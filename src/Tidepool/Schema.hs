@@ -24,6 +24,7 @@ module Tidepool.Schema
 import Data.Text (Text)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
+import Data.Maybe (catMaybes)
 import GHC.Generics
 import Data.Aeson (Value(..), ToJSON(..), object, (.=))
 
@@ -76,9 +77,32 @@ oneOfSchema variants = (emptySchema TObject) { schemaOneOf = Just variants }
 describeField :: Text -> Text -> JSONSchema -> JSONSchema
 describeField _fieldName desc schema = schema { schemaDescription = Just desc }
 
--- | Convert schema to Aeson Value
+-- | Convert schema to Aeson Value (JSON Schema draft-07 format)
 schemaToValue :: JSONSchema -> Value
-schemaToValue s = error "TODO: schemaToValue - convert JSONSchema to JSON Schema format Value"
+schemaToValue (JSONSchema typ desc props req items enum_ oneOf_) = object $ catMaybes
+  [ Just $ "type" .= typeToText typ
+  , ("description" .=) <$> desc
+  , if Map.null props
+    then Nothing
+    else Just $ "properties" .= fmap schemaToValue props
+  , if null req
+    then Nothing
+    else Just $ "required" .= req
+  , ("items" .=) . schemaToValue <$> items
+  , ("enum" .=) <$> enum_
+  , ("oneOf" .=) . fmap schemaToValue <$> oneOf_
+  ]
+
+-- | Convert schema type to JSON Schema type string
+typeToText :: SchemaType -> Text
+typeToText = \case
+  TString  -> "string"
+  TNumber  -> "number"
+  TInteger -> "integer"
+  TBoolean -> "boolean"
+  TObject  -> "object"
+  TArray   -> "array"
+  TNull    -> "null"
 
 -- | Typeclass for Generic schema derivation
 class GSchema f where
