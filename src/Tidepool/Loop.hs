@@ -2,37 +2,30 @@
 -- | Core game loop abstraction
 module Tidepool.Loop
   ( -- * Loop Types
-    Turn(..)
-  , TurnResult(..)
+    TurnConfig(..)
   , Compression(..)
-  
+
     -- * Loop Operations
-  , runTurn
+  , executeTurnConfig
   , compress
   , shouldCompress
-  
+
     -- * Context Building
   , buildContext
   ) where
 
-import Tidepool.Effect
+import Tidepool.Effect (State, LLM, Emit, TurnResult)
+import qualified Tidepool.Effect as E
 import Tidepool.Template
 import Effectful
-import Data.Text (Text)
 
--- | A single turn in the game loop
-data Turn state context output tools = Turn
+-- | Configuration for a single turn in the game loop
+-- Captures how to build context, which template to use, and how to apply output
+data TurnConfig state context output tools = TurnConfig
   { turnBuildContext :: state -> context
   , turnTemplate :: Template context output tools
   , turnApplyOutput :: output -> state -> state
   }
-
--- | Result of running a turn
-data TurnResult output = TurnResult
-  { turnOutput :: output
-  , turnResponse :: Text
-  }
-  deriving (Show, Eq)
 
 -- | Compression configuration
 data Compression state history compressionContext compressionOutput tools = Compression
@@ -42,13 +35,14 @@ data Compression state history compressionContext compressionOutput tools = Comp
   , compressionApply :: compressionOutput -> state -> state
   }
 
--- | Run a single turn
-runTurn
+-- | Execute a turn using configuration
+-- Gets state, builds context, runs LLM turn, applies output
+executeTurnConfig
   :: (State state :> es, LLM :> es, Emit event :> es)
-  => Turn state context output tools
+  => TurnConfig state context output tools
   -> input
   -> Eff es (TurnResult output)
-runTurn _turn _input = error "TODO: runTurn - get state, build context, render template, call LLM, parse output, apply to state"
+executeTurnConfig _config _input = error "TODO: executeTurnConfig - get state, build context, call E.runTurn, apply to state"
 
 -- | Check if compression is needed
 shouldCompress 

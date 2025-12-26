@@ -1,45 +1,68 @@
 -- | DM Templates
+--
+-- When jinja-th is ready, replace the placeholder templates with:
+-- @
+-- dmTurnJinja :: TypedTemplate DMContext ()
+-- dmTurnJinja = $(typedTemplateFile ''DMContext "templates/dm_turn.jinja")
+-- @
 module DM.Templates
   ( -- * Templates
     dmTurnTemplate
   , compressionTemplate
-  
-    -- * Rendering
-  , renderDMContext
-  , renderCompressionContext
-  
-    -- * Partials
-  , renderNpcCard
-  , renderClockCard
-  , renderThreadCard
-  , renderRumorCard
-  , renderFactionCard
+
+    -- * Typed Jinja Templates (placeholders until jinja-th ready)
+  , dmTurnJinja
+  , compressionJinja
   ) where
 
-import DM.State
+import DM.State (Clock, Thread, Rumor)
 import DM.Context
 import DM.Output
 import DM.Tools
 import Tidepool.Template
-import Tidepool.Schema
+import Data.Proxy (Proxy(..))
 import Data.Text (Text)
 
 -- ══════════════════════════════════════════════════════════════
--- TEMPLATES
+-- TYPED JINJA TEMPLATES
 -- ══════════════════════════════════════════════════════════════
 
-dmTurnTemplate :: Template DMContext TurnOutput '[ThinkAsDM, SpeakAsNPC, AskPlayer, Choose]
-dmTurnTemplate = Template
-  { templateRender = renderDMContext
-  , templateOutputSchema = turnOutputSchema
-  , templateTools = ToolSchemas
+-- | DM turn Jinja template
+-- TODO: Replace with: $(typedTemplateFile ''DMContext "templates/dm_turn.jinja")
+dmTurnJinja :: TypedTemplate DMContext ()
+dmTurnJinja = TypedTemplate
+  { templateCompiled = \_ctx -> error "TODO: replace with $(typedTemplateFile ''DMContext \"templates/dm_turn.jinja\")"
   }
 
+-- | Compression Jinja template
+-- TODO: Replace with: $(typedTemplateFile ''CompressionContext "templates/compression.jinja")
+compressionJinja :: TypedTemplate CompressionContext ()
+compressionJinja = TypedTemplate
+  { templateCompiled = \_ctx -> error "TODO: replace with $(typedTemplateFile ''CompressionContext \"templates/compression.jinja\")"
+  }
+
+-- ══════════════════════════════════════════════════════════════
+-- TIDEPOOL TEMPLATES
+-- ══════════════════════════════════════════════════════════════
+
+-- | Main DM turn template with all available tools
+dmTurnTemplate :: Template DMContext TurnOutput '[ThinkAsDM, SpeakAsNPC, AskPlayer, Choose]
+dmTurnTemplate = Template
+  { templateJinja = dmTurnJinja
+  , templateOutputSchema = turnOutputSchema
+  , templateTools = TCons (Proxy @ThinkAsDM)
+                  $ TCons (Proxy @SpeakAsNPC)
+                  $ TCons (Proxy @AskPlayer)
+                  $ TCons (Proxy @Choose)
+                  $ TNil
+  }
+
+-- | Compression template (no tools needed)
 compressionTemplate :: Template CompressionContext CompressionOutput '[]
 compressionTemplate = Template
-  { templateRender = renderCompressionContext
+  { templateJinja = compressionJinja
   , templateOutputSchema = compressionOutputSchema
-  , templateTools = ToolSchemas
+  , templateTools = TNil
   }
 
 -- ══════════════════════════════════════════════════════════════
@@ -51,50 +74,3 @@ turnOutputSchema = error "TODO: turnOutputSchema - build JSON Schema with field 
 
 compressionOutputSchema :: Schema CompressionOutput
 compressionOutputSchema = error "TODO: compressionOutputSchema - build JSON Schema for CompressionOutput"
-
--- ══════════════════════════════════════════════════════════════
--- RENDERING
--- ══════════════════════════════════════════════════════════════
-
-renderDMContext :: DMContext -> Text
-renderDMContext ctx = error "TODO: renderDMContext - render mustache template with DMContext"
-  -- Should produce:
-  -- - Scene header (location, stakes, tone)
-  -- - Session goals
-  -- - NPCs present (using renderNpcCard)
-  -- - Scene beats so far
-  -- - Clocks (visible and hidden)
-  -- - Threads
-  -- - Rumors
-  -- - Factions in play
-  -- - Tool instructions
-  -- - Output schema reminder
-
-renderCompressionContext :: CompressionContext -> Text
-renderCompressionContext ctx = error "TODO: renderCompressionContext - render compression template"
-  -- Should produce:
-  -- - All scene beats
-  -- - Faction states
-  -- - NPC states
-  -- - Active clocks
-  -- - Active threads
-  -- - Extraction instructions
-
--- ══════════════════════════════════════════════════════════════
--- PARTIALS
--- ══════════════════════════════════════════════════════════════
-
-renderNpcCard :: NpcWithDisposition -> Text
-renderNpcCard nwd = error "TODO: renderNpcCard - name, disposition, wants, voice notes"
-
-renderClockCard :: Clock -> Text
-renderClockCard clock = error "TODO: renderClockCard - emoji, name, filled/segments"
-
-renderThreadCard :: Thread -> Text
-renderThreadCard thread = error "TODO: renderThreadCard - hook, tension"
-
-renderRumorCard :: Rumor -> Text
-renderRumorCard rumor = error "TODO: renderRumorCard - content, spread level, truth"
-
-renderFactionCard :: FactionSummary -> Text
-renderFactionCard faction = error "TODO: renderFactionCard - name, attitude, current goal"

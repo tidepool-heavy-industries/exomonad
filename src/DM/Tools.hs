@@ -16,18 +16,18 @@ module DM.Tools
   
     -- * Events
   , DMEvent(..)
-  
+
     -- * Tool Registration
+  , dmToolList
   , dmTools
   ) where
 
 import DM.State
-import Tidepool.Effect
 import Tidepool.Tool
+import Data.Proxy (Proxy(..))
 import Data.Text (Text)
 import Data.Aeson (Value, ToJSON, FromJSON)
 import GHC.Generics (Generic)
-import Effectful
 
 -- ══════════════════════════════════════════════════════════════
 -- DM EVENTS
@@ -107,7 +107,7 @@ instance Tool AskPlayer where
   toolDescription = "Pause and ask the player a question."
   inputSchema = error "TODO: AskPlayer inputSchema - JSON Schema for AskInput"
   
-  executeTool input = error "TODO: AskPlayer executeTool - emit PlayerAsked, yield for response"
+  executeTool input = error "TODO: AskPlayer executeTool - use requestChoice/requestText from RequestInput effect"
 
 -- ══════════════════════════════════════════════════════════════
 -- CHOOSE
@@ -135,12 +135,20 @@ instance Tool Choose where
   toolDescription = "Make a weighted random choice."
   inputSchema = error "TODO: Choose inputSchema - JSON Schema for ChooseInput"
   
-  executeTool input = error "TODO: Choose executeTool - use Random effect, emit RandomChoice"
+  executeTool input = error "TODO: Choose executeTool - use randomDouble from Random effect, emit RandomChoice"
 
 -- ══════════════════════════════════════════════════════════════
 -- TOOL REGISTRATION
 -- ══════════════════════════════════════════════════════════════
 
+-- | All DM tools as a type-safe list
+dmToolList :: ToolList '[ThinkAsDM, SpeakAsNPC, AskPlayer, Choose]
+dmToolList = TCons (Proxy @ThinkAsDM)
+           $ TCons (Proxy @SpeakAsNPC)
+           $ TCons (Proxy @AskPlayer)
+           $ TCons (Proxy @Choose)
+           $ TNil
+
 -- | All DM tools as JSON for API
 dmTools :: [Value]
-dmTools = error "TODO: dmTools - collect all tool schemas for Anthropic API format"
+dmTools = toolListToJSON dmToolList
