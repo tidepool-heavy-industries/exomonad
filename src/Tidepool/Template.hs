@@ -48,11 +48,11 @@ data ToolSchemas (tools :: [*]) = ToolSchemas
 
 -- | Render a template with input
 render :: Template input output tools -> input -> Text
-render = templateRender
+render t = t.templateRender
 
 -- | Render a partial with input
 renderPartial :: Partial a -> a -> Text
-renderPartial = runPartial
+renderPartial p = p.runPartial
 
 -- ══════════════════════════════════════════════════════════════
 -- TEMPLATE HASKELL

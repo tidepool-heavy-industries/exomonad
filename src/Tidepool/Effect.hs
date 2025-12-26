@@ -136,8 +136,8 @@ type instance DispatchOf (ControlFlow r) = 'Dynamic
 yield :: ControlFlow r :> es => r -> Eff es a
 yield = send . Yield
 
-continue :: ControlFlow r :> es => Eff es ()
-continue = send Continue
+continue :: forall r es. ControlFlow r :> es => Eff es ()
+continue = send (Continue :: ControlFlow r (Eff es) ())
 
 -- ══════════════════════════════════════════════════════════════
 -- COMBINED RUNNER

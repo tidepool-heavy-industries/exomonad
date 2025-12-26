@@ -71,3 +71,4 @@ executable tidepool-dm
     default-language: GHC2021
     default-extensions:
         OverloadedStrings
+        OverloadedRecordDot

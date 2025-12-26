@@ -16,18 +16,18 @@ main = do
   let world = setupExampleWorld
   
   putStrLn $ "World initialized with:"
-  putStrLn $ "  - " <> show (HM.size (factions world)) <> " factions"
-  putStrLn $ "  - " <> show (HM.size (npcs world)) <> " NPCs"
-  putStrLn $ "  - " <> show (HM.size (locations world)) <> " locations"
-  putStrLn $ "  - " <> show (HM.size (clocks world)) <> " clocks"
-  putStrLn $ "  - " <> show (length (threads world)) <> " threads"
+  putStrLn $ "  - " <> show (HM.size world.factions) <> " factions"
+  putStrLn $ "  - " <> show (HM.size world.npcs) <> " NPCs"
+  putStrLn $ "  - " <> show (HM.size world.locations) <> " locations"
+  putStrLn $ "  - " <> show (HM.size world.clocks) <> " clocks"
+  putStrLn $ "  - " <> show (length world.threads) <> " threads"
   putStrLn ""
   
   runDMGame world handleEvent
   where
     handleEvent :: DMEvent -> IO ()
     handleEvent (DMThought t) = TIO.putStrLn $ "[DM thinks] " <> t
-    handleEvent (NPCSpoke nid t) = TIO.putStrLn $ "[NPC " <> unNpcId nid <> "] " <> t
+    handleEvent (NPCSpoke nid t) = TIO.putStrLn $ "[NPC " <> nid.unNpcId <> "] " <> t
     handleEvent (PlayerAsked q) = TIO.putStrLn $ "[Asks player] " <> q
     handleEvent (RandomChoice label idx) = 
       TIO.putStrLn $ "[Random] chose " <> label <> " (index " <> showT idx <> ")"

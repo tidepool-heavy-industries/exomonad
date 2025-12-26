@@ -103,7 +103,7 @@ initialWorld = WorldState
   , rumors = []
   , threads = []
   , scene = Nothing
-  , tone = Neutral
+  , tone = ToneNeutral
   , sessionHistory = Seq.empty
   , sessionGoals = []
   }
@@ -124,7 +124,7 @@ data Faction = Faction
   , factionSecrets :: [Secret]
   , factionKnownFacts :: [Fact]
   }
-  deriving (Show, Eq, Generic)
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
 data Attitude 
   = Hostile 
@@ -164,7 +164,7 @@ data Secret = Secret
   { secretContent :: Text
   , secretKnownBy :: [Either FactionId NpcId]
   }
-  deriving (Show, Eq, Generic)
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
 data Fact = Fact
   { factContent :: Text
@@ -190,7 +190,7 @@ data Npc = Npc
   , npcLocation :: Maybe LocationId
   , npcVoiceNotes :: Text
   }
-  deriving (Show, Eq, Generic)
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
 data Disposition
   = DispHostile
@@ -234,7 +234,7 @@ data Clock = Clock
   , clockConsequence :: Consequence
   , clockTriggers :: [Trigger]
   }
-  deriving (Show, Eq, Generic)
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
 data Trigger
   = OnPlayerAction ActionPattern
@@ -242,7 +242,7 @@ data Trigger
   | OnClockFilled ClockId
   | OnTimePass Duration
   | OnRumorSpread RumorId
-  deriving (Show, Eq, Generic)
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
 newtype ActionPattern = ActionPattern { unActionPattern :: Text }
   deriving (Show, Eq, Generic)
@@ -254,14 +254,14 @@ data Consequence
   | SpawnThread Thread
   | ChangeLocation LocationId LocationDelta
   | Escalate Escalation
-  deriving (Show, Eq, Generic)
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
 data FactionAction
   = Attack Target
   | Negotiate FactionId
   | Retreat
   | Scheme Goal
-  deriving (Show, Eq, Generic)
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
 newtype Target = Target { unTarget :: Text }
   deriving (Show, Eq, Generic)
@@ -310,7 +310,7 @@ data Rumor = Rumor
   , rumorTruthValue :: TruthValue
   , rumorSpread :: SpreadLevel
   }
-  deriving (Show, Eq, Generic)
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
 data RumorSource
   = OverheardFrom NpcId
@@ -344,7 +344,7 @@ data Thread = Thread
   , threadTension :: Tension
   , threadDeadline :: Maybe ClockId
   }
-  deriving (Show, Eq, Generic)
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
 data Tension
   = Simmering
@@ -363,7 +363,7 @@ data ActiveScene = ActiveScene
   , sceneStakes :: Stakes
   , sceneBeats :: Seq SceneBeat
   }
-  deriving (Show, Eq, Generic)
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
 data SceneBeat
   = PlayerAction Text [Tag]
@@ -379,7 +379,7 @@ newtype Stakes = Stakes { unStakes :: Text }
 
 data Tone
   = Tense
-  | Neutral
+  | ToneNeutral
   | Comedic
   | Dark
   | Hopeful

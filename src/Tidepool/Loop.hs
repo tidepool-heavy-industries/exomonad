@@ -1,3 +1,4 @@
+{-# LANGUAGE AllowAmbiguousTypes #-}
 -- | Core game loop abstraction
 module Tidepool.Loop
   ( -- * Loop Types

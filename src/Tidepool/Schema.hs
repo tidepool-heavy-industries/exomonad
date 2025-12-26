@@ -1,3 +1,4 @@
+{-# LANGUAGE AllowAmbiguousTypes #-}
 -- | JSON Schema derivation for structured output
 module Tidepool.Schema
   ( -- * Schema Type

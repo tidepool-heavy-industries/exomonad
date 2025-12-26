@@ -1,3 +1,4 @@
+{-# LANGUAGE AllowAmbiguousTypes #-}
 -- | Tool types for mid-turn LLM capabilities
 module Tidepool.Tool
   ( -- * Tool Class
