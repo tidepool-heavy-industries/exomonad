@@ -3,7 +3,20 @@ module DM.State
   ( -- * Core State
     WorldState(..)
   , initialWorld
-  
+
+    -- * Player
+  , PlayerState(..)
+  , initialPlayer
+  , Trauma(..)
+
+    -- * Dice Mechanics
+  , DicePool(..)
+  , Position(..)
+  , Effect(..)
+  , OutcomeTier(..)
+  , PendingOutcome(..)
+  , calculateOutcome
+
     -- * Factions
   , Faction(..)
   , FactionId(..)
@@ -75,7 +88,8 @@ import Data.Aeson (ToJSON, FromJSON)
 -- ══════════════════════════════════════════════════════════════
 
 data WorldState = WorldState
-  { factions :: HashMap FactionId Faction
+  { player :: PlayerState
+  , factions :: HashMap FactionId Faction
   , clocks :: HashMap ClockId Clock
   , locations :: HashMap LocationId Location
   , npcs :: HashMap NpcId Npc
@@ -85,6 +99,9 @@ data WorldState = WorldState
   , tone :: Tone
   , sessionHistory :: Seq SceneSummary
   , sessionGoals :: [Text]
+  -- Dice mechanics (session state)
+  , dicePool :: DicePool
+  , pendingOutcome :: Maybe PendingOutcome
   }
   deriving (Show, Eq, Generic)
 
@@ -96,7 +113,8 @@ data SceneSummary = SceneSummary
 
 initialWorld :: WorldState
 initialWorld = WorldState
-  { factions = HM.empty
+  { player = initialPlayer
+  , factions = HM.empty
   , clocks = HM.empty
   , locations = HM.empty
   , npcs = HM.empty
@@ -106,7 +124,98 @@ initialWorld = WorldState
   , tone = ToneNeutral
   , sessionHistory = Seq.empty
   , sessionGoals = []
+  , dicePool = DicePool []
+  , pendingOutcome = Nothing
   }
+
+-- ══════════════════════════════════════════════════════════════
+-- PLAYER STATE
+-- ══════════════════════════════════════════════════════════════
+
+data PlayerState = PlayerState
+  { stress :: Int           -- 0-9, at 9 you break and gain trauma
+  , coin :: Int             -- Currency for bribes, gear, flashbacks
+  , heat :: Int             -- 0-10, attention from authorities
+  , wanted :: Int           -- 0-4, law enforcement escalation
+  , trauma :: [Trauma]      -- Permanent scars that change how you play
+  }
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+
+-- | Trauma is freeform text - LLM can invent new ones
+-- Common examples: paranoid, cold, obsessed, reckless, haunted, vicious
+newtype Trauma = Trauma { unTrauma :: Text }
+  deriving (Show, Eq, Ord, Generic)
+  deriving newtype (ToJSON, FromJSON, Hashable)
+
+initialPlayer :: PlayerState
+initialPlayer = PlayerState
+  { stress = 0
+  , coin = 0
+  , heat = 0
+  , wanted = 0
+  , trauma = []
+  }
+
+-- ══════════════════════════════════════════════════════════════
+-- DICE MECHANICS
+-- ══════════════════════════════════════════════════════════════
+
+-- | Pool of available dice (1-6 values). Player sees all options.
+newtype DicePool = DicePool { poolDice :: [Int] }
+  deriving (Show, Eq, Generic)
+  deriving newtype (ToJSON, FromJSON)
+
+-- | Position determines danger level of the action
+data Position
+  = Controlled  -- You have the upper hand
+  | Risky       -- Standard danger, things could go either way
+  | Desperate   -- Serious danger, consequences will be severe
+  deriving (Show, Eq, Ord, Enum, Bounded, Generic, ToJSON, FromJSON)
+
+-- | Effect determines magnitude of success/failure
+data Effect
+  = Limited     -- Partial progress, small impact
+  | Standard    -- Expected outcome, full progress
+  | Great       -- Extra benefit, impressive success
+  deriving (Show, Eq, Ord, Enum, Bounded, Generic, ToJSON, FromJSON)
+
+-- | Outcome tier based on die roll and position
+data OutcomeTier
+  = Critical    -- 6: Exceptional success, extra benefit
+  | Success     -- 4-5: You do it
+  | Partial     -- 2-3: You do it, but there's a cost
+  | Bad         -- 1 at risky: Things go wrong
+  | Disaster    -- 1 at desperate: Things go very wrong
+  deriving (Show, Eq, Ord, Enum, Bounded, Generic, ToJSON, FromJSON)
+
+-- | Pending action waiting for player to select a die
+data PendingOutcome = PendingOutcome
+  { outcomeContext :: Text      -- What the player is trying to do
+  , outcomePosition :: Position
+  , outcomeEffect :: Effect
+  , outcomeStakes :: Text       -- What happens on failure
+  , chosenDie :: Maybe Int      -- Filled after player selection
+  , chosenTier :: Maybe OutcomeTier  -- Calculated from die + position
+  }
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+
+-- | Calculate outcome tier from die value and position
+--
+-- Controlled: 6=Critical, 4-5=Success, 1-3=Partial (no bad outcomes)
+-- Risky:      6=Critical, 4-5=Success, 2-3=Partial, 1=Bad
+-- Desperate:  6=Critical, 4-5=Success, 2-3=Partial, 1=Disaster
+calculateOutcome :: Position -> Int -> OutcomeTier
+calculateOutcome pos die = case die of
+  6 -> Critical
+  5 -> Success
+  4 -> Success
+  3 -> Partial
+  2 -> Partial
+  1 -> case pos of
+    Controlled -> Partial  -- Controlled never goes bad
+    Risky      -> Bad
+    Desperate  -> Disaster
+  _ -> Partial  -- Invalid die value, treat as partial
 
 -- ══════════════════════════════════════════════════════════════
 -- FACTIONS
@@ -212,7 +321,7 @@ data Fear = Fear
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
-data Urgency = Low | Medium | High | Desperate
+data Urgency = Low | Medium | High | UrgencyDesperate
   deriving (Show, Eq, Ord, Enum, Bounded, Generic, ToJSON, FromJSON)
 
 data Severity = Minor | Moderate | Severe | Existential
@@ -350,7 +459,7 @@ data Tension
   = Simmering
   | Rising
   | Urgent
-  | Critical
+  | TensionCritical
   deriving (Show, Eq, Ord, Enum, Bounded, Generic, ToJSON, FromJSON)
 
 -- ══════════════════════════════════════════════════════════════

@@ -4,27 +4,34 @@ module DM.Output
     TurnOutput(..)
   , emptyTurnOutput
   , applyTurnOutput
-  
+
+    -- * Player Resource Deltas
+  , PlayerDeltas(..)
+  , emptyPlayerDeltas
+
+    -- * Dice Mechanics
+  , RequestOutcomes(..)
+
     -- * Clock Operations
   , ClockTick(..)
   , NewClock(..)
-  
+
     -- * Thread Operations
   , NewThread(..)
   , ThreadResolution(..)
-  
+
     -- * Faction Operations
   , AttitudeShift(..)
   , Direction(..)
   , Degree(..)
-  
+
     -- * NPC Operations
   , DispositionShift(..)
   , NpcReveal(..)
-  
+
     -- * Scene Control
   , SceneControl(..)
-  
+
     -- * Rumor Operations
   , NewRumor(..)
   
@@ -51,6 +58,13 @@ import Data.Aeson (ToJSON, FromJSON)
 
 data TurnOutput = TurnOutput
   { narration :: Text
+  -- Player resource changes (delta fields - LLM says +2 stress, not "set to 5")
+  , playerDeltas :: PlayerDeltas
+  , newTrauma :: Maybe Trauma        -- Only when stress would exceed 9
+  -- Dice mechanics
+  , requestOutcomes :: Maybe RequestOutcomes  -- Ask player to choose die
+  , clearPendingOutcome :: Bool               -- Clear after narrating outcome
+  -- World state changes
   , clockTicks :: [ClockTick]
   , newClocks :: [NewClock]
   , revealClocks :: [ClockId]
@@ -68,9 +82,37 @@ data TurnOutput = TurnOutput
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
+-- | Delta fields for player resources
+-- LLM writes "+2" to stress, engine applies it with validation
+data PlayerDeltas = PlayerDeltas
+  { stressDelta :: Int    -- Can be negative (recovery) or positive
+  , coinDelta :: Int      -- Spending or earning
+  , heatDelta :: Int      -- Attention from authorities
+  , wantedDelta :: Int    -- Escalation level
+  , deltaBecause :: Text  -- Why these changes happened
+  }
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+
+emptyPlayerDeltas :: PlayerDeltas
+emptyPlayerDeltas = PlayerDeltas 0 0 0 0 ""
+
+-- | Request for player to select a die from their pool
+-- This is the core "see your decision space" mechanic
+data RequestOutcomes = RequestOutcomes
+  { requestContext :: Text    -- What the player is trying to do
+  , requestPosition :: Position  -- Controlled/Risky/Desperate
+  , requestEffect :: Effect      -- Limited/Standard/Great
+  , requestStakes :: Text        -- What happens on failure
+  }
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+
 emptyTurnOutput :: TurnOutput
 emptyTurnOutput = TurnOutput
   { narration = ""
+  , playerDeltas = emptyPlayerDeltas
+  , newTrauma = Nothing
+  , requestOutcomes = Nothing
+  , clearPendingOutcome = False
   , clockTicks = []
   , newClocks = []
   , revealClocks = []
