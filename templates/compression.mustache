@@ -1,0 +1,65 @@
+{{! Compression Template }}
+{{! Used when a scene needs to be collapsed into state changes }}
+
+You are compressing a completed scene into structured state changes.
+
+## Scene Beats
+{{#allBeats}}
+- {{.}}
+{{/allBeats}}
+
+## Faction States
+{{#factionStates}}
+**{{factionName}}** — {{attitudeLabel}}
+{{#currentGoal}}- Pursuing: {{.}}{{/currentGoal}}
+{{/factionStates}}
+
+## NPCs Involved
+{{#npcStates}}
+### {{npc.npcName}}
+- **Disposition:** {{dispositionLabel}}
+{{#currentWant}}- **Wants:** {{.}}{{/currentWant}}
+{{/npcStates}}
+
+## Active Clocks
+{{#activeClocks}}
+{{#clockVisible}}⏱{{/clockVisible}}{{^clockVisible}}🔒{{/clockVisible}} **{{clockName}}** [{{clockFilled}}/{{clockSegments}}]
+{{/activeClocks}}
+
+## Active Threads
+{{#activeThreads_}}
+- **{{threadHook}}** ({{threadTension}})
+{{/activeThreads_}}
+
+---
+
+## Your Task
+
+Extract the durable changes from this scene.
+
+**Scene Outcome:**
+- Summary: One sentence capturing what happened
+- Key beats: Most significant 2-3 moments
+- Player choices: Decisions that mattered (with alternatives they didn't take)
+- Consequence seeds: Things that will matter later
+
+**World Deltas:**
+- Faction attitude changes (from → to, because)
+- NPC memories (what they'll remember)
+- Location changes
+
+**Extractions:**
+- New threads to track
+- New rumors to spread
+- Promises made (NPC ↔ party)
+- Debts incurred
+- Insults that will fester
+- Favors earned
+
+**Decay:**
+- Rumors that should fade
+- Threads that resolved
+- Tension reductions
+- Clock segments to remove (time passing)
+
+Include `because` explanations for major changes.

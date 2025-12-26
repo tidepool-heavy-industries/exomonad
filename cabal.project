@@ -1,0 +1,7 @@
+packages: .
+
+-- Use GHC 9.6+ for best GHC2021 support
+-- with-compiler: ghc-9.6
+
+-- Allow newer for effectful ecosystem
+allow-newer: all
