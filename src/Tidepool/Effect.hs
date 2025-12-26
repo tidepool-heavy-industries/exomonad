@@ -24,8 +24,10 @@ module Tidepool.Effect
     -- * Result Types
   , TurnResult(..)
   , ToolInvocation(..)
+  , LLMConfig(..)
+  , InputHandler(..)
 
-    -- * Running Effects (stubs)
+    -- * Running Effects
   , runGame
   , runState
   , runRandom
@@ -36,18 +38,22 @@ module Tidepool.Effect
 
 import Effectful
 import Effectful.Dispatch.Dynamic
+import qualified Effectful.State.Static.Local as EState
+import System.Random (randomRIO)
 import Data.Text (Text)
 import Data.Aeson (Value)
 import GHC.Generics (Generic)
 import Data.Aeson (ToJSON, FromJSON)
 
 -- | The effect stack for game loops
+-- IOE is at the base for IO operations (random, emit, input)
 type GameEffects s event =
   '[ LLM
    , RequestInput
    , State s
    , Emit event
    , Random
+   , IOE
    ]
 
 -- ══════════════════════════════════════════════════════════════
@@ -73,7 +79,9 @@ modify :: State s :> es => (s -> s) -> Eff es ()
 modify f = get >>= put . f
 
 runState :: s -> Eff (State s : es) a -> Eff es (a, s)
-runState _initial = error "TODO: runState - reinterpret using Effectful.State.Static.Local"
+runState initial = reinterpret (EState.runState initial) $ \_ -> \case
+  Get   -> EState.get
+  Put s -> EState.put s
 
 -- ══════════════════════════════════════════════════════════════
 -- RANDOM EFFECT
@@ -91,8 +99,10 @@ randomInt lo hi = send (RandomInt lo hi)
 randomDouble :: Random :> es => Eff es Double
 randomDouble = send RandomDouble
 
-runRandom :: Eff (Random : es) a -> Eff es a
-runRandom = error "TODO: runRandom"
+runRandom :: IOE :> es => Eff (Random : es) a -> Eff es a
+runRandom = interpret $ \_ -> \case
+  RandomInt lo hi -> liftIO $ randomRIO (lo, hi)
+  RandomDouble    -> liftIO $ randomRIO (0.0, 1.0)
 
 -- ══════════════════════════════════════════════════════════════
 -- LLM EFFECT
@@ -164,8 +174,9 @@ type instance DispatchOf (Emit event) = 'Dynamic
 emit :: Emit event :> es => event -> Eff es ()
 emit = send . EmitEvent
 
-runEmit :: (event -> IO ()) -> Eff (Emit event : es) a -> Eff es a
-runEmit _handler = error "TODO: runEmit - interpret by calling handler in IO"
+runEmit :: IOE :> es => (event -> IO ()) -> Eff (Emit event : es) a -> Eff es a
+runEmit handler = interpret $ \_ -> \case
+  EmitEvent e -> liftIO $ handler e
 
 -- ══════════════════════════════════════════════════════════════
 -- REQUEST INPUT EFFECT
@@ -195,18 +206,39 @@ requestChoice prompt choices = send (RequestChoice prompt choices)
 requestText :: RequestInput :> es => Text -> Eff es Text
 requestText = send . RequestText
 
-runRequestInput :: Eff (RequestInput : es) a -> Eff es a
-runRequestInput = error "TODO: runRequestInput - interpret by presenting UI and collecting input"
+-- | Handler for input requests (terminal, UI, etc.)
+data InputHandler = InputHandler
+  { ihChoice :: forall a. Text -> [(Text, a)] -> IO a
+  , ihText   :: Text -> IO Text
+  }
+
+runRequestInput :: IOE :> es => InputHandler -> Eff (RequestInput : es) a -> Eff es a
+runRequestInput (InputHandler choiceHandler textHandler) = interpret $ \_ -> \case
+  RequestChoice prompt choices -> liftIO $ choiceHandler prompt choices
+  RequestText prompt           -> liftIO $ textHandler prompt
 
 -- ══════════════════════════════════════════════════════════════
 -- COMBINED RUNNER
 -- ══════════════════════════════════════════════════════════════
 
-runGame 
+-- | Stub LLM interpreter (placeholder until API client implemented)
+stubLLM :: Eff (LLM : es) a -> Eff es a
+stubLLM = interpret $ \_ -> \case
+  RunTurnOp _ _ _ -> error "LLM not yet implemented - see Phase 3-5 of plan"
+
+-- | Run the full game effect stack
+runGame
   :: s
   -> LLMConfig
   -> (event -> IO ())
-  -> Eff (GameEffects s event) a 
+  -> InputHandler
+  -> Eff (GameEffects s event) a
   -> IO (a, s)
-runGame _initialState _llmConfig _eventHandler _computation = 
-  error "TODO: runGame - compose runState, runRandom, runLLM, runEmit via runEff"
+runGame initialState _llmConfig eventHandler inputHandler computation =
+  runEff
+    . runRandom
+    . runEmit eventHandler
+    . runState initialState
+    . runRequestInput inputHandler
+    . stubLLM
+    $ computation
