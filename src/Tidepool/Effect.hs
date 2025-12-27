@@ -66,7 +66,7 @@ import System.Random (randomRIO)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
-import Data.Aeson (Value(..), FromJSON, ToJSON, fromJSON, toJSON, Result(..), encode)
+import Data.Aeson (Value(..), FromJSON, ToJSON, fromJSON, toJSON, Result(..), encode, decode)
 import qualified Data.Text.Encoding as TE
 import qualified Data.ByteString.Lazy as LBS
 import GHC.Generics (Generic)
@@ -472,12 +472,17 @@ runLLMWithTools config dispatcher = interpret $ \_ -> \case
 
     extractFinalOutput :: [ContentBlock] -> Value
     extractFinalOutput blocks =
-      case [t | TextBlock t <- reverse blocks] of
-        [] -> toJSON ()
-        (lastText:_) ->
-          case fromJSON (toJSON lastText) of
-            Success v -> v
-            Error _ -> toJSON lastText
+      -- First, look for a JsonBlock (from output_format structured output)
+      case [v | JsonBlock v <- blocks] of
+        (jsonVal:_) -> jsonVal
+        [] ->
+          -- Fall back to parsing the last text block as JSON
+          case [t | TextBlock t <- reverse blocks] of
+            [] -> toJSON ()
+            (lastText:_) ->
+              case decode (LBS.fromStrict $ TE.encodeUtf8 lastText) of
+                Just v -> v
+                Nothing -> String lastText
 
 -- ══════════════════════════════════════════════════════════════
 -- CHAT HISTORY EFFECT

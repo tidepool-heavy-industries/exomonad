@@ -425,7 +425,8 @@ dmTools = toolListToJSON dmToolList
 
 -- | Names of transition tools that change mood state
 transitionToolNames :: [Text]
-transitionToolNames = ["engage", "resolve", "accept"]
+transitionToolNames = ["engage", "resolve"]
+-- Note: "accept" is NOT a transition - it completes the turn, not restarts it
 
 -- | Create a DM dispatcher that detects mood transitions
 -- When a transition tool is called, it returns ToolBreak to restart the turn

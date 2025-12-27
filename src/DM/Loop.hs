@@ -1,3 +1,4 @@
+{-# LANGUAGE TypeApplications #-}
 -- | DM Game Loop
 module DM.Loop
   ( -- * Main Loop
@@ -22,12 +23,12 @@ import DM.State
 import DM.Context (buildDMContext, buildCompressionContext, DMContext(..))
 import DM.Output (TurnOutput(..), CompressionOutput(..), applyTurnOutput, applyCompression)
 import DM.Templates (renderForMood, renderCompression, turnOutputSchema, compressionOutputSchema)
-import DM.Tools (DMEvent(..), dmTools)
+import DM.Tools (DMEvent(..), dmTools, makeDMDispatcher)
 import Tidepool.Effect hiding (ToolResult)
-import Tidepool.Effect (TurnOutcome(..))
 import Tidepool.Template (Schema(..))
 
 import Effectful
+import Control.Monad (when)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
@@ -234,10 +235,6 @@ compressIfNeeded = do
   where
     compressionThreshold = 20
 
--- Helper for conditional execution
-when :: Applicative f => Bool -> f () -> f ()
-when True action = action
-when False _     = pure ()
 
 -- ══════════════════════════════════════════════════════════════
 -- SCENE MANAGEMENT
@@ -317,7 +314,16 @@ runDMGame initialState handleEvent saveState = do
       TIO.putStrLn "[Type 'quit' to exit]\n"
 
       -- Run the game loop with auto-save (Debug level shows all log messages)
-      ((), finalState) <- runGame stateWithScene llmConfig handleEvent inputHandler Debug (gameLoopWithSave saveState)
+      -- Use runLLMWithTools with real DM dispatcher (not stub executor!)
+      ((), finalState) <- runEff
+        . runRandom
+        . runEmit handleEvent
+        . runState stateWithScene
+        . runChatHistory
+        . runLog Debug
+        . runRequestInput inputHandler
+        . runLLMWithTools @_ @DMEvent llmConfig makeDMDispatcher
+        $ gameLoopWithSave saveState
 
       TIO.putStrLn "Game ended."
       return finalState

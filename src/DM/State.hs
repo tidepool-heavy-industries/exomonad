@@ -96,7 +96,6 @@ import GHC.Generics (Generic)
 import Data.Aeson (ToJSON, FromJSON, ToJSONKey, FromJSONKey)
 import Text.Ginger.GVal (ToGVal(..), toGVal, dict, list)
 import Text.Ginger.GVal.Generic (genericToGVal)
-import qualified Data.HashMap.Strict as HM
 import qualified Data.Foldable as F
 
 -- ══════════════════════════════════════════════════════════════
