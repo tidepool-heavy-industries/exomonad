@@ -22,14 +22,13 @@ module DM.Loop
 import DM.State
 import DM.Context (buildDMContext)
 import DM.Output (TurnOutput, applyTurnOutput)
-import DM.Templates (renderDMTurn)
+import DM.Templates (renderDMTurn, turnOutputSchema)
 import DM.Tools (DMEvent(..), dmTools)
 import Tidepool.Effect
-import Tidepool.Tool (toolListToJSON)
+import Tidepool.Template (Schema(..))
 
 import Effectful
 import Data.Text (Text)
-import Data.Aeson (Value)
 
 -- ══════════════════════════════════════════════════════════════
 -- TYPES
@@ -47,10 +46,6 @@ newtype Response = Response { responseText :: Text }
 -- ══════════════════════════════════════════════════════════════
 -- MAIN LOOP
 -- ══════════════════════════════════════════════════════════════
-
--- | Schema for TurnOutput (placeholder - should use deriveSchema in real impl)
-turnOutputSchema :: Value
-turnOutputSchema = error "TODO: turnOutputSchema - generate JSON Schema for TurnOutput"
 
 -- | Run a single DM turn
 -- Uses the new effect API: build context, call runTurn, apply output
@@ -71,7 +66,7 @@ dmTurn input = do
   context <- gets buildDMContext
 
   -- 3. Call LLM with template and tools
-  result <- runTurn renderDMTurn turnOutputSchema dmTools context
+  result <- runTurn renderDMTurn turnOutputSchema.schemaJSON dmTools context
 
   -- 4. Apply structured output to world state
   modify (applyTurnOutput result.trOutput)
