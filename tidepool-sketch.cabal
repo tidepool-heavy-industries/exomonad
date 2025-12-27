@@ -72,6 +72,9 @@ executable tidepool-dm
         base >= 4.17 && < 5,
         text >= 2.0 && < 3,
         unordered-containers >= 0.2 && < 1,
+        aeson >= 2.1 && < 3,
+        bytestring >= 0.11 && < 1,
+        directory >= 1.3 && < 2,
         tidepool-sketch
     hs-source-dirs:   app
     default-language: GHC2021

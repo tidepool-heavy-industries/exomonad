@@ -118,12 +118,21 @@ Avoid AND THEN - that's just sequence, not story.
 - think_as_dm: Internal reasoning (not shown to player)
 - speak_as_npc: Voice a specific NPC
 - ask_player: Pause to get player input
-- engage: Transition to ACTION when player commits to risky action
+- engage: **MUST USE** when player attempts risky action
 
-**When to use engage:**
-- Failure would have real consequences
-- The fiction demands tension
-- Dice should determine the outcome
+**CRITICAL - When to use engage:**
+You MUST call the `engage` tool when the player attempts something where:
+- Failure would have real consequences (harm, detection, offense)
+- The outcome is uncertain
+- Dice should determine success/failure
+
+Examples requiring engage:
+- Picking a pocket, lockpicking, sneaking
+- Lying to someone dangerous
+- Fighting or threatening violence
+- Any action where "you fail" would matter
+
+Do NOT just narrate the outcome. Call `engage` first, THEN narrate.
 </guidance>
 
 <output_format>

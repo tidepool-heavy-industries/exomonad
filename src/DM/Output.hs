@@ -11,16 +11,9 @@ module DM.Output
   , NewThread(..)
   , NewRumor(..)
 
-    -- * Compression Output
+    -- * Compression Output (Simplified)
   , CompressionOutput(..)
   , applyCompression
-  , SceneOutcome(..)
-  , PlayerChoice(..)
-  , ChoiceWeight(..)
-  , WorldDeltas(..)
-  , FactionDelta(..)
-  , Extractions(..)
-  , Decay(..)
   ) where
 
 import DM.State
@@ -183,14 +176,16 @@ applyTurnOutput output state = state
     clamp lo hi x = max lo (min hi x)
 
 -- ══════════════════════════════════════════════════════════════
--- COMPRESSION OUTPUT
+-- COMPRESSION OUTPUT (Simplified to avoid grammar size limits)
 -- ══════════════════════════════════════════════════════════════
 
+-- | Simplified compression output - complex extractions removed
 data CompressionOutput = CompressionOutput
-  { sceneOutcome :: SceneOutcome
-  , worldDeltas :: WorldDeltas
-  , extracted :: Extractions
-  , decay :: Decay
+  { summary :: Text               -- One paragraph summary
+  , keyMoments :: Text            -- Comma-separated key moments
+  , consequenceSeeds :: Text      -- Comma-separated consequence seeds
+  , stressChange :: Int           -- Net stress change
+  , coinChange :: Int             -- Net coin change
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
@@ -246,14 +241,21 @@ data Decay = Decay
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
--- | Apply compression output to world state
--- This is called after a scene ends to persist durable changes
+-- | Apply simplified compression output to world state
+-- Just applies stress/coin changes and stores summary for context
 applyCompression :: CompressionOutput -> WorldState -> WorldState
-applyCompression output =
-    applyWorldDeltas output.worldDeltas
-  . applyExtractions output.extracted
-  . applyDecay output.decay
-  . recordSceneOutcome output.sceneOutcome
+applyCompression output state = state
+  { player = (state.player)
+      { stress = clamp 0 9 (state.player.stress + output.stressChange)
+      , coin = max 0 (state.player.coin + output.coinChange)
+      }
+  -- Store consequence seeds as unresolved threats for future echoing
+  , unresolvedThreats = if T.null output.consequenceSeeds
+      then state.unresolvedThreats
+      else output.consequenceSeeds : state.unresolvedThreats
+  }
+  where
+    clamp lo hi x = max lo (min hi x)
 
 -- | Apply world deltas from compression
 applyWorldDeltas :: WorldDeltas -> WorldState -> WorldState

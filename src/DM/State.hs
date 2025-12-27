@@ -93,7 +93,7 @@ import Data.Hashable (Hashable(..))
 import Data.Sequence (Seq)
 import qualified Data.Sequence as Seq
 import GHC.Generics (Generic)
-import Data.Aeson (ToJSON, FromJSON)
+import Data.Aeson (ToJSON, FromJSON, ToJSONKey, FromJSONKey)
 import Text.Ginger.GVal (ToGVal(..), toGVal, dict, list)
 import Text.Ginger.GVal.Generic (genericToGVal)
 import qualified Data.HashMap.Strict as HM
@@ -250,7 +250,7 @@ data WorldState = WorldState
   , unresolvedThreats :: [Text]       -- Complications not yet addressed
   , pendingInterrupt :: Maybe ClockInterrupt  -- Clock triggered, awaiting handling
   }
-  deriving (Show, Eq, Generic)
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
 data SceneSummary = SceneSummary
   { summaryText :: Text
@@ -374,7 +374,7 @@ calculateOutcome pos die = case die of
 
 newtype FactionId = FactionId { unFactionId :: Text }
   deriving (Show, Eq, Ord, Generic)
-  deriving newtype (ToJSON, FromJSON, Hashable)
+  deriving newtype (ToJSON, FromJSON, ToJSONKey, FromJSONKey, Hashable)
 
 data Faction = Faction
   { factionName :: Text
@@ -396,7 +396,7 @@ data Attitude
 
 newtype GoalId = GoalId { unGoalId :: Text }
   deriving (Show, Eq, Ord, Generic)
-  deriving newtype (ToJSON, FromJSON, Hashable)
+  deriving newtype (ToJSON, FromJSON, ToJSONKey, FromJSONKey, Hashable)
 
 data Goal = Goal
   { goalId :: GoalId
@@ -438,7 +438,7 @@ data Fact = Fact
 
 newtype NpcId = NpcId { unNpcId :: Text }
   deriving (Show, Eq, Ord, Generic)
-  deriving newtype (ToJSON, FromJSON, Hashable)
+  deriving newtype (ToJSON, FromJSON, ToJSONKey, FromJSONKey, Hashable)
 
 data Npc = Npc
   { npcName :: Text
@@ -484,7 +484,7 @@ data Severity = Minor | Moderate | Severe | Existential
 
 newtype ClockId = ClockId { unClockId :: Text }
   deriving (Show, Eq, Ord, Generic)
-  deriving newtype (ToJSON, FromJSON, Hashable)
+  deriving newtype (ToJSON, FromJSON, ToJSONKey, FromJSONKey, Hashable)
 
 data Clock = Clock
   { clockName :: Text
@@ -545,7 +545,7 @@ data Escalation = Escalation
 
 newtype LocationId = LocationId { unLocationId :: Text }
   deriving (Show, Eq, Ord, Generic)
-  deriving newtype (ToJSON, FromJSON, Hashable)
+  deriving newtype (ToJSON, FromJSON, ToJSONKey, FromJSONKey, Hashable)
 
 data Location = Location
   { locationName :: Text
@@ -561,7 +561,7 @@ data Location = Location
 
 newtype RumorId = RumorId { unRumorId :: Text }
   deriving (Show, Eq, Ord, Generic)
-  deriving newtype (ToJSON, FromJSON, Hashable)
+  deriving newtype (ToJSON, FromJSON, ToJSONKey, FromJSONKey, Hashable)
 
 data Rumor = Rumor
   { rumorId :: RumorId
@@ -595,7 +595,7 @@ data SpreadLevel
 
 newtype ThreadId = ThreadId { unThreadId :: Text }
   deriving (Show, Eq, Ord, Generic)
-  deriving newtype (ToJSON, FromJSON, Hashable)
+  deriving newtype (ToJSON, FromJSON, ToJSONKey, FromJSONKey, Hashable)
 
 data Thread = Thread
   { threadId :: ThreadId

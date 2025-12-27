@@ -122,13 +122,14 @@ instance FromJSON Role where
     "assistant" -> pure Assistant
     other -> fail $ "Unknown role: " <> T.unpack other
 
--- | Content block - can be text, tool use, tool result, or thinking
+-- | Content block - can be text, tool use, tool result, thinking, or json (structured output)
 data ContentBlock
   = TextBlock Text
   | ToolUseBlock ToolUse
   | ToolResultBlock ToolResult
   | ThinkingBlock ThinkingContent
   | RedactedThinkingBlock RedactedThinking
+  | JsonBlock Value  -- Structured output from output_format
   deriving (Show, Eq, Generic)
 
 -- | Thinking content from extended thinking
@@ -170,6 +171,10 @@ instance ToJSON ContentBlock where
     [ "type" .= ("redacted_thinking" :: Text)
     , "data" .= redacted.redactedData
     ]
+  toJSON (JsonBlock jsonVal) = object
+    [ "type" .= ("json" :: Text)
+    , "json" .= jsonVal
+    ]
 
 instance FromJSON ContentBlock where
   parseJSON = withObject "ContentBlock" $ \v -> do
@@ -206,6 +211,9 @@ instance FromJSON ContentBlock where
         pure $ RedactedThinkingBlock RedactedThinking
           { redactedData = rData
           }
+      "json" -> do
+        jsonVal <- v .: "json"
+        pure $ JsonBlock jsonVal
       other -> fail $ "Unknown content block type: " <> T.unpack other
 
 -- | A tool use request from the model

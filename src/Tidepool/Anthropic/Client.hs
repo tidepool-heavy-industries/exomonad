@@ -311,14 +311,17 @@ runTurnRequest config turnReq = do
       _ -> TE.decodeUtf8 . LBS.toStrict . encode $ v
 
 -- | Extract the final output from response content
--- Looks for structured JSON in the response
+-- First looks for JsonBlock (structured output), then falls back to parsing text
 extractFinalOutput :: [ContentBlock] -> Value
 extractFinalOutput blocks =
-  -- For now, just take the last text block and try to parse as JSON
-  -- In practice, the model should return valid JSON in the text block
-  case [t | TextBlock t <- reverse blocks] of
-    [] -> Null
-    (lastText:_) ->
-      case decode (LBS.fromStrict $ TE.encodeUtf8 lastText) of
-        Just v -> v
-        Nothing -> String lastText  -- If not valid JSON, return as string
+  -- First, look for a JsonBlock (from output_format structured output)
+  case [v | JsonBlock v <- blocks] of
+    (jsonVal:_) -> jsonVal
+    [] ->
+      -- Fall back to parsing the last text block as JSON
+      case [t | TextBlock t <- reverse blocks] of
+        [] -> Null
+        (lastText:_) ->
+          case decode (LBS.fromStrict $ TE.encodeUtf8 lastText) of
+            Just v -> v
+            Nothing -> String lastText  -- If not valid JSON, return as string

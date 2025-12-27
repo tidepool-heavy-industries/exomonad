@@ -20,7 +20,7 @@ module DM.Loop
 
 import DM.State
 import DM.Context (buildDMContext, buildCompressionContext, DMContext(..))
-import DM.Output (TurnOutput(..), CompressionOutput(..), SceneOutcome(..), applyTurnOutput, applyCompression)
+import DM.Output (TurnOutput(..), CompressionOutput(..), applyTurnOutput, applyCompression)
 import DM.Templates (renderForMood, renderCompression, turnOutputSchema, compressionOutputSchema)
 import DM.Tools (DMEvent(..), dmTools)
 import Tidepool.Effect hiding (ToolResult)
@@ -221,7 +221,7 @@ compressIfNeeded = do
               Just scene -> s { scene = Just scene { sceneBeats = Seq.empty } }
 
             -- Emit compression event
-            emit $ SceneCompressed (result.trOutput.sceneOutcome.outcomeSummary)
+            emit $ SceneCompressed result.trOutput.summary
   where
     compressionThreshold = 20
 
@@ -262,18 +262,21 @@ endCurrentScene = modify $ \state -> state { scene = Nothing }
 -- ══════════════════════════════════════════════════════════════
 
 -- | Run the DM game with terminal I/O
+-- Returns the final WorldState for persistence
+-- Takes a save callback that's called after each turn for auto-save
 runDMGame
   :: WorldState
   -> (DMEvent -> IO ())
-  -> IO ()
-runDMGame initialState handleEvent = do
+  -> (WorldState -> IO ())  -- Save callback, called after each turn
+  -> IO WorldState
+runDMGame initialState handleEvent saveState = do
   -- Get API key from environment
   maybeKey <- lookupEnv "ANTHROPIC_API_KEY"
   case maybeKey of
     Nothing -> do
       TIO.putStrLn "Error: ANTHROPIC_API_KEY not set"
       TIO.putStrLn "Run: export ANTHROPIC_API_KEY=your-key-here"
-      return ()
+      return initialState  -- Return unchanged state
     Just apiKey -> do
       -- Set up the LLM config
       let llmConfig = LLMConfig
@@ -304,57 +307,68 @@ runDMGame initialState handleEvent = do
       TIO.putStrLn "[Telda, the bartender, is behind the counter.]"
       TIO.putStrLn "[Type 'quit' to exit]\n"
 
-      -- Run the game loop (Debug level shows all log messages)
-      ((), _finalState) <- runGame stateWithScene llmConfig handleEvent inputHandler Debug (gameLoop @(GameEffects WorldState DMEvent))
+      -- Run the game loop with auto-save (Debug level shows all log messages)
+      ((), finalState) <- runGame stateWithScene llmConfig handleEvent inputHandler Debug (gameLoopWithSave saveState)
 
       TIO.putStrLn "Game ended."
+      return finalState
 
--- Main game loop - separate function to help with type inference
-gameLoop
-  :: forall es.
-     ( State WorldState :> es
-     , LLM :> es
-     , Emit DMEvent :> es
-     , RequestInput :> es
-     , Log :> es
-     , Random :> es
-     , IOE :> es
-     )
-  => Eff es ()
-gameLoop = do
-  -- Check if we have an active scene
-  state <- get @WorldState
-  case state.scene of
-    Nothing -> do
-      -- No scene - prompt to start one or quit
-      liftIO $ TIO.putStrLn "\n[No active scene. Use startScene to begin.]"
-      return ()  -- Exit for now - real game would prompt for scene setup
+-- | Game loop with auto-save after each turn
+-- The save callback is captured in the closure
+gameLoopWithSave
+  :: (WorldState -> IO ())  -- Save callback
+  -> Eff (GameEffects WorldState DMEvent) ()
+gameLoopWithSave saveCallback = loop
+  where
+    loop :: Eff (GameEffects WorldState DMEvent) ()
+    loop = do
+      -- Check if we have an active scene
+      state <- get @WorldState
+      case state.scene of
+        Nothing -> do
+          -- No scene - prompt to start one or quit
+          liftIO $ TIO.putStrLn "\n[No active scene. Use startScene to begin.]"
+          return ()  -- Exit for now - real game would prompt for scene setup
 
-    Just _ -> do
-      -- Get player input
-      liftIO $ TIO.putStr "\n> What do you do? "
-      liftIO $ hFlush stdout
-      inputText <- liftIO TIO.getLine
+        Just _ -> do
+          -- Show current mood state
+          currentState <- get @WorldState
+          let moodLabel = case currentState.mood of
+                MoodScene _     -> "SCENE"
+                MoodAction _ _  -> "ACTION"
+                MoodAftermath _ -> "AFTERMATH"
+                MoodDowntime _  -> "DOWNTIME"
+                MoodTrauma _    -> "TRAUMA"
+          liftIO $ TIO.putStrLn $ "\n[" <> moodLabel <> "]"
 
-      -- Check for quit command
-      if T.toLower (T.strip inputText) `elem` ["quit", "exit", "q"]
-        then return ()  -- Exit loop
-        else do
-          -- Parse input and run turn
-          let playerInput = PlayerInput
-                { piActionText = inputText
-                , piActionTags = []  -- Could parse tags from input
-                }
+          -- Get player input
+          liftIO $ TIO.putStr "> What do you do? "
+          liftIO $ hFlush stdout
+          inputText <- liftIO TIO.getLine
 
-          -- Run a turn
-          response <- dmTurn playerInput
+          -- Check for quit command
+          if T.toLower (T.strip inputText) `elem` ["quit", "exit", "q"]
+            then return ()  -- Exit loop
+            else do
+              -- Parse input and run turn
+              let playerInput = PlayerInput
+                    { piActionText = inputText
+                    , piActionTags = []  -- Could parse tags from input
+                    }
 
-          -- Display response
-          liftIO $ TIO.putStrLn ""
-          liftIO $ TIO.putStrLn response.responseText
+              -- Run a turn
+              response <- dmTurn playerInput
 
-          -- Continue loop
-          gameLoop
+              -- Display response
+              liftIO $ TIO.putStrLn ""
+              liftIO $ TIO.putStrLn response.responseText
+
+              -- Auto-save after each turn
+              updatedState <- get @WorldState
+              liftIO $ saveCallback updatedState
+
+              -- Continue loop
+              loop
 
 -- | Terminal choice handler - display options and get selection
 terminalChoice :: Text -> [(Text, a)] -> IO a

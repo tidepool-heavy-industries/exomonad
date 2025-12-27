@@ -355,7 +355,7 @@ instance Tool Resolve DMEvent WorldState where
   toolName = "resolve"
   toolDescription = "Transition from ACTION to AFTERMATH. Use after dice/action is resolved to show consequences. Describe what the player achieved and what it cost them."
   inputSchema = schemaToValue $ objectSchema
-    [ ("resolveOutcome", describeField "resolveOutcome" "Type of outcome" (enumSchema ["clean", "costly", "setback", "disaster"]))
+    [ ("resolveOutcome", describeField "resolveOutcome" "Type of outcome: clean, costly, setback, or disaster" (emptySchema TString))
     , ("resolveWhat", describeField "resolveWhat" "What happened" (emptySchema TString))
     , ("resolveCosts", describeField "resolveCosts" "Costs paid" (arraySchema (emptySchema TString)))
     , ("resolveComplications", describeField "resolveComplications" "New problems" (arraySchema (emptySchema TString)))

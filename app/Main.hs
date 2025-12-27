@@ -7,15 +7,24 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import qualified Data.HashMap.Strict as HM
+import qualified Data.ByteString.Lazy as BL
+import Data.Aeson (encode, eitherDecode)
+import System.Directory (doesFileExist)
+import System.IO (hFlush, stdout)
+
+-- | Save file location
+saveFilePath :: FilePath
+saveFilePath = "tidepool-save.json"
 
 main :: IO ()
 main = do
   putStrLn "Tidepool DM - Type-safe LLM Agent Loop"
   putStrLn "======================================="
   putStrLn ""
-  
-  let world = setupExampleWorld
-  
+
+  -- Check for existing save
+  world <- loadOrCreateWorld
+
   putStrLn $ "World initialized with:"
   putStrLn $ "  - " <> show (HM.size world.factions) <> " factions"
   putStrLn $ "  - " <> show (HM.size world.npcs) <> " NPCs"
@@ -25,7 +34,9 @@ main = do
   TIO.putStrLn $ "  - Dice pool: " <> formatDice world.dicePool.poolDice
   putStrLn ""
 
-  runDMGame world handleEvent
+  -- Run game with auto-save after each turn
+  _ <- runDMGame world handleEvent saveWorld
+  putStrLn $ "Game saved to " <> saveFilePath
   where
     formatDice dice = T.intercalate " " [dieChar d | d <- dice]
     dieChar d = case d of
@@ -48,6 +59,35 @@ main = do
 
     showT :: Int -> Text
     showT = T.pack . show
+
+-- | Load existing save or create fresh world
+loadOrCreateWorld :: IO WorldState
+loadOrCreateWorld = do
+  exists <- doesFileExist saveFilePath
+  if exists
+    then do
+      putStrLn $ "Found save file: " <> saveFilePath
+      contents <- BL.readFile saveFilePath
+      case eitherDecode contents of
+        Right savedWorld -> do
+          putStr "Continue from save? (y/n): "
+          hFlush stdout
+          response <- getLine
+          if response `elem` ["y", "Y", "yes", "Yes"]
+            then do
+              putStrLn "Loading saved game..."
+              return savedWorld
+            else do
+              putStrLn "Starting fresh game..."
+              return setupExampleWorld
+        Left err -> do
+          putStrLn $ "Error loading save (starting fresh): " <> err
+          return setupExampleWorld
+    else return setupExampleWorld
+
+-- | Save world state to file
+saveWorld :: WorldState -> IO ()
+saveWorld world = BL.writeFile saveFilePath (encode world)
 
 setupExampleWorld :: WorldState
 setupExampleWorld = initialWorld

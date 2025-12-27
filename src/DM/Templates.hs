@@ -354,22 +354,27 @@ confirmRumorSchema = objectSchema
 -- COMPRESSION OUTPUT SCHEMA
 -- ══════════════════════════════════════════════════════════════
 
+-- | Simplified compression schema to avoid grammar size limits
+-- Complex extractions moved to post-processing or tools
 compressionOutputJSONSchema :: JSONSchema
 compressionOutputJSONSchema = objectSchema
-  [ ("sceneOutcome", describeField "sceneOutcome"
-      "Summary of what happened in the scene"
-      sceneOutcomeSchema)
-  , ("worldDeltas", describeField "worldDeltas"
-      "Changes to world state from the scene"
-      worldDeltasSchema)
-  , ("extracted", describeField "extracted"
-      "New narrative elements extracted from the scene"
-      extractionsSchema)
-  , ("decay", describeField "decay"
-      "Elements that decay or fade over time"
-      decaySchema)
+  [ ("summary", describeField "summary"
+      "One paragraph summary of what happened in the scene"
+      (emptySchema TString))
+  , ("keyMoments", describeField "keyMoments"
+      "Comma-separated list of the most important moments"
+      (emptySchema TString))
+  , ("consequenceSeeds", describeField "consequenceSeeds"
+      "Comma-separated seeds for future consequences"
+      (emptySchema TString))
+  , ("stressChange", describeField "stressChange"
+      "Net stress change from this scene"
+      (emptySchema TInteger))
+  , ("coinChange", describeField "coinChange"
+      "Net coin change from this scene"
+      (emptySchema TInteger))
   ]
-  ["sceneOutcome", "worldDeltas", "extracted", "decay"]
+  ["summary", "keyMoments", "consequenceSeeds", "stressChange", "coinChange"]
 
 sceneOutcomeSchema :: JSONSchema
 sceneOutcomeSchema = objectSchema
