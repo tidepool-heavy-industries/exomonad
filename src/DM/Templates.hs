@@ -4,13 +4,22 @@ module DM.Templates
     dmTurnTemplate
   , compressionTemplate'
 
+    -- * Mood-Specific Templates
+  , sceneTemplate
+  , actionTemplate
+  , aftermathTemplate
+
     -- * Typed Jinja Templates
   , dmTurnJinja
   , compressionJinja
+  , sceneJinja
+  , actionJinja
+  , aftermathJinja
 
     -- * Rendering
   , renderDMTurn
   , renderCompression
+  , renderForMood
 
     -- * Schemas
   , turnOutputSchema
@@ -19,7 +28,7 @@ module DM.Templates
 
 import DM.Context
 import DM.Output
-import DM.State (WorldState)
+import DM.State (WorldState, DMMood(..))
 import DM.Tools
 import Tidepool.Template
 import Tidepool.Schema
@@ -31,9 +40,21 @@ import Text.Parsec.Pos (SourcePos)
 -- TYPED JINJA TEMPLATES
 -- ══════════════════════════════════════════════════════════════
 
--- | DM turn Jinja template (compile-time validated)
+-- | DM turn Jinja template (compile-time validated) - legacy, use mood-specific
 dmTurnJinja :: TypedTemplate DMContext SourcePos
 dmTurnJinja = $(typedTemplateFile ''DMContext "templates/dm_turn.jinja")
+
+-- | Scene mood template - exploration, hooks, NPC encounters
+sceneJinja :: TypedTemplate DMContext SourcePos
+sceneJinja = $(typedTemplateFile ''DMContext "templates/scene/main.jinja")
+
+-- | Action mood template - dice mechanics, position/effect
+actionJinja :: TypedTemplate DMContext SourcePos
+actionJinja = $(typedTemplateFile ''DMContext "templates/action/main.jinja")
+
+-- | Aftermath mood template - consequences, costs, complications
+aftermathJinja :: TypedTemplate DMContext SourcePos
+aftermathJinja = $(typedTemplateFile ''DMContext "templates/aftermath/main.jinja")
 
 -- | Compression Jinja template (compile-time validated)
 compressionJinja :: TypedTemplate CompressionContext SourcePos
@@ -59,17 +80,49 @@ compressionTemplate' = Template
   , templateTools = TNil
   }
 
+-- | Scene template - exploration state
+sceneTemplate :: Template DMContext TurnOutput DMEvent WorldState '[ThinkAsDM, SpeakAsNPC, AskPlayer, Choose, SpendDie, Engage, Resolve, Accept]
+sceneTemplate = Template
+  { templateJinja = sceneJinja
+  , templateOutputSchema = turnOutputSchema
+  , templateTools = dmToolList
+  }
+
+-- | Action template - dice resolution state
+actionTemplate :: Template DMContext TurnOutput DMEvent WorldState '[ThinkAsDM, SpeakAsNPC, AskPlayer, Choose, SpendDie, Engage, Resolve, Accept]
+actionTemplate = Template
+  { templateJinja = actionJinja
+  , templateOutputSchema = turnOutputSchema
+  , templateTools = dmToolList
+  }
+
+-- | Aftermath template - consequence state
+aftermathTemplate :: Template DMContext TurnOutput DMEvent WorldState '[ThinkAsDM, SpeakAsNPC, AskPlayer, Choose, SpendDie, Engage, Resolve, Accept]
+aftermathTemplate = Template
+  { templateJinja = aftermathJinja
+  , templateOutputSchema = turnOutputSchema
+  , templateTools = dmToolList
+  }
+
 -- ══════════════════════════════════════════════════════════════
 -- RENDERING
 -- ══════════════════════════════════════════════════════════════
 
--- | Render DM turn template with context
+-- | Render DM turn template with context (legacy - use renderForMood)
 renderDMTurn :: DMContext -> Text
 renderDMTurn = render dmTurnTemplate
 
 -- | Render compression template with context
 renderCompression :: CompressionContext -> Text
 renderCompression = render compressionTemplate'
+
+-- | Render the appropriate template based on current mood
+renderForMood :: DMMood -> DMContext -> Text
+renderForMood mood ctx = case mood of
+  MoodScene _     -> render sceneTemplate ctx
+  MoodAction _ _  -> render actionTemplate ctx
+  MoodAftermath _ -> render aftermathTemplate ctx
+  MoodTrauma _    -> render sceneTemplate ctx  -- TODO: trauma template
 
 -- ══════════════════════════════════════════════════════════════
 -- SCHEMAS

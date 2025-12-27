@@ -608,7 +608,8 @@ runLog minLevel = interpret $ \_ -> \case
               Debug -> "[DEBUG] "
               Info  -> "[INFO]  "
               Warn  -> "[WARN]  "
-        TIO.putStrLn (prefix <> msg)
+        -- TIO.putStrLn (prefix <> msg)
+        return ()
     | otherwise -> pure ()
 
 -- ══════════════════════════════════════════════════════════════
