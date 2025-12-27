@@ -9,23 +9,26 @@ module Tidepool.Tool
   , toolListToJSON
 
     -- * Tool Execution
-  , ToolResult(..)
+  , ToolExecResult(..)
+  , makeDispatcher
+  , dispatchTool
   , executeTools
   , toolToJSON
   ) where
 
 import Data.Text (Text)
-import Data.Aeson (Value, ToJSON, FromJSON, object, (.=))
+import qualified Data.Text as T
+import Data.Aeson (Value, ToJSON, FromJSON, object, (.=), fromJSON, toJSON, Result(..))
 import Data.Kind (Type)
 import Data.Proxy (Proxy(..))
 import GHC.Generics (Generic)
-import Tidepool.Effect
+import Tidepool.Effect (Emit, RequestInput, Random, State, ToolDispatcher, ToolResult(..))
 import Effectful
 
 -- | Tools are mid-turn capabilities the LLM can invoke
--- Tools can use State, Emit, RequestInput, and Random effects
--- The event type parameter specifies what events this tool can emit
-class Tool t event where
+-- Tools can use Emit, RequestInput, Random, and State effects
+-- Parameters: t=tool type, event=event type, state=game state type
+class (FromJSON (ToolInput t), ToJSON (ToolOutput t)) => Tool t event state where
   type ToolInput t
   type ToolOutput t
 
@@ -34,9 +37,9 @@ class Tool t event where
   inputSchema :: Value  -- JSON Schema
 
   -- | Execute the tool with its input
-  -- Tools have access to game state, events, input requests, and randomness
+  -- Tools have access to state, events, input requests, and randomness
   executeTool
-    :: (State s :> es, Emit event :> es, RequestInput :> es, Random :> es)
+    :: (State state :> es, Emit event :> es, RequestInput :> es, Random :> es)
     => ToolInput t
     -> Eff es (ToolOutput t)
 
@@ -46,37 +49,106 @@ class Tool t event where
 
 -- | Type-safe heterogeneous list of tools
 -- Used to define which tools are available for a template
--- All tools in the list share the same event type
-data ToolList event (tools :: [Type]) where
-  TNil  :: ToolList event '[]
-  TCons :: Tool t event => Proxy t -> ToolList event ts -> ToolList event (t ': ts)
+-- All tools in the list share the same event and state types
+data ToolList event state (tools :: [Type]) where
+  TNil  :: ToolList event state '[]
+  TCons :: Tool t event state => Proxy t -> ToolList event state ts -> ToolList event state (t ': ts)
 
 -- | Convert tool list to JSON array of tool definitions
-toolListToJSON :: forall event tools. ToolList event tools -> [Value]
+toolListToJSON :: forall event state tools. ToolList event state tools -> [Value]
 toolListToJSON TNil = []
 toolListToJSON (TCons p rest) = toolToJSONProxy p : toolListToJSON rest
   where
-    toolToJSONProxy :: forall t. Tool t event => Proxy t -> Value
-    toolToJSONProxy _ = toolToJSON @t @event
+    toolToJSONProxy :: forall t. Tool t event state => Proxy t -> Value
+    toolToJSONProxy _ = toolToJSON @t @event @state
 
--- | Result of tool execution for returning to LLM
-data ToolResult = ToolResult
-  { toolResultName :: Text
-  , toolResultContent :: Value
+-- | Result of tool execution for returning to LLM (used by executeTools)
+data ToolExecResult = ToolExecResult
+  { toolExecResultName :: Text
+  , toolExecResultContent :: Value
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
+-- ══════════════════════════════════════════════════════════════
+-- TOOL DISPATCHER
+-- ══════════════════════════════════════════════════════════════
+
+-- | Create a dispatcher from a tool list
+makeDispatcher
+  :: forall event state tools es.
+     (State state :> es, Emit event :> es, RequestInput :> es, Random :> es)
+  => ToolList event state tools
+  -> ToolDispatcher event es
+makeDispatcher tools name input = dispatchToList tools name input
+
+-- | Dispatch to a tool list, finding the matching tool by name
+-- Returns ToolSuccess on normal completion, Left on error
+-- Note: For tools that break turns (state transitions), they should
+-- return ToolBreak from a separate dispatcher implementation
+dispatchToList
+  :: forall event state tools es.
+     (State state :> es, Emit event :> es, RequestInput :> es, Random :> es)
+  => ToolList event state tools
+  -> Text
+  -> Value
+  -> Eff es (Either Text ToolResult)
+dispatchToList TNil name _ = pure $ Left $ "Unknown tool: " <> name
+dispatchToList (TCons (_ :: Proxy t) rest) name input
+  | toolName @t @event @state == name = executeSingleTool @t @event @state input
+  | otherwise = dispatchToList rest name input
+
+-- | Execute a single tool with JSON input/output
+-- Returns ToolSuccess wrapping the output value
+executeSingleTool
+  :: forall t event state es.
+     (Tool t event state, State state :> es, Emit event :> es, RequestInput :> es, Random :> es)
+  => Value
+  -> Eff es (Either Text ToolResult)
+executeSingleTool input = do
+  case fromJSON input of
+    Error err -> pure $ Left $ "Failed to parse tool input: " <> T.pack err
+    Success parsedInput -> do
+      result <- executeTool @t @event @state parsedInput
+      pure $ Right $ ToolSuccess $ toJSON result
+
+-- | Dispatch a single tool call
+dispatchTool
+  :: (State state :> es, Emit event :> es, RequestInput :> es, Random :> es)
+  => ToolDispatcher event es
+  -> Text    -- Tool name
+  -> Value   -- Input JSON
+  -> Eff es (Either Text ToolResult)
+dispatchTool dispatcher = dispatcher
+
 -- | Execute a list of tool calls from LLM response
+-- Stops early if any tool returns ToolBreak
 executeTools
-  :: (State s :> es, Emit event :> es, RequestInput :> es, Random :> es)
-  => [Value]
-  -> Eff es [ToolResult]
-executeTools _toolCalls = error "TODO: executeTools - dispatch tool calls by name, execute, collect results"
+  :: (State state :> es, Emit event :> es, RequestInput :> es, Random :> es)
+  => ToolDispatcher event es
+  -> [(Text, Text, Value)]   -- [(toolUseId, toolName, input)]
+  -> Eff es (Either Text [ToolExecResult])  -- Left = break, Right = all results
+executeTools dispatcher calls = go calls []
+  where
+    go [] acc = pure $ Right (reverse acc)
+    go ((_, name, input):rest) acc = do
+      result <- dispatcher name input
+      case result of
+        Left err ->
+          -- Tool error - include it and continue
+          let res = ToolExecResult name (toJSON err)
+          in go rest (res:acc)
+        Right (ToolBreak reason) ->
+          -- Tool broke the turn - stop immediately
+          pure $ Left reason
+        Right (ToolSuccess val) ->
+          -- Tool succeeded - continue
+          let res = ToolExecResult name val
+          in go rest (res:acc)
 
 -- | Convert tool definition to JSON for API (Anthropic tool format)
-toolToJSON :: forall t event. Tool t event => Value
+toolToJSON :: forall t event state. Tool t event state => Value
 toolToJSON = object
-  [ "name" .= toolName @t @event
-  , "description" .= toolDescription @t @event
-  , "input_schema" .= inputSchema @t @event
+  [ "name" .= toolName @t @event @state
+  , "description" .= toolDescription @t @event @state
+  , "input_schema" .= inputSchema @t @event @state
   ]

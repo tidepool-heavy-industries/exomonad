@@ -4,6 +4,15 @@ module DM.State
     WorldState(..)
   , initialWorld
 
+    -- * DM Mood (State Machine)
+  , DMMood(..)
+  , SceneVariant(..)
+  , ActionVariant(..)
+  , ActionDomain(..)
+  , AftermathVariant(..)
+  , TraumaVariant(..)
+  , defaultMood
+
     -- * Player
   , PlayerState(..)
   , initialPlayer
@@ -88,11 +97,119 @@ import qualified Data.HashMap.Strict as HM
 import qualified Data.Foldable as F
 
 -- ══════════════════════════════════════════════════════════════
+-- DM MOOD (State Machine)
+-- ══════════════════════════════════════════════════════════════
+
+-- | The DM's current mood determines template, tools, and output schema
+data DMMood
+  = MoodScene SceneVariant
+  | MoodAction ActionVariant (Maybe ActionDomain)
+  | MoodAftermath AftermathVariant
+  | MoodTrauma TraumaVariant
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+
+-- | Scene variants - how we entered this scene
+data SceneVariant
+  = JobOffer
+      { svContact :: NpcId
+      , svObjectiveType :: Text
+      , svEmployerFaction :: Maybe FactionId
+      , svUrgency :: Int  -- 1=relaxed, 2=pressing, 3=urgent
+      }
+  | Complication
+      { svSource :: Text
+      , svSeverity :: Int  -- 1-3
+      , svEscapable :: Bool
+      }
+  | NpcEncounter
+      { svNpcId :: NpcId
+      , svNpcIntent :: Text  -- friendly, business, warning, threat
+      , svCallbackTo :: Maybe Text
+      }
+  | ClockTriggered
+      { svClockId :: ClockId
+      , svEventType :: Text
+      , svPreventable :: Bool
+      }
+  | FreePlay
+      { svLocationId :: LocationId
+      , svTimeOfDay :: Text  -- dawn, day, dusk, night
+      , svAmbientHeat :: Int
+      }
+  | SceneDowntime
+      { svActivitiesAvailable :: [Text]
+      , svTimePasses :: Bool
+      }
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+
+-- | Action variants - the position (controlled/risky/desperate)
+data ActionVariant
+  = AvControlled
+      { avAdvantageSource :: Text
+      , avRiskIfFails :: Text
+      }
+  | AvRisky
+      { avThreat :: Text
+      , avOpportunity :: Text
+      }
+  | AvDesperate
+      { avWhyDesperate :: Text
+      , avStakes :: Text
+      , avPotentialTrauma :: Bool
+      }
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+
+-- | Action domain overlays - what kind of action
+data ActionDomain
+  = DomainInfiltration
+  | DomainSocial
+  | DomainViolence
+  | DomainPursuit
+  | DomainArcane
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+
+-- | Aftermath variants - the outcome type
+data AftermathVariant
+  = AmClean
+      { amWhatAchieved :: Text
+      }
+  | AmCostly
+      { amWhatAchieved :: Text
+      , amCostsPaid :: [Text]
+      , amNewComplications :: [Text]
+      }
+  | AmSetback
+      { amWhatWentWrong :: Text
+      , amImmediateDanger :: Bool
+      , amEscapeRoute :: Text
+      }
+  | AmDisaster
+      { amCatastrophe :: Text
+      , amTraumaRisk :: Bool
+      , amWorldStateChanges :: [Text]
+      }
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+
+-- | Trauma variant - the breaking point
+data TraumaVariant = Breaking
+  { tvWhatBroke :: Text
+  , tvTraumaType :: Trauma
+  , tvTrigger :: Text
+  , tvAdrenaline :: Bool  -- If true, can snap back to action
+  }
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+
+-- | Default mood for new games
+defaultMood :: DMMood
+defaultMood = MoodScene (FreePlay (LocationId "unknown") "day" 0)
+
+-- ══════════════════════════════════════════════════════════════
 -- CORE STATE
 -- ══════════════════════════════════════════════════════════════
 
 data WorldState = WorldState
-  { player :: PlayerState
+  { mood :: DMMood                    -- Current DM mood (state machine)
+  , player :: PlayerState
   , factions :: HashMap FactionId Faction
   , clocks :: HashMap ClockId Clock
   , locations :: HashMap LocationId Location
@@ -117,7 +234,8 @@ data SceneSummary = SceneSummary
 
 initialWorld :: WorldState
 initialWorld = WorldState
-  { player = initialPlayer
+  { mood = defaultMood
+  , player = initialPlayer
   , factions = HM.empty
   , clocks = HM.empty
   , locations = HM.empty
@@ -481,6 +599,7 @@ data ActiveScene = ActiveScene
 data SceneBeat
   = PlayerAction Text [Tag]
   | NpcAction NpcId Text
+  | DMNarration Text          -- DM's narrative response
   | EnvironmentShift Text
   | Revelation Secret
   | ClockTick ClockId Int
@@ -532,6 +651,14 @@ instance (ToGVal m a, ToGVal m b) => ToGVal m (Either a b) where
 -- Core State
 instance ToGVal m WorldState where toGVal = genericToGVal
 instance ToGVal m SceneSummary where toGVal = genericToGVal
+
+-- DM Mood (State Machine)
+instance ToGVal m DMMood where toGVal = genericToGVal
+instance ToGVal m SceneVariant where toGVal = genericToGVal
+instance ToGVal m ActionVariant where toGVal = genericToGVal
+instance ToGVal m ActionDomain where toGVal = genericToGVal
+instance ToGVal m AftermathVariant where toGVal = genericToGVal
+instance ToGVal m TraumaVariant where toGVal = genericToGVal
 
 -- Player
 instance ToGVal m PlayerState where toGVal = genericToGVal

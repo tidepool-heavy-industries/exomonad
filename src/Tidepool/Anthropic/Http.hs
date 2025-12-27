@@ -10,6 +10,9 @@ module Tidepool.Anthropic.Http
   , ToolResult(..)
   , ToolChoice(..)
   , OutputFormat(..)
+  , ThinkingConfig(..)
+  , ThinkingContent(..)
+  , RedactedThinking(..)
 
     -- * Response Types
   , MessagesResponse(..)
@@ -45,6 +48,7 @@ data MessagesRequest = MessagesRequest
   , tools :: Maybe [Value]              -- Tool definitions as raw JSON
   , toolChoice :: Maybe ToolChoice
   , outputFormat :: Maybe OutputFormat  -- Structured output schema
+  , thinking :: Maybe ThinkingConfig    -- Extended thinking configuration
   }
   deriving (Show, Eq, Generic)
 
@@ -57,6 +61,20 @@ instance ToJSON MessagesRequest where
     , "tools" .= req.tools
     , "tool_choice" .= req.toolChoice
     , "output_format" .= req.outputFormat
+    , "thinking" .= req.thinking
+    ]
+
+-- | Extended thinking configuration
+data ThinkingConfig = ThinkingConfig
+  { thinkingType :: Text       -- "enabled"
+  , budgetTokens :: Int        -- Token budget for thinking
+  }
+  deriving (Show, Eq, Generic)
+
+instance ToJSON ThinkingConfig where
+  toJSON cfg = object
+    [ "type" .= cfg.thinkingType
+    , "budget_tokens" .= cfg.budgetTokens
     ]
 
 -- | Structured output format specification
@@ -104,11 +122,26 @@ instance FromJSON Role where
     "assistant" -> pure Assistant
     other -> fail $ "Unknown role: " <> T.unpack other
 
--- | Content block - can be text, tool use, or tool result
+-- | Content block - can be text, tool use, tool result, or thinking
 data ContentBlock
   = TextBlock Text
   | ToolUseBlock ToolUse
   | ToolResultBlock ToolResult
+  | ThinkingBlock ThinkingContent
+  | RedactedThinkingBlock RedactedThinking
+  deriving (Show, Eq, Generic)
+
+-- | Thinking content from extended thinking
+data ThinkingContent = ThinkingContent
+  { thinkingText :: Text      -- The thinking content (may be summarized)
+  , thinkingSignature :: Text -- Encrypted signature for verification
+  }
+  deriving (Show, Eq, Generic)
+
+-- | Redacted thinking (encrypted, for safety)
+data RedactedThinking = RedactedThinking
+  { redactedData :: Text      -- Encrypted thinking data
+  }
   deriving (Show, Eq, Generic)
 
 instance ToJSON ContentBlock where
@@ -127,6 +160,15 @@ instance ToJSON ContentBlock where
     , "tool_use_id" .= result.toolResultId
     , "content" .= result.toolResultContent
     , "is_error" .= result.toolResultIsError
+    ]
+  toJSON (ThinkingBlock thinking) = object
+    [ "type" .= ("thinking" :: Text)
+    , "thinking" .= thinking.thinkingText
+    , "signature" .= thinking.thinkingSignature
+    ]
+  toJSON (RedactedThinkingBlock redacted) = object
+    [ "type" .= ("redacted_thinking" :: Text)
+    , "data" .= redacted.redactedData
     ]
 
 instance FromJSON ContentBlock where
@@ -151,6 +193,18 @@ instance FromJSON ContentBlock where
           { toolResultId = trId
           , toolResultContent = trContent
           , toolResultIsError = trIsError
+          }
+      "thinking" -> do
+        thText <- v .: "thinking"
+        thSig <- v .: "signature"
+        pure $ ThinkingBlock ThinkingContent
+          { thinkingText = thText
+          , thinkingSignature = thSig
+          }
+      "redacted_thinking" -> do
+        rData <- v .: "data"
+        pure $ RedactedThinkingBlock RedactedThinking
+          { redactedData = rData
           }
       other -> fail $ "Unknown content block type: " <> T.unpack other
 
@@ -268,7 +322,7 @@ callMessages apiKey request = runReq defaultHttpConfig $ do
       -- Include structured outputs beta header
       headers = header "x-api-key" (TE.encodeUtf8 apiKey)
              <> header "anthropic-version" ("2023-06-01" :: ByteString)
-             <> header "anthropic-beta" ("structured-outputs-2025-11-13" :: ByteString)
+             <> header "anthropic-beta" ("structured-outputs-2025-11-13,interleaved-thinking-2025-05-14" :: ByteString)
              <> header "content-type" ("application/json" :: ByteString)
 
   response <- req POST url (ReqBodyJson request) jsonResponse headers

@@ -78,6 +78,7 @@ describeField :: Text -> Text -> JSONSchema -> JSONSchema
 describeField _fieldName desc schema = schema { schemaDescription = Just desc }
 
 -- | Convert schema to Aeson Value (JSON Schema draft-07 format)
+-- Note: Anthropic API requires additionalProperties: false on all object types
 schemaToValue :: JSONSchema -> Value
 schemaToValue (JSONSchema typ desc props req items enum_ oneOf_) = object $ catMaybes
   [ Just $ "type" .= typeToText typ
@@ -88,6 +89,10 @@ schemaToValue (JSONSchema typ desc props req items enum_ oneOf_) = object $ catM
   , if null req
     then Nothing
     else Just $ "required" .= req
+  -- Anthropic requires additionalProperties: false for all object types
+  , if typ == TObject
+    then Just $ "additionalProperties" .= False
+    else Nothing
   , ("items" .=) . schemaToValue <$> items
   , ("enum" .=) <$> enum_
   , ("oneOf" .=) . fmap schemaToValue <$> oneOf_

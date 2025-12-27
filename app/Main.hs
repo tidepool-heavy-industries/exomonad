@@ -22,20 +22,29 @@ main = do
   putStrLn $ "  - " <> show (HM.size world.locations) <> " locations"
   putStrLn $ "  - " <> show (HM.size world.clocks) <> " clocks"
   putStrLn $ "  - " <> show (length world.threads) <> " threads"
+  TIO.putStrLn $ "  - Dice pool: " <> formatDice world.dicePool.poolDice
   putStrLn ""
-  
+
   runDMGame world handleEvent
   where
+    formatDice dice = T.intercalate " " [dieChar d | d <- dice]
+    dieChar d = case d of
+      1 -> "⚀"; 2 -> "⚁"; 3 -> "⚂"; 4 -> "⚃"; 5 -> "⚄"; 6 -> "⚅"; _ -> "?"
     handleEvent :: DMEvent -> IO ()
     handleEvent (DMThought t) = TIO.putStrLn $ "[DM thinks] " <> t
-    handleEvent (NPCSpoke nid t) = TIO.putStrLn $ "[NPC " <> nid.unNpcId <> "] " <> t
+    handleEvent (NPCSpoke nid t) = TIO.putStrLn $ "[" <> nid.unNpcId <> "] \"" <> t <> "\""
     handleEvent (PlayerAsked q) = TIO.putStrLn $ "[Asks player] " <> q
     handleEvent (RandomChoice label idx) =
       TIO.putStrLn $ "[Random] chose " <> label <> " (index " <> showT idx <> ")"
+    handleEvent (DieSpent dieVal outcomeTier narrativeText) = do
+      TIO.putStrLn $ "\n🎲 Die spent: " <> showT dieVal <> " → " <> T.pack (show outcomeTier)
+      TIO.putStrLn $ narrativeText
     handleEvent (ClockCompleted clockId clockName _consequence) =
       TIO.putStrLn $ "[Clock filled] ⏰ " <> clockName <> " (" <> clockId <> ") - consequence triggered!"
     handleEvent (SceneCompressed summary) =
       TIO.putStrLn $ "[Scene compressed] " <> summary
+    handleEvent (MoodTransition toolName fromMood toMood) =
+      TIO.putStrLn $ "\n⚡ [" <> toolName <> "] " <> fromMood <> " → " <> toMood
 
     showT :: Int -> Text
     showT = T.pack . show
@@ -43,6 +52,7 @@ main = do
 setupExampleWorld :: WorldState
 setupExampleWorld = initialWorld
   { player = initialPlayer { coin = 4, stress = 2 }
+  , dicePool = DicePool [6, 4, 3, 2]  -- Starting dice pool
   , factions = HM.fromList
       -- The Bluecoats - corrupt city watch
       [ (FactionId "bluecoats", Faction

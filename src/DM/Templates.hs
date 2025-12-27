@@ -2,7 +2,7 @@
 module DM.Templates
   ( -- * Templates
     dmTurnTemplate
-  , compressionTemplate
+  , compressionTemplate'
 
     -- * Typed Jinja Templates
   , dmTurnJinja
@@ -19,6 +19,7 @@ module DM.Templates
 
 import DM.Context
 import DM.Output
+import DM.State (WorldState)
 import DM.Tools
 import Tidepool.Template
 import Tidepool.Schema
@@ -43,20 +44,16 @@ compressionJinja = $(typedTemplateFile ''CompressionContext "templates/compressi
 -- ══════════════════════════════════════════════════════════════
 
 -- | Main DM turn template with all available tools
-dmTurnTemplate :: Template DMContext TurnOutput DMEvent '[ThinkAsDM, SpeakAsNPC, AskPlayer, Choose]
+dmTurnTemplate :: Template DMContext TurnOutput DMEvent WorldState '[ThinkAsDM, SpeakAsNPC, AskPlayer, Choose, SpendDie, Engage, Resolve, Accept]
 dmTurnTemplate = Template
   { templateJinja = dmTurnJinja
   , templateOutputSchema = turnOutputSchema
-  , templateTools = TCons (Proxy @ThinkAsDM)
-                  $ TCons (Proxy @SpeakAsNPC)
-                  $ TCons (Proxy @AskPlayer)
-                  $ TCons (Proxy @Choose)
-                  $ TNil
+  , templateTools = dmToolList
   }
 
--- | Compression template (no tools needed - uses unit event type)
-compressionTemplate :: Template CompressionContext CompressionOutput () '[]
-compressionTemplate = Template
+-- | Compression template (no tools needed - uses unit state/event)
+compressionTemplate' :: Template CompressionContext CompressionOutput () () '[]
+compressionTemplate' = Template
   { templateJinja = compressionJinja
   , templateOutputSchema = compressionOutputSchema
   , templateTools = TNil
@@ -72,7 +69,7 @@ renderDMTurn = render dmTurnTemplate
 
 -- | Render compression template with context
 renderCompression :: CompressionContext -> Text
-renderCompression = render compressionTemplate
+renderCompression = render compressionTemplate'
 
 -- ══════════════════════════════════════════════════════════════
 -- SCHEMAS
@@ -93,70 +90,25 @@ compressionOutputSchema = Schema
   }
 
 -- ══════════════════════════════════════════════════════════════
--- TURN OUTPUT SCHEMA
+-- TURN OUTPUT SCHEMA (Simplified for API grammar limits)
 -- ══════════════════════════════════════════════════════════════
 
 turnOutputJSONSchema :: JSONSchema
 turnOutputJSONSchema = objectSchema
   [ ("narration", describeField "narration"
-      "The narrative prose for this turn. Describe what happens in response to player action."
+      "Narrative prose describing what happens. Use SpeakAsNPC tool for dialogue."
       (emptySchema TString))
-  , ("playerDeltas", describeField "playerDeltas"
-      "Changes to player resources (stress, coin, heat, wanted)"
-      playerDeltasSchema)
-  , ("newTrauma", describeField "newTrauma"
-      "New trauma if stress exceeded 9 (resets stress to 0)"
-      (emptySchema TString))
-  , ("requestOutcomes", describeField "requestOutcomes"
-      "Request player to choose a die for a risky action"
-      requestOutcomesSchema)
-  , ("clearPendingOutcome", describeField "clearPendingOutcome"
-      "Set true after narrating a locked dice outcome"
+  , ("stressDelta", describeField "stressDelta"
+      "Change in stress (-9 to +9, 0 if no change)"
+      (emptySchema TInteger))
+  , ("coinDelta", describeField "coinDelta"
+      "Change in coin (0 if no change)"
+      (emptySchema TInteger))
+  , ("continueScene", describeField "continueScene"
+      "True to continue the scene, false to end it"
       (emptySchema TBoolean))
-  , ("clockTicks", describeField "clockTicks"
-      "Advance existing clocks"
-      (arraySchema clockTickSchema))
-  , ("newClocks", describeField "newClocks"
-      "Create new countdown clocks"
-      (arraySchema newClockSchema))
-  , ("revealClocks", describeField "revealClocks"
-      "Clock IDs to reveal to the player"
-      (arraySchema (emptySchema TString)))
-  , ("newThreads", describeField "newThreads"
-      "Create new narrative threads"
-      (arraySchema newThreadSchema))
-  , ("threadEscalations", describeField "threadEscalations"
-      "Escalate thread tension levels"
-      (arraySchema threadEscalationSchema))
-  , ("resolvedThreads", describeField "resolvedThreads"
-      "Mark threads as resolved"
-      (arraySchema threadResolutionSchema))
-  , ("attitudeShifts", describeField "attitudeShifts"
-      "Shift faction attitudes toward/away from player"
-      (arraySchema attitudeShiftSchema))
-  , ("factionLearns", describeField "factionLearns"
-      "Facts that factions learn"
-      (arraySchema factionLearnsSchema))
-  , ("dispositionShifts", describeField "dispositionShifts"
-      "Shift NPC dispositions toward/away from player"
-      (arraySchema dispositionShiftSchema))
-  , ("npcMoves", describeField "npcMoves"
-      "Move NPCs to new locations"
-      (arraySchema npcMoveSchema))
-  , ("npcReveals", describeField "npcReveals"
-      "NPCs reveal secrets to the player"
-      (arraySchema npcRevealSchema))
-  , ("sceneControl", describeField "sceneControl"
-      "Scene flow control (continue, end scene, shift location, time jump)"
-      sceneControlSchema)
-  , ("spreadRumors", describeField "spreadRumors"
-      "New rumors spreading in the world"
-      (arraySchema newRumorSchema))
-  , ("confirmRumors", describeField "confirmRumors"
-      "Confirm rumor truth values"
-      (arraySchema confirmRumorSchema))
   ]
-  ["narration", "playerDeltas", "clearPendingOutcome", "sceneControl"]
+  ["narration", "stressDelta", "coinDelta", "continueScene"]
 
 -- ══════════════════════════════════════════════════════════════
 -- HELPER SCHEMAS FOR TURN OUTPUT
@@ -286,27 +238,27 @@ npcRevealSchema = objectSchema
   ]
   ["revealNpc", "revealSecret", "revealBecause"]
 
+-- Scene control uses tagged union pattern since oneOf isn't supported
 sceneControlSchema :: JSONSchema
-sceneControlSchema = oneOfSchema
-  [ objectSchema [("continue", emptySchema TBoolean)] ["continue"]
-  , objectSchema
-      [ ("endScene", emptySchema TBoolean)
-      , ("endResolution", describeField "endResolution" "How the scene ends" (emptySchema TString))
-      ]
-      ["endScene", "endResolution"]
-  , objectSchema
-      [ ("shiftLocation", emptySchema TBoolean)
-      , ("shiftTo", describeField "shiftTo" "Destination location ID" (emptySchema TString))
-      , ("shiftTransition", describeField "shiftTransition" "Transition narration" (emptySchema TString))
-      ]
-      ["shiftLocation", "shiftTo", "shiftTransition"]
-  , objectSchema
-      [ ("timeJump", emptySchema TBoolean)
-      , ("jumpDuration", describeField "jumpDuration" "Duration description" (emptySchema TString))
-      , ("jumpMontage", describeField "jumpMontage" "Montage narration" (emptySchema TString))
-      ]
-      ["timeJump", "jumpDuration", "jumpMontage"]
+sceneControlSchema = objectSchema
+  [ ("controlType", describeField "controlType"
+      "Type of scene control: continue, endScene, shiftLocation, or timeJump"
+      (enumSchema ["continue", "endScene", "shiftLocation", "timeJump"]))
+  -- Fields for endScene
+  , ("endResolution", describeField "endResolution"
+      "How the scene ends (required if controlType=endScene)" (emptySchema TString))
+  -- Fields for shiftLocation
+  , ("shiftTo", describeField "shiftTo"
+      "Destination location ID (required if controlType=shiftLocation)" (emptySchema TString))
+  , ("shiftTransition", describeField "shiftTransition"
+      "Transition narration (required if controlType=shiftLocation)" (emptySchema TString))
+  -- Fields for timeJump
+  , ("jumpDuration", describeField "jumpDuration"
+      "Duration description (required if controlType=timeJump)" (emptySchema TString))
+  , ("jumpMontage", describeField "jumpMontage"
+      "Montage narration (required if controlType=timeJump)" (emptySchema TString))
   ]
+  ["controlType"]  -- Only controlType is always required
 
 truthValueSchema :: JSONSchema
 truthValueSchema = enumSchema ["TrueRumor", "FalseRumor", "PartiallyTrue"]
@@ -364,37 +316,33 @@ sceneOutcomeSchema = objectSchema
   ]
   ["outcomeSummary", "outcomeKeyBeats", "outcomePlayerChoices", "outcomeConsequenceSeeds"]
 
+-- Scene beat uses tagged union pattern since oneOf isn't supported
 sceneBeatSchema :: JSONSchema
-sceneBeatSchema = oneOfSchema
-  [ objectSchema
-      [ ("playerAction", emptySchema TBoolean)
-      , ("action", describeField "action" "What the player did" (emptySchema TString))
-      , ("tags", describeField "tags" "Action tags" (arraySchema (emptySchema TString)))
-      ]
-      ["playerAction", "action"]
-  , objectSchema
-      [ ("npcAction", emptySchema TBoolean)
-      , ("npcId", describeField "npcId" "Acting NPC" (emptySchema TString))
-      , ("action", describeField "action" "What the NPC did" (emptySchema TString))
-      ]
-      ["npcAction", "npcId", "action"]
-  , objectSchema
-      [ ("environmentShift", emptySchema TBoolean)
-      , ("description", describeField "description" "Environmental change" (emptySchema TString))
-      ]
-      ["environmentShift", "description"]
-  , objectSchema
-      [ ("revelation", emptySchema TBoolean)
-      , ("secretContent", describeField "secretContent" "Revealed secret" (emptySchema TString))
-      ]
-      ["revelation", "secretContent"]
-  , objectSchema
-      [ ("clockTick", emptySchema TBoolean)
-      , ("clockId", describeField "clockId" "Ticking clock" (emptySchema TString))
-      , ("ticks", describeField "ticks" "Segments added" (emptySchema TInteger))
-      ]
-      ["clockTick", "clockId", "ticks"]
+sceneBeatSchema = objectSchema
+  [ ("beatType", describeField "beatType"
+      "Type of beat: playerAction, npcAction, environmentShift, revelation, or clockTick"
+      (enumSchema ["playerAction", "npcAction", "environmentShift", "revelation", "clockTick"]))
+  -- Fields for playerAction
+  , ("action", describeField "action"
+      "What happened (for playerAction, npcAction)" (emptySchema TString))
+  , ("tags", describeField "tags"
+      "Action tags (for playerAction)" (arraySchema (emptySchema TString)))
+  -- Fields for npcAction
+  , ("npcId", describeField "npcId"
+      "Acting NPC (for npcAction)" (emptySchema TString))
+  -- Fields for environmentShift
+  , ("description", describeField "description"
+      "Environmental change description (for environmentShift)" (emptySchema TString))
+  -- Fields for revelation
+  , ("secretContent", describeField "secretContent"
+      "Revealed secret (for revelation)" (emptySchema TString))
+  -- Fields for clockTick
+  , ("clockId", describeField "clockId"
+      "Ticking clock ID (for clockTick)" (emptySchema TString))
+  , ("ticks", describeField "ticks"
+      "Segments added (for clockTick)" (emptySchema TInteger))
   ]
+  ["beatType"]  -- Only beatType is always required
 
 choiceWeightSchema :: JSONSchema
 choiceWeightSchema = enumSchema ["Trivial", "Meaningful", "Pivotal"]

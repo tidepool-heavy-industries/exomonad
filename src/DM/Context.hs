@@ -1,8 +1,14 @@
+{-# LANGUAGE RecordWildCards #-}
 -- | DM Template Context
 module DM.Context
   ( -- * Turn Context
     DMContext(..)
   , buildDMContext
+
+    -- * Mood Variant Context
+  , MoodVariantContext(..)
+  , buildMoodContext
+  , emptyVariantContext
 
     -- * Dice State Context
   , DiceContext(..)
@@ -48,6 +54,10 @@ data DMContext = DMContext
   { -- Player state (for resource bars, precarity)
     ctxPlayer :: PlayerState
   , ctxPrecarity :: Precarity
+  -- Mood state machine - what phase of the loop we're in
+  , ctxMood :: DMMood
+  , ctxMoodLabel :: Text           -- Human-readable: "scene", "action", "aftermath", "trauma"
+  , ctxMoodVariant :: MoodVariantContext  -- Rich variant data for templates
   -- Dice mechanics (the key "see your decision space" feature)
   , ctxDice :: DiceContext
   -- Scene state
@@ -63,6 +73,35 @@ data DMContext = DMContext
   , ctxFactionsInPlay :: [FactionSummary]
   , ctxTone :: Tone
   , ctxSessionGoals :: [Text]
+  }
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+
+-- | Rich context for the current mood variant
+-- This is what templates use to adapt their rendering
+data MoodVariantContext = MoodVariantContext
+  { -- Scene variants
+    mvcSceneType :: Maybe Text           -- "job_offer", "complication", "npc_encounter", "clock_triggered", "free_play", "downtime"
+  , mvcSceneUrgency :: Maybe Int         -- 1=relaxed, 2=pressing, 3=urgent
+  , mvcSceneNpcIntent :: Maybe Text      -- "friendly", "business", "warning", "threat"
+  -- Action variants
+  , mvcPosition :: Maybe Text            -- "controlled", "risky", "desperate"
+  , mvcThreat :: Maybe Text              -- What could go wrong
+  , mvcOpportunity :: Maybe Text         -- What could be gained
+  , mvcDomain :: Maybe Text              -- "infiltration", "social", "violence", "pursuit", "arcane"
+  , mvcAdvantageSource :: Maybe Text     -- For controlled: why they have advantage
+  , mvcWhyDesperate :: Maybe Text        -- For desperate: why it's so bad
+  , mvcPotentialTrauma :: Maybe Bool     -- For desperate: could this break them?
+  -- Aftermath variants
+  , mvcOutcomeType :: Maybe Text         -- "clean", "costly", "setback", "disaster"
+  , mvcWhatAchieved :: Maybe Text        -- What was accomplished
+  , mvcWhatWentWrong :: Maybe Text       -- For setback/disaster
+  , mvcCostsPaid :: Maybe [Text]         -- For costly outcomes
+  , mvcNewComplications :: Maybe [Text]  -- Problems introduced
+  , mvcImmediateDanger :: Maybe Bool     -- Is there active threat?
+  , mvcEscapeRoute :: Maybe Text         -- Way out (for setback)
+  -- Trauma variants (future)
+  , mvcTraumaType :: Maybe Text
+  , mvcWhatBroke :: Maybe Text
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
@@ -163,9 +202,15 @@ buildDMContext world = case world.scene of
       -- Build dice context
       diceCtx = buildDiceContext world
 
+      -- Build mood context
+      (moodLabel, moodVariant) = buildMoodContext world.mood
+
     in DMContext
       { ctxPlayer = world.player
       , ctxPrecarity = precarity
+      , ctxMood = world.mood
+      , ctxMoodLabel = moodLabel
+      , ctxMoodVariant = moodVariant
       , ctxDice = diceCtx
       , ctxLocation = location
       , ctxPresentNpcs = presentNpcs
@@ -209,13 +254,139 @@ buildDiceContext world = DiceContext
         }
       _ -> error "pendingToLocked: incomplete pending outcome"
 
+-- | Build mood context from DMMood
+-- Returns (human label, rich variant context)
+buildMoodContext :: DMMood -> (Text, MoodVariantContext)
+buildMoodContext mood = case mood of
+  MoodScene variant -> ("scene", sceneVariantContext variant)
+  MoodAction variant domain -> ("action", actionVariantContext variant domain)
+  MoodAftermath variant -> ("aftermath", aftermathVariantContext variant)
+  MoodTrauma variant -> ("trauma", traumaVariantContext variant)
+
+-- | Empty variant context (all Nothing)
+emptyVariantContext :: MoodVariantContext
+emptyVariantContext = MoodVariantContext
+  { mvcSceneType = Nothing
+  , mvcSceneUrgency = Nothing
+  , mvcSceneNpcIntent = Nothing
+  , mvcPosition = Nothing
+  , mvcThreat = Nothing
+  , mvcOpportunity = Nothing
+  , mvcDomain = Nothing
+  , mvcAdvantageSource = Nothing
+  , mvcWhyDesperate = Nothing
+  , mvcPotentialTrauma = Nothing
+  , mvcOutcomeType = Nothing
+  , mvcWhatAchieved = Nothing
+  , mvcWhatWentWrong = Nothing
+  , mvcCostsPaid = Nothing
+  , mvcNewComplications = Nothing
+  , mvcImmediateDanger = Nothing
+  , mvcEscapeRoute = Nothing
+  , mvcTraumaType = Nothing
+  , mvcWhatBroke = Nothing
+  }
+
+-- | Extract scene variant context
+sceneVariantContext :: SceneVariant -> MoodVariantContext
+sceneVariantContext = \case
+  JobOffer{..} -> emptyVariantContext
+    { mvcSceneType = Just "job_offer"
+    , mvcSceneUrgency = Just svUrgency
+    }
+  Complication{..} -> emptyVariantContext
+    { mvcSceneType = Just "complication"
+    , mvcSceneUrgency = Just svSeverity
+    }
+  NpcEncounter{..} -> emptyVariantContext
+    { mvcSceneType = Just "npc_encounter"
+    , mvcSceneNpcIntent = Just svNpcIntent
+    }
+  ClockTriggered{..} -> emptyVariantContext
+    { mvcSceneType = Just "clock_triggered"
+    }
+  FreePlay{..} -> emptyVariantContext
+    { mvcSceneType = Just "free_play"
+    }
+  SceneDowntime{..} -> emptyVariantContext
+    { mvcSceneType = Just "downtime"
+    }
+
+-- | Extract action variant context
+actionVariantContext :: ActionVariant -> Maybe ActionDomain -> MoodVariantContext
+actionVariantContext variant domain = base
+  { mvcDomain = fmap domainLabel domain
+  }
+  where
+    base = case variant of
+      AvControlled{..} -> emptyVariantContext
+        { mvcPosition = Just "controlled"
+        , mvcAdvantageSource = Just avAdvantageSource
+        , mvcOpportunity = Just avAdvantageSource  -- Controlled: advantage IS the opportunity
+        , mvcThreat = Just avRiskIfFails
+        }
+      AvRisky{..} -> emptyVariantContext
+        { mvcPosition = Just "risky"
+        , mvcThreat = Just avThreat
+        , mvcOpportunity = Just avOpportunity
+        }
+      AvDesperate{..} -> emptyVariantContext
+        { mvcPosition = Just "desperate"
+        , mvcWhyDesperate = Just avWhyDesperate
+        , mvcThreat = Just avWhyDesperate  -- Desperate: the desperation IS the threat
+        , mvcOpportunity = Just avStakes
+        , mvcPotentialTrauma = Just avPotentialTrauma
+        }
+
+    domainLabel = \case
+      DomainInfiltration -> "infiltration"
+      DomainSocial -> "social"
+      DomainViolence -> "violence"
+      DomainPursuit -> "pursuit"
+      DomainArcane -> "arcane"
+
+-- | Extract aftermath variant context
+aftermathVariantContext :: AftermathVariant -> MoodVariantContext
+aftermathVariantContext = \case
+  AmClean{..} -> emptyVariantContext
+    { mvcOutcomeType = Just "clean"
+    , mvcWhatAchieved = Just amWhatAchieved
+    }
+  AmCostly{..} -> emptyVariantContext
+    { mvcOutcomeType = Just "costly"
+    , mvcWhatAchieved = Just amWhatAchieved
+    , mvcCostsPaid = Just amCostsPaid
+    , mvcNewComplications = Just amNewComplications
+    }
+  AmSetback{..} -> emptyVariantContext
+    { mvcOutcomeType = Just "setback"
+    , mvcWhatWentWrong = Just amWhatWentWrong
+    , mvcImmediateDanger = Just amImmediateDanger
+    , mvcEscapeRoute = Just amEscapeRoute
+    }
+  AmDisaster{..} -> emptyVariantContext
+    { mvcOutcomeType = Just "disaster"
+    , mvcWhatWentWrong = Just amCatastrophe
+    , mvcImmediateDanger = Just True
+    , mvcPotentialTrauma = Just amTraumaRisk
+    }
+
+-- | Extract trauma variant context
+traumaVariantContext :: TraumaVariant -> MoodVariantContext
+traumaVariantContext Breaking{..} = emptyVariantContext
+  { mvcTraumaType = Just (T.pack $ show tvTraumaType)
+  , mvcWhatBroke = Just tvWhatBroke
+  }
+
 -- | Render a scene beat as text for template display
 renderBeat :: SceneBeat -> Text
 renderBeat = \case
   PlayerAction action tags ->
-    action <> if null tags then "" else " [" <> T.intercalate ", " (map (\(Tag t) -> t) tags) <> "]"
+    "PLAYER: " <> action <> if null tags then "" else " [" <> T.intercalate ", " (map (\(Tag t) -> t) tags) <> "]"
   NpcAction (NpcId npcId) action ->
     npcId <> ": " <> action
+  DMNarration narration ->
+    "DM: " <> narration
   EnvironmentShift desc ->
     "*" <> desc <> "*"
   Revelation secret ->
@@ -328,6 +499,7 @@ instance ToGVal m DMContext where toGVal = genericToGVal
 instance ToGVal m DiceContext where toGVal = genericToGVal
 instance ToGVal m LockedOutcome where toGVal = genericToGVal
 instance ToGVal m Precarity where toGVal = genericToGVal
+instance ToGVal m MoodVariantContext where toGVal = genericToGVal
 instance ToGVal m NpcWithDisposition where toGVal = genericToGVal
 instance ToGVal m FactionSummary where toGVal = genericToGVal
 instance ToGVal m CompressionContext where toGVal = genericToGVal

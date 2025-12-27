@@ -6,3 +6,4 @@ dist-newstyle/
 *.dyn_o
 .ghc.environment.*
 cabal.project.local
+.env

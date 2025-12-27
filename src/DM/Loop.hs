@@ -6,8 +6,6 @@ module DM.Loop
 
     -- * Turn Operations
   , handlePlayerAction
-  , handleDiceSelection
-  , handleDiceRequest
   , checkClockConsequences
   , compressIfNeeded
 
@@ -21,11 +19,12 @@ module DM.Loop
   ) where
 
 import DM.State
-import DM.Context (buildDMContext, buildCompressionContext)
-import DM.Output (TurnOutput(..), CompressionOutput(..), SceneOutcome(..), applyTurnOutput, applyCompression, RequestOutcomes(..))
+import DM.Context (buildDMContext, buildCompressionContext, DMContext(..))
+import DM.Output (TurnOutput(..), CompressionOutput(..), SceneOutcome(..), applyTurnOutput, applyCompression)
 import DM.Templates (renderDMTurn, renderCompression, turnOutputSchema, compressionOutputSchema)
 import DM.Tools (DMEvent(..), dmTools)
-import Tidepool.Effect
+import Tidepool.Effect hiding (ToolResult)
+import Tidepool.Effect (TurnOutcome(..))
 import Tidepool.Template (Schema(..))
 
 import Effectful
@@ -35,6 +34,7 @@ import qualified Data.Text.IO as TIO
 import qualified Data.HashMap.Strict as HM
 import qualified Data.Sequence as Seq
 import System.IO (hFlush, stdout)
+import System.Environment (lookupEnv)
 
 -- ══════════════════════════════════════════════════════════════
 -- TYPES
@@ -55,105 +55,71 @@ newtype Response = Response { responseText :: Text }
 
 -- | Run a single DM turn
 -- Uses the new effect API: build context, call runTurn, apply output
+-- When a tool triggers a state transition (TurnBroken), recursively restarts
+-- with the new mood state.
 dmTurn
   :: ( State WorldState :> es
      , Random :> es
      , LLM :> es
      , Emit DMEvent :> es
      , RequestInput :> es
+     , Log :> es
      )
   => PlayerInput
   -> Eff es Response
 dmTurn input = do
-  -- 1. Record player action as scene beat
+  -- 1. Record player action as scene beat (only on first call, not restarts)
   handlePlayerAction input
 
-  -- 2. Build context from world state
-  context <- gets buildDMContext
+  -- 2. Run the turn (may restart on mood transition)
+  runMoodAwareTurn
 
-  -- 3. Call LLM with template and tools
-  result <- runTurn renderDMTurn turnOutputSchema.schemaJSON dmTools context
+  where
+    runMoodAwareTurn = do
+      -- Build context from world state
+      context <- gets buildDMContext
+      let loc = context.ctxLocation
+      let npcs = context.ctxPresentNpcs
+      let beats = context.ctxSceneBeats
+      logDebug $ "Context location: " <> loc.locationName
+      logDebug $ "Context stakes: " <> context.ctxStakes
+      logDebug $ "Context NPCs present: " <> T.pack (show (length npcs))
+      logDebug $ "Context scene beats: " <> T.pack (show (length beats))
 
-  -- 4. Apply structured output to world state
-  modify (applyTurnOutput result.trOutput)
+      -- Call LLM with template and tools
+      outcome <- runTurn renderDMTurn turnOutputSchema.schemaJSON dmTools context
 
-  -- 5. Handle dice mechanics if LLM requested outcomes
-  handleDiceRequest result.trOutput
+      case outcome of
+        -- Tool triggered state transition - restart with new mood
+        TurnBroken reason -> do
+          logInfo $ "Mood transition: " <> reason
+          runMoodAwareTurn  -- Recursive call with new mood
 
-  -- 6. Check clock consequences
-  checkClockConsequences
+        -- Turn completed normally - apply output and continue
+        TurnCompleted result -> do
+          -- Apply structured output to world state
+          modify (applyTurnOutput result.trOutput)
 
-  -- 7. Compress if scene is getting long
-  compressIfNeeded
+          -- Record DM response as scene beat (for history)
+          let narration = result.trOutput.narration
+          modify $ \state -> case state.scene of
+            Nothing -> state
+            Just activeScene ->
+              let beat = DMNarration narration
+                  newBeats = activeScene.sceneBeats Seq.|> beat
+              in state { scene = Just activeScene { sceneBeats = newBeats } }
 
-  -- 8. Return narrative response
-  return (Response result.trNarrative)
+          -- Check clock consequences
+          checkClockConsequences
 
--- | Handle dice selection when LLM requests outcomes
--- Sets up PendingOutcome so player can select a die on next turn
-handleDiceRequest
-  :: ( State WorldState :> es
-     , RequestInput :> es
-     )
-  => TurnOutput
-  -> Eff es ()
-handleDiceRequest output = case output.requestOutcomes of
-  Nothing -> return ()  -- No dice request this turn
-  Just req -> do
-    -- Set up pending outcome for player to select die
-    modify $ \state -> state
-      { pendingOutcome = Just PendingOutcome
-          { outcomeContext = req.requestContext
-          , outcomePosition = req.requestPosition
-          , outcomeEffect = req.requestEffect
-          , outcomeStakes = req.requestStakes
-          , chosenDie = Nothing
-          , chosenTier = Nothing
-          }
-      }
-    -- Immediately prompt for die selection
-    _ <- handleDiceSelection
-    return ()
+          -- Compress if scene is getting long
+          compressIfNeeded
 
--- | Handle dice selection from player
-handleDiceSelection
-  :: ( State WorldState :> es
-     , RequestInput :> es
-     )
-  => Eff es (Maybe Int)
-handleDiceSelection = do
-  state <- get
-  case state.pendingOutcome of
-    Nothing -> return Nothing
-    Just pending -> do
-      let pool = state.dicePool.poolDice
-          choices = [(describeDie d pending.outcomePosition, d) | d <- pool]
-      selected <- requestChoice "Select a die from your pool:" choices
-      -- Update pending outcome with selection
-      let outcome = calculateOutcome pending.outcomePosition selected
-      put state { pendingOutcome = Just pending { chosenDie = Just selected, chosenTier = Just outcome } }
-      return (Just selected)
+          -- Return narrative response
+          return (Response narration)
 
--- | Format a die value with its outcome for display
--- Shows: "⚄ (4) → Success" or "⚀ (1) → Disaster"
-describeDie :: Int -> Position -> Text
-describeDie die pos =
-  let dieChar = case die of
-        1 -> "⚀"
-        2 -> "⚁"
-        3 -> "⚂"
-        4 -> "⚃"
-        5 -> "⚄"
-        6 -> "⚅"
-        _ -> "?"
-      outcome = calculateOutcome pos die
-      tierText = case outcome of
-        Critical -> "Critical!"
-        Success  -> "Success"
-        Partial  -> "Partial"
-        Bad      -> "Bad"
-        Disaster -> "Disaster"
-  in dieChar <> " (" <> T.pack (show die) <> ") → " <> tierText
+-- NOTE: Dice selection is now handled by the SpendDie tool during LLM turn
+-- The tool modifies state directly and returns the outcome to the LLM
 
 handlePlayerAction
   :: State WorldState :> es
@@ -196,6 +162,7 @@ compressIfNeeded
   :: ( State WorldState :> es
      , LLM :> es
      , Emit DMEvent :> es
+     , Log :> es
      )
   => Eff es ()
 compressIfNeeded = do
@@ -208,18 +175,25 @@ compressIfNeeded = do
         let ctx = buildCompressionContext activeScene state
 
         -- Call LLM to compress the scene
-        result <- runTurn renderCompression compressionOutputSchema.schemaJSON [] ctx
+        outcome <- runTurn renderCompression compressionOutputSchema.schemaJSON [] ctx
 
-        -- Apply compression output to world state
-        modify (applyCompression result.trOutput)
+        -- Compression shouldn't break, but handle it gracefully
+        case outcome of
+          TurnBroken reason -> do
+            logWarn $ "Compression unexpectedly broke: " <> reason
+            -- Continue without compressing
 
-        -- Clear scene beats (keep scene active with empty beats)
-        modify $ \s -> case s.scene of
-          Nothing -> s
-          Just scene -> s { scene = Just scene { sceneBeats = Seq.empty } }
+          TurnCompleted result -> do
+            -- Apply compression output to world state
+            modify (applyCompression result.trOutput)
 
-        -- Emit compression event
-        emit $ SceneCompressed (result.trOutput.sceneOutcome.outcomeSummary)
+            -- Clear scene beats (keep scene active with empty beats)
+            modify $ \s -> case s.scene of
+              Nothing -> s
+              Just scene -> s { scene = Just scene { sceneBeats = Seq.empty } }
+
+            -- Emit compression event
+            emit $ SceneCompressed (result.trOutput.sceneOutcome.outcomeSummary)
   where
     compressionThreshold = 20
 
@@ -265,23 +239,47 @@ runDMGame
   -> (DMEvent -> IO ())
   -> IO ()
 runDMGame initialState handleEvent = do
-  -- Set up the LLM config (stub - will be configured properly later)
-  let llmConfig = LLMConfig
-        { llmApiKey = ""
-        , llmModel = "claude-sonnet-4-20250514"
-        , llmMaxTokens = 4096
-        }
+  -- Get API key from environment
+  maybeKey <- lookupEnv "ANTHROPIC_API_KEY"
+  case maybeKey of
+    Nothing -> do
+      TIO.putStrLn "Error: ANTHROPIC_API_KEY not set"
+      TIO.putStrLn "Run: export ANTHROPIC_API_KEY=your-key-here"
+      return ()
+    Just apiKey -> do
+      -- Set up the LLM config
+      let llmConfig = LLMConfig
+            { llmApiKey = T.pack apiKey
+            , llmModel = "claude-haiku-4-5-20251001"
+            , llmMaxTokens = 4096
+            , llmThinkingBudget = Just 1024  -- Enable extended thinking
+            , llmSystemPrompt = "You are the Dungeon Master for a Blades in the Dark style game. Respond to player actions with narrative prose, using your tools as appropriate."
+            }
 
-  -- Set up terminal input handler
-  let inputHandler = InputHandler
-        { ihChoice = terminalChoice
-        , ihText = terminalText
-        }
+      -- Set up terminal input handler
+      let inputHandler = InputHandler
+            { ihChoice = terminalChoice
+            , ihText = terminalText
+            }
 
-  -- Run the game loop
-  ((), _finalState) <- runGame initialState llmConfig handleEvent inputHandler (gameLoop @(GameEffects WorldState DMEvent))
+      -- Start with a scene at the Leaky Bucket (neutral territory)
+      let stateWithScene = initialState
+            { scene = Just ActiveScene
+                { sceneLocation = LocationId "leaky-bucket"
+                , scenePresent = [NpcId "telda"]  -- Bartender is present
+                , sceneStakes = Stakes "Find out what's happening in Crow's Foot"
+                , sceneBeats = Seq.empty
+                }
+            }
 
-  TIO.putStrLn "Game ended."
+      TIO.putStrLn "\n[Scene: The Leaky Bucket - neutral ground in Crow's Foot]"
+      TIO.putStrLn "[Telda, the bartender, is behind the counter.]"
+      TIO.putStrLn "[Type 'quit' to exit]\n"
+
+      -- Run the game loop (Debug level shows all log messages)
+      ((), _finalState) <- runGame stateWithScene llmConfig handleEvent inputHandler Debug (gameLoop @(GameEffects WorldState DMEvent))
+
+      TIO.putStrLn "Game ended."
 
 -- Main game loop - separate function to help with type inference
 gameLoop
@@ -290,6 +288,7 @@ gameLoop
      , LLM :> es
      , Emit DMEvent :> es
      , RequestInput :> es
+     , Log :> es
      , Random :> es
      , IOE :> es
      )

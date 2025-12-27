@@ -1,40 +1,15 @@
--- | DM Structured Output Types
+-- | DM Structured Output Types (Simplified for API grammar limits)
 module DM.Output
-  ( -- * Turn Output
+  ( -- * Turn Output (Simplified)
     TurnOutput(..)
   , emptyTurnOutput
   , applyTurnOutput
 
-    -- * Player Resource Deltas
-  , PlayerDeltas(..)
-  , emptyPlayerDeltas
-
-    -- * Dice Mechanics
+    -- * Legacy types for compression (TODO: simplify these too)
   , RequestOutcomes(..)
-
-    -- * Clock Operations
-  , ClockTick(..)
-  , NewClock(..)
-
-    -- * Thread Operations
   , NewThread(..)
-  , ThreadResolution(..)
-
-    -- * Faction Operations
-  , AttitudeShift(..)
-  , Direction(..)
-  , Degree(..)
-
-    -- * NPC Operations
-  , DispositionShift(..)
-  , NpcReveal(..)
-
-    -- * Scene Control
-  , SceneControl(..)
-
-    -- * Rumor Operations
   , NewRumor(..)
-  
+
     -- * Compression Output
   , CompressionOutput(..)
   , applyCompression
@@ -59,81 +34,35 @@ import GHC.Generics (Generic)
 import Data.Aeson (ToJSON, FromJSON)
 
 -- ══════════════════════════════════════════════════════════════
--- TURN OUTPUT
+-- TURN OUTPUT (Simplified for API grammar limits)
 -- ══════════════════════════════════════════════════════════════
 
+-- | Simplified turn output that fits within API grammar limits
+-- NPC speech happens via SpeakAsNPC tool invocation, not here
 data TurnOutput = TurnOutput
-  { narration :: Text
-  -- Player resource changes (delta fields - LLM says +2 stress, not "set to 5")
-  , playerDeltas :: PlayerDeltas
-  , newTrauma :: Maybe Trauma        -- Only when stress would exceed 9
-  -- Dice mechanics
-  , requestOutcomes :: Maybe RequestOutcomes  -- Ask player to choose die
-  , clearPendingOutcome :: Bool               -- Clear after narrating outcome
-  -- World state changes
-  , clockTicks :: [ClockTick]
-  , newClocks :: [NewClock]
-  , revealClocks :: [ClockId]
-  , newThreads :: [NewThread]
-  , threadEscalations :: [(ThreadId, Tension, Text)]
-  , resolvedThreads :: [(ThreadId, ThreadResolution)]
-  , attitudeShifts :: [AttitudeShift]
-  , factionLearns :: [(FactionId, Fact, Text)]
-  , dispositionShifts :: [DispositionShift]
-  , npcMoves :: [(NpcId, LocationId, Text)]
-  , npcReveals :: [NpcReveal]
-  , sceneControl :: SceneControl
-  , spreadRumors :: [NewRumor]
-  , confirmRumors :: [(RumorId, Text)]
-  }
-  deriving (Show, Eq, Generic, ToJSON, FromJSON)
-
--- | Delta fields for player resources
--- LLM writes "+2" to stress, engine applies it with validation
-data PlayerDeltas = PlayerDeltas
-  { stressDelta :: Int    -- Can be negative (recovery) or positive
-  , coinDelta :: Int      -- Spending or earning
-  , heatDelta :: Int      -- Attention from authorities
-  , wantedDelta :: Int    -- Escalation level
-  , deltaBecause :: Text  -- Why these changes happened
-  }
-  deriving (Show, Eq, Generic, ToJSON, FromJSON)
-
-emptyPlayerDeltas :: PlayerDeltas
-emptyPlayerDeltas = PlayerDeltas 0 0 0 0 ""
-
--- | Request for player to select a die from their pool
--- This is the core "see your decision space" mechanic
-data RequestOutcomes = RequestOutcomes
-  { requestContext :: Text    -- What the player is trying to do
-  , requestPosition :: Position  -- Controlled/Risky/Desperate
-  , requestEffect :: Effect      -- Limited/Standard/Great
-  , requestStakes :: Text        -- What happens on failure
+  { narration :: Text       -- Narrative prose for this turn
+  , stressDelta :: Int      -- Change in stress (-9 to +9)
+  , coinDelta :: Int        -- Change in coin
+  , continueScene :: Bool   -- True to continue, False to end scene
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
 emptyTurnOutput :: TurnOutput
 emptyTurnOutput = TurnOutput
   { narration = ""
-  , playerDeltas = emptyPlayerDeltas
-  , newTrauma = Nothing
-  , requestOutcomes = Nothing
-  , clearPendingOutcome = False
-  , clockTicks = []
-  , newClocks = []
-  , revealClocks = []
-  , newThreads = []
-  , threadEscalations = []
-  , resolvedThreads = []
-  , attitudeShifts = []
-  , factionLearns = []
-  , dispositionShifts = []
-  , npcMoves = []
-  , npcReveals = []
-  , sceneControl = Continue
-  , spreadRumors = []
-  , confirmRumors = []
+  , stressDelta = 0
+  , coinDelta = 0
+  , continueScene = True
   }
+
+-- | Legacy type kept for compression (TODO: simplify)
+data RequestOutcomes = RequestOutcomes
+  { requestContext :: Text
+  , requestPosition :: Position
+  , requestEffect :: Effect
+  , requestStakes :: Text
+  }
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
 -- ══════════════════════════════════════════════════════════════
 -- OPERATION TYPES
@@ -217,232 +146,17 @@ data NewRumor = NewRumor
 -- APPLY TURN OUTPUT
 -- ══════════════════════════════════════════════════════════════
 
--- | Apply all mutations from a turn output to the world state
+-- | Apply turn output to world state (simplified version)
 applyTurnOutput :: TurnOutput -> WorldState -> WorldState
-applyTurnOutput output =
-  -- Compose all appliers in order
-    applyPlayerDeltas output.playerDeltas
-  . applyNewTrauma output.newTrauma
-  . applyRequestOutcomes output.requestOutcomes
-  . applyClearPendingOutcome output.clearPendingOutcome
-  . applyClockTicks output.clockTicks
-  . applyNewClocks output.newClocks
-  . applyRevealClocks output.revealClocks
-  . applyNewThreads output.newThreads
-  . applyThreadEscalations output.threadEscalations
-  . applyResolvedThreads output.resolvedThreads
-  . applyAttitudeShifts output.attitudeShifts
-  . applyFactionLearns output.factionLearns
-  . applyDispositionShifts output.dispositionShifts
-  . applyNpcMoves output.npcMoves
-  . applyNpcReveals output.npcReveals
-  . applySceneControl output.sceneControl
-  . applyNewRumors output.spreadRumors
-  . applyConfirmRumors output.confirmRumors
-
--- | Apply player resource deltas with bounds checking
-applyPlayerDeltas :: PlayerDeltas -> WorldState -> WorldState
-applyPlayerDeltas deltas state = state
+applyTurnOutput output state = state
   { player = (state.player)
-      { stress = clamp 0 9 (state.player.stress + deltas.stressDelta)
-      , coin = max 0 (state.player.coin + deltas.coinDelta)
-      , heat = clamp 0 10 (state.player.heat + deltas.heatDelta)
-      , wanted = clamp 0 4 (state.player.wanted + deltas.wantedDelta)
+      { stress = clamp 0 9 (state.player.stress + output.stressDelta)
+      , coin = max 0 (state.player.coin + output.coinDelta)
       }
+  , scene = if output.continueScene then state.scene else Nothing
   }
   where
     clamp lo hi x = max lo (min hi x)
-
--- | Apply new trauma if present
-applyNewTrauma :: Maybe Trauma -> WorldState -> WorldState
-applyNewTrauma Nothing state = state
-applyNewTrauma (Just trauma) state = state
-  { player = (state.player)
-      { trauma = trauma : state.player.trauma
-      , stress = 0  -- Reset stress after trauma
-      }
-  }
-
--- | Set up pending outcome for dice selection
-applyRequestOutcomes :: Maybe RequestOutcomes -> WorldState -> WorldState
-applyRequestOutcomes Nothing state = state
-applyRequestOutcomes (Just req) state = state
-  { pendingOutcome = Just PendingOutcome
-      { outcomeContext = req.requestContext
-      , outcomePosition = req.requestPosition
-      , outcomeEffect = req.requestEffect
-      , outcomeStakes = req.requestStakes
-      , chosenDie = Nothing
-      , chosenTier = Nothing
-      }
-  }
-
--- | Clear pending outcome after it's been narrated
-applyClearPendingOutcome :: Bool -> WorldState -> WorldState
-applyClearPendingOutcome False state = state
-applyClearPendingOutcome True state = state { pendingOutcome = Nothing }
-
--- | Advance clocks by specified segments
-applyClockTicks :: [ClockTick] -> WorldState -> WorldState
-applyClockTicks ticks state = foldr applyTick state ticks
-  where
-    applyTick tick s = s
-      { clocks = HM.adjust advanceClock tick.tickClock s.clocks }
-    advanceClock clock = clock
-      { clockFilled = min clock.clockSegments (clock.clockFilled + 1) }
-
--- | Create new clocks
-applyNewClocks :: [NewClock] -> WorldState -> WorldState
-applyNewClocks newClks state = foldr addClock state newClks
-  where
-    addClock nc s =
-      let clockId = ClockId (T.toLower $ T.replace " " "-" nc.newClockName)
-          clock = Clock
-            { clockName = nc.newClockName
-            , clockSegments = nc.newClockSegments
-            , clockFilled = 0
-            , clockVisible = nc.newClockVisible
-            , clockConsequence = Escalate $ Escalation nc.newClockConsequence Moderate
-            , clockTriggers = []
-            }
-      in s { clocks = HM.insert clockId clock s.clocks }
-
--- | Reveal hidden clocks
-applyRevealClocks :: [ClockId] -> WorldState -> WorldState
-applyRevealClocks ids state = foldr reveal state ids
-  where
-    reveal clockId s = s
-      { clocks = HM.adjust (\c -> c { clockVisible = True }) clockId s.clocks }
-
--- | Create new narrative threads
-applyNewThreads :: [NewThread] -> WorldState -> WorldState
-applyNewThreads newThreads' state = foldr addThread state newThreads'
-  where
-    addThread nt s =
-      let threadId = ThreadId (T.toLower $ T.replace " " "-" nt.newThreadHook)
-          thread = Thread
-            { threadId = threadId
-            , threadHook = nt.newThreadHook
-            , threadInvolves = map Right nt.newThreadInvolves
-            , threadTension = nt.newThreadTension
-            , threadDeadline = Nothing
-            }
-      in s { threads = thread : s.threads }
-
--- | Escalate thread tensions
-applyThreadEscalations :: [(ThreadId, Tension, Text)] -> WorldState -> WorldState
-applyThreadEscalations escalations state = state
-  { threads = map escalate state.threads }
-  where
-    escalateMap = HM.fromList [(tid, t) | (tid, t, _) <- escalations]
-    escalate thread = case HM.lookup thread.threadId escalateMap of
-      Nothing -> thread
-      Just newTension -> thread { threadTension = newTension }
-
--- | Resolve (remove) completed threads
-applyResolvedThreads :: [(ThreadId, ThreadResolution)] -> WorldState -> WorldState
-applyResolvedThreads resolved state = state
-  { threads = filter (not . isResolved) state.threads }
-  where
-    resolvedIds = map fst resolved
-    isResolved thread = thread.threadId `elem` resolvedIds
-
--- | Shift faction attitudes
-applyAttitudeShifts :: [AttitudeShift] -> WorldState -> WorldState
-applyAttitudeShifts shifts state = foldr applyShift state shifts
-  where
-    applyShift shift s = s
-      { factions = HM.adjust (shiftAttitude shift) shift.shiftFaction s.factions }
-    shiftAttitude shift faction = faction
-      { factionAttitude = adjustAttitude shift.shiftDirection shift.shiftDegree faction.factionAttitude }
-    adjustAttitude dir degree att =
-      let steps = case degree of
-            Slight -> 1
-            Notable -> 2
-            Major -> 3
-          newOrd = case dir of
-            Toward -> fromEnum att + steps
-            Away -> fromEnum att - steps
-      in toEnum (max 0 (min 4 newOrd))
-
--- | Add facts to faction knowledge
-applyFactionLearns :: [(FactionId, Fact, Text)] -> WorldState -> WorldState
-applyFactionLearns learns state = foldr applyLearn state learns
-  where
-    applyLearn (fid, theFact, _) s = s
-      { factions = HM.adjust (addFact theFact) fid s.factions }
-    addFact theFact faction = faction
-      { factionKnownFacts = theFact : faction.factionKnownFacts }
-
--- | Shift NPC dispositions
-applyDispositionShifts :: [DispositionShift] -> WorldState -> WorldState
-applyDispositionShifts shifts state = foldr applyShift state shifts
-  where
-    applyShift shift s = s
-      { npcs = HM.adjust (shiftDisp shift) shift.dispShiftNpc s.npcs }
-    shiftDisp shift npc = npc
-      { npcDisposition = adjustDisposition shift.dispShiftDirection shift.dispShiftDegree npc.npcDisposition }
-    adjustDisposition dir degree disp =
-      let steps = case degree of
-            Slight -> 1
-            Notable -> 2
-            Major -> 3
-          newOrd = case dir of
-            Toward -> fromEnum disp + steps
-            Away -> fromEnum disp - steps
-      in toEnum (max 0 (min 4 newOrd))
-
--- | Move NPCs to new locations
-applyNpcMoves :: [(NpcId, LocationId, Text)] -> WorldState -> WorldState
-applyNpcMoves moves state = foldr applyMove state moves
-  where
-    applyMove (npcId, locId, _) s = s
-      { npcs = HM.adjust (\n -> n { npcLocation = Just locId }) npcId s.npcs }
-
--- | Record NPC secret reveals
-applyNpcReveals :: [NpcReveal] -> WorldState -> WorldState
-applyNpcReveals reveals state = foldr applyReveal state reveals
-  where
-    applyReveal rev s = s
-      { npcs = HM.adjust (addSecret rev) rev.revealNpc s.npcs }
-    addSecret rev npc =
-      let secret = Secret { secretContent = rev.revealSecret, secretKnownBy = [] }
-      in npc { npcKnows = secret : npc.npcKnows }
-
--- | Handle scene control directives
-applySceneControl :: SceneControl -> WorldState -> WorldState
-applySceneControl ctrl state = case ctrl of
-  Continue -> state
-  EndScene _ -> state { scene = Nothing }
-  ShiftLocation locId _ -> case state.scene of
-    Nothing -> state
-    Just s -> state { scene = Just s { sceneLocation = locId } }
-  TimeJump _ _ -> state  -- Time jumps don't directly modify state
-
--- | Create new rumors
-applyNewRumors :: [NewRumor] -> WorldState -> WorldState
-applyNewRumors newRumors state = foldr addRumor state newRumors
-  where
-    addRumor nr s =
-      let rumorId = RumorId (T.toLower $ T.take 20 $ T.replace " " "-" nr.newRumorContent)
-          rumor = Rumor
-            { rumorId = rumorId
-            , rumorContent = nr.newRumorContent
-            , rumorSource = PlayerStarted
-            , rumorTruthValue = nr.newRumorTruth
-            , rumorSpread = nr.newRumorSpread
-            }
-      in s { rumors = rumor : s.rumors }
-
--- | Confirm rumor truth values
-applyConfirmRumors :: [(RumorId, Text)] -> WorldState -> WorldState
-applyConfirmRumors confirms state = state
-  { rumors = map confirm state.rumors }
-  where
-    confirmMap = HM.fromList confirms
-    confirm rumor = case HM.lookup rumor.rumorId confirmMap of
-      Nothing -> rumor
-      Just _ -> rumor { rumorTruthValue = TrueRumor }
 
 -- ══════════════════════════════════════════════════════════════
 -- COMPRESSION OUTPUT
@@ -559,6 +273,36 @@ applyLocationChanges changes state = foldr applyChange state changes
   where
     applyChange (locId, newDesc) s = s
       { locations = HM.adjust (\l -> l { locationDescription = newDesc }) locId s.locations }
+
+-- | Create new narrative threads
+applyNewThreads :: [NewThread] -> WorldState -> WorldState
+applyNewThreads newThreads' state = foldr addThread state newThreads'
+  where
+    addThread nt s =
+      let threadId = ThreadId (T.toLower $ T.replace " " "-" nt.newThreadHook)
+          thread = Thread
+            { threadId = threadId
+            , threadHook = nt.newThreadHook
+            , threadInvolves = map Right nt.newThreadInvolves
+            , threadTension = nt.newThreadTension
+            , threadDeadline = Nothing
+            }
+      in s { threads = thread : s.threads }
+
+-- | Create new rumors
+applyNewRumors :: [NewRumor] -> WorldState -> WorldState
+applyNewRumors newRumors state = foldr addRumor state newRumors
+  where
+    addRumor nr s =
+      let rumorId = RumorId (T.toLower $ T.take 20 $ T.replace " " "-" nr.newRumorContent)
+          rumor = Rumor
+            { rumorId = rumorId
+            , rumorContent = nr.newRumorContent
+            , rumorSource = PlayerStarted
+            , rumorTruthValue = nr.newRumorTruth
+            , rumorSpread = nr.newRumorSpread
+            }
+      in s { rumors = rumor : s.rumors }
 
 -- | Apply extractions (new threads, rumors, etc.)
 applyExtractions :: Extractions -> WorldState -> WorldState

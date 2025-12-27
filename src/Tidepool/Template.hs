@@ -54,10 +54,10 @@ import Control.Monad.Writer (Writer)
 --                   $ TNil
 --   }
 -- @
-data Template context output event (tools :: [Type]) = Template
+data Template context output event state (tools :: [Type]) = Template
   { templateJinja :: TypedTemplate context SourcePos  -- ^ Compiled Jinja template
   , templateOutputSchema :: Schema output             -- ^ JSON Schema for structured output
-  , templateTools :: ToolList event tools             -- ^ Type-safe list of available tools
+  , templateTools :: ToolList event state tools       -- ^ Type-safe list of available tools
   }
 
 -- | JSON schema with descriptions for structured output
@@ -72,5 +72,5 @@ type GingerContext ctx = ToGVal (Run SourcePos (Writer Text) Text) ctx
 
 -- | Render a template with context
 -- Note: context type must have ToGVal instance for ginger
-render :: GingerContext context => Template context output event tools -> context -> Text
+render :: GingerContext context => Template context output event state tools -> context -> Text
 render t ctx = runTypedTemplate ctx (t.templateJinja)

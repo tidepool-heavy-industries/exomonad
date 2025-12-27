@@ -14,7 +14,7 @@ module Tidepool.Loop
   , buildContext
   ) where
 
-import Tidepool.Effect (State, LLM, TurnResult)
+import Tidepool.Effect (State, LLM, TurnResult, TurnOutcome(..))
 import qualified Tidepool.Effect as E
 import Tidepool.Template
 import Tidepool.Tool (toolListToJSON)
@@ -25,7 +25,7 @@ import Data.Aeson (ToJSON, FromJSON)
 -- Captures how to build context, which template to use, and how to apply output
 data TurnConfig state context output event tools = TurnConfig
   { turnBuildContext :: state -> context
-  , turnTemplate :: Template context output event tools
+  , turnTemplate :: Template context output event state tools
   , turnApplyOutput :: output -> state -> state
   }
 
@@ -33,12 +33,13 @@ data TurnConfig state context output event tools = TurnConfig
 data Compression state history compressionContext compressionOutput event tools = Compression
   { compressionThreshold :: Int
   , compressionBuildContext :: [history] -> state -> compressionContext
-  , compressionTemplate :: Template compressionContext compressionOutput event tools
+  , compressionTemplate :: Template compressionContext compressionOutput event state tools
   , compressionApply :: compressionOutput -> state -> state
   }
 
 -- | Execute a turn using configuration
--- Gets state, builds context, runs LLM turn, applies output
+-- Gets state, builds context, runs LLM turn, applies output on completion
+-- Returns TurnOutcome to allow caller to handle breaks (state transitions)
 executeTurnConfig
   :: ( State state :> es
      , LLM :> es
@@ -47,7 +48,7 @@ executeTurnConfig
      , FromJSON output
      )
   => TurnConfig state context output event tools
-  -> Eff es (TurnResult output)
+  -> Eff es (TurnOutcome (TurnResult output))
 executeTurnConfig config = do
   -- 1. Get current state
   state <- E.get
@@ -62,13 +63,15 @@ executeTurnConfig config = do
       tools = toolListToJSON template.templateTools
 
   -- 4. Call LLM with rendered template
-  result <- E.runTurn renderFn schema tools context
+  outcome <- E.runTurn renderFn schema tools context
 
-  -- 5. Apply output to state
-  E.modify (config.turnApplyOutput result.trOutput)
-
-  -- 6. Return the result
-  return result
+  -- 5. Only apply output if turn completed (not broken)
+  case outcome of
+    TurnCompleted result -> do
+      E.modify (config.turnApplyOutput result.trOutput)
+      return (TurnCompleted result)
+    TurnBroken reason ->
+      return (TurnBroken reason)
 
 -- | Check if compression is needed
 shouldCompress 
@@ -78,6 +81,7 @@ shouldCompress
 shouldCompress history threshold = length history > threshold
 
 -- | Run compression on history
+-- Returns TurnOutcome (compression shouldn't break, but we handle it)
 compress
   :: ( State state :> es
      , LLM :> es
@@ -87,7 +91,7 @@ compress
      )
   => Compression state history compressionContext compressionOutput event tools
   -> [history]
-  -> Eff es ()
+  -> Eff es (TurnOutcome ())
 compress comp history = do
   -- 1. Get current state
   state <- E.get
@@ -102,10 +106,15 @@ compress comp history = do
       tools = toolListToJSON template.templateTools
 
   -- 4. Call LLM to compress
-  result <- E.runTurn renderFn schema tools context
+  outcome <- E.runTurn renderFn schema tools context
 
-  -- 5. Apply compression output to state
-  E.modify (comp.compressionApply result.trOutput)
+  -- 5. Apply compression output to state if completed
+  case outcome of
+    TurnCompleted result -> do
+      E.modify (comp.compressionApply result.trOutput)
+      return (TurnCompleted ())
+    TurnBroken reason ->
+      return (TurnBroken reason)
 
 -- | Build context from state (helper)
 buildContext :: (state -> context) -> state -> context

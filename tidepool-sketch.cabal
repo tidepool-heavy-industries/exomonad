@@ -78,3 +78,18 @@ executable tidepool-dm
     default-extensions:
         OverloadedStrings
         OverloadedRecordDot
+
+executable test-llm
+    import:           warnings
+    main-is:          TestLLM.hs
+    build-depends:
+        base >= 4.17 && < 5,
+        text >= 2.0 && < 3,
+        aeson >= 2.1 && < 3,
+        bytestring >= 0.11 && < 1,
+        tidepool-sketch
+    hs-source-dirs:   app
+    default-language: GHC2021
+    default-extensions:
+        OverloadedStrings
+        OverloadedRecordDot
