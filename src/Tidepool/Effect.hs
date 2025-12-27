@@ -150,26 +150,26 @@ runRandom = interpret $ \_ -> \case
 -- Returns TurnOutcome to signal whether turn completed or was broken by a tool
 data LLM :: Effect where
   RunTurnOp
-    :: Text                          -- Rendered prompt
+    :: Text                          -- System prompt (rules + mood guidance + world state)
+    -> Text                          -- User message (player action ONLY)
     -> Value                         -- Output schema (JSON)
     -> [Value]                       -- Tool definitions (JSON)
     -> LLM m (TurnOutcome (TurnResult Value))  -- May complete or break
 
 type instance DispatchOf LLM = 'Dynamic
 
--- | Run a turn with a template and context
+-- | Run a turn with system prompt and user action
 -- Returns TurnOutcome to allow caller to handle breaks
 runTurn
-  :: forall context output es.
-     (LLM :> es, ToJSON context, FromJSON output)
-  => (context -> Text)    -- render function
+  :: forall output es.
+     (LLM :> es, FromJSON output)
+  => Text                 -- system prompt (rules + world state)
+  -> Text                 -- user action (player input only)
   -> Value                -- output schema
   -> [Value]              -- tool definitions
-  -> context              -- context to render
   -> Eff es (TurnOutcome (TurnResult output))
-runTurn render schema tools context = do
-  let prompt = render context
-  rawResult <- send (RunTurnOp prompt schema tools)
+runTurn systemPrompt userAction schema tools = do
+  rawResult <- send (RunTurnOp systemPrompt userAction schema tools)
   -- Parse the raw JSON output if turn completed
   case rawResult of
     TurnBroken reason -> return (TurnBroken reason)
@@ -209,12 +209,12 @@ data LLMConfig = LLMConfig
 -- Always returns TurnCompleted since stub tools never break.
 runLLM :: (IOE :> es, ChatHistory :> es, Log :> es) => LLMConfig -> Eff (LLM : es) a -> Eff es a
 runLLM config = interpret $ \_ -> \case
-  RunTurnOp prompt schema tools -> do
-    -- Get prior conversation history
+  RunTurnOp systemPrompt userAction schema tools -> do
+    -- Get prior conversation history (just action/response pairs)
     priorHistory <- getHistory
 
     logDebug $ "[LLM] Prior history: " <> T.pack (show (length priorHistory)) <> " messages"
-    logDebug $ "[LLM] User prompt:\n" <> prompt
+    logDebug $ "[LLM] User action: " <> userAction
 
     let clientConfig = Client.ClientConfig
           { Client.apiKey = config.llmApiKey
@@ -222,10 +222,12 @@ runLLM config = interpret $ \_ -> \case
           , Client.defaultMaxTokens = config.llmMaxTokens
           }
         outputSchema = if schema == toJSON () then Nothing else Just schema
+        -- User message is JUST the action
+        userMsg = Message User [TextBlock userAction]
         turnReq = Client.TurnRequest
-          { Client.prompt = prompt
+          { Client.prompt = userAction  -- Just the action for the prompt field
           , Client.priorMessages = priorHistory
-          , Client.systemPrompt = Just config.llmSystemPrompt
+          , Client.systemPrompt = Just systemPrompt  -- Dynamic system prompt!
           , Client.outputSchema = outputSchema
           , Client.tools = tools
           , Client.toolExecutor = stubToolExecutor
@@ -236,9 +238,8 @@ runLLM config = interpret $ \_ -> \case
     case result of
       Left err -> error $ "LLM API error: " <> show err
       Right resp -> do
-        -- Build messages and append to history
-        let userMsg = Message User [TextBlock prompt]
-            assistantMsg = Message Assistant [TextBlock resp.narrative]
+        -- Append just action + response to history (not the system prompt)
+        let assistantMsg = Message Assistant [TextBlock resp.narrative]
         appendMessages [userMsg, assistantMsg]
 
         logDebug $ "[LLM] Assistant response:\n" <> resp.narrative
@@ -276,7 +277,7 @@ type ToolDispatcher event es =
 -- | Run the LLM effect with full tool execution support
 -- Tools are executed in the effect context, allowing them to use Emit, RequestInput, etc.
 -- Maintains conversation history across turns via ChatHistory effect.
--- Uses config.llmSystemPrompt as the system prompt for all turns.
+-- System prompt is provided per-turn (dynamic, includes world state).
 -- Returns TurnBroken if any tool signals a break (for state machine transitions).
 runLLMWithTools
   :: forall es event a.
@@ -286,12 +287,12 @@ runLLMWithTools
   -> Eff (LLM : es) a
   -> Eff es a
 runLLMWithTools config dispatcher = interpret $ \_ -> \case
-  RunTurnOp prompt schema tools -> do
-    -- Get prior conversation history
+  RunTurnOp systemPrompt userAction schema tools -> do
+    -- Get prior conversation history (just action/response pairs)
     priorHistory <- getHistory
 
     logDebug $ "[LLM] Prior history: " <> T.pack (show (length priorHistory)) <> " messages"
-    logDebug $ "[LLM] User prompt:\n" <> prompt
+    logDebug $ "[LLM] User action: " <> userAction
 
     let clientConfig = Client.ClientConfig
           { Client.apiKey = config.llmApiKey
@@ -299,11 +300,13 @@ runLLMWithTools config dispatcher = interpret $ \_ -> \case
           , Client.defaultMaxTokens = config.llmMaxTokens
           }
         outputSchema = if schema == toJSON () then Nothing else Just schema
-        -- Build messages with prior history + new user message
-        initialMessages = priorHistory ++ [Message User [TextBlock prompt]]
+        -- User message is JUST the action
+        actionMsg = Message User [TextBlock userAction]
+        initialMessages = priorHistory ++ [actionMsg]
 
     -- Run the tool loop (may complete or break)
-    loopResult <- toolLoop clientConfig outputSchema tools initialMessages [] [] []
+    -- Pass systemPrompt to toolLoop so it can use it for API calls
+    loopResult <- toolLoop clientConfig systemPrompt outputSchema tools initialMessages [] [] []
 
     case loopResult of
       -- Tool broke the turn - don't append to history, return break signal
@@ -313,10 +316,9 @@ runLLMWithTools config dispatcher = interpret $ \_ -> \case
 
       -- Turn completed normally
       Right (result, finalContent) -> do
-        -- Append the full conversation to history
-        let userMsg = Message User [TextBlock prompt]
-            assistantMsg = Message Assistant finalContent
-        appendMessages [userMsg, assistantMsg]
+        -- Append just action + response to history (not the system prompt)
+        let assistantMsg = Message Assistant finalContent
+        appendMessages [actionMsg, assistantMsg]
 
         logDebug $ "[LLM] Assistant response:\n" <> result.trNarrative
         logDebug $ "[LLM] Tools invoked: " <> T.pack (show (length result.trToolsInvoked))
@@ -327,6 +329,7 @@ runLLMWithTools config dispatcher = interpret $ \_ -> \case
     -- Returns Left breakReason if a tool breaks, Right (result, content) otherwise
     toolLoop
       :: Client.ClientConfig
+      -> Text              -- System prompt (dynamic per turn)
       -> Maybe Value
       -> [Value]
       -> [Message]
@@ -334,11 +337,11 @@ runLLMWithTools config dispatcher = interpret $ \_ -> \case
       -> [Text]
       -> [Text]
       -> Eff es (Either Text (TurnResult Value, [ContentBlock]))
-    toolLoop cConfig outSchema tls msgs invs narrs thinks = do
+    toolLoop cConfig sysPrompt outSchema tls msgs invs narrs thinks = do
       -- Make API call
       let req = SingleCallRequest
             { scrMessages = msgs
-            , scrSystemPrompt = Just config.llmSystemPrompt
+            , scrSystemPrompt = Just sysPrompt  -- Dynamic system prompt!
             , scrOutputSchema = outSchema
             , scrTools = tls
             , scrThinkingBudget = config.llmThinkingBudget
@@ -347,12 +350,13 @@ runLLMWithTools config dispatcher = interpret $ \_ -> \case
 
       case apiResult of
         Left err -> error $ "LLM API error: " <> show err
-        Right resp -> processResponse cConfig outSchema tls msgs resp invs narrs thinks
+        Right resp -> processResponse cConfig sysPrompt outSchema tls msgs resp invs narrs thinks
 
     -- Process a response: either done, broken, or execute tools and continue
     -- Returns Left breakReason if broken, Right (result, content) otherwise
     processResponse
       :: Client.ClientConfig
+      -> Text              -- System prompt (for recursive calls)
       -> Maybe Value
       -> [Value]
       -> [Message]
@@ -361,7 +365,7 @@ runLLMWithTools config dispatcher = interpret $ \_ -> \case
       -> [Text]
       -> [Text]
       -> Eff es (Either Text (TurnResult Value, [ContentBlock]))
-    processResponse cConfig outSchema tls msgs resp invs narrs thinks = do
+    processResponse cConfig sysPrompt outSchema tls msgs resp invs narrs thinks = do
       let content = resp.scrContent
 
           -- Extract text and thinking blocks
@@ -399,7 +403,7 @@ runLLMWithTools config dispatcher = interpret $ \_ -> \case
                   newMessages = msgs ++ [assistantMsg, userMsg]
 
               -- Continue the loop
-              toolLoop cConfig outSchema tls newMessages allInvocations allNarratives allThinkings
+              toolLoop cConfig sysPrompt outSchema tls newMessages allInvocations allNarratives allThinkings
 
         MaxTokens ->
           error "Response hit max tokens limit"

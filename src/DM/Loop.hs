@@ -72,15 +72,16 @@ dmTurn input = do
   handlePlayerAction input
 
   -- 2. Run the turn (may restart on mood transition)
-  runMoodAwareTurn
+  -- Pass the player action to the inner loop
+  runMoodAwareTurn input.piActionText
 
   where
-    runMoodAwareTurn = do
+    runMoodAwareTurn userAction = do
       -- Check for pending clock interrupts first
       -- If one forces action, this will restart with action mood
       interrupted <- checkPendingInterrupts
       if interrupted
-        then runMoodAwareTurn  -- Restart with forced action mood
+        then runMoodAwareTurn userAction  -- Restart with forced action mood
         else do
           -- Get current mood and build context
           state <- get
@@ -94,15 +95,19 @@ dmTurn input = do
           logDebug $ "Context stakes: " <> context.ctxStakes
           logDebug $ "Context NPCs present: " <> T.pack (show (length npcs))
           logDebug $ "Context scene beats: " <> T.pack (show (length beats))
+          logDebug $ "User action: " <> userAction
 
-          -- Call LLM with mood-specific template and tools
-          outcome <- runTurn (renderForMood mood) turnOutputSchema.schemaJSON dmTools context
+          -- Build system prompt (rules + mood guidance + world state)
+          let systemPrompt = renderForMood mood context
+
+          -- Call LLM with system prompt and user action
+          outcome <- runTurn systemPrompt userAction turnOutputSchema.schemaJSON dmTools
 
           case outcome of
             -- Tool triggered state transition - restart with new mood
             TurnBroken reason -> do
               logInfo $ "Mood transition: " <> reason
-              runMoodAwareTurn  -- Recursive call with new mood
+              runMoodAwareTurn userAction  -- Recursive call with new mood
 
             -- Turn completed normally - apply output and continue
             TurnCompleted result -> do
@@ -201,9 +206,13 @@ compressIfNeeded = do
       when (Seq.length activeScene.sceneBeats >= compressionThreshold) $ do
         -- Build compression context
         let ctx = buildCompressionContext activeScene state
+            -- For compression, the "system prompt" is the compression template
+            -- and the "user action" is just a trigger phrase
+            systemPrompt = renderCompression ctx
+            userAction = "Compress this scene."
 
         -- Call LLM to compress the scene
-        outcome <- runTurn renderCompression compressionOutputSchema.schemaJSON [] ctx
+        outcome <- runTurn systemPrompt userAction compressionOutputSchema.schemaJSON []
 
         -- Compression shouldn't break, but handle it gracefully
         case outcome of

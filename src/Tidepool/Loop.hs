@@ -40,6 +40,10 @@ data Compression state history compressionContext compressionOutput event tools 
 -- | Execute a turn using configuration
 -- Gets state, builds context, runs LLM turn, applies output on completion
 -- Returns TurnOutcome to allow caller to handle breaks (state transitions)
+--
+-- NOTE: This generic abstraction is currently unused. The DM game uses
+-- DM.Loop directly which builds system prompt from mood+context.
+-- TODO: Update to use new runTurn API with systemPrompt + userAction
 executeTurnConfig
   :: ( State state :> es
      , LLM :> es
@@ -49,29 +53,7 @@ executeTurnConfig
      )
   => TurnConfig state context output event tools
   -> Eff es (TurnOutcome (TurnResult output))
-executeTurnConfig config = do
-  -- 1. Get current state
-  state <- E.get
-
-  -- 2. Build context from state
-  let context = config.turnBuildContext state
-
-  -- 3. Extract template components
-  let template = config.turnTemplate
-      renderFn = render template
-      schema = template.templateOutputSchema.schemaJSON
-      tools = toolListToJSON template.templateTools
-
-  -- 4. Call LLM with rendered template
-  outcome <- E.runTurn renderFn schema tools context
-
-  -- 5. Only apply output if turn completed (not broken)
-  case outcome of
-    TurnCompleted result -> do
-      E.modify (config.turnApplyOutput result.trOutput)
-      return (TurnCompleted result)
-    TurnBroken reason ->
-      return (TurnBroken reason)
+executeTurnConfig _config = error "TODO: executeTurnConfig needs update for new runTurn API"
 
 -- | Check if compression is needed
 shouldCompress 
@@ -82,6 +64,7 @@ shouldCompress history threshold = length history > threshold
 
 -- | Run compression on history
 -- Returns TurnOutcome (compression shouldn't break, but we handle it)
+-- TODO: Update to use new runTurn API with systemPrompt + userAction
 compress
   :: ( State state :> es
      , LLM :> es
@@ -92,29 +75,7 @@ compress
   => Compression state history compressionContext compressionOutput event tools
   -> [history]
   -> Eff es (TurnOutcome ())
-compress comp history = do
-  -- 1. Get current state
-  state <- E.get
-
-  -- 2. Build compression context from history and state
-  let context = comp.compressionBuildContext history state
-
-  -- 3. Extract template components
-  let template = comp.compressionTemplate
-      renderFn = render template
-      schema = template.templateOutputSchema.schemaJSON
-      tools = toolListToJSON template.templateTools
-
-  -- 4. Call LLM to compress
-  outcome <- E.runTurn renderFn schema tools context
-
-  -- 5. Apply compression output to state if completed
-  case outcome of
-    TurnCompleted result -> do
-      E.modify (comp.compressionApply result.trOutput)
-      return (TurnCompleted ())
-    TurnBroken reason ->
-      return (TurnBroken reason)
+compress _comp _history = error "TODO: compress needs update for new runTurn API"
 
 -- | Build context from state (helper)
 buildContext :: (state -> context) -> state -> context
