@@ -1,0 +1,279 @@
+-- | Core HTTP types and operations for Anthropic Messages API
+-- This is the lowest layer - just typed domain types and HTTP calls
+module Tidepool.Anthropic.Http
+  ( -- * Request Types
+    MessagesRequest(..)
+  , Message(..)
+  , Role(..)
+  , ContentBlock(..)
+  , ToolUse(..)
+  , ToolResult(..)
+  , ToolChoice(..)
+  , OutputFormat(..)
+
+    -- * Response Types
+  , MessagesResponse(..)
+  , StopReason(..)
+  , Usage(..)
+
+    -- * Errors
+  , ApiError(..)
+
+    -- * HTTP Operations
+  , callMessages
+  ) where
+
+import Data.Aeson
+import Data.Aeson.Types (Parser)
+import Data.Text (Text)
+import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
+import Data.ByteString (ByteString)
+import GHC.Generics (Generic)
+import Network.HTTP.Req
+
+-- ══════════════════════════════════════════════════════════════
+-- REQUEST TYPES
+-- ══════════════════════════════════════════════════════════════
+
+-- | A complete Messages API request
+data MessagesRequest = MessagesRequest
+  { model :: Text
+  , messages :: [Message]
+  , maxTokens :: Int
+  , system :: Maybe Text
+  , tools :: Maybe [Value]              -- Tool definitions as raw JSON
+  , toolChoice :: Maybe ToolChoice
+  , outputFormat :: Maybe OutputFormat  -- Structured output schema
+  }
+  deriving (Show, Eq, Generic)
+
+instance ToJSON MessagesRequest where
+  toJSON req = object $ filter ((/= Null) . snd)
+    [ "model" .= req.model
+    , "messages" .= req.messages
+    , "max_tokens" .= req.maxTokens
+    , "system" .= req.system
+    , "tools" .= req.tools
+    , "tool_choice" .= req.toolChoice
+    , "output_format" .= req.outputFormat
+    ]
+
+-- | Structured output format specification
+data OutputFormat = OutputFormat
+  { outputType :: Text      -- Always "json_schema"
+  , outputSchema :: Value   -- The JSON Schema
+  }
+  deriving (Show, Eq, Generic)
+
+instance ToJSON OutputFormat where
+  toJSON fmt = object
+    [ "type" .= fmt.outputType
+    , "schema" .= fmt.outputSchema
+    ]
+
+-- | A message in the conversation
+data Message = Message
+  { role :: Role
+  , content :: [ContentBlock]
+  }
+  deriving (Show, Eq, Generic)
+
+instance ToJSON Message where
+  toJSON msg = object
+    [ "role" .= msg.role
+    , "content" .= msg.content
+    ]
+
+instance FromJSON Message where
+  parseJSON = withObject "Message" $ \v -> Message
+    <$> v .: "role"
+    <*> v .: "content"
+
+-- | Message role
+data Role = User | Assistant
+  deriving (Show, Eq, Generic)
+
+instance ToJSON Role where
+  toJSON User = String "user"
+  toJSON Assistant = String "assistant"
+
+instance FromJSON Role where
+  parseJSON = withText "Role" $ \case
+    "user" -> pure User
+    "assistant" -> pure Assistant
+    other -> fail $ "Unknown role: " <> T.unpack other
+
+-- | Content block - can be text, tool use, or tool result
+data ContentBlock
+  = TextBlock Text
+  | ToolUseBlock ToolUse
+  | ToolResultBlock ToolResult
+  deriving (Show, Eq, Generic)
+
+instance ToJSON ContentBlock where
+  toJSON (TextBlock text) = object
+    [ "type" .= ("text" :: Text)
+    , "text" .= text
+    ]
+  toJSON (ToolUseBlock use) = object
+    [ "type" .= ("tool_use" :: Text)
+    , "id" .= use.toolUseId
+    , "name" .= use.toolName
+    , "input" .= use.toolInput
+    ]
+  toJSON (ToolResultBlock result) = object
+    [ "type" .= ("tool_result" :: Text)
+    , "tool_use_id" .= result.toolResultId
+    , "content" .= result.toolResultContent
+    , "is_error" .= result.toolResultIsError
+    ]
+
+instance FromJSON ContentBlock where
+  parseJSON = withObject "ContentBlock" $ \v -> do
+    blockType <- v .: "type" :: Parser Text
+    case blockType of
+      "text" -> TextBlock <$> v .: "text"
+      "tool_use" -> do
+        tuId <- v .: "id"
+        tuName <- v .: "name"
+        tuInput <- v .: "input"
+        pure $ ToolUseBlock ToolUse
+          { toolUseId = tuId
+          , toolName = tuName
+          , toolInput = tuInput
+          }
+      "tool_result" -> do
+        trId <- v .: "tool_use_id"
+        trContent <- v .: "content"
+        trIsError <- v .:? "is_error" .!= False
+        pure $ ToolResultBlock ToolResult
+          { toolResultId = trId
+          , toolResultContent = trContent
+          , toolResultIsError = trIsError
+          }
+      other -> fail $ "Unknown content block type: " <> T.unpack other
+
+-- | A tool use request from the model
+data ToolUse = ToolUse
+  { toolUseId :: Text
+  , toolName :: Text
+  , toolInput :: Value
+  }
+  deriving (Show, Eq, Generic)
+
+-- | A tool result to send back to the model
+data ToolResult = ToolResult
+  { toolResultId :: Text
+  , toolResultContent :: Text
+  , toolResultIsError :: Bool
+  }
+  deriving (Show, Eq, Generic)
+
+-- | Tool choice configuration
+data ToolChoice
+  = ToolChoiceAuto
+  | ToolChoiceAny
+  | ToolChoiceNone
+  | ToolChoiceTool Text  -- specific tool name
+  deriving (Show, Eq, Generic)
+
+instance ToJSON ToolChoice where
+  toJSON ToolChoiceAuto = object ["type" .= ("auto" :: Text)]
+  toJSON ToolChoiceAny = object ["type" .= ("any" :: Text)]
+  toJSON ToolChoiceNone = object ["type" .= ("none" :: Text)]
+  toJSON (ToolChoiceTool name) = object
+    [ "type" .= ("tool" :: Text)
+    , "name" .= name
+    ]
+
+-- ══════════════════════════════════════════════════════════════
+-- RESPONSE TYPES
+-- ══════════════════════════════════════════════════════════════
+
+-- | A complete Messages API response
+data MessagesResponse = MessagesResponse
+  { responseId :: Text
+  , responseContent :: [ContentBlock]
+  , responseStopReason :: StopReason
+  , responseUsage :: Usage
+  }
+  deriving (Show, Eq, Generic)
+
+instance FromJSON MessagesResponse where
+  parseJSON = withObject "MessagesResponse" $ \v -> MessagesResponse
+    <$> v .: "id"
+    <*> v .: "content"
+    <*> v .: "stop_reason"
+    <*> v .: "usage"
+
+-- | Why the model stopped generating
+data StopReason
+  = EndTurn        -- Normal completion
+  | ToolUseStop    -- Wants to use a tool
+  | MaxTokens      -- Hit token limit
+  | StopSequence   -- Hit a stop sequence
+  | Refusal        -- Safety refusal
+  | PauseTurn      -- Server tool pause (web search etc)
+  deriving (Show, Eq, Generic)
+
+instance FromJSON StopReason where
+  parseJSON = withText "StopReason" $ \case
+    "end_turn" -> pure EndTurn
+    "tool_use" -> pure ToolUseStop
+    "max_tokens" -> pure MaxTokens
+    "stop_sequence" -> pure StopSequence
+    "refusal" -> pure Refusal
+    "pause_turn" -> pure PauseTurn
+    other -> fail $ "Unknown stop reason: " <> T.unpack other
+
+-- | Token usage information
+data Usage = Usage
+  { inputTokens :: Int
+  , outputTokens :: Int
+  }
+  deriving (Show, Eq, Generic)
+
+instance FromJSON Usage where
+  parseJSON = withObject "Usage" $ \v -> Usage
+    <$> v .: "input_tokens"
+    <*> v .: "output_tokens"
+
+-- ══════════════════════════════════════════════════════════════
+-- ERROR TYPES
+-- ══════════════════════════════════════════════════════════════
+
+-- | API errors
+data ApiError
+  = HttpError Text          -- Network/HTTP error
+  | ParseError Text         -- JSON parsing failed
+  | ApiErrorResponse        -- API returned an error
+      { errorType :: Text
+      , errorMessage :: Text
+      }
+  deriving (Show, Eq, Generic)
+
+-- ══════════════════════════════════════════════════════════════
+-- HTTP OPERATIONS
+-- ══════════════════════════════════════════════════════════════
+
+-- | Make a Messages API call
+-- This is the core HTTP operation - no tool loop logic here
+callMessages
+  :: Text               -- API key
+  -> MessagesRequest    -- Request
+  -> IO (Either ApiError MessagesResponse)
+callMessages apiKey request = runReq defaultHttpConfig $ do
+  let url = https "api.anthropic.com" /: "v1" /: "messages"
+      -- Include structured outputs beta header
+      headers = header "x-api-key" (TE.encodeUtf8 apiKey)
+             <> header "anthropic-version" ("2023-06-01" :: ByteString)
+             <> header "anthropic-beta" ("structured-outputs-2025-11-13" :: ByteString)
+             <> header "content-type" ("application/json" :: ByteString)
+
+  response <- req POST url (ReqBodyJson request) jsonResponse headers
+
+  let body = responseBody response :: Value
+  case fromJSON body of
+    Success resp -> pure $ Right resp
+    Error err -> pure $ Left $ ParseError (T.pack err)

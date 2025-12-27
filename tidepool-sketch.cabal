@@ -11,12 +11,14 @@ common warnings
 
 library
     import:           warnings
-    exposed-modules:  
+    exposed-modules:
         Tidepool.Effect
         Tidepool.Template
         Tidepool.Tool
         Tidepool.Loop
         Tidepool.Schema
+        Tidepool.Anthropic.Http
+        Tidepool.Anthropic.Client
         DM.State
         DM.Output
         DM.Tools
@@ -39,7 +41,10 @@ library
         optics >= 0.4 && < 1,
         random >= 1.2 && < 2,
         bytestring >= 0.11 && < 1,
-        parsec >= 3.1 && < 4
+        parsec >= 3.1 && < 4,
+        req >= 3.13 && < 4,
+        http-client >= 0.7 && < 1,
+        modern-uri >= 0.3 && < 1
     hs-source-dirs:   src
     default-language: GHC2021
     default-extensions:

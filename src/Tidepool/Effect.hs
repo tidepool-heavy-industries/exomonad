@@ -41,9 +41,10 @@ import Effectful.Dispatch.Dynamic
 import qualified Effectful.State.Static.Local as EState
 import System.Random (randomRIO)
 import Data.Text (Text)
-import Data.Aeson (Value)
+import Data.Aeson (Value, FromJSON, ToJSON, fromJSON, toJSON, Result(..))
 import GHC.Generics (Generic)
-import Data.Aeson (ToJSON, FromJSON)
+import qualified Tidepool.Anthropic.Client as Client
+import qualified Tidepool.Anthropic.Http as Http
 
 -- | The effect stack for game loops
 -- IOE is at the base for IO operations (random, emit, input)
@@ -132,9 +133,10 @@ runTurn
 runTurn render schema tools context = do
   let prompt = render context
   rawResult <- send (RunTurnOp prompt schema tools)
-  -- Parse the raw JSON output
-  -- In real impl, this would use FromJSON; for now just error
-  return $ rawResult { trOutput = error "TODO: parse output" }
+  -- Parse the raw JSON output using FromJSON
+  case fromJSON rawResult.trOutput of
+    Success parsed -> return rawResult { trOutput = parsed }
+    Error err -> error $ "Failed to parse LLM output: " <> err
 
 -- | Result of running an LLM turn
 data TurnResult output = TurnResult
@@ -159,8 +161,47 @@ data LLMConfig = LLMConfig
   }
   deriving (Show, Eq, Generic)
 
-runLLM :: LLMConfig -> Eff (LLM : es) a -> Eff es a
-runLLM _config = error "TODO: runLLM"
+-- | Run the LLM effect by calling the Anthropic API
+-- Note: Tool execution currently uses a stub that logs tool calls
+-- For full tool support, use runLLMWithTools
+runLLM :: IOE :> es => LLMConfig -> Eff (LLM : es) a -> Eff es a
+runLLM config = interpret $ \_ -> \case
+  RunTurnOp prompt schema tools -> liftIO $ do
+    let clientConfig = Client.ClientConfig
+          { Client.apiKey = config.llmApiKey
+          , Client.defaultModel = config.llmModel
+          , Client.defaultMaxTokens = config.llmMaxTokens
+          }
+        -- Pass schema for structured output
+        outputSchema = if schema == toJSON () then Nothing else Just schema
+        turnReq = Client.TurnRequest
+          { Client.prompt = prompt
+          , Client.systemPrompt = Nothing  -- Could be added to LLMConfig
+          , Client.outputSchema = outputSchema
+          , Client.tools = tools
+          , Client.toolExecutor = stubToolExecutor
+          }
+
+    result <- Client.runTurnRequest clientConfig turnReq
+    case result of
+      Left err -> error $ "LLM API error: " <> show err
+      Right resp -> pure TurnResult
+        { trOutput = resp.output
+        , trToolsInvoked = map convertInvocation resp.toolsInvoked
+        , trNarrative = resp.narrative
+        }
+  where
+    -- Stub tool executor - just returns success with empty result
+    -- Real implementation would need to dispatch to actual tool handlers
+    stubToolExecutor :: Text -> Value -> IO (Either Text Value)
+    stubToolExecutor _name _input = pure $ Right (toJSON ())
+
+    convertInvocation :: Client.ToolInvocation -> ToolInvocation
+    convertInvocation inv = ToolInvocation
+      { tiName = inv.invocationName
+      , tiInput = inv.invocationInput
+      , tiOutput = inv.invocationOutput
+      }
 
 -- ══════════════════════════════════════════════════════════════
 -- EMIT EFFECT
@@ -221,11 +262,6 @@ runRequestInput (InputHandler choiceHandler textHandler) = interpret $ \_ -> \ca
 -- COMBINED RUNNER
 -- ══════════════════════════════════════════════════════════════
 
--- | Stub LLM interpreter (placeholder until API client implemented)
-stubLLM :: Eff (LLM : es) a -> Eff es a
-stubLLM = interpret $ \_ -> \case
-  RunTurnOp _ _ _ -> error "LLM not yet implemented - see Phase 3-5 of plan"
-
 -- | Run the full game effect stack
 runGame
   :: s
@@ -234,11 +270,11 @@ runGame
   -> InputHandler
   -> Eff (GameEffects s event) a
   -> IO (a, s)
-runGame initialState _llmConfig eventHandler inputHandler computation =
+runGame initialState llmConfig eventHandler inputHandler computation =
   runEff
     . runRandom
     . runEmit eventHandler
     . runState initialState
     . runRequestInput inputHandler
-    . stubLLM
+    . runLLM llmConfig
     $ computation
