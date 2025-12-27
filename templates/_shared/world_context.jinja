@@ -7,7 +7,7 @@
 ## Location: {{ ctxLocation.locationName }}
 {{ ctxLocation.locationDescription }}
 {% if ctxLocation.locationFeatures %}
-**Features:** {{ ctxLocation.locationFeatures | join(", ") }}
+**Features:** {% for f in ctxLocation.locationFeatures %}{{ f }}{% if not loop.last %}, {% endif %}{% endfor %}
 {% endif %}
 {% if ctxLocation.locationControlledBy %}
 **Controlled by:** {{ ctxLocation.locationControlledBy }}
@@ -28,7 +28,7 @@
 ## Active Clocks
 {% if ctxVisibleClocks %}
 {% for clock in ctxVisibleClocks %}
-- **{{ clock.clockName }}** [{{ clock.clockFilled }}/{{ clock.clockSegments }}]{% if clock.clockFilled >= clock.clockSegments %} TRIGGERED{% elif clock.clockFilled >= (clock.clockSegments * 0.75) %} (urgent){% endif %}
+- **{{ clock.clockName }}** [{{ clock.clockFilled }}/{{ clock.clockSegments }}]{% if clock.clockFilled >= clock.clockSegments %} TRIGGERED{% elif clock.clockFilled >= clock.clockSegments - 1 %} (urgent){% endif %}
 {% endfor %}
 {% else %}
 *No visible clocks.*

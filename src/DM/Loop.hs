@@ -21,7 +21,7 @@ module DM.Loop
 import DM.State
 import DM.Context (buildDMContext, buildCompressionContext, DMContext(..))
 import DM.Output (TurnOutput(..), CompressionOutput(..), SceneOutcome(..), applyTurnOutput, applyCompression)
-import DM.Templates (renderDMTurn, renderCompression, turnOutputSchema, compressionOutputSchema)
+import DM.Templates (renderForMood, renderCompression, turnOutputSchema, compressionOutputSchema)
 import DM.Tools (DMEvent(..), dmTools)
 import Tidepool.Effect hiding (ToolResult)
 import Tidepool.Effect (TurnOutcome(..))
@@ -76,18 +76,21 @@ dmTurn input = do
 
   where
     runMoodAwareTurn = do
-      -- Build context from world state
-      context <- gets buildDMContext
+      -- Get current mood and build context
+      state <- get
+      let mood = state.mood
+      let context = buildDMContext state
       let loc = context.ctxLocation
       let npcs = context.ctxPresentNpcs
       let beats = context.ctxSceneBeats
+      logDebug $ "Current mood: " <> T.pack (show mood)
       logDebug $ "Context location: " <> loc.locationName
       logDebug $ "Context stakes: " <> context.ctxStakes
       logDebug $ "Context NPCs present: " <> T.pack (show (length npcs))
       logDebug $ "Context scene beats: " <> T.pack (show (length beats))
 
-      -- Call LLM with template and tools
-      outcome <- runTurn renderDMTurn turnOutputSchema.schemaJSON dmTools context
+      -- Call LLM with mood-specific template and tools
+      outcome <- runTurn (renderForMood mood) turnOutputSchema.schemaJSON dmTools context
 
       case outcome of
         -- Tool triggered state transition - restart with new mood

@@ -61,8 +61,8 @@ Your voice: balanced tension. Things could go either way.
 </action_context>
 
 <dice_state>
-{% if ctxDice.dcPool | length > 0 %}
-**Available dice:** {{ ctxDice.dcPool | join(", ") }} ({{ ctxDice.dcPool | length }} dice)
+{% if ctxDice.dcPool %}
+**Available dice:** {% for die in ctxDice.dcPool %}{{ die }}, {% endfor %}({{ ctxDice.dcPool|length }} dice)
 {% else %}
 **Dice pool empty.** They should take downtime to refresh.
 {% endif %}
@@ -83,14 +83,14 @@ After narrating, use `resolve` to transition to Aftermath.
 <guidance>
 ## Resolving Actions
 
-{% if not ctxDice.dcLockedOutcome %}
+{% if ctxDice.dcLockedOutcome %}
+**STEP 2: Narrate locked outcome, then use resolve**
+The tier is fixed. Describe vividly, then transition.
+{% else %}
 **STEP 1: Frame stakes, then use spend_die**
 1. Describe what they're attempting
 2. Paint success and failure
 3. Call `spend_die` with position/effect/stakes
-{% else %}
-**STEP 2: Narrate locked outcome, then use resolve**
-The tier is fixed. Describe vividly, then transition.
 {% endif %}
 
 **Position:** controlled (advantage) / risky (balanced) / desperate (against odds)
