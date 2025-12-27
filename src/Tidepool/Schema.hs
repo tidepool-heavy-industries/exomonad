@@ -1,14 +1,9 @@
-{-# LANGUAGE AllowAmbiguousTypes #-}
--- | JSON Schema derivation for structured output
+-- | JSON Schema combinators for structured output
 module Tidepool.Schema
   ( -- * Schema Type
     JSONSchema(..)
   , SchemaType(..)
-  
-    -- * Derivation
-  , deriveSchema
-  , GSchema(..)
-  
+
     -- * Schema Combinators
   , objectSchema
   , arraySchema
@@ -16,7 +11,7 @@ module Tidepool.Schema
   , oneOfSchema
   , describeField
   , emptySchema
-  
+
     -- * Conversion
   , schemaToValue
   ) where
@@ -25,8 +20,7 @@ import Data.Text (Text)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (catMaybes)
-import GHC.Generics
-import Data.Aeson (Value(..), ToJSON(..), object, (.=))
+import Data.Aeson (Value(..), object, (.=))
 
 -- | A JSON Schema
 data JSONSchema = JSONSchema
@@ -40,7 +34,7 @@ data JSONSchema = JSONSchema
   }
   deriving (Show, Eq)
 
-data SchemaType 
+data SchemaType
   = TString
   | TNumber
   | TInteger
@@ -108,30 +102,3 @@ typeToText = \case
   TObject  -> "object"
   TArray   -> "array"
   TNull    -> "null"
-
--- | Typeclass for Generic schema derivation
-class GSchema f where
-  gSchema :: JSONSchema
-
--- | Derive schema from Generic instance
-deriveSchema :: forall a. (Generic a, GSchema (Rep a)) => JSONSchema
-deriveSchema = error "TODO: deriveSchema - use GHC.Generics to build JSONSchema from type structure"
-
--- Generic instances
-instance GSchema V1 where
-  gSchema = error "TODO: GSchema V1"
-
-instance GSchema U1 where
-  gSchema = error "TODO: GSchema U1"
-
-instance (GSchema f, GSchema g) => GSchema (f :+: g) where
-  gSchema = error "TODO: GSchema sum"
-
-instance (GSchema f, GSchema g) => GSchema (f :*: g) where
-  gSchema = error "TODO: GSchema product"
-
-instance GSchema f => GSchema (M1 i c f) where
-  gSchema = error "TODO: GSchema M1"
-
-instance GSchema (K1 i c) where
-  gSchema = error "TODO: GSchema K1"
