@@ -109,19 +109,23 @@ return to a Scene first. Downtime is for recovery and preparation, not adventure
 </downtime_guidance>
 
 <output_format>
-**Tools available:** think_as_dm, speak_as_npc
-**NOT available:** engage (cannot start action from downtime)
+**Tools:** think_as_dm
+**Cannot use:** engage (return to Scene first for risky actions)
 
 To return to active play, describe the transition and use accept with a scene type.
 
 **Voice ({{ ctxPrecarity }}):**
 {% if ctxPrecarity == "HangingByThread" %}
-Even rest feels urgent. They're patching holes in a sinking ship.
+Rest feels urgent. Patching holes in a sinking ship.
+Example: "Three hours of sleep. It's not enough. It never is."
 {% elif ctxPrecarity == "WallsClosingIn" %}
-Recovery is strategic. Every moment of rest is borrowed time.
+Recovery is strategic. Borrowed time.
+Example: "The safehouse feels smaller every day. The walls know what you did."
 {% elif ctxPrecarity == "RoomToManeuver" %}
-Downtime can breathe. Let small moments land.
+Let small moments land.
+Example: "The coffee is bitter and perfect. Outside, the city grinds on without you."
 {% else %}
-Comfortable downtime. But don't let them get too comfortable.
+Comfortable, but don't let them get too comfortable.
+Example: "A week of peace. The whispers say the Crows are planning something. They can wait."
 {% endif %}
 </output_format>

@@ -47,7 +47,12 @@ data PlayerInput = PlayerInput
   }
   deriving (Show, Eq)
 
-newtype Response = Response { responseText :: Text }
+data Response = Response
+  { responseText :: Text
+  , responseStressDelta :: Int
+  , responseCoinDelta :: Int
+  , responseHeatDelta :: Int
+  }
   deriving (Show, Eq)
 
 -- ══════════════════════════════════════════════════════════════
@@ -130,8 +135,14 @@ dmTurn input = do
               -- Compress if scene is getting long
               compressIfNeeded
 
-              -- Return narrative response
-              return (Response narration)
+              -- Return response with narrative and mechanical changes
+              let output = result.trOutput
+              return Response
+                { responseText = narration
+                , responseStressDelta = output.stressDelta
+                , responseCoinDelta = output.coinDelta
+                , responseHeatDelta = output.heatDelta
+                }
 
     -- | Check for pending clock interrupts and handle them
     -- Returns True if an interrupt forced a state transition
@@ -346,15 +357,21 @@ gameLoopWithSave saveCallback = loop
           return ()  -- Exit for now - real game would prompt for scene setup
 
         Just _ -> do
-          -- Show current mood state
+          -- Show current status and mood
           currentState <- get @WorldState
-          let moodLabel = case currentState.mood of
+          let p = currentState.player
+              statusLine = "Stress: " <> T.pack (show p.stress) <> "/9"
+                        <> " | Coin: " <> T.pack (show p.coin)
+                        <> " | Heat: " <> T.pack (show p.heat) <> "/10"
+                        <> " | Dice: " <> renderDice currentState.dicePool.poolDice
+              moodLabel = case currentState.mood of
                 MoodScene _     -> "SCENE"
                 MoodAction _ _  -> "ACTION"
                 MoodAftermath _ -> "AFTERMATH"
                 MoodDowntime _  -> "DOWNTIME"
                 MoodTrauma _    -> "TRAUMA"
-          liftIO $ TIO.putStrLn $ "\n[" <> moodLabel <> "]"
+          liftIO $ TIO.putStrLn $ "\n[" <> statusLine <> "]"
+          liftIO $ TIO.putStrLn $ "[" <> moodLabel <> "]"
 
           -- Get player input
           liftIO $ TIO.putStr "> What do you do? "
@@ -378,12 +395,50 @@ gameLoopWithSave saveCallback = loop
               liftIO $ TIO.putStrLn ""
               liftIO $ TIO.putStrLn response.responseText
 
-              -- Auto-save after each turn
+              -- Display mechanical state changes
               updatedState <- get @WorldState
+              let mechanicalChanges = renderMechanicalChanges response updatedState
+              when (not $ T.null mechanicalChanges) $
+                liftIO $ TIO.putStrLn mechanicalChanges
               liftIO $ saveCallback updatedState
 
               -- Continue loop
               loop
+
+-- | Render mechanical state changes for display
+-- Shows deltas and current values for stress, coin, heat
+renderMechanicalChanges :: Response -> WorldState -> Text
+renderMechanicalChanges resp state =
+  let parts = filter (not . T.null)
+        [ renderDelta "Stress" resp.responseStressDelta state.player.stress 9
+        , renderDelta "Coin" resp.responseCoinDelta state.player.coin (-1)  -- No max
+        , renderDelta "Heat" resp.responseHeatDelta state.player.heat 10
+        ]
+  in if null parts
+     then ""
+     else "\n" <> T.intercalate " | " parts
+  where
+    renderDelta :: Text -> Int -> Int -> Int -> Text
+    renderDelta name delta current maxVal
+      | delta == 0 = ""
+      | delta > 0  = name <> ": " <> T.pack (show (current - delta)) <> " → " <> T.pack (show current)
+                     <> " (+" <> T.pack (show delta) <> ")"
+                     <> if maxVal > 0 && current >= maxVal then " ⚠️" else ""
+      | otherwise  = name <> ": " <> T.pack (show (current - delta)) <> " → " <> T.pack (show current)
+                     <> " (" <> T.pack (show delta) <> ")"
+
+-- | Render dice pool for display
+renderDice :: [Int] -> Text
+renderDice dice = T.intercalate " " $ map dieFace dice
+  where
+    dieFace n = case n of
+      1 -> "⚀"
+      2 -> "⚁"
+      3 -> "⚂"
+      4 -> "⚃"
+      5 -> "⚄"
+      6 -> "⚅"
+      _ -> T.pack (show n)
 
 -- | Terminal choice handler - display options and get selection
 terminalChoice :: Text -> [(Text, a)] -> IO a

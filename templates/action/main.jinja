@@ -96,6 +96,11 @@ The tier is fixed. Describe vividly, then transition.
 **Position:** controlled (advantage) / risky (balanced) / desperate (against odds)
 **Effect:** limited (partial) / standard (solid) / great (exceptional)
 
+**Violence outcomes must be unambiguous:**
+- LETHAL: "dead", "kills", "blood pools", "life leaves their eyes", "corpse"
+- NON-LETHAL: "unconscious", "drops", "out cold", "crumples", "groaning"
+Never say "bodies drop" without clarifying. Player must know if they've killed.
+
 {% if domain %}
 **Domain: {{ domain | upper }}**
 {% if domain == "infiltration" %}Stealth, bypassing security. Failure = detection.
@@ -106,7 +111,8 @@ The tier is fixed. Describe vividly, then transition.
 </guidance>
 
 <output_format>
-**Tools:** think_as_dm, speak_as_npc, spend_die, resolve
+**Tools:** think_as_dm, spend_die, resolve
+(See tool schemas for details)
 **Voice ({{ ctxPrecarity }}):**
 {% if ctxPrecarity == "HangingByThread" %}Urgent, no wasted words.
 {% else %}Match position intensity.{% endif %}
