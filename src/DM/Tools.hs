@@ -398,14 +398,8 @@ instance Tool Accept DMEvent WorldState where
     ["acceptTransition"]
 
   executeTool _input = do
-    -- Get current location from state
-    state <- get @WorldState
-    let locId = case state.scene of
-          Just s -> s.sceneLocation
-          Nothing -> LocationId "unknown"
-
-    -- Return to Scene mood (FreePlay variant)
-    modify @WorldState $ \s -> s { mood = MoodScene (FreePlay locId "day" 0) }
+    -- Return to Scene mood (Encounter variant - default low-urgency continuation)
+    modify @WorldState $ \s -> s { mood = MoodScene (Encounter "continuing" UrgencyLow True) }
     emit (MoodTransition "accept" "aftermath" "scene")
     return ()
 

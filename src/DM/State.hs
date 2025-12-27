@@ -7,10 +7,13 @@ module DM.State
     -- * DM Mood (State Machine)
   , DMMood(..)
   , SceneVariant(..)
+  , SceneUrgency(..)
+  , DowntimeVariant(..)
   , ActionVariant(..)
   , ActionDomain(..)
   , AftermathVariant(..)
   , TraumaVariant(..)
+  , ClockInterrupt(..)
   , defaultMood
 
     -- * Player
@@ -105,40 +108,50 @@ data DMMood
   = MoodScene SceneVariant
   | MoodAction ActionVariant (Maybe ActionDomain)
   | MoodAftermath AftermathVariant
+  | MoodDowntime DowntimeVariant       -- Promoted from scene variant
   | MoodTrauma TraumaVariant
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
--- | Scene variants - how we entered this scene
+-- | Scene variants - every scene has a hook (no more FreePlay)
 data SceneVariant
-  = JobOffer
-      { svContact :: NpcId
-      , svObjectiveType :: Text
-      , svEmployerFaction :: Maybe FactionId
-      , svUrgency :: Int  -- 1=relaxed, 2=pressing, 3=urgent
+  = Encounter                        -- Someone/something demands attention
+      { svSource :: Text             -- NPC, faction, complication
+      , svUrgency :: SceneUrgency    -- How pressing is this
+      , svEscapable :: Bool          -- Can they walk away?
       }
-  | Complication
-      { svSource :: Text
-      , svSeverity :: Int  -- 1-3
-      , svEscapable :: Bool
+  | Opportunity                      -- Something offered
+      { svOfferedBy :: Maybe NpcId   -- Who's offering (if anyone)
+      , svNature :: Text             -- job, intel, alliance, gear, favor
+      , svCatch :: Text              -- There's always a catch
       }
-  | NpcEncounter
-      { svNpcId :: NpcId
-      , svNpcIntent :: Text  -- friendly, business, warning, threat
-      , svCallbackTo :: Maybe Text
+  | Discovery                        -- Found something
+      { svWhat :: Text               -- Location, secret, evidence, person
+      , svImplications :: [Text]     -- What this means
       }
-  | ClockTriggered
-      { svClockId :: ClockId
-      , svEventType :: Text
-      , svPreventable :: Bool
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+
+-- | Scene urgency levels (separate from NPC Want urgency)
+data SceneUrgency
+  = UrgencyLow       -- Relaxed, can take time
+  | UrgencyMedium    -- Pressing, shouldn't dawdle
+  | UrgencyHigh      -- Urgent, needs attention now
+  | UrgencyCritical  -- Immediate, no time to plan
+  deriving (Show, Eq, Ord, Enum, Bounded, Generic, ToJSON, FromJSON)
+
+-- | Downtime variants (promoted to top-level mood)
+data DowntimeVariant
+  = Recovery                         -- Healing stress/harm
+      { dvActivities :: [Text]       -- What's available
+      , dvTimeAvailable :: Text      -- "a few hours", "overnight", "a week"
       }
-  | FreePlay
-      { svLocationId :: LocationId
-      , svTimeOfDay :: Text  -- dawn, day, dusk, night
-      , svAmbientHeat :: Int
+  | Project                          -- Long-term work
+      { dvProjectName :: Text
+      , dvProgress :: Int            -- Current progress
+      , dvRequired :: Int            -- Total needed
       }
-  | SceneDowntime
-      { svActivitiesAvailable :: [Text]
-      , svTimePasses :: Bool
+  | Entanglement                     -- Heat catches up
+      { dvEntanglementType :: Text   -- Arrest, questioning, shakedown, etc.
+      , dvEscapeOptions :: [Text]    -- Ways out
       }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
@@ -199,9 +212,18 @@ data TraumaVariant = Breaking
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
--- | Default mood for new games
+-- | Clock interrupt - world asserting itself (not a mood, but forces transition)
+data ClockInterrupt = ClockInterrupt
+  { ciClockId :: ClockId
+  , ciEventType :: Text
+  , ciDescription :: Text
+  , ciForcesAction :: Bool  -- If true, forces immediate Action state
+  }
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+
+-- | Default mood for new games (Encounter with no pressure)
 defaultMood :: DMMood
-defaultMood = MoodScene (FreePlay (LocationId "unknown") "day" 0)
+defaultMood = MoodScene (Encounter "Starting scene" UrgencyLow True)
 
 -- ══════════════════════════════════════════════════════════════
 -- CORE STATE
@@ -223,6 +245,10 @@ data WorldState = WorldState
   -- Dice mechanics (session state)
   , dicePool :: DicePool
   , pendingOutcome :: Maybe PendingOutcome
+  -- Consequence echoing (narrative continuity)
+  , recentCosts :: [Text]             -- From last 3 costly/setback outcomes
+  , unresolvedThreats :: [Text]       -- Complications not yet addressed
+  , pendingInterrupt :: Maybe ClockInterrupt  -- Clock triggered, awaiting handling
   }
   deriving (Show, Eq, Generic)
 
@@ -248,6 +274,9 @@ initialWorld = WorldState
   , sessionGoals = []
   , dicePool = DicePool []
   , pendingOutcome = Nothing
+  , recentCosts = []
+  , unresolvedThreats = []
+  , pendingInterrupt = Nothing
   }
 
 -- ══════════════════════════════════════════════════════════════
@@ -655,10 +684,13 @@ instance ToGVal m SceneSummary where toGVal = genericToGVal
 -- DM Mood (State Machine)
 instance ToGVal m DMMood where toGVal = genericToGVal
 instance ToGVal m SceneVariant where toGVal = genericToGVal
+instance ToGVal m SceneUrgency where toGVal = genericToGVal
+instance ToGVal m DowntimeVariant where toGVal = genericToGVal
 instance ToGVal m ActionVariant where toGVal = genericToGVal
 instance ToGVal m ActionDomain where toGVal = genericToGVal
 instance ToGVal m AftermathVariant where toGVal = genericToGVal
 instance ToGVal m TraumaVariant where toGVal = genericToGVal
+instance ToGVal m ClockInterrupt where toGVal = genericToGVal
 
 -- Player
 instance ToGVal m PlayerState where toGVal = genericToGVal

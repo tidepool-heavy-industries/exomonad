@@ -76,50 +76,75 @@ dmTurn input = do
 
   where
     runMoodAwareTurn = do
-      -- Get current mood and build context
-      state <- get
-      let mood = state.mood
-      let context = buildDMContext state
-      let loc = context.ctxLocation
-      let npcs = context.ctxPresentNpcs
-      let beats = context.ctxSceneBeats
-      logDebug $ "Current mood: " <> T.pack (show mood)
-      logDebug $ "Context location: " <> loc.locationName
-      logDebug $ "Context stakes: " <> context.ctxStakes
-      logDebug $ "Context NPCs present: " <> T.pack (show (length npcs))
-      logDebug $ "Context scene beats: " <> T.pack (show (length beats))
+      -- Check for pending clock interrupts first
+      -- If one forces action, this will restart with action mood
+      interrupted <- checkPendingInterrupts
+      if interrupted
+        then runMoodAwareTurn  -- Restart with forced action mood
+        else do
+          -- Get current mood and build context
+          state <- get
+          let mood = state.mood
+          let context = buildDMContext state
+          let loc = context.ctxLocation
+          let npcs = context.ctxPresentNpcs
+          let beats = context.ctxSceneBeats
+          logDebug $ "Current mood: " <> T.pack (show mood)
+          logDebug $ "Context location: " <> loc.locationName
+          logDebug $ "Context stakes: " <> context.ctxStakes
+          logDebug $ "Context NPCs present: " <> T.pack (show (length npcs))
+          logDebug $ "Context scene beats: " <> T.pack (show (length beats))
 
-      -- Call LLM with mood-specific template and tools
-      outcome <- runTurn (renderForMood mood) turnOutputSchema.schemaJSON dmTools context
+          -- Call LLM with mood-specific template and tools
+          outcome <- runTurn (renderForMood mood) turnOutputSchema.schemaJSON dmTools context
 
-      case outcome of
-        -- Tool triggered state transition - restart with new mood
-        TurnBroken reason -> do
-          logInfo $ "Mood transition: " <> reason
-          runMoodAwareTurn  -- Recursive call with new mood
+          case outcome of
+            -- Tool triggered state transition - restart with new mood
+            TurnBroken reason -> do
+              logInfo $ "Mood transition: " <> reason
+              runMoodAwareTurn  -- Recursive call with new mood
 
-        -- Turn completed normally - apply output and continue
-        TurnCompleted result -> do
-          -- Apply structured output to world state
-          modify (applyTurnOutput result.trOutput)
+            -- Turn completed normally - apply output and continue
+            TurnCompleted result -> do
+              -- Apply structured output to world state
+              modify (applyTurnOutput result.trOutput)
 
-          -- Record DM response as scene beat (for history)
-          let narration = result.trOutput.narration
-          modify $ \state -> case state.scene of
-            Nothing -> state
-            Just activeScene ->
-              let beat = DMNarration narration
-                  newBeats = activeScene.sceneBeats Seq.|> beat
-              in state { scene = Just activeScene { sceneBeats = newBeats } }
+              -- Record DM response as scene beat (for history)
+              let narration = result.trOutput.narration
+              modify $ \s -> case s.scene of
+                Nothing -> s
+                Just activeScene ->
+                  let beat = DMNarration narration
+                      newBeats = activeScene.sceneBeats Seq.|> beat
+                  in s { scene = Just activeScene { sceneBeats = newBeats } }
 
-          -- Check clock consequences
-          checkClockConsequences
+              -- Check clock consequences
+              checkClockConsequences
 
-          -- Compress if scene is getting long
-          compressIfNeeded
+              -- Compress if scene is getting long
+              compressIfNeeded
 
-          -- Return narrative response
-          return (Response narration)
+              -- Return narrative response
+              return (Response narration)
+
+    -- | Check for pending clock interrupts and handle them
+    -- Returns True if an interrupt forced a state transition
+    checkPendingInterrupts = do
+      currState <- get @WorldState
+      case currState.pendingInterrupt of
+        Just interrupt | interrupt.ciForcesAction -> do
+          -- Force transition to Action with the interrupt as context
+          logInfo $ "Clock interrupt forces action: " <> interrupt.ciDescription
+          modify @WorldState $ \s -> s
+            { mood = MoodAction (AvRisky interrupt.ciEventType "react or suffer") Nothing
+            , pendingInterrupt = Nothing
+            }
+          return True  -- Signal that we need to restart
+        Just _interrupt -> do
+          -- Non-forcing interrupt - was surfaced in context, now clear it
+          modify @WorldState $ \s -> s { pendingInterrupt = Nothing }
+          return False
+        Nothing -> return False
 
 -- NOTE: Dice selection is now handled by the SpendDie tool during LLM turn
 -- The tool modifies state directly and returns the outcome to the LLM

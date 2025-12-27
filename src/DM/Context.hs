@@ -56,7 +56,7 @@ data DMContext = DMContext
   , ctxPrecarity :: Precarity
   -- Mood state machine - what phase of the loop we're in
   , ctxMood :: DMMood
-  , ctxMoodLabel :: Text           -- Human-readable: "scene", "action", "aftermath", "trauma"
+  , ctxMoodLabel :: Text           -- Human-readable: "scene", "action", "aftermath", "downtime", "trauma"
   , ctxMoodVariant :: MoodVariantContext  -- Rich variant data for templates
   -- Dice mechanics (the key "see your decision space" feature)
   , ctxDice :: DiceContext
@@ -73,16 +73,26 @@ data DMContext = DMContext
   , ctxFactionsInPlay :: [FactionSummary]
   , ctxTone :: Tone
   , ctxSessionGoals :: [Text]
+  -- Consequence echoing (narrative continuity)
+  , ctxRecentCosts :: [Text]            -- From last 3 costly/setback outcomes
+  , ctxUnresolvedThreats :: [Text]      -- Complications not yet addressed
+  , ctxPendingInterrupt :: Maybe ClockInterrupt  -- Clock triggered, awaiting handling
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
 -- | Rich context for the current mood variant
 -- This is what templates use to adapt their rendering
 data MoodVariantContext = MoodVariantContext
-  { -- Scene variants
-    mvcSceneType :: Maybe Text           -- "job_offer", "complication", "npc_encounter", "clock_triggered", "free_play", "downtime"
-  , mvcSceneUrgency :: Maybe Int         -- 1=relaxed, 2=pressing, 3=urgent
-  , mvcSceneNpcIntent :: Maybe Text      -- "friendly", "business", "warning", "threat"
+  { -- Scene variants (Encounter, Opportunity, Discovery)
+    mvcSceneType :: Maybe Text           -- "encounter", "opportunity", "discovery"
+  , mvcSource :: Maybe Text              -- Encounter: who/what demands attention
+  , mvcSceneUrgency :: Maybe Text        -- "low", "medium", "high", "critical"
+  , mvcEscapable :: Maybe Bool           -- Can they walk away?
+  , mvcOfferedBy :: Maybe Text           -- Opportunity: who's offering
+  , mvcNature :: Maybe Text              -- Opportunity: what kind (job, intel, etc.)
+  , mvcCatch :: Maybe Text               -- Opportunity: the catch
+  , mvcWhat :: Maybe Text                -- Discovery: what was found
+  , mvcImplications :: Maybe [Text]      -- Discovery: what it means
   -- Action variants
   , mvcPosition :: Maybe Text            -- "controlled", "risky", "desperate"
   , mvcThreat :: Maybe Text              -- What could go wrong
@@ -99,7 +109,16 @@ data MoodVariantContext = MoodVariantContext
   , mvcNewComplications :: Maybe [Text]  -- Problems introduced
   , mvcImmediateDanger :: Maybe Bool     -- Is there active threat?
   , mvcEscapeRoute :: Maybe Text         -- Way out (for setback)
-  -- Trauma variants (future)
+  -- Downtime variants
+  , mvcDowntimeType :: Maybe Text        -- "recovery", "project", "entanglement"
+  , mvcActivities :: Maybe [Text]        -- Recovery: available activities
+  , mvcTimeAvailable :: Maybe Text       -- Recovery: how much time
+  , mvcProjectName :: Maybe Text         -- Project: what they're working on
+  , mvcProgress :: Maybe Int             -- Project: current progress
+  , mvcRequired :: Maybe Int             -- Project: total needed
+  , mvcEntanglementType :: Maybe Text    -- Entanglement: what kind
+  , mvcEscapeOptions :: Maybe [Text]     -- Entanglement: ways out
+  -- Trauma variants
   , mvcTraumaType :: Maybe Text
   , mvcWhatBroke :: Maybe Text
   }
@@ -223,6 +242,10 @@ buildDMContext world = case world.scene of
       , ctxFactionsInPlay = factionsInPlay
       , ctxTone = world.tone
       , ctxSessionGoals = world.sessionGoals
+      -- Consequence echoing
+      , ctxRecentCosts = world.recentCosts
+      , ctxUnresolvedThreats = world.unresolvedThreats
+      , ctxPendingInterrupt = world.pendingInterrupt
       }
   where
     partitionClock clock (vis, hid)
@@ -261,14 +284,23 @@ buildMoodContext mood = case mood of
   MoodScene variant -> ("scene", sceneVariantContext variant)
   MoodAction variant domain -> ("action", actionVariantContext variant domain)
   MoodAftermath variant -> ("aftermath", aftermathVariantContext variant)
+  MoodDowntime variant -> ("downtime", downtimeVariantContext variant)
   MoodTrauma variant -> ("trauma", traumaVariantContext variant)
 
 -- | Empty variant context (all Nothing)
 emptyVariantContext :: MoodVariantContext
 emptyVariantContext = MoodVariantContext
-  { mvcSceneType = Nothing
+  { -- Scene
+    mvcSceneType = Nothing
+  , mvcSource = Nothing
   , mvcSceneUrgency = Nothing
-  , mvcSceneNpcIntent = Nothing
+  , mvcEscapable = Nothing
+  , mvcOfferedBy = Nothing
+  , mvcNature = Nothing
+  , mvcCatch = Nothing
+  , mvcWhat = Nothing
+  , mvcImplications = Nothing
+  -- Action
   , mvcPosition = Nothing
   , mvcThreat = Nothing
   , mvcOpportunity = Nothing
@@ -276,6 +308,7 @@ emptyVariantContext = MoodVariantContext
   , mvcAdvantageSource = Nothing
   , mvcWhyDesperate = Nothing
   , mvcPotentialTrauma = Nothing
+  -- Aftermath
   , mvcOutcomeType = Nothing
   , mvcWhatAchieved = Nothing
   , mvcWhatWentWrong = Nothing
@@ -283,6 +316,16 @@ emptyVariantContext = MoodVariantContext
   , mvcNewComplications = Nothing
   , mvcImmediateDanger = Nothing
   , mvcEscapeRoute = Nothing
+  -- Downtime
+  , mvcDowntimeType = Nothing
+  , mvcActivities = Nothing
+  , mvcTimeAvailable = Nothing
+  , mvcProjectName = Nothing
+  , mvcProgress = Nothing
+  , mvcRequired = Nothing
+  , mvcEntanglementType = Nothing
+  , mvcEscapeOptions = Nothing
+  -- Trauma
   , mvcTraumaType = Nothing
   , mvcWhatBroke = Nothing
   }
@@ -290,27 +333,29 @@ emptyVariantContext = MoodVariantContext
 -- | Extract scene variant context
 sceneVariantContext :: SceneVariant -> MoodVariantContext
 sceneVariantContext = \case
-  JobOffer{..} -> emptyVariantContext
-    { mvcSceneType = Just "job_offer"
-    , mvcSceneUrgency = Just svUrgency
+  Encounter{..} -> emptyVariantContext
+    { mvcSceneType = Just "encounter"
+    , mvcSource = Just svSource
+    , mvcSceneUrgency = Just (urgencyLabel svUrgency)
+    , mvcEscapable = Just svEscapable
     }
-  Complication{..} -> emptyVariantContext
-    { mvcSceneType = Just "complication"
-    , mvcSceneUrgency = Just svSeverity
+  Opportunity{..} -> emptyVariantContext
+    { mvcSceneType = Just "opportunity"
+    , mvcOfferedBy = fmap (\(NpcId nid) -> nid) svOfferedBy
+    , mvcNature = Just svNature
+    , mvcCatch = Just svCatch
     }
-  NpcEncounter{..} -> emptyVariantContext
-    { mvcSceneType = Just "npc_encounter"
-    , mvcSceneNpcIntent = Just svNpcIntent
+  Discovery{..} -> emptyVariantContext
+    { mvcSceneType = Just "discovery"
+    , mvcWhat = Just svWhat
+    , mvcImplications = Just svImplications
     }
-  ClockTriggered{..} -> emptyVariantContext
-    { mvcSceneType = Just "clock_triggered"
-    }
-  FreePlay{..} -> emptyVariantContext
-    { mvcSceneType = Just "free_play"
-    }
-  SceneDowntime{..} -> emptyVariantContext
-    { mvcSceneType = Just "downtime"
-    }
+  where
+    urgencyLabel = \case
+      UrgencyLow -> "low"
+      UrgencyMedium -> "medium"
+      UrgencyHigh -> "high"
+      UrgencyCritical -> "critical"
 
 -- | Extract action variant context
 actionVariantContext :: ActionVariant -> Maybe ActionDomain -> MoodVariantContext
@@ -369,6 +414,26 @@ aftermathVariantContext = \case
     , mvcWhatWentWrong = Just amCatastrophe
     , mvcImmediateDanger = Just True
     , mvcPotentialTrauma = Just amTraumaRisk
+    }
+
+-- | Extract downtime variant context
+downtimeVariantContext :: DowntimeVariant -> MoodVariantContext
+downtimeVariantContext = \case
+  Recovery{..} -> emptyVariantContext
+    { mvcDowntimeType = Just "recovery"
+    , mvcActivities = Just dvActivities
+    , mvcTimeAvailable = Just dvTimeAvailable
+    }
+  Project{..} -> emptyVariantContext
+    { mvcDowntimeType = Just "project"
+    , mvcProjectName = Just dvProjectName
+    , mvcProgress = Just dvProgress
+    , mvcRequired = Just dvRequired
+    }
+  Entanglement{..} -> emptyVariantContext
+    { mvcDowntimeType = Just "entanglement"
+    , mvcEntanglementType = Just dvEntanglementType
+    , mvcEscapeOptions = Just dvEscapeOptions
     }
 
 -- | Extract trauma variant context

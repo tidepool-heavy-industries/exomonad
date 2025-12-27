@@ -2,6 +2,7 @@
 module DM.Output
   ( -- * Turn Output (Simplified)
     TurnOutput(..)
+  , NarrativeConnector(..)
   , emptyTurnOutput
   , applyTurnOutput
 
@@ -37,22 +38,36 @@ import Data.Aeson (ToJSON, FromJSON)
 -- TURN OUTPUT (Simplified for API grammar limits)
 -- ══════════════════════════════════════════════════════════════
 
+-- | Narrative connector - forces causal thinking
+-- "And then" is lazy; these connectors demand causality
+data NarrativeConnector
+  = Therefore   -- This happened because of what came before
+  | But         -- This happened despite what came before
+  | Meanwhile   -- Parallel action (use sparingly)
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+
 -- | Simplified turn output that fits within API grammar limits
 -- NPC speech happens via SpeakAsNPC tool invocation, not here
 data TurnOutput = TurnOutput
-  { narration :: Text       -- Narrative prose for this turn
-  , stressDelta :: Int      -- Change in stress (-9 to +9)
-  , coinDelta :: Int        -- Change in coin
-  , continueScene :: Bool   -- True to continue, False to end scene
+  { narration :: Text                       -- Narrative prose for this turn
+  , narrativeConnector :: Maybe NarrativeConnector  -- How this connects to previous beat
+  , stressDelta :: Int                      -- Change in stress (-9 to +9)
+  , coinDelta :: Int                        -- Change in coin
+  , continueScene :: Bool                   -- True to continue, False to end scene
+  , costDescription :: Maybe Text           -- If costly/setback, describe the cost for echoing
+  , threatDescription :: Maybe Text         -- If unresolved threat, describe for echoing
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
 emptyTurnOutput :: TurnOutput
 emptyTurnOutput = TurnOutput
   { narration = ""
+  , narrativeConnector = Nothing
   , stressDelta = 0
   , coinDelta = 0
   , continueScene = True
+  , costDescription = Nothing
+  , threatDescription = Nothing
   }
 
 -- | Legacy type kept for compression (TODO: simplify)
@@ -147,6 +162,7 @@ data NewRumor = NewRumor
 -- ══════════════════════════════════════════════════════════════
 
 -- | Apply turn output to world state (simplified version)
+-- Also tracks costs and threats for consequence echoing
 applyTurnOutput :: TurnOutput -> WorldState -> WorldState
 applyTurnOutput output state = state
   { player = (state.player)
@@ -154,6 +170,14 @@ applyTurnOutput output state = state
       , coin = max 0 (state.player.coin + output.coinDelta)
       }
   , scene = if output.continueScene then state.scene else Nothing
+  -- Track costs for consequence echoing (keep last 3)
+  , recentCosts = take 3 $ case output.costDescription of
+      Just cost -> cost : state.recentCosts
+      Nothing -> state.recentCosts
+  -- Track unresolved threats
+  , unresolvedThreats = case output.threatDescription of
+      Just threat -> threat : state.unresolvedThreats
+      Nothing -> state.unresolvedThreats
   }
   where
     clamp lo hi x = max lo (min hi x)
