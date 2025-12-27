@@ -53,9 +53,7 @@ module Tidepool.Effect
   , ToolDispatcher
   , ToolResult(..)
 
-    -- * Break Turn Types (for state machine transitions)
-  , BreakTurn(..)
-  , breakTurn
+    -- * Turn Outcome
   , TurnOutcome(..)
   ) where
 
@@ -620,26 +618,6 @@ runLog minLevel = interpret $ \_ -> \case
         -- TIO.putStrLn (prefix <> msg)
         return ()
     | otherwise -> pure ()
-
--- ══════════════════════════════════════════════════════════════
--- BREAK TURN EFFECT (for state machine transitions)
--- ══════════════════════════════════════════════════════════════
-
--- | Effect for tools that need to break out of the current LLM turn.
--- Used by state transition tools (Engage, Resolve, Accept, etc.) to signal
--- that the mood has changed and the turn should restart with a new template.
-data BreakTurn :: Effect where
-  -- | Break out of the current turn with a reason
-  -- This is a non-returning operation - it terminates the current turn
-  BreakTurnOp :: Text -> BreakTurn m a
-
-type instance DispatchOf BreakTurn = 'Dynamic
-
--- | Break out of the current LLM turn (for state machine transitions)
--- Call this from a transition tool after modifying the mood state.
--- The turn will restart with the new mood's template.
-breakTurn :: BreakTurn :> es => Text -> Eff es a
-breakTurn = send . BreakTurnOp
 
 -- | Outcome of running a turn that may be interrupted
 data TurnOutcome a
