@@ -24,6 +24,7 @@ module DM.Tools
 
 import DM.State
 import Tidepool.Tool
+import Tidepool.Schema (objectSchema, arraySchema, emptySchema, schemaToValue, SchemaType(..))
 import Data.Proxy (Proxy(..))
 import Data.Text (Text)
 import Data.Aeson (Value, ToJSON, FromJSON)
@@ -53,12 +54,14 @@ data ThinkInput = ThinkInput { thought :: Text }
 instance Tool ThinkAsDM where
   type ToolInput ThinkAsDM = ThinkInput
   type ToolOutput ThinkAsDM = ()
-  
+
   toolName = "think_as_dm"
   toolDescription = "Internal reasoning as the DM. Not visible to players."
-  inputSchema = error "TODO: ThinkAsDM inputSchema - JSON Schema for ThinkInput"
-  
-  executeTool input = error "TODO: ThinkAsDM executeTool - emit DMThought event"
+  inputSchema = schemaToValue $ objectSchema
+    [("thought", emptySchema TString)]
+    ["thought"]
+
+  executeTool _input = error "TODO: ThinkAsDM executeTool - emit DMThought event"
 
 -- ══════════════════════════════════════════════════════════════
 -- SPEAK AS NPC
@@ -76,12 +79,16 @@ data SpeakInput = SpeakInput
 instance Tool SpeakAsNPC where
   type ToolInput SpeakAsNPC = SpeakInput
   type ToolOutput SpeakAsNPC = ()
-  
+
   toolName = "speak_as_npc"
   toolDescription = "Voice a specific NPC character."
-  inputSchema = error "TODO: SpeakAsNPC inputSchema - JSON Schema for SpeakInput"
-  
-  executeTool input = error "TODO: SpeakAsNPC executeTool - emit NPCSpoke event"
+  inputSchema = schemaToValue $ objectSchema
+    [ ("speakNpc", emptySchema TString)
+    , ("utterance", emptySchema TString)
+    ]
+    ["speakNpc", "utterance"]
+
+  executeTool _input = error "TODO: SpeakAsNPC executeTool - emit NPCSpoke event"
 
 -- ══════════════════════════════════════════════════════════════
 -- ASK PLAYER
@@ -102,12 +109,16 @@ data AskResult = AskResult { playerResponse :: Text }
 instance Tool AskPlayer where
   type ToolInput AskPlayer = AskInput
   type ToolOutput AskPlayer = AskResult
-  
+
   toolName = "ask_player"
   toolDescription = "Pause and ask the player a question."
-  inputSchema = error "TODO: AskPlayer inputSchema - JSON Schema for AskInput"
-  
-  executeTool input = error "TODO: AskPlayer executeTool - use requestChoice/requestText from RequestInput effect"
+  inputSchema = schemaToValue $ objectSchema
+    [ ("question", emptySchema TString)
+    , ("choices", arraySchema (emptySchema TString))
+    ]
+    ["question"]  -- choices is optional
+
+  executeTool _input = error "TODO: AskPlayer executeTool - use requestChoice/requestText from RequestInput effect"
 
 -- ══════════════════════════════════════════════════════════════
 -- CHOOSE
@@ -130,12 +141,14 @@ data ChooseResult = ChooseResult
 instance Tool Choose where
   type ToolInput Choose = ChooseInput
   type ToolOutput Choose = ChooseResult
-  
+
   toolName = "choose"
-  toolDescription = "Make a weighted random choice."
-  inputSchema = error "TODO: Choose inputSchema - JSON Schema for ChooseInput"
-  
-  executeTool input = error "TODO: Choose executeTool - use randomDouble from Random effect, emit RandomChoice"
+  toolDescription = "Make a weighted random choice. Options are [weight, label] pairs."
+  inputSchema = schemaToValue $ objectSchema
+    [("options", arraySchema $ arraySchema (emptySchema TNumber))]  -- [[weight, label], ...]
+    ["options"]
+
+  executeTool _input = error "TODO: Choose executeTool - use randomDouble from Random effect, emit RandomChoice"
 
 -- ══════════════════════════════════════════════════════════════
 -- TOOL REGISTRATION

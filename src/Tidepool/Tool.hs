@@ -15,7 +15,7 @@ module Tidepool.Tool
   ) where
 
 import Data.Text (Text)
-import Data.Aeson (Value, ToJSON, FromJSON)
+import Data.Aeson (Value, ToJSON, FromJSON, object, (.=))
 import Data.Kind (Type)
 import Data.Proxy (Proxy(..))
 import GHC.Generics (Generic)
@@ -71,6 +71,10 @@ executeTools
   -> Eff es [ToolResult]
 executeTools _toolCalls = error "TODO: executeTools - dispatch tool calls by name, execute, collect results"
 
--- | Convert tool definition to JSON for API
+-- | Convert tool definition to JSON for API (Anthropic tool format)
 toolToJSON :: forall t. Tool t => Value
-toolToJSON = error "TODO: toolToJSON - build Anthropic tool format from Tool typeclass"
+toolToJSON = object
+  [ "name" .= toolName @t
+  , "description" .= toolDescription @t
+  , "input_schema" .= inputSchema @t
+  ]
