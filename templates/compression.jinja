@@ -1,0 +1,42 @@
+{# Compression Template - rendered with CompressionContext #}
+
+You are compressing a completed scene into structured state changes.
+
+## Scene Beats
+{% for beat in ccAllBeats %}
+- {{ beat }}
+{% endfor %}
+
+## Faction States
+{% for faction in ccFactionStates %}
+**{{ faction.fsFactionName }}** - {{ faction.fsAttitudeLabel }}
+{% endfor %}
+
+## NPCs Involved
+{% for npcState in ccNpcStates %}
+### {{ npcState.nwdNpc.npcName }}
+- **Disposition:** {{ npcState.nwdDispositionLabel }}
+{% endfor %}
+
+## Active Clocks
+{% for clock in ccActiveClocks %}
+- **{{ clock.clockName }}** [{{ clock.clockFilled }}/{{ clock.clockSegments }}]
+{% endfor %}
+
+---
+
+## Your Task
+
+Extract the durable changes from this scene.
+
+**Scene Outcome:**
+- Summary: One sentence capturing what happened
+- Key beats: Most significant 2-3 moments
+
+**World Deltas:**
+- Faction attitude changes
+- NPC memories
+
+**Extractions:**
+- New threads to track
+- New rumors to spread

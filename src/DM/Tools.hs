@@ -24,10 +24,13 @@ module DM.Tools
 
 import DM.State
 import Tidepool.Tool
+import Tidepool.Effect (Emit, RequestInput, Random, emit, requestChoice, requestText, randomDouble)
 import Tidepool.Schema (objectSchema, arraySchema, emptySchema, schemaToValue, SchemaType(..))
+import Effectful (Eff, (:>))
 import Data.Proxy (Proxy(..))
 import Data.Text (Text)
 import Data.Aeson (Value, ToJSON, FromJSON)
+import Data.List (find)
 import GHC.Generics (Generic)
 
 -- ══════════════════════════════════════════════════════════════
@@ -41,6 +44,7 @@ data DMEvent
   | RandomChoice Text Int
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
+
 -- ══════════════════════════════════════════════════════════════
 -- THINK AS DM
 -- ══════════════════════════════════════════════════════════════
@@ -51,7 +55,7 @@ data ThinkAsDM = ThinkAsDM
 data ThinkInput = ThinkInput { thought :: Text }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
-instance Tool ThinkAsDM where
+instance Tool ThinkAsDM DMEvent where
   type ToolInput ThinkAsDM = ThinkInput
   type ToolOutput ThinkAsDM = ()
 
@@ -61,7 +65,7 @@ instance Tool ThinkAsDM where
     [("thought", emptySchema TString)]
     ["thought"]
 
-  executeTool _input = error "TODO: ThinkAsDM executeTool - emit DMThought event"
+  executeTool input = emit (DMThought input.thought)
 
 -- ══════════════════════════════════════════════════════════════
 -- SPEAK AS NPC
@@ -76,7 +80,7 @@ data SpeakInput = SpeakInput
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
-instance Tool SpeakAsNPC where
+instance Tool SpeakAsNPC DMEvent where
   type ToolInput SpeakAsNPC = SpeakInput
   type ToolOutput SpeakAsNPC = ()
 
@@ -88,7 +92,7 @@ instance Tool SpeakAsNPC where
     ]
     ["speakNpc", "utterance"]
 
-  executeTool _input = error "TODO: SpeakAsNPC executeTool - emit NPCSpoke event"
+  executeTool input = emit (NPCSpoke input.speakNpc input.utterance)
 
 -- ══════════════════════════════════════════════════════════════
 -- ASK PLAYER
@@ -106,7 +110,7 @@ data AskInput = AskInput
 data AskResult = AskResult { playerResponse :: Text }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
-instance Tool AskPlayer where
+instance Tool AskPlayer DMEvent where
   type ToolInput AskPlayer = AskInput
   type ToolOutput AskPlayer = AskResult
 
@@ -118,7 +122,12 @@ instance Tool AskPlayer where
     ]
     ["question"]  -- choices is optional
 
-  executeTool _input = error "TODO: AskPlayer executeTool - use requestChoice/requestText from RequestInput effect"
+  executeTool input = do
+    emit (PlayerAsked input.question)
+    response <- case input.choices of
+      Nothing -> requestText input.question
+      Just cs -> requestChoice input.question [(c, c) | c <- cs]
+    return (AskResult response)
 
 -- ══════════════════════════════════════════════════════════════
 -- CHOOSE
@@ -138,7 +147,7 @@ data ChooseResult = ChooseResult
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
-instance Tool Choose where
+instance Tool Choose DMEvent where
   type ToolInput Choose = ChooseInput
   type ToolOutput Choose = ChooseResult
 
@@ -148,14 +157,28 @@ instance Tool Choose where
     [("options", arraySchema $ arraySchema (emptySchema TNumber))]  -- [[weight, label], ...]
     ["options"]
 
-  executeTool _input = error "TODO: Choose executeTool - use randomDouble from Random effect, emit RandomChoice"
+  executeTool input = do
+    let opts = input.options
+        totalWeight = sum (map fst opts)
+    roll <- randomDouble
+    let target = roll * totalWeight
+        (idx, label) = pickWeighted 0 target opts
+    emit (RandomChoice label idx)
+    return (ChooseResult idx label)
+    where
+      -- Walk through options, accumulating weight until we hit target
+      pickWeighted :: Int -> Double -> [(Double, Text)] -> (Int, Text)
+      pickWeighted idx target ((w, label) : rest)
+        | target <= w = (idx, label)
+        | otherwise = pickWeighted (idx + 1) (target - w) rest
+      pickWeighted idx _ [] = (idx - 1, "")  -- Fallback (shouldn't happen)
 
 -- ══════════════════════════════════════════════════════════════
 -- TOOL REGISTRATION
 -- ══════════════════════════════════════════════════════════════
 
 -- | All DM tools as a type-safe list
-dmToolList :: ToolList '[ThinkAsDM, SpeakAsNPC, AskPlayer, Choose]
+dmToolList :: ToolList DMEvent '[ThinkAsDM, SpeakAsNPC, AskPlayer, Choose]
 dmToolList = TCons (Proxy @ThinkAsDM)
            $ TCons (Proxy @SpeakAsNPC)
            $ TCons (Proxy @AskPlayer)

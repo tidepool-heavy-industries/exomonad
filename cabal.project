@@ -5,3 +5,8 @@ packages: .
 
 -- Allow newer for effectful ecosystem
 allow-newer: all
+
+-- Ginger fork with typed templates
+source-repository-package
+  type: git
+  location: https://github.com/inanna-malick/ginger

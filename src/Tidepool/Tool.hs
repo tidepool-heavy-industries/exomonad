@@ -24,7 +24,8 @@ import Effectful
 
 -- | Tools are mid-turn capabilities the LLM can invoke
 -- Tools can use State, Emit, RequestInput, and Random effects
-class Tool t where
+-- The event type parameter specifies what events this tool can emit
+class Tool t event where
   type ToolInput t
   type ToolOutput t
 
@@ -45,17 +46,18 @@ class Tool t where
 
 -- | Type-safe heterogeneous list of tools
 -- Used to define which tools are available for a template
-data ToolList (tools :: [Type]) where
-  TNil  :: ToolList '[]
-  TCons :: Tool t => Proxy t -> ToolList ts -> ToolList (t ': ts)
+-- All tools in the list share the same event type
+data ToolList event (tools :: [Type]) where
+  TNil  :: ToolList event '[]
+  TCons :: Tool t event => Proxy t -> ToolList event ts -> ToolList event (t ': ts)
 
 -- | Convert tool list to JSON array of tool definitions
-toolListToJSON :: ToolList tools -> [Value]
+toolListToJSON :: forall event tools. ToolList event tools -> [Value]
 toolListToJSON TNil = []
 toolListToJSON (TCons p rest) = toolToJSONProxy p : toolListToJSON rest
   where
-    toolToJSONProxy :: forall t. Tool t => Proxy t -> Value
-    toolToJSONProxy _ = toolToJSON @t
+    toolToJSONProxy :: forall t. Tool t event => Proxy t -> Value
+    toolToJSONProxy _ = toolToJSON @t @event
 
 -- | Result of tool execution for returning to LLM
 data ToolResult = ToolResult
@@ -72,9 +74,9 @@ executeTools
 executeTools _toolCalls = error "TODO: executeTools - dispatch tool calls by name, execute, collect results"
 
 -- | Convert tool definition to JSON for API (Anthropic tool format)
-toolToJSON :: forall t. Tool t => Value
+toolToJSON :: forall t event. Tool t event => Value
 toolToJSON = object
-  [ "name" .= toolName @t
-  , "description" .= toolDescription @t
-  , "input_schema" .= inputSchema @t
+  [ "name" .= toolName @t @event
+  , "description" .= toolDescription @t @event
+  , "input_schema" .= inputSchema @t @event
   ]

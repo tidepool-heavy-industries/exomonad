@@ -1,52 +1,44 @@
--- | DM Templates
---
--- When jinja-th is ready, replace the placeholder templates with:
--- @
--- dmTurnJinja :: TypedTemplate DMContext ()
--- dmTurnJinja = $(typedTemplateFile ''DMContext "templates/dm_turn.jinja")
--- @
+-- | DM Templates - compile-time type-checked Jinja templates
 module DM.Templates
   ( -- * Templates
     dmTurnTemplate
   , compressionTemplate
 
-    -- * Typed Jinja Templates (placeholders until jinja-th ready)
+    -- * Typed Jinja Templates
   , dmTurnJinja
   , compressionJinja
+
+    -- * Rendering
+  , renderDMTurn
+  , renderCompression
   ) where
 
-import DM.State (Clock, Thread, Rumor)
 import DM.Context
 import DM.Output
 import DM.Tools
 import Tidepool.Template
 import Data.Proxy (Proxy(..))
 import Data.Text (Text)
+import Text.Parsec.Pos (SourcePos)
 
 -- ══════════════════════════════════════════════════════════════
 -- TYPED JINJA TEMPLATES
 -- ══════════════════════════════════════════════════════════════
 
--- | DM turn Jinja template
--- TODO: Replace with: $(typedTemplateFile ''DMContext "templates/dm_turn.jinja")
-dmTurnJinja :: TypedTemplate DMContext ()
-dmTurnJinja = TypedTemplate
-  { templateCompiled = \_ctx -> error "TODO: replace with $(typedTemplateFile ''DMContext \"templates/dm_turn.jinja\")"
-  }
+-- | DM turn Jinja template (compile-time validated)
+dmTurnJinja :: TypedTemplate DMContext SourcePos
+dmTurnJinja = $(typedTemplateFile ''DMContext "templates/dm_turn.jinja")
 
--- | Compression Jinja template
--- TODO: Replace with: $(typedTemplateFile ''CompressionContext "templates/compression.jinja")
-compressionJinja :: TypedTemplate CompressionContext ()
-compressionJinja = TypedTemplate
-  { templateCompiled = \_ctx -> error "TODO: replace with $(typedTemplateFile ''CompressionContext \"templates/compression.jinja\")"
-  }
+-- | Compression Jinja template (compile-time validated)
+compressionJinja :: TypedTemplate CompressionContext SourcePos
+compressionJinja = $(typedTemplateFile ''CompressionContext "templates/compression.jinja")
 
 -- ══════════════════════════════════════════════════════════════
 -- TIDEPOOL TEMPLATES
 -- ══════════════════════════════════════════════════════════════
 
 -- | Main DM turn template with all available tools
-dmTurnTemplate :: Template DMContext TurnOutput '[ThinkAsDM, SpeakAsNPC, AskPlayer, Choose]
+dmTurnTemplate :: Template DMContext TurnOutput DMEvent '[ThinkAsDM, SpeakAsNPC, AskPlayer, Choose]
 dmTurnTemplate = Template
   { templateJinja = dmTurnJinja
   , templateOutputSchema = turnOutputSchema
@@ -57,13 +49,25 @@ dmTurnTemplate = Template
                   $ TNil
   }
 
--- | Compression template (no tools needed)
-compressionTemplate :: Template CompressionContext CompressionOutput '[]
+-- | Compression template (no tools needed - uses unit event type)
+compressionTemplate :: Template CompressionContext CompressionOutput () '[]
 compressionTemplate = Template
   { templateJinja = compressionJinja
   , templateOutputSchema = compressionOutputSchema
   , templateTools = TNil
   }
+
+-- ══════════════════════════════════════════════════════════════
+-- RENDERING
+-- ══════════════════════════════════════════════════════════════
+
+-- | Render DM turn template with context
+renderDMTurn :: DMContext -> Text
+renderDMTurn = render dmTurnTemplate
+
+-- | Render compression template with context
+renderCompression :: CompressionContext -> Text
+renderCompression = render compressionTemplate
 
 -- ══════════════════════════════════════════════════════════════
 -- SCHEMAS

@@ -82,6 +82,10 @@ import Data.Sequence (Seq)
 import qualified Data.Sequence as Seq
 import GHC.Generics (Generic)
 import Data.Aeson (ToJSON, FromJSON)
+import Text.Ginger.GVal (ToGVal(..), toGVal, dict, list)
+import Text.Ginger.GVal.Generic (genericToGVal)
+import qualified Data.HashMap.Strict as HM
+import qualified Data.Foldable as F
 
 -- ══════════════════════════════════════════════════════════════
 -- CORE STATE
@@ -509,3 +513,88 @@ data Duration
 newtype Tag = Tag { unTag :: Text }
   deriving (Show, Eq, Ord, Generic)
   deriving newtype (ToJSON, FromJSON, Hashable)
+
+-- ══════════════════════════════════════════════════════════════
+-- TOGVAL INSTANCES (for template rendering via genericToGVal)
+-- ══════════════════════════════════════════════════════════════
+
+-- Container instances (not provided by ginger)
+instance (ToGVal m k, ToGVal m v) => ToGVal m (HashMap k v) where
+  toGVal hm = list [toGVal (k, v) | (k, v) <- HM.toList hm]
+
+instance ToGVal m a => ToGVal m (Seq a) where
+  toGVal s = list (map toGVal (F.toList s))
+
+instance (ToGVal m a, ToGVal m b) => ToGVal m (Either a b) where
+  toGVal (Left a) = dict [("Left", toGVal a)]
+  toGVal (Right b) = dict [("Right", toGVal b)]
+
+-- Core State
+instance ToGVal m WorldState where toGVal = genericToGVal
+instance ToGVal m SceneSummary where toGVal = genericToGVal
+
+-- Player
+instance ToGVal m PlayerState where toGVal = genericToGVal
+instance ToGVal m Trauma where toGVal = genericToGVal
+
+-- Dice Mechanics
+instance ToGVal m DicePool where toGVal = genericToGVal
+instance ToGVal m Position where toGVal = genericToGVal
+instance ToGVal m Effect where toGVal = genericToGVal
+instance ToGVal m OutcomeTier where toGVal = genericToGVal
+instance ToGVal m PendingOutcome where toGVal = genericToGVal
+
+-- Factions
+instance ToGVal m FactionId where toGVal = genericToGVal
+instance ToGVal m Faction where toGVal = genericToGVal
+instance ToGVal m Attitude where toGVal = genericToGVal
+instance ToGVal m GoalId where toGVal = genericToGVal
+instance ToGVal m Goal where toGVal = genericToGVal
+instance ToGVal m GoalStatus where toGVal = genericToGVal
+instance ToGVal m ResourcePool where toGVal = genericToGVal
+instance ToGVal m Secret where toGVal = genericToGVal
+instance ToGVal m Fact where toGVal = genericToGVal
+
+-- NPCs
+instance ToGVal m NpcId where toGVal = genericToGVal
+instance ToGVal m Npc where toGVal = genericToGVal
+instance ToGVal m Disposition where toGVal = genericToGVal
+instance ToGVal m Want where toGVal = genericToGVal
+instance ToGVal m Fear where toGVal = genericToGVal
+instance ToGVal m Urgency where toGVal = genericToGVal
+instance ToGVal m Severity where toGVal = genericToGVal
+
+-- Clocks
+instance ToGVal m ClockId where toGVal = genericToGVal
+instance ToGVal m Clock where toGVal = genericToGVal
+instance ToGVal m Trigger where toGVal = genericToGVal
+instance ToGVal m ActionPattern where toGVal = genericToGVal
+instance ToGVal m Consequence where toGVal = genericToGVal
+instance ToGVal m FactionAction where toGVal = genericToGVal
+instance ToGVal m Target where toGVal = genericToGVal
+instance ToGVal m LocationDelta where toGVal = genericToGVal
+instance ToGVal m Escalation where toGVal = genericToGVal
+
+-- Locations
+instance ToGVal m LocationId where toGVal = genericToGVal
+instance ToGVal m Location where toGVal = genericToGVal
+
+-- Narrative
+instance ToGVal m RumorId where toGVal = genericToGVal
+instance ToGVal m Rumor where toGVal = genericToGVal
+instance ToGVal m RumorSource where toGVal = genericToGVal
+instance ToGVal m TruthValue where toGVal = genericToGVal
+instance ToGVal m SpreadLevel where toGVal = genericToGVal
+instance ToGVal m ThreadId where toGVal = genericToGVal
+instance ToGVal m Thread where toGVal = genericToGVal
+instance ToGVal m Tension where toGVal = genericToGVal
+
+-- Scenes
+instance ToGVal m ActiveScene where toGVal = genericToGVal
+instance ToGVal m SceneBeat where toGVal = genericToGVal
+instance ToGVal m Stakes where toGVal = genericToGVal
+instance ToGVal m Tone where toGVal = genericToGVal
+
+-- Misc
+instance ToGVal m Duration where toGVal = genericToGVal
+instance ToGVal m Tag where toGVal = genericToGVal

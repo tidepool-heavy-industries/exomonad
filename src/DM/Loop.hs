@@ -22,10 +22,9 @@ module DM.Loop
 import DM.State
 import DM.Context (buildDMContext)
 import DM.Output (TurnOutput, applyTurnOutput)
-import DM.Templates (dmTurnTemplate)
+import DM.Templates (renderDMTurn)
 import DM.Tools (DMEvent(..), dmTools)
 import Tidepool.Effect
-import Tidepool.Template (render)
 import Tidepool.Tool (toolListToJSON)
 
 import Effectful
@@ -72,7 +71,7 @@ dmTurn input = do
   context <- gets buildDMContext
 
   -- 3. Call LLM with template and tools
-  result <- runTurn (render dmTurnTemplate) turnOutputSchema dmTools context
+  result <- runTurn renderDMTurn turnOutputSchema dmTools context
 
   -- 4. Apply structured output to world state
   modify (applyTurnOutput result.trOutput)
