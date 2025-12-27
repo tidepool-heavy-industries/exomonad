@@ -19,12 +19,24 @@ library
         Tidepool.Schema
         Tidepool.Anthropic.Http
         Tidepool.Anthropic.Client
+        Tidepool.GUI.Core
+        Tidepool.GUI.Handler
+        Tidepool.GUI.Server
+        Tidepool.GUI.Theme
+        Tidepool.GUI.Widgets
         DM.State
         DM.Output
         DM.Tools
         DM.Context
         DM.Templates
         DM.Loop
+        DM.GUI.App
+        DM.GUI.Theme
+        DM.GUI.Widgets.Stats
+        DM.GUI.Widgets.Mood
+        DM.GUI.Widgets.Clocks
+        DM.GUI.Widgets.History
+        DM.GUI.Widgets.Dice
     build-depends:
         base >= 4.17 && < 5,
         effectful-core >= 2.3 && < 3,
@@ -44,7 +56,10 @@ library
         parsec >= 3.1 && < 4,
         req >= 3.13 && < 4,
         http-client >= 0.7 && < 1,
-        modern-uri >= 0.3 && < 1
+        modern-uri >= 0.3 && < 1,
+        threepenny-gui >= 0.9 && < 1,
+        stm >= 2.5 && < 3,
+        time >= 1.12 && < 2
     hs-source-dirs:   src
     default-language: GHC2021
     default-extensions:
@@ -90,6 +105,21 @@ executable test-llm
         text >= 2.0 && < 3,
         aeson >= 2.1 && < 3,
         bytestring >= 0.11 && < 1,
+        tidepool-sketch
+    hs-source-dirs:   app
+    default-language: GHC2021
+    default-extensions:
+        OverloadedStrings
+        OverloadedRecordDot
+
+executable tidepool-dm-gui
+    import:           warnings
+    main-is:          MainGUI.hs
+    build-depends:
+        base >= 4.17 && < 5,
+        text >= 2.0 && < 3,
+        stm >= 2.5 && < 3,
+        threepenny-gui >= 0.9 && < 1,
         tidepool-sketch
     hs-source-dirs:   app
     default-language: GHC2021
