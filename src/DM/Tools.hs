@@ -42,6 +42,8 @@ data DMEvent
   | NPCSpoke NpcId Text
   | PlayerAsked Text
   | RandomChoice Text Int
+  | ClockCompleted Text Text Consequence  -- clockId, clockName, consequence
+  | SceneCompressed Text                   -- summary of what was compressed
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
 

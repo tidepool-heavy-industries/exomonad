@@ -4,6 +4,7 @@ import DM.State
 import DM.Loop
 import DM.Tools (DMEvent(..))
 import Data.Text (Text)
+import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import qualified Data.HashMap.Strict as HM
 
@@ -29,11 +30,15 @@ main = do
     handleEvent (DMThought t) = TIO.putStrLn $ "[DM thinks] " <> t
     handleEvent (NPCSpoke nid t) = TIO.putStrLn $ "[NPC " <> nid.unNpcId <> "] " <> t
     handleEvent (PlayerAsked q) = TIO.putStrLn $ "[Asks player] " <> q
-    handleEvent (RandomChoice label idx) = 
+    handleEvent (RandomChoice label idx) =
       TIO.putStrLn $ "[Random] chose " <> label <> " (index " <> showT idx <> ")"
-    
+    handleEvent (ClockCompleted clockId clockName _consequence) =
+      TIO.putStrLn $ "[Clock filled] ⏰ " <> clockName <> " (" <> clockId <> ") - consequence triggered!"
+    handleEvent (SceneCompressed summary) =
+      TIO.putStrLn $ "[Scene compressed] " <> summary
+
     showT :: Int -> Text
-    showT i = error "TODO: showT - convert Int to Text"
+    showT = T.pack . show
 
 setupExampleWorld :: WorldState
 setupExampleWorld = error "TODO: setupExampleWorld - create Blades in the Dark style factions, NPCs, locations, clocks, threads"
