@@ -248,4 +248,4 @@ roleToText Assistant = "assistant"
 textToRole :: Text -> Role
 textToRole "user" = User
 textToRole "assistant" = Assistant
-textToRole _ = User  -- fallback
+textToRole t = error ("Unknown role text: " ++ T.unpack t)
