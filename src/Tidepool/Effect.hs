@@ -171,9 +171,13 @@ runTurn systemPrompt userAction schema tools = do
   -- Parse the raw JSON output if turn completed
   case rawResult of
     TurnBroken reason -> return (TurnBroken reason)
-    TurnCompleted tr -> case fromJSON tr.trOutput of
-      Success parsed -> return $ TurnCompleted tr { trOutput = parsed }
-      Error err -> error $ "Failed to parse LLM output: " <> err
+    TurnCompleted tr -> do
+      let rawJson = tr.trOutput
+      case fromJSON rawJson of
+        Success parsed -> return $ TurnCompleted tr { trOutput = parsed }
+        Error err -> error $ "Failed to parse LLM output: " <> err
+                          <> "\n\nRaw JSON was:\n" <> T.unpack (TE.decodeUtf8 . LBS.toStrict $ encode rawJson)
+                          <> "\n\nNarrative was:\n" <> T.unpack tr.trNarrative
 
 -- | Result of running an LLM turn
 data TurnResult output = TurnResult

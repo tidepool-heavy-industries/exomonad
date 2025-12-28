@@ -70,7 +70,7 @@ compressionJinja = $(typedTemplateFile ''CompressionContext "templates/compressi
 -- ══════════════════════════════════════════════════════════════
 
 -- | Main DM turn template with all available tools
-dmTurnTemplate :: Template DMContext TurnOutput DMEvent WorldState '[ThinkAsDM, AskPlayer, Choose, SpendDie, Engage, Resolve, Accept]
+dmTurnTemplate :: Template DMContext TurnOutput DMEvent WorldState '[AskPlayer, Choose, SpendDie, Engage, Resolve, Accept]
 dmTurnTemplate = Template
   { templateJinja = dmTurnJinja
   , templateOutputSchema = turnOutputSchema
@@ -86,7 +86,7 @@ compressionTemplate' = Template
   }
 
 -- | Scene template - exploration state
-sceneTemplate :: Template DMContext TurnOutput DMEvent WorldState '[ThinkAsDM, AskPlayer, Choose, SpendDie, Engage, Resolve, Accept]
+sceneTemplate :: Template DMContext TurnOutput DMEvent WorldState '[AskPlayer, Choose, SpendDie, Engage, Resolve, Accept]
 sceneTemplate = Template
   { templateJinja = sceneJinja
   , templateOutputSchema = turnOutputSchema
@@ -94,7 +94,7 @@ sceneTemplate = Template
   }
 
 -- | Action template - dice resolution state
-actionTemplate :: Template DMContext TurnOutput DMEvent WorldState '[ThinkAsDM, AskPlayer, Choose, SpendDie, Engage, Resolve, Accept]
+actionTemplate :: Template DMContext TurnOutput DMEvent WorldState '[AskPlayer, Choose, SpendDie, Engage, Resolve, Accept]
 actionTemplate = Template
   { templateJinja = actionJinja
   , templateOutputSchema = turnOutputSchema
@@ -102,7 +102,7 @@ actionTemplate = Template
   }
 
 -- | Aftermath template - consequence state
-aftermathTemplate :: Template DMContext TurnOutput DMEvent WorldState '[ThinkAsDM, AskPlayer, Choose, SpendDie, Engage, Resolve, Accept]
+aftermathTemplate :: Template DMContext TurnOutput DMEvent WorldState '[AskPlayer, Choose, SpendDie, Engage, Resolve, Accept]
 aftermathTemplate = Template
   { templateJinja = aftermathJinja
   , templateOutputSchema = turnOutputSchema
@@ -110,7 +110,7 @@ aftermathTemplate = Template
   }
 
 -- | Downtime template - recovery montage state
-downtimeTemplate :: Template DMContext TurnOutput DMEvent WorldState '[ThinkAsDM, AskPlayer, Choose, SpendDie, Engage, Resolve, Accept]
+downtimeTemplate :: Template DMContext TurnOutput DMEvent WorldState '[AskPlayer, Choose, SpendDie, Engage, Resolve, Accept]
 downtimeTemplate = Template
   { templateJinja = downtimeJinja
   , templateOutputSchema = turnOutputSchema

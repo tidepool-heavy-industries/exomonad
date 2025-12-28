@@ -408,10 +408,9 @@ instance Tool Accept DMEvent WorldState where
 -- ══════════════════════════════════════════════════════════════
 
 -- | All DM tools as a type-safe list (including transition tools)
--- Note: SpeakAsNPC removed - dialogue should be part of narration, not a separate tool
-dmToolList :: ToolList DMEvent WorldState '[ThinkAsDM, AskPlayer, Choose, SpendDie, Engage, Resolve, Accept]
-dmToolList = TCons (Proxy @ThinkAsDM)
-           $ TCons (Proxy @AskPlayer)
+-- Note: SpeakAsNPC and ThinkAsDM removed - they add noise without value
+dmToolList :: ToolList DMEvent WorldState '[AskPlayer, Choose, SpendDie, Engage, Resolve, Accept]
+dmToolList = TCons (Proxy @AskPlayer)
            $ TCons (Proxy @Choose)
            $ TCons (Proxy @SpendDie)
            $ TCons (Proxy @Engage)
