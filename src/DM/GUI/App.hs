@@ -413,9 +413,12 @@ updateLoadingOverlay elements isLoading = do
 switchToGameTab :: GUIElements -> UI ()
 switchToGameTab elements = do
   -- Update tab styling and ARIA state
-  void $ element elements.geGameTab #. "tab active"
+  -- Note: Use set (attr "class") instead of #. for existing elements
+  void $ element elements.geGameTab
+    # set (attr "class") "tab active"
     # set (attr "aria-selected") "true"
-  void $ element elements.geHistoryTab #. "tab"
+  void $ element elements.geHistoryTab
+    # set (attr "class") "tab"
     # set (attr "aria-selected") "false"
 
   -- Show narrative, hide history
@@ -426,9 +429,12 @@ switchToGameTab elements = do
 switchToHistoryTab :: GUIElements -> UI ()
 switchToHistoryTab elements = do
   -- Update tab styling and ARIA state
-  void $ element elements.geGameTab #. "tab"
+  -- Note: Use set (attr "class") instead of #. for existing elements
+  void $ element elements.geGameTab
+    # set (attr "class") "tab"
     # set (attr "aria-selected") "false"
-  void $ element elements.geHistoryTab #. "tab active"
+  void $ element elements.geHistoryTab
+    # set (attr "class") "tab active"
     # set (attr "aria-selected") "true"
 
   -- Hide narrative, show history
