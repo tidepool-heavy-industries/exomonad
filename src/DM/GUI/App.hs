@@ -36,22 +36,29 @@ module DM.GUI.App
 import Control.Concurrent.STM (atomically, readTVar)
 import Control.Monad (void, when)
 import Data.IORef (newIORef, readIORef, writeIORef)
-import Data.Text (Text)
+import Data.Text ()
 import qualified Data.Text as T
 import Graphics.UI.Threepenny.Core
 import qualified Graphics.UI.Threepenny as UI
 
+import Control.Concurrent (forkIO)
+import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, takeMVar)
+import Data.Aeson (toJSON)
+
 import DM.State (WorldState(..), PlayerState(..), Position(..), PendingOutcome(..))
+import DM.CharacterCreation (CharacterChoices(..))
 import DM.GUI.Theme (noirTheme)
-import DM.GUI.Widgets.Stats (statsPanel, stressBar, coinDisplay, heatBar, wantedPips, traumaList)
+import DM.GUI.Widgets.Stats (statsPanel, stressBar, coinDisplay, heatBar, wantedPips, traumaList, dicePoolDisplay)
 import DM.GUI.Widgets.Mood (moodDisplay)
 import DM.GUI.Widgets.History (historyTab, updateHistoryTab)
 import DM.GUI.Widgets.Narrative (dmNarrativePane, updateDMNarrative)
 import DM.GUI.Widgets.Clocks (clocksPanel, updateClocksPanel)
 import DM.GUI.Widgets.Dice (diceChoice)
+import DM.GUI.Widgets.CharacterCreation (characterCreationWidget, CharacterCreationResult(..))
 import Tidepool.GUI.Core
 import Tidepool.GUI.Theme (applyTheme)
-import Tidepool.GUI.Widgets (textInput, choiceCards, loadingOverlay, updateDebugPanel, stateInspector, StateInspectorHandle(..), refreshStateInspector)
+import Tidepool.GUI.Widgets (textInput, choiceCards, loadingOverlay, updateDebugPanel)
+import DM.GUI.Widgets.State (dmStateInspector, DMStateInspectorHandle(..), refreshDMStateInspector)
 
 -- | Configuration for the DM GUI
 data DMGUIConfig = DMGUIConfig
@@ -83,7 +90,7 @@ data GUIElements = GUIElements
   , geInputArea        :: Element  -- ^ Input widget container
   , geLoadingOverlay   :: Element  -- ^ Loading overlay (hidden by default)
   , geDebugContent     :: Maybe Element  -- ^ Debug panel content (if shown)
-  , geStateInspector   :: Maybe StateInspectorHandle  -- ^ State inspector (if debug shown)
+  , geStateInspector   :: Maybe DMStateInspectorHandle  -- ^ State inspector (if debug shown)
   , geGameTab          :: Element  -- ^ Game tab button
   , geHistoryTab       :: Element  -- ^ History tab button
   }
@@ -130,9 +137,9 @@ buildLayout config bridge = do
       panel <- UI.div #. "debug-panel"
       titleEl <- UI.div #. "debug-section-title" # set text "DEBUG LOG"
       contentEl <- UI.div #. "debug-content"
-      -- State inspector (collapsible raw JSON view, live-updating)
-      inspectorHandle <- stateInspector bridge
-      void $ element panel #+ [element titleEl, element contentEl, element inspectorHandle.sihElement]
+      -- State inspector (collapsible tree view, live-updating)
+      inspectorHandle <- dmStateInspector bridge
+      void $ element panel #+ [element titleEl, element contentEl, element inspectorHandle.dsiContainer]
       pure (Just panel, Just contentEl, Just inspectorHandle)
     else pure (Nothing, Nothing, Nothing)
 
@@ -326,19 +333,23 @@ setupPolling config bridge elements = do
       refreshMood bridge elements
       refreshClocks bridge elements
       refreshHistory bridge elements
+      -- Refresh narrative (reads from state.scene.sceneBeats)
+      currentTab <- liftIO $ readIORef currentTabRef
+      when (currentTab == GameTab) $
+        refreshNarrative bridge elements
       -- Refresh state inspector if it's expanded (live view)
       case elements.geStateInspector of
-        Just handle -> refreshStateInspector handle bridge
+        Just handle -> refreshDMStateInspector handle bridge
         Nothing -> pure ()
 
-    -- Check for narrative changes
+    -- Check for narrative log changes (used as fallback when no active scene)
     narrativeVersion <- liftIO $ atomically $ readTVar bridge.gbNarrativeVersion
     prevNarrativeVersion <- liftIO $ readIORef prevNarrativeVersionRef
 
     when (narrativeVersion /= prevNarrativeVersion) $ do
       liftIO $ writeIORef prevNarrativeVersionRef narrativeVersion
+      -- Refresh narrative display (log is fallback when no scene)
       currentTab <- liftIO $ readIORef currentTabRef
-      -- Only refresh narrative if on Game tab
       when (currentTab == GameTab) $
         refreshNarrative bridge elements
       -- Trim narrative log to prevent unbounded growth
@@ -368,18 +379,53 @@ updateInputArea bridge elements pending = do
       void $ element inputArea # set children []
 
     Just (PendingText prompt) -> do
-      -- Clear and show text input
+      -- Clear and show text input with suggestion buttons
       void $ element inputArea # set children []
+
+      -- Reset any full-screen styles from character creation
+      void $ element inputArea # set style
+        [ ("display", "block")
+        , ("position", "static")
+        , ("inset", "auto")
+        , ("z-index", "auto")
+        ]
+
+      -- Show the normal game UI elements (in case they were hidden)
+      void $ element elements.geNarrativePane # set style [("display", "block")]
+
+      -- Get suggested actions from bridge
+      suggestions <- liftIO $ atomically $ readTVar bridge.gbSuggestedActions
+
+      -- Create suggestion buttons if any
+      suggestionsEl <- if null suggestions
+        then pure Nothing
+        else do
+          container <- UI.div #. "suggestions-container"
+          buttons <- mapM (mkSuggestionButton bridge) suggestions
+          void $ element container #+ map element buttons
+          pure (Just container)
+
+      -- Text input widget
       inputWidget <- textInput bridge prompt
-      void $ element inputArea #+ [element inputWidget]
-      void $ element inputArea # set style [("display", "block")]
+
+      -- Add both to input area
+      case suggestionsEl of
+        Just el -> void $ element inputArea #+ [element el, element inputWidget]
+        Nothing -> void $ element inputArea #+ [element inputWidget]
 
     Just (PendingChoice prompt options) -> do
       -- Clear and show choice cards
       void $ element inputArea # set children []
+      -- Reset any full-screen styles
+      void $ element inputArea # set style
+        [ ("display", "block")
+        , ("position", "static")
+        , ("inset", "auto")
+        , ("z-index", "auto")
+        ]
+      void $ element elements.geNarrativePane # set style [("display", "block")]
       choicesWidget <- choiceCards bridge prompt options
       void $ element inputArea #+ [element choicesWidget]
-      void $ element inputArea # set style [("display", "block")]
 
     Just (PendingDice prompt diceWithIndices) -> do
       -- Get current position from state for tier calculation
@@ -388,9 +434,64 @@ updateInputArea bridge elements pending = do
 
       -- Clear and show dice selection
       void $ element inputArea # set children []
+      -- Reset any full-screen styles
+      void $ element inputArea # set style
+        [ ("display", "block")
+        , ("position", "static")
+        , ("inset", "auto")
+        , ("z-index", "auto")
+        ]
+      void $ element elements.geNarrativePane # set style [("display", "block")]
       diceWidget <- diceChoice bridge prompt pos diceWithIndices
       void $ element inputArea #+ [element diceWidget]
-      void $ element inputArea # set style [("display", "block")]
+
+    Just PendingCharacterCreation -> do
+      -- Character creation is a full-screen takeover
+      -- Hide the normal game UI elements
+      void $ element elements.geNarrativePane # set style [("display", "none")]
+      void $ element elements.geHistoryPane # set style [("display", "none")]
+
+      -- Create local MVar to receive CharacterCreationResult
+      charCreationMVar <- liftIO newEmptyMVar
+      charWidget <- characterCreationWidget charCreationMVar
+
+      -- Add character creation to input area, make it full-screen
+      void $ element inputArea # set children []
+      void $ element inputArea #+ [element charWidget]
+      void $ element inputArea # set style
+        [ ("display", "flex")
+        , ("position", "fixed")
+        , ("inset", "0")
+        , ("z-index", "1000")
+        , ("background", "var(--bg-primary)")
+        ]
+
+      -- Set up callback to handle result and convert to JSON for bridge
+      liftIO $ void $ forkIO $ do
+        result <- takeMVar charCreationMVar
+        case result of
+          CharacterCreated choices ->
+            putMVar bridge.gbCharacterCreationResult (toJSON choices)
+          CharacterCreationCancelled ->
+            -- Put null to signal cancellation
+            putMVar bridge.gbCharacterCreationResult (toJSON (Nothing :: Maybe CharacterChoices))
+
+-- | Create a suggestion button that submits text when clicked
+mkSuggestionButton :: GUIBridge WorldState -> T.Text -> UI Element
+mkSuggestionButton bridge suggestion = do
+  btn <- UI.button #. "suggestion-btn"
+    # set text (T.unpack suggestion)
+    # set (attr "tabindex") "0"
+
+  on UI.click btn $ const $ liftIO $
+    safeSubmitResponse bridge (TextResponse suggestion)
+
+  -- Also handle Enter/Space for keyboard nav
+  on UI.keydown btn $ \code ->
+    when (code == 13 || code == 32) $ liftIO $
+      safeSubmitResponse bridge (TextResponse suggestion)
+
+  pure btn
 
 -- | Get the current position from world state
 --
@@ -456,6 +557,7 @@ refreshStats bridge elements = do
   heatEl <- heatBar player.heat
   wantedEl <- wantedPips player.wanted
   traumaEl <- traumaList player.trauma
+  diceEl <- dicePoolDisplay state.dicePool
 
   void $ element elements.geStatsContainer #+
     [ element titleEl
@@ -464,6 +566,7 @@ refreshStats bridge elements = do
     , element heatEl
     , element wantedEl
     , element traumaEl
+    , element diceEl
     ]
 
 -- | Refresh narrative pane (call when WorldState.scene changes)

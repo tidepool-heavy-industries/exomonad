@@ -54,6 +54,8 @@ import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Foldable (toList)
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.IO as TIO
+import System.IO (stderr)
 import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.Encoding as TLE
 import Data.Time.Format (formatTime, defaultTimeLocale)
@@ -87,8 +89,10 @@ textInput bridge prompt = do
 
   let submit = do
         val <- get value inputEl
-        when (not (null val)) $ liftIO $
-          safeSubmitResponse bridge (TextResponse (T.pack val))
+        liftIO $ TIO.hPutStrLn stderr $ "[textInput] Submit triggered, value: " <> T.pack (show val)
+        when (not (null val)) $ do
+          liftIO $ TIO.hPutStrLn stderr $ "[textInput] Submitting: " <> T.pack val
+          liftIO $ safeSubmitResponse bridge (TextResponse (T.pack val))
         void $ element inputEl # set value ""
 
   on UI.click submitBtn $ const submit

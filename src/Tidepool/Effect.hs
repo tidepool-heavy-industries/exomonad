@@ -24,6 +24,7 @@ module Tidepool.Effect
   , emit
   , requestChoice
   , requestText
+  , requestDice
   , logMsg
   , logDebug
   , logInfo
@@ -262,7 +263,15 @@ runLLM config = interpret $ \_ -> \case
 
     result <- liftIO $ Client.runTurnRequest clientConfig turnReq
     case result of
-      Left err -> error $ "LLM API error: " <> show err
+      Left err -> do
+        logWarn $ "[LLM] API error: " <> T.pack (show err)
+        -- Return a fallback result instead of crashing
+        pure $ TurnCompleted TurnResult
+          { trOutput = toJSON ()
+          , trToolsInvoked = []
+          , trNarrative = "*The spirits of Doskvol are silent. The world waits.*"
+          , trThinking = ""
+          }
       Right resp -> do
         -- Append just action + response to history (not the system prompt)
         let assistantMsg = Message Assistant [TextBlock resp.narrative]
@@ -631,6 +640,13 @@ data RequestInput :: Effect where
     :: Text              -- Prompt to display
     -> RequestInput m Text
 
+  -- | Request dice selection from player
+  -- Returns the index of the selected die
+  RequestDice
+    :: Text              -- Prompt to display
+    -> [(Int, Int)]      -- (die value, index) pairs
+    -> RequestInput m Int
+
 type instance DispatchOf RequestInput = 'Dynamic
 
 -- | Present a choice to the player and get their selection
@@ -641,6 +657,11 @@ requestChoice prompt choices = send (RequestChoice prompt choices)
 requestText :: RequestInput :> es => Text -> Eff es Text
 requestText = send . RequestText
 
+-- | Request dice selection from player
+-- Takes a prompt and (die value, index) pairs, returns the selected index
+requestDice :: RequestInput :> es => Text -> [(Int, Int)] -> Eff es Int
+requestDice prompt diceWithIndices = send (RequestDice prompt diceWithIndices)
+
 -- | Handler for input requests (terminal, UI, etc.)
 data InputHandler = InputHandler
   { ihChoice :: forall a. Text -> [(Text, a)] -> IO a
@@ -650,9 +671,10 @@ data InputHandler = InputHandler
   }
 
 runRequestInput :: IOE :> es => InputHandler -> Eff (RequestInput : es) a -> Eff es a
-runRequestInput (InputHandler choice txtInput _dice) = interpret $ \_ -> \case
+runRequestInput (InputHandler choice txtInput dice) = interpret $ \_ -> \case
   RequestChoice prompt choices -> liftIO $ choice prompt choices
   RequestText prompt           -> liftIO $ txtInput prompt
+  RequestDice prompt diceWithIndices -> liftIO $ dice prompt diceWithIndices
 
 -- ══════════════════════════════════════════════════════════════
 -- LOG EFFECT

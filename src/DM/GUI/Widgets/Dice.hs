@@ -5,7 +5,7 @@
 module DM.GUI.Widgets.Dice
   ( diceChoice
   , dieCard
-  , dieFace
+  , dieFaceClass
   , tierLabel
   ) where
 
@@ -79,7 +79,7 @@ dieCard bridge pos (displayNum, (dieValue, idx)) = do
   -- Keyboard shortcut hint
   numHint <- UI.span #. "dice-num" # set text (show displayNum <> ".")
 
-  faceEl <- UI.span #. "die-face" # set text (T.unpack (dieFace dieValue))
+  faceEl <- dieFaceIcon dieValue
 
   tierEl <- UI.span #. "tier-label"
     # set text (T.unpack (tierLabel tier))
@@ -97,15 +97,21 @@ dieCard bridge pos (displayNum, (dieValue, idx)) = do
   void $ element card #+ [element numHint, element faceEl, element tierEl]
   pure card
 
--- | Get the Unicode die face for a value
-dieFace :: Int -> Text
-dieFace 1 = "\x2680"  -- ⚀
-dieFace 2 = "\x2681"  -- ⚁
-dieFace 3 = "\x2682"  -- ⚂
-dieFace 4 = "\x2683"  -- ⚃
-dieFace 5 = "\x2684"  -- ⚄
-dieFace 6 = "\x2685"  -- ⚅
-dieFace _ = "?"
+-- | Create a Font Awesome die face icon element
+dieFaceIcon :: Int -> UI Element
+dieFaceIcon n = do
+  icon <- mkElement "i" #. ("die-face fa-solid " <> dieFaceClass n)
+  pure icon
+
+-- | Get the Font Awesome class for a die value
+dieFaceClass :: Int -> String
+dieFaceClass 1 = "fa-dice-one"
+dieFaceClass 2 = "fa-dice-two"
+dieFaceClass 3 = "fa-dice-three"
+dieFaceClass 4 = "fa-dice-four"
+dieFaceClass 5 = "fa-dice-five"
+dieFaceClass 6 = "fa-dice-six"
+dieFaceClass _ = "fa-question"
 
 -- | Get the display label for an outcome tier
 tierLabel :: OutcomeTier -> Text

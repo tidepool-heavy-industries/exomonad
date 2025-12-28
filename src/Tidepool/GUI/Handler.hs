@@ -34,6 +34,9 @@ guiChoice bridge prompt options = do
   let indexed = zip [0..] (map fst options)
       indexedOptions = [(label, idx) | (idx, label) <- indexed]
 
+  -- Hide spinner while waiting for player input
+  atomically $ writeTVar bridge.gbLLMActive False
+
   -- Post the request to the GUI
   atomically $ writeTVar bridge.gbPendingRequest
     (Just $ PendingChoice prompt indexedOptions)
@@ -41,8 +44,10 @@ guiChoice bridge prompt options = do
   -- Block until GUI responds
   response <- takeMVar bridge.gbRequestResponse
 
-  -- Clear the pending request
-  atomically $ writeTVar bridge.gbPendingRequest Nothing
+  -- Clear the pending request and re-enable spinner (LLM continues processing)
+  atomically $ do
+    writeTVar bridge.gbPendingRequest Nothing
+    writeTVar bridge.gbLLMActive True
 
   -- Return the value at the selected index (with bounds check)
   case response of
@@ -55,6 +60,9 @@ guiChoice bridge prompt options = do
 -- | Handle a text input request via the GUI
 guiText :: GUIBridge state -> Text -> IO Text
 guiText bridge prompt = do
+  -- Hide spinner while waiting for player input
+  atomically $ writeTVar bridge.gbLLMActive False
+
   -- Post the request to the GUI
   atomically $ writeTVar bridge.gbPendingRequest
     (Just $ PendingText prompt)
@@ -62,8 +70,10 @@ guiText bridge prompt = do
   -- Block until GUI responds
   response <- takeMVar bridge.gbRequestResponse
 
-  -- Clear the pending request
-  atomically $ writeTVar bridge.gbPendingRequest Nothing
+  -- Clear the pending request and re-enable spinner (LLM continues processing)
+  atomically $ do
+    writeTVar bridge.gbPendingRequest Nothing
+    writeTVar bridge.gbLLMActive True
 
   -- Return the text
   case response of
@@ -84,6 +94,9 @@ guiText bridge prompt = do
 -- @
 guiDice :: GUIBridge state -> Text -> [(Int, Int)] -> IO Int
 guiDice bridge prompt diceWithIndices = do
+  -- Hide spinner while waiting for player input
+  atomically $ writeTVar bridge.gbLLMActive False
+
   -- Post the dice request to the GUI
   atomically $ writeTVar bridge.gbPendingRequest
     (Just $ PendingDice prompt diceWithIndices)
@@ -91,8 +104,10 @@ guiDice bridge prompt diceWithIndices = do
   -- Block until GUI responds
   response <- takeMVar bridge.gbRequestResponse
 
-  -- Clear the pending request
-  atomically $ writeTVar bridge.gbPendingRequest Nothing
+  -- Clear the pending request and re-enable spinner (LLM continues processing)
+  atomically $ do
+    writeTVar bridge.gbPendingRequest Nothing
+    writeTVar bridge.gbLLMActive True
 
   -- Return the selected index
   case response of

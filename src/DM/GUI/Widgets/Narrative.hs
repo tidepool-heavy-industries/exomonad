@@ -48,6 +48,7 @@ dmNarrativePane bridge = do
 updateDMNarrative :: Element -> GUIBridge WorldState -> UI ()
 updateDMNarrative container bridge = do
   state <- liftIO $ atomically $ readTVar bridge.gbState
+  narrativeLog <- liftIO $ atomically $ readTVar bridge.gbNarrativeLog
 
   -- Clear existing content
   void $ element container # set children []
@@ -55,10 +56,16 @@ updateDMNarrative container bridge = do
   -- Render scene beats if we have an active scene
   case state.scene of
     Nothing -> do
-      -- No active scene - show a placeholder
-      placeholder <- UI.div #. "narrative-placeholder"
-        # set text "The story awaits..."
-      void $ element container #+ [element placeholder]
+      -- No active scene - show narrative log as fallback (e.g., loaded from DB)
+      if null narrativeLog
+        then do
+          placeholder <- UI.div #. "narrative-placeholder"
+            # set text "The story awaits..."
+          void $ element container #+ [element placeholder]
+        else do
+          -- Show narrative log entries
+          logEls <- mapM renderNarrativeLogEntry (toList narrativeLog)
+          void $ element container #+ map element logEls
 
     Just activeScene -> do
       -- Render each beat
@@ -67,6 +74,20 @@ updateDMNarrative container bridge = do
 
   -- Auto-scroll to bottom
   runFunction $ ffi "$(%1).scrollTop($(%1)[0].scrollHeight)" container
+
+-- | Render a narrative log entry (plain text from history)
+renderNarrativeLogEntry :: Text -> UI Element
+renderNarrativeLogEntry txt
+  | T.isPrefixOf "> " txt = do
+      -- Player action (prefixed with >)
+      entry <- UI.div #. "narrative-entry player-action"
+      void $ element entry # set text (T.unpack txt)
+      pure entry
+  | otherwise = do
+      -- DM narration
+      entry <- UI.div #. "narrative-entry dm-narration"
+      void $ element entry # set text (T.unpack txt)
+      pure entry
 
 -- | Render a single scene beat with appropriate styling
 renderSceneBeat :: SceneBeat -> UI Element

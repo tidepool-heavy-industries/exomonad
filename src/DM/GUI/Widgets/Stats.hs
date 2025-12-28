@@ -8,16 +8,16 @@ module DM.GUI.Widgets.Stats
   , wantedPips
   , coinDisplay
   , traumaList
+  , dicePoolDisplay
   ) where
 
 import Control.Concurrent.STM (atomically, readTVar)
 import Control.Monad (void)
-import Data.Text (Text)
 import qualified Data.Text as T
 import Graphics.UI.Threepenny.Core
 import qualified Graphics.UI.Threepenny as UI
 
-import DM.State (WorldState(..), PlayerState(..), Trauma(..))
+import DM.State (WorldState(..), PlayerState(..), Trauma(..), DicePool(..))
 import Tidepool.GUI.Core (GUIBridge(..))
 
 -- | Create the full stats panel
@@ -47,6 +47,9 @@ statsPanel bridge = do
   -- Trauma list
   traumaGroup <- traumaList player.trauma
 
+  -- Dice pool
+  diceGroup <- dicePoolDisplay state.dicePool
+
   void $ element panel #+
     [ element title
     , element stressGroup
@@ -54,6 +57,7 @@ statsPanel bridge = do
     , element heatGroup
     , element wantedGroup
     , element traumaGroup
+    , element diceGroup
     ]
 
   pure panel
@@ -141,3 +145,41 @@ traumaList traumas = do
 mkTraumaTag :: Trauma -> UI Element
 mkTraumaTag (Trauma txt) =
   UI.span #. "trauma-tag" # set text (T.unpack txt)
+
+-- | Create a dice pool display
+dicePoolDisplay :: DicePool -> UI Element
+dicePoolDisplay pool = do
+  group <- UI.div #. "stat-group"
+
+  label <- UI.div #. "stat-label" # set text "Dice"
+  container <- UI.div #. "dice-pool-display"
+
+  dice <- mapM mkDie pool.poolDice
+  void $ element container #+ map element dice
+
+  -- Show empty state if no dice
+  when (null pool.poolDice) $ do
+    emptyMsg <- UI.span #. "dice-empty" # set text "(none)"
+    void $ element container #+ [element emptyMsg]
+
+  void $ element group #+ [element label, element container]
+  pure group
+  where
+    when cond action = if cond then action else pure ()
+
+-- | Create a single die display using Font Awesome
+mkDie :: Int -> UI Element
+mkDie value = do
+  die <- mkElement "i" #. ("die-display fa-solid " ++ dieFaceClass value)
+    # set (attr "title") ("Die showing " ++ show value)
+  pure die
+
+-- | Get the Font Awesome class for a die value
+dieFaceClass :: Int -> String
+dieFaceClass 1 = "fa-dice-one"
+dieFaceClass 2 = "fa-dice-two"
+dieFaceClass 3 = "fa-dice-three"
+dieFaceClass 4 = "fa-dice-four"
+dieFaceClass 5 = "fa-dice-five"
+dieFaceClass 6 = "fa-dice-six"
+dieFaceClass _ = "fa-question"

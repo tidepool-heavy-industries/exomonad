@@ -60,6 +60,9 @@ module Tidepool.GUI.Core
     -- * Narrative
   , addNarrative
   , clearNarrative
+    -- * Suggested actions
+  , setSuggestedActions
+  , clearSuggestedActions
     -- * Log management
   , trimDebugLog
   , trimNarrativeLog
@@ -72,8 +75,10 @@ import Control.Exception (bracket_)
 import Data.Aeson (Value)
 import Data.Sequence (Seq)
 import qualified Data.Sequence as Seq
-import Data.Text (Text)
-import Data.Time (UTCTime, getCurrentTime)
+import Data.Text (Text, pack)
+import qualified Data.Text.IO as TIO
+import Data.Time (UTCTime, getCurrentTime, formatTime, defaultTimeLocale)
+import System.IO (stderr)
 
 -- | Bridge between game loop and GUI
 --
@@ -114,6 +119,13 @@ data GUIBridge state = GUIBridge
     -- ^ Version counter for debug log changes
   , gbLLMActive      :: TVar Bool
     -- ^ Whether an LLM call is in progress (for loading spinner)
+  , gbSuggestedActions :: TVar [Text]
+    -- ^ Suggested actions from last LLM response (for quick-pick buttons)
+  , gbSuggestionsVersion :: TVar Int
+    -- ^ Version counter for suggestions changes
+  , gbCharacterCreationResult :: MVar Value
+    -- ^ Character creation result (JSON-encoded CharacterChoices)
+    -- Used for one-time startup flow, bypasses normal request/response
   }
 
 -- | Create a new GUI bridge with initial state
@@ -128,6 +140,9 @@ newGUIBridge initialState = do
   debugVar <- newTVarIO Seq.empty
   debugVerVar <- newTVarIO 0
   llmActiveVar <- newTVarIO False
+  suggestionsVar <- newTVarIO []
+  suggestionsVerVar <- newTVarIO 0
+  charCreationVar <- newEmptyMVar
   pure GUIBridge
     { gbState = stateVar
     , gbStateVersion = stateVerVar
@@ -138,6 +153,9 @@ newGUIBridge initialState = do
     , gbDebugLog = debugVar
     , gbDebugVersion = debugVerVar
     , gbLLMActive = llmActiveVar
+    , gbSuggestedActions = suggestionsVar
+    , gbSuggestionsVersion = suggestionsVerVar
+    , gbCharacterCreationResult = charCreationVar
     }
 
 -- | Safely submit a response, ignoring if one is already pending
@@ -145,10 +163,10 @@ newGUIBridge initialState = do
 -- This prevents blocking on double-clicks or rapid submissions.
 -- Uses 'tryPutMVar' which returns immediately if the MVar is full.
 safeSubmitResponse :: GUIBridge state -> RequestResponse -> IO ()
-safeSubmitResponse bridge response =
-  void $ tryPutMVar bridge.gbRequestResponse response
-  where
-    void _ = pure ()
+safeSubmitResponse bridge response = do
+  TIO.hPutStrLn stderr $ "[safeSubmitResponse] Attempting to put: " <> pack (show response)
+  success <- tryPutMVar bridge.gbRequestResponse response
+  TIO.hPutStrLn stderr $ "[safeSubmitResponse] tryPutMVar result: " <> pack (show success)
 
 -- | A pending input request from the game loop
 data PendingRequest
@@ -159,6 +177,8 @@ data PendingRequest
   | PendingDice Text [(Int, Int)]
     -- ^ Dice selection: prompt and (die value, index) pairs
     -- The Position for tier calculation is stored separately in game state
+  | PendingCharacterCreation
+    -- ^ Character creation flow (full-screen takeover)
   deriving (Show, Eq)
 
 -- | Response from the GUI to the game loop
@@ -190,10 +210,20 @@ data DebugEntry = DebugEntry
 -- | Add a debug entry to the log
 --
 -- Also increments the debug version for change detection.
+-- Prints to stderr for terminal visibility.
 addDebugEntry :: GUIBridge state -> LogLevel -> Text -> Maybe Value -> IO ()
 addDebugEntry bridge level msg ctx = do
   now <- getCurrentTime
   let entry = DebugEntry now level msg ctx
+      timeStr = formatTime defaultTimeLocale "%H:%M:%S" now
+      levelStr = case level of
+        Debug -> "DEBUG"
+        Info  -> "INFO "
+        Warn  -> "WARN "
+        Error -> "ERROR"
+  -- Print to stderr for terminal visibility
+  TIO.hPutStrLn stderr $ "[" <> levelStr <> " " <> pack timeStr <> "] " <> msg
+  -- Add to GUI debug log
   atomically $ do
     modifyTVar' bridge.gbDebugLog (Seq.|> entry)
     modifyTVar' bridge.gbDebugVersion (+1)
@@ -211,6 +241,20 @@ clearNarrative :: GUIBridge state -> IO ()
 clearNarrative bridge = atomically $ do
   modifyTVar' bridge.gbNarrativeLog (const Seq.empty)
   modifyTVar' bridge.gbNarrativeVersion (+1)
+
+-- | Set the suggested actions for display
+--
+-- These are shown as quick-pick buttons in the input area.
+setSuggestedActions :: GUIBridge state -> [Text] -> IO ()
+setSuggestedActions bridge actions = atomically $ do
+  writeTVar bridge.gbSuggestedActions actions
+  modifyTVar' bridge.gbSuggestionsVersion (+1)
+
+-- | Clear the suggested actions
+clearSuggestedActions :: GUIBridge state -> IO ()
+clearSuggestedActions bridge = atomically $ do
+  writeTVar bridge.gbSuggestedActions []
+  modifyTVar' bridge.gbSuggestionsVersion (+1)
 
 -- | Update the game state
 --

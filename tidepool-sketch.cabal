@@ -31,6 +31,8 @@ library
         DM.Context
         DM.Templates
         DM.Loop
+        DM.Tarot
+        DM.CharacterCreation
         DM.GUI.App
         DM.GUI.Theme
         DM.GUI.Widgets.Stats
@@ -39,6 +41,8 @@ library
         DM.GUI.Widgets.History
         DM.GUI.Widgets.Dice
         DM.GUI.Widgets.Narrative
+        DM.GUI.Widgets.State
+        DM.GUI.Widgets.CharacterCreation
     build-depends:
         base >= 4.17 && < 5,
         effectful-core >= 2.3 && < 3,
@@ -128,6 +132,7 @@ executable tidepool-dm-gui
         containers >= 0.6 && < 1,
         unordered-containers >= 0.2 && < 1,
         threepenny-gui >= 0.9 && < 1,
+        effectful-core >= 2.3 && < 3,
         tidepool-sketch
     hs-source-dirs:   app
     default-language: GHC2021
