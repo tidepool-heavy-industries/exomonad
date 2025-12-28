@@ -1,0 +1,46 @@
+{# ORIENT: Classify the situation #}
+
+Classify what's happening. Return ONLY a situation tag.
+
+CONTEXT:
+- Phase: {{ phase }}
+- Function: {{ function | default("unknown") }}
+- Anchors: {{ anchors | join(", ") | default("none yet") }}
+- Unsure pile: {{ unsure_count }} items
+{% if last_anxiety %}- Avoiding: {{ last_anxiety }}{% endif %}
+
+INPUT:
+{% if photo_analysis %}Photo: {{ photo_analysis }}{% endif %}
+{% if user_text %}User: "{{ user_text }}"{% endif %}
+
+SITUATIONS:
+
+{% if phase == "Surveying" %}
+NeedFunction - no function established yet
+NeedAnchors - have function, need to know what stays
+OverwhelmedNeedMomentum - user seems stuck/overwhelmed, skip questions, start moving
+{% endif %}
+
+{% if phase == "Sorting" or phase == "Refining" or phase == "Splitting" %}
+ItemDescribed "<item>" Trash - user described trash/garbage
+ItemDescribed "<item>" Belongs "<where>" - item belongs somewhere specific
+ItemDescribed "<item>" Unsure - not clear yet
+ItemDescribed "<item>" NeedsDecisionSupport - user hesitating, needs help deciding
+ActionDone - user completed an instruction
+MainPileDone - current pile is empty/finished
+{% endif %}
+
+{% if phase == "Sorting" %}
+UnsureGrowing - unsure pile getting big, needs split
+{% endif %}
+
+ALWAYS CHECK:
+Stuck "<item>" - user can't decide on something
+Anxious "<trigger>" - user expressing fear/avoidance (e.g., "boxes freak me out")
+Flagging - energy dropping, slowing down
+WantsToStop - user wants to pause
+WantsToContinue - user wants to keep going
+AllDone - everything is done
+
+OUTPUT only the tag, e.g.:
+ItemDescribed "usb cable" Belongs "desk drawer"

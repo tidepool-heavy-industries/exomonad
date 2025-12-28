@@ -14,7 +14,6 @@ library
     import:           warnings
     exposed-modules:
         Tidepool.Effect
-        Tidepool.Machine
         Tidepool.Delta
         Tidepool.Template
         Tidepool.Tool
@@ -52,6 +51,17 @@ library
         DM.GUI.Widgets.State
         DM.GUI.Widgets.CharacterCreation
         DM.GUI.Widgets.Events
+        Tidying
+        Tidying.State
+        Tidying.Situation
+        Tidying.Action
+        Tidying.Decide
+        Tidying.Orient
+        Tidying.Act
+        Tidying.Context
+        Tidying.Output
+        Tidying.Templates
+        Tidying.Loop
     build-depends:
         base >= 4.17 && < 5,
         effectful-core >= 2.3 && < 3,
