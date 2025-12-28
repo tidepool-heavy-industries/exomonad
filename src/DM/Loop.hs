@@ -104,7 +104,7 @@ dmTurn
   -> Eff es Response
 dmTurn input = do
   -- Capture starting mood - used to detect trauma completion
-  startingMood <- gets @WorldState (.mood)
+  startingMood <- gets @WorldState currentMood
 
   -- 1. Record player action as scene beat (only on first call, not restarts)
   handlePlayerAction input
@@ -115,10 +115,9 @@ dmTurn input = do
   -- 3. If we STARTED in MoodTrauma, the turn just processed it - return to scene
   -- This ensures trauma gets one full turn to be narrated before transitioning
   case startingMood of
-    MoodTrauma _ -> do
+    Just (MoodTrauma _) -> do
       logInfo "Trauma turn completed, returning to scene"
-      modify @WorldState $ \s -> s
-        { mood = MoodScene (Encounter "aftermath of breakdown" UrgencyLow True) }
+      modify @WorldState $ updateMood (MoodScene (Encounter "aftermath of breakdown" UrgencyLow True))
     _ -> return ()
 
   return response
@@ -131,10 +130,14 @@ dmTurn input = do
       if interrupted
         then runMoodAwareTurn userAction  -- Restart with forced action mood
         else do
-          -- Get current mood and build context
+          -- Get current mood and scene from phase
           state <- get
-          let mood = state.mood
-          let context = buildDMContext state
+          -- Extract scene and mood from PhasePlaying (required for turn)
+          (scene, mood) <- case state.phase of
+            PhasePlaying s m -> return (s, m)
+            _ -> error "runMoodAwareTurn called outside PhasePlaying"
+
+          let context = buildDMContext scene mood state
           let loc = context.ctxLocation
           let npcs = context.ctxPresentNpcs
           let beats = context.ctxSceneBeats
@@ -197,12 +200,12 @@ dmTurn input = do
 
                 -- Record DM response as scene beat (for history)
                 let narration = result.trOutput.narration
-                modify $ \s -> case s.scene of
-                  Nothing -> s
-                  Just activeScene ->
+                modify $ \s -> case s.phase of
+                  PhasePlaying activeScene m ->
                     let beat = DMNarration narration
                         newBeats = activeScene.sceneBeats Seq.|> beat
-                    in s { scene = Just activeScene { sceneBeats = newBeats } }
+                    in s { phase = PhasePlaying (activeScene { sceneBeats = newBeats }) m }
+                  _ -> s
 
                 -- Check clock consequences
                 checkClockConsequences
@@ -243,10 +246,9 @@ dmTurn input = do
         Just interrupt | interrupt.ciForcesAction -> do
           -- Force transition to Action with the interrupt as context
           logInfo $ "Clock interrupt forces action: " <> interrupt.ciDescription
-          modify @WorldState $ \s -> s
-            { mood = MoodAction (AvRisky interrupt.ciEventType "react or suffer") Nothing
-            , pendingInterrupt = Nothing
-            }
+          modify @WorldState $ \s ->
+            updateMood (MoodAction (AvRisky interrupt.ciEventType "react or suffer") Nothing)
+              s { pendingInterrupt = Nothing }
           return True  -- Signal that we need to restart
         Just _interrupt -> do
           -- Non-forcing interrupt - was surfaced in context, now clear it
@@ -262,12 +264,12 @@ handlePlayerAction
   => PlayerInput
   -> Eff es ()
 handlePlayerAction input = modify $ \state ->
-  case state.scene of
-    Nothing -> state  -- No active scene, nothing to do
-    Just activeScene ->
+  case state.phase of
+    PhasePlaying activeScene mood ->
       let beat = PlayerAction input.piActionText input.piActionTags
           newBeats = activeScene.sceneBeats Seq.|> beat
-      in state { scene = Just activeScene { sceneBeats = newBeats } }
+      in state { phase = PhasePlaying (activeScene { sceneBeats = newBeats }) mood }
+    _ -> state  -- Not playing, nothing to do
 
 checkClockConsequences
   :: ( State WorldState :> es
@@ -320,7 +322,7 @@ checkTraumaTrigger stressBefore = do
           , tvTrigger = "accumulated pressure"
           , tvAdrenaline = False  -- Could be True if in combat
           }
-    modify @WorldState $ \s -> s { mood = MoodTrauma traumaVariant }
+    modify @WorldState $ updateMood (MoodTrauma traumaVariant)
 
 -- | Emit state change events by comparing before/after states
 --
@@ -376,15 +378,15 @@ emitStateChangeEvents before after reason = do
     emit $ DicePoolDepleted { dpContext = reason }
 
   -- Bargain mood transition
-  case (before.mood, after.mood) of
-    (_, MoodBargain bv) | not (isBargainMood before.mood) ->
+  case (currentMood before, currentMood after) of
+    (beforeMood, Just (MoodBargain bv)) | not (isBargainMood beforeMood) ->
       emit $ BargainOffered
         { boContext = bv.bvWhatDrained
         , boCanRetreat = bv.bvCanRetreat
         }
     _ -> pure ()
   where
-    isBargainMood (MoodBargain _) = True
+    isBargainMood (Just (MoodBargain _)) = True
     isBargainMood _ = False
 
 -- | Compress scene if it has too many beats
@@ -398,7 +400,7 @@ compressIfNeeded
   => Eff es ()
 compressIfNeeded = do
   state <- get
-  case state.scene of
+  case currentScene state of
     Nothing -> return ()  -- No active scene
     Just activeScene ->
       when (Seq.length activeScene.sceneBeats >= compressionThreshold) $ do
@@ -430,9 +432,9 @@ compressIfNeeded = do
               modify (applyCompression result.trOutput)
 
               -- Clear scene beats (keep scene active with empty beats)
-              modify $ \s -> case s.scene of
-                Nothing -> s
-                Just scene -> s { scene = Just scene { sceneBeats = Seq.empty } }
+              modify $ \s -> case s.phase of
+                PhasePlaying scene m -> s { phase = PhasePlaying (scene { sceneBeats = Seq.empty }) m }
+                _ -> s
 
               -- Emit compression event
               emit $ SceneCompressed result.trOutput.summary
@@ -444,7 +446,7 @@ compressIfNeeded = do
 -- SCENE MANAGEMENT
 -- ══════════════════════════════════════════════════════════════
 
--- | Start a new scene at a location
+-- | Start a new scene at a location (transitions to PhasePlaying)
 startScene
   :: State WorldState :> es
   => LocationId
@@ -452,20 +454,24 @@ startScene
   -> Stakes
   -> Eff es ()
 startScene locationId npcsPresent stakes = modify $ \state ->
-  state { scene = Just ActiveScene
-    { sceneLocation = locationId
-    , scenePresent = npcsPresent
-    , sceneStakes = stakes
-    , sceneBeats = Seq.empty
-    }
-  }
+  let newScene = ActiveScene
+        { sceneLocation = locationId
+        , scenePresent = npcsPresent
+        , sceneStakes = stakes
+        , sceneBeats = Seq.empty
+        }
+      -- Start with default scene mood
+      newMood = defaultMood
+  in state { phase = PhasePlaying newScene newMood }
 
--- | End the current scene, clearing it from state
+-- | End the current scene, transitioning to BetweenScenes
 -- Note: Call compressIfNeeded before this to preserve scene summary
+-- The context should be populated by the caller with LLM-generated transition text
 endCurrentScene
   :: State WorldState :> es
-  => Eff es ()
-endCurrentScene = modify $ \state -> state { scene = Nothing }
+  => BetweenScenesContext
+  -> Eff es ()
+endCurrentScene ctx = modify $ \state -> state { phase = PhaseBetweenScenes ctx }
 
 -- ══════════════════════════════════════════════════════════════
 -- RUNNING THE GAME
@@ -503,14 +509,15 @@ runDMGame initialState handleEvent saveState = do
             , ihDice = terminalDice
             }
 
-      -- Start without a scene - first turn establishes character and situation
-      let stateWithScene = initialState
-            { scene = Just ActiveScene
-                { sceneLocation = LocationId "intro"
-                , scenePresent = []
-                , sceneStakes = Stakes "Establish who you are in Doskvol"
-                , sceneBeats = Seq.empty
-                }
+      -- Start with an intro scene in PhasePlaying
+      let introScene = ActiveScene
+            { sceneLocation = LocationId "intro"
+            , scenePresent = []
+            , sceneStakes = Stakes "Establish who you are in Doskvol"
+            , sceneBeats = Seq.empty
+            }
+          stateWithScene = initialState
+            { phase = PhasePlaying introScene defaultMood
             }
 
       TIO.putStrLn "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -568,29 +575,31 @@ runDMGameWithDB conn gameId mCursor initialState handleEvent = do
             , ihDice = terminalDice
             }
 
-      -- Preserve loaded scene, or create intro scene if none exists
-      let stateWithScene = case initialState.scene of
-            Just _ -> initialState  -- Keep the loaded scene
-            Nothing -> initialState
-              { scene = Just ActiveScene
-                  { sceneLocation = LocationId "intro"
-                  , scenePresent = []
-                  , sceneStakes = Stakes "Establish who you are in Doskvol"
-                  , sceneBeats = Seq.empty
-                  }
+      -- Preserve loaded phase, or create intro scene if not playing
+      let stateWithScene = case initialState.phase of
+            PhasePlaying _ _ -> initialState  -- Keep the loaded scene
+            _ -> initialState
+              { phase = PhasePlaying
+                  (ActiveScene
+                    { sceneLocation = LocationId "intro"
+                    , scenePresent = []
+                    , sceneStakes = Stakes "Establish who you are in Doskvol"
+                    , sceneBeats = Seq.empty
+                    })
+                  defaultMood
               }
 
       TIO.putStrLn "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-      case initialState.scene of
-        Just _ -> TIO.putStrLn "Resuming your story in Doskvol..."
-        Nothing -> do
+      case initialState.phase of
+        PhasePlaying _ _ -> TIO.putStrLn "Resuming your story in Doskvol..."
+        _ -> do
           TIO.putStrLn "DOSKVOL. Industrial sprawl. Eternal night."
           TIO.putStrLn "The ghosts press against the lightning barriers."
           TIO.putStrLn "The gangs carve up the districts."
           TIO.putStrLn "You're about to step into the streets."
       TIO.putStrLn "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
       TIO.putStrLn "\n[Type 'quit' to exit]\n"
-      case initialState.scene of
+      case currentScene initialState of
         Just _ -> return ()  -- Don't repeat intro for resumed games
         Nothing -> TIO.putStrLn "Who are you? What brings you to Crow's Foot tonight?\n"
 
@@ -618,7 +627,7 @@ gameLoopWithDB conn gameId = loop []
     loop :: [Text] -> Eff (GameEffects WorldState DMEvent) ()
     loop lastSuggestions = do
       state <- get @WorldState
-      case state.scene of
+      case currentScene state of
         Nothing -> do
           liftIO $ TIO.putStrLn "\n[No active scene. Use startScene to begin.]"
           return ()
@@ -630,13 +639,14 @@ gameLoopWithDB conn gameId = loop []
                         <> " | Coin: " <> T.pack (show p.coin)
                         <> " | Heat: " <> T.pack (show p.heat) <> "/10"
                         <> " | Dice: " <> renderDice currentState.dicePool.poolDice
-              moodLabel = case currentState.mood of
-                MoodScene _     -> "SCENE"
-                MoodAction _ _  -> "ACTION"
-                MoodAftermath _ -> "AFTERMATH"
-                MoodDowntime _  -> "DOWNTIME"
-                MoodTrauma _    -> "TRAUMA"
-                MoodBargain _   -> "BARGAIN"
+              moodLabel = case currentMood currentState of
+                Just (MoodScene _)     -> "SCENE"
+                Just (MoodAction _ _)  -> "ACTION"
+                Just (MoodAftermath _) -> "AFTERMATH"
+                Just (MoodDowntime _)  -> "DOWNTIME"
+                Just (MoodTrauma _)    -> "TRAUMA"
+                Just (MoodBargain _)   -> "BARGAIN"
+                Nothing                -> "---"
           liftIO $ TIO.putStrLn $ "\n[" <> statusLine <> "]"
           liftIO $ TIO.putStrLn $ "[" <> moodLabel <> "]"
 
@@ -683,7 +693,7 @@ gameLoopWithSave saveCallback = loop []
     loop lastSuggestions = do
       -- Check if we have an active scene
       state <- get @WorldState
-      case state.scene of
+      case currentScene state of
         Nothing -> do
           -- No scene - prompt to start one or quit
           liftIO $ TIO.putStrLn "\n[No active scene. Use startScene to begin.]"
@@ -697,13 +707,14 @@ gameLoopWithSave saveCallback = loop []
                         <> " | Coin: " <> T.pack (show p.coin)
                         <> " | Heat: " <> T.pack (show p.heat) <> "/10"
                         <> " | Dice: " <> renderDice currentState.dicePool.poolDice
-              moodLabel = case currentState.mood of
-                MoodScene _     -> "SCENE"
-                MoodAction _ _  -> "ACTION"
-                MoodAftermath _ -> "AFTERMATH"
-                MoodDowntime _  -> "DOWNTIME"
-                MoodTrauma _    -> "TRAUMA"
-                MoodBargain _   -> "BARGAIN"
+              moodLabel = case currentMood currentState of
+                Just (MoodScene _)     -> "SCENE"
+                Just (MoodAction _ _)  -> "ACTION"
+                Just (MoodAftermath _) -> "AFTERMATH"
+                Just (MoodDowntime _)  -> "DOWNTIME"
+                Just (MoodTrauma _)    -> "TRAUMA"
+                Just (MoodBargain _)   -> "BARGAIN"
+                Nothing                -> "---"
           liftIO $ TIO.putStrLn $ "\n[" <> statusLine <> "]"
           liftIO $ TIO.putStrLn $ "[" <> moodLabel <> "]"
 
@@ -778,6 +789,14 @@ renderDice dice = T.intercalate " " $ map dieFace dice
       5 -> "⚄"
       6 -> "⚅"
       _ -> T.pack (show n)
+
+-- | Show phase for logging
+showPhase :: GamePhase -> String
+showPhase PhaseCharacterCreation = "CharacterCreation"
+showPhase (PhaseScenarioInit _) = "ScenarioInit"
+showPhase (PhasePlaying _ _) = "Playing"
+showPhase (PhaseBetweenScenes _) = "BetweenScenes"
+showPhase PhaseSessionEnded = "SessionEnded"
 
 -- | Render suggested actions for display
 renderSuggestedActions :: [Text] -> Text
@@ -929,21 +948,9 @@ guiGameLoop bridge = loop
       -- Sync current state to bridge (so GUI shows latest)
       liftIO $ updateState bridge (const state)
 
-      case state.scene of
-        Nothing -> do
-          -- No scene - create initial scene
-          let introScene = ActiveScene
-                { sceneLocation = LocationId "crows_foot"
-                , scenePresent = []
-                , sceneStakes = Stakes "Establish who you are in Doskvol"
-                , sceneBeats = Seq.empty
-                }
-          modify $ \s -> s { scene = Just introScene }
-          emit (NarrativeAdded "Who are you? What brings you to Crow's Foot tonight?")
-          loop
-
-        Just _ -> do
-          -- Wait for player input via GUI
+      case state.phase of
+        PhasePlaying _ _ -> do
+          -- Active scene - wait for player input
           playerInput <- waitForPlayerInput
 
           -- Check for quit
@@ -962,6 +969,22 @@ guiGameLoop bridge = loop
 
               -- Continue loop
               loop
+
+        PhaseCharacterCreation -> do
+          -- Need to create intro scene first
+          let introScene = ActiveScene
+                { sceneLocation = LocationId "crows_foot"
+                , scenePresent = []
+                , sceneStakes = Stakes "Establish who you are in Doskvol"
+                , sceneBeats = Seq.empty
+                }
+          modify @WorldState $ \s -> s { phase = PhasePlaying introScene defaultMood }
+          emit (NarrativeAdded "Who are you? What brings you to Crow's Foot tonight?")
+          loop
+
+        _ -> do
+          -- Other phases - for now just loop (will be handled by more complete dispatch)
+          loop
 
 -- ══════════════════════════════════════════════════════════════
 -- GUI WITH DATABASE PERSISTENCE
@@ -1007,7 +1030,7 @@ gameLoopWithGUIAndDB conn gameId mCursor bridge handleEvent = do
 
       -- Get initial state from bridge
       initialState <- atomically $ readTVar bridge.gbState
-      GUI.logInfo bridge $ "[Startup] Initial state loaded, scene: " <> T.pack (show $ fmap (const "...") initialState.scene)
+      GUI.logInfo bridge $ "[Startup] Initial state loaded, phase: " <> T.pack (showPhase initialState.phase)
 
       -- Load past messages and populate narrative log
       pastMessages <- Storage.loadMessages conn gameId
@@ -1021,15 +1044,15 @@ gameLoopWithGUIAndDB conn gameId mCursor bridge handleEvent = do
       GUI.logInfo bridge $ "[Startup] Restored " <> T.pack (show $ length initialState.suggestedActions) <> " suggested actions"
 
       -- Check if character creation is needed (fresh game)
-      stateAfterCreation <- case initialState.characterChoices of
-        Just _ -> do
-          -- Character already created, use existing state
-          GUI.logInfo bridge "[Startup] Character already exists, skipping creation"
-          return initialState
-        Nothing -> do
+      stateAfterCreation <- case initialState.phase of
+        PhaseCharacterCreation -> do
           -- New game - trigger character creation
           GUI.logInfo bridge "[Startup] Fresh game - starting character creation..."
           runCharacterCreation bridge initialState
+        _ -> do
+          -- Character already created, use existing state
+          GUI.logInfo bridge "[Startup] Character already exists, skipping creation"
+          return initialState
 
       -- Update bridge with potentially modified state
       atomically $ writeTVar bridge.gbState stateAfterCreation
@@ -1080,8 +1103,8 @@ runCharacterCreation bridge initialState = do
   case Aeson.fromJSON resultJson of
     Aeson.Success (Just choices) -> do
       GUI.logInfo bridge $ "[CharacterCreation] Character created: " <> choices.ccName
-      -- Update state with character choices
-      let newState = initialState { characterChoices = Just choices }
+      -- Transition to PhaseScenarioInit with character choices
+      let newState = initialState { phase = PhaseScenarioInit choices }
 
       -- Add intro narrative with character info
       addNarrative bridge "DOSKVOL. Industrial sprawl. Eternal night."
@@ -1177,7 +1200,7 @@ guiGameLoopWithDB conn gameId bridge = loop
         _ -> continueLoop state
 
     continueLoop :: WorldState -> Eff (GameEffects WorldState DMEvent) ()
-    continueLoop state = case state.scene of
+    continueLoop state = case currentScene state of
         Nothing -> do
           -- No scene - check if this is a fresh game (never had scenario init)
           -- Use chat history to detect: empty = never played, non-empty = scene ended
@@ -1190,8 +1213,9 @@ guiGameLoopWithDB conn gameId bridge = loop
             modify $ \s -> s { dicePool = DicePool startingDice }
             logInfo $ "[Loop] Fresh game - initialized dice pool: " <> T.pack (show startingDice)
 
-          case (isFreshGame, state.characterChoices) of
-            (True, Just choices) -> do
+          -- Phase-based dispatch
+          case state.phase of
+            PhaseScenarioInit choices -> do
               -- Fresh game with character - generate opening scenario
               logInfo "[Loop] Generating opening scenario from character choices..."
 
@@ -1229,11 +1253,9 @@ guiGameLoopWithDB conn gameId bridge = loop
                         }
 
                   modify $ \s -> s
-                    { phase = PhasePlaying
+                    { phase = PhasePlaying introScene defaultMood
                     , player = newPlayer
-                    , scene = Just introScene
                     , clocks = clocksFromInit
-                    , characterChoices = Nothing  -- Clear so we don't regenerate on scene end
                     , DM.State.suggestedActions = scenario.siSuggestedActions
                     }
 
@@ -1254,19 +1276,34 @@ guiGameLoopWithDB conn gameId bridge = loop
 
               loop
 
-            (True, Nothing) ->
-              -- Fresh game without character choices is invalid state
+            PhaseCharacterCreation ->
+              -- Character creation not yet done - should not happen in running game
               error "Cannot start game without character choices - character creation was cancelled or failed"
 
-            (False, _) -> do
-              -- Scene ended (not fresh game) - transition to BetweenScenes
-              logInfo "[Loop] Scene ended, entering BetweenScenes..."
+            PhaseBetweenScenes _ctx -> do
+              -- Handle between-scenes decision (user chose from menu)
+              logInfo "[Loop] In BetweenScenes phase, handling transition..."
               handleBetweenScenes bridge
-              -- Save state after BetweenScenes (in case of crash before next turn)
+              -- Save state after BetweenScenes
               updatedState <- get @WorldState
               liftIO $ updateState bridge (const updatedState)
               liftIO $ Storage.saveGameState conn gameId updatedState
               loop
+
+            PhasePlaying _ _ -> do
+              -- Scene active but no scene in phase? This shouldn't happen
+              -- But handle gracefully by prompting BetweenScenes
+              logInfo "[Loop] Scene ended, entering BetweenScenes..."
+              handleBetweenScenes bridge
+              updatedState <- get @WorldState
+              liftIO $ updateState bridge (const updatedState)
+              liftIO $ Storage.saveGameState conn gameId updatedState
+              loop
+
+            PhaseSessionEnded -> do
+              -- Game is over
+              logInfo "[Loop] Session ended."
+              return ()
 
         Just _ -> do
           -- Wait for player input via GUI (spinner is OFF during input)
@@ -1336,12 +1373,12 @@ handleBetweenScenes bridge = do
   -- 5. Build available options based on current state
   let options = buildAvailableOptions state
 
-  -- 6. Set display context in state (GUI will read this for rendering)
+  -- 6. Update phase with new context (GUI reads from phase)
   let ctx = BetweenScenesContext
         { bscClocks = clockSummaries
         , bscTransitionNarration = transitionText
         }
-  modify @WorldState $ \s -> s { betweenScenesDisplay = Just ctx }
+  modify @WorldState $ \s -> s { phase = PhaseBetweenScenes ctx }
 
   -- Sync state so GUI sees the context
   currentState <- get @WorldState
@@ -1353,8 +1390,7 @@ handleBetweenScenes bridge = do
   let labeledOptions = [(optionLabel opt, opt) | opt <- options]
   chosenOption <- requestChoice "What do you do?" labeledOptions
 
-  -- 8. Clear display context after choice
-  modify @WorldState $ \s -> s { betweenScenesDisplay = Nothing }
+  -- 8. Choice made - phase will transition on next action (no need to clear)
 
   logInfo $ "[BetweenScenes] Player chose: " <> T.pack (show chosenOption)
 
@@ -1521,10 +1557,9 @@ createNewScene = do
         , sceneBeats = Seq.empty
         }
 
+  let newMood = MoodScene (Encounter "continuing" UrgencyLow True)
   modify @WorldState $ \s -> s
-    { phase = PhasePlaying
-    , scene = Just contScene
-    , mood = MoodScene (Encounter "continuing" UrgencyLow True)  -- Reset mood for new scene
+    { phase = PhasePlaying contScene newMood
     }
 
   emit (NarrativeAdded "---")

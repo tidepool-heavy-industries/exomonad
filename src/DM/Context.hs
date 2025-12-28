@@ -190,24 +190,12 @@ data FactionSummary = FactionSummary
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
--- | Build context for DM turn template from world state
--- Uses a fallback scene if none is active
-buildDMContext :: WorldState -> DMContext
-buildDMContext world = case world.scene of
-  Nothing ->
-    -- Use a minimal fallback context when no scene is active
-    let fallbackScene = ActiveScene
-          { sceneLocation = LocationId "unknown"
-          , scenePresent = []
-          , sceneStakes = Stakes "Find your bearings in Doskvol"
-          , sceneBeats = mempty
-          }
-    in buildContextFromScene world fallbackScene
-  Just activeScene -> buildContextFromScene world activeScene
-
--- | Build context from a specific scene
-buildContextFromScene :: WorldState -> ActiveScene -> DMContext
-buildContextFromScene world activeScene =
+-- | Build context for DM turn template from active scene and mood
+--
+-- The scene and mood are passed explicitly (from PhasePlaying pattern match).
+-- This eliminates the need for Maybe checks - callers must have a valid scene.
+buildDMContext :: ActiveScene -> DMMood -> WorldState -> DMContext
+buildDMContext activeScene mood world =
     let
       -- Get location from scene
       location = fromMaybe defaultLocation $
@@ -239,13 +227,13 @@ buildContextFromScene world activeScene =
       -- Build dice context
       diceCtx = buildDiceContext world
 
-      -- Build mood context
-      (moodLabel, moodVariant) = buildMoodContext world.mood
+      -- Build mood context (from passed mood, not world.mood)
+      (moodLabel, moodVariant) = buildMoodContext mood
 
     in DMContext
       { ctxPlayer = world.player
       , ctxPrecarity = precarity
-      , ctxMood = world.mood
+      , ctxMood = mood
       , ctxMoodLabel = moodLabel
       , ctxMoodVariant = moodVariant
       , ctxDice = diceCtx

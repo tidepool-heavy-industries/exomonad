@@ -45,7 +45,7 @@ import Control.Concurrent (forkIO)
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
 import Data.Aeson (toJSON)
 
-import DM.State (WorldState(..), PlayerState(..), Position(..), PendingOutcome(..))
+import DM.State (WorldState(..), PlayerState(..), Position(..), PendingOutcome(..), GamePhase(..), currentMood)
 import DM.CharacterCreation (CharacterChoices(..))
 import DM.GUI.Theme (noirTheme)
 import DM.GUI.Widgets.Stats (statsPanel, stressBar, coinDisplay, heatBar, wantedPips, traumaList, dicePoolDisplay)
@@ -181,7 +181,9 @@ buildMainPanel bridge = do
   -- Mood header with separate label and description for updates
   moodHeaderEl <- UI.div #. "mood-header"
   state <- liftIO $ atomically $ readTVar bridge.gbState
-  let (lbl, desc) = moodDisplay state.mood
+  let (lbl, desc) = case currentMood state of
+        Just m  -> moodDisplay m
+        Nothing -> ("---", "Not in active scene")
   moodLabelEl <- UI.span #. "mood-label" # set text (T.unpack lbl)
   moodDescEl <- UI.span #. "mood-description" # set text (T.unpack desc)
   void $ element moodHeaderEl #+ [element moodLabelEl, UI.string " - ", element moodDescEl]
@@ -429,13 +431,13 @@ updateInputArea bridge elements pending = do
         ]
       void $ element elements.geNarrativePane # set style [("display", "block")]
 
-      -- If BetweenScenes context is set, render it above the choice cards
-      case state.betweenScenesDisplay of
-        Just ctx -> do
+      -- If in BetweenScenes phase, render context above the choice cards
+      case state.phase of
+        PhaseBetweenScenes ctx -> do
           bsContext <- betweenScenesContextWidget ctx
           choicesWidget <- choiceCards bridge prompt options
           void $ element inputArea #+ [element bsContext, element choicesWidget]
-        Nothing -> do
+        _ -> do
           choicesWidget <- choiceCards bridge prompt options
           void $ element inputArea #+ [element choicesWidget]
 
@@ -593,7 +595,9 @@ refreshNarrative bridge elements =
 refreshMood :: GUIBridge WorldState -> GUIElements -> UI ()
 refreshMood bridge elements = do
   state <- liftIO $ atomically $ readTVar bridge.gbState
-  let (lbl, desc) = moodDisplay state.mood
+  let (lbl, desc) = case currentMood state of
+        Just m  -> moodDisplay m
+        Nothing -> ("---", "Not in active scene")
 
   void $ element elements.geMoodLabel # set text (T.unpack lbl)
   void $ element elements.geMoodDescription # set text (T.unpack desc)

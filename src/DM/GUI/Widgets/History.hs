@@ -36,7 +36,7 @@ updateHistoryTab container bridge = do
   state <- liftIO $ atomically $ readTVar bridge.gbState
 
   -- Current scene beats (if any)
-  currentSceneSection <- case state.scene of
+  currentSceneSection <- case currentScene state of
     Nothing -> UI.div # set text "No active scene"
     Just activeScene -> do
       section <- UI.div #. "history-section"

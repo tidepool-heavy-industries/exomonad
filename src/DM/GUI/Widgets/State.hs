@@ -75,8 +75,8 @@ refreshContent contentEl bridge = do
 buildStateTree :: WorldState -> [UI Element]
 buildStateTree state =
   [ playerSection state.player
-  , sceneSection state.scene
-  , moodSection state.mood
+  , sceneSection (currentScene state)
+  , moodSection (currentMood state)
   , factionsSection state.factions
   , npcsSection state.npcs
   , locationsSection state.locations
@@ -117,9 +117,12 @@ sceneSection (Just s) = collapsibleSection "Scene" True $
   where
     formatPresent ps = T.intercalate ", " [nid.unNpcId | nid <- ps]
 
--- | Mood section
-moodSection :: DMMood -> UI Element
-moodSection m = collapsibleSection "Mood" False
+-- | Mood section (from phase, may not exist)
+moodSection :: Maybe DMMood -> UI Element
+moodSection Nothing = collapsibleSection "Mood" False
+  [ field "Current" "Not playing"
+  ]
+moodSection (Just m) = collapsibleSection "Mood" False
   [ field "Current" (formatMood m)
   ]
   where
@@ -128,6 +131,7 @@ moodSection m = collapsibleSection "Mood" False
     formatMood (MoodAftermath out) = "Aftermath: " <> showT out
     formatMood (MoodDowntime _) = "Downtime"
     formatMood (MoodTrauma t) = "Trauma: " <> t.tvWhatBroke
+    formatMood (MoodBargain _) = "Bargaining"
 
     formatSceneVariant enc@Encounter{} = enc.svSource
     formatSceneVariant opp@Opportunity{} = opp.svNature

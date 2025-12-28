@@ -4,6 +4,13 @@ module DM.State
     WorldState(..)
   , initialWorld
   , GamePhase(..)
+    -- ** Phase Accessors
+  , currentScene
+  , currentMood
+    -- ** Phase Updaters
+  , updateMood
+  , updateScene
+  , updateSceneAndMood
 
     -- * DM Mood (State Machine)
   , DMMood(..)
@@ -104,7 +111,8 @@ import Data.Hashable (Hashable(..))
 import Data.Sequence (Seq)
 import qualified Data.Sequence as Seq
 import GHC.Generics (Generic)
-import Data.Aeson (ToJSON, FromJSON, ToJSONKey, FromJSONKey)
+import Data.Aeson (ToJSON(..), FromJSON(..), ToJSONKey, FromJSONKey, object, (.=), (.:), withObject)
+import qualified Data.Text as T
 import Text.Ginger.GVal (ToGVal(..), toGVal, dict, list)
 import Text.Ginger.GVal.Generic (genericToGVal)
 import qualified Data.Foldable as F
@@ -270,29 +278,64 @@ data ClockInterrupt = ClockInterrupt
 defaultMood :: DMMood
 defaultMood = MoodScene (Encounter "Starting scene" UrgencyLow True)
 
--- | Explicit game phase (replaces implicit detection from nullable fields)
+-- | Game phase as sum type - each constructor carries phase-specific state
+--
+-- This makes illegal states unrepresentable:
+-- - PhasePlaying ALWAYS has a scene and mood
+-- - PhaseScenarioInit ALWAYS has character choices
+-- - PhaseBetweenScenes ALWAYS has context
 data GamePhase
-  = PhaseCharacterCreation       -- Needs character setup
-  | PhasePlaying                 -- Active scene, normal gameplay
-  | PhaseBetweenScenes           -- Scene ended, choosing what's next
-  | PhaseSessionEnded            -- Player chose to end session, exit loop
-  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+  = PhaseCharacterCreation
+    -- ^ Initial state: needs character setup
+  | PhaseScenarioInit CharacterChoices
+    -- ^ Has character choices, needs scenario generation
+  | PhasePlaying ActiveScene DMMood
+    -- ^ Active gameplay with scene and mood
+  | PhaseBetweenScenes BetweenScenesContext
+    -- ^ Between scenes, player choosing what's next
+  | PhaseSessionEnded
+    -- ^ Player chose to end session
+  deriving (Show, Eq, Generic)
+
+-- Custom JSON instances for GamePhase sum type with payloads
+instance ToJSON GamePhase where
+  toJSON PhaseCharacterCreation = object ["tag" .= ("PhaseCharacterCreation" :: Text)]
+  toJSON (PhaseScenarioInit choices) = object
+    ["tag" .= ("PhaseScenarioInit" :: Text), "choices" .= choices]
+  toJSON (PhasePlaying scene mood) = object
+    ["tag" .= ("PhasePlaying" :: Text), "scene" .= scene, "mood" .= mood]
+  toJSON (PhaseBetweenScenes ctx) = object
+    ["tag" .= ("PhaseBetweenScenes" :: Text), "context" .= ctx]
+  toJSON PhaseSessionEnded = object ["tag" .= ("PhaseSessionEnded" :: Text)]
+
+instance FromJSON GamePhase where
+  parseJSON = withObject "GamePhase" $ \v -> do
+    tag <- v .: "tag"
+    case tag :: Text of
+      "PhaseCharacterCreation" -> pure PhaseCharacterCreation
+      "PhaseScenarioInit" -> PhaseScenarioInit <$> v .: "choices"
+      "PhasePlaying" -> PhasePlaying <$> v .: "scene" <*> v .: "mood"
+      "PhaseBetweenScenes" -> PhaseBetweenScenes <$> v .: "context"
+      "PhaseSessionEnded" -> pure PhaseSessionEnded
+      other -> fail $ "Unknown GamePhase tag: " <> T.unpack other
 
 -- ══════════════════════════════════════════════════════════════
 -- CORE STATE
 -- ══════════════════════════════════════════════════════════════
 
+-- | World state with phase-specific data on GamePhase constructors
+--
+-- Cross-cutting state (persists across phases) stays here.
+-- Phase-specific state (scene, mood, choices, context) lives on GamePhase.
 data WorldState = WorldState
-  { phase :: GamePhase                -- Explicit game phase
-  , mood :: DMMood                    -- Current DM mood (state machine)
-  , player :: PlayerState
+  { phase :: GamePhase                -- Phase with its specific state
+  , player :: PlayerState             -- Stress/coin/heat persist across phases
   , factions :: HashMap FactionId Faction
   , clocks :: HashMap ClockId Clock
   , locations :: HashMap LocationId Location
   , npcs :: HashMap NpcId Npc
   , rumors :: [Rumor]
   , threads :: [Thread]
-  , scene :: Maybe ActiveScene
   , tone :: Tone
   , sessionHistory :: Seq SceneSummary
   , sessionGoals :: [Text]
@@ -305,10 +348,6 @@ data WorldState = WorldState
   , pendingInterrupt :: Maybe ClockInterrupt  -- Clock triggered, awaiting handling
   -- UI state (persisted for resume)
   , suggestedActions :: [Text]        -- Last LLM suggestions for quick-pick buttons
-  -- Character creation (Nothing means needs setup)
-  , characterChoices :: Maybe CharacterChoices
-  -- BetweenScenes display (ephemeral, not persisted)
-  , betweenScenesDisplay :: Maybe BetweenScenesContext
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
@@ -321,7 +360,6 @@ data SceneSummary = SceneSummary
 initialWorld :: WorldState
 initialWorld = WorldState
   { phase = PhaseCharacterCreation
-  , mood = defaultMood
   , player = initialPlayer
   , factions = HM.empty
   , clocks = HM.empty
@@ -329,7 +367,6 @@ initialWorld = WorldState
   , npcs = HM.empty
   , rumors = []
   , threads = []
-  , scene = Nothing
   , tone = ToneNeutral
   , sessionHistory = Seq.empty
   , sessionGoals = []
@@ -339,9 +376,37 @@ initialWorld = WorldState
   , unresolvedThreats = []
   , pendingInterrupt = Nothing
   , suggestedActions = []
-  , characterChoices = Nothing
-  , betweenScenesDisplay = Nothing
   }
+
+-- | Get scene if in PhasePlaying (for read-only contexts)
+currentScene :: WorldState -> Maybe ActiveScene
+currentScene s = case s.phase of
+  PhasePlaying scene _ -> Just scene
+  _ -> Nothing
+
+-- | Get mood if in PhasePlaying
+currentMood :: WorldState -> Maybe DMMood
+currentMood s = case s.phase of
+  PhasePlaying _ mood -> Just mood
+  _ -> Nothing
+
+-- | Update mood if in PhasePlaying (no-op otherwise)
+updateMood :: DMMood -> WorldState -> WorldState
+updateMood newMood s = case s.phase of
+  PhasePlaying scene _ -> s { phase = PhasePlaying scene newMood }
+  _ -> s
+
+-- | Update scene if in PhasePlaying (no-op otherwise)
+updateScene :: ActiveScene -> WorldState -> WorldState
+updateScene newScene s = case s.phase of
+  PhasePlaying _ mood -> s { phase = PhasePlaying newScene mood }
+  _ -> s
+
+-- | Update both scene and mood if in PhasePlaying
+updateSceneAndMood :: ActiveScene -> DMMood -> WorldState -> WorldState
+updateSceneAndMood newScene newMood s = case s.phase of
+  PhasePlaying _ _ -> s { phase = PhasePlaying newScene newMood }
+  _ -> s
 
 -- ══════════════════════════════════════════════════════════════
 -- PLAYER STATE

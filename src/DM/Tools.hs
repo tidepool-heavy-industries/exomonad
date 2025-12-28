@@ -51,6 +51,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Aeson (Value, ToJSON, FromJSON)
 import Data.List (delete)
+import Data.Maybe (fromMaybe)
 import Control.Monad (when)
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HM
@@ -290,18 +291,16 @@ instance Tool SpendDie DMEvent WorldState where
         let outcomeTier = calculateOutcome input.position chosenDie
 
         -- Check if pool is now empty - if so, queue transition to bargain
-        let currentMood = state.mood
+        let moodMaybe = currentMood state
+            theMood = fromMaybe defaultMood moodMaybe
             newState = if null newPool
-              then state
-                { dicePool = state.dicePool { poolDice = newPool }
-                , mood = MoodBargain Bargaining
+              then updateMood (MoodBargain Bargaining
                     { bvWhatDrained = input.situation
-                    , bvCanRetreat = not (isDesperateMood currentMood)
+                    , bvCanRetreat = not (isDesperateMood theMood)
                     , bvRetreatDesc = "slip away and regroup"
                     , bvPassOutDesc = "collapse from exhaustion"
-                    , bvPreviousMood = currentMood
-                    }
-                }
+                    , bvPreviousMood = theMood
+                    }) state { dicePool = state.dicePool { poolDice = newPool } }
               else state { dicePool = state.dicePool { poolDice = newPool } }
 
         put newState
@@ -390,7 +389,7 @@ instance Tool Engage DMEvent WorldState where
           _ -> Nothing
 
     -- Transition to Action mood
-    modify $ \s -> s { mood = MoodAction position domain }
+    modify $ updateMood (MoodAction position domain)
     emit (MoodTransition "engage" "scene" "action")
     return ()
 
@@ -431,7 +430,7 @@ instance Tool Resolve DMEvent WorldState where
           _ -> AmCostly input.resolveWhat input.resolveCosts input.resolveComplications
 
     -- Transition to Aftermath mood
-    modify $ \s -> s { mood = MoodAftermath aftermath }
+    modify $ updateMood (MoodAftermath aftermath)
     emit (MoodTransition "resolve" "action" "aftermath")
     return ()
 
@@ -458,7 +457,7 @@ instance Tool Accept DMEvent WorldState where
 
   executeTool _input = do
     -- Return to Scene mood (Encounter variant - default low-urgency continuation)
-    modify @WorldState $ \s -> s { mood = MoodScene (Encounter "continuing" UrgencyLow True) }
+    modify @WorldState $ updateMood (MoodScene (Encounter "continuing" UrgencyLow True))
     emit (MoodTransition "accept" "aftermath" "scene")
     return ()
 
@@ -512,17 +511,16 @@ instance Tool AcceptBargain DMEvent WorldState where
     rolledDice <- mapM (\_ -> randomInt 1 6) newDice
     let finalPool = state.dicePool.poolDice ++ rolledDice
 
-    -- Get previous mood to return to
-    let returnMood = case state.mood of
-          MoodBargain bv -> bv.bvPreviousMood
-          _ -> MoodScene (Encounter "continuing" UrgencyLow True)
+    -- Get previous mood to return to (from MoodBargain if we're in it)
+    let returnMood = case currentMood state of
+          Just (MoodBargain bv) -> bv.bvPreviousMood
+          Just m -> m  -- Keep current mood if not bargaining
+          Nothing -> MoodScene (Encounter "continuing" UrgencyLow True)
 
     -- Update state: apply cost, add dice, return to previous mood
     modify @WorldState $ \s -> applyCostToState s input
-    modify @WorldState $ \s -> s
-      { dicePool = s.dicePool { poolDice = finalPool }
-      , mood = returnMood
-      }
+    modify @WorldState $ \s -> updateMood returnMood $
+      s { dicePool = s.dicePool { poolDice = finalPool } }
 
     emit (MoodTransition "accept_bargain" "bargain" (moodName returnMood))
 
@@ -586,9 +584,12 @@ instance Tool Retreat DMEvent WorldState where
   executeTool _input = do
     -- End scene, transition to BetweenScenes phase
     -- Player will choose what to do (lay low, recover, work goal, new scene)
+    let retreatContext = BetweenScenesContext
+          { bscClocks = []
+          , bscTransitionNarration = "You retreat to safety, leaving the scene behind..."
+          }
     modify @WorldState $ \s -> s
-      { scene = Nothing               -- Scene ends
-      , phase = PhaseBetweenScenes    -- Go to between-scenes phase
+      { phase = PhaseBetweenScenes retreatContext
       , dicePool = DicePool [4, 4, 4] -- Refresh with 3 average dice
       }
     emit (MoodTransition "retreat" "bargain" "between_scenes")
@@ -638,10 +639,10 @@ instance Tool PassOut DMEvent WorldState where
           , sceneStakes = Stakes "Figure out what happened"
           , sceneBeats = mempty
           }
+        wakeUpMood = MoodScene (Encounter "waking up" UrgencyMedium False)  -- Can't just walk away
 
     modify @WorldState $ \s -> s
-      { scene = Just wakeUpScene
-      , mood = MoodScene (Encounter "waking up" UrgencyMedium False)  -- Can't just walk away
+      { phase = PhasePlaying wakeUpScene wakeUpMood
       , dicePool = DicePool [3, 3]  -- Minimal dice, still drained
       , player = s.player { stress = min 9 (s.player.stress + 2) }  -- Passing out is stressful
       }
@@ -699,8 +700,8 @@ makeDMDispatcher
   :: (State WorldState :> es, Emit DMEvent :> es, RequestInput :> es, Random :> es)
   => ToolDispatcher DMEvent es
 makeDMDispatcher name input = do
-  -- Record mood before tool execution
-  moodBefore <- get @WorldState >>= \s -> return s.mood
+  -- Record mood before tool execution (from phase if playing)
+  moodBefore <- get @WorldState >>= \s -> return (currentMood s)
 
   -- Dispatch to the regular tool dispatcher
   result <- makeDispatcher dmToolList name input
@@ -710,20 +711,28 @@ makeDMDispatcher name input = do
     then case result of
       Left err -> return (Left err)
       Right (ToolSuccess val) -> do
-        -- Check if mood actually changed
-        moodAfter <- get @WorldState >>= \s -> return s.mood
+        -- Check if mood actually changed (from phase if playing)
+        moodAfter <- get @WorldState >>= \s -> return (currentMood s)
         -- Debug: log mood comparison
-        emit (DMThought $ "Dispatcher: " <> name <> " before=" <> T.pack (show moodBefore) <> " after=" <> T.pack (show moodAfter) <> " changed=" <> T.pack (show $ moodChanged moodBefore moodAfter))
-        if moodChanged moodBefore moodAfter
+        emit (DMThought $ "Dispatcher: " <> name <> " before=" <> T.pack (show moodBefore) <> " after=" <> T.pack (show moodAfter) <> " changed=" <> T.pack (show $ moodMaybeChanged moodBefore moodAfter))
+        if moodMaybeChanged moodBefore moodAfter
           then return (Right (ToolBreak ("mood transition: " <> name)))
           else return (Right (ToolSuccess val))
       Right (ToolBreak reason) -> return (Right (ToolBreak reason))
     else return result  -- Non-transition tools pass through unchanged
   where
-    -- Simple check if mood changed
+    -- Simple check if mood changed (handles Maybe from currentMood)
+    moodMaybeChanged :: Maybe DMMood -> Maybe DMMood -> Bool
+    moodMaybeChanged Nothing Nothing = False
+    moodMaybeChanged Nothing (Just _) = True
+    moodMaybeChanged (Just _) Nothing = True
+    moodMaybeChanged (Just m1) (Just m2) = moodChanged m1 m2
+
     moodChanged :: DMMood -> DMMood -> Bool
     moodChanged (MoodScene _) (MoodScene _) = False
     moodChanged (MoodAction _ _) (MoodAction _ _) = False
     moodChanged (MoodAftermath _) (MoodAftermath _) = False
     moodChanged (MoodTrauma _) (MoodTrauma _) = False
+    moodChanged (MoodBargain _) (MoodBargain _) = False
+    moodChanged (MoodDowntime _) (MoodDowntime _) = False
     moodChanged _ _ = True  -- Different constructors = mood changed
