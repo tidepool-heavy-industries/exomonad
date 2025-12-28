@@ -398,7 +398,6 @@ runDMGame initialState handleEvent saveState = do
             , llmModel = "claude-haiku-4-5-20251001"
             , llmMaxTokens = 4096
             , llmThinkingBudget = Just 1024  -- Enable extended thinking
-            , llmSystemPrompt = "You are the Dungeon Master for a Blades in the Dark style game. Respond to player actions with narrative prose, using your tools as appropriate."
             }
 
       -- Set up terminal input handler
@@ -465,7 +464,6 @@ runDMGameWithDB conn gameId mCursor initialState handleEvent = do
             , llmModel = "claude-haiku-4-5-20251001"
             , llmMaxTokens = 4096
             , llmThinkingBudget = Just 1024
-            , llmSystemPrompt = "You are the Dungeon Master for a Blades in the Dark style game. Respond to player actions with narrative prose, using your tools as appropriate."
             }
 
       let inputHandler = InputHandler
@@ -793,7 +791,6 @@ gameLoopWithGUI bridge handleEvent = do
             , llmModel = "claude-haiku-4-5-20251001"
             , llmMaxTokens = 4096
             , llmThinkingBudget = Just 1024
-            , llmSystemPrompt = "You are the Dungeon Master for a Blades in the Dark style game. Respond to player actions with narrative prose, using your tools as appropriate."
             }
 
       -- Set up GUI input handler

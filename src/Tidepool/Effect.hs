@@ -226,7 +226,6 @@ data LLMConfig = LLMConfig
   , llmModel :: Text
   , llmMaxTokens :: Int
   , llmThinkingBudget :: Maybe Int  -- Token budget for extended thinking
-  , llmSystemPrompt :: Text         -- System prompt for all turns
   }
   deriving (Show, Eq, Generic)
 
