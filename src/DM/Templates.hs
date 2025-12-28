@@ -177,8 +177,11 @@ turnOutputJSONSchema = objectSchema
   , ("continueScene", describeField "continueScene"
       "True to continue the scene, false to end it"
       (emptySchema TBoolean))
+  , ("suggestedActions", describeField "suggestedActions"
+      "2-3 short suggested next actions for the player (3-8 words each)"
+      (arraySchema (emptySchema TString)))
   ]
-  ["narration", "stressDelta", "coinDelta", "heatDelta", "continueScene"]
+  ["narration", "stressDelta", "coinDelta", "heatDelta", "continueScene", "suggestedActions"]
 
 -- ══════════════════════════════════════════════════════════════
 -- COMPRESSION OUTPUT SCHEMA

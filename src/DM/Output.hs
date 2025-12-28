@@ -40,6 +40,7 @@ data TurnOutput = TurnOutput
   , continueScene :: Bool                   -- True to continue, False to end scene
   , costDescription :: Maybe Text           -- If costly/setback, describe the cost for echoing
   , threatDescription :: Maybe Text         -- If unresolved threat, describe for echoing
+  , suggestedActions :: [Text]              -- 2-3 suggested next actions for player
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
@@ -53,6 +54,7 @@ emptyTurnOutput = TurnOutput
   , continueScene = True
   , costDescription = Nothing
   , threatDescription = Nothing
+  , suggestedActions = []
   }
 
 -- | Apply turn output to world state

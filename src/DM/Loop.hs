@@ -52,6 +52,7 @@ data Response = Response
   , responseStressDelta :: Int
   , responseCoinDelta :: Int
   , responseHeatDelta :: Int
+  , responseSuggestedActions :: [Text]
   }
   deriving (Show, Eq)
 
@@ -142,6 +143,7 @@ dmTurn input = do
                 , responseStressDelta = output.stressDelta
                 , responseCoinDelta = output.coinDelta
                 , responseHeatDelta = output.heatDelta
+                , responseSuggestedActions = output.suggestedActions
                 }
 
     -- | Check for pending clock interrupts and handle them
@@ -341,13 +343,14 @@ runDMGame initialState handleEvent saveState = do
 
 -- | Game loop with auto-save after each turn
 -- The save callback is captured in the closure
+-- Threads last suggestions through for numeric input resolution
 gameLoopWithSave
   :: (WorldState -> IO ())  -- Save callback
   -> Eff (GameEffects WorldState DMEvent) ()
-gameLoopWithSave saveCallback = loop
+gameLoopWithSave saveCallback = loop []
   where
-    loop :: Eff (GameEffects WorldState DMEvent) ()
-    loop = do
+    loop :: [Text] -> Eff (GameEffects WorldState DMEvent) ()
+    loop lastSuggestions = do
       -- Check if we have an active scene
       state <- get @WorldState
       case state.scene of
@@ -373,8 +376,12 @@ gameLoopWithSave saveCallback = loop
           liftIO $ TIO.putStrLn $ "\n[" <> statusLine <> "]"
           liftIO $ TIO.putStrLn $ "[" <> moodLabel <> "]"
 
+          -- Display last suggestions if any
+          when (not $ null lastSuggestions) $
+            liftIO $ TIO.putStr $ renderSuggestedActions lastSuggestions
+
           -- Get player input
-          liftIO $ TIO.putStr "> What do you do? "
+          liftIO $ TIO.putStr "> "
           liftIO $ hFlush stdout
           inputText <- liftIO TIO.getLine
 
@@ -382,9 +389,10 @@ gameLoopWithSave saveCallback = loop
           if T.toLower (T.strip inputText) `elem` ["quit", "exit", "q"]
             then return ()  -- Exit loop
             else do
-              -- Parse input and run turn
-              let playerInput = PlayerInput
-                    { piActionText = inputText
+              -- Resolve input (numeric selection or freeform)
+              let resolvedInput = resolvePlayerInput lastSuggestions inputText
+                  playerInput = PlayerInput
+                    { piActionText = resolvedInput
                     , piActionTags = []  -- Could parse tags from input
                     }
 
@@ -402,8 +410,8 @@ gameLoopWithSave saveCallback = loop
                 liftIO $ TIO.putStrLn mechanicalChanges
               liftIO $ saveCallback updatedState
 
-              -- Continue loop
-              loop
+              -- Continue loop with new suggestions
+              loop response.responseSuggestedActions
 
 -- | Render mechanical state changes for display
 -- Shows deltas and current values for stress, coin, heat
@@ -439,6 +447,23 @@ renderDice dice = T.intercalate " " $ map dieFace dice
       5 -> "⚄"
       6 -> "⚅"
       _ -> T.pack (show n)
+
+-- | Render suggested actions for display
+renderSuggestedActions :: [Text] -> Text
+renderSuggestedActions [] = ""
+renderSuggestedActions actions = T.unlines $
+  [""] ++
+  zipWith (\i a -> "[" <> T.pack (show i) <> "] " <> a) [1 :: Int ..] actions
+
+-- | Resolve player input - if numeric, select from suggestions
+-- Otherwise use as freeform text
+resolvePlayerInput :: [Text] -> Text -> Text
+resolvePlayerInput suggestions input =
+  let stripped = T.strip input
+  in case reads (T.unpack stripped) :: [(Int, String)] of
+    [(n, "")] | n >= 1 && n <= length suggestions ->
+      suggestions !! (n - 1)
+    _ -> input  -- Use as-is if not a valid number
 
 -- | Terminal choice handler - display options and get selection
 terminalChoice :: Text -> [(Text, a)] -> IO a
