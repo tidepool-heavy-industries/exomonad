@@ -7,25 +7,31 @@ author:             Inanna
 build-type:         Simple
 
 common warnings
-    ghc-options: -Wall -Wno-missing-export-lists
+    -- -haddock + -fwrite-interface preserves Haddock comments for TH getDoc
+    ghc-options: -Wall -Wno-missing-export-lists -haddock -fwrite-interface
 
 library
     import:           warnings
     exposed-modules:
         Tidepool.Effect
         Tidepool.Machine
-        Tidepool.Capture
+        Tidepool.Delta
         Tidepool.Template
         Tidepool.Tool
         Tidepool.Schema
         Tidepool.Storage
         Tidepool.Anthropic.Http
         Tidepool.Anthropic.Client
+        Tidepool.Effects.Habitica
+        Tidepool.Effects.Obsidian
+        Tidepool.Effects.GitHub
+        Tidepool.Effects.Calendar
         Tidepool.GUI.Core
         Tidepool.GUI.Handler
         Tidepool.GUI.Server
         Tidepool.GUI.Theme
         Tidepool.GUI.Widgets
+        Delta.Agent
         DM.State
         DM.Output
         DM.Tools

@@ -1,14 +1,14 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
--- | Semantic Capture Pipeline for Tidepool
+-- | Delta Pipeline for Tidepool
 --
--- This module provides infrastructure for building "capture agents" that:
+-- This module provides infrastructure for building "delta agents" that:
 --
 -- * Route natural language input to multiple typed destinations
 -- * Support propose/correct interaction (user can correct classifications)
 -- * Learn from corrections to improve over time
 -- * Execute effects (Habitica, Obsidian, etc.) based on routing
 --
--- Unlike Machine (conversational state machines), Capture is for
+-- Unlike Machine (conversational state machines), Delta is for
 -- run-to-completion pipelines with optional user feedback loops.
 --
 -- Example flow:
@@ -27,10 +27,10 @@
 -- > ✓ effect handlers → tidepool-dev
 -- > (learned: Haskell/effects topics → tidepool-dev)
 --
-module Tidepool.Capture
+module Tidepool.Delta
   ( -- * Destination Configuration
     Destination(..)
-  , CaptureResult(..)
+  , DeltaResult(..)
 
     -- * User Context (accumulated learning)
   , UserContext(..)
@@ -46,16 +46,16 @@ module Tidepool.Capture
   , PatternSource(..)
   , EntityInfo(..)
 
-    -- * Capture Effects
-  , CaptureEffects
+    -- * Delta Effects
+  , DeltaEffects
 
-    -- * Running Captures
-  , runCapture
-  , runCaptureWithFeedback
-  , CaptureConfig(..)
+    -- * Running Deltas
+  , runDelta
+  , runDeltaWithFeedback
+  , DeltaConfig(..)
 
     -- * Logging for Meta-Learning
-  , CaptureLog(..)
+  , DeltaLog(..)
   ) where
 
 import Data.Text (Text)
@@ -77,7 +77,7 @@ import Tidepool.Effect
 -- DESTINATION
 -- ══════════════════════════════════════════════════════════════
 
--- | A destination for captured content
+-- | A destination for routed content
 --
 -- Destinations are the "where things go" configuration. Each destination:
 --
@@ -102,25 +102,25 @@ data Destination es = Destination
   , destMatchExisting :: Bool
     -- ^ If True, try to semantically match against existing items
     -- e.g., "milk" matches "Groceries" todo, gets added as checklist item
-  , destExecute :: UserContext -> Text -> [Text] -> Eff es [CaptureResult]
+  , destExecute :: UserContext -> Text -> [Text] -> Eff es [DeltaResult]
     -- ^ Execute: context -> original input -> entity refs -> results
   }
 
--- | Result of capturing an item to a destination
-data CaptureResult = CaptureResult
-  { crEntity      :: Text
-    -- ^ What was captured (e.g., "milk", "call Sarah")
-  , crDestination :: Text
+-- | Result of routing an item to a destination
+data DeltaResult = DeltaResult
+  { drEntity      :: Text
+    -- ^ What was routed (e.g., "milk", "call Sarah")
+  , drDestination :: Text
     -- ^ Where it went (e.g., "groceries", "calendar")
-  , crAsType      :: Text
+  , drAsType      :: Text
     -- ^ Type of item created (e.g., "checklist_item", "event", "note")
-  , crRef         :: Maybe Text
+  , drRef         :: Maybe Text
     -- ^ Reference/link if available (e.g., "todo-abc", "Haskell.md")
   }
   deriving (Show, Eq, Generic)
 
-instance ToJSON CaptureResult
-instance FromJSON CaptureResult
+instance ToJSON DeltaResult
+instance FromJSON DeltaResult
 
 -- ══════════════════════════════════════════════════════════════
 -- USER CONTEXT (accumulated learning)
@@ -169,15 +169,15 @@ instance FromJSON PatternSource
 -- | User context accumulated over time
 --
 -- This is the "insight" - what makes the agent smart about YOUR setup.
--- Gets updated after each capture based on corrections.
+-- Gets updated after each delta based on corrections.
 --
 data UserContext = UserContext
   { ucKnownEntities  :: Map Text EntityInfo
     -- ^ Known entities: "Sarah" → person with scheduling prefs
   , ucPatterns       :: [RoutingPattern]
     -- ^ Learned routing patterns
-  , ucRecentCaptures :: [CaptureResult]
-    -- ^ Recent captures (for context)
+  , ucRecentRoutes :: [DeltaResult]
+    -- ^ Recent routes (for context)
   , ucOrgSystem      :: Value
     -- ^ User's org system config (JSON blob)
   }
@@ -191,7 +191,7 @@ emptyContext :: UserContext
 emptyContext = UserContext
   { ucKnownEntities = Map.empty
   , ucPatterns = []
-  , ucRecentCaptures = []
+  , ucRecentRoutes = []
   , ucOrgSystem = object []
   }
 
@@ -251,15 +251,15 @@ instance ToJSON ParsedFeedback
 instance FromJSON ParsedFeedback
 
 -- ══════════════════════════════════════════════════════════════
--- CAPTURE EFFECTS
+-- DELTA EFFECTS
 -- ══════════════════════════════════════════════════════════════
 
--- | The effect constraints for capture operations
+-- | The effect constraints for delta operations
 --
 -- This is polymorphic so users can add their own domain effects
 -- (Habitica, Obsidian, etc.) to the stack.
 --
-type CaptureEffects es =
+type DeltaEffects es =
   ( LLM :> es
   , State UserContext :> es
   , RequestInput :> es
@@ -267,48 +267,48 @@ type CaptureEffects es =
   )
 
 -- ══════════════════════════════════════════════════════════════
--- RUNNING CAPTURES
+-- RUNNING DELTAS
 -- ══════════════════════════════════════════════════════════════
 
--- | Configuration for running captures
-data CaptureConfig es = CaptureConfig
-  { ccDestinations     :: [Destination es]
+-- | Configuration for running deltas
+data DeltaConfig es = DeltaConfig
+  { dcDestinations     :: [Destination es]
     -- ^ Available destinations
-  , ccClassifyPrompt   :: [Destination es] -> UserContext -> Text
+  , dcClassifyPrompt   :: [Destination es] -> UserContext -> Text
     -- ^ Build the classification system prompt
-  , ccFeedbackPrompt   :: Proposal -> Text
+  , dcFeedbackPrompt   :: Proposal -> Text
     -- ^ Build the feedback parsing system prompt
-  , ccClassifySchema   :: Value
+  , dcClassifySchema   :: Value
     -- ^ JSON schema for classification output
-  , ccFeedbackSchema   :: Value
+  , dcFeedbackSchema   :: Value
     -- ^ JSON schema for feedback parsing output
   }
 
--- | Run a single capture without user feedback
+-- | Run a single delta without user feedback
 --
 -- Use this for automated pipelines or when you trust classification.
--- For interactive use with corrections, use 'runCaptureWithFeedback'.
+-- For interactive use with corrections, use 'runDeltaWithFeedback'.
 --
-runCapture
-  :: forall es. CaptureEffects es
-  => CaptureConfig es
+runDelta
+  :: forall es. DeltaEffects es
+  => DeltaConfig es
   -> Text                           -- ^ User input
-  -> Eff es [CaptureResult]
-runCapture config input = do
+  -> Eff es [DeltaResult]
+runDelta config input = do
   ctx <- get @UserContext
 
-  logDebug "[Capture] Classifying input"
+  logDebug "[Delta] Classifying input"
 
   -- Phase 1: Classify
-  let classifyPrompt = config.ccClassifyPrompt config.ccDestinations ctx
-  proposal <- llmCall @Proposal classifyPrompt input config.ccClassifySchema
+  let classifyPrompt = config.dcClassifyPrompt config.dcDestinations ctx
+  proposal <- llmCall @Proposal classifyPrompt input config.dcClassifySchema
 
-  logInfo $ "[Capture] Classified " <> T.pack (show (length proposal.propItems)) <> " items"
+  logInfo $ "[Delta] Classified " <> T.pack (show (length proposal.propItems)) <> " items"
 
   -- Phase 2: Execute each destination group
   executeProposal config ctx input proposal
 
--- | Run capture with propose/correct feedback loop
+-- | Run delta with propose/correct feedback loop
 --
 -- This is the interactive version:
 -- 1. Classify input into proposal
@@ -318,22 +318,22 @@ runCapture config input = do
 -- 5. Apply corrections and execute
 -- 6. Learn from corrections
 --
-runCaptureWithFeedback
-  :: forall es. CaptureEffects es
-  => CaptureConfig es
+runDeltaWithFeedback
+  :: forall es. DeltaEffects es
+  => DeltaConfig es
   -> Text                           -- ^ User input
   -> (Proposal -> Eff es ())        -- ^ Display proposal to user
-  -> Eff es ([CaptureResult], [RoutingPattern])
-runCaptureWithFeedback config input displayProposal = do
+  -> Eff es ([DeltaResult], [RoutingPattern])
+runDeltaWithFeedback config input displayProposal = do
   ctx <- get @UserContext
 
-  logDebug "[Capture] Classifying input"
+  logDebug "[Delta] Classifying input"
 
   -- Phase 1: Classify
-  let classifyPrompt = config.ccClassifyPrompt config.ccDestinations ctx
-  proposal <- llmCall @Proposal classifyPrompt input config.ccClassifySchema
+  let classifyPrompt = config.dcClassifyPrompt config.dcDestinations ctx
+  proposal <- llmCall @Proposal classifyPrompt input config.dcClassifySchema
 
-  logInfo $ "[Capture] Proposing " <> T.pack (show (length proposal.propItems)) <> " items"
+  logInfo $ "[Delta] Proposing " <> T.pack (show (length proposal.propItems)) <> " items"
 
   -- Phase 2: Present to user
   displayProposal proposal
@@ -342,10 +342,10 @@ runCaptureWithFeedback config input displayProposal = do
   feedback <- requestText "Approve, correct, or add details:"
 
   -- Phase 4: Parse feedback (LLM understands natural language corrections)
-  let feedbackPrompt = config.ccFeedbackPrompt proposal
-  parsed <- llmCall @ParsedFeedback feedbackPrompt feedback config.ccFeedbackSchema
+  let feedbackPrompt = config.dcFeedbackPrompt proposal
+  parsed <- llmCall @ParsedFeedback feedbackPrompt feedback config.dcFeedbackSchema
 
-  logInfo $ "[Capture] Parsed feedback: "
+  logInfo $ "[Delta] Parsed feedback: "
     <> T.pack (show (length parsed.pfCorrections)) <> " corrections, "
     <> T.pack (show (length parsed.pfClarifications)) <> " clarifications"
 
@@ -357,7 +357,7 @@ runCaptureWithFeedback config input displayProposal = do
   let newPatterns = parsed.pfLearning
   modify @UserContext $ \c -> c
     { ucPatterns = newPatterns ++ c.ucPatterns
-    , ucRecentCaptures = results ++ take 10 c.ucRecentCaptures
+    , ucRecentRoutes = results ++ take 10 c.ucRecentRoutes
     }
 
   pure (results, newPatterns)
@@ -376,12 +376,12 @@ applyCorrections proposal feedback = Proposal
 
 -- | Execute a proposal, routing to destinations
 executeProposal
-  :: forall es. CaptureEffects es
-  => CaptureConfig es
+  :: forall es. DeltaEffects es
+  => DeltaConfig es
   -> UserContext
   -> Text                    -- ^ Original input
   -> Proposal
-  -> Eff es [CaptureResult]
+  -> Eff es [DeltaResult]
 executeProposal config ctx originalInput proposal = do
   -- Group items by destination
   let grouped = groupByDest proposal.propItems
@@ -400,19 +400,19 @@ groupByDest items =
 
 -- | Execute a group of items for one destination
 executeDestGroup
-  :: forall es. CaptureEffects es
-  => CaptureConfig es
+  :: forall es. DeltaEffects es
+  => DeltaConfig es
   -> UserContext
   -> Text                    -- ^ Original input
   -> (Text, [Text])          -- ^ (destination name, entities)
-  -> Eff es [CaptureResult]
+  -> Eff es [DeltaResult]
 executeDestGroup config ctx originalInput (destName, entities) = do
-  case findDest config.ccDestinations destName of
+  case findDest config.dcDestinations destName of
     Nothing -> do
-      logInfo $ "[Capture] Unknown destination: " <> destName
+      logInfo $ "[Delta] Unknown destination: " <> destName
       pure []
     Just dest -> do
-      logDebug $ "[Capture] Executing " <> destName <> " with " <> T.pack (show entities)
+      logDebug $ "[Delta] Executing " <> destName <> " with " <> T.pack (show entities)
       dest.destExecute ctx originalInput entities
 
 -- | Find a destination by name
@@ -435,19 +435,19 @@ findDest dests name = go dests
 -- * Add new routing patterns
 -- * Update entity database
 --
-data CaptureLog = CaptureLog
-  { clInput      :: Text
+data DeltaLog = DeltaLog
+  { dlInput      :: Text
     -- ^ Original user input
-  , clProposed   :: Proposal
+  , dlProposed   :: Proposal
     -- ^ What was proposed
-  , clFeedback   :: Maybe ParsedFeedback
+  , dlFeedback   :: Maybe ParsedFeedback
     -- ^ User feedback (if interactive)
-  , clResults    :: [CaptureResult]
-    -- ^ What was actually captured
-  , clTimestamp  :: UTCTime
+  , dlResults    :: [DeltaResult]
+    -- ^ What was actually routed
+  , dlTimestamp  :: UTCTime
     -- ^ When this happened
   }
   deriving (Show, Eq, Generic)
 
-instance ToJSON CaptureLog
-instance FromJSON CaptureLog
+instance ToJSON DeltaLog
+instance FromJSON DeltaLog

@@ -105,9 +105,8 @@ import Data.Sequence (Seq)
 import qualified Data.Sequence as Seq
 import GHC.Generics (Generic)
 import Data.Aeson (ToJSON, FromJSON, ToJSONKey, FromJSONKey)
-import Text.Ginger.GVal (ToGVal(..), toGVal, dict, list)
-import Text.Ginger.GVal.Generic (genericToGVal)
-import qualified Data.Foldable as F
+import Text.Ginger.GVal (ToGVal(..))
+import Tidepool.Template ()  -- ToGVal instances for HashMap, Seq, Either
 
 import DM.CharacterCreation (CharacterChoices, ClockType(..))
 
@@ -124,6 +123,7 @@ data DMMood
   | MoodTrauma TraumaVariant
   | MoodBargain BargainVariant         -- Out of dice, must make a deal
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
+  deriving anyclass (ToGVal m)
 
 -- | Scene variants - every scene has a hook (no more FreePlay)
 data SceneVariant
@@ -142,6 +142,7 @@ data SceneVariant
       , svImplications :: [Text]     -- What this means
       }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
+  deriving anyclass (ToGVal m)
 
 -- | Scene urgency levels (separate from NPC Want urgency)
 data SceneUrgency
@@ -150,6 +151,7 @@ data SceneUrgency
   | UrgencyHigh      -- Urgent, needs attention now
   | UrgencyCritical  -- Immediate, no time to plan
   deriving (Show, Eq, Ord, Enum, Bounded, Generic, ToJSON, FromJSON)
+  deriving anyclass (ToGVal m)
 
 -- | Downtime variants (promoted to top-level mood)
 data DowntimeVariant
@@ -167,6 +169,7 @@ data DowntimeVariant
       , dvEscapeOptions :: [Text]    -- Ways out
       }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
+  deriving anyclass (ToGVal m)
 
 -- | Action variants - the position (controlled/risky/desperate)
 data ActionVariant
@@ -184,6 +187,7 @@ data ActionVariant
       , avPotentialTrauma :: Bool
       }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
+  deriving anyclass (ToGVal m)
 
 -- | Action domain overlays - what kind of action
 data ActionDomain
@@ -193,6 +197,7 @@ data ActionDomain
   | DomainPursuit
   | DomainArcane
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
+  deriving anyclass (ToGVal m)
 
 -- | Aftermath variants - the outcome type
 data AftermathVariant
@@ -215,6 +220,7 @@ data AftermathVariant
       , amWorldStateChanges :: [Text]
       }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
+  deriving anyclass (ToGVal m)
 
 -- | Trauma variant - the breaking point
 data TraumaVariant = Breaking
@@ -224,6 +230,7 @@ data TraumaVariant = Breaking
   , tvAdrenaline :: Bool  -- If true, can snap back to action
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
+  deriving anyclass (ToGVal m)
 
 -- | Bargain variant - out of dice, must make a deal or exit
 -- LLM generates contextual bargains; player picks one or exits
@@ -265,6 +272,7 @@ data ClockInterrupt = ClockInterrupt
   , ciForcesAction :: Bool  -- If true, forces immediate Action state
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
+  deriving anyclass (ToGVal m)
 
 -- | Default mood for new games (Encounter with no pressure)
 defaultMood :: DMMood
@@ -311,12 +319,14 @@ data WorldState = WorldState
   , betweenScenesDisplay :: Maybe BetweenScenesContext
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
+  deriving anyclass (ToGVal m)
 
 data SceneSummary = SceneSummary
   { summaryText :: Text
   , summaryKeyBeats :: [SceneBeat]
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
+  deriving anyclass (ToGVal m)
 
 initialWorld :: WorldState
 initialWorld = WorldState
@@ -355,12 +365,14 @@ data PlayerState = PlayerState
   , trauma :: [Trauma]      -- Permanent scars that change how you play
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
+  deriving anyclass (ToGVal m)
 
 -- | Trauma is freeform text - LLM can invent new ones
 -- Common examples: paranoid, cold, obsessed, reckless, haunted, vicious
 newtype Trauma = Trauma { unTrauma :: Text }
   deriving (Show, Eq, Ord, Generic)
   deriving newtype (ToJSON, FromJSON, Hashable)
+  deriving anyclass (ToGVal m)
 
 initialPlayer :: PlayerState
 initialPlayer = PlayerState
@@ -379,6 +391,7 @@ initialPlayer = PlayerState
 newtype DicePool = DicePool { poolDice :: [Int] }
   deriving (Show, Eq, Generic)
   deriving newtype (ToJSON, FromJSON)
+  deriving anyclass (ToGVal m)
 
 -- | Position determines danger level of the action
 data Position
@@ -386,6 +399,7 @@ data Position
   | Risky       -- Standard danger, things could go either way
   | Desperate   -- Serious danger, consequences will be severe
   deriving (Show, Eq, Ord, Enum, Bounded, Generic, ToJSON, FromJSON)
+  deriving anyclass (ToGVal m)
 
 -- | Effect determines magnitude of success/failure
 data Effect
@@ -393,6 +407,7 @@ data Effect
   | Standard    -- Expected outcome, full progress
   | Great       -- Extra benefit, impressive success
   deriving (Show, Eq, Ord, Enum, Bounded, Generic, ToJSON, FromJSON)
+  deriving anyclass (ToGVal m)
 
 -- | Outcome tier based on die roll and position
 data OutcomeTier
@@ -402,6 +417,7 @@ data OutcomeTier
   | Bad         -- 1 at risky: Things go wrong
   | Disaster    -- 1 at desperate: Things go very wrong
   deriving (Show, Eq, Ord, Enum, Bounded, Generic, ToJSON, FromJSON)
+  deriving anyclass (ToGVal m)
 
 -- | Pending action waiting for player to select a die
 data PendingOutcome = PendingOutcome
@@ -413,6 +429,7 @@ data PendingOutcome = PendingOutcome
   , chosenTier :: Maybe OutcomeTier  -- Calculated from die + position
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
+  deriving anyclass (ToGVal m)
 
 -- | Calculate outcome tier from die value and position
 --
@@ -439,6 +456,7 @@ calculateOutcome pos die = case die of
 newtype FactionId = FactionId { unFactionId :: Text }
   deriving (Show, Eq, Ord, Generic)
   deriving newtype (ToJSON, FromJSON, ToJSONKey, FromJSONKey, Hashable)
+  deriving anyclass (ToGVal m)
 
 data Faction = Faction
   { factionName :: Text
@@ -449,18 +467,21 @@ data Faction = Faction
   , factionKnownFacts :: [Fact]
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
+  deriving anyclass (ToGVal m)
 
-data Attitude 
-  = Hostile 
-  | Wary 
-  | Neutral 
-  | Favorable 
+data Attitude
+  = Hostile
+  | Wary
+  | Neutral
+  | Favorable
   | Allied
   deriving (Show, Eq, Ord, Enum, Bounded, Generic, ToJSON, FromJSON)
+  deriving anyclass (ToGVal m)
 
 newtype GoalId = GoalId { unGoalId :: Text }
   deriving (Show, Eq, Ord, Generic)
   deriving newtype (ToJSON, FromJSON, ToJSONKey, FromJSONKey, Hashable)
+  deriving anyclass (ToGVal m)
 
 data Goal = Goal
   { goalId :: GoalId
@@ -468,6 +489,7 @@ data Goal = Goal
   , goalStatus :: GoalStatus
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
+  deriving anyclass (ToGVal m)
 
 data GoalStatus
   = Pursuing
@@ -475,6 +497,7 @@ data GoalStatus
   | Achieved
   | Abandoned
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
+  deriving anyclass (ToGVal m)
 
 data ResourcePool = ResourcePool
   { gold :: Int
@@ -483,18 +506,21 @@ data ResourcePool = ResourcePool
   , specialResources :: [(Text, Int)]
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
+  deriving anyclass (ToGVal m)
 
 data Secret = Secret
   { secretContent :: Text
   , secretKnownBy :: [Either FactionId NpcId]
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
+  deriving anyclass (ToGVal m)
 
 data Fact = Fact
   { factContent :: Text
   , factSource :: Text
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
+  deriving anyclass (ToGVal m)
 
 -- ══════════════════════════════════════════════════════════════
 -- NPCS
@@ -503,6 +529,7 @@ data Fact = Fact
 newtype NpcId = NpcId { unNpcId :: Text }
   deriving (Show, Eq, Ord, Generic)
   deriving newtype (ToJSON, FromJSON, ToJSONKey, FromJSONKey, Hashable)
+  deriving anyclass (ToGVal m)
 
 data Npc = Npc
   { npcName :: Text
@@ -515,6 +542,7 @@ data Npc = Npc
   , npcVoiceNotes :: Text
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
+  deriving anyclass (ToGVal m)
 
 data Disposition
   = DispHostile
@@ -523,24 +551,29 @@ data Disposition
   | Friendly
   | Loyal
   deriving (Show, Eq, Ord, Enum, Bounded, Generic, ToJSON, FromJSON)
+  deriving anyclass (ToGVal m)
 
 data Want = Want
   { wantDescription :: Text
   , wantUrgency :: Urgency
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
+  deriving anyclass (ToGVal m)
 
 data Fear = Fear
   { fearDescription :: Text
   , fearSeverity :: Severity
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
+  deriving anyclass (ToGVal m)
 
 data Urgency = Low | Medium | High | UrgencyDesperate
   deriving (Show, Eq, Ord, Enum, Bounded, Generic, ToJSON, FromJSON)
+  deriving anyclass (ToGVal m)
 
 data Severity = Minor | Moderate | Severe | Existential
   deriving (Show, Eq, Ord, Enum, Bounded, Generic, ToJSON, FromJSON)
+  deriving anyclass (ToGVal m)
 
 -- ══════════════════════════════════════════════════════════════
 -- CLOCKS
@@ -549,6 +582,7 @@ data Severity = Minor | Moderate | Severe | Existential
 newtype ClockId = ClockId { unClockId :: Text }
   deriving (Show, Eq, Ord, Generic)
   deriving newtype (ToJSON, FromJSON, ToJSONKey, FromJSONKey, Hashable)
+  deriving anyclass (ToGVal m)
 
 data Clock = Clock
   { clockName :: Text
@@ -560,6 +594,7 @@ data Clock = Clock
   , clockTriggers :: [Trigger]
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
+  deriving anyclass (ToGVal m)
 
 data Trigger
   = OnPlayerAction ActionPattern
@@ -568,10 +603,12 @@ data Trigger
   | OnTimePass Duration
   | OnRumorSpread RumorId
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
+  deriving anyclass (ToGVal m)
 
 newtype ActionPattern = ActionPattern { unActionPattern :: Text }
   deriving (Show, Eq, Generic)
   deriving newtype (ToJSON, FromJSON)
+  deriving anyclass (ToGVal m)
 
 data Consequence
   -- Threat consequences (bad things happen):
@@ -587,6 +624,7 @@ data Consequence
   | OpenOpportunity Text
   | RemoveThreat ClockId
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
+  deriving anyclass (ToGVal m)
 
 data FactionAction
   = Attack Target
@@ -594,22 +632,26 @@ data FactionAction
   | Retreat
   | Scheme Goal
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
+  deriving anyclass (ToGVal m)
 
 newtype Target = Target { unTarget :: Text }
   deriving (Show, Eq, Generic)
   deriving newtype (ToJSON, FromJSON)
+  deriving anyclass (ToGVal m)
 
 data LocationDelta = LocationDelta
   { deltaDescription :: Text
   , deltaEffects :: [Text]
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
+  deriving anyclass (ToGVal m)
 
 data Escalation = Escalation
   { escalationDescription :: Text
   , escalationSeverity :: Severity
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
+  deriving anyclass (ToGVal m)
 
 -- ══════════════════════════════════════════════════════════════
 -- LOCATIONS
@@ -618,6 +660,7 @@ data Escalation = Escalation
 newtype LocationId = LocationId { unLocationId :: Text }
   deriving (Show, Eq, Ord, Generic)
   deriving newtype (ToJSON, FromJSON, ToJSONKey, FromJSONKey, Hashable)
+  deriving anyclass (ToGVal m)
 
 data Location = Location
   { locationName :: Text
@@ -626,6 +669,7 @@ data Location = Location
   , locationFeatures :: [Text]
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
+  deriving anyclass (ToGVal m)
 
 -- ══════════════════════════════════════════════════════════════
 -- NARRATIVE
@@ -634,6 +678,7 @@ data Location = Location
 newtype RumorId = RumorId { unRumorId :: Text }
   deriving (Show, Eq, Ord, Generic)
   deriving newtype (ToJSON, FromJSON, ToJSONKey, FromJSONKey, Hashable)
+  deriving anyclass (ToGVal m)
 
 data Rumor = Rumor
   { rumorId :: RumorId
@@ -643,6 +688,7 @@ data Rumor = Rumor
   , rumorSpread :: SpreadLevel
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
+  deriving anyclass (ToGVal m)
 
 data RumorSource
   = OverheardFrom NpcId
@@ -650,6 +696,7 @@ data RumorSource
   | FromFaction FactionId
   | PlayerStarted
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
+  deriving anyclass (ToGVal m)
 
 data TruthValue
   = TrueRumor
@@ -657,6 +704,7 @@ data TruthValue
   | PartiallyTrue Text
   | Unknown
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
+  deriving anyclass (ToGVal m)
 
 data SpreadLevel
   = Whisper
@@ -664,10 +712,12 @@ data SpreadLevel
   | CommonKnowledge
   | Universal
   deriving (Show, Eq, Ord, Enum, Bounded, Generic, ToJSON, FromJSON)
+  deriving anyclass (ToGVal m)
 
 newtype ThreadId = ThreadId { unThreadId :: Text }
   deriving (Show, Eq, Ord, Generic)
   deriving newtype (ToJSON, FromJSON, ToJSONKey, FromJSONKey, Hashable)
+  deriving anyclass (ToGVal m)
 
 data Thread = Thread
   { threadId :: ThreadId
@@ -677,6 +727,7 @@ data Thread = Thread
   , threadDeadline :: Maybe ClockId
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
+  deriving anyclass (ToGVal m)
 
 data Tension
   = Simmering
@@ -684,6 +735,7 @@ data Tension
   | Urgent
   | TensionCritical
   deriving (Show, Eq, Ord, Enum, Bounded, Generic, ToJSON, FromJSON)
+  deriving anyclass (ToGVal m)
 
 -- ══════════════════════════════════════════════════════════════
 -- SCENES
@@ -696,6 +748,7 @@ data ActiveScene = ActiveScene
   , sceneBeats :: Seq SceneBeat
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
+  deriving anyclass (ToGVal m)
 
 data SceneBeat
   = PlayerAction Text [Tag]
@@ -705,10 +758,12 @@ data SceneBeat
   | Revelation Secret
   | ClockTick ClockId Int
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
+  deriving anyclass (ToGVal m)
 
 newtype Stakes = Stakes { unStakes :: Text }
   deriving (Show, Eq, Generic)
   deriving newtype (ToJSON, FromJSON)
+  deriving anyclass (ToGVal m)
 
 data Tone
   = Tense
@@ -718,6 +773,7 @@ data Tone
   | Hopeful
   | Mysterious
   deriving (Show, Eq, Enum, Bounded, Generic, ToJSON, FromJSON)
+  deriving anyclass (ToGVal m)
 
 -- ══════════════════════════════════════════════════════════════
 -- MISC
@@ -729,10 +785,12 @@ data Duration
   | Days Int
   | Weeks Int
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
+  deriving anyclass (ToGVal m)
 
 newtype Tag = Tag { unTag :: Text }
   deriving (Show, Eq, Ord, Generic)
   deriving newtype (ToJSON, FromJSON, Hashable)
+  deriving anyclass (ToGVal m)
 
 -- ══════════════════════════════════════════════════════════════
 -- TOGVAL INSTANCES (for template rendering via genericToGVal)

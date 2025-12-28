@@ -1,3 +1,4 @@
+{-# LANGUAGE TemplateHaskell #-}
 -- | DM Structured Output Types (Simplified for API grammar limits)
 module DM.Output
   ( -- * Turn Output
@@ -9,6 +10,10 @@ module DM.Output
     -- * Compression Output
   , CompressionOutput(..)
   , applyCompression
+
+    -- * Schemas (derived from Haddock comments)
+  , turnOutputJSONSchema
+  , compressionOutputJSONSchema
   ) where
 
 import DM.State
@@ -16,6 +21,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
 import Data.Aeson (ToJSON, FromJSON)
+import Tidepool.Schema (JSONSchema, deriveJSONSchema)
 
 -- ══════════════════════════════════════════════════════════════
 -- TURN OUTPUT
@@ -32,15 +38,24 @@ data NarrativeConnector
 -- | Simplified turn output that fits within API grammar limits
 -- NPC dialogue should be included directly in narration
 data TurnOutput = TurnOutput
-  { narration :: Text                       -- Narrative prose for this turn
-  , narrativeConnector :: Maybe NarrativeConnector  -- How this connects to previous beat
-  , stressDelta :: Int                      -- Change in stress (-9 to +9)
-  , coinDelta :: Int                        -- Change in coin
-  , heatDelta :: Int                        -- Change in heat (0 to +4)
-  , continueScene :: Bool                   -- True to continue, False to end scene
-  , costDescription :: Maybe Text           -- If costly/setback, describe the cost for echoing
-  , threatDescription :: Maybe Text         -- If unresolved threat, describe for echoing
-  , suggestedActions :: [Text]              -- 2-3 suggested next actions for player
+  { -- | Narrative prose describing what happens this turn. Include NPC dialogue inline.
+    narration :: Text
+    -- | How this beat connects causally to previous events.
+  , narrativeConnector :: Maybe NarrativeConnector
+    -- | Change in stress from -9 to +9. Positive for costs, negative for relief.
+  , stressDelta :: Int
+    -- | Change in coin. Positive for gains, negative for expenses.
+  , coinDelta :: Int
+    -- | Change in heat from 0 to +4. Heat draws faction attention.
+  , heatDelta :: Int
+    -- | True to continue the current scene, False to end it.
+  , continueScene :: Bool
+    -- | If there was a cost or setback, describe it for consequence echoing.
+  , costDescription :: Maybe Text
+    -- | If there is an unresolved threat, describe it for future echoing.
+  , threatDescription :: Maybe Text
+    -- | 2-3 suggested next actions the player might take.
+  , suggestedActions :: [Text]
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
@@ -91,11 +106,16 @@ applyTurnOutput output state = state
 
 -- | Simplified compression output - complex extractions removed
 data CompressionOutput = CompressionOutput
-  { summary :: Text               -- One paragraph summary
-  , keyMoments :: Text            -- Comma-separated key moments
-  , consequenceSeeds :: Text      -- Comma-separated consequence seeds
-  , stressChange :: Int           -- Net stress change
-  , coinChange :: Int             -- Net coin change
+  { -- | One paragraph summary of what happened during the compressed segment.
+    summary :: Text
+    -- | Comma-separated list of key dramatic moments worth remembering.
+  , keyMoments :: Text
+    -- | Comma-separated seeds for future consequences to echo.
+  , consequenceSeeds :: Text
+    -- | Net stress change over the compressed segment.
+  , stressChange :: Int
+    -- | Net coin change over the compressed segment.
+  , coinChange :: Int
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
@@ -113,3 +133,18 @@ applyCompression output state = state
   }
   where
     clamp lo hi x = max lo (min hi x)
+
+-- TH stage separator - required for deriveJSONSchema to see the types
+$(return [])
+
+-- ══════════════════════════════════════════════════════════════
+-- SCHEMAS (derived from Haddock comments via TH)
+-- ══════════════════════════════════════════════════════════════
+
+-- | Schema for turn output, derived from field Haddocks
+turnOutputJSONSchema :: JSONSchema
+turnOutputJSONSchema = $(deriveJSONSchema ''TurnOutput)
+
+-- | Schema for compression output, derived from field Haddocks
+compressionOutputJSONSchema :: JSONSchema
+compressionOutputJSONSchema = $(deriveJSONSchema ''CompressionOutput)

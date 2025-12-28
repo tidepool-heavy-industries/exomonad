@@ -1,3 +1,4 @@
+{-# LANGUAGE TemplateHaskell #-}
 -- | DM Templates - compile-time type-checked Jinja templates
 module DM.Templates
   ( -- * Templates
@@ -36,7 +37,7 @@ module DM.Templates
   ) where
 
 import DM.Context
-import DM.Output
+import DM.Output (TurnOutput, CompressionOutput, turnOutputJSONSchema, compressionOutputJSONSchema)
 import DM.State (WorldState, DMMood(..))
 import DM.Tools
 import Tidepool.Template
@@ -191,53 +192,3 @@ compressionOutputSchema = Schema
   , schemaDescription = "Scene compression output for persisting durable changes"
   }
 
--- ══════════════════════════════════════════════════════════════
--- TURN OUTPUT SCHEMA
--- ══════════════════════════════════════════════════════════════
-
-turnOutputJSONSchema :: JSONSchema
-turnOutputJSONSchema = objectSchema
-  [ ("narration", describeField "narration"
-      "Narrative prose describing what happens, including any NPC dialogue."
-      (emptySchema TString))
-  , ("stressDelta", describeField "stressDelta"
-      "Change in stress (-9 to +9, 0 if no change)"
-      (emptySchema TInteger))
-  , ("coinDelta", describeField "coinDelta"
-      "Change in coin (0 if no change)"
-      (emptySchema TInteger))
-  , ("heatDelta", describeField "heatDelta"
-      "Change in heat (0 to +4). Violence, loud actions, Bluecoat attention."
-      (emptySchema TInteger))
-  , ("continueScene", describeField "continueScene"
-      "True to continue the scene, false to end it"
-      (emptySchema TBoolean))
-  , ("suggestedActions", describeField "suggestedActions"
-      "2-3 short suggested next actions for the player (3-8 words each)"
-      (arraySchema (emptySchema TString)))
-  ]
-  ["narration", "stressDelta", "coinDelta", "heatDelta", "continueScene", "suggestedActions"]
-
--- ══════════════════════════════════════════════════════════════
--- COMPRESSION OUTPUT SCHEMA
--- ══════════════════════════════════════════════════════════════
-
-compressionOutputJSONSchema :: JSONSchema
-compressionOutputJSONSchema = objectSchema
-  [ ("summary", describeField "summary"
-      "One paragraph summary of what happened in the scene"
-      (emptySchema TString))
-  , ("keyMoments", describeField "keyMoments"
-      "Comma-separated list of the most important moments"
-      (emptySchema TString))
-  , ("consequenceSeeds", describeField "consequenceSeeds"
-      "Comma-separated seeds for future consequences"
-      (emptySchema TString))
-  , ("stressChange", describeField "stressChange"
-      "Net stress change from this scene"
-      (emptySchema TInteger))
-  , ("coinChange", describeField "coinChange"
-      "Net coin change from this scene"
-      (emptySchema TInteger))
-  ]
-  ["summary", "keyMoments", "consequenceSeeds", "stressChange", "coinChange"]
