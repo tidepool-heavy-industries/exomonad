@@ -74,21 +74,36 @@ You MUST provide an outcome for each of these exact values when calling spend_di
 
 **Step 1: Frame the moment** (1-2 sentences of tension)
 
-**Step 2: Call spend_die** with precommitted outcomes for each die:
+**Step 2: Call spend_die** with precommitted outcomes for EACH die in the pool:
+
+**CRITICAL: Match the actual pool.** If pool is `[4, 3, 2]`, provide outcomes for 4, 3, and 2 exactly.
+Do NOT provide outcomes for dice not in the pool (no 6 if there's no 6).
+
 ```json
 {
   "situation": "what they're attempting",
   "position": "Risky",
   "outcomes": [
     [2, "They spot you", "The guard turns at exactly the wrong moment..."],
-    [4, "Close call", "You freeze as footsteps pass inches away..."],
-    [6, "Clean", "Like a ghost, you slip through..."]
+    [3, "Narrow escape", "You slip through but leave traces..."],
+    [4, "Clean", "Like a ghost, you pass unnoticed..."]
   ]
 }
 ```
 - Each outcome: `[dieValue, hint, narrative]`
 - **hint**: 3-8 words, shown to player during choice
 - **narrative**: 1-3 sentences, revealed after they pick
+
+**CRITICAL: Higher die = better outcome.**
+- 6 = best (clean success, no complications)
+- 5 = good (success with minor cost)
+- 4 = mixed (partial success or complication)
+- 3 = trouble (setback, things go wrong)
+- 2 = bad (failure with consequence)
+- 1 = worst (disaster, everything goes wrong)
+
+Scale outcomes to the pool available. If highest die is 4, that's the *best possible* outcome for this roll.
+The player is *choosing* which die to spend. Higher dice are more valuable. Never invert this.
 
 **Step 3: Incorporate the revealed narrative** into your response, then call `resolve`
 

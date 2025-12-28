@@ -121,6 +121,7 @@ data MoodVariantContext = MoodVariantContext
   -- Trauma variants
   , mvcTraumaType :: Maybe Text
   , mvcWhatBroke :: Maybe Text
+  , mvcAdrenaline :: Maybe Bool     -- Can push through for one more action?
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
@@ -328,6 +329,7 @@ emptyVariantContext = MoodVariantContext
   -- Trauma
   , mvcTraumaType = Nothing
   , mvcWhatBroke = Nothing
+  , mvcAdrenaline = Nothing
   }
 
 -- | Extract scene variant context
@@ -441,6 +443,7 @@ traumaVariantContext :: TraumaVariant -> MoodVariantContext
 traumaVariantContext Breaking{..} = emptyVariantContext
   { mvcTraumaType = Just (T.pack $ show tvTraumaType)
   , mvcWhatBroke = Just tvWhatBroke
+  , mvcAdrenaline = Just tvAdrenaline
   }
 
 -- | Render a scene beat as text for template display

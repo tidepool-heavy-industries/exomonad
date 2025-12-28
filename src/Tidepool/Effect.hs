@@ -34,6 +34,7 @@ module Tidepool.Effect
 
     -- * Result Types
   , TurnResult(..)
+  , TurnParseResult(..)
   , ToolInvocation(..)
   , LLMConfig(..)
   , InputHandler(..)
@@ -161,6 +162,18 @@ type instance DispatchOf LLM = 'Dynamic
 
 -- | Run a turn with system prompt and user action
 -- Returns TurnOutcome to allow caller to handle breaks
+-- | Run a turn, returning either the parsed output or a parse failure with raw data
+-- Callers should handle ParseFailure gracefully (e.g., with fallback output)
+data TurnParseResult output
+  = TurnParsed (TurnResult output)
+  | TurnParseFailed
+      { tpfRawJson :: Value
+      , tpfNarrative :: Text
+      , tpfError :: String
+      , tpfToolsInvoked :: [ToolInvocation]
+      }
+  deriving (Show, Eq, Functor)
+
 runTurn
   :: forall output es.
      (LLM :> es, FromJSON output)
@@ -168,7 +181,7 @@ runTurn
   -> Text                 -- user action (player input only)
   -> Value                -- output schema
   -> [Value]              -- tool definitions
-  -> Eff es (TurnOutcome (TurnResult output))
+  -> Eff es (TurnOutcome (TurnParseResult output))
 runTurn systemPrompt userAction schema tools = do
   rawResult <- send (RunTurnOp systemPrompt userAction schema tools)
   -- Parse the raw JSON output if turn completed
@@ -177,10 +190,13 @@ runTurn systemPrompt userAction schema tools = do
     TurnCompleted tr -> do
       let rawJson = tr.trOutput
       case fromJSON rawJson of
-        Success parsed -> return $ TurnCompleted tr { trOutput = parsed }
-        Error err -> error $ "Failed to parse LLM output: " <> err
-                          <> "\n\nRaw JSON was:\n" <> T.unpack (TE.decodeUtf8 . LBS.toStrict $ encode rawJson)
-                          <> "\n\nNarrative was:\n" <> T.unpack tr.trNarrative
+        Success parsed -> return $ TurnCompleted $ TurnParsed tr { trOutput = parsed }
+        Error err -> return $ TurnCompleted $ TurnParseFailed
+          { tpfRawJson = rawJson
+          , tpfNarrative = tr.trNarrative
+          , tpfError = err
+          , tpfToolsInvoked = tr.trToolsInvoked
+          }
 
 -- | Result of running an LLM turn
 data TurnResult output = TurnResult

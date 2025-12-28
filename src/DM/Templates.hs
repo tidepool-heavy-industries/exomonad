@@ -9,6 +9,7 @@ module DM.Templates
   , actionTemplate
   , aftermathTemplate
   , downtimeTemplate
+  , traumaTemplate
 
     -- * Typed Jinja Templates
   , dmTurnJinja
@@ -17,6 +18,7 @@ module DM.Templates
   , actionJinja
   , aftermathJinja
   , downtimeJinja
+  , traumaJinja
 
     -- * Rendering
   , renderDMTurn
@@ -60,6 +62,10 @@ aftermathJinja = $(typedTemplateFile ''DMContext "templates/aftermath/main.jinja
 -- | Downtime mood template - recovery montage, time compression
 downtimeJinja :: TypedTemplate DMContext SourcePos
 downtimeJinja = $(typedTemplateFile ''DMContext "templates/downtime/main.jinja")
+
+-- | Trauma mood template - breaking point, gaining permanent scar
+traumaJinja :: TypedTemplate DMContext SourcePos
+traumaJinja = $(typedTemplateFile ''DMContext "templates/trauma/main.jinja")
 
 -- | Compression Jinja template (compile-time validated)
 compressionJinja :: TypedTemplate CompressionContext SourcePos
@@ -117,6 +123,14 @@ downtimeTemplate = Template
   , templateTools = dmToolList
   }
 
+-- | Trauma template - breaking point, stress reset
+traumaTemplate :: Template DMContext TurnOutput DMEvent WorldState '[Choose, SpendDie, Engage, Resolve, Accept]
+traumaTemplate = Template
+  { templateJinja = traumaJinja
+  , templateOutputSchema = turnOutputSchema
+  , templateTools = dmToolList
+  }
+
 -- ══════════════════════════════════════════════════════════════
 -- RENDERING
 -- ══════════════════════════════════════════════════════════════
@@ -136,7 +150,7 @@ renderForMood mood ctx = case mood of
   MoodAction _ _  -> render actionTemplate ctx
   MoodAftermath _ -> render aftermathTemplate ctx
   MoodDowntime _  -> render downtimeTemplate ctx
-  MoodTrauma _    -> render sceneTemplate ctx  -- TODO: trauma template
+  MoodTrauma _    -> render traumaTemplate ctx
 
 -- ══════════════════════════════════════════════════════════════
 -- SCHEMAS

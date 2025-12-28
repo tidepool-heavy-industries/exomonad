@@ -1,4 +1,5 @@
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE RecordWildCards #-}
 -- | DM Game Loop
 module DM.Loop
   ( -- * Main Loop
@@ -108,7 +109,7 @@ dmTurn input = do
           let systemPrompt = renderForMood mood context
 
           -- Call LLM with system prompt and user action
-          outcome <- runTurn systemPrompt userAction turnOutputSchema.schemaJSON dmTools
+          outcome <- runTurn @TurnOutput systemPrompt userAction turnOutputSchema.schemaJSON dmTools
 
           case outcome of
             -- Tool triggered state transition - restart with new mood
@@ -116,35 +117,75 @@ dmTurn input = do
               logInfo $ "Mood transition: " <> reason
               runMoodAwareTurn userAction  -- Recursive call with new mood
 
-            -- Turn completed normally - apply output and continue
-            TurnCompleted result -> do
-              -- Apply structured output to world state
-              modify (applyTurnOutput result.trOutput)
+            -- Turn completed - handle parse result
+            TurnCompleted parseResult -> case parseResult of
+              -- Parse failed - log warning and use fallback
+              TurnParseFailed{..} -> do
+                logWarn $ "Failed to parse LLM output: " <> T.pack tpfError
+                logWarn $ "Tools invoked: " <> T.pack (show $ map (\ti -> ti.tiName) tpfToolsInvoked)
+                logWarn $ "Narrative was: " <> (if T.null tpfNarrative then "(empty)" else T.take 100 tpfNarrative)
 
-              -- Record DM response as scene beat (for history)
-              let narration = result.trOutput.narration
-              modify $ \s -> case s.scene of
-                Nothing -> s
-                Just activeScene ->
-                  let beat = DMNarration narration
-                      newBeats = activeScene.sceneBeats Seq.|> beat
-                  in s { scene = Just activeScene { sceneBeats = newBeats } }
+                -- Use fallback response with whatever narrative we got
+                let fallbackNarration = if T.null tpfNarrative
+                      then "*The world waits for your next move.*"
+                      else tpfNarrative
+                return Response
+                  { responseText = fallbackNarration
+                  , responseStressDelta = 0
+                  , responseCoinDelta = 0
+                  , responseHeatDelta = 0
+                  , responseSuggestedActions = ["Try something else", "Look around", "Wait"]
+                  }
 
-              -- Check clock consequences
-              checkClockConsequences
+              -- Parsed successfully - apply output and continue
+              TurnParsed result -> do
+                -- Capture state BEFORE applying output (for accurate delta display)
+                stateBefore <- get @WorldState
 
-              -- Compress if scene is getting long
-              compressIfNeeded
+                -- Apply structured output to world state
+                modify (applyTurnOutput result.trOutput)
 
-              -- Return response with narrative and mechanical changes
-              let output = result.trOutput
-              return Response
-                { responseText = narration
-                , responseStressDelta = output.stressDelta
-                , responseCoinDelta = output.coinDelta
-                , responseHeatDelta = output.heatDelta
-                , responseSuggestedActions = output.suggestedActions
-                }
+                -- Record DM response as scene beat (for history)
+                let narration = result.trOutput.narration
+                modify $ \s -> case s.scene of
+                  Nothing -> s
+                  Just activeScene ->
+                    let beat = DMNarration narration
+                        newBeats = activeScene.sceneBeats Seq.|> beat
+                    in s { scene = Just activeScene { sceneBeats = newBeats } }
+
+                -- Check clock consequences
+                checkClockConsequences
+
+                -- Check if stress hit max (trauma trigger)
+                checkTraumaTrigger stateBefore.player.stress
+
+                -- Compress if scene is getting long
+                compressIfNeeded
+
+                -- Calculate ACTUAL deltas (not LLM's claimed deltas, which ignore clamping)
+                stateAfter <- get @WorldState
+                let actualStressDelta = stateAfter.player.stress - stateBefore.player.stress
+                    actualCoinDelta = stateAfter.player.coin - stateBefore.player.coin
+                    actualHeatDelta = stateAfter.player.heat - stateBefore.player.heat
+
+                -- If we just finished a trauma turn, return to scene
+                -- (trauma is a one-turn event: narrate the break, then continue)
+                case stateAfter.mood of
+                  MoodTrauma _ -> do
+                    logInfo "Trauma processed, returning to scene"
+                    modify @WorldState $ \s -> s
+                      { mood = MoodScene (Encounter "aftermath of breakdown" UrgencyLow True) }
+                  _ -> return ()
+
+                -- Return response with narrative and actual mechanical changes
+                return Response
+                  { responseText = narration
+                  , responseStressDelta = actualStressDelta
+                  , responseCoinDelta = actualCoinDelta
+                  , responseHeatDelta = actualHeatDelta
+                  , responseSuggestedActions = result.trOutput.suggestedActions
+                  }
 
     -- | Check for pending clock interrupts and handle them
     -- Returns True if an interrupt forced a state transition
@@ -203,6 +244,29 @@ checkClockConsequences = do
     emitClockComplete (ClockId clockId, clock) =
       emit $ ClockCompleted clockId clock.clockName clock.clockConsequence
 
+-- | Check if stress just hit max (trauma trigger)
+-- If player crossed from <9 to 9, transition to trauma mood
+checkTraumaTrigger
+  :: ( State WorldState :> es
+     , Log :> es
+     )
+  => Int  -- Stress BEFORE this turn
+  -> Eff es ()
+checkTraumaTrigger stressBefore = do
+  state <- get @WorldState
+  let stressNow = state.player.stress
+  when (stressNow >= 9 && stressBefore < 9) $ do
+    logWarn "TRAUMA TRIGGERED: Stress hit maximum"
+    -- Transition to trauma mood - next turn will use trauma template
+    -- The LLM will narrate the breaking point and assign a trauma
+    let traumaVariant = Breaking
+          { tvWhatBroke = "stress overflow"  -- LLM will elaborate
+          , tvTraumaType = Trauma "pending"  -- LLM will determine actual trauma
+          , tvTrigger = "accumulated pressure"
+          , tvAdrenaline = False  -- Could be True if in combat
+          }
+    modify @WorldState $ \s -> s { mood = MoodTrauma traumaVariant }
+
 -- | Compress scene if it has too many beats
 -- Threshold: 20 beats triggers compression
 compressIfNeeded
@@ -226,7 +290,7 @@ compressIfNeeded = do
             userAction = "Compress this scene."
 
         -- Call LLM to compress the scene
-        outcome <- runTurn systemPrompt userAction compressionOutputSchema.schemaJSON []
+        outcome <- runTurn @CompressionOutput systemPrompt userAction compressionOutputSchema.schemaJSON []
 
         -- Compression shouldn't break, but handle it gracefully
         case outcome of
@@ -234,17 +298,22 @@ compressIfNeeded = do
             logWarn $ "Compression unexpectedly broke: " <> reason
             -- Continue without compressing
 
-          TurnCompleted result -> do
-            -- Apply compression output to world state
-            modify (applyCompression result.trOutput)
+          TurnCompleted parseResult -> case parseResult of
+            TurnParseFailed{..} -> do
+              logWarn $ "Compression parse failed: " <> T.pack tpfError
+              -- Continue without compressing
 
-            -- Clear scene beats (keep scene active with empty beats)
-            modify $ \s -> case s.scene of
-              Nothing -> s
-              Just scene -> s { scene = Just scene { sceneBeats = Seq.empty } }
+            TurnParsed result -> do
+              -- Apply compression output to world state
+              modify (applyCompression result.trOutput)
 
-            -- Emit compression event
-            emit $ SceneCompressed result.trOutput.summary
+              -- Clear scene beats (keep scene active with empty beats)
+              modify $ \s -> case s.scene of
+                Nothing -> s
+                Just scene -> s { scene = Just scene { sceneBeats = Seq.empty } }
+
+              -- Emit compression event
+              emit $ SceneCompressed result.trOutput.summary
   where
     compressionThreshold = 20
 
@@ -312,19 +381,24 @@ runDMGame initialState handleEvent saveState = do
             , ihText = terminalText
             }
 
-      -- Start with a scene at the Leaky Bucket (neutral territory)
+      -- Start without a scene - first turn establishes character and situation
       let stateWithScene = initialState
             { scene = Just ActiveScene
-                { sceneLocation = LocationId "leaky-bucket"
-                , scenePresent = [NpcId "telda"]  -- Bartender is present
-                , sceneStakes = Stakes "Find out what's happening in Crow's Foot"
+                { sceneLocation = LocationId "intro"
+                , scenePresent = []
+                , sceneStakes = Stakes "Establish who you are in Doskvol"
                 , sceneBeats = Seq.empty
                 }
             }
 
-      TIO.putStrLn "\n[Scene: The Leaky Bucket - neutral ground in Crow's Foot]"
-      TIO.putStrLn "[Telda, the bartender, is behind the counter.]"
-      TIO.putStrLn "[Type 'quit' to exit]\n"
+      TIO.putStrLn "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      TIO.putStrLn "DOSKVOL. Industrial sprawl. Eternal night."
+      TIO.putStrLn "The ghosts press against the lightning barriers."
+      TIO.putStrLn "The gangs carve up the districts."
+      TIO.putStrLn "You're about to step into the streets."
+      TIO.putStrLn "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      TIO.putStrLn "\n[Type 'quit' to exit]\n"
+      TIO.putStrLn "Who are you? What brings you to Crow's Foot tonight?\n"
 
       -- Run the game loop with auto-save (Debug level shows all log messages)
       -- Use runLLMWithTools with real DM dispatcher (not stub executor!)

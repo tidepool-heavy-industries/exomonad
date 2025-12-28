@@ -270,7 +270,14 @@ setupExampleWorld = initialWorld
       ]
 
   , locations = HM.fromList
-      [ (LocationId "coal-warehouse", Location
+      [ (LocationId "intro", Location
+          { locationName = "The Streets of Crow's Foot"
+          , locationDescription = "Fog drifts through gas-lit streets. Somewhere a clock tower chimes. The district breathes with old violence and new opportunity."
+          , locationControlledBy = Nothing
+          , locationFeatures = ["Narrow alleys", "Canal bridges", "Gas-lamps", "Shadows everywhere"]
+          })
+
+      , (LocationId "coal-warehouse", Location
           { locationName = "Lampblack Coal Warehouse"
           , locationDescription = "A sprawling brick warehouse reeking of coal dust. The Lampblacks' headquarters."
           , locationControlledBy = Just (FactionId "lampblacks")
