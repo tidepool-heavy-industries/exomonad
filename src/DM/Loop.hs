@@ -90,12 +90,25 @@ dmTurn
   => PlayerInput
   -> Eff es Response
 dmTurn input = do
+  -- Capture starting mood - used to detect trauma completion
+  startingMood <- gets @WorldState (.mood)
+
   -- 1. Record player action as scene beat (only on first call, not restarts)
   handlePlayerAction input
 
   -- 2. Run the turn (may restart on mood transition)
-  -- Pass the player action to the inner loop
-  runMoodAwareTurn input.piActionText
+  response <- runMoodAwareTurn input.piActionText
+
+  -- 3. If we STARTED in MoodTrauma, the turn just processed it - return to scene
+  -- This ensures trauma gets one full turn to be narrated before transitioning
+  case startingMood of
+    MoodTrauma _ -> do
+      logInfo "Trauma turn completed, returning to scene"
+      modify @WorldState $ \s -> s
+        { mood = MoodScene (Encounter "aftermath of breakdown" UrgencyLow True) }
+    _ -> return ()
+
+  return response
 
   where
     runMoodAwareTurn userAction = do
@@ -190,15 +203,6 @@ dmTurn input = do
                 let actualStressDelta = stateAfter.player.stress - stateBefore.player.stress
                     actualCoinDelta = stateAfter.player.coin - stateBefore.player.coin
                     actualHeatDelta = stateAfter.player.heat - stateBefore.player.heat
-
-                -- If we just finished a trauma turn, return to scene
-                -- (trauma is a one-turn event: narrate the break, then continue)
-                case stateAfter.mood of
-                  MoodTrauma _ -> do
-                    logInfo "Trauma processed, returning to scene"
-                    modify @WorldState $ \s -> s
-                      { mood = MoodScene (Encounter "aftermath of breakdown" UrgencyLow True) }
-                  _ -> return ()
 
                 -- Return response with narrative and actual mechanical changes
                 return Response
