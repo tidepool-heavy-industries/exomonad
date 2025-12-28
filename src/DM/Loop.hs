@@ -5,6 +5,7 @@ module DM.Loop
   ( -- * Main Loop
     dmTurn
   , runDMGame
+  , runDMGameWithDB
 
     -- * GUI Integration
   , gameLoopWithGUI
@@ -44,6 +45,8 @@ import qualified Data.HashMap.Strict as HM
 import qualified Data.Sequence as Seq
 import System.IO (hFlush, stdout)
 import System.Environment (lookupEnv)
+import Database.SQLite.Simple (Connection)
+import qualified Tidepool.Storage as Storage
 
 import Tidepool.GUI.Core (GUIBridge(..), PendingRequest(..), RequestResponse(..),
                           updateState, addNarrative, setLLMActive, newGUIBridge)
@@ -434,6 +437,132 @@ runDMGame initialState handleEvent saveState = do
 
       TIO.putStrLn "Game ended."
       return finalState
+
+-- | Run the DM game with SQLite database persistence
+-- Uses DB-backed chat history and saves world state after each turn
+runDMGameWithDB
+  :: Connection
+  -> Storage.GameId
+  -> Maybe Int         -- ^ Compression cursor (load messages after this)
+  -> WorldState
+  -> (DMEvent -> IO ())
+  -> IO WorldState
+runDMGameWithDB conn gameId mCursor initialState handleEvent = do
+  -- Get API key from environment
+  maybeKey <- lookupEnv "ANTHROPIC_API_KEY"
+  case maybeKey of
+    Nothing -> do
+      TIO.putStrLn "Error: ANTHROPIC_API_KEY not set"
+      TIO.putStrLn "Run: export ANTHROPIC_API_KEY=your-key-here"
+      return initialState
+    Just apiKey -> do
+      let llmConfig = LLMConfig
+            { llmApiKey = T.pack apiKey
+            , llmModel = "claude-haiku-4-5-20251001"
+            , llmMaxTokens = 4096
+            , llmThinkingBudget = Just 1024
+            , llmSystemPrompt = "You are the Dungeon Master for a Blades in the Dark style game."
+            }
+
+      let inputHandler = InputHandler
+            { ihChoice = terminalChoice
+            , ihText = terminalText
+            }
+
+      -- Start with active scene
+      let stateWithScene = initialState
+            { scene = Just ActiveScene
+                { sceneLocation = LocationId "intro"
+                , scenePresent = []
+                , sceneStakes = Stakes "Establish who you are in Doskvol"
+                , sceneBeats = Seq.empty
+                }
+            }
+
+      TIO.putStrLn "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      TIO.putStrLn "DOSKVOL. Industrial sprawl. Eternal night."
+      TIO.putStrLn "The ghosts press against the lightning barriers."
+      TIO.putStrLn "The gangs carve up the districts."
+      TIO.putStrLn "You're about to step into the streets."
+      TIO.putStrLn "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      TIO.putStrLn "\n[Type 'quit' to exit]\n"
+      TIO.putStrLn "Who are you? What brings you to Crow's Foot tonight?\n"
+
+      -- Run with DB-backed chat history
+      ((), finalState) <- runEff
+        . runRandom
+        . runEmit handleEvent
+        . runState stateWithScene
+        . runChatHistoryWithDB conn gameId mCursor
+        . runLog Debug
+        . runRequestInput inputHandler
+        . runLLMWithTools @_ @DMEvent llmConfig makeDMDispatcher
+        $ gameLoopWithDB conn gameId
+
+      TIO.putStrLn "Game ended."
+      return finalState
+
+-- | Game loop that saves to database after each turn
+gameLoopWithDB
+  :: Connection
+  -> Storage.GameId
+  -> Eff (GameEffects WorldState DMEvent) ()
+gameLoopWithDB conn gameId = loop []
+  where
+    loop :: [Text] -> Eff (GameEffects WorldState DMEvent) ()
+    loop lastSuggestions = do
+      state <- get @WorldState
+      case state.scene of
+        Nothing -> do
+          liftIO $ TIO.putStrLn "\n[No active scene. Use startScene to begin.]"
+          return ()
+
+        Just _ -> do
+          currentState <- get @WorldState
+          let p = currentState.player
+              statusLine = "Stress: " <> T.pack (show p.stress) <> "/9"
+                        <> " | Coin: " <> T.pack (show p.coin)
+                        <> " | Heat: " <> T.pack (show p.heat) <> "/10"
+                        <> " | Dice: " <> renderDice currentState.dicePool.poolDice
+              moodLabel = case currentState.mood of
+                MoodScene _     -> "SCENE"
+                MoodAction _ _  -> "ACTION"
+                MoodAftermath _ -> "AFTERMATH"
+                MoodDowntime _  -> "DOWNTIME"
+                MoodTrauma _    -> "TRAUMA"
+          liftIO $ TIO.putStrLn $ "\n[" <> statusLine <> "]"
+          liftIO $ TIO.putStrLn $ "[" <> moodLabel <> "]"
+
+          when (not $ null lastSuggestions) $
+            liftIO $ TIO.putStr $ renderSuggestedActions lastSuggestions
+
+          liftIO $ TIO.putStr "> "
+          liftIO $ hFlush stdout
+          inputText <- liftIO TIO.getLine
+
+          if T.toLower (T.strip inputText) `elem` ["quit", "exit", "q"]
+            then return ()
+            else do
+              let resolvedInput = resolvePlayerInput lastSuggestions inputText
+                  playerInput = PlayerInput
+                    { piActionText = resolvedInput
+                    , piActionTags = []
+                    }
+
+              response <- dmTurn playerInput
+
+              liftIO $ TIO.putStrLn ""
+              liftIO $ TIO.putStrLn response.responseText
+
+              updatedState <- get @WorldState
+              let mechanicalChanges = renderMechanicalChanges response updatedState
+              when (not $ T.null mechanicalChanges) $
+                liftIO $ TIO.putStrLn mechanicalChanges
+
+              -- Save world state to database
+              liftIO $ Storage.saveGameState conn gameId updatedState
+
+              loop response.responseSuggestedActions
 
 -- | Game loop with auto-save after each turn
 -- The save callback is captured in the closure
