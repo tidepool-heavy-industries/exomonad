@@ -180,12 +180,18 @@ buildMainPanel bridge = do
   -- Content area - holds BOTH narrative and history (show/hide for tab switching)
   contentArea <- UI.div #. "content-area"
 
-  -- Narrative pane (visible by default)
+  -- Narrative pane (visible by default) - tabpanel for Game tab
   narrativeEl <- dmNarrativePane bridge
+  void $ element narrativeEl
+    # set (attr "role") "tabpanel"
+    # set (attr "aria-label") "Game narrative"
 
-  -- History pane (hidden by default)
+  -- History pane (hidden by default) - tabpanel for History tab
   historyEl <- historyTab bridge
-  void $ element historyEl # set style [("display", "none")]
+  void $ element historyEl
+    # set (attr "role") "tabpanel"
+    # set (attr "aria-label") "Session history"
+    # set style [("display", "none")]
 
   void $ element contentArea #+ [element narrativeEl, element historyEl]
 
@@ -203,12 +209,27 @@ buildMainPanel bridge = do
   pure (panel, moodLabelEl, moodDescEl, narrativeEl, historyEl, inputArea, gameTab, historyTabEl)
 
 -- | Build the tab bar, returning references to tab elements
+--
+-- Implements WAI-ARIA tabs pattern for accessibility:
+-- - Tab bar has role="tablist"
+-- - Each tab has role="tab", tabindex, and aria-selected
+-- - Keyboard: Enter/Space to activate
 buildTabBar :: UI (Element, Element, Element)
 buildTabBar = do
   tabBar <- UI.div #. "tab-bar"
+    # set (attr "role") "tablist"
 
-  gameTab <- UI.div #. "tab active" # set text "Game"
-  historyTab' <- UI.div #. "tab" # set text "History"
+  gameTab <- UI.div #. "tab active"
+    # set text "Game"
+    # set (attr "role") "tab"
+    # set (attr "tabindex") "0"
+    # set (attr "aria-selected") "true"
+
+  historyTab' <- UI.div #. "tab"
+    # set text "History"
+    # set (attr "role") "tab"
+    # set (attr "tabindex") "0"
+    # set (attr "aria-selected") "false"
 
   void $ element tabBar #+ [element gameTab, element historyTab']
   pure (tabBar, gameTab, historyTab')
@@ -256,6 +277,21 @@ setupPolling config bridge elements = do
     when (currentTab /= HistoryTab) $ do
       liftIO $ writeIORef currentTabRef HistoryTab
       switchToHistoryTab elements
+
+  -- Keyboard handlers for tabs (Enter or Space to activate)
+  on UI.keydown (geGameTab elements) $ \code ->
+    when (code == 13 || code == 32) $ do  -- Enter or Space
+      currentTab <- liftIO $ readIORef currentTabRef
+      when (currentTab /= GameTab) $ do
+        liftIO $ writeIORef currentTabRef GameTab
+        switchToGameTab elements
+
+  on UI.keydown (geHistoryTab elements) $ \code ->
+    when (code == 13 || code == 32) $ do  -- Enter or Space
+      currentTab <- liftIO $ readIORef currentTabRef
+      when (currentTab /= HistoryTab) $ do
+        liftIO $ writeIORef currentTabRef HistoryTab
+        switchToHistoryTab elements
 
   on UI.tick timer $ const $ do
     -- Check for pending requests
@@ -364,9 +400,11 @@ updateLoadingOverlay elements isLoading = do
 -- | Switch to the Game tab
 switchToGameTab :: GUIElements -> UI ()
 switchToGameTab elements = do
-  -- Update tab styling
+  -- Update tab styling and ARIA state
   void $ element (geGameTab elements) #. "tab active"
+    # set (attr "aria-selected") "true"
   void $ element (geHistoryTab elements) #. "tab"
+    # set (attr "aria-selected") "false"
 
   -- Show narrative, hide history
   void $ element (geNarrativePane elements) # set style [("display", "block")]
@@ -375,9 +413,11 @@ switchToGameTab elements = do
 -- | Switch to the History tab
 switchToHistoryTab :: GUIElements -> UI ()
 switchToHistoryTab elements = do
-  -- Update tab styling
+  -- Update tab styling and ARIA state
   void $ element (geGameTab elements) #. "tab"
+    # set (attr "aria-selected") "false"
   void $ element (geHistoryTab elements) #. "tab active"
+    # set (attr "aria-selected") "true"
 
   -- Hide narrative, show history
   void $ element (geNarrativePane elements) # set style [("display", "none")]

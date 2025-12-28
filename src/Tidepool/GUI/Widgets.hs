@@ -116,6 +116,7 @@ choiceCards bridge prompt options = do
   -- Cards container with keyboard handling
   cardsContainer <- UI.div #. "choice-container"
     # set (attr "role") "listbox"
+    # set (attr "aria-label") "Choose an option"
 
   -- Create cards with indices for keyboard shortcuts
   cards <- mapM (mkCard bridge) (zip [1..] options)
