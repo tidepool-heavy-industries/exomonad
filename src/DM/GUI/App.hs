@@ -41,17 +41,17 @@ import qualified Data.Text as T
 import Graphics.UI.Threepenny.Core
 import qualified Graphics.UI.Threepenny as UI
 
-import DM.State (WorldState(..), Position(..), PendingOutcome(..))
+import DM.State (WorldState(..), PlayerState(..), Position(..), PendingOutcome(..))
 import DM.GUI.Theme (noirTheme)
 import DM.GUI.Widgets.Stats (statsPanel, stressBar, coinDisplay, heatBar, wantedPips, traumaList)
-import DM.GUI.Widgets.Mood (moodHeader, moodDisplay)
+import DM.GUI.Widgets.Mood (moodDisplay)
 import DM.GUI.Widgets.History (historyTab, updateHistoryTab)
 import DM.GUI.Widgets.Narrative (dmNarrativePane, updateDMNarrative)
 import DM.GUI.Widgets.Clocks (clocksPanel, updateClocksPanel)
 import DM.GUI.Widgets.Dice (diceChoice)
 import Tidepool.GUI.Core
 import Tidepool.GUI.Theme (applyTheme)
-import Tidepool.GUI.Widgets (textInput, choiceCards, loadingOverlay, updateDebugPanel)
+import Tidepool.GUI.Widgets (textInput, choiceCards, loadingOverlay, updateDebugPanel, stateInspector, StateInspectorHandle(..), refreshStateInspector)
 
 -- | Configuration for the DM GUI
 data DMGUIConfig = DMGUIConfig
@@ -83,6 +83,7 @@ data GUIElements = GUIElements
   , geInputArea        :: Element  -- ^ Input widget container
   , geLoadingOverlay   :: Element  -- ^ Loading overlay (hidden by default)
   , geDebugContent     :: Maybe Element  -- ^ Debug panel content (if shown)
+  , geStateInspector   :: Maybe StateInspectorHandle  -- ^ State inspector (if debug shown)
   , geGameTab          :: Element  -- ^ Game tab button
   , geHistoryTab       :: Element  -- ^ History tab button
   }
@@ -124,14 +125,16 @@ buildLayout config bridge = do
     <- buildMainPanel bridge
 
   -- Debug panel (optional) - create inline to capture content element
-  (debugPanelEl, debugContentEl) <- if config.dcShowDebug
+  (debugPanelEl, debugContentEl, stateInspectorHandle) <- if config.dcShowDebug
     then do
       panel <- UI.div #. "debug-panel"
       titleEl <- UI.div #. "debug-section-title" # set text "DEBUG LOG"
       contentEl <- UI.div #. "debug-content"
-      void $ element panel #+ [element titleEl, element contentEl]
-      pure (Just panel, Just contentEl)
-    else pure (Nothing, Nothing)
+      -- State inspector (collapsible raw JSON view, live-updating)
+      inspectorHandle <- stateInspector bridge
+      void $ element panel #+ [element titleEl, element contentEl, element inspectorHandle.sihElement]
+      pure (Just panel, Just contentEl, Just inspectorHandle)
+    else pure (Nothing, Nothing, Nothing)
 
   -- Loading overlay (hidden by default)
   loadingEl <- loadingOverlay "The DM is thinking..."
@@ -153,6 +156,7 @@ buildLayout config bridge = do
         , geInputArea = inputEl
         , geLoadingOverlay = loadingEl
         , geDebugContent = debugContentEl
+        , geStateInspector = stateInspectorHandle
         , geGameTab = gameTab
         , geHistoryTab = histTab
         }
@@ -266,27 +270,27 @@ setupPolling config bridge elements = do
   prevDebugVersionRef <- liftIO $ newIORef (0 :: Int)
 
   -- Set up tab click handlers
-  on UI.click (geGameTab elements) $ const $ do
+  on UI.click elements.geGameTab $ const $ do
     currentTab <- liftIO $ readIORef currentTabRef
     when (currentTab /= GameTab) $ do
       liftIO $ writeIORef currentTabRef GameTab
       switchToGameTab elements
 
-  on UI.click (geHistoryTab elements) $ const $ do
+  on UI.click elements.geHistoryTab $ const $ do
     currentTab <- liftIO $ readIORef currentTabRef
     when (currentTab /= HistoryTab) $ do
       liftIO $ writeIORef currentTabRef HistoryTab
       switchToHistoryTab elements
 
   -- Keyboard handlers for tabs (Enter or Space to activate)
-  on UI.keydown (geGameTab elements) $ \code ->
+  on UI.keydown elements.geGameTab $ \code ->
     when (code == 13 || code == 32) $ do  -- Enter or Space
       currentTab <- liftIO $ readIORef currentTabRef
       when (currentTab /= GameTab) $ do
         liftIO $ writeIORef currentTabRef GameTab
         switchToGameTab elements
 
-  on UI.keydown (geHistoryTab elements) $ \code ->
+  on UI.keydown elements.geHistoryTab $ \code ->
     when (code == 13 || code == 32) $ do  -- Enter or Space
       currentTab <- liftIO $ readIORef currentTabRef
       when (currentTab /= HistoryTab) $ do
@@ -322,6 +326,10 @@ setupPolling config bridge elements = do
       refreshMood bridge elements
       refreshClocks bridge elements
       refreshHistory bridge elements
+      -- Refresh state inspector if it's expanded (live view)
+      case elements.geStateInspector of
+        Just handle -> refreshStateInspector handle bridge
+        Nothing -> pure ()
 
     -- Check for narrative changes
     narrativeVersion <- liftIO $ atomically $ readTVar bridge.gbNarrativeVersion
@@ -333,6 +341,8 @@ setupPolling config bridge elements = do
       -- Only refresh narrative if on Game tab
       when (currentTab == GameTab) $
         refreshNarrative bridge elements
+      -- Trim narrative log to prevent unbounded growth
+      liftIO $ trimNarrativeLog bridge defaultMaxLogEntries
 
     -- Check for debug log changes
     debugVersion <- liftIO $ atomically $ readTVar bridge.gbDebugVersion
@@ -341,13 +351,15 @@ setupPolling config bridge elements = do
     when (debugVersion /= prevDebugVersion) $ do
       liftIO $ writeIORef prevDebugVersionRef debugVersion
       refreshDebug bridge elements
+      -- Trim debug log to prevent unbounded growth
+      liftIO $ trimDebugLog bridge defaultMaxLogEntries
 
   UI.start timer
 
 -- | Update the input area based on pending request
 updateInputArea :: GUIBridge WorldState -> GUIElements -> Maybe PendingRequest -> UI ()
 updateInputArea bridge elements pending = do
-  let inputArea = geInputArea elements
+  let inputArea = elements.geInputArea
 
   case pending of
     Nothing -> do
@@ -392,7 +404,7 @@ getCurrentPosition state =
 -- | Update the loading overlay visibility
 updateLoadingOverlay :: GUIElements -> Bool -> UI ()
 updateLoadingOverlay elements isLoading = do
-  let overlay = geLoadingOverlay elements
+  let overlay = elements.geLoadingOverlay
   if isLoading
     then void $ element overlay # set style [("display", "flex")]
     else void $ element overlay # set style [("display", "none")]
@@ -401,27 +413,27 @@ updateLoadingOverlay elements isLoading = do
 switchToGameTab :: GUIElements -> UI ()
 switchToGameTab elements = do
   -- Update tab styling and ARIA state
-  void $ element (geGameTab elements) #. "tab active"
+  void $ element elements.geGameTab #. "tab active"
     # set (attr "aria-selected") "true"
-  void $ element (geHistoryTab elements) #. "tab"
+  void $ element elements.geHistoryTab #. "tab"
     # set (attr "aria-selected") "false"
 
   -- Show narrative, hide history
-  void $ element (geNarrativePane elements) # set style [("display", "block")]
-  void $ element (geHistoryPane elements) # set style [("display", "none")]
+  void $ element elements.geNarrativePane # set style [("display", "block")]
+  void $ element elements.geHistoryPane # set style [("display", "none")]
 
 -- | Switch to the History tab
 switchToHistoryTab :: GUIElements -> UI ()
 switchToHistoryTab elements = do
   -- Update tab styling and ARIA state
-  void $ element (geGameTab elements) #. "tab"
+  void $ element elements.geGameTab #. "tab"
     # set (attr "aria-selected") "false"
-  void $ element (geHistoryTab elements) #. "tab active"
+  void $ element elements.geHistoryTab #. "tab active"
     # set (attr "aria-selected") "true"
 
   -- Hide narrative, show history
-  void $ element (geNarrativePane elements) # set style [("display", "none")]
-  void $ element (geHistoryPane elements) # set style [("display", "block")]
+  void $ element elements.geNarrativePane # set style [("display", "none")]
+  void $ element elements.geHistoryPane # set style [("display", "block")]
 
 -- | Refresh stats display (call when WorldState changes)
 refreshStats :: GUIBridge WorldState -> GUIElements -> UI ()
@@ -430,7 +442,7 @@ refreshStats bridge elements = do
   let player = state.player
 
   -- Rebuild stats content
-  void $ element (geStatsContainer elements) # set children []
+  void $ element elements.geStatsContainer # set children []
 
   titleEl <- UI.h2 #. "sidebar-title" # set text "SCOUNDREL"
   stressEl <- stressBar player.stress
@@ -439,7 +451,7 @@ refreshStats bridge elements = do
   wantedEl <- wantedPips player.wanted
   traumaEl <- traumaList player.trauma
 
-  void $ element (geStatsContainer elements) #+
+  void $ element elements.geStatsContainer #+
     [ element titleEl
     , element stressEl
     , element coinEl
@@ -452,7 +464,7 @@ refreshStats bridge elements = do
 refreshNarrative :: GUIBridge WorldState -> GUIElements -> UI ()
 refreshNarrative bridge elements =
   -- Use DM-specific update for rich narrative with speech bubbles
-  updateDMNarrative (geNarrativePane elements) bridge
+  updateDMNarrative elements.geNarrativePane bridge
 
 -- | Refresh mood display (call when mood changes)
 refreshMood :: GUIBridge WorldState -> GUIElements -> UI ()
@@ -460,22 +472,22 @@ refreshMood bridge elements = do
   state <- liftIO $ atomically $ readTVar bridge.gbState
   let (lbl, desc) = moodDisplay state.mood
 
-  void $ element (geMoodLabel elements) # set text (T.unpack lbl)
-  void $ element (geMoodDescription elements) # set text (T.unpack desc)
+  void $ element elements.geMoodLabel # set text (T.unpack lbl)
+  void $ element elements.geMoodDescription # set text (T.unpack desc)
 
 -- | Refresh clocks panel (call when WorldState.clocks changes)
 refreshClocks :: GUIBridge WorldState -> GUIElements -> UI ()
 refreshClocks bridge elements =
-  updateClocksPanel (geClocksContainer elements) bridge
+  updateClocksPanel elements.geClocksContainer bridge
 
 -- | Refresh history pane (call when WorldState changes)
 refreshHistory :: GUIBridge WorldState -> GUIElements -> UI ()
 refreshHistory bridge elements =
-  updateHistoryTab (geHistoryPane elements) bridge
+  updateHistoryTab elements.geHistoryPane bridge
 
 -- | Refresh debug panel (call when debug log changes)
 refreshDebug :: GUIBridge WorldState -> GUIElements -> UI ()
 refreshDebug bridge elements =
-  case geDebugContent elements of
+  case elements.geDebugContent of
     Nothing -> pure ()  -- Debug panel not shown
     Just contentEl -> updateDebugPanel contentEl bridge

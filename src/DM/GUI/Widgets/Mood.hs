@@ -1,38 +1,18 @@
 -- | Mood header widget for the DM GUI
 --
 -- Displays the current DM mood state machine state with description.
+-- Note: App.hs builds the mood header inline because it needs references
+-- to the label/description elements for refreshing. This module provides
+-- the display logic helpers.
 module DM.GUI.Widgets.Mood
-  ( moodHeader
-  , moodDisplay
+  ( moodDisplay
   , moodLabel
   , moodDescription
   ) where
 
-import Control.Concurrent.STM (atomically, readTVar)
-import Control.Monad (void)
 import Data.Text (Text)
-import qualified Data.Text as T
-import Graphics.UI.Threepenny.Core
-import qualified Graphics.UI.Threepenny as UI
 
 import DM.State
-import Tidepool.GUI.Core (GUIBridge(..))
-
--- | Create the mood header panel
-moodHeader :: GUIBridge WorldState -> UI Element
-moodHeader bridge = do
-  header <- UI.div #. "mood-header"
-
-  -- Get current state
-  state <- liftIO $ atomically $ readTVar bridge.gbState
-  let mood = state.mood
-      (label, desc) = moodDisplay mood
-
-  labelEl <- UI.span #. "mood-label" # set text (T.unpack label)
-  descEl <- UI.span #. "mood-description" # set text (T.unpack desc)
-
-  void $ element header #+ [element labelEl, UI.string " - ", element descEl]
-  pure header
 
 -- | Get the label for a mood
 moodLabel :: DMMood -> Text

@@ -32,9 +32,12 @@ module Tidepool.GUI.Widgets
     -- * Display widgets
   , narrativePane
   , debugPanel
+  , stateInspector
+  , StateInspectorHandle(..)
     -- * Update functions
   , updateNarrative
   , updateDebugPanel
+  , refreshStateInspector
     -- * Loading state
   , loadingOverlay
     -- * Layout helpers
@@ -45,9 +48,15 @@ module Tidepool.GUI.Widgets
 
 import Control.Concurrent.STM (atomically, readTVar)
 import Control.Monad (void, when)
+import Data.Aeson (ToJSON, encode)
+import Data.Aeson.Encode.Pretty (encodePretty)
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Foldable (toList)
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.Lazy as TL
+import qualified Data.Text.Lazy.Encoding as TLE
+import Data.Time.Format (formatTime, defaultTimeLocale)
 import Graphics.UI.Threepenny.Core
 import qualified Graphics.UI.Threepenny as UI
 
@@ -218,12 +227,110 @@ mkDebugEntry entry = do
         Warn  -> "warn"
         Error -> "error"
 
+  -- Timestamp
+  let timeStr = formatTime defaultTimeLocale "%H:%M:%S" entry.deTimestamp
+  timeEl <- UI.span #. "debug-time" # set text timeStr
+
+  -- Level badge
   levelEl <- UI.span #. ("debug-level " <> levelClass)
     # set text (show entry.deLevel)
-  msgEl <- UI.span # set text (T.unpack entry.deMessage)
 
-  void $ element el #+ [element levelEl, element msgEl]
+  -- Message
+  msgEl <- UI.span #. "debug-message" # set text (T.unpack entry.deMessage)
+
+  -- JSON context (collapsible) if present
+  case entry.deContext of
+    Nothing -> do
+      void $ element el #+ [element timeEl, element levelEl, element msgEl]
+
+    Just ctx -> do
+      -- Create expandable context section
+      let jsonText = TL.toStrict $ TLE.decodeUtf8 $ encode ctx
+      contextEl <- UI.div #. "debug-context collapsed"
+      toggleBtn <- UI.span #. "debug-toggle" # set text "▶ context"
+      jsonEl <- UI.pre #. "debug-json" # set text (T.unpack jsonText)
+        # set style [("display", "none")]
+
+      -- Track expanded state with IORef
+      expandedRef <- liftIO $ newIORef False
+
+      -- Toggle visibility on click
+      on UI.click toggleBtn $ const $ do
+        isExpanded <- liftIO $ readIORef expandedRef
+        if isExpanded
+          then do
+            void $ element jsonEl # set style [("display", "none")]
+            void $ element toggleBtn # set text "▶ context"
+            liftIO $ writeIORef expandedRef False
+          else do
+            void $ element jsonEl # set style [("display", "block")]
+            void $ element toggleBtn # set text "▼ context"
+            liftIO $ writeIORef expandedRef True
+
+      void $ element contextEl #+ [element toggleBtn, element jsonEl]
+      void $ element el #+ [element timeEl, element levelEl, element msgEl, element contextEl]
+
   pure el
+
+-- | Handle for state inspector that allows external refresh
+data StateInspectorHandle = StateInspectorHandle
+  { sihElement    :: Element           -- ^ The container element
+  , sihJsonEl     :: Element           -- ^ The JSON pre element
+  , sihExpandedRef :: IORef Bool       -- ^ Whether currently expanded
+  }
+
+-- | Create a state inspector widget
+--
+-- Shows the raw game state as pretty-printed JSON. Collapsible by default.
+-- Returns a handle that can be used to refresh the view when state changes.
+stateInspector :: ToJSON state => GUIBridge state -> UI StateInspectorHandle
+stateInspector bridge = do
+  container <- UI.div #. "state-inspector"
+
+  -- Title (clickable to toggle)
+  titleEl <- UI.div #. "state-inspector-title" # set text "▶ RAW STATE (live)"
+
+  -- JSON content (hidden by default)
+  jsonEl <- UI.pre #. "state-json" # set style [("display", "none")]
+
+  -- Initial content
+  updateStateInspectorEl jsonEl bridge
+
+  -- Track expanded state with IORef
+  expandedRef <- liftIO $ newIORef False
+
+  -- Toggle visibility on click
+  on UI.click titleEl $ const $ do
+    isExpanded <- liftIO $ readIORef expandedRef
+    if isExpanded
+      then do
+        void $ element jsonEl # set style [("display", "none")]
+        void $ element titleEl # set text "▶ RAW STATE (live)"
+        liftIO $ writeIORef expandedRef False
+      else do
+        void $ element jsonEl # set style [("display", "block")]
+        void $ element titleEl # set text "▼ RAW STATE (live)"
+        -- Refresh content when expanding
+        updateStateInspectorEl jsonEl bridge
+        liftIO $ writeIORef expandedRef True
+
+  void $ element container #+ [element titleEl, element jsonEl]
+  pure $ StateInspectorHandle container jsonEl expandedRef
+
+-- | Internal: Update the state inspector element with current state
+updateStateInspectorEl :: ToJSON state => Element -> GUIBridge state -> UI ()
+updateStateInspectorEl jsonEl bridge = do
+  state <- liftIO $ atomically $ readTVar bridge.gbState
+  let jsonText = TL.toStrict $ TLE.decodeUtf8 $ encodePretty state
+  void $ element jsonEl # set text (T.unpack jsonText)
+
+-- | Refresh the state inspector if it's currently expanded
+-- Call this from polling loop when state changes
+refreshStateInspector :: ToJSON state => StateInspectorHandle -> GUIBridge state -> UI ()
+refreshStateInspector handle bridge = do
+  isExpanded <- liftIO $ readIORef handle.sihExpandedRef
+  when isExpanded $
+    updateStateInspectorEl handle.sihJsonEl bridge
 
 -- | Create a loading overlay
 --

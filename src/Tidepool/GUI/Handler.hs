@@ -3,27 +3,8 @@
 -- This module provides an 'InputHandler' that bridges to the GUI
 -- via the 'GUIBridge' types. When input is requested, it posts
 -- to the bridge and blocks until the GUI responds.
---
--- = Dice Support
---
--- The 'guiDice' function provides dice selection via the GUI. Since
--- dice selection is rendered differently (with tier colors based on
--- Position), it uses a separate 'PendingDice' request type.
---
--- To fully integrate dice into the effect system, add to Effect.hs:
---
--- @
--- data InputHandler = InputHandler
---   { ihChoice :: forall a. Text -> [(Text, a)] -> IO a
---   , ihText   :: Text -> IO Text
---   , ihDice   :: Text -> [(Int, Int)] -> IO Int  -- (die value, index)
---   }
--- @
---
--- Until then, use 'guiDice' directly from game logic.
 module Tidepool.GUI.Handler
   ( makeGUIHandler
-    -- * Direct dice support
   , guiDice
   ) where
 
@@ -43,6 +24,7 @@ makeGUIHandler :: GUIBridge state -> InputHandler
 makeGUIHandler bridge = InputHandler
   { ihChoice = guiChoice bridge
   , ihText = guiText bridge
+  , ihDice = guiDice bridge
   }
 
 -- | Handle a choice request via the GUI
@@ -62,9 +44,12 @@ guiChoice bridge prompt options = do
   -- Clear the pending request
   atomically $ writeTVar bridge.gbPendingRequest Nothing
 
-  -- Return the value at the selected index
+  -- Return the value at the selected index (with bounds check)
   case response of
-    ChoiceResponse idx -> pure (snd (options !! idx))
+    ChoiceResponse idx
+      | idx >= 0 && idx < length options -> pure (snd (options !! idx))
+      | otherwise -> error $ "Choice index out of bounds: " ++ show idx
+                          ++ " (valid: 0-" ++ show (length options - 1) ++ ")"
     TextResponse _ -> error "Expected ChoiceResponse, got TextResponse"
 
 -- | Handle a text input request via the GUI

@@ -55,6 +55,8 @@ module Tidepool.GUI.Core
   , logInfo
   , logWarn
   , logError
+  , logDebugWithContext
+  , logInfoWithContext
     -- * Narrative
   , addNarrative
   , clearNarrative
@@ -298,6 +300,14 @@ logWarn bridge msg = addDebugEntry bridge Warn msg Nothing
 -- | Log an error message
 logError :: GUIBridge state -> Text -> IO ()
 logError bridge msg = addDebugEntry bridge Error msg Nothing
+
+-- | Log a debug message with JSON context
+logDebugWithContext :: GUIBridge state -> Text -> Value -> IO ()
+logDebugWithContext bridge msg ctx = addDebugEntry bridge Debug msg (Just ctx)
+
+-- | Log an info message with JSON context
+logInfoWithContext :: GUIBridge state -> Text -> Value -> IO ()
+logInfoWithContext bridge msg ctx = addDebugEntry bridge Info msg (Just ctx)
 
 -- | Trim the debug log to a maximum number of entries
 --

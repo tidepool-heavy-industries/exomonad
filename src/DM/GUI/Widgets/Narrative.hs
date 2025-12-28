@@ -63,7 +63,7 @@ updateDMNarrative container bridge = do
     Just activeScene -> do
       -- Render each beat
       beatEls <- mapM renderSceneBeat (toList activeScene.sceneBeats)
-      void $ element container #+ beatEls
+      void $ element container #+ map element beatEls
 
   -- Auto-scroll to bottom
   runFunction $ ffi "$(%1).scrollTop($(%1)[0].scrollHeight)" container
