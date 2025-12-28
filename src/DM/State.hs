@@ -105,7 +105,7 @@ import Data.Sequence (Seq)
 import qualified Data.Sequence as Seq
 import GHC.Generics (Generic)
 import Data.Aeson (ToJSON, FromJSON, ToJSONKey, FromJSONKey)
-import Text.Ginger.GVal (ToGVal(..))
+import Text.Ginger.GVal (ToGVal(..), genericToGVal)
 import Tidepool.Template ()  -- ToGVal instances for HashMap, Seq, Either
 
 import DM.CharacterCreation (CharacterChoices, ClockType(..))
@@ -123,7 +123,7 @@ data DMMood
   | MoodTrauma TraumaVariant
   | MoodBargain BargainVariant         -- Out of dice, must make a deal
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
-  deriving anyclass (ToGVal m)
+  -- Note: ToGVal instance is at end of file due to mutual recursion with BargainVariant
 
 -- | Scene variants - every scene has a hook (no more FreePlay)
 data SceneVariant
@@ -285,6 +285,7 @@ data GamePhase
   | PhaseBetweenScenes           -- Scene ended, choosing what's next
   | PhaseSessionEnded            -- Player chose to end session, exit loop
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
+  deriving anyclass (ToGVal m)
 
 -- ══════════════════════════════════════════════════════════════
 -- CORE STATE
@@ -319,7 +320,7 @@ data WorldState = WorldState
   , betweenScenesDisplay :: Maybe BetweenScenesContext
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
-  deriving anyclass (ToGVal m)
+  -- Note: ToGVal instance is at end of file due to dependency on DMMood
 
 data SceneSummary = SceneSummary
   { summaryText :: Text
@@ -793,82 +794,6 @@ newtype Tag = Tag { unTag :: Text }
   deriving anyclass (ToGVal m)
 
 -- ══════════════════════════════════════════════════════════════
--- TOGVAL INSTANCES (for template rendering via genericToGVal)
--- ══════════════════════════════════════════════════════════════
-
--- Container instances (not provided by ginger)
-instance (ToGVal m k, ToGVal m v) => ToGVal m (HashMap k v) where
-  toGVal hm = list [toGVal (k, v) | (k, v) <- HM.toList hm]
-
-instance ToGVal m a => ToGVal m (Seq a) where
-  toGVal s = list (map toGVal (F.toList s))
-
-instance (ToGVal m a, ToGVal m b) => ToGVal m (Either a b) where
-  toGVal (Left a) = dict [("Left", toGVal a)]
-  toGVal (Right b) = dict [("Right", toGVal b)]
-
--- Core State
-instance ToGVal m GamePhase where toGVal = genericToGVal
-instance ToGVal m WorldState where toGVal = genericToGVal
-instance ToGVal m SceneSummary where toGVal = genericToGVal
-
--- DM Mood (State Machine)
-instance ToGVal m DMMood where toGVal = genericToGVal
-instance ToGVal m SceneVariant where toGVal = genericToGVal
-instance ToGVal m SceneUrgency where toGVal = genericToGVal
-instance ToGVal m DowntimeVariant where toGVal = genericToGVal
-instance ToGVal m ActionVariant where toGVal = genericToGVal
-instance ToGVal m ActionDomain where toGVal = genericToGVal
-instance ToGVal m AftermathVariant where toGVal = genericToGVal
-instance ToGVal m TraumaVariant where toGVal = genericToGVal
-instance ToGVal m BargainVariant where toGVal = genericToGVal
-instance ToGVal m BargainOption where toGVal = genericToGVal
-instance ToGVal m BargainCost where toGVal = genericToGVal
-instance ToGVal m ClockInterrupt where toGVal = genericToGVal
-
--- Player
-instance ToGVal m PlayerState where toGVal = genericToGVal
-instance ToGVal m Trauma where toGVal = genericToGVal
-
--- Dice Mechanics
-instance ToGVal m DicePool where toGVal = genericToGVal
-instance ToGVal m Position where toGVal = genericToGVal
-instance ToGVal m Effect where toGVal = genericToGVal
-instance ToGVal m OutcomeTier where toGVal = genericToGVal
-instance ToGVal m PendingOutcome where toGVal = genericToGVal
-
--- Factions
-instance ToGVal m FactionId where toGVal = genericToGVal
-instance ToGVal m Faction where toGVal = genericToGVal
-instance ToGVal m Attitude where toGVal = genericToGVal
-instance ToGVal m GoalId where toGVal = genericToGVal
-instance ToGVal m Goal where toGVal = genericToGVal
-instance ToGVal m GoalStatus where toGVal = genericToGVal
-instance ToGVal m ResourcePool where toGVal = genericToGVal
-instance ToGVal m Secret where toGVal = genericToGVal
-instance ToGVal m Fact where toGVal = genericToGVal
-
--- NPCs
-instance ToGVal m NpcId where toGVal = genericToGVal
-instance ToGVal m Npc where toGVal = genericToGVal
-instance ToGVal m Disposition where toGVal = genericToGVal
-instance ToGVal m Want where toGVal = genericToGVal
-instance ToGVal m Fear where toGVal = genericToGVal
-instance ToGVal m Urgency where toGVal = genericToGVal
-instance ToGVal m Severity where toGVal = genericToGVal
-
--- Clocks
-instance ToGVal m ClockId where toGVal = genericToGVal
-instance ToGVal m Clock where toGVal = genericToGVal
-instance ToGVal m Trigger where toGVal = genericToGVal
-instance ToGVal m ActionPattern where toGVal = genericToGVal
-instance ToGVal m Consequence where toGVal = genericToGVal
-instance ToGVal m FactionAction where toGVal = genericToGVal
-instance ToGVal m Target where toGVal = genericToGVal
-instance ToGVal m LocationDelta where toGVal = genericToGVal
-instance ToGVal m Escalation where toGVal = genericToGVal
-
--- ══════════════════════════════════════════════════════════════
 -- BETWEEN SCENES
 -- ══════════════════════════════════════════════════════════════
 
@@ -885,6 +810,7 @@ data BetweenScenesOption
   | BSEndSession
     -- ^ Save and quit
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
+  deriving anyclass (ToGVal m)
 
 -- | Summary of a clock for BetweenScenes display
 data ClockSummary = ClockSummary
@@ -894,6 +820,7 @@ data ClockSummary = ClockSummary
   , csIsThreat :: Bool  -- True = threat, False = goal
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
+  deriving anyclass (ToGVal m)
 
 -- | Context for the BetweenScenes UI
 data BetweenScenesContext = BetweenScenesContext
@@ -903,6 +830,7 @@ data BetweenScenesContext = BetweenScenesContext
     -- ^ LLM-generated bridge text (~50 words)
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
+  deriving anyclass (ToGVal m)
 
 -- | Get display label for a BetweenScenes option
 optionLabel :: BetweenScenesOption -> Text
@@ -912,30 +840,13 @@ optionLabel (BSWorkGoal name) = "Work on: " <> name
 optionLabel BSNewScene = "Start New Scene"
 optionLabel BSEndSession = "Save & Quit"
 
-instance ToGVal m BetweenScenesOption where toGVal = genericToGVal
-instance ToGVal m ClockSummary where toGVal = genericToGVal
-instance ToGVal m BetweenScenesContext where toGVal = genericToGVal
+-- ══════════════════════════════════════════════════════════════
+-- TOGVAL INSTANCES (explicit due to mutual recursion)
+-- ══════════════════════════════════════════════════════════════
 
--- Locations
-instance ToGVal m LocationId where toGVal = genericToGVal
-instance ToGVal m Location where toGVal = genericToGVal
-
--- Narrative
-instance ToGVal m RumorId where toGVal = genericToGVal
-instance ToGVal m Rumor where toGVal = genericToGVal
-instance ToGVal m RumorSource where toGVal = genericToGVal
-instance ToGVal m TruthValue where toGVal = genericToGVal
-instance ToGVal m SpreadLevel where toGVal = genericToGVal
-instance ToGVal m ThreadId where toGVal = genericToGVal
-instance ToGVal m Thread where toGVal = genericToGVal
-instance ToGVal m Tension where toGVal = genericToGVal
-
--- Scenes
-instance ToGVal m ActiveScene where toGVal = genericToGVal
-instance ToGVal m SceneBeat where toGVal = genericToGVal
-instance ToGVal m Stakes where toGVal = genericToGVal
-instance ToGVal m Tone where toGVal = genericToGVal
-
--- Misc
-instance ToGVal m Duration where toGVal = genericToGVal
-instance ToGVal m Tag where toGVal = genericToGVal
+-- These must be at end of file because of DMMood <-> BargainVariant cycle
+instance ToGVal m BargainCost where toGVal = genericToGVal
+instance ToGVal m BargainOption where toGVal = genericToGVal
+instance ToGVal m BargainVariant where toGVal = genericToGVal
+instance ToGVal m DMMood where toGVal = genericToGVal
+instance ToGVal m WorldState where toGVal = genericToGVal

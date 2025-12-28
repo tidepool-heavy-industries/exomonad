@@ -13,6 +13,7 @@ common warnings
 library
     import:           warnings
     exposed-modules:
+        Tidepool
         Tidepool.Effect
         Tidepool.Delta
         Tidepool.Template
@@ -31,6 +32,7 @@ library
         Tidepool.GUI.Theme
         Tidepool.GUI.Widgets
         Delta.Agent
+        DM.Agent
         DM.State
         DM.Output
         DM.Tools
@@ -52,6 +54,7 @@ library
         DM.GUI.Widgets.CharacterCreation
         DM.GUI.Widgets.Events
         Tidying
+        Tidying.Agent
         Tidying.State
         Tidying.Situation
         Tidying.Action

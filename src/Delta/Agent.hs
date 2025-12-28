@@ -17,8 +17,14 @@
 -- >   effect handlers → knowledge
 --
 module Delta.Agent
-  ( -- * Running the Agent
-    runDeltaAgent
+  ( -- * Agent (Tidepool pattern)
+    delta
+  , DeltaM
+  , DeltaExtra
+  , DeltaEvent(..)
+
+    -- * Running the Agent (legacy)
+  , runDeltaAgent
   , DeltaAgentConfig(..)
   , defaultConfig
 
@@ -34,10 +40,12 @@ module Delta.Agent
 
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Aeson (Value, object, (.=))
+import Data.Aeson (Value, object, (.=), ToJSON, FromJSON)
 import Control.Monad (forM_, forM, unless)
 import Effectful
+import GHC.Generics (Generic)
 
+import Tidepool (Agent(..), AgentM, noDispatcher)
 import Tidepool.Effect
 import Tidepool.Delta
 import Tidepool.Effects.Habitica
@@ -49,7 +57,7 @@ import Tidepool.Effects.Calendar
 -- EFFECT STACK
 -- ══════════════════════════════════════════════════════════════
 
--- | The full effect stack for the delta agent
+-- | The full effect stack for the delta agent (legacy)
 -- Note: Log must come after the stub effects (Habitica, etc.) because
 -- the stub runners require Log :> es in their context
 type AgentEffects =
@@ -64,6 +72,66 @@ type AgentEffects =
    , Log
    , IOE
    ]
+
+-- ══════════════════════════════════════════════════════════════
+-- TIDEPOOL AGENT PATTERN
+-- ══════════════════════════════════════════════════════════════
+
+-- | Delta's extra effects (external integrations)
+type DeltaExtra = '[Habitica, Obsidian, GitHub, Calendar]
+
+-- | The Delta agent monad (with external effects)
+type DeltaM = AgentM UserContext DeltaEvent DeltaExtra
+
+-- | Events emitted by Delta
+data DeltaEvent
+  = DeltaProposed Proposal         -- ^ Proposal shown to user
+  | DeltaFeedback Text             -- ^ User feedback received
+  | DeltaPatternLearned Text Text  -- ^ Pattern learned (match, destination)
+  | DeltaRouted Text Text          -- ^ Item routed (entity, destination)
+  | DeltaInfo Text                 -- ^ Informational message
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+
+-- | The Delta agent
+--
+-- A personal delta agent that routes natural language to destinations.
+-- Uses extra effects for external integrations (Habitica, Obsidian, GitHub, Calendar).
+--
+-- Usage with tidepoolWith:
+--
+-- @
+-- main = do
+--   finalState <- tidepoolWith config runDeltaExtra delta
+--   putStrLn "Done"
+--   where
+--     runDeltaExtra = runHabiticaStub . runObsidianStub . runGitHubStub . runCalendarStub
+-- @
+delta :: Agent UserContext DeltaEvent DeltaExtra
+delta = Agent
+  { agentName       = "delta"
+  , agentInit       = emptyContext
+  , agentTurn       = deltaTurnWrapper
+  , agentStartup    = deltaStartup
+  , agentShutdown   = deltaShutdown
+  , agentDispatcher = noDispatcher  -- No mid-turn tools, uses external effects instead
+  }
+
+-- | Wrap delta functionality to match Agent turn signature
+-- TODO: Integrate with existing DeltaConfig and destinations
+deltaTurnWrapper :: Text -> DeltaM ()
+deltaTurnWrapper _input = do
+  -- Placeholder - full implementation would use runDeltaWithFeedback
+  emit $ DeltaInfo "Delta turn (not yet implemented in Agent pattern)"
+
+-- | Startup: welcome message
+deltaStartup :: DeltaM ()
+deltaStartup = do
+  emit $ DeltaInfo "Delta agent ready. Enter text to capture."
+
+-- | Shutdown: summary
+deltaShutdown :: DeltaM ()
+deltaShutdown = do
+  emit $ DeltaInfo "Delta session complete."
 
 -- ══════════════════════════════════════════════════════════════
 -- CONFIGURATION
