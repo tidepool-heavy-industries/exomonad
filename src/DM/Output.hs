@@ -1,5 +1,8 @@
 {-# LANGUAGE TemplateHaskell #-}
--- | DM Structured Output Types (Simplified for API grammar limits)
+-- | DM Structured Output
+--
+-- Re-exports types from Types module and derives schemas.
+-- Types are in separate module so getDoc can access their Haddock comments.
 module DM.Output
   ( -- * Turn Output
     TurnOutput(..)
@@ -17,60 +20,15 @@ module DM.Output
   ) where
 
 import DM.State
-import Data.Text (Text)
 import qualified Data.Text as T
-import GHC.Generics (Generic)
-import Data.Aeson (ToJSON, FromJSON)
 import Tidepool.Schema (JSONSchema, deriveJSONSchema)
 
+-- Re-export types from Types module
+import DM.Output.Types
+
 -- ══════════════════════════════════════════════════════════════
--- TURN OUTPUT
+-- APPLY FUNCTIONS
 -- ══════════════════════════════════════════════════════════════
-
--- | Narrative connector - forces causal thinking
--- "And then" is lazy; these connectors demand causality
-data NarrativeConnector
-  = Therefore   -- This happened because of what came before
-  | But         -- This happened despite what came before
-  | Meanwhile   -- Parallel action (use sparingly)
-  deriving (Show, Eq, Generic, ToJSON, FromJSON)
-
--- | Simplified turn output that fits within API grammar limits
--- NPC dialogue should be included directly in narration
-data TurnOutput = TurnOutput
-  { -- | Narrative prose describing what happens this turn. Include NPC dialogue inline.
-    narration :: Text
-    -- | How this beat connects causally to previous events.
-  , narrativeConnector :: Maybe NarrativeConnector
-    -- | Change in stress from -9 to +9. Positive for costs, negative for relief.
-  , stressDelta :: Int
-    -- | Change in coin. Positive for gains, negative for expenses.
-  , coinDelta :: Int
-    -- | Change in heat from 0 to +4. Heat draws faction attention.
-  , heatDelta :: Int
-    -- | True to continue the current scene, False to end it.
-  , continueScene :: Bool
-    -- | If there was a cost or setback, describe it for consequence echoing.
-  , costDescription :: Maybe Text
-    -- | If there is an unresolved threat, describe it for future echoing.
-  , threatDescription :: Maybe Text
-    -- | 2-3 suggested next actions the player might take.
-  , suggestedActions :: [Text]
-  }
-  deriving (Show, Eq, Generic, ToJSON, FromJSON)
-
-emptyTurnOutput :: TurnOutput
-emptyTurnOutput = TurnOutput
-  { narration = ""
-  , narrativeConnector = Nothing
-  , stressDelta = 0
-  , coinDelta = 0
-  , heatDelta = 0
-  , continueScene = True
-  , costDescription = Nothing
-  , threatDescription = Nothing
-  , suggestedActions = []
-  }
 
 -- | Apply turn output to world state
 -- Tracks costs and threats for consequence echoing
@@ -100,25 +58,6 @@ applyTurnOutput output state = state
     -- Trauma triggers when stress crosses from <9 to 9
     traumaWillTrigger = state.player.stress < 9 && newStress >= 9
 
--- ══════════════════════════════════════════════════════════════
--- COMPRESSION OUTPUT
--- ══════════════════════════════════════════════════════════════
-
--- | Simplified compression output - complex extractions removed
-data CompressionOutput = CompressionOutput
-  { -- | One paragraph summary of what happened during the compressed segment.
-    summary :: Text
-    -- | Comma-separated list of key dramatic moments worth remembering.
-  , keyMoments :: Text
-    -- | Comma-separated seeds for future consequences to echo.
-  , consequenceSeeds :: Text
-    -- | Net stress change over the compressed segment.
-  , stressChange :: Int
-    -- | Net coin change over the compressed segment.
-  , coinChange :: Int
-  }
-  deriving (Show, Eq, Generic, ToJSON, FromJSON)
-
 -- | Apply simplified compression output to world state
 applyCompression :: CompressionOutput -> WorldState -> WorldState
 applyCompression output state = state
@@ -133,9 +72,6 @@ applyCompression output state = state
   }
   where
     clamp lo hi x = max lo (min hi x)
-
--- TH stage separator - required for deriveJSONSchema to see the types
-$(return [])
 
 -- ══════════════════════════════════════════════════════════════
 -- SCHEMAS (derived from Haddock comments via TH)
