@@ -38,7 +38,7 @@ module DM.Templates
 import DM.Context
 import DM.Output
 import DM.State (WorldState, DMMood(..))
-import DM.Tools
+import DM.Tools (DMEffects, DMEvent, dmToolList, Choose, SpendDie, Engage, Resolve, Accept, AcceptBargain, Retreat, PassOut)
 import Tidepool.Template
 import Tidepool.Schema
 import Data.Text (Text)
@@ -88,7 +88,7 @@ compressionJinja = $(typedTemplateFile ''CompressionContext "templates/compressi
 -- ══════════════════════════════════════════════════════════════
 
 -- | Main DM turn template with all available tools
-dmTurnTemplate :: Template DMContext TurnOutput DMEvent WorldState DMTools
+dmTurnTemplate :: Template DMContext TurnOutput DMEvent WorldState DMEffects DMTools
 dmTurnTemplate = Template
   { templateJinja = dmTurnJinja
   , templateOutputSchema = turnOutputSchema
@@ -96,7 +96,7 @@ dmTurnTemplate = Template
   }
 
 -- | Compression template (no tools needed - uses unit state/event)
-compressionTemplate' :: Template CompressionContext CompressionOutput () () '[]
+compressionTemplate' :: Template CompressionContext CompressionOutput () () '[] '[]
 compressionTemplate' = Template
   { templateJinja = compressionJinja
   , templateOutputSchema = compressionOutputSchema
@@ -104,7 +104,7 @@ compressionTemplate' = Template
   }
 
 -- | Scene template - exploration state
-sceneTemplate :: Template DMContext TurnOutput DMEvent WorldState DMTools
+sceneTemplate :: Template DMContext TurnOutput DMEvent WorldState DMEffects DMTools
 sceneTemplate = Template
   { templateJinja = sceneJinja
   , templateOutputSchema = turnOutputSchema
@@ -112,7 +112,7 @@ sceneTemplate = Template
   }
 
 -- | Action template - dice resolution state
-actionTemplate :: Template DMContext TurnOutput DMEvent WorldState DMTools
+actionTemplate :: Template DMContext TurnOutput DMEvent WorldState DMEffects DMTools
 actionTemplate = Template
   { templateJinja = actionJinja
   , templateOutputSchema = turnOutputSchema
@@ -120,7 +120,7 @@ actionTemplate = Template
   }
 
 -- | Aftermath template - consequence state
-aftermathTemplate :: Template DMContext TurnOutput DMEvent WorldState DMTools
+aftermathTemplate :: Template DMContext TurnOutput DMEvent WorldState DMEffects DMTools
 aftermathTemplate = Template
   { templateJinja = aftermathJinja
   , templateOutputSchema = turnOutputSchema
@@ -128,7 +128,7 @@ aftermathTemplate = Template
   }
 
 -- | Downtime template - recovery montage state
-downtimeTemplate :: Template DMContext TurnOutput DMEvent WorldState DMTools
+downtimeTemplate :: Template DMContext TurnOutput DMEvent WorldState DMEffects DMTools
 downtimeTemplate = Template
   { templateJinja = downtimeJinja
   , templateOutputSchema = turnOutputSchema
@@ -136,7 +136,7 @@ downtimeTemplate = Template
   }
 
 -- | Trauma template - breaking point, stress reset
-traumaTemplate :: Template DMContext TurnOutput DMEvent WorldState DMTools
+traumaTemplate :: Template DMContext TurnOutput DMEvent WorldState DMEffects DMTools
 traumaTemplate = Template
   { templateJinja = traumaJinja
   , templateOutputSchema = turnOutputSchema
@@ -144,7 +144,7 @@ traumaTemplate = Template
   }
 
 -- | Bargain template - out of dice, make deals
-bargainTemplate :: Template DMContext TurnOutput DMEvent WorldState DMTools
+bargainTemplate :: Template DMContext TurnOutput DMEvent WorldState DMEffects DMTools
 bargainTemplate = Template
   { templateJinja = bargainJinja
   , templateOutputSchema = turnOutputSchema

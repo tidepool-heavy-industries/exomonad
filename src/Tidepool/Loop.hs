@@ -18,22 +18,22 @@ import Tidepool.Effect (State, LLM, TurnResult, TurnOutcome(..))
 import qualified Tidepool.Effect as E
 import Tidepool.Template
 import Tidepool.Tool (toolListToJSON)
-import Effectful
+import Effectful (Effect, Eff, (:>))
 import Data.Aeson (ToJSON, FromJSON)
 
 -- | Configuration for a single turn in the game loop
 -- Captures how to build context, which template to use, and how to apply output
-data TurnConfig state context output event tools = TurnConfig
+data TurnConfig state context output event (extraEs :: [Effect]) tools = TurnConfig
   { turnBuildContext :: state -> context
-  , turnTemplate :: Template context output event state tools
+  , turnTemplate :: Template context output event state extraEs tools
   , turnApplyOutput :: output -> state -> state
   }
 
 -- | Compression configuration
-data Compression state history compressionContext compressionOutput event tools = Compression
+data Compression state history compressionContext compressionOutput event (extraEs :: [Effect]) tools = Compression
   { compressionThreshold :: Int
   , compressionBuildContext :: [history] -> state -> compressionContext
-  , compressionTemplate :: Template compressionContext compressionOutput event state tools
+  , compressionTemplate :: Template compressionContext compressionOutput event state extraEs tools
   , compressionApply :: compressionOutput -> state -> state
   }
 
@@ -51,7 +51,7 @@ executeTurnConfig
      , ToJSON context
      , FromJSON output
      )
-  => TurnConfig state context output event tools
+  => TurnConfig state context output event extraEs tools
   -> Eff es (TurnOutcome (TurnResult output))
 executeTurnConfig _config = error "TODO: executeTurnConfig needs update for new runTurn API"
 
@@ -72,7 +72,7 @@ compress
      , ToJSON compressionContext
      , FromJSON compressionOutput
      )
-  => Compression state history compressionContext compressionOutput event tools
+  => Compression state history compressionContext compressionOutput event extraEs tools
   -> [history]
   -> Eff es (TurnOutcome ())
 compress _comp _history = error "TODO: compress needs update for new runTurn API"

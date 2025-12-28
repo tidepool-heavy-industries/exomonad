@@ -35,27 +35,33 @@ module DM.Tools
   , DMEvent(..)
 
     -- * Tool Registration
+  , DMEffects
   , dmToolList
   , dmTools
   , makeDMDispatcher
+  , makeDMDispatcherWithPhase
   ) where
 
 import DM.State
+import DM.Effect (PlayingState, runPlayingState, putMood, getMood)
 import Tidepool.Tool
 import Tidepool.Effect (Emit, RequestInput, Random, State, ToolDispatcher, ToolResult(..)
                        , emit, requestDice, randomDouble, randomInt, get, put, modify)
 import Tidepool.Schema (objectSchema, arraySchema, enumSchema, emptySchema, schemaToValue, describeField, SchemaType(..))
-import Effectful ((:>))
+import Effectful ((:>), IOE)
 import Data.Proxy (Proxy(..))
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Aeson (Value, ToJSON, FromJSON)
 import Data.List (delete)
-import Data.Maybe (fromMaybe)
 import Control.Monad (when)
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HM
 import GHC.Generics (Generic)
+
+-- | Extra effects required by DM tools
+-- All DM tools have access to PlayingState for scene/mood management
+type DMEffects = '[PlayingState]
 
 -- ══════════════════════════════════════════════════════════════
 -- DM EVENTS
@@ -130,7 +136,7 @@ data ThinkAsDM = ThinkAsDM
 data ThinkInput = ThinkInput { thought :: Text }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
-instance Tool ThinkAsDM DMEvent WorldState where
+instance Tool ThinkAsDM DMEvent WorldState DMEffects where
   type ToolInput ThinkAsDM = ThinkInput
   type ToolOutput ThinkAsDM = ()
 
@@ -155,7 +161,7 @@ data SpeakInput = SpeakInput
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
-instance Tool SpeakAsNPC DMEvent WorldState where
+instance Tool SpeakAsNPC DMEvent WorldState DMEffects where
   type ToolInput SpeakAsNPC = SpeakInput
   type ToolOutput SpeakAsNPC = ()
 
@@ -187,7 +193,7 @@ data ChooseResult = ChooseResult
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
-instance Tool Choose DMEvent WorldState where
+instance Tool Choose DMEvent WorldState DMEffects where
   type ToolInput Choose = ChooseInput
   type ToolOutput Choose = ChooseResult
 
@@ -236,7 +242,7 @@ data SpendDieResult = SpendDieResult
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
-instance Tool SpendDie DMEvent WorldState where
+instance Tool SpendDie DMEvent WorldState DMEffects where
   type ToolInput SpendDie = SpendDieInput
   type ToolOutput SpendDie = SpendDieResult
 
@@ -251,7 +257,7 @@ instance Tool SpendDie DMEvent WorldState where
     ["situation", "position", "outcomes"]
 
   executeTool input = do
-    state <- get
+    state <- get @WorldState
     let pool = state.dicePool.poolDice
 
     -- Guard: if pool is empty, can't spend a die
@@ -290,20 +296,19 @@ instance Tool SpendDie DMEvent WorldState where
         -- Calculate outcome tier for the result
         let outcomeTier = calculateOutcome input.position chosenDie
 
-        -- Check if pool is now empty - if so, queue transition to bargain
-        let moodMaybe = currentMood state
-            theMood = fromMaybe defaultMood moodMaybe
-            newState = if null newPool
-              then updateMood (MoodBargain Bargaining
-                    { bvWhatDrained = input.situation
-                    , bvCanRetreat = not (isDesperateMood theMood)
-                    , bvRetreatDesc = "slip away and regroup"
-                    , bvPassOutDesc = "collapse from exhaustion"
-                    , bvPreviousMood = theMood
-                    }) state { dicePool = state.dicePool { poolDice = newPool } }
-              else state { dicePool = state.dicePool { poolDice = newPool } }
+        -- Update dice pool state
+        modify @WorldState $ \s -> s { dicePool = s.dicePool { poolDice = newPool } }
 
-        put newState
+        -- Check if pool is now empty - if so, transition to bargain mood
+        when (null newPool) $ do
+          theMood <- getMood
+          putMood $ MoodBargain Bargaining
+            { bvWhatDrained = input.situation
+            , bvCanRetreat = not (isDesperateMood theMood)
+            , bvRetreatDesc = "slip away and regroup"
+            , bvPassOutDesc = "collapse from exhaustion"
+            , bvPreviousMood = theMood
+            }
 
         -- Emit event with the revealed narrative
         emit (DieSpent chosenDie outcomeTier selectedNarrative)
@@ -355,7 +360,7 @@ data EngageInput = EngageInput
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
-instance Tool Engage DMEvent WorldState where
+instance Tool Engage DMEvent WorldState DMEffects where
   type ToolInput Engage = EngageInput
   type ToolOutput Engage = ()
 
@@ -389,7 +394,7 @@ instance Tool Engage DMEvent WorldState where
           _ -> Nothing
 
     -- Transition to Action mood
-    modify $ updateMood (MoodAction position domain)
+    putMood (MoodAction position domain)
     emit (MoodTransition "engage" "scene" "action")
     return ()
 
@@ -406,7 +411,7 @@ data ResolveInput = ResolveInput
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
-instance Tool Resolve DMEvent WorldState where
+instance Tool Resolve DMEvent WorldState DMEffects where
   type ToolInput Resolve = ResolveInput
   type ToolOutput Resolve = ()
 
@@ -430,7 +435,7 @@ instance Tool Resolve DMEvent WorldState where
           _ -> AmCostly input.resolveWhat input.resolveCosts input.resolveComplications
 
     -- Transition to Aftermath mood
-    modify $ updateMood (MoodAftermath aftermath)
+    putMood (MoodAftermath aftermath)
     emit (MoodTransition "resolve" "action" "aftermath")
     return ()
 
@@ -444,7 +449,7 @@ data AcceptInput = AcceptInput
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
-instance Tool Accept DMEvent WorldState where
+instance Tool Accept DMEvent WorldState DMEffects where
   type ToolInput Accept = AcceptInput
   type ToolOutput Accept = ()
 
@@ -457,7 +462,7 @@ instance Tool Accept DMEvent WorldState where
 
   executeTool _input = do
     -- Return to Scene mood (Encounter variant - default low-urgency continuation)
-    modify @WorldState $ updateMood (MoodScene (Encounter "continuing" UrgencyLow True))
+    putMood (MoodScene (Encounter "continuing" UrgencyLow True))
     emit (MoodTransition "accept" "aftermath" "scene")
     return ()
 
@@ -484,7 +489,7 @@ data AcceptBargainResult = AcceptBargainResult
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
-instance Tool AcceptBargain DMEvent WorldState where
+instance Tool AcceptBargain DMEvent WorldState DMEffects where
   type ToolInput AcceptBargain = AcceptBargainInput
   type ToolOutput AcceptBargain = AcceptBargainResult
 
@@ -512,15 +517,17 @@ instance Tool AcceptBargain DMEvent WorldState where
     let finalPool = state.dicePool.poolDice ++ rolledDice
 
     -- Get previous mood to return to (from MoodBargain if we're in it)
-    let returnMood = case currentMood state of
-          Just (MoodBargain bv) -> bv.bvPreviousMood
-          Just m -> m  -- Keep current mood if not bargaining
-          Nothing -> MoodScene (Encounter "continuing" UrgencyLow True)
+    currentMoodVal <- getMood
+    let returnMood = case currentMoodVal of
+          MoodBargain bv -> bv.bvPreviousMood
+          m -> m  -- Keep current mood if not bargaining
 
-    -- Update state: apply cost, add dice, return to previous mood
+    -- Update state: apply cost, add dice
     modify @WorldState $ \s -> applyCostToState s input
-    modify @WorldState $ \s -> updateMood returnMood $
-      s { dicePool = s.dicePool { poolDice = finalPool } }
+    modify @WorldState $ \s -> s { dicePool = s.dicePool { poolDice = finalPool } }
+
+    -- Return to previous mood
+    putMood returnMood
 
     emit (MoodTransition "accept_bargain" "bargain" (moodName returnMood))
 
@@ -570,7 +577,7 @@ data RetreatInput = RetreatInput
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
-instance Tool Retreat DMEvent WorldState where
+instance Tool Retreat DMEvent WorldState DMEffects where
   type ToolInput Retreat = RetreatInput
   type ToolOutput Retreat = ()
 
@@ -612,7 +619,7 @@ data PassOutResult = PassOutResult
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
-instance Tool PassOut DMEvent WorldState where
+instance Tool PassOut DMEvent WorldState DMEffects where
   type ToolInput PassOut = PassOutInput
   type ToolOutput PassOut = PassOutResult
 
@@ -666,7 +673,7 @@ instance Tool PassOut DMEvent WorldState where
 -- | All DM tools as a type-safe list (including transition tools)
 -- Note: SpeakAsNPC, ThinkAsDM, AskPlayer removed - they add noise without value
 -- Player clarification now happens via suggestedActions in structured output
-dmToolList :: ToolList DMEvent WorldState '[Choose, SpendDie, Engage, Resolve, Accept, AcceptBargain, Retreat, PassOut]
+dmToolList :: ToolList DMEvent WorldState DMEffects '[Choose, SpendDie, Engage, Resolve, Accept, AcceptBargain, Retreat, PassOut]
 dmToolList = TCons (Proxy @Choose)
            $ TCons (Proxy @SpendDie)
            $ TCons (Proxy @Engage)
@@ -696,8 +703,9 @@ transitionToolNames = ["engage", "resolve", "accept_bargain", "retreat", "pass_o
 
 -- | Create a DM dispatcher that detects mood transitions
 -- When a transition tool is called, it returns ToolBreak to restart the turn
+-- Requires PlayingState effect to be provided by the caller
 makeDMDispatcher
-  :: (State WorldState :> es, Emit DMEvent :> es, RequestInput :> es, Random :> es)
+  :: (State WorldState :> es, Emit DMEvent :> es, RequestInput :> es, Random :> es, PlayingState :> es)
   => ToolDispatcher DMEvent es
 makeDMDispatcher name input = do
   -- Record mood before tool execution (from phase if playing)
@@ -736,3 +744,24 @@ makeDMDispatcher name input = do
     moodChanged (MoodBargain _) (MoodBargain _) = False
     moodChanged (MoodDowntime _) (MoodDowntime _) = False
     moodChanged _ _ = True  -- Different constructors = mood changed
+
+-- | DM dispatcher that automatically provides PlayingState from current phase
+-- This is the main dispatcher to use - it extracts scene/mood from PhasePlaying,
+-- runs tools with PlayingState effect, and writes back any changes.
+-- Returns error if called outside PhasePlaying.
+makeDMDispatcherWithPhase
+  :: (State WorldState :> es, Emit DMEvent :> es, RequestInput :> es, Random :> es, IOE :> es)
+  => ToolDispatcher DMEvent es
+makeDMDispatcherWithPhase name input = do
+  state <- get @WorldState
+  case state.phase of
+    PhasePlaying scene mood -> do
+      -- Run dispatcher with PlayingState effect provided
+      (result, scene', mood') <- runPlayingState scene mood $
+        makeDMDispatcher name input
+      -- Write back updated scene/mood to state
+      put @WorldState $ state { phase = PhasePlaying scene' mood' }
+      return result
+    _ ->
+      -- Not in playing phase - tools requiring PlayingState can't be dispatched
+      pure $ Left $ "Tool " <> name <> " called outside of PhasePlaying phase"

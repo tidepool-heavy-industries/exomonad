@@ -26,6 +26,7 @@ library
         Tidepool.GUI.Theme
         Tidepool.GUI.Widgets
         DM.State
+        DM.Effect
         DM.Output
         DM.Tools
         DM.Context

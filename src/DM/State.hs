@@ -7,10 +7,8 @@ module DM.State
     -- ** Phase Accessors
   , currentScene
   , currentMood
-    -- ** Phase Updaters
+    -- ** Phase Updaters (for non-tool code)
   , updateMood
-  , updateScene
-  , updateSceneAndMood
 
     -- * DM Mood (State Machine)
   , DMMood(..)
@@ -391,21 +389,10 @@ currentMood s = case s.phase of
   _ -> Nothing
 
 -- | Update mood if in PhasePlaying (no-op otherwise)
+-- Note: Tools should use PlayingState effect's putMood instead
 updateMood :: DMMood -> WorldState -> WorldState
 updateMood newMood s = case s.phase of
   PhasePlaying scene _ -> s { phase = PhasePlaying scene newMood }
-  _ -> s
-
--- | Update scene if in PhasePlaying (no-op otherwise)
-updateScene :: ActiveScene -> WorldState -> WorldState
-updateScene newScene s = case s.phase of
-  PhasePlaying _ mood -> s { phase = PhasePlaying newScene mood }
-  _ -> s
-
--- | Update both scene and mood if in PhasePlaying
-updateSceneAndMood :: ActiveScene -> DMMood -> WorldState -> WorldState
-updateSceneAndMood newScene newMood s = case s.phase of
-  PhasePlaying _ _ -> s { phase = PhasePlaying newScene newMood }
   _ -> s
 
 -- ══════════════════════════════════════════════════════════════
