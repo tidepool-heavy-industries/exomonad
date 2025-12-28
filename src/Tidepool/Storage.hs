@@ -178,9 +178,11 @@ deleteGame conn gid =
 -- ══════════════════════════════════════════════════════════════
 
 -- | Append messages to a game's chat history
+-- Uses a transaction to ensure all-or-nothing semantics
 appendMessages :: Connection -> GameId -> [Message] -> IO ()
-appendMessages conn gid messages = do
-  -- Get current max sequence
+appendMessages _ _ [] = return ()  -- Early return for empty list
+appendMessages conn gid messages = withTransaction conn $ do
+  -- COALESCE guarantees exactly one row is returned
   [Only maxSeq] <- query conn
     "SELECT COALESCE(MAX(sequence), 0) FROM messages WHERE game_id = ?"
     (Only gid) :: IO [Only Int]

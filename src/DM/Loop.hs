@@ -465,7 +465,7 @@ runDMGameWithDB conn gameId mCursor initialState handleEvent = do
             , llmModel = "claude-haiku-4-5-20251001"
             , llmMaxTokens = 4096
             , llmThinkingBudget = Just 1024
-            , llmSystemPrompt = "You are the Dungeon Master for a Blades in the Dark style game."
+            , llmSystemPrompt = "You are the Dungeon Master for a Blades in the Dark style game. Respond to player actions with narrative prose, using your tools as appropriate."
             }
 
       let inputHandler = InputHandler
@@ -473,24 +473,31 @@ runDMGameWithDB conn gameId mCursor initialState handleEvent = do
             , ihText = terminalText
             }
 
-      -- Start with active scene
-      let stateWithScene = initialState
-            { scene = Just ActiveScene
-                { sceneLocation = LocationId "intro"
-                , scenePresent = []
-                , sceneStakes = Stakes "Establish who you are in Doskvol"
-                , sceneBeats = Seq.empty
-                }
-            }
+      -- Preserve loaded scene, or create intro scene if none exists
+      let stateWithScene = case initialState.scene of
+            Just _ -> initialState  -- Keep the loaded scene
+            Nothing -> initialState
+              { scene = Just ActiveScene
+                  { sceneLocation = LocationId "intro"
+                  , scenePresent = []
+                  , sceneStakes = Stakes "Establish who you are in Doskvol"
+                  , sceneBeats = Seq.empty
+                  }
+              }
 
       TIO.putStrLn "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-      TIO.putStrLn "DOSKVOL. Industrial sprawl. Eternal night."
-      TIO.putStrLn "The ghosts press against the lightning barriers."
-      TIO.putStrLn "The gangs carve up the districts."
-      TIO.putStrLn "You're about to step into the streets."
+      case initialState.scene of
+        Just _ -> TIO.putStrLn "Resuming your story in Doskvol..."
+        Nothing -> do
+          TIO.putStrLn "DOSKVOL. Industrial sprawl. Eternal night."
+          TIO.putStrLn "The ghosts press against the lightning barriers."
+          TIO.putStrLn "The gangs carve up the districts."
+          TIO.putStrLn "You're about to step into the streets."
       TIO.putStrLn "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
       TIO.putStrLn "\n[Type 'quit' to exit]\n"
-      TIO.putStrLn "Who are you? What brings you to Crow's Foot tonight?\n"
+      case initialState.scene of
+        Just _ -> return ()  -- Don't repeat intro for resumed games
+        Nothing -> TIO.putStrLn "Who are you? What brings you to Crow's Foot tonight?\n"
 
       -- Run with DB-backed chat history
       ((), finalState) <- runEff
