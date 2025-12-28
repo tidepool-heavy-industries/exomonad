@@ -132,10 +132,10 @@ instance Tool AskPlayer DMEvent WorldState where
   type ToolOutput AskPlayer = AskResult
 
   toolName = "ask_player"
-  toolDescription = "Pause and ask the player a question."
+  toolDescription = "Clarify ambiguous player intent mid-narration. Use when you need specific information to continue: 'Which door - front or back?' or 'The old debt or the new one?' Always narrate first, then ask if needed."
   inputSchema = schemaToValue $ objectSchema
-    [ ("question", emptySchema TString)
-    , ("choices", arraySchema (emptySchema TString))
+    [ ("question", describeField "question" "Specific clarifying question about player intent" (emptySchema TString))
+    , ("choices", describeField "choices" "Concrete options to disambiguate (e.g., 'front door', 'back door')" (arraySchema (emptySchema TString)))
     ]
     ["question"]  -- choices is optional
 
