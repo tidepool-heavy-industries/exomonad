@@ -14,10 +14,11 @@ import Data.Maybe (fromMaybe)
 import Effectful (runEff)
 
 import DM.State (WorldState(..), initialWorld, DicePool(..))
+import DM.GUI.Widgets.Events (formatEvent)
 import Tidepool.Effect (runRandom, randomInt)
 import DM.Loop (gameLoopWithGUIAndDB)
 import DM.GUI.App (dmGUISetup, defaultDMGUIConfig)
-import Tidepool.GUI.Core (newGUIBridge, logInfo)
+import Tidepool.GUI.Core (newGUIBridge, logInfo, addNarrative)
 import Tidepool.GUI.Server (startServer, defaultServerConfig, ServerConfig(..))
 import qualified Tidepool.Storage as Storage
 
@@ -44,8 +45,14 @@ main = do
     -- Create the GUI bridge with loaded world state
     bridge <- newGUIBridge world
 
-    -- Event handler: log DM events to debug panel
-    let handleEvent event = logInfo bridge (T.pack $ show event)
+    -- Event handler: display events in GUI narrative + debug log
+    let handleEvent event = do
+          -- Always log to debug panel
+          logInfo bridge (T.pack $ show event)
+          -- Add formatted events to narrative (for styled display)
+          case formatEvent event of
+            Just formattedText -> addNarrative bridge formattedText
+            Nothing -> pure ()  -- Internal events not displayed
 
     -- Start game loop in background thread (with DB persistence)
     _ <- forkIO $ gameLoopWithGUIAndDB conn gameId mCursor bridge handleEvent

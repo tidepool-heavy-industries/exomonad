@@ -6,10 +6,23 @@
 -- - Environment descriptions
 -- - Clock tick notifications
 -- - Revelation markers
+-- - **State change events** (stress, trauma, heat, etc.) with distinctive styling
 --
 -- Unlike the generic 'Tidepool.GUI.Widgets.narrativePane' which renders
 -- plain text, this widget understands DM domain types and renders them
 -- appropriately.
+--
+-- = State Event Display
+--
+-- State changes (trauma, stress spikes, clock fills, etc.) are displayed
+-- as visually distinct entries using the CSS classes from Tidepool.GUI.Theme:
+--
+-- * @.state-event-critical@ - Trauma, breaking points, max stress (red gradient)
+-- * @.state-event-warning@ - Stress/heat increases (amber gradient)
+-- * @.state-event-positive@ - Coin gains, stress recovery (green gradient)
+-- * @.state-event-info@ - Neutral changes (gold gradient)
+-- * @.state-event-bargain@ - Out of dice situations (gold, prominent)
+--
 module DM.GUI.Widgets.Narrative
   ( -- * Rich narrative pane
     dmNarrativePane
@@ -29,6 +42,7 @@ import Graphics.UI.Threepenny.Core
 import qualified Graphics.UI.Threepenny as UI
 
 import DM.State
+import DM.GUI.Widgets.Events (isEventEntry, renderEventEntry)
 import Tidepool.GUI.Core (GUIBridge(..))
 
 -- | Create a rich narrative pane for DM
@@ -76,8 +90,16 @@ updateDMNarrative container bridge = do
   runFunction $ ffi "$(%1).scrollTop($(%1)[0].scrollHeight)" container
 
 -- | Render a narrative log entry (plain text from history)
+--
+-- Handles three types of entries:
+-- 1. Event entries (prefixed with [EVENT:...]) - rendered with state event CSS
+-- 2. Player actions (prefixed with "> ") - rendered italicized
+-- 3. DM narration (everything else) - rendered as regular text
 renderNarrativeLogEntry :: Text -> UI Element
 renderNarrativeLogEntry txt
+  | isEventEntry txt = do
+      -- State change event - render with distinctive styling
+      renderEventEntry txt
   | T.isPrefixOf "> " txt = do
       -- Player action (prefixed with >)
       entry <- UI.div #. "narrative-entry player-action"

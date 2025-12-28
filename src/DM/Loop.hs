@@ -215,6 +215,13 @@ dmTurn input = do
                     actualCoinDelta = stateAfter.player.coin - stateBefore.player.coin
                     actualHeatDelta = stateAfter.player.heat - stateBefore.player.heat
 
+                -- Emit state change events for GUI display
+                -- Use narration as context (truncated if too long)
+                let eventContext = if T.length narration > 50
+                      then T.take 47 narration <> "..."
+                      else narration
+                emitStateChangeEvents stateBefore stateAfter eventContext
+
                 -- Return response with narrative and actual mechanical changes
                 return Response
                   { responseText = narration
@@ -286,6 +293,7 @@ checkClockConsequences = do
 checkTraumaTrigger
   :: ( State WorldState :> es
      , Log :> es
+     , Emit DMEvent :> es
      )
   => Int  -- Stress BEFORE this turn
   -> Eff es ()
@@ -294,6 +302,12 @@ checkTraumaTrigger stressBefore = do
   let stressNow = state.player.stress
   when (stressNow >= 9 && stressBefore < 9) $ do
     logWarn "TRAUMA TRIGGERED: Stress hit maximum"
+    -- Emit trauma event for GUI display
+    emit $ TraumaTriggered
+      { ttTrauma = Trauma "pending"  -- LLM will determine actual trauma
+      , ttTrigger = "The pressure finally became too much."
+      , ttBreakingPoint = "Something breaks inside you..."
+      }
     -- Transition to trauma mood - next turn will use trauma template
     -- The LLM will narrate the breaking point and assign a trauma
     let traumaVariant = Breaking
@@ -303,6 +317,71 @@ checkTraumaTrigger stressBefore = do
           , tvAdrenaline = False  -- Could be True if in combat
           }
     modify @WorldState $ \s -> s { mood = MoodTrauma traumaVariant }
+
+-- | Emit state change events by comparing before/after states
+--
+-- This function examines the differences between two world states and
+-- emits appropriate events for any significant changes. These events
+-- are displayed in the GUI narrative with distinctive styling.
+emitStateChangeEvents
+  :: Emit DMEvent :> es
+  => WorldState  -- ^ State before the turn
+  -> WorldState  -- ^ State after the turn
+  -> Text        -- ^ Reason/context for the changes
+  -> Eff es ()
+emitStateChangeEvents before after reason = do
+  let pb = before.player
+      pa = after.player
+
+  -- Stress changes
+  when (pa.stress /= pb.stress) $
+    emit $ StressChanged
+      { seFrom = pb.stress
+      , seTo = pa.stress
+      , seReason = reason
+      }
+
+  -- Heat changes
+  when (pa.heat /= pb.heat) $
+    emit $ HeatChanged
+      { heFrom = pb.heat
+      , heTo = pa.heat
+      , heReason = reason
+      }
+
+  -- Wanted changes
+  when (pa.wanted /= pb.wanted) $
+    emit $ WantedChanged
+      { weFrom = pb.wanted
+      , weTo = pa.wanted
+      , weReason = reason
+      }
+
+  -- Coin changes
+  when (pa.coin /= pb.coin) $
+    emit $ CoinChanged
+      { ceFrom = pb.coin
+      , ceTo = pa.coin
+      , ceReason = reason
+      }
+
+  -- Dice pool depletion
+  let poolBefore = length before.dicePool.poolDice
+      poolAfter = length after.dicePool.poolDice
+  when (poolBefore > 0 && poolAfter == 0) $
+    emit $ DicePoolDepleted { dpContext = reason }
+
+  -- Bargain mood transition
+  case (before.mood, after.mood) of
+    (_, MoodBargain bv) | not (isBargainMood before.mood) ->
+      emit $ BargainOffered
+        { boContext = bv.bvWhatDrained
+        , boCanRetreat = bv.bvCanRetreat
+        }
+    _ -> pure ()
+  where
+    isBargainMood (MoodBargain _) = True
+    isBargainMood _ = False
 
 -- | Compress scene if it has too many beats
 -- Threshold: 20 beats triggers compression
@@ -1116,6 +1195,7 @@ guiGameLoopWithDB conn gameId bridge = loop
                 TurnCompleted (TurnParsed tr) -> do
                   let scenario = tr.trOutput
                   liftIO $ GUI.logInfo bridge "[Loop] Scenario generated successfully"
+
                   -- Apply scenario to state (dice already initialized above)
                   let newPlayer = state.player
                         { stress = scenario.siStartingStress
@@ -1124,20 +1204,33 @@ guiGameLoopWithDB conn gameId bridge = loop
                         , wanted = scenario.siStartingWanted
                         , trauma = maybe [] (\t -> [Trauma t]) scenario.siStartingTrauma
                         }
+
+                      -- Convert ClockInit to Clock
+                      clocksFromInit = HM.fromList
+                        [ (ClockId (T.toLower $ T.replace " " "_" ci.ciName), initToClock ci)
+                        | ci <- scenario.siStartingClocks
+                        ]
+
                       introScene = ActiveScene
                         { sceneLocation = LocationId (T.toLower $ T.replace " " "_" scenario.siSceneLocation)
                         , scenePresent = []
                         , sceneStakes = Stakes scenario.siSceneStakes
-                        , sceneBeats = Seq.singleton $ DMNarration scenario.siNarration
+                        , sceneBeats = Seq.singleton $ DMNarration scenario.siSceneNarration
                         }
+
                   modify $ \s -> s
-                    { player = newPlayer
+                    { phase = PhasePlaying
+                    , player = newPlayer
                     , scene = Just introScene
+                    , clocks = clocksFromInit
                     , DM.State.suggestedActions = scenario.siSuggestedActions
                     }
-                  -- Add narration to GUI
-                  liftIO $ addNarrative bridge scenario.siNarration
+
+                  -- Add Fate's narration first, then scene narration
+                  liftIO $ addNarrative bridge scenario.siFateNarration
+                  liftIO $ addNarrative bridge scenario.siSceneNarration
                   liftIO $ addNarrative bridge $ ">> " <> scenario.siOpeningHook
+
                   -- Set suggested actions in bridge for UI
                   liftIO $ setSuggestedActions bridge scenario.siSuggestedActions
 
@@ -1220,9 +1313,37 @@ scenarioInitSchemaJSON = Object $ KM.fromList
   [ ("type", String "object")
   , ("additionalProperties", Bool False)
   , ("properties", Object $ KM.fromList
-      [ ("siNarration", Object $ KM.fromList
+      [ ("siFateNarration", Object $ KM.fromList
           [ ("type", String "string")
-          , ("description", String "2-3 paragraph opening narration, evocative and immediate")
+          , ("description", String "Fate's interpretation of the tarot spread - noir oracle voice, 1-2 sentences per card, names each clock")
+          ])
+      , ("siStartingClocks", Object $ KM.fromList
+          [ ("type", String "array")
+          , ("description", String "3 clocks seeded from tarot: 2 threats (past/present), 1 goal (future)")
+          , ("items", Object $ KM.fromList
+              [ ("type", String "object")
+              , ("additionalProperties", Bool False)
+              , ("properties", Object $ KM.fromList
+                  [ ("ciName", Object $ KM.fromList [("type", String "string")])
+                  , ("ciSegments", Object $ KM.fromList [("type", String "integer")])
+                  , ("ciFilled", Object $ KM.fromList [("type", String "integer")])
+                  , ("ciFromCard", Object $ KM.fromList
+                      [ ("type", String "string")
+                      , ("enum", Array $ V.fromList [String "TarotPast", String "TarotPresent", String "TarotFuture"])
+                      ])
+                  , ("ciType", Object $ KM.fromList
+                      [ ("type", String "string")
+                      , ("enum", Array $ V.fromList [String "ThreatClock", String "GoalClock"])
+                      ])
+                  , ("ciConsequenceDesc", Object $ KM.fromList [("type", String "string")])
+                  ])
+              , ("required", Array $ V.fromList
+                  [String "ciName", String "ciSegments", String "ciFilled", String "ciFromCard", String "ciType", String "ciConsequenceDesc"])
+              ])
+          ])
+      , ("siSceneNarration", Object $ KM.fromList
+          [ ("type", String "string")
+          , ("description", String "Opening scene narration - tight noir prose, ~100-150 words, establishes character in a moment")
           ])
       , ("siStartingStress", Object $ KM.fromList
           [ ("type", String "integer")
@@ -1263,7 +1384,9 @@ scenarioInitSchemaJSON = Object $ KM.fromList
           ])
       ])
   , ("required", Array $ V.fromList
-      [ String "siNarration"
+      [ String "siFateNarration"
+      , String "siStartingClocks"
+      , String "siSceneNarration"
       , String "siStartingStress"
       , String "siStartingCoin"
       , String "siStartingHeat"

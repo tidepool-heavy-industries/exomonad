@@ -63,6 +63,43 @@ handleEvent (SceneCompressed summary) =
   TIO.putStrLn $ "[Scene compressed] " <> summary
 handleEvent (MoodTransition toolName fromMood toMood) =
   TIO.putStrLn $ "\n⚡ [" <> toolName <> "] " <> fromMood <> " → " <> toMood
+-- State change events
+handleEvent (StressChanged from to reason) = do
+  let delta = to - from
+      arrow = if delta > 0 then "+" else ""
+  TIO.putStrLn $ "📊 Stress: " <> showT from <> " → " <> showT to <>
+    " (" <> arrow <> showT delta <> ") — " <> reason
+handleEvent (TraumaTriggered trauma trigger breakingPoint) = do
+  TIO.putStrLn $ "\n💔 ═══════════════════════════════════════"
+  TIO.putStrLn $ "   TRAUMA: " <> T.toUpper (unTrauma trauma)
+  TIO.putStrLn $ "   " <> breakingPoint
+  TIO.putStrLn $ "   " <> trigger
+  TIO.putStrLn $ "═══════════════════════════════════════\n"
+  where unTrauma (Trauma t) = t
+handleEvent (HeatChanged from to reason) = do
+  let delta = to - from
+      arrow = if delta > 0 then "+" else ""
+  TIO.putStrLn $ "🔥 Heat: " <> showT from <> " → " <> showT to <>
+    " (" <> arrow <> showT delta <> ") — " <> reason
+handleEvent (WantedChanged from to reason) =
+  TIO.putStrLn $ "⚠️ Wanted: " <> showT from <> " → " <> showT to <> " — " <> reason
+handleEvent (CoinChanged from to reason) = do
+  let delta = to - from
+      arrow = if delta > 0 then "+" else ""
+  TIO.putStrLn $ "💰 Coin: " <> showT from <> " → " <> showT to <>
+    " (" <> arrow <> showT delta <> ") — " <> reason
+handleEvent (DicePoolDepleted context) =
+  TIO.putStrLn $ "\n⚀ DICE POOL EMPTY — " <> context
+handleEvent (BargainOffered context canRetreat) = do
+  TIO.putStrLn $ "\n⚖️ BARGAIN REQUIRED"
+  TIO.putStrLn $ "   " <> context
+  TIO.putStrLn $ if canRetreat
+    then "   You can retreat to safety, or make a deal..."
+    else "   No escape. You must bargain or collapse."
+handleEvent (ClockAdvanced clockId clockName oldFilled newFilled total) = do
+  let ticks = newFilled - oldFilled
+  TIO.putStrLn $ "⏰ " <> clockName <> ": " <> showT newFilled <> "/" <> showT total <>
+    " [+" <> showT ticks <> "] (" <> clockId <> ")"
 
 showT :: Int -> Text
 showT = T.pack . show

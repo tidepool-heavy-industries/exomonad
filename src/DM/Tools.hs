@@ -60,6 +60,11 @@ import GHC.Generics (Generic)
 -- DM EVENTS
 -- ══════════════════════════════════════════════════════════════
 
+-- | Events emitted during gameplay
+-- These are used for:
+-- 1. Logging/debugging
+-- 2. GUI notifications (state changes shown in narrative)
+-- 3. Training data collection
 data DMEvent
   = DMThought Text
   | NPCSpoke NpcId Text
@@ -69,6 +74,46 @@ data DMEvent
   | ClockCompleted Text Text Consequence   -- clockId, clockName, consequence
   | SceneCompressed Text                   -- summary of what was compressed
   | MoodTransition Text Text Text          -- toolName, fromMood, toMood
+  -- State change events (for GUI display)
+  | StressChanged
+      { seFrom :: Int
+      , seTo :: Int
+      , seReason :: Text
+      }
+  | TraumaTriggered
+      { ttTrauma :: Trauma
+      , ttTrigger :: Text
+      , ttBreakingPoint :: Text            -- narrative moment of breaking
+      }
+  | HeatChanged
+      { heFrom :: Int
+      , heTo :: Int
+      , heReason :: Text
+      }
+  | WantedChanged
+      { weFrom :: Int
+      , weTo :: Int
+      , weReason :: Text
+      }
+  | CoinChanged
+      { ceFrom :: Int
+      , ceTo :: Int
+      , ceReason :: Text
+      }
+  | DicePoolDepleted
+      { dpContext :: Text                  -- what action drained the pool
+      }
+  | BargainOffered
+      { boContext :: Text                  -- why they're out of options
+      , boCanRetreat :: Bool               -- can they leave?
+      }
+  | ClockAdvanced
+      { caClockId :: Text
+      , caClockName :: Text
+      , caOldFilled :: Int
+      , caNewFilled :: Int
+      , caTotal :: Int
+      }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
 

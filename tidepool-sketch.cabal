@@ -43,6 +43,7 @@ library
         DM.GUI.Widgets.Narrative
         DM.GUI.Widgets.State
         DM.GUI.Widgets.CharacterCreation
+        DM.GUI.Widgets.Events
     build-depends:
         base >= 4.17 && < 5,
         effectful-core >= 2.3 && < 3,
