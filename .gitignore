@@ -7,3 +7,7 @@ dist-newstyle/
 .ghc.environment.*
 cabal.project.local
 .env
+
+# Local files
+tidepool-games.db
+plans/

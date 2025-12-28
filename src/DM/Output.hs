@@ -62,11 +62,14 @@ emptyTurnOutput = TurnOutput
 applyTurnOutput :: TurnOutput -> WorldState -> WorldState
 applyTurnOutput output state = state
   { player = (state.player)
-      { stress = clamp 0 9 (state.player.stress + output.stressDelta)
+      { stress = newStress
       , coin = max 0 (state.player.coin + output.coinDelta)
       , heat = clamp 0 10 (state.player.heat + output.heatDelta)
       }
-  , scene = if output.continueScene then state.scene else Nothing
+  -- Preserve scene if stress will trigger trauma (we need scene for trauma processing)
+  , scene = if output.continueScene || traumaWillTrigger
+            then state.scene
+            else Nothing
   -- Track costs for consequence echoing (keep last 3)
   , recentCosts = take 3 $ case output.costDescription of
       Just cost -> cost : state.recentCosts
@@ -78,6 +81,9 @@ applyTurnOutput output state = state
   }
   where
     clamp lo hi x = max lo (min hi x)
+    newStress = clamp 0 9 (state.player.stress + output.stressDelta)
+    -- Trauma triggers when stress crosses from <9 to 9
+    traumaWillTrigger = state.player.stress < 9 && newStress >= 9
 
 -- ══════════════════════════════════════════════════════════════
 -- COMPRESSION OUTPUT

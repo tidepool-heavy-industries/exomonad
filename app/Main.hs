@@ -3,18 +3,17 @@ module Main where
 import DM.State
 import DM.Loop
 import DM.Tools (DMEvent(..))
+import qualified Tidepool.Storage as Storage
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import qualified Data.HashMap.Strict as HM
-import qualified Data.ByteString.Lazy as BL
-import Data.Aeson (encode, eitherDecode)
-import System.Directory (doesFileExist)
 import System.IO (hFlush, stdout)
+import Data.Maybe (fromMaybe)
 
--- | Save file location
-saveFilePath :: FilePath
-saveFilePath = "tidepool-save.json"
+-- | Database file location
+dbFilePath :: FilePath
+dbFilePath = "tidepool-games.db"
 
 main :: IO ()
 main = do
@@ -22,72 +21,145 @@ main = do
   putStrLn "======================================="
   putStrLn ""
 
-  -- Check for existing save
-  world <- loadOrCreateWorld
+  -- Open database and run game selection
+  Storage.withGameDB dbFilePath $ \conn -> do
+    -- Show game menu and get choice
+    (gameId, world, mCursor) <- gameMenu conn
 
-  putStrLn $ "World initialized with:"
-  putStrLn $ "  - " <> show (HM.size world.factions) <> " factions"
-  putStrLn $ "  - " <> show (HM.size world.npcs) <> " NPCs"
-  putStrLn $ "  - " <> show (HM.size world.locations) <> " locations"
-  putStrLn $ "  - " <> show (HM.size world.clocks) <> " clocks"
-  putStrLn $ "  - " <> show (length world.threads) <> " threads"
-  TIO.putStrLn $ "  - Dice pool: " <> formatDice world.dicePool.poolDice
-  putStrLn ""
+    printWorldInfo world
 
-  -- Run game with auto-save after each turn
-  _ <- runDMGame world handleEvent saveWorld
-  putStrLn $ "Game saved to " <> saveFilePath
+    -- Run game with DB persistence
+    _ <- runDMGameWithDB conn gameId mCursor world handleEvent
+    putStrLn "Game saved to database."
+
   where
+    printWorldInfo world = do
+      putStrLn $ "World initialized with:"
+      putStrLn $ "  - " <> show (HM.size world.factions) <> " factions"
+      putStrLn $ "  - " <> show (HM.size world.npcs) <> " NPCs"
+      putStrLn $ "  - " <> show (HM.size world.locations) <> " locations"
+      putStrLn $ "  - " <> show (HM.size world.clocks) <> " clocks"
+      putStrLn $ "  - " <> show (length world.threads) <> " threads"
+      TIO.putStrLn $ "  - Dice pool: " <> formatDice world.dicePool.poolDice
+      putStrLn ""
+
     formatDice dice = T.intercalate " " [dieChar d | d <- dice]
     dieChar d = case d of
       1 -> "⚀"; 2 -> "⚁"; 3 -> "⚂"; 4 -> "⚃"; 5 -> "⚄"; 6 -> "⚅"; _ -> "?"
-    handleEvent :: DMEvent -> IO ()
-    handleEvent (DMThought t) = TIO.putStrLn $ "[DM thinks] " <> t
-    handleEvent (NPCSpoke nid t) = TIO.putStrLn $ "[" <> nid.unNpcId <> "] \"" <> t <> "\""
-    handleEvent (PlayerAsked q) = TIO.putStrLn $ "[Asks player] " <> q
-    handleEvent (RandomChoice label idx) =
-      TIO.putStrLn $ "[Random] chose " <> label <> " (index " <> showT idx <> ")"
-    handleEvent (DieSpent dieVal outcomeTier narrativeText) = do
-      TIO.putStrLn $ "\n🎲 Die spent: " <> showT dieVal <> " → " <> T.pack (show outcomeTier)
-      TIO.putStrLn $ narrativeText
-    handleEvent (ClockCompleted clockId clockName _consequence) =
-      TIO.putStrLn $ "[Clock filled] ⏰ " <> clockName <> " (" <> clockId <> ") - consequence triggered!"
-    handleEvent (SceneCompressed summary) =
-      TIO.putStrLn $ "[Scene compressed] " <> summary
-    handleEvent (MoodTransition toolName fromMood toMood) =
-      TIO.putStrLn $ "\n⚡ [" <> toolName <> "] " <> fromMood <> " → " <> toMood
 
-    showT :: Int -> Text
-    showT = T.pack . show
+-- | Event handler for game events
+handleEvent :: DMEvent -> IO ()
+handleEvent (DMThought t) = TIO.putStrLn $ "[DM thinks] " <> t
+handleEvent (NPCSpoke nid t) = TIO.putStrLn $ "[" <> nid.unNpcId <> "] \"" <> t <> "\""
+handleEvent (PlayerAsked q) = TIO.putStrLn $ "[Asks player] " <> q
+handleEvent (RandomChoice label idx) =
+  TIO.putStrLn $ "[Random] chose " <> label <> " (index " <> showT idx <> ")"
+handleEvent (DieSpent dieVal outcomeTier narrativeText) = do
+  TIO.putStrLn $ "\n🎲 Die spent: " <> showT dieVal <> " → " <> T.pack (show outcomeTier)
+  TIO.putStrLn $ narrativeText
+handleEvent (ClockCompleted clockId clockName _consequence) =
+  TIO.putStrLn $ "[Clock filled] ⏰ " <> clockName <> " (" <> clockId <> ") - consequence triggered!"
+handleEvent (SceneCompressed summary) =
+  TIO.putStrLn $ "[Scene compressed] " <> summary
+handleEvent (MoodTransition toolName fromMood toMood) =
+  TIO.putStrLn $ "\n⚡ [" <> toolName <> "] " <> fromMood <> " → " <> toMood
 
--- | Load existing save or create fresh world
-loadOrCreateWorld :: IO WorldState
-loadOrCreateWorld = do
-  exists <- doesFileExist saveFilePath
-  if exists
+showT :: Int -> Text
+showT = T.pack . show
+
+-- | Game selection menu
+-- Returns (GameId, WorldState, Maybe compression cursor)
+gameMenu :: Storage.Connection -> IO (Storage.GameId, WorldState, Maybe Int)
+gameMenu conn = do
+  games <- Storage.listGames conn
+  if null games
     then do
-      putStrLn $ "Found save file: " <> saveFilePath
-      contents <- BL.readFile saveFilePath
-      case eitherDecode contents of
-        Right savedWorld -> do
-          putStr "Continue from save? (y/n): "
-          hFlush stdout
-          response <- getLine
-          if response `elem` ["y", "Y", "yes", "Yes"]
-            then do
-              putStrLn "Loading saved game..."
-              return savedWorld
-            else do
-              putStrLn "Starting fresh game..."
-              return setupExampleWorld
-        Left err -> do
-          putStrLn $ "Error loading save (starting fresh): " <> err
-          return setupExampleWorld
-    else return setupExampleWorld
+      putStrLn "No saved games found. Starting new game..."
+      newGame conn
+    else do
+      putStrLn "Saved Games:"
+      putStrLn "────────────"
+      mapM_ printGame (zip [1..] games)
+      putStrLn ""
+      putStrLn "[n] New game"
+      putStrLn "[d] Delete a game"
+      putStrLn ""
+      putStr "Choice: "
+      hFlush stdout
+      choice <- getLine
+      case choice of
+        "n" -> newGame conn
+        "d" -> deleteGameMenu conn >> gameMenu conn
+        _ -> case reads choice :: [(Int, String)] of
+          [(n, "")] | n >= 1 && n <= length games ->
+            loadExistingGame conn (games !! (n - 1))
+          _ -> do
+            putStrLn "Invalid choice, try again."
+            gameMenu conn
+  where
+    printGame :: (Int, (Storage.GameId, Maybe Text, Text)) -> IO ()
+    printGame (n, (gid, mName, updatedAt)) = do
+      let name = fromMaybe (Storage.gameIdText gid) mName
+          -- Show just the date portion of ISO8601 timestamp
+          dateStr = T.take 10 updatedAt
+      TIO.putStrLn $ "[" <> showT n <> "] " <> name <> " (last played: " <> dateStr <> ")"
 
--- | Save world state to file
-saveWorld :: WorldState -> IO ()
-saveWorld world = BL.writeFile saveFilePath (encode world)
+-- | Create a new game
+newGame :: Storage.Connection -> IO (Storage.GameId, WorldState, Maybe Int)
+newGame conn = do
+  putStr "Game name (or enter for default): "
+  hFlush stdout
+  nameInput <- getLine
+  let mName = if null nameInput then Nothing else Just (T.pack nameInput)
+      world = setupExampleWorld
+
+  gameId <- Storage.createGame conn mName world
+  TIO.putStrLn $ "Created game: " <> Storage.gameIdText gameId
+  return (gameId, world, Nothing)
+
+-- | Load an existing game
+loadExistingGame
+  :: Storage.Connection
+  -> (Storage.GameId, Maybe Text, Text)
+  -> IO (Storage.GameId, WorldState, Maybe Int)
+loadExistingGame conn (gameId, mName, _) = do
+  TIO.putStrLn $ "Loading: " <> fromMaybe (Storage.gameIdText gameId) mName
+  result <- Storage.loadGame conn gameId
+  case result of
+    Nothing -> do
+      putStrLn "Error: Could not load game state. Starting fresh."
+      return (gameId, setupExampleWorld, Nothing)
+    Just (world, mCursor, _mSummary) -> do
+      msgCount <- Storage.getMessageCount conn gameId
+      putStrLn $ "Loaded game with " <> show msgCount <> " messages in history."
+      return (gameId, world, mCursor)
+
+-- | Delete a game
+deleteGameMenu :: Storage.Connection -> IO ()
+deleteGameMenu conn = do
+  games <- Storage.listGames conn
+  if null games
+    then putStrLn "No games to delete."
+    else do
+      putStrLn "\nWhich game to delete?"
+      mapM_ printGame (zip [1..] games)
+      putStr "Choice (or 'c' to cancel): "
+      hFlush stdout
+      choice <- getLine
+      case choice of
+        "c" -> return ()
+        _ -> case reads choice :: [(Int, String)] of
+          [(n, "")] | n >= 1 && n <= length games -> do
+            let (gameId, mName, _) = games !! (n - 1)
+            TIO.putStrLn $ "Deleting: " <> fromMaybe (Storage.gameIdText gameId) mName
+            Storage.deleteGame conn gameId
+            putStrLn "Deleted."
+          _ -> putStrLn "Invalid choice."
+  where
+    printGame :: (Int, (Storage.GameId, Maybe Text, Text)) -> IO ()
+    printGame (n, (gid, mName, _)) = do
+      let name = fromMaybe (Storage.gameIdText gid) mName
+      TIO.putStrLn $ "[" <> showT n <> "] " <> name
 
 setupExampleWorld :: WorldState
 setupExampleWorld = initialWorld

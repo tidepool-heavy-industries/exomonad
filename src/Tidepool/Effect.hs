@@ -50,6 +50,7 @@ module Tidepool.Effect
   , runLog
   , runLogWithBridge
   , runChatHistory
+  , runChatHistoryWithDB
 
     -- * Tool Execution Types
   , ToolDispatcher
@@ -84,6 +85,8 @@ import Tidepool.Anthropic.Client
 import Tidepool.Anthropic.Http (ThinkingContent(..))
 import qualified Tidepool.GUI.Core as GUICore
 import Tidepool.GUI.Core (GUIBridge)
+import qualified Tidepool.Storage as Storage
+import Database.SQLite.Simple (Connection)
 
 -- | The effect stack for game loops
 -- IOE is at the base for IO operations (random, emit, input, log)
@@ -223,7 +226,6 @@ data LLMConfig = LLMConfig
   , llmModel :: Text
   , llmMaxTokens :: Int
   , llmThinkingBudget :: Maybe Int  -- Token budget for extended thinking
-  , llmSystemPrompt :: Text         -- System prompt for all turns
   }
   deriving (Show, Eq, Generic)
 
@@ -563,6 +565,37 @@ runChatHistoryWith ref = interpret $ \_ -> \case
   GetHistory -> liftIO $ readIORef ref
   AppendMessages msgs -> liftIO $ modifyIORef ref (++ msgs)
   ClearHistory -> liftIO $ writeIORef ref []
+
+-- | Run the ChatHistory effect backed by SQLite database
+-- Loads initial history from DB on start (respecting compression cursor),
+-- caches in memory for fast reads during turn, and persists new messages to DB.
+runChatHistoryWithDB
+  :: IOE :> es
+  => Connection
+  -> Storage.GameId
+  -> Maybe Int         -- ^ Compression cursor (load only messages after this sequence)
+  -> Eff (ChatHistory : es) a
+  -> Eff es a
+runChatHistoryWithDB conn gameId mCursor action = do
+  -- Load initial history from database (respecting compression cursor)
+  initialHistory <- liftIO $ case mCursor of
+    Nothing     -> Storage.loadMessages conn gameId
+    Just cursor -> Storage.loadMessagesAfter conn gameId cursor
+
+  -- Use an IORef for in-memory cache (fast reads during turn)
+  ref <- liftIO $ newIORef initialHistory
+
+  interpret (\_ -> \case
+    GetHistory -> liftIO $ readIORef ref
+
+    AppendMessages msgs -> liftIO $ do
+      -- Update in-memory cache
+      modifyIORef ref (++ msgs)
+      -- Persist to database
+      Storage.appendMessages conn gameId msgs
+
+    ClearHistory -> liftIO $ writeIORef ref []
+    ) action
 
 -- ══════════════════════════════════════════════════════════════
 -- EMIT EFFECT
