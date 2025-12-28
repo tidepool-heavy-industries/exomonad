@@ -9,6 +9,7 @@ module DM.Loop
 
     -- * GUI Integration
   , gameLoopWithGUI
+  , gameLoopWithGUIAndDB
   , waitForPlayerInput
 
     -- * Turn Operations
@@ -34,10 +35,10 @@ import Tidepool.Effect hiding (ToolResult)
 import Tidepool.Template (Schema(..))
 
 import Effectful
-import Control.Concurrent (forkIO)
 import Control.Concurrent.MVar (takeMVar)
 import Control.Concurrent.STM (atomically, writeTVar, readTVar)
-import Control.Monad (when, forever)
+import Control.Monad (when, replicateM)
+import qualified Data.Aeson as Aeson
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
@@ -48,9 +49,18 @@ import System.Environment (lookupEnv)
 import Database.SQLite.Simple (Connection)
 import qualified Tidepool.Storage as Storage
 
+import DM.CharacterCreation (CharacterChoices(..), scenarioInitPrompt, ScenarioInit(..))
+import qualified DM.CharacterCreation as CC
+
 import Tidepool.GUI.Core (GUIBridge(..), PendingRequest(..), RequestResponse(..),
-                          updateState, addNarrative, setLLMActive, newGUIBridge)
+                          updateState, addNarrative, setLLMActive, setSuggestedActions)
+import qualified Tidepool.GUI.Core as GUI (logInfo)
 import Tidepool.GUI.Handler (makeGUIHandler)
+import Tidepool.Anthropic.Http (Message(..), ContentBlock(..), Role(..))
+import Data.Aeson (Value(..))
+import qualified Data.Aeson.KeyMap as KM
+import qualified Data.Vector as V
+import Prelude
 
 -- ══════════════════════════════════════════════════════════════
 -- TYPES
@@ -140,7 +150,8 @@ dmTurn input = do
           logDebug $ "Prompt preview: " <> T.take 200 systemPrompt <> "..."
 
           -- Call LLM with system prompt and user action
-          outcome <- runTurn @TurnOutput systemPrompt userAction turnOutputSchema.schemaJSON dmTools
+          let Schema{schemaJSON = outputSchema} = turnOutputSchema
+          outcome <- runTurn @TurnOutput systemPrompt userAction outputSchema dmTools
 
           case outcome of
             -- Tool triggered state transition - restart with new mood
@@ -316,7 +327,8 @@ compressIfNeeded = do
             userAction = "Compress this scene."
 
         -- Call LLM to compress the scene
-        outcome <- runTurn @CompressionOutput systemPrompt userAction compressionOutputSchema.schemaJSON []
+        let Schema{schemaJSON = compressSchema} = compressionOutputSchema
+        outcome <- runTurn @CompressionOutput systemPrompt userAction compressSchema []
 
         -- Compression shouldn't break, but handle it gracefully
         case outcome of
@@ -469,6 +481,7 @@ runDMGameWithDB conn gameId mCursor initialState handleEvent = do
       let inputHandler = InputHandler
             { ihChoice = terminalChoice
             , ihText = terminalText
+            , ihDice = terminalDice
             }
 
       -- Preserve loaded scene, or create intro scene if none exists
@@ -539,6 +552,7 @@ gameLoopWithDB conn gameId = loop []
                 MoodAftermath _ -> "AFTERMATH"
                 MoodDowntime _  -> "DOWNTIME"
                 MoodTrauma _    -> "TRAUMA"
+                MoodBargain _   -> "BARGAIN"
           liftIO $ TIO.putStrLn $ "\n[" <> statusLine <> "]"
           liftIO $ TIO.putStrLn $ "[" <> moodLabel <> "]"
 
@@ -605,6 +619,7 @@ gameLoopWithSave saveCallback = loop []
                 MoodAftermath _ -> "AFTERMATH"
                 MoodDowntime _  -> "DOWNTIME"
                 MoodTrauma _    -> "TRAUMA"
+                MoodBargain _   -> "BARGAIN"
           liftIO $ TIO.putStrLn $ "\n[" <> statusLine <> "]"
           liftIO $ TIO.putStrLn $ "[" <> moodLabel <> "]"
 
@@ -846,18 +861,16 @@ guiGameLoop bridge = loop
           loop
 
         Just _ -> do
-          -- Show loading indicator
-          liftIO $ setLLMActive bridge True
-
-          -- Wait for player input via GUI
+          -- Wait for player input via GUI (spinner is OFF during input)
           playerInput <- liftIO $ waitForPlayerInput bridge
 
           -- Check for quit
           if T.toLower (T.strip playerInput.piActionText) `elem` ["quit", "exit", "q"]
-            then do
-              liftIO $ setLLMActive bridge False
-              return ()
+            then return ()
             else do
+              -- Show loading indicator WHILE LLM is thinking
+              liftIO $ setLLMActive bridge True
+
               -- Run a turn
               response <- dmTurn playerInput
 
@@ -873,3 +886,391 @@ guiGameLoop bridge = loop
 
               -- Continue loop
               loop
+
+-- ══════════════════════════════════════════════════════════════
+-- GUI WITH DATABASE PERSISTENCE
+-- ══════════════════════════════════════════════════════════════
+
+-- | Run the game loop with GUI and database persistence
+--
+-- This is like 'gameLoopWithGUI' but:
+-- 1. Loads history from database (respecting compression cursor)
+-- 2. Populates narrative log with past conversation
+-- 3. Persists new messages to database
+-- 4. Saves world state after each turn
+gameLoopWithGUIAndDB
+  :: Connection
+  -> Storage.GameId
+  -> Maybe Int           -- ^ Compression cursor (messages before this are compressed)
+  -> GUIBridge WorldState
+  -> (DMEvent -> IO ())
+  -> IO ()
+gameLoopWithGUIAndDB conn gameId mCursor bridge handleEvent = do
+  GUI.logInfo bridge "[Startup] gameLoopWithGUIAndDB starting..."
+
+  -- Get API key from environment
+  maybeKey <- lookupEnv "ANTHROPIC_API_KEY"
+  case maybeKey of
+    Nothing -> do
+      addNarrative bridge "Error: ANTHROPIC_API_KEY not set"
+      GUI.logInfo bridge "[Startup] ERROR: No API key!"
+      return ()
+    Just apiKey -> do
+      GUI.logInfo bridge "[Startup] API key found, configuring..."
+
+      -- Set up the LLM config
+      let llmConfig = LLMConfig
+            { llmApiKey = T.pack apiKey
+            , llmModel = "claude-haiku-4-5-20251001"
+            , llmMaxTokens = 4096
+            , llmThinkingBudget = Just 1024
+            }
+
+      -- Set up GUI input handler
+      let inputHandler = makeGUIHandler bridge
+
+      -- Get initial state from bridge
+      initialState <- atomically $ readTVar bridge.gbState
+      GUI.logInfo bridge $ "[Startup] Initial state loaded, scene: " <> T.pack (show $ fmap (const "...") initialState.scene)
+
+      -- Load past messages and populate narrative log
+      pastMessages <- Storage.loadMessages conn gameId
+      GUI.logInfo bridge $ "[Startup] Loaded " <> T.pack (show $ length pastMessages) <> " past messages"
+      let narrativeTexts = extractNarrativeTexts pastMessages
+      GUI.logInfo bridge $ "[Startup] Extracted " <> T.pack (show $ length narrativeTexts) <> " narrative texts"
+      mapM_ (addNarrative bridge) narrativeTexts
+
+      -- Restore suggested actions from WorldState to bridge
+      setSuggestedActions bridge initialState.suggestedActions
+      GUI.logInfo bridge $ "[Startup] Restored " <> T.pack (show $ length initialState.suggestedActions) <> " suggested actions"
+
+      -- Check if character creation is needed (fresh game)
+      stateAfterCreation <- case initialState.characterChoices of
+        Just _ -> do
+          -- Character already created, use existing state
+          GUI.logInfo bridge "[Startup] Character already exists, skipping creation"
+          return initialState
+        Nothing -> do
+          -- New game - trigger character creation
+          GUI.logInfo bridge "[Startup] Fresh game - starting character creation..."
+          runCharacterCreation bridge initialState
+
+      -- Update bridge with potentially modified state
+      atomically $ writeTVar bridge.gbState stateAfterCreation
+
+      GUI.logInfo bridge "[Startup] Starting game loop..."
+
+      -- Run the game loop with DB persistence
+      ((), finalState) <- runEff
+        . runRandom
+        . runEmit handleEvent
+        . runState stateAfterCreation
+        . runChatHistoryWithDB conn gameId mCursor
+        . runLogWithBridge bridge Debug
+        . runRequestInput inputHandler
+        . runLLMWithTools @_ @DMEvent llmConfig makeDMDispatcher
+        $ guiGameLoopWithDB conn gameId bridge
+
+      -- Save final state
+      GUI.logInfo bridge "[Startup] Game loop ended, saving state..."
+      Storage.saveGameState conn gameId finalState
+
+      return ()
+
+-- | Run character creation flow via GUI
+--
+-- Posts PendingCharacterCreation request, waits for result from GUI,
+-- updates state with character choices, and adds intro narrative.
+runCharacterCreation :: GUIBridge WorldState -> WorldState -> IO WorldState
+runCharacterCreation bridge initialState = do
+  -- Post character creation request to GUI
+  atomically $ writeTVar bridge.gbPendingRequest (Just PendingCharacterCreation)
+
+  GUI.logInfo bridge "[CharacterCreation] Waiting for player to create character..."
+
+  -- Wait for character creation result from GUI
+  resultJson <- takeMVar bridge.gbCharacterCreationResult
+
+  -- Clear the pending request
+  atomically $ writeTVar bridge.gbPendingRequest Nothing
+
+  -- Parse the JSON result back to CharacterChoices
+  case Aeson.fromJSON resultJson of
+    Aeson.Success (Just choices) -> do
+      GUI.logInfo bridge $ "[CharacterCreation] Character created: " <> choices.ccName
+      -- Update state with character choices
+      let newState = initialState { characterChoices = Just choices }
+
+      -- Add intro narrative with character info
+      addNarrative bridge "DOSKVOL. Industrial sprawl. Eternal night."
+      addNarrative bridge "The ghosts press against the lightning barriers."
+      addNarrative bridge "The gangs carve up the districts."
+      addNarrative bridge $ "You are " <> choices.ccName <> ", a " <> archetypeLabel choices.ccArchetype <> "."
+      addNarrative bridge "Your story begins..."
+
+      return newState
+
+    Aeson.Success Nothing -> do
+      -- Cancelled - return unchanged state
+      GUI.logInfo bridge "[CharacterCreation] Cancelled by user"
+      return initialState
+
+    Aeson.Error err -> do
+      GUI.logInfo bridge $ "[CharacterCreation] Parse error: " <> T.pack err
+      return initialState
+  where
+    archetypeLabel :: CC.Archetype -> Text
+    archetypeLabel = \case
+      CC.Cutter -> "Cutter"
+      CC.Hound -> "Hound"
+      CC.Leech -> "Leech"
+      CC.Lurk -> "Lurk"
+      CC.Slide -> "Slide"
+      CC.Spider -> "Spider"
+      CC.Whisper -> "Whisper"
+
+-- | Extract narrative content from conversation history
+-- Includes both player actions and DM responses for context
+extractNarrativeTexts :: [Message] -> [Text]
+extractNarrativeTexts msgs = concatMap extractFromMessage msgs
+  where
+    extractFromMessage :: Message -> [Text]
+    extractFromMessage msg = case msg.role of
+      User -> extractUserText msg.content
+      Assistant -> extractAssistantText msg.content
+
+    -- Extract player action text from user messages
+    extractUserText :: [ContentBlock] -> [Text]
+    extractUserText blocks =
+      [ "> " <> txt  -- Prefix with > to show it's player action
+      | TextBlock txt <- blocks
+      , not (T.null $ T.strip txt)
+      ]
+
+    -- Extract DM response from assistant messages
+    -- Can be in TextBlock or JsonBlock (structured output)
+    extractAssistantText :: [ContentBlock] -> [Text]
+    extractAssistantText blocks = concatMap extractBlock blocks
+
+    extractBlock :: ContentBlock -> [Text]
+    extractBlock (TextBlock txt)
+      | not (T.null $ T.strip txt) = [txt]
+      | otherwise = []
+    extractBlock (JsonBlock val) = maybeToList $ extractResponseText val
+    extractBlock _ = []  -- Ignore tool use, thinking, etc.
+
+    -- Parse structured output JSON to get responseText field
+    extractResponseText :: Value -> Maybe Text
+    extractResponseText (Object obj) =
+      case KM.lookup "responseText" obj of
+        Just (String t) | not (T.null $ T.strip t) -> Just t
+        _ -> Nothing
+    extractResponseText _ = Nothing
+
+    maybeToList :: Maybe a -> [a]
+    maybeToList Nothing = []
+    maybeToList (Just x) = [x]
+
+-- | Game loop for GUI with DB persistence - saves state after each turn
+guiGameLoopWithDB
+  :: Connection
+  -> Storage.GameId
+  -> GUIBridge WorldState
+  -> Eff (GameEffects WorldState DMEvent) ()
+guiGameLoopWithDB conn gameId bridge = loop
+  where
+    loop :: Eff (GameEffects WorldState DMEvent) ()
+    loop = do
+      -- Check if we have an active scene
+      state <- get @WorldState
+
+      -- Sync current state to bridge (so GUI shows latest)
+      liftIO $ updateState bridge (const state)
+
+      case state.scene of
+        Nothing -> do
+          -- No scene - check if this is a fresh game or scene just ended
+          let isFreshGame = Seq.null state.sessionHistory
+
+          -- Initialize dice pool once for all fresh games
+          when isFreshGame $ do
+            startingDice <- rollStartingDice
+            modify $ \s -> s { dicePool = DicePool startingDice }
+            liftIO $ GUI.logInfo bridge $ "[Loop] Fresh game - initialized dice pool: " <> T.pack (show startingDice)
+
+          case (isFreshGame, state.characterChoices) of
+            (True, Just choices) -> do
+              -- Fresh game with character - generate opening scenario
+              liftIO $ GUI.logInfo bridge "[Loop] Generating opening scenario from character choices..."
+              liftIO $ setLLMActive bridge True
+
+              let prompt = scenarioInitPrompt choices
+              liftIO $ GUI.logInfo bridge $ "[Loop] Scenario prompt length: " <> T.pack (show $ T.length prompt)
+
+              -- Call LLM for scenario init (simple text response, no tools)
+              result <- runTurn @ScenarioInit prompt "Generate the opening scenario." scenarioInitSchemaJSON []
+
+              liftIO $ setLLMActive bridge False
+
+              case result of
+                TurnCompleted (TurnParsed tr) -> do
+                  let scenario = tr.trOutput
+                  liftIO $ GUI.logInfo bridge "[Loop] Scenario generated successfully"
+                  -- Apply scenario to state (dice already initialized above)
+                  let newPlayer = state.player
+                        { stress = scenario.siStartingStress
+                        , coin = scenario.siStartingCoin
+                        , heat = scenario.siStartingHeat
+                        , wanted = scenario.siStartingWanted
+                        , trauma = maybe [] (\t -> [Trauma t]) scenario.siStartingTrauma
+                        }
+                      introScene = ActiveScene
+                        { sceneLocation = LocationId (T.toLower $ T.replace " " "_" scenario.siSceneLocation)
+                        , scenePresent = []
+                        , sceneStakes = Stakes scenario.siSceneStakes
+                        , sceneBeats = Seq.singleton $ DMNarration scenario.siNarration
+                        }
+                  modify $ \s -> s
+                    { player = newPlayer
+                    , scene = Just introScene
+                    , DM.State.suggestedActions = scenario.siSuggestedActions
+                    }
+                  -- Add narration to GUI
+                  liftIO $ addNarrative bridge scenario.siNarration
+                  liftIO $ addNarrative bridge $ ">> " <> scenario.siOpeningHook
+                  -- Set suggested actions in bridge for UI
+                  liftIO $ setSuggestedActions bridge scenario.siSuggestedActions
+
+                TurnCompleted (TurnParseFailed{..}) ->
+                  error $ "Failed to generate opening scenario: " <> tpfError
+
+                TurnBroken reason ->
+                  error $ "LLM failed during scenario generation: " <> T.unpack reason
+
+              loop
+
+            (True, Nothing) ->
+              -- Fresh game without character choices is invalid state
+              error "Cannot start game without character choices - character creation was cancelled or failed"
+
+            (False, _) -> do
+              -- Scene ended (not fresh game) - create continuation scene
+              liftIO $ GUI.logInfo bridge "[Loop] Scene ended, creating continuation..."
+              createContinuationScene bridge state
+              loop
+
+        Just _ -> do
+          -- Wait for player input via GUI (spinner is OFF during input)
+          liftIO $ GUI.logInfo bridge "[Loop] Waiting for player input..."
+          playerInput <- liftIO $ waitForPlayerInput bridge
+          liftIO $ GUI.logInfo bridge $ "[Loop] Got input: " <> T.take 50 playerInput.piActionText
+
+          -- Check for quit
+          if T.toLower (T.strip playerInput.piActionText) `elem` ["quit", "exit", "q"]
+            then return ()
+            else do
+              -- Show loading indicator WHILE LLM is thinking
+              liftIO $ setLLMActive bridge True
+              liftIO $ GUI.logInfo bridge "[Loop] Starting dmTurn..."
+
+              -- Run a turn
+              response <- dmTurn playerInput
+
+              liftIO $ GUI.logInfo bridge $ "[Loop] dmTurn completed: " <> T.take 100 response.responseText
+
+              -- Hide loading indicator
+              liftIO $ setLLMActive bridge False
+
+              -- Push narrative to bridge
+              liftIO $ addNarrative bridge response.responseText
+
+              -- Store suggested actions in WorldState (for persistence) and bridge (for UI)
+              let newSuggestions = response.responseSuggestedActions
+              modify @WorldState $ \s -> s { DM.State.suggestedActions = newSuggestions }
+              liftIO $ setSuggestedActions bridge newSuggestions
+
+              -- Sync updated state to bridge and save to DB
+              updatedState <- get @WorldState
+              liftIO $ updateState bridge (const updatedState)
+              liftIO $ Storage.saveGameState conn gameId updatedState
+
+              -- Continue loop
+              loop
+
+    -- Helper to create a continuation scene when previous scene ends
+    createContinuationScene :: GUIBridge WorldState -> WorldState -> Eff (GameEffects WorldState DMEvent) ()
+    createContinuationScene br _st = do
+      let contScene = ActiveScene
+            { sceneLocation = LocationId "doskvol"
+            , scenePresent = []
+            , sceneStakes = Stakes "What happens next?"
+            , sceneBeats = Seq.empty
+            }
+      modify $ \s -> s { scene = Just contScene }
+      liftIO $ addNarrative br "---"
+      liftIO $ addNarrative br "The scene fades. What do you do next?"
+
+-- | Roll starting dice pool (5 dice, values 1-6)
+rollStartingDice :: Random :> es => Eff es [Int]
+rollStartingDice = replicateM 5 (randomInt 1 6)
+
+-- | JSON schema for scenario initialization response
+scenarioInitSchemaJSON :: Value
+scenarioInitSchemaJSON = Object $ KM.fromList
+  [ ("type", String "object")
+  , ("additionalProperties", Bool False)
+  , ("properties", Object $ KM.fromList
+      [ ("siNarration", Object $ KM.fromList
+          [ ("type", String "string")
+          , ("description", String "2-3 paragraph opening narration, evocative and immediate")
+          ])
+      , ("siStartingStress", Object $ KM.fromList
+          [ ("type", String "integer")
+          , ("description", String "Starting stress 0-4")
+          ])
+      , ("siStartingCoin", Object $ KM.fromList
+          [ ("type", String "integer")
+          , ("description", String "Starting coin 0-4")
+          ])
+      , ("siStartingHeat", Object $ KM.fromList
+          [ ("type", String "integer")
+          , ("description", String "Starting heat 0-2")
+          ])
+      , ("siStartingWanted", Object $ KM.fromList
+          [ ("type", String "integer")
+          , ("description", String "Starting wanted 0-1")
+          ])
+      , ("siStartingTrauma", Object $ KM.fromList
+          [ ("type", String "string")
+          , ("description", String "Optional starting trauma if past strongly suggests it")
+          ])
+      , ("siSceneLocation", Object $ KM.fromList
+          [ ("type", String "string")
+          , ("description", String "Where the opening scene takes place")
+          ])
+      , ("siSceneStakes", Object $ KM.fromList
+          [ ("type", String "string")
+          , ("description", String "What's at stake in the opening")
+          ])
+      , ("siOpeningHook", Object $ KM.fromList
+          [ ("type", String "string")
+          , ("description", String "The immediate situation demanding response")
+          ])
+      , ("siSuggestedActions", Object $ KM.fromList
+          [ ("type", String "array")
+          , ("items", Object $ KM.fromList [("type", String "string")])
+          , ("description", String "3-4 suggested actions the player could take in response to the opening hook")
+          ])
+      ])
+  , ("required", Array $ V.fromList
+      [ String "siNarration"
+      , String "siStartingStress"
+      , String "siStartingCoin"
+      , String "siStartingHeat"
+      , String "siStartingWanted"
+      , String "siSceneLocation"
+      , String "siSceneStakes"
+      , String "siOpeningHook"
+      , String "siSuggestedActions"
+      ])
+  ]

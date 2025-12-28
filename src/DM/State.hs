@@ -13,6 +13,9 @@ module DM.State
   , ActionDomain(..)
   , AftermathVariant(..)
   , TraumaVariant(..)
+  , BargainVariant(..)
+  , BargainOption(..)
+  , BargainCost(..)
   , ClockInterrupt(..)
   , defaultMood
 
@@ -98,6 +101,8 @@ import Text.Ginger.GVal (ToGVal(..), toGVal, dict, list)
 import Text.Ginger.GVal.Generic (genericToGVal)
 import qualified Data.Foldable as F
 
+import DM.CharacterCreation (CharacterChoices)
+
 -- ══════════════════════════════════════════════════════════════
 -- DM MOOD (State Machine)
 -- ══════════════════════════════════════════════════════════════
@@ -109,6 +114,7 @@ data DMMood
   | MoodAftermath AftermathVariant
   | MoodDowntime DowntimeVariant       -- Promoted from scene variant
   | MoodTrauma TraumaVariant
+  | MoodBargain BargainVariant         -- Out of dice, must make a deal
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
 -- | Scene variants - every scene has a hook (no more FreePlay)
@@ -211,6 +217,38 @@ data TraumaVariant = Breaking
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
+-- | Bargain variant - out of dice, must make a deal or exit
+-- LLM generates contextual bargains; player picks one or exits
+data BargainVariant = Bargaining
+  { bvWhatDrained :: Text        -- "the desperate chase", "holding the door"
+  , bvCanRetreat :: Bool         -- Can they "go home to rest"? (not mid-combat)
+  , bvRetreatDesc :: Text        -- "slip away to your garret in Crow's Foot"
+  , bvPassOutDesc :: Text        -- "collapse behind the coal bins"
+  , bvPreviousMood :: DMMood     -- Where to return after bargain accepted
+  }
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+
+-- | A bargain option offered when out of dice
+-- LLM generates these based on context (nearby NPCs, factions, items, etc.)
+data BargainOption = BargainOption
+  { boDescription :: Text        -- "The Lampblacks' fence could help, but..."
+  , boCost :: BargainCost        -- Mechanical cost
+  , boDiceGained :: Int          -- 1-3 dice
+  }
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+
+-- | Mechanical costs for bargains - must result in state changes
+data BargainCost
+  = CostStress Int               -- Take stress
+  | CostHeat Int                 -- Take heat
+  | CostWanted                   -- Increase wanted level
+  | CostClockTick ClockId Int    -- Advance a clock
+  | CostFactionDebt FactionId    -- Owe a faction (attitude shift)
+  | CostTrauma                   -- Accept a trauma (big cost, big reward)
+  | CostItem Text                -- Burn a narrative item
+  | CostMultiple [BargainCost]   -- Compound cost
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+
 -- | Clock interrupt - world asserting itself (not a mood, but forces transition)
 data ClockInterrupt = ClockInterrupt
   { ciClockId :: ClockId
@@ -248,6 +286,10 @@ data WorldState = WorldState
   , recentCosts :: [Text]             -- From last 3 costly/setback outcomes
   , unresolvedThreats :: [Text]       -- Complications not yet addressed
   , pendingInterrupt :: Maybe ClockInterrupt  -- Clock triggered, awaiting handling
+  -- UI state (persisted for resume)
+  , suggestedActions :: [Text]        -- Last LLM suggestions for quick-pick buttons
+  -- Character creation (Nothing means needs setup)
+  , characterChoices :: Maybe CharacterChoices
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
@@ -276,6 +318,8 @@ initialWorld = WorldState
   , recentCosts = []
   , unresolvedThreats = []
   , pendingInterrupt = Nothing
+  , suggestedActions = []
+  , characterChoices = Nothing
   }
 
 -- ══════════════════════════════════════════════════════════════
@@ -689,6 +733,9 @@ instance ToGVal m ActionVariant where toGVal = genericToGVal
 instance ToGVal m ActionDomain where toGVal = genericToGVal
 instance ToGVal m AftermathVariant where toGVal = genericToGVal
 instance ToGVal m TraumaVariant where toGVal = genericToGVal
+instance ToGVal m BargainVariant where toGVal = genericToGVal
+instance ToGVal m BargainOption where toGVal = genericToGVal
+instance ToGVal m BargainCost where toGVal = genericToGVal
 instance ToGVal m ClockInterrupt where toGVal = genericToGVal
 
 -- Player

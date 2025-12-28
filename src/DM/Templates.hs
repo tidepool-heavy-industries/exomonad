@@ -10,6 +10,7 @@ module DM.Templates
   , aftermathTemplate
   , downtimeTemplate
   , traumaTemplate
+  , bargainTemplate
 
     -- * Typed Jinja Templates
   , dmTurnJinja
@@ -19,6 +20,10 @@ module DM.Templates
   , aftermathJinja
   , downtimeJinja
   , traumaJinja
+  , bargainJinja
+
+    -- * Tool List Type
+  , DMTools
 
     -- * Rendering
   , renderDMTurn
@@ -38,6 +43,9 @@ import Tidepool.Template
 import Tidepool.Schema
 import Data.Text (Text)
 import Text.Parsec.Pos (SourcePos)
+
+-- | Type alias for the full DM tool list
+type DMTools = '[Choose, SpendDie, Engage, Resolve, Accept, AcceptBargain, Retreat, PassOut]
 
 -- ══════════════════════════════════════════════════════════════
 -- TYPED JINJA TEMPLATES
@@ -67,6 +75,10 @@ downtimeJinja = $(typedTemplateFile ''DMContext "templates/downtime/main.jinja")
 traumaJinja :: TypedTemplate DMContext SourcePos
 traumaJinja = $(typedTemplateFile ''DMContext "templates/trauma/main.jinja")
 
+-- | Bargain mood template - out of dice, make a deal
+bargainJinja :: TypedTemplate DMContext SourcePos
+bargainJinja = $(typedTemplateFile ''DMContext "templates/bargain/main.jinja")
+
 -- | Compression Jinja template (compile-time validated)
 compressionJinja :: TypedTemplate CompressionContext SourcePos
 compressionJinja = $(typedTemplateFile ''CompressionContext "templates/compression.jinja")
@@ -76,7 +88,7 @@ compressionJinja = $(typedTemplateFile ''CompressionContext "templates/compressi
 -- ══════════════════════════════════════════════════════════════
 
 -- | Main DM turn template with all available tools
-dmTurnTemplate :: Template DMContext TurnOutput DMEvent WorldState '[Choose, SpendDie, Engage, Resolve, Accept]
+dmTurnTemplate :: Template DMContext TurnOutput DMEvent WorldState DMTools
 dmTurnTemplate = Template
   { templateJinja = dmTurnJinja
   , templateOutputSchema = turnOutputSchema
@@ -92,7 +104,7 @@ compressionTemplate' = Template
   }
 
 -- | Scene template - exploration state
-sceneTemplate :: Template DMContext TurnOutput DMEvent WorldState '[Choose, SpendDie, Engage, Resolve, Accept]
+sceneTemplate :: Template DMContext TurnOutput DMEvent WorldState DMTools
 sceneTemplate = Template
   { templateJinja = sceneJinja
   , templateOutputSchema = turnOutputSchema
@@ -100,7 +112,7 @@ sceneTemplate = Template
   }
 
 -- | Action template - dice resolution state
-actionTemplate :: Template DMContext TurnOutput DMEvent WorldState '[Choose, SpendDie, Engage, Resolve, Accept]
+actionTemplate :: Template DMContext TurnOutput DMEvent WorldState DMTools
 actionTemplate = Template
   { templateJinja = actionJinja
   , templateOutputSchema = turnOutputSchema
@@ -108,7 +120,7 @@ actionTemplate = Template
   }
 
 -- | Aftermath template - consequence state
-aftermathTemplate :: Template DMContext TurnOutput DMEvent WorldState '[Choose, SpendDie, Engage, Resolve, Accept]
+aftermathTemplate :: Template DMContext TurnOutput DMEvent WorldState DMTools
 aftermathTemplate = Template
   { templateJinja = aftermathJinja
   , templateOutputSchema = turnOutputSchema
@@ -116,7 +128,7 @@ aftermathTemplate = Template
   }
 
 -- | Downtime template - recovery montage state
-downtimeTemplate :: Template DMContext TurnOutput DMEvent WorldState '[Choose, SpendDie, Engage, Resolve, Accept]
+downtimeTemplate :: Template DMContext TurnOutput DMEvent WorldState DMTools
 downtimeTemplate = Template
   { templateJinja = downtimeJinja
   , templateOutputSchema = turnOutputSchema
@@ -124,9 +136,17 @@ downtimeTemplate = Template
   }
 
 -- | Trauma template - breaking point, stress reset
-traumaTemplate :: Template DMContext TurnOutput DMEvent WorldState '[Choose, SpendDie, Engage, Resolve, Accept]
+traumaTemplate :: Template DMContext TurnOutput DMEvent WorldState DMTools
 traumaTemplate = Template
   { templateJinja = traumaJinja
+  , templateOutputSchema = turnOutputSchema
+  , templateTools = dmToolList
+  }
+
+-- | Bargain template - out of dice, make deals
+bargainTemplate :: Template DMContext TurnOutput DMEvent WorldState DMTools
+bargainTemplate = Template
+  { templateJinja = bargainJinja
   , templateOutputSchema = turnOutputSchema
   , templateTools = dmToolList
   }
@@ -151,6 +171,7 @@ renderForMood mood ctx = case mood of
   MoodAftermath _ -> render aftermathTemplate ctx
   MoodDowntime _  -> render downtimeTemplate ctx
   MoodTrauma _    -> render traumaTemplate ctx
+  MoodBargain _   -> render bargainTemplate ctx
 
 -- ══════════════════════════════════════════════════════════════
 -- SCHEMAS

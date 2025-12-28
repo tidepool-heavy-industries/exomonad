@@ -21,6 +21,7 @@ moodLabel (MoodAction _ _) = "ACTION"
 moodLabel (MoodAftermath _) = "AFTERMATH"
 moodLabel (MoodDowntime _) = "DOWNTIME"
 moodLabel (MoodTrauma _) = "TRAUMA"
+moodLabel (MoodBargain _) = "BARGAIN"
 
 -- | Get the description for a mood
 moodDescription :: DMMood -> Text
@@ -30,6 +31,7 @@ moodDescription mood = case mood of
   MoodAftermath av -> aftermathDescription av
   MoodDowntime dv -> downtimeDescription dv
   MoodTrauma tv -> traumaDescription tv
+  MoodBargain bv -> bargainDescription bv
 
 -- | Get label and description for a mood
 moodDisplay :: DMMood -> (Text, Text)
@@ -67,3 +69,7 @@ downtimeDescription dv = case dv of
 -- | Trauma variant description
 traumaDescription :: TraumaVariant -> Text
 traumaDescription tv = "Breaking point: " <> tv.tvWhatBroke
+
+-- | Bargain variant description
+bargainDescription :: BargainVariant -> Text
+bargainDescription bv = "Out of dice: " <> bv.bvWhatDrained

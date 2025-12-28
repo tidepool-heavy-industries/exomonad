@@ -122,6 +122,11 @@ data MoodVariantContext = MoodVariantContext
   , mvcTraumaType :: Maybe Text
   , mvcWhatBroke :: Maybe Text
   , mvcAdrenaline :: Maybe Bool     -- Can push through for one more action?
+  -- Bargain variants (out of dice)
+  , mvcBargainContext :: Maybe Text      -- "the desperate chase", "holding the door"
+  , mvcCanRetreat :: Maybe Bool          -- Can they "go home to rest"?
+  , mvcRetreatDesc :: Maybe Text         -- "slip away to your garret"
+  , mvcPassOutDesc :: Maybe Text         -- "collapse behind the coal bins"
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
@@ -186,11 +191,23 @@ data FactionSummary = FactionSummary
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
 -- | Build context for DM turn template from world state
--- Requires an active scene to be set
+-- Uses a fallback scene if none is active
 buildDMContext :: WorldState -> DMContext
 buildDMContext world = case world.scene of
-  Nothing -> error "buildDMContext: no active scene"
-  Just activeScene ->
+  Nothing ->
+    -- Use a minimal fallback context when no scene is active
+    let fallbackScene = ActiveScene
+          { sceneLocation = LocationId "unknown"
+          , scenePresent = []
+          , sceneStakes = Stakes "Find your bearings in Doskvol"
+          , sceneBeats = mempty
+          }
+    in buildContextFromScene world fallbackScene
+  Just activeScene -> buildContextFromScene world activeScene
+
+-- | Build context from a specific scene
+buildContextFromScene :: WorldState -> ActiveScene -> DMContext
+buildContextFromScene world activeScene =
     let
       -- Get location from scene
       location = fromMaybe defaultLocation $
@@ -287,6 +304,7 @@ buildMoodContext mood = case mood of
   MoodAftermath variant -> ("aftermath", aftermathVariantContext variant)
   MoodDowntime variant -> ("downtime", downtimeVariantContext variant)
   MoodTrauma variant -> ("trauma", traumaVariantContext variant)
+  MoodBargain variant -> ("bargain", bargainVariantContext variant)
 
 -- | Empty variant context (all Nothing)
 emptyVariantContext :: MoodVariantContext
@@ -330,6 +348,11 @@ emptyVariantContext = MoodVariantContext
   , mvcTraumaType = Nothing
   , mvcWhatBroke = Nothing
   , mvcAdrenaline = Nothing
+  -- Bargain
+  , mvcBargainContext = Nothing
+  , mvcCanRetreat = Nothing
+  , mvcRetreatDesc = Nothing
+  , mvcPassOutDesc = Nothing
   }
 
 -- | Extract scene variant context
@@ -444,6 +467,15 @@ traumaVariantContext Breaking{..} = emptyVariantContext
   { mvcTraumaType = Just (T.pack $ show tvTraumaType)
   , mvcWhatBroke = Just tvWhatBroke
   , mvcAdrenaline = Just tvAdrenaline
+  }
+
+-- | Extract bargain variant context
+bargainVariantContext :: BargainVariant -> MoodVariantContext
+bargainVariantContext Bargaining{..} = emptyVariantContext
+  { mvcBargainContext = Just bvWhatDrained
+  , mvcCanRetreat = Just bvCanRetreat
+  , mvcRetreatDesc = Just bvRetreatDesc
+  , mvcPassOutDesc = Just bvPassOutDesc
   }
 
 -- | Render a scene beat as text for template display
