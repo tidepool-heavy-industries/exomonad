@@ -3,7 +3,6 @@ module DM.Tools
   ( -- * Tools
     ThinkAsDM(..)
   , SpeakAsNPC(..)
-  , AskPlayer(..)
   , Choose(..)
   , SpendDie(..)
 
@@ -15,8 +14,6 @@ module DM.Tools
     -- * Tool Inputs/Outputs
   , ThinkInput(..)
   , SpeakInput(..)
-  , AskInput(..)
-  , AskResult(..)
   , ChooseInput(..)
   , ChooseResult(..)
   , SpendDieInput(..)
@@ -36,13 +33,13 @@ module DM.Tools
 import DM.State
 import Tidepool.Tool
 import Tidepool.Effect (Emit, RequestInput, Random, State, ToolDispatcher, ToolResult(..)
-                       , emit, requestChoice, requestText, randomDouble, get, put, modify)
+                       , emit, requestChoice, randomDouble, get, put, modify)
 import Tidepool.Schema (objectSchema, arraySchema, enumSchema, emptySchema, schemaToValue, describeField, SchemaType(..))
-import Effectful (Eff, (:>))
+import Effectful ((:>))
 import Data.Proxy (Proxy(..))
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Aeson (Value, ToJSON, FromJSON, toJSON)
+import Data.Aeson (Value, ToJSON, FromJSON)
 import Data.List (delete)
 import GHC.Generics (Generic)
 
@@ -112,41 +109,6 @@ instance Tool SpeakAsNPC DMEvent WorldState where
   executeTool input = emit (NPCSpoke input.speakNpc input.utterance)
 
 -- ══════════════════════════════════════════════════════════════
--- ASK PLAYER
--- ══════════════════════════════════════════════════════════════
-
-data AskPlayer = AskPlayer
-  deriving (Show, Eq, Generic)
-
-data AskInput = AskInput
-  { question :: Text
-  , choices :: Maybe [Text]
-  }
-  deriving (Show, Eq, Generic, ToJSON, FromJSON)
-
-data AskResult = AskResult { playerResponse :: Text }
-  deriving (Show, Eq, Generic, ToJSON, FromJSON)
-
-instance Tool AskPlayer DMEvent WorldState where
-  type ToolInput AskPlayer = AskInput
-  type ToolOutput AskPlayer = AskResult
-
-  toolName = "ask_player"
-  toolDescription = "Clarify ambiguous player intent mid-narration. Use when you need specific information to continue: 'Which door - front or back?' or 'The old debt or the new one?' Always narrate first, then ask if needed."
-  inputSchema = schemaToValue $ objectSchema
-    [ ("question", describeField "question" "Specific clarifying question about player intent" (emptySchema TString))
-    , ("choices", describeField "choices" "Concrete options to disambiguate (e.g., 'front door', 'back door')" (arraySchema (emptySchema TString)))
-    ]
-    ["question"]  -- choices is optional
-
-  executeTool input = do
-    emit (PlayerAsked input.question)
-    response <- case input.choices of
-      Nothing -> requestText input.question
-      Just cs -> requestChoice input.question [(c, c) | c <- cs]
-    return (AskResult response)
-
--- ══════════════════════════════════════════════════════════════
 -- CHOOSE
 -- ══════════════════════════════════════════════════════════════
 
@@ -198,12 +160,11 @@ data SpendDie = SpendDie
   deriving (Show, Eq, Generic)
 
 -- | LLM precommits to outcomes before player chooses
+-- Each outcome is (dieValue, hint, narrative) - hint shown during choice, narrative revealed after
 data SpendDieInput = SpendDieInput
-  { situation :: Text           -- What's at stake
-  , position :: Position        -- Controlled/Risky/Desperate
-  , outcomeGood :: Text         -- Narrative for Critical/Success
-  , outcomePartial :: Text      -- Narrative for Partial
-  , outcomeBad :: Text          -- Narrative for Bad/Disaster
+  { situation :: Text                       -- What's at stake
+  , position :: Position                    -- Controlled/Risky/Desperate
+  , outcomes :: [(Int, Text, Text)]         -- [(dieValue, hint, narrative)] for each die in pool
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
@@ -219,40 +180,36 @@ instance Tool SpendDie DMEvent WorldState where
   type ToolOutput SpendDie = SpendDieResult
 
   toolName = "spend_die"
-  toolDescription = "Request player spend a die. YOU MUST precommit to all three outcomes BEFORE player chooses. Player sees only tier labels, not your prewritten narratives. Returns the narrative matching their choice."
+  toolDescription = "Request player spend a die. Precommit to [dieValue, hint, narrative] for each die in pool. Player sees hints during choice, narrative revealed after."
   inputSchema = schemaToValue $ objectSchema
     [ ("situation", describeField "situation" "Brief description of the action" (emptySchema TString))
     , ("position", describeField "position" "Risk level" (enumSchema ["Controlled", "Risky", "Desperate"]))
-    , ("outcomeGood", describeField "outcomeGood" "Narrative if Critical/Success (player won't see until chosen)" (emptySchema TString))
-    , ("outcomePartial", describeField "outcomePartial" "Narrative if Partial success (player won't see until chosen)" (emptySchema TString))
-    , ("outcomeBad", describeField "outcomeBad" "Narrative if Bad/Disaster (player won't see until chosen)" (emptySchema TString))
+    , ("outcomes", describeField "outcomes" "Array of [dieValue, hint, narrative] triples. dieValue matches pool, hint shown during choice (3-8 words), narrative revealed after (1-3 sentences)."
+        (arraySchema (arraySchema (emptySchema TString))))  -- JSON: [[2, "hint", "narrative"], ...]
     ]
-    ["situation", "position", "outcomeGood", "outcomePartial", "outcomeBad"]
+    ["situation", "position", "outcomes"]
 
   executeTool input = do
     state <- get
     let pool = state.dicePool.poolDice
 
-    -- Build choices showing each die and its tier (but NOT the narrative)
-    let choices = [(formatDieChoice d input.position, d) | d <- pool]
+    -- Build choices from outcomes: die face + hint (narrative hidden)
+    -- Only include outcomes for dice actually in pool
+    let validOutcomes = [(d, hint, narrative)
+                        | (d, hint, narrative) <- input.outcomes
+                        , d `elem` pool]
+        choices = [(formatDieChoice d hint, (d, narrative))
+                  | (d, hint, narrative) <- validOutcomes]
 
     -- Get player's choice
-    chosenDie <- requestChoice (formatPrompt input) choices
+    (chosenDie, selectedNarrative) <- requestChoice (formatPrompt input) choices
 
     -- Remove die from pool
     let newPool = delete chosenDie pool
     put state { dicePool = state.dicePool { poolDice = newPool } }
 
-    -- Calculate outcome tier
+    -- Calculate outcome tier for the result
     let outcomeTier = calculateOutcome input.position chosenDie
-
-    -- Select the precommitted narrative based on tier
-    let selectedNarrative = case outcomeTier of
-          Critical -> input.outcomeGood
-          Success  -> input.outcomeGood
-          Partial  -> input.outcomePartial
-          Bad      -> input.outcomeBad
-          Disaster -> input.outcomeBad
 
     -- Emit event with the revealed narrative
     emit (DieSpent chosenDie outcomeTier selectedNarrative)
@@ -265,18 +222,11 @@ instance Tool SpendDie DMEvent WorldState where
     where
       formatPrompt inp = inp.situation <> " (" <> T.pack (show inp.position) <> ")"
 
-      formatDieChoice :: Int -> Position -> Text
-      formatDieChoice die pos =
+      formatDieChoice :: Int -> Text -> Text
+      formatDieChoice die hint =
         let dieChar = case die of
               1 -> "⚀"; 2 -> "⚁"; 3 -> "⚂"; 4 -> "⚃"; 5 -> "⚄"; 6 -> "⚅"; _ -> "?"
-            outcomeTier = calculateOutcome pos die
-            tierText = case outcomeTier of
-              Critical -> "Critical!"
-              Success  -> "Good"
-              Partial  -> "Partial"
-              Bad      -> "Bad"
-              Disaster -> "Disaster"
-        in dieChar <> " (" <> T.pack (show die) <> ") → " <> tierText
+        in dieChar <> " (" <> T.pack (show die) <> ") → " <> hint
 
 -- ══════════════════════════════════════════════════════════════
 -- TRANSITION TOOLS (Mood State Machine)
@@ -408,10 +358,10 @@ instance Tool Accept DMEvent WorldState where
 -- ══════════════════════════════════════════════════════════════
 
 -- | All DM tools as a type-safe list (including transition tools)
--- Note: SpeakAsNPC and ThinkAsDM removed - they add noise without value
-dmToolList :: ToolList DMEvent WorldState '[AskPlayer, Choose, SpendDie, Engage, Resolve, Accept]
-dmToolList = TCons (Proxy @AskPlayer)
-           $ TCons (Proxy @Choose)
+-- Note: SpeakAsNPC, ThinkAsDM, AskPlayer removed - they add noise without value
+-- Player clarification now happens via suggestedActions in structured output
+dmToolList :: ToolList DMEvent WorldState '[Choose, SpendDie, Engage, Resolve, Accept]
+dmToolList = TCons (Proxy @Choose)
            $ TCons (Proxy @SpendDie)
            $ TCons (Proxy @Engage)
            $ TCons (Proxy @Resolve)

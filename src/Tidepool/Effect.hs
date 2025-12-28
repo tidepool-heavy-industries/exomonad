@@ -65,10 +65,13 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import Data.Aeson (Value(..), FromJSON, ToJSON, fromJSON, toJSON, Result(..), encode, decode)
+import qualified Data.Aeson.KeyMap as KM
+import qualified Data.Vector as V
 import qualified Data.Text.Encoding as TE
 import qualified Data.ByteString.Lazy as LBS
 import GHC.Generics (Generic)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef, modifyIORef)
+import Data.Maybe (mapMaybe)
 import qualified Tidepool.Anthropic.Client as Client
 import Tidepool.Anthropic.Client
   ( SingleCallRequest(..), SingleCallResponse(..)
@@ -379,7 +382,8 @@ runLLMWithTools config dispatcher = interpret $ \_ -> \case
 
       case resp.scrStopReason of
         EndTurn -> do
-          let finalOutput = extractFinalOutput content
+          -- Try final response first, then accumulated narratives
+          let finalOutput = extractFinalOutputWithFallback content allNarratives
               turnResult = TurnResult
                 { trOutput = finalOutput
                 , trToolsInvoked = invs
@@ -411,7 +415,7 @@ runLLMWithTools config dispatcher = interpret $ \_ -> \case
           error "Response hit max tokens limit"
 
         StopSequence -> do
-          let finalOutput = extractFinalOutput content
+          let finalOutput = extractFinalOutputWithFallback content allNarratives
               turnResult = TurnResult
                 { trOutput = finalOutput
                 , trToolsInvoked = invs
@@ -472,19 +476,36 @@ runLLMWithTools config dispatcher = interpret $ \_ -> \case
       String t -> t
       _ -> TE.decodeUtf8 . LBS.toStrict . encode $ v
 
-    extractFinalOutput :: [ContentBlock] -> Value
-    extractFinalOutput blocks =
-      -- First, look for a JsonBlock (from output_format structured output)
-      case [v | JsonBlock v <- blocks] of
-        (jsonVal:_) -> jsonVal
-        [] ->
-          -- Fall back to parsing the last text block as JSON
-          case [t | TextBlock t <- reverse blocks] of
+    -- Extract structured output, with fallback to accumulated narratives
+    -- This handles the case where JSON is in an earlier response (before tool use)
+    extractFinalOutputWithFallback :: [ContentBlock] -> [Text] -> Value
+    extractFinalOutputWithFallback blocks allNarrs =
+      case extractFromBlocks blocks of
+        Just v -> v
+        Nothing ->
+          -- Fallback: try to parse any accumulated narrative as JSON
+          case mapMaybe tryParseJson allNarrs of
+            (parsed:_) -> parsed
             [] -> toJSON ()
-            (lastText:_) ->
-              case decode (LBS.fromStrict $ TE.encodeUtf8 lastText) of
-                Just v -> v
-                Nothing -> String lastText
+
+    extractFromBlocks :: [ContentBlock] -> Maybe Value
+    extractFromBlocks blocks =
+      -- First, look for a non-empty JsonBlock (from output_format structured output)
+      case [v | JsonBlock v <- blocks, not (isEmptyJson v)] of
+        (jsonVal:_) -> Just jsonVal
+        [] ->
+          -- Fall back to parsing text blocks as JSON (try each one)
+          case mapMaybe tryParseJson [t | TextBlock t <- blocks] of
+            (parsed:_) -> Just parsed
+            [] -> Nothing
+      where
+        isEmptyJson (Array arr) = V.null arr
+        isEmptyJson (Object obj) = KM.null obj
+        isEmptyJson Null = True
+        isEmptyJson _ = False
+
+    tryParseJson :: Text -> Maybe Value
+    tryParseJson t = decode (LBS.fromStrict $ TE.encodeUtf8 t)
 
 -- ══════════════════════════════════════════════════════════════
 -- CHAT HISTORY EFFECT

@@ -62,39 +62,37 @@ Your voice: balanced tension. Things could go either way.
 
 <dice_state>
 {% if ctxDice.dcPool %}
-**Available dice:** {% for die in ctxDice.dcPool %}{{ die }}, {% endfor %}({{ ctxDice.dcPool|length }} dice)
+**Dice pool:** {{ ctxDice.dcPool }}
+You MUST provide an outcome for each of these exact values when calling spend_die.
 {% else %}
 **Dice pool empty.** They should take downtime to refresh.
-{% endif %}
-
-{% if ctxDice.dcLockedOutcome %}
-{% set lo = ctxDice.dcLockedOutcome %}
-<locked_outcome>
-**THE DICE HAVE SPOKEN: {{ lo.loDieValue }}**
-Position: {{ lo.loPosition }} | Effect: {{ lo.loEffect }}
-**Outcome Tier: {{ lo.loTier }}**
-
-Narrate this outcome vividly. The tier is LOCKED.
-After narrating, use `resolve` to transition to Aftermath.
-</locked_outcome>
 {% endif %}
 </dice_state>
 
 <guidance>
 ## Resolving Actions
 
-{% if ctxDice.dcLockedOutcome %}
-**STEP 2: Narrate locked outcome, then use resolve**
-The tier is fixed. Describe vividly, then transition.
-{% else %}
-**STEP 1: Frame stakes, then use spend_die**
-1. Describe what they're attempting
-2. Paint success and failure
-3. Call `spend_die` with position/effect/stakes
-{% endif %}
+**Step 1: Frame the moment** (1-2 sentences of tension)
+
+**Step 2: Call spend_die** with precommitted outcomes for each die:
+```json
+{
+  "situation": "what they're attempting",
+  "position": "Risky",
+  "outcomes": [
+    [2, "They spot you", "The guard turns at exactly the wrong moment..."],
+    [4, "Close call", "You freeze as footsteps pass inches away..."],
+    [6, "Clean", "Like a ghost, you slip through..."]
+  ]
+}
+```
+- Each outcome: `[dieValue, hint, narrative]`
+- **hint**: 3-8 words, shown to player during choice
+- **narrative**: 1-3 sentences, revealed after they pick
+
+**Step 3: Incorporate the revealed narrative** into your response, then call `resolve`
 
 **Position:** controlled (advantage) / risky (balanced) / desperate (against odds)
-**Effect:** limited (partial) / standard (solid) / great (exceptional)
 
 **Violence outcomes must be unambiguous:**
 - LETHAL: "dead", "kills", "blood pools", "life leaves their eyes", "corpse"
@@ -111,8 +109,8 @@ Never say "bodies drop" without clarifying. Player must know if they've killed.
 </guidance>
 
 <output_format>
-**Tools:** spend_die, resolve
-(See tool schemas for details)
+**Tools:** spend_die → resolve
+
 **Voice ({{ ctxPrecarity }}):**
 {% if ctxPrecarity == "HangingByThread" %}Urgent, no wasted words.
 {% else %}Match position intensity.{% endif %}
