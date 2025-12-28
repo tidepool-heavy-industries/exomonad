@@ -169,14 +169,18 @@ safeSubmitResponse bridge response = do
   TIO.hPutStrLn stderr $ "[safeSubmitResponse] tryPutMVar result: " <> pack (show success)
 
 -- | A pending input request from the game loop
+--
+-- Note: BetweenScenes is handled differently - the display context
+-- is stored in WorldState.betweenScenesDisplay, and the choice
+-- uses a regular PendingChoice with labeled options.
 data PendingRequest
   = PendingChoice Text [(Text, Int)]
     -- ^ Choice selection: prompt and (label, index) pairs
   | PendingText Text
     -- ^ Free-form text input with prompt
-  | PendingDice Text [(Int, Int)]
-    -- ^ Dice selection: prompt and (die value, index) pairs
-    -- The Position for tier calculation is stored separately in game state
+  | PendingDice Text [(Int, Int, Text)]
+    -- ^ Dice selection: prompt and (die value, index, hint) triples
+    -- Hints are LLM-generated previews of what each outcome means
   | PendingCharacterCreation
     -- ^ Character creation flow (full-screen takeover)
   deriving (Show, Eq)

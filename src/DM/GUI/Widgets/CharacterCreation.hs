@@ -4,8 +4,9 @@
 -- 1. Enter name
 -- 2. Choose pronouns
 -- 3. Choose archetype
--- 4. View tarot spread
--- 5. Wait for LLM to generate scenario
+-- 4. Enter background (freeform "who are you")
+-- 5. View tarot spread
+-- 6. Wait for LLM to generate scenario
 module DM.GUI.Widgets.CharacterCreation
   ( characterCreationWidget
   , CharacterCreationResult(..)
@@ -173,18 +174,59 @@ mkArchetypeCard container contentArea resultMVar name pronouns archetype = do
   descEl <- UI.div #. "creation-card-desc" # set text (T.unpack $ archetypeDescription archetype)
 
   on UI.click card $ const $
-    showTarotStep contentArea resultMVar name pronouns archetype
+    showBackgroundStep contentArea resultMVar name pronouns archetype
 
   on UI.keydown card $ \code ->
     when (code == 13 || code == 32) $
-      showTarotStep contentArea resultMVar name pronouns archetype
+      showBackgroundStep contentArea resultMVar name pronouns archetype
 
   void $ element card #+ [element labelEl, element descEl]
   void $ element container #+ [element card]
 
--- | Step 4: Tarot spread reveal
-showTarotStep :: Element -> MVar CharacterCreationResult -> Text -> Pronouns -> Archetype -> UI ()
-showTarotStep contentArea resultMVar name pronouns archetype = do
+-- | Step 4: Enter background
+showBackgroundStep :: Element -> MVar CharacterCreationResult -> Text -> Pronouns -> Archetype -> UI ()
+showBackgroundStep contentArea resultMVar name pronouns archetype = do
+  void $ element contentArea # set children []
+
+  stepEl <- UI.div #. "creation-step"
+
+  promptEl <- UI.div #. "creation-prompt"
+    # set text "Who are you? A few sentences about your past, your situation, what drives you."
+
+  -- Use same style as name input, no placeholder hint
+  inputEl <- UI.input #. "creation-input"
+    # set (attr "autocomplete") "off"
+
+  nextBtn <- UI.button #. "creation-btn" # set text "Continue"
+    # set (attr "disabled") "disabled"
+
+  -- Enable button when background has any content (same as name step)
+  on UI.keyup inputEl $ \_ -> do
+    val <- get value inputEl
+    if null val
+      then void $ element nextBtn # set (attr "disabled") "disabled"
+      else void $ element nextBtn # set (attr "disabled") ""
+
+  -- Handle submit
+  let submit = do
+        val <- get value inputEl
+        when (not (null val)) $ do
+          let background = T.pack val
+          showTarotStep contentArea resultMVar name pronouns archetype background
+
+  on UI.click nextBtn $ const submit
+  on UI.keydown inputEl $ \code ->
+    when (code == 13) submit  -- Enter key
+
+  void $ element stepEl #+ [element promptEl, element inputEl, element nextBtn]
+  void $ element contentArea #+ [element stepEl]
+
+  -- Focus the input
+  runFunction $ ffi "$(%1).focus()" inputEl
+
+-- | Step 5: Tarot spread reveal
+showTarotStep :: Element -> MVar CharacterCreationResult -> Text -> Pronouns -> Archetype -> Text -> UI ()
+showTarotStep contentArea resultMVar name pronouns archetype background = do
   void $ element contentArea # set children []
 
   stepEl <- UI.div #. "creation-step tarot-step"
@@ -209,7 +251,7 @@ showTarotStep contentArea resultMVar name pronouns archetype = do
     # set text "Begin Your Story"
 
   on UI.click continueBtn $ const $ do
-    let choices = CharacterChoices name pronouns archetype cards
+    let choices = CharacterChoices name pronouns archetype background cards
     liftIO $ putMVar resultMVar (CharacterCreated choices)
 
   void $ element stepEl #+ [element promptEl, element cardsEl, element continueBtn]

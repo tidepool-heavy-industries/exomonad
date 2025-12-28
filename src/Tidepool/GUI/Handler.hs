@@ -82,24 +82,24 @@ guiText bridge prompt = do
 
 -- | Handle a dice selection request via the GUI
 --
--- Shows dice cards with outcome tier colors based on Position (stored in game state).
+-- Shows dice cards with LLM-generated hints for each outcome.
 -- Returns the selected die's index.
 --
 -- Example usage:
 --
 -- @
 -- -- In your game loop
--- let dicePool = [(4, 0), (2, 1), (6, 2)]  -- (die value, index) pairs
+-- let dicePool = [(4, 0, "Guard spots you"), (2, 1, "Clean escape"), (6, 2, "Perfect timing")]
 -- selectedIdx <- guiDice bridge "Choose a die from your pool:" dicePool
 -- @
-guiDice :: GUIBridge state -> Text -> [(Int, Int)] -> IO Int
-guiDice bridge prompt diceWithIndices = do
+guiDice :: GUIBridge state -> Text -> [(Int, Int, Text)] -> IO Int
+guiDice bridge prompt diceWithHints = do
   -- Hide spinner while waiting for player input
   atomically $ writeTVar bridge.gbLLMActive False
 
-  -- Post the dice request to the GUI
+  -- Post the dice request to the GUI (includes hints for display)
   atomically $ writeTVar bridge.gbPendingRequest
-    (Just $ PendingDice prompt diceWithIndices)
+    (Just $ PendingDice prompt diceWithHints)
 
   -- Block until GUI responds
   response <- takeMVar bridge.gbRequestResponse

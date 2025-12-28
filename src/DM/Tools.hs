@@ -238,12 +238,12 @@ instance Tool SpendDie DMEvent WorldState where
   type ToolOutput SpendDie = SpendDieResult
 
   toolName = "spend_die"
-  toolDescription = "Request player spend a die. Precommit to [dieValue, hint, narrative] for each die in pool. Player sees hints during choice, narrative revealed after."
+  toolDescription = "Request player spend a die. Precommit outcomes array parallel to dice pool - outcomes[0] is for pool[0], etc. Each die gets a UNIQUE outcome even if same value. Player sees hints during choice, narrative revealed after."
   inputSchema = schemaToValue $ objectSchema
     [ ("situation", describeField "situation" "Brief description of the action" (emptySchema TString))
     , ("position", describeField "position" "Risk level" (enumSchema ["Controlled", "Risky", "Desperate"]))
-    , ("outcomes", describeField "outcomes" "Array of [dieValue, hint, narrative] triples. dieValue matches pool, hint shown during choice (3-8 words), narrative revealed after (1-3 sentences)."
-        (arraySchema (arraySchema (emptySchema TString))))  -- JSON: [[2, "hint", "narrative"], ...]
+    , ("outcomes", describeField "outcomes" "Array parallel to dice pool. Each element is [dieValue, hint, narrative]. outcomes[i] is for pool[i]. EACH die gets unique outcome even if same value! hint: 3-8 words shown during choice. narrative: 1-3 sentences revealed after."
+        (arraySchema (arraySchema (emptySchema TString))))  -- JSON: [[4, "hint1", "narr1"], [4, "hint2", "narr2"], ...]
     ]
     ["situation", "position", "outcomes"]
 
@@ -262,19 +262,24 @@ instance Tool SpendDie DMEvent WorldState where
           , narrative = "You reach for your reserves, but there's nothing left."
           }
       else do
-        -- Build dice with indices for the visual dice selector
-        let diceWithIndices = zip pool [0..]
+        -- Build dice with indices and hints for the visual dice selector
+        -- outcomes array is PARALLEL to pool - outcomes[i] is for pool[i]
+        -- Each die gets its own unique precommitted outcome
+        let diceWithHints =
+              [ (dieVal, idx, getHintAt idx input.outcomes)
+              | (dieVal, idx) <- zip pool [0..]
+              ]
 
-        -- Get player's choice via dice widget
-        selectedIdx <- requestDice (formatPrompt input) diceWithIndices
+        -- Get player's choice via dice widget (shows hints on each card)
+        selectedIdx <- requestDice (formatPrompt input) diceWithHints
 
         -- Safely get the chosen die value
         let chosenDie = if selectedIdx < length pool
                         then pool !! selectedIdx
                         else head pool  -- Fallback to first die if index invalid
 
-        -- Find the narrative for this die value from LLM's precommitted outcomes
-        let selectedNarrative = findNarrative chosenDie input.outcomes
+        -- Get the narrative for the selected position (not by die value!)
+        let selectedNarrative = getNarrativeAt selectedIdx input.outcomes
 
         -- Remove die from pool
         let newPool = delete chosenDie pool
@@ -314,12 +319,17 @@ instance Tool SpendDie DMEvent WorldState where
     where
       formatPrompt inp = inp.situation <> " (" <> T.pack (show inp.position) <> ")"
 
-      -- Find the narrative for a given die value in the outcomes
-      findNarrative :: Int -> [(Int, Text, Text)] -> Text
-      findNarrative dieVal outcomes =
-        case [(narrative) | (d, _hint, narrative) <- outcomes, d == dieVal] of
-          (n:_) -> n
-          []    -> "The outcome unfolds..."  -- Fallback if LLM didn't provide
+      -- Get hint at position idx (outcomes is parallel to pool)
+      getHintAt :: Int -> [(Int, Text, Text)] -> Text
+      getHintAt idx outcomes
+        | idx < length outcomes = let (_, hint, _) = outcomes !! idx in hint
+        | otherwise = ""  -- Fallback if out of bounds
+
+      -- Get narrative at position idx (outcomes is parallel to pool)
+      getNarrativeAt :: Int -> [(Int, Text, Text)] -> Text
+      getNarrativeAt idx outcomes
+        | idx < length outcomes = let (_, _, narrative) = outcomes !! idx in narrative
+        | otherwise = "The outcome unfolds..."  -- Fallback if out of bounds
 
       -- Check if current mood is desperate (no retreat allowed)
       isDesperateMood (MoodAction (AvDesperate _ _ _) _) = True
@@ -572,13 +582,14 @@ instance Tool Retreat DMEvent WorldState where
     ["retreatNarration"]
 
   executeTool _input = do
-    -- End scene, transition to downtime-like recovery
+    -- End scene, transition to BetweenScenes phase
+    -- Player will choose what to do (lay low, recover, work goal, new scene)
     modify @WorldState $ \s -> s
-      { scene = Nothing  -- Scene ends
-      , mood = MoodDowntime (Recovery ["rest", "tend wounds", "lay low"] "a few hours")
-      , dicePool = DicePool [4, 4, 4]  -- Refresh with 3 average dice
+      { scene = Nothing               -- Scene ends
+      , phase = PhaseBetweenScenes    -- Go to between-scenes phase
+      , dicePool = DicePool [4, 4, 4] -- Refresh with 3 average dice
       }
-    emit (MoodTransition "retreat" "bargain" "downtime")
+    emit (MoodTransition "retreat" "bargain" "between_scenes")
     return ()
 
 -- | PassOut: Involuntary collapse when no retreat possible

@@ -3,6 +3,7 @@ module DM.State
   ( -- * Core State
     WorldState(..)
   , initialWorld
+  , GamePhase(..)
 
     -- * DM Mood (State Machine)
   , DMMood(..)
@@ -55,6 +56,7 @@ module DM.State
     -- * Clocks
   , Clock(..)
   , ClockId(..)
+  , ClockType(..)
   , Trigger(..)
   , Consequence(..)
   , ActionPattern(..)
@@ -83,7 +85,13 @@ module DM.State
   , SceneSummary(..)
   , Stakes(..)
   , Tone(..)
-  
+
+    -- * BetweenScenes
+  , BetweenScenesOption(..)
+  , ClockSummary(..)
+  , BetweenScenesContext(..)
+  , optionLabel
+
     -- * Misc
   , Duration(..)
   , Tag(..)
@@ -101,7 +109,7 @@ import Text.Ginger.GVal (ToGVal(..), toGVal, dict, list)
 import Text.Ginger.GVal.Generic (genericToGVal)
 import qualified Data.Foldable as F
 
-import DM.CharacterCreation (CharacterChoices)
+import DM.CharacterCreation (CharacterChoices, ClockType(..))
 
 -- ══════════════════════════════════════════════════════════════
 -- DM MOOD (State Machine)
@@ -262,12 +270,21 @@ data ClockInterrupt = ClockInterrupt
 defaultMood :: DMMood
 defaultMood = MoodScene (Encounter "Starting scene" UrgencyLow True)
 
+-- | Explicit game phase (replaces implicit detection from nullable fields)
+data GamePhase
+  = PhaseCharacterCreation       -- Needs character setup
+  | PhasePlaying                 -- Active scene, normal gameplay
+  | PhaseBetweenScenes           -- Scene ended, choosing what's next
+  | PhaseSessionEnded            -- Player chose to end session, exit loop
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+
 -- ══════════════════════════════════════════════════════════════
 -- CORE STATE
 -- ══════════════════════════════════════════════════════════════
 
 data WorldState = WorldState
-  { mood :: DMMood                    -- Current DM mood (state machine)
+  { phase :: GamePhase                -- Explicit game phase
+  , mood :: DMMood                    -- Current DM mood (state machine)
   , player :: PlayerState
   , factions :: HashMap FactionId Faction
   , clocks :: HashMap ClockId Clock
@@ -290,6 +307,8 @@ data WorldState = WorldState
   , suggestedActions :: [Text]        -- Last LLM suggestions for quick-pick buttons
   -- Character creation (Nothing means needs setup)
   , characterChoices :: Maybe CharacterChoices
+  -- BetweenScenes display (ephemeral, not persisted)
+  , betweenScenesDisplay :: Maybe BetweenScenesContext
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
@@ -301,7 +320,8 @@ data SceneSummary = SceneSummary
 
 initialWorld :: WorldState
 initialWorld = WorldState
-  { mood = defaultMood
+  { phase = PhaseCharacterCreation
+  , mood = defaultMood
   , player = initialPlayer
   , factions = HM.empty
   , clocks = HM.empty
@@ -320,6 +340,7 @@ initialWorld = WorldState
   , pendingInterrupt = Nothing
   , suggestedActions = []
   , characterChoices = Nothing
+  , betweenScenesDisplay = Nothing
   }
 
 -- ══════════════════════════════════════════════════════════════
@@ -534,6 +555,7 @@ data Clock = Clock
   , clockSegments :: Int
   , clockFilled :: Int
   , clockVisible :: Bool
+  , clockType :: ClockType            -- Threat or Goal
   , clockConsequence :: Consequence
   , clockTriggers :: [Trigger]
   }
@@ -552,11 +574,18 @@ newtype ActionPattern = ActionPattern { unActionPattern :: Text }
   deriving newtype (ToJSON, FromJSON)
 
 data Consequence
+  -- Threat consequences (bad things happen):
   = FactionMoves FactionId FactionAction
   | RevealSecret Secret
   | SpawnThread Thread
   | ChangeLocation LocationId LocationDelta
   | Escalate Escalation
+  -- Goal consequences (good things happen):
+  | GainCoin Int
+  | GainRep FactionId Int
+  | GainAsset Text
+  | OpenOpportunity Text
+  | RemoveThreat ClockId
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
 data FactionAction
@@ -721,6 +750,7 @@ instance (ToGVal m a, ToGVal m b) => ToGVal m (Either a b) where
   toGVal (Right b) = dict [("Right", toGVal b)]
 
 -- Core State
+instance ToGVal m GamePhase where toGVal = genericToGVal
 instance ToGVal m WorldState where toGVal = genericToGVal
 instance ToGVal m SceneSummary where toGVal = genericToGVal
 
@@ -779,6 +809,54 @@ instance ToGVal m FactionAction where toGVal = genericToGVal
 instance ToGVal m Target where toGVal = genericToGVal
 instance ToGVal m LocationDelta where toGVal = genericToGVal
 instance ToGVal m Escalation where toGVal = genericToGVal
+
+-- ══════════════════════════════════════════════════════════════
+-- BETWEEN SCENES
+-- ══════════════════════════════════════════════════════════════
+
+-- | Options available during BetweenScenes phase
+data BetweenScenesOption
+  = BSLayLow
+    -- ^ Reduce heat, but threat clocks tick
+  | BSRecover
+    -- ^ Spend coin to reduce stress
+  | BSWorkGoal Text
+    -- ^ Work toward a goal clock (name)
+  | BSNewScene
+    -- ^ Start a new scene
+  | BSEndSession
+    -- ^ Save and quit
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+
+-- | Summary of a clock for BetweenScenes display
+data ClockSummary = ClockSummary
+  { csName :: Text
+  , csFilled :: Int
+  , csSegments :: Int
+  , csIsThreat :: Bool  -- True = threat, False = goal
+  }
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+
+-- | Context for the BetweenScenes UI
+data BetweenScenesContext = BetweenScenesContext
+  { bscClocks :: [ClockSummary]
+    -- ^ All visible clocks with their current state
+  , bscTransitionNarration :: Text
+    -- ^ LLM-generated bridge text (~50 words)
+  }
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+
+-- | Get display label for a BetweenScenes option
+optionLabel :: BetweenScenesOption -> Text
+optionLabel BSLayLow = "Lay Low"
+optionLabel BSRecover = "Recover"
+optionLabel (BSWorkGoal name) = "Work on: " <> name
+optionLabel BSNewScene = "Start New Scene"
+optionLabel BSEndSession = "Save & Quit"
+
+instance ToGVal m BetweenScenesOption where toGVal = genericToGVal
+instance ToGVal m ClockSummary where toGVal = genericToGVal
+instance ToGVal m BetweenScenesContext where toGVal = genericToGVal
 
 -- Locations
 instance ToGVal m LocationId where toGVal = genericToGVal

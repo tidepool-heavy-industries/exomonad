@@ -97,3 +97,14 @@ consequenceText consequence = case consequence of
     "When filled: " <> loc <> " changes"
   Escalate _ ->
     "When filled: Things escalate"
+  -- Goal consequences (positive outcomes)
+  GainCoin n ->
+    "When filled: Gain " <> T.pack (show n) <> " coin"
+  GainRep (FactionId fid) n ->
+    "When filled: Gain " <> T.pack (show n) <> " rep with " <> fid
+  GainAsset asset ->
+    "When filled: Gain " <> asset
+  OpenOpportunity opp ->
+    "When filled: " <> opp
+  RemoveThreat (ClockId cid) ->
+    "When filled: Remove threat " <> cid

@@ -39,8 +39,10 @@ import Control.Concurrent.MVar (takeMVar)
 import Control.Concurrent.STM (atomically, writeTVar, readTVar)
 import Control.Monad (when, replicateM)
 import qualified Data.Aeson as Aeson
+import qualified Data.ByteString.Lazy as LBS
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
 import qualified Data.Text.IO as TIO
 import qualified Data.HashMap.Strict as HM
 import qualified Data.Sequence as Seq
@@ -49,7 +51,7 @@ import System.Environment (lookupEnv)
 import Database.SQLite.Simple (Connection)
 import qualified Tidepool.Storage as Storage
 
-import DM.CharacterCreation (CharacterChoices(..), scenarioInitPrompt, ScenarioInit(..))
+import DM.CharacterCreation (CharacterChoices(..), scenarioInitPrompt, ScenarioInit(..), ClockInit(..))
 import qualified DM.CharacterCreation as CC
 
 import Tidepool.GUI.Core (GUIBridge(..), PendingRequest(..), RequestResponse(..),
@@ -164,6 +166,7 @@ dmTurn input = do
               -- Parse failed - log warning and use fallback
               TurnParseFailed{..} -> do
                 logWarn $ "Failed to parse LLM output: " <> T.pack tpfError
+                logWarn $ "Raw JSON: " <> TE.decodeUtf8 (LBS.toStrict $ Aeson.encode tpfRawJson)
                 logWarn $ "Tools invoked: " <> T.pack (show $ map (\ti -> ti.tiName) tpfToolsInvoked)
                 logWarn $ "Narrative was: " <> (if T.null tpfNarrative then "(empty)" else T.take 100 tpfNarrative)
 
@@ -418,6 +421,7 @@ compressIfNeeded = do
           TurnCompleted parseResult -> case parseResult of
             TurnParseFailed{..} -> do
               logWarn $ "Compression parse failed: " <> T.pack tpfError
+              logWarn $ "Raw JSON: " <> TE.decodeUtf8 (LBS.toStrict $ Aeson.encode tpfRawJson)
               -- Continue without compressing
 
             TurnParsed result -> do
@@ -818,22 +822,25 @@ terminalText prompt = do
   TIO.getLine
 
 -- | Terminal dice selection handler
-terminalDice :: Text -> [(Int, Int)] -> IO Int
-terminalDice prompt diceWithIndices = do
+-- Now includes LLM-generated hints for each outcome
+terminalDice :: Text -> [(Int, Int, Text)] -> IO Int
+terminalDice prompt diceWithHints = do
   TIO.putStrLn prompt
-  mapM_ printDie (zip [1..] diceWithIndices)
+  mapM_ printDie (zip [1..] diceWithHints)
   TIO.putStr "Enter choice (number): "
   hFlush stdout
   input <- TIO.getLine
   case reads (T.unpack input) of
-    [(n, "")] | n >= 1 && n <= length diceWithIndices ->
-      return $ snd (diceWithIndices !! (n - 1))
+    [(n, "")] | n >= 1 && n <= length diceWithHints ->
+      let (_, idx, _) = diceWithHints !! (n - 1)
+      in return idx
     _ -> do
       TIO.putStrLn "Invalid choice, try again."
-      terminalDice prompt diceWithIndices
+      terminalDice prompt diceWithHints
   where
-    printDie (n :: Int, (dieValue, _idx)) =
-      TIO.putStrLn $ "  " <> T.pack (show n) <> ". Die showing " <> T.pack (show dieValue)
+    printDie (n :: Int, (dieValue, _idx, hint)) =
+      let hintPart = if T.null hint then "" else " - " <> hint
+      in TIO.putStrLn $ "  " <> T.pack (show n) <> ". Die showing " <> T.pack (show dieValue) <> hintPart
 
 -- ══════════════════════════════════════════════════════════════
 -- GUI INTEGRATION
@@ -841,23 +848,12 @@ terminalDice prompt diceWithIndices = do
 
 -- | Wait for player input via GUI
 --
--- Posts a text request to the bridge and blocks until the user submits.
+-- Uses the RequestInput effect to get text input from the player.
 -- Returns the input as a PlayerInput record.
-waitForPlayerInput :: GUIBridge WorldState -> IO PlayerInput
-waitForPlayerInput bridge = do
-  -- Post a text request
-  atomically $ writeTVar bridge.gbPendingRequest
-    (Just $ PendingText "What do you do?")
-
-  -- Block until response
-  response <- takeMVar bridge.gbRequestResponse
-
-  -- Clear request
-  atomically $ writeTVar bridge.gbPendingRequest Nothing
-
-  case response of
-    TextResponse txt -> pure $ PlayerInput txt []
-    ChoiceResponse _ -> waitForPlayerInput bridge  -- Retry on wrong type
+waitForPlayerInput :: RequestInput :> es => Eff es PlayerInput
+waitForPlayerInput = do
+  txt <- requestText "What do you do?"
+  pure $ PlayerInput txt []
 
 -- | Run the game loop with GUI integration
 --
@@ -1166,7 +1162,15 @@ guiGameLoopWithDB conn gameId bridge = loop
       -- Sync current state to bridge (so GUI shows latest)
       liftIO $ updateState bridge (const state)
 
-      case state.scene of
+      -- Check if session was ended by player
+      case state.phase of
+        PhaseSessionEnded -> do
+          liftIO $ GUI.logInfo bridge "[Loop] Session ended by player, exiting loop"
+          return ()
+        _ -> continueLoop state
+
+    continueLoop :: WorldState -> Eff (GameEffects WorldState DMEvent) ()
+    continueLoop state = case state.scene of
         Nothing -> do
           -- No scene - check if this is a fresh game or scene just ended
           let isFreshGame = Seq.null state.sessionHistory
@@ -1236,6 +1240,7 @@ guiGameLoopWithDB conn gameId bridge = loop
 
                 TurnCompleted (TurnParseFailed{..}) ->
                   error $ "Failed to generate opening scenario: " <> tpfError
+                       <> "\nRaw JSON: " <> T.unpack (TE.decodeUtf8 (LBS.toStrict $ Aeson.encode tpfRawJson))
 
                 TurnBroken reason ->
                   error $ "LLM failed during scenario generation: " <> T.unpack reason
@@ -1247,9 +1252,13 @@ guiGameLoopWithDB conn gameId bridge = loop
               error "Cannot start game without character choices - character creation was cancelled or failed"
 
             (False, _) -> do
-              -- Scene ended (not fresh game) - create continuation scene
-              liftIO $ GUI.logInfo bridge "[Loop] Scene ended, creating continuation..."
-              createContinuationScene bridge state
+              -- Scene ended (not fresh game) - transition to BetweenScenes
+              liftIO $ GUI.logInfo bridge "[Loop] Scene ended, entering BetweenScenes..."
+              handleBetweenScenes bridge
+              -- Save state after BetweenScenes (in case of crash before next turn)
+              updatedState <- get @WorldState
+              liftIO $ updateState bridge (const updatedState)
+              liftIO $ Storage.saveGameState conn gameId updatedState
               loop
 
         Just _ -> do
@@ -1290,22 +1299,255 @@ guiGameLoopWithDB conn gameId bridge = loop
               -- Continue loop
               loop
 
-    -- Helper to create a continuation scene when previous scene ends
-    createContinuationScene :: GUIBridge WorldState -> WorldState -> Eff (GameEffects WorldState DMEvent) ()
-    createContinuationScene br _st = do
-      let contScene = ActiveScene
-            { sceneLocation = LocationId "doskvol"
-            , scenePresent = []
-            , sceneStakes = Stakes "What happens next?"
-            , sceneBeats = Seq.empty
-            }
-      modify $ \s -> s { scene = Just contScene }
-      liftIO $ addNarrative br "---"
-      liftIO $ addNarrative br "The scene fades. What do you do next?"
+-- ══════════════════════════════════════════════════════════════
+-- BETWEENSCENES PHASE
+-- ══════════════════════════════════════════════════════════════
+
+-- | Handle the BetweenScenes phase
+--
+-- This is the pause between scenes where:
+-- 1. Threat clocks tick (time passes)
+-- 2. Player sees clock status
+-- 3. Player chooses what to do next (lay low, recover, work goal, new scene, quit)
+--
+-- Uses the RequestChoice effect for typed choice handling - no manual index handling.
+handleBetweenScenes
+  :: GUIBridge WorldState
+  -> Eff (GameEffects WorldState DMEvent) ()
+handleBetweenScenes bridge = do
+  logInfo "[BetweenScenes] Entering between-scenes phase..."
+
+  -- 1. Tick all threat clocks (time passes between scenes)
+  tickThreatClocks
+
+  -- 2. Check for completed clocks and trigger consequences
+  checkClockConsequences
+
+  state <- get @WorldState
+
+  -- 3. Generate transition narration via LLM (~50 words)
+  liftIO $ setLLMActive bridge True
+  transitionText <- generateTransitionNarration state
+  liftIO $ setLLMActive bridge False
+
+  -- 4. Build clock summaries for display
+  let clockSummaries = buildClockSummaries state.clocks
+
+  -- 5. Build available options based on current state
+  let options = buildAvailableOptions state
+
+  -- 6. Set display context in state (GUI will read this for rendering)
+  let ctx = BetweenScenesContext
+        { bscClocks = clockSummaries
+        , bscTransitionNarration = transitionText
+        }
+  modify @WorldState $ \s -> s { betweenScenesDisplay = Just ctx }
+
+  -- Sync state so GUI sees the context
+  currentState <- get @WorldState
+  liftIO $ updateState bridge (const currentState)
+
+  logInfo $ "[BetweenScenes] Requesting choice with " <> T.pack (show $ length options) <> " options"
+
+  -- 7. Use typed effect for choice - index handling is in Tidepool
+  let labeledOptions = [(optionLabel opt, opt) | opt <- options]
+  chosenOption <- requestChoice "What do you do?" labeledOptions
+
+  -- 8. Clear display context after choice
+  modify @WorldState $ \s -> s { betweenScenesDisplay = Nothing }
+
+  logInfo $ "[BetweenScenes] Player chose: " <> T.pack (show chosenOption)
+
+  -- 9. Apply the chosen option
+  applyBetweenScenesChoice bridge chosenOption
+
+-- | Tick all threat clocks by 1 (time passes)
+tickThreatClocks
+  :: State WorldState :> es
+  => Eff es ()
+tickThreatClocks = modify @WorldState $ \s ->
+  s { clocks = HM.map tickIfThreat s.clocks }
+  where
+    tickIfThreat clock = case clock.clockType of
+      ThreatClock -> clock { clockFilled = min clock.clockSegments (clock.clockFilled + 1) }
+      GoalClock -> clock  -- Goal clocks don't tick automatically
+
+-- | Generate brief transition narration via LLM
+generateTransitionNarration
+  :: ( LLM :> es
+     , Log :> es
+     )
+  => WorldState
+  -> Eff es Text
+generateTransitionNarration state = do
+  let prompt = T.unlines
+        [ "You are a noir narrator for a Blades in the Dark game."
+        , "The current scene has ended. Generate 1-2 sentences (~50 words) of transition narration."
+        , "Evoke passage of time, mood of the city, character's state of mind."
+        , "Tight. Atmospheric. No dialogue."
+        , ""
+        , "Character status:"
+        , "- Stress: " <> T.pack (show state.player.stress) <> "/9"
+        , "- Heat: " <> T.pack (show state.player.heat) <> "/10"
+        , "- Coin: " <> T.pack (show state.player.coin)
+        ]
+
+  -- Simple text generation (no structured output, no tools)
+  let schema = Object $ KM.fromList
+        [ ("type", String "object")
+        , ("additionalProperties", Bool False)
+        , ("properties", Object $ KM.fromList
+            [ ("text", Object $ KM.fromList
+                [ ("type", String "string")
+                , ("description", String "1-2 sentences of transition narration (~50 words)")
+                ])
+            ])
+        , ("required", Array $ V.fromList [String "text"])
+        ]
+
+  result <- runTurn @TransitionOutput prompt "Generate transition." schema []
+
+  case result of
+    TurnCompleted (TurnParsed tr) -> pure tr.trOutput.toText
+    TurnCompleted (TurnParseFailed{..}) -> do
+      logWarn $ "Transition parse failed: " <> T.pack tpfError
+      logWarn $ "Raw JSON: " <> TE.decodeUtf8 (LBS.toStrict $ Aeson.encode tpfRawJson)
+      pure "Time passes in the eternal dark of Doskvol..."
+    TurnBroken reason -> do
+      logWarn $ "Transition generation failed: " <> reason
+      pure "The city waits..."
+
+-- | Simple wrapper for transition output
+data TransitionOutput = TransitionOutput { toText :: Text }
+  deriving (Show, Eq)
+
+instance Aeson.FromJSON TransitionOutput where
+  parseJSON = Aeson.withObject "TransitionOutput" $ \o ->
+    TransitionOutput <$> o Aeson..: "text"
+
+-- | Build clock summaries for BetweenScenes display
+buildClockSummaries :: HM.HashMap ClockId Clock -> [ClockSummary]
+buildClockSummaries clocks =
+  [ ClockSummary
+      { csName = clock.clockName
+      , csFilled = clock.clockFilled
+      , csSegments = clock.clockSegments
+      , csIsThreat = clock.clockType == ThreatClock
+      }
+  | clock <- HM.elems clocks
+  , clock.clockVisible
+  ]
+
+-- | Build available options based on current state
+buildAvailableOptions :: WorldState -> [BetweenScenesOption]
+buildAvailableOptions state = concat
+  [ [ BSLayLow | state.player.heat > 0 ]
+  , [ BSRecover | state.player.coin > 0 && state.player.stress > 0 ]
+  , [ BSWorkGoal name
+    | clock <- HM.elems state.clocks
+    , clock.clockType == GoalClock
+    , clock.clockVisible
+    , let name = clock.clockName
+    ]
+  , [ BSNewScene ]
+  , [ BSEndSession ]
+  ]
+
+-- | Apply the player's choice from BetweenScenes
+applyBetweenScenesChoice
+  :: GUIBridge WorldState
+  -> BetweenScenesOption
+  -> Eff (GameEffects WorldState DMEvent) ()
+applyBetweenScenesChoice bridge choice = case choice of
+
+  BSLayLow -> do
+    -- Reduce heat by 1, but threat clocks already ticked
+    liftIO $ GUI.logInfo bridge "[BetweenScenes] Laying low - reducing heat"
+    modify @WorldState $ \s -> s
+      { player = s.player { heat = max 0 (s.player.heat - 1) }
+      }
+    liftIO $ addNarrative bridge "You lay low. The heat fades, but time passes..."
+    -- Create new scene
+    createNewScene bridge
+
+  BSRecover -> do
+    -- Spend 1 coin to reduce 1 stress (simple for now)
+    liftIO $ GUI.logInfo bridge "[BetweenScenes] Recovering - spending coin for stress"
+    modify @WorldState $ \s -> s
+      { player = s.player
+          { coin = max 0 (s.player.coin - 1)
+          , stress = max 0 (s.player.stress - 1)
+          }
+      }
+    liftIO $ addNarrative bridge "You spend coin on small comforts. The stress eases..."
+    createNewScene bridge
+
+  BSWorkGoal goalName -> do
+    -- Tick the goal clock (player is working toward it)
+    liftIO $ GUI.logInfo bridge $ "[BetweenScenes] Working goal: " <> goalName
+    modify @WorldState $ \s -> s
+      { clocks = HM.map (tickGoal goalName) s.clocks
+      }
+    -- Check if goal clock completed
+    checkClockConsequences
+    liftIO $ addNarrative bridge $ "You work toward your goal: " <> goalName <> "..."
+    createNewScene bridge
+    where
+      tickGoal name clock
+        | clock.clockName == name && clock.clockType == GoalClock =
+            clock { clockFilled = min clock.clockSegments (clock.clockFilled + 1) }
+        | otherwise = clock
+
+  BSNewScene -> do
+    liftIO $ GUI.logInfo bridge "[BetweenScenes] Starting new scene directly"
+    createNewScene bridge
+
+  BSEndSession -> do
+    liftIO $ GUI.logInfo bridge "[BetweenScenes] Player chose to end session"
+    liftIO $ addNarrative bridge "You fade into the city's eternal night. Until next time..."
+    -- Set phase to SessionEnded - the loop will check for this and exit
+    modify @WorldState $ \s -> s { phase = PhaseSessionEnded }
+
+-- | Create a new scene after BetweenScenes
+createNewScene
+  :: GUIBridge WorldState
+  -> Eff (GameEffects WorldState DMEvent) ()
+createNewScene bridge = do
+  liftIO $ GUI.logInfo bridge "[BetweenScenes] Creating continuation scene..."
+
+  -- Set phase back to Playing and create a basic scene
+  -- The LLM will flesh out the scene on the next turn
+  let contScene = ActiveScene
+        { sceneLocation = LocationId "doskvol"
+        , scenePresent = []
+        , sceneStakes = Stakes "What happens next?"
+        , sceneBeats = Seq.empty
+        }
+
+  modify @WorldState $ \s -> s
+    { phase = PhasePlaying
+    , scene = Just contScene
+    , mood = MoodScene (Encounter "continuing" UrgencyLow True)  -- Reset mood for new scene
+    }
+
+  liftIO $ addNarrative bridge "---"
+  liftIO $ addNarrative bridge "The city awaits your next move."
 
 -- | Roll starting dice pool (5 dice, values 1-6)
 rollStartingDice :: Random :> es => Eff es [Int]
 rollStartingDice = replicateM 5 (randomInt 1 6)
+
+-- | Convert ClockInit from scenario generation to a Clock
+initToClock :: ClockInit -> Clock
+initToClock ci = Clock
+  { clockName = ci.ciName
+  , clockSegments = ci.ciSegments
+  , clockFilled = ci.ciFilled
+  , clockVisible = True  -- All clocks visible per design
+  , clockType = ci.ciType
+  , clockConsequence = OpenOpportunity ci.ciConsequenceDesc  -- Use description as placeholder
+  , clockTriggers = []
+  }
 
 -- | JSON schema for scenario initialization response
 scenarioInitSchemaJSON :: Value

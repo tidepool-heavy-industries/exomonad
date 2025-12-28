@@ -642,9 +642,10 @@ data RequestInput :: Effect where
 
   -- | Request dice selection from player
   -- Returns the index of the selected die
+  -- Each die carries an LLM-generated hint about what that outcome means
   RequestDice
     :: Text              -- Prompt to display
-    -> [(Int, Int)]      -- (die value, index) pairs
+    -> [(Int, Int, Text)] -- (die value, index, hint) triples
     -> RequestInput m Int
 
 type instance DispatchOf RequestInput = 'Dynamic
@@ -658,23 +659,23 @@ requestText :: RequestInput :> es => Text -> Eff es Text
 requestText = send . RequestText
 
 -- | Request dice selection from player
--- Takes a prompt and (die value, index) pairs, returns the selected index
-requestDice :: RequestInput :> es => Text -> [(Int, Int)] -> Eff es Int
-requestDice prompt diceWithIndices = send (RequestDice prompt diceWithIndices)
+-- Takes a prompt and (die value, index, hint) triples, returns the selected index
+requestDice :: RequestInput :> es => Text -> [(Int, Int, Text)] -> Eff es Int
+requestDice prompt diceWithHints = send (RequestDice prompt diceWithHints)
 
 -- | Handler for input requests (terminal, UI, etc.)
 data InputHandler = InputHandler
   { ihChoice :: forall a. Text -> [(Text, a)] -> IO a
   , ihText   :: Text -> IO Text
-  , ihDice   :: Text -> [(Int, Int)] -> IO Int
-    -- ^ Dice selection: prompt, (die value, index) pairs -> selected index
+  , ihDice   :: Text -> [(Int, Int, Text)] -> IO Int
+    -- ^ Dice selection: prompt, (die value, index, hint) triples -> selected index
   }
 
 runRequestInput :: IOE :> es => InputHandler -> Eff (RequestInput : es) a -> Eff es a
 runRequestInput (InputHandler choice txtInput dice) = interpret $ \_ -> \case
   RequestChoice prompt choices -> liftIO $ choice prompt choices
   RequestText prompt           -> liftIO $ txtInput prompt
-  RequestDice prompt diceWithIndices -> liftIO $ dice prompt diceWithIndices
+  RequestDice prompt diceWithHints -> liftIO $ dice prompt diceWithHints
 
 -- ══════════════════════════════════════════════════════════════
 -- LOG EFFECT

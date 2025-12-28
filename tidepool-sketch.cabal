@@ -38,6 +38,7 @@ library
         DM.GUI.Widgets.Stats
         DM.GUI.Widgets.Mood
         DM.GUI.Widgets.Clocks
+        DM.GUI.Widgets.BetweenScenes
         DM.GUI.Widgets.History
         DM.GUI.Widgets.Dice
         DM.GUI.Widgets.Narrative

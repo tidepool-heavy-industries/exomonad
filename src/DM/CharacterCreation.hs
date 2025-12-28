@@ -16,6 +16,9 @@ module DM.CharacterCreation
     -- * Scenario generation
   , scenarioInitPrompt
   , ScenarioInit(..)
+  , ClockInit(..)
+  , TarotPosition(..)
+  , ClockType(..)
   , parseScenarioInit
   ) where
 
@@ -82,21 +85,43 @@ data CharacterChoices = CharacterChoices
   { ccName :: Text
   , ccPronouns :: Pronouns
   , ccArchetype :: Archetype
+  , ccBackground :: Text          -- Freeform "who are you"
   , ccTarotSpread :: [TarotCard]
+  }
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+
+-- | Which card position seeded a clock
+data TarotPosition = TarotPast | TarotPresent | TarotFuture
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+
+-- | Clock type: threat (bad things) or goal (good things)
+data ClockType = ThreatClock | GoalClock
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+
+-- | Clock initialization from scenario generation
+data ClockInit = ClockInit
+  { ciName :: Text              -- Clock name
+  , ciSegments :: Int           -- Total segments (4, 6, or 8)
+  , ciFilled :: Int             -- Starting filled segments
+  , ciFromCard :: TarotPosition -- Which card seeded this
+  , ciType :: ClockType         -- Threat or goal
+  , ciConsequenceDesc :: Text   -- What happens when filled
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
 -- | LLM response for scenario initialization
 data ScenarioInit = ScenarioInit
-  { siNarration :: Text         -- Opening narration
-  , siStartingStress :: Int     -- 0-4 typically
-  , siStartingCoin :: Int       -- 0-4 typically
-  , siStartingHeat :: Int       -- 0-2 typically
-  , siStartingWanted :: Int     -- 0-1 typically
+  { siFateNarration :: Text       -- Fate's interpretation of the spread
+  , siStartingClocks :: [ClockInit]  -- Clocks seeded from tarot
+  , siSceneNarration :: Text      -- Opening scene narration
+  , siStartingStress :: Int       -- 0-4 typically
+  , siStartingCoin :: Int         -- 0-4 typically
+  , siStartingHeat :: Int         -- 0-2 typically
+  , siStartingWanted :: Int       -- 0-1 typically
   , siStartingTrauma :: Maybe Text  -- Optional starting trauma
-  , siSceneLocation :: Text     -- Where we start
-  , siSceneStakes :: Text       -- What's at stake
-  , siOpeningHook :: Text       -- The immediate situation
+  , siSceneLocation :: Text       -- Where we start
+  , siSceneStakes :: Text         -- What's at stake
+  , siOpeningHook :: Text         -- The immediate situation
   , siSuggestedActions :: [Text]  -- Suggested player actions
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
@@ -111,8 +136,9 @@ parseScenarioInit v = case fromJSON v of
 scenarioInitPrompt :: CharacterChoices -> Text
 scenarioInitPrompt choices = T.unlines
   [ "<identity>"
-  , "You are the Dungeon Master initializing a new Blades in the Dark game."
-  , "Your job is to create a compelling opening scene based on the player's choices and the tarot spread drawn."
+  , "You generate the opening of a Blades in the Dark style game."
+  , "First speak as FATE - a noir oracle at a card table, smoke curling."
+  , "Then drop into Doskvol as the DM with tight noir prose."
   , "</identity>"
   , ""
   , "<world>"
@@ -121,32 +147,42 @@ scenarioInitPrompt choices = T.unlines
   , "The streets belong to criminals, nobles play deadly games, and the Spirit Wardens collect the dead."
   , "</world>"
   , ""
-  , "<player_character>"
+  , "<character>"
   , "Name: " <> choices.ccName
   , "Pronouns: " <> pronounsText choices.ccPronouns
   , "Archetype: " <> archetypeName choices.ccArchetype <> " - " <> archetypeDescription choices.ccArchetype
-  , "</player_character>"
+  , "Background: " <> choices.ccBackground
+  , "</character>"
   , ""
-  , "<fate>"
+  , "<spread>"
   , spreadDescription choices.ccTarotSpread
-  , "</fate>"
+  , "</spread>"
   , ""
   , "<instructions>"
-  , "Create an opening scenario that:"
-  , "1. Honors the tarot spread's themes (past shapes backstory, present drives the opening scene, future hints at what's coming)"
-  , "2. Fits the character's archetype and establishes them in a situation that uses their skills"
-  , "3. Starts in media res - something is happening RIGHT NOW that demands attention"
-  , "4. Sets appropriate starting stats based on the character's implied history"
+  , "FATE NARRATION (siFateNarration):"
+  , "- Interpret each card in 1-2 sentences, tight and knowing"
+  , "- Name the clock each card seeds (include in siStartingClocks)"
+  , "- Past + Present cards = threat clocks (start 1-2 filled)"
+  , "- Future card = goal clock (starts 0 filled)"
+  , "- Voice: noir oracle, a little cruel, smoke and knowing"
   , ""
-  , "Starting stat guidelines:"
-  , "- Stress (0-4): Higher if troubled past, lower if things are going well"
+  , "CLOCKS (siStartingClocks):"
+  , "- 3 clocks total: 2 threats (from past/present), 1 goal (from future)"
+  , "- Each clock: 4-6 segments, threat clocks start 1-2 filled"
+  , "- ciConsequenceDesc: what happens when clock fills"
+  , ""
+  , "SCENE NARRATION (siSceneNarration):"
+  , "- Drop into Doskvol. Tight noir prose."
+  , "- Establish character in a specific moment - grounding, not action"
+  , "- ~100-150 words max"
+  , "- Ground the player, then invite action"
+  , ""
+  , "STARTING STATS:"
+  , "- Stress (0-4): Higher if troubled past"
   , "- Coin (0-4): Based on recent jobs/situation"
-  , "- Heat (0-2): Higher if past card suggests trouble with law/gangs"
+  , "- Heat (0-2): Higher if past suggests trouble"
   , "- Wanted (0-1): Only 1 if seriously hunted"
   , "- Trauma: Only if past card strongly suggests psychological damage"
-  , ""
-  , "The opening narration should be 2-3 paragraphs, evocative and immediate."
-  , "End with a moment that demands player response."
   , "</instructions>"
   ]
 
@@ -157,3 +193,7 @@ scenarioInitPrompt choices = T.unlines
 instance ToGVal m Pronouns where toGVal = genericToGVal
 instance ToGVal m Archetype where toGVal = genericToGVal
 instance ToGVal m CharacterChoices where toGVal = genericToGVal
+instance ToGVal m TarotPosition where toGVal = genericToGVal
+instance ToGVal m ClockType where toGVal = genericToGVal
+instance ToGVal m ClockInit where toGVal = genericToGVal
+instance ToGVal m ScenarioInit where toGVal = genericToGVal

@@ -42,7 +42,7 @@ import Graphics.UI.Threepenny.Core
 import qualified Graphics.UI.Threepenny as UI
 
 import Control.Concurrent (forkIO)
-import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, takeMVar)
+import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
 import Data.Aeson (toJSON)
 
 import DM.State (WorldState(..), PlayerState(..), Position(..), PendingOutcome(..))
@@ -54,6 +54,7 @@ import DM.GUI.Widgets.History (historyTab, updateHistoryTab)
 import DM.GUI.Widgets.Narrative (dmNarrativePane, updateDMNarrative)
 import DM.GUI.Widgets.Clocks (clocksPanel, updateClocksPanel)
 import DM.GUI.Widgets.Dice (diceChoice)
+import DM.GUI.Widgets.BetweenScenes (betweenScenesContextWidget)
 import DM.GUI.Widgets.CharacterCreation (characterCreationWidget, CharacterCreationResult(..))
 import Tidepool.GUI.Core
 import Tidepool.GUI.Theme (applyTheme)
@@ -414,6 +415,9 @@ updateInputArea bridge elements pending = do
         Nothing -> void $ element inputArea #+ [element inputWidget]
 
     Just (PendingChoice prompt options) -> do
+      -- Get current state to check for BetweenScenes context
+      state <- liftIO $ atomically $ readTVar bridge.gbState
+
       -- Clear and show choice cards
       void $ element inputArea # set children []
       -- Reset any full-screen styles
@@ -424,10 +428,18 @@ updateInputArea bridge elements pending = do
         , ("z-index", "auto")
         ]
       void $ element elements.geNarrativePane # set style [("display", "block")]
-      choicesWidget <- choiceCards bridge prompt options
-      void $ element inputArea #+ [element choicesWidget]
 
-    Just (PendingDice prompt diceWithIndices) -> do
+      -- If BetweenScenes context is set, render it above the choice cards
+      case state.betweenScenesDisplay of
+        Just ctx -> do
+          bsContext <- betweenScenesContextWidget ctx
+          choicesWidget <- choiceCards bridge prompt options
+          void $ element inputArea #+ [element bsContext, element choicesWidget]
+        Nothing -> do
+          choicesWidget <- choiceCards bridge prompt options
+          void $ element inputArea #+ [element choicesWidget]
+
+    Just (PendingDice prompt diceWithHints) -> do
       -- Get current position from state for tier calculation
       state <- liftIO $ atomically $ readTVar bridge.gbState
       let pos = getCurrentPosition state
@@ -442,7 +454,8 @@ updateInputArea bridge elements pending = do
         , ("z-index", "auto")
         ]
       void $ element elements.geNarrativePane # set style [("display", "block")]
-      diceWidget <- diceChoice bridge prompt pos diceWithIndices
+      -- Pass hints through to dice widget - each card shows its LLM-generated outcome hint
+      diceWidget <- diceChoice bridge prompt pos diceWithHints
       void $ element inputArea #+ [element diceWidget]
 
     Just PendingCharacterCreation -> do
@@ -475,6 +488,7 @@ updateInputArea bridge elements pending = do
           CharacterCreationCancelled ->
             -- Put null to signal cancellation
             putMVar bridge.gbCharacterCreationResult (toJSON (Nothing :: Maybe CharacterChoices))
+
 
 -- | Create a suggestion button that submits text when clicked
 mkSuggestionButton :: GUIBridge WorldState -> T.Text -> UI Element
