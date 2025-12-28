@@ -52,11 +52,10 @@ demoPlayer = PlayerState
 
 -- | Demo mood - a scene with a job offer
 demoMood :: DMMood
-demoMood = MoodScene $ JobOffer
-  { svContact = NpcId "bazso_baz"
-  , svObjectiveType = "theft"
-  , svEmployerFaction = Just (FactionId "lampblacks")
-  , svUrgency = 2
+demoMood = MoodScene $ Opportunity
+  { svOfferedBy = Just (NpcId "bazso_baz")
+  , svNature = "theft job"
+  , svCatch = "The Red Sashes will know it was you"
   }
 
 -- | Demo clocks
@@ -67,7 +66,10 @@ demoClocks = HM.fromList
       , clockSegments = 6
       , clockFilled = 2
       , clockVisible = True
-      , clockConsequence = Escalate (Escalation "Investigation" "The Bluecoats close in")
+      , clockConsequence = Escalate (Escalation
+          { escalationDescription = "The Bluecoats close in"
+          , escalationSeverity = Moderate
+          })
       , clockTriggers = []
       })
   , (ClockId "red_sash_revenge", Clock

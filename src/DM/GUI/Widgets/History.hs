@@ -3,11 +3,13 @@
 -- Displays the full scene beat log and session history.
 module DM.GUI.Widgets.History
   ( historyTab
+  , updateHistoryTab
   , sceneBeatEntry
   , sceneSummaryEntry
   ) where
 
 import Control.Concurrent.STM (atomically, readTVar)
+import Control.Monad (void)
 import Data.Foldable (toList)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -21,9 +23,17 @@ import Tidepool.GUI.Core (GUIBridge(..))
 historyTab :: GUIBridge WorldState -> UI Element
 historyTab bridge = do
   container <- UI.div #. "history-tab"
+  updateHistoryTab container bridge
+  pure container
+
+-- | Update the history tab with current state
+updateHistoryTab :: Element -> GUIBridge WorldState -> UI ()
+updateHistoryTab container bridge = do
+  -- Clear existing content
+  void $ element container # set children []
 
   -- Get current state
-  state <- liftIO $ atomically $ readTVar (gbState bridge)
+  state <- liftIO $ atomically $ readTVar bridge.gbState
 
   -- Current scene beats (if any)
   currentSceneSection <- case state.scene of
@@ -46,39 +56,35 @@ historyTab bridge = do
   void $ element historySection #+ (element historyTitle : map element summaries)
 
   void $ element container #+ [element currentSceneSection, element historySection]
-  pure container
 
 -- | Create an entry for a scene beat
 sceneBeatEntry :: SceneBeat -> UI Element
-sceneBeatEntry beat = do
-  entry <- UI.div #. "narrative-entry"
+sceneBeatEntry beat = case beat of
+  PlayerAction txt _ ->
+    UI.div #. "narrative-entry player-action"
+      # set text ("> " <> T.unpack txt)
 
-  case beat of
-    PlayerAction txt _ -> do
-      void $ element entry #. "narrative-entry player-action"
-        # set text ("> " <> T.unpack txt)
+  NpcAction (NpcId npcName) txt -> do
+    entry <- UI.div #. "narrative-entry"
+    nameEl <- UI.span #. "npc-name" # set text (T.unpack npcName)
+    speechEl <- UI.span # set text (T.unpack txt)
+    void $ element entry #+ [element nameEl, UI.string ": ", element speechEl]
+    pure entry
 
-    NpcAction (NpcId npcName) txt -> do
-      nameEl <- UI.span #. "npc-name" # set text (T.unpack npcName)
-      speechEl <- UI.span # set text (T.unpack txt)
-      void $ element entry #+ [element nameEl, UI.string ": ", element speechEl]
+  DMNarration txt ->
+    UI.div #. "narrative-entry" # set text (T.unpack txt)
 
-    DMNarration txt ->
-      void $ element entry # set text (T.unpack txt)
+  EnvironmentShift txt ->
+    UI.div #. "narrative-entry environment-shift"
+      # set text (T.unpack txt)
 
-    EnvironmentShift txt -> do
-      void $ element entry # set style [("font-style", "italic")]
-        # set text (T.unpack txt)
+  Revelation _ ->
+    UI.div #. "narrative-entry revelation"
+      # set text "[A secret is revealed]"
 
-    Revelation _ -> do
-      void $ element entry # set style [("color", "var(--accent)")]
-        # set text "[A secret is revealed]"
-
-    ClockTick (ClockId clockName) ticks -> do
-      void $ element entry # set style [("color", "var(--warning)")]
-        # set text ("[Clock: " <> T.unpack clockName <> " +" <> show ticks <> "]")
-
-  pure entry
+  ClockTick (ClockId clockName) ticks ->
+    UI.div #. "narrative-entry clock-tick"
+      # set text ("[Clock: " <> T.unpack clockName <> " +" <> show ticks <> "]")
 
 -- | Create an entry for a scene summary
 sceneSummaryEntry :: SceneSummary -> UI Element
@@ -98,9 +104,15 @@ sceneSummaryEntry summary = do
 -- | Get summary text for a beat (shorter than full display)
 beatSummaryText :: SceneBeat -> String
 beatSummaryText beat = case beat of
-  PlayerAction txt _ -> T.unpack $ T.take 50 txt <> "..."
-  NpcAction (NpcId npc) txt -> T.unpack $ npc <> ": " <> T.take 30 txt <> "..."
-  DMNarration txt -> T.unpack $ T.take 50 txt <> "..."
-  EnvironmentShift txt -> T.unpack $ "Environment: " <> T.take 30 txt
+  PlayerAction txt _ -> T.unpack $ truncateWithEllipsis 50 txt
+  NpcAction (NpcId npc) txt -> T.unpack $ npc <> ": " <> truncateWithEllipsis 30 txt
+  DMNarration txt -> T.unpack $ truncateWithEllipsis 50 txt
+  EnvironmentShift txt -> T.unpack $ "Environment: " <> truncateWithEllipsis 30 txt
   Revelation _ -> "Secret revealed"
   ClockTick (ClockId name) n -> T.unpack $ name <> " +" <> T.pack (show n)
+
+-- | Truncate text and add ellipsis only if truncated
+truncateWithEllipsis :: Int -> Text -> Text
+truncateWithEllipsis maxLen txt
+  | T.length txt <= maxLen = txt
+  | otherwise = T.take maxLen txt <> "..."

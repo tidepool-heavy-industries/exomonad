@@ -11,6 +11,7 @@ module DM.GUI.Widgets.Stats
   ) where
 
 import Control.Concurrent.STM (atomically, readTVar)
+import Control.Monad (void)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Graphics.UI.Threepenny.Core
@@ -28,7 +29,7 @@ statsPanel bridge = do
   title <- UI.h2 #. "sidebar-title" # set text "SCOUNDREL"
 
   -- Get current state
-  state <- liftIO $ atomically $ readTVar (gbState bridge)
+  state <- liftIO $ atomically $ readTVar bridge.gbState
   let player = state.player
 
   -- Stress bar (0-9)

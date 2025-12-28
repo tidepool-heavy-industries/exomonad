@@ -37,6 +37,7 @@ library
         DM.GUI.Widgets.Clocks
         DM.GUI.Widgets.History
         DM.GUI.Widgets.Dice
+        DM.GUI.Widgets.Narrative
     build-depends:
         base >= 4.17 && < 5,
         effectful-core >= 2.3 && < 3,
@@ -119,6 +120,8 @@ executable tidepool-dm-gui
         base >= 4.17 && < 5,
         text >= 2.0 && < 3,
         stm >= 2.5 && < 3,
+        containers >= 0.6 && < 1,
+        unordered-containers >= 0.2 && < 1,
         threepenny-gui >= 0.9 && < 1,
         tidepool-sketch
     hs-source-dirs:   app

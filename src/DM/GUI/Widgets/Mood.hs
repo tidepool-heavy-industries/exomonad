@@ -3,11 +3,13 @@
 -- Displays the current DM mood state machine state with description.
 module DM.GUI.Widgets.Mood
   ( moodHeader
+  , moodDisplay
   , moodLabel
   , moodDescription
   ) where
 
 import Control.Concurrent.STM (atomically, readTVar)
+import Control.Monad (void)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Graphics.UI.Threepenny.Core
@@ -22,7 +24,7 @@ moodHeader bridge = do
   header <- UI.div #. "mood-header"
 
   -- Get current state
-  state <- liftIO $ atomically $ readTVar (gbState bridge)
+  state <- liftIO $ atomically $ readTVar bridge.gbState
   let mood = state.mood
       (label, desc) = moodDisplay mood
 
@@ -37,6 +39,7 @@ moodLabel :: DMMood -> Text
 moodLabel (MoodScene _) = "SCENE"
 moodLabel (MoodAction _ _) = "ACTION"
 moodLabel (MoodAftermath _) = "AFTERMATH"
+moodLabel (MoodDowntime _) = "DOWNTIME"
 moodLabel (MoodTrauma _) = "TRAUMA"
 
 -- | Get the description for a mood
@@ -45,6 +48,7 @@ moodDescription mood = case mood of
   MoodScene sv -> sceneDescription sv
   MoodAction av _ -> actionDescription av
   MoodAftermath av -> aftermathDescription av
+  MoodDowntime dv -> downtimeDescription dv
   MoodTrauma tv -> traumaDescription tv
 
 -- | Get label and description for a mood
@@ -54,12 +58,9 @@ moodDisplay mood = (moodLabel mood, moodDescription mood)
 -- | Scene variant descriptions
 sceneDescription :: SceneVariant -> Text
 sceneDescription sv = case sv of
-  JobOffer{} -> "A job offer is on the table"
-  Complication{} -> "A complication has arisen"
-  NpcEncounter{} -> "An unexpected encounter"
-  ClockTriggered{} -> "A clock has triggered"
-  FreePlay{} -> "Free exploration"
-  SceneDowntime{} -> "Downtime between scores"
+  Encounter{} -> "Someone demands attention"
+  Opportunity{} -> "An opportunity presents itself"
+  Discovery{} -> "A discovery has been made"
 
 -- | Action variant descriptions
 actionDescription :: ActionVariant -> Text
@@ -75,6 +76,13 @@ aftermathDescription av = case av of
   AmCostly{} -> "Success, but at a cost"
   AmSetback{} -> "Things went wrong"
   AmDisaster{} -> "Disaster strikes"
+
+-- | Downtime variant descriptions
+downtimeDescription :: DowntimeVariant -> Text
+downtimeDescription dv = case dv of
+  Recovery{} -> "Time to recover"
+  Project{} -> "Working on a long-term project"
+  Entanglement{} -> "Heat catches up"
 
 -- | Trauma variant description
 traumaDescription :: TraumaVariant -> Text

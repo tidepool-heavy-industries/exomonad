@@ -3,11 +3,13 @@
 -- Displays FitD-style progress clocks with hover tooltips.
 module DM.GUI.Widgets.Clocks
   ( clocksPanel
+  , updateClocksPanel
   , clockWidget
   , clockFace
   ) where
 
 import Control.Concurrent.STM (atomically, readTVar)
+import Control.Monad (void)
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HM
 import Data.Text (Text)
@@ -22,17 +24,24 @@ import Tidepool.GUI.Core (GUIBridge(..))
 clocksPanel :: GUIBridge WorldState -> UI Element
 clocksPanel bridge = do
   panel <- UI.div #. "clocks-panel"
+  updateClocksPanel panel bridge
+  pure panel
+
+-- | Update the clocks panel with current clock state
+updateClocksPanel :: Element -> GUIBridge WorldState -> UI ()
+updateClocksPanel panel bridge = do
+  -- Clear existing content
+  void $ element panel # set children []
 
   title <- UI.div #. "stat-label" # set text "Clocks"
 
   -- Get current state
-  state <- liftIO $ atomically $ readTVar (gbState bridge)
+  state <- liftIO $ atomically $ readTVar bridge.gbState
   let visibleClocks = filter (.clockVisible) (HM.elems state.clocks)
 
   clockWidgets <- mapM clockWidget visibleClocks
 
   void $ element panel #+ (element title : map element clockWidgets)
-  pure panel
 
 -- | Create a single clock widget with hover tooltip
 clockWidget :: Clock -> UI Element

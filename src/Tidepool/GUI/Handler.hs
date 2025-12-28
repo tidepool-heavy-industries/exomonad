@@ -3,11 +3,31 @@
 -- This module provides an 'InputHandler' that bridges to the GUI
 -- via the 'GUIBridge' types. When input is requested, it posts
 -- to the bridge and blocks until the GUI responds.
+--
+-- = Dice Support
+--
+-- The 'guiDice' function provides dice selection via the GUI. Since
+-- dice selection is rendered differently (with tier colors based on
+-- Position), it uses a separate 'PendingDice' request type.
+--
+-- To fully integrate dice into the effect system, add to Effect.hs:
+--
+-- @
+-- data InputHandler = InputHandler
+--   { ihChoice :: forall a. Text -> [(Text, a)] -> IO a
+--   , ihText   :: Text -> IO Text
+--   , ihDice   :: Text -> [(Int, Int)] -> IO Int  -- (die value, index)
+--   }
+-- @
+--
+-- Until then, use 'guiDice' directly from game logic.
 module Tidepool.GUI.Handler
   ( makeGUIHandler
+    -- * Direct dice support
+  , guiDice
   ) where
 
-import Control.Concurrent.MVar (putMVar, takeMVar)
+import Control.Concurrent.MVar (takeMVar)
 import Control.Concurrent.STM (atomically, writeTVar)
 import Data.Text (Text)
 
@@ -33,14 +53,14 @@ guiChoice bridge prompt options = do
       indexedOptions = [(label, idx) | (idx, label) <- indexed]
 
   -- Post the request to the GUI
-  atomically $ writeTVar (gbPendingRequest bridge)
+  atomically $ writeTVar bridge.gbPendingRequest
     (Just $ PendingChoice prompt indexedOptions)
 
   -- Block until GUI responds
-  response <- takeMVar (gbRequestResponse bridge)
+  response <- takeMVar bridge.gbRequestResponse
 
   -- Clear the pending request
-  atomically $ writeTVar (gbPendingRequest bridge) Nothing
+  atomically $ writeTVar bridge.gbPendingRequest Nothing
 
   -- Return the value at the selected index
   case response of
@@ -51,30 +71,45 @@ guiChoice bridge prompt options = do
 guiText :: GUIBridge state -> Text -> IO Text
 guiText bridge prompt = do
   -- Post the request to the GUI
-  atomically $ writeTVar (gbPendingRequest bridge)
+  atomically $ writeTVar bridge.gbPendingRequest
     (Just $ PendingText prompt)
 
   -- Block until GUI responds
-  response <- takeMVar (gbRequestResponse bridge)
+  response <- takeMVar bridge.gbRequestResponse
 
   -- Clear the pending request
-  atomically $ writeTVar (gbPendingRequest bridge) Nothing
+  atomically $ writeTVar bridge.gbPendingRequest Nothing
 
   -- Return the text
   case response of
     TextResponse txt -> pure txt
     ChoiceResponse _ -> error "Expected TextResponse, got ChoiceResponse"
 
--- | Respond to a pending choice request
+-- | Handle a dice selection request via the GUI
 --
--- This is called by the GUI when the user clicks a choice card.
-respondChoice :: GUIBridge state -> Int -> IO ()
-respondChoice bridge idx =
-  putMVar (gbRequestResponse bridge) (ChoiceResponse idx)
+-- Shows dice cards with outcome tier colors based on Position (stored in game state).
+-- Returns the selected die's index.
+--
+-- Example usage:
+--
+-- @
+-- -- In your game loop
+-- let dicePool = [(4, 0), (2, 1), (6, 2)]  -- (die value, index) pairs
+-- selectedIdx <- guiDice bridge "Choose a die from your pool:" dicePool
+-- @
+guiDice :: GUIBridge state -> Text -> [(Int, Int)] -> IO Int
+guiDice bridge prompt diceWithIndices = do
+  -- Post the dice request to the GUI
+  atomically $ writeTVar bridge.gbPendingRequest
+    (Just $ PendingDice prompt diceWithIndices)
 
--- | Respond to a pending text request
---
--- This is called by the GUI when the user submits text.
-respondText :: GUIBridge state -> Text -> IO ()
-respondText bridge txt =
-  putMVar (gbRequestResponse bridge) (TextResponse txt)
+  -- Block until GUI responds
+  response <- takeMVar bridge.gbRequestResponse
+
+  -- Clear the pending request
+  atomically $ writeTVar bridge.gbPendingRequest Nothing
+
+  -- Return the selected index
+  case response of
+    ChoiceResponse idx -> pure idx
+    TextResponse _ -> error "Expected ChoiceResponse, got TextResponse"

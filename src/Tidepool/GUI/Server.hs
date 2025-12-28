@@ -7,6 +7,7 @@ module Tidepool.GUI.Server
   , startServer
   ) where
 
+import Control.Monad (void)
 import qualified Graphics.UI.Threepenny as UI
 import Graphics.UI.Threepenny.Core
 
@@ -38,12 +39,12 @@ startServer
   -> (Window -> UI ())  -- ^ Setup function for each window
   -> IO ()
 startServer config setup = do
-  putStrLn $ "Tidepool GUI running at http://localhost:" ++ show (scPort config)
+  putStrLn $ "Tidepool GUI running at http://localhost:" ++ show config.scPort
   let tpConfig = UI.defaultConfig
-        { UI.jsPort = Just (scPort config)
-        , UI.jsStatic = scStaticDir config
+        { UI.jsPort = Just config.scPort
+        , UI.jsStatic = config.scStaticDir
         , UI.jsLog = const (pure ())  -- Suppress default logging
         }
   UI.startGUI tpConfig $ \window -> do
-    void $ return window # set UI.title (scTitle config)
+    void $ return window # set UI.title config.scTitle
     setup window
