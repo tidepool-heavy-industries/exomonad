@@ -6,6 +6,10 @@ module DM.Loop
     dmTurn
   , runDMGame
 
+    -- * GUI Integration
+  , gameLoopWithGUI
+  , waitForPlayerInput
+
     -- * Turn Operations
   , handlePlayerAction
   , checkClockConsequences
@@ -29,7 +33,10 @@ import Tidepool.Effect hiding (ToolResult)
 import Tidepool.Template (Schema(..))
 
 import Effectful
-import Control.Monad (when)
+import Control.Concurrent (forkIO)
+import Control.Concurrent.MVar (takeMVar)
+import Control.Concurrent.STM (atomically, writeTVar, readTVar)
+import Control.Monad (when, forever)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
@@ -37,6 +44,10 @@ import qualified Data.HashMap.Strict as HM
 import qualified Data.Sequence as Seq
 import System.IO (hFlush, stdout)
 import System.Environment (lookupEnv)
+
+import Tidepool.GUI.Core (GUIBridge(..), PendingRequest(..), RequestResponse(..),
+                          updateState, addNarrative, setLLMActive, newGUIBridge)
+import Tidepool.GUI.Handler (makeGUIHandler)
 
 -- ══════════════════════════════════════════════════════════════
 -- TYPES
@@ -108,6 +119,10 @@ dmTurn input = do
           -- Build system prompt (rules + mood guidance + world state)
           let systemPrompt = renderForMood mood context
 
+          -- Log prompt details (visible in debug panel)
+          logDebug $ "System prompt length: " <> T.pack (show $ T.length systemPrompt) <> " chars"
+          logDebug $ "Prompt preview: " <> T.take 200 systemPrompt <> "..."
+
           -- Call LLM with system prompt and user action
           outcome <- runTurn @TurnOutput systemPrompt userAction turnOutputSchema.schemaJSON dmTools
 
@@ -139,6 +154,10 @@ dmTurn input = do
 
               -- Parsed successfully - apply output and continue
               TurnParsed result -> do
+                -- Log LLM result
+                logInfo $ "LLM turn complete - tools: " <> T.pack (show $ length result.trToolsInvoked)
+                logDebug $ "Narrative: " <> T.take 150 result.trNarrative <> "..."
+
                 -- Capture state BEFORE applying output (for accurate delta display)
                 stateBefore <- get @WorldState
 
@@ -379,6 +398,7 @@ runDMGame initialState handleEvent saveState = do
       let inputHandler = InputHandler
             { ihChoice = terminalChoice
             , ihText = terminalText
+            , ihDice = terminalDice
             }
 
       -- Start without a scene - first turn establishes character and situation
@@ -564,3 +584,155 @@ terminalText prompt = do
   TIO.putStr " "
   hFlush stdout
   TIO.getLine
+
+-- | Terminal dice selection handler
+terminalDice :: Text -> [(Int, Int)] -> IO Int
+terminalDice prompt diceWithIndices = do
+  TIO.putStrLn prompt
+  mapM_ printDie (zip [1..] diceWithIndices)
+  TIO.putStr "Enter choice (number): "
+  hFlush stdout
+  input <- TIO.getLine
+  case reads (T.unpack input) of
+    [(n, "")] | n >= 1 && n <= length diceWithIndices ->
+      return $ snd (diceWithIndices !! (n - 1))
+    _ -> do
+      TIO.putStrLn "Invalid choice, try again."
+      terminalDice prompt diceWithIndices
+  where
+    printDie (n :: Int, (dieValue, _idx)) =
+      TIO.putStrLn $ "  " <> T.pack (show n) <> ". Die showing " <> T.pack (show dieValue)
+
+-- ══════════════════════════════════════════════════════════════
+-- GUI INTEGRATION
+-- ══════════════════════════════════════════════════════════════
+
+-- | Wait for player input via GUI
+--
+-- Posts a text request to the bridge and blocks until the user submits.
+-- Returns the input as a PlayerInput record.
+waitForPlayerInput :: GUIBridge WorldState -> IO PlayerInput
+waitForPlayerInput bridge = do
+  -- Post a text request
+  atomically $ writeTVar bridge.gbPendingRequest
+    (Just $ PendingText "What do you do?")
+
+  -- Block until response
+  response <- takeMVar bridge.gbRequestResponse
+
+  -- Clear request
+  atomically $ writeTVar bridge.gbPendingRequest Nothing
+
+  case response of
+    TextResponse txt -> pure $ PlayerInput txt []
+    ChoiceResponse _ -> waitForPlayerInput bridge  -- Retry on wrong type
+
+-- | Run the game loop with GUI integration
+--
+-- This function runs in a background thread and:
+-- 1. Waits for player input from GUI
+-- 2. Runs dmTurn with GUI handler
+-- 3. Syncs state to bridge (triggers GUI refresh)
+-- 4. Pushes narrative to bridge
+-- 5. Loops
+gameLoopWithGUI
+  :: GUIBridge WorldState
+  -> (DMEvent -> IO ())
+  -> IO ()
+gameLoopWithGUI bridge handleEvent = do
+  -- Get API key from environment
+  maybeKey <- lookupEnv "ANTHROPIC_API_KEY"
+  case maybeKey of
+    Nothing -> do
+      addNarrative bridge "Error: ANTHROPIC_API_KEY not set"
+      return ()
+    Just apiKey -> do
+      -- Set up the LLM config
+      let llmConfig = LLMConfig
+            { llmApiKey = T.pack apiKey
+            , llmModel = "claude-haiku-4-5-20251001"
+            , llmMaxTokens = 4096
+            , llmThinkingBudget = Just 1024
+            , llmSystemPrompt = "You are the Dungeon Master for a Blades in the Dark style game. Respond to player actions with narrative prose, using your tools as appropriate."
+            }
+
+      -- Set up GUI input handler
+      let inputHandler = makeGUIHandler bridge
+
+      -- Get initial state from bridge
+      initialState <- atomically $ readTVar bridge.gbState
+
+      -- Add intro narrative
+      addNarrative bridge "DOSKVOL. Industrial sprawl. Eternal night."
+      addNarrative bridge "The ghosts press against the lightning barriers."
+      addNarrative bridge "The gangs carve up the districts."
+      addNarrative bridge "You're about to step into the streets."
+
+      -- Run the game loop (logs go to GUI debug panel)
+      ((), _finalState) <- runEff
+        . runRandom
+        . runEmit handleEvent
+        . runState initialState
+        . runChatHistory
+        . runLogWithBridge bridge Debug
+        . runRequestInput inputHandler
+        . runLLMWithTools @_ @DMEvent llmConfig makeDMDispatcher
+        $ guiGameLoop bridge
+
+      return ()
+
+-- | Game loop for GUI - runs inside effect stack
+guiGameLoop
+  :: GUIBridge WorldState
+  -> Eff (GameEffects WorldState DMEvent) ()
+guiGameLoop bridge = loop
+  where
+    loop :: Eff (GameEffects WorldState DMEvent) ()
+    loop = do
+      -- Check if we have an active scene
+      state <- get @WorldState
+
+      -- Sync current state to bridge (so GUI shows latest)
+      liftIO $ updateState bridge (const state)
+
+      case state.scene of
+        Nothing -> do
+          -- No scene - create initial scene
+          let introScene = ActiveScene
+                { sceneLocation = LocationId "crows_foot"
+                , scenePresent = []
+                , sceneStakes = Stakes "Establish who you are in Doskvol"
+                , sceneBeats = Seq.empty
+                }
+          modify $ \s -> s { scene = Just introScene }
+          liftIO $ addNarrative bridge "Who are you? What brings you to Crow's Foot tonight?"
+          loop
+
+        Just _ -> do
+          -- Show loading indicator
+          liftIO $ setLLMActive bridge True
+
+          -- Wait for player input via GUI
+          playerInput <- liftIO $ waitForPlayerInput bridge
+
+          -- Check for quit
+          if T.toLower (T.strip playerInput.piActionText) `elem` ["quit", "exit", "q"]
+            then do
+              liftIO $ setLLMActive bridge False
+              return ()
+            else do
+              -- Run a turn
+              response <- dmTurn playerInput
+
+              -- Hide loading indicator
+              liftIO $ setLLMActive bridge False
+
+              -- Push narrative to bridge
+              liftIO $ addNarrative bridge response.responseText
+
+              -- Sync updated state to bridge
+              updatedState <- get @WorldState
+              liftIO $ updateState bridge (const updatedState)
+
+              -- Continue loop
+              loop

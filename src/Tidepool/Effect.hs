@@ -48,6 +48,7 @@ module Tidepool.Effect
   , runEmit
   , runRequestInput
   , runLog
+  , runLogWithBridge
   , runChatHistory
 
     -- * Tool Execution Types
@@ -81,6 +82,8 @@ import Tidepool.Anthropic.Client
 -- Note: ToolResult is imported qualified as Client.ToolResult to avoid
 -- collision with Tidepool.Effect.ToolResult
 import Tidepool.Anthropic.Http (ThinkingContent(..))
+import qualified Tidepool.GUI.Core as GUICore
+import Tidepool.GUI.Core (GUIBridge)
 
 -- | The effect stack for game loops
 -- IOE is at the base for IO operations (random, emit, input, log)
@@ -609,12 +612,14 @@ requestText = send . RequestText
 data InputHandler = InputHandler
   { ihChoice :: forall a. Text -> [(Text, a)] -> IO a
   , ihText   :: Text -> IO Text
+  , ihDice   :: Text -> [(Int, Int)] -> IO Int
+    -- ^ Dice selection: prompt, (die value, index) pairs -> selected index
   }
 
 runRequestInput :: IOE :> es => InputHandler -> Eff (RequestInput : es) a -> Eff es a
-runRequestInput (InputHandler choiceHandler textHandler) = interpret $ \_ -> \case
-  RequestChoice prompt choices -> liftIO $ choiceHandler prompt choices
-  RequestText prompt           -> liftIO $ textHandler prompt
+runRequestInput (InputHandler choice txtInput _dice) = interpret $ \_ -> \case
+  RequestChoice prompt choices -> liftIO $ choice prompt choices
+  RequestText prompt           -> liftIO $ txtInput prompt
 
 -- ══════════════════════════════════════════════════════════════
 -- LOG EFFECT
@@ -658,6 +663,24 @@ runLog minLevel = interpret $ \_ -> \case
               Warn  -> "[WARN]  "
         -- TIO.putStrLn (prefix <> msg)
         return ()
+    | otherwise -> pure ()
+
+-- | Run the Log effect, logging to GUI bridge debug panel
+-- This makes effect-based logs appear in the GUI debug panel
+runLogWithBridge
+  :: IOE :> es
+  => GUIBridge state
+  -> LogLevel
+  -> Eff (Log : es) a
+  -> Eff es a
+runLogWithBridge bridge minLevel = interpret $ \_ -> \case
+  LogMsg level msg
+    | level >= minLevel -> liftIO $ do
+        let guiLevel = case level of
+              Debug -> GUICore.Debug
+              Info  -> GUICore.Info
+              Warn  -> GUICore.Warn
+        GUICore.addDebugEntry bridge guiLevel msg Nothing
     | otherwise -> pure ()
 
 -- | Outcome of running a turn that may be interrupted
