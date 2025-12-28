@@ -8,6 +8,11 @@ module Tidepool.Tool
   , ToolList(..)
   , toolListToJSON
 
+    -- * Type-Level Tool Reification
+  , ReifyToolList(..)
+  , toolsFromType
+  , dispatcherFromType
+
     -- * Tool Execution
   , ToolExecResult(..)
   , makeDispatcher
@@ -61,6 +66,48 @@ toolListToJSON (TCons p rest) = toolToJSONProxy p : toolListToJSON rest
   where
     toolToJSONProxy :: forall t. Tool t event state => Proxy t -> Value
     toolToJSONProxy _ = toolToJSON @t @event @state
+
+-- ══════════════════════════════════════════════════════════════
+-- TYPE-LEVEL TOOL REIFICATION
+-- ══════════════════════════════════════════════════════════════
+
+-- | Reify a type-level list of tools into a term-level ToolList
+--
+-- This lets you go from:
+--   type instance PhaseTools 'Scene = '[ThinkAsDM, SpeakAsNPC]
+--
+-- To term-level values via:
+--   toolsFromType @(PhaseTools 'Scene) @MyEvent @MyState
+--
+class ReifyToolList (tools :: [Type]) event state where
+  reifyToolList :: ToolList event state tools
+
+instance ReifyToolList '[] event state where
+  reifyToolList = TNil
+
+instance (Tool t event state, ReifyToolList ts event state)
+      => ReifyToolList (t ': ts) event state where
+  reifyToolList = TCons (Proxy @t) reifyToolList
+
+-- | Get tool JSON definitions from a type-level tool list
+--
+-- Example:
+--   type instance PhaseTools 'Scene = '[ThinkAsDM, SpeakAsNPC]
+--   pcTools = toolsFromType @(PhaseTools 'Scene) @DMEvent @WorldState
+--
+toolsFromType :: forall tools event state. ReifyToolList tools event state => [Value]
+toolsFromType = toolListToJSON (reifyToolList @tools @event @state)
+
+-- | Create a dispatcher from a type-level tool list
+--
+-- Example:
+--   dispatcher = dispatcherFromType @(PhaseTools 'Scene) @DMEvent @WorldState
+--
+dispatcherFromType
+  :: forall tools event state es.
+     (ReifyToolList tools event state, State state :> es, Emit event :> es, RequestInput :> es, Random :> es)
+  => ToolDispatcher event es
+dispatcherFromType = makeDispatcher (reifyToolList @tools @event @state)
 
 -- | Result of tool execution for returning to LLM (used by executeTools)
 data ToolExecResult = ToolExecResult

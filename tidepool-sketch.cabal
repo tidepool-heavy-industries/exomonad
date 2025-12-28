@@ -13,9 +13,10 @@ library
     import:           warnings
     exposed-modules:
         Tidepool.Effect
+        Tidepool.Machine
+        Tidepool.Capture
         Tidepool.Template
         Tidepool.Tool
-        Tidepool.Loop
         Tidepool.Schema
         Tidepool.Storage
         Tidepool.Anthropic.Http

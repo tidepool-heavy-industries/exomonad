@@ -21,6 +21,8 @@ module Tidepool.Effect
   , randomInt
   , randomDouble
   , runTurn
+  , llmCall
+  , llmCallEither
   , emit
   , requestChoice
   , requestText
@@ -207,6 +209,46 @@ runTurn systemPrompt userAction schema tools = do
           , tpfError = err
           , tpfToolsInvoked = tr.trToolsInvoked
           }
+
+-- | Simple LLM call with structured output, no tools
+-- This is the primitive for Capture-style agents that don't need mid-turn tools.
+-- Returns the parsed output directly, or errors on parse failure.
+--
+-- Example:
+--   classification <- llmCall @Classification systemPrompt userInput schema
+--
+llmCall
+  :: forall output es.
+     (LLM :> es, FromJSON output)
+  => Text   -- ^ System prompt
+  -> Text   -- ^ User input
+  -> Value  -- ^ Output schema (JSON)
+  -> Eff es output
+llmCall systemPrompt userInput schema = do
+  result <- llmCallEither @output systemPrompt userInput schema
+  case result of
+    Left err -> error $ "LLM call failed: " <> T.unpack err
+    Right output -> pure output
+
+-- | Like llmCall but returns Either instead of erroring
+-- Use this when you want to handle parse failures gracefully.
+llmCallEither
+  :: forall output es.
+     (LLM :> es, FromJSON output)
+  => Text   -- ^ System prompt
+  -> Text   -- ^ User input
+  -> Value  -- ^ Output schema (JSON)
+  -> Eff es (Either Text output)
+llmCallEither systemPrompt userInput schema = do
+  result <- runTurn @output systemPrompt userInput schema []
+  case result of
+    TurnBroken reason ->
+      -- Shouldn't happen with no tools, but handle gracefully
+      pure $ Left $ "Unexpected break: " <> reason
+    TurnCompleted (TurnParsed tr) ->
+      pure $ Right tr.trOutput
+    TurnCompleted (TurnParseFailed {tpfError}) ->
+      pure $ Left $ "Parse failed: " <> T.pack tpfError
 
 -- | Result of running an LLM turn
 data TurnResult output = TurnResult
