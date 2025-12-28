@@ -38,6 +38,8 @@ module Tidepool.Effect
   , TurnParseResult(..)
   , ToolInvocation(..)
   , LLMConfig(..)
+  , LLMHooks(..)
+  , noHooks
   , InputHandler(..)
 
     -- * Running Effects
@@ -46,6 +48,7 @@ module Tidepool.Effect
   , runRandom
   , runLLM
   , runLLMWithTools
+  , runLLMWithToolsHooked
   , runEmit
   , runRequestInput
   , runLog
@@ -230,6 +233,17 @@ data LLMConfig = LLMConfig
   }
   deriving (Show, Eq, Generic)
 
+-- | Hooks for LLM interpreter lifecycle events
+-- Use these to inject UI behavior (spinners, etc.) without coupling game logic to UI.
+data LLMHooks = LLMHooks
+  { onTurnStart :: IO ()  -- ^ Called before each LLM API call
+  , onTurnEnd :: IO ()    -- ^ Called after each LLM API call completes
+  }
+
+-- | Default hooks that do nothing
+noHooks :: LLMHooks
+noHooks = LLMHooks (pure ()) (pure ())
+
 -- | Run the LLM effect by calling the Anthropic API
 -- Note: Tool execution uses a stub - for full tool support, use runLLMWithTools
 -- Uses ChatHistory effect for conversation persistence and Log for debugging.
@@ -321,8 +335,23 @@ runLLMWithTools
   -> ToolDispatcher event es
   -> Eff (LLM : es) a
   -> Eff es a
-runLLMWithTools config dispatcher = interpret $ \_ -> \case
+runLLMWithTools config dispatcher = runLLMWithToolsHooked @es @event noHooks config dispatcher
+
+-- | Run the LLM effect with hooks for lifecycle events
+-- Use this to inject UI behavior (e.g., spinner) around LLM calls.
+runLLMWithToolsHooked
+  :: forall es event a.
+     (IOE :> es, Emit event :> es, RequestInput :> es, Random :> es, ChatHistory :> es, Log :> es)
+  => LLMHooks
+  -> LLMConfig
+  -> ToolDispatcher event es
+  -> Eff (LLM : es) a
+  -> Eff es a
+runLLMWithToolsHooked hooks config dispatcher = interpret $ \_ -> \case
   RunTurnOp systemPrompt userAction schema tools -> do
+    -- Signal turn start (e.g., show spinner)
+    liftIO hooks.onTurnStart
+
     -- Get prior conversation history (just action/response pairs)
     priorHistory <- getHistory
 
@@ -347,6 +376,7 @@ runLLMWithTools config dispatcher = interpret $ \_ -> \case
       -- Tool broke the turn - don't append to history, return break signal
       Left breakReason -> do
         logInfo $ "[LLM] Turn broken by tool: " <> breakReason
+        liftIO hooks.onTurnEnd
         return (TurnBroken breakReason)
 
       -- Turn completed normally
@@ -358,6 +388,7 @@ runLLMWithTools config dispatcher = interpret $ \_ -> \case
         logDebug $ "[LLM] Assistant response:\n" <> result.trNarrative
         logDebug $ "[LLM] Tools invoked: " <> T.pack (show (length result.trToolsInvoked))
 
+        liftIO hooks.onTurnEnd
         return (TurnCompleted result)
   where
     -- The tool loop: call API, handle tools, repeat until done or broken
@@ -412,6 +443,11 @@ runLLMWithTools config dispatcher = interpret $ \_ -> \case
 
       case resp.scrStopReason of
         EndTurn -> do
+          -- Log content blocks for debugging
+          let blockTypes = map describeBlock content
+          logDebug $ "[LLM] EndTurn content blocks: " <> T.pack (show blockTypes)
+          logDebug $ "[LLM] Accumulated narratives: " <> T.pack (show $ length allNarratives)
+
           -- Try final response first, then accumulated narratives
           let finalOutput = extractFinalOutputWithFallback content allNarratives
               turnResult = TurnResult
@@ -536,6 +572,15 @@ runLLMWithTools config dispatcher = interpret $ \_ -> \case
 
     tryParseJson :: Text -> Maybe Value
     tryParseJson t = decode (LBS.fromStrict $ TE.encodeUtf8 t)
+
+    -- Describe a content block for debugging
+    describeBlock :: ContentBlock -> String
+    describeBlock (TextBlock t) = "Text(" <> show (T.take 50 t) <> if T.length t > 50 then "..." else "" <> ")"
+    describeBlock (ToolUseBlock tu) = "ToolUse(" <> T.unpack tu.toolName <> ")"
+    describeBlock (ToolResultBlock _) = "ToolResult"
+    describeBlock (ThinkingBlock _) = "Thinking"
+    describeBlock (RedactedThinkingBlock _) = "RedactedThinking"
+    describeBlock (JsonBlock v) = "Json(" <> take 100 (show v) <> ")"
 
 -- ══════════════════════════════════════════════════════════════
 -- CHAT HISTORY EFFECT

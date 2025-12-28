@@ -54,8 +54,9 @@ import qualified Tidepool.Storage as Storage
 import DM.CharacterCreation (CharacterChoices(..), scenarioInitPrompt, ScenarioInit(..), ClockInit(..))
 import qualified DM.CharacterCreation as CC
 
-import Tidepool.GUI.Core (GUIBridge(..), PendingRequest(..), RequestResponse(..),
+import Tidepool.GUI.Core (GUIBridge(..), PendingRequest(..),
                           updateState, addNarrative, setLLMActive, setSuggestedActions)
+import Tidepool.Effect (LLMHooks(..), runLLMWithToolsHooked)
 import qualified Tidepool.GUI.Core as GUI (logInfo)
 import Tidepool.GUI.Handler (makeGUIHandler)
 import Tidepool.Anthropic.Http (Message(..), ContentBlock(..), Role(..))
@@ -492,7 +493,7 @@ runDMGame initialState handleEvent saveState = do
             { llmApiKey = T.pack apiKey
             , llmModel = "claude-haiku-4-5-20251001"
             , llmMaxTokens = 4096
-            , llmThinkingBudget = Just 1024  -- Enable extended thinking
+            , llmThinkingBudget = Nothing  -- Disabled: faster, fixes structured output + tool use  -- Enable extended thinking
             }
 
       -- Set up terminal input handler
@@ -558,7 +559,7 @@ runDMGameWithDB conn gameId mCursor initialState handleEvent = do
             { llmApiKey = T.pack apiKey
             , llmModel = "claude-haiku-4-5-20251001"
             , llmMaxTokens = 4096
-            , llmThinkingBudget = Just 1024
+            , llmThinkingBudget = Nothing  -- Disabled: faster, fixes structured output + tool use
             }
 
       let inputHandler = InputHandler
@@ -880,7 +881,7 @@ gameLoopWithGUI bridge handleEvent = do
             { llmApiKey = T.pack apiKey
             , llmModel = "claude-haiku-4-5-20251001"
             , llmMaxTokens = 4096
-            , llmThinkingBudget = Just 1024
+            , llmThinkingBudget = Nothing  -- Disabled: faster, fixes structured output + tool use
             }
 
       -- Set up GUI input handler
@@ -895,6 +896,12 @@ gameLoopWithGUI bridge handleEvent = do
       addNarrative bridge "The gangs carve up the districts."
       addNarrative bridge "You're about to step into the streets."
 
+      -- Spinner hooks - show/hide loading indicator around LLM calls
+      let spinnerHooks = LLMHooks
+            { onTurnStart = setLLMActive bridge True
+            , onTurnEnd = setLLMActive bridge False
+            }
+
       -- Run the game loop (logs go to GUI debug panel)
       ((), _finalState) <- runEff
         . runRandom
@@ -903,7 +910,7 @@ gameLoopWithGUI bridge handleEvent = do
         . runChatHistory
         . runLogWithBridge bridge Debug
         . runRequestInput inputHandler
-        . runLLMWithTools @_ @DMEvent llmConfig makeDMDispatcher
+        . runLLMWithToolsHooked @_ @DMEvent spinnerHooks llmConfig makeDMDispatcher
         $ guiGameLoop bridge
 
       return ()
@@ -932,28 +939,22 @@ guiGameLoop bridge = loop
                 , sceneBeats = Seq.empty
                 }
           modify $ \s -> s { scene = Just introScene }
-          liftIO $ addNarrative bridge "Who are you? What brings you to Crow's Foot tonight?"
+          emit (NarrativeAdded "Who are you? What brings you to Crow's Foot tonight?")
           loop
 
         Just _ -> do
-          -- Wait for player input via GUI (spinner is OFF during input)
-          playerInput <- liftIO $ waitForPlayerInput bridge
+          -- Wait for player input via GUI
+          playerInput <- waitForPlayerInput
 
           -- Check for quit
           if T.toLower (T.strip playerInput.piActionText) `elem` ["quit", "exit", "q"]
             then return ()
             else do
-              -- Show loading indicator WHILE LLM is thinking
-              liftIO $ setLLMActive bridge True
-
-              -- Run a turn
+              -- Run a turn (spinner handled by LLM interpreter hooks)
               response <- dmTurn playerInput
 
-              -- Hide loading indicator
-              liftIO $ setLLMActive bridge False
-
-              -- Push narrative to bridge
-              liftIO $ addNarrative bridge response.responseText
+              -- Push narrative via Emit effect
+              emit (NarrativeAdded response.responseText)
 
               -- Sync updated state to bridge
               updatedState <- get @WorldState
@@ -998,7 +999,7 @@ gameLoopWithGUIAndDB conn gameId mCursor bridge handleEvent = do
             { llmApiKey = T.pack apiKey
             , llmModel = "claude-haiku-4-5-20251001"
             , llmMaxTokens = 4096
-            , llmThinkingBudget = Just 1024
+            , llmThinkingBudget = Nothing  -- Disabled: faster, fixes structured output + tool use
             }
 
       -- Set up GUI input handler
@@ -1035,6 +1036,12 @@ gameLoopWithGUIAndDB conn gameId mCursor bridge handleEvent = do
 
       GUI.logInfo bridge "[Startup] Starting game loop..."
 
+      -- Spinner hooks - show/hide loading indicator around LLM calls
+      let spinnerHooks = LLMHooks
+            { onTurnStart = setLLMActive bridge True
+            , onTurnEnd = setLLMActive bridge False
+            }
+
       -- Run the game loop with DB persistence
       ((), finalState) <- runEff
         . runRandom
@@ -1043,7 +1050,7 @@ gameLoopWithGUIAndDB conn gameId mCursor bridge handleEvent = do
         . runChatHistoryWithDB conn gameId mCursor
         . runLogWithBridge bridge Debug
         . runRequestInput inputHandler
-        . runLLMWithTools @_ @DMEvent llmConfig makeDMDispatcher
+        . runLLMWithToolsHooked @_ @DMEvent spinnerHooks llmConfig makeDMDispatcher
         $ guiGameLoopWithDB conn gameId bridge
 
       -- Save final state
@@ -1165,40 +1172,39 @@ guiGameLoopWithDB conn gameId bridge = loop
       -- Check if session was ended by player
       case state.phase of
         PhaseSessionEnded -> do
-          liftIO $ GUI.logInfo bridge "[Loop] Session ended by player, exiting loop"
+          logInfo "[Loop] Session ended by player, exiting loop"
           return ()
         _ -> continueLoop state
 
     continueLoop :: WorldState -> Eff (GameEffects WorldState DMEvent) ()
     continueLoop state = case state.scene of
         Nothing -> do
-          -- No scene - check if this is a fresh game or scene just ended
-          let isFreshGame = Seq.null state.sessionHistory
+          -- No scene - check if this is a fresh game (never had scenario init)
+          -- Use chat history to detect: empty = never played, non-empty = scene ended
+          history <- getHistory
+          let isFreshGame = null history
 
-          -- Initialize dice pool once for all fresh games
+          -- Initialize dice pool once for fresh games
           when isFreshGame $ do
             startingDice <- rollStartingDice
             modify $ \s -> s { dicePool = DicePool startingDice }
-            liftIO $ GUI.logInfo bridge $ "[Loop] Fresh game - initialized dice pool: " <> T.pack (show startingDice)
+            logInfo $ "[Loop] Fresh game - initialized dice pool: " <> T.pack (show startingDice)
 
           case (isFreshGame, state.characterChoices) of
             (True, Just choices) -> do
               -- Fresh game with character - generate opening scenario
-              liftIO $ GUI.logInfo bridge "[Loop] Generating opening scenario from character choices..."
-              liftIO $ setLLMActive bridge True
+              logInfo "[Loop] Generating opening scenario from character choices..."
 
               let prompt = scenarioInitPrompt choices
-              liftIO $ GUI.logInfo bridge $ "[Loop] Scenario prompt length: " <> T.pack (show $ T.length prompt)
+              logInfo $ "[Loop] Scenario prompt length: " <> T.pack (show $ T.length prompt)
 
-              -- Call LLM for scenario init (simple text response, no tools)
+              -- Call LLM for scenario init (spinner handled by interpreter hooks)
               result <- runTurn @ScenarioInit prompt "Generate the opening scenario." scenarioInitSchemaJSON []
-
-              liftIO $ setLLMActive bridge False
 
               case result of
                 TurnCompleted (TurnParsed tr) -> do
                   let scenario = tr.trOutput
-                  liftIO $ GUI.logInfo bridge "[Loop] Scenario generated successfully"
+                  logInfo "[Loop] Scenario generated successfully"
 
                   -- Apply scenario to state (dice already initialized above)
                   let newPlayer = state.player
@@ -1219,7 +1225,7 @@ guiGameLoopWithDB conn gameId bridge = loop
                         { sceneLocation = LocationId (T.toLower $ T.replace " " "_" scenario.siSceneLocation)
                         , scenePresent = []
                         , sceneStakes = Stakes scenario.siSceneStakes
-                        , sceneBeats = Seq.singleton $ DMNarration scenario.siSceneNarration
+                        , sceneBeats = Seq.empty  -- Narration flows through NarrativeAdded events
                         }
 
                   modify $ \s -> s
@@ -1227,13 +1233,14 @@ guiGameLoopWithDB conn gameId bridge = loop
                     , player = newPlayer
                     , scene = Just introScene
                     , clocks = clocksFromInit
+                    , characterChoices = Nothing  -- Clear so we don't regenerate on scene end
                     , DM.State.suggestedActions = scenario.siSuggestedActions
                     }
 
-                  -- Add Fate's narration first, then scene narration
-                  liftIO $ addNarrative bridge scenario.siFateNarration
-                  liftIO $ addNarrative bridge scenario.siSceneNarration
-                  liftIO $ addNarrative bridge $ ">> " <> scenario.siOpeningHook
+                  -- Add Fate's narration first, then scene narration (via Emit effect)
+                  emit (NarrativeAdded scenario.siFateNarration)
+                  emit (NarrativeAdded scenario.siSceneNarration)
+                  emit (NarrativeAdded $ ">> " <> scenario.siOpeningHook)
 
                   -- Set suggested actions in bridge for UI
                   liftIO $ setSuggestedActions bridge scenario.siSuggestedActions
@@ -1253,7 +1260,7 @@ guiGameLoopWithDB conn gameId bridge = loop
 
             (False, _) -> do
               -- Scene ended (not fresh game) - transition to BetweenScenes
-              liftIO $ GUI.logInfo bridge "[Loop] Scene ended, entering BetweenScenes..."
+              logInfo "[Loop] Scene ended, entering BetweenScenes..."
               handleBetweenScenes bridge
               -- Save state after BetweenScenes (in case of crash before next turn)
               updatedState <- get @WorldState
@@ -1263,28 +1270,23 @@ guiGameLoopWithDB conn gameId bridge = loop
 
         Just _ -> do
           -- Wait for player input via GUI (spinner is OFF during input)
-          liftIO $ GUI.logInfo bridge "[Loop] Waiting for player input..."
-          playerInput <- liftIO $ waitForPlayerInput bridge
-          liftIO $ GUI.logInfo bridge $ "[Loop] Got input: " <> T.take 50 playerInput.piActionText
+          logInfo "[Loop] Waiting for player input..."
+          playerInput <- waitForPlayerInput
+          logInfo $ "[Loop] Got input: " <> T.take 50 playerInput.piActionText
 
           -- Check for quit
           if T.toLower (T.strip playerInput.piActionText) `elem` ["quit", "exit", "q"]
             then return ()
             else do
-              -- Show loading indicator WHILE LLM is thinking
-              liftIO $ setLLMActive bridge True
-              liftIO $ GUI.logInfo bridge "[Loop] Starting dmTurn..."
+              logInfo "[Loop] Starting dmTurn..."
 
-              -- Run a turn
+              -- Run a turn (spinner handled by LLM interpreter hooks)
               response <- dmTurn playerInput
 
-              liftIO $ GUI.logInfo bridge $ "[Loop] dmTurn completed: " <> T.take 100 response.responseText
+              logInfo $ "[Loop] dmTurn completed: " <> T.take 100 response.responseText
 
-              -- Hide loading indicator
-              liftIO $ setLLMActive bridge False
-
-              -- Push narrative to bridge
-              liftIO $ addNarrative bridge response.responseText
+              -- Push narrative via Emit effect (handled by event handler)
+              emit (NarrativeAdded response.responseText)
 
               -- Store suggested actions in WorldState (for persistence) and bridge (for UI)
               let newSuggestions = response.responseSuggestedActions
@@ -1325,10 +1327,8 @@ handleBetweenScenes bridge = do
 
   state <- get @WorldState
 
-  -- 3. Generate transition narration via LLM (~50 words)
-  liftIO $ setLLMActive bridge True
+  -- 3. Generate transition narration via LLM (spinner handled by interpreter hooks)
   transitionText <- generateTransitionNarration state
-  liftIO $ setLLMActive bridge False
 
   -- 4. Build clock summaries for display
   let clockSummaries = buildClockSummaries state.clocks
@@ -1359,7 +1359,7 @@ handleBetweenScenes bridge = do
   logInfo $ "[BetweenScenes] Player chose: " <> T.pack (show chosenOption)
 
   -- 9. Apply the chosen option
-  applyBetweenScenesChoice bridge chosenOption
+  applyBetweenScenesChoice chosenOption
 
 -- | Tick all threat clocks by 1 (time passes)
 tickThreatClocks
@@ -1455,43 +1455,42 @@ buildAvailableOptions state = concat
 
 -- | Apply the player's choice from BetweenScenes
 applyBetweenScenesChoice
-  :: GUIBridge WorldState
-  -> BetweenScenesOption
+  :: BetweenScenesOption
   -> Eff (GameEffects WorldState DMEvent) ()
-applyBetweenScenesChoice bridge choice = case choice of
+applyBetweenScenesChoice choice = case choice of
 
   BSLayLow -> do
     -- Reduce heat by 1, but threat clocks already ticked
-    liftIO $ GUI.logInfo bridge "[BetweenScenes] Laying low - reducing heat"
+    logInfo "[BetweenScenes] Laying low - reducing heat"
     modify @WorldState $ \s -> s
       { player = s.player { heat = max 0 (s.player.heat - 1) }
       }
-    liftIO $ addNarrative bridge "You lay low. The heat fades, but time passes..."
+    emit (NarrativeAdded "You lay low. The heat fades, but time passes...")
     -- Create new scene
-    createNewScene bridge
+    createNewScene
 
   BSRecover -> do
     -- Spend 1 coin to reduce 1 stress (simple for now)
-    liftIO $ GUI.logInfo bridge "[BetweenScenes] Recovering - spending coin for stress"
+    logInfo "[BetweenScenes] Recovering - spending coin for stress"
     modify @WorldState $ \s -> s
       { player = s.player
           { coin = max 0 (s.player.coin - 1)
           , stress = max 0 (s.player.stress - 1)
           }
       }
-    liftIO $ addNarrative bridge "You spend coin on small comforts. The stress eases..."
-    createNewScene bridge
+    emit (NarrativeAdded "You spend coin on small comforts. The stress eases...")
+    createNewScene
 
   BSWorkGoal goalName -> do
     -- Tick the goal clock (player is working toward it)
-    liftIO $ GUI.logInfo bridge $ "[BetweenScenes] Working goal: " <> goalName
+    logInfo $ "[BetweenScenes] Working goal: " <> goalName
     modify @WorldState $ \s -> s
       { clocks = HM.map (tickGoal goalName) s.clocks
       }
     -- Check if goal clock completed
     checkClockConsequences
-    liftIO $ addNarrative bridge $ "You work toward your goal: " <> goalName <> "..."
-    createNewScene bridge
+    emit (NarrativeAdded $ "You work toward your goal: " <> goalName <> "...")
+    createNewScene
     where
       tickGoal name clock
         | clock.clockName == name && clock.clockType == GoalClock =
@@ -1499,21 +1498,19 @@ applyBetweenScenesChoice bridge choice = case choice of
         | otherwise = clock
 
   BSNewScene -> do
-    liftIO $ GUI.logInfo bridge "[BetweenScenes] Starting new scene directly"
-    createNewScene bridge
+    logInfo "[BetweenScenes] Starting new scene directly"
+    createNewScene
 
   BSEndSession -> do
-    liftIO $ GUI.logInfo bridge "[BetweenScenes] Player chose to end session"
-    liftIO $ addNarrative bridge "You fade into the city's eternal night. Until next time..."
+    logInfo "[BetweenScenes] Player chose to end session"
+    emit (NarrativeAdded "You fade into the city's eternal night. Until next time...")
     -- Set phase to SessionEnded - the loop will check for this and exit
     modify @WorldState $ \s -> s { phase = PhaseSessionEnded }
 
 -- | Create a new scene after BetweenScenes
-createNewScene
-  :: GUIBridge WorldState
-  -> Eff (GameEffects WorldState DMEvent) ()
-createNewScene bridge = do
-  liftIO $ GUI.logInfo bridge "[BetweenScenes] Creating continuation scene..."
+createNewScene :: Eff (GameEffects WorldState DMEvent) ()
+createNewScene = do
+  logInfo "[BetweenScenes] Creating continuation scene..."
 
   -- Set phase back to Playing and create a basic scene
   -- The LLM will flesh out the scene on the next turn
@@ -1530,8 +1527,8 @@ createNewScene bridge = do
     , mood = MoodScene (Encounter "continuing" UrgencyLow True)  -- Reset mood for new scene
     }
 
-  liftIO $ addNarrative bridge "---"
-  liftIO $ addNarrative bridge "The city awaits your next move."
+  emit (NarrativeAdded "---")
+  emit (NarrativeAdded "The city awaits your next move.")
 
 -- | Roll starting dice pool (5 dice, values 1-6)
 rollStartingDice :: Random :> es => Eff es [Int]

@@ -114,6 +114,8 @@ data DMEvent
       , caNewFilled :: Int
       , caTotal :: Int
       }
+  -- Narrative output (for GUI display)
+  | NarrativeAdded Text
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
 
@@ -710,6 +712,8 @@ makeDMDispatcher name input = do
       Right (ToolSuccess val) -> do
         -- Check if mood actually changed
         moodAfter <- get @WorldState >>= \s -> return s.mood
+        -- Debug: log mood comparison
+        emit (DMThought $ "Dispatcher: " <> name <> " before=" <> T.pack (show moodBefore) <> " after=" <> T.pack (show moodAfter) <> " changed=" <> T.pack (show $ moodChanged moodBefore moodAfter))
         if moodChanged moodBefore moodAfter
           then return (Right (ToolBreak ("mood transition: " <> name)))
           else return (Right (ToolSuccess val))

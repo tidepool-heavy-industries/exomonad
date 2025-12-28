@@ -31,7 +31,7 @@ import qualified Data.Text as T
 import Graphics.UI.Threepenny.Core
 import qualified Graphics.UI.Threepenny as UI
 
-import DM.State (Trauma(..), OutcomeTier(..))
+import DM.State (Trauma(..))
 import DM.Tools (DMEvent(..))
 
 -- | Event severity levels for styling
@@ -125,7 +125,7 @@ formatEvent event = case event of
         then "\n\nYou can retreat to safety, or make a deal..."
         else "\n\nNo escape. You must bargain or collapse."
 
-  ClockAdvanced clockId clockName oldFilled newFilled total ->
+  ClockAdvanced _clockId clockName oldFilled newFilled total ->
     Just $ formatEventEntry "CLOCK" severity $
       clockName <> " — " <> T.pack (show newFilled) <> "/" <>
       T.pack (show total) <>
@@ -136,6 +136,9 @@ formatEvent event = case event of
       severity = if newFilled >= total then SeverityCritical
                  else if newFilled >= total - 1 then SeverityWarning
                  else SeverityInfo
+
+  -- Narrative text - pass through directly (no special formatting)
+  NarrativeAdded txt -> Just txt
 
 -- | Format an event entry with type and severity markers
 formatEventEntry :: Text -> EventSeverity -> Text -> Text

@@ -58,33 +58,27 @@ dmNarrativePane bridge = do
 
   pure container
 
--- | Update the DM narrative pane with current scene beats
+-- | Update the DM narrative pane with narrative log
+--
+-- Always renders from gbNarrativeLog (populated via NarrativeAdded events).
+-- This is the primary source of display text - fate narration, scene narration,
+-- DM responses, player actions all flow through here.
 updateDMNarrative :: Element -> GUIBridge WorldState -> UI ()
 updateDMNarrative container bridge = do
-  state <- liftIO $ atomically $ readTVar bridge.gbState
   narrativeLog <- liftIO $ atomically $ readTVar bridge.gbNarrativeLog
 
   -- Clear existing content
   void $ element container # set children []
 
-  -- Render scene beats if we have an active scene
-  case state.scene of
-    Nothing -> do
-      -- No active scene - show narrative log as fallback (e.g., loaded from DB)
-      if null narrativeLog
-        then do
-          placeholder <- UI.div #. "narrative-placeholder"
-            # set text "The story awaits..."
-          void $ element container #+ [element placeholder]
-        else do
-          -- Show narrative log entries
-          logEls <- mapM renderNarrativeLogEntry (toList narrativeLog)
-          void $ element container #+ map element logEls
-
-    Just activeScene -> do
-      -- Render each beat
-      beatEls <- mapM renderSceneBeat (toList activeScene.sceneBeats)
-      void $ element container #+ map element beatEls
+  -- Render narrative log entries
+  if null narrativeLog
+    then do
+      placeholder <- UI.div #. "narrative-placeholder"
+        # set text "The story awaits..."
+      void $ element container #+ [element placeholder]
+    else do
+      logEls <- mapM renderNarrativeLogEntry (toList narrativeLog)
+      void $ element container #+ map element logEls
 
   -- Auto-scroll to bottom
   runFunction $ ffi "$(%1).scrollTop($(%1)[0].scrollHeight)" container
