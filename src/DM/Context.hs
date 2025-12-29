@@ -78,6 +78,8 @@ data DMContext = DMContext
   , ctxRecentCosts :: [Text]            -- From last 3 costly/setback outcomes
   , ctxUnresolvedThreats :: [Text]      -- Complications not yet addressed
   , ctxPendingInterrupt :: Maybe ClockInterrupt  -- Clock triggered, awaiting handling
+  -- Scene entry context (what led to this scene)
+  , ctxSceneEntry :: Maybe SceneEntryContext  -- Context from previous phase (downtime, aftermath, trauma)
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
@@ -110,6 +112,14 @@ data MoodVariantContext = MoodVariantContext
   , mvcNewComplications :: Maybe [Text]  -- Problems introduced
   , mvcImmediateDanger :: Maybe Bool     -- Is there active threat?
   , mvcEscapeRoute :: Maybe Text         -- Way out (for setback)
+  -- Action context carried into aftermath (the die that was cast)
+  , mvcActionDieChosen :: Maybe Int      -- The die value that determined fate
+  , mvcActionPosition :: Maybe Text      -- "controlled", "risky", "desperate"
+  , mvcActionEffect :: Maybe Text        -- "limited", "standard", "great"
+  , mvcActionTier :: Maybe Text          -- "critical", "success", "partial", "bad", "disaster"
+  , mvcActionOtherDice :: Maybe [Int]    -- The dice that weren't chosen
+  , mvcActionDomain :: Maybe Text        -- What kind of action
+  , mvcActionStakes :: Maybe Text        -- What was at risk
   -- Downtime variants
   , mvcDowntimeType :: Maybe Text        -- "recovery", "project", "entanglement"
   , mvcActivities :: Maybe [Text]        -- Recovery: available activities
@@ -254,6 +264,8 @@ buildDMContext activeScene mood world =
       , ctxRecentCosts = world.recentCosts
       , ctxUnresolvedThreats = world.unresolvedThreats
       , ctxPendingInterrupt = world.pendingInterrupt
+      -- Scene entry context
+      , ctxSceneEntry = world.sceneEntryContext
       }
   where
     partitionClock clock (vis, hid)
@@ -325,6 +337,14 @@ emptyVariantContext = MoodVariantContext
   , mvcNewComplications = Nothing
   , mvcImmediateDanger = Nothing
   , mvcEscapeRoute = Nothing
+  -- Action context into aftermath
+  , mvcActionDieChosen = Nothing
+  , mvcActionPosition = Nothing
+  , mvcActionEffect = Nothing
+  , mvcActionTier = Nothing
+  , mvcActionOtherDice = Nothing
+  , mvcActionDomain = Nothing
+  , mvcActionStakes = Nothing
   -- Downtime
   , mvcDowntimeType = Nothing
   , mvcActivities = Nothing
@@ -408,28 +428,64 @@ actionVariantContext variant domain = base
 -- | Extract aftermath variant context
 aftermathVariantContext :: AftermathVariant -> MoodVariantContext
 aftermathVariantContext = \case
-  AmClean{..} -> emptyVariantContext
+  AmClean{..} -> addActionContext amActionContext emptyVariantContext
     { mvcOutcomeType = Just "clean"
     , mvcWhatAchieved = Just amWhatAchieved
     }
-  AmCostly{..} -> emptyVariantContext
+  AmCostly{..} -> addActionContext amActionContext emptyVariantContext
     { mvcOutcomeType = Just "costly"
     , mvcWhatAchieved = Just amWhatAchieved
     , mvcCostsPaid = Just amCostsPaid
     , mvcNewComplications = Just amNewComplications
     }
-  AmSetback{..} -> emptyVariantContext
+  AmSetback{..} -> addActionContext amActionContext emptyVariantContext
     { mvcOutcomeType = Just "setback"
     , mvcWhatWentWrong = Just amWhatWentWrong
     , mvcImmediateDanger = Just amImmediateDanger
     , mvcEscapeRoute = Just amEscapeRoute
     }
-  AmDisaster{..} -> emptyVariantContext
+  AmDisaster{..} -> addActionContext amActionContext emptyVariantContext
     { mvcOutcomeType = Just "disaster"
     , mvcWhatWentWrong = Just amCatastrophe
     , mvcImmediateDanger = Just True
     , mvcPotentialTrauma = Just amTraumaRisk
     }
+  where
+    -- Add action context fields to variant context
+    addActionContext :: ActionToAftermathContext -> MoodVariantContext -> MoodVariantContext
+    addActionContext ctx mvc = mvc
+      { mvcActionDieChosen = Just ctx.atacDieChosen
+      , mvcActionPosition = Just (positionLabel ctx.atacPosition)
+      , mvcActionEffect = Just (effectLabel ctx.atacEffect)
+      , mvcActionTier = Just (tierLabel ctx.atacTier)
+      , mvcActionOtherDice = Just ctx.atacOtherDice
+      , mvcActionDomain = fmap domainLabel ctx.atacDomain
+      , mvcActionStakes = Just ctx.atacStakes
+      }
+
+    positionLabel = \case
+      Controlled -> "controlled"
+      Risky -> "risky"
+      Desperate -> "desperate"
+
+    effectLabel = \case
+      Limited -> "limited"
+      Standard -> "standard"
+      Great -> "great"
+
+    tierLabel = \case
+      Critical -> "critical"
+      Success -> "success"
+      Partial -> "partial"
+      Bad -> "bad"
+      Disaster -> "disaster"
+
+    domainLabel = \case
+      DomainInfiltration -> "infiltration"
+      DomainSocial -> "social"
+      DomainViolence -> "violence"
+      DomainPursuit -> "pursuit"
+      DomainArcane -> "arcane"
 
 -- | Extract downtime variant context
 downtimeVariantContext :: DowntimeVariant -> MoodVariantContext

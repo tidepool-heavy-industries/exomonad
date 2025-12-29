@@ -28,7 +28,7 @@ module DM.Loop
 
 import DM.State
 import DM.Context (buildDMContext, buildCompressionContext, DMContext(..))
-import DM.Output (TurnOutput(..), CompressionOutput(..), applyTurnOutput, applyCompression, DiceAction(..), DieOutcome(..))
+import DM.Output (TurnOutput(..), CompressionOutput(..), applyTurnOutput, applyCompression, DiceAction(..), DieOutcome(..), ClockTick(..))
 import DM.Templates (renderForMood, renderCompression, turnOutputSchema, compressionOutputSchema)
 import DM.Tools (DMEvent(..), dmTools, makeDMDispatcherWithPhase)
 import DM.GUI.Widgets.Events (formatEvent)
@@ -38,7 +38,7 @@ import Tidepool.Template (Schema(..))
 import Effectful
 import Control.Concurrent.MVar (takeMVar)
 import Control.Concurrent.STM (atomically, writeTVar, readTVar)
-import Control.Monad (when, replicateM)
+import Control.Monad (when, replicateM, forM_)
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Lazy as LBS
 import Data.Text (Text)
@@ -62,7 +62,7 @@ import qualified Tidepool.GUI.Core as GUI (logInfo)
 import Tidepool.GUI.Handler (makeGUIHandler)
 import Tidepool.Anthropic.Http (Message(..), ContentBlock(..), Role(..))
 import Data.Aeson (Value(..))
-import Data.Maybe (catMaybes)
+import Data.Maybe (catMaybes, fromMaybe)
 import qualified Data.Aeson.KeyMap as KM
 import qualified Data.Aeson.Key as Key
 import qualified Data.Vector as V
@@ -118,8 +118,14 @@ dmTurn input = do
   -- 3. If we STARTED in MoodTrauma, the turn just processed it - return to scene
   -- This ensures trauma gets one full turn to be narrated before transitioning
   case startingMood of
-    Just (MoodTrauma _) -> do
+    Just (MoodTrauma traumaVariant) -> do
       logInfo "Trauma turn completed, returning to scene"
+      -- Build context for the Weaver about what just happened
+      let traumaContext = TraumaToSceneContext
+            { ttscTraumaGained = traumaVariant.tvTraumaType.unTrauma
+            , ttscAdrenalineActive = traumaVariant.tvAdrenaline
+            }
+      modify @WorldState $ \s -> s { sceneEntryContext = Just (EntryFromTrauma traumaContext) }
       modify @WorldState $ updateMood (MoodScene (Encounter "aftermath of breakdown" UrgencyLow True))
     _ -> return ()
 
@@ -177,16 +183,16 @@ dmTurn input = do
                 logWarn $ "Tools invoked: " <> T.pack (show $ map (\ti -> ti.tiName) tpfToolsInvoked)
                 logWarn $ "Narrative was: " <> (if T.null tpfNarrative then "(empty)" else T.take 100 tpfNarrative)
 
-                -- Use fallback response with whatever narrative we got
-                let fallbackNarration = if T.null tpfNarrative
-                      then "*The world waits for your next move.*"
-                      else tpfNarrative
+                -- Try to extract narration from raw JSON first (don't show raw JSON to user!)
+                let fallbackNarration = case extractNarrationFromJson tpfRawJson of
+                      Just txt -> txt
+                      Nothing -> "*The world waits for your next move.*"
                 return Response
                   { responseText = fallbackNarration
                   , responseStressDelta = 0
                   , responseCoinDelta = 0
                   , responseHeatDelta = 0
-                  , responseSuggestedActions = ["Try something else", "Look around", "Wait"]
+                  , responseSuggestedActions = extractSuggestionsFromJson tpfRawJson
                   }
 
               -- Parsed successfully - apply output and continue
@@ -236,6 +242,41 @@ dmTurn input = do
 
                 -- Apply structured output to world state (non-dice deltas)
                 modify (applyTurnOutput result.trOutput)
+
+                -- Handle downtime → scene transition (The Tide flows back to the Weaver)
+                case mood of
+                  MoodDowntime _ -> do
+                    logInfo "Downtime turn completed, returning to scene"
+
+                    -- Auto-tick ALL threat clocks (time passed during rest)
+                    -- Downtime bypasses BetweenScenes where this normally happens
+                    tickThreatClocks
+                    logInfo "Threat clocks ticked (time passed during downtime)"
+
+                    -- Apply explicit clock ticks from LLM output (goal/project clocks)
+                    forM_ result.trOutput.clocksToTick $ \tick -> do
+                      let cid = ClockId tick.clockId
+                      modify @WorldState $ \s ->
+                        s { clocks = HM.adjust (advanceClock tick.ticks) cid s.clocks }
+                      logDebug $ "Advanced clock " <> tick.clockId <> " by " <> T.pack (show tick.ticks)
+
+                    -- Check for completed clocks
+                    checkClockConsequences
+
+                    -- Build context for the Weaver about the rest period
+                    let downtimeContext = DowntimeToSceneContext
+                          { dtscHook = fromMaybe "something pulls them back" result.trOutput.hookDescription
+                          , dtscTimeElapsed = fromMaybe "some time" result.trOutput.timeElapsed
+                          -- Calculate actual healing from state changes
+                          , dtscStressHealed = max 0 (stateBefore.player.stress - clamp 0 9 (stateBefore.player.stress + result.trOutput.stressDelta))
+                          , dtscHeatDecay = max 0 (stateBefore.player.heat - clamp 0 10 (stateBefore.player.heat + result.trOutput.heatDelta))
+                          , dtscDiceRecovered = result.trOutput.diceRecovered
+                          , dtscProjectProgress = Nothing  -- TODO: parse from output if project work was done
+                          }
+                        hookText = fromMaybe "the world calls" result.trOutput.hookDescription
+                    modify @WorldState $ \s -> s { sceneEntryContext = Just (EntryFromDowntime downtimeContext) }
+                    modify @WorldState $ updateMood (MoodScene (Encounter hookText UrgencyMedium True))
+                  _ -> return ()
 
                 -- Apply dice deltas separately (if any)
                 let (stressDelta, heatDelta, coinDeltaFromDice) = diceDeltas
@@ -327,22 +368,71 @@ checkClockConsequences
      )
   => Eff es ()
 checkClockConsequences = do
-  state <- get
+  state <- get @WorldState
   let allClocks = HM.toList state.clocks
       (completed, remaining) = foldr partitionClock ([], HM.empty) allClocks
 
-  -- Emit events for each completed clock
-  mapM_ emitClockComplete completed
+  -- Emit events AND apply consequences for each completed clock
+  forM_ completed $ \(ClockId clockId, clock) -> do
+    emit $ ClockCompleted clockId clock.clockName clock.clockConsequence
+    -- Apply the consequence to world state
+    modify @WorldState $ applyConsequence clock.clockConsequence
 
   -- Remove completed clocks from state
-  put state { clocks = remaining }
+  modify @WorldState $ \s -> s { clocks = remaining }
   where
     partitionClock (clockId, clock) (done, keep)
       | clock.clockFilled >= clock.clockSegments = ((clockId, clock) : done, keep)
       | otherwise = (done, HM.insert clockId clock keep)
 
-    emitClockComplete (ClockId clockId, clock) =
-      emit $ ClockCompleted clockId clock.clockName clock.clockConsequence
+-- | Apply a clock consequence to world state
+applyConsequence :: Consequence -> WorldState -> WorldState
+applyConsequence consequence state = case consequence of
+  -- Threat consequences
+  SpawnThread thread ->
+    state { threads = thread : state.threads }
+  FactionMoves _factionId _action ->
+    -- Faction actions are surfaced through events; LLM interprets them
+    state
+  RevealSecret _secret ->
+    -- Secrets are surfaced through events; LLM interprets them
+    state
+  ChangeLocation _locId _delta ->
+    -- Location changes are surfaced through events
+    state
+  Escalate _escalation ->
+    -- Escalations are surfaced through events
+    state
+  -- Goal consequences (rewards)
+  GainCoin amount ->
+    state { player = state.player { coin = state.player.coin + amount } }
+  GainRep factionId amount ->
+    state { factions = HM.adjust (increaseRep amount) factionId state.factions }
+  GainAsset _assetName ->
+    -- Assets would need an inventory system; for now just surfaced
+    state
+  OpenOpportunity _desc ->
+    -- Opportunities are narrative; surfaced through events
+    state
+  RemoveThreat clockId ->
+    -- Remove the specified threat clock
+    state { clocks = HM.delete clockId state.clocks }
+  where
+    -- Increase faction reputation by N steps
+    increaseRep :: Int -> Faction -> Faction
+    increaseRep n f = f { factionAttitude = increaseAttitudeN n f.factionAttitude }
+
+    increaseAttitudeN :: Int -> Attitude -> Attitude
+    increaseAttitudeN 0 a = a
+    increaseAttitudeN n a = increaseAttitudeN (n - 1) (increaseAttitude a)
+
+    increaseAttitude :: Attitude -> Attitude
+    increaseAttitude = \case
+      Hostile -> Wary
+      Wary -> Neutral
+      Neutral -> Favorable
+      Favorable -> Allied
+      Allied -> Allied  -- Can't go higher
 
 -- | Check if stress just hit max (trauma trigger)
 -- If player crossed from <9 to 9, transition to trauma mood
@@ -1527,6 +1617,10 @@ tickThreatClocks = modify @WorldState $ \s ->
       ThreatClock -> clock { clockFilled = min clock.clockSegments (clock.clockFilled + 1) }
       GoalClock -> clock  -- Goal clocks don't tick automatically
 
+-- | Advance a clock by N ticks (capped at segments)
+advanceClock :: Int -> Clock -> Clock
+advanceClock n clock = clock { clockFilled = min clock.clockSegments (clock.clockFilled + n) }
+
 -- | Generate brief transition narration via LLM
 generateTransitionNarration
   :: ( LLM :> es
@@ -2039,3 +2133,24 @@ deleteFirst _ [] = []
 deleteFirst x (y:ys)
   | x == y    = ys
   | otherwise = y : deleteFirst x ys
+
+-- ══════════════════════════════════════════════════════════════
+-- JSON EXTRACTION HELPERS (for fallback when parsing fails)
+-- ══════════════════════════════════════════════════════════════
+
+-- | Extract narration field from raw JSON (fallback when TurnOutput parsing fails)
+-- This ensures we never show raw JSON to the user
+extractNarrationFromJson :: Value -> Maybe Text
+extractNarrationFromJson (Object obj) =
+  case KM.lookup (Key.fromText "narration") obj of
+    Just (String txt) | not (T.null $ T.strip txt) -> Just txt
+    _ -> Nothing
+extractNarrationFromJson _ = Nothing
+
+-- | Extract suggestedActions from raw JSON (fallback when parsing fails)
+extractSuggestionsFromJson :: Value -> [Text]
+extractSuggestionsFromJson (Object obj) =
+  case KM.lookup (Key.fromText "suggestedActions") obj of
+    Just (Array arr) -> [txt | String txt <- V.toList arr]
+    _ -> ["Try something else", "Look around", "Wait"]
+extractSuggestionsFromJson _ = ["Try something else", "Look around", "Wait"]

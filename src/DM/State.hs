@@ -18,12 +18,22 @@ module DM.State
   , ActionVariant(..)
   , ActionDomain(..)
   , AftermathVariant(..)
+  , ActionToAftermathContext(..)
+  , emptyActionContext
   , TraumaVariant(..)
   , BargainVariant(..)
   , BargainOption(..)
   , BargainCost(..)
   , ClockInterrupt(..)
   , defaultMood
+    -- ** Scene Entry Context (what led to current scene)
+  , SceneEntryContext(..)
+  , DowntimeToSceneContext(..)
+  , AftermathToSceneContext(..)
+  , TraumaToSceneContext(..)
+  , emptyDowntimeToSceneContext
+  , emptyAftermathToSceneContext
+  , emptyTraumaToSceneContext
 
     -- * Player
   , PlayerState(..)
@@ -210,25 +220,54 @@ data ActionDomain
   | DomainArcane
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
+-- | Context carried from Action → Aftermath
+-- The die is chosen, consequences flow from this
+data ActionToAftermathContext = ActionToAftermathContext
+  { atacDieChosen :: Int             -- The die value that was selected
+  , atacPosition :: Position         -- Controlled/Risky/Desperate
+  , atacEffect :: Effect             -- Limited/Standard/Great
+  , atacTier :: OutcomeTier          -- Critical/Success/Partial/Bad/Disaster
+  , atacOtherDice :: [Int]           -- The dice that weren't chosen
+  , atacDomain :: Maybe ActionDomain -- What kind of action (Violence/Social/etc)
+  , atacStakes :: Text               -- What was at risk
+  }
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+
+-- | Default/empty action context (for backwards compatibility)
+emptyActionContext :: ActionToAftermathContext
+emptyActionContext = ActionToAftermathContext
+  { atacDieChosen = 0
+  , atacPosition = Risky
+  , atacEffect = Standard
+  , atacTier = Partial
+  , atacOtherDice = []
+  , atacDomain = Nothing
+  , atacStakes = ""
+  }
+
 -- | Aftermath variants - the outcome type
 data AftermathVariant
   = AmClean
       { amWhatAchieved :: Text
+      , amActionContext :: ActionToAftermathContext
       }
   | AmCostly
       { amWhatAchieved :: Text
       , amCostsPaid :: [Text]
       , amNewComplications :: [Text]
+      , amActionContext :: ActionToAftermathContext
       }
   | AmSetback
       { amWhatWentWrong :: Text
       , amImmediateDanger :: Bool
       , amEscapeRoute :: Text
+      , amActionContext :: ActionToAftermathContext
       }
   | AmDisaster
       { amCatastrophe :: Text
       , amTraumaRisk :: Bool
       , amWorldStateChanges :: [Text]
+      , amActionContext :: ActionToAftermathContext
       }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
@@ -328,6 +367,55 @@ instance FromJSON GamePhase where
       other -> fail $ "Unknown GamePhase tag: " <> T.unpack other
 
 -- ══════════════════════════════════════════════════════════════
+-- SCENE ENTRY CONTEXT
+-- ══════════════════════════════════════════════════════════════
+
+-- | Context carried from previous phase into current scene
+-- Allows templates to reference what led to this scene
+data SceneEntryContext
+  = EntryFromDowntime DowntimeToSceneContext
+  | EntryFromAftermath AftermathToSceneContext
+  | EntryFromTrauma TraumaToSceneContext
+  | EntryFresh  -- New scene, no prior context
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+
+-- | Context carried from Downtime → Scene (The Tide's farewell)
+data DowntimeToSceneContext = DowntimeToSceneContext
+  { dtscHook :: Text              -- What pulled them back to action
+  , dtscTimeElapsed :: Text       -- "a few hours", "three days", "a week"
+  , dtscStressHealed :: Int       -- How much stress was recovered
+  , dtscHeatDecay :: Int          -- How much heat faded
+  , dtscDiceRecovered :: Int      -- How many dice were restored
+  , dtscProjectProgress :: Maybe (Text, Int)  -- (projectName, progress added) if worked on project
+  }
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+
+-- | Context carried from Aftermath → Scene (The Echo's farewell)
+data AftermathToSceneContext = AftermathToSceneContext
+  { atscTransitionNote :: Text    -- Brief transition description
+  , atscUnresolvedThreats :: [Text]  -- What's still looming
+  , atscRecentCosts :: [Text]     -- What was just paid
+  }
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+
+-- | Context carried from Trauma → Scene (The Crack's farewell)
+data TraumaToSceneContext = TraumaToSceneContext
+  { ttscTraumaGained :: Text      -- What broke
+  , ttscAdrenalineActive :: Bool  -- Did they push through?
+  }
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+
+-- | Empty contexts for defaults
+emptyDowntimeToSceneContext :: DowntimeToSceneContext
+emptyDowntimeToSceneContext = DowntimeToSceneContext "" "" 0 0 0 Nothing
+
+emptyAftermathToSceneContext :: AftermathToSceneContext
+emptyAftermathToSceneContext = AftermathToSceneContext "" [] []
+
+emptyTraumaToSceneContext :: TraumaToSceneContext
+emptyTraumaToSceneContext = TraumaToSceneContext "" False
+
+-- ══════════════════════════════════════════════════════════════
 -- CORE STATE
 -- ══════════════════════════════════════════════════════════════
 
@@ -354,6 +442,8 @@ data WorldState = WorldState
   , recentCosts :: [Text]             -- From last 3 costly/setback outcomes
   , unresolvedThreats :: [Text]       -- Complications not yet addressed
   , pendingInterrupt :: Maybe ClockInterrupt  -- Clock triggered, awaiting handling
+  -- Scene entry context (what led to current scene)
+  , sceneEntryContext :: Maybe SceneEntryContext  -- Context from previous phase
   -- UI state (persisted for resume)
   , suggestedActions :: [Text]        -- Last LLM suggestions for quick-pick buttons
   }
@@ -383,6 +473,7 @@ initialWorld = WorldState
   , recentCosts = []
   , unresolvedThreats = []
   , pendingInterrupt = Nothing
+  , sceneEntryContext = Nothing
   , suggestedActions = []
   }
 
@@ -865,11 +956,18 @@ instance ToGVal m DowntimeVariant where toGVal = genericToGVal
 instance ToGVal m ActionVariant where toGVal = genericToGVal
 instance ToGVal m ActionDomain where toGVal = genericToGVal
 instance ToGVal m AftermathVariant where toGVal = genericToGVal
+instance ToGVal m ActionToAftermathContext where toGVal = genericToGVal
 instance ToGVal m TraumaVariant where toGVal = genericToGVal
 instance ToGVal m BargainVariant where toGVal = genericToGVal
 instance ToGVal m BargainOption where toGVal = genericToGVal
 instance ToGVal m BargainCost where toGVal = genericToGVal
 instance ToGVal m ClockInterrupt where toGVal = genericToGVal
+
+-- Scene Entry Context
+instance ToGVal m SceneEntryContext where toGVal = genericToGVal
+instance ToGVal m DowntimeToSceneContext where toGVal = genericToGVal
+instance ToGVal m AftermathToSceneContext where toGVal = genericToGVal
+instance ToGVal m TraumaToSceneContext where toGVal = genericToGVal
 
 -- Player
 instance ToGVal m PlayerState where toGVal = genericToGVal

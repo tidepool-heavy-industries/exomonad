@@ -329,6 +329,13 @@ downtimeOutputSchema = objectSchema
   , ("hookDescription", describeField "hookDescription"
       "What pulls them back to action. A knock, a rumor, a clock ticking."
       (emptySchema TString))
+  , ("clocksToTick", describeField "clocksToTick"
+      "Clocks to advance during rest. Threat clocks auto-tick; use this for goal/project clocks."
+      (arraySchema (objectSchema
+        [ ("clockId", describeField "clockId" "The clock's ID" (emptySchema TString))
+        , ("ticks", describeField "ticks" "Segments to advance (1-2 typical)" (emptySchema TInteger))
+        ]
+        ["clockId", "ticks"])))
   ]
   ["narration", "stressHealed", "diceRecovered", "timeElapsed", "hookDescription"]
 

@@ -3,6 +3,7 @@ module DM.Output
   ( -- * Turn Output
     TurnOutput(..)
   , NarrativeConnector(..)
+  , ClockTick(..)
   , emptyTurnOutput
   , applyTurnOutput
 
@@ -19,7 +20,7 @@ import DM.State
 import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
-import Data.Aeson (ToJSON, FromJSON)
+import Data.Aeson (ToJSON, FromJSON(..), (.:), (.:?), (.!=), withObject)
 
 -- ══════════════════════════════════════════════════════════════
 -- DICE ACTION (for action mode structured output)
@@ -72,8 +73,65 @@ data TurnOutput = TurnOutput
   , suggestedActions :: [Text]              -- 2-3 suggested next actions for player
   , traumaAssigned :: Maybe Text            -- If trauma turn, the trauma gained (e.g. "Cold", "Haunted")
   , diceAction :: Maybe DiceAction          -- Required in action mode: dice outcomes for player choice
+  -- Downtime-specific fields (The Tide)
+  , diceRecovered :: Int                    -- Dice restored to pool during downtime
+  , hookDescription :: Maybe Text           -- What pulls them back from downtime
+  , timeElapsed :: Maybe Text               -- How long downtime lasted ("three days", etc.)
+  , clocksToTick :: [ClockTick]              -- Clocks to advance during downtime
+  }
+  deriving (Show, Eq, Generic, ToJSON)
+
+-- | Clock tick request from LLM output
+data ClockTick = ClockTick
+  { clockId :: Text
+  , ticks :: Int
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
+
+-- | Custom FromJSON to handle missing fields gracefully
+-- Different mood schemas include different subsets of fields, so we need defaults
+-- Downtime uses stressHealed/heatDecay (positive = reduction), which we translate
+instance FromJSON TurnOutput where
+  parseJSON = withObject "TurnOutput" $ \o -> do
+    narration <- o .: "narration"
+    narrativeConnector <- o .:? "narrativeConnector"
+    -- Handle both stressDelta (direct) and stressHealed (inverted for downtime)
+    stressHealed <- o .:? "stressHealed" .!= 0
+    stressDeltaDirect <- o .:? "stressDelta" .!= 0
+    let stressDelta = if stressHealed > 0 then negate stressHealed else stressDeltaDirect
+    coinDelta <- o .:? "coinDelta" .!= 0
+    -- Handle both heatDelta (direct) and heatDecay (inverted for downtime)
+    heatDecay <- o .:? "heatDecay" .!= 0
+    heatDeltaDirect <- o .:? "heatDelta" .!= 0
+    let heatDelta = if heatDecay > 0 then negate heatDecay else heatDeltaDirect
+    continueScene <- o .:? "continueScene" .!= True
+    costDescription <- o .:? "costDescription"
+    threatDescription <- o .:? "threatDescription"
+    suggestedActions <- o .:? "suggestedActions" .!= []
+    traumaAssigned <- o .:? "traumaAssigned"
+    diceAction <- o .:? "diceAction"
+    -- Downtime-specific fields
+    diceRecovered <- o .:? "diceRecovered" .!= 0
+    hookDescription <- o .:? "hookDescription"
+    timeElapsed <- o .:? "timeElapsed"
+    clocksToTick <- o .:? "clocksToTick" .!= []
+    pure TurnOutput
+      { narration = narration
+      , narrativeConnector = narrativeConnector
+      , stressDelta = stressDelta
+      , coinDelta = coinDelta
+      , heatDelta = heatDelta
+      , continueScene = continueScene
+      , costDescription = costDescription
+      , threatDescription = threatDescription
+      , suggestedActions = suggestedActions
+      , traumaAssigned = traumaAssigned
+      , diceAction = diceAction
+      , diceRecovered = diceRecovered
+      , hookDescription = hookDescription
+      , timeElapsed = timeElapsed
+      , clocksToTick = clocksToTick
+      }
 
 emptyTurnOutput :: TurnOutput
 emptyTurnOutput = TurnOutput
@@ -88,6 +146,10 @@ emptyTurnOutput = TurnOutput
   , suggestedActions = []
   , traumaAssigned = Nothing
   , diceAction = Nothing
+  , diceRecovered = 0
+  , hookDescription = Nothing
+  , timeElapsed = Nothing
+  , clocksToTick = []
   }
 
 -- | Apply turn output to world state (cross-cutting updates only)
@@ -105,6 +167,10 @@ applyTurnOutput output state = state
           Just t  -> Trauma t : state.player.trauma
           Nothing -> state.player.trauma
       }
+  -- Recover dice during downtime (add to pool, capped at max pool size)
+  , dicePool = if output.diceRecovered > 0
+      then recoverDice output.diceRecovered state.dicePool
+      else state.dicePool
   -- Track costs for consequence echoing (keep last 3)
   , recentCosts = take 3 $ case output.costDescription of
       Just cost -> cost : state.recentCosts
@@ -120,6 +186,14 @@ applyTurnOutput output state = state
     newStress = case output.traumaAssigned of
       Just _  -> 0
       Nothing -> clamp 0 9 (state.player.stress + output.stressDelta)
+    -- Add dice to pool during downtime recovery
+    recoverDice n pool =
+      let maxPool = 6  -- Standard Blades pool size
+          currentCount = length pool.poolDice
+          toRecover = min n (maxPool - currentCount)
+          -- Generate dice values 1-6 for recovered dice (simple approach)
+          newDice = take toRecover [4, 3, 5, 2, 6, 1]  -- Placeholder values
+      in pool { poolDice = pool.poolDice ++ newDice }
 
 -- ══════════════════════════════════════════════════════════════
 -- COMPRESSION OUTPUT

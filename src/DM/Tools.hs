@@ -58,6 +58,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Aeson (Value, ToJSON, FromJSON)
 import Data.List (delete)
+import Data.Maybe (fromMaybe)
 import Control.Monad (when)
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HM
@@ -535,13 +536,37 @@ instance Tool Resolve DMEvent WorldState DMEffects where
     ["resolveOutcome", "resolveWhat"]
 
   executeTool input = do
-    -- Build aftermath variant based on outcome
+    state <- get @WorldState
+
+    -- Capture action context from current state before transitioning
+    let actionCtx = case state.pendingOutcome of
+          Just pending ->
+            let dieValue = fromMaybe 0 pending.chosenDie
+                tier = fromMaybe Partial pending.chosenTier
+                otherDice = case pending.chosenDie of
+                  Just chosen -> filter (/= chosen) state.dicePool.poolDice
+                  Nothing -> state.dicePool.poolDice
+                domain = case currentMood state of
+                  Just (MoodAction _ d) -> d
+                  _ -> Nothing
+            in ActionToAftermathContext
+              { atacDieChosen = dieValue
+              , atacPosition = pending.outcomePosition
+              , atacEffect = pending.outcomeEffect
+              , atacTier = tier
+              , atacOtherDice = otherDice
+              , atacDomain = domain
+              , atacStakes = pending.outcomeStakes
+              }
+          Nothing -> emptyActionContext
+
+    -- Build aftermath variant based on outcome, carrying action context
     let aftermath = case input.resolveOutcome of
-          "clean" -> AmClean input.resolveWhat
-          "costly" -> AmCostly input.resolveWhat input.resolveCosts input.resolveComplications
-          "setback" -> AmSetback input.resolveWhat False "retreat"
-          "disaster" -> AmDisaster input.resolveWhat True input.resolveComplications
-          _ -> AmCostly input.resolveWhat input.resolveCosts input.resolveComplications
+          "clean" -> AmClean input.resolveWhat actionCtx
+          "costly" -> AmCostly input.resolveWhat input.resolveCosts input.resolveComplications actionCtx
+          "setback" -> AmSetback input.resolveWhat False "retreat" actionCtx
+          "disaster" -> AmDisaster input.resolveWhat True input.resolveComplications actionCtx
+          _ -> AmCostly input.resolveWhat input.resolveCosts input.resolveComplications actionCtx
 
     -- Transition to Aftermath mood
     putMood (MoodAftermath aftermath)
@@ -569,7 +594,19 @@ instance Tool Accept DMEvent WorldState DMEffects where
     ]
     ["acceptTransition"]
 
-  executeTool _input = do
+  executeTool input = do
+    state <- get @WorldState
+
+    -- Capture aftermath context for the scene
+    let entryContext = AftermathToSceneContext
+          { atscTransitionNote = input.acceptTransition
+          , atscUnresolvedThreats = state.unresolvedThreats
+          , atscRecentCosts = state.recentCosts
+          }
+
+    -- Store the entry context and transition to Scene
+    modify @WorldState $ \s -> s { sceneEntryContext = Just (EntryFromAftermath entryContext) }
+
     -- Return to Scene mood (Encounter variant - default low-urgency continuation)
     putMood (MoodScene (Encounter "continuing" UrgencyLow True))
     emit (MoodTransition "accept" "aftermath" "scene")
@@ -662,8 +699,34 @@ instance Tool AcceptBargain DMEvent WorldState DMEffects where
         "heat" -> s { player = s.player { heat = min 10 (s.player.heat + inp.bargainCostAmount) } }
         "wanted" -> s { player = s.player { wanted = min 4 (s.player.wanted + 1) } }
         "trauma" -> s { player = s.player { trauma = Trauma "bargained" : s.player.trauma, stress = 0 } }
-        -- Clock and faction costs would need more sophisticated handling
+        "clock" -> case inp.bargainCostTarget of
+          Just clockIdText ->
+            let cid = ClockId clockIdText
+                ticks = max 1 inp.bargainCostAmount
+            in s { clocks = HM.adjust (advanceClockN ticks) cid s.clocks }
+          Nothing -> s  -- No target = no effect
+        "faction" -> case inp.bargainCostTarget of
+          Just factionIdText ->
+            let fid = FactionId factionIdText
+            in s { factions = HM.adjust decreaseFactionAttitude fid s.factions }
+          Nothing -> s  -- No target = no effect
         _ -> s
+
+      -- Advance a clock by N ticks (capped at segments)
+      advanceClockN :: Int -> Clock -> Clock
+      advanceClockN n clock = clock { clockFilled = min clock.clockSegments (clock.clockFilled + n) }
+
+      -- Decrease faction attitude by one step (they're owed a favor)
+      decreaseFactionAttitude :: Faction -> Faction
+      decreaseFactionAttitude f = f { factionAttitude = decreaseAttitude f.factionAttitude }
+
+      decreaseAttitude :: Attitude -> Attitude
+      decreaseAttitude = \case
+        Allied -> Favorable
+        Favorable -> Neutral
+        Neutral -> Wary
+        Wary -> Hostile
+        Hostile -> Hostile  -- Can't go lower
 
       moodName :: DMMood -> Text
       moodName (MoodScene _) = "scene"
