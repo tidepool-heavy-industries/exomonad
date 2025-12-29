@@ -66,6 +66,8 @@ library
         Tidying.Output
         Tidying.Templates
         Tidying.Loop
+        Tidying.Question
+        Tidying.Tools
     build-depends:
         base >= 4.17 && < 5,
         effectful-core >= 2.3 && < 3,

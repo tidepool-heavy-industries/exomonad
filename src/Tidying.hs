@@ -86,6 +86,19 @@ module Tidying
     -- * Templates
   , renderOrientPrompt
   , renderActPrompt
+
+    -- * Question DSL (Tidying.Question)
+    -- For ItemDisposition, import Tidying.Question directly
+    -- (its Trash/Donate constructors conflict with ItemClass)
+  , Question(..)
+  , Answer(..)
+  , Choice(..)
+
+    -- * Tools (Tidying.Tools)
+    -- Note: ProposeDisposition here is the TOOL type, not the Question constructor
+  , TidyingToolEvent(..)
+  , tidyingTools
+  , makeTidyingDispatcher
   ) where
 
 import Tidying.State
@@ -97,3 +110,5 @@ import Tidying.Agent (runTidyingSession)
 import Tidying.Context
 import Tidying.Output
 import Tidying.Templates
+import Tidying.Question (Question(..), Answer(..), Choice(..))
+import Tidying.Tools (TidyingToolEvent(..), tidyingTools, makeTidyingDispatcher)

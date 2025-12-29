@@ -504,6 +504,7 @@ runDMGame initialState handleEvent saveState = do
             { ihChoice = terminalChoice
             , ihText = terminalText
             , ihDice = terminalDice
+            , ihCustom = \tag _ -> error $ "Custom request '" <> T.unpack tag <> "' not supported in terminal"
             }
 
       -- Start without a scene - first turn establishes character and situation
@@ -569,6 +570,7 @@ runDMGameWithDB conn gameId mCursor initialState handleEvent = do
             { ihChoice = terminalChoice
             , ihText = terminalText
             , ihDice = terminalDice
+            , ihCustom = \tag _ -> error $ "Custom request '" <> T.unpack tag <> "' not supported in terminal"
             }
 
       -- Preserve loaded scene, or create intro scene if none exists

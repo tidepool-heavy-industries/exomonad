@@ -30,6 +30,7 @@ module Tidepool.Effect
   , requestText
   , requestDice
   , requestCustom
+  , requestQuestion
   , logMsg
   , logDebug
   , logInfo
@@ -61,6 +62,11 @@ module Tidepool.Effect
   , runChatHistory
   , runChatHistoryWithDB
 
+    -- * Question UI Effect (separate, for Tidying)
+  , QuestionUI(..)
+  , QuestionHandler
+  , runQuestionUI
+
     -- * Tool Execution Types
   , ToolDispatcher
   , ToolResult(..)
@@ -72,6 +78,11 @@ module Tidepool.Effect
 
     -- * Turn Outcome
   , TurnOutcome(..)
+
+    -- * Question DSL (re-exports)
+  , Question(..)
+  , Answer(..)
+  , ItemDisposition(..)
   ) where
 
 import Effectful
@@ -80,7 +91,7 @@ import qualified Effectful.State.Static.Local as EState
 import System.Random (randomRIO)
 import Data.Text (Text)
 import qualified Data.Text as T
-import qualified Data.Text.IO as TIO
+-- Note: Data.Text.IO removed - logging currently disabled in runLog
 import Data.Aeson (Value(..), FromJSON, ToJSON, fromJSON, toJSON, Result(..), encode, decode)
 import qualified Data.Aeson.KeyMap as KM
 import qualified Data.Vector as V
@@ -98,6 +109,7 @@ import Tidepool.Anthropic.Client
 -- collision with Tidepool.Effect.ToolResult
 import Tidepool.Anthropic.Http (ThinkingContent(..))
 import qualified Tidepool.GUI.Core as GUICore
+import Tidying.Question (Question(..), Answer(..), ItemDisposition(..))
 import Tidepool.GUI.Core (GUIBridge)
 import qualified Tidepool.Storage as Storage
 import Database.SQLite.Simple (Connection)
@@ -660,6 +672,7 @@ runLLMWithToolsHooked hooks config dispatcher = interpret $ \_ -> \case
     -- Describe a content block for debugging
     describeBlock :: ContentBlock -> String
     describeBlock (TextBlock t) = "Text(" <> show (T.take 50 t) <> if T.length t > 50 then "..." else "" <> ")"
+    describeBlock (ImageBlock _) = "Image"
     describeBlock (ToolUseBlock tu) = "ToolUse(" <> T.unpack tu.toolName <> ")"
     describeBlock (ToolResultBlock _) = "ToolResult"
     describeBlock (ThinkingBlock _) = "Thinking"
@@ -823,6 +836,35 @@ runRequestInput (InputHandler choice txtInput dice custom) = interpret $ \_ -> \
   RequestCustom tag payload -> liftIO $ custom tag payload
 
 -- ══════════════════════════════════════════════════════════════
+-- QUESTION UI EFFECT (for Tidying agent)
+-- ══════════════════════════════════════════════════════════════
+
+-- | Separate effect for Question DSL - only used by agents that need it.
+-- This keeps effects non-monolithic: DM and Delta don't need to provide
+-- a question handler.
+data QuestionUI :: Effect where
+  -- | Request structured question with conditional reveals
+  -- Uses the Question DSL - GUI renders as buttons + fallback text input.
+  AskQuestion
+    :: Question          -- Question tree DSL
+    -> QuestionUI m Answer
+
+type instance DispatchOf QuestionUI = 'Dynamic
+
+-- | Ask a structured question using the Question DSL
+-- The GUI renders choices as buttons with text fallback.
+requestQuestion :: QuestionUI :> es => Question -> Eff es Answer
+requestQuestion q = send (AskQuestion q)
+
+-- | Handler for Question DSL
+type QuestionHandler = Question -> IO Answer
+
+-- | Run the QuestionUI effect
+runQuestionUI :: IOE :> es => QuestionHandler -> Eff (QuestionUI : es) a -> Eff es a
+runQuestionUI handler = interpret $ \_ -> \case
+  AskQuestion q -> liftIO $ handler q
+
+-- ══════════════════════════════════════════════════════════════
 -- LOG EFFECT
 -- ══════════════════════════════════════════════════════════════
 
@@ -856,14 +898,8 @@ logWarn = logMsg Warn
 -- Only logs messages at or above the given minimum level
 runLog :: IOE :> es => LogLevel -> Eff (Log : es) a -> Eff es a
 runLog minLevel = interpret $ \_ -> \case
-  LogMsg level msg
-    | level >= minLevel -> liftIO $ do
-        let prefix = case level of
-              Debug -> "[DEBUG] "
-              Info  -> "[INFO]  "
-              Warn  -> "[WARN]  "
-        -- TIO.putStrLn (prefix <> msg)
-        return ()
+  LogMsg level _msg
+    | level >= minLevel -> pure ()  -- Logging disabled; use runLogWithBridge for GUI output
     | otherwise -> pure ()
 
 -- | Run the Log effect, logging to GUI bridge debug panel

@@ -429,6 +429,7 @@ runDeltaAgent config = do
             putStrLn $ T.unpack prompt
             T.pack <$> getLine
         , ihDice = \_ _ -> error "Dice not used in delta agent"
+        , ihCustom = \tag _ -> error $ "Custom request '" <> T.unpack tag <> "' not used in delta agent"
         }
 
       displayProposal :: Proposal -> Eff AgentEffects ()
