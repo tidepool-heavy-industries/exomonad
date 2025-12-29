@@ -40,9 +40,6 @@ module Tidying.Question
     -- * Answers
   , Answer(..)
 
-    -- * Conditions
-  , Condition(..)
-
     -- * Smart Constructors
   , proposeItem
   , confirm
@@ -52,10 +49,7 @@ module Tidying.Question
 
 import Control.Applicative ((<|>))
 import Data.Aeson
-import Data.Aeson.Key (fromText)
 import Data.Text (Text)
-import Data.Map.Strict (Map)
-import qualified Data.Map.Strict as Map
 import GHC.Generics (Generic)
 
 -- ══════════════════════════════════════════════════════════════
@@ -100,9 +94,6 @@ instance FromJSON ItemDisposition where
 -- ══════════════════════════════════════════════════════════════
 
 -- | A question the agent asks the user
---
--- Questions can have conditional follow-ups via 'choiceReveals' or
--- the 'chReveals' map for option-as-key nesting.
 data Question
   -- | Propose item disposition with ranked choices
   -- First choice is agent's best guess (highlighted in UI)
@@ -118,12 +109,11 @@ data Question
       , cfDefault :: Bool                 -- ^ Pre-selected answer
       }
 
-  -- | Multi-choice with optional per-choice follow-ups
+  -- | Multi-choice question
   | Choose
       { chPrompt :: Text                  -- ^ "What does this space need to DO?"
-      , chId :: Text                      -- ^ For referencing in conditions
+      , chId :: Text                      -- ^ Question identifier
       , chChoices :: [ChoiceOption]       -- ^ Available options
-      , chReveals :: Map Text [Question]  -- ^ Option-as-key nesting
       }
 
   -- | Free text input (last resort)
@@ -131,25 +121,12 @@ data Question
       { ftPrompt :: Text
       , ftPlaceholder :: Maybe Text
       }
-
-  -- | Group of questions (all visible together)
-  | QuestionGroup
-      { qgLabel :: Maybe Text
-      , qgQuestions :: [Question]
-      }
-
-  -- | Conditional visibility
-  | ConditionalQ
-      { cqWhen :: Condition
-      , cqThen :: Question
-      }
   deriving (Show, Eq, Generic)
 
 -- | A choice for ProposeDisposition (item classification)
 data Choice = Choice
   { choiceLabel :: Text                   -- ^ "Kitchen counter"
   , choiceValue :: ItemDisposition        -- ^ PlaceAt "kitchen"
-  , choiceReveals :: Maybe [Question]     -- ^ Follow-up if selected
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
@@ -160,7 +137,7 @@ data ChoiceOption = ChoiceOption
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
--- Custom JSON for Question to match popup-mcp style
+-- Custom JSON for Question
 instance ToJSON Question where
   toJSON (ProposeDisposition item choices fallback) = object
     [ "proposeDisposition" .= object
@@ -175,30 +152,18 @@ instance ToJSON Question where
         , "default" .= def
         ]
     ]
-  toJSON (Choose prompt qid choices reveals) = object $
+  toJSON (Choose prompt qid choices) = object
     [ "choose" .= object
-        ([ "prompt" .= prompt
-         , "id" .= qid
-         , "choices" .= choices
-         ] ++ revealEntries)
+        [ "prompt" .= prompt
+        , "id" .= qid
+        , "choices" .= choices
+        ]
     ]
-    where
-      revealEntries = map (\(k, v) -> fromText k .= v) (Map.toList reveals)
   toJSON (FreeText prompt placeholder) = object
     [ "freeText" .= object
         [ "prompt" .= prompt
         , "placeholder" .= placeholder
         ]
-    ]
-  toJSON (QuestionGroup label qs) = object
-    [ "group" .= object
-        [ "label" .= label
-        , "questions" .= qs
-        ]
-    ]
-  toJSON (ConditionalQ cond q) = object
-    [ "when" .= cond
-    , "then" .= q
     ]
 
 instance FromJSON Question where
@@ -207,8 +172,6 @@ instance FromJSON Question where
     <|> (parseConfirm o)
     <|> (parseChoose o)
     <|> (parseFreeText o)
-    <|> (parseGroup o)
-    <|> (parseConditional o)
     where
       parseProposeDisposition o = do
         pd <- o .: "proposeDisposition"
@@ -229,37 +192,12 @@ instance FromJSON Question where
           <$> ch .: "prompt"
           <*> ch .: "id"
           <*> ch .: "choices"
-          <*> pure Map.empty  -- TODO: parse reveals from remaining keys
 
       parseFreeText o = do
         ft <- o .: "freeText"
         FreeText
           <$> ft .: "prompt"
           <*> ft .:? "placeholder"
-
-      parseGroup o = do
-        g <- o .: "group"
-        QuestionGroup
-          <$> g .:? "label"
-          <*> g .: "questions"
-
-      parseConditional o =
-        ConditionalQ
-          <$> o .: "when"
-          <*> o .: "then"
-
--- ══════════════════════════════════════════════════════════════
--- CONDITIONS
--- ══════════════════════════════════════════════════════════════
-
--- | Conditions for visibility (simplified from popup-mcp)
-data Condition
-  = RefEquals Text Text           -- ^ @id == "value"
-  | RefTrue Text                  -- ^ @id (truthy check)
-  | CondAnd Condition Condition   -- ^ &&
-  | CondOr Condition Condition    -- ^ ||
-  | CondNot Condition             -- ^ !
-  deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
 -- ══════════════════════════════════════════════════════════════
 -- ANSWERS
@@ -271,7 +209,6 @@ data Answer
   | ConfirmAnswer Bool                    -- ^ Response to Confirm
   | ChoiceAnswer Text                     -- ^ Response to Choose (option value)
   | TextAnswer Text                       -- ^ Response to FreeText or fallback
-  | GroupAnswer (Map Text Answer)         -- ^ Response to QuestionGroup
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
 -- ══════════════════════════════════════════════════════════════
@@ -290,7 +227,7 @@ data Answer
 proposeItem :: Text -> [(Text, ItemDisposition)] -> Question
 proposeItem item choices = ProposeDisposition
   { pdItem = item
-  , pdChoices = map (\(lbl, val) -> Choice lbl val Nothing) choices
+  , pdChoices = map (\(lbl, val) -> Choice lbl val) choices
   , pdFallback = Just "Where does it actually go?"
   }
 
@@ -310,7 +247,6 @@ askFunction = Choose
       , ChoiceOption "Store - keep things organized" "storage"
       , ChoiceOption "Live - hang out and relax" "living"
       ]
-  , chReveals = Map.empty
   }
 
 -- | Ask for specific location with common options
@@ -318,10 +254,10 @@ askLocation :: Text -> Question
 askLocation item = ProposeDisposition
   { pdItem = item
   , pdChoices =
-      [ Choice "Desk" (PlaceAt "desk") Nothing
-      , Choice "Shelf" (PlaceAt "shelf") Nothing
-      , Choice "Drawer" (PlaceAt "drawer") Nothing
-      , Choice "Closet" (PlaceAt "closet") Nothing
+      [ Choice "Desk" (PlaceAt "desk")
+      , Choice "Shelf" (PlaceAt "shelf")
+      , Choice "Drawer" (PlaceAt "drawer")
+      , Choice "Closet" (PlaceAt "closet")
       ]
   , pdFallback = Just "Where exactly?"
   }

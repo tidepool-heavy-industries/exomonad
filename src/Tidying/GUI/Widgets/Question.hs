@@ -11,8 +11,6 @@
 -- * 'Confirm': Yes/No buttons with Y/N keyboard shortcuts
 -- * 'Choose': Option buttons with number keys 1-9
 -- * 'FreeText': Text input with placeholder, Enter to submit
--- * 'QuestionGroup': Renders first question only (MVP)
--- * 'ConditionalQ': Renders inner question unconditionally (MVP)
 --
 -- = Keyboard Support
 --
@@ -22,18 +20,6 @@
 -- * Y/N keys for Confirm questions
 -- * Enter/Space on focused cards
 -- * Tab to navigate between options
---
--- = Limitations (MVP)
---
--- The following features are not yet implemented:
---
--- * @choiceReveals@ - Follow-up questions after a choice are ignored
--- * @chReveals@ map in Choose - Per-option follow-ups are ignored
--- * @ConditionalQ@ conditions - All conditional questions render unconditionally
--- * @QuestionGroup@ - Only the first question is rendered (no GroupAnswer collection)
---
--- These would require stateful widget management to track selections and
--- render cascading follow-up questions.
 --
 module Tidying.GUI.Widgets.Question
   ( -- * Main renderer
@@ -81,20 +67,11 @@ renderQuestion bridge = \case
   Confirm prompt defVal ->
     renderConfirm bridge prompt defVal
 
-  Choose prompt qid options _reveals ->
-    -- Note: reveals (follow-up questions) not yet implemented
+  Choose prompt qid options ->
     renderChoose bridge prompt qid options
 
   FreeText prompt placeholder ->
     renderFreeText bridge prompt placeholder
-
-  QuestionGroup label questions ->
-    renderGroup bridge label questions
-
-  ConditionalQ _cond question ->
-    -- Note: condition evaluation not yet implemented
-    -- Just render the inner question
-    renderQuestion bridge question
 
 -- ══════════════════════════════════════════════════════════════
 -- DISPOSITION (Ranked Choices)
@@ -389,37 +366,3 @@ renderFreeText bridge prompt mPlaceholder = do
     { qrElement = container
     , qrFocusTarget = Just inputEl
     }
-
--- ══════════════════════════════════════════════════════════════
--- QUESTION GROUP
--- ══════════════════════════════════════════════════════════════
-
--- | Render QuestionGroup as stacked questions
---
--- Note: For MVP, this renders questions sequentially.
--- Full implementation would collect all answers as GroupAnswer.
-renderGroup
-  :: GUIBridge state
-  -> Maybe Text     -- ^ Group label
-  -> [Question]     -- ^ Questions in group
-  -> UI QuestionResult
-renderGroup bridge mLabel questions = do
-  container <- UI.div #. "question-group"
-
-  -- Optional label
-  case mLabel of
-    Just lbl -> void $ UI.div #. "group-label" # set text (T.unpack lbl)
-              >>= \el -> element container #+ [element el]
-    Nothing -> pure ()
-
-  -- For MVP, just render first question
-  -- TODO: Render all and collect GroupAnswer
-  case questions of
-    (q:_) -> do
-      result <- renderQuestion bridge q
-      void $ element container #+ [element result.qrElement]
-      pure result { qrElement = container }
-    [] -> do
-      void $ UI.div # set text "(empty group)"
-            >>= \el -> element container #+ [element el]
-      pure QuestionResult { qrElement = container, qrFocusTarget = Nothing }

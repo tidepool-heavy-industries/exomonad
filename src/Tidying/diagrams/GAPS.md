@@ -171,54 +171,7 @@ Analyze this space. What do you see? How messy is it? What should we tackle firs
 
 ---
 
-## 9. Question DSL Details (Partial in Diagrams)
-
-### ConditionalQ (Not Implemented in GUI)
-
-```haskell
-| ConditionalQ
-    { cqWhen :: Condition
-    , cqThen :: Question
-    }
-```
-
-Code exists but GUI renders unconditionally.
-
-### Condition Type
-
-```haskell
-data Condition
-  = AnswerEquals Text Text    -- question_id, value
-  | AnswerContains Text Text  -- question_id, substring
-  | And [Condition]
-  | Or [Condition]
-  | Not Condition
-```
-
-### QuestionGroup (Only First Rendered)
-
-```haskell
-| QuestionGroup
-    { qgLabel :: Maybe Text
-    , qgQuestions :: [Question]
-    }
-```
-
-GUI only renders first question, drops the rest.
-
-### Choose Reveals (Not Implemented)
-
-```haskell
-| Choose
-    { chReveals :: Map Text [Question]  -- Option-as-key nesting
-    }
-```
-
-The `chReveals` map exists but GUI ignores it.
-
----
-
-## 10. Action Classification (Not in Diagrams)
+## 9. Action Classification (Not in Diagrams)
 
 ### `isQuestion` (`Action.hs`)
 
@@ -260,7 +213,7 @@ isInstruction _ = False
 
 ---
 
-## 11. Constants (Not in Diagrams)
+## 10. Constants (Not in Diagrams)
 
 | Constant | Value | Location |
 |----------|-------|----------|
@@ -279,12 +232,9 @@ isInstruction _ = False
 5. **AskSpaceFunction** and **ConfirmDone** tool flows
 6. **Full TidyingEvent** list
 7. **Constants** reference
-8. **Question DSL limitations** (reveals/conditional not implemented)
 
 ---
 
 ## Summary: What Code Should Fix
 
-1. **Fix QuestionGroup** to render all questions OR remove from type
-2. **Implement Choose reveals** OR remove from type
-3. **Implement ConditionalQ** evaluation OR remove from type
+(All items addressed - Question DSL simplified)

@@ -27,7 +27,6 @@ import Tidying.Loop (TidyingEvent(..))
 import Tidying.State (SessionState(..))
 import Tidying.Question (Question(..), Answer(..), ItemDisposition(..))
 import Tidying.Tools (makeTidyingDispatcher)
-import qualified Data.Map.Strict as Map
 import Tidepool.Effect
   ( State(..)
   , runRandom
@@ -238,10 +237,8 @@ fallbackAnswer :: Question -> Answer
 fallbackAnswer = \case
   ProposeDisposition _ _ _ -> DispositionAnswer SkipForNow
   Confirm _ defVal -> ConfirmAnswer defVal
-  Choose _ _ _ _ -> ChoiceAnswer ""
+  Choose _ _ _ -> ChoiceAnswer ""
   FreeText _ _ -> TextAnswer ""
-  QuestionGroup _ _ -> GroupAnswer Map.empty
-  ConditionalQ _ q -> fallbackAnswer q
 
 -- | Run State effect with live synchronization to GUIBridge
 --

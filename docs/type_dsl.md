@@ -20,7 +20,10 @@ A type-level DSL for defining LLM agent state machines with automatic Mermaid di
 |------|---------|----------------|----------------|-------------------|
 | `LLM` | LLM invocation | Template or Vision, Schema | Tools | Must have JSON Schema |
 | `Logic` | Haskell computation | Sig, Eff or Pure | — | Any type (from Sig) |
-| `Canned` | Literal response | Text or Template | — | Text |
+
+**Why no Canned/Literal node?** Static text is just `Logic :@ Sig (() -> Text) :@ Pure`. Dispatch on values is `Logic :@ Sig (Action -> Text) :@ Pure`. No need for a separate node kind.
+
+**Future: Format/Render nodes.** If we want template interpolation without LLM calls (e.g., `"Put it on {location}"`), we'd add a `Format` node kind that shares template machinery with LLM nodes but skips the model invocation.
 
 ### Edges
 
@@ -86,12 +89,10 @@ type PureCheck = "check" := Logic
     :@ Sig (Action -> Bool)
     :@ Pure  -- sugar for Eff '[]
 
--- Canned nodes: literal text
-type TrashResponse = "trash" := Canned
-    :@ Text "Trashed! Next?"
-
-type PlaceResponse = "place" := Canned
-    :@ Template "Put it on {location}. Next?"
+-- Pure logic for static/computed responses (no separate Canned kind needed)
+type CannedResponse = "canned" := Logic
+    :@ Sig (Action -> Text)
+    :@ Pure
 ```
 
 ### Collecting Nodes
@@ -182,6 +183,7 @@ tidyingHandlers = Handlers
       InstructTrash  -> "Trashed! Next?"
       InstructUnsure -> "Unsure pile. Next?"
       InstructNext   -> "What's next?"
+      _              -> "Okay. Next?"
 
   , act = \ctx ->
       runLLMWithTools actTemplate [proposeDisposition] ctx
@@ -211,7 +213,7 @@ flowchart TD
 
     decide{{"decide<br/>─────────<br/>Logic · [State, Log]<br/>→ (Action, Phase)"}}
 
-    canned["canned<br/>─────────<br/>Canned<br/>→ Text"]
+    canned["canned<br/>─────────<br/>Logic · Pure<br/>→ Text"]
 
     act[["act<br/>─────────<br/>LLM · Template · Tools<br/>→ Text"]]
 
@@ -259,9 +261,11 @@ flowchart TD
 |-----------|---------------|---------|
 | `LLM` | Stadium (rounded) `[[...]]` | `foo[["foo"]]` |
 | `Logic` | Diamond `{{...}}` | `foo{{"foo"}}` |
-| `Canned` | Rectangle `[...]` | `foo["foo"]` |
+| `Logic :@ Pure` | Rectangle `[...]` | `foo["foo"]` (pure, no effects) |
 | `Entry` | Circle `((●))` | `entry((●))` |
 | `Exit` | Circle `((◆))` | `exit((◆))` |
+
+Logic nodes with effects render as diamonds (decision points). Logic nodes with `Pure` render as rectangles (simple computation).
 
 ---
 
@@ -276,7 +280,6 @@ flowchart TD
 
 data LLM      -- LLM invocation node
 data Logic    -- Haskell computation node
-data Canned   -- Literal text node
 
 
 -- ═══════════════════════════════════════════════════════════════
@@ -291,8 +294,6 @@ data Vision                    -- Vision capability for LLM
 data Sig (f :: Type)           -- Function signature for Logic
 data Eff (es :: [Effect])      -- Effects for Logic
 data Pure                      -- No effects (sugar for Eff '[])
-
-data Text (s :: Symbol)        -- Literal text for Canned
 
 
 -- ═══════════════════════════════════════════════════════════════
@@ -354,11 +355,6 @@ type family ValidProperty (kind :: Type) (prop :: Type) :: Constraint where
   ValidProperty Logic (Schema _)   = TypeError (ErrLogicNoSchema)
   ValidProperty Logic (Tools _)    = TypeError (ErrLogicNoTools)
 
-  -- Canned: Text or simple Template only
-  ValidProperty Canned (Text s)     = KnownSymbol s
-  ValidProperty Canned (Template t) = SimpleTemplate t
-  ValidProperty Canned _            = TypeError (ErrCannedOnlyText)
-
 
 -- ═══════════════════════════════════════════════════════════════
 -- REQUIRED PROPERTIES PER KIND
@@ -372,9 +368,6 @@ type family HasRequired (kind :: Type) (props :: [Type]) :: Constraint where
   HasRequired Logic props =
     ( RequireProp (Sig _) props (ErrMissingSig "Logic")
     , RequireOneOf '[Eff _, Pure] props (ErrMissingEff "Logic")
-    )
-  HasRequired Canned props =
-    ( RequireOneOf '[Text _, Template _] props (ErrMissingText "Canned")
     )
 
 
@@ -392,8 +385,6 @@ type ErrLogicNoSchema =
   'Text "Logic nodes don't have Schema — output type comes from Sig"
 type ErrLogicNoTools =
   'Text "Logic nodes can't call tools — that's what LLM nodes are for"
-type ErrCannedOnlyText =
-  'Text "Canned nodes only contain text"
 
 type ErrMissingSchema node =
   'Text node ':<>: 'Text " node missing required: Schema"
@@ -403,8 +394,6 @@ type ErrMissingSig node =
   'Text node ':<>: 'Text " node missing required: Sig"
 type ErrMissingEff node =
   'Text node ':<>: 'Text " node needs Eff '[...] or Pure"
-type ErrMissingText node =
-  'Text node ':<>: 'Text " node needs Text or Template"
 ```
 
 ### Property Extraction
@@ -462,12 +451,10 @@ type family NodeKind (node :: Type) :: Type where
 type family NodeOutput (node :: Type) :: Type where
   NodeOutput (Node _ LLM props)    = GetSchema props
   NodeOutput (Node _ Logic props)  = ResultType (GetSig props)
-  NodeOutput (Node _ Canned _)     = Text
 
 type family NodeEffects (node :: Type) :: [Effect] where
   NodeEffects (Node _ LLM _)       = '[LLMEffect]
   NodeEffects (Node _ Logic props) = GetEffects props
-  NodeEffects (Node _ Canned _)    = '[]
 
 
 -- ═══════════════════════════════════════════════════════════════
@@ -479,8 +466,6 @@ type family HandlerType (node :: Type) :: Type where
     LLMHandler (GetTemplate props) (GetTools props) (GetSchema props)
   HandlerType (Node _ Logic props) =
     GetSig props
-  HandlerType (Node _ Canned _) =
-    ()  -- no handler needed, text is in the type
 ```
 
 ### Mermaid Generation
@@ -506,7 +491,7 @@ data NodeRepr = NodeRepr
   , nrOutput :: Text
   }
 
-data NodeKindRepr = LLMRepr | LogicRepr | CannedRepr
+data NodeKindRepr = LLMRepr | LogicRepr | LogicPureRepr
 
 data EdgeRepr = EdgeRepr
   { erFrom   :: Text
@@ -525,9 +510,9 @@ renderMermaid gr = T.unlines $
 
 renderNode :: NodeRepr -> Text
 renderNode nr = case nrKind nr of
-  LLMRepr    -> nrName nr <> "[[\"" <> label <> "\"]]"
-  LogicRepr  -> nrName nr <> "{{\"" <> label <> "\"}}"
-  CannedRepr -> nrName nr <> "[\"" <> label <> "\"]"
+  LLMRepr       -> nrName nr <> "[[\"" <> label <> "\"]]"
+  LogicRepr     -> nrName nr <> "{{\"" <> label <> "\"}}"
+  LogicPureRepr -> nrName nr <> "[\"" <> label <> "\"]"
   where
     label = nrName nr <> "<br/>→ " <> nrOutput nr
 
@@ -571,8 +556,9 @@ type Decide = "decide" := Logic
             -> Eff '[State SessionState, Log] (Action, Phase))
     :@ Eff '[State SessionState, Log]
 
-type CannedResponse = "canned" := Canned
-    :@ Text "Response text"  -- actual dispatch in handler
+type CannedResponse = "canned" := Logic
+    :@ Sig (Action -> Text)
+    :@ Pure
 
 type ActWithTools = "act" := LLM
     :@ Template ActTpl
@@ -650,7 +636,11 @@ tidyingHandlers = Handlers
             _ -> pure (InstructNext, Sorting)
         _ -> pure (InstructNext, phase state)
 
-  , canned = ()  -- text is in the type, dispatch handled by runner
+  , canned = \action -> case action of
+      InstructTrash  -> "Trashed! Next?"
+      InstructUnsure -> "Unsure pile. Next?"
+      InstructNext   -> "What's next?"
+      _              -> "Okay. Next?"
 
   , act = \ctx ->
       runLLMWithTools actTemplate [proposeDisposition] ctx
@@ -700,16 +690,18 @@ error:
     • In the type synonym declaration for 'BadNode'
 ```
 
-### Wrong kind of node
+### Wrong property for Logic
 
 ```haskell
-type BadNode = "foo" := Canned
-    :@ Tools '[MyTool]  -- Canned can't have Tools!
+type BadNode = "foo" := Logic
+    :@ Sig MyFn
+    :@ Pure
+    :@ Tools '[MyTool]  -- Logic can't have Tools!
 ```
 
 ```
 error:
-    • Canned nodes only contain text
+    • Logic nodes can't call tools — that's what LLM nodes are for
     • In the type synonym declaration for 'BadNode'
 ```
 
