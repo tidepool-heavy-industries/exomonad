@@ -24,10 +24,12 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import GHC.Generics (Generic)
 
+import Tidying.Types (ItemName(..), Location(..), AnxietyTrigger(..))
+
 -- | How an item should be classified
 data ItemClass
   = Trash                  -- ^ Obviously garbage
-  | Belongs Text           -- ^ Belongs somewhere: "desk", "shelf", "drawer"
+  | Belongs Location       -- ^ Belongs somewhere: "desk", "shelf", "drawer"
   | Unsure                 -- ^ Not sure yet, goes in unsure pile
   | NeedsDecisionSupport   -- ^ User hesitating, needs reframe
   deriving (Eq, Show, Generic, ToJSON, FromJSON)
@@ -40,17 +42,17 @@ data Situation
   | OverwhelmedNeedMomentum  -- ^ User overwhelmed, skip questions, start moving
 
   -- Sorting phase
-  | ItemDescribed Text ItemClass  -- ^ User described an item
-  | ActionDone                    -- ^ User completed an instruction
-  | UnsureGrowing                 -- ^ Unsure pile too big, needs split
-  | MainPileDone                  -- ^ Current pile finished
+  | ItemDescribed ItemName ItemClass  -- ^ User described an item
+  | ActionDone                        -- ^ User completed an instruction
+  | UnsureGrowing                     -- ^ Unsure pile too big, needs split
+  | MainPileDone                      -- ^ Current pile finished
 
   -- Energy/stuck signals (any phase)
-  | Stuck (Maybe Text)       -- ^ User stuck, maybe on specific item
-  | Anxious Text             -- ^ User anxious about something ("boxes")
-  | Flagging                 -- ^ Energy dropping
-  | WantsToContinue          -- ^ User wants to keep going
-  | WantsToStop              -- ^ User wants to pause/stop
+  | Stuck (Maybe ItemName)     -- ^ User stuck, maybe on specific item
+  | Anxious AnxietyTrigger     -- ^ User anxious about something ("boxes")
+  | Flagging                   -- ^ Energy dropping
+  | WantsToContinue            -- ^ User wants to keep going
+  | WantsToStop                -- ^ User wants to pause/stop
 
   -- Completion
   | AllDone                  -- ^ Session complete
@@ -75,10 +77,10 @@ parseSituation t = case T.words (T.strip t) of
   ["WantsToStop"] -> Just WantsToStop
   ["AllDone"] -> Just AllDone
 
-  ("Stuck" : rest) -> Just $ Stuck (parseQuoted $ T.unwords rest)
+  ("Stuck" : rest) -> Just $ Stuck (ItemName <$> parseQuoted (T.unwords rest))
 
   ("Anxious" : rest) -> case parseQuoted (T.unwords rest) of
-    Just trigger -> Just $ Anxious trigger
+    Just trigger -> Just $ Anxious (AnxietyTrigger trigger)
     Nothing -> Nothing
 
   ("ItemDescribed" : rest) -> parseItemDescribed (T.unwords rest)
@@ -90,14 +92,14 @@ parseItemDescribed t = do
   -- Format: "item description" ClassType "optional location"
   (item, rest) <- parseQuotedAndRest t
   cls <- parseItemClass rest
-  Just $ ItemDescribed item cls
+  Just $ ItemDescribed (ItemName item) cls
 
 parseItemClass :: Text -> Maybe ItemClass
 parseItemClass t = case T.words (T.strip t) of
   ["Trash"] -> Just Trash
   ["Unsure"] -> Just Unsure
   ["NeedsDecisionSupport"] -> Just NeedsDecisionSupport
-  ("Belongs" : rest) -> Belongs <$> parseQuoted (T.unwords rest)
+  ("Belongs" : rest) -> Belongs . Location <$> parseQuoted (T.unwords rest)
   _ -> Nothing
 
 parseQuoted :: Text -> Maybe Text
@@ -131,10 +133,10 @@ isFlagging :: Situation -> Bool
 isFlagging Flagging = True
 isFlagging _ = False
 
-extractAnxietyTrigger :: Situation -> Maybe Text
+extractAnxietyTrigger :: Situation -> Maybe AnxietyTrigger
 extractAnxietyTrigger (Anxious t) = Just t
 extractAnxietyTrigger _ = Nothing
 
-extractStuckItem :: Situation -> Maybe Text
+extractStuckItem :: Situation -> Maybe ItemName
 extractStuckItem (Stuck item) = item
 extractStuckItem _ = Nothing

@@ -12,8 +12,9 @@ module Tidying.Decide
   , pickNextTarget
   ) where
 
+import Data.List.NonEmpty (NonEmpty(..))
 import Data.Map.Strict qualified as Map
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, isJust)
 import Data.Text (Text)
 import Data.Text qualified as T
 
@@ -21,6 +22,7 @@ import Tidying.State
 import Tidying.Situation
 import Tidying.Action
 import Tidying.Output (Extract(..), Intent(..), Choice(..))
+import Tidying.Types (ItemName(..), Location(..), AnxietyTrigger(..), CategoryName(..))
 
 -- | Pure routing: (State, Situation) -> (Action, NextPhase)
 -- This is the core state machine logic. NO LLM calls here.
@@ -126,8 +128,8 @@ decide st sit = case (st.phase, sit) of
 
   (_, Anxious trigger) ->
     -- Pivot away from anxiety trigger
-    let alternative = findAlternative st trigger
-    in (PivotAway trigger alternative, st.phase)
+    let alternative = findAlternative st ((\(AnxietyTrigger t) -> t) trigger)
+    in (PivotAway trigger (Location alternative), st.phase)
 
   (_, Flagging) ->
     (EnergyCheck, st.phase)
@@ -140,7 +142,7 @@ decide st sit = case (st.phase, sit) of
     (InstructNext, st.phase)
 
   (_, Stuck maybeItem) ->
-    let item = maybe "this item" id maybeItem
+    let item = fromMaybe (ItemName "this item") maybeItem
     in (DecisionAid item, DecisionSupport)
 
   ------------------------------------
@@ -151,8 +153,17 @@ decide st sit = case (st.phase, sit) of
     (Summary, st.phase)
 
   ------------------------------------
-  -- DEFAULT
+  -- DEFAULT (intentional catch-all)
   ------------------------------------
+  --
+  -- This default handles any (Phase, Situation) pairs not explicitly matched.
+  -- It's safe because:
+  -- 1. Universal handlers above catch Anxious, Flagging, WantsToStop, etc.
+  -- 2. Phase-specific handlers catch the main flows
+  -- 3. InstructNext is a safe fallback that keeps momentum
+  --
+  -- If you add a new Phase or Situation, test that it routes correctly.
+  -- Consider adding explicit cases if the default behavior is wrong.
 
   _ ->
     (InstructNext, st.phase)
@@ -164,8 +175,11 @@ decide st sit = case (st.phase, sit) of
 
 -- | Route based on extracted information from user input
 -- LLM extracts facts, this function decides what to do
+--
+-- This is PHASE-AWARE: different phases have different behaviors.
 decideFromExtract :: SessionState -> Extract -> (Action, Phase)
 decideFromExtract st ext = case ext.exIntent of
+  -- Universal intents (work in any phase)
   IntentStop ->
     (Summary, st.phase)
 
@@ -175,19 +189,68 @@ decideFromExtract st ext = case ext.exIntent of
       Just item -> (DecisionAid item, DecisionSupport)
       Nothing   -> (FirstInstruction, Sorting)
 
+  -- Phase-specific routing
+  _ -> case st.phase of
+
+    -- SURVEYING: Focus on getting function/anchors
+    Surveying
+      -- If they told us the function, check if we need anchors
+      | Just _ <- ext.exFunction ->
+          if hasAnchors st || isJust ext.exAnchors
+            then (FirstInstruction, Sorting)
+            else (AskAnchors, Surveying)
+      -- If they're describing space (start intent), ask function
+      | IntentStart <- ext.exIntent ->
+          if hasFunction st
+            then (AskAnchors, Surveying)
+            else (AskFunction, Surveying)
+      -- If they want to continue but we don't have function yet
+      | not (hasFunction st) ->
+          (AskFunction, Surveying)
+      | otherwise ->
+          -- Have function, start sorting
+          (FirstInstruction, Sorting)
+
+    -- SORTING: Handle item decisions
+    Sorting -> routeInSorting st ext
+
+    -- SPLITTING: Usually back to sorting after action
+    Splitting -> case ext.exIntent of
+      IntentContinue -> (InstructNext, Sorting)
+      IntentDecided  -> routeInSorting st ext
+      _              -> (InstructNext, Sorting)
+
+    -- DECISION_SUPPORT: Help with stuck items
+    DecisionSupport -> case ext.exIntent of
+      IntentDecided -> routeInSorting st ext
+      _             -> case ext.exItem of
+        Just item -> (DecisionAid item, DecisionSupport)
+        Nothing   -> (InstructNext, Sorting)
+
+    -- REFINING: Like sorting but for specific categories
+    Refining -> case ext.exIntent of
+      IntentDecided -> routeInSorting st ext
+      IntentItem    -> (AskItemDecision (fromMaybe (ItemName "that") ext.exItem), Refining)
+      _             -> (InstructNext, Refining)
+
+-- | Route decisions within Sorting phase
+routeInSorting :: SessionState -> Extract -> (Action, Phase)
+routeInSorting st ext = case ext.exIntent of
   IntentDecided ->
-    -- Made a decision about an item
     case ext.exChoice of
       Just ChoiceTrash  -> (InstructTrash, Sorting)
-      Just ChoicePlace  -> (InstructPlace (fromMaybe "its spot" ext.exPlace), Sorting)
-      Just ChoiceUnsure -> (InstructUnsure, Sorting)
-      Just ChoiceKeep   -> (InstructPlace "keep pile", Sorting)
+      Just ChoicePlace  -> (InstructPlace (fromMaybe (Location "its spot") ext.exPlace), Sorting)
+      Just ChoiceKeep   -> (InstructPlace (Location "keep pile"), Sorting)
+      Just ChoiceUnsure ->
+        -- Check if unsure pile is getting too big
+        if unsureCount st.piles >= unsureThreshold
+          then (InstructSplit (suggestSplit st), Splitting)
+          else (InstructUnsure, Sorting)
       Nothing           -> (InstructNext, Sorting)
 
   IntentItem ->
     -- They described an item but haven't said what to do with it
-    -- Ask them to decide
-    (AskItemDecision (fromMaybe "that" ext.exItem), Sorting)
+    (AskItemDecision (fromMaybe (ItemName "that") ext.exItem), Sorting)
 
   IntentContinue ->
     (InstructNext, Sorting)
@@ -196,33 +259,35 @@ decideFromExtract st ext = case ext.exIntent of
     -- Beginning or describing space - give first instruction
     (FirstInstruction, Sorting)
 
+  _ -> (InstructNext, Sorting)
+
 
 -- | Threshold for when to split unsure pile
 unsureThreshold :: Int
 unsureThreshold = 5
 
 -- | Add item to unsure pile
-addUnsure :: Text -> Piles -> Piles
+addUnsure :: ItemName -> Piles -> Piles
 addUnsure item p = p { unsure = item : p.unsure }
 
 -- | Suggest categories for splitting unsure pile
-suggestSplit :: SessionState -> [Text]
+suggestSplit :: SessionState -> NonEmpty CategoryName
 suggestSplit st =
   let items = st.piles.unsure
-      lowerItems = map T.toLower items
+      lowerItems = map (\(ItemName n) -> T.toLower n) items
   in
     -- Check for common patterns
     if any (hasWord "cable") lowerItems || any (hasWord "cord") lowerItems
-      then ["cables", "other"]
+      then CategoryName "cables" :| [CategoryName "other"]
     else if any (hasWord "paper") lowerItems || any (hasWord "document") lowerItems
-      then ["papers", "other"]
+      then CategoryName "papers" :| [CategoryName "other"]
     else if any (hasWord "book") lowerItems
-      then ["books", "other"]
+      then CategoryName "books" :| [CategoryName "other"]
     else if any (hasWord "clothes") lowerItems || any (hasWord "shirt") lowerItems
-      then ["clothes", "other"]
+      then CategoryName "clothes" :| [CategoryName "other"]
     else
       -- Default: keep-maybe vs donate-maybe
-      ["keep-maybe", "donate-maybe"]
+      CategoryName "keep-maybe" :| [CategoryName "donate-maybe"]
   where
     hasWord w t = w `T.isInfixOf` t
 
@@ -234,10 +299,8 @@ pickNextTarget st
       (AckProgress "Pile done. Unsure items left.", Sorting)
 
   -- Emergent categories to refine?
-  | not (Map.null st.emergentCats) =
-      let cats = Map.keys st.emergentCats
-          nextCat = head cats
-      in (AckProgress ("Let's do " <> nextCat), Refining)
+  | Just (CategoryName nextCat, _) <- Map.lookupMin (getEmergentCats st) =
+      (AckProgress ("Let's do " <> nextCat), Refining)
 
   -- All done
   | otherwise =

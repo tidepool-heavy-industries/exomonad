@@ -20,20 +20,24 @@ module Tidying.Loop
     tidyingTurn
   , Response(..)
 
-    -- * Events
+    -- * Events (re-exported from Tidying.Events)
   , TidyingEvent(..)
   ) where
 
 import Effectful
+import Control.Applicative ((<|>))
 import Control.Monad (when)
+import Data.List.NonEmpty (NonEmpty(..))
+import Data.List.NonEmpty qualified as NE
 import Data.Text (Text)
 import Data.Text qualified as T
+import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 
 import Tidepool.Effect
-  ( State, LLM, Emit, Log, TurnOutcome(..), TurnParseResult(..), TurnResult(..)
-  , get, modify, emit, logDebug, logInfo, logWarn
-  , llmCallEither, runTurnContent
+  ( State, LLM, Emit, Log, Time, TurnOutcome(..), TurnParseResult(..), TurnResult(..)
+  , get, modify, emit, logDebug, logInfo, logWarn, getCurrentTime
+  , llmCallEither, llmCallWithTools, runTurnContent
   )
 import Tidepool.Anthropic.Http (ContentBlock(..))
 import Tidepool.Template (Schema(..))
@@ -48,6 +52,9 @@ import Tidying.Output
   )
 import Tidying.Templates
 import Tidying.Act (cannedResponse)
+import Tidying.Tools (tidyingTools)
+import Tidying.Events (TidyingEvent(..))
+import Tidying.Types (ItemName(..), SpaceFunction(..), CategoryName(..), AnxietyTrigger(..))
 
 -- ══════════════════════════════════════════════════════════════
 -- TYPES
@@ -61,18 +68,9 @@ data Response = Response
     -- ^ Current phase after this turn
   , responseItemsProcessed :: Int
     -- ^ Running count of items handled
+  , responseSessionEnded :: Bool
+    -- ^ True if session should end (user said stop/quit/done)
   } deriving (Show, Eq)
-
--- | Events emitted during tidying
-data TidyingEvent
-  = PhotoAnalyzed Text          -- ^ Photo was analyzed
-  | SituationClassified Text    -- ^ Situation was classified
-  | ActionTaken Action          -- ^ Action was taken
-  | PhaseChanged Phase Phase    -- ^ Phase transition (from, to)
-  | SessionEnded Int            -- ^ Session ended, items processed
-  | UserInputReceived Text      -- ^ User input received (for chat display)
-  | ResponseGenerated Text      -- ^ Response generated (for chat display)
-  deriving (Show, Eq)
 
 -- ══════════════════════════════════════════════════════════════
 -- MAIN LOOP
@@ -87,6 +85,7 @@ tidyingTurn
      , LLM :> es
      , Emit TidyingEvent :> es
      , Log :> es
+     , Time :> es
      )
   => UserInput
   -> Eff es Response
@@ -99,12 +98,10 @@ tidyingTurn input = do
   -- OBSERVE: Analyze photos if present (stubbed for now)
   mPhotoAnalysis <- analyzePhotos input.inputPhotos
 
-  -- Build context for templates
-  let ctx = buildTidyingContext st mPhotoAnalysis input.inputText
-
   -- EXTRACT: Get structured info from user input
   -- LLM extracts facts, Haskell decides what to do
-  extract <- extractFromInput input
+  -- Pass photo analysis so extraction LLM knows what was seen
+  extract <- extractFromInput mPhotoAnalysis input
 
   logInfo $ "Extract: " <> T.pack (show extract)
   emit $ SituationClassified (T.pack $ show extract.exIntent)
@@ -120,21 +117,26 @@ tidyingTurn input = do
     logInfo $ "Phase change: " <> T.pack (show st.phase) <> " -> " <> T.pack (show nextPhase)
     emit $ PhaseChanged st.phase nextPhase
 
-  -- ACT: Generate response
-  response <- actResponse ctx action
-
-  -- Update state
+  -- Update state BEFORE generating response so counts/piles are accurate
   applyStateTransitionFromExtract extract action nextPhase
 
+  -- Build context from UPDATED state
+  st' <- get @SessionState
+  let ctx' = buildTidyingContext st' mPhotoAnalysis input.inputText
+
+  -- ACT: Generate response (now has correct pile counts, etc.)
+  response <- actResponse ctx' action
+
   -- Check for session end
-  when (extract.exIntent == IntentStop) $ do
-    finalState <- get @SessionState
-    emit $ SessionEnded finalState.itemsProcessed
+  let sessionEnded = extract.exIntent == IntentStop
+  when sessionEnded $ do
+    emit $ SessionEnded st'.itemsProcessed
 
   pure Response
     { responseText = response
     , responsePhase = nextPhase
-    , responseItemsProcessed = st.itemsProcessed + itemDelta action
+    , responseItemsProcessed = st'.itemsProcessed
+    , responseSessionEnded = sessionEnded
     }
 
 -- | How many items were processed by this action
@@ -198,9 +200,9 @@ outputToAnalysis :: PhotoAnalysisOutput -> PhotoAnalysis
 outputToAnalysis pao = PhotoAnalysis
   { paRoomType = pao.paoRoomType
   , paChaosLevel = pao.paoChaosLevel
-  , paVisibleItems = pao.paoVisibleItems
+  , paVisibleItems = map (\(ItemName n) -> n) pao.paoVisibleItems
   , paBlockedFunction = pao.paoBlockedFunction
-  , paFirstTarget = pao.paoFirstTarget
+  , paFirstTarget = fmap (\(ItemName n) -> n) pao.paoFirstTarget
   }
 
 -- | System prompt for photo analysis
@@ -224,16 +226,36 @@ visionPrompt = "Analyze this space. What do you see? How messy is it? What shoul
 
 -- | Extract structured info from user input
 -- LLM extracts facts (intent, item, choice), Haskell decides what to do
+--
+-- Photo analysis context is included when available so the LLM can
+-- understand what was seen even if the user just sent a photo without text.
 extractFromInput
   :: ( LLM :> es
      , Log :> es
      )
-  => UserInput
+  => Maybe PhotoAnalysis  -- ^ Photo analysis context (if photos were analyzed)
+  -> UserInput
   -> Eff es Extract
-extractFromInput input = do
+extractFromInput mPhotoAnalysis input = do
   logDebug "Calling LLM for extraction"
-  let userMsg = maybe "(photo only)" id input.inputText
 
+  -- Build user message with photo context if available
+  let textPart = maybe "" id input.inputText
+      photoContext = case mPhotoAnalysis of
+        Nothing -> ""
+        Just pa -> T.unlines
+          [ "[Photo analysis]"
+          , "Room type: " <> pa.paRoomType
+          , "Clutter level: " <> pa.paChaosLevel
+          , "Visible items: " <> T.intercalate ", " pa.paVisibleItems
+          , maybe "" ("Blocked function: " <>) pa.paBlockedFunction
+          , maybe "" ("Suggested first target: " <>) pa.paFirstTarget
+          ]
+      userMsg = if T.null textPart && T.null photoContext
+                then "(empty input)"
+                else T.strip $ photoContext <> "\n" <> textPart
+
+  logDebug $ "Extract input: " <> T.take 100 userMsg
   result <- llmCallEither @Extract renderExtractPrompt userMsg extractSchema.schemaJSON
 
   case result of
@@ -245,6 +267,8 @@ extractFromInput input = do
         , exItem = Nothing
         , exChoice = Nothing
         , exPlace = Nothing
+        , exFunction = Nothing
+        , exAnchors = Nothing
         }
     Right ext -> pure ext
 
@@ -268,18 +292,18 @@ actResponse ctx action = do
       logDebug $ "Canned response for: " <> T.pack (show action)
       pure response
     Nothing -> do
-      -- Need LLM for this action
+      -- Need LLM for this action - pass tools so LLM can propose dispositions
       logDebug $ "Calling LLM for action: " <> T.pack (show action)
       let systemPrompt = renderActPrompt ctx action
           -- Include action type and context in user message
           userMsg = "Action: " <> T.pack (show action)
                  <> maybe "" (\t -> "\nUser said: " <> t) ctx.tcUserText
 
-      result <- llmCallEither @ActOutput systemPrompt userMsg actOutputSchema.schemaJSON
+      result <- llmCallWithTools @ActOutput systemPrompt userMsg actOutputSchema.schemaJSON tidyingTools
 
       case result of
         Left err -> do
-          logWarn $ "Act parse failed: " <> err
+          logWarn $ "Act failed: " <> err
           pure "What's next?"  -- fallback
         Right output -> pure output.aoResponse
 
@@ -288,60 +312,186 @@ actResponse ctx action = do
 -- ══════════════════════════════════════════════════════════════
 
 -- | Apply state transition based on extraction and action
+--
+-- Sets sessionStart on first turn so session duration can be calculated.
+-- Handles the PhaseData sum type transitions properly.
 applyStateTransitionFromExtract
-  :: State SessionState :> es
+  :: ( State SessionState :> es
+     , Time :> es
+     )
   => Extract
   -> Action
   -> Phase
   -> Eff es ()
-applyStateTransitionFromExtract extract action nextPhase = modify @SessionState $ \st -> st
-  { phase = nextPhase
-  , itemsProcessed = st.itemsProcessed + itemDelta action
-  , piles = updatePilesFromExtract st.piles extract action
-  , emergentCats = updateCats st.emergentCats action
-  , currentCategory = updateCurrentCategory st.currentCategory action
-  }
+applyStateTransitionFromExtract extract action nextPhase = do
+  -- Get current time to set sessionStart on first turn
+  now <- getCurrentTime
+  modify @SessionState $ \st ->
+    -- Calculate new piles
+    let newPiles = case action of
+          InstructSplit _ ->
+            -- Clear unsure pile - items move to emergent categories
+            st.piles { unsure = [] }
+          _ ->
+            updatePilesFromExtract st.piles extract action
+
+        -- Build new PhaseData based on transition
+        newPhaseData = transitionPhaseData st.phaseData extract action nextPhase
+
+    in st
+      { phase = nextPhase
+      , phaseData = newPhaseData
+      , itemsProcessed = st.itemsProcessed + itemDelta action
+      , piles = newPiles
+      -- Set sessionStart on first turn (keep existing if already set)
+      , sessionStart = st.sessionStart <|> Just now
+      }
+
+-- | Transition PhaseData based on action and next phase
+transitionPhaseData :: PhaseData -> Extract -> Action -> Phase -> PhaseData
+transitionPhaseData pd extract action nextPhase = case (pd, nextPhase) of
+  -- Surveying: accumulate function/anchors
+  (SurveyingData mFn anchors, Surveying) ->
+    SurveyingData
+      (mFn <|> extract.exFunction)
+      (anchors <> maybe [] id extract.exAnchors)
+
+  -- Surveying → Sorting: start sorting with gathered data
+  (SurveyingData mFn anchors, Sorting) ->
+    let fn = case mFn <|> extract.exFunction of
+               Just f -> f
+               Nothing -> SpaceFunction "general"  -- fallback
+        newAnchors = anchors <> maybe [] id extract.exAnchors
+    in SortingData fn newAnchors (extract.exItem) Nothing
+
+  -- Sorting: update current item, maybe anxiety
+  (SortingData fn anchors _item lastAnx, Sorting) ->
+    SortingData fn anchors (extract.exItem <|> _item) lastAnx
+
+  -- Sorting → Splitting: create categories from split
+  (SortingData fn anchors _item lastAnx, Splitting) ->
+    case action of
+      InstructSplit cats ->
+        SplittingData fn anchors cats lastAnx
+      _ ->
+        -- Shouldn't happen, but fallback to default categories
+        SplittingData fn anchors (CategoryName "unsure" :| []) lastAnx
+
+  -- Splitting → Sorting: go back to sorting
+  (SplittingData fn anchors _cats lastAnx, Sorting) ->
+    SortingData fn anchors Nothing lastAnx
+
+  -- Sorting/Splitting → Refining: start refining
+  (SortingData fn anchors _item lastAnx, Refining) ->
+    let cat = extractNextCategory action
+    in RefiningData fn anchors Map.empty cat Nothing lastAnx
+
+  (SplittingData fn anchors cats lastAnx, Refining) ->
+    -- Move to first category for refining
+    let cat = NE.head cats
+        catsMap = Map.fromList [(c, []) | c <- NE.toList cats]
+    in RefiningData fn anchors catsMap cat Nothing lastAnx
+
+  -- Refining: update current item/category
+  (RefiningData fn anchors cats curCat _item lastAnx, Refining) ->
+    let newCat = extractNextCategory action
+        newItem = extract.exItem <|> _item
+    in RefiningData fn anchors cats newCat newItem lastAnx
+
+  -- Any → DecisionSupport: remember stuck item
+  (_, DecisionSupport) ->
+    let fn = getFunctionFromPhaseData pd
+        anchors = getAnchorsFromPhaseData pd
+        stuckItem = case extract.exItem of
+                      Just i -> i
+                      Nothing -> ItemName "unknown"
+        returnPhase = phaseFromPhaseData pd
+        lastAnx = getLastAnxietyFromPhaseData pd
+    in DecisionSupportData fn anchors stuckItem returnPhase lastAnx
+
+  -- DecisionSupport → Sorting: return from decision support
+  (DecisionSupportData fn anchors _stuck _return lastAnx, Sorting) ->
+    SortingData fn anchors Nothing lastAnx
+
+  -- Fallback: keep existing data but might need to update item
+  _ -> updateCurrentItemInPhaseData pd (extract.exItem)
+
+-- | Extract next category from AckProgress action
+extractNextCategory :: Action -> CategoryName
+extractNextCategory (AckProgress msg)
+  | "Let's do " `T.isPrefixOf` msg =
+      CategoryName $ T.drop (T.length "Let's do ") msg
+extractNextCategory _ = CategoryName "current"
+
+-- | Get function from any PhaseData variant
+getFunctionFromPhaseData :: PhaseData -> SpaceFunction
+getFunctionFromPhaseData = \case
+  SurveyingData mFn _ -> case mFn of
+    Just f -> f
+    Nothing -> SpaceFunction "general"
+  SortingData fn _ _ _ -> fn
+  SplittingData fn _ _ _ -> fn
+  RefiningData fn _ _ _ _ _ -> fn
+  DecisionSupportData fn _ _ _ _ -> fn
+
+-- | Get anchors from any PhaseData variant
+getAnchorsFromPhaseData :: PhaseData -> [ItemName]
+getAnchorsFromPhaseData = \case
+  SurveyingData _ a -> a
+  SortingData _ a _ _ -> a
+  SplittingData _ a _ _ -> a
+  RefiningData _ a _ _ _ _ -> a
+  DecisionSupportData _ a _ _ _ -> a
+
+-- | Get last anxiety from any PhaseData variant
+getLastAnxietyFromPhaseData :: PhaseData -> Maybe AnxietyTrigger
+getLastAnxietyFromPhaseData = \case
+  SurveyingData _ _ -> Nothing
+  SortingData _ _ _ a -> a
+  SplittingData _ _ _ a -> a
+  RefiningData _ _ _ _ _ a -> a
+  DecisionSupportData _ _ _ _ a -> a
+
+-- | Get phase from PhaseData
+phaseFromPhaseData :: PhaseData -> Phase
+phaseFromPhaseData = \case
+  SurveyingData _ _ -> Surveying
+  SortingData _ _ _ _ -> Sorting
+  SplittingData _ _ _ _ -> Splitting
+  RefiningData _ _ _ _ _ _ -> Refining
+  DecisionSupportData _ _ _ _ _ -> DecisionSupport
+
+-- | Update current item in PhaseData (for variants that have it)
+updateCurrentItemInPhaseData :: PhaseData -> Maybe ItemName -> PhaseData
+updateCurrentItemInPhaseData pd mItem = case pd of
+  SortingData fn a _ anx -> SortingData fn a mItem anx
+  RefiningData fn a cats cat _ anx -> RefiningData fn a cats cat mItem anx
+  _ -> pd  -- Other variants don't have current item
 
 -- | Update piles based on extraction
 updatePilesFromExtract :: Piles -> Extract -> Action -> Piles
-updatePilesFromExtract p extract action = case (extract.exIntent, extract.exChoice, action) of
+updatePilesFromExtract p extract _action = case (extract.exIntent, extract.exChoice) of
   -- User decided to trash
-  (IntentDecided, Just ChoiceTrash, _) ->
-    let item = maybe "item" id extract.exItem
+  (IntentDecided, Just ChoiceTrash) ->
+    let item = maybe (ItemName "item") id extract.exItem
     in p { out = item : p.out }
 
   -- User decided to place/keep
-  (IntentDecided, Just ChoicePlace, _) ->
-    let item = maybe "item" id extract.exItem
+  (IntentDecided, Just ChoicePlace) ->
+    let item = maybe (ItemName "item") id extract.exItem
     in p { belongs = item : p.belongs }
 
-  (IntentDecided, Just ChoiceKeep, _) ->
-    let item = maybe "item" id extract.exItem
+  (IntentDecided, Just ChoiceKeep) ->
+    let item = maybe (ItemName "item") id extract.exItem
     in p { belongs = item : p.belongs }
 
   -- User is unsure
-  (IntentDecided, Just ChoiceUnsure, _) ->
-    let item = maybe "item" id extract.exItem
+  (IntentDecided, Just ChoiceUnsure) ->
+    let item = maybe (ItemName "item") id extract.exItem
     in p { unsure = item : p.unsure }
 
-  -- After split, clear unsure (items moved to emergent cats)
-  (_, _, InstructSplit _) ->
-    p { unsure = [] }
+  -- Note: InstructSplit handled specially in applyStateTransitionFromExtract
+  -- to move items to emergent categories instead of losing them
 
   _ -> p
-
--- | Update emergent categories
-updateCats :: Map.Map Text [Text] -> Action -> Map.Map Text [Text]
-updateCats cats action = case action of
-  InstructSplit catNames ->
-    foldr (\name -> Map.insert name []) cats catNames
-  _ -> cats
-
--- | Update current category being refined
-updateCurrentCategory :: Maybe Text -> Action -> Maybe Text
-updateCurrentCategory current action = case action of
-  AckProgress msg
-    | "Let's do " `T.isPrefixOf` msg ->
-        Just $ T.drop (T.length "Let's do ") msg
-  _ -> current
 

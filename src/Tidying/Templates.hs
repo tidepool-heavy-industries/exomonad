@@ -42,6 +42,8 @@ module Tidying.Templates
   , decisionSupportGuidance
   ) where
 
+import Data.List.NonEmpty (NonEmpty)
+import Data.List.NonEmpty qualified as NE
 import Data.Text (Text)
 import Data.Text qualified as T
 
@@ -49,6 +51,7 @@ import Tidying.State
 import Tidying.Context (TidyingContext(..), PilesSummary(..), PhotoAnalysis(..))
 import Tidying.Action
 import Tidying.Output (orientOutputSchema, actOutputSchema, extractSchema)
+import Tidying.Types (ItemName(..), Location(..), AnxietyTrigger(..), CategoryName(..))
 
 -- ══════════════════════════════════════════════════════════════
 -- EXTRACT PROMPT (new extraction-first approach)
@@ -232,6 +235,24 @@ renderActPrompt :: TidyingContext -> Action -> Text
 renderActPrompt ctx action = T.unlines
   [ "You are a tidying coach giving terse, directive guidance."
   , ""
+  , "# Available Tools"
+  , ""
+  , "You have access to these tools for interacting with the user:"
+  , ""
+  , "- propose_disposition: Propose where an item should go."
+  , "  Call with item description and 2-4 ranked choices (best first)."
+  , "  User taps to confirm. After confirmation, continue to next item."
+  , "  Example: propose_disposition(\"old magazine\", [\"trash\", \"recycle\", \"keep\"])"
+  , ""
+  , "- ask_space_function: Ask what the space is FOR."
+  , "  Use in surveying phase to establish context."
+  , ""
+  , "- confirm_done: Confirm user wants to end session."
+  , "  Use when they say \"done\" or \"stop\"."
+  , ""
+  , "IMPORTANT: Use propose_disposition for EVERY item you identify."
+  , "Don't just describe items - propose dispositions!"
+  , ""
   , "# Style"
   , ""
   , "- ONE instruction at a time"
@@ -246,7 +267,11 @@ renderActPrompt ctx action = T.unlines
   , "Items processed: " <> T.pack (show ctx.tcItemsProcessed)
   , case ctx.tcPhotoAnalysis of
       Nothing -> ""
-      Just pa -> "Photo shows: " <> pa.paChaosLevel <> " " <> pa.paRoomType
+      Just pa -> T.unlines
+        [ "Photo shows: " <> pa.paChaosLevel <> " " <> pa.paRoomType
+        , "Visible items: " <> T.intercalate ", " pa.paVisibleItems
+        , maybe "" ("First target: " <>) pa.paFirstTarget
+        ]
   , ""
   , actionGuidance ctx action
   , ""
@@ -259,11 +284,19 @@ actionGuidance ctx action = case action of
   FirstInstruction -> T.unlines
     [ "# First Instruction"
     , ""
-    , "Get them moving with their first action."
-    , "Pick the most obvious, lowest-friction target."
-    , "Usually: chair with stuff, pile on floor, surface edge."
-    , ""
-    , "Example: \"Grab one thing off the chair. What is it?\""
+    , "Get them moving by proposing what to do with visible items."
+    , case ctx.tcPhotoAnalysis of
+        Just pa -> T.unlines
+          [ "Photo shows items: " <> T.intercalate ", " pa.paVisibleItems
+          , "Start with: " <> maybe "the most obvious item" id pa.paFirstTarget
+          , ""
+          , "Call propose_disposition for the first obvious item."
+          , "After they confirm, continue to the next item."
+          ]
+        Nothing -> T.unlines
+          [ "No photo - ask them what they see."
+          , "Example: \"Grab one thing off the chair. What is it?\""
+          ]
     ]
 
   InstructSplit cats -> T.unlines
@@ -272,12 +305,12 @@ actionGuidance ctx action = case action of
     , "Their unsure pile is growing. Time to split it."
     , "Suggest 2-3 natural categories based on what's there."
     , ""
-    , "Current unsure items suggest these categories: " <> T.intercalate ", " cats
+    , "Current unsure items suggest these categories: " <> T.intercalate ", " (map (\(CategoryName c) -> c) (NE.toList cats))
     , ""
     , "Example: \"Pause. Split your unsure pile: cables in one spot, papers in another.\""
     ]
 
-  DecisionAid item -> T.unlines
+  DecisionAid (ItemName item) -> T.unlines
     [ "# Decision Aid"
     , ""
     , "User is stuck on: " <> item
@@ -288,7 +321,7 @@ actionGuidance ctx action = case action of
     , "Example: \"This space is for design work. Does the sketchbook help with that?\""
     ]
 
-  PivotAway trigger alt -> T.unlines
+  PivotAway (AnxietyTrigger trigger) (Location alt) -> T.unlines
     [ "# Pivot Away"
     , ""
     , "User expressed anxiety about: " <> trigger

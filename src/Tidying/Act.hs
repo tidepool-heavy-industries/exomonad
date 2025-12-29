@@ -11,12 +11,15 @@ module Tidying.Act
   ) where
 
 import Data.Aeson (ToJSON(..), (.=), object)
+import Data.List.NonEmpty (NonEmpty)
+import Data.List.NonEmpty qualified as NE
 import Data.Text (Text)
 import Data.Text qualified as T
 import GHC.Generics (Generic)
 
 import Tidying.State
 import Tidying.Action
+import Tidying.Types (ItemName(..), Location(..), AnxietyTrigger(..), CategoryName(..), SpaceFunction(..))
 
 -- | Context for act templates
 data ActContext = ActContext
@@ -66,10 +69,10 @@ act runLLM st photoAnalysis action =
 -- | Build context for act template
 buildActContext :: SessionState -> Maybe Text -> Action -> ActContext
 buildActContext st photoAnalysis action = ActContext
-  { acFunction = st.function
-  , acAnchors = st.anchors
+  { acFunction = fmap (\(SpaceFunction t) -> t) (getFunction st)
+  , acAnchors = map (\(ItemName n) -> n) (getAnchors st)
   , acPhotoAnalysis = photoAnalysis
-  , acUnsurePile = st.piles.unsure
+  , acUnsurePile = map (\(ItemName n) -> n) st.piles.unsure
   , acItem = extractItem action
   , acTrigger = extractTrigger action
   , acAlternative = extractAlternative action
@@ -79,19 +82,19 @@ buildActContext st photoAnalysis action = ActContext
   }
 
 extractItem :: Action -> Maybe Text
-extractItem (DecisionAid item) = Just item
+extractItem (DecisionAid (ItemName item)) = Just item
 extractItem _ = Nothing
 
 extractTrigger :: Action -> Maybe Text
-extractTrigger (PivotAway trigger _) = Just trigger
+extractTrigger (PivotAway (AnxietyTrigger trigger) _) = Just trigger
 extractTrigger _ = Nothing
 
 extractAlternative :: Action -> Maybe Text
-extractAlternative (PivotAway _ alt) = Just alt
+extractAlternative (PivotAway _ (Location alt)) = Just alt
 extractAlternative _ = Nothing
 
 extractSplitCats :: Action -> [Text]
-extractSplitCats (InstructSplit cats) = cats
+extractSplitCats (InstructSplit cats) = map (\(CategoryName c) -> c) (NE.toList cats)
 extractSplitCats _ = []
 
 -- | Canned responses that don't need LLM
@@ -110,7 +113,7 @@ cannedResponse = \case
   AskWhereLive ->
     Just "Desk or somewhere else?"
 
-  AskItemDecision item ->
+  AskItemDecision (ItemName item) ->
     Just $ item <> ". Trash, keep, or not sure?"
 
   -- Simple instructions
@@ -126,7 +129,7 @@ cannedResponse = \case
   InstructBag ->
     Just "Bag the trash by the door."
 
-  InstructPlace loc ->
+  InstructPlace (Location loc) ->
     Just $ loc <> ". Next."
 
   -- Energy check is fixed

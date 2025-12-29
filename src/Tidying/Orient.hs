@@ -15,6 +15,7 @@ import GHC.Generics (Generic)
 
 import Tidying.State
 import Tidying.Situation
+import Tidying.Types (ItemName(..), SpaceFunction(..), AnxietyTrigger(..))
 
 -- For now, stub the LLM/template parts
 -- In real impl, this would use Tidepool.Effect.LLM
@@ -49,10 +50,10 @@ buildOrientContext
   -> OrientContext
 buildOrientContext st photoAnalysis userText = OrientContext
   { ocPhase = st.phase
-  , ocFunction = st.function
-  , ocAnchors = st.anchors
+  , ocFunction = fmap (\(SpaceFunction t) -> t) (getFunction st)
+  , ocAnchors = map (\(ItemName n) -> n) (getAnchors st)
   , ocUnsureCount = unsureCount st.piles
-  , ocLastAnxiety = st.lastAnxiety
+  , ocLastAnxiety = fmap (\(AnxietyTrigger t) -> t) (getLastAnxiety st)
   , ocPhotoAnalysis = photoAnalysis
   , ocUserText = userText
   }

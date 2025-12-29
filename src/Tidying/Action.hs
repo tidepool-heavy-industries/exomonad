@@ -13,39 +13,42 @@ module Tidying.Action
   ) where
 
 import Data.Aeson (ToJSON, FromJSON)
+import Data.List.NonEmpty (NonEmpty)
 import Data.Text (Text)
 import GHC.Generics (Generic)
+
+import Tidying.Types (ItemName, Location, AnxietyTrigger, CategoryName)
 
 -- | Actions the agent can take
 data Action
   -- Questions (surveying)
-  = AskFunction          -- ^ "What do you need to DO in this space?"
-  | AskAnchors           -- ^ "What's definitely staying?"
-  | AskWhatIsIt          -- ^ "What is it?"
-  | AskWhereLive         -- ^ "Desk or elsewhere?"
-  | AskItemDecision Text -- ^ "Trash, keep, or not sure?" (item = Text)
+  = AskFunction              -- ^ "What do you need to DO in this space?"
+  | AskAnchors               -- ^ "What's definitely staying?"
+  | AskWhatIsIt              -- ^ "What is it?"
+  | AskWhereLive             -- ^ "Desk or elsewhere?"
+  | AskItemDecision ItemName -- ^ "Trash, keep, or not sure?" for specific item
 
   -- Instructions (sorting)
-  | FirstInstruction     -- ^ Initial momentum-building action
-  | InstructTrash        -- ^ "Trash. Next."
-  | InstructPlace Text   -- ^ "Put it on [shelf]. Next."
-  | InstructUnsure       -- ^ "Unsure pile, floor right. Next."
-  | InstructNext         -- ^ "Next thing."
-  | InstructBag          -- ^ "Bag the trash by the door."
+  | FirstInstruction         -- ^ Initial momentum-building action
+  | InstructTrash            -- ^ "Trash. Next."
+  | InstructPlace Location   -- ^ "Put it on [shelf]. Next."
+  | InstructUnsure           -- ^ "Unsure pile, floor right. Next."
+  | InstructNext             -- ^ "Next thing."
+  | InstructBag              -- ^ "Bag the trash by the door."
 
-  -- Splitting
-  | InstructSplit [Text] -- ^ "Split: [cables] here, [papers] there."
+  -- Splitting (NonEmpty guarantees at least one category)
+  | InstructSplit (NonEmpty CategoryName) -- ^ "Split: [cables] here, [papers] there."
 
   -- Decision support
-  | DecisionAid Text     -- ^ Reframe using function, item = Text
-  | EnergyCheck          -- ^ "Keep going or stop?"
+  | DecisionAid ItemName     -- ^ Reframe using function for specific item
+  | EnergyCheck              -- ^ "Keep going or stop?"
 
-  -- Pivoting
-  | PivotAway Text Text  -- ^ Avoid trigger, do alternative
+  -- Pivoting (first param = anxiety trigger, second = alternative area)
+  | PivotAway AnxietyTrigger Location -- ^ Avoid trigger, do alternative
 
   -- Completion
-  | AckProgress Text     -- ^ Acknowledge + context
-  | Summary              -- ^ Session summary
+  | AckProgress Text         -- ^ Acknowledge + context (free-form message)
+  | Summary                  -- ^ Session summary
   deriving (Eq, Show, Generic, ToJSON, FromJSON)
 
 -- | Is this a question action?

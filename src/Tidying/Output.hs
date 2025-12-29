@@ -27,10 +27,6 @@ module Tidying.Output
     -- * PHOTO ANALYSIS output
   , PhotoAnalysisOutput(..)
   , photoAnalysisSchema
-
-    -- * Apply output to state
-  , applyOrientOutput
-  , applyActOutput
   ) where
 
 import Data.Aeson
@@ -38,12 +34,11 @@ import Data.Aeson.Types (Options(..), defaultOptions, camelTo2)
 import Data.Text (Text)
 import GHC.Generics (Generic)
 
-import Data.Map.Strict qualified as Map
-
 import Tidepool.Template (Schema(..))
-import Tidying.State
+import Tidying.Types
+  ( ItemName(..), Location(..), SpaceFunction(..), AnxietyTrigger(..) )
 import Tidying.Situation
-import Tidying.Action
+  ( Situation(..), ItemClass(..) )
 
 -- ══════════════════════════════════════════════════════════════
 -- EXTRACT OUTPUT (new extraction-first approach)
@@ -105,27 +100,38 @@ instance ToJSON Choice where
 data Extract = Extract
   { exIntent :: Intent
     -- ^ What user wants to do (required)
-  , exItem   :: Maybe Text
+  , exItem   :: Maybe ItemName
     -- ^ Item name if mentioned
   , exChoice :: Maybe Choice
     -- ^ Decision about item if made
-  , exPlace  :: Maybe Text
+  , exPlace  :: Maybe Location
     -- ^ Where to put it if choice=place
+  , exFunction :: Maybe SpaceFunction
+    -- ^ What the space is for: "workspace", "bedroom", "creative", etc.
+    -- Extracted when user describes the purpose of their space.
+  , exAnchors :: Maybe [ItemName]
+    -- ^ Anchor items that belong in this space (desk, bed, etc.)
+    -- Extracted when user mentions items that define the space.
+    -- Note: Empty list becomes Nothing (caller should check length for NonEmpty)
   } deriving (Show, Eq, Generic)
 
 instance FromJSON Extract where
   parseJSON = withObject "Extract" $ \v -> Extract
     <$> v .:  "intent"
-    <*> v .:? "item"
+    <*> (fmap ItemName <$> v .:? "item")
     <*> v .:? "choice"
-    <*> v .:? "place"
+    <*> (fmap Location <$> v .:? "place")
+    <*> (fmap SpaceFunction <$> v .:? "function")
+    <*> (fmap (map ItemName) <$> v .:? "anchors")
 
 instance ToJSON Extract where
   toJSON Extract{..} = object $
     [ "intent" .= exIntent ]
-    <> maybe [] (\x -> ["item" .= x]) exItem
+    <> maybe [] (\(ItemName x) -> ["item" .= x]) exItem
     <> maybe [] (\x -> ["choice" .= x]) exChoice
-    <> maybe [] (\x -> ["place" .= x]) exPlace
+    <> maybe [] (\(Location x) -> ["place" .= x]) exPlace
+    <> maybe [] (\(SpaceFunction x) -> ["function" .= x]) exFunction
+    <> maybe [] (\xs -> ["anchors" .= map (\(ItemName n) -> n) xs]) exAnchors
 
 -- | Schema for extraction
 extractSchema :: Schema Extract
@@ -153,6 +159,15 @@ extractSchema = Schema
               [ "type" .= ("string" :: Text)
               , "description" .= ("Where to put it if choice=place" :: Text)
               ]
+          , "function" .= object
+              [ "type" .= ("string" :: Text)
+              , "description" .= ("What the space is for: workspace, bedroom, creative, storage, living, other" :: Text)
+              ]
+          , "anchors" .= object
+              [ "type" .= ("array" :: Text)
+              , "items" .= object ["type" .= ("string" :: Text)]
+              , "description" .= ("Anchor items that define/belong in the space (desk, bed, etc.)" :: Text)
+              ]
           ]
       , "required" .= (["intent"] :: [Text])
       ]
@@ -169,15 +184,15 @@ data OrientOutput = OrientOutput
     --   item_trash, item_belongs, item_unsure, item_stuck,
     --   action_done, unsure_growing, main_done,
     --   anxious, flagging, wants_stop, wants_continue, all_done
-  , ooItemName :: Maybe Text
+  , ooItemName :: Maybe ItemName
     -- ^ For item classifications, the item name
-  , ooItemLocation :: Maybe Text
+  , ooItemLocation :: Maybe Location
     -- ^ For "belongs" classification, where it goes
-  , ooAnxietyTrigger :: Maybe Text
+  , ooAnxietyTrigger :: Maybe AnxietyTrigger
     -- ^ For "anxious" classification, what triggered it
-  , ooFunctionExtracted :: Maybe Text
+  , ooFunctionExtracted :: Maybe SpaceFunction
     -- ^ If user provided function, extract it
-  , ooAnchorsExtracted :: [Text]
+  , ooAnchorsExtracted :: [ItemName]
     -- ^ If user mentioned anchors, extract them
   } deriving (Show, Eq, Generic)
 
@@ -191,11 +206,11 @@ orientJsonOptions = defaultOptions
 instance FromJSON OrientOutput where
   parseJSON = withObject "OrientOutput" $ \v -> OrientOutput
     <$> v .: "situation"
-    <*> v .:? "item_name"
-    <*> v .:? "item_location"
-    <*> v .:? "anxiety_trigger"
-    <*> v .:? "function_extracted"
-    <*> v .:? "anchors_extracted" .!= []  -- Default to empty list
+    <*> (fmap ItemName <$> v .:? "item_name")
+    <*> (fmap Location <$> v .:? "item_location")
+    <*> (fmap AnxietyTrigger <$> v .:? "anxiety_trigger")
+    <*> (fmap SpaceFunction <$> v .:? "function_extracted")
+    <*> (map ItemName <$> v .:? "anchors_extracted" .!= [])
 
 instance ToJSON OrientOutput where
   toJSON = genericToJSON orientJsonOptions
@@ -206,15 +221,15 @@ parseOrientToSituation OrientOutput{..} = case ooSituation of
   "need_function" -> NeedFunction
   "need_anchors" -> NeedAnchors
   "overwhelmed" -> OverwhelmedNeedMomentum
-  "item_trash" -> ItemDescribed (maybe "unknown" id ooItemName) Trash
-  "item_belongs" -> ItemDescribed (maybe "unknown" id ooItemName)
-                                   (Belongs (maybe "its place" id ooItemLocation))
-  "item_unsure" -> ItemDescribed (maybe "unknown" id ooItemName) Unsure
-  "item_stuck" -> ItemDescribed (maybe "unknown" id ooItemName) NeedsDecisionSupport
+  "item_trash" -> ItemDescribed (maybe (ItemName "unknown") id ooItemName) Trash
+  "item_belongs" -> ItemDescribed (maybe (ItemName "unknown") id ooItemName)
+                                   (Belongs (maybe (Location "its place") id ooItemLocation))
+  "item_unsure" -> ItemDescribed (maybe (ItemName "unknown") id ooItemName) Unsure
+  "item_stuck" -> ItemDescribed (maybe (ItemName "unknown") id ooItemName) NeedsDecisionSupport
   "action_done" -> ActionDone
   "unsure_growing" -> UnsureGrowing
   "main_done" -> MainPileDone
-  "anxious" -> Anxious (maybe "something" id ooAnxietyTrigger)
+  "anxious" -> Anxious (maybe (AnxietyTrigger "something") id ooAnxietyTrigger)
   "flagging" -> Flagging
   "wants_stop" -> WantsToStop
   "wants_continue" -> WantsToContinue
@@ -263,18 +278,6 @@ orientOutputSchema = Schema
       ]
   }
 
--- | Apply orient output to state (extract function/anchors)
-applyOrientOutput :: OrientOutput -> SessionState -> SessionState
-applyOrientOutput OrientOutput{..} st = st
-  { function = ooFunctionExtracted <|> st.function
-  , anchors = ooAnchorsExtracted <> st.anchors
-  , lastAnxiety = ooAnxietyTrigger <|> st.lastAnxiety
-  }
-  where
-    (<|>) :: Maybe a -> Maybe a -> Maybe a
-    (<|>) (Just x) _ = Just x
-    (<|>) Nothing y = y
-
 -- ══════════════════════════════════════════════════════════════
 -- ACT OUTPUT
 -- ══════════════════════════════════════════════════════════════
@@ -285,6 +288,8 @@ data ActOutput = ActOutput
     -- ^ The message to send to user
   , aoSuggestedSplits :: [Text]
     -- ^ For split instructions, suggested category names
+    -- Note: This is kept as [Text] for JSON parsing simplicity.
+    -- Caller should convert to NonEmpty CategoryName when creating InstructSplit.
   } deriving (Show, Eq, Generic)
 
 -- | JSON options: aoResponse -> response
@@ -321,14 +326,6 @@ actOutputSchema = Schema
       ]
   }
 
--- | Apply act output to state (minimal - mostly just for splits)
-applyActOutput :: ActOutput -> Action -> SessionState -> SessionState
-applyActOutput ActOutput{..} action st = case action of
-  InstructSplit _ -> st { emergentCats = foldr addCat st.emergentCats aoSuggestedSplits }
-  _ -> st
-  where
-    addCat name cats = Map.insertWith (++) name [] cats
-
 -- ══════════════════════════════════════════════════════════════
 -- PHOTO ANALYSIS OUTPUT
 -- ══════════════════════════════════════════════════════════════
@@ -339,11 +336,11 @@ data PhotoAnalysisOutput = PhotoAnalysisOutput
     -- ^ "office", "bedroom", "closet", "kitchen", "living_room", "garage", "other"
   , paoChaosLevel :: Text
     -- ^ "clear", "moderate", "cluttered", "buried"
-  , paoVisibleItems :: [Text]
+  , paoVisibleItems :: [ItemName]
     -- ^ Main visible items in the photo
   , paoBlockedFunction :: Maybe Text
     -- ^ What function is blocked? "can't sit", "can't reach desk"
-  , paoFirstTarget :: Maybe Text
+  , paoFirstTarget :: Maybe ItemName
     -- ^ Best first thing to address
   } deriving (Show, Eq, Generic)
 
@@ -355,10 +352,21 @@ photoAnalysisJsonOptions = defaultOptions
   }
 
 instance FromJSON PhotoAnalysisOutput where
-  parseJSON = genericParseJSON photoAnalysisJsonOptions
+  parseJSON = withObject "PhotoAnalysisOutput" $ \v -> PhotoAnalysisOutput
+    <$> v .: "room_type"
+    <*> v .: "chaos_level"
+    <*> (map ItemName <$> v .: "visible_items")
+    <*> v .:? "blocked_function"
+    <*> (fmap ItemName <$> v .:? "first_target")
 
 instance ToJSON PhotoAnalysisOutput where
-  toJSON = genericToJSON photoAnalysisJsonOptions
+  toJSON PhotoAnalysisOutput{..} = object
+    [ "room_type" .= paoRoomType
+    , "chaos_level" .= paoChaosLevel
+    , "visible_items" .= map (\(ItemName n) -> n) paoVisibleItems
+    , "blocked_function" .= paoBlockedFunction
+    , "first_target" .= fmap (\(ItemName n) -> n) paoFirstTarget
+    ]
 
 photoAnalysisSchema :: Schema PhotoAnalysisOutput
 photoAnalysisSchema = Schema

@@ -11,10 +11,16 @@
 --
 -- 1. LLM analyzes photo, sees "blue mug on papers"
 -- 2. LLM calls propose_disposition with its best guesses
--- 3. Tool presents choices to user via Question DSL
+-- 3. Tool presents choices to user via QuestionHandler (IO callback)
 -- 4. User taps button or types correction
 -- 5. Answer returns to LLM as tool result
 -- 6. LLM continues: "Kitchen counter. Now those cables..."
+--
+-- = Effect Architecture
+--
+-- Tools use IO callbacks (QuestionHandler) rather than the QuestionUI effect
+-- because tools run inside the LLM interpreter, after QuestionUI has been
+-- interpreted. The QuestionHandler is passed to the dispatcher at setup time.
 --
 module Tidying.Tools
   ( -- * Tools
@@ -31,40 +37,30 @@ module Tidying.Tools
   , ConfirmDoneInput(..)
   , ConfirmDoneResult(..)
 
-    -- * Events
-  , TidyingToolEvent(..)
-
     -- * Tool Registration
   , tidyingTools
   , makeTidyingDispatcher
   ) where
 
+import Control.Exception (SomeException, try)
+import Control.Monad.IO.Class (liftIO)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Aeson (Value, ToJSON(..), FromJSON(..), Result(..), object, (.=), (.:), (.:?), (.!=), withObject, fromJSON)
 import GHC.Generics (Generic)
-import Effectful (Eff, (:>))
+import Effectful (Eff, (:>), IOE)
 
 import Tidepool.Effect
-  ( State, Emit, RequestInput, Random, QuestionUI
-  , emit, requestQuestion
+  ( State, Emit, Log
+  , emit, logWarn, modify
+  , QuestionHandler
+  , ToolResult(..)
   )
 import Tidepool.Schema (objectSchema, arraySchema, emptySchema, schemaToValue, describeField, SchemaType(..))
 import Tidying.Question as Q
-import Tidying.State (SessionState)
-
--- ══════════════════════════════════════════════════════════════
--- EVENTS
--- ══════════════════════════════════════════════════════════════
-
--- | Events emitted by tidying tools
-data TidyingToolEvent
-  = ItemProposed Text [Text]      -- ^ Item and proposed dispositions
-  | UserConfirmed Text Text       -- ^ Item and chosen disposition
-  | UserCorrected Text Text       -- ^ Item and user-provided location
-  | FunctionChosen Text           -- ^ Space function selected
-  | SessionConfirmedDone          -- ^ User confirmed session is done
-  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+import Tidying.State (SessionState(..), PhaseData(..))
+import Tidying.Events (TidyingEvent(..))
+import Tidying.Types (SpaceFunction(..))
 
 -- ══════════════════════════════════════════════════════════════
 -- PROPOSE DISPOSITION TOOL
@@ -131,14 +127,21 @@ proposeDispositionSchema = schemaToValue $ objectSchema
   ["item", "choices"]
 
 -- | Execute the tool
+--
+-- Takes a QuestionHandler because tools run inside the LLM interpreter
+-- where QuestionUI effect has already been consumed.
+--
+-- Wraps the question handler in try/catch so GUI crashes don't crash the agent.
 executeProposeDisposition
   :: ( State SessionState :> es
-     , Emit TidyingToolEvent :> es
-     , QuestionUI :> es
+     , Emit TidyingEvent :> es
+     , Log :> es
+     , IOE :> es
      )
-  => ProposeDispositionInput
+  => QuestionHandler
+  -> ProposeDispositionInput
   -> Eff es ProposeDispositionResult
-executeProposeDisposition input = do
+executeProposeDisposition askQuestion input = do
   -- Emit that we're proposing
   emit $ ItemProposed input.pdiItem (map (.pcLabel) input.pdiChoices)
 
@@ -150,31 +153,41 @@ executeProposeDisposition input = do
         , Q.pdFallback = input.pdiFallback
         }
 
-  -- Ask user via Question effect
-  answer <- requestQuestion question
+  -- Ask user via IO callback (wrapped in try/catch for robustness)
+  result <- liftIO $ try @SomeException $ askQuestion question
 
-  -- Process answer
-  case answer of
-    Q.DispositionAnswer disp -> do
-      emit $ UserConfirmed input.pdiItem (dispositionToText disp)
-      pure ProposeDispositionResult
-        { pdrDisposition = disp
-        , pdrWasCorrection = False
-        }
-
-    Q.TextAnswer loc -> do
-      emit $ UserCorrected input.pdiItem loc
-      pure ProposeDispositionResult
-        { pdrDisposition = Q.PlaceAt loc
-        , pdrWasCorrection = True
-        }
-
-    _ -> do
-      -- Fallback - treat as skip
+  case result of
+    Left err -> do
+      -- Question handler failed (GUI crash, MVar deadlock, etc)
+      logWarn $ "Question handler failed: " <> T.pack (show err)
       pure ProposeDispositionResult
         { pdrDisposition = Q.SkipForNow
         , pdrWasCorrection = False
         }
+
+    Right answer ->
+      -- Process answer
+      case answer of
+        Q.DispositionAnswer disp -> do
+          emit $ UserConfirmed input.pdiItem (dispositionToText disp)
+          pure ProposeDispositionResult
+            { pdrDisposition = disp
+            , pdrWasCorrection = False
+            }
+
+        Q.TextAnswer loc -> do
+          emit $ UserCorrected input.pdiItem loc
+          pure ProposeDispositionResult
+            { pdrDisposition = Q.PlaceAt loc
+            , pdrWasCorrection = True
+            }
+
+        _ -> do
+          -- Fallback - treat as skip
+          pure ProposeDispositionResult
+            { pdrDisposition = Q.SkipForNow
+            , pdrWasCorrection = False
+            }
 
   where
     toChoice :: ProposedChoice -> Q.Choice
@@ -227,27 +240,48 @@ askSpaceFunctionSchema = schemaToValue $ objectSchema
   []
 
 executeAskSpaceFunction
-  :: ( Emit TidyingToolEvent :> es
-     , QuestionUI :> es
+  :: ( State SessionState :> es
+     , Emit TidyingEvent :> es
+     , Log :> es
+     , IOE :> es
      )
-  => AskSpaceFunctionInput
+  => QuestionHandler
+  -> AskSpaceFunctionInput
   -> Eff es AskSpaceFunctionResult
-executeAskSpaceFunction _input = do
-  -- Use the smart constructor from Question.hs
-  answer <- requestQuestion askFunction
+executeAskSpaceFunction askQuestion _input = do
+  -- Use the smart constructor from Question.hs (wrapped in try/catch)
+  result <- liftIO $ try @SomeException $ askQuestion askFunction
 
-  case answer of
-    Q.ChoiceAnswer value -> do
-      emit $ FunctionChosen value
-      pure AskSpaceFunctionResult { asfrFunction = value }
-
-    Q.TextAnswer custom -> do
-      emit $ FunctionChosen custom
-      pure AskSpaceFunctionResult { asfrFunction = custom }
-
-    _ ->
-      -- Fallback
+  case result of
+    Left err -> do
+      logWarn $ "Question handler failed: " <> T.pack (show err)
       pure AskSpaceFunctionResult { asfrFunction = "living" }
+
+    Right answer ->
+      case answer of
+        Q.ChoiceAnswer value -> do
+          emit $ FunctionChosen value
+          -- Sync to state so subsequent turns see the function choice
+          modify @SessionState $ \st -> updateFunctionInState st (SpaceFunction value)
+          pure AskSpaceFunctionResult { asfrFunction = value }
+
+        Q.TextAnswer custom -> do
+          emit $ FunctionChosen custom
+          -- Sync to state so subsequent turns see the function choice
+          modify @SessionState $ \st -> updateFunctionInState st (SpaceFunction custom)
+          pure AskSpaceFunctionResult { asfrFunction = custom }
+
+        _ ->
+          -- Fallback
+          pure AskSpaceFunctionResult { asfrFunction = "living" }
+
+-- | Helper to update function in PhaseData (only valid in Surveying)
+updateFunctionInState :: SessionState -> SpaceFunction -> SessionState
+updateFunctionInState st fn = case st.phaseData of
+  SurveyingData _ anchors ->
+    st { phaseData = SurveyingData (Just fn) anchors }
+  -- In other phases, function is already set and can't be changed
+  _ -> st
 
 -- ══════════════════════════════════════════════════════════════
 -- CONFIRM DONE TOOL
@@ -276,29 +310,37 @@ confirmDoneSchema = schemaToValue $ objectSchema
   ["items_processed"]
 
 executeConfirmDone
-  :: ( Emit TidyingToolEvent :> es
-     , QuestionUI :> es
+  :: ( Emit TidyingEvent :> es
+     , Log :> es
+     , IOE :> es
      )
-  => ConfirmDoneInput
+  => QuestionHandler
+  -> ConfirmDoneInput
   -> Eff es ConfirmDoneResult
-executeConfirmDone input = do
+executeConfirmDone askQuestion input = do
   let prompt = maybe
         ("Done for now? (" <> T.pack (show input.cdiItemsProcessed) <> " items handled)")
         id
         input.cdiMessage
 
-  answer <- requestQuestion $ Q.Confirm
+  result <- liftIO $ try @SomeException $ askQuestion $ Q.Confirm
     { Q.cfPrompt = prompt
     , Q.cfDefault = True  -- Default to "yes, done"
     }
 
-  case answer of
-    Q.ConfirmAnswer True -> do
-      emit SessionConfirmedDone
-      pure ConfirmDoneResult { cdrConfirmed = True }
-
-    _ ->
+  case result of
+    Left err -> do
+      logWarn $ "Question handler failed: " <> T.pack (show err)
       pure ConfirmDoneResult { cdrConfirmed = False }
+
+    Right answer ->
+      case answer of
+        Q.ConfirmAnswer True -> do
+          emit SessionConfirmedDone
+          pure ConfirmDoneResult { cdrConfirmed = True }
+
+        _ ->
+          pure ConfirmDoneResult { cdrConfirmed = False }
 
 -- ══════════════════════════════════════════════════════════════
 -- TOOL REGISTRATION
@@ -325,37 +367,40 @@ tidyingTools =
   ]
 
 -- | Create dispatcher for tidying tools
--- Note: Requires QuestionUI effect in addition to standard tool effects
+--
+-- Takes a QuestionHandler to route questions to the GUI.
+-- Tools need IOE for the question handler callbacks.
+-- Tools use Log to warn about failures (try/catch on question handler).
 makeTidyingDispatcher
   :: ( State SessionState :> es
-     , Emit TidyingToolEvent :> es
-     , RequestInput :> es
-     , Random :> es
-     , QuestionUI :> es
+     , Emit TidyingEvent :> es
+     , Log :> es
+     , IOE :> es
      )
-  => Text   -- ^ Tool name
-  -> Value  -- ^ Tool input
-  -> Eff es (Either Text Value)
-makeTidyingDispatcher "propose_disposition" input =
+  => QuestionHandler  -- ^ Handler for routing questions to user
+  -> Text             -- ^ Tool name
+  -> Value            -- ^ Tool input
+  -> Eff es (Either Text ToolResult)
+makeTidyingDispatcher handler "propose_disposition" input =
   case fromJSON input of
     Error err -> pure $ Left $ "Failed to parse propose_disposition input: " <> T.pack err
     Success parsed -> do
-      result <- executeProposeDisposition parsed
-      pure $ Right $ toJSON result
+      result <- executeProposeDisposition handler parsed
+      pure $ Right $ ToolSuccess $ toJSON result
 
-makeTidyingDispatcher "ask_space_function" input =
+makeTidyingDispatcher handler "ask_space_function" input =
   case fromJSON input of
     Error err -> pure $ Left $ "Failed to parse ask_space_function input: " <> T.pack err
     Success parsed -> do
-      result <- executeAskSpaceFunction parsed
-      pure $ Right $ toJSON result
+      result <- executeAskSpaceFunction handler parsed
+      pure $ Right $ ToolSuccess $ toJSON result
 
-makeTidyingDispatcher "confirm_done" input =
+makeTidyingDispatcher handler "confirm_done" input =
   case fromJSON input of
     Error err -> pure $ Left $ "Failed to parse confirm_done input: " <> T.pack err
     Success parsed -> do
-      result <- executeConfirmDone parsed
-      pure $ Right $ toJSON result
+      result <- executeConfirmDone handler parsed
+      pure $ Right $ ToolSuccess $ toJSON result
 
-makeTidyingDispatcher name _ =
+makeTidyingDispatcher _ name _ =
   pure $ Left $ "Unknown tidying tool: " <> name

@@ -32,6 +32,7 @@ import GHC.Generics (Generic)
 
 import Tidepool.Anthropic.Http (ImageSource(..))
 import Tidying.State
+import Tidying.Types (ItemName(..), SpaceFunction(..), AnxietyTrigger(..), CategoryName(..))
 
 -- | Context for tidying prompts
 -- This is what gets rendered into the system prompt template
@@ -114,13 +115,13 @@ buildTidyingContext
   -> TidyingContext
 buildTidyingContext st mPhotoAnalysis userText = TidyingContext
   { tcPhase = st.phase
-  , tcFunction = st.function
-  , tcAnchors = st.anchors
+  , tcFunction = fmap (\(SpaceFunction t) -> t) (getFunction st)
+  , tcAnchors = map (\(ItemName n) -> n) (getAnchors st)
   , tcPiles = summarizePiles st.piles
-  , tcEmergentCategories = Map.keys st.emergentCats
-  , tcCurrentCategory = st.currentCategory
+  , tcEmergentCategories = map (\(CategoryName c) -> c) $ Map.keys (getEmergentCats st)
+  , tcCurrentCategory = fmap (\(CategoryName c) -> c) (getCurrentCategory st)
   , tcItemsProcessed = st.itemsProcessed
-  , tcLastAnxiety = st.lastAnxiety
+  , tcLastAnxiety = fmap (\(AnxietyTrigger t) -> t) (getLastAnxiety st)
   , tcPhotoAnalysis = mPhotoAnalysis
   , tcUserText = userText
   }
@@ -131,7 +132,7 @@ summarizePiles Piles{..} = PilesSummary
   { psBelongsCount = length belongs
   , psOutCount = length out
   , psUnsureCount = length unsure
-  , psUnsurePreview = take 5 unsure
+  , psUnsurePreview = map (\(ItemName n) -> n) $ take 5 unsure
   }
 
 -- | Stub photo analysis for testing
