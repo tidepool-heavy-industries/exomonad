@@ -186,6 +186,10 @@ data PendingRequest
     -- Used by tidying agent to request photos of spaces/items
   | PendingCharacterCreation
     -- ^ Character creation flow (full-screen takeover)
+  | PendingCustom Text Value
+    -- ^ Custom request: (type tag, JSON payload)
+    -- Used for agent-specific UI flows like Tidying's Question DSL.
+    -- The type tag helps the GUI dispatch to the right renderer.
   deriving (Show, Eq)
 
 -- | Response from the GUI to the game loop
@@ -199,6 +203,9 @@ data RequestResponse
   | TextWithPhotoResponse Text Text Text
     -- ^ Text with optional photo: (text, base64 data, mime type)
     -- Used when user attaches a photo to their text message
+  | CustomResponse Value
+    -- ^ Custom response (JSON payload)
+    -- Used for agent-specific responses like Tidying's Answer type.
   deriving (Show, Eq)
 
 -- | Log levels for debug entries

@@ -48,8 +48,9 @@ module Tidying
   , Response(..)
   , TidyingEvent(..)
 
-    -- * Running sessions
-  , runTidyingSession
+    -- * Agent
+  , tidying
+  , tidyingRun
 
     -- * State
   , SessionState(..)
@@ -88,15 +89,12 @@ module Tidying
   , renderActPrompt
 
     -- * Question DSL (Tidying.Question)
-    -- For ItemDisposition, import Tidying.Question directly
+    -- For ItemDisposition and Choice type, import Tidying.Question directly
     -- (its Trash/Donate constructors conflict with ItemClass)
   , Question(..)
   , Answer(..)
-  , Choice(..)
 
     -- * Tools (Tidying.Tools)
-    -- Note: ProposeDisposition here is the TOOL type, not the Question constructor
-  , TidyingToolEvent(..)
   , tidyingTools
   , makeTidyingDispatcher
   ) where
@@ -106,9 +104,9 @@ import Tidying.Situation
 import Tidying.Action
 import Tidying.Decide
 import Tidying.Loop
-import Tidying.Agent (runTidyingSession)
+import Tidying.Agent (tidying, tidyingRun)
 import Tidying.Context
 import Tidying.Output
 import Tidying.Templates
-import Tidying.Question (Question(..), Answer(..), Choice(..))
-import Tidying.Tools (TidyingToolEvent(..), tidyingTools, makeTidyingDispatcher)
+import Tidying.Question (Question(..), Answer(..))
+import Tidying.Tools (tidyingTools, makeTidyingDispatcher)

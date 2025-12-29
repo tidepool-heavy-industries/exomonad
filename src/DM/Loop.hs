@@ -59,7 +59,7 @@ import qualified DM.CharacterCreation as CC
 
 import Tidepool.GUI.Core (GUIBridge(..), PendingRequest(..),
                           updateState, addNarrative, setLLMActive, setSuggestedActions)
-import Tidepool.Effect (LLMHooks(..), runLLMWithToolsHooked)
+import Tidepool.Effect (LLMHooks(..), runLLMWithToolsHooked, runTime)
 import qualified Tidepool.GUI.Core as GUI (logInfo)
 import Tidepool.GUI.Handler (makeGUIHandler)
 import Tidepool.Anthropic.Http (Message(..), ContentBlock(..), Role(..))
@@ -529,6 +529,7 @@ runDMGame initialState handleEvent saveState = do
       -- Run the game loop with auto-save (Debug level shows all log messages)
       -- Use runLLMWithTools with real DM dispatcher (not stub executor!)
       ((), finalState) <- runEff
+        . runTime
         . runRandom
         . runEmit handleEvent
         . runState stateWithScene
@@ -601,6 +602,7 @@ runDMGameWithDB conn gameId mCursor initialState handleEvent = do
 
       -- Run with DB-backed chat history
       ((), finalState) <- runEff
+        . runTime
         . runRandom
         . runEmit handleEvent
         . runState stateWithScene
@@ -909,6 +911,7 @@ gameLoopWithGUI bridge handleEvent = do
 
       -- Run the game loop (logs go to GUI debug panel)
       ((), _finalState) <- runEff
+        . runTime
         . runRandom
         . runEmit handleEvent
         . runState initialState
@@ -1049,6 +1052,7 @@ gameLoopWithGUIAndDB conn gameId mCursor bridge handleEvent = do
 
       -- Run the game loop with DB persistence
       ((), finalState) <- runEff
+        . runTime
         . runRandom
         . runEmit handleEvent
         . runState stateAfterCreation

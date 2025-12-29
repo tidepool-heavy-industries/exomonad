@@ -7,6 +7,7 @@ module Tidepool.Effect
     -- * Core Effects
   , State(..)
   , Random(..)
+  , Time(..)
   , LLM(..)
   , ChatHistory(..)
   , Emit(..)
@@ -21,10 +22,12 @@ module Tidepool.Effect
   , modify
   , randomInt
   , randomDouble
+  , getCurrentTime
   , runTurn
   , runTurnContent
   , llmCall
   , llmCallEither
+  , llmCallWithTools
   , emit
   , requestChoice
   , requestText
@@ -53,6 +56,7 @@ module Tidepool.Effect
   , runGame
   , runState
   , runRandom
+  , runTime
   , runLLM
   , runLLMWithTools
   , runLLMWithToolsHooked
@@ -90,6 +94,8 @@ import Effectful
 import Effectful.Dispatch.Dynamic
 import qualified Effectful.State.Static.Local as EState
 import System.Random (randomRIO)
+import Data.Time (UTCTime)
+import qualified Data.Time as Time
 import Data.Text (Text)
 import qualified Data.Text as T
 -- Note: Data.Text.IO removed - logging currently disabled in runLog
@@ -131,6 +137,7 @@ type RunnerEffects s event =
    , State s
    , Emit event
    , Random
+   , Time
    , IOE
    ]
 
@@ -181,6 +188,26 @@ runRandom :: IOE :> es => Eff (Random : es) a -> Eff es a
 runRandom = interpret $ \_ -> \case
   RandomInt lo hi -> liftIO $ randomRIO (lo, hi)
   RandomDouble    -> liftIO $ randomRIO (0.0, 1.0)
+
+-- ══════════════════════════════════════════════════════════════
+-- TIME EFFECT
+-- ══════════════════════════════════════════════════════════════
+
+-- | Effect for getting the current time.
+--
+-- This keeps agents IO-blind while still allowing time access.
+-- The runner interprets this effect using IOE.
+data Time :: Effect where
+  GetCurrentTime :: Time m UTCTime
+
+type instance DispatchOf Time = 'Dynamic
+
+getCurrentTime :: Time :> es => Eff es UTCTime
+getCurrentTime = send GetCurrentTime
+
+runTime :: IOE :> es => Eff (Time : es) a -> Eff es a
+runTime = interpret $ \_ -> \case
+  GetCurrentTime -> liftIO Time.getCurrentTime
 
 -- ══════════════════════════════════════════════════════════════
 -- LLM EFFECT
@@ -294,6 +321,27 @@ llmCallEither systemPrompt userInput schema = do
     TurnBroken reason ->
       -- Shouldn't happen with no tools, but handle gracefully
       pure $ Left $ "Unexpected break: " <> reason
+    TurnCompleted (TurnParsed tr) ->
+      pure $ Right tr.trOutput
+    TurnCompleted (TurnParseFailed {tpfError}) ->
+      pure $ Left $ "Parse failed: " <> T.pack tpfError
+
+-- | Like llmCallEither but with tools support
+-- Use this when you need the LLM to have access to tools during the call.
+-- Tools are executed by the dispatcher wired into runLLMWithTools.
+llmCallWithTools
+  :: forall output es.
+     (LLM :> es, FromJSON output)
+  => Text     -- ^ System prompt
+  -> Text     -- ^ User input
+  -> Value    -- ^ Output schema (JSON)
+  -> [Value]  -- ^ Tool definitions (JSON)
+  -> Eff es (Either Text output)
+llmCallWithTools systemPrompt userInput schema tools = do
+  result <- runTurn @output systemPrompt userInput schema tools
+  case result of
+    TurnBroken reason ->
+      pure $ Left $ "Turn broken: " <> reason
     TurnCompleted (TurnParsed tr) ->
       pure $ Right tr.trOutput
     TurnCompleted (TurnParseFailed {tpfError}) ->
@@ -982,6 +1030,7 @@ runGame
   -> IO (a, s)
 runGame initialState llmConfig eventHandler inputHandler minLogLevel computation =
   runEff
+    . runTime
     . runRandom
     . runEmit eventHandler
     . runState initialState

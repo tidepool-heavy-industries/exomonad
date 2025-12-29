@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE LambdaCase #-}
 -- | Runner for the Tidying agent with GUI integration
 --
 -- Connects the tidying agent loop to the threepenny-gui via GUIBridge.
@@ -8,36 +9,44 @@ module Tidying.GUI.Runner
   ( tidyingGameLoopWithGUI
   ) where
 
-import Control.Concurrent.STM (atomically, readTVar)
+import Control.Concurrent.MVar (takeMVar)
+import Control.Concurrent.STM (atomically, readTVar, writeTVar)
 import Control.Exception (SomeException, try)
+import System.Timeout (timeout)
 import Control.Monad.IO.Class (liftIO)
-import Data.Aeson (toJSON)
+import Data.Aeson (fromJSON, Result(..), toJSON)
 import qualified Data.Text as T
 import System.Environment (lookupEnv)
 
 import Effectful (Eff, runEff, IOE, (:>), inject)
+import Effectful.Dispatch.Dynamic (reinterpret)
+import qualified Effectful.State.Static.Local as EState
 
 import Tidying.Agent (tidyingRun)
 import Tidying.Loop (TidyingEvent(..))
 import Tidying.State (SessionState(..))
-import Tidepool (BaseEffects, RunnerEffects)
+import Tidying.Question (Question(..), Answer(..), ItemDisposition(..))
+import Tidying.Tools (makeTidyingDispatcher)
+import qualified Data.Map.Strict as Map
 import Tidepool.Effect
-  ( State
-  , runState
+  ( State(..)
   , runRandom
+  , runTime
   , runEmit
   , runChatHistory
   , runLogWithBridge
   , runRequestInput
   , runLLMWithToolsHooked
+  , runQuestionUI
+  , QuestionHandler
   , LLMConfig(..)
   , LLMHooks(..)
   , LogLevel(..)
-  , ToolDispatcher
-  , ToolResult(..)
   )
 import Tidepool.GUI.Core
   ( GUIBridge(..)
+  , PendingRequest(..)
+  , RequestResponse(..)
   , addNarrative
   , logInfo
   , logError
@@ -120,22 +129,55 @@ tidyingGameLoopWithGUI bridge = do
           addNarrative bridge $ "Session complete! You processed "
             <> T.pack (show itemsProcessed) <> " items."
 
-  -- The agent uses BaseEffects (no IOE). We inject into RunnerEffects which includes IOE.
-  let theRun :: Eff (BaseEffects SessionState TidyingEvent) ()
-      theRun = tidyingRun
-      widened :: Eff (RunnerEffects SessionState TidyingEvent) ()
-      widened = inject theRun
+        -- Tool events (from mid-turn tool calls)
+        ItemProposed item choices ->
+          logInfo bridge $ "TOOL: propose_disposition for '" <> item
+            <> "' with choices: " <> T.intercalate ", " choices
+
+        UserConfirmed item disposition ->
+          addNarrative bridge $ "Got it! " <> item <> " -> " <> disposition
+
+        UserCorrected item location ->
+          addNarrative bridge $ "Thanks for the correction! " <> item <> " -> " <> location
+
+        FunctionChosen fn ->
+          logInfo bridge $ "TOOL: Space function set to '" <> fn <> "'"
+
+        SessionConfirmedDone ->
+          logInfo bridge "TOOL: User confirmed session done"
+
+  -- Create the question handler for tools to use
+  let questionHandler = makeQuestionHandler bridge
+
+  -- Create tool dispatcher with the question handler
+  -- Tools need QuestionHandler to show UI during LLM turns
+  let toolDispatcher = makeTidyingDispatcher questionHandler
 
   -- Run the game loop with error handling
+  -- tidyingRun is TidyingM which includes QuestionUI in its effect stack.
+  -- We inject into a stack with IOE, then interpret QuestionUI.
+  --
+  -- The effect order is:
+  -- TidyingM = Eff '[QuestionUI, LLM, State, Emit, RequestInput, Log, ChatHistory, Random]
+  -- After inject (adding IOE): Eff '[QuestionUI, ...effects..., IOE]
+  -- After runQuestionUI: Eff '[LLM, ...effects..., IOE] (BaseEffects + IOE)
+  -- Remaining interpreters strip the rest
+  --
+  -- Note: tidyingTools defines the available tools, but they're only used
+  -- when passed to runTurn/runTurnContent calls. The dispatcher handles
+  -- executing tools when the LLM invokes them.
   result <- try $ runEff
+    . runTime
     . runRandom
     . runEmit handleEvent
-    . runStateWithSync bridge initialState
+    . runStateWithGUISync bridge initialState
     . runChatHistory
     . runLogWithBridge bridge Tidepool.Effect.Debug
     . runRequestInput inputHandler
-    . runLLMWithToolsHooked @_ @TidyingEvent spinnerHooks llmConfig noToolDispatcher
-    $ widened
+    . runLLMWithToolsHooked @_ @TidyingEvent spinnerHooks llmConfig toolDispatcher
+    . runQuestionUI questionHandler
+    . inject
+    $ tidyingRun
 
   case result of
     Left (err :: SomeException) -> do
@@ -144,22 +186,78 @@ tidyingGameLoopWithGUI bridge = do
     Right () ->
       addNarrative bridge "Thanks for tidying with me today!"
 
--- | No-op tool dispatcher for agents without mid-turn tools
-noToolDispatcher :: ToolDispatcher event es
-noToolDispatcher _ _ = pure (Right (ToolSuccess (toJSON ())))
-
--- | Run State effect with synchronization to GUIBridge
+-- | Create a question handler that routes through the GUIBridge
 --
--- Syncs state to the bridge's TVar after each action completes.
--- This ensures the GUI always shows the latest state.
-runStateWithSync
+-- Posts the Question as a PendingCustom request, blocks on MVar,
+-- and parses the CustomResponse back to an Answer.
+--
+-- Has a 5-minute timeout to prevent blocking forever if GUI hangs.
+makeQuestionHandler :: GUIBridge state -> QuestionHandler
+makeQuestionHandler bridge = \question -> do
+  -- Post question to bridge as PendingCustom
+  atomically $ writeTVar bridge.gbPendingRequest
+    (Just $ PendingCustom "question" (toJSON question))
+
+  -- Block waiting for user response (5 minute timeout)
+  -- 5 * 60 * 1000000 = 300000000 microseconds
+  mResponse <- timeout 300000000 $ takeMVar bridge.gbRequestResponse
+
+  -- Clear the pending request
+  atomically $ writeTVar bridge.gbPendingRequest Nothing
+
+  case mResponse of
+    Nothing -> do
+      -- Timeout occurred
+      logError bridge "Question handler timed out (5 min)"
+      pure $ fallbackAnswer question
+
+    Just response ->
+      -- Parse response
+      case response of
+        CustomResponse val ->
+          case fromJSON val of
+            Success answer -> pure answer
+            Error err -> do
+              logError bridge $ "Failed to parse answer: " <> T.pack err
+              -- Fallback: treat as text answer
+              pure $ fallbackAnswer question
+
+        -- Shouldn't happen, but handle gracefully
+        TextResponse _ ->
+          pure $ fallbackAnswer question
+
+        _ -> do
+          logError bridge "Unexpected response type for question"
+          pure $ fallbackAnswer question
+
+-- | Fallback answer when parsing fails
+--
+-- Returns a sensible default based on question type.
+-- This ensures the agent gets the expected Answer variant.
+fallbackAnswer :: Question -> Answer
+fallbackAnswer = \case
+  ProposeDisposition _ _ _ -> DispositionAnswer SkipForNow
+  Confirm _ defVal -> ConfirmAnswer defVal
+  Choose _ _ _ _ -> ChoiceAnswer ""
+  FreeText _ _ -> TextAnswer ""
+  QuestionGroup _ _ -> GroupAnswer Map.empty
+  ConditionalQ _ q -> fallbackAnswer q
+
+-- | Run State effect with live synchronization to GUIBridge
+--
+-- Unlike a simple runState wrapper, this interpreter syncs to the
+-- GUIBridge TVar after EVERY Put operation. This ensures the GUI
+-- shows state changes in real-time during long-running agent loops.
+runStateWithGUISync
   :: IOE :> es
   => GUIBridge state
   -> state
   -> Eff (State state : es) a
   -> Eff es a
-runStateWithSync bridge initialState action = do
-  (result, finalState) <- runState initialState action
-  -- Sync final state to bridge
-  liftIO $ updateState bridge (const finalState)
-  pure result
+runStateWithGUISync bridge initialState action =
+  fmap fst $ reinterpret (EState.runState initialState) (\_ -> \case
+    Get -> EState.get
+    Put s -> do
+      EState.put s
+      -- Sync to GUI bridge after every state change
+      liftIO $ updateState bridge (const s)) action

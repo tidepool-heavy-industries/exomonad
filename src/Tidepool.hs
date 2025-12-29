@@ -108,6 +108,7 @@ type BaseEffects s evt =
    , Log
    , ChatHistory
    , Random
+   , Time
    ]
 
 -- ══════════════════════════════════════════════════════════════════════
@@ -200,6 +201,7 @@ tidepool config agent = do
 
   -- Now interpret using runGame's proven order (matches RunnerEffects)
   ((), finalState) <- runEff
+    . runTime
     . runRandom
     . runEmit config.acOnEvent
     . runState agent.agentInit

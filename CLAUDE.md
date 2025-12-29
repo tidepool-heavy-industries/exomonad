@@ -1,10 +1,14 @@
-# Tidepool DM Agent - Haskell Sketch
+# Tidepool - Type-Safe LLM Agent Framework
 
 ## What This Is
 
-A type-safe LLM agent loop library (Tidepool) demonstrated via a Blades in the Dark-style Dungeon Master agent. The key insight: LLMs don't need raw IO - they need typed state they can read (via templates) and typed mutations they can express (via structured output).
+A type-safe LLM agent loop library (Tidepool) with two demonstration agents:
+1. **DM Agent** - Blades in the Dark-style Dungeon Master
+2. **Tidying Agent** - Prosthetic executive function for tackling overwhelming spaces
 
-**Status**: Compiles successfully. All logic is stubbed with `error "TODO: ..."`.
+The key insight: LLMs don't need raw IO - they need typed state they can read (via templates) and typed mutations they can express (via structured output).
+
+**Status**: Compiles successfully. DM agent has stubbed logic. Tidying agent is functional with GUI.
 
 ## Architecture
 
@@ -224,24 +228,53 @@ selectedIdx <- guiDice bridge "Choose a die:" pool
 
 ## Effect System
 
-```haskell
--- The effect stack for game loops
-type GameEffects s event =
-  '[ LLM
-   , RequestInput
-   , State s
-   , Emit event
-   , Random
-   ]
+### IO-Blind Architecture
 
+Agents are **IO-blind**: they cannot use `IOE` directly. All IO happens in the runner via effect interpreters. This enables:
+- Eventual WASM compilation
+- Deterministic testing
+- Clear separation of pure logic from IO
+
+```haskell
+-- BaseEffects: What agents see (no IOE!)
+type BaseEffects s evt =
+  '[ LLM, State s, Emit evt, RequestInput, Log, ChatHistory, Random, Time ]
+
+-- RunnerEffects: What interpreters use (includes IOE)
+type RunnerEffects s event =
+  '[ LLM, RequestInput, Log, ChatHistory, State s, Emit event, Random, Time, IOE ]
+```
+
+### Core Effects
+
+```haskell
 -- LLM effect - interpreter handles API, tools, retries
 data LLM :: Effect where
-  RunTurnOp :: Text -> Value -> [Value] -> LLM m (TurnResult Value)
+  RunTurnOp :: Text -> [ContentBlock] -> Value -> [Value] -> LLM m (TurnOutcome (TurnResult Value))
 
 -- RequestInput - for tools/game logic needing player input
 data RequestInput :: Effect where
   RequestChoice :: Text -> [(Text, a)] -> RequestInput m a
   RequestText :: Text -> RequestInput m Text
+  RequestTextWithPhoto :: Text -> RequestInput m (Text, [(Text, Text)])  -- For photo attachments
+
+-- Time effect - IO-blind time access
+data Time :: Effect where
+  GetCurrentTime :: Time m UTCTime
+
+-- Interpreted by runner:
+runTime :: IOE :> es => Eff (Time : es) a -> Eff es a
+```
+
+### QuestionUI Effect (Tidying-specific)
+
+For mid-turn user interaction during tool execution:
+
+```haskell
+data QuestionUI :: Effect where
+  AskQuestion :: Question -> QuestionUI m Answer
+
+type QuestionHandler = Question -> IO Answer
 ```
 
 ## Project Structure
@@ -249,40 +282,50 @@ data RequestInput :: Effect where
 ```
 src/
 ├── Tidepool/              # Core library (reusable)
-│   ├── Effect.hs          # LLM, RequestInput, State, Emit, Random effects
+│   ├── Effect.hs          # LLM, RequestInput, State, Emit, Random, Time effects
 │   ├── Template.hs        # TypedTemplate, Template (jinja + schema + tools)
 │   ├── Tool.hs            # Tool typeclass, ToolList GADT
 │   ├── Schema.hs          # JSON Schema derivation (deriveSchema)
-│   ├── Loop.hs            # TurnConfig, Compression abstractions
+│   ├── Storage.hs         # SQLite persistence for game state
 │   └── GUI/               # Generic threepenny-gui components
 │       ├── Core.hs        # GUIBridge, PendingRequest, safeSubmitResponse
 │       ├── Handler.hs     # makeGUIHandler, guiDice
 │       ├── Server.hs      # startServer, threepenny config
 │       ├── Theme.hs       # Theme type, ColorPalette, CSS generation
 │       └── Widgets.hs     # textInput, choiceCards, narrativePane, debugPanel
-└── DM/                    # DM agent (domain-specific)
-    ├── State.hs           # WorldState, PlayerState, dice mechanics, factions...
-    ├── Output.hs          # TurnOutput with delta fields, applyTurnOutput
-    ├── Tools.hs           # ThinkAsDM, SpeakAsNPC, AskPlayer, Choose
-    ├── Context.hs         # DMContext, DiceContext, Precarity
-    ├── Templates.hs       # dmTurnTemplate, compressionTemplate
-    ├── Loop.hs            # dmTurn, handleDiceSelection, runDMGame
-    └── GUI/               # DM-specific GUI (Blades aesthetic)
-        ├── App.hs         # Main layout, polling loop, widget wiring
-        ├── Theme.hs       # Dark noir theme, tier colors
-        └── Widgets/
-            ├── Stats.hs   # stressBar, coinDisplay, heatBar, wantedPips
-            ├── Mood.hs    # moodHeader, moodDisplay
-            ├── Clocks.hs  # clocksPanel, clockWidget with hover tooltips
-            ├── History.hs # historyTab, sceneBeatEntry, sceneSummaryEntry
-            ├── Narrative.hs # dmNarrativePane with NPC speech bubbles
-            └── Dice.hs    # diceChoice with tier colors, keyboard nav
+├── DM/                    # DM agent (Blades in the Dark)
+│   ├── State.hs           # WorldState, PlayerState, dice mechanics, factions
+│   ├── Output.hs          # TurnOutput with delta fields, applyTurnOutput
+│   ├── Tools.hs           # ThinkAsDM, SpeakAsNPC, AskPlayer, Choose
+│   ├── Context.hs         # DMContext, DiceContext, Precarity
+│   ├── Templates.hs       # dmTurnTemplate, compressionTemplate
+│   ├── Loop.hs            # dmTurn, handleDiceSelection, runDMGame
+│   └── GUI/               # DM-specific GUI (noir aesthetic)
+│       ├── App.hs         # Main layout, polling loop, widget wiring
+│       ├── Theme.hs       # Dark noir theme, tier colors
+│       └── Widgets/       # Stats, Mood, Clocks, History, Narrative, Dice
+└── Tidying/               # Tidying agent (executive function prosthetic)
+    ├── Agent.hs           # Agent definition, TidyingM monad
+    ├── State.hs           # SessionState, Phase, Piles, Photo
+    ├── Loop.hs            # OODA loop: tidyingTurn, photo analysis, extraction
+    ├── Decide.hs          # Pure routing: (State, Extract) → (Action, Phase)
+    ├── Action.hs          # Action ADT (InstructTrash, InstructPlace, etc.)
+    ├── Tools.hs           # ProposeDisposition, AskSpaceFunction, ConfirmDone
+    ├── Question.hs        # Question DSL for mid-turn user interaction
+    ├── Events.hs          # TidyingEvent for GUI updates
+    ├── Context.hs         # TidyingContext for template rendering
+    ├── Output.hs          # Extract, PhotoAnalysisOutput schemas
+    ├── Templates.hs       # Prompt templates for LLM calls
+    └── GUI/               # Tidying-specific GUI (calm aesthetic)
+        ├── App.hs         # Main layout, chat interface
+        ├── Runner.hs      # Effect stack wiring, QuestionHandler
+        ├── Theme.hs       # Light calming theme
+        └── Widgets/       # Chat, Input, PhotoUpload, Question
 app/
-├── Main.hs                # Executable entry point
-└── MainGUI.hs             # GUI demo executable
-templates/                 # Jinja templates (to be created)
-├── dm_turn.jinja
-└── compression.jinja
+├── Main.hs                # DM CLI entry point
+├── MainGUI.hs             # DM GUI entry point
+├── MainTidyGUI.hs         # Tidying GUI entry point
+└── TestTidying.hs         # Tidying test harness
 ```
 
 ## Key Types
@@ -354,9 +397,15 @@ data PlayerDeltas = PlayerDeltas
 ## Running
 
 ```bash
-cabal build               # Succeeds
-cabal run tidepool-dm     # Runs but hits TODO errors
-cabal run tidepool-dm-gui # GUI demo (opens browser at localhost:8023)
+cabal build                # Succeeds
+
+# DM Agent
+cabal run tidepool-dm      # CLI mode (hits TODO errors)
+cabal run tidepool-dm-gui  # GUI mode (opens browser at localhost:8023)
+
+# Tidying Agent
+cabal run tidepool-tidy-gui  # GUI mode (opens browser at localhost:8024)
+                             # Requires ANTHROPIC_API_KEY env var
 ```
 
 ## Next Steps

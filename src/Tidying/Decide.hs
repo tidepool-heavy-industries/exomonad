@@ -10,6 +10,10 @@ module Tidying.Decide
     -- * Helpers
   , suggestSplit
   , pickNextTarget
+
+    -- * Photo analysis helpers
+  , ChaosLevel(..)
+  , chaosLevel
   ) where
 
 import Data.List.NonEmpty (NonEmpty(..))
@@ -21,6 +25,7 @@ import Data.Text qualified as T
 import Tidying.State
 import Tidying.Situation
 import Tidying.Action
+import Tidying.Context (PhotoAnalysis(..))
 import Tidying.Output (Extract(..), Intent(..), Choice(..))
 import Tidying.Types (ItemName(..), Location(..), AnxietyTrigger(..), CategoryName(..))
 
@@ -177,8 +182,9 @@ decide st sit = case (st.phase, sit) of
 -- LLM extracts facts, this function decides what to do
 --
 -- This is PHASE-AWARE: different phases have different behaviors.
-decideFromExtract :: SessionState -> Extract -> (Action, Phase)
-decideFromExtract st ext = case ext.exIntent of
+-- Photo analysis is consulted for chaos level, blocked function, and first target.
+decideFromExtract :: SessionState -> Maybe PhotoAnalysis -> Extract -> (Action, Phase)
+decideFromExtract st mPhoto ext = case ext.exIntent of
   -- Universal intents (work in any phase)
   IntentStop ->
     (Summary, st.phase)
@@ -193,7 +199,14 @@ decideFromExtract st ext = case ext.exIntent of
   _ -> case st.phase of
 
     -- SURVEYING: Focus on getting function/anchors
+    -- Photo analysis can fast-track to sorting if space is chaotic
     Surveying
+      -- Buried chaos: skip questions, get them moving immediately
+      | chaosLevel mPhoto == Buried ->
+          (FirstInstruction, Sorting)
+      -- Blocked function + have function: start sorting to unblock
+      | hasBlockedFunction mPhoto, hasFunction st ->
+          (FirstInstruction, Sorting)
       -- If they told us the function, check if we need anchors
       | Just _ <- ext.exFunction ->
           if hasAnchors st || isJust ext.exAnchors
@@ -212,7 +225,12 @@ decideFromExtract st ext = case ext.exIntent of
           (FirstInstruction, Sorting)
 
     -- SORTING: Handle item decisions
-    Sorting -> routeInSorting st ext
+    -- Photo analysis can acknowledge progress
+    Sorting
+      -- Clear space: acknowledge progress!
+      | chaosLevel mPhoto == Clear, IntentStart <- ext.exIntent ->
+          (AckProgress "Space is looking clear!", Sorting)
+      | otherwise -> routeInSorting st ext
 
     -- SPLITTING: Usually back to sorting after action
     Splitting -> case ext.exIntent of
@@ -319,3 +337,36 @@ findAlternative st trigger =
         "something on the floor"
     _ ->
         "something smaller"
+
+-- ══════════════════════════════════════════════════════════════
+-- PHOTO ANALYSIS HELPERS
+-- ══════════════════════════════════════════════════════════════
+
+-- | Photo chaos level (extracted from photo analysis)
+data ChaosLevel
+  = Buried     -- ^ "buried" - overwhelmingly messy, fast-track to action
+  | Cluttered  -- ^ "cluttered" - clearly messy
+  | Moderate   -- ^ "moderate" - some clutter
+  | Clear      -- ^ "clear" - space is mostly tidy
+  | Unknown    -- ^ No photo analysis available
+  deriving (Eq, Show)
+
+-- | Extract chaos level from photo analysis
+chaosLevel :: Maybe PhotoAnalysis -> ChaosLevel
+chaosLevel Nothing = Unknown
+chaosLevel (Just pa) = case T.toLower pa.paChaosLevel of
+  "buried"    -> Buried
+  "cluttered" -> Cluttered
+  "moderate"  -> Moderate
+  "clear"     -> Clear
+  _           -> Unknown
+
+-- | Does photo analysis indicate a blocked function?
+hasBlockedFunction :: Maybe PhotoAnalysis -> Bool
+hasBlockedFunction (Just pa) = isJust pa.paBlockedFunction
+hasBlockedFunction Nothing = False
+
+-- | Does photo analysis suggest a first target?
+hasFirstTarget :: Maybe PhotoAnalysis -> Bool
+hasFirstTarget (Just pa) = isJust pa.paFirstTarget
+hasFirstTarget Nothing = False

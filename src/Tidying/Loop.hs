@@ -31,7 +31,6 @@ import Data.List.NonEmpty (NonEmpty(..))
 import Data.List.NonEmpty qualified as NE
 import Data.Text (Text)
 import Data.Text qualified as T
-import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 
 import Tidepool.Effect
@@ -107,7 +106,8 @@ tidyingTurn input = do
   emit $ SituationClassified (T.pack $ show extract.exIntent)
 
   -- DECIDE: Pure routing based on extraction (no LLM)
-  let (action, nextPhase) = decideFromExtract st extract
+  -- Photo analysis informs routing (chaos level, blocked function, first target)
+  let (action, nextPhase) = decideFromExtract st mPhotoAnalysis extract
 
   logDebug $ "Action: " <> T.pack (show action)
   emit $ ActionTaken action
@@ -327,16 +327,20 @@ applyStateTransitionFromExtract extract action nextPhase = do
   -- Get current time to set sessionStart on first turn
   now <- getCurrentTime
   modify @SessionState $ \st ->
-    -- Calculate new piles
-    let newPiles = case action of
+    -- Capture unsure items BEFORE clearing (for split transitions)
+    let unsureItems = st.piles.unsure
+
+        -- Calculate new piles
+        newPiles = case action of
           InstructSplit _ ->
-            -- Clear unsure pile - items move to emergent categories
+            -- Clear unsure pile - items will be moved to emergent categories
             st.piles { unsure = [] }
           _ ->
             updatePilesFromExtract st.piles extract action
 
         -- Build new PhaseData based on transition
-        newPhaseData = transitionPhaseData st.phaseData extract action nextPhase
+        -- Pass unsure items so they can be distributed to categories
+        newPhaseData = transitionPhaseData st.phaseData extract action nextPhase unsureItems
 
     in st
       { phase = nextPhase
@@ -348,8 +352,11 @@ applyStateTransitionFromExtract extract action nextPhase = do
       }
 
 -- | Transition PhaseData based on action and next phase
-transitionPhaseData :: PhaseData -> Extract -> Action -> Phase -> PhaseData
-transitionPhaseData pd extract action nextPhase = case (pd, nextPhase) of
+--
+-- The unsureItems parameter carries items from the unsure pile so they can
+-- be distributed to emergent categories when transitioning to Refining.
+transitionPhaseData :: PhaseData -> Extract -> Action -> Phase -> [ItemName] -> PhaseData
+transitionPhaseData pd extract action nextPhase unsureItems = case (pd, nextPhase) of
   -- Surveying: accumulate function/anchors
   (SurveyingData mFn anchors, Surveying) ->
     SurveyingData
@@ -384,16 +391,20 @@ transitionPhaseData pd extract action nextPhase = case (pd, nextPhase) of
   -- Sorting/Splitting → Refining: start refining
   (SortingData fn anchors _item lastAnx, Refining) ->
     let cat = extractNextCategory action
-    in RefiningData fn anchors Map.empty cat Nothing lastAnx
+        -- Put all unsure items in first (and only) category
+        catsMap = Map.singleton cat unsureItems
+    in RefiningData fn anchors catsMap cat Nothing lastAnx
 
   (SplittingData fn anchors cats lastAnx, Refining) ->
     -- Move to first category for refining
+    -- Put all unsure items in the first category (user will re-sort from there)
     let cat = NE.head cats
         catsMap = Map.fromList [(c, []) | c <- NE.toList cats]
-    in RefiningData fn anchors catsMap cat Nothing lastAnx
+        catsWithItems = Map.adjust (++ unsureItems) cat catsMap
+    in RefiningData fn anchors catsWithItems cat Nothing lastAnx
 
   -- Refining: update current item/category
-  (RefiningData fn anchors cats curCat _item lastAnx, Refining) ->
+  (RefiningData fn anchors cats _curCat _item lastAnx, Refining) ->
     let newCat = extractNextCategory action
         newItem = extract.exItem <|> _item
     in RefiningData fn anchors cats newCat newItem lastAnx

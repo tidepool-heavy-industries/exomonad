@@ -60,7 +60,7 @@ tidying = Agent
   { agentName       = "tidying"
   , agentInit       = newSession
   , agentRun        = tidyingRun
-  , agentDispatcher = noDispatcher  -- TODO: Wire makeTidyingDispatcher
+  , agentDispatcher = noDispatcher  -- Actual dispatcher wired in Runner.hs via runLLMWithToolsHooked
   }
 
 -- | The Tidying agent's main loop
@@ -85,26 +85,27 @@ tidyingRun = do
           hasPhoto = not (null photoData)
           hasText = not (T.null trimmed)
 
-      case trimmed of
-        "quit" -> pure ()
-        "exit" -> pure ()
-        "done" -> pure ()
-        _ | not hasText && not hasPhoto -> loop  -- No input at all, continue
-          | otherwise -> do
-              -- Convert photo data tuples to Photo values
-              let photos = map (\(b64, mime) -> Photo b64 mime) photoData
+      -- Skip empty input (no text, no photo)
+      if not hasText && not hasPhoto
+        then loop
+        else do
+          -- Convert photo data tuples to Photo values
+          let photos = map (\(b64, mime) -> Photo b64 mime) photoData
 
-              -- Emit user input for chat display (with photo indicator)
-              let photoIndicator = if hasPhoto then " [📷]" else ""
-              emit $ UserInputReceived (input <> photoIndicator)
+          -- Emit user input for chat display (with photo indicator)
+          let photoIndicator = if hasPhoto then " [📷]" else ""
+          emit $ UserInputReceived (input <> photoIndicator)
 
-              let userInput = UserInput
-                    { inputText = if hasText then Just input else Nothing
-                    , inputPhotos = photos
-                    }
-              response <- tidyingTurn userInput
+          let userInput = UserInput
+                { inputText = if hasText then Just input else Nothing
+                , inputPhotos = photos
+                }
+          response <- tidyingTurn userInput
 
-              -- Emit response for chat display
-              emit $ ResponseGenerated response.responseText
+          -- Emit response for chat display
+          emit $ ResponseGenerated response.responseText
 
-              loop
+          -- Exit if session ended (quit/done/stop), otherwise continue
+          if response.responseSessionEnded
+            then pure ()
+            else loop

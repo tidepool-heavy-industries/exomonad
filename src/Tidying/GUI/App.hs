@@ -12,7 +12,8 @@ module Tidying.GUI.App
 
 import Control.Concurrent.STM (atomically, readTVar)
 import Control.Monad (void, when)
-import Data.Aeson (ToJSON)
+import Data.Aeson (ToJSON, fromJSON)
+import Data.Aeson qualified as Aeson
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -20,13 +21,15 @@ import Graphics.UI.Threepenny.Core
 import qualified Graphics.UI.Threepenny as UI
 
 import Tidying.State (Phase(..))
+import Tidying.Question (Question)
 import Tidying.GUI.Theme (tidyingTheme)
 import Tidying.GUI.Widgets.Chat (chatPane, updateChatPane, typingIndicator)
 import Tidying.GUI.Widgets.Input (textInputWithPhoto)
 import Tidying.GUI.Widgets.PhotoUpload (photoUploadWidget)
+import Tidying.GUI.Widgets.Question (renderQuestion, QuestionResult(..))
 import Tidepool.GUI.Core
 import Tidepool.GUI.Theme (applyTheme)
-import Tidepool.GUI.Widgets (choiceCards, updateDebugPanel, stateInspector, StateInspectorHandle(..), refreshStateInspector)
+import Tidepool.GUI.Widgets (choiceCards, updateDebugPanel, stateInspector, StateInspectorHandle(..), refreshStateInspector, focusElement)
 
 -- | Configuration for the Tidying GUI
 data TidyingGUIConfig = TidyingGUIConfig
@@ -262,6 +265,28 @@ updateInputArea bridge elements pending = do
 
     Just PendingCharacterCreation -> do
       -- Character creation not used in tidying
+      void $ element inputArea # set children []
+      void $ element inputArea # set style [("display", "none")]
+
+    Just (PendingCustom "question" val) -> do
+      -- Question DSL widget
+      case fromJSON val of
+        Aeson.Success (q :: Question) -> do
+          void $ element inputArea # set children []
+          void $ element inputArea # set style [("display", "block")]
+          result <- renderQuestion bridge q
+          void $ element inputArea #+ [element result.qrElement]
+          -- Auto-focus if there's a target
+          case result.qrFocusTarget of
+            Just el -> focusElement el
+            Nothing -> pure ()
+        Aeson.Error err -> do
+          -- Failed to decode question, log and hide
+          liftIO $ logError bridge $ "Failed to decode question: " <> T.pack err
+          void $ element inputArea # set style [("display", "none")]
+
+    Just (PendingCustom _ _) -> do
+      -- Unknown custom request type
       void $ element inputArea # set children []
       void $ element inputArea # set style [("display", "none")]
 
