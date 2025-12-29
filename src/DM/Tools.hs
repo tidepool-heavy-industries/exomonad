@@ -340,18 +340,31 @@ instance Tool SpendDie DMEvent WorldState DMEffects where
               }
           }
 
-        -- Check if pool is now empty - if so, transition to bargain mood
-        when (null newPool) $ do
-          putMood $ MoodBargain Bargaining
-            { bvWhatDrained = input.situation
-            , bvCanRetreat = not (isDesperateMood currentMoodBefore)
-            , bvRetreatDesc = "slip away and regroup"
-            , bvPassOutDesc = "collapse from exhaustion"
-            , bvPreviousMood = currentMoodBefore
-            }
-
-        -- Get updated state for accurate event emission
+        -- Get updated state for trauma check and event emission
         newState <- get @WorldState
+
+        -- Check trauma FIRST (stress >= 9 takes priority over empty pool)
+        -- If stress hits 9, they're breaking regardless of dice remaining
+        if newState.player.stress >= 9
+          then do
+            putMood $ MoodTrauma Breaking
+              { tvTraumaType = Trauma "pending"  -- Will be assigned by LLM
+              , tvWhatBroke = input.situation
+              , tvTrigger = "stress overflow from dice outcome"
+              , tvAdrenaline = True  -- Can push through for one more action
+              }
+            emit (MoodTransition "spend_die" "action" "trauma")
+          else
+            -- Check if pool is now empty - if so, transition to bargain mood
+            when (null newPool) $ do
+              putMood $ MoodBargain Bargaining
+                { bvWhatDrained = input.situation
+                , bvCanRetreat = not (isDesperateMood currentMoodBefore)
+                , bvRetreatDesc = "slip away and regroup"
+                , bvPassOutDesc = "collapse from exhaustion"
+                , bvPreviousMood = currentMoodBefore
+                }
+              emit (MoodTransition "spend_die" "action" "bargain")
 
         -- Emit event with the revealed narrative
         emit (DieSpent chosenDie outcomeTier chosenOutcome.narrative)
@@ -361,10 +374,6 @@ instance Tool SpendDie DMEvent WorldState DMEffects where
           emit (StressChanged state.player.stress newState.player.stress "dice outcome")
         when (chosenOutcome.heatCost /= 0) $
           emit (HeatChanged state.player.heat newState.player.heat "dice outcome")
-
-        -- If we just emptied the pool, also emit that
-        when (null newPool) $
-          emit (MoodTransition "spend_die" "action" "bargain")
 
         return SpendDieResult
           { chosenDieValue = chosenDie
@@ -518,6 +527,9 @@ instance Tool Resolve DMEvent WorldState DMEffects where
           "disaster" -> AmDisaster input.resolveWhat True input.resolveComplications actionCtx
           _ -> AmCostly input.resolveWhat input.resolveCosts input.resolveComplications actionCtx
 
+    -- Clear pendingOutcome now that we've consumed it
+    modify @WorldState $ \s -> s { pendingOutcome = Nothing }
+
     -- Transition to Aftermath mood
     putMood (MoodAftermath aftermath)
     emit (MoodTransition "resolve" "action" "aftermath")
@@ -554,8 +566,11 @@ instance Tool Accept DMEvent WorldState DMEffects where
           , atscRecentCosts = state.recentCosts
           }
 
-    -- Store the entry context and transition to Scene
-    modify @WorldState $ \s -> s { sceneEntryContext = Just (EntryFromAftermath entryContext) }
+    -- Store the entry context, clear any stale pendingOutcome, and transition to Scene
+    modify @WorldState $ \s -> s
+      { sceneEntryContext = Just (EntryFromAftermath entryContext)
+      , pendingOutcome = Nothing  -- Clear any stale outcome from action sequence
+      }
 
     -- Return to Scene mood (Encounter variant - default low-urgency continuation)
     putMood (MoodScene (Encounter "continuing" UrgencyLow True))

@@ -155,8 +155,8 @@ applyTurnOutput output state = state
   , recentCosts = take 3 $ case output.costDescription of
       Just cost -> cost : state.recentCosts
       Nothing -> state.recentCosts
-  -- Track unresolved threats
-  , unresolvedThreats = case output.threatDescription of
+  -- Track unresolved threats (keep last 5)
+  , unresolvedThreats = take 5 $ case output.threatDescription of
       Just threat -> threat : state.unresolvedThreats
       Nothing -> state.unresolvedThreats
   }
