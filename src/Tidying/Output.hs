@@ -36,7 +36,7 @@ import GHC.Generics (Generic)
 
 import Tidepool.Template (Schema(..))
 import Tidying.Types
-  ( ItemName(..), Location(..), SpaceFunction(..), AnxietyTrigger(..) )
+  ( ItemName(..), Location(..), SpaceFunction(..), AnxietyTrigger(..), ChaosLevel )
 import Tidying.Situation
   ( Situation(..), ItemClass(..) )
 
@@ -334,8 +334,8 @@ actOutputSchema = Schema
 data PhotoAnalysisOutput = PhotoAnalysisOutput
   { paoRoomType :: Text
     -- ^ "office", "bedroom", "closet", "kitchen", "living_room", "garage", "other"
-  , paoChaosLevel :: Text
-    -- ^ "clear", "moderate", "cluttered", "buried"
+  , paoChaosLevel :: ChaosLevel
+    -- ^ Parsed at JSON boundary (see Types.hs)
   , paoVisibleItems :: [ItemName]
     -- ^ Main visible items in the photo
   , paoBlockedFunction :: Maybe Text

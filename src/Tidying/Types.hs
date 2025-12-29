@@ -1,6 +1,7 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 -- | Core semantic types for the Tidying agent
@@ -27,9 +28,13 @@ module Tidying.Types
     -- * Category names
   , CategoryName(..)
   , mkCategoryName
+
+    -- * Photo analysis
+  , ChaosLevel(..)
+  , chaosLevelToText
   ) where
 
-import Data.Aeson (ToJSON, FromJSON, ToJSONKey, FromJSONKey)
+import Data.Aeson (ToJSON(..), FromJSON(..), ToJSONKey, FromJSONKey, withText)
 import Data.String (IsString(..))
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -79,3 +84,39 @@ newtype CategoryName = CategoryName { unCategoryName :: Text }
 -- | Smart constructor that strips whitespace
 mkCategoryName :: Text -> CategoryName
 mkCategoryName = CategoryName . T.strip
+
+-- ══════════════════════════════════════════════════════════════
+-- PHOTO ANALYSIS
+-- ══════════════════════════════════════════════════════════════
+
+-- | Chaos level of a space (from photo analysis)
+--
+-- Parsed at JSON boundary so invalid values are rejected early.
+data ChaosLevel
+  = Buried     -- ^ Overwhelmingly messy, fast-track to action
+  | Cluttered  -- ^ Clearly messy
+  | Moderate   -- ^ Some clutter
+  | Clear      -- ^ Mostly tidy
+  deriving (Eq, Show, Generic)
+
+instance FromJSON ChaosLevel where
+  parseJSON = withText "ChaosLevel" $ \case
+    "buried"    -> pure Buried
+    "cluttered" -> pure Cluttered
+    "moderate"  -> pure Moderate
+    "clear"     -> pure Clear
+    other       -> fail $ "Unknown chaos level: " <> T.unpack other
+
+instance ToJSON ChaosLevel where
+  toJSON = \case
+    Buried    -> "buried"
+    Cluttered -> "cluttered"
+    Moderate  -> "moderate"
+    Clear     -> "clear"
+
+-- | Convert ChaosLevel to Text for display
+chaosLevelToText :: ChaosLevel -> Text
+chaosLevelToText Buried    = "buried"
+chaosLevelToText Cluttered = "cluttered"
+chaosLevelToText Moderate  = "moderate"
+chaosLevelToText Clear     = "clear"

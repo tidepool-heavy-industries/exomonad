@@ -53,7 +53,7 @@ import Tidying.Templates
 import Tidying.Act (cannedResponse)
 import Tidying.Tools (tidyingTools)
 import Tidying.Events (TidyingEvent(..))
-import Tidying.Types (ItemName(..), SpaceFunction(..), CategoryName(..), AnxietyTrigger(..))
+import Tidying.Types (ItemName(..), SpaceFunction(..), CategoryName(..), AnxietyTrigger(..), ChaosLevel(..), chaosLevelToText)
 
 -- ══════════════════════════════════════════════════════════════
 -- TYPES
@@ -91,7 +91,7 @@ tidyingTurn
 tidyingTurn input = do
   st <- get @SessionState
 
-  logDebug $ "Phase: " <> T.pack (show st.phase)
+  logDebug $ "Phase: " <> T.pack (show (phase st))
   logDebug $ "User text: " <> maybe "(none)" id input.inputText
 
   -- OBSERVE: Analyze photos if present (stubbed for now)
@@ -113,9 +113,9 @@ tidyingTurn input = do
   emit $ ActionTaken action
 
   -- Emit phase change if different
-  when (nextPhase /= st.phase) $ do
-    logInfo $ "Phase change: " <> T.pack (show st.phase) <> " -> " <> T.pack (show nextPhase)
-    emit $ PhaseChanged st.phase nextPhase
+  when (nextPhase /= phase st) $ do
+    logInfo $ "Phase change: " <> T.pack (show (phase st)) <> " -> " <> T.pack (show nextPhase)
+    emit $ PhaseChanged (phase st) nextPhase
 
   -- Update state BEFORE generating response so counts/piles are accurate
   applyStateTransitionFromExtract extract action nextPhase
@@ -179,7 +179,7 @@ analyzePhotos photos = do
   case result of
     TurnCompleted (TurnParsed tr) -> do
       let analysis = outputToAnalysis tr.trOutput
-      emit $ PhotoAnalyzed (analysis.paRoomType <> ", " <> analysis.paChaosLevel)
+      emit $ PhotoAnalyzed (analysis.paRoomType <> ", " <> chaosLevelToText analysis.paChaosLevel)
       pure (Just analysis)
 
     TurnCompleted (TurnParseFailed {tpfError}) -> do
@@ -187,7 +187,7 @@ analyzePhotos photos = do
       -- Fall back to stub
       let analysis = stubPhotoAnalysis photos
       case analysis of
-        Just pa -> emit $ PhotoAnalyzed (pa.paRoomType <> " (stub), " <> pa.paChaosLevel)
+        Just pa -> emit $ PhotoAnalyzed (pa.paRoomType <> " (stub), " <> chaosLevelToText pa.paChaosLevel)
         Nothing -> pure ()
       pure analysis
 
@@ -246,7 +246,7 @@ extractFromInput mPhotoAnalysis input = do
         Just pa -> T.unlines
           [ "[Photo analysis]"
           , "Room type: " <> pa.paRoomType
-          , "Clutter level: " <> pa.paChaosLevel
+          , "Clutter level: " <> chaosLevelToText pa.paChaosLevel
           , "Visible items: " <> T.intercalate ", " pa.paVisibleItems
           , maybe "" ("Blocked function: " <>) pa.paBlockedFunction
           , maybe "" ("Suggested first target: " <>) pa.paFirstTarget
@@ -343,8 +343,7 @@ applyStateTransitionFromExtract extract action nextPhase = do
         newPhaseData = transitionPhaseData st.phaseData extract action nextPhase unsureItems
 
     in st
-      { phase = nextPhase
-      , phaseData = newPhaseData
+      { phaseData = newPhaseData
       , itemsProcessed = st.itemsProcessed + itemDelta action
       , piles = newPiles
       -- Set sessionStart on first turn (keep existing if already set)

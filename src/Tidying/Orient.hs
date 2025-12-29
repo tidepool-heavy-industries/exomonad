@@ -49,7 +49,7 @@ buildOrientContext
   -> Maybe Text        -- ^ User text
   -> OrientContext
 buildOrientContext st photoAnalysis userText = OrientContext
-  { ocPhase = st.phase
+  { ocPhase = phase st
   , ocFunction = fmap (\(SpaceFunction t) -> t) (getFunction st)
   , ocAnchors = map (\(ItemName n) -> n) (getAnchors st)
   , ocUnsureCount = unsureCount st.piles
@@ -91,12 +91,12 @@ fastPathOrient st input =
     Just t | isStuckSignal t -> Just (Stuck Nothing)
 
     -- Surveying phase fast-paths
-    _ | st.phase == Surveying && not (hasFunction st) ->
+    _ | phase st == Surveying && not (hasFunction st) ->
         if isOverwhelmedSignal txt
           then Just OverwhelmedNeedMomentum
           else Just NeedFunction
 
-    _ | st.phase == Surveying && hasFunction st && not (hasAnchors st) ->
+    _ | phase st == Surveying && hasFunction st && not (hasAnchors st) ->
         -- They answered function, could ask anchors or start moving
         if isOverwhelmedSignal txt
           then Just OverwhelmedNeedMomentum

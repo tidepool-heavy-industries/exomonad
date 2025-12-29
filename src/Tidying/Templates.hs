@@ -51,7 +51,7 @@ import Tidying.State
 import Tidying.Context (TidyingContext(..), PilesSummary(..), PhotoAnalysis(..))
 import Tidying.Action
 import Tidying.Output (orientOutputSchema, actOutputSchema, extractSchema)
-import Tidying.Types (ItemName(..), Location(..), AnxietyTrigger(..), CategoryName(..))
+import Tidying.Types (ItemName(..), Location(..), AnxietyTrigger(..), CategoryName(..), chaosLevelToText)
 
 -- ══════════════════════════════════════════════════════════════
 -- EXTRACT PROMPT (new extraction-first approach)
@@ -117,7 +117,7 @@ renderOrientPrompt ctx = T.unlines
   , ""
   , case ctx.tcPhotoAnalysis of
       Nothing -> ""
-      Just pa -> "Photo shows: " <> pa.paRoomType <> ", " <> pa.paChaosLevel <> " clutter"
+      Just pa -> "Photo shows: " <> pa.paRoomType <> ", " <> chaosLevelToText pa.paChaosLevel <> " clutter"
                  <> maybe "" (\t -> ". First target: " <> t) pa.paFirstTarget
   , case ctx.tcUserText of
       Nothing -> "(user sent photo only)"
@@ -268,7 +268,7 @@ renderActPrompt ctx action = T.unlines
   , case ctx.tcPhotoAnalysis of
       Nothing -> ""
       Just pa -> T.unlines
-        [ "Photo shows: " <> pa.paChaosLevel <> " " <> pa.paRoomType
+        [ "Photo shows: " <> chaosLevelToText pa.paChaosLevel <> " " <> pa.paRoomType
         , "Visible items: " <> T.intercalate ", " pa.paVisibleItems
         , maybe "" ("First target: " <>) pa.paFirstTarget
         ]

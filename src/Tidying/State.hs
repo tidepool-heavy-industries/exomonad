@@ -7,8 +7,12 @@ module Tidying.State
   ( -- * Core types
     Phase(..)
   , PhaseData(..)
+  , ActiveState(..)
   , SessionState(..)
   , newSession
+
+    -- * Phase (derived from PhaseData, not stored)
+  , phase
 
     -- * Piles
   , Piles(..)
@@ -20,6 +24,7 @@ module Tidying.State
   , Photo(..)
 
     -- * Accessors for phase-specific data
+  , getActiveState
   , getFunction
   , getAnchors
   , getCurrentItem
@@ -45,6 +50,19 @@ import GHC.Generics (Generic)
 import Tidying.Types
   ( ItemName, SpaceFunction(..), AnxietyTrigger, CategoryName )
 
+-- | Common state present after surveying completes
+--
+-- Every phase except Surveying has these fields.
+-- Factored out to eliminate duplication.
+data ActiveState = ActiveState
+  { asFunction    :: SpaceFunction
+    -- ^ What this space is FOR (required post-surveying)
+  , asAnchors     :: [ItemName]
+    -- ^ Things that definitely stay
+  , asLastAnxiety :: Maybe AnxietyTrigger
+    -- ^ Thing user was anxious about (to avoid)
+  } deriving (Eq, Show, Generic, ToJSON, FromJSON)
+
 -- | Session phases
 data Phase
   = Surveying        -- ^ Gathering photos, function, anchors
@@ -58,6 +76,9 @@ data Phase
 --
 -- Each phase has different fields that are valid/required.
 -- This sum type makes invalid states unrepresentable.
+--
+-- Every phase except Surveying has an 'ActiveState' containing
+-- the common fields (function, anchors, lastAnxiety).
 data PhaseData
   = SurveyingData
       { sdGatheredFunction :: Maybe SpaceFunction
@@ -66,38 +87,33 @@ data PhaseData
         -- ^ Anchors gathered so far
       }
   | SortingData
-      { soFunction    :: SpaceFunction
-        -- ^ Required! Can't be sorting without knowing the function
-      , soAnchors     :: [ItemName]
+      { soActive      :: ActiveState
+        -- ^ Common state (function, anchors, lastAnxiety)
       , soCurrentItem :: Maybe ItemName
         -- ^ Item currently being discussed
-      , soLastAnxiety :: Maybe AnxietyTrigger
       }
   | SplittingData
-      { spFunction    :: SpaceFunction
-      , spAnchors     :: [ItemName]
-      , spCategories  :: NonEmpty CategoryName
+      { spActive     :: ActiveState
+        -- ^ Common state (function, anchors, lastAnxiety)
+      , spCategories :: NonEmpty CategoryName
         -- ^ Categories to split into (NonEmpty - must have at least one)
-      , spLastAnxiety :: Maybe AnxietyTrigger
       }
   | RefiningData
-      { rfFunction        :: SpaceFunction
-      , rfAnchors         :: [ItemName]
+      { rfActive          :: ActiveState
+        -- ^ Common state (function, anchors, lastAnxiety)
       , rfEmergentCats    :: Map CategoryName [ItemName]
         -- ^ Categories and their items
       , rfCurrentCategory :: CategoryName
         -- ^ Required! Can't be refining without a category
       , rfCurrentItem     :: Maybe ItemName
-      , rfLastAnxiety     :: Maybe AnxietyTrigger
       }
   | DecisionSupportData
-      { dsFunction    :: SpaceFunction
-      , dsAnchors     :: [ItemName]
+      { dsActive      :: ActiveState
+        -- ^ Common state (function, anchors, lastAnxiety)
       , dsStuckItem   :: ItemName
         -- ^ Required! Can't be in decision support without a stuck item
       , dsReturnPhase :: Phase
         -- ^ Which phase to return to after decision
-      , dsLastAnxiety :: Maybe AnxietyTrigger
       }
   deriving (Eq, Show, Generic, ToJSON, FromJSON)
 
@@ -115,11 +131,12 @@ unsureCount :: Piles -> Int
 unsureCount p = length p.unsure
 
 -- | Main session state
+--
+-- Note: The 'phase' is not stored; it's derived from 'phaseData'.
+-- Use the 'phase' function to get the current phase.
 data SessionState = SessionState
-  { phase          :: Phase
-    -- ^ Current phase (redundant with phaseData constructor, but convenient)
-  , phaseData      :: PhaseData
-    -- ^ Phase-specific data
+  { phaseData      :: PhaseData
+    -- ^ Phase-specific data (phase is derived from this)
   , piles          :: Piles
     -- ^ Current pile contents
   , itemsProcessed :: Int
@@ -128,11 +145,21 @@ data SessionState = SessionState
     -- ^ When session started
   } deriving (Eq, Show, Generic, ToJSON, FromJSON)
 
+-- | Derive phase from PhaseData (not stored, computed)
+--
+-- This ensures phase and phaseData can never be inconsistent.
+phase :: SessionState -> Phase
+phase st = case st.phaseData of
+  SurveyingData {}        -> Surveying
+  SortingData {}          -> Sorting
+  SplittingData {}        -> Splitting
+  RefiningData {}         -> Refining
+  DecisionSupportData {}  -> DecisionSupport
+
 -- | Fresh session
 newSession :: SessionState
 newSession = SessionState
-  { phase = Surveying
-  , phaseData = SurveyingData Nothing []
+  { phaseData = SurveyingData Nothing []
   , piles = emptyPiles
   , itemsProcessed = 0
   , sessionStart = Nothing
@@ -154,53 +181,53 @@ data UserInput = UserInput
 -- ACCESSORS FOR PHASE-SPECIFIC DATA
 -- ══════════════════════════════════════════════════════════════
 
+-- | Get ActiveState from any post-surveying phase
+--
+-- Returns Nothing only during Surveying.
+getActiveState :: SessionState -> Maybe ActiveState
+getActiveState st = case st.phaseData of
+  SurveyingData {}        -> Nothing
+  SortingData a _         -> Just a
+  SplittingData a _       -> Just a
+  RefiningData a _ _ _    -> Just a
+  DecisionSupportData a _ _ -> Just a
+
 -- | Get function from any phase (Nothing only in Surveying before set)
 getFunction :: SessionState -> Maybe SpaceFunction
 getFunction st = case st.phaseData of
-  SurveyingData mf _      -> mf
-  SortingData f _ _ _     -> Just f
-  SplittingData f _ _ _   -> Just f
-  RefiningData f _ _ _ _ _ -> Just f
-  DecisionSupportData f _ _ _ _ -> Just f
+  SurveyingData mf _ -> mf
+  _                  -> (.asFunction) <$> getActiveState st
 
 -- | Get anchors from any phase
 getAnchors :: SessionState -> [ItemName]
 getAnchors st = case st.phaseData of
-  SurveyingData _ a       -> a
-  SortingData _ a _ _     -> a
-  SplittingData _ a _ _   -> a
-  RefiningData _ a _ _ _ _ -> a
-  DecisionSupportData _ a _ _ _ -> a
+  SurveyingData _ a -> a
+  _                 -> maybe [] (.asAnchors) (getActiveState st)
 
 -- | Get current item being discussed (if any)
 getCurrentItem :: SessionState -> Maybe ItemName
 getCurrentItem st = case st.phaseData of
-  SurveyingData _ _       -> Nothing
-  SortingData _ _ i _     -> i
-  SplittingData _ _ _ _   -> Nothing
-  RefiningData _ _ _ _ i _ -> i
-  DecisionSupportData _ _ i _ _ -> Just i  -- stuck item is the current item
+  SurveyingData {}        -> Nothing
+  SortingData _ i         -> i
+  SplittingData {}        -> Nothing
+  RefiningData _ _ _ i    -> i
+  DecisionSupportData _ i _ -> Just i  -- stuck item is the current item
 
 -- | Get last anxiety trigger (if any)
 getLastAnxiety :: SessionState -> Maybe AnxietyTrigger
-getLastAnxiety st = case st.phaseData of
-  SurveyingData _ _       -> Nothing
-  SortingData _ _ _ a     -> a
-  SplittingData _ _ _ a   -> a
-  RefiningData _ _ _ _ _ a -> a
-  DecisionSupportData _ _ _ _ a -> a
+getLastAnxiety st = getActiveState st >>= asLastAnxiety
 
 -- | Get current category being refined (only valid in Refining phase)
 getCurrentCategory :: SessionState -> Maybe CategoryName
 getCurrentCategory st = case st.phaseData of
-  RefiningData _ _ _ c _ _ -> Just c
-  _                       -> Nothing
+  RefiningData _ _ c _ -> Just c
+  _                    -> Nothing
 
 -- | Get emergent categories (only valid in Refining phase)
 getEmergentCats :: SessionState -> Map CategoryName [ItemName]
 getEmergentCats st = case st.phaseData of
-  RefiningData _ _ cats _ _ _ -> cats
-  _                          -> Map.empty
+  RefiningData _ cats _ _ -> cats
+  _                       -> Map.empty
 
 -- ══════════════════════════════════════════════════════════════
 -- HELPERS

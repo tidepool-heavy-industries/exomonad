@@ -12,8 +12,9 @@ module Tidying.Decide
   , pickNextTarget
 
     -- * Photo analysis helpers
-  , ChaosLevel(..)
   , chaosLevel
+  , hasBlockedFunction
+  , hasFirstTarget
   ) where
 
 import Data.List.NonEmpty (NonEmpty(..))
@@ -27,12 +28,12 @@ import Tidying.Situation
 import Tidying.Action
 import Tidying.Context (PhotoAnalysis(..))
 import Tidying.Output (Extract(..), Intent(..), Choice(..))
-import Tidying.Types (ItemName(..), Location(..), AnxietyTrigger(..), CategoryName(..))
+import Tidying.Types (ItemName(..), Location(..), AnxietyTrigger(..), CategoryName(..), ChaosLevel(..))
 
 -- | Pure routing: (State, Situation) -> (Action, NextPhase)
 -- This is the core state machine logic. NO LLM calls here.
 decide :: SessionState -> Situation -> (Action, Phase)
-decide st sit = case (st.phase, sit) of
+decide st sit = case (phase st, sit) of
 
   ------------------------------------
   -- SURVEYING
@@ -134,17 +135,17 @@ decide st sit = case (st.phase, sit) of
   (_, Anxious trigger) ->
     -- Pivot away from anxiety trigger
     let alternative = findAlternative st ((\(AnxietyTrigger t) -> t) trigger)
-    in (PivotAway trigger (Location alternative), st.phase)
+    in (PivotAway trigger (Location alternative), phase st)
 
   (_, Flagging) ->
-    (EnergyCheck, st.phase)
+    (EnergyCheck, phase st)
 
   (_, WantsToStop) ->
-    (Summary, st.phase)
+    (Summary, phase st)
 
   (_, WantsToContinue) ->
     -- Continue with whatever is next
-    (InstructNext, st.phase)
+    (InstructNext, phase st)
 
   (_, Stuck maybeItem) ->
     let item = fromMaybe (ItemName "this item") maybeItem
@@ -155,7 +156,7 @@ decide st sit = case (st.phase, sit) of
   ------------------------------------
 
   (_, AllDone) ->
-    (Summary, st.phase)
+    (Summary, phase st)
 
   ------------------------------------
   -- DEFAULT (intentional catch-all)
@@ -171,7 +172,7 @@ decide st sit = case (st.phase, sit) of
   -- Consider adding explicit cases if the default behavior is wrong.
 
   _ ->
-    (InstructNext, st.phase)
+    (InstructNext, phase st)
 
 
 -- ══════════════════════════════════════════════════════════════
@@ -187,7 +188,7 @@ decideFromExtract :: SessionState -> Maybe PhotoAnalysis -> Extract -> (Action, 
 decideFromExtract st mPhoto ext = case ext.exIntent of
   -- Universal intents (work in any phase)
   IntentStop ->
-    (Summary, st.phase)
+    (Summary, phase st)
 
   IntentHelp ->
     -- Stuck - provide decision aid if they mentioned an item
@@ -196,13 +197,13 @@ decideFromExtract st mPhoto ext = case ext.exIntent of
       Nothing   -> (FirstInstruction, Sorting)
 
   -- Phase-specific routing
-  _ -> case st.phase of
+  _ -> case phase st of
 
     -- SURVEYING: Focus on getting function/anchors
     -- Photo analysis can fast-track to sorting if space is chaotic
     Surveying
       -- Buried chaos: skip questions, get them moving immediately
-      | chaosLevel mPhoto == Buried ->
+      | chaosLevel mPhoto == Just Buried ->
           (FirstInstruction, Sorting)
       -- Blocked function + have function: start sorting to unblock
       | hasBlockedFunction mPhoto, hasFunction st ->
@@ -228,7 +229,7 @@ decideFromExtract st mPhoto ext = case ext.exIntent of
     -- Photo analysis can acknowledge progress
     Sorting
       -- Clear space: acknowledge progress!
-      | chaosLevel mPhoto == Clear, IntentStart <- ext.exIntent ->
+      | chaosLevel mPhoto == Just Clear, IntentStart <- ext.exIntent ->
           (AckProgress "Space is looking clear!", Sorting)
       | otherwise -> routeInSorting st ext
 
@@ -322,7 +323,7 @@ pickNextTarget st
 
   -- All done
   | otherwise =
-      (Summary, st.phase)
+      (Summary, phase st)
 
 -- | Find an alternative when pivoting away from anxiety trigger
 findAlternative :: SessionState -> Text -> Text
@@ -342,24 +343,11 @@ findAlternative st trigger =
 -- PHOTO ANALYSIS HELPERS
 -- ══════════════════════════════════════════════════════════════
 
--- | Photo chaos level (extracted from photo analysis)
-data ChaosLevel
-  = Buried     -- ^ "buried" - overwhelmingly messy, fast-track to action
-  | Cluttered  -- ^ "cluttered" - clearly messy
-  | Moderate   -- ^ "moderate" - some clutter
-  | Clear      -- ^ "clear" - space is mostly tidy
-  | Unknown    -- ^ No photo analysis available
-  deriving (Eq, Show)
-
 -- | Extract chaos level from photo analysis
-chaosLevel :: Maybe PhotoAnalysis -> ChaosLevel
-chaosLevel Nothing = Unknown
-chaosLevel (Just pa) = case T.toLower pa.paChaosLevel of
-  "buried"    -> Buried
-  "cluttered" -> Cluttered
-  "moderate"  -> Moderate
-  "clear"     -> Clear
-  _           -> Unknown
+-- Now just extracts the already-parsed field from PhotoAnalysis.
+-- ChaosLevel is defined in Types.hs with proper FromJSON instance.
+chaosLevel :: Maybe PhotoAnalysis -> Maybe ChaosLevel
+chaosLevel = fmap (.paChaosLevel)
 
 -- | Does photo analysis indicate a blocked function?
 hasBlockedFunction :: Maybe PhotoAnalysis -> Bool

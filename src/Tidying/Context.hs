@@ -32,7 +32,7 @@ import GHC.Generics (Generic)
 
 import Tidepool.Anthropic.Http (ImageSource(..))
 import Tidying.State
-import Tidying.Types (ItemName(..), SpaceFunction(..), AnxietyTrigger(..), CategoryName(..))
+import Tidying.Types (ItemName(..), SpaceFunction(..), AnxietyTrigger(..), CategoryName(..), ChaosLevel(..))
 
 -- | Context for tidying prompts
 -- This is what gets rendered into the system prompt template
@@ -69,9 +69,9 @@ data PilesSummary = PilesSummary
 
 -- | Photo analysis result (stubbed)
 data PhotoAnalysis = PhotoAnalysis
-  { paRoomType :: Text        -- "office", "bedroom", "closet"
-  , paChaosLevel :: Text      -- "clear", "moderate", "cluttered", "buried"
-  , paVisibleItems :: [Text]  -- what's visible
+  { paRoomType :: Text          -- "office", "bedroom", "closet"
+  , paChaosLevel :: ChaosLevel  -- Parsed at JSON boundary (see Types.hs)
+  , paVisibleItems :: [Text]    -- what's visible
   , paBlockedFunction :: Maybe Text  -- "can't sit", "can't reach desk"
   , paFirstTarget :: Maybe Text      -- "chair with clothes"
   } deriving (Show, Eq, Generic)
@@ -114,7 +114,7 @@ buildTidyingContext
   -> Maybe Text          -- user text
   -> TidyingContext
 buildTidyingContext st mPhotoAnalysis userText = TidyingContext
-  { tcPhase = st.phase
+  { tcPhase = phase st
   , tcFunction = fmap (\(SpaceFunction t) -> t) (getFunction st)
   , tcAnchors = map (\(ItemName n) -> n) (getAnchors st)
   , tcPiles = summarizePiles st.piles
@@ -141,7 +141,7 @@ stubPhotoAnalysis :: [Photo] -> Maybe PhotoAnalysis
 stubPhotoAnalysis [] = Nothing
 stubPhotoAnalysis _ = Just PhotoAnalysis
   { paRoomType = "office"
-  , paChaosLevel = "moderate"
+  , paChaosLevel = Moderate
   , paVisibleItems = ["desk", "chair", "papers", "mugs"]
   , paBlockedFunction = Just "chair has clothes on it"
   , paFirstTarget = Just "chair"

@@ -11,6 +11,7 @@ import Data.Text qualified as T
 import Data.Text.IO qualified as TIO
 
 import Tidying
+import Tidying.Types (ItemName(..), AnxietyTrigger(..), SpaceFunction(..))
 
 -- | Simulate a session (no actual LLM)
 exampleSession :: IO ()
@@ -28,15 +29,15 @@ exampleSession = do
   putStrLn ""
 
   -- Turn 2: User answers function question (if we asked)
-  let st1 = st0 { phase = Surveying, function = Nothing }
-  let (action2, phase2) = decide st1 NeedFunction
+  -- st0 is already in Surveying with no function
+  let (action2, phase2) = decide st0 NeedFunction
   putStrLn "--- Alternative path: asking function ---"
   putStrLn $ "DECIDE: " <> show action2 <> " -> " <> show phase2
   putStrLn "BOT: \"What do you need to DO in this space?\""
   putStrLn ""
 
-  -- Turn 3: User provides function
-  let st2 = st1 { function = Just "work from home, designer" }
+  -- Turn 3: User provides function (simulate with Sorting state)
+  let st2 = st0 { phaseData = SortingData (SpaceFunction "work from home, designer") [] Nothing Nothing }
   let (action3, phase3) = decide st2 OverwhelmedNeedMomentum
   putStrLn "USER: \"work from home, I'm a designer\""
   putStrLn $ "DECIDE: " <> show action3 <> " -> " <> show phase3
@@ -44,7 +45,7 @@ exampleSession = do
   putStrLn ""
 
   -- Turn 4: User completes action
-  let st3 = st2 { phase = Sorting }
+  let st3 = st2  -- already in Sorting
   let (action4, phase4) = decide st3 ActionDone
   putStrLn "USER: \"done\" [photo of cleared chair]"
   putStrLn $ "ORIENT: ActionDone"
@@ -53,7 +54,7 @@ exampleSession = do
   putStrLn ""
 
   -- Turn 5: User describes an item
-  let (action5, phase5) = decide st3 (ItemDescribed "empty amazon envelope" Trash)
+  let (action5, phase5) = decide st3 (ItemDescribed (ItemName "empty amazon envelope") Trash)
   putStrLn "USER: \"empty amazon envelope\""
   putStrLn $ "ORIENT: ItemDescribed \"empty amazon envelope\" Trash"
   putStrLn $ "DECIDE: " <> show action5 <> " -> " <> show phase5
@@ -61,7 +62,7 @@ exampleSession = do
   putStrLn ""
 
   -- Turn 6: User hesitates on item
-  let (action6, phase6) = decide st3 (ItemDescribed "sketchbook" NeedsDecisionSupport)
+  let (action6, phase6) = decide st3 (ItemDescribed (ItemName "sketchbook") NeedsDecisionSupport)
   putStrLn "USER: \"sketchbook with some ideas, idk...\""
   putStrLn $ "ORIENT: ItemDescribed \"sketchbook\" NeedsDecisionSupport"
   putStrLn $ "DECIDE: " <> show action6 <> " -> " <> show phase6
@@ -69,7 +70,7 @@ exampleSession = do
   putStrLn ""
 
   -- Turn 7: User expresses anxiety
-  let (action7, phase7) = decide st3 (Anxious "boxes")
+  let (action7, phase7) = decide st3 (Anxious (AnxietyTrigger "boxes"))
   putStrLn "USER: \"the boxes freak me out\""
   putStrLn $ "ORIENT: Anxious \"boxes\""
   putStrLn $ "DECIDE: " <> show action7 <> " -> " <> show phase7
@@ -77,7 +78,7 @@ exampleSession = do
   putStrLn ""
 
   -- Turn 8: Unsure pile growing
-  let st4 = st3 { piles = Piles [] [] ["cable1", "cable2", "paper1", "thing1", "thing2", "thing3"] }
+  let st4 = st3 { piles = Piles [] [] [ItemName "cable1", ItemName "cable2", ItemName "paper1", ItemName "thing1", ItemName "thing2", ItemName "thing3"] }
   let (action8, phase8) = decide st4 UnsureGrowing
   putStrLn "--- Unsure pile has 6 items ---"
   putStrLn $ "ORIENT: UnsureGrowing"
