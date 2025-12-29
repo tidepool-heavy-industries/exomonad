@@ -190,6 +190,22 @@ Tense language. Short paragraphs. The vice tightening.
 **Desperate.** Every word costs breath. No room for error.
 Staccato. Urgent. The world compressing to this moment.
 {% endif %}
+
+<tone_modulation>
+{% if ctxTone == "Tense" %}
+Short sentences. Clipped dialogue. Every shadow hides something.
+{% elif ctxTone == "ToneNeutral" %}
+Standard noir prose. Professional distance.
+{% elif ctxTone == "Comedic" %}
+Dark humor surfaces. NPCs have quirks. Absurdity creeps in.
+{% elif ctxTone == "Dark" %}
+Bleak. Victories are pyrrhic. The city wins in the end.
+{% elif ctxTone == "Hopeful" %}
+Small kindnesses matter. Glimmers of something better.
+{% elif ctxTone == "Mysterious" %}
+Questions outnumber answers. Strange details accumulate.
+{% endif %}
+</tone_modulation>
 </my_voice>
 
 {# ═══════════════════════════════════════════════════════════════════════════ #}
@@ -257,6 +273,16 @@ I weave these into the texture. NPCs mention them. The environment reflects them
 {% endfor %}
 These are ticking bombs. I surface them when the moment is right.
 </shadows>
+{% endif %}
+
+{% if ctxHiddenClocks %}
+<hidden_threats>
+These clocks are invisible to the player but inform your narration:
+{% for clock in ctxHiddenClocks %}
+- **{{ clock.clockName }}** [{{ clock.clockFilled }}/{{ clock.clockSegments }}]{% if clock.clockFilled >= clock.clockSegments - 1 %} IMMINENT{% endif %}
+{% endfor %}
+Weave tension from these without revealing the mechanical tracker.
+</hidden_threats>
 {% endif %}
 
 {% if ctxSceneBeats %}

@@ -197,6 +197,22 @@ They'll find the body by morning. They'll start asking questions.
 But for now, you have what you came for."
 
 Land it. Let it sit. Then offer them the next move.
+
+<tone_modulation>
+{% if ctxTone == "Tense" %}
+The aftermath coils tight. What comes next won't wait.
+{% elif ctxTone == "ToneNeutral" %}
+Standard aftermath prose. Account for what happened.
+{% elif ctxTone == "Comedic" %}
+Even tragedy has absurd edges. Black comedy in the fallout.
+{% elif ctxTone == "Dark" %}
+The cost was always too high. Even victory is hollow.
+{% elif ctxTone == "Hopeful" %}
+Wounds heal. Lessons learned. Tomorrow is another day.
+{% elif ctxTone == "Mysterious" %}
+Questions linger. The pattern isn't clear yet.
+{% endif %}
+</tone_modulation>
 </my_voice>
 
 {# ═══════════════════════════════════════════════════════════════════════════ #}

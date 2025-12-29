@@ -37,6 +37,7 @@ module DM.Tools
   , DMEffects
   , dmToolList
   , dmTools
+  , toolsForMood
   , makeDMDispatcher
   , makeDMDispatcherWithPhase
   ) where
@@ -806,13 +807,57 @@ dmToolList = TCons (Proxy @SetSceneStyle)
            $ TCons (Proxy @PassOut)
            $ TNil
 
--- | All DM tools as JSON for API
+-- | All DM tools as JSON for API (used for dispatcher, not for LLM calls)
 dmTools :: [Value]
 dmTools = toolListToJSON dmToolList
 
--- Note: Per-mood tool filtering is NOT implemented.
--- All tools are available in all moods; template guidance steers usage.
--- See BUGS_AND_OMISSIONS.md for discussion.
+-- ══════════════════════════════════════════════════════════════
+-- PER-MOOD TOOL LISTS
+-- ══════════════════════════════════════════════════════════════
+
+-- | Scene tools: explore, transition to action, modify style
+sceneToolList :: ToolList DMEvent WorldState DMEffects '[SetSceneStyle, Choose, Engage]
+sceneToolList = TCons (Proxy @SetSceneStyle)
+              $ TCons (Proxy @Choose)
+              $ TCons (Proxy @Engage)
+              $ TNil
+
+-- | Action tools: spend dice, resolve to aftermath
+actionToolList :: ToolList DMEvent WorldState DMEffects '[SetSceneStyle, SpendDie, Resolve]
+actionToolList = TCons (Proxy @SetSceneStyle)
+               $ TCons (Proxy @SpendDie)
+               $ TCons (Proxy @Resolve)
+               $ TNil
+
+-- | Aftermath tools: accept and return to scene
+aftermathToolList :: ToolList DMEvent WorldState DMEffects '[SetSceneStyle, Accept, Choose]
+aftermathToolList = TCons (Proxy @SetSceneStyle)
+                  $ TCons (Proxy @Accept)
+                  $ TCons (Proxy @Choose)
+                  $ TNil
+
+-- | Trauma tools: accept aftermath of breaking
+traumaToolList :: ToolList DMEvent WorldState DMEffects '[SetSceneStyle, Accept, Choose]
+traumaToolList = TCons (Proxy @SetSceneStyle)
+               $ TCons (Proxy @Accept)
+               $ TCons (Proxy @Choose)
+               $ TNil
+
+-- | Bargain tools: accept deal, retreat, or pass out
+bargainToolList :: ToolList DMEvent WorldState DMEffects '[AcceptBargain, Retreat, PassOut]
+bargainToolList = TCons (Proxy @AcceptBargain)
+                $ TCons (Proxy @Retreat)
+                $ TCons (Proxy @PassOut)
+                $ TNil
+
+-- | Get tool list for a specific mood
+toolsForMood :: DMMood -> [Value]
+toolsForMood = \case
+  MoodScene _     -> toolListToJSON sceneToolList
+  MoodAction _ _  -> toolListToJSON actionToolList
+  MoodAftermath _ -> toolListToJSON aftermathToolList
+  MoodTrauma _    -> toolListToJSON traumaToolList
+  MoodBargain _   -> toolListToJSON bargainToolList
 
 -- | Names of transition tools that change mood state
 transitionToolNames :: [Text]

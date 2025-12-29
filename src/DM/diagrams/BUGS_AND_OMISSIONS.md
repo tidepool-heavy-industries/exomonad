@@ -34,68 +34,28 @@ Issues found during diagram-vs-code audit. Some are bugs, some are dead code, so
 - Per-mood tool filtering was never implemented
 - Template guidance steers tool usage (enforcement remains a future option)
 
----
+### ctxHiddenClocks Added to Mood Templates
+- Added `<hidden_threats>` section to `scene/main.jinja`
+- Added `<hidden_threats>` section to `action/main.jinja`
+- DM can now reference hidden clocks in narration without revealing mechanical state
 
-## Gap: ctxHiddenClocks (in mood templates)
+### Precarity Signature Simplified
+- Removed unused `hunted :: Bool` and `recovering :: Bool` params from `calculatePrecarity`
+- Removed unused params from `precarityScore`
+- `buildDMContext` call site simplified
+- If hunted/recovering mechanics are added later, add fields to PlayerState
 
-Hidden clocks are built (`Context.hs:213-214`) but only consumed by legacy `dm_turn.jinja`:
+### ctxTone Now Modulates Prose
+- Added `<tone_modulation>` section to `scene/main.jinja`
+- Added `<tone_modulation>` section to `action/main.jinja`
+- Added `<tone_modulation>` section to `aftermath/main.jinja`
+- Each Tone value (Tense, ToneNeutral, Comedic, Dark, Hopeful, Mysterious) provides prose guidance
 
-| Template | Uses ctxHiddenClocks? |
-|----------|----------------------|
-| dm_turn.jinja | Yes (line 42) |
-| scene/main.jinja | No |
-| action/main.jinja | No |
-| aftermath/main.jinja | No |
-| trauma/main.jinja | No |
-| bargain/main.jinja | No |
-
-### Impact
-DM can't reference hidden threats in mood-specific templates.
-
-### Fix
-Add ctxHiddenClocks section to mood templates where relevant (scene, action).
-
----
-
-## Gap: Precarity flags hardcoded
-
-`calculatePrecarity` supports `hunted` and `recovering` flags (`Context.hs:165`):
-```haskell
-calculatePrecarity ps hunted recovering
-```
-
-But `buildDMContext` always passes `False False` (`Context.hs:226`):
-```haskell
-precarity = calculatePrecarity world.player False False
-```
-
-### Impact
-Precarity never accounts for hunted/recovering status even if the character has those conditions.
-
-### Fix
-Add `hunted :: Bool` and `recovering :: Bool` to `PlayerState` or derive from wanted level / trauma.
-
----
-
-## Gap: Tool filtering not implemented
-
-Per-mood tool filtering is defined in diagrams but not enforced in code:
-- All tools are available in all moods
-- Template guidance steers usage contextually
-- LLM could theoretically call wrong tools (template voice prevents this)
-
-### Options
-1. Implement filtering (pass different tool lists per mood)
-2. Accept template-guidance-only approach (current)
-
----
-
-## Gap: ctxTone underused
-
-`ctxTone` is set from `world.tone` but only displayed in one place:
-- `templates/scene/main.jinja:283`: `**Tone:** {{ ctxTone }}`
-
-Not used for prose modulation anywhere. The `Tone` type exists (`State.hs`) but doesn't affect template behavior.
+### Per-Mood Tool Filtering Implemented
+- Added per-mood tool lists: `sceneToolList`, `actionToolList`, `aftermathToolList`, `traumaToolList`, `bargainToolList`
+- Added `toolsForMood :: DMMood -> [Value]` function in Tools.hs
+- Loop.hs now uses `toolsForMood mood` instead of `dmTools`
+- LLM only sees tools appropriate for current mood
 
 ---
 
@@ -103,7 +63,6 @@ Not used for prose modulation anywhere. The `Tone` type exists (`State.hs`) but 
 
 | Issue | Severity | Type | Status |
 |-------|----------|------|--------|
-| ctxHiddenClocks not in mood templates | Low | Gap | Open |
-| Precarity flags hardcoded | Low | Missing feature | Open |
-| Tool filtering not implemented | Low | Design choice | Open |
-| ctxTone underused | Low | Gap | Open |
+| (empty) | | | |
+
+All known issues have been addressed.

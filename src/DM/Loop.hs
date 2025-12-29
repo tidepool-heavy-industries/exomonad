@@ -31,7 +31,7 @@ import qualified DM.State
 import DM.Context (buildDMContext, buildCompressionContext, DMContext(..))
 import DM.Output (TurnOutput(..), CompressionOutput(..), applyTurnOutput, applyCompression)
 import DM.Templates (renderForMood, renderCompression, turnOutputSchema, compressionOutputSchema)
-import DM.Tools (DMEvent(..), dmTools, makeDMDispatcherWithPhase)
+import DM.Tools (DMEvent(..), toolsForMood, makeDMDispatcherWithPhase)
 import DM.GUI.Widgets.Events (formatEvent)
 import Tidepool.Effect hiding (ToolResult)
 import Tidepool.Template (Schema(..))
@@ -165,9 +165,9 @@ dmTurn input = do
           logDebug $ "System prompt length: " <> T.pack (show $ T.length systemPrompt) <> " chars"
           logDebug $ "Prompt preview: " <> T.take 200 systemPrompt <> "..."
 
-          -- Call LLM with system prompt and user action
+          -- Call LLM with system prompt and user action (tools filtered by current mood)
           let Schema{schemaJSON = outputSchema} = turnOutputSchema
-          outcome <- runTurn @TurnOutput systemPrompt userAction outputSchema dmTools
+          outcome <- runTurn @TurnOutput systemPrompt userAction outputSchema (toolsForMood mood)
 
           case outcome of
             -- Tool triggered state transition - restart with new mood

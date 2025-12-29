@@ -160,21 +160,18 @@ data Precarity
   deriving (Show, Eq, Ord, Enum, Bounded, Generic, ToJSON, FromJSON)
 
 -- | Calculate precarity from player state
--- precarity = stress + heat + (3 if hunted) + (2 if recovering) + wanted*2
-calculatePrecarity :: PlayerState -> Bool -> Bool -> Precarity
-calculatePrecarity ps hunted recovering =
-  let score = precarityScore ps hunted recovering
+-- precarity = stress + heat + wanted*2
+calculatePrecarity :: PlayerState -> Precarity
+calculatePrecarity ps =
+  let score = precarityScore ps
   in if score >= 15 then HangingByThread
      else if score >= 10 then WallsClosingIn
      else if score >= 5 then RoomToManeuver
      else OperatingFromStrength
 
 -- | Raw precarity score for calculations
-precarityScore :: PlayerState -> Bool -> Bool -> Int
-precarityScore ps hunted recovering =
-  ps.stress + ps.heat + (ps.wanted * 2)
-  + (if hunted then 3 else 0)
-  + (if recovering then 2 else 0)
+precarityScore :: PlayerState -> Int
+precarityScore ps = ps.stress + ps.heat + (ps.wanted * 2)
 
 data NpcWithDisposition = NpcWithDisposition
   { nwdNpc :: Npc
@@ -222,8 +219,8 @@ buildDMContext activeScene mood world =
       -- Build faction summaries for factions in play
       factionsInPlay = map summarizeFaction (HM.elems world.factions)
 
-      -- Calculate precarity (assume not hunted/recovering for now)
-      precarity = calculatePrecarity world.player False False
+      -- Calculate precarity
+      precarity = calculatePrecarity world.player
 
       -- Build dice context
       diceCtx = buildDiceContext world

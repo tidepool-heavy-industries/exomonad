@@ -180,6 +180,15 @@ Drama lives in the low dice. A 6 is almost boring: they just do it.
 {% for clock in ctxVisibleClocks %}
 - **{{ clock.clockName }}** [{{ clock.clockFilled }}/{{ clock.clockSegments }}]
 {% endfor %}
+
+{% if ctxHiddenClocks %}
+<hidden_threats>
+**Invisible to player, inform your narration:**
+{% for clock in ctxHiddenClocks %}
+- **{{ clock.clockName }}** [{{ clock.clockFilled }}/{{ clock.clockSegments }}]{% if clock.clockFilled >= clock.clockSegments - 1 %} IMMINENT{% endif %}
+{% endfor %}
+</hidden_threats>
+{% endif %}
 </the_world>
 
 {# ═══════════════════════════════════════════════════════════════════════════ #}
@@ -202,6 +211,22 @@ Violence is desperate, ugly. Stakes are survival.
 {% elif style.ssClass == "Salon" %}
 Even violence has decorum. The blade is silver.
 {% endif %}
+
+<tone_modulation>
+{% if ctxTone == "Tense" %}
+Clipped. Staccato. Every moment could break.
+{% elif ctxTone == "ToneNeutral" %}
+Professional distance. The job is the job.
+{% elif ctxTone == "Comedic" %}
+Dark humor in the absurdity of violence.
+{% elif ctxTone == "Dark" %}
+Grim. Even success tastes like ash.
+{% elif ctxTone == "Hopeful" %}
+Compassion in crisis. Fighting for something.
+{% elif ctxTone == "Mysterious" %}
+Strange coincidences. Uncanny timing.
+{% endif %}
+</tone_modulation>
 </my_voice>
 
 {# ═══════════════════════════════════════════════════════════════════════════ #}
