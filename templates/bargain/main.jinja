@@ -39,7 +39,7 @@ I am also very fair.
 {% endfor %}
 
 {% for faction in ctxFactionsInPlay %}
-**{{ faction.fsSummary }}** ({{ faction.fsAttitudeLabel }})
+**{{ faction.fsFactionName }}** ({{ faction.fsAttitudeLabel }}){% if faction.fsCurrentGoal %} — {{ faction.fsCurrentGoal }}{% endif %}
 *Debts can be made.*
 {% endfor %}
 

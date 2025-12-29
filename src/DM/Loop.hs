@@ -2058,7 +2058,6 @@ initToClock ci = Clock
   , clockVisible = True  -- All clocks visible per design
   , clockType = ci.ciType
   , clockConsequence = initConsequenceToConsequence ci.ciConsequence
-  , clockTriggers = []
   }
 
 -- | Convert LocationInit from scenario generation to Location

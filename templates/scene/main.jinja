@@ -230,6 +230,20 @@ Voice: {{ npc.nwdVoiceNotes }}
 - {{ thread.threadHook }} ({{ thread.threadTension }})
 {% endfor %}
 {% endif %}
+
+{% if ctxRelevantRumors %}
+**Rumors in circulation:**
+{% for rumor in ctxRelevantRumors %}
+- "{{ rumor.rumorContent }}" ({{ rumor.rumorSpread }})
+{% endfor %}
+{% endif %}
+
+{% if ctxSessionGoals %}
+**What's at stake this session:**
+{% for goal in ctxSessionGoals %}
+- {{ goal }}
+{% endfor %}
+{% endif %}
 </what_i_see>
 
 {% if ctxRecentCosts %}

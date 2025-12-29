@@ -72,9 +72,7 @@ module DM.State
   , Clock(..)
   , ClockId(..)
   , ClockType(..)
-  , Trigger(..)
   , Consequence(..)
-  , ActionPattern(..)
   , FactionAction(..)
   , Target(..)
   , LocationDelta(..)
@@ -118,7 +116,6 @@ module DM.State
   , EscapeOption(..)
 
     -- * Misc
-  , Duration(..)
   , Tag(..)
   ) where
 
@@ -710,21 +707,8 @@ data Clock = Clock
   , clockVisible :: Bool
   , clockType :: ClockType            -- Threat or Goal
   , clockConsequence :: Consequence
-  , clockTriggers :: [Trigger]
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
-
-data Trigger
-  = OnPlayerAction ActionPattern
-  | OnFactionMove FactionId
-  | OnClockFilled ClockId
-  | OnTimePass Duration
-  | OnRumorSpread RumorId
-  deriving (Show, Eq, Generic, ToJSON, FromJSON)
-
-newtype ActionPattern = ActionPattern { unActionPattern :: Text }
-  deriving (Show, Eq, Generic)
-  deriving newtype (ToJSON, FromJSON)
 
 data Consequence
   -- Threat consequences (bad things happen):
@@ -917,13 +901,6 @@ data Tone
 -- MISC
 -- ══════════════════════════════════════════════════════════════
 
-data Duration
-  = Minutes Int
-  | Hours Int
-  | Days Int
-  | Weeks Int
-  deriving (Show, Eq, Generic, ToJSON, FromJSON)
-
 newtype Tag = Tag { unTag :: Text }
   deriving (Show, Eq, Ord, Generic)
   deriving newtype (ToJSON, FromJSON, Hashable)
@@ -1003,8 +980,6 @@ instance ToGVal m Severity where toGVal = genericToGVal
 -- Clocks
 instance ToGVal m ClockId where toGVal = genericToGVal
 instance ToGVal m Clock where toGVal = genericToGVal
-instance ToGVal m Trigger where toGVal = genericToGVal
-instance ToGVal m ActionPattern where toGVal = genericToGVal
 instance ToGVal m Consequence where toGVal = genericToGVal
 instance ToGVal m FactionAction where toGVal = genericToGVal
 instance ToGVal m Target where toGVal = genericToGVal
@@ -1116,5 +1091,4 @@ instance ToGVal m Pressure where toGVal = genericToGVal
 instance ToGVal m ClassRegister where toGVal = genericToGVal
 
 -- Misc
-instance ToGVal m Duration where toGVal = genericToGVal
 instance ToGVal m Tag where toGVal = genericToGVal

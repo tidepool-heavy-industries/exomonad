@@ -443,7 +443,6 @@ setupExampleWorld = initialWorld
           , clockVisible = True
           , clockType = ThreatClock
           , clockConsequence = Escalate (Escalation "Open warfare in the streets of Crow's Foot" Severe)
-          , clockTriggers = [OnPlayerAction (ActionPattern "violence"), OnFactionMove (FactionId "lampblacks"), OnFactionMove (FactionId "red-sashes")]
           })
 
       , (ClockId "bluecoat-crackdown", Clock
@@ -453,7 +452,6 @@ setupExampleWorld = initialWorld
           , clockVisible = True
           , clockType = ThreatClock
           , clockConsequence = FactionMoves (FactionId "bluecoats") (Attack (Target "all criminal elements"))
-          , clockTriggers = [OnPlayerAction (ActionPattern "public disturbance"), OnClockFilled (ClockId "gang-war-erupts")]
           })
 
       , (ClockId "lyssa-exposed", Clock
@@ -463,7 +461,6 @@ setupExampleWorld = initialWorld
           , clockVisible = False
           , clockType = GoalClock
           , clockConsequence = RevealSecret (Secret "Lyssa killed Roric to take over the Crows" [])
-          , clockTriggers = [OnPlayerAction (ActionPattern "investigate Roric"), OnRumorSpread (RumorId "roric-murder")]
           })
 
       , (ClockId "ghost-problem", Clock
@@ -478,7 +475,6 @@ setupExampleWorld = initialWorld
               [Left (FactionId "spirit-wardens")]
               TensionCritical
               Nothing)
-          , clockTriggers = [OnTimePass (Days 1), OnPlayerAction (ActionPattern "disturb spirits")]
           })
       ]
 
