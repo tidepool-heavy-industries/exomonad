@@ -93,10 +93,6 @@ handleEvent (BargainOffered context canRetreat) = do
   TIO.putStrLn $ if canRetreat
     then "   You can retreat to safety, or make a deal..."
     else "   No escape. You must bargain or collapse."
-handleEvent (ClockAdvanced clockId clockName oldFilled newFilled total) = do
-  let ticks = newFilled - oldFilled
-  TIO.putStrLn $ "⏰ " <> clockName <> ": " <> showT newFilled <> "/" <> showT total <>
-    " [+" <> showT ticks <> "] (" <> clockId <> ")"
 handleEvent (NarrativeAdded _) = pure ()  -- Handled elsewhere
 
 showT :: Int -> Text

@@ -14,14 +14,7 @@
 
 {% if scene_entry %}
 <how_they_arrived>
-{% if scene_entry.tag == "EntryFromDowntime" %}
-**From the Tide (downtime):**
-The rest is over. {{ scene_entry.contents.dtscTimeElapsed }} have passed.
-{% if scene_entry.contents.dtscStressHealed > 0 %}The tension has eased ({{ scene_entry.contents.dtscStressHealed }} stress healed).{% endif %}
-{% if scene_entry.contents.dtscHeatDecay > 0 %}The city has begun to forget ({{ scene_entry.contents.dtscHeatDecay }} heat faded).{% endif %}
-{% if scene_entry.contents.dtscDiceRecovered > 0 %}They're refreshed ({{ scene_entry.contents.dtscDiceRecovered }} dice restored).{% endif %}
-**What pulled them back:** {{ scene_entry.contents.dtscHook }}
-{% elif scene_entry.tag == "EntryFromAftermath" %}
+{% if scene_entry.tag == "EntryFromAftermath" %}
 **From the Echo (aftermath):**
 {{ scene_entry.contents.atscTransitionNote }}
 {% if scene_entry.contents.atscRecentCosts %}**Still feeling:** {{ scene_entry.contents.atscRecentCosts | join(", ") }}{% endif %}

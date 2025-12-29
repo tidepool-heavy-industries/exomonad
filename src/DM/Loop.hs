@@ -29,7 +29,7 @@ module DM.Loop
 import DM.State
 import qualified DM.State
 import DM.Context (buildDMContext, buildCompressionContext, DMContext(..))
-import DM.Output (TurnOutput(..), CompressionOutput(..), applyTurnOutput, applyCompression, DiceAction(..), DieOutcome(..), ClockTick(..))
+import DM.Output (TurnOutput(..), CompressionOutput(..), applyTurnOutput, applyCompression)
 import DM.Templates (renderForMood, renderCompression, turnOutputSchema, compressionOutputSchema)
 import DM.Tools (DMEvent(..), dmTools, makeDMDispatcherWithPhase)
 import DM.GUI.Widgets.Events (formatEvent)
@@ -205,59 +205,13 @@ dmTurn input = do
                 -- Capture state BEFORE applying output (for accurate delta display)
                 stateBefore <- get @WorldState
 
-                -- Process dice action if present (action mode structured output)
-                (finalNarration, diceDeltas) <- case result.trOutput.diceAction of
-                  Just dice -> do
-                    logInfo $ "Processing dice action: " <> dice.situation
-                    let pool = stateBefore.dicePool.poolDice
-                    -- Build dice choices with hints and costs
-                    let diceWithHints =
-                          [ (dieVal, idx, formatHintWithCosts (getOutcomeAt idx dice.outcomes))
-                          | (dieVal, idx) <- zip pool [0..]
-                          ]
-                    -- Show dice to player
-                    selectedIdx <- requestDice (dice.situation <> " (" <> T.pack (show dice.position) <> ")") diceWithHints
-
-                    -- Use actual die from pool (not LLM's claimed dieValue which might be wrong)
-                    let actualDie = pool !! selectedIdx
-                        chosenOutcome = getOutcomeAt selectedIdx dice.outcomes
-                        tier = calculateOutcome dice.position actualDie
-
-                    -- Remove die from pool (use delete to handle duplicates correctly)
-                    let newPool = deleteFirst actualDie pool
-                    modify @WorldState $ \s -> s { dicePool = s.dicePool { poolDice = newPool } }
-
-                    -- Emit dice spent event (use actual die value, not LLM's)
-                    emit (DieSpent actualDie tier chosenOutcome.narrative)
-
-                    -- Auto-transition back to scene mode after dice resolution
-                    -- The action is complete, player has agency again
-                    modify @WorldState $ updateMood (MoodScene (Encounter "action resolved" UrgencyMedium True))
-
-                    -- Return chosen narrative and deltas to apply
-                    return (result.trOutput.narration <> "\n\n" <> chosenOutcome.narrative,
-                            (chosenOutcome.stressCost, chosenOutcome.heatCost, chosenOutcome.coinDelta))
-
-                  Nothing ->
-                    return (result.trOutput.narration, (0, 0, 0))
-
-                -- Apply structured output to world state (non-dice deltas)
+                -- Apply structured output to world state
+                -- Note: Dice mechanics are handled by the SpendDie tool, not inline structured output.
+                -- The flow is: Action → spend_die tool → resolve tool → Aftermath → accept → Scene
                 modify (applyTurnOutput result.trOutput)
 
-
-                -- Apply dice deltas separately (if any)
-                let (stressDelta, heatDelta, coinDeltaFromDice) = diceDeltas
-                when (stressDelta /= 0 || heatDelta /= 0 || coinDeltaFromDice /= 0) $
-                  modify @WorldState $ \s -> s
-                    { player = (s.player)
-                        { stress = clamp 0 9 (s.player.stress + stressDelta)
-                        , heat = clamp 0 10 (s.player.heat + heatDelta)
-                        , coin = max 0 (s.player.coin + coinDeltaFromDice)
-                        }
-                    }
-
                 -- Record DM response as scene beat (for history)
-                let narration = finalNarration
+                let narration = result.trOutput.narration
                 modify $ \s -> case s.phase of
                   PhasePlaying activeScene m ->
                     let beat = DMNarration narration
@@ -2274,40 +2228,6 @@ scenarioInitSchemaJSON = Object $ KM.fromList
       , String "siScenePresentNpcs"
       ])
   ]
-
--- ══════════════════════════════════════════════════════════════
--- DICE PROCESSING HELPERS
--- ══════════════════════════════════════════════════════════════
-
--- | Get outcome at index (outcomes parallel to pool)
-getOutcomeAt :: Int -> [DieOutcome] -> DieOutcome
-getOutcomeAt idx outs
-  | idx < length outs = outs !! idx
-  | otherwise = DieOutcome 0 "?" 0 0 0 "The outcome unfolds..."
-
--- | Format hint with cost preview for dice display
-formatHintWithCosts :: DieOutcome -> Text
-formatHintWithCosts o =
-  let costs = filter (not . T.null)
-        [ if o.stressCost > 0 then "+" <> T.pack (show o.stressCost) <> " stress" else ""
-        , if o.stressCost < 0 then T.pack (show o.stressCost) <> " stress" else ""
-        , if o.heatCost > 0 then "+" <> T.pack (show o.heatCost) <> " heat" else ""
-        , if o.coinDelta > 0 then "+" <> T.pack (show o.coinDelta) <> " coin" else ""
-        , if o.coinDelta < 0 then T.pack (show o.coinDelta) <> " coin" else ""
-        ]
-      costStr = if null costs then "" else " [" <> T.intercalate ", " costs <> "]"
-  in o.hint <> costStr
-
--- | Clamp a value between min and max
-clamp :: Ord a => a -> a -> a -> a
-clamp lo hi x = max lo (min hi x)
-
--- | Delete first occurrence of element from list (handles duplicates correctly)
-deleteFirst :: Eq a => a -> [a] -> [a]
-deleteFirst _ [] = []
-deleteFirst x (y:ys)
-  | x == y    = ys
-  | otherwise = y : deleteFirst x ys
 
 -- ══════════════════════════════════════════════════════════════
 -- JSON EXTRACTION HELPERS (for fallback when parsing fails)

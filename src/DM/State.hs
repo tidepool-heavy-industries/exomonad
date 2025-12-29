@@ -27,10 +27,8 @@ module DM.State
   , defaultMood
     -- ** Scene Entry Context (what led to current scene)
   , SceneEntryContext(..)
-  , DowntimeToSceneContext(..)
   , AftermathToSceneContext(..)
   , TraumaToSceneContext(..)
-  , emptyDowntimeToSceneContext
   , emptyAftermathToSceneContext
   , emptyTraumaToSceneContext
 
@@ -351,21 +349,11 @@ instance FromJSON GamePhase where
 
 -- | Context carried from previous phase into current scene
 -- Allows templates to reference what led to this scene
+-- Note: EntryFromDowntime removed - downtime phase not implemented
 data SceneEntryContext
-  = EntryFromDowntime DowntimeToSceneContext
-  | EntryFromAftermath AftermathToSceneContext
+  = EntryFromAftermath AftermathToSceneContext
   | EntryFromTrauma TraumaToSceneContext
   | EntryFresh  -- New scene, no prior context
-  deriving (Show, Eq, Generic, ToJSON, FromJSON)
-
--- | Context carried from Downtime → Scene (The Tide's farewell)
-data DowntimeToSceneContext = DowntimeToSceneContext
-  { dtscHook :: Text              -- What pulled them back to action
-  , dtscTimeElapsed :: Text       -- "a few hours", "three days", "a week"
-  , dtscStressHealed :: Int       -- How much stress was recovered
-  , dtscHeatDecay :: Int          -- How much heat faded
-  , dtscDiceRecovered :: Int      -- How many dice were restored
-  }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
 -- | Context carried from Aftermath → Scene (The Echo's farewell)
@@ -384,9 +372,6 @@ data TraumaToSceneContext = TraumaToSceneContext
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
 -- | Empty contexts for defaults
-emptyDowntimeToSceneContext :: DowntimeToSceneContext
-emptyDowntimeToSceneContext = DowntimeToSceneContext "" "" 0 0 0
-
 emptyAftermathToSceneContext :: AftermathToSceneContext
 emptyAftermathToSceneContext = AftermathToSceneContext "" [] []
 
@@ -922,7 +907,6 @@ instance ToGVal m ClockInterrupt where toGVal = genericToGVal
 
 -- Scene Entry Context
 instance ToGVal m SceneEntryContext where toGVal = genericToGVal
-instance ToGVal m DowntimeToSceneContext where toGVal = genericToGVal
 instance ToGVal m AftermathToSceneContext where toGVal = genericToGVal
 instance ToGVal m TraumaToSceneContext where toGVal = genericToGVal
 

@@ -3,12 +3,10 @@ module DM.Output
   ( -- * Turn Output
     TurnOutput(..)
   , NarrativeConnector(..)
-  , ClockTick(..)
   , emptyTurnOutput
   , applyTurnOutput
 
-    -- * Dice Action (for action mode structured output)
-  , DiceAction(..)
+    -- * Die Outcome (for spend_die tool input)
   , DieOutcome(..)
 
     -- * Compression Output
@@ -39,14 +37,8 @@ data DieOutcome = DieOutcome
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
--- | Dice action in structured output - REQUIRED in action mode
--- Player sees hint + costs BEFORE choosing; game applies chosen outcome
-data DiceAction = DiceAction
-  { situation :: Text           -- What's at stake
-  , position :: Position        -- Controlled/Risky/Desperate
-  , outcomes :: [DieOutcome]    -- One outcome per die in pool (parallel to pool)
-  }
-  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+-- Note: DiceAction type removed - dice mechanics now handled by spend_die tool
+-- DieOutcome is still used by SpendDie tool input
 
 -- ══════════════════════════════════════════════════════════════
 -- TURN OUTPUT
@@ -73,21 +65,13 @@ data TurnOutput = TurnOutput
   , threatDescription :: Maybe Text         -- If unresolved threat, describe for echoing
   , suggestedActions :: [Text]              -- 2-3 suggested next actions for player
   , traumaAssigned :: Maybe Text            -- If trauma turn, the trauma gained (e.g. "Cold", "Haunted")
-  , diceAction :: Maybe DiceAction          -- Required in action mode: dice outcomes for player choice
+  -- Note: diceAction removed - dice mechanics now handled by spend_die tool
   -- Downtime-specific fields (The Tide)
   , diceRecovered :: Int                    -- Dice restored to pool during downtime
   , hookDescription :: Maybe Text           -- What pulls them back from downtime
   , timeElapsed :: Maybe Text               -- How long downtime lasted ("three days", etc.)
-  , clocksToTick :: [ClockTick]              -- Clocks to advance during downtime
   }
   deriving (Show, Eq, Generic, ToJSON)
-
--- | Clock tick request from LLM output
-data ClockTick = ClockTick
-  { clockId :: Text
-  , ticks :: Int
-  }
-  deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
 -- | Custom FromJSON to handle missing fields gracefully
 -- Different mood schemas include different subsets of fields, so we need defaults
@@ -110,12 +94,11 @@ instance FromJSON TurnOutput where
     threatDescription <- o .:? "threatDescription"
     suggestedActions <- o .:? "suggestedActions" .!= []
     traumaAssigned <- o .:? "traumaAssigned"
-    diceAction <- o .:? "diceAction"
+    -- Note: diceAction no longer parsed - dice handled by spend_die tool
     -- Downtime-specific fields
     diceRecovered <- o .:? "diceRecovered" .!= 0
     hookDescription <- o .:? "hookDescription"
     timeElapsed <- o .:? "timeElapsed"
-    clocksToTick <- o .:? "clocksToTick" .!= []
     pure TurnOutput
       { narration = narration
       , narrativeConnector = narrativeConnector
@@ -127,11 +110,9 @@ instance FromJSON TurnOutput where
       , threatDescription = threatDescription
       , suggestedActions = suggestedActions
       , traumaAssigned = traumaAssigned
-      , diceAction = diceAction
       , diceRecovered = diceRecovered
       , hookDescription = hookDescription
       , timeElapsed = timeElapsed
-      , clocksToTick = clocksToTick
       }
 
 emptyTurnOutput :: TurnOutput
@@ -146,11 +127,9 @@ emptyTurnOutput = TurnOutput
   , threatDescription = Nothing
   , suggestedActions = []
   , traumaAssigned = Nothing
-  , diceAction = Nothing
   , diceRecovered = 0
   , hookDescription = Nothing
   , timeElapsed = Nothing
-  , clocksToTick = []
   }
 
 -- | Apply turn output to world state (cross-cutting updates only)

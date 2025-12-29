@@ -227,32 +227,13 @@ sceneOutputSchema = objectSchema
   ]
   ["narration", "continueScene", "suggestedActions"]
 
--- | ACTION: Dice resolution via structured output
--- diceAction is REQUIRED - player chooses, game applies
+-- | ACTION: Build tension before dice via spend_die tool
+-- No diceAction in structured output - the spend_die tool handles dice
 actionOutputSchema :: JSONSchema
 actionOutputSchema = objectSchema
   [ ("narration", describeField "narration"
-      "Frame the tension BEFORE dice. After player chooses, this becomes aftermath."
+      "Frame the tension. After this, call spend_die tool with precommitted outcomes."
       (emptySchema TString))
-  , ("diceAction", describeField "diceAction"
-      "REQUIRED. Precommit outcomes for each die in the pool."
-      (objectSchema
-        [ ("situation", describeField "situation" "What's at stake" (emptySchema TString))
-        , ("position", describeField "position" "Controlled, Risky, or Desperate"
-            (enumSchema ["Controlled", "Risky", "Desperate"]))
-        , ("outcomes", describeField "outcomes"
-            "One outcome per die in pool. outcomes[i] matches pool[i]."
-            (arraySchema $ objectSchema
-              [ ("dieValue", describeField "dieValue" "The die value (must match pool)" (emptySchema TInteger))
-              , ("hint", describeField "hint" "3-8 word preview shown during choice" (emptySchema TString))
-              , ("stressCost", describeField "stressCost" "Stress cost (0-3 typical)" (emptySchema TInteger))
-              , ("heatCost", describeField "heatCost" "Heat cost (0-2 typical)" (emptySchema TInteger))
-              , ("coinDelta", describeField "coinDelta" "Coin change" (emptySchema TInteger))
-              , ("narrative", describeField "narrative" "1-3 sentences revealed after choice" (emptySchema TString))
-              ]
-              ["dieValue", "hint", "stressCost", "heatCost", "coinDelta", "narrative"]))
-        ]
-        ["situation", "position", "outcomes"]))
   , ("continueScene", describeField "continueScene"
       "True to continue after resolution"
       (emptySchema TBoolean))
@@ -260,7 +241,7 @@ actionOutputSchema = objectSchema
       "2-3 next actions based on outcome"
       (arraySchema (emptySchema TString)))
   ]
-  ["narration", "diceAction", "continueScene", "suggestedActions"]
+  ["narration", "continueScene", "suggestedActions"]
 
 -- | AFTERMATH: Consequences landed, echoing forward
 -- Coin for loot/payout, descriptions for future echoing

@@ -121,18 +121,6 @@ formatEvent event = case event of
         then "\n\nYou can retreat to safety, or make a deal..."
         else "\n\nNo escape. You must bargain or collapse."
 
-  ClockAdvanced _clockId clockName oldFilled newFilled total ->
-    Just $ formatEventEntry "CLOCK" severity $
-      clockName <> " — " <> T.pack (show newFilled) <> "/" <>
-      T.pack (show total) <>
-      if newFilled >= total
-        then " ⚠ FILLED!"
-        else " [+" <> T.pack (show (newFilled - oldFilled)) <> "]"
-    where
-      severity = if newFilled >= total then SeverityCritical
-                 else if newFilled >= total - 1 then SeverityWarning
-                 else SeverityInfo
-
   -- Narrative text - pass through directly (no special formatting)
   NarrativeAdded txt -> Just txt
 

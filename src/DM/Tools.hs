@@ -112,13 +112,6 @@ data DMEvent
       { boContext :: Text                  -- why they're out of options
       , boCanRetreat :: Bool               -- can they leave?
       }
-  | ClockAdvanced
-      { caClockId :: Text
-      , caClockName :: Text
-      , caOldFilled :: Int
-      , caNewFilled :: Int
-      , caTotal :: Int
-      }
   -- Narrative output (for GUI display)
   | NarrativeAdded Text
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
@@ -320,7 +313,15 @@ instance Tool SpendDie DMEvent WorldState DMEffects where
         -- Calculate outcome tier for the result
         let outcomeTier = calculateOutcome input.position chosenDie
 
-        -- Apply the deltas from the chosen outcome
+        -- Capture current mood BEFORE any modifications for pendingOutcome
+        currentMoodBefore <- getMood
+        let (position, stakes) = case currentMoodBefore of
+              MoodAction (AvControlled _ risk) _ -> (Controlled, risk)
+              MoodAction (AvRisky threat _) _ -> (Risky, threat)
+              MoodAction (AvDesperate why stakes' _) _ -> (Desperate, why <> ": " <> stakes')
+              _ -> (Risky, input.situation)
+
+        -- Apply the deltas and populate pendingOutcome for resolve tool
         modify @WorldState $ \s -> s
           { dicePool = s.dicePool { poolDice = newPool }
           , player = (s.player)
@@ -328,17 +329,24 @@ instance Tool SpendDie DMEvent WorldState DMEffects where
               , heat = clamp 0 10 (s.player.heat + chosenOutcome.heatCost)
               , coin = max 0 (s.player.coin + chosenOutcome.coinDelta)
               }
+          , pendingOutcome = Just PendingOutcome
+              { outcomeContext = input.situation
+              , outcomePosition = position
+              , outcomeEffect = Standard  -- Could add to SpendDie input if needed
+              , outcomeStakes = stakes
+              , chosenDie = Just chosenDie
+              , chosenTier = Just outcomeTier
+              }
           }
 
         -- Check if pool is now empty - if so, transition to bargain mood
         when (null newPool) $ do
-          theMood <- getMood
           putMood $ MoodBargain Bargaining
             { bvWhatDrained = input.situation
-            , bvCanRetreat = not (isDesperateMood theMood)
+            , bvCanRetreat = not (isDesperateMood currentMoodBefore)
             , bvRetreatDesc = "slip away and regroup"
             , bvPassOutDesc = "collapse from exhaustion"
-            , bvPreviousMood = theMood
+            , bvPreviousMood = currentMoodBefore
             }
 
         -- Get updated state for accurate event emission
@@ -802,13 +810,9 @@ dmToolList = TCons (Proxy @SetSceneStyle)
 dmTools :: [Value]
 dmTools = toolListToJSON dmToolList
 
--- | Bargain-only tools (for filtering when in bargain mood)
-bargainToolNames :: [Text]
-bargainToolNames = ["accept_bargain", "retreat", "pass_out"]
-
--- | Core action tools (not available in bargain mood)
-actionToolNames :: [Text]
-actionToolNames = ["choose", "spend_die", "engage", "resolve", "accept"]
+-- Note: Per-mood tool filtering is NOT implemented.
+-- All tools are available in all moods; template guidance steers usage.
+-- See BUGS_AND_OMISSIONS.md for discussion.
 
 -- | Names of transition tools that change mood state
 transitionToolNames :: [Text]

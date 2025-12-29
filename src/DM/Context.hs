@@ -77,7 +77,6 @@ data DMContext = DMContext
   -- Consequence echoing (narrative continuity)
   , ctxRecentCosts :: [Text]            -- From last 3 costly/setback outcomes
   , ctxUnresolvedThreats :: [Text]      -- Complications not yet addressed
-  , ctxPendingInterrupt :: Maybe ClockInterrupt  -- Clock triggered, awaiting handling
   -- Scene entry context (what led to this scene)
   , ctxSceneEntry :: Maybe SceneEntryContext  -- Context from previous phase (downtime, aftermath, trauma)
   }
@@ -254,7 +253,6 @@ buildDMContext activeScene mood world =
       -- Consequence echoing
       , ctxRecentCosts = world.recentCosts
       , ctxUnresolvedThreats = world.unresolvedThreats
-      , ctxPendingInterrupt = world.pendingInterrupt
       -- Scene entry context
       , ctxSceneEntry = world.sceneEntryContext
       }
