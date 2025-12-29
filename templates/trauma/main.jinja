@@ -1,6 +1,8 @@
 {# trauma/main.jinja - The Crack speaks #}
 
 {% set existing_trauma = ctxPlayer.trauma %}
+{% set trauma_type = ctxMoodVariant.mvcTraumaType %}
+{% set what_broke = ctxMoodVariant.mvcWhatBroke %}
 
 <the_crack>
 I am the moment the glass gives.
@@ -39,6 +41,16 @@ This is their first scar. The one they'll remember when they collect more.
 {% endif %}
 
 **Stress:** {{ ctxPlayer.stress }}/9 — MAXIMUM
+
+{% if what_broke %}
+**What broke them:** {{ what_broke }}
+This is the trigger. The moment that was one too many.
+{% endif %}
+
+{% if trauma_type %}
+**Suggested trauma:** {{ trauma_type }}
+(Or choose something that fits the fiction better.)
+{% endif %}
 
 {% if ctxMoodVariant.mvcAdrenaline %}
 **ADRENALINE ACTIVE.** They can push through for one more action.
@@ -127,7 +139,6 @@ But they carry this scar forever.
 **Mechanical output:**
 - `traumaAssigned`: The trauma name (REQUIRED)
 - `stressDelta: 0` (trauma handles the reset)
-- `continueScene: true` — they can keep playing
 </what_i_require>
 
 <my_output>

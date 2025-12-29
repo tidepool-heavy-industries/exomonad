@@ -6,6 +6,7 @@
 {% set costs_paid = ctxMoodVariant.mvcCostsPaid | default([]) %}
 {% set new_complications = ctxMoodVariant.mvcNewComplications | default([]) %}
 {% set immediate_danger = ctxMoodVariant.mvcImmediateDanger | default(false) %}
+{% set escape_route = ctxMoodVariant.mvcEscapeRoute %}
 {% set stress_room = 9 - ctxPlayer.stress %}
 {% set precarity = ctxPrecarity %}
 
@@ -76,6 +77,7 @@ A wound. A bridge burned. A favor owed.
 Partially. Complications. New problems born from the attempt.
 The goal may be achieved, but the situation is worse.
 Someone saw. Something broke. A clock advanced.
+{% if escape_route %}*There's still a way out:* {{ escape_route }}{% endif %}
 {% elif outcome_type == "disaster" %}
 It failed. And the failure created new problems.
 They're in a hole now. I show them the walls.

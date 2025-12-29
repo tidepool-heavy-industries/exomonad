@@ -637,6 +637,11 @@ instance Tool AcceptBargain DMEvent WorldState DMEffects where
     modify @WorldState $ \s -> applyCostToState s input
     modify @WorldState $ \s -> s { dicePool = s.dicePool { poolDice = finalPool } }
 
+    -- Reset stress to 0 after bargain (catch your breath - prevents bounce back to trauma)
+    -- Note: trauma cost type already resets stress in applyCostToState, but this ensures
+    -- all bargain types give relief
+    modify @WorldState $ \s -> s { player = s.player { stress = 0 } }
+
     -- Return to previous mood
     putMood returnMood
 

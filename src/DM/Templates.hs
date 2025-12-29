@@ -218,14 +218,11 @@ sceneOutputSchema = objectSchema
   , ("coinDelta", describeField "coinDelta"
       "Direct transactions only (bought drink, paid informant). Usually 0."
       (emptySchema TInteger))
-  , ("continueScene", describeField "continueScene"
-      "True to continue, false to end scene"
-      (emptySchema TBoolean))
   , ("suggestedActions", describeField "suggestedActions"
       "2-3 short next actions (3-8 words). One safe, one risky."
       (arraySchema (emptySchema TString)))
   ]
-  ["narration", "continueScene", "suggestedActions"]
+  ["narration", "suggestedActions"]
 
 -- | ACTION: Build tension before dice via spend_die tool
 -- No diceAction in structured output - the spend_die tool handles dice
@@ -234,14 +231,11 @@ actionOutputSchema = objectSchema
   [ ("narration", describeField "narration"
       "Frame the tension. After this, call spend_die tool with precommitted outcomes."
       (emptySchema TString))
-  , ("continueScene", describeField "continueScene"
-      "True to continue after resolution"
-      (emptySchema TBoolean))
   , ("suggestedActions", describeField "suggestedActions"
       "2-3 next actions based on outcome"
       (arraySchema (emptySchema TString)))
   ]
-  ["narration", "continueScene", "suggestedActions"]
+  ["narration", "suggestedActions"]
 
 -- | AFTERMATH: Consequences landed, echoing forward
 -- Coin for loot/payout, descriptions for future echoing
@@ -253,9 +247,6 @@ aftermathOutputSchema = objectSchema
   , ("coinDelta", describeField "coinDelta"
       "Loot found, job payout, stolen goods. 0 if none."
       (emptySchema TInteger))
-  , ("continueScene", describeField "continueScene"
-      "True to continue, false to end"
-      (emptySchema TBoolean))
   , ("suggestedActions", describeField "suggestedActions"
       "2-3 next actions: recover, press on, deal with fallout"
       (arraySchema (emptySchema TString)))
@@ -266,7 +257,7 @@ aftermathOutputSchema = objectSchema
       "If unresolved threat: describe it for surfacing later. Null if resolved."
       (nullableSchema (emptySchema TString)))
   ]
-  ["narration", "continueScene", "suggestedActions"]
+  ["narration", "suggestedActions"]
 
 -- | TRAUMA: Breaking point - stress reset, scar gained
 traumaOutputSchema :: JSONSchema

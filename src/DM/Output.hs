@@ -60,12 +60,10 @@ data TurnOutput = TurnOutput
   , stressDelta :: Int                      -- Change in stress (-9 to +9)
   , coinDelta :: Int                        -- Change in coin
   , heatDelta :: Int                        -- Change in heat (0 to +4)
-  , continueScene :: Bool                   -- True to continue, False to end scene
   , costDescription :: Maybe Text           -- If costly/setback, describe the cost for echoing
   , threatDescription :: Maybe Text         -- If unresolved threat, describe for echoing
   , suggestedActions :: [Text]              -- 2-3 suggested next actions for player
   , traumaAssigned :: Maybe Text            -- If trauma turn, the trauma gained (e.g. "Cold", "Haunted")
-  -- Note: diceAction removed - dice mechanics now handled by spend_die tool
   -- Downtime-specific fields (The Tide)
   , diceRecovered :: Int                    -- Dice restored to pool during downtime
   , hookDescription :: Maybe Text           -- What pulls them back from downtime
@@ -89,7 +87,6 @@ instance FromJSON TurnOutput where
     heatDecay <- o .:? "heatDecay" .!= 0
     heatDeltaDirect <- o .:? "heatDelta" .!= 0
     let heatDelta = if heatDecay > 0 then negate heatDecay else heatDeltaDirect
-    continueScene <- o .:? "continueScene" .!= True
     costDescription <- o .:? "costDescription"
     threatDescription <- o .:? "threatDescription"
     suggestedActions <- o .:? "suggestedActions" .!= []
@@ -105,7 +102,6 @@ instance FromJSON TurnOutput where
       , stressDelta = stressDelta
       , coinDelta = coinDelta
       , heatDelta = heatDelta
-      , continueScene = continueScene
       , costDescription = costDescription
       , threatDescription = threatDescription
       , suggestedActions = suggestedActions
@@ -122,7 +118,6 @@ emptyTurnOutput = TurnOutput
   , stressDelta = 0
   , coinDelta = 0
   , heatDelta = 0
-  , continueScene = True
   , costDescription = Nothing
   , threatDescription = Nothing
   , suggestedActions = []

@@ -4,6 +4,8 @@
 {% set threat = ctxMoodVariant.mvcThreat | default("uncertain outcome") %}
 {% set opportunity = ctxMoodVariant.mvcOpportunity | default("the goal itself") %}
 {% set domain = ctxMoodVariant.mvcDomain %}
+{% set advantage_source = ctxMoodVariant.mvcAdvantageSource %}
+{% set potential_trauma = ctxMoodVariant.mvcPotentialTrauma | default(false) %}
 {% set stress = ctxPlayer.stress %}
 {% set stress_room = 9 - stress %}
 {% set heat = ctxPlayer.heat %}
@@ -43,12 +45,14 @@ Every choice is real.
 {% if position == "controlled" %}
 They have advantage. Even failure leaves options.
 The dice are kind to the prepared.
+{% if advantage_source %}*Why controlled:* {{ advantage_source }}{% endif %}
 {% elif position == "risky" %}
 The default. Could go either way.
 This is where most stories happen—the balanced edge.
 {% elif position == "desperate" %}
 Against the odds. The world is not kind.
 Success is precious. Failure is expensive.
+{% if potential_trauma %}**This could break them.** Stress at {{ stress }}/9.{% endif %}
 {% endif %}
 
 {% if domain %}

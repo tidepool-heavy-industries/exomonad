@@ -6,44 +6,45 @@ Issues found during diagram-vs-code audit. Some are bugs, some are dead code, so
 
 ## MEDIUM BUGS (Active)
 
-### continueScene Field is Dead Code
-**Severity: MEDIUM** | **Location:** Output.hs:63, Templates.hs (multiple)
-
-`TurnOutput.continueScene` is parsed but never checked anywhere. LLM might set `continueScene: false` expecting it to end the scene, but it has no effect.
-
-**Fix:** Remove from TurnOutput and schema, or implement scene-ending logic. Requires touching multiple files.
-
----
-
-### Bargain Return Doesn't Reset Stress
-**Severity: MEDIUM** | **Location:** Tools.hs:630-640
-
-When accepting a bargain (not trauma type), stress stays at current value. If player is at 9 stress and accepts a bargain, they return to previous mood and could immediately trigger trauma on next turn. Creates "bounce" behavior.
-
-**Fix:** Either reset stress to 0 after any bargain, or run trauma check after `accept_bargain`.
+*None*
 
 ---
 
 ## LOW PRIORITY (Gaps/Design Debt)
 
-### BetweenScenes Handler Missing
-`PhaseBetweenScenes` exists and `Retreat` tool transitions to it, but no handler processes it. Game would hang.
-
-### Unused MoodVariantContext Fields
-These fields are defined and populated but never referenced in templates:
-- `mvcAdvantageSource` (controlled actions)
-- `mvcPotentialTrauma` (desperate actions, disasters)
-- `mvcEscapeRoute` (setback outcomes)
-- `mvcTraumaType`, `mvcWhatBroke` (trauma variant)
-
-Could be surfaced for richer narrative context or removed.
-
-### Visionary Draft Template Bug
-`aftermath/visionary_draft.jinja` line 4 references `mvcWhatHappened` which doesn't exist. Use `mvcWhatAchieved` or `mvcWhatWentWrong`.
+*None*
 
 ---
 
 ## FIXED (2025-12-29)
+
+### continueScene Dead Code Removed
+- Removed `continueScene` field from TurnOutput type in Output.hs
+- Removed from FromJSON parser and emptyTurnOutput default
+- Removed from sceneOutputSchema, actionOutputSchema, aftermathOutputSchema in Templates.hs
+- Removed from trauma/main.jinja and _shared/output_format.jinja templates
+
+### Bargain Return Now Resets Stress
+- Added `stress = 0` reset after any bargain acceptance in Tools.hs
+- Prevents "bounce" behavior where player at 9 stress could immediately trigger trauma
+- All bargain cost types (heat, clock, faction, etc.) now give stress relief
+
+### Visionary Draft Template Fixed
+- Changed `mvcWhatHappened` to `mvcWhatAchieved` in aftermath/visionary_draft.jinja line 4
+- Template now correctly references existing MVC field
+
+### MVC Fields Now Surfaced in Templates
+- Added `mvcAdvantageSource` to action/main.jinja for controlled position context
+- Added `mvcPotentialTrauma` to action/main.jinja for desperate position warning
+- Added `mvcEscapeRoute` to aftermath/main.jinja for setback outcomes
+- Added `mvcTraumaType` and `mvcWhatBroke` to trauma/main.jinja for trauma context
+
+### BetweenScenes Handler Verified Present
+- `handleBetweenScenes` fully implements the between-scenes flow
+- Handles heat escalation, threat clock ticking, clock consequences
+- Generates LLM transition narration
+- Presents options: BSLayLow, BSRecover, BSWorkGoal, BSNewScene, BSEndSession
+- `applyBetweenScenesChoice` applies chosen option and creates new scene
 
 ### pendingOutcome Now Cleared After Use
 - Added `modify @WorldState $ \s -> s { pendingOutcome = Nothing }` in Resolve tool
@@ -117,8 +118,4 @@ Could be surfaced for richer narrative context or removed.
 
 | Issue | Severity | Type | Status |
 |-------|----------|------|--------|
-| continueScene dead code | MEDIUM | Dead code | Open |
-| Bargain return stress bounce | MEDIUM | Design | Open |
-| BetweenScenes handler missing | LOW | Incomplete | Open |
-| Unused mvc fields | LOW | Dead code | Open |
-| Visionary draft template bug | LOW | Bug | Open |
+| All issues fixed | — | — | Complete |
