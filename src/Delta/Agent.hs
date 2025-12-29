@@ -110,28 +110,35 @@ delta :: Agent UserContext DeltaEvent DeltaExtra
 delta = Agent
   { agentName       = "delta"
   , agentInit       = emptyContext
-  , agentTurn       = deltaTurnWrapper
-  , agentStartup    = deltaStartup
-  , agentShutdown   = deltaShutdown
+  , agentRun        = deltaRun
   , agentDispatcher = noDispatcher  -- No mid-turn tools, uses external effects instead
   }
 
--- | Wrap delta functionality to match Agent turn signature
--- TODO: Integrate with existing DeltaConfig and destinations
-deltaTurnWrapper :: Text -> DeltaM ()
-deltaTurnWrapper _input = do
-  -- Placeholder - full implementation would use runDeltaWithFeedback
-  emit $ DeltaInfo "Delta turn (not yet implemented in Agent pattern)"
-
--- | Startup: welcome message
-deltaStartup :: DeltaM ()
-deltaStartup = do
+-- | The Delta agent's full lifecycle
+--
+-- TODO: Integrate with existing DeltaConfig and destinations.
+-- For now, this is a minimal stub.
+deltaRun :: DeltaM ()
+deltaRun = do
+  -- Startup
   emit $ DeltaInfo "Delta agent ready. Enter text to capture."
 
--- | Shutdown: summary
-deltaShutdown :: DeltaM ()
-deltaShutdown = do
+  -- Main loop
+  loop
+
+  -- Shutdown
   emit $ DeltaInfo "Delta session complete."
+  where
+    loop = do
+      input <- requestText "> "
+      case T.toLower (T.strip input) of
+        "quit" -> pure ()
+        "exit" -> pure ()
+        "" -> loop
+        _ -> do
+          -- Placeholder - full implementation would use runDeltaWithFeedback
+          emit $ DeltaInfo $ "Would route: " <> input
+          loop
 
 -- ══════════════════════════════════════════════════════════════
 -- CONFIGURATION

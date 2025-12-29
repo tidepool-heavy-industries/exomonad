@@ -6,10 +6,12 @@
 module Tidepool.GUI.Handler
   ( makeGUIHandler
   , guiDice
+  , guiCustom
   ) where
 
 import Control.Concurrent.MVar (takeMVar)
 import Control.Concurrent.STM (atomically, writeTVar)
+import Data.Aeson (Value)
 import Data.Text (Text)
 
 import Tidepool.Effect (InputHandler(..))
@@ -25,6 +27,7 @@ makeGUIHandler bridge = InputHandler
   { ihChoice = guiChoice bridge
   , ihText = guiText bridge
   , ihDice = guiDice bridge
+  , ihCustom = guiCustom bridge
   }
 
 -- | Handle a choice request via the GUI
@@ -113,3 +116,39 @@ guiDice bridge prompt diceWithHints = do
   case response of
     ChoiceResponse idx -> pure idx
     TextResponse _ -> error "Expected ChoiceResponse, got TextResponse"
+
+-- | Handle a custom request via the GUI
+--
+-- Routes custom requests based on tag. Currently supports:
+-- - "character-creation": Uses gbCharacterCreationResult MVar
+--
+-- Unknown tags return an error value.
+--
+-- ════════════════════════════════════════════════════════════════════════════
+-- FIXME: MAKE GENERIC
+-- ════════════════════════════════════════════════════════════════════════════
+-- This is a stopgap. The "character-creation" tag is DM-specific and shouldn't
+-- be hardcoded here. Proper solution:
+--
+--   1. GUIBridge gets a generic `gbCustomResult :: MVar Value`
+--   2. PendingRequest gets `PendingCustom Text Value` (tag + payload)
+--   3. GUI routes based on tag, any agent can define custom UI flows
+--   4. Remove DM-specific gbCharacterCreationResult
+--
+-- For now, this works because DM is the only agent using custom requests.
+-- ════════════════════════════════════════════════════════════════════════════
+guiCustom :: GUIBridge state -> Text -> Value -> IO Value
+guiCustom bridge tag _payload = case tag of
+  "character-creation" -> do
+    -- Post character creation request to GUI
+    atomically $ writeTVar bridge.gbPendingRequest (Just PendingCharacterCreation)
+
+    -- Block until character creation completes
+    result <- takeMVar bridge.gbCharacterCreationResult
+
+    -- Clear pending request
+    atomically $ writeTVar bridge.gbPendingRequest Nothing
+
+    pure result
+
+  _ -> error $ "Unknown custom request tag: " ++ show tag

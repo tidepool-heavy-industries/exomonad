@@ -2,8 +2,9 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 -- | Core effect types for Tidepool game loops
 module Tidepool.Effect
-  ( -- * Core Effects
-    GameEffects
+  ( -- * Effect Stacks
+    RunnerEffects
+    -- * Core Effects
   , State(..)
   , Random(..)
   , LLM(..)
@@ -27,6 +28,7 @@ module Tidepool.Effect
   , requestChoice
   , requestText
   , requestDice
+  , requestCustom
   , logMsg
   , logDebug
   , logInfo
@@ -94,9 +96,15 @@ import Tidepool.GUI.Core (GUIBridge)
 import qualified Tidepool.Storage as Storage
 import Database.SQLite.Simple (Connection)
 
--- | The effect stack for game loops
--- IOE is at the base for IO operations (random, emit, input, log)
-type GameEffects s event =
+-- | The effect stack for runners (interpreters).
+--
+-- DISTINCTION: This is for /runner/ code, not /agent/ code.
+-- - Agents use 'BaseEffects' from "Tidepool" (IO-blind, enables WASM)
+-- - Runners use 'RunnerEffects' (with IOE, for actual IO operations)
+--
+-- Runner code (gameLoopWithGUI, effect interpreters) needs IOE for:
+-- - Console I/O, TVar updates, database access, HTTP calls
+type RunnerEffects s event =
   '[ LLM
    , RequestInput
    , Log
@@ -735,6 +743,14 @@ data RequestInput :: Effect where
     -> [(Int, Int, Text)] -- (die value, index, hint) triples
     -> RequestInput m Int
 
+  -- | Request custom UI interaction (character creation, complex forms, etc.)
+  -- The tag identifies the request type, handler returns JSON response.
+  -- Use this for agent-specific UI that doesn't fit choice/text/dice.
+  RequestCustom
+    :: Text              -- Request tag (e.g., "character-creation", "inventory-select")
+    -> Value             -- Request payload (JSON)
+    -> RequestInput m Value
+
 type instance DispatchOf RequestInput = 'Dynamic
 
 -- | Present a choice to the player and get their selection
@@ -750,19 +766,27 @@ requestText = send . RequestText
 requestDice :: RequestInput :> es => Text -> [(Int, Int, Text)] -> Eff es Int
 requestDice prompt diceWithHints = send (RequestDice prompt diceWithHints)
 
+-- | Request custom UI interaction
+-- Tag identifies the request type, payload is JSON for the handler
+requestCustom :: RequestInput :> es => Text -> Value -> Eff es Value
+requestCustom tag payload = send (RequestCustom tag payload)
+
 -- | Handler for input requests (terminal, UI, etc.)
 data InputHandler = InputHandler
   { ihChoice :: forall a. Text -> [(Text, a)] -> IO a
   , ihText   :: Text -> IO Text
   , ihDice   :: Text -> [(Int, Int, Text)] -> IO Int
     -- ^ Dice selection: prompt, (die value, index, hint) triples -> selected index
+  , ihCustom :: Text -> Value -> IO Value
+    -- ^ Custom requests: tag, payload -> response (all JSON)
   }
 
 runRequestInput :: IOE :> es => InputHandler -> Eff (RequestInput : es) a -> Eff es a
-runRequestInput (InputHandler choice txtInput dice) = interpret $ \_ -> \case
+runRequestInput (InputHandler choice txtInput dice custom) = interpret $ \_ -> \case
   RequestChoice prompt choices -> liftIO $ choice prompt choices
   RequestText prompt           -> liftIO $ txtInput prompt
   RequestDice prompt diceWithHints -> liftIO $ dice prompt diceWithHints
+  RequestCustom tag payload -> liftIO $ custom tag payload
 
 -- ══════════════════════════════════════════════════════════════
 -- LOG EFFECT
@@ -853,7 +877,7 @@ runGame
   -> (event -> IO ())
   -> InputHandler
   -> LogLevel              -- ^ Minimum log level to display
-  -> Eff (GameEffects s event) a
+  -> Eff (RunnerEffects s event) a
   -> IO (a, s)
 runGame initialState llmConfig eventHandler inputHandler minLogLevel computation =
   runEff

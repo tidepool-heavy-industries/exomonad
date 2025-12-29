@@ -1,11 +1,13 @@
 {-# LANGUAGE OverloadedStrings #-}
 -- | Tidying Agent
 --
--- Wraps the Tidying OODA loop as a Tidepool Agent.
+-- The Tidying agent owns its full lifecycle via 'tidyingRun'.
+-- Uses OODA (Observe-Orient-Decide-Act) pattern with pure routing.
 --
 module Tidying.Agent
   ( tidying
   , TidyingM
+  , tidyingRun
   ) where
 
 import Data.Text (Text)
@@ -34,29 +36,34 @@ tidying :: SimpleAgent SessionState TidyingEvent
 tidying = Agent
   { agentName       = "tidying"
   , agentInit       = newSession
-  , agentTurn       = tidyingTurnWrapper
-  , agentStartup    = tidyingStartup
-  , agentShutdown   = tidyingShutdown
+  , agentRun        = tidyingRun
   , agentDispatcher = noDispatcher  -- Pure OODA, no mid-turn tools
   }
 
--- | Wrap tidyingTurn to match Agent turn signature
-tidyingTurnWrapper :: Text -> TidyingM ()
-tidyingTurnWrapper inputText = do
-  let input = UserInput
-        { inputText = Just inputText
-        , inputPhotos = []  -- Photo support TBD
-        }
-  response <- tidyingTurn input
-  -- Emit phase change event
-  emit $ SituationClassified $ "Phase: " <> T.pack (show response.responsePhase)
-
--- | Startup: welcome message
-tidyingStartup :: TidyingM ()
-tidyingStartup = do
+-- | The Tidying agent's full lifecycle
+tidyingRun :: TidyingM ()
+tidyingRun = do
+  -- Startup
   emit $ SituationClassified "Let's tidy! Send me a photo of your space."
 
--- | Shutdown: session summary
-tidyingShutdown :: TidyingM ()
-tidyingShutdown = do
+  -- Main loop
+  loop
+
+  -- Shutdown
   emit $ SituationClassified "Great work! Session complete."
+  where
+    loop = do
+      input <- requestText "> "
+      case T.toLower (T.strip input) of
+        "quit" -> pure ()
+        "exit" -> pure ()
+        "done" -> pure ()
+        "" -> loop  -- Empty input, continue
+        _ -> do
+          let userInput = UserInput
+                { inputText = Just input
+                , inputPhotos = []  -- Photo support TBD
+                }
+          response <- tidyingTurn userInput
+          emit $ SituationClassified $ "Phase: " <> T.pack (show response.responsePhase)
+          loop

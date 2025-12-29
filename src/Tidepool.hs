@@ -3,7 +3,8 @@
 {-# LANGUAGE UndecidableInstances #-}
 -- | Tidepool: Opinionated LLM Agent Framework
 --
--- An agent is (State, Event, Turn). That's the opinion.
+-- An agent is (State, Event, Run). That's the opinion.
+-- The agent owns its lifecycle. The runner just interprets effects.
 --
 -- = IO-Blindness
 --
@@ -52,24 +53,27 @@ type family (++) (xs :: [k]) (ys :: [k]) :: [k] where
   (x ': xs) ++ ys = x ': (xs ++ ys)
 
 -- ══════════════════════════════════════════════════════════════════════
--- THE OPINION: An agent is (State, Event, Turn)
+-- THE OPINION: An agent is (State, Event, Run)
 -- ══════════════════════════════════════════════════════════════════════
 
 -- | An agent. Parameterized by state, event, and extra effect types.
 --
 -- The @extra@ parameter allows agents to use domain-specific effects
 -- beyond the base set. Use @'[]@ for simple agents.
+--
+-- = Design: Agent as Process
+--
+-- The agent owns its entire lifecycle via 'agentRun'. It uses 'requestText'
+-- when it needs input, 'emit' when it has output, and returns when done.
+-- The runner just interprets effects - it doesn't impose loop structure.
 data Agent s evt (extra :: [Effect]) = Agent
   { agentName       :: Text
     -- ^ Human-readable name for logging
   , agentInit       :: s
-    -- ^ Initial state
-  , agentTurn       :: Text -> AgentM s evt extra ()
-    -- ^ Handle one turn of user input
-  , agentStartup    :: AgentM s evt extra ()
-    -- ^ Run once at session start (greeting, init)
-  , agentShutdown   :: AgentM s evt extra ()
-    -- ^ Run once at session end (summary, cleanup)
+    -- ^ Initial state (before agentRun starts)
+  , agentRun        :: AgentM s evt extra ()
+    -- ^ The agent's entire lifecycle. Uses RequestInput when it needs input,
+    -- Emit for output, returns () when session is complete.
   , agentDispatcher :: AgentDispatcher s evt
     -- ^ Tool dispatcher for LLM tool calls (use 'noDispatcher' if no tools)
   }

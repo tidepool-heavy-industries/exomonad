@@ -24,6 +24,9 @@ module DM.Loop
     -- * Types
   , PlayerInput(..)
   , Response(..)
+
+    -- * Schemas (for Agent pattern)
+  , scenarioInitSchemaJSON
   ) where
 
 import DM.State
@@ -612,10 +615,10 @@ runDMGameWithDB conn gameId mCursor initialState handleEvent = do
 gameLoopWithDB
   :: Connection
   -> Storage.GameId
-  -> Eff (GameEffects WorldState DMEvent) ()
+  -> Eff (RunnerEffects WorldState DMEvent) ()
 gameLoopWithDB conn gameId = loop []
   where
-    loop :: [Text] -> Eff (GameEffects WorldState DMEvent) ()
+    loop :: [Text] -> Eff (RunnerEffects WorldState DMEvent) ()
     loop lastSuggestions = do
       state <- get @WorldState
       case state.scene of
@@ -676,10 +679,10 @@ gameLoopWithDB conn gameId = loop []
 -- Threads last suggestions through for numeric input resolution
 gameLoopWithSave
   :: (WorldState -> IO ())  -- Save callback
-  -> Eff (GameEffects WorldState DMEvent) ()
+  -> Eff (RunnerEffects WorldState DMEvent) ()
 gameLoopWithSave saveCallback = loop []
   where
-    loop :: [Text] -> Eff (GameEffects WorldState DMEvent) ()
+    loop :: [Text] -> Eff (RunnerEffects WorldState DMEvent) ()
     loop lastSuggestions = do
       -- Check if we have an active scene
       state <- get @WorldState
@@ -918,10 +921,10 @@ gameLoopWithGUI bridge handleEvent = do
 -- | Game loop for GUI - runs inside effect stack
 guiGameLoop
   :: GUIBridge WorldState
-  -> Eff (GameEffects WorldState DMEvent) ()
+  -> Eff (RunnerEffects WorldState DMEvent) ()
 guiGameLoop bridge = loop
   where
-    loop :: Eff (GameEffects WorldState DMEvent) ()
+    loop :: Eff (RunnerEffects WorldState DMEvent) ()
     loop = do
       -- Check if we have an active scene
       state <- get @WorldState
@@ -1158,10 +1161,10 @@ guiGameLoopWithDB
   :: Connection
   -> Storage.GameId
   -> GUIBridge WorldState
-  -> Eff (GameEffects WorldState DMEvent) ()
+  -> Eff (RunnerEffects WorldState DMEvent) ()
 guiGameLoopWithDB conn gameId bridge = loop
   where
-    loop :: Eff (GameEffects WorldState DMEvent) ()
+    loop :: Eff (RunnerEffects WorldState DMEvent) ()
     loop = do
       -- Check if we have an active scene
       state <- get @WorldState
@@ -1176,7 +1179,7 @@ guiGameLoopWithDB conn gameId bridge = loop
           return ()
         _ -> continueLoop state
 
-    continueLoop :: WorldState -> Eff (GameEffects WorldState DMEvent) ()
+    continueLoop :: WorldState -> Eff (RunnerEffects WorldState DMEvent) ()
     continueLoop state = case state.scene of
         Nothing -> do
           -- No scene - check if this is a fresh game (never had scenario init)
@@ -1315,7 +1318,7 @@ guiGameLoopWithDB conn gameId bridge = loop
 -- Uses the RequestChoice effect for typed choice handling - no manual index handling.
 handleBetweenScenes
   :: GUIBridge WorldState
-  -> Eff (GameEffects WorldState DMEvent) ()
+  -> Eff (RunnerEffects WorldState DMEvent) ()
 handleBetweenScenes bridge = do
   logInfo "[BetweenScenes] Entering between-scenes phase..."
 
@@ -1456,7 +1459,7 @@ buildAvailableOptions state = concat
 -- | Apply the player's choice from BetweenScenes
 applyBetweenScenesChoice
   :: BetweenScenesOption
-  -> Eff (GameEffects WorldState DMEvent) ()
+  -> Eff (RunnerEffects WorldState DMEvent) ()
 applyBetweenScenesChoice choice = case choice of
 
   BSLayLow -> do
@@ -1508,7 +1511,7 @@ applyBetweenScenesChoice choice = case choice of
     modify @WorldState $ \s -> s { phase = PhaseSessionEnded }
 
 -- | Create a new scene after BetweenScenes
-createNewScene :: Eff (GameEffects WorldState DMEvent) ()
+createNewScene :: Eff (RunnerEffects WorldState DMEvent) ()
 createNewScene = do
   logInfo "[BetweenScenes] Creating continuation scene..."
 
