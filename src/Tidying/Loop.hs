@@ -256,17 +256,21 @@ fastPathOrient :: SessionState -> UserInput -> Maybe Situation
 fastPathOrient st input =
   let txt = input.inputText
   in case txt of
-    -- Explicit signals
+    -- Explicit signals (always check first)
     Just t | isStopSignal t -> Just WantsToStop
     Just t | isContinueSignal t -> Just WantsToContinue
     Just t | isStuckSignal t -> Just (Stuck Nothing)
 
-    -- Surveying phase fast-paths
+    -- Surveying phase: need function
+    -- Only fast-path to NeedFunction if NO user text (first turn)
+    -- If user provided text, let LLM parse it to extract function
     _ | st.phase == Surveying && not (hasFunction st) ->
-        if isOverwhelmedSignal txt
-          then Just OverwhelmedNeedMomentum
-          else Just NeedFunction
+        case txt of
+          Nothing -> Just NeedFunction  -- No input yet, ask for function
+          Just t | isOverwhelmedSignal (Just t) -> Just OverwhelmedNeedMomentum
+          Just _ -> Nothing  -- User gave text, let LLM parse it
 
+    -- Surveying phase: have function but no anchors
     _ | st.phase == Surveying && hasFunction st && not (hasAnchors st) ->
         if isOverwhelmedSignal txt
           then Just OverwhelmedNeedMomentum
