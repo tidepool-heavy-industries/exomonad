@@ -16,16 +16,21 @@ module Tidying.Context
     -- * Piles summary
   , PilesSummary(..)
 
-    -- * Photo analysis (stubbed for now)
+    -- * Photo analysis
   , PhotoAnalysis(..)
   , stubPhotoAnalysis
+
+    -- * Photo conversion
+  , photoToImageSource
   ) where
 
 import Data.Aeson (ToJSON(..), (.=), object)
 import Data.Text (Text)
+import Data.Text qualified as T
 import Data.Map.Strict qualified as Map
 import GHC.Generics (Generic)
 
+import Tidepool.Anthropic.Http (ImageSource(..))
 import Tidying.State
 
 -- | Context for tidying prompts
@@ -140,3 +145,14 @@ stubPhotoAnalysis _ = Just PhotoAnalysis
   , paBlockedFunction = Just "chair has clothes on it"
   , paFirstTarget = Just "chair"
   }
+
+-- | Convert Photo to ImageSource for vision API
+-- Detects whether data is a URL or base64 encoded
+photoToImageSource :: Photo -> ImageSource
+photoToImageSource photo
+  | "http://" `T.isPrefixOf` photo.photoData = UrlImage photo.photoData
+  | "https://" `T.isPrefixOf` photo.photoData = UrlImage photo.photoData
+  | otherwise = Base64Image
+      { isMediaType = photo.photoMime
+      , isData = photo.photoData
+      }

@@ -1,6 +1,10 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE DataKinds #-}
 -- | Tidepool: Opinionated LLM Agent Framework
 --
 -- An agent is (State, Event, Run). That's the opinion.
@@ -40,7 +44,10 @@ module Tidepool
 
 import Effectful
 import Data.Text (Text)
+import qualified Data.Text as T
+import qualified Data.Text.IO as TIO
 import Data.Aeson (Value, toJSON)
+import System.IO (hFlush, stdout)
 import Tidepool.Effect
 
 -- ══════════════════════════════════════════════════════════════════════
@@ -168,8 +175,62 @@ data AgentConfig s evt = AgentConfig
 --   finalState <- tidepool config myAgent
 --   putStrLn $ "Final score: " <> show finalState.score
 -- @
-tidepool :: AgentConfig s evt -> SimpleAgent s evt -> IO s
-tidepool config agent = tidepoolWith config id agent
+tidepool :: forall s evt. AgentConfig s evt -> SimpleAgent s evt -> IO s
+tidepool config agent = do
+  -- Build CLI input handler (text-only, no photos)
+  -- For photo support, use GUI runner with camera integration
+  let inputHandler = InputHandler
+        { ihChoice = cliChoice
+        , ihText = cliText
+        , ihDice = \_ _ -> error "Dice not supported in CLI runner"
+        , ihCustom = \tag _ -> error $ "Custom request '" <> T.unpack tag <> "' not supported in CLI - use GUI for photos"
+        }
+
+  -- Run the agent's full lifecycle
+  -- The agent stack is BaseEffects (no IOE). We inject into RunnerEffects which includes IOE.
+  -- inject allows the agent's effects (a subset) to run in the larger stack.
+  let theRun :: Eff (BaseEffects s evt) ()
+      theRun = agent.agentRun
+      widened :: Eff (RunnerEffects s evt) ()
+      widened = inject theRun
+
+  -- Now interpret using runGame's proven order (matches RunnerEffects)
+  ((), finalState) <- runEff
+    . runRandom
+    . runEmit config.acOnEvent
+    . runState agent.agentInit
+    . runChatHistory
+    . runLog config.acLogLevel
+    . runRequestInput inputHandler
+    . runLLM config.acLLM
+    $ widened
+
+  pure finalState
+  where
+    -- CLI choice: numbered menu
+    cliChoice :: Text -> [(Text, a)] -> IO a
+    cliChoice prompt choices = do
+      TIO.putStrLn prompt
+      mapM_ printChoice (zip [1 :: Int ..] choices)
+      TIO.putStr "Enter number: "
+      hFlush stdout
+      line <- TIO.getLine
+      case reads (T.unpack line) of
+        [(n, "")] | n >= 1 && n <= length choices ->
+          pure $ snd (choices !! (n - 1))
+        _ -> do
+          TIO.putStrLn "Invalid choice, try again."
+          cliChoice prompt choices
+      where
+        printChoice (i, (label, _)) =
+          TIO.putStrLn $ T.pack (show i) <> ". " <> label
+
+    -- CLI text: simple line input
+    cliText :: Text -> IO Text
+    cliText prompt = do
+      TIO.putStr prompt
+      hFlush stdout
+      TIO.getLine
 
 -- | Run an agent with extra effects.
 --

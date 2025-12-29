@@ -177,3 +177,16 @@ executable tidepool-dm-gui
     default-extensions:
         OverloadedStrings
         OverloadedRecordDot
+
+executable test-tidying
+    import:           warnings
+    main-is:          TestTidying.hs
+    build-depends:
+        base >= 4.17 && < 5,
+        text >= 2.0 && < 3,
+        tidepool-sketch
+    hs-source-dirs:   app
+    default-language: GHC2021
+    default-extensions:
+        OverloadedStrings
+        OverloadedRecordDot

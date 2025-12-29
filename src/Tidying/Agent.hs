@@ -4,13 +4,22 @@
 -- The Tidying agent owns its full lifecycle via 'tidyingRun'.
 -- Uses OODA (Observe-Orient-Decide-Act) pattern with pure routing.
 --
+-- = Photo Support
+--
+-- Photos are provided via GUI (threepenny-gui with camera access).
+-- The GUI sends base64-encoded photos directly - no filesystem involved.
+-- CLI mode is text-only; use GUI for photo analysis.
+--
 module Tidying.Agent
-  ( tidying
+  ( -- * Agent
+    tidying
   , TidyingM
   , tidyingRun
+
+    -- * Running
+  , runTidyingSession
   ) where
 
-import Data.Text (Text)
 import qualified Data.Text as T
 
 import Tidepool
@@ -41,10 +50,13 @@ tidying = Agent
   }
 
 -- | The Tidying agent's full lifecycle
+--
+-- CLI mode: text-only input. For photo support, use GUI.
 tidyingRun :: TidyingM ()
 tidyingRun = do
   -- Startup
-  emit $ SituationClassified "Let's tidy! Send me a photo of your space."
+  emit $ SituationClassified "Let's tidy! Tell me about your space."
+  emit $ SituationClassified "(For photo analysis, use the GUI version)"
 
   -- Main loop
   loop
@@ -62,8 +74,40 @@ tidyingRun = do
         _ -> do
           let userInput = UserInput
                 { inputText = Just input
-                , inputPhotos = []  -- Photo support TBD
+                , inputPhotos = []  -- Photos come via GUI, not CLI
                 }
           response <- tidyingTurn userInput
           emit $ SituationClassified $ "Phase: " <> T.pack (show response.responsePhase)
           loop
+
+-- ══════════════════════════════════════════════════════════════
+-- RUNNING THE SESSION
+-- ══════════════════════════════════════════════════════════════
+
+-- | Run a tidying session with terminal I/O
+--
+-- Uses the tidepool runner with the tidying agent.
+--
+-- @
+-- main = do
+--   apiKey <- getEnv "ANTHROPIC_API_KEY"
+--   let llmConfig = LLMConfig (T.pack apiKey) "claude-sonnet-4-20250514" 4096 Nothing
+--   finalState <- runTidyingSession newSession print llmConfig
+--   putStrLn $ "Processed " <> show finalState.itemsProcessed <> " items"
+-- @
+runTidyingSession
+  :: SessionState
+  -> (TidyingEvent -> IO ())
+  -> LLMConfig
+  -> IO SessionState
+runTidyingSession initialState handleEvent llmConfig = do
+  let config = AgentConfig
+        { acOnEvent = handleEvent
+        , acOnSave = \_ -> pure ()  -- No persistence for CLI
+        , acGetInput = pure ""      -- Not used (RequestInput handles it)
+        , acLLM = llmConfig
+        , acLogLevel = Info
+        , acQuitCommands = ["quit", "exit", "done"]
+        }
+      agent = tidying { agentInit = initialState }
+  tidepool config agent

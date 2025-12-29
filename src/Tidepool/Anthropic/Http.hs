@@ -6,6 +6,7 @@ module Tidepool.Anthropic.Http
   , Message(..)
   , Role(..)
   , ContentBlock(..)
+  , ImageSource(..)
   , ToolUse(..)
   , ToolResult(..)
   , ToolChoice(..)
@@ -122,9 +123,10 @@ instance FromJSON Role where
     "assistant" -> pure Assistant
     other -> fail $ "Unknown role: " <> T.unpack other
 
--- | Content block - can be text, tool use, tool result, thinking, or json (structured output)
+-- | Content block - can be text, image, tool use, tool result, thinking, or json
 data ContentBlock
   = TextBlock Text
+  | ImageBlock ImageSource
   | ToolUseBlock ToolUse
   | ToolResultBlock ToolResult
   | ThinkingBlock ThinkingContent
@@ -145,10 +147,54 @@ data RedactedThinking = RedactedThinking
   }
   deriving (Show, Eq, Generic)
 
+-- | Image source for vision - either base64-encoded or URL
+--
+-- Base64 format:
+-- @
+-- { "type": "base64", "media_type": "image/jpeg", "data": "..." }
+-- @
+--
+-- URL format:
+-- @
+-- { "type": "url", "url": "https://..." }
+-- @
+data ImageSource
+  = Base64Image
+      { isMediaType :: Text  -- ^ MIME type: "image/jpeg", "image/png", "image/gif", "image/webp"
+      , isData :: Text       -- ^ Base64-encoded image data
+      }
+  | UrlImage
+      { isUrl :: Text        -- ^ HTTPS URL to image
+      }
+  deriving (Show, Eq, Generic)
+
+instance ToJSON ImageSource where
+  toJSON (Base64Image mediaType imgData) = object
+    [ "type" .= ("base64" :: Text)
+    , "media_type" .= mediaType
+    , "data" .= imgData
+    ]
+  toJSON (UrlImage url) = object
+    [ "type" .= ("url" :: Text)
+    , "url" .= url
+    ]
+
+instance FromJSON ImageSource where
+  parseJSON = withObject "ImageSource" $ \v -> do
+    srcType <- v .: "type" :: Parser Text
+    case srcType of
+      "base64" -> Base64Image <$> v .: "media_type" <*> v .: "data"
+      "url" -> UrlImage <$> v .: "url"
+      other -> fail $ "Unknown image source type: " <> T.unpack other
+
 instance ToJSON ContentBlock where
   toJSON (TextBlock text) = object
     [ "type" .= ("text" :: Text)
     , "text" .= text
+    ]
+  toJSON (ImageBlock source) = object
+    [ "type" .= ("image" :: Text)
+    , "source" .= source
     ]
   toJSON (ToolUseBlock use) = object
     [ "type" .= ("tool_use" :: Text)
@@ -181,6 +227,7 @@ instance FromJSON ContentBlock where
     blockType <- v .: "type" :: Parser Text
     case blockType of
       "text" -> TextBlock <$> v .: "text"
+      "image" -> ImageBlock <$> v .: "source"
       "tool_use" -> do
         tuId <- v .: "id"
         tuName <- v .: "name"

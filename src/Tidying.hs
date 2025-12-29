@@ -93,6 +93,7 @@ import Tidying.Situation
 import Tidying.Action
 import Tidying.Decide
 import Tidying.Loop
+import Tidying.Agent (runTidyingSession)
 import Tidying.Context
 import Tidying.Output
 import Tidying.Templates

@@ -20,6 +20,7 @@ module Tidepool.Anthropic.Client
   , Message(..)
   , Role(..)
   , ContentBlock(..)
+  , ImageSource(..)
   , ToolResult(..)
   , ThinkingContent(..)
   , RedactedThinking(..)
@@ -30,7 +31,7 @@ module Tidepool.Anthropic.Client
 
 import Tidepool.Anthropic.Http
   ( MessagesRequest(..), MessagesResponse(..), Message(..), Role(..)
-  , ContentBlock(..), ToolUse(..), ToolResult(..), ToolChoice(..)
+  , ContentBlock(..), ImageSource(..), ToolUse(..), ToolResult(..), ToolChoice(..)
   , OutputFormat(..), ThinkingConfig(..), ThinkingContent(..), RedactedThinking(..)
   , StopReason(..), ApiError(..)
   , callMessages

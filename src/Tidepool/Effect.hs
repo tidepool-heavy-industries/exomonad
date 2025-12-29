@@ -22,6 +22,7 @@ module Tidepool.Effect
   , randomInt
   , randomDouble
   , runTurn
+  , runTurnContent
   , llmCall
   , llmCallEither
   , emit
@@ -64,6 +65,11 @@ module Tidepool.Effect
   , ToolDispatcher
   , ToolResult(..)
 
+    -- * Content Types (for multimodal)
+  , ContentBlock(..)
+  , ImageSource(..)
+  , withImages
+
     -- * Turn Outcome
   , TurnOutcome(..)
   ) where
@@ -86,7 +92,7 @@ import Data.Maybe (mapMaybe)
 import qualified Tidepool.Anthropic.Client as Client
 import Tidepool.Anthropic.Client
   ( SingleCallRequest(..), SingleCallResponse(..)
-  , StopReason(..), ToolUse(..), Message(..), Role(..), ContentBlock(..)
+  , StopReason(..), ToolUse(..), Message(..), Role(..), ContentBlock(..), ImageSource(..)
   )
 -- Note: ToolResult is imported qualified as Client.ToolResult to avoid
 -- collision with Tidepool.Effect.ToolResult
@@ -173,7 +179,7 @@ runRandom = interpret $ \_ -> \case
 data LLM :: Effect where
   RunTurnOp
     :: Text                          -- System prompt (rules + mood guidance + world state)
-    -> Text                          -- User message (player action ONLY)
+    -> [ContentBlock]                -- User content (text, images, etc.)
     -> Value                         -- Output schema (JSON)
     -> [Value]                       -- Tool definitions (JSON)
     -> LLM m (TurnOutcome (TurnResult Value))  -- May complete or break
@@ -194,6 +200,16 @@ data TurnParseResult output
       }
   deriving (Show, Eq, Functor)
 
+-- | Build content blocks from text + optional images
+--
+-- Example:
+-- @
+-- content <- withImages "What's in this photo?" [Base64Image "image/jpeg" imgData]
+-- result <- runTurn systemPrompt content schema tools
+-- @
+withImages :: Text -> [ImageSource] -> [ContentBlock]
+withImages text images = TextBlock text : map ImageBlock images
+
 runTurn
   :: forall output es.
      (LLM :> es, FromJSON output)
@@ -202,8 +218,20 @@ runTurn
   -> Value                -- output schema
   -> [Value]              -- tool definitions
   -> Eff es (TurnOutcome (TurnParseResult output))
-runTurn systemPrompt userAction schema tools = do
-  rawResult <- send (RunTurnOp systemPrompt userAction schema tools)
+runTurn systemPrompt userAction schema tools =
+  runTurnContent systemPrompt [TextBlock userAction] schema tools
+
+-- | Run a turn with multimodal content (text, images, etc.)
+runTurnContent
+  :: forall output es.
+     (LLM :> es, FromJSON output)
+  => Text                 -- system prompt
+  -> [ContentBlock]       -- user content (text, images, etc.)
+  -> Value                -- output schema
+  -> [Value]              -- tool definitions
+  -> Eff es (TurnOutcome (TurnParseResult output))
+runTurnContent systemPrompt userContent schema tools = do
+  rawResult <- send (RunTurnOp systemPrompt userContent schema tools)
   -- Parse the raw JSON output if turn completed
   case rawResult of
     TurnBroken reason -> return (TurnBroken reason)
@@ -300,12 +328,15 @@ noHooks = LLMHooks (pure ()) (pure ())
 -- Always returns TurnCompleted since stub tools never break.
 runLLM :: (IOE :> es, ChatHistory :> es, Log :> es) => LLMConfig -> Eff (LLM : es) a -> Eff es a
 runLLM config = interpret $ \_ -> \case
-  RunTurnOp systemPrompt userAction schema tools -> do
+  RunTurnOp systemPrompt userContent schema tools -> do
     -- Get prior conversation history (just action/response pairs)
     priorHistory <- getHistory
 
+    -- Extract text for logging and prompt field
+    let userText = extractText userContent
     logDebug $ "[LLM] Prior history: " <> T.pack (show (length priorHistory)) <> " messages"
-    logDebug $ "[LLM] User action: " <> userAction
+    logDebug $ "[LLM] User action: " <> userText
+    logDebug $ "[LLM] Content blocks: " <> T.pack (show (length userContent))
 
     let clientConfig = Client.ClientConfig
           { Client.apiKey = config.llmApiKey
@@ -313,10 +344,10 @@ runLLM config = interpret $ \_ -> \case
           , Client.defaultMaxTokens = config.llmMaxTokens
           }
         outputSchema = if schema == toJSON () then Nothing else Just schema
-        -- User message is JUST the action
-        userMsg = Message User [TextBlock userAction]
+        -- User message includes all content blocks (text, images, etc.)
+        userMsg = Message User userContent
         turnReq = Client.TurnRequest
-          { Client.prompt = userAction  -- Just the action for the prompt field
+          { Client.prompt = userText  -- Text representation for prompt field
           , Client.priorMessages = priorHistory
           , Client.systemPrompt = Just systemPrompt  -- Dynamic system prompt!
           , Client.outputSchema = outputSchema
@@ -398,15 +429,18 @@ runLLMWithToolsHooked
   -> Eff (LLM : es) a
   -> Eff es a
 runLLMWithToolsHooked hooks config dispatcher = interpret $ \_ -> \case
-  RunTurnOp systemPrompt userAction schema tools -> do
+  RunTurnOp systemPrompt userContent schema tools -> do
     -- Signal turn start (e.g., show spinner)
     liftIO hooks.onTurnStart
 
     -- Get prior conversation history (just action/response pairs)
     priorHistory <- getHistory
 
+    -- Extract text for logging
+    let userText = extractText userContent
     logDebug $ "[LLM] Prior history: " <> T.pack (show (length priorHistory)) <> " messages"
-    logDebug $ "[LLM] User action: " <> userAction
+    logDebug $ "[LLM] User action: " <> userText
+    logDebug $ "[LLM] Content blocks: " <> T.pack (show (length userContent))
 
     let clientConfig = Client.ClientConfig
           { Client.apiKey = config.llmApiKey
@@ -414,8 +448,8 @@ runLLMWithToolsHooked hooks config dispatcher = interpret $ \_ -> \case
           , Client.defaultMaxTokens = config.llmMaxTokens
           }
         outputSchema = if schema == toJSON () then Nothing else Just schema
-        -- User message is JUST the action
-        actionMsg = Message User [TextBlock userAction]
+        -- User message includes all content blocks (text, images, etc.)
+        actionMsg = Message User userContent
         initialMessages = priorHistory ++ [actionMsg]
 
     -- Run the tool loop (may complete or break)
@@ -865,6 +899,18 @@ data ToolResult
   = ToolSuccess Value   -- Tool succeeded, return value to LLM
   | ToolBreak Text      -- Tool signals to break turn (reason)
   deriving (Show, Eq)
+
+-- ══════════════════════════════════════════════════════════════
+-- CONTENT HELPERS
+-- ══════════════════════════════════════════════════════════════
+
+-- | Extract text content from content blocks (for logging/display)
+-- Concatenates all TextBlock content, ignoring images and other blocks.
+extractText :: [ContentBlock] -> Text
+extractText = T.intercalate " " . mapMaybe getText
+  where
+    getText (TextBlock t) = Just t
+    getText _ = Nothing
 
 -- ══════════════════════════════════════════════════════════════
 -- COMBINED RUNNER

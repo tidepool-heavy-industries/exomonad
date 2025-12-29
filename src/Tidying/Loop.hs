@@ -20,9 +20,6 @@ module Tidying.Loop
     tidyingTurn
   , Response(..)
 
-    -- * Running the loop
-  , runTidyingSession
-
     -- * Events
   , TidyingEvent(..)
   ) where
@@ -34,6 +31,11 @@ import Data.Text qualified as T
 import Data.Map.Strict qualified as Map
 
 import Tidepool.Effect
+  ( State, LLM, Emit, Log, TurnOutcome(..), TurnParseResult(..), TurnResult(..)
+  , get, modify, emit, logDebug, logInfo, logWarn
+  , llmCallEither, runTurnContent
+  )
+import Tidepool.Anthropic.Http (ContentBlock(..))
 import Tidepool.Template (Schema(..))
 
 import Tidying.State
@@ -41,7 +43,7 @@ import Tidying.Situation (Situation(..), ItemClass(..), extractAnxietyTrigger)
 import Tidying.Action
 import Tidying.Decide (decide)
 import Tidying.Context
-import Tidying.Output (OrientOutput(..), ActOutput(..), applyOrientOutput, parseOrientToSituation)
+import Tidying.Output (OrientOutput(..), ActOutput(..), PhotoAnalysisOutput(..), photoAnalysisSchema, applyOrientOutput, parseOrientToSituation)
 import Tidying.Templates
 import Tidying.Act (cannedResponse)
 
@@ -138,11 +140,11 @@ itemDelta InstructUnsure = 1
 itemDelta _ = 0
 
 -- ══════════════════════════════════════════════════════════════
--- OBSERVE: Photo Analysis (stubbed)
+-- OBSERVE: Photo Analysis (via Vision)
 -- ══════════════════════════════════════════════════════════════
 
--- | Analyze photos using vision (stubbed for now)
--- Real implementation would call LLM with image content
+-- | Analyze photos using vision
+-- Calls LLM with image content to understand the space
 analyzePhotos
   :: ( LLM :> es
      , Emit TidyingEvent :> es
@@ -152,17 +154,64 @@ analyzePhotos
   -> Eff es (Maybe PhotoAnalysis)
 analyzePhotos [] = pure Nothing
 analyzePhotos photos = do
-  logDebug $ "Analyzing " <> T.pack (show $ length photos) <> " photos (stubbed)"
+  logDebug $ "Analyzing " <> T.pack (show $ length photos) <> " photos via vision"
 
-  -- TODO: Real implementation would call LLM with vision
-  -- For now, return stub analysis
-  let analysis = stubPhotoAnalysis photos
+  -- Convert photos to image sources
+  let imageSources = map photoToImageSource photos
+      imageBlocks = map ImageBlock imageSources
+      -- Build content: text prompt followed by images
+      userContent = TextBlock visionPrompt : imageBlocks
 
-  case analysis of
-    Just pa -> emit $ PhotoAnalyzed (pa.paRoomType <> ", " <> pa.paChaosLevel)
-    Nothing -> pure ()
+  -- Call LLM with vision
+  result <- runTurnContent @PhotoAnalysisOutput
+    visionSystemPrompt
+    userContent
+    photoAnalysisSchema.schemaJSON
+    []  -- no tools for vision
 
-  pure analysis
+  case result of
+    TurnCompleted (TurnParsed tr) -> do
+      let analysis = outputToAnalysis tr.trOutput
+      emit $ PhotoAnalyzed (analysis.paRoomType <> ", " <> analysis.paChaosLevel)
+      pure (Just analysis)
+
+    TurnCompleted (TurnParseFailed {tpfError}) -> do
+      logWarn $ "Photo analysis parse failed: " <> T.pack tpfError
+      -- Fall back to stub
+      let analysis = stubPhotoAnalysis photos
+      case analysis of
+        Just pa -> emit $ PhotoAnalyzed (pa.paRoomType <> " (stub), " <> pa.paChaosLevel)
+        Nothing -> pure ()
+      pure analysis
+
+    TurnBroken reason -> do
+      logWarn $ "Photo analysis broken: " <> reason
+      pure (stubPhotoAnalysis photos)
+
+-- | Convert PhotoAnalysisOutput to PhotoAnalysis
+outputToAnalysis :: PhotoAnalysisOutput -> PhotoAnalysis
+outputToAnalysis pao = PhotoAnalysis
+  { paRoomType = pao.paoRoomType
+  , paChaosLevel = pao.paoChaosLevel
+  , paVisibleItems = pao.paoVisibleItems
+  , paBlockedFunction = pao.paoBlockedFunction
+  , paFirstTarget = pao.paoFirstTarget
+  }
+
+-- | System prompt for photo analysis
+visionSystemPrompt :: Text
+visionSystemPrompt = T.unlines
+  [ "You are a tidying assistant analyzing a photo of a space."
+  , "Your job is to understand what you see and identify the best first step."
+  , ""
+  , "Be specific about visible items - mention actual objects, not vague categories."
+  , "For 'blocked_function', describe what the mess prevents (sitting, working, sleeping)."
+  , "For 'first_target', pick something quick to clear that would create visible progress."
+  ]
+
+-- | User prompt for photo analysis
+visionPrompt :: Text
+visionPrompt = "Analyze this space. What do you see? How messy is it? What should we tackle first?"
 
 -- ══════════════════════════════════════════════════════════════
 -- ORIENT: Situation Classification
@@ -335,16 +384,3 @@ updateCurrentCategory current action = case action of
         Just $ T.drop (T.length "Let's do ") msg
   _ -> current
 
--- ══════════════════════════════════════════════════════════════
--- RUNNING THE SESSION
--- ══════════════════════════════════════════════════════════════
-
--- | Run a tidying session with terminal I/O
--- Placeholder - real implementation would wire up effects
-runTidyingSession
-  :: SessionState
-  -> (TidyingEvent -> IO ())
-  -> IO SessionState
-runTidyingSession _initialState _handleEvent = do
-  -- TODO: Wire up effect stack like DM/Loop.hs does
-  error "TODO: runTidyingSession - wire up effect stack"

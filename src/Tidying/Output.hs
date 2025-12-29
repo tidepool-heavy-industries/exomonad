@@ -18,6 +18,10 @@ module Tidying.Output
   , ActOutput(..)
   , actOutputSchema
 
+    -- * PHOTO ANALYSIS output
+  , PhotoAnalysisOutput(..)
+  , photoAnalysisSchema
+
     -- * Apply output to state
   , applyOrientOutput
   , applyActOutput
@@ -197,3 +201,68 @@ applyActOutput ActOutput{..} action st = case action of
   _ -> st
   where
     addCat name cats = Map.insertWith (++) name [] cats
+
+-- ══════════════════════════════════════════════════════════════
+-- PHOTO ANALYSIS OUTPUT
+-- ══════════════════════════════════════════════════════════════
+
+-- | Output from photo analysis via vision
+data PhotoAnalysisOutput = PhotoAnalysisOutput
+  { paoRoomType :: Text
+    -- ^ "office", "bedroom", "closet", "kitchen", "living_room", "garage", "other"
+  , paoChaosLevel :: Text
+    -- ^ "clear", "moderate", "cluttered", "buried"
+  , paoVisibleItems :: [Text]
+    -- ^ Main visible items in the photo
+  , paoBlockedFunction :: Maybe Text
+    -- ^ What function is blocked? "can't sit", "can't reach desk"
+  , paoFirstTarget :: Maybe Text
+    -- ^ Best first thing to address
+  } deriving (Show, Eq, Generic)
+
+-- | JSON options: paoRoomType -> room_type
+photoAnalysisJsonOptions :: Options
+photoAnalysisJsonOptions = defaultOptions
+  { fieldLabelModifier = camelTo2 '_' . drop 3  -- drop "pao" prefix
+  , omitNothingFields = True
+  }
+
+instance FromJSON PhotoAnalysisOutput where
+  parseJSON = genericParseJSON photoAnalysisJsonOptions
+
+instance ToJSON PhotoAnalysisOutput where
+  toJSON = genericToJSON photoAnalysisJsonOptions
+
+photoAnalysisSchema :: Schema PhotoAnalysisOutput
+photoAnalysisSchema = Schema
+  { schemaDescription = "Analysis of room photo for tidying"
+  , schemaJSON = object
+      [ "type" .= ("object" :: Text)
+      , "properties" .= object
+          [ "room_type" .= object
+              [ "type" .= ("string" :: Text)
+              , "enum" .= (["office", "bedroom", "closet", "kitchen", "living_room", "garage", "other"] :: [Text])
+              , "description" .= ("What type of space is this?" :: Text)
+              ]
+          , "chaos_level" .= object
+              [ "type" .= ("string" :: Text)
+              , "enum" .= (["clear", "moderate", "cluttered", "buried"] :: [Text])
+              , "description" .= ("How messy is the space?" :: Text)
+              ]
+          , "visible_items" .= object
+              [ "type" .= ("array" :: Text)
+              , "items" .= object ["type" .= ("string" :: Text)]
+              , "description" .= ("Main visible items/categories of items (max 10)" :: Text)
+              ]
+          , "blocked_function" .= object
+              [ "type" .= ("string" :: Text)
+              , "description" .= ("What can't be done because of clutter? e.g. 'can't sit', 'can't reach desk'" :: Text)
+              ]
+          , "first_target" .= object
+              [ "type" .= ("string" :: Text)
+              , "description" .= ("Best first thing to clear - something quick and impactful" :: Text)
+              ]
+          ]
+      , "required" .= (["room_type", "chaos_level", "visible_items"] :: [Text])
+      ]
+  }
