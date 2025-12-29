@@ -49,9 +49,6 @@ main = do
 
 -- | Event handler for game events
 handleEvent :: DMEvent -> IO ()
-handleEvent (DMThought t) = TIO.putStrLn $ "[DM thinks] " <> t
-handleEvent (NPCSpoke nid t) = TIO.putStrLn $ "[" <> nid.unNpcId <> "] \"" <> t <> "\""
-handleEvent (PlayerAsked q) = TIO.putStrLn $ "[Asks player] " <> q
 handleEvent (RandomChoice label idx) =
   TIO.putStrLn $ "[Random] chose " <> label <> " (index " <> showT idx <> ")"
 handleEvent (DieSpent dieVal outcomeTier narrativeText) = do
@@ -100,6 +97,7 @@ handleEvent (ClockAdvanced clockId clockName oldFilled newFilled total) = do
   let ticks = newFilled - oldFilled
   TIO.putStrLn $ "⏰ " <> clockName <> ": " <> showT newFilled <> "/" <> showT total <>
     " [+" <> showT ticks <> "] (" <> clockId <> ")"
+handleEvent (NarrativeAdded _) = pure ()  -- Handled elsewhere
 
 showT :: Int -> Text
 showT = T.pack . show

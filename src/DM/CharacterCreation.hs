@@ -19,6 +19,11 @@ module DM.CharacterCreation
   , ClockInit(..)
   , TarotPosition(..)
   , ClockType(..)
+  , InitConsequence(..)
+  , InitSeverity(..)
+  , LocationInit(..)
+  , FactionInit(..)
+  , NpcInit(..)
   , parseScenarioInit
   ) where
 
@@ -98,6 +103,19 @@ data TarotPosition = TarotPast | TarotPresent | TarotFuture
 data ClockType = ThreatClock | GoalClock
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
+-- | Severity for escalation consequences
+data InitSeverity = Minor | Moderate | Severe | Existential
+  deriving (Show, Eq, Ord, Enum, Bounded, Generic, ToJSON, FromJSON)
+
+-- | Simplified consequence type for initialization
+-- Avoids circular import with DM.State; converted to Consequence in Loop.hs
+data InitConsequence
+  = ICGainCoin Int              -- Goal: gain coins
+  | ICGainAsset Text            -- Goal: gain named asset
+  | ICOpportunity Text          -- Flexible: opens opportunity
+  | ICEscalate Text InitSeverity  -- Threat: situation escalates
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+
 -- | Clock initialization from scenario generation
 data ClockInit = ClockInit
   { ciName :: Text              -- Clock name
@@ -105,7 +123,39 @@ data ClockInit = ClockInit
   , ciFilled :: Int             -- Starting filled segments
   , ciFromCard :: TarotPosition -- Which card seeded this
   , ciType :: ClockType         -- Threat or goal
-  , ciConsequenceDesc :: Text   -- What happens when filled
+  , ciConsequence :: InitConsequence  -- Typed consequence when filled
+  }
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+
+-- | Location initialization from LLM
+data LocationInit = LocationInit
+  { liId :: Text              -- Unique identifier (snake_case)
+  , liName :: Text            -- Display name
+  , liDescription :: Text     -- Atmospheric description
+  , liControlledBy :: Maybe Text  -- Faction ID if controlled
+  , liFeatures :: [Text]      -- Notable features
+  }
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+
+-- | Faction initialization from LLM
+data FactionInit = FactionInit
+  { fiId :: Text              -- Unique identifier (snake_case)
+  , fiName :: Text            -- Display name
+  , fiAttitude :: Text        -- "Hostile", "Wary", "Neutral", "Favorable", "Allied"
+  , fiGoalDescription :: Text -- What they're pursuing
+  , fiResources :: Text       -- Brief resource description
+  }
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+
+-- | NPC initialization from LLM
+data NpcInit = NpcInit
+  { niId :: Text              -- Unique identifier (snake_case)
+  , niName :: Text            -- Display name
+  , niFaction :: Maybe Text   -- Faction ID if affiliated
+  , niDisposition :: Text     -- "DispHostile", "Suspicious", "DispNeutral", "Friendly", "Loyal"
+  , niWant :: Text            -- Primary motivation
+  , niVoiceNotes :: Text      -- Speech patterns, mannerisms
+  , niLocation :: Maybe Text  -- Starting location ID
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
@@ -113,16 +163,20 @@ data ClockInit = ClockInit
 data ScenarioInit = ScenarioInit
   { siFateNarration :: Text       -- Fate's interpretation of the spread
   , siStartingClocks :: [ClockInit]  -- Clocks seeded from tarot
+  , siLocations :: [LocationInit]    -- World locations
+  , siFactions :: [FactionInit]      -- Active factions
+  , siNpcs :: [NpcInit]              -- NPCs in the world
   , siSceneNarration :: Text      -- Opening scene narration
   , siStartingStress :: Int       -- 0-4 typically
   , siStartingCoin :: Int         -- 0-4 typically
   , siStartingHeat :: Int         -- 0-2 typically
   , siStartingWanted :: Int       -- 0-1 typically
   , siStartingTrauma :: Maybe Text  -- Optional starting trauma
-  , siSceneLocation :: Text       -- Where we start
+  , siSceneLocation :: Text       -- Where we start (location ID)
   , siSceneStakes :: Text         -- What's at stake
   , siOpeningHook :: Text         -- The immediate situation
   , siSuggestedActions :: [Text]  -- Suggested player actions
+  , siScenePresentNpcs :: [Text]  -- NPC IDs present in opening scene
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
@@ -169,7 +223,33 @@ scenarioInitPrompt choices = T.unlines
   , "CLOCKS (siStartingClocks):"
   , "- 3 clocks total: 2 threats (from past/present), 1 goal (from future)"
   , "- Each clock: 4-6 segments, threat clocks start 1-2 filled"
-  , "- ciConsequenceDesc: what happens when clock fills"
+  , "- ciConsequence: typed consequence when clock fills"
+  , "  - Goal clocks use: {\"tag\":\"ICGainCoin\",\"contents\":50} or {\"tag\":\"ICGainAsset\",\"contents\":\"asset name\"}"
+  , "  - Threat clocks use: {\"tag\":\"ICEscalate\",\"contents\":[\"description\",\"Moderate\"]}"
+  , "  - Flexible: {\"tag\":\"ICOpportunity\",\"contents\":\"what opens up\"}"
+  , "  - Severity levels: Minor, Moderate, Severe, Existential"
+  , ""
+  , "LOCATIONS (siLocations):"
+  , "- 2-3 locations relevant to the opening situation"
+  , "- liId: snake_case identifier (e.g., \"docks_warehouse\")"
+  , "- liControlledBy: faction ID if controlled, null otherwise"
+  , "- liFeatures: 2-3 notable features"
+  , ""
+  , "FACTIONS (siFactions):"
+  , "- 2-3 factions that matter to this character's situation"
+  , "- fiId: snake_case identifier (e.g., \"crimson_hand\")"
+  , "- fiAttitude: one of Hostile, Wary, Neutral, Favorable, Allied"
+  , "- fiGoalDescription: what they want in a sentence"
+  , "- fiResources: brief description of their assets"
+  , ""
+  , "NPCS (siNpcs):"
+  , "- 2-4 NPCs the character might encounter"
+  , "- niId: snake_case identifier (e.g., \"marla_the_fence\")"
+  , "- niFaction: faction ID if affiliated, null otherwise"
+  , "- niDisposition: one of DispHostile, Suspicious, DispNeutral, Friendly, Loyal"
+  , "- niWant: what they want from the player"
+  , "- niVoiceNotes: brief speech pattern notes"
+  , "- niLocation: location ID where they usually are, null if mobile"
   , ""
   , "SCENE NARRATION (siSceneNarration):"
   , "- Drop into Doskvol. Tight noir prose."
@@ -195,5 +275,10 @@ instance ToGVal m Archetype where toGVal = genericToGVal
 instance ToGVal m CharacterChoices where toGVal = genericToGVal
 instance ToGVal m TarotPosition where toGVal = genericToGVal
 instance ToGVal m ClockType where toGVal = genericToGVal
+instance ToGVal m InitSeverity where toGVal = genericToGVal
+instance ToGVal m InitConsequence where toGVal = genericToGVal
 instance ToGVal m ClockInit where toGVal = genericToGVal
+instance ToGVal m LocationInit where toGVal = genericToGVal
+instance ToGVal m FactionInit where toGVal = genericToGVal
+instance ToGVal m NpcInit where toGVal = genericToGVal
 instance ToGVal m ScenarioInit where toGVal = genericToGVal

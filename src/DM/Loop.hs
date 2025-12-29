@@ -27,6 +27,7 @@ module DM.Loop
   ) where
 
 import DM.State
+import qualified DM.State
 import DM.Context (buildDMContext, buildCompressionContext, DMContext(..))
 import DM.Output (TurnOutput(..), CompressionOutput(..), applyTurnOutput, applyCompression, DiceAction(..), DieOutcome(..), ClockTick(..))
 import DM.Templates (renderForMood, renderCompression, turnOutputSchema, compressionOutputSchema)
@@ -52,7 +53,7 @@ import System.Environment (lookupEnv)
 import Database.SQLite.Simple (Connection)
 import qualified Tidepool.Storage as Storage
 
-import DM.CharacterCreation (CharacterChoices(..), scenarioInitPrompt, ScenarioInit(..), ClockInit(..))
+import DM.CharacterCreation (CharacterChoices(..), scenarioInitPrompt, ScenarioInit(..), ClockInit(..), InitConsequence(..), InitSeverity(..), LocationInit(..), FactionInit(..), NpcInit(..))
 import qualified DM.CharacterCreation as CC
 
 import Tidepool.GUI.Core (GUIBridge(..), PendingRequest(..),
@@ -574,6 +575,15 @@ compressIfNeeded = do
               -- Continue without compressing
 
             TurnParsed result -> do
+              -- Build scene summary from compression output
+              let sceneSummary = SceneSummary
+                    { summaryText = result.trOutput.summary
+                    , summaryKeyMoments = result.trOutput.keyMoments
+                    }
+
+              -- Add to session history
+              modify $ \s -> s { sessionHistory = s.sessionHistory Seq.|> sceneSummary }
+
               -- Apply compression output to world state
               modify (applyCompression result.trOutput)
 
@@ -1444,9 +1454,30 @@ guiGameLoopWithDB conn gameId bridge = loop
                         | ci <- scenario.siStartingClocks
                         ]
 
+                      -- Convert LocationInit to Location
+                      locationsFromInit = HM.fromList
+                        [ (LocationId li.liId, initToLocation li)
+                        | li <- scenario.siLocations
+                        ]
+
+                      -- Convert FactionInit to Faction
+                      factionsFromInit = HM.fromList
+                        [ (FactionId fi.fiId, initToFaction fi)
+                        | fi <- scenario.siFactions
+                        ]
+
+                      -- Convert NpcInit to Npc
+                      npcsFromInit = HM.fromList
+                        [ (NpcId ni.niId, initToNpc ni)
+                        | ni <- scenario.siNpcs
+                        ]
+
+                      -- NPCs present in opening scene
+                      scenePresentNpcs = map NpcId scenario.siScenePresentNpcs
+
                       introScene = ActiveScene
-                        { sceneLocation = LocationId (T.toLower $ T.replace " " "_" scenario.siSceneLocation)
-                        , scenePresent = []
+                        { sceneLocation = LocationId scenario.siSceneLocation
+                        , scenePresent = scenePresentNpcs
                         , sceneStakes = Stakes scenario.siSceneStakes
                         , sceneBeats = Seq.empty  -- Narration flows through NarrativeAdded events
                         , sceneStyle = defaultSceneStyle
@@ -1456,6 +1487,9 @@ guiGameLoopWithDB conn gameId bridge = loop
                     { phase = PhasePlaying introScene defaultMood
                     , player = newPlayer
                     , clocks = clocksFromInit
+                    , locations = locationsFromInit
+                    , factions = factionsFromInit
+                    , npcs = npcsFromInit
                     , DM.State.suggestedActions = scenario.siSuggestedActions
                     }
 
@@ -1997,6 +2031,24 @@ createNewScene = do
 rollStartingDice :: Random :> es => Eff es [Int]
 rollStartingDice = replicateM 5 (randomInt 1 6)
 
+-- | Convert InitSeverity from CharacterCreation to Severity from State
+-- Note: Both modules define Minor/Moderate/Severe/Existential constructors
+-- so we need explicit qualification
+initSeverityToSeverity :: InitSeverity -> Severity
+initSeverityToSeverity sev = case sev of
+  CC.Minor -> DM.State.Minor
+  CC.Moderate -> DM.State.Moderate
+  CC.Severe -> DM.State.Severe
+  CC.Existential -> DM.State.Existential
+
+-- | Convert InitConsequence from CharacterCreation to Consequence from State
+initConsequenceToConsequence :: InitConsequence -> Consequence
+initConsequenceToConsequence = \case
+  ICGainCoin n -> GainCoin n
+  ICGainAsset t -> GainAsset t
+  ICOpportunity t -> OpenOpportunity t
+  ICEscalate desc sev -> Escalate (Escalation desc (initSeverityToSeverity sev))
+
 -- | Convert ClockInit from scenario generation to a Clock
 initToClock :: ClockInit -> Clock
 initToClock ci = Clock
@@ -2005,8 +2057,68 @@ initToClock ci = Clock
   , clockFilled = ci.ciFilled
   , clockVisible = True  -- All clocks visible per design
   , clockType = ci.ciType
-  , clockConsequence = OpenOpportunity ci.ciConsequenceDesc  -- Use description as placeholder
+  , clockConsequence = initConsequenceToConsequence ci.ciConsequence
   , clockTriggers = []
+  }
+
+-- | Convert LocationInit from scenario generation to Location
+initToLocation :: LocationInit -> Location
+initToLocation li = Location
+  { locationName = li.liName
+  , locationDescription = li.liDescription
+  , locationControlledBy = FactionId <$> li.liControlledBy
+  , locationFeatures = li.liFeatures
+  }
+
+-- | Parse attitude string to Attitude type
+parseAttitude :: Text -> Attitude
+parseAttitude t = case T.toLower t of
+  "hostile"   -> Hostile
+  "wary"      -> Wary
+  "neutral"   -> Neutral
+  "favorable" -> Favorable
+  "allied"    -> Allied
+  _           -> Neutral  -- Default
+
+-- | Convert FactionInit from scenario generation to Faction
+initToFaction :: FactionInit -> Faction
+initToFaction fi = Faction
+  { factionName = fi.fiName
+  , factionAttitude = parseAttitude fi.fiAttitude
+  , factionGoals = [Goal (GoalId "main") fi.fiGoalDescription Pursuing]
+  , factionResources = ResourcePool
+      { gold = 5
+      , soldiers = 5
+      , influence = 5
+      , specialResources = [(fi.fiResources, 1)]  -- Store description as a special resource
+      }
+  , factionSecrets = []
+  , factionKnownFacts = []
+  }
+
+-- | Parse disposition string to Disposition type
+parseDisposition :: Text -> Disposition
+parseDisposition t = case T.toLower t of
+  "disphostile" -> DispHostile
+  "hostile"     -> DispHostile
+  "suspicious"  -> Suspicious
+  "dispneutral" -> DispNeutral
+  "neutral"     -> DispNeutral
+  "friendly"    -> Friendly
+  "loyal"       -> Loyal
+  _             -> DispNeutral  -- Default
+
+-- | Convert NpcInit from scenario generation to Npc
+initToNpc :: NpcInit -> Npc
+initToNpc ni = Npc
+  { npcName = ni.niName
+  , npcFaction = FactionId <$> ni.niFaction
+  , npcDisposition = parseDisposition ni.niDisposition
+  , npcWants = [Want { wantDescription = ni.niWant, wantUrgency = Medium }]
+  , npcFears = []
+  , npcKnows = []
+  , npcLocation = LocationId <$> ni.niLocation
+  , npcVoiceNotes = ni.niVoiceNotes
   }
 
 -- | JSON schema for scenario initialization response
@@ -2037,10 +2149,21 @@ scenarioInitSchemaJSON = Object $ KM.fromList
                       [ ("type", String "string")
                       , ("enum", Array $ V.fromList [String "ThreatClock", String "GoalClock"])
                       ])
-                  , ("ciConsequenceDesc", Object $ KM.fromList [("type", String "string")])
+                  , ("ciConsequence", Object $ KM.fromList
+                      [ ("type", String "object")
+                      , ("description", String "Typed consequence. Use tag + contents format. Tags: ICGainCoin (contents: int), ICGainAsset (contents: string), ICOpportunity (contents: string), ICEscalate (contents: [description, severity] where severity is Minor|Moderate|Severe|Existential)")
+                      , ("properties", Object $ KM.fromList
+                          [ ("tag", Object $ KM.fromList
+                              [ ("type", String "string")
+                              , ("enum", Array $ V.fromList [String "ICGainCoin", String "ICGainAsset", String "ICOpportunity", String "ICEscalate"])
+                              ])
+                          , ("contents", Object $ KM.fromList [])  -- Any type based on tag
+                          ])
+                      , ("required", Array $ V.fromList [String "tag", String "contents"])
+                      ])
                   ])
               , ("required", Array $ V.fromList
-                  [String "ciName", String "ciSegments", String "ciFilled", String "ciFromCard", String "ciType", String "ciConsequenceDesc"])
+                  [String "ciName", String "ciSegments", String "ciFilled", String "ciFromCard", String "ciType", String "ciConsequence"])
               ])
           ])
       , ("siSceneNarration", Object $ KM.fromList
@@ -2084,10 +2207,98 @@ scenarioInitSchemaJSON = Object $ KM.fromList
           , ("items", Object $ KM.fromList [("type", String "string")])
           , ("description", String "3-4 suggested actions the player could take in response to the opening hook")
           ])
+      , ("siLocations", Object $ KM.fromList
+          [ ("type", String "array")
+          , ("description", String "2-3 locations relevant to the opening situation")
+          , ("items", Object $ KM.fromList
+              [ ("type", String "object")
+              , ("additionalProperties", Bool False)
+              , ("properties", Object $ KM.fromList
+                  [ ("liId", Object $ KM.fromList
+                      [ ("type", String "string")
+                      , ("description", String "snake_case identifier")
+                      ])
+                  , ("liName", Object $ KM.fromList [("type", String "string")])
+                  , ("liDescription", Object $ KM.fromList [("type", String "string")])
+                  , ("liControlledBy", Object $ KM.fromList
+                      [ ("type", String "string")
+                      , ("description", String "Faction ID if controlled, or null")
+                      ])
+                  , ("liFeatures", Object $ KM.fromList
+                      [ ("type", String "array")
+                      , ("items", Object $ KM.fromList [("type", String "string")])
+                      ])
+                  ])
+              , ("required", Array $ V.fromList
+                  [String "liId", String "liName", String "liDescription", String "liFeatures"])
+              ])
+          ])
+      , ("siFactions", Object $ KM.fromList
+          [ ("type", String "array")
+          , ("description", String "2-3 factions relevant to the character's situation")
+          , ("items", Object $ KM.fromList
+              [ ("type", String "object")
+              , ("additionalProperties", Bool False)
+              , ("properties", Object $ KM.fromList
+                  [ ("fiId", Object $ KM.fromList
+                      [ ("type", String "string")
+                      , ("description", String "snake_case identifier")
+                      ])
+                  , ("fiName", Object $ KM.fromList [("type", String "string")])
+                  , ("fiAttitude", Object $ KM.fromList
+                      [ ("type", String "string")
+                      , ("enum", Array $ V.fromList [String "Hostile", String "Wary", String "Neutral", String "Favorable", String "Allied"])
+                      ])
+                  , ("fiGoalDescription", Object $ KM.fromList [("type", String "string")])
+                  , ("fiResources", Object $ KM.fromList [("type", String "string")])
+                  ])
+              , ("required", Array $ V.fromList
+                  [String "fiId", String "fiName", String "fiAttitude", String "fiGoalDescription", String "fiResources"])
+              ])
+          ])
+      , ("siNpcs", Object $ KM.fromList
+          [ ("type", String "array")
+          , ("description", String "2-4 NPCs the character might encounter")
+          , ("items", Object $ KM.fromList
+              [ ("type", String "object")
+              , ("additionalProperties", Bool False)
+              , ("properties", Object $ KM.fromList
+                  [ ("niId", Object $ KM.fromList
+                      [ ("type", String "string")
+                      , ("description", String "snake_case identifier")
+                      ])
+                  , ("niName", Object $ KM.fromList [("type", String "string")])
+                  , ("niFaction", Object $ KM.fromList
+                      [ ("type", String "string")
+                      , ("description", String "Faction ID if affiliated, or null")
+                      ])
+                  , ("niDisposition", Object $ KM.fromList
+                      [ ("type", String "string")
+                      , ("enum", Array $ V.fromList [String "DispHostile", String "Suspicious", String "DispNeutral", String "Friendly", String "Loyal"])
+                      ])
+                  , ("niWant", Object $ KM.fromList [("type", String "string")])
+                  , ("niVoiceNotes", Object $ KM.fromList [("type", String "string")])
+                  , ("niLocation", Object $ KM.fromList
+                      [ ("type", String "string")
+                      , ("description", String "Location ID where they usually are, or null")
+                      ])
+                  ])
+              , ("required", Array $ V.fromList
+                  [String "niId", String "niName", String "niDisposition", String "niWant", String "niVoiceNotes"])
+              ])
+          ])
+      , ("siScenePresentNpcs", Object $ KM.fromList
+          [ ("type", String "array")
+          , ("items", Object $ KM.fromList [("type", String "string")])
+          , ("description", String "NPC IDs present in the opening scene")
+          ])
       ])
   , ("required", Array $ V.fromList
       [ String "siFateNarration"
       , String "siStartingClocks"
+      , String "siLocations"
+      , String "siFactions"
+      , String "siNpcs"
       , String "siSceneNarration"
       , String "siStartingStress"
       , String "siStartingCoin"
@@ -2097,6 +2308,7 @@ scenarioInitSchemaJSON = Object $ KM.fromList
       , String "siSceneStakes"
       , String "siOpeningHook"
       , String "siSuggestedActions"
+      , String "siScenePresentNpcs"
       ])
   ]
 

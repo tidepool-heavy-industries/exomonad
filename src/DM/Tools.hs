@@ -1,9 +1,7 @@
 -- | DM-Specific Tools (mid-turn capabilities)
 module DM.Tools
   ( -- * Tools
-    ThinkAsDM(..)
-  , SpeakAsNPC(..)
-  , SetSceneStyle(..)
+    SetSceneStyle(..)
   , Choose(..)
   , SpendDie(..)
 
@@ -23,8 +21,6 @@ module DM.Tools
   , PassOutResult(..)
 
     -- * Tool Inputs/Outputs
-  , ThinkInput(..)
-  , SpeakInput(..)
   , SetSceneStyleInput(..)
   , ChooseInput(..)
   , ChooseResult(..)
@@ -78,10 +74,7 @@ type DMEffects = '[PlayingState]
 -- 2. GUI notifications (state changes shown in narrative)
 -- 3. Training data collection
 data DMEvent
-  = DMThought Text
-  | NPCSpoke NpcId Text
-  | PlayerAsked Text
-  | RandomChoice Text Int
+  = RandomChoice Text Int
   | DieSpent Int OutcomeTier Text          -- dieValue, outcome, context
   | ClockCompleted Text Text Consequence   -- clockId, clockName, consequence
   | SceneCompressed Text                   -- summary of what was compressed
@@ -132,55 +125,6 @@ data DMEvent
 
 
 -- ══════════════════════════════════════════════════════════════
--- THINK AS DM
--- ══════════════════════════════════════════════════════════════
-
-data ThinkAsDM = ThinkAsDM
-  deriving (Show, Eq, Generic)
-
-data ThinkInput = ThinkInput { thought :: Text }
-  deriving (Show, Eq, Generic, ToJSON, FromJSON)
-
-instance Tool ThinkAsDM DMEvent WorldState DMEffects where
-  type ToolInput ThinkAsDM = ThinkInput
-  type ToolOutput ThinkAsDM = ()
-
-  toolName = "think_as_dm"
-  toolDescription = "Internal reasoning as the DM. Not visible to players."
-  inputSchema = schemaToValue $ objectSchema
-    [("thought", emptySchema TString)]
-    ["thought"]
-
-  executeTool input = emit (DMThought input.thought)
-
--- ══════════════════════════════════════════════════════════════
--- SPEAK AS NPC
--- ══════════════════════════════════════════════════════════════
-
-data SpeakAsNPC = SpeakAsNPC
-  deriving (Show, Eq, Generic)
-
-data SpeakInput = SpeakInput
-  { speakNpc :: NpcId
-  , utterance :: Text
-  }
-  deriving (Show, Eq, Generic, ToJSON, FromJSON)
-
-instance Tool SpeakAsNPC DMEvent WorldState DMEffects where
-  type ToolInput SpeakAsNPC = SpeakInput
-  type ToolOutput SpeakAsNPC = ()
-
-  toolName = "speak_as_npc"
-  toolDescription = "Voice a specific NPC character."
-  inputSchema = schemaToValue $ objectSchema
-    [ ("speakNpc", emptySchema TString)
-    , ("utterance", emptySchema TString)
-    ]
-    ["speakNpc", "utterance"]
-
-  executeTool input = emit (NPCSpoke input.speakNpc input.utterance)
-
--- ══════════════════════════════════════════════════════════════
 -- SET SCENE STYLE
 -- ══════════════════════════════════════════════════════════════
 
@@ -221,7 +165,6 @@ instance Tool SetSceneStyle DMEvent WorldState DMEffects where
         newClass = maybe currentStyle.ssClass parseClass input.styleClass
         newStyle = SceneStyle newAtmosphere newPressure newClass
     modifyScene $ \s -> s { sceneStyle = newStyle }
-    emit (DMThought $ "Scene style shifted to: " <> showStyle newStyle)
     where
       parseAtmosphere t = case T.toLower t of
         "mundane" -> Mundane
@@ -348,9 +291,7 @@ instance Tool SpendDie DMEvent WorldState DMEffects where
 
     -- Guard: if pool is empty, can't spend a die
     if null pool
-      then do
-        emit (DMThought "Tried to spend die but pool is empty")
-        return SpendDieResult
+      then return SpendDieResult
           { chosenDieValue = 0
           , tier = Partial
           , stressApplied = 0
@@ -895,8 +836,6 @@ makeDMDispatcher name input = do
       Right (ToolSuccess val) -> do
         -- Check if mood actually changed (from PlayingState)
         moodAfter <- getMood
-        -- Debug: log mood comparison
-        emit (DMThought $ "Dispatcher: " <> name <> " before=" <> T.pack (show moodBefore) <> " after=" <> T.pack (show moodAfter) <> " changed=" <> T.pack (show $ moodChanged moodBefore moodAfter))
         if moodChanged moodBefore moodAfter
           then return (Right (ToolBreak ("mood transition: " <> name)))
           else return (Right (ToolSuccess val))

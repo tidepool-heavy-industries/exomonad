@@ -91,14 +91,14 @@ sceneSummaryEntry :: SceneSummary -> UI Element
 sceneSummaryEntry summary = do
   entry <- UI.div #. "history-summary"
 
-  summaryText <- UI.p # set text (T.unpack summary.summaryText)
+  summaryTextElem <- UI.p # set text (T.unpack summary.summaryText)
 
-  -- Key beats as a list
-  beatsList <- UI.ul #. "key-beats"
-  beatItems <- mapM (\b -> UI.li # set text (beatSummaryText b)) summary.summaryKeyBeats
-  void $ element beatsList #+ map element beatItems
+  -- Key moments as a list
+  momentsList <- UI.ul #. "key-moments"
+  momentItems <- mapM (\m -> UI.li # set text (T.unpack m)) summary.summaryKeyMoments
+  void $ element momentsList #+ map element momentItems
 
-  void $ element entry #+ [element summaryText, element beatsList]
+  void $ element entry #+ [element summaryTextElem, element momentsList]
   pure entry
 
 -- | Get summary text for a beat (shorter than full display)

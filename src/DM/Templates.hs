@@ -377,8 +377,8 @@ compressionOutputJSONSchema = objectSchema
       "One paragraph summary of what happened in the scene"
       (emptySchema TString))
   , ("keyMoments", describeField "keyMoments"
-      "Comma-separated list of the most important moments"
-      (emptySchema TString))
+      "Array of key moments from the scene (3-5 items)"
+      (arraySchema (emptySchema TString)))
   , ("consequenceSeeds", describeField "consequenceSeeds"
       "Comma-separated seeds for future consequences"
       (emptySchema TString))

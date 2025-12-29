@@ -451,7 +451,7 @@ data WorldState = WorldState
 
 data SceneSummary = SceneSummary
   { summaryText :: Text
-  , summaryKeyBeats :: [SceneBeat]
+  , summaryKeyMoments :: [Text]  -- Key moments as simple strings (from LLM)
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 

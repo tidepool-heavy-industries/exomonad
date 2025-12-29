@@ -46,17 +46,11 @@ data EventSeverity
 -- | Format an event for the narrative log
 --
 -- Returns Nothing for events that shouldn't be displayed in narrative
--- (like DMThought which is internal)
 formatEvent :: DMEvent -> Maybe Text
 formatEvent event = case event of
   -- Internal events - don't display
-  DMThought _ -> Nothing
   RandomChoice _ _ -> Nothing
   MoodTransition _ _ _ -> Nothing  -- Handled by mood header
-
-  -- NPC speech - handled separately in narrative
-  NPCSpoke _ _ -> Nothing
-  PlayerAsked _ -> Nothing
 
   -- Die spent - show outcome tier and narrative prominently
   DieSpent dieVal tier narrative ->

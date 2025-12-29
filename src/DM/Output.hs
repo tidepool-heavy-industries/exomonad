@@ -202,7 +202,7 @@ applyTurnOutput output state = state
 -- | Simplified compression output - complex extractions removed
 data CompressionOutput = CompressionOutput
   { summary :: Text               -- One paragraph summary
-  , keyMoments :: Text            -- Comma-separated key moments
+  , keyMoments :: [Text]          -- Key moments from the scene (3-5 items)
   , consequenceSeeds :: Text      -- Comma-separated consequence seeds
   , stressChange :: Int           -- Net stress change
   , coinChange :: Int             -- Net coin change
