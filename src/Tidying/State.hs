@@ -28,7 +28,6 @@ module Tidying.State
   , getFunction
   , getAnchors
   , getCurrentItem
-  , getLastAnxiety
   , getCurrentCategory
   , getEmergentCats
 
@@ -48,19 +47,17 @@ import Data.Time (UTCTime)
 import GHC.Generics (Generic)
 
 import Tidying.Types
-  ( ItemName, SpaceFunction(..), AnxietyTrigger, CategoryName )
+  ( ItemName, SpaceFunction(..), CategoryName )
 
 -- | Common state present after surveying completes
 --
 -- Every phase except Surveying has these fields.
 -- Factored out to eliminate duplication.
 data ActiveState = ActiveState
-  { asFunction    :: SpaceFunction
+  { asFunction :: SpaceFunction
     -- ^ What this space is FOR (required post-surveying)
-  , asAnchors     :: [ItemName]
+  , asAnchors  :: [ItemName]
     -- ^ Things that definitely stay
-  , asLastAnxiety :: Maybe AnxietyTrigger
-    -- ^ Thing user was anxious about (to avoid)
   } deriving (Eq, Show, Generic, ToJSON, FromJSON)
 
 -- | Session phases
@@ -78,7 +75,7 @@ data Phase
 -- This sum type makes invalid states unrepresentable.
 --
 -- Every phase except Surveying has an 'ActiveState' containing
--- the common fields (function, anchors, lastAnxiety).
+-- the common fields (function, anchors).
 data PhaseData
   = SurveyingData
       { sdGatheredFunction :: Maybe SpaceFunction
@@ -88,19 +85,19 @@ data PhaseData
       }
   | SortingData
       { soActive      :: ActiveState
-        -- ^ Common state (function, anchors, lastAnxiety)
+        -- ^ Common state (function, anchors)
       , soCurrentItem :: Maybe ItemName
         -- ^ Item currently being discussed
       }
   | SplittingData
       { spActive     :: ActiveState
-        -- ^ Common state (function, anchors, lastAnxiety)
+        -- ^ Common state (function, anchors)
       , spCategories :: NonEmpty CategoryName
         -- ^ Categories to split into (NonEmpty - must have at least one)
       }
   | RefiningData
       { rfActive          :: ActiveState
-        -- ^ Common state (function, anchors, lastAnxiety)
+        -- ^ Common state (function, anchors)
       , rfEmergentCats    :: Map CategoryName [ItemName]
         -- ^ Categories and their items
       , rfCurrentCategory :: CategoryName
@@ -109,7 +106,7 @@ data PhaseData
       }
   | DecisionSupportData
       { dsActive      :: ActiveState
-        -- ^ Common state (function, anchors, lastAnxiety)
+        -- ^ Common state (function, anchors)
       , dsStuckItem   :: ItemName
         -- ^ Required! Can't be in decision support without a stuck item
       , dsReturnPhase :: Phase
@@ -212,10 +209,6 @@ getCurrentItem st = case st.phaseData of
   SplittingData {}        -> Nothing
   RefiningData _ _ _ i    -> i
   DecisionSupportData _ i _ -> Just i  -- stuck item is the current item
-
--- | Get last anxiety trigger (if any)
-getLastAnxiety :: SessionState -> Maybe AnxietyTrigger
-getLastAnxiety st = getActiveState st >>= (.asLastAnxiety)
 
 -- | Get current category being refined (only valid in Refining phase)
 getCurrentCategory :: SessionState -> Maybe CategoryName

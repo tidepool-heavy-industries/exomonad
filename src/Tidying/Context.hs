@@ -32,7 +32,7 @@ import GHC.Generics (Generic)
 
 import Tidepool.Anthropic.Http (ImageSource(..))
 import Tidying.State
-import Tidying.Types (ItemName(..), SpaceFunction(..), AnxietyTrigger(..), CategoryName(..), ChaosLevel(..))
+import Tidying.Types (ItemName(..), SpaceFunction(..), CategoryName(..), ChaosLevel(..))
 
 -- | Context for tidying prompts
 -- This is what gets rendered into the system prompt template
@@ -51,8 +51,6 @@ data TidyingContext = TidyingContext
     -- ^ Category being refined (if any)
   , tcItemsProcessed :: Int
     -- ^ Progress count
-  , tcLastAnxiety :: Maybe Text
-    -- ^ Thing user was anxious about (to avoid)
   , tcPhotoAnalysis :: Maybe PhotoAnalysis
     -- ^ LLM analysis of photos (if any)
   , tcUserText :: Maybe Text
@@ -85,7 +83,6 @@ instance ToJSON TidyingContext where
     , "emergent_categories" .= tcEmergentCategories
     , "current_category" .= tcCurrentCategory
     , "items_processed" .= tcItemsProcessed
-    , "last_anxiety" .= tcLastAnxiety
     , "photo_analysis" .= fmap toJSON tcPhotoAnalysis
     , "user_text" .= tcUserText
     ]
@@ -121,7 +118,6 @@ buildTidyingContext st mPhotoAnalysis userText = TidyingContext
   , tcEmergentCategories = map (\(CategoryName c) -> c) $ Map.keys (getEmergentCats st)
   , tcCurrentCategory = fmap (\(CategoryName c) -> c) (getCurrentCategory st)
   , tcItemsProcessed = st.itemsProcessed
-  , tcLastAnxiety = fmap (\(AnxietyTrigger t) -> t) (getLastAnxiety st)
   , tcPhotoAnalysis = mPhotoAnalysis
   , tcUserText = userText
   }

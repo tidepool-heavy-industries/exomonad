@@ -368,7 +368,7 @@ transitionPhaseData pd extract action nextPhase unsureItems = case (pd, nextPhas
                Just f -> f
                Nothing -> SpaceFunction "general"  -- fallback
         newAnchors = anchors <> maybe [] id extract.exAnchors
-        active = ActiveState fn newAnchors Nothing
+        active = ActiveState fn newAnchors
     in SortingData active (extract.exItem)
 
   -- Sorting: update current item, maybe anxiety
@@ -437,7 +437,7 @@ getActiveStateFromPhaseData :: PhaseData -> ActiveState
 getActiveStateFromPhaseData = \case
   SurveyingData mFn a ->
     let fn = maybe (SpaceFunction "general") id mFn
-    in ActiveState fn a Nothing
+    in ActiveState fn a
   SortingData a _         -> a
   SplittingData a _       -> a
   RefiningData a _ _ _    -> a

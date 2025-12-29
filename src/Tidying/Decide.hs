@@ -12,7 +12,6 @@ module Tidying.Decide
     -- * Photo analysis helpers
   , chaosLevel
   , hasBlockedFunction
-  , hasFirstTarget
   ) where
 
 import Data.List.NonEmpty (NonEmpty(..))
@@ -170,8 +169,3 @@ chaosLevel = fmap (.paChaosLevel)
 hasBlockedFunction :: Maybe PhotoAnalysis -> Bool
 hasBlockedFunction (Just pa) = isJust pa.paBlockedFunction
 hasBlockedFunction Nothing = False
-
--- | Does photo analysis suggest a first target?
-hasFirstTarget :: Maybe PhotoAnalysis -> Bool
-hasFirstTarget (Just pa) = isJust pa.paFirstTarget
-hasFirstTarget Nothing = False
