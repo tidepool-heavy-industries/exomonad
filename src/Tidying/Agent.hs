@@ -6,9 +6,9 @@
 --
 -- = Photo Support
 --
--- Photos are provided via GUI (threepenny-gui with camera access).
+-- Photos are attached to text input in the GUI (chat-app style).
 -- The GUI sends base64-encoded photos directly - no filesystem involved.
--- CLI mode is text-only; use GUI for photo analysis.
+-- Users can attach a photo while typing their message.
 --
 -- = Tool-Based Flow
 --
@@ -20,38 +20,32 @@
 -- 4. User taps to confirm or types correction
 -- 5. Answer returns to LLM, which continues processing
 --
--- This requires the 'QuestionUI' effect in the stack. The basic CLI runner
--- (tidepool) doesn't support tools; use the GUI runner for full functionality.
+-- This requires the 'QuestionUI' effect in the stack.
 --
 module Tidying.Agent
   ( -- * Agent
     tidying
-  , tidyingNoTools
   , TidyingM
   , TidyingExtra
   , tidyingRun
-
-    -- * Running
-  , runTidyingSession
   ) where
 
 import qualified Data.Text as T
-import Effectful (Eff)
 
 import Tidepool
-import Tidying.State (SessionState, newSession, UserInput(..))
+import Tidying.State (SessionState, newSession, UserInput(..), Photo(..))
 import Tidying.Loop (tidyingTurn, TidyingEvent(..), Response(..))
 
--- | Extra effects for full Tidying agent (with tools)
+-- | Extra effects for Tidying agent
 --
 -- The QuestionUI effect enables mid-turn tools like 'propose_disposition'
 -- that pause for user input.
 type TidyingExtra = '[QuestionUI]
 
--- | The Tidying agent monad (with QuestionUI for tool support)
+-- | The Tidying agent monad
 type TidyingM = AgentM SessionState TidyingEvent TidyingExtra
 
--- | The Tidying agent with tool support
+-- | The Tidying agent
 --
 -- A prosthetic executive function for tackling overwhelming spaces.
 -- Uses OODA (Observe-Orient-Decide-Act) pattern with tool-based user interaction.
@@ -61,70 +55,23 @@ type TidyingM = AgentM SessionState TidyingEvent TidyingExtra
 -- * 'propose_disposition' - LLM proposes where item goes, user confirms
 -- * 'ask_space_function' - LLM asks what the space is for
 -- * 'confirm_done' - confirm session is complete
---
--- Requires 'tidepoolWith' or a GUI runner that provides QuestionUI.
 tidying :: Agent SessionState TidyingEvent TidyingExtra
 tidying = Agent
   { agentName       = "tidying"
   , agentInit       = newSession
   , agentRun        = tidyingRun
-  , agentDispatcher = noDispatcher  -- TODO: Wire makeTidyingDispatcher when runner supports QuestionUI
+  , agentDispatcher = noDispatcher  -- TODO: Wire makeTidyingDispatcher
   }
 
--- | Simple Tidying agent (no tools, for basic CLI use)
+-- | The Tidying agent's main loop
 --
--- This version works with the basic 'tidepool' runner but doesn't
--- have access to mid-turn tools. For full functionality, use 'tidying'
--- with a GUI runner.
-tidyingNoTools :: SimpleAgent SessionState TidyingEvent
-tidyingNoTools = Agent
-  { agentName       = "tidying"
-  , agentInit       = newSession
-  , agentRun        = tidyingRunNoTools
-  , agentDispatcher = noDispatcher
-  }
-
--- | Simple run loop without tools (for CLI use with 'tidepool' runner)
-tidyingRunNoTools :: Eff (BaseEffects SessionState TidyingEvent) ()
-tidyingRunNoTools = do
-  -- Startup
-  emit $ SituationClassified "Let's tidy! Tell me about your space."
-  emit $ SituationClassified "(For photo analysis and full tool support, use the GUI version)"
-
-  -- Main loop
-  loop
-
-  -- Shutdown
-  emit $ SituationClassified "Great work! Session complete."
-  where
-    loop = do
-      input <- requestText "> "
-      case T.toLower (T.strip input) of
-        "quit" -> pure ()
-        "exit" -> pure ()
-        "done" -> pure ()
-        "" -> loop
-        _ -> do
-          let userInput = UserInput
-                { inputText = Just input
-                , inputPhotos = []
-                }
-          response <- tidyingTurn userInput
-          emit $ SituationClassified $ "Phase: " <> T.pack (show response.responsePhase)
-          loop
-
--- | The Tidying agent's full lifecycle (with tool support)
---
--- This run function has access to QuestionUI, enabling mid-turn tools
--- like 'propose_disposition'. The LLM can call tools that pause for
--- user input and then continue processing.
---
--- The tools are wired via 'makeTidyingDispatcher' in the runner.
--- See 'Tidying.Tools' for available tools.
+-- Supports photo attachments via requestTextWithPhoto.
+-- Photos are converted to base64 and sent with the text input.
 tidyingRun :: TidyingM ()
 tidyingRun = do
   -- Startup
-  emit $ SituationClassified "Let's tidy! Take a photo of your space."
+  emit $ SituationClassified "Let's tidy! Tell me about your space."
+  emit $ SituationClassified "You can attach photos of your space for analysis."
 
   -- Main loop
   loop
@@ -133,50 +80,31 @@ tidyingRun = do
   emit $ SituationClassified "Great work! Session complete."
   where
     loop = do
-      input <- requestText "> "
-      case T.toLower (T.strip input) of
+      (input, photoData) <- requestTextWithPhoto "> "
+      let trimmed = T.toLower (T.strip input)
+          hasPhoto = not (null photoData)
+          hasText = not (T.null trimmed)
+
+      case trimmed of
         "quit" -> pure ()
         "exit" -> pure ()
         "done" -> pure ()
-        "" -> loop
-        _ -> do
-          let userInput = UserInput
-                { inputText = Just input
-                , inputPhotos = []  -- Photos come via GUI, not text
-                }
-          response <- tidyingTurn userInput
-          emit $ SituationClassified $ "Phase: " <> T.pack (show response.responsePhase)
-          loop
+        _ | not hasText && not hasPhoto -> loop  -- No input at all, continue
+          | otherwise -> do
+              -- Convert photo data tuples to Photo values
+              let photos = map (\(b64, mime) -> Photo b64 mime) photoData
 
--- ══════════════════════════════════════════════════════════════
--- RUNNING THE SESSION
--- ══════════════════════════════════════════════════════════════
+              -- Emit user input for chat display (with photo indicator)
+              let photoIndicator = if hasPhoto then " [📷]" else ""
+              emit $ UserInputReceived (input <> photoIndicator)
 
--- | Run a tidying session with terminal I/O (no tools)
---
--- Uses the basic 'tidepool' runner with 'tidyingNoTools'.
--- For full tool support (photo analysis, propose_disposition), use a GUI runner.
---
--- @
--- main = do
---   apiKey <- getEnv "ANTHROPIC_API_KEY"
---   let llmConfig = LLMConfig (T.pack apiKey) "claude-sonnet-4-20250514" 4096 Nothing
---   finalState <- runTidyingSession newSession print llmConfig
---   putStrLn $ "Processed " <> show finalState.itemsProcessed <> " items"
--- @
-runTidyingSession
-  :: SessionState
-  -> (TidyingEvent -> IO ())
-  -> LLMConfig
-  -> IO SessionState
-runTidyingSession initialState handleEvent llmConfig = do
-  let config = AgentConfig
-        { acOnEvent = handleEvent
-        , acOnSave = \_ -> pure ()
-        , acGetInput = pure ""
-        , acLLM = llmConfig
-        , acLogLevel = Info
-        , acQuitCommands = ["quit", "exit", "done"]
-        }
-      agent = tidyingNoTools { agentInit = initialState }
-  tidepool config agent
+              let userInput = UserInput
+                    { inputText = if hasText then Just input else Nothing
+                    , inputPhotos = photos
+                    }
+              response <- tidyingTurn userInput
+
+              -- Emit response for chat display
+              emit $ ResponseGenerated response.responseText
+
+              loop

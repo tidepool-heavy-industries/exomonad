@@ -182,6 +182,10 @@ tidepool config agent = do
   let inputHandler = InputHandler
         { ihChoice = cliChoice
         , ihText = cliText
+        , ihTextWithPhoto = \prompt -> do
+            -- CLI doesn't support photos - just get text
+            txt <- cliText prompt
+            pure (txt, [])
         , ihDice = \_ _ -> error "Dice not supported in CLI runner"
         , ihCustom = \tag _ -> error $ "Custom request '" <> T.unpack tag <> "' not supported in CLI - use GUI for photos"
         }

@@ -181,6 +181,9 @@ data PendingRequest
   | PendingDice Text [(Int, Int, Text)]
     -- ^ Dice selection: prompt and (die value, index, hint) triples
     -- Hints are LLM-generated previews of what each outcome means
+  | PendingPhoto Text
+    -- ^ Photo upload request with prompt
+    -- Used by tidying agent to request photos of spaces/items
   | PendingCharacterCreation
     -- ^ Character creation flow (full-screen takeover)
   deriving (Show, Eq)
@@ -191,6 +194,11 @@ data RequestResponse
     -- ^ Selected choice index
   | TextResponse Text
     -- ^ Entered text
+  | PhotoResponse Text Text
+    -- ^ Photo upload: (base64 data, mime type)
+  | TextWithPhotoResponse Text Text Text
+    -- ^ Text with optional photo: (text, base64 data, mime type)
+    -- Used when user attaches a photo to their text message
   deriving (Show, Eq)
 
 -- | Log levels for debug entries

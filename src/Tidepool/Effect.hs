@@ -28,6 +28,7 @@ module Tidepool.Effect
   , emit
   , requestChoice
   , requestText
+  , requestTextWithPhoto
   , requestDice
   , requestCustom
   , requestQuestion
@@ -790,6 +791,12 @@ data RequestInput :: Effect where
     -> [(Int, Int, Text)] -- (die value, index, hint) triples
     -> RequestInput m Int
 
+  -- | Request text input with optional photo attachment
+  -- Returns text and list of (base64, mime) photo tuples (0 or 1 photos)
+  RequestTextWithPhoto
+    :: Text              -- Prompt to display
+    -> RequestInput m (Text, [(Text, Text)])
+
   -- | Request custom UI interaction (character creation, complex forms, etc.)
   -- The tag identifies the request type, handler returns JSON response.
   -- Use this for agent-specific UI that doesn't fit choice/text/dice.
@@ -813,6 +820,11 @@ requestText = send . RequestText
 requestDice :: RequestInput :> es => Text -> [(Int, Int, Text)] -> Eff es Int
 requestDice prompt diceWithHints = send (RequestDice prompt diceWithHints)
 
+-- | Request text input with optional photo attachment
+-- Returns text and list of (base64, mime) tuples for attached photos
+requestTextWithPhoto :: RequestInput :> es => Text -> Eff es (Text, [(Text, Text)])
+requestTextWithPhoto = send . RequestTextWithPhoto
+
 -- | Request custom UI interaction
 -- Tag identifies the request type, payload is JSON for the handler
 requestCustom :: RequestInput :> es => Text -> Value -> Eff es Value
@@ -822,6 +834,8 @@ requestCustom tag payload = send (RequestCustom tag payload)
 data InputHandler = InputHandler
   { ihChoice :: forall a. Text -> [(Text, a)] -> IO a
   , ihText   :: Text -> IO Text
+  , ihTextWithPhoto :: Text -> IO (Text, [(Text, Text)])
+    -- ^ Text with optional photo: prompt -> (text, [(base64, mime)])
   , ihDice   :: Text -> [(Int, Int, Text)] -> IO Int
     -- ^ Dice selection: prompt, (die value, index, hint) triples -> selected index
   , ihCustom :: Text -> Value -> IO Value
@@ -829,11 +843,16 @@ data InputHandler = InputHandler
   }
 
 runRequestInput :: IOE :> es => InputHandler -> Eff (RequestInput : es) a -> Eff es a
-runRequestInput (InputHandler choice txtInput dice custom) = interpret $ \_ -> \case
-  RequestChoice prompt choices -> liftIO $ choice prompt choices
-  RequestText prompt           -> liftIO $ txtInput prompt
-  RequestDice prompt diceWithHints -> liftIO $ dice prompt diceWithHints
-  RequestCustom tag payload -> liftIO $ custom tag payload
+runRequestInput handler = interpret $ \_ -> \case
+  -- Note: ihChoice is extracted via pattern match because polymorphic forall a.
+  -- types don't work with OverloadedRecordDot's HasField constraint
+  RequestChoice prompt choices ->
+    let InputHandler { ihChoice = choiceHandler } = handler
+    in liftIO $ choiceHandler prompt choices
+  RequestText prompt           -> liftIO $ handler.ihText prompt
+  RequestTextWithPhoto prompt  -> liftIO $ handler.ihTextWithPhoto prompt
+  RequestDice prompt diceWithHints -> liftIO $ handler.ihDice prompt diceWithHints
+  RequestCustom tag payload -> liftIO $ handler.ihCustom tag payload
 
 -- ══════════════════════════════════════════════════════════════
 -- QUESTION UI EFFECT (for Tidying agent)

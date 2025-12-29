@@ -428,6 +428,10 @@ runDeltaAgent config = do
         , ihText = \prompt -> do
             putStrLn $ T.unpack prompt
             T.pack <$> getLine
+        , ihTextWithPhoto = \prompt -> do
+            putStrLn $ T.unpack prompt
+            txt <- T.pack <$> getLine
+            pure (txt, [])  -- CLI: no photos
         , ihDice = \_ _ -> error "Dice not used in delta agent"
         , ihCustom = \tag _ -> error $ "Custom request '" <> T.unpack tag <> "' not used in delta agent"
         }

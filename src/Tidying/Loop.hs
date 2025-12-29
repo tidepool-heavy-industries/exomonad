@@ -68,6 +68,8 @@ data TidyingEvent
   | ActionTaken Action          -- ^ Action was taken
   | PhaseChanged Phase Phase    -- ^ Phase transition (from, to)
   | SessionEnded Int            -- ^ Session ended, items processed
+  | UserInputReceived Text      -- ^ User input received (for chat display)
+  | ResponseGenerated Text      -- ^ Response generated (for chat display)
   deriving (Show, Eq)
 
 -- ══════════════════════════════════════════════════════════════
