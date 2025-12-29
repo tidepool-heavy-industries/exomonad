@@ -71,7 +71,7 @@ tidyingGameLoopWithGUI bridge = do
 
   let llmConfig = LLMConfig
         { llmApiKey = apiKey
-        , llmModel = "claude-sonnet-4-20250514"
+        , llmModel = "claude-haiku-4-5-20251001"
         , llmMaxTokens = 4096
         , llmThinkingBudget = Nothing
         }

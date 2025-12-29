@@ -5,6 +5,7 @@
 module Tidying.Decide
   ( -- * Core routing
     decide
+  , decideFromExtract
 
     -- * Helpers
   , suggestSplit
@@ -12,12 +13,14 @@ module Tidying.Decide
   ) where
 
 import Data.Map.Strict qualified as Map
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
 
 import Tidying.State
 import Tidying.Situation
 import Tidying.Action
+import Tidying.Output (Extract(..), Intent(..), Choice(..))
 
 -- | Pure routing: (State, Situation) -> (Action, NextPhase)
 -- This is the core state machine logic. NO LLM calls here.
@@ -153,6 +156,45 @@ decide st sit = case (st.phase, sit) of
 
   _ ->
     (InstructNext, st.phase)
+
+
+-- ══════════════════════════════════════════════════════════════
+-- EXTRACTION-BASED ROUTING (new approach)
+-- ══════════════════════════════════════════════════════════════
+
+-- | Route based on extracted information from user input
+-- LLM extracts facts, this function decides what to do
+decideFromExtract :: SessionState -> Extract -> (Action, Phase)
+decideFromExtract st ext = case ext.exIntent of
+  IntentStop ->
+    (Summary, st.phase)
+
+  IntentHelp ->
+    -- Stuck - provide decision aid if they mentioned an item
+    case ext.exItem of
+      Just item -> (DecisionAid item, DecisionSupport)
+      Nothing   -> (FirstInstruction, Sorting)
+
+  IntentDecided ->
+    -- Made a decision about an item
+    case ext.exChoice of
+      Just ChoiceTrash  -> (InstructTrash, Sorting)
+      Just ChoicePlace  -> (InstructPlace (fromMaybe "its spot" ext.exPlace), Sorting)
+      Just ChoiceUnsure -> (InstructUnsure, Sorting)
+      Just ChoiceKeep   -> (InstructPlace "keep pile", Sorting)
+      Nothing           -> (InstructNext, Sorting)
+
+  IntentItem ->
+    -- They described an item but haven't said what to do with it
+    -- Ask them to decide
+    (AskItemDecision (fromMaybe "that" ext.exItem), Sorting)
+
+  IntentContinue ->
+    (InstructNext, Sorting)
+
+  IntentStart ->
+    -- Beginning or describing space - give first instruction
+    (FirstInstruction, Sorting)
 
 
 -- | Threshold for when to split unsure pile

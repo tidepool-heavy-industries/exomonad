@@ -1,8 +1,8 @@
 {-# LANGUAGE OverloadedStrings #-}
 -- | Theme for the Tidying GUI
 --
--- A calm, minimal aesthetic inspired by Marie Kondo's philosophy:
--- soft off-white backgrounds, muted sage green accents, warm gray text.
+-- A calm, minimal dark aesthetic inspired by Marie Kondo's philosophy:
+-- deep charcoal backgrounds, muted sage green accents, soft light text.
 module Tidying.GUI.Theme
   ( tidyingTheme
   , tidyingPalette
@@ -10,32 +10,32 @@ module Tidying.GUI.Theme
 
 import Tidepool.GUI.Theme (Theme(..), ColorPalette(..))
 
--- | Calming color palette for tidying
+-- | Calming dark color palette for tidying
 --
--- Inspired by Japanese minimalism and natural materials:
--- - Warm off-white like natural paper
--- - Sage green like bamboo leaves
--- - Soft grays like stone
+-- Inspired by Japanese minimalism - evening zen garden:
+-- - Deep charcoal like river stones at dusk
+-- - Sage green like moss in shadow
+-- - Soft warm whites like paper lanterns
 tidyingPalette :: ColorPalette
 tidyingPalette = ColorPalette
-  { cpBackground    = "#faf9f7"   -- Warm off-white (natural paper)
-  , cpBackgroundAlt = "#f2f0ed"   -- Slightly darker for cards
-  , cpBackgroundHover = "#e8e5e1" -- Hover state
-  , cpAccent        = "#7d9a78"   -- Sage green (bamboo)
-  , cpAccentDim     = "#a8bba4"   -- Lighter sage
-  , cpText          = "#3d3d3d"   -- Warm charcoal
-  , cpTextMuted     = "#6b6b6b"   -- Medium gray
-  , cpTextDim       = "#9a9a9a"   -- Light gray
-  , cpSuccess       = "#6b9a6b"   -- Soft green
-  , cpWarning       = "#b89b5c"   -- Warm amber
-  , cpDanger        = "#b06060"   -- Muted coral
-  , cpCritical      = "#9a7d7d"   -- Dusty rose
+  { cpBackground    = "#1a1a1a"   -- Deep charcoal
+  , cpBackgroundAlt = "#242424"   -- Slightly lighter for cards
+  , cpBackgroundHover = "#2e2e2e" -- Hover state
+  , cpAccent        = "#8faa8a"   -- Sage green (moss)
+  , cpAccentDim     = "#6b8267"   -- Darker sage
+  , cpText          = "#e8e6e3"   -- Warm off-white
+  , cpTextMuted     = "#a8a5a0"   -- Muted warm gray
+  , cpTextDim       = "#6b6966"   -- Dim warm gray
+  , cpSuccess       = "#7eb07e"   -- Soft green
+  , cpWarning       = "#c4a86c"   -- Warm amber
+  , cpDanger        = "#c07070"   -- Muted coral
+  , cpCritical      = "#a88a8a"   -- Dusty rose
   }
 
 -- | The complete tidying theme
 tidyingTheme :: Theme
 tidyingTheme = Theme
-  { themeName = "tidying"
+  { themeName = "tidying-dark"
   , themeColors = tidyingPalette
   , themeFontMain = "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
   , themeFontMono = "'JetBrains Mono', 'Fira Code', 'SF Mono', monospace"

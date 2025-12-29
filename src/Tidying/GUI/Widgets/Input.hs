@@ -82,27 +82,33 @@ textInputWithPhoto bridge prompt = do
 
   -- Click attach button to trigger file input
   on UI.click attachBtn $ \_ ->
-    runFunction $ ffi "document.getElementById('text-photo-file-input').click()"
+    runFunction $ ffi "var el = document.getElementById('text-photo-file-input'); if (el) el.click()"
 
   -- File input change handler - show preview
+  -- Use setTimeout to defer until after DOM is ready
   runFunction $ ffi $ T.unpack $ T.unlines
-    [ "document.getElementById('text-photo-file-input').addEventListener('change', function() {"
-    , "  var file = this.files[0];"
-    , "  if (!file) return;"
-    , "  "
-    , "  var reader = new FileReader();"
-    , "  reader.onload = function(e) {"
-    , "    var dataUrl = e.target.result;"
-    , "    var previewArea = document.getElementById('text-photo-preview-area');"
-    , "    var previewImg = document.getElementById('text-photo-preview-img');"
+    [ "setTimeout(function() {"
+    , "  var fileInput = document.getElementById('text-photo-file-input');"
+    , "  if (!fileInput) return;"
+    , "  fileInput.addEventListener('change', function() {"
+    , "    var file = this.files[0];"
+    , "    if (!file) return;"
     , "    "
-    , "    previewImg.src = dataUrl;"
-    , "    previewImg.dataset.base64 = dataUrl.split(',')[1];"
-    , "    previewImg.dataset.mime = file.type;"
-    , "    previewArea.style.display = 'flex';"
-    , "  };"
-    , "  reader.readAsDataURL(file);"
-    , "});"
+    , "    var reader = new FileReader();"
+    , "    reader.onload = function(e) {"
+    , "      var dataUrl = e.target.result;"
+    , "      var previewArea = document.getElementById('text-photo-preview-area');"
+    , "      var previewImg = document.getElementById('text-photo-preview-img');"
+    , "      if (!previewArea || !previewImg) return;"
+    , "      "
+    , "      previewImg.src = dataUrl;"
+    , "      previewImg.dataset.base64 = dataUrl.split(',')[1];"
+    , "      previewImg.dataset.mime = file.type;"
+    , "      previewArea.style.display = 'flex';"
+    , "    };"
+    , "    reader.readAsDataURL(file);"
+    , "  });"
+    , "}, 0);"
     ]
 
   -- Remove button - clear photo
@@ -169,7 +175,7 @@ textInputWithPhoto bridge prompt = do
     , element inputRow
     ]
 
-  -- Auto-focus the text input
-  runFunction $ ffi "document.getElementById('text-input-field').focus()"
+  -- Auto-focus the text input (deferred to ensure DOM is ready)
+  runFunction $ ffi "setTimeout(function() { var el = document.getElementById('text-input-field'); if (el) el.focus(); }, 0)"
 
   pure container

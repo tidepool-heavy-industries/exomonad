@@ -39,11 +39,13 @@ import Tidepool.Anthropic.Http (ContentBlock(..))
 import Tidepool.Template (Schema(..))
 
 import Tidying.State
-import Tidying.Situation (Situation(..), ItemClass(..), extractAnxietyTrigger)
 import Tidying.Action
-import Tidying.Decide (decide)
+import Tidying.Decide (decideFromExtract)
 import Tidying.Context
-import Tidying.Output (OrientOutput(..), ActOutput(..), PhotoAnalysisOutput(..), photoAnalysisSchema, applyOrientOutput, parseOrientToSituation)
+import Tidying.Output
+  ( ActOutput(..), PhotoAnalysisOutput(..), photoAnalysisSchema
+  , Extract(..), Intent(..), Choice(..)
+  )
 import Tidying.Templates
 import Tidying.Act (cannedResponse)
 
@@ -100,14 +102,15 @@ tidyingTurn input = do
   -- Build context for templates
   let ctx = buildTidyingContext st mPhotoAnalysis input.inputText
 
-  -- ORIENT: Classify situation
-  situation <- orientSituation ctx st input
+  -- EXTRACT: Get structured info from user input
+  -- LLM extracts facts, Haskell decides what to do
+  extract <- extractFromInput input
 
-  logInfo $ "Situation: " <> T.pack (show situation)
-  emit $ SituationClassified (T.pack $ show situation)
+  logInfo $ "Extract: " <> T.pack (show extract)
+  emit $ SituationClassified (T.pack $ show extract.exIntent)
 
-  -- DECIDE: Pure routing (no LLM)
-  let (action, nextPhase) = decide st situation
+  -- DECIDE: Pure routing based on extraction (no LLM)
+  let (action, nextPhase) = decideFromExtract st extract
 
   logDebug $ "Action: " <> T.pack (show action)
   emit $ ActionTaken action
@@ -121,10 +124,10 @@ tidyingTurn input = do
   response <- actResponse ctx action
 
   -- Update state
-  applyStateTransition situation action nextPhase
+  applyStateTransitionFromExtract extract action nextPhase
 
   -- Check for session end
-  when (situation == AllDone || situation == WantsToStop) $ do
+  when (extract.exIntent == IntentStop) $ do
     finalState <- get @SessionState
     emit $ SessionEnded finalState.itemsProcessed
 
@@ -216,87 +219,34 @@ visionPrompt :: Text
 visionPrompt = "Analyze this space. What do you see? How messy is it? What should we tackle first?"
 
 -- ══════════════════════════════════════════════════════════════
--- ORIENT: Situation Classification
+-- EXTRACT: Information Extraction from User Input
 -- ══════════════════════════════════════════════════════════════
 
--- | Classify the situation using LLM
--- Uses fast-path for obvious cases, LLM for ambiguous ones
-orientSituation
+-- | Extract structured info from user input
+-- LLM extracts facts (intent, item, choice), Haskell decides what to do
+extractFromInput
   :: ( LLM :> es
      , Log :> es
-     , State SessionState :> es
      )
-  => TidyingContext
-  -> SessionState
-  -> UserInput
-  -> Eff es Situation
-orientSituation ctx st input = do
-  -- Fast-path: detect obvious situations without LLM
-  case fastPathOrient st input of
-    Just sit -> do
-      logDebug $ "Fast-path orient: " <> T.pack (show sit)
-      pure sit
-    Nothing -> do
-      -- Call LLM for classification
-      logDebug "Calling LLM for orient"
-      let systemPrompt = renderOrientPrompt ctx
-          userMsg = maybe "(photo only)" id input.inputText
+  => UserInput
+  -> Eff es Extract
+extractFromInput input = do
+  logDebug "Calling LLM for extraction"
+  let userMsg = maybe "(photo only)" id input.inputText
 
-      result <- llmCallEither @OrientOutput systemPrompt userMsg orientOutputSchema.schemaJSON
+  result <- llmCallEither @Extract renderExtractPrompt userMsg extractSchema.schemaJSON
 
-      case result of
-        Left err -> do
-          logWarn $ "Orient parse failed: " <> err
-          pure ActionDone  -- fallback
-        Right output -> do
-          -- Apply extracted info to state (function, anchors)
-          modify @SessionState (applyOrientOutput output)
-          pure $ parseOrientToSituation output
-
--- | Fast-path situations that don't need LLM
-fastPathOrient :: SessionState -> UserInput -> Maybe Situation
-fastPathOrient st input =
-  let txt = input.inputText
-  in case txt of
-    -- Explicit signals (always check first)
-    Just t | isStopSignal t -> Just WantsToStop
-    Just t | isContinueSignal t -> Just WantsToContinue
-    Just t | isStuckSignal t -> Just (Stuck Nothing)
-
-    -- Surveying phase: need function
-    -- Only fast-path to NeedFunction if NO user text (first turn)
-    -- If user provided text, let LLM parse it to extract function
-    _ | st.phase == Surveying && not (hasFunction st) ->
-        case txt of
-          Nothing -> Just NeedFunction  -- No input yet, ask for function
-          Just t | isOverwhelmedSignal (Just t) -> Just OverwhelmedNeedMomentum
-          Just _ -> Nothing  -- User gave text, let LLM parse it
-
-    -- Surveying phase: have function but no anchors
-    _ | st.phase == Surveying && hasFunction st && not (hasAnchors st) ->
-        if isOverwhelmedSignal txt
-          then Just OverwhelmedNeedMomentum
-          else Nothing  -- let LLM decide
-
-    -- Simple "done" responses
-    Just t | isDoneSignal t -> Just ActionDone
-
-    -- Need LLM for item classification, anxiety detection, etc.
-    _ -> Nothing
-
-isStopSignal :: Text -> Bool
-isStopSignal t = any (`elem` T.words (T.toLower t)) ["stop", "pause", "tired", "later", "break"]
-
-isContinueSignal :: Text -> Bool
-isContinueSignal t = any (`elem` T.words (T.toLower t))
-  ["continue", "keep", "going", "more", "yes", "yeah", "next"]
-
-isStuckSignal :: Text -> Bool
-isStuckSignal t = any (`elem` T.words (T.toLower t))
-  ["stuck", "idk", "unsure", "help", "can't", "decide"]
-
-isDoneSignal :: Text -> Bool
-isDoneSignal t = T.toLower (T.strip t) `elem` ["done", "ok", "okay", "did it", "next"]
+  case result of
+    Left err -> do
+      logWarn $ "Extract parse failed: " <> err
+      -- Fallback: assume they want to continue
+      pure Extract
+        { exIntent = IntentContinue
+        , exItem = Nothing
+        , exChoice = Nothing
+        , exPlace = Nothing
+        }
+    Right ext -> pure ext
 
 -- ══════════════════════════════════════════════════════════════
 -- ACT: Response Generation
@@ -337,40 +287,45 @@ actResponse ctx action = do
 -- STATE TRANSITIONS
 -- ══════════════════════════════════════════════════════════════
 
--- | Apply state transition based on situation and action
-applyStateTransition
+-- | Apply state transition based on extraction and action
+applyStateTransitionFromExtract
   :: State SessionState :> es
-  => Situation
+  => Extract
   -> Action
   -> Phase
   -> Eff es ()
-applyStateTransition situation action nextPhase = modify @SessionState $ \st -> st
+applyStateTransitionFromExtract extract action nextPhase = modify @SessionState $ \st -> st
   { phase = nextPhase
   , itemsProcessed = st.itemsProcessed + itemDelta action
-  , piles = updatePiles st.piles situation action
+  , piles = updatePilesFromExtract st.piles extract action
   , emergentCats = updateCats st.emergentCats action
-  , lastAnxiety = extractAnxietyTrigger situation <|> st.lastAnxiety
   , currentCategory = updateCurrentCategory st.currentCategory action
   }
-  where
-    (<|>) :: Maybe a -> Maybe a -> Maybe a
-    (<|>) (Just x) _ = Just x
-    (<|>) Nothing y = y
 
--- | Update piles based on situation
-updatePiles :: Piles -> Situation -> Action -> Piles
-updatePiles p situation action = case (situation, action) of
-  (ItemDescribed item Trash, _) ->
-    p { out = item : p.out }
+-- | Update piles based on extraction
+updatePilesFromExtract :: Piles -> Extract -> Action -> Piles
+updatePilesFromExtract p extract action = case (extract.exIntent, extract.exChoice, action) of
+  -- User decided to trash
+  (IntentDecided, Just ChoiceTrash, _) ->
+    let item = maybe "item" id extract.exItem
+    in p { out = item : p.out }
 
-  (ItemDescribed item (Belongs _), _) ->
-    p { belongs = item : p.belongs }
+  -- User decided to place/keep
+  (IntentDecided, Just ChoicePlace, _) ->
+    let item = maybe "item" id extract.exItem
+    in p { belongs = item : p.belongs }
 
-  (ItemDescribed item Unsure, _) ->
-    p { unsure = item : p.unsure }
+  (IntentDecided, Just ChoiceKeep, _) ->
+    let item = maybe "item" id extract.exItem
+    in p { belongs = item : p.belongs }
+
+  -- User is unsure
+  (IntentDecided, Just ChoiceUnsure, _) ->
+    let item = maybe "item" id extract.exItem
+    in p { unsure = item : p.unsure }
 
   -- After split, clear unsure (items moved to emergent cats)
-  (_, InstructSplit _) ->
+  (_, _, InstructSplit _) ->
     p { unsure = [] }
 
   _ -> p

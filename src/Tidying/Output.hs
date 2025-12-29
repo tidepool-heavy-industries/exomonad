@@ -9,8 +9,14 @@
 -- Both are LLM outputs with JSON schemas.
 
 module Tidying.Output
-  ( -- * ORIENT output
-    OrientOutput(..)
+  ( -- * EXTRACT output (new extraction-first approach)
+    Extract(..)
+  , Intent(..)
+  , Choice(..)
+  , extractSchema
+
+    -- * ORIENT output (legacy)
+  , OrientOutput(..)
   , orientOutputSchema
   , parseOrientToSituation
 
@@ -40,7 +46,120 @@ import Tidying.Situation
 import Tidying.Action
 
 -- ══════════════════════════════════════════════════════════════
--- ORIENT OUTPUT
+-- EXTRACT OUTPUT (new extraction-first approach)
+-- ══════════════════════════════════════════════════════════════
+
+-- | User intent - what they want to do right now
+data Intent
+  = IntentStart      -- ^ Beginning or describing space
+  | IntentContinue   -- ^ Ready for next item
+  | IntentItem       -- ^ Describing an item
+  | IntentDecided    -- ^ Made a decision about item
+  | IntentHelp       -- ^ Stuck, needs help
+  | IntentStop       -- ^ Done for now
+  deriving (Show, Eq, Generic)
+
+instance FromJSON Intent where
+  parseJSON = withText "Intent" $ \case
+    "start"    -> pure IntentStart
+    "continue" -> pure IntentContinue
+    "item"     -> pure IntentItem
+    "decided"  -> pure IntentDecided
+    "help"     -> pure IntentHelp
+    "stop"     -> pure IntentStop
+    other      -> fail $ "Unknown intent: " <> show other
+
+instance ToJSON Intent where
+  toJSON = \case
+    IntentStart    -> "start"
+    IntentContinue -> "continue"
+    IntentItem     -> "item"
+    IntentDecided  -> "decided"
+    IntentHelp     -> "help"
+    IntentStop     -> "stop"
+
+-- | Choice about an item
+data Choice
+  = ChoiceTrash   -- ^ Throw it away
+  | ChoiceKeep    -- ^ Keep it
+  | ChoicePlace   -- ^ Put it somewhere specific
+  | ChoiceUnsure  -- ^ Not sure yet
+  deriving (Show, Eq, Generic)
+
+instance FromJSON Choice where
+  parseJSON = withText "Choice" $ \case
+    "trash"  -> pure ChoiceTrash
+    "keep"   -> pure ChoiceKeep
+    "place"  -> pure ChoicePlace
+    "unsure" -> pure ChoiceUnsure
+    other    -> fail $ "Unknown choice: " <> show other
+
+instance ToJSON Choice where
+  toJSON = \case
+    ChoiceTrash  -> "trash"
+    ChoiceKeep   -> "keep"
+    ChoicePlace  -> "place"
+    ChoiceUnsure -> "unsure"
+
+-- | Extraction from user input (replaces OrientOutput)
+data Extract = Extract
+  { exIntent :: Intent
+    -- ^ What user wants to do (required)
+  , exItem   :: Maybe Text
+    -- ^ Item name if mentioned
+  , exChoice :: Maybe Choice
+    -- ^ Decision about item if made
+  , exPlace  :: Maybe Text
+    -- ^ Where to put it if choice=place
+  } deriving (Show, Eq, Generic)
+
+instance FromJSON Extract where
+  parseJSON = withObject "Extract" $ \v -> Extract
+    <$> v .:  "intent"
+    <*> v .:? "item"
+    <*> v .:? "choice"
+    <*> v .:? "place"
+
+instance ToJSON Extract where
+  toJSON Extract{..} = object $
+    [ "intent" .= exIntent ]
+    <> maybe [] (\x -> ["item" .= x]) exItem
+    <> maybe [] (\x -> ["choice" .= x]) exChoice
+    <> maybe [] (\x -> ["place" .= x]) exPlace
+
+-- | Schema for extraction
+extractSchema :: Schema Extract
+extractSchema = Schema
+  { schemaDescription = "Extract information from user message"
+  , schemaJSON = object
+      [ "type" .= ("object" :: Text)
+      , "additionalProperties" .= False
+      , "properties" .= object
+          [ "intent" .= object
+              [ "type" .= ("string" :: Text)
+              , "enum" .= (["start", "continue", "item", "decided", "help", "stop"] :: [Text])
+              , "description" .= ("start=begin/describe space, continue=next, item=describing something, decided=made choice, help=stuck, stop=done" :: Text)
+              ]
+          , "item" .= object
+              [ "type" .= ("string" :: Text)
+              , "description" .= ("Item name if mentioned" :: Text)
+              ]
+          , "choice" .= object
+              [ "type" .= ("string" :: Text)
+              , "enum" .= (["trash", "keep", "place", "unsure"] :: [Text])
+              , "description" .= ("If decided: what to do with item" :: Text)
+              ]
+          , "place" .= object
+              [ "type" .= ("string" :: Text)
+              , "description" .= ("Where to put it if choice=place" :: Text)
+              ]
+          ]
+      , "required" .= (["intent"] :: [Text])
+      ]
+  }
+
+-- ══════════════════════════════════════════════════════════════
+-- ORIENT OUTPUT (legacy)
 -- ══════════════════════════════════════════════════════════════
 
 -- | Output from ORIENT phase - LLM classifies the situation
@@ -70,7 +189,13 @@ orientJsonOptions = defaultOptions
   }
 
 instance FromJSON OrientOutput where
-  parseJSON = genericParseJSON orientJsonOptions
+  parseJSON = withObject "OrientOutput" $ \v -> OrientOutput
+    <$> v .: "situation"
+    <*> v .:? "item_name"
+    <*> v .:? "item_location"
+    <*> v .:? "anxiety_trigger"
+    <*> v .:? "function_extracted"
+    <*> v .:? "anchors_extracted" .!= []  -- Default to empty list
 
 instance ToJSON OrientOutput where
   toJSON = genericToJSON orientJsonOptions
@@ -101,6 +226,7 @@ orientOutputSchema = Schema
   { schemaDescription = "Situation classification from user input"
   , schemaJSON = object
       [ "type" .= ("object" :: Text)
+      , "additionalProperties" .= False
       , "properties" .= object
           [ "situation" .= object
               [ "type" .= ("string" :: Text)
@@ -125,7 +251,7 @@ orientOutputSchema = Schema
               ]
           , "function_extracted" .= object
               [ "type" .= ("string" :: Text)
-              , "description" .= ("Function of space if user mentioned it" :: Text)
+              , "description" .= ("Function of space - what it's FOR. Extract from descriptions like 'computer desk' → 'computer work', 'home office' → 'office work', 'where I sleep' → 'sleeping'. Always extract if user describes the space's purpose." :: Text)
               ]
           , "anchors_extracted" .= object
               [ "type" .= ("array" :: Text)
@@ -179,6 +305,7 @@ actOutputSchema = Schema
   { schemaDescription = "Response to send to user"
   , schemaJSON = object
       [ "type" .= ("object" :: Text)
+      , "additionalProperties" .= False
       , "properties" .= object
           [ "response" .= object
               [ "type" .= ("string" :: Text)
@@ -238,6 +365,7 @@ photoAnalysisSchema = Schema
   { schemaDescription = "Analysis of room photo for tidying"
   , schemaJSON = object
       [ "type" .= ("object" :: Text)
+      , "additionalProperties" .= False
       , "properties" .= object
           [ "room_type" .= object
               [ "type" .= ("string" :: Text)

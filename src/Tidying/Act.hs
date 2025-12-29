@@ -110,6 +110,9 @@ cannedResponse = \case
   AskWhereLive ->
     Just "Desk or somewhere else?"
 
+  AskItemDecision item ->
+    Just $ item <> ". Trash, keep, or not sure?"
+
   -- Simple instructions
   InstructTrash ->
     Just "Trash. Toss it by the door. Next."

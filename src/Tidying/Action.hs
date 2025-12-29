@@ -23,6 +23,7 @@ data Action
   | AskAnchors           -- ^ "What's definitely staying?"
   | AskWhatIsIt          -- ^ "What is it?"
   | AskWhereLive         -- ^ "Desk or elsewhere?"
+  | AskItemDecision Text -- ^ "Trash, keep, or not sure?" (item = Text)
 
   -- Instructions (sorting)
   | FirstInstruction     -- ^ Initial momentum-building action
@@ -53,6 +54,7 @@ isQuestion AskFunction = True
 isQuestion AskAnchors = True
 isQuestion AskWhatIsIt = True
 isQuestion AskWhereLive = True
+isQuestion (AskItemDecision _) = True
 isQuestion EnergyCheck = True
 isQuestion _ = False
 

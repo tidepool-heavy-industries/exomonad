@@ -21,8 +21,12 @@
 -- - Complex actions: first instruction, decision aid, summary, etc.
 
 module Tidying.Templates
-  ( -- * System prompts
-    renderOrientPrompt
+  ( -- * Extract prompt (new extraction-first approach)
+    renderExtractPrompt
+  , extractSchema
+
+    -- * System prompts (legacy)
+  , renderOrientPrompt
   , renderActPrompt
   , renderPhotoAnalysisPrompt
 
@@ -44,13 +48,50 @@ import Data.Text qualified as T
 import Tidying.State
 import Tidying.Context (TidyingContext(..), PilesSummary(..), PhotoAnalysis(..))
 import Tidying.Action
-import Tidying.Output (orientOutputSchema, actOutputSchema)
+import Tidying.Output (orientOutputSchema, actOutputSchema, extractSchema)
 
 -- ══════════════════════════════════════════════════════════════
--- ORIENT PROMPT
+-- EXTRACT PROMPT (new extraction-first approach)
 -- ══════════════════════════════════════════════════════════════
 
--- | Render the ORIENT system prompt
+-- | Render the EXTRACT system prompt
+-- LLM extracts facts from user input; Haskell decides what to do
+renderExtractPrompt :: Text
+renderExtractPrompt = T.unlines
+  [ "Extract information from user message about tidying."
+  , ""
+  , "Examples:"
+  , "- \"desk messy\" → {\"intent\":\"start\"}"
+  , "- \"my computer area\" → {\"intent\":\"start\"}"
+  , "- \"old magazine\" → {\"intent\":\"item\",\"item\":\"old magazine\"}"
+  , "- \"broken headphones\" → {\"intent\":\"item\",\"item\":\"broken headphones\"}"
+  , "- \"trash it\" → {\"intent\":\"decided\",\"choice\":\"trash\"}"
+  , "- \"throw away\" → {\"intent\":\"decided\",\"choice\":\"trash\"}"
+  , "- \"keep\" → {\"intent\":\"decided\",\"choice\":\"keep\"}"
+  , "- \"drawer\" → {\"intent\":\"decided\",\"choice\":\"place\",\"place\":\"drawer\"}"
+  , "- \"put in closet\" → {\"intent\":\"decided\",\"choice\":\"place\",\"place\":\"closet\"}"
+  , "- \"not sure\" → {\"intent\":\"help\"}"
+  , "- \"idk\" → {\"intent\":\"help\"}"
+  , "- \"next\" → {\"intent\":\"continue\"}"
+  , "- \"done\" → {\"intent\":\"stop\"}"
+  , "- \"tired\" → {\"intent\":\"stop\"}"
+  , ""
+  , "Rules:"
+  , "- If they describe a space/area → intent=start"
+  , "- If they name an object → intent=item with item name"
+  , "- If they say what to do with it → intent=decided with choice"
+  , "- If unsure/stuck/help → intent=help"
+  , "- If ready for next/continue → intent=continue"
+  , "- If done/stop/tired → intent=stop"
+  , ""
+  , "Output JSON only."
+  ]
+
+-- ══════════════════════════════════════════════════════════════
+-- ORIENT PROMPT (legacy)
+-- ══════════════════════════════════════════════════════════════
+
+-- | Render the ORIENT system prompt (legacy - use renderExtractPrompt instead)
 -- This prompt helps the LLM classify what situation the user is in
 renderOrientPrompt :: TidyingContext -> Text
 renderOrientPrompt ctx = T.unlines
@@ -81,15 +122,22 @@ renderOrientPrompt ctx = T.unlines
   , ""
   , "# Task"
   , ""
-  , "Classify the situation. Look for:"
-  , "- Overwhelm signals: \"idk\", \"too much\", \"where to start\""
-  , "- Stop signals: \"stop\", \"tired\", \"later\""
-  , "- Continue signals: \"next\", \"more\", \"keep going\""
-  , "- Item descriptions: what they're holding"
-  , "- Anxiety: \"freaks me out\", \"hate\", avoiding something"
-  , "- Stuck/uncertain: \"not sure\", \"maybe\", hesitation"
+  , "Do TWO things:"
   , ""
-  , "Output your classification as JSON."
+  , "1. CLASSIFY the situation (required):"
+  , "   - Overwhelm signals: \"idk\", \"too much\" → 'overwhelmed'"
+  , "   - Stop signals: \"stop\", \"tired\" → 'wants_stop'"
+  , "   - Item descriptions → 'item_trash/item_belongs/item_unsure'"
+  , "   - General response/info → 'action_done'"
+  , ""
+  , "2. EXTRACT information (if present):"
+  , "   - function_extracted: what the space is FOR"
+  , "   - anchors_extracted: things that definitely stay"
+  , "   - item_name: if they described an item"
+  , ""
+  , "IMPORTANT: If user provides ANY info about the space's purpose, extract it!"
+  , ""
+  , "Output as JSON."
   ]
   where
     formatList [] = "(none)"
@@ -113,9 +161,18 @@ surveyingGuidance = T.unlines
   , "1. What is this space FOR? (function)"
   , "2. What definitely STAYS? (anchors)"
   , ""
-  , "If user hasn't told us function yet, situation is 'need_function'."
-  , "If they seem overwhelmed and we have photos, situation is 'overwhelmed'."
-  , "If they give us function info, extract it."
+  , "IMPORTANT: If user describes the space, EXTRACT THE FUNCTION."
+  , ""
+  , "Examples of function extraction:"
+  , "- 'it's my computer desk' → function_extracted: 'computer work'"
+  , "- 'home office for design' → function_extracted: 'design work'"
+  , "- 'this is where I sleep' → function_extracted: 'sleeping'"
+  , "- 'storage closet' → function_extracted: 'storage'"
+  , ""
+  , "When you extract function, set situation to 'action_done' (they answered)."
+  , "Only use 'need_function' if they gave NO information about what the space is for."
+  , ""
+  , "If they seem overwhelmed ('idk', 'too much'), situation is 'overwhelmed'."
   ]
 
 sortingGuidance :: Text

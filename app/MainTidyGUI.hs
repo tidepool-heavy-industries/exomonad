@@ -13,7 +13,6 @@
 module Main where
 
 import Control.Concurrent (forkIO)
-import Graphics.UI.Threepenny.Core (liftIO)
 
 import Tidying.State (newSession, SessionState(..), Phase)
 import Tidying.GUI.App (tidyingGUISetup, defaultTidyingGUIConfig)
@@ -30,6 +29,11 @@ main = do
   -- Create the bridge with initial session state
   bridge <- newGUIBridge newSession
 
+  -- Spawn agent loop ONCE (not per-connection!)
+  -- The agent thread persists across browser reconnects
+  _ <- forkIO $ tidyingGameLoopWithGUI bridge
+  putStrLn "Tidepool GUI running at http://localhost:8024"
+
   -- Start the server
   let config = defaultServerConfig
         { scPort = 8024
@@ -37,12 +41,8 @@ main = do
         }
 
   startServer config $ \window -> do
-    -- Set up GUI first
+    -- Set up GUI for this connection (can happen multiple times)
     tidyingGUISetup defaultTidyingGUIConfig bridge getPhase window
-
-    -- Spawn agent loop in background thread
-    _ <- liftIO $ forkIO $ tidyingGameLoopWithGUI bridge
-    pure ()
 
 -- | Get phase from session state (workaround for HasField)
 getPhase :: SessionState -> Phase

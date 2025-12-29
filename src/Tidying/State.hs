@@ -67,6 +67,8 @@ data SessionState = SessionState
     -- ^ Emergent categories from splitting ("cables" -> [items])
   , currentCategory :: Maybe Text
     -- ^ Which sub-category we're refining (if any)
+  , currentItem     :: Maybe Text
+    -- ^ Item currently being discussed (for context when user says "trash it")
   , itemsProcessed  :: Int
     -- ^ Count for progress tracking
   , lastAnxiety     :: Maybe Text
@@ -84,6 +86,7 @@ newSession = SessionState
   , piles = emptyPiles
   , emergentCats = Map.empty
   , currentCategory = Nothing
+  , currentItem = Nothing
   , itemsProcessed = 0
   , lastAnxiety = Nothing
   , sessionStart = Nothing
