@@ -38,14 +38,14 @@ module DM.Templates
 import DM.Context
 import DM.Output
 import DM.State (WorldState, DMMood(..))
-import DM.Tools (DMEffects, DMEvent, dmToolList, Choose, SpendDie, Engage, Resolve, Accept, AcceptBargain, Retreat, PassOut)
+import DM.Tools (DMEffects, DMEvent, dmToolList, SetSceneStyle, Choose, SpendDie, Engage, Resolve, Accept, AcceptBargain, Retreat, PassOut)
 import Tidepool.Template
 import Tidepool.Schema
 import Data.Text (Text)
 import Text.Parsec.Pos (SourcePos)
 
 -- | Type alias for the full DM tool list
-type DMTools = '[Choose, SpendDie, Engage, Resolve, Accept, AcceptBargain, Retreat, PassOut]
+type DMTools = '[SetSceneStyle, Choose, SpendDie, Engage, Resolve, Accept, AcceptBargain, Retreat, PassOut]
 
 -- ══════════════════════════════════════════════════════════════
 -- TYPED JINJA TEMPLATES
@@ -107,7 +107,7 @@ compressionTemplate' = Template
 sceneTemplate :: Template DMContext TurnOutput DMEvent WorldState DMEffects DMTools
 sceneTemplate = Template
   { templateJinja = sceneJinja
-  , templateOutputSchema = turnOutputSchema
+  , templateOutputSchema = sceneSchema
   , templateTools = dmToolList
   }
 
@@ -115,7 +115,7 @@ sceneTemplate = Template
 actionTemplate :: Template DMContext TurnOutput DMEvent WorldState DMEffects DMTools
 actionTemplate = Template
   { templateJinja = actionJinja
-  , templateOutputSchema = turnOutputSchema
+  , templateOutputSchema = actionSchema
   , templateTools = dmToolList
   }
 
@@ -123,7 +123,7 @@ actionTemplate = Template
 aftermathTemplate :: Template DMContext TurnOutput DMEvent WorldState DMEffects DMTools
 aftermathTemplate = Template
   { templateJinja = aftermathJinja
-  , templateOutputSchema = turnOutputSchema
+  , templateOutputSchema = aftermathSchema
   , templateTools = dmToolList
   }
 
@@ -131,7 +131,7 @@ aftermathTemplate = Template
 downtimeTemplate :: Template DMContext TurnOutput DMEvent WorldState DMEffects DMTools
 downtimeTemplate = Template
   { templateJinja = downtimeJinja
-  , templateOutputSchema = turnOutputSchema
+  , templateOutputSchema = downtimeSchema
   , templateTools = dmToolList
   }
 
@@ -139,7 +139,7 @@ downtimeTemplate = Template
 traumaTemplate :: Template DMContext TurnOutput DMEvent WorldState DMEffects DMTools
 traumaTemplate = Template
   { templateJinja = traumaJinja
-  , templateOutputSchema = turnOutputSchema
+  , templateOutputSchema = traumaSchema
   , templateTools = dmToolList
   }
 
@@ -147,7 +147,7 @@ traumaTemplate = Template
 bargainTemplate :: Template DMContext TurnOutput DMEvent WorldState DMEffects DMTools
 bargainTemplate = Template
   { templateJinja = bargainJinja
-  , templateOutputSchema = turnOutputSchema
+  , templateOutputSchema = bargainSchema
   , templateTools = dmToolList
   }
 
@@ -174,15 +174,48 @@ renderForMood mood ctx = case mood of
   MoodBargain _   -> render bargainTemplate ctx
 
 -- ══════════════════════════════════════════════════════════════
--- SCHEMAS
+-- SCHEMA WRAPPERS (typed Schema for each mood)
 -- ══════════════════════════════════════════════════════════════
 
--- | Schema for the main turn output structure
-turnOutputSchema :: Schema TurnOutput
-turnOutputSchema = Schema
-  { schemaJSON = schemaToValue turnOutputJSONSchema
-  , schemaDescription = "DM turn output with narration and world state mutations"
+sceneSchema :: Schema TurnOutput
+sceneSchema = Schema
+  { schemaJSON = schemaToValue sceneOutputSchema
+  , schemaDescription = "Scene: narration + affordances. No stress/heat."
   }
+
+actionSchema :: Schema TurnOutput
+actionSchema = Schema
+  { schemaJSON = schemaToValue actionOutputSchema
+  , schemaDescription = "Action: frame tension, call spend_die. Mechanics in tool."
+  }
+
+aftermathSchema :: Schema TurnOutput
+aftermathSchema = Schema
+  { schemaJSON = schemaToValue aftermathOutputSchema
+  , schemaDescription = "Aftermath: land consequences, echo forward."
+  }
+
+downtimeSchema :: Schema TurnOutput
+downtimeSchema = Schema
+  { schemaJSON = schemaToValue downtimeOutputSchema
+  , schemaDescription = "Downtime: recovery montage. The ONLY place healing happens."
+  }
+
+traumaSchema :: Schema TurnOutput
+traumaSchema = Schema
+  { schemaJSON = schemaToValue traumaOutputSchema
+  , schemaDescription = "Trauma: breaking point. Assign scar, reset stress."
+  }
+
+bargainSchema :: Schema TurnOutput
+bargainSchema = Schema
+  { schemaJSON = schemaToValue bargainOutputSchema
+  , schemaDescription = "Bargain: out of dice. Present desperate options."
+  }
+
+-- | Legacy schema alias (for dmTurnTemplate backwards compat)
+turnOutputSchema :: Schema TurnOutput
+turnOutputSchema = sceneSchema  -- Default to scene
 
 -- | Schema for scene compression output
 compressionOutputSchema :: Schema CompressionOutput
@@ -192,31 +225,140 @@ compressionOutputSchema = Schema
   }
 
 -- ══════════════════════════════════════════════════════════════
--- TURN OUTPUT SCHEMA
+-- TURN OUTPUT SCHEMAS (MOOD-SPECIFIC)
+-- Each mood has exactly the fields it needs, nothing more.
 -- ══════════════════════════════════════════════════════════════
 
-turnOutputJSONSchema :: JSONSchema
-turnOutputJSONSchema = objectSchema
+-- | SCENE: Presenting fiction, offering affordances
+-- No stress/heat - those flow through dice
+sceneOutputSchema :: JSONSchema
+sceneOutputSchema = objectSchema
   [ ("narration", describeField "narration"
-      "Narrative prose describing what happens, including any NPC dialogue."
+      "Narrative prose. NPC dialogue inline. End on an affordance or hook."
       (emptySchema TString))
-  , ("stressDelta", describeField "stressDelta"
-      "Change in stress (-9 to +9, 0 if no change)"
-      (emptySchema TInteger))
   , ("coinDelta", describeField "coinDelta"
-      "Change in coin (0 if no change)"
-      (emptySchema TInteger))
-  , ("heatDelta", describeField "heatDelta"
-      "Change in heat (0 to +4). Violence, loud actions, Bluecoat attention."
+      "Direct transactions only (bought drink, paid informant). Usually 0."
       (emptySchema TInteger))
   , ("continueScene", describeField "continueScene"
-      "True to continue the scene, false to end it"
+      "True to continue, false to end scene"
       (emptySchema TBoolean))
   , ("suggestedActions", describeField "suggestedActions"
-      "2-3 short suggested next actions for the player (3-8 words each)"
+      "2-3 short next actions (3-8 words). One safe, one risky."
       (arraySchema (emptySchema TString)))
   ]
-  ["narration", "stressDelta", "coinDelta", "heatDelta", "continueScene", "suggestedActions"]
+  ["narration", "continueScene", "suggestedActions"]
+
+-- | ACTION: Dice resolution via structured output
+-- diceAction is REQUIRED - player chooses, game applies
+actionOutputSchema :: JSONSchema
+actionOutputSchema = objectSchema
+  [ ("narration", describeField "narration"
+      "Frame the tension BEFORE dice. After player chooses, this becomes aftermath."
+      (emptySchema TString))
+  , ("diceAction", describeField "diceAction"
+      "REQUIRED. Precommit outcomes for each die in the pool."
+      (objectSchema
+        [ ("situation", describeField "situation" "What's at stake" (emptySchema TString))
+        , ("position", describeField "position" "Controlled, Risky, or Desperate"
+            (enumSchema ["Controlled", "Risky", "Desperate"]))
+        , ("outcomes", describeField "outcomes"
+            "One outcome per die in pool. outcomes[i] matches pool[i]."
+            (arraySchema $ objectSchema
+              [ ("dieValue", describeField "dieValue" "The die value (must match pool)" (emptySchema TInteger))
+              , ("hint", describeField "hint" "3-8 word preview shown during choice" (emptySchema TString))
+              , ("stressCost", describeField "stressCost" "Stress cost (0-3 typical)" (emptySchema TInteger))
+              , ("heatCost", describeField "heatCost" "Heat cost (0-2 typical)" (emptySchema TInteger))
+              , ("coinDelta", describeField "coinDelta" "Coin change" (emptySchema TInteger))
+              , ("narrative", describeField "narrative" "1-3 sentences revealed after choice" (emptySchema TString))
+              ]
+              ["dieValue", "hint", "stressCost", "heatCost", "coinDelta", "narrative"]))
+        ]
+        ["situation", "position", "outcomes"]))
+  , ("continueScene", describeField "continueScene"
+      "True to continue after resolution"
+      (emptySchema TBoolean))
+  , ("suggestedActions", describeField "suggestedActions"
+      "2-3 next actions based on outcome"
+      (arraySchema (emptySchema TString)))
+  ]
+  ["narration", "diceAction", "continueScene", "suggestedActions"]
+
+-- | AFTERMATH: Consequences landed, echoing forward
+-- Coin for loot/payout, descriptions for future echoing
+aftermathOutputSchema :: JSONSchema
+aftermathOutputSchema = objectSchema
+  [ ("narration", describeField "narration"
+      "What the outcome means. One paragraph, then agency back to player."
+      (emptySchema TString))
+  , ("coinDelta", describeField "coinDelta"
+      "Loot found, job payout, stolen goods. 0 if none."
+      (emptySchema TInteger))
+  , ("continueScene", describeField "continueScene"
+      "True to continue, false to end"
+      (emptySchema TBoolean))
+  , ("suggestedActions", describeField "suggestedActions"
+      "2-3 next actions: recover, press on, deal with fallout"
+      (arraySchema (emptySchema TString)))
+  , ("costDescription", describeField "costDescription"
+      "If costly: describe the price paid for echoing later. Null if clean."
+      (nullableSchema (emptySchema TString)))
+  , ("threatDescription", describeField "threatDescription"
+      "If unresolved threat: describe it for surfacing later. Null if resolved."
+      (nullableSchema (emptySchema TString)))
+  ]
+  ["narration", "continueScene", "suggestedActions"]
+
+-- | DOWNTIME: Recovery montage - the ONLY place healing happens
+downtimeOutputSchema :: JSONSchema
+downtimeOutputSchema = objectSchema
+  [ ("narration", describeField "narration"
+      "Montage of passing time. Compress hours/days into moments."
+      (emptySchema TString))
+  , ("stressHealed", describeField "stressHealed"
+      "Stress recovered (positive number). 1-3 for short rest, 4-6 for extended."
+      (emptySchema TInteger))
+  , ("heatDecay", describeField "heatDecay"
+      "Heat that fades with time (positive number). 0-2 typical."
+      (emptySchema TInteger))
+  , ("diceRecovered", describeField "diceRecovered"
+      "Dice restored to pool. Full rest = full pool."
+      (emptySchema TInteger))
+  , ("timeElapsed", describeField "timeElapsed"
+      "How much time passed: 'a few hours', 'three days', 'a week'"
+      (emptySchema TString))
+  , ("hookDescription", describeField "hookDescription"
+      "What pulls them back to action. A knock, a rumor, a clock ticking."
+      (emptySchema TString))
+  ]
+  ["narration", "stressHealed", "diceRecovered", "timeElapsed", "hookDescription"]
+
+-- | TRAUMA: Breaking point - stress reset, scar gained
+traumaOutputSchema :: JSONSchema
+traumaOutputSchema = objectSchema
+  [ ("narration", describeField "narration"
+      "The moment they break. Visceral, specific, unforgettable."
+      (emptySchema TString))
+  , ("traumaAssigned", describeField "traumaAssigned"
+      "REQUIRED. The scar: Cold, Haunted, Obsessed, Paranoid, Reckless, Soft, Vicious, Volatile (or invent)"
+      (emptySchema TString))  -- String not enum - allow creative trauma names
+  , ("suggestedActions", describeField "suggestedActions"
+      "What now? Usually: rest, regroup, process"
+      (arraySchema (emptySchema TString)))
+  ]
+  ["narration", "traumaAssigned", "suggestedActions"]  -- traumaAssigned is REQUIRED
+
+-- | BARGAIN: Out of dice, desperate measures
+-- Lean - tools handle the mechanics
+bargainOutputSchema :: JSONSchema
+bargainOutputSchema = objectSchema
+  [ ("narration", describeField "narration"
+      "Present the desperate situation. What can they bargain with?"
+      (emptySchema TString))
+  , ("suggestedActions", describeField "suggestedActions"
+      "Options: accept the cost, retreat if possible, or collapse"
+      (arraySchema (emptySchema TString)))
+  ]
+  ["narration", "suggestedActions"]
 
 -- ══════════════════════════════════════════════════════════════
 -- COMPRESSION OUTPUT SCHEMA

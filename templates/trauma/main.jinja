@@ -66,8 +66,9 @@ Brief moment of clarity. They're different now. Stress resets to 0.
 They can continue - but they carry this scar forever.
 
 **Mechanical effects:**
-- Set `stressDelta: -9` to reset stress to 0
-- Narrate the trauma they've gained (output includes no trauma field - it's narrative)
+- Set `traumaAssigned` to the trauma name (e.g. "Cold", "Haunted", "Paranoid")
+- Stress will automatically reset to 0 when trauma is assigned
+- Set `stressDelta: 0` (trauma handles the reset)
 - Set `continueScene: true` - they can keep playing
 </guidance>
 

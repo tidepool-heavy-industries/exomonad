@@ -31,7 +31,7 @@ import qualified Data.Text as T
 import Graphics.UI.Threepenny.Core
 import qualified Graphics.UI.Threepenny as UI
 
-import DM.State (Trauma(..))
+import DM.State (Trauma(..), OutcomeTier(..))
 import DM.Tools (DMEvent(..))
 
 -- | Event severity levels for styling
@@ -58,8 +58,10 @@ formatEvent event = case event of
   NPCSpoke _ _ -> Nothing
   PlayerAsked _ -> Nothing
 
-  -- Die spent - shown as part of action narrative
-  DieSpent _ _ _ -> Nothing
+  -- Die spent - show outcome tier and narrative prominently
+  DieSpent dieVal tier narrative ->
+    Just $ formatEventEntry "OUTCOME" (tierToSeverity tier) $
+      tierLabel tier <> " (die: " <> T.pack (show dieVal) <> ")\n" <> narrative
 
   -- Compression - shown as divider
   SceneCompressed summary ->
@@ -197,15 +199,17 @@ renderEventEntry txt = do
         SeverityPositive -> "state-event-positive"
         SeverityInfo     -> "state-event-info"
         SeverityBargain  -> "state-event-bargain"
-      -- Special class for trauma events
-      extraClass = if eventType == "TRAUMA" then " state-event-trauma" else ""
+      -- Special class for trauma and outcome events
+      extraClass = case eventType of
+        "TRAUMA"  -> " state-event-trauma"
+        "OUTCOME" -> " state-event-outcome"
+        _         -> ""
 
   entry <- UI.div # set (attr "class") (baseClass <> " " <> severityClass <> extraClass)
 
-  -- Icon based on event type
-  let icon = eventTypeIcon eventType
-  iconEl <- UI.span #. "state-event-icon"
-    # set text (T.unpack icon)
+  -- Icon based on event type (Font Awesome)
+  let iconClass = eventTypeIcon eventType
+  iconEl <- mkElement "i" # set (attr "class") ("state-event-icon " <> T.unpack iconClass)
 
   -- Label (event type)
   labelEl <- UI.span #. "state-event-label"
@@ -245,16 +249,35 @@ renderEventEntry txt = do
       | T.isPrefixOf "You are now:" line = UI.div # set style [("display", "none")]  -- Hide this, shown as badge
       | otherwise = UI.div # set text (T.unpack line)
 
--- | Get icon for event type
+-- | Map outcome tier to display severity
+tierToSeverity :: OutcomeTier -> EventSeverity
+tierToSeverity tier = case tier of
+  Critical -> SeverityPositive   -- Gold/success
+  Success  -> SeverityPositive   -- Green/success
+  Partial  -> SeverityWarning    -- Amber/warning
+  Bad      -> SeverityWarning    -- Red/warning
+  Disaster -> SeverityCritical   -- Deep red/critical
+
+-- | Human-readable tier label
+tierLabel :: OutcomeTier -> Text
+tierLabel tier = case tier of
+  Critical -> "CRITICAL SUCCESS"
+  Success  -> "SUCCESS"
+  Partial  -> "PARTIAL SUCCESS"
+  Bad      -> "BAD OUTCOME"
+  Disaster -> "DISASTER"
+
+-- | Get Font Awesome icon class for event type
 eventTypeIcon :: Text -> Text
 eventTypeIcon eventType = case eventType of
-  "STRESS" -> "◆"
-  "TRAUMA" -> "✧"
-  "HEAT"   -> "△"
-  "WANTED" -> "⚠"
-  "COIN"   -> "◎"
-  "DICE"   -> "⚀"
-  "BARGAIN"-> "⚖"
-  "CLOCK"  -> "◐"
-  "SCENE"  -> "─"
-  _        -> "•"
+  "STRESS"  -> "fa-solid fa-heart-crack"
+  "TRAUMA"  -> "fa-solid fa-skull"
+  "HEAT"    -> "fa-solid fa-fire"
+  "WANTED"  -> "fa-solid fa-bullseye"
+  "COIN"    -> "fa-solid fa-coins"
+  "DICE"    -> "fa-solid fa-dice"
+  "BARGAIN" -> "fa-solid fa-handshake"
+  "CLOCK"   -> "fa-solid fa-clock"
+  "SCENE"   -> "fa-solid fa-film"
+  "OUTCOME" -> "fa-solid fa-dice-d20"   -- D20 for outcome
+  _         -> "fa-solid fa-circle"

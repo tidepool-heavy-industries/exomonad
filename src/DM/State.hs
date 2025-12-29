@@ -90,12 +90,22 @@ module DM.State
   , SceneSummary(..)
   , Stakes(..)
   , Tone(..)
+    -- ** Scene Style (compositional axes)
+  , SceneStyle(..)
+  , Atmosphere(..)
+  , Pressure(..)
+  , ClassRegister(..)
+  , defaultSceneStyle
 
     -- * BetweenScenes
   , BetweenScenesOption(..)
   , ClockSummary(..)
   , BetweenScenesContext(..)
   , optionLabel
+
+    -- * Entanglement (Heat Escalation)
+  , EntanglementOutput(..)
+  , EscapeOption(..)
 
     -- * Misc
   , Duration(..)
@@ -741,11 +751,52 @@ data Tension
 -- SCENES
 -- ══════════════════════════════════════════════════════════════
 
+-- | Scene style axes - three orthogonal dimensions that combine
+-- to generate prose style guidance. Each value contributes a "shard"
+-- of prose rules that stack additively.
+data SceneStyle = SceneStyle
+  { ssAtmosphere :: Atmosphere    -- Supernatural presence
+  , ssPressure :: Pressure        -- Tension/urgency level
+  , ssClass :: ClassRegister      -- Social register of the space
+  }
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+
+-- | Supernatural presence axis
+data Atmosphere
+  = Mundane       -- Normal world, ghosts are distant
+  | Liminal       -- Edges of the real, something's not quite right
+  | Supernatural  -- Ghosts pressing close, electroplasm active
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+
+-- | Tension/urgency axis
+data Pressure
+  = PressureCalm      -- Breathing room, time to think
+  | PressureWatchful  -- Something's coming, attention split
+  | PressureUrgent    -- Walls closing in, no time
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+
+-- | Social register axis
+data ClassRegister
+  = Gutter        -- Poverty, desperation, raw survival
+  | Street        -- Working class, criminal, practical
+  | Salon         -- Wealth, refinement, hidden daggers
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+
+-- | Default scene style
+defaultSceneStyle :: SceneStyle
+defaultSceneStyle = SceneStyle
+  { ssAtmosphere = Mundane
+  , ssPressure = PressureWatchful
+  , ssClass = Street
+  }
+
 data ActiveScene = ActiveScene
   { sceneLocation :: LocationId
   , scenePresent :: [NpcId]
   , sceneStakes :: Stakes
   , sceneBeats :: Seq SceneBeat
+  -- NEW: Compositional style axes
+  , sceneStyle :: SceneStyle
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
@@ -910,6 +961,38 @@ instance ToGVal m BetweenScenesOption where toGVal = genericToGVal
 instance ToGVal m ClockSummary where toGVal = genericToGVal
 instance ToGVal m BetweenScenesContext where toGVal = genericToGVal
 
+-- ══════════════════════════════════════════════════════════════
+-- ENTANGLEMENT (Heat Escalation)
+-- ══════════════════════════════════════════════════════════════
+
+-- | LLM-generated entanglement scenario when heat reaches max
+-- This is generated via structured output during BetweenScenes
+data EntanglementOutput = EntanglementOutput
+  { eoType :: Text
+    -- ^ Type: "raid", "shakedown", "warrant", "informant", "reprisal"
+  , eoNarration :: Text
+    -- ^ 2-3 sentences describing what's happening
+  , eoOptions :: [EscapeOption]
+    -- ^ 3 ways to respond with different costs
+  }
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+
+-- | An escape option for resolving an entanglement
+data EscapeOption = EscapeOption
+  { eoLabel :: Text
+    -- ^ Display label: "Pay the bribe", "Fight your way out"
+  , eoCostType :: Text
+    -- ^ Cost type: "coin", "stress", "heat"
+  , eoCostAmount :: Int
+    -- ^ How much of that resource is consumed
+  , eoResolution :: Text
+    -- ^ 1 sentence describing outcome if chosen
+  }
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+
+instance ToGVal m EntanglementOutput where toGVal = genericToGVal
+instance ToGVal m EscapeOption where toGVal = genericToGVal
+
 -- Locations
 instance ToGVal m LocationId where toGVal = genericToGVal
 instance ToGVal m Location where toGVal = genericToGVal
@@ -929,6 +1012,10 @@ instance ToGVal m ActiveScene where toGVal = genericToGVal
 instance ToGVal m SceneBeat where toGVal = genericToGVal
 instance ToGVal m Stakes where toGVal = genericToGVal
 instance ToGVal m Tone where toGVal = genericToGVal
+instance ToGVal m SceneStyle where toGVal = genericToGVal
+instance ToGVal m Atmosphere where toGVal = genericToGVal
+instance ToGVal m Pressure where toGVal = genericToGVal
+instance ToGVal m ClassRegister where toGVal = genericToGVal
 
 -- Misc
 instance ToGVal m Duration where toGVal = genericToGVal

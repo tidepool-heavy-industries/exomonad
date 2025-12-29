@@ -1,0 +1,137 @@
+{# _shared/style_shards.jinja - Compositional prose style based on scene axes #}
+{# Each axis contributes prose rules that stack additively #}
+
+{# ═══════════════════════════════════════════════════════════════════════════ #}
+{# ATMOSPHERE AXIS: Supernatural presence                                      #}
+{# ═══════════════════════════════════════════════════════════════════════════ #}
+
+{% macro atmosphere_shard(atmosphere) %}
+{% if atmosphere == "Mundane" %}
+<style_atmosphere>
+**ATMOSPHERE: MUNDANE**
+The world behaves. Physics works. Ghosts are stories.
+- Describe the industrial: soot, smoke, labor, commerce
+- NPCs are just people with human concerns
+- Light comes from gas-lamps and electroplasm, nothing strange about it
+- The supernatural is distant, abstract, someone else's problem
+</style_atmosphere>
+{% elif atmosphere == "Liminal" %}
+<style_atmosphere>
+**ATMOSPHERE: LIMINAL**
+Something's not right. The character notices before they understand.
+- Wrongnesses accumulate in small details: angles that shouldn't be, sounds that echo wrong
+- Peripheral vision catches movement that isn't there when you look directly
+- Electroplasm flickers in patterns that almost mean something
+- NPCs pause mid-sentence, lose their train of thought, glance at nothing
+- Temperature drops. Hair stands up. The back of the neck prickles.
+- Don't explain. Let the wrongness build.
+</style_atmosphere>
+{% elif atmosphere == "Supernatural" %}
+<style_atmosphere>
+**ATMOSPHERE: SUPERNATURAL**
+The veil is thin. The dead are close. The impossible is happening.
+- Ghosts are present: glimpsed, heard, felt pressing against the lightning barriers
+- Electroplasm pulses with intent, flows wrong, pools in impossible places
+- The possessed show it: wrong eyes, wrong voice, wrong knowledge
+- Spirit Wardens are near or should be called
+- Physical reality has become negotiable
+- Describe what shouldn't be possible as if it's simply true
+</style_atmosphere>
+{% endif %}
+{% endmacro %}
+
+{# ═══════════════════════════════════════════════════════════════════════════ #}
+{# PRESSURE AXIS: Tension/urgency level                                        #}
+{# ═══════════════════════════════════════════════════════════════════════════ #}
+
+{% macro pressure_shard(pressure) %}
+{% if pressure == "PressureCalm" %}
+<style_pressure>
+**PRESSURE: CALM**
+Breathing room. Time to think. The walls aren't closing in yet.
+- Longer sentences are fine. Let moments land.
+- Characters can observe details, consider options, make plans
+- Conversations can meander, reveal character, build relationship
+- The scene can breathe. Not everything is urgent.
+- This is the exhale before the next inhale. Use it.
+</style_pressure>
+{% elif pressure == "PressureWatchful" %}
+<style_pressure>
+**PRESSURE: WATCHFUL**
+Something's coming. Attention is split. The default mode of scoundrel life.
+- Balance observation with alertness
+- Characters notice exits, weapons, who's watching
+- Conversations have subtext: what aren't they saying?
+- Moderate sentence length. Not staccato, not languid.
+- The tension is background, not foreground. Present but not overwhelming.
+</style_pressure>
+{% elif pressure == "PressureUrgent" %}
+<style_pressure>
+**PRESSURE: URGENT**
+Walls closing in. No time. Every second costs.
+- Short sentences. Staccato rhythm. Action verbs.
+- Cut description to essentials. What matters NOW.
+- Characters move, react, decide. No time to think.
+- Every beat should raise stakes or change the situation
+- Physical symptoms of stress: tunnel vision, adrenaline, racing heart
+- Compress. 20 words to 10.
+</style_pressure>
+{% endif %}
+{% endmacro %}
+
+{# ═══════════════════════════════════════════════════════════════════════════ #}
+{# CLASS AXIS: Social register of the space                                    #}
+{# ═══════════════════════════════════════════════════════════════════════════ #}
+
+{% macro class_shard(class) %}
+{% if class == "Gutter" %}
+<style_class>
+**CLASS: GUTTER**
+Poverty. Desperation. Raw survival. The bottom of Doskvol.
+- Materials: rotting wood, rust, stagnant water, refuse
+- Light: guttering candles, distant gas-lamps, mostly dark
+- People: hungry, sick, desperate, dangerous
+- Violence is close to the surface. Everyone has a knife.
+- No pretense. Everyone knows what they are.
+- Dialogue is blunt, crude, efficient. No wasted words.
+- The smell: sewage, unwashed bodies, desperation
+</style_class>
+{% elif class == "Street" %}
+<style_class>
+**CLASS: STREET**
+Working class, criminal, practical. The mid-tier of Doskvol.
+- Materials: worn but functional, repaired things, honest tools
+- Light: gas-lamps, electro-lights in taverns, working conditions
+- People: laborers, shopkeeps, gang members, working criminals
+- Violence is professional, not desperate. Business, not survival.
+- Codes and respect matter. Reputation is currency.
+- Dialogue has slang, shorthand, assumed knowledge
+- The smell: coal smoke, beer, sweat, industry
+</style_class>
+{% elif class == "Salon" %}
+<style_class>
+**CLASS: SALON**
+Wealth, refinement, hidden daggers. The top of Doskvol.
+- Materials: polished wood, velvet, crystal, things that cost
+- Light: brilliant electroplasm, chandeliers, strategic shadow
+- People: nobles, merchants, politicians, their servants and guards
+- Violence is concealed, delegated, deniable. Poison over blade.
+- Appearances are everything. Every word is calculated.
+- Dialogue is formal, layered, what's not said matters more
+- The smell: perfume covering the same rot
+</style_class>
+{% endif %}
+{% endmacro %}
+
+{# ═══════════════════════════════════════════════════════════════════════════ #}
+{# COMBINED STYLE BLOCK                                                        #}
+{# Call this macro with the scene style to get all three shards               #}
+{# ═══════════════════════════════════════════════════════════════════════════ #}
+
+{% macro scene_style_block(style) %}
+<scene_style>
+{{ atmosphere_shard(style.ssAtmosphere) }}
+{{ pressure_shard(style.ssPressure) }}
+{{ class_shard(style.ssClass) }}
+</scene_style>
+{% endmacro %}

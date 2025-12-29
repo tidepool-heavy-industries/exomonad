@@ -28,9 +28,10 @@ module DM.Loop
 
 import DM.State
 import DM.Context (buildDMContext, buildCompressionContext, DMContext(..))
-import DM.Output (TurnOutput(..), CompressionOutput(..), applyTurnOutput, applyCompression)
+import DM.Output (TurnOutput(..), CompressionOutput(..), applyTurnOutput, applyCompression, DiceAction(..), DieOutcome(..))
 import DM.Templates (renderForMood, renderCompression, turnOutputSchema, compressionOutputSchema)
-import DM.Tools (DMEvent(..), dmTools, makeDMDispatcher)
+import DM.Tools (DMEvent(..), dmTools, makeDMDispatcherWithPhase)
+import DM.GUI.Widgets.Events (formatEvent)
 import Tidepool.Effect hiding (ToolResult)
 import Tidepool.Template (Schema(..))
 
@@ -61,7 +62,9 @@ import qualified Tidepool.GUI.Core as GUI (logInfo)
 import Tidepool.GUI.Handler (makeGUIHandler)
 import Tidepool.Anthropic.Http (Message(..), ContentBlock(..), Role(..))
 import Data.Aeson (Value(..))
+import Data.Maybe (catMaybes)
 import qualified Data.Aeson.KeyMap as KM
+import qualified Data.Aeson.Key as Key
 import qualified Data.Vector as V
 import Prelude
 
@@ -195,11 +198,58 @@ dmTurn input = do
                 -- Capture state BEFORE applying output (for accurate delta display)
                 stateBefore <- get @WorldState
 
-                -- Apply structured output to world state
+                -- Process dice action if present (action mode structured output)
+                (finalNarration, diceDeltas) <- case result.trOutput.diceAction of
+                  Just dice -> do
+                    logInfo $ "Processing dice action: " <> dice.situation
+                    let pool = stateBefore.dicePool.poolDice
+                    -- Build dice choices with hints and costs
+                    let diceWithHints =
+                          [ (dieVal, idx, formatHintWithCosts (getOutcomeAt idx dice.outcomes))
+                          | (dieVal, idx) <- zip pool [0..]
+                          ]
+                    -- Show dice to player
+                    selectedIdx <- requestDice (dice.situation <> " (" <> T.pack (show dice.position) <> ")") diceWithHints
+
+                    -- Use actual die from pool (not LLM's claimed dieValue which might be wrong)
+                    let actualDie = pool !! selectedIdx
+                        chosenOutcome = getOutcomeAt selectedIdx dice.outcomes
+                        tier = calculateOutcome dice.position actualDie
+
+                    -- Remove die from pool (use delete to handle duplicates correctly)
+                    let newPool = deleteFirst actualDie pool
+                    modify @WorldState $ \s -> s { dicePool = s.dicePool { poolDice = newPool } }
+
+                    -- Emit dice spent event (use actual die value, not LLM's)
+                    emit (DieSpent actualDie tier chosenOutcome.narrative)
+
+                    -- Auto-transition back to scene mode after dice resolution
+                    -- The action is complete, player has agency again
+                    modify @WorldState $ updateMood (MoodScene (Encounter "action resolved" UrgencyMedium True))
+
+                    -- Return chosen narrative and deltas to apply
+                    return (result.trOutput.narration <> "\n\n" <> chosenOutcome.narrative,
+                            (chosenOutcome.stressCost, chosenOutcome.heatCost, chosenOutcome.coinDelta))
+
+                  Nothing ->
+                    return (result.trOutput.narration, (0, 0, 0))
+
+                -- Apply structured output to world state (non-dice deltas)
                 modify (applyTurnOutput result.trOutput)
 
+                -- Apply dice deltas separately (if any)
+                let (stressDelta, heatDelta, coinDeltaFromDice) = diceDeltas
+                when (stressDelta /= 0 || heatDelta /= 0 || coinDeltaFromDice /= 0) $
+                  modify @WorldState $ \s -> s
+                    { player = (s.player)
+                        { stress = clamp 0 9 (s.player.stress + stressDelta)
+                        , heat = clamp 0 10 (s.player.heat + heatDelta)
+                        , coin = max 0 (s.player.coin + coinDeltaFromDice)
+                        }
+                    }
+
                 -- Record DM response as scene beat (for history)
-                let narration = result.trOutput.narration
+                let narration = finalNarration
                 modify $ \s -> case s.phase of
                   PhasePlaying activeScene m ->
                     let beat = DMNarration narration
@@ -308,14 +358,9 @@ checkTraumaTrigger stressBefore = do
   let stressNow = state.player.stress
   when (stressNow >= 9 && stressBefore < 9) $ do
     logWarn "TRAUMA TRIGGERED: Stress hit maximum"
-    -- Emit trauma event for GUI display
-    emit $ TraumaTriggered
-      { ttTrauma = Trauma "pending"  -- LLM will determine actual trauma
-      , ttTrigger = "The pressure finally became too much."
-      , ttBreakingPoint = "Something breaks inside you..."
-      }
-    -- Transition to trauma mood - next turn will use trauma template
-    -- The LLM will narrate the breaking point and assign a trauma
+    -- Don't emit TraumaTriggered yet - wait for LLM to determine the actual trauma
+    -- The trauma turn will narrate the breaking point and assign the trauma
+    -- TraumaTriggered event will be emitted AFTER the trauma turn completes
     let traumaVariant = Breaking
           { tvWhatBroke = "stress overflow"  -- LLM will elaborate
           , tvTraumaType = Trauma "pending"  -- LLM will determine actual trauma
@@ -385,6 +430,17 @@ emitStateChangeEvents before after reason = do
         , boCanRetreat = bv.bvCanRetreat
         }
     _ -> pure ()
+
+  -- Trauma assigned (new trauma in list that wasn't there before)
+  -- pa = after, pb = before (from the let binding at top)
+  let newTraumas = filter (`notElem` pb.trauma) pa.trauma
+  case newTraumas of
+    (newTrauma:_) -> emit $ TraumaTriggered
+      { ttTrauma = newTrauma
+      , ttTrigger = reason
+      , ttBreakingPoint = "The pressure finally became too much."
+      }
+    [] -> pure ()
   where
     isBargainMood (Just (MoodBargain _)) = True
     isBargainMood _ = False
@@ -459,6 +515,7 @@ startScene locationId npcsPresent stakes = modify $ \state ->
         , scenePresent = npcsPresent
         , sceneStakes = stakes
         , sceneBeats = Seq.empty
+        , sceneStyle = defaultSceneStyle
         }
       -- Start with default scene mood
       newMood = defaultMood
@@ -515,6 +572,7 @@ runDMGame initialState handleEvent saveState = do
             , scenePresent = []
             , sceneStakes = Stakes "Establish who you are in Doskvol"
             , sceneBeats = Seq.empty
+            , sceneStyle = defaultSceneStyle
             }
           stateWithScene = initialState
             { phase = PhasePlaying introScene defaultMood
@@ -538,7 +596,7 @@ runDMGame initialState handleEvent saveState = do
         . runChatHistory
         . runLog Debug
         . runRequestInput inputHandler
-        . runLLMWithTools @_ @DMEvent llmConfig makeDMDispatcher
+        . runLLMWithTools @_ @DMEvent llmConfig makeDMDispatcherWithPhase
         $ gameLoopWithSave saveState
 
       TIO.putStrLn "Game ended."
@@ -585,6 +643,7 @@ runDMGameWithDB conn gameId mCursor initialState handleEvent = do
                     , scenePresent = []
                     , sceneStakes = Stakes "Establish who you are in Doskvol"
                     , sceneBeats = Seq.empty
+                    , sceneStyle = defaultSceneStyle
                     })
                   defaultMood
               }
@@ -611,7 +670,7 @@ runDMGameWithDB conn gameId mCursor initialState handleEvent = do
         . runChatHistoryWithDB conn gameId mCursor
         . runLog Debug
         . runRequestInput inputHandler
-        . runLLMWithTools @_ @DMEvent llmConfig makeDMDispatcher
+        . runLLMWithTools @_ @DMEvent llmConfig makeDMDispatcherWithPhase
         $ gameLoopWithDB conn gameId
 
       TIO.putStrLn "Game ended."
@@ -929,7 +988,7 @@ gameLoopWithGUI bridge handleEvent = do
         . runChatHistory
         . runLogWithBridge bridge Debug
         . runRequestInput inputHandler
-        . runLLMWithToolsHooked @_ @DMEvent spinnerHooks llmConfig makeDMDispatcher
+        . runLLMWithToolsHooked @_ @DMEvent spinnerHooks llmConfig makeDMDispatcherWithPhase
         $ guiGameLoop bridge
 
       return ()
@@ -957,6 +1016,9 @@ guiGameLoop bridge = loop
           if T.toLower (T.strip playerInput.piActionText) `elem` ["quit", "exit", "q"]
             then return ()
             else do
+              -- Show player's action in narrative
+              emit (NarrativeAdded $ "> " <> playerInput.piActionText)
+
               -- Run a turn (spinner handled by LLM interpreter hooks)
               response <- dmTurn playerInput
 
@@ -977,6 +1039,7 @@ guiGameLoop bridge = loop
                 , scenePresent = []
                 , sceneStakes = Stakes "Establish who you are in Doskvol"
                 , sceneBeats = Seq.empty
+                , sceneStyle = defaultSceneStyle
                 }
           modify @WorldState $ \s -> s { phase = PhasePlaying introScene defaultMood }
           emit (NarrativeAdded "Who are you? What brings you to Crow's Foot tonight?")
@@ -1073,7 +1136,7 @@ gameLoopWithGUIAndDB conn gameId mCursor bridge handleEvent = do
         . runChatHistoryWithDB conn gameId mCursor
         . runLogWithBridge bridge Debug
         . runRequestInput inputHandler
-        . runLLMWithToolsHooked @_ @DMEvent spinnerHooks llmConfig makeDMDispatcher
+        . runLLMWithToolsHooked @_ @DMEvent spinnerHooks llmConfig makeDMDispatcherWithPhase
         $ guiGameLoopWithDB conn gameId bridge
 
       -- Save final state
@@ -1159,18 +1222,64 @@ extractNarrativeTexts msgs = concatMap extractFromMessage msgs
 
     extractBlock :: ContentBlock -> [Text]
     extractBlock (TextBlock txt)
-      | not (T.null $ T.strip txt) = [txt]
-      | otherwise = []
-    extractBlock (JsonBlock val) = maybeToList $ extractResponseText val
+      | T.null (T.strip txt) = []
+      -- Try to parse as JSON and replay events through formatEvent
+      | Just val <- Aeson.decode (LBS.fromStrict $ TE.encodeUtf8 txt)
+      = replayEventsFromJson val
+      -- Not JSON - return raw text
+      | otherwise = [txt]
+    extractBlock (JsonBlock val) = replayEventsFromJson val
     extractBlock _ = []  -- Ignore tool use, thinking, etc.
 
-    -- Parse structured output JSON to get responseText field
-    extractResponseText :: Value -> Maybe Text
-    extractResponseText (Object obj) =
-      case KM.lookup "responseText" obj of
+    -- Reconstruct DMEvents from JSON and format them the same way as live play
+    replayEventsFromJson :: Value -> [Text]
+    replayEventsFromJson val =
+      let events = reconstructEvents val
+          formatted = catMaybes $ map formatEvent events
+          -- Also include raw narrative if present
+          narrative = maybeToList $ extractNarration val
+      in narrative ++ formatted
+
+    -- Reconstruct DMEvent values from stored JSON
+    reconstructEvents :: Value -> [DMEvent]
+    reconstructEvents (Object obj) =
+      let stressDelta = getIntField "stressDelta" obj
+          heatDelta = getIntField "heatDelta" obj
+          coinDelta = getIntField "coinDelta" obj
+      in catMaybes
+           [ if stressDelta /= 0
+             then Just $ StressChanged 0 stressDelta ""
+             else Nothing
+           , if heatDelta /= 0
+             then Just $ HeatChanged 0 heatDelta ""
+             else Nothing
+           , if coinDelta /= 0
+             then Just $ CoinChanged 0 coinDelta ""
+             else Nothing
+           ]
+    reconstructEvents _ = []
+
+    getIntField :: Text -> KM.KeyMap Value -> Int
+    getIntField key obj = case KM.lookup (Key.fromText key) obj of
+      Just (Aeson.Number n) -> round n
+      _ -> 0
+
+    getTextField :: Text -> KM.KeyMap Value -> Text
+    getTextField key obj = case KM.lookup (Key.fromText key) obj of
+      Just (Aeson.String t) -> t
+      _ -> ""
+
+    -- Extract just the narrative text field
+    extractNarration :: Value -> Maybe Text
+    extractNarration (Object obj) =
+      -- Try regular turn output field first
+      case KM.lookup (Key.fromText "narration") obj of
         Just (String t) | not (T.null $ T.strip t) -> Just t
-        _ -> Nothing
-    extractResponseText _ = Nothing
+        _ -> -- Try scenario init fields
+          case KM.lookup (Key.fromText "siSceneNarration") obj of
+            Just (String t) | not (T.null $ T.strip t) -> Just t
+            _ -> Nothing
+    extractNarration _ = Nothing
 
     maybeToList :: Maybe a -> [a]
     maybeToList Nothing = []
@@ -1250,6 +1359,7 @@ guiGameLoopWithDB conn gameId bridge = loop
                         , scenePresent = []
                         , sceneStakes = Stakes scenario.siSceneStakes
                         , sceneBeats = Seq.empty  -- Narration flows through NarrativeAdded events
+                        , sceneStyle = defaultSceneStyle
                         }
 
                   modify $ \s -> s
@@ -1315,6 +1425,9 @@ guiGameLoopWithDB conn gameId bridge = loop
           if T.toLower (T.strip playerInput.piActionText) `elem` ["quit", "exit", "q"]
             then return ()
             else do
+              -- Show player's action in narrative (before DM response)
+              emit (NarrativeAdded $ "> " <> playerInput.piActionText)
+
               logInfo "[Loop] Starting dmTurn..."
 
               -- Run a turn (spinner handled by LLM interpreter hooks)
@@ -1356,6 +1469,11 @@ handleBetweenScenes
 handleBetweenScenes bridge = do
   logInfo "[BetweenScenes] Entering between-scenes phase..."
 
+  -- 0. Check for heat-triggered entanglement FIRST (before clocks tick)
+  initialState <- get @WorldState
+  when (initialState.player.heat >= 10) $ do
+    handleHeatEscalation bridge
+
   -- 1. Tick all threat clocks (time passes between scenes)
   tickThreatClocks
 
@@ -1390,7 +1508,8 @@ handleBetweenScenes bridge = do
   let labeledOptions = [(optionLabel opt, opt) | opt <- options]
   chosenOption <- requestChoice "What do you do?" labeledOptions
 
-  -- 8. Choice made - phase will transition on next action (no need to clear)
+  -- 8. Show player's choice in narrative
+  emit (NarrativeAdded $ "> " <> optionLabel chosenOption)
 
   logInfo $ "[BetweenScenes] Player chose: " <> T.pack (show chosenOption)
 
@@ -1460,6 +1579,220 @@ data TransitionOutput = TransitionOutput { toText :: Text }
 instance Aeson.FromJSON TransitionOutput where
   parseJSON = Aeson.withObject "TransitionOutput" $ \o ->
     TransitionOutput <$> o Aeson..: "text"
+
+-- ══════════════════════════════════════════════════════════════
+-- HEAT ESCALATION
+-- ══════════════════════════════════════════════════════════════
+
+-- | Handle heat-triggered entanglement when heat reaches max (10)
+-- Called at the START of BetweenScenes, before normal options.
+-- Flow:
+--   1. LLM generates entanglement (type, narration, escape options)
+--   2. Player chooses an escape option
+--   3. Apply the option's costs
+--   4. Wanted++, heat resets to 0
+--   5. Continue to normal BetweenScenes
+handleHeatEscalation
+  :: GUIBridge WorldState
+  -> Eff (GameEffects WorldState DMEvent) ()
+handleHeatEscalation _bridge = do
+  logInfo "[Escalation] Heat at max, triggering entanglement..."
+  state <- get @WorldState
+
+  -- Build context-aware prompt
+  let prompt = buildEntanglementPrompt state
+
+  -- Generate entanglement via LLM
+  result <- runTurn @EntanglementOutput prompt "Generate entanglement." entanglementSchemaJSON []
+
+  case result of
+    TurnCompleted (TurnParsed tr) -> do
+      let entanglement = tr.trOutput
+
+      -- Emit the narration (dramatic moment!)
+      emit (NarrativeAdded "")
+      emit (NarrativeAdded "---")
+      emit (NarrativeAdded $ "**ENTANGLEMENT: " <> T.toUpper entanglement.eoType <> "**")
+      emit (NarrativeAdded entanglement.eoNarration)
+
+      -- Build choices from options (include cost in label)
+      let choices = [(formatEscapeOption eo, eo) | eo <- entanglement.eoOptions]
+
+      -- Get player choice
+      chosen <- requestChoice "How do you handle this?" choices
+
+      -- Show player's choice
+      emit (NarrativeAdded $ "> " <> chosen.eoLabel)
+
+      -- Apply the chosen option's costs
+      applyEscapeOption chosen
+
+      -- Emit resolution
+      emit (NarrativeAdded chosen.eoResolution)
+
+      -- Escalate: wanted++, heat reset
+      stateBefore <- get @WorldState
+      modify @WorldState $ \s -> s
+        { player = s.player
+            { wanted = min 4 (s.player.wanted + 1)
+            , heat = 0
+            }
+        }
+      stateAfter <- get @WorldState
+
+      -- Emit state change events
+      emit $ WantedChanged
+        { weFrom = stateBefore.player.wanted
+        , weTo = stateAfter.player.wanted
+        , weReason = "Heat escalation - " <> entanglement.eoType
+        }
+      emit $ HeatChanged
+        { heFrom = stateBefore.player.heat
+        , heTo = 0
+        , heReason = "Entanglement resolved"
+        }
+
+      emit (NarrativeAdded "---")
+      logInfo "[Escalation] Entanglement resolved, continuing to BetweenScenes..."
+
+    TurnCompleted (TurnParseFailed{..}) -> do
+      logWarn $ "Entanglement generation failed: " <> T.pack tpfError
+      -- Fallback: just reset heat and bump wanted without narration
+      applyEscalationFallback
+
+    TurnBroken reason -> do
+      logWarn $ "Entanglement LLM broke: " <> reason
+      applyEscalationFallback
+
+-- | Fallback when entanglement generation fails
+applyEscalationFallback :: Eff (GameEffects WorldState DMEvent) ()
+applyEscalationFallback = do
+  stateBefore <- get @WorldState
+  modify @WorldState $ \s -> s
+    { player = s.player
+        { wanted = min 4 (s.player.wanted + 1)
+        , heat = 0
+        }
+    }
+  stateAfter <- get @WorldState
+  emit (NarrativeAdded "The heat catches up. You're more wanted now.")
+  emit $ WantedChanged
+    { weFrom = stateBefore.player.wanted
+    , weTo = stateAfter.player.wanted
+    , weReason = "Heat escalation"
+    }
+  emit $ HeatChanged
+    { heFrom = stateBefore.player.heat
+    , heTo = 0
+    , heReason = "Heat reset"
+    }
+
+-- | Build the prompt for entanglement generation
+buildEntanglementPrompt :: WorldState -> Text
+buildEntanglementPrompt state = T.unlines
+  [ "You are a noir narrator for a Blades in the Dark game."
+  , "The player's heat has reached maximum. The Bluecoats are closing in."
+  , "Generate an ENTANGLEMENT - a consequence that catches up with them."
+  , ""
+  , "Current state:"
+  , "- Heat: " <> T.pack (show state.player.heat) <> "/10 (MAXIMUM)"
+  , "- Wanted: " <> T.pack (show state.player.wanted) <> "/4"
+  , "- Stress: " <> T.pack (show state.player.stress) <> "/9"
+  , "- Coin: " <> T.pack (show state.player.coin)
+  , ""
+  , "Entanglement types (pick one that fits):"
+  , "- raid: Bluecoats search their hideout/stash"
+  , "- shakedown: Corrupt official demands payment"
+  , "- warrant: Now officially wanted, can't move freely"
+  , "- informant: Someone sold them out"
+  , "- reprisal: Someone they wronged strikes back"
+  , ""
+  , "Provide 3 escape options with escalating costs:"
+  , "- One cheap option (1-2 coin or 1 stress)"
+  , "- One moderate option (2-3 coin or 2 stress)"
+  , "- One desperate option (high stress, 3-4, but no coin)"
+  , ""
+  , "Keep narration tight and atmospheric (2-3 sentences)."
+  , "Each resolution should be 1 sentence."
+  ]
+
+-- | Apply the costs from the chosen escape option
+applyEscapeOption :: EscapeOption -> Eff (GameEffects WorldState DMEvent) ()
+applyEscapeOption opt = do
+  let amount = opt.eoCostAmount
+  case opt.eoCostType of
+    "coin" -> modify @WorldState $ \s ->
+      s { player = s.player { coin = max 0 (s.player.coin - amount) } }
+    "stress" -> modify @WorldState $ \s ->
+      s { player = s.player { stress = min 9 (s.player.stress + amount) } }
+    "heat" -> modify @WorldState $ \s ->
+      s { player = s.player { heat = min 10 (s.player.heat + amount) } }
+    _ -> pure ()  -- Unknown cost type, ignore
+
+-- | Format escape option for display (include cost in label)
+formatEscapeOption :: EscapeOption -> Text
+formatEscapeOption opt =
+  opt.eoLabel <> " (" <> costText <> ")"
+  where
+    costText = case opt.eoCostType of
+      "coin" -> T.pack (show opt.eoCostAmount) <> " coin"
+      "stress" -> "+" <> T.pack (show opt.eoCostAmount) <> " stress"
+      "heat" -> "+" <> T.pack (show opt.eoCostAmount) <> " heat"
+      other -> other <> " " <> T.pack (show opt.eoCostAmount)
+
+-- | JSON Schema for entanglement generation
+entanglementSchemaJSON :: Value
+entanglementSchemaJSON = Object $ KM.fromList
+  [ ("type", String "object")
+  , ("additionalProperties", Bool False)
+  , ("properties", Object $ KM.fromList
+      [ ("eoType", Object $ KM.fromList
+          [ ("type", String "string")
+          , ("enum", Array $ V.fromList
+              [String "raid", String "shakedown", String "warrant", String "informant", String "reprisal"])
+          , ("description", String "Type of entanglement")
+          ])
+      , ("eoNarration", Object $ KM.fromList
+          [ ("type", String "string")
+          , ("description", String "2-3 sentences describing what's happening, tight and atmospheric")
+          ])
+      , ("eoOptions", Object $ KM.fromList
+          [ ("type", String "array")
+          , ("items", escapeOptionSchemaJSON)
+          , ("minItems", Number 3)
+          , ("maxItems", Number 3)
+          , ("description", String "3 escape options with escalating costs")
+          ])
+      ])
+  , ("required", Array $ V.fromList [String "eoType", String "eoNarration", String "eoOptions"])
+  ]
+
+-- | JSON Schema for escape option
+escapeOptionSchemaJSON :: Value
+escapeOptionSchemaJSON = Object $ KM.fromList
+  [ ("type", String "object")
+  , ("additionalProperties", Bool False)
+  , ("properties", Object $ KM.fromList
+      [ ("eoLabel", Object $ KM.fromList
+          [ ("type", String "string")
+          , ("description", String "Short action label, e.g. 'Pay the bribe', 'Fight your way out'")
+          ])
+      , ("eoCostType", Object $ KM.fromList
+          [ ("type", String "string")
+          , ("enum", Array $ V.fromList [String "coin", String "stress", String "heat"])
+          , ("description", String "What resource this costs")
+          ])
+      , ("eoCostAmount", Object $ KM.fromList
+          [ ("type", String "integer")
+          , ("description", String "Amount of the resource consumed (1-4)")
+          ])
+      , ("eoResolution", Object $ KM.fromList
+          [ ("type", String "string")
+          , ("description", String "1 sentence describing what happens if they choose this")
+          ])
+      ])
+  , ("required", Array $ V.fromList [String "eoLabel", String "eoCostType", String "eoCostAmount", String "eoResolution"])
+  ]
 
 -- | Build clock summaries for BetweenScenes display
 buildClockSummaries :: HM.HashMap ClockId Clock -> [ClockSummary]
@@ -1555,6 +1888,7 @@ createNewScene = do
         , scenePresent = []
         , sceneStakes = Stakes "What happens next?"
         , sceneBeats = Seq.empty
+        , sceneStyle = defaultSceneStyle
         }
 
   let newMood = MoodScene (Encounter "continuing" UrgencyLow True)
@@ -1671,3 +2005,37 @@ scenarioInitSchemaJSON = Object $ KM.fromList
       , String "siSuggestedActions"
       ])
   ]
+
+-- ══════════════════════════════════════════════════════════════
+-- DICE PROCESSING HELPERS
+-- ══════════════════════════════════════════════════════════════
+
+-- | Get outcome at index (outcomes parallel to pool)
+getOutcomeAt :: Int -> [DieOutcome] -> DieOutcome
+getOutcomeAt idx outs
+  | idx < length outs = outs !! idx
+  | otherwise = DieOutcome 0 "?" 0 0 0 "The outcome unfolds..."
+
+-- | Format hint with cost preview for dice display
+formatHintWithCosts :: DieOutcome -> Text
+formatHintWithCosts o =
+  let costs = filter (not . T.null)
+        [ if o.stressCost > 0 then "+" <> T.pack (show o.stressCost) <> " stress" else ""
+        , if o.stressCost < 0 then T.pack (show o.stressCost) <> " stress" else ""
+        , if o.heatCost > 0 then "+" <> T.pack (show o.heatCost) <> " heat" else ""
+        , if o.coinDelta > 0 then "+" <> T.pack (show o.coinDelta) <> " coin" else ""
+        , if o.coinDelta < 0 then T.pack (show o.coinDelta) <> " coin" else ""
+        ]
+      costStr = if null costs then "" else " [" <> T.intercalate ", " costs <> "]"
+  in o.hint <> costStr
+
+-- | Clamp a value between min and max
+clamp :: Ord a => a -> a -> a -> a
+clamp lo hi x = max lo (min hi x)
+
+-- | Delete first occurrence of element from list (handles duplicates correctly)
+deleteFirst :: Eq a => a -> [a] -> [a]
+deleteFirst _ [] = []
+deleteFirst x (y:ys)
+  | x == y    = ys
+  | otherwise = y : deleteFirst x ys

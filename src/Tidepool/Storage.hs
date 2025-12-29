@@ -35,7 +35,8 @@ import Database.SQLite.Simple.ToField
 import Data.Aeson (ToJSON, FromJSON, encode, decode)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.ByteString.Lazy (ByteString)
+import qualified Data.ByteString.Lazy as LBS
+import qualified Data.ByteString as BS
 import Data.Time.Clock (getCurrentTime)
 import Data.Time.Format.ISO8601 (iso8601Show)
 import qualified Data.UUID as UUID
@@ -58,7 +59,7 @@ gameIdText (GameId t) = t
 data GameRow = GameRow
   { gameId :: GameId
   , gameName :: Maybe Text
-  , gameWorldState :: ByteString    -- JSON-encoded WorldState
+  , gameWorldState :: BS.ByteString    -- JSON-encoded WorldState (strict for SQLite)
   , gameCompressionCursor :: Maybe Int
   , gameCompressionSummary :: Maybe Text
   , gameCreatedAt :: Text           -- ISO8601
@@ -130,7 +131,7 @@ createGame conn mName initialState = do
   uuid <- UUID4.nextRandom
   let gameId = GameId (UUID.toText uuid)
   now <- iso8601Now
-  let stateJson = encode initialState
+  let stateJson = LBS.toStrict (encode initialState)
 
   execute conn
     "INSERT INTO games (id, name, world_state, created_at, updated_at) \
@@ -148,7 +149,7 @@ loadGame conn gid = do
     (Only gid) :: IO [GameRow]
   case rows of
     [] -> return Nothing
-    (row:_) -> case decode row.gameWorldState of
+    (row:_) -> case decode (LBS.fromStrict row.gameWorldState) of
       Nothing -> return Nothing
       Just state -> return $ Just (state, row.gameCompressionCursor, row.gameCompressionSummary)
 
@@ -156,7 +157,7 @@ loadGame conn gid = do
 saveGameState :: ToJSON state => Connection -> GameId -> state -> IO ()
 saveGameState conn gid state = do
   now <- iso8601Now
-  let stateJson = encode state
+  let stateJson = LBS.toStrict (encode state)
   execute conn
     "UPDATE games SET world_state = ?, updated_at = ? WHERE id = ?"
     (stateJson, now, gid)
@@ -190,10 +191,11 @@ appendMessages conn gid messages = withTransaction conn $ do
   now <- iso8601Now
 
   -- Insert each message with incrementing sequence
+  -- Convert lazy ByteString from encode to strict for SQLite
   let insertMsg seqNum msg = execute conn
         "INSERT INTO messages (game_id, sequence, role, content, created_at) \
         \VALUES (?, ?, ?, ?, ?)"
-        (gid, seqNum, roleToText msg.role, encode msg.content, now)
+        (gid, seqNum, roleToText msg.role, LBS.toStrict (encode msg.content), now)
 
   mapM_ (uncurry insertMsg) (zip [(maxSeq + 1)..] messages)
 
@@ -202,16 +204,18 @@ loadMessages :: Connection -> GameId -> IO [Message]
 loadMessages conn gid = do
   rows <- query conn
     "SELECT role, content FROM messages WHERE game_id = ? ORDER BY sequence"
-    (Only gid) :: IO [(Text, ByteString)]
-  return [Message (textToRole r) (fromMaybe [] $ decode c) | (r, c) <- rows]
+    (Only gid) :: IO [(Text, BS.ByteString)]
+  -- Convert strict ByteString from SQLite to lazy for decode
+  return [Message (textToRole r) (fromMaybe [] $ decode (LBS.fromStrict c)) | (r, c) <- rows]
 
 -- | Load messages after a given sequence number
 loadMessagesAfter :: Connection -> GameId -> Int -> IO [Message]
 loadMessagesAfter conn gid cursor = do
   rows <- query conn
     "SELECT role, content FROM messages WHERE game_id = ? AND sequence > ? ORDER BY sequence"
-    (gid, cursor) :: IO [(Text, ByteString)]
-  return [Message (textToRole r) (fromMaybe [] $ decode c) | (r, c) <- rows]
+    (gid, cursor) :: IO [(Text, BS.ByteString)]
+  -- Convert strict ByteString from SQLite to lazy for decode
+  return [Message (textToRole r) (fromMaybe [] $ decode (LBS.fromStrict c)) | (r, c) <- rows]
 
 -- | Get message count for a game
 getMessageCount :: Connection -> GameId -> IO Int

@@ -65,6 +65,7 @@ data DMContext = DMContext
   , ctxPresentNpcs :: [NpcWithDisposition]
   , ctxSceneBeats :: [Text]
   , ctxStakes :: Text
+  , ctxSceneStyle :: SceneStyle  -- Compositional prose axes
   -- World state
   , ctxVisibleClocks :: [Clock]
   , ctxHiddenClocks :: [Clock]
@@ -241,6 +242,7 @@ buildDMContext activeScene mood world =
       , ctxPresentNpcs = presentNpcs
       , ctxSceneBeats = sceneBeats
       , ctxStakes = let Stakes s = activeScene.sceneStakes in s
+      , ctxSceneStyle = activeScene.sceneStyle
       , ctxVisibleClocks = visibleClocks
       , ctxHiddenClocks = hiddenClocks
       , ctxActiveThreads = activeThreads

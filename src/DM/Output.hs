@@ -6,6 +6,10 @@ module DM.Output
   , emptyTurnOutput
   , applyTurnOutput
 
+    -- * Dice Action (for action mode structured output)
+  , DiceAction(..)
+  , DieOutcome(..)
+
     -- * Compression Output
   , CompressionOutput(..)
   , applyCompression
@@ -16,6 +20,31 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
 import Data.Aeson (ToJSON, FromJSON)
+
+-- ══════════════════════════════════════════════════════════════
+-- DICE ACTION (for action mode structured output)
+-- ══════════════════════════════════════════════════════════════
+
+-- | A single precommitted outcome for one die
+-- LLM provides these in structured output; player chooses; game applies
+data DieOutcome = DieOutcome
+  { dieValue :: Int       -- Which die this outcome is for (must match pool)
+  , hint :: Text          -- 3-8 words shown during choice
+  , stressCost :: Int     -- Stress delta (usually 0-3, can be negative for relief)
+  , heatCost :: Int       -- Heat delta (0-2 typical)
+  , coinDelta :: Int      -- Coin change (positive = gain, negative = cost)
+  , narrative :: Text     -- 1-3 sentences revealed after choice
+  }
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+
+-- | Dice action in structured output - REQUIRED in action mode
+-- Player sees hint + costs BEFORE choosing; game applies chosen outcome
+data DiceAction = DiceAction
+  { situation :: Text           -- What's at stake
+  , position :: Position        -- Controlled/Risky/Desperate
+  , outcomes :: [DieOutcome]    -- One outcome per die in pool (parallel to pool)
+  }
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
 -- ══════════════════════════════════════════════════════════════
 -- TURN OUTPUT
@@ -41,6 +70,8 @@ data TurnOutput = TurnOutput
   , costDescription :: Maybe Text           -- If costly/setback, describe the cost for echoing
   , threatDescription :: Maybe Text         -- If unresolved threat, describe for echoing
   , suggestedActions :: [Text]              -- 2-3 suggested next actions for player
+  , traumaAssigned :: Maybe Text            -- If trauma turn, the trauma gained (e.g. "Cold", "Haunted")
+  , diceAction :: Maybe DiceAction          -- Required in action mode: dice outcomes for player choice
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
@@ -55,6 +86,8 @@ emptyTurnOutput = TurnOutput
   , costDescription = Nothing
   , threatDescription = Nothing
   , suggestedActions = []
+  , traumaAssigned = Nothing
+  , diceAction = Nothing
   }
 
 -- | Apply turn output to world state (cross-cutting updates only)
@@ -67,6 +100,10 @@ applyTurnOutput output state = state
       { stress = newStress
       , coin = max 0 (state.player.coin + output.coinDelta)
       , heat = clamp 0 10 (state.player.heat + output.heatDelta)
+      -- Add trauma if assigned (and reset stress to 0)
+      , trauma = case output.traumaAssigned of
+          Just t  -> Trauma t : state.player.trauma
+          Nothing -> state.player.trauma
       }
   -- Track costs for consequence echoing (keep last 3)
   , recentCosts = take 3 $ case output.costDescription of
@@ -79,7 +116,10 @@ applyTurnOutput output state = state
   }
   where
     clamp lo hi x = max lo (min hi x)
-    newStress = clamp 0 9 (state.player.stress + output.stressDelta)
+    -- If trauma was assigned, stress resets to 0 regardless of stressDelta
+    newStress = case output.traumaAssigned of
+      Just _  -> 0
+      Nothing -> clamp 0 9 (state.player.stress + output.stressDelta)
 
 -- ══════════════════════════════════════════════════════════════
 -- COMPRESSION OUTPUT

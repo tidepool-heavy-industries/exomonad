@@ -249,11 +249,15 @@ data RequestInput :: Effect where
 ```
 src/
 ├── Tidepool/              # Core library (reusable)
-│   ├── Effect.hs          # LLM, RequestInput, State, Emit, Random effects
+│   ├── Effect.hs          # LLM, RequestInput, State, Emit, Random, ChatHistory effects
 │   ├── Template.hs        # TypedTemplate, Template (jinja + schema + tools)
 │   ├── Tool.hs            # Tool typeclass, ToolList GADT
 │   ├── Schema.hs          # JSON Schema derivation (deriveSchema)
 │   ├── Loop.hs            # TurnConfig, Compression abstractions
+│   ├── Storage.hs         # SQLite persistence for games, runChatHistoryWithDB
+│   ├── Anthropic/         # Claude API integration
+│   │   ├── Http.hs        # Raw HTTP client (req-based)
+│   │   └── Client.hs      # High-level client with tool dispatch
 │   └── GUI/               # Generic threepenny-gui components
 │       ├── Core.hs        # GUIBridge, PendingRequest, safeSubmitResponse
 │       ├── Handler.hs     # makeGUIHandler, guiDice
@@ -267,6 +271,8 @@ src/
     ├── Context.hs         # DMContext, DiceContext, Precarity
     ├── Templates.hs       # dmTurnTemplate, compressionTemplate
     ├── Loop.hs            # dmTurn, handleDiceSelection, runDMGame
+    ├── Tarot.hs           # Tarot card types for scene/NPC seeds
+    ├── CharacterCreation.hs # Character generation flow
     └── GUI/               # DM-specific GUI (Blades aesthetic)
         ├── App.hs         # Main layout, polling loop, widget wiring
         ├── Theme.hs       # Dark noir theme, tier colors
@@ -276,13 +282,26 @@ src/
             ├── Clocks.hs  # clocksPanel, clockWidget with hover tooltips
             ├── History.hs # historyTab, sceneBeatEntry, sceneSummaryEntry
             ├── Narrative.hs # dmNarrativePane with NPC speech bubbles
-            └── Dice.hs    # diceChoice with tier colors, keyboard nav
+            ├── Dice.hs    # diceChoice with tier colors, keyboard nav
+            ├── State.hs   # WorldState debug view
+            ├── Events.hs  # Game event log display
+            ├── BetweenScenes.hs # Inter-scene transition UI
+            └── CharacterCreation.hs # Character creation wizard
 app/
-├── Main.hs                # Executable entry point
-└── MainGUI.hs             # GUI demo executable
-templates/                 # Jinja templates (to be created)
-├── dm_turn.jinja
-└── compression.jinja
+├── Main.hs                # Main game executable (tidepool-dm)
+├── MainGUI.hs             # GUI demo executable (tidepool-dm-gui)
+└── TestLLM.hs             # LLM integration test (test-llm)
+templates/                 # Jinja templates (ginger library)
+├── dm_turn.jinja          # Main DM turn prompt
+├── compression.jinja      # Scene compression prompt
+├── scene/                 # Scene-phase templates
+├── action/                # Action-phase templates
+├── aftermath/             # Aftermath-phase templates
+├── downtime/              # Downtime-phase templates
+├── bargain/               # Devil's bargain templates
+├── trauma/                # Trauma handling templates
+├── partials/              # Reusable template blocks
+└── _shared/               # Shared template fragments
 ```
 
 ## Key Types
@@ -351,13 +370,29 @@ data PlayerDeltas = PlayerDeltas
 - GUI: Clock face SVG (currently text circles)
 - GUI: `ihDice` in InputHandler (use `guiDice` directly for now)
 
-## Running
+## Development Commands
 
 ```bash
-cabal build               # Succeeds
-cabal run tidepool-dm     # Runs but hits TODO errors
-cabal run tidepool-dm-gui # GUI demo (opens browser at localhost:8023)
+# Build
+cabal build                    # Build all targets
+cabal build tidepool-sketch    # Build library only
+
+# Run executables
+cabal run tidepool-dm          # Main game (CLI + GUI, opens localhost:8023)
+cabal run tidepool-dm-gui      # GUI demo only
+cabal run test-llm             # Test LLM integration
+
+# Development workflow
+cabal check                    # Validate cabal file
+cabal clean                    # Clean build artifacts
+
+# Environment
+export ANTHROPIC_API_KEY=...   # Required for LLM calls
 ```
+
+### GHC Extensions (enabled by default)
+
+The cabal file enables GHC2021 plus: `DataKinds`, `GADTs`, `TypeFamilies`, `TypeOperators`, `OverloadedStrings`, `OverloadedRecordDot`, `NoFieldSelectors`, `DuplicateRecordFields`, `QuasiQuotes`, `TemplateHaskell`
 
 ## Next Steps
 
@@ -382,6 +417,321 @@ The "sleeptime" learning agent reads run logs and evolves:
 5. **Tool behavior** - How tools execute
 
 The loop structure, effect types, and infrastructure stay stable.
+
+## Code Organization: Quality Without a Name
+
+These principles draw from Christopher Alexander's architectural philosophy. Good code, like good buildings, has a quality that's hard to name but unmistakable: it feels *alive*, coherent, like each part belongs where it is. The opposite—code that's merely correct—feels dead, arbitrary, fragile.
+
+### One Path Through the Code
+
+**Prefer N sources → 1 transformation → 1 output over N parallel implementations.**
+
+When the same logic appears in multiple places, the code loses coherence. Each copy becomes a center that competes rather than strengthens.
+
+```haskell
+-- Bad: Two moods, two render paths
+renderSceneNarrative :: SceneContext -> Text
+renderSceneNarrative ctx = ...  -- 50 lines
+
+renderActionNarrative :: ActionContext -> Text
+renderActionNarrative ctx = ...  -- 50 similar lines with subtle drift
+
+-- Good: Multiple moods flow through one render path
+renderForMood :: DMMood -> DMContext -> Text
+renderForMood mood ctx = case mood of
+  MoodScene _     -> render sceneTemplate ctx
+  MoodAction _ _  -> render actionTemplate ctx
+  MoodAftermath _ -> render aftermathTemplate ctx
+  ...
+-- The mood selects WHICH template; the rendering path is unified
+```
+
+**In this codebase:**
+- `renderForMood` unifies 6 mood-specific templates through one function
+- GUI polling: multiple state sources (WorldState, narrative, requests) → single refresh loop → widgets
+- Effect interpretation: one `runDMGame` wires all effect handlers
+
+### Centers Strengthen Each Other
+
+Good boundaries make each part more alive, not less. When you extract something, both the extraction and the remainder should feel more coherent.
+
+```haskell
+-- Bad: Extraction that weakens both sides
+-- DMContext has 30 fields; Template has 30 fields; they mirror each other
+data DMContext = DMContext { ... }  -- Everything the LLM might need
+data Template = Template { ... }    -- Same fields, different order
+
+-- Good: Each center has its own gravity
+data DMContext = DMContext          -- What the world looks like NOW
+  { ctxLocation, ctxPresentNpcs, ctxStakes, ctxPrecarity, ... }
+
+data Template context output = Template  -- How to invoke the LLM
+  { templateJinja :: TypedTemplate context
+  , templateOutputSchema :: Schema output
+  , templateTools :: ToolList
+  }
+-- DMContext knows what to show; Template knows how to render
+```
+
+### Structure Grows from Life
+
+Don't anticipate abstractions. Let them emerge from repeated use. The right abstraction appears after you've written the same pattern three times and felt the friction.
+
+```haskell
+-- Premature: Abstracting before patterns emerge
+class Renderable a where
+  render :: a -> Text
+
+-- Emerged: The actual pattern that revealed itself
+-- After writing sceneTemplate, actionTemplate, aftermathTemplate...
+-- the Template type emerged naturally:
+data Template context output event state tools = Template
+  { templateJinja :: TypedTemplate context SourcePos
+  , templateOutputSchema :: Schema output
+  , templateTools :: ToolList tools event state
+  }
+```
+
+**Signs you're anticipating:**
+- The abstraction has one use case
+- You're adding type parameters "for flexibility"
+- The concrete version would be simpler to read
+
+**Signs it emerged:**
+- You've felt the friction of duplication
+- The abstraction deletes code rather than adding indirection
+- Each use case fits naturally
+
+### Roughness Over Perfection
+
+Working code with character beats polished code that's fragile. Leave room for the structure to breathe.
+
+```haskell
+-- Over-polished: Every edge case handled, but brittle
+handleEvent :: Event -> StateT World (ExceptT Error IO) Response
+handleEvent = \case
+  Click x y -> validateCoords x y >>= \case
+    Valid coords -> processClick coords >>= \case
+      ...  -- 50 lines of nested case handling
+
+-- Rough but alive: Clear happy path, simple error boundary
+handleEvent :: Event -> IO (Either Error Response)
+handleEvent (Click x y) = runExceptT $ do
+  coords <- validateCoords x y
+  processClick coords
+handleEvent _ = pure $ Right defaultResponse
+-- Less "complete" but easier to read, extend, debug
+```
+
+**Roughness means:**
+- Handling the common cases well, not all cases
+- Preferring simple error messages over elaborate recovery
+- Leaving TODOs for genuinely uncertain futures
+- Three lines of similar code > one clever abstraction
+
+### The Test: Does It Feel Alive?
+
+When reviewing code, ask:
+- Does each function have one clear purpose, or is it doing several things?
+- Do the boundaries feel natural, or forced?
+- Can you hold the structure in your head, or does it keep slipping away?
+- Would adding a feature feel like growth, or surgery?
+
+Code with the quality without a name invites contribution. Code without it resists every change.
+
+## Haskell Design Principles
+
+These principles guide architectural decisions in this codebase. Each explains what the type system enforces versus what requires programmer discipline.
+
+### Make Invalid States Unrepresentable
+
+Don't validate—make it impossible to construct bad data.
+
+```haskell
+-- Bad: runtime checks scattered everywhere
+data GamePhase = Scene | Action | Aftermath | Downtime
+data WorldState = WorldState { phase :: GamePhase, pendingOutcome :: Maybe PendingOutcome }
+-- Every function must check: is pendingOutcome Nothing when phase /= Action?
+
+-- Good: impossible to have pendingOutcome in wrong phase
+data GamePhase
+  = PhaseScene SceneContext
+  | PhaseAction PendingOutcome  -- outcome MUST exist in action phase
+  | PhaseAftermath AftermathContext
+  | PhaseDowntime DowntimeContext
+-- Type system enforces: PendingOutcome exists iff in Action phase
+```
+
+**Type system enforces**: Once modeled as a sum type with phase-specific payloads, illegal combinations won't compile.
+**Discipline required**: Choosing to model it this way in the first place.
+
+### Liberties Constrain; Constraints Liberate
+
+The more polymorphic your function, the less it can do—and the more you know about it from the type alone.
+
+```haskell
+-- Very constrained type → almost no implementation freedom
+mystery :: forall a. [a] -> [a]
+-- Can only rearrange, duplicate, or drop elements. Cannot create new 'a's, or compare them for equality/ordering.
+-- Parametricity gives you theorems for free. Lack of constraints provides documentation
+
+
+-- Specifically constrained type
+mystery :: forall a. Ord => [a] -> [a]
+-- Can only compare elements, nothing else. Almost certainly a sorting function
+-- Constraints provide guidance and documentation.
+
+-- Very specific type → implementation could do anything
+mystery' :: [Int] -> [Int]
+-- Could return [42] always, could sum them, could do anything.
+```
+
+**Type system enforces**: Parametric polymorphism guarantees the function can't inspect or create values of type `a`.
+**Discipline required**: Choosing to keep types polymorphic where possible.
+
+### Parse, Don't Validate
+
+Transform unstructured data into typed data at system boundaries. Then trust the types internally.
+
+```haskell
+-- Bad: validate repeatedly, forget to check somewhere
+processInput :: Text -> IO ()
+processInput t = do
+  when (T.null t) $ throwIO EmptyInput  -- must remember every time
+  ...
+
+-- Good: parse once into a type that cannot be empty
+newtype NonEmptyText = NonEmptyText Text  -- constructor not exported
+
+mkNonEmptyText :: Text -> Maybe NonEmptyText
+mkNonEmptyText t | T.null t  = Nothing
+                 | otherwise = Just (NonEmptyText t)
+
+processInput :: NonEmptyText -> IO ()  -- impossible to receive empty
+processInput (NonEmptyText t) = ...  -- no check needed, type guarantees it
+```
+
+**Type system enforces**: Once you have a `NonEmptyText`, it cannot be empty.
+**Discipline required**: Parse at boundaries; don't export raw constructors.
+
+### Newtypes Prevent Primitive Obsession
+
+Wrap domain concepts so the compiler catches misuse.
+
+```haskell
+-- Bad: which Int is which?
+applyDamage :: Int -> Int -> Int -> WorldState -> WorldState
+applyDamage stress heat wanted = ...
+-- Easy to call: applyDamage heat stress wanted (wrong order!)
+
+-- Good: distinct types for distinct concepts
+newtype Stress = Stress { unStress :: Int }
+newtype Heat = Heat { unHeat :: Int }
+newtype Wanted = Wanted { unWanted :: Int }
+
+applyDamage :: Stress -> Heat -> Wanted -> WorldState -> WorldState
+-- applyDamage (Heat 2) (Stress 1) ... won't compile
+```
+
+**Type system enforces**: Cannot pass `Heat` where `Stress` expected.
+**Discipline required**: Define newtypes; resist the urge to unwrap everywhere.
+
+### Total Functions (Avoid Partiality)
+
+Partial functions (`head`, `!!`, incomplete patterns) push errors to runtime. Total functions encode failure in types.
+
+```haskell
+-- Partial: crashes on empty list
+firstElement :: [a] -> a
+firstElement (x:_) = x  -- warning: incomplete patterns
+
+-- Total: failure is in the type
+firstElement :: [a] -> Maybe a
+firstElement []    = Nothing
+firstElement (x:_) = Just x
+```
+
+**Type system enforces**: Callers must handle `Nothing`—can't ignore possible failure.
+**Discipline required**: Enable `-Wincomplete-patterns`, avoid `error`/`undefined` except for genuine impossibilities.
+
+### Effects in the Types
+
+Make side effects visible in type signatures. This is the core insight of effectful (and MTL, free monads, etc.).
+
+```haskell
+-- Type tells you exactly what effects this function can perform
+dmTurn
+  :: (LLM :> es, State WorldState :> es, Emit GameEvent :> es, RequestInput :> es)
+  => Text
+  -> Eff es Text
+
+-- Compare to:
+dmTurn :: Text -> IO Text  -- could do literally anything
+```
+
+**Type system enforces**: Function can only use effects listed in constraints.
+**Discipline required**: Define small, focused effect sets; resist `IOE` escape hatch.
+
+### Smart Constructors
+
+Hide data constructors, expose validated creation functions. Maintain invariants by construction.
+
+```haskell
+module Clock (Clock, mkClock, tickClock, clockProgress) where
+
+-- Constructor not exported
+data Clock = Clock
+  { clockName :: Text
+  , clockSegments :: Int  -- invariant: 4, 6, or 8
+  , clockFilled :: Int    -- invariant: 0 <= filled <= segments
+  }
+
+-- Only way to create a Clock
+mkClock :: Text -> Int -> Maybe Clock
+mkClock name segs
+  | segs `elem` [4, 6, 8] = Just (Clock name segs 0)
+  | otherwise = Nothing
+
+-- Maintains invariants
+tickClock :: Clock -> Clock
+tickClock c = c { clockFilled = min (clockSegments c) (clockFilled c + 1) }
+```
+
+**Type system enforces**: External code cannot construct invalid `Clock` values.
+**Discipline required**: Actually hide the constructor in the export list.
+
+### Phantom Types for Compile-Time Tags
+
+Add type parameters that exist only at compile time to track state or capabilities.
+
+```haskell
+data Validated
+data Unvalidated
+
+newtype UserId (status :: Type) = UserId Text
+
+-- Only validated IDs can query the database
+lookupUser :: UserId Validated -> IO User
+
+-- Validation promotes Unvalidated → Validated
+validateUserId :: UserId Unvalidated -> IO (Maybe (UserId Validated))
+validateUserId (UserId t) = do
+  exists <- checkUserExists t
+  pure $ if exists then Just (UserId t) else Nothing
+```
+
+**Type system enforces**: Cannot call `lookupUser` with unvalidated ID.
+**Discipline required**: Choosing to use phantom types; not using `coerce` to bypass.
+
+### Summary: The Type System Is Your Proof Assistant
+
+Each principle shifts invariant checking from runtime to compile time. The pattern is always:
+
+1. **Model** the invariant in types (sum types, newtypes, GADTs, phantom types)
+2. **Parse** at boundaries into the typed representation
+3. **Trust** the types internally—no defensive checks
+
+The compiler then verifies your program maintains invariants across all code paths. The cost is upfront modeling; the payoff is fearless refactoring.
 
 ## References
 

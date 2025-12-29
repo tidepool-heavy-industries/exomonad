@@ -9,6 +9,7 @@ module Tidepool.Schema
   , arraySchema
   , enumSchema
   , oneOfSchema
+  , nullableSchema
   , describeField
   , emptySchema
 
@@ -66,6 +67,10 @@ enumSchema variants = (emptySchema TString) { schemaEnum = Just variants }
 -- | OneOf schema combinator (for sum types)
 oneOfSchema :: [JSONSchema] -> JSONSchema
 oneOfSchema variants = (emptySchema TObject) { schemaOneOf = Just variants }
+
+-- | Nullable schema combinator (allows null or the given type)
+nullableSchema :: JSONSchema -> JSONSchema
+nullableSchema inner = oneOfSchema [inner, emptySchema TNull]
 
 -- | Add description to schema
 describeField :: Text -> Text -> JSONSchema -> JSONSchema

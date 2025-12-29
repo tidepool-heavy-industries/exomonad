@@ -3,6 +3,7 @@ module DM.Tools
   ( -- * Tools
     ThinkAsDM(..)
   , SpeakAsNPC(..)
+  , SetSceneStyle(..)
   , Choose(..)
   , SpendDie(..)
 
@@ -24,10 +25,12 @@ module DM.Tools
     -- * Tool Inputs/Outputs
   , ThinkInput(..)
   , SpeakInput(..)
+  , SetSceneStyleInput(..)
   , ChooseInput(..)
   , ChooseResult(..)
   , SpendDieInput(..)
   , SpendDieResult(..)
+  , DieOutcome(..)
   , EngageInput(..)
   , ResolveInput(..)
 
@@ -43,7 +46,8 @@ module DM.Tools
   ) where
 
 import DM.State
-import DM.Effect (PlayingState, runPlayingState, putMood, getMood)
+import DM.Output (DieOutcome(..))
+import DM.Effect (PlayingState, runPlayingState, putMood, getMood, modifyScene, getScene)
 import Tidepool.Tool
 import Tidepool.Effect (Emit, RequestInput, Random, State, ToolDispatcher, ToolResult(..)
                        , emit, requestDice, randomDouble, randomInt, get, put, modify)
@@ -176,6 +180,73 @@ instance Tool SpeakAsNPC DMEvent WorldState DMEffects where
   executeTool input = emit (NPCSpoke input.speakNpc input.utterance)
 
 -- ══════════════════════════════════════════════════════════════
+-- SET SCENE STYLE
+-- ══════════════════════════════════════════════════════════════
+
+data SetSceneStyle = SetSceneStyle
+  deriving (Show, Eq, Generic)
+
+data SetSceneStyleInput = SetSceneStyleInput
+  { styleAtmosphere :: Maybe Text  -- "mundane", "liminal", "supernatural"
+  , stylePressure :: Maybe Text    -- "calm", "watchful", "urgent"
+  , styleClass :: Maybe Text       -- "gutter", "street", "salon"
+  }
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+
+instance Tool SetSceneStyle DMEvent WorldState DMEffects where
+  type ToolInput SetSceneStyle = SetSceneStyleInput
+  type ToolOutput SetSceneStyle = ()
+
+  toolName = "set_scene_style"
+  toolDescription = "Shift the scene's prose style axes. Each axis affects how narration is written. Only specify axes you want to change."
+  inputSchema = schemaToValue $ objectSchema
+    [ ("styleAtmosphere", describeField "styleAtmosphere"
+        "Supernatural presence: mundane (normal world), liminal (wrongness accumulates), supernatural (ghosts press close)"
+        (enumSchema ["mundane", "liminal", "supernatural"]))
+    , ("stylePressure", describeField "stylePressure"
+        "Tension level: calm (breathing room), watchful (attention split), urgent (walls closing in)"
+        (enumSchema ["calm", "watchful", "urgent"]))
+    , ("styleClass", describeField "styleClass"
+        "Social register: gutter (raw survival), street (working criminal), salon (refined daggers)"
+        (enumSchema ["gutter", "street", "salon"]))
+    ]
+    []  -- No required fields - only change what you specify
+
+  executeTool input = do
+    scene <- getScene
+    let currentStyle = scene.sceneStyle
+        newAtmosphere = maybe currentStyle.ssAtmosphere parseAtmosphere input.styleAtmosphere
+        newPressure = maybe currentStyle.ssPressure parsePressure input.stylePressure
+        newClass = maybe currentStyle.ssClass parseClass input.styleClass
+        newStyle = SceneStyle newAtmosphere newPressure newClass
+    modifyScene $ \s -> s { sceneStyle = newStyle }
+    emit (DMThought $ "Scene style shifted to: " <> showStyle newStyle)
+    where
+      parseAtmosphere t = case T.toLower t of
+        "mundane" -> Mundane
+        "liminal" -> Liminal
+        "supernatural" -> Supernatural
+        _ -> Mundane
+
+      parsePressure t = case T.toLower t of
+        "calm" -> PressureCalm
+        "watchful" -> PressureWatchful
+        "urgent" -> PressureUrgent
+        _ -> PressureWatchful
+
+      parseClass t = case T.toLower t of
+        "gutter" -> Gutter
+        "street" -> Street
+        "salon" -> Salon
+        _ -> Street
+
+      showStyle s = T.intercalate ", "
+        [ T.pack (show s.ssAtmosphere)
+        , T.pack (show s.ssPressure)
+        , T.pack (show s.ssClass)
+        ]
+
+-- ══════════════════════════════════════════════════════════════
 -- CHOOSE
 -- ══════════════════════════════════════════════════════════════
 
@@ -226,19 +297,24 @@ instance Tool Choose DMEvent WorldState DMEffects where
 data SpendDie = SpendDie
   deriving (Show, Eq, Generic)
 
+-- DieOutcome imported from DM.Output (shared with structured output)
+
 -- | LLM precommits to outcomes before player chooses
--- Each outcome is (dieValue, hint, narrative) - hint shown during choice, narrative revealed after
+-- Player sees hint AND cost preview during choice - full transparency
 data SpendDieInput = SpendDieInput
-  { situation :: Text                       -- What's at stake
-  , position :: Position                    -- Controlled/Risky/Desperate
-  , outcomes :: [(Int, Text, Text)]         -- [(dieValue, hint, narrative)] for each die in pool
+  { situation :: Text           -- What's at stake
+  , position :: Position        -- Controlled/Risky/Desperate
+  , outcomes :: [DieOutcome]    -- One outcome per die in pool (parallel to pool)
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
 data SpendDieResult = SpendDieResult
-  { dieValue :: Int
+  { chosenDieValue :: Int
   , tier :: OutcomeTier
-  , narrative :: Text           -- The precommitted narrative for this tier
+  , stressApplied :: Int        -- Stress delta that was applied
+  , heatApplied :: Int          -- Heat delta that was applied
+  , coinApplied :: Int          -- Coin delta that was applied
+  , resultNarrative :: Text     -- The precommitted narrative for this outcome
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
@@ -247,12 +323,21 @@ instance Tool SpendDie DMEvent WorldState DMEffects where
   type ToolOutput SpendDie = SpendDieResult
 
   toolName = "spend_die"
-  toolDescription = "Request player spend a die. Precommit outcomes array parallel to dice pool - outcomes[0] is for pool[0], etc. Each die gets a UNIQUE outcome even if same value. Player sees hints during choice, narrative revealed after."
+  toolDescription = "THE CORE MECHANIC. Call this for ANY situation with stakes - not just combat. Social pressure? Spend die. Sneaking past? Spend die. Gathering dangerous info? Spend die. Player sees hint + costs BEFORE choosing, so they can weigh risk vs reward. Higher die = better outcome, but they might save it for later."
   inputSchema = schemaToValue $ objectSchema
     [ ("situation", describeField "situation" "Brief description of the action" (emptySchema TString))
     , ("position", describeField "position" "Risk level" (enumSchema ["Controlled", "Risky", "Desperate"]))
-    , ("outcomes", describeField "outcomes" "Array parallel to dice pool. Each element is [dieValue, hint, narrative]. outcomes[i] is for pool[i]. EACH die gets unique outcome even if same value! hint: 3-8 words shown during choice. narrative: 1-3 sentences revealed after."
-        (arraySchema (arraySchema (emptySchema TString))))  -- JSON: [[4, "hint1", "narr1"], [4, "hint2", "narr2"], ...]
+    , ("outcomes", describeField "outcomes"
+        "Array parallel to dice pool. outcomes[i] is for pool[i]. Each outcome object has: dieValue (int), hint (3-8 words), stressCost (0-3 typical), heatCost (0-2 typical), coinDelta (positive=gain), narrative (1-3 sentences). Player sees hint+costs during choice. Higher die = better outcome with lower costs."
+        (arraySchema $ objectSchema
+          [ ("dieValue", describeField "dieValue" "The die value" (emptySchema TInteger))
+          , ("hint", describeField "hint" "3-8 word preview shown during choice" (emptySchema TString))
+          , ("stressCost", describeField "stressCost" "Stress cost (0-3 typical, can be negative for relief)" (emptySchema TInteger))
+          , ("heatCost", describeField "heatCost" "Heat cost (0-2 typical)" (emptySchema TInteger))
+          , ("coinDelta", describeField "coinDelta" "Coin change (positive=gain, negative=cost)" (emptySchema TInteger))
+          , ("narrative", describeField "narrative" "1-3 sentences revealed after choice" (emptySchema TString))
+          ]
+          ["dieValue", "hint", "stressCost", "heatCost", "coinDelta", "narrative"]))
     ]
     ["situation", "position", "outcomes"]
 
@@ -264,31 +349,28 @@ instance Tool SpendDie DMEvent WorldState DMEffects where
     if null pool
       then do
         emit (DMThought "Tried to spend die but pool is empty")
-        -- Return a fallback result - LLM shouldn't have called this
         return SpendDieResult
-          { dieValue = 0
+          { chosenDieValue = 0
           , tier = Partial
-          , narrative = "You reach for your reserves, but there's nothing left."
+          , stressApplied = 0
+          , heatApplied = 0
+          , coinApplied = 0
+          , resultNarrative = "You reach for your reserves, but there's nothing left."
           }
       else do
-        -- Build dice with indices and hints for the visual dice selector
+        -- Build dice with indices and hint+cost preview for the visual dice selector
         -- outcomes array is PARALLEL to pool - outcomes[i] is for pool[i]
-        -- Each die gets its own unique precommitted outcome
         let diceWithHints =
-              [ (dieVal, idx, getHintAt idx input.outcomes)
+              [ (dieVal, idx, formatHintWithCosts (getOutcomeAt idx input.outcomes))
               | (dieVal, idx) <- zip pool [0..]
               ]
 
-        -- Get player's choice via dice widget (shows hints on each card)
+        -- Get player's choice via dice widget (shows hints + costs on each card)
         selectedIdx <- requestDice (formatPrompt input) diceWithHints
 
-        -- Safely get the chosen die value
-        let chosenDie = if selectedIdx < length pool
-                        then pool !! selectedIdx
-                        else head pool  -- Fallback to first die if index invalid
-
-        -- Get the narrative for the selected position (not by die value!)
-        let selectedNarrative = getNarrativeAt selectedIdx input.outcomes
+        -- Get the chosen outcome
+        let chosenOutcome = getOutcomeAt selectedIdx input.outcomes
+            chosenDie = chosenOutcome.dieValue
 
         -- Remove die from pool
         let newPool = delete chosenDie pool
@@ -296,8 +378,15 @@ instance Tool SpendDie DMEvent WorldState DMEffects where
         -- Calculate outcome tier for the result
         let outcomeTier = calculateOutcome input.position chosenDie
 
-        -- Update dice pool state
-        modify @WorldState $ \s -> s { dicePool = s.dicePool { poolDice = newPool } }
+        -- Apply the deltas from the chosen outcome
+        modify @WorldState $ \s -> s
+          { dicePool = s.dicePool { poolDice = newPool }
+          , player = (s.player)
+              { stress = clamp 0 9 (s.player.stress + chosenOutcome.stressCost)
+              , heat = clamp 0 10 (s.player.heat + chosenOutcome.heatCost)
+              , coin = max 0 (s.player.coin + chosenOutcome.coinDelta)
+              }
+          }
 
         -- Check if pool is now empty - if so, transition to bargain mood
         when (null newPool) $ do
@@ -310,32 +399,52 @@ instance Tool SpendDie DMEvent WorldState DMEffects where
             , bvPreviousMood = theMood
             }
 
+        -- Get updated state for accurate event emission
+        newState <- get @WorldState
+
         -- Emit event with the revealed narrative
-        emit (DieSpent chosenDie outcomeTier selectedNarrative)
+        emit (DieSpent chosenDie outcomeTier chosenOutcome.narrative)
+
+        -- Emit stress/heat changes if any (from/to are actual values, not deltas)
+        when (chosenOutcome.stressCost /= 0) $
+          emit (StressChanged state.player.stress newState.player.stress "dice outcome")
+        when (chosenOutcome.heatCost /= 0) $
+          emit (HeatChanged state.player.heat newState.player.heat "dice outcome")
 
         -- If we just emptied the pool, also emit that
         when (null newPool) $
           emit (MoodTransition "spend_die" "action" "bargain")
 
         return SpendDieResult
-          { dieValue = chosenDie
+          { chosenDieValue = chosenDie
           , tier = outcomeTier
-          , narrative = selectedNarrative
+          , stressApplied = chosenOutcome.stressCost
+          , heatApplied = chosenOutcome.heatCost
+          , coinApplied = chosenOutcome.coinDelta
+          , resultNarrative = chosenOutcome.narrative
           }
     where
+      clamp lo hi x = max lo (min hi x)
       formatPrompt inp = inp.situation <> " (" <> T.pack (show inp.position) <> ")"
 
-      -- Get hint at position idx (outcomes is parallel to pool)
-      getHintAt :: Int -> [(Int, Text, Text)] -> Text
-      getHintAt idx outcomes
-        | idx < length outcomes = let (_, hint, _) = outcomes !! idx in hint
-        | otherwise = ""  -- Fallback if out of bounds
+      -- Get outcome at position idx (outcomes is parallel to pool)
+      getOutcomeAt :: Int -> [DieOutcome] -> DieOutcome
+      getOutcomeAt idx outs
+        | idx < length outs = outs !! idx
+        | otherwise = DieOutcome 0 "?" 0 0 0 "The outcome unfolds..."
 
-      -- Get narrative at position idx (outcomes is parallel to pool)
-      getNarrativeAt :: Int -> [(Int, Text, Text)] -> Text
-      getNarrativeAt idx outcomes
-        | idx < length outcomes = let (_, _, narrative) = outcomes !! idx in narrative
-        | otherwise = "The outcome unfolds..."  -- Fallback if out of bounds
+      -- Format hint with cost preview for dice display
+      formatHintWithCosts :: DieOutcome -> Text
+      formatHintWithCosts o =
+        let costs = filter (not . T.null)
+              [ if o.stressCost > 0 then "+" <> T.pack (show o.stressCost) <> " stress" else ""
+              , if o.stressCost < 0 then T.pack (show o.stressCost) <> " stress" else ""
+              , if o.heatCost > 0 then "+" <> T.pack (show o.heatCost) <> " heat" else ""
+              , if o.coinDelta > 0 then "+" <> T.pack (show o.coinDelta) <> " coin" else ""
+              , if o.coinDelta < 0 then T.pack (show o.coinDelta) <> " coin" else ""
+              ]
+            costStr = if null costs then "" else " [" <> T.intercalate ", " costs <> "]"
+        in o.hint <> costStr
 
       -- Check if current mood is desperate (no retreat allowed)
       isDesperateMood (MoodAction (AvDesperate _ _ _) _) = True
@@ -645,6 +754,7 @@ instance Tool PassOut DMEvent WorldState DMEffects where
           , scenePresent = []
           , sceneStakes = Stakes "Figure out what happened"
           , sceneBeats = mempty
+          , sceneStyle = defaultSceneStyle
           }
         wakeUpMood = MoodScene (Encounter "waking up" UrgencyMedium False)  -- Can't just walk away
 
@@ -673,8 +783,9 @@ instance Tool PassOut DMEvent WorldState DMEffects where
 -- | All DM tools as a type-safe list (including transition tools)
 -- Note: SpeakAsNPC, ThinkAsDM, AskPlayer removed - they add noise without value
 -- Player clarification now happens via suggestedActions in structured output
-dmToolList :: ToolList DMEvent WorldState DMEffects '[Choose, SpendDie, Engage, Resolve, Accept, AcceptBargain, Retreat, PassOut]
-dmToolList = TCons (Proxy @Choose)
+dmToolList :: ToolList DMEvent WorldState DMEffects '[SetSceneStyle, Choose, SpendDie, Engage, Resolve, Accept, AcceptBargain, Retreat, PassOut]
+dmToolList = TCons (Proxy @SetSceneStyle)
+           $ TCons (Proxy @Choose)
            $ TCons (Proxy @SpendDie)
            $ TCons (Proxy @Engage)
            $ TCons (Proxy @Resolve)
@@ -708,8 +819,8 @@ makeDMDispatcher
   :: (State WorldState :> es, Emit DMEvent :> es, RequestInput :> es, Random :> es, PlayingState :> es)
   => ToolDispatcher DMEvent es
 makeDMDispatcher name input = do
-  -- Record mood before tool execution (from phase if playing)
-  moodBefore <- get @WorldState >>= \s -> return (currentMood s)
+  -- Record mood before tool execution (from PlayingState, not WorldState!)
+  moodBefore <- getMood
 
   -- Dispatch to the regular tool dispatcher
   result <- makeDispatcher dmToolList name input
@@ -719,23 +830,16 @@ makeDMDispatcher name input = do
     then case result of
       Left err -> return (Left err)
       Right (ToolSuccess val) -> do
-        -- Check if mood actually changed (from phase if playing)
-        moodAfter <- get @WorldState >>= \s -> return (currentMood s)
+        -- Check if mood actually changed (from PlayingState)
+        moodAfter <- getMood
         -- Debug: log mood comparison
-        emit (DMThought $ "Dispatcher: " <> name <> " before=" <> T.pack (show moodBefore) <> " after=" <> T.pack (show moodAfter) <> " changed=" <> T.pack (show $ moodMaybeChanged moodBefore moodAfter))
-        if moodMaybeChanged moodBefore moodAfter
+        emit (DMThought $ "Dispatcher: " <> name <> " before=" <> T.pack (show moodBefore) <> " after=" <> T.pack (show moodAfter) <> " changed=" <> T.pack (show $ moodChanged moodBefore moodAfter))
+        if moodChanged moodBefore moodAfter
           then return (Right (ToolBreak ("mood transition: " <> name)))
           else return (Right (ToolSuccess val))
       Right (ToolBreak reason) -> return (Right (ToolBreak reason))
     else return result  -- Non-transition tools pass through unchanged
   where
-    -- Simple check if mood changed (handles Maybe from currentMood)
-    moodMaybeChanged :: Maybe DMMood -> Maybe DMMood -> Bool
-    moodMaybeChanged Nothing Nothing = False
-    moodMaybeChanged Nothing (Just _) = True
-    moodMaybeChanged (Just _) Nothing = True
-    moodMaybeChanged (Just m1) (Just m2) = moodChanged m1 m2
-
     moodChanged :: DMMood -> DMMood -> Bool
     moodChanged (MoodScene _) (MoodScene _) = False
     moodChanged (MoodAction _ _) (MoodAction _ _) = False
