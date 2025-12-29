@@ -388,5 +388,21 @@ compressionOutputJSONSchema = objectSchema
   , ("coinChange", describeField "coinChange"
       "Net coin change from this scene"
       (emptySchema TInteger))
+  , ("newRumors", describeField "newRumors"
+      "Rumors that emerged from this scene - gossip, news, hearsay spreading through the city"
+      (arraySchema rumorInitSchema))
   ]
   ["summary", "keyMoments", "consequenceSeeds", "stressChange", "coinChange"]
+  where
+    rumorInitSchema = objectSchema
+      [ ("riContent", describeField "riContent"
+          "What the rumor says - a piece of gossip or news spreading through the city"
+          (emptySchema TString))
+      , ("riSpread", describeField "riSpread"
+          "How widely known: whisper (few know), tavern (local gossip), common_knowledge (widely known)"
+          (enumSchema ["whisper", "tavern", "common_knowledge"]))
+      , ("riTrue", describeField "riTrue"
+          "Is the rumor true? true/false/null if unknown"
+          (nullableSchema (emptySchema TBoolean)))
+      ]
+      ["riContent", "riSpread"]

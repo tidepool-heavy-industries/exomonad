@@ -13,6 +13,7 @@ module DM.Output
 
     -- * Compression Output
   , CompressionOutput(..)
+  , RumorInit(..)
   , applyCompression
   ) where
 
@@ -199,6 +200,14 @@ applyTurnOutput output state = state
 -- COMPRESSION OUTPUT
 -- ══════════════════════════════════════════════════════════════
 
+-- | Rumor extracted during compression
+data RumorInit = RumorInit
+  { riContent :: Text             -- What the rumor says
+  , riSpread :: Text              -- "whisper", "tavern", "common_knowledge"
+  , riTrue :: Maybe Bool          -- True/False/null for unknown
+  }
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+
 -- | Simplified compression output - complex extractions removed
 data CompressionOutput = CompressionOutput
   { summary :: Text               -- One paragraph summary
@@ -206,8 +215,20 @@ data CompressionOutput = CompressionOutput
   , consequenceSeeds :: Text      -- Comma-separated consequence seeds
   , stressChange :: Int           -- Net stress change
   , coinChange :: Int             -- Net coin change
+  , newRumors :: [RumorInit]      -- Rumors that emerged from this scene
   }
-  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+  deriving (Show, Eq, Generic, ToJSON)
+
+-- | Custom FromJSON to default newRumors to [] if missing
+instance FromJSON CompressionOutput where
+  parseJSON = withObject "CompressionOutput" $ \o ->
+    CompressionOutput
+      <$> o .: "summary"
+      <*> o .: "keyMoments"
+      <*> o .:? "consequenceSeeds" .!= ""
+      <*> o .:? "stressChange" .!= 0
+      <*> o .:? "coinChange" .!= 0
+      <*> o .:? "newRumors" .!= []
 
 -- | Apply simplified compression output to world state
 applyCompression :: CompressionOutput -> WorldState -> WorldState
@@ -220,6 +241,29 @@ applyCompression output state = state
   , unresolvedThreats = if T.null output.consequenceSeeds
       then state.unresolvedThreats
       else output.consequenceSeeds : state.unresolvedThreats
+  -- Add new rumors from compression
+  , rumors = state.rumors ++ zipWith (initToRumor baseId) [0..] output.newRumors
   }
   where
     clamp lo hi x = max lo (min hi x)
+    baseId = length state.rumors
+
+-- | Convert RumorInit to Rumor with generated ID
+initToRumor :: Int -> Int -> RumorInit -> Rumor
+initToRumor baseId idx ri = Rumor
+  { rumorId = RumorId $ "rumor_" <> T.pack (show (baseId + idx))
+  , rumorContent = ri.riContent
+  , rumorSource = PublicKnowledge  -- Compression extracts from scene, so public
+  , rumorTruthValue = case ri.riTrue of
+      Just True  -> TrueRumor
+      Just False -> FalseRumor
+      Nothing    -> Unknown
+  , rumorSpread = parseSpread ri.riSpread
+  }
+  where
+    parseSpread s = case T.toLower s of
+      "whisper"          -> Whisper
+      "tavern"           -> Tavern
+      "common_knowledge" -> CommonKnowledge
+      "universal"        -> Universal
+      _                  -> Tavern  -- Default to tavern-level spread
