@@ -14,7 +14,6 @@ module DM.State
   , DMMood(..)
   , SceneVariant(..)
   , SceneUrgency(..)
-  , DowntimeVariant(..)
   , ActionVariant(..)
   , ActionDomain(..)
   , AftermathVariant(..)
@@ -139,11 +138,11 @@ import DM.CharacterCreation (CharacterChoices, ClockType(..))
 -- ══════════════════════════════════════════════════════════════
 
 -- | The DM's current mood determines template, tools, and output schema
+-- Note: Downtime was removed - BetweenScenes handles rest/recovery directly
 data DMMood
   = MoodScene SceneVariant
   | MoodAction ActionVariant (Maybe ActionDomain)
   | MoodAftermath AftermathVariant
-  | MoodDowntime DowntimeVariant       -- Promoted from scene variant
   | MoodTrauma TraumaVariant
   | MoodBargain BargainVariant         -- Out of dice, must make a deal
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
@@ -173,23 +172,6 @@ data SceneUrgency
   | UrgencyHigh      -- Urgent, needs attention now
   | UrgencyCritical  -- Immediate, no time to plan
   deriving (Show, Eq, Ord, Enum, Bounded, Generic, ToJSON, FromJSON)
-
--- | Downtime variants (promoted to top-level mood)
-data DowntimeVariant
-  = Recovery                         -- Healing stress/harm
-      { dvActivities :: [Text]       -- What's available
-      , dvTimeAvailable :: Text      -- "a few hours", "overnight", "a week"
-      }
-  | Project                          -- Long-term work
-      { dvProjectName :: Text
-      , dvProgress :: Int            -- Current progress
-      , dvRequired :: Int            -- Total needed
-      }
-  | Entanglement                     -- Heat catches up
-      { dvEntanglementType :: Text   -- Arrest, questioning, shakedown, etc.
-      , dvEscapeOptions :: [Text]    -- Ways out
-      }
-  deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
 -- | Action variants - the position (controlled/risky/desperate)
 data ActionVariant
@@ -383,7 +365,6 @@ data DowntimeToSceneContext = DowntimeToSceneContext
   , dtscStressHealed :: Int       -- How much stress was recovered
   , dtscHeatDecay :: Int          -- How much heat faded
   , dtscDiceRecovered :: Int      -- How many dice were restored
-  , dtscProjectProgress :: Maybe (Text, Int)  -- (projectName, progress added) if worked on project
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
@@ -404,7 +385,7 @@ data TraumaToSceneContext = TraumaToSceneContext
 
 -- | Empty contexts for defaults
 emptyDowntimeToSceneContext :: DowntimeToSceneContext
-emptyDowntimeToSceneContext = DowntimeToSceneContext "" "" 0 0 0 Nothing
+emptyDowntimeToSceneContext = DowntimeToSceneContext "" "" 0 0 0
 
 emptyAftermathToSceneContext :: AftermathToSceneContext
 emptyAftermathToSceneContext = AftermathToSceneContext "" [] []
@@ -929,7 +910,6 @@ instance ToGVal m SceneSummary where toGVal = genericToGVal
 instance ToGVal m DMMood where toGVal = genericToGVal
 instance ToGVal m SceneVariant where toGVal = genericToGVal
 instance ToGVal m SceneUrgency where toGVal = genericToGVal
-instance ToGVal m DowntimeVariant where toGVal = genericToGVal
 instance ToGVal m ActionVariant where toGVal = genericToGVal
 instance ToGVal m ActionDomain where toGVal = genericToGVal
 instance ToGVal m AftermathVariant where toGVal = genericToGVal

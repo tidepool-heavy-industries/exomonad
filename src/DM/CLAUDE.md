@@ -48,11 +48,11 @@ The game operates in distinct **moods**, each with its own template, tools, and 
               │                          │               │
               ▼                          ▼               │
        ┌────────────┐            ┌────────────┐          │
-       │  Downtime  │            │   Trauma   │          │
-       │ (The Tide) │            │(The Crack) │          │
+       │BetweenScene│            │   Trauma   │          │
+       │  (Rest)    │            │(The Crack) │          │
        └─────┬──────┘            └─────┬──────┘          │
              │                         │                 │
-             │ hook pulls back         │ adrenaline or   │
+             │ player picks activity   │ adrenaline or   │
              └─────────────────────────┴─────────────────┘
 ```
 
@@ -60,27 +60,24 @@ The game operates in distinct **moods**, each with its own template, tools, and 
 
 ```haskell
 data DMMood
-  = MoodScene SceneMoodVariant           -- Exploration, dialogue, discovery
-  | MoodAction ActionVariant (Maybe PendingOutcome)  -- Dice about to roll
-  | MoodAftermath AftermathVariant       -- Consequences landing
-  | MoodDowntime DowntimeMoodVariant     -- Rest, recovery, projects
-  | MoodTrauma TraumaMoodVariant         -- Breaking point
-  | MoodBargain BargainMoodVariant       -- Devil's bargain (no dice left)
-  | MoodBetweenScenes                    -- Inter-scene transition
+  = MoodScene SceneVariant           -- Exploration, dialogue, discovery
+  | MoodAction ActionVariant (Maybe ActionDomain)  -- Dice about to roll
+  | MoodAftermath AftermathVariant   -- Consequences landing
+  | MoodTrauma TraumaVariant         -- Breaking point
+  | MoodBargain BargainVariant       -- Devil's bargain (no dice left)
 
 -- Each variant carries phase-specific context
-data SceneMoodVariant
-  = SvEncounter { smvSource :: Text, smvUrgency :: SceneUrgency, smvEscapable :: Bool }
-  | SvOpportunity { smvOfferedBy :: Maybe Text, smvNature :: Text, smvCatch :: Text }
-  | SvDiscovery { smvWhat :: Text, smvImplications :: [Text] }
-  | SvOpen
+data SceneVariant
+  = Encounter { svSource :: Text, svUrgency :: SceneUrgency, svEscapable :: Bool }
+  | Opportunity { svOfferedBy :: Maybe Text, svNature :: Text, svCatch :: Text }
+  | Discovery { svWhat :: Text, svImplications :: [Text] }
 ```
 
 ### Mood Transitions (Loop.hs)
 
 Transitions happen via:
 1. **Tool calls** - `engage` → Action, `resolve` → Aftermath
-2. **Output flags** - `continueScene = False` → compression → Scene/Downtime
+2. **Output flags** - `continueScene = False` → compression → BetweenScenes
 3. **State thresholds** - stress = 9 → Trauma
 4. **Clock interrupts** - `pendingInterrupt` forces Action
 
@@ -125,7 +122,7 @@ data DicePool = DicePool
 ```
 
 - Dice are **spent** on actions (removed from pool)
-- Dice **recover** during downtime
+- Dice **recover** during BetweenScenes (lay low, recover activities)
 - When pool is empty → MoodBargain (devil's bargain)
 
 ### Position & Effect
@@ -199,7 +196,7 @@ data ClockType = ThreatClock | GoalClock | FactionClock
 Clocks tick via LLM structured output:
 
 ```haskell
--- In TurnOutput (downtime/aftermath)
+-- In TurnOutput (aftermath)
 clocksToTick :: [ClockTick]
 
 data ClockTick = ClockTick
@@ -320,7 +317,6 @@ Templates live in `templates/` and use Jinja2 syntax (Ginger library).
 MoodScene     → templates/scene/main.jinja      (The Weaver)
 MoodAction    → templates/action/main.jinja     (The Crucible)
 MoodAftermath → templates/aftermath/main.jinja  (The Echo)
-MoodDowntime  → templates/downtime/main.jinja   (The Tide)
 MoodTrauma    → templates/trauma/main.jinja     (The Crack)
 MoodBargain   → templates/bargain/main.jinja    (The Hungry City)
 ```
@@ -370,8 +366,8 @@ data TurnOutput = TurnOutput
   , suggestedActions :: [Text]           -- 2-3 player options
   , traumaAssigned :: Maybe Text         -- If trauma turn
   , diceAction :: Maybe DiceAction       -- Required in Action mood
-  , diceRecovered :: Int                 -- Downtime only
-  , hookDescription :: Maybe Text        -- What pulls back from downtime
+  , diceRecovered :: Int                 -- From BetweenScenes recovery
+  , hookDescription :: Maybe Text        -- Scene entry hook
   , timeElapsed :: Maybe Text            -- "three days", etc.
   , clocksToTick :: [ClockTick]          -- Clocks to advance
   }

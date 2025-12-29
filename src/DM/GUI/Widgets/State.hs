@@ -129,7 +129,6 @@ moodSection (Just m) = collapsibleSection "Mood" False
     formatMood (MoodScene enc) = "Scene: " <> formatSceneVariant enc
     formatMood (MoodAction act _) = "Action: " <> formatActionVariant act
     formatMood (MoodAftermath out) = "Aftermath: " <> showT out
-    formatMood (MoodDowntime _) = "Downtime"
     formatMood (MoodTrauma t) = "Trauma: " <> t.tvWhatBroke
     formatMood (MoodBargain _) = "Bargaining"
 

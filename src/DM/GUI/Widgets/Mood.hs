@@ -19,7 +19,6 @@ moodLabel :: DMMood -> Text
 moodLabel (MoodScene _) = "SCENE"
 moodLabel (MoodAction _ _) = "ACTION"
 moodLabel (MoodAftermath _) = "AFTERMATH"
-moodLabel (MoodDowntime _) = "DOWNTIME"
 moodLabel (MoodTrauma _) = "TRAUMA"
 moodLabel (MoodBargain _) = "BARGAIN"
 
@@ -29,7 +28,6 @@ moodDescription mood = case mood of
   MoodScene sv -> sceneDescription sv
   MoodAction av _ -> actionDescription av
   MoodAftermath av -> aftermathDescription av
-  MoodDowntime dv -> downtimeDescription dv
   MoodTrauma tv -> traumaDescription tv
   MoodBargain bv -> bargainDescription bv
 
@@ -58,13 +56,6 @@ aftermathDescription av = case av of
   AmCostly{} -> "Success, but at a cost"
   AmSetback{} -> "Things went wrong"
   AmDisaster{} -> "Disaster strikes"
-
--- | Downtime variant descriptions
-downtimeDescription :: DowntimeVariant -> Text
-downtimeDescription dv = case dv of
-  Recovery{} -> "Time to recover"
-  Project{} -> "Working on a long-term project"
-  Entanglement{} -> "Heat catches up"
 
 -- | Trauma variant description
 traumaDescription :: TraumaVariant -> Text

@@ -8,7 +8,6 @@ module DM.Templates
   , sceneTemplate
   , actionTemplate
   , aftermathTemplate
-  , downtimeTemplate
   , traumaTemplate
   , bargainTemplate
 
@@ -18,7 +17,6 @@ module DM.Templates
   , sceneJinja
   , actionJinja
   , aftermathJinja
-  , downtimeJinja
   , traumaJinja
   , bargainJinja
 
@@ -66,10 +64,6 @@ actionJinja = $(typedTemplateFile ''DMContext "templates/action/main.jinja")
 -- | Aftermath mood template - consequences, costs, complications
 aftermathJinja :: TypedTemplate DMContext SourcePos
 aftermathJinja = $(typedTemplateFile ''DMContext "templates/aftermath/main.jinja")
-
--- | Downtime mood template - recovery montage, time compression
-downtimeJinja :: TypedTemplate DMContext SourcePos
-downtimeJinja = $(typedTemplateFile ''DMContext "templates/downtime/main.jinja")
 
 -- | Trauma mood template - breaking point, gaining permanent scar
 traumaJinja :: TypedTemplate DMContext SourcePos
@@ -127,14 +121,6 @@ aftermathTemplate = Template
   , templateTools = dmToolList
   }
 
--- | Downtime template - recovery montage state
-downtimeTemplate :: Template DMContext TurnOutput DMEvent WorldState DMEffects DMTools
-downtimeTemplate = Template
-  { templateJinja = downtimeJinja
-  , templateOutputSchema = downtimeSchema
-  , templateTools = dmToolList
-  }
-
 -- | Trauma template - breaking point, stress reset
 traumaTemplate :: Template DMContext TurnOutput DMEvent WorldState DMEffects DMTools
 traumaTemplate = Template
@@ -169,7 +155,6 @@ renderForMood mood ctx = case mood of
   MoodScene _     -> render sceneTemplate ctx
   MoodAction _ _  -> render actionTemplate ctx
   MoodAftermath _ -> render aftermathTemplate ctx
-  MoodDowntime _  -> render downtimeTemplate ctx
   MoodTrauma _    -> render traumaTemplate ctx
   MoodBargain _   -> render bargainTemplate ctx
 
@@ -193,12 +178,6 @@ aftermathSchema :: Schema TurnOutput
 aftermathSchema = Schema
   { schemaJSON = schemaToValue aftermathOutputSchema
   , schemaDescription = "Aftermath: land consequences, echo forward."
-  }
-
-downtimeSchema :: Schema TurnOutput
-downtimeSchema = Schema
-  { schemaJSON = schemaToValue downtimeOutputSchema
-  , schemaDescription = "Downtime: recovery montage. The ONLY place healing happens."
   }
 
 traumaSchema :: Schema TurnOutput
@@ -307,37 +286,6 @@ aftermathOutputSchema = objectSchema
       (nullableSchema (emptySchema TString)))
   ]
   ["narration", "continueScene", "suggestedActions"]
-
--- | DOWNTIME: Recovery montage - the ONLY place healing happens
-downtimeOutputSchema :: JSONSchema
-downtimeOutputSchema = objectSchema
-  [ ("narration", describeField "narration"
-      "Montage of passing time. Compress hours/days into moments."
-      (emptySchema TString))
-  , ("stressHealed", describeField "stressHealed"
-      "Stress recovered (positive number). 1-3 for short rest, 4-6 for extended."
-      (emptySchema TInteger))
-  , ("heatDecay", describeField "heatDecay"
-      "Heat that fades with time (positive number). 0-2 typical."
-      (emptySchema TInteger))
-  , ("diceRecovered", describeField "diceRecovered"
-      "Dice restored to pool. Full rest = full pool."
-      (emptySchema TInteger))
-  , ("timeElapsed", describeField "timeElapsed"
-      "How much time passed: 'a few hours', 'three days', 'a week'"
-      (emptySchema TString))
-  , ("hookDescription", describeField "hookDescription"
-      "What pulls them back to action. A knock, a rumor, a clock ticking."
-      (emptySchema TString))
-  , ("clocksToTick", describeField "clocksToTick"
-      "Clocks to advance during rest. Threat clocks auto-tick; use this for goal/project clocks."
-      (arraySchema (objectSchema
-        [ ("clockId", describeField "clockId" "The clock's ID" (emptySchema TString))
-        , ("ticks", describeField "ticks" "Segments to advance (1-2 typical)" (emptySchema TInteger))
-        ]
-        ["clockId", "ticks"])))
-  ]
-  ["narration", "stressHealed", "diceRecovered", "timeElapsed", "hookDescription"]
 
 -- | TRAUMA: Breaking point - stress reset, scar gained
 traumaOutputSchema :: JSONSchema

@@ -673,7 +673,6 @@ instance Tool AcceptBargain DMEvent WorldState DMEffects where
       moodName (MoodScene _) = "scene"
       moodName (MoodAction _ _) = "action"
       moodName (MoodAftermath _) = "aftermath"
-      moodName (MoodDowntime _) = "downtime"
       moodName (MoodTrauma _) = "trauma"
       moodName (MoodBargain _) = "bargain"
 
@@ -848,7 +847,6 @@ makeDMDispatcher name input = do
     moodChanged (MoodAftermath _) (MoodAftermath _) = False
     moodChanged (MoodTrauma _) (MoodTrauma _) = False
     moodChanged (MoodBargain _) (MoodBargain _) = False
-    moodChanged (MoodDowntime _) (MoodDowntime _) = False
     moodChanged _ _ = True  -- Different constructors = mood changed
 
 -- | DM dispatcher that automatically provides PlayingState from current phase

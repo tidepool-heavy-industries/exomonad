@@ -244,40 +244,6 @@ dmTurn input = do
                 -- Apply structured output to world state (non-dice deltas)
                 modify (applyTurnOutput result.trOutput)
 
-                -- Handle downtime → scene transition (The Tide flows back to the Weaver)
-                case mood of
-                  MoodDowntime _ -> do
-                    logInfo "Downtime turn completed, returning to scene"
-
-                    -- Auto-tick ALL threat clocks (time passed during rest)
-                    -- Downtime bypasses BetweenScenes where this normally happens
-                    tickThreatClocks
-                    logInfo "Threat clocks ticked (time passed during downtime)"
-
-                    -- Apply explicit clock ticks from LLM output (goal/project clocks)
-                    forM_ result.trOutput.clocksToTick $ \tick -> do
-                      let cid = ClockId tick.clockId
-                      modify @WorldState $ \s ->
-                        s { clocks = HM.adjust (advanceClock tick.ticks) cid s.clocks }
-                      logDebug $ "Advanced clock " <> tick.clockId <> " by " <> T.pack (show tick.ticks)
-
-                    -- Check for completed clocks
-                    checkClockConsequences
-
-                    -- Build context for the Weaver about the rest period
-                    let downtimeContext = DowntimeToSceneContext
-                          { dtscHook = fromMaybe "something pulls them back" result.trOutput.hookDescription
-                          , dtscTimeElapsed = fromMaybe "some time" result.trOutput.timeElapsed
-                          -- Calculate actual healing from state changes
-                          , dtscStressHealed = max 0 (stateBefore.player.stress - clamp 0 9 (stateBefore.player.stress + result.trOutput.stressDelta))
-                          , dtscHeatDecay = max 0 (stateBefore.player.heat - clamp 0 10 (stateBefore.player.heat + result.trOutput.heatDelta))
-                          , dtscDiceRecovered = result.trOutput.diceRecovered
-                          , dtscProjectProgress = Nothing  -- TODO: parse from output if project work was done
-                          }
-                        hookText = fromMaybe "the world calls" result.trOutput.hookDescription
-                    modify @WorldState $ \s -> s { sceneEntryContext = Just (EntryFromDowntime downtimeContext) }
-                    modify @WorldState $ updateMood (MoodScene (Encounter hookText UrgencyMedium True))
-                  _ -> return ()
 
                 -- Apply dice deltas separately (if any)
                 let (stressDelta, heatDelta, coinDeltaFromDice) = diceDeltas
@@ -802,7 +768,6 @@ gameLoopWithDB conn gameId = loop []
                 Just (MoodScene _)     -> "SCENE"
                 Just (MoodAction _ _)  -> "ACTION"
                 Just (MoodAftermath _) -> "AFTERMATH"
-                Just (MoodDowntime _)  -> "DOWNTIME"
                 Just (MoodTrauma _)    -> "TRAUMA"
                 Just (MoodBargain _)   -> "BARGAIN"
                 Nothing                -> "---"
@@ -870,7 +835,6 @@ gameLoopWithSave saveCallback = loop []
                 Just (MoodScene _)     -> "SCENE"
                 Just (MoodAction _ _)  -> "ACTION"
                 Just (MoodAftermath _) -> "AFTERMATH"
-                Just (MoodDowntime _)  -> "DOWNTIME"
                 Just (MoodTrauma _)    -> "TRAUMA"
                 Just (MoodBargain _)   -> "BARGAIN"
                 Nothing                -> "---"

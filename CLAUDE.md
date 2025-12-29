@@ -297,7 +297,6 @@ templates/                 # Jinja templates (ginger library)
 ├── scene/                 # Scene-phase templates
 ├── action/                # Action-phase templates
 ├── aftermath/             # Aftermath-phase templates
-├── downtime/              # Downtime-phase templates
 ├── bargain/               # Devil's bargain templates
 ├── trauma/                # Trauma handling templates
 ├── partials/              # Reusable template blocks
@@ -351,7 +350,7 @@ data PlayerDeltas = PlayerDeltas
 - **Game loop** - dmTurn with mood-based template selection, tool dispatch, output application
 - **Dice mechanics** - Pool management, die selection UI, outcome tier calculation, cost application
 - **Clock system** - Tick via LLM output, consequence dispatch on completion, visible/hidden split
-- **Mood state machine** - Scene → Action → Aftermath → Downtime/Trauma, with interrupts
+- **Mood state machine** - Scene → Action → Aftermath → BetweenScenes/Trauma, with interrupts
 - **Compression** - Scene summarization, rumor extraction, thread spawning
 - **Tools (9)** - All dispatchable: think, speak_as_npc, ask_player, choose, engage, spend_die, resolve, accept, set_scene_style
 - **Events (14)** - All emitted and handled for state change notifications
@@ -367,6 +366,7 @@ data PlayerDeltas = PlayerDeltas
 
 ### Removed Dead Code (2024-12)
 - `clockTriggers` system (Trigger, ActionPattern, Duration types) - clocks tick via LLM output only
+- `MoodDowntime` + `DowntimeVariant` - replaced by BetweenScenes phase with direct mechanics
 
 ## Development Commands
 
@@ -547,7 +547,7 @@ Don't validate—make it impossible to construct bad data.
 
 ```haskell
 -- Bad: runtime checks scattered everywhere
-data GamePhase = Scene | Action | Aftermath | Downtime
+data GamePhase = Scene | Action | Aftermath
 data WorldState = WorldState { phase :: GamePhase, pendingOutcome :: Maybe PendingOutcome }
 -- Every function must check: is pendingOutcome Nothing when phase /= Action?
 
@@ -556,7 +556,6 @@ data GamePhase
   = PhaseScene SceneContext
   | PhaseAction PendingOutcome  -- outcome MUST exist in action phase
   | PhaseAftermath AftermathContext
-  | PhaseDowntime DowntimeContext
 -- Type system enforces: PendingOutcome exists iff in Action phase
 ```
 

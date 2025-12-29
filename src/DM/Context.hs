@@ -120,15 +120,6 @@ data MoodVariantContext = MoodVariantContext
   , mvcActionOtherDice :: Maybe [Int]    -- The dice that weren't chosen
   , mvcActionDomain :: Maybe Text        -- What kind of action
   , mvcActionStakes :: Maybe Text        -- What was at risk
-  -- Downtime variants
-  , mvcDowntimeType :: Maybe Text        -- "recovery", "project", "entanglement"
-  , mvcActivities :: Maybe [Text]        -- Recovery: available activities
-  , mvcTimeAvailable :: Maybe Text       -- Recovery: how much time
-  , mvcProjectName :: Maybe Text         -- Project: what they're working on
-  , mvcProgress :: Maybe Int             -- Project: current progress
-  , mvcRequired :: Maybe Int             -- Project: total needed
-  , mvcEntanglementType :: Maybe Text    -- Entanglement: what kind
-  , mvcEscapeOptions :: Maybe [Text]     -- Entanglement: ways out
   -- Trauma variants
   , mvcTraumaType :: Maybe Text
   , mvcWhatBroke :: Maybe Text
@@ -304,7 +295,6 @@ buildMoodContext mood = case mood of
   MoodScene variant -> ("scene", sceneVariantContext variant)
   MoodAction variant domain -> ("action", actionVariantContext variant domain)
   MoodAftermath variant -> ("aftermath", aftermathVariantContext variant)
-  MoodDowntime variant -> ("downtime", downtimeVariantContext variant)
   MoodTrauma variant -> ("trauma", traumaVariantContext variant)
   MoodBargain variant -> ("bargain", bargainVariantContext variant)
 
@@ -345,15 +335,6 @@ emptyVariantContext = MoodVariantContext
   , mvcActionOtherDice = Nothing
   , mvcActionDomain = Nothing
   , mvcActionStakes = Nothing
-  -- Downtime
-  , mvcDowntimeType = Nothing
-  , mvcActivities = Nothing
-  , mvcTimeAvailable = Nothing
-  , mvcProjectName = Nothing
-  , mvcProgress = Nothing
-  , mvcRequired = Nothing
-  , mvcEntanglementType = Nothing
-  , mvcEscapeOptions = Nothing
   -- Trauma
   , mvcTraumaType = Nothing
   , mvcWhatBroke = Nothing
@@ -486,26 +467,6 @@ aftermathVariantContext = \case
       DomainViolence -> "violence"
       DomainPursuit -> "pursuit"
       DomainArcane -> "arcane"
-
--- | Extract downtime variant context
-downtimeVariantContext :: DowntimeVariant -> MoodVariantContext
-downtimeVariantContext = \case
-  Recovery{..} -> emptyVariantContext
-    { mvcDowntimeType = Just "recovery"
-    , mvcActivities = Just dvActivities
-    , mvcTimeAvailable = Just dvTimeAvailable
-    }
-  Project{..} -> emptyVariantContext
-    { mvcDowntimeType = Just "project"
-    , mvcProjectName = Just dvProjectName
-    , mvcProgress = Just dvProgress
-    , mvcRequired = Just dvRequired
-    }
-  Entanglement{..} -> emptyVariantContext
-    { mvcDowntimeType = Just "entanglement"
-    , mvcEntanglementType = Just dvEntanglementType
-    , mvcEscapeOptions = Just dvEscapeOptions
-    }
 
 -- | Extract trauma variant context
 traumaVariantContext :: TraumaVariant -> MoodVariantContext
