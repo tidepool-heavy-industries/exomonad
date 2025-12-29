@@ -36,7 +36,6 @@ classDiagram
     class ActiveState {
         asFunction: SpaceFunction
         asAnchors: [ItemName]
-        asLastAnxiety: Maybe AnxietyTrigger
     }
 
     class SurveyingData {

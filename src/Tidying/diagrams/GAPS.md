@@ -24,24 +24,7 @@ data ItemDisposition
 
 ---
 
-## 2. Return Type Error in Diagrams
-
-### Diagram Says:
-```
-chaosLevel :: Maybe PhotoAnalysis -> ChaosLevel
-```
-
-### Actual Code (`Decide.hs`):
-```haskell
-chaosLevel :: Maybe PhotoAnalysis -> Maybe ChaosLevel
-chaosLevel = fmap (.paChaosLevel)
-```
-
-The function returns `Maybe ChaosLevel`, not `ChaosLevel`. This affects routing logic that must handle `Nothing`.
-
----
-
-## 3. Overwhelm Detection (Not in Diagrams)
+## 2. Overwhelm Detection (Not in Diagrams)
 
 ### `isOverwhelmedSignal` Function (`State.hs`)
 
@@ -65,7 +48,7 @@ This triggers fast-track to Sorting when user seems overwhelmed.
 
 ---
 
-## 4. Split Suggestion Logic (Not in Diagrams)
+## 3. Split Suggestion Logic (Not in Diagrams)
 
 ### `suggestSplit` Function (`Decide.hs`)
 
@@ -81,7 +64,7 @@ Pattern-matches item names to suggest categories:
 
 ---
 
-## 5. State Transition Helpers (Not in Diagrams)
+## 4. State Transition Helpers (Not in Diagrams)
 
 ### `transitionPhaseData` (`Loop.hs`)
 
@@ -103,7 +86,7 @@ Parses category name from `AckProgress "Let's do cables"` → `CategoryName "cab
 
 ---
 
-## 6. Additional Tools (Partially Diagrammed)
+## 5. Additional Tools (Partially Diagrammed)
 
 ### AskSpaceFunction Tool (`Tools.hs`)
 
@@ -129,7 +112,7 @@ data ProposedChoice = ProposedChoice
 
 ---
 
-## 7. Vision Prompts (Not in Diagrams)
+## 6. Vision Prompts (Not in Diagrams)
 
 ### System Prompt (`Loop.hs`)
 
@@ -150,7 +133,7 @@ Analyze this space. What do you see? How messy is it? What should we tackle firs
 
 ---
 
-## 8. TidyingEvent Full List (Partial in Diagrams)
+## 7. TidyingEvent Full List (Partial in Diagrams)
 
 ### All 11 Events (`Events.hs`)
 
@@ -171,7 +154,7 @@ Analyze this space. What do you see? How messy is it? What should we tackle firs
 
 ---
 
-## 9. Action Classification (Not in Diagrams)
+## 8. Action Classification (Not in Diagrams)
 
 ### `isQuestion` (`Action.hs`)
 
@@ -213,7 +196,7 @@ isInstruction _ = False
 
 ---
 
-## 10. Constants (Not in Diagrams)
+## 9. Constants (Not in Diagrams)
 
 | Constant | Value | Location |
 |----------|-------|----------|
@@ -226,12 +209,11 @@ isInstruction _ = False
 ## Summary: What Diagrams Should Add
 
 1. **ItemDisposition** enum
-2. **Fix** `chaosLevel` return type to `Maybe ChaosLevel`
-3. **Overwhelm signals** list
-4. **Split suggestion patterns** table
-5. **AskSpaceFunction** and **ConfirmDone** tool flows
-6. **Full TidyingEvent** list
-7. **Constants** reference
+2. **Overwhelm signals** list
+3. **Split suggestion patterns** table
+4. **AskSpaceFunction** and **ConfirmDone** tool flows
+5. **Full TidyingEvent** list
+6. **Constants** reference
 
 ---
 
