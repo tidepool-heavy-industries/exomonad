@@ -4,7 +4,7 @@
 
 A type-safe LLM agent loop library (Tidepool) demonstrated via a Blades in the Dark-style Dungeon Master agent. The key insight: LLMs don't need raw IO - they need typed state they can read (via templates) and typed mutations they can express (via structured output).
 
-**Status**: Compiles successfully. All logic is stubbed with `error "TODO: ..."`.
+**Status**: Functional game loop with LLM integration. Core mechanics wired: dice selection, clock consequences, mood transitions, compression. See `src/DM/CLAUDE.md` for exhaustive DM system documentation.
 
 ## Architecture
 
@@ -346,29 +346,27 @@ data PlayerDeltas = PlayerDeltas
 
 ## Implementation Status
 
-### Complete
-- Effect system with all core effects defined
-- Type-safe tool list (ToolList GADT)
-- Template system ready for typed Jinja integration
-- FitD dice mechanics types
-- Precarity calculation
-- Delta-based mutation types
-- DM loop structure with RequestInput for dice selection
-- **GUI: Core bridge** - GUIBridge with TVar/MVar communication
-- **GUI: Generic widgets** - textInput, choiceCards, narrativePane, debugPanel, loadingOverlay
-- **GUI: DM widgets** - Stats, Mood, Clocks, History, Narrative (with NPC bubbles), Dice
-- **GUI: Theme system** - ColorPalette, CSS generation, noir theme
-- **GUI: Polling loop** - Version-based change detection, efficient updates
-- **GUI: Accessibility** - Keyboard navigation, ARIA labels, focus states
-- **GUI: Handler** - makeGUIHandler for choice/text, guiDice for dice selection
+### Fully Wired
+- **Effect system** - LLM, State, Emit, RequestInput, Random, Log, ChatHistory
+- **Game loop** - dmTurn with mood-based template selection, tool dispatch, output application
+- **Dice mechanics** - Pool management, die selection UI, outcome tier calculation, cost application
+- **Clock system** - Tick via LLM output, consequence dispatch on completion, visible/hidden split
+- **Mood state machine** - Scene → Action → Aftermath → Downtime/Trauma, with interrupts
+- **Compression** - Scene summarization, rumor extraction, thread spawning
+- **Tools (9)** - All dispatchable: think, speak_as_npc, ask_player, choose, engage, spend_die, resolve, accept, set_scene_style
+- **Events (14)** - All emitted and handled for state change notifications
+- **Context building** - DMContext from WorldState with precarity, NPCs, clocks, rumors, threads
+- **Template rendering** - Ginger (Jinja) with mood-specific templates
+- **GUI** - Full threepenny-gui with stats, clocks, dice, narrative, history tabs
 
-### Stubbed / Partial
-- Template rendering (waiting for jinja-th package)
-- `applyTurnOutput` and mutation appliers
-- `buildDMContext` and context enrichment
-- JSON Schema derivation
-- GUI: Clock face SVG (currently text circles)
-- GUI: `ihDice` in InputHandler (use `guiDice` directly for now)
+### Partial / WIP
+- Template type-checking (runtime Ginger, not compile-time jinja-th)
+- JSON Schema derivation (manual schemas)
+- GUI: Clock SVG rendering (currently text circles)
+- GUI: `ihDice` in InputHandler (use `guiDice` directly)
+
+### Removed Dead Code (2024-12)
+- `clockTriggers` system (Trigger, ActionPattern, Duration types) - clocks tick via LLM output only
 
 ## Development Commands
 
