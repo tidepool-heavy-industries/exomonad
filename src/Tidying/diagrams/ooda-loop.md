@@ -120,6 +120,20 @@ flowchart TD
 | `exFunction` | `Maybe SpaceFunction` | Space purpose |
 | `exAnchors` | `Maybe [ItemName]` | Anchor items |
 
+### Overwhelm Detection
+
+`isOverwhelmedSignal` triggers fast-track to Sorting when user seems stuck:
+
+| Signal | Example |
+|--------|---------|
+| `idk` | "idk where to start" |
+| `don't know` | "I don't know" |
+| `no idea` | "no idea what to do" |
+| `where to start` | "where do I start" |
+| `overwhelm` | "feeling overwhelmed" |
+| `too much` | "there's too much" |
+| `help` | "help" |
+
 ## DECIDE: Pure Routing
 
 No LLM calls - pure function from state to action:

@@ -66,15 +66,28 @@ flowchart TD
     E --> F --> G --> H --> I --> J
 ```
 
+## ItemDisposition Enum
+
+Where an item can go (no "Unsure" option - that's an antipattern):
+
+```haskell
+data ItemDisposition
+  = PlaceAt Text      -- Specific location: "kitchen counter"
+  | Trash             -- Garbage
+  | Donate            -- Give away
+  | Recycle           -- Recycling bin
+  | SkipForNow        -- Put it back, come back later
+  | NeedMoreInfo      -- Agent needs more context
+```
+
 ## Question Types and Answers
 
 | Question Type | Answer Type | Fallback |
 |---------------|-------------|----------|
-| `ProposeDisposition item choices reason` | `DispositionAnswer ItemDisposition` | `SkipForNow` |
+| `ProposeDisposition item choices fallback` | `DispositionAnswer ItemDisposition` | `SkipForNow` |
 | `Confirm prompt default` | `ConfirmAnswer Bool` | `default` |
-| `Choose prompt qid options reveals` | `ChoiceAnswer Text` | `""` |
+| `Choose prompt qid options` | `ChoiceAnswer Text` | `""` |
 | `FreeText prompt placeholder` | `TextAnswer Text` | `""` |
-| `QuestionGroup label questions` | `GroupAnswer (Map QuestionId Answer)` | `Map.empty` |
 
 ## QuestionHandler Implementation
 
@@ -153,11 +166,26 @@ fallbackAnswer :: Question -> Answer
 fallbackAnswer = \case
   ProposeDisposition _ _ _ -> DispositionAnswer SkipForNow
   Confirm _ defVal         -> ConfirmAnswer defVal
-  Choose _ _ _ _           -> ChoiceAnswer ""
+  Choose _ _ _             -> ChoiceAnswer ""
   FreeText _ _             -> TextAnswer ""
-  QuestionGroup _ _        -> GroupAnswer Map.empty
-  ConditionalQ _ q         -> fallbackAnswer q
 ```
+
+## TidyingEvent List (All 11 Events)
+
+| Event | Description |
+|-------|-------------|
+| `PhotoAnalyzed Text` | Photo was analyzed |
+| `SituationClassified Text` | Situation/intent classified |
+| `ActionTaken Action` | Action was decided |
+| `PhaseChanged Phase Phase` | Phase transition (from, to) |
+| `SessionEnded Int` | Session ended with item count |
+| `UserInputReceived Text` | User input for chat display |
+| `ResponseGenerated Text` | Response for chat display |
+| `ItemProposed Text [Text]` | Tool: item + dispositions |
+| `UserConfirmed Text Text` | Tool: item + chosen disposition |
+| `UserCorrected Text Text` | Tool: item + user-provided location |
+| `FunctionChosen Text` | Tool: space function selected |
+| `SessionConfirmedDone` | Tool: user confirmed done |
 
 ## Tool Schema Example
 

@@ -129,8 +129,28 @@ mindmap
 | | AckProgress |
 | | InstructSplit |
 
+## Split Suggestion Patterns
+
+When unsure pile >= 5, `suggestSplit` pattern-matches items to suggest categories:
+
+| Pattern | Suggested Categories |
+|---------|---------------------|
+| `cable`, `cord` | `cables`, `other` |
+| `paper`, `document` | `papers`, `other` |
+| `book` | `books`, `other` |
+| `clothes`, `shirt` | `clothes`, `other` |
+| (default) | `keep-maybe`, `donate-maybe` |
+
+## Constants
+
+| Constant | Value | Location |
+|----------|-------|----------|
+| `unsureThreshold` | 5 items | `Decide.hs` |
+| Question handler timeout | 5 minutes | `GUI/Runner.hs` |
+| Polling interval | 100ms | `GUI/App.hs` |
+
 ## Key Files
 
 - `State.hs` - Phase, PhaseData, ActiveState, SessionState
-- `Decide.hs` - decideFromExtract (pure routing)
+- `Decide.hs` - decideFromExtract, suggestSplit
 - `Action.hs` - Action ADT
