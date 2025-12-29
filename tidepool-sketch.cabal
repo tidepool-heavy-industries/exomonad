@@ -59,10 +59,8 @@ library
         Tidying.Types
         Tidying.Agent
         Tidying.State
-        Tidying.Situation
         Tidying.Action
         Tidying.Decide
-        Tidying.Orient
         Tidying.Act
         Tidying.Context
         Tidying.Output

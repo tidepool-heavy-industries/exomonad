@@ -4,12 +4,10 @@
 
 module Tidying.Decide
   ( -- * Core routing
-    decide
-  , decideFromExtract
+    decideFromExtract
 
     -- * Helpers
   , suggestSplit
-  , pickNextTarget
 
     -- * Photo analysis helpers
   , chaosLevel
@@ -18,165 +16,17 @@ module Tidying.Decide
   ) where
 
 import Data.List.NonEmpty (NonEmpty(..))
-import Data.Map.Strict qualified as Map
 import Data.Maybe (fromMaybe, isJust)
-import Data.Text (Text)
 import Data.Text qualified as T
 
 import Tidying.State
-import Tidying.Situation
 import Tidying.Action
 import Tidying.Context (PhotoAnalysis(..))
 import Tidying.Output (Extract(..), Intent(..), Choice(..))
-import Tidying.Types (ItemName(..), Location(..), AnxietyTrigger(..), CategoryName(..), ChaosLevel(..))
-
--- | Pure routing: (State, Situation) -> (Action, NextPhase)
--- This is the core state machine logic. NO LLM calls here.
-decide :: SessionState -> Situation -> (Action, Phase)
-decide st sit = case (phase st, sit) of
-
-  ------------------------------------
-  -- SURVEYING
-  ------------------------------------
-
-  (Surveying, NeedFunction) ->
-    (AskFunction, Surveying)
-
-  (Surveying, NeedAnchors) ->
-    (AskAnchors, Surveying)
-
-  (Surveying, OverwhelmedNeedMomentum) ->
-    -- Skip questions, get them moving
-    (FirstInstruction, Sorting)
-
-  -- User answered function question
-  (Surveying, ActionDone)
-    | hasFunction st && not (hasAnchors st) ->
-        -- Could ask anchors, but check if they seem overwhelmed
-        (AskAnchors, Surveying)
-    | hasFunction st ->
-        (FirstInstruction, Sorting)
-    | otherwise ->
-        (AskFunction, Surveying)
-
-  ------------------------------------
-  -- SORTING
-  ------------------------------------
-
-  (Sorting, ItemDescribed _item Trash) ->
-    (InstructTrash, Sorting)
-
-  (Sorting, ItemDescribed _item (Belongs location)) ->
-    (InstructPlace location, Sorting)
-
-  (Sorting, ItemDescribed item Unsure) ->
-    let st' = st { piles = addUnsure item st.piles }
-    in if unsureCount st'.piles > unsureThreshold
-       then (InstructSplit (suggestSplit st'), Splitting)
-       else (InstructUnsure, Sorting)
-
-  (Sorting, ItemDescribed item NeedsDecisionSupport) ->
-    (DecisionAid item, DecisionSupport)
-
-  (Sorting, ActionDone) ->
-    (InstructNext, Sorting)
-
-  (Sorting, UnsureGrowing) ->
-    (InstructSplit (suggestSplit st), Splitting)
-
-  (Sorting, MainPileDone) ->
-    pickNextTarget st
-
-  ------------------------------------
-  -- SPLITTING
-  ------------------------------------
-
-  (Splitting, ActionDone) ->
-    -- After split, back to sorting
-    (InstructNext, Sorting)
-
-  ------------------------------------
-  -- DECISION_SUPPORT
-  ------------------------------------
-
-  (DecisionSupport, ItemDescribed item cls) ->
-    -- User made a decision, route based on classification
-    case cls of
-      Trash -> (InstructTrash, Sorting)
-      Belongs loc -> (InstructPlace loc, Sorting)
-      Unsure -> (InstructUnsure, Sorting)
-      NeedsDecisionSupport -> (DecisionAid item, DecisionSupport)
-
-  (DecisionSupport, ActionDone) ->
-    (InstructNext, Sorting)
-
-  ------------------------------------
-  -- REFINING
-  ------------------------------------
-
-  (Refining, ItemDescribed item cls) ->
-    case cls of
-      Trash -> (InstructTrash, Refining)
-      Belongs loc -> (InstructPlace loc, Refining)
-      -- In refining, no more unsure - must decide
-      Unsure -> (DecisionAid item, DecisionSupport)
-      NeedsDecisionSupport -> (DecisionAid item, DecisionSupport)
-
-  (Refining, ActionDone) ->
-    (InstructNext, Refining)
-
-  (Refining, MainPileDone) ->
-    pickNextTarget st
-
-  ------------------------------------
-  -- ENERGY / ANXIETY (any phase)
-  ------------------------------------
-
-  (_, Anxious trigger) ->
-    -- Pivot away from anxiety trigger
-    let alternative = findAlternative st ((\(AnxietyTrigger t) -> t) trigger)
-    in (PivotAway trigger (Location alternative), phase st)
-
-  (_, Flagging) ->
-    (EnergyCheck, phase st)
-
-  (_, WantsToStop) ->
-    (Summary, phase st)
-
-  (_, WantsToContinue) ->
-    -- Continue with whatever is next
-    (InstructNext, phase st)
-
-  (_, Stuck maybeItem) ->
-    let item = fromMaybe (ItemName "this item") maybeItem
-    in (DecisionAid item, DecisionSupport)
-
-  ------------------------------------
-  -- COMPLETION
-  ------------------------------------
-
-  (_, AllDone) ->
-    (Summary, phase st)
-
-  ------------------------------------
-  -- DEFAULT (intentional catch-all)
-  ------------------------------------
-  --
-  -- This default handles any (Phase, Situation) pairs not explicitly matched.
-  -- It's safe because:
-  -- 1. Universal handlers above catch Anxious, Flagging, WantsToStop, etc.
-  -- 2. Phase-specific handlers catch the main flows
-  -- 3. InstructNext is a safe fallback that keeps momentum
-  --
-  -- If you add a new Phase or Situation, test that it routes correctly.
-  -- Consider adding explicit cases if the default behavior is wrong.
-
-  _ ->
-    (InstructNext, phase st)
-
+import Tidying.Types (ItemName(..), Location(..), CategoryName(..), ChaosLevel(..))
 
 -- ══════════════════════════════════════════════════════════════
--- EXTRACTION-BASED ROUTING (new approach)
+-- EXTRACTION-BASED ROUTING
 -- ══════════════════════════════════════════════════════════════
 
 -- | Route based on extracted information from user input
@@ -285,10 +135,6 @@ routeInSorting st ext = case ext.exIntent of
 unsureThreshold :: Int
 unsureThreshold = 5
 
--- | Add item to unsure pile
-addUnsure :: ItemName -> Piles -> Piles
-addUnsure item p = p { unsure = item : p.unsure }
-
 -- | Suggest categories for splitting unsure pile
 suggestSplit :: SessionState -> NonEmpty CategoryName
 suggestSplit st =
@@ -309,35 +155,6 @@ suggestSplit st =
       CategoryName "keep-maybe" :| [CategoryName "donate-maybe"]
   where
     hasWord w t = w `T.isInfixOf` t
-
--- | Pick next target after pile is done
-pickNextTarget :: SessionState -> (Action, Phase)
-pickNextTarget st
-  -- More unsure items?
-  | not (null st.piles.unsure) =
-      (AckProgress "Pile done. Unsure items left.", Sorting)
-
-  -- Emergent categories to refine?
-  | Just (CategoryName nextCat, _) <- Map.lookupMin (getEmergentCats st) =
-      (AckProgress ("Let's do " <> nextCat), Refining)
-
-  -- All done
-  | otherwise =
-      (Summary, phase st)
-
--- | Find an alternative when pivoting away from anxiety trigger
-findAlternative :: SessionState -> Text -> Text
-findAlternative st trigger =
-  -- Simple heuristic: if trigger is "boxes", suggest something else
-  case T.toLower trigger of
-    t | "box" `T.isInfixOf` t ->
-        if not (null st.piles.unsure)
-          then "the unsure pile"
-          else "the desk"
-    t | "paper" `T.isInfixOf` t ->
-        "something on the floor"
-    _ ->
-        "something smaller"
 
 -- ══════════════════════════════════════════════════════════════
 -- PHOTO ANALYSIS HELPERS

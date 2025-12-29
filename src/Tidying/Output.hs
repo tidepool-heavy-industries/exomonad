@@ -4,21 +4,16 @@
 
 -- | Tidying turn output types
 --
--- ORIENT produces a situation classification.
+-- EXTRACT extracts structured info from user input.
 -- ACT produces a response to send to the user.
 -- Both are LLM outputs with JSON schemas.
 
 module Tidying.Output
-  ( -- * EXTRACT output (new extraction-first approach)
+  ( -- * EXTRACT output
     Extract(..)
   , Intent(..)
   , Choice(..)
   , extractSchema
-
-    -- * ORIENT output (legacy)
-  , OrientOutput(..)
-  , orientOutputSchema
-  , parseOrientToSituation
 
     -- * ACT output
   , ActOutput(..)
@@ -36,9 +31,7 @@ import GHC.Generics (Generic)
 
 import Tidepool.Template (Schema(..))
 import Tidying.Types
-  ( ItemName(..), Location(..), SpaceFunction(..), AnxietyTrigger(..), ChaosLevel )
-import Tidying.Situation
-  ( Situation(..), ItemClass(..) )
+  ( ItemName(..), Location(..), SpaceFunction(..), ChaosLevel )
 
 -- ══════════════════════════════════════════════════════════════
 -- EXTRACT OUTPUT (new extraction-first approach)
@@ -170,111 +163,6 @@ extractSchema = Schema
               ]
           ]
       , "required" .= (["intent"] :: [Text])
-      ]
-  }
-
--- ══════════════════════════════════════════════════════════════
--- ORIENT OUTPUT (legacy)
--- ══════════════════════════════════════════════════════════════
-
--- | Output from ORIENT phase - LLM classifies the situation
-data OrientOutput = OrientOutput
-  { ooSituation :: Text
-    -- ^ One of: need_function, need_anchors, overwhelmed,
-    --   item_trash, item_belongs, item_unsure, item_stuck,
-    --   action_done, unsure_growing, main_done,
-    --   anxious, flagging, wants_stop, wants_continue, all_done
-  , ooItemName :: Maybe ItemName
-    -- ^ For item classifications, the item name
-  , ooItemLocation :: Maybe Location
-    -- ^ For "belongs" classification, where it goes
-  , ooAnxietyTrigger :: Maybe AnxietyTrigger
-    -- ^ For "anxious" classification, what triggered it
-  , ooFunctionExtracted :: Maybe SpaceFunction
-    -- ^ If user provided function, extract it
-  , ooAnchorsExtracted :: [ItemName]
-    -- ^ If user mentioned anchors, extract them
-  } deriving (Show, Eq, Generic)
-
--- | JSON options: ooItemName -> item_name
-orientJsonOptions :: Options
-orientJsonOptions = defaultOptions
-  { fieldLabelModifier = camelTo2 '_' . drop 2  -- drop "oo" prefix
-  , omitNothingFields = True
-  }
-
-instance FromJSON OrientOutput where
-  parseJSON = withObject "OrientOutput" $ \v -> OrientOutput
-    <$> v .: "situation"
-    <*> (fmap ItemName <$> v .:? "item_name")
-    <*> (fmap Location <$> v .:? "item_location")
-    <*> (fmap AnxietyTrigger <$> v .:? "anxiety_trigger")
-    <*> (fmap SpaceFunction <$> v .:? "function_extracted")
-    <*> (map ItemName <$> v .:? "anchors_extracted" .!= [])
-
-instance ToJSON OrientOutput where
-  toJSON = genericToJSON orientJsonOptions
-
--- | Parse OrientOutput into Situation
-parseOrientToSituation :: OrientOutput -> Situation
-parseOrientToSituation OrientOutput{..} = case ooSituation of
-  "need_function" -> NeedFunction
-  "need_anchors" -> NeedAnchors
-  "overwhelmed" -> OverwhelmedNeedMomentum
-  "item_trash" -> ItemDescribed (maybe (ItemName "unknown") id ooItemName) Trash
-  "item_belongs" -> ItemDescribed (maybe (ItemName "unknown") id ooItemName)
-                                   (Belongs (maybe (Location "its place") id ooItemLocation))
-  "item_unsure" -> ItemDescribed (maybe (ItemName "unknown") id ooItemName) Unsure
-  "item_stuck" -> ItemDescribed (maybe (ItemName "unknown") id ooItemName) NeedsDecisionSupport
-  "action_done" -> ActionDone
-  "unsure_growing" -> UnsureGrowing
-  "main_done" -> MainPileDone
-  "anxious" -> Anxious (maybe (AnxietyTrigger "something") id ooAnxietyTrigger)
-  "flagging" -> Flagging
-  "wants_stop" -> WantsToStop
-  "wants_continue" -> WantsToContinue
-  "all_done" -> AllDone
-  _ -> ActionDone  -- fallback
-
-orientOutputSchema :: Schema OrientOutput
-orientOutputSchema = Schema
-  { schemaDescription = "Situation classification from user input"
-  , schemaJSON = object
-      [ "type" .= ("object" :: Text)
-      , "additionalProperties" .= False
-      , "properties" .= object
-          [ "situation" .= object
-              [ "type" .= ("string" :: Text)
-              , "enum" .= ([ "need_function", "need_anchors", "overwhelmed"
-                           , "item_trash", "item_belongs", "item_unsure", "item_stuck"
-                           , "action_done", "unsure_growing", "main_done"
-                           , "anxious", "flagging", "wants_stop", "wants_continue", "all_done"
-                           ] :: [Text])
-              , "description" .= ("What situation is the user in?" :: Text)
-              ]
-          , "item_name" .= object
-              [ "type" .= ("string" :: Text)
-              , "description" .= ("Name of item if classifying an item" :: Text)
-              ]
-          , "item_location" .= object
-              [ "type" .= ("string" :: Text)
-              , "description" .= ("Where item belongs if situation is item_belongs" :: Text)
-              ]
-          , "anxiety_trigger" .= object
-              [ "type" .= ("string" :: Text)
-              , "description" .= ("What triggered anxiety if situation is anxious" :: Text)
-              ]
-          , "function_extracted" .= object
-              [ "type" .= ("string" :: Text)
-              , "description" .= ("Function of space - what it's FOR. Extract from descriptions like 'computer desk' → 'computer work', 'home office' → 'office work', 'where I sleep' → 'sleeping'. Always extract if user describes the space's purpose." :: Text)
-              ]
-          , "anchors_extracted" .= object
-              [ "type" .= ("array" :: Text)
-              , "items" .= object ["type" .= ("string" :: Text)]
-              , "description" .= ("Anchors user mentioned (things that stay)" :: Text)
-              ]
-          ]
-      , "required" .= (["situation"] :: [Text])
       ]
   }
 

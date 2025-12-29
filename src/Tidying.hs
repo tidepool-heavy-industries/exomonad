@@ -9,10 +9,10 @@
 --
 -- OODA-inspired loop:
 --
--- * OBSERVE: User sends photos/text
--- * ORIENT: LLM classifies situation (template)
--- * DECIDE: Pure routing (state machine)
--- * ACT: Generate response (canned or template)
+-- * OBSERVE: User sends photos/text (analyzePhotos)
+-- * ORIENT: LLM extracts structured facts (extractFromInput)
+-- * DECIDE: Pure routing (decideFromExtract)
+-- * ACT: Generate response (actResponse)
 --
 -- = Key insight
 --
@@ -62,15 +62,8 @@ module Tidying
   , UserInput(..)
   , Photo(..)
 
-    -- * Situation (ORIENT output)
-  , Situation(..)
-  , ItemClass(..)
-
     -- * Action (DECIDE output)
   , Action(..)
-
-    -- * Pure routing
-  , decide
 
     -- * Context (for templates)
   , TidyingContext(..)
@@ -79,18 +72,14 @@ module Tidying
   , stubPhotoAnalysis
 
     -- * Output types (LLM structured output)
-  , OrientOutput(..)
   , ActOutput(..)
-  , orientOutputSchema
   , actOutputSchema
 
     -- * Templates
-  , renderOrientPrompt
   , renderActPrompt
 
     -- * Question DSL (Tidying.Question)
-    -- For ItemDisposition and Choice type, import Tidying.Question directly
-    -- (its Trash/Donate constructors conflict with ItemClass)
+    -- For ItemDisposition type, import Tidying.Question directly
   , Question(..)
   , Answer(..)
 
@@ -100,9 +89,7 @@ module Tidying
   ) where
 
 import Tidying.State
-import Tidying.Situation
 import Tidying.Action
-import Tidying.Decide
 import Tidying.Loop
 import Tidying.Agent (tidying, tidyingRun)
 import Tidying.Context

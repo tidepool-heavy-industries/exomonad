@@ -9,29 +9,27 @@
 -- = Design
 --
 -- Unlike the DM agent which has complex mood-based templates,
--- Tidying uses a simpler two-step approach:
+-- Tidying uses a simpler approach:
 --
--- 1. ORIENT prompt: classify what situation the user is in
+-- 1. EXTRACT prompt: extract structured facts from user input
 -- 2. ACT prompt: generate the appropriate response
 --
 -- Most responses are canned (don't need LLM), so the templates
 -- are only used for:
 -- - Photo analysis (needs vision)
--- - Orient classification (needs semantic understanding)
+-- - Extraction (needs semantic understanding)
 -- - Complex actions: first instruction, decision aid, summary, etc.
 
 module Tidying.Templates
-  ( -- * Extract prompt (new extraction-first approach)
+  ( -- * Extract prompt
     renderExtractPrompt
   , extractSchema
 
-    -- * System prompts (legacy)
-  , renderOrientPrompt
+    -- * System prompts
   , renderActPrompt
   , renderPhotoAnalysisPrompt
 
     -- * Schemas (re-exported)
-  , orientOutputSchema
   , actOutputSchema
 
     -- * Phase-specific templates (for future TypedTemplate)
@@ -50,7 +48,7 @@ import Data.Text qualified as T
 import Tidying.State
 import Tidying.Context (TidyingContext(..), PilesSummary(..), PhotoAnalysis(..))
 import Tidying.Action
-import Tidying.Output (orientOutputSchema, actOutputSchema, extractSchema)
+import Tidying.Output (actOutputSchema, extractSchema)
 import Tidying.Types (ItemName(..), Location(..), AnxietyTrigger(..), CategoryName(..), chaosLevelToText)
 
 -- ══════════════════════════════════════════════════════════════
@@ -91,70 +89,8 @@ renderExtractPrompt = T.unlines
   ]
 
 -- ══════════════════════════════════════════════════════════════
--- ORIENT PROMPT (legacy)
+-- PHASE-SPECIFIC GUIDANCE (for templates)
 -- ══════════════════════════════════════════════════════════════
-
--- | Render the ORIENT system prompt (legacy - use renderExtractPrompt instead)
--- This prompt helps the LLM classify what situation the user is in
-renderOrientPrompt :: TidyingContext -> Text
-renderOrientPrompt ctx = T.unlines
-  [ "You are classifying what situation a user is in during a tidying session."
-  , ""
-  , "# Current State"
-  , ""
-  , "Phase: " <> T.pack (show ctx.tcPhase)
-  , "Function of space: " <> maybe "(not yet established)" id ctx.tcFunction
-  , "Anchors (things that stay): " <> formatList ctx.tcAnchors
-  , "Items processed: " <> T.pack (show ctx.tcItemsProcessed)
-  , "Unsure pile size: " <> T.pack (show unsureCount)
-  , case ctx.tcLastAnxiety of
-      Nothing -> ""
-      Just trigger -> "User was anxious about: " <> trigger <> " (avoid this topic)"
-  , ""
-  , phaseGuidance ctx.tcPhase
-  , ""
-  , "# User Input"
-  , ""
-  , case ctx.tcPhotoAnalysis of
-      Nothing -> ""
-      Just pa -> "Photo shows: " <> pa.paRoomType <> ", " <> chaosLevelToText pa.paChaosLevel <> " clutter"
-                 <> maybe "" (\t -> ". First target: " <> t) pa.paFirstTarget
-  , case ctx.tcUserText of
-      Nothing -> "(user sent photo only)"
-      Just txt -> "User says: \"" <> txt <> "\""
-  , ""
-  , "# Task"
-  , ""
-  , "Do TWO things:"
-  , ""
-  , "1. CLASSIFY the situation (required):"
-  , "   - Overwhelm signals: \"idk\", \"too much\" → 'overwhelmed'"
-  , "   - Stop signals: \"stop\", \"tired\" → 'wants_stop'"
-  , "   - Item descriptions → 'item_trash/item_belongs/item_unsure'"
-  , "   - General response/info → 'action_done'"
-  , ""
-  , "2. EXTRACT information (if present):"
-  , "   - function_extracted: what the space is FOR"
-  , "   - anchors_extracted: things that definitely stay"
-  , "   - item_name: if they described an item"
-  , ""
-  , "IMPORTANT: If user provides ANY info about the space's purpose, extract it!"
-  , ""
-  , "Output as JSON."
-  ]
-  where
-    formatList [] = "(none)"
-    formatList xs = T.intercalate ", " xs
-    PilesSummary{psUnsureCount = unsureCount} = ctx.tcPiles
-
--- | Phase-specific guidance for orient
-phaseGuidance :: Phase -> Text
-phaseGuidance phase = case phase of
-  Surveying -> surveyingGuidance
-  Sorting -> sortingGuidance
-  Splitting -> splittingGuidance
-  Refining -> refiningGuidance
-  DecisionSupport -> decisionSupportGuidance
 
 surveyingGuidance :: Text
 surveyingGuidance = T.unlines
