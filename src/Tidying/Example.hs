@@ -11,6 +11,7 @@ import Data.Text qualified as T
 import Data.Text.IO qualified as TIO
 
 import Tidying
+import Tidying.State (ActiveState(..))
 import Tidying.Types (ItemName(..), AnxietyTrigger(..), SpaceFunction(..))
 
 -- | Simulate a session (no actual LLM)
@@ -37,7 +38,7 @@ exampleSession = do
   putStrLn ""
 
   -- Turn 3: User provides function (simulate with Sorting state)
-  let st2 = st0 { phaseData = SortingData (SpaceFunction "work from home, designer") [] Nothing Nothing }
+  let st2 = st0 { phaseData = SortingData (ActiveState (SpaceFunction "work from home, designer") [] Nothing) Nothing }
   let (action3, phase3) = decide st2 OverwhelmedNeedMomentum
   putStrLn "USER: \"work from home, I'm a designer\""
   putStrLn $ "DECIDE: " <> show action3 <> " -> " <> show phase3

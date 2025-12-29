@@ -53,7 +53,7 @@ import Tidying.Templates
 import Tidying.Act (cannedResponse)
 import Tidying.Tools (tidyingTools)
 import Tidying.Events (TidyingEvent(..))
-import Tidying.Types (ItemName(..), SpaceFunction(..), CategoryName(..), AnxietyTrigger(..), ChaosLevel(..), chaosLevelToText)
+import Tidying.Types (ItemName(..), SpaceFunction(..), CategoryName(..), chaosLevelToText)
 
 -- ══════════════════════════════════════════════════════════════
 -- TYPES
@@ -368,60 +368,59 @@ transitionPhaseData pd extract action nextPhase unsureItems = case (pd, nextPhas
                Just f -> f
                Nothing -> SpaceFunction "general"  -- fallback
         newAnchors = anchors <> maybe [] id extract.exAnchors
-    in SortingData fn newAnchors (extract.exItem) Nothing
+        active = ActiveState fn newAnchors Nothing
+    in SortingData active (extract.exItem)
 
   -- Sorting: update current item, maybe anxiety
-  (SortingData fn anchors _item lastAnx, Sorting) ->
-    SortingData fn anchors (extract.exItem <|> _item) lastAnx
+  (SortingData active _item, Sorting) ->
+    SortingData active (extract.exItem <|> _item)
 
   -- Sorting → Splitting: create categories from split
-  (SortingData fn anchors _item lastAnx, Splitting) ->
+  (SortingData active _item, Splitting) ->
     case action of
       InstructSplit cats ->
-        SplittingData fn anchors cats lastAnx
+        SplittingData active cats
       _ ->
         -- Shouldn't happen, but fallback to default categories
-        SplittingData fn anchors (CategoryName "unsure" :| []) lastAnx
+        SplittingData active (CategoryName "unsure" :| [])
 
   -- Splitting → Sorting: go back to sorting
-  (SplittingData fn anchors _cats lastAnx, Sorting) ->
-    SortingData fn anchors Nothing lastAnx
+  (SplittingData active _cats, Sorting) ->
+    SortingData active Nothing
 
   -- Sorting/Splitting → Refining: start refining
-  (SortingData fn anchors _item lastAnx, Refining) ->
+  (SortingData active _item, Refining) ->
     let cat = extractNextCategory action
         -- Put all unsure items in first (and only) category
         catsMap = Map.singleton cat unsureItems
-    in RefiningData fn anchors catsMap cat Nothing lastAnx
+    in RefiningData active catsMap cat Nothing
 
-  (SplittingData fn anchors cats lastAnx, Refining) ->
+  (SplittingData active cats, Refining) ->
     -- Move to first category for refining
     -- Put all unsure items in the first category (user will re-sort from there)
     let cat = NE.head cats
         catsMap = Map.fromList [(c, []) | c <- NE.toList cats]
         catsWithItems = Map.adjust (++ unsureItems) cat catsMap
-    in RefiningData fn anchors catsWithItems cat Nothing lastAnx
+    in RefiningData active catsWithItems cat Nothing
 
   -- Refining: update current item/category
-  (RefiningData fn anchors cats _curCat _item lastAnx, Refining) ->
+  (RefiningData active cats _curCat _item, Refining) ->
     let newCat = extractNextCategory action
         newItem = extract.exItem <|> _item
-    in RefiningData fn anchors cats newCat newItem lastAnx
+    in RefiningData active cats newCat newItem
 
   -- Any → DecisionSupport: remember stuck item
   (_, DecisionSupport) ->
-    let fn = getFunctionFromPhaseData pd
-        anchors = getAnchorsFromPhaseData pd
+    let active = getActiveStateFromPhaseData pd
         stuckItem = case extract.exItem of
                       Just i -> i
                       Nothing -> ItemName "unknown"
         returnPhase = phaseFromPhaseData pd
-        lastAnx = getLastAnxietyFromPhaseData pd
-    in DecisionSupportData fn anchors stuckItem returnPhase lastAnx
+    in DecisionSupportData active stuckItem returnPhase
 
   -- DecisionSupport → Sorting: return from decision support
-  (DecisionSupportData fn anchors _stuck _return lastAnx, Sorting) ->
-    SortingData fn anchors Nothing lastAnx
+  (DecisionSupportData active _stuck _return, Sorting) ->
+    SortingData active Nothing
 
   -- Fallback: keep existing data but might need to update item
   _ -> updateCurrentItemInPhaseData pd (extract.exItem)
@@ -433,49 +432,31 @@ extractNextCategory (AckProgress msg)
       CategoryName $ T.drop (T.length "Let's do ") msg
 extractNextCategory _ = CategoryName "current"
 
--- | Get function from any PhaseData variant
-getFunctionFromPhaseData :: PhaseData -> SpaceFunction
-getFunctionFromPhaseData = \case
-  SurveyingData mFn _ -> case mFn of
-    Just f -> f
-    Nothing -> SpaceFunction "general"
-  SortingData fn _ _ _ -> fn
-  SplittingData fn _ _ _ -> fn
-  RefiningData fn _ _ _ _ _ -> fn
-  DecisionSupportData fn _ _ _ _ -> fn
-
--- | Get anchors from any PhaseData variant
-getAnchorsFromPhaseData :: PhaseData -> [ItemName]
-getAnchorsFromPhaseData = \case
-  SurveyingData _ a -> a
-  SortingData _ a _ _ -> a
-  SplittingData _ a _ _ -> a
-  RefiningData _ a _ _ _ _ -> a
-  DecisionSupportData _ a _ _ _ -> a
-
--- | Get last anxiety from any PhaseData variant
-getLastAnxietyFromPhaseData :: PhaseData -> Maybe AnxietyTrigger
-getLastAnxietyFromPhaseData = \case
-  SurveyingData _ _ -> Nothing
-  SortingData _ _ _ a -> a
-  SplittingData _ _ _ a -> a
-  RefiningData _ _ _ _ _ a -> a
-  DecisionSupportData _ _ _ _ a -> a
+-- | Get ActiveState from any PhaseData variant (defaults for Surveying)
+getActiveStateFromPhaseData :: PhaseData -> ActiveState
+getActiveStateFromPhaseData = \case
+  SurveyingData mFn a ->
+    let fn = maybe (SpaceFunction "general") id mFn
+    in ActiveState fn a Nothing
+  SortingData a _         -> a
+  SplittingData a _       -> a
+  RefiningData a _ _ _    -> a
+  DecisionSupportData a _ _ -> a
 
 -- | Get phase from PhaseData
 phaseFromPhaseData :: PhaseData -> Phase
 phaseFromPhaseData = \case
-  SurveyingData _ _ -> Surveying
-  SortingData _ _ _ _ -> Sorting
-  SplittingData _ _ _ _ -> Splitting
-  RefiningData _ _ _ _ _ _ -> Refining
-  DecisionSupportData _ _ _ _ _ -> DecisionSupport
+  SurveyingData {}        -> Surveying
+  SortingData {}          -> Sorting
+  SplittingData {}        -> Splitting
+  RefiningData {}         -> Refining
+  DecisionSupportData {}  -> DecisionSupport
 
 -- | Update current item in PhaseData (for variants that have it)
 updateCurrentItemInPhaseData :: PhaseData -> Maybe ItemName -> PhaseData
 updateCurrentItemInPhaseData pd mItem = case pd of
-  SortingData fn a _ anx -> SortingData fn a mItem anx
-  RefiningData fn a cats cat _ anx -> RefiningData fn a cats cat mItem anx
+  SortingData a _         -> SortingData a mItem
+  RefiningData a cats cat _ -> RefiningData a cats cat mItem
   _ -> pd  -- Other variants don't have current item
 
 -- | Update piles based on extraction

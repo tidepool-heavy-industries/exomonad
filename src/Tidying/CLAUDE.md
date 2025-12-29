@@ -136,6 +136,18 @@ data Phase
   | DecisionSupport  -- Helping with stuck items
 ```
 
+### ActiveState (Common Fields)
+
+Every phase except Surveying shares common fields. These are factored out into `ActiveState`:
+
+```haskell
+data ActiveState = ActiveState
+  { asFunction    :: SpaceFunction     -- What this space is FOR
+  , asAnchors     :: [ItemName]        -- Things that definitely stay
+  , asLastAnxiety :: Maybe AnxietyTrigger  -- Thing user was anxious about
+  }
+```
+
 ### PhaseData Sum Type
 
 **Each phase has different valid fields** - this prevents invalid states:
@@ -147,36 +159,28 @@ data PhaseData
       , sdGatheredAnchors  :: [ItemName]
       }
   | SortingData
-      { soFunction    :: SpaceFunction      -- REQUIRED (not Maybe)
-      , soAnchors     :: [ItemName]
+      { soActive      :: ActiveState       -- Common state (function, anchors, lastAnxiety)
       , soCurrentItem :: Maybe ItemName
-      , soLastAnxiety :: Maybe AnxietyTrigger
       }
   | SplittingData
-      { spFunction   :: SpaceFunction
-      , spAnchors    :: [ItemName]
+      { spActive     :: ActiveState
       , spCategories :: NonEmpty CategoryName  -- REQUIRED, non-empty
-      , spLastAnxiety :: Maybe AnxietyTrigger
       }
   | RefiningData
-      { rfFunction        :: SpaceFunction
-      , rfAnchors         :: [ItemName]
+      { rfActive          :: ActiveState
       , rfEmergentCats    :: Map CategoryName [ItemName]
       , rfCurrentCategory :: CategoryName     -- REQUIRED
       , rfCurrentItem     :: Maybe ItemName
-      , rfLastAnxiety     :: Maybe AnxietyTrigger
       }
   | DecisionSupportData
-      { dsFunction    :: SpaceFunction
-      , dsAnchors     :: [ItemName]
+      { dsActive      :: ActiveState
       , dsStuckItem   :: ItemName             -- REQUIRED
       , dsReturnPhase :: Phase
-      , dsLastAnxiety :: Maybe AnxietyTrigger
       }
 ```
 
 **Key invariants enforced by types**:
-- Can't be Sorting without a function
+- Can't be Sorting without a function (in ActiveState)
 - Can't be Refining without a current category
 - Can't be in DecisionSupport without a stuck item
 - Can't split into zero categories (NonEmpty)
@@ -185,12 +189,20 @@ data PhaseData
 
 ```haskell
 data SessionState = SessionState
-  { phase          :: Phase        -- Redundant with phaseData but convenient
-  , phaseData      :: PhaseData    -- Phase-specific data
+  { phaseData      :: PhaseData    -- Phase-specific data
   , piles          :: Piles        -- belongs/out/unsure item lists
   , itemsProcessed :: Int          -- Progress count
   , sessionStart   :: Maybe UTCTime -- Set on first turn (via Time effect)
   }
+
+-- Phase is DERIVED, not stored (prevents inconsistency)
+phase :: SessionState -> Phase
+phase st = case st.phaseData of
+  SurveyingData {}       -> Surveying
+  SortingData {}         -> Sorting
+  SplittingData {}       -> Splitting
+  RefiningData {}        -> Refining
+  DecisionSupportData {} -> DecisionSupport
 ```
 
 ### Piles
@@ -208,6 +220,10 @@ data Piles = Piles
 Since PhaseData is a sum type, use accessors to get common fields:
 
 ```haskell
+-- Get the ActiveState (Nothing only during Surveying)
+getActiveState :: SessionState -> Maybe ActiveState
+
+-- Individual accessors (delegate to ActiveState when available)
 getFunction :: SessionState -> Maybe SpaceFunction
 getAnchors :: SessionState -> [ItemName]
 getCurrentItem :: SessionState -> Maybe ItemName

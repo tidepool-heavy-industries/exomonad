@@ -14,7 +14,7 @@ module Main where
 
 import Control.Concurrent (forkIO)
 
-import Tidying.State (newSession, SessionState(..), Phase)
+import Tidying.State (newSession, SessionState, Phase, phase)
 import Tidying.GUI.App (tidyingGUISetup, defaultTidyingGUIConfig)
 import Tidying.GUI.Runner (tidyingGameLoopWithGUI)
 import Tidepool.GUI.Core (newGUIBridge)
@@ -44,6 +44,6 @@ main = do
     -- Set up GUI for this connection (can happen multiple times)
     tidyingGUISetup defaultTidyingGUIConfig bridge getPhase window
 
--- | Get phase from session state (workaround for HasField)
+-- | Get phase from session state (phase is now a derived function)
 getPhase :: SessionState -> Phase
-getPhase SessionState{phase} = phase
+getPhase = phase

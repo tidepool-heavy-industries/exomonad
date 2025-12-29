@@ -215,7 +215,7 @@ getCurrentItem st = case st.phaseData of
 
 -- | Get last anxiety trigger (if any)
 getLastAnxiety :: SessionState -> Maybe AnxietyTrigger
-getLastAnxiety st = getActiveState st >>= asLastAnxiety
+getLastAnxiety st = getActiveState st >>= (.asLastAnxiety)
 
 -- | Get current category being refined (only valid in Refining phase)
 getCurrentCategory :: SessionState -> Maybe CategoryName
