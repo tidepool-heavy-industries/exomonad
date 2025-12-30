@@ -364,9 +364,19 @@ data PlayerDeltas = PlayerDeltas
 - GUI: Clock SVG rendering (currently text circles)
 - GUI: `ihDice` in InputHandler (use `guiDice` directly)
 
-### Removed Dead Code (2024-12)
+### Removed Dead Code
+
+**2024-12:**
 - `clockTriggers` system (Trigger, ActionPattern, Duration types) - clocks tick via LLM output only
 - `MoodDowntime` + `DowntimeVariant` - replaced by BetweenScenes phase with direct mechanics
+
+**2025-12-30:**
+- Consequence types (`Consequence`, `FactionAction`, `Target`, `LocationDelta`, `Escalation`) - never constructed
+- `ClockInterrupt` type and `pendingInterrupt` field - interrupt system never used
+- `checkPendingInterrupts`, `getTextField`, `advanceClock` helpers - dead code in Loop.hs
+- 4 unused template files in `partials/` and `_shared/`
+- Error paths now graceful instead of crashing
+- See `src/DM/CLAUDE.md` for exhaustive list
 
 ## Development Commands
 

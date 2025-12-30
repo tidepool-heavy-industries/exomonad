@@ -23,7 +23,6 @@ module DM.State
   , BargainVariant(..)
   , BargainOption(..)
   , BargainCost(..)
-  , ClockInterrupt(..)
   , defaultMood
     -- ** Scene Entry Context (what led to current scene)
   , SceneEntryContext(..)
@@ -69,11 +68,6 @@ module DM.State
   , Clock(..)
   , ClockId(..)
   , ClockType(..)
-  , Consequence(..)
-  , FactionAction(..)
-  , Target(..)
-  , LocationDelta(..)
-  , Escalation(..)
   
     -- * Locations
   , Location(..)
@@ -289,15 +283,6 @@ data BargainCost
   | CostMultiple [BargainCost]   -- Compound cost
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
--- | Clock interrupt - world asserting itself (not a mood, but forces transition)
-data ClockInterrupt = ClockInterrupt
-  { ciClockId :: ClockId
-  , ciEventType :: Text
-  , ciDescription :: Text
-  , ciForcesAction :: Bool  -- If true, forces immediate Action state
-  }
-  deriving (Show, Eq, Generic, ToJSON, FromJSON)
-
 -- | Default mood for new games (Encounter with no pressure)
 defaultMood :: DMMood
 defaultMood = MoodScene (Encounter "Starting scene" UrgencyLow True)
@@ -404,7 +389,6 @@ data WorldState = WorldState
   -- Consequence echoing (narrative continuity)
   , recentCosts :: [Text]             -- From last 3 costly/setback outcomes
   , unresolvedThreats :: [Text]       -- Complications not yet addressed
-  , pendingInterrupt :: Maybe ClockInterrupt  -- Clock triggered, awaiting handling
   -- Scene entry context (what led to current scene)
   , sceneEntryContext :: Maybe SceneEntryContext  -- Context from previous phase
   -- UI state (persisted for resume)
@@ -435,7 +419,6 @@ initialWorld = WorldState
   , pendingOutcome = Nothing
   , recentCosts = []
   , unresolvedThreats = []
-  , pendingInterrupt = Nothing
   , sceneEntryContext = Nothing
   , suggestedActions = []
   }
@@ -676,44 +659,6 @@ data Clock = Clock
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
-data Consequence
-  -- Threat consequences (bad things happen):
-  = FactionMoves FactionId FactionAction
-  | RevealSecret Secret
-  | SpawnThread Thread
-  | ChangeLocation LocationId LocationDelta
-  | Escalate Escalation
-  -- Goal consequences (good things happen):
-  | GainCoin Int
-  | GainRep FactionId Int
-  | GainAsset Text
-  | OpenOpportunity Text
-  | RemoveThreat ClockId
-  deriving (Show, Eq, Generic, ToJSON, FromJSON)
-
-data FactionAction
-  = Attack Target
-  | Negotiate FactionId
-  | Retreat
-  | Scheme Goal
-  deriving (Show, Eq, Generic, ToJSON, FromJSON)
-
-newtype Target = Target { unTarget :: Text }
-  deriving (Show, Eq, Generic)
-  deriving newtype (ToJSON, FromJSON)
-
-data LocationDelta = LocationDelta
-  { deltaDescription :: Text
-  , deltaEffects :: [Text]
-  }
-  deriving (Show, Eq, Generic, ToJSON, FromJSON)
-
-data Escalation = Escalation
-  { escalationDescription :: Text
-  , escalationSeverity :: Severity
-  }
-  deriving (Show, Eq, Generic, ToJSON, FromJSON)
-
 -- ══════════════════════════════════════════════════════════════
 -- LOCATIONS
 -- ══════════════════════════════════════════════════════════════
@@ -903,7 +848,6 @@ instance ToGVal m TraumaVariant where toGVal = genericToGVal
 instance ToGVal m BargainVariant where toGVal = genericToGVal
 instance ToGVal m BargainOption where toGVal = genericToGVal
 instance ToGVal m BargainCost where toGVal = genericToGVal
-instance ToGVal m ClockInterrupt where toGVal = genericToGVal
 
 -- Scene Entry Context
 instance ToGVal m SceneEntryContext where toGVal = genericToGVal
@@ -944,11 +888,6 @@ instance ToGVal m Severity where toGVal = genericToGVal
 -- Clocks
 instance ToGVal m ClockId where toGVal = genericToGVal
 instance ToGVal m Clock where toGVal = genericToGVal
-instance ToGVal m Consequence where toGVal = genericToGVal
-instance ToGVal m FactionAction where toGVal = genericToGVal
-instance ToGVal m Target where toGVal = genericToGVal
-instance ToGVal m LocationDelta where toGVal = genericToGVal
-instance ToGVal m Escalation where toGVal = genericToGVal
 
 -- ══════════════════════════════════════════════════════════════
 -- BETWEEN SCENES

@@ -138,6 +138,13 @@ Not cruelty—honesty. This is what happened.
 - **{{ clock.clockName }}** [{{ clock.clockFilled }}/{{ clock.clockSegments }}]
 {% endfor %}
 {% endif %}
+
+{% if ctxRecentCosts %}
+**Recent costs echoing:**
+{% for cost in ctxRecentCosts %}
+- {{ cost }}
+{% endfor %}
+{% endif %}
 </the_world>
 
 {# ═══════════════════════════════════════════════════════════════════════════ #}

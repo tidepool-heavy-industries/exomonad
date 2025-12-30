@@ -202,7 +202,6 @@ data WorldState = WorldState
   -- Consequence echoing
   , recentCosts :: [Text]           -- Last 3 costly outcomes (narrative continuity)
   , unresolvedThreats :: [Text]     -- Complications not yet addressed
-  , pendingInterrupt :: Maybe ClockInterrupt  -- Clock forcing action
   , sceneEntryContext :: Maybe SceneEntryContext  -- What led to this scene
   , suggestedActions :: [Text]      -- LLM's suggested next actions
   }
@@ -366,7 +365,7 @@ But `handleBetweenScenes` doesn't exist. Retreat tool transitions to BetweenScen
 `TurnOutput.continueScene = False` is parsed but **never checked**. Scenes only end via compression (20+ beats), not LLM signal.
 
 ### Clock Consequences
-Clock consequences are now narrative text. When a clock fills, the LLM receives the narrative description and decides appropriate mechanical effects at runtime. The `Consequence` sum type in State.hs is dead code (kept for potential future use).
+Clock consequences are narrative text (2-3 sentences). When a clock fills, the LLM receives the narrative description and decides appropriate mechanical effects at runtime.
 
 ---
 
@@ -403,7 +402,24 @@ Clock consequences are now narrative text. When a clock fills, the LLM receives 
 
 ### ctxPendingInterrupt (DMContext)
 - Built but never used in templates
-- Note: `pendingInterrupt` in WorldState IS still used in Loop.hs
+- `pendingInterrupt` field and `ClockInterrupt` type now removed from State.hs
+
+### Consequence Types (2025-12-30)
+- `Consequence`, `FactionAction`, `Target`, `LocationDelta`, `Escalation` types removed
+- These were never constructed - clock consequences are now plain narrative text
+- Removed ~60 lines from State.hs
+
+### Dead Template Files (2025-12-30)
+- `templates/partials/clock_card.mustache` - Mustache, never included
+- `templates/partials/npc_card.mustache` - Mustache, never included
+- `templates/_shared/output_format.jinja` - unused
+- `templates/_shared/world_context.jinja` - duplicated in each mood template
+
+### Loop.hs Cleanup (2025-12-30)
+- `checkPendingInterrupts` - dead code for interrupt system
+- `getTextField` - defined but never called
+- `advanceClock` - unused helper
+- Error paths now graceful instead of `error` calls
 
 ---
 

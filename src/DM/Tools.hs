@@ -613,17 +613,15 @@ actionToolList = TCons (Proxy @SetSceneStyle)
                $ TNil
 
 -- | Aftermath tools: accept and return to scene
-aftermathToolList :: ToolList DMEvent WorldState DMEffects '[SetSceneStyle, Accept, Choose]
+aftermathToolList :: ToolList DMEvent WorldState DMEffects '[SetSceneStyle, Accept]
 aftermathToolList = TCons (Proxy @SetSceneStyle)
                   $ TCons (Proxy @Accept)
-                  $ TCons (Proxy @Choose)
                   $ TNil
 
 -- | Trauma tools: accept aftermath of breaking
-traumaToolList :: ToolList DMEvent WorldState DMEffects '[SetSceneStyle, Accept, Choose]
+traumaToolList :: ToolList DMEvent WorldState DMEffects '[SetSceneStyle, Accept]
 traumaToolList = TCons (Proxy @SetSceneStyle)
                $ TCons (Proxy @Accept)
-               $ TCons (Proxy @Choose)
                $ TNil
 
 -- Note: bargainToolList removed - bargain mode uses structured output + requestChoice

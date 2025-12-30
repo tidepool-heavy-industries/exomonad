@@ -63,6 +63,14 @@ These are old cracks. I am new.
 This is their first scar. The one they'll remember when they collect more.
 {% endif %}
 
+{% if ctxUnresolvedThreats %}
+**Shadows that followed them here:**
+{% for threat in ctxUnresolvedThreats %}
+- {{ threat }}
+{% endfor %}
+*These didn't cause this. But they made it inevitable.*
+{% endif %}
+
 **Stress:** {{ ctxPlayer.stress }}/9 — MAXIMUM
 
 {% if what_broke %}

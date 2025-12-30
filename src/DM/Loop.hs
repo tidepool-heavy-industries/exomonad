@@ -64,7 +64,7 @@ import qualified Tidepool.GUI.Core as GUI (logInfo)
 import Tidepool.GUI.Handler (makeGUIHandler)
 import Tidepool.Anthropic.Http (Message(..), ContentBlock(..), Role(..))
 import Data.Aeson (Value(..))
-import Data.Maybe (catMaybes, fromMaybe)
+import Data.Maybe (catMaybes)
 import qualified Data.Aeson.KeyMap as KM
 import qualified Data.Aeson.Key as Key
 import qualified Data.Vector as V
@@ -135,23 +135,26 @@ dmTurn input = do
 
   where
     runMoodAwareTurn userAction = do
-      -- Check for pending clock interrupts first
-      -- If one forces action, this will restart with action mood
-      interrupted <- checkPendingInterrupts
-      if interrupted
-        then runMoodAwareTurn userAction  -- Restart with forced action mood
-        else do
-          -- Get current mood and scene from phase
-          state <- get @WorldState
-          -- Extract scene and mood from PhasePlaying (required for turn)
-          (scene, mood) <- case state.phase of
-            PhasePlaying s m -> return (s, m)
-            _ -> error "runMoodAwareTurn called outside PhasePlaying"
-
+      -- Get current mood and scene from phase
+      state <- get @WorldState
+      -- Extract scene and mood from PhasePlaying (required for turn)
+      case state.phase of
+        PhasePlaying scene mood -> do
           -- Special handling for MoodBargain: use structured output + requestChoice
           case mood of
             MoodBargain bargainVariant -> handleBargainTurn scene bargainVariant
             _ -> handleNormalTurn scene mood userAction
+
+        otherPhase -> do
+          -- Not in PhasePlaying - log warning and return empty response
+          logWarn $ "runMoodAwareTurn called in wrong phase: " <> T.pack (show otherPhase)
+          return Response
+            { responseText = "*Something went wrong. Please continue.*"
+            , responseStressDelta = 0
+            , responseCoinDelta = 0
+            , responseHeatDelta = 0
+            , responseSuggestedActions = ["Continue"]
+            }
 
     -- | Handle normal turns (Scene, Action, Aftermath, Trauma)
     handleNormalTurn scene mood userAction = do
@@ -232,7 +235,8 @@ dmTurn input = do
                 checkClockConsequences
 
                 -- Check if stress hit max (trauma trigger)
-                checkTraumaTrigger stateBefore.player.stress
+                -- Pass current mood to detect if trauma happened during combat
+                checkTraumaTrigger mood stateBefore.player.stress
 
                 -- Compress if scene is getting long
                 compressIfNeeded
@@ -487,24 +491,6 @@ dmTurn input = do
     worsenAttitude Wary = Hostile
     worsenAttitude Hostile = Hostile  -- Can't get worse
 
-    -- | Check for pending clock interrupts and handle them
-    -- Returns True if an interrupt forced a state transition
-    checkPendingInterrupts = do
-      currState <- get @WorldState
-      case currState.pendingInterrupt of
-        Just interrupt | interrupt.ciForcesAction -> do
-          -- Force transition to Action with the interrupt as context
-          logInfo $ "Clock interrupt forces action: " <> interrupt.ciDescription
-          modify @WorldState $ \s ->
-            updateMood (MoodAction (AvRisky interrupt.ciEventType "react or suffer") Nothing)
-              s { pendingInterrupt = Nothing }
-          return True  -- Signal that we need to restart
-        Just _interrupt -> do
-          -- Non-forcing interrupt - was surfaced in context, now clear it
-          modify @WorldState $ \s -> s { pendingInterrupt = Nothing }
-          return False
-        Nothing -> return False
-
 -- NOTE: Dice selection is now handled by the SpendDie tool during LLM turn
 -- The tool modifies state directly and returns the outcome to the LLM
 
@@ -548,9 +534,10 @@ checkTraumaTrigger
      , Log :> es
      , Emit DMEvent :> es
      )
-  => Int  -- Stress BEFORE this turn
+  => DMMood  -- The mood when trauma was triggered
+  -> Int     -- Stress BEFORE this turn
   -> Eff es ()
-checkTraumaTrigger stressBefore = do
+checkTraumaTrigger triggerMood stressBefore = do
   state <- get @WorldState
   let stressNow = state.player.stress
   when (stressNow >= 9 && stressBefore < 9) $ do
@@ -558,11 +545,14 @@ checkTraumaTrigger stressBefore = do
     -- Don't emit TraumaTriggered yet - wait for LLM to determine the actual trauma
     -- The trauma turn will narrate the breaking point and assign the trauma
     -- TraumaTriggered event will be emitted AFTER the trauma turn completes
+    let inCombat = case triggerMood of
+          MoodAction _ _ -> True  -- In action = adrenaline is flowing
+          _ -> False
     let traumaVariant = Breaking
           { tvWhatBroke = "stress overflow"  -- LLM will elaborate
           , tvTraumaType = Trauma "pending"  -- LLM will determine actual trauma
           , tvTrigger = "accumulated pressure"
-          , tvAdrenaline = False  -- Could be True if in combat
+          , tvAdrenaline = inCombat  -- True if trauma triggered during action
           }
     modify @WorldState $ updateMood (MoodTrauma traumaVariant)
 
@@ -1468,11 +1458,6 @@ extractNarrativeTexts msgs = concatMap extractFromMessage msgs
       Just (Aeson.Number n) -> round n
       _ -> 0
 
-    getTextField :: Text -> KM.KeyMap Value -> Text
-    getTextField key obj = case KM.lookup (Key.fromText key) obj of
-      Just (Aeson.String t) -> t
-      _ -> ""
-
     -- Extract just the narrative text field
     extractNarration :: Value -> Maybe Text
     extractNarration (Object obj) =
@@ -1603,18 +1588,23 @@ guiGameLoopWithDB conn gameId bridge = loop
                   -- Set suggested actions in bridge for UI
                   liftIO $ setSuggestedActions bridge scenario.siSuggestedActions
 
-                TurnCompleted (TurnParseFailed{..}) ->
-                  error $ "Failed to generate opening scenario: " <> tpfError
-                       <> "\nRaw JSON: " <> T.unpack (TE.decodeUtf8 (LBS.toStrict $ Aeson.encode tpfRawJson))
+                TurnCompleted (TurnParseFailed{..}) -> do
+                  logWarn $ "Failed to parse scenario: " <> T.pack tpfError
+                  emit (NarrativeAdded "*The city's threads tangle. Something went wrong generating the scenario. Try again.*")
+                  -- Stay in PhaseScenarioInit so user can retry
 
-                TurnBroken reason ->
-                  error $ "LLM failed during scenario generation: " <> T.unpack reason
+                TurnBroken reason -> do
+                  logWarn $ "LLM failed during scenario generation: " <> reason
+                  emit (NarrativeAdded "*The oracle falls silent. Something went wrong. Try again.*")
+                  -- Stay in PhaseScenarioInit so user can retry
 
               loop
 
-            PhaseCharacterCreation ->
-              -- Character creation not yet done - should not happen in running game
-              error "Cannot start game without character choices - character creation was cancelled or failed"
+            PhaseCharacterCreation -> do
+              -- Character creation not yet done - user needs to complete it
+              logWarn "Game loop called in PhaseCharacterCreation - waiting for character setup"
+              -- Don't crash, just wait for character creation to complete
+              loop
 
             PhaseBetweenScenes _ctx -> do
               -- Handle between-scenes decision (user chose from menu)
@@ -1752,10 +1742,6 @@ tickThreatClocks = modify @WorldState $ \s ->
     tickIfThreat clock = case clock.clockType of
       ThreatClock -> clock { clockFilled = min clock.clockSegments (clock.clockFilled + 1) }
       GoalClock -> clock  -- Goal clocks don't tick automatically
-
--- | Advance a clock by N ticks (capped at segments)
-advanceClock :: Int -> Clock -> Clock
-advanceClock n clock = clock { clockFilled = min clock.clockSegments (clock.clockFilled + n) }
 
 -- | Generate brief transition narration via LLM
 generateTransitionNarration
