@@ -19,8 +19,6 @@ module DM.CharacterCreation
   , ClockInit(..)
   , TarotPosition(..)
   , ClockType(..)
-  , InitConsequence(..)
-  , InitSeverity(..)
   , LocationInit(..)
   , FactionInit(..)
   , NpcInit(..)
@@ -103,18 +101,6 @@ data TarotPosition = TarotPast | TarotPresent | TarotFuture
 data ClockType = ThreatClock | GoalClock
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
--- | Severity for escalation consequences
-data InitSeverity = Minor | Moderate | Severe | Existential
-  deriving (Show, Eq, Ord, Enum, Bounded, Generic, ToJSON, FromJSON)
-
--- | Simplified consequence type for initialization
--- Avoids circular import with DM.State; converted to Consequence in Loop.hs
-data InitConsequence
-  = ICGainCoin Int              -- Goal: gain coins
-  | ICGainAsset Text            -- Goal: gain named asset
-  | ICOpportunity Text          -- Flexible: opens opportunity
-  | ICEscalate Text InitSeverity  -- Threat: situation escalates
-  deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
 -- | Clock initialization from scenario generation
 data ClockInit = ClockInit
@@ -123,7 +109,7 @@ data ClockInit = ClockInit
   , ciFilled :: Int             -- Starting filled segments
   , ciFromCard :: TarotPosition -- Which card seeded this
   , ciType :: ClockType         -- Threat or goal
-  , ciConsequence :: InitConsequence  -- Typed consequence when filled
+  , ciConsequence :: Text        -- Narrative describing what happens when filled
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
@@ -223,11 +209,9 @@ scenarioInitPrompt choices = T.unlines
   , "CLOCKS (siStartingClocks):"
   , "- 3 clocks total: 2 threats (from past/present), 1 goal (from future)"
   , "- Each clock: 4-6 segments, threat clocks start 1-2 filled"
-  , "- ciConsequence: typed consequence when clock fills"
-  , "  - Goal clocks use: {\"tag\":\"ICGainCoin\",\"contents\":50} or {\"tag\":\"ICGainAsset\",\"contents\":\"asset name\"}"
-  , "  - Threat clocks use: {\"tag\":\"ICEscalate\",\"contents\":[\"description\",\"Moderate\"]}"
-  , "  - Flexible: {\"tag\":\"ICOpportunity\",\"contents\":\"what opens up\"}"
-  , "  - Severity levels: Minor, Moderate, Severe, Existential"
+  , "- ciConsequence: 2-3 sentences describing what happens when clock fills"
+  , "  - Goal example: \"The heist succeeds. You walk away with 50 coin and Bazso owes you a favor.\""
+  , "  - Threat example: \"The Bluecoats close in. Your hideout is compromised and someone talks.\""
   , ""
   , "LOCATIONS (siLocations):"
   , "- 2-3 locations relevant to the opening situation"
@@ -275,8 +259,6 @@ instance ToGVal m Archetype where toGVal = genericToGVal
 instance ToGVal m CharacterChoices where toGVal = genericToGVal
 instance ToGVal m TarotPosition where toGVal = genericToGVal
 instance ToGVal m ClockType where toGVal = genericToGVal
-instance ToGVal m InitSeverity where toGVal = genericToGVal
-instance ToGVal m InitConsequence where toGVal = genericToGVal
 instance ToGVal m ClockInit where toGVal = genericToGVal
 instance ToGVal m LocationInit where toGVal = genericToGVal
 instance ToGVal m FactionInit where toGVal = genericToGVal

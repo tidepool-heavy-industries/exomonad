@@ -438,7 +438,7 @@ setupExampleWorld = initialWorld
           , clockFilled = 2
           , clockVisible = True
           , clockType = ThreatClock
-          , clockConsequence = Escalate (Escalation "Open warfare in the streets of Crow's Foot" Severe)
+          , clockConsequence = "Open warfare erupts in Crow's Foot. The Lampblacks and Red Sashes spill blood in the streets. Neutral parties must pick sides or be crushed between them."
           })
 
       , (ClockId "bluecoat-crackdown", Clock
@@ -447,7 +447,7 @@ setupExampleWorld = initialWorld
           , clockFilled = 0
           , clockVisible = True
           , clockType = ThreatClock
-          , clockConsequence = FactionMoves (FactionId "bluecoats") (Attack (Target "all criminal elements"))
+          , clockConsequence = "The Bluecoats launch a coordinated sweep. Safe houses are raided, fences go to ground, and every scoundrel in the district feels the heat."
           })
 
       , (ClockId "lyssa-exposed", Clock
@@ -456,7 +456,7 @@ setupExampleWorld = initialWorld
           , clockFilled = 0
           , clockVisible = False
           , clockType = GoalClock
-          , clockConsequence = RevealSecret (Secret "Lyssa killed Roric to take over the Crows" [])
+          , clockConsequence = "The truth comes out: Lyssa murdered Roric to take control of the Crows. Her grip on power shatters as the gang fractures."
           })
 
       , (ClockId "ghost-problem", Clock
@@ -465,12 +465,7 @@ setupExampleWorld = initialWorld
           , clockFilled = 3
           , clockVisible = True
           , clockType = ThreatClock
-          , clockConsequence = SpawnThread (Thread
-              (ThreadId "ghost-plague")
-              "Ghosts flood the streets of Crow's Foot"
-              [Left (FactionId "spirit-wardens")]
-              TensionCritical
-              Nothing)
+          , clockConsequence = "The spirit well ruptures. Ghosts flood the streets of Crow's Foot in a howling tide. The Spirit Wardens scramble to contain the breach."
           })
       ]
 

@@ -49,7 +49,7 @@ flowchart TD
     CTX --> TMPL[renderForMood]
 ```
 
-**Source:** `Context.hs:198-258`
+**Source:** `Context.hs` buildDMContext
 
 ---
 
@@ -63,21 +63,19 @@ flowchart LR
         S[stress]
         H[heat]
         W[wanted × 2]
-        HU["hunted? +3"]
-        RC["recovering? +2"]
     end
 
     S --> SUM[Sum]
     H --> SUM
     W --> SUM
-    HU --> SUM
-    RC --> SUM
 
     SUM --> |"< 5"| OS[OperatingFromStrength]
     SUM --> |"5-9"| RM[RoomToManeuver]
     SUM --> |"10-14"| WC[WallsClosingIn]
     SUM --> |"≥ 15"| HBT[HangingByThread]
 ```
+
+Note: `hunted` and `recovering` params were removed - if needed later, add fields to PlayerState.
 
 | Precarity | Score | Prose Style |
 |-----------|-------|-------------|
@@ -86,7 +84,7 @@ flowchart LR
 | WallsClosingIn | 10-14 | Tense, options narrowing, vice tightening |
 | HangingByThread | ≥ 15 | Desperate, staccato, world compressed |
 
-**Source:** `Context.hs:163-177`
+**Source:** `Context.hs` calculatePrecarity
 
 ---
 
@@ -161,7 +159,7 @@ flowchart TD
 
 **Action context fields** (carried into Aftermath): mvcActionDieChosen, mvcActionPosition, mvcActionEffect, mvcActionTier, mvcActionOtherDice, mvcActionDomain, mvcActionStakes
 
-**Source:** `Context.hs:87-132`, `Context.hs:347-484`
+**Source:** `Context.hs` MoodVariantContext, variant context builders
 
 ---
 
@@ -210,7 +208,7 @@ flowchart LR
 | | Street | Working criminal, codes, reputation |
 | | Salon | Polished, calculated, poison over blade |
 
-**Source:** `State.hs:810-847`, `templates/_shared/style_shards.jinja`
+**Source:** `State.hs` SceneStyle, `templates/_shared/style_shards.jinja`
 
 ---
 
@@ -229,9 +227,9 @@ flowchart TD
     end
 
     subgraph Schemas
-        SCS["narration, coinDelta, continueScene, suggestedActions"]
-        ACS["narration, **diceAction** (REQUIRED), continueScene, suggestedActions"]
-        AFS["narration, coinDelta, continueScene, suggestedActions, costDescription, threatDescription"]
+        SCS["narration, coinDelta, suggestedActions"]
+        ACS["narration, suggestedActions (dice via spend_die tool)"]
+        AFS["narration, coinDelta, suggestedActions, costDescription, threatDescription"]
         TRS["narration, **traumaAssigned** (REQUIRED), suggestedActions"]
         BGS["narration, suggestedActions"]
     end
@@ -244,12 +242,13 @@ flowchart TD
 ```
 
 **Key differences:**
-- **Action** requires `diceAction` with precommitted outcomes
+- **Action** calls `spend_die` tool for dice mechanics (no structured output for dice)
 - **Trauma** requires `traumaAssigned` (the scar gained)
 - **Aftermath** has `costDescription` and `threatDescription` for echoing
 - **Scene** has no stress/heat deltas (all consequences through dice)
+- `continueScene` was removed from all schemas
 
-**Source:** `Templates.hs:213-316`
+**Source:** `Templates.hs` mood-specific output schemas
 
 ---
 
@@ -327,7 +326,7 @@ Templates have explicit prose guidance for each trauma type:
 - **Volatile**: Emotions spike without warning
 - **Soft**: Every victim is personal
 
-**Source:** `templates/scene/main.jinja:72-140`, `templates/action/main.jinja:67-103`
+**Source:** `templates/scene/main.jinja`, `templates/action/main.jinja`
 
 ---
 
@@ -338,28 +337,27 @@ Templates know HOW you arrived at the current scene:
 ```mermaid
 flowchart TD
     subgraph Previous["Previous Phase"]
-        DOWN[Downtime]
         AFT[Aftermath]
         TRM[Trauma]
         FRESH[Fresh]
     end
 
     subgraph Entry["SceneEntryContext"]
-        EDOWN["EntryFromDowntime<br/>hook, timeElapsed, stressHealed, heatDecay, diceRecovered"]
         EAFT["EntryFromAftermath<br/>transitionNote, unresolvedThreats, recentCosts"]
         ETRM["EntryFromTrauma<br/>traumaGained, adrenalineActive"]
         EFRESH["EntryFresh"]
     end
 
-    DOWN --> EDOWN
     AFT --> EAFT
     TRM --> ETRM
     FRESH --> EFRESH
 ```
 
+Note: `EntryFromDowntime` was removed - downtime phase not implemented.
+
 Templates render this as `<how_they_arrived>` block with phase-specific prose.
 
-**Source:** `State.hs:352-394`, `templates/scene/main.jinja:15-35`
+**Source:** `State.hs` SceneEntryContext, `templates/scene/main.jinja`
 
 ---
 
@@ -375,4 +373,4 @@ Not all world state reaches templates:
 | NPCs | Present in scene | Enriched with disposition, currentWant |
 | Factions | All | Summarized with attitude, currentGoal |
 
-**Source:** `Context.hs:212-223`
+**Source:** `Context.hs` buildDMContext filtering logic

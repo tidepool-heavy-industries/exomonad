@@ -29,7 +29,7 @@ flowchart TD
     end
 ```
 
-**Source:** `Tools.hs:806-808`
+**Source:** `Tools.hs` transitionToolNames
 
 ```haskell
 transitionToolNames :: [Text]
@@ -50,30 +50,18 @@ flowchart TD
     B -->|No| C[Continue]
     B -->|Yes| D[checkClockConsequences]
 
-    D --> E[Emit ClockCompleted event]
-    D --> F[Dispatch consequence]
+    D --> E[Emit ClockCompleted event<br/>with narrative text]
+    D --> F[Remove clock from state]
 
-    F --> G{Consequence type}
-
-    G -->|GainCoin| H[player.coin += n]
-    G -->|GainRep| I[faction.attitude += n]
-    G -->|SpawnThread| J[threads.append]
-    G -->|RemoveThreat| K[clocks.delete]
-    G -->|FactionMoves| L[Event only - LLM interprets]
-    G -->|RevealSecret| L
-    G -->|Escalate| L
-    G -->|GainAsset| L
-    G -->|OpenOpportunity| L
-    G -->|ChangeLocation| L
-
-    D --> M[Remove clock from state]
+    E --> G[LLM interprets narrative<br/>in next turn]
+    G --> H[LLM decides mechanical effects<br/>stress/heat/coin/etc]
 ```
 
-**Source:** `Loop.hs:332-354`, `State.hs` Consequence type
+**Source:** `Loop.hs` checkClockConsequences
 
-### Mechanical vs Narrative Consequences
+### Narrative-Based Consequences
 
-Some consequences have direct mechanical effects (GainCoin, GainRep, SpawnThread, RemoveThreat). Others emit events that the LLM interprets narratively in subsequent turns.
+Clock consequences are 2-3 sentences of narrative text describing what happens when the clock fills. The LLM interprets this at runtime and applies appropriate mechanical effects through its normal output (stress/heat/coin deltas).
 
 ---
 
@@ -101,7 +89,7 @@ flowchart TD
     L --> M[Emit SceneCompressed]
 ```
 
-**Source:** `Loop.hs:505-564`, `Output.hs:199-257`
+**Source:** `Loop.hs` compressIfNeeded, `Output.hs` CompressionOutput
 
 ### CompressionOutput
 

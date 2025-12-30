@@ -77,7 +77,7 @@ type DMEffects = '[PlayingState]
 data DMEvent
   = RandomChoice Text Int
   | DieSpent Int OutcomeTier Text          -- dieValue, outcome, context
-  | ClockCompleted Text Text Consequence   -- clockId, clockName, consequence
+  | ClockCompleted Text Text Text          -- clockId, clockName, consequence narrative
   | SceneCompressed Text                   -- summary of what was compressed
   | MoodTransition Text Text Text          -- toolName, fromMood, toMood
   -- State change events (for GUI display)

@@ -65,8 +65,17 @@ enumSchema :: [Text] -> JSONSchema
 enumSchema variants = (emptySchema TString) { schemaEnum = Just variants }
 
 -- | OneOf schema combinator (for sum types)
+-- Note: oneOf schemas don't have a type field - the type is determined by the variants
 oneOfSchema :: [JSONSchema] -> JSONSchema
-oneOfSchema variants = (emptySchema TObject) { schemaOneOf = Just variants }
+oneOfSchema variants = JSONSchema
+  { schemaType = TNull  -- Placeholder, won't be emitted when oneOf is present
+  , schemaDescription = Nothing
+  , schemaProperties = Map.empty
+  , schemaRequired = []
+  , schemaItems = Nothing
+  , schemaEnum = Nothing
+  , schemaOneOf = Just variants
+  }
 
 -- | Nullable schema combinator (allows null or the given type)
 nullableSchema :: JSONSchema -> JSONSchema
@@ -80,7 +89,10 @@ describeField _fieldName desc schema = schema { schemaDescription = Just desc }
 -- Note: Anthropic API requires additionalProperties: false on all object types
 schemaToValue :: JSONSchema -> Value
 schemaToValue (JSONSchema typ desc props req items enum_ oneOf_) = object $ catMaybes
-  [ Just $ "type" .= typeToText typ
+  [ -- Don't emit type for oneOf schemas (type is determined by variants)
+    if isJust oneOf_
+    then Nothing
+    else Just $ "type" .= typeToText typ
   , ("description" .=) <$> desc
   , if Map.null props
     then Nothing
@@ -89,13 +101,17 @@ schemaToValue (JSONSchema typ desc props req items enum_ oneOf_) = object $ catM
     then Nothing
     else Just $ "required" .= req
   -- Anthropic requires additionalProperties: false for all object types
-  , if typ == TObject
+  , if typ == TObject && isNothing oneOf_
     then Just $ "additionalProperties" .= False
     else Nothing
   , ("items" .=) . schemaToValue <$> items
   , ("enum" .=) <$> enum_
   , ("oneOf" .=) . fmap schemaToValue <$> oneOf_
   ]
+  where
+    isJust (Just _) = True
+    isJust Nothing = False
+    isNothing = not . isJust
 
 -- | Convert schema type to JSON Schema type string
 typeToText :: SchemaType -> Text

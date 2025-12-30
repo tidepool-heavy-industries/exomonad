@@ -53,7 +53,7 @@ import System.Environment (lookupEnv)
 import Database.SQLite.Simple (Connection)
 import qualified Tidepool.Storage as Storage
 
-import DM.CharacterCreation (CharacterChoices(..), scenarioInitPrompt, ScenarioInit(..), ClockInit(..), InitConsequence(..), InitSeverity(..), LocationInit(..), FactionInit(..), NpcInit(..))
+import DM.CharacterCreation (CharacterChoices(..), scenarioInitPrompt, ScenarioInit(..), ClockInit(..), LocationInit(..), FactionInit(..), NpcInit(..))
 import qualified DM.CharacterCreation as CC
 
 import Tidepool.GUI.Core (GUIBridge(..), PendingRequest(..),
@@ -293,11 +293,9 @@ checkClockConsequences = do
   let allClocks = HM.toList state.clocks
       (completed, remaining) = foldr partitionClock ([], HM.empty) allClocks
 
-  -- Emit events AND apply consequences for each completed clock
+  -- Emit events for each completed clock (LLM interprets narrative consequences)
   forM_ completed $ \(ClockId clockId, clock) -> do
     emit $ ClockCompleted clockId clock.clockName clock.clockConsequence
-    -- Apply the consequence to world state
-    modify @WorldState $ applyConsequence clock.clockConsequence
 
   -- Remove completed clocks from state
   modify @WorldState $ \s -> s { clocks = remaining }
@@ -305,55 +303,6 @@ checkClockConsequences = do
     partitionClock (clockId, clock) (done, keep)
       | clock.clockFilled >= clock.clockSegments = ((clockId, clock) : done, keep)
       | otherwise = (done, HM.insert clockId clock keep)
-
--- | Apply a clock consequence to world state
-applyConsequence :: Consequence -> WorldState -> WorldState
-applyConsequence consequence state = case consequence of
-  -- Threat consequences
-  SpawnThread thread ->
-    state { threads = thread : state.threads }
-  FactionMoves _factionId _action ->
-    -- Faction actions are surfaced through events; LLM interprets them
-    state
-  RevealSecret _secret ->
-    -- Secrets are surfaced through events; LLM interprets them
-    state
-  ChangeLocation _locId _delta ->
-    -- Location changes are surfaced through events
-    state
-  Escalate _escalation ->
-    -- Escalations are surfaced through events
-    state
-  -- Goal consequences (rewards)
-  GainCoin amount ->
-    state { player = state.player { coin = state.player.coin + amount } }
-  GainRep factionId amount ->
-    state { factions = HM.adjust (increaseRep amount) factionId state.factions }
-  GainAsset _assetName ->
-    -- Assets would need an inventory system; for now just surfaced
-    state
-  OpenOpportunity _desc ->
-    -- Opportunities are narrative; surfaced through events
-    state
-  RemoveThreat clockId ->
-    -- Remove the specified threat clock
-    state { clocks = HM.delete clockId state.clocks }
-  where
-    -- Increase faction reputation by N steps
-    increaseRep :: Int -> Faction -> Faction
-    increaseRep n f = f { factionAttitude = increaseAttitudeN n f.factionAttitude }
-
-    increaseAttitudeN :: Int -> Attitude -> Attitude
-    increaseAttitudeN 0 a = a
-    increaseAttitudeN n a = increaseAttitudeN (n - 1) (increaseAttitude a)
-
-    increaseAttitude :: Attitude -> Attitude
-    increaseAttitude = \case
-      Hostile -> Wary
-      Wary -> Neutral
-      Neutral -> Favorable
-      Favorable -> Allied
-      Allied -> Allied  -- Can't go higher
 
 -- | Check if stress just hit max (trauma trigger)
 -- If player crossed from <9 to 9, transition to trauma mood
@@ -1949,24 +1898,6 @@ createNewScene = do
 rollStartingDice :: Random :> es => Eff es [Int]
 rollStartingDice = replicateM 5 (randomInt 1 6)
 
--- | Convert InitSeverity from CharacterCreation to Severity from State
--- Note: Both modules define Minor/Moderate/Severe/Existential constructors
--- so we need explicit qualification
-initSeverityToSeverity :: InitSeverity -> Severity
-initSeverityToSeverity sev = case sev of
-  CC.Minor -> DM.State.Minor
-  CC.Moderate -> DM.State.Moderate
-  CC.Severe -> DM.State.Severe
-  CC.Existential -> DM.State.Existential
-
--- | Convert InitConsequence from CharacterCreation to Consequence from State
-initConsequenceToConsequence :: InitConsequence -> Consequence
-initConsequenceToConsequence = \case
-  ICGainCoin n -> GainCoin n
-  ICGainAsset t -> GainAsset t
-  ICOpportunity t -> OpenOpportunity t
-  ICEscalate desc sev -> Escalate (Escalation desc (initSeverityToSeverity sev))
-
 -- | Convert ClockInit from scenario generation to a Clock
 initToClock :: ClockInit -> Clock
 initToClock ci = Clock
@@ -1975,7 +1906,7 @@ initToClock ci = Clock
   , clockFilled = ci.ciFilled
   , clockVisible = True  -- All clocks visible per design
   , clockType = ci.ciType
-  , clockConsequence = initConsequenceToConsequence ci.ciConsequence
+  , clockConsequence = ci.ciConsequence
   }
 
 -- | Convert LocationInit from scenario generation to Location
@@ -2067,16 +1998,8 @@ scenarioInitSchemaJSON = Object $ KM.fromList
                       , ("enum", Array $ V.fromList [String "ThreatClock", String "GoalClock"])
                       ])
                   , ("ciConsequence", Object $ KM.fromList
-                      [ ("type", String "object")
-                      , ("description", String "Typed consequence. Use tag + contents format. Tags: ICGainCoin (contents: int), ICGainAsset (contents: string), ICOpportunity (contents: string), ICEscalate (contents: [description, severity] where severity is Minor|Moderate|Severe|Existential)")
-                      , ("properties", Object $ KM.fromList
-                          [ ("tag", Object $ KM.fromList
-                              [ ("type", String "string")
-                              , ("enum", Array $ V.fromList [String "ICGainCoin", String "ICGainAsset", String "ICOpportunity", String "ICEscalate"])
-                              ])
-                          , ("contents", Object $ KM.fromList [])  -- Any type based on tag
-                          ])
-                      , ("required", Array $ V.fromList [String "tag", String "contents"])
+                      [ ("type", String "string")
+                      , ("description", String "2-3 sentences describing what happens when this clock fills. Be specific about stakes and outcomes.")
                       ])
                   ])
               , ("required", Array $ V.fromList

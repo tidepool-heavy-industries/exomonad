@@ -66,7 +66,6 @@ journey
     section Between Scenes
       Choose downtime activity: 4: Player
       Lay low OR recover OR new scene: 4: Player
-      Note: BetweenScenes handler NOT YET IMPLEMENTED
     section End
       Player quits: 5: Player
       Session summary: 4: System

@@ -17,7 +17,7 @@ import qualified Data.Text as T
 import Graphics.UI.Threepenny.Core
 import qualified Graphics.UI.Threepenny as UI
 
-import DM.State (WorldState(..), Clock(..), ClockId(..), Consequence(..), FactionId(..), LocationId(..))
+import DM.State (WorldState(..), Clock(..), ClockId(..))
 import Tidepool.GUI.Core (GUIBridge(..))
 
 -- | Create a panel showing all visible clocks
@@ -55,7 +55,7 @@ clockWidget clock = do
   -- Tooltip (hidden by default, shown on hover)
   tooltip <- UI.div #. "clock-tooltip"
     # set style [("display", "none")]
-    # set text (T.unpack (consequenceText clock.clockConsequence))
+    # set text (T.unpack ("When filled: " <> clock.clockConsequence))
 
   -- Hover events
   on UI.hover container $ const $
@@ -84,27 +84,3 @@ clockFace segments filled = do
   void $ element face # set text (T.unpack bar)
   pure face
 
--- | Get display text for a consequence
-consequenceText :: Consequence -> Text
-consequenceText consequence = case consequence of
-  FactionMoves (FactionId fid) _ ->
-    "When filled: " <> fid <> " makes a move"
-  RevealSecret _ ->
-    "When filled: A secret is revealed"
-  SpawnThread _ ->
-    "When filled: A new narrative thread emerges"
-  ChangeLocation (LocationId loc) _ ->
-    "When filled: " <> loc <> " changes"
-  Escalate _ ->
-    "When filled: Things escalate"
-  -- Goal consequences (positive outcomes)
-  GainCoin n ->
-    "When filled: Gain " <> T.pack (show n) <> " coin"
-  GainRep (FactionId fid) n ->
-    "When filled: Gain " <> T.pack (show n) <> " rep with " <> fid
-  GainAsset asset ->
-    "When filled: Gain " <> asset
-  OpenOpportunity opp ->
-    "When filled: " <> opp
-  RemoveThreat (ClockId cid) ->
-    "When filled: Remove threat " <> cid

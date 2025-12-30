@@ -52,7 +52,7 @@ sequenceDiagram
     end
 ```
 
-**Source:** `Loop.hs:99-298`
+**Source:** `Loop.hs` dmTurn
 
 ### Key Steps
 
@@ -111,7 +111,7 @@ sequenceDiagram
     L-->>P: Aftermath narrative
 ```
 
-**Source:** `Tools.hs:281-387` (SpendDie), `Tools.hs:445-508` (Resolve)
+**Source:** `Tools.hs` SpendDie, Resolve
 
 ### What Player Sees
 

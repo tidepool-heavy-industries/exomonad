@@ -26,7 +26,7 @@ stateDiagram-v2
     end note
 ```
 
-**Source:** `State.hs:313-324`
+**Source:** `State.hs` GamePhase type
 
 ```haskell
 data GamePhase

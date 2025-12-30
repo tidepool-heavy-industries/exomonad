@@ -27,7 +27,7 @@ dmToolList :: ToolList DMEvent WorldState DMEffects
 
 ## Removed Tools
 
-These tools were removed (Tools.hs:780-781) as they added noise without value:
+These tools were removed as they added noise without value:
 
 - ~~`think`~~ - DM internal reasoning (removed)
 - ~~`speak_as_npc`~~ - NPC dialogue (removed)
@@ -82,4 +82,4 @@ graph LR
     Action -->|empty pool| Bargain
 ```
 
-**Source:** `Tools.hs` dmToolList (lines 782-792), transitionToolNames (lines 806-808)
+**Source:** `Tools.hs` dmToolList, transitionToolNames

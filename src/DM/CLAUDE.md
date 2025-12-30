@@ -271,7 +271,7 @@ Events flow from game loop → GUI via `Emit DMEvent`:
 data DMEvent
   = RandomChoice Text Int              -- Random roll result
   | DieSpent Int OutcomeTier Text      -- Die used, outcome, context
-  | ClockCompleted Text Text Consequence  -- Clock filled
+  | ClockCompleted Text Text Text         -- clockId, clockName, consequence narrative
   | SceneCompressed Text               -- Summary when compressed
   | MoodTransition Text Text Text      -- Tool, fromMood, toMood
   | StressChanged Int Int Text         -- old, new, reason
@@ -322,23 +322,11 @@ data Clock = Clock
   , clockFilled :: Int
   , clockVisible :: Bool      -- Shown to player?
   , clockType :: ClockType
-  , clockConsequence :: Consequence
+  , clockConsequence :: Text  -- Narrative describing what happens when filled
   }
-
-data Consequence
-  = FactionMoves FactionId FactionAction  -- Faction acts
-  | RevealSecret Secret                   -- Hidden info surfaces
-  | Escalate Escalation                   -- Situation worsens
-  | SpawnThread Thread                    -- New narrative thread
-  | GainCoin Int                          -- Player reward
-  | GainRep FactionId Int                 -- Faction attitude change
-  | RemoveThreat ClockId                  -- Delete another clock
-  | OpenOpportunity Text                  -- New option
-  | GainAsset Text                        -- Acquire item
-  | NoConsequence                         -- Marker only
 ```
 
-When a clock fills, `checkClockConsequences` dispatches its consequence. Some consequences are narrative-only (LLM interprets via emitted event); others have mechanical effects.
+Clock consequences are narrative text (2-3 sentences) describing what happens when the clock fills. When a clock completes, `checkClockConsequences` emits a `ClockCompleted` event with the narrative. The LLM interprets this at runtime and decides appropriate mechanical effects (stress, heat, coin, etc.).
 
 ---
 
@@ -377,12 +365,8 @@ But `handleBetweenScenes` doesn't exist. Retreat tool transitions to BetweenScen
 ### continueScene Flag
 `TurnOutput.continueScene = False` is parsed but **never checked**. Scenes only end via compression (20+ beats), not LLM signal.
 
-### Consequence Handlers
-Some consequences emit events but have no mechanical effect (narrative-only):
-- `FactionMoves` - no handler
-- `RevealSecret` - no handler
-- `Escalate` - no handler
-- `GainAsset` - no inventory system
+### Clock Consequences
+Clock consequences are now narrative text. When a clock fills, the LLM receives the narrative description and decides appropriate mechanical effects at runtime. The `Consequence` sum type in State.hs is dead code (kept for potential future use).
 
 ---
 

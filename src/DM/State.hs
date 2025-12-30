@@ -672,7 +672,7 @@ data Clock = Clock
   , clockFilled :: Int
   , clockVisible :: Bool
   , clockType :: ClockType            -- Threat or Goal
-  , clockConsequence :: Consequence
+  , clockConsequence :: Text          -- Narrative describing what happens when filled
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
