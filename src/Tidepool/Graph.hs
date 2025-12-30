@@ -113,6 +113,7 @@ module Tidepool.Graph
   , HasExit
   , AllNeedsSatisfied
   , AllGotoTargetsExist
+  , AllToolsHaveSchema
 
     -- * Reification
   , ReifyGraph(..)
@@ -151,6 +152,16 @@ module Tidepool.Graph
   , GetGotoTargets
   , GetEntryType
   , GetExitType
+
+    -- * Tools
+  , ToolDef(..)
+  , ValidTool
+  , ValidToolList
+  , AllToolsValid
+  , ToolInfo(..)
+  , ReifyToolList(..)
+  , toolInfoToJSON
+  , toolToInfo
   ) where
 
 import Tidepool.Graph.Types
@@ -161,3 +172,4 @@ import Tidepool.Graph.Reify
 import Tidepool.Graph.Mermaid
 import Tidepool.Graph.TH
 import Tidepool.Graph.Runner
+import Tidepool.Graph.Tool

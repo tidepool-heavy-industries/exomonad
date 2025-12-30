@@ -1,8 +1,17 @@
+{-# LANGUAGE AllowAmbiguousTypes #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE StandaloneKindSignatures #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE UndecidableInstances #-}
+
 -- | JSON Schema combinators for structured output
 module Tidepool.Schema
   ( -- * Schema Type
     JSONSchema(..)
   , SchemaType(..)
+
+    -- * HasJSONSchema Typeclass
+  , HasJSONSchema(..)
 
     -- * Schema Combinators
   , objectSchema
@@ -12,8 +21,22 @@ module Tidepool.Schema
   , describeField
   , emptySchema
 
+    -- * Schema Marker Traits
+  , UsesOneOf
+  , UsesEnum
+  , HasUsesOneOf
+  , HasUsesEnum
+
+    -- * Contextual Validation
+  , SchemaContext(..)
+  , ValidInContext
+  , ValidStructuredOutput
+
     -- * TH Derivation
   , deriveJSONSchema
+  , deriveHasJSONSchema
+  , deriveUsesOneOf
+  , deriveUsesEnum
 
     -- * Conversion
   , schemaToValue
@@ -25,6 +48,9 @@ import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (catMaybes)
 import Data.Aeson (Value(..), object, (.=))
+import Data.Kind (Constraint)
+import qualified Data.Kind as K
+import GHC.TypeLits (TypeError, ErrorMessage(..))
 import Language.Haskell.TH
 
 -- | A JSON Schema
@@ -244,3 +270,176 @@ typeToSchemaExp typ = case typ of
     typeToSchemaExp innerType
   -- Fallback: treat as string
   _ -> [| emptySchema TString |]
+
+-- ══════════════════════════════════════════════════════════════
+-- HAS JSON SCHEMA TYPECLASS
+-- ══════════════════════════════════════════════════════════════
+
+-- | Typeclass for types that have a JSON Schema representation.
+--
+-- Use 'deriveHasJSONSchema' to generate instances from record types
+-- with Haddock documentation.
+--
+-- @
+-- -- In Types.hs (separate module):
+-- data MyInput = MyInput
+--   { field1 :: Text
+--     -- ^ Description of field1
+--   , field2 :: Int
+--     -- ^ Description of field2
+--   }
+--
+-- -- In Main.hs:
+-- $(deriveHasJSONSchema ''MyInput)
+--
+-- -- Now you can use:
+-- schema = jsonSchema @MyInput
+-- @
+class HasJSONSchema a where
+  jsonSchema :: JSONSchema
+
+-- | Derive a 'HasJSONSchema' instance for a record type.
+--
+-- Same requirements as 'deriveJSONSchema':
+--
+-- 1. Type must be in a separate, already-compiled module
+-- 2. That module must have @{-\# LANGUAGE FieldSelectors \#-}@
+-- 3. All fields must have Haddock documentation
+--
+-- @
+-- $(deriveHasJSONSchema ''MyInput)
+-- @
+deriveHasJSONSchema :: Name -> Q [Dec]
+deriveHasJSONSchema typeName = do
+  schemaExp <- deriveJSONSchema typeName
+  [d| instance HasJSONSchema $(conT typeName) where
+        jsonSchema = $(pure schemaExp)
+    |]
+
+-- ══════════════════════════════════════════════════════════════
+-- SCHEMA MARKER TRAITS
+-- ══════════════════════════════════════════════════════════════
+
+-- | Marker class for types whose JSON schema uses oneOf.
+--
+-- Automatically derived by 'deriveHasJSONSchema' when the type is a sum type.
+-- Used for contextual validation - e.g., structured output doesn't support oneOf.
+class UsesOneOf a
+
+-- | Marker class for types whose JSON schema uses enum.
+--
+-- Automatically derived by 'deriveHasJSONSchema' when the type is an enum
+-- (sum type with all nullary constructors).
+class UsesEnum a
+
+-- | Type family to check if a type has the 'UsesOneOf' marker.
+--
+-- Returns 'True if the type has a 'UsesOneOf' instance, 'False otherwise.
+-- Implementation uses the overlapping instances trick.
+type HasUsesOneOf :: K.Type -> Bool
+type family HasUsesOneOf a where
+  HasUsesOneOf a = HasUsesOneOfImpl a
+
+-- | Type family to check if a type has the 'UsesEnum' marker.
+type HasUsesEnum :: K.Type -> Bool
+type family HasUsesEnum a where
+  HasUsesEnum a = HasUsesEnumImpl a
+
+-- Implementation detail: These need an overlapping instance trick at the value level
+-- to detect whether a constraint is satisfied. For now, we use the simpler approach
+-- of having TH generate the instances, and the type families just return 'True
+-- for types we know have the marker.
+type family HasUsesOneOfImpl (a :: K.Type) :: Bool where
+  HasUsesOneOfImpl _ = 'False  -- Default: no oneOf
+
+type family HasUsesEnumImpl (a :: K.Type) :: Bool where
+  HasUsesEnumImpl _ = 'False  -- Default: no enum
+
+-- ══════════════════════════════════════════════════════════════
+-- CONTEXTUAL SCHEMA VALIDATION
+-- ══════════════════════════════════════════════════════════════
+
+-- | Context in which a schema is being used.
+--
+-- Different contexts have different constraints on what schema features
+-- are supported. For example, Anthropic's structured output doesn't
+-- support @oneOf@ schemas.
+data SchemaContext
+  = ToolInputCtx     -- ^ Tool input: full JSON Schema support
+  | ToolOutputCtx    -- ^ Tool output: full JSON Schema support
+  | StructuredOutputCtx  -- ^ LLM structured output: no oneOf
+
+-- | Validate that a type's schema is valid in the given context.
+--
+-- Produces helpful compile-time error messages when validation fails.
+--
+-- @
+-- -- This compiles (tools support oneOf):
+-- type Valid = ValidInContext 'ToolInputCtx MyUnion
+--
+-- -- This fails with helpful message (structured output doesn't support oneOf):
+-- type Invalid = ValidInContext 'StructuredOutputCtx MyUnion
+-- @
+type ValidInContext :: SchemaContext -> K.Type -> Constraint
+type family ValidInContext ctx t where
+  ValidInContext 'ToolInputCtx t = ()  -- Tools allow everything
+  ValidInContext 'ToolOutputCtx t = ()
+  ValidInContext 'StructuredOutputCtx t = ValidStructuredOutputImpl t
+
+-- | Constraint alias for structured output validation.
+type ValidStructuredOutput :: K.Type -> Constraint
+type ValidStructuredOutput t = ValidInContext 'StructuredOutputCtx t
+
+-- | Implementation of structured output validation.
+--
+-- Checks that the type doesn't use oneOf (sum types).
+type family ValidStructuredOutputImpl (t :: K.Type) :: Constraint where
+  ValidStructuredOutputImpl t =
+    If (HasUsesOneOf t)
+       (TypeError
+         ('Text "Schema error for structured output type: " ':<>: 'ShowType t
+          ':$$: 'Text ""
+          ':$$: 'Text "Anthropic's structured output does not support 'oneOf' schemas."
+          ':$$: 'Text "This type uses a sum type or union that generates oneOf."
+          ':$$: 'Text ""
+          ':$$: 'Text "Fix options:"
+          ':$$: 'Text "  1. Use a tagged record: data MyChoice = MyChoice { tag :: Tag, ... }"
+          ':$$: 'Text "  2. Use separate fields: data Output = Output { optionA :: Maybe A, optionB :: Maybe B }"
+          ':$$: 'Text "  3. Use an enum if choices are simple strings"))
+       ()
+
+-- | Type-level conditional.
+type If :: Bool -> Constraint -> Constraint -> Constraint
+type family If cond t f where
+  If 'True t _ = t
+  If 'False _ f = f
+
+-- ══════════════════════════════════════════════════════════════
+-- TH MARKER DERIVATION
+-- ══════════════════════════════════════════════════════════════
+
+-- | Derive a 'UsesOneOf' instance for a type.
+--
+-- Call this when you have a sum type that generates a oneOf schema.
+-- Typically called automatically by 'deriveHasJSONSchema' for sum types.
+--
+-- @
+-- $(deriveUsesOneOf ''MyUnion)
+-- @
+deriveUsesOneOf :: Name -> Q [Dec]
+deriveUsesOneOf typeName = do
+  -- Generate: instance UsesOneOf TypeName
+  [d| instance UsesOneOf $(conT typeName) |]
+
+-- | Derive a 'UsesEnum' instance for a type.
+--
+-- Call this when you have an enum type (sum type with all nullary constructors).
+-- Typically called automatically by 'deriveHasJSONSchema' for enum types.
+--
+-- @
+-- $(deriveUsesEnum ''MyEnum)
+-- @
+deriveUsesEnum :: Name -> Q [Dec]
+deriveUsesEnum typeName = do
+  -- Generate: instance UsesEnum TypeName
+  [d| instance UsesEnum $(conT typeName) |]

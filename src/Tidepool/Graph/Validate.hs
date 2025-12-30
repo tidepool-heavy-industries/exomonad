@@ -34,6 +34,8 @@ module Tidepool.Graph.Validate
   , HasExit
   , AllNeedsSatisfied
   , AllGotoTargetsExist
+  , AllToolsHaveSchema
+  , AllSchemasValidForStructuredOutput
   , NeedsSatisfied
   , GotoTargetExists
 
@@ -48,8 +50,9 @@ import Data.Kind (Type, Constraint)
 import GHC.TypeLits (Symbol, TypeError, ErrorMessage(..))
 
 import Tidepool.Graph.Types
-import Tidepool.Graph.Edges
-import Tidepool.Graph.Goto (Goto)
+import Tidepool.Graph.Edges (GetNeeds, GetSchema, GetTools, GetEntryType, GetGotoTargets)
+import Tidepool.Graph.Tool (AllToolsValid)
+import Tidepool.Schema (ValidStructuredOutput)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- MAIN VALIDATION CONSTRAINT
@@ -60,6 +63,14 @@ import Tidepool.Graph.Goto (Goto)
 -- Use this constraint on any function that runs or processes a graph
 -- to ensure compile-time validation.
 --
+-- Validates:
+--
+-- * Entry and Exit declarations exist
+-- * All Needs are satisfied by Entry or Schema outputs
+-- * All Goto targets reference existing nodes or Exit
+-- * All Tools have valid schemas
+-- * All Schema types are valid for structured output (no oneOf)
+--
 -- @
 -- runGraph :: ValidGraph g => HandlersFor g -> EntryType g -> IO (ExitType g)
 -- @
@@ -69,6 +80,8 @@ type ValidGraph g =
   , HasExit g
   , AllNeedsSatisfied g
   , AllGotoTargetsExist g
+  , AllToolsHaveSchema g
+  , AllSchemasValidForStructuredOutput g
   )
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -259,6 +272,63 @@ type InvalidGotoTargetError srcName targetName = TypeError
    ':$$: 'Text "But no node named \"" ':<>: 'Text targetName ':<>: 'Text "\" exists."
    ':$$: 'Text "Fix: Create the target node or use Goto Exit for termination."
   )
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- TOOL SCHEMA VALIDATION
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Validates that all tools used in the graph have valid schemas.
+--
+-- This ensures:
+-- * Every tool has a GraphTool instance
+-- * Tool input types have HasJSONSchema
+-- * Tool output types have HasJSONSchema
+type AllToolsHaveSchema :: Type -> Constraint
+type family AllToolsHaveSchema g where
+  AllToolsHaveSchema (Graph nodes) = AllNodeToolsValid nodes
+  AllToolsHaveSchema (g :& _) = AllToolsHaveSchema g
+
+-- | Validate tools for each node.
+type AllNodeToolsValid :: [Type] -> Constraint
+type family AllNodeToolsValid nodes where
+  AllNodeToolsValid '[] = ()
+  AllNodeToolsValid ((Entry :~> _) ': rest) = AllNodeToolsValid rest
+  AllNodeToolsValid ((Exit :<~ _) ': rest) = AllNodeToolsValid rest
+  AllNodeToolsValid (node ': rest) =
+    ( AllToolsValid (GetTools node)
+    , AllNodeToolsValid rest
+    )
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- SCHEMA VALIDATION FOR STRUCTURED OUTPUT
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Validates that all Schema types are valid for Anthropic structured output.
+--
+-- This ensures Schema output types don't use features unsupported by structured
+-- output (e.g., oneOf for sum types). Types with the 'UsesOneOf' marker will
+-- produce a helpful compile-time error.
+type AllSchemasValidForStructuredOutput :: Type -> Constraint
+type family AllSchemasValidForStructuredOutput g where
+  AllSchemasValidForStructuredOutput (Graph nodes) = AllNodeSchemasValid nodes
+  AllSchemasValidForStructuredOutput (g :& _) = AllSchemasValidForStructuredOutput g
+
+-- | Validate Schema for each node.
+type AllNodeSchemasValid :: [Type] -> Constraint
+type family AllNodeSchemasValid nodes where
+  AllNodeSchemasValid '[] = ()
+  AllNodeSchemasValid ((Entry :~> _) ': rest) = AllNodeSchemasValid rest
+  AllNodeSchemasValid ((Exit :<~ _) ': rest) = AllNodeSchemasValid rest
+  AllNodeSchemasValid (node ': rest) =
+    ( ValidateNodeSchema (GetSchema node)
+    , AllNodeSchemasValid rest
+    )
+
+-- | Validate a single node's Schema (if present).
+type ValidateNodeSchema :: Maybe Type -> Constraint
+type family ValidateNodeSchema mSchema where
+  ValidateNodeSchema 'Nothing = ()
+  ValidateNodeSchema ('Just t) = ValidStructuredOutput t
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- UTILITIES

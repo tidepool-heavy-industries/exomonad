@@ -22,6 +22,7 @@ module Tidepool.Graph.Reify
   , EdgeInfo(..)
   , RuntimeNodeKind(..)
   , RuntimeEdgeKind(..)
+  , ToolInfo(..)
 
     -- * Reification Typeclasses
   , ReifyGraph(..)
@@ -32,6 +33,7 @@ import Data.Text (Text)
 import Data.Typeable (TypeRep)
 
 import Tidepool.Graph.Edges (EdgeKind(..))
+import Tidepool.Graph.Tool (ToolInfo(..))
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- RUNTIME INFO TYPES
@@ -57,7 +59,8 @@ data NodeInfo = NodeInfo
   , niHasGotoExit :: Bool        -- ^ Can this node exit the graph?
   , niIsConditional :: Bool      -- ^ Has When annotation?
   , niHasVision :: Bool          -- ^ Has Vision annotation?
-  , niTools :: [TypeRep]         -- ^ Tool types
+  , niTools :: [TypeRep]         -- ^ Tool types (for backwards compat)
+  , niToolInfos :: [ToolInfo]    -- ^ Full tool info with schemas (V2)
   , niTemplate :: Maybe TypeRep  -- ^ Template type
   }
   deriving (Show, Eq)

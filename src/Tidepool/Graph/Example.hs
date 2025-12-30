@@ -1,5 +1,6 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
 
 -- | Example graph definitions and diagram generation.
@@ -11,6 +12,12 @@ module Tidepool.Graph.Example
     SimpleGraph
   , BranchingGraph
   , AnnotatedGraph
+  , ToolsGraph
+
+    -- * Example Tools
+  , SearchTool(..)
+  , SearchInput(..)
+  , SearchOutput(..)
 
     -- * Graph Info (runtime)
   , simpleGraphInfo
@@ -22,15 +29,20 @@ module Tidepool.Graph.Example
   , printAllDiagrams
   ) where
 
+import Data.Aeson (FromJSON, ToJSON)
+import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
-import Data.Typeable (typeRep)
+import Data.Typeable (Typeable, typeRep)
 import Data.Proxy (Proxy(..))
+import GHC.Generics (Generic)
 
 import Tidepool.Graph.Types
 import Tidepool.Graph.Validate (ValidGraph)
 import Tidepool.Graph.Goto (Goto)
+import Tidepool.Graph.Tool (ToolDef(..), ToolInfo(..), toolToInfo)
+import Tidepool.Schema (HasJSONSchema(..), JSONSchema(..), SchemaType(..), objectSchema, arraySchema, describeField, emptySchema)
 import Tidepool.Graph.Reify
 import Tidepool.Graph.Mermaid
 
@@ -41,6 +53,60 @@ import Tidepool.Graph.Mermaid
 data Message = Message { msgContent :: String }
 data Intent = IntentRefund | IntentQuestion | IntentComplaint
 data Response = Response { respText :: String }
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- V2 TOOL EXAMPLE
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Tool input type for search functionality.
+--
+-- In production, you would use @deriveHasJSONSchema ''SearchInput@ in a
+-- separate module. Here we manually write the instance for demonstration.
+data SearchInput = SearchInput
+  { query :: Text       -- ^ The search query string
+  , maxResults :: Int   -- ^ Maximum number of results to return
+  }
+  deriving (Show, Eq, Generic)
+  deriving anyclass (FromJSON, ToJSON)
+
+-- | Tool output type for search results.
+data SearchOutput = SearchOutput
+  { results :: [Text]   -- ^ List of matching results
+  }
+  deriving (Show, Eq, Generic)
+  deriving anyclass (FromJSON, ToJSON)
+
+-- Manual HasJSONSchema instances (normally derived via TH)
+instance HasJSONSchema SearchInput where
+  jsonSchema = objectSchema
+    [ ("query", describeField "query" "The search query string" (emptySchema TString))
+    , ("maxResults", describeField "maxResults" "Maximum number of results (1-100)" (emptySchema TInteger))
+    ]
+    ["query", "maxResults"]
+
+instance HasJSONSchema SearchOutput where
+  jsonSchema = objectSchema
+    [ ("results", describeField "results" "List of matching results" (arraySchema (emptySchema TString)))
+    ]
+    ["results"]
+
+-- | Example tool: search the knowledge base.
+--
+-- This demonstrates the unified ToolDef API where everything hangs off
+-- the typeclass - types, effects, name, description, and implementation.
+data SearchTool = SearchTool
+  deriving (Typeable)
+
+instance ToolDef SearchTool where
+  type ToolInput SearchTool = SearchInput
+  type ToolOutput SearchTool = SearchOutput
+  type ToolEffects SearchTool = '[]  -- Pure implementation
+
+  toolName _ = "search"
+  toolDescription _ = "Search the knowledge base for relevant information"
+  toolExecute _ input =
+    -- Stub implementation - in real code this would use effects
+    pure SearchOutput { results = ["Result for: " <> input.query] }
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- SIMPLE LINEAR GRAPH
@@ -114,6 +180,40 @@ validAnnotatedGraph :: ValidGraph AnnotatedGraph => ()
 validAnnotatedGraph = ()
 
 -- ════════════════════════════════════════════════════════════════════════════
+-- GRAPH WITH V2 TOOLS
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | A graph using schema-driven tools.
+--
+-- The 'Tools' annotation references 'SearchTool' which has:
+--
+-- * 'ToolDef' instance with input/output types and effects
+-- * 'HasJSONSchema' instances for input/output types
+--
+-- At compile time, 'ValidGraph' ensures all tools have proper schemas.
+type ToolsGraph = Graph
+  '[ Entry :~> Message
+   , "search" := LLM
+       :@ Needs '[Message]
+       :@ Schema Response
+       :@ Tools '[SearchTool]  -- V2 tool with schema validation
+   , Exit :<~ Response
+   ]
+
+-- | This validates ToolsGraph at compile time, including tool schemas.
+--
+-- If SearchTool lacked proper HasJSONSchema instances, this would fail.
+validToolsGraph :: ValidGraph ToolsGraph => ()
+validToolsGraph = ()
+
+-- | Demonstrate runtime reification of tool info.
+--
+-- This shows how to get tool metadata (names, descriptions, schemas) at runtime.
+-- With the unified API, we use 'toolToInfo' on tool instances.
+exampleToolReification :: [ToolInfo]
+exampleToolReification = [toolToInfo SearchTool]
+
+-- ════════════════════════════════════════════════════════════════════════════
 -- INVALID GRAPHS (commented out - uncomment to see compile errors)
 -- ════════════════════════════════════════════════════════════════════════════
 
@@ -163,6 +263,7 @@ simpleGraphInfo = GraphInfo
           , niIsConditional = False
           , niHasVision = False
           , niTools = []
+          , niToolInfos = []
           , niTemplate = Nothing
           }
       , NodeInfo
@@ -175,6 +276,7 @@ simpleGraphInfo = GraphInfo
           , niIsConditional = False
           , niHasVision = False
           , niTools = []
+          , niToolInfos = []
           , niTemplate = Nothing
           }
       ]
@@ -201,6 +303,7 @@ branchingGraphInfo = GraphInfo
           , niIsConditional = False
           , niHasVision = False
           , niTools = []
+          , niToolInfos = []
           , niTemplate = Nothing
           }
       , NodeInfo
@@ -213,6 +316,7 @@ branchingGraphInfo = GraphInfo
           , niIsConditional = False
           , niHasVision = False
           , niTools = []
+          , niToolInfos = []
           , niTemplate = Nothing
           }
       , NodeInfo
@@ -225,6 +329,7 @@ branchingGraphInfo = GraphInfo
           , niIsConditional = False
           , niHasVision = False
           , niTools = []
+          , niToolInfos = []
           , niTemplate = Nothing
           }
       ]
@@ -248,6 +353,7 @@ annotatedGraphInfo = GraphInfo
           , niIsConditional = False
           , niHasVision = True
           , niTools = [typeRep (Proxy @PhotoTool)]
+          , niToolInfos = []  -- Would be populated by reification
           , niTemplate = Just (typeRep (Proxy @MyTemplate))
           }
       , NodeInfo
@@ -260,6 +366,7 @@ annotatedGraphInfo = GraphInfo
           , niIsConditional = True  -- Has When annotation
           , niHasVision = False
           , niTools = []
+          , niToolInfos = []
           , niTemplate = Nothing
           }
       ]
