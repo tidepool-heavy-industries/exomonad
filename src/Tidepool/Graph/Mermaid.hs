@@ -142,6 +142,10 @@ edgeDeclarations config info =
   ++ exitEdges config info
 
 -- | Generate edges from Entry to nodes that need the entry type.
+--
+-- Only draws edges to nodes where Entry is their SOLE dependency
+-- (all their Needs are satisfied by Entry alone). Otherwise the node
+-- requires output from other nodes first.
 entryEdges :: MermaidConfig -> GraphInfo -> [Text]
 entryEdges config info = case info.giEntryType of
   Nothing -> []
@@ -149,6 +153,7 @@ entryEdges config info = case info.giEntryType of
     [ "    entry" <> arrow <> "|" <> typeLabel config entryType <> "| " <> escapeName node.niName
     | node <- info.giNodes
     , entryType `elem` node.niNeeds
+    , all (== entryType) node.niNeeds  -- Entry must satisfy ALL needs
     ]
   where
     arrow = " --> "
@@ -284,6 +289,8 @@ stateTransitions config info =
   ++ exitStateTransitions config info
 
 -- | Entry transitions.
+--
+-- Only creates transitions to nodes where Entry satisfies ALL their needs.
 entryStateTransitions :: MermaidConfig -> GraphInfo -> [Text]
 entryStateTransitions config info = case info.giEntryType of
   Nothing -> []
@@ -291,6 +298,7 @@ entryStateTransitions config info = case info.giEntryType of
     [ "    [*] --> " <> escapeName node.niName <> ": " <> typeLabel config entryType
     | node <- info.giNodes
     , entryType `elem` node.niNeeds
+    , all (== entryType) node.niNeeds  -- Entry must satisfy ALL needs
     ]
 
 -- | Node-to-node transitions.

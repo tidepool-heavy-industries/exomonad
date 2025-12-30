@@ -2,6 +2,8 @@
 
 This file contains Mermaid diagrams generated from the example graphs in `Example.hs`.
 
+---
+
 ## SimpleGraph
 
 A linear graph: Entry → classify → respond → Exit
@@ -19,18 +21,12 @@ type SimpleGraph = Graph
 
 ```mermaid
 flowchart TD
-
-    %% Entry and Exit
     entry((start))
     exit__((end))
-
-    %% Nodes
     classify[["classify<br/>LLM"]]
     respond[["respond<br/>LLM"]]
 
-    %% Edges
     entry --> |Message| classify
-    entry --> |Message| respond
     classify --> |Intent| respond
     respond --> |Response| exit__
 ```
@@ -39,14 +35,10 @@ flowchart TD
 
 ```mermaid
 stateDiagram-v2
-
-    %% State definitions
     classify : LLM
     respond : LLM
 
-    %% Transitions
     [*] --> classify: Message
-    [*] --> respond: Message
     classify --> respond: Intent
     respond --> [*]: Response
 ```
@@ -55,14 +47,11 @@ stateDiagram-v2
 
 ```mermaid
 sequenceDiagram
-
-    %% Participants
     participant Entry
     participant classify
     participant respond
     participant Exit
 
-    %% Message flow
     Entry->>classify: Message
     classify->>respond: Intent
     respond->>Exit: Response
@@ -90,17 +79,12 @@ type BranchingGraph = Graph
 
 ```mermaid
 flowchart TD
-
-    %% Entry and Exit
     entry((start))
     exit__((end))
-
-    %% Nodes
     route{{"route<br/>Logic"}}
     refund[["refund<br/>LLM"]]
     answer[["answer<br/>LLM"]]
 
-    %% Edges
     entry --> |Message| route
     entry --> |Message| refund
     entry --> |Message| answer
@@ -111,17 +95,19 @@ flowchart TD
     answer --> |Response| exit__
 ```
 
+> **Note**: The `entry → refund` and `entry → answer` edges are technically correct
+> (those nodes only need `Message` which Entry provides) but semantically misleading.
+> In practice, they're only reachable via `Goto` from `route`. A future improvement
+> would filter out entry edges to nodes that are Goto targets.
+
 ### State Diagram
 
 ```mermaid
 stateDiagram-v2
-
-    %% State definitions
     route : Logic
     refund : LLM
     answer : LLM
 
-    %% Transitions
     [*] --> route: Message
     [*] --> refund: Message
     [*] --> answer: Message
@@ -136,14 +122,11 @@ stateDiagram-v2
 
 ```mermaid
 sequenceDiagram
-
-    %% Participants
     participant Entry
     participant route
     participant refund
     participant Exit
 
-    %% Message flow
     Entry->>route: Message
     route->>refund: Message
     refund->>Exit: Response
@@ -153,14 +136,11 @@ sequenceDiagram
 
 ```mermaid
 sequenceDiagram
-
-    %% Participants
     participant Entry
     participant route
     participant answer
     participant Exit
 
-    %% Message flow
     Entry->>route: Message
     route->>answer: Message
     answer->>Exit: Response
@@ -193,16 +173,11 @@ type AnnotatedGraph = Graph
 
 ```mermaid
 flowchart TD
-
-    %% Entry and Exit
     entry((start))
     exit__((end))
-
-    %% Nodes
     analyze[["analyze<br/>LLM"]]
     conditional[["conditional<br/>LLM"]]
 
-    %% Edges
     entry --> |Message| analyze
     analyze --> |Intent| conditional
     conditional --> |Response| exit__
@@ -212,12 +187,9 @@ flowchart TD
 
 ```mermaid
 stateDiagram-v2
-
-    %% State definitions
     analyze : LLM
     conditional : LLM
 
-    %% Transitions
     [*] --> analyze: Message
     analyze --> conditional: Intent
     conditional --> [*]: Response
@@ -229,7 +201,7 @@ stateDiagram-v2
 
 | Diagram Type | Best For | Limitations |
 |--------------|----------|-------------|
-| **Flowchart** | Visual overview, node shapes show LLM vs Logic | Shows all Schema→Needs edges (can be noisy) |
+| **Flowchart** | Visual overview, node shapes show LLM vs Logic | Shows data flow edges, not just control flow |
 | **State Diagram** | Accurate state machine representation | Less visual distinction between node types |
 | **Sequence Diagram** | Showing specific execution paths | Requires choosing a path through branches |
 
@@ -239,7 +211,8 @@ stateDiagram-v2
 - `[["double brackets"]]` - LLM nodes
 - `{{"hexagon"}}` - Logic nodes
 
-## Edge Styles
+## Edge Semantics
 
-- `-->` solid arrow - Normal transitions
-- `-.->` dashed arrow - Conditional (from `When` annotation)
+- **Schema → Needs**: Implicit data flow (solid arrow)
+- **Goto**: Explicit control flow (solid arrow)
+- **When**: Conditional edges (dashed arrow `-.->`)
