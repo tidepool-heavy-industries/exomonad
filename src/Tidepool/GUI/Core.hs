@@ -36,6 +36,9 @@ module Tidepool.GUI.Core
     -- * Request/Response types
   , PendingRequest(..)
   , RequestResponse(..)
+    -- * Chat messages (typed narrative log)
+  , ChatMessage(..)
+  , addChatMessage
     -- * State management
   , updateState
   , updateStateM
@@ -57,7 +60,7 @@ module Tidepool.GUI.Core
   , logError
   , logDebugWithContext
   , logInfoWithContext
-    -- * Narrative
+    -- * Narrative (legacy, wraps ChatMessage)
   , addNarrative
   , clearNarrative
     -- * Suggested actions
@@ -76,9 +79,23 @@ import Data.Aeson (Value)
 import Data.Sequence (Seq)
 import qualified Data.Sequence as Seq
 import Data.Text (Text, pack)
+import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import Data.Time (UTCTime, getCurrentTime, formatTime, defaultTimeLocale)
 import System.IO (stderr)
+
+-- | Typed chat messages for the narrative log
+--
+-- Instead of storing raw Text with prefix conventions, we use a proper sum type.
+-- This eliminates fragile string parsing and makes invalid states unrepresentable.
+data ChatMessage
+  = SystemMessage Text              -- ^ Agent responses, status updates
+  | UserMessage Text                -- ^ User text input
+  | PhotoMessage Text Text          -- ^ Photo: base64 data, mimeType
+  | ChoicesMessage Text [Text]      -- ^ Choices presented: prompt, options
+  | SelectedMessage Text            -- ^ User's selection
+  | ErrorMessage Text               -- ^ Errors and warnings
+  deriving (Show, Eq)
 
 -- | Bridge between game loop and GUI
 --
@@ -109,8 +126,8 @@ data GUIBridge state = GUIBridge
     -- ^ Current pending input request, if any
   , gbRequestResponse :: MVar RequestResponse
     -- ^ Response channel - game loop blocks here, GUI puts response
-  , gbNarrativeLog   :: TVar (Seq Text)
-    -- ^ Narrative text log for display (generic text entries)
+  , gbNarrativeLog   :: TVar (Seq ChatMessage)
+    -- ^ Typed chat message log for display
   , gbNarrativeVersion :: TVar Int
     -- ^ Version counter for narrative changes
   , gbDebugLog       :: TVar (Seq DebugEntry)
@@ -164,9 +181,26 @@ newGUIBridge initialState = do
 -- Uses 'tryPutMVar' which returns immediately if the MVar is full.
 safeSubmitResponse :: GUIBridge state -> RequestResponse -> IO ()
 safeSubmitResponse bridge response = do
-  TIO.hPutStrLn stderr $ "[safeSubmitResponse] Attempting to put: " <> pack (show response)
+  TIO.hPutStrLn stderr $ "[safeSubmitResponse] Attempting to put: " <> summarizeResponse response
   success <- tryPutMVar bridge.gbRequestResponse response
   TIO.hPutStrLn stderr $ "[safeSubmitResponse] tryPutMVar result: " <> pack (show success)
+
+-- | Summarize a response for logging (truncate large data like base64)
+summarizeResponse :: RequestResponse -> Text
+summarizeResponse (TextResponse t) = "TextResponse " <> truncateText 50 t
+summarizeResponse (ChoiceResponse i) = "ChoiceResponse " <> pack (show i)
+summarizeResponse (PhotoResponse b64 mime) =
+  "PhotoResponse (" <> pack (show (T.length b64)) <> " bytes, " <> mime <> ")"
+summarizeResponse (TextWithPhotoResponse t b64 mime) =
+  "TextWithPhotoResponse " <> truncateText 30 t <>
+  " + photo (" <> pack (show (T.length b64)) <> " bytes, " <> mime <> ")"
+summarizeResponse (CustomResponse val) = "CustomResponse " <> truncateText 100 (pack (show val))
+
+-- | Truncate text with ellipsis
+truncateText :: Int -> Text -> Text
+truncateText n t
+  | T.length t <= n = t
+  | otherwise = T.take n t <> "..."
 
 -- | A pending input request from the game loop
 --
@@ -247,13 +281,20 @@ addDebugEntry bridge level msg ctx = do
     modifyTVar' bridge.gbDebugLog (Seq.|> entry)
     modifyTVar' bridge.gbDebugVersion (+1)
 
--- | Add narrative text to the log
+-- | Add a typed chat message to the log
 --
+-- This is the primary way to add messages - uses proper ChatMessage type.
 -- Also increments the narrative version for change detection.
-addNarrative :: GUIBridge state -> Text -> IO ()
-addNarrative bridge txt = atomically $ do
-  modifyTVar' bridge.gbNarrativeLog (Seq.|> txt)
+addChatMessage :: GUIBridge state -> ChatMessage -> IO ()
+addChatMessage bridge msg = atomically $ do
+  modifyTVar' bridge.gbNarrativeLog (Seq.|> msg)
   modifyTVar' bridge.gbNarrativeVersion (+1)
+
+-- | Add narrative text to the log (convenience wrapper)
+--
+-- Wraps text as SystemMessage. For typed messages, use addChatMessage.
+addNarrative :: GUIBridge state -> Text -> IO ()
+addNarrative bridge txt = addChatMessage bridge (SystemMessage txt)
 
 -- | Clear the narrative log
 clearNarrative :: GUIBridge state -> IO ()

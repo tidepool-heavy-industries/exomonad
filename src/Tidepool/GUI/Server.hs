@@ -8,6 +8,7 @@ module Tidepool.GUI.Server
   ) where
 
 import Control.Monad (void)
+import qualified Data.ByteString.Char8 as BS
 import qualified Graphics.UI.Threepenny as UI
 import Graphics.UI.Threepenny.Core
 
@@ -15,6 +16,8 @@ import Graphics.UI.Threepenny.Core
 data ServerConfig = ServerConfig
   { scPort :: Int
     -- ^ Port to run on (default: 8023)
+  , scAddr :: Maybe String
+    -- ^ Address to bind to (default: "0.0.0.0" for all interfaces)
   , scStaticDir :: Maybe FilePath
     -- ^ Optional static files directory
   , scTitle :: String
@@ -26,6 +29,7 @@ data ServerConfig = ServerConfig
 defaultServerConfig :: ServerConfig
 defaultServerConfig = ServerConfig
   { scPort = 8023
+  , scAddr = Just "0.0.0.0"  -- Bind to all interfaces
   , scStaticDir = Nothing
   , scTitle = "Tidepool"
   }
@@ -39,9 +43,11 @@ startServer
   -> (Window -> UI ())  -- ^ Setup function for each window
   -> IO ()
 startServer config setup = do
-  putStrLn $ "Tidepool GUI running at http://localhost:" ++ show config.scPort
+  let addr = maybe "0.0.0.0" id config.scAddr
+  putStrLn $ "Tidepool GUI running at http://" ++ addr ++ ":" ++ show config.scPort
   let tpConfig = UI.defaultConfig
         { UI.jsPort = Just config.scPort
+        , UI.jsAddr = fmap BS.pack config.scAddr
         , UI.jsStatic = config.scStaticDir
         , UI.jsLog = const (pure ())  -- Suppress default logging
         }

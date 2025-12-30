@@ -27,28 +27,23 @@ module Tidying.Context
 import Data.Aeson (ToJSON(..), (.=), object)
 import Data.Text (Text)
 import Data.Text qualified as T
-import Data.Map.Strict qualified as Map
 import GHC.Generics (Generic)
 
 import Tidepool.Anthropic.Http (ImageSource(..))
 import Tidying.State
-import Tidying.Types (ItemName(..), SpaceFunction(..), CategoryName(..), ChaosLevel(..))
+import Tidying.Types (ItemName(..), SpaceFunction(..), ChaosLevel(..), chaosLevelToText)
 
 -- | Context for tidying prompts
 -- This is what gets rendered into the system prompt template
 data TidyingContext = TidyingContext
-  { tcPhase :: Phase
-    -- ^ Current phase of the session
+  { tcMode :: Mode
+    -- ^ Current mode (sum type with mode-specific data)
   , tcFunction :: Maybe Text
     -- ^ What the space is FOR (if known)
   , tcAnchors :: [Text]
     -- ^ Things that definitely stay
   , tcPiles :: PilesSummary
     -- ^ Summary of current piles
-  , tcEmergentCategories :: [Text]
-    -- ^ Names of emergent categories from splits
-  , tcCurrentCategory :: Maybe Text
-    -- ^ Category being refined (if any)
   , tcItemsProcessed :: Int
     -- ^ Progress count
   , tcPhotoAnalysis :: Maybe PhotoAnalysis
@@ -63,9 +58,10 @@ data PilesSummary = PilesSummary
   , psOutCount :: Int
   , psUnsureCount :: Int
   , psUnsurePreview :: [Text]  -- first 5 items
+  , psRecentDecisions :: [Text]  -- last 10 decided items (for "don't re-ask")
   } deriving (Show, Eq, Generic)
 
--- | Photo analysis result (stubbed)
+-- | Photo analysis result
 data PhotoAnalysis = PhotoAnalysis
   { paRoomType :: Text          -- "office", "bedroom", "closet"
   , paChaosLevel :: ChaosLevel  -- Parsed at JSON boundary (see Types.hs)
@@ -76,12 +72,10 @@ data PhotoAnalysis = PhotoAnalysis
 
 instance ToJSON TidyingContext where
   toJSON TidyingContext{..} = object
-    [ "phase" .= show tcPhase
+    [ "mode" .= modeName tcMode
     , "function" .= tcFunction
     , "anchors" .= tcAnchors
     , "piles" .= toJSON tcPiles
-    , "emergent_categories" .= tcEmergentCategories
-    , "current_category" .= tcCurrentCategory
     , "items_processed" .= tcItemsProcessed
     , "photo_analysis" .= fmap toJSON tcPhotoAnalysis
     , "user_text" .= tcUserText
@@ -93,12 +87,13 @@ instance ToJSON PilesSummary where
     , "out_count" .= psOutCount
     , "unsure_count" .= psUnsureCount
     , "unsure_preview" .= psUnsurePreview
+    , "recent_decisions" .= psRecentDecisions
     ]
 
 instance ToJSON PhotoAnalysis where
   toJSON PhotoAnalysis{..} = object
     [ "room_type" .= paRoomType
-    , "chaos_level" .= paChaosLevel
+    , "chaos_level" .= chaosLevelToText paChaosLevel
     , "visible_items" .= paVisibleItems
     , "blocked_function" .= paBlockedFunction
     , "first_target" .= paFirstTarget
@@ -111,12 +106,10 @@ buildTidyingContext
   -> Maybe Text          -- user text
   -> TidyingContext
 buildTidyingContext st mPhotoAnalysis userText = TidyingContext
-  { tcPhase = phase st
-  , tcFunction = fmap (\(SpaceFunction t) -> t) (getFunction st)
-  , tcAnchors = map (\(ItemName n) -> n) (getAnchors st)
+  { tcMode = st.mode
+  , tcFunction = fmap (\(SpaceFunction t) -> t) st.spaceFunction
+  , tcAnchors = map (\(ItemName n) -> n) st.anchors
   , tcPiles = summarizePiles st.piles
-  , tcEmergentCategories = map (\(CategoryName c) -> c) $ Map.keys (getEmergentCats st)
-  , tcCurrentCategory = fmap (\(CategoryName c) -> c) (getCurrentCategory st)
   , tcItemsProcessed = st.itemsProcessed
   , tcPhotoAnalysis = mPhotoAnalysis
   , tcUserText = userText
@@ -129,6 +122,7 @@ summarizePiles Piles{..} = PilesSummary
   , psOutCount = length out
   , psUnsureCount = length unsure
   , psUnsurePreview = map (\(ItemName n) -> n) $ take 5 unsure
+  , psRecentDecisions = take 10 $ map (\(ItemName n) -> n) (belongs ++ out)
   }
 
 -- | Stub photo analysis for testing

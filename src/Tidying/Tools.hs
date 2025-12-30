@@ -3,18 +3,22 @@
 {-# LANGUAGE RecordWildCards #-}
 -- | Tidying Tools (mid-turn LLM capabilities)
 --
--- The key tool is 'ProposeDisposition' which lets the LLM ask the user
--- about where an item should go. The LLM generates the question based on
--- what it sees (photo analysis), then waits for user confirmation.
+-- = Tool Categories
 --
--- = Flow
+-- == Regular Tools (ToolSuccess)
+-- Execute an action, return result, LLM continues:
+-- - propose_disposition: Propose item disposition, get user confirmation
+-- - ask_space_function: Ask what the space is for
 --
--- 1. LLM analyzes photo, sees "blue mug on papers"
--- 2. LLM calls propose_disposition with its best guesses
--- 3. Tool presents choices to user via QuestionHandler (IO callback)
--- 4. User taps button or types correction
--- 5. Answer returns to LLM as tool result
--- 6. LLM continues: "Kitchen counter. Now those cables..."
+-- == Transition Tools (ToolBreak)
+-- Change mode, end turn, start fresh:
+-- - begin_sorting: Surveying → Sorting
+-- - need_to_clarify: Sorting → Clarifying
+-- - user_seems_stuck: Sorting → DecisionSupport
+-- - time_to_wrap: Sorting → WindingDown
+-- - resume_sorting: Clarifying/DecisionSupport → Sorting
+-- - skip_item: Clarifying → Sorting
+-- - end_session: WindingDown → (end)
 --
 -- = Effect Architecture
 --
@@ -23,7 +27,7 @@
 -- interpreted. The QuestionHandler is passed to the dispatcher at setup time.
 --
 module Tidying.Tools
-  ( -- * Tools
+  ( -- * Regular Tools
     ProposeDisposition(..)
   , AskSpaceFunction(..)
   , ConfirmDone(..)
@@ -37,8 +41,13 @@ module Tidying.Tools
   , ConfirmDoneInput(..)
   , ConfirmDoneResult(..)
 
+    -- * Transition tool inputs
+  , NeedToClarifyInput(..)
+  , UserSeemsStuckInput(..)
+
     -- * Tool Registration
   , tidyingTools
+  , toolsForMode
   , makeTidyingDispatcher
   ) where
 
@@ -52,18 +61,21 @@ import Effectful (Eff, (:>), IOE)
 
 import Tidepool.Effect
   ( State, Emit, Log
-  , emit, logInfo, logWarn, modify
+  , emit, get, logInfo, logWarn, modify
   , QuestionHandler
   , ToolResult(..)
   )
 import Tidepool.Schema (objectSchema, arraySchema, emptySchema, schemaToValue, describeField, SchemaType(..))
 import Tidying.Question as Q
-import Tidying.State (SessionState(..), PhaseData(..))
+import Tidying.State
+  ( SessionState(..), Mode(..)
+  , SortingData(..), ClarifyingData(..), DecisionSupportData(..), WindingDownData(..)
+  )
 import Tidying.Events (TidyingEvent(..))
-import Tidying.Types (SpaceFunction(..))
+import Tidying.Types (SpaceFunction(..), ItemName(..))
 
 -- ══════════════════════════════════════════════════════════════
--- PROPOSE DISPOSITION TOOL
+-- PROPOSE DISPOSITION TOOL (Regular)
 -- ══════════════════════════════════════════════════════════════
 
 -- | Tool for proposing item disposition
@@ -113,14 +125,14 @@ instance FromJSON ProposeDispositionInput where
 -- | Result returned to LLM
 data ProposeDispositionResult = ProposeDispositionResult
   { pdrDisposition :: Q.ItemDisposition  -- ^ Where the item goes
-  , pdrWasCorrection :: Bool              -- ^ True if user typed custom location
+  , pdrUserResponse :: Text               -- ^ What user said (for LLM to interpret)
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
 -- | Schema for LLM
 proposeDispositionSchema :: Value
 proposeDispositionSchema = schemaToValue $ objectSchema
-  [ ("item", describeField "item" "Specific description of the item (e.g., 'the blue mug on the papers')" (emptySchema TString))
+  [ ("item", describeField "item" "SPECIFIC description: location + appearance. E.g., 'the blue mug on the stack of papers by the monitor' or 'tangled black cables behind the keyboard'. Include enough detail that user can unambiguously identify it." (emptySchema TString))
   , ("choices", describeField "choices" "2-4 ranked choices. First is your best guess. Each has label (shown to user), disposition (location or 'trash'/'donate'), is_trash, is_donate flags."
       (arraySchema $ objectSchema
         [ ("label", emptySchema TString)
@@ -134,11 +146,6 @@ proposeDispositionSchema = schemaToValue $ objectSchema
   ["item", "choices"]
 
 -- | Execute the tool
---
--- Takes a QuestionHandler because tools run inside the LLM interpreter
--- where QuestionUI effect has already been consumed.
---
--- Wraps the question handler in try/catch so GUI crashes don't crash the agent.
 executeProposeDisposition
   :: ( State SessionState :> es
      , Emit TidyingEvent :> es
@@ -165,35 +172,33 @@ executeProposeDisposition askQuestion input = do
 
   case result of
     Left err -> do
-      -- Question handler failed (GUI crash, MVar deadlock, etc)
       logWarn $ "Question handler failed: " <> T.pack (show err)
       pure ProposeDispositionResult
         { pdrDisposition = Q.SkipForNow
-        , pdrWasCorrection = False
+        , pdrUserResponse = "(no response - error)"
         }
 
     Right answer ->
-      -- Process answer
       case answer of
         Q.DispositionAnswer disp -> do
-          emit $ UserConfirmed input.pdiItem (dispositionToText disp)
+          let label = dispositionToLabel disp
+          emit $ UserConfirmed input.pdiItem label
           pure ProposeDispositionResult
             { pdrDisposition = disp
-            , pdrWasCorrection = False
+            , pdrUserResponse = label
             }
 
-        Q.TextAnswer loc -> do
-          emit $ UserCorrected input.pdiItem loc
+        Q.TextAnswer txt -> do
+          emit $ UserCorrected input.pdiItem txt
           pure ProposeDispositionResult
-            { pdrDisposition = Q.PlaceAt loc
-            , pdrWasCorrection = True
+            { pdrDisposition = Q.PlaceAt txt
+            , pdrUserResponse = txt
             }
 
         _ -> do
-          -- Fallback - treat as skip
           pure ProposeDispositionResult
             { pdrDisposition = Q.SkipForNow
-            , pdrWasCorrection = False
+            , pdrUserResponse = "(skipped)"
             }
 
   where
@@ -213,41 +218,38 @@ executeProposeDisposition askQuestion input = do
       | pc.pcDisposition == "skip" = Q.SkipForNow
       | otherwise = Q.PlaceAt pc.pcDisposition
 
-    dispositionToText :: Q.ItemDisposition -> Text
-    dispositionToText Q.Trash = "trash"
-    dispositionToText Q.Donate = "donate"
-    dispositionToText Q.Recycle = "recycle"
-    dispositionToText Q.SkipForNow = "skip"
-    dispositionToText Q.NeedMoreInfo = "need_more_info"
-    dispositionToText (Q.PlaceAt loc) = loc
+    dispositionToLabel :: Q.ItemDisposition -> Text
+    dispositionToLabel Q.Trash = "trash"
+    dispositionToLabel Q.Donate = "donate"
+    dispositionToLabel Q.Recycle = "recycle"
+    dispositionToLabel Q.SkipForNow = "skip"
+    dispositionToLabel Q.NeedMoreInfo = "need more info"
+    dispositionToLabel (Q.PlaceAt loc) = "place at " <> loc
 
 -- ══════════════════════════════════════════════════════════════
--- ASK SPACE FUNCTION TOOL
+-- ASK SPACE FUNCTION TOOL (Regular)
 -- ══════════════════════════════════════════════════════════════
 
--- | Tool for asking what the space needs to DO
 data AskSpaceFunction = AskSpaceFunction
   deriving (Show, Eq, Generic)
 
 data AskSpaceFunctionInput = AskSpaceFunctionInput
-  { asfiPrompt :: Text              -- ^ Question to ask
-  , asfiChoices :: [SpaceFunctionChoice]  -- ^ LLM-generated choices
+  { asfiPrompt :: Text
+  , asfiChoices :: [SpaceFunctionChoice]
   }
   deriving (Show, Eq, Generic, ToJSON)
 
--- | Custom FromJSON to match schema field names (prompt, choices)
 instance FromJSON AskSpaceFunctionInput where
   parseJSON = withObject "AskSpaceFunctionInput" $ \o -> AskSpaceFunctionInput
     <$> o .: "prompt"
     <*> o .: "choices"
 
 data SpaceFunctionChoice = SpaceFunctionChoice
-  { sfcLabel :: Text   -- ^ Display text: "Work - sit and focus"
-  , sfcValue :: Text   -- ^ Value: "workspace"
+  { sfcLabel :: Text
+  , sfcValue :: Text
   }
   deriving (Show, Eq, Generic)
 
--- | Custom ToJSON/FromJSON to match schema field names (label, value)
 instance ToJSON SpaceFunctionChoice where
   toJSON c = object ["label" .= c.sfcLabel, "value" .= c.sfcValue]
 
@@ -256,7 +258,7 @@ instance FromJSON SpaceFunctionChoice where
     SpaceFunctionChoice <$> o .: "label" <*> o .: "value"
 
 data AskSpaceFunctionResult = AskSpaceFunctionResult
-  { asfrFunction :: Text  -- ^ "workspace", "creative", "bedroom", etc.
+  { asfrFunction :: Text
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
@@ -283,9 +285,7 @@ executeAskSpaceFunction
   -> Eff es AskSpaceFunctionResult
 executeAskSpaceFunction askQuestion input = do
   logInfo $ "TOOL ask_space_function: prompt=" <> input.asfiPrompt
-  logInfo $ "TOOL ask_space_function: choices=" <> T.pack (show (map (.sfcLabel) input.asfiChoices))
 
-  -- Build question from LLM-provided choices
   let choiceOptions = map (\c -> Q.ChoiceOption c.sfcLabel c.sfcValue) input.asfiChoices
       question = Q.Choose
         { Q.chPrompt = input.asfiPrompt
@@ -293,81 +293,55 @@ executeAskSpaceFunction askQuestion input = do
         , Q.chChoices = choiceOptions
         }
 
-  logInfo "TOOL ask_space_function: calling askQuestion..."
   result <- liftIO $ try @SomeException $ askQuestion question
-  logInfo $ "TOOL ask_space_function: askQuestion returned, result=" <> T.pack (show (isRight result))
 
   case result of
     Left err -> do
-      logWarn $ "TOOL ask_space_function: Question handler failed: " <> T.pack (show err)
+      logWarn $ "Question handler failed: " <> T.pack (show err)
       pure AskSpaceFunctionResult { asfrFunction = "living" }
 
     Right answer -> do
-      logInfo $ "TOOL ask_space_function: got answer type=" <> answerType answer
       case answer of
         Q.ChoiceAnswer value -> do
           emit $ FunctionChosen value
-          -- Sync to state so subsequent turns see the function choice
-          modify @SessionState $ \st -> updateFunctionInState st (SpaceFunction value)
+          modify @SessionState $ \st -> st { spaceFunction = Just (SpaceFunction value) }
           pure AskSpaceFunctionResult { asfrFunction = value }
 
         Q.TextAnswer custom -> do
           emit $ FunctionChosen custom
-          -- Sync to state so subsequent turns see the function choice
-          modify @SessionState $ \st -> updateFunctionInState st (SpaceFunction custom)
+          modify @SessionState $ \st -> st { spaceFunction = Just (SpaceFunction custom) }
           pure AskSpaceFunctionResult { asfrFunction = custom }
 
         _ -> do
-          logWarn "TOOL ask_space_function: unexpected answer type, using fallback"
-          -- Fallback
           pure AskSpaceFunctionResult { asfrFunction = "living" }
-  where
-    isRight (Right _) = True
-    isRight _ = False
-
-    answerType :: Q.Answer -> T.Text
-    answerType (Q.DispositionAnswer _) = "DispositionAnswer"
-    answerType (Q.ConfirmAnswer _) = "ConfirmAnswer"
-    answerType (Q.ChoiceAnswer _) = "ChoiceAnswer"
-    answerType (Q.TextAnswer _) = "TextAnswer"
-
--- | Helper to update function in PhaseData (only valid in Surveying)
-updateFunctionInState :: SessionState -> SpaceFunction -> SessionState
-updateFunctionInState st fn = case st.phaseData of
-  SurveyingData _ anchors ->
-    st { phaseData = SurveyingData (Just fn) anchors }
-  -- In other phases, function is already set and can't be changed
-  _ -> st
 
 -- ══════════════════════════════════════════════════════════════
--- CONFIRM DONE TOOL
+-- CONFIRM DONE TOOL (Regular)
 -- ══════════════════════════════════════════════════════════════
 
--- | Tool for confirming user wants to stop
 data ConfirmDone = ConfirmDone
   deriving (Show, Eq, Generic)
 
 data ConfirmDoneInput = ConfirmDoneInput
-  { cdiItemsProcessed :: Int   -- ^ How many items handled so far
-  , cdiMessage :: Maybe Text   -- ^ Optional message to show
+  { cdiItemsProcessed :: Int
+  , cdiMessage :: Maybe Text
   }
   deriving (Show, Eq, Generic, ToJSON)
 
--- | Custom FromJSON to match schema field names (items_processed, message)
 instance FromJSON ConfirmDoneInput where
   parseJSON = withObject "ConfirmDoneInput" $ \o -> ConfirmDoneInput
     <$> o .: "items_processed"
     <*> o .:? "message"
 
 data ConfirmDoneResult = ConfirmDoneResult
-  { cdrConfirmed :: Bool  -- ^ True if user wants to stop
+  { cdrConfirmed :: Bool
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
 confirmDoneSchema :: Value
 confirmDoneSchema = schemaToValue $ objectSchema
   [ ("items_processed", describeField "items_processed" "Number of items handled this session" (emptySchema TNumber))
-  , ("message", describeField "message" "Optional message to show (e.g., 'Great progress!')" (emptySchema TString))
+  , ("message", describeField "message" "Optional message to show" (emptySchema TString))
   ]
   ["items_processed"]
 
@@ -387,7 +361,7 @@ executeConfirmDone askQuestion input = do
 
   result <- liftIO $ try @SomeException $ askQuestion $ Q.Confirm
     { Q.cfPrompt = prompt
-    , Q.cfDefault = True  -- Default to "yes, done"
+    , Q.cfDefault = True
     }
 
   case result of
@@ -405,44 +379,323 @@ executeConfirmDone askQuestion input = do
           pure ConfirmDoneResult { cdrConfirmed = False }
 
 -- ══════════════════════════════════════════════════════════════
--- TOOL REGISTRATION
+-- TRANSITION TOOLS (ToolBreak)
 -- ══════════════════════════════════════════════════════════════
 
--- | All tidying tools as JSON for API
-tidyingTools :: [Value]
-tidyingTools =
-  [ object
-      [ "name" .= ("propose_disposition" :: Text)
-      , "description" .= ("Propose where an item should go. Present 2-4 choices ranked by likelihood (first = best guess). User taps to confirm or types correction. Use this for EVERY item you see - don't just describe, propose!" :: Text)
-      , "input_schema" .= proposeDispositionSchema
-      ]
-  , object
-      [ "name" .= ("ask_space_function" :: Text)
-      , "description" .= ("Ask what the space is FOR. Generate 2-4 context-specific choices based on what you know (e.g., if they said 'desk', offer 'Work area', 'Gaming setup', 'Art station'). User picks one." :: Text)
-      , "input_schema" .= askSpaceFunctionSchema
-      ]
-  , object
-      [ "name" .= ("confirm_done" :: Text)
-      , "description" .= ("Confirm user wants to end session. Shows items processed count." :: Text)
-      , "input_schema" .= confirmDoneSchema
+-- | Input for need_to_clarify transition tool
+data NeedToClarifyInput = NeedToClarifyInput
+  { ntcItem :: Text           -- ^ Item to clarify
+  , ntcPhotoContext :: Text   -- ^ What we observed in photo
+  , ntcReason :: Text         -- ^ Why user is confused
+  }
+  deriving (Show, Eq, Generic)
+
+instance FromJSON NeedToClarifyInput where
+  parseJSON = withObject "NeedToClarifyInput" $ \o -> NeedToClarifyInput
+    <$> o .: "item"
+    <*> o .: "photo_context"
+    <*> o .: "reason"
+
+instance ToJSON NeedToClarifyInput where
+  toJSON NeedToClarifyInput{..} = object
+    [ "item" .= ntcItem
+    , "photo_context" .= ntcPhotoContext
+    , "reason" .= ntcReason
+    ]
+
+needToClarifySchema :: Value
+needToClarifySchema = schemaToValue $ objectSchema
+  [ ("item", describeField "item" "What item we're clarifying" (emptySchema TString))
+  , ("photo_context", describeField "photo_context" "What we observed in the photo (location, nearby objects)" (emptySchema TString))
+  , ("reason", describeField "reason" "Why user is confused (their response)" (emptySchema TString))
+  ]
+  ["item", "photo_context", "reason"]
+
+-- | Input for user_seems_stuck transition tool
+data UserSeemsStuckInput = UserSeemsStuckInput
+  { ussStuckItem :: Text  -- ^ Item they're stuck on
+  }
+  deriving (Show, Eq, Generic)
+
+instance FromJSON UserSeemsStuckInput where
+  parseJSON = withObject "UserSeemsStuckInput" $ \o -> UserSeemsStuckInput
+    <$> o .: "stuck_item"
+
+instance ToJSON UserSeemsStuckInput where
+  toJSON UserSeemsStuckInput{..} = object
+    [ "stuck_item" .= ussStuckItem
+    ]
+
+userSeemsStuckSchema :: Value
+userSeemsStuckSchema = schemaToValue $ objectSchema
+  [ ("stuck_item", describeField "stuck_item" "Item the user is stuck deciding about" (emptySchema TString))
+  ]
+  ["stuck_item"]
+
+-- | Execute begin_sorting: Surveying → Sorting
+executeBeginSorting
+  :: ( State SessionState :> es
+     , Emit TidyingEvent :> es
+     )
+  => Eff es ToolResult
+executeBeginSorting = do
+  oldMode <- (.mode) <$> get @SessionState
+  let newMode = Sorting $ SortingData Nothing Nothing
+  modify @SessionState $ \st -> st { mode = newMode }
+  emit $ ModeChanged oldMode newMode
+  pure $ ToolBreak "[Continue as: Sorting. Begin processing items.]"
+
+-- | Execute need_to_clarify: Sorting → Clarifying
+executeNeedToClarify
+  :: ( State SessionState :> es
+     , Emit TidyingEvent :> es
+     )
+  => NeedToClarifyInput
+  -> Eff es ToolResult
+executeNeedToClarify input = do
+  oldMode <- (.mode) <$> get @SessionState
+  let newModeData = ClarifyingData
+        { cdItem = input.ntcItem
+        , cdPhotoContext = input.ntcPhotoContext
+        , cdReason = input.ntcReason
+        }
+      newMode = Clarifying newModeData
+  modify @SessionState $ \st -> st { mode = newMode }
+  emit $ ModeChanged oldMode newMode
+  pure $ ToolBreak $ "[Continue as: Clarifying. Describe: " <> input.ntcItem <> "]"
+
+-- | Execute user_seems_stuck: Sorting → DecisionSupport
+executeUserSeemsStuck
+  :: ( State SessionState :> es
+     , Emit TidyingEvent :> es
+     )
+  => UserSeemsStuckInput
+  -> Eff es ToolResult
+executeUserSeemsStuck input = do
+  oldMode <- (.mode) <$> get @SessionState
+  let newModeData = DecisionSupportData { dsdStuckItem = input.ussStuckItem }
+      newMode = DecisionSupport newModeData
+  modify @SessionState $ \st -> st { mode = newMode }
+  emit $ ModeChanged oldMode newMode
+  pure $ ToolBreak $ "[Continue as: DecisionSupport. Help with: " <> input.ussStuckItem <> "]"
+
+-- | Execute time_to_wrap: Sorting → WindingDown
+executeTimeToWrap
+  :: ( State SessionState :> es
+     , Emit TidyingEvent :> es
+     )
+  => Eff es ToolResult
+executeTimeToWrap = do
+  oldMode <- (.mode) <$> get @SessionState
+  let newMode = WindingDown $ WindingDownData Nothing []
+  modify @SessionState $ \st -> st { mode = newMode }
+  emit $ ModeChanged oldMode newMode
+  pure $ ToolBreak "[Continue as: WindingDown. Wrap up session.]"
+
+-- | Execute resume_sorting: Clarifying/DecisionSupport → Sorting
+executeResumeSorting
+  :: ( State SessionState :> es
+     , Emit TidyingEvent :> es
+     )
+  => Eff es ToolResult
+executeResumeSorting = do
+  oldMode <- (.mode) <$> get @SessionState
+  let newMode = Sorting $ SortingData Nothing Nothing
+  modify @SessionState $ \st -> st { mode = newMode }
+  emit $ ModeChanged oldMode newMode
+  pure $ ToolBreak "[Continue as: Sorting. Resume item processing.]"
+
+-- | Execute skip_item: Clarifying → Sorting
+executeSkipItem
+  :: ( State SessionState :> es
+     , Emit TidyingEvent :> es
+     )
+  => Eff es ToolResult
+executeSkipItem = do
+  oldMode <- (.mode) <$> get @SessionState
+  let newMode = Sorting $ SortingData Nothing Nothing
+  modify @SessionState $ \st -> st { mode = newMode }
+  emit $ ModeChanged oldMode newMode
+  pure $ ToolBreak "[Continue as: Sorting. Item skipped, move on.]"
+
+-- | Execute end_session: WindingDown → (end)
+executeEndSession
+  :: ( State SessionState :> es
+     , Emit TidyingEvent :> es
+     )
+  => Eff es ToolResult
+executeEndSession = do
+  st <- get @SessionState
+  emit $ SessionEnded st.itemsProcessed
+  pure $ ToolBreak "[Session ended.]"
+
+-- ══════════════════════════════════════════════════════════════
+-- TOOL SCHEMAS
+-- ══════════════════════════════════════════════════════════════
+
+-- | begin_sorting tool (Surveying → Sorting)
+beginSortingTool :: Value
+beginSortingTool = object
+  [ "name" .= ("begin_sorting" :: Text)
+  , "description" .= ("Transition from Surveying to Sorting mode. Call when you've established what the space is for and what stays. This ENDS the current turn." :: Text)
+  , "input_schema" .= object
+      [ "type" .= ("object" :: Text)
+      , "properties" .= object []
+      , "additionalProperties" .= False
       ]
   ]
 
+-- | need_to_clarify tool (Sorting → Clarifying)
+needToClarifyTool :: Value
+needToClarifyTool = object
+  [ "name" .= ("need_to_clarify" :: Text)
+  , "description" .= ("User can't identify the item. Transition to Clarifying mode to describe it in more detail using spatial references and physical traits. This ENDS the current turn." :: Text)
+  , "input_schema" .= needToClarifySchema
+  ]
+
+-- | user_seems_stuck tool (Sorting → DecisionSupport)
+userSeemsStuckTool :: Value
+userSeemsStuckTool = object
+  [ "name" .= ("user_seems_stuck" :: Text)
+  , "description" .= ("User is struggling to decide about an item. Transition to DecisionSupport mode to help them through it gently. This ENDS the current turn." :: Text)
+  , "input_schema" .= userSeemsStuckSchema
+  ]
+
+-- | time_to_wrap tool (Sorting → WindingDown)
+timeToWrapTool :: Value
+timeToWrapTool = object
+  [ "name" .= ("time_to_wrap" :: Text)
+  , "description" .= ("Time to wrap up the session. User mentioned being done/tired or you sense natural stopping point. Transition to WindingDown mode. This ENDS the current turn." :: Text)
+  , "input_schema" .= object
+      [ "type" .= ("object" :: Text)
+      , "properties" .= object []
+      , "additionalProperties" .= False
+      ]
+  ]
+
+-- | resume_sorting tool (Clarifying/DecisionSupport → Sorting)
+resumeSortingTool :: Value
+resumeSortingTool = object
+  [ "name" .= ("resume_sorting" :: Text)
+  , "description" .= ("Return to Sorting mode. Call when clarification is complete or user made a decision. This ENDS the current turn." :: Text)
+  , "input_schema" .= object
+      [ "type" .= ("object" :: Text)
+      , "properties" .= object []
+      , "additionalProperties" .= False
+      ]
+  ]
+
+-- | skip_item tool (Clarifying → Sorting)
+skipItemTool :: Value
+skipItemTool = object
+  [ "name" .= ("skip_item" :: Text)
+  , "description" .= ("Skip this item and move on. Use when user still can't identify it after clarification. This ENDS the current turn." :: Text)
+  , "input_schema" .= object
+      [ "type" .= ("object" :: Text)
+      , "properties" .= object []
+      , "additionalProperties" .= False
+      ]
+  ]
+
+-- | end_session tool (WindingDown → end)
+endSessionTool :: Value
+endSessionTool = object
+  [ "name" .= ("end_session" :: Text)
+  , "description" .= ("End the tidying session. This ENDS the session completely." :: Text)
+  , "input_schema" .= object
+      [ "type" .= ("object" :: Text)
+      , "properties" .= object []
+      , "additionalProperties" .= False
+      ]
+  ]
+
+-- | propose_disposition tool (regular, for Sorting mode)
+proposeDispositionTool :: Value
+proposeDispositionTool = object
+  [ "name" .= ("propose_disposition" :: Text)
+  , "description" .= (T.unlines
+      [ "Propose where an item should go."
+      , ""
+      , "ITEM DESCRIPTION: Be SPECIFIC about location + appearance."
+      , "Bad: 'the mouse'. Good: 'the white mouse with green logo on the right side of the keyboard'."
+      , ""
+      , "CHOICES: 2-4 options ranked by likelihood (first = best guess)."
+      , ""
+      , "USER CONFUSION: If user says 'I don't see it', describe WHERE you see it more precisely."
+      ] :: Text)
+  , "input_schema" .= proposeDispositionSchema
+  ]
+
+-- | ask_space_function tool (regular, for Surveying mode)
+askSpaceFunctionTool :: Value
+askSpaceFunctionTool = object
+  [ "name" .= ("ask_space_function" :: Text)
+  , "description" .= ("Ask what the space is FOR. Generate 2-4 context-specific choices based on what you know." :: Text)
+  , "input_schema" .= askSpaceFunctionSchema
+  ]
+
+-- ══════════════════════════════════════════════════════════════
+-- TOOL SELECTION BY MODE
+-- ══════════════════════════════════════════════════════════════
+
+-- | Select tools available in each mode
+toolsForMode :: Mode -> [Value]
+toolsForMode (Surveying _) =
+  [ askSpaceFunctionTool
+  , beginSortingTool
+  ]
+
+toolsForMode (Sorting _) =
+  [ proposeDispositionTool
+  , needToClarifyTool
+  , userSeemsStuckTool
+  , timeToWrapTool
+  ]
+
+toolsForMode (Clarifying _) =
+  [ resumeSortingTool
+  , skipItemTool
+  ]
+
+toolsForMode (DecisionSupport _) =
+  [ resumeSortingTool
+  ]
+
+toolsForMode (WindingDown _) =
+  [ endSessionTool
+  ]
+
+-- | All tidying tools (for backwards compatibility)
+tidyingTools :: [Value]
+tidyingTools =
+  [ proposeDispositionTool
+  , askSpaceFunctionTool
+  , beginSortingTool
+  , needToClarifyTool
+  , userSeemsStuckTool
+  , timeToWrapTool
+  , resumeSortingTool
+  , skipItemTool
+  , endSessionTool
+  ]
+
+-- ══════════════════════════════════════════════════════════════
+-- TOOL DISPATCHER
+-- ══════════════════════════════════════════════════════════════
+
 -- | Create dispatcher for tidying tools
---
--- Takes a QuestionHandler to route questions to the GUI.
--- Tools need IOE for the question handler callbacks.
--- Tools use Log to warn about failures (try/catch on question handler).
 makeTidyingDispatcher
   :: ( State SessionState :> es
      , Emit TidyingEvent :> es
      , Log :> es
      , IOE :> es
      )
-  => QuestionHandler  -- ^ Handler for routing questions to user
-  -> Text             -- ^ Tool name
-  -> Value            -- ^ Tool input
+  => QuestionHandler
+  -> Text
+  -> Value
   -> Eff es (Either Text ToolResult)
+
+-- Regular tools (ToolSuccess)
 makeTidyingDispatcher handler "propose_disposition" input =
   case fromJSON input of
     Error err -> pure $ Left $ "Failed to parse propose_disposition input: " <> T.pack err
@@ -451,15 +704,10 @@ makeTidyingDispatcher handler "propose_disposition" input =
       pure $ Right $ ToolSuccess $ toJSON result
 
 makeTidyingDispatcher handler "ask_space_function" input = do
-  logInfo "DISPATCHER: ask_space_function called"
   case fromJSON input of
-    Error err -> do
-      logWarn $ "DISPATCHER: Failed to parse ask_space_function input: " <> T.pack err
-      pure $ Left $ "Failed to parse ask_space_function input: " <> T.pack err
+    Error err -> pure $ Left $ "Failed to parse ask_space_function input: " <> T.pack err
     Success parsed -> do
-      logInfo "DISPATCHER: ask_space_function input parsed, executing..."
       result <- executeAskSpaceFunction handler parsed
-      logInfo $ "DISPATCHER: ask_space_function completed, function=" <> result.asfrFunction
       pure $ Right $ ToolSuccess $ toJSON result
 
 makeTidyingDispatcher handler "confirm_done" input =
@@ -468,6 +716,41 @@ makeTidyingDispatcher handler "confirm_done" input =
     Success parsed -> do
       result <- executeConfirmDone handler parsed
       pure $ Right $ ToolSuccess $ toJSON result
+
+-- Transition tools (ToolBreak)
+makeTidyingDispatcher _ "begin_sorting" _ = do
+  result <- executeBeginSorting
+  pure $ Right result
+
+makeTidyingDispatcher _ "need_to_clarify" input =
+  case fromJSON input of
+    Error err -> pure $ Left $ "Failed to parse need_to_clarify input: " <> T.pack err
+    Success parsed -> do
+      result <- executeNeedToClarify parsed
+      pure $ Right result
+
+makeTidyingDispatcher _ "user_seems_stuck" input =
+  case fromJSON input of
+    Error err -> pure $ Left $ "Failed to parse user_seems_stuck input: " <> T.pack err
+    Success parsed -> do
+      result <- executeUserSeemsStuck parsed
+      pure $ Right result
+
+makeTidyingDispatcher _ "time_to_wrap" _ = do
+  result <- executeTimeToWrap
+  pure $ Right result
+
+makeTidyingDispatcher _ "resume_sorting" _ = do
+  result <- executeResumeSorting
+  pure $ Right result
+
+makeTidyingDispatcher _ "skip_item" _ = do
+  result <- executeSkipItem
+  pure $ Right result
+
+makeTidyingDispatcher _ "end_session" _ = do
+  result <- executeEndSession
+  pure $ Right result
 
 makeTidyingDispatcher _ name _ =
   pure $ Left $ "Unknown tidying tool: " <> name

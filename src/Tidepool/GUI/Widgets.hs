@@ -193,9 +193,22 @@ updateNarrative container bridge = do
   -- Auto-scroll to bottom
   runFunction $ ffi "$(%1).scrollTop($(%1)[0].scrollHeight)" container
 
-mkNarrativeEntry :: Text -> UI Element
-mkNarrativeEntry txt =
-  UI.div #. "narrative-entry" # set text (T.unpack txt)
+-- | Create a narrative entry from a ChatMessage
+--
+-- For the generic widget, we just extract text content.
+-- Domain-specific widgets can pattern-match for richer rendering.
+mkNarrativeEntry :: ChatMessage -> UI Element
+mkNarrativeEntry msg =
+  UI.div #. "narrative-entry" # set text (T.unpack $ chatMessageText msg)
+
+-- | Extract text content from a ChatMessage (for simple rendering)
+chatMessageText :: ChatMessage -> Text
+chatMessageText (SystemMessage txt) = txt
+chatMessageText (UserMessage txt) = "> " <> txt
+chatMessageText (PhotoMessage _ _) = "[Photo]"
+chatMessageText (ChoicesMessage prompt _) = prompt
+chatMessageText (SelectedMessage txt) = "✓ " <> txt
+chatMessageText (ErrorMessage txt) = "⚠ " <> txt
 
 -- | Create a debug panel
 --

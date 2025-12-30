@@ -32,15 +32,6 @@ library
         Tidepool.GUI.Server
         Tidepool.GUI.Theme
         Tidepool.GUI.Widgets
-        Tidepool.Graph
-        Tidepool.Graph.Types
-        Tidepool.Graph.Goto
-        Tidepool.Graph.Edges
-        Tidepool.Graph.Validate
-        Tidepool.Graph.Reify
-        Tidepool.Graph.Mermaid
-        Tidepool.Graph.TH
-        Tidepool.Graph.Runner
         Delta.Agent
         DM.Agent
         DM.State
@@ -68,8 +59,6 @@ library
         Tidying.Types
         Tidying.Agent
         Tidying.State
-        Tidying.Action
-        Tidying.Decide
         Tidying.Act
         Tidying.Context
         Tidying.Output

@@ -729,3 +729,4 @@ QuestionHandler has 5-minute timeout → returns `fallbackAnswer` on timeout.
 - **Graceful degradation**: Try/catch on all IO, fallback answers on timeout
 - **Type safety**: Newtypes prevent mixing up ItemName/Location/etc.
 - **Invalid states unrepresentable**: PhaseData sum type, NonEmpty constraints
+- **Trust LLM judgment**: Don't hardcode keyword matching or state detection in Haskell when the LLM can interpret intent. Instead: give rich context in prompts, pass relevant state, and let tools return raw user responses. The LLM understands "idk what that is" vs "put it on the desk" - you don't need `isConfusionSignal :: Text -> Bool`.

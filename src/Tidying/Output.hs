@@ -2,26 +2,34 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 
--- | Tidying turn output types
+-- | Tidying Mode-Specific Output Types
 --
--- EXTRACT extracts structured info from user input.
--- ACT produces a response to send to the user.
--- Both are LLM outputs with JSON schemas.
+-- Each mode has its own structured output schema.
+-- The LLM produces mode-specific fields that update mode data.
 
 module Tidying.Output
-  ( -- * EXTRACT output
-    Extract(..)
-  , Intent(..)
-  , Choice(..)
-  , extractSchema
+  ( -- * Mode-specific outputs
+    SurveyingOutput(..)
+  , surveyingOutputSchema
+  , SortingOutput(..)
+  , sortingOutputSchema
+  , ClarifyingOutput(..)
+  , clarifyingOutputSchema
+  , DecisionSupportOutput(..)
+  , decisionSupportOutputSchema
+  , WindingDownOutput(..)
+  , windingDownOutputSchema
 
-    -- * ACT output
-  , ActOutput(..)
-  , actOutputSchema
+    -- * Schema selection
+  , schemaForMode
 
-    -- * PHOTO ANALYSIS output
+    -- * Photo analysis output
   , PhotoAnalysisOutput(..)
   , photoAnalysisSchema
+
+    -- * Legacy exports (temporary, for compilation)
+  , ActOutput(..)
+  , actOutputSchema
   ) where
 
 import Data.Aeson
@@ -30,191 +38,282 @@ import Data.Text (Text)
 import GHC.Generics (Generic)
 
 import Tidepool.Template (Schema(..))
+import Tidying.State (Mode(..))
 import Tidying.Types
-  ( ItemName(..), Location(..), SpaceFunction(..), ChaosLevel )
+  ( ItemName(..), ChaosLevel )
 
 -- ══════════════════════════════════════════════════════════════
--- EXTRACT OUTPUT (new extraction-first approach)
+-- MODE-SPECIFIC OUTPUT TYPES
 -- ══════════════════════════════════════════════════════════════
 
--- | User intent - what they want to do right now
-data Intent
-  = IntentStart      -- ^ Beginning or describing space
-  | IntentContinue   -- ^ Ready for next item
-  | IntentItem       -- ^ Describing an item
-  | IntentDecided    -- ^ Made a decision about item
-  | IntentHelp       -- ^ Stuck, needs help
-  | IntentStop       -- ^ Done for now
-  deriving (Show, Eq, Generic)
-
-instance FromJSON Intent where
-  parseJSON = withText "Intent" $ \case
-    "start"    -> pure IntentStart
-    "continue" -> pure IntentContinue
-    "item"     -> pure IntentItem
-    "decided"  -> pure IntentDecided
-    "help"     -> pure IntentHelp
-    "stop"     -> pure IntentStop
-    other      -> fail $ "Unknown intent: " <> show other
-
-instance ToJSON Intent where
-  toJSON = \case
-    IntentStart    -> "start"
-    IntentContinue -> "continue"
-    IntentItem     -> "item"
-    IntentDecided  -> "decided"
-    IntentHelp     -> "help"
-    IntentStop     -> "stop"
-
--- | Choice about an item
-data Choice
-  = ChoiceTrash   -- ^ Throw it away
-  | ChoiceKeep    -- ^ Keep it
-  | ChoicePlace   -- ^ Put it somewhere specific
-  | ChoiceUnsure  -- ^ Not sure yet
-  deriving (Show, Eq, Generic)
-
-instance FromJSON Choice where
-  parseJSON = withText "Choice" $ \case
-    "trash"  -> pure ChoiceTrash
-    "keep"   -> pure ChoiceKeep
-    "place"  -> pure ChoicePlace
-    "unsure" -> pure ChoiceUnsure
-    other    -> fail $ "Unknown choice: " <> show other
-
-instance ToJSON Choice where
-  toJSON = \case
-    ChoiceTrash  -> "trash"
-    ChoiceKeep   -> "keep"
-    ChoicePlace  -> "place"
-    ChoiceUnsure -> "unsure"
-
--- | Extraction from user input (replaces OrientOutput)
-data Extract = Extract
-  { exIntent :: Intent
-    -- ^ What user wants to do (required)
-  , exItem   :: Maybe ItemName
-    -- ^ Item name if mentioned
-  , exChoice :: Maybe Choice
-    -- ^ Decision about item if made
-  , exPlace  :: Maybe Location
-    -- ^ Where to put it if choice=place
-  , exFunction :: Maybe SpaceFunction
-    -- ^ What the space is for: "workspace", "bedroom", "creative", etc.
-    -- Extracted when user describes the purpose of their space.
-  , exAnchors :: Maybe [ItemName]
-    -- ^ Anchor items that belong in this space (desk, bed, etc.)
-    -- Extracted when user mentions items that define the space.
-    -- Note: Empty list becomes Nothing (caller should check length for NonEmpty)
+-- | Surveying mode output
+--
+-- Discovers what the space is FOR and what stays.
+data SurveyingOutput = SurveyingOutput
+  { svResponse          :: Text
+    -- ^ Response to user
+  , svDiscoveredFunction :: Maybe Text
+    -- ^ What the space is for (if discovered)
+  , svDiscoveredAnchors  :: Maybe [Text]
+    -- ^ Items that definitely stay (if discovered)
   } deriving (Show, Eq, Generic)
 
-instance FromJSON Extract where
-  parseJSON = withObject "Extract" $ \v -> Extract
-    <$> v .:  "intent"
-    <*> (fmap ItemName <$> v .:? "item")
-    <*> v .:? "choice"
-    <*> (fmap Location <$> v .:? "place")
-    <*> (fmap SpaceFunction <$> v .:? "function")
-    <*> (fmap (map ItemName) <$> v .:? "anchors")
-
-instance ToJSON Extract where
-  toJSON Extract{..} = object $
-    [ "intent" .= exIntent ]
-    <> maybe [] (\(ItemName x) -> ["item" .= x]) exItem
-    <> maybe [] (\x -> ["choice" .= x]) exChoice
-    <> maybe [] (\(Location x) -> ["place" .= x]) exPlace
-    <> maybe [] (\(SpaceFunction x) -> ["function" .= x]) exFunction
-    <> maybe [] (\xs -> ["anchors" .= map (\(ItemName n) -> n) xs]) exAnchors
-
--- | Schema for extraction
-extractSchema :: Schema Extract
-extractSchema = Schema
-  { schemaDescription = "Extract information from user message"
-  , schemaJSON = object
-      [ "type" .= ("object" :: Text)
-      , "additionalProperties" .= False
-      , "properties" .= object
-          [ "intent" .= object
-              [ "type" .= ("string" :: Text)
-              , "enum" .= (["start", "continue", "item", "decided", "help", "stop"] :: [Text])
-              , "description" .= ("start=begin/describe space, continue=next, item=describing something, decided=made choice, help=stuck, stop=done" :: Text)
-              ]
-          , "item" .= object
-              [ "type" .= ("string" :: Text)
-              , "description" .= ("Item name if mentioned" :: Text)
-              ]
-          , "choice" .= object
-              [ "type" .= ("string" :: Text)
-              , "enum" .= (["trash", "keep", "place", "unsure"] :: [Text])
-              , "description" .= ("If decided: what to do with item" :: Text)
-              ]
-          , "place" .= object
-              [ "type" .= ("string" :: Text)
-              , "description" .= ("Where to put it if choice=place" :: Text)
-              ]
-          , "function" .= object
-              [ "type" .= ("string" :: Text)
-              , "description" .= ("What the space is for: workspace, bedroom, creative, storage, living, other" :: Text)
-              ]
-          , "anchors" .= object
-              [ "type" .= ("array" :: Text)
-              , "items" .= object ["type" .= ("string" :: Text)]
-              , "description" .= ("Anchor items that define/belong in the space (desk, bed, etc.)" :: Text)
-              ]
-          ]
-      , "required" .= (["intent"] :: [Text])
-      ]
-  }
-
--- ══════════════════════════════════════════════════════════════
--- ACT OUTPUT
--- ══════════════════════════════════════════════════════════════
-
--- | Output from ACT phase - response to user
-data ActOutput = ActOutput
-  { aoResponse :: Text
-    -- ^ The message to send to user
-  , aoSuggestedSplits :: [Text]
-    -- ^ For split instructions, suggested category names
-    -- Note: This is kept as [Text] for JSON parsing simplicity.
-    -- Caller should convert to NonEmpty CategoryName when creating InstructSplit.
-  } deriving (Show, Eq, Generic)
-
--- | JSON options: aoResponse -> response
-actJsonOptions :: Options
-actJsonOptions = defaultOptions
-  { fieldLabelModifier = camelTo2 '_' . drop 2  -- drop "ao" prefix
-  , omitNothingFields = True
-  }
-
-instance FromJSON ActOutput where
-  parseJSON = withObject "ActOutput" $ \v -> ActOutput
+instance FromJSON SurveyingOutput where
+  parseJSON = withObject "SurveyingOutput" $ \v -> SurveyingOutput
     <$> v .: "response"
-    <*> v .:? "suggested_splits" .!= []  -- Default to empty list
+    <*> v .:? "discovered_function"
+    <*> v .:? "discovered_anchors"
 
-instance ToJSON ActOutput where
-  toJSON = genericToJSON actJsonOptions
+instance ToJSON SurveyingOutput where
+  toJSON SurveyingOutput{..} = object
+    [ "response" .= svResponse
+    , "discovered_function" .= svDiscoveredFunction
+    , "discovered_anchors" .= svDiscoveredAnchors
+    ]
 
-actOutputSchema :: Schema ActOutput
-actOutputSchema = Schema
-  { schemaDescription = "Response to send to user"
+surveyingOutputSchema :: Schema SurveyingOutput
+surveyingOutputSchema = Schema
+  { schemaDescription = "Surveying mode response"
   , schemaJSON = object
       [ "type" .= ("object" :: Text)
       , "additionalProperties" .= False
       , "properties" .= object
           [ "response" .= object
               [ "type" .= ("string" :: Text)
-              , "description" .= ("The message to send to user. Keep it terse and directive." :: Text)
+              , "description" .= ("Response to user. Be curious and orienting." :: Text)
               ]
-          , "suggested_splits" .= object
+          , "discovered_function" .= object
+              [ "type" .= ("string" :: Text)
+              , "description" .= ("What this space is FOR, if user mentioned it (workspace, bedroom, etc.)" :: Text)
+              ]
+          , "discovered_anchors" .= object
               [ "type" .= ("array" :: Text)
               , "items" .= object ["type" .= ("string" :: Text)]
-              , "description" .= ("Category names if suggesting a pile split" :: Text)
+              , "description" .= ("Items that definitely stay in this space, if user mentioned them" :: Text)
               ]
           ]
       , "required" .= (["response"] :: [Text])
       ]
   }
+
+-- | Sorting mode output
+--
+-- Processes items quickly, tracks current item context.
+data SortingOutput = SortingOutput
+  { sortResponse     :: Text
+    -- ^ Response to user (terse, directive)
+  , sortCurrentItem  :: Maybe Text
+    -- ^ Item currently being discussed
+  , sortItemLocation :: Maybe Text
+    -- ^ Where the item is in the photo (spatial context)
+  } deriving (Show, Eq, Generic)
+
+instance FromJSON SortingOutput where
+  parseJSON = withObject "SortingOutput" $ \v -> SortingOutput
+    <$> v .: "response"
+    <*> v .:? "current_item"
+    <*> v .:? "item_location"
+
+instance ToJSON SortingOutput where
+  toJSON SortingOutput{..} = object
+    [ "response" .= sortResponse
+    , "current_item" .= sortCurrentItem
+    , "item_location" .= sortItemLocation
+    ]
+
+sortingOutputSchema :: Schema SortingOutput
+sortingOutputSchema = Schema
+  { schemaDescription = "Sorting mode response"
+  , schemaJSON = object
+      [ "type" .= ("object" :: Text)
+      , "additionalProperties" .= False
+      , "properties" .= object
+          [ "response" .= object
+              [ "type" .= ("string" :: Text)
+              , "description" .= ("Response to user. Be terse and directive - keep them moving." :: Text)
+              ]
+          , "current_item" .= object
+              [ "type" .= ("string" :: Text)
+              , "description" .= ("Item you're discussing (name/description)" :: Text)
+              ]
+          , "item_location" .= object
+              [ "type" .= ("string" :: Text)
+              , "description" .= ("Where item is in the photo (for reference)" :: Text)
+              ]
+          ]
+      , "required" .= (["response"] :: [Text])
+      ]
+  }
+
+-- | Clarifying mode output
+--
+-- Helps user identify an item they can't recognize.
+data ClarifyingOutput = ClarifyingOutput
+  { clResponse      :: Text
+    -- ^ Response to user (patient, descriptive)
+  , clDescribingItem :: Maybe Text
+    -- ^ Item being described
+  , clSpatialRefs    :: Maybe [Text]
+    -- ^ Spatial references ("between the desk leg and wall")
+  , clPhysicalTraits :: Maybe [Text]
+    -- ^ Physical traits ("green", "rectangular", "has wires")
+  } deriving (Show, Eq, Generic)
+
+instance FromJSON ClarifyingOutput where
+  parseJSON = withObject "ClarifyingOutput" $ \v -> ClarifyingOutput
+    <$> v .: "response"
+    <*> v .:? "describing_item"
+    <*> v .:? "spatial_refs"
+    <*> v .:? "physical_traits"
+
+instance ToJSON ClarifyingOutput where
+  toJSON ClarifyingOutput{..} = object
+    [ "response" .= clResponse
+    , "describing_item" .= clDescribingItem
+    , "spatial_refs" .= clSpatialRefs
+    , "physical_traits" .= clPhysicalTraits
+    ]
+
+clarifyingOutputSchema :: Schema ClarifyingOutput
+clarifyingOutputSchema = Schema
+  { schemaDescription = "Clarifying mode response"
+  , schemaJSON = object
+      [ "type" .= ("object" :: Text)
+      , "additionalProperties" .= False
+      , "properties" .= object
+          [ "response" .= object
+              [ "type" .= ("string" :: Text)
+              , "description" .= ("Response to user. Be patient and descriptive - help them identify the item." :: Text)
+              ]
+          , "describing_item" .= object
+              [ "type" .= ("string" :: Text)
+              , "description" .= ("What item you're describing" :: Text)
+              ]
+          , "spatial_refs" .= object
+              [ "type" .= ("array" :: Text)
+              , "items" .= object ["type" .= ("string" :: Text)]
+              , "description" .= ("Spatial references to help locate ('next to the desk leg', 'under the papers')" :: Text)
+              ]
+          , "physical_traits" .= object
+              [ "type" .= ("array" :: Text)
+              , "items" .= object ["type" .= ("string" :: Text)]
+              , "description" .= ("Physical traits ('green', 'rectangular', 'has a cord')" :: Text)
+              ]
+          ]
+      , "required" .= (["response"] :: [Text])
+      ]
+  }
+
+-- | Decision support mode output
+--
+-- Helps user decide on a stuck item.
+data DecisionSupportOutput = DecisionSupportOutput
+  { dsResponse        :: Text
+    -- ^ Response to user (gentle, reframing)
+  , dsStuckItem       :: Maybe Text
+    -- ^ Item they're stuck on
+  , dsReframeQuestion :: Maybe Text
+    -- ^ Reframed question to help decide
+  } deriving (Show, Eq, Generic)
+
+instance FromJSON DecisionSupportOutput where
+  parseJSON = withObject "DecisionSupportOutput" $ \v -> DecisionSupportOutput
+    <$> v .: "response"
+    <*> v .:? "stuck_item"
+    <*> v .:? "reframe_question"
+
+instance ToJSON DecisionSupportOutput where
+  toJSON DecisionSupportOutput{..} = object
+    [ "response" .= dsResponse
+    , "stuck_item" .= dsStuckItem
+    , "reframe_question" .= dsReframeQuestion
+    ]
+
+decisionSupportOutputSchema :: Schema DecisionSupportOutput
+decisionSupportOutputSchema = Schema
+  { schemaDescription = "Decision support mode response"
+  , schemaJSON = object
+      [ "type" .= ("object" :: Text)
+      , "additionalProperties" .= False
+      , "properties" .= object
+          [ "response" .= object
+              [ "type" .= ("string" :: Text)
+              , "description" .= ("Response to user. Be gentle and reframe around the space's function." :: Text)
+              ]
+          , "stuck_item" .= object
+              [ "type" .= ("string" :: Text)
+              , "description" .= ("Item they're stuck on" :: Text)
+              ]
+          , "reframe_question" .= object
+              [ "type" .= ("string" :: Text)
+              , "description" .= ("Reframed question: 'Does this help with [function]?'" :: Text)
+              ]
+          ]
+      , "required" .= (["response"] :: [Text])
+      ]
+  }
+
+-- | Winding down mode output
+--
+-- Wraps up the session warmly.
+data WindingDownOutput = WindingDownOutput
+  { wdoResponse       :: Text
+    -- ^ Response to user (warm, factual)
+  , wdoSessionSummary :: Maybe Text
+    -- ^ Summary of what was accomplished
+  , wdoNextTime       :: Maybe [Text]
+    -- ^ Suggestions for next session
+  } deriving (Show, Eq, Generic)
+
+instance FromJSON WindingDownOutput where
+  parseJSON = withObject "WindingDownOutput" $ \v -> WindingDownOutput
+    <$> v .: "response"
+    <*> v .:? "session_summary"
+    <*> v .:? "next_time"
+
+instance ToJSON WindingDownOutput where
+  toJSON WindingDownOutput{..} = object
+    [ "response" .= wdoResponse
+    , "session_summary" .= wdoSessionSummary
+    , "next_time" .= wdoNextTime
+    ]
+
+windingDownOutputSchema :: Schema WindingDownOutput
+windingDownOutputSchema = Schema
+  { schemaDescription = "Winding down mode response"
+  , schemaJSON = object
+      [ "type" .= ("object" :: Text)
+      , "additionalProperties" .= False
+      , "properties" .= object
+          [ "response" .= object
+              [ "type" .= ("string" :: Text)
+              , "description" .= ("Response to user. Be warm and factual - acknowledge progress." :: Text)
+              ]
+          , "session_summary" .= object
+              [ "type" .= ("string" :: Text)
+              , "description" .= ("Brief summary of what was accomplished" :: Text)
+              ]
+          , "next_time" .= object
+              [ "type" .= ("array" :: Text)
+              , "items" .= object ["type" .= ("string" :: Text)]
+              , "description" .= ("Suggestions for next session (no pressure)" :: Text)
+              ]
+          ]
+      , "required" .= (["response"] :: [Text])
+      ]
+  }
+
+-- ══════════════════════════════════════════════════════════════
+-- SCHEMA SELECTION
+-- ══════════════════════════════════════════════════════════════
+
+-- | Select output schema based on mode
+schemaForMode :: Mode -> Value
+schemaForMode (Surveying _)       = surveyingOutputSchema.schemaJSON
+schemaForMode (Sorting _)         = sortingOutputSchema.schemaJSON
+schemaForMode (Clarifying _)      = clarifyingOutputSchema.schemaJSON
+schemaForMode (DecisionSupport _) = decisionSupportOutputSchema.schemaJSON
+schemaForMode (WindingDown _)     = windingDownOutputSchema.schemaJSON
 
 -- ══════════════════════════════════════════════════════════════
 -- PHOTO ANALYSIS OUTPUT
@@ -233,13 +332,6 @@ data PhotoAnalysisOutput = PhotoAnalysisOutput
   , paoFirstTarget :: Maybe ItemName
     -- ^ Best first thing to address
   } deriving (Show, Eq, Generic)
-
--- | JSON options: paoRoomType -> room_type
-photoAnalysisJsonOptions :: Options
-photoAnalysisJsonOptions = defaultOptions
-  { fieldLabelModifier = camelTo2 '_' . drop 3  -- drop "pao" prefix
-  , omitNothingFields = True
-  }
 
 instance FromJSON PhotoAnalysisOutput where
   parseJSON = withObject "PhotoAnalysisOutput" $ \v -> PhotoAnalysisOutput
@@ -290,5 +382,52 @@ photoAnalysisSchema = Schema
               ]
           ]
       , "required" .= (["room_type", "chaos_level", "visible_items"] :: [Text])
+      ]
+  }
+
+-- ══════════════════════════════════════════════════════════════
+-- LEGACY (temporary, for compilation)
+-- ══════════════════════════════════════════════════════════════
+
+-- | Output from ACT phase - response to user (DEPRECATED)
+--
+-- Kept for compilation during refactor. Will be removed.
+data ActOutput = ActOutput
+  { aoResponse :: Text
+  , aoSuggestedSplits :: [Text]
+  } deriving (Show, Eq, Generic)
+
+actJsonOptions :: Options
+actJsonOptions = defaultOptions
+  { fieldLabelModifier = camelTo2 '_' . drop 2
+  , omitNothingFields = True
+  }
+
+instance FromJSON ActOutput where
+  parseJSON = withObject "ActOutput" $ \v -> ActOutput
+    <$> v .: "response"
+    <*> v .:? "suggested_splits" .!= []
+
+instance ToJSON ActOutput where
+  toJSON = genericToJSON actJsonOptions
+
+actOutputSchema :: Schema ActOutput
+actOutputSchema = Schema
+  { schemaDescription = "Response to send to user"
+  , schemaJSON = object
+      [ "type" .= ("object" :: Text)
+      , "additionalProperties" .= False
+      , "properties" .= object
+          [ "response" .= object
+              [ "type" .= ("string" :: Text)
+              , "description" .= ("The message to send to user." :: Text)
+              ]
+          , "suggested_splits" .= object
+              [ "type" .= ("array" :: Text)
+              , "items" .= object ["type" .= ("string" :: Text)]
+              , "description" .= ("Category names if suggesting a pile split" :: Text)
+              ]
+          ]
+      , "required" .= (["response"] :: [Text])
       ]
   }

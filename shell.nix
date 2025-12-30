@@ -83,8 +83,6 @@ pkgs.mkShell {
     echo "  cabal run tidepool-dm-gui      - Run DM agent GUI"
     echo "  claude                         - Start Claude Code"
     echo ""
-    echo "Environment:"
-    echo "  ANTHROPIC_API_KEY must be set for LLM calls"
     echo "───────────────────────────────────────────────────────────"
   '';
 }

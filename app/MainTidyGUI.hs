@@ -14,7 +14,7 @@ module Main where
 
 import Control.Concurrent (forkIO)
 
-import Tidying.State (newSession, SessionState, Phase, phase)
+import Tidying.State (newSession, SessionState(..), Mode)
 import Tidying.GUI.App (tidyingGUISetup, defaultTidyingGUIConfig)
 import Tidying.GUI.Runner (tidyingGameLoopWithGUI)
 import Tidepool.GUI.Core (newGUIBridge)
@@ -24,6 +24,7 @@ main :: IO ()
 main = do
   putStrLn "Starting Tidying GUI..."
   putStrLn "Open http://localhost:8024 in your browser"
+  putStrLn "(Also accessible from other machines on the network)"
   putStrLn "(Make sure ANTHROPIC_API_KEY is set)"
 
   -- Create the bridge with initial session state
@@ -32,7 +33,6 @@ main = do
   -- Spawn agent loop ONCE (not per-connection!)
   -- The agent thread persists across browser reconnects
   _ <- forkIO $ tidyingGameLoopWithGUI bridge
-  putStrLn "Tidepool GUI running at http://localhost:8024"
 
   -- Start the server
   let config = defaultServerConfig
@@ -42,8 +42,8 @@ main = do
 
   startServer config $ \window -> do
     -- Set up GUI for this connection (can happen multiple times)
-    tidyingGUISetup defaultTidyingGUIConfig bridge getPhase window
+    tidyingGUISetup defaultTidyingGUIConfig bridge getMode window
 
--- | Get phase from session state (phase is now a derived function)
-getPhase :: SessionState -> Phase
-getPhase = phase
+-- | Get mode from session state
+getMode :: SessionState -> Mode
+getMode st = st.mode

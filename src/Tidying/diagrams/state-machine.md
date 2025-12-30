@@ -1,157 +1,156 @@
-# State Machine
+# Mode State Machine
 
-Phase states, transitions, and PhaseData types for the Tidying agent.
+Mode states, transitions, and mode-specific data for the Tidying agent.
 
-## Phase State Machine
+## Mode State Machine
+
+The LLM navigates between modes via **transition tools**. Each mode has a persona, tool set, and output schema.
 
 ```mermaid
 stateDiagram-v2
     [*] --> Surveying: newSession
 
-    Surveying --> Surveying: gathering function/anchors
-    Surveying --> Sorting: hasFunction (+ hasAnchors OR overwhelmed)
+    Surveying --> Sorting: begin_sorting
 
-    Sorting --> Sorting: processing items
-    Sorting --> Splitting: unsureCount >= 5
-    Sorting --> DecisionSupport: item stuck
-    Sorting --> [*]: IntentStop → Summary
+    Sorting --> Sorting: (normal turns)
+    Sorting --> Clarifying: need_to_clarify
+    Sorting --> DecisionSupport: user_seems_stuck
+    Sorting --> WindingDown: time_to_wrap
 
-    Splitting --> Sorting: split confirmed
+    Clarifying --> Sorting: resume_sorting
+    Clarifying --> Sorting: skip_item
 
-    Refining --> Refining: processing category items
-    Refining --> DecisionSupport: item stuck
-    Refining --> Sorting: category done, more unsure
-    Refining --> [*]: all categories done
+    DecisionSupport --> Sorting: resume_sorting
 
-    DecisionSupport --> Sorting: decision made (typical)
-    DecisionSupport --> Refining: decision made (if came from Refining)
+    WindingDown --> [*]: end_session
 ```
 
-## PhaseData Types
+## Mode = Sum Type with Data
 
-The `ActiveState` record factors out common fields shared by all phases except Surveying:
+Mode is NOT an enum - each mode carries its own data:
 
 ```mermaid
 classDiagram
-    class ActiveState {
-        asFunction: SpaceFunction
-        asAnchors: [ItemName]
+    class Mode {
+        <<sum type>>
     }
 
     class SurveyingData {
-        sdGatheredFunction: Maybe SpaceFunction
-        sdGatheredAnchors: [ItemName]
+        (empty - discoveries go to session)
     }
 
     class SortingData {
-        soActive: ActiveState
-        soCurrentItem: Maybe ItemName
+        sdCurrentItem: Maybe Text
+        sdItemLocation: Maybe Text
     }
 
-    class SplittingData {
-        spActive: ActiveState
-        spCategories: NonEmpty CategoryName
-    }
-
-    class RefiningData {
-        rfActive: ActiveState
-        rfEmergentCats: Map CategoryName [ItemName]
-        rfCurrentCategory: CategoryName
-        rfCurrentItem: Maybe ItemName
+    class ClarifyingData {
+        cdItem: Text
+        cdPhotoContext: Text
+        cdReason: Text
     }
 
     class DecisionSupportData {
-        dsActive: ActiveState
-        dsStuckItem: ItemName
-        dsReturnPhase: Phase
+        dsdStuckItem: Text
     }
 
-    SortingData --> ActiveState
-    SplittingData --> ActiveState
-    RefiningData --> ActiveState
-    DecisionSupportData --> ActiveState
+    class WindingDownData {
+        (summary fields)
+    }
+
+    Mode <|-- SurveyingData : Surveying
+    Mode <|-- SortingData : Sorting
+    Mode <|-- ClarifyingData : Clarifying
+    Mode <|-- DecisionSupportData : DecisionSupport
+    Mode <|-- WindingDownData : WindingDown
 ```
 
-## Transition Triggers
+## Mode Personas
 
-| From | To | Trigger |
-|------|-----|---------|
-| Surveying | Surveying | AskFunction, AskAnchors |
-| Surveying | Sorting | Buried chaos |
-| Surveying | Sorting | hasBlockedFunction + hasFunction |
-| Surveying | Sorting | overwhelmed signal + hasFunction |
-| Surveying | Sorting | hasFunction + hasAnchors |
-| Sorting | Sorting | InstructTrash, InstructPlace, InstructUnsure, InstructNext |
-| Sorting | Splitting | ChoiceUnsure + unsureCount >= 5 |
-| Sorting | DecisionSupport | IntentHelp or Stuck |
-| Splitting | Sorting | Split confirmed |
-| Refining | Refining | Processing category |
-| Refining | DecisionSupport | IntentHelp |
-| DecisionSupport | [return] | Decision made |
-| Any | Summary | IntentStop |
+| Mode | Persona | Voice | Goal |
+|------|---------|-------|------|
+| Surveying | Curious, orienting | "What is this space? What stays?" | Discover function + anchors |
+| Sorting | Terse, directive | "Trash. Next." | Keep momentum, process items |
+| Clarifying | Patient, descriptive | "The green device by the desk leg..." | Help user identify item |
+| DecisionSupport | Gentle, reframing | "Does this help with [function]?" | Unstick without pressure |
+| WindingDown | Warm, factual | "Good stopping point." | Acknowledge progress, wrap up |
 
-## Action Types
+## Transition Tools
+
+Transition tools take arguments that become the **new mode's initial data**:
+
+| Tool | From | To | Arguments → Data |
+|------|------|-----|------------------|
+| `begin_sorting` | Surveying | Sorting | {} → SortingData {} |
+| `need_to_clarify` | Sorting | Clarifying | {item, photo_context, reason} → ClarifyingData |
+| `user_seems_stuck` | Sorting | DecisionSupport | {stuck_item} → DecisionSupportData |
+| `time_to_wrap` | Sorting | WindingDown | {} → WindingDownData {} |
+| `resume_sorting` | Clarifying | Sorting | {} → SortingData {} |
+| `resume_sorting` | DecisionSupport | Sorting | {} → SortingData {} |
+| `skip_item` | Clarifying | Sorting | {} → SortingData {} |
+| `end_session` | WindingDown | (end) | {} |
+
+## Transition Mechanism
+
+When LLM calls a transition tool:
 
 ```mermaid
-mindmap
-  root((Action))
-    Questions
-      AskFunction
-      AskAnchors
-      AskWhatIsIt
-      AskWhereLive
-      AskItemDecision ItemName
-      EnergyCheck
-    Instructions
-      FirstInstruction
-      InstructTrash
-      InstructPlace Location
-      InstructUnsure
-      InstructNext
-      InstructBag
-    Splitting
-      InstructSplit NonEmpty CategoryName
-    DecisionSupport
-      DecisionAid ItemName
-    Pivoting
-      PivotAway AnxietyTrigger Location
-    Completion
-      AckProgress Text
-      Summary
+sequenceDiagram
+    participant LLM
+    participant Tool
+    participant State
+    participant Loop
+
+    LLM->>Tool: need_to_clarify(item, context, reason)
+    Tool->>State: mode = Clarifying(ClarifyingData {...})
+    Tool->>Loop: return ToolBreak("[Continue as: Clarifying]")
+    Loop->>Loop: End current turn
+    Loop->>Loop: Inject synthetic user message
+    Loop->>LLM: New turn with Clarifying template + tools
 ```
 
-## Response Generation
+## Mode-Specific Tool Sets
 
-All responses go through LLM for natural, context-aware conversation.
-No canned responses - the Action just informs the system prompt.
+Each mode only has access to relevant tools:
 
-Key actions that use tools:
-- `AskFunction` → calls `ask_space_function` tool for UI choices
-- `AskItemDecision` → calls `propose_disposition` tool with thoughtful options
-- `FirstInstruction` → calls `propose_disposition` for first item
+| Mode | Available Tools |
+|------|-----------------|
+| Surveying | `begin_sorting` |
+| Sorting | `propose_disposition`, `need_to_clarify`, `user_seems_stuck`, `time_to_wrap` |
+| Clarifying | `resume_sorting`, `skip_item` |
+| DecisionSupport | `resume_sorting` |
+| WindingDown | `end_session` |
 
-## Split Suggestion Patterns
+## Mode-Specific Output Schemas
 
-When unsure pile >= 5, `suggestSplit` pattern-matches items to suggest categories:
+Each mode has its own structured output that updates mode data:
 
-| Pattern | Suggested Categories |
-|---------|---------------------|
-| `cable`, `cord` | `cables`, `other` |
-| `paper`, `document` | `papers`, `other` |
-| `book` | `books`, `other` |
-| `clothes`, `shirt` | `clothes`, `other` |
-| (default) | `keep-maybe`, `donate-maybe` |
+| Mode | Output Fields | Updates |
+|------|--------------|---------|
+| Surveying | `{response, discovered_function?, discovered_anchors?}` | Session-level fields |
+| Sorting | `{response, current_item?, item_location?}` | SortingData |
+| Clarifying | `{response, describing_item?, spatial_refs?, physical_traits?}` | ClarifyingData |
+| DecisionSupport | `{response, stuck_item?, reframe_question?}` | DecisionSupportData |
+| WindingDown | `{response, session_summary?, next_time?}` | WindingDownData |
 
-## Constants
+## Session State
 
-| Constant | Value | Location |
-|----------|-------|----------|
-| `unsureThreshold` | 5 items | `Decide.hs` |
-| Question handler timeout | 5 minutes | `GUI/Runner.hs` |
-| Polling interval | 100ms | `GUI/App.hs` |
+Mode data is ephemeral; session-level data persists across modes:
+
+```haskell
+data SessionState = SessionState
+  { mode :: Mode              -- Sum type with mode-specific data
+  , piles :: Piles            -- belongs/out/unsure
+  , itemsProcessed :: Int     -- Progress count
+  , sessionStart :: Maybe UTCTime
+  -- Discovered in Surveying, used everywhere:
+  , spaceFunction :: Maybe SpaceFunction
+  , anchors :: [ItemName]
+  }
+```
 
 ## Key Files
 
-- `State.hs` - Phase, PhaseData, ActiveState, SessionState
-- `Decide.hs` - decideFromExtract, suggestSplit
-- `Action.hs` - Action ADT
+- `State.hs` - Mode sum type, mode data types, SessionState
+- `Tools.hs` - Transition tools, `toolsForMode`
+- `Loop.hs` - ToolBreak handling, mode transitions

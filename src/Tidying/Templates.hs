@@ -3,395 +3,258 @@
 
 -- | Tidying Templates
 --
--- Renders system prompts based on phase and context.
--- Re-exports schemas from Output module.
+-- Mode-specific system prompts. Each mode has its own persona and guidance.
 --
--- = Design
+-- = Modes
 --
--- Unlike the DM agent which has complex mood-based templates,
--- Tidying uses a simpler approach:
---
--- 1. EXTRACT prompt: extract structured facts from user input
--- 2. ACT prompt: generate the appropriate response
---
--- Most responses are canned (don't need LLM), so the templates
--- are only used for:
--- - Photo analysis (needs vision)
--- - Extraction (needs semantic understanding)
--- - Complex actions: first instruction, decision aid, summary, etc.
+-- * Surveying - Curious, orienting. Discover function + anchors.
+-- * Sorting - Terse, directive. Keep momentum, process items.
+-- * Clarifying - Patient, descriptive. Help identify items.
+-- * DecisionSupport - Gentle, reframing. Help with stuck items.
+-- * WindingDown - Warm, factual. Wrap up session.
 
 module Tidying.Templates
-  ( -- * Extract prompt
-    renderExtractPrompt
-  , extractSchema
+  ( -- * Template selection
+    templateForMode
 
-    -- * System prompts
+    -- * Legacy exports (for compilation)
   , renderActPrompt
   , renderPhotoAnalysisPrompt
-
-    -- * Schemas (re-exported)
   , actOutputSchema
-
-    -- * Phase-specific templates (for future TypedTemplate)
-  , surveyingGuidance
-  , sortingGuidance
-  , splittingGuidance
-  , refiningGuidance
-  , decisionSupportGuidance
   ) where
 
-import Data.List.NonEmpty (NonEmpty)
-import Data.List.NonEmpty qualified as NE
 import Data.Text (Text)
 import Data.Text qualified as T
 
 import Tidying.State
+  ( Mode(..)
+  , SurveyingData(..), SortingData(..), ClarifyingData(..)
+  , DecisionSupportData(..), WindingDownData(..)
+  )
 import Tidying.Context (TidyingContext(..), PilesSummary(..), PhotoAnalysis(..))
-import Tidying.Action
-import Tidying.Output (actOutputSchema, extractSchema)
-import Tidying.Types (ItemName(..), Location(..), AnxietyTrigger(..), CategoryName(..), chaosLevelToText)
+import Tidying.Output (actOutputSchema)
+import Tidying.Types (SpaceFunction(..), chaosLevelToText)
 
 -- ══════════════════════════════════════════════════════════════
--- EXTRACT PROMPT (new extraction-first approach)
+-- TEMPLATE SELECTION
 -- ══════════════════════════════════════════════════════════════
 
--- | Render the EXTRACT system prompt
--- LLM extracts facts from user input; Haskell decides what to do
-renderExtractPrompt :: Text
-renderExtractPrompt = T.unlines
-  [ "Extract information from user message about tidying."
-  , ""
-  , "# Function extraction (what space is FOR):"
-  , "- \"work\" → {\"intent\":\"start\",\"function\":\"workspace\"}"
-  , "- \"coding\" → {\"intent\":\"start\",\"function\":\"workspace\"}"
-  , "- \"gaming\" → {\"intent\":\"start\",\"function\":\"gaming\"}"
-  , "- \"work and gaming\" → {\"intent\":\"start\",\"function\":\"workspace\"}"
-  , "- \"art stuff\" → {\"intent\":\"start\",\"function\":\"creative\"}"
-  , "- \"sleep\" → {\"intent\":\"start\",\"function\":\"bedroom\"}"
-  , "- \"storage\" → {\"intent\":\"start\",\"function\":\"storage\"}"
-  , ""
-  , "# Starting/describing space:"
-  , "- \"desk messy\" → {\"intent\":\"start\"}"
-  , "- \"my computer area\" → {\"intent\":\"start\"}"
-  , ""
-  , "# Item handling:"
-  , "- \"old magazine\" → {\"intent\":\"item\",\"item\":\"old magazine\"}"
-  , "- \"broken headphones\" → {\"intent\":\"item\",\"item\":\"broken headphones\"}"
-  , "- \"trash it\" → {\"intent\":\"decided\",\"choice\":\"trash\"}"
-  , "- \"keep\" → {\"intent\":\"decided\",\"choice\":\"keep\"}"
-  , "- \"drawer\" → {\"intent\":\"decided\",\"choice\":\"place\",\"place\":\"drawer\"}"
-  , "- \"not sure\" → {\"intent\":\"help\"}"
-  , "- \"next\" → {\"intent\":\"continue\"}"
-  , "- \"done\" → {\"intent\":\"stop\"}"
-  , ""
-  , "Rules:"
-  , "- If they say what space is FOR (work, gaming, art, etc) → extract function"
-  , "- If they describe a space/area → intent=start"
-  , "- If they name an object → intent=item"
-  , "- If they say what to do with it → intent=decided"
-  , "- If done/stop/tired → intent=stop"
-  , ""
-  , "Output JSON only."
-  ]
-
--- ══════════════════════════════════════════════════════════════
--- PHASE-SPECIFIC GUIDANCE (for templates)
--- ══════════════════════════════════════════════════════════════
-
-surveyingGuidance :: Text
-surveyingGuidance = T.unlines
-  [ "# Surveying Phase"
-  , ""
-  , "We're establishing the space. Key questions:"
-  , "1. What is this space FOR? (function)"
-  , "2. What definitely STAYS? (anchors)"
-  , ""
-  , "IMPORTANT: If user describes the space, EXTRACT THE FUNCTION."
-  , ""
-  , "Examples of function extraction:"
-  , "- 'it's my computer desk' → function_extracted: 'computer work'"
-  , "- 'home office for design' → function_extracted: 'design work'"
-  , "- 'this is where I sleep' → function_extracted: 'sleeping'"
-  , "- 'storage closet' → function_extracted: 'storage'"
-  , ""
-  , "When you extract function, set situation to 'action_done' (they answered)."
-  , "Only use 'need_function' if they gave NO information about what the space is for."
-  , ""
-  , "If they seem overwhelmed ('idk', 'too much'), situation is 'overwhelmed'."
-  ]
-
-sortingGuidance :: Text
-sortingGuidance = T.unlines
-  [ "# Sorting Phase"
-  , ""
-  , "Main loop: user picks up items, we classify."
-  , ""
-  , "Item classifications:"
-  , "- Trash/donate → 'item_trash'"
-  , "- Has a clear home → 'item_belongs' (include location)"
-  , "- Not sure yet → 'item_unsure'"
-  , "- Need help deciding → 'item_stuck'"
-  , ""
-  , "Other situations:"
-  , "- Just completed an action → 'action_done'"
-  , "- Unsure pile growing large (5+) → 'unsure_growing'"
-  , "- Main pile done → 'main_done'"
-  ]
-
-splittingGuidance :: Text
-splittingGuidance = T.unlines
-  [ "# Splitting Phase"
-  , ""
-  , "User is sorting their unsure pile into categories."
-  , "Listen for what categories they're creating."
-  , ""
-  , "When they report progress → 'action_done'"
-  ]
-
-refiningGuidance :: Text
-refiningGuidance = T.unlines
-  [ "# Refining Phase"
-  , ""
-  , "Working through a specific sub-category."
-  , "Same item classification as Sorting."
-  ]
-
-decisionSupportGuidance :: Text
-decisionSupportGuidance = T.unlines
-  [ "# Decision Support Phase"
-  , ""
-  , "Helping user decide on a stuck item."
-  , "Listen for:"
-  , "- They made a decision → classify item"
-  , "- Still stuck → 'item_stuck'"
-  , "- Want to defer → 'item_unsure'"
-  ]
-
--- ══════════════════════════════════════════════════════════════
--- ACT PROMPT
--- ══════════════════════════════════════════════════════════════
-
--- | Render the ACT system prompt for actions that need LLM
--- Only called for actions that aren't canned responses
-renderActPrompt :: TidyingContext -> Action -> Text
-renderActPrompt ctx action = T.unlines
-  [ "You are a tidying coach giving terse, directive guidance."
-  , ""
-  , "# Available Tools"
-  , ""
-  , "You have access to these tools for interacting with the user:"
-  , ""
-  , "- propose_disposition: Propose where an item should go."
-  , "  Call with item description and 2-4 ranked choices (best first)."
-  , "  User taps to confirm. After confirmation, continue to next item."
-  , "  Example: propose_disposition(\"old magazine\", [\"trash\", \"recycle\", \"keep\"])"
-  , ""
-  , "- ask_space_function: Ask what the space is FOR."
-  , "  Use in surveying phase to establish context."
-  , ""
-  , "- confirm_done: Confirm user wants to end session."
-  , "  Use when they say \"done\" or \"stop\"."
-  , ""
-  , "IMPORTANT: Use propose_disposition for EVERY item you identify."
-  , "Don't just describe items - propose dispositions!"
-  , ""
-  , "# Style"
-  , ""
-  , "- ONE instruction at a time"
-  , "- Under 20 words"
-  , "- Directive, not suggestive (\"Do X\" not \"Maybe try X\")"
-  , "- No praise, no filler"
-  , "- Goal: keep them moving"
+-- | Select and render system prompt for current mode
+--
+-- The prompt includes:
+-- 1. Mode-specific persona and guidance
+-- 2. Available tools for this mode
+-- 3. Current context (function, piles, photo analysis)
+-- 4. Mode-specific data from the sum type
+templateForMode :: Mode -> TidyingContext -> Text
+templateForMode mode ctx = T.unlines
+  [ modePersona mode
   , ""
   , "# Context"
   , ""
-  , "Function of space: " <> maybe "(unknown)" id ctx.tcFunction
-  , "Items processed: " <> T.pack (show ctx.tcItemsProcessed)
-  , case ctx.tcPhotoAnalysis of
-      Nothing -> ""
-      Just pa -> T.unlines
-        [ "Photo shows: " <> chaosLevelToText pa.paChaosLevel <> " " <> pa.paRoomType
-        , "Visible items: " <> T.intercalate ", " pa.paVisibleItems
-        , maybe "" ("First target: " <>) pa.paFirstTarget
-        ]
+  , contextSection ctx
   , ""
-  , actionGuidance ctx action
+  , modeGuidance mode
   , ""
   , "Output your response as JSON with 'response' field."
   ]
 
--- | Action-specific guidance (takes context for DecisionAid)
-actionGuidance :: TidyingContext -> Action -> Text
-actionGuidance ctx action = case action of
-  AskFunction -> T.unlines
-    [ "# Ask Space Function"
-    , ""
-    , "We need to know what this space is FOR."
-    , ""
-    , "Call ask_space_function with context-specific choices."
-    , "Base the options on what they told you (desk → work/gaming/art)."
-    , ""
-    , "Example for 'desk messy':"
-    , "  prompt: 'What do you use this desk for?'"
-    , "  choices: [{label: 'Work - computer stuff', value: 'workspace'},"
-    , "            {label: 'Gaming', value: 'gaming'},"
-    , "            {label: 'Art/crafts', value: 'creative'}]"
-    ]
-
-  AskAnchors -> T.unlines
-    [ "# Ask About Anchors"
-    , ""
-    , "What definitely STAYS in this space?"
-    , "Ask briefly what items belong here no matter what."
-    , ""
-    , "Example: \"What definitely stays? The desk, the computer...\""
-    ]
-
-  FirstInstruction -> T.unlines
-    [ "# First Instruction"
-    , ""
-    , "Get them moving by proposing what to do with visible items."
-    , case ctx.tcPhotoAnalysis of
-        Just pa -> T.unlines
-          [ "Photo shows items: " <> T.intercalate ", " pa.paVisibleItems
-          , "Start with: " <> maybe "the most obvious item" id pa.paFirstTarget
-          , ""
-          , "Call propose_disposition for the first obvious item."
-          , "After they confirm, continue to the next item."
-          ]
-        Nothing -> T.unlines
-          [ "No photo - ask them what they see."
-          , "Example: \"Grab one thing off the chair. What is it?\""
-          ]
-    ]
-
-  InstructSplit cats -> T.unlines
-    [ "# Split Instruction"
-    , ""
-    , "Their unsure pile is growing. Time to split it."
-    , "Suggest 2-3 natural categories based on what's there."
-    , ""
-    , "Current unsure items suggest these categories: " <> T.intercalate ", " (map (\(CategoryName c) -> c) (NE.toList cats))
-    , ""
-    , "Example: \"Pause. Split your unsure pile: cables in one spot, papers in another.\""
-    ]
-
-  DecisionAid (ItemName item) -> T.unlines
-    [ "# Decision Aid"
-    , ""
-    , "User is stuck on: " <> item
-    , "Function of space: " <> maybe "unknown" id ctx.tcFunction
-    , ""
-    , "Reframe around function. Ask one clarifying question."
-    , ""
-    , "Example: \"This space is for design work. Does the sketchbook help with that?\""
-    ]
-
-  PivotAway (AnxietyTrigger trigger) (Location alt) -> T.unlines
-    [ "# Pivot Away"
-    , ""
-    , "User expressed anxiety about: " <> trigger
-    , "Pivot to something else: " <> alt
-    , ""
-    , "Acknowledge briefly, then redirect."
-    , ""
-    , "Example: \"Boxes stay closed for now. Let's do the desk instead.\""
-    ]
-
-  AckProgress _ -> T.unlines
-    [ "# Acknowledge Progress"
-    , ""
-    , "Brief acknowledgment, then point to what's next."
-    , "Don't overpraise. Stay factual."
-    , ""
-    , "Example: \"Desk clear. Let's hit the unsure pile.\""
-    ]
-
-  Summary -> T.unlines
-    [ "# Session Summary"
-    , ""
-    , "Wrap up the session."
-    , "- What's now usable"
-    , "- Brief acknowledgment (not excessive)"
-    , "- What's left (no pressure)"
-    , ""
-    , "Under 25 words. Factual."
-    , ""
-    , "Example: \"Chair and desk usable. Nice progress. Papers are for next time.\""
-    ]
-
-  AskWhatIsIt -> T.unlines
-    [ "# Ask What It Is"
-    , ""
-    , "User picked something up. Find out what it is."
-    , "Be brief and curious."
-    ]
-
-  AskWhereLive -> T.unlines
-    [ "# Ask Where It Lives"
-    , ""
-    , "User has an item that belongs somewhere."
-    , "Help them figure out where. Use propose_disposition if you have context."
-    ]
-
-  AskItemDecision item -> T.unlines
-    [ "# Item Decision"
-    , ""
-    , "User mentioned: " <> (\(ItemName n) -> n) item
-    , ""
-    , "IMPORTANT: Use propose_disposition tool to offer choices."
-    , "Consider any context they gave (sentimental, broken, etc)."
-    , "Make the options thoughtful, not just 'trash/keep/unsure'."
-    ]
-
-  InstructTrash -> T.unlines
-    [ "# Trash It"
-    , ""
-    , "Item is trash. Confirm briefly and keep momentum."
-    , "Example: \"Toss it. What's next?\""
-    ]
-
-  InstructPlace loc -> T.unlines
-    [ "# Place It"
-    , ""
-    , "Item goes to: " <> (\(Location l) -> l) loc
-    , "Confirm the location and move on."
-    ]
-
-  InstructUnsure -> T.unlines
-    [ "# Unsure Pile"
-    , ""
-    , "They're not sure about this one. That's fine."
-    , "Direct them to set it aside and keep going."
-    ]
-
-  InstructNext -> T.unlines
-    [ "# Next Item"
-    , ""
-    , "Keep the momentum. Ask what's next."
-    , "Be brief."
-    ]
-
-  InstructBag -> T.unlines
-    [ "# Bag the Trash"
-    , ""
-    , "Trash pile is getting big. Time to bag it."
-    , "Quick directive."
-    ]
-
-  EnergyCheck -> T.unlines
-    [ "# Energy Check"
-    , ""
-    , "Check if they want to continue or stop."
-    , "No pressure either way."
-    ]
-
 -- ══════════════════════════════════════════════════════════════
--- PHOTO ANALYSIS PROMPT
+-- MODE PERSONAS
 -- ══════════════════════════════════════════════════════════════
 
--- | Prompt for analyzing photos (vision)
--- Returns description of what's visible
+modePersona :: Mode -> Text
+modePersona (Surveying _) = T.unlines
+  [ "You are a tidying coach helping someone understand their space."
+  , ""
+  , "Your persona: CURIOUS and ORIENTING."
+  , "Voice: \"What is this space? What stays?\""
+  , ""
+  , "Goal: Discover what the space is FOR and what definitely stays."
+  ]
+
+modePersona (Sorting _) = T.unlines
+  [ "You are a tidying coach helping someone sort their items."
+  , ""
+  , "Your persona: TERSE and DIRECTIVE."
+  , "Voice: \"Trash. Next.\""
+  , ""
+  , "Goal: Keep momentum. Process items quickly."
+  , "ONE instruction at a time. Under 20 words."
+  , "Don't praise. Don't explain. Just move."
+  ]
+
+modePersona (Clarifying cd) = T.unlines
+  [ "You are a tidying coach helping someone identify an item."
+  , ""
+  , "Your persona: PATIENT and DESCRIPTIVE."
+  , "Voice: \"The green device by the desk leg...\""
+  , ""
+  , "Goal: Help them find the item using spatial refs and physical traits."
+  , ""
+  , "Item: " <> cd.cdItem
+  , "Photo context: " <> cd.cdPhotoContext
+  , "User said: " <> cd.cdReason
+  ]
+
+modePersona (DecisionSupport ds) = T.unlines
+  [ "You are a tidying coach helping someone decide on an item."
+  , ""
+  , "Your persona: GENTLE and REFRAMING."
+  , "Voice: \"Does this help with [function]?\""
+  , ""
+  , "Goal: Help them decide without pressure. Reframe around function."
+  , ""
+  , "Stuck item: " <> ds.dsdStuckItem
+  ]
+
+modePersona (WindingDown wd) = T.unlines
+  [ "You are a tidying coach wrapping up a session."
+  , ""
+  , "Your persona: WARM and FACTUAL."
+  , "Voice: \"Good stopping point.\""
+  , ""
+  , "Goal: Acknowledge progress factually. No pressure about what's left."
+  , case wd.wdSessionSummary of
+      Nothing -> ""
+      Just summary -> "\nPrevious summary: " <> summary
+  ]
+
+-- ══════════════════════════════════════════════════════════════
+-- MODE GUIDANCE
+-- ══════════════════════════════════════════════════════════════
+
+modeGuidance :: Mode -> Text
+modeGuidance (Surveying _) = T.unlines
+  [ "# Available Tools"
+  , ""
+  , "- ask_space_function: Ask what the space is FOR."
+  , "  Generate context-specific choices (e.g., if desk → work/gaming/art)."
+  , ""
+  , "- begin_sorting: Transition to Sorting mode."
+  , "  Call when you've established function and anchors."
+  , "  This ENDS the current turn."
+  , ""
+  , "# Guidance"
+  , ""
+  , "If user describes space → extract function"
+  , "If they mention items that stay → those are anchors"
+  , "When ready to sort → call begin_sorting"
+  ]
+
+modeGuidance (Sorting _) = T.unlines
+  [ "# Available Tools"
+  , ""
+  , "- propose_disposition: Propose where item goes."
+  , "  SPECIFIC item description (location + appearance)."
+  , "  2-4 ranked choices. First = best guess."
+  , ""
+  , "- need_to_clarify: User can't identify item."
+  , "  Transition to Clarifying mode."
+  , "  Provide: item, photo_context, reason."
+  , ""
+  , "- user_seems_stuck: User struggling to decide."
+  , "  Transition to DecisionSupport mode."
+  , "  Provide: stuck_item."
+  , ""
+  , "- time_to_wrap: User wants to stop."
+  , "  Transition to WindingDown mode."
+  , ""
+  , "# Guidance"
+  , ""
+  , "DON'T re-ask about decided items."
+  , "If user says 'idk what that is' → call need_to_clarify"
+  , "If user hesitates multiple times → call user_seems_stuck"
+  , "If user says 'done'/'tired' → call time_to_wrap"
+  ]
+
+modeGuidance (Clarifying _) = T.unlines
+  [ "# Available Tools"
+  , ""
+  , "- resume_sorting: Go back to Sorting."
+  , "  Call when user identifies the item."
+  , ""
+  , "- skip_item: Skip and move on."
+  , "  Call when they still can't find it."
+  , ""
+  , "# Guidance"
+  , ""
+  , "Describe the item using:"
+  , "- Spatial refs: 'between the desk leg and wall'"
+  , "- Physical traits: 'green', 'rectangular', 'has a cord'"
+  , "- Relation to other items: 'under the stack of papers'"
+  , ""
+  , "Be patient. Try multiple descriptions."
+  ]
+
+modeGuidance (DecisionSupport _) = T.unlines
+  [ "# Available Tools"
+  , ""
+  , "- resume_sorting: Go back to Sorting."
+  , "  Call when they make a decision."
+  , ""
+  , "# Guidance"
+  , ""
+  , "Reframe the decision around function:"
+  , "- \"Does this help with [function]?\""
+  , "- \"When did you last use this?\""
+  , "- \"Could you replace it if needed?\""
+  , ""
+  , "If they decide → call resume_sorting"
+  , "No pressure. It's okay to skip."
+  ]
+
+modeGuidance (WindingDown _) = T.unlines
+  [ "# Available Tools"
+  , ""
+  , "- end_session: End the session."
+  , "  Call when ready to wrap up."
+  , ""
+  , "# Guidance"
+  , ""
+  , "Acknowledge progress factually:"
+  , "- What's now usable"
+  , "- Items processed"
+  , ""
+  , "Mention what's left (no pressure)."
+  , "Under 25 words. Warm but brief."
+  ]
+
+-- ══════════════════════════════════════════════════════════════
+-- CONTEXT SECTION
+-- ══════════════════════════════════════════════════════════════
+
+contextSection :: TidyingContext -> Text
+contextSection ctx = T.unlines
+  [ "Function: " <> maybe "(unknown)" id ctx.tcFunction
+  , "Anchors: " <> if null ctx.tcAnchors then "(none)" else T.intercalate ", " ctx.tcAnchors
+  , "Items processed: " <> T.pack (show ctx.tcItemsProcessed)
+  , ""
+  , "Piles:"
+  , "  Belongs: " <> T.pack (show ctx.tcPiles.psBelongsCount)
+  , "  Out: " <> T.pack (show ctx.tcPiles.psOutCount)
+  , "  Unsure: " <> T.pack (show ctx.tcPiles.psUnsureCount)
+  , case ctx.tcPiles.psRecentDecisions of
+      [] -> ""
+      recent -> "  Recent decisions: " <> T.intercalate ", " recent
+  , case ctx.tcPhotoAnalysis of
+      Nothing -> ""
+      Just pa -> T.unlines
+        [ ""
+        , "Photo shows: " <> chaosLevelToText pa.paChaosLevel <> " " <> pa.paRoomType
+        , "Visible: " <> T.intercalate ", " pa.paVisibleItems
+        , maybe "" ("First target: " <>) pa.paFirstTarget
+        ]
+  , case ctx.tcUserText of
+      Nothing -> ""
+      Just t -> "\nUser said: " <> t
+  ]
+
+-- ══════════════════════════════════════════════════════════════
+-- LEGACY (for compilation)
+-- ══════════════════════════════════════════════════════════════
+
+-- | Render photo analysis prompt
 renderPhotoAnalysisPrompt :: Text
 renderPhotoAnalysisPrompt = T.unlines
   [ "Describe what you see in this photo of a space being tidied."
@@ -404,6 +267,8 @@ renderPhotoAnalysisPrompt = T.unlines
   , "- Any obvious first targets? (chair with stuff, pile on floor)"
   , ""
   , "Be factual. 2-3 sentences max."
-  , ""
-  , "Example: \"Home office, desk with papers and mugs, chair has clothes on it. Moderate clutter. Chair is blocking—can't sit to work.\""
   ]
+
+-- | Legacy renderActPrompt (stub for compilation)
+renderActPrompt :: TidyingContext -> Text -> Text
+renderActPrompt ctx _ = templateForMode (Sorting $ SortingData Nothing Nothing) ctx

@@ -20,7 +20,7 @@ import qualified Data.Text as T
 import Graphics.UI.Threepenny.Core
 import qualified Graphics.UI.Threepenny as UI
 
-import Tidying.State (Phase(..))
+import Tidying.State (Mode(..))
 import Tidying.Question (Question)
 import Tidying.GUI.Theme (tidyingTheme)
 import Tidying.GUI.Widgets.Chat (chatPane, updateChatPane, typingIndicator)
@@ -62,29 +62,29 @@ tidyingGUISetup
   :: ToJSON state
   => TidyingGUIConfig
   -> GUIBridge state
-  -> (state -> Phase)  -- ^ Extract phase from state
+  -> (state -> Mode)  -- ^ Extract mode from state
   -> Window
   -> UI ()
-tidyingGUISetup config bridge getPhase window = do
+tidyingGUISetup config bridge getMode window = do
   -- Apply the tidying theme (calming colors)
   applyTheme tidyingTheme window
 
   -- Build the layout
-  (root, elements) <- buildLayout config bridge getPhase
+  (root, elements) <- buildLayout config bridge getMode
 
   void $ getBody window #+ [element root]
 
   -- Set up polling for state updates
-  setupPolling config bridge getPhase elements
+  setupPolling config bridge getMode elements
 
 -- | Build the complete layout
 buildLayout
   :: ToJSON state
   => TidyingGUIConfig
   -> GUIBridge state
-  -> (state -> Phase)
+  -> (state -> Mode)
   -> UI (Element, GUIElements)
-buildLayout config bridge getPhase = do
+buildLayout config bridge getMode = do
   root <- UI.div #. "chat-layout"
 
   -- Main chat area
@@ -95,9 +95,9 @@ buildLayout config bridge getPhase = do
   titleEl <- UI.div #. "chat-header-title" # set text "TIDYING SESSION"
   phaseEl <- UI.div #. "chat-header-phase"
 
-  -- Get initial phase
+  -- Get initial mode
   state <- liftIO $ atomically $ readTVar bridge.gbState
-  void $ element phaseEl # set text (T.unpack $ phaseText $ getPhase state)
+  void $ element phaseEl # set text (T.unpack $ modeText $ getMode state)
 
   void $ element header #+ [element titleEl, element phaseEl]
 
@@ -148,23 +148,23 @@ buildLayout config bridge getPhase = do
 
   pure (root, elements)
 
--- | Convert phase to display text
-phaseText :: Phase -> Text
-phaseText Surveying = "Surveying your space..."
-phaseText Sorting = "Sorting items"
-phaseText Splitting = "Breaking down categories"
-phaseText Refining = "Refining decisions"
-phaseText DecisionSupport = "Helping you decide"
+-- | Convert mode to display text
+modeText :: Mode -> Text
+modeText (Surveying _) = "Surveying your space..."
+modeText (Sorting _) = "Sorting items"
+modeText (Clarifying _) = "Identifying item..."
+modeText (DecisionSupport _) = "Helping you decide"
+modeText (WindingDown _) = "Wrapping up"
 
 -- | Set up polling for state updates
 setupPolling
   :: ToJSON state
   => TidyingGUIConfig
   -> GUIBridge state
-  -> (state -> Phase)
+  -> (state -> Mode)
   -> GUIElements
   -> UI ()
-setupPolling config bridge getPhase elements = do
+setupPolling config bridge getMode elements = do
   timer <- UI.timer # set UI.interval (config.tcPollIntervalMs)
 
   -- Track previous state
@@ -207,7 +207,7 @@ setupPolling config bridge getPhase elements = do
     when (stateVersion /= prevStateVersion) $ do
       liftIO $ writeIORef prevStateVersionRef stateVersion
       state <- liftIO $ atomically $ readTVar bridge.gbState
-      void $ element elements.gePhaseLabel # set text (T.unpack $ phaseText $ getPhase state)
+      void $ element elements.gePhaseLabel # set text (T.unpack $ modeText $ getMode state)
       -- Refresh state inspector if expanded
       case elements.geStateInspector of
         Just handle -> refreshStateInspector handle bridge
@@ -226,29 +226,10 @@ setupPolling config bridge getPhase elements = do
 
   UI.start timer
 
--- | Cleanup script to stop camera streams before destroying widget
---
--- This prevents orphaned streams when the input widget is swapped out.
-cleanupCameraScript :: Text
-cleanupCameraScript = T.unlines
-  [ "(function() {"
-  , "  window.cameraModalPending = false;"
-  , "  if (window.cameraModalStream) {"
-  , "    window.cameraModalStream.getTracks().forEach(function(t) { t.stop(); });"
-  , "    window.cameraModalStream = null;"
-  , "  }"
-  , "  var video = document.getElementById('camera-modal-video');"
-  , "  if (video) video.srcObject = null;"
-  , "})();"
-  ]
-
 -- | Update the input area based on pending request
 updateInputArea :: GUIBridge state -> GUIElements -> Maybe PendingRequest -> UI ()
 updateInputArea bridge elements pending = do
   let inputArea = elements.geInputArea
-
-  -- Cleanup any active camera before swapping widgets
-  runFunction $ ffi $ T.unpack cleanupCameraScript
 
   case pending of
     Nothing -> do

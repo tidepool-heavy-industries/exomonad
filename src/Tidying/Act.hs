@@ -1,33 +1,35 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 
+-- | Tidying Act - Stub module
+--
+-- This module is being deprecated as part of the Mode-based refactor.
+-- The response generation will be handled by the turn loop directly,
+-- using mode-specific templates.
+--
+-- Kept temporarily for compilation; will be removed or significantly
+-- rewritten in a later phase.
 module Tidying.Act
-  ( -- * ACT: Generate response
-    act
-  , ActContext(..)
+  ( -- * Stub exports (temporary)
+    ActContext(..)
   ) where
 
 import Data.Aeson (ToJSON(..), (.=), object)
-import Data.List.NonEmpty (NonEmpty)
-import Data.List.NonEmpty qualified as NE
 import Data.Text (Text)
-import Data.Text qualified as T
 import GHC.Generics (Generic)
 
-import Tidying.State
-import Tidying.Action
-import Tidying.Types (ItemName(..), Location(..), AnxietyTrigger(..), CategoryName(..), SpaceFunction(..))
-
--- | Context for act templates
+-- | Context for act templates (temporary stub)
+--
+-- Will be replaced by mode-specific context building
 data ActContext = ActContext
   { acFunction      :: Maybe Text
   , acAnchors       :: [Text]
   , acPhotoAnalysis :: Maybe Text
   , acUnsurePile    :: [Text]
-  , acItem          :: Maybe Text      -- for decision aid
-  , acTrigger       :: Maybe Text      -- for pivot
-  , acAlternative   :: Maybe Text      -- for pivot
-  , acSplitCats     :: [Text]          -- for split
+  , acItem          :: Maybe Text
+  , acTrigger       :: Maybe Text
+  , acAlternative   :: Maybe Text
+  , acSplitCats     :: [Text]
   , acItemsProcessed :: Int
   , acSessionMinutes :: Int
   } deriving (Show, Generic)
@@ -45,49 +47,3 @@ instance ToJSON ActContext where
     , "items_processed" .= acItemsProcessed
     , "session_minutes" .= acSessionMinutes
     ]
-
--- | ACT: Generate response text
--- For actions that need LLM, calls the template runner
--- For canned actions, returns fixed text
-act
-  :: Monad m
-  => (Action -> ActContext -> m Text)  -- ^ LLM template runner
-  -> SessionState
-  -> Maybe Text                         -- ^ Photo analysis
-  -> Action
-  -> m Text
-act runLLM st photoAnalysis action = do
-  let ctx = buildActContext st photoAnalysis action
-  runLLM action ctx
-
--- | Build context for act template
-buildActContext :: SessionState -> Maybe Text -> Action -> ActContext
-buildActContext st photoAnalysis action = ActContext
-  { acFunction = fmap (\(SpaceFunction t) -> t) (getFunction st)
-  , acAnchors = map (\(ItemName n) -> n) (getAnchors st)
-  , acPhotoAnalysis = photoAnalysis
-  , acUnsurePile = map (\(ItemName n) -> n) st.piles.unsure
-  , acItem = extractItem action
-  , acTrigger = extractTrigger action
-  , acAlternative = extractAlternative action
-  , acSplitCats = extractSplitCats action
-  , acItemsProcessed = st.itemsProcessed
-  , acSessionMinutes = 0  -- TODO: compute from sessionStart
-  }
-
-extractItem :: Action -> Maybe Text
-extractItem (DecisionAid (ItemName item)) = Just item
-extractItem _ = Nothing
-
-extractTrigger :: Action -> Maybe Text
-extractTrigger (PivotAway (AnxietyTrigger trigger) _) = Just trigger
-extractTrigger _ = Nothing
-
-extractAlternative :: Action -> Maybe Text
-extractAlternative (PivotAway _ (Location alt)) = Just alt
-extractAlternative _ = Nothing
-
-extractSplitCats :: Action -> [Text]
-extractSplitCats (InstructSplit cats) = map (\(CategoryName c) -> c) (NE.toList cats)
-extractSplitCats _ = []
-

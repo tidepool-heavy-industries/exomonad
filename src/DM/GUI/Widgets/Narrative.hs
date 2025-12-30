@@ -43,7 +43,7 @@ import qualified Graphics.UI.Threepenny as UI
 
 import DM.State
 import DM.GUI.Widgets.Events (isEventEntry, renderEventEntry)
-import Tidepool.GUI.Core (GUIBridge(..))
+import Tidepool.GUI.Core (GUIBridge(..), ChatMessage(..))
 
 -- | Create a rich narrative pane for DM
 --
@@ -83,27 +83,44 @@ updateDMNarrative container bridge = do
   -- Auto-scroll to bottom
   runFunction $ ffi "$(%1).scrollTop($(%1)[0].scrollHeight)" container
 
--- | Render a narrative log entry (plain text from history)
+-- | Render a narrative log entry from ChatMessage
 --
--- Handles three types of entries:
--- 1. Event entries (prefixed with [EVENT:...]) - rendered with state event CSS
--- 2. Player actions (prefixed with "> ") - rendered italicized
--- 3. DM narration (everything else) - rendered as regular text
-renderNarrativeLogEntry :: Text -> UI Element
-renderNarrativeLogEntry txt
+-- Pattern-matches on ChatMessage type for appropriate rendering:
+-- - UserMessage: Player action styling (italicized)
+-- - SystemMessage: May be event entries (prefixed [EVENT:...]) or narration
+-- - ErrorMessage: Warning styling
+-- - Others: Fallback to plain text
+renderNarrativeLogEntry :: ChatMessage -> UI Element
+renderNarrativeLogEntry (UserMessage txt) = do
+  -- Player action
+  entry <- UI.div #. "narrative-entry player-action"
+  void $ element entry # set text (T.unpack $ "> " <> txt)
+  pure entry
+renderNarrativeLogEntry (SystemMessage txt)
   | isEventEntry txt = do
       -- State change event - render with distinctive styling
       renderEventEntry txt
-  | T.isPrefixOf "> " txt = do
-      -- Player action (prefixed with >)
-      entry <- UI.div #. "narrative-entry player-action"
-      void $ element entry # set text (T.unpack txt)
-      pure entry
   | otherwise = do
       -- DM narration
       entry <- UI.div #. "narrative-entry dm-narration"
       void $ element entry # set text (T.unpack txt)
       pure entry
+renderNarrativeLogEntry (ErrorMessage txt) = do
+  entry <- UI.div #. "narrative-entry error-message"
+  void $ element entry # set text (T.unpack $ "⚠ " <> txt)
+  pure entry
+renderNarrativeLogEntry (PhotoMessage _ _) = do
+  entry <- UI.div #. "narrative-entry"
+  void $ element entry # set text "[Photo]"
+  pure entry
+renderNarrativeLogEntry (ChoicesMessage prompt _) = do
+  entry <- UI.div #. "narrative-entry"
+  void $ element entry # set text (T.unpack prompt)
+  pure entry
+renderNarrativeLogEntry (SelectedMessage txt) = do
+  entry <- UI.div #. "narrative-entry player-action"
+  void $ element entry # set text (T.unpack $ "✓ " <> txt)
+  pure entry
 
 -- | Render a single scene beat with appropriate styling
 renderSceneBeat :: SceneBeat -> UI Element

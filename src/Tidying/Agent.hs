@@ -30,6 +30,7 @@ module Tidying.Agent
   , tidyingRun
   ) where
 
+import Control.Monad (forM_, when)
 import qualified Data.Text as T
 
 import Tidepool
@@ -92,9 +93,12 @@ tidyingRun = do
           -- Convert photo data tuples to Photo values
           let photos = map (\(b64, mime) -> Photo b64 mime) photoData
 
-          -- Emit user input for chat display (with photo indicator)
-          let photoIndicator = if hasPhoto then " [📷]" else ""
-          emit $ UserInputReceived (input <> photoIndicator)
+          -- Emit photos for chat display (as inline images)
+          forM_ photoData $ \(b64, mime) ->
+            emit $ PhotoUploaded b64 mime
+
+          -- Emit user text input for chat display
+          when hasText $ emit $ UserInputReceived input
 
           let userInput = UserInput
                 { inputText = if hasText then Just input else Nothing
@@ -102,8 +106,7 @@ tidyingRun = do
                 }
           response <- tidyingTurn userInput
 
-          -- Emit response for chat display
-          emit $ ResponseGenerated response.responseText
+          -- Note: ResponseGenerated is emitted inside tidyingTurn (Loop.hs)
 
           -- Exit if session ended (quit/done/stop), otherwise continue
           if response.responseSessionEnded

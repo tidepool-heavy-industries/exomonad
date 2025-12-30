@@ -7,40 +7,35 @@
 --
 -- = Design
 --
--- OODA-inspired loop:
+-- Mode-based turn loop with LLM-driven navigation:
 --
--- * OBSERVE: User sends photos/text (analyzePhotos)
--- * ORIENT: LLM extracts structured facts (extractFromInput)
--- * DECIDE: Pure routing (decideFromExtract)
--- * ACT: Generate response (actResponse)
+-- 1. Mode determines template, tools, and output schema
+-- 2. LLM receives system prompt + photos + text + history
+-- 3. LLM produces structured output + optional tool calls
+-- 4. Output updates mode data; transition tools change mode
 --
 -- = Key insight
 --
--- No upfront schema. Structure emerges from doing:
+-- Mode is a SUM TYPE with data, not an enum. Each mode carries
+-- its own context fields. The LLM navigates between modes via
+-- transition tools.
 --
--- 1. Function + anchors (what's the space FOR, what STAYS)
--- 2. belongs / out / unsure (initial sort)
--- 3. Dynamic splits (when unsure grows)
--- 4. Refinement (place keepers)
+-- = Modes
 --
--- = Phases
---
--- * 'Surveying' - gather photos, establish function + anchors
--- * 'Sorting' - main loop: classify items, atomic instructions
--- * 'Splitting' - break unsure pile into emergent categories
--- * 'Refining' - work through sub-piles, place keepers
--- * 'DecisionSupport' - help user decide on stuck items
+-- * 'Surveying' - curious, orienting - discover function + anchors
+-- * 'Sorting' - terse, directive - process items quickly
+-- * 'Clarifying' - patient, descriptive - help identify items
+-- * 'DecisionSupport' - gentle, reframing - help with stuck items
+-- * 'WindingDown' - warm, factual - wrap up session
 --
 -- = Integration with Tidepool
 --
 -- Uses the Tidepool effect system:
 --
 -- * 'State SessionState' - session state
--- * 'LLM' - for ORIENT and ACT calls
+-- * 'LLM' - for multimodal calls
 -- * 'Emit TidyingEvent' - for logging/debugging
 -- * 'Log' - structured logging
---
--- Photo analysis is stubbed for now (requires vision support).
 
 module Tidying
   ( -- * Main loop (effect-based)
@@ -54,16 +49,19 @@ module Tidying
 
     -- * State
   , SessionState(..)
-  , Phase(..)
+  , Mode(..)
+  , SurveyingData(..)
+  , SortingData(..)
+  , ClarifyingData(..)
+  , DecisionSupportData(..)
+  , WindingDownData(..)
   , Piles(..)
   , newSession
+  , modeName
 
     -- * Input
   , UserInput(..)
   , Photo(..)
-
-    -- * Action (DECIDE output)
-  , Action(..)
 
     -- * Context (for templates)
   , TidyingContext(..)
@@ -89,7 +87,6 @@ module Tidying
   ) where
 
 import Tidying.State
-import Tidying.Action
 import Tidying.Loop
 import Tidying.Agent (tidying, tidyingRun)
 import Tidying.Context

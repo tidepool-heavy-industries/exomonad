@@ -1,237 +1,245 @@
 # Tool Execution
 
-How tools execute during LLM turns and communicate with the GUI.
+How tools execute during LLM turns, including transition tools and ToolBreak.
 
-## Tool → QuestionHandler → GUI Flow
+## Tool Result Types
 
-```mermaid
-flowchart TD
-    subgraph LLM["LLM Turn"]
-        L1["LLM requests tool call"]
-        L2["toolDispatcher"]
-        L3["executeProposeDisposition"]
-    end
-
-    subgraph Handler["QuestionHandler (IO)"]
-        H1["askQuestion :: Question -> IO Answer"]
-        H2["writeTVar gbPendingRequest"]
-        H3["takeMVar (with 5min timeout)"]
-        H4["Parse response"]
-    end
-
-    subgraph GUI["Browser"]
-        G1["Poll detects request"]
-        G2["renderQuestion"]
-        G3["User taps disposition card"]
-        G4["tryPutMVar response"]
-    end
-
-    subgraph Safety["Error Handling"]
-        S1["try/catch around handler"]
-        S2["Timeout → fallbackAnswer"]
-        S3["Parse error → fallbackAnswer"]
-    end
-
-    L1 --> L2 --> L3
-    L3 --> H1
-    H1 --> H2 --> H3
-    H3 --> G1 --> G2 --> G3 --> G4
-    G4 --> H3
-    H3 --> H4
-    H4 --> L3
-
-    L3 -.-> S1
-    H3 -.-> S2
-    H4 -.-> S3
-```
-
-## ProposeDisposition Tool Flow
-
-The main tool for item disposition:
-
-```mermaid
-flowchart TD
-    A["LLM calls propose_disposition<br/>{item, choices, reason}"]
-    B["emit ItemProposed event"]
-    C["Build Question<br/>ProposeDisposition item choices reason"]
-    D["askQuestion (IO callback)"]
-    E{"Response type?"}
-    F["DispositionAnswer<br/>Trash/Keep/Place/Skip"]
-    G["Parse location if Place"]
-    H["Emit UserConfirmed or UserCorrected"]
-    I["Return ProposeDispositionResult<br/>disposition + wasCorrection"]
-    J["LLM continues turn<br/>with tool result"]
-
-    A --> B --> C --> D --> E
-    E --> F --> G --> H --> I --> J
-```
-
-## ItemDisposition Enum
-
-Where an item can go (no "Unsure" option - that's an antipattern):
+Tools can return two types of results:
 
 ```haskell
-data ItemDisposition
-  = PlaceAt Text      -- Specific location: "kitchen counter"
-  | Trash             -- Garbage
-  | Donate            -- Give away
-  | Recycle           -- Recycling bin
-  | SkipForNow        -- Put it back, come back later
-  | NeedMoreInfo      -- Agent needs more context
+data ToolResult
+  = ToolSuccess Value    -- Continue current turn
+  | ToolBreak Text       -- End turn, inject message, transition mode
 ```
-
-## Question Types and Answers
-
-| Question Type | Answer Type | Fallback |
-|---------------|-------------|----------|
-| `ProposeDisposition item choices fallback` | `DispositionAnswer ItemDisposition` | `SkipForNow` |
-| `Confirm prompt default` | `ConfirmAnswer Bool` | `default` |
-| `Choose prompt qid options` | `ChoiceAnswer Text` | `""` |
-| `FreeText prompt placeholder` | `TextAnswer Text` | `""` |
-
-## QuestionHandler Implementation
 
 ```mermaid
 flowchart TD
-    A["makeQuestionHandler bridge"]
-    B["Return: Question -> IO Answer"]
-    C["Post to gbPendingRequest"]
-    D["takeMVar with 5min timeout"]
-    E{"Timeout?"}
-    F["Return fallbackAnswer"]
-    G["Parse CustomResponse"]
-    H{"Parse success?"}
-    I["Return Answer"]
-    J["Return fallbackAnswer"]
+    T["Tool Executes"]
+    T --> TS["ToolSuccess Value"]
+    T --> TB["ToolBreak Text"]
 
-    A --> B
-    B --> C --> D --> E
-    E -->|yes| F
-    E -->|no| G --> H
-    H -->|yes| I
-    H -->|no| J
+    TS --> C["Return result to LLM<br/>LLM may call more tools"]
+
+    TB --> E["End current turn immediately"]
+    E --> M["Change Mode in state"]
+    M --> I["Inject synthetic user message"]
+    I --> N["Start new turn with new Mode"]
+```
+
+## Tool Categories
+
+### Regular Tools (ToolSuccess)
+
+Execute an action, return result, LLM continues:
+
+| Tool | Mode | Purpose |
+|------|------|---------|
+| `propose_disposition` | Sorting | Propose item disposition, get user confirmation |
+
+### Transition Tools (ToolBreak)
+
+Change mode, end turn, start fresh:
+
+| Tool | From → To | Initial Data |
+|------|-----------|--------------|
+| `begin_sorting` | Surveying → Sorting | SortingData {} |
+| `need_to_clarify` | Sorting → Clarifying | ClarifyingData {item, photoContext, reason} |
+| `user_seems_stuck` | Sorting → DecisionSupport | DecisionSupportData {stuckItem} |
+| `time_to_wrap` | Sorting → WindingDown | WindingDownData {} |
+| `resume_sorting` | Clarifying/DecisionSupport → Sorting | SortingData {} |
+| `skip_item` | Clarifying → Sorting | SortingData {} |
+| `end_session` | WindingDown → (end) | N/A |
+
+## Transition Tool Flow
+
+```mermaid
+sequenceDiagram
+    participant LLM
+    participant Dispatcher
+    participant Tool
+    participant State
+    participant Loop
+
+    LLM->>Dispatcher: Tool call: need_to_clarify({item, context, reason})
+    Dispatcher->>Tool: executeNeedToClarify(args)
+    Tool->>State: mode = Clarifying(ClarifyingData {...})
+    Tool->>Tool: emit ModeChanged event
+    Tool->>Dispatcher: return ToolBreak("[Continue as: Clarifying]")
+    Dispatcher->>Loop: ToolBreak received
+    Loop->>Loop: End current turn
+    Loop->>Loop: Append synthetic user message to history
+    Loop->>LLM: Start new turn with Clarifying template/tools
 ```
 
 ## Tool Dispatcher
 
-Routes tool calls to their executors:
+Routes tool calls to executors, handles ToolBreak:
 
 ```mermaid
 flowchart TD
-    A["makeTidyingDispatcher questionHandler"]
-    B["Return: ToolDispatcher"]
-    C["Match tool name"]
-    D{"Tool?"}
-    E["propose_disposition"]
-    F["executeProposeDisposition"]
-    G["ask_space_function"]
-    H["executeAskSpaceFunction"]
-    I["confirm_done"]
-    J["executeConfirmDone"]
-    K["Unknown tool"]
-    L["Return error result"]
+    D["toolDispatcher(toolName, args)"]
+    D --> M{"Match tool name"}
 
-    A --> B --> C --> D
-    D -->|propose| E --> F
-    D -->|ask_function| G --> H
-    D -->|confirm| I --> J
-    D -->|unknown| K --> L
+    M -->|propose_disposition| E1["executeProposeDisposition"]
+    M -->|need_to_clarify| E2["executeNeedToClarify"]
+    M -->|resume_sorting| E3["executeResumeSorting"]
+    M -->|user_seems_stuck| E4["executeUserSeemsStuck"]
+    M -->|time_to_wrap| E5["executeTimeToWrap"]
+    M -->|skip_item| E6["executeSkipItem"]
+    M -->|end_session| E7["executeEndSession"]
+    M -->|unknown| ERR["ToolSuccess (error message)"]
+
+    E1 --> R1["ToolSuccess (result)"]
+    E2 --> R2["ToolBreak"]
+    E3 --> R2
+    E4 --> R2
+    E5 --> R2
+    E6 --> R2
+    E7 --> R2
 ```
 
-## Error Handling Pattern
-
-All tool execution wraps the QuestionHandler in try/catch:
+## Transition Tool Implementation
 
 ```haskell
+executeNeedToClarify
+  :: (State SessionState :> es, Emit TidyingEvent :> es)
+  => NeedToClarifyInput
+  -> Eff es ToolResult
+executeNeedToClarify input = do
+  oldMode <- gets @SessionState mode
+
+  -- Create new mode with initial data from tool args
+  let newModeData = ClarifyingData
+        { cdItem = input.item
+        , cdPhotoContext = input.photoContext
+        , cdReason = input.reason
+        }
+
+  -- Update state
+  modify @SessionState $ \s -> s { mode = Clarifying newModeData }
+
+  -- Emit event for debugging/GUI
+  emit $ ModeChanged oldMode (Clarifying newModeData)
+
+  -- Return ToolBreak to end turn and inject synthetic message
+  pure $ ToolBreak $ "[Continue as: Clarifying. Describe: " <> input.item <> "]"
+```
+
+## Regular Tool Implementation
+
+```haskell
+executeProposeDisposition
+  :: (State SessionState :> es, Emit TidyingEvent :> es, IOE :> es)
+  => QuestionHandler
+  -> ProposeDispositionInput
+  -> Eff es ToolResult
 executeProposeDisposition askQuestion input = do
-  emit $ ItemProposed ...
+  -- Emit event
+  emit $ ItemProposed input.item input.choices
 
-  -- Wrapped in try/catch for robustness
-  result <- liftIO $ try @SomeException $ askQuestion question
+  -- Ask user via QuestionHandler (blocks for response)
+  answer <- liftIO $ askQuestion (ProposeDispositionQ input.item input.choices)
 
-  case result of
-    Left err -> do
-      logWarn "Question handler failed"
-      pure fallback
-    Right answer ->
-      processAnswer answer
+  -- Process answer, update piles
+  processDispositionAnswer input.item answer
+
+  -- Return success - LLM continues turn
+  pure $ ToolSuccess (toJSON result)
 ```
 
-## Fallback Answers
+## QuestionHandler (for Regular Tools)
 
-When handler fails or times out:
+Regular tools that need user input use the QuestionHandler:
+
+```mermaid
+sequenceDiagram
+    participant Tool
+    participant QH as QuestionHandler
+    participant Bridge as GUIBridge
+    participant GUI as Browser
+
+    Tool->>QH: askQuestion(ProposeDispositionQ ...)
+    QH->>Bridge: writeTVar gbPendingRequest
+    QH->>Bridge: takeMVar gbRequestResponse (BLOCKS)
+
+    GUI->>Bridge: Poll detects request
+    GUI->>GUI: Render disposition cards
+    GUI->>GUI: User taps card
+    GUI->>Bridge: tryPutMVar response
+
+    Bridge->>QH: Unblock with response
+    QH->>Tool: Return Answer
+```
+
+## Mode-Specific Tool Sets
 
 ```haskell
-fallbackAnswer :: Question -> Answer
-fallbackAnswer = \case
-  ProposeDisposition _ _ _ -> DispositionAnswer SkipForNow
-  Confirm _ defVal         -> ConfirmAnswer defVal
-  Choose _ _ _             -> ChoiceAnswer ""
-  FreeText _ _             -> TextAnswer ""
+toolsForMode :: Mode -> [Value]
+toolsForMode (Surveying _) =
+  [ beginSortingTool
+  ]
+
+toolsForMode (Sorting _) =
+  [ proposeDispositionTool
+  , needToClarifyTool
+  , userSeemsStuckTool
+  , timeToWrapTool
+  ]
+
+toolsForMode (Clarifying _) =
+  [ resumeSortingTool
+  , skipItemTool
+  ]
+
+toolsForMode (DecisionSupport _) =
+  [ resumeSortingTool
+  ]
+
+toolsForMode (WindingDown _) =
+  [ endSessionTool
+  ]
 ```
-
-## TidyingEvent List (All 12 Events)
-
-| Event | Description |
-|-------|-------------|
-| `PhotoAnalyzed Text` | Photo was analyzed |
-| `SituationClassified Text` | Situation/intent classified |
-| `ActionTaken Action` | Action was decided |
-| `PhaseChanged Phase Phase` | Phase transition (from, to) |
-| `SessionEnded Int` | Session ended with item count |
-| `UserInputReceived Text` | User input for chat display |
-| `ResponseGenerated Text` | Response for chat display |
-| `ItemProposed Text [Text]` | Tool: item + dispositions |
-| `UserConfirmed Text Text` | Tool: item + chosen disposition |
-| `UserCorrected Text Text` | Tool: item + user-provided location |
-| `FunctionChosen Text` | Tool: space function selected |
-| `SessionConfirmedDone` | Tool: user confirmed done |
 
 ## Tool Schema Example
 
 ```json
 {
-  "name": "propose_disposition",
-  "description": "Propose what to do with an item",
+  "name": "need_to_clarify",
+  "description": "User can't identify the item. Transition to Clarifying mode to describe it in detail. This ENDS the current turn.",
   "input_schema": {
     "type": "object",
     "properties": {
-      "item": { "type": "string" },
-      "choices": {
-        "type": "array",
-        "items": {
-          "type": "object",
-          "properties": {
-            "label": { "type": "string" },
-            "description": { "type": "string" }
-          }
-        }
+      "item": {
+        "type": "string",
+        "description": "What item we're clarifying"
       },
-      "reason": { "type": "string" }
+      "photo_context": {
+        "type": "string",
+        "description": "What we observed in the photo (location, nearby objects)"
+      },
+      "reason": {
+        "type": "string",
+        "description": "Why user is confused (their response)"
+      }
     },
-    "required": ["item", "choices"]
+    "required": ["item", "photo_context", "reason"]
   }
 }
 ```
 
-## Why IO Callback (not Effect)?
+## Events Emitted
 
-Tools run **inside** the LLM interpreter where `QuestionUI` has already been consumed:
-
-```
-runLLMWithToolsHooked  -- LLM effect interpreted here
-  └── tool calls       -- Tools execute during interpretation
-       └── need QuestionHandler (IO) not QuestionUI (Effect)
-```
-
-The `QuestionHandler` type bridges this:
-```haskell
-type QuestionHandler = Question -> IO Answer
-```
+| Event | When | Data |
+|-------|------|------|
+| `ModeChanged` | Transition tool executed | oldMode, newMode |
+| `ItemProposed` | propose_disposition called | item, choices |
+| `UserConfirmed` | User accepted disposition | item, disposition |
+| `UserCorrected` | User provided different location | item, location |
+| `SessionEnded` | end_session called | itemsProcessed |
 
 ## Key Files
 
-- `Tools.hs` - ProposeDisposition, tool schemas, executors
-- `Question.hs` - Question DSL, Answer types, fallbackAnswer
-- `GUI/Runner.hs` - makeQuestionHandler, makeTidyingDispatcher
-- `GUI/Widgets/Question.hs` - renderQuestion (GUI side)
+- `Tools.hs` - Tool definitions, executors, `toolsForMode`
+- `Loop.hs` - ToolBreak handling, turn continuation
+- `GUI/Runner.hs` - QuestionHandler implementation
+- `Events.hs` - ModeChanged and other events

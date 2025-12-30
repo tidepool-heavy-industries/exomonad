@@ -106,44 +106,44 @@ renderDisposition bridge item choices fallback = do
 
   void $ element choicesEl #+ map element cards
 
-  -- Fallback text input (for "Other...")
-  fallbackSection <- case fallback of
-    Nothing -> UI.div # set style [("display", "none")]
-    Just placeholder -> do
-      section <- UI.div #. "disposition-fallback"
+  -- "Other" option - always shown so user can override agent's suggestions
+  fallbackSection <- do
+    let placeholder = maybe "Where should it go?" id fallback
 
-      otherBtn <- UI.button #. "disposition-other-btn"
-        # set text "Other..."
-        # set (attr "tabindex") "0"
+    section <- UI.div #. "disposition-fallback"
 
-      inputContainer <- UI.div #. "disposition-other-input"
-        # set style [("display", "none")]
+    otherBtn <- UI.button #. "disposition-other-btn"
+      # set text "Other..."
+      # set (attr "tabindex") "0"
 
-      inputEl <- UI.input #. "text-input"
-        # set (attr "placeholder") (T.unpack placeholder)
+    inputContainer <- UI.div #. "disposition-other-input"
+      # set style [("display", "none")]
 
-      submitBtn <- UI.button #. "submit-btn" # set text "Submit"
+    inputEl <- UI.input #. "text-input"
+      # set (attr "placeholder") (T.unpack placeholder)
 
-      -- Show input when "Other..." clicked
-      on UI.click otherBtn $ const $ do
-        void $ element inputContainer # set style [("display", "flex")]
-        void $ element otherBtn # set style [("display", "none")]
-        UI.setFocus inputEl
+    submitBtn <- UI.button #. "submit-btn" # set text "Submit"
 
-      -- Submit custom location
-      let submitOther = do
-            val <- get value inputEl
-            when (not (null val)) $ do
-              let answer = DispositionAnswer (PlaceAt (T.pack val))
-              liftIO $ safeSubmitResponse bridge (CustomResponse (toJSON answer))
+    -- Show input when "Other..." clicked
+    on UI.click otherBtn $ const $ do
+      void $ element inputContainer # set style [("display", "flex")]
+      void $ element otherBtn # set style [("display", "none")]
+      UI.setFocus inputEl
 
-      on UI.click submitBtn $ const submitOther
-      on UI.keydown inputEl $ \code ->
-        when (code == 13) submitOther  -- Enter
+    -- Submit custom location
+    let submitOther = do
+          val <- get value inputEl
+          when (not (null val)) $ do
+            let answer = DispositionAnswer (PlaceAt (T.pack val))
+            liftIO $ safeSubmitResponse bridge (CustomResponse (toJSON answer))
 
-      void $ element inputContainer #+ [element inputEl, element submitBtn]
-      void $ element section #+ [element otherBtn, element inputContainer]
-      pure section
+    on UI.click submitBtn $ const submitOther
+    on UI.keydown inputEl $ \code ->
+      when (code == 13) submitOther  -- Enter
+
+    void $ element inputContainer #+ [element inputEl, element submitBtn]
+    void $ element section #+ [element otherBtn, element inputContainer]
+    pure section
 
   -- Keyboard shortcuts 1-9 for quick selection
   on UI.keydown container $ \code -> do
@@ -291,6 +291,40 @@ renderChoose bridge prompt _qid options = do
 
   void $ element optionsEl #+ map element cards
 
+  -- "Other" option for custom text input
+  otherSection <- do
+    section <- UI.div #. "choose-other"
+
+    otherBtn <- UI.button #. "disposition-other-btn"
+      # set text "Other..."
+      # set (attr "tabindex") "0"
+
+    inputContainer <- UI.div #. "disposition-other-input"
+      # set style [("display", "none")]
+
+    inputEl <- UI.input #. "text-input"
+      # set (attr "placeholder") "Type your answer..."
+
+    submitBtn <- UI.button #. "submit-btn" # set text "Submit"
+
+    on UI.click otherBtn $ const $ do
+      void $ element inputContainer # set style [("display", "flex")]
+      void $ element otherBtn # set style [("display", "none")]
+      UI.setFocus inputEl
+
+    let submitOther = do
+          val <- get value inputEl
+          when (not (null val)) $ liftIO $
+            safeSubmitResponse bridge (CustomResponse (toJSON (TextAnswer (T.pack val))))
+
+    on UI.click submitBtn $ const submitOther
+    on UI.keydown inputEl $ \code ->
+      when (code == 13) submitOther
+
+    void $ element inputContainer #+ [element inputEl, element submitBtn]
+    void $ element section #+ [element otherBtn, element inputContainer]
+    pure section
+
   -- Keyboard shortcuts 1-9
   on UI.keydown container $ \code -> do
     when (code >= 49 && code <= 57) $ do
@@ -300,7 +334,7 @@ renderChoose bridge prompt _qid options = do
         liftIO $ safeSubmitResponse bridge
           (CustomResponse (toJSON (ChoiceAnswer opt.optionValue)))
 
-  void $ element container #+ [element promptEl, element optionsEl]
+  void $ element container #+ [element promptEl, element optionsEl, element otherSection]
 
   -- Focus container so number shortcuts (1-9) work immediately
   pure QuestionResult

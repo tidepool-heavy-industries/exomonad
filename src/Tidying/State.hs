@@ -3,16 +3,25 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 
+-- | Session state for the Tidying agent.
+--
+-- Key insight: Mode is a SUM TYPE with data, not an enum.
+-- Each mode carries its own context/data fields.
+--
+-- The LLM navigates between modes via transition tools.
+-- Haskell only structures the available tools/templates/schemas per mode.
 module Tidying.State
-  ( -- * Core types
-    Phase(..)
-  , PhaseData(..)
-  , ActiveState(..)
+  ( -- * Mode (sum type with mode-specific data)
+    Mode(..)
+  , SurveyingData(..)
+  , SortingData(..)
+  , ClarifyingData(..)
+  , DecisionSupportData(..)
+  , WindingDownData(..)
+
+    -- * Session state
   , SessionState(..)
   , newSession
-
-    -- * Phase (derived from PhaseData, not stored)
-  , phase
 
     -- * Piles
   , Piles(..)
@@ -23,96 +32,130 @@ module Tidying.State
   , UserInput(..)
   , Photo(..)
 
-    -- * Accessors for phase-specific data
-  , getActiveState
-  , getFunction
-  , getAnchors
-  , getCurrentItem
-  , getCurrentCategory
-  , getEmergentCats
-
     -- * Helpers
-  , hasFunction
-  , hasAnchors
-  , isOverwhelmedSignal
+  , modeName
   ) where
 
-import Data.Aeson (ToJSON, FromJSON)
-import Data.List.NonEmpty (NonEmpty)
-import Data.Map.Strict (Map)
-import Data.Map.Strict qualified as Map
+import Data.Aeson (ToJSON(..), FromJSON, object, (.=))
 import Data.Text (Text)
-import Data.Text qualified as T
 import Data.Time (UTCTime)
 import GHC.Generics (Generic)
 
 import Tidying.Types
-  ( ItemName, SpaceFunction(..), CategoryName )
+  ( ItemName, SpaceFunction )
 
--- | Common state present after surveying completes
+-- ══════════════════════════════════════════════════════════════
+-- MODE (sum type with mode-specific data)
+-- ══════════════════════════════════════════════════════════════
+
+-- | Mode = sum type with mode-specific data
 --
--- Every phase except Surveying has these fields.
--- Factored out to eliminate duplication.
-data ActiveState = ActiveState
-  { asFunction :: SpaceFunction
-    -- ^ What this space is FOR (required post-surveying)
-  , asAnchors  :: [ItemName]
-    -- ^ Things that definitely stay
-  } deriving (Eq, Show, Generic, ToJSON, FromJSON)
-
--- | Session phases
-data Phase
-  = Surveying        -- ^ Gathering photos, function, anchors
-  | Sorting          -- ^ Main sorting loop: belongs/out/unsure
-  | Splitting        -- ^ Breaking unsure pile into categories
-  | Refining         -- ^ Working through sub-piles
-  | DecisionSupport  -- ^ Helping user decide on stuck item
+-- Each mode has its own:
+--   - Data fields (carried in the constructor)
+--   - Jinja template (selected by templateForMode)
+--   - Tool set (selected by toolsForMode)
+--   - Output schema (selected by schemaForMode)
+--
+-- The LLM navigates between modes via transition tools.
+-- When a transition tool is called:
+--   1. Tool args become the NEW mode's initial data
+--   2. ToolBreak ends the current turn
+--   3. Synthetic message injected
+--   4. New turn starts with new mode's template/tools
+data Mode
+  = Surveying SurveyingData
+    -- ^ Curious, orienting - "What is this space?"
+  | Sorting SortingData
+    -- ^ Terse, directive - "Keep moving. Next."
+  | Clarifying ClarifyingData
+    -- ^ Patient, descriptive - "Let me show you..."
+  | DecisionSupport DecisionSupportData
+    -- ^ Gentle, reframing - "What does this space need?"
+  | WindingDown WindingDownData
+    -- ^ Warm, factual - "Good stopping point."
   deriving (Eq, Show, Generic, ToJSON, FromJSON)
 
--- | Phase-specific data
+-- | Surveying mode data
 --
--- Each phase has different fields that are valid/required.
--- This sum type makes invalid states unrepresentable.
---
--- Every phase except Surveying has an 'ActiveState' containing
--- the common fields (function, anchors).
-data PhaseData
-  = SurveyingData
-      { sdGatheredFunction :: Maybe SpaceFunction
-        -- ^ Function being gathered (Nothing until user provides it)
-      , sdGatheredAnchors  :: [ItemName]
-        -- ^ Anchors gathered so far
-      }
-  | SortingData
-      { soActive      :: ActiveState
-        -- ^ Common state (function, anchors)
-      , soCurrentItem :: Maybe ItemName
-        -- ^ Item currently being discussed
-      }
-  | SplittingData
-      { spActive     :: ActiveState
-        -- ^ Common state (function, anchors)
-      , spCategories :: NonEmpty CategoryName
-        -- ^ Categories to split into (NonEmpty - must have at least one)
-      }
-  | RefiningData
-      { rfActive          :: ActiveState
-        -- ^ Common state (function, anchors)
-      , rfEmergentCats    :: Map CategoryName [ItemName]
-        -- ^ Categories and their items
-      , rfCurrentCategory :: CategoryName
-        -- ^ Required! Can't be refining without a category
-      , rfCurrentItem     :: Maybe ItemName
-      }
-  | DecisionSupportData
-      { dsActive      :: ActiveState
-        -- ^ Common state (function, anchors)
-      , dsStuckItem   :: ItemName
-        -- ^ Required! Can't be in decision support without a stuck item
-      , dsReturnPhase :: Phase
-        -- ^ Which phase to return to after decision
-      }
+-- Empty because discoveries (function, anchors) go to session-level fields.
+-- This keeps them persistent across mode transitions.
+data SurveyingData = SurveyingData
   deriving (Eq, Show, Generic, ToJSON, FromJSON)
+
+-- | Sorting mode data
+--
+-- Tracks the current item being discussed.
+data SortingData = SortingData
+  { sdCurrentItem  :: Maybe Text
+    -- ^ Item currently being discussed (name/description)
+  , sdItemLocation :: Maybe Text
+    -- ^ Where the item is in the photo (spatial context)
+  } deriving (Eq, Show, Generic, FromJSON)
+
+-- Custom ToJSON with snake_case field names for Jinja templates
+instance ToJSON SortingData where
+  toJSON SortingData{..} = object
+    [ "current_item" .= sdCurrentItem
+    , "item_location" .= sdItemLocation
+    ]
+
+-- | Clarifying mode data
+--
+-- When user can't identify an item, the LLM calls need_to_clarify
+-- which creates this data from the tool's arguments.
+data ClarifyingData = ClarifyingData
+  { cdItem         :: Text
+    -- ^ What item we're clarifying
+  , cdPhotoContext :: Text
+    -- ^ What we observed in the photo (location, nearby objects)
+  , cdReason       :: Text
+    -- ^ Why user is confused (their response)
+  } deriving (Eq, Show, Generic, FromJSON)
+
+-- Custom ToJSON with snake_case field names for Jinja templates
+instance ToJSON ClarifyingData where
+  toJSON ClarifyingData{..} = object
+    [ "item" .= cdItem
+    , "photo_context" .= cdPhotoContext
+    , "reason" .= cdReason
+    ]
+
+-- | Decision support mode data
+--
+-- When user seems stuck on an item, the LLM calls user_seems_stuck
+-- which creates this data from the tool's arguments.
+data DecisionSupportData = DecisionSupportData
+  { dsdStuckItem :: Text
+    -- ^ Which item they're stuck on
+  } deriving (Eq, Show, Generic, FromJSON)
+
+-- Custom ToJSON with snake_case field names for Jinja templates
+instance ToJSON DecisionSupportData where
+  toJSON DecisionSupportData{..} = object
+    [ "stuck_item" .= dsdStuckItem
+    ]
+
+-- | Winding down mode data
+--
+-- When LLM detects it's time to wrap up, it calls time_to_wrap
+-- which transitions to this mode.
+data WindingDownData = WindingDownData
+  { wdSessionSummary :: Maybe Text
+    -- ^ Summary of what was accomplished
+  , wdNextTime       :: [Text]
+    -- ^ Suggestions for next session
+  } deriving (Eq, Show, Generic, FromJSON)
+
+-- Custom ToJSON with snake_case field names for Jinja templates
+instance ToJSON WindingDownData where
+  toJSON WindingDownData{..} = object
+    [ "session_summary" .= wdSessionSummary
+    , "next_time" .= wdNextTime
+    ]
+
+-- ══════════════════════════════════════════════════════════════
+-- SESSION STATE
+-- ══════════════════════════════════════════════════════════════
 
 -- | Pile tracking
 data Piles = Piles
@@ -129,38 +172,38 @@ unsureCount p = length p.unsure
 
 -- | Main session state
 --
--- Note: The 'phase' is not stored; it's derived from 'phaseData'.
--- Use the 'phase' function to get the current phase.
+-- Mode carries mode-specific data (sum type).
+-- Session-level fields persist across mode transitions.
 data SessionState = SessionState
-  { phaseData      :: PhaseData
-    -- ^ Phase-specific data (phase is derived from this)
+  { mode           :: Mode
+    -- ^ Current mode (sum type with mode-specific data)
   , piles          :: Piles
     -- ^ Current pile contents
   , itemsProcessed :: Int
     -- ^ Count for progress tracking
   , sessionStart   :: Maybe UTCTime
     -- ^ When session started
+  -- Session-level fields (persist across modes):
+  , spaceFunction  :: Maybe SpaceFunction
+    -- ^ What this space is FOR (discovered in Surveying)
+  , anchors        :: [ItemName]
+    -- ^ Things that definitely stay (discovered in Surveying)
   } deriving (Eq, Show, Generic, ToJSON, FromJSON)
 
--- | Derive phase from PhaseData (not stored, computed)
---
--- This ensures phase and phaseData can never be inconsistent.
-phase :: SessionState -> Phase
-phase st = case st.phaseData of
-  SurveyingData {}        -> Surveying
-  SortingData {}          -> Sorting
-  SplittingData {}        -> Splitting
-  RefiningData {}         -> Refining
-  DecisionSupportData {}  -> DecisionSupport
-
--- | Fresh session
+-- | Fresh session starts in Surveying mode
 newSession :: SessionState
 newSession = SessionState
-  { phaseData = SurveyingData Nothing []
+  { mode = Surveying SurveyingData
   , piles = emptyPiles
   , itemsProcessed = 0
   , sessionStart = Nothing
+  , spaceFunction = Nothing
+  , anchors = []
   }
+
+-- ══════════════════════════════════════════════════════════════
+-- USER INPUT
+-- ══════════════════════════════════════════════════════════════
 
 -- | Photo wrapper (base64 or URL)
 data Photo = Photo
@@ -175,76 +218,13 @@ data UserInput = UserInput
   } deriving (Eq, Show, Generic, ToJSON, FromJSON)
 
 -- ══════════════════════════════════════════════════════════════
--- ACCESSORS FOR PHASE-SPECIFIC DATA
--- ══════════════════════════════════════════════════════════════
-
--- | Get ActiveState from any post-surveying phase
---
--- Returns Nothing only during Surveying.
-getActiveState :: SessionState -> Maybe ActiveState
-getActiveState st = case st.phaseData of
-  SurveyingData {}        -> Nothing
-  SortingData a _         -> Just a
-  SplittingData a _       -> Just a
-  RefiningData a _ _ _    -> Just a
-  DecisionSupportData a _ _ -> Just a
-
--- | Get function from any phase (Nothing only in Surveying before set)
-getFunction :: SessionState -> Maybe SpaceFunction
-getFunction st = case st.phaseData of
-  SurveyingData mf _ -> mf
-  _                  -> (.asFunction) <$> getActiveState st
-
--- | Get anchors from any phase
-getAnchors :: SessionState -> [ItemName]
-getAnchors st = case st.phaseData of
-  SurveyingData _ a -> a
-  _                 -> maybe [] (.asAnchors) (getActiveState st)
-
--- | Get current item being discussed (if any)
-getCurrentItem :: SessionState -> Maybe ItemName
-getCurrentItem st = case st.phaseData of
-  SurveyingData {}        -> Nothing
-  SortingData _ i         -> i
-  SplittingData {}        -> Nothing
-  RefiningData _ _ _ i    -> i
-  DecisionSupportData _ i _ -> Just i  -- stuck item is the current item
-
--- | Get current category being refined (only valid in Refining phase)
-getCurrentCategory :: SessionState -> Maybe CategoryName
-getCurrentCategory st = case st.phaseData of
-  RefiningData _ _ c _ -> Just c
-  _                    -> Nothing
-
--- | Get emergent categories (only valid in Refining phase)
-getEmergentCats :: SessionState -> Map CategoryName [ItemName]
-getEmergentCats st = case st.phaseData of
-  RefiningData _ cats _ _ -> cats
-  _                       -> Map.empty
-
--- ══════════════════════════════════════════════════════════════
 -- HELPERS
 -- ══════════════════════════════════════════════════════════════
 
-hasFunction :: SessionState -> Bool
-hasFunction st = case getFunction st of
-  Just (SpaceFunction t) -> not (T.null t)
-  Nothing -> False
-
-hasAnchors :: SessionState -> Bool
-hasAnchors st = not (null (getAnchors st))
-
--- | Detect overwhelm signals in user text
-isOverwhelmedSignal :: Maybe Text -> Bool
-isOverwhelmedSignal Nothing = False
-isOverwhelmedSignal (Just t) = any (`T.isInfixOf` T.toLower t) signals
-  where
-    signals =
-      [ "idk"
-      , "don't know"
-      , "no idea"
-      , "where to start"
-      , "overwhelm"
-      , "too much"
-      , "help"
-      ]
+-- | Get mode name for display/debugging
+modeName :: Mode -> Text
+modeName (Surveying _)       = "Surveying"
+modeName (Sorting _)         = "Sorting"
+modeName (Clarifying _)      = "Clarifying"
+modeName (DecisionSupport _) = "DecisionSupport"
+modeName (WindingDown _)     = "WindingDown"

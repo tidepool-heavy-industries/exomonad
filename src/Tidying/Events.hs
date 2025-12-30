@@ -8,17 +8,16 @@ module Tidying.Events
   ) where
 
 import Data.Text (Text)
-import Tidying.State (Phase)
-import Tidying.Action (Action)
+import Tidying.State (Mode)
 
 -- | Events emitted during tidying
 data TidyingEvent
   = PhotoAnalyzed Text          -- ^ Photo was analyzed
-  | SituationClassified Text    -- ^ Situation was classified
-  | ActionTaken Action          -- ^ Action was taken
-  | PhaseChanged Phase Phase    -- ^ Phase transition (from, to)
+  | SituationClassified Text    -- ^ Situation was classified (deprecated, will be removed)
+  | ModeChanged Mode Mode       -- ^ Mode transition (from, to)
   | SessionEnded Int            -- ^ Session ended, items processed
   | UserInputReceived Text      -- ^ User input received (for chat display)
+  | PhotoUploaded Text Text     -- ^ Photo uploaded: base64, mimeType
   | ResponseGenerated Text      -- ^ Response generated (for chat display)
   | ErrorOccurred Text          -- ^ Error occurred (for visible feedback)
   -- Tool events (from mid-turn tool calls)

@@ -46,6 +46,8 @@ import Tidepool.GUI.Core
   ( GUIBridge(..)
   , PendingRequest(..)
   , RequestResponse(..)
+  , ChatMessage(..)
+  , addChatMessage
   , addNarrative
   , logDebug
   , logInfo
@@ -103,43 +105,47 @@ tidyingGameLoopWithGUI bridge = do
         , onTurnEnd = setLLMActive bridge False
         }
 
-  -- Event handler - routes events to GUI
+  -- Event handler - routes events to GUI using typed ChatMessage
   let handleEvent :: TidyingEvent -> IO ()
       handleEvent = \case
         UserInputReceived input ->
-          -- Prefix with "> " so chat parser shows as user message
-          addNarrative bridge $ "> " <> input
+          addChatMessage bridge $ UserMessage input
+
+        PhotoUploaded base64 mime ->
+          addChatMessage bridge $ PhotoMessage base64 mime
 
         ResponseGenerated resp ->
-          addNarrative bridge resp
+          addChatMessage bridge $ SystemMessage resp
 
         PhotoAnalyzed info ->
-          addNarrative bridge $ "Analyzing your photo... " <> info
+          addChatMessage bridge $ SystemMessage $ "Analyzing your photo... " <> info
 
         SituationClassified situation ->
           logInfo bridge $ "ORIENT: " <> situation
 
-        ActionTaken action ->
-          logInfo bridge $ "DECIDE: " <> T.pack (show action)
+        ModeChanged _old new ->
+          logInfo bridge $ "MODE: " <> T.pack (show new)
 
-        PhaseChanged _old new -> do
-          -- State is synced separately, just log phase change
-          logInfo bridge $ "PHASE: " <> T.pack (show new)
+        ErrorOccurred err ->
+          logWarn bridge $ "ERROR: " <> err
 
         SessionEnded itemsProcessed ->
-          addNarrative bridge $ "Session complete! You processed "
-            <> T.pack (show itemsProcessed) <> " items."
+          addChatMessage bridge $ SystemMessage $
+            "Session complete! You processed " <> T.pack (show itemsProcessed) <> " items."
 
         -- Tool events (from mid-turn tool calls)
-        ItemProposed item choices ->
-          logInfo bridge $ "TOOL: propose_disposition for '" <> item
-            <> "' with choices: " <> T.intercalate ", " choices
+        ItemProposed item choices -> do
+          let prompt = "What about: " <> item <> "?"
+          addChatMessage bridge $ ChoicesMessage prompt choices
+          logInfo bridge $ "TOOL: propose_disposition for '" <> item <> "'"
 
-        UserConfirmed item disposition ->
-          addNarrative bridge $ "Got it! " <> item <> " -> " <> disposition
+        UserConfirmed item disposition -> do
+          addChatMessage bridge $ SelectedMessage disposition
+          addChatMessage bridge $ SystemMessage $ "Got it! " <> item <> " → " <> disposition
 
-        UserCorrected item location ->
-          addNarrative bridge $ "Thanks for the correction! " <> item <> " -> " <> location
+        UserCorrected item location -> do
+          addChatMessage bridge $ SelectedMessage $ location <> " (custom)"
+          addChatMessage bridge $ SystemMessage $ "Got it! " <> item <> " → " <> location
 
         FunctionChosen fn ->
           logInfo bridge $ "TOOL: Space function set to '" <> fn <> "'"
@@ -148,8 +154,7 @@ tidyingGameLoopWithGUI bridge = do
           logInfo bridge "TOOL: User confirmed session done"
 
         ErrorOccurred err -> do
-          -- Show errors visibly in both narrative and debug
-          addNarrative bridge $ "⚠️ " <> err
+          addChatMessage bridge $ ErrorMessage err
           logWarn bridge $ "ERROR: " <> err
 
   -- Create the question handler for tools to use

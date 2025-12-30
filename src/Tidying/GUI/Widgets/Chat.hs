@@ -3,6 +3,8 @@
 --
 -- Provides a sequential chat interface with system messages (left),
 -- user messages (right), and photo thumbnails.
+--
+-- Uses typed ChatMessage instead of string parsing for reliable rendering.
 module Tidying.GUI.Widgets.Chat
   ( -- * Chat pane
     chatPane
@@ -15,14 +17,14 @@ module Tidying.GUI.Widgets.Chat
   ) where
 
 import Control.Concurrent.STM (atomically, readTVar)
-import Control.Monad (void)
+import Control.Monad (void, forM)
 import Data.Foldable (toList)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Graphics.UI.Threepenny.Core
 import qualified Graphics.UI.Threepenny as UI
 
-import Tidepool.GUI.Core (GUIBridge(..))
+import Tidepool.GUI.Core (GUIBridge(..), ChatMessage(..))
 
 -- | Create the chat pane container
 --
@@ -33,13 +35,11 @@ chatPane = UI.div #. "chat-pane"
 
 -- | Update the chat pane with messages from the narrative log
 --
--- Messages are parsed to determine if they're system or user messages.
--- Lines starting with "> " are treated as user input.
+-- Pattern-matches on ChatMessage constructors for type-safe rendering.
 updateChatPane :: Element -> GUIBridge state -> UI ()
 updateChatPane container bridge = do
   entries <- liftIO $ atomically $ readTVar bridge.gbNarrativeLog
-  let messages = map parseMessage (toList entries)
-  messageEls <- mapM renderMessage messages
+  messageEls <- mapM renderMessage (toList entries)
 
   void $ element container # set children []
   void $ element container #+ map element messageEls
@@ -47,46 +47,14 @@ updateChatPane container bridge = do
   -- Auto-scroll to bottom
   runFunction $ ffi "$(%1).scrollTop($(%1)[0].scrollHeight)" container
 
--- | Message types for rendering
-data MessageType
-  = SystemMsg Text
-  | UserMsg Text
-  | PhotoMsg Text Text  -- base64 data, mime type
-  deriving (Eq, Show)
-
--- | Parse a narrative log entry into a message type
---
--- Convention:
--- - Lines starting with "> " are user input
--- - Lines starting with "[photo:" are photo references (format: [photo:data:image/TYPE;base64,DATA])
--- - Everything else is system messages
-parseMessage :: Text -> MessageType
-parseMessage txt
-  | "> " `T.isPrefixOf` txt = UserMsg (T.drop 2 txt)
-  | "[photo:" `T.isPrefixOf` txt = parsePhotoRef txt
-  | otherwise = SystemMsg txt
-  where
-    -- Parse "[photo:data:image/jpeg;base64,...]" format
-    -- Falls back to SystemMsg if format doesn't match
-    parsePhotoRef t =
-      let content = T.drop 7 $ T.dropEnd 1 t  -- Remove "[photo:" and "]"
-          (mimeWithPrefix, dataWithPrefix) = T.breakOn ";base64," content
-      in if T.null dataWithPrefix
-         then SystemMsg txt  -- Malformed: no ";base64," found
-         else
-           let base64Data = T.drop 8 dataWithPrefix  -- Remove ";base64,"
-               mime = if "data:" `T.isPrefixOf` mimeWithPrefix
-                      then T.drop 5 mimeWithPrefix  -- Remove "data:" prefix
-                      else mimeWithPrefix
-           in if T.null base64Data
-              then SystemMsg txt  -- Malformed: empty base64 data
-              else PhotoMsg base64Data mime
-
--- | Render a message based on its type
-renderMessage :: MessageType -> UI Element
-renderMessage (SystemMsg txt) = systemMessage txt
-renderMessage (UserMsg txt) = userMessage txt
-renderMessage (PhotoMsg base64 mime) = photoMessage base64 mime
+-- | Render a ChatMessage to a UI element
+renderMessage :: ChatMessage -> UI Element
+renderMessage (SystemMessage txt) = systemMessage txt
+renderMessage (UserMessage txt) = userMessage txt
+renderMessage (PhotoMessage base64 mime) = photoMessage base64 mime
+renderMessage (ChoicesMessage prompt choices) = choicesMessage prompt choices
+renderMessage (SelectedMessage txt) = selectedMessage txt
+renderMessage (ErrorMessage txt) = errorMessage txt
 
 -- | Create a system message bubble (left-aligned)
 systemMessage :: Text -> UI Element
@@ -116,6 +84,36 @@ photoMessage base64Data mimeType = do
 
   void $ element container #+ [element img, element caption]
   pure container
+
+-- | Create a choices message showing what options were presented
+choicesMessage :: Text -> [Text] -> UI Element
+choicesMessage prompt choices = do
+  container <- UI.div #. "chat-message chat-message-system chat-choices"
+
+  promptEl <- UI.div #. "chat-choices-prompt"
+    # set text (T.unpack prompt)
+
+  choicesEl <- UI.div #. "chat-choices-options"
+
+  choiceBtns <- forM choices $ \choice ->
+    UI.span #. "chat-choice-badge"
+      # set text (T.unpack choice)
+
+  void $ element choicesEl #+ map element choiceBtns
+  void $ element container #+ [element promptEl, element choicesEl]
+  pure container
+
+-- | Create a selected message (right-aligned, shows user's choice)
+selectedMessage :: Text -> UI Element
+selectedMessage txt =
+  UI.div #. "chat-message chat-message-user chat-selected"
+    # set text (T.unpack $ "✓ " <> txt)
+
+-- | Create an error message (left-aligned, warning style)
+errorMessage :: Text -> UI Element
+errorMessage txt =
+  UI.div #. "chat-message chat-message-system chat-error"
+    # set text (T.unpack $ "⚠️ " <> txt)
 
 -- | Create a typing indicator (animated dots)
 --
