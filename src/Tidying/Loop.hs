@@ -100,7 +100,14 @@ tidyingTurn input = do
   -- EXTRACT: Get structured info from user input
   -- LLM extracts facts, Haskell decides what to do
   -- Pass photo analysis so extraction LLM knows what was seen
-  extract <- extractFromInput mPhotoAnalysis input
+  rawExtract <- extractFromInput mPhotoAnalysis input
+
+  -- Apply overwhelm signal heuristic as backup for LLM classification
+  -- If user shows overwhelm signals but LLM didn't classify as Help, upgrade intent
+  let extract = if isOverwhelmedSignal input.inputText
+                   && rawExtract.exIntent `notElem` [IntentHelp, IntentStop]
+                then rawExtract { exIntent = IntentHelp }
+                else rawExtract
 
   logInfo $ "Extract: " <> T.pack (show extract)
   emit $ SituationClassified (T.pack $ show extract.exIntent)

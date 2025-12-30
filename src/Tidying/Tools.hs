@@ -194,7 +194,6 @@ executeProposeDisposition askQuestion input = do
     toChoice pc = Q.Choice
       { Q.choiceLabel = pc.pcLabel
       , Q.choiceValue = parseDisposition pc
-      , Q.choiceReveals = Nothing
       }
 
     parseDisposition :: ProposedChoice -> Q.ItemDisposition

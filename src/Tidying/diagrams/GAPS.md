@@ -1,12 +1,56 @@
 # Diagrams vs Actual System: Gap Analysis
 
-No gaps. Diagrams accurately reflect the codebase.
+No gaps. All documented gaps have been fixed.
 
 ---
 
-## Completed Work
+## Recently Fixed (Phase 6)
 
-All gaps between diagrams and code have been addressed:
+### 1. Dead Code: `isOverwhelmedSignal` ✅
+
+**Problem:** Function defined in State.hs but never called in routing logic.
+
+**Fix:** Wired into Loop.hs:105-110 as extraction post-processor. Now upgrades intent to `IntentHelp` when overwhelm signals detected but LLM didn't classify as help.
+
+---
+
+### 2. TidyingEvent Count Typo ✅
+
+**Problem:** tool-execution.md said "11 Events" but there were 12.
+
+**Fix:** Updated header to "All 12 Events".
+
+---
+
+### 3. Choice.choiceReveals Field Inconsistency ✅
+
+**Problem:** Tools.hs:197 referenced `Q.choiceReveals` which didn't exist in Question.hs.
+
+**Fix:** Removed stale field reference from Tools.hs:197. This was dead code from when reveals feature was removed.
+
+---
+
+### 4. Missing Transition Paths in state-machine.md ✅
+
+**Problem:** Surveying → Sorting triggers table was incomplete.
+
+**Fix:** Added all fast-track paths:
+- Buried chaos
+- hasBlockedFunction + hasFunction
+- overwhelmed signal + hasFunction
+- hasFunction + hasAnchors
+
+---
+
+### 5. Canned Response Table Inaccuracies ✅
+
+**Problem:** AskItemDecision incorrectly listed as LLM-generated; 5 canned responses missing.
+
+**Fix:** Updated table with all 11 canned responses and correct text from Act.hs.
+
+---
+
+## Previously Completed Work
 
 ### Code Cleanup (Phases 1-3)
 - Removed legacy Situation-based routing system

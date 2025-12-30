@@ -170,7 +170,7 @@ fallbackAnswer = \case
   FreeText _ _             -> TextAnswer ""
 ```
 
-## TidyingEvent List (All 11 Events)
+## TidyingEvent List (All 12 Events)
 
 | Event | Description |
 |-------|-------------|

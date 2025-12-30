@@ -77,7 +77,10 @@ classDiagram
 | From | To | Trigger |
 |------|-----|---------|
 | Surveying | Surveying | AskFunction, AskAnchors |
-| Surveying | Sorting | hasFunction + (hasAnchors OR Buried chaos) |
+| Surveying | Sorting | Buried chaos |
+| Surveying | Sorting | hasBlockedFunction + hasFunction |
+| Surveying | Sorting | overwhelmed signal + hasFunction |
+| Surveying | Sorting | hasFunction + hasAnchors |
 | Sorting | Sorting | InstructTrash, InstructPlace, InstructUnsure, InstructNext |
 | Sorting | Splitting | ChoiceUnsure + unsureCount >= 5 |
 | Sorting | DecisionSupport | IntentHelp or Stuck |
@@ -121,13 +124,17 @@ mindmap
 
 | Canned (no LLM) | LLM-Generated |
 |-----------------|---------------|
-| InstructTrash → "Trashed! Next?" | FirstInstruction |
-| InstructUnsure → "Unsure pile. Next?" | AskItemDecision |
-| InstructNext → "Next?" | DecisionAid |
-| InstructBag → "Bag the trash." | PivotAway |
-| InstructPlace → "Put it on [loc]. Next." | Summary |
-| | AckProgress |
-| | InstructSplit |
+| AskFunction → "What do you need to DO in this space?" | FirstInstruction |
+| AskAnchors → "What's definitely staying no matter what?" | DecisionAid |
+| AskWhatIsIt → "What is it?" | PivotAway |
+| AskWhereLive → "Desk or somewhere else?" | Summary |
+| AskItemDecision → "[item]. Trash, keep, or not sure?" | AckProgress |
+| InstructTrash → "Trash. Toss it by the door. Next." | InstructSplit |
+| InstructUnsure → "Unsure pile, floor to your right. Next." | |
+| InstructNext → "Next thing." | |
+| InstructBag → "Bag the trash by the door." | |
+| InstructPlace → "[loc]. Next." | |
+| EnergyCheck → "Energy check: keep going, or stop here for today?" | |
 
 ## Split Suggestion Patterns
 
