@@ -15,7 +15,6 @@
 --
 -- * Implicit (Schema → Needs): @-->@ solid arrow
 -- * Explicit (Goto): @-->@ solid arrow
--- * Conditional (from When): @-.->@ dashed arrow
 --
 -- = Example Output
 --
@@ -167,13 +166,11 @@ nodeToNodeEdges config info node =
     schemaEdges = case node.niSchema of
       Nothing -> []
       Just schemaType ->
-        [ "    " <> escapeName node.niName <> arrow <> "|" <> typeLabel config schemaType <> "| " <> escapeName target.niName
+        [ "    " <> escapeName node.niName <> " --> |" <> typeLabel config schemaType <> "| " <> escapeName target.niName
         | target <- info.giNodes
         , schemaType `elem` target.niNeeds
         , target.niName /= node.niName  -- No self-loops from schema
         ]
-        where
-          arrow = if node.niIsConditional then " -.-> " else " --> "
 
     -- Goto edges (explicit)
     gotoEdges =

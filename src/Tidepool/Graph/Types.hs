@@ -43,10 +43,10 @@ module Tidepool.Graph.Types
   , type (:@)
   , Needs
   , Schema
+  , System
   , Template
   , Vision
   , Tools
-  , When
   , Eff
   , Memory
 
@@ -137,7 +137,20 @@ data Needs types
 type Schema :: Type -> Type
 data Schema output
 
--- | The prompt template type for an LLM node.
+-- | System prompt template for an LLM node. Rendered before the user prompt.
+-- Uses a separate TemplateDef from the user 'Template' annotation.
+--
+-- @
+-- "classify" := LLM
+--     :@ System ClassifySystemTpl   -- System prompt (optional)
+--     :@ Template ClassifyUserTpl   -- User prompt
+--     :@ Schema Intent
+-- @
+type System :: Type -> Type
+data System tpl
+
+-- | User prompt template for an LLM node. This is the main prompt that
+-- contains the request/context for the LLM.
 type Template :: Type -> Type
 data Template tpl
 
@@ -147,11 +160,6 @@ data Vision
 -- | List of tools available to an LLM node during execution.
 type Tools :: [Type] -> Type
 data Tools tools
-
--- | Conditional execution. The node only runs if the condition is satisfied.
--- Downstream nodes receive 'Maybe' of this node's output.
-type When :: Type -> Type
-data When condition
 
 -- | Effect stack for Logic nodes. Contains the effects the handler can use,
 -- including 'Goto' effects for transitions.

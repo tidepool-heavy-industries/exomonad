@@ -92,10 +92,10 @@ module Tidepool.Graph
   , type (:@)
   , Needs
   , Schema
+  , System
   , Template
   , Vision
   , Tools
-  , When
   , Eff
   , Memory
 

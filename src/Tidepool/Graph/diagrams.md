@@ -141,7 +141,7 @@ sequenceDiagram
 
 ## AnnotatedGraph
 
-A graph with various annotations: Template, Vision, Tools, When.
+A graph with various annotations: Template, Vision, Tools.
 
 ```haskell
 type AnnotatedGraph = Graph
@@ -152,10 +152,9 @@ type AnnotatedGraph = Graph
        :@ Template MyTemplate
        :@ Vision
        :@ Tools '[PhotoTool]
-   , "conditional" := LLM
+   , "respond" := LLM
        :@ Needs '[Intent]
        :@ Schema Response
-       :@ When Intent  -- Only runs when Intent is present
    , Exit :<~ Response
    ]
 ```
@@ -167,11 +166,11 @@ flowchart TD
     entry((start))
     exit__((end))
     analyze[["analyze<br/>LLM"]]
-    conditional[["conditional<br/>LLM"]]
+    respond[["respond<br/>LLM"]]
 
     entry --> |Message| analyze
-    analyze --> |Intent| conditional
-    conditional --> |Response| exit__
+    analyze --> |Intent| respond
+    respond --> |Response| exit__
 ```
 
 ### State Diagram
@@ -179,11 +178,11 @@ flowchart TD
 ```mermaid
 stateDiagram-v2
     analyze : LLM
-    conditional : LLM
+    respond : LLM
 
     [*] --> analyze: Message
-    analyze --> conditional: Intent
-    conditional --> [*]: Response
+    analyze --> respond: Intent
+    respond --> [*]: Response
 ```
 
 ---
@@ -210,4 +209,3 @@ not roots because they have incoming Goto edges.
 
 - **Schema → Needs**: Implicit data flow (solid arrow)
 - **Goto**: Explicit control flow (solid arrow)
-- **When**: Conditional edges (dashed arrow `-.->`)

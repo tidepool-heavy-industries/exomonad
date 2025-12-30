@@ -26,7 +26,6 @@
 -- Additionally:
 --
 -- * Entry provides the graph input type to all nodes that need it
--- * Conditional nodes (with 'When') produce 'Maybe' edges
 module Tidepool.Graph.Edges
   ( -- * Edge Type
     EdgeKind(..)
@@ -35,7 +34,7 @@ module Tidepool.Graph.Edges
   , GetNeeds
   , GetSchema
   , GetEff
-  , GetWhen
+  , GetSystem
   , GetTemplate
   , GetVision
   , GetTools
@@ -50,7 +49,6 @@ module Tidepool.Graph.Edges
   , ExtractGotoPayload
 
     -- * Node Queries
-  , IsConditional
   , HasAnnotation
   , FindAnnotation
 
@@ -76,7 +74,6 @@ import Tidepool.Graph.Goto (Goto)
 data EdgeKind
   = ImplicitEdge      -- ^ Data flow via Schema → Needs (solid arrow)
   | ExplicitEdge      -- ^ Transition via Goto (solid arrow)
-  | ConditionalEdge   -- ^ From a When-guarded node (dashed arrow)
   deriving (Show, Eq)
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -121,12 +118,17 @@ type family GetEff node where
   GetEff (node :@ Eff effs) = 'Just effs
   GetEff (node :@ _) = GetEff node
 
--- | Extract the When condition from a node.
-type GetWhen :: Type -> Maybe Type
-type family GetWhen node where
-  GetWhen (_ := _) = 'Nothing
-  GetWhen (node :@ When cond) = 'Just cond
-  GetWhen (node :@ _) = GetWhen node
+-- | Extract the System template type from a node.
+--
+-- @
+-- GetSystem ("classify" := LLM :@ System SysTpl :@ Template UserTpl :@ Schema Intent)
+--   = 'Just SysTpl
+-- @
+type GetSystem :: Type -> Maybe Type
+type family GetSystem node where
+  GetSystem (_ := _) = 'Nothing
+  GetSystem (node :@ System t) = 'Just t
+  GetSystem (node :@ _) = GetSystem node
 
 -- | Extract the Template type from a node.
 type GetTemplate :: Type -> Maybe Type
@@ -214,11 +216,6 @@ type family GetGotoExitPayload effs where
 -- NODE QUERIES
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Check if a node is conditional (has When annotation).
-type IsConditional :: Type -> Bool
-type family IsConditional node where
-  IsConditional node = IsJust (GetWhen node)
-
 -- | Check if a node has a specific annotation type.
 type HasAnnotation :: Type -> Type -> Bool
 type family HasAnnotation node annType where
@@ -231,9 +228,9 @@ type SameAnnotationType :: Type -> Type -> Bool
 type family SameAnnotationType ann target where
   SameAnnotationType (Needs _) (Needs _) = 'True
   SameAnnotationType (Schema _) (Schema _) = 'True
+  SameAnnotationType (System _) (System _) = 'True
   SameAnnotationType (Template _) (Template _) = 'True
   SameAnnotationType (Tools _) (Tools _) = 'True
-  SameAnnotationType (When _) (When _) = 'True
   SameAnnotationType (Eff _) (Eff _) = 'True
   SameAnnotationType (Memory _) (Memory _) = 'True
   SameAnnotationType Vision Vision = 'True

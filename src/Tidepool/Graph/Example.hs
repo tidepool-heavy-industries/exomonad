@@ -185,10 +185,9 @@ type AnnotatedGraph = Graph
        :@ Template MyTemplate
        :@ Vision
        :@ Tools '[PhotoTool]
-   , "conditional" := LLM
+   , "respond" := LLM
        :@ Needs '[Intent]
        :@ Schema Response
-       :@ When Intent  -- Only runs when Intent is present
    , Exit :<~ Response
    ]
 
@@ -384,10 +383,10 @@ simpleGraphInfo = GraphInfo
           , niSchema = Just (typeRep (Proxy @Intent))
           , niGotoTargets = []
           , niHasGotoExit = False
-          , niIsConditional = False
           , niHasVision = False
           , niTools = []
           , niToolInfos = []
+          , niSystem = Nothing
           , niTemplate = Nothing
           , niMemory = Nothing
           }
@@ -398,10 +397,10 @@ simpleGraphInfo = GraphInfo
           , niSchema = Just (typeRep (Proxy @Response))
           , niGotoTargets = []
           , niHasGotoExit = True  -- Last node exits
-          , niIsConditional = False
           , niHasVision = False
           , niTools = []
           , niToolInfos = []
+          , niSystem = Nothing
           , niTemplate = Nothing
           , niMemory = Nothing
           }
@@ -426,10 +425,10 @@ branchingGraphInfo = GraphInfo
               , ("answer", typeRep (Proxy @Message))
               ]
           , niHasGotoExit = True  -- Can also exit directly
-          , niIsConditional = False
           , niHasVision = False
           , niTools = []
           , niToolInfos = []
+          , niSystem = Nothing
           , niTemplate = Nothing
           , niMemory = Nothing
           }
@@ -440,10 +439,10 @@ branchingGraphInfo = GraphInfo
           , niSchema = Just (typeRep (Proxy @Response))
           , niGotoTargets = []
           , niHasGotoExit = True
-          , niIsConditional = False
           , niHasVision = False
           , niTools = []
           , niToolInfos = []
+          , niSystem = Nothing
           , niTemplate = Nothing
           , niMemory = Nothing
           }
@@ -454,10 +453,10 @@ branchingGraphInfo = GraphInfo
           , niSchema = Just (typeRep (Proxy @Response))
           , niGotoTargets = []
           , niHasGotoExit = True
-          , niIsConditional = False
           , niHasVision = False
           , niTools = []
           , niToolInfos = []
+          , niSystem = Nothing
           , niTemplate = Nothing
           , niMemory = Nothing
           }
@@ -479,24 +478,24 @@ annotatedGraphInfo = GraphInfo
           , niSchema = Just (typeRep (Proxy @Intent))
           , niGotoTargets = []
           , niHasGotoExit = False
-          , niIsConditional = False
           , niHasVision = True
           , niTools = [typeRep (Proxy @PhotoTool)]
           , niToolInfos = []  -- Would be populated by reification
+          , niSystem = Nothing
           , niTemplate = Just (typeRep (Proxy @MyTemplate))
           , niMemory = Nothing
           }
       , NodeInfo
-          { niName = "conditional"
+          { niName = "respond"
           , niKind = RuntimeLLM
           , niNeeds = [typeRep (Proxy @Intent)]
           , niSchema = Just (typeRep (Proxy @Response))
           , niGotoTargets = []
           , niHasGotoExit = True
-          , niIsConditional = True  -- Has When annotation
           , niHasVision = False
           , niTools = []
           , niToolInfos = []
+          , niSystem = Nothing
           , niTemplate = Nothing
           , niMemory = Nothing
           }

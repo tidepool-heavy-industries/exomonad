@@ -57,11 +57,11 @@ data NodeInfo = NodeInfo
   , niSchema :: Maybe TypeRep    -- ^ Schema output type (LLM nodes)
   , niGotoTargets :: [(Text, TypeRep)]  -- ^ Goto targets (Logic nodes)
   , niHasGotoExit :: Bool        -- ^ Can this node exit the graph?
-  , niIsConditional :: Bool      -- ^ Has When annotation?
   , niHasVision :: Bool          -- ^ Has Vision annotation?
   , niTools :: [TypeRep]         -- ^ Tool types (for backwards compat)
   , niToolInfos :: [ToolInfo]    -- ^ Full tool info with schemas (V2)
-  , niTemplate :: Maybe TypeRep  -- ^ Template type
+  , niSystem :: Maybe TypeRep    -- ^ System prompt template type
+  , niTemplate :: Maybe TypeRep  -- ^ User prompt template type
   , niMemory :: Maybe TypeRep    -- ^ Memory type (node-private persistent state)
   }
   deriving (Show, Eq)
@@ -83,7 +83,6 @@ data RuntimeNodeKind = RuntimeLLM | RuntimeLogic
 data RuntimeEdgeKind
   = RuntimeImplicit    -- ^ Schema → Needs (data flow)
   | RuntimeExplicit    -- ^ Goto (transition)
-  | RuntimeConditional -- ^ From When-guarded node
   deriving (Show, Eq)
 
 -- ════════════════════════════════════════════════════════════════════════════

@@ -96,11 +96,12 @@ infixl 7 :@  -- Left-associative, lower precedence than :=
 -- Available annotations:
 Needs '[Type, ...]    -- Input dependencies (becomes handler params)
 Schema Type           -- Output type (LLM nodes)
-Template Type         -- Prompt template type
+System Type           -- System prompt template (optional, LLM nodes)
+Template Type         -- User prompt template (LLM nodes)
 Vision                -- Marker for vision/image input
 Tools '[Type, ...]    -- Available tools during LLM call
-When Type             -- Conditional execution guard
 Eff '[Effect, ...]    -- Effect stack (Logic nodes, includes Goto)
+Memory Type           -- Node-private persistent state
 ```
 
 #### Operator Precedence
@@ -276,10 +277,11 @@ type GetEff :: forall k. Type -> Maybe [k]
 GetEff ("foo" := Logic :@ Eff '[State S, Goto "bar" X]) = 'Just '[State S, Goto "bar" X]
 
 -- Other extractors
-type GetWhen :: Type -> Maybe Type
-type GetTemplate :: Type -> Maybe Type
+type GetSystem :: Type -> Maybe Type    -- System prompt template
+type GetTemplate :: Type -> Maybe Type  -- User prompt template
 type GetVision :: Type -> Bool
 type GetTools :: Type -> [Type]
+type GetMemory :: Type -> Maybe Type
 ```
 
 #### Goto Target Extraction
@@ -373,10 +375,11 @@ data NodeInfo = NodeInfo
   , niSchema :: Maybe TypeRep
   , niGotoTargets :: [(Text, TypeRep)]
   , niHasGotoExit :: Bool
-  , niIsConditional :: Bool
   , niHasVision :: Bool
   , niTools :: [TypeRep]
-  , niTemplate :: Maybe TypeRep
+  , niSystem :: Maybe TypeRep      -- System prompt template
+  , niTemplate :: Maybe TypeRep    -- User prompt template
+  , niMemory :: Maybe TypeRep      -- Node-private state type
   }
 
 -- Typeclass for reification (implement via TH or manually)
@@ -411,7 +414,6 @@ data MermaidConfig = MermaidConfig
 #### Edge Styles
 - Implicit (Schema → Needs): `-->` solid arrow
 - Explicit (Goto): `-->` solid arrow
-- Conditional (from When): `-.->` dashed arrow
 
 ### TH.hs - Template Haskell
 
@@ -500,21 +502,6 @@ type FanInGraph = Graph
    , "analyze" := LLM :@ Needs '[Input] :@ Schema Analysis
    , "enrich"  := LLM :@ Needs '[Input] :@ Schema Enrichment
    , "combine" := LLM :@ Needs '[Analysis, Enrichment] :@ Schema Output
-   , Exit :<~ Output
-   ]
-```
-
-### Conditional Execution
-
-```haskell
-type ConditionalGraph = Graph
-  '[ Entry :~> Input
-   , "check" := LLM :@ Needs '[Input] :@ Schema (Maybe Flag)
-   , "conditional" := LLM
-       :@ Needs '[Input]
-       :@ Schema Extra
-       :@ When Flag  -- Only runs if Flag present
-   , "final" := LLM :@ Needs '[Input, Extra] :@ Schema Output  -- Gets Maybe Extra
    , Exit :<~ Output
    ]
 ```
@@ -651,6 +638,44 @@ instance ReifyGraph MyGraph where
 **Cause**: Effect list has wrong kind (e.g., `[Type]` instead of `[Effect]`)
 
 **Solution**: Ensure effects in `Eff '[...]` are actual effectful effects with kind `(Type -> Type) -> Type -> Type`.
+
+## Known Limitations
+
+These are intentional simplifications for the initial implementation:
+
+### LLM Configuration Hardcoded
+
+The LLM model and parameters (model, temperature, etc.) are currently hardcoded
+in the LLM effect interpreter:
+- **Model**: Claude Haiku 4.5 (for fast iteration during development)
+- **Temperature**: Default (not configurable per-node)
+
+**Future work**: Add node-level or graph-level LLM configuration annotations.
+
+### Retry Logic Hardcoded
+
+Retry behavior for LLM calls is hardcoded in the LLM effect:
+- Fixed retry count and backoff strategy
+- No per-node retry configuration
+
+**Future work**: Consider `Retry` annotation or graph-level retry policy.
+
+### Vision Input Handling TBD
+
+The `Vision` annotation marks a node as accepting image input, but:
+- How images are passed (which input in `Needs`) is not yet defined
+- Multi-image handling unclear
+- Base64 vs URL handling unclear
+
+**Future work**: Research multimodal input patterns and design appropriate DSL.
+
+### Handler Provision for Logic Nodes
+
+Logic nodes need user-provided handlers, but:
+- How the runtime receives handlers is not yet designed
+- Handler signature derivation via TH is incomplete
+
+**Future work**: Design handler record generation and runtime wiring.
 
 ## Known Issues / Gotchas
 
