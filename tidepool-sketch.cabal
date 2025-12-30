@@ -46,6 +46,7 @@ library
         Tidepool.Graph.Example.Context
         Tidepool.Graph.Memory
         Tidepool.Graph.Template
+        Tidepool.Graph.Docs
         Delta.Agent
         DM.Agent
         DM.State

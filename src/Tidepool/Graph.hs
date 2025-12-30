@@ -127,6 +127,19 @@ module Tidepool.Graph
   , Tpl.typedTemplateFile
   , Tpl.runTypedTemplate
   , Tpl.makeTemplateCompiled
+    -- ** Dependency Tracking
+  , Tpl.TemplateDependency(..)
+  , Tpl.DepRelation(..)
+  , Tpl.DepLocation(..)
+  , Tpl.TemplateContextInfo(..)
+
+    -- * Template Documentation
+    -- $templateDocs
+  , Docs.DepTree(..)
+  , Docs.buildDepTree
+  , Docs.renderDepTree
+  , Docs.renderDepTreeCompact
+  , Docs.templateDocBlock
 
     -- * Validation
   , ValidGraph
@@ -199,6 +212,7 @@ import Tidepool.Graph.Runner
 import Tidepool.Graph.Tool
 import qualified Tidepool.Graph.Memory as Mem
 import qualified Tidepool.Graph.Template as Tpl
+import qualified Tidepool.Graph.Docs as Docs
 
 -- $memoryEffect
 --
@@ -250,3 +264,25 @@ import qualified Tidepool.Graph.Template as Tpl
 -- @
 --
 -- For the full 'TemplateDef' typeclass, import "Tidepool.Graph.Template" directly.
+
+-- $templateDocs
+--
+-- Generate documentation for templates showing their include hierarchy:
+--
+-- @
+-- -- For a TemplateDef instance:
+-- putStrLn $ templateDocBlock \@ClassifyTpl
+--
+-- -- Or manually from dependencies:
+-- case buildDepTree (templateDeps \@ClassifyTpl) of
+--   Just tree -> putStrLn (renderDepTree tree)
+--   Nothing   -> pure ()
+-- @
+--
+-- Example output:
+--
+-- @
+-- templates/classify.jinja
+--    ├─ partials/system.jinja
+--    └─ partials/intent.jinja
+-- @

@@ -78,11 +78,20 @@ module Tidepool.Graph.Template
     -- * Rendering
   , renderTemplate
 
-    -- * Ginger Re-exports
+    -- * Ginger Re-exports (core)
   , TypedTemplate
   , typedTemplateFile
   , runTypedTemplate
   , GingerContext
+
+    -- * Ginger Re-exports (dependency tracking)
+  , TemplateDependency(..)
+  , DepRelation(..)
+  , DepLocation(..)
+  , TemplateContextInfo(..)
+  , templateDependencies
+  , templateContextInfo
+  , templateAccessedFields
 
     -- * Template Haskell Helper
   , makeTemplateCompiled
@@ -95,7 +104,20 @@ import Effectful
 import Language.Haskell.TH hiding (Type)
 import Text.Ginger.GVal (ToGVal)
 import Text.Ginger.Run.Type (Run)
-import Text.Ginger.TH (TypedTemplate, typedTemplateFile, runTypedTemplate)
+import Text.Ginger.TH
+  ( TypedTemplate
+  , typedTemplateFile
+  , runTypedTemplate
+  , templateDependencies
+  , templateContextInfo
+  , templateAccessedFields
+  )
+import Text.Ginger.TH.Types
+  ( TemplateDependency(..)
+  , DepRelation(..)
+  , DepLocation(..)
+  , TemplateContextInfo(..)
+  )
 import Text.Parsec.Pos (SourcePos)
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -175,6 +197,35 @@ class TemplateDef t where
   --   pure MyContext { ... }
   -- @
   buildContext :: TemplateConstraint t es => Eff es (TemplateContext t)
+
+  -- ════════════════════════════════════════════════════════════════════════════
+  -- DERIVED ACCESSORS (for documentation generation)
+  -- ════════════════════════════════════════════════════════════════════════════
+
+  -- | Template file dependencies with include hierarchy.
+  --
+  -- Extracted from 'templateCompiled'. Each dependency has:
+  --
+  -- * 'depAbsolutePath' / 'depRelativePath' - file paths
+  -- * 'depIncludedBy' - parent file (Nothing for root)
+  -- * 'depRelation' - 'DepIncluded' or 'DepExtended'
+  -- * 'depIncludeLocation' - line/col of the directive
+  --
+  -- Use 'Tidepool.Graph.Docs.buildDepTree' to convert to a tree structure.
+  templateDeps :: [TemplateDependency]
+  templateDeps = templateDependencies (templateCompiled @t)
+
+  -- | Fields accessed by the template (e.g., @["user.name", "user.email"]@).
+  --
+  -- Useful for documentation to show what context fields are actually used.
+  templateFields :: [String]
+  templateFields = templateAccessedFields (templateCompiled @t)
+
+  -- | Context type metadata (type name, module, fully qualified name).
+  --
+  -- Useful for documentation generation.
+  templateContextMeta :: TemplateContextInfo
+  templateContextMeta = templateContextInfo (templateCompiled @t)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- RENDERING
