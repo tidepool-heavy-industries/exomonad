@@ -41,6 +41,7 @@ library
         Tidepool.Graph.Mermaid
         Tidepool.Graph.TH
         Tidepool.Graph.Runner
+        Tidepool.Graph.Example
         Delta.Agent
         DM.Agent
         DM.State
