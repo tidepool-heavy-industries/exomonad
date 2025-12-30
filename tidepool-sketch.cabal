@@ -43,6 +43,7 @@ library
         Tidepool.Graph.Runner
         Tidepool.Graph.Tool
         Tidepool.Graph.Example
+        Tidepool.Graph.Memory
         Delta.Agent
         DM.Agent
         DM.State

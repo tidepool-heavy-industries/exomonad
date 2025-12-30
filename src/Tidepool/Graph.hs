@@ -109,6 +109,15 @@ module Tidepool.Graph
   , Goto(..)
   , goto
 
+    -- * The Memory Effect
+    -- $memoryEffect
+  , Mem.getMem
+  , Mem.updateMem
+  , Mem.modifyMem
+  , Mem.runMemory
+  , Mem.evalMemory
+    -- For the Memory effect type itself, import Tidepool.Graph.Memory directly
+
     -- * Validation
   , ValidGraph
   , HasEntry
@@ -178,3 +187,23 @@ import Tidepool.Graph.Mermaid
 import Tidepool.Graph.TH
 import Tidepool.Graph.Runner
 import Tidepool.Graph.Tool
+import qualified Tidepool.Graph.Memory as Mem
+
+-- $memoryEffect
+--
+-- The 'Mem.Memory' effect provides typed persistent state for graph nodes.
+-- Use the same effect type for both node-private and graph-level memory:
+--
+-- @
+-- handler :: (Mem.Memory ExploreMem :> es, Mem.Memory SessionState :> es) => Eff es ()
+-- handler = do
+--   myMem <- Mem.getMem \@ExploreMem     -- Node's private state
+--   global <- Mem.getMem \@SessionState  -- Graph's shared state
+--
+--   Mem.updateMem \@ExploreMem $ \\m -> m { visited = True }
+--   Mem.modifyMem \@SessionState #counter (+ 1)
+-- @
+--
+-- Note: The 'Memory' annotation (from "Tidepool.Graph.Types") declares which
+-- memory type a node has. The 'Mem.Memory' effect is used at runtime to
+-- access that memory. They share a name but have different kinds.
