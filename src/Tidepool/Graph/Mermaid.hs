@@ -141,22 +141,17 @@ edgeDeclarations config info =
   ++ nodeEdges config info
   ++ exitEdges config info
 
--- | Generate edges from Entry to nodes that need the entry type.
+-- | Generate edges from Entry to root nodes.
 --
--- Only draws edges to nodes where Entry is their SOLE dependency
--- (all their Needs are satisfied by Entry alone). Otherwise the node
--- requires output from other nodes first.
+-- Root nodes are nodes with no incoming edges (Schema→Needs or Goto)
+-- from other nodes. These are the natural entry points of the graph.
 entryEdges :: MermaidConfig -> GraphInfo -> [Text]
 entryEdges config info = case info.giEntryType of
   Nothing -> []
   Just entryType ->
-    [ "    entry" <> arrow <> "|" <> typeLabel config entryType <> "| " <> escapeName node.niName
-    | node <- info.giNodes
-    , entryType `elem` node.niNeeds
-    , all (== entryType) node.niNeeds  -- Entry must satisfy ALL needs
+    [ "    entry --> |" <> typeLabel config entryType <> "| " <> escapeName name
+    | name <- findRootNodes info
     ]
-  where
-    arrow = " --> "
 
 -- | Generate edges between nodes.
 nodeEdges :: MermaidConfig -> GraphInfo -> [Text]
@@ -290,15 +285,13 @@ stateTransitions config info =
 
 -- | Entry transitions.
 --
--- Only creates transitions to nodes where Entry satisfies ALL their needs.
+-- Connects to root nodes (nodes with no incoming edges from other nodes).
 entryStateTransitions :: MermaidConfig -> GraphInfo -> [Text]
 entryStateTransitions config info = case info.giEntryType of
   Nothing -> []
   Just entryType ->
-    [ "    [*] --> " <> escapeName node.niName <> ": " <> typeLabel config entryType
-    | node <- info.giNodes
-    , entryType `elem` node.niNeeds
-    , all (== entryType) node.niNeeds  -- Entry must satisfy ALL needs
+    [ "    [*] --> " <> escapeName name <> ": " <> typeLabel config entryType
+    | name <- findRootNodes info
     ]
 
 -- | Node-to-node transitions.
@@ -433,3 +426,28 @@ findNodeByName info name =
   case filter (\n -> n.niName == name) info.giNodes of
     [n] -> Just n
     _ -> Nothing
+
+-- | Find root nodes (nodes with no incoming edges from other nodes).
+--
+-- These are the natural entry points of the graph.
+findRootNodes :: GraphInfo -> [Text]
+findRootNodes info =
+  [ node.niName
+  | node <- info.giNodes
+  , not (hasIncomingEdge info node.niName)
+  ]
+
+-- | Check if a node has any incoming edge (Schema→Needs or Goto).
+hasIncomingEdge :: GraphInfo -> Text -> Bool
+hasIncomingEdge info targetName = any sendsTo info.giNodes
+  where
+    sendsTo node =
+      -- Goto edge to this node?
+      targetName `elem` map fst node.niGotoTargets ||
+      -- Schema→Needs edge to this node?
+      case node.niSchema of
+        Nothing -> False
+        Just schemaType ->
+          case findNodeByName info targetName of
+            Nothing -> False
+            Just target -> schemaType `elem` target.niNeeds

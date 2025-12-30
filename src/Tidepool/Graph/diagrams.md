@@ -86,19 +86,12 @@ flowchart TD
     answer[["answer<br/>LLM"]]
 
     entry --> |Message| route
-    entry --> |Message| refund
-    entry --> |Message| answer
     route --> |Message| refund
     route --> |Message| answer
     route --> |Response| exit__
     refund --> |Response| exit__
     answer --> |Response| exit__
 ```
-
-> **Note**: The `entry → refund` and `entry → answer` edges are technically correct
-> (those nodes only need `Message` which Entry provides) but semantically misleading.
-> In practice, they're only reachable via `Goto` from `route`. A future improvement
-> would filter out entry edges to nodes that are Goto targets.
 
 ### State Diagram
 
@@ -109,8 +102,6 @@ stateDiagram-v2
     answer : LLM
 
     [*] --> route: Message
-    [*] --> refund: Message
-    [*] --> answer: Message
     route --> refund: Message
     route --> answer: Message
     route --> [*]: Response
@@ -208,10 +199,14 @@ stateDiagram-v2
 ## Node Shapes (Flowchart)
 
 - `((circle))` - Entry/Exit points
-- `[["double brackets"]]` - LLM nodes
-- `{{"hexagon"}}` - Logic nodes
+- `[[double brackets]]` - LLM nodes
+- `{{hexagon}}` - Logic nodes
 
 ## Edge Semantics
+
+Entry edges are computed structurally: Entry connects to **root nodes** (nodes with
+no incoming edges from other nodes). This correctly handles Goto targets - they're
+not roots because they have incoming Goto edges.
 
 - **Schema → Needs**: Implicit data flow (solid arrow)
 - **Goto**: Explicit control flow (solid arrow)
