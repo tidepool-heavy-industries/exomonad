@@ -146,6 +146,59 @@ data GotoResult where
 runGotoCapture :: Eff (Goto target a : es) () -> Eff es (Maybe GotoResult)
 ```
 
+### Memory.hs - Persistent State Effect
+
+The `Memory` effect provides typed persistent state for graph nodes. A single
+parameterized effect is used for both node-private and graph-level memory.
+
+```haskell
+-- Effect definition (parameterized by state type)
+data Memory (s :: Type) :: Effect where
+  GetMem    :: Memory s m s
+  UpdateMem :: (s -> s) -> Memory s m ()
+
+-- Access functions
+getMem    :: forall s es. Memory s :> es => Eff es s
+updateMem :: forall s es. Memory s :> es => (s -> s) -> Eff es ()
+
+-- Optics helper (uses update, not set, to prevent clobber bugs)
+modifyMem :: (Memory s :> es, Is k A_Setter) => Optic' k is s a -> (a -> a) -> Eff es ()
+```
+
+#### Usage
+
+The same effect type works for both node-private and shared state - the
+difference is just which type parameter you use:
+
+```haskell
+-- Graph definition with Memory annotations
+type MyGraph = Graph
+  '[ Entry :~> Message
+   , "explore" := LLM :@ Needs '[Message] :@ Schema Findings :@ Memory ExploreMem
+   , Exit :<~ Response
+   ]
+  :& Global SessionState
+
+-- Handler with both memory types in scope
+exploreHandler :: (Memory ExploreMem :> es, Memory SessionState :> es) => Eff es ()
+exploreHandler = do
+  myMem <- getMem @ExploreMem      -- Node's private state
+  global <- getMem @SessionState   -- Graph's shared state
+
+  updateMem @ExploreMem $ \m -> m { urlsVisited = url : m.urlsVisited }
+  modifyMem @SessionState #totalSearches (+ 1)  -- With optics
+```
+
+#### Interpreters
+
+```haskell
+-- Run memory with State, returns (result, finalState)
+runMemory :: s -> Eff (Memory s : es) a -> Eff es (a, s)
+
+-- Run memory, discard final state
+evalMemory :: s -> Eff (Memory s : es) a -> Eff es a
+```
+
 ### Edges.hs - Edge Derivation
 
 Type families that extract graph structure from declarations.
@@ -546,12 +599,13 @@ instance ReifyGraph MyGraph where
 
 | File | Lines | Purpose |
 |------|-------|---------|
-| Types.hs | ~210 | Core DSL syntax types |
+| Types.hs | ~220 | Core DSL syntax types |
 | Goto.hs | ~100 | Goto effect for transitions |
-| Edges.hs | ~345 | Edge derivation type families |
-| Validate.hs | ~235 | Compile-time validation |
-| Reify.hs | ~115 | Runtime info types (stub) |
+| Memory.hs | ~210 | Memory effect for persistent state |
+| Edges.hs | ~375 | Edge derivation type families |
+| Validate.hs | ~270 | Compile-time validation |
+| Reify.hs | ~120 | Runtime info types (stub) |
 | Mermaid.hs | ~220 | Diagram generation |
-| TH.hs | ~200 | Template Haskell generation |
+| TH.hs | ~210 | Template Haskell generation |
 | Runner.hs | ~280 | Graph execution engine |
-| Example.hs | ~80 | Usage examples |
+| Example.hs | ~270 | Usage examples |
