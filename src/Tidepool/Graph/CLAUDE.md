@@ -199,6 +199,63 @@ runMemory :: s -> Eff (Memory s : es) a -> Eff es (a, s)
 evalMemory :: s -> Eff (Memory s : es) a -> Eff es a
 ```
 
+### Template.hs - Typed Prompt Templates
+
+The `TemplateDef` typeclass defines typed templates for LLM nodes. Templates
+combine a Jinja file (validated at compile time via ginger TH) with an
+effectful context builder.
+
+```haskell
+class TemplateDef t where
+  -- What context type this template renders
+  type TemplateContext t :: Type
+
+  -- Effects required to build the context (default: none)
+  type TemplateConstraint t (es :: [Effect]) :: Constraint
+
+  templateName :: Text
+  templateDescription :: Text
+  templateCompiled :: TypedTemplate (TemplateContext t) SourcePos
+  buildContext :: TemplateConstraint t es => Eff es (TemplateContext t)
+
+-- One-shot build + render
+renderTemplate :: (TemplateDef t, GingerContext (TemplateContext t), TemplateConstraint t es)
+               => Eff es Text
+```
+
+#### Usage (Two-Phase Pattern)
+
+Due to TH staging, context types must be in a separate module compiled before
+the TH splice:
+
+```haskell
+-- In YourContext.hs (compiled first)
+data ClassifyContext = ClassifyContext { topic :: Text, categories :: Text }
+instance ToGVal (...) ClassifyContext where ...
+
+-- In YourTemplates.hs (compiled second)
+import YourContext (ClassifyContext)
+
+classifyCompiled :: TypedTemplate ClassifyContext SourcePos
+classifyCompiled = $(typedTemplateFile ''ClassifyContext "templates/classify.jinja")
+
+data ClassifyTpl
+
+instance TemplateDef ClassifyTpl where
+  type TemplateContext ClassifyTpl = ClassifyContext
+  type TemplateConstraint ClassifyTpl es = (State S :> es)
+
+  templateName = "classify"
+  templateDescription = "Classify user intent"
+  templateCompiled = classifyCompiled
+
+  buildContext = do
+    st <- get @S
+    pure ClassifyContext { topic = "...", categories = "..." }
+```
+
+See `Example.hs` and `Example/Context.hs` for a working demonstration.
+
 ### Edges.hs - Edge Derivation
 
 Type families that extract graph structure from declarations.
@@ -595,6 +652,35 @@ instance ReifyGraph MyGraph where
 
 **Solution**: Ensure effects in `Eff '[...]` are actual effectful effects with kind `(Type -> Type) -> Type -> Type`.
 
+## Known Issues / Gotchas
+
+### Record Field Names vs Template/JSON Names
+
+**Problem**: Haskell's record field namespace is flat per module, so we use
+prefixes like `ccTopic` for `ClassifyContext.topic`. But ginger's TH validates
+template variables against actual record field names, not ToGVal dict keys.
+
+This means if your template uses `{{ topic }}` but your record has `ccTopic`,
+ginger's compile-time validation will fail with "field 'topic' not found".
+
+**Current workaround**: For types used with ginger TH, use unprefixed field
+names that match template variables:
+
+```haskell
+-- Good: field names match template {{ topic }} {{ categories }}
+data ClassifyContext = ClassifyContext { topic :: Text, categories :: Text }
+
+-- Bad: TH will fail because {{ topic }} doesn't match 'ccTopic'
+data ClassifyContext = ClassifyContext { ccTopic :: Text, ccCategories :: Text }
+```
+
+**Same issue affects**: Aeson JSON derivation (field names become JSON keys).
+The codebase uses prefixes for JSON schema types but this creates friction
+with ginger templates.
+
+**Future fix**: Custom TH that reads a field mapping, or ginger enhancement
+to check ToGVal instances instead of raw record fields.
+
 ## File Inventory
 
 | File | Lines | Purpose |
@@ -602,10 +688,12 @@ instance ReifyGraph MyGraph where
 | Types.hs | ~220 | Core DSL syntax types |
 | Goto.hs | ~100 | Goto effect for transitions |
 | Memory.hs | ~210 | Memory effect for persistent state |
+| Template.hs | ~250 | TemplateDef typeclass for typed prompts |
 | Edges.hs | ~375 | Edge derivation type families |
 | Validate.hs | ~270 | Compile-time validation |
 | Reify.hs | ~120 | Runtime info types (stub) |
 | Mermaid.hs | ~220 | Diagram generation |
 | TH.hs | ~210 | Template Haskell generation |
 | Runner.hs | ~280 | Graph execution engine |
-| Example.hs | ~270 | Usage examples |
+| Example.hs | ~350 | Usage examples |
+| Example/Context.hs | ~40 | Example context types (for TH staging) |

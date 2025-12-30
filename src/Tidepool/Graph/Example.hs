@@ -1,7 +1,9 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 -- | Example graph definitions and diagram generation.
 --
@@ -14,6 +16,7 @@ module Tidepool.Graph.Example
   , AnnotatedGraph
   , ToolsGraph
   , MemoryGraph
+  , TemplateGraph
 
     -- * Example Memory Types
   , ExploreMem(..)
@@ -23,6 +26,10 @@ module Tidepool.Graph.Example
   , SearchTool(..)
   , SearchInput(..)
   , SearchOutput(..)
+
+    -- * Example Templates
+  , ClassifyTpl
+  , ClassifyContext(..)
 
     -- * Graph Info (runtime)
   , simpleGraphInfo
@@ -35,18 +42,22 @@ module Tidepool.Graph.Example
   ) where
 
 import Data.Aeson (FromJSON, ToJSON)
-import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import Data.Typeable (Typeable, typeRep)
 import Data.Proxy (Proxy(..))
+import Effectful (type (:>))
+import Effectful.State.Static.Local (State, get)
 import GHC.Generics (Generic)
+import Text.Parsec.Pos (SourcePos)
 
 import Tidepool.Graph.Types
 import Tidepool.Graph.Validate (ValidGraph)
 import Tidepool.Graph.Goto (Goto)
-import Tidepool.Graph.Tool (ToolDef(..), ToolInfo(..), toolToInfo)
+import Tidepool.Graph.Tool (ToolDef(..), toolToInfo)
+import Tidepool.Graph.Template (TemplateDef(..), TypedTemplate, typedTemplateFile)
+import Tidepool.Graph.Example.Context (ClassifyContext(..))
 import Tidepool.Schema (HasJSONSchema(..), JSONSchema(..), SchemaType(..), objectSchema, arraySchema, describeField, emptySchema)
 import Tidepool.Graph.Reify
 import Tidepool.Graph.Mermaid
@@ -265,6 +276,66 @@ type MemoryGraph = Graph
 -- | Validates MemoryGraph at compile time.
 validMemoryGraph :: ValidGraph MemoryGraph => ()
 validMemoryGraph = ()
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- GRAPH WITH TEMPLATEDEF (Typed Prompt Templates)
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | The template type (phantom type for type-level configuration).
+data ClassifyTpl
+
+-- | Phase 1: Compile the template file via TH.
+--
+-- This validates at compile time that @{{ topic }}@ and @{{ categories }}@
+-- exist in ClassifyContext's ToGVal instance.
+--
+-- Note: ClassifyContext is defined in Example.Context (a separate module)
+-- because TH splices require types to be in previously-compiled modules.
+classifyCompiled :: TypedTemplate ClassifyContext SourcePos
+classifyCompiled = $(typedTemplateFile ''ClassifyContext "templates/example.jinja")
+
+-- | Phase 2: Define the TemplateDef instance.
+--
+-- This connects:
+--
+-- * The context type (ClassifyContext)
+-- * The effect constraints (State SessionState)
+-- * The compiled template
+-- * The context builder function
+instance TemplateDef ClassifyTpl where
+  type TemplateContext ClassifyTpl = ClassifyContext
+  type TemplateConstraint ClassifyTpl es = (State SessionState :> es)
+
+  templateName = "classify"
+  templateDescription = "Classify user intent into categories"
+  templateCompiled = classifyCompiled
+
+  buildContext = do
+    st <- get @SessionState
+    pure ClassifyContext
+      { topic = "user message"  -- In real code: from state/input
+      , categories = T.intercalate ", " st.sessionNotes
+      }
+
+-- | A graph using the TemplateDef system.
+--
+-- The @Template ClassifyTpl@ annotation tells the runner which template
+-- to use for generating the LLM prompt for this node.
+type TemplateGraph = Graph
+  '[ Entry :~> Message
+   , "classify" := LLM
+       :@ Needs '[Message]
+       :@ Template ClassifyTpl   -- Uses our typed template
+       :@ Schema Intent
+   , "respond" := LLM
+       :@ Needs '[Message, Intent]
+       :@ Schema Response
+   , Exit :<~ Response
+   ]
+
+-- | Validates TemplateGraph at compile time.
+validTemplateGraph :: ValidGraph TemplateGraph => ()
+validTemplateGraph = ()
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- INVALID GRAPHS (commented out - uncomment to see compile errors)
