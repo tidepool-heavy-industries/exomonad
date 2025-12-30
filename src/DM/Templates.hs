@@ -31,19 +31,21 @@ module DM.Templates
     -- * Schemas
   , turnOutputSchema
   , compressionOutputSchema
+  , bargainSchema
   ) where
 
 import DM.Context
 import DM.Output
 import DM.State (WorldState, DMMood(..))
-import DM.Tools (DMEffects, DMEvent, dmToolList, SetSceneStyle, Choose, SpendDie, Engage, Resolve, Accept, AcceptBargain, Retreat, PassOut)
+import DM.Tools (DMEffects, DMEvent, dmToolList, SetSceneStyle, Choose, SpendDie, Engage, Resolve, Accept)
 import Tidepool.Template
 import Tidepool.Schema
 import Data.Text (Text)
 import Text.Parsec.Pos (SourcePos)
 
 -- | Type alias for the full DM tool list
-type DMTools = '[SetSceneStyle, Choose, SpendDie, Engage, Resolve, Accept, AcceptBargain, Retreat, PassOut]
+-- Note: Bargain tools (AcceptBargain, Retreat, PassOut) removed - bargain uses structured output
+type DMTools = '[SetSceneStyle, Choose, SpendDie, Engage, Resolve, Accept]
 
 -- ══════════════════════════════════════════════════════════════
 -- TYPED JINJA TEMPLATES
@@ -130,11 +132,12 @@ traumaTemplate = Template
   }
 
 -- | Bargain template - out of dice, make deals
-bargainTemplate :: Template DMContext TurnOutput DMEvent WorldState DMEffects DMTools
+-- Note: Uses BargainLLMOutput (not TurnOutput) - loop handles this separately
+bargainTemplate :: Template DMContext BargainLLMOutput DMEvent WorldState DMEffects '[]
 bargainTemplate = Template
   { templateJinja = bargainJinja
   , templateOutputSchema = bargainSchema
-  , templateTools = dmToolList
+  , templateTools = TNil  -- No tools - structured output handles everything
   }
 
 -- ══════════════════════════════════════════════════════════════
@@ -186,10 +189,13 @@ traumaSchema = Schema
   , schemaDescription = "Trauma: breaking point. Assign scar, reset stress."
   }
 
-bargainSchema :: Schema TurnOutput
+-- | Schema for bargain output (different type from TurnOutput)
+-- Note: This schema is for BargainLLMOutput, not TurnOutput
+-- The loop handles bargain mode separately
+bargainSchema :: Schema BargainLLMOutput
 bargainSchema = Schema
-  { schemaJSON = schemaToValue bargainOutputSchema
-  , schemaDescription = "Bargain: out of dice. Present desperate options."
+  { schemaJSON = schemaToValue bargainOutputJSONSchema
+  , schemaDescription = "Bargain: generate 2-4 bargain options for player choice."
   }
 
 -- | Legacy schema alias (for dmTurnTemplate backwards compat)
@@ -213,7 +219,7 @@ compressionOutputSchema = Schema
 sceneOutputSchema :: JSONSchema
 sceneOutputSchema = objectSchema
   [ ("narration", describeField "narration"
-      "Narrative prose. NPC dialogue inline. End on an affordance or hook."
+      "1-2 tweets (280 chars each). Prose poetry—line breaks as breath. Fragments complete. Sentences end before—"
       (emptySchema TString))
   , ("coinDelta", describeField "coinDelta"
       "Direct transactions only (bought drink, paid informant). Usually 0."
@@ -229,7 +235,7 @@ sceneOutputSchema = objectSchema
 actionOutputSchema :: JSONSchema
 actionOutputSchema = objectSchema
   [ ("narration", describeField "narration"
-      "Frame the tension. After this, call spend_die tool with precommitted outcomes."
+      "1 tweet (280 chars). Prose poetry—the precipice. Line breaks as held breath. Then spend_die."
       (emptySchema TString))
   , ("suggestedActions", describeField "suggestedActions"
       "2-3 next actions based on outcome"
@@ -242,7 +248,7 @@ actionOutputSchema = objectSchema
 aftermathOutputSchema :: JSONSchema
 aftermathOutputSchema = objectSchema
   [ ("narration", describeField "narration"
-      "What the outcome means. One paragraph, then agency back to player."
+      "1 tweet (280 chars). Prose poetry—consequence lands. Line breaks as aftermath. End on friction."
       (emptySchema TString))
   , ("coinDelta", describeField "coinDelta"
       "Loot found, job payout, stolen goods. 0 if none."
@@ -251,11 +257,11 @@ aftermathOutputSchema = objectSchema
       "2-3 next actions: recover, press on, deal with fallout"
       (arraySchema (emptySchema TString)))
   , ("costDescription", describeField "costDescription"
-      "If costly: describe the price paid for echoing later. Null if clean."
-      (nullableSchema (emptySchema TString)))
+      "If costly: describe the price paid for echoing later. Omit if clean."
+      (emptySchema TString))
   , ("threatDescription", describeField "threatDescription"
-      "If unresolved threat: describe it for surfacing later. Null if resolved."
-      (nullableSchema (emptySchema TString)))
+      "If unresolved threat: describe it for surfacing later. Omit if resolved."
+      (emptySchema TString))
   ]
   ["narration", "suggestedActions"]
 
@@ -263,7 +269,7 @@ aftermathOutputSchema = objectSchema
 traumaOutputSchema :: JSONSchema
 traumaOutputSchema = objectSchema
   [ ("narration", describeField "narration"
-      "The moment they break. Visceral, specific, unforgettable."
+      "2-3 tweets (≤840 chars). Interior microfiction—the breaking. Sensory fragments. This is earned."
       (emptySchema TString))
   , ("traumaAssigned", describeField "traumaAssigned"
       "REQUIRED. The scar: Cold, Haunted, Obsessed, Paranoid, Reckless, Soft, Vicious, Volatile (or invent)"
@@ -274,18 +280,49 @@ traumaOutputSchema = objectSchema
   ]
   ["narration", "traumaAssigned", "suggestedActions"]  -- traumaAssigned is REQUIRED
 
--- | BARGAIN: Out of dice, desperate measures
--- Lean - tools handle the mechanics
-bargainOutputSchema :: JSONSchema
-bargainOutputSchema = objectSchema
-  [ ("narration", describeField "narration"
-      "Present the desperate situation. What can they bargain with?"
+-- | BARGAIN: Out of dice, generate bargain options for player choice
+-- No tools needed - structured output defines the options, system presents via requestChoice
+bargainOutputJSONSchema :: JSONSchema
+bargainOutputJSONSchema = objectSchema
+  [ ("bargainNarration", describeField "bargainNarration"
+      "1 tweet (280 chars). Prose poetry—the city waits. Line breaks as desperation."
       (emptySchema TString))
-  , ("suggestedActions", describeField "suggestedActions"
-      "Options: accept the cost, retreat if possible, or collapse"
-      (arraySchema (emptySchema TString)))
+  , ("bargainOptions", describeField "bargainOptions"
+      "2-4 bargain options. Each has a cost and dice gained."
+      (arraySchema bargainOptionSchema))
+  , ("bargainCanRetreat", describeField "bargainCanRetreat"
+      "Can they slip away? False if cornered."
+      (emptySchema TBoolean))
+  , ("bargainRetreatDesc", describeField "bargainRetreatDesc"
+      "If retreat possible: how they escape (1 sentence)."
+      (emptySchema TString))
   ]
-  ["narration", "suggestedActions"]
+  ["bargainNarration", "bargainOptions", "bargainCanRetreat"]
+  where
+    bargainOptionSchema = objectSchema
+      [ ("bloLabel", describeField "bloLabel"
+          "Short label: 'Take 2 stress for a die'"
+          (emptySchema TString))
+      , ("bloHint", describeField "bloHint"
+          "Evocative hint (3-8 words): 'Cheap, but it hurts'"
+          (emptySchema TString))
+      , ("bloCostType", describeField "bloCostType"
+          "Type of cost"
+          (enumSchema ["stress", "heat", "clock", "faction", "trauma"]))
+      , ("bloCostAmount", describeField "bloCostAmount"
+          "Amount for stress/heat (1-3), ticks for clock (1-2)"
+          (emptySchema TInteger))
+      , ("bloCostTarget", describeField "bloCostTarget"
+          "Clock ID or Faction ID if applicable"
+          (emptySchema TString))
+      , ("bloDiceGained", describeField "bloDiceGained"
+          "Dice to add (1-3)"
+          (emptySchema TInteger))
+      , ("bloNarrative", describeField "bloNarrative"
+          "1-2 sentences revealed AFTER choice. Consequences land."
+          (emptySchema TString))
+      ]
+      ["bloLabel", "bloHint", "bloCostType", "bloCostAmount", "bloDiceGained", "bloNarrative"]
 
 -- ══════════════════════════════════════════════════════════════
 -- COMPRESSION OUTPUT SCHEMA
@@ -322,7 +359,7 @@ compressionOutputJSONSchema = objectSchema
           "How widely known: whisper (few know), tavern (local gossip), common_knowledge (widely known)"
           (enumSchema ["whisper", "tavern", "common_knowledge"]))
       , ("riTrue", describeField "riTrue"
-          "Is the rumor true? true/false/null if unknown"
-          (nullableSchema (emptySchema TBoolean)))
+          "Is the rumor true? Omit if unknown."
+          (emptySchema TBoolean))
       ]
       ["riContent", "riSpread"]

@@ -10,16 +10,6 @@ module DM.Tools
   , Resolve(..)
   , Accept(..)
 
-    -- * Bargain Tools (out of dice)
-  , AcceptBargain(..)
-  , AcceptBargainInput(..)
-  , AcceptBargainResult(..)
-  , Retreat(..)
-  , RetreatInput(..)
-  , PassOut(..)
-  , PassOutInput(..)
-  , PassOutResult(..)
-
     -- * Tool Inputs/Outputs
   , SetSceneStyleInput(..)
   , ChooseInput(..)
@@ -577,236 +567,10 @@ instance Tool Accept DMEvent WorldState DMEffects where
     emit (MoodTransition "accept" "aftermath" "scene")
     return ()
 
--- ══════════════════════════════════════════════════════════════
--- BARGAIN TOOLS (out of dice)
--- ══════════════════════════════════════════════════════════════
-
--- | AcceptBargain: Player accepts a deal to refresh dice
-data AcceptBargain = AcceptBargain
-  deriving (Show, Eq, Generic)
-
-data AcceptBargainInput = AcceptBargainInput
-  { bargainDescription :: Text      -- "Owe Bazso Baz a favor"
-  , bargainCostType :: Text         -- "stress", "heat", "wanted", "clock", "faction", "trauma", "item"
-  , bargainCostAmount :: Int        -- For stress/heat: amount. For clock: ticks. Otherwise ignored.
-  , bargainCostTarget :: Maybe Text -- Clock ID or Faction ID if applicable
-  , bargainDiceGained :: Int        -- 1-3
-  }
-  deriving (Show, Eq, Generic, ToJSON, FromJSON)
-
-data AcceptBargainResult = AcceptBargainResult
-  { newPoolSize :: Int
-  , costApplied :: Text
-  }
-  deriving (Show, Eq, Generic, ToJSON, FromJSON)
-
-instance Tool AcceptBargain DMEvent WorldState DMEffects where
-  type ToolInput AcceptBargain = AcceptBargainInput
-  type ToolOutput AcceptBargain = AcceptBargainResult
-
-  toolName = "accept_bargain"
-  toolDescription = "Accept a bargain to refresh dice. Applies the mechanical cost and adds dice to pool. Use only in BARGAIN mood."
-  inputSchema = schemaToValue $ objectSchema
-    [ ("bargainDescription", describeField "bargainDescription" "What the bargain is" (emptySchema TString))
-    , ("bargainCostType", describeField "bargainCostType" "Type of cost" (enumSchema ["stress", "heat", "wanted", "clock", "faction", "trauma", "item"]))
-    , ("bargainCostAmount", describeField "bargainCostAmount" "Amount for stress/heat, ticks for clock" (emptySchema TNumber))
-    , ("bargainCostTarget", describeField "bargainCostTarget" "Clock ID or Faction ID if applicable" (emptySchema TString))
-    , ("bargainDiceGained", describeField "bargainDiceGained" "Dice to add (1-3)" (emptySchema TNumber))
-    ]
-    ["bargainDescription", "bargainCostType", "bargainDiceGained"]
-
-  executeTool input = do
-    state <- get @WorldState
-
-    -- Apply the cost based on type
-    let costDesc = applyCost state input
-        newDice = replicate (min 3 (max 1 input.bargainDiceGained)) 0  -- Placeholder values, will be rolled
-        updatedPool = state.dicePool.poolDice ++ newDice
-
-    -- Roll fresh dice values (1-6)
-    rolledDice <- mapM (\_ -> randomInt 1 6) newDice
-    let finalPool = state.dicePool.poolDice ++ rolledDice
-
-    -- Get previous mood to return to (from MoodBargain if we're in it)
-    currentMoodVal <- getMood
-    let returnMood = case currentMoodVal of
-          MoodBargain bv -> bv.bvPreviousMood
-          m -> m  -- Keep current mood if not bargaining
-
-    -- Update state: apply cost, add dice
-    modify @WorldState $ \s -> applyCostToState s input
-    modify @WorldState $ \s -> s { dicePool = s.dicePool { poolDice = finalPool } }
-
-    -- Reset stress to 0 after bargain (catch your breath - prevents bounce back to trauma)
-    -- Note: trauma cost type already resets stress in applyCostToState, but this ensures
-    -- all bargain types give relief
-    modify @WorldState $ \s -> s { player = s.player { stress = 0 } }
-
-    -- Return to previous mood
-    putMood returnMood
-
-    emit (MoodTransition "accept_bargain" "bargain" (moodName returnMood))
-
-    return AcceptBargainResult
-      { newPoolSize = length finalPool
-      , costApplied = costDesc
-      }
-    where
-      applyCost :: WorldState -> AcceptBargainInput -> Text
-      applyCost _ inp = case inp.bargainCostType of
-        "stress" -> "Took " <> T.pack (show inp.bargainCostAmount) <> " stress"
-        "heat" -> "Took " <> T.pack (show inp.bargainCostAmount) <> " heat"
-        "wanted" -> "Increased wanted level"
-        "clock" -> "Advanced clock: " <> fromMaybe "unknown" inp.bargainCostTarget
-        "faction" -> "Owe favor to: " <> fromMaybe "unknown" inp.bargainCostTarget
-        "trauma" -> "Accepted a trauma"
-        "item" -> "Burned: " <> fromMaybe "an item" inp.bargainCostTarget
-        _ -> "Paid a price"
-
-      applyCostToState :: WorldState -> AcceptBargainInput -> WorldState
-      applyCostToState s inp = case inp.bargainCostType of
-        "stress" -> s { player = s.player { stress = min 9 (s.player.stress + inp.bargainCostAmount) } }
-        "heat" -> s { player = s.player { heat = min 10 (s.player.heat + inp.bargainCostAmount) } }
-        "wanted" -> s { player = s.player { wanted = min 4 (s.player.wanted + 1) } }
-        "trauma" -> s { player = s.player { trauma = Trauma "bargained" : s.player.trauma, stress = 0 } }
-        "clock" -> case inp.bargainCostTarget of
-          Just clockIdText ->
-            let cid = ClockId clockIdText
-                ticks = max 1 inp.bargainCostAmount
-            in s { clocks = HM.adjust (advanceClockN ticks) cid s.clocks }
-          Nothing -> s  -- No target = no effect
-        "faction" -> case inp.bargainCostTarget of
-          Just factionIdText ->
-            let fid = FactionId factionIdText
-            in s { factions = HM.adjust decreaseFactionAttitude fid s.factions }
-          Nothing -> s  -- No target = no effect
-        _ -> s
-
-      -- Advance a clock by N ticks (capped at segments)
-      advanceClockN :: Int -> Clock -> Clock
-      advanceClockN n clock = clock { clockFilled = min clock.clockSegments (clock.clockFilled + n) }
-
-      -- Decrease faction attitude by one step (they're owed a favor)
-      decreaseFactionAttitude :: Faction -> Faction
-      decreaseFactionAttitude f = f { factionAttitude = decreaseAttitude f.factionAttitude }
-
-      decreaseAttitude :: Attitude -> Attitude
-      decreaseAttitude = \case
-        Allied -> Favorable
-        Favorable -> Neutral
-        Neutral -> Wary
-        Wary -> Hostile
-        Hostile -> Hostile  -- Can't go lower
-
-      moodName :: DMMood -> Text
-      moodName (MoodScene _) = "scene"
-      moodName (MoodAction _ _) = "action"
-      moodName (MoodAftermath _) = "aftermath"
-      moodName (MoodTrauma _) = "trauma"
-      moodName (MoodBargain _) = "bargain"
-
-      fromMaybe :: Text -> Maybe Text -> Text
-      fromMaybe def Nothing = def
-      fromMaybe _ (Just x) = x
-
--- | Retreat: Player chooses to leave and rest (if available)
-data Retreat = Retreat
-  deriving (Show, Eq, Generic)
-
-data RetreatInput = RetreatInput
-  { retreatNarration :: Text  -- "You slip away through the back alleys..."
-  }
-  deriving (Show, Eq, Generic, ToJSON, FromJSON)
-
-instance Tool Retreat DMEvent WorldState DMEffects where
-  type ToolInput Retreat = RetreatInput
-  type ToolOutput Retreat = ()
-
-  toolName = "retreat"
-  toolDescription = "Leave the scene to rest and recover. Only available in BARGAIN mood when retreat is possible. Ends the current scene, time passes, dice refresh on next score."
-  inputSchema = schemaToValue $ objectSchema
-    [ ("retreatNarration", describeField "retreatNarration" "How they slip away" (emptySchema TString))
-    ]
-    ["retreatNarration"]
-
-  executeTool _input = do
-    -- End scene, transition to BetweenScenes phase
-    -- Player will choose what to do (lay low, recover, work goal, new scene)
-    let retreatContext = BetweenScenesContext
-          { bscClocks = []
-          , bscTransitionNarration = "You retreat to safety, leaving the scene behind..."
-          }
-    modify @WorldState $ \s -> s
-      { phase = PhaseBetweenScenes retreatContext
-      , dicePool = DicePool [4, 4, 4] -- Refresh with 3 average dice
-      }
-    emit (MoodTransition "retreat" "bargain" "between_scenes")
-    return ()
-
--- | PassOut: Involuntary collapse when no retreat possible
-data PassOut = PassOut
-  deriving (Show, Eq, Generic)
-
-data PassOutInput = PassOutInput
-  { passOutNarration :: Text  -- "Your legs give out..."
-  , clocksToAdvance :: [Text] -- Clock IDs to tick
-  , wakeUpLocation :: Text    -- Where they come to
-  }
-  deriving (Show, Eq, Generic, ToJSON, FromJSON)
-
-data PassOutResult = PassOutResult
-  { clocksAdvanced :: [Text]
-  , wokeUpAt :: Text
-  }
-  deriving (Show, Eq, Generic, ToJSON, FromJSON)
-
-instance Tool PassOut DMEvent WorldState DMEffects where
-  type ToolInput PassOut = PassOutInput
-  type ToolOutput PassOut = PassOutResult
-
-  toolName = "pass_out"
-  toolDescription = "Collapse from exhaustion. Advances threat clocks, player wakes up somewhere (captured, rescued, in the gutter). Use when retreat is not possible."
-  inputSchema = schemaToValue $ objectSchema
-    [ ("passOutNarration", describeField "passOutNarration" "How they collapse" (emptySchema TString))
-    , ("clocksToAdvance", describeField "clocksToAdvance" "Clock IDs to advance by 1" (arraySchema (emptySchema TString)))
-    , ("wakeUpLocation", describeField "wakeUpLocation" "Where they wake up" (emptySchema TString))
-    ]
-    ["passOutNarration", "wakeUpLocation"]
-
-  executeTool input = do
-    -- Advance each specified clock by 1
-    let clockIds = map ClockId input.clocksToAdvance
-    modify @WorldState $ \s -> s
-      { clocks = foldr advanceClock s.clocks clockIds
-      }
-
-    -- Create new scene at wake-up location
-    let wakeUpScene = ActiveScene
-          { sceneLocation = LocationId (T.toLower $ T.replace " " "_" input.wakeUpLocation)
-          , scenePresent = []
-          , sceneStakes = Stakes "Figure out what happened"
-          , sceneBeats = mempty
-          , sceneStyle = defaultSceneStyle
-          }
-        wakeUpMood = MoodScene (Encounter "waking up" UrgencyMedium False)  -- Can't just walk away
-
-    modify @WorldState $ \s -> s
-      { phase = PhasePlaying wakeUpScene wakeUpMood
-      , dicePool = DicePool [3, 3]  -- Minimal dice, still drained
-      , player = s.player { stress = min 9 (s.player.stress + 2) }  -- Passing out is stressful
-      }
-
-    emit (MoodTransition "pass_out" "bargain" "scene")
-
-    return PassOutResult
-      { clocksAdvanced = input.clocksToAdvance
-      , wokeUpAt = input.wakeUpLocation
-      }
-    where
-      advanceClock :: ClockId -> HashMap ClockId Clock -> HashMap ClockId Clock
-      advanceClock cid clocks = case HM.lookup cid clocks of
-        Nothing -> clocks
-        Just clock -> HM.insert cid (clock { clockFilled = clock.clockFilled + 1 }) clocks
+-- Note: BARGAIN TOOLS (AcceptBargain, Retreat, PassOut) were removed.
+-- Bargain mode now uses structured output (BargainLLMOutput) + requestChoice pattern.
+-- This is more reliable than hoping the LLM will call tools.
+-- See DM.Output for BargainLLMOutput, DM.Loop for handleBargainTurn.
 
 -- ══════════════════════════════════════════════════════════════
 -- TOOL REGISTRATION
@@ -815,16 +579,15 @@ instance Tool PassOut DMEvent WorldState DMEffects where
 -- | All DM tools as a type-safe list (including transition tools)
 -- Note: SpeakAsNPC, ThinkAsDM, AskPlayer removed - they add noise without value
 -- Player clarification now happens via suggestedActions in structured output
-dmToolList :: ToolList DMEvent WorldState DMEffects '[SetSceneStyle, Choose, SpendDie, Engage, Resolve, Accept, AcceptBargain, Retreat, PassOut]
+-- Note: Bargain tools (AcceptBargain, Retreat, PassOut) removed - bargain mode now uses
+-- structured output + requestChoice instead of tool calls
+dmToolList :: ToolList DMEvent WorldState DMEffects '[SetSceneStyle, Choose, SpendDie, Engage, Resolve, Accept]
 dmToolList = TCons (Proxy @SetSceneStyle)
            $ TCons (Proxy @Choose)
            $ TCons (Proxy @SpendDie)
            $ TCons (Proxy @Engage)
            $ TCons (Proxy @Resolve)
            $ TCons (Proxy @Accept)
-           $ TCons (Proxy @AcceptBargain)
-           $ TCons (Proxy @Retreat)
-           $ TCons (Proxy @PassOut)
            $ TNil
 
 -- | All DM tools as JSON for API (used for dispatcher, not for LLM calls)
@@ -863,12 +626,7 @@ traumaToolList = TCons (Proxy @SetSceneStyle)
                $ TCons (Proxy @Choose)
                $ TNil
 
--- | Bargain tools: accept deal, retreat, or pass out
-bargainToolList :: ToolList DMEvent WorldState DMEffects '[AcceptBargain, Retreat, PassOut]
-bargainToolList = TCons (Proxy @AcceptBargain)
-                $ TCons (Proxy @Retreat)
-                $ TCons (Proxy @PassOut)
-                $ TNil
+-- Note: bargainToolList removed - bargain mode uses structured output + requestChoice
 
 -- | Get tool list for a specific mood
 toolsForMood :: DMMood -> [Value]
@@ -877,11 +635,12 @@ toolsForMood = \case
   MoodAction _ _  -> toolListToJSON actionToolList
   MoodAftermath _ -> toolListToJSON aftermathToolList
   MoodTrauma _    -> toolListToJSON traumaToolList
-  MoodBargain _   -> toolListToJSON bargainToolList
+  MoodBargain _   -> []  -- No tools - bargain uses structured output + requestChoice
 
 -- | Names of transition tools that change mood state
 transitionToolNames :: [Text]
-transitionToolNames = ["engage", "resolve", "accept_bargain", "retreat", "pass_out"]
+transitionToolNames = ["engage", "resolve"]
+-- Note: accept_bargain, retreat, pass_out removed - bargain mode uses structured output
 -- Note: "accept" is NOT a transition - it completes the turn, not restarts it
 
 -- | Create a DM dispatcher that detects mood transitions

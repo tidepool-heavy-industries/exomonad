@@ -13,6 +13,10 @@ module DM.Output
   , CompressionOutput(..)
   , RumorInit(..)
   , applyCompression
+
+    -- * Bargain Output
+  , BargainLLMOutput(..)
+  , BargainLLMOption(..)
   ) where
 
 import DM.State
@@ -241,3 +245,39 @@ initToRumor baseId idx ri = Rumor
       "common_knowledge" -> CommonKnowledge
       "universal"        -> Universal
       _                  -> Tavern  -- Default to tavern-level spread
+
+-- ══════════════════════════════════════════════════════════════
+-- BARGAIN OUTPUT
+-- ══════════════════════════════════════════════════════════════
+
+-- | A single bargain option from LLM output
+-- LLM generates these; player picks; system applies mechanically
+data BargainLLMOption = BargainLLMOption
+  { bloLabel :: Text           -- "Take 2 stress for a die"
+  , bloHint :: Text            -- "Cheap, but it hurts" (shown during choice)
+  , bloCostType :: Text        -- "stress" | "heat" | "clock" | "faction" | "trauma"
+  , bloCostAmount :: Int       -- For stress/heat: amount. For clock: ticks.
+  , bloCostTarget :: Maybe Text -- Clock ID or Faction ID if applicable
+  , bloDiceGained :: Int       -- 1-3 dice gained
+  , bloNarrative :: Text       -- Revealed AFTER choice (consequences land)
+  }
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+
+-- | Structured output for bargain mode
+-- LLM generates options; system presents via requestChoice; player picks
+data BargainLLMOutput = BargainLLMOutput
+  { bargainNarration :: Text             -- "Your hands are shaking..."
+  , bargainOptions :: [BargainLLMOption] -- 2-4 bargain options
+  , bargainCanRetreat :: Bool            -- Is escape possible?
+  , bargainRetreatDesc :: Maybe Text     -- "Slip out the back..." (if can retreat)
+  }
+  deriving (Show, Eq, Generic, ToJSON)
+
+-- | Custom FromJSON with defaults for missing fields
+instance FromJSON BargainLLMOutput where
+  parseJSON = withObject "BargainLLMOutput" $ \o ->
+    BargainLLMOutput
+      <$> o .: "bargainNarration"
+      <*> o .:? "bargainOptions" .!= []
+      <*> o .:? "bargainCanRetreat" .!= False
+      <*> o .:? "bargainRetreatDesc"

@@ -29,8 +29,9 @@ module DM.Loop
 import DM.State
 import qualified DM.State
 import DM.Context (buildDMContext, buildCompressionContext, DMContext(..))
-import DM.Output (TurnOutput(..), CompressionOutput(..), applyTurnOutput, applyCompression)
-import DM.Templates (renderForMood, renderCompression, turnOutputSchema, compressionOutputSchema)
+import DM.Output (TurnOutput(..), CompressionOutput(..), applyTurnOutput, applyCompression, BargainLLMOutput(..), BargainLLMOption(..))
+import DM.Templates (renderForMood, renderCompression, turnOutputSchema, compressionOutputSchema, bargainSchema, bargainTemplate)
+import Tidepool.Template (render)
 import DM.Tools (DMEvent(..), toolsForMood, makeDMDispatcherWithPhase)
 import DM.GUI.Widgets.Events (formatEvent)
 import Tidepool.Effect hiding (ToolResult)
@@ -141,12 +142,20 @@ dmTurn input = do
         then runMoodAwareTurn userAction  -- Restart with forced action mood
         else do
           -- Get current mood and scene from phase
-          state <- get
+          state <- get @WorldState
           -- Extract scene and mood from PhasePlaying (required for turn)
           (scene, mood) <- case state.phase of
             PhasePlaying s m -> return (s, m)
             _ -> error "runMoodAwareTurn called outside PhasePlaying"
 
+          -- Special handling for MoodBargain: use structured output + requestChoice
+          case mood of
+            MoodBargain bargainVariant -> handleBargainTurn scene bargainVariant
+            _ -> handleNormalTurn scene mood userAction
+
+    -- | Handle normal turns (Scene, Action, Aftermath, Trauma)
+    handleNormalTurn scene mood userAction = do
+          state <- get @WorldState
           let context = buildDMContext scene mood state
           let loc = context.ctxLocation
           let npcs = context.ctxPresentNpcs
@@ -249,6 +258,234 @@ dmTurn input = do
                   , responseHeatDelta = actualHeatDelta
                   , responseSuggestedActions = result.trOutput.suggestedActions
                   }
+
+    -- | Handle bargain turn: LLM generates options, player picks via requestChoice
+    handleBargainTurn scene bargainVariant = do
+      stateBefore <- get @WorldState
+      let mood = MoodBargain bargainVariant
+      let context = buildDMContext scene mood stateBefore
+
+      logInfo $ "BARGAIN - Out of dice: " <> bargainVariant.bvWhatDrained
+
+      -- Render bargain template and call LLM (no tools needed)
+      let systemPrompt = render bargainTemplate context
+      let Schema{schemaJSON = outputSchema} = bargainSchema
+
+      logDebug $ "Bargain prompt length: " <> T.pack (show $ T.length systemPrompt) <> " chars"
+
+      -- Call LLM with bargain schema (no tools)
+      outcome <- runTurn @BargainLLMOutput systemPrompt "waiting for options" outputSchema []
+
+      case outcome of
+        TurnBroken reason -> do
+          -- Shouldn't happen with no tools, but handle gracefully
+          logWarn $ "Bargain turn broken (unexpected): " <> reason
+          return Response
+            { responseText = "*The city waits. Something went wrong.*"
+            , responseStressDelta = 0
+            , responseCoinDelta = 0
+            , responseHeatDelta = 0
+            , responseSuggestedActions = ["Try again"]
+            }
+
+        TurnCompleted parseResult -> case parseResult of
+          TurnParseFailed{..} -> do
+            logWarn $ "Failed to parse bargain output: " <> T.pack tpfError
+            return Response
+              { responseText = "*The city grows impatient. Something went wrong.*"
+              , responseStressDelta = 0
+              , responseCoinDelta = 0
+              , responseHeatDelta = 0
+              , responseSuggestedActions = ["Try again"]
+              }
+
+          TurnParsed result -> do
+            let bargainOutput = result.trOutput
+            logInfo $ "Bargain LLM returned " <> T.pack (show $ length bargainOutput.bargainOptions) <> " options"
+
+            -- Emit the opening narration
+            emit (NarrativeAdded bargainOutput.bargainNarration)
+
+            -- Build choice list: bargain options + retreat (if available) + pass out
+            let bargainChoices = [(opt.bloLabel <> " — " <> opt.bloHint, Left opt) | opt <- bargainOutput.bargainOptions]
+            let retreatChoice = case (bargainOutput.bargainCanRetreat, bargainOutput.bargainRetreatDesc) of
+                  (True, Just desc) -> [("Retreat: " <> desc, Right "retreat")]
+                  (True, Nothing) -> [("Retreat: slip away", Right "retreat")]
+                  _ -> []
+            let passOutChoice = [("Pass out", Right "passout")]
+            let allChoices = bargainChoices ++ retreatChoice ++ passOutChoice
+
+            -- Present choice via requestChoice
+            choice <- requestChoice "The city waits. What will you trade?" allChoices
+
+            case choice of
+              Left chosenOption -> do
+                -- Player chose a bargain option - apply costs and grant dice
+                logInfo $ "Player chose bargain: " <> chosenOption.bloLabel
+
+                -- Show player's choice
+                emit (NarrativeAdded $ "> " <> chosenOption.bloLabel)
+
+                -- Reveal the narrative (consequences land)
+                emit (NarrativeAdded chosenOption.bloNarrative)
+
+                -- Apply the cost
+                applyBargainCost chosenOption
+
+                -- Grant dice
+                modify @WorldState $ \s -> s
+                  { dicePool = addDiceToPool chosenOption.bloDiceGained s.dicePool }
+
+                -- Check clock consequences (bargain may have advanced a clock to completion)
+                checkClockConsequences
+
+                -- Transition back to the scene that led to bargain
+                let returnMood = MoodScene (Encounter "after the bargain" UrgencyMedium True)
+                modify @WorldState $ updateMood returnMood
+
+                stateAfter <- get @WorldState
+                let actualStressDelta = stateAfter.player.stress - stateBefore.player.stress
+                    actualCoinDelta = stateAfter.player.coin - stateBefore.player.coin
+                    actualHeatDelta = stateAfter.player.heat - stateBefore.player.heat
+
+                -- Emit state change events for GUI event log
+                let eventContext = "bargain: " <> chosenOption.bloLabel
+                emitStateChangeEvents stateBefore stateAfter eventContext
+
+                return Response
+                  { responseText = chosenOption.bloNarrative
+                  , responseStressDelta = actualStressDelta
+                  , responseCoinDelta = actualCoinDelta
+                  , responseHeatDelta = actualHeatDelta
+                  , responseSuggestedActions = ["Continue", "Take stock", "Press on"]
+                  }
+
+              Right "retreat" -> do
+                -- Player chose to retreat - transition to BetweenScenes
+                logInfo "Player chose to retreat from bargain"
+
+                emit (NarrativeAdded "> Retreat")
+                emit (NarrativeAdded "*You slip away. The debt remains unpaid.*")
+
+                -- Reset dice to 3 (retreat benefit)
+                modify @WorldState $ \s -> s
+                  { dicePool = resetDicePool 3 s.dicePool }
+
+                -- Transition to BetweenScenes
+                let bsContext = BetweenScenesContext
+                      { bscClocks = []  -- Will be filled by handleBetweenScenes
+                      , bscTransitionNarration = "You retreat into the city's embrace."
+                      }
+                modify @WorldState $ \s -> s { phase = PhaseBetweenScenes bsContext }
+
+                return Response
+                  { responseText = "*You slip away. The debt remains unpaid. Dice restored.*"
+                  , responseStressDelta = 0
+                  , responseCoinDelta = 0
+                  , responseHeatDelta = 0
+                  , responseSuggestedActions = ["Find safety", "Lay low", "Regroup"]
+                  }
+
+              Right "passout" -> do
+                -- Player chose to pass out
+                logInfo "Player chose to pass out"
+
+                emit (NarrativeAdded "> Pass out")
+                emit (NarrativeAdded "*Darkness takes you. You wake somewhere else.*")
+
+                let stressBeforePassout = stateBefore.player.stress
+
+                -- Apply pass out costs: +2 stress, tick 1-2 threat clocks
+                modify @WorldState $ \s -> s
+                  { player = s.player { stress = min 9 (s.player.stress + 2) }
+                  , dicePool = resetDicePool 2 s.dicePool  -- Minimal dice
+                  }
+
+                -- Tick threat clocks (1-2 random)
+                tickRandomThreatClocks 1
+
+                -- Emit stress change event
+                stateAfterPassout <- get @WorldState
+                let actualStressDelta = stateAfterPassout.player.stress - stressBeforePassout
+                when (actualStressDelta /= 0) $
+                  emit (StressChanged stressBeforePassout stateAfterPassout.player.stress "passed out")
+
+                -- Transition to BetweenScenes
+                let bsContext = BetweenScenesContext
+                      { bscClocks = []
+                      , bscTransitionNarration = "You wake somewhere unfamiliar. Time has passed."
+                      }
+                modify @WorldState $ \s -> s { phase = PhaseBetweenScenes bsContext }
+
+                return Response
+                  { responseText = "*Darkness takes you. You wake somewhere else. +2 stress.*"
+                  , responseStressDelta = actualStressDelta
+                  , responseCoinDelta = 0
+                  , responseHeatDelta = 0
+                  , responseSuggestedActions = ["Get your bearings", "Find out what happened"]
+                  }
+
+              Right other -> do
+                logWarn $ "Unknown bargain choice: " <> other
+                return Response
+                  { responseText = "*Something went wrong.*"
+                  , responseStressDelta = 0
+                  , responseCoinDelta = 0
+                  , responseHeatDelta = 0
+                  , responseSuggestedActions = ["Try again"]
+                  }
+
+    -- | Apply bargain cost based on cost type
+    applyBargainCost opt = case opt.bloCostType of
+      "stress" -> modify @WorldState $ \s -> s
+        { player = s.player { stress = min 9 (s.player.stress + opt.bloCostAmount) } }
+      "heat" -> modify @WorldState $ \s -> s
+        { player = s.player { heat = min 10 (s.player.heat + opt.bloCostAmount) } }
+      "clock" -> case opt.bloCostTarget of
+        Just clockIdText -> do
+          let cid = ClockId clockIdText
+          modify @WorldState $ \s -> s
+            { clocks = HM.adjust (\c -> c { clockFilled = min c.clockSegments (c.clockFilled + opt.bloCostAmount) }) cid s.clocks }
+        Nothing -> logWarn "Clock bargain without target - ignoring"
+      "faction" -> case opt.bloCostTarget of
+        Just factionIdText -> do
+          let fid = FactionId factionIdText
+          modify @WorldState $ \s -> s
+            { factions = HM.adjust (\f -> f { factionAttitude = worsenAttitude f.factionAttitude }) fid s.factions }
+        Nothing -> logWarn "Faction bargain without target - ignoring"
+      "trauma" -> modify @WorldState $ \s -> s
+        { player = s.player
+          { stress = 0  -- Stress resets with trauma
+          , trauma = Trauma "Desperate Bargain" : s.player.trauma
+          }
+        }
+      other -> logWarn $ "Unknown bargain cost type: " <> other
+
+    -- | Add dice to pool
+    addDiceToPool n pool =
+      let newDice = replicate n 4  -- Add dice with value 4 (average)
+      in pool { poolDice = pool.poolDice ++ newDice }
+
+    -- | Reset dice pool to N dice
+    resetDicePool n pool = pool { poolDice = replicate n 4 }
+
+    -- | Tick 1-2 random threat clocks
+    tickRandomThreatClocks n = do
+      state <- get @WorldState
+      let threatClocks = HM.filter (\c -> c.clockType == ThreatClock) state.clocks
+      let clockIds = HM.keys threatClocks
+      case clockIds of
+        [] -> pure ()
+        (cid:_) -> modify @WorldState $ \s -> s
+          { clocks = HM.adjust (\c -> c { clockFilled = min c.clockSegments (c.clockFilled + n) }) cid s.clocks }
+
+    -- | Make a faction attitude worse (Allied -> Favorable -> Neutral -> Wary -> Hostile)
+    worsenAttitude :: Attitude -> Attitude
+    worsenAttitude Allied = Favorable
+    worsenAttitude Favorable = Neutral
+    worsenAttitude Neutral = Wary
+    worsenAttitude Wary = Hostile
+    worsenAttitude Hostile = Hostile  -- Can't get worse
 
     -- | Check for pending clock interrupts and handle them
     -- Returns True if an interrupt forced a state transition
@@ -1360,10 +1597,8 @@ guiGameLoopWithDB conn gameId bridge = loop
                     , DM.State.suggestedActions = scenario.siSuggestedActions
                     }
 
-                  -- Add Fate's narration first, then scene narration (via Emit effect)
-                  emit (NarrativeAdded scenario.siFateNarration)
-                  emit (NarrativeAdded scenario.siSceneNarration)
-                  emit (NarrativeAdded $ ">> " <> scenario.siOpeningHook)
+                  -- Add opening thread (consolidated 3-tweet narrative)
+                  emit (NarrativeAdded scenario.siOpeningThread)
 
                   -- Set suggested actions in bridge for UI
                   liftIO $ setSuggestedActions bridge scenario.siSuggestedActions
