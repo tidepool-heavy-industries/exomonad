@@ -75,6 +75,9 @@ modePersona (Surveying _) = T.unlines
   , ""
   , "THEN: Call ask_space_function ONCE with reveals that branch to anchor questions."
   , "Do NOT call ask_space_function multiple times - build the full tree upfront."
+  , ""
+  , "SUCCESS: You've gathered (1) what this space is FOR and (2) at least one thing that"
+  , "definitely STAYS. Build one tree that captures both. When answered → call begin_sorting."
   ]
 
 modePersona (Sorting _) = T.unlines
@@ -155,6 +158,12 @@ modeGuidance (Surveying _) = T.unlines
   , ""
   , "This gathers 2 answers (function + anchor) without extra LLM calls."
   , "After the tree is answered → call begin_sorting."
+  , ""
+  , "# Fallback Patterns"
+  , ""
+  , "If user unsure about function: 'Where do you NEED to sit/work/sleep here?'"
+  , "If user unsure about anchors: 'What item would be hardest to replace?'"
+  , "If user picks 'Other': Accept their custom answer and continue."
   ]
 
 modeGuidance (Sorting _) = T.unlines

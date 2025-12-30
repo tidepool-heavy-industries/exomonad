@@ -39,12 +39,6 @@ module Tidying.Question
 
     -- * Answers
   , Answer(..)
-
-    -- * Smart Constructors
-  , proposeItem
-  , confirm
-  , askFunction
-  , askLocation
   ) where
 
 import Control.Applicative ((<|>))
@@ -242,55 +236,6 @@ data Answer
   | ChoiceAnswer Text                     -- ^ Response to Choose (option value)
   | TextAnswer Text                       -- ^ Response to FreeText or fallback
   | AnswerPath [(Text, Text)]             -- ^ Trail of (questionId, value) from tree walk
+  | AnswerWithPath Answer [(Text, Text)]  -- ^ Inner answer wrapped with path context
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
--- ══════════════════════════════════════════════════════════════
--- SMART CONSTRUCTORS
--- ══════════════════════════════════════════════════════════════
-
--- | Create item disposition question from agent's analysis
---
--- @
--- proposeItem "mug on chair"
---   [ ("Kitchen counter", PlaceAt "kitchen")
---   , ("Trash", Trash)
---   , ("Desk", PlaceAt "desk")
---   ]
--- @
-proposeItem :: Text -> [(Text, ItemDisposition)] -> Question
-proposeItem item choices = ProposeDisposition
-  { pdItem = item
-  , pdChoices = map (\(lbl, val) -> Choice lbl val []) choices
-  , pdFallback = Just "Where does it actually go?"
-  }
-
--- | Simple yes/no confirmation
-confirm :: Text -> Bool -> Question
-confirm prompt def = Confirm prompt def
-
--- | Ask about space function with common options
-askFunction :: Question
-askFunction = Choose
-  { chPrompt = "What does this space need to DO?"
-  , chId = "function"
-  , chChoices =
-      [ ChoiceOption "Work - sit and focus" "workspace" []
-      , ChoiceOption "Create - art/music/crafts" "creative" []
-      , ChoiceOption "Sleep - rest and recover" "bedroom" []
-      , ChoiceOption "Store - keep things organized" "storage" []
-      , ChoiceOption "Live - hang out and relax" "living" []
-      ]
-  }
-
--- | Ask for specific location with common options
-askLocation :: Text -> Question
-askLocation item = ProposeDisposition
-  { pdItem = item
-  , pdChoices =
-      [ Choice "Desk" (PlaceAt "desk") []
-      , Choice "Shelf" (PlaceAt "shelf") []
-      , Choice "Drawer" (PlaceAt "drawer") []
-      , Choice "Closet" (PlaceAt "closet") []
-      ]
-  , pdFallback = Just "Where exactly?"
-  }

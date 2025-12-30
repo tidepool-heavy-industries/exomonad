@@ -56,6 +56,11 @@ data QuestionResult = QuestionResult
     -- ^ Element to auto-focus (if any)
   }
 
+-- | Wrap answer with path context if path is present
+wrapWithPath :: Maybe [(Text, Text)] -> Answer -> Answer
+wrapWithPath Nothing answer = answer
+wrapWithPath (Just path) answer = AnswerWithPath answer path
+
 -- | Render a Question to interactive UI elements
 --
 -- The widget will call 'safeSubmitResponse' with a 'CustomResponse'
@@ -88,7 +93,18 @@ renderDisposition
   -> [Choice]       -- ^ Ranked choices (first = recommended)
   -> Maybe Text     -- ^ Fallback text placeholder
   -> UI QuestionResult
-renderDisposition bridge item choices fallback = do
+renderDisposition bridge item choices fallback =
+  renderDispositionWithPath bridge item choices fallback Nothing
+
+-- | Render disposition with optional path context for terminal reveals
+renderDispositionWithPath
+  :: GUIBridge state
+  -> Text           -- ^ Item description
+  -> [Choice]       -- ^ Ranked choices (first = recommended)
+  -> Maybe Text     -- ^ Fallback text placeholder
+  -> Maybe [(Text, Text)]  -- ^ Accumulated path from parent Choose (for AnswerWithPath)
+  -> UI QuestionResult
+renderDispositionWithPath bridge item choices fallback mPath = do
   -- Container needs tabindex for number key shortcuts
   container <- UI.div #. "question-disposition"
     # set (attr "tabindex") "-1"
@@ -103,7 +119,7 @@ renderDisposition bridge item choices fallback = do
 
   -- Render each choice, first one highlighted
   cards <- forM (zip [1..] choices) $ \(num, choice) ->
-    mkDispositionCard bridge num (num == 1) choice
+    mkDispositionCard bridge mPath num (num == 1) choice
 
   void $ element choicesEl #+ map element cards
 
@@ -135,7 +151,8 @@ renderDisposition bridge item choices fallback = do
     let submitOther = do
           val <- get value inputEl
           when (not (null val)) $ do
-            let answer = DispositionAnswer (PlaceAt (T.pack val))
+            let baseAnswer = DispositionAnswer (PlaceAt (T.pack val))
+                answer = wrapWithPath mPath baseAnswer
             liftIO $ safeSubmitResponse bridge (CustomResponse (toJSON answer))
 
     on UI.click submitBtn $ const submitOther
@@ -152,8 +169,9 @@ renderDisposition bridge item choices fallback = do
       let num = code - 48
       when (num <= length choices) $ do
         let choice = choices !! (num - 1)
-        liftIO $ safeSubmitResponse bridge
-          (CustomResponse (toJSON (DispositionAnswer choice.choiceValue)))
+            baseAnswer = DispositionAnswer choice.choiceValue
+            answer = wrapWithPath mPath baseAnswer
+        liftIO $ safeSubmitResponse bridge (CustomResponse (toJSON answer))
 
   void $ element container #+ [element itemEl, element choicesEl, element fallbackSection]
 
@@ -166,11 +184,12 @@ renderDisposition bridge item choices fallback = do
 -- | Create a disposition choice card
 mkDispositionCard
   :: GUIBridge state
+  -> Maybe [(Text, Text)]  -- ^ Path context for AnswerWithPath
   -> Int         -- ^ Number (for keyboard shortcut)
   -> Bool        -- ^ Is this the recommended choice?
   -> Choice      -- ^ The choice
   -> UI Element
-mkDispositionCard bridge num isRecommended choice = do
+mkDispositionCard bridge mPath num isRecommended choice = do
   let cardClass = if isRecommended
         then "disposition-card recommended"
         else "disposition-card"
@@ -194,13 +213,15 @@ mkDispositionCard bridge num isRecommended choice = do
 
   -- Click handler
   on UI.click card $ const $ liftIO $ do
-    let answer = DispositionAnswer choice.choiceValue
+    let baseAnswer = DispositionAnswer choice.choiceValue
+        answer = wrapWithPath mPath baseAnswer
     safeSubmitResponse bridge (CustomResponse (toJSON answer))
 
   -- Keyboard handler
   on UI.keydown card $ \code ->
     when (code == 13 || code == 32) $ liftIO $ do  -- Enter or Space
-      let answer = DispositionAnswer choice.choiceValue
+      let baseAnswer = DispositionAnswer choice.choiceValue
+          answer = wrapWithPath mPath baseAnswer
       safeSubmitResponse bridge (CustomResponse (toJSON answer))
 
   void $ element card #+ [element numHint, element labelEl, element badge]
@@ -221,7 +242,17 @@ renderConfirm
   -> Text    -- ^ Prompt
   -> Bool    -- ^ Default value (pre-selected)
   -> UI QuestionResult
-renderConfirm bridge prompt defVal = do
+renderConfirm bridge prompt defVal =
+  renderConfirmWithPath bridge prompt defVal Nothing
+
+-- | Render Confirm with optional path context for terminal reveals
+renderConfirmWithPath
+  :: GUIBridge state
+  -> Text    -- ^ Prompt
+  -> Bool    -- ^ Default value (pre-selected)
+  -> Maybe [(Text, Text)]  -- ^ Accumulated path from parent Choose
+  -> UI QuestionResult
+renderConfirmWithPath bridge prompt defVal mPath = do
   -- Container needs tabindex to receive keyboard events for Y/N shortcuts
   container <- UI.div #. "question-confirm"
     # set (attr "tabindex") "-1"
@@ -243,17 +274,21 @@ renderConfirm bridge prompt defVal = do
     # set (attr "tabindex") "0"
 
   on UI.click yesBtn $ const $ liftIO $ do
-    safeSubmitResponse bridge (CustomResponse (toJSON (ConfirmAnswer True)))
+    let answer = wrapWithPath mPath (ConfirmAnswer True)
+    safeSubmitResponse bridge (CustomResponse (toJSON answer))
 
   on UI.click noBtn $ const $ liftIO $ do
-    safeSubmitResponse bridge (CustomResponse (toJSON (ConfirmAnswer False)))
+    let answer = wrapWithPath mPath (ConfirmAnswer False)
+    safeSubmitResponse bridge (CustomResponse (toJSON answer))
 
   -- Keyboard shortcuts: Y for yes, N for no
   on UI.keydown container $ \code -> do
-    when (code == 89) $ liftIO $  -- Y key
-      safeSubmitResponse bridge (CustomResponse (toJSON (ConfirmAnswer True)))
-    when (code == 78) $ liftIO $  -- N key
-      safeSubmitResponse bridge (CustomResponse (toJSON (ConfirmAnswer False)))
+    when (code == 89) $ liftIO $ do  -- Y key
+      let answer = wrapWithPath mPath (ConfirmAnswer True)
+      safeSubmitResponse bridge (CustomResponse (toJSON answer))
+    when (code == 78) $ liftIO $ do  -- N key
+      let answer = wrapWithPath mPath (ConfirmAnswer False)
+      safeSubmitResponse bridge (CustomResponse (toJSON answer))
 
   void $ element buttonsRow #+ [element yesBtn, element noBtn]
   void $ element container #+ [element promptEl, element buttonsRow]
@@ -397,27 +432,28 @@ handleOptionSelected bridge answersRef _parentContainer revealsContainer qid opt
     (firstReveal:_) -> do
       -- Has reveals - render the first one in the reveals container
       void $ element revealsContainer # set children []
+      -- Get accumulated path for terminal reveals
+      currentPath <- liftIO $ reverse <$> readIORef answersRef
       case firstReveal of
         Choose revPrompt revQid revOptions ->
-          -- Choose chains accumulate answers via IORef
+          -- Choose chains continue accumulating answers via IORef
           renderChooseLevel bridge answersRef revealsContainer revQid revPrompt revOptions
 
         ProposeDisposition item choices fallback -> do
-          -- Terminal reveal - render disposition widget
-          -- Note: accumulated answers discarded; disposition submits its own answer
-          result <- renderDisposition bridge item choices fallback
+          -- Terminal reveal - disposition widget wraps answer with path
+          result <- renderDispositionWithPath bridge item choices fallback (Just currentPath)
           void $ element revealsContainer #+ [element result.qrElement]
           maybe (pure ()) UI.setFocus result.qrFocusTarget
 
         FreeText prompt placeholder -> do
-          -- Terminal reveal - render text input widget
-          result <- renderFreeText bridge prompt placeholder
+          -- Terminal reveal - text input wraps answer with path
+          result <- renderFreeTextWithPath bridge prompt placeholder (Just currentPath)
           void $ element revealsContainer #+ [element result.qrElement]
           maybe (pure ()) UI.setFocus result.qrFocusTarget
 
         Confirm prompt defVal -> do
-          -- Terminal reveal - render confirm widget
-          result <- renderConfirm bridge prompt defVal
+          -- Terminal reveal - confirm widget wraps answer with path
+          result <- renderConfirmWithPath bridge prompt defVal (Just currentPath)
           void $ element revealsContainer #+ [element result.qrElement]
           maybe (pure ()) UI.setFocus result.qrFocusTarget
 
@@ -470,7 +506,17 @@ renderFreeText
   -> Text         -- ^ Prompt
   -> Maybe Text   -- ^ Placeholder
   -> UI QuestionResult
-renderFreeText bridge prompt mPlaceholder = do
+renderFreeText bridge prompt mPlaceholder =
+  renderFreeTextWithPath bridge prompt mPlaceholder Nothing
+
+-- | Render FreeText with optional path context for terminal reveals
+renderFreeTextWithPath
+  :: GUIBridge state
+  -> Text         -- ^ Prompt
+  -> Maybe Text   -- ^ Placeholder
+  -> Maybe [(Text, Text)]  -- ^ Accumulated path from parent Choose
+  -> UI QuestionResult
+renderFreeTextWithPath bridge prompt mPlaceholder mPath = do
   container <- UI.div #. "question-freetext"
 
   promptEl <- UI.div #. "freetext-prompt"
@@ -486,7 +532,8 @@ renderFreeText bridge prompt mPlaceholder = do
   let submit = do
         val <- get value inputEl
         when (not (null val)) $ liftIO $ do
-          safeSubmitResponse bridge (CustomResponse (toJSON (TextAnswer (T.pack val))))
+          let answer = wrapWithPath mPath (TextAnswer (T.pack val))
+          safeSubmitResponse bridge (CustomResponse (toJSON answer))
 
   on UI.click submitBtn $ const submit
   on UI.keydown inputEl $ \code ->

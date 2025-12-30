@@ -51,7 +51,7 @@ module Tidying.Tools
   , makeTidyingDispatcher
   ) where
 
-import Control.Exception (SomeException, try)
+import Control.Exception (SomeException, try, displayException)
 import Control.Monad (when)
 import Control.Monad.IO.Class (liftIO)
 import Data.Text (Text)
@@ -173,7 +173,9 @@ executeProposeDisposition askQuestion input = do
 
   case result of
     Left err -> do
-      logWarn $ "Question handler failed: " <> T.pack (show err)
+      let errMsg = T.pack (displayException err)
+      logWarn $ "Question handler failed for '" <> input.pdiItem <> "': " <> errMsg
+      emit $ ToolError "propose_disposition" input.pdiItem errMsg
       pure ProposeDispositionResult
         { pdrDisposition = Q.SkipForNow
         , pdrUserResponse = "(no response - error)"
@@ -315,7 +317,9 @@ executeAskSpaceFunction askQuestion input = do
 
   case result of
     Left err -> do
-      logWarn $ "Question handler failed: " <> T.pack (show err)
+      let errMsg = T.pack (displayException err)
+      logWarn $ "Question handler failed for ask_space_function '" <> input.asfiPrompt <> "': " <> errMsg
+      emit $ ToolError "ask_space_function" input.asfiPrompt errMsg
       pure AskSpaceFunctionResult { asfrFunction = "living", asfrAnswerPath = [] }
 
     Right answer -> do
@@ -401,7 +405,9 @@ executeConfirmDone askQuestion input = do
 
   case result of
     Left err -> do
-      logWarn $ "Question handler failed: " <> T.pack (show err)
+      let errMsg = T.pack (displayException err)
+      logWarn $ "Question handler failed for confirm_done: " <> errMsg
+      emit $ ToolError "confirm_done" prompt errMsg
       pure ConfirmDoneResult { cdrConfirmed = False }
 
     Right answer ->

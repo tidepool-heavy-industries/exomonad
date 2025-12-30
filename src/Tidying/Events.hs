@@ -26,4 +26,5 @@ data TidyingEvent
   | UserCorrected Text Text     -- ^ Item and user-provided location
   | FunctionChosen Text         -- ^ Space function selected
   | SessionConfirmedDone        -- ^ User confirmed session is done
+  | ToolError Text Text Text    -- ^ Tool error: tool name, item/context, error message
   deriving (Show, Eq)

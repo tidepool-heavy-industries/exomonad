@@ -12,9 +12,10 @@ module Tidying.GUI.Runner
 import Control.Concurrent.MVar (takeMVar)
 import Control.Concurrent.STM (atomically, readTVar, writeTVar)
 import Control.Exception (SomeException, try)
-import System.Timeout (timeout)
 import Control.Monad.IO.Class (liftIO)
 import Data.Aeson (fromJSON, Result(..), toJSON)
+import Data.Maybe (isJust)
+import System.Timeout (timeout)
 import qualified Data.Text as T
 import System.Environment (lookupEnv)
 
@@ -153,9 +154,9 @@ tidyingGameLoopWithGUI bridge = do
         SessionConfirmedDone ->
           logInfo bridge "TOOL: User confirmed session done"
 
-        ErrorOccurred err -> do
-          addChatMessage bridge $ ErrorMessage err
-          logWarn bridge $ "ERROR: " <> err
+        ToolError toolName context errMsg -> do
+          logWarn bridge $ "TOOL ERROR [" <> toolName <> "] " <> context <> ": " <> errMsg
+          addChatMessage bridge $ ErrorMessage $ "Tool error: " <> errMsg
 
   -- Create the question handler for tools to use
   let questionHandler = makeQuestionHandler bridge
@@ -254,9 +255,6 @@ makeQuestionHandler bridge = \question -> do
           logError bridge "Unexpected response type for question"
           pure $ fallbackAnswer question
   where
-    isJust Nothing = False
-    isJust (Just _) = True
-
     questionType :: Question -> T.Text
     questionType (ProposeDisposition _ _ _) = "ProposeDisposition"
     questionType (Confirm _ _) = "Confirm"
@@ -278,7 +276,7 @@ fallbackAnswer :: Question -> Answer
 fallbackAnswer = \case
   ProposeDisposition _ _ _ -> DispositionAnswer SkipForNow
   Confirm _ defVal -> ConfirmAnswer defVal
-  Choose _ _ _ -> ChoiceAnswer ""
+  Choose _ _ _ -> AnswerPath []  -- Empty path, not empty string
   FreeText _ _ -> TextAnswer ""
 
 -- | Run State effect with live synchronization to GUIBridge
