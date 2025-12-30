@@ -61,28 +61,34 @@ renderExtractPrompt :: Text
 renderExtractPrompt = T.unlines
   [ "Extract information from user message about tidying."
   , ""
-  , "Examples:"
+  , "# Function extraction (what space is FOR):"
+  , "- \"work\" → {\"intent\":\"start\",\"function\":\"workspace\"}"
+  , "- \"coding\" → {\"intent\":\"start\",\"function\":\"workspace\"}"
+  , "- \"gaming\" → {\"intent\":\"start\",\"function\":\"gaming\"}"
+  , "- \"work and gaming\" → {\"intent\":\"start\",\"function\":\"workspace\"}"
+  , "- \"art stuff\" → {\"intent\":\"start\",\"function\":\"creative\"}"
+  , "- \"sleep\" → {\"intent\":\"start\",\"function\":\"bedroom\"}"
+  , "- \"storage\" → {\"intent\":\"start\",\"function\":\"storage\"}"
+  , ""
+  , "# Starting/describing space:"
   , "- \"desk messy\" → {\"intent\":\"start\"}"
   , "- \"my computer area\" → {\"intent\":\"start\"}"
+  , ""
+  , "# Item handling:"
   , "- \"old magazine\" → {\"intent\":\"item\",\"item\":\"old magazine\"}"
   , "- \"broken headphones\" → {\"intent\":\"item\",\"item\":\"broken headphones\"}"
   , "- \"trash it\" → {\"intent\":\"decided\",\"choice\":\"trash\"}"
-  , "- \"throw away\" → {\"intent\":\"decided\",\"choice\":\"trash\"}"
   , "- \"keep\" → {\"intent\":\"decided\",\"choice\":\"keep\"}"
   , "- \"drawer\" → {\"intent\":\"decided\",\"choice\":\"place\",\"place\":\"drawer\"}"
-  , "- \"put in closet\" → {\"intent\":\"decided\",\"choice\":\"place\",\"place\":\"closet\"}"
   , "- \"not sure\" → {\"intent\":\"help\"}"
-  , "- \"idk\" → {\"intent\":\"help\"}"
   , "- \"next\" → {\"intent\":\"continue\"}"
   , "- \"done\" → {\"intent\":\"stop\"}"
-  , "- \"tired\" → {\"intent\":\"stop\"}"
   , ""
   , "Rules:"
+  , "- If they say what space is FOR (work, gaming, art, etc) → extract function"
   , "- If they describe a space/area → intent=start"
-  , "- If they name an object → intent=item with item name"
-  , "- If they say what to do with it → intent=decided with choice"
-  , "- If unsure/stuck/help → intent=help"
-  , "- If ready for next/continue → intent=continue"
+  , "- If they name an object → intent=item"
+  , "- If they say what to do with it → intent=decided"
   , "- If done/stop/tired → intent=stop"
   , ""
   , "Output JSON only."
@@ -217,6 +223,30 @@ renderActPrompt ctx action = T.unlines
 -- | Action-specific guidance (takes context for DecisionAid)
 actionGuidance :: TidyingContext -> Action -> Text
 actionGuidance ctx action = case action of
+  AskFunction -> T.unlines
+    [ "# Ask Space Function"
+    , ""
+    , "We need to know what this space is FOR."
+    , ""
+    , "Call ask_space_function with context-specific choices."
+    , "Base the options on what they told you (desk → work/gaming/art)."
+    , ""
+    , "Example for 'desk messy':"
+    , "  prompt: 'What do you use this desk for?'"
+    , "  choices: [{label: 'Work - computer stuff', value: 'workspace'},"
+    , "            {label: 'Gaming', value: 'gaming'},"
+    , "            {label: 'Art/crafts', value: 'creative'}]"
+    ]
+
+  AskAnchors -> T.unlines
+    [ "# Ask About Anchors"
+    , ""
+    , "What definitely STAYS in this space?"
+    , "Ask briefly what items belong here no matter what."
+    , ""
+    , "Example: \"What definitely stays? The desk, the computer...\""
+    ]
+
   FirstInstruction -> T.unlines
     [ "# First Instruction"
     , ""
@@ -290,7 +320,71 @@ actionGuidance ctx action = case action of
     , "Example: \"Chair and desk usable. Nice progress. Papers are for next time.\""
     ]
 
-  _ -> "Respond briefly and keep momentum."
+  AskWhatIsIt -> T.unlines
+    [ "# Ask What It Is"
+    , ""
+    , "User picked something up. Find out what it is."
+    , "Be brief and curious."
+    ]
+
+  AskWhereLive -> T.unlines
+    [ "# Ask Where It Lives"
+    , ""
+    , "User has an item that belongs somewhere."
+    , "Help them figure out where. Use propose_disposition if you have context."
+    ]
+
+  AskItemDecision item -> T.unlines
+    [ "# Item Decision"
+    , ""
+    , "User mentioned: " <> (\(ItemName n) -> n) item
+    , ""
+    , "IMPORTANT: Use propose_disposition tool to offer choices."
+    , "Consider any context they gave (sentimental, broken, etc)."
+    , "Make the options thoughtful, not just 'trash/keep/unsure'."
+    ]
+
+  InstructTrash -> T.unlines
+    [ "# Trash It"
+    , ""
+    , "Item is trash. Confirm briefly and keep momentum."
+    , "Example: \"Toss it. What's next?\""
+    ]
+
+  InstructPlace loc -> T.unlines
+    [ "# Place It"
+    , ""
+    , "Item goes to: " <> (\(Location l) -> l) loc
+    , "Confirm the location and move on."
+    ]
+
+  InstructUnsure -> T.unlines
+    [ "# Unsure Pile"
+    , ""
+    , "They're not sure about this one. That's fine."
+    , "Direct them to set it aside and keep going."
+    ]
+
+  InstructNext -> T.unlines
+    [ "# Next Item"
+    , ""
+    , "Keep the momentum. Ask what's next."
+    , "Be brief."
+    ]
+
+  InstructBag -> T.unlines
+    [ "# Bag the Trash"
+    , ""
+    , "Trash pile is getting big. Time to bag it."
+    , "Quick directive."
+    ]
+
+  EnergyCheck -> T.unlines
+    [ "# Energy Check"
+    , ""
+    , "Check if they want to continue or stop."
+    , "No pressure either way."
+    ]
 
 -- ══════════════════════════════════════════════════════════════
 -- PHOTO ANALYSIS PROMPT

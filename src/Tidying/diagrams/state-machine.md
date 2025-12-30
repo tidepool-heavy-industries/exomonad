@@ -120,21 +120,15 @@ mindmap
       Summary
 ```
 
-## Canned vs LLM-Generated Responses
+## Response Generation
 
-| Canned (no LLM) | LLM-Generated |
-|-----------------|---------------|
-| AskFunction → "What do you need to DO in this space?" | FirstInstruction |
-| AskAnchors → "What's definitely staying no matter what?" | DecisionAid |
-| AskWhatIsIt → "What is it?" | PivotAway |
-| AskWhereLive → "Desk or somewhere else?" | Summary |
-| AskItemDecision → "[item]. Trash, keep, or not sure?" | AckProgress |
-| InstructTrash → "Trash. Toss it by the door. Next." | InstructSplit |
-| InstructUnsure → "Unsure pile, floor to your right. Next." | |
-| InstructNext → "Next thing." | |
-| InstructBag → "Bag the trash by the door." | |
-| InstructPlace → "[loc]. Next." | |
-| EnergyCheck → "Energy check: keep going, or stop here for today?" | |
+All responses go through LLM for natural, context-aware conversation.
+No canned responses - the Action just informs the system prompt.
+
+Key actions that use tools:
+- `AskFunction` → calls `ask_space_function` tool for UI choices
+- `AskItemDecision` → calls `propose_disposition` tool with thoughtful options
+- `FirstInstruction` → calls `propose_disposition` for first item
 
 ## Split Suggestion Patterns
 

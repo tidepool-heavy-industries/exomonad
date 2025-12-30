@@ -50,7 +50,6 @@ import Tidying.Output
   , Extract(..), Intent(..), Choice(..)
   )
 import Tidying.Templates
-import Tidying.Act (cannedResponse)
 import Tidying.Tools (tidyingTools)
 import Tidying.Events (TidyingEvent(..))
 import Tidying.Types (ItemName(..), SpaceFunction(..), CategoryName(..), chaosLevelToText)
@@ -191,6 +190,7 @@ analyzePhotos photos = do
 
     TurnCompleted (TurnParseFailed {tpfError}) -> do
       logWarn $ "Photo analysis parse failed: " <> T.pack tpfError
+      emit $ ErrorOccurred $ "Photo analysis failed: " <> T.pack tpfError
       -- Fall back to stub
       let analysis = stubPhotoAnalysis photos
       case analysis of
@@ -200,6 +200,7 @@ analyzePhotos photos = do
 
     TurnBroken reason -> do
       logWarn $ "Photo analysis broken: " <> reason
+      emit $ ErrorOccurred $ "Photo analysis error: " <> reason
       pure (stubPhotoAnalysis photos)
 
 -- | Convert PhotoAnalysisOutput to PhotoAnalysis
@@ -239,6 +240,7 @@ visionPrompt = "Analyze this space. What do you see? How messy is it? What shoul
 extractFromInput
   :: ( LLM :> es
      , Log :> es
+     , Emit TidyingEvent :> es
      )
   => Maybe PhotoAnalysis  -- ^ Photo analysis context (if photos were analyzed)
   -> UserInput
@@ -268,6 +270,7 @@ extractFromInput mPhotoAnalysis input = do
   case result of
     Left err -> do
       logWarn $ "Extract parse failed: " <> err
+      emit $ ErrorOccurred $ "Extract failed: " <> err
       -- Fallback: assume they want to continue
       pure Extract
         { exIntent = IntentContinue
@@ -284,35 +287,29 @@ extractFromInput mPhotoAnalysis input = do
 -- ══════════════════════════════════════════════════════════════
 
 -- | Generate response for action
--- Uses canned responses when possible, LLM for complex ones
+-- All responses go through LLM for natural conversation
 actResponse
   :: ( LLM :> es
      , Log :> es
+     , Emit TidyingEvent :> es
      )
   => TidyingContext
   -> Action
   -> Eff es Text
 actResponse ctx action = do
-  -- Check for canned response first
-  case cannedResponse action of
-    Just response -> do
-      logDebug $ "Canned response for: " <> T.pack (show action)
-      pure response
-    Nothing -> do
-      -- Need LLM for this action - pass tools so LLM can propose dispositions
-      logDebug $ "Calling LLM for action: " <> T.pack (show action)
-      let systemPrompt = renderActPrompt ctx action
-          -- Include action type and context in user message
-          userMsg = "Action: " <> T.pack (show action)
-                 <> maybe "" (\t -> "\nUser said: " <> t) ctx.tcUserText
+  logDebug $ "Calling LLM for action: " <> T.pack (show action)
+  let systemPrompt = renderActPrompt ctx action
+      userMsg = "Action: " <> T.pack (show action)
+             <> maybe "" (\t -> "\nUser said: " <> t) ctx.tcUserText
 
-      result <- llmCallWithTools @ActOutput systemPrompt userMsg actOutputSchema.schemaJSON tidyingTools
+  result <- llmCallWithTools @ActOutput systemPrompt userMsg actOutputSchema.schemaJSON tidyingTools
 
-      case result of
-        Left err -> do
-          logWarn $ "Act failed: " <> err
-          pure "What's next?"  -- fallback
-        Right output -> pure output.aoResponse
+  case result of
+    Left err -> do
+      logWarn $ "Act failed: " <> err
+      emit $ ErrorOccurred err
+      pure $ "⚠️ Error: " <> err <> "\n\nWhat's next?"
+    Right output -> pure output.aoResponse
 
 -- ══════════════════════════════════════════════════════════════
 -- STATE TRANSITIONS

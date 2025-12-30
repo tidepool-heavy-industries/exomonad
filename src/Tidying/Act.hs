@@ -5,9 +5,6 @@ module Tidying.Act
   ( -- * ACT: Generate response
     act
   , ActContext(..)
-
-    -- * Canned responses
-  , cannedResponse
   ) where
 
 import Data.Aeson (ToJSON(..), (.=), object)
@@ -59,12 +56,9 @@ act
   -> Maybe Text                         -- ^ Photo analysis
   -> Action
   -> m Text
-act runLLM st photoAnalysis action =
-  case cannedResponse action of
-    Just response -> pure response
-    Nothing -> do
-      let ctx = buildActContext st photoAnalysis action
-      runLLM action ctx
+act runLLM st photoAnalysis action = do
+  let ctx = buildActContext st photoAnalysis action
+  runLLM action ctx
 
 -- | Build context for act template
 buildActContext :: SessionState -> Maybe Text -> Action -> ActContext
@@ -97,49 +91,3 @@ extractSplitCats :: Action -> [Text]
 extractSplitCats (InstructSplit cats) = map (\(CategoryName c) -> c) (NE.toList cats)
 extractSplitCats _ = []
 
--- | Canned responses that don't need LLM
-cannedResponse :: Action -> Maybe Text
-cannedResponse = \case
-  -- Questions
-  AskFunction ->
-    Just "What do you need to DO in this space?"
-
-  AskAnchors ->
-    Just "What's definitely staying no matter what?"
-
-  AskWhatIsIt ->
-    Just "What is it?"
-
-  AskWhereLive ->
-    Just "Desk or somewhere else?"
-
-  AskItemDecision (ItemName item) ->
-    Just $ item <> ". Trash, keep, or not sure?"
-
-  -- Simple instructions
-  InstructTrash ->
-    Just "Trash. Toss it by the door. Next."
-
-  InstructUnsure ->
-    Just "Unsure pile, floor to your right. Next."
-
-  InstructNext ->
-    Just "Next thing."
-
-  InstructBag ->
-    Just "Bag the trash by the door."
-
-  InstructPlace (Location loc) ->
-    Just $ loc <> ". Next."
-
-  -- Energy check is fixed
-  EnergyCheck ->
-    Just "Energy check: keep going, or stop here for today?"
-
-  -- These need LLM
-  FirstInstruction -> Nothing
-  InstructSplit _ -> Nothing
-  DecisionAid _ -> Nothing
-  PivotAway _ _ -> Nothing
-  AckProgress _ -> Nothing
-  Summary -> Nothing

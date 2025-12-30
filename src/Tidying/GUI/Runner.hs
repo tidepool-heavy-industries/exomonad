@@ -47,7 +47,9 @@ import Tidepool.GUI.Core
   , PendingRequest(..)
   , RequestResponse(..)
   , addNarrative
+  , logDebug
   , logInfo
+  , logWarn
   , logError
   , updateState
   , setLLMActive
@@ -145,6 +147,11 @@ tidyingGameLoopWithGUI bridge = do
         SessionConfirmedDone ->
           logInfo bridge "TOOL: User confirmed session done"
 
+        ErrorOccurred err -> do
+          -- Show errors visibly in both narrative and debug
+          addNarrative bridge $ "⚠️ " <> err
+          logWarn bridge $ "ERROR: " <> err
+
   -- Create the question handler for tools to use
   let questionHandler = makeQuestionHandler bridge
 
@@ -193,13 +200,21 @@ tidyingGameLoopWithGUI bridge = do
 -- Has a 5-minute timeout to prevent blocking forever if GUI hangs.
 makeQuestionHandler :: GUIBridge state -> QuestionHandler
 makeQuestionHandler bridge = \question -> do
+  -- Debug: log question being posted
+  logInfo bridge $ "QuestionHandler: posting question type: " <> questionType question
+  logDebug bridge $ "QuestionHandler: full question JSON: " <> T.pack (show (toJSON question))
+
   -- Post question to bridge as PendingCustom
   atomically $ writeTVar bridge.gbPendingRequest
     (Just $ PendingCustom "question" (toJSON question))
 
+  logInfo bridge "QuestionHandler: blocking on MVar..."
+
   -- Block waiting for user response (5 minute timeout)
   -- 5 * 60 * 1000000 = 300000000 microseconds
   mResponse <- timeout 300000000 $ takeMVar bridge.gbRequestResponse
+
+  logInfo bridge $ "QuestionHandler: MVar returned: " <> T.pack (show (isJust mResponse))
 
   -- Clear the pending request
   atomically $ writeTVar bridge.gbPendingRequest Nothing
@@ -210,24 +225,45 @@ makeQuestionHandler bridge = \question -> do
       logError bridge "Question handler timed out (5 min)"
       pure $ fallbackAnswer question
 
-    Just response ->
+    Just response -> do
       -- Parse response
+      logInfo bridge $ "QuestionHandler: got response type: " <> responseType response
       case response of
-        CustomResponse val ->
+        CustomResponse val -> do
+          logDebug bridge $ "QuestionHandler: parsing CustomResponse: " <> T.pack (show val)
           case fromJSON val of
-            Success answer -> pure answer
+            Success answer -> do
+              logInfo bridge $ "QuestionHandler: parsed answer successfully"
+              pure answer
             Error err -> do
               logError bridge $ "Failed to parse answer: " <> T.pack err
               -- Fallback: treat as text answer
               pure $ fallbackAnswer question
 
         -- Shouldn't happen, but handle gracefully
-        TextResponse _ ->
+        TextResponse txt -> do
+          logWarn bridge $ "QuestionHandler: got TextResponse instead of CustomResponse: " <> txt
           pure $ fallbackAnswer question
 
         _ -> do
           logError bridge "Unexpected response type for question"
           pure $ fallbackAnswer question
+  where
+    isJust Nothing = False
+    isJust (Just _) = True
+
+    questionType :: Question -> T.Text
+    questionType (ProposeDisposition _ _ _) = "ProposeDisposition"
+    questionType (Confirm _ _) = "Confirm"
+    questionType (Choose _ _ _) = "Choose"
+    questionType (FreeText _ _) = "FreeText"
+
+    responseType :: RequestResponse -> T.Text
+    responseType (ChoiceResponse _) = "ChoiceResponse"
+    responseType (TextResponse _) = "TextResponse"
+    responseType (PhotoResponse _ _) = "PhotoResponse"
+    responseType (TextWithPhotoResponse _ _ _) = "TextWithPhotoResponse"
+    responseType (CustomResponse _) = "CustomResponse"
 
 -- | Fallback answer when parsing fails
 --

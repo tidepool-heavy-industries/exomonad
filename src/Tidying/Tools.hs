@@ -52,7 +52,7 @@ import Effectful (Eff, (:>), IOE)
 
 import Tidepool.Effect
   ( State, Emit, Log
-  , emit, logWarn, modify
+  , emit, logInfo, logWarn, modify
   , QuestionHandler
   , ToolResult(..)
   )
@@ -101,7 +101,14 @@ data ProposeDispositionInput = ProposeDispositionInput
   , pdiChoices :: [ProposedChoice]  -- ^ Ranked choices, first = best guess
   , pdiFallback :: Maybe Text    -- ^ Placeholder for text input if all wrong
   }
-  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+  deriving (Show, Eq, Generic, ToJSON)
+
+-- | Custom FromJSON to match schema field names (item, choices, fallback)
+instance FromJSON ProposeDispositionInput where
+  parseJSON = withObject "ProposeDispositionInput" $ \o -> ProposeDispositionInput
+    <$> o .: "item"
+    <*> o .: "choices"
+    <*> o .:? "fallback"
 
 -- | Result returned to LLM
 data ProposeDispositionResult = ProposeDispositionResult
@@ -223,9 +230,30 @@ data AskSpaceFunction = AskSpaceFunction
   deriving (Show, Eq, Generic)
 
 data AskSpaceFunctionInput = AskSpaceFunctionInput
-  { asfiContext :: Maybe Text  -- ^ Optional context about the space
+  { asfiPrompt :: Text              -- ^ Question to ask
+  , asfiChoices :: [SpaceFunctionChoice]  -- ^ LLM-generated choices
   }
-  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+  deriving (Show, Eq, Generic, ToJSON)
+
+-- | Custom FromJSON to match schema field names (prompt, choices)
+instance FromJSON AskSpaceFunctionInput where
+  parseJSON = withObject "AskSpaceFunctionInput" $ \o -> AskSpaceFunctionInput
+    <$> o .: "prompt"
+    <*> o .: "choices"
+
+data SpaceFunctionChoice = SpaceFunctionChoice
+  { sfcLabel :: Text   -- ^ Display text: "Work - sit and focus"
+  , sfcValue :: Text   -- ^ Value: "workspace"
+  }
+  deriving (Show, Eq, Generic)
+
+-- | Custom ToJSON/FromJSON to match schema field names (label, value)
+instance ToJSON SpaceFunctionChoice where
+  toJSON c = object ["label" .= c.sfcLabel, "value" .= c.sfcValue]
+
+instance FromJSON SpaceFunctionChoice where
+  parseJSON = withObject "SpaceFunctionChoice" $ \o ->
+    SpaceFunctionChoice <$> o .: "label" <*> o .: "value"
 
 data AskSpaceFunctionResult = AskSpaceFunctionResult
   { asfrFunction :: Text  -- ^ "workspace", "creative", "bedroom", etc.
@@ -234,9 +262,15 @@ data AskSpaceFunctionResult = AskSpaceFunctionResult
 
 askSpaceFunctionSchema :: Value
 askSpaceFunctionSchema = schemaToValue $ objectSchema
-  [ ("context", describeField "context" "Optional context about what you observe in the space" (emptySchema TString))
+  [ ("prompt", describeField "prompt" "Question to ask (e.g., 'What do you use this space for?')" (emptySchema TString))
+  , ("choices", describeField "choices" "2-4 context-specific options. Each has label (shown) and value (returned)."
+      (arraySchema $ objectSchema
+        [ ("label", emptySchema TString)
+        , ("value", emptySchema TString)
+        ]
+        ["label", "value"]))
   ]
-  []
+  ["prompt", "choices"]
 
 executeAskSpaceFunction
   :: ( State SessionState :> es
@@ -247,16 +281,29 @@ executeAskSpaceFunction
   => QuestionHandler
   -> AskSpaceFunctionInput
   -> Eff es AskSpaceFunctionResult
-executeAskSpaceFunction askQuestion _input = do
-  -- Use the smart constructor from Question.hs (wrapped in try/catch)
-  result <- liftIO $ try @SomeException $ askQuestion askFunction
+executeAskSpaceFunction askQuestion input = do
+  logInfo $ "TOOL ask_space_function: prompt=" <> input.asfiPrompt
+  logInfo $ "TOOL ask_space_function: choices=" <> T.pack (show (map (.sfcLabel) input.asfiChoices))
+
+  -- Build question from LLM-provided choices
+  let choiceOptions = map (\c -> Q.ChoiceOption c.sfcLabel c.sfcValue) input.asfiChoices
+      question = Q.Choose
+        { Q.chPrompt = input.asfiPrompt
+        , Q.chId = "function"
+        , Q.chChoices = choiceOptions
+        }
+
+  logInfo "TOOL ask_space_function: calling askQuestion..."
+  result <- liftIO $ try @SomeException $ askQuestion question
+  logInfo $ "TOOL ask_space_function: askQuestion returned, result=" <> T.pack (show (isRight result))
 
   case result of
     Left err -> do
-      logWarn $ "Question handler failed: " <> T.pack (show err)
+      logWarn $ "TOOL ask_space_function: Question handler failed: " <> T.pack (show err)
       pure AskSpaceFunctionResult { asfrFunction = "living" }
 
-    Right answer ->
+    Right answer -> do
+      logInfo $ "TOOL ask_space_function: got answer type=" <> answerType answer
       case answer of
         Q.ChoiceAnswer value -> do
           emit $ FunctionChosen value
@@ -270,9 +317,19 @@ executeAskSpaceFunction askQuestion _input = do
           modify @SessionState $ \st -> updateFunctionInState st (SpaceFunction custom)
           pure AskSpaceFunctionResult { asfrFunction = custom }
 
-        _ ->
+        _ -> do
+          logWarn "TOOL ask_space_function: unexpected answer type, using fallback"
           -- Fallback
           pure AskSpaceFunctionResult { asfrFunction = "living" }
+  where
+    isRight (Right _) = True
+    isRight _ = False
+
+    answerType :: Q.Answer -> T.Text
+    answerType (Q.DispositionAnswer _) = "DispositionAnswer"
+    answerType (Q.ConfirmAnswer _) = "ConfirmAnswer"
+    answerType (Q.ChoiceAnswer _) = "ChoiceAnswer"
+    answerType (Q.TextAnswer _) = "TextAnswer"
 
 -- | Helper to update function in PhaseData (only valid in Surveying)
 updateFunctionInState :: SessionState -> SpaceFunction -> SessionState
@@ -294,7 +351,13 @@ data ConfirmDoneInput = ConfirmDoneInput
   { cdiItemsProcessed :: Int   -- ^ How many items handled so far
   , cdiMessage :: Maybe Text   -- ^ Optional message to show
   }
-  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+  deriving (Show, Eq, Generic, ToJSON)
+
+-- | Custom FromJSON to match schema field names (items_processed, message)
+instance FromJSON ConfirmDoneInput where
+  parseJSON = withObject "ConfirmDoneInput" $ \o -> ConfirmDoneInput
+    <$> o .: "items_processed"
+    <*> o .:? "message"
 
 data ConfirmDoneResult = ConfirmDoneResult
   { cdrConfirmed :: Bool  -- ^ True if user wants to stop
@@ -355,7 +418,7 @@ tidyingTools =
       ]
   , object
       [ "name" .= ("ask_space_function" :: Text)
-      , "description" .= ("Ask what the space needs to DO. Use early in session to understand user's goal. Options: workspace, creative, bedroom, storage, living." :: Text)
+      , "description" .= ("Ask what the space is FOR. Generate 2-4 context-specific choices based on what you know (e.g., if they said 'desk', offer 'Work area', 'Gaming setup', 'Art station'). User picks one." :: Text)
       , "input_schema" .= askSpaceFunctionSchema
       ]
   , object
@@ -387,11 +450,16 @@ makeTidyingDispatcher handler "propose_disposition" input =
       result <- executeProposeDisposition handler parsed
       pure $ Right $ ToolSuccess $ toJSON result
 
-makeTidyingDispatcher handler "ask_space_function" input =
+makeTidyingDispatcher handler "ask_space_function" input = do
+  logInfo "DISPATCHER: ask_space_function called"
   case fromJSON input of
-    Error err -> pure $ Left $ "Failed to parse ask_space_function input: " <> T.pack err
+    Error err -> do
+      logWarn $ "DISPATCHER: Failed to parse ask_space_function input: " <> T.pack err
+      pure $ Left $ "Failed to parse ask_space_function input: " <> T.pack err
     Success parsed -> do
+      logInfo "DISPATCHER: ask_space_function input parsed, executing..."
       result <- executeAskSpaceFunction handler parsed
+      logInfo $ "DISPATCHER: ask_space_function completed, function=" <> result.asfrFunction
       pure $ Right $ ToolSuccess $ toJSON result
 
 makeTidyingDispatcher handler "confirm_done" input =

@@ -20,6 +20,7 @@ data TidyingEvent
   | SessionEnded Int            -- ^ Session ended, items processed
   | UserInputReceived Text      -- ^ User input received (for chat display)
   | ResponseGenerated Text      -- ^ Response generated (for chat display)
+  | ErrorOccurred Text          -- ^ Error occurred (for visible feedback)
   -- Tool events (from mid-turn tool calls)
   | ItemProposed Text [Text]    -- ^ Item and proposed dispositions
   | UserConfirmed Text Text     -- ^ Item and chosen disposition

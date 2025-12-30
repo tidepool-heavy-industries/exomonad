@@ -188,7 +188,9 @@ actJsonOptions = defaultOptions
   }
 
 instance FromJSON ActOutput where
-  parseJSON = genericParseJSON actJsonOptions
+  parseJSON = withObject "ActOutput" $ \v -> ActOutput
+    <$> v .: "response"
+    <*> v .:? "suggested_splits" .!= []  -- Default to empty list
 
 instance ToJSON ActOutput where
   toJSON = genericToJSON actJsonOptions

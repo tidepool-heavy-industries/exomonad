@@ -25,9 +25,9 @@ import Tidying.Question (Question)
 import Tidying.GUI.Theme (tidyingTheme)
 import Tidying.GUI.Widgets.Chat (chatPane, updateChatPane, typingIndicator)
 import Tidying.GUI.Widgets.Input (textInputWithPhoto)
-import Tidying.GUI.Widgets.PhotoUpload (photoUploadWidget)
 import Tidying.GUI.Widgets.Question (renderQuestion, QuestionResult(..))
-import Tidepool.GUI.Core
+import Tidepool.GUI.Core hiding (logDebug, logInfo, logWarn, logError)
+import qualified Tidepool.GUI.Core as GUICore
 import Tidepool.GUI.Theme (applyTheme)
 import Tidepool.GUI.Widgets (choiceCards, updateDebugPanel, stateInspector, StateInspectorHandle(..), refreshStateInspector, focusElement)
 
@@ -226,10 +226,29 @@ setupPolling config bridge getPhase elements = do
 
   UI.start timer
 
+-- | Cleanup script to stop camera streams before destroying widget
+--
+-- This prevents orphaned streams when the input widget is swapped out.
+cleanupCameraScript :: Text
+cleanupCameraScript = T.unlines
+  [ "(function() {"
+  , "  window.cameraModalPending = false;"
+  , "  if (window.cameraModalStream) {"
+  , "    window.cameraModalStream.getTracks().forEach(function(t) { t.stop(); });"
+  , "    window.cameraModalStream = null;"
+  , "  }"
+  , "  var video = document.getElementById('camera-modal-video');"
+  , "  if (video) video.srcObject = null;"
+  , "})();"
+  ]
+
 -- | Update the input area based on pending request
 updateInputArea :: GUIBridge state -> GUIElements -> Maybe PendingRequest -> UI ()
 updateInputArea bridge elements pending = do
   let inputArea = elements.geInputArea
+
+  -- Cleanup any active camera before swapping widgets
+  runFunction $ ffi $ T.unpack cleanupCameraScript
 
   case pending of
     Nothing -> do
@@ -251,12 +270,10 @@ updateInputArea bridge elements pending = do
       choicesWidget <- choiceCards bridge prompt options
       void $ element inputArea #+ [element choicesWidget]
 
-    Just (PendingPhoto prompt) -> do
-      -- Show photo upload
+    Just (PendingPhoto _) -> do
+      -- Photo-only upload not used in tidying (use textInputWithPhoto instead)
       void $ element inputArea # set children []
-      void $ element inputArea # set style [("display", "block")]
-      photoWidget <- photoUploadWidget bridge prompt
-      void $ element inputArea #+ [element photoWidget]
+      void $ element inputArea # set style [("display", "none")]
 
     Just (PendingDice _ _) -> do
       -- Dice selection not used in tidying, but handle gracefully
@@ -270,19 +287,23 @@ updateInputArea bridge elements pending = do
 
     Just (PendingCustom "question" val) -> do
       -- Question DSL widget
+      liftIO $ GUICore.logInfo bridge $ "GUI: Received PendingCustom question"
+      liftIO $ GUICore.logDebug bridge $ "GUI: Question JSON: " <> T.pack (show val)
       case fromJSON val of
         Aeson.Success (q :: Question) -> do
+          liftIO $ GUICore.logInfo bridge $ "GUI: Parsed question successfully, rendering..."
           void $ element inputArea # set children []
           void $ element inputArea # set style [("display", "block")]
           result <- renderQuestion bridge q
           void $ element inputArea #+ [element result.qrElement]
+          liftIO $ GUICore.logInfo bridge "GUI: Question widget rendered"
           -- Auto-focus if there's a target
           case result.qrFocusTarget of
             Just el -> focusElement el
             Nothing -> pure ()
         Aeson.Error err -> do
           -- Failed to decode question, log and hide
-          liftIO $ logError bridge $ "Failed to decode question: " <> T.pack err
+          liftIO $ GUICore.logError bridge $ "GUI: Failed to decode question: " <> T.pack err
           void $ element inputArea # set style [("display", "none")]
 
     Just (PendingCustom _ _) -> do

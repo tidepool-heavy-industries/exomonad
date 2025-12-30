@@ -32,6 +32,15 @@ library
         Tidepool.GUI.Server
         Tidepool.GUI.Theme
         Tidepool.GUI.Widgets
+        Tidepool.Graph
+        Tidepool.Graph.Types
+        Tidepool.Graph.Goto
+        Tidepool.Graph.Edges
+        Tidepool.Graph.Validate
+        Tidepool.Graph.Reify
+        Tidepool.Graph.Mermaid
+        Tidepool.Graph.TH
+        Tidepool.Graph.Runner
         Delta.Agent
         DM.Agent
         DM.State
@@ -74,7 +83,6 @@ library
         Tidying.GUI.Theme
         Tidying.GUI.Widgets.Chat
         Tidying.GUI.Widgets.Input
-        Tidying.GUI.Widgets.PhotoUpload
         Tidying.GUI.Widgets.Question
     build-depends:
         base >= 4.17 && < 5,
