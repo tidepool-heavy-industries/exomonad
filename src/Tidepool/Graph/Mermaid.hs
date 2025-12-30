@@ -27,9 +27,17 @@
 --     handler[[\"handler<br/>LLM\"]] -->|Response| exit((end))
 -- @
 module Tidepool.Graph.Mermaid
-  ( -- * Diagram Generation
+  ( -- * Flowchart Generation
     toMermaid
   , toMermaidWithConfig
+
+    -- * State Diagram Generation
+  , toStateDiagram
+  , toStateDiagramWithConfig
+
+    -- * Sequence Diagram Generation
+  , toSequenceDiagram
+  , ExecutionPath(..)
 
     -- * Configuration
   , MermaidConfig(..)
@@ -219,3 +227,201 @@ simplifyType t = T.pack $ go $ T.unpack t
           (c:_) | c >= 'A' && c <= 'Z' -> go rest
           _ -> s
       _ -> s
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- STATE DIAGRAM GENERATION
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Generate Mermaid state diagram with default configuration.
+--
+-- State diagrams are semantically accurate for our Graph DSL since
+-- nodes ARE states and Goto transitions ARE state transitions.
+--
+-- @
+-- stateDiagram-v2
+--     [*] --> classify: Message
+--     classify --> route: Intent
+--     route --> refund: Message
+--     route --> answer: Message
+--     refund --> [*]: Response
+--     answer --> [*]: Response
+-- @
+toStateDiagram :: GraphInfo -> Text
+toStateDiagram = toStateDiagramWithConfig defaultConfig
+
+-- | Generate Mermaid state diagram with custom configuration.
+toStateDiagramWithConfig :: MermaidConfig -> GraphInfo -> Text
+toStateDiagramWithConfig config info = T.unlines $
+  [ "stateDiagram-v2"
+  , ""
+  ]
+  ++ stateDefinitions config info
+  ++ [""]
+  ++ stateTransitions config info
+
+-- | Generate state definitions with annotations.
+stateDefinitions :: MermaidConfig -> GraphInfo -> [Text]
+stateDefinitions config info =
+  ["    %% State definitions"]
+  ++ map (renderState config) info.giNodes
+
+-- | Render a state definition.
+renderState :: MermaidConfig -> NodeInfo -> Text
+renderState config node =
+  if config.mcShowNodeKind
+  then "    " <> escapeName node.niName <> " : " <> kindAnnotation node.niKind
+  else ""
+  where
+    kindAnnotation RuntimeLLM   = "LLM"
+    kindAnnotation RuntimeLogic = "Logic"
+
+-- | Generate state transitions.
+stateTransitions :: MermaidConfig -> GraphInfo -> [Text]
+stateTransitions config info =
+  ["    %% Transitions"]
+  ++ entryStateTransitions config info
+  ++ nodeStateTransitions config info
+  ++ exitStateTransitions config info
+
+-- | Entry transitions.
+entryStateTransitions :: MermaidConfig -> GraphInfo -> [Text]
+entryStateTransitions config info = case info.giEntryType of
+  Nothing -> []
+  Just entryType ->
+    [ "    [*] --> " <> escapeName node.niName <> ": " <> typeLabel config entryType
+    | node <- info.giNodes
+    , entryType `elem` node.niNeeds
+    ]
+
+-- | Node-to-node transitions.
+nodeStateTransitions :: MermaidConfig -> GraphInfo -> [Text]
+nodeStateTransitions config info =
+  concatMap (nodeStateEdges config info) info.giNodes
+
+-- | Transitions from a single node.
+nodeStateEdges :: MermaidConfig -> GraphInfo -> NodeInfo -> [Text]
+nodeStateEdges config info node =
+  schemaTransitions ++ gotoTransitions
+  where
+    -- Schema → Needs transitions (implicit data flow)
+    schemaTransitions = case node.niSchema of
+      Nothing -> []
+      Just schemaType ->
+        [ "    " <> escapeName node.niName <> " --> " <> escapeName target.niName <> ": " <> typeLabel config schemaType
+        | target <- info.giNodes
+        , schemaType `elem` target.niNeeds
+        , target.niName /= node.niName
+        ]
+
+    -- Goto transitions (explicit control flow)
+    gotoTransitions =
+      [ "    " <> escapeName node.niName <> " --> " <> escapeName targetName <> ": " <> typeLabel config payload
+      | (targetName, payload) <- node.niGotoTargets
+      ]
+
+-- | Exit transitions.
+exitStateTransitions :: MermaidConfig -> GraphInfo -> [Text]
+exitStateTransitions config info = case info.giExitType of
+  Nothing ->
+    [ "    " <> escapeName node.niName <> " --> [*]"
+    | node <- info.giNodes
+    , node.niHasGotoExit
+    ]
+  Just exitType ->
+    [ "    " <> escapeName node.niName <> " --> [*]: " <> typeLabel config exitType
+    | node <- info.giNodes
+    , node.niHasGotoExit
+    ]
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- SEQUENCE DIAGRAM GENERATION
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | An execution path through the graph.
+--
+-- Each step is a node name. The path starts implicitly from Entry
+-- and ends at Exit.
+newtype ExecutionPath = ExecutionPath { pathSteps :: [Text] }
+  deriving (Show, Eq)
+
+-- | Generate Mermaid sequence diagram for a specific execution path.
+--
+-- Since graphs can have branches, you must specify which path to visualize.
+--
+-- @
+-- sequenceDiagram
+--     participant Entry
+--     participant classify
+--     participant route
+--     participant refund
+--     participant Exit
+--
+--     Entry->>classify: Message
+--     classify->>route: Intent
+--     route->>refund: Message
+--     refund->>Exit: Response
+-- @
+toSequenceDiagram :: MermaidConfig -> GraphInfo -> ExecutionPath -> Text
+toSequenceDiagram config info path = T.unlines $
+  [ "sequenceDiagram"
+  , ""
+  , "    %% Participants"
+  , "    participant Entry"
+  ]
+  ++ map renderParticipant path.pathSteps
+  ++ [ "    participant Exit"
+     , ""
+     , "    %% Message flow"
+     ]
+  ++ sequenceMessages config info path
+
+-- | Render a participant declaration.
+renderParticipant :: Text -> Text
+renderParticipant name = "    participant " <> escapeName name
+
+-- | Generate sequence messages for the path.
+sequenceMessages :: MermaidConfig -> GraphInfo -> ExecutionPath -> [Text]
+sequenceMessages config info (ExecutionPath steps) =
+  entryMessage ++ stepMessages ++ exitMessage
+  where
+    -- Entry to first node
+    entryMessage = case (steps, info.giEntryType) of
+      (first:_, Just entryType) ->
+        ["    Entry->>" <> escapeName first <> ": " <> typeLabel config entryType]
+      _ -> []
+
+    -- Messages between consecutive nodes
+    stepMessages = zipWith (makeMessage config info) steps (drop 1 steps)
+
+    -- Last node to Exit
+    exitMessage = case (reverse steps, info.giExitType) of
+      (lastNode:_, Just exitType) ->
+        ["    " <> escapeName lastNode <> "->>Exit: " <> typeLabel config exitType]
+      (lastNode:_, Nothing) ->
+        ["    " <> escapeName lastNode <> "->>Exit: "]
+      _ -> []
+
+-- | Make a message between two nodes.
+makeMessage :: MermaidConfig -> GraphInfo -> Text -> Text -> Text
+makeMessage config info fromNode toNode =
+  "    " <> escapeName fromNode <> "->>" <> escapeName toNode <> ": " <> msgType
+  where
+    -- Find the type being passed (from Schema or Goto)
+    msgType = case findNodeByName info fromNode of
+      Nothing -> ""
+      Just node ->
+        -- Check if it's a Goto transition
+        case lookup toNode node.niGotoTargets of
+          Just payload -> typeLabel config payload
+          Nothing ->
+            -- Must be Schema → Needs
+            case node.niSchema of
+              Just schemaType -> typeLabel config schemaType
+              Nothing -> ""
+
+-- | Find a node by name.
+findNodeByName :: GraphInfo -> Text -> Maybe NodeInfo
+findNodeByName info name =
+  case filter (\n -> n.niName == name) info.giNodes of
+    [n] -> Just n
+    _ -> Nothing
