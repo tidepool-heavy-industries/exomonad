@@ -164,6 +164,16 @@ Weave tension from these without revealing the mechanical tracker.
 </hidden_threats>
 {% endif %}
 
+{% if ctxFactionsInPlay %}
+<factions_in_play>
+Power moves in the city. These factions have interests that may intersect:
+{% for faction in ctxFactionsInPlay %}
+- **{{ faction.fsFactionName }}** ({{ faction.fsAttitudeLabel }}){% if faction.fsCurrentGoal %} — pursuing: {{ faction.fsCurrentGoal }}{% endif %}
+{% endfor %}
+Their goals can create friction, offer leverage, or explain why things are the way they are.
+</factions_in_play>
+{% endif %}
+
 {# ═══════════════════════════════════════════════════════════════════════════ #}
 {# THE SCENE TYPE                                                              #}
 {# ═══════════════════════════════════════════════════════════════════════════ #}

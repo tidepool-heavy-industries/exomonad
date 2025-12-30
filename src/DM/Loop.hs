@@ -467,21 +467,30 @@ dmTurn input = do
 
     -- | Add dice to pool
     addDiceToPool n pool =
-      let newDice = replicate n 4  -- Add dice with value 4 (average)
+      let currentLen = length pool.poolDice
+          -- Use varied values based on current pool size (deterministic but varied)
+          newDice = take n $ drop (currentLen `mod` 6) $ cycle [4, 5, 3, 6, 2, 1]
       in pool { poolDice = pool.poolDice ++ newDice }
 
-    -- | Reset dice pool to N dice
-    resetDicePool n pool = pool { poolDice = replicate n 4 }
+    -- | Reset dice pool to N dice with varied values
+    resetDicePool n pool = pool { poolDice = take n [4, 3, 5, 2, 6, 1, 4, 3] }
 
-    -- | Tick 1-2 random threat clocks
+    -- | Tick a random threat clock by n segments
     tickRandomThreatClocks n = do
       state <- get @WorldState
       let threatClocks = HM.filter (\c -> c.clockType == ThreatClock) state.clocks
       let clockIds = HM.keys threatClocks
       case clockIds of
         [] -> pure ()
-        (cid:_) -> modify @WorldState $ \s -> s
-          { clocks = HM.adjust (\c -> c { clockFilled = min c.clockSegments (c.clockFilled + n) }) cid s.clocks }
+        [cid] -> tickClock cid n  -- Only one clock, tick it
+        _ -> do
+          -- Multiple clocks: pick one at random
+          idx <- randomInt 0 (length clockIds - 1)
+          let cid = clockIds !! idx
+          tickClock cid n
+      where
+        tickClock cid amount = modify @WorldState $ \s -> s
+          { clocks = HM.adjust (\c -> c { clockFilled = min c.clockSegments (c.clockFilled + amount) }) cid s.clocks }
 
     -- | Make a faction attitude worse (Allied -> Favorable -> Neutral -> Wary -> Hostile)
     worsenAttitude :: Attitude -> Attitude

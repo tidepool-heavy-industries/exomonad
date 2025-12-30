@@ -52,6 +52,7 @@ What I leave out, dread fills in.
 {# THE DIE THAT WAS CAST                                                       #}
 {# ═══════════════════════════════════════════════════════════════════════════ #}
 
+{% if die_chosen > 0 %}
 <the_die_that_was_cast>
 **The moment of truth:**
 - Die chosen: **{{ die_chosen }}** → **{{ action_tier | upper }}**
@@ -71,6 +72,12 @@ A {{ die_chosen }}. {% if action_position == "controlled" %}Manageable. The posi
 A one. The die betrayed them. Or perhaps they betrayed themselves in choosing it.
 {% endif %}
 </the_die_that_was_cast>
+{% else %}
+<no_dice_context>
+No die was spent for this outcome. Narrate the aftermath without referencing dice mechanics.
+Focus on the situation and consequences directly.
+</no_dice_context>
+{% endif %}
 
 {# ═══════════════════════════════════════════════════════════════════════════ #}
 {# WHAT JUST HAPPENED                                                          #}

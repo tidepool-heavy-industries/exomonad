@@ -182,7 +182,8 @@ data NpcWithDisposition = NpcWithDisposition
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
 data FactionSummary = FactionSummary
-  { fsFactionName :: Text
+  { fsFactionId :: Text        -- ID for bargain cost targeting
+  , fsFactionName :: Text
   , fsAttitudeLabel :: Text
   , fsCurrentGoal :: Maybe Text
   }
@@ -216,8 +217,8 @@ buildDMContext activeScene mood world =
       -- Get relevant rumors (spread beyond whisper)
       relevantRumors = filter (\r -> r.rumorSpread > Whisper) world.rumors
 
-      -- Build faction summaries for factions in play
-      factionsInPlay = map summarizeFaction (HM.elems world.factions)
+      -- Build faction summaries for factions in play (with IDs for bargain targeting)
+      factionsInPlay = map (uncurry summarizeFaction) (HM.toList world.factions)
 
       -- Calculate precarity
       precarity = calculatePrecarity world.player
@@ -272,16 +273,14 @@ buildDiceContext world = DiceContext
   , dcLockedOutcome = fmap pendingToLocked world.pendingOutcome
   }
   where
-    pendingToLocked pending = case (pending.chosenDie, pending.chosenTier) of
-      (Just die, Just tier) -> LockedOutcome
-        { loContext = pending.outcomeContext
-        , loPosition = pending.outcomePosition
-        , loEffect = pending.outcomeEffect
-        , loStakes = pending.outcomeStakes
-        , loDieValue = die
-        , loTier = tier
-        }
-      _ -> error "pendingToLocked: incomplete pending outcome"
+    pendingToLocked pending = LockedOutcome
+      { loContext = pending.outcomeContext
+      , loPosition = pending.outcomePosition
+      , loEffect = pending.outcomeEffect
+      , loStakes = pending.outcomeStakes
+      , loDieValue = fromMaybe 4 pending.chosenDie  -- Default to middle value
+      , loTier = fromMaybe Partial pending.chosenTier  -- Default to partial success
+      }
 
 -- | Build mood context from DMMood
 -- Returns (human label, rich variant context)
@@ -544,10 +543,11 @@ mostUrgentWant wants = case sortOn (Down . urgencyOrd . (.wantUrgency)) wants of
       High -> 2
       UrgencyDesperate -> 3
 
--- | Summarize a faction for template display
-summarizeFaction :: Faction -> FactionSummary
-summarizeFaction faction = FactionSummary
-  { fsFactionName = faction.factionName
+-- | Summarize a faction for template display (includes ID for bargain targeting)
+summarizeFaction :: FactionId -> Faction -> FactionSummary
+summarizeFaction (FactionId fid) faction = FactionSummary
+  { fsFactionId = fid
+  , fsFactionName = faction.factionName
   , fsAttitudeLabel = attitudeLabel faction.factionAttitude
   , fsCurrentGoal = currentPursuingGoal faction.factionGoals
   }
@@ -585,7 +585,7 @@ buildCompressionContext :: ActiveScene -> WorldState -> CompressionContext
 buildCompressionContext scene world = CompressionContext
   { ccSceneToCompress = scene
   , ccAllBeats = map renderBeat (toList scene.sceneBeats)
-  , ccFactionStates = map summarizeFaction (HM.elems world.factions)
+  , ccFactionStates = map (uncurry summarizeFaction) (HM.toList world.factions)
   , ccNpcStates = map (enrichNpc world) scene.scenePresent
   , ccActiveClocks = filter (not . clockComplete) (HM.elems world.clocks)
   , ccActiveThreads = world.threads

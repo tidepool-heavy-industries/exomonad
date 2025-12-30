@@ -294,9 +294,11 @@ instance Tool SpendDie DMEvent WorldState DMEffects where
         -- Get player's choice via dice widget (shows hints + costs on each card)
         selectedIdx <- requestDice (formatPrompt input) diceWithHints
 
-        -- Get the chosen outcome and actual die value from pool
+        -- Get the chosen outcome and actual die value from pool (safe indexing)
         let chosenOutcome = getOutcomeAt selectedIdx input.outcomes
-            chosenDie = pool !! selectedIdx  -- Use actual pool value, not LLM's dieValue
+            chosenDie = case drop selectedIdx pool of
+              (x:_) -> x
+              []    -> 4  -- Fallback to middle value if index invalid
 
         -- Remove die from pool by index (not value, in case of duplicates)
         let newPool = take selectedIdx pool ++ drop (selectedIdx + 1) pool
@@ -378,10 +380,11 @@ instance Tool SpendDie DMEvent WorldState DMEffects where
       formatPrompt inp = inp.situation <> " (" <> T.pack (show inp.position) <> ")"
 
       -- Get outcome at position idx (outcomes is parallel to pool)
+      -- Returns a visible fallback if index out of bounds (LLM provided wrong number of outcomes)
       getOutcomeAt :: Int -> [DieOutcome] -> DieOutcome
       getOutcomeAt idx outs
         | idx < length outs = outs !! idx
-        | otherwise = DieOutcome 0 "?" 0 0 0 "The outcome unfolds..."
+        | otherwise = DieOutcome 4 "[FALLBACK: missing outcome]" 1 0 0 "Something unexpected happens..."
 
       -- Format hint with cost preview for dice display
       formatHintWithCosts :: DieOutcome -> Text
@@ -509,13 +512,17 @@ instance Tool Resolve DMEvent WorldState DMEffects where
               }
           Nothing -> emptyActionContext
 
+    -- Truncate lists to prevent LLM from bloating state
+    let costs = take 5 input.resolveCosts
+        complications = take 5 input.resolveComplications
+
     -- Build aftermath variant based on outcome, carrying action context
     let aftermath = case input.resolveOutcome of
           "clean" -> AmClean input.resolveWhat actionCtx
-          "costly" -> AmCostly input.resolveWhat input.resolveCosts input.resolveComplications actionCtx
+          "costly" -> AmCostly input.resolveWhat costs complications actionCtx
           "setback" -> AmSetback input.resolveWhat False "retreat" actionCtx
-          "disaster" -> AmDisaster input.resolveWhat True input.resolveComplications actionCtx
-          _ -> AmCostly input.resolveWhat input.resolveCosts input.resolveComplications actionCtx
+          "disaster" -> AmDisaster input.resolveWhat True complications actionCtx
+          _ -> AmCostly input.resolveWhat costs complications actionCtx
 
     -- Clear pendingOutcome now that we've consumed it
     modify @WorldState $ \s -> s { pendingOutcome = Nothing }

@@ -58,8 +58,8 @@ I am very patient.
 {% endfor %}
 
 {% for clock in ctxVisibleClocks %}
-**{{ clock.clockName }}** ticks. {{ clock.clockFilled }} of {{ clock.clockSegments }} filled.
-*It could tick faster.* (clockId: "{{ clock.clockId }}")
+**{{ clock.clockName }}** [{{ clock.clockFilled }}/{{ clock.clockSegments }}]
+*It could tick faster.* (Reference by name: "{{ clock.clockName }}")
 {% endfor %}
 
 {% for faction in ctxFactionsInPlay %}

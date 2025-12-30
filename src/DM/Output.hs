@@ -170,8 +170,14 @@ applyTurnOutput output state = state
       let maxPool = 6  -- Standard Blades pool size
           currentCount = length pool.poolDice
           toRecover = min n (maxPool - currentCount)
-          -- Generate dice values 1-6 for recovered dice (simple approach)
-          newDice = take toRecover [4, 3, 5, 2, 6, 1]  -- Placeholder values
+          -- Varied dice values based on current pool state (deterministic but not boring)
+          seed = sum pool.poolDice + currentCount  -- Simple seed from current state
+          newDice = take toRecover $ cycle [((seed + 1) `mod` 6) + 1,
+                                            ((seed + 3) `mod` 6) + 1,
+                                            ((seed + 5) `mod` 6) + 1,
+                                            ((seed + 2) `mod` 6) + 1,
+                                            ((seed + 4) `mod` 6) + 1,
+                                            ((seed + 0) `mod` 6) + 1]
       in pool { poolDice = pool.poolDice ++ newDice }
 
 -- ══════════════════════════════════════════════════════════════
