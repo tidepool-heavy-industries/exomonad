@@ -97,11 +97,13 @@ module Tidepool.Graph
   , Tools
   , When
   , Eff
+  , Memory
 
     -- * Graph-Level Annotations
   , type (:&)
   , Groups
   , Requires
+  , Global
 
     -- * The Goto Effect
   , Goto(..)
@@ -114,6 +116,7 @@ module Tidepool.Graph
   , AllNeedsSatisfied
   , AllGotoTargetsExist
   , AllToolsHaveSchema
+  , AllMemoriesValid
 
     -- * Reification
   , ReifyGraph(..)
@@ -152,6 +155,8 @@ module Tidepool.Graph
   , GetGotoTargets
   , GetEntryType
   , GetExitType
+  , GetMemory
+  , GetGlobal
 
     -- * Tools
   , ToolDef(..)

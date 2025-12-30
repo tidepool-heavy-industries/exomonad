@@ -36,6 +36,7 @@ module Tidepool.Graph.Validate
   , AllGotoTargetsExist
   , AllToolsHaveSchema
   , AllSchemasValidForStructuredOutput
+  , AllMemoriesValid
   , NeedsSatisfied
   , GotoTargetExists
 
@@ -50,7 +51,7 @@ import Data.Kind (Type, Constraint)
 import GHC.TypeLits (Symbol, TypeError, ErrorMessage(..))
 
 import Tidepool.Graph.Types
-import Tidepool.Graph.Edges (GetNeeds, GetSchema, GetTools, GetEntryType, GetGotoTargets)
+import Tidepool.Graph.Edges (GetNeeds, GetSchema, GetTools, GetMemory, GetEntryType, GetGotoTargets)
 import Tidepool.Graph.Tool (AllToolsValid)
 import Tidepool.Schema (ValidStructuredOutput)
 
@@ -70,6 +71,7 @@ import Tidepool.Schema (ValidStructuredOutput)
 -- * All Goto targets reference existing nodes or Exit
 -- * All Tools have valid schemas
 -- * All Schema types are valid for structured output (no oneOf)
+-- * All Memory types are valid (placeholder for future serialization checks)
 --
 -- @
 -- runGraph :: ValidGraph g => HandlersFor g -> EntryType g -> IO (ExitType g)
@@ -82,6 +84,7 @@ type ValidGraph g =
   , AllGotoTargetsExist g
   , AllToolsHaveSchema g
   , AllSchemasValidForStructuredOutput g
+  , AllMemoriesValid g
   )
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -329,6 +332,42 @@ type ValidateNodeSchema :: Maybe Type -> Constraint
 type family ValidateNodeSchema mSchema where
   ValidateNodeSchema 'Nothing = ()
   ValidateNodeSchema ('Just t) = ValidStructuredOutput t
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- MEMORY VALIDATION
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Validates that all Memory types in the graph are valid.
+--
+-- Currently a placeholder that always succeeds. Full validation
+-- (e.g., JSON serializable, Typeable) will be enforced at runtime
+-- when the NodeMemory effect is interpreted.
+--
+-- Future: Add compile-time checks for serialization constraints.
+type AllMemoriesValid :: Type -> Constraint
+type family AllMemoriesValid g where
+  AllMemoriesValid (Graph nodes) = AllNodeMemoriesValid nodes
+  AllMemoriesValid (g :& _) = AllMemoriesValid g
+
+-- | Validate Memory for each node.
+type AllNodeMemoriesValid :: [Type] -> Constraint
+type family AllNodeMemoriesValid nodes where
+  AllNodeMemoriesValid '[] = ()
+  AllNodeMemoriesValid ((Entry :~> _) ': rest) = AllNodeMemoriesValid rest
+  AllNodeMemoriesValid ((Exit :<~ _) ': rest) = AllNodeMemoriesValid rest
+  AllNodeMemoriesValid (node ': rest) =
+    ( ValidateNodeMemory (GetMemory node)
+    , AllNodeMemoriesValid rest
+    )
+
+-- | Validate a single node's Memory (if present).
+--
+-- Currently always succeeds. The Memory type will be validated
+-- at runtime when the effect is used (JSON, Typeable constraints).
+type ValidateNodeMemory :: Maybe Type -> Constraint
+type family ValidateNodeMemory mMemory where
+  ValidateNodeMemory 'Nothing = ()
+  ValidateNodeMemory ('Just _t) = ()  -- Placeholder: add constraints when effect is built
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- UTILITIES

@@ -13,6 +13,11 @@ module Tidepool.Graph.Example
   , BranchingGraph
   , AnnotatedGraph
   , ToolsGraph
+  , MemoryGraph
+
+    -- * Example Memory Types
+  , ExploreMem(..)
+  , SessionState(..)
 
     -- * Example Tools
   , SearchTool(..)
@@ -214,6 +219,54 @@ exampleToolReification :: [ToolInfo]
 exampleToolReification = [toolToInfo SearchTool]
 
 -- ════════════════════════════════════════════════════════════════════════════
+-- GRAPH WITH MEMORY (Node-Private Persistent State)
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Example memory type for a research/exploration node.
+--
+-- This is the node's private persistent state - it remembers what it has
+-- searched for, what worked, and what didn't work.
+data ExploreMem = ExploreMem
+  { urlsVisited :: [Text]    -- ^ URLs already searched
+  , deadEnds :: [Text]       -- ^ Queries that didn't help
+  , promisingLeads :: [Text] -- ^ Things worth exploring more
+  }
+
+-- | Example global state for a research session.
+--
+-- This is shared across all nodes in the graph.
+data SessionState = SessionState
+  { totalSearches :: Int     -- ^ How many searches have been performed
+  , sessionNotes :: [Text]   -- ^ Notes accumulated during the session
+  }
+
+-- | Intermediate type for research findings.
+data Findings = Findings { findingsList :: [Text] }
+
+-- | A graph demonstrating the Memory annotation for node-private state.
+--
+-- The "explore" node has its own ExploreMem that persists across runs.
+-- This allows it to avoid repeating searches and build up knowledge.
+--
+-- The graph also demonstrates Global for shared state.
+type MemoryGraph = Graph
+  '[ Entry :~> Message
+   , "explore" := LLM
+       :@ Needs '[Message]
+       :@ Schema Findings
+       :@ Memory ExploreMem      -- Node-private persistent state
+   , "summarize" := LLM
+       :@ Needs '[Findings]
+       :@ Schema Response
+   , Exit :<~ Response
+   ]
+  :& Global SessionState         -- Graph-level shared state
+
+-- | Validates MemoryGraph at compile time.
+validMemoryGraph :: ValidGraph MemoryGraph => ()
+validMemoryGraph = ()
+
+-- ════════════════════════════════════════════════════════════════════════════
 -- INVALID GRAPHS (commented out - uncomment to see compile errors)
 -- ════════════════════════════════════════════════════════════════════════════
 
@@ -265,6 +318,7 @@ simpleGraphInfo = GraphInfo
           , niTools = []
           , niToolInfos = []
           , niTemplate = Nothing
+          , niMemory = Nothing
           }
       , NodeInfo
           { niName = "respond"
@@ -278,6 +332,7 @@ simpleGraphInfo = GraphInfo
           , niTools = []
           , niToolInfos = []
           , niTemplate = Nothing
+          , niMemory = Nothing
           }
       ]
   , giEdges = []  -- Derived from Schema/Needs
@@ -305,6 +360,7 @@ branchingGraphInfo = GraphInfo
           , niTools = []
           , niToolInfos = []
           , niTemplate = Nothing
+          , niMemory = Nothing
           }
       , NodeInfo
           { niName = "refund"
@@ -318,6 +374,7 @@ branchingGraphInfo = GraphInfo
           , niTools = []
           , niToolInfos = []
           , niTemplate = Nothing
+          , niMemory = Nothing
           }
       , NodeInfo
           { niName = "answer"
@@ -331,6 +388,7 @@ branchingGraphInfo = GraphInfo
           , niTools = []
           , niToolInfos = []
           , niTemplate = Nothing
+          , niMemory = Nothing
           }
       ]
   , giEdges = []
@@ -355,6 +413,7 @@ annotatedGraphInfo = GraphInfo
           , niTools = [typeRep (Proxy @PhotoTool)]
           , niToolInfos = []  -- Would be populated by reification
           , niTemplate = Just (typeRep (Proxy @MyTemplate))
+          , niMemory = Nothing
           }
       , NodeInfo
           { niName = "conditional"
@@ -368,6 +427,7 @@ annotatedGraphInfo = GraphInfo
           , niTools = []
           , niToolInfos = []
           , niTemplate = Nothing
+          , niMemory = Nothing
           }
       ]
   , giEdges = []

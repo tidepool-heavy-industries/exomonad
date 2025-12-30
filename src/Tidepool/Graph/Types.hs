@@ -48,11 +48,13 @@ module Tidepool.Graph.Types
   , Tools
   , When
   , Eff
+  , Memory
 
     -- * Graph-Level Annotations
   , type (:&)
   , Groups
   , Requires
+  , Global
 
     -- * Type-Level Utilities
   , NodeName
@@ -163,6 +165,18 @@ data When condition
 type Eff :: [k] -> Type
 data Eff effects
 
+-- | Node-private persistent memory. Each node can declare its own state type
+-- that persists across graph runs. Only this node can access its Memory.
+--
+-- @
+-- "explore" := LLM
+--     :@ Needs '[Query]
+--     :@ Schema Findings
+--     :@ Memory ExploreMem   -- Private state for this node
+-- @
+type Memory :: Type -> Type
+data Memory stateType
+
 -- ════════════════════════════════════════════════════════════════════════════
 -- GRAPH-LEVEL ANNOTATIONS
 -- ════════════════════════════════════════════════════════════════════════════
@@ -188,6 +202,16 @@ data Groups groups
 -- Used for documentation and runner configuration.
 type Requires :: [Type] -> Type
 data Requires effects
+
+-- | Graph-level shared state accessible to all nodes. Unlike node-private
+-- 'Memory', Global state can be read and updated by any node in the graph.
+--
+-- @
+-- type MyGraph = Graph '[...]
+--     :& Global SessionState   -- Shared state for all nodes
+-- @
+type Global :: Type -> Type
+data Global stateType
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TYPE-LEVEL UTILITIES

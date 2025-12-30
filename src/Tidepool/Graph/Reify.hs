@@ -62,6 +62,7 @@ data NodeInfo = NodeInfo
   , niTools :: [TypeRep]         -- ^ Tool types (for backwards compat)
   , niToolInfos :: [ToolInfo]    -- ^ Full tool info with schemas (V2)
   , niTemplate :: Maybe TypeRep  -- ^ Template type
+  , niMemory :: Maybe TypeRep    -- ^ Memory type (node-private persistent state)
   }
   deriving (Show, Eq)
 

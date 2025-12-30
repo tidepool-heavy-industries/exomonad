@@ -146,6 +146,7 @@ data NodeDef = NodeDef
   , ndNeeds :: [TH.Type]      -- ^ Types this node needs
   , ndSchema :: Maybe TH.Type -- ^ Schema output (LLM nodes)
   , ndEff :: Maybe TH.Type    -- ^ Effect stack (Logic nodes)
+  , ndMemory :: Maybe TH.Type -- ^ Memory type (persistent node state)
   }
   deriving (Show)
 
@@ -202,6 +203,7 @@ parseNode t = case t of
       , ndNeeds = extractNeeds anns
       , ndSchema = extractSchema anns
       , ndEff = extractEff anns
+      , ndMemory = extractMemory anns
       }
 
 -- | Parse a node with its annotations.
@@ -252,6 +254,14 @@ extractEff = foldr go Nothing
   where
     go (AppT (ConT eff) t) _
       | nameBase eff == "Eff" = Just t
+    go _ acc = acc
+
+-- | Extract Memory type from annotations.
+extractMemory :: [TH.Type] -> Maybe TH.Type
+extractMemory = foldr go Nothing
+  where
+    go (AppT (ConT memory) t) _
+      | nameBase memory == "Memory" = Just t
     go _ acc = acc
 
 -- | Extract types from a promoted list.

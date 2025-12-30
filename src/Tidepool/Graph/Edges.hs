@@ -39,6 +39,10 @@ module Tidepool.Graph.Edges
   , GetTemplate
   , GetVision
   , GetTools
+  , GetMemory
+
+    -- * Graph-Level Extraction
+  , GetGlobal
 
     -- * Goto Extraction
   , GetGotoTargets
@@ -145,6 +149,18 @@ type family GetTools node where
   GetTools (node :@ Tools ts) = ts
   GetTools (node :@ _) = GetTools node
 
+-- | Extract the Memory type from a node declaration.
+--
+-- @
+-- GetMemory ("explore" := LLM :@ Schema Findings :@ Memory ExploreMem)
+--   = 'Just ExploreMem
+-- @
+type GetMemory :: Type -> Maybe Type
+type family GetMemory node where
+  GetMemory (_ := _) = 'Nothing
+  GetMemory (node :@ Memory t) = 'Just t
+  GetMemory (node :@ _) = GetMemory node
+
 -- ════════════════════════════════════════════════════════════════════════════
 -- GOTO EXTRACTION
 -- ════════════════════════════════════════════════════════════════════════════
@@ -219,6 +235,7 @@ type family SameAnnotationType ann target where
   SameAnnotationType (Tools _) (Tools _) = 'True
   SameAnnotationType (When _) (When _) = 'True
   SameAnnotationType (Eff _) (Eff _) = 'True
+  SameAnnotationType (Memory _) (Memory _) = 'True
   SameAnnotationType Vision Vision = 'True
   SameAnnotationType _ _ = 'False
 
@@ -274,6 +291,18 @@ type family FindExitType nodes where
   FindExitType ((Exit :<~ t) ': _) = t
   FindExitType (_ ': rest) = FindExitType rest
   -- Note: Missing Exit will cause a type error here (stuck type family)
+
+-- | Get the Global state type from a graph-level annotation.
+--
+-- @
+-- GetGlobal (Graph '[...] :& Global SessionState)
+--   = 'Just SessionState
+-- @
+type GetGlobal :: Type -> Maybe Type
+type family GetGlobal graph where
+  GetGlobal (Graph _) = 'Nothing
+  GetGlobal (graph :& Global t) = 'Just t
+  GetGlobal (graph :& _) = GetGlobal graph
 
 -- | Find a node by its name.
 type FindNodeByName :: [Type] -> Symbol -> Maybe Type
