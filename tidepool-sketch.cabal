@@ -41,6 +41,7 @@ library
         Tidepool.Graph.Mermaid
         Tidepool.Graph.TH
         Tidepool.Graph.Runner
+        Tidepool.Graph.Tool
         Tidepool.Graph.Example
         Delta.Agent
         DM.Agent
@@ -224,3 +225,16 @@ executable tidepool-tidy-gui
     default-extensions:
         OverloadedStrings
         OverloadedRecordDot
+
+test-suite graph-validation-tests
+    import:           warnings
+    type:             exitcode-stdio-1.0
+    main-is:          Spec.hs
+    other-modules:
+        GraphValidationSpec
+    build-depends:
+        base >= 4.17 && < 5,
+        hspec >= 2.10 && < 3,
+        process >= 1.6 && < 2
+    hs-source-dirs:   test
+    default-language: GHC2021

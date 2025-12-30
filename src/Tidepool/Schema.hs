@@ -24,6 +24,7 @@ module Tidepool.Schema
     -- * Schema Marker Traits
   , UsesOneOf
   , UsesEnum
+  , IsMarkedOneOf
   , HasUsesOneOf
   , HasUsesEnum
 
@@ -326,6 +327,15 @@ deriveHasJSONSchema typeName = do
 -- Used for contextual validation - e.g., structured output doesn't support oneOf.
 class UsesOneOf a
 
+-- | Open type family for types explicitly marked as using oneOf.
+--
+-- 'deriveUsesOneOf' generates instances like:
+-- @type instance IsMarkedOneOf MySum = 'True@
+--
+-- Types without an explicit instance remain stuck, which the
+-- 'HasUsesOneOf' type family interprets as 'False via 'IfStuck'.
+type family IsMarkedOneOf (a :: K.Type) :: Bool
+
 -- | Marker class for types whose JSON schema uses enum.
 --
 -- Automatically derived by 'deriveHasJSONSchema' when the type is an enum
@@ -334,24 +344,20 @@ class UsesEnum a
 
 -- | Type family to check if a type has the 'UsesOneOf' marker.
 --
--- Returns 'True if the type has a 'UsesOneOf' instance, 'False otherwise.
--- Implementation uses the overlapping instances trick.
+-- Returns ''True' if the type has 'IsMarkedOneOf' set to ''True'.
+-- For types without an explicit instance, this causes a type family
+-- conflict when used in structured output validation.
 type HasUsesOneOf :: K.Type -> Bool
 type family HasUsesOneOf a where
-  HasUsesOneOf a = HasUsesOneOfImpl a
+  HasUsesOneOf a = IsMarkedOneOf a
 
 -- | Type family to check if a type has the 'UsesEnum' marker.
 type HasUsesEnum :: K.Type -> Bool
 type family HasUsesEnum a where
   HasUsesEnum a = HasUsesEnumImpl a
 
--- Implementation detail: These need an overlapping instance trick at the value level
--- to detect whether a constraint is satisfied. For now, we use the simpler approach
--- of having TH generate the instances, and the type families just return 'True
--- for types we know have the marker.
-type family HasUsesOneOfImpl (a :: K.Type) :: Bool where
-  HasUsesOneOfImpl _ = 'False  -- Default: no oneOf
-
+-- Implementation detail: HasUsesEnumImpl still uses the closed type family approach.
+-- Could be updated similarly to HasUsesOneOf if needed.
 type family HasUsesEnumImpl (a :: K.Type) :: Bool where
   HasUsesEnumImpl _ = 'False  -- Default: no enum
 
@@ -393,20 +399,24 @@ type ValidStructuredOutput t = ValidInContext 'StructuredOutputCtx t
 -- | Implementation of structured output validation.
 --
 -- Checks that the type doesn't use oneOf (sum types).
+-- Uses CheckNotMarkedOneOf to avoid evaluating TypeError when the marker is unknown.
 type family ValidStructuredOutputImpl (t :: K.Type) :: Constraint where
-  ValidStructuredOutputImpl t =
-    If (HasUsesOneOf t)
-       (TypeError
-         ('Text "Schema error for structured output type: " ':<>: 'ShowType t
-          ':$$: 'Text ""
-          ':$$: 'Text "Anthropic's structured output does not support 'oneOf' schemas."
-          ':$$: 'Text "This type uses a sum type or union that generates oneOf."
-          ':$$: 'Text ""
-          ':$$: 'Text "Fix options:"
-          ':$$: 'Text "  1. Use a tagged record: data MyChoice = MyChoice { tag :: Tag, ... }"
-          ':$$: 'Text "  2. Use separate fields: data Output = Output { optionA :: Maybe A, optionB :: Maybe B }"
-          ':$$: 'Text "  3. Use an enum if choices are simple strings"))
-       ()
+  ValidStructuredOutputImpl t = CheckNotMarkedOneOf (IsMarkedOneOf t) t
+
+-- | Check that a type is not marked as oneOf.
+-- Only pattern matches on 'True to emit error; 'False and stuck types pass through.
+type family CheckNotMarkedOneOf (isMarked :: Bool) (t :: K.Type) :: Constraint where
+  CheckNotMarkedOneOf 'True t = TypeError
+    ('Text "Schema error for structured output type: " ':<>: 'ShowType t
+     ':$$: 'Text ""
+     ':$$: 'Text "Anthropic's structured output does not support 'oneOf' schemas."
+     ':$$: 'Text "This type uses a sum type or union that generates oneOf."
+     ':$$: 'Text ""
+     ':$$: 'Text "Fix options:"
+     ':$$: 'Text "  1. Use a tagged record: data MyChoice = MyChoice { tag :: Tag, ... }"
+     ':$$: 'Text "  2. Use separate fields: data Output = Output { optionA :: Maybe A, optionB :: Maybe B }"
+     ':$$: 'Text "  3. Use an enum if choices are simple strings")
+  CheckNotMarkedOneOf 'False _ = ()
 
 -- | Type-level conditional.
 type If :: Bool -> Constraint -> Constraint -> Constraint
@@ -423,13 +433,24 @@ type family If cond t f where
 -- Call this when you have a sum type that generates a oneOf schema.
 -- Typically called automatically by 'deriveHasJSONSchema' for sum types.
 --
+-- Generates both:
+--
+-- 1. @instance UsesOneOf TypeName@ (marker class)
+-- 2. @instance IsOneOfSchema TypeName where type UsesOneOfSchema TypeName = 'True@
+--    (for type-level detection via 'HasUsesOneOf')
+--
 -- @
 -- $(deriveUsesOneOf ''MyUnion)
 -- @
 deriveUsesOneOf :: Name -> Q [Dec]
 deriveUsesOneOf typeName = do
-  -- Generate: instance UsesOneOf TypeName
-  [d| instance UsesOneOf $(conT typeName) |]
+  -- Generate: instance UsesOneOf TypeName (backwards-compatible marker)
+  markerInst <- [d| instance UsesOneOf $(conT typeName) |]
+  -- Generate: type instance IsMarkedOneOf TypeName = 'True
+  let markedInst = TySynInstD (TySynEqn Nothing
+        (AppT (ConT ''IsMarkedOneOf) (ConT typeName))
+        (PromotedT 'True))
+  pure (markerInst ++ [markedInst])
 
 -- | Derive a 'UsesEnum' instance for a type.
 --
