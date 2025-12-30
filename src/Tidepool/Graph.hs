@@ -132,11 +132,11 @@ module Tidepool.Graph
   , Tpl.DepRelation(..)
   , Tpl.DepLocation(..)
   , Tpl.TemplateContextInfo(..)
+  , Tpl.templateDependencyTree
+  , Tpl.flattenDeps
 
     -- * Template Documentation
     -- $templateDocs
-  , Docs.DepTree(..)
-  , Docs.buildDepTree
   , Docs.renderDepTree
   , Docs.renderDepTreeCompact
   , Docs.templateDocBlock
@@ -273,10 +273,8 @@ import qualified Tidepool.Graph.Docs as Docs
 -- -- For a TemplateDef instance:
 -- putStrLn $ templateDocBlock \@ClassifyTpl
 --
--- -- Or manually from dependencies:
--- case buildDepTree (templateDeps \@ClassifyTpl) of
---   Just tree -> putStrLn (renderDepTree tree)
---   Nothing   -> pure ()
+-- -- Or render the dependency tree directly:
+-- putStrLn $ renderDepTree (templateDepTree \@ClassifyTpl)
 -- @
 --
 -- Example output:

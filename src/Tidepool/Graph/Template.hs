@@ -89,7 +89,8 @@ module Tidepool.Graph.Template
   , DepRelation(..)
   , DepLocation(..)
   , TemplateContextInfo(..)
-  , templateDependencies
+  , templateDependencyTree
+  , flattenDeps
   , templateContextInfo
   , templateAccessedFields
 
@@ -108,7 +109,8 @@ import Text.Ginger.TH
   ( TypedTemplate
   , typedTemplateFile
   , runTypedTemplate
-  , templateDependencies
+  , templateDependencyTree
+  , flattenDeps
   , templateContextInfo
   , templateAccessedFields
   )
@@ -202,18 +204,27 @@ class TemplateDef t where
   -- DERIVED ACCESSORS (for documentation generation)
   -- ════════════════════════════════════════════════════════════════════════════
 
-  -- | Template file dependencies with include hierarchy.
+  -- | Template dependency tree with include hierarchy.
   --
-  -- Extracted from 'templateCompiled'. Each dependency has:
+  -- Extracted from 'templateCompiled'. The root is the main template file,
+  -- with 'depChildren' containing included/extended templates recursively.
+  --
+  -- Each node has:
   --
   -- * 'depAbsolutePath' / 'depRelativePath' - file paths
-  -- * 'depIncludedBy' - parent file (Nothing for root)
-  -- * 'depRelation' - 'DepIncluded' or 'DepExtended'
+  -- * 'depRelation' - 'DepIncluded' or 'DepExtended' (Nothing for root)
   -- * 'depIncludeLocation' - line/col of the directive
+  -- * 'depChildren' - nested includes/extends
   --
-  -- Use 'Tidepool.Graph.Docs.buildDepTree' to convert to a tree structure.
+  -- Use 'Tidepool.Graph.Docs.renderDepTree' for text documentation.
+  templateDepTree :: TemplateDependency
+  templateDepTree = templateDependencyTree (templateCompiled @t)
+
+  -- | Flattened list of all template dependencies (pre-order traversal).
+  --
+  -- Convenience accessor for iteration. Use 'templateDepTree' for hierarchy.
   templateDeps :: [TemplateDependency]
-  templateDeps = templateDependencies (templateCompiled @t)
+  templateDeps = flattenDeps (templateDepTree @t)
 
   -- | Fields accessed by the template (e.g., @["user.name", "user.email"]@).
   --

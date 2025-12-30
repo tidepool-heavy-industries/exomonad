@@ -27,27 +27,20 @@
 -- docs :: Text
 -- docs = templateDocBlock \@ClassifyTpl
 --
--- -- Or build tree manually from dependencies:
--- let deps = templateDeps \@ClassifyTpl
--- case buildDepTree deps of
---   Just tree -> putStrLn (renderDepTree tree)
---   Nothing   -> putStrLn "No dependencies"
+-- -- Or render the dependency tree directly:
+-- let tree = templateDepTree \@ClassifyTpl
+-- putStrLn (renderDepTree tree)
 -- @
 module Tidepool.Graph.Docs
-  ( -- * Dependency Tree
-    DepTree(..)
-  , buildDepTree
-
-    -- * Tree Rendering
-  , renderDepTree
+  ( -- * Tree Rendering
+    renderDepTree
   , renderDepTreeCompact
 
     -- * Template Documentation
   , templateDocBlock
   ) where
 
-import Data.List (partition, sortOn)
-import Data.Maybe (mapMaybe)
+import Data.List (sortOn)
 import Data.Text (Text)
 import qualified Data.Text as T
 
@@ -59,54 +52,12 @@ import Tidepool.Graph.Template
   )
 
 -- ════════════════════════════════════════════════════════════════════════════
--- DEPENDENCY TREE
--- ════════════════════════════════════════════════════════════════════════════
-
--- | A tree of template dependencies.
---
--- Built from the flat list of 'TemplateDependency' using 'depIncludedBy'
--- to reconstruct the include hierarchy.
-data DepTree = DepTree
-  { dtPath :: FilePath           -- ^ Relative path to template file
-  , dtRelation :: Maybe DepRelation  -- ^ How included (Nothing for root)
-  , dtChildren :: [DepTree]      -- ^ Included/extended templates
-  }
-  deriving (Show, Eq)
-
--- | Build a dependency tree from a flat list.
---
--- Uses 'depIncludedBy' to reconstruct the hierarchy. Returns 'Nothing'
--- if the list is empty or has no root (no entry with 'depIncludedBy' = Nothing).
---
--- The tree is sorted by relative path at each level for consistent output.
-buildDepTree :: [TemplateDependency] -> Maybe DepTree
-buildDepTree deps = case roots of
-  [] -> Nothing
-  (root:_) -> Just $ buildNode root
-  where
-    -- Root is the dependency with no parent
-    (roots, nonRoots) = partition (null . depIncludedBy) deps
-
-    -- Build a node and its children recursively
-    buildNode :: TemplateDependency -> DepTree
-    buildNode dep = DepTree
-      { dtPath = dep.depRelativePath
-      , dtRelation = dep.depRelation
-      , dtChildren = sortOn (.dtPath) $ map buildNode (childrenOf dep)
-      }
-
-    -- Find all deps that have this dep as their parent
-    childrenOf :: TemplateDependency -> [TemplateDependency]
-    childrenOf parent = filter isChildOf nonRoots
-      where
-        parentPath = parent.depAbsolutePath
-        isChildOf child = child.depIncludedBy == Just parentPath
-
--- ════════════════════════════════════════════════════════════════════════════
 -- TREE RENDERING
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Render a dependency tree as indented text with box-drawing characters.
+--
+-- Takes ginger's 'TemplateDependency' tree directly (via 'templateDepTree').
 --
 -- Output example:
 --
@@ -116,28 +67,32 @@ buildDepTree deps = case roots of
 --    │    └─ partials/nav.jinja
 --    └─ partials/footer.jinja
 -- @
-renderDepTree :: DepTree -> Text
+renderDepTree :: TemplateDependency -> Text
 renderDepTree = T.unlines . renderLines ""
   where
-    renderLines :: Text -> DepTree -> [Text]
-    renderLines prefix tree =
-      (prefix <> T.pack tree.dtPath <> relationSuffix tree)
-      : concatMap (renderChild prefix) (withPosition tree.dtChildren)
+    renderLines :: Text -> TemplateDependency -> [Text]
+    renderLines prefix dep =
+      (prefix <> T.pack dep.depRelativePath <> relationSuffix dep)
+      : concatMap (renderChild prefix) (withPosition $ sortedChildren dep)
 
-    renderChild :: Text -> (DepTree, Bool) -> [Text]
+    renderChild :: Text -> (TemplateDependency, Bool) -> [Text]
     renderChild prefix (child, isLast) =
       let connector = if isLast then "└─ " else "├─ "
           extension = if isLast then "   " else "│  "
           childPrefix = prefix <> "   "  -- Indent for children
-      in case child.dtChildren of
-        [] -> [childPrefix <> connector <> T.pack child.dtPath <> relationSuffix child]
-        _  -> (childPrefix <> connector <> T.pack child.dtPath <> relationSuffix child)
-              : concatMap (renderChild (childPrefix <> extension)) (withPosition child.dtChildren)
+      in case child.depChildren of
+        [] -> [childPrefix <> connector <> T.pack child.depRelativePath <> relationSuffix child]
+        _  -> (childPrefix <> connector <> T.pack child.depRelativePath <> relationSuffix child)
+              : concatMap (renderChild (childPrefix <> extension)) (withPosition $ sortedChildren child)
 
-    relationSuffix :: DepTree -> Text
-    relationSuffix tree = case tree.dtRelation of
+    relationSuffix :: TemplateDependency -> Text
+    relationSuffix dep = case dep.depRelation of
       Just DepExtended -> " (extends)"
       _ -> ""
+
+    -- Sort children by relative path for consistent output
+    sortedChildren :: TemplateDependency -> [TemplateDependency]
+    sortedChildren dep = sortOn (.depRelativePath) dep.depChildren
 
     -- Tag each element with whether it's the last in the list
     withPosition :: [a] -> [(a, Bool)]
@@ -147,11 +102,11 @@ renderDepTree = T.unlines . renderLines ""
 -- | Render a compact single-line representation.
 --
 -- Output example: @main.jinja -> header.jinja, footer.jinja@
-renderDepTreeCompact :: DepTree -> Text
-renderDepTreeCompact tree = T.pack tree.dtPath <> renderChildren tree.dtChildren
+renderDepTreeCompact :: TemplateDependency -> Text
+renderDepTreeCompact dep = T.pack dep.depRelativePath <> renderChildren dep.depChildren
   where
     renderChildren [] = ""
-    renderChildren cs = " -> " <> T.intercalate ", " (map (T.pack . (.dtPath)) cs)
+    renderChildren cs = " -> " <> T.intercalate ", " (map (T.pack . (.depRelativePath)) cs)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TEMPLATE DOCUMENTATION
@@ -187,9 +142,7 @@ templateDocBlock = T.unlines $ filter (not . T.null)
   , ""
   , "**Context**: " <> T.pack (tciFullyQualified (templateContextMeta @t))
   , ""
-  , case buildDepTree (templateDeps @t) of
-      Just tree -> "**Template**:\n" <> renderDepTree tree
-      Nothing   -> "**Template**: (no dependencies)"
+  , "**Template**:\n" <> renderDepTree (templateDepTree @t)
   , if null (templateFields @t)
       then ""
       else "**Fields**: " <> T.intercalate ", " (map T.pack $ templateFields @t)
