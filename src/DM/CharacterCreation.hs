@@ -147,12 +147,11 @@ data NpcInit = NpcInit
 
 -- | LLM response for scenario initialization
 data ScenarioInit = ScenarioInit
-  { siFateNarration :: Text       -- Fate's interpretation of the spread
+  { siOpeningThread :: Text       -- 3-tweet opening thread (scene + tension + hook)
   , siStartingClocks :: [ClockInit]  -- Clocks seeded from tarot
   , siLocations :: [LocationInit]    -- World locations
   , siFactions :: [FactionInit]      -- Active factions
   , siNpcs :: [NpcInit]              -- NPCs in the world
-  , siSceneNarration :: Text      -- Opening scene narration
   , siStartingStress :: Int       -- 0-4 typically
   , siStartingCoin :: Int         -- 0-4 typically
   , siStartingHeat :: Int         -- 0-2 typically
@@ -160,7 +159,6 @@ data ScenarioInit = ScenarioInit
   , siStartingTrauma :: Maybe Text  -- Optional starting trauma
   , siSceneLocation :: Text       -- Where we start (location ID)
   , siSceneStakes :: Text         -- What's at stake
-  , siOpeningHook :: Text         -- The immediate situation
   , siSuggestedActions :: [Text]  -- Suggested player actions
   , siScenePresentNpcs :: [Text]  -- NPC IDs present in opening scene
   }
@@ -199,13 +197,6 @@ scenarioInitPrompt choices = T.unlines
   , "</spread>"
   , ""
   , "<instructions>"
-  , "FATE NARRATION (siFateNarration):"
-  , "- Interpret each card in 1-2 sentences, tight and knowing"
-  , "- Name the clock each card seeds (include in siStartingClocks)"
-  , "- Past + Present cards = threat clocks (start 1-2 filled)"
-  , "- Future card = goal clock (starts 0 filled)"
-  , "- Voice: noir oracle, a little cruel, smoke and knowing"
-  , ""
   , "CLOCKS (siStartingClocks):"
   , "- 3 clocks total: 2 threats (from past/present), 1 goal (from future)"
   , "- Each clock: 4-6 segments, threat clocks start 1-2 filled"
@@ -235,11 +226,21 @@ scenarioInitPrompt choices = T.unlines
   , "- niVoiceNotes: brief speech pattern notes"
   , "- niLocation: location ID where they usually are, null if mobile"
   , ""
-  , "SCENE NARRATION (siSceneNarration):"
-  , "- Drop into Doskvol. Tight noir prose."
-  , "- Establish character in a specific moment - grounding, not action"
-  , "- ~100-150 words max"
-  , "- Ground the player, then invite action"
+  , "OPENING THREAD (siOpeningThread):"
+  , "- 3 tweets (280 chars each). PROSE POETRY."
+  , "- LINE BREAKS WITHIN EACH TWEET. Each line 5-15 words."
+  , "- Fragments that feel complete. Sentences that end before—"
+  , "- Present tense. Second person as accusation."
+  , ""
+  , "GOOD:"
+  , "  The workshop hums wrong."
+  , "  Something in the walls."
+  , ""
+  , "  Three knocks."
+  , "  You know before you open."
+  , ""
+  , "BAD:"
+  , "  A bloodied runner arrives at her workshop door with news about a contract."
   , ""
   , "STARTING STATS:"
   , "- Stress (0-4): Higher if troubled past"
