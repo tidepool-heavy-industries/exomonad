@@ -31,7 +31,7 @@ module Tidying.Loop
 import Effectful
 import Control.Applicative ((<|>))
 import Control.Monad (when)
-import Data.Aeson (Value, FromJSON, fromJSON, Result(..))
+import Data.Aeson (Value, fromJSON, Result(..))
 import Data.Text (Text)
 import Data.Text qualified as T
 
@@ -116,6 +116,9 @@ tidyingTurn input = do
   let systemPrompt = templateForMode st.mode ctx
       tools = toolsForMode st.mode
       schema = schemaForMode st.mode
+
+  logDebug $ "System prompt:\n" <> systemPrompt
+  logDebug $ "Tools: " <> T.pack (show (length tools))
 
   -- Build user content (photos + text)
   let userContent = buildUserContent input mPhotoAnalysis

@@ -52,6 +52,7 @@ module Tidying.Tools
   ) where
 
 import Control.Exception (SomeException, try)
+import Control.Monad (when)
 import Control.Monad.IO.Class (liftIO)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -206,6 +207,7 @@ executeProposeDisposition askQuestion input = do
     toChoice pc = Q.Choice
       { Q.choiceLabel = pc.pcLabel
       , Q.choiceValue = parseDisposition pc
+      , Q.choiceReveals = []  -- ProposeDisposition doesn't use reveals (yet)
       }
 
     parseDisposition :: ProposedChoice -> Q.ItemDisposition
@@ -247,30 +249,41 @@ instance FromJSON AskSpaceFunctionInput where
 data SpaceFunctionChoice = SpaceFunctionChoice
   { sfcLabel :: Text
   , sfcValue :: Text
+  , sfcReveals :: [Q.Question]  -- Follow-up questions when this option selected
   }
   deriving (Show, Eq, Generic)
 
 instance ToJSON SpaceFunctionChoice where
-  toJSON c = object ["label" .= c.sfcLabel, "value" .= c.sfcValue]
+  toJSON c = object $
+    [ "label" .= c.sfcLabel
+    , "value" .= c.sfcValue
+    ] <> case c.sfcReveals of
+           [] -> []
+           rs -> ["reveals" .= rs]
 
 instance FromJSON SpaceFunctionChoice where
   parseJSON = withObject "SpaceFunctionChoice" $ \o ->
-    SpaceFunctionChoice <$> o .: "label" <*> o .: "value"
+    SpaceFunctionChoice
+      <$> o .: "label"
+      <*> o .: "value"
+      <*> o .:? "reveals" .!= []
 
 data AskSpaceFunctionResult = AskSpaceFunctionResult
-  { asfrFunction :: Text
+  { asfrFunction :: Text              -- ^ Primary answer (first in path, or single answer)
+  , asfrAnswerPath :: [(Text, Text)]  -- ^ All answers from tree walk: [(questionId, value)]
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
 askSpaceFunctionSchema :: Value
 askSpaceFunctionSchema = schemaToValue $ objectSchema
   [ ("prompt", describeField "prompt" "Question to ask (e.g., 'What do you use this space for?')" (emptySchema TString))
-  , ("choices", describeField "choices" "2-4 context-specific options. Each has label (shown) and value (returned)."
+  , ("choices", describeField "choices" "2-4 options. EACH MUST have label, value, AND reveals array."
       (arraySchema $ objectSchema
         [ ("label", emptySchema TString)
         , ("value", emptySchema TString)
+        , ("reveals", describeField "reveals" "REQUIRED: Array of follow-up questions. Use [] for leaf nodes, or [{\"choose\":{...}}] for branches." (arraySchema (emptySchema TObject)))
         ]
-        ["label", "value"]))
+        ["label", "value", "reveals"]))  -- reveals is now required!
   ]
   ["prompt", "choices"]
 
@@ -286,7 +299,12 @@ executeAskSpaceFunction
 executeAskSpaceFunction askQuestion input = do
   logInfo $ "TOOL ask_space_function: prompt=" <> input.asfiPrompt
 
-  let choiceOptions = map (\c -> Q.ChoiceOption c.sfcLabel c.sfcValue) input.asfiChoices
+  -- Warn if no reveals - LLM should be building a tree, not a flat list
+  let allFlat = all (\c -> null c.sfcReveals) input.asfiChoices
+  when allFlat $
+    logWarn "ask_space_function: No reveals provided. Consider adding follow-up questions for anchors."
+
+  let choiceOptions = map (\c -> Q.ChoiceOption c.sfcLabel c.sfcValue c.sfcReveals) input.asfiChoices
       question = Q.Choose
         { Q.chPrompt = input.asfiPrompt
         , Q.chId = "function"
@@ -298,22 +316,39 @@ executeAskSpaceFunction askQuestion input = do
   case result of
     Left err -> do
       logWarn $ "Question handler failed: " <> T.pack (show err)
-      pure AskSpaceFunctionResult { asfrFunction = "living" }
+      pure AskSpaceFunctionResult { asfrFunction = "living", asfrAnswerPath = [] }
 
     Right answer -> do
       case answer of
         Q.ChoiceAnswer value -> do
           emit $ FunctionChosen value
           modify @SessionState $ \st -> st { spaceFunction = Just (SpaceFunction value) }
-          pure AskSpaceFunctionResult { asfrFunction = value }
+          pure AskSpaceFunctionResult { asfrFunction = value, asfrAnswerPath = [("function", value)] }
 
         Q.TextAnswer custom -> do
           emit $ FunctionChosen custom
           modify @SessionState $ \st -> st { spaceFunction = Just (SpaceFunction custom) }
-          pure AskSpaceFunctionResult { asfrFunction = custom }
+          pure AskSpaceFunctionResult { asfrFunction = custom, asfrAnswerPath = [("function", custom)] }
+
+        Q.AnswerPath path -> do
+          -- Parse path: first answer is function, "anchor" answers are anchors
+          let functionValue = case lookup "function" path of
+                Just v -> v
+                Nothing -> case path of
+                  ((_, v):_) -> v  -- fallback to first answer
+                  [] -> "living"
+              anchorValues = [v | (k, v) <- path, k == "anchor"]
+
+          emit $ FunctionChosen functionValue
+          modify @SessionState $ \st -> st
+            { spaceFunction = Just (SpaceFunction functionValue)
+            , anchors = st.anchors ++ map ItemName anchorValues
+            }
+          logInfo $ "SURVEY: function=" <> functionValue <> ", anchors=" <> T.intercalate "," anchorValues
+          pure AskSpaceFunctionResult { asfrFunction = functionValue, asfrAnswerPath = path }
 
         _ -> do
-          pure AskSpaceFunctionResult { asfrFunction = "living" }
+          pure AskSpaceFunctionResult { asfrFunction = "living", asfrAnswerPath = [] }
 
 -- ══════════════════════════════════════════════════════════════
 -- CONFIRM DONE TOOL (Regular)
@@ -630,7 +665,22 @@ proposeDispositionTool = object
 askSpaceFunctionTool :: Value
 askSpaceFunctionTool = object
   [ "name" .= ("ask_space_function" :: Text)
-  , "description" .= ("Ask what the space is FOR. Generate 2-4 context-specific choices based on what you know." :: Text)
+  , "description" .= (T.unlines
+      [ "Build a branching question tree. Gather function+anchor in ONE call."
+      , ""
+      , "Example with reveals:"
+      , "{\"prompt\":\"What's this space for?\", \"choices\":["
+      , "  {\"label\":\"Work\", \"value\":\"work\", \"reveals\":[{"
+      , "    \"choose\":{\"prompt\":\"Anchor?\", \"id\":\"anchor\", \"choices\":["
+      , "      {\"label\":\"Desk\", \"value\":\"desk\", \"reveals\":[]},"
+      , "      {\"label\":\"Computer\", \"value\":\"computer\", \"reveals\":[]}]}}]},"
+      , "  {\"label\":\"Living\", \"value\":\"living\", \"reveals\":[{"
+      , "    \"choose\":{\"prompt\":\"Anchor?\", \"id\":\"anchor\", \"choices\":["
+      , "      {\"label\":\"Couch\", \"value\":\"couch\", \"reveals\":[]}]}}]}"
+      , "]}"
+      , ""
+      , "Rules: reveals=[] for leaves, reveals=[{choose:{...}}] for branches."
+      ] :: Text)
   , "input_schema" .= askSpaceFunctionSchema
   ]
 

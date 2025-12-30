@@ -29,6 +29,7 @@ module Tidying.GUI.Widgets.Question
 
 import Control.Monad (void, when, forM)
 import Data.Aeson (toJSON)
+import Data.IORef
 import Data.Text (Text)
 import qualified Data.Text as T
 import Graphics.UI.Threepenny.Core
@@ -265,20 +266,48 @@ renderConfirm bridge prompt defVal = do
     }
 
 -- ══════════════════════════════════════════════════════════════
--- CHOOSE (Multi-Choice)
+-- CHOOSE (Multi-Choice with Reveals)
 -- ══════════════════════════════════════════════════════════════
 
--- | Render Choose as option buttons
+-- | Render Choose as option buttons, with support for branching reveals
+--
+-- When an option has reveals, clicking it shows the follow-up questions
+-- instead of submitting immediately. Answers accumulate until reaching
+-- a leaf option (no reveals), then all answers are submitted together.
 renderChoose
   :: GUIBridge state
   -> Text            -- ^ Prompt
-  -> Text            -- ^ Question ID (for reveals)
+  -> Text            -- ^ Question ID
   -> [ChoiceOption]  -- ^ Options
   -> UI QuestionResult
-renderChoose bridge prompt _qid options = do
+renderChoose bridge prompt qid options = do
+  -- Accumulator for answers as user walks the tree
+  answersRef <- liftIO $ newIORef ([] :: [(Text, Text)])
+
   -- Container needs tabindex for number key shortcuts
   container <- UI.div #. "question-choose"
     # set (attr "tabindex") "-1"
+
+  -- Render this level
+  renderChooseLevel bridge answersRef container qid prompt options
+
+  pure QuestionResult
+    { qrElement = container
+    , qrFocusTarget = Just container
+    }
+
+-- | Render one level of a Choose question tree
+renderChooseLevel
+  :: GUIBridge state
+  -> IORef [(Text, Text)]  -- ^ Accumulated answers
+  -> Element               -- ^ Container to render into
+  -> Text                  -- ^ Question ID for this level
+  -> Text                  -- ^ Prompt
+  -> [ChoiceOption]        -- ^ Options
+  -> UI ()
+renderChooseLevel bridge answersRef container qid prompt options = do
+  -- Clear container
+  void $ element container # set children []
 
   promptEl <- UI.div #. "choose-prompt"
     # set text (T.unpack prompt)
@@ -286,44 +315,16 @@ renderChoose bridge prompt _qid options = do
   optionsEl <- UI.div #. "choose-options"
     # set (attr "role") "listbox"
 
+  -- Container for revealed follow-up questions
+  revealsContainer <- UI.div #. "reveals-container"
+
   cards <- forM (zip [1..] options) $ \(num, opt) ->
-    mkChooseCard bridge num opt
+    mkChooseCardWithReveals bridge answersRef container revealsContainer qid num opt
 
   void $ element optionsEl #+ map element cards
 
   -- "Other" option for custom text input
-  otherSection <- do
-    section <- UI.div #. "choose-other"
-
-    otherBtn <- UI.button #. "disposition-other-btn"
-      # set text "Other..."
-      # set (attr "tabindex") "0"
-
-    inputContainer <- UI.div #. "disposition-other-input"
-      # set style [("display", "none")]
-
-    inputEl <- UI.input #. "text-input"
-      # set (attr "placeholder") "Type your answer..."
-
-    submitBtn <- UI.button #. "submit-btn" # set text "Submit"
-
-    on UI.click otherBtn $ const $ do
-      void $ element inputContainer # set style [("display", "flex")]
-      void $ element otherBtn # set style [("display", "none")]
-      UI.setFocus inputEl
-
-    let submitOther = do
-          val <- get value inputEl
-          when (not (null val)) $ liftIO $
-            safeSubmitResponse bridge (CustomResponse (toJSON (TextAnswer (T.pack val))))
-
-    on UI.click submitBtn $ const submitOther
-    on UI.keydown inputEl $ \code ->
-      when (code == 13) submitOther
-
-    void $ element inputContainer #+ [element inputEl, element submitBtn]
-    void $ element section #+ [element otherBtn, element inputContainer]
-    pure section
+  otherSection <- mkOtherSection bridge answersRef qid
 
   -- Keyboard shortcuts 1-9
   on UI.keydown container $ \code -> do
@@ -331,35 +332,133 @@ renderChoose bridge prompt _qid options = do
       let num = code - 48
       when (num <= length options) $ do
         let opt = options !! (num - 1)
-        liftIO $ safeSubmitResponse bridge
-          (CustomResponse (toJSON (ChoiceAnswer opt.optionValue)))
+        handleOptionSelected bridge answersRef container revealsContainer qid opt
 
-  void $ element container #+ [element promptEl, element optionsEl, element otherSection]
+  void $ element container #+ [element promptEl, element optionsEl, element revealsContainer, element otherSection]
 
-  -- Focus container so number shortcuts (1-9) work immediately
-  pure QuestionResult
-    { qrElement = container
-    , qrFocusTarget = Just container
-    }
+-- | Create a choice card that handles reveals
+mkChooseCardWithReveals
+  :: GUIBridge state
+  -> IORef [(Text, Text)]  -- ^ Answer accumulator
+  -> Element               -- ^ Parent container (for re-rendering)
+  -> Element               -- ^ Reveals container
+  -> Text                  -- ^ Question ID
+  -> Int                   -- ^ Option number
+  -> ChoiceOption          -- ^ The option
+  -> UI Element
+mkChooseCardWithReveals bridge answersRef _parentContainer revealsContainer qid num opt = do
+  let hasReveals = not (null opt.optionReveals)
 
-mkChooseCard :: GUIBridge state -> Int -> ChoiceOption -> UI Element
-mkChooseCard bridge num opt = do
-  card <- UI.div #. "choose-card"
+  card <- UI.div #. ("choose-card" <> if hasReveals then " has-reveals" else "")
     # set (attr "tabindex") "0"
     # set (attr "role") "option"
 
   numHint <- UI.span #. "choice-num" # set text (show num <> ". ")
   labelEl <- UI.span # set text (T.unpack opt.optionLabel)
 
-  on UI.click card $ const $ liftIO $
-    safeSubmitResponse bridge (CustomResponse (toJSON (ChoiceAnswer opt.optionValue)))
+  -- Indicator for options with follow-ups (arrow shows there's more)
+  mIndicator <- if hasReveals
+    then Just <$> (UI.span #. "reveals-indicator" # set text " →")
+    else pure Nothing
+
+  let handleClick = handleOptionSelected bridge answersRef _parentContainer revealsContainer qid opt
+
+  on UI.click card $ const handleClick
 
   on UI.keydown card $ \code ->
-    when (code == 13 || code == 32) $ liftIO $
-      safeSubmitResponse bridge (CustomResponse (toJSON (ChoiceAnswer opt.optionValue)))
+    when (code == 13 || code == 32) handleClick
 
-  void $ element card #+ [element numHint, element labelEl]
+  case mIndicator of
+    Just indicator -> void $ element card #+ [element numHint, element labelEl, element indicator]
+    Nothing -> void $ element card #+ [element numHint, element labelEl]
+
   pure card
+
+-- | Handle when an option is selected
+handleOptionSelected
+  :: GUIBridge state
+  -> IORef [(Text, Text)]
+  -> Element  -- ^ Parent container
+  -> Element  -- ^ Reveals container
+  -> Text     -- ^ Question ID
+  -> ChoiceOption
+  -> UI ()
+handleOptionSelected bridge answersRef _parentContainer revealsContainer qid opt = do
+  -- Record this answer
+  liftIO $ modifyIORef' answersRef ((qid, opt.optionValue) :)
+
+  case opt.optionReveals of
+    [] -> do
+      -- Leaf node - submit all accumulated answers
+      answers <- liftIO $ readIORef answersRef
+      liftIO $ safeSubmitResponse bridge
+        (CustomResponse (toJSON (AnswerPath (reverse answers))))
+
+    (firstReveal:_) -> do
+      -- Has reveals - render the first one in the reveals container
+      void $ element revealsContainer # set children []
+      case firstReveal of
+        Choose revPrompt revQid revOptions ->
+          -- Choose chains accumulate answers via IORef
+          renderChooseLevel bridge answersRef revealsContainer revQid revPrompt revOptions
+
+        ProposeDisposition item choices fallback -> do
+          -- Terminal reveal - render disposition widget
+          -- Note: accumulated answers discarded; disposition submits its own answer
+          result <- renderDisposition bridge item choices fallback
+          void $ element revealsContainer #+ [element result.qrElement]
+          maybe (pure ()) UI.setFocus result.qrFocusTarget
+
+        FreeText prompt placeholder -> do
+          -- Terminal reveal - render text input widget
+          result <- renderFreeText bridge prompt placeholder
+          void $ element revealsContainer #+ [element result.qrElement]
+          maybe (pure ()) UI.setFocus result.qrFocusTarget
+
+        Confirm prompt defVal -> do
+          -- Terminal reveal - render confirm widget
+          result <- renderConfirm bridge prompt defVal
+          void $ element revealsContainer #+ [element result.qrElement]
+          maybe (pure ()) UI.setFocus result.qrFocusTarget
+
+-- | Create the "Other..." section for free text input
+mkOtherSection :: GUIBridge state -> IORef [(Text, Text)] -> Text -> UI Element
+mkOtherSection bridge answersRef qid = do
+  section <- UI.div #. "choose-other"
+
+  otherBtn <- UI.button #. "disposition-other-btn"
+    # set text "Other..."
+    # set (attr "tabindex") "0"
+
+  inputContainer <- UI.div #. "disposition-other-input"
+    # set style [("display", "none")]
+
+  inputEl <- UI.input #. "text-input"
+    # set (attr "placeholder") "Type your answer..."
+
+  submitBtn <- UI.button #. "submit-btn" # set text "Submit"
+
+  on UI.click otherBtn $ const $ do
+    void $ element inputContainer # set style [("display", "flex")]
+    void $ element otherBtn # set style [("display", "none")]
+    UI.setFocus inputEl
+
+  let submitOther = do
+        val <- get value inputEl
+        when (not (null val)) $ do
+          -- Record custom answer and submit
+          liftIO $ modifyIORef' answersRef ((qid, T.pack val) :)
+          answers <- liftIO $ readIORef answersRef
+          liftIO $ safeSubmitResponse bridge
+            (CustomResponse (toJSON (AnswerPath (reverse answers))))
+
+  on UI.click submitBtn $ const submitOther
+  on UI.keydown inputEl $ \code ->
+    when (code == 13) submitOther
+
+  void $ element inputContainer #+ [element inputEl, element submitBtn]
+  void $ element section #+ [element otherBtn, element inputContainer]
+  pure section
 
 -- ══════════════════════════════════════════════════════════════
 -- FREE TEXT

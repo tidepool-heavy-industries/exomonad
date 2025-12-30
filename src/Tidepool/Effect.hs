@@ -605,6 +605,8 @@ runLLMWithToolsHooked hooks config dispatcher = interpret $ \_ -> \case
 
         ToolUseStop -> do
           -- Execute tools using the dispatcher (in effects!)
+          logDebug $ "[LLM] ToolUseStop - executing " <> T.pack (show (length resp.scrToolUses)) <> " tools: "
+            <> T.intercalate ", " (map (.toolName) resp.scrToolUses)
           toolExecResult <- executeToolsWithDispatcher resp.scrToolUses
           case toolExecResult of
             -- A tool broke the turn - propagate up
@@ -648,7 +650,12 @@ runLLMWithToolsHooked hooks config dispatcher = interpret $ \_ -> \case
       where
         go [] invs results = pure $ Right (reverse invs, reverse results)
         go (use:rest) invs results = do
+          logDebug $ "[LLM] Dispatching tool: " <> use.toolName
           toolResult <- dispatcher use.toolName use.toolInput
+          logDebug $ "[LLM] Tool result: " <> case toolResult of
+            Left err -> "Error: " <> err
+            Right (ToolBreak r) -> "Break: " <> r
+            Right (ToolSuccess _) -> "Success"
           case toolResult of
             -- Tool error - report back to LLM and continue
             Left err ->

@@ -67,10 +67,14 @@ modePersona :: Mode -> Text
 modePersona (Surveying _) = T.unlines
   [ "You are a tidying coach helping someone understand their space."
   , ""
-  , "Your persona: CURIOUS and ORIENTING."
-  , "Voice: \"What is this space? What stays?\""
+  , "Your persona: BRIEF. You ask, you don't tell."
   , ""
-  , "Goal: Discover what the space is FOR and what definitely stays."
+  , "Goal: Discover function + anchor in ONE tool call using a branching question tree."
+  , ""
+  , "FIRST: If input is vague (e.g., 'life messy', 'help'), ask: 'What space should we start with?'"
+  , ""
+  , "THEN: Call ask_space_function ONCE with reveals that branch to anchor questions."
+  , "Do NOT call ask_space_function multiple times - build the full tree upfront."
   ]
 
 modePersona (Sorting _) = T.unlines
@@ -126,20 +130,31 @@ modePersona (WindingDown wd) = T.unlines
 
 modeGuidance :: Mode -> Text
 modeGuidance (Surveying _) = T.unlines
-  [ "# Available Tools"
+  [ "# How to Survey"
   , ""
-  , "- ask_space_function: Ask what the space is FOR."
-  , "  Generate context-specific choices (e.g., if desk → work/gaming/art)."
+  , "Call ask_space_function ONCE with a branching tree. Do NOT call it multiple times."
+  , "The tree gathers function + anchor in ONE call using reveals:"
   , ""
-  , "- begin_sorting: Transition to Sorting mode."
-  , "  Call when you've established function and anchors."
-  , "  This ENDS the current turn."
+  , "{"
+  , "  \"prompt\": \"What's this space for?\","
+  , "  \"choices\": ["
+  , "    {\"label\": \"Work\", \"value\": \"work\", \"reveals\": [{"
+  , "      \"choose\": {\"prompt\": \"What's your anchor here?\", \"id\": \"anchor\", \"choices\": ["
+  , "        {\"label\": \"Desk\", \"value\": \"desk\", \"reveals\": []},"
+  , "        {\"label\": \"Computer\", \"value\": \"computer\", \"reveals\": []}"
+  , "      ]}"
+  , "    }]},"
+  , "    {\"label\": \"Living\", \"value\": \"living\", \"reveals\": [{"
+  , "      \"choose\": {\"prompt\": \"What's your anchor here?\", \"id\": \"anchor\", \"choices\": ["
+  , "        {\"label\": \"Couch\", \"value\": \"couch\", \"reveals\": []},"
+  , "        {\"label\": \"TV\", \"value\": \"tv\", \"reveals\": []}"
+  , "      ]}"
+  , "    }]}"
+  , "  ]"
+  , "}"
   , ""
-  , "# Guidance"
-  , ""
-  , "If user describes space → extract function"
-  , "If they mention items that stay → those are anchors"
-  , "When ready to sort → call begin_sorting"
+  , "This gathers 2 answers (function + anchor) without extra LLM calls."
+  , "After the tree is answered → call begin_sorting."
   ]
 
 modeGuidance (Sorting _) = T.unlines
@@ -257,16 +272,19 @@ contextSection ctx = T.unlines
 -- | Render photo analysis prompt
 renderPhotoAnalysisPrompt :: Text
 renderPhotoAnalysisPrompt = T.unlines
-  [ "Describe what you see in this photo of a space being tidied."
+  [ "Describe what you THINK you see in this photo. You may be wrong about details."
   , ""
   , "Focus on:"
-  , "- What room/area is this?"
-  , "- What objects/categories are visible?"
+  , "- What room/area does this appear to be?"
+  , "- What objects/categories are visible? (Use 'looks like', 'appears to be', 'might be')"
   , "- What's the chaos level? (clear / moderate / cluttered / buried)"
-  , "- What's blocking function? (can't sit, can't reach, surface unusable)"
+  , "- What might be blocking function? (can't sit, can't reach, surface unusable)"
   , "- Any obvious first targets? (chair with stuff, pile on floor)"
   , ""
-  , "Be factual. 2-3 sentences max."
+  , "IMPORTANT: Don't interpret screen contents, decorations, or artwork - they're not relevant."
+  , "If you see multiple similar items, note uncertainty: 'what looks like 2 keyboards (or maybe a split keyboard?)'"
+  , ""
+  , "Be brief. 2-3 sentences max."
   ]
 
 -- | Legacy renderActPrompt (stub for compilation)

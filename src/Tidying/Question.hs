@@ -127,15 +127,47 @@ data Question
 data Choice = Choice
   { choiceLabel :: Text                   -- ^ "Kitchen counter"
   , choiceValue :: ItemDisposition        -- ^ PlaceAt "kitchen"
+  , choiceReveals :: [Question]           -- ^ Follow-up questions when selected
   }
-  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+  deriving (Show, Eq, Generic)
 
 -- | A choice option for Choose (general multi-choice)
 data ChoiceOption = ChoiceOption
   { optionLabel :: Text                   -- ^ Display text
   , optionValue :: Text                   -- ^ Value for condition matching
+  , optionReveals :: [Question]           -- ^ Follow-up questions when selected
   }
-  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+  deriving (Show, Eq, Generic)
+
+-- JSON for Choice (with optional reveals)
+instance ToJSON Choice where
+  toJSON c = object $
+    [ "choiceLabel" .= c.choiceLabel
+    , "choiceValue" .= c.choiceValue
+    ] <> case c.choiceReveals of
+           [] -> []
+           rs -> ["reveals" .= rs]
+
+instance FromJSON Choice where
+  parseJSON = withObject "Choice" $ \o -> Choice
+    <$> o .: "choiceLabel"
+    <*> o .: "choiceValue"
+    <*> o .:? "reveals" .!= []
+
+-- JSON for ChoiceOption (with optional reveals)
+instance ToJSON ChoiceOption where
+  toJSON o = object $
+    [ "optionLabel" .= o.optionLabel
+    , "optionValue" .= o.optionValue
+    ] <> case o.optionReveals of
+           [] -> []
+           rs -> ["reveals" .= rs]
+
+instance FromJSON ChoiceOption where
+  parseJSON = withObject "ChoiceOption" $ \o -> ChoiceOption
+    <$> o .: "optionLabel"
+    <*> o .: "optionValue"
+    <*> o .:? "reveals" .!= []
 
 -- Custom JSON for Question
 instance ToJSON Question where
@@ -209,6 +241,7 @@ data Answer
   | ConfirmAnswer Bool                    -- ^ Response to Confirm
   | ChoiceAnswer Text                     -- ^ Response to Choose (option value)
   | TextAnswer Text                       -- ^ Response to FreeText or fallback
+  | AnswerPath [(Text, Text)]             -- ^ Trail of (questionId, value) from tree walk
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
 -- ══════════════════════════════════════════════════════════════
@@ -227,7 +260,7 @@ data Answer
 proposeItem :: Text -> [(Text, ItemDisposition)] -> Question
 proposeItem item choices = ProposeDisposition
   { pdItem = item
-  , pdChoices = map (\(lbl, val) -> Choice lbl val) choices
+  , pdChoices = map (\(lbl, val) -> Choice lbl val []) choices
   , pdFallback = Just "Where does it actually go?"
   }
 
@@ -241,11 +274,11 @@ askFunction = Choose
   { chPrompt = "What does this space need to DO?"
   , chId = "function"
   , chChoices =
-      [ ChoiceOption "Work - sit and focus" "workspace"
-      , ChoiceOption "Create - art/music/crafts" "creative"
-      , ChoiceOption "Sleep - rest and recover" "bedroom"
-      , ChoiceOption "Store - keep things organized" "storage"
-      , ChoiceOption "Live - hang out and relax" "living"
+      [ ChoiceOption "Work - sit and focus" "workspace" []
+      , ChoiceOption "Create - art/music/crafts" "creative" []
+      , ChoiceOption "Sleep - rest and recover" "bedroom" []
+      , ChoiceOption "Store - keep things organized" "storage" []
+      , ChoiceOption "Live - hang out and relax" "living" []
       ]
   }
 
@@ -254,10 +287,10 @@ askLocation :: Text -> Question
 askLocation item = ProposeDisposition
   { pdItem = item
   , pdChoices =
-      [ Choice "Desk" (PlaceAt "desk")
-      , Choice "Shelf" (PlaceAt "shelf")
-      , Choice "Drawer" (PlaceAt "drawer")
-      , Choice "Closet" (PlaceAt "closet")
+      [ Choice "Desk" (PlaceAt "desk") []
+      , Choice "Shelf" (PlaceAt "shelf") []
+      , Choice "Drawer" (PlaceAt "drawer") []
+      , Choice "Closet" (PlaceAt "closet") []
       ]
   , pdFallback = Just "Where exactly?"
   }
