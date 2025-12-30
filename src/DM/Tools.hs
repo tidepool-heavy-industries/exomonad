@@ -304,12 +304,12 @@ instance Tool SpendDie DMEvent WorldState DMEffects where
         -- Get player's choice via dice widget (shows hints + costs on each card)
         selectedIdx <- requestDice (formatPrompt input) diceWithHints
 
-        -- Get the chosen outcome
+        -- Get the chosen outcome and actual die value from pool
         let chosenOutcome = getOutcomeAt selectedIdx input.outcomes
-            chosenDie = chosenOutcome.dieValue
+            chosenDie = pool !! selectedIdx  -- Use actual pool value, not LLM's dieValue
 
-        -- Remove die from pool
-        let newPool = delete chosenDie pool
+        -- Remove die from pool by index (not value, in case of duplicates)
+        let newPool = take selectedIdx pool ++ drop (selectedIdx + 1) pool
 
         -- Calculate outcome tier for the result
         let outcomeTier = calculateOutcome input.position chosenDie
@@ -932,8 +932,8 @@ makeDMDispatcherWithPhase name input = do
       -- Run dispatcher with PlayingState effect provided
       (result, scene', mood') <- runPlayingState scene mood $
         makeDMDispatcher name input
-      -- Write back updated scene/mood to state
-      put @WorldState $ state { phase = PhasePlaying scene' mood' }
+      -- Update only the phase, preserving all other state changes made by tools
+      modify @WorldState $ \s -> s { phase = PhasePlaying scene' mood' }
       return result
     _ ->
       -- Not in playing phase - tools requiring PlayingState can't be dispatched
