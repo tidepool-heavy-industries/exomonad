@@ -15,11 +15,13 @@ library
         Tidepool.Telegram
         Tidepool.Telegram.Types
         Tidepool.Telegram.Effect
+        Tidepool.Telegram.Example
     build-depends:
         base >= 4.17 && < 5,
         effectful-core >= 2.3 && < 3,
         text >= 2.0 && < 3,
-        aeson >= 2.1 && < 3
+        aeson >= 2.1 && < 3,
+        tidepool-core >= 0.1 && < 0.2
     hs-source-dirs:   src
     default-language: GHC2021
     default-extensions:
