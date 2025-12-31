@@ -318,3 +318,43 @@ export interface GraphRunResult {
   /** Number of steps taken */
   totalSteps: number;
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// WEBSOCKET PROTOCOL (Client ↔ Server messages)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Messages sent from client to server.
+ */
+export type ClientMessage =
+  | { type: 'init'; graphId: string; input: unknown }
+  | { type: 'resume'; result: EffectResult }
+  | { type: 'reconnect'; sessionId: string }
+  | { type: 'ping' };
+
+/**
+ * Messages sent from server to client.
+ */
+export type ServerMessage =
+  | { type: 'yield'; effect: SerializableEffect; sessionId: string }
+  | { type: 'progress'; effect: SerializableEffect; status: string }
+  | { type: 'done'; result: unknown }
+  | { type: 'error'; message: string; recoverable: boolean; sessionId?: string }
+  | { type: 'pong' };
+
+/**
+ * Session state stored in Durable Object storage for reconnection.
+ */
+export interface SessionState {
+  /** Graph being executed */
+  graphId: string;
+  /** Serialized WASM machine state (opaque to TypeScript) */
+  machineState: unknown;
+  /** Effect waiting for client response, if any */
+  pendingEffect: SerializableEffect | null;
+  /** Last activity timestamp (Unix ms) */
+  lastActivity: number;
+}
+
+/** Session timeout in milliseconds (5 minutes) */
+export const SESSION_TIMEOUT_MS = 5 * 60 * 1000;

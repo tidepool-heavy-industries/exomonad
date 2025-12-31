@@ -49,6 +49,25 @@ The key insight: **TypeScript is a graph-aware effect executor**. Haskell owns t
 
 ## Protocol Flow
 
+See [docs/PROTOCOL.md](docs/PROTOCOL.md) for the full WebSocket protocol specification.
+
+### Message Types
+
+**Client → Server:**
+- `init` - Start graph execution: `{ type: 'init', graphId: string, input: unknown }`
+- `resume` - Provide effect result: `{ type: 'resume', result: EffectResult }`
+- `reconnect` - Resume suspended session: `{ type: 'reconnect', sessionId: string }`
+- `ping` - Keepalive heartbeat
+
+**Server → Client:**
+- `progress` - Effect executing server-side: `{ type: 'progress', effect, status }`
+- `yield` - Effect for client handling: `{ type: 'yield', effect, sessionId }`
+- `done` - Graph completed: `{ type: 'done', result }`
+- `error` - Error occurred: `{ type: 'error', message, recoverable, sessionId? }`
+- `pong` - Keepalive response
+
+### Sequence Diagram
+
 ```
 Client                    TypeScript                    WASM (Haskell)
   │                           │                              │
@@ -56,13 +75,20 @@ Client                    TypeScript                    WASM (Haskell)
   │                           │── initialize(json) ─────────►│
   │                           │◄── StepOutput {effect} ──────│
   │                           │                              │
-  │                           │ [execute effect: LLM/log]    │
+  │◄── {progress} ────────────│ [execute effect: LLM/log]    │
   │                           │                              │
   │                           │── step(result) ─────────────►│
   │                           │◄── StepOutput {done: true} ──│
   │                           │                              │
   │◄── WS: {done: result} ────│                              │
 ```
+
+### Session Management
+
+- Sessions are stored in Durable Object storage for reconnection
+- Sessions expire after 5 minutes of inactivity
+- `sessionId` is included in `yield` and recoverable `error` messages
+- Clients can reconnect with `reconnect` message to resume from last yield point
 
 ## Effect Types
 
