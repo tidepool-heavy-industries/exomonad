@@ -5,6 +5,11 @@ import Test.Hspec
 import qualified GraphValidationSpec
 import qualified LLMNodeExecuteSpec
 import qualified MemorySerializationSpec
+import qualified OneOfSpec
+import qualified InjectTargetSpec
+import qualified GotoChoiceSpec
+import qualified CallHandlerSpec
+import qualified DispatchGotoSpec
 
 main :: IO ()
 main = hspec $ do
@@ -16,3 +21,18 @@ main = hspec $ do
 
   describe "Memory Serialization" $ do
     MemorySerializationSpec.spec
+
+  describe "OneOf GADT" $ do
+    OneOfSpec.spec
+
+  describe "InjectTarget" $ do
+    InjectTargetSpec.spec
+
+  describe "GotoChoice" $ do
+    GotoChoiceSpec.spec
+
+  describe "CallHandler" $ do
+    CallHandlerSpec.spec
+
+  describe "DispatchGoto" $ do
+    DispatchGotoSpec.spec
