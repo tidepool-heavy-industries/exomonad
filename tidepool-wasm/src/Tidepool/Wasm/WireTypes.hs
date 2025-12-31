@@ -17,6 +17,10 @@ module Tidepool.Wasm.WireTypes
     -- * Results (TypeScript → WASM)
   , EffectResult(..)
 
+    -- * Graph State (for observability)
+  , ExecutionPhase(..)
+  , GraphState(..)
+
     -- * Step Output
   , StepOutput(..)
   ) where
@@ -137,6 +141,83 @@ instance FromJSON EffectResult where
 
 
 -- ════════════════════════════════════════════════════════════════════════════
+-- GRAPH STATE (for observability)
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Execution phase - matches protocol.ts ExecutionPhase exactly.
+--
+-- JSON encoding uses flat object with "type" discriminator:
+-- - @{type: "idle"}@
+-- - @{type: "in_node", nodeName: "classify"}@
+-- - @{type: "transitioning", fromNode: "a", toNode: "b"}@
+-- - @{type: "completed", result: ...}@
+-- - @{type: "failed", error: "..."}@
+data ExecutionPhase
+  = PhaseIdle
+  | PhaseInNode { phaseName :: Text }
+  | PhaseTransitioning { phaseFrom :: Text, phaseTo :: Text }
+  | PhaseCompleted { phaseResult :: Value }
+  | PhaseFailed { phaseError :: Text }
+  deriving stock (Show, Eq, Generic)
+
+instance ToJSON ExecutionPhase where
+  toJSON PhaseIdle = object
+    [ "type" .= ("idle" :: Text)
+    ]
+  toJSON (PhaseInNode name) = object
+    [ "type" .= ("in_node" :: Text)
+    , "nodeName" .= name
+    ]
+  toJSON (PhaseTransitioning from to) = object
+    [ "type" .= ("transitioning" :: Text)
+    , "fromNode" .= from
+    , "toNode" .= to
+    ]
+  toJSON (PhaseCompleted result) = object
+    [ "type" .= ("completed" :: Text)
+    , "result" .= result
+    ]
+  toJSON (PhaseFailed err) = object
+    [ "type" .= ("failed" :: Text)
+    , "error" .= err
+    ]
+
+instance FromJSON ExecutionPhase where
+  parseJSON = withObject "ExecutionPhase" $ \o -> do
+    (typ :: Text) <- o .: "type"
+    case typ of
+      "idle"          -> pure PhaseIdle
+      "in_node"       -> PhaseInNode <$> o .: "nodeName"
+      "transitioning" -> PhaseTransitioning <$> o .: "fromNode" <*> o .: "toNode"
+      "completed"     -> PhaseCompleted <$> o .: "result"
+      "failed"        -> PhaseFailed <$> o .: "error"
+      _               -> fail $ "Unknown execution phase type: " ++ show typ
+
+
+-- | Runtime graph state - matches protocol.ts GraphState.
+--
+-- JSON encoding: @{phase: {...}, completedNodes: [...]}@
+data GraphState = GraphState
+  { gsPhase :: ExecutionPhase
+  -- ^ Current execution phase
+  , gsCompletedNodes :: [Text]
+  -- ^ Nodes that have completed
+  }
+  deriving stock (Show, Eq, Generic)
+
+instance ToJSON GraphState where
+  toJSON gs = object
+    [ "phase" .= gs.gsPhase
+    , "completedNodes" .= gs.gsCompletedNodes
+    ]
+
+instance FromJSON GraphState where
+  parseJSON = withObject "GraphState" $ \o -> GraphState
+    <$> o .: "phase"
+    <*> o .: "completedNodes"
+
+
+-- ════════════════════════════════════════════════════════════════════════════
 -- STEP OUTPUT (WASM → TypeScript per step)
 -- ════════════════════════════════════════════════════════════════════════════
 
@@ -154,6 +235,8 @@ data StepOutput = StepOutput
   -- ^ Is graph execution complete?
   , soStepResult :: Maybe Value
   -- ^ Final result when done=True (matches Exit type)
+  , soGraphState :: GraphState
+  -- ^ Current graph execution state (for observability)
   }
   deriving stock (Show, Eq, Generic)
 
@@ -162,6 +245,7 @@ instance ToJSON StepOutput where
     [ "effect" .= so.soEffect
     , "done" .= so.soDone
     , "stepResult" .= so.soStepResult
+    , "graphState" .= so.soGraphState
     ]
 
 instance FromJSON StepOutput where
@@ -169,3 +253,4 @@ instance FromJSON StepOutput where
     <$> o .:? "effect"
     <*> o .: "done"
     <*> o .:? "stepResult"
+    <*> o .: "graphState"
