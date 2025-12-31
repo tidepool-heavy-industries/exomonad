@@ -11,3 +11,9 @@ cabal.project.local
 # Local files
 tidepool-games.db
 plans/
+
+# Deploy (CF Worker)
+deploy/node_modules/
+deploy/.wrangler/
+deploy/src/*.wasm
+deploy/.dev.vars

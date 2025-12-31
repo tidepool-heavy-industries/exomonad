@@ -1,0 +1,27 @@
+{
+  "name": "tidepool-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/",
+    "lint:fix": "eslint src/ --fix",
+    "build": "tsc"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20251231.0",
+    "@eslint/js": "^9.39.2",
+    "@typescript-eslint/eslint-plugin": "^8.51.0",
+    "@typescript-eslint/parser": "^8.51.0",
+    "eslint": "^9.39.2",
+    "typescript": "^5.7.2",
+    "wrangler": "^3.99.0",
+    "ws": "^8.18.3"
+  },
+  "dependencies": {
+    "@bjorn3/browser_wasi_shim": "^0.3.0"
+  }
+}

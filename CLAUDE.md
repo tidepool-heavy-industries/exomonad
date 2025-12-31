@@ -432,9 +432,76 @@ The "sleeptime" learning agent reads run logs and evolves:
 
 The loop structure, effect types, and infrastructure stay stable.
 
+## Cloudflare Worker Deployment (`deploy/`)
+
+The `deploy/` directory contains a Cloudflare Worker Durable Object harness for hosting compiled WASM state machines. This enables long-lived, WebSocket-based agent sessions running on the edge.
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Cloudflare Durable Object                                  │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │  TypeScript Harness (deploy/src/)                     │  │
+│  │  - WebSocket connection management                    │  │
+│  │  - Effect interpreter (CF AI, fetch, logging)         │  │
+│  │  - WASM instance lifecycle                            │  │
+│  └─────────────────────┬─────────────────────────────────┘  │
+│                        │ FFI (JSON)                         │
+│  ┌─────────────────────▼─────────────────────────────────┐  │
+│  │  WASM Module (GHC 9.10 → wasm32-wasi)                 │  │
+│  │  - Effectful-based state machine                      │  │
+│  │  - Yields serialized effect descriptions              │  │
+│  │  - Pure business logic, no IO                         │  │
+│  └───────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### WASM Standin
+
+**Current status**: The WASM module (`tidepool.wasm`) comes from a separate standin implementation at `~/dev/tidepool`. This standin demonstrates the effect protocol but will be replaced by compiling the Haskell code in this repo once:
+
+1. The effectful-based agent loop is WASM-ready
+2. GHC WASM cross-compilation is integrated into the build
+
+The protocol types in `deploy/src/protocol.ts` define the contract between TypeScript and Haskell.
+
+### Files
+
+- `src/index.ts` - Durable Object with WebSocket handling, effect loop
+- `src/loader.ts` - GHC WASM loader with JSFFI and WASI polyfills
+- `src/protocol.ts` - TypeScript types matching Haskell Serializable.hs
+- `src/jsffi.ts` - GHC WASM JavaScript FFI implementation
+- `wrangler.toml` - CF Worker configuration (AI binding, DO class)
+
+### Running
+
+```bash
+cd deploy
+pnpm install
+pnpm dev          # Local dev server
+pnpm typecheck    # Type check
+pnpm lint         # ESLint
+pnpm deploy       # Deploy to Cloudflare
+```
+
+### WebSocket Protocol
+
+```typescript
+// Client → Server
+{ type: "init", input: { messageText: "..." } }
+{ type: "resume", result: { type: "success", value: ... } }
+
+// Server → Client
+{ type: "progress", node: "classify", effect: "LlmComplete" }
+{ type: "done", result: { responseText: "..." } }
+{ type: "error", message: "..." }
+```
+
 ## References
 
 - effectful: https://hackage.haskell.org/package/effectful
 - Anthropic tool use: https://docs.anthropic.com/en/docs/tool-use
 - Blades in the Dark SRD: https://bladesinthedark.com/
 - heist-engine (v1 reference): ~/dev/shoal-automat/machines/heist-engine
+- GHC WASM: https://ghc.gitlab.haskell.org/ghc/doc/users_guide/wasm.html

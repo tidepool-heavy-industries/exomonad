@@ -1,0 +1,35 @@
+name = "tidepool"
+main = "src/index.ts"
+compatibility_date = "2024-12-01"
+
+# Durable Objects for state machine instances
+[durable_objects]
+bindings = [
+  { name = "STATE_MACHINE", class_name = "StateMachineDO" }
+]
+
+[[migrations]]
+tag = "v1"
+new_classes = ["StateMachineDO"]
+
+# D1 database (optional)
+# [[d1_databases]]
+# binding = "DB"
+# database_name = "tidepool-db"
+# database_id = "your-database-id"
+
+# R2 storage (optional)
+# [[r2_buckets]]
+# binding = "STORAGE"
+# bucket_name = "tidepool-storage"
+
+# Cloudflare AI binding
+[ai]
+binding = "AI"
+
+# Environment variables
+[vars]
+ENVIRONMENT = "development"
+
+# WASM module configuration
+# The WASM binary is imported directly in TypeScript
