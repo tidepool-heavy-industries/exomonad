@@ -77,9 +77,9 @@ install-hooks:
     @echo "Installing git hooks..."
     @mkdir -p .git/hooks
     @echo '#!/bin/bash' > .git/hooks/pre-commit
-    @echo 'just pre-commit-fast' >> .git/hooks/pre-commit
+    @echo 'just pre-commit' >> .git/hooks/pre-commit
     @chmod +x .git/hooks/pre-commit
-    @echo "✓ Installed pre-commit hook (runs 'just pre-commit-fast')"
+    @echo "✓ Installed pre-commit hook (runs 'just pre-commit' - build + tests)"
 
 # Uninstall git hooks
 uninstall-hooks:
