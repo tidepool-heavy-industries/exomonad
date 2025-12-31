@@ -40,10 +40,10 @@ import Effectful.State.Static.Local (State, get)
 import GHC.Generics (Generic)
 import Text.Parsec.Pos (SourcePos)
 
-import Tidepool.Graph.Types (type (:@), Needs, Schema, Template, UsesEffects)
+import Tidepool.Graph.Types (type (:@), Needs, Schema, Template, UsesEffects, Exit)
 import Tidepool.Graph.Generic (GraphMode(..), AsHandler)
 import qualified Tidepool.Graph.Generic as G (Entry, Exit, LLMNode, LogicNode, ValidGraphRecord)
-import Tidepool.Graph.Goto (Goto, To, GotoChoice, gotoChoice)
+import Tidepool.Graph.Goto (Goto, To, GotoChoice, gotoChoice, gotoExit, LLMHandler(..))
 import Tidepool.Graph.Reify (ReifyRecordGraph(..), makeGraphInfo)
 import Tidepool.Graph.Tool (ToolDef(..))
 import Tidepool.Graph.Template (TemplateDef(..), TypedTemplate, typedTemplateFile)
@@ -262,17 +262,17 @@ data SupportGraph mode = SupportGraph
 -- In 'AsHandler es' mode, the NodeHandler type family computes:
 --
 -- * Entry -> Proxy Message (marker, not a handler)
--- * LLM :@ Needs '[A] :@ Template T :@ Schema B -> A -> Eff es (TemplateContext T)
--- * Logic :@ Needs '[A] :@ UsesEffects effs -> A -> Eff effs ()
+-- * LLM :@ Needs '[A] :@ Template T :@ Schema B -> LLMHandler A B '[] es (TemplateContext T)
+-- * Logic :@ Needs '[A] :@ UsesEffects effs -> A -> Eff es (GotoChoice targets)
 -- * Exit -> Proxy Response (marker, not a handler)
 --
--- Note: The handler returns the TemplateContext, not the Schema output.
--- The runner handles template rendering, LLM call, and schema parsing.
+-- Note: LLM handlers are wrapped in LLMBefore/LLMAfter/LLMBoth to specify
+-- which phases they handle. The runner uses these to orchestrate the LLM call.
 supportHandlers :: SupportGraph (AsHandler '[State SessionState])
 supportHandlers = SupportGraph
   { sgEntry    = Proxy @Message
-  , sgClassify = \msg -> do
-      -- Handler builds context for the classify template
+  , sgClassify = LLMBefore $ \msg -> do
+      -- Before handler: builds context for the classify template
       st <- get @SessionState
       pure ClassifyContext
         { topic = msgContent msg
@@ -290,11 +290,11 @@ supportHandlers = SupportGraph
         IntentRefund    -> gotoChoice @"sgRefund" msg
         IntentQuestion  -> gotoChoice @"sgFaq" msg
         IntentComplaint -> gotoChoice @"sgFaq" msg  -- Complaints go to FAQ for now
-  , sgRefund   = \_msg -> do
-      -- Refund template context builder
+  , sgRefund   = LLMBefore $ \_msg -> do
+      -- Before handler: builds refund template context
       pure SimpleContext { scContent = "Processing refund..." }
-  , sgFaq      = \_msg -> do
-      -- FAQ template context builder
+  , sgFaq      = LLMBefore $ \_msg -> do
+      -- Before handler: builds FAQ template context
       pure SimpleContext { scContent = "Here are some common questions..." }
   , sgExit     = Proxy @Response
   }
@@ -330,3 +330,75 @@ validRecordGraph = ()
 -- explicit Goto transitions.
 instance ReifyRecordGraph SupportGraph where
   reifyRecordGraph = makeGraphInfo
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- LLM HANDLER VARIANTS EXAMPLE
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Example graph demonstrating all three LLMHandler variants.
+--
+-- This shows:
+--
+-- * 'LLMBefore' - Provides template context, uses Needs-based data flow after LLM
+-- * 'LLMAfter' - Uses default context, explicit routing based on LLM output
+-- * 'LLMBoth' - Custom context AND explicit routing
+--
+-- @
+-- Entry(Message) → analyze(LLMBefore) → route(LLMAfter) → process(LLMBoth) → Exit
+-- @
+data RoutingGraph mode = RoutingGraph
+  { rgEntry   :: mode :- G.Entry Message
+    -- LLMBefore: provides context, uses Needs-based routing after LLM
+  , rgAnalyze :: mode :- G.LLMNode :@ Needs '[Message] :@ Template ClassifyTpl :@ Schema Intent
+    -- LLMAfter: no context (uses default), explicit routing based on LLM output
+  , rgRoute   :: mode :- G.LLMNode :@ Needs '[Intent] :@ Schema Intent
+                   :@ UsesEffects '[Goto "rgProcess" Intent, Goto Exit Response]
+    -- LLMBoth: custom context AND explicit routing
+  , rgProcess :: mode :- G.LLMNode :@ Needs '[Intent] :@ Template RefundTpl :@ Schema Response
+                   :@ UsesEffects '[Goto Exit Response]
+  , rgExit    :: mode :- G.Exit Response
+  }
+  deriving Generic
+
+-- | Handler record demonstrating all three LLMHandler variants.
+routingHandlers :: RoutingGraph (AsHandler '[State SessionState])
+routingHandlers = RoutingGraph
+  { rgEntry   = Proxy @Message
+
+    -- LLMBefore: builds context for the analyze template
+    -- After the LLM call, routing is implicit via Needs-based data flow
+  , rgAnalyze = LLMBefore $ \msg -> do
+      st <- get @SessionState
+      pure ClassifyContext
+        { topic = T.pack (msgContent msg)
+        , categories = T.intercalate ", " st.sessionNotes
+        }
+
+    -- LLMAfter: no before-phase context, explicit routing after LLM
+    -- The runner uses default context; handler decides where to go based on output
+  , rgRoute   = LLMAfter $ \intent -> pure $ case intent of
+      IntentRefund    -> gotoChoice @"rgProcess" intent
+      IntentQuestion  -> gotoExit (Response "FAQ response")
+      IntentComplaint -> gotoChoice @"rgProcess" intent
+
+    -- LLMBoth: custom context before LLM, explicit routing after
+    -- Full control over both phases
+  , rgProcess = LLMBoth
+      (\intent -> pure SimpleContext { scContent = T.pack $ "Processing: " ++ show intent })
+      (\response -> pure $ gotoExit response)
+
+  , rgExit    = Proxy @Response
+  }
+  where
+    msgContent :: Message -> String
+    msgContent (Message s) = s
+
+    -- Need Show instance for Intent in the example
+    show :: Intent -> String
+    show IntentRefund = "refund"
+    show IntentQuestion = "question"
+    show IntentComplaint = "complaint"
+
+-- | Validate RoutingGraph at compile time.
+validRoutingGraph :: G.ValidGraphRecord RoutingGraph => ()
+validRoutingGraph = ()
