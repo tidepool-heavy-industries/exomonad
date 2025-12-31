@@ -10,7 +10,7 @@ cabal.project.local
 
 # Local files
 tidepool-games.db
-plans/
+tidepool-save.json
 
 # Deploy (CF Worker)
 deploy/node_modules/
