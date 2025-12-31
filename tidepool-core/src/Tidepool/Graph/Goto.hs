@@ -60,7 +60,7 @@ module Tidepool.Graph.Goto
   , Payloads
   , PayloadOf
   , InjectTarget(..)
-  -- Note: Inject is intentionally NOT exported. It uses type equality which
+  -- Note: Inject has been removed from exports. It uses type equality which
   -- finds the first match in duplicate-type lists. Use InjectTarget instead,
   -- which matches on full (To name payload) markers for correct positioning.
 
