@@ -60,7 +60,7 @@ data SerializableEffect
       -- ^ HTTP method
       }
   | EffLogInfo { effMessage :: Text }
-  | EffLogError { effErrorMessage :: Text }
+  | EffLogError { effMessage :: Text }
   deriving stock (Show, Eq, Generic)
 
 instance ToJSON SerializableEffect where
