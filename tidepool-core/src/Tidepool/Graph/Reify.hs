@@ -52,8 +52,6 @@ module Tidepool.Graph.Reify
   , ReifyGotoTargets(..)
   , ReifyNodeKind(..)
   , ReifyBool(..)
-  , ReifyNode(..)
-  , ReifyNodeList(..)
   ) where
 
 import Data.Kind (Type, Constraint)
@@ -63,15 +61,7 @@ import qualified Data.Text as T
 import Data.Typeable (TypeRep, Typeable, typeRep)
 import GHC.TypeLits (Symbol, KnownSymbol, symbolVal)
 
-import Tidepool.Graph.Types
-  ( Graph, NodeKind(..), NodeName, GetNodeKind
-  )
-import Tidepool.Graph.Edges
-  ( FilterNodes
-  , GetNeeds, GetSchema, GetSystem, GetTemplate
-  , GetVision, GetTools, GetMemory
-  , GetEntryType, GetExitType
-  )
+import Tidepool.Graph.Types (NodeKind(..))
 import Tidepool.Graph.Tool (ToolInfo(..))
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -130,8 +120,7 @@ data RuntimeEdgeKind
 
 -- | Typeclass for reifying a complete graph to runtime GraphInfo.
 --
--- The instance for @Graph nodes@ is defined below using the helper classes.
--- Additional instances can be defined for record-based graphs.
+-- Instances should be defined for record-based graphs using GHC.Generics.
 class ReifyGraph (g :: Type) where
   reifyGraph :: GraphInfo
 
@@ -201,97 +190,5 @@ instance ReifyBool 'True where
 instance ReifyBool 'False where
   reifyBool _ = False
 
--- ════════════════════════════════════════════════════════════════════════════
--- NODE REIFICATION
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Reify a single node declaration to NodeInfo.
---
--- This typeclass extracts all annotations from a node type using
--- the type families from Edges.hs and converts them to runtime values.
-type ReifyNode :: Type -> Constraint
-class ReifyNode (node :: Type) where
-  reifyNode :: Proxy node -> NodeInfo
-
--- Default instance using type families from Edges.hs
--- Note: This instance has many constraints corresponding to all the
--- information we extract from nodes.
---
--- Goto targets and HasGotoExit are stubbed to empty/False due to
--- polykind ambiguity issues with GetUsesEffects. See TODO above.
-instance
-  ( KnownSymbol (NodeName node)
-  , ReifyNodeKind (GetNodeKind node)
-  , ReifyTypeList (GetNeeds node)
-  , ReifyMaybeType (GetSchema node)
-  , ReifyMaybeType (GetTemplate node)
-  , ReifyMaybeType (GetSystem node)
-  , ReifyMaybeType (GetMemory node)
-  , ReifyBool (GetVision node)
-  , ReifyTypeList (GetTools node)
-  ) => ReifyNode node where
-  reifyNode _ = NodeInfo
-    { niName = T.pack $ symbolVal (Proxy @(NodeName node))
-    , niKind = reifyNodeKind (Proxy @(GetNodeKind node))
-    , niNeeds = reifyTypeList (Proxy @(GetNeeds node))
-    , niSchema = reifyMaybeType (Proxy @(GetSchema node))
-    , niGotoTargets = []  -- TODO: extract from UsesEffects
-    , niHasGotoExit = False  -- TODO: extract from UsesEffects
-    , niHasVision = reifyBool (Proxy @(GetVision node))
-    , niTools = reifyTypeList (Proxy @(GetTools node))
-    , niToolInfos = []  -- Tool reification TBD
-    , niSystem = reifyMaybeType (Proxy @(GetSystem node))
-    , niTemplate = reifyMaybeType (Proxy @(GetTemplate node))
-    , niMemory = reifyMaybeType (Proxy @(GetMemory node))
-    }
-
--- Note: Full Goto target extraction from polykinded UsesEffects is complex
--- due to kind ambiguity (GetUsesEffects returns Maybe [k] where k can be
--- Effect or Type). For now, Goto targets are left empty.
---
--- TODO: Implement Goto extraction either by:
--- 1. Adding a monokinded type family that extracts just Type-kind Goto targets
--- 2. Using Template Haskell to generate instances with concrete kinds
--- 3. Adding a separate annotation for explicit transition declarations
-
--- ════════════════════════════════════════════════════════════════════════════
--- NODE LIST REIFICATION
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Reify a type-level list of nodes to runtime [NodeInfo].
-type ReifyNodeList :: [Type] -> Constraint
-class ReifyNodeList (nodes :: [Type]) where
-  reifyNodeList :: Proxy nodes -> [NodeInfo]
-
-instance ReifyNodeList '[] where
-  reifyNodeList _ = []
-
-instance (ReifyNode node, ReifyNodeList rest)
-      => ReifyNodeList (node ': rest) where
-  reifyNodeList _ = reifyNode (Proxy @node) : reifyNodeList (Proxy @rest)
-
--- ════════════════════════════════════════════════════════════════════════════
--- GRAPH REIFICATION INSTANCE
--- ════════════════════════════════════════════════════════════════════════════
-
--- Helper type family: wrap a Type in Just for uniform Maybe handling
-type MaybeJust :: Type -> Maybe Type
-type family MaybeJust t where
-  MaybeJust t = 'Just t
-
--- | ReifyGraph instance for Graph nodes.
---
--- Reifies Entry/Exit types and all node declarations.
--- Edge derivation and group annotations are left empty for now.
-instance
-  ( ReifyNodeList (FilterNodes nodes)
-  , ReifyMaybeType (MaybeJust (GetEntryType (Graph nodes)))
-  , ReifyMaybeType (MaybeJust (GetExitType (Graph nodes)))
-  ) => ReifyGraph (Graph nodes) where
-  reifyGraph = GraphInfo
-    { giEntryType = reifyMaybeType (Proxy @(MaybeJust (GetEntryType (Graph nodes))))
-    , giExitType = reifyMaybeType (Proxy @(MaybeJust (GetExitType (Graph nodes))))
-    , giNodes = reifyNodeList (Proxy @(FilterNodes nodes))
-    , giEdges = []  -- Edge derivation TBD (requires Schema→Needs tracking)
-    , giGroups = []  -- Group annotation TBD (requires :& handling)
-    }
+-- Note: Reification instances for record-based graphs should be defined
+-- using GHC.Generics traversal.
