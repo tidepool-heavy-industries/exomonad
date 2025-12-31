@@ -173,6 +173,9 @@ export async function handleHabitica(
           throw new Error(data.message || "AddChecklistItem failed");
         // Return the new checklist item ID
         const checklist = data.data.checklist ?? [];
+        if (checklist.length === 0) {
+          throw new Error("AddChecklistItem failed: empty checklist in response");
+        }
         const lastItem = checklist[checklist.length - 1];
         return successResult(lastItem.id);
       }
