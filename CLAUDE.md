@@ -32,9 +32,9 @@ The key insight: LLMs don't need raw IO - they need typed state they can read (v
 
 1. **effectful** for effects
    - MTL-equivalent performance, no INLINE pragma dance
-   - Effects: `LLM`, `RequestInput`, `State`, `Emit`, `Random`
+   - Effects: `LLM`, `RequestInput`, `State`, `Emit`, `Random`, `Log`, `ChatHistory`, `Time`
 
-2. **Typed Jinja templates** (WIP - external package)
+2. **Typed Jinja templates** (via ginger library)
    - Compile-time validation against Haskell types
    - `$(typedTemplateFile ''DMContext "templates/dm_turn.jinja")`
    - LLMs know Jinja from training data
@@ -203,29 +203,6 @@ tierColor TierBad      = "#7c4a4a"  -- Muted red
 tierColor TierDisaster = "#4a0000"  -- Deep red
 ```
 
-### Dice Integration Note
-
-For full dice integration with the effect system, add to `InputHandler`:
-
-```haskell
--- In Tidepool.Effect (TODO)
-data InputHandler = InputHandler
-  { ihChoice :: forall a. Text -> [(Text, a)] -> IO a
-  , ihText   :: Text -> IO Text
-  , ihDice   :: Text -> [(Int, Int)] -> IO Int  -- NEW
-  }
-```
-
-Until then, use `guiDice` from `Tidepool.GUI.Handler` directly:
-
-```haskell
-import Tidepool.GUI.Handler (guiDice)
-
--- In game logic
-let pool = [(4, 0), (2, 1), (6, 2)]  -- (value, index)
-selectedIdx <- guiDice bridge "Choose a die:" pool
-```
-
 ## Effect System
 
 ### IO-Blind Architecture
@@ -377,7 +354,8 @@ data PlayerDeltas = PlayerDeltas
 ### Complete
 - Effect system with all core effects defined
 - Type-safe tool list (ToolList GADT)
-- Template system ready for typed Jinja integration
+- Template system (ginger library with TH compile-time validation)
+- JSON Schema derivation via Template Haskell (`deriveJSONSchema`)
 - FitD dice mechanics types
 - Precarity calculation
 - Delta-based mutation types
@@ -391,12 +369,7 @@ data PlayerDeltas = PlayerDeltas
 - **GUI: Handler** - makeGUIHandler for choice/text, guiDice for dice selection
 
 ### Stubbed / Partial
-- Template rendering (waiting for jinja-th package)
-- `applyTurnOutput` and mutation appliers
-- `buildDMContext` and context enrichment
-- JSON Schema derivation
 - GUI: Clock face SVG (currently text circles)
-- GUI: `ihDice` in InputHandler (use `guiDice` directly for now)
 
 ## Running
 
@@ -420,15 +393,8 @@ cabal test all             # Run all test suites
 
 ## Next Steps
 
-### Core Library
-1. **jinja-th integration** - Replace placeholder TypedTemplate with real TH splice
-2. **Schema derivation** - `deriveSchema` via GHC.Generics
-3. **Apply functions** - Wire up `applyTurnOutput` with optics
-
 ### GUI Integration
-4. **Add `ihDice` to InputHandler** - Full effect system integration for dice
-5. **Wire GUI to real game loop** - Connect dmTurn to GUIBridge
-6. **Clock SVG rendering** - Replace text circles with pie charts
+1. **Clock SVG rendering** - Replace text circles with pie charts
 
 ## What Sleeptime Would Evolve
 
