@@ -45,8 +45,15 @@ module Tidepool.Graph.Validate
   , MissingEntryError
   , MissingExitError
   , UnsatisfiedNeedError
+  , UnsatisfiedNeedErrorWithContext
   , InvalidGotoTargetError
+  , InvalidGotoTargetErrorWithContext
   , DuplicateSchemaError
+  , DuplicateSchemaErrorWithNodes
+
+    -- * Error Formatting Helpers
+  , FormatTypeList
+  , FormatSymbolList
   ) where
 
 import Data.Kind (Type, Constraint)
@@ -130,6 +137,7 @@ type family AllNeedsSatisfied g where
   AllNeedsSatisfied (g :& _) = AllNeedsSatisfied g
 
 -- | Check each node's Needs against provided types.
+-- We pass the full 'provided' list to each check so errors can show what's available.
 type AllNodeNeedsSatisfied :: [Type] -> [Type] -> Constraint
 type family AllNodeNeedsSatisfied nodes provided where
   AllNodeNeedsSatisfied '[] _ = ()
@@ -138,26 +146,28 @@ type family AllNodeNeedsSatisfied nodes provided where
   AllNodeNeedsSatisfied ((Exit :<~ _) ': rest) provided =
     AllNodeNeedsSatisfied rest provided
   AllNodeNeedsSatisfied (node ': rest) provided =
-    ( NeedsSatisfied (NodeName node) (GetNeeds node) provided
+    ( NeedsSatisfied (NodeName node) (GetNeeds node) provided provided
     , AllNodeNeedsSatisfied rest provided
     )
 
 -- | Validate that all types in a node's Needs are in the provided list.
-type NeedsSatisfied :: Symbol -> [Type] -> [Type] -> Constraint
-type family NeedsSatisfied nodeName needs provided where
-  NeedsSatisfied _ '[] _ = ()
-  NeedsSatisfied nodeName (t ': rest) provided =
-    ( CheckNeedProvided nodeName t provided
-    , NeedsSatisfied nodeName rest provided
+-- Takes both the remaining provided list (for checking) and the full list (for errors).
+type NeedsSatisfied :: Symbol -> [Type] -> [Type] -> [Type] -> Constraint
+type family NeedsSatisfied nodeName needs provided allProvided where
+  NeedsSatisfied _ '[] _ _ = ()
+  NeedsSatisfied nodeName (t ': rest) provided allProvided =
+    ( CheckNeedProvided nodeName t provided allProvided
+    , NeedsSatisfied nodeName rest provided allProvided
     )
 
 -- | Check if a single need is satisfied.
-type CheckNeedProvided :: Symbol -> Type -> [Type] -> Constraint
-type family CheckNeedProvided nodeName need provided where
-  CheckNeedProvided nodeName need provided =
+-- Uses the enhanced error that shows available types.
+type CheckNeedProvided :: Symbol -> Type -> [Type] -> [Type] -> Constraint
+type family CheckNeedProvided nodeName need provided allProvided where
+  CheckNeedProvided nodeName need provided allProvided =
     If (ElemType need provided)
        (() :: Constraint)
-       (UnsatisfiedNeedError nodeName need)
+       (UnsatisfiedNeedErrorWithContext nodeName need allProvided)
 
 -- | Collect all types provided by Entry + all Schema outputs.
 type GetAllProvidedTypes :: [Type] -> Type -> [Type]
@@ -224,21 +234,23 @@ type family ProjectSymbols pairs where
   ProjectSymbols ('(sym, _) ': rest) = sym ': ProjectSymbols rest
 
 -- | Validate that all Goto symbols in a node are valid targets.
+-- We pass the full validNames list so errors can show available options.
 type ValidateNodeGotoTargets :: Symbol -> [Symbol] -> [Symbol] -> Constraint
 type family ValidateNodeGotoTargets srcName targets validNames where
   ValidateNodeGotoTargets _ '[] _ = ()
   ValidateNodeGotoTargets srcName (target ': rest) validNames =
-    ( GotoTargetExists srcName target validNames
+    ( GotoTargetExists srcName target validNames validNames
     , ValidateNodeGotoTargets srcName rest validNames
     )
 
 -- | Validate a single Goto target exists.
-type GotoTargetExists :: Symbol -> Symbol -> [Symbol] -> Constraint
-type family GotoTargetExists srcName target validNames where
-  GotoTargetExists srcName target validNames =
-    If (ElemSymbol target validNames)
+-- Takes both the checking list and full list (for error messages).
+type GotoTargetExists :: Symbol -> Symbol -> [Symbol] -> [Symbol] -> Constraint
+type family GotoTargetExists srcName target checkList allValidNames where
+  GotoTargetExists srcName target checkList allValidNames =
+    If (ElemSymbol target checkList)
        (() :: Constraint)
-       (InvalidGotoTargetError srcName target)
+       (InvalidGotoTargetErrorWithContext srcName target allValidNames)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- ERROR MESSAGES
@@ -259,25 +271,88 @@ type MissingExitError = TypeError
   )
 
 -- | Error when a node's Need is not provided by any Schema or Entry.
+--
+-- This version takes the list of provided types so it can show what IS available.
 type UnsatisfiedNeedError :: Symbol -> Type -> Constraint
 type UnsatisfiedNeedError nodeName needType = TypeError
   ('Text "Graph validation failed: unsatisfied dependency"
+   ':$$: 'Text ""
    ':$$: 'Text "Node '" ':<>: 'Text nodeName ':<>: 'Text "' needs type:"
    ':$$: 'Text "  " ':<>: 'ShowType needType
-   ':$$: 'Text "But no node provides it via Schema and Entry doesn't provide it."
-   ':$$: 'Text "Fix: Add a node with 'Schema " ':<>: 'ShowType needType ':<>: 'Text "'"
-   ':$$: 'Text "  or add it to Entry type."
+   ':$$: 'Text ""
+   ':$$: 'Text "But no node provides this type via Schema and Entry doesn't provide it."
+   ':$$: 'Text ""
+   ':$$: 'Text "Fix options:"
+   ':$$: 'Text "  1. Add a node with 'Schema " ':<>: 'ShowType needType ':<>: 'Text "'"
+   ':$$: 'Text "  2. Change Entry to provide this type: Entry :~> " ':<>: 'ShowType needType
+   ':$$: 'Text "  3. Remove " ':<>: 'ShowType needType ':<>: 'Text " from this node's Needs"
   )
+
+-- | Enhanced error showing what types ARE available.
+type UnsatisfiedNeedErrorWithContext :: Symbol -> Type -> [Type] -> Constraint
+type UnsatisfiedNeedErrorWithContext nodeName needType available = TypeError
+  ('Text "Graph validation failed: unsatisfied dependency"
+   ':$$: 'Text ""
+   ':$$: 'Text "Node '" ':<>: 'Text nodeName ':<>: 'Text "' needs type:"
+   ':$$: 'Text "  " ':<>: 'ShowType needType
+   ':$$: 'Text ""
+   ':$$: 'Text "Available types (from Entry and Schema outputs):"
+   ':$$: FormatTypeList available
+   ':$$: 'Text ""
+   ':$$: 'Text "Fix options:"
+   ':$$: 'Text "  1. Add a node with 'Schema " ':<>: 'ShowType needType ':<>: 'Text "'"
+   ':$$: 'Text "  2. Change Entry to provide this type"
+   ':$$: 'Text "  3. Remove " ':<>: 'ShowType needType ':<>: 'Text " from this node's Needs"
+  )
+
+-- | Format a list of types for display in error messages.
+type FormatTypeList :: [Type] -> ErrorMessage
+type family FormatTypeList ts where
+  FormatTypeList '[] = 'Text "  (none)"
+  FormatTypeList '[t] = 'Text "  • " ':<>: 'ShowType t
+  FormatTypeList (t ': rest) = 'Text "  • " ':<>: 'ShowType t ':$$: FormatTypeList rest
 
 -- | Error when a Goto target doesn't exist.
 type InvalidGotoTargetError :: Symbol -> Symbol -> Constraint
 type InvalidGotoTargetError srcName targetName = TypeError
   ('Text "Graph validation failed: invalid Goto target"
+   ':$$: 'Text ""
    ':$$: 'Text "Node '" ':<>: 'Text srcName ':<>: 'Text "' has:"
    ':$$: 'Text "  Goto \"" ':<>: 'Text targetName ':<>: 'Text "\" ..."
+   ':$$: 'Text ""
    ':$$: 'Text "But no node named \"" ':<>: 'Text targetName ':<>: 'Text "\" exists."
-   ':$$: 'Text "Fix: Create the target node or use Goto Exit for termination."
+   ':$$: 'Text ""
+   ':$$: 'Text "Fix options:"
+   ':$$: 'Text "  1. Create a node named \"" ':<>: 'Text targetName ':<>: 'Text "\""
+   ':$$: 'Text "  2. Use 'Goto Exit' for graph termination"
+   ':$$: 'Text "  3. Check spelling of the target node name"
   )
+
+-- | Enhanced error showing available node names.
+type InvalidGotoTargetErrorWithContext :: Symbol -> Symbol -> [Symbol] -> Constraint
+type InvalidGotoTargetErrorWithContext srcName targetName validNames = TypeError
+  ('Text "Graph validation failed: invalid Goto target"
+   ':$$: 'Text ""
+   ':$$: 'Text "Node '" ':<>: 'Text srcName ':<>: 'Text "' has:"
+   ':$$: 'Text "  Goto \"" ':<>: 'Text targetName ':<>: 'Text "\" ..."
+   ':$$: 'Text ""
+   ':$$: 'Text "But no node named \"" ':<>: 'Text targetName ':<>: 'Text "\" exists."
+   ':$$: 'Text ""
+   ':$$: 'Text "Available node names:"
+   ':$$: FormatSymbolList validNames
+   ':$$: 'Text ""
+   ':$$: 'Text "Fix options:"
+   ':$$: 'Text "  1. Create a node named \"" ':<>: 'Text targetName ':<>: 'Text "\""
+   ':$$: 'Text "  2. Use 'Goto Exit' for graph termination"
+   ':$$: 'Text "  3. Use one of the existing node names above"
+  )
+
+-- | Format a list of symbols for display in error messages.
+type FormatSymbolList :: [Symbol] -> ErrorMessage
+type family FormatSymbolList ss where
+  FormatSymbolList '[] = 'Text "  (none)"
+  FormatSymbolList '[s] = 'Text "  • " ':<>: 'Text s
+  FormatSymbolList (s ': rest) = 'Text "  • " ':<>: 'Text s ':$$: FormatSymbolList rest
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TOOL SCHEMA VALIDATION
@@ -392,10 +467,68 @@ type family ValidateNodeMemory mMemory where
 -- @
 type UniqueSchemas :: Type -> Constraint
 type family UniqueSchemas g where
-  UniqueSchemas (Graph nodes) = Unique (CollectSchemaTypes nodes)
+  UniqueSchemas (Graph nodes) = UniqueSchemasWithNames (CollectNodeSchemas nodes)
   UniqueSchemas (g :& _) = UniqueSchemas g
 
--- | Ensure no duplicates in a type-level list.
+-- | Collect (NodeName, SchemaType) pairs from all nodes.
+type CollectNodeSchemas :: [Type] -> [(Symbol, Type)]
+type family CollectNodeSchemas nodes where
+  CollectNodeSchemas '[] = '[]
+  CollectNodeSchemas ((Entry :~> _) ': rest) = CollectNodeSchemas rest
+  CollectNodeSchemas ((Exit :<~ _) ': rest) = CollectNodeSchemas rest
+  CollectNodeSchemas (node ': rest) = AppendMaybeWithName (NodeName node) (GetSchema node) (CollectNodeSchemas rest)
+
+-- | Append (name, schema) pair if schema is Just.
+type AppendMaybeWithName :: Symbol -> Maybe Type -> [(Symbol, Type)] -> [(Symbol, Type)]
+type family AppendMaybeWithName name mSchema rest where
+  AppendMaybeWithName _ 'Nothing rest = rest
+  AppendMaybeWithName name ('Just t) rest = '(name, t) ': rest
+
+-- | Ensure no duplicate schemas, tracking node names for error messages.
+type UniqueSchemasWithNames :: [(Symbol, Type)] -> Constraint
+type family UniqueSchemasWithNames pairs where
+  UniqueSchemasWithNames '[] = ()
+  UniqueSchemasWithNames ('(name, t) ': rest) =
+    ( CheckSchemaNotDuplicated name t rest
+    , UniqueSchemasWithNames rest
+    )
+
+-- | Check that a schema type doesn't appear in the remaining list.
+type CheckSchemaNotDuplicated :: Symbol -> Type -> [(Symbol, Type)] -> Constraint
+type family CheckSchemaNotDuplicated firstName firstType rest where
+  CheckSchemaNotDuplicated _ _ '[] = ()
+  CheckSchemaNotDuplicated firstName firstType ('(secondName, firstType) ': _) =
+    DuplicateSchemaErrorWithNodes firstName secondName firstType
+  CheckSchemaNotDuplicated firstName firstType ('(_, _) ': rest) =
+    CheckSchemaNotDuplicated firstName firstType rest
+
+-- | Error when two nodes have the same Schema type, showing which nodes conflict.
+type DuplicateSchemaErrorWithNodes :: Symbol -> Symbol -> Type -> Constraint
+type DuplicateSchemaErrorWithNodes node1 node2 schemaType = TypeError
+  ('Text "Graph validation failed: duplicate Schema type"
+   ':$$: 'Text ""
+   ':$$: 'Text "Multiple nodes produce the same Schema type:"
+   ':$$: 'Text "  • Node '" ':<>: 'Text node1 ':<>: 'Text "' has Schema " ':<>: 'ShowType schemaType
+   ':$$: 'Text "  • Node '" ':<>: 'Text node2 ':<>: 'Text "' has Schema " ':<>: 'ShowType schemaType
+   ':$$: 'Text ""
+   ':$$: 'Text "This creates ambiguous Needs resolution - which node provides the type?"
+   ':$$: 'Text ""
+   ':$$: 'Text "Fix options:"
+   ':$$: 'Text "  1. Use distinct wrapper types: data " ':<>: 'Text node1 ':<>: 'Text "Response = ..."
+   ':$$: 'Text "  2. Merge the nodes if they serve the same purpose"
+   ':$$: 'Text "  3. Use different Schema types for different semantics"
+  )
+
+-- | Simple duplicate error (kept for backwards compatibility)
+type DuplicateSchemaError :: Type -> Constraint
+type DuplicateSchemaError t = TypeError
+  ('Text "Graph validation failed: duplicate Schema type"
+   ':$$: 'Text "  Schema " ':<>: 'ShowType t ':<>: 'Text " is produced by multiple nodes."
+   ':$$: 'Text "This creates ambiguous Needs resolution."
+   ':$$: 'Text "Fix: Use distinct types for each node's Schema output."
+  )
+
+-- | Legacy Unique family (kept for compatibility, uses simpler error)
 type Unique :: [Type] -> Constraint
 type family Unique xs where
   Unique '[] = ()
@@ -408,15 +541,6 @@ type family NotElemType x xs where
   NotElemType _ '[] = ()
   NotElemType x (x ': _) = DuplicateSchemaError x
   NotElemType x (_ ': rest) = NotElemType x rest
-
--- | Error when two nodes have the same Schema type.
-type DuplicateSchemaError :: Type -> Constraint
-type DuplicateSchemaError t = TypeError
-  ('Text "Graph validation failed: duplicate Schema type"
-   ':$$: 'Text "  Schema " ':<>: 'ShowType t ':<>: 'Text " is produced by multiple nodes."
-   ':$$: 'Text "This creates ambiguous Needs resolution."
-   ':$$: 'Text "Fix: Use distinct types for each node's Schema output."
-  )
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- UTILITIES
