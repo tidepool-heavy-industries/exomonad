@@ -685,9 +685,15 @@ class ReifyGraph (g :: Type) where
 
 ### Mermaid.hs - Diagram Generation
 
-Generates Mermaid flowchart syntax from `GraphInfo`.
+Generates Mermaid flowchart syntax from graph types or `GraphInfo`.
 
 ```haskell
+-- Generate Mermaid directly from a graph type (most common usage)
+graphToMermaid :: (Generic (graph AsGraph), GReifyFields (Rep (graph AsGraph)), ...)
+               => Proxy graph -> Text
+graphToMermaidWithConfig :: ... => MermaidConfig -> Proxy graph -> Text
+
+-- Lower-level functions using GraphInfo
 toMermaid :: GraphInfo -> Text
 toMermaidWithConfig :: MermaidConfig -> GraphInfo -> Text
 
@@ -698,6 +704,29 @@ data MermaidConfig = MermaidConfig
   , mcEntryLabel :: Text     -- Label for entry node
   , mcExitLabel :: Text      -- Label for exit node
   }
+```
+
+#### Type-Driven Usage
+
+```haskell
+-- Define your graph
+data MyGraph mode = MyGraph
+  { entry   :: mode :- Entry Input
+  , process :: mode :- LLMNode :@ Needs '[Input] :@ Schema Output
+  , exit    :: mode :- Exit Output
+  }
+  deriving Generic
+
+-- Generate Mermaid diagram
+diagram :: Text
+diagram = graphToMermaid (Proxy @MyGraph)
+-- Produces:
+-- flowchart TD
+--     entry((start))
+--     process[["process<br/>LLM"]]
+--     exit__((end))
+--     entry --> |Input| process
+--     process --> |Output| exit__
 ```
 
 #### Node Shapes
@@ -791,15 +820,22 @@ type GetGotoTargets :: forall k. [k] -> [(Symbol, Type)]
 
 This enables matching on both `[Type]` lists and `[Effect]` lists.
 
-### Why Stub for Reify.hs?
+### Polykind Resolution for Goto Reification
 
-Full type-level reification of polykinded structures into runtime data hits GHC limitations:
-- Kind inference struggles with `Effect` kind in instance heads
-- Instance overlap becomes complex with mixed kinds
+The original limitation stated that Goto targets couldn't be extracted at runtime due to polykind issues with `Effect`. The solution was found by examining how validation code handles the same problem:
 
-**Solution**: Provide data types and the `ReifyGraph` typeclass, but generate instances via Template Haskell which has access to the full type structure at splice time.
+```haskell
+-- Key insight: Apply @Effect kind explicitly to resolve ambiguity
+type GotoTargetsFromDef :: Type -> [(Symbol, Type)]
+type family GotoTargetsFromDef def where
+  GotoTargetsFromDef def = GotoTargetsFromEffects (GetUsesEffects @Effect def)
 
-Note: The `AllGotoTargetsExist` validation *does* work at compile-time by pattern matching directly on the `Eff effs` annotation, avoiding the kind inference issues that affect runtime reification.
+type HasGotoExitInDef :: Type -> Bool
+type family HasGotoExitInDef def where
+  HasGotoExitInDef def = HasGotoExitFromEffects (GetUsesEffects @Effect def)
+```
+
+This pattern (from `Generic.hs:693`) explicitly applies the `@Effect` kind, allowing GHC to resolve the polykind ambiguity. The `ReifyAnnotatedNode` instance for `LogicNode` now uses these type families to extract Goto targets and exit information at runtime.
 
 ### Why Two Edge Types?
 
@@ -1082,8 +1118,8 @@ See `tidepool-wasm/test/ExecutorSpec.hs` for comprehensive examples:
 | Tool.hs | ~150 | Unified tool definitions (ToolDef typeclass) |
 | Edges.hs | ~375 | Edge derivation type families |
 | Validate.hs | ~400 | Compile-time validation |
-| Reify.hs | ~120 | Runtime info types (stub) |
-| Mermaid.hs | ~220 | Diagram generation |
+| Reify.hs | ~560 | Runtime graph info extraction (now includes Goto target reification) |
+| Mermaid.hs | ~510 | Diagram generation (graphToMermaid, toMermaid, state/sequence diagrams) |
 | Docs.hs | ~80 | Template dependency tree documentation |
 | Example.hs | ~570 | Usage examples (type-level list + record syntax) |
 | Example/Context.hs | ~40 | Example context types (for TH staging) |

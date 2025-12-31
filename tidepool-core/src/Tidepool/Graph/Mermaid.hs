@@ -1,4 +1,8 @@
+{-# LANGUAGE AllowAmbiguousTypes #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications #-}
 
 -- | Mermaid diagram generation for Graph definitions.
 --
@@ -29,6 +33,8 @@ module Tidepool.Graph.Mermaid
   ( -- * Flowchart Generation
     toMermaid
   , toMermaidWithConfig
+  , graphToMermaid
+  , graphToMermaidWithConfig
 
     -- * State Diagram Generation
   , toStateDiagram
@@ -43,10 +49,14 @@ module Tidepool.Graph.Mermaid
   , defaultConfig
   ) where
 
+import Data.Kind (Type)
+import Data.Proxy (Proxy(..))
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Typeable (TypeRep)
+import GHC.Generics (Generic(..))
 
+import Tidepool.Graph.Generic.Core (AsGraph)
 import Tidepool.Graph.Reify
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -80,6 +90,58 @@ defaultConfig = MermaidConfig
 -- | Generate Mermaid diagram with default configuration.
 toMermaid :: GraphInfo -> Text
 toMermaid = toMermaidWithConfig defaultConfig
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- GRAPH-TO-MERMAID (TYPE-DRIVEN)
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Generate Mermaid diagram directly from a graph type.
+--
+-- This is a convenience function that combines 'makeGraphInfo' with 'toMermaid'.
+-- It extracts graph structure at compile time and generates the diagram.
+--
+-- @
+-- data SupportGraph mode = SupportGraph
+--   { sgEntry    :: mode :- Entry Message
+--   , sgClassify :: mode :- LLMNode :@ Needs '[Message] :@ Schema Intent
+--   , sgRoute    :: mode :- LogicNode :@ Needs '[Intent] :@ UsesEffects '[Goto "sgRefund" Message, Goto "sgFaq" Message]
+--   , sgRefund   :: mode :- LLMNode :@ Needs '[Message] :@ Schema Response
+--   , sgFaq      :: mode :- LLMNode :@ Needs '[Message] :@ Schema Response
+--   , sgExit     :: mode :- Exit Response
+--   }
+--   deriving Generic
+--
+-- -- Generate Mermaid diagram:
+-- mermaidOutput :: Text
+-- mermaidOutput = graphToMermaid (Proxy @SupportGraph)
+-- @
+graphToMermaid
+  :: forall (graph :: Type -> Type).
+     ( Generic (graph AsGraph)
+     , GReifyFields (Rep (graph AsGraph))
+     , ReifyMaybeType (GetEntryTypeFromGraph graph)
+     , ReifyMaybeType (GetExitTypeFromGraph graph)
+     )
+  => Proxy graph
+  -> Text
+graphToMermaid p = toMermaid (makeGraphInfo p)
+
+-- | Generate Mermaid diagram with custom configuration from a graph type.
+graphToMermaidWithConfig
+  :: forall (graph :: Type -> Type).
+     ( Generic (graph AsGraph)
+     , GReifyFields (Rep (graph AsGraph))
+     , ReifyMaybeType (GetEntryTypeFromGraph graph)
+     , ReifyMaybeType (GetExitTypeFromGraph graph)
+     )
+  => MermaidConfig
+  -> Proxy graph
+  -> Text
+graphToMermaidWithConfig config p = toMermaidWithConfig config (makeGraphInfo p)
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- FLOWCHART GENERATION
+-- ════════════════════════════════════════════════════════════════════════════
 
 -- | Generate Mermaid diagram with custom configuration.
 toMermaidWithConfig :: MermaidConfig -> GraphInfo -> Text

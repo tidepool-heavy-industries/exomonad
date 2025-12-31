@@ -5,6 +5,8 @@ import Test.Hspec
 import qualified GraphValidationSpec
 import qualified LLMNodeExecuteSpec
 import qualified MemorySerializationSpec
+import qualified MermaidSpec
+
 import qualified OneOfSpec
 import qualified InjectTargetSpec
 import qualified GotoChoiceSpec
@@ -22,6 +24,8 @@ main = hspec $ do
   describe "Memory Serialization" $ do
     MemorySerializationSpec.spec
 
+  describe "Mermaid Generation" $ do
+    MermaidSpec.spec
   describe "OneOf GADT" $ do
     OneOfSpec.spec
 

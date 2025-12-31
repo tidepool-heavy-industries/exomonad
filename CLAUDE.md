@@ -272,6 +272,8 @@ tidepool-core/             # Core library (reusable)
 │   │   ├── Schema.hs      # JSON Schema derivation (deriveSchema)
 │   │   ├── Storage.hs     # SQLite persistence for game state
 │   │   ├── Graph/         # Type-level DSL for agent graphs
+│   │   ├── Template/      # Template analysis tools
+│   │   │   └── DependencyTree.hs  # Jinja include/extends parsing, Mermaid generation
 │   │   └── GUI/           # Generic threepenny-gui components
 │   └── Delta/
 │       └── Agent.hs       # Example delta routing agent
