@@ -86,7 +86,6 @@ export function getCurrentNode(phase: ExecutionPhase): string | null {
 
 export type SerializableEffect =
   | LlmCompleteEffect
-  | HttpFetchEffect
   | LogInfoEffect
   | LogErrorEffect;
 
@@ -96,12 +95,6 @@ export interface LlmCompleteEffect {
   eff_system_prompt: string;
   eff_user_content: string;
   eff_schema: JsonSchema | null;
-}
-
-export interface HttpFetchEffect {
-  type: "HttpFetch";
-  eff_url: string;
-  eff_method: string;
 }
 
 export interface LogInfoEffect {

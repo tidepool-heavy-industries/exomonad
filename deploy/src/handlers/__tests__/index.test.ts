@@ -4,10 +4,9 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { executeEffect, type Env } from "../index.js";
-import type { SerializableEffect, LogInfoEffect, LlmCompleteEffect, HttpFetchEffect } from "../../protocol.js";
+import type { SerializableEffect, LogInfoEffect, LlmCompleteEffect } from "../../protocol.js";
 
 // Store originals
-const originalFetch = globalThis.fetch;
 const originalLog = console.log;
 const originalError = console.error;
 
@@ -28,7 +27,6 @@ describe("executeEffect", () => {
   });
 
   afterEach(() => {
-    globalThis.fetch = originalFetch;
     console.log = originalLog;
     console.error = originalError;
   });
@@ -73,27 +71,6 @@ describe("executeEffect", () => {
 
     expect(result.type).toBe("success");
     expect(env.AI.run).toHaveBeenCalled();
-  });
-
-  it("dispatches HttpFetch to http handler", async () => {
-    const effect: HttpFetchEffect = {
-      type: "HttpFetch",
-      eff_url: "https://example.com",
-      eff_method: "GET",
-    };
-    const env = createMockEnv();
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      status: 200,
-      headers: new Headers([["content-type", "text/plain"]]),
-      text: () => Promise.resolve("OK"),
-    } as unknown as Response);
-
-    const result = await executeEffect(effect, env);
-
-    expect(result).toEqual({
-      type: "success",
-      value: { status: 200, body: "OK" },
-    });
   });
 
   it("returns error for unknown effect type", async () => {

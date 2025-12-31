@@ -955,6 +955,120 @@ with ginger templates.
 **Future fix**: Custom TH that reads a field mapping, or ginger enhancement
 to check ToGVal instances instead of raw record fields.
 
+## WASM Execution (tidepool-wasm)
+
+The `tidepool-wasm` package provides a yield/resume capable effect system for
+executing graphs across FFI boundaries (e.g., WASM → TypeScript).
+
+### Why freer-simple?
+
+While `tidepool-core` uses `effectful` (ReaderT IO under the hood), WASM
+execution requires reified continuations. `freer-simple` models effects as
+data, enabling step-by-step execution:
+
+```haskell
+-- effectful: Cannot suspend mid-execution
+runPureEff :: Eff '[] a -> a
+
+-- freer-simple: Can yield and resume
+data Status effs a b r
+  = Done r                           -- Computation complete
+  | Continue a (b -> Status effs a b r)  -- Yielded, here's the continuation
+```
+
+### WasmM and Effect Execution
+
+```haskell
+-- The WASM effect monad
+type WasmM a = Eff '[Yield SerializableEffect EffectResult] a
+
+-- Smart constructors for effects
+logInfo :: Member (Yield ...) effs => Text -> Eff effs ()
+llmComplete :: Member (Yield ...) effs => Text -> Text -> Text -> Maybe Value -> Eff effs Value
+```
+
+### Handler Pattern for WASM
+
+Graph handlers return `WasmM (GotoChoice targets)`:
+
+```haskell
+-- Handler that uses effects and returns a typed transition
+computeHandler :: Int -> WasmM (GotoChoice '[To Exit Int])
+computeHandler n = do
+  logInfo $ "Computing: " <> T.pack (show n)  -- Yields to TypeScript
+  pure $ gotoExit (n + 1)                     -- Returns typed choice
+```
+
+### Manual Dispatch Pattern
+
+Since `DispatchGoto` uses effectful, WASM execution uses manual dispatch:
+
+```haskell
+runLinearGraph :: Int -> WasmM Int
+runLinearGraph input = do
+  c1 <- handler1 input
+  case c1 of
+    GotoChoice (Here n) -> do       -- First target
+      c2 <- handler2 n
+      case c2 of
+        GotoChoice (Here result) -> pure result  -- Exit
+
+-- Pattern matching on OneOf gives exact types:
+-- GotoChoice '[To "a" A, To "b" B, To Exit R]
+--   Here payload      -> payload :: A
+--   There (Here p)    -> p :: B
+--   There (There (Here r)) -> r :: R
+```
+
+### Self-Loop Pattern
+
+Self-loops require recursive dispatch:
+
+```haskell
+loopHandler :: Int -> WasmM (GotoChoice '[To Self Int, To Exit Int])
+loopHandler n
+  | n <= 0    = pure $ gotoExit n
+  | otherwise = do
+      logInfo $ "Loop: " <> T.pack (show n)
+      pure $ gotoSelf (n - 1)
+
+-- Run with manual self-loop handling
+runLoop :: Int -> WasmM Int
+runLoop n = do
+  c <- loopHandler n
+  case c of
+    GotoChoice (Here n')           -> runLoop n'  -- Self: recurse
+    GotoChoice (There (Here result)) -> pure result  -- Exit
+```
+
+### Running WasmM to Completion
+
+```haskell
+-- Initialize computation
+initializeWasm :: WasmM a -> WasmResult a
+
+-- WasmResult captures yield/resume
+data WasmResult a
+  = WasmYield SerializableEffect (EffectResult -> WasmResult a)
+  | WasmComplete a
+  | WasmError Text
+
+-- Run to completion (for testing)
+runToCompletion :: WasmResult a -> a
+runToCompletion (WasmComplete a) = a
+runToCompletion (WasmYield _ resume) = runToCompletion (resume (ResSuccess Nothing))
+runToCompletion (WasmError msg) = error $ T.unpack msg
+```
+
+### E2E Test Patterns
+
+See `tidepool-wasm/test/ExecutorSpec.hs` for comprehensive examples:
+
+- **LinearGraph**: Chaining handlers through multiple nodes
+- **BranchGraph**: Branching based on handler logic
+- **DiamondGraph**: Convergent paths with merge node
+- **LoopGraph**: Self-loops with bounded iteration
+
 ## File Inventory
 
 | File | Lines | Purpose |

@@ -14,6 +14,7 @@ library
     exposed-modules:
         Tidepool.Wasm.Effect
         Tidepool.Wasm.TestGraph
+        Tidepool.Wasm.LlmTestGraph
         Tidepool.Wasm.WireTypes
         Tidepool.Wasm.Ffi
         Tidepool.Wasm.Runner
@@ -61,9 +62,12 @@ test-suite tidepool-wasm-tests
     other-modules:
         WireTypesSpec
         TestGraphSpec
+        LlmTestGraphSpec
         ProtocolConformanceSpec
         RunnerSpec
         FfiSpec
+        E2ESpec
+        ExecutorSpec
     build-depends:
         base >= 4.17 && < 5,
         hspec >= 2.10 && < 3,

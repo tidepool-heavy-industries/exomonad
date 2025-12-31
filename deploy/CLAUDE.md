@@ -50,6 +50,25 @@ The key insight: **TypeScript is a graph-aware effect executor**. Haskell owns t
 
 ## Protocol Flow
 
+See [docs/PROTOCOL.md](docs/PROTOCOL.md) for the full WebSocket protocol specification.
+
+### Message Types
+
+**Client → Server:**
+- `init` - Start graph execution: `{ type: 'init', graphId: string, input: unknown }`
+- `resume` - Provide effect result: `{ type: 'resume', result: EffectResult }`
+- `reconnect` - Resume suspended session: `{ type: 'reconnect', sessionId: string }`
+- `ping` - Keepalive heartbeat
+
+**Server → Client:**
+- `progress` - Effect executing server-side: `{ type: 'progress', effect, status }`
+- `yield` - Effect for client handling: `{ type: 'yield', effect, sessionId }`
+- `done` - Graph completed: `{ type: 'done', result }`
+- `error` - Error occurred: `{ type: 'error', message, recoverable, sessionId? }`
+- `pong` - Keepalive response
+
+### Sequence Diagram
+
 ```
 Client                    TypeScript                    WASM (Haskell)
   │                           │                              │
@@ -57,13 +76,20 @@ Client                    TypeScript                    WASM (Haskell)
   │                           │── initialize(json) ─────────►│
   │                           │◄── StepOutput {effect} ──────│
   │                           │                              │
-  │                           │ [execute effect: LLM/log]    │
+  │◄── {progress} ────────────│ [execute effect: LLM/log]    │
   │                           │                              │
   │                           │── step(result) ─────────────►│
   │                           │◄── StepOutput {done: true} ──│
   │                           │                              │
   │◄── WS: {done: result} ────│                              │
 ```
+
+### Session Management
+
+- Sessions are stored in Durable Object storage for reconnection
+- Sessions expire after 5 minutes of inactivity
+- `sessionId` is included in `yield` and recoverable `error` messages
+- Clients can reconnect with `reconnect` message to resume from last yield point
 
 ## Effect Types
 
@@ -74,7 +100,6 @@ Currently defined in `protocol.ts`:
 | `LogInfo` | ✅ Ready | Console log |
 | `LogError` | ✅ Ready | Console error |
 | `LlmComplete` | ✅ Ready | Cloudflare AI binding |
-| `HttpFetch` | ✅ Ready | `fetch()` with timeout |
 | `Habitica` | ✅ Ready | Habitica API |
 
 ## Effect Handlers
@@ -86,7 +111,6 @@ src/handlers/
 ├── index.ts      # Registry: executeEffect() dispatches to handlers
 ├── log.ts        # LogInfo, LogError → console output
 ├── llm.ts        # LlmComplete → Cloudflare AI (@cf/meta/llama-3.3-70b-instruct-fp8-fast)
-├── http.ts       # HttpFetch → fetch() with 25s timeout
 ├── habitica.ts   # Habitica API operations
 └── __tests__/    # Vitest tests for each handler
 ```

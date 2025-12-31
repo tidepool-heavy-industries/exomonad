@@ -9,7 +9,6 @@ import type {
   SerializableEffect,
   EffectResult,
   LlmCompleteEffect,
-  HttpFetchEffect,
   LogInfoEffect,
   LogErrorEffect,
   HabiticaEffect,
@@ -18,13 +17,11 @@ import { errorResult } from "../protocol.js";
 
 import { handleLogInfo, handleLogError } from "./log.js";
 import { handleLlmComplete, type LlmEnv } from "./llm.js";
-import { handleHttpFetch } from "./http.js";
 import { handleHabitica, type HabiticaConfig } from "./habitica.js";
 
 // Re-export handlers for direct testing
 export { handleLogInfo, handleLogError } from "./log.js";
 export { handleLlmComplete } from "./llm.js";
-export { handleHttpFetch } from "./http.js";
 export { handleHabitica } from "./habitica.js";
 
 /**
@@ -55,9 +52,6 @@ export async function executeEffect(
 
       case "LlmComplete":
         return await handleLlmComplete(effect as LlmCompleteEffect, env);
-
-      case "HttpFetch":
-        return await handleHttpFetch(effect as HttpFetchEffect, env);
 
       case "Habitica": {
         const config: HabiticaConfig = {

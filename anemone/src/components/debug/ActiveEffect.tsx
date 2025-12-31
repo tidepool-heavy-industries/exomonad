@@ -2,7 +2,7 @@ import { type Component, Show, createSignal } from "solid-js";
 import { useActiveEffect } from "../../stores";
 import { Badge, eventTypeVariant } from "../shared";
 import { JsonViewer } from "../shared";
-import type { LlmCompleteEffect, HttpFetchEffect, SerializableEffect } from "../../types";
+import type { LlmCompleteEffect, SerializableEffect } from "../../types";
 
 export const ActiveEffect: Component = () => {
   const effect = useActiveEffect();
@@ -55,10 +55,6 @@ const EffectSummary: Component<{ effect: SerializableEffect }> = (props) => {
         <LlmSummary effect={props.effect as LlmCompleteEffect} />
       </Show>
 
-      <Show when={props.effect.type === "HttpFetch"}>
-        <HttpSummary effect={props.effect as HttpFetchEffect} />
-      </Show>
-
       <Show when={props.effect.type === "LogInfo" || props.effect.type === "LogError"}>
         <div class="text-sm text-text-primary">
           {(props.effect as { eff_message: string }).eff_message}
@@ -82,19 +78,6 @@ const LlmSummary: Component<{ effect: LlmCompleteEffect }> = (props) => (
     </div>
     <div class="text-xs text-text-dim mt-2 line-clamp-2">
       {props.effect.eff_system_prompt.slice(0, 100)}...
-    </div>
-  </>
-);
-
-const HttpSummary: Component<{ effect: HttpFetchEffect }> = (props) => (
-  <>
-    <div class="text-sm">
-      <span class="text-text-muted">Method: </span>
-      <span class="text-phase-active">{props.effect.eff_method}</span>
-    </div>
-    <div class="text-sm truncate">
-      <span class="text-text-muted">URL: </span>
-      <span class="text-text-primary">{props.effect.eff_url}</span>
     </div>
   </>
 );
