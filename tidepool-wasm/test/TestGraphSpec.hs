@@ -51,7 +51,9 @@ runComputeHandler n =
   let GotoChoice oneOf = runPureEff (testHandlers.compute n)
   in case oneOf of
        Here result -> result
-       -- Note: There case is impossible since OneOf '[Int] only has Here
+       -- Note: There case is impossible since OneOf '[Int] only has Here,
+       -- but we handle it explicitly to avoid incomplete pattern warnings.
+       There _     -> error "runComputeHandler: impossible - OneOf '[Int] has no There case"
 
 
 -- ════════════════════════════════════════════════════════════════════════════
