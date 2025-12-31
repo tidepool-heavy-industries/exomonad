@@ -1,6 +1,16 @@
 {# Main processing template #}
 {% include "_shared/output_format.jinja" %}
 
+{% if history %}
+## Conversation History
+
+{% for msg in history %}
+**{{ msg.role }}**: {{ msg.content }}
+
+{% endfor %}
+---
+
+{% endif %}
 You are processing the following input:
 
 {{ input }}

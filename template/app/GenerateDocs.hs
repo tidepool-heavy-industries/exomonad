@@ -3,7 +3,6 @@
 -- This generates documentation optimized for LLM consumption, including:
 -- - Graph structure (Mermaid diagram)
 -- - Node-by-node documentation with types
--- - Actual template content (resolved with includes)
 -- - Template dependency tree
 --
 -- Run with: cabal run generate-template-docs
@@ -16,12 +15,11 @@ import qualified Data.Text.IO as TIO
 import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.Encoding as TLE
 import System.Directory (createDirectoryIfMissing, doesFileExist)
-import System.FilePath (takeDirectory)
 
 import Data.Aeson.Encode.Pretty (encodePretty)
 import Tidepool.Graph.Mermaid (graphToMermaid, toSequenceDiagram, ExecutionPath(..), defaultConfig)
 import Tidepool.Graph.Reify (GraphInfo(..), NodeInfo(..), RuntimeNodeKind(..), makeGraphInfo)
-import Tidepool.Template.DependencyTree (templateTreeToMermaid, buildDependencyTree, DependencyTree(..))
+import Tidepool.Template.DependencyTree (templateTreeToMermaid)
 import Tidepool.Schema (schemaToValue, JSONSchema(..), SchemaType(..))
 import qualified Data.Map.Strict as Map
 import Data.Typeable (TypeRep)
@@ -40,12 +38,9 @@ main = do
 
   -- Generate template documentation
   hasTemplates <- doesFileExist "templates/process.jinja"
-  (templateDiagram, templateContent) <- if hasTemplates
-    then do
-      diagram <- templateTreeToMermaid "templates/process.jinja"
-      content <- resolveTemplateContent "templates/process.jinja"
-      pure (diagram, content)
-    else pure ("", "")
+  templateDiagram <- if hasTemplates
+    then templateTreeToMermaid "templates/process.jinja"
+    else pure ""
 
   let content = T.unlines $
         [ "# Agent Documentation"
@@ -69,19 +64,13 @@ main = do
            , "|------|-----|------|"
            ]
         ++ edgeDocumentation graphInfo
-        ++ if T.null templateContent then [] else
-        [ ""
-        , "## Template Content"
-        , ""
-        , "The LLM node uses this template to generate prompts:"
-        , ""
-        , "```jinja"
-        , templateContent
-        , "```"
-        ]
         ++ if T.null templateDiagram then [] else
         [ ""
-        , "## Template Dependencies"
+        , "## Templates"
+        , ""
+        , "See [`templates/process.jinja`](../templates/process.jinja) for the main prompt template."
+        , ""
+        , "### Dependencies"
         , ""
         , "```mermaid"
         , templateDiagram
@@ -186,43 +175,6 @@ formatType tr = simplifyType $ T.pack $ show tr
           _ -> s
       _ -> s
 
--- | Read a template file and resolve all includes into a single content block.
-resolveTemplateContent :: FilePath -> IO T.Text
-resolveTemplateContent path = do
-  tree <- buildDependencyTree path
-  content <- TIO.readFile path
-  -- Resolve includes inline
-  resolveIncludes (takeDirectory path) content (Map.toList tree.dtIncludes)
-
--- | Resolve {% include %} directives by inlining included content.
-resolveIncludes :: FilePath -> T.Text -> [(FilePath, [FilePath])] -> IO T.Text
-resolveIncludes _baseDir content includes = do
-  -- Simple approach: for each included file, read and inline it at the top
-  -- A more sophisticated approach would replace the include directive in place
-  includedContents <- mapM readInclude allIncludes
-  pure $ T.unlines $
-    [ "{# Resolved template with includes inlined #}"
-    , ""
-    ]
-    ++ map formatInclude (zip allIncludes includedContents)
-    ++ [ ""
-       , "{# Main template #}"
-       , content
-       ]
-  where
-    allIncludes = concatMap snd includes
-
-    readInclude :: FilePath -> IO T.Text
-    readInclude incPath = do
-      exists <- doesFileExist incPath
-      if exists
-        then TIO.readFile incPath
-        else pure $ "# File not found: " <> T.pack incPath
-
-    formatInclude :: (FilePath, T.Text) -> T.Text
-    formatInclude (incPath, incContent) =
-      "{# From " <> T.pack incPath <> " #}\n" <> T.strip incContent
-
 -- | Type Definitions section showing all graph types with their fields.
 typeDefinitionsSection :: [T.Text]
 typeDefinitionsSection =
@@ -288,6 +240,7 @@ contextMappingSection =
   , "| Context Field | Template Variable | Source |"
   , "|---------------|-------------------|--------|"
   , "| `input` | `{{ input }}` | `Input.inputText` |"
+  , "| `history` | `{{ history }}` | `ChatHistory` effect (formatted messages) |"
   , ""
   , "See [`src/Template/Context.hs`](../src/Template/Context.hs) for the full context definition."
   ]
