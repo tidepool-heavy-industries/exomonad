@@ -683,8 +683,11 @@ type family AllGotoTargetsFrom fields where
 
 -- | Extract Goto targets from a single node definition.
 --
--- Note: We fix the kind to Effect to avoid ambiguous type inference.
--- UsesEffects annotations contain effectful Effects.
+-- Note: We fix the kind to Effect explicitly via @Effect to avoid ambiguous
+-- type inference. Without this kind application, GHC cannot determine which
+-- kind to use for the polykinded GetUsesEffects family when the result isn't
+-- immediately constrained. UsesEffects annotations contain effectful Effects
+-- (kind: (Type -> Type) -> Type -> Type).
 type GotoTargetsFromDef :: Type -> [(Symbol, Type)]
 type family GotoTargetsFromDef def where
   GotoTargetsFromDef def = GotoTargetsFromEffects (GetUsesEffects @Effect def)
