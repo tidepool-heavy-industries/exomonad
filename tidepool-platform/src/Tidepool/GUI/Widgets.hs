@@ -47,7 +47,7 @@ module Tidepool.GUI.Widgets
   ) where
 
 import Control.Concurrent.STM (atomically, readTVar)
-import Control.Monad (void, when)
+import Control.Monad (void, when, unless)
 import Data.Aeson (ToJSON, encode)
 import Data.Aeson.Encode.Pretty (encodePretty)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
@@ -90,7 +90,7 @@ textInput bridge prompt = do
   let submit = do
         val <- get value inputEl
         liftIO $ TIO.hPutStrLn stderr $ "[textInput] Submit triggered, value: " <> T.pack (show val)
-        when (not (null val)) $ do
+        unless (null val) $ do
           liftIO $ TIO.hPutStrLn stderr $ "[textInput] Submitting: " <> T.pack val
           liftIO $ safeSubmitResponse bridge (TextResponse (T.pack val))
         void $ element inputEl # set value ""

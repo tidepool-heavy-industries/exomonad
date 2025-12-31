@@ -27,7 +27,7 @@ module Tidying.GUI.Widgets.Question
   , QuestionResult(..)
   ) where
 
-import Control.Monad (void, when, forM)
+import Control.Monad (void, when, unless, forM)
 import Data.Aeson (toJSON)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -133,7 +133,7 @@ renderDisposition bridge item choices fallback = do
       -- Submit custom location
       let submitOther = do
             val <- get value inputEl
-            when (not (null val)) $ do
+            unless (null val) $ do
               let answer = DispositionAnswer (PlaceAt (T.pack val))
               liftIO $ safeSubmitResponse bridge (CustomResponse (toJSON answer))
 
@@ -352,7 +352,7 @@ renderFreeText bridge prompt mPlaceholder = do
 
   let submit = do
         val <- get value inputEl
-        when (not (null val)) $ liftIO $ do
+        unless (null val) $ liftIO $ do
           safeSubmitResponse bridge (CustomResponse (toJSON (TextAnswer (T.pack val))))
 
   on UI.click submitBtn $ const submit

@@ -1,4 +1,3 @@
-{-# LANGUAGE QuasiQuotes #-}
 -- | SQLite persistence for games and chat history
 module Tidepool.Storage
   ( -- * Database Management

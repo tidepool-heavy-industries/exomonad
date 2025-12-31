@@ -44,6 +44,7 @@ module Tidying.Tools
 
 import Control.Exception (SomeException, try)
 import Control.Monad.IO.Class (liftIO)
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Aeson (Value, ToJSON(..), FromJSON(..), Result(..), object, (.=), (.:), (.:?), (.!=), withObject, fromJSON)
@@ -380,9 +381,8 @@ executeConfirmDone
   -> ConfirmDoneInput
   -> Eff es ConfirmDoneResult
 executeConfirmDone askQuestion input = do
-  let prompt = maybe
+  let prompt = fromMaybe
         ("Done for now? (" <> T.pack (show input.cdiItemsProcessed) <> " items handled)")
-        id
         input.cdiMessage
 
   result <- liftIO $ try @SomeException $ askQuestion $ Q.Confirm

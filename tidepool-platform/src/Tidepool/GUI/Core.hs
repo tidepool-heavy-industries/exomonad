@@ -342,11 +342,10 @@ setLLMActive bridge active =
 --
 -- Shows loading during the action, hides it after (even on exception).
 withLLMActive :: GUIBridge state -> IO a -> IO a
-withLLMActive bridge action =
+withLLMActive bridge =
   bracket_
     (setLLMActive bridge True)
     (setLLMActive bridge False)
-    action
 
 -- | Log a debug message
 logDebug :: GUIBridge state -> Text -> IO ()

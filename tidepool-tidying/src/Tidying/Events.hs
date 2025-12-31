@@ -1,4 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
 -- | Tidying Events
 --
 -- Events emitted during tidying sessions.

@@ -1,4 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
 -- | Tidying Agent
 --
 -- The Tidying agent owns its full lifecycle via 'tidyingRun'.
@@ -30,6 +29,7 @@ module Tidying.Agent
   , tidyingRun
   ) where
 
+import Control.Monad (unless)
 import qualified Data.Text as T
 
 import Tidepool
@@ -106,6 +106,4 @@ tidyingRun = do
           emit $ ResponseGenerated response.responseText
 
           -- Exit if session ended (quit/done/stop), otherwise continue
-          if response.responseSessionEnded
-            then pure ()
-            else loop
+          unless response.responseSessionEnded loop

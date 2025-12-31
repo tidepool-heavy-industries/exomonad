@@ -1,6 +1,5 @@
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RecordWildCards #-}
 
 -- | Tidying Loop - OODA-based tidying agent
 --
@@ -29,6 +28,7 @@ import Control.Applicative ((<|>))
 import Control.Monad (when)
 import Data.List.NonEmpty (NonEmpty(..))
 import Data.List.NonEmpty qualified as NE
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Map.Strict qualified as Map
@@ -91,7 +91,7 @@ tidyingTurn input = do
   st <- get @SessionState
 
   logDebug $ "Phase: " <> T.pack (show (phase st))
-  logDebug $ "User text: " <> maybe "(none)" id input.inputText
+  logDebug $ "User text: " <> fromMaybe "(none)" input.inputText
 
   -- OBSERVE: Analyze photos if present (stubbed for now)
   mPhotoAnalysis <- analyzePhotos input.inputPhotos
@@ -249,7 +249,7 @@ extractFromInput mPhotoAnalysis input = do
   logDebug "Calling LLM for extraction"
 
   -- Build user message with photo context if available
-  let textPart = maybe "" id input.inputText
+  let textPart = fromMaybe "" input.inputText
       photoContext = case mPhotoAnalysis of
         Nothing -> ""
         Just pa -> T.unlines
@@ -364,14 +364,14 @@ transitionPhaseData pd extract action nextPhase unsureItems = case (pd, nextPhas
   (SurveyingData mFn anchors, Surveying) ->
     SurveyingData
       (mFn <|> extract.exFunction)
-      (anchors <> maybe [] id extract.exAnchors)
+      (anchors <> fromMaybe [] extract.exAnchors)
 
   -- Surveying → Sorting: start sorting with gathered data
   (SurveyingData mFn anchors, Sorting) ->
     let fn = case mFn <|> extract.exFunction of
                Just f -> f
                Nothing -> SpaceFunction "general"  -- fallback
-        newAnchors = anchors <> maybe [] id extract.exAnchors
+        newAnchors = anchors <> fromMaybe [] extract.exAnchors
         active = ActiveState fn newAnchors
     in SortingData active (extract.exItem)
 
@@ -440,7 +440,7 @@ extractNextCategory _ = CategoryName "current"
 getActiveStateFromPhaseData :: PhaseData -> ActiveState
 getActiveStateFromPhaseData = \case
   SurveyingData mFn a ->
-    let fn = maybe (SpaceFunction "general") id mFn
+    let fn = fromMaybe (SpaceFunction "general") mFn
     in ActiveState fn a
   SortingData a _         -> a
   SplittingData a _       -> a
@@ -468,21 +468,21 @@ updatePilesFromExtract :: Piles -> Extract -> Action -> Piles
 updatePilesFromExtract p extract _action = case (extract.exIntent, extract.exChoice) of
   -- User decided to trash
   (IntentDecided, Just ChoiceTrash) ->
-    let item = maybe (ItemName "item") id extract.exItem
+    let item = fromMaybe (ItemName "item") extract.exItem
     in p { out = item : p.out }
 
   -- User decided to place/keep
   (IntentDecided, Just ChoicePlace) ->
-    let item = maybe (ItemName "item") id extract.exItem
+    let item = fromMaybe (ItemName "item") extract.exItem
     in p { belongs = item : p.belongs }
 
   (IntentDecided, Just ChoiceKeep) ->
-    let item = maybe (ItemName "item") id extract.exItem
+    let item = fromMaybe (ItemName "item") extract.exItem
     in p { belongs = item : p.belongs }
 
   -- User is unsure
   (IntentDecided, Just ChoiceUnsure) ->
-    let item = maybe (ItemName "item") id extract.exItem
+    let item = fromMaybe (ItemName "item") extract.exItem
     in p { unsure = item : p.unsure }
 
   -- Note: InstructSplit handled specially in applyStateTransitionFromExtract
