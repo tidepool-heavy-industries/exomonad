@@ -161,11 +161,11 @@ defaultCompressionConfig llmConfig = CompressionConfig
   }
 
 -- | Create a default chat history config.
--- Uses 8000 token threshold and keeps 4 recent messages.
+-- Uses 8000 token threshold and keeps 8 recent messages.
 defaultChatHistoryConfig :: LLMConfig -> ChatHistoryConfig es
 defaultChatHistoryConfig llmConfig = ChatHistoryConfig
   { chcTokenThreshold = 8000
-  , chcRecentToKeep   = 4
+  , chcRecentToKeep   = 8
   , chcCompression    = defaultCompressionConfig llmConfig
   }
 
@@ -515,6 +515,10 @@ runChatHistoryWithDB conn gameId mCursor action = do
 --
 -- The compression LLM has access to tools but NOT to ChatHistory,
 -- which prevents infinite recursion.
+--
+-- __Note__: Compression is performed synchronously within 'AppendMessages'.
+-- If the compression LLM call takes significant time (likely for API calls),
+-- this will block the caller until compression completes.
 runChatHistoryWithCompression
   :: forall es a.
      ( RequestInput :> es
@@ -628,7 +632,8 @@ runCompressionLLM config userPrompt = do
           _ -> acc) Nothing candidates
     extractSummary _ = Nothing
 
--- | Format messages for compression prompt
+-- | Format messages for compression prompt.
+-- Includes all content types to preserve context for the compressor.
 formatMessagesForCompression :: [Message] -> Text
 formatMessagesForCompression = T.intercalate "\n\n" . map formatMessage
   where
@@ -636,8 +641,17 @@ formatMessagesForCompression = T.intercalate "\n\n" . map formatMessage
       let roleLabel = case msg.role of
             User -> "USER"
             Assistant -> "ASSISTANT"
-          contentText = T.intercalate " " [t | TextBlock t <- msg.content]
+          contentText = T.intercalate " " (map formatBlock msg.content)
       in roleLabel <> ": " <> contentText
+
+    formatBlock :: ContentBlock -> Text
+    formatBlock (TextBlock t) = t
+    formatBlock (ImageBlock _) = "[IMAGE]"
+    formatBlock (ToolUseBlock tu) = "[TOOL:" <> tu.toolName <> "]"
+    formatBlock (ToolResultBlock tr) = "[TOOL_RESULT:" <> tr.toolResultContent <> "]"
+    formatBlock (ThinkingBlock tc) = "[THINKING:" <> tc.thinkingText <> "]"
+    formatBlock (RedactedThinkingBlock _) = "[REDACTED_THINKING]"
+    formatBlock (JsonBlock _) = "[JSON]"
 
 -- ══════════════════════════════════════════════════════════════
 -- LOG AND GAME RUNNERS

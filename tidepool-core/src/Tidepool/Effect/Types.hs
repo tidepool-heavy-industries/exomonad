@@ -353,27 +353,38 @@ runChatHistoryWith ref = interpret $ \_ -> \case
   AppendMessages msgs -> liftIO $ modifyIORef ref (++ msgs)
   ClearHistory -> liftIO $ writeIORef ref []
 
--- | Estimate token count for a list of messages
--- Uses character_count / 4 approximation
+-- | Roughly estimate token count for a list of messages.
+--
+-- Uses a common @character_count / 4@ heuristic as a quick approximation.
+-- This is intentionally coarse and:
+--
+--   * Is not model- or tokenizer-aware
+--   * Can be significantly off for technical content, code, or non-English text
+--   * Does not account for provider-specific image/tool token handling
+--
+-- Use this only for budgeting and back-of-the-envelope estimates,
+-- not for precise token accounting.
 estimateTokens :: [Message] -> Int
 estimateTokens msgs = sum (map estimateMessageChars msgs) `div` 4
 
--- | Estimate character count for a single message
+-- | Estimate character count for a single message.
+-- This is a rough estimate for use with 'estimateTokens'.
 estimateMessageChars :: Message -> Int
 estimateMessageChars msg = sum (map estimateBlockChars msg.content)
 
--- | Estimate character count for a content block
+-- | Estimate character count for a content block.
+-- All estimates are approximate and may under- or over-estimate true token usage.
 estimateBlockChars :: ContentBlock -> Int
 estimateBlockChars = \case
   TextBlock t -> T.length t
-  ImageBlock _ -> 1000  -- Images have separate token accounting; rough placeholder
+  ImageBlock _ -> 1000  -- Rough placeholder; actual image tokens vary by provider
   ToolUseBlock tu -> T.length tu.toolName + estimateValueChars tu.toolInput
   ToolResultBlock tr -> T.length tr.toolResultContent
   ThinkingBlock tc -> T.length tc.thinkingText
-  RedactedThinkingBlock _ -> 100  -- Encrypted, unknown size
+  RedactedThinkingBlock _ -> 100  -- Encrypted/hidden; arbitrary rough estimate
   JsonBlock v -> estimateValueChars v
 
--- | Estimate characters in a JSON value
+-- | Estimate characters in a JSON value via its encoded length.
 estimateValueChars :: Value -> Int
 estimateValueChars = fromIntegral . LBS.length . encode
 
