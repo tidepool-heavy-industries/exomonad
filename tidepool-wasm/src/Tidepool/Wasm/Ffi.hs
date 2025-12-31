@@ -45,7 +45,7 @@ import Tidepool.Wasm.WireTypes
   ( EffectResult(..)
   , ExecutionPhase(..)
   , GraphState(..)
-  , StepOutput(..)
+  , StepOutput(..)  -- StepYield, StepDone, StepFailed
   )
 import Tidepool.Graph.Goto (GotoChoice(..), OneOf(..), To)
 import Tidepool.Graph.Types (Exit)
@@ -95,7 +95,7 @@ foreign export javascript "getGraphState" getGraphState :: IO JSString
 -- | Existential wrapper for the continuation.
 --
 -- The continuation's result type varies by graph, so we wrap it existentially.
--- The 'resultHandler' extracts the final value as JSON.
+-- The 'toOutput' function converts the final value to StepOutput.
 data SomeContinuation where
   SomeCont
     :: (EffectResult -> WasmResult a)  -- The continuation
@@ -133,12 +133,7 @@ encodeStepOutput = TL.toStrict . TLE.decodeUtf8 . encode
 
 -- | Create error StepOutput.
 mkErrorOutput :: Text -> StepOutput
-mkErrorOutput msg = StepOutput
-  { soEffect = Nothing
-  , soDone = True
-  , soStepResult = Nothing
-  , soGraphState = GraphState (PhaseFailed msg) []
-  }
+mkErrorOutput msg = StepFailed msg (GraphState (PhaseFailed msg) [])
 
 -- | Node name for TestGraph's compute node.
 testGraphNodeName :: Text
@@ -146,18 +141,18 @@ testGraphNodeName = "compute"
 
 -- | Convert a GotoChoice result to StepOutput.
 --
--- For TestGraph: GotoChoice '[To Exit Int] extracts the Int.
-gotoChoiceToOutput :: GotoChoice '[Tidepool.Graph.Goto.To Tidepool.Graph.Types.Exit Int] -> StepOutput
-gotoChoiceToOutput (GotoChoice (Here result)) = StepOutput
-  { soEffect = Nothing
-  , soDone = True
-  , soStepResult = Just (toJSON result)
-  , soGraphState = GraphState (PhaseCompleted (toJSON result)) [testGraphNodeName]
-  }
+-- Note: This is specialized to TestGraph's result type. For other graphs,
+-- you would need additional converters or a more generic approach.
+gotoChoiceToOutput :: GotoChoice '[To Exit Int] -> StepOutput
+gotoChoiceToOutput (GotoChoice (Here result)) =
+  let resultVal = toJSON result
+  in StepDone resultVal (GraphState (PhaseCompleted resultVal) [testGraphNodeName])
 
 -- | Convert WasmResult to StepOutput, storing continuation if yielded.
+--
+-- Note: Specialized to TestGraph's result type.
 wasmResultToOutput
-  :: WasmResult (GotoChoice '[Tidepool.Graph.Goto.To Tidepool.Graph.Types.Exit Int])
+  :: WasmResult (GotoChoice '[To Exit Int])
   -> IO StepOutput
 wasmResultToOutput (WasmComplete choice) = do
   writeIORef globalState Idle
@@ -166,12 +161,7 @@ wasmResultToOutput (WasmComplete choice) = do
 wasmResultToOutput (WasmYield eff resume) = do
   let phase = PhaseInNode testGraphNodeName
   writeIORef globalState (Waiting (SomeCont resume gotoChoiceToOutput) phase)
-  pure StepOutput
-    { soEffect = Just eff
-    , soDone = False
-    , soStepResult = Nothing
-    , soGraphState = GraphState phase []
-    }
+  pure $ StepYield eff (GraphState phase [])
 
 wasmResultToOutput (WasmError msg) = do
   writeIORef globalState Idle
@@ -249,12 +239,7 @@ wasmResultToOutputGeneric (WasmComplete a) toOutput = do
 wasmResultToOutputGeneric (WasmYield eff resume) toOutput = do
   let phase = PhaseInNode testGraphNodeName
   writeIORef globalState (Waiting (SomeCont resume toOutput) phase)
-  pure StepOutput
-    { soEffect = Just eff
-    , soDone = False
-    , soStepResult = Nothing
-    , soGraphState = GraphState phase []
-    }
+  pure $ StepYield eff (GraphState phase [])
 
 wasmResultToOutputGeneric (WasmError msg) _toOutput = do
   writeIORef globalState Idle

@@ -93,6 +93,20 @@ resumeCycleSpec = describe "resuming with EffectResult" $ do
           _ -> expectationFailure "Expected WasmComplete with result"
       _ -> expectationFailure "Expected initial WasmYield"
 
+  -- Note: ResError handling in current implementation ignores errors for Log effects.
+  -- The handler doesn't distinguish success/error for effects that don't return values.
+  -- This test documents current behavior - Log effects succeed regardless of ResError.
+  it "Log effects continue on ResError (current behavior)" $ do
+    let result = initializeWasm (computeHandlerWasm 5)
+    case result of
+      WasmYield _ resume ->
+        -- Even with ResError, the computation continues because logInfo ignores the result
+        case resume (ResError "simulated failure") of
+          WasmComplete (GotoChoice (Here n)) ->
+            n `shouldBe` 6
+          _ -> expectationFailure "Expected WasmComplete despite error"
+      _ -> expectationFailure "Expected initial WasmYield"
+
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Full Cycle (integration)
