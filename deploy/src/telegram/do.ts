@@ -18,7 +18,7 @@ import {
   isAllowedUser,
   updateToIncomingMessage,
 } from "./types.js";
-import { sendMessage, sendTypingAction, answerCallbackQuery } from "./api.js";
+import { sendMessage, sendTypingAction, answerCallbackQuery, sendPhoto, sendDocument } from "./api.js";
 import type {
   TelegramIncomingMessage,
   SerializableEffect,
@@ -288,6 +288,7 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
 
   /**
    * Echo mode for testing (when no WASM session is active).
+   * Echoes back the same type of message: text, photo, document, or button click.
    */
   private async handleEchoMode(
     chatId: number,
@@ -295,25 +296,56 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
   ): Promise<void> {
     await sendTypingAction(this.env.TELEGRAM_TOKEN, chatId);
 
-    let responseText: string;
+    let result: { message_id: number } | null = null;
+
     switch (message.type) {
       case "text":
-        responseText = `Echo: ${message.text}`;
+        result = await sendMessage(
+          this.env.TELEGRAM_TOKEN,
+          chatId,
+          `Echo: ${message.text}`
+        );
         break;
-      case "button_click":
-        responseText = `Button clicked: ${JSON.stringify(message.data)}`;
-        break;
+
       case "photo":
-        responseText = `Received photo${message.caption ? `: ${message.caption}` : ""}`;
+        // Echo back the same photo with an "Echo:" caption
+        result = await sendPhoto(
+          this.env.TELEGRAM_TOKEN,
+          chatId,
+          message.media,
+          message.caption ? `Echo: ${message.caption}` : "Echo!"
+        );
         break;
+
       case "document":
-        responseText = `Received document: ${message.filename}`;
+        // Echo back the same document
+        result = await sendDocument(
+          this.env.TELEGRAM_TOKEN,
+          chatId,
+          message.media,
+          `Echo: ${message.filename}`
+        );
         break;
-      default:
-        responseText = "Received unknown message type";
+
+      case "button_click":
+        result = await sendMessage(
+          this.env.TELEGRAM_TOKEN,
+          chatId,
+          `Button clicked: ${JSON.stringify(message.data)}`
+        );
+        break;
+
+      default: {
+        const _exhaustive: never = message;
+        console.error("[TelegramDO] Unknown message type:", _exhaustive);
+        result = await sendMessage(
+          this.env.TELEGRAM_TOKEN,
+          chatId,
+          "Received unknown message type"
+        );
+      }
     }
 
-    const result = await sendMessage(this.env.TELEGRAM_TOKEN, chatId, responseText);
     if (result) {
       console.log(`[TelegramDO] Sent echo response, message_id: ${result.message_id}`);
     }
