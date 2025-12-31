@@ -5,6 +5,7 @@ import Test.Hspec
 import qualified WireTypesSpec
 import qualified TestGraphSpec
 import qualified ProtocolConformanceSpec
+import qualified RunnerSpec
 
 main :: IO ()
 main = hspec $ do
@@ -12,3 +13,4 @@ main = hspec $ do
     describe "WireTypes" WireTypesSpec.spec
     describe "TestGraph" TestGraphSpec.spec
     describe "ProtocolConformance" ProtocolConformanceSpec.spec
+    describe "Runner" RunnerSpec.spec
