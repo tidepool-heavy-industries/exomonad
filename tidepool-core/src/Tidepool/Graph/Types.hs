@@ -32,6 +32,7 @@ module Tidepool.Graph.Types
     Graph
   , Entry
   , Exit
+  , Self
   , type (:~>)
   , type (:<~)
 
@@ -85,6 +86,10 @@ data Entry
 -- | Exit point marker. Used with ':<~' to declare the graph's output type.
 -- Also used as a 'Goto' target: @Goto Exit ResultType@.
 data Exit
+
+-- | Self-loop marker for transitions back to the current node.
+-- Used for retry/continuation patterns: @Goto Self UpdatedState@.
+data Self
 
 -- | Entry point declaration. @Entry :~> InputType@ declares that the graph
 -- accepts @InputType@ as input.
