@@ -277,23 +277,28 @@ data QuestionUI :: Effect where
 type QuestionHandler = Question -> IO Answer
 ```
 
-## Project Structure
+## Project Structure (Monorepo)
 
 ```
-src/
-├── Tidepool/              # Core library (reusable)
-│   ├── Effect.hs          # LLM, RequestInput, State, Emit, Random, Time effects
-│   ├── Template.hs        # TypedTemplate, Template (jinja + schema + tools)
-│   ├── Tool.hs            # Tool typeclass, ToolList GADT
-│   ├── Schema.hs          # JSON Schema derivation (deriveSchema)
-│   ├── Storage.hs         # SQLite persistence for game state
-│   └── GUI/               # Generic threepenny-gui components
-│       ├── Core.hs        # GUIBridge, PendingRequest, safeSubmitResponse
-│       ├── Handler.hs     # makeGUIHandler, guiDice
-│       ├── Server.hs      # startServer, threepenny config
-│       ├── Theme.hs       # Theme type, ColorPalette, CSS generation
-│       └── Widgets.hs     # textInput, choiceCards, narrativePane, debugPanel
-├── DM/                    # DM agent (Blades in the Dark)
+tidepool-core/             # Core library (reusable)
+├── src/
+│   ├── Tidepool.hs        # Re-exports
+│   ├── Tidepool/
+│   │   ├── Effect.hs      # LLM, RequestInput, State, Emit, Random, Time effects
+│   │   ├── Template.hs    # TypedTemplate, Template (jinja + schema + tools)
+│   │   ├── Tool.hs        # Tool typeclass, ToolList GADT
+│   │   ├── Schema.hs      # JSON Schema derivation (deriveSchema)
+│   │   ├── Storage.hs     # SQLite persistence for game state
+│   │   ├── Graph/         # Type-level DSL for agent graphs
+│   │   └── GUI/           # Generic threepenny-gui components
+│   └── Delta/
+│       └── Agent.hs       # Example delta routing agent
+├── docs/                  # Core library documentation
+├── templates/             # Example templates
+└── test/                  # Graph validation tests
+
+tidepool-dm/               # DM agent (Blades in the Dark)
+├── src/DM/
 │   ├── State.hs           # WorldState, PlayerState, dice mechanics, factions
 │   ├── Output.hs          # TurnOutput with delta fields, applyTurnOutput
 │   ├── Tools.hs           # ThinkAsDM, SpeakAsNPC, AskPlayer, Choose
@@ -301,31 +306,30 @@ src/
 │   ├── Templates.hs       # dmTurnTemplate, compressionTemplate
 │   ├── Loop.hs            # dmTurn, handleDiceSelection, runDMGame
 │   └── GUI/               # DM-specific GUI (noir aesthetic)
-│       ├── App.hs         # Main layout, polling loop, widget wiring
-│       ├── Theme.hs       # Dark noir theme, tier colors
-│       └── Widgets/       # Stats, Mood, Clocks, History, Narrative, Dice
-└── Tidying/               # Tidying agent (executive function prosthetic)
-    ├── Agent.hs           # Agent definition, TidyingM monad
-    ├── State.hs           # SessionState, Phase, Piles, Photo
-    ├── Loop.hs            # OODA loop: tidyingTurn, photo analysis, extraction
-    ├── Decide.hs          # Pure routing: (State, Extract) → (Action, Phase)
-    ├── Action.hs          # Action ADT (InstructTrash, InstructPlace, etc.)
-    ├── Tools.hs           # ProposeDisposition, AskSpaceFunction, ConfirmDone
-    ├── Question.hs        # Question DSL for mid-turn user interaction
-    ├── Events.hs          # TidyingEvent for GUI updates
-    ├── Context.hs         # TidyingContext for template rendering
-    ├── Output.hs          # Extract, PhotoAnalysisOutput schemas
-    ├── Templates.hs       # Prompt templates for LLM calls
-    └── GUI/               # Tidying-specific GUI (calm aesthetic)
-        ├── App.hs         # Main layout, chat interface
-        ├── Runner.hs      # Effect stack wiring, QuestionHandler
-        ├── Theme.hs       # Light calming theme
-        └── Widgets/       # Chat, Input, PhotoUpload, Question
-app/
-├── Main.hs                # DM CLI entry point
-├── MainGUI.hs             # DM GUI entry point
-├── MainTidyGUI.hs         # Tidying GUI entry point
-└── TestTidying.hs         # Tidying test harness
+├── app/
+│   ├── Main.hs            # CLI entry point
+│   ├── MainGUI.hs         # GUI entry point
+│   └── TestSchema.hs      # Schema test
+├── docs/                  # DM-specific docs
+└── templates/             # DM prompt templates (jinja/mustache)
+
+tidepool-tidying/          # Tidying agent (executive function prosthetic)
+├── src/Tidying/
+│   ├── Agent.hs           # Agent definition, TidyingM monad
+│   ├── State.hs           # SessionState, Phase, Piles, Photo
+│   ├── Loop.hs            # OODA loop: tidyingTurn, photo analysis, extraction
+│   ├── Decide.hs          # Pure routing: (State, Extract) → (Action, Phase)
+│   ├── Action.hs          # Action ADT (InstructTrash, InstructPlace, etc.)
+│   ├── Tools.hs           # ProposeDisposition, AskSpaceFunction, ConfirmDone
+│   └── GUI/               # Tidying-specific GUI (calm aesthetic)
+├── app/
+│   ├── MainTidyGUI.hs     # GUI entry point
+│   └── TestTidying.hs     # Test harness
+└── templates/tidying/     # Tidying prompt templates
+
+deploy/                    # Cloudflare Worker Durable Object harness
+├── src/                   # TypeScript harness for WASM state machines
+└── wrangler.toml          # CF Worker configuration
 ```
 
 ## Key Types
@@ -397,7 +401,8 @@ data PlayerDeltas = PlayerDeltas
 ## Running
 
 ```bash
-cabal build                # Succeeds
+# Build all packages
+cabal build all
 
 # DM Agent
 cabal run tidepool-dm      # CLI mode (hits TODO errors)
@@ -406,6 +411,11 @@ cabal run tidepool-dm-gui  # GUI mode (opens browser at localhost:8023)
 # Tidying Agent
 cabal run tidepool-tidy-gui  # GUI mode (opens browser at localhost:8024)
                              # Requires ANTHROPIC_API_KEY env var
+
+# Tests
+cabal run test-llm         # LLM integration test (tidepool-core)
+cabal run test-schema      # Schema derivation test (tidepool-dm)
+cabal test all             # Run all test suites
 ```
 
 ## Next Steps
