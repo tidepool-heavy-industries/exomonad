@@ -42,6 +42,7 @@ import Tidepool.Graph.Validate.RecordStructure
   , UnreachableFieldError
   , NoExitPathFieldError
   , DeadGotoFieldError
+  , FormatTypeList
   )
 
 -- Create type family wrappers for backward compatibility
@@ -108,13 +109,6 @@ type UnsatisfiedNeedErrorWithContext nodeName needType available = TypeError
    ':$$: 'Text "  2. Change Entry to provide this type"
    ':$$: 'Text "  3. Remove " ':<>: 'ShowType needType ':<>: 'Text " from this node's Needs"
   )
-
--- | Format a list of types for display in error messages.
-type FormatTypeList :: [Type] -> ErrorMessage
-type family FormatTypeList ts where
-  FormatTypeList '[] = 'Text "  (none)"
-  FormatTypeList '[t] = 'Text "  • " ':<>: 'ShowType t
-  FormatTypeList (t ': rest) = 'Text "  • " ':<>: 'ShowType t ':$$: FormatTypeList rest
 
 -- | Error when a Goto target doesn't exist.
 type InvalidGotoTargetError :: Symbol -> Symbol -> Constraint
