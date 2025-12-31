@@ -74,7 +74,7 @@ spec = do
         [ "Graph validation failed: unsatisfied dependency"
         , "Node 'process' needs type:"
         , "Intent"
-        , "But no node provides"
+        , "Available types"
         ]
 
     it "multiple unsatisfied Needs produces error" $ do
