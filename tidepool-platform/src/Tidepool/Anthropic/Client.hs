@@ -14,7 +14,7 @@ module Tidepool.Anthropic.Client
   , SingleCallResponse(..)
   , callMessagesOnce
 
-    -- * Re-exports from Http layer
+    -- * Re-exports from Types
   , StopReason(..)
   , ToolUse(..)
   , Message(..)
@@ -30,11 +30,13 @@ module Tidepool.Anthropic.Client
   ) where
 
 import Tidepool.Anthropic.Http
+  ( callMessages
+  )
+import Tidepool.Anthropic.Types
   ( MessagesRequest(..), MessagesResponse(..), Message(..), Role(..)
   , ContentBlock(..), ImageSource(..), ToolUse(..), ToolResult(..), ToolChoice(..)
   , OutputFormat(..), ThinkingConfig(..), ThinkingContent(..), RedactedThinking(..)
   , StopReason(..), ApiError(..)
-  , callMessages
   )
 
 import Data.Aeson

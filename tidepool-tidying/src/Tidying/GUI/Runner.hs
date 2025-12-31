@@ -33,15 +33,14 @@ import Tidepool.Effect
   , runTime
   , runEmit
   , runChatHistory
-  , runLogWithBridge
   , runRequestInput
-  , runLLMWithToolsHooked
   , runQuestionUI
   , QuestionHandler
   , LLMConfig(..)
   , LLMHooks(..)
   , LogLevel(..)
   )
+import Tidepool.Effect.Runners (runLLMWithToolsHooked, runLogWithBridge)
 import Tidepool.GUI.Core
   ( GUIBridge(..)
   , PendingRequest(..)

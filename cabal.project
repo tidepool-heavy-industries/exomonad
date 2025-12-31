@@ -1,5 +1,6 @@
 packages:
     tidepool-core
+    tidepool-platform
     tidepool-dm
     tidepool-tidying
     tidepool-wasm

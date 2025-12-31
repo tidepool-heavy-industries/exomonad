@@ -23,8 +23,7 @@ module Delta.Agent
   , DeltaExtra
   , DeltaEvent(..)
 
-    -- * Running the Agent (legacy)
-  , runDeltaAgent
+    -- * Configuration (for platform runners)
   , DeltaAgentConfig(..)
   , defaultConfig
 
@@ -36,6 +35,12 @@ module Delta.Agent
 
     -- * Effect Stack
   , AgentEffects
+
+    -- * Loop (for custom runners)
+  , deltaLoop
+  , DeltaConfig(..)
+  , buildClassifyPrompt
+  , buildFeedbackPrompt
   ) where
 
 import Data.Text (Text)
@@ -397,66 +402,11 @@ buildFeedbackPrompt proposal = T.unlines
       <> maybe "" (\c -> " (needs: " <> c <> ")") item.piNeedsClarify
 
 -- ══════════════════════════════════════════════════════════════
--- RUNNING THE AGENT
+-- DELTA LOOP (pure, for use with platform runners)
 -- ══════════════════════════════════════════════════════════════
 
--- | Run the delta agent with the given configuration
-runDeltaAgent :: DeltaAgentConfig -> IO ()
-runDeltaAgent config = do
-  let destinations =
-        [ groceriesDestination config.dacGroceryTodo
-        , calendarDestination
-        , knowledgeDestination
-        , devIdeasDestination config.dacDefaultRepo
-        ]
-
-      deltaConfig = DeltaConfig
-        { dcDestinations = destinations
-        , dcClassifyPrompt = buildClassifyPrompt
-        , dcFeedbackPrompt = buildFeedbackPrompt
-        , dcClassifySchema = proposalSchema
-        , dcFeedbackSchema = feedbackSchema
-        }
-
-      inputHandler = InputHandler
-        { ihChoice = \prompt choices -> do
-            putStrLn $ T.unpack prompt
-            mapM_ (\(i, (label, _)) -> putStrLn $ show i <> ". " <> T.unpack label)
-              (zip [1 :: Int ..] choices)
-            idx <- readLn
-            pure $ snd (choices !! (idx - 1))
-        , ihText = \prompt -> do
-            putStrLn $ T.unpack prompt
-            T.pack <$> getLine
-        , ihTextWithPhoto = \prompt -> do
-            putStrLn $ T.unpack prompt
-            txt <- T.pack <$> getLine
-            pure (txt, [])  -- CLI: no photos
-        , ihDice = \_ _ -> error "Dice not used in delta agent"
-        , ihCustom = \tag _ -> error $ "Custom request '" <> T.unpack tag <> "' not used in delta agent"
-        }
-
-      displayProposal :: Proposal -> Eff AgentEffects ()
-      displayProposal proposal = do
-        logInfo "Proposing:"
-        forM_ proposal.propItems $ \item -> do
-          let clarify = maybe "" (\c -> " (needs: " <> c <> ")") item.piNeedsClarify
-          logInfo $ "  " <> item.piEntity <> " → " <> item.piDestination <> clarify
-
-  -- Run the main loop
-  -- Order must match AgentEffects type (innermost effect = innermost runner)
-  -- Log comes after stubs because stub runners require Log :> es
-  runEff
-    . runLog config.dacLogLevel
-    . runCalendarStub
-    . runGitHubStub
-    . runObsidianStub
-    . runHabiticaStub
-    . runChatHistory
-    . runRequestInput inputHandler
-    . fmap fst . runState emptyContext
-    . runLLM config.dacLLMConfig
-    $ deltaLoop deltaConfig displayProposal
+-- Note: runDeltaAgent moved to tidepool-platform where it can use runLLM.
+-- Use deltaLoop with your own effect interpreter stack.
 
 -- | The main delta loop
 deltaLoop

@@ -59,7 +59,8 @@ import qualified DM.CharacterCreation as CC
 
 import Tidepool.GUI.Core (GUIBridge(..), PendingRequest(..),
                           updateState, addNarrative, setLLMActive, setSuggestedActions)
-import Tidepool.Effect (LLMHooks(..), runLLMWithToolsHooked, runTime)
+import Tidepool.Effect (LLMHooks(..), runTime)
+import Tidepool.Effect.Runners (runLLMWithToolsHooked, runLLMWithTools, runLogWithBridge, runChatHistoryWithDB, RunnerEffects)
 import qualified Tidepool.GUI.Core as GUI (logInfo)
 import Tidepool.GUI.Handler (makeGUIHandler)
 import Tidepool.Anthropic.Http (Message(..), ContentBlock(..), Role(..))

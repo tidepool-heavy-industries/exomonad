@@ -26,7 +26,7 @@ module Tidepool.Storage
   , updateCompression
   ) where
 
-import Tidepool.Anthropic.Http (Message(..), Role(..))
+import Tidepool.Anthropic.Types (Message(..), Role(..))
 
 import Database.SQLite.Simple
 import Database.SQLite.Simple.FromField
