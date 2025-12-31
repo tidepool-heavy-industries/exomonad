@@ -22,6 +22,7 @@ The key insight: **TypeScript is a graph-aware effect executor**. Haskell owns t
 | `loader.ts` | ✅ Complete | WASM loader with GHC RTS + JSFFI setup |
 | `jsffi.ts` | ✅ Complete | JavaScript FFI for GHC WASM |
 | `tidepool.wasm.d.ts` | ✅ Stub | TypeScript declaration for WASM exports |
+| `handlers/` | ✅ Complete | Effect handler registry with tests |
 
 **WASM blob: Missing** - Needs `tidepool-wasm` compiled with `wasm32-wasi-ghc`.
 
@@ -73,7 +74,49 @@ Currently defined in `protocol.ts`:
 | `LogInfo` | ✅ Ready | Console log |
 | `LogError` | ✅ Ready | Console error |
 | `LlmComplete` | ✅ Ready | Cloudflare AI binding |
-| `HttpFetch` | ✅ Ready | `fetch()` |
+| `HttpFetch` | ✅ Ready | `fetch()` with timeout |
+| `Habitica` | ✅ Ready | Habitica API |
+
+## Effect Handlers
+
+Effect handlers are implemented in `src/handlers/`:
+
+```
+src/handlers/
+├── index.ts      # Registry: executeEffect() dispatches to handlers
+├── log.ts        # LogInfo, LogError → console output
+├── llm.ts        # LlmComplete → Cloudflare AI (@cf/meta/llama-3.3-70b-instruct-fp8-fast)
+├── http.ts       # HttpFetch → fetch() with 25s timeout
+├── habitica.ts   # Habitica API operations
+└── __tests__/    # Vitest tests for each handler
+```
+
+### Handler Interface
+
+All handlers follow this pattern:
+
+```typescript
+async function handleEffect(effect: EffectType, env?: Env): Promise<EffectResult>
+```
+
+Results are always `{ type: "success", value: T }` or `{ type: "error", message: string }`.
+
+### Error Handling
+
+Handlers return typed errors rather than throwing:
+- **Rate limits**: `LLM rate limited: ...`
+- **Timeouts**: `HTTP timeout after 25000ms: ...`
+- **Network errors**: `HTTP network error: ...`
+- **Unknown effects**: `Unknown effect type: ...`
+
+The `executeEffect()` wrapper catches any uncaught exceptions and converts them to error results.
+
+### Adding a New Handler
+
+1. Create `src/handlers/myeffect.ts` with handler function
+2. Add effect type to `protocol.ts` (must match Haskell side)
+3. Add case to `executeEffect()` in `src/handlers/index.ts`
+4. Add tests in `src/handlers/__tests__/myeffect.test.ts`
 
 ## Running
 
@@ -82,6 +125,7 @@ cd deploy
 pnpm install
 pnpm dev          # Local dev server (needs WASM blob)
 pnpm typecheck    # Type check
+pnpm test         # Run vitest tests
 pnpm lint         # ESLint
 pnpm deploy       # Deploy to Cloudflare
 ```
