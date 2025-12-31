@@ -12,25 +12,22 @@ import type {
   LogInfoEffect,
   LogErrorEffect,
   HabiticaEffect,
-  TelegramSendEffect,
 } from "../protocol.js";
 import { errorResult } from "../protocol.js";
 
 import { handleLogInfo, handleLogError } from "./log.js";
 import { handleLlmComplete, type LlmEnv } from "./llm.js";
 import { handleHabitica, type HabiticaConfig } from "./habitica.js";
-import { handleTelegramSend, type TelegramHandlerEnv } from "./telegram.js";
 
 // Re-export handlers for direct testing
 export { handleLogInfo, handleLogError } from "./log.js";
 export { handleLlmComplete } from "./llm.js";
 export { handleHabitica } from "./habitica.js";
-export { handleTelegramSend } from "./telegram.js";
 
 /**
  * Environment interface with all required bindings.
  */
-export interface Env extends LlmEnv, TelegramHandlerEnv {
+export interface Env extends LlmEnv {
   HABITICA_USER_ID: string;
   HABITICA_API_TOKEN: string;
 }
@@ -63,9 +60,6 @@ export async function executeEffect(
         };
         return await handleHabitica(effect as HabiticaEffect, config);
       }
-
-      case "TelegramSend":
-        return await handleTelegramSend(effect as TelegramSendEffect, env);
 
       default:
         return errorResult(`Unknown effect type: ${(effect as { type: string }).type}`);

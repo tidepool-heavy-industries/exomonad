@@ -143,8 +143,7 @@ export type SerializableEffect =
   | LlmCompleteEffect
   | LogInfoEffect
   | LogErrorEffect
-  | HabiticaEffect
-  | TelegramSendEffect;
+  | HabiticaEffect;
 
 /**
  * LLM completion request - matches Haskell EffLlmComplete.
@@ -188,21 +187,6 @@ export interface HabiticaEffect {
   eff_hab_op: string;
   /** Operation-specific payload (JSON) */
   eff_hab_payload: unknown;
-}
-
-/**
- * Send a message via Telegram Bot API.
- * Ready for WASM state machines to yield when they need to send messages.
- * Note: The current echo bot in TelegramDO calls sendMessage directly.
- */
-export interface TelegramSendEffect {
-  type: "TelegramSend";
-  /** Target chat ID */
-  eff_chat_id: number;
-  /** Message text */
-  eff_text: string;
-  /** Optional parse mode for formatting */
-  eff_parse_mode?: "HTML" | "Markdown";
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
