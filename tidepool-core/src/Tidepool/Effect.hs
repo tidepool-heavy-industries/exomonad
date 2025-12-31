@@ -116,10 +116,48 @@ import Tidepool.Anthropic.Client
 -- collision with Tidepool.Effect.ToolResult
 import Tidepool.Anthropic.Http (ThinkingContent(..))
 import qualified Tidepool.GUI.Core as GUICore
-import Tidying.Question (Question(..), Answer(..), ItemDisposition(..))
 import Tidepool.GUI.Core (GUIBridge)
 import qualified Tidepool.Storage as Storage
 import Database.SQLite.Simple (Connection)
+
+-- TODO: These types should be moved to tidepool-core or a shared package
+-- For now, we define stubs here to avoid a cross-package dependency
+-- The real types are in Tidying.Question in tidepool-tidying
+
+-- | Stub Question type for the QuestionUI effect.
+-- The real implementation is in tidepool-tidying.
+data Question
+  = ProposeDisposition Text [Choice] (Maybe Text)
+  | Confirm Text Bool
+  | Choose Text Text [ChoiceOption]
+  | FreeText Text (Maybe Text)
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+
+-- | Stub Choice type
+data Choice = Choice { choiceLabel :: Text, choiceValue :: ItemDisposition }
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+
+-- | Stub ChoiceOption type
+data ChoiceOption = ChoiceOption { optionLabel :: Text, optionValue :: Text }
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+
+-- | Stub ItemDisposition type
+data ItemDisposition
+  = PlaceAt Text
+  | Trash
+  | Donate
+  | Recycle
+  | SkipForNow
+  | NeedMoreInfo
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+
+-- | Stub Answer type
+data Answer
+  = DispositionAnswer ItemDisposition
+  | ConfirmAnswer Bool
+  | ChoiceAnswer Text
+  | TextAnswer Text
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
 -- | The effect stack for runners (interpreters).
 --

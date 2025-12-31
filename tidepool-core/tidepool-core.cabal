@@ -33,9 +33,12 @@ library
         Tidepool.Graph
         Tidepool.Graph.Types
         Tidepool.Graph.Generic
+        Tidepool.Graph.Generic.Core
         Tidepool.Graph.Goto
         Tidepool.Graph.Edges
         Tidepool.Graph.Validate
+        Tidepool.Graph.Validate.Structure
+        Tidepool.Graph.Validate.RecordStructure
         Tidepool.Graph.Reify
         Tidepool.Graph.Mermaid
         Tidepool.Graph.TH

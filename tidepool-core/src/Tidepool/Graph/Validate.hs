@@ -15,7 +15,9 @@
 --    by Entry or by some node's 'Schema' or 'Goto'
 -- 4. __Goto Targets Valid__: Every 'Goto' target must reference an existing
 --    node name or 'Exit'
--- 5. __No Orphans__: Every node must be reachable from Entry
+-- 5. __Reachability__: Every node must be reachable from Entry
+-- 6. __Exit Coverage__: Every Logic node must have a path to Exit
+-- 7. __No Dead Gotos__: Every Goto target must be able to receive its payload
 --
 -- = Usage
 --
@@ -41,6 +43,11 @@ module Tidepool.Graph.Validate
   , NeedsSatisfied
   , GotoTargetExists
 
+    -- * Structural Validation Constraints
+  , AllNodesReachable
+  , AllLogicNodesReachExit
+  , NoDeadGotos
+
     -- * Error Messages
   , MissingEntryError
   , MissingExitError
@@ -54,6 +61,11 @@ module Tidepool.Graph.Validate
     -- * Error Formatting Helpers
   , FormatTypeList
   , FormatSymbolList
+
+    -- * Structural Error Messages
+  , UnreachableNodeError
+  , NoExitPathError
+  , DeadGotoError
   ) where
 
 import Data.Kind (Type, Constraint)
@@ -63,6 +75,14 @@ import Tidepool.Graph.Types
 import Tidepool.Graph.Edges (GetNeeds, GetSchema, GetTools, GetMemory, GetEntryType, GetGotoTargets)
 import Tidepool.Graph.Tool (AllToolsValid)
 import Tidepool.Schema (ValidStructuredOutput)
+import Tidepool.Graph.Validate.Structure
+  ( AllNodesReachable
+  , AllLogicNodesReachExit
+  , NoDeadGotos
+  , UnreachableNodeError
+  , NoExitPathError
+  , DeadGotoError
+  )
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- MAIN VALIDATION CONSTRAINT
@@ -81,6 +101,9 @@ import Tidepool.Schema (ValidStructuredOutput)
 -- * All Tools have valid schemas
 -- * All Schema types are valid for structured output (no oneOf)
 -- * All Memory types are valid (placeholder for future serialization checks)
+-- * All nodes are reachable from Entry
+-- * All Logic nodes have a path to Exit
+-- * All Goto targets can receive their payload type
 --
 -- @
 -- runGraph :: ValidGraph g => HandlersFor g -> EntryType g -> IO (ExitType g)
@@ -95,6 +118,10 @@ type ValidGraph g =
   , AllSchemasValidForStructuredOutput g
   , AllMemoriesValid g
   , UniqueSchemas g
+  -- Structural validation
+  , AllNodesReachable g
+  , AllLogicNodesReachExit g
+  , NoDeadGotos g
   )
 
 -- ════════════════════════════════════════════════════════════════════════════

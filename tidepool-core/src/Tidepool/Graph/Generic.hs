@@ -131,111 +131,15 @@ import Tidepool.Graph.Types (type (:@), Needs, Schema, Template, Vision, Tools, 
 import Tidepool.Graph.Template (TemplateContext)
 import Tidepool.Graph.Edges (GetUsesEffects, GetGotoTargets)
 import Tidepool.Graph.Goto (Goto, goto)
-
--- ════════════════════════════════════════════════════════════════════════════
--- GRAPH MODE CLASS
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Mode determines how graph record fields are interpreted.
---
--- This mirrors Servant's 'GenericMode' class. Each mode defines how
--- to transform a node definition into a concrete type.
---
--- @
--- data MyGraph mode = MyGraph
---   { classify :: mode :- LLM :@ Needs '[Message] :@ Schema Intent
---   , ...
---   }
--- @
-class GraphMode mode where
-  type mode :- nodeDef :: Type
-
-infixl 0 :-
-
--- ════════════════════════════════════════════════════════════════════════════
--- ENTRY/EXIT MARKER TYPES
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Entry point marker type.
---
--- Used in graph records to declare the input type:
---
--- @
--- data MyGraph mode = MyGraph
---   { entry :: mode :- Entry Message
---   , ...
---   }
--- @
---
--- In 'AsHandler' mode, Entry fields become @Proxy inputType@.
-type Entry :: Type -> Type
-data Entry inputType
-
--- | Exit point marker type.
---
--- Used in graph records to declare the output type:
---
--- @
--- data MyGraph mode = MyGraph
---   { ...
---   , exit :: mode :- Exit Response
---   }
--- @
---
--- In 'AsHandler' mode, Exit fields become @Proxy outputType@.
-type Exit :: Type -> Type
-data Exit outputType
-
--- ════════════════════════════════════════════════════════════════════════════
--- NODE KIND WRAPPER TYPES (for record DSL)
--- ════════════════════════════════════════════════════════════════════════════
-
--- | LLM node marker type (kind Type) for record-based graph DSL.
---
--- Use this instead of the 'LLM' data constructor (which has kind 'NodeKind').
--- In the list-based DSL, @"name" := LLM@ lifts to Type, but in the record DSL
--- field names serve as node names, so we need a Type-kinded marker.
---
--- @
--- data MyGraph mode = MyGraph
---   { classify :: mode :- LLMNode :@ Needs '[Message] :@ Template T :@ Schema Intent
---   }
--- @
-type LLMNode :: Type
-data LLMNode
-
--- | Logic node marker type (kind Type) for record-based graph DSL.
---
--- Use this instead of the 'Logic' data constructor (which has kind 'NodeKind').
---
--- @
--- data MyGraph mode = MyGraph
---   { route :: mode :- LogicNode :@ Needs '[Intent] :@ UsesEffects '[Goto "a", Goto "b"]
---   }
--- @
-type LogicNode :: Type
-data LogicNode
-
--- ════════════════════════════════════════════════════════════════════════════
--- ASGRAPH MODE (IDENTITY)
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Identity mode - fields contain node definitions as-is.
---
--- Used for:
---
--- * Type-level validation (ValidGraph constraint)
--- * Documentation generation
--- * Reification to runtime info
---
--- @
--- graph :: MyGraph AsGraph
--- -- All fields are the node definition types themselves
--- @
-data AsGraph
-
-instance GraphMode AsGraph where
-  type AsGraph :- nodeDef = nodeDef
+import Tidepool.Graph.Validate.RecordStructure (AllFieldsReachable, AllLogicFieldsReachExit, NoDeadGotosRecord)
+import Tidepool.Graph.Generic.Core
+  ( GraphMode(..)
+  , AsGraph
+  , LLMNode
+  , LogicNode
+  , Entry
+  , Exit
+  )
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- ASHANDLER MODE
@@ -745,11 +649,18 @@ type family InvalidGotoTargetError target fieldNames where
 -- * Has an Entry field
 -- * Has an Exit field
 -- * All Goto targets reference existing fields
+-- * All nodes are reachable from Entry
+-- * All Logic nodes have a path to Exit
+-- * All Goto targets can receive their payload type
 type ValidGraphRecord :: (Type -> Type) -> Constraint
 type ValidGraphRecord graph =
   ( Generic (graph AsGraph)
   , ValidateEntryExit graph
   , ValidateGotoTargets graph
+  -- Structural validation
+  , AllFieldsReachable graph
+  , AllLogicFieldsReachExit graph
+  , NoDeadGotosRecord graph
   )
 
 -- ════════════════════════════════════════════════════════════════════════════

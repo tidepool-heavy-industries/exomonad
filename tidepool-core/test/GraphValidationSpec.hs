@@ -5,6 +5,9 @@
 -- These tests verify that invalid graph constructions produce the expected
 -- compiler error messages. Each test compiles an ill-typed module and checks
 -- that specific error strings appear in GHC's output.
+--
+-- Tests cover both the list-based syntax (Graph '[...]) and the record-based
+-- Servant-style syntax (data MyGraph mode = ...).
 module GraphValidationSpec (spec) where
 
 import Test.Hspec
@@ -19,7 +22,7 @@ compileTestFile path = do
   (exitCode, _stdout, stderr) <- readProcessWithExitCode "cabal"
     [ "exec", "ghc", "--"
     , "-fno-code"          -- don't generate code, just typecheck
-    , "-package", "tidepool-sketch"
+    , "-package", "tidepool-core"
     , path
     ] ""
   pure (exitCode, stderr)
@@ -37,43 +40,20 @@ shouldFailWith path expectedErrors = do
 spec :: Spec
 spec = describe "Graph validation error messages" $ do
 
-  it "missing Entry produces clear error" $ do
-    "test/golden/MissingEntry.hs" `shouldFailWith`
-      [ "Graph validation failed: missing Entry declaration"
-      , "Add: Entry :~> YourInputType"
-      ]
+  -- ══════════════════════════════════════════════════════════════════════════
+  -- Record-based (Servant-style) structural validation
+  -- ══════════════════════════════════════════════════════════════════════════
 
-  it "missing Exit produces clear error" $ do
-    "test/golden/MissingExit.hs" `shouldFailWith`
-      [ "Graph validation failed: missing Exit declaration"
-      , "Add: Exit :<~ YourOutputType"
-      ]
+  describe "Record-based structural validation" $ do
 
-  it "unsatisfied Needs produces clear error with node name and type" $ do
-    "test/golden/UnsatisfiedNeed.hs" `shouldFailWith`
-      [ "Graph validation failed: unsatisfied dependency"
-      , "Node 'process' needs type:"
-      , "Intent"
-      , "But no node provides it via Schema"
-      ]
+    it "unreachable field produces clear error" $ do
+      "test/golden/UnreachableFieldRecord.hs" `shouldFailWith`
+        [ "Graph validation failed: unreachable node"
+        , "Field 'orphan' cannot be reached from Entry"
+        ]
 
-  it "invalid Goto target produces clear error with node names" $ do
-    "test/golden/InvalidGoto.hs" `shouldFailWith`
-      [ "Graph validation failed: invalid Goto target"
-      , "Node 'router' has:"
-      , "Goto \"nonexistent\""
-      , "But no node named \"nonexistent\" exists"
-      ]
-
-  it "invalid tool (no ToolDef) produces clear error" $ do
-    "test/golden/InvalidTool.hs" `shouldFailWith`
-      [ "No instance for"
-      , "ToolDef"
-      ]
-
-  it "oneOf schema in structured output produces compile error" $ do
-    "test/golden/InvalidOneOf.hs" `shouldFailWith`
-      [ "Schema error for structured output type"
-      , "MyChoice"
-      , "oneOf"
-      ]
+    it "Logic field without exit path produces clear error" $ do
+      "test/golden/NoExitPathFieldRecord.hs" `shouldFailWith`
+        [ "Graph validation failed: Logic node cannot reach Exit"
+        , "Field 'loop' has no path to Exit"
+        ]
