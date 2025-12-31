@@ -28,7 +28,7 @@ module Tidepool.Wasm.WireTypes
 import Data.Aeson
   ( ToJSON(..)
   , FromJSON(..)
-  , Value
+  , Value(..)
   , object
   , (.=)
   , (.:)
@@ -237,34 +237,75 @@ instance FromJSON GraphState where
 
 -- | Output from each step of graph execution.
 --
+-- This is a sum type that makes invalid states unrepresentable:
+-- - 'StepYield': Not done, has an effect to execute
+-- - 'StepDone': Completed successfully with a result
+-- - 'StepFailed': Completed with an error
+--
 -- The execution loop:
 -- 1. TypeScript calls @initialize(input)@ → gets StepOutput
--- 2. If effect present: execute it, call @step(result)@ → gets StepOutput
--- 3. Repeat until @done = True@
--- 4. Final result in @stepResult@
-data StepOutput = StepOutput
-  { soEffect     :: Maybe SerializableEffect
-  -- ^ Effect to execute (Nothing if pure step or done)
-  , soDone       :: Bool
-  -- ^ Is graph execution complete?
-  , soStepResult :: Maybe Value
-  -- ^ Final result when done=True (matches Exit type)
-  , soGraphState :: GraphState
-  -- ^ Current graph execution state (for observability)
-  }
+-- 2. If StepYield: execute the effect, call @step(result)@ → gets StepOutput
+-- 3. Repeat until StepDone or StepFailed
+data StepOutput
+  = StepYield
+      { soEffect :: SerializableEffect
+      -- ^ Effect to execute
+      , soGraphState :: GraphState
+      -- ^ Current graph execution state (for observability)
+      }
+  | StepDone
+      { soResult :: Value
+      -- ^ Final result (matches Exit type)
+      , soGraphState :: GraphState
+      -- ^ Final graph execution state
+      }
+  | StepFailed
+      { soError :: Text
+      -- ^ Error message
+      , soGraphState :: GraphState
+      -- ^ Graph state at failure
+      }
   deriving stock (Show, Eq, Generic)
 
 instance ToJSON StepOutput where
-  toJSON so = object
-    [ "effect" .= so.soEffect
-    , "done" .= so.soDone
-    , "stepResult" .= so.soStepResult
-    , "graphState" .= so.soGraphState
+  toJSON (StepYield eff gs) = object
+    [ "effect" .= Just eff
+    , "done" .= False
+    , "stepResult" .= Null
+    , "graphState" .= gs
+    ]
+  toJSON (StepDone result gs) = object
+    [ "effect" .= Null
+    , "done" .= True
+    , "stepResult" .= result
+    , "graphState" .= gs
+    ]
+  toJSON (StepFailed err gs) = object
+    [ "effect" .= Null
+    , "done" .= True
+    , "stepResult" .= Null
+    , "error" .= err
+    , "graphState" .= gs
     ]
 
 instance FromJSON StepOutput where
-  parseJSON = withObject "StepOutput" $ \o -> StepOutput
-    <$> o .:? "effect"
-    <*> o .: "done"
-    <*> o .:? "stepResult"
-    <*> o .: "graphState"
+  parseJSON = withObject "StepOutput" $ \o -> do
+    done <- o .: "done"
+    mEffect <- o .:? "effect"
+    mError <- o .:? "error"
+    gs <- o .: "graphState"
+    case (done, mEffect, mError) of
+      -- Valid: not done, has effect to execute
+      (False, Just eff, _) -> pure $ StepYield eff gs
+      -- Valid: done with error
+      (True, Nothing, Just err) -> pure $ StepFailed err gs
+      -- Valid: done with result
+      (True, Nothing, Nothing) -> do
+        result <- o .: "stepResult"
+        pure $ StepDone result gs
+      -- Invalid: done should not have an effect
+      (True, Just _, _) ->
+        fail "StepOutput: done=true should not have an effect"
+      -- Invalid: not done requires an effect
+      (False, Nothing, _) ->
+        fail "StepOutput: done=false requires an effect"

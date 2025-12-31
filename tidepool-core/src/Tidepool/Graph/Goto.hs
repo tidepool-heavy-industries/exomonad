@@ -57,6 +57,7 @@ module Tidepool.Graph.Goto
 
     -- * OneOf Sum Type
   , OneOf(..)
+  , NonEmptyList
   , Payloads
   , PayloadOf
   , InjectTarget(..)
@@ -108,6 +109,9 @@ import Tidepool.Graph.Types (Exit, Self)
 -- Position in the list encodes which type was chosen. Pattern matching is
 -- fully typed - each case knows the exact payload type.
 --
+-- Note: @OneOf '[]@ is uninhabited (has no constructors). Use 'NonEmptyList'
+-- constraint if you need to enforce non-empty lists at compile time.
+--
 -- @
 -- OneOf '[Int, String, Bool]
 --   Here 42           -- an Int
@@ -120,6 +124,23 @@ data OneOf ts where
   Here  :: t -> OneOf (t ': ts)
   -- | The value is somewhere in the rest of the list
   There :: OneOf ts -> OneOf (t ': ts)
+
+-- | Constraint that ensures a type list is non-empty.
+--
+-- Use this to catch empty 'OneOf' or 'GotoChoice' at compile time:
+--
+-- @
+-- myFunction :: NonEmptyList targets => GotoChoice targets -> ...
+-- @
+type NonEmptyList :: [Type] -> Constraint
+type family NonEmptyList ts where
+  NonEmptyList '[] = TypeError
+    ('Text "Empty type list is not allowed"
+     ':$$: 'Text ""
+     ':$$: 'Text "OneOf '[] and GotoChoice '[] have no valid constructors."
+     ':$$: 'Text "Ensure your target list contains at least one transition."
+    )
+  NonEmptyList (_ ': _) = ()
 
 -- | Inject a value into a 'OneOf' at its position in the type list.
 --
@@ -279,7 +300,8 @@ type family GotoElemC' g targets result where
 -- @
 gotoChoice
   :: forall (name :: Symbol) payload targets.
-     ( InjectTarget (To name payload) targets
+     ( NonEmptyList targets
+     , InjectTarget (To name payload) targets
      , GotoElemC (To name payload) targets
      )
   => payload -> GotoChoice targets
@@ -292,7 +314,8 @@ gotoChoice payload = GotoChoice (injectTarget @(To name payload) @targets payloa
 -- @
 gotoExit
   :: forall payload targets.
-     ( InjectTarget (To Exit payload) targets
+     ( NonEmptyList targets
+     , InjectTarget (To Exit payload) targets
      , GotoElemC (To Exit payload) targets
      )
   => payload -> GotoChoice targets
@@ -305,7 +328,8 @@ gotoExit payload = GotoChoice (injectTarget @(To Exit payload) @targets payload)
 -- @
 gotoSelf
   :: forall payload targets.
-     ( InjectTarget (To Self payload) targets
+     ( NonEmptyList targets
+     , InjectTarget (To Self payload) targets
      , GotoElemC (To Self payload) targets
      )
   => payload -> GotoChoice targets
@@ -376,15 +400,25 @@ data LLMHandler needs schema targets es tpl where
 -- | Result of capturing a Goto from a Logic node handler.
 --
 -- This is used by the graph runner to determine which node to execute next.
+--
+-- __DEPRECATED__: Use 'GotoChoice' with 'DispatchGoto' for type-safe dispatch.
+-- This type uses 'Dynamic' which loses type safety at the boundary.
 data GotoResult
   = GotoNode Text Dynamic   -- ^ Transition to named node with payload
   | GotoExit Dynamic        -- ^ Exit graph with result
   | GotoSelf Dynamic        -- ^ Self-loop with updated state
   deriving (Show)
 
+{-# DEPRECATED GotoResult "Use GotoChoice with DispatchGoto for type-safe dispatch" #-}
+{-# DEPRECATED GotoNode "Use gotoChoice @name from GotoChoice API instead" #-}
+{-# DEPRECATED GotoExit "Use gotoExit from GotoChoice API instead" #-}
+{-# DEPRECATED GotoSelf "Use gotoSelf from GotoChoice API instead" #-}
+
 -- | Existential wrapper for any Goto effect.
 --
 -- Used internally by the runner to handle multiple Goto effects uniformly.
+--
+-- __DEPRECATED__: Use 'GotoChoice' with 'DispatchGoto' for type-safe dispatch.
 data SomeGoto where
   SomeGotoNode
     :: forall (name :: Symbol) a.
@@ -397,6 +431,8 @@ data SomeGoto where
     :: forall a. Typeable a
     => a -> SomeGoto
 
+{-# DEPRECATED SomeGoto "Use GotoChoice with DispatchGoto for type-safe dispatch" #-}
+
 -- ════════════════════════════════════════════════════════════════════════════
 -- EFFECT INTERPRETATION
 -- ════════════════════════════════════════════════════════════════════════════
@@ -406,6 +442,9 @@ data SomeGoto where
 -- Returns the payload wrapped in a 'GotoResult' for the runner to process.
 -- This is the primary interpreter used during graph execution.
 --
+-- __DEPRECATED__: Use handlers that return 'GotoChoice' and dispatch with
+-- 'DispatchGoto' instead. This approach loses type safety via 'Dynamic'.
+--
 -- @
 -- result <- runGotoCapture @"target" @Payload $ do
 --   goto @"target" somePayload
@@ -414,6 +453,7 @@ data SomeGoto where
 --   Just (GotoExit dyn) -> -- handle exit
 --   Nothing -> -- no goto was called (shouldn't happen for Logic nodes)
 -- @
+{-# DEPRECATED runGotoCapture "Use GotoChoice return type with DispatchGoto instead" #-}
 runGotoCapture
   :: forall name a es b.
      (KnownSymbol name, Typeable a)
@@ -439,6 +479,9 @@ runGotoIgnore = interpret $ \_ -> \case
   GotoOp _ -> pure ()
 
 -- | Specialized runner for Goto Exit
+--
+-- __DEPRECATED__: Use 'gotoExit' with 'GotoChoice' return type instead.
+{-# DEPRECATED runGotoExitCapture "Use GotoChoice return type with DispatchGoto instead" #-}
 runGotoExitCapture
   :: forall a es b.
      Typeable a

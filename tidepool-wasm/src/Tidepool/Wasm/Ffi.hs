@@ -117,12 +117,7 @@ encodeText = TL.toStrict . TLE.decodeUtf8 . encode
 
 -- | Create error StepOutput.
 mkErrorOutput :: Text -> StepOutput
-mkErrorOutput msg = StepOutput
-  { soEffect = Nothing
-  , soDone = True
-  , soStepResult = Nothing
-  , soGraphState = GraphState (PhaseFailed msg) []
-  }
+mkErrorOutput msg = StepFailed msg (GraphState (PhaseFailed msg) [])
 
 -- | Node name for TestGraph's compute node.
 --
@@ -133,39 +128,27 @@ testGraphNodeName = "compute"
 
 -- | Convert GraphYield to (StepOutput, Maybe RunnerState).
 --
--- YieldEffect: Return effect with continuation stored in state
--- YieldComplete: Return done=True with result, clear state
--- YieldError: Return done=True with error, clear state
+-- YieldEffect: Return StepYield with effect, store continuation in state
+-- YieldComplete: Return StepDone with result, clear state
+-- YieldError: Return StepFailed with error, clear state
 yieldToOutput :: GraphYield -> (StepOutput, Maybe RunnerState)
 yieldToOutput (YieldEffect eff cont) =
-  ( StepOutput
-      { soEffect = Just eff
-      , soDone = False
-      , soStepResult = Nothing
-      , soGraphState = GraphState (PhaseInNode testGraphNodeName) []
-      }
-  , Just (RunnerState cont (PhaseInNode testGraphNodeName))
-  )
+  let gs = GraphState (PhaseInNode testGraphNodeName) []
+  in ( StepYield eff gs
+     , Just (RunnerState cont (PhaseInNode testGraphNodeName))
+     )
 yieldToOutput (YieldComplete result) =
-  ( StepOutput
-      { soEffect = Nothing
-      , soDone = True
-      , soStepResult = Just result
-      -- completedNodes is [] for consistency with getGraphStateImpl - TestGraph
-      -- doesn't track per-node completion. Real graphs would accumulate this.
-      , soGraphState = GraphState (PhaseCompleted result) []
-      }
-  , Nothing  -- Clear state on completion
-  )
+  -- completedNodes is [] for consistency with getGraphStateImpl - TestGraph
+  -- doesn't track per-node completion. Real graphs would accumulate this.
+  let gs = GraphState (PhaseCompleted result) []
+  in ( StepDone result gs
+     , Nothing  -- Clear state on completion
+     )
 yieldToOutput (YieldError msg) =
-  ( StepOutput
-      { soEffect = Nothing
-      , soDone = True
-      , soStepResult = Nothing
-      , soGraphState = GraphState (PhaseFailed msg) []
-      }
-  , Nothing  -- Clear state on error
-  )
+  let gs = GraphState (PhaseFailed msg) []
+  in ( StepFailed msg gs
+     , Nothing  -- Clear state on error
+     )
 
 
 -- ════════════════════════════════════════════════════════════════════════════
