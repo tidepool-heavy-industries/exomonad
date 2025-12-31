@@ -142,7 +142,8 @@ export type SerializableEffect =
   | LlmCompleteEffect
   | HttpFetchEffect
   | LogInfoEffect
-  | LogErrorEffect;
+  | LogErrorEffect
+  | HabiticaEffect;
 
 /**
  * LLM completion request - matches Haskell EffLlmComplete.
@@ -183,6 +184,18 @@ export interface LogInfoEffect {
 export interface LogErrorEffect {
   type: "LogError";
   eff_message: string;
+}
+
+/**
+ * Habitica API effect - matches Haskell EffHabitica.
+ * Used for task management and gamification features.
+ */
+export interface HabiticaEffect {
+  type: "Habitica";
+  /** Operation name: "GetUser", "ScoreTask", "GetTasks", etc. */
+  eff_hab_op: string;
+  /** Operation-specific payload (JSON) */
+  eff_hab_payload: unknown;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

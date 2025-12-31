@@ -19,6 +19,7 @@ spec = do
   serializableEffectSpec
   effectResultSpec
   stepOutputSpec
+  habiticaEffectSpec
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -133,4 +134,63 @@ stepOutputSpec = describe "StepOutput" $ do
           Just (Object effObj) ->
             KM.lookup "type" effObj `shouldBe` Just (String "LogInfo")
           _ -> expectationFailure "Expected effect object"
+      _ -> expectationFailure "Expected JSON object"
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- EffHabitica
+-- ════════════════════════════════════════════════════════════════════════════
+
+habiticaEffectSpec :: Spec
+habiticaEffectSpec = describe "EffHabitica" $ do
+
+  it "round-trips EffHabitica GetUser" $ do
+    let effect = EffHabitica "GetUser" (object [])
+    decode (encode effect) `shouldBe` Just effect
+
+  it "round-trips EffHabitica ScoreTask" $ do
+    let payload = object ["taskId" .= ("abc123" :: String), "direction" .= ("Up" :: String)]
+        effect = EffHabitica "ScoreTask" payload
+    decode (encode effect) `shouldBe` Just effect
+
+  it "round-trips EffHabitica GetTasks" $ do
+    let payload = object ["taskType" .= ("Todos" :: String)]
+        effect = EffHabitica "GetTasks" payload
+    decode (encode effect) `shouldBe` Just effect
+
+  it "round-trips EffHabitica FetchTodos" $ do
+    let effect = EffHabitica "FetchTodos" (object [])
+    decode (encode effect) `shouldBe` Just effect
+
+  it "round-trips EffHabitica CreateTodo" $ do
+    let payload = object ["title" .= ("My new task" :: String)]
+        effect = EffHabitica "CreateTodo" payload
+    decode (encode effect) `shouldBe` Just effect
+
+  it "round-trips EffHabitica AddChecklistItem" $ do
+    let payload = object ["todoId" .= ("xyz789" :: String), "item" .= ("Subtask" :: String)]
+        effect = EffHabitica "AddChecklistItem" payload
+    decode (encode effect) `shouldBe` Just effect
+
+  it "encodes EffHabitica with correct JSON structure" $ do
+    let payload = object ["taskId" .= ("xyz" :: String)]
+        effect = EffHabitica "ScoreTask" payload
+        json = decode (encode effect) :: Maybe Value
+    case json of
+      Just (Object obj) -> do
+        KM.lookup "type" obj `shouldBe` Just (String "Habitica")
+        KM.lookup "eff_hab_op" obj `shouldBe` Just (String "ScoreTask")
+        case KM.lookup "eff_hab_payload" obj of
+          Just (Object p) -> KM.lookup "taskId" p `shouldBe` Just (String "xyz")
+          _ -> expectationFailure "Expected payload object"
+      _ -> expectationFailure "Expected JSON object"
+
+  it "encodes EffHabitica GetUser with empty payload" $ do
+    let effect = EffHabitica "GetUser" (object [])
+        json = decode (encode effect) :: Maybe Value
+    case json of
+      Just (Object obj) -> do
+        KM.lookup "type" obj `shouldBe` Just (String "Habitica")
+        KM.lookup "eff_hab_op" obj `shouldBe` Just (String "GetUser")
+        KM.lookup "eff_hab_payload" obj `shouldBe` Just (Object KM.empty)
       _ -> expectationFailure "Expected JSON object"
