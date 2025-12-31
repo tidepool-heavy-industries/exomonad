@@ -10,7 +10,6 @@ module WireTypesSpec (spec) where
 import Test.Hspec
 import Data.Aeson (encode, decode, object, (.=), Value(..))
 import Data.Aeson.KeyMap qualified as KM
-import Data.Maybe (fromJust)
 
 import Tidepool.Wasm.WireTypes
 
