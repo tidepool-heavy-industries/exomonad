@@ -177,11 +177,19 @@ This is safe in WASM because each module instance is isolated (one per Durable O
 
 ### Testing
 
-- `RunnerSpec.hs` - Tests pure continuation logic
-- `FfiSpec.hs` - Integration tests through JSON interface
-- `TestGraphSpec.hs` - Tests TestGraph handler behavior
-- `ExampleGraphSpec.hs` - Tests ExampleGraph (21 tests covering all branch paths)
-- Uses `resetState` / `resetExampleState` for test isolation
+| File | Purpose | Coverage |
+|------|---------|----------|
+| `WireTypesSpec.hs` | Wire type round-tripping | JSON encode/decode for all types |
+| `TestGraphSpec.hs` | Graph structure validation | TestGraph shape and handler |
+| `ExampleGraphSpec.hs` | ExampleGraph testing | 21 tests covering all branch paths |
+| `LlmTestGraphSpec.hs` | LLM node testing | LlmTestGraph shape and handler |
+| `ProtocolConformanceSpec.hs` | JSON ↔ TypeScript protocol | Exact field names match protocol.ts |
+| `RunnerSpec.hs` | Pure continuation logic | Single-yield WasmResult/Status |
+| `FfiSpec.hs` | FFI JSON interface | Single-yield E2E through FFI |
+| `E2ESpec.hs` | Multi-yield scenarios | 3-effect sequences, edge cases |
+
+- Uses `resetState` / `resetExampleState` for FFI test isolation
+- E2E tests use Runner directly (pure, no global state)
 
 ## Protocol Flow
 

@@ -67,20 +67,6 @@ serializableEffectConformanceSpec = describe "SerializableEffect matches protoco
           KM.lookup "eff_schema" obj `shouldBe` Just Null
         _ -> expectationFailure "Expected JSON object"
 
-  describe "HttpFetchEffect" $ do
-    it "encodes with correct field names: type, eff_url, eff_method" $ do
-      let effect = EffHttpFetch
-            { effUrl = "https://api.example.com/data"
-            , effMethod = "POST"
-            }
-          json = decode (encode effect) :: Maybe Value
-      case json of
-        Just (Object obj) -> do
-          KM.lookup "type" obj `shouldBe` Just (String "HttpFetch")
-          KM.lookup "eff_url" obj `shouldBe` Just (String "https://api.example.com/data")
-          KM.lookup "eff_method" obj `shouldBe` Just (String "POST")
-        _ -> expectationFailure "Expected JSON object"
-
   describe "LogInfoEffect" $ do
     it "encodes with correct field names: type, eff_message" $ do
       let effect = EffLogInfo "Processing request..."

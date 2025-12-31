@@ -13,8 +13,9 @@
 module Tidepool.Wasm.TestGraph
   ( -- * Graph Type
     TestGraph(..)
-    -- * WASM Handler
+    -- * WASM Handlers
   , computeHandlerWasm
+  , computeMultiEffectWasm
   ) where
 
 import qualified Data.Text as T
@@ -53,4 +54,23 @@ data TestGraph mode = TestGraph
 computeHandlerWasm :: Int -> WasmM (GotoChoice '[To Exit Int])
 computeHandlerWasm n = do
   logInfo $ "Computing: " <> T.pack (show n)
+  pure $ gotoExit (n + 1)
+
+
+-- | Multi-effect WASM handler for E2E testing.
+--
+-- This handler yields 3 Log effects before completing, proving that
+-- the yield/resume cycle works correctly across multiple steps:
+--
+-- 1. Logs "Step 1: received n" (yields)
+-- 2. Logs "Step 2: computing" (yields)
+-- 3. Logs "Step 3: returning n+1" (yields)
+-- 4. Returns gotoExit (n+1)
+--
+-- This tests the full multi-step flow: init -> step -> step -> step -> done
+computeMultiEffectWasm :: Int -> WasmM (GotoChoice '[To Exit Int])
+computeMultiEffectWasm n = do
+  logInfo $ "Step 1: received " <> T.pack (show n)
+  logInfo $ "Step 2: computing"
+  logInfo $ "Step 3: returning " <> T.pack (show (n + 1))
   pure $ gotoExit (n + 1)
