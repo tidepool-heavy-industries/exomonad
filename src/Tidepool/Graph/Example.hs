@@ -38,10 +38,16 @@ module Tidepool.Graph.Example
   , ClassifyTpl
   , ClassifyContext(..)
 
-    -- * Graph Info (runtime)
+    -- * Graph Info (runtime, manually constructed)
   , simpleGraphInfo
   , branchingGraphInfo
   , annotatedGraphInfo
+
+    -- * Graph Info (runtime, via ReifyGraph)
+  , simpleGraphReified
+  , branchingGraphReified
+  , annotatedGraphReified
+  , printReificationDemo
 
     -- * Generated Diagrams
   , allDiagrams
@@ -691,3 +697,36 @@ printAllDiagrams = mapM_ printDiagram allDiagrams
       TIO.putStrLn $ "\n" <> name
       TIO.putStrLn $ T.replicate (T.length name) "="
       TIO.putStrLn diagram
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- AUTOMATIC REIFICATION
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Reified SimpleGraph using the typeclass-based approach.
+--
+-- This tests that the ReifyGraph instance for Graph works correctly.
+simpleGraphReified :: GraphInfo
+simpleGraphReified = reifyGraph @SimpleGraph
+
+-- | Reified BranchingGraph.
+branchingGraphReified :: GraphInfo
+branchingGraphReified = reifyGraph @BranchingGraph
+
+-- | Reified AnnotatedGraph.
+annotatedGraphReified :: GraphInfo
+annotatedGraphReified = reifyGraph @AnnotatedGraph
+
+-- | Print reified graph info for SimpleGraph.
+--
+-- Compares manual construction with automatic reification.
+printReificationDemo :: IO ()
+printReificationDemo = do
+  TIO.putStrLn "\n=== AUTOMATIC REIFICATION DEMO ==="
+  TIO.putStrLn "\nSimpleGraph (reified):"
+  print simpleGraphReified
+  TIO.putStrLn "\nSimpleGraph (mermaid from reified):"
+  TIO.putStrLn $ toMermaid simpleGraphReified
+  TIO.putStrLn "\nBranchingGraph (reified):"
+  print branchingGraphReified
+  TIO.putStrLn "\nAnnotatedGraph (reified):"
+  print annotatedGraphReified

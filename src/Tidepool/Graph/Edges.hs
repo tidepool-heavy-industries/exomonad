@@ -45,6 +45,7 @@ module Tidepool.Graph.Edges
 
     -- * Goto Extraction
   , GetGotoTargets
+  , HasGotoExit
   , ExtractGotoTarget
   , ExtractGotoPayload
 
@@ -54,6 +55,7 @@ module Tidepool.Graph.Edges
 
     -- * Graph Queries
   , GetNodes
+  , FilterNodes
   , GetEntryType
   , GetExitType
   , FindNodeByName
