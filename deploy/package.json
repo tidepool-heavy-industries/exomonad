@@ -16,9 +16,11 @@
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20251231.0",
     "@eslint/js": "^9.39.2",
+    "@types/node": "^22.0.0",
     "@typescript-eslint/eslint-plugin": "^8.51.0",
     "@typescript-eslint/parser": "^8.51.0",
     "eslint": "^9.39.2",
+    "ts-node": "^10.9.2",
     "typescript": "^5.7.2",
     "vitest": "^3.2.4",
     "wrangler": "^3.99.0",

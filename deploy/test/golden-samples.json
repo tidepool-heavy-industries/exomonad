@@ -1,0 +1,352 @@
+{
+    "_metadata": {
+        "generatedBy": "tidepool-wasm/golden/GenerateGoldenSamples.hs",
+        "purpose": "Cross-language protocol verification",
+        "usage": "Run verify-protocol.ts to validate TypeScript can parse these"
+    },
+    "effectResults": [
+        {
+            "type": "success",
+            "value": null
+        },
+        {
+            "type": "success",
+            "value": 42
+        },
+        {
+            "type": "success",
+            "value": "result text"
+        },
+        {
+            "type": "success",
+            "value": {
+                "parsed": "data",
+                "tokens": 150
+            }
+        },
+        {
+            "type": "success",
+            "value": []
+        },
+        {
+            "message": "Network timeout",
+            "type": "error"
+        },
+        {
+            "message": "",
+            "type": "error"
+        },
+        {
+            "message": "Error with newline:\nSecond line",
+            "type": "error"
+        }
+    ],
+    "executionPhases": [
+        {
+            "type": "idle"
+        },
+        {
+            "nodeName": "classify",
+            "type": "in_node"
+        },
+        {
+            "nodeName": "",
+            "type": "in_node"
+        },
+        {
+            "fromNode": "classify",
+            "toNode": "respond",
+            "type": "transitioning"
+        },
+        {
+            "fromNode": "entry",
+            "toNode": "exit",
+            "type": "transitioning"
+        },
+        {
+            "result": "success",
+            "type": "completed"
+        },
+        {
+            "result": 42,
+            "type": "completed"
+        },
+        {
+            "result": {
+                "answer": 42
+            },
+            "type": "completed"
+        },
+        {
+            "result": null,
+            "type": "completed"
+        },
+        {
+            "error": "Node execution error",
+            "type": "failed"
+        },
+        {
+            "error": "",
+            "type": "failed"
+        }
+    ],
+    "graphStates": [
+        {
+            "completedNodes": [],
+            "phase": {
+                "type": "idle"
+            }
+        },
+        {
+            "completedNodes": [],
+            "phase": {
+                "nodeName": "compute",
+                "type": "in_node"
+            }
+        },
+        {
+            "completedNodes": [
+                "entry",
+                "fetch"
+            ],
+            "phase": {
+                "nodeName": "validate",
+                "type": "in_node"
+            }
+        },
+        {
+            "completedNodes": [
+                "entry",
+                "fetch",
+                "validate"
+            ],
+            "phase": {
+                "fromNode": "validate",
+                "toNode": "respond",
+                "type": "transitioning"
+            }
+        },
+        {
+            "completedNodes": [
+                "entry",
+                "compute",
+                "validate",
+                "respond"
+            ],
+            "phase": {
+                "result": "done",
+                "type": "completed"
+            }
+        },
+        {
+            "completedNodes": [
+                "entry"
+            ],
+            "phase": {
+                "error": "oops",
+                "type": "failed"
+            }
+        }
+    ],
+    "serializableEffects": [
+        {
+            "eff_node": "classify",
+            "eff_schema": {
+                "properties": {
+                    "category": {
+                        "type": "string"
+                    },
+                    "confidence": {
+                        "type": "number"
+                    }
+                },
+                "type": "object"
+            },
+            "eff_system_prompt": "You are a helpful classifier.",
+            "eff_user_content": "Classify this text into categories.",
+            "type": "LlmComplete"
+        },
+        {
+            "eff_node": "respond",
+            "eff_schema": null,
+            "eff_system_prompt": "You are a friendly assistant.",
+            "eff_user_content": "Hello!",
+            "type": "LlmComplete"
+        },
+        {
+            "eff_method": "GET",
+            "eff_url": "https://api.example.com/data",
+            "type": "HttpFetch"
+        },
+        {
+            "eff_method": "POST",
+            "eff_url": "https://api.example.com/submit",
+            "type": "HttpFetch"
+        },
+        {
+            "eff_message": "Processing request...",
+            "type": "LogInfo"
+        },
+        {
+            "eff_message": "",
+            "type": "LogInfo"
+        },
+        {
+            "eff_message": "Unicode test: 😀 ❤",
+            "type": "LogInfo"
+        },
+        {
+            "eff_message": "Connection failed: timeout",
+            "type": "LogError"
+        },
+        {
+            "eff_message": "Error with special chars: \"quoted\" and \\backslash\\",
+            "type": "LogError"
+        },
+        {
+            "eff_hab_op": "GetUser",
+            "eff_hab_payload": {},
+            "type": "Habitica"
+        },
+        {
+            "eff_hab_op": "ScoreTask",
+            "eff_hab_payload": {
+                "direction": "up",
+                "taskId": "abc123"
+            },
+            "type": "Habitica"
+        },
+        {
+            "eff_hab_op": "CreateTodo",
+            "eff_hab_payload": {
+                "notes": "Task notes here",
+                "title": "New task"
+            },
+            "type": "Habitica"
+        }
+    ],
+    "stepOutputs": [
+        {
+            "done": false,
+            "effect": {
+                "eff_message": "Computing...",
+                "type": "LogInfo"
+            },
+            "graphState": {
+                "completedNodes": [],
+                "phase": {
+                    "nodeName": "compute",
+                    "type": "in_node"
+                }
+            },
+            "stepResult": null
+        },
+        {
+            "done": false,
+            "effect": {
+                "eff_node": "classify",
+                "eff_schema": null,
+                "eff_system_prompt": "sys",
+                "eff_user_content": "user",
+                "type": "LlmComplete"
+            },
+            "graphState": {
+                "completedNodes": [
+                    "entry"
+                ],
+                "phase": {
+                    "nodeName": "classify",
+                    "type": "in_node"
+                }
+            },
+            "stepResult": null
+        },
+        {
+            "done": true,
+            "effect": null,
+            "graphState": {
+                "completedNodes": [
+                    "compute"
+                ],
+                "phase": {
+                    "result": 42,
+                    "type": "completed"
+                }
+            },
+            "stepResult": 42
+        },
+        {
+            "done": true,
+            "effect": null,
+            "graphState": {
+                "completedNodes": [
+                    "entry",
+                    "process",
+                    "finish"
+                ],
+                "phase": {
+                    "result": "completed",
+                    "type": "completed"
+                }
+            },
+            "stepResult": "completed"
+        },
+        {
+            "done": true,
+            "effect": null,
+            "graphState": {
+                "completedNodes": [],
+                "phase": {
+                    "result": {
+                        "result": "success"
+                    },
+                    "type": "completed"
+                }
+            },
+            "stepResult": {
+                "result": "success"
+            }
+        },
+        {
+            "done": true,
+            "effect": null,
+            "graphState": {
+                "completedNodes": [],
+                "phase": {
+                    "result": null,
+                    "type": "completed"
+                }
+            },
+            "stepResult": null
+        },
+        {
+            "done": true,
+            "effect": null,
+            "error": "Execution timeout",
+            "graphState": {
+                "completedNodes": [
+                    "entry",
+                    "stuck"
+                ],
+                "phase": {
+                    "error": "Execution timeout",
+                    "type": "failed"
+                }
+            },
+            "stepResult": null
+        },
+        {
+            "done": true,
+            "effect": null,
+            "error": "",
+            "graphState": {
+                "completedNodes": [],
+                "phase": {
+                    "error": "",
+                    "type": "failed"
+                }
+            },
+            "stepResult": null
+        }
+    ]
+}

@@ -72,6 +72,7 @@ test-suite tidepool-wasm-tests
         ExampleGraphSpec
         LlmTestGraphSpec
         ProtocolConformanceSpec
+        ProtocolPropertySpec
         RunnerSpec
         FfiSpec
         E2ESpec
@@ -79,8 +80,10 @@ test-suite tidepool-wasm-tests
     build-depends:
         base >= 4.17 && < 5,
         hspec >= 2.10 && < 3,
+        QuickCheck >= 2.14 && < 3,
         aeson >= 2.1 && < 3,
         bytestring >= 0.11 && < 1,
+        scientific >= 0.3 && < 1,
         text >= 2.0 && < 3,
         vector >= 0.12 && < 1,
         tidepool-wasm,
@@ -90,3 +93,21 @@ test-suite tidepool-wasm-tests
     default-extensions:
         OverloadedStrings
         OverloadedRecordDot
+
+-- | Generates golden JSON samples for cross-language protocol verification.
+-- Run with: cabal run generate-golden-samples
+-- Output goes to deploy/test/golden-samples.json
+executable generate-golden-samples
+    import:           warnings
+    main-is:          GenerateGoldenSamples.hs
+    build-depends:
+        base >= 4.17 && < 5,
+        aeson >= 2.1 && < 3,
+        aeson-pretty >= 0.8 && < 1,
+        bytestring >= 0.11 && < 1,
+        text >= 2.0 && < 3,
+        tidepool-wasm
+    hs-source-dirs:   golden
+    default-language: GHC2021
+    default-extensions:
+        OverloadedStrings
