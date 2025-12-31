@@ -11,6 +11,14 @@ import { successResult, errorResult } from "../protocol.js";
 // Habitica API base URL
 const HABITICA_API = "https://habitica.com/api/v3";
 
+// Map Habitica API task types to Haskell TaskType enum names
+const TASK_TYPE_MAP: Record<string, string> = {
+  habit: "Habits",
+  daily: "Dailys",
+  todo: "Todos",
+  reward: "Rewards",
+};
+
 // Habitica API response types
 interface HabiticaResponse<T> {
   success: boolean;
@@ -114,7 +122,7 @@ export async function handleHabitica(
           data.data.map((t) => ({
             taskId: t._id,
             taskText: t.text,
-            taskType: t.type,
+            taskType: TASK_TYPE_MAP[t.type] ?? t.type,
             taskCompleted: t.completed ?? null,
           }))
         );
