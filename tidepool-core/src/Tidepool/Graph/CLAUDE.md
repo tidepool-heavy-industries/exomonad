@@ -89,21 +89,24 @@ node names, so we need `LLMNode`/`LogicNode` which have kind `Type` directly.
 │  (DSL syntax)     (type families   (ValidGraph                              │
 │                    for edge         constraint)                              │
 │                    derivation)                                               │
-│                         │                                                    │
-│                         ▼                                                    │
-│  Generic.hs ◄─── TH.hs ─────────────────────────────────────────────────►  │
-│  (Servant-style  (generates typed handler records)                           │
-│   record modes)                                                              │
+│                                                                              │
+│  Generic.hs ◄──── Template.hs ◄──── Tool.hs                                 │
+│  (Servant-style   (TemplateDef      (ToolDef                                │
+│   record modes)    typeclass)        typeclass)                              │
 │                                                                              │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                           RUNTIME                                            │
 │                                                                              │
-│  Reify.hs ──────► Mermaid.hs        Runner.hs                               │
-│  (GraphInfo,      (diagram          (graph execution,                        │
-│   NodeInfo)        generation)       Goto handling)                          │
+│  Reify.hs ──────► Mermaid.hs                                                │
+│  (GraphInfo,      (diagram                                                   │
+│   NodeInfo)        generation)                                               │
 │                                                                              │
-│  Goto.hs                                                                     │
-│  (effectful effect for transitions)                                          │
+│  Goto.hs ─────────► Memory.hs                                               │
+│  (transition       (persistent                                               │
+│   effect)           state effect)                                            │
+│                                                                              │
+│  Docs.hs                                                                     │
+│  (template dependency documentation)                                         │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -538,57 +541,6 @@ data MermaidConfig = MermaidConfig
 - Implicit (Schema → Needs): `-->` solid arrow
 - Explicit (Goto): `-->` solid arrow
 
-### TH.hs - Template Haskell
-
-Generates typed handler records from graph definitions.
-
-```haskell
--- Generate handler record type
-deriveHandlers :: Name -> Q [Dec]
-
--- Generate RunnableGraph instance
-deriveRunnableGraph :: Name -> Q [Dec]
-```
-
-#### Generated Code Example
-
-For `CustomerServiceGraph`:
-```haskell
-data Handlers_CustomerServiceGraph = Handlers_CustomerServiceGraph
-  { h_classify :: Message -> IO Intent
-  , h_route :: Intent -> IO ()  -- Uses Goto effects
-  , h_refund :: Message -> IO Response
-  , h_faq :: Message -> IO Response
-  }
-```
-
-### Runner.hs - Graph Execution
-
-Runtime execution engine for graphs.
-
-```haskell
-class ValidGraph g => RunnableGraph g where
-  type HandlersFor g :: Type
-  type EntryType g :: Type
-  type ExitType g :: Type
-  type GraphEffects g :: [Effect]
-
-runGraph
-  :: (RunnableGraph g, ...)
-  => HandlersFor g
-  -> EntryType g
-  -> Eff es (ExitType g)
-```
-
-#### Execution Model
-
-1. Entry value added to available values
-2. Find nodes whose `Needs` are all satisfied
-3. Execute node handler
-4. For LLM: add Schema output to available values
-5. For Logic: follow Goto to next node or Exit
-6. Repeat until Exit reached
-
 ## Usage Patterns
 
 ### Basic Linear Graph
@@ -792,13 +744,13 @@ The `Vision` annotation marks a node as accepting image input, but:
 
 **Future work**: Research multimodal input patterns and design appropriate DSL.
 
-### Handler Provision for Logic Nodes
+### Graph Execution Runtime
 
-Logic nodes need user-provided handlers, but:
-- How the runtime receives handlers is not yet designed
-- Handler signature derivation via TH is incomplete
+Graph execution is not yet implemented in this module:
+- The `Generic.hs` defines handler type computation via `NodeHandler`
+- Actual graph runner (stepping through nodes, handling Goto) is not yet built
 
-**Future work**: Design handler record generation and runtime wiring.
+**Future work**: Implement graph runner that uses `NodeHandler` types.
 
 ## Known Issues / Gotchas
 
@@ -838,11 +790,11 @@ to check ToGVal instances instead of raw record fields.
 | Goto.hs | ~100 | Goto effect for transitions |
 | Memory.hs | ~210 | Memory effect for persistent state |
 | Template.hs | ~250 | TemplateDef typeclass for typed prompts |
+| Tool.hs | ~150 | Unified tool definitions (ToolDef typeclass) |
 | Edges.hs | ~375 | Edge derivation type families |
 | Validate.hs | ~400 | Compile-time validation |
 | Reify.hs | ~120 | Runtime info types (stub) |
 | Mermaid.hs | ~220 | Diagram generation |
-| TH.hs | ~210 | Template Haskell generation |
-| Runner.hs | ~280 | Graph execution engine |
+| Docs.hs | ~80 | Template dependency tree documentation |
 | Example.hs | ~570 | Usage examples (type-level list + record syntax) |
 | Example/Context.hs | ~40 | Example context types (for TH staging) |
