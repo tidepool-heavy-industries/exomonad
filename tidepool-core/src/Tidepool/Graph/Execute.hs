@@ -2,6 +2,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE RankNTypes #-}
@@ -41,20 +42,30 @@ module Tidepool.Graph.Execute
   , runGraphFrom
     -- * Entry Handler Discovery
   , FindEntryHandler
+    -- * Handler Invocation
+  , CallHandler(..)
+    -- * LLM Handler Execution
+  , executeLLMHandler
   ) where
 
+import Data.Aeson (FromJSON)
 import Data.Kind (Constraint, Type)
-import Effectful (Effect, Eff)
+import Effectful (Effect, Eff, type (:>))
 import GHC.Generics (Generic(..))
 import GHC.Records (HasField(..))
 import GHC.TypeLits (Symbol, KnownSymbol, TypeError, ErrorMessage(..))
+import Text.Ginger.TH (TypedTemplate, runTypedTemplate)
+import Text.Parsec.Pos (SourcePos)
 
+import Tidepool.Effect (LLM, llmCall)
 import Tidepool.Graph.Edges (GetNeeds)
 import Tidepool.Graph.Generic (AsHandler, FieldsWithNamesOf)
 import Tidepool.Graph.Generic.Core (Entry, AsGraph)
 import qualified Tidepool.Graph.Generic.Core as G (Exit)
-import Tidepool.Graph.Goto (GotoChoice(..), OneOf(..), To)
+import Tidepool.Graph.Goto (GotoChoice(..), OneOf(..), To, LLMHandler(..))
+import Tidepool.Graph.Template (GingerContext)
 import Tidepool.Graph.Types (Exit, Self)
+import Tidepool.Schema (HasJSONSchema(..), schemaToValue)
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -118,9 +129,10 @@ type family FindEntryHandler entryType fields where
 -- result <- runGraphFrom @"compute" handlers inputValue
 -- @
 runGraphFrom
-  :: forall (name :: Symbol) graph entryType targets exitType es.
+  :: forall (name :: Symbol) graph entryType targets exitType es handler.
      ( KnownSymbol name
-     , HasField name (graph (AsHandler es)) (entryType -> Eff es (GotoChoice targets))
+     , HasField name (graph (AsHandler es)) handler
+     , CallHandler handler entryType es targets
      , DispatchGoto graph targets es exitType
      )
   => graph (AsHandler es)
@@ -128,7 +140,7 @@ runGraphFrom
   -> Eff es exitType
 runGraphFrom graph input = do
   let handler = getField @name graph
-  choice <- handler input
+  choice <- callHandler handler input
   dispatchGoto graph choice
 
 
@@ -150,17 +162,113 @@ runGraphFrom graph input = do
 -- result <- runGraph handlers 5  -- Returns 6 (if compute does +1)
 -- @
 runGraph
-  :: forall graph entryType targets exitType es entryHandlerName.
+  :: forall graph entryType targets exitType es entryHandlerName handler.
      ( Generic (graph AsGraph)
      , FindEntryHandler entryType (FieldsWithNamesOf graph) ~ 'Just entryHandlerName
      , KnownSymbol entryHandlerName
-     , HasField entryHandlerName (graph (AsHandler es)) (entryType -> Eff es (GotoChoice targets))
+     , HasField entryHandlerName (graph (AsHandler es)) handler
+     , CallHandler handler entryType es targets
      , DispatchGoto graph targets es exitType
      )
   => graph (AsHandler es)
   -> entryType
   -> Eff es exitType
 runGraph = runGraphFrom @entryHandlerName
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- LLM HANDLER EXECUTION
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Execute an LLMBoth handler, returning a GotoChoice.
+--
+-- This function:
+-- 1. Calls the before-handler to build template context
+-- 2. Renders the system template (if provided) and user template
+-- 3. Calls the LLM effect with rendered prompts and JSON schema
+-- 4. Parses the structured output
+-- 5. Calls the after-handler to determine the next transition
+--
+-- = Type Parameters
+--
+-- * @needs@ - The input type from Needs annotation
+-- * @schema@ - The LLM output schema type
+-- * @targets@ - The transition targets from UsesEffects
+-- * @es@ - The effect stack (must include LLM)
+-- * @tpl@ - The template context type
+--
+-- = Example
+--
+-- @
+-- result <- executeLLMHandler
+--   Nothing                          -- no system template
+--   userTemplate                     -- user prompt template
+--   (\\input -> pure MyContext {...}) -- build context
+--   (\\output -> pure (gotoExit output)) -- route based on output
+--   inputValue
+-- @
+executeLLMHandler
+  :: forall needs schema targets es tpl.
+     ( LLM :> es
+     , FromJSON schema
+     , HasJSONSchema schema
+     , GingerContext tpl
+     )
+  => Maybe (TypedTemplate tpl SourcePos)      -- ^ Optional system prompt template
+  -> TypedTemplate tpl SourcePos              -- ^ User prompt template (required)
+  -> (needs -> Eff es tpl)                    -- ^ Before handler: builds context
+  -> (schema -> Eff es (GotoChoice targets))  -- ^ After handler: routes based on output
+  -> needs                                    -- ^ Input from Needs
+  -> Eff es (GotoChoice targets)
+executeLLMHandler mSystemTpl userTpl beforeFn afterFn input = do
+  -- Build context from before-handler
+  ctx <- beforeFn input
+  -- Render templates
+  let systemPrompt = maybe "" (runTypedTemplate ctx) mSystemTpl
+      userPrompt = runTypedTemplate ctx userTpl
+      schemaVal = schemaToValue (jsonSchema @schema)
+  -- Call LLM with rendered prompts
+  output <- llmCall @schema systemPrompt userPrompt schemaVal
+  -- Route based on output
+  afterFn output
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- HANDLER INVOCATION TYPECLASS
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Typeclass for invoking handlers uniformly.
+--
+-- This abstracts over the difference between:
+-- * Logic node handlers: @payload -> Eff es (GotoChoice targets)@
+-- * LLM node handlers: @LLMHandler payload schema targets es tpl@
+--
+-- By using this typeclass, the main dispatch instance doesn't need to know
+-- which kind of handler it's dealing with - it just calls 'callHandler'.
+type CallHandler :: Type -> Type -> [Effect] -> [Type] -> Constraint
+class CallHandler handler payload es targets | handler -> payload es targets where
+  callHandler :: handler -> payload -> Eff es (GotoChoice targets)
+
+-- | Logic node handler: simple function invocation.
+instance CallHandler (payload -> Eff es (GotoChoice targets)) payload es targets where
+  callHandler f p = f p
+
+-- | LLM node handler: execute via executeLLMHandler.
+--
+-- Only LLMBoth is supported for graph execution. LLMBefore and LLMAfter
+-- will error at runtime because they lack complete routing logic.
+instance
+  ( LLM :> es
+  , FromJSON schema
+  , HasJSONSchema schema
+  , GingerContext tpl
+  ) => CallHandler (LLMHandler payload schema targets es tpl) payload es targets where
+  callHandler (LLMBoth mSysTpl userTpl beforeFn afterFn) p =
+    executeLLMHandler mSysTpl userTpl beforeFn afterFn p
+  callHandler (LLMBefore _) _ =
+    error "LLMBefore is not supported for graph dispatch: it has no explicit routing targets. Use LLMBoth instead and move any pre-processing into the before function."
+  callHandler (LLMAfter _) _ =
+    error "LLMAfter is not supported for graph dispatch: it lacks the template context needed to build LLM prompts. Use LLMBoth instead and move any post-processing into the after function."
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -271,29 +379,30 @@ instance {-# OVERLAPPABLE #-} TypeError
 
 
 -- ════════════════════════════════════════════════════════════════════════════
--- NAMED NODE INSTANCES
+-- NAMED NODE INSTANCE
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Named node target: call the handler and recurse.
+-- | Named node target: call the handler via 'CallHandler' and recurse.
 --
 -- When the first target is @To (name :: Symbol) payload@:
 --
 -- 1. Use 'HasField' to get the handler from the graph record
--- 2. Call handler with the payload (fully typed!)
+-- 2. Use 'CallHandler' to invoke the handler (works for both Logic and LLM nodes)
 -- 3. Recursively dispatch on the handler's returned 'GotoChoice'
 --
--- The @handlerTargets@ type variable is inferred from the handler's return
--- type, ensuring type safety throughout the dispatch chain.
+-- The @handler@ type is inferred from the graph record, and 'CallHandler'
+-- determines how to invoke it based on whether it's a function or LLMHandler.
 instance
   ( KnownSymbol name
-  , HasField name (graph (AsHandler es)) (payload -> Eff es (GotoChoice handlerTargets))
+  , HasField name (graph (AsHandler es)) handler
+  , CallHandler handler payload es handlerTargets
   , DispatchGoto graph handlerTargets es exitType
   , DispatchGoto graph rest es exitType
   ) => DispatchGoto graph (To (name :: Symbol) payload ': rest) es exitType where
 
   dispatchGoto graph (GotoChoice (Here payload)) = do
     let handler = getField @name graph
-    nextChoice <- handler payload
+    nextChoice <- callHandler handler payload
     dispatchGoto graph nextChoice
 
   dispatchGoto graph (GotoChoice (There rest)) =
