@@ -98,7 +98,6 @@ module Tidepool.Graph.Generic
   , Elem
   , ElemC
   , ElemCWithOptions
-  , FormatSymbolList
   , If
   , Append
   , type (||)
@@ -123,6 +122,8 @@ import Data.Kind (Type, Constraint)
 import Data.Proxy (Proxy(..))
 import GHC.Generics (Generic(..), K1(..), M1(..), (:*:)(..), Meta(..), S, D, C)
 import GHC.TypeLits (Symbol, KnownSymbol, TypeError, ErrorMessage(..), Nat, type (+))
+
+import Tidepool.Graph.Validate (FormatSymbolList)
 import Effectful (Effect)
 import Effectful qualified as E
 
@@ -460,13 +461,6 @@ type family ElemCWithOptions s ss allOptions where
     )
   ElemCWithOptions s (s ': _) _ = ()
   ElemCWithOptions s (_ ': rest) allOptions = ElemCWithOptions s rest allOptions
-
--- | Format a list of symbols for display in error messages.
-type FormatSymbolList :: [Symbol] -> ErrorMessage
-type family FormatSymbolList ss where
-  FormatSymbolList '[] = 'Text "  (none)"
-  FormatSymbolList '[s] = 'Text "  • " ':<>: 'Text s
-  FormatSymbolList (s ': rest) = 'Text "  • " ':<>: 'Text s ':$$: FormatSymbolList rest
 
 -- | Type-level If (returns Constraint).
 type If :: Bool -> Constraint -> Constraint -> Constraint
