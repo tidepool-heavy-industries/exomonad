@@ -52,6 +52,40 @@ serializableEffectSpec = describe "SerializableEffect" $ do
         KM.lookup "eff_message" obj `shouldBe` Just (String "test")
       _ -> expectationFailure "Expected JSON object"
 
+  -- LlmComplete tests
+  it "round-trips EffLlmComplete without schema" $ do
+    let effect = EffLlmComplete "mynode" "You are helpful" "Hello" Nothing
+    decode (encode effect) `shouldBe` Just effect
+
+  it "round-trips EffLlmComplete with schema" $ do
+    let schema = object ["type" .= ("string" :: String)]
+        effect = EffLlmComplete "classify" "Classify intent" "User message" (Just schema)
+    decode (encode effect) `shouldBe` Just effect
+
+  it "encodes EffLlmComplete with correct JSON structure" $ do
+    let schema = object ["type" .= ("object" :: String)]
+        effect = EffLlmComplete "node1" "sys prompt" "user content" (Just schema)
+        json = decode (encode effect) :: Maybe Value
+    case json of
+      Just (Object obj) -> do
+        KM.lookup "type" obj `shouldBe` Just (String "LlmComplete")
+        KM.lookup "eff_node" obj `shouldBe` Just (String "node1")
+        KM.lookup "eff_system_prompt" obj `shouldBe` Just (String "sys prompt")
+        KM.lookup "eff_user_content" obj `shouldBe` Just (String "user content")
+        case KM.lookup "eff_schema" obj of
+          Just (Object schemaObj) ->
+            KM.lookup "type" schemaObj `shouldBe` Just (String "object")
+          _ -> expectationFailure "Expected eff_schema to be an object"
+      _ -> expectationFailure "Expected JSON object"
+
+  it "encodes EffLlmComplete with null schema when Nothing" $ do
+    let effect = EffLlmComplete "node" "sys" "user" Nothing
+        json = decode (encode effect) :: Maybe Value
+    case json of
+      Just (Object obj) ->
+        KM.lookup "eff_schema" obj `shouldBe` Just Null
+      _ -> expectationFailure "Expected JSON object"
+
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- EffectResult

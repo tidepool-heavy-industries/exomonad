@@ -73,7 +73,7 @@ Currently defined in `protocol.ts`:
 | `LogInfo` | ✅ Ready | Console log |
 | `LogError` | ✅ Ready | Console error |
 | `LlmComplete` | ✅ Ready | Cloudflare AI binding |
-| `HttpFetch` | ✅ Ready | `fetch()` |
+| `Habitica` | ✅ Ready | Habitica API |
 
 ## Running
 

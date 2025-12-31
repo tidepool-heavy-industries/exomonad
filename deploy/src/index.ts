@@ -182,20 +182,6 @@ export class StateMachineDO extends DurableObject<Env> {
         case "LlmComplete":
           return await this.callCfAi(effect);
 
-        case "HttpFetch": {
-          const resp = await fetch(effect.eff_url, { method: effect.eff_method });
-          const contentType = resp.headers.get("content-type") ?? "";
-          let body: unknown;
-
-          if (contentType.includes("application/json")) {
-            body = await resp.json();
-          } else {
-            body = await resp.text();
-          }
-
-          return successResult({ status: resp.status, body });
-        }
-
         case "LogInfo":
           console.log(`[Graph Log] ${effect.eff_message}`);
           return successResult(null);
