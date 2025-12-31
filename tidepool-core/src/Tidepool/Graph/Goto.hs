@@ -96,6 +96,8 @@ import Effectful hiding (inject)
 import Effectful.Dispatch.Dynamic
 import qualified Effectful.State.Static.Local as EState
 import GHC.TypeLits (Symbol, KnownSymbol, symbolVal, TypeError, ErrorMessage(..))
+import Text.Ginger.TH (TypedTemplate)
+import Text.Parsec.Pos (SourcePos)
 
 import Tidepool.Graph.Types (Exit, Self)
 
@@ -342,11 +344,13 @@ gotoSelf payload = GotoChoice (injectTarget @(To Self payload) @targets payload)
 --   IntentRefund -> gotoChoice @"refund" intent
 --   IntentFaq    -> gotoChoice @"faq" intent
 --
--- -- Both: custom context AND explicit routing
+-- -- Both: custom context AND explicit routing (with templates)
 -- sgSmart :: LLMHandler Message Intent '[To "a" X, To "b" Y] es SmartContext
 -- sgSmart = LLMBoth
---   (\\msg -> pure SmartContext { ... })
---   (\\intent -> pure $ gotoChoice @"a" (processIntent intent))
+--   Nothing                              -- no system template
+--   (templateCompiled @SmartTpl)         -- user template
+--   (\\msg -> pure SmartContext { ... }) -- context builder
+--   (\\intent -> pure $ gotoChoice @"a" (processIntent intent))  -- router
 -- @
 type LLMHandler :: Type -> Type -> [Type] -> [Effect] -> Type -> Type
 data LLMHandler needs schema targets es tpl where
@@ -363,10 +367,15 @@ data LLMHandler needs schema targets es tpl where
     -> LLMHandler needs schema targets es ()
 
   -- | Both: custom context AND explicit routing
+  --
+  -- Takes optional system template, required user template, before handler, and after handler.
+  -- Both templates share the same context type (tpl).
   LLMBoth
     :: forall tpl needs schema targets es.
-       (needs -> Eff es tpl)
-    -> (schema -> Eff es (GotoChoice targets))
+       Maybe (TypedTemplate tpl SourcePos)      -- ^ Optional system prompt template
+    -> TypedTemplate tpl SourcePos              -- ^ User prompt template (required)
+    -> (needs -> Eff es tpl)                    -- ^ Builds context for both templates
+    -> (schema -> Eff es (GotoChoice targets))  -- ^ Routes based on LLM output
     -> LLMHandler needs schema targets es tpl
 
 -- ════════════════════════════════════════════════════════════════════════════

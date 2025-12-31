@@ -382,8 +382,10 @@ routingHandlers = RoutingGraph
       IntentComplaint -> gotoChoice @"rgProcess" intent
 
     -- LLMBoth: custom context before LLM, explicit routing after
-    -- Full control over both phases
+    -- Full control over both phases. Takes system template (optional), user template, before handler, after handler.
   , rgProcess = LLMBoth
+      Nothing  -- no system template
+      (templateCompiled @RefundTpl)  -- user template
       (\intent -> pure SimpleContext { scContent = T.pack $ "Processing: " ++ show intent })
       (\response -> pure $ gotoExit response)
 

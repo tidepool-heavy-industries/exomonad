@@ -117,6 +117,7 @@ test-suite graph-validation-tests
     main-is:          Spec.hs
     other-modules:
         GraphValidationSpec
+        LLMNodeExecuteSpec
         MemorySerializationSpec
     build-depends:
         base >= 4.17 && < 5,
