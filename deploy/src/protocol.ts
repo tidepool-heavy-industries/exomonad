@@ -3,7 +3,8 @@
  *
  * Design principle: TypeScript is a graph-aware effect executor.
  * - Haskell owns: graph structure, DAG ordering, Needs resolution, Goto/exitWith
- * - TypeScript owns: LLM calls, HTTP, persistence, logging, observability
+ * - TypeScript owns: domain-specific effects (LLM, Habitica), persistence, logging, observability
+ * - No general-purpose primitives (HTTP fetch) - only domain-specific effects
  *
  * These types match the Haskell Serializable.hs and Info.hs modules.
  */
@@ -140,7 +141,6 @@ export function getCurrentNode(phase: ExecutionPhase): string | null {
  */
 export type SerializableEffect =
   | LlmCompleteEffect
-  | HttpFetchEffect
   | LogInfoEffect
   | LogErrorEffect
   | HabiticaEffect;
@@ -159,15 +159,6 @@ export interface LlmCompleteEffect {
   eff_user_content: string;
   /** JSON schema for structured output */
   eff_schema: JsonSchema | null;
-}
-
-/**
- * HTTP fetch request - matches Haskell EffHttpFetch.
- */
-export interface HttpFetchEffect {
-  type: "HttpFetch";
-  eff_url: string;
-  eff_method: string;
 }
 
 /**

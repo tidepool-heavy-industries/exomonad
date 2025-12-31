@@ -30,7 +30,6 @@ module Tidepool.Wasm.Effect
   , logInfo
   , logError
   , llmComplete
-  , httpFetch
   , habitica
 
     -- * Running Effects
@@ -103,20 +102,6 @@ llmComplete node systemPrompt userContent schema = do
     ResSuccess (Just v) -> pure v
     ResSuccess Nothing  -> pure (toJSON ())
     ResError msg        -> error $ "LLM call failed: " <> T.unpack msg
-
--- | Make an HTTP fetch request.
---
--- Yields 'EffHttpFetch', expects JSON response on success.
-httpFetch :: Member (Yield SerializableEffect EffectResult) effs
-          => Text  -- ^ URL
-          -> Text  -- ^ HTTP method
-          -> Eff effs Value
-httpFetch url method = do
-  result <- yield (EffHttpFetch url method) (id @EffectResult)
-  case result of
-    ResSuccess (Just v) -> pure v
-    ResSuccess Nothing  -> pure (toJSON ())
-    ResError msg        -> error $ "HTTP fetch failed: " <> T.unpack msg
 
 -- | Make a Habitica API call.
 --

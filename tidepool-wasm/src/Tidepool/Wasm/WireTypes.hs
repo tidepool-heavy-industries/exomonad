@@ -8,8 +8,8 @@
 -- These types cross the WASM/JSON boundary and must match the
 -- TypeScript definitions in @deploy/src/protocol.ts@.
 --
--- Design: Start minimal - only what step 1 needs. Expand later
--- as we add LLM effects, HTTP, etc.
+-- Design: Domain-specific effects only (LLM, Habitica, Log).
+-- No general-purpose primitives like HTTP fetch.
 module Tidepool.Wasm.WireTypes
   ( -- * Effects (WASM → TypeScript)
     SerializableEffect(..)
@@ -57,12 +57,6 @@ data SerializableEffect
       , effSchema :: Maybe Value
       -- ^ JSON schema for structured output
       }
-  | EffHttpFetch
-      { effUrl :: Text
-      -- ^ URL to fetch
-      , effMethod :: Text
-      -- ^ HTTP method
-      }
   | EffLogInfo { effMessage :: Text }
   | EffLogError { effMessage :: Text }
   | EffHabitica
@@ -80,11 +74,6 @@ instance ToJSON SerializableEffect where
     , "eff_system_prompt" .= sys
     , "eff_user_content" .= user
     , "eff_schema" .= schema
-    ]
-  toJSON (EffHttpFetch url method) = object
-    [ "type" .= ("HttpFetch" :: Text)
-    , "eff_url" .= url
-    , "eff_method" .= method
     ]
   toJSON (EffLogInfo msg) = object
     [ "type" .= ("LogInfo" :: Text)
@@ -109,9 +98,6 @@ instance FromJSON SerializableEffect where
         <*> o .: "eff_system_prompt"
         <*> o .: "eff_user_content"
         <*> o .:? "eff_schema"
-      "HttpFetch" -> EffHttpFetch
-        <$> o .: "eff_url"
-        <*> o .: "eff_method"
       "LogInfo" -> EffLogInfo <$> o .: "eff_message"
       "LogError" -> EffLogError <$> o .: "eff_message"
       "Habitica" -> EffHabitica
