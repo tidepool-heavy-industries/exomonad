@@ -5,17 +5,12 @@ compatibility_date = "2024-12-01"
 # Durable Objects for state machine instances
 [durable_objects]
 bindings = [
-  { name = "STATE_MACHINE", class_name = "StateMachineDO" },
-  { name = "TELEGRAM_DO", class_name = "TelegramDO" }
+  { name = "STATE_MACHINE", class_name = "StateMachineDO" }
 ]
 
 [[migrations]]
 tag = "v1"
 new_classes = ["StateMachineDO"]
-
-[[migrations]]
-tag = "v2"
-new_classes = ["TelegramDO"]
 
 # D1 database (optional)
 # [[d1_databases]]

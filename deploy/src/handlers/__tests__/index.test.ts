@@ -17,7 +17,6 @@ function createMockEnv(): Env {
     } as unknown as Ai,
     HABITICA_USER_ID: "test-user",
     HABITICA_API_TOKEN: "test-token",
-    TELEGRAM_TOKEN: "test-telegram-token",
   };
 }
 
@@ -102,7 +101,6 @@ describe("executeEffect", () => {
       } as unknown as Ai,
       HABITICA_USER_ID: "test",
       HABITICA_API_TOKEN: "test",
-      TELEGRAM_TOKEN: "test-telegram-token",
     };
 
     const result = await executeEffect(effect, env);
