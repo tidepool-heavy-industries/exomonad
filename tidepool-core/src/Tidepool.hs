@@ -13,13 +13,18 @@
 -- = IO-Blindness
 --
 -- Agents are IO-blind: they cannot use IOE directly. All IO happens in the
--- runner (tidepool/tidepoolWith). This enables eventual WASM compilation.
+-- runner. This enables eventual WASM compilation.
 --
 -- = Extensible Effects
 --
 -- Base effects are fixed for all agents. Agents can add domain-specific
 -- effects (like Habitica, Obsidian) via the @extra@ type parameter.
 -- The runner provides interpreters for extra effects.
+--
+-- = Runners
+--
+-- For platform-specific runners that interpret effects with real IO (HTTP, SQLite, GUI),
+-- see @Tidepool.Effect.Runners@ in tidepool-platform.
 --
 module Tidepool
   ( -- * Agent Definition
@@ -33,9 +38,7 @@ module Tidepool
   , AgentDispatcher(..)
   , noDispatcher
 
-    -- * Running Agents
-  , tidepool
-  , tidepoolWith
+    -- * Configuration (for runners in tidepool-platform)
   , AgentConfig(..)
 
     -- * Re-exports
@@ -44,10 +47,7 @@ module Tidepool
 
 import Effectful
 import Data.Text (Text)
-import qualified Data.Text as T
-import qualified Data.Text.IO as TIO
 import Data.Aeson (Value, toJSON)
-import System.IO (hFlush, stdout)
 import Tidepool.Effect
 
 -- ══════════════════════════════════════════════════════════════════════
@@ -163,99 +163,6 @@ data AgentConfig s evt = AgentConfig
     -- ^ Commands that end the session (e.g., ["quit", "exit"])
   }
 
--- ══════════════════════════════════════════════════════════════════════
--- RUNNER
--- ══════════════════════════════════════════════════════════════════════
-
--- | Run a simple agent (no extra effects). Returns final state.
---
--- Events stream via 'acOnEvent' callback, not collected.
---
--- @
--- main = do
---   finalState <- tidepool config myAgent
---   putStrLn $ "Final score: " <> show finalState.score
--- @
-tidepool :: forall s evt. AgentConfig s evt -> SimpleAgent s evt -> IO s
-tidepool config agent = do
-  -- Build CLI input handler (text-only, no photos)
-  -- For photo support, use GUI runner with camera integration
-  let inputHandler = InputHandler
-        { ihChoice = cliChoice
-        , ihText = cliText
-        , ihTextWithPhoto = \prompt -> do
-            -- CLI doesn't support photos - just get text
-            txt <- cliText prompt
-            pure (txt, [])
-        , ihDice = \_ _ -> error "Dice not supported in CLI runner"
-        , ihCustom = \tag _ -> error $ "Custom request '" <> T.unpack tag <> "' not supported in CLI - use GUI for photos"
-        }
-
-  -- Run the agent's full lifecycle
-  -- The agent stack is BaseEffects (no IOE). We inject into RunnerEffects which includes IOE.
-  -- inject allows the agent's effects (a subset) to run in the larger stack.
-  let theRun :: Eff (BaseEffects s evt) ()
-      theRun = agent.agentRun
-      widened :: Eff (RunnerEffects s evt) ()
-      widened = inject theRun
-
-  -- Now interpret using runGame's proven order (matches RunnerEffects)
-  ((), finalState) <- runEff
-    . runTime
-    . runRandom
-    . runEmit config.acOnEvent
-    . runState agent.agentInit
-    . runChatHistory
-    . runLog config.acLogLevel
-    . runRequestInput inputHandler
-    . runLLM config.acLLM
-    $ widened
-
-  pure finalState
-  where
-    -- CLI choice: numbered menu
-    cliChoice :: Text -> [(Text, a)] -> IO a
-    cliChoice prompt choices = do
-      TIO.putStrLn prompt
-      mapM_ printChoice (zip [1 :: Int ..] choices)
-      TIO.putStr "Enter number: "
-      hFlush stdout
-      line <- TIO.getLine
-      case reads (T.unpack line) of
-        [(n, "")] | n >= 1 && n <= length choices ->
-          pure $ snd (choices !! (n - 1))
-        _ -> do
-          TIO.putStrLn "Invalid choice, try again."
-          cliChoice prompt choices
-      where
-        printChoice (i, (label, _)) =
-          TIO.putStrLn $ T.pack (show i) <> ". " <> label
-
-    -- CLI text: simple line input
-    cliText :: Text -> IO Text
-    cliText prompt = do
-      TIO.putStr prompt
-      hFlush stdout
-      TIO.getLine
-
--- | Run an agent with extra effects.
---
--- You must provide an interpreter for the extra effects. The interpreter
--- runs in an IO context and can use IOE.
---
--- @
--- runDelta = tidepoolWith config runExternalEffects delta
---   where
---     runExternalEffects = runHabitica . runObsidian . runGitHub . runCalendar
--- @
---
--- TODO: Full implementation pending effect stack composition work.
--- The type-level list append (++) requires careful handling with effectful.
-tidepoolWith
-  :: forall s evt extra.
-     AgentConfig s evt
-  -> (forall es a. IOE :> es => Eff (extra ++ es) a -> Eff es a)
-  -> Agent s evt extra
-  -> IO s
-tidepoolWith _config _extraInterp _agent =
-  error "TODO: tidepoolWith - implement effect stack composition"
+-- Note: Platform-specific runners (tidepool, tidepoolWith) are in
+-- Tidepool.Effect.Runners in the tidepool-platform package.
+-- They interpret BaseEffects using real IO (HTTP, SQLite, etc.).

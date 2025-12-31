@@ -64,6 +64,7 @@ guiChoice bridge prompt options = do
     TextResponse _ -> error "Expected ChoiceResponse, got TextResponse"
     PhotoResponse _ _ -> error "Expected ChoiceResponse, got PhotoResponse"
     TextWithPhotoResponse {} -> error "Expected ChoiceResponse, got TextWithPhotoResponse"
+    CustomResponse _ -> error "Expected ChoiceResponse, got CustomResponse"
 
 -- | Handle a text input request via the GUI
 guiText :: GUIBridge state -> Text -> IO Text
@@ -89,6 +90,7 @@ guiText bridge prompt = do
     TextWithPhotoResponse txt _ _ -> pure txt  -- Ignore photo, return just text
     ChoiceResponse _ -> error "Expected TextResponse, got ChoiceResponse"
     PhotoResponse _ _ -> error "Expected TextResponse, got PhotoResponse"
+    CustomResponse _ -> error "Expected TextResponse, got CustomResponse"
 
 -- | Handle a dice selection request via the GUI
 --
@@ -125,6 +127,7 @@ guiDice bridge prompt diceWithHints = do
     TextResponse _ -> error "Expected ChoiceResponse, got TextResponse"
     PhotoResponse _ _ -> error "Expected ChoiceResponse, got PhotoResponse"
     TextWithPhotoResponse {} -> error "Expected ChoiceResponse, got TextWithPhotoResponse"
+    CustomResponse _ -> error "Expected ChoiceResponse, got CustomResponse"
 
 -- | Handle a photo upload request via the GUI
 --
@@ -161,6 +164,7 @@ guiPhoto bridge prompt = do
     TextWithPhotoResponse _ photoData mimeType -> pure (photoData, mimeType)
     ChoiceResponse _ -> error "Expected PhotoResponse, got ChoiceResponse"
     TextResponse _ -> error "Expected PhotoResponse, got TextResponse"
+    CustomResponse _ -> error "Expected PhotoResponse, got CustomResponse"
 
 -- | Handle a text input request with optional photo attachment
 --
@@ -198,6 +202,7 @@ guiTextWithPhoto bridge prompt = do
     TextWithPhotoResponse txt photoData mimeType -> pure (txt, [(photoData, mimeType)])
     ChoiceResponse _ -> error "Expected TextResponse, got ChoiceResponse"
     PhotoResponse _ _ -> error "Expected TextResponse, got PhotoResponse"
+    CustomResponse _ -> error "Expected TextResponse, got CustomResponse"
 
 -- | Handle a custom request via the GUI
 --
@@ -205,20 +210,6 @@ guiTextWithPhoto bridge prompt = do
 -- - "character-creation": Uses gbCharacterCreationResult MVar
 --
 -- Unknown tags return an error value.
---
--- ════════════════════════════════════════════════════════════════════════════
--- FIXME: MAKE GENERIC
--- ════════════════════════════════════════════════════════════════════════════
--- This is a stopgap. The "character-creation" tag is DM-specific and shouldn't
--- be hardcoded here. Proper solution:
---
---   1. GUIBridge gets a generic `gbCustomResult :: MVar Value`
---   2. PendingRequest gets `PendingCustom Text Value` (tag + payload)
---   3. GUI routes based on tag, any agent can define custom UI flows
---   4. Remove DM-specific gbCharacterCreationResult
---
--- For now, this works because DM is the only agent using custom requests.
--- ════════════════════════════════════════════════════════════════════════════
 guiCustom :: GUIBridge state -> Text -> Value -> IO Value
 guiCustom bridge tag _payload = case tag of
   "character-creation" -> do

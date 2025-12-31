@@ -1,6 +1,6 @@
--- | Core HTTP types and operations for Anthropic Messages API
--- This is the lowest layer - just typed domain types and HTTP calls
-module Tidepool.Anthropic.Http
+-- | Core types for Anthropic Messages API
+-- These are pure data types that can be used in WASM builds
+module Tidepool.Anthropic.Types
   ( -- * Request Types
     MessagesRequest(..)
   , Message(..)
@@ -22,19 +22,13 @@ module Tidepool.Anthropic.Http
 
     -- * Errors
   , ApiError(..)
-
-    -- * HTTP Operations
-  , callMessages
   ) where
 
 import Data.Aeson
 import Data.Aeson.Types (Parser)
 import Data.Text (Text)
 import qualified Data.Text as T
-import qualified Data.Text.Encoding as TE
-import Data.ByteString (ByteString)
 import GHC.Generics (Generic)
-import Network.HTTP.Req
 
 -- ══════════════════════════════════════════════════════════════
 -- REQUEST TYPES
@@ -361,28 +355,3 @@ data ApiError
       , errorMessage :: Text
       }
   deriving (Show, Eq, Generic)
-
--- ══════════════════════════════════════════════════════════════
--- HTTP OPERATIONS
--- ══════════════════════════════════════════════════════════════
-
--- | Make a Messages API call
--- This is the core HTTP operation - no tool loop logic here
-callMessages
-  :: Text               -- API key
-  -> MessagesRequest    -- Request
-  -> IO (Either ApiError MessagesResponse)
-callMessages apiKey request = runReq defaultHttpConfig $ do
-  let url = https "api.anthropic.com" /: "v1" /: "messages"
-      -- Include structured outputs beta header
-      headers = header "x-api-key" (TE.encodeUtf8 apiKey)
-             <> header "anthropic-version" ("2023-06-01" :: ByteString)
-             <> header "anthropic-beta" ("structured-outputs-2025-11-13,interleaved-thinking-2025-05-14" :: ByteString)
-             <> header "content-type" ("application/json" :: ByteString)
-
-  response <- req POST url (ReqBodyJson request) jsonResponse headers
-
-  let body = responseBody response :: Value
-  case fromJSON body of
-    Success resp -> pure $ Right resp
-    Error err -> pure $ Left $ ParseError (T.pack err)

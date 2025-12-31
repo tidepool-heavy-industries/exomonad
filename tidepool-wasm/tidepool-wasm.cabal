@@ -12,16 +12,16 @@ common warnings
 library
     import:           warnings
     exposed-modules:
-        Tidepool.Wasm.TestGraph
         Tidepool.Wasm.WireTypes
         Tidepool.Wasm.Ffi
         Tidepool.Wasm.Runner
+        Tidepool.Wasm.TestGraph
     build-depends:
         base >= 4.17 && < 5,
-        tidepool-core,
-        effectful-core >= 2.3 && < 3,
         aeson >= 2.1 && < 3,
-        text >= 2.0 && < 3
+        text >= 2.0 && < 3,
+        tidepool-core,
+        effectful-core >= 2.3 && < 3
 
     -- WASM-specific configuration
     if os(wasi)
