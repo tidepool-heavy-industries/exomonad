@@ -1,5 +1,8 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE UndecidableInstances #-}
 -- | IO-based effect runners that need platform dependencies
 --
 -- These runners require HTTP, SQLite, or GUI - not WASM-compatible.
@@ -11,9 +14,22 @@ module Tidepool.Effect.Runners
   , runLLM
   , runLLMWithTools
   , runLLMWithToolsHooked
+  , runLLMForCompression
   , ToolDispatcher
+    -- * Compression Types
+  , NotMember
+  , CompressionEffects
+  , CompressionDispatcher
+  , CompressionConfig(..)
+  , ChatHistoryConfig(..)
+  , defaultCompressionPrompt
+  , defaultCompressionSchema
+  , defaultCompressionConfig
+  , defaultChatHistoryConfig
     -- * Chat History with DB
   , runChatHistoryWithDB
+    -- * Chat History with Compression
+  , runChatHistoryWithCompression
     -- * Log with GUI Bridge
   , runLogWithBridge
     -- * Combined Runner
@@ -22,23 +38,24 @@ module Tidepool.Effect.Runners
 
 import Effectful
 import Effectful.Dispatch.Dynamic
+import Data.Kind (Constraint)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Aeson (Value(..), ToJSON, toJSON, encode, decode)
+import Data.Aeson (Value(..), toJSON, encode, decode)
 import qualified Data.Aeson.KeyMap as KM
 import qualified Data.Vector as V
 import qualified Data.Text.Encoding as TE
 import qualified Data.ByteString.Lazy as LBS
-import Data.IORef (IORef, newIORef, readIORef, writeIORef, modifyIORef)
+import Data.IORef (newIORef, readIORef, writeIORef, modifyIORef)
 import Data.Maybe (mapMaybe)
 import Database.SQLite.Simple (Connection)
+import GHC.TypeLits (TypeError, ErrorMessage(..))
 
 import qualified Tidepool.Anthropic.Client as Client
 import Tidepool.Anthropic.Client
   ( SingleCallRequest(..), SingleCallResponse(..)
-  , StopReason(..), ToolUse(..), Message(..), ContentBlock(..)
+  , StopReason(..), ToolUse(..)
   )
-import Tidepool.Anthropic.Types (ThinkingContent(..))
 import qualified Tidepool.GUI.Core as GUICore
 import Tidepool.GUI.Core (GUIBridge)
 import qualified Tidepool.Storage as Storage
@@ -60,90 +77,127 @@ type RunnerEffects s event =
 
 -- ToolDispatcher is re-exported from Tidepool.Effect.Types
 
--- | Run the LLM effect by calling the Anthropic API
-runLLM :: (IOE :> es, ChatHistory :> es, Log :> es) => LLMConfig -> Eff (LLM : es) a -> Eff es a
-runLLM config = interpret $ \_ -> \case
-  RunTurnOp systemPrompt userContent schema tools -> do
-    priorHistory <- getHistory
+-- ══════════════════════════════════════════════════════════════
+-- TYPE-LEVEL EFFECT MEMBERSHIP CHECK
+-- ══════════════════════════════════════════════════════════════
 
-    let userText = extractText userContent
-    logDebug $ "[LLM] Prior history: " <> T.pack (show (length priorHistory)) <> " messages"
-    logDebug $ "[LLM] User action: " <> userText
+-- | Type family that produces a compile error if an effect is present in the stack.
+-- Used to enforce that compression LLM cannot access ChatHistory (prevents recursion).
+type family NotMember (e :: Effect) (es :: [Effect]) :: Constraint where
+  NotMember e '[] = ()
+  NotMember e (e : _) = TypeError
+    ('Text "Effect " ':<>: 'ShowType e ':<>: 'Text " must not be in effect stack for compression")
+  NotMember e (_ : es) = NotMember e es
 
-    let clientConfig = Client.ClientConfig
-          { Client.apiKey = config.llmApiKey
-          , Client.defaultModel = config.llmModel
-          , Client.defaultMaxTokens = config.llmMaxTokens
-          }
-        outputSchema = if schema == toJSON () then Nothing else Just schema
-        userMsg = Message User userContent
-        turnReq = Client.TurnRequest
-          { Client.prompt = userText
-          , Client.priorMessages = priorHistory
-          , Client.systemPrompt = Just systemPrompt
-          , Client.outputSchema = outputSchema
-          , Client.tools = tools
-          , Client.toolExecutor = stubToolExecutor
-          , Client.thinkingBudget = config.llmThinkingBudget
-          }
+-- ══════════════════════════════════════════════════════════════
+-- COMPRESSION TYPES
+-- ══════════════════════════════════════════════════════════════
 
-    result <- liftIO $ Client.runTurnRequest clientConfig turnReq
-    case result of
-      Left err -> do
-        logWarn $ "[LLM] API error: " <> T.pack (show err)
-        pure $ TurnCompleted TurnResult
-          { trOutput = toJSON ()
-          , trToolsInvoked = []
-          , trNarrative = "*The spirits of Doskvol are silent. The world waits.*"
-          , trThinking = ""
-          }
-      Right resp -> do
-        let assistantMsg = Message Assistant [TextBlock resp.narrative]
-        appendMessages [userMsg, assistantMsg]
+-- | Effects available to compression tools (NO ChatHistory, NO Goto).
+-- This restricted stack prevents recursion in the compression LLM.
+type CompressionEffects state event =
+  '[ State state, Emit event, RequestInput, Random, Log, IOE ]
 
-        logDebug $ "[LLM] Assistant response:\n" <> resp.narrative
+-- | Tool dispatcher for compression - polymorphic in effect stack.
+-- The actual effect constraints are enforced at call site via 'runLLMForCompression'.
+type CompressionDispatcher es =
+  Text -> Value -> Eff es (Either Text ToolResult)
 
-        pure $ TurnCompleted TurnResult
-          { trOutput = resp.output
-          , trToolsInvoked = map convertInvocation resp.toolsInvoked
-          , trNarrative = resp.narrative
-          , trThinking = resp.thinking
-          }
-  where
-    stubToolExecutor :: Text -> Value -> IO (Either Text Value)
-    stubToolExecutor _name _input = pure $ Right (toJSON ())
+-- | Configuration for the compression LLM
+-- The 'es' type parameter is the effect stack available to tools.
+data CompressionConfig es = CompressionConfig
+  { ccLLMConfig   :: LLMConfig            -- ^ LLM configuration (can use cheaper model)
+  , ccPrompt      :: Text                 -- ^ System prompt for compression
+  , ccSchema      :: Value                -- ^ Output schema for compression
+  , ccTools       :: [Value]              -- ^ Tool definitions (JSON)
+  , ccDispatcher  :: CompressionDispatcher es  -- ^ Tool dispatcher
+  }
 
-    convertInvocation :: Client.ToolInvocation -> ToolInvocation
-    convertInvocation inv = ToolInvocation
-      { tiName = inv.invocationName
-      , tiInput = inv.invocationInput
-      , tiOutput = inv.invocationOutput
-      }
+-- | Configuration for automatic chat history compression
+-- The 'es' type parameter is the effect stack available to compression tools.
+data ChatHistoryConfig es = ChatHistoryConfig
+  { chcTokenThreshold :: Int                 -- ^ Trigger compression when estimated tokens exceed this
+  , chcRecentToKeep   :: Int                 -- ^ Number of recent messages to preserve verbatim
+  , chcCompression    :: CompressionConfig es -- ^ Compression LLM configuration
+  }
 
--- | Run the LLM effect with full tool execution support
-runLLMWithTools
-  :: forall es event a.
-     (IOE :> es, Emit event :> es, RequestInput :> es, Random :> es, ChatHistory :> es, Log :> es)
-  => LLMConfig
-  -> ToolDispatcher event es
-  -> Eff (LLM : es) a
-  -> Eff es a
-runLLMWithTools = runLLMWithToolsHooked @es @event noHooks
+-- | Default system prompt for compression
+defaultCompressionPrompt :: Text
+defaultCompressionPrompt = T.unlines
+  [ "You are a conversation summarizer. Given a conversation history,"
+  , "produce a compressed version that preserves:"
+  , "1. Key facts and decisions made"
+  , "2. Important context about characters/entities mentioned"
+  , "3. The emotional tone and relationship dynamics"
+  , "4. Any unresolved threads or pending actions"
+  , ""
+  , "Output a single summary that can replace the original conversation"
+  , "while maintaining context for future turns."
+  ]
 
--- | Run the LLM effect with hooks for lifecycle events
-runLLMWithToolsHooked
-  :: forall es event a.
-     (IOE :> es, Emit event :> es, RequestInput :> es, Random :> es, ChatHistory :> es, Log :> es)
+-- | Default schema for compression output.
+-- Expects a JSON object with a 'summary' field containing the compressed text.
+defaultCompressionSchema :: Value
+defaultCompressionSchema = Object $ KM.fromList
+  [ ("type", String "object")
+  , ("properties", Object $ KM.fromList
+      [ ("summary", Object $ KM.fromList
+          [ ("type", String "string")
+          , ("description", String "A concise summary of the conversation that preserves key context")
+          ])
+      ])
+  , ("required", Array $ V.fromList [String "summary"])
+  ]
+
+-- | Create a default compression config with no tools.
+-- Uses a simple summarization prompt and schema.
+defaultCompressionConfig :: LLMConfig -> CompressionConfig es
+defaultCompressionConfig llmConfig = CompressionConfig
+  { ccLLMConfig   = llmConfig
+  , ccPrompt      = defaultCompressionPrompt
+  , ccSchema      = defaultCompressionSchema
+  , ccTools       = []  -- No tools by default
+  , ccDispatcher  = \_ _ -> pure $ Right (ToolSuccess Null)  -- Stub dispatcher
+  }
+
+-- | Create a default chat history config.
+-- Uses 8000 token threshold and keeps 8 recent messages.
+defaultChatHistoryConfig :: LLMConfig -> ChatHistoryConfig es
+defaultChatHistoryConfig llmConfig = ChatHistoryConfig
+  { chcTokenThreshold = 8000
+  , chcRecentToKeep   = 8
+  , chcCompression    = defaultCompressionConfig llmConfig
+  }
+
+-- ══════════════════════════════════════════════════════════════
+-- SHARED LLM CORE
+-- ══════════════════════════════════════════════════════════════
+
+-- | Operations for reading/writing chat history (optional for compression)
+data ChatHistoryOps es = ChatHistoryOps
+  { choGetHistory     :: Eff es [Message]
+  , choAppendMessages :: [Message] -> Eff es ()
+  }
+
+-- | Shared LLM implementation - ChatHistory operations are optional.
+-- This allows both normal LLM runners (with ChatHistory) and compression
+-- LLM runners (without ChatHistory) to share the same core logic.
+runLLMCore
+  :: forall es a.
+     (IOE :> es, Log :> es)
   => LLMHooks
   -> LLMConfig
-  -> ToolDispatcher event es
+  -> Maybe (ChatHistoryOps es)  -- Nothing for compression, Just for normal
+  -> (Text -> Value -> Eff es (Either Text ToolResult))  -- Tool dispatcher
   -> Eff (LLM : es) a
   -> Eff es a
-runLLMWithToolsHooked hooks config dispatcher = interpret $ \_ -> \case
+runLLMCore hooks config mChatOps dispatcher = interpret $ \_ -> \case
   RunTurnOp systemPrompt userContent schema tools -> do
     liftIO hooks.onTurnStart
 
-    priorHistory <- getHistory
+    priorHistory <- case mChatOps of
+      Nothing -> pure []  -- Compression: no prior history
+      Just ops -> ops.choGetHistory
 
     let userText = extractText userContent
     logDebug $ "[LLM] Prior history: " <> T.pack (show (length priorHistory)) <> " messages"
@@ -167,8 +221,12 @@ runLLMWithToolsHooked hooks config dispatcher = interpret $ \_ -> \case
         return (TurnBroken breakReason)
 
       Right (result, finalContent) -> do
-        let assistantMsg = Message Assistant finalContent
-        appendMessages [actionMsg, assistantMsg]
+        -- Only append to history if we have ChatHistory operations
+        case mChatOps of
+          Nothing -> pure ()
+          Just ops -> do
+            let assistantMsg = Message Assistant finalContent
+            ops.choAppendMessages [actionMsg, assistantMsg]
 
         logDebug $ "[LLM] Assistant response:\n" <> result.trNarrative
 
@@ -316,6 +374,118 @@ runLLMWithToolsHooked hooks config dispatcher = interpret $ \_ -> \case
     tryParseJson :: Text -> Maybe Value
     tryParseJson t = decode (LBS.fromStrict $ TE.encodeUtf8 t)
 
+-- ══════════════════════════════════════════════════════════════
+-- LLM RUNNERS
+-- ══════════════════════════════════════════════════════════════
+
+-- | Run the LLM effect by calling the Anthropic API
+runLLM :: (IOE :> es, ChatHistory :> es, Log :> es) => LLMConfig -> Eff (LLM : es) a -> Eff es a
+runLLM config = interpret $ \_ -> \case
+  RunTurnOp systemPrompt userContent schema tools -> do
+    priorHistory <- getHistory
+
+    let userText = extractText userContent
+    logDebug $ "[LLM] Prior history: " <> T.pack (show (length priorHistory)) <> " messages"
+    logDebug $ "[LLM] User action: " <> userText
+
+    let clientConfig = Client.ClientConfig
+          { Client.apiKey = config.llmApiKey
+          , Client.defaultModel = config.llmModel
+          , Client.defaultMaxTokens = config.llmMaxTokens
+          }
+        outputSchema = if schema == toJSON () then Nothing else Just schema
+        userMsg = Message User userContent
+        turnReq = Client.TurnRequest
+          { Client.prompt = userText
+          , Client.priorMessages = priorHistory
+          , Client.systemPrompt = Just systemPrompt
+          , Client.outputSchema = outputSchema
+          , Client.tools = tools
+          , Client.toolExecutor = stubToolExecutor
+          , Client.thinkingBudget = config.llmThinkingBudget
+          }
+
+    result <- liftIO $ Client.runTurnRequest clientConfig turnReq
+    case result of
+      Left err -> do
+        logWarn $ "[LLM] API error: " <> T.pack (show err)
+        pure $ TurnCompleted TurnResult
+          { trOutput = toJSON ()
+          , trToolsInvoked = []
+          , trNarrative = "*The spirits of Doskvol are silent. The world waits.*"
+          , trThinking = ""
+          }
+      Right resp -> do
+        let assistantMsg = Message Assistant [TextBlock resp.narrative]
+        appendMessages [userMsg, assistantMsg]
+
+        logDebug $ "[LLM] Assistant response:\n" <> resp.narrative
+
+        pure $ TurnCompleted TurnResult
+          { trOutput = resp.output
+          , trToolsInvoked = map convertInvocation resp.toolsInvoked
+          , trNarrative = resp.narrative
+          , trThinking = resp.thinking
+          }
+  where
+    stubToolExecutor :: Text -> Value -> IO (Either Text Value)
+    stubToolExecutor _name _input = pure $ Right (toJSON ())
+
+    convertInvocation :: Client.ToolInvocation -> ToolInvocation
+    convertInvocation inv = ToolInvocation
+      { tiName = inv.invocationName
+      , tiInput = inv.invocationInput
+      , tiOutput = inv.invocationOutput
+      }
+
+-- | Run the LLM effect with full tool execution support
+runLLMWithTools
+  :: forall es event a.
+     (IOE :> es, Emit event :> es, RequestInput :> es, Random :> es, ChatHistory :> es, Log :> es)
+  => LLMConfig
+  -> ToolDispatcher event es
+  -> Eff (LLM : es) a
+  -> Eff es a
+runLLMWithTools = runLLMWithToolsHooked @es @event noHooks
+
+-- | Run the LLM effect with hooks for lifecycle events
+-- Uses shared 'runLLMCore' with ChatHistory operations enabled.
+runLLMWithToolsHooked
+  :: forall es event a.
+     (IOE :> es, Emit event :> es, RequestInput :> es, Random :> es, ChatHistory :> es, Log :> es)
+  => LLMHooks
+  -> LLMConfig
+  -> ToolDispatcher event es
+  -> Eff (LLM : es) a
+  -> Eff es a
+runLLMWithToolsHooked hooks config dispatcher =
+  let chatOps = ChatHistoryOps
+        { choGetHistory = getHistory
+        , choAppendMessages = appendMessages
+        }
+  in runLLMCore hooks config (Just chatOps) dispatcher
+
+-- | Run the LLM effect for compression - NO ChatHistory access.
+-- This is used during history compression to prevent infinite recursion.
+-- The 'NotMember ChatHistory es' constraint is a compile-time guarantee
+-- that ChatHistory cannot be accessed by the compression LLM or its tools.
+runLLMForCompression
+  :: forall es a.
+     ( NotMember ChatHistory es  -- Compile error if ChatHistory in scope
+     , Log :> es
+     , IOE :> es
+     )
+  => LLMConfig
+  -> (Text -> Value -> Eff es (Either Text ToolResult))  -- Tool dispatcher
+  -> Eff (LLM : es) a
+  -> Eff es a
+runLLMForCompression config =
+  runLLMCore noHooks config Nothing  -- Nothing = no ChatHistory ops
+
+-- ══════════════════════════════════════════════════════════════
+-- CHAT HISTORY RUNNERS
+-- ══════════════════════════════════════════════════════════════
+
 -- | Run the ChatHistory effect backed by SQLite database
 runChatHistoryWithDB
   :: IOE :> es
@@ -338,6 +508,154 @@ runChatHistoryWithDB conn gameId mCursor action = do
       Storage.appendMessages conn gameId msgs
     ClearHistory -> liftIO $ writeIORef ref []
     ) action
+
+-- | Run the ChatHistory effect with automatic compression.
+-- When the estimated token count exceeds the threshold, older messages
+-- are compressed using an LLM call (with restricted effect stack).
+--
+-- The compression LLM has access to tools but NOT to ChatHistory,
+-- which prevents infinite recursion.
+--
+-- __Note__: Compression is performed synchronously within 'AppendMessages'.
+-- If the compression LLM call takes significant time (likely for API calls),
+-- this will block the caller until compression completes.
+runChatHistoryWithCompression
+  :: forall es a.
+     ( RequestInput :> es
+     , Random :> es
+     , Log :> es
+     , IOE :> es
+     , NotMember ChatHistory es  -- Ensure es doesn't have ChatHistory
+     )
+  => ChatHistoryConfig es
+  -> Eff (ChatHistory : es) a
+  -> Eff es a
+runChatHistoryWithCompression config action = do
+  historyRef <- liftIO $ newIORef ([] :: [Message])
+
+  interpret (\_ -> \case
+    GetHistory -> liftIO $ readIORef historyRef
+
+    ClearHistory -> liftIO $ writeIORef historyRef []
+
+    AppendMessages newMsgs -> do
+      currentHistory <- liftIO $ readIORef historyRef
+      let updatedHistory = currentHistory ++ newMsgs
+          tokenCount = estimateTokens updatedHistory
+
+      if tokenCount > config.chcTokenThreshold
+        then do
+          logInfo $ "[ChatHistory] Compressing: " <> T.pack (show tokenCount)
+                 <> " tokens > " <> T.pack (show config.chcTokenThreshold) <> " threshold"
+          compressed <- compressHistory config updatedHistory
+          liftIO $ writeIORef historyRef compressed
+        else
+          liftIO $ writeIORef historyRef updatedHistory
+    ) action
+
+-- | Compress old messages using the compression LLM
+compressHistory
+  :: forall es.
+     ( RequestInput :> es
+     , Random :> es
+     , Log :> es
+     , IOE :> es
+     , NotMember ChatHistory es
+     )
+  => ChatHistoryConfig es
+  -> [Message]
+  -> Eff es [Message]
+compressHistory config history = do
+  let recentCount = config.chcRecentToKeep
+      (toCompress, toKeep) = splitAt (length history - recentCount) history
+
+  -- If nothing to compress, return as-is
+  if null toCompress
+    then pure history
+    else do
+      logDebug $ "[ChatHistory] Compressing " <> T.pack (show (length toCompress))
+              <> " messages, keeping " <> T.pack (show (length toKeep)) <> " recent"
+
+      -- Format messages for compression prompt
+      let formattedHistory = formatMessagesForCompression toCompress
+          userPrompt = "Compress this conversation:\n\n" <> formattedHistory
+
+      -- Run compression LLM in restricted effect stack
+      -- CRITICAL: This runs WITHOUT ChatHistory, preventing recursion
+      compressionResult <- runCompressionLLM config userPrompt
+
+      pure $ compressionResult ++ toKeep
+
+-- | Run the compression LLM call
+-- Uses 'runLLMForCompression' which requires ChatHistory to be absent from the stack.
+runCompressionLLM
+  :: forall es.
+     ( RequestInput :> es
+     , Random :> es
+     , Log :> es
+     , IOE :> es
+     , NotMember ChatHistory es
+     )
+  => ChatHistoryConfig es
+  -> Text  -- User prompt with formatted messages
+  -> Eff es [Message]
+runCompressionLLM config userPrompt = do
+  let cc = config.chcCompression
+
+  -- Run the LLM call for compression
+  -- Note: We're in an effect stack that does NOT have ChatHistory,
+  -- so runLLMForCompression's NotMember constraint is satisfied.
+  runLLMForCompression cc.ccLLMConfig cc.ccDispatcher $ do
+    outcome <- runTurnContent cc.ccPrompt [TextBlock userPrompt] cc.ccSchema cc.ccTools
+    pure $ case outcome of
+      TurnBroken reason ->
+        -- Fallback: just use a placeholder
+        [Message Assistant [TextBlock $ "[Compressed history - interrupted: " <> reason <> "]"]]
+
+      TurnCompleted parseResult -> case parseResult of
+        TurnParsed tr ->
+          -- Extract summary from the structured output
+          case extractSummary tr.trOutput of
+            Just summary -> [Message Assistant [TextBlock $ "[Compressed history]\n" <> summary]]
+            Nothing -> [Message Assistant [TextBlock $ "[Compressed history]\n" <> tr.trNarrative]]
+        TurnParseFailed{tpfNarrative = narr} ->
+          -- Fallback on parse failure
+          [Message Assistant [TextBlock $ "[Compressed history]\n" <> narr]]
+  where
+    -- Extract summary from structured output.
+    -- Tries common field names: "summary", "coSummary", "text", "content"
+    extractSummary :: Value -> Maybe Text
+    extractSummary (Object obj) =
+      let candidates = ["summary", "coSummary", "text", "content"]
+      in foldr (\key acc -> case KM.lookup key obj of
+          Just (String s) -> Just s
+          _ -> acc) Nothing candidates
+    extractSummary _ = Nothing
+
+-- | Format messages for compression prompt.
+-- Includes all content types to preserve context for the compressor.
+formatMessagesForCompression :: [Message] -> Text
+formatMessagesForCompression = T.intercalate "\n\n" . map formatMessage
+  where
+    formatMessage msg =
+      let roleLabel = case msg.role of
+            User -> "USER"
+            Assistant -> "ASSISTANT"
+          contentText = T.intercalate " " (map formatBlock msg.content)
+      in roleLabel <> ": " <> contentText
+
+    formatBlock :: ContentBlock -> Text
+    formatBlock (TextBlock t) = t
+    formatBlock (ImageBlock _) = "[IMAGE]"
+    formatBlock (ToolUseBlock tu) = "[TOOL:" <> tu.toolName <> "]"
+    formatBlock (ToolResultBlock tr) = "[TOOL_RESULT:" <> tr.toolResultContent <> "]"
+    formatBlock (ThinkingBlock tc) = "[THINKING:" <> tc.thinkingText <> "]"
+    formatBlock (RedactedThinkingBlock _) = "[REDACTED_THINKING]"
+    formatBlock (JsonBlock _) = "[JSON]"
+
+-- ══════════════════════════════════════════════════════════════
+-- LOG AND GAME RUNNERS
+-- ══════════════════════════════════════════════════════════════
 
 -- | Run the Log effect, logging to GUI bridge debug panel
 runLogWithBridge
