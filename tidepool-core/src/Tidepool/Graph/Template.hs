@@ -98,6 +98,7 @@ module Tidepool.Graph.Template
   , makeTemplateCompiled
   ) where
 
+import Data.Char (isAsciiUpper, toLower)
 import Data.Kind (Constraint, Type)
 import Data.Text (Text)
 import Control.Monad.Writer (Writer)
@@ -306,7 +307,4 @@ makeTemplateCompiled ctxName path = do
     lowerFirst [] = []
     lowerFirst (c:cs) = toLower c : cs
 
-    toLower :: Char -> Char
-    toLower c
-      | c >= 'A' && c <= 'Z' = toEnum (fromEnum c + 32)
-      | otherwise = c
+    -- toLower is imported from Data.Char

@@ -71,6 +71,6 @@ computeHandlerWasm n = do
 computeMultiEffectWasm :: Int -> WasmM (GotoChoice '[To Exit Int])
 computeMultiEffectWasm n = do
   logInfo $ "Step 1: received " <> T.pack (show n)
-  logInfo $ "Step 2: computing"
+  logInfo "Step 2: computing"
   logInfo $ "Step 3: returning " <> T.pack (show (n + 1))
   pure $ gotoExit (n + 1)

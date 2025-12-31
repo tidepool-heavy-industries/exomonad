@@ -51,6 +51,7 @@ module Tidepool.Graph.Mermaid
 
 import Data.Kind (Type)
 import Data.Proxy (Proxy(..))
+import Data.Char (isAsciiUpper)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Typeable (TypeRep)
@@ -162,7 +163,7 @@ toMermaidWithConfig config info = T.unlines $
 -- | Generate node declarations.
 nodeDeclarations :: MermaidConfig -> GraphInfo -> [Text]
 nodeDeclarations config info =
-  ["    %% Nodes"] ++ map (renderNode config) info.giNodes
+  "    %% Nodes" : map (renderNode config) info.giNodes
 
 -- | Render a single node declaration.
 renderNode :: MermaidConfig -> NodeInfo -> Text
@@ -184,7 +185,7 @@ groupDeclarations :: GraphInfo -> [Text]
 groupDeclarations info
   | null info.giGroups = []
   | otherwise =
-      ["    %% Groups"] ++ concatMap renderGroup info.giGroups
+      "    %% Groups" : concatMap renderGroup info.giGroups
 
 -- | Render a subgraph.
 renderGroup :: (Text, [Text]) -> [Text]
@@ -283,7 +284,7 @@ simplifyType t = T.pack $ go $ T.unpack t
       (_, '.':rest) ->
         -- Check if next segment is uppercase (module) or lowercase (end)
         case rest of
-          (c:_) | c >= 'A' && c <= 'Z' -> go rest
+          (c:_) | isAsciiUpper c -> go rest
           _ -> s
       _ -> s
 
@@ -321,8 +322,8 @@ toStateDiagramWithConfig config info = T.unlines $
 -- | Generate state definitions with annotations.
 stateDefinitions :: MermaidConfig -> GraphInfo -> [Text]
 stateDefinitions config info =
-  ["    %% State definitions"]
-  ++ map (renderState config) info.giNodes
+  "    %% State definitions"
+  : map (renderState config) info.giNodes
 
 -- | Render a state definition.
 renderState :: MermaidConfig -> NodeInfo -> Text

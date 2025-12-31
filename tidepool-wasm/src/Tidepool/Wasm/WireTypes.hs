@@ -122,8 +122,8 @@ data EffectResult
 
 instance ToJSON EffectResult where
   toJSON (ResSuccess val) = object $
-    [ "type" .= ("success" :: Text)
-    ] ++ maybe [] (\v -> ["value" .= v]) val
+    ("type" .= ("success" :: Text))
+    : maybe [] (\v -> ["value" .= v]) val
   toJSON (ResError msg) = object
     [ "type" .= ("error" :: Text)
     , "message" .= msg

@@ -197,7 +197,7 @@ questionHandlerWasm msg = do
         String t -> t
         _        -> "I'm thinking about that question: \"" <> msg.unUserMessage <> "\""
 
-  logInfo $ "Generated answer for question"
+  logInfo "Generated answer for question"
   pure $ gotoExit (Response responseText)
 
 

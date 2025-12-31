@@ -3,7 +3,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FunctionalDependencies #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -254,7 +253,7 @@ class CallHandler handler payload es targets | handler -> payload es targets whe
 
 -- | Logic node handler: simple function invocation.
 instance CallHandler (payload -> Eff es (GotoChoice targets)) payload es targets where
-  callHandler f p = f p
+  callHandler = id
 
 -- | LLM node handler: execute via executeLLMHandler.
 --

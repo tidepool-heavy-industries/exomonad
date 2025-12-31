@@ -54,9 +54,9 @@ import Tidepool.Schema (HasJSONSchema(..), JSONSchema(..), SchemaType(..), objec
 -- EXAMPLE TYPES
 -- ════════════════════════════════════════════════════════════════════════════
 
-data Message = Message { msgContent :: String }
+newtype Message = Message { msgContent :: String }
 data Intent = IntentRefund | IntentQuestion | IntentComplaint
-data Response = Response { respText :: String }
+newtype Response = Response { respText :: String }
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- V2 TOOL EXAMPLE
@@ -74,7 +74,7 @@ data SearchInput = SearchInput
   deriving anyclass (FromJSON, ToJSON)
 
 -- | Tool output type for search results.
-data SearchOutput = SearchOutput
+newtype SearchOutput = SearchOutput
   { results :: [Text]   -- ^ List of matching results
   }
   deriving (Show, Eq, Generic)
@@ -226,7 +226,7 @@ data RefundTpl
 data FaqTpl
 
 -- | Dummy context for refund/faq (would have real context in production)
-data SimpleContext = SimpleContext { scContent :: Text }
+newtype SimpleContext = SimpleContext { scContent :: Text }
 
 -- Dummy TemplateDef instances for RefundTpl and FaqTpl
 -- (In real code, these would have proper templates)
@@ -387,7 +387,7 @@ routingHandlers = RoutingGraph
       Nothing  -- no system template
       (templateCompiled @RefundTpl)  -- user template
       (\intent -> pure SimpleContext { scContent = T.pack $ "Processing: " ++ show intent })
-      (\response -> pure $ gotoExit response)
+      (pure . gotoExit)
 
   , rgExit    = Proxy @Response
   }
