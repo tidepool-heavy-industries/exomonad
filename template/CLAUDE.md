@@ -22,7 +22,7 @@ An agent is a **state machine** where:
 │                                                             │
 │  1. Entry receives Input                                    │
 │  2. sgProcess (LLM node):                                   │
-│     - Handler builds template context from Input            │
+│     - Handler builds template context from Input + History  │
 │     - Template renders context → prompt string              │
 │     - LLM called with prompt + Schema                       │
 │     - LLM returns structured Output                         │
@@ -184,11 +184,54 @@ Templates receive context from LLM handlers. Variables like `{{ input }}` are
 populated by the handler's `buildContext` function. The context type must have
 a `ToGVal` instance for template rendering.
 
+## Chat History
+
+The template includes chat history integration via the `ChatHistory` effect.
+
+### How It Works
+
+1. **Effect**: Handlers declare `ChatHistory` in their effect list via `AsHandler '[ChatHistory]`
+2. **Access**: Use `getHistory` to retrieve conversation history as `[Message]`
+3. **Formatting**: `formatHistory` converts raw messages to simplified `[HistoryMessage]`
+4. **Template**: The `{{ history }}` variable is available in templates
+
+### Template Usage
+
+```jinja
+{% if history %}
+## Conversation History
+
+{% for msg in history %}
+**{{ msg.role }}**: {{ msg.content }}
+
+{% endfor %}
+---
+
+{% endif %}
+```
+
+### HistoryMessage Type
+
+The `HistoryMessage` type provides a simplified view of messages:
+
+```haskell
+data HistoryMessage = HistoryMessage
+  { role :: Text    -- "user" or "assistant"
+  , content :: Text -- Text content only (images/tools stripped)
+  }
+```
+
+### Runner Requirements
+
+The runner must interpret the `ChatHistory` effect. Options:
+- `runChatHistory` - Simple in-memory (tidepool-core)
+- `runChatHistoryWithDB` - SQLite-backed (tidepool-platform)
+- `runChatHistoryWithCompression` - Auto-compresses long histories (tidepool-platform)
+
 ## Unfinished Features (Stubs)
 
 The following features are planned but not yet stable:
 
-- **Chat History**: Integration with chat history effect
 - **Self-Loops**: Nodes that can loop back to themselves
 - **Tools**: LLM tool use within nodes
 
@@ -220,6 +263,7 @@ for complete runnable agents.
 | Type-safe graph definition | Complete |
 | Mermaid diagram generation | Complete |
 | Template dependency tree | Complete |
+| Chat history integration | Complete |
 | Stub handlers | Complete |
 | LLM API integration | Requires tidepool-platform |
 | Graph executor | Requires tidepool-core runner |

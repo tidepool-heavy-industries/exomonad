@@ -47,7 +47,7 @@ resultSchema = $(deriveJSONSchema ''Result)
 
 -- | A minimal graph: Entry -> process (LLM) -> route (Logic) -> Exit
 --
--- This demonstrates the core pattern without self-loops or chat history.
+-- This demonstrates the core pattern with chat history integration.
 -- See tidepool-core/src/Tidepool/Graph/CLAUDE.md for DSL documentation.
 --
 -- Pattern:
