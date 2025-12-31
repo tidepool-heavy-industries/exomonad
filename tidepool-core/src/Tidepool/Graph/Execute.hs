@@ -47,14 +47,14 @@ import Data.Kind (Constraint, Type)
 import Effectful (Effect, Eff)
 import GHC.Generics (Generic(..))
 import GHC.Records (HasField(..))
-import GHC.TypeLits (Symbol, KnownSymbol)
+import GHC.TypeLits (Symbol, KnownSymbol, TypeError, ErrorMessage(..))
 
 import Tidepool.Graph.Edges (GetNeeds)
 import Tidepool.Graph.Generic (AsHandler, FieldsWithNamesOf)
 import Tidepool.Graph.Generic.Core (Entry, AsGraph)
 import qualified Tidepool.Graph.Generic.Core as G (Exit)
 import Tidepool.Graph.Goto (GotoChoice(..), OneOf(..), To)
-import Tidepool.Graph.Types (Exit)
+import Tidepool.Graph.Types (Exit, Self)
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -206,6 +206,23 @@ class DispatchGoto graph targets es exitType where
 
 
 -- ════════════════════════════════════════════════════════════════════════════
+-- ERROR CASE: EMPTY TARGET LIST
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Error case: Empty target list is invalid.
+--
+-- A GotoChoice must have at least one target. This instance produces a clear
+-- type error rather than an opaque "No instance" message.
+instance TypeError
+  ('Text "Cannot dispatch on empty target list"
+   ':$$: 'Text ""
+   ':$$: 'Text "A GotoChoice must have at least one target (typically To Exit exitType)."
+   ':$$: 'Text "Check that your UsesEffects annotation includes valid Goto effects."
+  ) => DispatchGoto graph '[] es exitType where
+  dispatchGoto = error "unreachable: empty target list"
+
+
+-- ════════════════════════════════════════════════════════════════════════════
 -- EXIT INSTANCES
 -- ════════════════════════════════════════════════════════════════════════════
 
@@ -225,6 +242,32 @@ instance {-# OVERLAPPABLE #-}
   dispatchGoto _ (GotoChoice (Here result)) = pure result
   dispatchGoto graph (GotoChoice (There rest)) =
     dispatchGoto @graph @rest graph (GotoChoice rest)
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- SELF-LOOP INSTANCES
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Self-loop as only target: not yet implemented.
+--
+-- Self-loops require tracking the "current" handler to re-invoke.
+-- This instance provides a clear error rather than failing with HasField.
+instance TypeError
+  ('Text "Self-loop dispatch not yet implemented"
+   ':$$: 'Text ""
+   ':$$: 'Text "To Self transitions require a graph runner that tracks"
+   ':$$: 'Text "the current node. Use explicit Goto to a named node instead."
+  ) => DispatchGoto graph '[To Self payload] es exitType where
+  dispatchGoto = error "unreachable: self-loop"
+
+-- | Self first with more targets: not yet implemented.
+instance {-# OVERLAPPABLE #-} TypeError
+  ('Text "Self-loop dispatch not yet implemented"
+   ':$$: 'Text ""
+   ':$$: 'Text "To Self transitions require a graph runner that tracks"
+   ':$$: 'Text "the current node. Use explicit Goto to a named node instead."
+  ) => DispatchGoto graph (To Self payload ': rest) es exitType where
+  dispatchGoto = error "unreachable: self-loop"
 
 
 -- ════════════════════════════════════════════════════════════════════════════

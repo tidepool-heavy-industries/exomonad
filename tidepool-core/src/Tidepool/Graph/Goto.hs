@@ -57,10 +57,12 @@ module Tidepool.Graph.Goto
 
     -- * OneOf Sum Type
   , OneOf(..)
-  , Inject(..)
   , Payloads
   , PayloadOf
   , InjectTarget(..)
+  -- Note: Inject has been removed from exports. It uses type equality which
+  -- finds the first match in duplicate-type lists. Use InjectTarget instead,
+  -- which matches on full (To name payload) markers for correct positioning.
 
     -- * GotoChoice Return Type
   , To
