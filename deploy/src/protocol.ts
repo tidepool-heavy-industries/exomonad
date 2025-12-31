@@ -144,7 +144,9 @@ export type SerializableEffect =
   | LogInfoEffect
   | LogErrorEffect
   | HabiticaEffect
-  | TelegramSendEffect;
+  | TelegramSendEffect
+  | TelegramReceiveEffect
+  | TelegramTryReceiveEffect;
 
 /**
  * LLM completion request - matches Haskell EffLlmComplete.
@@ -190,19 +192,64 @@ export interface HabiticaEffect {
   eff_hab_payload: unknown;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// TELEGRAM EFFECT TYPES (from tidepool-telegram-ts)
+// ═══════════════════════════════════════════════════════════════════════════
+
 /**
- * Send a message via Telegram Bot API.
- * Ready for WASM state machines to yield when they need to send messages.
- * Note: The current echo bot in TelegramDO calls sendMessage directly.
+ * Outgoing messages that can be sent to the user.
+ * Mirrors Haskell: Tidepool.Telegram.Types.OutgoingMessage
+ */
+export type TelegramOutgoingMessage =
+  | { type: 'text'; text: string }
+  | { type: 'photo'; media: string; caption?: string }
+  | { type: 'document'; media: string; filename: string }
+  | { type: 'buttons'; text: string; buttons: TelegramInlineButton[][] };
+
+/**
+ * Inline keyboard button with callback data.
+ */
+export interface TelegramInlineButton {
+  text: string;
+  data: unknown;
+}
+
+/**
+ * Incoming messages received from the user.
+ * Mirrors Haskell: Tidepool.Telegram.Types.IncomingMessage
+ */
+export type TelegramIncomingMessage =
+  | { type: 'text'; text: string }
+  | { type: 'photo'; media: string; caption?: string }
+  | { type: 'document'; media: string; filename: string }
+  | { type: 'button_click'; data: unknown };
+
+/**
+ * Send a message (fire and forget).
+ * Mirrors Haskell: Send :: OutgoingMessage -> Telegram m ()
  */
 export interface TelegramSendEffect {
-  type: "TelegramSend";
-  /** Target chat ID */
-  eff_chat_id: number;
-  /** Message text */
-  eff_text: string;
-  /** Optional parse mode for formatting */
-  eff_parse_mode?: "HTML" | "Markdown";
+  type: "telegram_send";
+  message: TelegramOutgoingMessage;
+}
+
+/**
+ * Block until at least one message arrives.
+ * The runtime should block until there's at least one message,
+ * then return all pending messages.
+ * Mirrors Haskell: Receive :: Telegram m (NonEmpty IncomingMessage)
+ */
+export interface TelegramReceiveEffect {
+  type: "telegram_receive";
+}
+
+/**
+ * Non-blocking check for pending messages.
+ * Returns immediately with any pending messages (may be empty).
+ * Mirrors Haskell: TryReceive :: Telegram m [IncomingMessage]
+ */
+export interface TelegramTryReceiveEffect {
+  type: "telegram_try_receive";
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -250,6 +297,39 @@ export interface LlmResult {
     inputTokens: number;
     outputTokens: number;
   };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TELEGRAM EFFECT RESULTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Result for TelegramSendEffectV2: unit (void).
+ * Mirrors Haskell: UnitResult
+ */
+export interface TelegramUnitResult {
+  type: 'unit';
+}
+
+/**
+ * Result for TelegramReceiveEffect / TelegramTryReceiveEffect.
+ * For Receive: guaranteed to have at least one message.
+ * For TryReceive: may be empty.
+ * Mirrors Haskell: MessagesResult
+ */
+export interface TelegramMessagesResult {
+  type: 'messages';
+  messages: TelegramIncomingMessage[];
+}
+
+/** Create a unit result. */
+export function telegramUnitResult(): TelegramUnitResult {
+  return { type: 'unit' };
+}
+
+/** Create a messages result. */
+export function telegramMessagesResult(messages: TelegramIncomingMessage[]): TelegramMessagesResult {
+  return { type: 'messages', messages };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

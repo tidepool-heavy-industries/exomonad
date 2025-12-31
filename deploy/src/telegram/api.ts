@@ -139,3 +139,117 @@ export async function answerCallbackQuery(
   }
   return true;
 }
+
+// =============================================================================
+// Inline Keyboard Support
+// =============================================================================
+
+import type { TelegramInlineButton } from "../protocol.js";
+
+/**
+ * Convert our InlineButton format to Telegram's InlineKeyboardButton.
+ * We use callback_data which must be JSON-serialized string ≤ 64 bytes.
+ */
+function toTelegramButton(button: TelegramInlineButton): Record<string, string> {
+  return {
+    text: button.text,
+    callback_data: JSON.stringify(button.data),
+  };
+}
+
+/**
+ * Send a text message with inline keyboard buttons.
+ *
+ * @param token - Bot API token
+ * @param chatId - Target chat ID
+ * @param text - Message text
+ * @param buttons - 2D array of buttons (rows x columns)
+ * @returns Message result with message_id, or null on failure
+ */
+export async function sendMessageWithButtons(
+  token: string,
+  chatId: number,
+  text: string,
+  buttons: TelegramInlineButton[][]
+): Promise<SendMessageResult | null> {
+  const inlineKeyboard = buttons.map((row) => row.map(toTelegramButton));
+
+  const body: Record<string, unknown> = {
+    chat_id: chatId,
+    text,
+    reply_markup: {
+      inline_keyboard: inlineKeyboard,
+    },
+  };
+
+  const result = await callTelegram<SendMessageResult>(token, "sendMessage", body);
+  if (!result.ok) {
+    console.error("sendMessageWithButtons failed:", result.description);
+    return null;
+  }
+  return result.result ?? null;
+}
+
+// =============================================================================
+// Media Support (for future use)
+// =============================================================================
+
+/**
+ * Send a photo by file_id (MediaHandle).
+ *
+ * @param token - Bot API token
+ * @param chatId - Target chat ID
+ * @param fileId - Telegram file_id obtained from incoming photo
+ * @param caption - Optional caption
+ * @returns Message result with message_id, or null on failure
+ */
+export async function sendPhoto(
+  token: string,
+  chatId: number,
+  fileId: string,
+  caption?: string
+): Promise<SendMessageResult | null> {
+  const body: Record<string, unknown> = {
+    chat_id: chatId,
+    photo: fileId,
+  };
+  if (caption) {
+    body.caption = caption;
+  }
+
+  const result = await callTelegram<SendMessageResult>(token, "sendPhoto", body);
+  if (!result.ok) {
+    console.error("sendPhoto failed:", result.description);
+    return null;
+  }
+  return result.result ?? null;
+}
+
+/**
+ * Send a document by file_id (MediaHandle).
+ *
+ * @param token - Bot API token
+ * @param chatId - Target chat ID
+ * @param fileId - Telegram file_id obtained from incoming document
+ * @param filename - Display filename
+ * @returns Message result with message_id, or null on failure
+ */
+export async function sendDocument(
+  token: string,
+  chatId: number,
+  fileId: string,
+  filename: string
+): Promise<SendMessageResult | null> {
+  const body: Record<string, unknown> = {
+    chat_id: chatId,
+    document: fileId,
+    caption: filename, // Use caption for filename display
+  };
+
+  const result = await callTelegram<SendMessageResult>(token, "sendDocument", body);
+  if (!result.ok) {
+    console.error("sendDocument failed:", result.description);
+    return null;
+  }
+  return result.result ?? null;
+}

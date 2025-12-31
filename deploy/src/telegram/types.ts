@@ -145,3 +145,52 @@ export function isAllowedUser(
   if (allowed.length === 0) return true;
   return allowed.includes(String(userId));
 }
+
+// =============================================================================
+// IncomingMessage Conversion
+// =============================================================================
+
+import type { TelegramIncomingMessage } from "../protocol.js";
+
+/**
+ * Convert a TelegramUpdate to a TelegramIncomingMessage.
+ * Returns null if the update cannot be converted (e.g., unsupported type).
+ *
+ * Currently supports:
+ * - Text messages
+ * - Callback queries (button clicks)
+ *
+ * TODO: Add support for photos and documents when needed.
+ */
+export function updateToIncomingMessage(update: TelegramUpdate): TelegramIncomingMessage | null {
+  // Handle text messages
+  if (update.message?.text) {
+    return {
+      type: 'text',
+      text: update.message.text,
+    };
+  }
+
+  // Handle callback queries (button clicks)
+  if (update.callback_query?.data) {
+    // Parse the JSON data if possible, otherwise use as-is
+    let data: unknown = update.callback_query.data;
+    try {
+      data = JSON.parse(update.callback_query.data);
+    } catch {
+      // Keep as string if not valid JSON
+    }
+    return {
+      type: 'button_click',
+      data,
+    };
+  }
+
+  // TODO: Handle photos
+  // if (update.message?.photo) { ... }
+
+  // TODO: Handle documents
+  // if (update.message?.document) { ... }
+
+  return null;
+}
