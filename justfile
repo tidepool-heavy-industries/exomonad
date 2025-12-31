@@ -35,6 +35,14 @@ test:
 test-graph:
     cabal test graph-validation-tests
 
+# Run cross-language protocol conformance tests (Haskell → TypeScript)
+test-protocol:
+    @echo "── Generating fixtures from Haskell ──"
+    cabal run generate-fixtures
+    @echo ""
+    @echo "── Running TypeScript conformance tests ──"
+    cd deploy && pnpm test
+
 # ─────────────────────────────────────────────────────────────
 # Pre-commit checks
 # ─────────────────────────────────────────────────────────────
