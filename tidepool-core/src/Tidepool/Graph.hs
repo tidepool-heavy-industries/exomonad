@@ -110,7 +110,9 @@ module Tidepool.Graph
   , Docs.renderDepTreeCompact
   , Docs.templateDocBlock
 
-    -- * Validation (for record-based graphs)
+    -- * Validation (record-based graphs only)
+    -- These constraints operate on graphs of kind @Type -> Type@,
+    -- i.e. record-based graphs defined with @mode@ parameter.
   , AllNodesReachable
   , AllLogicNodesReachExit
   , NoDeadGotos
@@ -122,6 +124,11 @@ module Tidepool.Graph
   , EdgeInfo(..)
   , RuntimeNodeKind(..)
   , RuntimeEdgeKind(..)
+
+    -- * Record-Based Reification
+    -- $recordReification
+  , ReifyRecordGraph(..)
+  , makeGraphInfo
 
     -- * Mermaid Diagrams
   , toMermaid
@@ -282,3 +289,21 @@ import qualified Tidepool.Graph.Generic as G
 --
 -- Note: Import @Tidepool.Graph.Generic@ qualified to access 'G.Entry' and 'G.Exit'
 -- (they conflict with the unparameterized markers from @Tidepool.Graph.Types@).
+
+-- $recordReification
+--
+-- Record-based graphs can be automatically reified to 'GraphInfo' for
+-- Mermaid diagram generation:
+--
+-- @
+-- instance ReifyRecordGraph SupportGraph where
+--   reifyRecordGraph = makeGraphInfo
+--
+-- diagram :: Text
+-- diagram = toMermaid (reifyRecordGraph (Proxy \@SupportGraph))
+-- @
+--
+-- Note: Due to polykind limitations with @UsesEffects '[Effect]@, the
+-- @niGotoTargets@ field is always empty. Goto transitions are validated
+-- at compile-time but not represented at runtime. The generated Mermaid
+-- diagram shows implicit edges (Entry/Schema → Needs) only.

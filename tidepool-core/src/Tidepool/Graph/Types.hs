@@ -31,8 +31,9 @@ module Tidepool.Graph.Types
   , Requires
   , Global
 
-    -- * Special Goto Target
+    -- * Special Goto Targets
   , Exit
+  , Self
   ) where
 
 import Data.Kind (Type, Constraint)
@@ -167,7 +168,17 @@ data Global stateType
 -- UsesEffects '[State S, Goto "nextNode" A, Goto Exit FinalResult]
 -- @
 --
--- Note: This is NOT the list-based DSL Exit marker (Exit :<~ Type).
--- Record-based graphs use G.Exit from Tidepool.Graph.Generic instead.
--- This Exit is specifically for the Goto effect as a special target.
+-- Note: The old list-based DSL syntax @Exit :<~ Type@ has been removed.
+-- This @Exit@ type is retained solely as a special target for the @Goto@
+-- effect in the record-based Graph DSL. Record-based graphs use @G.Exit@
+-- from "Tidepool.Graph.Generic" for their exit field definitions.
 data Exit
+
+-- | Self-loop marker for transitions back to the current node.
+--
+-- Used for retry/continuation patterns:
+--
+-- @
+-- Goto Self UpdatedState
+-- @
+data Self

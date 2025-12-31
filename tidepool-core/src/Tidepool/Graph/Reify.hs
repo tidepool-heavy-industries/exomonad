@@ -1,5 +1,6 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE PolyKinds #-}
@@ -46,6 +47,16 @@ module Tidepool.Graph.Reify
     -- * Reification Typeclasses
   , ReifyGraph(..)
 
+    -- * Record-Based Graph Reification
+  , ReifyRecordGraph(..)
+  , GReifyFields(..)
+  , ReifyNodeDef(..)
+  , makeGraphInfo
+
+    -- * Entry/Exit Type Extraction
+  , GetEntryTypeFromGraph
+  , GetExitTypeFromGraph
+
     -- * Helper Typeclasses
   , ReifyTypeList(..)
   , ReifyMaybeType(..)
@@ -59,10 +70,54 @@ import Data.Proxy (Proxy(..))
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Typeable (TypeRep, Typeable, typeRep)
+import GHC.Generics (Generic(..), K1(..), M1(..), (:*:)(..), Meta(..), S, D, C)
 import GHC.TypeLits (Symbol, KnownSymbol, symbolVal)
 
-import Tidepool.Graph.Types (NodeKind(..))
+import Tidepool.Graph.Types (NodeKind(..), type (:@))
 import Tidepool.Graph.Tool (ToolInfo(..))
+import Tidepool.Graph.Generic.Core (Entry, Exit, LLMNode, LogicNode, AsGraph)
+import Tidepool.Graph.Edges
+  ( GetNeeds, GetSchema, GetTemplate, GetSystem
+  , GetVision, GetTools, GetMemory
+  )
+
+-- | Helper type family to get Entry type from a graph.
+--
+-- This is a simplified version that works directly on graph records.
+type GetEntryTypeFromGraph :: (Type -> Type) -> Maybe Type
+type family GetEntryTypeFromGraph graph where
+  GetEntryTypeFromGraph graph = GetEntryTypeRep (Rep (graph AsGraph))
+
+-- | Extract Entry type from Generic representation.
+type GetEntryTypeRep :: (Type -> Type) -> Maybe Type
+type family GetEntryTypeRep f where
+  GetEntryTypeRep (M1 D _ f) = GetEntryTypeRep f
+  GetEntryTypeRep (M1 C _ f) = GetEntryTypeRep f
+  GetEntryTypeRep (M1 S _ (K1 _ (Entry a))) = 'Just a
+  GetEntryTypeRep (M1 S _ _) = 'Nothing
+  GetEntryTypeRep (l :*: r) = OrMaybe (GetEntryTypeRep l) (GetEntryTypeRep r)
+  GetEntryTypeRep _ = 'Nothing
+
+-- | Extract Exit type from a graph.
+type GetExitTypeFromGraph :: (Type -> Type) -> Maybe Type
+type family GetExitTypeFromGraph graph where
+  GetExitTypeFromGraph graph = GetExitTypeRep (Rep (graph AsGraph))
+
+-- | Extract Exit type from Generic representation.
+type GetExitTypeRep :: (Type -> Type) -> Maybe Type
+type family GetExitTypeRep f where
+  GetExitTypeRep (M1 D _ f) = GetExitTypeRep f
+  GetExitTypeRep (M1 C _ f) = GetExitTypeRep f
+  GetExitTypeRep (M1 S _ (K1 _ (Exit a))) = 'Just a
+  GetExitTypeRep (M1 S _ _) = 'Nothing
+  GetExitTypeRep (l :*: r) = OrMaybe (GetExitTypeRep l) (GetExitTypeRep r)
+  GetExitTypeRep _ = 'Nothing
+
+-- | Return first Just, or Nothing if both Nothing.
+type OrMaybe :: Maybe k -> Maybe k -> Maybe k
+type family OrMaybe a b where
+  OrMaybe ('Just x) _ = 'Just x
+  OrMaybe 'Nothing b = b
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- RUNTIME INFO TYPES
@@ -190,5 +245,249 @@ instance ReifyBool 'True where
 instance ReifyBool 'False where
   reifyBool _ = False
 
--- Note: Reification instances for record-based graphs should be defined
--- using GHC.Generics traversal.
+-- ════════════════════════════════════════════════════════════════════════════
+-- RECORD-BASED GRAPH REIFICATION
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Reify a record-based graph to runtime GraphInfo.
+--
+-- This typeclass enables automatic reification for graphs defined using
+-- the record-based DSL (see "Tidepool.Graph.Generic").
+--
+-- @
+-- data SupportGraph mode = SupportGraph { ... } deriving Generic
+--
+-- graphInfo :: GraphInfo
+-- graphInfo = reifyRecordGraph (Proxy \@SupportGraph)
+-- @
+--
+-- == Known Limitations
+--
+-- Due to polykind issues with @UsesEffects '[Effect]@ at runtime, the
+-- @niGotoTargets@ field will always be empty @[]@. Goto targets are validated
+-- at compile-time via @ValidateGotoTargets@ but cannot be extracted to runtime
+-- without Template Haskell.
+--
+-- Edges derived are implicit only (Entry/Schema → Needs). Explicit Goto edges
+-- are not included due to the above limitation.
+class ReifyRecordGraph (graph :: Type -> Type) where
+  reifyRecordGraph :: Proxy graph -> GraphInfo
+
+-- | Helper to construct GraphInfo from a record-based graph.
+--
+-- Use this when defining @ReifyRecordGraph@ instances:
+--
+-- @
+-- instance ReifyRecordGraph SupportGraph where
+--   reifyRecordGraph = makeGraphInfo
+-- @
+--
+-- Requires:
+--
+-- * @Generic (graph AsGraph)@ - for field traversal
+-- * @GReifyFields (Rep (graph AsGraph))@ - for node extraction
+-- * @ReifyMaybeType (GetEntryTypeFromGraph graph)@ - for entry type
+-- * @ReifyMaybeType (GetExitTypeFromGraph graph)@ - for exit type
+makeGraphInfo
+  :: forall graph.
+     ( Generic (graph AsGraph)
+     , GReifyFields (Rep (graph AsGraph))
+     , ReifyMaybeType (GetEntryTypeFromGraph graph)
+     , ReifyMaybeType (GetExitTypeFromGraph graph)
+     )
+  => Proxy graph
+  -> GraphInfo
+makeGraphInfo _ = GraphInfo
+  { giEntryType = entryType
+  , giExitType = exitType
+  , giNodes = nodes
+  , giEdges = deriveImplicitEdges entryType nodes ++ deriveExitEdges exitType nodes
+  , giGroups = []  -- Would need graph-level annotation extraction
+  }
+  where
+    entryType = reifyMaybeType (Proxy @(GetEntryTypeFromGraph graph))
+    exitType = reifyMaybeType (Proxy @(GetExitTypeFromGraph graph))
+    nodes = gReifyFields (Proxy @(Rep (graph AsGraph)))
+
+-- | Generic traversal for reifying record fields to NodeInfo list.
+--
+-- Handles GHC.Generics representation types:
+--
+-- * @M1 D@ - datatype metadata, pass through
+-- * @M1 C@ - constructor metadata, pass through
+-- * @M1 S ('MetaSel ('Just name) ...)@ - named field, extract name and def
+-- * @l :*: r@ - product, combine left and right
+-- * @K1@ - field value (handled via M1 S wrapper)
+class GReifyFields (f :: Type -> Type) where
+  gReifyFields :: Proxy f -> [NodeInfo]
+
+-- Datatype metadata: pass through
+instance GReifyFields f => GReifyFields (M1 D meta f) where
+  gReifyFields _ = gReifyFields (Proxy @f)
+
+-- Constructor metadata: pass through
+instance GReifyFields f => GReifyFields (M1 C meta f) where
+  gReifyFields _ = gReifyFields (Proxy @f)
+
+-- Product: combine left and right
+instance (GReifyFields l, GReifyFields r) => GReifyFields (l :*: r) where
+  gReifyFields _ = gReifyFields (Proxy @l) ++ gReifyFields (Proxy @r)
+
+-- Named field: extract name and delegate to ReifyNodeDef
+instance (KnownSymbol name, ReifyNodeDef def)
+      => GReifyFields (M1 S ('MetaSel ('Just name) su ss ds) (K1 i def)) where
+  gReifyFields _ = reifyNodeDef (Proxy @name) (Proxy @def)
+
+-- Unnamed field or bare K1: no nodes
+instance GReifyFields (M1 S ('MetaSel 'Nothing su ss ds) f) where
+  gReifyFields _ = []
+
+instance GReifyFields (K1 i c) where
+  gReifyFields _ = []
+
+-- | Reify a single node definition to Maybe NodeInfo.
+--
+-- Returns @[]@ for Entry/Exit (not real nodes), @[NodeInfo]@ for LLMNode/LogicNode.
+class ReifyNodeDef (def :: Type) where
+  reifyNodeDef :: KnownSymbol name => Proxy name -> Proxy def -> [NodeInfo]
+
+-- Entry and Exit are not nodes
+instance ReifyNodeDef (Entry a) where
+  reifyNodeDef _ _ = []
+
+instance ReifyNodeDef (Exit a) where
+  reifyNodeDef _ _ = []
+
+-- | Get the base node type from a potentially annotated node definition.
+--
+-- @
+-- GetBaseNode (LLMNode :@ A :@ B :@ C) = LLMNode
+-- GetBaseNode LogicNode = LogicNode
+-- @
+type GetBaseNode :: Type -> Type
+type family GetBaseNode def where
+  GetBaseNode (node :@ _) = GetBaseNode node
+  GetBaseNode node = node
+
+-- | Check if the base node is LLMNode.
+type IsLLMNode :: Type -> Bool
+type family IsLLMNode def where
+  IsLLMNode LLMNode = 'True
+  IsLLMNode (node :@ _) = IsLLMNode node
+  IsLLMNode _ = 'False
+
+-- | Check if the base node is LogicNode.
+type IsLogicNode :: Type -> Bool
+type family IsLogicNode def where
+  IsLogicNode LogicNode = 'True
+  IsLogicNode (node :@ _) = IsLogicNode node
+  IsLogicNode _ = 'False
+
+-- General instance for any annotated node: dispatch based on base type
+instance {-# OVERLAPPABLE #-}
+         ( ReifyAnnotatedNode (def :@ ann) (IsLLMNode (def :@ ann)) (IsLogicNode (def :@ ann))
+         ) => ReifyNodeDef (def :@ ann) where
+  reifyNodeDef pName pDef = reifyAnnotatedNode pDef (Proxy @(IsLLMNode (def :@ ann))) (Proxy @(IsLogicNode (def :@ ann))) pName pDef
+
+-- | Helper class to dispatch based on node kind.
+class ReifyAnnotatedNode (def :: Type) (isLLM :: Bool) (isLogic :: Bool) where
+  reifyAnnotatedNode :: Proxy def -> Proxy isLLM -> Proxy isLogic
+                     -> (forall name. KnownSymbol name => Proxy name -> Proxy def -> [NodeInfo])
+
+-- LLMNode case
+instance ( ReifyTypeList (GetNeeds def)
+         , ReifyMaybeType (GetSchema def)
+         , ReifyMaybeType (GetTemplate def)
+         , ReifyMaybeType (GetSystem def)
+         , ReifyMaybeType (GetMemory def)
+         , ReifyBool (GetVision def)
+         , ReifyTypeList (GetTools def)
+         ) => ReifyAnnotatedNode def 'True 'False where
+  reifyAnnotatedNode _ _ _ pName _ = [NodeInfo
+    { niName = T.pack (symbolVal pName)
+    , niKind = RuntimeLLM
+    , niNeeds = reifyTypeList (Proxy @(GetNeeds def))
+    , niSchema = reifyMaybeType (Proxy @(GetSchema def))
+    , niGotoTargets = []  -- LLM nodes don't have Goto
+    , niHasGotoExit = False
+    , niHasVision = reifyBool (Proxy @(GetVision def))
+    , niTools = reifyTypeList (Proxy @(GetTools def))
+    , niToolInfos = []  -- Would require ToolDef instances
+    , niSystem = reifyMaybeType (Proxy @(GetSystem def))
+    , niTemplate = reifyMaybeType (Proxy @(GetTemplate def))
+    , niMemory = reifyMaybeType (Proxy @(GetMemory def))
+    }]
+
+-- LogicNode case
+instance ( ReifyTypeList (GetNeeds def)
+         , ReifyMaybeType (GetMemory def)
+         ) => ReifyAnnotatedNode def 'False 'True where
+  reifyAnnotatedNode _ _ _ pName _ = [NodeInfo
+    { niName = T.pack (symbolVal pName)
+    , niKind = RuntimeLogic
+    , niNeeds = reifyTypeList (Proxy @(GetNeeds def))
+    , niSchema = Nothing  -- Logic nodes don't have Schema
+    , niGotoTargets = []  -- Cannot extract due to polykind limitation
+    , niHasGotoExit = False  -- Cannot determine at runtime
+    , niHasVision = False
+    , niTools = []
+    , niToolInfos = []
+    , niSystem = Nothing
+    , niTemplate = Nothing
+    , niMemory = reifyMaybeType (Proxy @(GetMemory def))
+    }]
+
+-- Neither LLM nor Logic - unknown node type, return empty
+instance ReifyAnnotatedNode def 'False 'False where
+  reifyAnnotatedNode _ _ _ _ _ = []
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- EDGE DERIVATION
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Derive implicit edges from nodes.
+--
+-- For each node, creates edges from:
+-- 1. Entry → nodes that need the entry type
+-- 2. Nodes with Schema → nodes that need that schema type
+--
+-- Note: Explicit Goto edges cannot be derived due to polykind limitations.
+-- They are validated at compile-time but not represented at runtime.
+deriveImplicitEdges
+  :: Maybe TypeRep    -- ^ Entry type
+  -> [NodeInfo]       -- ^ All nodes
+  -> [EdgeInfo]
+deriveImplicitEdges mEntryType nodes = entryEdges ++ schemaEdges
+  where
+    -- Edges from Entry to nodes that need the entry type
+    entryEdges = case mEntryType of
+      Nothing -> []
+      Just entryTy ->
+        [ EdgeInfo "Entry" n.niName (Just entryTy) RuntimeImplicit
+        | n <- nodes
+        , entryTy `elem` n.niNeeds
+        ]
+
+    -- Edges from nodes with Schema to nodes that need that type
+    schemaEdges =
+      [ EdgeInfo producer.niName consumer.niName producer.niSchema RuntimeImplicit
+      | producer <- nodes
+      , Just schemaTy <- [producer.niSchema]
+      , consumer <- nodes
+      , schemaTy `elem` consumer.niNeeds
+      ]
+
+-- | Derive edges to Exit.
+--
+-- Any node with Schema matching exit type creates an edge to Exit.
+deriveExitEdges
+  :: Maybe TypeRep    -- ^ Exit type
+  -> [NodeInfo]       -- ^ All nodes
+  -> [EdgeInfo]
+deriveExitEdges mExitType nodes = case mExitType of
+  Nothing -> []
+  Just exitTy ->
+    [ EdgeInfo n.niName "Exit" (Just exitTy) RuntimeImplicit
+    | n <- nodes
+    , n.niSchema == Just exitTy
+    ]
