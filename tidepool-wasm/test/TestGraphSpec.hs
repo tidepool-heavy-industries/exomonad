@@ -1,27 +1,27 @@
-{-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE OverloadedStrings #-}
 
--- | Tests for TestGraph structure and handler behavior.
+-- | Tests for TestGraph structure and WasmM handler behavior.
 --
 -- These tests verify that:
 -- 1. TestGraph compiles (passes graph validation constraints)
--- 2. The compute handler returns n+1 as expected
--- 3. The DispatchGoto typeclass correctly dispatches to Exit
--- 4. The runGraph function executes the full graph end-to-end
+-- 2. The computeHandlerWasm handler works with WasmM effects
+-- 3. The handler correctly uses the Log effect and returns n+1
 module TestGraphSpec (spec) where
 
 import Test.Hspec
-import Effectful (runPureEff)
+import qualified Data.Text as T
 
 import Tidepool.Graph.Goto (GotoChoice(..), OneOf(..))
-import Tidepool.Graph.Execute (DispatchGoto(..), runGraph)
-import Tidepool.Wasm.TestGraph (TestGraph(..), testHandlers)
+import Tidepool.Wasm.TestGraph (computeHandlerWasm)
+import Tidepool.Wasm.Runner (initializeWasm, WasmResult(..))
+import Tidepool.Wasm.WireTypes (SerializableEffect(..), EffectResult(..))
 
 
 spec :: Spec
 spec = do
   computeHandlerSpec
-  dispatchGotoSpec
-  runGraphSpec
+  graphStructureSpec
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -29,7 +29,7 @@ spec = do
 -- ════════════════════════════════════════════════════════════════════════════
 
 computeHandlerSpec :: Spec
-computeHandlerSpec = describe "compute handler" $ do
+computeHandlerSpec = describe "computeHandlerWasm" $ do
 
   it "returns n+1 for input 0" $ do
     runComputeHandler 0 `shouldBe` 1
@@ -44,77 +44,42 @@ computeHandlerSpec = describe "compute handler" $ do
     runComputeHandler 1000000 `shouldBe` 1000001
 
 
--- | Helper to run the compute handler and extract the exit payload.
+-- | Helper to run the compute handler through full yield/resume cycle.
 --
--- TestGraph's compute handler returns GotoChoice '[To Exit Int], which is
--- a newtype over OneOf '[Int]. Pattern matching on Here gives us the Int directly.
+-- The handler logs a message (yield), we resume with success, and extract the result.
 runComputeHandler :: Int -> Int
 runComputeHandler n =
-  let GotoChoice oneOf = runPureEff (testHandlers.compute n)
-  in case oneOf of
-       Here result -> result
-       -- Note: There case is impossible since OneOf '[Int] only has Here,
-       -- but we handle it explicitly to avoid incomplete pattern warnings.
-       There _     -> error "runComputeHandler: impossible - OneOf '[Int] has no There case"
+  case initializeWasm (computeHandlerWasm n) of
+    WasmYield _ resume ->
+      case resume (ResSuccess Nothing) of
+        WasmComplete (GotoChoice (Here result)) -> result
+        WasmError msg -> error $ "runComputeHandler: WasmError after resume: " <> T.unpack msg
+        _ -> error "runComputeHandler: expected WasmComplete after resume"
+    WasmComplete (GotoChoice (Here result)) ->
+      -- Handler completed without yielding (shouldn't happen for current impl)
+      error $ "runComputeHandler: handler completed without yielding, got: " <> show result
+    WasmError msg ->
+      error $ "runComputeHandler: WasmError: " <> T.unpack msg
+    _ -> error "runComputeHandler: unexpected result"
 
 
 -- ════════════════════════════════════════════════════════════════════════════
--- DispatchGoto
+-- Graph Structure
 -- ════════════════════════════════════════════════════════════════════════════
 
-dispatchGotoSpec :: Spec
-dispatchGotoSpec = describe "dispatchGoto" $ do
+graphStructureSpec :: Spec
+graphStructureSpec = describe "TestGraph structure" $ do
 
-  it "dispatches Exit target and returns payload" $ do
-    runDispatchTest 5 `shouldBe` 6
+  it "handler yields Log effect with correct message format" $ do
+    case initializeWasm (computeHandlerWasm 42) of
+      WasmYield (EffLogInfo msg) _ -> do
+        T.unpack msg `shouldContain` "Computing:"
+        T.unpack msg `shouldContain` "42"
+      _ -> expectationFailure "Expected Log effect yield"
 
-  it "dispatches Exit target for input 0" $ do
-    runDispatchTest 0 `shouldBe` 1
-
-  it "dispatches Exit target for negative input" $ do
-    runDispatchTest (-10) `shouldBe` (-9)
-
-  it "dispatches Exit target for large input" $ do
-    runDispatchTest 999999 `shouldBe` 1000000
-
-
--- | Helper to run the full dispatch through TestGraph.
---
--- This tests the DispatchGoto typeclass by:
--- 1. Calling the compute handler to get a GotoChoice
--- 2. Using dispatchGoto to dispatch on the choice
--- 3. Since compute returns GotoChoice '[To Exit Int], dispatch returns the Int
-runDispatchTest :: Int -> Int
-runDispatchTest n = runPureEff $ do
-  choice <- testHandlers.compute n
-  dispatchGoto testHandlers choice
-
-
--- ════════════════════════════════════════════════════════════════════════════
--- runGraph (end-to-end execution)
--- ════════════════════════════════════════════════════════════════════════════
-
-runGraphSpec :: Spec
-runGraphSpec = describe "runGraph" $ do
-
-  it "runs TestGraph end-to-end for input 5" $ do
-    runGraphTest 5 `shouldBe` 6
-
-  it "runs TestGraph for input 0" $ do
-    runGraphTest 0 `shouldBe` 1
-
-  it "runs TestGraph for negative input" $ do
-    runGraphTest (-10) `shouldBe` (-9)
-
-  it "runs TestGraph for large input" $ do
-    runGraphTest 999999 `shouldBe` 1000000
-
-
--- | Helper to run the full graph end-to-end using runGraph.
---
--- This tests the runGraph function by:
--- 1. Automatically discovering that 'compute' accepts the entry type (Int)
--- 2. Calling the compute handler with the input
--- 3. Dispatching through the graph until Exit is reached
-runGraphTest :: Int -> Int
-runGraphTest n = runPureEff $ runGraph testHandlers n
+  it "handler uses EffLogInfo (not EffLogError)" $ do
+    case initializeWasm (computeHandlerWasm 7) of
+      WasmYield (EffLogInfo _) _ -> pure ()
+      WasmYield (EffLogError _) _ ->
+        expectationFailure "Expected EffLogInfo, got EffLogError"
+      _ -> expectationFailure "Expected yield"
