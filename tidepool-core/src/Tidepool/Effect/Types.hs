@@ -40,6 +40,9 @@ module Tidepool.Effect.Types
   , getHistory
   , appendMessages
   , clearHistory
+  , estimateTokens
+  , estimateMessageChars
+  , estimateBlockChars
 
     -- * LLM Operations
   , runTurn
@@ -105,10 +108,14 @@ import GHC.Generics (Generic)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef, modifyIORef)
 
 -- Re-exports from Anthropic.Types (pure types)
+-- Note: We import ToolUse but not ToolResult from Anthropic.Types
+-- because Tidepool.Effect.Types defines its own ToolResult for tool dispatchers.
 import Tidepool.Anthropic.Types
   ( ContentBlock(..), ImageSource(..), Message(..), Role(..)
   , ThinkingContent(..), RedactedThinking(..)
+  , ToolUse(..)
   )
+import qualified Tidepool.Anthropic.Types as AT (ToolResult(..))
 
 -- Question DSL types (shared across agents)
 import Tidepool.Question (Question(..), Answer(..), ItemDisposition(..), Choice(..), ChoiceOption(..))
@@ -345,6 +352,30 @@ runChatHistoryWith ref = interpret $ \_ -> \case
   GetHistory -> liftIO $ readIORef ref
   AppendMessages msgs -> liftIO $ modifyIORef ref (++ msgs)
   ClearHistory -> liftIO $ writeIORef ref []
+
+-- | Estimate token count for a list of messages
+-- Uses character_count / 4 approximation
+estimateTokens :: [Message] -> Int
+estimateTokens msgs = sum (map estimateMessageChars msgs) `div` 4
+
+-- | Estimate character count for a single message
+estimateMessageChars :: Message -> Int
+estimateMessageChars msg = sum (map estimateBlockChars msg.content)
+
+-- | Estimate character count for a content block
+estimateBlockChars :: ContentBlock -> Int
+estimateBlockChars = \case
+  TextBlock t -> T.length t
+  ImageBlock _ -> 1000  -- Images have separate token accounting; rough placeholder
+  ToolUseBlock tu -> T.length tu.toolName + estimateValueChars tu.toolInput
+  ToolResultBlock tr -> T.length tr.toolResultContent
+  ThinkingBlock tc -> T.length tc.thinkingText
+  RedactedThinkingBlock _ -> 100  -- Encrypted, unknown size
+  JsonBlock v -> estimateValueChars v
+
+-- | Estimate characters in a JSON value
+estimateValueChars :: Value -> Int
+estimateValueChars = fromIntegral . LBS.length . encode
 
 -- ══════════════════════════════════════════════════════════════
 -- EMIT EFFECT
