@@ -18,6 +18,7 @@ The key insight: **tidepool-core stays WASM-agnostic**. This package handles all
 | File | Status | Purpose |
 |------|--------|---------|
 | `TestGraph.hs` | ✅ Complete | Minimal graph (Int → Int+1 with Log effect) |
+| `ExampleGraph.hs` | ✅ Complete | Multi-node graph with branching (message classifier) |
 | `WireTypes.hs` | ✅ Complete | SerializableEffect, EffectResult, StepOutput |
 | `Runner.hs` | ✅ Complete | Explicit continuation encoding for yield/resume |
 | `Ffi.hs` | ✅ Complete | FFI exports with global IORef state management |
@@ -55,6 +56,43 @@ data TestGraph mode = TestGraph
 The same type serves dual purposes:
 - **AsGraph mode**: Type-level specification (structure, edges, effect requirements)
 - **AsHandler mode**: Value-level handlers (actual implementations)
+
+### ExampleGraph.hs
+
+A non-trivial multi-node graph that demonstrates branching with 3+ targets:
+
+```
+Entry(UserMessage) → classify → handleGreeting  ─┐
+                            │                    │
+                            ├→ handleQuestion   ─┼→ Exit(Response)
+                            │                    │
+                            └→ handleStatement ─┘
+```
+
+**Domain Types** (newtypes for type safety):
+- `UserMessage` - Newtype around Text for input
+- `Classification` - ADT: Greeting | Question | Statement
+- `Response` - Newtype around Text for output
+
+**Nodes** (6 total):
+1. `entry` - Entry point with UserMessage
+2. `classify` - Classifies messages, yields Log effects, returns 3-way GotoChoice
+3. `handleGreeting` - Handles greetings, yields Log, exits with Response
+4. `handleQuestion` - Handles questions, yields Log + LlmComplete, exits (also has Self for retry demo)
+5. `handleStatement` - Handles statements, yields Log, exits with Response
+6. `exit` - Exit point with Response
+
+**Key Features Demonstrated**:
+- `GotoChoice` with 3+ targets at classify node
+- Multiple effect types: Log (all handlers) + LlmComplete (question handler)
+- Self-loop capability in question handler
+- Deterministic classification for testability
+
+**FFI Exports** (separate from TestGraph):
+- `initializeExample(json)` - Start with JSON-encoded Text message
+- `stepExample(json)` - Continue with EffectResult
+- `getExampleGraphInfo()` - Get graph structure
+- `getExampleGraphState()` - Get runtime state
 
 ### WireTypes.hs
 
@@ -107,7 +145,7 @@ wasm32-wasi-cabal build tidepool-wasm
 | Step | Graph Shape | Proves | Status |
 |------|-------------|--------|--------|
 | **1** | Single logic node + Log effect | WASM runs, effect loop works | ✅ Complete |
-| 2 | Multiple logic nodes + routing | Graph structure, Goto transitions | Future |
+| **2** | Multiple logic nodes + routing | Graph structure, Goto transitions, GotoChoice with 3+ targets | ✅ Complete |
 | 3 | LLM node (CF AI) | Real effect interpretation | Future |
 
 ## Implementation Details
@@ -141,7 +179,9 @@ This is safe in WASM because each module instance is isolated (one per Durable O
 
 - `RunnerSpec.hs` - Tests pure continuation logic
 - `FfiSpec.hs` - Integration tests through JSON interface
-- Uses `resetState` for test isolation
+- `TestGraphSpec.hs` - Tests TestGraph handler behavior
+- `ExampleGraphSpec.hs` - Tests ExampleGraph (21 tests covering all branch paths)
+- Uses `resetState` / `resetExampleState` for test isolation
 
 ## Protocol Flow
 
@@ -187,8 +227,14 @@ if os(wasi)
     -no-hs-main                    -- No main(), it's a library
     -optl-mexec-model=reactor      -- WASI reactor model
     -optl-Wl,--export=hs_init      -- Export RTS initialization
-    -optl-Wl,--export=initialize   -- Export our functions
+    # TestGraph exports
+    -optl-Wl,--export=initialize
     -optl-Wl,--export=step
     -optl-Wl,--export=getGraphInfo
     -optl-Wl,--export=getGraphState
+    # ExampleGraph exports
+    -optl-Wl,--export=initializeExample
+    -optl-Wl,--export=stepExample
+    -optl-Wl,--export=getExampleGraphInfo
+    -optl-Wl,--export=getExampleGraphState
 ```
