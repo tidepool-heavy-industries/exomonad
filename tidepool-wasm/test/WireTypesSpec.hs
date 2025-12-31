@@ -99,40 +99,24 @@ stepOutputSpec :: Spec
 stepOutputSpec = describe "StepOutput" $ do
   let idleState = GraphState PhaseIdle []
 
-  it "round-trips StepOutput with effect, not done" $ do
-    let output = StepOutput
-          { soEffect = Just (EffLogInfo "computing")
-          , soDone = False
-          , soStepResult = Nothing
-          , soGraphState = idleState
-          }
+  it "round-trips StepYield" $ do
+    let output = StepYield (EffLogInfo "computing") idleState
     decode (encode output) `shouldBe` Just output
 
-  it "round-trips StepOutput done with result" $ do
-    let output = StepOutput
-          { soEffect = Nothing
-          , soDone = True
-          , soStepResult = Just (Number 42)
-          , soGraphState = GraphState (PhaseCompleted (Number 42)) []
-          }
+  it "round-trips StepDone" $ do
+    let output = StepDone (Number 42) (GraphState (PhaseCompleted (Number 42)) [])
     decode (encode output) `shouldBe` Just output
 
-  it "round-trips StepOutput with all fields populated" $ do
-    let output = StepOutput
-          { soEffect = Just (EffLogInfo "msg")
-          , soDone = True
-          , soStepResult = Just (String "result")
-          , soGraphState = GraphState (PhaseInNode "test") ["a", "b"]
-          }
+  it "round-trips StepFailed" $ do
+    let output = StepFailed "something went wrong" (GraphState (PhaseFailed "something went wrong") [])
     decode (encode output) `shouldBe` Just output
 
-  it "encodes StepOutput with correct JSON structure" $ do
-    let output = StepOutput
-          { soEffect = Just (EffLogInfo "test")
-          , soDone = False
-          , soStepResult = Nothing
-          , soGraphState = idleState
-          }
+  it "round-trips StepDone with complex result" $ do
+    let output = StepDone (String "result") (GraphState (PhaseInNode "test") ["a", "b"])
+    decode (encode output) `shouldBe` Just output
+
+  it "encodes StepYield with correct JSON structure" $ do
+    let output = StepYield (EffLogInfo "test") idleState
         json = decode (encode output) :: Maybe Value
     case json of
       Just (Object obj) -> do
@@ -146,6 +130,25 @@ stepOutputSpec = describe "StepOutput" $ do
           Just (Object gsObj) ->
             KM.lookup "completedNodes" gsObj `shouldBe` Just (Array V.empty)
           _ -> expectationFailure "Expected graphState object"
+      _ -> expectationFailure "Expected JSON object"
+
+  it "encodes StepDone with correct JSON structure" $ do
+    let output = StepDone (Number 42) (GraphState (PhaseCompleted (Number 42)) [])
+        json = decode (encode output) :: Maybe Value
+    case json of
+      Just (Object obj) -> do
+        KM.lookup "done" obj `shouldBe` Just (Bool True)
+        KM.lookup "stepResult" obj `shouldBe` Just (Number 42)
+        KM.lookup "effect" obj `shouldBe` Just Null
+      _ -> expectationFailure "Expected JSON object"
+
+  it "encodes StepFailed with error field" $ do
+    let output = StepFailed "oops" (GraphState (PhaseFailed "oops") [])
+        json = decode (encode output) :: Maybe Value
+    case json of
+      Just (Object obj) -> do
+        KM.lookup "done" obj `shouldBe` Just (Bool True)
+        KM.lookup "error" obj `shouldBe` Just (String "oops")
       _ -> expectationFailure "Expected JSON object"
 
 

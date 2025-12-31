@@ -1,4 +1,5 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
+{-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE StandaloneKindSignatures #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE RankNTypes #-}
@@ -82,7 +83,9 @@ module Tidepool.Graph.Memory
 
     -- * WASM Serialization
     -- $serialization
-  , MemorySnapshot(..)
+  , MemorySnapshot
+  , pattern MemorySnapshotScopes
+  , mkMemorySnapshot
   , MemoryStore(..)
   , emptyMemoryStore
   , serializeMemoryStore
@@ -292,6 +295,10 @@ emptyMemoryStore = MemoryStore Map.empty
 --
 -- This is the top-level type that gets serialized to JSON for persistence.
 -- It includes a version number for future format evolution.
+--
+-- The constructor is not exported to ensure snapshots always have the
+-- correct version. Use 'mkMemorySnapshot' to create new snapshots and
+-- 'MemorySnapshotScopes' pattern to read the scopes.
 data MemorySnapshot = MemorySnapshot
   { snapVersion :: Int
     -- ^ Schema version for forward compatibility
@@ -299,6 +306,31 @@ data MemorySnapshot = MemorySnapshot
     -- ^ Node name -> JSON value mapping
   }
   deriving stock (Show, Eq)
+
+-- | Create a 'MemorySnapshot' with the current version.
+--
+-- This smart constructor ensures snapshots are always created with
+-- the correct version number, preventing invalid version states.
+--
+-- @
+-- let snapshot = mkMemorySnapshot myScopes
+-- @
+mkMemorySnapshot :: Map Text Value -> MemorySnapshot
+mkMemorySnapshot scopes = MemorySnapshot
+  { snapVersion = currentSnapshotVersion
+  , snapScopes = scopes
+  }
+
+-- | Pattern for read-only access to snapshot scopes.
+--
+-- Use this pattern to extract scopes without exposing the version field:
+--
+-- @
+-- case snapshot of
+--   MemorySnapshotScopes scopes -> Map.lookup "myNode" scopes
+-- @
+pattern MemorySnapshotScopes :: Map Text Value -> MemorySnapshot
+pattern MemorySnapshotScopes scopes <- MemorySnapshot { snapScopes = scopes }
 
 instance ToJSON MemorySnapshot where
   toJSON snap = object
