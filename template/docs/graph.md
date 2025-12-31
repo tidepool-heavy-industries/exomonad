@@ -44,31 +44,11 @@ flowchart TD
 | sgProcess | sgRoute | Output |
 | sgRoute | Exit | Result |
 
-## Template Content
+## Templates
 
-The LLM node uses this template to generate prompts:
+See [`templates/process.jinja`](../templates/process.jinja) for the main prompt template.
 
-```jinja
-{# Resolved template with includes inlined #}
-
-{# From templates/_shared/output_format.jinja #}
-{# Shared output format instructions #}
-Respond with valid JSON matching the output schema.
-
-{# Main template #}
-{# Main processing template #}
-{% include "_shared/output_format.jinja" %}
-
-You are processing the following input:
-
-{{ input }}
-
-Analyze and produce structured output.
-
-
-```
-
-## Template Dependencies
+### Dependencies
 
 ```mermaid
 flowchart TD
@@ -131,6 +111,7 @@ The LLM handler builds a `ProcessContext` which is rendered into the template:
 | Context Field | Template Variable | Source |
 |---------------|-------------------|--------|
 | `input` | `{{ input }}` | `Input.inputText` |
+| `history` | `{{ history }}` | `ChatHistory` effect (formatted messages) |
 
 See [`src/Template/Context.hs`](../src/Template/Context.hs) for the full context definition.
 
