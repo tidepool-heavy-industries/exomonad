@@ -41,19 +41,47 @@ import GHC.Generics (Generic)
 
 -- | Effects that Haskell yields for TypeScript to execute.
 --
--- For step 1, we only support Log. Future steps add:
--- - LlmComplete (step 3)
--- - HttpFetch
--- - etc.
---
 -- JSON encoding matches protocol.ts: @{type: "LogInfo", eff_message: "..."}@
 data SerializableEffect
-  = EffLogInfo { effMessage :: Text }
+  = EffLlmComplete
+      { effNode :: Text
+      -- ^ Which node is making this call
+      , effSystemPrompt :: Text
+      -- ^ System prompt
+      , effUserContent :: Text
+      -- ^ User content
+      , effSchema :: Maybe Value
+      -- ^ JSON schema for structured output
+      }
+  | EffHttpFetch
+      { effUrl :: Text
+      -- ^ URL to fetch
+      , effMethod :: Text
+      -- ^ HTTP method
+      }
+  | EffLogInfo { effMessage :: Text }
+  | EffLogError { effMessage :: Text }
   deriving stock (Show, Eq, Generic)
 
 instance ToJSON SerializableEffect where
+  toJSON (EffLlmComplete node sys user schema) = object
+    [ "type" .= ("LlmComplete" :: Text)
+    , "eff_node" .= node
+    , "eff_system_prompt" .= sys
+    , "eff_user_content" .= user
+    , "eff_schema" .= schema
+    ]
+  toJSON (EffHttpFetch url method) = object
+    [ "type" .= ("HttpFetch" :: Text)
+    , "eff_url" .= url
+    , "eff_method" .= method
+    ]
   toJSON (EffLogInfo msg) = object
     [ "type" .= ("LogInfo" :: Text)
+    , "eff_message" .= msg
+    ]
+  toJSON (EffLogError msg) = object
+    [ "type" .= ("LogError" :: Text)
     , "eff_message" .= msg
     ]
 
@@ -61,7 +89,16 @@ instance FromJSON SerializableEffect where
   parseJSON = withObject "SerializableEffect" $ \o -> do
     (typ :: Text) <- o .: "type"
     case typ of
+      "LlmComplete" -> EffLlmComplete
+        <$> o .: "eff_node"
+        <*> o .: "eff_system_prompt"
+        <*> o .: "eff_user_content"
+        <*> o .:? "eff_schema"
+      "HttpFetch" -> EffHttpFetch
+        <$> o .: "eff_url"
+        <*> o .: "eff_method"
       "LogInfo" -> EffLogInfo <$> o .: "eff_message"
+      "LogError" -> EffLogError <$> o .: "eff_message"
       _         -> fail $ "Unknown effect type: " ++ show typ
 
 
