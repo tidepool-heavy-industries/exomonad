@@ -22,6 +22,7 @@ The key insight: **TypeScript is a graph-aware effect executor**. Haskell owns t
 | `loader.ts` | ✅ Complete | WASM loader with GHC RTS + JSFFI setup |
 | `jsffi.ts` | ✅ Complete | JavaScript FFI for GHC WASM |
 | `tidepool.wasm.d.ts` | ✅ Stub | TypeScript declaration for WASM exports |
+| `handlers/` | ✅ Complete | Effect handler registry with tests |
 
 **WASM blob: Missing** - Needs `tidepool-wasm` compiled with `wasm32-wasi-ghc`.
 
@@ -49,6 +50,25 @@ The key insight: **TypeScript is a graph-aware effect executor**. Haskell owns t
 
 ## Protocol Flow
 
+See [docs/PROTOCOL.md](docs/PROTOCOL.md) for the full WebSocket protocol specification.
+
+### Message Types
+
+**Client → Server:**
+- `init` - Start graph execution: `{ type: 'init', graphId: string, input: unknown }`
+- `resume` - Provide effect result: `{ type: 'resume', result: EffectResult }`
+- `reconnect` - Resume suspended session: `{ type: 'reconnect', sessionId: string }`
+- `ping` - Keepalive heartbeat
+
+**Server → Client:**
+- `progress` - Effect executing server-side: `{ type: 'progress', effect, status }`
+- `yield` - Effect for client handling: `{ type: 'yield', effect, sessionId }`
+- `done` - Graph completed: `{ type: 'done', result }`
+- `error` - Error occurred: `{ type: 'error', message, recoverable, sessionId? }`
+- `pong` - Keepalive response
+
+### Sequence Diagram
+
 ```
 Client                    TypeScript                    WASM (Haskell)
   │                           │                              │
@@ -56,13 +76,20 @@ Client                    TypeScript                    WASM (Haskell)
   │                           │── initialize(json) ─────────►│
   │                           │◄── StepOutput {effect} ──────│
   │                           │                              │
-  │                           │ [execute effect: LLM/log]    │
+  │◄── {progress} ────────────│ [execute effect: LLM/log]    │
   │                           │                              │
   │                           │── step(result) ─────────────►│
   │                           │◄── StepOutput {done: true} ──│
   │                           │                              │
   │◄── WS: {done: result} ────│                              │
 ```
+
+### Session Management
+
+- Sessions are stored in Durable Object storage for reconnection
+- Sessions expire after 5 minutes of inactivity
+- `sessionId` is included in `yield` and recoverable `error` messages
+- Clients can reconnect with `reconnect` message to resume from last yield point
 
 ## Effect Types
 
@@ -73,7 +100,47 @@ Currently defined in `protocol.ts`:
 | `LogInfo` | ✅ Ready | Console log |
 | `LogError` | ✅ Ready | Console error |
 | `LlmComplete` | ✅ Ready | Cloudflare AI binding |
-| `HttpFetch` | ✅ Ready | `fetch()` |
+| `Habitica` | ✅ Ready | Habitica API |
+
+## Effect Handlers
+
+Effect handlers are implemented in `src/handlers/`:
+
+```
+src/handlers/
+├── index.ts      # Registry: executeEffect() dispatches to handlers
+├── log.ts        # LogInfo, LogError → console output
+├── llm.ts        # LlmComplete → Cloudflare AI (@cf/meta/llama-3.3-70b-instruct-fp8-fast)
+├── habitica.ts   # Habitica API operations
+└── __tests__/    # Vitest tests for each handler
+```
+
+### Handler Interface
+
+All handlers follow this pattern:
+
+```typescript
+async function handleEffect(effect: EffectType, env?: Env): Promise<EffectResult>
+```
+
+Results are always `{ type: "success", value: T }` or `{ type: "error", message: string }`.
+
+### Error Handling
+
+Handlers return typed errors rather than throwing:
+- **Rate limits**: `LLM rate limited: ...`
+- **Timeouts**: `HTTP timeout after 25000ms: ...`
+- **Network errors**: `HTTP network error: ...`
+- **Unknown effects**: `Unknown effect type: ...`
+
+The `executeEffect()` wrapper catches any uncaught exceptions and converts them to error results.
+
+### Adding a New Handler
+
+1. Create `src/handlers/myeffect.ts` with handler function
+2. Add effect type to `protocol.ts` (must match Haskell side)
+3. Add case to `executeEffect()` in `src/handlers/index.ts`
+4. Add tests in `src/handlers/__tests__/myeffect.test.ts`
 
 ## Running
 
@@ -82,6 +149,7 @@ cd deploy
 pnpm install
 pnpm dev          # Local dev server (needs WASM blob)
 pnpm typecheck    # Type check
+pnpm test         # Run vitest tests
 pnpm lint         # ESLint
 pnpm deploy       # Deploy to Cloudflare
 ```

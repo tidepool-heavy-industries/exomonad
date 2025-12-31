@@ -97,6 +97,11 @@ test-suite graph-validation-tests
         LLMNodeExecuteSpec
         MemorySerializationSpec
         MermaidSpec
+        OneOfSpec
+        InjectTargetSpec
+        GotoChoiceSpec
+        CallHandlerSpec
+        DispatchGotoSpec
     build-depends:
         base >= 4.17 && < 5,
         hspec >= 2.10 && < 3,

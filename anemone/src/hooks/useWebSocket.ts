@@ -86,12 +86,6 @@ export function useWebSocket() {
                 hasSchema: !!llmEffect.eff_schema,
               },
             });
-          } else if (effect.type === "HttpFetch") {
-            eventActions.addEvent({
-              type: "http_start",
-              summary: `HTTP ${effect.eff_method} ${effect.eff_url}`,
-              data: effect,
-            });
           } else if (effect.type === "LogInfo") {
             eventActions.addEvent({
               type: "log_info",
