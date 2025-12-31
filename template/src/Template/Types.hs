@@ -26,7 +26,7 @@ newtype Input = Input
 -- | Output type - what the LLM produces (structured output).
 newtype Output = Output
   { outputText :: String
-    -- ^ The processed output text from the LLM
+    -- ^The processed output text from the LLM
   }
   deriving (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)

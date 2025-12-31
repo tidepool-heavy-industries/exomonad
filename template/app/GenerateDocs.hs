@@ -10,6 +10,7 @@
 module Main where
 
 import Data.Proxy (Proxy(..))
+import Data.Maybe (fromMaybe)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import qualified Data.Text.Lazy as TL
@@ -72,7 +73,7 @@ main = do
         [ ""
         , "## Template Content"
         , ""
-        , "The `sgProcess` LLM node uses this template to generate prompts:"
+        , "The LLM node uses this template to generate prompts:"
         , ""
         , "```jinja"
         , templateContent
@@ -250,7 +251,7 @@ renderTypeFromSchema typeName desc schema =
     renderField (fieldName, fieldSchema) =
       "| " <> fieldName
       <> " | " <> schemaTypeToText fieldSchema.schemaType
-      <> " | " <> maybe "" id fieldSchema.schemaDescription <> " |"
+      <> " | " <> fromMaybe "" fieldSchema.schemaDescription <> " |"
 
     schemaTypeToText TString = "String"
     schemaTypeToText TNumber = "Number"
@@ -266,7 +267,7 @@ jsonSchemaSection =
   [ ""
   , "## JSON Schema (LLM Output)"
   , ""
-  , "The `sgProcess` node expects the LLM to return JSON matching this schema:"
+  , "The LLM node expects JSON matching this schema:"
   , ""
   , "```json"
   , TL.toStrict $ TLE.decodeUtf8 $ encodePretty $ schemaToValue outputSchema
@@ -274,6 +275,9 @@ jsonSchemaSection =
   ]
 
 -- | Context to template mapping section.
+--
+-- NOTE: This table is template-specific. Update if ProcessContext or its
+-- ToGVal instance changes.
 contextMappingSection :: [T.Text]
 contextMappingSection =
   [ ""
@@ -289,6 +293,9 @@ contextMappingSection =
   ]
 
 -- | Example execution trace using Mermaid sequence diagram.
+--
+-- NOTE: The walkthrough steps and ExecutionPath are template-specific.
+-- Update if the graph structure changes.
 executionTraceSection :: GraphInfo -> [T.Text]
 executionTraceSection graphInfo =
   [ ""

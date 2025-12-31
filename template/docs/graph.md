@@ -46,7 +46,7 @@ flowchart TD
 
 ## Template Content
 
-The `sgProcess` LLM node uses this template to generate prompts:
+The LLM node uses this template to generate prompts:
 
 ```jinja
 {# Resolved template with includes inlined #}
@@ -94,7 +94,7 @@ _LLM structured output_
 
 | Field | Type | Description |
 |-------|------|-------------|
-| outputText | String |  The processed output text from the LLM |
+| outputText | String | The processed output text from the LLM |
 
 ### Result
 
@@ -106,14 +106,14 @@ _What exits the graph_
 
 ## JSON Schema (LLM Output)
 
-The `sgProcess` node expects the LLM to return JSON matching this schema:
+The LLM node expects JSON matching this schema:
 
 ```json
 {
     "additionalProperties": false,
     "properties": {
         "outputText": {
-            "description": " The processed output text from the LLM",
+            "description": "The processed output text from the LLM",
             "type": "string"
         }
     },
