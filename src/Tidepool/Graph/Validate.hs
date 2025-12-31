@@ -37,6 +37,7 @@ module Tidepool.Graph.Validate
   , AllToolsHaveSchema
   , AllSchemasValidForStructuredOutput
   , AllMemoriesValid
+  , UniqueSchemas
   , NeedsSatisfied
   , GotoTargetExists
 
@@ -45,6 +46,7 @@ module Tidepool.Graph.Validate
   , MissingExitError
   , UnsatisfiedNeedError
   , InvalidGotoTargetError
+  , DuplicateSchemaError
   ) where
 
 import Data.Kind (Type, Constraint)
@@ -85,6 +87,7 @@ type ValidGraph g =
   , AllToolsHaveSchema g
   , AllSchemasValidForStructuredOutput g
   , AllMemoriesValid g
+  , UniqueSchemas g
   )
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -368,6 +371,52 @@ type ValidateNodeMemory :: Maybe Type -> Constraint
 type family ValidateNodeMemory mMemory where
   ValidateNodeMemory 'Nothing = ()
   ValidateNodeMemory ('Just _t) = ()  -- Placeholder: add constraints when effect is built
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- UNIQUE SCHEMA VALIDATION
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Validates that all Schema types in the graph are unique.
+--
+-- Two nodes with the same Schema type would create ambiguous Needs resolution.
+-- This ensures each Schema type is produced by exactly one node.
+--
+-- @
+-- -- This would fail:
+-- type BadGraph = Graph
+--   '[ Entry :~> Input
+--    , "a" := LLM :@ Needs '[Input] :@ Schema Response
+--    , "b" := LLM :@ Needs '[Input] :@ Schema Response  -- Duplicate!
+--    , Exit :<~ Response
+--    ]
+-- @
+type UniqueSchemas :: Type -> Constraint
+type family UniqueSchemas g where
+  UniqueSchemas (Graph nodes) = Unique (CollectSchemaTypes nodes)
+  UniqueSchemas (g :& _) = UniqueSchemas g
+
+-- | Ensure no duplicates in a type-level list.
+type Unique :: [Type] -> Constraint
+type family Unique xs where
+  Unique '[] = ()
+  Unique (x ': xs) = (NotElemType x xs, Unique xs)
+
+-- | Constraint-level check that a type is NOT in a list.
+-- Produces a type error if the type IS in the list.
+type NotElemType :: Type -> [Type] -> Constraint
+type family NotElemType x xs where
+  NotElemType _ '[] = ()
+  NotElemType x (x ': _) = DuplicateSchemaError x
+  NotElemType x (_ ': rest) = NotElemType x rest
+
+-- | Error when two nodes have the same Schema type.
+type DuplicateSchemaError :: Type -> Constraint
+type DuplicateSchemaError t = TypeError
+  ('Text "Graph validation failed: duplicate Schema type"
+   ':$$: 'Text "  Schema " ':<>: 'ShowType t ':<>: 'Text " is produced by multiple nodes."
+   ':$$: 'Text "This creates ambiguous Needs resolution."
+   ':$$: 'Text "Fix: Use distinct types for each node's Schema output."
+  )
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- UTILITIES

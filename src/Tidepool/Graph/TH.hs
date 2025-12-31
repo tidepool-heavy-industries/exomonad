@@ -248,12 +248,12 @@ extractSchema = foldr go Nothing
       | nameBase schema == "Schema" = Just t
     go _ acc = acc
 
--- | Extract Eff stack from annotations.
+-- | Extract UsesEffects stack from annotations.
 extractEff :: [TH.Type] -> Maybe TH.Type
 extractEff = foldr go Nothing
   where
     go (AppT (ConT eff) t) _
-      | nameBase eff == "Eff" = Just t
+      | nameBase eff == "UsesEffects" = Just t
     go _ acc = acc
 
 -- | Extract Memory type from annotations.

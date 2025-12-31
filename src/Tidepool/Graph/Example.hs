@@ -61,7 +61,7 @@ import Text.Parsec.Pos (SourcePos)
 
 import Tidepool.Graph.Types
 import Tidepool.Graph.Validate (ValidGraph)
-import Tidepool.Graph.Generic (GraphMode(..), AsGraph, AsHandler)
+import Tidepool.Graph.Generic (GraphMode(..), AsGraph, AsHandler, gotoField)
 import qualified Tidepool.Graph.Generic as G (Entry, Exit, LLMNode, LogicNode, ValidGraphRecord)
 import Tidepool.Graph.Goto (Goto)
 import Tidepool.Graph.Tool (ToolDef(..), toolToInfo)
@@ -420,7 +420,8 @@ instance TemplateDef FaqTpl where
 data SupportGraph mode = SupportGraph
   { sgEntry    :: mode :- G.Entry Message
   , sgClassify :: mode :- G.LLMNode :@ Needs '[Message] :@ Template ClassifyTpl :@ Schema Intent
-  , sgRoute    :: mode :- G.LogicNode :@ Needs '[Intent] :@ UsesEffects '[Goto "refund" Message, Goto "faq" Message]
+    -- Note: Goto targets must match actual field names for gotoField validation
+  , sgRoute    :: mode :- G.LogicNode :@ Needs '[Intent] :@ UsesEffects '[Goto "sgRefund" Message, Goto "sgFaq" Message]
   , sgRefund   :: mode :- G.LLMNode :@ Needs '[Message] :@ Template RefundTpl :@ Schema Response
   , sgFaq      :: mode :- G.LLMNode :@ Needs '[Message] :@ Template FaqTpl :@ Schema Response
   , sgExit     :: mode :- G.Exit Response
@@ -448,10 +449,19 @@ supportHandlers = SupportGraph
         { topic = msgContent msg
         , categories = T.intercalate ", " st.sessionNotes
         }
-  , sgRoute    = \_intent -> do
-      -- Logic handler: examines intent and gotos the right node
-      -- For now, stub that does nothing (would use goto effect)
-      pure ()
+  , sgRoute    = \intent -> do
+      -- Logic handler: examines intent and uses gotoField for graph-validated transitions
+      --
+      -- gotoField @SupportGraph @"sgRefund" validates at compile time that:
+      -- 1. "sgRefund" is actually a field in SupportGraph
+      -- 2. The Goto "sgRefund" Message effect is in our effect stack
+      --
+      -- This catches typos and prevents referencing fields from wrong graphs.
+      let msg = Message "forwarded message"
+      case intent of
+        IntentRefund    -> gotoField @SupportGraph @"sgRefund" msg
+        IntentQuestion  -> gotoField @SupportGraph @"sgFaq" msg
+        IntentComplaint -> gotoField @SupportGraph @"sgFaq" msg  -- Complaints go to FAQ for now
   , sgRefund   = \_msg -> do
       -- Refund template context builder
       pure SimpleContext { scContent = "Processing refund..." }

@@ -149,6 +149,7 @@ module Tidepool.Graph
   , AllGotoTargetsExist
   , AllToolsHaveSchema
   , AllMemoriesValid
+  , UniqueSchemas
 
     -- * Reification
   , ReifyGraph(..)
@@ -190,6 +191,8 @@ module Tidepool.Graph
   , G.GraphProduct(..)
   , G.FieldNamesOf
   , G.FieldsWithNamesOf
+  , G.ElemC
+  , G.gotoField
   , G.GenericGraph
 
     -- * Type-Level Utilities

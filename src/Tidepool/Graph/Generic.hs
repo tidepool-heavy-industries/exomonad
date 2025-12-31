@@ -91,8 +91,12 @@ module Tidepool.Graph.Generic
   , FieldNamesOf
   , FieldsWithNamesOf
 
+    -- * Graph-Validated Goto
+  , gotoField
+
     -- * Type-Level Utilities
   , Elem
+  , ElemC
   , If
   , Append
   , type (||)
@@ -101,6 +105,8 @@ module Tidepool.Graph.Generic
     -- * Record Validation
   , HasEntryField
   , HasExitField
+  , CountEntries
+  , CountExits
   , GetEntryType
   , GetExitType
   , ValidateEntryExit
@@ -114,13 +120,14 @@ module Tidepool.Graph.Generic
 import Data.Kind (Type, Constraint)
 import Data.Proxy (Proxy(..))
 import GHC.Generics (Generic(..), K1(..), M1(..), (:*:)(..), Meta(..), S, D, C)
-import GHC.TypeLits (Symbol, TypeError, ErrorMessage(..))
+import GHC.TypeLits (Symbol, KnownSymbol, TypeError, ErrorMessage(..), Nat, type (+))
 import Effectful (Effect)
 import Effectful qualified as E
 
 import Tidepool.Graph.Types (type (:@), Needs, Schema, Template, Vision, Tools, Memory, System, UsesEffects)
 import Tidepool.Graph.Template (TemplateContext)
 import Tidepool.Graph.Edges (GetUsesEffects, GetGotoTargets)
+import Tidepool.Graph.Goto (Goto, goto)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- GRAPH MODE CLASS
@@ -374,12 +381,33 @@ type family Append xs ys where
   Append '[] ys = ys
   Append (x ': xs) ys = x ': Append xs ys
 
--- | Check if a Symbol is in a type-level list.
+-- | Check if a Symbol is in a type-level list (returns Bool).
 type Elem :: Symbol -> [Symbol] -> Bool
 type family Elem x xs where
   Elem _ '[] = 'False
   Elem x (x ': _) = 'True
   Elem x (_ ': xs) = Elem x xs
+
+-- | Constraint-level membership check with type error on failure.
+--
+-- Use this to validate that a field name exists in a graph:
+--
+-- @
+-- gotoField
+--   :: forall graph (name :: Symbol) payload es.
+--      ( ElemC name (FieldNamesOf graph)
+--      , Goto name payload :> es
+--      )
+--   => payload -> Eff es ()
+-- @
+type ElemC :: Symbol -> [Symbol] -> Constraint
+type family ElemC s ss where
+  ElemC s '[] = TypeError
+    ('Text "Field '" ':<>: 'Text s ':<>: 'Text "' not found in graph"
+     ':$$: 'Text "Check that the field name matches a record field in the graph type."
+    )
+  ElemC s (s ': _) = ()
+  ElemC s (_ ': rest) = ElemC s rest
 
 -- | Type-level If (returns Constraint).
 type If :: Bool -> Constraint -> Constraint -> Constraint
@@ -491,6 +519,30 @@ type family a || b where
   'True  || _ = 'True
   'False || b = b
 
+-- | Count Entry fields in a Generic representation.
+--
+-- Returns the number of fields with type @Entry a@ for some @a@.
+type CountEntries :: (Type -> Type) -> Nat
+type family CountEntries f where
+  CountEntries (M1 D _ f) = CountEntries f
+  CountEntries (M1 C _ f) = CountEntries f
+  CountEntries (M1 S _ (K1 _ (Entry _))) = 1
+  CountEntries (M1 S _ _) = 0
+  CountEntries (l :*: r) = CountEntries l + CountEntries r
+  CountEntries _ = 0
+
+-- | Count Exit fields in a Generic representation.
+--
+-- Returns the number of fields with type @Exit a@ for some @a@.
+type CountExits :: (Type -> Type) -> Nat
+type family CountExits f where
+  CountExits (M1 D _ f) = CountExits f
+  CountExits (M1 C _ f) = CountExits f
+  CountExits (M1 S _ (K1 _ (Exit _))) = 1
+  CountExits (M1 S _ _) = 0
+  CountExits (l :*: r) = CountExits l + CountExits r
+  CountExits _ = 0
+
 -- | Extract Entry type from a graph record.
 type GetEntryType :: (Type -> Type) -> Maybe Type
 type family GetEntryType f where
@@ -517,34 +569,40 @@ type family OrMaybe a b where
   OrMaybe ('Just x) _ = 'Just x
   OrMaybe 'Nothing b = b
 
--- | Validate a graph record has Entry and Exit fields.
+-- | Validate a graph record has exactly one Entry and one Exit field.
 --
--- Produces type errors if Entry or Exit are missing.
+-- Produces type errors if Entry or Exit are missing, or if there are duplicates.
 type ValidateEntryExit :: (Type -> Type) -> Constraint
 type family ValidateEntryExit graph where
   ValidateEntryExit graph =
-    ( If (HasEntryField (Rep (graph AsGraph)))
-         (() :: Constraint)
-         (MissingEntryFieldError graph)
-    , If (HasExitField (Rep (graph AsGraph)))
-         (() :: Constraint)
-         (MissingExitFieldError graph)
+    ( ValidateEntryCount (CountEntries (Rep (graph AsGraph)))
+    , ValidateExitCount (CountExits (Rep (graph AsGraph)))
     )
 
--- | Error when graph record has no Entry field.
-type MissingEntryFieldError :: (Type -> Type) -> Constraint
-type family MissingEntryFieldError graph where
-  MissingEntryFieldError _ = DelayedTypeError
+-- | Validate Entry count is exactly 1.
+type ValidateEntryCount :: Nat -> Constraint
+type family ValidateEntryCount n where
+  ValidateEntryCount 0 = DelayedTypeError
     ('Text "Graph record validation failed: missing Entry field"
      ':$$: 'Text "Add a field like: entry :: mode :- Entry YourInputType"
     )
+  ValidateEntryCount 1 = ()
+  ValidateEntryCount _ = DelayedTypeError
+    ('Text "Graph record validation failed: multiple Entry fields"
+     ':$$: 'Text "A graph record must have exactly one Entry field."
+    )
 
--- | Error when graph record has no Exit field.
-type MissingExitFieldError :: (Type -> Type) -> Constraint
-type family MissingExitFieldError graph where
-  MissingExitFieldError _ = DelayedTypeError
+-- | Validate Exit count is exactly 1.
+type ValidateExitCount :: Nat -> Constraint
+type family ValidateExitCount n where
+  ValidateExitCount 0 = DelayedTypeError
     ('Text "Graph record validation failed: missing Exit field"
      ':$$: 'Text "Add a field like: exit :: mode :- Exit YourOutputType"
+    )
+  ValidateExitCount 1 = ()
+  ValidateExitCount _ = DelayedTypeError
+    ('Text "Graph record validation failed: multiple Exit fields"
+     ':$$: 'Text "A graph record must have exactly one Exit field."
     )
 
 -- | Helper to delay TypeError evaluation.
@@ -696,3 +754,40 @@ type GenericGraph graph mode =
   , Generic (graph mode)
   , GraphProduct (Rep (graph mode))
   )
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- GRAPH-VALIDATED GOTO
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Graph-validated goto using TypeApplications.
+--
+-- Like 'goto', but also validates at compile time that the target field
+-- exists in the specified graph type. This catches typos and prevents
+-- accidentally referencing fields from other graphs.
+--
+-- @
+-- -- Define a graph
+-- data SupportGraph mode = SupportGraph
+--   { sgEntry  :: mode :- Entry Message
+--   , sgRefund :: mode :- LLMNode :@ ...
+--   , sgFaq    :: mode :- LLMNode :@ ...
+--   , sgExit   :: mode :- Exit Response
+--   }
+--
+-- -- In a handler:
+-- routeHandler :: (...) => Intent -> Eff es ()
+-- routeHandler intent = case intent of
+--   Refund -> gotoField @SupportGraph @"sgRefund" msg   -- Validated!
+--   FAQ    -> gotoField @SupportGraph @"sgFaq" msg      -- Validated!
+--   _      -> gotoField @SupportGraph @"sgTypo" msg     -- Compile error!
+-- @
+gotoField
+  :: forall (graph :: Type -> Type) (name :: Symbol) payload es.
+     ( KnownSymbol name
+     , Generic (graph AsGraph)
+     , ElemC name (FieldNamesOf graph)
+     , Goto name payload E.:> es
+     )
+  => payload
+  -> E.Eff es ()
+gotoField = goto @name
