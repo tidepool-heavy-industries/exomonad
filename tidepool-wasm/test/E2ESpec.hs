@@ -149,28 +149,30 @@ multiYieldJsonBoundarySpec = describe "JSON boundary (wire types)" $ do
     let state = GraphState (PhaseInNode "compute") []
         step1Output = StepYield (EffLogInfo "Step 1: received 5") state
 
-    let Just json = decode (encode step1Output) :: Maybe Value
-    case json of
-      Object obj -> do
-        KM.lookup "done" obj `shouldBe` Just (Bool False)
-        case KM.lookup "effect" obj of
-          Just (Object eff) -> do
-            KM.lookup "type" eff `shouldBe` Just (String "LogInfo")
-            KM.lookup "eff_message" eff `shouldBe` Just (String "Step 1: received 5")
-          _ -> expectationFailure "Expected effect object"
-      _ -> expectationFailure "Expected JSON object"
+    case decode (encode step1Output) :: Maybe Value of
+      Nothing -> expectationFailure "Failed to decode StepOutput JSON"
+      Just json -> case json of
+        Object obj -> do
+          KM.lookup "done" obj `shouldBe` Just (Bool False)
+          case KM.lookup "effect" obj of
+            Just (Object eff) -> do
+              KM.lookup "type" eff `shouldBe` Just (String "LogInfo")
+              KM.lookup "eff_message" eff `shouldBe` Just (String "Step 1: received 5")
+            _ -> expectationFailure "Expected effect object"
+        _ -> expectationFailure "Expected JSON object"
 
   it "StepOutput encodes completion correctly after multi-yield" $ do
     let state = GraphState (PhaseCompleted (Number 6)) ["compute"]
         doneOutput = StepDone (Number 6) state
 
-    let Just json = decode (encode doneOutput) :: Maybe Value
-    case json of
-      Object obj -> do
-        KM.lookup "done" obj `shouldBe` Just (Bool True)
-        KM.lookup "stepResult" obj `shouldBe` Just (Number 6)
-        KM.lookup "effect" obj `shouldBe` Just Null
-      _ -> expectationFailure "Expected JSON object"
+    case decode (encode doneOutput) :: Maybe Value of
+      Nothing -> expectationFailure "Failed to decode StepOutput JSON"
+      Just json -> case json of
+        Object obj -> do
+          KM.lookup "done" obj `shouldBe` Just (Bool True)
+          KM.lookup "stepResult" obj `shouldBe` Just (Number 6)
+          KM.lookup "effect" obj `shouldBe` Just Null
+        _ -> expectationFailure "Expected JSON object"
 
   it "EffectResult round-trips for multi-step acknowledgments" $ do
     -- Each step between yields receives a ResSuccess Nothing
