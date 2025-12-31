@@ -36,6 +36,10 @@ module Tidepool.Graph.Validate.RecordStructure
   , UnreachableFieldError
   , NoExitPathFieldError
   , DeadGotoFieldError
+  , GotoTypeMismatchError
+
+    -- * Error Formatting
+  , FormatTypeList
 
     -- * Internal Type Families (exported for testing)
   , ComputeReachableFields
@@ -381,29 +385,31 @@ type family NoDeadGotosRecord graph where
         (GetRecordEntryType graph))
 
 -- | Check if dead goto list is empty.
-type CheckNoDeadGotosRecord :: [(Symbol, Symbol, Type)] -> Constraint
+-- The tuple now includes target's Needs for better error messages.
+type CheckNoDeadGotosRecord :: [(Symbol, Symbol, Type, [Type])] -> Constraint
 type family CheckNoDeadGotosRecord deadGotos where
   CheckNoDeadGotosRecord '[] = ()
-  CheckNoDeadGotosRecord ('(src, target, payload) ': _) =
-    DeadGotoFieldError src target payload
+  CheckNoDeadGotosRecord ('(src, target, payload, targetNeeds) ': _) =
+    GotoTypeMismatchError src target payload targetNeeds
 
 -- | Find dead Gotos in all fields.
-type FindDeadGotosInFields :: [(Symbol, Type)] -> Type -> [(Symbol, Symbol, Type)]
+-- Returns 4-tuples: (srcName, targetName, payload, targetNeeds)
+type FindDeadGotosInFields :: [(Symbol, Type)] -> Type -> [(Symbol, Symbol, Type, [Type])]
 type family FindDeadGotosInFields fields entryType where
   FindDeadGotosInFields fields entryType =
     FindDeadGotosHelper fields fields entryType
 
 -- | Helper that keeps track of all fields while iterating.
-type FindDeadGotosHelper :: [(Symbol, Type)] -> [(Symbol, Type)] -> Type -> [(Symbol, Symbol, Type)]
+type FindDeadGotosHelper :: [(Symbol, Type)] -> [(Symbol, Type)] -> Type -> [(Symbol, Symbol, Type, [Type])]
 type family FindDeadGotosHelper remaining allFields entryType where
   FindDeadGotosHelper '[] _ _ = '[]
   FindDeadGotosHelper ('(name, def) ': rest) allFields entryType =
-    AppendTriples
+    AppendQuads
       (CheckFieldGotos name def allFields entryType)
       (FindDeadGotosHelper rest allFields entryType)
 
 -- | Check Gotos in a single field.
-type CheckFieldGotos :: Symbol -> Type -> [(Symbol, Type)] -> Type -> [(Symbol, Symbol, Type)]
+type CheckFieldGotos :: Symbol -> Type -> [(Symbol, Type)] -> Type -> [(Symbol, Symbol, Type, [Type])]
 type family CheckFieldGotos srcName def allFields entryType where
   CheckFieldGotos srcName def allFields entryType =
     CheckGotoList srcName (GetFieldGotoTargetsWithPayloads def) allFields entryType
@@ -430,16 +436,16 @@ type family GetGotoTargetsFromEffects effs where
   GetGotoTargetsFromEffects (_ ': rest) = GetGotoTargetsFromEffects rest
 
 -- | Check a list of Gotos.
-type CheckGotoList :: Symbol -> [(Symbol, Type)] -> [(Symbol, Type)] -> Type -> [(Symbol, Symbol, Type)]
+type CheckGotoList :: Symbol -> [(Symbol, Type)] -> [(Symbol, Type)] -> Type -> [(Symbol, Symbol, Type, [Type])]
 type family CheckGotoList srcName gotos allFields entryType where
   CheckGotoList _ '[] _ _ = '[]
   CheckGotoList srcName ('(target, payload) ': rest) allFields entryType =
-    AppendTriples
+    AppendQuads
       (CheckSingleFieldGoto srcName target payload allFields entryType)
       (CheckGotoList srcName rest allFields entryType)
 
 -- | Check a single Goto.
-type CheckSingleFieldGoto :: Symbol -> Symbol -> Type -> [(Symbol, Type)] -> Type -> [(Symbol, Symbol, Type)]
+type CheckSingleFieldGoto :: Symbol -> Symbol -> Type -> [(Symbol, Type)] -> Type -> [(Symbol, Symbol, Type, [Type])]
 type family CheckSingleFieldGoto srcName targetName payload allFields entryType where
   CheckSingleFieldGoto srcName targetName payload allFields entryType =
     CheckGotoWithTarget
@@ -466,12 +472,13 @@ type family CollectAllFieldSchemas fields where
     AppendMaybeType (GetSchema def) (CollectAllFieldSchemas rest)
 
 -- | Check Goto with resolved target needs.
-type CheckGotoWithTarget :: Symbol -> Symbol -> Type -> [Type] -> [Type] -> [(Symbol, Symbol, Type)]
+-- Returns 4-tuple including targetNeeds for better error messages.
+type CheckGotoWithTarget :: Symbol -> Symbol -> Type -> [Type] -> [Type] -> [(Symbol, Symbol, Type, [Type])]
 type family CheckGotoWithTarget srcName targetName payload targetNeeds available where
   CheckGotoWithTarget srcName targetName payload targetNeeds available =
     If (AllIn targetNeeds available)
        '[]
-       '[ '(srcName, targetName, payload) ]
+       '[ '(srcName, targetName, payload, targetNeeds) ]
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- ERROR MESSAGES
@@ -503,21 +510,39 @@ type NoExitPathFieldError name = TypeError
    ':$$: 'Text "     or add Goto to a node that reaches Exit."
   )
 
--- | Error when a Goto target can't receive its payload.
-type DeadGotoFieldError :: Symbol -> Symbol -> Type -> Constraint
-type DeadGotoFieldError srcName targetName payload = TypeError
-  ('Text "Graph validation failed: dead Goto"
-   ':$$: 'Text "Field '" ':<>: 'Text srcName ':<>: 'Text "' has:"
+-- | Error when a Goto payload type doesn't satisfy target's Needs.
+--
+-- This improved error shows both what was sent and what was expected,
+-- making type mismatches much easier to debug.
+type GotoTypeMismatchError :: Symbol -> Symbol -> Type -> [Type] -> Constraint
+type GotoTypeMismatchError srcName targetName payload targetNeeds = TypeError
+  ('Text "Graph validation failed: Goto payload type mismatch"
+   ':$$: 'Text ""
+   ':$$: 'Text "Node '" ':<>: 'Text srcName ':<>: 'Text "' sends:"
    ':$$: 'Text "  Goto \"" ':<>: 'Text targetName ':<>: 'Text "\" " ':<>: 'ShowType payload
    ':$$: 'Text ""
-   ':$$: 'Text "But field '" ':<>: 'Text targetName ':<>: 'Text "' Needs types that won't be available."
+   ':$$: 'Text "But target '" ':<>: 'Text targetName ':<>: 'Text "' needs:"
+   ':$$: FormatTypeList targetNeeds
    ':$$: 'Text ""
-   ':$$: 'Text "Fix: Ensure the Goto payload matches what the target Needs."
+   ':$$: 'Text "The Goto payload must provide all types the target Needs."
+   ':$$: 'Text "Fix: Change the payload type or adjust the target's Needs."
   )
+
+-- | Legacy alias for backwards compatibility with Validate.hs exports.
+type DeadGotoFieldError :: Symbol -> Symbol -> Type -> Constraint
+type DeadGotoFieldError srcName targetName payload =
+  GotoTypeMismatchError srcName targetName payload '[]
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TYPE-LEVEL UTILITIES
 -- ════════════════════════════════════════════════════════════════════════════
+
+-- | Format a list of types for display in error messages.
+type FormatTypeList :: [Type] -> ErrorMessage
+type family FormatTypeList ts where
+  FormatTypeList '[] = 'Text "  (none)"
+  FormatTypeList '[t] = 'Text "  • " ':<>: 'ShowType t
+  FormatTypeList (t ': rest) = 'Text "  • " ':<>: 'ShowType t ':$$: FormatTypeList rest
 
 -- | Type-level If.
 type If :: Bool -> k -> k -> k
@@ -591,11 +616,11 @@ type family AppendMaybeType m xs where
   AppendMaybeType 'Nothing xs = xs
   AppendMaybeType ('Just x) xs = x ': xs
 
--- | Append triple lists.
-type AppendTriples :: [(Symbol, Symbol, Type)] -> [(Symbol, Symbol, Type)] -> [(Symbol, Symbol, Type)]
-type family AppendTriples xs ys where
-  AppendTriples '[] ys = ys
-  AppendTriples (x ': rest) ys = x ': AppendTriples rest ys
+-- | Append 4-tuple lists (for dead goto tracking).
+type AppendQuads :: [(Symbol, Symbol, Type, [Type])] -> [(Symbol, Symbol, Type, [Type])] -> [(Symbol, Symbol, Type, [Type])]
+type family AppendQuads xs ys where
+  AppendQuads '[] ys = ys
+  AppendQuads (x ': rest) ys = x ': AppendQuads rest ys
 
 -- | Length of pair list.
 type LengthPairs :: [(Symbol, Type)] -> Nat

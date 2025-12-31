@@ -46,6 +46,9 @@ module Tidepool.Graph.Execute
   , CallHandler(..)
     -- * LLM Handler Execution
   , executeLLMHandler
+
+    -- * Self-Loop Dispatch
+  , DispatchGotoWithSelf(..)
   ) where
 
 import Data.Aeson (FromJSON)
@@ -353,27 +356,27 @@ instance {-# OVERLAPPABLE #-}
 
 
 -- ════════════════════════════════════════════════════════════════════════════
--- SELF-LOOP INSTANCES
+-- SELF-LOOP INSTANCES (error guidance)
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Self-loop as only target: not yet implemented.
+-- | Self-loop as only target: use DispatchGotoWithSelf instead.
 --
 -- Self-loops require tracking the "current" handler to re-invoke.
--- This instance provides a clear error rather than failing with HasField.
+-- This instance provides a clear error directing users to the correct API.
 instance TypeError
-  ('Text "Self-loop dispatch not yet implemented"
+  ('Text "Self-loop dispatch requires DispatchGotoWithSelf"
    ':$$: 'Text ""
-   ':$$: 'Text "To Self transitions require a graph runner that tracks"
-   ':$$: 'Text "the current node. Use explicit Goto to a named node instead."
+   ':$$: 'Text "To Self transitions need an explicit self-handler."
+   ':$$: 'Text "Use dispatchGotoWithSelf instead of dispatchGoto."
   ) => DispatchGoto graph '[To Self payload] es exitType where
   dispatchGoto = error "unreachable: self-loop"
 
--- | Self first with more targets: not yet implemented.
+-- | Self first with more targets: use DispatchGotoWithSelf instead.
 instance {-# OVERLAPPABLE #-} TypeError
-  ('Text "Self-loop dispatch not yet implemented"
+  ('Text "Self-loop dispatch requires DispatchGotoWithSelf"
    ':$$: 'Text ""
-   ':$$: 'Text "To Self transitions require a graph runner that tracks"
-   ':$$: 'Text "the current node. Use explicit Goto to a named node instead."
+   ':$$: 'Text "To Self transitions need an explicit self-handler."
+   ':$$: 'Text "Use dispatchGotoWithSelf instead of dispatchGoto."
   ) => DispatchGoto graph (To Self payload ': rest) es exitType where
   dispatchGoto = error "unreachable: self-loop"
 
@@ -407,3 +410,87 @@ instance
 
   dispatchGoto graph (GotoChoice (There rest)) =
     dispatchGoto @graph @rest graph (GotoChoice rest)
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- SELF-LOOP DISPATCH
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Dispatch with an explicit self-handler for nodes that use 'Goto Self'.
+--
+-- When a node can transition back to itself via 'Goto Self', the standard
+-- 'dispatchGoto' doesn't know which handler to re-invoke. This typeclass
+-- solves this by taking the self-handler as an explicit parameter.
+--
+-- The key difference from 'DispatchGoto' is that the self-handler is threaded
+-- through all recursive calls, so when 'Goto Self' is encountered, the handler
+-- can be invoked with the new payload.
+--
+-- = Usage
+--
+-- For nodes with self-loops:
+--
+-- @
+-- -- Define handler that may loop back to itself
+-- loopHandler :: Int -> Eff es (GotoChoice '[To Self Int, To Exit Int])
+-- loopHandler n
+--   | n >= 10   = pure $ gotoExit n
+--   | otherwise = pure $ gotoSelf (n + 1)
+--
+-- -- Run with explicit self-handler
+-- initialChoice <- loopHandler 0
+-- result <- dispatchGotoWithSelf loopHandler graph initialChoice
+-- @
+--
+-- Note: The @allTargets@ parameter is the full target list that the self-handler
+-- returns. This ensures type consistency when recursing back via Self.
+type DispatchGotoWithSelf :: (Type -> Type) -> Type -> [Type] -> [Type] -> [Effect] -> Type -> Constraint
+class DispatchGotoWithSelf graph selfPayload allTargets targets es exitType where
+  dispatchGotoWithSelf
+    :: (selfPayload -> Eff es (GotoChoice allTargets))  -- ^ Self-handler (returns full target list)
+    -> graph (AsHandler es)                              -- ^ Graph handlers
+    -> GotoChoice targets                                -- ^ Current choice (may be subset)
+    -> Eff es exitType
+
+-- | Base case: Exit is the only target.
+instance DispatchGotoWithSelf graph selfPayload allTargets '[To Exit exitType] es exitType where
+  dispatchGotoWithSelf _ _ (GotoChoice (Here result)) = pure result
+
+-- | Self is first target: call self-handler and recurse with full target list.
+instance
+  ( DispatchGotoWithSelf graph selfPayload allTargets allTargets es exitType
+  , DispatchGotoWithSelf graph selfPayload allTargets rest es exitType
+  ) => DispatchGotoWithSelf graph selfPayload allTargets (To Self selfPayload ': rest) es exitType where
+  dispatchGotoWithSelf selfHandler graph (GotoChoice (Here payload)) = do
+    -- Call self-handler, which returns GotoChoice allTargets
+    nextChoice <- selfHandler payload
+    -- Recurse with full target list
+    dispatchGotoWithSelf @graph @selfPayload @allTargets @allTargets selfHandler graph nextChoice
+  dispatchGotoWithSelf selfHandler graph (GotoChoice (There rest)) =
+    dispatchGotoWithSelf @graph @selfPayload @allTargets @rest selfHandler graph (GotoChoice rest)
+
+-- | Exit in current position: handle exit or skip.
+instance
+  ( DispatchGotoWithSelf graph selfPayload allTargets rest es exitType
+  ) => DispatchGotoWithSelf graph selfPayload allTargets (To Exit exitType ': rest) es exitType where
+  dispatchGotoWithSelf _ _ (GotoChoice (Here result)) = pure result
+  dispatchGotoWithSelf selfHandler graph (GotoChoice (There rest)) =
+    dispatchGotoWithSelf @graph @selfPayload @allTargets @rest selfHandler graph (GotoChoice rest)
+
+-- | Named node target: call handler and recurse.
+--
+-- Note: When a named handler returns a GotoChoice, we dispatch on it with the
+-- handler's target list, not allTargets. The self-handler is still threaded
+-- through for nested Self transitions.
+instance
+  ( KnownSymbol name
+  , HasField name (graph (AsHandler es)) (payload -> Eff es (GotoChoice handlerTargets))
+  , DispatchGotoWithSelf graph selfPayload allTargets handlerTargets es exitType
+  , DispatchGotoWithSelf graph selfPayload allTargets rest es exitType
+  ) => DispatchGotoWithSelf graph selfPayload allTargets (To (name :: Symbol) payload ': rest) es exitType where
+  dispatchGotoWithSelf selfHandler graph (GotoChoice (Here payload)) = do
+    let handler = getField @name graph
+    nextChoice <- handler payload
+    dispatchGotoWithSelf @graph @selfPayload @allTargets @handlerTargets selfHandler graph nextChoice
+  dispatchGotoWithSelf selfHandler graph (GotoChoice (There rest)) =
+    dispatchGotoWithSelf @graph @selfPayload @allTargets @rest selfHandler graph (GotoChoice rest)

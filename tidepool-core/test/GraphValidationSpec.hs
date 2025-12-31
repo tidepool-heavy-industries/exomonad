@@ -68,6 +68,9 @@ spec = do
     it "mixed LLM/Logic graph compiles" $ do
       shouldPass "test/golden/valid/MixedLLMLogicRecord.hs"
 
+    it "self-loop graph with Goto Self compiles" $ do
+      shouldPass "test/golden/valid/SelfLoopRecord.hs"
+
   -- ════════════════════════════════════════════════════════════════════════════
   -- NEGATIVE TESTS: Record-based DSL
   -- ════════════════════════════════════════════════════════════════════════════
@@ -99,4 +102,12 @@ spec = do
       "test/golden/InvalidGotoTargetRecord.hs" `shouldFailWith`
         [ "Graph validation failed: invalid Goto target"
         , "nonexistent"
+        ]
+
+    it "Goto type mismatch produces clear error with expected types" $ do
+      "test/golden/GotoTypeMismatchRecord.hs" `shouldFailWith`
+        [ "Graph validation failed: Goto payload type mismatch"
+        , "Node 'router' sends:"
+        , "Goto \"handler\""
+        , "But target 'handler' needs:"
         ]
