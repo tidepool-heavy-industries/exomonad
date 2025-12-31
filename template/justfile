@@ -1,0 +1,19 @@
+# Template Agent Justfile
+# Run `just` to see available recipes
+
+set shell := ["bash", "-uc"]
+
+# Default: show available recipes
+default:
+    @just --list
+
+# Build the template
+build:
+    cabal build all
+
+# Generate Mermaid documentation from graph types
+generate-docs:
+    cabal run generate-template-docs
+
+# Build and generate docs
+all: build generate-docs
