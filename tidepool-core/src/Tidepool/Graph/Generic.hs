@@ -251,9 +251,21 @@ type family NodeHandlerDispatch nodeDef origNode es needs mTpl mSchema mEffs whe
   NodeHandlerDispatch (node :@ Template tpl) orig es needs 'Nothing mSchema mEffs =
     NodeHandlerDispatch node orig es needs ('Just tpl) mSchema mEffs
 
+  -- Detect duplicate Template annotations
+  NodeHandlerDispatch (node :@ Template _) orig es needs ('Just _) mSchema mEffs = TypeError
+    ('Text "Duplicate Template annotation on node"
+     ':$$: 'Text "Each node may have at most one Template annotation."
+    )
+
   -- Peel Schema annotation - record it (for LLM nodes)
   NodeHandlerDispatch (node :@ Schema s) orig es needs mTpl 'Nothing mEffs =
     NodeHandlerDispatch node orig es needs mTpl ('Just s) mEffs
+
+  -- Detect duplicate Schema annotations
+  NodeHandlerDispatch (node :@ Schema _) orig es needs mTpl ('Just _) mEffs = TypeError
+    ('Text "Duplicate Schema annotation on node"
+     ':$$: 'Text "Each node may have at most one Schema annotation."
+    )
 
   -- Skip other annotations (Vision, Tools, Memory, System)
   NodeHandlerDispatch (node :@ Vision) orig es needs mTpl mSchema mEffs =
@@ -268,6 +280,12 @@ type family NodeHandlerDispatch nodeDef origNode es needs mTpl mSchema mEffs whe
   -- Peel UsesEffects annotation - record effects
   NodeHandlerDispatch (node :@ UsesEffects effs) orig es needs mTpl mSchema 'Nothing =
     NodeHandlerDispatch node orig es needs mTpl mSchema ('Just (EffStack effs))
+
+  -- Detect duplicate UsesEffects annotations
+  NodeHandlerDispatch (node :@ UsesEffects _) orig es needs mTpl mSchema ('Just _) = TypeError
+    ('Text "Duplicate UsesEffects annotation on node"
+     ':$$: 'Text "Each node may have at most one UsesEffects annotation."
+    )
 
   -- ══════════════════════════════════════════════════════════════════════════
   -- LLMNode Base Cases
@@ -285,18 +303,35 @@ type family NodeHandlerDispatch nodeDef origNode es needs mTpl mSchema mEffs whe
   NodeHandlerDispatch LLMNode orig es needs 'Nothing ('Just schema) ('Just (EffStack effs)) =
     LLMHandler (TupleOf needs) schema (GotoEffectsToTargets effs) es ()
 
-  -- LLMNode missing Template - error
-  NodeHandlerDispatch LLMNode orig es needs 'Nothing 'Nothing _ = TypeError
-    ('Text "LLM node missing Template annotation"
+  -- LLMNode with Schema only (no Template or UsesEffects) - error
+  NodeHandlerDispatch LLMNode orig es needs 'Nothing ('Just schema) 'Nothing = TypeError
+    ('Text "LLM node has Schema but missing Template or UsesEffects"
      ':$$: 'Text ""
      ':$$: 'Text "Node definition:"
      ':$$: 'Text "  " ':<>: 'ShowType orig
      ':$$: 'Text ""
-     ':$$: 'Text "LLM nodes must have a Template annotation to specify the prompt context,"
-     ':$$: 'Text "OR a UsesEffects annotation for after-only routing (with default context)."
+     ':$$: 'Text "LLM nodes with a Schema must also specify either:"
+     ':$$: 'Text "  • Template annotation (for before-only or both phases)"
+     ':$$: 'Text "  • UsesEffects annotation (for after-only routing with default context)"
      ':$$: 'Text ""
      ':$$: 'Text "Fix: Add a Template annotation:"
-     ':$$: 'Text "  myNode :: mode :- LLMNode :@ ... :@ Template MyPromptTpl :@ Schema Output"
+     ':$$: 'Text "  myNode :: mode :- LLMNode :@ Template MyTpl :@ Schema " ':<>: 'ShowType schema
+    )
+
+  -- LLMNode missing both Template and Schema - error
+  NodeHandlerDispatch LLMNode orig es needs 'Nothing 'Nothing _ = TypeError
+    ('Text "LLM node missing Template and Schema annotations"
+     ':$$: 'Text ""
+     ':$$: 'Text "Node definition:"
+     ':$$: 'Text "  " ':<>: 'ShowType orig
+     ':$$: 'Text ""
+     ':$$: 'Text "LLM nodes require:"
+     ':$$: 'Text "  • Schema annotation (required) - specifies LLM output type"
+     ':$$: 'Text "  • Template annotation (for before handlers) - specifies prompt context"
+     ':$$: 'Text "  • UsesEffects annotation (for after routing) - specifies transitions"
+     ':$$: 'Text ""
+     ':$$: 'Text "Example:"
+     ':$$: 'Text "  myNode :: mode :- LLMNode :@ Template MyTpl :@ Schema MyOutput"
     )
 
   -- LLMNode missing Schema - error
@@ -342,7 +377,18 @@ type family TupleOf ts where
   TupleOf '[t1, t2] = (t1, t2)
   TupleOf '[t1, t2, t3] = (t1, t2, t3)
   TupleOf '[t1, t2, t3, t4] = (t1, t2, t3, t4)
-  -- Extend as needed
+  TupleOf '[t1, t2, t3, t4, t5] = (t1, t2, t3, t4, t5)
+  TupleOf '[t1, t2, t3, t4, t5, t6] = (t1, t2, t3, t4, t5, t6)
+  TupleOf '[t1, t2, t3, t4, t5, t6, t7] = (t1, t2, t3, t4, t5, t6, t7)
+  TupleOf '[t1, t2, t3, t4, t5, t6, t7, t8] = (t1, t2, t3, t4, t5, t6, t7, t8)
+  TupleOf ts = TypeError
+    ('Text "Too many Needs types (maximum 8 supported)"
+     ':$$: 'Text ""
+     ':$$: 'Text "Needs list:"
+     ':$$: 'Text "  " ':<>: 'ShowType ts
+     ':$$: 'Text ""
+     ':$$: 'Text "Fix: Reduce the number of Needs types or combine related types."
+    )
 
 -- | Wrapper to distinguish Template types from EffStack in the Maybe
 data EffStack (effs :: [Effect])

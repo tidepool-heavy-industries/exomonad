@@ -263,7 +263,7 @@ gotoChoiceToResult (GotoChoiceSelf payload) =
 --
 -- LLM nodes can have before-only, after-only, or both handlers:
 --
--- * 'LLMBefore': Provides template context before LLM call, implicit routing
+-- * 'LLMBefore': Provides template context before LLM call, uses Needs-based data flow
 -- * 'LLMAfter': Routes based on LLM output, uses default context
 -- * 'LLMBoth': Custom context AND explicit routing
 --
@@ -274,24 +274,24 @@ gotoChoiceToResult (GotoChoiceSelf payload) =
 --
 -- @
 -- -- Before-only: classifier with custom context
--- sgClassify :: LLMHandler Message Intent '[] es
+-- sgClassify :: LLMHandler Message Intent '[] es ClassifyContext
 -- sgClassify = LLMBefore $ \\msg -> pure ClassifyContext { topic = msg.content }
 --
 -- -- After-only: router using LLM output
--- sgRouter :: LLMHandler () Intent '[To "refund" Msg, To "faq" Msg] es
+-- sgRouter :: LLMHandler () Intent '[To "refund" Msg, To "faq" Msg] es ()
 -- sgRouter = LLMAfter $ \\intent -> pure $ case intent of
 --   IntentRefund -> gotoChoice @"refund" msg
 --   IntentFaq    -> gotoChoice @"faq" msg
 --
 -- -- Both: custom context AND explicit routing
--- sgSmart :: LLMHandler Message Intent '[To "a" X, To "b" Y] es
+-- sgSmart :: LLMHandler Message Intent '[To "a" X, To "b" Y] es SmartContext
 -- sgSmart = LLMBoth
 --   (\\msg -> pure SmartContext { ... })
 --   (\\intent -> pure $ gotoChoice @"a" (processIntent intent))
 -- @
 type LLMHandler :: Type -> Type -> [Type] -> [Effect] -> Type -> Type
 data LLMHandler needs schema targets es tpl where
-  -- | Before-only: provides template context, implicit routing after LLM
+  -- | Before-only: provides template context, uses Needs-based data flow after LLM
   LLMBefore
     :: forall tpl needs schema es.
        (needs -> Eff es tpl)
