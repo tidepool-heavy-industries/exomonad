@@ -192,7 +192,8 @@ export interface HabiticaEffect {
 
 /**
  * Send a message via Telegram Bot API.
- * Used by TelegramDO for echo bot and later for WASM-driven responses.
+ * Ready for WASM state machines to yield when they need to send messages.
+ * Note: The current echo bot in TelegramDO calls sendMessage directly.
  */
 export interface TelegramSendEffect {
   type: "TelegramSend";

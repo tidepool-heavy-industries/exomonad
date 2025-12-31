@@ -19,18 +19,32 @@ interface TelegramApiResponse<T = unknown> {
 
 /**
  * Call a Telegram Bot API method.
+ * Handles network errors and non-200 responses gracefully.
  */
 async function callTelegram<T>(
   token: string,
   method: string,
   body: Record<string, unknown>
 ): Promise<TelegramApiResponse<T>> {
-  const response = await fetch(`${API_BASE}${token}/${method}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  return response.json() as Promise<TelegramApiResponse<T>>;
+  try {
+    const response = await fetch(`${API_BASE}${token}/${method}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+    // Try to parse response as JSON regardless of status code
+    // Telegram returns JSON error bodies for API errors
+    const data = (await response.json()) as TelegramApiResponse<T>;
+    return data;
+  } catch (error) {
+    // Network error or JSON parse error
+    const message = error instanceof Error ? error.message : "Unknown error";
+    return {
+      ok: false,
+      description: `Network error: ${message}`,
+    };
+  }
 }
 
 /**
@@ -77,15 +91,21 @@ export async function sendMessage(
  *
  * @param token - Bot API token
  * @param chatId - Target chat ID
+ * @returns true on success, false on failure
  */
 export async function sendTypingAction(
   token: string,
   chatId: number
-): Promise<void> {
-  await callTelegram(token, "sendChatAction", {
+): Promise<boolean> {
+  const result = await callTelegram<boolean>(token, "sendChatAction", {
     chat_id: chatId,
     action: "typing",
   });
+  if (!result.ok) {
+    console.error("sendTypingAction failed:", result.description);
+    return false;
+  }
+  return true;
 }
 
 /**
