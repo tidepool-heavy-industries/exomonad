@@ -10,14 +10,12 @@ import { loadMachine, type GraphMachine } from "./loader.js";
 import type {
   SerializableEffect,
   EffectResult,
-  LlmCompleteEffect,
-  HabiticaEffect,
   ClientMessage,
   ServerMessage,
   SessionState,
 } from "./protocol.js";
-import { successResult, errorResult, SESSION_TIMEOUT_MS } from "./protocol.js";
-import { handleHabitica, type HabiticaConfig } from "./handlers/habitica.js";
+import { SESSION_TIMEOUT_MS } from "./protocol.js";
+import { executeEffect, type Env as HandlersEnv } from "./handlers/index.js";
 
 // Import WASM module at build time
 import wasmModule from "./tidepool.wasm";
@@ -26,12 +24,8 @@ import wasmModule from "./tidepool.wasm";
 // Environment Types
 // =============================================================================
 
-export interface Env {
+export interface Env extends HandlersEnv {
   STATE_MACHINE: DurableObjectNamespace<StateMachineDO>;
-  AI: Ai;
-  // Habitica API credentials (set via wrangler secret)
-  HABITICA_USER_ID: string;
-  HABITICA_API_TOKEN: string;
 }
 
 // =============================================================================
@@ -311,8 +305,8 @@ export class StateMachineDO extends DurableObject<Env> {
         status: "executing",
       });
 
-      // Execute the effect server-side
-      const result = await this.executeEffect(effect);
+      // Execute the effect server-side using handler registry
+      const result = await executeEffect(effect, this.env);
 
       // Check if effect failed - yield to client for retry/handling
       if (result.type === "error") {
@@ -365,103 +359,6 @@ export class StateMachineDO extends DurableObject<Env> {
       // Set alarm for session timeout
       await this.ctx.storage.setAlarm(Date.now() + SESSION_TIMEOUT_MS);
     }
-  }
-
-  /**
-   * Execute an effect and return the result
-   */
-  private async executeEffect(effect: SerializableEffect): Promise<EffectResult> {
-    try {
-      switch (effect.type) {
-        case "LlmComplete":
-          return await this.callCfAi(effect);
-
-        case "LogInfo":
-          console.log(`[Graph Log] ${effect.eff_message}`);
-          return successResult(null);
-
-        case "LogError":
-          console.error(`[Graph Error] ${effect.eff_message}`);
-          return successResult(null);
-
-        case "Habitica": {
-          const config: HabiticaConfig = {
-            userId: this.env.HABITICA_USER_ID,
-            apiToken: this.env.HABITICA_API_TOKEN,
-          };
-          return await handleHabitica(effect as HabiticaEffect, config);
-        }
-
-        default:
-          return errorResult(`Unknown effect type: ${(effect as { type: string }).type}`);
-      }
-    } catch (err) {
-      return errorResult(err instanceof Error ? err.message : String(err));
-    }
-  }
-
-  /**
-   * Call Cloudflare AI for LLM completion
-   */
-  private async callCfAi(effect: LlmCompleteEffect): Promise<EffectResult> {
-    const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
-      { role: "system", content: effect.eff_system_prompt },
-      { role: "user", content: effect.eff_user_content },
-    ];
-
-    // Build request options
-    const options: Record<string, unknown> = {
-      messages,
-      max_tokens: 2048,
-    };
-
-    // Use JSON schema mode if schema provided
-    if (effect.eff_schema) {
-      options.response_format = {
-        type: "json_schema",
-        json_schema: {
-          name: "effect_output",
-          strict: true,
-          schema: effect.eff_schema,
-        },
-      };
-    }
-
-    const response = await this.env.AI.run(
-      "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
-      options
-    ) as { response?: string };
-
-    // Handle response
-    let output: unknown = {};
-
-    if (typeof response.response === "object" && response.response !== null) {
-      // JSON schema mode returned parsed object directly
-      output = response.response;
-    } else if (typeof response.response === "string") {
-      // Parse JSON from string response
-      let jsonStr = response.response.trim();
-
-      // Strip markdown code blocks if present
-      if (jsonStr.startsWith("```json")) {
-        jsonStr = jsonStr.slice(7);
-      } else if (jsonStr.startsWith("```")) {
-        jsonStr = jsonStr.slice(3);
-      }
-      if (jsonStr.endsWith("```")) {
-        jsonStr = jsonStr.slice(0, -3);
-      }
-      jsonStr = jsonStr.trim();
-
-      try {
-        output = JSON.parse(jsonStr);
-      } catch {
-        // Return raw text if JSON parse fails
-        output = { text: response.response };
-      }
-    }
-
-    return successResult(output);
   }
 
   /**
