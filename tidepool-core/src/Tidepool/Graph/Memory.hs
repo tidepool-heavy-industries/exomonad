@@ -84,7 +84,6 @@ module Tidepool.Graph.Memory
     -- * WASM Serialization
     -- $serialization
   , MemorySnapshot(..)
-  , ScopedMemory(..)
   , MemoryStore(..)
   , emptyMemoryStore
   , serializeMemoryStore
@@ -101,7 +100,7 @@ import Data.Kind (Type)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text, pack)
-import Data.Typeable (Typeable, TypeRep, typeRep, Proxy(..))
+import Debug.Trace (trace)
 import Effectful
 import Effectful.Dispatch.Dynamic
 import qualified Effectful.State.Static.Local as EState
@@ -277,45 +276,14 @@ runMemoryPure = evalMemory
 --   Right restored -> continue restored
 -- @
 
--- | A single scoped memory entry, existentially quantified.
---
--- We store the JSON Value directly rather than the typed value because:
--- 1. Different scopes may have different types
--- 2. We can't know all types at serialization time
--- 3. JSON is the interchange format anyway
-data ScopedMemory = ScopedMemory
-  { smTypeRep :: TypeRep
-    -- ^ Type fingerprint for safety checks on restore
-  , smValue   :: Value
-    -- ^ JSON-serialized memory contents
-  }
-  deriving stock (Show, Eq)
-
-instance ToJSON ScopedMemory where
-  toJSON sm = object
-    [ "typeRep" .= show sm.smTypeRep
-    , "value" .= sm.smValue
-    ]
-
-instance FromJSON ScopedMemory where
-  parseJSON = withObject "ScopedMemory" $ \o -> do
-    -- We store typeRep as String for human readability, but can't
-    -- reconstruct the actual TypeRep from String. That's fine -
-    -- we'll do type checking at restore time with the actual type.
-    _typeStr :: Text <- o .: "typeRep"
-    val <- o .: "value"
-    -- Use a placeholder TypeRep - actual type checking happens in restoreScope
-    pure ScopedMemory
-      { smTypeRep = typeRep (Proxy @())
-      , smValue = val
-      }
-
 -- | Container for all memory scopes across the graph.
 --
--- Each scope is keyed by node name. The map stores JSON Values directly
--- to support heterogeneous memory types across different nodes.
+-- Each scope is keyed by node name (typically the graph node name).
+-- The map stores JSON Values directly to support heterogeneous memory
+-- types across different nodes. Type checking happens at access time
+-- via 'FromJSON' constraints on 'getScope'.
 newtype MemoryStore = MemoryStore
-  { msScopes :: Map Text ScopedMemory
+  { msScopes :: Map Text Value
   }
   deriving stock (Show, Eq)
 
@@ -362,17 +330,17 @@ currentSnapshotVersion = 1
 serializeMemoryStore :: MemoryStore -> Value
 serializeMemoryStore (MemoryStore scopes) = toJSON MemorySnapshot
   { snapVersion = currentSnapshotVersion
-  , snapScopes = Map.map (.smValue) scopes
+  , snapScopes = scopes
   }
 
 -- | Restore a 'MemoryStore' from a 'Value'.
 --
 -- This performs version checking and returns an error if the format
--- is incompatible. Individual scopes are restored lazily when accessed.
+-- is incompatible. Individual scopes are type-checked lazily when accessed
+-- via 'getScope'.
 --
 -- @
 -- case restoreMemoryStore json of
---   Left "Unknown version: 99" -> error "Please upgrade"
 --   Left err -> error $ "Corrupted memory: " <> err
 --   Right store -> continueWithStore store
 -- @
@@ -381,45 +349,49 @@ restoreMemoryStore val = case Aeson.fromJSON @MemorySnapshot val of
   Aeson.Error err -> Left $ "Failed to parse MemorySnapshot: " <> pack err
   Aeson.Success snap
     | snap.snapVersion /= currentSnapshotVersion ->
-        Left $ "Unsupported snapshot version: " <> pack (show snap.snapVersion)
+        let versionHint
+              | snap.snapVersion > currentSnapshotVersion =
+                  " (snapshot is newer; upgrade the reader)"
+              | otherwise =
+                  " (snapshot is older; may need migration)"
+        in Left $ "Unsupported snapshot version: " <> pack (show snap.snapVersion)
           <> " (expected " <> pack (show currentSnapshotVersion) <> ")"
+          <> versionHint
     | otherwise ->
-        -- Convert the raw Value map to ScopedMemory entries
-        -- TypeRep is placeholder; actual type checking happens at scope access
-        let scoped = Map.map (\v -> ScopedMemory (typeRep (Proxy @())) v) snap.snapScopes
-        in Right (MemoryStore scoped)
+        Right (MemoryStore snap.snapScopes)
 
 -- | Get a scope from the store, deserializing to the expected type.
 --
--- Returns 'Nothing' if the scope doesn't exist.
+-- Returns 'Right Nothing' if the scope doesn't exist.
 -- Returns 'Left' error if deserialization fails (type mismatch).
+--
+-- Type safety is enforced by the 'FromJSON' constraint - if the stored
+-- JSON doesn't match the expected type, parsing will fail with an error.
 getScope
-  :: forall s. (FromJSON s, Typeable s)
+  :: forall s. (FromJSON s)
   => Text
   -> MemoryStore
   -> Either Text (Maybe s)
 getScope scopeName (MemoryStore scopes) =
   case Map.lookup scopeName scopes of
     Nothing -> Right Nothing
-    Just sm -> case Aeson.fromJSON sm.smValue of
+    Just jsonVal -> case Aeson.fromJSON jsonVal of
       Aeson.Error err -> Left $
         "Failed to deserialize scope '" <> scopeName <> "': " <> pack err
       Aeson.Success val -> Right (Just val)
 
 -- | Set a scope in the store, serializing the value.
+--
+-- The value is immediately serialized to JSON. Type information is not
+-- stored - type checking happens at access time via 'getScope'.
 setScope
-  :: forall s. (ToJSON s, Typeable s)
+  :: forall s. (ToJSON s)
   => Text
   -> s
   -> MemoryStore
   -> MemoryStore
 setScope scopeName val (MemoryStore scopes) = MemoryStore $
-  Map.insert scopeName entry scopes
-  where
-    entry = ScopedMemory
-      { smTypeRep = typeRep (Proxy @s)
-      , smValue = toJSON val
-      }
+  Map.insert scopeName (toJSON val) scopes
 
 -- | Run memory effect with scoped persistence.
 --
@@ -428,13 +400,17 @@ setScope scopeName val (MemoryStore scopes) = MemoryStore $
 -- 2. Runs the action
 -- 3. Saves final state back to the store
 --
+-- __Note on error handling__: If the scope exists but deserialization fails
+-- (e.g., schema mismatch after code changes), a warning is traced and the
+-- default value is used. This prevents crashes but may indicate data issues.
+--
 -- @
 -- (result, finalStore) <- runMemoryScoped "explore" defaultState store $ do
 --   updateMem @ExploreMem $ \\m -> m { visited = newUrl : m.visited }
 --   getMem @ExploreMem
 -- @
 runMemoryScoped
-  :: forall s es a. (ToJSON s, FromJSON s, Typeable s)
+  :: forall s es a. (ToJSON s, FromJSON s)
   => Text              -- ^ Scope name (typically node name)
   -> s                 -- ^ Default value if scope doesn't exist
   -> MemoryStore       -- ^ Current store
@@ -443,7 +419,13 @@ runMemoryScoped
 runMemoryScoped scopeName defaultVal store action = do
   -- Load initial state from store or use default
   let initial = case getScope @s scopeName store of
-        Left _err -> defaultVal  -- Deserialization error: use default
+        Left err ->
+          -- Deserialization error: log warning and use default
+          -- This can happen after schema changes
+          trace ("runMemoryScoped: failed to deserialize scope '"
+                 ++ show scopeName ++ "': " ++ show err
+                 ++ "; using default value")
+                defaultVal
         Right Nothing -> defaultVal  -- Scope doesn't exist: use default
         Right (Just val) -> val  -- Successfully loaded
 
@@ -458,7 +440,7 @@ runMemoryScoped scopeName defaultVal store action = do
 --
 -- Useful when you don't need the updated store (e.g., read-only access).
 evalMemoryScoped
-  :: forall s es a. (ToJSON s, FromJSON s, Typeable s)
+  :: forall s es a. (ToJSON s, FromJSON s)
   => Text
   -> s
   -> MemoryStore

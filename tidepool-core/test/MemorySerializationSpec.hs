@@ -190,11 +190,3 @@ spec = do
           Left err -> expectationFailure $ "Failed to restore: " ++ show err
           Right restored ->
             getScope @ExploreMem "mynode" restored `shouldBe` Right (Just mem)
-
-
--- ════════════════════════════════════════════════════════════════════════════
--- HELPERS
--- ════════════════════════════════════════════════════════════════════════════
-
--- Helper to lookup in Aeson Object (compatibility helper)
--- In aeson 2.x, KeyMap uses Key type
