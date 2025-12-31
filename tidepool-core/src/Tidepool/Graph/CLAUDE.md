@@ -101,9 +101,10 @@ node names, so we need `LLMNode`/`LogicNode` which have kind `Type` directly.
 │  (GraphInfo,      (diagram                                                   │
 │   NodeInfo)        generation)                                               │
 │                                                                              │
-│  Goto.hs ─────────► Memory.hs                                               │
-│  (transition       (persistent                                               │
-│   effect)           state effect)                                            │
+│  Goto.hs ─────────► Execute.hs ──────► Memory.hs                            │
+│  (transition       (DispatchGoto       (persistent                           │
+│   effect,           typeclass,          state effect)                        │
+│   OneOf GADT)       typed dispatch)                                          │
 │                                                                              │
 │  Docs.hs                                                                     │
 │  (template dependency documentation)                                         │
@@ -246,7 +247,7 @@ The `NodeHandlerDispatch` accumulator peels annotations from outside-in:
 - Records `Template` type for LLM nodes (returns `Eff es (TemplateContext tpl)`)
 - Records `UsesEffects` stack for Logic nodes (returns `Eff effs ()`)
 
-### Goto.hs - Transition Effect
+### Goto.hs - Transition Effect and GotoChoice
 
 The `Goto` effect enables typed transitions in Logic nodes.
 
@@ -262,15 +263,182 @@ goto :: forall {k} (target :: k) a es. Goto target a :> es => a -> Eff es ()
 -- Usage: Goto Exit ResponseType
 ```
 
-#### Capturing Goto Results
+#### OneOf: Type-Indexed Sum Type
+
+`OneOf` is a GADT that represents "one of these types" where position in the
+type-level list encodes which type was chosen. Pattern matching is fully typed.
 
 ```haskell
--- Run a computation, capturing which Goto was taken
+-- Position encodes which type was chosen
+data OneOf (ts :: [Type]) where
+  Here  :: t -> OneOf (t ': ts)         -- value is first type
+  There :: OneOf ts -> OneOf (t ': ts)  -- value is in rest
+
+-- Examples for OneOf '[Int, String, Bool]:
+Here 42                     :: OneOf '[Int, String, Bool]  -- an Int
+There (Here "hi")           :: OneOf '[Int, String, Bool]  -- a String
+There (There (Here True))   :: OneOf '[Int, String, Bool]  -- a Bool
+```
+
+The `Inject` typeclass finds the correct position automatically:
+
+```haskell
+class Inject (t :: Type) (ts :: [Type]) where
+  inject :: t -> OneOf ts
+
+-- inject @Int @'[Int, String] 42 = Here 42
+-- inject @String @'[Int, String] "hi" = There (Here "hi")
+```
+
+For target injection with full `To name payload` matching (handles same payload
+types at different targets correctly):
+
+```haskell
+class InjectTarget (target :: Type) (targets :: [Type]) where
+  injectTarget :: PayloadOf target -> OneOf (Payloads targets)
+
+-- injectTarget @(To "a" Int) 42  -- injects at position of To "a" Int
+-- injectTarget @(To "b" Int) 42  -- injects at position of To "b" Int (different!)
+```
+
+#### GotoChoice: Handler Return Type
+
+`GotoChoice` is what Logic node handlers return. It wraps `OneOf` with target
+metadata, guaranteeing a transition is always selected.
+
+```haskell
+-- Target marker type
+data To (target :: k) (payload :: Type)
+
+-- Extract payload types from To markers
+type family Payloads targets where
+  Payloads '[] = '[]
+  Payloads (To name payload ': rest) = payload ': Payloads rest
+
+-- GotoChoice wraps OneOf with target metadata
+newtype GotoChoice (targets :: [Type]) =
+  GotoChoice { unGotoChoice :: OneOf (Payloads targets) }
+
+-- Smart constructors
+gotoChoice :: forall name payload targets. (...) => payload -> GotoChoice targets
+gotoExit   :: forall payload targets. (...) => payload -> GotoChoice targets
+gotoSelf   :: forall payload targets. (...) => payload -> GotoChoice targets
+```
+
+Example handler returning a choice:
+
+```haskell
+routerHandler :: Intent -> Eff es (GotoChoice '[To "refund" Msg, To Exit Response])
+routerHandler intent = case intent of
+  RefundIntent -> pure $ gotoChoice @"refund" msg
+  DoneIntent   -> pure $ gotoExit response
+```
+
+#### Why OneOf Instead of Existentials?
+
+The previous approach used existential types with `Dynamic`:
+
+```haskell
+-- OLD: Required unsafeCoerce to extract payloads
+data GotoChoiceNode = forall a. Typeable a => GotoChoiceNode Text a
+data GotoChoiceExit = forall a. Typeable a => GotoChoiceExit a
+```
+
+With `OneOf`, pattern matching gives exact typed payloads directly:
+
+```haskell
+-- NEW: Fully typed, no unsafeCoerce needed
+case oneOf of
+  Here payload    -> payload :: A   -- exact type known!
+  There (Here p)  -> p :: B         -- exact type known!
+```
+
+#### Capturing Goto Results (Legacy)
+
+For compatibility, there's still a Dynamic-based capture mechanism:
+
+```haskell
 data GotoResult where
   GotoNode :: Text -> Dynamic -> GotoResult  -- Named node target
   GotoExit :: Dynamic -> GotoResult          -- Exit target
 
 runGotoCapture :: Eff (Goto target a : es) () -> Eff es (Maybe GotoResult)
+```
+
+### Execute.hs - Typed Graph Dispatch
+
+The `DispatchGoto` typeclass provides fully typed graph execution without
+Dynamic or unsafeCoerce. It pattern matches on `OneOf` to dispatch handlers.
+
+```haskell
+class DispatchGoto graph targets es exitType where
+  dispatchGoto :: graph (AsHandler es) -> GotoChoice targets -> Eff es exitType
+```
+
+#### How Dispatch Works
+
+Given `GotoChoice '[To "a" A, To "b" B, To Exit R]`:
+
+1. Pattern match on `OneOf '[A, B, R]`
+2. If `Here payload`: call handler "a" with `payload :: A`
+3. If `There (Here payload)`: call handler "b" with `payload :: B`
+4. If `There (There (Here result))`: return `result :: R`
+
+Each handler returns its own `GotoChoice`, so dispatch recurses until Exit.
+
+#### Instances
+
+```haskell
+-- Base case: Exit is the only target
+instance DispatchGoto graph '[To Exit exitType] es exitType where
+  dispatchGoto _ (GotoChoice (Here result)) = pure result
+
+-- Exit first with more targets
+instance (DispatchGoto graph rest es exitType)
+  => DispatchGoto graph (To Exit exitType ': rest) es exitType where
+  dispatchGoto _ (GotoChoice (Here result)) = pure result
+  dispatchGoto graph (GotoChoice (There rest)) =
+    dispatchGoto @graph @rest graph (GotoChoice rest)
+
+-- Named node: call handler and recurse
+instance
+  ( KnownSymbol name
+  , HasField name (graph (AsHandler es)) (payload -> Eff es (GotoChoice handlerTargets))
+  , DispatchGoto graph handlerTargets es exitType
+  , DispatchGoto graph rest es exitType
+  ) => DispatchGoto graph (To name payload ': rest) es exitType where
+  dispatchGoto graph (GotoChoice (Here payload)) = do
+    let handler = getField @name graph
+    nextChoice <- handler payload  -- payload has exact type!
+    dispatchGoto graph nextChoice
+  dispatchGoto graph (GotoChoice (There rest)) =
+    dispatchGoto @graph @rest graph (GotoChoice rest)
+```
+
+#### Example Usage
+
+```haskell
+-- TestGraph: Entry(Int) → compute(+1) → Exit(Int)
+data TestGraph mode = TestGraph
+  { entry   :: mode :- G.Entry Int
+  , compute :: mode :- G.LogicNode :@ Needs '[Int] :@ UsesEffects '[Goto Exit Int]
+  , exit    :: mode :- G.Exit Int
+  }
+
+testHandlers :: TestGraph (AsHandler es)
+testHandlers = TestGraph
+  { entry   = Proxy @Int
+  , compute = \n -> pure $ gotoExit (n + 1)
+  , exit    = Proxy @Int
+  }
+
+-- Running the graph
+runDispatchTest :: Int -> Int
+runDispatchTest n = runPureEff $ do
+  choice <- testHandlers.compute n  -- GotoChoice '[To Exit Int]
+  dispatchGoto testHandlers choice  -- Returns Int directly
+
+-- runDispatchTest 5 = 6
 ```
 
 ### Memory.hs - Persistent State Effect
@@ -746,11 +914,17 @@ The `Vision` annotation marks a node as accepting image input, but:
 
 ### Graph Execution Runtime
 
-Graph execution is not yet implemented in this module:
-- The `Generic.hs` defines handler type computation via `NodeHandler`
-- Actual graph runner (stepping through nodes, handling Goto) is not yet built
+Graph execution is **partially implemented** via `Execute.hs`:
+- `DispatchGoto` typeclass handles typed dispatch through `GotoChoice` targets
+- Pattern matching on `OneOf` gives exact typed payloads without Dynamic/unsafeCoerce
+- Works for Logic nodes that return `GotoChoice`
 
-**Future work**: Implement graph runner that uses `NodeHandler` types.
+**Not yet implemented**:
+- Full `runGraph` entry point that finds the first handler from Entry
+- LLM node execution (requires LLM effect interpretation)
+- Self-loop handling via `GotoSelf`
+
+**Future work**: Implement full graph runner with LLM node support.
 
 ## Known Issues / Gotchas
 
@@ -787,7 +961,8 @@ to check ToGVal instances instead of raw record fields.
 |------|-------|---------|
 | Types.hs | ~270 | Core DSL syntax types |
 | Generic.hs | ~380 | Servant-style record modes (GraphMode, AsHandler) |
-| Goto.hs | ~100 | Goto effect for transitions |
+| Goto.hs | ~460 | Goto effect, OneOf GADT, GotoChoice, Inject typeclasses |
+| Execute.hs | ~140 | DispatchGoto typeclass for typed graph dispatch |
 | Memory.hs | ~210 | Memory effect for persistent state |
 | Template.hs | ~250 | TemplateDef typeclass for typed prompts |
 | Tool.hs | ~150 | Unified tool definitions (ToolDef typeclass) |
