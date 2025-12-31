@@ -67,7 +67,13 @@ module Tidepool.Telegram
 
     -- * Stub Runner
   , runTelegramStub
+
+    -- * Example Graph
+  , EchoGraph(..)
+  , echoHandlers
+  , ChatId(..)
   ) where
 
 import Tidepool.Telegram.Effect
 import Tidepool.Telegram.Types
+import Tidepool.Telegram.Example
