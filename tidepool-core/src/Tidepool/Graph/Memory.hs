@@ -1,6 +1,7 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE StandaloneKindSignatures #-}
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE RankNTypes #-}
 
 -- | The Memory effect for persistent state in graph nodes.
 --
@@ -78,9 +79,26 @@ module Tidepool.Graph.Memory
   , runMemory
   , runMemoryPure
   , evalMemory
+
+    -- * WASM Serialization
+    -- $serialization
+  , MemorySnapshot(..)
+  , MemoryStore(..)
+  , emptyMemoryStore
+  , serializeMemoryStore
+  , restoreMemoryStore
+  , getScope
+  , setScope
+  , runMemoryScoped
+  , evalMemoryScoped
   ) where
 
+import Data.Aeson (ToJSON(..), FromJSON(..), Value, object, (.=), (.:), withObject)
+import qualified Data.Aeson as Aeson
 import Data.Kind (Type)
+import Data.Map.Strict (Map)
+import qualified Data.Map.Strict as Map
+import Data.Text (Text, pack)
 import Effectful
 import Effectful.Dispatch.Dynamic
 import qualified Effectful.State.Static.Local as EState
@@ -203,24 +221,220 @@ runMemoryPure :: forall s es a. s -> Eff (Memory s : es) a -> Eff es a
 runMemoryPure = evalMemory
 
 -- ════════════════════════════════════════════════════════════════════════════
--- FUTURE: PERSISTENT INTERPRETERS
+-- WASM SERIALIZATION
 -- ════════════════════════════════════════════════════════════════════════════
 
--- Note: The following interpreters will be added when persistence is wired up:
+-- $serialization
 --
--- runMemoryPersistent
---   :: (IOE :> es, FromJSON s, ToJSON s)
---   => FilePath -> s -> Eff (Memory s : es) a -> Eff es a
+-- For WASM deployment, memory must survive across sessions. When the WASM
+-- instance dies, we serialize all memory scopes to JSON. When resuming,
+-- we restore from the snapshot.
 --
--- This would:
--- 1. Load state from file (or use default if missing)
--- 2. Run the action
--- 3. Persist final state to file
+-- = Design
 --
--- For the graph runner, node memory and global memory will have different
--- persistence strategies:
+-- Memory is scoped by node name (a Text key). The 'MemoryStore' holds all
+-- scopes as a @Map Text Value@, where each Value is the JSON-serialized
+-- contents of that scope.
 --
--- * Global: Load at graph start, save at graph end
--- * Node: Load before each node execution, save after
+-- The serialization format is:
 --
--- The persistence backend (SQLite, files, etc.) is a separate concern.
+-- @
+-- {
+--   "version": 1,
+--   "scopes": {
+--     "explore": { ... node-specific state ... },
+--     "classify": { ... node-specific state ... }
+--   }
+-- }
+-- @
+--
+-- = Constraints
+--
+-- For a type to be used with scoped memory, it must have:
+--
+-- * 'ToJSON' instance (for serialization)
+-- * 'FromJSON' instance (for restoration)
+--
+-- = Usage
+--
+-- @
+-- -- Create empty store
+-- let store = emptyMemoryStore
+--
+-- -- Run a computation with scoped memory
+-- (result, finalStore) <- runMemoryScoped "myNode" initialState store action
+--
+-- -- Serialize for persistence
+-- let json = serializeMemoryStore finalStore
+--
+-- -- Later, restore from JSON
+-- case restoreMemoryStore json of
+--   Left err -> handleError err
+--   Right restored -> continue restored
+-- @
+
+-- | Container for all memory scopes across the graph.
+--
+-- Each scope is keyed by node name (typically the graph node name).
+-- The map stores JSON Values directly to support heterogeneous memory
+-- types across different nodes. Type checking happens at access time
+-- via 'FromJSON' constraints on 'getScope'.
+newtype MemoryStore = MemoryStore
+  { msScopes :: Map Text Value
+  }
+  deriving stock (Show, Eq)
+
+-- | Create an empty memory store.
+emptyMemoryStore :: MemoryStore
+emptyMemoryStore = MemoryStore Map.empty
+
+-- | Snapshot of all memory for serialization.
+--
+-- This is the top-level type that gets serialized to JSON for persistence.
+-- It includes a version number for future format evolution.
+data MemorySnapshot = MemorySnapshot
+  { snapVersion :: Int
+    -- ^ Schema version for forward compatibility
+  , snapScopes  :: Map Text Value
+    -- ^ Node name -> JSON value mapping
+  }
+  deriving stock (Show, Eq)
+
+instance ToJSON MemorySnapshot where
+  toJSON snap = object
+    [ "version" .= snap.snapVersion
+    , "scopes" .= snap.snapScopes
+    ]
+
+instance FromJSON MemorySnapshot where
+  parseJSON = withObject "MemorySnapshot" $ \o -> MemorySnapshot
+    <$> o .: "version"
+    <*> o .: "scopes"
+
+-- | Current snapshot format version.
+currentSnapshotVersion :: Int
+currentSnapshotVersion = 1
+
+-- | Serialize a 'MemoryStore' to a 'Value' for persistence.
+--
+-- The resulting JSON can be stored in a file, database, or sent over
+-- the wire for WASM session persistence.
+--
+-- @
+-- let json = serializeMemoryStore store
+-- ByteString.writeFile "memory.json" (Aeson.encode json)
+-- @
+serializeMemoryStore :: MemoryStore -> Value
+serializeMemoryStore (MemoryStore scopes) = toJSON MemorySnapshot
+  { snapVersion = currentSnapshotVersion
+  , snapScopes = scopes
+  }
+
+-- | Restore a 'MemoryStore' from a 'Value'.
+--
+-- This performs version checking and returns an error if the format
+-- is incompatible. Individual scopes are type-checked lazily when accessed
+-- via 'getScope'.
+--
+-- @
+-- case restoreMemoryStore json of
+--   Left err -> error $ "Corrupted memory: " <> err
+--   Right store -> continueWithStore store
+-- @
+restoreMemoryStore :: Value -> Either Text MemoryStore
+restoreMemoryStore val = case Aeson.fromJSON @MemorySnapshot val of
+  Aeson.Error err -> Left $ "Failed to parse MemorySnapshot: " <> pack err
+  Aeson.Success snap
+    | snap.snapVersion /= currentSnapshotVersion ->
+        let versionHint
+              | snap.snapVersion > currentSnapshotVersion =
+                  " (snapshot is newer; upgrade the reader)"
+              | otherwise =
+                  " (snapshot is older; may need migration)"
+        in Left $ "Unsupported snapshot version: " <> pack (show snap.snapVersion)
+          <> " (expected " <> pack (show currentSnapshotVersion) <> ")"
+          <> versionHint
+    | otherwise ->
+        Right (MemoryStore snap.snapScopes)
+
+-- | Get a scope from the store, deserializing to the expected type.
+--
+-- Returns 'Right Nothing' if the scope doesn't exist.
+-- Returns 'Left' error if deserialization fails (type mismatch).
+--
+-- Type safety is enforced by the 'FromJSON' constraint - if the stored
+-- JSON doesn't match the expected type, parsing will fail with an error.
+getScope
+  :: forall s. (FromJSON s)
+  => Text
+  -> MemoryStore
+  -> Either Text (Maybe s)
+getScope scopeName (MemoryStore scopes) =
+  case Map.lookup scopeName scopes of
+    Nothing -> Right Nothing
+    Just jsonVal -> case Aeson.fromJSON jsonVal of
+      Aeson.Error err -> Left $
+        "Failed to deserialize scope '" <> scopeName <> "': " <> pack err
+      Aeson.Success val -> Right (Just val)
+
+-- | Set a scope in the store, serializing the value.
+--
+-- The value is immediately serialized to JSON. Type information is not
+-- stored - type checking happens at access time via 'getScope'.
+setScope
+  :: forall s. (ToJSON s)
+  => Text
+  -> s
+  -> MemoryStore
+  -> MemoryStore
+setScope scopeName val (MemoryStore scopes) = MemoryStore $
+  Map.insert scopeName (toJSON val) scopes
+
+-- | Run memory effect with scoped persistence.
+--
+-- This interpreter:
+-- 1. Loads initial state from the store (or uses default if scope missing)
+-- 2. Runs the action
+-- 3. Saves final state back to the store
+--
+-- If deserialization fails (e.g., schema mismatch after code changes), the
+-- default value is used. Use 'getScope' directly if you need to detect errors.
+--
+-- @
+-- (result, finalStore) <- runMemoryScoped "explore" defaultState store $ do
+--   updateMem @ExploreMem $ \\m -> m { visited = newUrl : m.visited }
+--   getMem @ExploreMem
+-- @
+runMemoryScoped
+  :: forall s es a. (ToJSON s, FromJSON s)
+  => Text              -- ^ Scope name (typically node name)
+  -> s                 -- ^ Default value if scope doesn't exist
+  -> MemoryStore       -- ^ Current store
+  -> Eff (Memory s : es) a
+  -> Eff es (a, MemoryStore)
+runMemoryScoped scopeName defaultVal store action = do
+  -- Load initial state from store or use default
+  let initial = case getScope @s scopeName store of
+        Left _err -> defaultVal  -- Deserialization error: use default
+        Right Nothing -> defaultVal  -- Scope doesn't exist: use default
+        Right (Just val) -> val  -- Successfully loaded
+
+  -- Run the action
+  (result, final) <- runMemory initial action
+
+  -- Save final state back to store
+  let newStore = setScope scopeName final store
+  pure (result, newStore)
+
+-- | Run memory effect with scoped persistence, discarding result store.
+--
+-- Useful when you don't need the updated store (e.g., read-only access).
+evalMemoryScoped
+  :: forall s es a. (ToJSON s, FromJSON s)
+  => Text
+  -> s
+  -> MemoryStore
+  -> Eff (Memory s : es) a
+  -> Eff es a
+evalMemoryScoped scopeName defaultVal store =
+  fmap fst . runMemoryScoped scopeName defaultVal store
