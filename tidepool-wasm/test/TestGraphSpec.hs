@@ -6,13 +6,14 @@
 -- 1. TestGraph compiles (passes graph validation constraints)
 -- 2. The compute handler returns n+1 as expected
 -- 3. The DispatchGoto typeclass correctly dispatches to Exit
+-- 4. The runGraph function executes the full graph end-to-end
 module TestGraphSpec (spec) where
 
 import Test.Hspec
 import Effectful (runPureEff)
 
 import Tidepool.Graph.Goto (GotoChoice(..), OneOf(..))
-import Tidepool.Graph.Execute (DispatchGoto(..))
+import Tidepool.Graph.Execute (DispatchGoto(..), runGraph)
 import Tidepool.Wasm.TestGraph (TestGraph(..), testHandlers)
 
 
@@ -20,6 +21,7 @@ spec :: Spec
 spec = do
   computeHandlerSpec
   dispatchGotoSpec
+  runGraphSpec
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -86,3 +88,33 @@ runDispatchTest :: Int -> Int
 runDispatchTest n = runPureEff $ do
   choice <- testHandlers.compute n
   dispatchGoto testHandlers choice
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- runGraph (end-to-end execution)
+-- ════════════════════════════════════════════════════════════════════════════
+
+runGraphSpec :: Spec
+runGraphSpec = describe "runGraph" $ do
+
+  it "runs TestGraph end-to-end for input 5" $ do
+    runGraphTest 5 `shouldBe` 6
+
+  it "runs TestGraph for input 0" $ do
+    runGraphTest 0 `shouldBe` 1
+
+  it "runs TestGraph for negative input" $ do
+    runGraphTest (-10) `shouldBe` (-9)
+
+  it "runs TestGraph for large input" $ do
+    runGraphTest 999999 `shouldBe` 1000000
+
+
+-- | Helper to run the full graph end-to-end using runGraph.
+--
+-- This tests the runGraph function by:
+-- 1. Automatically discovering that 'compute' accepts the entry type (Int)
+-- 2. Calling the compute handler with the input
+-- 3. Dispatching through the graph until Exit is reached
+runGraphTest :: Int -> Int
+runGraphTest n = runPureEff $ runGraph testHandlers n

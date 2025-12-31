@@ -4,6 +4,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE PolyKinds #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneKindSignatures #-}
 {-# LANGUAGE TypeApplications #-}
@@ -35,16 +36,131 @@
 module Tidepool.Graph.Execute
   ( -- * Dispatch Typeclass
     DispatchGoto(..)
+    -- * Graph Execution
+  , runGraph
+  , runGraphFrom
+    -- * Entry Handler Discovery
+  , FindEntryHandler
   ) where
 
 import Data.Kind (Constraint, Type)
 import Effectful (Effect, Eff)
+import GHC.Generics (Generic(..))
 import GHC.Records (HasField(..))
 import GHC.TypeLits (Symbol, KnownSymbol)
 
-import Tidepool.Graph.Generic (AsHandler)
+import Tidepool.Graph.Edges (GetNeeds)
+import Tidepool.Graph.Generic (AsHandler, FieldsWithNamesOf)
+import Tidepool.Graph.Generic.Core (Entry, AsGraph)
+import qualified Tidepool.Graph.Generic.Core as G (Exit)
 import Tidepool.Graph.Goto (GotoChoice(..), OneOf(..), To)
 import Tidepool.Graph.Types (Exit)
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- TYPE-LEVEL UTILITIES (local definitions)
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Type-level If (polykinded).
+type IfMaybe :: Bool -> Maybe k -> Maybe k -> Maybe k
+type family IfMaybe cond t f where
+  IfMaybe 'True  t _ = t
+  IfMaybe 'False _ f = f
+
+-- | Check if an element is in a type-level list (polykinded).
+type ElemType :: k -> [k] -> Bool
+type family ElemType x xs where
+  ElemType _ '[] = 'False
+  ElemType x (x ': _) = 'True
+  ElemType x (_ ': rest) = ElemType x rest
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- ENTRY HANDLER DISCOVERY
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Find the first field whose node definition accepts the entry type.
+--
+-- Iterates through (fieldName, nodeDef) pairs from 'FieldsWithNamesOf' and
+-- returns the first field name where 'GetNeeds' contains the entry type.
+--
+-- @
+-- -- For a graph with:
+-- --   entry   :: mode :- Entry Int
+-- --   compute :: mode :- LogicNode :@ Needs '[Int] :@ UsesEffects '[...]
+-- --   exit    :: mode :- Exit Int
+-- --
+-- FindEntryHandler Int fields = 'Just "compute"
+-- @
+type FindEntryHandler :: Type -> [(Symbol, Type)] -> Maybe Symbol
+type family FindEntryHandler entryType fields where
+  FindEntryHandler _ '[] = 'Nothing
+  FindEntryHandler entryType ('(name, Entry _) ': rest) =
+    FindEntryHandler entryType rest  -- Skip Entry marker
+  FindEntryHandler entryType ('(name, G.Exit _) ': rest) =
+    FindEntryHandler entryType rest  -- Skip Exit marker
+  FindEntryHandler entryType ('(name, def) ': rest) =
+    IfMaybe (ElemType entryType (GetNeeds def))
+            ('Just name)
+            (FindEntryHandler entryType rest)
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- GRAPH EXECUTION
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Run a graph starting from a named handler.
+--
+-- Use this when you want to explicitly specify which handler to start from,
+-- bypassing automatic entry handler discovery.
+--
+-- @
+-- result <- runGraphFrom @"compute" handlers inputValue
+-- @
+runGraphFrom
+  :: forall (name :: Symbol) graph entryType targets exitType es.
+     ( KnownSymbol name
+     , HasField name (graph (AsHandler es)) (entryType -> Eff es (GotoChoice targets))
+     , DispatchGoto graph targets es exitType
+     )
+  => graph (AsHandler es)
+  -> entryType
+  -> Eff es exitType
+runGraphFrom graph input = do
+  let handler = getField @name graph
+  choice <- handler input
+  dispatchGoto graph choice
+
+
+-- | Run a graph from Entry to Exit.
+--
+-- Automatically discovers the first handler that accepts the entry type
+-- (via the 'Needs' annotation), calls it with the input, and dispatches
+-- through the graph until Exit is reached.
+--
+-- @
+-- -- Define graph
+-- data TestGraph mode = TestGraph
+--   { entry   :: mode :- Entry Int
+--   , compute :: mode :- LogicNode :@ Needs '[Int] :@ UsesEffects '[Goto Exit Int]
+--   , exit    :: mode :- Exit Int
+--   }
+--
+-- -- Run it
+-- result <- runGraph handlers 5  -- Returns 6 (if compute does +1)
+-- @
+runGraph
+  :: forall graph entryType targets exitType es entryHandlerName.
+     ( Generic (graph AsGraph)
+     , FindEntryHandler entryType (FieldsWithNamesOf graph) ~ 'Just entryHandlerName
+     , KnownSymbol entryHandlerName
+     , HasField entryHandlerName (graph (AsHandler es)) (entryType -> Eff es (GotoChoice targets))
+     , DispatchGoto graph targets es exitType
+     )
+  => graph (AsHandler es)
+  -> entryType
+  -> Eff es exitType
+runGraph = runGraphFrom @entryHandlerName
 
 
 -- ════════════════════════════════════════════════════════════════════════════
