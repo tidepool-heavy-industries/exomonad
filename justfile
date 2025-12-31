@@ -35,6 +35,15 @@ test:
 test-graph:
     cabal test graph-validation-tests
 
+# Verify protocol conformance between Haskell and TypeScript
+# Requires: node/npm installed in deploy/
+test-protocol-conformance:
+    @echo "── Generating JSON samples from Haskell ──"
+    cabal run generate-golden-samples
+    @echo ""
+    @echo "── Verifying TypeScript can parse samples ──"
+    cd deploy && npx tsx test/verify-protocol.ts
+
 # ─────────────────────────────────────────────────────────────
 # Pre-commit checks
 # ─────────────────────────────────────────────────────────────
