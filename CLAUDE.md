@@ -52,6 +52,11 @@ The key insight: LLMs don't need raw IO - they need typed state they can read (v
    - Position (Controlled/Risky/Desperate) + Effect (Limited/Standard/Great)
    - Precarity system scales narrative tone
 
+6. **Typed graph execution** (via `OneOf` sum type)
+   - `GotoChoice` wraps `OneOf` for fully typed dispatch
+   - `DispatchGoto` typeclass pattern matches to call handlers
+   - No Dynamic or unsafeCoerce - exact types at every step
+
 ## GUI Architecture
 
 The GUI uses threepenny-gui with a polling-based update model:
@@ -360,6 +365,9 @@ data PlayerDeltas = PlayerDeltas
 - Precarity calculation
 - Delta-based mutation types
 - DM loop structure with RequestInput for dice selection
+- **Graph: OneOf sum type** - Type-indexed GADT for fully typed dispatch
+- **Graph: GotoChoice** - Handler return type wrapping OneOf
+- **Graph: DispatchGoto** - Typeclass for typed graph execution (no Dynamic/unsafeCoerce)
 - **GUI: Core bridge** - GUIBridge with TVar/MVar communication
 - **GUI: Generic widgets** - textInput, choiceCards, narrativePane, debugPanel, loadingOverlay
 - **GUI: DM widgets** - Stats, Mood, Clocks, History, Narrative (with NPC bubbles), Dice
