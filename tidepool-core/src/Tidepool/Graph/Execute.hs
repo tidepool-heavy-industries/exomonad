@@ -80,7 +80,7 @@ import Tidepool.Graph.Types (Exit)
 --
 -- @
 -- -- Given a graph with compute handler that exits
--- result <- dispatchGoto testHandlers (gotoChoice \@\"compute\" 5)
+-- result <- dispatchGoto testHandlers (gotoChoice \@"compute" 5)
 -- -- Internally: calls compute handler, gets GotoChoice '[To Exit Int]
 -- -- Pattern matches Here 6, returns 6
 -- @
