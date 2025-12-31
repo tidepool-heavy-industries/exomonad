@@ -291,15 +291,15 @@ type family NodeHandlerDispatch nodeDef origNode es needs mTpl mSchema mEffs whe
   -- LLMNode Base Cases
   -- ══════════════════════════════════════════════════════════════════════════
 
-  -- LLMNode with Template only (before-only): returns LLMHandler with LLMBefore
+  -- LLMNode with Template only (before-only): handler must use LLMBefore constructor
   NodeHandlerDispatch LLMNode orig es needs ('Just tpl) ('Just schema) 'Nothing =
     LLMHandler (TupleOf needs) schema '[] es (TemplateContext tpl)
 
-  -- LLMNode with Template AND UsesEffects (both): returns LLMHandler with LLMBoth
+  -- LLMNode with Template AND UsesEffects (both): handler must use LLMBoth constructor
   NodeHandlerDispatch LLMNode orig es needs ('Just tpl) ('Just schema) ('Just (EffStack effs)) =
     LLMHandler (TupleOf needs) schema (GotoEffectsToTargets effs) es (TemplateContext tpl)
 
-  -- LLMNode with UsesEffects but no Template (after-only): returns LLMHandler with LLMAfter
+  -- LLMNode with UsesEffects but no Template (after-only): handler must use LLMAfter constructor
   NodeHandlerDispatch LLMNode orig es needs 'Nothing ('Just schema) ('Just (EffStack effs)) =
     LLMHandler (TupleOf needs) schema (GotoEffectsToTargets effs) es ()
 
@@ -314,8 +314,11 @@ type family NodeHandlerDispatch nodeDef origNode es needs mTpl mSchema mEffs whe
      ':$$: 'Text "  • Template annotation (for before-only or both phases)"
      ':$$: 'Text "  • UsesEffects annotation (for after-only routing with default context)"
      ':$$: 'Text ""
-     ':$$: 'Text "Fix: Add a Template annotation:"
+     ':$$: 'Text "Fix: Add a Template annotation (before-only with default routing):"
      ':$$: 'Text "  myNode :: mode :- LLMNode :@ Template MyTpl :@ Schema " ':<>: 'ShowType schema
+     ':$$: 'Text ""
+     ':$$: 'Text "Or add UsesEffects annotation (after-only with explicit routing):"
+     ':$$: 'Text "  myNode :: mode :- LLMNode :@ Schema " ':<>: 'ShowType schema ':<>: 'Text " :@ UsesEffects '[Goto \"target\" Payload]"
     )
 
   -- LLMNode missing both Template and Schema - error

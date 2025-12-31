@@ -277,11 +277,11 @@ gotoChoiceToResult (GotoChoiceSelf payload) =
 -- sgClassify :: LLMHandler Message Intent '[] es ClassifyContext
 -- sgClassify = LLMBefore $ \\msg -> pure ClassifyContext { topic = msg.content }
 --
--- -- After-only: router using LLM output
--- sgRouter :: LLMHandler () Intent '[To "refund" Msg, To "faq" Msg] es ()
+-- -- After-only: router using LLM output (no access to before-phase data)
+-- sgRouter :: LLMHandler () Intent '[To "refund" Intent, To "faq" Intent] es ()
 -- sgRouter = LLMAfter $ \\intent -> pure $ case intent of
---   IntentRefund -> gotoChoice @"refund" msg
---   IntentFaq    -> gotoChoice @"faq" msg
+--   IntentRefund -> gotoChoice @"refund" intent
+--   IntentFaq    -> gotoChoice @"faq" intent
 --
 -- -- Both: custom context AND explicit routing
 -- sgSmart :: LLMHandler Message Intent '[To "a" X, To "b" Y] es SmartContext
