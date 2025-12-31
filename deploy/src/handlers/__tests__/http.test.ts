@@ -29,7 +29,7 @@ describe("handleHttpFetch", () => {
     const mockData = { foo: "bar" };
     globalThis.fetch = vi.fn().mockResolvedValue({
       status: 200,
-      headers: new Map([["content-type", "application/json"]]),
+      headers: new Headers([["content-type", "application/json"]]),
       json: () => Promise.resolve(mockData),
     } as unknown as Response);
 
@@ -48,7 +48,7 @@ describe("handleHttpFetch", () => {
   it("fetches text response", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue({
       status: 200,
-      headers: new Map([["content-type", "text/plain"]]),
+      headers: new Headers([["content-type", "text/plain"]]),
       text: () => Promise.resolve("Hello, world!"),
     } as unknown as Response);
 
@@ -63,7 +63,7 @@ describe("handleHttpFetch", () => {
   it("handles missing content-type as text", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue({
       status: 200,
-      headers: new Map(),
+      headers: new Headers(),
       text: () => Promise.resolve("<html>...</html>"),
     } as unknown as Response);
 
@@ -83,7 +83,7 @@ describe("handleHttpFetch", () => {
     };
     globalThis.fetch = vi.fn().mockResolvedValue({
       status: 201,
-      headers: new Map([["content-type", "application/json"]]),
+      headers: new Headers([["content-type", "application/json"]]),
       json: () => Promise.resolve({ id: 123 }),
     } as unknown as Response);
 
@@ -128,7 +128,7 @@ describe("handleHttpFetch", () => {
   it("handles 4xx/5xx status codes as success with status", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue({
       status: 404,
-      headers: new Map([["content-type", "application/json"]]),
+      headers: new Headers([["content-type", "application/json"]]),
       json: () => Promise.resolve({ error: "Not found" }),
     } as unknown as Response);
 

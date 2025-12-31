@@ -57,7 +57,7 @@ export async function handleLlmComplete(
     // Handle response
     const output = parseAiResponse(response.response);
 
-    return successResult({ output });
+    return successResult(output);
   } catch (err) {
     // Handle specific error types
     const message = err instanceof Error ? err.message : String(err);

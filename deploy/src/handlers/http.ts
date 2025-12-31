@@ -41,8 +41,6 @@ export async function handleHttpFetch(
         signal: controller.signal,
       });
 
-      clearTimeout(timeoutId);
-
       const contentType = resp.headers.get("content-type") ?? "";
       let body: unknown;
 

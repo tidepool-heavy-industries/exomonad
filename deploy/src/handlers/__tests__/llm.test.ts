@@ -32,7 +32,7 @@ describe("handleLlmComplete", () => {
 
     expect(result).toEqual({
       type: "success",
-      value: { output: mockOutput },
+      value: mockOutput,
     });
   });
 
@@ -43,7 +43,7 @@ describe("handleLlmComplete", () => {
 
     expect(result).toEqual({
       type: "success",
-      value: { output: { intent: "greeting" } },
+      value: { intent: "greeting" },
     });
   });
 
@@ -54,7 +54,7 @@ describe("handleLlmComplete", () => {
 
     expect(result).toEqual({
       type: "success",
-      value: { output: { intent: "greeting" } },
+      value: { intent: "greeting" },
     });
   });
 
@@ -65,7 +65,7 @@ describe("handleLlmComplete", () => {
 
     expect(result).toEqual({
       type: "success",
-      value: { output: { data: 123 } },
+      value: { data: 123 },
     });
   });
 
@@ -76,7 +76,7 @@ describe("handleLlmComplete", () => {
 
     expect(result).toEqual({
       type: "success",
-      value: { output: { text: "This is not JSON" } },
+      value: { text: "This is not JSON" },
     });
   });
 
@@ -87,7 +87,7 @@ describe("handleLlmComplete", () => {
 
     expect(result).toEqual({
       type: "success",
-      value: { output: {} },
+      value: {},
     });
   });
 

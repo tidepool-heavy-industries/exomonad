@@ -84,7 +84,7 @@ describe("executeEffect", () => {
     const env = createMockEnv();
     globalThis.fetch = vi.fn().mockResolvedValue({
       status: 200,
-      headers: new Map([["content-type", "text/plain"]]),
+      headers: new Headers([["content-type", "text/plain"]]),
       text: () => Promise.resolve("OK"),
     } as unknown as Response);
 
