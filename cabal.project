@@ -14,4 +14,4 @@ allow-newer: all
 source-repository-package
   type: git
   location: https://github.com/inanna-malick/ginger
-  tag: 25af8c8
+  tag: 25af8c8e60f4afbfdb4e50e6d1d86a5e73975638
