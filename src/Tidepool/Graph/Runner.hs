@@ -59,7 +59,7 @@ import Data.Proxy (Proxy(..))
 import Effectful
 import GHC.TypeLits (Symbol)
 
-import Tidepool.Graph.Types hiding (Eff)
+import Tidepool.Graph.Types
 import Tidepool.Graph.Edges
 import Tidepool.Graph.Validate
 import Tidepool.Graph.Goto

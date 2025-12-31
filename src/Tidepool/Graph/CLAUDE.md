@@ -14,12 +14,70 @@ The Graph DSL enables declarative definition of LLM agent state machines where:
 type CustomerServiceGraph = Graph
   '[ Entry :~> Message
    , "classify" := LLM :@ Needs '[Message] :@ Schema Intent
-   , "route"    := Logic :@ Needs '[Intent] :@ Eff '[Goto "refund" Message, Goto "faq" Message]
+   , "route"    := Logic :@ Needs '[Intent] :@ UsesEffects '[Goto "refund" Message, Goto "faq" Message]
    , "refund"   := LLM :@ Needs '[Message] :@ Schema Response
    , "faq"      := LLM :@ Needs '[Message] :@ Schema Response
    , Exit :<~ Response
    ]
 ```
+
+### Record-Based Syntax (Servant-style)
+
+An alternative syntax uses mode-parameterized records, inspired by Servant's
+`NamedRoutes` pattern. This provides:
+
+* **Field names as node names** - No `:=` annotation needed
+* **Type-safe handler records** - The `AsHandler` mode computes handler types
+* **Generic traversal** - Validate and reify via `GHC.Generics`
+
+```haskell
+import Tidepool.Graph.Generic (GraphMode(..), AsHandler)
+import qualified Tidepool.Graph.Generic as G
+
+data SupportGraph mode = SupportGraph
+  { sgEntry    :: mode :- G.Entry Message
+  , sgClassify :: mode :- G.LLMNode :@ Needs '[Message] :@ Template ClassifyTpl :@ Schema Intent
+  , sgRoute    :: mode :- G.LogicNode :@ Needs '[Intent] :@ UsesEffects '[Goto "refund", Goto "faq"]
+  , sgRefund   :: mode :- G.LLMNode :@ Needs '[Message] :@ Template RefundTpl :@ Schema Response
+  , sgFaq      :: mode :- G.LLMNode :@ Needs '[Message] :@ Template FaqTpl :@ Schema Response
+  , sgExit     :: mode :- G.Exit Response
+  }
+  deriving Generic
+
+-- Handler record: handlers return template context, runner handles LLM call
+handlers :: SupportGraph (AsHandler '[State SessionState])
+handlers = SupportGraph
+  { sgEntry    = Proxy @Message           -- Entry marker
+  , sgClassify = \msg -> do               -- Builds ClassifyContext
+      st <- get @SessionState
+      pure ClassifyContext { topic = msg.content, ... }
+  , sgRoute    = \intent -> do            -- Uses Goto effects
+      case intent of
+        RefundIntent -> goto @"refund" msg
+        FaqIntent    -> goto @"faq" msg
+  , sgRefund   = \msg -> pure RefundContext { ... }
+  , sgFaq      = \msg -> pure FaqContext { ... }
+  , sgExit     = Proxy @Response          -- Exit marker
+  }
+```
+
+#### Handler Type Computation
+
+The `NodeHandler` type family in `Generic.hs` computes handler types:
+
+| Node Definition | Handler Type |
+|-----------------|--------------|
+| `G.Entry Message` | `Proxy Message` |
+| `G.Exit Response` | `Proxy Response` |
+| `G.LLMNode :@ Needs '[A] :@ Template T :@ Schema B` | `A -> Eff es (TemplateContext T)` |
+| `G.LogicNode :@ Needs '[A] :@ UsesEffects effs` | `A -> Eff effs ()` |
+
+Key insight: **LLM handlers return template context, not Schema output.**
+The runner handles template rendering, LLM API call, and structured output parsing.
+
+**Why LLMNode/LogicNode?** The list-based syntax uses `"name" := LLM` where `:=`
+lifts `LLM` (kind `NodeKind`) to `Type`. In record syntax, field names serve as
+node names, so we need `LLMNode`/`LogicNode` which have kind `Type` directly.
 
 ## Architecture
 
@@ -33,8 +91,9 @@ type CustomerServiceGraph = Graph
 │                    derivation)                                               │
 │                         │                                                    │
 │                         ▼                                                    │
-│                    TH.hs ────────────────────────────────────────────────►  │
-│                    (generates typed handler records)                         │
+│  Generic.hs ◄─── TH.hs ─────────────────────────────────────────────────►  │
+│  (Servant-style  (generates typed handler records)                           │
+│   record modes)                                                              │
 │                                                                              │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                           RUNTIME                                            │
@@ -100,7 +159,7 @@ System Type           -- System prompt template (optional, LLM nodes)
 Template Type         -- User prompt template (LLM nodes)
 Vision                -- Marker for vision/image input
 Tools '[Type, ...]    -- Available tools during LLM call
-Eff '[Effect, ...]    -- Effect stack (Logic nodes, includes Goto)
+UsesEffects '[Effect, ...]    -- Effect stack (Logic nodes, includes Goto)
 Memory Type           -- Node-private persistent state
 ```
 
@@ -119,6 +178,70 @@ This allows natural syntax without parentheses:
 "node" := LLM :@ Needs '[A] :@ Schema B
 -- Parses as: (("node" := LLM) :@ Needs '[A]) :@ Schema B
 ```
+
+### Generic.hs - Servant-Style Record Modes
+
+Provides infrastructure for defining graphs as mode-parameterized records,
+following the pattern established by Servant's `NamedRoutes`.
+
+#### GraphMode Class
+
+```haskell
+-- Mode determines how graph record fields are interpreted
+class GraphMode mode where
+  type mode :- nodeDef :: Type
+
+infixl 0 :-
+```
+
+#### Modes
+
+```haskell
+-- AsGraph: Identity mode, fields are node definitions
+data AsGraph
+instance GraphMode AsGraph where
+  type AsGraph :- nodeDef = nodeDef
+
+-- AsHandler: Fields are handler function types
+type AsHandler :: [Effect] -> Type
+data AsHandler es
+instance GraphMode (AsHandler es) where
+  type (AsHandler es) :- nodeDef = NodeHandler nodeDef es
+```
+
+#### Entry/Exit Markers (for records)
+
+```haskell
+-- Entry point marker (parameterized, unlike Types.hs Entry)
+type Entry :: Type -> Type
+data Entry inputType
+
+-- Exit point marker
+type Exit :: Type -> Type
+data Exit outputType
+```
+
+Note: These are *different* from `Types.Entry` and `Types.Exit` which are
+unparameterized markers for the type-level list syntax.
+
+#### NodeHandler Type Family
+
+Computes handler types from node definitions:
+
+```haskell
+type NodeHandler :: Type -> [Effect] -> Type
+type family NodeHandler nodeDef es where
+  NodeHandler (Entry a) es = Proxy a
+  NodeHandler (Exit a) es = Proxy a
+  NodeHandler (node :@ ann) es = NodeHandlerDispatch (node :@ ann) es '[] 'Nothing
+  NodeHandler LLM es = LLMRequiresAnnotations
+  NodeHandler Logic es = LogicRequiresAnnotations
+```
+
+The `NodeHandlerDispatch` accumulator peels annotations from outside-in:
+- Collects `Needs` types for function parameters
+- Records `Template` type for LLM nodes (returns `Eff es (TemplateContext tpl)`)
+- Records `UsesEffects` stack for Logic nodes (returns `Eff effs ()`)
 
 ### Goto.hs - Transition Effect
 
@@ -273,8 +396,8 @@ type GetSchema :: Type -> Maybe Type
 GetSchema ("foo" := LLM :@ Schema C) = 'Just C
 
 -- Extract effect stack (polykinded for effectful compatibility)
-type GetEff :: forall k. Type -> Maybe [k]
-GetEff ("foo" := Logic :@ Eff '[State S, Goto "bar" X]) = 'Just '[State S, Goto "bar" X]
+type GetUsesEffects :: forall k. Type -> Maybe [k]
+GetUsesEffects ("foo" := Logic :@ UsesEffects '[State S, Goto "bar" X]) = 'Just '[State S, Goto "bar" X]
 
 -- Other extractors
 type GetSystem :: Type -> Maybe Type    -- System prompt template
@@ -487,7 +610,7 @@ type BranchingGraph = Graph
    , "classify" := LLM :@ Needs '[Query] :@ Schema Intent
    , "router" := Logic
        :@ Needs '[Intent]
-       :@ Eff '[Goto "pathA" Query, Goto "pathB" Query, Goto Exit Response]
+       :@ UsesEffects '[Goto "pathA" Query, Goto "pathB" Query, Goto Exit Response]
    , "pathA" := LLM :@ Needs '[Query] :@ Schema Response
    , "pathB" := LLM :@ Needs '[Query] :@ Schema Response
    , Exit :<~ Response
@@ -633,11 +756,11 @@ instance ReifyGraph MyGraph where
 
 **Solution**: Add the missing declaration to the graph's node list.
 
-### Kind errors with Eff
+### Kind errors with UsesEffects
 
 **Cause**: Effect list has wrong kind (e.g., `[Type]` instead of `[Effect]`)
 
-**Solution**: Ensure effects in `Eff '[...]` are actual effectful effects with kind `(Type -> Type) -> Type -> Type`.
+**Solution**: Ensure effects in `UsesEffects '[...]` are actual effectful effects with kind `(Type -> Type) -> Type -> Type`.
 
 ## Known Limitations
 
@@ -710,15 +833,16 @@ to check ToGVal instances instead of raw record fields.
 
 | File | Lines | Purpose |
 |------|-------|---------|
-| Types.hs | ~220 | Core DSL syntax types |
+| Types.hs | ~270 | Core DSL syntax types |
+| Generic.hs | ~380 | Servant-style record modes (GraphMode, AsHandler) |
 | Goto.hs | ~100 | Goto effect for transitions |
 | Memory.hs | ~210 | Memory effect for persistent state |
 | Template.hs | ~250 | TemplateDef typeclass for typed prompts |
 | Edges.hs | ~375 | Edge derivation type families |
-| Validate.hs | ~270 | Compile-time validation |
+| Validate.hs | ~400 | Compile-time validation |
 | Reify.hs | ~120 | Runtime info types (stub) |
 | Mermaid.hs | ~220 | Diagram generation |
 | TH.hs | ~210 | Template Haskell generation |
 | Runner.hs | ~280 | Graph execution engine |
-| Example.hs | ~350 | Usage examples |
+| Example.hs | ~570 | Usage examples (type-level list + record syntax) |
 | Example/Context.hs | ~40 | Example context types (for TH staging) |

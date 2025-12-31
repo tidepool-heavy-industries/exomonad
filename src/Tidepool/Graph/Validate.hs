@@ -211,7 +211,7 @@ type family AllNodeGotosValid nodes validNames where
 type ExtractGotoSymbols :: Type -> [Symbol]
 type family ExtractGotoSymbols node where
   ExtractGotoSymbols (_ := _) = '[]
-  ExtractGotoSymbols (node :@ Eff effs) = ProjectSymbols (GetGotoTargets effs)
+  ExtractGotoSymbols (node :@ UsesEffects effs) = ProjectSymbols (GetGotoTargets effs)
   ExtractGotoSymbols (node :@ _) = ExtractGotoSymbols node
 
 -- | Project just the Symbol from [(Symbol, Type)] pairs

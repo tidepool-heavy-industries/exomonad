@@ -1,4 +1,7 @@
+{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -10,13 +13,17 @@
 -- This module contains example graphs that verify the DSL compiles correctly,
 -- plus manually-constructed GraphInfo for diagram generation.
 module Tidepool.Graph.Example
-  ( -- * Example Graphs (type-level)
+  ( -- * Example Graphs (type-level list syntax)
     SimpleGraph
   , BranchingGraph
   , AnnotatedGraph
   , ToolsGraph
   , MemoryGraph
   , TemplateGraph
+
+    -- * Example Graphs (record syntax - Servant-style)
+  , SupportGraph(..)
+  , supportHandlers
 
     -- * Example Memory Types
   , ExploreMem(..)
@@ -47,13 +54,15 @@ import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import Data.Typeable (Typeable, typeRep)
 import Data.Proxy (Proxy(..))
-import Effectful (type (:>))
+import Effectful (type (:>), Eff)
 import Effectful.State.Static.Local (State, get)
 import GHC.Generics (Generic)
 import Text.Parsec.Pos (SourcePos)
 
 import Tidepool.Graph.Types
 import Tidepool.Graph.Validate (ValidGraph)
+import Tidepool.Graph.Generic (GraphMode(..), AsGraph, AsHandler)
+import qualified Tidepool.Graph.Generic as G (Entry, Exit, LLMNode, LogicNode, ValidGraphRecord)
 import Tidepool.Graph.Goto (Goto)
 import Tidepool.Graph.Tool (ToolDef(..), toolToInfo)
 import Tidepool.Graph.Template (TemplateDef(..), TypedTemplate, typedTemplateFile)
@@ -160,7 +169,7 @@ type BranchingGraph = Graph
   '[ Entry :~> Message
    , "route"  := Logic
        :@ Needs '[Message]
-       :@ Eff '[Goto "refund" Message, Goto "answer" Message, Goto Exit Response]
+       :@ UsesEffects '[Goto "refund" Message, Goto "answer" Message, Goto Exit Response]
    , "refund" := LLM :@ Needs '[Message] :@ Schema Response
    , "answer" := LLM :@ Needs '[Message] :@ Schema Response
    , Exit :<~ Response
@@ -337,6 +346,137 @@ validTemplateGraph :: ValidGraph TemplateGraph => ()
 validTemplateGraph = ()
 
 -- ════════════════════════════════════════════════════════════════════════════
+-- RECORD-BASED GRAPH (Servant-style pattern)
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- $recordSyntax
+--
+-- This is the new Servant-inspired pattern for defining graphs. Instead of
+-- type-level lists, graphs are mode-parameterized records:
+--
+-- @
+-- data MyGraph mode = MyGraph
+--   { entry    :: mode :- Entry Message
+--   , classify :: mode :- LLM :@ Needs '[Message] :@ Schema Intent
+--   , exit     :: mode :- Exit Response
+--   }
+--   deriving Generic
+-- @
+--
+-- Modes determine interpretation:
+--
+-- * 'AsGraph' - Identity; fields are node definitions (for validation)
+-- * 'AsHandler es' - Fields are handler function types (for execution)
+--
+-- This pattern provides:
+--
+-- * Field names become node names (no @\":=\"@ annotation needed)
+-- * Type-safe handler records with correct effect constraints
+-- * Generic traversal for validation and reification
+
+-- | A customer support graph using the record-based syntax.
+--
+-- This is equivalent to:
+--
+-- @
+-- type SupportGraphList = Graph
+--   '[ Entry :~> Message
+--    , "classify" := LLM :@ Needs '[Message] :@ Template ClassifyTpl :@ Schema Intent
+--    , "route"    := Logic :@ Needs '[Intent] :@ UsesEffects '[Goto "refund", Goto "faq", Goto Exit]
+--    , "refund"   := LLM :@ Needs '[Message] :@ Schema Response
+--    , "faq"      := LLM :@ Needs '[Message] :@ Schema Response
+--    , Exit :<~ Response
+--    ]
+-- @
+--
+-- But with record syntax, field names become node names automatically.
+-- | Dummy template for refund handler
+data RefundTpl
+
+-- | Dummy template for FAQ handler
+data FaqTpl
+
+-- | Dummy context for refund/faq (would have real context in production)
+data SimpleContext = SimpleContext { scContent :: Text }
+
+-- Dummy TemplateDef instances for RefundTpl and FaqTpl
+-- (In real code, these would have proper templates)
+instance TemplateDef RefundTpl where
+  type TemplateContext RefundTpl = SimpleContext
+  type TemplateConstraint RefundTpl es = ()
+  templateName = "refund"
+  templateDescription = "Handle refund requests"
+  templateCompiled = error "RefundTpl stub"
+  buildContext = pure SimpleContext { scContent = "refund" }
+
+instance TemplateDef FaqTpl where
+  type TemplateContext FaqTpl = SimpleContext
+  type TemplateConstraint FaqTpl es = ()
+  templateName = "faq"
+  templateDescription = "Answer FAQ questions"
+  templateCompiled = error "FaqTpl stub"
+  buildContext = pure SimpleContext { scContent = "faq" }
+
+data SupportGraph mode = SupportGraph
+  { sgEntry    :: mode :- G.Entry Message
+  , sgClassify :: mode :- G.LLMNode :@ Needs '[Message] :@ Template ClassifyTpl :@ Schema Intent
+  , sgRoute    :: mode :- G.LogicNode :@ Needs '[Intent] :@ UsesEffects '[Goto "refund" Message, Goto "faq" Message]
+  , sgRefund   :: mode :- G.LLMNode :@ Needs '[Message] :@ Template RefundTpl :@ Schema Response
+  , sgFaq      :: mode :- G.LLMNode :@ Needs '[Message] :@ Template FaqTpl :@ Schema Response
+  , sgExit     :: mode :- G.Exit Response
+  }
+  deriving Generic
+
+-- | Handler record for SupportGraph.
+--
+-- In 'AsHandler es' mode, the NodeHandler type family computes:
+--
+-- * Entry -> Proxy Message (marker, not a handler)
+-- * LLM :@ Needs '[A] :@ Template T :@ Schema B -> A -> Eff es (TemplateContext T)
+-- * Logic :@ Needs '[A] :@ UsesEffects effs -> A -> Eff effs ()
+-- * Exit -> Proxy Response (marker, not a handler)
+--
+-- Note: The handler returns the TemplateContext, not the Schema output.
+-- The runner handles template rendering, LLM call, and schema parsing.
+supportHandlers :: SupportGraph (AsHandler '[State SessionState])
+supportHandlers = SupportGraph
+  { sgEntry    = Proxy @Message
+  , sgClassify = \msg -> do
+      -- Handler builds context for the classify template
+      st <- get @SessionState
+      pure ClassifyContext
+        { topic = msgContent msg
+        , categories = T.intercalate ", " st.sessionNotes
+        }
+  , sgRoute    = \_intent -> do
+      -- Logic handler: examines intent and gotos the right node
+      -- For now, stub that does nothing (would use goto effect)
+      pure ()
+  , sgRefund   = \_msg -> do
+      -- Refund template context builder
+      pure SimpleContext { scContent = "Processing refund..." }
+  , sgFaq      = \_msg -> do
+      -- FAQ template context builder
+      pure SimpleContext { scContent = "Here are some common questions..." }
+  , sgExit     = Proxy @Response
+  }
+  where
+    -- Helper to extract message content as Text
+    msgContent :: Message -> Text
+    msgContent (Message s) = T.pack s
+
+-- | Test that ValidGraphRecord works on record-based graphs.
+--
+-- This uses the constraint to verify at compile time that:
+-- * SupportGraph has an Entry field (sgEntry :: mode :- G.Entry Message)
+-- * SupportGraph has an Exit field (sgExit :: mode :- G.Exit Response)
+-- * All Goto targets reference valid field names
+--
+-- If any validation fails, you get a compile-time error.
+validRecordGraph :: G.ValidGraphRecord SupportGraph => ()
+validRecordGraph = ()
+
+-- ════════════════════════════════════════════════════════════════════════════
 -- INVALID GRAPHS (commented out - uncomment to see compile errors)
 -- ════════════════════════════════════════════════════════════════════════════
 
@@ -356,7 +496,7 @@ validTemplateGraph = ()
 --   '[ Entry :~> Message
 --    , "badRoute" := Logic
 --        :@ Needs '[Message]
---        :@ Eff '[Goto "nonexistent" Message]
+--        :@ UsesEffects '[Goto "nonexistent" Message]
 --    , Exit :<~ Response
 --    ]
 --

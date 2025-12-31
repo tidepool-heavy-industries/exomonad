@@ -47,7 +47,7 @@ module Tidepool.Graph.Types
   , Template
   , Vision
   , Tools
-  , Eff
+  , UsesEffects
   , Memory
 
     -- * Graph-Level Annotations
@@ -167,11 +167,13 @@ data Tools tools
 -- Note: This takes a list of effects with kind [Effect] where
 -- Effect = (Type -> Type) -> Type -> Type
 --
+-- Renamed from 'Eff' to avoid conflict with Effectful's 'Eff' monad type.
+--
 -- @
--- Eff '[State MyState, Goto "nextNode" PayloadType, Goto Exit ResultType]
+-- UsesEffects '[State MyState, Goto "nextNode" PayloadType, Goto Exit ResultType]
 -- @
-type Eff :: [k] -> Type
-data Eff effects
+type UsesEffects :: [k] -> Type
+data UsesEffects effects
 
 -- | Node-private persistent memory. Each node can declare its own state type
 -- that persists across graph runs. Only this node can access its Memory.

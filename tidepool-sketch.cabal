@@ -34,6 +34,7 @@ library
         Tidepool.GUI.Widgets
         Tidepool.Graph
         Tidepool.Graph.Types
+        Tidepool.Graph.Generic
         Tidepool.Graph.Goto
         Tidepool.Graph.Edges
         Tidepool.Graph.Validate

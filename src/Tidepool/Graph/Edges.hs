@@ -33,7 +33,7 @@ module Tidepool.Graph.Edges
     -- * Annotation Extraction
   , GetNeeds
   , GetSchema
-  , GetEff
+  , GetUsesEffects
   , GetSystem
   , GetTemplate
   , GetVision
@@ -104,19 +104,19 @@ type family GetSchema node where
   GetSchema (node :@ Schema t) = 'Just t
   GetSchema (node :@ _) = GetSchema node
 
--- | Extract the Eff stack from a Logic node.
+-- | Extract the UsesEffects stack from a Logic node.
 --
 -- @
--- GetEff ("foo" := Logic :@ Needs '[A] :@ Eff '[State S, Goto "bar" B])
+-- GetUsesEffects ("foo" := Logic :@ Needs '[A] :@ UsesEffects '[State S, Goto "bar" B])
 --   = 'Just '[State S, Goto "bar" B]
 -- @
 --
 -- Note: The effect list can have any kind (usually Effect).
-type GetEff :: forall k. Type -> Maybe [k]
-type family GetEff node where
-  GetEff (_ := _) = 'Nothing
-  GetEff (node :@ Eff effs) = 'Just effs
-  GetEff (node :@ _) = GetEff node
+type GetUsesEffects :: forall k. Type -> Maybe [k]
+type family GetUsesEffects node where
+  GetUsesEffects (_ := _) = 'Nothing
+  GetUsesEffects (node :@ UsesEffects effs) = 'Just effs
+  GetUsesEffects (node :@ _) = GetUsesEffects node
 
 -- | Extract the System template type from a node.
 --
@@ -231,7 +231,7 @@ type family SameAnnotationType ann target where
   SameAnnotationType (System _) (System _) = 'True
   SameAnnotationType (Template _) (Template _) = 'True
   SameAnnotationType (Tools _) (Tools _) = 'True
-  SameAnnotationType (Eff _) (Eff _) = 'True
+  SameAnnotationType (UsesEffects _) (UsesEffects _) = 'True
   SameAnnotationType (Memory _) (Memory _) = 'True
   SameAnnotationType Vision Vision = 'True
   SameAnnotationType _ _ = 'False
