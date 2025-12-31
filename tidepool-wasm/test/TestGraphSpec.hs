@@ -5,19 +5,21 @@
 -- These tests verify that:
 -- 1. TestGraph compiles (passes graph validation constraints)
 -- 2. The compute handler returns n+1 as expected
+-- 3. The DispatchGoto typeclass correctly dispatches to Exit
 module TestGraphSpec (spec) where
 
 import Test.Hspec
-import Data.Dynamic (fromDynamic)
 import Effectful (runPureEff)
 
-import Tidepool.Graph.Goto (GotoResult(..), gotoChoiceToResult)
+import Tidepool.Graph.Goto (GotoChoice(..), OneOf(..))
+import Tidepool.Graph.Execute (DispatchGoto(..))
 import Tidepool.Wasm.TestGraph (TestGraph(..), testHandlers)
 
 
 spec :: Spec
 spec = do
   computeHandlerSpec
+  dispatchGotoSpec
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -27,38 +29,58 @@ spec = do
 computeHandlerSpec :: Spec
 computeHandlerSpec = describe "compute handler" $ do
 
-  it "returns GotoExit with n+1 for input 0" $ do
-    let result = runComputeHandler 0
-    extractExitPayload result `shouldBe` Just 1
+  it "returns n+1 for input 0" $ do
+    runComputeHandler 0 `shouldBe` 1
 
-  it "returns GotoExit with n+1 for input 5" $ do
-    let result = runComputeHandler 5
-    extractExitPayload result `shouldBe` Just 6
+  it "returns n+1 for input 5" $ do
+    runComputeHandler 5 `shouldBe` 6
 
-  it "returns GotoExit with n+1 for negative input" $ do
-    let result = runComputeHandler (-3)
-    extractExitPayload result `shouldBe` Just (-2)
+  it "returns n+1 for negative input" $ do
+    runComputeHandler (-3) `shouldBe` (-2)
 
-  it "returns GotoExit with n+1 for large input" $ do
-    let result = runComputeHandler 1000000
-    extractExitPayload result `shouldBe` Just 1000001
-
-  it "produces a GotoExit result (not GotoNode)" $ do
-    let result = runComputeHandler 0
-    case result of
-      GotoExit _ -> pure ()
-      GotoNode _ _ -> expectationFailure "Expected GotoExit, got GotoNode"
-      GotoSelf _ -> expectationFailure "Expected GotoExit, got GotoSelf"
+  it "returns n+1 for large input" $ do
+    runComputeHandler 1000000 `shouldBe` 1000001
 
 
--- | Helper to run the compute handler and get the GotoResult.
-runComputeHandler :: Int -> GotoResult
+-- | Helper to run the compute handler and extract the exit payload.
+--
+-- TestGraph's compute handler returns GotoChoice '[To Exit Int], which is
+-- a newtype over OneOf '[Int]. Pattern matching on Here gives us the Int directly.
+runComputeHandler :: Int -> Int
 runComputeHandler n =
-  let choice = runPureEff (testHandlers.compute n)
-  in gotoChoiceToResult choice
+  let GotoChoice oneOf = runPureEff (testHandlers.compute n)
+  in case oneOf of
+       Here result -> result
+       -- Note: There case is impossible since OneOf '[Int] only has Here
 
 
--- | Extract the Int payload from a GotoExit result.
-extractExitPayload :: GotoResult -> Maybe Int
-extractExitPayload (GotoExit dyn) = fromDynamic dyn
-extractExitPayload _ = Nothing
+-- ════════════════════════════════════════════════════════════════════════════
+-- DispatchGoto
+-- ════════════════════════════════════════════════════════════════════════════
+
+dispatchGotoSpec :: Spec
+dispatchGotoSpec = describe "dispatchGoto" $ do
+
+  it "dispatches Exit target and returns payload" $ do
+    runDispatchTest 5 `shouldBe` 6
+
+  it "dispatches Exit target for input 0" $ do
+    runDispatchTest 0 `shouldBe` 1
+
+  it "dispatches Exit target for negative input" $ do
+    runDispatchTest (-10) `shouldBe` (-9)
+
+  it "dispatches Exit target for large input" $ do
+    runDispatchTest 999999 `shouldBe` 1000000
+
+
+-- | Helper to run the full dispatch through TestGraph.
+--
+-- This tests the DispatchGoto typeclass by:
+-- 1. Calling the compute handler to get a GotoChoice
+-- 2. Using dispatchGoto to dispatch on the choice
+-- 3. Since compute returns GotoChoice '[To Exit Int], dispatch returns the Int
+runDispatchTest :: Int -> Int
+runDispatchTest n = runPureEff $ do
+  choice <- testHandlers.compute n
+  dispatchGoto testHandlers choice

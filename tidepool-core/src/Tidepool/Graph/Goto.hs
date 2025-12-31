@@ -55,13 +55,19 @@ module Tidepool.Graph.Goto
     Goto(..)
   , goto
 
+    -- * OneOf Sum Type
+  , OneOf(..)
+  , Inject(..)
+  , Payloads
+  , PayloadOf
+  , InjectTarget(..)
+
     -- * GotoChoice Return Type
   , To
   , GotoChoice(..)
   , gotoChoice
   , gotoExit
   , gotoSelf
-  , gotoChoiceToResult
 
     -- * LLM Handler Variants
   , LLMHandler(..)
@@ -84,12 +90,91 @@ import Data.Proxy (Proxy(..))
 import Data.Dynamic (Dynamic, toDyn, Typeable)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Effectful
+import Effectful hiding (inject)
 import Effectful.Dispatch.Dynamic
 import qualified Effectful.State.Static.Local as EState
 import GHC.TypeLits (Symbol, KnownSymbol, symbolVal, TypeError, ErrorMessage(..))
 
 import Tidepool.Graph.Types (Exit, Self)
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- ONEOF: TYPE-INDEXED SUM TYPE
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | A type-indexed sum type: "one of these types".
+--
+-- Position in the list encodes which type was chosen. Pattern matching is
+-- fully typed - each case knows the exact payload type.
+--
+-- @
+-- OneOf '[Int, String, Bool]
+--   Here 42           -- an Int
+--   There (Here "hi") -- a String
+--   There (There (Here True)) -- a Bool
+-- @
+type OneOf :: [Type] -> Type
+data OneOf ts where
+  -- | The value is the first type in the list
+  Here  :: t -> OneOf (t ': ts)
+  -- | The value is somewhere in the rest of the list
+  There :: OneOf ts -> OneOf (t ': ts)
+
+-- | Inject a value into a 'OneOf' at its position in the type list.
+--
+-- This typeclass finds the correct position automatically:
+--
+-- @
+-- inject @Int @'[Int, String] 42 = Here 42
+-- inject @String @'[Int, String] "hi" = There (Here "hi")
+-- @
+class Inject (t :: Type) (ts :: [Type]) where
+  inject :: t -> OneOf ts
+
+-- | Base case: t is at the head of the list
+instance {-# OVERLAPPING #-} Inject t (t ': ts) where
+  inject = Here
+
+-- | Inductive case: t is somewhere in the tail
+instance Inject t ts => Inject t (t' ': ts) where
+  inject = There . inject
+
+-- | Extract payload types from a list of 'To' markers.
+--
+-- @
+-- Payloads '[To "a" Int, To "b" String, To Exit Bool] = '[Int, String, Bool]
+-- @
+type Payloads :: [Type] -> [Type]
+type family Payloads targets where
+  Payloads '[] = '[]
+  Payloads (To name payload ': rest) = payload ': Payloads rest
+
+-- | Extract the payload type from a 'To' marker.
+type PayloadOf :: Type -> Type
+type family PayloadOf t where
+  PayloadOf (To name payload) = payload
+
+-- | Inject a target's payload into a 'OneOf' at the correct position.
+--
+-- Unlike 'Inject', this matches on the full 'To name payload' marker,
+-- correctly handling cases where multiple targets have the same payload type.
+--
+-- @
+-- injectTarget @(To "a" Int) 42 -- injects at position of To "a" Int
+-- injectTarget @(To "b" Int) 42 -- injects at position of To "b" Int (different!)
+-- @
+class InjectTarget (target :: Type) (targets :: [Type]) where
+  injectTarget :: PayloadOf target -> OneOf (Payloads targets)
+
+-- | Base case: target is at the head
+instance {-# OVERLAPPING #-} InjectTarget (To name payload) (To name payload ': ts) where
+  injectTarget = Here
+
+-- | Inductive case: target is in the tail
+--
+-- Note: We match on @To name' payload'@ specifically so GHC can reduce
+-- @Payloads (To name' payload' : ts)@ to @payload' : Payloads ts@.
+instance InjectTarget target ts => InjectTarget target (To name' payload' ': ts) where
+  injectTarget = There . injectTarget @target @ts
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- THE GOTO EFFECT
@@ -145,6 +230,9 @@ data To target payload
 -- The @targets@ parameter is a type-level list of 'To' markers:
 -- @'[To "nodeA" PayloadA, To "nodeB" PayloadB, To Exit Response]@
 --
+-- Internally, 'GotoChoice' is a newtype over 'OneOf', enabling fully typed
+-- dispatch without existentials or unsafeCoerce.
+--
 -- = Example
 --
 -- @
@@ -154,31 +242,7 @@ data To target payload
 --   DoneIntent   -> pure $ gotoExit response
 -- @
 type GotoChoice :: [Type] -> Type
-data GotoChoice targets where
-  -- | Transition to a named node
-  GotoChoiceNode
-    :: forall (name :: Symbol) payload targets.
-       ( KnownSymbol name
-       , Typeable payload
-       , GotoElemC (To name payload) targets
-       )
-    => Proxy name -> payload -> GotoChoice targets
-
-  -- | Exit the graph with a result
-  GotoChoiceExit
-    :: forall payload targets.
-       ( Typeable payload
-       , GotoElemC (To Exit payload) targets
-       )
-    => payload -> GotoChoice targets
-
-  -- | Self-loop back to current node
-  GotoChoiceSelf
-    :: forall payload targets.
-       ( Typeable payload
-       , GotoElemC (To Self payload) targets
-       )
-    => payload -> GotoChoice targets
+newtype GotoChoice targets = GotoChoice { unGotoChoice :: OneOf (Payloads targets) }
 
 -- | Check if a To marker is in the targets list (returns Bool).
 type GotoElem :: Type -> [Type] -> Bool
@@ -213,12 +277,11 @@ type family GotoElemC' g targets result where
 -- @
 gotoChoice
   :: forall (name :: Symbol) payload targets.
-     ( KnownSymbol name
-     , Typeable payload
+     ( InjectTarget (To name payload) targets
      , GotoElemC (To name payload) targets
      )
   => payload -> GotoChoice targets
-gotoChoice = GotoChoiceNode (Proxy @name)
+gotoChoice payload = GotoChoice (injectTarget @(To name payload) @targets payload)
 
 -- | Construct a 'GotoChoice' for exiting the graph.
 --
@@ -227,11 +290,11 @@ gotoChoice = GotoChoiceNode (Proxy @name)
 -- @
 gotoExit
   :: forall payload targets.
-     ( Typeable payload
+     ( InjectTarget (To Exit payload) targets
      , GotoElemC (To Exit payload) targets
      )
   => payload -> GotoChoice targets
-gotoExit = GotoChoiceExit
+gotoExit payload = GotoChoice (injectTarget @(To Exit payload) @targets payload)
 
 -- | Construct a 'GotoChoice' for a self-loop.
 --
@@ -240,20 +303,14 @@ gotoExit = GotoChoiceExit
 -- @
 gotoSelf
   :: forall payload targets.
-     ( Typeable payload
+     ( InjectTarget (To Self payload) targets
      , GotoElemC (To Self payload) targets
      )
   => payload -> GotoChoice targets
-gotoSelf = GotoChoiceSelf
+gotoSelf payload = GotoChoice (injectTarget @(To Self payload) @targets payload)
 
--- | Convert a 'GotoChoice' to a 'GotoResult' for the runner.
-gotoChoiceToResult :: GotoChoice targets -> GotoResult
-gotoChoiceToResult (GotoChoiceNode proxy payload) =
-  GotoNode (T.pack $ symbolVal proxy) (toDyn payload)
-gotoChoiceToResult (GotoChoiceExit payload) =
-  GotoExit (toDyn payload)
-gotoChoiceToResult (GotoChoiceSelf payload) =
-  GotoSelf (toDyn payload)
+-- Note: gotoChoiceToResult has been removed. The typed executor in Execute.hs
+-- dispatches directly on OneOf without needing to convert to Dynamic-based GotoResult.
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- LLM HANDLER VARIANTS
