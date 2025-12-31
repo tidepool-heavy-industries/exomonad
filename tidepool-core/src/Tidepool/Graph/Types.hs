@@ -8,37 +8,11 @@
 
 -- | Core types for the Tidepool Graph DSL.
 --
--- This module defines the type-level syntax for declaring state machine graphs.
--- Graphs consist of nodes (LLM or Logic) connected by edges derived from
--- 'Needs', 'Schema', and 'Goto' annotations.
---
--- = Example
---
--- @
--- type MyGraph = Graph '[
---     Entry :~> InputType
---   , "process" := LLM
---       :@ Needs '[InputType]
---       :@ Template ProcessTpl
---       :@ Schema OutputType
---   , "decide" := Logic
---       :@ Needs '[OutputType]
---       :@ Eff '[Goto Exit ResultType]
---   , Exit :<~ ResultType
---   ]
--- @
+-- This module defines annotations and shared types for the Graph DSL.
+-- The record-based DSL (see Tidepool.Graph.Generic) is now the preferred syntax.
 module Tidepool.Graph.Types
-  ( -- * Graph Structure
-    Graph
-  , Entry
-  , Exit
-  , Self
-  , type (:~>)
-  , type (:<~)
-
-    -- * Node Definition
-  , type (:=)
-  , NodeKind(..)
+  ( -- * Node Kind
+    NodeKind(..)
 
     -- * Annotations
   , type (:@)
@@ -57,66 +31,24 @@ module Tidepool.Graph.Types
   , Requires
   , Global
 
-    -- * Type-Level Utilities
-  , NodeName
-  , GetNodeKind
-  , GetAnnotations
+    -- * Special Goto Targets
+  , Exit
+  , Self
   ) where
 
 import Data.Kind (Type, Constraint)
 import GHC.TypeLits (Symbol)
 
 -- ════════════════════════════════════════════════════════════════════════════
--- GRAPH STRUCTURE
+-- NODE KIND
 -- ════════════════════════════════════════════════════════════════════════════
-
--- | A graph is a list of node declarations.
---
--- The list should contain:
---
--- * Exactly one 'Entry' declaration: @Entry :~> InputType@
--- * Zero or more node declarations: @"name" := Kind :@ ...@
--- * Exactly one 'Exit' declaration: @Exit :<~ OutputType@
-type Graph :: [Type] -> Type
-data Graph nodes
-
--- | Entry point marker. Used with ':~>' to declare the graph's input type.
-data Entry
-
--- | Exit point marker. Used with ':<~' to declare the graph's output type.
--- Also used as a 'Goto' target: @Goto Exit ResultType@.
-data Exit
-
--- | Self-loop marker for transitions back to the current node.
--- Used for retry/continuation patterns: @Goto Self UpdatedState@.
-data Self
-
--- | Entry point declaration. @Entry :~> InputType@ declares that the graph
--- accepts @InputType@ as input.
-type (:~>) :: Type -> Type -> Type
-data entry :~> inputType
-infixr 5 :~>
-
--- | Exit point declaration. @Exit :<~ OutputType@ declares that the graph
--- produces @OutputType@ as output.
-type (:<~) :: Type -> Type -> Type
-data exit :<~ outputType
-infixr 5 :<~
-
--- ════════════════════════════════════════════════════════════════════════════
--- NODE DEFINITION
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Node declaration. @"nodeName" := LLM@ declares a node with the given name
--- and kind. Annotations are attached with ':@'.
-type (:=) :: Symbol -> NodeKind -> Type
-data name := kind
-infixr 8 :=
 
 -- | The kind of a node determines its behavior:
 --
 -- * 'LLM' nodes call the language model and produce output via 'Schema'
 -- * 'Logic' nodes run pure/effectful code and transition via 'Goto'
+--
+-- Note: For the record-based DSL, use LLMNode and LogicNode from Tidepool.Graph.Generic
 data NodeKind
   = LLM    -- ^ Node that invokes the LLM. Output flows implicitly via Schema.
   | Logic  -- ^ Node with effect stack. Transitions explicitly via Goto.
@@ -221,28 +153,32 @@ data Requires effects
 -- | Graph-level shared state accessible to all nodes. Unlike node-private
 -- 'Memory', Global state can be read and updated by any node in the graph.
 --
--- @
--- type MyGraph = Graph '[...]
---     :& Global SessionState   -- Shared state for all nodes
--- @
+-- Used with the (:&) operator for graph-level annotations.
 type Global :: Type -> Type
 data Global stateType
 
 -- ════════════════════════════════════════════════════════════════════════════
--- TYPE-LEVEL UTILITIES
+-- SPECIAL GOTO TARGET
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Extract the name from a node declaration.
-type family NodeName (node :: Type) :: Symbol where
-  NodeName (name := kind) = name
-  NodeName (node :@ _) = NodeName node
+-- | Special marker type used as a target for the Goto effect to exit the graph.
+--
+-- @
+-- -- In a Logic node's effect stack:
+-- UsesEffects '[State S, Goto "nextNode" A, Goto Exit FinalResult]
+-- @
+--
+-- Note: The old list-based DSL syntax @Exit :<~ Type@ has been removed.
+-- This @Exit@ type is retained solely as a special target for the @Goto@
+-- effect in the record-based Graph DSL. Record-based graphs use @G.Exit@
+-- from "Tidepool.Graph.Generic" for their exit field definitions.
+data Exit
 
--- | Extract the kind from a node declaration.
-type family GetNodeKind (node :: Type) :: NodeKind where
-  GetNodeKind (_ := kind) = kind
-  GetNodeKind (node :@ _) = GetNodeKind node
-
--- | Extract all annotations from a node as a type-level list.
-type family GetAnnotations (node :: Type) :: [Type] where
-  GetAnnotations (_ := _) = '[]
-  GetAnnotations (node :@ ann) = ann ': GetAnnotations node
+-- | Self-loop marker for transitions back to the current node.
+--
+-- Used for retry/continuation patterns:
+--
+-- @
+-- Goto Self UpdatedState
+-- @
+data Self

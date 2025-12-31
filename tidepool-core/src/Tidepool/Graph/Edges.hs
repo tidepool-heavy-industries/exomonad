@@ -2,30 +2,10 @@
 {-# LANGUAGE StandaloneKindSignatures #-}
 {-# LANGUAGE UndecidableInstances #-}
 
--- | Edge derivation for the Graph DSL.
+-- | Annotation extraction for the Graph DSL.
 --
--- Edges are not declared explicitly in the DSL. Instead, they are derived
--- automatically from two sources:
---
--- 1. __Implicit edges__ (data flow): When a node's 'Schema' output matches
---    another node's 'Needs' input, an edge is created.
---
--- 2. __Explicit edges__ (transitions): Each 'Goto' effect in a Logic node's
---    'Eff' stack creates an edge to the target node.
---
--- = Edge Derivation Algorithm
---
--- For each node N in the graph:
---
--- * If N has @Schema T@, find all nodes M where @T ∈ Needs M@
---   → Create implicit edge @N → M@ carrying @T@
---
--- * If N has @Eff '[..., Goto "target" T, ...]@
---   → Create explicit edge @N → "target"@ carrying @T@
---
--- Additionally:
---
--- * Entry provides the graph input type to all nodes that need it
+-- This module provides type families to extract information from node annotations.
+-- These work with both list-based and record-based graph definitions.
 module Tidepool.Graph.Edges
   ( -- * Edge Type
     EdgeKind(..)
@@ -53,14 +33,6 @@ module Tidepool.Graph.Edges
     -- * Node Queries
   , HasAnnotation
   , FindAnnotation
-
-    -- * Graph Queries
-  , GetNodes
-  , FilterNodes
-  , GetEntryType
-  , GetExitType
-  , FindNodeByName
-  , FindProducers
   ) where
 
 import Data.Kind (Type)
@@ -86,101 +58,85 @@ data EdgeKind
 -- | Extract the Needs types from a node declaration.
 --
 -- @
--- GetNeeds ("foo" := LLM :@ Needs '[A, B] :@ Schema C)
+-- GetNeeds (LLMNode :@ Needs '[A, B] :@ Schema C)
 --   = '[A, B]
 -- @
 type GetNeeds :: Type -> [Type]
 type family GetNeeds node where
-  GetNeeds (Entry :~> _) = '[]
-  GetNeeds (Exit :<~ _) = '[]
-  GetNeeds (_ := _) = '[]
   GetNeeds (node :@ Needs ts) = ts
   GetNeeds (node :@ _) = GetNeeds node
+  GetNeeds _ = '[]
 
 -- | Extract the Schema output type from a node declaration.
 --
 -- @
--- GetSchema ("foo" := LLM :@ Needs '[A] :@ Schema B)
+-- GetSchema (LLMNode :@ Needs '[A] :@ Schema B)
 --   = 'Just B
 -- @
 type GetSchema :: Type -> Maybe Type
 type family GetSchema node where
-  GetSchema (Entry :~> _) = 'Nothing
-  GetSchema (Exit :<~ _) = 'Nothing
-  GetSchema (_ := _) = 'Nothing
   GetSchema (node :@ Schema t) = 'Just t
   GetSchema (node :@ _) = GetSchema node
+  GetSchema _ = 'Nothing
 
 -- | Extract the UsesEffects stack from a Logic node.
 --
 -- @
--- GetUsesEffects ("foo" := Logic :@ Needs '[A] :@ UsesEffects '[State S, Goto "bar" B])
+-- GetUsesEffects (LogicNode :@ Needs '[A] :@ UsesEffects '[State S, Goto "bar" B])
 --   = 'Just '[State S, Goto "bar" B]
 -- @
 --
 -- Note: The effect list can have any kind (usually Effect).
 type GetUsesEffects :: forall k. Type -> Maybe [k]
 type family GetUsesEffects node where
-  GetUsesEffects (Entry :~> _) = 'Nothing
-  GetUsesEffects (Exit :<~ _) = 'Nothing
-  GetUsesEffects (_ := _) = 'Nothing
   GetUsesEffects (node :@ UsesEffects effs) = 'Just effs
   GetUsesEffects (node :@ _) = GetUsesEffects node
+  GetUsesEffects _ = 'Nothing
 
 -- | Extract the System template type from a node.
 --
 -- @
--- GetSystem ("classify" := LLM :@ System SysTpl :@ Template UserTpl :@ Schema Intent)
+-- GetSystem (LLMNode :@ System SysTpl :@ Template UserTpl :@ Schema Intent)
 --   = 'Just SysTpl
 -- @
 type GetSystem :: Type -> Maybe Type
 type family GetSystem node where
-  GetSystem (Entry :~> _) = 'Nothing
-  GetSystem (Exit :<~ _) = 'Nothing
-  GetSystem (_ := _) = 'Nothing
   GetSystem (node :@ System t) = 'Just t
   GetSystem (node :@ _) = GetSystem node
+  GetSystem _ = 'Nothing
 
 -- | Extract the Template type from a node.
 type GetTemplate :: Type -> Maybe Type
 type family GetTemplate node where
-  GetTemplate (Entry :~> _) = 'Nothing
-  GetTemplate (Exit :<~ _) = 'Nothing
-  GetTemplate (_ := _) = 'Nothing
   GetTemplate (node :@ Template t) = 'Just t
   GetTemplate (node :@ _) = GetTemplate node
+  GetTemplate _ = 'Nothing
 
 -- | Check if a node has Vision.
 type GetVision :: Type -> Bool
 type family GetVision node where
-  GetVision (Entry :~> _) = 'False
-  GetVision (Exit :<~ _) = 'False
-  GetVision (_ := _) = 'False
   GetVision (node :@ Vision) = 'True
   GetVision (node :@ _) = GetVision node
+  GetVision _ = 'False
 
 -- | Extract Tools from a node.
 type GetTools :: Type -> [Type]
 type family GetTools node where
-  GetTools (Entry :~> _) = '[]
-  GetTools (Exit :<~ _) = '[]
-  GetTools (_ := _) = '[]
   GetTools (node :@ Tools ts) = ts
   GetTools (node :@ _) = GetTools node
+  GetTools _ = '[]
 
 -- | Extract the Memory type from a node declaration.
 --
 -- @
--- GetMemory ("explore" := LLM :@ Schema Findings :@ Memory ExploreMem)
+-- GetMemory (LLMNode :@ Schema Findings :@ Memory ExploreMem)
 --   = 'Just ExploreMem
 -- @
 type GetMemory :: Type -> Maybe Type
 type family GetMemory node where
-  GetMemory (Entry :~> _) = 'Nothing
-  GetMemory (Exit :<~ _) = 'Nothing
-  GetMemory (_ := _) = 'Nothing
   GetMemory (node :@ Memory t) = 'Just t
   GetMemory (node :@ _) = GetMemory node
+  GetMemory _ = 'Nothing
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- GOTO EXTRACTION
@@ -255,9 +211,9 @@ type family GetGotoExitPayload effs where
 -- | Check if a node has a specific annotation type.
 type HasAnnotation :: Type -> Type -> Bool
 type family HasAnnotation node annType where
-  HasAnnotation (_ := _) _ = 'False
   HasAnnotation (node :@ ann) annType =
     Or (SameAnnotationType ann annType) (HasAnnotation node annType)
+  HasAnnotation _ _ = 'False
 
 -- | Helper to check if annotation matches a type constructor.
 type SameAnnotationType :: Type -> Type -> Bool
@@ -275,99 +231,23 @@ type family SameAnnotationType ann target where
 -- | Find a specific annotation in a node.
 type FindAnnotation :: Type -> Type -> Maybe Type
 type family FindAnnotation node annType where
-  FindAnnotation (_ := _) _ = 'Nothing
   FindAnnotation (node :@ ann) annType =
     If (SameAnnotationType ann annType)
        ('Just ann)
        (FindAnnotation node annType)
-
--- ════════════════════════════════════════════════════════════════════════════
--- GRAPH QUERIES
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Extract all node declarations from a graph.
---
--- Filters out Entry and Exit declarations.
-type GetNodes :: Type -> [Type]
-type family GetNodes graph where
-  GetNodes (Graph nodes) = FilterNodes nodes
-  GetNodes (graph :& _) = GetNodes graph
-
--- | Filter node list to only actual node declarations.
-type FilterNodes :: [Type] -> [Type]
-type family FilterNodes nodes where
-  FilterNodes '[] = '[]
-  FilterNodes ((Entry :~> _) ': rest) = FilterNodes rest
-  FilterNodes ((Exit :<~ _) ': rest) = FilterNodes rest
-  FilterNodes (node ': rest) = node ': FilterNodes rest
-
--- | Get the Entry input type from a graph.
-type GetEntryType :: Type -> Type
-type family GetEntryType graph where
-  GetEntryType (Graph nodes) = FindEntryType nodes
-  GetEntryType (graph :& _) = GetEntryType graph
-
-type FindEntryType :: [Type] -> Type
-type family FindEntryType nodes where
-  FindEntryType ((Entry :~> t) ': _) = t
-  FindEntryType (_ ': rest) = FindEntryType rest
-  -- Note: Missing Entry will cause a type error here (stuck type family)
-
--- | Get the Exit output type from a graph.
-type GetExitType :: Type -> Type
-type family GetExitType graph where
-  GetExitType (Graph nodes) = FindExitType nodes
-  GetExitType (graph :& _) = GetExitType graph
-
-type FindExitType :: [Type] -> Type
-type family FindExitType nodes where
-  FindExitType ((Exit :<~ t) ': _) = t
-  FindExitType (_ ': rest) = FindExitType rest
-  -- Note: Missing Exit will cause a type error here (stuck type family)
+  FindAnnotation _ _ = 'Nothing
 
 -- | Get the Global state type from a graph-level annotation.
 --
 -- @
--- GetGlobal (Graph '[...] :& Global SessionState)
+-- GetGlobal (graph :& Global SessionState)
 --   = 'Just SessionState
 -- @
 type GetGlobal :: Type -> Maybe Type
 type family GetGlobal graph where
-  GetGlobal (Graph _) = 'Nothing
   GetGlobal (graph :& Global t) = 'Just t
   GetGlobal (graph :& _) = GetGlobal graph
-
--- | Find a node by its name.
-type FindNodeByName :: [Type] -> Symbol -> Maybe Type
-type family FindNodeByName nodes name where
-  FindNodeByName '[] _ = 'Nothing
-  FindNodeByName (node ': rest) name =
-    If (NodeName node == name)
-       ('Just node)
-       (FindNodeByName rest name)
-
--- | Find all nodes that produce a given type via Schema.
---
--- Used for implicit edge derivation: Schema T → Needs T.
-type FindProducers :: [Type] -> Type -> [Symbol]
-type family FindProducers nodes t where
-  FindProducers '[] _ = '[]
-  FindProducers (node ': rest) t =
-    If (ProducesType node t)
-       (NodeName node ': FindProducers rest t)
-       (FindProducers rest t)
-
--- | Check if a node produces a given type.
-type ProducesType :: Type -> Type -> Bool
-type family ProducesType node t where
-  ProducesType node t = MaybeEq (GetSchema node) ('Just t)
-
--- | Type-level equality for Maybe Type.
-type MaybeEq :: Maybe Type -> Maybe Type -> Bool
-type family MaybeEq a b where
-  MaybeEq 'Nothing 'Nothing = 'True
-  MaybeEq ('Just a) ('Just a) = 'True
-  MaybeEq _ _ = 'False
+  GetGlobal _ = 'Nothing
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TYPE-LEVEL UTILITIES
@@ -398,9 +278,3 @@ type family Elem x xs where
   Elem _ '[] = 'False
   Elem x (x ': _) = 'True
   Elem x (_ ': rest) = Elem x rest
-
--- | Type-level equality for Symbols.
-type (==) :: Symbol -> Symbol -> Bool
-type family a == b where
-  a == a = 'True
-  _ == _ = 'False

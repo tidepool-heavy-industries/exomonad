@@ -1,6 +1,6 @@
 -- | Type-Safe Graph DSL for LLM Agent State Machines
 --
--- This module provides a type-level DSL for defining state machine graphs
+-- This module provides a record-based DSL for defining state machine graphs
 -- that are validated at compile time and can generate Mermaid diagrams.
 --
 -- = Core Concepts
@@ -28,65 +28,34 @@
 -- Logic nodes declare their effects via 'UsesEffects', which includes 'Goto'
 -- effects for possible transitions.
 --
--- = Example
+-- = Example (Record-Based Syntax)
 --
 -- @
--- type SupportGraph = Graph '[
---     Entry :~> Message
---
---   , "classify" := LLM
---       :@ Needs '[Message]
---       :@ Template ClassifyTpl
---       :@ Schema Intent
---
---   , "route" := Logic
---       :@ Needs '[Message, Intent]
---       :@ UsesEffects '[
---           Goto "refund" Message
---         , Goto "support" Message
---         , Goto Exit Response
---         ]
---
---   , "refund" := LLM
---       :@ Needs '[Message]
---       :@ Template RefundTpl
---       :@ Schema Response
---
---   , "support" := LLM
---       :@ Needs '[Message]
---       :@ Template SupportTpl
---       :@ Schema Response
---
---   , Exit :<~ Response
---   ]
+-- data SupportGraph mode = SupportGraph
+--   { sgEntry    :: mode :- G.Entry Message
+--   , sgClassify :: mode :- G.LLMNode :@ Needs '[Message] :@ Template ClassifyTpl :@ Schema Intent
+--   , sgRoute    :: mode :- G.LogicNode :@ Needs '[Intent] :@ UsesEffects '[Goto "sgRefund", Goto "sgFaq"]
+--   , sgRefund   :: mode :- G.LLMNode :@ Needs '[Message] :@ Template RefundTpl :@ Schema Response
+--   , sgFaq      :: mode :- G.LLMNode :@ Needs '[Message] :@ Template FaqTpl :@ Schema Response
+--   , sgExit     :: mode :- G.Exit Response
+--   }
+--   deriving Generic
 -- @
 --
 -- = Validation
 --
 -- Graphs are validated at compile time:
 --
--- * Must have exactly one Entry and one Exit
+-- * Must have exactly one Entry and one Exit field
 -- * All 'Needs' must be satisfied by Entry or some 'Schema'
--- * All 'Goto' targets must exist or be 'Exit'
+-- * All 'Goto' targets must reference valid field names
 --
 -- = Diagram Generation
 --
--- Generate Mermaid diagrams from graph definitions:
---
--- @
--- putStrLn $ toMermaid $ reifyGraph \@SupportGraph
--- @
+-- Generate Mermaid diagrams from graph definitions using reification.
 module Tidepool.Graph
-  ( -- * Graph Structure
-    Graph
-  , Entry
-  , Exit
-  , type (:~>)
-  , type (:<~)
-
-    -- * Node Definition
-  , type (:=)
-  , NodeKind(..)
+  ( -- * Node Kind
+    NodeKind(..)
 
     -- * Annotations
   , type (:@)
@@ -141,15 +110,12 @@ module Tidepool.Graph
   , Docs.renderDepTreeCompact
   , Docs.templateDocBlock
 
-    -- * Validation
-  , ValidGraph
-  , HasEntry
-  , HasExit
-  , AllNeedsSatisfied
-  , AllGotoTargetsExist
-  , AllToolsHaveSchema
-  , AllMemoriesValid
-  , UniqueSchemas
+    -- * Validation (record-based graphs only)
+    -- These constraints operate on graphs of kind @Type -> Type@,
+    -- i.e. record-based graphs defined with @mode@ parameter.
+  , AllNodesReachable
+  , AllLogicNodesReachExit
+  , NoDeadGotos
 
     -- * Reification
   , ReifyGraph(..)
@@ -159,24 +125,16 @@ module Tidepool.Graph
   , RuntimeNodeKind(..)
   , RuntimeEdgeKind(..)
 
+    -- * Record-Based Reification
+    -- $recordReification
+  , ReifyRecordGraph(..)
+  , makeGraphInfo
+
     -- * Mermaid Diagrams
   , toMermaid
   , toMermaidWithConfig
   , MermaidConfig(..)
   , defaultConfig
-
-    -- * Template Haskell
-  , deriveHandlers
-  , HandlersFor
-  , HandlerType
-
-    -- * Graph Execution
-  , RunnableGraph(..)
-  , runGraph
-  , runGraphWith
-  , GraphState(..)
-  , GraphContext(..)
-  , defaultContext
 
     -- * Record-Based Graph DSL
     -- $recordDSL
@@ -195,16 +153,11 @@ module Tidepool.Graph
   , G.gotoField
   , G.GenericGraph
 
-    -- * Type-Level Utilities
-  , NodeName
-  , GetNodeKind
-  , GetAnnotations
+    -- * Annotation Extraction (used by record DSL)
   , GetNeeds
   , GetSchema
   , GetUsesEffects
   , GetGotoTargets
-  , GetEntryType
-  , GetExitType
   , GetMemory
   , GetGlobal
 
@@ -225,8 +178,6 @@ import Tidepool.Graph.Edges
 import Tidepool.Graph.Validate
 import Tidepool.Graph.Reify
 import Tidepool.Graph.Mermaid
-import Tidepool.Graph.TH
-import Tidepool.Graph.Runner
 import Tidepool.Graph.Tool
 import qualified Tidepool.Graph.Memory as Mem
 import qualified Tidepool.Graph.Template as Tpl
@@ -338,3 +289,21 @@ import qualified Tidepool.Graph.Generic as G
 --
 -- Note: Import @Tidepool.Graph.Generic@ qualified to access 'G.Entry' and 'G.Exit'
 -- (they conflict with the unparameterized markers from @Tidepool.Graph.Types@).
+
+-- $recordReification
+--
+-- Record-based graphs can be automatically reified to 'GraphInfo' for
+-- Mermaid diagram generation:
+--
+-- @
+-- instance ReifyRecordGraph SupportGraph where
+--   reifyRecordGraph = makeGraphInfo
+--
+-- diagram :: Text
+-- diagram = toMermaid (reifyRecordGraph (Proxy \@SupportGraph))
+-- @
+--
+-- Note: Due to polykind limitations with @UsesEffects '[Effect]@, the
+-- @niGotoTargets@ field is always empty. Goto transitions are validated
+-- at compile-time but not represented at runtime. The generated Mermaid
+-- diagram shows implicit edges (Entry/Schema → Needs) only.
