@@ -15,6 +15,10 @@ import type {
 } from "./protocol.js";
 import { SESSION_TIMEOUT_MS } from "./protocol.js";
 import { executeEffect, type Env as HandlersEnv } from "./handlers/index.js";
+import { routeWebhook, type WebhookEnv } from "./telegram/webhook.js";
+
+// Re-export TelegramDO for Cloudflare Workers
+export { TelegramDO } from "./telegram/do.js";
 
 // Import WASM module at build time
 import wasmModule from "./tidepool.wasm";
@@ -23,8 +27,9 @@ import wasmModule from "./tidepool.wasm";
 // Environment Types
 // =============================================================================
 
-export interface Env extends HandlersEnv {
+export interface Env extends HandlersEnv, WebhookEnv {
   STATE_MACHINE: DurableObjectNamespace<StateMachineDO>;
+  // TELEGRAM_DO is inherited from WebhookEnv
 }
 
 // =============================================================================
@@ -398,6 +403,11 @@ export default {
       return new Response(JSON.stringify({ sessionId, wsUrl: `/session/${sessionId}` }), {
         headers: { "Content-Type": "application/json" },
       });
+    }
+
+    // Telegram webhook: /telegram
+    if (url.pathname === "/telegram" && request.method === "POST") {
+      return routeWebhook(request, env);
     }
 
     return new Response("Not found", { status: 404 });
