@@ -34,9 +34,9 @@ export const EventProvider: ParentComponent = (props) => {
       setState(
         produce((s) => {
           s.events.push(event);
-          // Trim to max
+          // Trim to max - use splice to mutate in place
           if (s.events.length > s.maxEvents) {
-            s.events = s.events.slice(-s.maxEvents);
+            s.events.splice(0, s.events.length - s.maxEvents);
           }
         })
       );

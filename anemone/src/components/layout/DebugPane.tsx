@@ -10,7 +10,7 @@ interface DebugPaneProps {
 
 export const DebugPane: Component<DebugPaneProps> = (props) => {
   return (
-    <div class="w-72 md:w-72 w-full flex-shrink-0 border-r border-bg-hover bg-bg-secondary flex flex-col h-full overflow-hidden">
+    <div class="w-full md:w-72 flex-shrink-0 border-r border-bg-hover bg-bg-secondary flex flex-col h-full overflow-hidden">
       {/* Header */}
       <div class="p-3 border-b border-bg-hover flex items-center justify-between">
         <h2 class="text-sm font-semibold text-text-muted uppercase tracking-wider">

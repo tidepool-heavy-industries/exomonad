@@ -61,11 +61,9 @@ export const EventItem: Component<EventItemProps> = (props) => {
 };
 
 function formatTimestamp(date: Date): string {
-  return date.toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  }).slice(-5); // Just show :ss
+  const minutes = date.getMinutes().toString().padStart(2, "0");
+  const seconds = date.getSeconds().toString().padStart(2, "0");
+  return `${minutes}:${seconds}`;
 }
 
 function formatEventType(type: string): string {

@@ -8,7 +8,7 @@ interface HistoryPaneProps {
 
 export const HistoryPane: Component<HistoryPaneProps> = (props) => {
   return (
-    <div class="w-80 md:w-80 w-full flex-shrink-0 border-l border-bg-hover bg-bg-secondary flex flex-col h-full overflow-hidden">
+    <div class="w-full md:w-80 flex-shrink-0 border-l border-bg-hover bg-bg-secondary flex flex-col h-full overflow-hidden">
       {/* Header */}
       <div class="p-3 border-b border-bg-hover flex items-center justify-between">
         <h2 class="text-sm font-semibold text-text-muted uppercase tracking-wider">
