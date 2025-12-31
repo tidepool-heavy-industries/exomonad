@@ -1,4 +1,6 @@
 {-# LANGUAGE CPP #-}
+{-# LANGUAGE ExistentialQuantification #-}
+{-# LANGUAGE GADTs #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 -- | WASM FFI exports for graph execution.
@@ -9,9 +11,15 @@
 -- For native builds, we provide the same interface without FFI exports,
 -- allowing the same code to be tested natively.
 --
--- Implementation uses a global IORef to persist state across FFI calls.
--- This works in WASM because IORef is synchronous (non-blocking) and each
--- WASM module instance is isolated (one per Durable Object).
+-- = Continuation Storage
+--
+-- The continuation returned by 'WasmYield' is a Haskell function that cannot
+-- be serialized to JSON. We store it in a global 'IORef' (per WASM instance).
+-- This works because:
+--
+-- * Each WASM module instance is isolated (one per Durable Object)
+-- * Single-threaded execution (no races)
+-- * The continuation lives for the duration of the yield/resume cycle
 module Tidepool.Wasm.Ffi
   ( -- * FFI Exports
     initialize
@@ -22,7 +30,7 @@ module Tidepool.Wasm.Ffi
   , resetState
   ) where
 
-import Data.Aeson (eitherDecodeStrict, encode, object, (.=))
+import Data.Aeson (eitherDecodeStrict, encode, object, (.=), toJSON)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -31,18 +39,16 @@ import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.Encoding as TLE
 import System.IO.Unsafe (unsafePerformIO)
 
-import Tidepool.Wasm.Runner
-  ( GraphYield(..)
-  , RunnerState(..)
-  , initializeGraph
-  , stepGraph
-  )
+import Tidepool.Wasm.Runner (WasmResult(..), initializeWasm)
+import Tidepool.Wasm.TestGraph (computeHandlerWasm)
 import Tidepool.Wasm.WireTypes
   ( EffectResult(..)
   , ExecutionPhase(..)
   , GraphState(..)
   , StepOutput(..)
   )
+import Tidepool.Graph.Goto (GotoChoice(..), OneOf(..), To)
+import Tidepool.Graph.Types (Exit)
 
 #if defined(wasm32_HOST_ARCH)
 import GHC.Wasm.Prim (JSString, fromJSString, toJSString)
@@ -86,69 +92,90 @@ foreign export javascript "getGraphState" getGraphState :: IO JSString
 -- GLOBAL STATE
 -- ════════════════════════════════════════════════════════════════════════════
 
+-- | Existential wrapper for the continuation.
+--
+-- The continuation's result type varies by graph, so we wrap it existentially.
+-- The 'resultHandler' extracts the final value as JSON.
+data SomeContinuation where
+  SomeCont
+    :: (EffectResult -> WasmResult a)  -- The continuation
+    -> (a -> StepOutput)               -- How to convert result to StepOutput
+    -> SomeContinuation
+
+-- | Global state: either idle or waiting for an effect result.
+data WasmState
+  = Idle
+  | Waiting SomeContinuation ExecutionPhase
+
 -- | Global state persisted across FFI calls.
 --
 -- In WASM: Each module instance is isolated (one per Durable Object),
 -- so "global" really means "session-scoped". Single-threaded, no races.
 --
--- WARNING: This pattern assumes single-threaded execution. In WASM this is
--- guaranteed. For native builds, this is safe for sequential testing but
--- would NOT be thread-safe if used concurrently. The native build is only
--- intended for unit testing, not production use.
---
 -- Note: NOINLINE is critical - ensures single IORef across all call sites.
 {-# NOINLINE globalState #-}
-globalState :: IORef (Maybe RunnerState)
-globalState = unsafePerformIO $ newIORef Nothing
+globalState :: IORef WasmState
+globalState = unsafePerformIO $ newIORef Idle
 
 
 -- | Reset state (for testing only).
 resetState :: IO ()
-resetState = writeIORef globalState Nothing
+resetState = writeIORef globalState Idle
 
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- HELPERS
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Encode value to JSON Text.
-encodeText :: StepOutput -> Text
-encodeText = TL.toStrict . TLE.decodeUtf8 . encode
+-- | Encode StepOutput to JSON Text.
+encodeStepOutput :: StepOutput -> Text
+encodeStepOutput = TL.toStrict . TLE.decodeUtf8 . encode
 
 -- | Create error StepOutput.
 mkErrorOutput :: Text -> StepOutput
-mkErrorOutput msg = StepFailed msg (GraphState (PhaseFailed msg) [])
+mkErrorOutput msg = StepOutput
+  { soEffect = Nothing
+  , soDone = True
+  , soStepResult = Nothing
+  , soGraphState = GraphState (PhaseFailed msg) []
+  }
 
 -- | Node name for TestGraph's compute node.
---
--- Kept as a constant to avoid scattering magic strings. When extending
--- to real graphs, this would come from the continuation/graph structure.
 testGraphNodeName :: Text
 testGraphNodeName = "compute"
 
--- | Convert GraphYield to (StepOutput, Maybe RunnerState).
+-- | Convert a GotoChoice result to StepOutput.
 --
--- YieldEffect: Return StepYield with effect, store continuation in state
--- YieldComplete: Return StepDone with result, clear state
--- YieldError: Return StepFailed with error, clear state
-yieldToOutput :: GraphYield -> (StepOutput, Maybe RunnerState)
-yieldToOutput (YieldEffect eff cont) =
-  let gs = GraphState (PhaseInNode testGraphNodeName) []
-  in ( StepYield eff gs
-     , Just (RunnerState cont (PhaseInNode testGraphNodeName))
-     )
-yieldToOutput (YieldComplete result) =
-  -- completedNodes is [] for consistency with getGraphStateImpl - TestGraph
-  -- doesn't track per-node completion. Real graphs would accumulate this.
-  let gs = GraphState (PhaseCompleted result) []
-  in ( StepDone result gs
-     , Nothing  -- Clear state on completion
-     )
-yieldToOutput (YieldError msg) =
-  let gs = GraphState (PhaseFailed msg) []
-  in ( StepFailed msg gs
-     , Nothing  -- Clear state on error
-     )
+-- For TestGraph: GotoChoice '[To Exit Int] extracts the Int.
+gotoChoiceToOutput :: GotoChoice '[Tidepool.Graph.Goto.To Tidepool.Graph.Types.Exit Int] -> StepOutput
+gotoChoiceToOutput (GotoChoice (Here result)) = StepOutput
+  { soEffect = Nothing
+  , soDone = True
+  , soStepResult = Just (toJSON result)
+  , soGraphState = GraphState (PhaseCompleted (toJSON result)) [testGraphNodeName]
+  }
+
+-- | Convert WasmResult to StepOutput, storing continuation if yielded.
+wasmResultToOutput
+  :: WasmResult (GotoChoice '[Tidepool.Graph.Goto.To Tidepool.Graph.Types.Exit Int])
+  -> IO StepOutput
+wasmResultToOutput (WasmComplete choice) = do
+  writeIORef globalState Idle
+  pure $ gotoChoiceToOutput choice
+
+wasmResultToOutput (WasmYield eff resume) = do
+  let phase = PhaseInNode testGraphNodeName
+  writeIORef globalState (Waiting (SomeCont resume gotoChoiceToOutput) phase)
+  pure StepOutput
+    { soEffect = Just eff
+    , soDone = False
+    , soStepResult = Nothing
+    , soGraphState = GraphState phase []
+    }
+
+wasmResultToOutput (WasmError msg) = do
+  writeIORef globalState Idle
+  pure $ mkErrorOutput msg
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -158,7 +185,7 @@ yieldToOutput (YieldError msg) =
 -- | Initialize graph execution.
 --
 -- 1. Parses entry value (Int) from JSON
--- 2. Runs graph until first effect yield
+-- 2. Runs graph until first effect yield (using freer-simple)
 -- 3. Stores continuation in global state
 -- 4. Returns StepOutput with effect to execute
 #if defined(wasm32_HOST_ARCH)
@@ -172,12 +199,11 @@ initialize = initializeImpl
 initializeImpl :: Text -> IO Text
 initializeImpl inputJson =
   case eitherDecodeStrict (encodeUtf8 inputJson) of
-    Left err -> pure $ encodeText $ mkErrorOutput $ "JSON parse error: " <> T.pack err
+    Left err -> pure $ encodeStepOutput $ mkErrorOutput $ "JSON parse error: " <> T.pack err
     Right entry -> do
-      let yield = initializeGraph entry
-          (output, mState) = yieldToOutput yield
-      writeIORef globalState mState
-      pure $ encodeText output
+      let result = initializeWasm (computeHandlerWasm entry)
+      output <- wasmResultToOutput result
+      pure $ encodeStepOutput output
 
 
 -- | Step graph execution with effect result.
@@ -199,17 +225,40 @@ stepImpl :: Text -> IO Text
 stepImpl resultJson = do
   mState <- readIORef globalState
   case mState of
-    Nothing ->
-      pure $ encodeText $ mkErrorOutput "Graph not initialized - call initialize() before step()"
-    Just state ->
+    Idle ->
+      pure $ encodeStepOutput $ mkErrorOutput "Graph not initialized - call initialize() before step()"
+    Waiting (SomeCont resume toOutput) _phase ->
       case eitherDecodeStrict (encodeUtf8 resultJson) of
         Left err ->
-          pure $ encodeText $ mkErrorOutput $ "JSON parse error: " <> T.pack err
+          pure $ encodeStepOutput $ mkErrorOutput $ "JSON parse error: " <> T.pack err
         Right effectResult -> do
-          let yield = stepGraph state.rsContinuation effectResult
-              (output, mNewState) = yieldToOutput yield
-          writeIORef globalState mNewState
-          pure $ encodeText output
+          let nextResult = resume effectResult
+          -- We need to handle the result generically, but for now we know it's TestGraph
+          output <- wasmResultToOutputGeneric nextResult toOutput
+          pure $ encodeStepOutput output
+
+-- | Generic version that uses the stored toOutput function.
+wasmResultToOutputGeneric
+  :: WasmResult a
+  -> (a -> StepOutput)
+  -> IO StepOutput
+wasmResultToOutputGeneric (WasmComplete a) toOutput = do
+  writeIORef globalState Idle
+  pure $ toOutput a
+
+wasmResultToOutputGeneric (WasmYield eff resume) toOutput = do
+  let phase = PhaseInNode testGraphNodeName
+  writeIORef globalState (Waiting (SomeCont resume toOutput) phase)
+  pure StepOutput
+    { soEffect = Just eff
+    , soDone = False
+    , soStepResult = Nothing
+    , soGraphState = GraphState phase []
+    }
+
+wasmResultToOutputGeneric (WasmError msg) _toOutput = do
+  writeIORef globalState Idle
+  pure $ mkErrorOutput msg
 
 
 -- | Get graph metadata.
@@ -252,10 +301,7 @@ getGraphState = getGraphStateImpl
 getGraphStateImpl :: IO Text
 getGraphStateImpl = do
   mState <- readIORef globalState
-  -- Note: completedNodes is always [] because TestGraph's simple 2-state
-  -- machine doesn't track per-node completion. Real graphs would accumulate
-  -- completed node names in the continuation or RunnerState.
   let graphState = case mState of
-        Nothing -> GraphState PhaseIdle []
-        Just state -> GraphState state.rsPhase []
+        Idle -> GraphState PhaseIdle []
+        Waiting _ phase -> GraphState phase []
   pure $ TL.toStrict $ TLE.decodeUtf8 $ encode graphState
