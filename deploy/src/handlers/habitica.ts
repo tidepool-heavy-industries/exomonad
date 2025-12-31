@@ -57,7 +57,7 @@ export async function handleHabitica(
     "Content-Type": "application/json",
     "x-api-user": config.userId,
     "x-api-key": config.apiToken,
-    "x-client": "tidepool-wasm",
+    "x-client": `${config.userId}-tidepool`,
   };
 
   try {
@@ -138,7 +138,7 @@ export async function handleHabitica(
                 checklistText: c.text,
                 checklistDone: c.completed,
               })) ?? [],
-            todoCompleted: t.completed,
+            todoCompleted: t.completed ?? false,
           }))
         );
       }
