@@ -91,6 +91,11 @@ foreign export javascript "getGraphState" getGraphState :: IO JSString
 -- In WASM: Each module instance is isolated (one per Durable Object),
 -- so "global" really means "session-scoped". Single-threaded, no races.
 --
+-- WARNING: This pattern assumes single-threaded execution. In WASM this is
+-- guaranteed. For native builds, this is safe for sequential testing but
+-- would NOT be thread-safe if used concurrently. The native build is only
+-- intended for unit testing, not production use.
+--
 -- Note: NOINLINE is critical - ensures single IORef across all call sites.
 {-# NOINLINE globalState #-}
 globalState :: IORef (Maybe RunnerState)
@@ -119,6 +124,13 @@ mkErrorOutput msg = StepOutput
   , soGraphState = GraphState (PhaseFailed msg) []
   }
 
+-- | Node name for TestGraph's compute node.
+--
+-- Kept as a constant to avoid scattering magic strings. When extending
+-- to real graphs, this would come from the continuation/graph structure.
+testGraphNodeName :: Text
+testGraphNodeName = "compute"
+
 -- | Convert GraphYield to (StepOutput, Maybe RunnerState).
 --
 -- YieldEffect: Return effect with continuation stored in state
@@ -130,16 +142,16 @@ yieldToOutput (YieldEffect eff cont) =
       { soEffect = Just eff
       , soDone = False
       , soStepResult = Nothing
-      , soGraphState = GraphState (PhaseInNode "compute") []
+      , soGraphState = GraphState (PhaseInNode testGraphNodeName) []
       }
-  , Just (RunnerState cont (PhaseInNode "compute"))
+  , Just (RunnerState cont (PhaseInNode testGraphNodeName))
   )
 yieldToOutput (YieldComplete result) =
   ( StepOutput
       { soEffect = Nothing
       , soDone = True
       , soStepResult = Just result
-      , soGraphState = GraphState (PhaseCompleted result) ["compute"]
+      , soGraphState = GraphState (PhaseCompleted result) [testGraphNodeName]
       }
   , Nothing  -- Clear state on completion
   )
@@ -203,7 +215,7 @@ stepImpl resultJson = do
   mState <- readIORef globalState
   case mState of
     Nothing ->
-      pure $ encodeText $ mkErrorOutput "Not initialized (no continuation)"
+      pure $ encodeText $ mkErrorOutput "Graph not initialized - call initialize() before step()"
     Just state ->
       case eitherDecodeStrict (encodeUtf8 resultJson) of
         Left err ->
@@ -255,6 +267,9 @@ getGraphState = getGraphStateImpl
 getGraphStateImpl :: IO Text
 getGraphStateImpl = do
   mState <- readIORef globalState
+  -- Note: completedNodes is always [] because TestGraph's simple 2-state
+  -- machine doesn't track per-node completion. Real graphs would accumulate
+  -- completed node names in the continuation or RunnerState.
   let graphState = case mState of
         Nothing -> GraphState PhaseIdle []
         Just state -> GraphState state.rsPhase []
