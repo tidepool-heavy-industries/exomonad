@@ -13,6 +13,7 @@ library
     import:           warnings
     exposed-modules:
         Tidepool.Wasm.Effect
+        Tidepool.Wasm.ExampleGraph
         Tidepool.Wasm.TestGraph
         Tidepool.Wasm.LlmTestGraph
         Tidepool.Wasm.WireTypes
@@ -33,10 +34,16 @@ library
             -no-hs-main
             -optl-mexec-model=reactor
             -optl-Wl,--export=hs_init
+            -- TestGraph exports
             -optl-Wl,--export=initialize
             -optl-Wl,--export=step
             -optl-Wl,--export=getGraphInfo
             -optl-Wl,--export=getGraphState
+            -- ExampleGraph exports
+            -optl-Wl,--export=initializeExample
+            -optl-Wl,--export=stepExample
+            -optl-Wl,--export=getExampleGraphInfo
+            -optl-Wl,--export=getExampleGraphState
 
     hs-source-dirs:   src
     default-language: GHC2021
@@ -62,6 +69,7 @@ test-suite tidepool-wasm-tests
     other-modules:
         WireTypesSpec
         TestGraphSpec
+        ExampleGraphSpec
         LlmTestGraphSpec
         ProtocolConformanceSpec
         RunnerSpec
