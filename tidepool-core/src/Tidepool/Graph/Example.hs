@@ -382,7 +382,7 @@ routingHandlers = RoutingGraph
       IntentComplaint -> gotoChoice @"rgProcess" intent
 
     -- LLMBoth: custom context before LLM, explicit routing after
-    -- Full control over both phases - takes system template (optional), user template, before, after
+    -- Full control over both phases. Takes system template (optional), user template, before handler, after handler.
   , rgProcess = LLMBoth
       Nothing  -- no system template
       (templateCompiled @RefundTpl)  -- user template

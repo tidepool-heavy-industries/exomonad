@@ -17,6 +17,10 @@
 -- 1. The CallHandler typeclass correctly invokes both Logic and LLM handlers
 -- 2. Logic nodes (function handlers) still work after adding LLM support
 -- 3. The type machinery compiles correctly
+--
+-- Note: Full LLM node execution tests require Template Haskell for TypedTemplate
+-- creation, which is validated via Example.hs compilation. The tests here focus
+-- on the CallHandler abstraction and Logic node paths.
 module LLMNodeExecuteSpec (spec) where
 
 import Data.Aeson (FromJSON, ToJSON, Value, object, (.=))
@@ -91,24 +95,44 @@ runMockLLM fixedOutput =
 
 
 -- ════════════════════════════════════════════════════════════════════════════
+-- HELPERS
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Extract value from a GotoChoice that contains only an Exit target.
+-- This is safe because the type guarantees only one option exists.
+extractExitValue :: GotoChoice '[To Exit a] -> a
+extractExitValue (GotoChoice (Here a)) = a
+
+
+-- ════════════════════════════════════════════════════════════════════════════
 -- TESTS
 -- ════════════════════════════════════════════════════════════════════════════
 
 spec :: Spec
 spec = do
   describe "CallHandler for Logic nodes" $ do
-    it "invokes simple function handlers" $ do
+    it "invokes simple function handlers and returns correct value" $ do
       let handler :: Int -> Eff '[] (GotoChoice '[To Exit Int])
           handler n = pure $ gotoExit (n + 1)
 
       let result = runPureEff $ callHandler handler (5 :: Int)
-      -- Result should be GotoChoice containing 6
-      result `seq` True `shouldBe` True
+      extractExitValue result `shouldBe` 6
 
-    it "works with graph field handlers" $ do
+    it "works with graph field handlers and returns correct value" $ do
       let handler = lgCompute logicHandlers
       let result = runPureEff $ callHandler handler (10 :: Int)
-      result `seq` True `shouldBe` True
+      extractExitValue result `shouldBe` 11
+
+    it "handles zero correctly" $ do
+      let handler = lgCompute logicHandlers
+      let result = runPureEff $ callHandler handler (0 :: Int)
+      extractExitValue result `shouldBe` 1
+
+    it "handles negative numbers" $ do
+      let handler :: Int -> Eff '[] (GotoChoice '[To Exit Int])
+          handler n = pure $ gotoExit (n * 2)
+      let result = runPureEff $ callHandler handler (-5 :: Int)
+      extractExitValue result `shouldBe` (-10)
 
   describe "DispatchGoto exit handling" $ do
     it "exit-only target returns value directly" $ do
@@ -117,10 +141,12 @@ spec = do
       let exitChoice :: GotoChoice '[To Exit Int]
           exitChoice = GotoChoice (Here 42)
 
-      -- The instance DispatchGoto graph '[To Exit exitType] es exitType
-      -- should handle this by returning the exit value
-      case exitChoice of
-        GotoChoice (Here n) -> n `shouldBe` 42
+      extractExitValue exitChoice `shouldBe` 42
+
+    it "extracts different exit values correctly" $ do
+      extractExitValue (gotoExit @Int 0) `shouldBe` (0 :: Int)
+      extractExitValue (gotoExit @Int 100) `shouldBe` (100 :: Int)
+      extractExitValue (gotoExit @Int (-1)) `shouldBe` ((-1) :: Int)
 
   describe "CallHandler for LLM nodes" $ do
     it "mock LLM interpreter works" $ do
@@ -130,21 +156,28 @@ spec = do
 
     it "LLMAfter handler type compiles" $ do
       -- Verify LLMHandler constructors work correctly
+      -- Note: LLMAfter is not usable for graph dispatch (lacks context builder)
+      -- but we verify the type machinery compiles
       let afterHandler :: LLMHandler Int TestOutput '[To Exit TestOutput] '[] ()
           afterHandler = LLMAfter (\out -> pure $ gotoExit out)
-
-      -- Just verify this compiles and can be used
       afterHandler `seq` True `shouldBe` True
 
+    it "LLMBefore handler type compiles" $ do
+      -- LLMBefore is not usable for graph dispatch (lacks routing)
+      -- Note: LLMBefore has targets='[] because it doesn't provide routing
+      let beforeHandler :: LLMHandler Int TestOutput '[] '[] Int
+          beforeHandler = LLMBefore (\n -> pure n)
+      beforeHandler `seq` True `shouldBe` True
+
   describe "Graph handler types" $ do
-    it "Logic handler has correct type" $ do
-      -- Verify that Logic node handlers have the expected function type
+    it "Logic handler has correct type and behavior" $ do
       let handler :: Int -> Eff '[] (GotoChoice '[To Exit Int])
           handler = lgCompute logicHandlers
-
-      -- Just verify the type is correct
-      handler `seq` True `shouldBe` True
+      -- Verify both type and behavior
+      let result = runPureEff $ handler 99
+      extractExitValue result `shouldBe` 100
 
     it "Graph record compiles with handlers" $ do
-      -- Verify the full graph record compiles
-      logicHandlers `seq` True `shouldBe` True
+      -- Verify the full graph record compiles and handlers work
+      let computeResult = runPureEff $ (lgCompute logicHandlers) 5
+      extractExitValue computeResult `shouldBe` 6
