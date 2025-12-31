@@ -405,8 +405,9 @@ buildFeedbackPrompt proposal = T.unlines
 -- DELTA LOOP (pure, for use with platform runners)
 -- ══════════════════════════════════════════════════════════════
 
--- Note: runDeltaAgent moved to tidepool-platform where it can use runLLM.
--- Use deltaLoop with your own effect interpreter stack.
+-- Note: the previous 'runDeltaAgent' helper was removed from this module.
+-- Use 'deltaLoop' with your own effect interpreter stack or a platform-specific
+-- runner (e.g. in tidepool-platform) that invokes it.
 
 -- | The main delta loop
 deltaLoop
