@@ -65,6 +65,12 @@ data SerializableEffect
       }
   | EffLogInfo { effMessage :: Text }
   | EffLogError { effMessage :: Text }
+  | EffHabitica
+      { effHabOp :: Text
+      -- ^ Operation name: "GetUser", "ScoreTask", "GetTasks", etc.
+      , effHabPayload :: Value
+      -- ^ Operation-specific payload (taskId, direction, etc.)
+      }
   deriving stock (Show, Eq, Generic)
 
 instance ToJSON SerializableEffect where
@@ -88,6 +94,11 @@ instance ToJSON SerializableEffect where
     [ "type" .= ("LogError" :: Text)
     , "eff_message" .= msg
     ]
+  toJSON (EffHabitica op payload) = object
+    [ "type" .= ("Habitica" :: Text)
+    , "eff_hab_op" .= op
+    , "eff_hab_payload" .= payload
+    ]
 
 instance FromJSON SerializableEffect where
   parseJSON = withObject "SerializableEffect" $ \o -> do
@@ -103,6 +114,9 @@ instance FromJSON SerializableEffect where
         <*> o .: "eff_method"
       "LogInfo" -> EffLogInfo <$> o .: "eff_message"
       "LogError" -> EffLogError <$> o .: "eff_message"
+      "Habitica" -> EffHabitica
+        <$> o .: "eff_hab_op"
+        <*> o .: "eff_hab_payload"
       _         -> fail $ "Unknown effect type: " ++ show typ
 
 

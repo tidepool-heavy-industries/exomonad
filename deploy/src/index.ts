@@ -10,8 +10,10 @@ import type {
   SerializableEffect,
   EffectResult,
   LlmCompleteEffect,
+  HabiticaEffect,
 } from "./protocol.js";
 import { successResult, errorResult } from "./protocol.js";
+import { handleHabitica, type HabiticaConfig } from "./handlers/habitica.js";
 
 // Import WASM module at build time
 import wasmModule from "./tidepool.wasm";
@@ -23,6 +25,9 @@ import wasmModule from "./tidepool.wasm";
 export interface Env {
   STATE_MACHINE: DurableObjectNamespace<StateMachineDO>;
   AI: Ai;
+  // Habitica API credentials (set via wrangler secret)
+  HABITICA_USER_ID: string;
+  HABITICA_API_TOKEN: string;
 }
 
 // =============================================================================
@@ -198,6 +203,14 @@ export class StateMachineDO extends DurableObject<Env> {
         case "LogError":
           console.error(`[Graph Error] ${effect.eff_message}`);
           return successResult(null);
+
+        case "Habitica": {
+          const config: HabiticaConfig = {
+            userId: this.env.HABITICA_USER_ID,
+            apiToken: this.env.HABITICA_API_TOKEN,
+          };
+          return await handleHabitica(effect as HabiticaEffect, config);
+        }
 
         default:
           return errorResult(`Unknown effect type: ${(effect as { type: string }).type}`);
