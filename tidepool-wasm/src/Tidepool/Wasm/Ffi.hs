@@ -436,7 +436,7 @@ getExampleGraphInfoImpl =
           [ "entry" .= ("classify" :: Text)
           , "classify" .= (["handleGreeting", "handleQuestion", "handleStatement"] :: [Text])
           , "handleGreeting" .= ("exit" :: Text)
-          , "handleQuestion" .= ("exit" :: Text)
+          , "handleQuestion" .= (["exit", "handleQuestion"] :: [Text])
           , "handleStatement" .= ("exit" :: Text)
           ]
       ]

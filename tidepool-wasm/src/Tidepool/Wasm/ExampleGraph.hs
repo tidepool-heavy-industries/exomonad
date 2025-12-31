@@ -117,18 +117,18 @@ data ExampleGraph mode = ExampleGraph
 -- pattern matching to ensure deterministic behavior.
 classifyMessage :: Text -> Classification
 classifyMessage msg
-  | isGreeting msg  = Greeting
-  | isQuestion msg  = Question
-  | otherwise       = Statement
+  | isGreeting = Greeting
+  | isQuestion = Question
+  | otherwise  = Statement
   where
     lower = T.toLower msg
 
-    isGreeting t =
-      any (`T.isPrefixOf` T.toLower t) ["hello", "hi ", "hi!", "hey", "good morning", "good afternoon", "good evening", "goodbye", "bye", "greetings"]
-      || T.toLower t == "hi"
+    isGreeting =
+      any (`T.isPrefixOf` lower) ["hello", "hi ", "hi!", "hey", "good morning", "good afternoon", "good evening", "goodbye", "bye", "greetings"]
+      || lower == "hi"
 
-    isQuestion t =
-      "?" `T.isSuffixOf` T.strip t
+    isQuestion =
+      "?" `T.isSuffixOf` T.strip msg
       || any (`T.isPrefixOf` lower) ["what", "who", "where", "when", "why", "how", "is ", "are ", "can ", "could ", "would ", "should ", "do ", "does ", "did "]
 
 
@@ -253,13 +253,8 @@ runExampleGraph msg = do
   -- Step 2: Dispatch based on classification
   dispatchClassify classifyResult
   where
-    -- Dispatch helper that handles each branch
     dispatchClassify :: GotoChoice ClassifyTargets -> WasmM Response
-    dispatchClassify choice = case choice of
-      -- This is a bit verbose because we're manually dispatching.
-      -- In the full graph runner, this would be automated via DispatchGoto.
-      -- For now we pattern match on the OneOf structure.
-      _ -> dispatchFromOneOf choice
+    dispatchClassify = dispatchFromOneOf
 
     dispatchFromOneOf :: GotoChoice ClassifyTargets -> WasmM Response
     dispatchFromOneOf (GotoChoice oneOf) = case oneOf of
