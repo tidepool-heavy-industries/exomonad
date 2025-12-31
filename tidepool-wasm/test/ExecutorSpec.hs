@@ -13,7 +13,7 @@
 --
 -- These tests exercise graph execution patterns via the WASM effect system:
 --
--- 1. LinearGraph: Entry -> Add1 -> Add1 -> Exit (chain)
+-- 1. LinearGraph: Entry -> Add1 -> Add2 -> Exit (chain)
 -- 2. BranchGraph: Entry -> IsEven -> EvenPath|OddPath -> Exit (branching)
 -- 3. DiamondGraph: Entry -> Split -> PathA|PathB -> Merge -> Exit (diamond)
 -- 4. LoopGraph: Entry -> Decrement (self-loop) -> Exit (self-loops)
@@ -186,6 +186,8 @@ runLinearGraph input = runToCompletion $ initializeWasm $ do
       c2 <- lgAdd2Handler n
       case c2 of
         GotoChoice (Here result) -> pure result
+        _ -> error "runLinearGraph: unexpected choice from lgAdd2Handler"
+    _ -> error "runLinearGraph: unexpected choice from lgAdd1Handler"
 
 
 -- | Run the branching graph: Entry -> IsEven -> EvenPath|OddPath -> Exit
@@ -198,11 +200,14 @@ runBranchGraph input = runToCompletion $ initializeWasm $ do
       c2 <- bgEvenPathHandler n
       case c2 of
         GotoChoice (Here result) -> pure result
+        _ -> error "runBranchGraph: unexpected choice from bgEvenPathHandler"
     GotoChoice (There (Here n)) -> do
       -- Odd path
       c2 <- bgOddPathHandler n
       case c2 of
         GotoChoice (Here result) -> pure result
+        _ -> error "runBranchGraph: unexpected choice from bgOddPathHandler"
+    _ -> error "runBranchGraph: unexpected choice from bgIsEvenHandler"
 
 
 -- | Run the diamond graph: Entry -> Split -> PathA|PathB -> Merge -> Exit
@@ -212,11 +217,14 @@ runDiamondGraph input = runToCompletion $ initializeWasm $ do
   c2 <- case c1 of
     GotoChoice (Here n) -> dgPathAHandler n
     GotoChoice (There (Here n)) -> dgPathBHandler n
+    _ -> error "runDiamondGraph: unexpected choice from dgSplitHandler"
   case c2 of
     GotoChoice (Here n) -> do
       c3 <- dgMergeHandler n
       case c3 of
         GotoChoice (Here result) -> pure result
+        _ -> error "runDiamondGraph: unexpected choice from dgMergeHandler"
+    _ -> error "runDiamondGraph: unexpected choice from dgPathHandler"
 
 
 -- | Run the loop graph: Entry -> Decrement (loop) -> Exit
@@ -230,6 +238,7 @@ runLoopGraph input = runToCompletion $ initializeWasm $ runLoop input
       case c of
         GotoChoice (Here n') -> runLoop n'  -- Self: continue loop
         GotoChoice (There (Here result)) -> pure result  -- Exit
+        _ -> error "runLoopGraph: unexpected choice from loopDecrementHandler"
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -334,10 +343,12 @@ effectOrderingSpec = describe "Effect Ordering" $ do
               c2 <- lgAdd2Handler n
               case c2 of
                 GotoChoice (Here r) -> pure r
+                _ -> error "effectOrderingSpec: unexpected choice from lgAdd2Handler"
+            _ -> error "effectOrderingSpec: unexpected choice from lgAdd1Handler"
 
     -- First yield should be Log "Add1: 5"
     case result of
-      WasmYield eff1 resume1 -> do
+      WasmYield _eff1 resume1 -> do
         -- Resume first effect
         case resume1 (ResSuccess Nothing) of
           WasmYield _eff2 resume2 -> do
@@ -359,6 +370,7 @@ effectOrderingSpec = describe "Effect Ordering" $ do
               case c of
                 GotoChoice (Here n') -> runLoop n'
                 GotoChoice (There (Here r)) -> pure r
+                _ -> error "effectOrderingSpec: unexpected choice from loopDecrementHandler"
 
     -- Should yield 3 times (for n=3,2,1), then complete
     case result of
