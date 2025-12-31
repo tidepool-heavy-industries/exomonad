@@ -63,6 +63,12 @@ module Tidepool.Graph.Reify
   , ReifyGotoTargets(..)
   , ReifyNodeKind(..)
   , ReifyBool(..)
+
+    -- * Goto Target Extraction
+  , GotoTargetsFromDef
+  , GotoTargetsFromEffects
+  , HasGotoExitInDef
+  , HasGotoExitFromEffects
   ) where
 
 import Data.Kind (Type, Constraint)
@@ -73,12 +79,15 @@ import Data.Typeable (TypeRep, Typeable, typeRep)
 import GHC.Generics (Generic(..), K1(..), M1(..), (:*:)(..), Meta(..), S, D, C)
 import GHC.TypeLits (Symbol, KnownSymbol, symbolVal)
 
-import Tidepool.Graph.Types (NodeKind(..), type (:@))
+import Effectful (Effect)
+
+import Tidepool.Graph.Types (NodeKind(..), type (:@), UsesEffects)
 import Tidepool.Graph.Tool (ToolInfo(..))
 import Tidepool.Graph.Generic.Core (Entry, Exit, LLMNode, LogicNode, AsGraph)
 import Tidepool.Graph.Edges
   ( GetNeeds, GetSchema, GetTemplate, GetSystem
-  , GetVision, GetTools, GetMemory
+  , GetVision, GetTools, GetMemory, GetUsesEffects
+  , GetGotoTargets, HasGotoExit
   )
 
 -- | Helper type family to get Entry type from a graph.
@@ -246,6 +255,40 @@ instance ReifyBool 'False where
   reifyBool _ = False
 
 -- ════════════════════════════════════════════════════════════════════════════
+-- GOTO TARGET REIFICATION
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Extract Goto targets from a node definition's UsesEffects annotation.
+--
+-- This uses the same pattern as validation code in Generic.hs:
+-- explicitly apply @Effect kind to resolve polykind ambiguity.
+--
+-- @
+-- GotoTargetsFromDef (LogicNode :@ UsesEffects '[Goto "a" A, Goto "b" B])
+--   = '[ '("a", A), '("b", B) ]
+-- @
+type GotoTargetsFromDef :: Type -> [(Symbol, Type)]
+type family GotoTargetsFromDef def where
+  GotoTargetsFromDef def = GotoTargetsFromEffects (GetUsesEffects @Effect def)
+
+-- | Extract Goto targets from Maybe effect list.
+type GotoTargetsFromEffects :: Maybe [Effect] -> [(Symbol, Type)]
+type family GotoTargetsFromEffects mEffs where
+  GotoTargetsFromEffects 'Nothing = '[]
+  GotoTargetsFromEffects ('Just effs) = GetGotoTargets @Effect effs
+
+-- | Check if a node definition has Goto Exit in its effect stack.
+type HasGotoExitInDef :: Type -> Bool
+type family HasGotoExitInDef def where
+  HasGotoExitInDef def = HasGotoExitFromEffects (GetUsesEffects @Effect def)
+
+-- | Extract HasGotoExit from Maybe effect list.
+type HasGotoExitFromEffects :: Maybe [Effect] -> Bool
+type family HasGotoExitFromEffects mEffs where
+  HasGotoExitFromEffects 'Nothing = 'False
+  HasGotoExitFromEffects ('Just effs) = HasGotoExit @Effect effs
+
+-- ════════════════════════════════════════════════════════════════════════════
 -- RECORD-BASED GRAPH REIFICATION
 -- ════════════════════════════════════════════════════════════════════════════
 
@@ -261,15 +304,11 @@ instance ReifyBool 'False where
 -- graphInfo = reifyRecordGraph (Proxy \@SupportGraph)
 -- @
 --
--- == Known Limitations
+-- == Goto Target Extraction
 --
--- Due to polykind issues with @UsesEffects '[Effect]@ at runtime, the
--- @niGotoTargets@ field will always be empty @[]@. Goto targets are validated
--- at compile-time via @ValidateGotoTargets@ but cannot be extracted to runtime
--- without Template Haskell.
---
--- Edges derived are implicit only (Entry/Schema → Needs). Explicit Goto edges
--- are not included due to the above limitation.
+-- Goto targets are extracted from Logic nodes by using 'GotoTargetsFromDef',
+-- which applies @\@Effect@ kind explicitly to resolve polykind ambiguity.
+-- This enables full Mermaid diagram generation including explicit Goto edges.
 class ReifyRecordGraph (graph :: Type -> Type) where
   reifyRecordGraph :: Proxy graph -> GraphInfo
 
@@ -301,7 +340,10 @@ makeGraphInfo _ = GraphInfo
   { giEntryType = entryType
   , giExitType = exitType
   , giNodes = nodes
-  , giEdges = deriveImplicitEdges entryType nodes ++ deriveExitEdges exitType nodes
+  , giEdges = deriveImplicitEdges entryType nodes
+          ++ deriveExitEdges exitType nodes
+          ++ deriveGotoEdges nodes
+          ++ deriveGotoExitEdges nodes
   , giGroups = []  -- Would need graph-level annotation extraction
   }
   where
@@ -419,16 +461,21 @@ instance ( ReifyTypeList (GetNeeds def)
     }]
 
 -- LogicNode case
+--
+-- Now extracts Goto targets by using GotoTargetsFromDef, which applies
+-- @Effect kind explicitly to resolve polykind ambiguity.
 instance ( ReifyTypeList (GetNeeds def)
          , ReifyMaybeType (GetMemory def)
+         , ReifyGotoTargets (GotoTargetsFromDef def)
+         , ReifyBool (HasGotoExitInDef def)
          ) => ReifyAnnotatedNode def 'False 'True where
   reifyAnnotatedNode _ _ _ pName _ = [NodeInfo
     { niName = T.pack (symbolVal pName)
     , niKind = RuntimeLogic
     , niNeeds = reifyTypeList (Proxy @(GetNeeds def))
     , niSchema = Nothing  -- Logic nodes don't have Schema
-    , niGotoTargets = []  -- Cannot extract due to polykind limitation
-    , niHasGotoExit = False  -- Cannot determine at runtime
+    , niGotoTargets = reifyGotoTargets (Proxy @(GotoTargetsFromDef def))
+    , niHasGotoExit = reifyBool (Proxy @(HasGotoExitInDef def))
     , niHasVision = False
     , niTools = []
     , niToolInfos = []
@@ -450,9 +497,6 @@ instance ReifyAnnotatedNode def 'False 'False where
 -- For each node, creates edges from:
 -- 1. Entry → nodes that need the entry type
 -- 2. Nodes with Schema → nodes that need that schema type
---
--- Note: Explicit Goto edges cannot be derived due to polykind limitations.
--- They are validated at compile-time but not represented at runtime.
 deriveImplicitEdges
   :: Maybe TypeRep    -- ^ Entry type
   -> [NodeInfo]       -- ^ All nodes
@@ -477,7 +521,7 @@ deriveImplicitEdges mEntryType nodes = entryEdges ++ schemaEdges
       , schemaTy `elem` consumer.niNeeds
       ]
 
--- | Derive edges to Exit.
+-- | Derive edges to Exit from Schema matching.
 --
 -- Any node with Schema matching exit type creates an edge to Exit.
 deriveExitEdges
@@ -491,3 +535,24 @@ deriveExitEdges mExitType nodes = case mExitType of
     | n <- nodes
     , n.niSchema == Just exitTy
     ]
+
+-- | Derive explicit Goto edges from Logic nodes.
+--
+-- For each Logic node, creates edges to its Goto targets.
+deriveGotoEdges :: [NodeInfo] -> [EdgeInfo]
+deriveGotoEdges nodes =
+  [ EdgeInfo node.niName targetName (Just payload) RuntimeExplicit
+  | node <- nodes
+  , (targetName, payload) <- node.niGotoTargets
+  ]
+
+-- | Derive edges to Exit from Goto Exit.
+--
+-- Logic nodes with niHasGotoExit create an edge to Exit.
+-- Note: We don't have the exact payload type, so we use Nothing.
+deriveGotoExitEdges :: [NodeInfo] -> [EdgeInfo]
+deriveGotoExitEdges nodes =
+  [ EdgeInfo node.niName "Exit" Nothing RuntimeExplicit
+  | node <- nodes
+  , node.niHasGotoExit
+  ]

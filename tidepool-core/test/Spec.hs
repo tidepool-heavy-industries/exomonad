@@ -5,6 +5,7 @@ import Test.Hspec
 import qualified GraphValidationSpec
 import qualified LLMNodeExecuteSpec
 import qualified MemorySerializationSpec
+import qualified MermaidSpec
 
 main :: IO ()
 main = hspec $ do
@@ -16,3 +17,6 @@ main = hspec $ do
 
   describe "Memory Serialization" $ do
     MemorySerializationSpec.spec
+
+  describe "Mermaid Generation" $ do
+    MermaidSpec.spec
