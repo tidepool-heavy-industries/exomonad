@@ -2,6 +2,7 @@ packages:
     tidepool-core
     tidepool-dm
     tidepool-tidying
+    tidepool-wasm
 
 -- Use GHC 9.6+ for best GHC2021 support
 -- with-compiler: ghc-9.6

@@ -1,0 +1,53 @@
+cabal-version:      3.0
+name:               tidepool-wasm
+version:            0.1.0.0
+synopsis:           WASM target for tidepool graphs - FFI exports and wire types
+license:            MIT
+author:             Inanna
+build-type:         Simple
+
+common warnings
+    ghc-options: -Wall -Wno-missing-export-lists -Wincomplete-patterns
+
+library
+    import:           warnings
+    exposed-modules:
+        Tidepool.Wasm.TestGraph
+        Tidepool.Wasm.WireTypes
+        Tidepool.Wasm.Ffi
+    build-depends:
+        base >= 4.17 && < 5,
+        tidepool-core,
+        effectful-core >= 2.3 && < 3,
+        aeson >= 2.1 && < 3,
+        text >= 2.0 && < 3
+
+    -- WASM-specific configuration
+    if os(wasi)
+        build-depends:
+            ghc-experimental
+        ghc-options:
+            -no-hs-main
+            -optl-mexec-model=reactor
+            -optl-Wl,--export=hs_init
+            -optl-Wl,--export=initialize
+            -optl-Wl,--export=step
+            -optl-Wl,--export=getGraphInfo
+            -optl-Wl,--export=getGraphState
+
+    hs-source-dirs:   src
+    default-language: GHC2021
+    default-extensions:
+        DataKinds
+        DeriveAnyClass
+        DeriveGeneric
+        DerivingStrategies
+        DuplicateRecordFields
+        GADTs
+        LambdaCase
+        MultiParamTypeClasses
+        NoFieldSelectors
+        OverloadedRecordDot
+        OverloadedStrings
+        TypeFamilies
+        TypeOperators
