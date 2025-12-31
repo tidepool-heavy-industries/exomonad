@@ -4,21 +4,23 @@
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeOperators #-}
 
--- | Negative test: Duplicate Schema types should fail.
-module DuplicateSchema where
+-- | Negative test: Multiple unsatisfied Needs should fail.
+module MultipleUnsatisfiedNeeds where
 
 import Tidepool.Graph.Types
 import Tidepool.Graph.Validate (ValidGraph)
 
 data Message
+data Intent
+data Context
 data Response
 
--- This graph has two nodes with the same Schema type (Response).
--- The improved error message will now show which nodes conflict.
+-- | Invalid: Node needs both Intent and Context, but neither is provided
+--
+-- Expected error: "Graph validation failed: unsatisfied dependency"
 type BadGraph = Graph
   '[ Entry :~> Message
-   , "nodeA" := LLM :@ Needs '[Message] :@ Schema Response
-   , "nodeB" := LLM :@ Needs '[Message] :@ Schema Response  -- Duplicate!
+   , "process" := LLM :@ Needs '[Message, Intent, Context] :@ Schema Response
    , Exit :<~ Response
    ]
 

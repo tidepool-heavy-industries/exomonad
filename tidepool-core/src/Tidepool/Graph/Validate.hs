@@ -30,6 +30,7 @@
 module Tidepool.Graph.Validate
   ( -- * Main Validation Constraint
     ValidGraph
+  , ValidGraphStructure
 
     -- * Individual Validation Constraints
   , HasEntry
@@ -122,6 +123,17 @@ type ValidGraph g =
   , AllNodesReachable g
   , AllLogicNodesReachExit g
   , NoDeadGotos g
+  )
+
+-- | Structural validation only - for testing graph topology without
+-- requiring schema instances.
+type ValidGraphStructure :: Type -> Constraint
+type ValidGraphStructure g =
+  ( HasEntry g
+  , HasExit g
+  , AllNeedsSatisfied g
+  , AllGotoTargetsExist g
+  , UniqueSchemas g
   )
 
 -- ════════════════════════════════════════════════════════════════════════════
