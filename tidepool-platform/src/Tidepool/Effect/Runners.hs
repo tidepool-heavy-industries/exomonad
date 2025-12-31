@@ -446,7 +446,7 @@ runLLMWithTools
   -> ToolDispatcher event es
   -> Eff (LLM : es) a
   -> Eff es a
-runLLMWithTools config dispatcher = runLLMWithToolsHooked @es @event noHooks config dispatcher
+runLLMWithTools = runLLMWithToolsHooked @es @event noHooks
 
 -- | Run the LLM effect with hooks for lifecycle events
 -- Uses shared 'runLLMCore' with ChatHistory operations enabled.
@@ -521,7 +521,8 @@ runChatHistoryWithDB conn gameId mCursor action = do
 -- this will block the caller until compression completes.
 runChatHistoryWithCompression
   :: forall es a.
-     ( RequestInput :> es
+     ( LLM :> es  -- LLM effect for compression (caller provides interpreter)
+     , RequestInput :> es
      , Random :> es
      , Log :> es
      , IOE :> es
@@ -556,7 +557,8 @@ runChatHistoryWithCompression config action = do
 -- | Compress old messages using the compression LLM
 compressHistory
   :: forall es.
-     ( RequestInput :> es
+     ( LLM :> es
+     , RequestInput :> es
      , Random :> es
      , Log :> es
      , IOE :> es
@@ -586,14 +588,14 @@ compressHistory config history = do
 
       pure $ compressionResult ++ toKeep
 
--- | Run the compression LLM call
--- Uses 'runLLMForCompression' which requires ChatHistory to be absent from the stack.
+-- | Run the compression LLM call.
+-- Uses the LLM effect from the stack (caller provides interpreter).
+-- The NotMember ChatHistory constraint ensures the compression LLM
+-- cannot access chat history, preventing infinite recursion.
 runCompressionLLM
   :: forall es.
-     ( RequestInput :> es
-     , Random :> es
+     ( LLM :> es
      , Log :> es
-     , IOE :> es
      , NotMember ChatHistory es
      )
   => ChatHistoryConfig es
@@ -602,25 +604,23 @@ runCompressionLLM
 runCompressionLLM config userPrompt = do
   let cc = config.chcCompression
 
-  -- Run the LLM call for compression
-  -- Note: We're in an effect stack that does NOT have ChatHistory,
-  -- so runLLMForCompression's NotMember constraint is satisfied.
-  runLLMForCompression cc.ccLLMConfig cc.ccDispatcher $ do
-    outcome <- runTurnContent cc.ccPrompt [TextBlock userPrompt] cc.ccSchema cc.ccTools
-    pure $ case outcome of
-      TurnBroken reason ->
-        -- Fallback: just use a placeholder
-        [Message Assistant [TextBlock $ "[Compressed history - interrupted: " <> reason <> "]"]]
+  -- Use the LLM effect from the stack
+  -- The caller provides the interpreter (real API or mock for tests)
+  outcome <- runTurnContent cc.ccPrompt [TextBlock userPrompt] cc.ccSchema cc.ccTools
+  pure $ case outcome of
+    TurnBroken reason ->
+      -- Fallback: just use a placeholder
+      [Message Assistant [TextBlock $ "[Compressed history - interrupted: " <> reason <> "]"]]
 
-      TurnCompleted parseResult -> case parseResult of
-        TurnParsed tr ->
-          -- Extract summary from the structured output
-          case extractSummary tr.trOutput of
-            Just summary -> [Message Assistant [TextBlock $ "[Compressed history]\n" <> summary]]
-            Nothing -> [Message Assistant [TextBlock $ "[Compressed history]\n" <> tr.trNarrative]]
-        TurnParseFailed{tpfNarrative = narr} ->
-          -- Fallback on parse failure
-          [Message Assistant [TextBlock $ "[Compressed history]\n" <> narr]]
+    TurnCompleted parseResult -> case parseResult of
+      TurnParsed tr ->
+        -- Extract summary from the structured output
+        case extractSummary tr.trOutput of
+          Just summary -> [Message Assistant [TextBlock $ "[Compressed history]\n" <> summary]]
+          Nothing -> [Message Assistant [TextBlock $ "[Compressed history]\n" <> tr.trNarrative]]
+      TurnParseFailed{tpfNarrative = narr} ->
+        -- Fallback on parse failure
+        [Message Assistant [TextBlock $ "[Compressed history]\n" <> narr]]
   where
     -- Extract summary from structured output.
     -- Tries common field names: "summary", "coSummary", "text", "content"
