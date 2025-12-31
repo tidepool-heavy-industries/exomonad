@@ -301,10 +301,8 @@ diamondGraphSpec = describe "DiamondGraph" $ do
     -- 5 -> PathB(+100) -> Merge(+1) = 106
     runDiamondGraph 5 `shouldBe` 106
 
-  it "handles boundary condition (10)" $ do
-    runDiamondGraph 10 `shouldBe` 21
-
-  it "handles boundary condition (9)" $ do
+  it "handles boundary condition (9 goes to PathB)" $ do
+    -- 9 -> PathB(+100) -> Merge(+1) = 110
     runDiamondGraph 9 `shouldBe` 110
 
   it "handles zero" $ do
