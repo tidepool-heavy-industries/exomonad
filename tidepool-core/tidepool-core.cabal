@@ -49,6 +49,7 @@ library
         Tidepool.Graph.Memory
         Tidepool.Graph.Template
         Tidepool.Graph.Docs
+        Tidepool.Question
         Delta.Agent
     build-depends:
         base >= 4.17 && < 5,

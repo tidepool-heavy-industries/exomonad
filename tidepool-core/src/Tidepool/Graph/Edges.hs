@@ -90,6 +90,8 @@ data EdgeKind
 -- @
 type GetNeeds :: Type -> [Type]
 type family GetNeeds node where
+  GetNeeds (Entry :~> _) = '[]
+  GetNeeds (Exit :<~ _) = '[]
   GetNeeds (_ := _) = '[]
   GetNeeds (node :@ Needs ts) = ts
   GetNeeds (node :@ _) = GetNeeds node
@@ -102,6 +104,8 @@ type family GetNeeds node where
 -- @
 type GetSchema :: Type -> Maybe Type
 type family GetSchema node where
+  GetSchema (Entry :~> _) = 'Nothing
+  GetSchema (Exit :<~ _) = 'Nothing
   GetSchema (_ := _) = 'Nothing
   GetSchema (node :@ Schema t) = 'Just t
   GetSchema (node :@ _) = GetSchema node
@@ -116,6 +120,8 @@ type family GetSchema node where
 -- Note: The effect list can have any kind (usually Effect).
 type GetUsesEffects :: forall k. Type -> Maybe [k]
 type family GetUsesEffects node where
+  GetUsesEffects (Entry :~> _) = 'Nothing
+  GetUsesEffects (Exit :<~ _) = 'Nothing
   GetUsesEffects (_ := _) = 'Nothing
   GetUsesEffects (node :@ UsesEffects effs) = 'Just effs
   GetUsesEffects (node :@ _) = GetUsesEffects node
@@ -128,6 +134,8 @@ type family GetUsesEffects node where
 -- @
 type GetSystem :: Type -> Maybe Type
 type family GetSystem node where
+  GetSystem (Entry :~> _) = 'Nothing
+  GetSystem (Exit :<~ _) = 'Nothing
   GetSystem (_ := _) = 'Nothing
   GetSystem (node :@ System t) = 'Just t
   GetSystem (node :@ _) = GetSystem node
@@ -135,6 +143,8 @@ type family GetSystem node where
 -- | Extract the Template type from a node.
 type GetTemplate :: Type -> Maybe Type
 type family GetTemplate node where
+  GetTemplate (Entry :~> _) = 'Nothing
+  GetTemplate (Exit :<~ _) = 'Nothing
   GetTemplate (_ := _) = 'Nothing
   GetTemplate (node :@ Template t) = 'Just t
   GetTemplate (node :@ _) = GetTemplate node
@@ -142,6 +152,8 @@ type family GetTemplate node where
 -- | Check if a node has Vision.
 type GetVision :: Type -> Bool
 type family GetVision node where
+  GetVision (Entry :~> _) = 'False
+  GetVision (Exit :<~ _) = 'False
   GetVision (_ := _) = 'False
   GetVision (node :@ Vision) = 'True
   GetVision (node :@ _) = GetVision node
@@ -149,6 +161,8 @@ type family GetVision node where
 -- | Extract Tools from a node.
 type GetTools :: Type -> [Type]
 type family GetTools node where
+  GetTools (Entry :~> _) = '[]
+  GetTools (Exit :<~ _) = '[]
   GetTools (_ := _) = '[]
   GetTools (node :@ Tools ts) = ts
   GetTools (node :@ _) = GetTools node
@@ -161,6 +175,8 @@ type family GetTools node where
 -- @
 type GetMemory :: Type -> Maybe Type
 type family GetMemory node where
+  GetMemory (Entry :~> _) = 'Nothing
+  GetMemory (Exit :<~ _) = 'Nothing
   GetMemory (_ := _) = 'Nothing
   GetMemory (node :@ Memory t) = 'Just t
   GetMemory (node :@ _) = GetMemory node

@@ -2,9 +2,13 @@
 
 -- | Golden tests for Graph DSL compile-time validation.
 --
--- These tests verify that invalid graph constructions produce the expected
--- compiler error messages. Each test compiles an ill-typed module and checks
--- that specific error strings appear in GHC's output.
+-- These tests verify that:
+-- 1. Valid graphs compile successfully
+-- 2. Invalid graph constructions produce the expected compiler error messages
+--
+-- Each negative test compiles an ill-typed module and checks that specific
+-- error strings appear in GHC's output. Positive tests simply verify compilation
+-- succeeds.
 --
 -- Tests cover both the list-based syntax (Graph '[...]) and the record-based
 -- Servant-style syntax (data MyGraph mode = ...).
@@ -37,23 +41,89 @@ shouldFailWith path expectedErrors = do
   where
     forM_ xs f = mapM_ f xs
 
+-- | Assert that compilation succeeds
+shouldCompile :: FilePath -> Expectation
+shouldCompile path = do
+  (exitCode, stderr) <- compileTestFile path
+  case exitCode of
+    ExitSuccess -> pure ()
+    ExitFailure _ -> expectationFailure $
+      "Expected compilation to succeed, but got error:\n" ++ stderr
+
 spec :: Spec
-spec = describe "Graph validation error messages" $ do
+spec = do
+  -- ════════════════════════════════════════════════════════════════════════════
+  -- NEGATIVE TESTS: List-based DSL
+  -- ════════════════════════════════════════════════════════════════════════════
+  describe "Graph validation error messages (list DSL)" $ do
 
-  -- ══════════════════════════════════════════════════════════════════════════
-  -- Record-based (Servant-style) structural validation
-  -- ══════════════════════════════════════════════════════════════════════════
-
-  describe "Record-based structural validation" $ do
-
-    it "unreachable field produces clear error" $ do
-      "test/golden/UnreachableFieldRecord.hs" `shouldFailWith`
-        [ "Graph validation failed: unreachable node"
-        , "Field 'orphan' cannot be reached from Entry"
+    it "missing Entry produces clear error" $ do
+      "test/golden/MissingEntry.hs" `shouldFailWith`
+        [ "Graph validation failed: missing Entry declaration"
+        , "Add: Entry :~> YourInputType"
         ]
 
-    it "Logic field without exit path produces clear error" $ do
-      "test/golden/NoExitPathFieldRecord.hs" `shouldFailWith`
-        [ "Graph validation failed: Logic node cannot reach Exit"
-        , "Field 'loop' has no path to Exit"
+    it "missing Exit produces clear error" $ do
+      "test/golden/MissingExit.hs" `shouldFailWith`
+        [ "Graph validation failed: missing Exit declaration"
+        , "Add: Exit :<~ YourOutputType"
         ]
+
+    it "unsatisfied Needs produces clear error with node name and type" $ do
+      "test/golden/UnsatisfiedNeed.hs" `shouldFailWith`
+        [ "Graph validation failed: unsatisfied dependency"
+        , "Node 'process' needs type:"
+        , "Intent"
+        , "But no node provides"
+        ]
+
+    it "multiple unsatisfied Needs produces error" $ do
+      "test/golden/MultipleUnsatisfiedNeeds.hs" `shouldFailWith`
+        [ "Graph validation failed: unsatisfied dependency"
+        , "Intent"
+        ]
+
+    it "invalid Goto target produces clear error with node names" $ do
+      "test/golden/InvalidGoto.hs" `shouldFailWith`
+        [ "Graph validation failed: invalid Goto target"
+        , "Node 'router' has:"
+        , "Goto \"nonexistent\""
+        , "But no node named \"nonexistent\" exists"
+        ]
+
+    it "duplicate Schema types produce error" $ do
+      "test/golden/DuplicateSchema.hs" `shouldFailWith`
+        [ "Graph validation failed: duplicate Schema type"
+        , "Response"
+        , "ambiguous"
+        ]
+
+    it "invalid tool (no ToolDef) produces clear error" $ do
+      "test/golden/InvalidTool.hs" `shouldFailWith`
+        [ "No instance for"
+        , "ToolDef"
+        ]
+
+    it "oneOf schema in structured output produces compile error" $ do
+      "test/golden/InvalidOneOf.hs" `shouldFailWith`
+        [ "Schema error for structured output type"
+        , "MyChoice"
+        , "oneOf"
+        ]
+
+  -- ════════════════════════════════════════════════════════════════════════════
+  -- POSITIVE TESTS: List-based DSL
+  -- ════════════════════════════════════════════════════════════════════════════
+  describe "Valid graphs compile (list DSL)" $ do
+
+    it "linear graph compiles" $ do
+      shouldCompile "test/golden/valid/LinearGraph.hs"
+
+    it "branching graph with Goto compiles" $ do
+      shouldCompile "test/golden/valid/BranchingGraph.hs"
+
+    it "fan-in graph (multiple inputs) compiles" $ do
+      shouldCompile "test/golden/valid/FanInGraph.hs"
+
+    it "Goto Exit graph compiles" $ do
+      shouldCompile "test/golden/valid/GotoExitGraph.hs"
