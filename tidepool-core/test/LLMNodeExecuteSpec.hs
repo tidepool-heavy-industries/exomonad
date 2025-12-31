@@ -166,7 +166,7 @@ spec = do
       -- LLMBefore is not usable for graph dispatch (lacks routing)
       -- Note: LLMBefore has targets='[] because it doesn't provide routing
       let beforeHandler :: LLMHandler Int TestOutput '[] '[] Int
-          beforeHandler = LLMBefore (\n -> pure n)
+          beforeHandler = LLMBefore pure
       beforeHandler `seq` True `shouldBe` True
 
   describe "Graph handler types" $ do

@@ -27,6 +27,7 @@ import Tidepool.Graph.Goto
   , GotoChoice(..)
   , gotoChoice
   , gotoExit
+  , Goto
   )
 import Tidepool.Graph.Execute (DispatchGoto(..))
 import Tidepool.Graph.Generic (GraphMode(..), type (:-), AsHandler)
@@ -34,7 +35,6 @@ import Tidepool.Graph.Generic.Core (Entry)
 import Tidepool.Graph.Types (Needs, UsesEffects, type (:@))
 import qualified Tidepool.Graph.Types as Types (Exit)
 import qualified Tidepool.Graph.Generic as G
-import Tidepool.Graph.Goto (Goto)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TEST GRAPHS

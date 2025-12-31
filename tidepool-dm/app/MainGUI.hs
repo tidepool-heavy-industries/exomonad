@@ -6,6 +6,7 @@ module Main where
 
 import Control.Concurrent (forkIO)
 import Control.Monad (replicateM)
+import Data.Foldable (for_)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
@@ -50,9 +51,7 @@ main = do
           -- Always log to debug panel
           logInfo bridge (T.pack $ show event)
           -- Add formatted events to narrative (for styled display)
-          case formatEvent event of
-            Just formattedText -> addNarrative bridge formattedText
-            Nothing -> pure ()  -- Internal events not displayed
+          for_ (formatEvent event) (addNarrative bridge)
 
     -- Start game loop in background thread (with DB persistence)
     _ <- forkIO $ gameLoopWithGUIAndDB conn gameId mCursor bridge handleEvent

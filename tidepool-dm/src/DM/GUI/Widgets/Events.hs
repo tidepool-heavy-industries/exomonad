@@ -154,7 +154,7 @@ formatEventEntry eventType severity content =
 
 -- | Check if a narrative entry is a formatted event
 isEventEntry :: Text -> Bool
-isEventEntry txt = T.isPrefixOf "[EVENT:" txt
+isEventEntry = T.isPrefixOf "[EVENT:"
 
 -- | Get the severity of an event from its formatted type
 eventSeverity :: Text -> EventSeverity

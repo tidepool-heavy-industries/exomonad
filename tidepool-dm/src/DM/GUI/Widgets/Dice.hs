@@ -181,9 +181,7 @@ dieCard bridge pos (displayNum, (dieValue, idx, hint)) = do
 
 -- | Create a Font Awesome die face icon element
 dieFaceIcon :: Int -> UI Element
-dieFaceIcon n = do
-  icon <- mkElement "i" #. ("die-face fa-solid " <> dieFaceClass n)
-  pure icon
+dieFaceIcon n = mkElement "i" #. ("die-face fa-solid " <> dieFaceClass n)
 
 -- | Get the Font Awesome class for a die value
 dieFaceClass :: Int -> String

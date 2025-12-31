@@ -263,8 +263,8 @@ runTurn
      (LLM :> es, FromJSON output)
   => Text -> Text -> Value -> [Value]
   -> Eff es (TurnOutcome (TurnParseResult output))
-runTurn systemPrompt userAction schema tools =
-  runTurnContent systemPrompt [TextBlock userAction] schema tools
+runTurn systemPrompt userAction =
+  runTurnContent systemPrompt [TextBlock userAction]
 
 runTurnContent
   :: forall output es.

@@ -40,7 +40,7 @@ import Tidepool.Template (Schema(..))
 import Effectful
 import Control.Concurrent.MVar (takeMVar)
 import Control.Concurrent.STM (atomically, writeTVar, readTVar)
-import Control.Monad (when, replicateM)
+import Control.Monad (when, unless, replicateM)
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Lazy as LBS
 import Data.Text (Text)
@@ -648,7 +648,7 @@ gameLoopWithDB conn gameId = loop []
           liftIO $ TIO.putStrLn $ "\n[" <> statusLine <> "]"
           liftIO $ TIO.putStrLn $ "[" <> moodLabel <> "]"
 
-          when (not $ null lastSuggestions) $
+          unless (null lastSuggestions) $
             liftIO $ TIO.putStr $ renderSuggestedActions lastSuggestions
 
           liftIO $ TIO.putStr "> "
@@ -671,7 +671,7 @@ gameLoopWithDB conn gameId = loop []
 
               updatedState <- get @WorldState
               let mechanicalChanges = renderMechanicalChanges response updatedState
-              when (not $ T.null mechanicalChanges) $
+              unless (T.null mechanicalChanges) $
                 liftIO $ TIO.putStrLn mechanicalChanges
 
               -- Save world state to database
@@ -716,7 +716,7 @@ gameLoopWithSave saveCallback = loop []
           liftIO $ TIO.putStrLn $ "[" <> moodLabel <> "]"
 
           -- Display last suggestions if any
-          when (not $ null lastSuggestions) $
+          unless (null lastSuggestions) $
             liftIO $ TIO.putStr $ renderSuggestedActions lastSuggestions
 
           -- Get player input
@@ -745,7 +745,7 @@ gameLoopWithSave saveCallback = loop []
               -- Display mechanical state changes
               updatedState <- get @WorldState
               let mechanicalChanges = renderMechanicalChanges response updatedState
-              when (not $ T.null mechanicalChanges) $
+              unless (T.null mechanicalChanges) $
                 liftIO $ TIO.putStrLn mechanicalChanges
               liftIO $ saveCallback updatedState
 
@@ -1124,7 +1124,7 @@ runCharacterCreation bridge initialState = do
 -- | Extract narrative content from conversation history
 -- Includes both player actions and DM responses for context
 extractNarrativeTexts :: [Message] -> [Text]
-extractNarrativeTexts msgs = concatMap extractFromMessage msgs
+extractNarrativeTexts = concatMap extractFromMessage
   where
     extractFromMessage :: Message -> [Text]
     extractFromMessage msg = case msg.role of
@@ -1142,7 +1142,7 @@ extractNarrativeTexts msgs = concatMap extractFromMessage msgs
     -- Extract DM response from assistant messages
     -- Can be in TextBlock or JsonBlock (structured output)
     extractAssistantText :: [ContentBlock] -> [Text]
-    extractAssistantText blocks = concatMap extractBlock blocks
+    extractAssistantText = concatMap extractBlock
 
     extractBlock :: ContentBlock -> [Text]
     extractBlock (TextBlock txt)

@@ -387,9 +387,7 @@ executeProposal config ctx originalInput proposal = do
   let grouped = groupByDest proposal.propItems
 
   -- Execute each destination
-  results <- concat <$> mapM (executeDestGroup config ctx originalInput) grouped
-
-  pure results
+  concat <$> mapM (executeDestGroup config ctx originalInput) grouped
 
 -- | Group proposed items by destination
 groupByDest :: [ProposedItem] -> [(Text, [Text])]

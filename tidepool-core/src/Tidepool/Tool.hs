@@ -127,7 +127,7 @@ makeDispatcher
      (State state :> es, Emit event :> es, RequestInput :> es, Random :> es)
   => ToolList event state tools
   -> ToolDispatcher event es
-makeDispatcher tools name input = dispatchToList tools name input
+makeDispatcher = dispatchToList
 
 -- | Dispatch to a tool list, finding the matching tool by name
 -- Returns ToolSuccess on normal completion, Left on error

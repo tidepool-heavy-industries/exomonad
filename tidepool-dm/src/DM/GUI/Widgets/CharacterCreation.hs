@@ -13,7 +13,7 @@ module DM.GUI.Widgets.CharacterCreation
   ) where
 
 import Control.Concurrent.MVar (MVar, putMVar)
-import Control.Monad (void, when)
+import Control.Monad (void, unless)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Graphics.UI.Threepenny.Core
@@ -78,7 +78,7 @@ showNameStep contentArea resultMVar = do
   -- Handle submit
   let submit = do
         val <- get value inputEl
-        when (not (null val)) $ do
+        unless (null val) $ do
           let name = T.pack val
           showPronounsStep contentArea resultMVar name
 
@@ -121,7 +121,7 @@ showPronounsStep contentArea resultMVar name = do
 
   on UI.click customBtn $ const $ do
     val <- get value customInput
-    when (not (null val)) $ do
+    unless (null val) $ do
       let pronouns = Custom (T.pack val)
       showArchetypeStep contentArea resultMVar name pronouns
 
@@ -210,7 +210,7 @@ showBackgroundStep contentArea resultMVar name pronouns archetype = do
   -- Handle submit
   let submit = do
         val <- get value inputEl
-        when (not (null val)) $ do
+        unless (null val) $ do
           let background = T.pack val
           showTarotStep contentArea resultMVar name pronouns archetype background
 
