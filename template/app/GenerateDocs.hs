@@ -3,7 +3,6 @@
 -- This generates documentation optimized for LLM consumption, including:
 -- - Graph structure (Mermaid diagram)
 -- - Node-by-node documentation with types
--- - Template dependency tree
 --
 -- Run with: cabal run generate-template-docs
 module Main where
