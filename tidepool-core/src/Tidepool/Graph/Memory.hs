@@ -2,7 +2,6 @@
 {-# LANGUAGE StandaloneKindSignatures #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE ExistentialQuantification #-}
 
 -- | The Memory effect for persistent state in graph nodes.
 --
@@ -100,7 +99,6 @@ import Data.Kind (Type)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text, pack)
-import Debug.Trace (trace)
 import Effectful
 import Effectful.Dispatch.Dynamic
 import qualified Effectful.State.Static.Local as EState
@@ -256,7 +254,6 @@ runMemoryPure = evalMemory
 --
 -- * 'ToJSON' instance (for serialization)
 -- * 'FromJSON' instance (for restoration)
--- * 'Typeable' instance (for type safety checks - derived automatically)
 --
 -- = Usage
 --
@@ -400,9 +397,8 @@ setScope scopeName val (MemoryStore scopes) = MemoryStore $
 -- 2. Runs the action
 -- 3. Saves final state back to the store
 --
--- __Note on error handling__: If the scope exists but deserialization fails
--- (e.g., schema mismatch after code changes), a warning is traced and the
--- default value is used. This prevents crashes but may indicate data issues.
+-- If deserialization fails (e.g., schema mismatch after code changes), the
+-- default value is used. Use 'getScope' directly if you need to detect errors.
 --
 -- @
 -- (result, finalStore) <- runMemoryScoped "explore" defaultState store $ do
@@ -419,13 +415,7 @@ runMemoryScoped
 runMemoryScoped scopeName defaultVal store action = do
   -- Load initial state from store or use default
   let initial = case getScope @s scopeName store of
-        Left err ->
-          -- Deserialization error: log warning and use default
-          -- This can happen after schema changes
-          trace ("runMemoryScoped: failed to deserialize scope '"
-                 ++ show scopeName ++ "': " ++ show err
-                 ++ "; using default value")
-                defaultVal
+        Left _err -> defaultVal  -- Deserialization error: use default
         Right Nothing -> defaultVal  -- Scope doesn't exist: use default
         Right (Just val) -> val  -- Successfully loaded
 
