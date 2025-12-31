@@ -151,7 +151,9 @@ yieldToOutput (YieldComplete result) =
       { soEffect = Nothing
       , soDone = True
       , soStepResult = Just result
-      , soGraphState = GraphState (PhaseCompleted result) [testGraphNodeName]
+      -- completedNodes is [] for consistency with getGraphStateImpl - TestGraph
+      -- doesn't track per-node completion. Real graphs would accumulate this.
+      , soGraphState = GraphState (PhaseCompleted result) []
       }
   , Nothing  -- Clear state on completion
   )
