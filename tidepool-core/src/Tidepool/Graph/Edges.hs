@@ -45,6 +45,7 @@ module Tidepool.Graph.Edges
 
     -- * Goto Extraction
   , GetGotoTargets
+  , GotoEffectsToTargets
   , HasGotoExit
   , ExtractGotoTarget
   , ExtractGotoPayload
@@ -66,7 +67,7 @@ import Data.Kind (Type)
 import GHC.TypeLits (Symbol)
 
 import Tidepool.Graph.Types
-import Tidepool.Graph.Goto (Goto)
+import Tidepool.Graph.Goto (Goto, To)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- EDGE TYPES
@@ -203,6 +204,23 @@ type family GetGotoTargets effs where
     -- Exit is handled specially, not included in named targets
     GetGotoTargets rest
   GetGotoTargets (_ ': rest) = GetGotoTargets rest
+
+-- | Convert Goto effects to To markers for GotoChoice.
+--
+-- @
+-- GotoEffectsToTargets '[State S, Goto "foo" A, Goto Exit B, Goto Self C]
+--   = '[To "foo" A, To Exit B, To Self C]
+-- @
+type GotoEffectsToTargets :: forall k. [k] -> [Type]
+type family GotoEffectsToTargets effs where
+  GotoEffectsToTargets '[] = '[]
+  GotoEffectsToTargets (Goto (name :: Symbol) payload ': rest) =
+    To name payload ': GotoEffectsToTargets rest
+  GotoEffectsToTargets (Goto Exit payload ': rest) =
+    To Exit payload ': GotoEffectsToTargets rest
+  GotoEffectsToTargets (Goto Self payload ': rest) =
+    To Self payload ': GotoEffectsToTargets rest
+  GotoEffectsToTargets (_ ': rest) = GotoEffectsToTargets rest
 
 -- | Extract the target from a Goto effect type.
 type ExtractGotoTarget :: forall k. k -> Maybe Symbol

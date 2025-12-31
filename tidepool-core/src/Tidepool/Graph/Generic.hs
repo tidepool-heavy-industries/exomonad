@@ -129,8 +129,8 @@ import Effectful qualified as E
 
 import Tidepool.Graph.Types (type (:@), Needs, Schema, Template, Vision, Tools, Memory, System, UsesEffects)
 import Tidepool.Graph.Template (TemplateContext)
-import Tidepool.Graph.Edges (GetUsesEffects, GetGotoTargets)
-import Tidepool.Graph.Goto (Goto, goto)
+import Tidepool.Graph.Edges (GetUsesEffects, GetGotoTargets, GotoEffectsToTargets)
+import Tidepool.Graph.Goto (Goto, goto, GotoChoice)
 import Tidepool.Graph.Validate.RecordStructure (AllFieldsReachable, AllLogicFieldsReachExit, NoDeadGotosRecord)
 import Tidepool.Graph.Generic.Core
   ( GraphMode(..)
@@ -281,8 +281,10 @@ type family NodeHandlerDispatch nodeDef origNode es needs mTpl where
     )
 
   -- Base case: bare LogicNode with UsesEffects found
+  -- Logic handlers return GotoChoice containing the possible transitions
+  -- The effect stack is 'es' (from AsHandler), not 'effs' (the Goto effects)
   NodeHandlerDispatch LogicNode orig es needs ('Just (EffStack effs)) =
-    BuildFunctionType needs (E.Eff effs ())
+    BuildFunctionType needs (E.Eff es (GotoChoice (GotoEffectsToTargets effs)))
 
   -- Base case: bare LogicNode without UsesEffects - error
   NodeHandlerDispatch LogicNode orig es needs _ = TypeError

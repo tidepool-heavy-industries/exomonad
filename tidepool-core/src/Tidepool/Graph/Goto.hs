@@ -1,8 +1,16 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
+{-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneKindSignatures #-}
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
 
 -- | The Goto effect for graph transitions.
@@ -47,6 +55,18 @@ module Tidepool.Graph.Goto
     Goto(..)
   , goto
 
+    -- * GotoChoice Return Type
+  , To
+  , GotoChoice(..)
+  , gotoChoice
+  , gotoExit
+  , gotoSelf
+  , gotoChoiceToResult
+
+    -- * Target Validation
+  , GotoElem
+  , GotoElemC
+
     -- * Goto Result Types
   , GotoResult(..)
   , SomeGoto(..)
@@ -56,7 +76,7 @@ module Tidepool.Graph.Goto
   , runGotoIgnore
   ) where
 
-import Data.Kind (Type)
+import Data.Kind (Type, Constraint)
 import Data.Proxy (Proxy(..))
 import Data.Dynamic (Dynamic, toDyn, Typeable)
 import Data.Text (Text)
@@ -64,9 +84,9 @@ import qualified Data.Text as T
 import Effectful
 import Effectful.Dispatch.Dynamic
 import qualified Effectful.State.Static.Local as EState
-import GHC.TypeLits (Symbol, KnownSymbol, symbolVal)
+import GHC.TypeLits (Symbol, KnownSymbol, symbolVal, TypeError, ErrorMessage(..))
 
-import Tidepool.Graph.Types (Exit)
+import Tidepool.Graph.Types (Exit, Self)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- THE GOTO EFFECT
@@ -100,6 +120,139 @@ goto :: forall {k} (target :: k) a es. Goto target a :> es => a -> Eff es ()
 goto x = send (GotoOp x :: Goto target a (Eff es) ())
 
 -- ════════════════════════════════════════════════════════════════════════════
+-- GOTOCHOICE RETURN TYPE
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Marker type for transition targets in 'GotoChoice'.
+--
+-- Unlike 'Goto' (which is an Effect), 'To' is a plain type-level marker
+-- that represents a possible transition destination.
+--
+-- @
+-- GotoChoice '[To "nodeA" PayloadA, To "nodeB" PayloadB, To Exit Response]
+-- @
+type To :: k -> Type -> Type
+data To target payload
+
+-- | Return type for handlers that must choose a transition.
+--
+-- Unlike the 'Goto' effect which is fired mid-execution, 'GotoChoice' is
+-- returned by the handler to guarantee that a transition is always selected.
+--
+-- The @targets@ parameter is a type-level list of 'To' markers:
+-- @'[To "nodeA" PayloadA, To "nodeB" PayloadB, To Exit Response]@
+--
+-- = Example
+--
+-- @
+-- routerHandler :: Intent -> Eff es (GotoChoice '[To "refund" Msg, To Exit Response])
+-- routerHandler intent = case intent of
+--   RefundIntent -> pure $ gotoChoice @"refund" msg
+--   DoneIntent   -> pure $ gotoExit response
+-- @
+type GotoChoice :: [Type] -> Type
+data GotoChoice targets where
+  -- | Transition to a named node
+  GotoChoiceNode
+    :: forall (name :: Symbol) payload targets.
+       ( KnownSymbol name
+       , Typeable payload
+       , GotoElemC (To name payload) targets
+       )
+    => Proxy name -> payload -> GotoChoice targets
+
+  -- | Exit the graph with a result
+  GotoChoiceExit
+    :: forall payload targets.
+       ( Typeable payload
+       , GotoElemC (To Exit payload) targets
+       )
+    => payload -> GotoChoice targets
+
+  -- | Self-loop back to current node
+  GotoChoiceSelf
+    :: forall payload targets.
+       ( Typeable payload
+       , GotoElemC (To Self payload) targets
+       )
+    => payload -> GotoChoice targets
+
+-- | Check if a To marker is in the targets list (returns Bool).
+type GotoElem :: Type -> [Type] -> Bool
+type family GotoElem g targets where
+  GotoElem _ '[] = 'False
+  GotoElem g (g ': _) = 'True
+  GotoElem g (_ ': rest) = GotoElem g rest
+
+-- | Constraint version of 'GotoElem' with helpful error message.
+type GotoElemC :: Type -> [Type] -> Constraint
+type family GotoElemC g targets where
+  GotoElemC g targets =
+    GotoElemC' g targets (GotoElem g targets)
+
+type GotoElemC' :: Type -> [Type] -> Bool -> Constraint
+type family GotoElemC' g targets result where
+  GotoElemC' _ _ 'True = ()
+  GotoElemC' g targets 'False = TypeError
+    ( 'Text "Invalid transition target"
+      ':$$: 'Text ""
+      ':$$: 'Text "The transition:"
+      ':$$: 'Text "  " ':<>: 'ShowType g
+      ':$$: 'Text ""
+      ':$$: 'Text "is not in the allowed targets:"
+      ':$$: 'Text "  " ':<>: 'ShowType targets
+    )
+
+-- | Construct a 'GotoChoice' for a named node target.
+--
+-- @
+-- gotoChoice @"nextNode" payload
+-- @
+gotoChoice
+  :: forall (name :: Symbol) payload targets.
+     ( KnownSymbol name
+     , Typeable payload
+     , GotoElemC (To name payload) targets
+     )
+  => payload -> GotoChoice targets
+gotoChoice = GotoChoiceNode (Proxy @name)
+
+-- | Construct a 'GotoChoice' for exiting the graph.
+--
+-- @
+-- gotoExit response
+-- @
+gotoExit
+  :: forall payload targets.
+     ( Typeable payload
+     , GotoElemC (To Exit payload) targets
+     )
+  => payload -> GotoChoice targets
+gotoExit = GotoChoiceExit
+
+-- | Construct a 'GotoChoice' for a self-loop.
+--
+-- @
+-- gotoSelf updatedState
+-- @
+gotoSelf
+  :: forall payload targets.
+     ( Typeable payload
+     , GotoElemC (To Self payload) targets
+     )
+  => payload -> GotoChoice targets
+gotoSelf = GotoChoiceSelf
+
+-- | Convert a 'GotoChoice' to a 'GotoResult' for the runner.
+gotoChoiceToResult :: GotoChoice targets -> GotoResult
+gotoChoiceToResult (GotoChoiceNode proxy payload) =
+  GotoNode (T.pack $ symbolVal proxy) (toDyn payload)
+gotoChoiceToResult (GotoChoiceExit payload) =
+  GotoExit (toDyn payload)
+gotoChoiceToResult (GotoChoiceSelf payload) =
+  GotoSelf (toDyn payload)
+
+-- ════════════════════════════════════════════════════════════════════════════
 -- GOTO RESULT TYPES
 -- ════════════════════════════════════════════════════════════════════════════
 
@@ -109,6 +262,7 @@ goto x = send (GotoOp x :: Goto target a (Eff es) ())
 data GotoResult
   = GotoNode Text Dynamic   -- ^ Transition to named node with payload
   | GotoExit Dynamic        -- ^ Exit graph with result
+  | GotoSelf Dynamic        -- ^ Self-loop with updated state
   deriving (Show)
 
 -- | Existential wrapper for any Goto effect.
@@ -120,6 +274,9 @@ data SomeGoto where
        (KnownSymbol name, Typeable a)
     => Proxy name -> a -> SomeGoto
   SomeGotoExit
+    :: forall a. Typeable a
+    => a -> SomeGoto
+  SomeGotoSelf
     :: forall a. Typeable a
     => a -> SomeGoto
 
