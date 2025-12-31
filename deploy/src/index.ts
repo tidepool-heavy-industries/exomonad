@@ -2,6 +2,7 @@
  * Tidepool Cloudflare Worker - Durable Object Harness
  *
  * Hosts GHC WASM state machines with WebSocket communication.
+ * See docs/PROTOCOL.md for the WebSocket protocol specification.
  */
 
 import { DurableObject } from "cloudflare:workers";
@@ -11,8 +12,11 @@ import type {
   EffectResult,
   LlmCompleteEffect,
   HabiticaEffect,
+  ClientMessage,
+  ServerMessage,
+  SessionState,
 } from "./protocol.js";
-import { successResult, errorResult } from "./protocol.js";
+import { successResult, errorResult, SESSION_TIMEOUT_MS } from "./protocol.js";
 import { handleHabitica, type HabiticaConfig } from "./handlers/habitica.js";
 
 // Import WASM module at build time
@@ -31,25 +35,14 @@ export interface Env {
 }
 
 // =============================================================================
-// WebSocket Protocol Types
-// =============================================================================
-
-type ClientMessage =
-  | { type: "init"; input: unknown }
-  | { type: "resume"; result: EffectResult };
-
-type ServerMessage =
-  | { type: "progress"; node: string; effect: string }
-  | { type: "suspend"; effect: SerializableEffect }
-  | { type: "done"; result: unknown }
-  | { type: "error"; message: string };
-
-// =============================================================================
 // Durable Object: StateMachineDO
 // =============================================================================
 
 export class StateMachineDO extends DurableObject<Env> {
   private machine: GraphMachine | null = null;
+  // The session ID is derived from the DO instance ID (set via URL path)
+  // This ensures sessionId matches the routing path for reconnection
+  private sessionId: string | null = null;
 
   /**
    * Handle incoming requests - expect WebSocket upgrade
@@ -60,11 +53,19 @@ export class StateMachineDO extends DurableObject<Env> {
       return new Response("Expected WebSocket upgrade", { status: 426 });
     }
 
+    // Extract session ID from URL path (matches the idFromName routing)
+    const url = new URL(request.url);
+    const match = url.pathname.match(/^\/session\/(.+)$/);
+    if (match) {
+      this.sessionId = match[1];
+    }
+
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
 
     // Accept the WebSocket connection using Hibernation API
     this.ctx.acceptWebSocket(server);
+    console.log(`[DO] WebSocket connection accepted, sessionId: ${this.sessionId}`);
 
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -74,30 +75,51 @@ export class StateMachineDO extends DurableObject<Env> {
    */
   async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
     if (typeof message !== "string") {
-      this.send(ws, { type: "error", message: "Binary messages not supported" });
+      this.send(ws, { type: "error", message: "Binary messages not supported", recoverable: false });
       return;
     }
 
+    let msg: ClientMessage;
     try {
-      const msg = JSON.parse(message) as ClientMessage;
+      msg = JSON.parse(message) as ClientMessage;
+    } catch {
+      this.send(ws, { type: "error", message: "Invalid JSON", recoverable: false });
+      return;
+    }
 
+    console.log(`[DO] Received message: ${msg.type}`);
+
+    try {
       switch (msg.type) {
         case "init":
-          await this.runGraph(ws, msg.input);
+          await this.handleInit(ws, msg.graphId, msg.input);
           break;
 
         case "resume":
-          // Future: handle suspension resume
-          this.send(ws, { type: "error", message: "Resume not yet implemented" });
+          await this.handleResume(ws, msg.result);
+          break;
+
+        case "reconnect":
+          await this.handleReconnect(ws, msg.sessionId);
+          break;
+
+        case "ping":
+          this.send(ws, { type: "pong" });
           break;
 
         default:
-          this.send(ws, { type: "error", message: `Unknown message type: ${(msg as { type: string }).type}` });
+          this.send(ws, {
+            type: "error",
+            message: `Unknown message type: ${(msg as { type: string }).type}`,
+            recoverable: false,
+          });
       }
     } catch (err) {
       this.send(ws, {
         type: "error",
         message: err instanceof Error ? err.message : String(err),
+        recoverable: this.sessionId !== null,
+        sessionId: this.sessionId ?? undefined,
       });
     }
   }
@@ -107,6 +129,7 @@ export class StateMachineDO extends DurableObject<Env> {
    */
   async webSocketClose(ws: WebSocket, code: number, reason: string): Promise<void> {
     console.log(`[DO] WebSocket closed: ${code} ${reason}`);
+    // Session state is preserved in storage for reconnection
   }
 
   /**
@@ -117,59 +140,230 @@ export class StateMachineDO extends DurableObject<Env> {
   }
 
   /**
-   * Run graph to completion
+   * Handle DO alarm for session cleanup
    */
-  private async runGraph(ws: WebSocket, input: unknown): Promise<void> {
-    try {
-      // Load WASM if not already loaded
-      if (!this.machine) {
-        this.machine = await loadMachine({
-          wasmModule: wasmModule as unknown as WebAssembly.Module,
-          debug: false,
-        });
-      }
+  async alarm(): Promise<void> {
+    console.log("[DO] Alarm triggered - checking for expired sessions");
+    const now = Date.now();
 
-      // Initialize the graph
-      let output = await this.machine.initialize(input);
+    // List all session keys and clean up expired ones
+    const keys = await this.ctx.storage.list({ prefix: "session:" });
+    let hasActiveSessions = false;
 
-      // Effect interpretation loop
-      while (!output.done && output.effect) {
-        const effect = output.effect;
-        const nodeName = output.graphState.phase.type === "in_node"
-          ? output.graphState.phase.nodeName
-          : "unknown";
-
-        // Send progress update
-        this.send(ws, {
-          type: "progress",
-          node: nodeName,
-          effect: effect.type,
-        });
-
-        // Execute the effect
-        const result = await this.executeEffect(effect);
-
-        // Step with the result
-        output = await this.machine.step(result);
-      }
-
-      // Check for completion or failure
-      if (output.graphState.phase.type === "failed") {
-        this.send(ws, {
-          type: "error",
-          message: output.graphState.phase.error,
-        });
+    for (const [key, value] of keys) {
+      const session = value as SessionState;
+      if (now - session.lastActivity > SESSION_TIMEOUT_MS) {
+        console.log(`[DO] Cleaning up expired session: ${key}`);
+        await this.ctx.storage.delete(key);
       } else {
-        this.send(ws, {
-          type: "done",
-          result: output.stepResult,
-        });
+        hasActiveSessions = true;
       }
-    } catch (err) {
+    }
+
+    // Reschedule alarm if there are still active sessions
+    if (hasActiveSessions) {
+      await this.ctx.storage.setAlarm(now + SESSION_TIMEOUT_MS);
+    }
+  }
+
+  /**
+   * Handle init message - start new graph execution
+   */
+  private async handleInit(ws: WebSocket, graphId: string, input: unknown): Promise<void> {
+    // Validate graphId
+    if (!graphId || typeof graphId !== "string" || graphId.trim() === "") {
+      this.send(ws, { type: "error", message: "Invalid graphId: must be a non-empty string", recoverable: false });
+      return;
+    }
+
+    // Use the session ID from the URL path (set in fetch())
+    // This ensures the sessionId matches the DO routing for reconnection
+    const sessionId = this.sessionId;
+    if (!sessionId) {
+      this.send(ws, { type: "error", message: "Session ID not initialized", recoverable: false });
+      return;
+    }
+    console.log(`[DO] Starting graph execution: sessionId=${sessionId}, graphId=${graphId}`);
+
+    // Load WASM if not already loaded
+    if (!this.machine) {
+      this.machine = await loadMachine({
+        wasmModule: wasmModule as unknown as WebAssembly.Module,
+        debug: false,
+      });
+    }
+
+    // Initialize the graph
+    const output = await this.machine.initialize(input);
+
+    // Run until completion or yield
+    await this.runGraphLoop(ws, sessionId, graphId, output);
+  }
+
+  /**
+   * Handle resume message - continue after client-handled effect
+   */
+  private async handleResume(ws: WebSocket, result: EffectResult): Promise<void> {
+    if (!this.sessionId) {
+      this.send(ws, { type: "error", message: "No active session to resume", recoverable: false });
+      return;
+    }
+
+    const sessionKey = `session:${this.sessionId}`;
+    const session = await this.ctx.storage.get<SessionState>(sessionKey);
+
+    if (!session) {
+      this.send(ws, { type: "error", message: "Session not found or expired", recoverable: false });
+      return;
+    }
+
+    console.log(`[DO] Resuming session: ${this.sessionId}`);
+
+    // Update last activity
+    session.lastActivity = Date.now();
+    session.pendingEffect = null;
+    await this.ctx.storage.put(sessionKey, session);
+
+    // Always create a fresh machine instance when resuming to avoid
+    // stale in-memory state from a previous DO lifecycle
+    this.machine = await loadMachine({
+      wasmModule: wasmModule as unknown as WebAssembly.Module,
+      debug: false,
+    });
+
+    const output = await this.machine.step(result);
+    await this.runGraphLoop(ws, this.sessionId, session.graphId, output);
+  }
+
+  /**
+   * Handle reconnect message - restore session from storage
+   *
+   * Note: The client must reconnect to the same URL path (/session/:sessionId)
+   * for routing to reach this DO instance. The sessionId in the message is
+   * validated to match the URL-based session.
+   */
+  private async handleReconnect(ws: WebSocket, sessionId: string): Promise<void> {
+    // Validate that the requested sessionId matches this DO's session
+    if (sessionId !== this.sessionId) {
       this.send(ws, {
         type: "error",
-        message: err instanceof Error ? err.message : String(err),
+        message: "Session ID mismatch - reconnect to the correct session URL",
+        recoverable: false,
       });
+      return;
+    }
+
+    const sessionKey = `session:${sessionId}`;
+    const session = await this.ctx.storage.get<SessionState>(sessionKey);
+
+    if (!session) {
+      this.send(ws, { type: "error", message: "Session not found or expired", recoverable: false });
+      return;
+    }
+
+    console.log(`[DO] Reconnecting to session: ${sessionId}`);
+
+    // Update last activity
+    session.lastActivity = Date.now();
+    await this.ctx.storage.put(sessionKey, session);
+
+    // Re-send the pending effect if there is one
+    if (session.pendingEffect) {
+      this.send(ws, {
+        type: "yield",
+        effect: session.pendingEffect,
+        sessionId,
+      });
+    } else {
+      // No pending effect - session state is inconsistent/corrupted
+      this.send(ws, {
+        type: "error",
+        message: "Session state is inconsistent - cannot resume",
+        recoverable: false,
+      });
+      await this.ctx.storage.delete(sessionKey);
+    }
+  }
+
+  /**
+   * Run graph execution loop until completion or client yield
+   */
+  private async runGraphLoop(
+    ws: WebSocket,
+    sessionId: string,
+    graphId: string,
+    output: Awaited<ReturnType<GraphMachine["initialize"]>>
+  ): Promise<void> {
+    const sessionKey = `session:${sessionId}`;
+
+    // Effect interpretation loop
+    while (!output.done && output.effect) {
+      const effect = output.effect;
+
+      // Check if this effect should be yielded to client
+      // For now, all effects are handled server-side
+      // Future: add client-side effect types here
+
+      // Send progress update
+      this.send(ws, {
+        type: "progress",
+        effect,
+        status: "executing",
+      });
+
+      // Execute the effect server-side
+      const result = await this.executeEffect(effect);
+
+      // Check if effect failed - yield to client for retry/handling
+      if (result.type === "error") {
+        // Save session state for potential retry
+        const session: SessionState = {
+          graphId,
+          machineState: null, // WASM state is in memory
+          pendingEffect: effect,
+          lastActivity: Date.now(),
+        };
+        await this.ctx.storage.put(sessionKey, session);
+        await this.scheduleCleanupAlarm();
+
+        this.send(ws, {
+          type: "yield",
+          effect,
+          sessionId,
+        });
+        return; // Wait for client to send resume
+      }
+
+      // Step with the result
+      output = await this.machine!.step(result);
+    }
+
+    // Graph completed - clean up session state (but keep sessionId for potential new graph)
+    await this.ctx.storage.delete(sessionKey);
+
+    // Check for completion or failure
+    if (output.graphState.phase.type === "failed") {
+      this.send(ws, {
+        type: "error",
+        message: output.graphState.phase.error,
+        recoverable: false,
+      });
+    } else {
+      this.send(ws, {
+        type: "done",
+        result: output.stepResult,
+      });
+    }
+  }
+
+  /**
+   * Schedule cleanup alarm for session expiry
+   */
+  private async scheduleCleanupAlarm(): Promise<void> {
+    const currentAlarm = await this.ctx.storage.getAlarm();
+    if (!currentAlarm) {
+      // Set alarm for session timeout
+      await this.ctx.storage.setAlarm(Date.now() + SESSION_TIMEOUT_MS);
     }
   }
 
