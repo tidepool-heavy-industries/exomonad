@@ -268,7 +268,7 @@ stepOutputConformanceSpec = describe "StepOutput matches protocol.ts" $ do
           { soEffect = Just (EffLogInfo "computing")
           , soDone = False
           , soStepResult = Nothing
-          , soGraphState = GraphState PhaseInNode { phaseName = "compute" } []
+          , soGraphState = GraphState (PhaseInNode "compute") []
           }
         json = decode (encode output) :: Maybe Value
     case json of
