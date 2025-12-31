@@ -139,9 +139,17 @@ This is safe in WASM because each module instance is isolated (one per Durable O
 
 ### Testing
 
-- `RunnerSpec.hs` - Tests pure continuation logic
-- `FfiSpec.hs` - Integration tests through JSON interface
-- Uses `resetState` for test isolation
+| File | Purpose | Coverage |
+|------|---------|----------|
+| `WireTypesSpec.hs` | Wire type round-tripping | JSON encode/decode for all types |
+| `TestGraphSpec.hs` | Graph structure validation | TestGraph shape and handler |
+| `ProtocolConformanceSpec.hs` | JSON ↔ TypeScript protocol | Exact field names match protocol.ts |
+| `RunnerSpec.hs` | Pure continuation logic | Single-yield WasmResult/Status |
+| `FfiSpec.hs` | FFI JSON interface | Single-yield E2E through FFI |
+| `E2ESpec.hs` | Multi-yield scenarios | 3-effect sequences, edge cases |
+
+- Uses `resetState` for FFI test isolation
+- E2E tests use Runner directly (pure, no global state)
 
 ## Protocol Flow
 

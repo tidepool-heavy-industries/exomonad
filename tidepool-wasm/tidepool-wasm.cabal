@@ -64,6 +64,7 @@ test-suite tidepool-wasm-tests
         ProtocolConformanceSpec
         RunnerSpec
         FfiSpec
+        E2ESpec
     build-depends:
         base >= 4.17 && < 5,
         hspec >= 2.10 && < 3,
