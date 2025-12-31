@@ -113,7 +113,7 @@ toMermaid = toMermaidWithConfig defaultConfig
 --
 -- -- Generate Mermaid diagram:
 -- mermaidOutput :: Text
--- mermaidOutput = graphToMermaid (Proxy \@SupportGraph)
+-- mermaidOutput = graphToMermaid (Proxy @SupportGraph)
 -- @
 graphToMermaid
   :: forall (graph :: Type -> Type).

@@ -38,6 +38,7 @@ module Tidepool.Template.DependencyTree
   , DependencyTree(..)
   ) where
 
+import Control.Monad (foldM)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Set (Set)
@@ -46,7 +47,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import System.Directory (doesFileExist)
-import System.FilePath (takeDirectory, (</>), normalise)
+import System.FilePath (takeDirectory, takeFileName, (</>), normalise)
 import Text.Parsec
 import Text.Parsec.Text (Parser)
 
@@ -132,8 +133,6 @@ displayPath :: TemplateTreeConfig -> FilePath -> Text
 displayPath config path
   | config.ttcShowPath = T.pack path
   | otherwise = T.pack $ takeFileName path
-  where
-    takeFileName = reverse . takeWhile (/= '/') . reverse
 
 -- | Escape a node name for Mermaid.
 escapeName :: Text -> Text
@@ -190,16 +189,10 @@ buildTreeFrom path visited incMap extMap
           let visited' = Set.insert path visited
           let allDeps = resolvedIncs ++ resolvedExts
 
-          foldlM
+          foldM
             (\(im, em) dep -> buildTreeFrom dep visited' im em)
             (incMap', extMap')
             allDeps
-  where
-    foldlM :: Monad m => (a -> b -> m a) -> a -> [b] -> m a
-    foldlM _ acc [] = pure acc
-    foldlM f acc (x:xs) = do
-      acc' <- f acc x
-      foldlM f acc' xs
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TEMPLATE PARSING

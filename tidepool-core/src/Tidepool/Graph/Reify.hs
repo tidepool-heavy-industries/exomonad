@@ -81,7 +81,7 @@ import GHC.TypeLits (Symbol, KnownSymbol, symbolVal)
 
 import Effectful (Effect)
 
-import Tidepool.Graph.Types (NodeKind(..), type (:@), UsesEffects)
+import Tidepool.Graph.Types (NodeKind(..), type (:@))
 import Tidepool.Graph.Tool (ToolInfo(..))
 import Tidepool.Graph.Generic.Core (Entry, Exit, LLMNode, LogicNode, AsGraph)
 import Tidepool.Graph.Edges
@@ -301,13 +301,13 @@ type family HasGotoExitFromEffects mEffs where
 -- data SupportGraph mode = SupportGraph { ... } deriving Generic
 --
 -- graphInfo :: GraphInfo
--- graphInfo = reifyRecordGraph (Proxy \@SupportGraph)
+-- graphInfo = reifyRecordGraph (Proxy @SupportGraph)
 -- @
 --
 -- == Goto Target Extraction
 --
 -- Goto targets are extracted from Logic nodes by using 'GotoTargetsFromDef',
--- which applies @\@Effect@ kind explicitly to resolve polykind ambiguity.
+-- which applies @Effect@ kind explicitly to resolve polykind ambiguity.
 -- This enables full Mermaid diagram generation including explicit Goto edges.
 class ReifyRecordGraph (graph :: Type -> Type) where
   reifyRecordGraph :: Proxy graph -> GraphInfo

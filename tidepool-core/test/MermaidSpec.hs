@@ -17,8 +17,9 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
 
-import Tidepool.Graph.Types (type (:@), Needs, Schema)
+import Tidepool.Graph.Types (type (:@), Needs, Schema, UsesEffects)
 import Tidepool.Graph.Generic (GraphMode(..), Entry, Exit, LLMNode, LogicNode)
+import Tidepool.Graph.Goto (Goto)
 import Tidepool.Graph.Mermaid (graphToMermaid)
 import Tidepool.Template.DependencyTree
   ( parseTemplateIncludes
@@ -46,9 +47,10 @@ data TypeY
 data TypeZ
 
 -- | Branching graph with Logic node for more complex Mermaid output
+-- Logic nodes use UsesEffects with Goto targets, not Schema
 data BranchingTestGraph mode = BranchingTestGraph
   { btgEntry  :: mode :- Entry TypeX
-  , btgRouter :: mode :- LogicNode :@ Needs '[TypeX] :@ Schema TypeY
+  , btgRouter :: mode :- LogicNode :@ Needs '[TypeX] :@ UsesEffects '[Goto "btgLlm" TypeY]
   , btgLlm    :: mode :- LLMNode :@ Needs '[TypeY] :@ Schema TypeZ
   , btgExit   :: mode :- Exit TypeZ
   }
