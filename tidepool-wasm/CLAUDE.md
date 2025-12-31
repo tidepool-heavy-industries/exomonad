@@ -13,15 +13,14 @@ The key insight: **tidepool-core stays WASM-agnostic**. This package handles all
 
 ## Current Status
 
-**Scaffolding: Complete** - Package structure and types defined.
+**Complete** - Full FFI implementation with integration tests.
 
 | File | Status | Purpose |
 |------|--------|---------|
 | `TestGraph.hs` | ✅ Complete | Minimal graph (Int → Int+1 with Log effect) |
 | `WireTypes.hs` | ✅ Complete | SerializableEffect, EffectResult, StepOutput |
-| `Ffi.hs` | ✅ Stubs | FFI exports (implementations are `error "TODO"`) |
-
-**Runner implementation: Out of scope** - Handled by larger LLM swarm.
+| `Runner.hs` | ✅ Complete | Explicit continuation encoding for yield/resume |
+| `Ffi.hs` | ✅ Complete | FFI exports with global IORef state management |
 
 ## Architecture
 
@@ -107,23 +106,42 @@ wasm32-wasi-cabal build tidepool-wasm
 
 | Step | Graph Shape | Proves | Status |
 |------|-------------|--------|--------|
-| **1** | Single logic node + Log effect | WASM runs, effect loop works | Scaffolding done |
+| **1** | Single logic node + Log effect | WASM runs, effect loop works | ✅ Complete |
 | 2 | Multiple logic nodes + routing | Graph structure, Goto transitions | Future |
 | 3 | LLM node (CF AI) | Real effect interpretation | Future |
 
-## What's Needed (Swarm Implements)
+## Implementation Details
 
-1. **Runner implementation** in `Ffi.hs`:
-   - `initializeImpl`: Parse entry value, run graph until first effect yield
-   - `stepImpl`: Resume with effect result, run until next yield or completion
-   - `getGraphInfoImpl`: Reify graph structure to JSON
-   - `getGraphStateImpl`: Serialize current execution state
+### Runner.hs - Continuation Encoding
 
-2. **Effect interpretation loop** that:
-   - Runs graph handlers
-   - Catches effect operations
-   - Serializes them as `StepOutput`
-   - Resumes when `step` is called with result
+The runner uses explicit continuations to work around GHC WASM's inability to block mid-computation:
+
+```haskell
+data GraphContinuation
+  = ContAfterLog Int  -- Waiting for Log effect result, resume with n+1
+
+data GraphYield
+  = YieldEffect SerializableEffect GraphContinuation
+  | YieldComplete Value
+  | YieldError Text
+```
+
+### Ffi.hs - Global State
+
+Uses a global `IORef` to persist state across FFI calls:
+
+```haskell
+{-# NOINLINE globalState #-}
+globalState :: IORef (Maybe RunnerState)
+```
+
+This is safe in WASM because each module instance is isolated (one per Durable Object).
+
+### Testing
+
+- `RunnerSpec.hs` - Tests pure continuation logic
+- `FfiSpec.hs` - Integration tests through JSON interface
+- Uses `resetState` for test isolation
 
 ## Protocol Flow
 
