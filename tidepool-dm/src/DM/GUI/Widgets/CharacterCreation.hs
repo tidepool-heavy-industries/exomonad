@@ -13,7 +13,7 @@ module DM.GUI.Widgets.CharacterCreation
   ) where
 
 import Control.Concurrent.MVar (MVar, putMVar)
-import Control.Monad (void, unless)
+import Control.Monad (void, when, unless)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Graphics.UI.Threepenny.Core

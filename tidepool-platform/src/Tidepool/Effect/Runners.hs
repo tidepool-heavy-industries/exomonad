@@ -128,7 +128,7 @@ runLLMWithTools
   -> ToolDispatcher event es
   -> Eff (LLM : es) a
   -> Eff es a
-runLLMWithTools config dispatcher = runLLMWithToolsHooked @es @event noHooks config dispatcher
+runLLMWithTools = runLLMWithToolsHooked @es @event noHooks
 
 -- | Run the LLM effect with hooks for lifecycle events
 runLLMWithToolsHooked
@@ -365,7 +365,7 @@ runGame
   -> LogLevel
   -> Eff (RunnerEffects s event) a
   -> IO (a, s)
-runGame initialState llmConfig eventHandler inputHandler minLogLevel computation =
+runGame initialState llmConfig eventHandler inputHandler minLogLevel =
   runEff
     . runTime
     . runRandom
@@ -375,7 +375,6 @@ runGame initialState llmConfig eventHandler inputHandler minLogLevel computation
     . runLog minLogLevel
     . runRequestInput inputHandler
     . runLLM llmConfig
-    $ computation
 
 -- Helper: Extract text content from content blocks
 extractText :: [ContentBlock] -> Text

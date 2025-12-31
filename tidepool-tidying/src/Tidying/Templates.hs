@@ -1,5 +1,4 @@
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RecordWildCards #-}
 
 -- | Tidying Templates
 --
@@ -42,6 +41,7 @@ module Tidying.Templates
 
 import Data.List.NonEmpty (NonEmpty)
 import Data.List.NonEmpty qualified as NE
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
 
@@ -205,7 +205,7 @@ renderActPrompt ctx action = T.unlines
   , ""
   , "# Context"
   , ""
-  , "Function of space: " <> maybe "(unknown)" id ctx.tcFunction
+  , "Function of space: " <> fromMaybe "(unknown)" ctx.tcFunction
   , "Items processed: " <> T.pack (show ctx.tcItemsProcessed)
   , case ctx.tcPhotoAnalysis of
       Nothing -> ""
@@ -254,7 +254,7 @@ actionGuidance ctx action = case action of
     , case ctx.tcPhotoAnalysis of
         Just pa -> T.unlines
           [ "Photo shows items: " <> T.intercalate ", " pa.paVisibleItems
-          , "Start with: " <> maybe "the most obvious item" id pa.paFirstTarget
+          , "Start with: " <> fromMaybe "the most obvious item" pa.paFirstTarget
           , ""
           , "Call propose_disposition for the first obvious item."
           , "After they confirm, continue to the next item."
@@ -280,7 +280,7 @@ actionGuidance ctx action = case action of
     [ "# Decision Aid"
     , ""
     , "User is stuck on: " <> item
-    , "Function of space: " <> maybe "unknown" id ctx.tcFunction
+    , "Function of space: " <> fromMaybe "unknown" ctx.tcFunction
     , ""
     , "Reframe around function. Ask one clarifying question."
     , ""

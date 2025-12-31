@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | Tidying Agent
 --
 -- A prosthetic executive function for tackling overwhelming spaces.

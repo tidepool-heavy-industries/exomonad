@@ -12,7 +12,7 @@ module DM.GUI.Widgets.Stats
   ) where
 
 import Control.Concurrent.STM (atomically, readTVar)
-import Control.Monad (void)
+import Control.Monad (void, when)
 import qualified Data.Text as T
 import Graphics.UI.Threepenny.Core
 import qualified Graphics.UI.Threepenny as UI
@@ -164,15 +164,12 @@ dicePoolDisplay pool = do
 
   void $ element group #+ [element label, element container]
   pure group
-  where
-    when cond action = if cond then action else pure ()
 
 -- | Create a single die display using Font Awesome
 mkDie :: Int -> UI Element
-mkDie value = do
-  die <- mkElement "i" #. ("die-display fa-solid " ++ dieFaceClass value)
+mkDie value =
+  mkElement "i" #. ("die-display fa-solid " ++ dieFaceClass value)
     # set (attr "title") ("Die showing " ++ show value)
-  pure die
 
 -- | Get the Font Awesome class for a die value
 dieFaceClass :: Int -> String

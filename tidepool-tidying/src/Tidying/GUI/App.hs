@@ -12,6 +12,7 @@ module Tidying.GUI.App
 
 import Control.Concurrent.STM (atomically, readTVar)
 import Control.Monad (void, when)
+import Data.Foldable (for_)
 import Data.Aeson (ToJSON, fromJSON)
 import Data.Aeson qualified as Aeson
 import Data.IORef (newIORef, readIORef, writeIORef)
@@ -298,9 +299,7 @@ updateInputArea bridge elements pending = do
           void $ element inputArea #+ [element result.qrElement]
           liftIO $ GUICore.logInfo bridge "GUI: Question widget rendered"
           -- Auto-focus if there's a target
-          case result.qrFocusTarget of
-            Just el -> focusElement el
-            Nothing -> pure ()
+          for_ result.qrFocusTarget focusElement
         Aeson.Error err -> do
           -- Failed to decode question, log and hide
           liftIO $ GUICore.logError bridge $ "GUI: Failed to decode question: " <> T.pack err
