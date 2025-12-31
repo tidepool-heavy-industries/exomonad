@@ -100,8 +100,12 @@ module Tidepool.Graph.Generic
   , ElemCWithOptions
   , If
   , Append
+  , TupleOf
   , type (||)
   , OrMaybe
+
+    -- * Re-exports for LLM Handlers
+  , LLMHandler(..)
 
     -- * Record Validation
   , HasEntryField
@@ -130,7 +134,7 @@ import Effectful qualified as E
 import Tidepool.Graph.Types (type (:@), Needs, Schema, Template, Vision, Tools, Memory, System, UsesEffects)
 import Tidepool.Graph.Template (TemplateContext)
 import Tidepool.Graph.Edges (GetUsesEffects, GetGotoTargets, GotoEffectsToTargets)
-import Tidepool.Graph.Goto (Goto, goto, GotoChoice)
+import Tidepool.Graph.Goto (Goto, goto, GotoChoice, LLMHandler(..))
 import Tidepool.Graph.Validate.RecordStructure (AllFieldsReachable, AllLogicFieldsReachExit, NoDeadGotosRecord)
 import Tidepool.Graph.Generic.Core
   ( GraphMode(..)
@@ -202,7 +206,8 @@ type family NodeHandler nodeDef es where
 
   -- Any annotated node: dispatch to the appropriate accumulator based on base kind
   -- We peel from outside, so start with the full node
-  NodeHandler (node :@ ann) es = NodeHandlerDispatch (node :@ ann) (node :@ ann) es '[] 'Nothing
+  -- Accumulator: (nodeDef, origNode, es, needs, mTpl, mSchema, mEffs)
+  NodeHandler (node :@ ann) es = NodeHandlerDispatch (node :@ ann) (node :@ ann) es '[] 'Nothing 'Nothing 'Nothing
 
   -- Bare LLMNode/LogicNode without annotations - error
   NodeHandler LLMNode es = TypeError
@@ -234,60 +239,89 @@ type family NodeHandler nodeDef es where
 --   es       - effect stack from AsHandler
 --   needs    - accumulated Needs types (collected in order, not reversed)
 --   mTpl     - Maybe found Template type (for LLM nodes)
-type NodeHandlerDispatch :: Type -> Type -> [Effect] -> [Type] -> Maybe Type -> Type
-type family NodeHandlerDispatch nodeDef origNode es needs mTpl where
+--   mSchema  - Maybe found Schema type (for LLM nodes)
+--   mEffs    - Maybe found UsesEffects (for Logic nodes, or LLM with routing)
+type NodeHandlerDispatch :: Type -> Type -> [Effect] -> [Type] -> Maybe Type -> Maybe Type -> Maybe Type -> Type
+type family NodeHandlerDispatch nodeDef origNode es needs mTpl mSchema mEffs where
   -- Peel Needs annotation - accumulate types
-  NodeHandlerDispatch (node :@ Needs ts) orig es needs mTpl =
-    NodeHandlerDispatch node orig es (Append needs ts) mTpl
+  NodeHandlerDispatch (node :@ Needs ts) orig es needs mTpl mSchema mEffs =
+    NodeHandlerDispatch node orig es (Append needs ts) mTpl mSchema mEffs
 
   -- Peel Template annotation - record it (for LLM nodes)
-  NodeHandlerDispatch (node :@ Template tpl) orig es needs 'Nothing =
-    NodeHandlerDispatch node orig es needs ('Just tpl)
+  NodeHandlerDispatch (node :@ Template tpl) orig es needs 'Nothing mSchema mEffs =
+    NodeHandlerDispatch node orig es needs ('Just tpl) mSchema mEffs
 
-  -- Skip other annotations (Schema, Vision, Tools, Memory, System)
-  NodeHandlerDispatch (node :@ Schema _) orig es needs mTpl =
-    NodeHandlerDispatch node orig es needs mTpl
-  NodeHandlerDispatch (node :@ Vision) orig es needs mTpl =
-    NodeHandlerDispatch node orig es needs mTpl
-  NodeHandlerDispatch (node :@ Tools _) orig es needs mTpl =
-    NodeHandlerDispatch node orig es needs mTpl
-  NodeHandlerDispatch (node :@ Memory _) orig es needs mTpl =
-    NodeHandlerDispatch node orig es needs mTpl
-  NodeHandlerDispatch (node :@ System _) orig es needs mTpl =
-    NodeHandlerDispatch node orig es needs mTpl
+  -- Peel Schema annotation - record it (for LLM nodes)
+  NodeHandlerDispatch (node :@ Schema s) orig es needs mTpl 'Nothing mEffs =
+    NodeHandlerDispatch node orig es needs mTpl ('Just s) mEffs
 
-  -- Peel UsesEffects annotation - build Logic handler type immediately
-  -- Logic handlers use their own effect stack, not the es from AsHandler
-  NodeHandlerDispatch (node :@ UsesEffects effs) orig es needs mTpl =
-    NodeHandlerDispatch node orig es needs ('Just (EffStack effs))
+  -- Skip other annotations (Vision, Tools, Memory, System)
+  NodeHandlerDispatch (node :@ Vision) orig es needs mTpl mSchema mEffs =
+    NodeHandlerDispatch node orig es needs mTpl mSchema mEffs
+  NodeHandlerDispatch (node :@ Tools _) orig es needs mTpl mSchema mEffs =
+    NodeHandlerDispatch node orig es needs mTpl mSchema mEffs
+  NodeHandlerDispatch (node :@ Memory _) orig es needs mTpl mSchema mEffs =
+    NodeHandlerDispatch node orig es needs mTpl mSchema mEffs
+  NodeHandlerDispatch (node :@ System _) orig es needs mTpl mSchema mEffs =
+    NodeHandlerDispatch node orig es needs mTpl mSchema mEffs
 
-  -- Base case: bare LLMNode with Template found
-  NodeHandlerDispatch LLMNode orig es needs ('Just tpl) =
-    BuildFunctionType needs (E.Eff es (TemplateContext tpl))
+  -- Peel UsesEffects annotation - record effects
+  NodeHandlerDispatch (node :@ UsesEffects effs) orig es needs mTpl mSchema 'Nothing =
+    NodeHandlerDispatch node orig es needs mTpl mSchema ('Just (EffStack effs))
 
-  -- Base case: bare LLMNode without Template - error
-  NodeHandlerDispatch LLMNode orig es needs 'Nothing = TypeError
+  -- ══════════════════════════════════════════════════════════════════════════
+  -- LLMNode Base Cases
+  -- ══════════════════════════════════════════════════════════════════════════
+
+  -- LLMNode with Template only (before-only): returns LLMHandler with LLMBefore
+  NodeHandlerDispatch LLMNode orig es needs ('Just tpl) ('Just schema) 'Nothing =
+    LLMHandler (TupleOf needs) schema '[] es (TemplateContext tpl)
+
+  -- LLMNode with Template AND UsesEffects (both): returns LLMHandler with LLMBoth
+  NodeHandlerDispatch LLMNode orig es needs ('Just tpl) ('Just schema) ('Just (EffStack effs)) =
+    LLMHandler (TupleOf needs) schema (GotoEffectsToTargets effs) es (TemplateContext tpl)
+
+  -- LLMNode with UsesEffects but no Template (after-only): returns LLMHandler with LLMAfter
+  NodeHandlerDispatch LLMNode orig es needs 'Nothing ('Just schema) ('Just (EffStack effs)) =
+    LLMHandler (TupleOf needs) schema (GotoEffectsToTargets effs) es ()
+
+  -- LLMNode missing Template - error
+  NodeHandlerDispatch LLMNode orig es needs 'Nothing 'Nothing _ = TypeError
     ('Text "LLM node missing Template annotation"
      ':$$: 'Text ""
      ':$$: 'Text "Node definition:"
      ':$$: 'Text "  " ':<>: 'ShowType orig
      ':$$: 'Text ""
-     ':$$: 'Text "LLM nodes must have a Template annotation to specify the prompt context."
-     ':$$: 'Text "The handler will return TemplateContext <YourTemplate> which the runner"
-     ':$$: 'Text "uses to render the prompt."
+     ':$$: 'Text "LLM nodes must have a Template annotation to specify the prompt context,"
+     ':$$: 'Text "OR a UsesEffects annotation for after-only routing (with default context)."
      ':$$: 'Text ""
      ':$$: 'Text "Fix: Add a Template annotation:"
      ':$$: 'Text "  myNode :: mode :- LLMNode :@ ... :@ Template MyPromptTpl :@ Schema Output"
     )
 
-  -- Base case: bare LogicNode with UsesEffects found
-  -- Logic handlers return GotoChoice containing the possible transitions
-  -- The effect stack is 'es' (from AsHandler), not 'effs' (the Goto effects)
-  NodeHandlerDispatch LogicNode orig es needs ('Just (EffStack effs)) =
+  -- LLMNode missing Schema - error
+  NodeHandlerDispatch LLMNode orig es needs _ 'Nothing _ = TypeError
+    ('Text "LLM node missing Schema annotation"
+     ':$$: 'Text ""
+     ':$$: 'Text "Node definition:"
+     ':$$: 'Text "  " ':<>: 'ShowType orig
+     ':$$: 'Text ""
+     ':$$: 'Text "LLM nodes must have a Schema annotation to specify the output type."
+     ':$$: 'Text ""
+     ':$$: 'Text "Fix: Add a Schema annotation:"
+     ':$$: 'Text "  myNode :: mode :- LLMNode :@ ... :@ Template MyTpl :@ Schema MyOutputType"
+    )
+
+  -- ══════════════════════════════════════════════════════════════════════════
+  -- LogicNode Base Cases
+  -- ══════════════════════════════════════════════════════════════════════════
+
+  -- LogicNode with UsesEffects: returns GotoChoice
+  NodeHandlerDispatch LogicNode orig es needs _ _ ('Just (EffStack effs)) =
     BuildFunctionType needs (E.Eff es (GotoChoice (GotoEffectsToTargets effs)))
 
-  -- Base case: bare LogicNode without UsesEffects - error
-  NodeHandlerDispatch LogicNode orig es needs _ = TypeError
+  -- LogicNode without UsesEffects - error
+  NodeHandlerDispatch LogicNode orig es needs _ _ 'Nothing = TypeError
     ('Text "Logic node missing UsesEffects annotation"
      ':$$: 'Text ""
      ':$$: 'Text "Node definition:"
@@ -299,6 +333,16 @@ type family NodeHandlerDispatch nodeDef origNode es needs mTpl where
      ':$$: 'Text "Fix: Add a UsesEffects annotation with your transitions:"
      ':$$: 'Text "  myRouter :: mode :- LogicNode :@ Needs '[...] :@ UsesEffects '[Goto \"nodeA\" Payload, Goto \"nodeB\" Payload]"
     )
+
+-- | Convert a Needs list to a single type (unit, single, or tuple).
+type TupleOf :: [Type] -> Type
+type family TupleOf ts where
+  TupleOf '[] = ()
+  TupleOf '[t] = t
+  TupleOf '[t1, t2] = (t1, t2)
+  TupleOf '[t1, t2, t3] = (t1, t2, t3)
+  TupleOf '[t1, t2, t3, t4] = (t1, t2, t3, t4)
+  -- Extend as needed
 
 -- | Wrapper to distinguish Template types from EffStack in the Maybe
 data EffStack (effs :: [Effect])

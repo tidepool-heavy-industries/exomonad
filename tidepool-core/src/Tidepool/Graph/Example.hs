@@ -43,7 +43,7 @@ import Text.Parsec.Pos (SourcePos)
 import Tidepool.Graph.Types (type (:@), Needs, Schema, Template, UsesEffects)
 import Tidepool.Graph.Generic (GraphMode(..), AsHandler)
 import qualified Tidepool.Graph.Generic as G (Entry, Exit, LLMNode, LogicNode, ValidGraphRecord)
-import Tidepool.Graph.Goto (Goto, To, GotoChoice, gotoChoice)
+import Tidepool.Graph.Goto (Goto, To, GotoChoice, gotoChoice, LLMHandler(..))
 import Tidepool.Graph.Reify (ReifyRecordGraph(..), makeGraphInfo)
 import Tidepool.Graph.Tool (ToolDef(..))
 import Tidepool.Graph.Template (TemplateDef(..), TypedTemplate, typedTemplateFile)
@@ -262,17 +262,17 @@ data SupportGraph mode = SupportGraph
 -- In 'AsHandler es' mode, the NodeHandler type family computes:
 --
 -- * Entry -> Proxy Message (marker, not a handler)
--- * LLM :@ Needs '[A] :@ Template T :@ Schema B -> A -> Eff es (TemplateContext T)
--- * Logic :@ Needs '[A] :@ UsesEffects effs -> A -> Eff effs ()
+-- * LLM :@ Needs '[A] :@ Template T :@ Schema B -> LLMHandler A B '[] es (TemplateContext T)
+-- * Logic :@ Needs '[A] :@ UsesEffects effs -> A -> Eff es (GotoChoice targets)
 -- * Exit -> Proxy Response (marker, not a handler)
 --
--- Note: The handler returns the TemplateContext, not the Schema output.
--- The runner handles template rendering, LLM call, and schema parsing.
+-- Note: LLM handlers are wrapped in LLMBefore/LLMAfter/LLMBoth to specify
+-- which phases they handle. The runner uses these to orchestrate the LLM call.
 supportHandlers :: SupportGraph (AsHandler '[State SessionState])
 supportHandlers = SupportGraph
   { sgEntry    = Proxy @Message
-  , sgClassify = \msg -> do
-      -- Handler builds context for the classify template
+  , sgClassify = LLMBefore $ \msg -> do
+      -- Before handler: builds context for the classify template
       st <- get @SessionState
       pure ClassifyContext
         { topic = msgContent msg
@@ -290,11 +290,11 @@ supportHandlers = SupportGraph
         IntentRefund    -> gotoChoice @"sgRefund" msg
         IntentQuestion  -> gotoChoice @"sgFaq" msg
         IntentComplaint -> gotoChoice @"sgFaq" msg  -- Complaints go to FAQ for now
-  , sgRefund   = \_msg -> do
-      -- Refund template context builder
+  , sgRefund   = LLMBefore $ \_msg -> do
+      -- Before handler: builds refund template context
       pure SimpleContext { scContent = "Processing refund..." }
-  , sgFaq      = \_msg -> do
-      -- FAQ template context builder
+  , sgFaq      = LLMBefore $ \_msg -> do
+      -- Before handler: builds FAQ template context
       pure SimpleContext { scContent = "Here are some common questions..." }
   , sgExit     = Proxy @Response
   }

@@ -63,6 +63,9 @@ module Tidepool.Graph.Goto
   , gotoSelf
   , gotoChoiceToResult
 
+    -- * LLM Handler Variants
+  , LLMHandler(..)
+
     -- * Target Validation
   , GotoElem
   , GotoElemC
@@ -251,6 +254,61 @@ gotoChoiceToResult (GotoChoiceExit payload) =
   GotoExit (toDyn payload)
 gotoChoiceToResult (GotoChoiceSelf payload) =
   GotoSelf (toDyn payload)
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- LLM HANDLER VARIANTS
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Handler variants for LLM nodes.
+--
+-- LLM nodes can have before-only, after-only, or both handlers:
+--
+-- * 'LLMBefore': Provides template context before LLM call, implicit routing
+-- * 'LLMAfter': Routes based on LLM output, uses default context
+-- * 'LLMBoth': Custom context AND explicit routing
+--
+-- The constructor explicitly declares which phases are handled, making the
+-- handler type self-documenting.
+--
+-- = Examples
+--
+-- @
+-- -- Before-only: classifier with custom context
+-- sgClassify :: LLMHandler Message Intent '[] es
+-- sgClassify = LLMBefore $ \\msg -> pure ClassifyContext { topic = msg.content }
+--
+-- -- After-only: router using LLM output
+-- sgRouter :: LLMHandler () Intent '[To "refund" Msg, To "faq" Msg] es
+-- sgRouter = LLMAfter $ \\intent -> pure $ case intent of
+--   IntentRefund -> gotoChoice @"refund" msg
+--   IntentFaq    -> gotoChoice @"faq" msg
+--
+-- -- Both: custom context AND explicit routing
+-- sgSmart :: LLMHandler Message Intent '[To "a" X, To "b" Y] es
+-- sgSmart = LLMBoth
+--   (\\msg -> pure SmartContext { ... })
+--   (\\intent -> pure $ gotoChoice @"a" (processIntent intent))
+-- @
+type LLMHandler :: Type -> Type -> [Type] -> [Effect] -> Type -> Type
+data LLMHandler needs schema targets es tpl where
+  -- | Before-only: provides template context, implicit routing after LLM
+  LLMBefore
+    :: forall tpl needs schema es.
+       (needs -> Eff es tpl)
+    -> LLMHandler needs schema '[] es tpl
+
+  -- | After-only: uses default context, explicit routing based on LLM output
+  LLMAfter
+    :: forall needs schema targets es.
+       (schema -> Eff es (GotoChoice targets))
+    -> LLMHandler needs schema targets es ()
+
+  -- | Both: custom context AND explicit routing
+  LLMBoth
+    :: forall tpl needs schema targets es.
+       (needs -> Eff es tpl)
+    -> (schema -> Eff es (GotoChoice targets))
+    -> LLMHandler needs schema targets es tpl
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- GOTO RESULT TYPES
