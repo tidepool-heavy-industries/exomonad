@@ -94,12 +94,14 @@ effectResultSpec = describe "EffectResult" $ do
 
 stepOutputSpec :: Spec
 stepOutputSpec = describe "StepOutput" $ do
+  let idleState = GraphState PhaseIdle []
 
   it "round-trips StepOutput with effect, not done" $ do
     let output = StepOutput
           { soEffect = Just (EffLogInfo "computing")
           , soDone = False
           , soStepResult = Nothing
+          , soGraphState = idleState
           }
     decode (encode output) `shouldBe` Just output
 
@@ -108,6 +110,7 @@ stepOutputSpec = describe "StepOutput" $ do
           { soEffect = Nothing
           , soDone = True
           , soStepResult = Just (Number 42)
+          , soGraphState = GraphState (PhaseCompleted (Number 42)) ["compute"]
           }
     decode (encode output) `shouldBe` Just output
 
@@ -116,6 +119,7 @@ stepOutputSpec = describe "StepOutput" $ do
           { soEffect = Just (EffLogInfo "msg")
           , soDone = True
           , soStepResult = Just (String "result")
+          , soGraphState = GraphState (PhaseInNode "test") ["a", "b"]
           }
     decode (encode output) `shouldBe` Just output
 
@@ -124,6 +128,7 @@ stepOutputSpec = describe "StepOutput" $ do
           { soEffect = Just (EffLogInfo "test")
           , soDone = False
           , soStepResult = Nothing
+          , soGraphState = idleState
           }
         json = decode (encode output) :: Maybe Value
     case json of

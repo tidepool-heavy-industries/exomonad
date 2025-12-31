@@ -59,6 +59,7 @@ test-suite tidepool-wasm-tests
     other-modules:
         WireTypesSpec
         TestGraphSpec
+        ProtocolConformanceSpec
     build-depends:
         base >= 4.17 && < 5,
         hspec >= 2.10 && < 3,
