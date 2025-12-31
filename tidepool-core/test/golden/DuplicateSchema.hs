@@ -3,20 +3,20 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeOperators #-}
-module InvalidGoto where
+module DuplicateSchema where
 
 import Tidepool.Graph.Types
 import Tidepool.Graph.Validate (ValidGraph)
-import Tidepool.Graph.Goto (Goto)
 
 data Message
 data Response
 
--- This graph has an invalid Goto target "nonexistent" which doesn't exist.
--- The improved error message will now show available node names.
+-- This graph has two nodes with the same Schema type (Response).
+-- The improved error message will now show which nodes conflict.
 type BadGraph = Graph
   '[ Entry :~> Message
-   , "router" := Logic :@ Needs '[Message] :@ UsesEffects '[Goto "nonexistent" Message]
+   , "nodeA" := LLM :@ Needs '[Message] :@ Schema Response
+   , "nodeB" := LLM :@ Needs '[Message] :@ Schema Response  -- Duplicate!
    , Exit :<~ Response
    ]
 

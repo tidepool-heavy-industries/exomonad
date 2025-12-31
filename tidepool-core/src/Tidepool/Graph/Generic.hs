@@ -97,6 +97,8 @@ module Tidepool.Graph.Generic
     -- * Type-Level Utilities
   , Elem
   , ElemC
+  , ElemCWithOptions
+  , FormatSymbolList
   , If
   , Append
   , type (||)
@@ -295,70 +297,104 @@ type family NodeHandler nodeDef es where
 
   -- Any annotated node: dispatch to the appropriate accumulator based on base kind
   -- We peel from outside, so start with the full node
-  NodeHandler (node :@ ann) es = NodeHandlerDispatch (node :@ ann) es '[] 'Nothing
+  NodeHandler (node :@ ann) es = NodeHandlerDispatch (node :@ ann) (node :@ ann) es '[] 'Nothing
 
   -- Bare LLMNode/LogicNode without annotations - error
-  NodeHandler LLMNode es = LLMRequiresAnnotations
-  NodeHandler LogicNode es = LogicRequiresAnnotations
-
--- Placeholder error types (will be TypeError in full implementation)
-data LLMRequiresAnnotations
-data LogicRequiresAnnotations
+  NodeHandler LLMNode es = TypeError
+    ('Text "LLMNode requires annotations"
+     ':$$: 'Text ""
+     ':$$: 'Text "A bare LLMNode without annotations cannot determine handler type."
+     ':$$: 'Text "LLM nodes must have at least:"
+     ':$$: 'Text "  • Template <YourTemplate>  - to build prompt context"
+     ':$$: 'Text ""
+     ':$$: 'Text "Example:"
+     ':$$: 'Text "  myNode :: mode :- LLMNode :@ Needs '[Input] :@ Template MyTpl :@ Schema Output"
+    )
+  NodeHandler LogicNode es = TypeError
+    ('Text "LogicNode requires annotations"
+     ':$$: 'Text ""
+     ':$$: 'Text "A bare LogicNode without annotations cannot determine handler type."
+     ':$$: 'Text "Logic nodes must have:"
+     ':$$: 'Text "  • UsesEffects '[...]  - the effect stack for transitions"
+     ':$$: 'Text ""
+     ':$$: 'Text "Example:"
+     ':$$: 'Text "  myRouter :: mode :- LogicNode :@ Needs '[Intent] :@ UsesEffects '[Goto \"a\", Goto \"b\"]"
+    )
 
 -- | Unified accumulator that peels annotations and dispatches based on base kind.
 --
 -- Parameters:
---   nodeDef - current node being processed (may have :@ annotations)
---   es      - effect stack from AsHandler
---   needs   - accumulated Needs types (collected in order, not reversed)
---   mTpl    - Maybe found Template type (for LLM nodes)
-type NodeHandlerDispatch :: Type -> [Effect] -> [Type] -> Maybe Type -> Type
-type family NodeHandlerDispatch nodeDef es needs mTpl where
+--   nodeDef  - current node being processed (may have :@ annotations)
+--   origNode - original full node definition (for error messages)
+--   es       - effect stack from AsHandler
+--   needs    - accumulated Needs types (collected in order, not reversed)
+--   mTpl     - Maybe found Template type (for LLM nodes)
+type NodeHandlerDispatch :: Type -> Type -> [Effect] -> [Type] -> Maybe Type -> Type
+type family NodeHandlerDispatch nodeDef origNode es needs mTpl where
   -- Peel Needs annotation - accumulate types
-  NodeHandlerDispatch (node :@ Needs ts) es needs mTpl =
-    NodeHandlerDispatch node es (Append needs ts) mTpl
+  NodeHandlerDispatch (node :@ Needs ts) orig es needs mTpl =
+    NodeHandlerDispatch node orig es (Append needs ts) mTpl
 
   -- Peel Template annotation - record it (for LLM nodes)
-  NodeHandlerDispatch (node :@ Template tpl) es needs 'Nothing =
-    NodeHandlerDispatch node es needs ('Just tpl)
+  NodeHandlerDispatch (node :@ Template tpl) orig es needs 'Nothing =
+    NodeHandlerDispatch node orig es needs ('Just tpl)
 
   -- Skip other annotations (Schema, Vision, Tools, Memory, System)
-  NodeHandlerDispatch (node :@ Schema _) es needs mTpl =
-    NodeHandlerDispatch node es needs mTpl
-  NodeHandlerDispatch (node :@ Vision) es needs mTpl =
-    NodeHandlerDispatch node es needs mTpl
-  NodeHandlerDispatch (node :@ Tools _) es needs mTpl =
-    NodeHandlerDispatch node es needs mTpl
-  NodeHandlerDispatch (node :@ Memory _) es needs mTpl =
-    NodeHandlerDispatch node es needs mTpl
-  NodeHandlerDispatch (node :@ System _) es needs mTpl =
-    NodeHandlerDispatch node es needs mTpl
+  NodeHandlerDispatch (node :@ Schema _) orig es needs mTpl =
+    NodeHandlerDispatch node orig es needs mTpl
+  NodeHandlerDispatch (node :@ Vision) orig es needs mTpl =
+    NodeHandlerDispatch node orig es needs mTpl
+  NodeHandlerDispatch (node :@ Tools _) orig es needs mTpl =
+    NodeHandlerDispatch node orig es needs mTpl
+  NodeHandlerDispatch (node :@ Memory _) orig es needs mTpl =
+    NodeHandlerDispatch node orig es needs mTpl
+  NodeHandlerDispatch (node :@ System _) orig es needs mTpl =
+    NodeHandlerDispatch node orig es needs mTpl
 
   -- Peel UsesEffects annotation - build Logic handler type immediately
   -- Logic handlers use their own effect stack, not the es from AsHandler
-  NodeHandlerDispatch (node :@ UsesEffects effs) es needs mTpl =
-    NodeHandlerDispatch node es needs ('Just (EffStack effs))
+  NodeHandlerDispatch (node :@ UsesEffects effs) orig es needs mTpl =
+    NodeHandlerDispatch node orig es needs ('Just (EffStack effs))
 
   -- Base case: bare LLMNode with Template found
-  NodeHandlerDispatch LLMNode es needs ('Just tpl) =
+  NodeHandlerDispatch LLMNode orig es needs ('Just tpl) =
     BuildFunctionType needs (E.Eff es (TemplateContext tpl))
 
   -- Base case: bare LLMNode without Template - error
-  NodeHandlerDispatch LLMNode es needs 'Nothing = LLMRequiresTemplate
+  NodeHandlerDispatch LLMNode orig es needs 'Nothing = TypeError
+    ('Text "LLM node missing Template annotation"
+     ':$$: 'Text ""
+     ':$$: 'Text "Node definition:"
+     ':$$: 'Text "  " ':<>: 'ShowType orig
+     ':$$: 'Text ""
+     ':$$: 'Text "LLM nodes must have a Template annotation to specify the prompt context."
+     ':$$: 'Text "The handler will return TemplateContext <YourTemplate> which the runner"
+     ':$$: 'Text "uses to render the prompt."
+     ':$$: 'Text ""
+     ':$$: 'Text "Fix: Add a Template annotation:"
+     ':$$: 'Text "  myNode :: mode :- LLMNode :@ ... :@ Template MyPromptTpl :@ Schema Output"
+    )
 
   -- Base case: bare LogicNode with UsesEffects found
-  NodeHandlerDispatch LogicNode es needs ('Just (EffStack effs)) =
+  NodeHandlerDispatch LogicNode orig es needs ('Just (EffStack effs)) =
     BuildFunctionType needs (E.Eff effs ())
 
   -- Base case: bare LogicNode without UsesEffects - error
-  NodeHandlerDispatch LogicNode es needs _ = LogicRequiresUsesEffects
+  NodeHandlerDispatch LogicNode orig es needs _ = TypeError
+    ('Text "Logic node missing UsesEffects annotation"
+     ':$$: 'Text ""
+     ':$$: 'Text "Node definition:"
+     ':$$: 'Text "  " ':<>: 'ShowType orig
+     ':$$: 'Text ""
+     ':$$: 'Text "Logic nodes must have a UsesEffects annotation declaring their effect stack."
+     ':$$: 'Text "This should include Goto effects for transitions."
+     ':$$: 'Text ""
+     ':$$: 'Text "Fix: Add a UsesEffects annotation with your transitions:"
+     ':$$: 'Text "  myRouter :: mode :- LogicNode :@ Needs '[...] :@ UsesEffects '[Goto \"nodeA\" Payload, Goto \"nodeB\" Payload]"
+    )
 
 -- | Wrapper to distinguish Template types from EffStack in the Maybe
 data EffStack (effs :: [Effect])
-
--- Placeholder error types
-data LLMRequiresTemplate
-data LogicRequiresUsesEffects
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TYPE-LEVEL UTILITIES
@@ -408,6 +444,29 @@ type family ElemC s ss where
     )
   ElemC s (s ': _) = ()
   ElemC s (_ ': rest) = ElemC s rest
+
+-- | Enhanced membership check that shows available options on failure.
+--
+-- This variant takes the full list to display in error messages.
+type ElemCWithOptions :: Symbol -> [Symbol] -> [Symbol] -> Constraint
+type family ElemCWithOptions s ss allOptions where
+  ElemCWithOptions s '[] allOptions = TypeError
+    ('Text "Field '" ':<>: 'Text s ':<>: 'Text "' not found in graph"
+     ':$$: 'Text ""
+     ':$$: 'Text "Available fields:"
+     ':$$: FormatSymbolList allOptions
+     ':$$: 'Text ""
+     ':$$: 'Text "Check spelling and ensure you're referencing a field from the correct graph type."
+    )
+  ElemCWithOptions s (s ': _) _ = ()
+  ElemCWithOptions s (_ ': rest) allOptions = ElemCWithOptions s rest allOptions
+
+-- | Format a list of symbols for display in error messages.
+type FormatSymbolList :: [Symbol] -> ErrorMessage
+type family FormatSymbolList ss where
+  FormatSymbolList '[] = 'Text "  (none)"
+  FormatSymbolList '[s] = 'Text "  • " ':<>: 'Text s
+  FormatSymbolList (s ': rest) = 'Text "  • " ':<>: 'Text s ':$$: FormatSymbolList rest
 
 -- | Type-level If (returns Constraint).
 type If :: Bool -> Constraint -> Constraint -> Constraint
@@ -781,11 +840,23 @@ type GenericGraph graph mode =
 --   FAQ    -> gotoField @SupportGraph @"sgFaq" msg      -- Validated!
 --   _      -> gotoField @SupportGraph @"sgTypo" msg     -- Compile error!
 -- @
+--
+-- If the target field doesn't exist, you get a helpful error listing valid fields:
+--
+-- @
+-- Field 'sgTypo' not found in graph
+--
+-- Available fields:
+--   • sgEntry
+--   • sgRefund
+--   • sgFaq
+--   • sgExit
+-- @
 gotoField
   :: forall (graph :: Type -> Type) (name :: Symbol) payload es.
      ( KnownSymbol name
      , Generic (graph AsGraph)
-     , ElemC name (FieldNamesOf graph)
+     , ElemCWithOptions name (FieldNamesOf graph) (FieldNamesOf graph)
      , Goto name payload E.:> es
      )
   => payload
