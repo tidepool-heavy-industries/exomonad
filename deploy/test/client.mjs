@@ -101,13 +101,15 @@ const pingInterval = setInterval(() => {
   }
 }, 30000);
 
-// Timeout after 60 seconds
+// Timeout - configurable via TIMEOUT_MS env var (default 60 seconds)
+// Exit code 1 indicates test failure (graph didn't complete in time)
+const TIMEOUT_MS = parseInt(process.env.TIMEOUT_MS || '60000', 10);
 setTimeout(() => {
   clearInterval(pingInterval);
-  console.log('Timeout - closing');
+  console.log(`Timeout after ${TIMEOUT_MS}ms - graph did not complete`);
   ws.close();
   process.exit(1);
-}, 60000);
+}, TIMEOUT_MS);
 
 // Clean up on exit
 process.on('SIGINT', () => {

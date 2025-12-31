@@ -40,7 +40,9 @@ export interface Env {
 
 export class StateMachineDO extends DurableObject<Env> {
   private machine: GraphMachine | null = null;
-  private currentSessionId: string | null = null;
+  // The session ID is derived from the DO instance ID (set via URL path)
+  // This ensures sessionId matches the routing path for reconnection
+  private sessionId: string | null = null;
 
   /**
    * Handle incoming requests - expect WebSocket upgrade
@@ -51,12 +53,19 @@ export class StateMachineDO extends DurableObject<Env> {
       return new Response("Expected WebSocket upgrade", { status: 426 });
     }
 
+    // Extract session ID from URL path (matches the idFromName routing)
+    const url = new URL(request.url);
+    const match = url.pathname.match(/^\/session\/(.+)$/);
+    if (match) {
+      this.sessionId = match[1];
+    }
+
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
 
     // Accept the WebSocket connection using Hibernation API
     this.ctx.acceptWebSocket(server);
-    console.log("[DO] WebSocket connection accepted");
+    console.log(`[DO] WebSocket connection accepted, sessionId: ${this.sessionId}`);
 
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -106,12 +115,11 @@ export class StateMachineDO extends DurableObject<Env> {
           });
       }
     } catch (err) {
-      const sessionId = this.currentSessionId;
       this.send(ws, {
         type: "error",
         message: err instanceof Error ? err.message : String(err),
-        recoverable: sessionId !== null,
-        sessionId: sessionId ?? undefined,
+        recoverable: this.sessionId !== null,
+        sessionId: this.sessionId ?? undefined,
       });
     }
   }
@@ -140,12 +148,21 @@ export class StateMachineDO extends DurableObject<Env> {
 
     // List all session keys and clean up expired ones
     const keys = await this.ctx.storage.list({ prefix: "session:" });
+    let hasActiveSessions = false;
+
     for (const [key, value] of keys) {
       const session = value as SessionState;
       if (now - session.lastActivity > SESSION_TIMEOUT_MS) {
         console.log(`[DO] Cleaning up expired session: ${key}`);
         await this.ctx.storage.delete(key);
+      } else {
+        hasActiveSessions = true;
       }
+    }
+
+    // Reschedule alarm if there are still active sessions
+    if (hasActiveSessions) {
+      await this.ctx.storage.setAlarm(now + SESSION_TIMEOUT_MS);
     }
   }
 
@@ -153,10 +170,20 @@ export class StateMachineDO extends DurableObject<Env> {
    * Handle init message - start new graph execution
    */
   private async handleInit(ws: WebSocket, graphId: string, input: unknown): Promise<void> {
-    // Generate new session ID
-    const sessionId = crypto.randomUUID();
-    this.currentSessionId = sessionId;
-    console.log(`[DO] Starting new session: ${sessionId}, graphId: ${graphId}`);
+    // Validate graphId
+    if (!graphId || typeof graphId !== "string" || graphId.trim() === "") {
+      this.send(ws, { type: "error", message: "Invalid graphId: must be a non-empty string", recoverable: false });
+      return;
+    }
+
+    // Use the session ID from the URL path (set in fetch())
+    // This ensures the sessionId matches the DO routing for reconnection
+    const sessionId = this.sessionId;
+    if (!sessionId) {
+      this.send(ws, { type: "error", message: "Session ID not initialized", recoverable: false });
+      return;
+    }
+    console.log(`[DO] Starting graph execution: sessionId=${sessionId}, graphId=${graphId}`);
 
     // Load WASM if not already loaded
     if (!this.machine) {
@@ -177,12 +204,12 @@ export class StateMachineDO extends DurableObject<Env> {
    * Handle resume message - continue after client-handled effect
    */
   private async handleResume(ws: WebSocket, result: EffectResult): Promise<void> {
-    if (!this.currentSessionId) {
+    if (!this.sessionId) {
       this.send(ws, { type: "error", message: "No active session to resume", recoverable: false });
       return;
     }
 
-    const sessionKey = `session:${this.currentSessionId}`;
+    const sessionKey = `session:${this.sessionId}`;
     const session = await this.ctx.storage.get<SessionState>(sessionKey);
 
     if (!session) {
@@ -190,29 +217,42 @@ export class StateMachineDO extends DurableObject<Env> {
       return;
     }
 
-    console.log(`[DO] Resuming session: ${this.currentSessionId}`);
+    console.log(`[DO] Resuming session: ${this.sessionId}`);
 
     // Update last activity
     session.lastActivity = Date.now();
     session.pendingEffect = null;
     await this.ctx.storage.put(sessionKey, session);
 
-    // Continue graph execution with the result
-    if (!this.machine) {
-      this.machine = await loadMachine({
-        wasmModule: wasmModule as unknown as WebAssembly.Module,
-        debug: false,
-      });
-    }
+    // Always create a fresh machine instance when resuming to avoid
+    // stale in-memory state from a previous DO lifecycle
+    this.machine = await loadMachine({
+      wasmModule: wasmModule as unknown as WebAssembly.Module,
+      debug: false,
+    });
 
     const output = await this.machine.step(result);
-    await this.runGraphLoop(ws, this.currentSessionId, session.graphId, output);
+    await this.runGraphLoop(ws, this.sessionId, session.graphId, output);
   }
 
   /**
    * Handle reconnect message - restore session from storage
+   *
+   * Note: The client must reconnect to the same URL path (/session/:sessionId)
+   * for routing to reach this DO instance. The sessionId in the message is
+   * validated to match the URL-based session.
    */
   private async handleReconnect(ws: WebSocket, sessionId: string): Promise<void> {
+    // Validate that the requested sessionId matches this DO's session
+    if (sessionId !== this.sessionId) {
+      this.send(ws, {
+        type: "error",
+        message: "Session ID mismatch - reconnect to the correct session URL",
+        recoverable: false,
+      });
+      return;
+    }
+
     const sessionKey = `session:${sessionId}`;
     const session = await this.ctx.storage.get<SessionState>(sessionKey);
 
@@ -222,7 +262,6 @@ export class StateMachineDO extends DurableObject<Env> {
     }
 
     console.log(`[DO] Reconnecting to session: ${sessionId}`);
-    this.currentSessionId = sessionId;
 
     // Update last activity
     session.lastActivity = Date.now();
@@ -236,10 +275,10 @@ export class StateMachineDO extends DurableObject<Env> {
         sessionId,
       });
     } else {
-      // No pending effect - session might have been interrupted during server-side processing
+      // No pending effect - session state is inconsistent/corrupted
       this.send(ws, {
         type: "error",
-        message: "Session has no pending effect - cannot resume",
+        message: "Session state is inconsistent - cannot resume",
         recoverable: false,
       });
       await this.ctx.storage.delete(sessionKey);
@@ -299,9 +338,8 @@ export class StateMachineDO extends DurableObject<Env> {
       output = await this.machine!.step(result);
     }
 
-    // Graph completed - clean up session
+    // Graph completed - clean up session state (but keep sessionId for potential new graph)
     await this.ctx.storage.delete(sessionKey);
-    this.currentSessionId = null;
 
     // Check for completion or failure
     if (output.graphState.phase.type === "failed") {

@@ -118,20 +118,22 @@ Client                         Server
 If the connection drops while a graph is suspended (waiting for client input):
 
 1. `YieldMessage` and recoverable `ErrorMessage` include a `sessionId`
-2. Client reconnects to any worker endpoint
+2. Client reconnects to the **same URL path** (`/session/:sessionId`) - this routes to the same Durable Object instance
 3. Client sends `ReconnectMessage` with the `sessionId`
-4. Server retrieves session state from Durable Object storage
-5. Server resumes from the last yield point
+4. Server validates the sessionId matches, retrieves session state from storage
+5. Server re-sends the pending effect as a new `YieldMessage`
 6. Sessions expire after **5 minutes** of inactivity
 
+**Important**: The `sessionId` in the URL path determines which Durable Object handles the request. Reconnecting to a different path will route to a different DO that doesn't have the session data.
+
 ```
-Client                         Server
+Client                         Server (DO for session "abc123")
   │                              │
   │◄─── YieldMessage ────────────│  (sessionId: "abc123")
   │                              │
   ╳     (connection drops)       │
   │                              │
-  │──── WebSocket Connect ──────►│
+  │──── WS Connect /session/abc123 ─►│
   │──── ReconnectMessage ───────►│  (sessionId: "abc123")
   │                              │
   │◄─── YieldMessage ────────────│  (same effect, new chance to respond)
@@ -153,10 +155,11 @@ To prevent connection timeouts, clients should send `PingMessage` periodically:
 |----------|-----------------|
 | Invalid JSON | `ErrorMessage` with `recoverable: false` |
 | Unknown message type | `ErrorMessage` with `recoverable: false` |
-| Unknown graph ID | `ErrorMessage` with `recoverable: false` |
-| Effect execution failed | `ErrorMessage` with `recoverable: true` and `sessionId` |
+| Invalid/empty graph ID | `ErrorMessage` with `recoverable: false` |
+| Effect execution failed | `YieldMessage` with the failed effect (client can retry) |
 | Session expired | `ErrorMessage` with `recoverable: false` |
-| Internal error | `ErrorMessage` with `recoverable: false` |
+| Session state inconsistent | `ErrorMessage` with `recoverable: false` |
+| Internal error | `ErrorMessage` with `recoverable: true` and `sessionId` (if session exists) |
 
 ## Session Storage
 
@@ -174,6 +177,9 @@ interface SessionState {
 Storage key: `session:<sessionId>`
 
 Sessions are cleaned up:
-- After 5 minutes of inactivity (via DO alarm)
+- Via DO alarm that checks for and removes sessions inactive for 5+ minutes
+- The alarm reschedules itself while active sessions remain
 - When graph completes successfully
-- When unrecoverable error occurs
+- When session state becomes inconsistent
+
+**Note**: WASM machine state is kept in-memory within the DO instance. If the DO instance is evicted, the in-memory state is lost. Session storage preserves the pending effect for reconnection, but full graph state restoration requires the DO to remain active.
