@@ -8,7 +8,6 @@
 import { DurableObject } from "cloudflare:workers";
 import { loadMachine, type GraphMachine } from "./loader.js";
 import type {
-  SerializableEffect,
   EffectResult,
   ClientMessage,
   ServerMessage,
