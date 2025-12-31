@@ -10,6 +10,7 @@ module WireTypesSpec (spec) where
 import Test.Hspec
 import Data.Aeson (encode, decode, object, (.=), Value(..))
 import Data.Aeson.KeyMap qualified as KM
+import Data.Vector qualified as V
 
 import Tidepool.Wasm.WireTypes
 
@@ -19,6 +20,7 @@ spec = do
   serializableEffectSpec
   effectResultSpec
   stepOutputSpec
+  graphStateSpec
   habiticaEffectSpec
 
 
@@ -111,7 +113,7 @@ stepOutputSpec = describe "StepOutput" $ do
           { soEffect = Nothing
           , soDone = True
           , soStepResult = Just (Number 42)
-          , soGraphState = GraphState (PhaseCompleted (Number 42)) ["compute"]
+          , soGraphState = GraphState (PhaseCompleted (Number 42)) []
           }
     decode (encode output) `shouldBe` Just output
 
@@ -139,6 +141,51 @@ stepOutputSpec = describe "StepOutput" $ do
           Just (Object effObj) ->
             KM.lookup "type" effObj `shouldBe` Just (String "LogInfo")
           _ -> expectationFailure "Expected effect object"
+        -- Verify graphState is present
+        case KM.lookup "graphState" obj of
+          Just (Object gsObj) ->
+            KM.lookup "completedNodes" gsObj `shouldBe` Just (Array V.empty)
+          _ -> expectationFailure "Expected graphState object"
+      _ -> expectationFailure "Expected JSON object"
+
+
+graphStateSpec :: Spec
+graphStateSpec = describe "GraphState" $ do
+
+  it "round-trips GraphState with PhaseIdle" $ do
+    let gs = GraphState PhaseIdle []
+    decode (encode gs) `shouldBe` Just gs
+
+  it "round-trips GraphState with PhaseInNode" $ do
+    let gs = GraphState (PhaseInNode "compute") []
+    decode (encode gs) `shouldBe` Just gs
+
+  it "round-trips GraphState with PhaseTransitioning" $ do
+    let gs = GraphState (PhaseTransitioning "entry" "compute") []
+    decode (encode gs) `shouldBe` Just gs
+
+  it "round-trips GraphState with PhaseCompleted" $ do
+    let gs = GraphState (PhaseCompleted (Number 42)) ["compute"]
+    decode (encode gs) `shouldBe` Just gs
+
+  it "round-trips GraphState with PhaseFailed" $ do
+    let gs = GraphState (PhaseFailed "something went wrong") []
+    decode (encode gs) `shouldBe` Just gs
+
+  it "round-trips GraphState with multiple completed nodes" $ do
+    let gs = GraphState (PhaseCompleted (String "done")) ["entry", "compute", "validate"]
+    decode (encode gs) `shouldBe` Just gs
+
+  it "encodes ExecutionPhase with correct type field" $ do
+    let gs = GraphState (PhaseInNode "mynode") []
+        json = decode (encode gs) :: Maybe Value
+    case json of
+      Just (Object obj) ->
+        case KM.lookup "phase" obj of
+          Just (Object phaseObj) -> do
+            KM.lookup "type" phaseObj `shouldBe` Just (String "in_node")
+            KM.lookup "nodeName" phaseObj `shouldBe` Just (String "mynode")
+          _ -> expectationFailure "Expected phase object"
       _ -> expectationFailure "Expected JSON object"
 
 
