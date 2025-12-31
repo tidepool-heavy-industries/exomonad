@@ -10,6 +10,7 @@
 
 import * as fs from "fs";
 import * as path from "path";
+import { fileURLToPath } from "url";
 import type {
   SerializableEffect,
   EffectResult,
@@ -263,10 +264,20 @@ function validateStepOutput(output: unknown, index: number): boolean {
       console.error(`  [${index}] Invalid effect`);
       return false;
     }
+    // stepResult should be null when not done
+    if ("stepResult" in o && o.stepResult !== null) {
+      console.error(`  [${index}] done=false but stepResult is not null`);
+      return false;
+    }
   } else {
     // done=true: effect should be null
     if (o.effect !== null) {
       console.error(`  [${index}] done=true but effect is not null`);
+      return false;
+    }
+    // stepResult field should be present when done
+    if (!("stepResult" in o)) {
+      console.error(`  [${index}] done=true but stepResult field missing`);
       return false;
     }
   }
@@ -292,6 +303,7 @@ interface GoldenSamples {
 }
 
 function main(): void {
+  const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const samplesPath = path.join(__dirname, "golden-samples.json");
 
   if (!fs.existsSync(samplesPath)) {

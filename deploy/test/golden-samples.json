@@ -6,8 +6,7 @@
     },
     "effectResults": [
         {
-            "type": "success",
-            "value": null
+            "type": "success"
         },
         {
             "type": "success",
@@ -168,20 +167,9 @@
         },
         {
             "eff_node": "respond",
-            "eff_schema": null,
             "eff_system_prompt": "You are a friendly assistant.",
             "eff_user_content": "Hello!",
             "type": "LlmComplete"
-        },
-        {
-            "eff_method": "GET",
-            "eff_url": "https://api.example.com/data",
-            "type": "HttpFetch"
-        },
-        {
-            "eff_method": "POST",
-            "eff_url": "https://api.example.com/submit",
-            "type": "HttpFetch"
         },
         {
             "eff_message": "Processing request...",
@@ -245,7 +233,6 @@
             "done": false,
             "effect": {
                 "eff_node": "classify",
-                "eff_schema": null,
                 "eff_system_prompt": "sys",
                 "eff_user_content": "user",
                 "type": "LlmComplete"

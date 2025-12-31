@@ -54,7 +54,7 @@ serializableEffectConformanceSpec = describe "SerializableEffect matches protoco
             _ -> expectationFailure "Expected eff_schema to be an object"
         _ -> expectationFailure "Expected JSON object"
 
-    it "encodes null schema as JSON null" $ do
+    it "omits eff_schema field when Nothing" $ do
       let effect = EffLlmComplete
             { effNode = "node"
             , effSystemPrompt = "sys"
@@ -64,7 +64,7 @@ serializableEffectConformanceSpec = describe "SerializableEffect matches protoco
           json = decode (encode effect) :: Maybe Value
       case json of
         Just (Object obj) -> do
-          KM.lookup "eff_schema" obj `shouldBe` Just Null
+          KM.lookup "eff_schema" obj `shouldBe` Nothing
         _ -> expectationFailure "Expected JSON object"
 
   describe "LogInfoEffect" $ do
@@ -105,13 +105,13 @@ effectResultConformanceSpec = describe "EffectResult matches protocol.ts" $ do
           KM.lookup "value" obj `shouldBe` Just (Number 42)
         _ -> expectationFailure "Expected JSON object"
 
-    it "encodes null value correctly" $ do
+    it "omits value field when Nothing" $ do
       let result = ResSuccess Nothing
           json = decode (encode result) :: Maybe Value
       case json of
         Just (Object obj) -> do
           KM.lookup "type" obj `shouldBe` Just (String "success")
-          KM.lookup "value" obj `shouldBe` Just Null
+          KM.lookup "value" obj `shouldBe` Nothing
         _ -> expectationFailure "Expected JSON object"
 
   describe "error" $ do

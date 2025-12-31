@@ -42,7 +42,7 @@ test-protocol-conformance:
     cabal run generate-golden-samples
     @echo ""
     @echo "── Verifying TypeScript can parse samples ──"
-    cd deploy && npx ts-node test/verify-protocol.ts
+    cd deploy && npx tsx test/verify-protocol.ts
 
 # ─────────────────────────────────────────────────────────────
 # Pre-commit checks

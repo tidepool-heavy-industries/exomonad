@@ -68,13 +68,12 @@ data SerializableEffect
   deriving stock (Show, Eq, Generic)
 
 instance ToJSON SerializableEffect where
-  toJSON (EffLlmComplete node sys user schema) = object
+  toJSON (EffLlmComplete node sys user schema) = object $
     [ "type" .= ("LlmComplete" :: Text)
     , "eff_node" .= node
     , "eff_system_prompt" .= sys
     , "eff_user_content" .= user
-    , "eff_schema" .= schema
-    ]
+    ] ++ maybe [] (\s -> ["eff_schema" .= s]) schema
   toJSON (EffLogInfo msg) = object
     [ "type" .= ("LogInfo" :: Text)
     , "eff_message" .= msg
@@ -122,10 +121,9 @@ data EffectResult
   deriving stock (Show, Eq, Generic)
 
 instance ToJSON EffectResult where
-  toJSON (ResSuccess val) = object
+  toJSON (ResSuccess val) = object $
     [ "type" .= ("success" :: Text)
-    , "value" .= val
-    ]
+    ] ++ maybe [] (\v -> ["value" .= v]) val
   toJSON (ResError msg) = object
     [ "type" .= ("error" :: Text)
     , "message" .= msg

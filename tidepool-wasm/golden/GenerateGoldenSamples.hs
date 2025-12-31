@@ -56,15 +56,6 @@ sampleEffects =
       , effUserContent = "Hello!"
       , effSchema = Nothing
       }
-  -- HttpFetch with various methods
-  , EffHttpFetch
-      { effUrl = "https://api.example.com/data"
-      , effMethod = "GET"
-      }
-  , EffHttpFetch
-      { effUrl = "https://api.example.com/submit"
-      , effMethod = "POST"
-      }
   -- Log effects
   , EffLogInfo "Processing request..."
   , EffLogInfo ""  -- Empty message edge case

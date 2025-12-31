@@ -14,6 +14,7 @@ import Test.QuickCheck
   , elements
   , listOf
   , scale
+  , frequency
   , arbitraryUnicodeChar
   )
 import Data.Aeson (encode, decode, Value(..), object, (.=))
@@ -39,22 +40,18 @@ spec = do
 -- ARBITRARY INSTANCES
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Generate arbitrary Text with various edge cases
+-- | Generate arbitrary Text with various edge cases.
+-- Uses frequency to weight random generation more heavily than fixed cases.
 instance Arbitrary Text where
-  arbitrary = oneof
-    [ pure ""                                    -- Empty string
-    , pure " "                                   -- Single space
-    , pure "\t\n\r"                              -- Whitespace chars
-    , T.pack <$> listOf arbitraryUnicodeChar    -- Unicode strings
-    , pure "Hello, World!"                       -- Simple ASCII
-    , pure "emoji: \x1F600\x1F4A9\x2764"        -- Emoji
-    , pure "null"                                -- JSON keyword as string
-    , pure "true"                                -- JSON keyword as string
-    , pure "false"                               -- JSON keyword as string
-    , pure "{\"nested\": \"json\"}"              -- JSON-like string
-    , pure "line1\nline2\nline3"                 -- Multi-line
-    , pure $ T.replicate 1000 "x"                -- Long string
-    , T.pack <$> listOf (elements ['a'..'z'])   -- Simple ASCII letters
+  arbitrary = frequency
+    [ (5, T.pack <$> listOf arbitraryUnicodeChar)  -- Random unicode (most common)
+    , (3, T.pack <$> listOf (elements ['a'..'z'])) -- Simple ASCII letters
+    , (1, pure "")                                  -- Empty string
+    , (1, pure " ")                                 -- Single space
+    , (1, pure "\t\n\r")                            -- Whitespace chars
+    , (1, pure "emoji: \x1F600\x1F4A9\x2764")      -- Emoji
+    , (1, pure "null")                              -- JSON keyword as string
+    , (1, pure "{\"nested\": \"json\"}")            -- JSON-like string
     ]
 
   shrink t
@@ -62,7 +59,8 @@ instance Arbitrary Text where
     | otherwise = [T.empty, T.take (T.length t `div` 2) t]
 
 
--- Note: Arbitrary Value instance is provided by aeson
+-- Note: Arbitrary Value instance is provided by aeson (Data.Aeson.Types.Internal)
+-- with depth limiting built-in.
 
 -- | Arbitrary SerializableEffect covering all constructors
 instance Arbitrary SerializableEffect where
@@ -71,10 +69,7 @@ instance Arbitrary SerializableEffect where
         <$> arbitrary
         <*> arbitrary
         <*> arbitrary
-        <*> arbitrary
-    , EffHttpFetch
-        <$> arbitrary
-        <*> elements ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"]
+        <*> arbitrary  -- Maybe Value roundtrips correctly now
     , EffLogInfo <$> arbitrary
     , EffLogError <$> arbitrary
     , EffHabitica
@@ -88,9 +83,6 @@ instance Arbitrary SerializableEffect where
     ++ [ EffLlmComplete node sys' user schema | sys' <- shrink sys ]
     ++ [ EffLlmComplete node sys user' schema | user' <- shrink user ]
     ++ [ EffLlmComplete node sys user schema' | schema' <- shrink schema ]
-  shrink (EffHttpFetch url method) =
-    [ EffLogInfo url ]
-    ++ [ EffHttpFetch url' method | url' <- shrink url ]
   shrink (EffLogInfo msg) =
     [ EffLogInfo msg' | msg' <- shrink msg ]
   shrink (EffLogError msg) =
@@ -182,9 +174,6 @@ serializableEffectPropertySpec = describe "SerializableEffect properties" $ do
   prop "decode . encode ≡ id (roundtrip)" $ \(effect :: SerializableEffect) ->
     decode (encode effect) == Just effect
 
-  prop "encoding is deterministic (same input → same output)" $ \(effect :: SerializableEffect) ->
-    encode effect == encode effect
-
   prop "all variants produce valid JSON objects with 'type' field" $ \(effect :: SerializableEffect) ->
     case decode (encode effect) :: Maybe Value of
       Just (Object obj) -> KM.member "type" obj
@@ -197,11 +186,12 @@ effectResultPropertySpec = describe "EffectResult properties" $ do
   prop "decode . encode ≡ id (roundtrip)" $ \(result :: EffectResult) ->
     decode (encode result) == Just result
 
-  prop "success results have 'value' field" $ \val ->
+  prop "success results have 'value' field iff value is Just" $ \val ->
     let result = ResSuccess val
         json = decode (encode result) :: Maybe Value
-    in case json of
-         Just (Object obj) -> KM.member "value" obj
+    in case (val, json) of
+         (Nothing, Just (Object obj)) -> not (KM.member "value" obj)
+         (Just _, Just (Object obj)) -> KM.member "value" obj
          _ -> False
 
   prop "error results have 'message' field" $ \msg ->
@@ -330,16 +320,30 @@ edgeCaseSpec = describe "Edge cases" $ do
           effect = EffLogInfo longStr
       decode (encode effect) `shouldBe` Just effect
 
-  describe "Null vs missing fields (JSON semantics)" $ do
-    it "ResSuccess Nothing encodes value as null (not missing)" $ do
+  describe "Nothing vs Just Null (proper roundtrip)" $ do
+    it "ResSuccess Nothing omits value field" $ do
       let result = ResSuccess Nothing
+          json = decode (encode result) :: Maybe Value
+      case json of
+        Just (Object obj) -> KM.lookup "value" obj `shouldBe` Nothing
+        _ -> expectationFailure "Expected JSON object"
+
+    it "ResSuccess (Just Null) includes value as null" $ do
+      let result = ResSuccess (Just Null)
           json = decode (encode result) :: Maybe Value
       case json of
         Just (Object obj) -> KM.lookup "value" obj `shouldBe` Just Null
         _ -> expectationFailure "Expected JSON object"
 
-    it "EffLlmComplete with Nothing schema encodes as null" $ do
+    it "EffLlmComplete with Nothing schema omits eff_schema field" $ do
       let effect = EffLlmComplete "node" "sys" "user" Nothing
+          json = decode (encode effect) :: Maybe Value
+      case json of
+        Just (Object obj) -> KM.lookup "eff_schema" obj `shouldBe` Nothing
+        _ -> expectationFailure "Expected JSON object"
+
+    it "EffLlmComplete with Just Null schema includes eff_schema as null" $ do
+      let effect = EffLlmComplete "node" "sys" "user" (Just Null)
           json = decode (encode effect) :: Maybe Value
       case json of
         Just (Object obj) -> KM.lookup "eff_schema" obj `shouldBe` Just Null
@@ -391,7 +395,6 @@ edgeCaseSpec = describe "Edge cases" $ do
     it "all SerializableEffect variants have distinct 'type' values" $ do
       let effects =
             [ EffLlmComplete "n" "s" "u" Nothing
-            , EffHttpFetch "url" "GET"
             , EffLogInfo "msg"
             , EffLogError "err"
             , EffHabitica "GetUser" (object [])

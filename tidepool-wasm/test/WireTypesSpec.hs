@@ -78,12 +78,12 @@ serializableEffectSpec = describe "SerializableEffect" $ do
           _ -> expectationFailure "Expected eff_schema to be an object"
       _ -> expectationFailure "Expected JSON object"
 
-  it "encodes EffLlmComplete with null schema when Nothing" $ do
+  it "omits eff_schema field when Nothing" $ do
     let effect = EffLlmComplete "node" "sys" "user" Nothing
         json = decode (encode effect) :: Maybe Value
     case json of
       Just (Object obj) ->
-        KM.lookup "eff_schema" obj `shouldBe` Just Null
+        KM.lookup "eff_schema" obj `shouldBe` Nothing
       _ -> expectationFailure "Expected JSON object"
 
 
