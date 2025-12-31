@@ -25,7 +25,7 @@ import qualified Effectful.State.Static.Local as EState
 import Tidying.Agent (tidyingRun)
 import Tidying.Loop (TidyingEvent(..))
 import Tidying.State (SessionState(..))
-import Tidying.Question (Question(..), Answer(..), ItemDisposition(..))
+import Tidepool.Question (Question(..), Answer(..), ItemDisposition(..))
 import Tidying.Tools (makeTidyingDispatcher)
 import Tidepool.Effect
   ( State(..)

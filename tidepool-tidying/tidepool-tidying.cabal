@@ -24,7 +24,6 @@ library
         Tidying.Templates
         Tidying.Events
         Tidying.Loop
-        Tidying.Question
         Tidying.Tools
         Tidying.GUI.App
         Tidying.GUI.Runner

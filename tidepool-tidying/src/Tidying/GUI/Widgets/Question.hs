@@ -39,7 +39,7 @@ import Tidepool.GUI.Core
   , safeSubmitResponse
   , RequestResponse(..)
   )
-import Tidying.Question
+import Tidepool.Question
   ( Question(..)
   , Answer(..)
   , Choice(..)

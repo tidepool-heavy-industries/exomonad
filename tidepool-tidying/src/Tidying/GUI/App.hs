@@ -21,7 +21,7 @@ import Graphics.UI.Threepenny.Core
 import qualified Graphics.UI.Threepenny as UI
 
 import Tidying.State (Phase(..))
-import Tidying.Question (Question)
+import Tidepool.Question (Question)
 import Tidying.GUI.Theme (tidyingTheme)
 import Tidying.GUI.Widgets.Chat (chatPane, updateChatPane, typingIndicator)
 import Tidying.GUI.Widgets.Input (textInputWithPhoto)

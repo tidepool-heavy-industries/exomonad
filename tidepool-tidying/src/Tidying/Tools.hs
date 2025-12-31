@@ -57,7 +57,7 @@ import Tidepool.Effect
   , ToolResult(..)
   )
 import Tidepool.Schema (objectSchema, arraySchema, emptySchema, schemaToValue, describeField, SchemaType(..))
-import Tidying.Question as Q
+import Tidepool.Question as Q
 import Tidying.State (SessionState(..), PhaseData(..))
 import Tidying.Events (TidyingEvent(..))
 import Tidying.Types (SpaceFunction(..))

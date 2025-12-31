@@ -78,8 +78,8 @@ module Tidying
     -- * Templates
   , renderActPrompt
 
-    -- * Question DSL (Tidying.Question)
-    -- For ItemDisposition type, import Tidying.Question directly
+    -- * Question DSL (from Tidepool.Question)
+    -- For ItemDisposition type, import Tidepool.Question directly
   , Question(..)
   , Answer(..)
 
@@ -95,5 +95,5 @@ import Tidying.Agent (tidying, tidyingRun)
 import Tidying.Context
 import Tidying.Output
 import Tidying.Templates
-import Tidying.Question (Question(..), Answer(..))
+import Tidepool.Question (Question(..), Answer(..))
 import Tidying.Tools (tidyingTools, makeTidyingDispatcher)
