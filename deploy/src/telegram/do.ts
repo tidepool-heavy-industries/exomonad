@@ -270,7 +270,8 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
    * Start a new StateMachineDO session with the HabiticaRoutingGraph.
    *
    * Converts the incoming message to RawInput and initiates graph execution.
-   * The graph will call back to this TelegramDO for Telegram effects.
+   * TelegramDO then polls the StateMachineDO (via HTTP /resume) to retrieve
+   * and execute Telegram-related effects.
    */
   private async startGraphSession(
     chatId: number,
