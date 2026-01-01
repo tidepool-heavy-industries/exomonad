@@ -12,6 +12,7 @@ import type {
   ClientMessage,
   ServerMessage,
   SessionState,
+  SerializableEffect,
 } from "./protocol.js";
 import { SESSION_TIMEOUT_MS } from "./protocol.js";
 import { executeEffect, type Env as HandlersEnv } from "./handlers/index.js";
@@ -43,16 +44,28 @@ export class StateMachineDO extends DurableObject<Env> {
   private sessionId: string | null = null;
 
   /**
-   * Handle incoming requests - expect WebSocket upgrade
+   * Handle incoming requests - WebSocket upgrade or HTTP API
    */
   async fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+
+    // HTTP API for DO-to-DO communication (e.g., TelegramDO → StateMachineDO)
+    if (request.method === "POST") {
+      switch (url.pathname) {
+        case "/start":
+          return this.handleHttpStart(request);
+        case "/resume":
+          return this.handleHttpResume(request);
+      }
+    }
+
+    // WebSocket upgrade for direct client connections
     const upgradeHeader = request.headers.get("Upgrade");
     if (upgradeHeader !== "websocket") {
-      return new Response("Expected WebSocket upgrade", { status: 426 });
+      return new Response("Expected WebSocket upgrade or POST to /start|/resume", { status: 426 });
     }
 
     // Extract session ID from URL path (matches the idFromName routing)
-    const url = new URL(request.url);
     const match = url.pathname.match(/^\/session\/(.+)$/);
     if (match) {
       this.sessionId = match[1];
@@ -66,6 +79,183 @@ export class StateMachineDO extends DurableObject<Env> {
     console.log(`[DO] WebSocket connection accepted, sessionId: ${this.sessionId}`);
 
     return new Response(null, { status: 101, webSocket: client });
+  }
+
+  /**
+   * Handle HTTP /start - Start graph execution (for DO-to-DO calls).
+   *
+   * Runs the graph loop until it yields a Telegram effect or completes.
+   * Non-Telegram effects (Log, LLM, Habitica) are handled internally.
+   */
+  private async handleHttpStart(request: Request): Promise<Response> {
+    const body = await request.json() as {
+      graphId: string;
+      input: unknown;
+      telegramChatId?: number;
+    };
+
+    const { graphId, input } = body;
+
+    // Validate graphId
+    if (!graphId || typeof graphId !== "string" || graphId.trim() === "") {
+      return Response.json(
+        { type: "error", message: "Invalid graphId: must be a non-empty string" },
+        { status: 400 }
+      );
+    }
+
+    // Generate session ID if not set
+    if (!this.sessionId) {
+      this.sessionId = crypto.randomUUID();
+    }
+    console.log(`[DO] HTTP start: sessionId=${this.sessionId}, graphId=${graphId}`);
+
+    try {
+      // Load WASM if not already loaded
+      if (!this.machine) {
+        this.machine = await loadMachine({
+          wasmModule: wasmModule as unknown as WebAssembly.Module,
+          debug: false,
+        });
+      }
+
+      // Initialize the graph
+      const output = await this.machine.initialize(input);
+
+      // Run until Telegram effect or completion
+      return this.runHttpGraphLoop(output, graphId);
+    } catch (err) {
+      console.error("[DO] HTTP start error:", err);
+      return Response.json({
+        type: "error",
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  /**
+   * Handle HTTP /resume - Continue graph after effect result.
+   */
+  private async handleHttpResume(request: Request): Promise<Response> {
+    const body = await request.json() as { result: EffectResult };
+    const { result } = body;
+
+    if (!this.sessionId) {
+      return Response.json(
+        { type: "error", message: "No active session to resume" },
+        { status: 400 }
+      );
+    }
+
+    const sessionKey = `session:${this.sessionId}`;
+    const session = await this.ctx.storage.get<SessionState>(sessionKey);
+
+    if (!session) {
+      return Response.json(
+        { type: "error", message: "Session not found or expired" },
+        { status: 400 }
+      );
+    }
+
+    console.log(`[DO] HTTP resume: sessionId=${this.sessionId}`);
+
+    try {
+      // Update session
+      session.lastActivity = Date.now();
+      session.pendingEffect = null;
+      await this.ctx.storage.put(sessionKey, session);
+
+      // Ensure machine is loaded
+      if (!this.machine) {
+        this.machine = await loadMachine({
+          wasmModule: wasmModule as unknown as WebAssembly.Module,
+          debug: false,
+        });
+      }
+
+      const output = await this.machine.step(result);
+      return this.runHttpGraphLoop(output, session.graphId);
+    } catch (err) {
+      console.error("[DO] HTTP resume error:", err);
+      return Response.json({
+        type: "error",
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  /**
+   * Run graph loop for HTTP mode.
+   *
+   * Handles non-Telegram effects internally (Log, LLM, Habitica).
+   * Yields to caller for Telegram effects.
+   */
+  private async runHttpGraphLoop(
+    output: Awaited<ReturnType<GraphMachine["initialize"]>>,
+    graphId: string
+  ): Promise<Response> {
+    const sessionId = this.sessionId!;
+    const sessionKey = `session:${sessionId}`;
+
+    while (!output.done && output.effect) {
+      const effect = output.effect;
+
+      // Check if this is a Telegram effect - yield to caller
+      if (this.isTelegramEffect(effect)) {
+        // Save session state for resume
+        const session: SessionState = {
+          graphId,
+          machineState: null,
+          pendingEffect: effect,
+          lastActivity: Date.now(),
+        };
+        await this.ctx.storage.put(sessionKey, session);
+        await this.scheduleCleanupAlarm();
+
+        return Response.json({
+          type: "yield",
+          effect,
+          sessionId,
+        });
+      }
+
+      // Handle non-Telegram effects internally
+      const result = await executeEffect(effect, this.env);
+
+      if (result.type === "error") {
+        console.error(`[DO] Effect ${effect.type} failed:`, result.message);
+        // Continue anyway - let the graph decide how to handle errors
+      }
+
+      // Step with the result
+      output = await this.machine!.step(result);
+    }
+
+    // Graph completed - clean up
+    await this.ctx.storage.delete(sessionKey);
+
+    if (output.graphState.phase.type === "failed") {
+      return Response.json({
+        type: "error",
+        message: output.graphState.phase.error,
+      });
+    }
+
+    return Response.json({
+      type: "done",
+      result: output.stepResult,
+    });
+  }
+
+  /**
+   * Check if an effect is a Telegram effect.
+   */
+  private isTelegramEffect(effect: SerializableEffect): boolean {
+    return (
+      effect.type === "telegram_send" ||
+      effect.type === "telegram_receive" ||
+      effect.type === "telegram_try_receive"
+    );
   }
 
   /**

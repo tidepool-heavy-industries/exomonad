@@ -33,6 +33,15 @@ import {
 } from "../handlers/telegram.js";
 
 /**
+ * Result from StateMachineDO's /start and /resume endpoints.
+ * Mirrors the ServerMessage type but for HTTP responses.
+ */
+type GraphStartResult =
+  | { type: "yield"; effect: SerializableEffect; sessionId: string }
+  | { type: "done"; result: unknown }
+  | { type: "error"; message: string };
+
+/**
  * Environment bindings for TelegramDO.
  */
 export interface TelegramDOEnv extends TelegramEnv {
@@ -249,13 +258,296 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
 
     await this.saveState();
 
-    // If no active session, start echo mode (for testing)
-    // TODO: Replace with StateMachineDO integration
+    // If no active session, start a new StateMachineDO session
     if (!state.wasmSessionId) {
-      await this.handleEchoMode(chatId, incomingMessage);
+      await this.startGraphSession(chatId, incomingMessage);
     }
 
     return new Response("OK");
+  }
+
+  /**
+   * Start a new StateMachineDO session with the HabiticaRoutingGraph.
+   *
+   * Converts the incoming message to RawInput and initiates graph execution.
+   * The graph will call back to this TelegramDO for Telegram effects.
+   */
+  private async startGraphSession(
+    chatId: number,
+    message: TelegramIncomingMessage
+  ): Promise<void> {
+    // Convert message to RawInput text
+    const rawInput = this.messageToRawInput(message);
+    if (!rawInput) {
+      console.log(`[TelegramDO] Message type ${message.type} cannot be converted to RawInput`);
+      await sendMessage(
+        this.env.TELEGRAM_TOKEN,
+        chatId,
+        "Sorry, I can only process text messages right now."
+      );
+      return;
+    }
+
+    // Generate session ID based on chat ID + timestamp for uniqueness
+    const sessionId = `telegram-${chatId}-${Date.now()}`;
+    console.log(`[TelegramDO] Starting graph session: ${sessionId}`);
+
+    // Show typing indicator while processing
+    await sendTypingAction(this.env.TELEGRAM_TOKEN, chatId);
+
+    // Store session ID before starting (in case we need to resume)
+    if (this.state) {
+      this.state.wasmSessionId = sessionId;
+      this.state.pendingMessages = []; // Clear pending since we're processing
+      await this.saveState();
+    }
+
+    try {
+      // Get StateMachineDO stub
+      const doId = this.env.STATE_MACHINE.idFromName(sessionId);
+      const stub = this.env.STATE_MACHINE.get(doId);
+
+      // Start the graph via HTTP (not WebSocket)
+      // POST /start initiates graph execution and returns first effect or result
+      const startResponse = await stub.fetch(
+        new Request(`https://do/start`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            graphId: "HabiticaRoutingGraph",
+            input: { rawInput }, // RawInput is a newtype, pass as object
+            telegramChatId: chatId,
+          }),
+        })
+      );
+
+      if (!startResponse.ok) {
+        throw new Error(`StateMachineDO start failed: ${startResponse.status}`);
+      }
+
+      const startResult = await startResponse.json() as GraphStartResult;
+      console.log(`[TelegramDO] Graph started, result type: ${startResult.type}`);
+
+      // Handle the graph execution loop
+      await this.handleGraphResult(chatId, sessionId, stub, startResult);
+    } catch (err) {
+      console.error(`[TelegramDO] Graph execution error:`, err);
+      await sendMessage(
+        this.env.TELEGRAM_TOKEN,
+        chatId,
+        `Sorry, something went wrong: ${err instanceof Error ? err.message : String(err)}`
+      );
+
+      // Clear session on error
+      if (this.state) {
+        this.state.wasmSessionId = null;
+        await this.saveState();
+      }
+    }
+  }
+
+  /**
+   * Convert incoming message to RawInput text for the graph.
+   * Returns null if message type is not supported.
+   */
+  private messageToRawInput(message: TelegramIncomingMessage): string | null {
+    switch (message.type) {
+      case "text":
+        return message.text;
+      case "photo":
+        // Could potentially use caption, but photos need special handling
+        return message.caption ?? null;
+      case "document":
+        // Documents not supported for task extraction
+        return null;
+      case "button_click":
+        // Button clicks are handled separately in the confirm flow
+        return null;
+      default: {
+        const _exhaustive: never = message;
+        console.error(`[TelegramDO] Unknown message type:`, _exhaustive);
+        return null;
+      }
+    }
+  }
+
+  /**
+   * Handle graph execution results, processing effects as needed.
+   *
+   * This is the main loop that:
+   * 1. Receives effects from StateMachineDO
+   * 2. Handles Telegram effects locally
+   * 3. Sends results back to resume graph execution
+   *
+   * StateMachineDO handles non-Telegram effects (Log, LLM, Habitica) internally.
+   * It only yields Telegram effects to us for handling.
+   */
+  private async handleGraphResult(
+    chatId: number,
+    sessionId: string,
+    stub: { fetch: (request: Request) => Promise<Response> },
+    result: GraphStartResult
+  ): Promise<void> {
+    let currentResult = result;
+
+    while (true) {
+      switch (currentResult.type) {
+        case "done": {
+          // Graph completed successfully
+          console.log(`[TelegramDO] Graph completed:`, currentResult.result);
+          if (this.state) {
+            this.state.wasmSessionId = null;
+            await this.saveState();
+          }
+          return;
+        }
+
+        case "error": {
+          // Graph failed
+          console.error(`[TelegramDO] Graph error:`, currentResult.message);
+          await sendMessage(
+            this.env.TELEGRAM_TOKEN,
+            chatId,
+            `Error: ${currentResult.message}`
+          );
+          if (this.state) {
+            this.state.wasmSessionId = null;
+            await this.saveState();
+          }
+          return;
+        }
+
+        case "yield": {
+          // Effect needs to be handled - dispatch based on effect type
+          const effect = currentResult.effect;
+          console.log(`[TelegramDO] Handling effect: ${effect.type}`);
+
+          const handleResult = await this.handleYieldedEffect(effect, chatId);
+
+          switch (handleResult.outcome) {
+            case "blocking":
+              // Receive effect is waiting for messages - exit loop
+              console.log(`[TelegramDO] Receive blocking, waiting for message`);
+              return;
+
+            case "handled":
+              // Effect handled, resume graph with result
+              break;
+          }
+
+          // Resume graph with the result
+          const resumeResponse = await stub.fetch(
+            new Request(`https://do/resume`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ result: handleResult.result }),
+            })
+          );
+
+          if (!resumeResponse.ok) {
+            throw new Error(`StateMachineDO resume failed: ${resumeResponse.status}`);
+          }
+
+          currentResult = await resumeResponse.json() as GraphStartResult;
+          break;
+        }
+
+        default: {
+          const _exhaustive: never = currentResult;
+          throw new Error(`Unknown result type: ${JSON.stringify(_exhaustive)}`);
+        }
+      }
+    }
+  }
+
+  /**
+   * Handle a yielded effect from StateMachineDO.
+   *
+   * Returns either:
+   * - { outcome: "handled", result: EffectResult } - effect processed, resume with result
+   * - { outcome: "blocking" } - Receive effect waiting for messages
+   */
+  private async handleYieldedEffect(
+    effect: SerializableEffect,
+    chatId: number
+  ): Promise<
+    | { outcome: "handled"; result: EffectResult }
+    | { outcome: "blocking" }
+  > {
+    const state = await this.loadState();
+    const ctx: TelegramHandlerContext = {
+      chatId,
+      pendingMessages: state.pendingMessages,
+    };
+
+    switch (effect.type) {
+      // ─────────────────────────────────────────────────────────────────────
+      // Telegram effects - handled locally by TelegramDO
+      // ─────────────────────────────────────────────────────────────────────
+
+      case "telegram_send": {
+        const result = await handleTelegramSend(effect, this.env, ctx);
+        return { outcome: "handled", result };
+      }
+
+      case "telegram_receive": {
+        const receiveResult = handleTelegramReceive(effect, ctx);
+        if (receiveResult.type === "yield") {
+          // Block until messages arrive
+          state.waitingForReceive = true;
+          state.pendingEffect = effect;
+          await this.saveState();
+          return { outcome: "blocking" };
+        }
+        // Messages available
+        state.pendingMessages = [];
+        await this.saveState();
+        return { outcome: "handled", result: receiveResult.result };
+      }
+
+      case "telegram_try_receive": {
+        const result = handleTelegramTryReceive(effect, ctx);
+        state.pendingMessages = [];
+        await this.saveState();
+        return { outcome: "handled", result };
+      }
+
+      // ─────────────────────────────────────────────────────────────────────
+      // Internal effects - StateMachineDO handles these, shouldn't reach here
+      // Return error result to let the graph decide how to proceed
+      // ─────────────────────────────────────────────────────────────────────
+
+      case "LogInfo":
+      case "LogError":
+      case "LlmComplete":
+      case "Habitica": {
+        console.error(
+          `[TelegramDO] Received internal effect "${effect.type}" that should be handled by StateMachineDO`
+        );
+        return {
+          outcome: "handled",
+          result: {
+            type: "error",
+            message: `Effect "${effect.type}" was unexpectedly yielded to TelegramDO`,
+          },
+        };
+      }
+
+      // ─────────────────────────────────────────────────────────────────────
+      // Exhaustive check - TypeScript errors if we miss a case
+      // ─────────────────────────────────────────────────────────────────────
+
+      default: {
+        const _exhaustive: never = effect;
+        return {
+          outcome: "handled",
+          result: {
+            type: "error",
+            message: `Unknown effect type: ${JSON.stringify(_exhaustive)}`,
+          },
+        };
+      }
+    }
   }
 
   /**
