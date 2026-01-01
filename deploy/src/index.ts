@@ -264,7 +264,8 @@ export class StateMachineDO extends DurableObject<Env> {
     return (
       effect.type === "telegram_send" ||
       effect.type === "telegram_receive" ||
-      effect.type === "telegram_try_receive"
+      effect.type === "telegram_try_receive" ||
+      effect.type === "TelegramConfirm"
     );
   }
 

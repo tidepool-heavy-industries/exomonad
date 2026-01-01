@@ -29,6 +29,7 @@ import {
   handleTelegramSend,
   handleTelegramReceive,
   handleTelegramTryReceive,
+  handleTelegramConfirm,
   type TelegramHandlerContext,
 } from "../handlers/telegram.js";
 
@@ -511,6 +512,32 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
         state.pendingMessages = [];
         await this.saveState();
         return { outcome: "handled", result };
+      }
+
+      case "TelegramConfirm": {
+        // Check if buttons were already sent (resuming after blocking)
+        const buttonsSent = state.pendingEffect?.type === "TelegramConfirm";
+
+        const confirmResult = await handleTelegramConfirm(
+          effect,
+          this.env,
+          ctx,
+          buttonsSent
+        );
+
+        if (confirmResult.type === "yield") {
+          // Block until button click arrives
+          state.waitingForReceive = true; // Reuse this flag for confirm too
+          state.pendingEffect = effect;
+          await this.saveState();
+          return { outcome: "blocking" };
+        }
+
+        // Button click received
+        state.pendingMessages = [];
+        state.pendingEffect = null;
+        await this.saveState();
+        return { outcome: "handled", result: confirmResult.result };
       }
 
       // ─────────────────────────────────────────────────────────────────────
