@@ -24,6 +24,7 @@ library
         DM.CharacterCreation
         DM.Graph
         DM.Graph.Types
+        DM.Graph.Handlers
         DM.GUI.App
         DM.GUI.Theme
         DM.GUI.Widgets.Stats

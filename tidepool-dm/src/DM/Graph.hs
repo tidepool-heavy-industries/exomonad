@@ -38,11 +38,10 @@ module DM.Graph
 import Data.Proxy (Proxy)
 import GHC.Generics (Generic)
 
-import Tidepool.Graph.Types (type (:@), Needs, UsesEffects)
+import Tidepool.Graph.Types (type (:@), Needs, UsesEffects, Exit)
 import Tidepool.Graph.Generic (GraphMode(..), type (:-))
 import qualified Tidepool.Graph.Generic as G (Entry, Exit, LogicNode)
-import Tidepool.Graph.Goto (Goto, To)
-import qualified Tidepool.Graph.Types as G (Exit)
+import Tidepool.Graph.Goto (Goto)
 
 import DM.Graph.Types
   ( PlayerInput
@@ -68,7 +67,7 @@ type DMSceneEffects =
   '[ Goto "action" ActionSetup        -- engage tool triggers action
    , Goto "downtime" DowntimeSetup    -- scene ends naturally
    , Goto "sceneRouter" SceneSetup    -- continue scene with new variant
-   , Goto G.Exit Response             -- session ends
+   , Goto Exit Response               -- session ends
    ]
 
 -- | Action nodes can:
@@ -108,7 +107,7 @@ type DMBargainEffects =
 -- - End session
 type DMTraumaEffects =
   '[ Goto "sceneRouter" SceneSetup    -- return to scene after trauma
-   , Goto G.Exit Response             -- session ends
+   , Goto Exit Response               -- session ends
    ]
 
 -- | Downtime nodes can:
@@ -116,7 +115,7 @@ type DMTraumaEffects =
 -- - End session
 type DMDowntimeEffects =
   '[ Goto "sceneRouter" SceneSetup    -- start new scene
-   , Goto G.Exit Response             -- end session
+   , Goto Exit Response               -- end session
    ]
 
 -- ══════════════════════════════════════════════════════════════
