@@ -25,18 +25,18 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cabal/store
-          key: ${{ runner.os }}-cabal-${{ hashFiles('**/*.cabal', 'cabal.project') }}
+          key: ${{ runner.os }}-ghc9.6-cabal-${{ hashFiles('**/*.cabal', 'cabal.project') }}
           restore-keys: |
-            ${{ runner.os }}-cabal-
+            ${{ runner.os }}-ghc9.6-cabal-
 
       - name: Cache dist-newstyle
         uses: actions/cache@v4
         with:
           path: dist-newstyle
-          key: ${{ runner.os }}-dist-${{ hashFiles('**/*.cabal', 'cabal.project') }}-${{ hashFiles('**/*.hs') }}
+          key: ${{ runner.os }}-ghc9.6-dist-${{ hashFiles('**/*.cabal', 'cabal.project') }}-${{ hashFiles('**/*.hs') }}
           restore-keys: |
-            ${{ runner.os }}-dist-${{ hashFiles('**/*.cabal', 'cabal.project') }}-
-            ${{ runner.os }}-dist-
+            ${{ runner.os }}-ghc9.6-dist-${{ hashFiles('**/*.cabal', 'cabal.project') }}-
+            ${{ runner.os }}-ghc9.6-dist-
 
       - name: Update cabal index
         run: cabal update
