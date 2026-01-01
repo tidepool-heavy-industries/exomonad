@@ -8,14 +8,10 @@ on:
 jobs:
   haskell:
     runs-on: ubuntu-latest
+    container:
+      image: haskell:9.6
     steps:
       - uses: actions/checkout@v4
-
-      - name: Setup Haskell
-        uses: haskell-actions/setup@v2
-        with:
-          ghc-version: '9.6'
-          cabal-version: '3.10'
 
       - name: Setup just
         uses: extractions/setup-just@v2
@@ -23,24 +19,24 @@ jobs:
       - name: Install hlint
         run: |
           curl -sSL https://github.com/ndmitchell/hlint/releases/download/v3.8/hlint-3.8-x86_64-linux.tar.gz | tar xz
-          sudo mv hlint-3.8/hlint /usr/local/bin/
+          mv hlint-3.8/hlint /usr/local/bin/
 
       - name: Cache cabal store
         uses: actions/cache@v4
         with:
           path: ~/.cabal/store
-          key: ${{ runner.os }}-cabal-${{ hashFiles('**/*.cabal', 'cabal.project') }}
+          key: ${{ runner.os }}-ghc9.6-cabal-${{ hashFiles('**/*.cabal', 'cabal.project') }}
           restore-keys: |
-            ${{ runner.os }}-cabal-
+            ${{ runner.os }}-ghc9.6-cabal-
 
       - name: Cache dist-newstyle
         uses: actions/cache@v4
         with:
           path: dist-newstyle
-          key: ${{ runner.os }}-dist-${{ hashFiles('**/*.cabal', 'cabal.project') }}-${{ hashFiles('**/*.hs') }}
+          key: ${{ runner.os }}-ghc9.6-dist-${{ hashFiles('**/*.cabal', 'cabal.project') }}-${{ hashFiles('**/*.hs') }}
           restore-keys: |
-            ${{ runner.os }}-dist-${{ hashFiles('**/*.cabal', 'cabal.project') }}-
-            ${{ runner.os }}-dist-
+            ${{ runner.os }}-ghc9.6-dist-${{ hashFiles('**/*.cabal', 'cabal.project') }}-
+            ${{ runner.os }}-ghc9.6-dist-
 
       - name: Update cabal index
         run: cabal update
