@@ -25,6 +25,7 @@ library
         DM.Graph
         DM.Graph.Types
         DM.Graph.Handlers
+        DM.Graph.Run
         DM.GUI.App
         DM.GUI.Theme
         DM.GUI.Widgets.Stats
