@@ -1,6 +1,8 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE OverloadedRecordDot #-}
+{-# LANGUAGE FieldSelectors #-}  -- Override NoFieldSelectors from cabal defaults
 
 -- | Handlers for the Tidying Graph
 --
@@ -49,14 +51,8 @@ import Tidepool.Graph.Generic (AsHandler)
 import Tidepool.Graph.Types (Exit)
 
 import Tidying.State
-  ( SessionState, UserInput(..), Photo(..), phase, Phase(..)
-  , isOverwhelmedSignal
-  )
 import Tidying.Action (Action(..))
 import Tidying.Context
-  ( TidyingContext, PhotoAnalysis(..), buildTidyingContext
-  , photoToImageSource
-  )
 import Tidying.Output
   ( Extract(..), Intent(..), PhotoAnalysisOutput(..)
   , extractSchema, photoAnalysisSchema, actOutputSchema, ActOutput(..)
@@ -398,12 +394,12 @@ applyStateTransition
   -> Action
   -> Phase
   -> Eff es ()
-applyStateTransition extract action nextPhase = do
+applyStateTransition _extract action _nextPhase = do
   now <- getCurrentTime
-  modify @SessionState $ \st ->
-    st
-      { Tidying.State.itemsProcessed = st.itemsProcessed + itemDelta action
-      , Tidying.State.sessionStart = st.sessionStart <|> Just now
+  modify @SessionState $ \(st :: SessionState) ->
+    (st :: SessionState)
+      { itemsProcessed = st.itemsProcessed + itemDelta action
+      , sessionStart = st.sessionStart <|> Just now
       -- TODO: Full phaseData transition logic from Loop.hs
       }
   where
