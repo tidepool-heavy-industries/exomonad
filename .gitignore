@@ -17,3 +17,4 @@ deploy/node_modules/
 deploy/.wrangler/
 deploy/src/*.wasm
 deploy/.dev.vars
+a.out
