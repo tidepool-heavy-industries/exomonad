@@ -22,6 +22,8 @@ library
         DM.Loop
         DM.Tarot
         DM.CharacterCreation
+        DM.Graph
+        DM.Graph.Types
         DM.GUI.App
         DM.GUI.Theme
         DM.GUI.Widgets.Stats
