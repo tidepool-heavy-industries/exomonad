@@ -205,7 +205,14 @@ export class StateMachineDO extends DurableObject<Env> {
         // Save session state for resume
         const session: SessionState = {
           graphId,
-          machineState: null,
+          // Persist the current WASM machine state so we can restore after hibernation
+          machineState:
+            this.machine && "serialize" in this.machine
+              ? // `serialize` is provided by the GraphMachine implementation and
+                // must return a JSON-serializable snapshot suitable for Durable Object storage.
+                // We use a runtime check to avoid issues if some implementations lack it.
+                (this.machine as any).serialize()
+              : null,
           pendingEffect: effect,
           lastActivity: Date.now(),
         };
