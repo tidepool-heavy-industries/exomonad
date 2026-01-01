@@ -385,7 +385,7 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
   private async handleGraphResult(
     chatId: number,
     sessionId: string,
-    stub: { fetch: (request: Request) => Promise<Response> },
+    stub: DurableObjectStub,
     result: GraphStartResult
   ): Promise<void> {
     let currentResult = result;
