@@ -12,25 +12,33 @@ import type {
   LogInfoEffect,
   LogErrorEffect,
   HabiticaEffect,
-  TelegramSendEffect,
 } from "../protocol.js";
 import { errorResult } from "../protocol.js";
 
 import { handleLogInfo, handleLogError } from "./log.js";
 import { handleLlmComplete, type LlmEnv } from "./llm.js";
 import { handleHabitica, type HabiticaConfig } from "./habitica.js";
-import { handleTelegramSend, type TelegramHandlerEnv } from "./telegram.js";
 
 // Re-export handlers for direct testing
 export { handleLogInfo, handleLogError } from "./log.js";
 export { handleLlmComplete } from "./llm.js";
 export { handleHabitica } from "./habitica.js";
-export { handleTelegramSend } from "./telegram.js";
+
+// Telegram handlers (used by TelegramDO, not executeEffect - they need chat context)
+export {
+  handleTelegramSend,
+  handleTelegramReceive,
+  handleTelegramTryReceive,
+  type TelegramHandlerEnv,
+  type TelegramHandlerContext,
+  type ReceiveHandlerResult,
+} from "./telegram.js";
 
 /**
  * Environment interface with all required bindings.
+ * Note: Telegram effects are handled by TelegramDO, not executeEffect.
  */
-export interface Env extends LlmEnv, TelegramHandlerEnv {
+export interface Env extends LlmEnv {
   HABITICA_USER_ID: string;
   HABITICA_API_TOKEN: string;
 }
@@ -64,8 +72,15 @@ export async function executeEffect(
         return await handleHabitica(effect as HabiticaEffect, config);
       }
 
-      case "TelegramSend":
-        return await handleTelegramSend(effect as TelegramSendEffect, env);
+      // Telegram effects require TelegramDO context (message queue, chat ID)
+      // They should be routed to TelegramDO via /effect endpoint, not executed here
+      case "telegram_send":
+      case "telegram_receive":
+      case "telegram_try_receive":
+        return errorResult(
+          `Telegram effect "${effect.type}" requires TelegramDO context. ` +
+            "Route this effect to TelegramDO via the /effect endpoint."
+        );
 
       default:
         return errorResult(`Unknown effect type: ${(effect as { type: string }).type}`);

@@ -407,7 +407,19 @@ export default {
 
     // Telegram webhook: /telegram
     if (url.pathname === "/telegram" && request.method === "POST") {
+      console.log("[Worker] Routing to /telegram webhook");
       return routeWebhook(request, env);
+    }
+
+    // Telegram webhook status: /webhook-status
+    if (url.pathname === "/webhook-status") {
+      console.log("[Worker] Fetching webhook status");
+      const info = await fetch(
+        `https://api.telegram.org/bot${env.TELEGRAM_TOKEN}/getWebhookInfo`
+      );
+      return new Response(await info.text(), {
+        headers: { "Content-Type": "application/json" },
+      });
     }
 
     return new Response("Not found", { status: 404 });

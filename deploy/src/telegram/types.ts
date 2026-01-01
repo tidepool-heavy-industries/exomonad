@@ -28,8 +28,37 @@ export interface TelegramMessage {
   chat: TelegramChat;
   from?: TelegramUser;
   text?: string;
+  caption?: string;
   date: number;
   reply_to_message?: TelegramMessage;
+  /** Photos come as array of sizes, largest last */
+  photo?: TelegramPhotoSize[];
+  /** Document attachment */
+  document?: TelegramDocument;
+}
+
+/**
+ * Photo size variant.
+ * See: https://core.telegram.org/bots/api#photosize
+ */
+export interface TelegramPhotoSize {
+  file_id: string;
+  file_unique_id: string;
+  width: number;
+  height: number;
+  file_size?: number;
+}
+
+/**
+ * Document attachment.
+ * See: https://core.telegram.org/bots/api#document
+ */
+export interface TelegramDocument {
+  file_id: string;
+  file_unique_id: string;
+  file_name?: string;
+  mime_type?: string;
+  file_size?: number;
 }
 
 /**
@@ -144,4 +173,66 @@ export function isAllowedUser(
     .filter(Boolean);
   if (allowed.length === 0) return true;
   return allowed.includes(String(userId));
+}
+
+// =============================================================================
+// IncomingMessage Conversion
+// =============================================================================
+
+import type { TelegramIncomingMessage } from "../protocol.js";
+
+/**
+ * Convert a TelegramUpdate to a TelegramIncomingMessage.
+ * Returns null if the update cannot be converted (e.g., unsupported type).
+ *
+ * Supports:
+ * - Text messages
+ * - Photos (picks largest size)
+ * - Documents
+ * - Callback queries (button clicks)
+ */
+export function updateToIncomingMessage(update: TelegramUpdate): TelegramIncomingMessage | null {
+  // Handle text messages
+  if (update.message?.text) {
+    return {
+      type: 'text',
+      text: update.message.text,
+    };
+  }
+
+  // Handle photos - pick the largest size (last in array)
+  if (update.message?.photo && update.message.photo.length > 0) {
+    const largestPhoto = update.message.photo[update.message.photo.length - 1];
+    return {
+      type: 'photo',
+      media: largestPhoto.file_id,
+      caption: update.message.caption,
+    };
+  }
+
+  // Handle documents
+  if (update.message?.document) {
+    return {
+      type: 'document',
+      media: update.message.document.file_id,
+      filename: update.message.document.file_name ?? 'document',
+    };
+  }
+
+  // Handle callback queries (button clicks)
+  if (update.callback_query?.data) {
+    // Parse the JSON data if possible, otherwise use as-is
+    let data: unknown = update.callback_query.data;
+    try {
+      data = JSON.parse(update.callback_query.data);
+    } catch {
+      // Keep as string if not valid JSON
+    }
+    return {
+      type: 'button_click',
+      data,
+    };
+  }
+
+  return null;
 }

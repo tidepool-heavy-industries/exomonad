@@ -1,10 +1,16 @@
 /**
- * Tests for Telegram effect handler.
+ * Tests for Telegram effect handlers.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { handleTelegramSend, type TelegramHandlerEnv } from "../telegram.js";
-import type { TelegramSendEffect } from "../../protocol.js";
+import {
+  handleTelegramSend,
+  handleTelegramReceive,
+  handleTelegramTryReceive,
+  type TelegramHandlerEnv,
+  type TelegramHandlerContext,
+} from "../telegram.js";
+import type { TelegramSendEffect, TelegramIncomingMessage } from "../../protocol.js";
 
 // Store original fetch
 const originalFetch = globalThis.fetch;
@@ -16,11 +22,20 @@ function createMockEnv(): TelegramHandlerEnv {
   };
 }
 
+// Mock context
+function createMockContext(
+  pendingMessages: TelegramIncomingMessage[] = []
+): TelegramHandlerContext {
+  return {
+    chatId: 123456,
+    pendingMessages,
+  };
+}
+
 describe("handleTelegramSend", () => {
   const baseEffect: TelegramSendEffect = {
-    type: "TelegramSend",
-    eff_chat_id: 123456,
-    eff_text: "Hello, world!",
+    type: "telegram_send",
+    message: { type: "text", text: "Hello, world!" },
   };
 
   beforeEach(() => {
@@ -32,7 +47,7 @@ describe("handleTelegramSend", () => {
     globalThis.fetch = originalFetch;
   });
 
-  it("sends message successfully and returns message_id", async () => {
+  it("sends text message successfully and returns unit", async () => {
     const mockResponse = {
       ok: true,
       result: { message_id: 42 },
@@ -41,11 +56,11 @@ describe("handleTelegramSend", () => {
       json: () => Promise.resolve(mockResponse),
     } as Response);
 
-    const result = await handleTelegramSend(baseEffect, createMockEnv());
+    const result = await handleTelegramSend(baseEffect, createMockEnv(), createMockContext());
 
     expect(result).toEqual({
       type: "success",
-      value: { message_id: 42 },
+      value: { type: "unit" },
     });
 
     // Verify fetch was called correctly
@@ -58,10 +73,14 @@ describe("handleTelegramSend", () => {
     );
   });
 
-  it("includes parse_mode when specified", async () => {
-    const effectWithParseMode: TelegramSendEffect = {
-      ...baseEffect,
-      eff_parse_mode: "HTML",
+  it("sends buttons message correctly", async () => {
+    const buttonsEffect: TelegramSendEffect = {
+      type: "telegram_send",
+      message: {
+        type: "buttons",
+        text: "Choose an option:",
+        buttons: [[{ text: "Option A", data: "a" }, { text: "Option B", data: "b" }]],
+      },
     };
     const mockResponse = {
       ok: true,
@@ -71,11 +90,13 @@ describe("handleTelegramSend", () => {
       json: () => Promise.resolve(mockResponse),
     } as Response);
 
-    await handleTelegramSend(effectWithParseMode, createMockEnv());
+    await handleTelegramSend(buttonsEffect, createMockEnv(), createMockContext());
 
     const fetchCall = vi.mocked(globalThis.fetch).mock.calls[0];
     const body = JSON.parse(fetchCall[1]?.body as string);
-    expect(body.parse_mode).toBe("HTML");
+    expect(body.reply_markup).toBeDefined();
+    expect(body.reply_markup.inline_keyboard).toHaveLength(1);
+    expect(body.reply_markup.inline_keyboard[0]).toHaveLength(2);
   });
 
   it("returns error when API returns ok: false", async () => {
@@ -88,7 +109,7 @@ describe("handleTelegramSend", () => {
       json: () => Promise.resolve(mockResponse),
     } as Response);
 
-    const result = await handleTelegramSend(baseEffect, createMockEnv());
+    const result = await handleTelegramSend(baseEffect, createMockEnv(), createMockContext());
 
     expect(result).toEqual({
       type: "error",
@@ -99,7 +120,7 @@ describe("handleTelegramSend", () => {
   it("handles network errors gracefully", async () => {
     vi.mocked(globalThis.fetch).mockRejectedValue(new Error("Network failure"));
 
-    const result = await handleTelegramSend(baseEffect, createMockEnv());
+    const result = await handleTelegramSend(baseEffect, createMockEnv(), createMockContext());
 
     // Network errors are caught by api.ts and logged, handler returns generic error
     expect(result).toEqual({
@@ -113,12 +134,73 @@ describe("handleTelegramSend", () => {
       json: () => Promise.reject(new Error("Invalid JSON")),
     } as Response);
 
-    const result = await handleTelegramSend(baseEffect, createMockEnv());
+    const result = await handleTelegramSend(baseEffect, createMockEnv(), createMockContext());
 
     // JSON errors are caught by api.ts and logged, handler returns generic error
     expect(result).toEqual({
       type: "error",
       message: "Failed to send Telegram message",
+    });
+  });
+});
+
+describe("handleTelegramReceive", () => {
+  it("returns messages when pending messages exist", () => {
+    const pendingMessages: TelegramIncomingMessage[] = [
+      { type: "text", text: "Hello" },
+      { type: "text", text: "World" },
+    ];
+
+    const result = handleTelegramReceive(
+      { type: "telegram_receive" },
+      createMockContext(pendingMessages)
+    );
+
+    expect(result).toEqual({
+      type: "messages",
+      result: {
+        type: "success",
+        value: { type: "messages", messages: pendingMessages },
+      },
+    });
+  });
+
+  it("returns yield when no pending messages", () => {
+    const result = handleTelegramReceive(
+      { type: "telegram_receive" },
+      createMockContext([])
+    );
+
+    expect(result).toEqual({ type: "yield" });
+  });
+});
+
+describe("handleTelegramTryReceive", () => {
+  it("returns pending messages when they exist", () => {
+    const pendingMessages: TelegramIncomingMessage[] = [
+      { type: "text", text: "Hello" },
+    ];
+
+    const result = handleTelegramTryReceive(
+      { type: "telegram_try_receive" },
+      createMockContext(pendingMessages)
+    );
+
+    expect(result).toEqual({
+      type: "success",
+      value: { type: "messages", messages: pendingMessages },
+    });
+  });
+
+  it("returns empty messages when none pending", () => {
+    const result = handleTelegramTryReceive(
+      { type: "telegram_try_receive" },
+      createMockContext([])
+    );
+
+    expect(result).toEqual({
+      type: "success",
+      value: { type: "messages", messages: [] },
     });
   });
 });
