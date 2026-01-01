@@ -80,10 +80,12 @@ userDenialSpec = describe "User denial (retry flow)" $ do
     let input = RawInput "Schedule meeting"
         result = initializeWasm (runHabiticaRoutingGraph input)
 
-    -- Mock responses: first confirm denied, then approved
-    case runToCompletion result mockDenialThenApproveResponses of
-      Just execResult -> do
+    -- Use stateful runner: first TelegramConfirm returns "denied", second returns "approved"
+    case runToCompletionStateful result mockDenialThenApproveStateful of
+      Just (execResult, confirmCount) -> do
         execResult.erSuccess `shouldBe` True
+        -- Should have seen 2 TelegramConfirm effects (denied, then approved)
+        confirmCount `shouldBe` 2
       Nothing ->
         expectationFailure "Expected graph to complete after retry"
 
@@ -142,9 +144,10 @@ effectSequenceSpec = describe "Effect sequence" $ do
 
     length effects `shouldSatisfy` (> 10)
 
-    -- Check first effect is LogInfo
-    case head effects of
-      EffLogInfo msg -> T.unpack msg `shouldSatisfy` isInfixOf "Extracting"
+    -- Check first effect is LogInfo (using pattern match instead of partial `head`)
+    case effects of
+      (EffLogInfo msg : _) -> T.unpack msg `shouldSatisfy` isInfixOf "Extracting"
+      [] -> expectationFailure "Expected at least one effect"
       _ -> expectationFailure "Expected first effect to be LogInfo"
 
     -- Check we have LlmComplete effects
@@ -238,18 +241,9 @@ mockChecklistResponses eff = case eff of
     [ "response" .= ("approved" :: String)
     ]
 
--- | Denial then approve: user denies first, then approves on retry
-mockDenialThenApproveResponses :: SerializableEffect -> EffectResult
-mockDenialThenApproveResponses = mockWithConfirmSequence ["denied", "approved"]
-
 -- | Skip: user skips immediately
 mockSkipResponses :: SerializableEffect -> EffectResult
-mockSkipResponses = mockWithConfirmSequence ["skipped"]
-
--- | Helper to create mock with specific confirm sequence
--- Uses stateful tracking via IORef-like pattern encoded in the mock
-mockWithConfirmSequence :: [String] -> SerializableEffect -> EffectResult
-mockWithConfirmSequence responses eff = case eff of
+mockSkipResponses eff = case eff of
   EffLogInfo _ -> ResSuccess Nothing
   EffLogError _ -> ResSuccess Nothing
 
@@ -271,17 +265,46 @@ mockWithConfirmSequence responses eff = case eff of
       ]
     _ -> ResSuccess $ Just $ object []
 
+  EffTelegramConfirm _ _ -> ResSuccess $ Just $ object
+    [ "response" .= ("skipped" :: String)
+    ]
+
+-- | Stateful mock for denial-then-approve: returns different responses based on call count
+-- State is the number of TelegramConfirm effects seen so far
+mockDenialThenApproveStateful :: Int -> SerializableEffect -> (EffectResult, Int)
+mockDenialThenApproveStateful confirmCount eff = case eff of
+  EffLogInfo _ -> (ResSuccess Nothing, confirmCount)
+  EffLogError _ -> (ResSuccess Nothing, confirmCount)
+
+  EffLlmComplete node _ _ _ -> case node of
+    "extract_task" -> (ResSuccess $ Just $ object
+      [ "description" .= ("Schedule meeting" :: String)
+      , "context" .= Null
+      ], confirmCount)
+    "match_task" -> (ResSuccess $ Just $ object
+      [ "match_id" .= Null
+      , "reason" .= ("No match found" :: String)
+      ], confirmCount)
+    _ -> (ResSuccess $ Just $ object [], confirmCount)
+
+  EffHabitica op _ -> case op of
+    "fetchTodos" -> (ResSuccess $ Just $ Array V.empty, confirmCount)
+    "createTodo" -> (ResSuccess $ Just $ object
+      [ "id" .= ("new-todo-id" :: String)
+      ], confirmCount)
+    _ -> (ResSuccess $ Just $ object [], confirmCount)
+
   EffTelegramConfirm _ _ ->
-    -- Return first response; for denial->approve we need stateful mock
-    -- Since we can't easily do stateful mocks in pure Haskell,
-    -- we use the confirm count tracking approach
-    case responses of
-      ("skipped":_) -> ResSuccess $ Just $ object
-        [ "response" .= ("skipped" :: String)
-        ]
-      _ -> ResSuccess $ Just $ object
-        [ "response" .= ("approved" :: String)
-        ]
+    let newCount = confirmCount + 1
+        response = if confirmCount == 0
+          then object  -- First call: deny with feedback
+            [ "response" .= ("denied" :: String)
+            , "feedback" .= ("Try a different approach" :: String)
+            ]
+          else object  -- Second call: approve
+            [ "response" .= ("approved" :: String)
+            ]
+    in (ResSuccess $ Just response, newCount)
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -300,6 +323,22 @@ runToCompletion result mockResponses = go 100 result
     go n (WasmYield eff k) = go (n-1) (k (mockResponses eff))
     go _ (WasmComplete execResult) = Just execResult
     go _ (WasmError _) = Nothing
+
+-- | Run a WasmResult to completion using a stateful mock.
+-- The mock function takes current state and effect, returns (result, new state).
+-- Returns the final ExecutionResult and final state, or Nothing if max steps exceeded.
+runToCompletionStateful :: WasmResult ExecutionResult
+                        -> (Int -> SerializableEffect -> (EffectResult, Int))
+                        -> Maybe (ExecutionResult, Int)
+runToCompletionStateful result mockResponses = go 100 0 result
+  where
+    go :: Int -> Int -> WasmResult ExecutionResult -> Maybe (ExecutionResult, Int)
+    go 0 _ _ = Nothing  -- Max steps exceeded
+    go n state (WasmYield eff k) =
+      let (response, newState) = mockResponses state eff
+      in go (n-1) newState (k response)
+    go _ state (WasmComplete execResult) = Just (execResult, state)
+    go _ _ (WasmError _) = Nothing
 
 -- | Collect effects yielded by the graph up to a maximum count.
 collectEffects :: Int
