@@ -37,8 +37,19 @@ import GHC.Generics (Generic)
 -- ============================================================================
 
 -- | Raw unstructured text input from Telegram.
+-- Matches the TypeScript TelegramIncomingMessage type.
 newtype RawInput = RawInput { unRawInput :: Text }
   deriving stock (Show, Eq, Generic)
+
+instance ToJSON RawInput where
+  toJSON (RawInput t) = object ["type" .= ("text" :: Text), "text" .= t]
+
+instance FromJSON RawInput where
+  parseJSON = withObject "RawInput" $ \v -> do
+    (msgType :: Text) <- v .: "type"
+    case msgType of
+      "text" -> RawInput <$> v .: "text"
+      _ -> fail $ "RawInput only supports 'text' type, got: " ++ show msgType
 
 -- | A task extracted from unstructured text.
 data ExtractedTask = ExtractedTask

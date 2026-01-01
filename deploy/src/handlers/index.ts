@@ -29,9 +29,11 @@ export {
   handleTelegramSend,
   handleTelegramReceive,
   handleTelegramTryReceive,
+  handleTelegramConfirm,
   type TelegramHandlerEnv,
   type TelegramHandlerContext,
   type ReceiveHandlerResult,
+  type ConfirmHandlerResult,
 } from "./telegram.js";
 
 /**
@@ -77,6 +79,7 @@ export async function executeEffect(
       case "telegram_send":
       case "telegram_receive":
       case "telegram_try_receive":
+      case "TelegramConfirm":
         return errorResult(
           `Telegram effect "${effect.type}" requires TelegramDO context. ` +
             "Route this effect to TelegramDO via the /effect endpoint."

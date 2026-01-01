@@ -17,3 +17,9 @@ source-repository-package
   type: git
   location: https://github.com/inanna-malick/ginger
   tag: 25af8c8e60f4afbfdb4e50e6d1d86a5e73975638
+
+-- freer-simple fork with GHC 9.10/9.12 compatibility (PR #45)
+source-repository-package
+  type: git
+  location: https://github.com/georgefst/freer-simple.git
+  tag: e1d88c1ee036115ef527bda8c66da997962b3f34

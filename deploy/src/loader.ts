@@ -17,11 +17,13 @@ import type {
 // GraphMachine Interface (inline to avoid circular deps)
 // =============================================================================
 
+export type GraphId = "TestGraph" | "ExampleGraph" | "HabiticaRoutingGraph";
+
 export interface GraphMachine {
-  initialize(input: unknown): Promise<StepOutput>;
-  step(result: EffectResult): Promise<StepOutput>;
-  getGraphInfo(): Promise<GraphInfo>;
-  getGraphState(): Promise<GraphState>;
+  initialize(graphId: GraphId, input: unknown): Promise<StepOutput>;
+  step(graphId: GraphId, result: EffectResult): Promise<StepOutput>;
+  getGraphInfo(graphId: GraphId): Promise<GraphInfo>;
+  getGraphState(graphId: GraphId): Promise<GraphState>;
 }
 
 // =============================================================================
@@ -108,51 +110,108 @@ export async function loadMachine(options: LoaderOptions): Promise<GraphMachine>
     console.log("[Tidepool] WASM module loaded");
   }
 
-  return {
-    async initialize(input: unknown): Promise<StepOutput> {
-      const inputJson = JSON.stringify(input);
-      if (debug) console.log("[Tidepool] initialize:", inputJson);
+  // Extended exports type with all graph functions
+  type ExtendedExports = WasmExports & {
+    // TestGraph
+    initialize: (json: string) => string | Promise<string>;
+    step: (json: string) => string | Promise<string>;
+    getGraphInfo: () => string | Promise<string>;
+    getGraphState: () => string | Promise<string>;
+    // ExampleGraph
+    initializeExample: (json: string) => string | Promise<string>;
+    stepExample: (json: string) => string | Promise<string>;
+    getExampleGraphInfo: () => string | Promise<string>;
+    getExampleGraphState: () => string | Promise<string>;
+    // HabiticaRoutingGraph
+    initializeHabitica: (json: string) => string | Promise<string>;
+    stepHabitica: (json: string) => string | Promise<string>;
+    getHabiticaGraphInfo: () => string | Promise<string>;
+    getHabiticaGraphState: () => string | Promise<string>;
+  };
 
-      const resultStr = await exports.initialize(inputJson);
+  const ext = exports as unknown as ExtendedExports;
+
+  // Helper to get the right functions based on graphId
+  const getGraphFns = (graphId: GraphId) => {
+    switch (graphId) {
+      case "TestGraph":
+        return {
+          initialize: ext.initialize,
+          step: ext.step,
+          getGraphInfo: ext.getGraphInfo,
+          getGraphState: ext.getGraphState,
+        };
+      case "ExampleGraph":
+        return {
+          initialize: ext.initializeExample,
+          step: ext.stepExample,
+          getGraphInfo: ext.getExampleGraphInfo,
+          getGraphState: ext.getExampleGraphState,
+        };
+      case "HabiticaRoutingGraph":
+        return {
+          initialize: ext.initializeHabitica,
+          step: ext.stepHabitica,
+          getGraphInfo: ext.getHabiticaGraphInfo,
+          getGraphState: ext.getHabiticaGraphState,
+        };
+    }
+  };
+
+  const defaultStepOutput: StepOutput = {
+    effect: null,
+    done: true,
+    stepResult: null,
+    graphState: { phase: { type: "idle" } as const, completedNodes: [] }
+  };
+
+  return {
+    async initialize(graphId: GraphId, input: unknown): Promise<StepOutput> {
+      const fns = getGraphFns(graphId);
+      const inputJson = JSON.stringify(input);
+      if (debug) console.log(`[Tidepool] initialize ${graphId}:`, inputJson);
+
+      const resultStr = await fns.initialize(inputJson);
 
       const result: StepOutput = typeof resultStr === "string"
         ? JSON.parse(resultStr)
-        : { effect: null, done: true, stepResult: null, graphState: { phase: { type: "idle" } as const, completedNodes: [] } };
+        : defaultStepOutput;
 
-      if (debug) console.log("[Tidepool] initialize result:", JSON.stringify(result, null, 2));
+      if (debug) console.log(`[Tidepool] initialize ${graphId} result:`, JSON.stringify(result, null, 2));
       return result;
     },
 
-    async step(result: EffectResult): Promise<StepOutput> {
+    async step(graphId: GraphId, result: EffectResult): Promise<StepOutput> {
+      const fns = getGraphFns(graphId);
       const resultJson = JSON.stringify(result);
-      if (debug) console.log("[Tidepool] step:", resultJson);
+      if (debug) console.log(`[Tidepool] step ${graphId}:`, resultJson);
 
-      const outputStr = await exports.step(resultJson);
+      const outputStr = await fns.step(resultJson);
 
       const output: StepOutput = typeof outputStr === "string"
         ? JSON.parse(outputStr)
-        : { effect: null, done: true, stepResult: null, graphState: { phase: { type: "idle" } as const, completedNodes: [] } };
+        : defaultStepOutput;
 
-      if (debug) console.log("[Tidepool] step result:", JSON.stringify(output, null, 2));
+      if (debug) console.log(`[Tidepool] step ${graphId} result:`, JSON.stringify(output, null, 2));
       return output;
     },
 
-    async getGraphInfo(): Promise<GraphInfo> {
-      const fn = (exports as unknown as { getGraphInfo?: () => string | Promise<string> }).getGraphInfo;
-      if (!fn) {
+    async getGraphInfo(graphId: GraphId): Promise<GraphInfo> {
+      const fns = getGraphFns(graphId);
+      if (!fns.getGraphInfo) {
         return { name: "Unknown", entryType: { typeName: "", typeModule: "" }, exitType: { typeName: "", typeModule: "" }, nodes: [], edges: [] };
       }
-      const str = fn();
+      const str = fns.getGraphInfo();
       const resolved = typeof str === "string" ? str : await str;
       return JSON.parse(resolved);
     },
 
-    async getGraphState(): Promise<GraphState> {
-      const fn = (exports as unknown as { getGraphState?: () => string | Promise<string> }).getGraphState;
-      if (!fn) {
+    async getGraphState(graphId: GraphId): Promise<GraphState> {
+      const fns = getGraphFns(graphId);
+      if (!fns.getGraphState) {
         return { phase: { type: "idle" } as const, completedNodes: [] };
       }
-      const str = fn();
+      const str = fns.getGraphState();
       const resolved = typeof str === "string" ? str : await str;
       return JSON.parse(resolved);
     },
