@@ -49,7 +49,7 @@ module Tidepool.Graph.Validate.RecordStructure
   ) where
 
 import Data.Kind (Type, Constraint)
-import GHC.TypeLits (Symbol, TypeError, ErrorMessage(..), Nat, type (-), type (+))
+import GHC.TypeLits (Symbol, TypeError, ErrorMessage(..), Nat, type (-), type (+), type (*))
 import GHC.Generics (Generic(..), K1(..), M1(..), (:*:)(..), Meta(..), S, D, C, Rep)
 
 import Tidepool.Graph.Types (type (:@), Needs, Schema, UsesEffects)
