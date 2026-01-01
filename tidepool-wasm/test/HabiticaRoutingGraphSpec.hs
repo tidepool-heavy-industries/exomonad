@@ -196,10 +196,9 @@ mockHappyPathResponses eff = case eff of
     _ -> ResSuccess $ Just $ object []
 
   EffHabitica op _ -> case op of
-    "fetchTodos" -> ResSuccess $ Just $ Array V.empty  -- Empty list
-    "createTodo" -> ResSuccess $ Just $ object
-      [ "id" .= ("new-todo-id" :: String)
-      , "text" .= ("Buy milk from the store" :: String)
+    "FetchTodos" -> ResSuccess $ Just $ Array V.empty  -- Empty list
+    "CreateTodo" -> ResSuccess $ Just $ object
+      [ "unTodoId" .= ("new-todo-id" :: String)
       ]
     _ -> ResSuccess $ Just $ object []
 
@@ -225,16 +224,16 @@ mockChecklistResponses eff = case eff of
     _ -> ResSuccess $ Just $ object []
 
   EffHabitica op _ -> case op of
-    "fetchTodos" -> ResSuccess $ Just $ Array $ V.fromList
+    "FetchTodos" -> ResSuccess $ Just $ Array $ V.fromList
       [ object
-          [ "id" .= ("grocery-todo-id" :: String)
-          , "text" .= ("Groceries" :: String)
-          , "checklist" .= (["milk", "bread"] :: [String])
+          [ "todoId" .= ("grocery-todo-id" :: String)
+          , "todoTitle" .= ("Groceries" :: String)
+          , "todoChecklist" .= ([ object ["checklistText" .= ("milk" :: String)]
+                                , object ["checklistText" .= ("bread" :: String)]
+                                ] :: [Value])
           ]
       ]
-    "addChecklistItem" -> ResSuccess $ Just $ object
-      [ "id" .= ("checklist-item-id" :: String)
-      ]
+    "AddChecklistItem" -> ResSuccess $ Just $ String "checklist-item-id"
     _ -> ResSuccess $ Just $ object []
 
   EffTelegramConfirm _ _ -> ResSuccess $ Just $ object
@@ -259,9 +258,9 @@ mockSkipResponses eff = case eff of
     _ -> ResSuccess $ Just $ object []
 
   EffHabitica op _ -> case op of
-    "fetchTodos" -> ResSuccess $ Just $ Array V.empty
-    "createTodo" -> ResSuccess $ Just $ object
-      [ "id" .= ("new-todo-id" :: String)
+    "FetchTodos" -> ResSuccess $ Just $ Array V.empty
+    "CreateTodo" -> ResSuccess $ Just $ object
+      [ "unTodoId" .= ("new-todo-id" :: String)
       ]
     _ -> ResSuccess $ Just $ object []
 
@@ -288,9 +287,9 @@ mockDenialThenApproveStateful confirmCount eff = case eff of
     _ -> (ResSuccess $ Just $ object [], confirmCount)
 
   EffHabitica op _ -> case op of
-    "fetchTodos" -> (ResSuccess $ Just $ Array V.empty, confirmCount)
-    "createTodo" -> (ResSuccess $ Just $ object
-      [ "id" .= ("new-todo-id" :: String)
+    "FetchTodos" -> (ResSuccess $ Just $ Array V.empty, confirmCount)
+    "CreateTodo" -> (ResSuccess $ Just $ object
+      [ "unTodoId" .= ("new-todo-id" :: String)
       ], confirmCount)
     _ -> (ResSuccess $ Just $ object [], confirmCount)
 
