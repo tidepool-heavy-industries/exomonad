@@ -1,0 +1,43 @@
+# Copilot Coding Agent Environment Setup
+# This gives the coding agent access to build tools
+
+setup:
+  - name: Setup Haskell
+    uses: haskell-actions/setup@v2
+    with:
+      ghc-version: '9.6'
+      cabal-version: '3.10'
+
+  - name: Setup just
+    uses: extractions/setup-just@v2
+
+  - name: Install hlint
+    run: |
+      curl -sSL https://github.com/ndmitchell/hlint/releases/download/v3.8/hlint-3.8-x86_64-linux.tar.gz | tar xz
+      sudo mv hlint-3.8/hlint /usr/local/bin/
+
+  - name: Cache cabal store
+    uses: actions/cache@v4
+    with:
+      path: ~/.cabal/store
+      key: cabal-${{ hashFiles('**/*.cabal', 'cabal.project') }}
+
+  - name: Update cabal and build
+    run: |
+      cabal update
+      cabal build all
+
+  - name: Setup pnpm (for deploy/)
+    uses: pnpm/action-setup@v4
+    with:
+      version: 9
+
+  - name: Setup Node
+    uses: actions/setup-node@v4
+    with:
+      node-version: '20'
+
+  - name: Install TypeScript dependencies
+    run: |
+      cd deploy
+      pnpm install --frozen-lockfile
