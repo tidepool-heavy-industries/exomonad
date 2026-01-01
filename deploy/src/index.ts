@@ -122,8 +122,8 @@ export class StateMachineDO extends DurableObject<Env> {
         });
       }
 
-      // Initialize the graph
-      const output = await this.machine.initialize(input);
+      // Initialize the graph with the specified graphId
+      const output = await this.machine.initialize(graphId as import("./loader.js").GraphId, input);
 
       // Run until Telegram effect or completion
       return this.runHttpGraphLoop(output, graphId);
@@ -176,7 +176,7 @@ export class StateMachineDO extends DurableObject<Env> {
         });
       }
 
-      const output = await this.machine.step(result);
+      const output = await this.machine.step(session.graphId as import("./loader.js").GraphId, result);
       return this.runHttpGraphLoop(output, session.graphId);
     } catch (err) {
       console.error("[DO] HTTP resume error:", err);
@@ -238,7 +238,7 @@ export class StateMachineDO extends DurableObject<Env> {
       }
 
       // Step with the result
-      output = await this.machine!.step(result);
+      output = await this.machine!.step(graphId as import("./loader.js").GraphId, result);
     }
 
     // Graph completed - clean up
@@ -392,8 +392,8 @@ export class StateMachineDO extends DurableObject<Env> {
       });
     }
 
-    // Initialize the graph
-    const output = await this.machine.initialize(input);
+    // Initialize the graph with the specified graphId
+    const output = await this.machine.initialize(graphId as import("./loader.js").GraphId, input);
 
     // Run until completion or yield
     await this.runGraphLoop(ws, sessionId, graphId, output);
@@ -430,7 +430,7 @@ export class StateMachineDO extends DurableObject<Env> {
       debug: false,
     });
 
-    const output = await this.machine.step(result);
+    const output = await this.machine.step(session.graphId as import("./loader.js").GraphId, result);
     await this.runGraphLoop(ws, this.sessionId, session.graphId, output);
   }
 
@@ -534,7 +534,7 @@ export class StateMachineDO extends DurableObject<Env> {
       }
 
       // Step with the result
-      output = await this.machine!.step(result);
+      output = await this.machine!.step(graphId as import("./loader.js").GraphId, result);
     }
 
     // Graph completed - clean up session state (but keep sessionId for potential new graph)

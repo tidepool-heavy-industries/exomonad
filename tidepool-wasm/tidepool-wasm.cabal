@@ -99,6 +99,40 @@ test-suite tidepool-wasm-tests
         OverloadedStrings
         OverloadedRecordDot
 
+-- | WASM reactor executable for Cloudflare Workers.
+-- This produces a self-contained WASM module with all FFI exports.
+-- The library produces a dynamically-linked .so which won't work standalone.
+executable tidepool-reactor
+    import:           warnings
+    main-is:          Reactor.hs
+    build-depends:
+        base >= 4.17 && < 5,
+        tidepool-wasm
+    hs-source-dirs:   reactor
+    default-language: GHC2021
+    if os(wasi)
+        build-depends:
+            ghc-experimental
+        ghc-options:
+            -no-hs-main
+            -optl-mexec-model=reactor
+            -optl-Wl,--export=hs_init
+            -- TestGraph exports
+            -optl-Wl,--export=initialize
+            -optl-Wl,--export=step
+            -optl-Wl,--export=getGraphInfo
+            -optl-Wl,--export=getGraphState
+            -- ExampleGraph exports
+            -optl-Wl,--export=initializeExample
+            -optl-Wl,--export=stepExample
+            -optl-Wl,--export=getExampleGraphInfo
+            -optl-Wl,--export=getExampleGraphState
+            -- HabiticaRoutingGraph exports
+            -optl-Wl,--export=initializeHabitica
+            -optl-Wl,--export=stepHabitica
+            -optl-Wl,--export=getHabiticaGraphInfo
+            -optl-Wl,--export=getHabiticaGraphState
+
 -- | Generates golden JSON samples for cross-language protocol verification.
 -- Run with: cabal run generate-golden-samples
 -- Output goes to deploy/test/golden-samples.json

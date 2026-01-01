@@ -115,3 +115,28 @@ install-hooks:
 uninstall-hooks:
     @rm -f .git/hooks/pre-commit
     @echo "✓ Removed pre-commit hook"
+
+# ─────────────────────────────────────────────────────────────
+# WASM & Deployment
+# ─────────────────────────────────────────────────────────────
+
+# Build WASM blob (requires nix develop .#wasm)
+build-wasm:
+    @echo "── Building tidepool-reactor with wasm32-wasi-ghc ──"
+    nix develop .#wasm --command bash -c "wasm32-wasi-cabal build tidepool-reactor"
+    @echo ""
+    @echo "── Copying WASM to deploy/src/tidepool.wasm ──"
+    cp "$(find dist-newstyle/build/wasm32-wasi -name 'tidepool-reactor.wasm' | head -1)" deploy/src/tidepool.wasm
+    @ls -lh deploy/src/tidepool.wasm
+    @echo "✓ WASM blob ready"
+
+# Deploy to Cloudflare Workers
+deploy-worker:
+    @echo "── Deploying to Cloudflare Workers ──"
+    cd deploy && pnpm run deploy
+    @echo "✓ Deployed"
+
+# Build WASM and deploy to Cloudflare (full pipeline)
+deploy: build-wasm deploy-worker
+    @echo ""
+    @echo "✓ Full deploy complete"
