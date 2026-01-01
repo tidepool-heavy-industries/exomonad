@@ -2,6 +2,7 @@
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE AllowAmbiguousTypes #-}
+{-# LANGUAGE RecordWildCards #-}
 
 -- | DM Graph Handlers
 --
@@ -33,14 +34,14 @@ module DM.Graph.Handlers
   , downtimeHandler
   ) where
 
+import Control.Monad (when)
 import Data.Proxy (Proxy(..))
 import Data.Text (Text)
 import qualified Data.Text as T
-import Effectful
+import Effectful (Eff, IOE, (:>))
 
-import Tidepool.Effect (LLM, RequestInput, Log, Random, Emit, logInfo, logDebug, logWarn, runTurn, TurnOutcome(..), TurnResult(..))
+import Tidepool.Effect (LLM, RequestInput, Log, Random, Emit, ChatHistory, Time, State, emit, logInfo, logDebug, logWarn, runTurn, TurnOutcome(..), TurnResult(..), TurnParseResult(..), get, modify)
 import Tidepool.Template (Schema(..))
-import Effectful.State.Static.Local (State, get, modify, put)
 import Tidepool.Graph.Goto (GotoChoice, To, gotoChoice, gotoExit)
 import Tidepool.Graph.Types (Exit)
 import Tidepool.Graph.Generic (AsHandler)
@@ -60,13 +61,18 @@ import DM.Graph.Types
 -- | Effect stack available to DM handlers
 --
 -- Handlers are IO-blind - all IO happens in the runner via effect interpreters.
+-- Includes runner effects (IOE, ChatHistory, Time) needed by interpreters.
+-- Order MUST match interpreter application order in Run.hs (innermost first).
 type DMEffects =
-  '[ State WorldState      -- Game state
-   , LLM                   -- Language model calls
-   , RequestInput          -- Player choices (dice, text, options)
-   , Emit DMEvent          -- Event log for GUI
-   , Random                -- Dice rolls
-   , Log                   -- Debug logging
+  '[ LLM                   -- runLLMWithTools (innermost)
+   , RequestInput          -- runRequestInput
+   , Log                   -- runLog
+   , ChatHistory           -- runChatHistory
+   , State WorldState      -- runState
+   , Emit DMEvent          -- runEmit
+   , Random                -- runRandom
+   , Time                  -- runTime
+   , IOE                   -- runEff (outermost)
    ]
 
 -- ══════════════════════════════════════════════════════════════
@@ -251,18 +257,8 @@ sceneEncounterHandler setup = do
 
     -- Turn completed - process output
     TurnCompleted parseResult -> case parseResult of
-      TurnParseFailed{..} -> do
-        logWarn $ "[SceneEncounter] Parse failed: " <> T.pack tpfError
-        -- Continue scene with fallback narration
-        let response = Response
-              { rNarration = if T.null tpfNarrative
-                  then "*The world waits for your next move.*"
-                  else tpfNarrative
-              , rStressDelta = 0
-              , rCoinDelta = 0
-              , rSuggestedActions = ["Look around", "Wait", "Try something else"]
-              }
-        pure $ gotoExit response
+      TurnParseFailed{..} ->
+        error $ "[SceneEncounter] Parse failed: " <> tpfError
 
       TurnParsed result -> do
         -- Apply output to state
@@ -343,8 +339,6 @@ emitStateChanges before after reason = do
 
   when (pa.coin /= pb.coin) $
     emit $ CoinChanged pb.coin pa.coin reason
-  where
-    when cond action = if cond then action else pure ()
 
 -- | Handle an Opportunity scene
 -- Uses same flow as Encounter but with Opportunity variant
@@ -403,17 +397,8 @@ runSceneHandler variantName setup = do
       handleSceneTransition setup reason
 
     TurnCompleted parseResult -> case parseResult of
-      TurnParseFailed{..} -> do
-        logWarn $ "[Scene" <> variantName <> "] Parse failed: " <> T.pack tpfError
-        let response = Response
-              { rNarration = if T.null tpfNarrative
-                  then "*The moment passes...*"
-                  else tpfNarrative
-              , rStressDelta = 0
-              , rCoinDelta = 0
-              , rSuggestedActions = ["Continue", "Look around"]
-              }
-        pure $ gotoExit response
+      TurnParseFailed{..} ->
+        error $ "[Scene" <> T.unpack variantName <> "] Parse failed: " <> tpfError
 
       TurnParsed result -> do
         stateBefore <- get @WorldState
@@ -498,19 +483,8 @@ actionHandler setup = do
           handleActionTransition setup reason
 
         TurnCompleted parseResult -> case parseResult of
-          TurnParseFailed{..} -> do
-            logWarn $ "[Action] Parse failed: " <> T.pack tpfError
-            -- On failure, retry action or go to aftermath with bad outcome
-            let aftermathSetup = AftermathSetup
-                  { afVariant = AmSetback
-                      { amWhatWentWrong = "something went wrong"
-                      , amImmediateDanger = False
-                      , amEscapeRoute = "regroup"
-                      }
-                  , afOutcomeTier = Bad
-                  , afActionContext = setup.asPlayerAction
-                  }
-            pure $ gotoChoice @"aftermath" aftermathSetup
+          TurnParseFailed{..} ->
+            error $ "[Action] Parse failed: " <> tpfError
 
           TurnParsed result -> do
             -- Apply output
@@ -616,17 +590,8 @@ aftermathHandler setup = do
       handleAftermathTransition setup stressBefore reason
 
     TurnCompleted parseResult -> case parseResult of
-      TurnParseFailed{..} -> do
-        logWarn $ "[Aftermath] Parse failed: " <> T.pack tpfError
-        -- Fallback: return to scene
-        let sceneSetup = SceneSetup
-              { ssVariant = Encounter "aftermath" UrgencyLow True
-              , ssPlayerAction = ""
-              , ssPreviousNarration = Just $ if T.null tpfNarrative
-                  then "The dust settles..."
-                  else tpfNarrative
-              }
-        pure $ gotoChoice @"sceneRouter" sceneSetup
+      TurnParseFailed{..} ->
+        error $ "[Aftermath] Parse failed: " <> tpfError
 
       TurnParsed result -> do
         -- Apply output
@@ -751,27 +716,8 @@ bargainHandler setup = do
       handleBargainTransition setup reason
 
     TurnCompleted parseResult -> case parseResult of
-      TurnParseFailed{..} -> do
-        logWarn $ "[Bargain] Parse failed: " <> T.pack tpfError
-        -- Fallback: force retreat if possible, else pass out
-        if setup.bsVariant.bvCanRetreat
-          then do
-            let downtimeSetup = DowntimeSetup
-                  { dsVariant = Recovery ["rest", "escape"] "a moment"
-                  , dsPreviousSceneSummary = "slipped away"
-                  }
-            pure $ gotoChoice @"downtime" downtimeSetup
-          else do
-            let traumaSetup = TraumaSetup
-                  { tsVariant = Breaking
-                      { tvWhatBroke = "exhaustion"
-                      , tvTraumaType = Trauma "pending"
-                      , tvTrigger = setup.bsVariant.bvWhatDrained
-                      , tvAdrenaline = False
-                      }
-                  , tsTrigger = "collapsed from exhaustion"
-                  }
-            pure $ gotoChoice @"trauma" traumaSetup
+      TurnParseFailed{..} ->
+        error $ "[Bargain] Parse failed: " <> tpfError
 
       TurnParsed result -> do
         -- Apply output
@@ -879,11 +825,8 @@ traumaHandler setup = do
       finishTrauma setup.tsVariant reason
 
     TurnCompleted parseResult -> case parseResult of
-      TurnParseFailed{..} -> do
-        logWarn $ "[Trauma] Parse failed: " <> T.pack tpfError
-        finishTrauma setup.tsVariant (if T.null tpfNarrative
-          then "Something breaks inside you..."
-          else tpfNarrative)
+      TurnParseFailed{..} ->
+        error $ "[Trauma] Parse failed: " <> tpfError
 
       TurnParsed result -> do
         -- Apply output
@@ -971,11 +914,8 @@ downtimeHandler setup = do
       startNewScene "Time passes..."
 
     TurnCompleted parseResult -> case parseResult of
-      TurnParseFailed{..} -> do
-        logWarn $ "[Downtime] Parse failed: " <> T.pack tpfError
-        startNewScene (if T.null tpfNarrative
-          then "Time passes in Doskvol..."
-          else tpfNarrative)
+      TurnParseFailed{..} ->
+        error $ "[Downtime] Parse failed: " <> tpfError
 
       TurnParsed result -> do
         -- Apply output
@@ -993,7 +933,9 @@ downtimeHandler setup = do
                   { rNarration = result.trOutput.narration <> "\n\n*The eternal night of Doskvol awaits your return...*"
                   , rStressDelta = stateAfter.player.stress - stateBefore.player.stress
                   , rCoinDelta = stateAfter.player.coin - stateBefore.player.coin
+                  , rHeatDelta = stateAfter.player.heat - stateBefore.player.heat
                   , rSuggestedActions = []
+                  , rSessionEnded = True
                   }
             pure $ gotoExit response
 
@@ -1016,5 +958,3 @@ startNewScene narration = do
         , ssPreviousNarration = Just narration
         }
   pure $ gotoChoice @"sceneRouter" sceneSetup
-  where
-    when cond action = if cond then action else pure ()

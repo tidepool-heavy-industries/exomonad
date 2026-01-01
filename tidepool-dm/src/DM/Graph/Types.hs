@@ -204,9 +204,18 @@ data DowntimeSetup = DowntimeSetup
 -- ══════════════════════════════════════════════════════════════
 
 -- | Final response to the player (exit type)
+--
+-- Includes delta fields for GUI display of mechanical changes.
+-- These track actual changes after clamping (not LLM's claimed values).
 data Response = Response
   { rNarration :: Text
     -- ^ The DM's narrative response
+  , rStressDelta :: Int
+    -- ^ Actual stress change this turn (after clamping)
+  , rCoinDelta :: Int
+    -- ^ Actual coin change this turn
+  , rHeatDelta :: Int
+    -- ^ Actual heat change this turn
   , rSuggestedActions :: [Text]
     -- ^ Suggested next actions for quick-pick buttons
   , rSessionEnded :: Bool

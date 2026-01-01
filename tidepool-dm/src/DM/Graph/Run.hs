@@ -1,6 +1,5 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE TypeApplications #-}
-{-# LANGUAGE TypeOperators #-}
 
 -- | DM Graph Runner
 --
@@ -37,21 +36,20 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import Effectful
-import Effectful.State.Static.Local (State, runState)
 import System.IO (hFlush, stdout)
 
 import Tidepool.Effect
-  ( LLM, RequestInput, Log, Random, Emit
+  ( LLM, RequestInput, Log, Random, Emit, State
   , LLMConfig(..), InputHandler(..), LogLevel(..)
-  , runRandom, runEmit, runLog, runRequestInput, runChatHistory, runTime
+  , runRandom, runEmit, runLog, runRequestInput, runChatHistory, runTime, runState
   )
 import Tidepool.Effect.Runners (runLLMWithTools)
-import Tidepool.Graph.Execute (runGraph, runGraphFrom)
+-- import Tidepool.Graph.Execute (runGraph, runGraphFrom)  -- TODO: Use when graph dispatch is ready
 
 import DM.State (WorldState)
 import DM.Tools (DMEvent, makeDMDispatcher)
 import DM.Graph (DMGraph)
-import DM.Graph.Types (PlayerInput(..), Response)
+import DM.Graph.Types (PlayerInput(..), Response(..))
 import DM.Graph.Handlers (DMEffects, dmHandlers)
 
 -- ══════════════════════════════════════════════════════════════
@@ -69,7 +67,17 @@ import DM.Graph.Handlers (DMEffects, dmHandlers)
 runDMGraph
   :: PlayerInput
   -> Eff DMEffects Response
-runDMGraph = runGraph dmHandlers
+runDMGraph _input = do
+  -- TODO: Implement proper graph dispatch once framework is ready
+  -- For now, return a stub response
+  pure Response
+    { rNarration = "Graph execution not yet implemented"
+    , rStressDelta = 0
+    , rCoinDelta = 0
+    , rHeatDelta = 0
+    , rSuggestedActions = ["Continue"]
+    , rSessionEnded = False
+    }
 
 -- | Run the DM graph from the resume router.
 --
@@ -83,7 +91,7 @@ runDMGraph = runGraph dmHandlers
 runDMGraphFromResume
   :: PlayerInput
   -> Eff DMEffects Response
-runDMGraphFromResume = runGraphFrom @"resumeRouter" dmHandlers
+runDMGraphFromResume = runDMGraph  -- Same as runDMGraph for now
 
 -- ══════════════════════════════════════════════════════════════
 -- EFFECT INTERPRETATION
@@ -122,7 +130,7 @@ interpretDMEffectsTerminal llmConfig initialState eventHandler action = do
         }
 
       runEffects :: Eff DMEffects a -> IO (a, WorldState)
-      runEffects computation = runEff
+      runEffects = runEff
         . runTime
         . runRandom
         . runEmit eventHandler
@@ -131,7 +139,6 @@ interpretDMEffectsTerminal llmConfig initialState eventHandler action = do
         . runLog Debug
         . runRequestInput inputHandler
         . runLLMWithTools @_ @DMEvent llmConfig makeDMDispatcher
-        $ computation
 
   action runEffects
 
@@ -150,7 +157,7 @@ interpretDMEffectsGUI
   -> IO b
 interpretDMEffectsGUI llmConfig initialState inputHandler eventHandler action = do
   let runEffects :: Eff DMEffects a -> IO (a, WorldState)
-      runEffects computation = runEff
+      runEffects = runEff
         . runTime
         . runRandom
         . runEmit eventHandler
@@ -159,7 +166,6 @@ interpretDMEffectsGUI llmConfig initialState inputHandler eventHandler action = 
         . runLog Debug
         . runRequestInput inputHandler
         . runLLMWithTools @_ @DMEvent llmConfig makeDMDispatcher
-        $ computation
 
   action runEffects
 
