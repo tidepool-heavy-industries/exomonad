@@ -135,6 +135,41 @@ Handlers return typed errors rather than throwing:
 
 The `executeEffect()` wrapper catches any uncaught exceptions and converts them to error results.
 
+## Important Implementation Details
+
+### Runaway Execution Protection
+
+The effect loop in `index.ts` has a `MAX_EFFECT_STEPS = 1000` limit to prevent
+infinite loops from buggy WASM graphs. If exceeded, the session is terminated
+with an error message.
+
+### WASM Return Validation
+
+The loader (`loader.ts`) explicitly validates that WASM exports return strings.
+If WASM returns non-string (throws, undefined, etc.), an explicit error is
+thrown rather than silently returning a fake success response.
+
+### Protocol Type Alignment
+
+The TypeScript types in `protocol.ts` must exactly match Haskell's `WireTypes.hs`:
+
+| Field | TypeScript | Haskell | Notes |
+|-------|------------|---------|-------|
+| `StepOutput.error` | `error?: string` | `soError :: Text` | Only present on `StepFailed` |
+| `EffectResult.value` | `value?: unknown` | `resValue :: Maybe Value` | Optional - Haskell may omit |
+
+### Durable Object Concurrency Model
+
+DOs are **single-threaded** with cooperative multitasking (yields at `await`).
+This means:
+- No true parallelism within a DO instance
+- Code only yields control at explicit `await` points
+- In-memory state (`this.state` in TelegramDO) is instantly visible to interleaved code
+- No locking needed for in-memory state mutations
+
+This is NOT a race condition concern - the `this.state` cache ensures concurrent
+requests see the same in-memory state immediately, even if storage writes are pending.
+
 ### Adding a New Handler
 
 1. Create `src/handlers/myeffect.ts` with handler function

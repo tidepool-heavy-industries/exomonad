@@ -962,6 +962,45 @@ Graph execution is **partially implemented** via `Execute.hs`:
 
 **Future work**: Implement full graph runner with LLM node support.
 
+### LLMBefore/LLMAfter Detection
+
+LLM handlers have three constructors: `LLMBefore`, `LLMAfter`, and `LLMBoth`.
+Only `LLMBoth` is valid for graph dispatch. The others are caught at **compile
+time** via type families:
+
+```haskell
+-- In Execute.hs
+type family ValidLLMTargets targets where
+  ValidLLMTargets '[] = TypeError "LLMBefore is not supported..."
+  ValidLLMTargets _   = ()
+
+type family ValidLLMContext tpl where
+  ValidLLMContext () = TypeError "LLMAfter is not supported..."
+  ValidLLMContext _  = ()
+```
+
+This works because:
+- `LLMBefore` forces `targets = '[]` (no Goto targets)
+- `LLMAfter` forces `tpl = ()` (no template context)
+- `LLMBoth` with `targets = '[]` is unconstructible (`GotoChoice '[]` is uninhabited)
+
+Users who genuinely need empty context with `LLMBoth` should define a custom
+unit type: `data NoContext = NoContext` instead of using `()`.
+
+### Reachability Fuel Multiplier
+
+The structural validation in `RecordStructure.hs` uses fuel-based fixed-point
+iteration to compute reachable nodes. The fuel is set to `3 * N + 1` where N
+is the field count:
+
+```haskell
+ComputeReachableFields fields entryType (3 * LengthPairs fields + 1)
+```
+
+This handles deep dependency chains where the chain depth exceeds the field
+count. Using just N as fuel would incorrectly flag valid nodes as unreachable
+in pathological cases.
+
 ## Known Issues / Gotchas
 
 ### Record Field Names vs Template/JSON Names

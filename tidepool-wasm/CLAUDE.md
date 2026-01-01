@@ -104,6 +104,21 @@ Types that cross the WASM/JSON boundary. Matches `deploy/src/protocol.ts`:
 | `EffectResult` | TS → WASM | Result of effect execution (success/error) |
 | `StepOutput` | WASM → TS | Per-step output (effect, done flag, result) |
 
+**Critical Protocol Details**:
+
+1. **StepFailed includes `error` field**: When `StepFailed` is serialized, it
+   includes an `error` field with the error message. TypeScript's `StepOutput`
+   interface must have `error?: string` to receive this.
+
+2. **EffectResult `value` is optional**: `ResSuccess` may omit the `value` field
+   when `resValue = Nothing`. TypeScript must use `value?: unknown`, not
+   `value: unknown`.
+
+3. **Field name conventions**: Aeson's `fieldLabelModifier` drops prefixes:
+   - `resValue` → `value`
+   - `resMessage` → `message`
+   - `effMessage` → `message` (for effects)
+
 ### Ffi.hs
 
 FFI exports with CPP conditionals:
