@@ -31,9 +31,15 @@ module Tidepool.Wasm.Ffi
   , stepExample
   , getExampleGraphInfo
   , getExampleGraphState
+    -- * FFI Exports (HabiticaRoutingGraph)
+  , initializeHabitica
+  , stepHabitica
+  , getHabiticaGraphInfo
+  , getHabiticaGraphState
     -- * Testing (native only)
   , resetState
   , resetExampleState
+  , resetHabiticaState
   ) where
 
 import Data.Aeson (eitherDecodeStrict, encode, object, (.=), toJSON)
@@ -48,6 +54,8 @@ import System.IO.Unsafe (unsafePerformIO)
 import Tidepool.Wasm.Runner (WasmResult(..), initializeWasm)
 import Tidepool.Wasm.TestGraph (computeHandlerWasm)
 import Tidepool.Wasm.ExampleGraph (UserMessage(..), Response(..), runExampleGraph)
+import Tidepool.Wasm.HabiticaRoutingGraph (RawInput(..), runHabiticaRoutingGraph)
+import Tidepool.Wasm.HabiticaTypes (ExecutionResult(..))
 import Tidepool.Wasm.WireTypes
   ( EffectResult(..)
   , ExecutionPhase(..)
@@ -106,6 +114,20 @@ foreign export javascript "getExampleGraphInfo" getExampleGraphInfo :: IO JSStri
 -- | Get ExampleGraph runtime state.
 foreign export javascript "getExampleGraphState" getExampleGraphState :: IO JSString
 
+-- HabiticaRoutingGraph FFI exports
+
+-- | Start HabiticaRoutingGraph execution with JSON input (Text message).
+foreign export javascript "initializeHabitica" initializeHabitica :: JSString -> IO JSString
+
+-- | Continue HabiticaRoutingGraph execution with effect result.
+foreign export javascript "stepHabitica" stepHabitica :: JSString -> IO JSString
+
+-- | Get HabiticaRoutingGraph structure.
+foreign export javascript "getHabiticaGraphInfo" getHabiticaGraphInfo :: IO JSString
+
+-- | Get HabiticaRoutingGraph runtime state.
+foreign export javascript "getHabiticaGraphState" getHabiticaGraphState :: IO JSString
+
 #endif
 
 
@@ -153,6 +175,17 @@ exampleGlobalState = unsafePerformIO $ newIORef Idle
 -- | Reset ExampleGraph state (for testing only).
 resetExampleState :: IO ()
 resetExampleState = writeIORef exampleGlobalState Idle
+
+
+-- | Global state for HabiticaRoutingGraph (separate from other graphs).
+{-# NOINLINE habiticaGlobalState #-}
+habiticaGlobalState :: IORef WasmState
+habiticaGlobalState = unsafePerformIO $ newIORef Idle
+
+
+-- | Reset HabiticaRoutingGraph state (for testing only).
+resetHabiticaState :: IO ()
+resetHabiticaState = writeIORef habiticaGlobalState Idle
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -454,6 +487,144 @@ getExampleGraphState = getExampleGraphStateImpl
 getExampleGraphStateImpl :: IO Text
 getExampleGraphStateImpl = do
   mState <- readIORef exampleGlobalState
+  let graphState = case mState of
+        Idle -> GraphState PhaseIdle []
+        Waiting _ phase -> GraphState phase []
+  pure $ TL.toStrict $ TLE.decodeUtf8 $ encode graphState
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- HABITICA ROUTING GRAPH IMPLEMENTATION
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Node name for tracking HabiticaRoutingGraph execution.
+habiticaGraphNodeName :: Text
+habiticaGraphNodeName = "extractTask"
+
+-- | Convert ExecutionResult to StepOutput.
+executionResultToOutput :: ExecutionResult -> StepOutput
+executionResultToOutput result =
+  let resultVal = toJSON result
+  in StepDone resultVal (GraphState (PhaseCompleted resultVal) [habiticaGraphNodeName])
+
+-- | Convert WasmResult for HabiticaRoutingGraph to StepOutput.
+habiticaWasmResultToOutput :: WasmResult ExecutionResult -> IO StepOutput
+habiticaWasmResultToOutput (WasmComplete result) = do
+  writeIORef habiticaGlobalState Idle
+  pure $ executionResultToOutput result
+
+habiticaWasmResultToOutput (WasmYield eff resume) = do
+  let phase = PhaseInNode habiticaGraphNodeName
+  writeIORef habiticaGlobalState (Waiting (SomeCont resume executionResultToOutput) phase)
+  pure $ StepYield eff (GraphState phase [])
+
+habiticaWasmResultToOutput (WasmError msg) = do
+  writeIORef habiticaGlobalState Idle
+  pure $ mkErrorOutput msg
+
+
+-- | Initialize HabiticaRoutingGraph with raw text input.
+#if defined(wasm32_HOST_ARCH)
+initializeHabitica :: JSString -> IO JSString
+initializeHabitica input = toJSString <$> initializeHabiticaImpl (fromJSString input)
+#else
+initializeHabitica :: Text -> IO Text
+initializeHabitica = initializeHabiticaImpl
+#endif
+
+initializeHabiticaImpl :: Text -> IO Text
+initializeHabiticaImpl inputJson =
+  case eitherDecodeStrict (encodeUtf8 inputJson) of
+    Left err -> pure $ encodeStepOutput $ mkErrorOutput $ "JSON parse error: " <> T.pack err
+    Right rawInput -> do
+      let result = initializeWasm (runHabiticaRoutingGraph rawInput)
+      output <- habiticaWasmResultToOutput result
+      pure $ encodeStepOutput output
+
+
+-- | Step HabiticaRoutingGraph execution.
+#if defined(wasm32_HOST_ARCH)
+stepHabitica :: JSString -> IO JSString
+stepHabitica result = toJSString <$> stepHabiticaImpl (fromJSString result)
+#else
+stepHabitica :: Text -> IO Text
+stepHabitica = stepHabiticaImpl
+#endif
+
+stepHabiticaImpl :: Text -> IO Text
+stepHabiticaImpl resultJson = do
+  mState <- readIORef habiticaGlobalState
+  case mState of
+    Idle ->
+      pure $ encodeStepOutput $ mkErrorOutput "HabiticaRoutingGraph not initialized - call initializeHabitica() before stepHabitica()"
+    Waiting (SomeCont resume toOutput) _phase ->
+      case eitherDecodeStrict (encodeUtf8 resultJson) of
+        Left err ->
+          pure $ encodeStepOutput $ mkErrorOutput $ "JSON parse error: " <> T.pack err
+        Right effectResult -> do
+          let nextResult = resume effectResult
+          output <- wasmResultToOutputGenericHabitica nextResult toOutput
+          pure $ encodeStepOutput output
+
+-- | Generic version for HabiticaRoutingGraph.
+wasmResultToOutputGenericHabitica
+  :: WasmResult a
+  -> (a -> StepOutput)
+  -> IO StepOutput
+wasmResultToOutputGenericHabitica (WasmComplete a) toOutput = do
+  writeIORef habiticaGlobalState Idle
+  pure $ toOutput a
+
+wasmResultToOutputGenericHabitica (WasmYield eff resume) toOutput = do
+  let phase = PhaseInNode habiticaGraphNodeName
+  writeIORef habiticaGlobalState (Waiting (SomeCont resume toOutput) phase)
+  pure $ StepYield eff (GraphState phase [])
+
+wasmResultToOutputGenericHabitica (WasmError msg) _toOutput = do
+  writeIORef habiticaGlobalState Idle
+  pure $ mkErrorOutput msg
+
+
+-- | Get HabiticaRoutingGraph metadata.
+#if defined(wasm32_HOST_ARCH)
+getHabiticaGraphInfo :: IO JSString
+getHabiticaGraphInfo = toJSString <$> getHabiticaGraphInfoImpl
+#else
+getHabiticaGraphInfo :: IO Text
+getHabiticaGraphInfo = getHabiticaGraphInfoImpl
+#endif
+
+getHabiticaGraphInfoImpl :: IO Text
+getHabiticaGraphInfoImpl =
+  pure $ TL.toStrict $ TLE.decodeUtf8 $ encode $
+    object
+      [ "name" .= ("HabiticaRoutingGraph" :: Text)
+      , "description" .= ("Task extraction and Habitica routing workflow" :: Text)
+      , "nodes" .= (["entry", "extractTask", "fetchExisting", "matchTask", "suggestAction", "confirmWithUser", "executeAction", "exit"] :: [Text])
+      , "edges" .= object
+          [ "entry" .= ("extractTask" :: Text)
+          , "extractTask" .= ("fetchExisting" :: Text)
+          , "fetchExisting" .= ("matchTask" :: Text)
+          , "matchTask" .= ("suggestAction" :: Text)
+          , "suggestAction" .= ("confirmWithUser" :: Text)
+          , "confirmWithUser" .= (["executeAction", "suggestAction", "exit"] :: [Text])
+          , "executeAction" .= ("exit" :: Text)
+          ]
+      ]
+
+
+-- | Get HabiticaRoutingGraph runtime state.
+#if defined(wasm32_HOST_ARCH)
+getHabiticaGraphState :: IO JSString
+getHabiticaGraphState = toJSString <$> getHabiticaGraphStateImpl
+#else
+getHabiticaGraphState :: IO Text
+getHabiticaGraphState = getHabiticaGraphStateImpl
+#endif
+
+getHabiticaGraphStateImpl :: IO Text
+getHabiticaGraphStateImpl = do
+  mState <- readIORef habiticaGlobalState
   let graphState = case mState of
         Idle -> GraphState PhaseIdle []
         Waiting _ phase -> GraphState phase []

@@ -146,7 +146,8 @@ export type SerializableEffect =
   | HabiticaEffect
   | TelegramSendEffect
   | TelegramReceiveEffect
-  | TelegramTryReceiveEffect;
+  | TelegramTryReceiveEffect
+  | TelegramConfirmEffect;
 
 /**
  * LLM completion request - matches Haskell EffLlmComplete.
@@ -250,6 +251,19 @@ export interface TelegramReceiveEffect {
  */
 export interface TelegramTryReceiveEffect {
   type: "telegram_try_receive";
+}
+
+/**
+ * User confirmation via Telegram inline buttons.
+ * Displays a message with buttons and waits for user to click one.
+ * Mirrors Haskell: EffTelegramConfirm
+ */
+export interface TelegramConfirmEffect {
+  type: "TelegramConfirm";
+  /** Message to display to user */
+  eff_message: string;
+  /** Button options: [[label, value], ...] */
+  eff_buttons: [string, string][];
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

@@ -43,16 +43,28 @@ export class StateMachineDO extends DurableObject<Env> {
   private sessionId: string | null = null;
 
   /**
-   * Handle incoming requests - expect WebSocket upgrade
+   * Handle incoming requests - WebSocket upgrade or HTTP endpoints
    */
   async fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+
+    // Handle /run endpoint (HTTP POST for DO-to-DO communication)
+    if (url.pathname === "/run" && request.method === "POST") {
+      return this.handleRunRequest(request);
+    }
+
+    // Handle /effect endpoint (HTTP POST for Telegram effect results)
+    if (url.pathname === "/effect" && request.method === "POST") {
+      return this.handleEffectResult(request);
+    }
+
+    // Handle WebSocket upgrade
     const upgradeHeader = request.headers.get("Upgrade");
     if (upgradeHeader !== "websocket") {
-      return new Response("Expected WebSocket upgrade", { status: 426 });
+      return new Response("Expected WebSocket upgrade or POST /run", { status: 426 });
     }
 
     // Extract session ID from URL path (matches the idFromName routing)
-    const url = new URL(request.url);
     const match = url.pathname.match(/^\/session\/(.+)$/);
     if (match) {
       this.sessionId = match[1];
@@ -66,6 +78,160 @@ export class StateMachineDO extends DurableObject<Env> {
     console.log(`[DO] WebSocket connection accepted, sessionId: ${this.sessionId}`);
 
     return new Response(null, { status: 101, webSocket: client });
+  }
+
+  /**
+   * Handle /run request - run a graph and return when complete or yielded.
+   * Used for DO-to-DO communication (e.g., TelegramDO -> StateMachineDO).
+   */
+  private async handleRunRequest(request: Request): Promise<Response> {
+    try {
+      const { graphId, input, chatId } = await request.json() as {
+        graphId: string;
+        input: unknown;
+        chatId: number;
+      };
+
+      console.log(`[DO] /run request: graphId=${graphId}, chatId=${chatId}`);
+
+      // Load WASM if not already loaded
+      if (!this.machine) {
+        this.machine = await loadMachine({
+          wasmModule: wasmModule as unknown as WebAssembly.Module,
+          debug: false,
+        });
+      }
+
+      // Initialize the graph
+      const output = await this.machine.initialize(input, graphId);
+
+      // Run effect loop until completion or Telegram effect
+      return this.runHttpGraphLoop(graphId, chatId, output);
+    } catch (err) {
+      console.error("[DO] /run error:", err);
+      return Response.json(
+        { type: "error", message: err instanceof Error ? err.message : String(err) },
+        { status: 500 }
+      );
+    }
+  }
+
+  /**
+   * Handle /effect request - resume after effect result.
+   */
+  private async handleEffectResult(request: Request): Promise<Response> {
+    try {
+      const { graphId, chatId, result } = await request.json() as {
+        graphId: string;
+        chatId: number;
+        result: EffectResult;
+      };
+
+      console.log(`[DO] /effect request: graphId=${graphId}, chatId=${chatId}`);
+
+      if (!this.machine) {
+        return Response.json(
+          { type: "error", message: "No active machine" },
+          { status: 400 }
+        );
+      }
+
+      // Step with the result
+      const output = await this.machine.step(result, graphId);
+
+      // Continue the loop
+      return this.runHttpGraphLoop(graphId, chatId, output);
+    } catch (err) {
+      console.error("[DO] /effect error:", err);
+      return Response.json(
+        { type: "error", message: err instanceof Error ? err.message : String(err) },
+        { status: 500 }
+      );
+    }
+  }
+
+  /**
+   * Run graph loop for HTTP requests (DO-to-DO).
+   * Returns when complete or when a Telegram effect needs routing.
+   */
+  private async runHttpGraphLoop(
+    graphId: string,
+    chatId: number,
+    output: Awaited<ReturnType<GraphMachine["initialize"]>>
+  ): Promise<Response> {
+    // Effect interpretation loop
+    while (!output.done && output.effect) {
+      const effect = output.effect;
+
+      // Check if this is a Telegram effect that needs routing back to TelegramDO
+      if (this.isTelegramEffect(effect)) {
+        console.log(`[DO] Routing Telegram effect to TelegramDO: ${effect.type}`);
+        const telegramResult = await this.routeToTelegramDO(effect, chatId);
+
+        // If TelegramDO yielded (waiting for user), we also yield
+        if (telegramResult.type === "yield") {
+          return Response.json({ type: "yield", effect });
+        }
+
+        // Continue with the result from Telegram
+        output = await this.machine!.step(telegramResult.result, graphId);
+        continue;
+      }
+
+      // Execute non-Telegram effects server-side
+      const result = await executeEffect(effect, this.env);
+
+      // Check if effect failed
+      if (result.type === "error") {
+        console.error(`[DO] Effect failed: ${result.message}`);
+        return Response.json({ type: "error", message: result.message }, { status: 500 });
+      }
+
+      // Step with the result
+      output = await this.machine!.step(result, graphId);
+    }
+
+    // Graph completed
+    if (output.graphState.phase.type === "failed") {
+      return Response.json({
+        type: "error",
+        message: output.graphState.phase.error,
+      });
+    }
+
+    return Response.json({
+      type: "done",
+      result: output.stepResult,
+    });
+  }
+
+  /**
+   * Check if effect should be routed to TelegramDO.
+   */
+  private isTelegramEffect(effect: import("./protocol.js").SerializableEffect): boolean {
+    return ["telegram_send", "telegram_receive", "telegram_try_receive", "TelegramConfirm"]
+      .includes(effect.type);
+  }
+
+  /**
+   * Route effect to TelegramDO and wait for result.
+   */
+  private async routeToTelegramDO(
+    effect: import("./protocol.js").SerializableEffect,
+    chatId: number
+  ): Promise<{ type: "yield" } | { type: "result"; result: EffectResult }> {
+    const doId = this.env.TELEGRAM_DO.idFromName(`chat:${chatId}`);
+    const stub = this.env.TELEGRAM_DO.get(doId);
+
+    const response = await stub.fetch(
+      new Request("https://internal/effect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ effect, sessionId: this.sessionId }),
+      })
+    );
+
+    return response.json() as Promise<{ type: "yield" } | { type: "result"; result: EffectResult }>;
   }
 
   /**

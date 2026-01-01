@@ -48,6 +48,11 @@ library
             -optl-Wl,--export=stepExample
             -optl-Wl,--export=getExampleGraphInfo
             -optl-Wl,--export=getExampleGraphState
+            -- HabiticaRoutingGraph exports
+            -optl-Wl,--export=initializeHabitica
+            -optl-Wl,--export=stepHabitica
+            -optl-Wl,--export=getHabiticaGraphInfo
+            -optl-Wl,--export=getHabiticaGraphState
 
     hs-source-dirs:   src
     default-language: GHC2021

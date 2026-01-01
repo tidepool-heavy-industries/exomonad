@@ -19,7 +19,7 @@ import {
   isAllowedUser,
   updateToIncomingMessage,
 } from "./types.js";
-import { sendMessage, sendTypingAction, answerCallbackQuery, sendPhoto, sendDocument } from "./api.js";
+import { sendMessage, answerCallbackQuery, sendMessageWithButtons } from "./api.js";
 import type {
   TelegramIncomingMessage,
   SerializableEffect,
@@ -68,8 +68,10 @@ const IncomingMessageSchema = z.discriminatedUnion("type", [
 const ConversationStateSchema = z.object({
   chatId: z.number(),
   wasmSessionId: z.string().nullable().default(null),
+  graphId: z.string().default("habitica"),
   pendingMessages: z.array(IncomingMessageSchema).default([]),
   waitingForReceive: z.boolean().default(false),
+  waitingForConfirm: z.boolean().default(false),
   pendingEffect: z.unknown().default(null),
   lastActivity: z.number().default(() => Date.now()),
 });
@@ -81,6 +83,11 @@ const ConversationStateSchema = z.object({
  */
 interface ConversationState extends Omit<z.infer<typeof ConversationStateSchema>, 'pendingEffect'> {
   pendingEffect: SerializableEffect | null;
+}
+
+/** Type guard for TelegramConfirmEffect */
+function isTelegramConfirmEffect(effect: SerializableEffect): effect is import("../protocol.js").TelegramConfirmEffect {
+  return effect.type === "TelegramConfirm";
 }
 
 /**
@@ -247,15 +254,101 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
       return this.processEffect(effect, state);
     }
 
+    // If we're waiting for confirmation and got a button click, resume
+    if (state.waitingForConfirm && state.pendingEffect && incomingMessage.type === "button_click") {
+      console.log(`[TelegramDO] Resuming after confirmation button click`);
+      state.waitingForConfirm = false;
+      const effect = state.pendingEffect;
+      state.pendingEffect = null;
+
+      await this.saveState();
+
+      // Process the TelegramConfirm effect - it will find the button_click in pendingMessages
+      return this.processEffect(effect, state);
+    }
+
     await this.saveState();
 
-    // If no active session, start echo mode (for testing)
-    // TODO: Replace with StateMachineDO integration
-    if (!state.wasmSessionId) {
-      await this.handleEchoMode(chatId, incomingMessage);
+    // If no active session, start a Habitica routing session
+    if (!state.wasmSessionId && incomingMessage.type === "text") {
+      await this.startHabiticaSession(chatId, incomingMessage.text);
     }
 
     return new Response("OK");
+  }
+
+  /**
+   * Start a new Habitica routing session.
+   * Creates a StateMachineDO session and initiates the graph.
+   */
+  private async startHabiticaSession(chatId: number, messageText: string): Promise<void> {
+    const sessionId = `telegram:${chatId}:${Date.now()}`;
+    console.log(`[TelegramDO] Starting Habitica session: ${sessionId}`);
+
+    // Update state with new session ID
+    if (this.state) {
+      this.state.wasmSessionId = sessionId;
+      this.state.graphId = "habitica";
+      await this.saveState();
+    }
+
+    // Get StateMachineDO stub
+    const doId = this.env.STATE_MACHINE.idFromName(sessionId);
+    const stub = this.env.STATE_MACHINE.get(doId);
+
+    // Call the /run endpoint to start the graph
+    try {
+      const response = await stub.fetch(
+        new Request("https://internal/run", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            graphId: "habitica",
+            input: messageText,
+            chatId: chatId,
+          }),
+        })
+      );
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`[TelegramDO] StateMachine /run failed: ${response.status} ${errorText}`);
+        await sendMessage(
+          this.env.TELEGRAM_TOKEN,
+          chatId,
+          `Error starting session: ${errorText}`
+        );
+        // Clear session on error
+        if (this.state) {
+          this.state.wasmSessionId = null;
+          await this.saveState();
+        }
+        return;
+      }
+
+      const result = await response.json() as { type: string; message?: string };
+      console.log(`[TelegramDO] StateMachine /run result: ${JSON.stringify(result)}`);
+
+      // If completed, clear the session
+      if (result.type === "done") {
+        if (this.state) {
+          this.state.wasmSessionId = null;
+          await this.saveState();
+        }
+      }
+    } catch (err) {
+      console.error(`[TelegramDO] Error calling StateMachine:`, err);
+      await sendMessage(
+        this.env.TELEGRAM_TOKEN,
+        chatId,
+        `Error: ${err instanceof Error ? err.message : String(err)}`
+      );
+      // Clear session on error
+      if (this.state) {
+        this.state.wasmSessionId = null;
+        await this.saveState();
+      }
+    }
   }
 
   /**
@@ -316,6 +409,49 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
         await this.saveState();
         break;
 
+      case "TelegramConfirm": {
+        // TelegramConfirm effect - show buttons and wait for user to click
+        if (isTelegramConfirmEffect(effect)) {
+          // Check if we already have a button click in the pending messages
+          const buttonClick = state.pendingMessages.find(m => m.type === "button_click");
+          if (buttonClick) {
+            // We have a response - clear pending messages and return the result
+            state.pendingMessages = state.pendingMessages.filter(m => m.type !== "button_click");
+            state.waitingForConfirm = false;
+            await this.saveState();
+
+            result = {
+              type: "success",
+              value: { response: buttonClick.data },
+            };
+            break;
+          }
+
+          // No response yet - send buttons and yield
+          console.log(`[TelegramDO] Sending confirmation buttons: ${effect.eff_message}`);
+          const buttons = effect.eff_buttons.map(([label, value]) => [{ text: label, data: value }]);
+          await sendMessageWithButtons(
+            this.env.TELEGRAM_TOKEN,
+            state.chatId,
+            effect.eff_message,
+            buttons
+          );
+
+          // Mark as waiting for confirmation
+          state.waitingForConfirm = true;
+          state.pendingEffect = effect;
+          await this.saveState();
+
+          return Response.json({ type: "yield", effect });
+        }
+        // Fallthrough to default if not TelegramConfirmEffect
+        console.error(`[TelegramDO] Invalid TelegramConfirm effect`);
+        return Response.json(
+          { type: "error", message: "Invalid TelegramConfirm effect" },
+          { status: 400 }
+        );
+      }
+
       default:
         // Not a Telegram effect - shouldn't happen
         console.error(`[TelegramDO] Unknown effect type: ${(effect as { type: string }).type}`);
@@ -326,76 +462,5 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
     }
 
     return Response.json({ type: "result", result });
-  }
-
-  /**
-   * Echo mode for testing (when no WASM session is active).
-   * Echoes back the same type of message: text, photo, document, or button click.
-   */
-  private async handleEchoMode(
-    chatId: number,
-    message: TelegramIncomingMessage
-  ): Promise<void> {
-    await sendTypingAction(this.env.TELEGRAM_TOKEN, chatId);
-
-    let result: { message_id: number } | null = null;
-
-    switch (message.type) {
-      case "text":
-        result = await sendMessage(
-          this.env.TELEGRAM_TOKEN,
-          chatId,
-          `Echo: ${message.text}`
-        );
-        break;
-
-      case "photo":
-        // Echo back the same photo with an "Echo:" caption
-        result = await sendPhoto(
-          this.env.TELEGRAM_TOKEN,
-          chatId,
-          message.media,
-          message.caption ? `Echo: ${message.caption}` : "Echo!"
-        );
-        break;
-
-      case "document":
-        // Echo back the same document
-        result = await sendDocument(
-          this.env.TELEGRAM_TOKEN,
-          chatId,
-          message.media,
-          `Echo: ${message.filename}`
-        );
-        break;
-
-      case "button_click":
-        result = await sendMessage(
-          this.env.TELEGRAM_TOKEN,
-          chatId,
-          `Button clicked: ${JSON.stringify(message.data)}`
-        );
-        break;
-
-      default: {
-        const _exhaustive: never = message;
-        console.error("[TelegramDO] Unknown message type:", _exhaustive);
-        result = await sendMessage(
-          this.env.TELEGRAM_TOKEN,
-          chatId,
-          "Received unknown message type"
-        );
-      }
-    }
-
-    if (result) {
-      console.log(`[TelegramDO] Sent echo response, message_id: ${result.message_id}`);
-    }
-
-    // Clear pending messages after echo
-    if (this.state) {
-      this.state.pendingMessages = [];
-      await this.saveState();
-    }
   }
 }

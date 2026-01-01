@@ -11,9 +11,25 @@ export interface WasmExports {
   // Initialization exports
   _initialize: () => void;  // WASI/libc initialization (reactor mode)
   hs_init: (argc: number, argv: number) => void;  // GHC RTS initialization
-  // GHC WASM exports use externref - JS values passed directly
+
+  // TestGraph exports (default)
   initialize: (input: string) => Promise<string>;
   step: (result: string) => Promise<string>;
+  getGraphInfo?: () => string | Promise<string>;
+  getGraphState?: () => string | Promise<string>;
+
+  // ExampleGraph exports
+  initializeExample?: (input: string) => Promise<string>;
+  stepExample?: (result: string) => Promise<string>;
+  getExampleGraphInfo?: () => string | Promise<string>;
+  getExampleGraphState?: () => string | Promise<string>;
+
+  // HabiticaRoutingGraph exports
+  initializeHabitica?: (input: string) => Promise<string>;
+  stepHabitica?: (result: string) => Promise<string>;
+  getHabiticaGraphInfo?: () => string | Promise<string>;
+  getHabiticaGraphState?: () => string | Promise<string>;
+
   // RTS exports for JSFFI
   rts_schedulerLoop: () => void;
   rts_freeStablePtr: (sp: number) => void;

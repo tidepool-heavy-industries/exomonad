@@ -40,6 +40,13 @@ import GHC.Generics (Generic)
 newtype RawInput = RawInput { unRawInput :: Text }
   deriving stock (Show, Eq, Generic)
 
+-- | Parses as a plain string (for FFI input).
+instance FromJSON RawInput where
+  parseJSON = fmap RawInput . parseJSON
+
+instance ToJSON RawInput where
+  toJSON (RawInput t) = toJSON t
+
 -- | A task extracted from unstructured text.
 data ExtractedTask = ExtractedTask
   { etDescription :: Text       -- ^ The task description

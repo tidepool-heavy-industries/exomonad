@@ -18,10 +18,42 @@ import type {
 // =============================================================================
 
 export interface GraphMachine {
-  initialize(input: unknown): Promise<StepOutput>;
-  step(result: EffectResult): Promise<StepOutput>;
-  getGraphInfo(): Promise<GraphInfo>;
-  getGraphState(): Promise<GraphState>;
+  initialize(input: unknown, graphId?: string): Promise<StepOutput>;
+  step(result: EffectResult, graphId?: string): Promise<StepOutput>;
+  getGraphInfo(graphId?: string): Promise<GraphInfo>;
+  getGraphState(graphId?: string): Promise<GraphState>;
+}
+
+/** Supported graph types */
+export type GraphId = "test" | "example" | "habitica";
+
+/** Get graph-specific exports based on graphId */
+function getGraphExports(exports: WasmExports, graphId: GraphId = "test") {
+  switch (graphId) {
+    case "test":
+      return {
+        initialize: exports.initialize,
+        step: exports.step,
+        getGraphInfo: exports.getGraphInfo,
+        getGraphState: exports.getGraphState,
+      };
+    case "example":
+      return {
+        initialize: exports.initializeExample,
+        step: exports.stepExample,
+        getGraphInfo: exports.getExampleGraphInfo,
+        getGraphState: exports.getExampleGraphState,
+      };
+    case "habitica":
+      return {
+        initialize: exports.initializeHabitica,
+        step: exports.stepHabitica,
+        getGraphInfo: exports.getHabiticaGraphInfo,
+        getGraphState: exports.getHabiticaGraphState,
+      };
+    default:
+      throw new Error(`Unknown graphId: ${graphId}`);
+  }
 }
 
 // =============================================================================
@@ -109,50 +141,68 @@ export async function loadMachine(options: LoaderOptions): Promise<GraphMachine>
   }
 
   return {
-    async initialize(input: unknown): Promise<StepOutput> {
-      const inputJson = JSON.stringify(input);
-      if (debug) console.log("[Tidepool] initialize:", inputJson);
+    async initialize(input: unknown, graphId?: string): Promise<StepOutput> {
+      const gid = (graphId ?? "test") as GraphId;
+      const graphExports = getGraphExports(exports, gid);
 
-      const resultStr = await exports.initialize(inputJson);
+      if (!graphExports.initialize) {
+        throw new Error(`Graph '${gid}' initialize function not available`);
+      }
+
+      const inputJson = JSON.stringify(input);
+      if (debug) console.log(`[Tidepool] initialize (${gid}):`, inputJson);
+
+      const resultStr = await graphExports.initialize(inputJson);
 
       const result: StepOutput = typeof resultStr === "string"
         ? JSON.parse(resultStr)
         : { effect: null, done: true, stepResult: null, graphState: { phase: { type: "idle" } as const, completedNodes: [] } };
 
-      if (debug) console.log("[Tidepool] initialize result:", JSON.stringify(result, null, 2));
+      if (debug) console.log(`[Tidepool] initialize (${gid}) result:`, JSON.stringify(result, null, 2));
       return result;
     },
 
-    async step(result: EffectResult): Promise<StepOutput> {
-      const resultJson = JSON.stringify(result);
-      if (debug) console.log("[Tidepool] step:", resultJson);
+    async step(result: EffectResult, graphId?: string): Promise<StepOutput> {
+      const gid = (graphId ?? "test") as GraphId;
+      const graphExports = getGraphExports(exports, gid);
 
-      const outputStr = await exports.step(resultJson);
+      if (!graphExports.step) {
+        throw new Error(`Graph '${gid}' step function not available`);
+      }
+
+      const resultJson = JSON.stringify(result);
+      if (debug) console.log(`[Tidepool] step (${gid}):`, resultJson);
+
+      const outputStr = await graphExports.step(resultJson);
 
       const output: StepOutput = typeof outputStr === "string"
         ? JSON.parse(outputStr)
         : { effect: null, done: true, stepResult: null, graphState: { phase: { type: "idle" } as const, completedNodes: [] } };
 
-      if (debug) console.log("[Tidepool] step result:", JSON.stringify(output, null, 2));
+      if (debug) console.log(`[Tidepool] step (${gid}) result:`, JSON.stringify(output, null, 2));
       return output;
     },
 
-    async getGraphInfo(): Promise<GraphInfo> {
-      const fn = (exports as unknown as { getGraphInfo?: () => string | Promise<string> }).getGraphInfo;
-      if (!fn) {
-        return { name: "Unknown", entryType: { typeName: "", typeModule: "" }, exitType: { typeName: "", typeModule: "" }, nodes: [], edges: [] };
+    async getGraphInfo(graphId?: string): Promise<GraphInfo> {
+      const gid = (graphId ?? "test") as GraphId;
+      const graphExports = getGraphExports(exports, gid);
+
+      if (!graphExports.getGraphInfo) {
+        return { name: gid, entryType: { typeName: "", typeModule: "" }, exitType: { typeName: "", typeModule: "" }, nodes: [], edges: [] };
       }
-      const str = fn();
+      const str = graphExports.getGraphInfo();
       const resolved = typeof str === "string" ? str : await str;
       return JSON.parse(resolved);
     },
 
-    async getGraphState(): Promise<GraphState> {
-      const fn = (exports as unknown as { getGraphState?: () => string | Promise<string> }).getGraphState;
-      if (!fn) {
+    async getGraphState(graphId?: string): Promise<GraphState> {
+      const gid = (graphId ?? "test") as GraphId;
+      const graphExports = getGraphExports(exports, gid);
+
+      if (!graphExports.getGraphState) {
         return { phase: { type: "idle" } as const, completedNodes: [] };
       }
-      const str = fn();
+      const str = graphExports.getGraphState();
       const resolved = typeof str === "string" ? str : await str;
       return JSON.parse(resolved);
     },
