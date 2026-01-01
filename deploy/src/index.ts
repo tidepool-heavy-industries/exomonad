@@ -422,6 +422,67 @@ export default {
       });
     }
 
+    // Habitica auth test: /habitica-status
+    if (url.pathname === "/habitica-status") {
+      console.log("[Worker] Testing Habitica auth");
+
+      if (!env.HABITICA_USER_ID || !env.HABITICA_API_TOKEN) {
+        return new Response(JSON.stringify({
+          error: "Habitica secrets not configured",
+          hint: "Run: wrangler secret put HABITICA_USER_ID && wrangler secret put HABITICA_API_TOKEN"
+        }), {
+          status: 500,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      try {
+        const resp = await fetch("https://habitica.com/api/v3/user", {
+          headers: {
+            "x-api-user": env.HABITICA_USER_ID,
+            "x-api-key": env.HABITICA_API_TOKEN,
+            "x-client": `${env.HABITICA_USER_ID}-tidepool`,
+          },
+        });
+
+        const data = await resp.json() as {
+          success: boolean;
+          data?: { stats: { hp: number; mp: number; exp: number; gp: number } };
+          message?: string;
+        };
+
+        if (!data.success) {
+          return new Response(JSON.stringify({
+            error: "Habitica API error",
+            message: data.message
+          }), {
+            status: 401,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        return new Response(JSON.stringify({
+          status: "ok",
+          stats: {
+            hp: data.data?.stats.hp,
+            mp: data.data?.stats.mp,
+            exp: data.data?.stats.exp,
+            gp: data.data?.stats.gp,
+          }
+        }), {
+          headers: { "Content-Type": "application/json" },
+        });
+      } catch (err) {
+        return new Response(JSON.stringify({
+          error: "Network error",
+          message: err instanceof Error ? err.message : String(err)
+        }), {
+          status: 500,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+    }
+
     return new Response("Not found", { status: 404 });
   },
 };
