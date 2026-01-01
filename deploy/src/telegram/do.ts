@@ -317,7 +317,7 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             graphId: "HabiticaRoutingGraph",
-            input: { rawInput }, // RawInput is a newtype, pass as object
+            input: { type: "text", text: rawInput }, // RawInput expects {type, text}
             telegramChatId: chatId,
           }),
         })
