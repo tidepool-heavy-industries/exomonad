@@ -1,0 +1,93 @@
+{# match_task.jinja
+   PURPOSE: Determine if new task should be a checklist item on existing todo or new todo
+   EXPECTS:
+     - taskDescription (Text) - the extracted task
+     - taskContext (Maybe Text) - optional context
+     - todos (List of TodoForMatching) - existing Habitica todos
+     - stats (MatchStats) - summary statistics
+   OUTPUT: JSON { match_id: string|null, reason: string }
+
+   TodoForMatching structure:
+     - id: Text
+     - title: Text
+     - checklist: [Text] (may be truncated)
+     - checklistCount: Int (full count)
+     - notes: Maybe Text
+     - completed: Bool
+#}
+
+<task>
+## New Task to Route
+
+**Description:** {{ taskDescription }}
+{% if taskContext %}**Context:** {{ taskContext }}{% endif %}
+
+</task>
+
+<existing_todos>
+## Your Existing Habitica Todos
+
+{% if stats.totalTodos == 0 %}
+*No existing todos. This will be a new todo.*
+{% else %}
+**Summary:** {{ stats.totalTodos }} todo{% if stats.totalTodos != 1 %}s{% endif %}{% if stats.totalChecklistItems > 0 %}, {{ stats.totalChecklistItems }} total checklist items{% endif %}
+
+{% for todo in todos %}
+{% if not todo.completed %}
+### {{ loop.index }}. {{ todo.title }}
+{% if todo.notes %}<small>{{ todo.notes | truncate(100) }}</small>{% endif %}
+
+{% if todo.checklist %}
+**Checklist{% if todo.checklistCount > todo.checklist | length %} (showing {{ todo.checklist | length }}/{{ todo.checklistCount }}){% endif %}:**
+{% for item in todo.checklist %}
+  - {{ item }}
+{% endfor %}
+{% if todo.checklistCount > todo.checklist | length %}
+  - *[+{{ todo.checklistCount - (todo.checklist | length) }} more items...]*
+{% endif %}
+{% else %}
+*No checklist items yet*
+{% endif %}
+`ID: {{ todo.id }}`
+
+{% endif %}
+{% endfor %}
+{% endif %}
+</existing_todos>
+
+<decision_rules>
+## When to ADD AS CHECKLIST ITEM (match_id = todo's ID):
+
+1. **Clear parent-child relationship**: The new task is a specific step toward completing an existing todo
+   - Existing: "Plan birthday party" → New: "Order cake" ✓
+   - Existing: "Home renovation" → New: "Buy paint" ✓
+
+2. **Same project/goal**: Tasks share an obvious grouping
+   - Existing: "Grocery shopping" → New: "Buy milk" ✓
+   - Existing: "Prepare presentation" → New: "Make slides" ✓
+
+3. **Checklist pattern exists**: The todo already has checklist items in a similar vein
+   - Existing has: ["Buy eggs", "Buy bread"] → New: "Buy butter" ✓
+
+## When to CREATE NEW TODO (match_id = null):
+
+1. **Independent task**: Not clearly a subtask of anything
+   - Existing: "Plan birthday party" → New: "Call dentist" ✗
+
+2. **Same topic but different goal**: Related but not a subtask
+   - Existing: "Read book about cooking" → New: "Buy cookbook" ✗ (different action)
+
+3. **Ambiguous fit**: Could fit multiple todos equally well → prefer new todo
+
+4. **No existing todos**: Obviously create new
+
+**When in doubt, prefer NEW TODO.** It's easier to merge later than to undo a wrong categorization.
+</decision_rules>
+
+<output_format>
+Return valid JSON only:
+{
+  "match_id": "the todo ID to add checklist item to, or null for new todo",
+  "reason": "1-2 sentence explanation of your decision"
+}
+</output_format>

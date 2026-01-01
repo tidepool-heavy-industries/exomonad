@@ -1,0 +1,35 @@
+{# suggest_action.jinja
+   PURPOSE: Format the suggestion message shown to user in Telegram
+   EXPECTS:
+     - taskDescription (Text) - the task to add
+     - action (SuggestionAction) - either "new_todo" or "checklist"
+     - matchingTodo (Maybe TodoForMatching) - the todo to add to, if checklist
+     - matchReason (Text) - LLM's reasoning for the match
+     - retryFeedback (Maybe Text) - user's feedback from previous attempt, if retry
+   OUTPUT: Plain text message for Telegram
+#}
+
+{% if retryFeedback %}
+*Revised suggestion based on your feedback:*
+"{{ retryFeedback }}"
+
+{% endif %}
+{% if action == "new_todo" %}
+**Create new todo:**
+{{ taskDescription }}
+{% else %}
+**Add to "{{ matchingTodo.title }}":**
+{{ taskDescription }}
+
+{% if matchingTodo.checklist %}
+_Current checklist:_
+{% for item in matchingTodo.checklist[:3] %}
+• {{ item }}
+{% endfor %}
+{% if matchingTodo.checklistCount > 3 %}
+_...and {{ matchingTodo.checklistCount - 3 }} more_
+{% endif %}
+{% endif %}
+{% endif %}
+
+_{{ matchReason }}_

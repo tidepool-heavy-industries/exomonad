@@ -35,6 +35,7 @@ import Data.Aeson
   , (.:?)
   , withObject
   )
+import Data.Aeson.Types (Parser)
 import Data.Text (Text)
 import GHC.Generics (Generic)
 
@@ -65,6 +66,12 @@ data SerializableEffect
       , effHabPayload :: Value
       -- ^ Operation-specific payload (taskId, direction, etc.)
       }
+  | EffTelegramConfirm
+      { effConfirmMessage :: Text
+      -- ^ Message to display to user
+      , effConfirmButtons :: [(Text, Text)]
+      -- ^ Button options: [(label, value)]
+      }
   deriving stock (Show, Eq, Generic)
 
 instance ToJSON SerializableEffect where
@@ -87,6 +94,11 @@ instance ToJSON SerializableEffect where
     , "eff_hab_op" .= op
     , "eff_hab_payload" .= payload
     ]
+  toJSON (EffTelegramConfirm msg buttons) = object
+    [ "type" .= ("TelegramConfirm" :: Text)
+    , "eff_message" .= msg
+    , "eff_buttons" .= [[label, val] | (label, val) <- buttons]
+    ]
 
 instance FromJSON SerializableEffect where
   parseJSON = withObject "SerializableEffect" $ \o -> do
@@ -102,6 +114,11 @@ instance FromJSON SerializableEffect where
       "Habitica" -> EffHabitica
         <$> o .: "eff_hab_op"
         <*> o .: "eff_hab_payload"
+      "TelegramConfirm" -> do
+        msg <- o .: "eff_message"
+        buttonArrays <- o .: "eff_buttons" :: Parser [[Text]]
+        let buttons = [(l, v) | [l, v] <- buttonArrays]
+        pure $ EffTelegramConfirm msg buttons
       _         -> fail $ "Unknown effect type: " ++ show typ
 
 

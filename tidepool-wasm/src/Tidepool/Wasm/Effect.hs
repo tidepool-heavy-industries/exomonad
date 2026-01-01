@@ -30,6 +30,7 @@ module Tidepool.Wasm.Effect
   , logError
   , llmComplete
   , habitica
+  , telegramConfirm
 
     -- * Running Effects
   , runWasmM
@@ -115,6 +116,25 @@ habitica op payload = do
     ResSuccess (Just v) -> pure v
     ResSuccess Nothing  -> pure (toJSON ())
     ResError msg        -> error $ "Habitica call failed: " <> T.unpack msg
+
+-- | Request confirmation from user via Telegram buttons.
+--
+-- Yields 'EffTelegramConfirm', expects JSON response with user's selection.
+-- Default buttons are: Yes, No (with feedback), Skip
+telegramConfirm :: Member (Yield SerializableEffect EffectResult) effs
+                => Text   -- ^ Message to display
+                -> Eff effs Value
+telegramConfirm message = do
+  let buttons =
+        [ ("✓ Yes", "approved")
+        , ("✗ No", "denied")
+        , ("Skip", "skipped")
+        ]
+  result <- yield (EffTelegramConfirm message buttons) (id @EffectResult)
+  case result of
+    ResSuccess (Just v) -> pure v
+    ResSuccess Nothing  -> pure (toJSON ())
+    ResError msg        -> error $ "Telegram confirm failed: " <> T.unpack msg
 
 
 -- ════════════════════════════════════════════════════════════════════════════
