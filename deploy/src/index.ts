@@ -14,6 +14,9 @@ import type {
   SessionState,
 } from "./protocol.js";
 import { SESSION_TIMEOUT_MS } from "./protocol.js";
+
+/** Maximum number of effect steps before forcing a yield to prevent runaway execution */
+const MAX_EFFECT_STEPS = 1000;
 import { executeEffect, type Env as HandlersEnv } from "./handlers/index.js";
 import { routeWebhook, type WebhookEnv } from "./telegram/webhook.js";
 
@@ -293,9 +296,22 @@ export class StateMachineDO extends DurableObject<Env> {
     output: Awaited<ReturnType<GraphMachine["initialize"]>>
   ): Promise<void> {
     const sessionKey = `session:${sessionId}`;
+    let stepCount = 0;
 
     // Effect interpretation loop
     while (!output.done && output.effect) {
+      // Guard against runaway execution
+      stepCount++;
+      if (stepCount > MAX_EFFECT_STEPS) {
+        this.send(ws, {
+          type: "error",
+          message: `Graph execution exceeded maximum steps (${MAX_EFFECT_STEPS}). ` +
+            `This may indicate an infinite loop or excessively long execution.`,
+          recoverable: false,
+        });
+        await this.ctx.storage.delete(sessionKey);
+        return;
+      }
       const effect = output.effect;
 
       // Check if this effect should be yielded to client

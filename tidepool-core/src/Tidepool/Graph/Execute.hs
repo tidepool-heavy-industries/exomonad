@@ -255,22 +255,89 @@ class CallHandler handler payload es targets | handler -> payload es targets whe
 instance CallHandler (payload -> Eff es (GotoChoice targets)) payload es targets where
   callHandler = id
 
+-- ════════════════════════════════════════════════════════════════════════════
+-- COMPILE-TIME VALIDATION FOR LLM HANDLERS
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Validate that LLM handler has non-empty targets.
+--
+-- LLMBefore forces @targets = '[]@, which makes graph dispatch impossible
+-- because there are no Goto targets to route to. This constraint catches
+-- LLMBefore at compile time.
+--
+-- Note: LLMBoth cannot have @targets = '[]@ in practice because you cannot
+-- construct a value of type @GotoChoice '[]@ (it contains @OneOf '[]@ which
+-- is uninhabited). So this constraint precisely identifies LLMBefore.
+type ValidLLMTargets :: [Type] -> Constraint
+type family ValidLLMTargets targets where
+  ValidLLMTargets '[] = TypeError
+    ( 'Text "LLMBefore is not supported for graph dispatch."
+      ':$$: 'Text ""
+      ':$$: 'Text "LLMBefore has targets = '[] (no explicit Goto targets),"
+      ':$$: 'Text "but graph dispatch requires routing information to"
+      ':$$: 'Text "determine which node to execute next."
+      ':$$: 'Text ""
+      ':$$: 'Text "Fix: Use LLMBoth instead, which provides both template"
+      ':$$: 'Text "context (before) and explicit routing (after)."
+    )
+  ValidLLMTargets _ = ()
+
+-- | Validate that LLM handler has non-unit template context.
+--
+-- LLMAfter forces @tpl = ()@, which means no template context is available.
+-- Graph dispatch needs to render LLM prompts using typed template contexts.
+-- This constraint catches LLMAfter at compile time.
+--
+-- Note: If you genuinely need an empty context with LLMBoth, define a custom
+-- unit type: @data NoContext = NoContext@ and use that instead of @()@.
+type ValidLLMContext :: Type -> Constraint
+type family ValidLLMContext tpl where
+  ValidLLMContext () = TypeError
+    ( 'Text "LLMAfter is not supported for graph dispatch."
+      ':$$: 'Text ""
+      ':$$: 'Text "LLMAfter has tpl = () (no template context),"
+      ':$$: 'Text "but graph dispatch needs to render LLM prompts"
+      ':$$: 'Text "using typed template contexts."
+      ':$$: 'Text ""
+      ':$$: 'Text "Fix: Use LLMBoth instead, which provides both template"
+      ':$$: 'Text "context (before) and explicit routing (after)."
+      ':$$: 'Text ""
+      ':$$: 'Text "If you genuinely need an empty context, define a custom"
+      ':$$: 'Text "unit type: 'data NoContext = NoContext'"
+    )
+  ValidLLMContext _ = ()
+
 -- | LLM node handler: execute via executeLLMHandler.
 --
--- Only LLMBoth is supported for graph execution. LLMBefore and LLMAfter
--- will error at runtime because they lack complete routing logic.
+-- Only 'LLMBoth' is supported for graph execution because it provides both:
+--
+-- 1. A template context builder (before phase) for rendering prompts
+-- 2. Explicit Goto targets (after phase) for typed dispatch
+--
+-- 'LLMBefore' and 'LLMAfter' are caught at __compile time__ via type family
+-- constraints that detect their characteristic type signatures:
+--
+-- * 'LLMBefore' forces @targets = '[]@ → caught by 'ValidLLMTargets'
+-- * 'LLMAfter' forces @tpl = ()@ → caught by 'ValidLLMContext'
 instance
   ( LLM :> es
   , FromJSON schema
   , HasJSONSchema schema
   , GingerContext tpl
+  , ValidLLMTargets targets  -- Compile-time: catches LLMBefore
+  , ValidLLMContext tpl      -- Compile-time: catches LLMAfter
   ) => CallHandler (LLMHandler payload schema targets es tpl) payload es targets where
   callHandler (LLMBoth mSysTpl userTpl beforeFn afterFn) p =
     executeLLMHandler mSysTpl userTpl beforeFn afterFn p
+  -- The following patterns are unreachable due to the ValidLLMTargets and
+  -- ValidLLMContext constraints above. GHC knows that:
+  --   - LLMBefore would require targets ~ '[], contradicting ValidLLMTargets
+  --   - LLMAfter would require tpl ~ (), contradicting ValidLLMContext
+  -- We keep them for pattern exhaustiveness with explicit unreachable markers.
   callHandler (LLMBefore _) _ =
-    error "LLMBefore is not supported for graph dispatch: it has no explicit routing targets. Use LLMBoth instead and move any pre-processing into the before function."
+    error "unreachable: LLMBefore is caught at compile time by ValidLLMTargets"
   callHandler (LLMAfter _) _ =
-    error "LLMAfter is not supported for graph dispatch: it lacks the template context needed to build LLM prompts. Use LLMBoth instead and move any post-processing into the after function."
+    error "unreachable: LLMAfter is caught at compile time by ValidLLMContext"
 
 
 -- ════════════════════════════════════════════════════════════════════════════

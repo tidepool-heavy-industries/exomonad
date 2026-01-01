@@ -148,12 +148,17 @@ type family CheckAllReachableFields unreachable where
   CheckAllReachableFields (name ': _) = UnreachableFieldError name
 
 -- | Find unreachable fields.
+--
+-- Note: We use 3x the field count as fuel to handle deep dependency chains.
+-- A graph with N fields can have at most N-deep chains, but fixed-point
+-- iteration may need multiple passes. 3x provides generous headroom while
+-- keeping compile times reasonable.
 type FindUnreachableFields :: [(Symbol, Type)] -> Type -> [Symbol]
 type family FindUnreachableFields fields entryType where
   FindUnreachableFields fields entryType =
     FilterNotInSymbols
       (CollectNodeFieldNames fields)
-      (ComputeReachableFields fields entryType (LengthPairs fields))
+      (ComputeReachableFields fields entryType (3 * LengthPairs fields + 1))
 
 -- | Collect field names that are nodes (not Entry/Exit).
 type CollectNodeFieldNames :: [(Symbol, Type)] -> [Symbol]
@@ -247,12 +252,14 @@ type family CheckAllReachExit noExit where
   CheckAllReachExit (name ': _) = NoExitPathFieldError name
 
 -- | Find Logic fields that can't reach Exit.
+--
+-- Note: Uses 3x fuel multiplier for the same reasons as FindUnreachableFields.
 type FindNoExitPathFields :: [(Symbol, Type)] -> [Symbol]
 type family FindNoExitPathFields fields where
   FindNoExitPathFields fields =
     FilterNotInSymbols
       (CollectLogicFieldNames fields)
-      (ComputeExitReachingFields fields (LengthPairs fields))
+      (ComputeExitReachingFields fields (3 * LengthPairs fields + 1))
 
 -- | Collect names of Logic node fields.
 type CollectLogicFieldNames :: [(Symbol, Type)] -> [Symbol]

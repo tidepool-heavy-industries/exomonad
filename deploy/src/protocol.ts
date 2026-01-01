@@ -270,9 +270,12 @@ export interface TelegramTryReceiveEffect {
  * Result of effect execution.
  * Aeson TaggedObject puts single-field records directly at top level (no contents wrapper).
  * fieldLabelModifier drops "res" prefix: resValue -> value, resMessage -> message
+ *
+ * Note: value is optional because Haskell's ResSuccess can omit it when resValue is Nothing.
+ * This produces JSON like {type: "success"} without a value field.
  */
 export type EffectResult =
-  | { type: "success"; value: unknown }
+  | { type: "success"; value?: unknown }
   | { type: "error"; message: string };
 
 // Helper to create success result
@@ -349,6 +352,9 @@ export interface StepOutput {
 
   /** Final result (only when done=true, matches Exit type) */
   stepResult: unknown | null;
+
+  /** Error message (only when done=true with failure, from StepFailed) */
+  error?: string;
 
   /** Current graph execution state (for observability) */
   graphState: GraphState;

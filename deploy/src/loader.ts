@@ -115,10 +115,14 @@ export async function loadMachine(options: LoaderOptions): Promise<GraphMachine>
 
       const resultStr = await exports.initialize(inputJson);
 
-      const result: StepOutput = typeof resultStr === "string"
-        ? JSON.parse(resultStr)
-        : { effect: null, done: true, stepResult: null, graphState: { phase: { type: "idle" } as const, completedNodes: [] } };
+      if (typeof resultStr !== "string") {
+        throw new Error(
+          `WASM initialize returned non-string: ${typeof resultStr}. ` +
+          `This indicates a WASM execution error or missing export.`
+        );
+      }
 
+      const result: StepOutput = JSON.parse(resultStr);
       if (debug) console.log("[Tidepool] initialize result:", JSON.stringify(result, null, 2));
       return result;
     },
@@ -129,10 +133,14 @@ export async function loadMachine(options: LoaderOptions): Promise<GraphMachine>
 
       const outputStr = await exports.step(resultJson);
 
-      const output: StepOutput = typeof outputStr === "string"
-        ? JSON.parse(outputStr)
-        : { effect: null, done: true, stepResult: null, graphState: { phase: { type: "idle" } as const, completedNodes: [] } };
+      if (typeof outputStr !== "string") {
+        throw new Error(
+          `WASM step returned non-string: ${typeof outputStr}. ` +
+          `This indicates a WASM execution error or missing export.`
+        );
+      }
 
+      const output: StepOutput = JSON.parse(outputStr);
       if (debug) console.log("[Tidepool] step result:", JSON.stringify(output, null, 2));
       return output;
     },
