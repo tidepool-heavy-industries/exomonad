@@ -1,14 +1,36 @@
 /**
  * Telegram Durable Object.
  *
- * Handles Telegram updates for a single chat.
- * Currently implements echo bot; will later bridge to StateMachineDO.
+ * Handles Telegram updates for a single chat, bridging to StateMachineDO.
+ *
+ * Architecture:
+ * - One TelegramDO per chat_id
+ * - Manages message queue for pending user messages
+ * - Handles blocking Receive by waiting for webhook updates
+ * - Bridges Telegram effects from WASM to Telegram API
  */
 
 import { DurableObject } from "cloudflare:workers";
+import { z } from "zod";
 import type { TelegramUpdate, TelegramEnv } from "./types.js";
-import { extractChatId, extractText, extractUser, isAllowedUser } from "./types.js";
-import { sendMessage, sendTypingAction } from "./api.js";
+import {
+  extractChatId,
+  extractUser,
+  isAllowedUser,
+  updateToIncomingMessage,
+} from "./types.js";
+import { sendMessage, sendTypingAction, answerCallbackQuery, sendPhoto, sendDocument } from "./api.js";
+import type {
+  TelegramIncomingMessage,
+  SerializableEffect,
+  EffectResult,
+} from "../protocol.js";
+import {
+  handleTelegramSend,
+  handleTelegramReceive,
+  handleTelegramTryReceive,
+  type TelegramHandlerContext,
+} from "../handlers/telegram.js";
 
 /**
  * Environment bindings for TelegramDO.
@@ -17,14 +39,70 @@ export interface TelegramDOEnv extends TelegramEnv {
   STATE_MACHINE: DurableObjectNamespace;
 }
 
+// =============================================================================
+// Zod Schemas - Runtime validation at storage boundary
+// =============================================================================
+
 /**
- * Conversation state stored in DO storage.
+ * Schema for incoming messages.
+ * Discriminated union on 'type' field.
  */
-interface ConversationState {
-  chatId: number;
-  /** Session ID for future StateMachineDO integration */
-  wasmSessionId: string | null;
-  lastActivity: number;
+const IncomingMessageSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("text"), text: z.string() }),
+  z.object({ type: z.literal("photo"), media: z.string(), caption: z.string().optional() }),
+  z.object({ type: z.literal("document"), media: z.string(), filename: z.string() }),
+  z.object({ type: z.literal("button_click"), data: z.unknown() }),
+]);
+
+/**
+ * Conversation state schema with defaults for missing fields.
+ *
+ * This is the source of truth for state shape. When loaded from storage:
+ * - Missing fields get defaults (schema evolution)
+ * - Invalid data throws (corruption detection)
+ * - Type safety is enforced at runtime, not just compile time
+ *
+ * Note: pendingEffect uses z.unknown() because SerializableEffect is a complex
+ * union that we just need to persist and restore, not deeply validate.
+ */
+const ConversationStateSchema = z.object({
+  chatId: z.number(),
+  wasmSessionId: z.string().nullable().default(null),
+  pendingMessages: z.array(IncomingMessageSchema).default([]),
+  waitingForReceive: z.boolean().default(false),
+  pendingEffect: z.unknown().default(null),
+  lastActivity: z.number().default(() => Date.now()),
+});
+
+/**
+ * Conversation state type.
+ * We override pendingEffect to use the proper SerializableEffect type
+ * since zod can't express the full union.
+ */
+interface ConversationState extends Omit<z.infer<typeof ConversationStateSchema>, 'pendingEffect'> {
+  pendingEffect: SerializableEffect | null;
+}
+
+/**
+ * Parse storage data into validated state.
+ * Throws on invalid data (corruption), provides defaults for missing fields (evolution).
+ */
+function parseState(stored: unknown, defaultChatId: number): ConversationState {
+  // If nothing stored, create fresh state
+  if (stored === undefined || stored === null) {
+    return ConversationStateSchema.parse({ chatId: defaultChatId }) as ConversationState;
+  }
+
+  // Merge with default chatId if missing, then validate
+  const withDefaults = { chatId: defaultChatId, ...(stored as object) };
+  return ConversationStateSchema.parse(withDefaults) as ConversationState;
+}
+
+/**
+ * Create an empty state for a new conversation.
+ */
+function emptyState(chatId: number): ConversationState {
+  return ConversationStateSchema.parse({ chatId }) as ConversationState;
 }
 
 /**
@@ -34,24 +112,80 @@ interface ConversationState {
  */
 export class TelegramDO extends DurableObject<TelegramDOEnv> {
   private chatId: number | null = null;
+  private state: ConversationState | null = null;
 
   /**
-   * Handle incoming requests from webhook router.
+   * Load state from storage.
+   * Uses zod schema to validate and provide defaults for missing fields.
    */
-  async fetch(request: Request): Promise<Response> {
-    const url = new URL(request.url);
+  private async loadState(): Promise<ConversationState> {
+    if (this.state) return this.state;
 
-    // Handle webhook update
-    if (url.pathname === "/update") {
-      const update = (await request.json()) as TelegramUpdate;
-      return this.handleUpdate(update);
+    // Get raw storage data - don't trust the type, let zod validate it
+    const stored = await this.ctx.storage.get("state");
+    if (stored !== undefined) {
+      // parseState validates shape and provides defaults for missing fields
+      this.state = parseState(stored, 0);
+      this.chatId = this.state.chatId;
+      return this.state;
     }
 
-    return new Response("Not found", { status: 404 });
+    // Will be initialized when we get the first update
+    return emptyState(0);
   }
 
   /**
-   * Process a Telegram update.
+   * Save state to storage.
+   */
+  private async saveState(): Promise<void> {
+    if (this.state) {
+      await this.ctx.storage.put("state", this.state);
+    }
+  }
+
+  /**
+   * Handle incoming requests from webhook router or StateMachineDO.
+   */
+  async fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    console.log(`[TelegramDO] fetch() called with path: ${url.pathname}`);
+
+    switch (url.pathname) {
+      case "/update": {
+        // Webhook update from Telegram
+        console.log("[TelegramDO] Processing /update");
+        const update = (await request.json()) as TelegramUpdate;
+        console.log(`[TelegramDO] Update parsed: ${JSON.stringify(update).slice(0, 300)}`);
+        return this.handleUpdate(update);
+      }
+
+      case "/effect": {
+        // Effect from StateMachineDO (future use)
+        const effectRequest = (await request.json()) as {
+          effect: SerializableEffect;
+          sessionId: string;
+        };
+        return this.handleEffect(effectRequest.effect, effectRequest.sessionId);
+      }
+
+      case "/status": {
+        // Debug endpoint
+        const state = await this.loadState();
+        return Response.json({
+          chatId: state.chatId,
+          pendingMessages: state.pendingMessages.length,
+          waitingForReceive: state.waitingForReceive,
+          hasSession: state.wasmSessionId !== null,
+        });
+      }
+
+      default:
+        return new Response("Not found", { status: 404 });
+    }
+  }
+
+  /**
+   * Process a Telegram update from webhook.
    */
   private async handleUpdate(update: TelegramUpdate): Promise<Response> {
     const chatId = extractChatId(update);
@@ -59,15 +193,15 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
       return new Response("OK");
     }
 
-    this.chatId = chatId;
-    const text = extractText(update);
-    const user = extractUser(update);
-
-    // Ignore non-text messages for now
-    if (!text) {
-      console.log(`[TelegramDO] No text in update from chat ${chatId}`);
-      return new Response("OK");
+    // Initialize or load state
+    let state = await this.loadState();
+    if (state.chatId === 0) {
+      state = emptyState(chatId);
+      this.state = state;
+      this.chatId = chatId;
     }
+
+    const user = extractUser(update);
 
     // Check user authorization
     if (!isAllowedUser(user?.id, this.env.ALLOWED_TELEGRAM_USERS)) {
@@ -80,46 +214,188 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
       return new Response("OK");
     }
 
-    console.log(`[TelegramDO] Received message from ${user?.username ?? user?.id}: ${text}`);
+    // Answer callback query if present (to remove loading indicator)
+    if (update.callback_query?.id) {
+      await answerCallbackQuery(this.env.TELEGRAM_TOKEN, update.callback_query.id);
+    }
 
-    // Update conversation state
-    await this.updateConversationState(chatId);
+    // Convert update to IncomingMessage
+    const incomingMessage = updateToIncomingMessage(update);
+    if (!incomingMessage) {
+      console.log(`[TelegramDO] Could not convert update to IncomingMessage`);
+      return new Response("OK");
+    }
 
-    // Show typing indicator
-    await sendTypingAction(this.env.TELEGRAM_TOKEN, chatId);
+    console.log(
+      `[TelegramDO] Received message from ${user?.username ?? user?.id}: ${JSON.stringify(incomingMessage)}`
+    );
 
-    // Echo the message back
+    // Add to pending messages queue
+    state.pendingMessages.push(incomingMessage);
+    state.lastActivity = Date.now();
+
+    // If we're waiting for a Receive, resume processing
+    if (state.waitingForReceive && state.pendingEffect) {
+      console.log(`[TelegramDO] Resuming blocked Receive`);
+      state.waitingForReceive = false;
+      const effect = state.pendingEffect;
+      state.pendingEffect = null;
+
+      await this.saveState();
+
+      // Process the effect now that we have messages
+      return this.processEffect(effect, state);
+    }
+
+    await this.saveState();
+
+    // If no active session, start echo mode (for testing)
     // TODO: Replace with StateMachineDO integration
-    const response = `Echo: ${text}`;
-    const result = await sendMessage(this.env.TELEGRAM_TOKEN, chatId, response);
-
-    if (result) {
-      console.log(`[TelegramDO] Sent response, message_id: ${result.message_id}`);
-    } else {
-      console.error(`[TelegramDO] Failed to send response`);
+    if (!state.wasmSessionId) {
+      await this.handleEchoMode(chatId, incomingMessage);
     }
 
     return new Response("OK");
   }
 
   /**
-   * Update or create conversation state.
+   * Handle an effect from StateMachineDO.
    */
-  private async updateConversationState(chatId: number): Promise<ConversationState> {
-    const key = "state";
-    let state = await this.ctx.storage.get<ConversationState>(key);
+  private async handleEffect(
+    effect: SerializableEffect,
+    sessionId: string
+  ): Promise<Response> {
+    const state = await this.loadState();
+    state.wasmSessionId = sessionId;
+    state.lastActivity = Date.now();
 
-    if (!state) {
-      state = {
-        chatId,
-        wasmSessionId: null,
-        lastActivity: Date.now(),
-      };
-    } else {
-      state.lastActivity = Date.now();
+    await this.saveState();
+    return this.processEffect(effect, state);
+  }
+
+  /**
+   * Process a Telegram effect.
+   */
+  private async processEffect(
+    effect: SerializableEffect,
+    state: ConversationState
+  ): Promise<Response> {
+    const ctx: TelegramHandlerContext = {
+      chatId: state.chatId,
+      pendingMessages: state.pendingMessages,
+    };
+
+    let result: EffectResult;
+
+    switch (effect.type) {
+      case "telegram_send":
+        result = await handleTelegramSend(effect, this.env, ctx);
+        break;
+
+      case "telegram_receive": {
+        const receiveResult = handleTelegramReceive(effect, ctx);
+        if (receiveResult.type === "yield") {
+          // Need to block until messages arrive
+          console.log(`[TelegramDO] Blocking on Receive`);
+          state.waitingForReceive = true;
+          state.pendingEffect = effect;
+          await this.saveState();
+          return Response.json({ type: "yield", effect });
+        }
+        // Messages available, clear the queue
+        state.pendingMessages = [];
+        await this.saveState();
+        result = receiveResult.result;
+        break;
+      }
+
+      case "telegram_try_receive":
+        result = handleTelegramTryReceive(effect, ctx);
+        // Clear the queue after reading
+        state.pendingMessages = [];
+        await this.saveState();
+        break;
+
+      default:
+        // Not a Telegram effect - shouldn't happen
+        console.error(`[TelegramDO] Unknown effect type: ${(effect as { type: string }).type}`);
+        return Response.json(
+          { type: "error", message: "Unknown effect type" },
+          { status: 400 }
+        );
     }
 
-    await this.ctx.storage.put(key, state);
-    return state;
+    return Response.json({ type: "result", result });
+  }
+
+  /**
+   * Echo mode for testing (when no WASM session is active).
+   * Echoes back the same type of message: text, photo, document, or button click.
+   */
+  private async handleEchoMode(
+    chatId: number,
+    message: TelegramIncomingMessage
+  ): Promise<void> {
+    await sendTypingAction(this.env.TELEGRAM_TOKEN, chatId);
+
+    let result: { message_id: number } | null = null;
+
+    switch (message.type) {
+      case "text":
+        result = await sendMessage(
+          this.env.TELEGRAM_TOKEN,
+          chatId,
+          `Echo: ${message.text}`
+        );
+        break;
+
+      case "photo":
+        // Echo back the same photo with an "Echo:" caption
+        result = await sendPhoto(
+          this.env.TELEGRAM_TOKEN,
+          chatId,
+          message.media,
+          message.caption ? `Echo: ${message.caption}` : "Echo!"
+        );
+        break;
+
+      case "document":
+        // Echo back the same document
+        result = await sendDocument(
+          this.env.TELEGRAM_TOKEN,
+          chatId,
+          message.media,
+          `Echo: ${message.filename}`
+        );
+        break;
+
+      case "button_click":
+        result = await sendMessage(
+          this.env.TELEGRAM_TOKEN,
+          chatId,
+          `Button clicked: ${JSON.stringify(message.data)}`
+        );
+        break;
+
+      default: {
+        const _exhaustive: never = message;
+        console.error("[TelegramDO] Unknown message type:", _exhaustive);
+        result = await sendMessage(
+          this.env.TELEGRAM_TOKEN,
+          chatId,
+          "Received unknown message type"
+        );
+      }
+    }
+
+    if (result) {
+      console.log(`[TelegramDO] Sent echo response, message_id: ${result.message_id}`);
+    }
+
+    // Clear pending messages after echo
+    if (this.state) {
+      this.state.pendingMessages = [];
+      await this.saveState();
+    }
   }
 }
