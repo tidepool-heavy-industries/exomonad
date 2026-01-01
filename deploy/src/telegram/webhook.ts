@@ -57,34 +57,43 @@ export async function routeWebhook(
   request: Request,
   env: WebhookEnv
 ): Promise<Response> {
+  console.log("[Webhook] Received request");
+
   // Verify webhook secret
-  if (!verifyWebhookSecret(request, env.TELEGRAM_WEBHOOK_SECRET)) {
-    console.error("Invalid webhook secret");
+  const secretValid = verifyWebhookSecret(request, env.TELEGRAM_WEBHOOK_SECRET);
+  console.log(`[Webhook] Secret verification: ${secretValid ? "PASS" : "FAIL"}`);
+  if (!secretValid) {
+    console.error("[Webhook] Invalid webhook secret");
     return new Response("Unauthorized", { status: 401 });
   }
 
   let update: TelegramUpdate;
   try {
     update = (await request.json()) as TelegramUpdate;
+    console.log(`[Webhook] Parsed update: ${JSON.stringify(update).slice(0, 500)}`);
   } catch (error) {
     // Bad JSON from Telegram (shouldn't happen, but handle it)
-    console.error("Failed to parse webhook JSON:", error);
+    console.error("[Webhook] Failed to parse JSON:", error);
     return new Response("Bad Request", { status: 400 });
   }
 
   try {
     // Extract chat_id for DO routing
     const chatId = extractChatId(update);
+    console.log(`[Webhook] Extracted chat_id: ${chatId}`);
     if (!chatId) {
-      console.log("No chat_id in update, ignoring");
+      console.log("[Webhook] No chat_id in update, ignoring");
       return new Response("OK");
     }
 
     // Route to TelegramDO keyed by chat_id
-    const doId = env.TELEGRAM_DO.idFromName(`chat:${chatId}`);
+    const doName = `chat:${chatId}`;
+    console.log(`[Webhook] Routing to DO: ${doName}`);
+    const doId = env.TELEGRAM_DO.idFromName(doName);
     const agent = env.TELEGRAM_DO.get(doId);
 
     // Forward the update to the DO
+    console.log("[Webhook] Forwarding to TelegramDO...");
     const doResponse = await agent.fetch(
       new Request("https://internal/update", {
         method: "POST",
@@ -93,13 +102,14 @@ export async function routeWebhook(
       })
     );
 
+    console.log(`[Webhook] TelegramDO response: ${doResponse.status}`);
     if (!doResponse.ok) {
-      console.error(`TelegramDO returned error: ${doResponse.status} ${doResponse.statusText}`);
+      console.error(`[Webhook] TelegramDO error: ${doResponse.status} ${doResponse.statusText}`);
     }
 
     return new Response("OK");
   } catch (error) {
-    console.error("Webhook error:", error);
+    console.error("[Webhook] Error:", error);
     // Return 200 to prevent Telegram retries on internal errors
     return new Response("OK");
   }

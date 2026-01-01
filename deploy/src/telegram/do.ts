@@ -11,6 +11,7 @@
  */
 
 import { DurableObject } from "cloudflare:workers";
+import { z } from "zod";
 import type { TelegramUpdate, TelegramEnv } from "./types.js";
 import {
   extractChatId,
@@ -38,35 +39,70 @@ export interface TelegramDOEnv extends TelegramEnv {
   STATE_MACHINE: DurableObjectNamespace;
 }
 
+// =============================================================================
+// Zod Schemas - Runtime validation at storage boundary
+// =============================================================================
+
 /**
- * Conversation state stored in DO storage.
+ * Schema for incoming messages.
+ * Discriminated union on 'type' field.
  */
-interface ConversationState {
-  chatId: number;
-  /** Session ID for future StateMachineDO integration */
-  wasmSessionId: string | null;
-  /** Messages awaiting pickup by WASM (for Receive/TryReceive) */
-  pendingMessages: TelegramIncomingMessage[];
-  /** Is WASM blocked on a Receive effect? */
-  waitingForReceive: boolean;
-  /** The effect we're waiting on, if any */
+const IncomingMessageSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("text"), text: z.string() }),
+  z.object({ type: z.literal("photo"), media: z.string(), caption: z.string().optional() }),
+  z.object({ type: z.literal("document"), media: z.string(), filename: z.string() }),
+  z.object({ type: z.literal("button_click"), data: z.unknown() }),
+]);
+
+/**
+ * Conversation state schema with defaults for missing fields.
+ *
+ * This is the source of truth for state shape. When loaded from storage:
+ * - Missing fields get defaults (schema evolution)
+ * - Invalid data throws (corruption detection)
+ * - Type safety is enforced at runtime, not just compile time
+ *
+ * Note: pendingEffect uses z.unknown() because SerializableEffect is a complex
+ * union that we just need to persist and restore, not deeply validate.
+ */
+const ConversationStateSchema = z.object({
+  chatId: z.number(),
+  wasmSessionId: z.string().nullable().default(null),
+  pendingMessages: z.array(IncomingMessageSchema).default([]),
+  waitingForReceive: z.boolean().default(false),
+  pendingEffect: z.unknown().default(null),
+  lastActivity: z.number().default(() => Date.now()),
+});
+
+/**
+ * Conversation state type.
+ * We override pendingEffect to use the proper SerializableEffect type
+ * since zod can't express the full union.
+ */
+interface ConversationState extends Omit<z.infer<typeof ConversationStateSchema>, 'pendingEffect'> {
   pendingEffect: SerializableEffect | null;
-  /** Last activity timestamp */
-  lastActivity: number;
 }
 
 /**
- * Default empty state.
+ * Parse storage data into validated state.
+ * Throws on invalid data (corruption), provides defaults for missing fields (evolution).
+ */
+function parseState(stored: unknown, defaultChatId: number): ConversationState {
+  // If nothing stored, create fresh state
+  if (stored === undefined || stored === null) {
+    return ConversationStateSchema.parse({ chatId: defaultChatId }) as ConversationState;
+  }
+
+  // Merge with default chatId if missing, then validate
+  const withDefaults = { chatId: defaultChatId, ...(stored as object) };
+  return ConversationStateSchema.parse(withDefaults) as ConversationState;
+}
+
+/**
+ * Create an empty state for a new conversation.
  */
 function emptyState(chatId: number): ConversationState {
-  return {
-    chatId,
-    wasmSessionId: null,
-    pendingMessages: [],
-    waitingForReceive: false,
-    pendingEffect: null,
-    lastActivity: Date.now(),
-  };
+  return ConversationStateSchema.parse({ chatId }) as ConversationState;
 }
 
 /**
@@ -80,15 +116,18 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
 
   /**
    * Load state from storage.
+   * Uses zod schema to validate and provide defaults for missing fields.
    */
   private async loadState(): Promise<ConversationState> {
     if (this.state) return this.state;
 
-    const stored = await this.ctx.storage.get<ConversationState>("state");
-    if (stored) {
-      this.state = stored;
-      this.chatId = stored.chatId;
-      return stored;
+    // Get raw storage data - don't trust the type, let zod validate it
+    const stored = await this.ctx.storage.get("state");
+    if (stored !== undefined) {
+      // parseState validates shape and provides defaults for missing fields
+      this.state = parseState(stored, 0);
+      this.chatId = this.state.chatId;
+      return this.state;
     }
 
     // Will be initialized when we get the first update
@@ -109,11 +148,14 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
    */
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
+    console.log(`[TelegramDO] fetch() called with path: ${url.pathname}`);
 
     switch (url.pathname) {
       case "/update": {
         // Webhook update from Telegram
+        console.log("[TelegramDO] Processing /update");
         const update = (await request.json()) as TelegramUpdate;
+        console.log(`[TelegramDO] Update parsed: ${JSON.stringify(update).slice(0, 300)}`);
         return this.handleUpdate(update);
       }
 
