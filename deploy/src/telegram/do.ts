@@ -299,7 +299,7 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
     // Store session ID before starting (in case we need to resume)
     if (this.state) {
       this.state.wasmSessionId = sessionId;
-      this.state.pendingMessages = []; // Clear pending since we're processing
+      // Do not clear pendingMessages here; preserve any queued messages
       await this.saveState();
     }
 
