@@ -75,6 +75,9 @@ instance Arbitrary SerializableEffect where
     , EffHabitica
         <$> elements ["GetUser", "ScoreTask", "GetTasks", "FetchTodos", "CreateTodo", "AddChecklistItem"]
         <*> scale (`div` 2) arbitrary
+    , EffTelegramConfirm
+        <$> arbitrary
+        <*> listOf ((,) <$> arbitrary <*> arbitrary)
     ]
 
   shrink (EffLlmComplete node sys user schema) =
@@ -91,6 +94,10 @@ instance Arbitrary SerializableEffect where
   shrink (EffHabitica op payload) =
     [ EffLogInfo op ]
     ++ [ EffHabitica op payload' | payload' <- shrink payload ]
+  shrink (EffTelegramConfirm msg buttons) =
+    [ EffLogInfo msg ]
+    ++ [ EffTelegramConfirm msg' buttons | msg' <- shrink msg ]
+    ++ [ EffTelegramConfirm msg buttons' | buttons' <- shrink buttons ]
 
 
 -- | Arbitrary EffectResult covering success and error cases

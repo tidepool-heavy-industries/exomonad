@@ -14,6 +14,9 @@ library
     exposed-modules:
         Tidepool.Wasm.Effect
         Tidepool.Wasm.ExampleGraph
+        Tidepool.Wasm.HabiticaRoutingGraph
+        Tidepool.Wasm.HabiticaTemplates
+        Tidepool.Wasm.HabiticaTypes
         Tidepool.Wasm.TestGraph
         Tidepool.Wasm.LlmTestGraph
         Tidepool.Wasm.WireTypes
@@ -24,7 +27,8 @@ library
         tidepool-core,
         freer-simple >= 1.2 && < 2,
         aeson >= 2.1 && < 3,
-        text >= 2.0 && < 3
+        text >= 2.0 && < 3,
+        vector >= 0.12 && < 1
 
     -- WASM-specific configuration
     if os(wasi)
