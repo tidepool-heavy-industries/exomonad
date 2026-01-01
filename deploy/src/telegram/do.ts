@@ -244,17 +244,23 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
     state.pendingMessages.push(incomingMessage);
     state.lastActivity = Date.now();
 
-    // If we're waiting for a Receive, resume processing
-    if (state.waitingForReceive && state.pendingEffect) {
-      console.log(`[TelegramDO] Resuming blocked Receive`);
+    // If we're waiting for a Receive/Confirm, resume processing
+    if (state.waitingForReceive && state.pendingEffect && state.wasmSessionId) {
+      console.log(`[TelegramDO] Resuming blocked effect: ${state.pendingEffect.type}`);
       state.waitingForReceive = false;
       const effect = state.pendingEffect;
-      state.pendingEffect = null;
+      // Don't clear pendingEffect yet - handleYieldedEffect may need to check if buttons sent
 
+      this.state = state;
       await this.saveState();
 
-      // Process the effect now that we have messages
-      return this.processEffect(effect, state);
+      // Re-run the effect loop - handleYieldedEffect will process the pending effect
+      // with the new messages in the queue
+      await this.runEffectLoop(state.chatId, state.wasmSessionId, {
+        type: "yield",
+        effect,
+      });
+      return new Response("OK");
     }
 
     await this.saveState();
