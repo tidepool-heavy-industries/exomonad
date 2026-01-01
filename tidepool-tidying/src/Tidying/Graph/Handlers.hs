@@ -396,8 +396,8 @@ applyStateTransition
   -> Eff es ()
 applyStateTransition _extract action _nextPhase = do
   now <- getCurrentTime
-  modify @SessionState $ \(st :: SessionState) ->
-    (st :: SessionState)
+  modify @SessionState $ \st ->
+    st
       { itemsProcessed = st.itemsProcessed + itemDelta action
       , sessionStart = st.sessionStart <|> Just now
       -- TODO: Full phaseData transition logic from Loop.hs
