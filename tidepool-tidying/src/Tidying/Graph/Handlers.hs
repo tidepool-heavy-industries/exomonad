@@ -25,6 +25,9 @@ module Tidying.Graph.Handlers
 
     -- * Handler record
   , tidyingHandlers
+
+    -- * Graph-based turn (drop-in replacement for tidyingTurn)
+  , tidyingTurnGraph
   ) where
 
 import Control.Monad (when)
@@ -41,7 +44,7 @@ import Tidepool.Effect
   )
 import Tidepool.Anthropic.Http (ContentBlock(..), ImageSource(..))
 import Tidepool.Template (Schema(..))
-import Tidepool.Graph.Goto (GotoChoice, To, gotoChoice, gotoExit)
+import Tidepool.Graph.Goto (GotoChoice(..), OneOf(..), To, gotoChoice, gotoExit)
 import Tidepool.Graph.Generic (AsHandler)
 import Tidepool.Graph.Types (Exit)
 
@@ -287,6 +290,52 @@ tidyingHandlers = TidyingGraph
   , tgAct = actHandler
   , tgExit = Proxy
   }
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- GRAPH-BASED TURN
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Run a tidying turn using the graph-based approach
+--
+-- This is a drop-in replacement for 'tidyingTurn' from Tidying.Loop.
+-- It uses the graph executor to dispatch through the OODA nodes.
+--
+-- The flow is:
+-- 1. Entry(UserInput) → tgAnalyzePhotos → tgExtract → tgRoute → tgAct → Exit(Response)
+--
+-- Note: This implementation manually sequences the handlers rather than
+-- using runGraph, because the type-level machinery for FindEntryHandler
+-- and DispatchGoto requires complex constraints that are hard to satisfy
+-- in a polymorphic context.
+--
+-- A future version could use runGraph directly once the type inference
+-- issues are resolved.
+tidyingTurnGraph
+  :: TidyingEs es
+  => UserInput
+  -> Eff es Response
+tidyingTurnGraph input = do
+  -- Step 1: Analyze photos
+  photoChoice <- analyzePhotosHandler input
+  let GotoChoice (Here photoResult) = photoChoice
+
+  -- Step 2: Extract intent
+  extractChoice <- extractHandler photoResult
+  let GotoChoice (Here extractResult) = extractChoice
+
+  -- Step 3: Route (may exit directly for IntentStop)
+  routeChoice <- routeHandler extractResult
+  case routeChoice of
+    GotoChoice (Here actInput) -> do
+      -- Step 4: Generate response
+      actChoice <- actHandler actInput
+      let GotoChoice (Here response) = actChoice
+      pure response
+
+    GotoChoice (There (Here response)) ->
+      -- Direct exit (IntentStop with Summary)
+      pure response
 
 
 -- ════════════════════════════════════════════════════════════════════════════

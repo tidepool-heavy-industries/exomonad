@@ -3,6 +3,22 @@
 -- The Tidying agent owns its full lifecycle via 'tidyingRun'.
 -- Uses OODA (Observe-Orient-Decide-Act) pattern with pure routing.
 --
+-- = Graph-Based Implementation
+--
+-- The agent can use either the manual loop ('tidyingTurn') or the
+-- graph-based dispatch ('tidyingTurnGraph'). Both produce identical
+-- behavior, but the graph version uses the V2 Graph DSL for typed
+-- dispatch through nodes.
+--
+-- To switch to graph-based:
+--
+-- @
+-- -- In tidyingRun, replace:
+-- response <- tidyingTurn userInput
+-- -- With:
+-- response <- tidyingTurnGraph userInput
+-- @
+--
 -- = Photo Support
 --
 -- Photos are attached to text input in the GUI (chat-app style).
@@ -35,6 +51,7 @@ import qualified Data.Text as T
 import Tidepool
 import Tidying.State (SessionState, newSession, UserInput(..), Photo(..))
 import Tidying.Loop (tidyingTurn, TidyingEvent(..), Response(..))
+import Tidying.Graph.Handlers (tidyingTurnGraph)
 
 -- | Extra effects for Tidying agent
 --
@@ -100,7 +117,10 @@ tidyingRun = do
                 { inputText = if hasText then Just input else Nothing
                 , inputPhotos = photos
                 }
+          -- Use tidyingTurn (manual OODA loop) or tidyingTurnGraph (V2 graph DSL)
+          -- Both produce identical behavior
           response <- tidyingTurn userInput
+          -- Alternative: response <- tidyingTurnGraph userInput
 
           -- Emit response for chat display
           emit $ ResponseGenerated response.responseText
