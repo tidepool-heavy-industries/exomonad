@@ -39,8 +39,10 @@ export interface Env extends HandlersEnv, WebhookEnv {
 
 export class StateMachineDO extends DurableObject<Env> {
   private machine: GraphMachine | null = null;
-  // The session ID is derived from the DO instance ID (set via URL path)
-  // This ensures sessionId matches the routing path for reconnection
+  // The session ID is derived from the DO name (set via idFromName() routing)
+  // For WebSocket: extracted from URL path /session/:sessionId
+  // For HTTP: extracted from this.ctx.id.name (matches idFromName() parameter)
+  // This ensures sessionId matches TelegramDO routing for consistency
   private sessionId: string | null = null;
 
   /**
@@ -104,9 +106,10 @@ export class StateMachineDO extends DurableObject<Env> {
       );
     }
 
-    // Generate session ID if not set
+    // Use the DO name as session ID (set via idFromName() routing)
+    // This ensures sessionId matches the TelegramDO routing for consistency
     if (!this.sessionId) {
-      this.sessionId = crypto.randomUUID();
+      this.sessionId = this.ctx.id.name ?? crypto.randomUUID();
     }
     console.log(`[DO] HTTP start: sessionId=${this.sessionId}, graphId=${graphId}`);
 
