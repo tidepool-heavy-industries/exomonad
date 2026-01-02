@@ -42,12 +42,15 @@ import Data.Aeson
   ( ToJSON(..)
   , FromJSON(..)
   , Value(..)
+  , Object
   , object
   , (.=)
   , (.:)
   , (.:?)
   , withObject
   )
+import qualified Data.Aeson.KeyMap as KM
+import Data.Aeson.Key (fromText)
 import Data.Aeson.Types (Parser)
 import Data.Text (Text)
 import GHC.Generics (Generic)
@@ -191,9 +194,19 @@ instance FromJSON EffectResult where
   parseJSON = withObject "EffectResult" $ \o -> do
     (typ :: Text) <- o .: "type"
     case typ of
-      "success" -> ResSuccess <$> o .:? "value"
+      "success" -> ResSuccess <$> lookupValue o
       "error"   -> ResError <$> o .: "message"
       _         -> fail $ "Unknown result type: " ++ show typ
+
+-- | Look up "value" field, distinguishing missing from null.
+--
+-- - Missing field → Nothing
+-- - Field present (even if null) → Just value
+--
+-- This is needed because .:? treats null as missing, but for Maybe Value
+-- we need to preserve Just Null when the field is explicitly null.
+lookupValue :: Object -> Parser (Maybe Value)
+lookupValue o = pure $ KM.lookup (fromText "value") o
 
 
 -- ════════════════════════════════════════════════════════════════════════════
