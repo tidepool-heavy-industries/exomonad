@@ -98,6 +98,9 @@ jobs:
           name: roundtrip-wasm
           path: deploy/
 
+      - name: Copy WASM to src for import
+        run: cp tidepool-roundtrip.wasm src/tidepool.wasm
+
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
