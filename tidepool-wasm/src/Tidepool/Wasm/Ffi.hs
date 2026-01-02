@@ -64,7 +64,7 @@ import Tidepool.Graph.Types (Exit)
 import Tidepool.Generated.Registry.TH (GraphFFISpec(..), deriveFFIExports)
 
 #if defined(wasm32_HOST_ARCH)
-import GHC.Wasm.Prim (JSString, fromJSString, toJSString)
+import GHC.Wasm.Prim (JSString(..), fromJSString, toJSString)
 #endif
 
 
@@ -189,17 +189,19 @@ $(deriveFFIExports
 -- The TH generates the implementation functions; we just need to export them.
 
 -- WASM wrappers that convert JSString <-> Text
+-- Note: fromJSString returns String, toJSString expects String
+-- Our functions use Text, so we need T.pack/T.unpack conversions
 initialize_test_wasm :: JSString -> IO JSString
-initialize_test_wasm input = toJSString <$> initialize_test (fromJSString input)
+initialize_test_wasm input = (toJSString . T.unpack) <$> initialize_test (T.pack $ fromJSString input)
 
 step_test_wasm :: JSString -> IO JSString
-step_test_wasm result = toJSString <$> step_test (fromJSString result)
+step_test_wasm result = (toJSString . T.unpack) <$> step_test (T.pack $ fromJSString result)
 
 getGraphInfo_test_wasm :: IO JSString
-getGraphInfo_test_wasm = toJSString <$> getGraphInfo_test
+getGraphInfo_test_wasm = (toJSString . T.unpack) <$> getGraphInfo_test
 
 getGraphState_test_wasm :: IO JSString
-getGraphState_test_wasm = toJSString <$> getGraphState_test
+getGraphState_test_wasm = (toJSString . T.unpack) <$> getGraphState_test
 
 foreign export javascript "initialize_test" initialize_test_wasm :: JSString -> IO JSString
 foreign export javascript "step_test" step_test_wasm :: JSString -> IO JSString
@@ -208,16 +210,16 @@ foreign export javascript "getGraphState_test" getGraphState_test_wasm :: IO JSS
 
 
 initialize_example_wasm :: JSString -> IO JSString
-initialize_example_wasm input = toJSString <$> initialize_example (fromJSString input)
+initialize_example_wasm input = (toJSString . T.unpack) <$> initialize_example (T.pack $ fromJSString input)
 
 step_example_wasm :: JSString -> IO JSString
-step_example_wasm result = toJSString <$> step_example (fromJSString result)
+step_example_wasm result = (toJSString . T.unpack) <$> step_example (T.pack $ fromJSString result)
 
 getGraphInfo_example_wasm :: IO JSString
-getGraphInfo_example_wasm = toJSString <$> getGraphInfo_example
+getGraphInfo_example_wasm = (toJSString . T.unpack) <$> getGraphInfo_example
 
 getGraphState_example_wasm :: IO JSString
-getGraphState_example_wasm = toJSString <$> getGraphState_example
+getGraphState_example_wasm = (toJSString . T.unpack) <$> getGraphState_example
 
 foreign export javascript "initialize_example" initialize_example_wasm :: JSString -> IO JSString
 foreign export javascript "step_example" step_example_wasm :: JSString -> IO JSString
@@ -226,16 +228,16 @@ foreign export javascript "getGraphState_example" getGraphState_example_wasm :: 
 
 
 initialize_habitica_wasm :: JSString -> IO JSString
-initialize_habitica_wasm input = toJSString <$> initialize_habitica (fromJSString input)
+initialize_habitica_wasm input = (toJSString . T.unpack) <$> initialize_habitica (T.pack $ fromJSString input)
 
 step_habitica_wasm :: JSString -> IO JSString
-step_habitica_wasm result = toJSString <$> step_habitica (fromJSString result)
+step_habitica_wasm result = (toJSString . T.unpack) <$> step_habitica (T.pack $ fromJSString result)
 
 getGraphInfo_habitica_wasm :: IO JSString
-getGraphInfo_habitica_wasm = toJSString <$> getGraphInfo_habitica
+getGraphInfo_habitica_wasm = (toJSString . T.unpack) <$> getGraphInfo_habitica
 
 getGraphState_habitica_wasm :: IO JSString
-getGraphState_habitica_wasm = toJSString <$> getGraphState_habitica
+getGraphState_habitica_wasm = (toJSString . T.unpack) <$> getGraphState_habitica
 
 foreign export javascript "initialize_habitica" initialize_habitica_wasm :: JSString -> IO JSString
 foreign export javascript "step_habitica" step_habitica_wasm :: JSString -> IO JSString

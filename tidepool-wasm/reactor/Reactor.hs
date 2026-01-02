@@ -12,8 +12,9 @@
 -- (initialize, step, etc.) are the entry points.
 module Main where
 
--- Import Ffi to ensure the foreign exports are linked
+-- Import Ffi and Roundtrip to ensure the foreign exports are linked
 import Tidepool.Wasm.Ffi ()
+import Tidepool.Wasm.Roundtrip ()
 
 -- Dummy main - never called when using -no-hs-main, but GHC requires it
 main :: IO ()

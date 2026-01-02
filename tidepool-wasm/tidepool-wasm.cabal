@@ -23,6 +23,7 @@ library
         Tidepool.Wasm.Ffi
         Tidepool.Wasm.Ffi.Types
         Tidepool.Wasm.Runner
+        Tidepool.Wasm.Roundtrip
     build-depends:
         base >= 4.17 && < 5,
         tidepool-core,
@@ -33,7 +34,7 @@ library
         text >= 2.0 && < 3,
         vector >= 0.12 && < 1
 
-    -- WASM-specific configuration
+    -- WASM-specific build dependency
     if os(wasi)
         build-depends:
             ghc-experimental
@@ -56,6 +57,12 @@ library
             -optl-Wl,--export=step_habitica
             -optl-Wl,--export=getGraphInfo_habitica
             -optl-Wl,--export=getGraphState_habitica
+            -- Roundtrip exports (for property testing)
+            -optl-Wl,--export=roundtripSerializableEffect
+            -optl-Wl,--export=roundtripEffectResult
+            -optl-Wl,--export=roundtripExecutionPhase
+            -optl-Wl,--export=roundtripGraphState
+            -optl-Wl,--export=roundtripStepOutput
 
     hs-source-dirs:   src
     default-language: GHC2021
@@ -91,6 +98,7 @@ test-suite tidepool-wasm-tests
         E2ESpec
         ExecutorSpec
         CodegenSyncSpec
+        RoundtripSpec
     build-depends:
         base >= 4.17 && < 5,
         hspec >= 2.10 && < 3,
@@ -142,6 +150,12 @@ executable tidepool-reactor
             -optl-Wl,--export=step_habitica
             -optl-Wl,--export=getGraphInfo_habitica
             -optl-Wl,--export=getGraphState_habitica
+            -- Roundtrip exports (for property testing)
+            -optl-Wl,--export=roundtripSerializableEffect
+            -optl-Wl,--export=roundtripEffectResult
+            -optl-Wl,--export=roundtripExecutionPhase
+            -optl-Wl,--export=roundtripGraphState
+            -optl-Wl,--export=roundtripStepOutput
 
 -- | Generates the TypeScript npm package with type-safe bindings.
 -- Run with: cabal run generate-ts-package -- ./output
