@@ -82,6 +82,25 @@ pre-commit-fast: build lint
 pre-commit: build lint test test-ts
 
 # ─────────────────────────────────────────────────────────────
+# WASM Roundtrip Testing
+# ─────────────────────────────────────────────────────────────
+
+# Build roundtrip WASM (requires: nix develop .#wasm)
+build-roundtrip-wasm:
+    @echo "── Building roundtrip WASM ──"
+    @echo "Note: This must be run inside 'nix develop .#wasm'"
+    wasm32-wasi-cabal build tidepool-wasm
+    @echo ""
+    @echo "── Copying WASM to deploy/ ──"
+    find dist-newstyle -name '*.wasm' -exec cp {} deploy/tidepool-roundtrip.wasm \;
+    @echo "✓ Built: deploy/tidepool-roundtrip.wasm"
+
+# Run cross-boundary property tests (requires WASM built first)
+test-roundtrip:
+    @echo "── Running cross-boundary property tests ──"
+    cd deploy && pnpm test -- --grep "roundtrip"
+
+# ─────────────────────────────────────────────────────────────
 # Running
 # ─────────────────────────────────────────────────────────────
 
