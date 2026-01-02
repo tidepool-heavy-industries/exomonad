@@ -110,6 +110,18 @@ describe("executeEffect", () => {
   });
 
   describe("structured logging", () => {
+    /**
+     * Helper to extract and parse the structured log entry from console.log calls.
+     * LogInfo effects produce two logs: the graph log and the structured log.
+     * Other effects may only produce the structured log.
+     */
+    function getStructuredLog(callIndex: number = -1): Record<string, unknown> {
+      const calls = (console.log as ReturnType<typeof vi.fn>).mock.calls;
+      const index = callIndex >= 0 ? callIndex : calls.length - 1; // Default to last call
+      const logCall = calls[index][0];
+      return JSON.parse(logCall);
+    }
+
     it("creates log entries with correct format when logCtx is provided", async () => {
       const effect: LogInfoEffect = {
         type: "LogInfo",
@@ -126,9 +138,8 @@ describe("executeEffect", () => {
       // console.log should be called twice: once for the graph log, once for structured log
       expect(console.log).toHaveBeenCalledTimes(2);
       
-      // Get the structured log entry (second call)
-      const structuredLogCall = (console.log as ReturnType<typeof vi.fn>).mock.calls[1][0];
-      const logEntry = JSON.parse(structuredLogCall);
+      // Get the structured log entry (last call)
+      const logEntry = getStructuredLog();
 
       // Verify log entry has correct structure
       expect(logEntry).toMatchObject({
@@ -155,8 +166,7 @@ describe("executeEffect", () => {
 
       await executeEffect(effect, env, logCtx);
 
-      const structuredLogCall = (console.log as ReturnType<typeof vi.fn>).mock.calls[1][0];
-      const logEntry = JSON.parse(structuredLogCall);
+      const logEntry = getStructuredLog();
 
       // Verify all required fields are present
       expect(logEntry).toHaveProperty("ts");
@@ -195,9 +205,8 @@ describe("executeEffect", () => {
 
       await executeEffect(effect, env, logCtx);
 
-      // Get the structured log entry
-      const structuredLogCall = (console.log as ReturnType<typeof vi.fn>).mock.calls[0][0];
-      const logEntry = JSON.parse(structuredLogCall);
+      // Get the structured log entry (first and only call since LlmComplete doesn't log to console)
+      const logEntry = getStructuredLog(0);
 
       // Verify error fields
       expect(logEntry).toMatchObject({
@@ -243,9 +252,8 @@ describe("executeEffect", () => {
 
       await executeEffect(effect, env, logCtx);
 
-      // Get the structured log entry
-      const structuredLogCall = (console.log as ReturnType<typeof vi.fn>).mock.calls[0][0];
-      const logEntry = JSON.parse(structuredLogCall);
+      // Get the structured log entry (first and only call since yielded effects don't log to console)
+      const logEntry = getStructuredLog(0);
 
       // Verify yielded effect error is logged
       expect(logEntry).toMatchObject({
