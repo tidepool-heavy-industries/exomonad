@@ -26,6 +26,7 @@ library
         -- Unified Registry
         Tidepool.Wasm.Registry
         Tidepool.Wasm.Registry.Types
+        Tidepool.Wasm.Registry.Default
         Tidepool.Wasm.Registry.TestGraph
         Tidepool.Wasm.Registry.ExampleGraph
         Tidepool.Wasm.Registry.HabiticaGraph
@@ -51,6 +52,7 @@ library
             -no-hs-main
             -optl-mexec-model=reactor
             -optl-Wl,--export=hs_init
+            -- NOTE: initRegistry NOT exported from library - only from reactor executable
             -- Unified FFI exports (4 total, never changes when adding graphs)
             -optl-Wl,--export=initialize
             -optl-Wl,--export=step
@@ -141,6 +143,8 @@ executable tidepool-reactor
             -no-hs-main
             -optl-mexec-model=reactor
             -optl-Wl,--export=hs_init
+            -- Registry initialization (call once before any FFI calls)
+            -optl-Wl,--export=initRegistry
             -- Unified FFI exports (4 total, never changes when adding graphs)
             -optl-Wl,--export=initialize
             -optl-Wl,--export=step

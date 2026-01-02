@@ -40,6 +40,7 @@ import Tidepool.Generated.Codegen
   )
 import Tidepool.Generated.GraphSpecs (allEffectSpecs)
 import Tidepool.Wasm.Registry (registryGraphSpecs)
+import Tidepool.Wasm.Registry.Default (setupDefaultRegistry)
 
 
 -- ============================================================================
@@ -92,13 +93,16 @@ generatePackage :: FilePath -> IO ()
 generatePackage outputDir = do
   putStrLn $ "Generating TypeScript package in: " ++ outputDir
 
+  -- Setup registry first
+  setupDefaultRegistry
+
   -- Create output directories
   createDirectoryIfMissing True (outputDir </> "src")
   createDirectoryIfMissing True (outputDir </> "wasm")
 
   -- Generate TypeScript files
   -- Graph specs come from the unified Registry (single source of truth)
-  let graphSpecs = registryGraphSpecs
+  graphSpecs <- registryGraphSpecs
 
   putStrLn "  Generating graphs.ts..."
   TIO.writeFile (outputDir </> "src" </> "graphs.ts") (generateGraphsTs graphSpecs)

@@ -1,3 +1,5 @@
+{-# LANGUAGE CPP #-}
+
 -- | WASM reactor entry point.
 --
 -- This module exists solely to produce a statically-linked WASM executable
@@ -12,9 +14,24 @@
 -- (initialize, step, getGraphInfo, getGraphState) are the entry points.
 module Main where
 
+#if defined(wasm32_HOST_ARCH)
+import GHC.Wasm.Prim (JSString(..))
+#endif
+
 -- Import unified FFI and Roundtrip to ensure the foreign exports are linked
 import Tidepool.Wasm.Ffi.Unified ()
 import Tidepool.Wasm.Roundtrip ()
+import Tidepool.Wasm.Registry.Default (setupDefaultRegistry)
+
+
+-- | Initialize the registry with default graphs.
+-- TypeScript must call this once after loading WASM, before any initialize() calls.
+initRegistry :: IO ()
+initRegistry = setupDefaultRegistry
+
+#if defined(wasm32_HOST_ARCH)
+foreign export javascript "initRegistry" initRegistry :: IO ()
+#endif
 
 -- Dummy main - never called when using -no-hs-main, but GHC requires it
 main :: IO ()
