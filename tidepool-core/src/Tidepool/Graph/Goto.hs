@@ -161,7 +161,7 @@ type family NonEmptyList ts where
       ':$$: Indent "Dead ends are compile errors, not runtime mysteries."
       ':$$: Blank
       ':$$: Fixes
-      ':$$: Bullet "Add To Exit: UsesEffects '[Goto Exit YourResultType]"
+      ':$$: Bullet "Add Goto Exit to UsesEffects: UsesEffects '[Goto Exit YourResultType]"
       ':$$: Bullet "Add a transition: UsesEffects '[Goto \"nextNode\" Payload]"
       ':$$: Bullet "Check that you haven't accidentally filtered out all targets"
       ':$$: Blank
