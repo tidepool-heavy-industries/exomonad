@@ -64,10 +64,21 @@ jobs:
       - name: Cache Nix store
         uses: actions/cache@v4
         with:
-          path: /nix/store
+          path: |
+            ~/.cache/nix
+            /nix/store
           key: ${{ runner.os }}-nix-wasm-${{ hashFiles('flake.lock') }}
           restore-keys: |
             ${{ runner.os }}-nix-wasm-
+
+      - name: Cache WASM dist-newstyle
+        uses: actions/cache@v4
+        with:
+          path: dist-newstyle/build/wasm32-wasi
+          key: ${{ runner.os }}-wasm-dist-${{ hashFiles('**/*.cabal', 'cabal.project') }}-${{ hashFiles('tidepool-wasm/**/*.hs', 'tidepool-core/**/*.hs') }}
+          restore-keys: |
+            ${{ runner.os }}-wasm-dist-${{ hashFiles('**/*.cabal', 'cabal.project') }}-
+            ${{ runner.os }}-wasm-dist-
 
       - name: Build roundtrip WASM
         run: |
