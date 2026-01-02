@@ -34,6 +34,7 @@ spec = do
   executionPhasePropertySpec
   graphStatePropertySpec
   stepOutputPropertySpec
+  graphInfoPropertySpec
   edgeCaseSpec
 
 
@@ -185,6 +186,74 @@ instance Arbitrary StepOutput where
     ++ [ StepFailed err gs' | gs' <- shrink gs ]
 
 
+-- | Arbitrary TypeInfoWire
+instance Arbitrary TypeInfoWire where
+  arbitrary = TypeInfoWire
+    <$> arbitrary
+    <*> arbitrary
+
+  shrink (TypeInfoWire name mod') =
+    [ TypeInfoWire name' mod' | name' <- shrink name ]
+    ++ [ TypeInfoWire name mod'' | mod'' <- shrink mod' ]
+
+
+-- | Arbitrary GotoTargetWire
+instance Arbitrary GotoTargetWire where
+  arbitrary = GotoTargetWire
+    <$> arbitrary
+    <*> arbitrary
+
+  shrink (GotoTargetWire target payload) =
+    [ GotoTargetWire target' payload | target' <- shrink target ]
+    ++ [ GotoTargetWire target payload' | payload' <- shrink payload ]
+
+
+-- | Arbitrary NodeInfoWire
+instance Arbitrary NodeInfoWire where
+  arbitrary = NodeInfoWire
+    <$> arbitrary
+    <*> elements ["LLM", "Logic"]
+    <*> scale (`div` 2) (listOf arbitrary)
+    <*> arbitrary
+    <*> scale (`div` 2) (listOf arbitrary)
+
+  shrink (NodeInfoWire name kind needs schema targets) =
+    [ NodeInfoWire name' kind needs schema targets | name' <- shrink name ]
+    ++ [ NodeInfoWire name kind needs' schema targets | needs' <- shrink needs ]
+    ++ [ NodeInfoWire name kind needs schema' targets | schema' <- shrink schema ]
+    ++ [ NodeInfoWire name kind needs schema targets' | targets' <- shrink targets ]
+
+
+-- | Arbitrary EdgeInfoWire
+instance Arbitrary EdgeInfoWire where
+  arbitrary = EdgeInfoWire
+    <$> arbitrary
+    <*> arbitrary
+    <*> arbitrary
+
+  shrink (EdgeInfoWire from to payload) =
+    [ EdgeInfoWire from' to payload | from' <- shrink from ]
+    ++ [ EdgeInfoWire from to' payload | to' <- shrink to ]
+    ++ [ EdgeInfoWire from to payload' | payload' <- shrink payload ]
+
+
+-- | Arbitrary GraphInfoWire
+instance Arbitrary GraphInfoWire where
+  arbitrary = GraphInfoWire
+    <$> arbitrary
+    <*> arbitrary
+    <*> arbitrary
+    <*> scale (`div` 2) (listOf arbitrary)
+    <*> scale (`div` 2) (listOf arbitrary)
+
+  shrink (GraphInfoWire name entry exit nodes edges) =
+    [ GraphInfoWire name' entry exit nodes edges | name' <- shrink name ]
+    ++ [ GraphInfoWire name entry' exit nodes edges | entry' <- shrink entry ]
+    ++ [ GraphInfoWire name entry exit' nodes edges | exit' <- shrink exit ]
+    ++ [ GraphInfoWire name entry exit nodes' edges | nodes' <- shrink nodes ]
+    ++ [ GraphInfoWire name entry exit nodes edges' | edges' <- shrink edges ]
+
+
 -- ════════════════════════════════════════════════════════════════════════════
 -- PROPERTY TESTS
 -- ════════════════════════════════════════════════════════════════════════════
@@ -289,6 +358,69 @@ stepOutputPropertySpec = describe "StepOutput properties" $ do
            KM.lookup "done" obj == Just (Bool True) &&
            KM.member "error" obj
          _ -> False
+
+
+graphInfoPropertySpec :: Spec
+graphInfoPropertySpec = describe "GraphInfo wire type properties" $ do
+
+  describe "TypeInfoWire" $ do
+    prop "decode . encode ≡ id (roundtrip)" $ \(ti :: TypeInfoWire) ->
+      decode (encode ti) == Just ti
+
+    prop "has typeName and typeModule fields" $ \(ti :: TypeInfoWire) ->
+      case decode (encode ti) :: Maybe Value of
+        Just (Object obj) ->
+          KM.member "typeName" obj && KM.member "typeModule" obj
+        _ -> False
+
+  describe "GotoTargetWire" $ do
+    prop "decode . encode ≡ id (roundtrip)" $ \(gt :: GotoTargetWire) ->
+      decode (encode gt) == Just gt
+
+    prop "has gtTarget and gtPayloadType fields" $ \(gt :: GotoTargetWire) ->
+      case decode (encode gt) :: Maybe Value of
+        Just (Object obj) ->
+          KM.member "gtTarget" obj && KM.member "gtPayloadType" obj
+        _ -> False
+
+  describe "NodeInfoWire" $ do
+    prop "decode . encode ≡ id (roundtrip)" $ \(ni :: NodeInfoWire) ->
+      decode (encode ni) == Just ni
+
+    prop "has all required fields" $ \(ni :: NodeInfoWire) ->
+      case decode (encode ni) :: Maybe Value of
+        Just (Object obj) ->
+          KM.member "niName" obj &&
+          KM.member "niKind" obj &&
+          KM.member "niNeeds" obj &&
+          KM.member "niGotoTargets" obj
+        _ -> False
+
+  describe "EdgeInfoWire" $ do
+    prop "decode . encode ≡ id (roundtrip)" $ \(ei :: EdgeInfoWire) ->
+      decode (encode ei) == Just ei
+
+    prop "has all required fields" $ \(ei :: EdgeInfoWire) ->
+      case decode (encode ei) :: Maybe Value of
+        Just (Object obj) ->
+          KM.member "eiFrom" obj &&
+          KM.member "eiTo" obj &&
+          KM.member "eiPayloadType" obj
+        _ -> False
+
+  describe "GraphInfoWire" $ do
+    prop "decode . encode ≡ id (roundtrip)" $ \(gi :: GraphInfoWire) ->
+      decode (encode gi) == Just gi
+
+    prop "has all required fields" $ \(gi :: GraphInfoWire) ->
+      case decode (encode gi) :: Maybe Value of
+        Just (Object obj) ->
+          KM.member "name" obj &&
+          KM.member "entryType" obj &&
+          KM.member "exitType" obj &&
+          KM.member "nodes" obj &&
+          KM.member "edges" obj
+        _ -> False
 
 
 -- ════════════════════════════════════════════════════════════════════════════

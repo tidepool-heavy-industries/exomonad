@@ -99,6 +99,56 @@ roundtripFunctionSpec = describe "Roundtrip functions" $ do
           getValue obj `shouldBe` Just (toJSON output)
         Nothing -> expectationFailure "Failed to parse roundtrip result as JSON"
 
+  describe "roundtripTypeInfoWire" $ do
+    prop "roundtrips correctly via native interface" $ \(ti :: TypeInfoWire) -> do
+      let input = TL.toStrict $ TLE.decodeUtf8 $ encode ti
+      result <- roundtripTypeInfoWire input
+      case decode (TLE.encodeUtf8 $ TL.fromStrict result) of
+        Just obj -> do
+          obj `shouldSatisfy` isOk
+          getValue obj `shouldBe` Just (toJSON ti)
+        Nothing -> expectationFailure "Failed to parse roundtrip result as JSON"
+
+  describe "roundtripGotoTargetWire" $ do
+    prop "roundtrips correctly via native interface" $ \(gt :: GotoTargetWire) -> do
+      let input = TL.toStrict $ TLE.decodeUtf8 $ encode gt
+      result <- roundtripGotoTargetWire input
+      case decode (TLE.encodeUtf8 $ TL.fromStrict result) of
+        Just obj -> do
+          obj `shouldSatisfy` isOk
+          getValue obj `shouldBe` Just (toJSON gt)
+        Nothing -> expectationFailure "Failed to parse roundtrip result as JSON"
+
+  describe "roundtripNodeInfoWire" $ do
+    prop "roundtrips correctly via native interface" $ \(ni :: NodeInfoWire) -> do
+      let input = TL.toStrict $ TLE.decodeUtf8 $ encode ni
+      result <- roundtripNodeInfoWire input
+      case decode (TLE.encodeUtf8 $ TL.fromStrict result) of
+        Just obj -> do
+          obj `shouldSatisfy` isOk
+          getValue obj `shouldBe` Just (toJSON ni)
+        Nothing -> expectationFailure "Failed to parse roundtrip result as JSON"
+
+  describe "roundtripEdgeInfoWire" $ do
+    prop "roundtrips correctly via native interface" $ \(ei :: EdgeInfoWire) -> do
+      let input = TL.toStrict $ TLE.decodeUtf8 $ encode ei
+      result <- roundtripEdgeInfoWire input
+      case decode (TLE.encodeUtf8 $ TL.fromStrict result) of
+        Just obj -> do
+          obj `shouldSatisfy` isOk
+          getValue obj `shouldBe` Just (toJSON ei)
+        Nothing -> expectationFailure "Failed to parse roundtrip result as JSON"
+
+  describe "roundtripGraphInfoWire" $ do
+    prop "roundtrips correctly via native interface" $ \(gi :: GraphInfoWire) -> do
+      let input = TL.toStrict $ TLE.decodeUtf8 $ encode gi
+      result <- roundtripGraphInfoWire input
+      case decode (TLE.encodeUtf8 $ TL.fromStrict result) of
+        Just obj -> do
+          obj `shouldSatisfy` isOk
+          getValue obj `shouldBe` Just (toJSON gi)
+        Nothing -> expectationFailure "Failed to parse roundtrip result as JSON"
+
 
 errorHandlingSpec :: Spec
 errorHandlingSpec = describe "Error handling" $ do

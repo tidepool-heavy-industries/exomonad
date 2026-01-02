@@ -24,6 +24,11 @@ import type {
   ExecutionPhase,
   GraphState,
   StepOutput,
+  TypeInfo,
+  GotoTarget,
+  NodeInfo,
+  EdgeInfo,
+  GraphInfo,
 } from "tidepool-generated";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -44,7 +49,24 @@ const arbText = fc.oneof(
 );
 
 // JSON values with bounded depth - matches aeson's Arbitrary Value
-const arbJsonValue = fc.jsonValue({ maxDepth: 3 });
+// Note: We filter out -0 because JSON doesn't distinguish between -0 and +0,
+// so {value: [-0]} would roundtrip as {value: [0]} and fail deep equality.
+const arbJsonValue = fc.jsonValue({ maxDepth: 3 }).filter((v) => {
+  // Recursively check for -0 in the value
+  const hasNegativeZero = (val: unknown): boolean => {
+    if (typeof val === "number") {
+      return Object.is(val, -0);
+    }
+    if (Array.isArray(val)) {
+      return val.some(hasNegativeZero);
+    }
+    if (val !== null && typeof val === "object") {
+      return Object.values(val).some(hasNegativeZero);
+    }
+    return false;
+  };
+  return !hasNegativeZero(v);
+});
 
 // JSON Schema - more constrained than arbitrary JSON
 // Note: We use undefined (field omitted) instead of null because Aeson's .:?
@@ -179,6 +201,47 @@ const arbStepOutput: fc.Arbitrary<StepOutput> = fc.oneof(
 );
 
 // =============================================================================
+// Graph Info Arbitraries - matches WireTypes.hs
+// =============================================================================
+
+// TypeInfo - matches TypeInfoWire
+const arbTypeInfo: fc.Arbitrary<TypeInfo> = fc.record({
+  typeName: arbText,
+  typeModule: arbText,
+});
+
+// GotoTarget - matches GotoTargetWire
+const arbGotoTarget: fc.Arbitrary<GotoTarget> = fc.record({
+  gtTarget: arbText,
+  gtPayloadType: arbTypeInfo,
+});
+
+// NodeInfo - matches NodeInfoWire
+const arbNodeInfo: fc.Arbitrary<NodeInfo> = fc.record({
+  niName: arbText,
+  niKind: fc.constantFrom("LLM" as const, "Logic" as const),
+  niNeeds: fc.array(arbTypeInfo, { maxLength: 5 }),
+  niSchema: fc.option(arbTypeInfo, { nil: null }),
+  niGotoTargets: fc.array(arbGotoTarget, { maxLength: 5 }),
+});
+
+// EdgeInfo - matches EdgeInfoWire
+const arbEdgeInfo: fc.Arbitrary<EdgeInfo> = fc.record({
+  eiFrom: arbText,
+  eiTo: arbText,
+  eiPayloadType: arbTypeInfo,
+});
+
+// GraphInfo - matches GraphInfoWire
+const arbGraphInfo: fc.Arbitrary<GraphInfo> = fc.record({
+  name: arbText,
+  entryType: arbTypeInfo,
+  exitType: arbTypeInfo,
+  nodes: fc.array(arbNodeInfo, { maxLength: 5 }),
+  edges: fc.array(arbEdgeInfo, { maxLength: 10 }),
+});
+
+// =============================================================================
 // Test Setup
 // =============================================================================
 
@@ -303,6 +366,96 @@ describe("Cross-boundary serialization roundtrip", () => {
 
           expect(result.ok).toBe(true);
           expect(result.value).toEqual(output);
+        }),
+        { numRuns: 100 }
+      );
+    });
+  });
+
+  describe("TypeInfo (wire type)", () => {
+    it("roundtrips through WASM", async () => {
+      if (skipIfNoWasm()) return;
+
+      await fc.assert(
+        fc.asyncProperty(arbTypeInfo, async (typeInfo) => {
+          const inputJson = JSON.stringify(typeInfo);
+          const resultStr = await roundtrip!.roundtripTypeInfoWire(inputJson);
+          const result: RoundtripResult = JSON.parse(resultStr);
+
+          expect(result.ok).toBe(true);
+          expect(result.value).toEqual(typeInfo);
+        }),
+        { numRuns: 100 }
+      );
+    });
+  });
+
+  describe("GotoTarget (wire type)", () => {
+    it("roundtrips through WASM", async () => {
+      if (skipIfNoWasm()) return;
+
+      await fc.assert(
+        fc.asyncProperty(arbGotoTarget, async (gotoTarget) => {
+          const inputJson = JSON.stringify(gotoTarget);
+          const resultStr = await roundtrip!.roundtripGotoTargetWire(inputJson);
+          const result: RoundtripResult = JSON.parse(resultStr);
+
+          expect(result.ok).toBe(true);
+          expect(result.value).toEqual(gotoTarget);
+        }),
+        { numRuns: 100 }
+      );
+    });
+  });
+
+  describe("NodeInfo (wire type)", () => {
+    it("roundtrips through WASM", async () => {
+      if (skipIfNoWasm()) return;
+
+      await fc.assert(
+        fc.asyncProperty(arbNodeInfo, async (nodeInfo) => {
+          const inputJson = JSON.stringify(nodeInfo);
+          const resultStr = await roundtrip!.roundtripNodeInfoWire(inputJson);
+          const result: RoundtripResult = JSON.parse(resultStr);
+
+          expect(result.ok).toBe(true);
+          expect(result.value).toEqual(nodeInfo);
+        }),
+        { numRuns: 100 }
+      );
+    });
+  });
+
+  describe("EdgeInfo (wire type)", () => {
+    it("roundtrips through WASM", async () => {
+      if (skipIfNoWasm()) return;
+
+      await fc.assert(
+        fc.asyncProperty(arbEdgeInfo, async (edgeInfo) => {
+          const inputJson = JSON.stringify(edgeInfo);
+          const resultStr = await roundtrip!.roundtripEdgeInfoWire(inputJson);
+          const result: RoundtripResult = JSON.parse(resultStr);
+
+          expect(result.ok).toBe(true);
+          expect(result.value).toEqual(edgeInfo);
+        }),
+        { numRuns: 100 }
+      );
+    });
+  });
+
+  describe("GraphInfo (wire type)", () => {
+    it("roundtrips through WASM", async () => {
+      if (skipIfNoWasm()) return;
+
+      await fc.assert(
+        fc.asyncProperty(arbGraphInfo, async (graphInfo) => {
+          const inputJson = JSON.stringify(graphInfo);
+          const resultStr = await roundtrip!.roundtripGraphInfoWire(inputJson);
+          const result: RoundtripResult = JSON.parse(resultStr);
+
+          expect(result.ok).toBe(true);
+          expect(result.value).toEqual(graphInfo);
         }),
         { numRuns: 100 }
       );
