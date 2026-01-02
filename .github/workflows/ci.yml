@@ -50,13 +50,32 @@ jobs:
       - name: Test
         run: just test
 
+      - name: Generate TypeScript package
+        run: |
+          cabal run generate-ts-package -- ./tidepool-generated-ts/output
+          cd tidepool-generated-ts/output && npm install && npm run build
+
+      - name: Upload generated package
+        uses: actions/upload-artifact@v4
+        with:
+          name: tidepool-generated-ts
+          path: tidepool-generated-ts/output
+          retention-days: 1
+
   typescript:
+    needs: haskell
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: deploy
     steps:
       - uses: actions/checkout@v4
+
+      - name: Download generated package
+        uses: actions/download-artifact@v4
+        with:
+          name: tidepool-generated-ts
+          path: tidepool-generated-ts/output
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
