@@ -1,7 +1,7 @@
 /**
  * Telegram effect handlers.
  *
- * Handles all Telegram effects (Send, Receive, TryReceive).
+ * Handles all Telegram effects (Send, Receive, TryReceive, Ask).
  * These handlers are called by TelegramDO when processing effects.
  */
 
@@ -9,8 +9,8 @@ import type {
   TelegramSendEffect,
   TelegramReceiveEffect,
   TelegramTryReceiveEffect,
-  TelegramConfirmEffect,
-  TelegramConfirmResponse,
+  TelegramAskEffect,
+  TelegramAskResult,
   TelegramOutgoingMessage,
   TelegramIncomingMessage,
   TelegramInlineButton,
@@ -175,110 +175,151 @@ export function handleTelegramTryReceive(
 }
 
 /**
- * Result of a Confirm handler.
+ * Result of an Ask handler.
  *
  * Either:
- * - Button click already in queue → return parsed response
- * - No button click yet → caller should block/yield until one arrives
+ * - Response ready (button click, text, or stale button) → return result
+ * - Nothing yet → caller should block/yield until input arrives
+ *
+ * When yielding, returns the nonce for storage so it can be validated
+ * when the callback arrives.
  */
-export type ConfirmHandlerResult =
+export type AskHandlerResult =
   | { type: "result"; result: EffectResult }
-  | { type: "yield" };
+  | { type: "yield"; nonce: string };
 
 /**
- * Handle TelegramConfirm effect (blocking).
- *
- * 1. Sends message with inline keyboard buttons
- * 2. Checks if a button_click is already in pendingMessages
- *    - If yes: parses it into TelegramConfirmResponse and returns
- *    - If no: returns { type: "yield" } to block until button is clicked
- *
- * Note: The TelegramDO is responsible for:
- * 1. Sending the buttons on first call
- * 2. Storing that we're waiting for a confirm response
- * 3. Resuming when webhook delivers a callback_query
+ * Button callback data format with nonce for validation.
  */
-export async function handleTelegramConfirm(
-  effect: TelegramConfirmEffect,
+interface ButtonCallbackData {
+  action: string;
+  nonce: string;
+}
+
+/**
+ * Parse button callback data from a button click.
+ * Returns null if the data is not in the expected format.
+ */
+function parseButtonCallbackData(data: unknown): ButtonCallbackData | null {
+  if (typeof data === "object" && data !== null) {
+    const obj = data as Record<string, unknown>;
+    if (typeof obj.action === "string" && typeof obj.nonce === "string") {
+      return { action: obj.action, nonce: obj.nonce };
+    }
+  }
+  // Legacy format: plain string (no nonce)
+  if (typeof data === "string") {
+    return null; // No nonce means we can't validate
+  }
+  return null;
+}
+
+/**
+ * Handle TelegramAsk effect (blocking).
+ *
+ * This effect presents inline buttons and waits for user input.
+ * The user can:
+ * 1. Click a button → returns { type: "button", response: "..." }
+ * 2. Send text instead → returns { type: "text", text: "..." }
+ * 3. Click a stale button → returns { type: "stale_button" }
+ *
+ * Nonce-based validation:
+ * - When buttons are sent, a nonce is embedded in callback_data
+ * - When a button click arrives, the nonce is validated
+ * - Mismatched nonces mean the button is from an old session
+ *
+ * @param effect - The TelegramAsk effect from Haskell
+ * @param env - Environment with TELEGRAM_TOKEN
+ * @param ctx - Context with chatId and pendingMessages
+ * @param storedNonce - Nonce from previous yield, or null if buttons not sent
+ */
+export async function handleTelegramAsk(
+  effect: TelegramAskEffect,
   env: TelegramHandlerEnv,
   ctx: TelegramHandlerContext,
-  buttonsSent: boolean
-): Promise<ConfirmHandlerResult> {
-  // If buttons haven't been sent yet, send them first
-  if (!buttonsSent) {
-    const buttons = convertButtonsToInlineKeyboard(effect.eff_buttons);
+  storedNonce: string | null
+): Promise<AskHandlerResult> {
+  // If no stored nonce, buttons haven't been sent yet - send them
+  if (storedNonce === null) {
+    const nonce = crypto.randomUUID().slice(0, 12);
+    const buttons = convertButtonsToInlineKeyboardWithNonce(effect.eff_buttons, nonce);
     const success = await sendMessageWithButtons(
       env.TELEGRAM_TOKEN,
       ctx.chatId,
-      effect.eff_message,
+      effect.eff_tg_text,
       buttons
     );
 
     if (!success) {
       return {
         type: "result",
-        result: errorResult("Failed to send confirmation buttons"),
+        result: errorResult("Failed to send buttons"),
       };
     }
+
+    // Yield with the nonce for storage
+    return { type: "yield", nonce };
   }
 
-  // Check if there's already a button_click in pending messages
+  // Buttons were sent - check for responses in pending messages
+
+  // 1. Check for button click
   const buttonClick = ctx.pendingMessages.find(
     (msg): msg is Extract<TelegramIncomingMessage, { type: "button_click" }> =>
       msg.type === "button_click"
   );
 
   if (buttonClick) {
-    // Parse the button click data into TelegramConfirmResponse
-    const response = parseButtonClickToConfirmResponse(
-      buttonClick.data,
-      effect.eff_buttons
-    );
-    return {
-      type: "result",
-      result: successResult(response),
-    };
+    const callbackData = parseButtonCallbackData(buttonClick.data);
+
+    if (callbackData && callbackData.nonce === storedNonce) {
+      // Valid button click with matching nonce
+      const result: TelegramAskResult = {
+        type: "button",
+        response: callbackData.action,
+      };
+      return { type: "result", result: successResult(result) };
+    } else {
+      // Stale button click (no nonce or mismatched nonce)
+      console.log(`[TelegramAsk] Stale button click detected. Expected nonce: ${storedNonce}, got: ${callbackData?.nonce ?? "none"}`);
+      await sendMessage(
+        env.TELEGRAM_TOKEN,
+        ctx.chatId,
+        "That button has expired. Please use the current buttons above, or type a message."
+      );
+      const result: TelegramAskResult = { type: "stale_button" };
+      return { type: "result", result: successResult(result) };
+    }
   }
 
-  // No button click yet - caller should yield/block
-  return { type: "yield" };
+  // 2. Check for text message (user typing instead of clicking)
+  const textMsg = ctx.pendingMessages.find(
+    (msg): msg is Extract<TelegramIncomingMessage, { type: "text" }> =>
+      msg.type === "text"
+  );
+
+  if (textMsg) {
+    const result: TelegramAskResult = { type: "text", text: textMsg.text };
+    return { type: "result", result: successResult(result) };
+  }
+
+  // 3. Nothing yet - keep waiting
+  return { type: "yield", nonce: storedNonce };
 }
 
 /**
- * Convert Haskell-style button pairs to Telegram inline keyboard format.
- * Each button goes in its own row for clear layout.
+ * Convert Haskell-style button pairs to Telegram inline keyboard format,
+ * embedding a nonce in each button's callback data.
  */
-function convertButtonsToInlineKeyboard(
-  buttons: [string, string][]
+function convertButtonsToInlineKeyboardWithNonce(
+  buttons: [string, string][],
+  nonce: string
 ): TelegramInlineButton[][] {
-  // Put each button in its own row
-  return buttons.map(([label, value]) => [{ text: label, data: value }]);
-}
-
-/**
- * Parse a button click's callback data into TelegramConfirmResponse.
- *
- * The callback data is the "value" from the button pair.
- * Maps "approved", "denied", "skipped" to the response format.
- */
-function parseButtonClickToConfirmResponse(
-  data: unknown,
-  _buttons: [string, string][]
-): TelegramConfirmResponse {
-  // The callback data should be one of: "approved", "denied", "skipped"
-  const value = typeof data === "string" ? data : String(data);
-
-  switch (value) {
-    case "approved":
-      return { response: "approved" };
-    case "denied":
-      // For now, no feedback - could be enhanced later with a follow-up prompt
-      return { response: "denied" };
-    case "skipped":
-      return { response: "skipped" };
-    default:
-      // Unknown value - treat as skipped
-      console.warn(`[TelegramConfirm] Unknown button value: ${value}, treating as skipped`);
-      return { response: "skipped" };
-  }
+  // Put each button in its own row, with nonce embedded in data
+  return buttons.map(([label, action]) => [
+    {
+      text: label,
+      data: { action, nonce } satisfies ButtonCallbackData,
+    },
+  ]);
 }

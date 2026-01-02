@@ -27,11 +27,11 @@ export {
   handleTelegramSend,
   handleTelegramReceive,
   handleTelegramTryReceive,
-  handleTelegramConfirm,
+  handleTelegramAsk,
   type TelegramHandlerEnv,
   type TelegramHandlerContext,
   type ReceiveHandlerResult,
-  type ConfirmHandlerResult,
+  type AskHandlerResult,
 } from "./telegram.js";
 
 /**

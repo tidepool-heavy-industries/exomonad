@@ -9,6 +9,7 @@ export interface WasmExports {
     memory: WebAssembly.Memory;
     _initialize: () => void;
     hs_init: (argc: number, argv: number) => void;
+    initRegistry: () => void;
     initialize: (input: string) => Promise<string>;
     step: (result: string) => Promise<string>;
     rts_schedulerLoop: () => void;

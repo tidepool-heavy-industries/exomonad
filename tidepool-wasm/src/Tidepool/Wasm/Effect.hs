@@ -34,6 +34,7 @@ module Tidepool.Wasm.Effect
   , telegramMarkdown
   , telegramHtml
   , telegramAsk
+  , TelegramAskResult(..)
 
     -- * Habitica (typed API)
   , habitica
@@ -45,11 +46,11 @@ module Tidepool.Wasm.Effect
 
 import Control.Monad.Freer (Eff, Member, run)
 import Control.Monad.Freer.Coroutine (Yield, yield, runC, Status(..))
-import Data.Aeson (Value(..), toJSON)
+import Data.Aeson (Value(..), toJSON, fromJSON, Result(..))
 import Data.Text (Text)
 import qualified Data.Text as T
 
-import Tidepool.Wasm.WireTypes (SerializableEffect(..), EffectResult(..))
+import Tidepool.Wasm.WireTypes (SerializableEffect(..), EffectResult(..), TelegramAskResult(..))
 import Tidepool.Wasm.Habitica (habitica)
 
 
@@ -157,19 +158,23 @@ telegramHtml txt = do
     ResSuccess Nothing  -> pure 0
     ResError msg        -> error $ "Telegram send failed: " <> T.unpack msg
 
--- | Ask user with custom buttons, returns callback data.
+-- | Ask user with custom buttons, returns the result.
 --
--- Yields 'EffTelegramAsk', blocks until user clicks a button.
+-- Yields 'EffTelegramAsk', blocks until user responds.
+-- The user can:
+-- 1. Click a button → 'TelegramButton' with the action
+-- 2. Send text instead → 'TelegramText' with the message
+-- 3. Click a stale button → 'TelegramStaleButton'
 telegramAsk :: Member (Yield SerializableEffect EffectResult) effs
             => Text           -- ^ Message to display
             -> [(Text, Text)] -- ^ [(button label, callback data)]
-            -> Eff effs Text
+            -> Eff effs TelegramAskResult
 telegramAsk message buttons = do
   result <- yield (EffTelegramAsk message "Markdown" buttons) (id @EffectResult)
   case result of
-    ResSuccess (Just v) -> case v of
-      String cb -> pure cb
-      _         -> error "Telegram ask: expected string callback"
+    ResSuccess (Just v) -> case fromJSON v of
+      Success askResult -> pure askResult
+      Error err         -> error $ "Telegram ask: failed to parse result: " <> err
     ResSuccess Nothing  -> error "Telegram ask: no response"
     ResError msg        -> error $ "Telegram ask failed: " <> T.unpack msg
 

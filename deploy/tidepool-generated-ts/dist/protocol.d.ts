@@ -116,7 +116,7 @@ export declare function getCurrentNode(phase: ExecutionPhase): string | null;
  * Effect types that Haskell yields for TypeScript to execute.
  * Haskell uses flat encoding: {type: "LlmComplete", eff_node: "...", ...}
  */
-export type SerializableEffect = LlmCompleteEffect | LogInfoEffect | LogErrorEffect | HabiticaEffect | TelegramSendEffect | TelegramReceiveEffect | TelegramTryReceiveEffect | TelegramConfirmEffect;
+export type SerializableEffect = LlmCompleteEffect | LogInfoEffect | LogErrorEffect | HabiticaEffect | TelegramSendEffect | TelegramReceiveEffect | TelegramTryReceiveEffect | TelegramAskEffect;
 /**
  * LLM completion request - matches Haskell EffLlmComplete.
  * TypeScript calls the LLM API and returns parsed output.
@@ -229,25 +229,39 @@ export interface TelegramTryReceiveEffect {
     type: "telegram_try_receive";
 }
 /**
- * Request user confirmation via Telegram inline buttons.
- * Blocking effect - waits for user to click a button.
- * Mirrors Haskell: EffTelegramConfirm
+ * Request user input via Telegram inline buttons.
+ * Blocking effect - waits for user to click a button OR send text.
+ * Mirrors Haskell: EffTelegramAsk
  *
  * Default buttons from Haskell:
  * - "✓ Yes" -> "approved"
  * - "✗ No" -> "denied"
  * - "Skip" -> "skipped"
  */
-export interface TelegramConfirmEffect {
-    type: "TelegramConfirm";
+export interface TelegramAskEffect {
+    type: "TelegramAsk";
     /** Message to display above buttons */
-    eff_message: string;
+    eff_tg_text: string;
+    /** Parse mode: "PlainText" | "Markdown" | "HTML" */
+    eff_tg_parse_mode: string;
     /** Buttons as [label, value] pairs */
     eff_buttons: [string, string][];
 }
 /**
- * Response format for TelegramConfirmEffect.
- * Parsed by Haskell's parseConfirmation in HabiticaRoutingGraph.hs
+ * Result from TelegramAskEffect.
+ * Sum type: user can click button, send text, or click stale button.
+ */
+export type TelegramAskResult = {
+    type: "button";
+    response: string;
+} | {
+    type: "text";
+    text: string;
+} | {
+    type: "stale_button";
+};
+/**
+ * @deprecated Use TelegramAskResult instead
  */
 export interface TelegramConfirmResponse {
     response: "approved" | "denied" | "skipped";
