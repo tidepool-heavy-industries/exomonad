@@ -90,18 +90,23 @@ spec = do
 
     it "missing Entry field produces clear error" $ do
       "test/golden/MissingEntryRecord.hs" `shouldFailWith`
-        [ "Graph record validation failed: missing Entry field"
+        [ "Missing Entry field"
+        , "WHAT HAPPENED:"
+        , "Your graph record has no Entry field."
         ]
 
     it "missing Exit field produces clear error" $ do
       "test/golden/MissingExitRecord.hs" `shouldFailWith`
-        [ "Graph record validation failed: missing Exit field"
+        [ "Missing Exit field"
+        , "WHAT HAPPENED:"
+        , "Your graph record has no Exit field."
         ]
 
     it "invalid Goto target produces clear error" $ do
       "test/golden/InvalidGotoTargetRecord.hs" `shouldFailWith`
-        [ "Graph validation failed: invalid Goto target"
-        , "nonexistent"
+        [ "Goto target \"nonexistent\" not found"
+        , "WHAT HAPPENED:"
+        , "no field named \"nonexistent\" exists"
         ]
 
     it "Goto type mismatch produces clear error with expected types" $ do
