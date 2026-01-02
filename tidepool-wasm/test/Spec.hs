@@ -15,6 +15,7 @@ import qualified E2ESpec
 import qualified ExecutorSpec
 import qualified CodegenSyncSpec
 import qualified RoundtripSpec
+import qualified RegistrySpec
 
 main :: IO ()
 main = hspec $ do
@@ -32,3 +33,4 @@ main = hspec $ do
     describe "Graph Executor E2E" ExecutorSpec.spec
     describe "Codegen Sync" CodegenSyncSpec.spec
     describe "Roundtrip" RoundtripSpec.spec
+    describe "Registry" RegistrySpec.spec

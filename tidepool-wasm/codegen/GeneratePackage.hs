@@ -38,7 +38,8 @@ import Tidepool.Generated.Codegen
   , generatePackageJson
   , generateTsConfig
   )
-import Tidepool.Generated.GraphSpecs (allGraphSpecs, allEffectSpecs)
+import Tidepool.Generated.GraphSpecs (allEffectSpecs)
+import Tidepool.Wasm.Registry (registryGraphSpecs)
 
 
 -- ============================================================================
@@ -96,14 +97,17 @@ generatePackage outputDir = do
   createDirectoryIfMissing True (outputDir </> "wasm")
 
   -- Generate TypeScript files
+  -- Graph specs come from the unified Registry (single source of truth)
+  let graphSpecs = registryGraphSpecs
+
   putStrLn "  Generating graphs.ts..."
-  TIO.writeFile (outputDir </> "src" </> "graphs.ts") (generateGraphsTs allGraphSpecs)
+  TIO.writeFile (outputDir </> "src" </> "graphs.ts") (generateGraphsTs graphSpecs)
 
   putStrLn "  Generating exports.ts..."
-  TIO.writeFile (outputDir </> "src" </> "exports.ts") (generateExportsTs allGraphSpecs)
+  TIO.writeFile (outputDir </> "src" </> "exports.ts") (generateExportsTs graphSpecs)
 
   putStrLn "  Generating dispatcher.ts..."
-  TIO.writeFile (outputDir </> "src" </> "dispatcher.ts") (generateDispatcherTs allGraphSpecs)
+  TIO.writeFile (outputDir </> "src" </> "dispatcher.ts") (generateDispatcherTs graphSpecs)
 
   putStrLn "  Generating routing.ts..."
   TIO.writeFile (outputDir </> "src" </> "routing.ts") (generateRoutingTs allEffectSpecs)

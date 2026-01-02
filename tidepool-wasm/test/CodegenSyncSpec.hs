@@ -1,14 +1,13 @@
 {-# LANGUAGE OverloadedStrings #-}
 
--- | Tests that verify FFI output matches the shared GraphSpecs.
+-- | Tests that verify FFI output matches the unified Registry.
 --
--- This is a critical sync test: if someone adds a graph to Ffi.hs but forgets
--- to add it to GraphSpecs.hs, this test will fail.
+-- With the unified Registry (Phase 4), this test now:
+-- 1. Uses the unified getGraphInfo FFI function (takes graphId)
+-- 2. Compares against registryGraphSpecs (single source of truth)
 --
--- The test works by:
--- 1. Calling each graph's getGraphInfo_* FFI function
--- 2. Parsing the JSON response
--- 3. Comparing nodes and edges against GraphSpecs.hs
+-- The sync guarantee is now structural: both FFI and codegen derive from the same
+-- Registry entries, so they can't get out of sync.
 module CodegenSyncSpec (spec) where
 
 import Test.Hspec
@@ -21,47 +20,55 @@ import qualified Data.Text as T
 import Data.Text.Encoding (encodeUtf8)
 import Data.List (sort)
 
-import Tidepool.Wasm.Ffi
-  ( getGraphInfo_test
-  , getGraphInfo_example
-  , getGraphInfo_habitica
+import Tidepool.Wasm.Registry
+  ( graphIds
+  , getGraphInfo
+  , registryGraphSpecs
   )
-import Tidepool.Generated.GraphSpecs
-  ( allGraphSpecs
-  , testGraphSpec
-  , exampleGraphSpec
-  , habiticaGraphSpec
-  , GraphSpec(..)
-  )
+import Tidepool.Generated.GraphSpecs (GraphSpec(..))
 
 
 spec :: Spec
 spec = describe "Codegen Sync" $ do
-  describe "GraphSpecs matches FFI output" $ do
-    it "testGraphSpec matches getGraphInfo_test" $ do
-      json <- getGraphInfo_test
-      verifyGraphInfo json testGraphSpec
+  describe "Registry provides unified GraphSpecs" $ do
+    it "registryGraphSpecs has entries for all graphIds" $ do
+      let specIds = map (\s -> s.gsId) registryGraphSpecs
+      sort specIds `shouldBe` sort graphIds
 
-    it "exampleGraphSpec matches getGraphInfo_example" $ do
-      json <- getGraphInfo_example
-      verifyGraphInfo json exampleGraphSpec
-
-    it "habiticaGraphSpec matches getGraphInfo_habitica" $ do
-      json <- getGraphInfo_habitica
-      verifyGraphInfo json habiticaGraphSpec
-
-  describe "allGraphSpecs completeness" $ do
     it "graph IDs are unique" $ do
-      let ids = map (\s -> s.gsId) allGraphSpecs
+      let ids = map (\s -> s.gsId) registryGraphSpecs
+          nub [] = []
+          nub (x:xs) = x : nub (filter (/= x) xs)
       length ids `shouldBe` length (nub ids)
-      where
-        nub [] = []
-        nub (x:xs) = x : nub (filter (/= x) xs)
+
+  describe "Unified FFI matches Registry specs" $ do
+    it "test graph info matches spec" $ do
+      json <- getGraphInfo "test"
+      let spec = findSpec "test"
+      verifyGraphInfo json spec
+
+    it "example graph info matches spec" $ do
+      json <- getGraphInfo "example"
+      let spec = findSpec "example"
+      verifyGraphInfo json spec
+
+    it "habitica graph info matches spec" $ do
+      json <- getGraphInfo "habitica"
+      let spec = findSpec "habitica"
+      verifyGraphInfo json spec
+
+
+-- | Find a GraphSpec by ID.
+findSpec :: Text -> GraphSpec
+findSpec gid =
+  case filter (\s -> s.gsId == gid) registryGraphSpecs of
+    [s] -> s
+    _ -> error $ "No spec found for: " ++ T.unpack gid
 
 
 -- | Verify that FFI JSON output matches a GraphSpec.
 verifyGraphInfo :: Text -> GraphSpec -> IO ()
-verifyGraphInfo jsonText spec = do
+verifyGraphInfo jsonText gspec = do
   let mValue = decode (BL.fromStrict $ encodeUtf8 jsonText) :: Maybe Value
 
   case mValue of
@@ -74,20 +81,20 @@ verifyGraphInfo jsonText spec = do
           mEdges = extractEdges val
 
       -- Verify id
-      mId `shouldBe` Just spec.gsId
+      mId `shouldBe` Just gspec.gsId
 
       -- Verify name
-      mName `shouldBe` Just spec.gsName
+      mName `shouldBe` Just gspec.gsName
 
       -- Verify nodes (order may differ, so sort)
       case mNodes of
         Nothing -> expectationFailure "Missing 'nodes' field in JSON"
-        Just nodes -> sort nodes `shouldBe` sort spec.gsNodes
+        Just nodes -> sort nodes `shouldBe` sort gspec.gsNodes
 
       -- Verify edges (order may differ, so sort)
       case mEdges of
         Nothing -> expectationFailure "Missing 'edges' field in JSON"
-        Just edges -> sort edges `shouldBe` sort spec.gsEdges
+        Just edges -> sort edges `shouldBe` sort gspec.gsEdges
 
 
 -- | Extract a text field from JSON.

@@ -1,14 +1,14 @@
 {-# LANGUAGE OverloadedStrings #-}
 
--- | Integration tests for FFI entry points.
+-- | Integration tests for unified FFI entry points.
 --
--- These tests verify the full end-to-end flow:
--- 1. initialize(JSON) parses input and runs until first effect yield
--- 2. step(JSON) resumes with effect result and runs until next yield or completion
--- 3. getGraphInfo returns static graph structure
--- 4. getGraphState reflects current execution progress
+-- These tests verify the full end-to-end flow using the unified Registry API:
+-- 1. initialize(graphId, JSON) parses input and runs until first effect yield
+-- 2. step(graphId, JSON) resumes with effect result and runs until next yield or completion
+-- 3. getGraphInfo(graphId) returns static graph structure
+-- 4. getGraphState(graphId) reflects current execution progress
 --
--- All tests use resetState between runs to ensure isolation.
+-- All tests use resetSession between runs to ensure isolation.
 module FfiSpec (spec) where
 
 import Test.Hspec
@@ -19,29 +19,13 @@ import qualified Data.ByteString.Lazy as LBS
 import qualified Data.Text as T
 import Data.Text.Encoding (encodeUtf8)
 
-import Tidepool.Wasm.Ffi
-  ( initialize_test
-  , step_test
-  , getGraphInfo_test
-  , getGraphState_test
-  , resetTestState
+import Tidepool.Wasm.Registry
+  ( initialize
+  , step
+  , getGraphInfo
+  , getGraphState
+  , resetSession
   )
-
--- Aliases for backwards compat with tests
-initialize :: T.Text -> IO T.Text
-initialize = initialize_test
-
-step :: T.Text -> IO T.Text
-step = step_test
-
-getGraphInfo :: IO T.Text
-getGraphInfo = getGraphInfo_test
-
-getGraphState :: IO T.Text
-getGraphState = getGraphState_test
-
-resetState :: IO ()
-resetState = resetTestState
 
 
 spec :: Spec
@@ -68,8 +52,8 @@ initializeSpec :: Spec
 initializeSpec = describe "initialize" $ do
 
   it "returns StepOutput with effect for valid input" $ do
-    resetState
-    result <- initialize "5"
+    resetSession
+    result <- initialize "test" "5"
     let Just output = decodeOutput result
     case output of
       Object o -> do
@@ -81,8 +65,8 @@ initializeSpec = describe "initialize" $ do
       _ -> expectationFailure "Expected JSON object"
 
   it "includes message with input value in effect" $ do
-    resetState
-    result <- initialize "42"
+    resetSession
+    result <- initialize "test" "42"
     let Just output = decodeOutput result
     case output of
       Object o -> case KM.lookup "effect" o of
@@ -92,8 +76,8 @@ initializeSpec = describe "initialize" $ do
       _ -> expectationFailure "Expected JSON object"
 
   it "includes graphState in output" $ do
-    resetState
-    result <- initialize "10"
+    resetSession
+    result <- initialize "test" "10"
     let Just output = decodeOutput result
     case output of
       Object o -> case KM.lookup "graphState" o of
@@ -114,9 +98,9 @@ stepSpec :: Spec
 stepSpec = describe "step" $ do
 
   it "completes graph with success result" $ do
-    resetState
-    _ <- initialize "5"
-    result <- step "{\"type\": \"success\", \"value\": null}"
+    resetSession
+    _ <- initialize "test" "5"
+    result <- step "test" "{\"type\": \"success\", \"value\": null}"
     let Just output = decodeOutput result
     case output of
       Object o -> do
@@ -128,9 +112,9 @@ stepSpec = describe "step" $ do
   -- Note: Log effects are fire-and-forget - they ignore errors and continue.
   -- This test documents that behavior: even with ResError, the computation completes.
   it "Log effects ignore errors and continue (fire-and-forget)" $ do
-    resetState
-    _ <- initialize "5"
-    result <- step "{\"type\": \"error\", \"message\": \"test failure\"}"
+    resetSession
+    _ <- initialize "test" "5"
+    result <- step "test" "{\"type\": \"error\", \"message\": \"test failure\"}"
     let Just output = decodeOutput result
     case output of
       Object o -> do
@@ -156,9 +140,9 @@ fullCycleSpec :: Spec
 fullCycleSpec = describe "Full cycle (initialize -> step -> done)" $ do
 
   it "produces n+1 for input n" $ do
-    resetState
+    resetSession
     -- Step 1: Initialize with 10
-    initResult <- initialize "10"
+    initResult <- initialize "test" "10"
     let Just initOutput = decodeOutput initResult
 
     -- Verify we got the Log effect
@@ -171,7 +155,7 @@ fullCycleSpec = describe "Full cycle (initialize -> step -> done)" $ do
       _ -> expectationFailure "Expected object"
 
     -- Step 2: Send success, expect completion with 11
-    stepResult <- step "{\"type\": \"success\"}"
+    stepResult <- step "test" "{\"type\": \"success\"}"
     let Just stepOutput = decodeOutput stepResult
 
     case stepOutput of
@@ -181,18 +165,18 @@ fullCycleSpec = describe "Full cycle (initialize -> step -> done)" $ do
       _ -> expectationFailure "Expected object"
 
   it "works with zero" $ do
-    resetState
-    _ <- initialize "0"
-    result <- step "{\"type\": \"success\"}"
+    resetSession
+    _ <- initialize "test" "0"
+    result <- step "test" "{\"type\": \"success\"}"
     let Just output = decodeOutput result
     case output of
       Object o -> KM.lookup "stepResult" o `shouldBe` Just (Number 1)
       _ -> expectationFailure "Expected object"
 
   it "works with negative numbers" $ do
-    resetState
-    _ <- initialize "-5"
-    result <- step "{\"type\": \"success\"}"
+    resetSession
+    _ <- initialize "test" "-5"
+    result <- step "test" "{\"type\": \"success\"}"
     let Just output = decodeOutput result
     case output of
       Object o -> KM.lookup "stepResult" o `shouldBe` Just (Number (-4))
@@ -207,7 +191,7 @@ getGraphInfoSpec :: Spec
 getGraphInfoSpec = describe "getGraphInfo" $ do
 
   it "returns static graph structure" $ do
-    result <- getGraphInfo
+    result <- getGraphInfo "test"
     let Just output = decodeOutput result
     case output of
       Object o -> do
@@ -218,7 +202,7 @@ getGraphInfoSpec = describe "getGraphInfo" $ do
       _ -> expectationFailure "Expected JSON object"
 
   it "includes edge information" $ do
-    result <- getGraphInfo
+    result <- getGraphInfo "test"
     let Just output = decodeOutput result
     case output of
       Object o -> case KM.lookup "edges" o of
@@ -245,8 +229,8 @@ getGraphStateSpec :: Spec
 getGraphStateSpec = describe "getGraphState" $ do
 
   it "returns idle when not initialized" $ do
-    resetState
-    result <- getGraphState
+    resetSession
+    result <- getGraphState "test"
     let Just output = decodeOutput result
     case output of
       Object o -> case KM.lookup "phase" o of
@@ -255,9 +239,9 @@ getGraphStateSpec = describe "getGraphState" $ do
       _ -> expectationFailure "Expected JSON object"
 
   it "returns in_node after initialize" $ do
-    resetState
-    _ <- initialize "5"
-    result <- getGraphState
+    resetSession
+    _ <- initialize "test" "5"
+    result <- getGraphState "test"
     let Just output = decodeOutput result
     case output of
       Object o -> case KM.lookup "phase" o of
@@ -268,10 +252,10 @@ getGraphStateSpec = describe "getGraphState" $ do
       _ -> expectationFailure "Expected JSON object"
 
   it "returns idle after step completes (state cleared)" $ do
-    resetState
-    _ <- initialize "5"
-    _ <- step "{\"type\": \"success\"}"
-    result <- getGraphState
+    resetSession
+    _ <- initialize "test" "5"
+    _ <- step "test" "{\"type\": \"success\"}"
+    result <- getGraphState "test"
     let Just output = decodeOutput result
     case output of
       Object o -> case KM.lookup "phase" o of
@@ -290,63 +274,61 @@ errorCasesSpec :: Spec
 errorCasesSpec = describe "Error cases" $ do
 
   it "step before initialize returns error" $ do
-    resetState
-    result <- step "{\"type\": \"success\"}"
+    resetSession
+    result <- step "test" "{\"type\": \"success\"}"
     let Just output = decodeOutput result
     case output of
       Object o -> do
         KM.lookup "done" o `shouldBe` Just (Bool True)
-        case KM.lookup "graphState" o of
-          Just (Object gs) -> case KM.lookup "phase" gs of
-            Just (Object phase) -> do
-              KM.lookup "type" phase `shouldBe` Just (String "failed")
-              case KM.lookup "error" phase of
-                Just (String err) -> T.unpack err `shouldContain` "not initialized"
-                _ -> expectationFailure "Expected error message"
-            _ -> expectationFailure "Expected phase"
-          _ -> expectationFailure "Expected graphState"
+        case KM.lookup "error" o of
+          Just (String err) -> T.unpack err `shouldContain` "No active session"
+          _ -> expectationFailure "Expected error message"
       _ -> expectationFailure "Expected JSON object"
 
   it "initialize with invalid JSON returns error" $ do
-    resetState
-    result <- initialize "not valid json"
+    resetSession
+    result <- initialize "test" "not valid json"
     let Just output = decodeOutput result
     case output of
       Object o -> do
         KM.lookup "done" o `shouldBe` Just (Bool True)
-        case KM.lookup "graphState" o of
-          Just (Object gs) -> case KM.lookup "phase" gs of
-            Just (Object phase) -> do
-              KM.lookup "type" phase `shouldBe` Just (String "failed")
-              case KM.lookup "error" phase of
-                Just (String err) -> T.unpack err `shouldContain` "JSON parse error"
-                _ -> expectationFailure "Expected error message"
-            _ -> expectationFailure "Expected phase"
-          _ -> expectationFailure "Expected graphState"
+        case KM.lookup "error" o of
+          Just (String err) -> T.unpack err `shouldContain` "JSON parse error"
+          _ -> expectationFailure "Expected error message"
       _ -> expectationFailure "Expected JSON object"
 
   it "step with invalid JSON returns error" $ do
-    resetState
-    _ <- initialize "5"
-    result <- step "not valid json"
+    resetSession
+    _ <- initialize "test" "5"
+    result <- step "test" "not valid json"
     let Just output = decodeOutput result
     case output of
       Object o -> do
         KM.lookup "done" o `shouldBe` Just (Bool True)
-        case KM.lookup "graphState" o of
-          Just (Object gs) -> case KM.lookup "phase" gs of
-            Just (Object phase) ->
-              KM.lookup "type" phase `shouldBe` Just (String "failed")
-            _ -> expectationFailure "Expected phase"
-          _ -> expectationFailure "Expected graphState"
+        case KM.lookup "error" o of
+          Just (String err) -> T.unpack err `shouldContain` "JSON parse error"
+          _ -> expectationFailure "Expected error message"
       _ -> expectationFailure "Expected JSON object"
 
   it "double initialize resets state" $ do
-    resetState
-    _ <- initialize "5"
-    _ <- initialize "10"  -- Reset with new value
-    result <- step "{\"type\": \"success\"}"
+    resetSession
+    _ <- initialize "test" "5"
+    _ <- initialize "test" "10"  -- Reset with new value
+    result <- step "test" "{\"type\": \"success\"}"
     let Just output = decodeOutput result
     case output of
       Object o -> KM.lookup "stepResult" o `shouldBe` Just (Number 11)  -- 10+1, not 5+1
       _ -> expectationFailure "Expected object"
+
+  it "step with wrong graphId returns mismatch error" $ do
+    resetSession
+    _ <- initialize "test" "5"
+    result <- step "example" "{\"type\": \"success\"}"
+    let Just output = decodeOutput result
+    case output of
+      Object o -> do
+        KM.lookup "done" o `shouldBe` Just (Bool True)
+        case KM.lookup "error" o of
+          Just (String err) -> T.unpack err `shouldContain` "Graph mismatch"
+          _ -> expectationFailure "Expected error message"
+      _ -> expectationFailure "Expected JSON object"

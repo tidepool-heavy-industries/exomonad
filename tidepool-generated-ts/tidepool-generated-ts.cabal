@@ -16,7 +16,6 @@ library
     import:           warnings
     exposed-modules:
         Tidepool.Generated.Registry
-        Tidepool.Generated.Registry.TH
         Tidepool.Generated.Codegen
         Tidepool.Generated.GraphSpecs
     build-depends:
@@ -26,7 +25,6 @@ library
         containers,
         directory,
         filepath,
-        template-haskell,
         text,
         -- Dependencies from tidepool ecosystem (no tidepool-wasm to avoid circular dep)
         tidepool-core
