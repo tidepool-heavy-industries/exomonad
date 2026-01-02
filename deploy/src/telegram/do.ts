@@ -420,6 +420,17 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
         case "done": {
           // Graph completed successfully
           console.log(`[TelegramDO] Graph completed:`, currentResult.result);
+
+          // Send success message to user
+          const resultObj = currentResult.result as { message?: string; success?: boolean } | null;
+          if (resultObj?.message) {
+            await sendMessage(
+              this.env.TELEGRAM_TOKEN,
+              chatId,
+              `✓ ${resultObj.message}`
+            );
+          }
+
           if (this.state) {
             this.state.wasmSessionId = null;
             await this.saveState();
