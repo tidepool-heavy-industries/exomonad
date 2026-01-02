@@ -1,5 +1,6 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
@@ -13,6 +14,11 @@
 module Tidepool.Wasm.WireTypes
   ( -- * Effects (WASM → TypeScript)
     SerializableEffect(..)
+
+    -- * Effect Metadata (for routing)
+  , EffectCategory(..)
+  , EffectSemantics(..)
+  , effectMetadata
 
     -- * Results (TypeScript → WASM)
   , EffectResult(..)
@@ -120,6 +126,56 @@ instance FromJSON SerializableEffect where
         let buttons = [(l, v) | [l, v] <- buttonArrays]
         pure $ EffTelegramConfirm msg buttons
       _         -> fail $ "Unknown effect type: " ++ show typ
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- EFFECT METADATA (for routing decisions)
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Where an effect should be handled.
+--
+-- - 'Internal': Handled by StateMachineDO (LLM, Habitica, Log)
+-- - 'Yielded': Sent back to caller for handling (Telegram effects → TelegramDO)
+data EffectCategory
+  = Internal
+  | Yielded
+  deriving stock (Show, Eq, Generic)
+
+instance ToJSON EffectCategory where
+  toJSON Internal = "internal"
+  toJSON Yielded  = "yielded"
+
+instance FromJSON EffectCategory where
+  parseJSON = withObject "EffectCategory" $ \_ -> fail "EffectCategory is output-only"
+
+-- | How an effect interacts with the execution loop.
+--
+-- - 'FireAndForget': Effect is executed but result is ignored (Log effects)
+-- - 'Blocking': Execution waits for effect result before continuing
+data EffectSemantics
+  = FireAndForget
+  | Blocking
+  deriving stock (Show, Eq, Generic)
+
+instance ToJSON EffectSemantics where
+  toJSON FireAndForget = "fire_and_forget"
+  toJSON Blocking      = "blocking"
+
+instance FromJSON EffectSemantics where
+  parseJSON = withObject "EffectSemantics" $ \_ -> fail "EffectSemantics is output-only"
+
+-- | Get routing metadata for an effect.
+--
+-- This determines:
+-- 1. Whether StateMachineDO handles it internally or yields to caller
+-- 2. Whether the graph waits for a response or continues immediately
+effectMetadata :: SerializableEffect -> (EffectCategory, EffectSemantics)
+effectMetadata = \case
+  EffLogInfo{}         -> (Internal, FireAndForget)
+  EffLogError{}        -> (Internal, FireAndForget)
+  EffLlmComplete{}     -> (Internal, Blocking)
+  EffHabitica{}        -> (Internal, Blocking)
+  EffTelegramConfirm{} -> (Yielded, Blocking)
 
 
 -- ════════════════════════════════════════════════════════════════════════════
