@@ -22,6 +22,7 @@ module Tidepool.Wasm.WireTypes
 
     -- * Results (TypeScript → WASM)
   , EffectResult(..)
+  , TelegramAskResult(..)
 
     -- * Graph State (for observability)
   , ExecutionPhase(..)
@@ -53,6 +54,7 @@ import qualified Data.Aeson.KeyMap as KM
 import Data.Aeson.Key (fromText)
 import Data.Aeson.Types (Parser)
 import Data.Text (Text)
+import qualified Data.Text as T
 import GHC.Generics (Generic)
 
 -- Re-export effect metadata from the single source of truth
@@ -226,6 +228,53 @@ instance FromJSON EffectResult where
 -- we need to preserve Just Null when the field is explicitly null.
 lookupValue :: Object -> Parser (Maybe Value)
 lookupValue o = pure $ KM.lookup (fromText "value") o
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- TELEGRAM ASK RESULT (TypeScript → WASM)
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Result from TelegramAsk effect.
+--
+-- The user can respond to buttons in three ways:
+-- 1. Click a valid button → 'TelegramButton' with the action
+-- 2. Send text instead → 'TelegramText' with the message
+-- 3. Click a stale button → 'TelegramStaleButton' (nonce mismatch)
+--
+-- JSON encoding matches TypeScript TelegramAskResult:
+-- - @{type: "button", response: "approved"}@
+-- - @{type: "text", text: "some message"}@
+-- - @{type: "stale_button"}@
+data TelegramAskResult
+  = TelegramButton { tarResponse :: Text }
+    -- ^ User clicked a valid button
+  | TelegramText { tarText :: Text }
+    -- ^ User sent text instead of clicking
+  | TelegramStaleButton
+    -- ^ User clicked a button with expired/invalid nonce
+  deriving stock (Show, Eq, Generic)
+
+instance ToJSON TelegramAskResult where
+  toJSON (TelegramButton response) = object
+    [ "type" .= ("button" :: Text)
+    , "response" .= response
+    ]
+  toJSON (TelegramText txt) = object
+    [ "type" .= ("text" :: Text)
+    , "text" .= txt
+    ]
+  toJSON TelegramStaleButton = object
+    [ "type" .= ("stale_button" :: Text)
+    ]
+
+instance FromJSON TelegramAskResult where
+  parseJSON = withObject "TelegramAskResult" $ \o -> do
+    (typ :: Text) <- o .: "type"
+    case typ of
+      "button" -> TelegramButton <$> o .: "response"
+      "text" -> TelegramText <$> o .: "text"
+      "stale_button" -> pure TelegramStaleButton
+      _ -> fail $ "Unknown TelegramAskResult type: " ++ T.unpack typ
 
 
 -- ════════════════════════════════════════════════════════════════════════════

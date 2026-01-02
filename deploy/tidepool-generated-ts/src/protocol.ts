@@ -150,7 +150,7 @@ export type SerializableEffect =
   | TelegramSendEffect
   | TelegramReceiveEffect
   | TelegramTryReceiveEffect
-  | TelegramConfirmEffect;
+  | TelegramAskEffect;
 
 /**
  * LLM completion request - matches Haskell EffLlmComplete.
@@ -257,26 +257,36 @@ export interface TelegramTryReceiveEffect {
 }
 
 /**
- * Request user confirmation via Telegram inline buttons.
- * Blocking effect - waits for user to click a button.
- * Mirrors Haskell: EffTelegramConfirm
+ * Request user input via Telegram inline buttons.
+ * Blocking effect - waits for user to click a button OR send text.
+ * Mirrors Haskell: EffTelegramAsk
  *
  * Default buttons from Haskell:
  * - "✓ Yes" -> "approved"
  * - "✗ No" -> "denied"
  * - "Skip" -> "skipped"
  */
-export interface TelegramConfirmEffect {
-  type: "TelegramConfirm";
+export interface TelegramAskEffect {
+  type: "TelegramAsk";
   /** Message to display above buttons */
-  eff_message: string;
+  eff_tg_text: string;
+  /** Parse mode: "PlainText" | "Markdown" | "HTML" */
+  eff_tg_parse_mode: string;
   /** Buttons as [label, value] pairs */
   eff_buttons: [string, string][];
 }
 
 /**
- * Response format for TelegramConfirmEffect.
- * Parsed by Haskell's parseConfirmation in HabiticaRoutingGraph.hs
+ * Result from TelegramAskEffect.
+ * Sum type: user can click button, send text, or click stale button.
+ */
+export type TelegramAskResult =
+  | { type: "button"; response: string }
+  | { type: "text"; text: string }
+  | { type: "stale_button" };
+
+/**
+ * @deprecated Use TelegramAskResult instead
  */
 export interface TelegramConfirmResponse {
   response: "approved" | "denied" | "skipped";

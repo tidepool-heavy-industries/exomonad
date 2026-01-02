@@ -64,7 +64,7 @@ import Tidepool.Graph.Generic (GraphMode(..), type (:-))
 import qualified Tidepool.Graph.Generic as G (Entry, Exit, LogicNode)
 import Tidepool.Graph.Goto (Goto, GotoChoice(..), OneOf(..), To, gotoChoice, gotoExit)
 
-import Tidepool.Wasm.Effect (WasmM, logInfo, logError, llmComplete, telegramAsk)
+import Tidepool.Wasm.Effect (WasmM, logInfo, logError, llmComplete, telegramAsk, TelegramAskResult(..))
 import Tidepool.Wasm.Habitica
   ( HabiticaOp(..)
   , habitica
@@ -303,7 +303,12 @@ suggestActionHandler matchResult = do
 
 
 -- | Confirm with the user via Telegram buttons.
--- This handler yields a TelegramConfirm effect and processes the response.
+-- This handler yields a TelegramAsk effect and processes the response.
+--
+-- The TelegramAskResult sum type handles three cases:
+-- 1. TelegramButton - User clicked a button (approved/denied/skipped)
+-- 2. TelegramText - User sent text instead of clicking
+-- 3. TelegramStaleButton - User clicked an expired button from old session
 confirmWithUserHandler
   :: Suggestion
   -> WasmM (GotoChoice '[ To "executeAction" Suggestion
@@ -320,36 +325,52 @@ confirmWithUserHandler suggestion = do
     , ("Skip", "skipped")
     ]
 
-  case parseConfirmation result of
-    Approved -> do
-      logInfo "User approved suggestion"
-      pure $ gotoChoice @"executeAction" suggestion
+  case result of
+    TelegramButton response -> case response of
+      "approved" -> do
+        logInfo "User approved suggestion"
+        pure $ gotoChoice @"executeAction" suggestion
 
-    Denied feedback -> do
-      logInfo $ "User denied with feedback: " <> feedback
-      -- Retry: go back to suggestAction with feedback
-      -- We need to reconstruct a MatchResult with the feedback
-      let retryResult = MatchResult
-            { mrTask = suggestion.sgTask
-            , mrTodos = maybeToList suggestion.sgMatchingTodo
-            , mrMatch = suggestion.sgMatchingTodo
-            , mrReason = "Retry after user feedback: " <> feedback
-            }
-      pure $ gotoChoice @"suggestAction" retryResult
+      "denied" -> do
+        logInfo "User denied suggestion"
+        -- Retry: go back to suggestAction with feedback
+        let retryResult = MatchResult
+              { mrTask = suggestion.sgTask
+              , mrTodos = maybeToList suggestion.sgMatchingTodo
+              , mrMatch = suggestion.sgMatchingTodo
+              , mrReason = "Retry after user denied"
+              }
+        pure $ gotoChoice @"suggestAction" retryResult
 
-    Skipped -> do
-      logInfo "User skipped this task"
+      "skipped" -> do
+        logInfo "User skipped this task"
+        pure $ gotoExit ExecutionResult
+          { erSuccess = True
+          , erMessage = "Task skipped by user"
+          }
+
+      _ -> do
+        -- Unknown button response, treat as skip
+        logInfo $ "Unknown button response: " <> response
+        pure $ gotoExit ExecutionResult
+          { erSuccess = True
+          , erMessage = "Unknown response, skipped"
+          }
+
+    TelegramText text -> do
+      -- User sent text instead of clicking a button
+      -- This interrupts the current flow - exit gracefully
+      logInfo $ "User sent text instead of clicking button: " <> text
       pure $ gotoExit ExecutionResult
-        { erSuccess = True
-        , erMessage = "Task skipped by user"
+        { erSuccess = False
+        , erMessage = "Session interrupted by new message: " <> text
         }
-  where
-    -- Parse the callback string directly
-    parseConfirmation :: Text -> UserConfirmation
-    parseConfirmation "approved" = Approved
-    parseConfirmation "skipped"  = Skipped
-    parseConfirmation "denied"   = Denied ""  -- No feedback in simple button flow
-    parseConfirmation _          = Skipped    -- Default to skip on unknown
+
+    TelegramStaleButton -> do
+      -- User clicked an expired button from a previous session
+      -- Retry the confirmation - new buttons were sent by TypeScript
+      logInfo "Stale button clicked, retrying confirmation"
+      confirmWithUserHandler suggestion
 
 
 -- | Execute the Habitica action (create todo or add checklist item).

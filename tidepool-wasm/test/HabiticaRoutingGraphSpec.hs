@@ -203,7 +203,10 @@ mockHappyPathResponses eff = case eff of
     _ -> ResSuccess $ Just $ object []
 
   EffTelegramSend _ _ -> ResSuccess Nothing  -- Fire-and-forget
-  EffTelegramAsk _ _ _ -> ResSuccess $ Just $ String "approved"
+  EffTelegramAsk _ _ _ -> ResSuccess $ Just $ object
+    [ "type" .= ("button" :: String)
+    , "response" .= ("approved" :: String)
+    ]
 
 -- | Checklist path: matching todo found, user approves adding checklist item
 mockChecklistResponses :: SerializableEffect -> EffectResult
@@ -243,7 +246,10 @@ mockChecklistResponses eff = case eff of
     _ -> ResSuccess $ Just $ object []
 
   EffTelegramSend _ _ -> ResSuccess Nothing  -- Fire-and-forget
-  EffTelegramAsk _ _ _ -> ResSuccess $ Just $ String "approved"
+  EffTelegramAsk _ _ _ -> ResSuccess $ Just $ object
+    [ "type" .= ("button" :: String)
+    , "response" .= ("approved" :: String)
+    ]
 
 -- | Skip: user skips immediately
 mockSkipResponses :: SerializableEffect -> EffectResult
@@ -270,7 +276,10 @@ mockSkipResponses eff = case eff of
     _ -> ResSuccess $ Just $ object []
 
   EffTelegramSend _ _ -> ResSuccess Nothing  -- Fire-and-forget
-  EffTelegramAsk _ _ _ -> ResSuccess $ Just $ String "skipped"
+  EffTelegramAsk _ _ _ -> ResSuccess $ Just $ object
+    [ "type" .= ("button" :: String)
+    , "response" .= ("skipped" :: String)
+    ]
 
 -- | Stateful mock for denial-then-approve: returns different responses based on call count
 -- State is the number of TelegramAsk effects seen so far
@@ -301,7 +310,10 @@ mockDenialThenApproveStateful confirmCount eff = case eff of
   EffTelegramAsk _ _ _ ->
     let newCount = confirmCount + 1
         -- First call: deny, second call: approve
-        response = String $ if confirmCount == 0 then "denied" else "approved"
+        response = object
+          [ "type" .= ("button" :: String)
+          , "response" .= (if confirmCount == 0 then "denied" else "approved" :: String)
+          ]
     in (ResSuccess $ Just response, newCount)
 
 

@@ -11,7 +11,10 @@ export function getEffectCategory(effect: SerializableEffect): EffectCategory {
     case "LogError": return "internal";
     case "LlmComplete": return "internal";
     case "Habitica": return "internal";
-    case "TelegramConfirm": return "yielded";
+    case "TelegramAsk": return "yielded";
+    case "telegram_send": return "yielded";
+    case "telegram_receive": return "yielded";
+    case "telegram_try_receive": return "yielded";
     default:
       // Exhaustiveness check: unknown effects default to internal
       return 'internal';
@@ -24,7 +27,10 @@ export function getEffectSemantics(effect: SerializableEffect): EffectSemantics 
     case "LogError": return "fire_and_forget";
     case "LlmComplete": return "blocking";
     case "Habitica": return "blocking";
-    case "TelegramConfirm": return "blocking";
+    case "TelegramAsk": return "blocking";
+    case "telegram_send": return "fire_and_forget";
+    case "telegram_receive": return "blocking";
+    case "telegram_try_receive": return "fire_and_forget";
     default:
       // Exhaustiveness check: unknown effects default to blocking
       return 'blocking';

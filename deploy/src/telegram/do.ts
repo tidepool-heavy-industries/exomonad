@@ -29,7 +29,7 @@ import {
   handleTelegramSend,
   handleTelegramReceive,
   handleTelegramTryReceive,
-  handleTelegramConfirm,
+  handleTelegramAsk,
   type TelegramHandlerContext,
 } from "../handlers/telegram.js";
 
@@ -81,6 +81,7 @@ const ConversationStateSchema = z.object({
   pendingMessages: z.array(IncomingMessageSchema).default([]),
   waitingForReceive: z.boolean().default(false),
   pendingEffect: z.unknown().default(null),
+  effectNonce: z.string().nullable().default(null),
   lastActivity: z.number().default(() => Date.now()),
 });
 
@@ -91,6 +92,7 @@ const ConversationStateSchema = z.object({
  */
 interface ConversationState extends Omit<z.infer<typeof ConversationStateSchema>, 'pendingEffect'> {
   pendingEffect: SerializableEffect | null;
+  effectNonce: string | null;
 }
 
 /**
@@ -548,30 +550,32 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
         return { outcome: "handled", result };
       }
 
-      case "TelegramConfirm": {
-        // Check if buttons were already sent (resuming after blocking)
-        const buttonsSent = state.pendingEffect?.type === "TelegramConfirm";
+      case "TelegramAsk": {
+        // Get stored nonce (null if buttons not sent yet)
+        const storedNonce = state.effectNonce;
 
-        const confirmResult = await handleTelegramConfirm(
+        const askResult = await handleTelegramAsk(
           effect,
           this.env,
           ctx,
-          buttonsSent
+          storedNonce
         );
 
-        if (confirmResult.type === "yield") {
-          // Block until button click arrives
-          state.waitingForReceive = true; // Reuse this flag for confirm too
+        if (askResult.type === "yield") {
+          // Block until input arrives, store the nonce for validation
+          state.waitingForReceive = true;
           state.pendingEffect = effect;
+          state.effectNonce = askResult.nonce;
           await this.saveState();
           return { outcome: "blocking" };
         }
 
-        // Button click received
+        // Got response (button click, text, or stale button)
         state.pendingMessages = [];
         state.pendingEffect = null;
+        state.effectNonce = null;
         await this.saveState();
-        return { outcome: "handled", result: confirmResult.result };
+        return { outcome: "handled", result: askResult.result };
       }
 
       // ─────────────────────────────────────────────────────────────────────
