@@ -15,13 +15,13 @@ import type {
   TelegramIncomingMessage,
   TelegramInlineButton,
   EffectResult,
-} from "../protocol.js";
+} from "tidepool-generated";
 import {
   successResult,
   errorResult,
   telegramUnitResult,
   telegramMessagesResult,
-} from "../protocol.js";
+} from "tidepool-generated";
 import {
   sendMessage,
   sendMessageWithButtons,

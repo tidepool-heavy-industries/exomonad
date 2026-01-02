@@ -4,7 +4,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { handleLogInfo, handleLogError } from "../log.js";
-import type { LogInfoEffect, LogErrorEffect } from "../../protocol.js";
+import type { LogInfoEffect, LogErrorEffect } from "tidepool-generated";
 
 describe("handleLogInfo", () => {
   const originalLog = console.log;

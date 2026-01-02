@@ -13,8 +13,8 @@ import type {
   ServerMessage,
   SessionState,
   SerializableEffect,
-} from "./protocol.js";
-import { SESSION_TIMEOUT_MS } from "./protocol.js";
+} from "tidepool-generated";
+import { SESSION_TIMEOUT_MS } from "tidepool-generated";
 import { executeEffect, type Env as HandlersEnv } from "./handlers/index.js";
 import { routeWebhook, type WebhookEnv } from "./telegram/webhook.js";
 

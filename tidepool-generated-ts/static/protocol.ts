@@ -149,7 +149,8 @@ export type SerializableEffect =
   | HabiticaEffect
   | TelegramSendEffect
   | TelegramReceiveEffect
-  | TelegramTryReceiveEffect;
+  | TelegramTryReceiveEffect
+  | TelegramConfirmEffect;
 
 /**
  * LLM completion request - matches Haskell EffLlmComplete.
@@ -253,6 +254,33 @@ export interface TelegramReceiveEffect {
  */
 export interface TelegramTryReceiveEffect {
   type: "telegram_try_receive";
+}
+
+/**
+ * Request user confirmation via Telegram inline buttons.
+ * Blocking effect - waits for user to click a button.
+ * Mirrors Haskell: EffTelegramConfirm
+ *
+ * Default buttons from Haskell:
+ * - "✓ Yes" -> "approved"
+ * - "✗ No" -> "denied"
+ * - "Skip" -> "skipped"
+ */
+export interface TelegramConfirmEffect {
+  type: "TelegramConfirm";
+  /** Message to display above buttons */
+  eff_message: string;
+  /** Buttons as [label, value] pairs */
+  eff_buttons: [string, string][];
+}
+
+/**
+ * Response format for TelegramConfirmEffect.
+ * Parsed by Haskell's parseConfirmation in HabiticaRoutingGraph.hs
+ */
+export interface TelegramConfirmResponse {
+  response: "approved" | "denied" | "skipped";
+  feedback?: string;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

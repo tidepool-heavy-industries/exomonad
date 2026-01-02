@@ -5,8 +5,8 @@
  * and returning results in the expected format.
  */
 
-import type { HabiticaEffect, EffectResult } from "../protocol.js";
-import { successResult, errorResult } from "../protocol.js";
+import type { HabiticaEffect, EffectResult } from "tidepool-generated";
+import { successResult, errorResult } from "tidepool-generated";
 
 // Habitica API base URL
 const HABITICA_API = "https://habitica.com/api/v3";

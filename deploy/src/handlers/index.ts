@@ -12,8 +12,8 @@ import type {
   LogInfoEffect,
   LogErrorEffect,
   HabiticaEffect,
-} from "../protocol.js";
-import { errorResult } from "../protocol.js";
+} from "tidepool-generated";
+import { errorResult } from "tidepool-generated";
 
 import { handleLogInfo, handleLogError } from "./log.js";
 import { handleLlmComplete, type LlmEnv } from "./llm.js";
