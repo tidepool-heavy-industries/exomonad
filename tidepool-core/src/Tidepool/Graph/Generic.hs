@@ -299,8 +299,17 @@ type family NodeHandlerDispatch nodeDef origNode es needs mTpl mSchema mEffs whe
 
   -- Detect duplicate Template annotations
   NodeHandlerDispatch (node :@ Template _) orig es needs ('Just _) mSchema mEffs = TypeError
-    ('Text "Duplicate Template annotation on node"
-     ':$$: 'Text "Each node may have at most one Template annotation."
+    ( HR
+      ':$$: 'Text "  Duplicate Template annotation"
+      ':$$: HR
+      ':$$: Blank
+      ':$$: WhatHappened
+      ':$$: Indent "Your node has multiple Template annotations."
+      ':$$: Indent "Each LLM node can only have one prompt template."
+      ':$$: Blank
+      ':$$: Fixes
+      ':$$: Bullet "Remove the duplicate Template annotation"
+      ':$$: Bullet "Combine templates if you need multiple prompts"
     )
 
   -- Peel Schema annotation - record it (for LLM nodes)
@@ -309,8 +318,21 @@ type family NodeHandlerDispatch nodeDef origNode es needs mTpl mSchema mEffs whe
 
   -- Detect duplicate Schema annotations
   NodeHandlerDispatch (node :@ Schema _) orig es needs mTpl ('Just _) mEffs = TypeError
-    ('Text "Duplicate Schema annotation on node"
-     ':$$: 'Text "Each node may have at most one Schema annotation."
+    ( HR
+      ':$$: 'Text "  Duplicate Schema annotation"
+      ':$$: HR
+      ':$$: Blank
+      ':$$: WhatHappened
+      ':$$: Indent "Your node has multiple Schema annotations."
+      ':$$: Indent "Each LLM node produces exactly one output type."
+      ':$$: Blank
+      ':$$: HowItWorks
+      ':$$: Indent "Schema defines the structured output type the LLM returns."
+      ':$$: Indent "Multiple Schema would be ambiguous - which type is the output?"
+      ':$$: Blank
+      ':$$: Fixes
+      ':$$: Bullet "Remove the duplicate Schema annotation"
+      ':$$: Bullet "Use a sum type if you need multiple output shapes"
     )
 
   -- Skip other annotations (Vision, Tools, Memory, System)
@@ -329,8 +351,19 @@ type family NodeHandlerDispatch nodeDef origNode es needs mTpl mSchema mEffs whe
 
   -- Detect duplicate UsesEffects annotations
   NodeHandlerDispatch (node :@ UsesEffects _) orig es needs mTpl mSchema ('Just _) = TypeError
-    ('Text "Duplicate UsesEffects annotation on node"
-     ':$$: 'Text "Each node may have at most one UsesEffects annotation."
+    ( HR
+      ':$$: 'Text "  Duplicate UsesEffects annotation"
+      ':$$: HR
+      ':$$: Blank
+      ':$$: WhatHappened
+      ':$$: Indent "Your node has multiple UsesEffects annotations."
+      ':$$: Blank
+      ':$$: HowItWorks
+      ':$$: Indent "UsesEffects declares the effect stack for this handler."
+      ':$$: Indent "All effects should be listed in a single annotation."
+      ':$$: Blank
+      ':$$: Fixes
+      ':$$: Bullet "Combine into one: UsesEffects '[Effect1, Effect2, ...]"
     )
 
   -- ══════════════════════════════════════════════════════════════════════════
@@ -570,8 +603,16 @@ type family Elem x xs where
 type ElemC :: Symbol -> [Symbol] -> Constraint
 type family ElemC s ss where
   ElemC s '[] = TypeError
-    ('Text "Field '" ':<>: 'Text s ':<>: 'Text "' not found in graph"
-     ':$$: 'Text "Check that the field name matches a record field in the graph type."
+    ( HR
+      ':$$: 'Text "  Field \"" ':<>: 'Text s ':<>: 'Text "\" not found"
+      ':$$: HR
+      ':$$: Blank
+      ':$$: WhatHappened
+      ':$$: Indent "You referenced a field that doesn't exist in this graph."
+      ':$$: Blank
+      ':$$: Fixes
+      ':$$: Bullet "Check the field name spelling"
+      ':$$: Bullet "Ensure you're using the correct graph type"
     )
   ElemC s (s ': _) = ()
   ElemC s (_ ': rest) = ElemC s rest
@@ -582,12 +623,19 @@ type family ElemC s ss where
 type ElemCWithOptions :: Symbol -> [Symbol] -> [Symbol] -> Constraint
 type family ElemCWithOptions s ss allOptions where
   ElemCWithOptions s '[] allOptions = TypeError
-    ('Text "Field '" ':<>: 'Text s ':<>: 'Text "' not found in graph"
-     ':$$: 'Text ""
-     ':$$: 'Text "Available fields:"
-     ':$$: FormatSymbolList allOptions
-     ':$$: 'Text ""
-     ':$$: 'Text "Check spelling and ensure you're referencing a field from the correct graph type."
+    ( HR
+      ':$$: 'Text "  Field \"" ':<>: 'Text s ':<>: 'Text "\" not found"
+      ':$$: HR
+      ':$$: Blank
+      ':$$: WhatHappened
+      ':$$: Indent "You referenced a field that doesn't exist in this graph."
+      ':$$: Blank
+      ':$$: Indent "Available fields:"
+      ':$$: FormatSymbolList allOptions
+      ':$$: Blank
+      ':$$: Fixes
+      ':$$: Bullet "Check the field name spelling"
+      ':$$: Bullet "Use one of the available fields listed above"
     )
   ElemCWithOptions s (s ': _) _ = ()
   ElemCWithOptions s (_ ': rest) allOptions = ElemCWithOptions s rest allOptions
@@ -766,26 +814,73 @@ type family ValidateEntryExit graph where
 type ValidateEntryCount :: Nat -> Constraint
 type family ValidateEntryCount n where
   ValidateEntryCount 0 = DelayedTypeError
-    ('Text "Graph record validation failed: missing Entry field"
-     ':$$: 'Text "Add a field like: entry :: mode :- Entry YourInputType"
+    ( HR
+      ':$$: 'Text "  Missing Entry field"
+      ':$$: HR
+      ':$$: Blank
+      ':$$: WhatHappened
+      ':$$: Indent "Your graph record has no Entry field."
+      ':$$: Blank
+      ':$$: HowItWorks
+      ':$$: Indent "Every graph needs exactly one entry point that defines"
+      ':$$: Indent "what type of input the graph accepts."
+      ':$$: Blank
+      ':$$: Fixes
+      ':$$: Bullet "Add an entry field:"
+      ':$$: CodeLine "entry :: mode :- Entry YourInputType"
     )
   ValidateEntryCount 1 = ()
   ValidateEntryCount _ = DelayedTypeError
-    ('Text "Graph record validation failed: multiple Entry fields"
-     ':$$: 'Text "A graph record must have exactly one Entry field."
+    ( HR
+      ':$$: 'Text "  Multiple Entry fields"
+      ':$$: HR
+      ':$$: Blank
+      ':$$: WhatHappened
+      ':$$: Indent "Your graph record has more than one Entry field."
+      ':$$: Blank
+      ':$$: HowItWorks
+      ':$$: Indent "A graph can only have one entry point. Multiple entries"
+      ':$$: Indent "would be ambiguous - which one starts the graph?"
+      ':$$: Blank
+      ':$$: Fixes
+      ':$$: Bullet "Remove duplicate Entry fields, keeping just one"
     )
 
 -- | Validate Exit count is exactly 1.
 type ValidateExitCount :: Nat -> Constraint
 type family ValidateExitCount n where
   ValidateExitCount 0 = DelayedTypeError
-    ('Text "Graph record validation failed: missing Exit field"
-     ':$$: 'Text "Add a field like: exit :: mode :- Exit YourOutputType"
+    ( HR
+      ':$$: 'Text "  Missing Exit field"
+      ':$$: HR
+      ':$$: Blank
+      ':$$: WhatHappened
+      ':$$: Indent "Your graph record has no Exit field."
+      ':$$: Blank
+      ':$$: HowItWorks
+      ':$$: Indent "Every graph needs exactly one exit point that defines"
+      ':$$: Indent "what type of result the graph produces."
+      ':$$: Blank
+      ':$$: Fixes
+      ':$$: Bullet "Add an exit field:"
+      ':$$: CodeLine "exit :: mode :- Exit YourResultType"
     )
   ValidateExitCount 1 = ()
   ValidateExitCount _ = DelayedTypeError
-    ('Text "Graph record validation failed: multiple Exit fields"
-     ':$$: 'Text "A graph record must have exactly one Exit field."
+    ( HR
+      ':$$: 'Text "  Multiple Exit fields"
+      ':$$: HR
+      ':$$: Blank
+      ':$$: WhatHappened
+      ':$$: Indent "Your graph record has more than one Exit field."
+      ':$$: Blank
+      ':$$: HowItWorks
+      ':$$: Indent "A graph can only have one exit point. Multiple exits"
+      ':$$: Indent "would be ambiguous - which defines the output type?"
+      ':$$: Blank
+      ':$$: Fixes
+      ':$$: Bullet "Remove duplicate Exit fields, keeping just one"
+      ':$$: Bullet "Use a sum type if you need multiple result shapes"
     )
 
 -- | Helper to delay TypeError evaluation.
@@ -854,10 +949,24 @@ type family ValidateGotoTargetsList fieldNames gotos where
 -- | Error for invalid Goto target.
 type InvalidGotoTargetError :: Symbol -> [Symbol] -> Constraint
 type family InvalidGotoTargetError target fieldNames where
-  InvalidGotoTargetError target _ = DelayedTypeError
-    ( 'Text "Graph validation failed: invalid Goto target"
-      ':$$: 'Text "  Goto \"" ':<>: 'Text target ':<>: 'Text "\" references a node that doesn't exist."
-      ':$$: 'Text "Fix: Add a field named \"" ':<>: 'Text target ':<>: 'Text "\" or use Goto Exit for termination."
+  InvalidGotoTargetError target fieldNames = DelayedTypeError
+    ( HR
+      ':$$: 'Text "  Goto target \"" ':<>: 'Text target ':<>: 'Text "\" not found"
+      ':$$: HR
+      ':$$: Blank
+      ':$$: WhatHappened
+      ':$$: Indent "Your handler has:"
+      ':$$: CodeLine "Goto \"" ':<>: 'Text target ':<>: 'Text "\" payload"
+      ':$$: Blank
+      ':$$: Indent "But no field named \"" ':<>: 'Text target ':<>: 'Text "\" exists in the graph."
+      ':$$: Blank
+      ':$$: Indent "Available fields:"
+      ':$$: FormatSymbolList fieldNames
+      ':$$: Blank
+      ':$$: Fixes
+      ':$$: Bullet "Add a field: " ':<>: 'Text target ':<>: 'Text " :: mode :- ..."
+      ':$$: Bullet "Use Goto Exit to terminate the graph"
+      ':$$: Bullet "Check spelling of the target name"
     )
 
 -- ════════════════════════════════════════════════════════════════════════════
