@@ -61,6 +61,7 @@ export interface AlertInput {
 
 /**
  * Extract chat_id from alert labels or annotations.
+ * Labels take precedence over annotations (labels.chat_id ?? annotations.chat_id).
  * Returns null if chat_id not found or invalid.
  */
 export function extractChatId(alert: GrafanaAlert): number | null {

@@ -2,6 +2,11 @@
  * Alert webhook handler.
  *
  * Receives Grafana Alertmanager webhook payloads and routes to AlertDO.
+ *
+ * Design decisions:
+ * - ALERT_WEBHOOK_SECRET is optional to support local development without
+ *   configuring secrets. For production, set this via `wrangler secret put`.
+ *   Grafana will send the secret in X-Webhook-Secret header.
  */
 
 import type { GrafanaWebhookPayload } from "./types.js";
