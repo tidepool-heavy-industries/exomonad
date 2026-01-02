@@ -49,7 +49,24 @@ const arbText = fc.oneof(
 );
 
 // JSON values with bounded depth - matches aeson's Arbitrary Value
-const arbJsonValue = fc.jsonValue({ maxDepth: 3 });
+// Note: We filter out -0 because JSON doesn't distinguish between -0 and +0,
+// so {value: [-0]} would roundtrip as {value: [0]} and fail deep equality.
+const arbJsonValue = fc.jsonValue({ maxDepth: 3 }).filter((v) => {
+  // Recursively check for -0 in the value
+  const hasNegativeZero = (val: unknown): boolean => {
+    if (typeof val === "number") {
+      return Object.is(val, -0);
+    }
+    if (Array.isArray(val)) {
+      return val.some(hasNegativeZero);
+    }
+    if (val !== null && typeof val === "object") {
+      return Object.values(val).some(hasNegativeZero);
+    }
+    return false;
+  };
+  return !hasNegativeZero(v);
+});
 
 // JSON Schema - more constrained than arbitrary JSON
 // Note: We use undefined (field omitted) instead of null because Aeson's .:?
