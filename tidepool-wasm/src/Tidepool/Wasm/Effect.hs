@@ -29,8 +29,10 @@ module Tidepool.Wasm.Effect
   , logInfo
   , logError
   , llmComplete
-  , habitica
   , telegramConfirm
+
+    -- * Habitica (typed API)
+  , habitica
 
     -- * Running Effects
   , runWasmM
@@ -44,6 +46,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 
 import Tidepool.Wasm.WireTypes (SerializableEffect(..), EffectResult(..))
+import Tidepool.Wasm.Habitica (habitica)
 
 
 -- | The effect stack for WASM computations.
@@ -103,19 +106,6 @@ llmComplete node systemPrompt userContent schema = do
     ResSuccess Nothing  -> pure (toJSON ())
     ResError msg        -> error $ "LLM call failed: " <> T.unpack msg
 
--- | Make a Habitica API call.
---
--- Yields 'EffHabitica', expects JSON response on success.
-habitica :: Member (Yield SerializableEffect EffectResult) effs
-         => Text   -- ^ Operation name
-         -> Value  -- ^ Payload
-         -> Eff effs Value
-habitica op payload = do
-  result <- yield (EffHabitica op payload) (id @EffectResult)
-  case result of
-    ResSuccess (Just v) -> pure v
-    ResSuccess Nothing  -> pure (toJSON ())
-    ResError msg        -> error $ "Habitica call failed: " <> T.unpack msg
 
 -- | Request confirmation from user via Telegram buttons.
 --

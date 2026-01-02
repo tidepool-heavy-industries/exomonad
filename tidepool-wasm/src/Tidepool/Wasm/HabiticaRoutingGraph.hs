@@ -57,7 +57,6 @@ import qualified Data.Aeson.Key as Key
 import qualified Data.Aeson.KeyMap as KM
 import qualified Data.Text as T
 import Data.Text (Text)
-import qualified Data.Vector as V
 import GHC.Generics (Generic)
 
 import Tidepool.Graph.Types (type (:@), Needs, UsesEffects, Exit)
@@ -65,7 +64,14 @@ import Tidepool.Graph.Generic (GraphMode(..), type (:-))
 import qualified Tidepool.Graph.Generic as G (Entry, Exit, LogicNode)
 import Tidepool.Graph.Goto (Goto, GotoChoice(..), OneOf(..), To, gotoChoice, gotoExit)
 
-import Tidepool.Wasm.Effect (WasmM, logInfo, logError, llmComplete, habitica, telegramConfirm)
+import Tidepool.Wasm.Effect (WasmM, logInfo, logError, llmComplete, telegramConfirm)
+import Tidepool.Wasm.Habitica
+  ( HabiticaOp(..)
+  , habitica
+  , FetchedTodo(..)
+  , FetchedChecklistItem(..)
+  , TodoId(..)
+  )
 import Tidepool.Wasm.HabiticaTemplates
   ( ExtractTaskContext(..)
   , SuggestActionContext(..)
@@ -187,9 +193,9 @@ fetchExistingHandler :: ExtractedTask -> WasmM (GotoChoice '[To "matchTask" Exis
 fetchExistingHandler task = do
   logInfo "Fetching existing Habitica todos..."
 
-  result <- habitica "FetchTodos" (object [])
+  fetchedTodos <- habitica FetchTodos
 
-  let todos = parseTodos result
+  let todos = map toHabiticaTodo fetchedTodos
   logInfo $ "Fetched " <> T.pack (show (length todos)) <> " existing todos"
 
   pure $ gotoChoice @"matchTask" ExistingTodos
@@ -197,28 +203,13 @@ fetchExistingHandler task = do
     , etTodos = todos
     }
   where
-    parseTodos :: Value -> [HabiticaTodo]
-    parseTodos (Array arr) =
-      [ HabiticaTodo
-          { htId = extractText "todoId" v
-          , htTitle = extractText "todoTitle" v
-          , htChecklist = extractChecklist v
-          }
-      | v <- V.toList arr
-      ]
-    parseTodos _ = []
-
-    extractText :: Text -> Value -> Text
-    extractText key (Object obj) = case KM.lookup (Key.fromText key) obj of
-      Just (String t) -> t
-      _ -> ""
-    extractText _ _ = ""
-
-    extractChecklist :: Value -> [Text]
-    extractChecklist (Object obj) = case KM.lookup (Key.fromText "todoChecklist") obj of
-      Just (Array items) -> [extractText "checklistText" item | item <- V.toList items]
-      _ -> []
-    extractChecklist _ = []
+    -- Convert typed API response to graph domain type
+    toHabiticaTodo :: FetchedTodo -> HabiticaTodo
+    toHabiticaTodo ft = HabiticaTodo
+      { htId = ft.ftTodoId.unTodoId
+      , htTitle = ft.ftTitle
+      , htChecklist = map (.fciText) ft.ftChecklist
+      }
 
 
 -- | Match the extracted task against existing todos using LLM.
@@ -371,17 +362,12 @@ executeActionHandler suggestion = do
   result <- case suggestion.sgAction of
     SuggestNewTodo -> do
       logInfo $ "Creating new todo: " <> suggestion.sgTask.etDescription
-      _ <- habitica "CreateTodo" $ object
-        [ "title" .= suggestion.sgTask.etDescription
-        ]
+      _ <- habitica (CreateTodo suggestion.sgTask.etDescription)
       pure $ ExecutionResult True $ "Created todo: " <> suggestion.sgTask.etDescription
 
-    SuggestChecklist todoId -> do
-      logInfo $ "Adding checklist item to todo " <> todoId
-      _ <- habitica "AddChecklistItem" $ object
-        [ "todoId" .= todoId
-        , "item" .= suggestion.sgTask.etDescription
-        ]
+    SuggestChecklist todoIdText -> do
+      logInfo $ "Adding checklist item to todo " <> todoIdText
+      _ <- habitica (AddChecklistItem (TodoId todoIdText) suggestion.sgTask.etDescription)
       pure $ ExecutionResult True $ "Added checklist item: " <> suggestion.sgTask.etDescription
 
   logInfo $ "Execution result: " <> result.erMessage

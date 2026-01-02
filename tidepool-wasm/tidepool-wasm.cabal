@@ -17,6 +17,7 @@ library
         Tidepool.Wasm.HabiticaRoutingGraph
         Tidepool.Wasm.HabiticaTemplates
         Tidepool.Wasm.HabiticaTypes
+        Tidepool.Wasm.Habitica
         Tidepool.Wasm.TestGraph
         Tidepool.Wasm.LlmTestGraph
         Tidepool.Wasm.WireTypes
