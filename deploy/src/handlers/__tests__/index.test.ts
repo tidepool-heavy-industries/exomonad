@@ -81,7 +81,7 @@ describe("executeEffect", () => {
 
     expect(result).toEqual({
       type: "error",
-      message: "Unknown effect type: UnknownEffect",
+      message: "Unknown internal effect type: UnknownEffect",
     });
   });
 
