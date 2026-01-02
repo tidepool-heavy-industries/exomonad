@@ -64,7 +64,7 @@ import Tidepool.Graph.Types (Exit)
 import Tidepool.Generated.Registry.TH (GraphFFISpec(..), deriveFFIExports)
 
 #if defined(wasm32_HOST_ARCH)
-import GHC.Wasm.Prim (JSString, fromJSString, toJSString)
+import GHC.Wasm.Prim (JSString(..), fromJSString, toJSString)
 #endif
 
 

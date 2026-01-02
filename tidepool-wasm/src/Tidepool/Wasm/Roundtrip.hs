@@ -40,7 +40,7 @@ import Tidepool.Wasm.WireTypes
   )
 
 #if defined(wasm32_HOST_ARCH)
-import GHC.Wasm.Prim (JSString, fromJSString, toJSString)
+import GHC.Wasm.Prim (JSString(..), fromJSString, toJSString)
 #endif
 
 

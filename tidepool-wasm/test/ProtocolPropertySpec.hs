@@ -10,6 +10,7 @@ import Test.Hspec
 import Test.Hspec.QuickCheck (prop)
 import Test.QuickCheck
   ( Arbitrary(..)
+  , Gen
   , oneof
   , elements
   , listOf
@@ -62,6 +63,16 @@ instance Arbitrary Text where
 -- Note: Arbitrary Value instance is provided by aeson (Data.Aeson.Types.Internal)
 -- with depth limiting built-in.
 
+-- | Generate Maybe Value that roundtrips correctly.
+-- Aeson's .:? treats null and missing field the same (both → Nothing),
+-- so we never generate Just Null since it would decode to Nothing.
+arbMaybeNonNullValue :: Gen (Maybe Value)
+arbMaybeNonNullValue = do
+  mv <- arbitrary
+  pure $ mv >>= \v -> case v of
+    Null -> Nothing
+    _    -> Just v
+
 -- | Arbitrary SerializableEffect covering all constructors
 instance Arbitrary SerializableEffect where
   arbitrary = oneof
@@ -69,7 +80,7 @@ instance Arbitrary SerializableEffect where
         <$> arbitrary
         <*> arbitrary
         <*> arbitrary
-        <*> arbitrary  -- Maybe Value roundtrips correctly now
+        <*> arbMaybeNonNullValue  -- Avoid Just Null (doesn't roundtrip)
     , EffLogInfo <$> arbitrary
     , EffLogError <$> arbitrary
     , EffHabitica
@@ -85,7 +96,10 @@ instance Arbitrary SerializableEffect where
     ++ [ EffLlmComplete node' sys user schema | node' <- shrink node ]
     ++ [ EffLlmComplete node sys' user schema | sys' <- shrink sys ]
     ++ [ EffLlmComplete node sys user' schema | user' <- shrink user ]
-    ++ [ EffLlmComplete node sys user schema' | schema' <- shrink schema ]
+    ++ [ EffLlmComplete node sys user schema'
+       | schema' <- shrink schema
+       , schema' /= Just Null  -- Avoid Just Null (doesn't roundtrip)
+       ]
   shrink (EffLogInfo msg) =
     [ EffLogInfo msg' | msg' <- shrink msg ]
   shrink (EffLogError msg) =
