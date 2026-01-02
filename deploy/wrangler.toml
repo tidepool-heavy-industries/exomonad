@@ -32,6 +32,11 @@ new_classes = ["TelegramDO"]
 [ai]
 binding = "AI"
 
+# KV namespace for rate limiting
+[[kv_namespaces]]
+binding = "RATE_LIMIT_KV"
+id = "your-kv-namespace-id"
+
 # Environment variables
 [vars]
 ENVIRONMENT = "development"
