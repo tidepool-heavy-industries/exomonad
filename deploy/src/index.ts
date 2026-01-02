@@ -12,9 +12,8 @@ import type {
   ClientMessage,
   ServerMessage,
   SessionState,
-  SerializableEffect,
 } from "tidepool-generated";
-import { SESSION_TIMEOUT_MS } from "tidepool-generated";
+import { SESSION_TIMEOUT_MS, isYieldedEffect } from "tidepool-generated";
 import { executeEffect, type Env as HandlersEnv } from "./handlers/index.js";
 import { routeWebhook, type WebhookEnv } from "./telegram/webhook.js";
 
@@ -208,8 +207,8 @@ export class StateMachineDO extends DurableObject<Env> {
     while (!output.done && output.effect) {
       const effect = output.effect;
 
-      // Check if this is a Telegram effect - yield to caller
-      if (this.isTelegramEffect(effect)) {
+      // Check if this is a yielded effect (e.g., Telegram) - return to caller
+      if (isYieldedEffect(effect)) {
         // Save session state for resume
         const session: SessionState = {
           graphId,
@@ -258,18 +257,6 @@ export class StateMachineDO extends DurableObject<Env> {
       type: "done",
       result: output.stepResult,
     });
-  }
-
-  /**
-   * Check if an effect is a Telegram effect.
-   */
-  private isTelegramEffect(effect: SerializableEffect): boolean {
-    return (
-      effect.type === "telegram_send" ||
-      effect.type === "telegram_receive" ||
-      effect.type === "telegram_try_receive" ||
-      effect.type === "TelegramConfirm"
-    );
   }
 
   /**

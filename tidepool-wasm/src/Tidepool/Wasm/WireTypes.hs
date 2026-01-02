@@ -15,7 +15,7 @@ module Tidepool.Wasm.WireTypes
   ( -- * Effects (WASM → TypeScript)
     SerializableEffect(..)
 
-    -- * Effect Metadata (for routing)
+    -- * Effect Metadata (for routing) - re-exported from tidepool-core
   , EffectCategory(..)
   , EffectSemantics(..)
   , effectMetadata
@@ -51,6 +51,9 @@ import Data.Aeson
 import Data.Aeson.Types (Parser)
 import Data.Text (Text)
 import GHC.Generics (Generic)
+
+-- Re-export effect metadata from the single source of truth
+import Tidepool.Effect.Metadata (EffectCategory(..), EffectSemantics(..))
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -139,43 +142,18 @@ instance FromJSON SerializableEffect where
 -- EFFECT METADATA (for routing decisions)
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Where an effect should be handled.
---
--- - 'Internal': Handled by StateMachineDO (LLM, Habitica, Log)
--- - 'Yielded': Sent back to caller for handling (Telegram effects → TelegramDO)
-data EffectCategory
-  = Internal
-  | Yielded
-  deriving stock (Show, Eq, Generic)
-
-instance ToJSON EffectCategory where
-  toJSON Internal = "internal"
-  toJSON Yielded  = "yielded"
-
-instance FromJSON EffectCategory where
-  parseJSON = withObject "EffectCategory" $ \_ -> fail "EffectCategory is output-only"
-
--- | How an effect interacts with the execution loop.
---
--- - 'FireAndForget': Effect is executed but result is ignored (Log effects)
--- - 'Blocking': Execution waits for effect result before continuing
-data EffectSemantics
-  = FireAndForget
-  | Blocking
-  deriving stock (Show, Eq, Generic)
-
-instance ToJSON EffectSemantics where
-  toJSON FireAndForget = "fire_and_forget"
-  toJSON Blocking      = "blocking"
-
-instance FromJSON EffectSemantics where
-  parseJSON = withObject "EffectSemantics" $ \_ -> fail "EffectSemantics is output-only"
+-- EffectCategory and EffectSemantics are imported from Tidepool.Effect.Metadata
+-- (the single source of truth for effect routing)
 
 -- | Get routing metadata for an effect.
 --
 -- This determines:
 -- 1. Whether StateMachineDO handles it internally or yields to caller
 -- 2. Whether the graph waits for a response or continues immediately
+--
+-- Implementation note: Uses pattern matching on effect constructors and
+-- looks up metadata from allEffectMeta. The type name must match the
+-- emTypeName in the metadata.
 effectMetadata :: SerializableEffect -> (EffectCategory, EffectSemantics)
 effectMetadata = \case
   EffLogInfo{}         -> (Internal, FireAndForget)
