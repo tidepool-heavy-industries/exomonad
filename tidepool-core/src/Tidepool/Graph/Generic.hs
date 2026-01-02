@@ -126,6 +126,10 @@ import Data.Kind (Type, Constraint)
 import Data.Proxy (Proxy(..))
 import GHC.Generics (Generic(..), K1(..), M1(..), (:*:)(..), Meta(..), S, D, C)
 import GHC.TypeLits (Symbol, KnownSymbol, TypeError, ErrorMessage(..), Nat, type (+))
+import Tidepool.Graph.Errors
+  ( HR, Blank, WhatHappened, HowItWorks, Fixes, Example
+  , Indent, CodeLine, Bullet
+  )
 
 import Tidepool.Graph.Validate (FormatSymbolList)
 import Effectful (Effect)
@@ -211,24 +215,66 @@ type family NodeHandler nodeDef es where
 
   -- Bare LLMNode/LogicNode without annotations - error
   NodeHandler LLMNode es = TypeError
-    ('Text "LLMNode requires annotations"
-     ':$$: 'Text ""
-     ':$$: 'Text "A bare LLMNode without annotations cannot determine handler type."
-     ':$$: 'Text "LLM nodes must have at least:"
-     ':$$: 'Text "  • Template <YourTemplate>  - to build prompt context"
-     ':$$: 'Text ""
-     ':$$: 'Text "Example:"
-     ':$$: 'Text "  myNode :: mode :- LLMNode :@ Needs '[Input] :@ Template MyTpl :@ Schema Output"
+    ( HR
+      ':$$: 'Text "  LLMNode requires annotations"
+      ':$$: HR
+      ':$$: Blank
+      ':$$: WhatHappened
+      ':$$: Indent "You wrote: LLMNode with no annotations"
+      ':$$: Indent "The compiler can't determine what handler type to generate."
+      ':$$: Blank
+      ':$$: HowItWorks
+      ':$$: Indent "LLM nodes call a language model. For this to work, we need:"
+      ':$$: Blank
+      ':$$: CodeLine "1. WHAT to send (Template) - your handler builds context, template renders it"
+      ':$$: CodeLine "2. WHAT comes back (Schema) - the structured output type from the LLM"
+      ':$$: Blank
+      ':$$: Indent "The flow is:"
+      ':$$: CodeLine "   Handler builds context -> Template renders prompt -> LLM responds -> Schema parses"
+      ':$$: Blank
+      ':$$: Fixes
+      ':$$: Bullet "Add Template and Schema annotations:"
+      ':$$: CodeLine "  myNode :: mode :- LLMNode :@ Needs '[Input] :@ Template MyTpl :@ Schema Output"
+      ':$$: Blank
+      ':$$: Example
+      ':$$: CodeLine "-- In Context.hs (separate module for TH staging):"
+      ':$$: CodeLine "data ClassifyContext = ClassifyContext { query :: Text }"
+      ':$$: CodeLine ""
+      ':$$: CodeLine "-- In your graph definition:"
+      ':$$: CodeLine "classify :: mode :- LLMNode"
+      ':$$: CodeLine "            :@ Needs '[Message]"
+      ':$$: CodeLine "            :@ Template ClassifyTpl  -- references your context type"
+      ':$$: CodeLine "            :@ Schema Intent         -- what the LLM returns"
     )
   NodeHandler LogicNode es = TypeError
-    ('Text "LogicNode requires annotations"
-     ':$$: 'Text ""
-     ':$$: 'Text "A bare LogicNode without annotations cannot determine handler type."
-     ':$$: 'Text "Logic nodes must have:"
-     ':$$: 'Text "  • UsesEffects '[...]  - the effect stack for transitions"
-     ':$$: 'Text ""
-     ':$$: 'Text "Example:"
-     ':$$: 'Text "  myRouter :: mode :- LogicNode :@ Needs '[Intent] :@ UsesEffects '[Goto \"a\", Goto \"b\"]"
+    ( HR
+      ':$$: 'Text "  LogicNode requires annotations"
+      ':$$: HR
+      ':$$: Blank
+      ':$$: WhatHappened
+      ':$$: Indent "You wrote: LogicNode with no annotations"
+      ':$$: Indent "The compiler can't determine what transitions this node can make."
+      ':$$: Blank
+      ':$$: HowItWorks
+      ':$$: Indent "Logic nodes are pure decision points - they route to other nodes."
+      ':$$: Indent "We need to know WHICH nodes they can transition to."
+      ':$$: Blank
+      ':$$: CodeLine "UsesEffects '[Goto \"nodeA\" Payload, Goto \"nodeB\" Payload, Goto Exit Result]"
+      ':$$: CodeLine "              ^^^^^^^^^^^^^^^^      ^^^^^^^^^^^^^^^^       ^^^^^^^^^^^^^^^"
+      ':$$: CodeLine "              These become the valid targets for gotoChoice/gotoExit"
+      ':$$: Blank
+      ':$$: Fixes
+      ':$$: Bullet "Add UsesEffects with your transitions:"
+      ':$$: CodeLine "  myRouter :: mode :- LogicNode"
+      ':$$: CodeLine "               :@ Needs '[Intent]"
+      ':$$: CodeLine "               :@ UsesEffects '[Goto \"process\" Data, Goto Exit Result]"
+      ':$$: Blank
+      ':$$: Example
+      ':$$: CodeLine "-- Handler implementation:"
+      ':$$: CodeLine "router :: Intent -> Eff es (GotoChoice '[To \"process\" Data, To Exit Result])"
+      ':$$: CodeLine "router intent = case intent of"
+      ':$$: CodeLine "  NeedsProcessing x -> pure $ gotoChoice @\"process\" x"
+      ':$$: CodeLine "  Done result       -> pure $ gotoExit result"
     )
 
 -- | Unified accumulator that peels annotations and dispatches based on base kind.
@@ -253,8 +299,17 @@ type family NodeHandlerDispatch nodeDef origNode es needs mTpl mSchema mEffs whe
 
   -- Detect duplicate Template annotations
   NodeHandlerDispatch (node :@ Template _) orig es needs ('Just _) mSchema mEffs = TypeError
-    ('Text "Duplicate Template annotation on node"
-     ':$$: 'Text "Each node may have at most one Template annotation."
+    ( HR
+      ':$$: 'Text "  Duplicate Template annotation"
+      ':$$: HR
+      ':$$: Blank
+      ':$$: WhatHappened
+      ':$$: Indent "Your node has multiple Template annotations."
+      ':$$: Indent "Each LLM node can only have one prompt template."
+      ':$$: Blank
+      ':$$: Fixes
+      ':$$: Bullet "Remove the duplicate Template annotation"
+      ':$$: Bullet "Combine templates if you need multiple prompts"
     )
 
   -- Peel Schema annotation - record it (for LLM nodes)
@@ -263,8 +318,21 @@ type family NodeHandlerDispatch nodeDef origNode es needs mTpl mSchema mEffs whe
 
   -- Detect duplicate Schema annotations
   NodeHandlerDispatch (node :@ Schema _) orig es needs mTpl ('Just _) mEffs = TypeError
-    ('Text "Duplicate Schema annotation on node"
-     ':$$: 'Text "Each node may have at most one Schema annotation."
+    ( HR
+      ':$$: 'Text "  Duplicate Schema annotation"
+      ':$$: HR
+      ':$$: Blank
+      ':$$: WhatHappened
+      ':$$: Indent "Your node has multiple Schema annotations."
+      ':$$: Indent "Each LLM node produces exactly one output type."
+      ':$$: Blank
+      ':$$: HowItWorks
+      ':$$: Indent "Schema defines the structured output type the LLM returns."
+      ':$$: Indent "Multiple Schema would be ambiguous - which type is the output?"
+      ':$$: Blank
+      ':$$: Fixes
+      ':$$: Bullet "Remove the duplicate Schema annotation"
+      ':$$: Bullet "Use a sum type if you need multiple output shapes"
     )
 
   -- Skip other annotations (Vision, Tools, Memory, System)
@@ -283,8 +351,19 @@ type family NodeHandlerDispatch nodeDef origNode es needs mTpl mSchema mEffs whe
 
   -- Detect duplicate UsesEffects annotations
   NodeHandlerDispatch (node :@ UsesEffects _) orig es needs mTpl mSchema ('Just _) = TypeError
-    ('Text "Duplicate UsesEffects annotation on node"
-     ':$$: 'Text "Each node may have at most one UsesEffects annotation."
+    ( HR
+      ':$$: 'Text "  Duplicate UsesEffects annotation"
+      ':$$: HR
+      ':$$: Blank
+      ':$$: WhatHappened
+      ':$$: Indent "Your node has multiple UsesEffects annotations."
+      ':$$: Blank
+      ':$$: HowItWorks
+      ':$$: Indent "UsesEffects declares the effect stack for this handler."
+      ':$$: Indent "All effects should be listed in a single annotation."
+      ':$$: Blank
+      ':$$: Fixes
+      ':$$: Bullet "Combine into one: UsesEffects '[Effect1, Effect2, ...]"
     )
 
   -- ══════════════════════════════════════════════════════════════════════════
@@ -305,49 +384,94 @@ type family NodeHandlerDispatch nodeDef origNode es needs mTpl mSchema mEffs whe
 
   -- LLMNode with Schema only (no Template or UsesEffects) - error
   NodeHandlerDispatch LLMNode orig es needs 'Nothing ('Just schema) 'Nothing = TypeError
-    ('Text "LLM node has Schema but missing Template or UsesEffects"
-     ':$$: 'Text ""
-     ':$$: 'Text "Node definition:"
-     ':$$: 'Text "  " ':<>: 'ShowType orig
-     ':$$: 'Text ""
-     ':$$: 'Text "LLM nodes with a Schema must also specify either:"
-     ':$$: 'Text "  • Template annotation (for before-only or both phases)"
-     ':$$: 'Text "  • UsesEffects annotation (for after-only routing with default context)"
-     ':$$: 'Text ""
-     ':$$: 'Text "Fix: Add a Template annotation (before-only with default routing):"
-     ':$$: 'Text "  myNode :: mode :- LLMNode :@ Template MyTpl :@ Schema " ':<>: 'ShowType schema
-     ':$$: 'Text ""
-     ':$$: 'Text "Or add UsesEffects annotation (after-only with explicit routing):"
-     ':$$: 'Text "  myNode :: mode :- LLMNode :@ Schema " ':<>: 'ShowType schema ':<>: 'Text " :@ UsesEffects '[Goto \"target\" Payload]"
+    ( HR
+      ':$$: 'Text "  LLM node incomplete: has Schema but no Template or routing"
+      ':$$: HR
+      ':$$: Blank
+      ':$$: WhatHappened
+      ':$$: Indent "Your LLM node has:"
+      ':$$: CodeLine "Schema " ':<>: 'ShowType schema ':<>: 'Text "  -- what the LLM returns"
+      ':$$: Blank
+      ':$$: Indent "But we don't know:"
+      ':$$: Bullet "What prompt to send (no Template)"
+      ':$$: Bullet "Where to go next (no UsesEffects routing)"
+      ':$$: Blank
+      ':$$: HowItWorks
+      ':$$: Indent "LLM nodes have three possible configurations:"
+      ':$$: Blank
+      ':$$: CodeLine "1. BEFORE-ONLY (most common):"
+      ':$$: CodeLine "   LLMNode :@ Template T :@ Schema S"
+      ':$$: CodeLine "   -> Handler builds context, routing is implicit via Needs"
+      ':$$: Blank
+      ':$$: CodeLine "2. AFTER-ONLY (custom routing):"
+      ':$$: CodeLine "   LLMNode :@ Schema S :@ UsesEffects '[Goto ...]"
+      ':$$: CodeLine "   -> Uses default context, handler routes based on output"
+      ':$$: Blank
+      ':$$: CodeLine "3. BOTH (full control):"
+      ':$$: CodeLine "   LLMNode :@ Template T :@ Schema S :@ UsesEffects '[Goto ...]"
+      ':$$: CodeLine "   -> Custom context AND custom routing"
+      ':$$: Blank
+      ':$$: Fixes
+      ':$$: Bullet "Add Template for custom prompts:"
+      ':$$: CodeLine "  myNode :: mode :- LLMNode :@ Template MyTpl :@ Schema " ':<>: 'ShowType schema
+      ':$$: Bullet "Or add UsesEffects for custom routing:"
+      ':$$: CodeLine "  myNode :: mode :- LLMNode :@ Schema " ':<>: 'ShowType schema ':<>: 'Text " :@ UsesEffects '[Goto \"next\" X]"
     )
 
   -- LLMNode missing both Template and Schema - error
   NodeHandlerDispatch LLMNode orig es needs 'Nothing 'Nothing _ = TypeError
-    ('Text "LLM node missing Template and Schema annotations"
-     ':$$: 'Text ""
-     ':$$: 'Text "Node definition:"
-     ':$$: 'Text "  " ':<>: 'ShowType orig
-     ':$$: 'Text ""
-     ':$$: 'Text "LLM nodes require:"
-     ':$$: 'Text "  • Schema annotation (required) - specifies LLM output type"
-     ':$$: 'Text "  • Template annotation (for before handlers) - specifies prompt context"
-     ':$$: 'Text "  • UsesEffects annotation (for after routing) - specifies transitions"
-     ':$$: 'Text ""
-     ':$$: 'Text "Example:"
-     ':$$: 'Text "  myNode :: mode :- LLMNode :@ Template MyTpl :@ Schema MyOutput"
+    ( HR
+      ':$$: 'Text "  LLM node missing required annotations"
+      ':$$: HR
+      ':$$: Blank
+      ':$$: WhatHappened
+      ':$$: Indent "Your LLM node has neither Template nor Schema."
+      ':$$: Indent "We need at least Schema to know what the LLM returns."
+      ':$$: Blank
+      ':$$: HowItWorks
+      ':$$: Indent "The LLM call flow requires knowing:"
+      ':$$: Blank
+      ':$$: CodeLine "Template  -> What prompt to render (context type)"
+      ':$$: CodeLine "Schema    -> What the LLM returns (output type)"
+      ':$$: Blank
+      ':$$: Indent "Schema is ALWAYS required."
+      ':$$: Indent "Template is required unless you use UsesEffects for after-only routing."
+      ':$$: Blank
+      ':$$: Fixes
+      ':$$: Bullet "Add both Template and Schema:"
+      ':$$: CodeLine "  myNode :: mode :- LLMNode"
+      ':$$: CodeLine "             :@ Needs '[Input]"
+      ':$$: CodeLine "             :@ Template MyContextTpl"
+      ':$$: CodeLine "             :@ Schema MyOutputType"
     )
 
   -- LLMNode missing Schema - error
   NodeHandlerDispatch LLMNode orig es needs _ 'Nothing _ = TypeError
-    ('Text "LLM node missing Schema annotation"
-     ':$$: 'Text ""
-     ':$$: 'Text "Node definition:"
-     ':$$: 'Text "  " ':<>: 'ShowType orig
-     ':$$: 'Text ""
-     ':$$: 'Text "LLM nodes must have a Schema annotation to specify the output type."
-     ':$$: 'Text ""
-     ':$$: 'Text "Fix: Add a Schema annotation:"
-     ':$$: 'Text "  myNode :: mode :- LLMNode :@ ... :@ Template MyTpl :@ Schema MyOutputType"
+    ( HR
+      ':$$: 'Text "  LLM node missing Schema annotation"
+      ':$$: HR
+      ':$$: Blank
+      ':$$: WhatHappened
+      ':$$: Indent "Your LLM node has no Schema annotation."
+      ':$$: Indent "We don't know what type the LLM should return."
+      ':$$: Blank
+      ':$$: HowItWorks
+      ':$$: Indent "Schema specifies the structured output format for the LLM call."
+      ':$$: Indent "It must be a type with:"
+      ':$$: Bullet "Aeson FromJSON instance (to parse LLM response)"
+      ':$$: Bullet "HasJSONSchema instance (to generate JSON Schema for the LLM)"
+      ':$$: Blank
+      ':$$: CodeLine "-- Example output type:"
+      ':$$: CodeLine "data Intent = IntentRefund | IntentQuestion | IntentOther"
+      ':$$: CodeLine "  deriving (Generic, FromJSON)"
+      ':$$: CodeLine ""
+      ':$$: CodeLine "-- In node definition:"
+      ':$$: CodeLine "classify :: mode :- LLMNode :@ Template T :@ Schema Intent"
+      ':$$: CodeLine "                                              ^^^^^^^^^^^^"
+      ':$$: Blank
+      ':$$: Fixes
+      ':$$: Bullet "Add a Schema annotation:"
+      ':$$: CodeLine "  myNode :: mode :- LLMNode :@ ... :@ Schema YourOutputType"
     )
 
   -- ══════════════════════════════════════════════════════════════════════════
@@ -360,16 +484,36 @@ type family NodeHandlerDispatch nodeDef origNode es needs mTpl mSchema mEffs whe
 
   -- LogicNode without UsesEffects - error
   NodeHandlerDispatch LogicNode orig es needs _ _ 'Nothing = TypeError
-    ('Text "Logic node missing UsesEffects annotation"
-     ':$$: 'Text ""
-     ':$$: 'Text "Node definition:"
-     ':$$: 'Text "  " ':<>: 'ShowType orig
-     ':$$: 'Text ""
-     ':$$: 'Text "Logic nodes must have a UsesEffects annotation declaring their effect stack."
-     ':$$: 'Text "This should include Goto effects for transitions."
-     ':$$: 'Text ""
-     ':$$: 'Text "Fix: Add a UsesEffects annotation with your transitions:"
-     ':$$: 'Text "  myRouter :: mode :- LogicNode :@ Needs '[...] :@ UsesEffects '[Goto \"nodeA\" Payload, Goto \"nodeB\" Payload]"
+    ( HR
+      ':$$: 'Text "  Logic node missing UsesEffects annotation"
+      ':$$: HR
+      ':$$: Blank
+      ':$$: WhatHappened
+      ':$$: Indent "Your LogicNode has no UsesEffects annotation."
+      ':$$: Indent "We don't know what transitions this node can make."
+      ':$$: Blank
+      ':$$: HowItWorks
+      ':$$: Indent "Logic nodes are routing points in your graph. They receive input,"
+      ':$$: Indent "make a decision, and transition to another node (or Exit)."
+      ':$$: Blank
+      ':$$: Indent "The UsesEffects annotation declares ALL possible destinations:"
+      ':$$: Blank
+      ':$$: CodeLine "UsesEffects '[Goto \"nodeA\" PayloadA, Goto \"nodeB\" PayloadB, Goto Exit Result]"
+      ':$$: CodeLine "              ^^^^^^^^^^^^^^^^^^^   ^^^^^^^^^^^^^^^^^^^   ^^^^^^^^^^^^^^^^^"
+      ':$$: CodeLine "              Can go to nodeA       Can go to nodeB       Can exit graph"
+      ':$$: Blank
+      ':$$: Indent "Your handler then uses gotoChoice or gotoExit to pick one:"
+      ':$$: Blank
+      ':$$: CodeLine "router intent = case intent of"
+      ':$$: CodeLine "  CaseA x -> pure $ gotoChoice @\"nodeA\" x"
+      ':$$: CodeLine "  CaseB y -> pure $ gotoChoice @\"nodeB\" y"
+      ':$$: CodeLine "  Done r  -> pure $ gotoExit r"
+      ':$$: Blank
+      ':$$: Fixes
+      ':$$: Bullet "Add UsesEffects with your transitions:"
+      ':$$: CodeLine "  myRouter :: mode :- LogicNode"
+      ':$$: CodeLine "               :@ Needs '[YourInput]"
+      ':$$: CodeLine "               :@ UsesEffects '[Goto \"target\" Payload, Goto Exit Result]"
     )
 
 -- | Convert a Needs list to a single type (unit, single, or tuple).
@@ -385,12 +529,32 @@ type family TupleOf ts where
   TupleOf '[t1, t2, t3, t4, t5, t6, t7] = (t1, t2, t3, t4, t5, t6, t7)
   TupleOf '[t1, t2, t3, t4, t5, t6, t7, t8] = (t1, t2, t3, t4, t5, t6, t7, t8)
   TupleOf ts = TypeError
-    ('Text "Too many Needs types (maximum 8 supported)"
-     ':$$: 'Text ""
-     ':$$: 'Text "Needs list:"
-     ':$$: 'Text "  " ':<>: 'ShowType ts
-     ':$$: 'Text ""
-     ':$$: 'Text "Fix: Reduce the number of Needs types or combine related types."
+    ( HR
+      ':$$: 'Text "  Too many Needs types (maximum 8)"
+      ':$$: HR
+      ':$$: Blank
+      ':$$: WhatHappened
+      ':$$: Indent "Your node has more than 8 Needs types."
+      ':$$: Indent "The tuple-based handler signature can't accommodate this many."
+      ':$$: Blank
+      ':$$: HowItWorks
+      ':$$: Indent "Handler parameters come from the Needs list:"
+      ':$$: Blank
+      ':$$: CodeLine "Needs '[A]           -> handler :: A -> Eff es ..."
+      ':$$: CodeLine "Needs '[A, B]        -> handler :: A -> B -> Eff es ..."
+      ':$$: CodeLine "Needs '[A, B, C]     -> handler :: (A, B, C) -> Eff es ..."
+      ':$$: CodeLine "Needs '[A, B, ..., H] -> handler :: (A, B, ..., H) -> Eff es ..."
+      ':$$: Blank
+      ':$$: Indent "Beyond 8 types, we can't form a tuple."
+      ':$$: Blank
+      ':$$: Fixes
+      ':$$: Bullet "Group related types into a record:"
+      ':$$: CodeLine "  -- Instead of: Needs '[A, B, C, D, E, F, G, H, I]"
+      ':$$: CodeLine "  -- Use:"
+      ':$$: CodeLine "  data MyContext = MyContext { a :: A, b :: B, ... }"
+      ':$$: CodeLine "  Needs '[MyContext]"
+      ':$$: Blank
+      ':$$: Bullet "Or split the node into multiple nodes"
     )
 
 -- | Wrapper to distinguish Template types from EffStack in the Maybe
@@ -439,8 +603,16 @@ type family Elem x xs where
 type ElemC :: Symbol -> [Symbol] -> Constraint
 type family ElemC s ss where
   ElemC s '[] = TypeError
-    ('Text "Field '" ':<>: 'Text s ':<>: 'Text "' not found in graph"
-     ':$$: 'Text "Check that the field name matches a record field in the graph type."
+    ( HR
+      ':$$: 'Text "  Field \"" ':<>: 'Text s ':<>: 'Text "\" not found"
+      ':$$: HR
+      ':$$: Blank
+      ':$$: WhatHappened
+      ':$$: Indent "You referenced a field that doesn't exist in this graph."
+      ':$$: Blank
+      ':$$: Fixes
+      ':$$: Bullet "Check the field name spelling"
+      ':$$: Bullet "Ensure you're using the correct graph type"
     )
   ElemC s (s ': _) = ()
   ElemC s (_ ': rest) = ElemC s rest
@@ -451,12 +623,19 @@ type family ElemC s ss where
 type ElemCWithOptions :: Symbol -> [Symbol] -> [Symbol] -> Constraint
 type family ElemCWithOptions s ss allOptions where
   ElemCWithOptions s '[] allOptions = TypeError
-    ('Text "Field '" ':<>: 'Text s ':<>: 'Text "' not found in graph"
-     ':$$: 'Text ""
-     ':$$: 'Text "Available fields:"
-     ':$$: FormatSymbolList allOptions
-     ':$$: 'Text ""
-     ':$$: 'Text "Check spelling and ensure you're referencing a field from the correct graph type."
+    ( HR
+      ':$$: 'Text "  Field \"" ':<>: 'Text s ':<>: 'Text "\" not found"
+      ':$$: HR
+      ':$$: Blank
+      ':$$: WhatHappened
+      ':$$: Indent "You referenced a field that doesn't exist in this graph."
+      ':$$: Blank
+      ':$$: Indent "Available fields:"
+      ':$$: FormatSymbolList allOptions
+      ':$$: Blank
+      ':$$: Fixes
+      ':$$: Bullet "Check the field name spelling"
+      ':$$: Bullet "Use one of the available fields listed above"
     )
   ElemCWithOptions s (s ': _) _ = ()
   ElemCWithOptions s (_ ': rest) allOptions = ElemCWithOptions s rest allOptions
@@ -635,26 +814,73 @@ type family ValidateEntryExit graph where
 type ValidateEntryCount :: Nat -> Constraint
 type family ValidateEntryCount n where
   ValidateEntryCount 0 = DelayedTypeError
-    ('Text "Graph record validation failed: missing Entry field"
-     ':$$: 'Text "Add a field like: entry :: mode :- Entry YourInputType"
+    ( HR
+      ':$$: 'Text "  Missing Entry field"
+      ':$$: HR
+      ':$$: Blank
+      ':$$: WhatHappened
+      ':$$: Indent "Your graph record has no Entry field."
+      ':$$: Blank
+      ':$$: HowItWorks
+      ':$$: Indent "Every graph needs exactly one entry point that defines"
+      ':$$: Indent "what type of input the graph accepts."
+      ':$$: Blank
+      ':$$: Fixes
+      ':$$: Bullet "Add an entry field:"
+      ':$$: CodeLine "entry :: mode :- Entry YourInputType"
     )
   ValidateEntryCount 1 = ()
   ValidateEntryCount _ = DelayedTypeError
-    ('Text "Graph record validation failed: multiple Entry fields"
-     ':$$: 'Text "A graph record must have exactly one Entry field."
+    ( HR
+      ':$$: 'Text "  Multiple Entry fields"
+      ':$$: HR
+      ':$$: Blank
+      ':$$: WhatHappened
+      ':$$: Indent "Your graph record has more than one Entry field."
+      ':$$: Blank
+      ':$$: HowItWorks
+      ':$$: Indent "A graph can only have one entry point. Multiple entries"
+      ':$$: Indent "would be ambiguous - which one starts the graph?"
+      ':$$: Blank
+      ':$$: Fixes
+      ':$$: Bullet "Remove duplicate Entry fields, keeping just one"
     )
 
 -- | Validate Exit count is exactly 1.
 type ValidateExitCount :: Nat -> Constraint
 type family ValidateExitCount n where
   ValidateExitCount 0 = DelayedTypeError
-    ('Text "Graph record validation failed: missing Exit field"
-     ':$$: 'Text "Add a field like: exit :: mode :- Exit YourOutputType"
+    ( HR
+      ':$$: 'Text "  Missing Exit field"
+      ':$$: HR
+      ':$$: Blank
+      ':$$: WhatHappened
+      ':$$: Indent "Your graph record has no Exit field."
+      ':$$: Blank
+      ':$$: HowItWorks
+      ':$$: Indent "Every graph needs exactly one exit point that defines"
+      ':$$: Indent "what type of result the graph produces."
+      ':$$: Blank
+      ':$$: Fixes
+      ':$$: Bullet "Add an exit field:"
+      ':$$: CodeLine "exit :: mode :- Exit YourResultType"
     )
   ValidateExitCount 1 = ()
   ValidateExitCount _ = DelayedTypeError
-    ('Text "Graph record validation failed: multiple Exit fields"
-     ':$$: 'Text "A graph record must have exactly one Exit field."
+    ( HR
+      ':$$: 'Text "  Multiple Exit fields"
+      ':$$: HR
+      ':$$: Blank
+      ':$$: WhatHappened
+      ':$$: Indent "Your graph record has more than one Exit field."
+      ':$$: Blank
+      ':$$: HowItWorks
+      ':$$: Indent "A graph can only have one exit point. Multiple exits"
+      ':$$: Indent "would be ambiguous - which defines the output type?"
+      ':$$: Blank
+      ':$$: Fixes
+      ':$$: Bullet "Remove duplicate Exit fields, keeping just one"
+      ':$$: Bullet "Use a sum type if you need multiple result shapes"
     )
 
 -- | Helper to delay TypeError evaluation.
@@ -723,10 +949,24 @@ type family ValidateGotoTargetsList fieldNames gotos where
 -- | Error for invalid Goto target.
 type InvalidGotoTargetError :: Symbol -> [Symbol] -> Constraint
 type family InvalidGotoTargetError target fieldNames where
-  InvalidGotoTargetError target _ = DelayedTypeError
-    ( 'Text "Graph validation failed: invalid Goto target"
-      ':$$: 'Text "  Goto \"" ':<>: 'Text target ':<>: 'Text "\" references a node that doesn't exist."
-      ':$$: 'Text "Fix: Add a field named \"" ':<>: 'Text target ':<>: 'Text "\" or use Goto Exit for termination."
+  InvalidGotoTargetError target fieldNames = DelayedTypeError
+    ( HR
+      ':$$: 'Text "  Goto target \"" ':<>: 'Text target ':<>: 'Text "\" not found"
+      ':$$: HR
+      ':$$: Blank
+      ':$$: WhatHappened
+      ':$$: Indent "Your handler has:"
+      ':$$: CodeLine "Goto \"" ':<>: 'Text target ':<>: 'Text "\" payload"
+      ':$$: Blank
+      ':$$: Indent "But no field named \"" ':<>: 'Text target ':<>: 'Text "\" exists in the graph."
+      ':$$: Blank
+      ':$$: Indent "Available fields:"
+      ':$$: FormatSymbolList fieldNames
+      ':$$: Blank
+      ':$$: Fixes
+      ':$$: Bullet "Add a field: " ':<>: 'Text target ':<>: 'Text " :: mode :- ..."
+      ':$$: Bullet "Use Goto Exit to terminate the graph"
+      ':$$: Bullet "Check spelling of the target name"
     )
 
 -- ════════════════════════════════════════════════════════════════════════════

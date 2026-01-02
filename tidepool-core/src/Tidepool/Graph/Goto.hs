@@ -97,6 +97,10 @@ import Effectful hiding (inject)
 import Effectful.Dispatch.Dynamic
 import qualified Effectful.State.Static.Local as EState
 import GHC.TypeLits (Symbol, KnownSymbol, symbolVal, TypeError, ErrorMessage(..))
+import Tidepool.Graph.Errors
+  ( HR, Blank, WhatHappened, HowItWorks, Fixes, Example
+  , Indent, CodeLine, Bullet, FormatTargetList
+  )
 import Text.Ginger.TH (TypedTemplate)
 import Text.Parsec.Pos (SourcePos)
 
@@ -137,10 +141,36 @@ data OneOf ts where
 type NonEmptyList :: [Type] -> Constraint
 type family NonEmptyList ts where
   NonEmptyList '[] = TypeError
-    ('Text "Empty type list is not allowed"
-     ':$$: 'Text ""
-     ':$$: 'Text "OneOf '[] and GotoChoice '[] have no valid constructors."
-     ':$$: 'Text "Ensure your target list contains at least one transition."
+    ( HR
+      ':$$: 'Text "  Handler has no exit points (empty target list)"
+      ':$$: HR
+      ':$$: Blank
+      ':$$: WhatHappened
+      ':$$: Indent "Your handler returns GotoChoice '[]"
+      ':$$: Indent "This type has NO constructors - there's no way to return a value!"
+      ':$$: Blank
+      ':$$: HowItWorks
+      ':$$: Indent "Every handler must be able to exit. The type system enforces"
+      ':$$: Indent "this by requiring at least one target in GotoChoice:"
+      ':$$: Blank
+      ':$$: CodeLine "GotoChoice '[]                               -- Impossible!"
+      ':$$: CodeLine "GotoChoice '[To Exit Result]                 -- Can exit"
+      ':$$: CodeLine "GotoChoice '[To \"next\" X, To Exit Result]    -- Can continue OR exit"
+      ':$$: Blank
+      ':$$: Indent "This is like requiring every code path to return a value."
+      ':$$: Indent "Dead ends are compile errors, not runtime mysteries."
+      ':$$: Blank
+      ':$$: Fixes
+      ':$$: Bullet "Add Goto Exit to UsesEffects: UsesEffects '[Goto Exit YourResultType]"
+      ':$$: Bullet "Add a transition: UsesEffects '[Goto \"nextNode\" Payload]"
+      ':$$: Bullet "Check that you haven't accidentally filtered out all targets"
+      ':$$: Blank
+      ':$$: Example
+      ':$$: CodeLine "-- A handler that can either continue or exit:"
+      ':$$: CodeLine "router :: Intent -> Eff es (GotoChoice '[To \"process\" Data, To Exit Done])"
+      ':$$: CodeLine "router intent = case intent of"
+      ':$$: CodeLine "  NeedMore x -> pure $ gotoChoice @\"process\" x"
+      ':$$: CodeLine "  Finished   -> pure $ gotoExit Done"
     )
   NonEmptyList (_ ': _) = ()
 
@@ -285,14 +315,50 @@ type family GotoElemC g targets where
 type GotoElemC' :: Type -> [Type] -> Bool -> Constraint
 type family GotoElemC' g targets result where
   GotoElemC' _ _ 'True = ()
+  GotoElemC' (To (name :: Symbol) payload) targets 'False = TypeError
+    ( HR
+      ':$$: 'Text "  Unknown transition target: \"" ':<>: 'Text name ':<>: 'Text "\""
+      ':$$: HR
+      ':$$: Blank
+      ':$$: WhatHappened
+      ':$$: Indent "You wrote:"
+      ':$$: CodeLine "gotoChoice @\"" ':<>: 'Text name ':<>: 'Text "\" ..."
+      ':$$: Blank
+      ':$$: Indent "But this target is not in your handler's allowed transitions."
+      ':$$: Blank
+      ':$$: Indent "Valid targets for this handler:"
+      ':$$: FormatTargetList targets
+      ':$$: Blank
+      ':$$: HowItWorks
+      ':$$: Indent "Handlers declare their possible exits via UsesEffects:"
+      ':$$: Blank
+      ':$$: CodeLine "myHandler :: X -> Eff es (GotoChoice '[To \"a\" A, To Exit B])"
+      ':$$: CodeLine "                                      ^^^^^^^^^^^^^^^^^^^^^^^"
+      ':$$: CodeLine "                                      Only THESE targets are valid"
+      ':$$: Blank
+      ':$$: Indent "The type checker ensures you can only transition to declared"
+      ':$$: Indent "targets. This prevents runtime \"node not found\" errors."
+      ':$$: Blank
+      ':$$: Fixes
+      ':$$: Bullet "Check spelling of the target name"
+      ':$$: Bullet "Add the target: UsesEffects '[Goto \"" ':<>: 'Text name ':<>: 'Text "\" " ':<>: 'ShowType payload ':<>: 'Text ", ...]"
+      ':$$: Bullet "Use gotoExit if you meant to exit the graph"
+      ':$$: Blank
+      ':$$: Example
+      ':$$: CodeLine "-- Your handler signature declares valid targets:"
+      ':$$: CodeLine "router :: Intent -> Eff es (GotoChoice '[To \"refund\" Msg, To Exit Done])"
+      ':$$: CodeLine ""
+      ':$$: CodeLine "-- Then you can only use those targets:"
+      ':$$: CodeLine "router intent = case intent of"
+      ':$$: CodeLine "  Refund -> pure $ gotoChoice @\"refund\" msg  -- OK: declared above"
+      ':$$: CodeLine "  Done   -> pure $ gotoExit done              -- OK: Exit declared"
+      ':$$: CodeLine "  Other  -> pure $ gotoChoice @\"faq\" msg     -- ERROR: not declared!"
+    )
+  -- Fallback for non-To types (shouldn't happen in practice)
   GotoElemC' g targets 'False = TypeError
-    ( 'Text "Invalid transition target"
-      ':$$: 'Text ""
-      ':$$: 'Text "The transition:"
-      ':$$: 'Text "  " ':<>: 'ShowType g
-      ':$$: 'Text ""
-      ':$$: 'Text "is not in the allowed targets:"
-      ':$$: 'Text "  " ':<>: 'ShowType targets
+    ( 'Text "Invalid transition target: " ':<>: 'ShowType g
+      ':$$: 'Text "Expected a To marker but got something else."
+      ':$$: 'Text "Valid targets: " ':<>: 'ShowType targets
     )
 
 -- | Construct a 'GotoChoice' for a named node target.

@@ -30,6 +30,7 @@ library
         Tidepool.Graph.Generic
         Tidepool.Graph.Generic.Core
         Tidepool.Graph.Goto
+        Tidepool.Graph.Errors
         Tidepool.Graph.Execute
         Tidepool.Graph.Edges
         Tidepool.Graph.Validate

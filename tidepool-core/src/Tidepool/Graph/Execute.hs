@@ -56,6 +56,10 @@ import Effectful (Effect, Eff, type (:>))
 import GHC.Generics (Generic(..))
 import GHC.Records (HasField(..))
 import GHC.TypeLits (Symbol, KnownSymbol, TypeError, ErrorMessage(..))
+import Tidepool.Graph.Errors
+  ( HR, Blank, WhatHappened, HowItWorks, Fixes
+  , Indent, CodeLine, Bullet
+  )
 import Text.Ginger.TH (TypedTemplate, runTypedTemplate)
 import Text.Parsec.Pos (SourcePos)
 
@@ -324,10 +328,28 @@ class DispatchGoto graph targets es exitType where
 -- A GotoChoice must have at least one target. This instance produces a clear
 -- type error rather than an opaque "No instance" message.
 instance TypeError
-  ('Text "Cannot dispatch on empty target list"
-   ':$$: 'Text ""
-   ':$$: 'Text "A GotoChoice must have at least one target (typically To Exit exitType)."
-   ':$$: 'Text "Check that your UsesEffects annotation includes valid Goto effects."
+  ( HR
+    ':$$: 'Text "  Cannot dispatch: handler has no exit points"
+    ':$$: HR
+    ':$$: Blank
+    ':$$: WhatHappened
+    ':$$: Indent "dispatchGoto was called with GotoChoice '[]"
+    ':$$: Indent "This type has no constructors - the handler can never return!"
+    ':$$: Blank
+    ':$$: HowItWorks
+    ':$$: Indent "The graph executor pattern-matches on GotoChoice to determine"
+    ':$$: Indent "which handler to call next. With an empty target list, there's"
+    ':$$: Indent "nothing to match on."
+    ':$$: Blank
+    ':$$: CodeLine "dispatchGoto graph (GotoChoice oneOf)"
+    ':$$: CodeLine "                             ^^^^"
+    ':$$: CodeLine "                             OneOf '[] has no constructors!"
+    ':$$: Blank
+    ':$$: Fixes
+    ':$$: Bullet "Add at least one target to your UsesEffects annotation:"
+    ':$$: CodeLine "  UsesEffects '[Goto Exit ResultType]"
+    ':$$: Bullet "Or add transitions to other nodes:"
+    ':$$: CodeLine "  UsesEffects '[Goto \"nextNode\" Payload, Goto Exit Result]"
   ) => DispatchGoto graph '[] es exitType where
   dispatchGoto = error "unreachable: empty target list"
 
@@ -363,19 +385,67 @@ instance {-# OVERLAPPABLE #-}
 -- Self-loops require tracking the "current" handler to re-invoke.
 -- This instance provides a clear error directing users to the correct API.
 instance TypeError
-  ('Text "Self-loop dispatch requires DispatchGotoWithSelf"
-   ':$$: 'Text ""
-   ':$$: 'Text "To Self transitions need an explicit self-handler."
-   ':$$: 'Text "Use dispatchGotoWithSelf instead of dispatchGoto."
+  ( HR
+    ':$$: 'Text "  Self-loop requires special dispatch"
+    ':$$: HR
+    ':$$: Blank
+    ':$$: WhatHappened
+    ':$$: Indent "Your handler can 'gotoSelf', but you called 'dispatchGoto'."
+    ':$$: Indent "The standard dispatcher doesn't know which handler to re-invoke."
+    ':$$: Blank
+    ':$$: HowItWorks
+    ':$$: Indent "Normal dispatch:  GotoChoice -> find handler by name -> call it"
+    ':$$: Indent "Self dispatch:    GotoChoice -> ??? -> call... which handler?"
+    ':$$: Blank
+    ':$$: Indent "The graph record has fields like 'compute', 'route', etc."
+    ':$$: Indent "But there's no 'self' field! We need you to tell us what"
+    ':$$: Indent "'self' means for this particular dispatch."
+    ':$$: Blank
+    ':$$: Fixes
+    ':$$: Bullet "Use dispatchGotoWithSelf and pass the self-handler:"
+    ':$$: Blank
+    ':$$: CodeLine "-- Instead of:"
+    ':$$: CodeLine "choice <- loopHandler input"
+    ':$$: CodeLine "result <- dispatchGoto handlers choice        -- ERROR"
+    ':$$: Blank
+    ':$$: CodeLine "-- Use:"
+    ':$$: CodeLine "choice <- loopHandler input"
+    ':$$: CodeLine "result <- dispatchGotoWithSelf loopHandler handlers choice  -- OK"
+    ':$$: CodeLine "                               ^^^^^^^^^^^"
+    ':$$: CodeLine "                               \"when you see Self, call this\""
   ) => DispatchGoto graph '[To Self payload] es exitType where
   dispatchGoto = error "unreachable: self-loop"
 
 -- | Self first with more targets: use DispatchGotoWithSelf instead.
 instance {-# OVERLAPPABLE #-} TypeError
-  ('Text "Self-loop dispatch requires DispatchGotoWithSelf"
-   ':$$: 'Text ""
-   ':$$: 'Text "To Self transitions need an explicit self-handler."
-   ':$$: 'Text "Use dispatchGotoWithSelf instead of dispatchGoto."
+  ( HR
+    ':$$: 'Text "  Self-loop requires special dispatch"
+    ':$$: HR
+    ':$$: Blank
+    ':$$: WhatHappened
+    ':$$: Indent "Your handler can 'gotoSelf', but you called 'dispatchGoto'."
+    ':$$: Indent "The standard dispatcher doesn't know which handler to re-invoke."
+    ':$$: Blank
+    ':$$: HowItWorks
+    ':$$: Indent "Normal dispatch:  GotoChoice -> find handler by name -> call it"
+    ':$$: Indent "Self dispatch:    GotoChoice -> ??? -> call... which handler?"
+    ':$$: Blank
+    ':$$: Indent "The graph record has fields like 'compute', 'route', etc."
+    ':$$: Indent "But there's no 'self' field! We need you to tell us what"
+    ':$$: Indent "'self' means for this particular dispatch."
+    ':$$: Blank
+    ':$$: Fixes
+    ':$$: Bullet "Use dispatchGotoWithSelf and pass the self-handler:"
+    ':$$: Blank
+    ':$$: CodeLine "-- Instead of:"
+    ':$$: CodeLine "choice <- loopHandler input"
+    ':$$: CodeLine "result <- dispatchGoto handlers choice        -- ERROR"
+    ':$$: Blank
+    ':$$: CodeLine "-- Use:"
+    ':$$: CodeLine "choice <- loopHandler input"
+    ':$$: CodeLine "result <- dispatchGotoWithSelf loopHandler handlers choice  -- OK"
+    ':$$: CodeLine "                               ^^^^^^^^^^^"
+    ':$$: CodeLine "                               \"when you see Self, call this\""
   ) => DispatchGoto graph (To Self payload ': rest) es exitType where
   dispatchGoto = error "unreachable: self-loop"
 
