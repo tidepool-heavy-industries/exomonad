@@ -1,0 +1,46 @@
+# Single-stage Dockerfile for Tidepool CI
+# Pre-builds all Haskell dependencies
+FROM haskell:9.6
+
+WORKDIR /workspace
+
+# Install system dependencies and tools
+RUN apt-get update && apt-get install -y \
+    git \
+    curl \
+    ca-certificates \
+    libgmp-dev \
+    zlib1g-dev \
+    nodejs \
+    npm \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install just
+RUN curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to /usr/local/bin
+
+# Install hlint
+RUN curl -sSL https://github.com/ndmitchell/hlint/releases/download/v3.8/hlint-3.8-x86_64-linux.tar.gz | tar xz \
+    && mv hlint-3.8/hlint /usr/local/bin/ \
+    && rm -rf hlint-3.8
+
+# Copy all project files (needed for cabal to resolve dependencies)
+COPY . .
+
+# Update cabal index
+RUN cabal update
+
+# Build everything once to populate cabal store with all dependencies
+# This is the expensive operation we're caching
+RUN cabal build all
+
+# Clean up build artifacts but keep the cabal store
+# This keeps the container smaller while preserving cached dependencies
+RUN rm -rf dist-newstyle
+
+# Set up working directory for CI runs
+WORKDIR /build
+
+# When CI runs, it will:
+# 1. Mount the repo at /build
+# 2. Run cabal build (fast, deps already in ~/.cabal/store)
+# 3. Run tests

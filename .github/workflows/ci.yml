@@ -2,34 +2,31 @@ name: CI
 
 on:
   pull_request:
+    types: [opened, ready_for_review]  # Only run when PR is opened or marked ready
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.github/README.md'
   push:
     branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.github/README.md'
 
 jobs:
   haskell:
     runs-on: ubuntu-latest
     container:
-      image: haskell:9.6
+      # Use pre-built container with all dependencies cached
+      image: ghcr.io/${{ github.repository }}/ci-cache:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup just
-        uses: extractions/setup-just@v2
-
-      - name: Install hlint
-        run: |
-          curl -sSL https://github.com/ndmitchell/hlint/releases/download/v3.8/hlint-3.8-x86_64-linux.tar.gz | tar xz
-          mv hlint-3.8/hlint /usr/local/bin/
-
-      - name: Cache cabal store
-        uses: actions/cache@v4
-        with:
-          # In container, HOME=/github/home, so cabal store is there
-          path: ~/.cabal/store
-          key: ${{ runner.os }}-ghc9.6-cabal-${{ hashFiles('**/*.cabal', 'cabal.project') }}
-          restore-keys: |
-            ${{ runner.os }}-ghc9.6-cabal-
-
+      # Dependencies are pre-built in the container, so we only need to cache dist-newstyle
       - name: Cache dist-newstyle
         uses: actions/cache@v4
         with:
@@ -38,9 +35,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-ghc9.6-dist-${{ hashFiles('**/*.cabal', 'cabal.project') }}-
             ${{ runner.os }}-ghc9.6-dist-
-
-      - name: Update cabal index
-        run: cabal update
 
       - name: Build
         run: |
@@ -61,11 +55,6 @@ jobs:
 
       - name: Test
         run: just test
-
-      - name: Install Node.js
-        run: |
-          curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-          apt-get install -y nodejs
 
       - name: Generate TypeScript package
         run: |
