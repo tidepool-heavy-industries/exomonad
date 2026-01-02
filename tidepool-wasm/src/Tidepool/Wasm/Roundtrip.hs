@@ -93,7 +93,7 @@ roundtripImpl input =
 #if defined(wasm32_HOST_ARCH)
 roundtripSerializableEffect :: JSString -> IO JSString
 roundtripSerializableEffect input =
-  pure $ toJSString $ roundtripImpl @SerializableEffect $ fromJSString input
+  pure $ toJSString $ T.unpack $ roundtripImpl @SerializableEffect $ T.pack $ fromJSString input
 #else
 roundtripSerializableEffect :: Text -> IO Text
 roundtripSerializableEffect = pure . roundtripImpl @SerializableEffect
@@ -104,7 +104,7 @@ roundtripSerializableEffect = pure . roundtripImpl @SerializableEffect
 #if defined(wasm32_HOST_ARCH)
 roundtripEffectResult :: JSString -> IO JSString
 roundtripEffectResult input =
-  pure $ toJSString $ roundtripImpl @EffectResult $ fromJSString input
+  pure $ toJSString $ T.unpack $ roundtripImpl @EffectResult $ T.pack $ fromJSString input
 #else
 roundtripEffectResult :: Text -> IO Text
 roundtripEffectResult = pure . roundtripImpl @EffectResult
@@ -115,7 +115,7 @@ roundtripEffectResult = pure . roundtripImpl @EffectResult
 #if defined(wasm32_HOST_ARCH)
 roundtripExecutionPhase :: JSString -> IO JSString
 roundtripExecutionPhase input =
-  pure $ toJSString $ roundtripImpl @ExecutionPhase $ fromJSString input
+  pure $ toJSString $ T.unpack $ roundtripImpl @ExecutionPhase $ T.pack $ fromJSString input
 #else
 roundtripExecutionPhase :: Text -> IO Text
 roundtripExecutionPhase = pure . roundtripImpl @ExecutionPhase
@@ -126,7 +126,7 @@ roundtripExecutionPhase = pure . roundtripImpl @ExecutionPhase
 #if defined(wasm32_HOST_ARCH)
 roundtripGraphState :: JSString -> IO JSString
 roundtripGraphState input =
-  pure $ toJSString $ roundtripImpl @GraphState $ fromJSString input
+  pure $ toJSString $ T.unpack $ roundtripImpl @GraphState $ T.pack $ fromJSString input
 #else
 roundtripGraphState :: Text -> IO Text
 roundtripGraphState = pure . roundtripImpl @GraphState
@@ -137,7 +137,7 @@ roundtripGraphState = pure . roundtripImpl @GraphState
 #if defined(wasm32_HOST_ARCH)
 roundtripStepOutput :: JSString -> IO JSString
 roundtripStepOutput input =
-  pure $ toJSString $ roundtripImpl @StepOutput $ fromJSString input
+  pure $ toJSString $ T.unpack $ roundtripImpl @StepOutput $ T.pack $ fromJSString input
 #else
 roundtripStepOutput :: Text -> IO Text
 roundtripStepOutput = pure . roundtripImpl @StepOutput
