@@ -8,11 +8,76 @@ import type { LlmCompleteEffect, EffectResult } from "tidepool-generated-ts";
 import { successResult, errorResult } from "tidepool-generated-ts";
 
 /**
- * Environment with AI binding.
+ * Rate limit configuration.
+ */
+const RATE_LIMITS = {
+  perMinute: 5,
+  perHour: 15,
+} as const;
+
+/**
+ * Environment with AI and KV bindings.
  * Uses Cloudflare's Ai type from @cloudflare/workers-types.
  */
 export interface LlmEnv {
   AI: Ai;
+  RATE_LIMIT_KV?: KVNamespace;
+}
+
+/**
+ * Get the current minute timestamp (floored to minute boundary).
+ */
+function getCurrentMinuteTimestamp(): number {
+  return Math.floor(Date.now() / 60000);
+}
+
+/**
+ * Get the current hour timestamp (floored to hour boundary).
+ */
+function getCurrentHourTimestamp(): number {
+  return Math.floor(Date.now() / 3600000);
+}
+
+/**
+ * Check and update rate limits using fixed time windows (minute/hour buckets).
+ * Returns null if within limits, or an error message if exceeded.
+ *
+ * Note: This is best-effort rate limiting. Due to KV's eventual consistency,
+ * concurrent requests may briefly exceed limits. Acceptable for non-critical
+ * use cases like alert throttling.
+ */
+async function checkRateLimit(kv: KVNamespace): Promise<string | null> {
+  const minuteTs = getCurrentMinuteTimestamp();
+  const hourTs = getCurrentHourTimestamp();
+
+  const minuteKey = `llm-rate:min:${minuteTs}`;
+  const hourKey = `llm-rate:hr:${hourTs}`;
+
+  // Read current counts
+  const [minuteCountStr, hourCountStr] = await Promise.all([
+    kv.get(minuteKey),
+    kv.get(hourKey),
+  ]);
+
+  const minuteCount = minuteCountStr ? parseInt(minuteCountStr, 10) : 0;
+  const hourCount = hourCountStr ? parseInt(hourCountStr, 10) : 0;
+
+  // Check limits
+  if (minuteCount >= RATE_LIMITS.perMinute) {
+    return `Rate limit exceeded: ${RATE_LIMITS.perMinute} calls per minute`;
+  }
+
+  if (hourCount >= RATE_LIMITS.perHour) {
+    return `Rate limit exceeded: ${RATE_LIMITS.perHour} calls per hour`;
+  }
+
+  // Increment counts with appropriate TTLs
+  await Promise.all([
+    kv.put(minuteKey, String(minuteCount + 1), { expirationTtl: 120 }), // 2 min TTL
+    kv.put(hourKey, String(hourCount + 1), { expirationTtl: 7200 }), // 2 hour TTL
+  ]);
+
+  return null;
 }
 
 /**
@@ -25,6 +90,14 @@ export async function handleLlmComplete(
   effect: LlmCompleteEffect,
   env: LlmEnv
 ): Promise<EffectResult> {
+  // Check rate limits if KV is available
+  if (env.RATE_LIMIT_KV) {
+    const rateLimitError = await checkRateLimit(env.RATE_LIMIT_KV);
+    if (rateLimitError) {
+      return errorResult(rateLimitError);
+    }
+  }
+
   try {
     const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
       { role: "system", content: effect.eff_system_prompt },
