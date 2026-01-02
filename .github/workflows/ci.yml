@@ -43,7 +43,18 @@ jobs:
         run: cabal update
 
       - name: Build
-        run: just build
+        run: |
+          just build 2>&1 | tee build.log
+          echo ""
+          echo "=== BUILD ANALYSIS ==="
+          echo "Modules compiled: $(grep -c 'Compiling' build.log || echo 0)"
+          echo "Packages built: $(grep -c 'Building' build.log || echo 0)"
+          echo ""
+          echo "=== First 30 compile lines ==="
+          grep -E '(Compiling|Building|Configuring)' build.log | head -30
+          echo ""
+          echo "=== Dependency rebuilds (if any) ==="
+          grep -E 'Building (library|executable)' build.log | grep -v tidepool | head -10 || echo "None - using cached deps"
 
       - name: Lint Haskell
         run: just lint-hs
