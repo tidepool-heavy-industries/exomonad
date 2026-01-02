@@ -131,13 +131,20 @@ uninstall-hooks:
 
 # Build WASM blob (requires nix develop .#wasm)
 build-wasm:
-    @echo "── Building tidepool-reactor with wasm32-wasi-ghc ──"
-    nix develop .#wasm --command bash -c "wasm32-wasi-cabal build tidepool-reactor"
-    @echo ""
-    @echo "── Copying WASM to deploy/src/tidepool.wasm ──"
-    cp "$(find dist-newstyle/build/wasm32-wasi -name 'tidepool-reactor.wasm' | head -1)" deploy/src/tidepool.wasm
-    @ls -lh deploy/src/tidepool.wasm
-    @echo "✓ WASM blob ready"
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "── Building tidepool-reactor with wasm32-wasi-ghc ──"
+    nix develop .#wasm --command bash -c ' \
+        wasm32-wasi-cabal build tidepool-reactor && \
+        echo "" && \
+        echo "── Optimizing WASM with wasm-opt -Oz ──" && \
+        WASM=$(find dist-newstyle/build/wasm32-wasi -name "tidepool-reactor.wasm" | head -1) && \
+        ls -lh "$WASM" && \
+        wasm-opt -Oz "$WASM" -o deploy/src/tidepool.wasm && \
+        echo "  ↓ optimized to:" && \
+        ls -lh deploy/src/tidepool.wasm \
+    '
+    echo "✓ WASM blob ready"
 
 # Deploy to Cloudflare Workers
 deploy-worker:
