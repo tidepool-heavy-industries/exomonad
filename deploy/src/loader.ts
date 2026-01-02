@@ -109,6 +109,7 @@ export async function loadMachine(options: LoaderOptions): Promise<GraphMachine>
 
   // Initialize GHC runtime
   exports.hs_init(0, 0);
+  exports.initRegistry();  // Populate graph registry
 
   if (debug) {
     console.log("[Tidepool] WASM module loaded");
