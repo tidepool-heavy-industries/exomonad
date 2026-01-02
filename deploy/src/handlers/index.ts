@@ -15,6 +15,7 @@ import { dispatchInternalEffect, errorResult, isYieldedEffect } from "tidepool-g
 import { handleLogInfo, handleLogError } from "./log.js";
 import { handleLlmComplete, type LlmEnv } from "./llm.js";
 import { handleHabitica, type HabiticaConfig } from "./habitica.js";
+import { logEffectExecution, type LogContext } from "../structured-log.js";
 
 // Re-export handlers for direct testing
 export { handleLogInfo, handleLogError } from "./log.js";
@@ -59,30 +60,57 @@ const internalHandlers: InternalEffectHandlers<Env> = {
   },
 };
 
+// Re-export LogContext for callers
+export type { LogContext } from "../structured-log.js";
+
 /**
  * Execute an effect and return the result.
  *
  * Dispatches to the appropriate handler based on effect type.
  * Uses generated dispatcher for internal effects.
  * Wraps all handlers in try/catch for consistent error handling.
+ *
+ * @param effect - The effect to execute
+ * @param env - Environment with required bindings
+ * @param logCtx - Optional context for structured logging (session_id, graph_id)
  */
 export async function executeEffect(
   effect: SerializableEffect,
-  env: Env
+  env: Env,
+  logCtx?: LogContext
 ): Promise<EffectResult> {
+  const startTime = performance.now();
+
   try {
     // Yielded effects require caller context (e.g., TelegramDO for Telegram effects)
     if (isYieldedEffect(effect)) {
-      return errorResult(
+      const result = errorResult(
         `Yielded effect "${effect.type}" requires caller context. ` +
           "This effect should be yielded to the caller, not executed internally."
       );
+      if (logCtx) {
+        logEffectExecution(logCtx, effect, result, performance.now() - startTime);
+      }
+      return result;
     }
 
     // Use generated dispatcher for internal effects
-    return await dispatchInternalEffect(effect, internalHandlers, env);
+    const result = await dispatchInternalEffect(effect, internalHandlers, env);
+
+    // Log with structured format if context provided
+    if (logCtx) {
+      logEffectExecution(logCtx, effect, result, performance.now() - startTime);
+    }
+
+    return result;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    return errorResult(`Effect execution failed: ${message}`);
+    const result = errorResult(`Effect execution failed: ${message}`);
+
+    if (logCtx) {
+      logEffectExecution(logCtx, effect, result, performance.now() - startTime);
+    }
+
+    return result;
   }
 }

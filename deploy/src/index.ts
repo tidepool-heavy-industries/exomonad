@@ -14,8 +14,9 @@ import type {
   SessionState,
 } from "tidepool-generated-ts";
 import { SESSION_TIMEOUT_MS } from "tidepool-generated-ts";
-import { executeEffect, type Env as HandlersEnv } from "./handlers/index.js";
+import { executeEffect, type Env as HandlersEnv, type LogContext } from "./handlers/index.js";
 import { runLoop } from "./loop.js";
+import { logGraphEvent } from "./structured-log.js";
 import { routeWebhook, type WebhookEnv } from "./telegram/webhook.js";
 
 // Re-export TelegramDO for Cloudflare Workers
@@ -111,7 +112,8 @@ export class StateMachineDO extends DurableObject<Env> {
     if (!this.sessionId) {
       this.sessionId = this.ctx.id.name ?? crypto.randomUUID();
     }
-    console.log(`[StateMachineDO] start: session=${this.sessionId}, graph=${graphId}`);
+    const logCtx: LogContext = { sessionId: this.sessionId, graphId };
+    logGraphEvent(logCtx, "start");
 
     try {
       // Load WASM if not already loaded
@@ -204,23 +206,19 @@ export class StateMachineDO extends DurableObject<Env> {
   ): Promise<Response> {
     const sessionId = this.sessionId!;
     const sessionKey = `session:${sessionId}`;
+    const logCtx: LogContext = { sessionId, graphId };
 
     // Use the shared loop helper
     const result = await runLoop(
       (effectResult) => this.machine!.step(graphId as import("./loader.js").GraphId, effectResult),
       output,
-      (effect) => {
-        const promise = executeEffect(effect, this.env);
-        promise.then((r) => {
-          console.log(`[StateMachineDO] effect ${effect.type}: ${r.type === "error" ? `error: ${r.message}` : "ok"}`);
-        });
-        return promise;
-      }
+      (effect) => executeEffect(effect, this.env, logCtx)
     );
 
     switch (result.type) {
       case "yield":
       case "error_yield": {
+        logGraphEvent(logCtx, "yield", { effect_type: result.effect.type });
         // Save session state for resume (error_yield shouldn't happen in HTTP mode)
         const session: SessionState = {
           graphId,
@@ -242,6 +240,7 @@ export class StateMachineDO extends DurableObject<Env> {
       }
 
       case "done":
+        logGraphEvent(logCtx, "complete");
         await this.ctx.storage.delete(sessionKey);
         return Response.json({
           type: "done",
@@ -249,6 +248,7 @@ export class StateMachineDO extends DurableObject<Env> {
         });
 
       case "error":
+        logGraphEvent(logCtx, "error", { error: result.error });
         await this.ctx.storage.delete(sessionKey);
         return Response.json({
           type: "error",
@@ -482,12 +482,13 @@ export class StateMachineDO extends DurableObject<Env> {
     output: Awaited<ReturnType<GraphMachine["initialize"]>>
   ): Promise<void> {
     const sessionKey = `session:${sessionId}`;
+    const logCtx: LogContext = { sessionId, graphId };
 
     // Use the shared loop helper with WS-specific options
     const result = await runLoop(
       (effectResult) => this.machine!.step(graphId as import("./loader.js").GraphId, effectResult),
       output,
-      (effect) => executeEffect(effect, this.env),
+      (effect) => executeEffect(effect, this.env, logCtx),
       {
         onProgress: (effect) => {
           this.send(ws, {
@@ -503,6 +504,7 @@ export class StateMachineDO extends DurableObject<Env> {
     switch (result.type) {
       case "yield":
       case "error_yield": {
+        logGraphEvent(logCtx, "yield", { effect_type: result.effect.type });
         // Save session state for resume/retry
         const session: SessionState = {
           graphId,
@@ -522,6 +524,7 @@ export class StateMachineDO extends DurableObject<Env> {
       }
 
       case "done":
+        logGraphEvent(logCtx, "complete");
         await this.ctx.storage.delete(sessionKey);
         this.send(ws, {
           type: "done",
@@ -530,6 +533,7 @@ export class StateMachineDO extends DurableObject<Env> {
         return;
 
       case "error":
+        logGraphEvent(logCtx, "error", { error: result.error });
         await this.ctx.storage.delete(sessionKey);
         this.send(ws, {
           type: "error",
