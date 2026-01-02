@@ -12,7 +12,7 @@
 import WebSocket from 'ws';
 
 const WS_URL = process.env.WS_URL || 'ws://localhost:8787/session/test123';
-const GRAPH_ID = process.env.GRAPH_ID || 'TestGraph';
+const GRAPH_ID = process.env.GRAPH_ID || 'test';
 const INPUT = process.env.INPUT ? JSON.parse(process.env.INPUT) : 5;
 
 console.log(`Connecting to ${WS_URL}...`);

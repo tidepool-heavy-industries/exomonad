@@ -144,7 +144,7 @@ export async function answerCallbackQuery(
 // Inline Keyboard Support
 // =============================================================================
 
-import type { TelegramInlineButton } from "../protocol.js";
+import type { TelegramInlineButton } from "tidepool-generated";
 
 /**
  * Convert our InlineButton format to Telegram's InlineKeyboardButton.

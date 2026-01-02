@@ -24,7 +24,7 @@ import type {
   TelegramIncomingMessage,
   SerializableEffect,
   EffectResult,
-} from "../protocol.js";
+} from "tidepool-generated";
 import {
   handleTelegramSend,
   handleTelegramReceive,
@@ -291,7 +291,7 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
   }
 
   /**
-   * Start a new StateMachineDO session with the HabiticaRoutingGraph.
+   * Start a new StateMachineDO session with the habitica graph.
    *
    * Converts the incoming message to RawInput and initiates graph execution.
    * TelegramDO then polls the StateMachineDO (via HTTP /resume) to retrieve
@@ -339,7 +339,7 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            graphId: "HabiticaRoutingGraph",
+            graphId: "habitica",
             input: { type: "text", text: rawInput }, // RawInput expects {type, text}
             telegramChatId: chatId,
           }),
