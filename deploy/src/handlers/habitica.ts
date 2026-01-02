@@ -153,12 +153,15 @@ export async function handleHabitica(
 
       case "CreateTodo": {
         const payload = effect.eff_hab_payload as { title: string };
+        const body = JSON.stringify({ text: payload.title, type: "todo" });
+        console.log(`[Habitica] CreateTodo: "${payload.title}"`);
         const resp = await fetch(`${HABITICA_API}/tasks/user`, {
           method: "POST",
           headers,
-          body: JSON.stringify({ text: payload.title, type: "todo" }),
+          body,
         });
         const data = (await resp.json()) as HabiticaResponse<HabiticaTask>;
+        console.log(`[Habitica] CreateTodo response: ${resp.ok ? `ok, id=${data.data._id}` : `error ${resp.status}: ${data.message}`}`);
         if (!resp.ok) throw new Error(data.message || "CreateTodo failed");
         return successResult({ unTodoId: data.data._id });
       }

@@ -240,28 +240,51 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
       `[TelegramDO] Received message from ${user?.username ?? user?.id}: ${JSON.stringify(incomingMessage)}`
     );
 
+    // Log state for debugging resume logic
+    console.log(`[TelegramDO] state: waiting=${state.waitingForReceive}, effect=${state.pendingEffect?.type ?? 'none'}, session=${state.wasmSessionId ?? 'none'}`);
+
     // Add to pending messages queue
     state.pendingMessages.push(incomingMessage);
     state.lastActivity = Date.now();
 
-    // If we're waiting for a Receive, resume processing
-    if (state.waitingForReceive && state.pendingEffect) {
-      console.log(`[TelegramDO] Resuming blocked Receive`);
+    // If we're waiting for a Receive/Confirm, resume processing
+    if (state.waitingForReceive && state.pendingEffect && state.wasmSessionId) {
+      console.log(`[TelegramDO] Resuming blocked effect: ${state.pendingEffect.type}`);
       state.waitingForReceive = false;
       const effect = state.pendingEffect;
-      state.pendingEffect = null;
+      // Don't clear pendingEffect yet - handleYieldedEffect may need to check if buttons sent
 
+      this.state = state;
       await this.saveState();
 
-      // Process the effect now that we have messages
-      return this.processEffect(effect, state);
+      // Get StateMachineDO stub for resuming
+      const doId = this.env.STATE_MACHINE.idFromName(state.wasmSessionId);
+      const stub = this.env.STATE_MACHINE.get(doId);
+
+      // Re-run the effect loop - handleYieldedEffect will process the pending effect
+      // with the new messages in the queue
+      await this.handleGraphResult(state.chatId, state.wasmSessionId, stub, {
+        type: "yield",
+        effect,
+        sessionId: state.wasmSessionId,
+      });
+      return new Response("OK");
     }
 
     await this.saveState();
 
-    // If no active session, start a new StateMachineDO session
-    if (!state.wasmSessionId) {
-      await this.startGraphSession(chatId, incomingMessage);
+    // If no active session OR we have a stale session (not waiting for input),
+    // start a new graph session for text messages
+    if (incomingMessage.type === "text") {
+      if (!state.wasmSessionId || !state.waitingForReceive) {
+        // Clear any stale session state
+        state.wasmSessionId = null;
+        state.pendingEffect = null;
+        state.pendingMessages = [incomingMessage]; // Keep only current message
+        this.state = state;
+        await this.saveState();
+        await this.startGraphSession(chatId, incomingMessage);
+      }
     }
 
     return new Response("OK");
@@ -317,7 +340,7 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             graphId: "HabiticaRoutingGraph",
-            input: { rawInput }, // RawInput is a newtype, pass as object
+            input: { type: "text", text: rawInput }, // RawInput expects {type, text}
             telegramChatId: chatId,
           }),
         })

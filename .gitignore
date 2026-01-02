@@ -20,3 +20,4 @@ deploy/.dev.vars
 
 # Generated TypeScript package
 tidepool-generated-ts/output/
+a.out

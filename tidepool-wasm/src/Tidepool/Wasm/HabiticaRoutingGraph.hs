@@ -187,7 +187,7 @@ fetchExistingHandler :: ExtractedTask -> WasmM (GotoChoice '[To "matchTask" Exis
 fetchExistingHandler task = do
   logInfo "Fetching existing Habitica todos..."
 
-  result <- habitica "fetchTodos" (object [])
+  result <- habitica "FetchTodos" (object [])
 
   let todos = parseTodos result
   logInfo $ "Fetched " <> T.pack (show (length todos)) <> " existing todos"
@@ -200,8 +200,8 @@ fetchExistingHandler task = do
     parseTodos :: Value -> [HabiticaTodo]
     parseTodos (Array arr) =
       [ HabiticaTodo
-          { htId = extractText "id" v
-          , htTitle = extractText "text" v  -- Habitica uses "text" not "title"
+          { htId = extractText "todoId" v
+          , htTitle = extractText "todoTitle" v
           , htChecklist = extractChecklist v
           }
       | v <- V.toList arr
@@ -215,8 +215,8 @@ fetchExistingHandler task = do
     extractText _ _ = ""
 
     extractChecklist :: Value -> [Text]
-    extractChecklist (Object obj) = case KM.lookup (Key.fromText "checklist") obj of
-      Just (Array items) -> [extractText "text" item | item <- V.toList items]
+    extractChecklist (Object obj) = case KM.lookup (Key.fromText "todoChecklist") obj of
+      Just (Array items) -> [extractText "checklistText" item | item <- V.toList items]
       _ -> []
     extractChecklist _ = []
 
@@ -371,17 +371,16 @@ executeActionHandler suggestion = do
   result <- case suggestion.sgAction of
     SuggestNewTodo -> do
       logInfo $ "Creating new todo: " <> suggestion.sgTask.etDescription
-      _ <- habitica "createTodo" $ object
-        [ "text" .= suggestion.sgTask.etDescription
-        , "type" .= ("todo" :: Text)
+      _ <- habitica "CreateTodo" $ object
+        [ "title" .= suggestion.sgTask.etDescription
         ]
       pure $ ExecutionResult True $ "Created todo: " <> suggestion.sgTask.etDescription
 
     SuggestChecklist todoId -> do
       logInfo $ "Adding checklist item to todo " <> todoId
-      _ <- habitica "addChecklistItem" $ object
-        [ "taskId" .= todoId
-        , "text" .= suggestion.sgTask.etDescription
+      _ <- habitica "AddChecklistItem" $ object
+        [ "todoId" .= todoId
+        , "item" .= suggestion.sgTask.etDescription
         ]
       pure $ ExecutionResult True $ "Added checklist item: " <> suggestion.sgTask.etDescription
 
