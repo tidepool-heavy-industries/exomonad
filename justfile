@@ -51,7 +51,7 @@ test-protocol-conformance:
 # Run hlint on Haskell sources (errors only, not suggestions)
 lint-hs:
     @echo "── Running hlint ──"
-    hlint tidepool-core tidepool-dm tidepool-tidying tidepool-platform tidepool-wasm --ignore-suggestions
+    hlint tidepool-core tidepool-wasm --ignore-suggestions
 
 # Run ESLint on TypeScript sources
 lint-ts:
@@ -101,20 +101,10 @@ test-roundtrip:
     cd deploy && pnpm test -- --grep "roundtrip"
 
 # ─────────────────────────────────────────────────────────────
-# Running
+# Running (disabled - GUI packages removed from build)
 # ─────────────────────────────────────────────────────────────
 
-# Run DM CLI
-dm:
-    cabal run tidepool-dm
-
-# Run DM GUI
-dm-gui:
-    cabal run tidepool-dm-gui
-
-# Run Tidying GUI
-tidy-gui:
-    cabal run tidepool-tidy-gui
+# NOTE: dm, dm-gui, tidy-gui disabled - see cabal.project for details
 
 # ─────────────────────────────────────────────────────────────
 # Git hooks

@@ -1,11 +1,14 @@
 packages:
     tidepool-core
-    tidepool-platform
-    tidepool-dm
-    tidepool-tidying
     tidepool-wasm
-    tidepool-telegram-hs
     tidepool-generated-ts
+
+-- Disabled packages (heavy deps, not needed for WASM deployment):
+-- tidepool-platform   -- threepenny-gui, http-client, sqlite
+-- tidepool-dm         -- GUI app, depends on platform
+-- tidepool-tidying    -- GUI app, depends on platform
+-- template            -- unused template skeleton
+-- tidepool-telegram-hs -- types only, not used by tidepool-wasm
 
 -- Use GHC 9.6+ for best GHC2021 support
 -- with-compiler: ghc-9.6
