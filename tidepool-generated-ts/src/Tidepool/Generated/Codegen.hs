@@ -236,6 +236,10 @@ generateIndexTs = T.unlines
   , "// Protocol types"
   , "export * from './protocol.js';"
   , ""
+  , "// GHC WASM JSFFI"
+  , "export { createJsFFI } from './jsffi.js';"
+  , "export type { WasmExports } from './jsffi.js';"
+  , ""
   , "// WASM loader"
   , "export * from './loader.js';"
   ]

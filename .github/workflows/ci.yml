@@ -50,6 +50,11 @@ jobs:
       - name: Test
         run: just test
 
+      - name: Install Node.js
+        run: |
+          curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+          apt-get install -y nodejs
+
       - name: Generate TypeScript package
         run: |
           cabal run generate-ts-package -- ./tidepool-generated-ts/output
