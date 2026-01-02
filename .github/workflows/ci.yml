@@ -73,7 +73,7 @@ jobs:
         run: |
           nix develop .#wasm --command bash -c "
             wasm32-wasi-cabal update
-            wasm32-wasi-cabal build tidepool-wasm
+            wasm32-wasi-cabal build tidepool-reactor
           "
 
       - name: Copy WASM artifact

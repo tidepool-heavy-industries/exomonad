@@ -89,7 +89,7 @@ pre-commit: build lint test test-ts
 build-roundtrip-wasm:
     @echo "── Building roundtrip WASM ──"
     @echo "Note: This must be run inside 'nix develop .#wasm'"
-    wasm32-wasi-cabal build tidepool-wasm
+    wasm32-wasi-cabal build tidepool-reactor
     @echo ""
     @echo "── Copying WASM to deploy/ ──"
     find dist-newstyle -name '*.wasm' -exec cp {} deploy/tidepool-roundtrip.wasm \;

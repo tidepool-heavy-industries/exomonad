@@ -34,7 +34,7 @@ library
         text >= 2.0 && < 3,
         vector >= 0.12 && < 1
 
-    -- WASM-specific configuration
+    -- WASM-specific build dependency
     if os(wasi)
         build-depends:
             ghc-experimental
