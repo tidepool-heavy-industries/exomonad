@@ -39,8 +39,12 @@ function getCurrentHourTimestamp(): number {
 }
 
 /**
- * Check and update rate limits using sliding windows.
+ * Check and update rate limits using fixed time windows (minute/hour buckets).
  * Returns null if within limits, or an error message if exceeded.
+ *
+ * Note: This is best-effort rate limiting. Due to KV's eventual consistency,
+ * concurrent requests may briefly exceed limits. Acceptable for non-critical
+ * use cases like alert throttling.
  */
 async function checkRateLimit(kv: KVNamespace): Promise<string | null> {
   const minuteTs = getCurrentMinuteTimestamp();
