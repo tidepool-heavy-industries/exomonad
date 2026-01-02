@@ -61,15 +61,11 @@ jobs:
           extra_nix_config: |
             experimental-features = nix-command flakes
 
-      - name: Cache Nix store
-        uses: actions/cache@v4
+      - name: Setup Cachix
+        uses: cachix/cachix-action@v15
         with:
-          path: |
-            ~/.cache/nix
-            /nix/store
-          key: ${{ runner.os }}-nix-wasm-${{ hashFiles('flake.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-nix-wasm-
+          name: tidepool-builds
+          authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
 
       - name: Cache WASM dist-newstyle
         uses: actions/cache@v4
