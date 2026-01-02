@@ -24,7 +24,7 @@ import type {
   ExecutionPhase,
   GraphState,
   StepOutput,
-} from "../protocol.js";
+} from "tidepool-generated";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 

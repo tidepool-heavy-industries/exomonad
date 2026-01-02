@@ -5,7 +5,7 @@
  */
 
 import { WASI, File, OpenFile, ConsoleStdout } from "@bjorn3/browser_wasi_shim";
-import { createJsFFI, type WasmExports } from "./jsffi.js";
+import { createJsFFI, type WasmExports } from "tidepool-generated";
 
 // =============================================================================
 // Polyfills (same as loader.ts)
