@@ -24,8 +24,8 @@ jobs:
       - name: Cache cabal store
         uses: actions/cache@v4
         with:
-          # Use absolute path - in Docker container HOME may differ from cabal's default
-          path: /root/.cabal/store
+          # In container, HOME=/github/home, so cabal store is there
+          path: ~/.cabal/store
           key: ${{ runner.os }}-ghc9.6-cabal-${{ hashFiles('**/*.cabal', 'cabal.project') }}
           restore-keys: |
             ${{ runner.os }}-ghc9.6-cabal-
