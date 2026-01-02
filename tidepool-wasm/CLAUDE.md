@@ -19,6 +19,9 @@ The key insight: **tidepool-core stays WASM-agnostic**. This package handles all
 |------|--------|---------|
 | `TestGraph.hs` | ✅ Complete | Minimal graph (Int → Int+1 with Log effect) |
 | `ExampleGraph.hs` | ✅ Complete | Multi-node graph with branching (message classifier) |
+| `HabiticaRoutingGraph.hs` | ✅ Complete | Production graph for Habitica todo routing |
+| `Habitica.hs` | ✅ Complete | Type-safe Habitica API with GADT operations |
+| `Effect.hs` | ✅ Complete | Effect smart constructors (logInfo, llmComplete, habitica) |
 | `WireTypes.hs` | ✅ Complete | SerializableEffect, EffectResult, StepOutput |
 | `Runner.hs` | ✅ Complete | Explicit continuation encoding for yield/resume |
 | `Ffi.hs` | ✅ Complete | FFI exports with global IORef state management |
@@ -93,6 +96,49 @@ Entry(UserMessage) → classify → handleGreeting  ─┐
 - `stepExample(json)` - Continue with EffectResult
 - `getExampleGraphInfo()` - Get graph structure
 - `getExampleGraphState()` - Get runtime state
+
+### Habitica.hs - Type-Safe External API
+
+Provides a GADT-based typed interface to the Habitica API, replacing error-prone raw string + JSON calls.
+
+**Problem solved**: Raw API like `habitica "GetTasks" $ object ["type" .= "dailys"]` has no compile-time validation. A typo in `"type"` vs `"taskType"` causes runtime errors.
+
+**Solution**: GADT where each operation specifies exact payload and return type:
+
+```haskell
+data HabiticaOp a where
+  GetUser          :: HabiticaOp UserInfo
+  GetTasks         :: TaskType -> HabiticaOp [HabiticaTask]
+  FetchTodos       :: HabiticaOp [FetchedTodo]
+  ScoreTask        :: TaskId -> Direction -> HabiticaOp ScoreResult
+  CreateTodo       :: Text -> HabiticaOp TodoId
+  AddChecklistItem :: TodoId -> Text -> HabiticaOp ChecklistItemId
+
+-- Usage:
+todos <- habitica FetchTodos
+todoId <- habitica (CreateTodo "Buy groceries")
+_ <- habitica (AddChecklistItem todoId "Milk")
+```
+
+**Key types**:
+- Domain: `TaskType`, `Direction`, `TaskId`, `TodoId`, `ChecklistItemId`
+- Responses: `UserInfo`, `UserStats`, `HabiticaTask`, `FetchedTodo`, `ScoreResult`
+
+**Wire format**: Still yields `EffHabitica opName payload` - TypeScript handler unchanged.
+
+**TypeScript handler**: `deploy/src/handlers/habitica.ts` - implements the 6 operations with Habitica API calls.
+
+### Effect.hs - Smart Constructors
+
+Effect smart constructors that yield `SerializableEffect` to TypeScript:
+
+```haskell
+logInfo :: Text -> WasmM ()           -- Yields EffLogInfo
+logError :: Text -> WasmM ()          -- Yields EffLogError
+llmComplete :: ... -> WasmM Value     -- Yields EffLlmComplete
+habitica :: HabiticaOp a -> WasmM a   -- Yields EffHabitica (typed!)
+telegramConfirm :: ... -> WasmM Value -- Yields EffTelegramConfirm
+```
 
 ### WireTypes.hs
 

@@ -142,6 +142,26 @@ The `executeEffect()` wrapper catches any uncaught exceptions and converts them 
 3. Add case to `executeEffect()` in `src/handlers/index.ts`
 4. Add tests in `src/handlers/__tests__/myeffect.test.ts`
 
+### Habitica Handler (`habitica.ts`)
+
+Handles `EffHabitica` effects with 6 operations. The Haskell side uses a typed GADT (`tidepool-wasm/src/Tidepool/Wasm/Habitica.hs`) but the wire format is `{ eff_hab_op: string, eff_hab_payload: object }`.
+
+| Operation | Payload | Response |
+|-----------|---------|----------|
+| `GetUser` | `{}` | `{ userId, userName, userStats: { usHp, usMp, usExp, usGp } }` |
+| `GetTasks` | `{ taskType: "habits"\|"dailys"\|"todos"\|"rewards" }` | `[{ taskId, taskText, taskType, taskCompleted }]` |
+| `FetchTodos` | `{}` | `[{ todoId, todoTitle, todoChecklist: [{checklistId, checklistText, checklistDone}], todoCompleted }]` |
+| `ScoreTask` | `{ taskId, direction: "up"\|"down" }` | `{ srDelta, srDrop? }` |
+| `CreateTodo` | `{ title }` | `{ unTodoId }` |
+| `AddChecklistItem` | `{ todoId, item }` | `string` (the new item ID) |
+
+**Adding a new Habitica operation**:
+1. Add constructor to `HabiticaOp` GADT in `Habitica.hs`
+2. Add case to `encodeOp` (operation name + payload)
+3. Add case to `decodeResult` (parse response)
+4. Add case to `handleHabitica` switch in `habitica.ts`
+5. Response types must match exactly between Haskell `FromJSON` and TypeScript handler
+
 ## Running
 
 ```bash
