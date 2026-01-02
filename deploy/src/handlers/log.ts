@@ -4,8 +4,8 @@
  * Handles LogInfo and LogError effects from WASM by writing to console.
  */
 
-import type { LogInfoEffect, LogErrorEffect, EffectResult } from "../protocol.js";
-import { successResult } from "../protocol.js";
+import type { LogInfoEffect, LogErrorEffect, EffectResult } from "tidepool-generated";
+import { successResult } from "tidepool-generated";
 
 /**
  * Handle LogInfo effect - logs message at info level.

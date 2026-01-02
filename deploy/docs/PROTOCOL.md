@@ -9,7 +9,7 @@ WebSocket protocol for client↔worker communication during graph execution.
 #### InitMessage
 Start a new graph execution.
 ```json
-{ "type": "init", "graphId": "TestGraph", "input": <any> }
+{ "type": "init", "graphId": "test", "input": <any> }
 ```
 - `graphId`: Name of the graph to execute
 - `input`: Initial input value (must match graph's Entry type)

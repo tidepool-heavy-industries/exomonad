@@ -1,23 +1,27 @@
 /**
  * Tidepool WASM Loader for Cloudflare Workers
  *
- * Self-contained loader for the DO harness.
+ * Uses generated dispatcher from tidepool-generated package.
  */
 
 import { WASI, File, OpenFile, ConsoleStdout } from "@bjorn3/browser_wasi_shim";
-import { createJsFFI, type WasmExports } from "./jsffi.js";
+import { createJsFFI, type WasmExports } from "tidepool-generated";
 import type {
   StepOutput,
   EffectResult,
-  GraphInfo,
+  DetailedGraphInfo as GraphInfo,
   GraphState,
-} from "./protocol.js";
+  GraphId,
+  GraphWasmExports,
+} from "tidepool-generated";
+import { getGraphFns } from "tidepool-generated";
 
 // =============================================================================
-// GraphMachine Interface (inline to avoid circular deps)
+// GraphMachine Interface
 // =============================================================================
 
-export type GraphId = "TestGraph" | "ExampleGraph" | "HabiticaRoutingGraph";
+// Re-export GraphId for consumers
+export type { GraphId };
 
 export interface GraphMachine {
   initialize(graphId: GraphId, input: unknown): Promise<StepOutput>;
@@ -110,53 +114,9 @@ export async function loadMachine(options: LoaderOptions): Promise<GraphMachine>
     console.log("[Tidepool] WASM module loaded");
   }
 
-  // Extended exports type with all graph functions
-  type ExtendedExports = WasmExports & {
-    // TestGraph
-    initialize: (json: string) => string | Promise<string>;
-    step: (json: string) => string | Promise<string>;
-    getGraphInfo: () => string | Promise<string>;
-    getGraphState: () => string | Promise<string>;
-    // ExampleGraph
-    initializeExample: (json: string) => string | Promise<string>;
-    stepExample: (json: string) => string | Promise<string>;
-    getExampleGraphInfo: () => string | Promise<string>;
-    getExampleGraphState: () => string | Promise<string>;
-    // HabiticaRoutingGraph
-    initializeHabitica: (json: string) => string | Promise<string>;
-    stepHabitica: (json: string) => string | Promise<string>;
-    getHabiticaGraphInfo: () => string | Promise<string>;
-    getHabiticaGraphState: () => string | Promise<string>;
-  };
-
-  const ext = exports as unknown as ExtendedExports;
-
-  // Helper to get the right functions based on graphId
-  const getGraphFns = (graphId: GraphId) => {
-    switch (graphId) {
-      case "TestGraph":
-        return {
-          initialize: ext.initialize,
-          step: ext.step,
-          getGraphInfo: ext.getGraphInfo,
-          getGraphState: ext.getGraphState,
-        };
-      case "ExampleGraph":
-        return {
-          initialize: ext.initializeExample,
-          step: ext.stepExample,
-          getGraphInfo: ext.getExampleGraphInfo,
-          getGraphState: ext.getExampleGraphState,
-        };
-      case "HabiticaRoutingGraph":
-        return {
-          initialize: ext.initializeHabitica,
-          step: ext.stepHabitica,
-          getGraphInfo: ext.getHabiticaGraphInfo,
-          getGraphState: ext.getHabiticaGraphState,
-        };
-    }
-  };
+  // Cast WASM exports to generated interface
+  // Note: WASM functions may return Promise<string> due to GHC RTS async behavior
+  const graphExports = exports as unknown as GraphWasmExports;
 
   const defaultStepOutput: StepOutput = {
     effect: null,
@@ -167,11 +127,12 @@ export async function loadMachine(options: LoaderOptions): Promise<GraphMachine>
 
   return {
     async initialize(graphId: GraphId, input: unknown): Promise<StepOutput> {
-      const fns = getGraphFns(graphId);
+      const fns = getGraphFns(graphId, graphExports);
       const inputJson = JSON.stringify(input);
       if (debug) console.log(`[Tidepool] initialize ${graphId}:`, inputJson);
 
-      const resultStr = await fns.initialize(inputJson);
+      // Handle both sync and async returns from WASM
+      const resultStr = await Promise.resolve(fns.initialize(inputJson));
 
       const result: StepOutput = typeof resultStr === "string"
         ? JSON.parse(resultStr)
@@ -182,11 +143,12 @@ export async function loadMachine(options: LoaderOptions): Promise<GraphMachine>
     },
 
     async step(graphId: GraphId, result: EffectResult): Promise<StepOutput> {
-      const fns = getGraphFns(graphId);
+      const fns = getGraphFns(graphId, graphExports);
       const resultJson = JSON.stringify(result);
       if (debug) console.log(`[Tidepool] step ${graphId}:`, resultJson);
 
-      const outputStr = await fns.step(resultJson);
+      // Handle both sync and async returns from WASM
+      const outputStr = await Promise.resolve(fns.step(resultJson));
 
       const output: StepOutput = typeof outputStr === "string"
         ? JSON.parse(outputStr)
@@ -197,23 +159,15 @@ export async function loadMachine(options: LoaderOptions): Promise<GraphMachine>
     },
 
     async getGraphInfo(graphId: GraphId): Promise<GraphInfo> {
-      const fns = getGraphFns(graphId);
-      if (!fns.getGraphInfo) {
-        return { name: "Unknown", entryType: { typeName: "", typeModule: "" }, exitType: { typeName: "", typeModule: "" }, nodes: [], edges: [] };
-      }
-      const str = fns.getGraphInfo();
-      const resolved = typeof str === "string" ? str : await str;
-      return JSON.parse(resolved);
+      const fns = getGraphFns(graphId, graphExports);
+      const str = await Promise.resolve(fns.getGraphInfo());
+      return JSON.parse(str);
     },
 
     async getGraphState(graphId: GraphId): Promise<GraphState> {
-      const fns = getGraphFns(graphId);
-      if (!fns.getGraphState) {
-        return { phase: { type: "idle" } as const, completedNodes: [] };
-      }
-      const str = fns.getGraphState();
-      const resolved = typeof str === "string" ? str : await str;
-      return JSON.parse(resolved);
+      const fns = getGraphFns(graphId, graphExports);
+      const str = await Promise.resolve(fns.getGraphState());
+      return JSON.parse(str);
     },
   };
 }

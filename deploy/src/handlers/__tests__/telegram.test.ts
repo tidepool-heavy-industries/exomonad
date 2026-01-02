@@ -10,7 +10,7 @@ import {
   type TelegramHandlerEnv,
   type TelegramHandlerContext,
 } from "../telegram.js";
-import type { TelegramSendEffect, TelegramIncomingMessage } from "../../protocol.js";
+import type { TelegramSendEffect, TelegramIncomingMessage } from "tidepool-generated";
 
 // Store original fetch
 const originalFetch = globalThis.fetch;
