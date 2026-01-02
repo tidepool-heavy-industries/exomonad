@@ -50,6 +50,23 @@ jobs:
       - name: Test
         run: just test
 
+      - name: Install Node.js
+        run: |
+          curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+          apt-get install -y nodejs
+
+      - name: Generate TypeScript package
+        run: |
+          cabal run generate-ts-package -- ./tidepool-generated-ts/output
+          cd tidepool-generated-ts/output && npm install && npm run build
+
+      - name: Upload generated package
+        uses: actions/upload-artifact@v4
+        with:
+          name: tidepool-generated-ts
+          path: tidepool-generated-ts/output
+          retention-days: 1
+
   roundtrip-wasm:
     runs-on: ubuntu-latest
     steps:
@@ -84,13 +101,19 @@ jobs:
           path: deploy/tidepool-roundtrip.wasm
 
   typescript:
-    needs: roundtrip-wasm
+    needs: [haskell, roundtrip-wasm]
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: deploy
     steps:
       - uses: actions/checkout@v4
+
+      - name: Download generated package
+        uses: actions/download-artifact@v4
+        with:
+          name: tidepool-generated-ts
+          path: tidepool-generated-ts/output
 
       - name: Download WASM artifact
         uses: actions/download-artifact@v4
