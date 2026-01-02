@@ -19,7 +19,29 @@ import qualified Data.ByteString.Lazy as LBS
 import qualified Data.Text as T
 import Data.Text.Encoding (encodeUtf8)
 
-import Tidepool.Wasm.Ffi (initialize, step, getGraphInfo, getGraphState, resetState)
+import Tidepool.Wasm.Ffi
+  ( initialize_test
+  , step_test
+  , getGraphInfo_test
+  , getGraphState_test
+  , resetTestState
+  )
+
+-- Aliases for backwards compat with tests
+initialize :: T.Text -> IO T.Text
+initialize = initialize_test
+
+step :: T.Text -> IO T.Text
+step = step_test
+
+getGraphInfo :: IO T.Text
+getGraphInfo = getGraphInfo_test
+
+getGraphState :: IO T.Text
+getGraphState = getGraphState_test
+
+resetState :: IO ()
+resetState = resetTestState
 
 
 spec :: Spec
@@ -200,10 +222,18 @@ getGraphInfoSpec = describe "getGraphInfo" $ do
     let Just output = decodeOutput result
     case output of
       Object o -> case KM.lookup "edges" o of
-        Just (Object edges) -> do
-          KM.lookup "entry" edges `shouldBe` Just (String "compute")
-          KM.lookup "compute" edges `shouldBe` Just (String "exit")
-        _ -> expectationFailure "Expected edges object"
+        Just (Array edges) -> do
+          length edges `shouldBe` 2
+          -- Edges should be [{from: "entry", to: "compute"}, {from: "compute", to: "exit"}]
+          let edgeList = V.toList edges
+          case edgeList of
+            [Object e1, Object e2] -> do
+              KM.lookup "from" e1 `shouldBe` Just (String "entry")
+              KM.lookup "to" e1 `shouldBe` Just (String "compute")
+              KM.lookup "from" e2 `shouldBe` Just (String "compute")
+              KM.lookup "to" e2 `shouldBe` Just (String "exit")
+            _ -> expectationFailure "Expected 2 edge objects"
+        _ -> expectationFailure "Expected edges array"
       _ -> expectationFailure "Expected JSON object"
 
 

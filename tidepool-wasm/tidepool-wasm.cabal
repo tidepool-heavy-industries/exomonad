@@ -21,12 +21,15 @@ library
         Tidepool.Wasm.LlmTestGraph
         Tidepool.Wasm.WireTypes
         Tidepool.Wasm.Ffi
+        Tidepool.Wasm.Ffi.Types
         Tidepool.Wasm.Runner
     build-depends:
         base >= 4.17 && < 5,
         tidepool-core,
+        tidepool-generated-ts,
         freer-simple >= 1.2 && < 2,
         aeson >= 2.1 && < 3,
+        template-haskell,
         text >= 2.0 && < 3,
         vector >= 0.12 && < 1
 
@@ -39,15 +42,20 @@ library
             -optl-mexec-model=reactor
             -optl-Wl,--export=hs_init
             -- TestGraph exports
-            -optl-Wl,--export=initialize
-            -optl-Wl,--export=step
-            -optl-Wl,--export=getGraphInfo
-            -optl-Wl,--export=getGraphState
+            -optl-Wl,--export=initialize_test
+            -optl-Wl,--export=step_test
+            -optl-Wl,--export=getGraphInfo_test
+            -optl-Wl,--export=getGraphState_test
             -- ExampleGraph exports
-            -optl-Wl,--export=initializeExample
-            -optl-Wl,--export=stepExample
-            -optl-Wl,--export=getExampleGraphInfo
-            -optl-Wl,--export=getExampleGraphState
+            -optl-Wl,--export=initialize_example
+            -optl-Wl,--export=step_example
+            -optl-Wl,--export=getGraphInfo_example
+            -optl-Wl,--export=getGraphState_example
+            -- HabiticaRoutingGraph exports
+            -optl-Wl,--export=initialize_habitica
+            -optl-Wl,--export=step_habitica
+            -optl-Wl,--export=getGraphInfo_habitica
+            -optl-Wl,--export=getGraphState_habitica
 
     hs-source-dirs:   src
     default-language: GHC2021
@@ -82,6 +90,7 @@ test-suite tidepool-wasm-tests
         FfiSpec
         E2ESpec
         ExecutorSpec
+        CodegenSyncSpec
     build-depends:
         base >= 4.17 && < 5,
         hspec >= 2.10 && < 3,
@@ -92,7 +101,8 @@ test-suite tidepool-wasm-tests
         text >= 2.0 && < 3,
         vector >= 0.12 && < 1,
         tidepool-wasm,
-        tidepool-core
+        tidepool-core,
+        tidepool-generated-ts
     hs-source-dirs:   test
     default-language: GHC2021
     default-extensions:
@@ -118,20 +128,37 @@ executable tidepool-reactor
             -optl-mexec-model=reactor
             -optl-Wl,--export=hs_init
             -- TestGraph exports
-            -optl-Wl,--export=initialize
-            -optl-Wl,--export=step
-            -optl-Wl,--export=getGraphInfo
-            -optl-Wl,--export=getGraphState
+            -optl-Wl,--export=initialize_test
+            -optl-Wl,--export=step_test
+            -optl-Wl,--export=getGraphInfo_test
+            -optl-Wl,--export=getGraphState_test
             -- ExampleGraph exports
-            -optl-Wl,--export=initializeExample
-            -optl-Wl,--export=stepExample
-            -optl-Wl,--export=getExampleGraphInfo
-            -optl-Wl,--export=getExampleGraphState
+            -optl-Wl,--export=initialize_example
+            -optl-Wl,--export=step_example
+            -optl-Wl,--export=getGraphInfo_example
+            -optl-Wl,--export=getGraphState_example
             -- HabiticaRoutingGraph exports
-            -optl-Wl,--export=initializeHabitica
-            -optl-Wl,--export=stepHabitica
-            -optl-Wl,--export=getHabiticaGraphInfo
-            -optl-Wl,--export=getHabiticaGraphState
+            -optl-Wl,--export=initialize_habitica
+            -optl-Wl,--export=step_habitica
+            -optl-Wl,--export=getGraphInfo_habitica
+            -optl-Wl,--export=getGraphState_habitica
+
+-- | Generates the TypeScript npm package with type-safe bindings.
+-- Run with: cabal run generate-ts-package -- ./output
+-- Output is a complete npm package ready for use by deploy/
+executable generate-ts-package
+    import:           warnings
+    main-is:          GeneratePackage.hs
+    build-depends:
+        base >= 4.17 && < 5,
+        directory,
+        filepath,
+        text >= 2.0 && < 3,
+        tidepool-generated-ts
+    hs-source-dirs:   codegen
+    default-language: GHC2021
+    default-extensions:
+        OverloadedStrings
 
 -- | Generates golden JSON samples for cross-language protocol verification.
 -- Run with: cabal run generate-golden-samples

@@ -5,6 +5,7 @@ packages:
     tidepool-tidying
     tidepool-wasm
     tidepool-telegram-hs
+    tidepool-generated-ts
 
 -- Use GHC 9.6+ for best GHC2021 support
 -- with-compiler: ghc-9.6
