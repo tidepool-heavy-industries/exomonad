@@ -87,8 +87,12 @@ instance Arbitrary SerializableEffect where
     , EffHabitica
         <$> elements ["GetUser", "ScoreTask", "GetTasks", "FetchTodos", "CreateTodo", "AddChecklistItem"]
         <*> scale (`div` 2) arbitrary
-    , EffTelegramConfirm
+    , EffTelegramSend
         <$> arbitrary
+        <*> elements ["PlainText", "Markdown", "HTML"]
+    , EffTelegramAsk
+        <$> arbitrary
+        <*> elements ["PlainText", "Markdown", "HTML"]
         <*> listOf ((,) <$> arbitrary <*> arbitrary)
     ]
 
@@ -109,10 +113,13 @@ instance Arbitrary SerializableEffect where
   shrink (EffHabitica op payload) =
     [ EffLogInfo op ]
     ++ [ EffHabitica op payload' | payload' <- shrink payload ]
-  shrink (EffTelegramConfirm msg buttons) =
-    [ EffLogInfo msg ]
-    ++ [ EffTelegramConfirm msg' buttons | msg' <- shrink msg ]
-    ++ [ EffTelegramConfirm msg buttons' | buttons' <- shrink buttons ]
+  shrink (EffTelegramSend txt parseMode) =
+    [ EffLogInfo txt ]
+    ++ [ EffTelegramSend txt' parseMode | txt' <- shrink txt ]
+  shrink (EffTelegramAsk txt parseMode buttons) =
+    [ EffLogInfo txt ]
+    ++ [ EffTelegramAsk txt' parseMode buttons | txt' <- shrink txt ]
+    ++ [ EffTelegramAsk txt parseMode buttons' | buttons' <- shrink buttons ]
 
 
 -- | Arbitrary EffectResult covering success and error cases

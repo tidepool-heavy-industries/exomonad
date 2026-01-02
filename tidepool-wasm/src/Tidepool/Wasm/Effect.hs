@@ -29,7 +29,11 @@ module Tidepool.Wasm.Effect
   , logInfo
   , logError
   , llmComplete
-  , telegramConfirm
+    -- ** Telegram
+  , telegramSend
+  , telegramMarkdown
+  , telegramHtml
+  , telegramAsk
 
     -- * Habitica (typed API)
   , habitica
@@ -41,7 +45,7 @@ module Tidepool.Wasm.Effect
 
 import Control.Monad.Freer (Eff, Member, run)
 import Control.Monad.Freer.Coroutine (Yield, yield, runC, Status(..))
-import Data.Aeson (Value, toJSON)
+import Data.Aeson (Value(..), toJSON)
 import Data.Text (Text)
 import qualified Data.Text as T
 
@@ -107,25 +111,67 @@ llmComplete node systemPrompt userContent schema = do
     ResError msg        -> error $ "LLM call failed: " <> T.unpack msg
 
 
--- | Request confirmation from user via Telegram buttons.
+-- | Send a plain text message via Telegram.
 --
--- Yields 'EffTelegramConfirm', expects JSON response with user's selection.
--- Default buttons are: Yes, No (with feedback), Skip
-telegramConfirm :: Member (Yield SerializableEffect EffectResult) effs
-                => Text   -- ^ Message to display
-                -> Eff effs Value
-telegramConfirm message = do
-  let buttons =
-        [ ("✓ Yes", "approved")
-        , ("✗ No", "denied")
-        , ("Skip", "skipped")
-        ]
-  result <- yield (EffTelegramConfirm message buttons) (id @EffectResult)
+-- Yields 'EffTelegramSend', returns message ID (as Int wrapped in Value).
+-- Fire-and-forget semantics - doesn't block for response.
+telegramSend :: Member (Yield SerializableEffect EffectResult) effs
+             => Text  -- ^ Message text
+             -> Eff effs Int
+telegramSend txt = do
+  result <- yield (EffTelegramSend txt "PlainText") (id @EffectResult)
   case result of
-    ResSuccess (Just v) -> pure v
-    ResSuccess Nothing  -> pure (toJSON ())
-    ResError msg        -> error $ "Telegram confirm failed: " <> T.unpack msg
+    ResSuccess (Just v) -> case v of
+      Number n -> pure $ round n
+      _        -> pure 0  -- Fire-and-forget OK
+    ResSuccess Nothing  -> pure 0
+    ResError msg        -> error $ "Telegram send failed: " <> T.unpack msg
 
+-- | Send a Markdown-formatted message via Telegram.
+--
+-- Yields 'EffTelegramSend' with Markdown parse mode.
+telegramMarkdown :: Member (Yield SerializableEffect EffectResult) effs
+                 => Text  -- ^ Markdown text
+                 -> Eff effs Int
+telegramMarkdown txt = do
+  result <- yield (EffTelegramSend txt "Markdown") (id @EffectResult)
+  case result of
+    ResSuccess (Just v) -> case v of
+      Number n -> pure $ round n
+      _        -> pure 0
+    ResSuccess Nothing  -> pure 0
+    ResError msg        -> error $ "Telegram send failed: " <> T.unpack msg
+
+-- | Send an HTML-formatted message via Telegram.
+--
+-- Yields 'EffTelegramSend' with HTML parse mode.
+telegramHtml :: Member (Yield SerializableEffect EffectResult) effs
+             => Text  -- ^ HTML text
+             -> Eff effs Int
+telegramHtml txt = do
+  result <- yield (EffTelegramSend txt "HTML") (id @EffectResult)
+  case result of
+    ResSuccess (Just v) -> case v of
+      Number n -> pure $ round n
+      _        -> pure 0
+    ResSuccess Nothing  -> pure 0
+    ResError msg        -> error $ "Telegram send failed: " <> T.unpack msg
+
+-- | Ask user with custom buttons, returns callback data.
+--
+-- Yields 'EffTelegramAsk', blocks until user clicks a button.
+telegramAsk :: Member (Yield SerializableEffect EffectResult) effs
+            => Text           -- ^ Message to display
+            -> [(Text, Text)] -- ^ [(button label, callback data)]
+            -> Eff effs Text
+telegramAsk message buttons = do
+  result <- yield (EffTelegramAsk message "Markdown" buttons) (id @EffectResult)
+  case result of
+    ResSuccess (Just v) -> case v of
+      String cb -> pure cb
+      _         -> error "Telegram ask: expected string callback"
+    ResSuccess Nothing  -> error "Telegram ask: no response"
+    ResError msg        -> error $ "Telegram ask failed: " <> T.unpack msg
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- RUNNING EFFECTS

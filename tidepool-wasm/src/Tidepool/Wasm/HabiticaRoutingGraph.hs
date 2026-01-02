@@ -64,7 +64,7 @@ import Tidepool.Graph.Generic (GraphMode(..), type (:-))
 import qualified Tidepool.Graph.Generic as G (Entry, Exit, LogicNode)
 import Tidepool.Graph.Goto (Goto, GotoChoice(..), OneOf(..), To, gotoChoice, gotoExit)
 
-import Tidepool.Wasm.Effect (WasmM, logInfo, logError, llmComplete, telegramConfirm)
+import Tidepool.Wasm.Effect (WasmM, logInfo, logError, llmComplete, telegramAsk)
 import Tidepool.Wasm.Habitica
   ( HabiticaOp(..)
   , habitica
@@ -313,8 +313,12 @@ confirmWithUserHandler
 confirmWithUserHandler suggestion = do
   logInfo $ "Awaiting user confirmation: " <> suggestion.sgMessage
 
-  -- Yield TelegramConfirm effect - TypeScript will present buttons and return response
-  result <- telegramConfirm suggestion.sgMessage
+  -- Yield TelegramAsk effect - TypeScript will present buttons and return callback
+  result <- telegramAsk suggestion.sgMessage
+    [ ("✓ Yes", "approved")
+    , ("✗ No", "denied")
+    , ("Skip", "skipped")
+    ]
 
   case parseConfirmation result of
     Approved -> do
@@ -340,18 +344,12 @@ confirmWithUserHandler suggestion = do
         , erMessage = "Task skipped by user"
         }
   where
-    parseConfirmation :: Value -> UserConfirmation
-    parseConfirmation (Object obj) = case KM.lookup (Key.fromText "response") obj of
-      Just (String "approved") -> Approved
-      Just (String "skipped")  -> Skipped
-      Just (String "denied")   -> Denied $ extractFeedback obj
-      _ -> Skipped  -- Default to skip on parse failure
-    parseConfirmation _ = Skipped
-
-    extractFeedback :: KM.KeyMap Value -> Text
-    extractFeedback obj = case KM.lookup (Key.fromText "feedback") obj of
-      Just (String f) -> f
-      _ -> ""
+    -- Parse the callback string directly
+    parseConfirmation :: Text -> UserConfirmation
+    parseConfirmation "approved" = Approved
+    parseConfirmation "skipped"  = Skipped
+    parseConfirmation "denied"   = Denied ""  -- No feedback in simple button flow
+    parseConfirmation _          = Skipped    -- Default to skip on unknown
 
 
 -- | Execute the Habitica action (create todo or add checklist item).

@@ -95,7 +95,8 @@ allEffectMeta =
   , EffectMeta "LogError"        Internal FireAndForget
   , EffectMeta "LlmComplete"     Internal Blocking
   , EffectMeta "Habitica"        Internal Blocking
-  , EffectMeta "TelegramConfirm" Yielded  Blocking
+  , EffectMeta "TelegramSend"    Yielded  FireAndForget
+  , EffectMeta "TelegramAsk"     Yielded  Blocking
   ]
 
 
