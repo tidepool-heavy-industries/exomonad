@@ -183,6 +183,16 @@ app/
 - [ ] Add player I/O layer
 - [ ] Sleeptime agent that evolves templates/state/output
 
+## Contributing
+
+This repository is configured for [GitHub Copilot](https://github.com/features/copilot):
+- **Coding agent instructions** in `.github/copilot-instructions.md` provide project context
+- **Review instructions** in `.github/copilot-review-instructions.md` guide code reviews
+- **File-specific instructions** in `.github/instructions/` apply to Haskell, TypeScript, and templates
+- **Environment setup** in `copilot-setup-steps.yaml` configures the build environment
+
+Pull requests automatically request Copilot reviews for code quality and best practices.
+
 ## See Also
 
 - [effectful](https://hackage.haskell.org/package/effectful) - Effect system
