@@ -17,4 +17,7 @@ deploy/node_modules/
 deploy/.wrangler/
 deploy/src/*.wasm
 deploy/.dev.vars
+
+# Generated TypeScript package
+tidepool-generated-ts/output/
 a.out

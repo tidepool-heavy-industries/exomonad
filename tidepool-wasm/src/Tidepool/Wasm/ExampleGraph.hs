@@ -41,7 +41,7 @@ module Tidepool.Wasm.ExampleGraph
   , runExampleGraph
   ) where
 
-import Data.Aeson (Value(..))
+import Data.Aeson (Value(..), FromJSON(..))
 import qualified Data.Text as T
 import Data.Text (Text)
 import GHC.Generics (Generic)
@@ -61,6 +61,10 @@ import Tidepool.Wasm.Effect (WasmM, logInfo, logError, llmComplete)
 -- | A message from the user to be classified.
 newtype UserMessage = UserMessage { unUserMessage :: Text }
   deriving stock (Show, Eq, Generic)
+
+-- UserMessage is a Text wrapper - parse as text
+instance FromJSON UserMessage where
+  parseJSON v = UserMessage <$> parseJSON v
 
 -- | Classification result from the classifier.
 data Classification
