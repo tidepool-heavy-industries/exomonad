@@ -111,7 +111,7 @@ export class StateMachineDO extends DurableObject<Env> {
     if (!this.sessionId) {
       this.sessionId = this.ctx.id.name ?? crypto.randomUUID();
     }
-    console.log(`[DO] HTTP start: sessionId=${this.sessionId}, graphId=${graphId}`);
+    console.log(`[StateMachineDO] start: session=${this.sessionId}, graph=${graphId}`);
 
     try {
       // Load WASM if not already loaded
@@ -143,6 +143,11 @@ export class StateMachineDO extends DurableObject<Env> {
     const body = await request.json() as { result: EffectResult };
     const { result } = body;
 
+    // Set sessionId from DO name (matches idFromName() routing from TelegramDO)
+    if (!this.sessionId) {
+      this.sessionId = this.ctx.id.name ?? null;
+    }
+
     if (!this.sessionId) {
       return Response.json(
         { type: "error", message: "No active session to resume" },
@@ -160,7 +165,7 @@ export class StateMachineDO extends DurableObject<Env> {
       );
     }
 
-    console.log(`[DO] HTTP resume: sessionId=${this.sessionId}`);
+    console.log(`[StateMachineDO] resume: session=${this.sessionId}`);
 
     try {
       // Update session
@@ -231,11 +236,9 @@ export class StateMachineDO extends DurableObject<Env> {
 
       // Handle non-Telegram effects internally
       const result = await executeEffect(effect, this.env);
+      console.log(`[StateMachineDO] effect ${effect.type}: ${result.type === "error" ? `error: ${result.message}` : "ok"}`);
 
-      if (result.type === "error") {
-        console.error(`[DO] Effect ${effect.type} failed:`, result.message);
-        // Continue anyway - let the graph decide how to handle errors
-      }
+      // Continue even on error - let the graph decide how to handle it
 
       // Step with the result
       output = await this.machine!.step(graphId as import("./loader.js").GraphId, result);

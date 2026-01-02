@@ -240,6 +240,9 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
       `[TelegramDO] Received message from ${user?.username ?? user?.id}: ${JSON.stringify(incomingMessage)}`
     );
 
+    // Log state for debugging resume logic
+    console.log(`[TelegramDO] state: waiting=${state.waitingForReceive}, effect=${state.pendingEffect?.type ?? 'none'}, session=${state.wasmSessionId ?? 'none'}`);
+
     // Add to pending messages queue
     state.pendingMessages.push(incomingMessage);
     state.lastActivity = Date.now();
@@ -254,20 +257,34 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
       this.state = state;
       await this.saveState();
 
+      // Get StateMachineDO stub for resuming
+      const doId = this.env.STATE_MACHINE.idFromName(state.wasmSessionId);
+      const stub = this.env.STATE_MACHINE.get(doId);
+
       // Re-run the effect loop - handleYieldedEffect will process the pending effect
       // with the new messages in the queue
-      await this.runEffectLoop(state.chatId, state.wasmSessionId, {
+      await this.handleGraphResult(state.chatId, state.wasmSessionId, stub, {
         type: "yield",
         effect,
+        sessionId: state.wasmSessionId,
       });
       return new Response("OK");
     }
 
     await this.saveState();
 
-    // If no active session, start a new StateMachineDO session
-    if (!state.wasmSessionId) {
-      await this.startGraphSession(chatId, incomingMessage);
+    // If no active session OR we have a stale session (not waiting for input),
+    // start a new graph session for text messages
+    if (incomingMessage.type === "text") {
+      if (!state.wasmSessionId || !state.waitingForReceive) {
+        // Clear any stale session state
+        state.wasmSessionId = null;
+        state.pendingEffect = null;
+        state.pendingMessages = [incomingMessage]; // Keep only current message
+        this.state = state;
+        await this.saveState();
+        await this.startGraphSession(chatId, incomingMessage);
+      }
     }
 
     return new Response("OK");
