@@ -33,11 +33,12 @@ import Tidepool.Generated.Codegen
   ( generateGraphsTs
   , generateExportsTs
   , generateDispatcherTs
+  , generateRoutingTs
   , generateIndexTs
   , generatePackageJson
   , generateTsConfig
   )
-import Tidepool.Generated.GraphSpecs (allGraphSpecs)
+import Tidepool.Generated.GraphSpecs (allGraphSpecs, allEffectSpecs)
 
 
 -- ============================================================================
@@ -103,6 +104,9 @@ generatePackage outputDir = do
 
   putStrLn "  Generating dispatcher.ts..."
   TIO.writeFile (outputDir </> "src" </> "dispatcher.ts") (generateDispatcherTs allGraphSpecs)
+
+  putStrLn "  Generating routing.ts..."
+  TIO.writeFile (outputDir </> "src" </> "routing.ts") (generateRoutingTs allEffectSpecs)
 
   putStrLn "  Generating index.ts..."
   TIO.writeFile (outputDir </> "src" </> "index.ts") generateIndexTs

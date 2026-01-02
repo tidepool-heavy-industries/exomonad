@@ -28,7 +28,7 @@ import type {
   GotoTarget,
   NodeInfo,
   EdgeInfo,
-  GraphInfo,
+  DetailedGraphInfo,
 } from "tidepool-generated";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -232,8 +232,8 @@ const arbEdgeInfo: fc.Arbitrary<EdgeInfo> = fc.record({
   eiPayloadType: arbTypeInfo,
 });
 
-// GraphInfo - matches GraphInfoWire
-const arbGraphInfo: fc.Arbitrary<GraphInfo> = fc.record({
+// DetailedGraphInfo - matches GraphInfoWire
+const arbDetailedGraphInfo: fc.Arbitrary<DetailedGraphInfo> = fc.record({
   name: arbText,
   entryType: arbTypeInfo,
   exitType: arbTypeInfo,
@@ -444,12 +444,12 @@ describe("Cross-boundary serialization roundtrip", () => {
     });
   });
 
-  describe("GraphInfo (wire type)", () => {
+  describe("DetailedGraphInfo (wire type)", () => {
     it("roundtrips through WASM", async () => {
       if (skipIfNoWasm()) return;
 
       await fc.assert(
-        fc.asyncProperty(arbGraphInfo, async (graphInfo) => {
+        fc.asyncProperty(arbDetailedGraphInfo, async (graphInfo) => {
           const inputJson = JSON.stringify(graphInfo);
           const resultStr = await roundtrip!.roundtripGraphInfoWire(inputJson);
           const result: RoundtripResult = JSON.parse(resultStr);
