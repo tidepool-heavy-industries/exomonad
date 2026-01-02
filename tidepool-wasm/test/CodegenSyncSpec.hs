@@ -58,11 +58,6 @@ spec = beforeAll_ setupDefaultRegistry $ describe "Codegen Sync" $ do
       spec <- findSpec "example"
       verifyGraphInfo json spec
 
-    it "habitica graph info matches spec" $ do
-      json <- getGraphInfo "habitica"
-      spec <- findSpec "habitica"
-      verifyGraphInfo json spec
-
 
 -- | Find a GraphSpec by ID.
 findSpec :: Text -> IO GraphSpec

@@ -15,9 +15,6 @@ library
         Tidepool.Wasm.Prelude
         Tidepool.Wasm.Effect
         Tidepool.Wasm.ExampleGraph
-        Tidepool.Wasm.HabiticaRoutingGraph
-        Tidepool.Wasm.HabiticaTemplates
-        Tidepool.Wasm.HabiticaTypes
         Tidepool.Wasm.Habitica
         Tidepool.Wasm.TestGraph
         Tidepool.Wasm.LlmTestGraph
@@ -31,7 +28,6 @@ library
         Tidepool.Wasm.Registry.Default
         Tidepool.Wasm.Registry.TestGraph
         Tidepool.Wasm.Registry.ExampleGraph
-        Tidepool.Wasm.Registry.HabiticaGraph
         -- Unified FFI
         Tidepool.Wasm.Ffi.Unified
     build-depends:
@@ -99,7 +95,6 @@ test-suite tidepool-wasm-tests
         TestGraphSpec
         ExampleGraphSpec
         LlmTestGraphSpec
-        HabiticaRoutingGraphSpec
         ProtocolConformanceSpec
         ProtocolPropertySpec
         RunnerSpec
