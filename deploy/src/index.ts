@@ -17,9 +17,13 @@ import { SESSION_TIMEOUT_MS } from "tidepool-generated-ts";
 import { executeEffect, type Env as HandlersEnv } from "./handlers/index.js";
 import { runLoop } from "./loop.js";
 import { routeWebhook, type WebhookEnv } from "./telegram/webhook.js";
+import { routeAlertWebhook, type AlertWebhookEnv } from "./alert/webhook.js";
 
 // Re-export TelegramDO for Cloudflare Workers
 export { TelegramDO } from "./telegram/do.js";
+
+// Re-export AlertDO for Cloudflare Workers
+export { AlertDO } from "./alert/do.js";
 
 // Import WASM module at build time
 import wasmModule from "./tidepool.wasm";
@@ -28,9 +32,10 @@ import wasmModule from "./tidepool.wasm";
 // Environment Types
 // =============================================================================
 
-export interface Env extends HandlersEnv, WebhookEnv {
+export interface Env extends HandlersEnv, WebhookEnv, AlertWebhookEnv {
   STATE_MACHINE: DurableObjectNamespace<StateMachineDO>;
   // TELEGRAM_DO is inherited from WebhookEnv
+  // ALERT_DO is inherited from AlertWebhookEnv
 }
 
 // =============================================================================
@@ -595,6 +600,12 @@ export default {
     if (url.pathname === "/telegram" && request.method === "POST") {
       console.log("[Worker] Routing to /telegram webhook");
       return routeWebhook(request, env);
+    }
+
+    // Alert webhook: /alert
+    if (url.pathname === "/alert" && request.method === "POST") {
+      console.log("[Worker] Routing to /alert webhook");
+      return routeAlertWebhook(request, env);
     }
 
     // Telegram webhook status: /webhook-status
