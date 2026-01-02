@@ -63,6 +63,12 @@ library
             -optl-Wl,--export=roundtripExecutionPhase
             -optl-Wl,--export=roundtripGraphState
             -optl-Wl,--export=roundtripStepOutput
+            -- Graph info roundtrip exports
+            -optl-Wl,--export=roundtripTypeInfoWire
+            -optl-Wl,--export=roundtripGotoTargetWire
+            -optl-Wl,--export=roundtripNodeInfoWire
+            -optl-Wl,--export=roundtripEdgeInfoWire
+            -optl-Wl,--export=roundtripGraphInfoWire
 
     hs-source-dirs:   src
     default-language: GHC2021
@@ -156,6 +162,12 @@ executable tidepool-reactor
             -optl-Wl,--export=roundtripExecutionPhase
             -optl-Wl,--export=roundtripGraphState
             -optl-Wl,--export=roundtripStepOutput
+            -- Graph info roundtrip exports
+            -optl-Wl,--export=roundtripTypeInfoWire
+            -optl-Wl,--export=roundtripGotoTargetWire
+            -optl-Wl,--export=roundtripNodeInfoWire
+            -optl-Wl,--export=roundtripEdgeInfoWire
+            -optl-Wl,--export=roundtripGraphInfoWire
 
 -- | Generates the TypeScript npm package with type-safe bindings.
 -- Run with: cabal run generate-ts-package -- ./output

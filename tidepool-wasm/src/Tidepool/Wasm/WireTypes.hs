@@ -23,6 +23,13 @@ module Tidepool.Wasm.WireTypes
 
     -- * Step Output
   , StepOutput(..)
+
+    -- * Graph Info (compile-time metadata)
+  , TypeInfoWire(..)
+  , GotoTargetWire(..)
+  , NodeInfoWire(..)
+  , EdgeInfoWire(..)
+  , GraphInfoWire(..)
   ) where
 
 import Data.Aeson
@@ -310,3 +317,152 @@ instance FromJSON StepOutput where
       -- Invalid: not done requires an effect
       (False, Nothing, _) ->
         fail "StepOutput: done=false requires an effect"
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- GRAPH INFO (compile-time metadata - matches protocol.ts)
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Type information for a Haskell type.
+--
+-- JSON encoding: @{typeName: "Intent", typeModule: "Echo"}@
+data TypeInfoWire = TypeInfoWire
+  { tiwTypeName :: Text
+  -- ^ Simple type name, e.g., "Intent"
+  , tiwTypeModule :: Text
+  -- ^ Module path, e.g., "Echo"
+  }
+  deriving stock (Show, Eq, Generic)
+
+instance ToJSON TypeInfoWire where
+  toJSON ti = object
+    [ "typeName" .= ti.tiwTypeName
+    , "typeModule" .= ti.tiwTypeModule
+    ]
+
+instance FromJSON TypeInfoWire where
+  parseJSON = withObject "TypeInfoWire" $ \o -> TypeInfoWire
+    <$> o .: "typeName"
+    <*> o .: "typeModule"
+
+
+-- | Goto target - control flow destination.
+--
+-- JSON encoding: @{gtTarget: "exit", gtPayloadType: {...}}@
+data GotoTargetWire = GotoTargetWire
+  { gtwTarget :: Text
+  -- ^ Target node name, or "Exit"
+  , gtwPayloadType :: TypeInfoWire
+  -- ^ Type passed (for Exit transitions)
+  }
+  deriving stock (Show, Eq, Generic)
+
+instance ToJSON GotoTargetWire where
+  toJSON gt = object
+    [ "gtTarget" .= gt.gtwTarget
+    , "gtPayloadType" .= gt.gtwPayloadType
+    ]
+
+instance FromJSON GotoTargetWire where
+  parseJSON = withObject "GotoTargetWire" $ \o -> GotoTargetWire
+    <$> o .: "gtTarget"
+    <*> o .: "gtPayloadType"
+
+
+-- | Node metadata - matches protocol.ts NodeInfo.
+--
+-- JSON encoding:
+-- @{niName: "classify", niKind: "LLM", niNeeds: [...], niSchema: null, niGotoTargets: [...]}@
+data NodeInfoWire = NodeInfoWire
+  { niwName :: Text
+  -- ^ Node name (record field name in Servant-style)
+  , niwKind :: Text
+  -- ^ "LLM" or "Logic"
+  , niwNeeds :: [TypeInfoWire]
+  -- ^ Types this node needs (from context)
+  , niwSchema :: Maybe TypeInfoWire
+  -- ^ Output type (LLM nodes only)
+  , niwGotoTargets :: [GotoTargetWire]
+  -- ^ Possible Goto targets (Logic nodes only)
+  }
+  deriving stock (Show, Eq, Generic)
+
+instance ToJSON NodeInfoWire where
+  toJSON ni = object
+    [ "niName" .= ni.niwName
+    , "niKind" .= ni.niwKind
+    , "niNeeds" .= ni.niwNeeds
+    , "niSchema" .= ni.niwSchema
+    , "niGotoTargets" .= ni.niwGotoTargets
+    ]
+
+instance FromJSON NodeInfoWire where
+  parseJSON = withObject "NodeInfoWire" $ \o -> NodeInfoWire
+    <$> o .: "niName"
+    <*> o .: "niKind"
+    <*> o .: "niNeeds"
+    <*> o .: "niSchema"
+    <*> o .: "niGotoTargets"
+
+
+-- | Edge for graph visualization.
+--
+-- JSON encoding: @{eiFrom: "entry", eiTo: "classify", eiPayloadType: {...}}@
+data EdgeInfoWire = EdgeInfoWire
+  { eiwFrom :: Text
+  -- ^ Source: "Entry" or node name
+  , eiwTo :: Text
+  -- ^ Target: "Exit" or node name
+  , eiwPayloadType :: TypeInfoWire
+  -- ^ Type carried on this edge
+  }
+  deriving stock (Show, Eq, Generic)
+
+instance ToJSON EdgeInfoWire where
+  toJSON ei = object
+    [ "eiFrom" .= ei.eiwFrom
+    , "eiTo" .= ei.eiwTo
+    , "eiPayloadType" .= ei.eiwPayloadType
+    ]
+
+instance FromJSON EdgeInfoWire where
+  parseJSON = withObject "EdgeInfoWire" $ \o -> EdgeInfoWire
+    <$> o .: "eiFrom"
+    <*> o .: "eiTo"
+    <*> o .: "eiPayloadType"
+
+
+-- | Static graph metadata - matches protocol.ts GraphInfo.
+--
+-- JSON encoding:
+-- @{name: "ExampleGraph", entryType: {...}, exitType: {...}, nodes: [...], edges: [...]}@
+data GraphInfoWire = GraphInfoWire
+  { giwName :: Text
+  -- ^ Graph name
+  , giwEntryType :: TypeInfoWire
+  -- ^ Type accepted at Entry
+  , giwExitType :: TypeInfoWire
+  -- ^ Type produced at Exit
+  , giwNodes :: [NodeInfoWire]
+  -- ^ All nodes in the graph (excludes Entry/Exit)
+  , giwEdges :: [EdgeInfoWire]
+  -- ^ Edges for visualization (from Needs/Schema and Goto)
+  }
+  deriving stock (Show, Eq, Generic)
+
+instance ToJSON GraphInfoWire where
+  toJSON gi = object
+    [ "name" .= gi.giwName
+    , "entryType" .= gi.giwEntryType
+    , "exitType" .= gi.giwExitType
+    , "nodes" .= gi.giwNodes
+    , "edges" .= gi.giwEdges
+    ]
+
+instance FromJSON GraphInfoWire where
+  parseJSON = withObject "GraphInfoWire" $ \o -> GraphInfoWire
+    <$> o .: "name"
+    <*> o .: "entryType"
+    <*> o .: "exitType"
+    <*> o .: "nodes"
+    <*> o .: "edges"

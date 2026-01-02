@@ -20,6 +20,12 @@ module Tidepool.Wasm.Roundtrip
   , roundtripExecutionPhase
   , roundtripGraphState
   , roundtripStepOutput
+    -- ** Graph Info Types
+  , roundtripTypeInfoWire
+  , roundtripGotoTargetWire
+  , roundtripNodeInfoWire
+  , roundtripEdgeInfoWire
+  , roundtripGraphInfoWire
     -- * Pure implementation (for native testing)
   , roundtripImpl
   ) where
@@ -37,6 +43,11 @@ import Tidepool.Wasm.WireTypes
   , ExecutionPhase
   , GraphState
   , StepOutput
+  , TypeInfoWire
+  , GotoTargetWire
+  , NodeInfoWire
+  , EdgeInfoWire
+  , GraphInfoWire
   )
 
 #if defined(wasm32_HOST_ARCH)
@@ -64,6 +75,21 @@ foreign export javascript "roundtripGraphState"
 
 foreign export javascript "roundtripStepOutput"
   roundtripStepOutput :: JSString -> IO JSString
+
+foreign export javascript "roundtripTypeInfoWire"
+  roundtripTypeInfoWire :: JSString -> IO JSString
+
+foreign export javascript "roundtripGotoTargetWire"
+  roundtripGotoTargetWire :: JSString -> IO JSString
+
+foreign export javascript "roundtripNodeInfoWire"
+  roundtripNodeInfoWire :: JSString -> IO JSString
+
+foreign export javascript "roundtripEdgeInfoWire"
+  roundtripEdgeInfoWire :: JSString -> IO JSString
+
+foreign export javascript "roundtripGraphInfoWire"
+  roundtripGraphInfoWire :: JSString -> IO JSString
 
 #endif
 
@@ -141,4 +167,63 @@ roundtripStepOutput input =
 #else
 roundtripStepOutput :: Text -> IO Text
 roundtripStepOutput = pure . roundtripImpl @StepOutput
+#endif
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- GRAPH INFO TYPE EXPORTS
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Roundtrip TypeInfoWire through Haskell's Aeson.
+#if defined(wasm32_HOST_ARCH)
+roundtripTypeInfoWire :: JSString -> IO JSString
+roundtripTypeInfoWire input =
+  pure $ toJSString $ T.unpack $ roundtripImpl @TypeInfoWire $ T.pack $ fromJSString input
+#else
+roundtripTypeInfoWire :: Text -> IO Text
+roundtripTypeInfoWire = pure . roundtripImpl @TypeInfoWire
+#endif
+
+
+-- | Roundtrip GotoTargetWire through Haskell's Aeson.
+#if defined(wasm32_HOST_ARCH)
+roundtripGotoTargetWire :: JSString -> IO JSString
+roundtripGotoTargetWire input =
+  pure $ toJSString $ T.unpack $ roundtripImpl @GotoTargetWire $ T.pack $ fromJSString input
+#else
+roundtripGotoTargetWire :: Text -> IO Text
+roundtripGotoTargetWire = pure . roundtripImpl @GotoTargetWire
+#endif
+
+
+-- | Roundtrip NodeInfoWire through Haskell's Aeson.
+#if defined(wasm32_HOST_ARCH)
+roundtripNodeInfoWire :: JSString -> IO JSString
+roundtripNodeInfoWire input =
+  pure $ toJSString $ T.unpack $ roundtripImpl @NodeInfoWire $ T.pack $ fromJSString input
+#else
+roundtripNodeInfoWire :: Text -> IO Text
+roundtripNodeInfoWire = pure . roundtripImpl @NodeInfoWire
+#endif
+
+
+-- | Roundtrip EdgeInfoWire through Haskell's Aeson.
+#if defined(wasm32_HOST_ARCH)
+roundtripEdgeInfoWire :: JSString -> IO JSString
+roundtripEdgeInfoWire input =
+  pure $ toJSString $ T.unpack $ roundtripImpl @EdgeInfoWire $ T.pack $ fromJSString input
+#else
+roundtripEdgeInfoWire :: Text -> IO Text
+roundtripEdgeInfoWire = pure . roundtripImpl @EdgeInfoWire
+#endif
+
+
+-- | Roundtrip GraphInfoWire through Haskell's Aeson.
+#if defined(wasm32_HOST_ARCH)
+roundtripGraphInfoWire :: JSString -> IO JSString
+roundtripGraphInfoWire input =
+  pure $ toJSString $ T.unpack $ roundtripImpl @GraphInfoWire $ T.pack $ fromJSString input
+#else
+roundtripGraphInfoWire :: Text -> IO Text
+roundtripGraphInfoWire = pure . roundtripImpl @GraphInfoWire
 #endif

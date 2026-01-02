@@ -51,6 +51,12 @@ export interface RoundtripExports {
   roundtripExecutionPhase(json: string): Promise<string>;
   roundtripGraphState(json: string): Promise<string>;
   roundtripStepOutput(json: string): Promise<string>;
+  // Graph info types
+  roundtripTypeInfoWire(json: string): Promise<string>;
+  roundtripGotoTargetWire(json: string): Promise<string>;
+  roundtripNodeInfoWire(json: string): Promise<string>;
+  roundtripEdgeInfoWire(json: string): Promise<string>;
+  roundtripGraphInfoWire(json: string): Promise<string>;
 }
 
 // =============================================================================
@@ -102,6 +108,12 @@ export async function loadRoundtripModule(
     roundtripExecutionPhase: (json: string) => string | Promise<string>;
     roundtripGraphState: (json: string) => string | Promise<string>;
     roundtripStepOutput: (json: string) => string | Promise<string>;
+    // Graph info types
+    roundtripTypeInfoWire: (json: string) => string | Promise<string>;
+    roundtripGotoTargetWire: (json: string) => string | Promise<string>;
+    roundtripNodeInfoWire: (json: string) => string | Promise<string>;
+    roundtripEdgeInfoWire: (json: string) => string | Promise<string>;
+    roundtripGraphInfoWire: (json: string) => string | Promise<string>;
   };
 
   const exports = instance.exports as unknown as RawExports;
@@ -155,6 +167,27 @@ export async function loadRoundtripModule(
     roundtripStepOutput: wrapRoundtrip(
       exports.roundtripStepOutput,
       "roundtripStepOutput"
+    ),
+    // Graph info types
+    roundtripTypeInfoWire: wrapRoundtrip(
+      exports.roundtripTypeInfoWire,
+      "roundtripTypeInfoWire"
+    ),
+    roundtripGotoTargetWire: wrapRoundtrip(
+      exports.roundtripGotoTargetWire,
+      "roundtripGotoTargetWire"
+    ),
+    roundtripNodeInfoWire: wrapRoundtrip(
+      exports.roundtripNodeInfoWire,
+      "roundtripNodeInfoWire"
+    ),
+    roundtripEdgeInfoWire: wrapRoundtrip(
+      exports.roundtripEdgeInfoWire,
+      "roundtripEdgeInfoWire"
+    ),
+    roundtripGraphInfoWire: wrapRoundtrip(
+      exports.roundtripGraphInfoWire,
+      "roundtripGraphInfoWire"
     ),
   };
 }
