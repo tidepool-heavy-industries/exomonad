@@ -1,6 +1,10 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 -- | TestGraph registry entry.
+--
+-- Uses per-session IORef pattern: each createSession allocates a fresh IORef
+-- that lives only as long as the session. This avoids state leakage between
+-- graphs when switching sessions.
 module Tidepool.Wasm.Registry.TestGraph
   ( testGraphEntry
   ) where
@@ -9,9 +13,6 @@ import Data.Aeson (ToJSON(..), Value(..), object, (.=))
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Scientific (floatingOrInteger)
 import Data.Text (Text)
-import qualified Data.Text as T
-import System.IO.Unsafe (unsafePerformIO)
-
 import Tidepool.Graph.Goto (GotoChoice(..), OneOf(..), To)
 import Tidepool.Graph.Types (Exit)
 import Tidepool.Wasm.WireTypes
@@ -23,8 +24,6 @@ import Tidepool.Wasm.WireTypes
 import Tidepool.Wasm.Runner (WasmResult(..), initializeWasm)
 import Tidepool.Wasm.Ffi.Types (mkErrorOutput)
 import Tidepool.Wasm.TestGraph (computeHandlerWasm)
-
--- Import the shared types from Registry (will create this)
 import Tidepool.Wasm.Registry.Types (GraphEntry(..), ActiveSession(..))
 
 
@@ -55,17 +54,14 @@ graphInfo = object
 
 
 -- ════════════════════════════════════════════════════════════════════════════
--- SESSION STATE
+-- SESSION STATE (per-session, not global)
 -- ════════════════════════════════════════════════════════════════════════════
 
--- Internal state for this graph's sessions
+-- | Internal state for a single session.
+-- Each session gets its own IORef - no global state.
 data TestState
   = TestIdle
   | TestWaiting (EffectResult -> WasmResult (GotoChoice '[To Exit Int])) ExecutionPhase
-
-{-# NOINLINE testState #-}
-testState :: IORef TestState
-testState = unsafePerformIO $ newIORef TestIdle
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -79,23 +75,25 @@ exitToOutput (GotoChoice (Here result)) =
   in StepDone resultVal (GraphState (PhaseCompleted resultVal) ["compute"])
 
 
--- | Create a new session for TestGraph
+-- | Create a new session for TestGraph.
+--
+-- Each call allocates a fresh IORef for this session's state.
+-- When the session is replaced in Registry.activeSession, this IORef
+-- becomes unreachable and can be garbage collected.
 createSession :: Value -> IO (Either Text (StepOutput, ActiveSession))
 createSession inputValue = do
-  -- Reset state
-  writeIORef testState TestIdle
+  -- Allocate fresh IORef for THIS session (not global!)
+  sessionState <- newIORef TestIdle
 
-  -- Parse input as Int
   case parseIntValue inputValue of
     Left err -> pure $ Left $ "Invalid input for TestGraph: " <> err
     Right entry -> do
-      -- Initialize the graph
       let result = initializeWasm (computeHandlerWasm entry)
-      output <- wasmResultToOutput result
+      output <- wasmResultToOutput sessionState result
       let session = ActiveSession
             { asGraphId = "test"
-            , asStep = stepSession
-            , asGetState = getSessionState
+            , asStep = stepSession sessionState
+            , asGetState = getSessionState sessionState
             , asGraphInfo = graphInfo
             }
       pure $ Right (output, session)
@@ -109,37 +107,37 @@ parseIntValue (Number n) = case floatingOrInteger n of
 parseIntValue _ = Left "Expected integer"
 
 
--- | Step the TestGraph session
-stepSession :: EffectResult -> IO StepOutput
-stepSession effectResult = do
-  st <- readIORef testState
+-- | Step the session (captures sessionState IORef in closure)
+stepSession :: IORef TestState -> EffectResult -> IO StepOutput
+stepSession sessionState effectResult = do
+  st <- readIORef sessionState
   case st of
     TestIdle -> pure $ mkErrorOutput "TestGraph not initialized"
     TestWaiting resume _phase -> do
       let result = resume effectResult
-      wasmResultToOutput result
+      wasmResultToOutput sessionState result
 
 
--- | Get current state
-getSessionState :: IO GraphState
-getSessionState = do
-  st <- readIORef testState
+-- | Get current state (captures sessionState IORef in closure)
+getSessionState :: IORef TestState -> IO GraphState
+getSessionState sessionState = do
+  st <- readIORef sessionState
   pure $ case st of
     TestIdle -> GraphState PhaseIdle []
     TestWaiting _ phase -> GraphState phase []
 
 
--- | Convert WasmResult to StepOutput and update state
-wasmResultToOutput :: WasmResult (GotoChoice '[To Exit Int]) -> IO StepOutput
-wasmResultToOutput (WasmComplete a) = do
-  writeIORef testState TestIdle
+-- | Convert WasmResult to StepOutput and update session state
+wasmResultToOutput :: IORef TestState -> WasmResult (GotoChoice '[To Exit Int]) -> IO StepOutput
+wasmResultToOutput sessionState (WasmComplete a) = do
+  writeIORef sessionState TestIdle
   pure $ exitToOutput a
 
-wasmResultToOutput (WasmYield eff resume) = do
+wasmResultToOutput sessionState (WasmYield eff resume) = do
   let phase = PhaseInNode "compute"
-  writeIORef testState (TestWaiting resume phase)
+  writeIORef sessionState (TestWaiting resume phase)
   pure $ StepYield eff (GraphState phase [])
 
-wasmResultToOutput (WasmError msg) = do
-  writeIORef testState TestIdle
+wasmResultToOutput sessionState (WasmError msg) = do
+  writeIORef sessionState TestIdle
   pure $ mkErrorOutput msg

@@ -1,16 +1,18 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 -- | HabiticaRoutingGraph registry entry.
+--
+-- Uses per-session IORef pattern: each createSession allocates a fresh IORef
+-- that lives only as long as the session. This avoids state leakage between
+-- graphs when switching sessions.
 module Tidepool.Wasm.Registry.HabiticaGraph
   ( habiticaGraphEntry
   ) where
 
-import Data.Aeson (ToJSON(..), FromJSON(..), Value(..), Result(..), object, (.=), fromJSON)
+import Data.Aeson (ToJSON(..), Value(..), Result(..), object, (.=), fromJSON)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Text (Text)
 import qualified Data.Text as T
-import System.IO.Unsafe (unsafePerformIO)
-
 import Tidepool.Wasm.WireTypes
   ( EffectResult(..)
   , ExecutionPhase(..)
@@ -60,16 +62,14 @@ graphInfo = object
 
 
 -- ════════════════════════════════════════════════════════════════════════════
--- SESSION STATE
+-- SESSION STATE (per-session, not global)
 -- ════════════════════════════════════════════════════════════════════════════
 
+-- | Internal state for a single session.
+-- Each session gets its own IORef - no global state.
 data HabiticaState
   = HabiticaIdle
   | HabiticaWaiting (EffectResult -> WasmResult ExecutionResult) ExecutionPhase
-
-{-# NOINLINE habiticaState #-}
-habiticaState :: IORef HabiticaState
-habiticaState = unsafePerformIO $ newIORef HabiticaIdle
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -82,52 +82,61 @@ exitToOutput result =
   in StepDone resultVal (GraphState (PhaseCompleted resultVal) ["executeAction"])
 
 
+-- | Create a new session for HabiticaRoutingGraph.
+--
+-- Each call allocates a fresh IORef for this session's state.
+-- When the session is replaced in Registry.activeSession, this IORef
+-- becomes unreachable and can be garbage collected.
 createSession :: Value -> IO (Either Text (StepOutput, ActiveSession))
 createSession inputValue = do
-  writeIORef habiticaState HabiticaIdle
+  -- Allocate fresh IORef for THIS session (not global!)
+  sessionState <- newIORef HabiticaIdle
 
   case fromJSON inputValue of
     Error err -> pure $ Left $ "Invalid input for HabiticaRoutingGraph: " <> T.pack err
     Success (input :: RawInput) -> do
       let result = initializeWasm (runHabiticaRoutingGraph input)
-      output <- wasmResultToOutput result
+      output <- wasmResultToOutput sessionState result
       let session = ActiveSession
             { asGraphId = "habitica"
-            , asStep = stepSession
-            , asGetState = getSessionState
+            , asStep = stepSession sessionState
+            , asGetState = getSessionState sessionState
             , asGraphInfo = graphInfo
             }
       pure $ Right (output, session)
 
 
-stepSession :: EffectResult -> IO StepOutput
-stepSession effectResult = do
-  st <- readIORef habiticaState
+-- | Step the session (captures sessionState IORef in closure)
+stepSession :: IORef HabiticaState -> EffectResult -> IO StepOutput
+stepSession sessionState effectResult = do
+  st <- readIORef sessionState
   case st of
     HabiticaIdle -> pure $ mkErrorOutput "HabiticaRoutingGraph not initialized"
     HabiticaWaiting resume _phase -> do
       let result = resume effectResult
-      wasmResultToOutput result
+      wasmResultToOutput sessionState result
 
 
-getSessionState :: IO GraphState
-getSessionState = do
-  st <- readIORef habiticaState
+-- | Get current state (captures sessionState IORef in closure)
+getSessionState :: IORef HabiticaState -> IO GraphState
+getSessionState sessionState = do
+  st <- readIORef sessionState
   pure $ case st of
     HabiticaIdle -> GraphState PhaseIdle []
     HabiticaWaiting _ phase -> GraphState phase []
 
 
-wasmResultToOutput :: WasmResult ExecutionResult -> IO StepOutput
-wasmResultToOutput (WasmComplete a) = do
-  writeIORef habiticaState HabiticaIdle
+-- | Convert WasmResult to StepOutput and update session state
+wasmResultToOutput :: IORef HabiticaState -> WasmResult ExecutionResult -> IO StepOutput
+wasmResultToOutput sessionState (WasmComplete a) = do
+  writeIORef sessionState HabiticaIdle
   pure $ exitToOutput a
 
-wasmResultToOutput (WasmYield eff resume) = do
+wasmResultToOutput sessionState (WasmYield eff resume) = do
   let phase = PhaseInNode "extractTask"
-  writeIORef habiticaState (HabiticaWaiting resume phase)
+  writeIORef sessionState (HabiticaWaiting resume phase)
   pure $ StepYield eff (GraphState phase [])
 
-wasmResultToOutput (WasmError msg) = do
-  writeIORef habiticaState HabiticaIdle
+wasmResultToOutput sessionState (WasmError msg) = do
+  writeIORef sessionState HabiticaIdle
   pure $ mkErrorOutput msg
