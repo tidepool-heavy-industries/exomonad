@@ -24,7 +24,7 @@ import type {
   TelegramIncomingMessage,
   SerializableEffect,
   EffectResult,
-} from "tidepool-generated";
+} from "tidepool-generated-ts";
 import {
   handleTelegramSend,
   handleTelegramReceive,

@@ -4,7 +4,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { executeEffect, type Env } from "../index.js";
-import type { SerializableEffect, LogInfoEffect, LlmCompleteEffect } from "tidepool-generated";
+import type { SerializableEffect, LogInfoEffect, LlmCompleteEffect } from "tidepool-generated-ts";
 
 // Store originals
 const originalLog = console.log;

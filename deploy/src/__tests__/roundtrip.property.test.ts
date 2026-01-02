@@ -29,7 +29,7 @@ import type {
   NodeInfo,
   EdgeInfo,
   DetailedGraphInfo,
-} from "tidepool-generated";
+} from "tidepool-generated-ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 

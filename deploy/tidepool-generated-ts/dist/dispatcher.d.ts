@@ -1,0 +1,16 @@
+import type { GraphId } from './graphs.js';
+import type { GraphWasmExports } from './exports.js';
+export interface GraphFns {
+    initialize: (json: string) => string;
+    step: (json: string) => string;
+    getGraphInfo: () => string;
+    getGraphState: () => string;
+}
+/**
+ * Get type-safe graph functions for a specific graph.
+ *
+ * Uses unified FFI - graphId is baked in, caller just passes data.
+ * No more switch statement needed - all graphs use same 4 exports.
+ */
+export declare function getGraphFns(graphId: GraphId, exports: GraphWasmExports): GraphFns;
+//# sourceMappingURL=dispatcher.d.ts.map
