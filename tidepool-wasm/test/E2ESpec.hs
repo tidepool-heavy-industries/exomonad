@@ -31,7 +31,8 @@ import Tidepool.Wasm.WireTypes
   , GraphState(..)
   , ExecutionPhase(..)
   )
-import Tidepool.Graph.Goto (GotoChoice(..), OneOf(..), To)
+import Tidepool.Graph.Goto (GotoChoice, OneOf, To)
+import Tidepool.Graph.Goto.Internal (GotoChoice(..), OneOf(..))  -- For test assertions
 import Tidepool.Graph.Types (Exit)
 
 

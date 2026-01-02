@@ -28,8 +28,7 @@ module Tidepool.Effects.Habitica
 import Data.Text (Text)
 import Data.Aeson (FromJSON, ToJSON)
 import GHC.Generics (Generic)
-import Effectful
-import Effectful.Dispatch.Dynamic
+import Control.Monad.Freer (Eff, Member, send, interpret)
 
 import Tidepool.Effect (Log, logInfo)
 
@@ -95,38 +94,36 @@ data ScoreResult = ScoreResult
 
 -- Effect
 
-data Habitica :: Effect where
-  FetchTodos       :: Habitica m [Todo]
-  AddChecklistItem :: TodoId -> Text -> Habitica m Text
-  CreateTodo       :: Text -> Habitica m TodoId
-  GetUser          :: Habitica m User
-  ScoreTask        :: TaskId -> Direction -> Habitica m ScoreResult
-  GetTasks         :: TaskType -> Habitica m [Task]
+data Habitica r where
+  FetchTodos       :: Habitica [Todo]
+  AddChecklistItem :: TodoId -> Text -> Habitica Text
+  CreateTodo       :: Text -> Habitica TodoId
+  GetUser          :: Habitica User
+  ScoreTask        :: TaskId -> Direction -> Habitica ScoreResult
+  GetTasks         :: TaskType -> Habitica [Task]
 
-type instance DispatchOf Habitica = 'Dynamic
-
-fetchTodos :: Habitica :> es => Eff es [Todo]
+fetchTodos :: Member Habitica effs => Eff effs [Todo]
 fetchTodos = send FetchTodos
 
-addChecklistItem :: Habitica :> es => TodoId -> Text -> Eff es Text
+addChecklistItem :: Member Habitica effs => TodoId -> Text -> Eff effs Text
 addChecklistItem tid item = send (AddChecklistItem tid item)
 
-createTodo :: Habitica :> es => Text -> Eff es TodoId
+createTodo :: Member Habitica effs => Text -> Eff effs TodoId
 createTodo title = send (CreateTodo title)
 
-getUser :: Habitica :> es => Eff es User
+getUser :: Member Habitica effs => Eff effs User
 getUser = send GetUser
 
-scoreTask :: Habitica :> es => TaskId -> Direction -> Eff es ScoreResult
+scoreTask :: Member Habitica effs => TaskId -> Direction -> Eff effs ScoreResult
 scoreTask tid dir = send (ScoreTask tid dir)
 
-getTasks :: Habitica :> es => TaskType -> Eff es [Task]
+getTasks :: Member Habitica effs => TaskType -> Eff effs [Task]
 getTasks tt = send (GetTasks tt)
 
 -- Stub runner (errors on call)
 
-runHabiticaStub :: (IOE :> es, Log :> es) => Eff (Habitica : es) a -> Eff es a
-runHabiticaStub = interpret $ \_ -> \case
+runHabiticaStub :: Member Log effs => Eff (Habitica ': effs) a -> Eff effs a
+runHabiticaStub = interpret $ \case
   FetchTodos -> do
     logInfo "[Habitica:stub] FetchTodos called"
     error "Habitica.fetchTodos: not implemented"

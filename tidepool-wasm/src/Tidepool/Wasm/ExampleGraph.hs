@@ -49,7 +49,8 @@ import GHC.Generics (Generic)
 import Tidepool.Graph.Types (type (:@), Needs, UsesEffects, Exit, Self)
 import Tidepool.Graph.Generic (GraphMode(..), type (:-))
 import qualified Tidepool.Graph.Generic as G (Entry, Exit, LogicNode)
-import Tidepool.Graph.Goto (Goto, GotoChoice(..), OneOf(..), To, gotoChoice, gotoExit, gotoSelf)
+import Tidepool.Graph.Goto (Goto, GotoChoice, OneOf, To, gotoChoice, gotoExit, gotoSelf)
+import Tidepool.Graph.Goto.Internal (GotoChoice(..), OneOf(..))  -- For dispatch
 
 import Tidepool.Wasm.Effect (WasmM, logInfo, logError, llmComplete)
 

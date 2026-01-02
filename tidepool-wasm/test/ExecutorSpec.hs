@@ -34,7 +34,8 @@ import Test.Hspec
 import Tidepool.Graph.Types (type (:@), Needs, UsesEffects, Exit, Self)
 import Tidepool.Graph.Generic (GraphMode(..), type (:-))
 import qualified Tidepool.Graph.Generic as G (Entry, Exit, LogicNode)
-import Tidepool.Graph.Goto (Goto, GotoChoice(..), To, OneOf(..), gotoChoice, gotoExit, gotoSelf)
+import Tidepool.Graph.Goto (Goto, GotoChoice, To, OneOf, gotoChoice, gotoExit, gotoSelf)
+import Tidepool.Graph.Goto.Internal (GotoChoice(..), OneOf(..))  -- For test assertions
 
 import Tidepool.Wasm.Effect (WasmM, logInfo)
 import Tidepool.Wasm.Runner (initializeWasm, WasmResult(..))

@@ -17,8 +17,7 @@ module Tidepool.Effects.Obsidian
 import Data.Text (Text)
 import Data.Aeson (FromJSON, ToJSON)
 import GHC.Generics (Generic)
-import Effectful
-import Effectful.Dispatch.Dynamic
+import Control.Monad.Freer (Eff, Member, send, interpret)
 
 import Tidepool.Effect (Log, logInfo)
 
@@ -30,30 +29,28 @@ newtype PagePath = PagePath { unPagePath :: Text }
 
 -- Effect
 
-data Obsidian :: Effect where
-  ListPages    :: Obsidian m [PagePath]
-  ReadPage     :: PagePath -> Obsidian m Text
-  AppendToPage :: PagePath -> Text -> Obsidian m ()
-  CreatePage   :: PagePath -> Text -> Obsidian m ()
+data Obsidian r where
+  ListPages    :: Obsidian [PagePath]
+  ReadPage     :: PagePath -> Obsidian Text
+  AppendToPage :: PagePath -> Text -> Obsidian ()
+  CreatePage   :: PagePath -> Text -> Obsidian ()
 
-type instance DispatchOf Obsidian = 'Dynamic
-
-listPages :: Obsidian :> es => Eff es [PagePath]
+listPages :: Member Obsidian effs => Eff effs [PagePath]
 listPages = send ListPages
 
-readPage :: Obsidian :> es => PagePath -> Eff es Text
+readPage :: Member Obsidian effs => PagePath -> Eff effs Text
 readPage path = send (ReadPage path)
 
-appendToPage :: Obsidian :> es => PagePath -> Text -> Eff es ()
+appendToPage :: Member Obsidian effs => PagePath -> Text -> Eff effs ()
 appendToPage path content = send (AppendToPage path content)
 
-createPage :: Obsidian :> es => PagePath -> Text -> Eff es ()
+createPage :: Member Obsidian effs => PagePath -> Text -> Eff effs ()
 createPage path content = send (CreatePage path content)
 
 -- Stub runner (errors on call)
 
-runObsidianStub :: (IOE :> es, Log :> es) => Eff (Obsidian : es) a -> Eff es a
-runObsidianStub = interpret $ \_ -> \case
+runObsidianStub :: Member Log effs => Eff (Obsidian ': effs) a -> Eff effs a
+runObsidianStub = interpret $ \case
   ListPages -> do
     logInfo "[Obsidian:stub] ListPages called"
     error "Obsidian.listPages: not implemented"

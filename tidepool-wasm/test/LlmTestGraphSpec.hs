@@ -13,7 +13,8 @@ import Test.Hspec
 import Data.Aeson (object, (.=), Value(..))
 import qualified Data.Text as T
 
-import Tidepool.Graph.Goto (GotoChoice(..), OneOf(..))
+import Tidepool.Graph.Goto (GotoChoice, OneOf)
+import Tidepool.Graph.Goto.Internal (GotoChoice(..), OneOf(..))  -- For test assertions
 import Tidepool.Wasm.LlmTestGraph (echoHandlerWasm)
 import Tidepool.Wasm.Runner (initializeWasm, WasmResult(..))
 import Tidepool.Wasm.WireTypes (SerializableEffect(..), EffectResult(..))

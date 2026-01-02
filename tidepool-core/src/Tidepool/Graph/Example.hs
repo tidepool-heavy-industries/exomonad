@@ -35,9 +35,10 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Typeable (Typeable)
 import Data.Proxy (Proxy(..))
-import Effectful (type (:>), Eff)
-import Effectful.State.Static.Local (State, get)
+import Control.Monad.Freer (Eff, Member)
 import GHC.Generics (Generic)
+
+import Tidepool.Effect (State, get)
 import Text.Parsec.Pos (SourcePos)
 
 import Tidepool.Graph.Types (type (:@), Needs, Schema, Template, UsesEffects, Exit)
@@ -161,7 +162,7 @@ classifyCompiled = $(typedTemplateFile ''ClassifyContext "templates/example.jinj
 -- * The context builder function
 instance TemplateDef ClassifyTpl where
   type TemplateContext ClassifyTpl = ClassifyContext
-  type TemplateConstraint ClassifyTpl es = (State SessionState :> es)
+  type TemplateConstraint ClassifyTpl es = (Member (State SessionState) es)
 
   templateName = "classify"
   templateDescription = "Classify user intent into categories"

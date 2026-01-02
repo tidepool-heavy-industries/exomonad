@@ -18,8 +18,7 @@ import qualified Data.Text as T
 import Data.Aeson (FromJSON, ToJSON)
 import Data.Time (UTCTime, Day, TimeOfDay)
 import GHC.Generics (Generic)
-import Effectful
-import Effectful.Dispatch.Dynamic
+import Control.Monad.Freer (Eff, Member, send, interpret)
 
 import Tidepool.Effect (Log, logInfo)
 
@@ -39,22 +38,20 @@ data CalendarEvent = CalendarEvent
 
 -- Effect
 
-data Calendar :: Effect where
-  CreateEvent :: Text -> Day -> TimeOfDay -> Maybe TimeOfDay -> Calendar m EventId
-  ListEvents  :: Day -> Day -> Calendar m [CalendarEvent]
+data Calendar r where
+  CreateEvent :: Text -> Day -> TimeOfDay -> Maybe TimeOfDay -> Calendar EventId
+  ListEvents  :: Day -> Day -> Calendar [CalendarEvent]
 
-type instance DispatchOf Calendar = 'Dynamic
-
-createEvent :: Calendar :> es => Text -> Day -> TimeOfDay -> Maybe TimeOfDay -> Eff es EventId
+createEvent :: Member Calendar effs => Text -> Day -> TimeOfDay -> Maybe TimeOfDay -> Eff effs EventId
 createEvent title day start mEnd = send (CreateEvent title day start mEnd)
 
-listEvents :: Calendar :> es => Day -> Day -> Eff es [CalendarEvent]
+listEvents :: Member Calendar effs => Day -> Day -> Eff effs [CalendarEvent]
 listEvents from to = send (ListEvents from to)
 
 -- Stub runner (errors on call)
 
-runCalendarStub :: (IOE :> es, Log :> es) => Eff (Calendar : es) a -> Eff es a
-runCalendarStub = interpret $ \_ -> \case
+runCalendarStub :: Member Log effs => Eff (Calendar ': effs) a -> Eff effs a
+runCalendarStub = interpret $ \case
   CreateEvent title day start _ -> do
     logInfo $ "[Calendar:stub] CreateEvent called: " <> title <> " on " <> T.pack (show day) <> " at " <> T.pack (show start)
     error "Calendar.createEvent: not implemented"

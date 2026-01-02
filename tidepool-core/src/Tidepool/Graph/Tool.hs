@@ -81,9 +81,12 @@ import Data.Kind (Type, Constraint)
 import Data.Proxy (Proxy(..))
 import Data.Text (Text)
 import Data.Typeable (TypeRep, Typeable, typeRep)
-import Effectful (Eff, Effect)
+import Control.Monad.Freer (Eff)
 
 import Tidepool.Schema (HasJSONSchema(..), JSONSchema, schemaToValue)
+
+-- | Effect type alias (freer-simple effects have kind Type -> Type).
+type Effect = Type -> Type
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TOOL DEFINITION

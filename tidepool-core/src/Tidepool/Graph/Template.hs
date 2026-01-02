@@ -98,11 +98,11 @@ module Tidepool.Graph.Template
   , makeTemplateCompiled
   ) where
 
-import Data.Char (isAsciiUpper, toLower)
+import Data.Char (toLower)
 import Data.Kind (Constraint, Type)
 import Data.Text (Text)
 import Control.Monad.Writer (Writer)
-import Effectful
+import Control.Monad.Freer (Eff)
 import Language.Haskell.TH hiding (Type)
 import Text.Ginger.GVal (ToGVal)
 import Text.Ginger.Run.Type (Run)
@@ -164,10 +164,10 @@ class TemplateDef t where
   -- Default is no effects (empty constraint).
   --
   -- @
-  -- type TemplateConstraint MyTpl es = (State S :> es, Log :> es)
+  -- type TemplateConstraint MyTpl effs = (Member (State S) effs, Member Log effs)
   -- @
-  type TemplateConstraint t (es :: [Effect]) :: Constraint
-  type TemplateConstraint t es = ()
+  type TemplateConstraint t (effs :: [Type -> Type]) :: Constraint
+  type TemplateConstraint t effs = ()
 
   -- | Short name for this template (used in logging, debugging).
   templateName :: Text
@@ -199,7 +199,7 @@ class TemplateDef t where
   --   mem <- getMem \@NodeMemory
   --   pure MyContext { ... }
   -- @
-  buildContext :: TemplateConstraint t es => Eff es (TemplateContext t)
+  buildContext :: TemplateConstraint t effs => Eff effs (TemplateContext t)
 
   -- ════════════════════════════════════════════════════════════════════════════
   -- DERIVED ACCESSORS (for documentation generation)
@@ -255,12 +255,12 @@ class TemplateDef t where
 -- 1. Calls 'buildContext' to gather data from effects
 -- 2. Calls 'runTypedTemplate' to render the Jinja template
 renderTemplate
-  :: forall t es.
+  :: forall t effs.
      ( TemplateDef t
      , GingerContext (TemplateContext t)
-     , TemplateConstraint t es
+     , TemplateConstraint t effs
      )
-  => Eff es Text
+  => Eff effs Text
 renderTemplate = do
   ctx <- buildContext @t
   pure $ runTypedTemplate ctx (templateCompiled @t)

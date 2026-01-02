@@ -29,7 +29,7 @@ import Data.Proxy (Proxy(..))
 import GHC.Generics (Generic)
 import Tidepool.Effect (Emit, RequestInput, Random, State, ToolDispatcher, ToolResult(..))
 import Tidepool.Schema (HasJSONSchema(..), schemaToValue)
-import Effectful
+import Control.Monad.Freer (Eff, Member)
 
 -- | Tools are mid-turn capabilities the LLM can invoke
 -- Tools can use Emit, RequestInput, Random, and State effects
@@ -45,9 +45,9 @@ class (FromJSON (ToolInput t), ToJSON (ToolOutput t)) => Tool t event state wher
   -- | Execute the tool with its input
   -- Tools have access to state, events, input requests, and randomness
   executeTool
-    :: (State state :> es, Emit event :> es, RequestInput :> es, Random :> es)
+    :: (Member (State state) effs, Member (Emit event) effs, Member RequestInput effs, Member Random effs)
     => ToolInput t
-    -> Eff es (ToolOutput t)
+    -> Eff effs (ToolOutput t)
 
 -- ══════════════════════════════════════════════════════════════
 -- TOOL LIST
@@ -105,9 +105,9 @@ toolsFromType = toolListToJSON (reifyToolList @tools @event @state)
 --   dispatcher = dispatcherFromType @(PhaseTools 'Scene) @DMEvent @WorldState
 --
 dispatcherFromType
-  :: forall tools event state es.
-     (ReifyToolList tools event state, State state :> es, Emit event :> es, RequestInput :> es, Random :> es)
-  => ToolDispatcher event es
+  :: forall tools event state effs.
+     (ReifyToolList tools event state, Member (State state) effs, Member (Emit event) effs, Member RequestInput effs, Member Random effs)
+  => ToolDispatcher event effs
 dispatcherFromType = makeDispatcher (reifyToolList @tools @event @state)
 
 -- | Result of tool execution for returning to LLM (used by executeTools)
@@ -123,10 +123,10 @@ data ToolExecResult = ToolExecResult
 
 -- | Create a dispatcher from a tool list
 makeDispatcher
-  :: forall event state tools es.
-     (State state :> es, Emit event :> es, RequestInput :> es, Random :> es)
+  :: forall event state tools effs.
+     (Member (State state) effs, Member (Emit event) effs, Member RequestInput effs, Member Random effs)
   => ToolList event state tools
-  -> ToolDispatcher event es
+  -> ToolDispatcher event effs
 makeDispatcher = dispatchToList
 
 -- | Dispatch to a tool list, finding the matching tool by name
@@ -134,12 +134,12 @@ makeDispatcher = dispatchToList
 -- Note: For tools that break turns (state transitions), they should
 -- return ToolBreak from a separate dispatcher implementation
 dispatchToList
-  :: forall event state tools es.
-     (State state :> es, Emit event :> es, RequestInput :> es, Random :> es)
+  :: forall event state tools effs.
+     (Member (State state) effs, Member (Emit event) effs, Member RequestInput effs, Member Random effs)
   => ToolList event state tools
   -> Text
   -> Value
-  -> Eff es (Either Text ToolResult)
+  -> Eff effs (Either Text ToolResult)
 dispatchToList TNil name _ = pure $ Left $ "Unknown tool: " <> name
 dispatchToList (TCons (_ :: Proxy t) rest) name input
   | toolName @t @event @state == name = executeSingleTool @t @event @state input
@@ -148,10 +148,10 @@ dispatchToList (TCons (_ :: Proxy t) rest) name input
 -- | Execute a single tool with JSON input/output
 -- Returns ToolSuccess wrapping the output value
 executeSingleTool
-  :: forall t event state es.
-     (Tool t event state, State state :> es, Emit event :> es, RequestInput :> es, Random :> es)
+  :: forall t event state effs.
+     (Tool t event state, Member (State state) effs, Member (Emit event) effs, Member RequestInput effs, Member Random effs)
   => Value
-  -> Eff es (Either Text ToolResult)
+  -> Eff effs (Either Text ToolResult)
 executeSingleTool input = do
   case fromJSON input of
     Error err -> pure $ Left $ "Failed to parse tool input: " <> T.pack err
@@ -161,20 +161,20 @@ executeSingleTool input = do
 
 -- | Dispatch a single tool call
 dispatchTool
-  :: (State state :> es, Emit event :> es, RequestInput :> es, Random :> es)
-  => ToolDispatcher event es
+  :: (Member (State state) effs, Member (Emit event) effs, Member RequestInput effs, Member Random effs)
+  => ToolDispatcher event effs
   -> Text    -- Tool name
   -> Value   -- Input JSON
-  -> Eff es (Either Text ToolResult)
+  -> Eff effs (Either Text ToolResult)
 dispatchTool dispatcher = dispatcher
 
 -- | Execute a list of tool calls from LLM response
 -- Stops early if any tool returns ToolBreak
 executeTools
-  :: (State state :> es, Emit event :> es, RequestInput :> es, Random :> es)
-  => ToolDispatcher event es
+  :: (Member (State state) effs, Member (Emit event) effs, Member RequestInput effs, Member Random effs)
+  => ToolDispatcher event effs
   -> [(Text, Text, Value)]   -- [(toolUseId, toolName, input)]
-  -> Eff es (Either Text [ToolExecResult])  -- Left = break, Right = all results
+  -> Eff effs (Either Text [ToolExecResult])  -- Left = break, Right = all results
 executeTools dispatcher calls = go calls []
   where
     go [] acc = pure $ Right (reverse acc)

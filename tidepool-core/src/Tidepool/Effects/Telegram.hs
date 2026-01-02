@@ -25,8 +25,7 @@ import Data.Text (Text)
 import Data.Aeson (FromJSON, ToJSON)
 import Data.String (IsString)
 import GHC.Generics (Generic)
-import Effectful
-import Effectful.Dispatch.Dynamic
+import Control.Monad.Freer (Eff, Member, send, interpret)
 
 import Tidepool.Effect (Log, logInfo)
 
@@ -64,32 +63,30 @@ data TelegramButton = TelegramButton
 -- Effect
 
 -- | Telegram messaging effect
-data Telegram :: Effect where
+data Telegram r where
   -- | Send a message, returns message ID for potential editing
-  TelegramSendOp :: TelegramMessage -> Telegram m MessageId
+  TelegramSendOp :: TelegramMessage -> Telegram MessageId
 
   -- | Send message with inline keyboard, blocks until user clicks a button
-  TelegramAskOp :: TelegramMessage -> [TelegramButton] -> Telegram m CallbackData
-
-type instance DispatchOf Telegram = 'Dynamic
+  TelegramAskOp :: TelegramMessage -> [TelegramButton] -> Telegram CallbackData
 
 -- | Send plain text message
-telegramSend :: Telegram :> es => Text -> Eff es MessageId
+telegramSend :: Member Telegram effs => Text -> Eff effs MessageId
 telegramSend txt = send $ TelegramSendOp (TelegramMessage txt PlainText)
 
 -- | Send Markdown-formatted message
-telegramMarkdown :: Telegram :> es => Text -> Eff es MessageId
+telegramMarkdown :: Member Telegram effs => Text -> Eff effs MessageId
 telegramMarkdown txt = send $ TelegramSendOp (TelegramMessage txt Markdown)
 
 -- | Send HTML-formatted message
-telegramHtml :: Telegram :> es => Text -> Eff es MessageId
+telegramHtml :: Member Telegram effs => Text -> Eff effs MessageId
 telegramHtml txt = send $ TelegramSendOp (TelegramMessage txt HTML)
 
 -- | Ask with custom buttons, returns the callback data as Text
-telegramAsk :: Telegram :> es
+telegramAsk :: Member Telegram effs
             => Text
             -> [(Text, Text)]  -- ^ [(label, callback)]
-            -> Eff es Text
+            -> Eff effs Text
 telegramAsk msg buttons = do
   CallbackData cb <- send $ TelegramAskOp
     (TelegramMessage msg Markdown)
@@ -107,8 +104,8 @@ parseModeText HTML = "HTML"
 
 -- Stub runner (errors on call)
 
-runTelegramStub :: (IOE :> es, Log :> es) => Eff (Telegram : es) a -> Eff es a
-runTelegramStub = interpret $ \_ -> \case
+runTelegramStub :: Member Log effs => Eff (Telegram ': effs) a -> Eff effs a
+runTelegramStub = interpret $ \case
   TelegramSendOp msg -> do
     logInfo $ "[Telegram:stub] TelegramSend called: " <> msg.tmText
     error "Telegram.telegramSend: not implemented"

@@ -65,7 +65,7 @@ import qualified Data.Map.Strict as Map
 import Data.Aeson (Value, FromJSON, ToJSON, object)
 import GHC.Generics (Generic)
 import Data.Time (UTCTime)
-import Effectful
+import Control.Monad.Freer (Eff, Member)
 
 import Tidepool.Effect
   ( LLM, State, RequestInput, Log
@@ -90,7 +90,7 @@ import Tidepool.Effect
 -- * The original input (for context in formatting)
 -- * The entity refs routed to this destination
 --
-data Destination es = Destination
+data Destination effs = Destination
   { destName        :: Text
     -- ^ Name of destination (e.g., "groceries", "calendar", "knowledge")
   , destDescription :: Text
@@ -102,7 +102,7 @@ data Destination es = Destination
   , destMatchExisting :: Bool
     -- ^ If True, try to semantically match against existing items
     -- e.g., "milk" matches "Groceries" todo, gets added as checklist item
-  , destExecute :: UserContext -> Text -> [Text] -> Eff es [DeltaResult]
+  , destExecute :: UserContext -> Text -> [Text] -> Eff effs [DeltaResult]
     -- ^ Execute: context -> original input -> entity refs -> results
   }
 
@@ -259,11 +259,11 @@ instance FromJSON ParsedFeedback
 -- This is polymorphic so users can add their own domain effects
 -- (Habitica, Obsidian, etc.) to the stack.
 --
-type DeltaEffects es =
-  ( LLM :> es
-  , State UserContext :> es
-  , RequestInput :> es
-  , Log :> es
+type DeltaEffects effs =
+  ( Member LLM effs
+  , Member (State UserContext) effs
+  , Member RequestInput effs
+  , Member Log effs
   )
 
 -- ══════════════════════════════════════════════════════════════
@@ -271,10 +271,10 @@ type DeltaEffects es =
 -- ══════════════════════════════════════════════════════════════
 
 -- | Configuration for running deltas
-data DeltaConfig es = DeltaConfig
-  { dcDestinations     :: [Destination es]
+data DeltaConfig effs = DeltaConfig
+  { dcDestinations     :: [Destination effs]
     -- ^ Available destinations
-  , dcClassifyPrompt   :: [Destination es] -> UserContext -> Text
+  , dcClassifyPrompt   :: [Destination effs] -> UserContext -> Text
     -- ^ Build the classification system prompt
   , dcFeedbackPrompt   :: Proposal -> Text
     -- ^ Build the feedback parsing system prompt
@@ -290,10 +290,10 @@ data DeltaConfig es = DeltaConfig
 -- For interactive use with corrections, use 'runDeltaWithFeedback'.
 --
 runDelta
-  :: forall es. DeltaEffects es
-  => DeltaConfig es
+  :: forall effs. DeltaEffects effs
+  => DeltaConfig effs
   -> Text                           -- ^ User input
-  -> Eff es [DeltaResult]
+  -> Eff effs [DeltaResult]
 runDelta config input = do
   ctx <- get @UserContext
 
@@ -319,11 +319,11 @@ runDelta config input = do
 -- 6. Learn from corrections
 --
 runDeltaWithFeedback
-  :: forall es. DeltaEffects es
-  => DeltaConfig es
+  :: forall effs. DeltaEffects effs
+  => DeltaConfig effs
   -> Text                           -- ^ User input
-  -> (Proposal -> Eff es ())        -- ^ Display proposal to user
-  -> Eff es ([DeltaResult], [RoutingPattern])
+  -> (Proposal -> Eff effs ())        -- ^ Display proposal to user
+  -> Eff effs ([DeltaResult], [RoutingPattern])
 runDeltaWithFeedback config input displayProposal = do
   ctx <- get @UserContext
 
@@ -376,12 +376,12 @@ applyCorrections proposal feedback = Proposal
 
 -- | Execute a proposal, routing to destinations
 executeProposal
-  :: forall es. DeltaEffects es
-  => DeltaConfig es
+  :: forall effs. DeltaEffects effs
+  => DeltaConfig effs
   -> UserContext
   -> Text                    -- ^ Original input
   -> Proposal
-  -> Eff es [DeltaResult]
+  -> Eff effs [DeltaResult]
 executeProposal config ctx originalInput proposal = do
   -- Group items by destination
   let grouped = groupByDest proposal.propItems
@@ -398,23 +398,23 @@ groupByDest items =
 
 -- | Execute a group of items for one destination
 executeDestGroup
-  :: forall es. DeltaEffects es
-  => DeltaConfig es
+  :: forall effs. DeltaEffects effs
+  => DeltaConfig effs
   -> UserContext
   -> Text                    -- ^ Original input
   -> (Text, [Text])          -- ^ (destination name, entities)
-  -> Eff es [DeltaResult]
-executeDestGroup config ctx originalInput (destName, entities) = do
-  case findDest config.dcDestinations destName of
+  -> Eff effs [DeltaResult]
+executeDestGroup config ctx originalInput (destName', entities) = do
+  case findDest config.dcDestinations destName' of
     Nothing -> do
-      logInfo $ "[Delta] Unknown destination: " <> destName
+      logInfo $ "[Delta] Unknown destination: " <> destName'
       pure []
     Just dest -> do
-      logDebug $ "[Delta] Executing " <> destName <> " with " <> T.pack (show entities)
+      logDebug $ "[Delta] Executing " <> destName' <> " with " <> T.pack (show entities)
       dest.destExecute ctx originalInput entities
 
 -- | Find a destination by name
-findDest :: [Destination es] -> Text -> Maybe (Destination es)
+findDest :: [Destination effs] -> Text -> Maybe (Destination effs)
 findDest dests name = go dests
   where
     go [] = Nothing

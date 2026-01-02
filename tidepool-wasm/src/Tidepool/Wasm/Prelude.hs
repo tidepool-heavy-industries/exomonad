@@ -65,8 +65,8 @@ module Tidepool.Wasm.Prelude
 
     -- * Transitions
   , Goto
-  , GotoChoice(..)
-  , OneOf(..)
+  , GotoChoice   -- Constructors hidden; use gotoChoice/gotoExit/gotoSelf
+  , OneOf        -- Constructors hidden; import Goto.Internal for dispatch
   , To
   , gotoChoice
   , gotoExit

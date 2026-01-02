@@ -55,8 +55,8 @@ module Tidepool.Graph.Goto
     Goto(..)
   , goto
 
-    -- * OneOf Sum Type
-  , OneOf(..)
+    -- * OneOf Sum Type (constructors hidden - use smart constructors)
+  , OneOf       -- Type only, constructors in Goto.Internal
   , NonEmptyList
   , Payloads
   , PayloadOf
@@ -65,9 +65,9 @@ module Tidepool.Graph.Goto
   -- finds the first match in duplicate-type lists. Use InjectTarget instead,
   -- which matches on full (To name payload) markers for correct positioning.
 
-    -- * GotoChoice Return Type
+    -- * GotoChoice Return Type (constructor hidden - use smart constructors)
   , To
-  , GotoChoice(..)
+  , GotoChoice  -- Type only, constructor in Goto.Internal
   , gotoChoice
   , gotoExit
   , gotoSelf
@@ -79,11 +79,11 @@ module Tidepool.Graph.Goto
   , GotoElem
   , GotoElemC
 
-    -- * Goto Result Types
+    -- * Goto Result Types (deprecated)
   , GotoResult(..)
   , SomeGoto(..)
 
-    -- * Effect Interpretation
+    -- * Effect Interpretation (deprecated)
   , runGotoCapture
   , runGotoIgnore
   ) where
@@ -94,9 +94,8 @@ import Data.Proxy (Proxy(..))
 import Data.Dynamic (Dynamic, toDyn, Typeable)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Effectful hiding (inject)
-import Effectful.Dispatch.Dynamic
-import qualified Effectful.State.Static.Local as EState
+import Control.Monad.Freer (Eff, Member, send, interpret)
+import Control.Monad.Freer.Internal (handleRelayS)
 import GHC.TypeLits (Symbol, KnownSymbol, symbolVal, TypeError, ErrorMessage(..))
 import Tidepool.Graph.Errors
   ( HR, Blank, WhatHappened, HowItWorks, Fixes, Example
@@ -107,30 +106,15 @@ import Text.Parsec.Pos (SourcePos)
 
 import Tidepool.Graph.Types (Exit, Self)
 
+-- Import from Internal (re-exports types, we hide constructors in this module's exports)
+import Tidepool.Graph.Goto.Internal (OneOf(..), GotoChoice(..), To, Payloads, PayloadOf)
+
 -- ════════════════════════════════════════════════════════════════════════════
--- ONEOF: TYPE-INDEXED SUM TYPE
+-- ONEOF CONSTRAINTS AND INJECTION
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | A type-indexed sum type: "one of these types".
---
--- Position in the list encodes which type was chosen. Pattern matching is
--- fully typed - each case knows the exact payload type.
---
--- Note: @OneOf '[]@ is uninhabited (has no constructors). Use 'NonEmptyList'
--- constraint if you need to enforce non-empty lists at compile time.
---
--- @
--- OneOf '[Int, String, Bool]
---   Here 42           -- an Int
---   There (Here "hi") -- a String
---   There (There (Here True)) -- a Bool
--- @
-type OneOf :: [Type] -> Type
-data OneOf ts where
-  -- | The value is the first type in the list
-  Here  :: t -> OneOf (t ': ts)
-  -- | The value is somewhere in the rest of the list
-  There :: OneOf ts -> OneOf (t ': ts)
+-- Note: OneOf, GotoChoice, To, Payloads, PayloadOf are defined in
+-- Tidepool.Graph.Goto.Internal and imported above.
 
 -- | Constraint that ensures a type list is non-empty.
 --
@@ -194,21 +178,6 @@ instance {-# OVERLAPPING #-} Inject t (t ': ts) where
 instance Inject t ts => Inject t (t' ': ts) where
   inject = There . inject
 
--- | Extract payload types from a list of 'To' markers.
---
--- @
--- Payloads '[To "a" Int, To "b" String, To Exit Bool] = '[Int, String, Bool]
--- @
-type Payloads :: [Type] -> [Type]
-type family Payloads targets where
-  Payloads '[] = '[]
-  Payloads (To name payload ': rest) = payload ': Payloads rest
-
--- | Extract the payload type from a 'To' marker.
-type PayloadOf :: Type -> Type
-type family PayloadOf t where
-  PayloadOf (To name payload) = payload
-
 -- | Inject a target's payload into a 'OneOf' at the correct position.
 --
 -- Unlike 'Inject', this matches on the full 'To name payload' marker,
@@ -245,11 +214,8 @@ instance InjectTarget target ts => InjectTarget target (To name' payload' ': ts)
 --
 -- The @payload@ type is the data passed to the target node, which must
 -- match what the target 'Needs'.
-type Goto :: k -> Type -> Effect
-data Goto target payload :: Effect where
-  GotoOp :: a -> Goto target a m ()
-
-type instance DispatchOf (Goto target a) = 'Dynamic
+data Goto (target :: k) (payload :: Type) r where
+  GotoOp :: a -> Goto target a ()
 
 -- | Perform a transition to the specified target.
 --
@@ -260,46 +226,8 @@ type instance DispatchOf (Goto target a) = 'Dynamic
 -- -- Exit the graph
 -- goto @Exit finalResult
 -- @
-goto :: forall {k} (target :: k) a es. Goto target a :> es => a -> Eff es ()
-goto x = send (GotoOp x :: Goto target a (Eff es) ())
-
--- ════════════════════════════════════════════════════════════════════════════
--- GOTOCHOICE RETURN TYPE
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Marker type for transition targets in 'GotoChoice'.
---
--- Unlike 'Goto' (which is an Effect), 'To' is a plain type-level marker
--- that represents a possible transition destination.
---
--- @
--- GotoChoice '[To "nodeA" PayloadA, To "nodeB" PayloadB, To Exit Response]
--- @
-type To :: k -> Type -> Type
-data To target payload
-
--- | Return type for handlers that must choose a transition.
---
--- Unlike the 'Goto' effect which is fired mid-execution, 'GotoChoice' is
--- returned by the handler to guarantee that a transition is always selected.
---
--- The @targets@ parameter is a type-level list of 'To' markers:
--- @'[To "nodeA" PayloadA, To "nodeB" PayloadB, To Exit Response]@
---
--- Internally, 'GotoChoice' is a newtype over 'OneOf', enabling fully typed
--- dispatch without existentials or unsafeCoerce.
---
--- = Example
---
--- @
--- routerHandler :: Intent -> Eff es (GotoChoice '[To "refund" Msg, To Exit Response])
--- routerHandler intent = case intent of
---   RefundIntent -> pure $ gotoChoice @"refund" msg
---   DoneIntent   -> pure $ gotoExit response
--- @
-type GotoChoice :: [Type] -> Type
-newtype GotoChoice targets = GotoChoice { unGotoChoice :: OneOf (Payloads targets) }
-
+goto :: forall {k} (target :: k) a effs. Member (Goto target a) effs => a -> Eff effs ()
+goto x = send (GotoOp x :: Goto target a ())
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- JSON SERIALIZATION
@@ -448,51 +376,51 @@ gotoSelf payload = GotoChoice (injectTarget @(To Self payload) @targets payload)
 --
 -- @
 -- -- Before-only: classifier with custom context
--- sgClassify :: LLMHandler Message Intent '[] es ClassifyContext
+-- sgClassify :: LLMHandler Message Intent '[] effs ClassifyContext
 -- sgClassify = LLMBefore $ \\msg -> pure ClassifyContext { topic = msg.content }
 --
 -- -- After-only: router using LLM output (no access to before-phase data)
--- sgRouter :: LLMHandler () Intent '[To "refund" Intent, To "faq" Intent] es ()
+-- sgRouter :: LLMHandler () Intent '[To "refund" Intent, To "faq" Intent] effs ()
 -- sgRouter = LLMAfter $ \\intent -> pure $ case intent of
 --   IntentRefund -> gotoChoice @"refund" intent
 --   IntentFaq    -> gotoChoice @"faq" intent
 --
 -- -- Both: custom context AND explicit routing (with templates)
--- sgSmart :: LLMHandler Message Intent '[To "a" X, To "b" Y] es SmartContext
+-- sgSmart :: LLMHandler Message Intent '[To "a" X, To "b" Y] effs SmartContext
 -- sgSmart = LLMBoth
 --   Nothing                              -- no system template
 --   (templateCompiled @SmartTpl)         -- user template
 --   (\\msg -> pure SmartContext { ... }) -- context builder
 --   (\\intent -> pure $ gotoChoice @"a" (processIntent intent))  -- router
 -- @
-type LLMHandler :: Type -> Type -> [Type] -> [Effect] -> Type -> Type
-data LLMHandler needs schema targets es tpl where
+type LLMHandler :: Type -> Type -> [Type] -> [Type -> Type] -> Type -> Type
+data LLMHandler needs schema targets effs tpl where
   -- | Before-only: provides template context, uses Needs-based data flow after LLM
   LLMBefore
-    :: forall tpl needs schema es.
-       (needs -> Eff es tpl)
-    -> LLMHandler needs schema '[] es tpl
+    :: forall tpl needs schema effs.
+       (needs -> Eff effs tpl)
+    -> LLMHandler needs schema '[] effs tpl
 
   -- | After-only: uses default context, explicit routing based on LLM output
   LLMAfter
-    :: forall needs schema targets es.
-       (schema -> Eff es (GotoChoice targets))
-    -> LLMHandler needs schema targets es ()
+    :: forall needs schema targets effs.
+       (schema -> Eff effs (GotoChoice targets))
+    -> LLMHandler needs schema targets effs ()
 
   -- | Both: custom context AND explicit routing
   --
   -- Takes optional system template, required user template, before handler, and after handler.
   -- Both templates share the same context type (tpl).
   LLMBoth
-    :: forall tpl needs schema targets es.
+    :: forall tpl needs schema targets effs.
        Maybe (TypedTemplate tpl SourcePos)      -- ^ Optional system prompt template
     -> TypedTemplate tpl SourcePos              -- ^ User prompt template (required)
-    -> (needs -> Eff es tpl)                    -- ^ Builds context for both templates
-    -> (schema -> Eff es (GotoChoice targets))  -- ^ Routes based on LLM output
-    -> LLMHandler needs schema targets es tpl
+    -> (needs -> Eff effs tpl)                  -- ^ Builds context for both templates
+    -> (schema -> Eff effs (GotoChoice targets))  -- ^ Routes based on LLM output
+    -> LLMHandler needs schema targets effs tpl
 
 -- ════════════════════════════════════════════════════════════════════════════
--- GOTO RESULT TYPES
+-- GOTO RESULT TYPES (DEPRECATED)
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Result of capturing a Goto from a Logic node handler.
@@ -503,14 +431,12 @@ data LLMHandler needs schema targets es tpl where
 -- This type uses 'Dynamic' which loses type safety at the boundary.
 data GotoResult
   = GotoNode Text Dynamic   -- ^ Transition to named node with payload
-  | GotoExit Dynamic        -- ^ Exit graph with result
-  | GotoSelf Dynamic        -- ^ Self-loop with updated state
+  | GotoExit' Dynamic       -- ^ Exit graph with result
+  | GotoSelf' Dynamic       -- ^ Self-loop with updated state
   deriving (Show)
 
 {-# DEPRECATED GotoResult "Use GotoChoice with DispatchGoto for type-safe dispatch" #-}
 {-# DEPRECATED GotoNode "Use gotoChoice @name from GotoChoice API instead" #-}
-{-# DEPRECATED GotoExit "Use gotoExit from GotoChoice API instead" #-}
-{-# DEPRECATED GotoSelf "Use gotoSelf from GotoChoice API instead" #-}
 
 -- | Existential wrapper for any Goto effect.
 --
@@ -532,74 +458,28 @@ data SomeGoto where
 {-# DEPRECATED SomeGoto "Use GotoChoice with DispatchGoto for type-safe dispatch" #-}
 
 -- ════════════════════════════════════════════════════════════════════════════
--- EFFECT INTERPRETATION
+-- EFFECT INTERPRETATION (DEPRECATED)
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Run a Goto effect by capturing the transition.
 --
--- Returns the payload wrapped in a 'GotoResult' for the runner to process.
--- This is the primary interpreter used during graph execution.
---
 -- __DEPRECATED__: Use handlers that return 'GotoChoice' and dispatch with
 -- 'DispatchGoto' instead. This approach loses type safety via 'Dynamic'.
---
--- @
--- result <- runGotoCapture @"target" @Payload $ do
---   goto @"target" somePayload
--- case result of
---   Just (GotoNode name dyn) -> -- handle transition
---   Just (GotoExit dyn) -> -- handle exit
---   Nothing -> -- no goto was called (shouldn't happen for Logic nodes)
--- @
 {-# DEPRECATED runGotoCapture "Use GotoChoice return type with DispatchGoto instead" #-}
 runGotoCapture
-  :: forall name a es b.
+  :: forall name a effs b.
      (KnownSymbol name, Typeable a)
-  => Eff (Goto name a : es) b
-  -> Eff es (Maybe GotoResult, b)
-runGotoCapture action = do
-  (b, mResult) <- reinterpret (EState.runState Nothing) handler action
-  pure (mResult, b)
-  where
-    handler :: forall es'. EState.State (Maybe GotoResult) :> es'
-            => EffectHandler (Goto name a) es'
-    handler _ = \case
-      GotoOp payload -> do
-        let target = T.pack $ symbolVal (Proxy @name)
-        EState.put (Just $ GotoNode target (toDyn payload))
+  => Eff (Goto name a ': effs) b
+  -> Eff effs (Maybe GotoResult, b)
+runGotoCapture = handleRelayS Nothing (\s a -> pure (s, a)) $ \s -> \case
+  GotoOp payload -> \k -> do
+    let target = T.pack $ symbolVal (Proxy @name)
+    k (Just $ GotoNode target (toDyn payload)) ()
 
 -- | Run a Goto effect by ignoring it (for testing/debugging).
 runGotoIgnore
-  :: forall name a es b.
-     Eff (Goto name a : es) b
-  -> Eff es b
-runGotoIgnore = interpret $ \_ -> \case
+  :: forall name a effs b.
+     Eff (Goto name a ': effs) b
+  -> Eff effs b
+runGotoIgnore = interpret $ \case
   GotoOp _ -> pure ()
-
--- | Specialized runner for Goto Exit
---
--- __DEPRECATED__: Use 'gotoExit' with 'GotoChoice' return type instead.
-{-# DEPRECATED runGotoExitCapture "Use GotoChoice return type with DispatchGoto instead" #-}
-runGotoExitCapture
-  :: forall a es b.
-     Typeable a
-  => Eff (Goto Exit a : es) b
-  -> Eff es (Maybe GotoResult, b)
-runGotoExitCapture action = do
-  (b, mResult) <- reinterpret (EState.runState Nothing) handler action
-  pure (mResult, b)
-  where
-    handler :: forall es'. EState.State (Maybe GotoResult) :> es'
-            => EffectHandler (Goto Exit a) es'
-    handler _ = \case
-      GotoOp payload -> EState.put (Just $ GotoExit (toDyn payload))
-
--- Note: The full runner will need to handle multiple Goto effects in a single
--- node's effect stack. This is done by the graph Runner, which composes
--- multiple runGotoCapture calls or uses a more sophisticated approach.
---
--- For now, individual Goto effects can be captured one at a time. The Runner
--- will need to:
--- 1. Run the handler's effects
--- 2. Capture which Goto was actually called (only one should be)
--- 3. Extract the payload and target for the next node

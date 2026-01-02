@@ -31,6 +31,7 @@ library
         Tidepool.Graph.Generic
         Tidepool.Graph.Generic.Core
         Tidepool.Graph.Goto
+        Tidepool.Graph.Goto.Internal
         Tidepool.Graph.Errors
         Tidepool.Graph.Execute
         Tidepool.Graph.Edges
@@ -49,8 +50,7 @@ library
         Delta.Agent
     build-depends:
         base >= 4.17 && < 5,
-        effectful-core >= 2.3 && < 3,
-        effectful-th >= 1.0 && < 2,
+        freer-simple >= 1.2 && < 2,
         ginger >= 0.10,
         aeson >= 2.1 && < 3,
         aeson-pretty >= 0.8 && < 1,
@@ -112,7 +112,7 @@ test-suite graph-validation-tests
         aeson >= 2.1 && < 3,
         bytestring >= 0.11 && < 1,
         text >= 2.0 && < 3,
-        effectful-core >= 2.3 && < 3,
+        freer-simple >= 1.2 && < 2,
         tidepool-core
     hs-source-dirs:   test
     default-language: GHC2021

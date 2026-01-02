@@ -1,5 +1,6 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE RankNTypes #-}
 -- | Core effect types for Tidepool - pure definitions without IO runners
 --
 -- This module contains the effect type definitions and pure operations
@@ -67,7 +68,7 @@ module Tidepool.Effect.Types
     -- * Tool Dispatcher Type
   , ToolDispatcher
 
-    -- * Simple Runners (pure/IOE only)
+    -- * Simple Runners (pure/IO)
   , runState
   , runRandom
   , runTime
@@ -93,9 +94,8 @@ module Tidepool.Effect.Types
   , ChoiceOption(..)
   ) where
 
-import Effectful
-import Effectful.Dispatch.Dynamic
-import qualified Effectful.State.Static.Local as EState
+import Control.Monad.Freer (Eff, Member, send, interpret, sendM, LastMember)
+import Control.Monad.Freer.Internal (handleRelayS)
 import System.Random (randomRIO)
 import Data.Time (UTCTime)
 import qualified Data.Time as Time
@@ -124,80 +124,72 @@ import Tidepool.Question (Question(..), Answer(..), ItemDisposition(..), Choice(
 -- STATE EFFECT
 -- ══════════════════════════════════════════════════════════════
 
-data State s :: Effect where
-  Get :: State s m s
-  Put :: s -> State s m ()
+data State s r where
+  Get :: State s s
+  Put :: s -> State s ()
 
-type instance DispatchOf (State s) = 'Dynamic
-
-get :: State s :> es => Eff es s
+get :: Member (State s) effs => Eff effs s
 get = send Get
 
-gets :: State s :> es => (s -> a) -> Eff es a
+gets :: Member (State s) effs => (s -> a) -> Eff effs a
 gets f = f <$> get
 
-put :: State s :> es => s -> Eff es ()
+put :: Member (State s) effs => s -> Eff effs ()
 put = send . Put
 
-modify :: State s :> es => (s -> s) -> Eff es ()
+modify :: Member (State s) effs => (s -> s) -> Eff effs ()
 modify f = get >>= put . f
 
-runState :: s -> Eff (State s : es) a -> Eff es (a, s)
-runState initial = reinterpret (EState.runState initial) $ \_ -> \case
-  Get   -> EState.get
-  Put s -> EState.put s
+runState :: s -> Eff (State s ': effs) a -> Eff effs (a, s)
+runState initial = handleRelayS initial (\s a -> pure (a, s)) $ \s -> \case
+  Get   -> \k -> k s s
+  Put s' -> \k -> k s' ()
 
 -- ══════════════════════════════════════════════════════════════
 -- RANDOM EFFECT
 -- ══════════════════════════════════════════════════════════════
 
-data Random :: Effect where
-  RandomInt :: Int -> Int -> Random m Int  -- lo hi inclusive
-  RandomDouble :: Random m Double
+data Random r where
+  RandomInt :: Int -> Int -> Random Int  -- lo hi inclusive
+  RandomDouble :: Random Double
 
-type instance DispatchOf Random = 'Dynamic
-
-randomInt :: Random :> es => Int -> Int -> Eff es Int
+randomInt :: Member Random effs => Int -> Int -> Eff effs Int
 randomInt lo hi = send (RandomInt lo hi)
 
-randomDouble :: Random :> es => Eff es Double
+randomDouble :: Member Random effs => Eff effs Double
 randomDouble = send RandomDouble
 
-runRandom :: IOE :> es => Eff (Random : es) a -> Eff es a
-runRandom = interpret $ \_ -> \case
-  RandomInt lo hi -> liftIO $ randomRIO (lo, hi)
-  RandomDouble    -> liftIO $ randomRIO (0.0, 1.0)
+runRandom :: LastMember IO effs => Eff (Random ': effs) a -> Eff effs a
+runRandom = interpret $ \case
+  RandomInt lo hi -> sendM $ randomRIO (lo, hi)
+  RandomDouble    -> sendM $ randomRIO (0.0, 1.0)
 
 -- ══════════════════════════════════════════════════════════════
 -- TIME EFFECT
 -- ══════════════════════════════════════════════════════════════
 
-data Time :: Effect where
-  GetCurrentTime :: Time m UTCTime
+data Time r where
+  GetCurrentTime :: Time UTCTime
 
-type instance DispatchOf Time = 'Dynamic
-
-getCurrentTime :: Time :> es => Eff es UTCTime
+getCurrentTime :: Member Time effs => Eff effs UTCTime
 getCurrentTime = send GetCurrentTime
 
-runTime :: IOE :> es => Eff (Time : es) a -> Eff es a
-runTime = interpret $ \_ -> \case
-  GetCurrentTime -> liftIO Time.getCurrentTime
+runTime :: LastMember IO effs => Eff (Time ': effs) a -> Eff effs a
+runTime = interpret $ \case
+  GetCurrentTime -> sendM Time.getCurrentTime
 
 -- ══════════════════════════════════════════════════════════════
 -- LLM EFFECT
 -- ══════════════════════════════════════════════════════════════
 
 -- | The LLM effect runs a complete turn with template and tools
-data LLM :: Effect where
+data LLM r where
   RunTurnOp
     :: Text                          -- System prompt
     -> [ContentBlock]                -- User content
     -> Value                         -- Output schema
     -> [Value]                       -- Tool definitions
-    -> LLM m (TurnOutcome (TurnResult Value))
-
-type instance DispatchOf LLM = 'Dynamic
+    -> LLM (TurnOutcome (TurnResult Value))
 
 -- | Outcome of running a turn
 data TurnOutcome a
@@ -258,26 +250,26 @@ noHooks :: LLMHooks
 noHooks = LLMHooks (pure ()) (pure ())
 
 -- | A tool dispatcher executes tools by name, returning results
-type ToolDispatcher event es =
-  Text -> Value -> Eff es (Either Text ToolResult)
+type ToolDispatcher event effs =
+  Text -> Value -> Eff effs (Either Text ToolResult)
 
 -- | Build content blocks from text + images
 withImages :: Text -> [ImageSource] -> [ContentBlock]
 withImages text images = TextBlock text : map ImageBlock images
 
 runTurn
-  :: forall output es.
-     (LLM :> es, FromJSON output)
+  :: forall output effs.
+     (Member LLM effs, FromJSON output)
   => Text -> Text -> Value -> [Value]
-  -> Eff es (TurnOutcome (TurnParseResult output))
+  -> Eff effs (TurnOutcome (TurnParseResult output))
 runTurn systemPrompt userAction =
   runTurnContent systemPrompt [TextBlock userAction]
 
 runTurnContent
-  :: forall output es.
-     (LLM :> es, FromJSON output)
+  :: forall output effs.
+     (Member LLM effs, FromJSON output)
   => Text -> [ContentBlock] -> Value -> [Value]
-  -> Eff es (TurnOutcome (TurnParseResult output))
+  -> Eff effs (TurnOutcome (TurnParseResult output))
 runTurnContent systemPrompt userContent schema tools = do
   rawResult <- send (RunTurnOp systemPrompt userContent schema tools)
   case rawResult of
@@ -294,8 +286,8 @@ runTurnContent systemPrompt userContent schema tools = do
           }
 
 llmCall
-  :: forall output es. (LLM :> es, FromJSON output)
-  => Text -> Text -> Value -> Eff es output
+  :: forall output effs. (Member LLM effs, FromJSON output)
+  => Text -> Text -> Value -> Eff effs output
 llmCall systemPrompt userInput schema = do
   result <- llmCallEither @output systemPrompt userInput schema
   case result of
@@ -303,8 +295,8 @@ llmCall systemPrompt userInput schema = do
     Right output -> pure output
 
 llmCallEither
-  :: forall output es. (LLM :> es, FromJSON output)
-  => Text -> Text -> Value -> Eff es (Either Text output)
+  :: forall output effs. (Member LLM effs, FromJSON output)
+  => Text -> Text -> Value -> Eff effs (Either Text output)
 llmCallEither systemPrompt userInput schema = do
   result <- runTurn @output systemPrompt userInput schema []
   case result of
@@ -313,8 +305,8 @@ llmCallEither systemPrompt userInput schema = do
     TurnCompleted (TurnParseFailed {tpfError}) -> pure $ Left $ "Parse failed: " <> T.pack tpfError
 
 llmCallWithTools
-  :: forall output es. (LLM :> es, FromJSON output)
-  => Text -> Text -> Value -> [Value] -> Eff es (Either Text output)
+  :: forall output effs. (Member LLM effs, FromJSON output)
+  => Text -> Text -> Value -> [Value] -> Eff effs (Either Text output)
 llmCallWithTools systemPrompt userInput schema tools = do
   result <- runTurn @output systemPrompt userInput schema tools
   case result of
@@ -326,32 +318,30 @@ llmCallWithTools systemPrompt userInput schema tools = do
 -- CHAT HISTORY EFFECT
 -- ══════════════════════════════════════════════════════════════
 
-data ChatHistory :: Effect where
-  GetHistory :: ChatHistory m [Message]
-  AppendMessages :: [Message] -> ChatHistory m ()
-  ClearHistory :: ChatHistory m ()
+data ChatHistory r where
+  GetHistory :: ChatHistory [Message]
+  AppendMessages :: [Message] -> ChatHistory ()
+  ClearHistory :: ChatHistory ()
 
-type instance DispatchOf ChatHistory = 'Dynamic
-
-getHistory :: ChatHistory :> es => Eff es [Message]
+getHistory :: Member ChatHistory effs => Eff effs [Message]
 getHistory = send GetHistory
 
-appendMessages :: ChatHistory :> es => [Message] -> Eff es ()
+appendMessages :: Member ChatHistory effs => [Message] -> Eff effs ()
 appendMessages = send . AppendMessages
 
-clearHistory :: ChatHistory :> es => Eff es ()
+clearHistory :: Member ChatHistory effs => Eff effs ()
 clearHistory = send ClearHistory
 
-runChatHistory :: IOE :> es => Eff (ChatHistory : es) a -> Eff es a
+runChatHistory :: LastMember IO effs => Eff (ChatHistory ': effs) a -> Eff effs a
 runChatHistory action = do
-  ref <- liftIO $ newIORef ([] :: [Message])
+  ref <- sendM $ newIORef ([] :: [Message])
   runChatHistoryWith ref action
 
-runChatHistoryWith :: IOE :> es => IORef [Message] -> Eff (ChatHistory : es) a -> Eff es a
-runChatHistoryWith ref = interpret $ \_ -> \case
-  GetHistory -> liftIO $ readIORef ref
-  AppendMessages msgs -> liftIO $ modifyIORef ref (++ msgs)
-  ClearHistory -> liftIO $ writeIORef ref []
+runChatHistoryWith :: LastMember IO effs => IORef [Message] -> Eff (ChatHistory ': effs) a -> Eff effs a
+runChatHistoryWith ref = interpret $ \case
+  GetHistory -> sendM $ readIORef ref
+  AppendMessages msgs -> sendM $ modifyIORef ref (++ msgs)
+  ClearHistory -> sendM $ writeIORef ref []
 
 -- | Roughly estimate token count for a list of messages.
 --
@@ -392,44 +382,40 @@ estimateValueChars = fromIntegral . LBS.length . encode
 -- EMIT EFFECT
 -- ══════════════════════════════════════════════════════════════
 
-data Emit event :: Effect where
-  EmitEvent :: event -> Emit event m ()
+data Emit event r where
+  EmitEvent :: event -> Emit event ()
 
-type instance DispatchOf (Emit event) = 'Dynamic
-
-emit :: Emit event :> es => event -> Eff es ()
+emit :: Member (Emit event) effs => event -> Eff effs ()
 emit = send . EmitEvent
 
-runEmit :: IOE :> es => (event -> IO ()) -> Eff (Emit event : es) a -> Eff es a
-runEmit handler = interpret $ \_ -> \case
-  EmitEvent e -> liftIO $ handler e
+runEmit :: LastMember IO effs => (event -> IO ()) -> Eff (Emit event ': effs) a -> Eff effs a
+runEmit handler = interpret $ \case
+  EmitEvent e -> sendM $ handler e
 
 -- ══════════════════════════════════════════════════════════════
 -- REQUEST INPUT EFFECT
 -- ══════════════════════════════════════════════════════════════
 
-data RequestInput :: Effect where
-  RequestChoice :: Text -> [(Text, a)] -> RequestInput m a
-  RequestText :: Text -> RequestInput m Text
-  RequestDice :: Text -> [(Int, Int, Text)] -> RequestInput m Int
-  RequestTextWithPhoto :: Text -> RequestInput m (Text, [(Text, Text)])
-  RequestCustom :: Text -> Value -> RequestInput m Value
+data RequestInput r where
+  RequestChoice :: Text -> [(Text, a)] -> RequestInput a
+  RequestText :: Text -> RequestInput Text
+  RequestDice :: Text -> [(Int, Int, Text)] -> RequestInput Int
+  RequestTextWithPhoto :: Text -> RequestInput (Text, [(Text, Text)])
+  RequestCustom :: Text -> Value -> RequestInput Value
 
-type instance DispatchOf RequestInput = 'Dynamic
-
-requestChoice :: RequestInput :> es => Text -> [(Text, a)] -> Eff es a
+requestChoice :: Member RequestInput effs => Text -> [(Text, a)] -> Eff effs a
 requestChoice prompt choices = send (RequestChoice prompt choices)
 
-requestText :: RequestInput :> es => Text -> Eff es Text
+requestText :: Member RequestInput effs => Text -> Eff effs Text
 requestText = send . RequestText
 
-requestDice :: RequestInput :> es => Text -> [(Int, Int, Text)] -> Eff es Int
+requestDice :: Member RequestInput effs => Text -> [(Int, Int, Text)] -> Eff effs Int
 requestDice prompt diceWithHints = send (RequestDice prompt diceWithHints)
 
-requestTextWithPhoto :: RequestInput :> es => Text -> Eff es (Text, [(Text, Text)])
+requestTextWithPhoto :: Member RequestInput effs => Text -> Eff effs (Text, [(Text, Text)])
 requestTextWithPhoto = send . RequestTextWithPhoto
 
-requestCustom :: RequestInput :> es => Text -> Value -> Eff es Value
+requestCustom :: Member RequestInput effs => Text -> Value -> Eff effs Value
 requestCustom tag payload = send (RequestCustom tag payload)
 
 data InputHandler = InputHandler
@@ -440,33 +426,31 @@ data InputHandler = InputHandler
   , ihCustom :: Text -> Value -> IO Value
   }
 
-runRequestInput :: IOE :> es => InputHandler -> Eff (RequestInput : es) a -> Eff es a
-runRequestInput handler = interpret $ \_ -> \case
+runRequestInput :: LastMember IO effs => InputHandler -> Eff (RequestInput ': effs) a -> Eff effs a
+runRequestInput handler = interpret $ \case
   RequestChoice prompt choices ->
     let InputHandler { ihChoice = choiceHandler } = handler
-    in liftIO $ choiceHandler prompt choices
-  RequestText prompt -> liftIO $ handler.ihText prompt
-  RequestTextWithPhoto prompt -> liftIO $ handler.ihTextWithPhoto prompt
-  RequestDice prompt diceWithHints -> liftIO $ handler.ihDice prompt diceWithHints
-  RequestCustom tag payload -> liftIO $ handler.ihCustom tag payload
+    in sendM $ choiceHandler prompt choices
+  RequestText prompt -> sendM $ handler.ihText prompt
+  RequestTextWithPhoto prompt -> sendM $ handler.ihTextWithPhoto prompt
+  RequestDice prompt diceWithHints -> sendM $ handler.ihDice prompt diceWithHints
+  RequestCustom tag payload -> sendM $ handler.ihCustom tag payload
 
 -- ══════════════════════════════════════════════════════════════
 -- QUESTION UI EFFECT
 -- ══════════════════════════════════════════════════════════════
 
-data QuestionUI :: Effect where
-  AskQuestion :: Question -> QuestionUI m Answer
+data QuestionUI r where
+  AskQuestion :: Question -> QuestionUI Answer
 
-type instance DispatchOf QuestionUI = 'Dynamic
-
-requestQuestion :: QuestionUI :> es => Question -> Eff es Answer
+requestQuestion :: Member QuestionUI effs => Question -> Eff effs Answer
 requestQuestion q = send (AskQuestion q)
 
 type QuestionHandler = Question -> IO Answer
 
-runQuestionUI :: IOE :> es => QuestionHandler -> Eff (QuestionUI : es) a -> Eff es a
-runQuestionUI handler = interpret $ \_ -> \case
-  AskQuestion q -> liftIO $ handler q
+runQuestionUI :: LastMember IO effs => QuestionHandler -> Eff (QuestionUI ': effs) a -> Eff effs a
+runQuestionUI handler = interpret $ \case
+  AskQuestion q -> sendM $ handler q
 
 -- ══════════════════════════════════════════════════════════════
 -- LOG EFFECT
@@ -475,25 +459,23 @@ runQuestionUI handler = interpret $ \_ -> \case
 data LogLevel = Debug | Info | Warn
   deriving (Show, Eq, Ord, Enum, Bounded)
 
-data Log :: Effect where
-  LogMsg :: LogLevel -> Text -> Log m ()
+data Log r where
+  LogMsg :: LogLevel -> Text -> Log ()
 
-type instance DispatchOf Log = 'Dynamic
-
-logMsg :: Log :> es => LogLevel -> Text -> Eff es ()
+logMsg :: Member Log effs => LogLevel -> Text -> Eff effs ()
 logMsg level msg = send (LogMsg level msg)
 
-logDebug :: Log :> es => Text -> Eff es ()
+logDebug :: Member Log effs => Text -> Eff effs ()
 logDebug = logMsg Debug
 
-logInfo :: Log :> es => Text -> Eff es ()
+logInfo :: Member Log effs => Text -> Eff effs ()
 logInfo = logMsg Info
 
-logWarn :: Log :> es => Text -> Eff es ()
+logWarn :: Member Log effs => Text -> Eff effs ()
 logWarn = logMsg Warn
 
-runLog :: IOE :> es => LogLevel -> Eff (Log : es) a -> Eff es a
-runLog minLevel = interpret $ \_ -> \case
+runLog :: LastMember IO effs => LogLevel -> Eff (Log ': effs) a -> Eff effs a
+runLog minLevel = interpret $ \case
   LogMsg level _msg
     | level >= minLevel -> pure ()
     | otherwise -> pure ()

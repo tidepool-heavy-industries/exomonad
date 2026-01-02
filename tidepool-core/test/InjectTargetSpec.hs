@@ -10,7 +10,8 @@
 module InjectTargetSpec (spec) where
 
 import Test.Hspec
-import Tidepool.Graph.Goto (OneOf(..), InjectTarget(..), To, Payloads)
+import Tidepool.Graph.Goto (OneOf, InjectTarget(..), To, Payloads)
+import Tidepool.Graph.Goto.Internal (OneOf(..))  -- For test assertions
 import Tidepool.Graph.Types (Exit)
 
 -- | Test targets with different payload types.

@@ -43,7 +43,8 @@ module Tidepool
   , module Tidepool.Effect
   ) where
 
-import Effectful
+import Control.Monad.Freer (Eff, Member)
+import Data.Kind (Type)
 import Data.Text (Text)
 import Data.Aeson (Value, toJSON)
 import Tidepool.Effect
@@ -83,6 +84,9 @@ data Agent s evt (extra :: [Effect]) = Agent
     -- ^ Tool dispatcher for LLM tool calls (use 'noDispatcher' if no tools)
   }
 
+-- | Effect type alias (freer-simple effects have kind Type -> Type).
+type Effect = Type -> Type
+
 -- | Convenience alias for agents with no extra effects
 type SimpleAgent s evt = Agent s evt '[]
 
@@ -91,11 +95,11 @@ type AgentM s evt extra = Eff (extra ++ BaseEffects s evt)
 
 -- | Base effects for all agents. IO-blind by design.
 --
--- Agents cannot use IOE - it's not in the stack. The runner injects IOE
+-- Agents cannot use IO directly - it's not in the stack. The runner injects IO
 -- at the interpretation boundary. This enables WASM compilation where
 -- IO is provided by the host environment.
 --
--- Interpreters like @runRandom@ require @IOE :> es@, but that constraint
+-- Interpreters like @runRandom@ require @LastMember IO effs@, but that constraint
 -- applies to the /remaining/ stack after interpretation, not the agent's
 -- visible stack.
 type BaseEffects s evt =
@@ -121,16 +125,16 @@ type BaseEffects s evt =
 -- Use 'noDispatcher' for agents without tools.
 newtype AgentDispatcher s evt = AgentDispatcher
   { runDispatcher
-      :: forall es.
-         ( State s :> es
-         , Emit evt :> es
-         , RequestInput :> es
-         , Random :> es
-         , Log :> es
+      :: forall effs.
+         ( Member (State s) effs
+         , Member (Emit evt) effs
+         , Member RequestInput effs
+         , Member Random effs
+         , Member Log effs
          )
       => Text   -- Tool name
       -> Value  -- Tool input (JSON)
-      -> Eff es (Either Text ToolResult)
+      -> Eff effs (Either Text ToolResult)
   }
 
 -- | Default dispatcher for agents without tools

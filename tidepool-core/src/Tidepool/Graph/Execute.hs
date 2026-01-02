@@ -52,7 +52,7 @@ module Tidepool.Graph.Execute
 
 import Data.Aeson (FromJSON)
 import Data.Kind (Constraint, Type)
-import Effectful (Effect, Eff, type (:>))
+import Control.Monad.Freer (Eff, Member)
 import GHC.Generics (Generic(..))
 import GHC.Records (HasField(..))
 import GHC.TypeLits (Symbol, KnownSymbol, TypeError, ErrorMessage(..))
@@ -68,11 +68,14 @@ import Tidepool.Graph.Edges (GetNeeds)
 import Tidepool.Graph.Generic (AsHandler, FieldsWithNamesOf)
 import Tidepool.Graph.Generic.Core (Entry, AsGraph)
 import qualified Tidepool.Graph.Generic.Core as G (Exit)
-import Tidepool.Graph.Goto (GotoChoice(..), OneOf(..), To, LLMHandler(..))
+import Tidepool.Graph.Goto (GotoChoice, OneOf, To, LLMHandler(..))
+import Tidepool.Graph.Goto.Internal (GotoChoice(..), OneOf(..))
 import Tidepool.Graph.Template (GingerContext)
 import Tidepool.Graph.Types (Exit, Self)
 import Tidepool.Schema (HasJSONSchema(..), schemaToValue)
 
+-- | Effect type alias (freer-simple effects have kind Type -> Type).
+type Effect = Type -> Type
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TYPE-LEVEL UTILITIES (local definitions)
@@ -215,7 +218,7 @@ runGraph = runGraphFrom @entryHandlerName
 -- @
 executeLLMHandler
   :: forall needs schema targets es tpl.
-     ( LLM :> es
+     ( Member LLM es
      , FromJSON schema
      , HasJSONSchema schema
      , GingerContext tpl
@@ -264,7 +267,7 @@ instance CallHandler (payload -> Eff es (GotoChoice targets)) payload es targets
 -- Only LLMBoth is supported for graph execution. LLMBefore and LLMAfter
 -- will error at runtime because they lack complete routing logic.
 instance
-  ( LLM :> es
+  ( Member LLM es
   , FromJSON schema
   , HasJSONSchema schema
   , GingerContext tpl

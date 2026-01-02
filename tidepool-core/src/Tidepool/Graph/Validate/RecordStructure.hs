@@ -319,8 +319,8 @@ type family GetUsesEffectsFixed def where
   GetUsesEffectsFixed (node :@ _) = GetUsesEffectsFixed node
   GetUsesEffectsFixed _ = 'Nothing
 
--- | Effect kind alias.
-type Effect = (Type -> Type) -> Type -> Type
+-- | Effect kind alias (freer-simple effects have kind Type -> Type).
+type Effect = Type -> Type
 
 -- | Check for Goto Exit in Maybe effect list.
 type HasGotoExitInMaybeEffects :: Maybe [Effect] -> Bool

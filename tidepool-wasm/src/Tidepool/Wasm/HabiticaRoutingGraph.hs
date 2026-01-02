@@ -62,7 +62,8 @@ import GHC.Generics (Generic)
 import Tidepool.Graph.Types (type (:@), Needs, UsesEffects, Exit)
 import Tidepool.Graph.Generic (GraphMode(..), type (:-))
 import qualified Tidepool.Graph.Generic as G (Entry, Exit, LogicNode)
-import Tidepool.Graph.Goto (Goto, GotoChoice(..), OneOf(..), To, gotoChoice, gotoExit)
+import Tidepool.Graph.Goto (Goto, GotoChoice, OneOf, To, gotoChoice, gotoExit)
+import Tidepool.Graph.Goto.Internal (GotoChoice(..), OneOf(..))  -- For manual dispatch (antipattern)
 
 import Tidepool.Wasm.Effect (WasmM, logInfo, logError, llmComplete, telegramAsk, TelegramAskResult(..))
 import Tidepool.Wasm.Habitica

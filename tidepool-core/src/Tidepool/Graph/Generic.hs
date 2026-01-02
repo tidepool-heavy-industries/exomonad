@@ -132,8 +132,7 @@ import Tidepool.Graph.Errors
   )
 
 import Tidepool.Graph.Validate (FormatSymbolList)
-import Effectful (Effect)
-import Effectful qualified as E
+import Control.Monad.Freer (Eff, Member)
 
 import Tidepool.Graph.Types (type (:@), Needs, Schema, Template, Vision, Tools, Memory, System, UsesEffects)
 import Tidepool.Graph.Template (TemplateContext)
@@ -148,6 +147,9 @@ import Tidepool.Graph.Generic.Core
   , Entry
   , Exit
   )
+
+-- | Effect type alias (freer-simple effects have kind Type -> Type).
+type Effect = Type -> Type
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- ASHANDLER MODE
@@ -480,7 +482,7 @@ type family NodeHandlerDispatch nodeDef origNode es needs mTpl mSchema mEffs whe
 
   -- LogicNode with UsesEffects: returns GotoChoice
   NodeHandlerDispatch LogicNode orig es needs _ _ ('Just (EffStack effs)) =
-    BuildFunctionType needs (E.Eff es (GotoChoice (GotoEffectsToTargets effs)))
+    BuildFunctionType needs (Eff es (GotoChoice (GotoEffectsToTargets effs)))
 
   -- LogicNode without UsesEffects - error
   NodeHandlerDispatch LogicNode orig es needs _ _ 'Nothing = TypeError
@@ -1096,12 +1098,12 @@ type GenericGraph graph mode =
 --   • sgExit
 -- @
 gotoField
-  :: forall (graph :: Type -> Type) (name :: Symbol) payload es.
+  :: forall (graph :: Type -> Type) (name :: Symbol) payload effs.
      ( KnownSymbol name
      , Generic (graph AsGraph)
      , ElemCWithOptions name (FieldNamesOf graph) (FieldNamesOf graph)
-     , Goto name payload E.:> es
+     , Member (Goto name payload) effs
      )
   => payload
-  -> E.Eff es ()
+  -> Eff effs ()
 gotoField = goto @name

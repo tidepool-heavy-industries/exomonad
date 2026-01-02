@@ -46,8 +46,8 @@ module Delta.Agent
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Aeson (Value, object, (.=), ToJSON, FromJSON)
-import Control.Monad (forM_, forM, unless)
-import Effectful
+import Control.Monad (forM, unless)
+import Control.Monad.Freer (Eff, Member)
 import GHC.Generics (Generic)
 
 import Tidepool (Agent(..), AgentM, noDispatcher)
@@ -64,7 +64,7 @@ import Tidepool.Effects.Calendar
 
 -- | The full effect stack for the delta agent (legacy)
 -- Note: Log must come after the stub effects (Habitica, etc.) because
--- the stub runners require Log :> es in their context
+-- the stub runners require Member Log effs in their context
 type AgentEffects =
   '[ LLM
    , State UserContext
@@ -75,7 +75,6 @@ type AgentEffects =
    , GitHub
    , Calendar
    , Log
-   , IOE
    ]
 
 -- ══════════════════════════════════════════════════════════════

@@ -15,7 +15,8 @@ module ExampleGraphSpec (spec) where
 import Test.Hspec
 import qualified Data.Text as T
 
-import Tidepool.Graph.Goto (GotoChoice(..), OneOf(..), To)
+import Tidepool.Graph.Goto (GotoChoice, OneOf, To)
+import Tidepool.Graph.Goto.Internal (GotoChoice(..), OneOf(..))  -- For test assertions
 import Tidepool.Graph.Types (Exit, Self)
 import Tidepool.Wasm.Effect (WasmM)
 import Tidepool.Wasm.ExampleGraph

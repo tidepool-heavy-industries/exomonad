@@ -18,8 +18,7 @@ module Tidepool.Effects.GitHub
 import Data.Text (Text)
 import Data.Aeson (FromJSON, ToJSON)
 import GHC.Generics (Generic)
-import Effectful
-import Effectful.Dispatch.Dynamic
+import Control.Monad.Freer (Eff, Member, send, interpret)
 
 import Tidepool.Effect (Log, logInfo)
 
@@ -46,22 +45,20 @@ data Issue = Issue
 
 -- Effect
 
-data GitHub :: Effect where
-  CreateIssue :: Repo -> Text -> Text -> [Label] -> GitHub m IssueUrl
-  ListIssues  :: Repo -> [Label] -> GitHub m [Issue]
+data GitHub r where
+  CreateIssue :: Repo -> Text -> Text -> [Label] -> GitHub IssueUrl
+  ListIssues  :: Repo -> [Label] -> GitHub [Issue]
 
-type instance DispatchOf GitHub = 'Dynamic
-
-createIssue :: GitHub :> es => Repo -> Text -> Text -> [Label] -> Eff es IssueUrl
+createIssue :: Member GitHub effs => Repo -> Text -> Text -> [Label] -> Eff effs IssueUrl
 createIssue repo title body labels = send (CreateIssue repo title body labels)
 
-listIssues :: GitHub :> es => Repo -> [Label] -> Eff es [Issue]
+listIssues :: Member GitHub effs => Repo -> [Label] -> Eff effs [Issue]
 listIssues repo labels = send (ListIssues repo labels)
 
 -- Stub runner (errors on call)
 
-runGitHubStub :: (IOE :> es, Log :> es) => Eff (GitHub : es) a -> Eff es a
-runGitHubStub = interpret $ \_ -> \case
+runGitHubStub :: Member Log effs => Eff (GitHub ': effs) a -> Eff effs a
+runGitHubStub = interpret $ \case
   CreateIssue (Repo repo) title _ _ -> do
     logInfo $ "[GitHub:stub] CreateIssue called: " <> repo <> " - " <> title
     error "GitHub.createIssue: not implemented"

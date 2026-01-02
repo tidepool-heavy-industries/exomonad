@@ -79,8 +79,6 @@ import Data.Typeable (TypeRep, Typeable, typeRep)
 import GHC.Generics (Generic(..), K1(..), M1(..), (:*:)(..), Meta(..), S, D, C)
 import GHC.TypeLits (Symbol, KnownSymbol, symbolVal)
 
-import Effectful (Effect)
-
 import Tidepool.Graph.Types (NodeKind(..), type (:@))
 import Tidepool.Graph.Tool (ToolInfo(..))
 import Tidepool.Graph.Generic.Core (Entry, Exit, LLMNode, LogicNode, AsGraph)
@@ -89,6 +87,9 @@ import Tidepool.Graph.Edges
   , GetVision, GetTools, GetMemory, GetUsesEffects
   , GetGotoTargets, HasGotoExit
   )
+
+-- | Effect type alias (freer-simple effects have kind Type -> Type).
+type Effect = Type -> Type
 
 -- | Helper type family to get Entry type from a graph.
 --

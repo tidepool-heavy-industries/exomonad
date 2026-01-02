@@ -102,9 +102,8 @@ import Data.Kind (Type)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text, pack)
-import Effectful
-import Effectful.Dispatch.Dynamic
-import qualified Effectful.State.Static.Local as EState
+import Control.Monad.Freer (Eff, Member, send)
+import Control.Monad.Freer.Internal (handleRelayS)
 import Optics (A_Setter, Is, Optic', over)
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -121,25 +120,23 @@ import Optics (A_Setter, Is, Optic', over)
 --
 -- Multiple @Memory@ effects with different types can coexist in the same
 -- effect stack, each accessing its own independent state.
-type Memory :: Type -> Effect
-data Memory s :: Effect where
+type Memory :: Type -> Type -> Type
+data Memory s r where
   -- | Get the current memory value.
-  GetMem :: Memory s m s
+  GetMem :: Memory s s
 
   -- | Update memory by applying a function.
   --
   -- Uses a function rather than a setter to prevent update conflicts.
   -- Each update sees the current state, not a stale snapshot.
-  UpdateMem :: (s -> s) -> Memory s m ()
-
-type instance DispatchOf (Memory s) = 'Dynamic
+  UpdateMem :: (s -> s) -> Memory s ()
 
 -- | Get the current memory value.
 --
 -- @
 -- myState <- getMem \@MyStateType
 -- @
-getMem :: forall s es. Memory s :> es => Eff es s
+getMem :: forall s effs. Member (Memory s) effs => Eff effs s
 getMem = send GetMem
 
 -- | Update memory by applying a function to the current state.
@@ -154,7 +151,7 @@ getMem = send GetMem
 -- -- x <- getMem
 -- -- setMem (x + 1)  -- Could clobber concurrent updates!
 -- @
-updateMem :: forall s es. Memory s :> es => (s -> s) -> Eff es ()
+updateMem :: forall s effs. Member (Memory s) effs => (s -> s) -> Eff effs ()
 updateMem f = send (UpdateMem f)
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -172,7 +169,7 @@ updateMem f = send (UpdateMem f)
 -- -- Or with explicit optics
 -- modifyMem \@Config (field \@"timeout") (* 2)
 -- @
-modifyMem :: forall s a es k is. (Memory s :> es, Is k A_Setter) => Optic' k is s a -> (a -> a) -> Eff es ()
+modifyMem :: forall s a effs k is. (Member (Memory s) effs, Is k A_Setter) => Optic' k is s a -> (a -> a) -> Eff effs ()
 modifyMem l f = updateMem @s (over l f)
 
 -- | Monadic version for updates that need effects.
@@ -194,33 +191,28 @@ modifyMem l f = updateMem @s (over l f)
 
 -- | Run memory effect with an initial value, returning final state.
 --
--- This is the basic interpreter that wraps effectful's State.
+-- This is the basic interpreter using freer-simple's handleRelayS.
 --
 -- @
 -- (result, finalState) <- runMemory initialState $ do
 --   updateMem (+ 1)
 --   getMem
 -- @
-runMemory :: forall s es a. s -> Eff (Memory s : es) a -> Eff es (a, s)
-runMemory initial action = do
-  reinterpret (EState.runState initial) handler action
-  where
-    handler :: forall es'. EState.State s :> es'
-            => EffectHandler (Memory s) es'
-    handler _ = \case
-      GetMem -> EState.get
-      UpdateMem f -> EState.modify f
+runMemory :: forall s effs a. s -> Eff (Memory s ': effs) a -> Eff effs (a, s)
+runMemory initial = handleRelayS initial (\s a -> pure (a, s)) $ \s -> \case
+  GetMem      -> \k -> k s s
+  UpdateMem f -> \k -> k (f s) ()
 
 -- | Run memory effect purely, returning only the result.
 --
 -- Useful when you don't need the final state.
-evalMemory :: forall s es a. s -> Eff (Memory s : es) a -> Eff es a
+evalMemory :: forall s effs a. s -> Eff (Memory s ': effs) a -> Eff effs a
 evalMemory initial = fmap fst . runMemory initial
 
 -- | Run memory effect with pure initial value, discarding final state.
 --
 -- Alias for 'evalMemory' for symmetry with State naming conventions.
-runMemoryPure :: forall s es a. s -> Eff (Memory s : es) a -> Eff es a
+runMemoryPure :: forall s effs a. s -> Eff (Memory s ': effs) a -> Eff effs a
 runMemoryPure = evalMemory
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -438,12 +430,12 @@ setScope scopeName val (MemoryStore scopes) = MemoryStore $
 --   getMem @ExploreMem
 -- @
 runMemoryScoped
-  :: forall s es a. (ToJSON s, FromJSON s)
+  :: forall s effs a. (ToJSON s, FromJSON s)
   => Text              -- ^ Scope name (typically node name)
   -> s                 -- ^ Default value if scope doesn't exist
   -> MemoryStore       -- ^ Current store
-  -> Eff (Memory s : es) a
-  -> Eff es (a, MemoryStore)
+  -> Eff (Memory s ': effs) a
+  -> Eff effs (a, MemoryStore)
 runMemoryScoped scopeName defaultVal store action = do
   -- Load initial state from store or use default
   let initial = case getScope @s scopeName store of
@@ -462,11 +454,11 @@ runMemoryScoped scopeName defaultVal store action = do
 --
 -- Useful when you don't need the updated store (e.g., read-only access).
 evalMemoryScoped
-  :: forall s es a. (ToJSON s, FromJSON s)
+  :: forall s effs a. (ToJSON s, FromJSON s)
   => Text
   -> s
   -> MemoryStore
-  -> Eff (Memory s : es) a
-  -> Eff es a
+  -> Eff (Memory s ': effs) a
+  -> Eff effs a
 evalMemoryScoped scopeName defaultVal store =
   fmap fst . runMemoryScoped scopeName defaultVal store

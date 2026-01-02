@@ -34,7 +34,8 @@ import Tidepool.Effect (LLM(..), TurnOutcome(..), TurnResult(..))
 import Tidepool.Graph.Types (type (:@), Needs, Schema, UsesEffects, Exit)
 import Tidepool.Graph.Generic (GraphMode(..), AsHandler)
 import qualified Tidepool.Graph.Generic as G
-import Tidepool.Graph.Goto (Goto, To, GotoChoice(..), OneOf(..), gotoExit, LLMHandler(..))
+import Tidepool.Graph.Goto (Goto, To, GotoChoice, OneOf, gotoExit, LLMHandler(..))
+import Tidepool.Graph.Goto.Internal (GotoChoice(..), OneOf(..))  -- For test assertions
 import Tidepool.Graph.Execute (DispatchGoto(..), CallHandler(..))
 import Tidepool.Schema (HasJSONSchema(..), SchemaType(..), objectSchema, describeField, emptySchema)
 
