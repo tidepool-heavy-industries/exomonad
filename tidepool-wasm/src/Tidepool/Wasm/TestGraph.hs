@@ -1,4 +1,5 @@
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
 
@@ -19,14 +20,8 @@ module Tidepool.Wasm.TestGraph
   ) where
 
 import qualified Data.Text as T
-import GHC.Generics (Generic)
 
-import Tidepool.Graph.Types (type (:@), Needs, UsesEffects, Exit)
-import Tidepool.Graph.Generic (GraphMode(..), type (:-))
-import qualified Tidepool.Graph.Generic as G (Entry, Exit, LogicNode)
-import Tidepool.Graph.Goto (Goto, GotoChoice, To, gotoExit)
-
-import Tidepool.Wasm.Effect (WasmM, logInfo)
+import Tidepool.Wasm.Prelude
 
 
 -- | Minimal test graph: Int in, Int+1 out.
@@ -36,9 +31,9 @@ import Tidepool.Wasm.Effect (WasmM, logInfo)
 --
 -- The compute node logs a message (yielding to TypeScript) then exits with n+1.
 data TestGraph mode = TestGraph
-  { entry   :: mode :- G.Entry Int
-  , compute :: mode :- G.LogicNode :@ Needs '[Int] :@ UsesEffects '[Goto Exit Int]
-  , exit    :: mode :- G.Exit Int
+  { entry   :: mode :- Entry Int
+  , compute :: mode :- LogicNode :@ Needs '[Int] :@ UsesEffects '[Goto ExitTarget Int]
+  , exit    :: mode :- Exit Int
   }
   deriving Generic
 
@@ -51,7 +46,7 @@ data TestGraph mode = TestGraph
 --
 -- The log effect causes execution to suspend. TypeScript executes the log,
 -- then calls resume. Execution continues and returns the GotoChoice.
-computeHandlerWasm :: Int -> WasmM (GotoChoice '[To Exit Int])
+computeHandlerWasm :: Int -> WasmM (GotoChoice '[To ExitTarget Int])
 computeHandlerWasm n = do
   logInfo $ "Computing: " <> T.pack (show n)
   pure $ gotoExit (n + 1)
@@ -68,7 +63,7 @@ computeHandlerWasm n = do
 -- 4. Returns gotoExit (n+1)
 --
 -- This tests the full multi-step flow: init -> step -> step -> step -> done
-computeMultiEffectWasm :: Int -> WasmM (GotoChoice '[To Exit Int])
+computeMultiEffectWasm :: Int -> WasmM (GotoChoice '[To ExitTarget Int])
 computeMultiEffectWasm n = do
   logInfo $ "Step 1: received " <> T.pack (show n)
   logInfo "Step 2: computing"

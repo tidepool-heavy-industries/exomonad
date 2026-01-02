@@ -12,6 +12,7 @@ common warnings
 library
     import:           warnings
     exposed-modules:
+        Tidepool.Wasm.Prelude
         Tidepool.Wasm.Effect
         Tidepool.Wasm.ExampleGraph
         Tidepool.Wasm.HabiticaRoutingGraph

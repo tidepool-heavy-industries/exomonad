@@ -1,4 +1,7 @@
+{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications #-}
 
 -- | Unified Graph Registry - configurable at init time.
 --
@@ -7,7 +10,15 @@
 -- 1. 'ActiveSession' - Runtime state for the currently executing graph
 -- 2. 'GraphEntry' - How to create sessions for a graph
 -- 3. 'setRegistry' - Configure which graphs are available
--- 4. Unified FFI: 4 exports that take graphId as parameter
+-- 4. 'makeGraphEntry' - One-liner to create GraphEntry from graph type
+-- 5. Unified FFI: 4 exports that take graphId as parameter
+--
+-- = Usage (defining a graph entry)
+--
+-- @
+-- myGraphEntry :: GraphEntry
+-- myGraphEntry = makeGraphEntry \@MyGraph "mygraph" runMyGraph
+-- @
 --
 -- = Usage (in your reactor)
 --
@@ -24,6 +35,10 @@ module Tidepool.Wasm.Registry
   ( -- * Types (re-exported from Registry.Types)
     ActiveSession(..)
   , GraphEntry(..)
+
+    -- * Graph Entry Helper
+  , makeGraphEntry
+  , graphInfoToJson
 
     -- * Registry Configuration
   , setRegistry
@@ -43,21 +58,37 @@ module Tidepool.Wasm.Registry
   , resetRegistry
   ) where
 
-import Data.Aeson (Value(..), encode, eitherDecodeStrict)
+import Data.Aeson (Value(..), FromJSON, ToJSON(..), encode, eitherDecodeStrict, object, (.=))
+import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KM
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
+import Data.Proxy (Proxy(..))
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Encoding (encodeUtf8)
 import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.Encoding as TLE
 import qualified Data.Vector as V
+import GHC.Generics (Generic, Rep)
 import System.IO.Unsafe (unsafePerformIO)
 
+import Tidepool.Graph.Reify
+  ( GraphInfo(..)
+  , NodeInfo(..)
+  , EdgeInfo(..)
+  , GReifyFields
+  , ReifyMaybeType
+  , GetEntryTypeFromGraph
+  , GetExitTypeFromGraph
+  , makeGraphInfo
+  )
+import Tidepool.Graph.Generic (AsGraph)
+import Tidepool.Wasm.Runner (WasmResult(..), initializeWasm, WasmM)
 import Tidepool.Wasm.WireTypes
-  ( ExecutionPhase(..)
+  ( EffectResult
+  , ExecutionPhase(..)
   , GraphState(..)
   , StepOutput(..)
   )
@@ -66,6 +97,143 @@ import Tidepool.Generated.Codegen (GraphSpec(..))
 
 -- Types
 import Tidepool.Wasm.Registry.Types (ActiveSession(..), GraphEntry(..))
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- GRAPH ENTRY HELPER
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Create a GraphEntry from a graph type and runner.
+--
+-- This is the primary API for defining graph entries. It:
+--
+-- * Derives graphInfo (nodes, edges) from the graph type via Generics
+-- * Uses the graph ID as single source of truth (no duplication)
+-- * Handles all session state boilerplate
+--
+-- @
+-- testGraphEntry :: GraphEntry
+-- testGraphEntry = makeGraphEntry \@TestGraph "test" computeHandlerWasm
+-- @
+makeGraphEntry
+  :: forall graph input output.
+     ( Generic (graph AsGraph)
+     , GReifyFields (Rep (graph AsGraph))
+     , ReifyMaybeType (GetEntryTypeFromGraph graph)
+     , ReifyMaybeType (GetExitTypeFromGraph graph)
+     , FromJSON input
+     , ToJSON output
+     )
+  => Text                    -- ^ Graph ID (single source of truth)
+  -> (input -> WasmM output) -- ^ Graph runner
+  -> GraphEntry
+makeGraphEntry graphId runner = GraphEntry
+  { geName = graphId
+  , geGraphInfo = graphInfoToJson graphId (makeGraphInfo (Proxy @graph))
+  , geCreate = createSession graphId runner
+  }
+
+
+-- | Convert GraphInfo to JSON Value for FFI.
+--
+-- Produces JSON in the format expected by TypeScript:
+--
+-- @
+-- { "id": "test",
+--   "name": "test",
+--   "nodes": ["entry", "compute", "exit"],
+--   "edges": [{"from": "entry", "to": "compute"}, ...]
+-- }
+-- @
+graphInfoToJson :: Text -> GraphInfo -> Value
+graphInfoToJson graphId gi = object
+  [ "id" .= graphId
+  , "name" .= graphId
+  , "nodes" .= nodeNames
+  , "edges" .= map edgeToJson (gi.giEdges)
+  ]
+  where
+    -- Include entry/exit plus all real nodes
+    nodeNames :: [Text]
+    nodeNames = "entry" : map (.niName) (gi.giNodes) ++ ["exit"]
+
+    edgeToJson :: EdgeInfo -> Value
+    edgeToJson e = object
+      [ "from" .= e.eiFrom
+      , "to" .= e.eiTo
+      ]
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- SESSION STATE (generic, used by makeGraphEntry)
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Generic session state, parameterized by output type.
+data SessionState a
+  = SessionIdle
+  | SessionWaiting (EffectResult -> WasmResult a) ExecutionPhase
+
+
+-- | Create a new session for a graph.
+createSession
+  :: forall input output.
+     (FromJSON input, ToJSON output)
+  => Text                      -- ^ Graph ID
+  -> (input -> WasmM output)   -- ^ Runner
+  -> Value                     -- ^ Input JSON
+  -> IO (Either Text (StepOutput, ActiveSession))
+createSession graphId runner inputValue = do
+  sessionState <- newIORef SessionIdle
+
+  case Aeson.fromJSON inputValue of
+    Aeson.Error err -> pure $ Left $ "Invalid input: " <> T.pack err
+    Aeson.Success input -> do
+      let result = initializeWasm (runner input)
+      output <- wasmResultToOutput sessionState result
+      let session = ActiveSession
+            { asGraphId = graphId
+            , asStep = stepSession sessionState
+            , asGetState = getSessionState sessionState
+            , asGraphInfo = object ["id" .= graphId]  -- Minimal, full info in GraphEntry
+            }
+      pure $ Right (output, session)
+
+
+-- | Step the session with an effect result.
+stepSession :: ToJSON a => IORef (SessionState a) -> EffectResult -> IO StepOutput
+stepSession sessionState effectResult = do
+  st <- readIORef sessionState
+  case st of
+    SessionIdle -> pure $ mkErrorOutput "Session not initialized"
+    SessionWaiting resume _phase -> do
+      let result = resume effectResult
+      wasmResultToOutput sessionState result
+
+
+-- | Get current session state.
+getSessionState :: IORef (SessionState a) -> IO GraphState
+getSessionState sessionState = do
+  st <- readIORef sessionState
+  pure $ case st of
+    SessionIdle -> GraphState PhaseIdle []
+    SessionWaiting _ phase -> GraphState phase []
+
+
+-- | Convert WasmResult to StepOutput.
+wasmResultToOutput :: ToJSON a => IORef (SessionState a) -> WasmResult a -> IO StepOutput
+wasmResultToOutput sessionState (WasmComplete result) = do
+  writeIORef sessionState SessionIdle
+  let resultVal = toJSON result
+  pure $ StepDone resultVal (GraphState (PhaseCompleted resultVal) [])
+
+wasmResultToOutput sessionState (WasmYield eff resume) = do
+  let phase = PhaseInNode "running"  -- Generic phase name
+  writeIORef sessionState (SessionWaiting resume phase)
+  pure $ StepYield eff (GraphState phase [])
+
+wasmResultToOutput sessionState (WasmError msg) = do
+  writeIORef sessionState SessionIdle
+  pure $ mkErrorOutput msg
 
 
 -- ════════════════════════════════════════════════════════════════════════════

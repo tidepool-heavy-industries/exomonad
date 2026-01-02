@@ -88,6 +88,7 @@ module Tidepool.Graph.Goto
   , runGotoIgnore
   ) where
 
+import Data.Aeson (ToJSON(..))
 import Data.Kind (Type, Constraint)
 import Data.Proxy (Proxy(..))
 import Data.Dynamic (Dynamic, toDyn, Typeable)
@@ -298,6 +299,28 @@ data To target payload
 -- @
 type GotoChoice :: [Type] -> Type
 newtype GotoChoice targets = GotoChoice { unGotoChoice :: OneOf (Payloads targets) }
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- JSON SERIALIZATION
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Serialize a OneOf by serializing whatever payload it contains.
+--
+-- This flattens the sum type - we just serialize the inner value.
+-- The position information is lost, but for WASM FFI we only care about
+-- the payload reaching the exit point.
+instance {-# OVERLAPPING #-} ToJSON t => ToJSON (OneOf '[t]) where
+  toJSON (Here x) = toJSON x
+
+instance {-# OVERLAPPABLE #-} (ToJSON t, ToJSON (OneOf ts)) => ToJSON (OneOf (t ': ts)) where
+  toJSON (Here x) = toJSON x
+  toJSON (There rest) = toJSON rest
+
+-- | Serialize a GotoChoice by serializing its inner OneOf.
+instance ToJSON (OneOf (Payloads targets)) => ToJSON (GotoChoice targets) where
+  toJSON (GotoChoice oneOf) = toJSON oneOf
+
 
 -- | Check if a To marker is in the targets list (returns Bool).
 type GotoElem :: Type -> [Type] -> Bool

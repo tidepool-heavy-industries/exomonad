@@ -196,7 +196,8 @@ getGraphInfoSpec = describe "getGraphInfo" $ do
     let Just output = decodeOutput result
     case output of
       Object o -> do
-        KM.lookup "name" o `shouldBe` Just (String "TestGraph")
+        -- Graph ID is single source of truth for both id and name
+        KM.lookup "name" o `shouldBe` Just (String "test")
         case KM.lookup "nodes" o of
           Just (Array nodes) -> length nodes `shouldBe` 3
           _ -> expectationFailure "Expected nodes array"
@@ -209,14 +210,14 @@ getGraphInfoSpec = describe "getGraphInfo" $ do
       Object o -> case KM.lookup "edges" o of
         Just (Array edges) -> do
           length edges `shouldBe` 2
-          -- Edges should be [{from: "entry", to: "compute"}, {from: "compute", to: "exit"}]
+          -- Edges from reification use type names: Entry -> compute -> Exit
           let edgeList = V.toList edges
           case edgeList of
             [Object e1, Object e2] -> do
-              KM.lookup "from" e1 `shouldBe` Just (String "entry")
+              KM.lookup "from" e1 `shouldBe` Just (String "Entry")
               KM.lookup "to" e1 `shouldBe` Just (String "compute")
               KM.lookup "from" e2 `shouldBe` Just (String "compute")
-              KM.lookup "to" e2 `shouldBe` Just (String "exit")
+              KM.lookup "to" e2 `shouldBe` Just (String "Exit")
             _ -> expectationFailure "Expected 2 edge objects"
         _ -> expectationFailure "Expected edges array"
       _ -> expectationFailure "Expected JSON object"
@@ -248,7 +249,8 @@ getGraphStateSpec = describe "getGraphState" $ do
       Object o -> case KM.lookup "phase" o of
         Just (Object phase) -> do
           KM.lookup "type" phase `shouldBe` Just (String "in_node")
-          KM.lookup "nodeName" phase `shouldBe` Just (String "compute")
+          -- Generic session state uses "running" as phase name
+          KM.lookup "nodeName" phase `shouldBe` Just (String "running")
         _ -> expectationFailure "Expected phase object"
       _ -> expectationFailure "Expected JSON object"
 

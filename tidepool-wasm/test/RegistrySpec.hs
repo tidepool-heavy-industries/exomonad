@@ -86,12 +86,14 @@ spec = do
     describe "getGraphInfo" $ do
       it "returns info for valid graph" $ do
         result <- getGraphInfo "test"
-        result `shouldSatisfy` T.isInfixOf "TestGraph"
+        -- Graph ID is single source of truth for name
+        result `shouldSatisfy` T.isInfixOf "\"name\":\"test\""
         result `shouldSatisfy` T.isInfixOf "compute"
 
       it "returns info for habitica graph" $ do
         result <- getGraphInfo "habitica"
-        result `shouldSatisfy` T.isInfixOf "HabiticaRoutingGraph"
+        -- Graph ID is single source of truth for name
+        result `shouldSatisfy` T.isInfixOf "\"name\":\"habitica\""
         result `shouldSatisfy` T.isInfixOf "extractTask"
 
       it "returns error for unknown graph" $ do
