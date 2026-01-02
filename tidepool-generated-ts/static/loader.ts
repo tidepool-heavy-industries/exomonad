@@ -2,6 +2,9 @@
  * Tidepool WASM Loader for Cloudflare Workers
  *
  * Self-contained loader for the DO harness.
+ *
+ * The WASM module exports graph-specific functions (e.g., initialize_test,
+ * step_habitica). Use the graphId parameter to select which graph to use.
  */
 
 import { WASI, File, OpenFile, ConsoleStdout } from "@bjorn3/browser_wasi_shim";
@@ -9,9 +12,9 @@ import { createJsFFI, type WasmExports } from "./jsffi.js";
 import type {
   StepOutput,
   EffectResult,
-  GraphInfo,
   GraphState,
 } from "./protocol.js";
+import type { GraphInfo } from "./graphs.js";
 
 // =============================================================================
 // GraphMachine Interface (inline to avoid circular deps)
@@ -57,6 +60,8 @@ if (typeof globalThis.FinalizationRegistry === "undefined") {
 export interface LoaderOptions {
   /** The compiled WASM module */
   wasmModule: WebAssembly.Module;
+  /** Graph ID to load (e.g., "test", "example", "habitica") */
+  graphId: string;
   /** Enable debug logging */
   debug?: boolean;
 }
@@ -66,7 +71,7 @@ export interface LoaderOptions {
 // =============================================================================
 
 export async function loadMachine(options: LoaderOptions): Promise<GraphMachine> {
-  const { wasmModule, debug = false } = options;
+  const { wasmModule, graphId, debug = false } = options;
 
   // Set up WASI with minimal filesystem (stdout/stderr only)
   const fds = [
@@ -105,42 +110,59 @@ export async function loadMachine(options: LoaderOptions): Promise<GraphMachine>
   exports.hs_init(0, 0);
 
   if (debug) {
-    console.log("[Tidepool] WASM module loaded");
+    console.log(`[Tidepool] WASM module loaded for graph: ${graphId}`);
+  }
+
+  // Get graph-specific function names
+  const initFnName = `initialize_${graphId}`;
+  const stepFnName = `step_${graphId}`;
+  const infoFnName = `getGraphInfo_${graphId}`;
+  const stateFnName = `getGraphState_${graphId}`;
+
+  // Type for dynamic exports access
+  type DynamicExports = Record<string, ((arg: string) => string | Promise<string>) | (() => string | Promise<string>)>;
+  const dynamicExports = exports as unknown as DynamicExports;
+
+  // Verify required functions exist
+  if (!dynamicExports[initFnName]) {
+    throw new Error(`WASM module missing export: ${initFnName}. Available graphs may not include "${graphId}".`);
   }
 
   return {
     async initialize(input: unknown): Promise<StepOutput> {
       const inputJson = JSON.stringify(input);
-      if (debug) console.log("[Tidepool] initialize:", inputJson);
+      if (debug) console.log(`[Tidepool:${graphId}] initialize:`, inputJson);
 
-      const resultStr = await exports.initialize(inputJson);
+      const initFn = dynamicExports[initFnName] as (arg: string) => string | Promise<string>;
+      const resultStr = await initFn(inputJson);
 
       const result: StepOutput = typeof resultStr === "string"
         ? JSON.parse(resultStr)
         : { effect: null, done: true, stepResult: null, graphState: { phase: { type: "idle" } as const, completedNodes: [] } };
 
-      if (debug) console.log("[Tidepool] initialize result:", JSON.stringify(result, null, 2));
+      if (debug) console.log(`[Tidepool:${graphId}] initialize result:`, JSON.stringify(result, null, 2));
       return result;
     },
 
     async step(result: EffectResult): Promise<StepOutput> {
       const resultJson = JSON.stringify(result);
-      if (debug) console.log("[Tidepool] step:", resultJson);
+      if (debug) console.log(`[Tidepool:${graphId}] step:`, resultJson);
 
-      const outputStr = await exports.step(resultJson);
+      const stepFn = dynamicExports[stepFnName] as (arg: string) => string | Promise<string>;
+      const outputStr = await stepFn(resultJson);
 
       const output: StepOutput = typeof outputStr === "string"
         ? JSON.parse(outputStr)
         : { effect: null, done: true, stepResult: null, graphState: { phase: { type: "idle" } as const, completedNodes: [] } };
 
-      if (debug) console.log("[Tidepool] step result:", JSON.stringify(output, null, 2));
+      if (debug) console.log(`[Tidepool:${graphId}] step result:`, JSON.stringify(output, null, 2));
       return output;
     },
 
     async getGraphInfo(): Promise<GraphInfo> {
-      const fn = (exports as unknown as { getGraphInfo?: () => string | Promise<string> }).getGraphInfo;
+      const fn = dynamicExports[infoFnName] as (() => string | Promise<string>) | undefined;
       if (!fn) {
-        return { name: "Unknown", entryType: { typeName: "", typeModule: "" }, exitType: { typeName: "", typeModule: "" }, nodes: [], edges: [] };
+        return { id: graphId, name: "Unknown", nodes: [], edges: [] } as GraphInfo;
       }
       const str = fn();
       const resolved = typeof str === "string" ? str : await str;
@@ -148,7 +170,7 @@ export async function loadMachine(options: LoaderOptions): Promise<GraphMachine>
     },
 
     async getGraphState(): Promise<GraphState> {
-      const fn = (exports as unknown as { getGraphState?: () => string | Promise<string> }).getGraphState;
+      const fn = dynamicExports[stateFnName] as (() => string | Promise<string>) | undefined;
       if (!fn) {
         return { phase: { type: "idle" } as const, completedNodes: [] };
       }

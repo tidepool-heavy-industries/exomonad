@@ -38,11 +38,14 @@ export interface TypeInfo {
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
- * Static graph metadata - matches Haskell GraphInfo.
+ * Detailed graph metadata - matches Haskell GraphInfo with full type information.
  * Edges are derived from Needs/Schema relationships (implicit data flow)
  * and GotoTargets (explicit control flow).
+ *
+ * Note: The simple GraphInfo type used by the loader is in graphs.ts.
+ * This detailed version is for advanced introspection features.
  */
-export interface GraphInfo {
+export interface DetailedGraphInfo {
   /** Graph name */
   name: string;
   /** Type accepted at Entry */
@@ -369,8 +372,8 @@ export interface GraphMachineExports {
   /** Continue execution with JSON EffectResult */
   step(result: string): Promise<string>; // → JSON StepOutput
 
-  /** Get compile-time graph structure */
-  getGraphInfo(): string; // → JSON GraphInfo
+  /** Get compile-time graph structure (returns simple GraphInfo from graphs.ts) */
+  getGraphInfo(): string; // → JSON { id, name, nodes, edges }
 
   /** Get current runtime state */
   getGraphState(): string; // → JSON GraphState

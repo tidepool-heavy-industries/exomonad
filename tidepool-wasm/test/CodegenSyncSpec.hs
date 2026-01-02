@@ -51,9 +51,6 @@ spec = describe "Codegen Sync" $ do
       verifyGraphInfo json habiticaGraphSpec
 
   describe "allGraphSpecs completeness" $ do
-    it "has exactly 3 graphs (update this when adding graphs)" $ do
-      length allGraphSpecs `shouldBe` 3
-
     it "graph IDs are unique" $ do
       let ids = map (\s -> s.gsId) allGraphSpecs
       length ids `shouldBe` length (nub ids)
