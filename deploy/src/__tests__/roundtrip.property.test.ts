@@ -47,8 +47,10 @@ const arbText = fc.oneof(
 const arbJsonValue = fc.jsonValue({ maxDepth: 3 });
 
 // JSON Schema - more constrained than arbitrary JSON
-const arbJsonSchema: fc.Arbitrary<Record<string, unknown> | null> = fc.oneof(
-  fc.constant(null),
+// Note: We use undefined (field omitted) instead of null because Aeson's .:?
+// treats null same as missing, so {eff_schema: null} doesn't roundtrip.
+const arbJsonSchema: fc.Arbitrary<Record<string, unknown> | undefined> = fc.oneof(
+  fc.constant(undefined),
   fc.record({
     type: fc.constantFrom("object", "string", "number", "boolean", "array"),
     properties: fc.option(
@@ -108,10 +110,13 @@ const arbSerializableEffect: fc.Arbitrary<SerializableEffect> = fc.oneof(
 ) as fc.Arbitrary<SerializableEffect>;
 
 // EffectResult - matches ProtocolPropertySpec.hs:103-115
+// Note: We avoid generating {value: null} because Aeson's .:? treats null same
+// as missing. Generate either undefined (field omitted) or a non-null value.
+const arbNonNullJsonValue = arbJsonValue.filter((v) => v !== null);
 const arbEffectResult: fc.Arbitrary<EffectResult> = fc.oneof(
   fc.record({
     type: fc.constant("success" as const),
-    value: fc.option(arbJsonValue, { nil: undefined }).map((v) => v ?? null),
+    value: fc.option(arbNonNullJsonValue, { nil: undefined }),
   }),
   fc.record({ type: fc.constant("error" as const), message: arbText })
 );
