@@ -33,10 +33,9 @@ new_classes = ["TelegramDO"]
 binding = "AI"
 
 # KV namespace for rate limiting
-# Create with: wrangler kv:namespace create RATE_LIMIT_KV
 [[kv_namespaces]]
 binding = "RATE_LIMIT_KV"
-id = "REPLACE_WITH_RATE_LIMIT_KV_ID"
+id = "cba6db049a5e436db8bcb3d31e5978d2"
 
 # Environment variables
 [vars]
