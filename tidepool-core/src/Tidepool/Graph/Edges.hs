@@ -145,7 +145,7 @@ type family GetMemory node where
 -- | Extract all Goto targets from an effect list.
 --
 -- Returns a list of (target, payload) type pairs.
--- Note: This works with effectful's Effect kind.
+-- Note: This works with the polykinded Effect type.
 --
 -- @
 -- GetGotoTargets '[State S, Goto "foo" A, Log, Goto "bar" B]

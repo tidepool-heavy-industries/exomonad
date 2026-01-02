@@ -46,7 +46,7 @@ import GHC.TypeLits (Symbol)
 -- | The kind of a node determines its behavior:
 --
 -- * 'LLM' nodes call the language model and produce output via 'Schema'
--- * 'Logic' nodes run pure/effectful code and transition via 'Goto'
+-- * 'Logic' nodes run pure or effect-based code and transition via 'Goto'
 --
 -- Note: For the record-based DSL, use LLMNode and LogicNode from Tidepool.Graph.Generic
 data NodeKind

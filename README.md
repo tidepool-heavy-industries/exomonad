@@ -4,7 +4,7 @@
 
 ## What Is This?
 
-A sketch of Tidepool's core architecture: **effectful** for sandboxed effects, **mustache** templates validated at compile time, and **structured output** for LLM → state mutations.
+A sketch of Tidepool's core architecture: **freer-simple** for sandboxed effects with reified continuations, **mustache** templates validated at compile time, and **structured output** for LLM → state mutations.
 
 The key insight: LLMs don't need raw IO access. They need:
 1. **Typed state** they can read (via templates)
@@ -185,6 +185,6 @@ app/
 
 ## See Also
 
-- [effectful](https://hackage.haskell.org/package/effectful) - Effect system
+- [freer-simple](https://hackage.haskell.org/package/freer-simple) - Effect system with reified continuations
 - [stache](https://hackage.haskell.org/package/stache) - Mustache templates
 - Blades in the Dark - Inspiration for faction/clock mechanics

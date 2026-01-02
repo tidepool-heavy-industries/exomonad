@@ -5,7 +5,7 @@
 -- | WASM effect system using freer-simple.
 --
 -- This module provides a yield/resume capable effect system for WASM execution.
--- Unlike effectful (which is ReaderT IO under the hood), freer-simple reifies
+-- Unlike effect systems based on ReaderT IO, freer-simple reifies
 -- continuations as data, enabling step-by-step execution across FFI boundaries.
 --
 -- = Design

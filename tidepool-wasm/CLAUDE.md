@@ -219,7 +219,7 @@ TypeScript                              WASM (Haskell)
 ## Dependencies
 
 - `tidepool-core` - Graph DSL, effects, validation
-- `effectful-core` - Effect system
+- `freer-simple` - Effect system with reified continuations
 - `aeson` - JSON encoding/decoding
 - `text` - Text type
 - `ghc-experimental` - WASM FFI primitives (WASM builds only)

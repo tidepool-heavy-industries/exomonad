@@ -174,7 +174,7 @@ modifyMem l f = updateMem @s (over l f)
 
 -- | Monadic version for updates that need effects.
 --
--- When you need to compute the new value effectfully, use getMem/updateMem:
+-- When you need to compute the new value using effects, use getMem/updateMem:
 --
 -- @
 -- s <- getMem \@Cache

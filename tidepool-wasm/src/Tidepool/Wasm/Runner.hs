@@ -5,7 +5,7 @@
 -- | Graph runner using freer-simple's Coroutine effect.
 --
 -- This module implements the yield/resume pattern for WASM execution using
--- freer-simple's built-in 'Status' type. Unlike effectful (which is ReaderT IO),
+-- freer-simple's built-in 'Status' type. Unlike effect systems based on ReaderT IO,
 -- freer-simple reifies continuations as data, enabling step-by-step execution.
 --
 -- = Design

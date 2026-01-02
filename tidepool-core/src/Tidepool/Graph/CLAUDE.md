@@ -146,7 +146,7 @@ infixr 8 :=  -- Binds tighter than :@
 -- Node kinds
 data NodeKind
   = LLM    -- Calls language model, outputs via Schema
-  | Logic  -- Pure/effectful code, transitions via Goto
+  | Logic  -- Pure or effect-based code, transitions via Goto
 ```
 
 #### Annotations (attached with `:@`)
@@ -498,7 +498,7 @@ evalMemory :: s -> Eff (Memory s : es) a -> Eff es a
 
 The `TemplateDef` typeclass defines typed templates for LLM nodes. Templates
 combine a Jinja file (validated at compile time via ginger TH) with an
-effectful context builder.
+effect-based context builder.
 
 ```haskell
 class TemplateDef t where
@@ -566,7 +566,7 @@ GetNeeds ("foo" := LLM :@ Needs '[A, B] :@ Schema C) = '[A, B]
 type GetSchema :: Type -> Maybe Type
 GetSchema ("foo" := LLM :@ Schema C) = 'Just C
 
--- Extract effect stack (polykinded for effectful compatibility)
+-- Extract effect stack (polykinded for Effect type compatibility)
 type GetUsesEffects :: forall k. Type -> Maybe [k]
 GetUsesEffects ("foo" := Logic :@ UsesEffects '[State S, Goto "bar" X]) = 'Just '[State S, Goto "bar" X]
 
@@ -812,7 +812,7 @@ type AnnotatedGraph = Graph
 
 ### Why Polykinded Type Families?
 
-effectful's `Effect` kind is `(Type -> Type) -> Type -> Type`, not `Type`. To pattern match on `Goto` inside effect lists, type families like `GetGotoTargets` must be polykinded:
+The `Effect` kind is `(Type -> Type) -> Type -> Type`, not `Type`. To pattern match on `Goto` inside effect lists, type families like `GetGotoTargets` must be polykinded:
 
 ```haskell
 type GetGotoTargets :: forall k. [k] -> [(Symbol, Type)]
@@ -916,7 +916,7 @@ instance ReifyGraph MyGraph where
 
 **Cause**: Effect list has wrong kind (e.g., `[Type]` instead of `[Effect]`)
 
-**Solution**: Ensure effects in `UsesEffects '[...]` are actual effectful effects with kind `(Type -> Type) -> Type -> Type`.
+**Solution**: Ensure effects in `UsesEffects '[...]` are actual Effect types with kind `(Type -> Type) -> Type -> Type`.
 
 ## Known Limitations
 
@@ -998,13 +998,12 @@ executing graphs across FFI boundaries (e.g., WASM → TypeScript).
 
 ### Why freer-simple?
 
-While `tidepool-core` uses `effectful` (ReaderT IO under the hood), WASM
-execution requires reified continuations. `freer-simple` models effects as
+WASM execution requires reified continuations. `freer-simple` models effects as
 data, enabling step-by-step execution:
 
 ```haskell
--- effectful: Cannot suspend mid-execution
-runPureEff :: Eff '[] a -> a
+-- Effect systems based on ReaderT IO cannot suspend mid-execution
+runIO :: ReaderT env IO a -> env -> IO a
 
 -- freer-simple: Can yield and resume
 data Status effs a b r
@@ -1037,7 +1036,7 @@ computeHandler n = do
 
 ### Manual Dispatch Pattern
 
-Since `DispatchGoto` uses effectful, WASM execution uses manual dispatch:
+For WASM execution with explicit yield points, manual dispatch is used:
 
 ```haskell
 runLinearGraph :: Int -> WasmM Int

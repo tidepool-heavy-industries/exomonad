@@ -80,7 +80,7 @@ data LLMNode
 
 -- | Logic node marker.
 --
--- For pure/effectful routing logic:
+-- For pure or effect-based routing logic:
 --
 -- @
 -- data MyGraph mode = MyGraph

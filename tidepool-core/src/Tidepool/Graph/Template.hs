@@ -13,7 +13,7 @@
 --
 -- = Design Philosophy
 --
--- "Templates are typed. Context building is effectful. Validation is compile-time."
+-- "Templates are typed. Context building uses effects. Validation is compile-time."
 --
 -- The ginger library's `typedTemplateFile` TH splice validates that all
 -- @{{ variable }}@ references in the .jinja file correspond to fields in

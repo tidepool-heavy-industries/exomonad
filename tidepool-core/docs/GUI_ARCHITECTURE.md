@@ -16,7 +16,7 @@ The GUI uses a polling-based architecture with threepenny-gui. The game loop and
 │                                                              │
 │   ┌──────────────────┐         ┌──────────────────────────┐ │
 │   │   Game Loop      │◄──MVar──│   Threepenny GUI         │ │
-│   │   (effectful)    │         │   (browser)              │ │
+│   │   (freer-simple) │         │   (browser)              │ │
 │   │                  │         │                          │ │
 │   │ RequestInput ────┼──TVar──►│ Polls for PendingRequest │ │
 │   │ blocks on MVar   │         │ User clicks → MVar put   │ │

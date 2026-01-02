@@ -30,8 +30,8 @@ The key insight: LLMs don't need raw IO - they need typed state they can read (v
 
 ### Core Design Decisions
 
-1. **effectful** for effects
-   - MTL-equivalent performance, no INLINE pragma dance
+1. **freer-simple** for effects
+   - Reified continuations enable yield/resume across FFI boundaries
    - Effects: `LLM`, `RequestInput`, `State`, `Emit`, `Random`, `Log`, `ChatHistory`, `Time`
 
 2. **Typed Jinja templates** (via ginger library)
@@ -67,7 +67,7 @@ The GUI uses threepenny-gui with a polling-based update model:
 │                                                              │
 │   ┌──────────────────┐         ┌──────────────────────────┐ │
 │   │   Game Loop      │◄──MVar──│   Threepenny GUI         │ │
-│   │   (effectful)    │         │   (browser)              │ │
+│   │   (freer-simple) │         │   (browser)              │ │
 │   │                  │         │                          │ │
 │   │ RequestInput ────┼──TVar──►│ Polls for PendingRequest │ │
 │   │ blocks on MVar   │         │ User clicks → MVar put   │ │
@@ -447,7 +447,7 @@ The `deploy/` directory contains a Cloudflare Worker Durable Object harness for 
 
 **Current status**: The WASM module (`tidepool.wasm`) comes from a separate standin implementation at `~/dev/tidepool`. This standin demonstrates the effect protocol but will be replaced by compiling the Haskell code in this repo once:
 
-1. The effectful-based agent loop is WASM-ready
+1. The freer-simple-based agent loop is WASM-ready
 2. GHC WASM cross-compilation is integrated into the build
 
 The protocol types in `deploy/src/protocol.ts` define the contract between TypeScript and Haskell.
@@ -486,7 +486,7 @@ pnpm deploy       # Deploy to Cloudflare
 
 ## References
 
-- effectful: https://hackage.haskell.org/package/effectful
+- freer-simple: https://hackage.haskell.org/package/freer-simple
 - Anthropic tool use: https://docs.anthropic.com/en/docs/tool-use
 - Blades in the Dark SRD: https://bladesinthedark.com/
 - heist-engine (v1 reference): ~/dev/shoal-automat/machines/heist-engine

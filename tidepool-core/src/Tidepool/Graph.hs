@@ -10,7 +10,7 @@
 -- Nodes come in two kinds:
 --
 -- * __LLM nodes__: Call the language model, produce output via 'Schema'
--- * __Logic nodes__: Run effectful code, transition via 'Goto'
+-- * __Logic nodes__: Run pure or effect-based code, transition via 'Goto'
 --
 -- == Edges
 --
@@ -207,7 +207,7 @@ import qualified Tidepool.Graph.Generic as G
 --
 -- The 'Tpl.TemplateDef' typeclass defines typed templates for LLM nodes.
 -- Templates combine a Jinja file (validated at compile time) with an
--- effectful context builder.
+-- effect-based context builder.
 --
 -- @
 -- -- Phase 1: Compile template (TH validates against context type)
