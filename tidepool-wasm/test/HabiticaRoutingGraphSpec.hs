@@ -5,7 +5,7 @@
 -- | Tests for the Habitica Routing Graph.
 --
 -- Tests the full graph execution using the initializeWasm pattern from E2ESpec.
--- Mocks effect responses (EffLlmComplete, EffHabitica, EffTelegramConfirm) to
+-- Mocks effect responses (EffLlmComplete, EffHabitica, EffTelegramAsk) to
 -- exercise the happy path and various branches.
 module HabiticaRoutingGraphSpec (spec) where
 
@@ -80,11 +80,11 @@ userDenialSpec = describe "User denial (retry flow)" $ do
     let input = RawInput "Schedule meeting"
         result = initializeWasm (runHabiticaRoutingGraph input)
 
-    -- Use stateful runner: first TelegramConfirm returns "denied", second returns "approved"
+    -- Use stateful runner: first TelegramAsk returns "denied", second returns "approved"
     case runToCompletionStateful result mockDenialThenApproveStateful of
       Just (execResult, confirmCount) -> do
         execResult.erSuccess `shouldBe` True
-        -- Should have seen 2 TelegramConfirm effects (denied, then approved)
+        -- Should have seen 2 TelegramAsk effects (denied, then approved)
         confirmCount `shouldBe` 2
       Nothing ->
         expectationFailure "Expected graph to complete after retry"
@@ -135,7 +135,7 @@ effectSequenceSpec = describe "Effect sequence" $ do
     -- 9. LogInfo (match decision)
     -- 10. LogInfo (suggestion)
     -- 11. LogInfo (awaiting confirmation)
-    -- 12. TelegramConfirm
+    -- 12. TelegramAsk
     -- 13. LogInfo (user approved)
     -- 14. LogInfo (executing action)
     -- 15. LogInfo (creating new todo)
@@ -158,8 +158,8 @@ effectSequenceSpec = describe "Effect sequence" $ do
     let habEffects = filter isHabitica effects
     length habEffects `shouldSatisfy` (>= 2)
 
-    -- Check we have TelegramConfirm effect
-    let confirmEffects = filter isTelegramConfirm effects
+    -- Check we have TelegramAsk effect
+    let confirmEffects = filter isTelegramAsk effects
     length confirmEffects `shouldBe` 1
 
   it "LlmComplete effects have correct node names" $ do
@@ -202,9 +202,8 @@ mockHappyPathResponses eff = case eff of
       ]
     _ -> ResSuccess $ Just $ object []
 
-  EffTelegramConfirm _ _ -> ResSuccess $ Just $ object
-    [ "response" .= ("approved" :: String)
-    ]
+  EffTelegramSend _ _ -> ResSuccess Nothing  -- Fire-and-forget
+  EffTelegramAsk _ _ _ -> ResSuccess $ Just $ String "approved"
 
 -- | Checklist path: matching todo found, user approves adding checklist item
 mockChecklistResponses :: SerializableEffect -> EffectResult
@@ -243,9 +242,8 @@ mockChecklistResponses eff = case eff of
     "AddChecklistItem" -> ResSuccess $ Just $ String "checklist-item-id"
     _ -> ResSuccess $ Just $ object []
 
-  EffTelegramConfirm _ _ -> ResSuccess $ Just $ object
-    [ "response" .= ("approved" :: String)
-    ]
+  EffTelegramSend _ _ -> ResSuccess Nothing  -- Fire-and-forget
+  EffTelegramAsk _ _ _ -> ResSuccess $ Just $ String "approved"
 
 -- | Skip: user skips immediately
 mockSkipResponses :: SerializableEffect -> EffectResult
@@ -271,12 +269,11 @@ mockSkipResponses eff = case eff of
       ]
     _ -> ResSuccess $ Just $ object []
 
-  EffTelegramConfirm _ _ -> ResSuccess $ Just $ object
-    [ "response" .= ("skipped" :: String)
-    ]
+  EffTelegramSend _ _ -> ResSuccess Nothing  -- Fire-and-forget
+  EffTelegramAsk _ _ _ -> ResSuccess $ Just $ String "skipped"
 
 -- | Stateful mock for denial-then-approve: returns different responses based on call count
--- State is the number of TelegramConfirm effects seen so far
+-- State is the number of TelegramAsk effects seen so far
 mockDenialThenApproveStateful :: Int -> SerializableEffect -> (EffectResult, Int)
 mockDenialThenApproveStateful confirmCount eff = case eff of
   EffLogInfo _ -> (ResSuccess Nothing, confirmCount)
@@ -300,16 +297,11 @@ mockDenialThenApproveStateful confirmCount eff = case eff of
       ], confirmCount)
     _ -> (ResSuccess $ Just $ object [], confirmCount)
 
-  EffTelegramConfirm _ _ ->
+  EffTelegramSend _ _ -> (ResSuccess Nothing, confirmCount)  -- Fire-and-forget
+  EffTelegramAsk _ _ _ ->
     let newCount = confirmCount + 1
-        response = if confirmCount == 0
-          then object  -- First call: deny with feedback
-            [ "response" .= ("denied" :: String)
-            , "feedback" .= ("Try a different approach" :: String)
-            ]
-          else object  -- Second call: approve
-            [ "response" .= ("approved" :: String)
-            ]
+        -- First call: deny, second call: approve
+        response = String $ if confirmCount == 0 then "denied" else "approved"
     in (ResSuccess $ Just response, newCount)
 
 
@@ -367,6 +359,6 @@ isHabitica :: SerializableEffect -> Bool
 isHabitica (EffHabitica {}) = True
 isHabitica _ = False
 
-isTelegramConfirm :: SerializableEffect -> Bool
-isTelegramConfirm (EffTelegramConfirm {}) = True
-isTelegramConfirm _ = False
+isTelegramAsk :: SerializableEffect -> Bool
+isTelegramAsk (EffTelegramAsk {}) = True
+isTelegramAsk _ = False

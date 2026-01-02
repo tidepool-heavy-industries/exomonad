@@ -85,11 +85,19 @@ data SerializableEffect
       , effHabPayload :: Value
       -- ^ Operation-specific payload (taskId, direction, etc.)
       }
-  | EffTelegramConfirm
-      { effConfirmMessage :: Text
-      -- ^ Message to display to user
-      , effConfirmButtons :: [(Text, Text)]
-      -- ^ Button options: [(label, value)]
+  | EffTelegramSend
+      { effTgText :: Text
+      -- ^ Message text to send
+      , effTgParseMode :: Text
+      -- ^ Parse mode: "PlainText" | "Markdown" | "HTML"
+      }
+  | EffTelegramAsk
+      { effTgAskText :: Text
+      -- ^ Message text to display
+      , effTgAskParseMode :: Text
+      -- ^ Parse mode: "PlainText" | "Markdown" | "HTML"
+      , effTgButtons :: [(Text, Text)]
+      -- ^ Button options: [(label, callback)]
       }
   deriving stock (Show, Eq, Generic)
 
@@ -113,9 +121,15 @@ instance ToJSON SerializableEffect where
     , "eff_hab_op" .= op
     , "eff_hab_payload" .= payload
     ]
-  toJSON (EffTelegramConfirm msg buttons) = object
-    [ "type" .= ("TelegramConfirm" :: Text)
-    , "eff_message" .= msg
+  toJSON (EffTelegramSend txt parseMode) = object
+    [ "type" .= ("TelegramSend" :: Text)
+    , "eff_tg_text" .= txt
+    , "eff_tg_parse_mode" .= parseMode
+    ]
+  toJSON (EffTelegramAsk txt parseMode buttons) = object
+    [ "type" .= ("TelegramAsk" :: Text)
+    , "eff_tg_text" .= txt
+    , "eff_tg_parse_mode" .= parseMode
     , "eff_buttons" .= [[label, val] | (label, val) <- buttons]
     ]
 
@@ -133,11 +147,15 @@ instance FromJSON SerializableEffect where
       "Habitica" -> EffHabitica
         <$> o .: "eff_hab_op"
         <*> o .: "eff_hab_payload"
-      "TelegramConfirm" -> do
-        msg <- o .: "eff_message"
+      "TelegramSend" -> EffTelegramSend
+        <$> o .: "eff_tg_text"
+        <*> o .: "eff_tg_parse_mode"
+      "TelegramAsk" -> do
+        txt <- o .: "eff_tg_text"
+        parseMode <- o .: "eff_tg_parse_mode"
         buttonArrays <- o .: "eff_buttons" :: Parser [[Text]]
         let buttons = [(l, v) | [l, v] <- buttonArrays]
-        pure $ EffTelegramConfirm msg buttons
+        pure $ EffTelegramAsk txt parseMode buttons
       _         -> fail $ "Unknown effect type: " ++ show typ
 
 
@@ -159,11 +177,12 @@ instance FromJSON SerializableEffect where
 -- emTypeName in the metadata.
 effectMetadata :: SerializableEffect -> (EffectCategory, EffectSemantics)
 effectMetadata = \case
-  EffLogInfo{}         -> (Internal, FireAndForget)
-  EffLogError{}        -> (Internal, FireAndForget)
-  EffLlmComplete{}     -> (Internal, Blocking)
-  EffHabitica{}        -> (Internal, Blocking)
-  EffTelegramConfirm{} -> (Yielded, Blocking)
+  EffLogInfo{}       -> (Internal, FireAndForget)
+  EffLogError{}      -> (Internal, FireAndForget)
+  EffLlmComplete{}   -> (Internal, Blocking)
+  EffHabitica{}      -> (Internal, Blocking)
+  EffTelegramSend{}  -> (Yielded, FireAndForget)  -- Send and continue
+  EffTelegramAsk{}   -> (Yielded, Blocking)       -- Wait for button click
 
 
 -- ════════════════════════════════════════════════════════════════════════════

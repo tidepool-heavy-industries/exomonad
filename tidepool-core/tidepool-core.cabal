@@ -22,6 +22,7 @@ library
         Tidepool.Schema
         Tidepool.Anthropic.Types
         Tidepool.Effects.Habitica
+        Tidepool.Effects.Telegram
         Tidepool.Effects.Obsidian
         Tidepool.Effects.GitHub
         Tidepool.Effects.Calendar
