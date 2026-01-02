@@ -156,3 +156,15 @@ deploy-worker:
 deploy: build-wasm deploy-worker
     @echo ""
     @echo "✓ Full deploy complete"
+
+# ─────────────────────────────────────────────────────────────
+# Observability
+# ─────────────────────────────────────────────────────────────
+
+# Tail Cloudflare Worker logs (pretty format)
+logs:
+    cd deploy && npx wrangler tail --format pretty
+
+# Tail logs with JSON format (for parsing)
+logs-json:
+    cd deploy && npx wrangler tail --format json
