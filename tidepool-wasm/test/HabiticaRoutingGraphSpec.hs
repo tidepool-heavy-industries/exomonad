@@ -228,9 +228,16 @@ mockChecklistResponses eff = case eff of
       [ object
           [ "todoId" .= ("grocery-todo-id" :: String)
           , "todoTitle" .= ("Groceries" :: String)
-          , "todoChecklist" .= ([ object ["checklistText" .= ("milk" :: String)]
-                                , object ["checklistText" .= ("bread" :: String)]
+          , "todoChecklist" .= ([ object [ "checklistId" .= ("item-1" :: String)
+                                         , "checklistText" .= ("milk" :: String)
+                                         , "checklistDone" .= False
+                                         ]
+                                , object [ "checklistId" .= ("item-2" :: String)
+                                         , "checklistText" .= ("bread" :: String)
+                                         , "checklistDone" .= False
+                                         ]
                                 ] :: [Value])
+          , "todoCompleted" .= False
           ]
       ]
     "AddChecklistItem" -> ResSuccess $ Just $ String "checklist-item-id"

@@ -29,8 +29,12 @@ module Tidepool.Wasm.Effect
   , logInfo
   , logError
   , llmComplete
-  , habitica
   , telegramConfirm
+
+    -- * Habitica (typed API)
+  , habitica
+    -- ** Raw API (internal use only)
+  , habiticaRaw
 
     -- * Running Effects
   , runWasmM
@@ -44,6 +48,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 
 import Tidepool.Wasm.WireTypes (SerializableEffect(..), EffectResult(..))
+import Tidepool.Wasm.Habitica (habitica)
 
 
 -- | The effect stack for WASM computations.
@@ -103,14 +108,17 @@ llmComplete node systemPrompt userContent schema = do
     ResSuccess Nothing  -> pure (toJSON ())
     ResError msg        -> error $ "LLM call failed: " <> T.unpack msg
 
--- | Make a Habitica API call.
+-- | Make a raw Habitica API call.
 --
 -- Yields 'EffHabitica', expects JSON response on success.
-habitica :: Member (Yield SerializableEffect EffectResult) effs
-         => Text   -- ^ Operation name
-         -> Value  -- ^ Payload
-         -> Eff effs Value
-habitica op payload = do
+--
+-- __Prefer the typed 'habitica' function from "Tidepool.Wasm.Habitica".__
+-- This raw version is kept for backwards compatibility and testing.
+habiticaRaw :: Member (Yield SerializableEffect EffectResult) effs
+            => Text   -- ^ Operation name
+            -> Value  -- ^ Payload
+            -> Eff effs Value
+habiticaRaw op payload = do
   result <- yield (EffHabitica op payload) (id @EffectResult)
   case result of
     ResSuccess (Just v) -> pure v
