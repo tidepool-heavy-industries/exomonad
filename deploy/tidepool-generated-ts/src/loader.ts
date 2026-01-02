@@ -73,7 +73,16 @@ export interface LoaderOptions {
 // Unified WASM Exports Interface
 // =============================================================================
 
-interface UnifiedWasmExports extends WasmExports {
+// Note: We don't extend WasmExports because the unified FFI has different
+// signatures (takes graphId as first parameter). We only need the common
+// fields for initialization.
+interface UnifiedWasmExports {
+  // From WasmExports - needed for initialization
+  memory: WebAssembly.Memory;
+  _initialize: () => void;
+  hs_init: (argc: number, argv: number) => void;
+
+  // Unified FFI exports (take graphId as first parameter)
   initialize: (graphId: string, json: string) => string | Promise<string>;
   step: (graphId: string, json: string) => string | Promise<string>;
   getGraphInfo: (graphId: string) => string | Promise<string>;
