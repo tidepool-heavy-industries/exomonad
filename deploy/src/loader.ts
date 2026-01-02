@@ -6,6 +6,7 @@
 
 import { WASI, File, OpenFile, ConsoleStdout } from "@bjorn3/browser_wasi_shim";
 import { createJsFFI, type WasmExports } from "tidepool-generated-ts";
+import { setupPolyfills } from "./polyfills";
 import type {
   StepOutput,
   EffectResult,
@@ -31,30 +32,11 @@ export interface GraphMachine {
 }
 
 // =============================================================================
-// Cloudflare Workers Polyfills
+// GHC WASM Runtime Polyfills
 // =============================================================================
 
-// MessageChannel is not available in Workers - use setTimeout
-if (typeof (globalThis as Record<string, unknown>).MessageChannel === "undefined") {
-  (globalThis as Record<string, unknown>).MessageChannel = class {
-    port1 = { postMessage: () => {} };
-    port2 = { onmessage: null };
-  };
-}
-
-// setImmediate polyfill for GHC WASM scheduler
-if (typeof (globalThis as Record<string, unknown>).setImmediate === "undefined") {
-  (globalThis as Record<string, unknown>).setImmediate = (fn: () => void) => setTimeout(fn, 0);
-}
-
-// FinalizationRegistry - no-op for short-lived Workers
-if (typeof globalThis.FinalizationRegistry === "undefined") {
-  // @ts-expect-error - Minimal polyfill, Workers requests are short-lived
-  globalThis.FinalizationRegistry = class {
-    register() {}
-    unregister() {}
-  };
-}
+// Setup required polyfills for GHC WASM runtime
+setupPolyfills();
 
 // =============================================================================
 // Loader Options

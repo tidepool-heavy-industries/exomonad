@@ -13,7 +13,6 @@ module Tidepool.Wasm.Registry.Default
     -- * Individual entries (re-exported)
   , testGraphEntry
   , exampleGraphEntry
-  , habiticaGraphEntry
   ) where
 
 import Data.Text (Text)
@@ -21,7 +20,6 @@ import Tidepool.Wasm.Registry (setRegistry)
 import Tidepool.Wasm.Registry.Types (GraphEntry)
 import Tidepool.Wasm.Registry.TestGraph (testGraphEntry)
 import Tidepool.Wasm.Registry.ExampleGraph (exampleGraphEntry)
-import Tidepool.Wasm.Registry.HabiticaGraph (habiticaGraphEntry)
 
 
 -- | All default graph entries.
@@ -29,7 +27,6 @@ defaultGraphEntries :: [(Text, GraphEntry)]
 defaultGraphEntries =
   [ ("test", testGraphEntry)
   , ("example", exampleGraphEntry)
-  , ("habitica", habiticaGraphEntry)
   ]
 
 

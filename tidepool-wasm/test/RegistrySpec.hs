@@ -30,7 +30,6 @@ spec = do
           let ids = Map.keys registry
           ids `shouldContain` ["test"]
           ids `shouldContain` ["example"]
-          ids `shouldContain` ["habitica"]
 
     describe "initialize" $ do
       it "returns error for unknown graph" $ do
@@ -89,12 +88,6 @@ spec = do
         -- Graph ID is single source of truth for name
         result `shouldSatisfy` T.isInfixOf "\"name\":\"test\""
         result `shouldSatisfy` T.isInfixOf "compute"
-
-      it "returns info for habitica graph" $ do
-        result <- getGraphInfo "habitica"
-        -- Graph ID is single source of truth for name
-        result `shouldSatisfy` T.isInfixOf "\"name\":\"habitica\""
-        result `shouldSatisfy` T.isInfixOf "extractTask"
 
       it "returns error for unknown graph" $ do
         result <- getGraphInfo "nonexistent"

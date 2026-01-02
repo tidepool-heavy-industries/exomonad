@@ -6,7 +6,6 @@ import qualified WireTypesSpec
 import qualified TestGraphSpec
 import qualified ExampleGraphSpec
 import qualified LlmTestGraphSpec
-import qualified HabiticaRoutingGraphSpec
 import qualified ProtocolConformanceSpec
 import qualified ProtocolPropertySpec
 import qualified RunnerSpec
@@ -24,7 +23,6 @@ main = hspec $ do
     describe "TestGraph" TestGraphSpec.spec
     describe "ExampleGraph" ExampleGraphSpec.spec
     describe "LlmTestGraph" LlmTestGraphSpec.spec
-    describe "HabiticaRoutingGraph" HabiticaRoutingGraphSpec.spec
     describe "ProtocolConformance" ProtocolConformanceSpec.spec
     describe "ProtocolProperty" ProtocolPropertySpec.spec
     describe "Runner" RunnerSpec.spec

@@ -47,7 +47,6 @@ library
         Tidepool.Graph.Docs
         Tidepool.Question
         Tidepool.Template.DependencyTree
-        Delta.Agent
     build-depends:
         base >= 4.17 && < 5,
         freer-simple >= 1.2 && < 2,
