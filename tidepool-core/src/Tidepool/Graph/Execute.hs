@@ -454,10 +454,42 @@ instance {-# OVERLAPPABLE #-} TypeError
 
 
 -- ════════════════════════════════════════════════════════════════════════════
--- NAMED NODE INSTANCE
+-- NAMED NODE INSTANCES
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Named node target: call the handler via 'CallHandler' and recurse.
+-- | Single named node target: call the handler and recurse.
+--
+-- When there's only one target @To (name :: Symbol) payload@ and no rest:
+--
+-- 1. Use 'HasField' to get the handler from the graph record
+-- 2. Use 'CallHandler' to invoke the handler (works for both Logic and LLM nodes)
+-- 3. Recursively dispatch on the handler's returned 'GotoChoice'
+--
+-- This instance allows intermediate handlers to return single-target GotoChoice
+-- without requiring Exit or multiple targets in the type.
+--
+-- Example:
+--
+-- @
+-- fetchHandler :: Input -> Eff es (GotoChoice '[To "process" Data])
+-- fetchHandler input = do
+--   data <- fetchData input
+--   pure $ gotoChoice \@"process" data
+-- @
+instance {-# OVERLAPPING #-}
+  ( KnownSymbol name
+  , HasField name (graph (AsHandler es)) handler
+  , CallHandler handler payload es handlerTargets
+  , DispatchGoto graph handlerTargets es exitType
+  ) => DispatchGoto graph '[To (name :: Symbol) payload] es exitType where
+
+  dispatchGoto graph (GotoChoice (Here payload)) = do
+    let handler = getField @name graph
+    nextChoice <- callHandler handler payload
+    dispatchGoto graph nextChoice
+
+
+-- | Named node target with additional targets: call the handler via 'CallHandler' and recurse.
 --
 -- When the first target is @To (name :: Symbol) payload@:
 --
@@ -467,7 +499,7 @@ instance {-# OVERLAPPABLE #-} TypeError
 --
 -- The @handler@ type is inferred from the graph record, and 'CallHandler'
 -- determines how to invoke it based on whether it's a function or LLMHandler.
-instance
+instance {-# OVERLAPPABLE #-}
   ( KnownSymbol name
   , HasField name (graph (AsHandler es)) handler
   , CallHandler handler payload es handlerTargets

@@ -25,8 +25,7 @@ module LLMNodeExecuteSpec (spec) where
 
 import Data.Aeson (FromJSON, ToJSON, Value, object, (.=))
 import Data.Proxy (Proxy(..))
-import Effectful (Eff, runPureEff, type (:>))
-import Effectful.Dispatch.Dynamic (interpret)
+import Control.Monad.Freer (Eff, run, Member, interpret)
 import GHC.Generics (Generic)
 import Test.Hspec
 
@@ -84,8 +83,8 @@ logicHandlers = LogicGraph
 -- | Run LLM effect with a mock that returns a fixed value
 runMockLLM :: Value -> Eff '[LLM] a -> a
 runMockLLM fixedOutput =
-  runPureEff
-  . interpret (\_ (RunTurnOp _sysPmt _userContent _schema _tools) ->
+  run
+  . interpret (\(RunTurnOp _sysPmt _userContent _schema _tools) ->
       pure $ TurnCompleted TurnResult
         { trOutput = fixedOutput
         , trToolsInvoked = []
@@ -116,23 +115,23 @@ spec = do
       let handler :: Int -> Eff '[] (GotoChoice '[To Exit Int])
           handler n = pure $ gotoExit (n + 1)
 
-      let result = runPureEff $ callHandler handler (5 :: Int)
+      let result = run $ callHandler handler (5 :: Int)
       extractExitValue result `shouldBe` 6
 
     it "works with graph field handlers and returns correct value" $ do
       let handler = lgCompute logicHandlers
-      let result = runPureEff $ callHandler handler (10 :: Int)
+      let result = run $ callHandler handler (10 :: Int)
       extractExitValue result `shouldBe` 11
 
     it "handles zero correctly" $ do
       let handler = lgCompute logicHandlers
-      let result = runPureEff $ callHandler handler (0 :: Int)
+      let result = run $ callHandler handler (0 :: Int)
       extractExitValue result `shouldBe` 1
 
     it "handles negative numbers" $ do
       let handler :: Int -> Eff '[] (GotoChoice '[To Exit Int])
           handler n = pure $ gotoExit (n * 2)
-      let result = runPureEff $ callHandler handler (-5 :: Int)
+      let result = run $ callHandler handler (-5 :: Int)
       extractExitValue result `shouldBe` (-10)
 
   describe "DispatchGoto exit handling" $ do
@@ -175,10 +174,10 @@ spec = do
       let handler :: Int -> Eff '[] (GotoChoice '[To Exit Int])
           handler = lgCompute logicHandlers
       -- Verify both type and behavior
-      let result = runPureEff $ handler 99
+      let result = run $ handler 99
       extractExitValue result `shouldBe` 100
 
     it "Graph record compiles with handlers" $ do
       -- Verify the full graph record compiles and handlers work
-      let computeResult = runPureEff $ (lgCompute logicHandlers) 5
+      let computeResult = run $ (lgCompute logicHandlers) 5
       extractExitValue computeResult `shouldBe` 6

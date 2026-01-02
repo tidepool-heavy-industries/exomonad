@@ -17,7 +17,7 @@ import Data.List (isInfixOf)
 import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
-import Effectful
+import Control.Monad.Freer (run)
 
 import Tidepool.Graph.Memory
 
@@ -124,7 +124,7 @@ spec = do
     it "initializes from empty store with default value" $ do
       let defaultMem = ExploreMem { urlsVisited = [], searchCount = 0 }
           action = getMem @ExploreMem
-          (result, _) = runPureEff $ runMemoryScoped "test" defaultMem emptyMemoryStore action
+          (result, _) = run $ runMemoryScoped "test" defaultMem emptyMemoryStore action
       result `shouldBe` defaultMem
 
     it "loads existing scope value" $ do
@@ -132,7 +132,7 @@ spec = do
           store = setScope @ExploreMem "test" mem emptyMemoryStore
           defaultMem = ExploreMem { urlsVisited = [], searchCount = 0 }
           action = getMem @ExploreMem
-          (result, _) = runPureEff $ runMemoryScoped "test" defaultMem store action
+          (result, _) = run $ runMemoryScoped "test" defaultMem store action
       result `shouldBe` mem
 
     it "persists updates to store" $ do
@@ -140,7 +140,7 @@ spec = do
           action = do
             updateMem @ExploreMem $ \m -> m { searchCount = m.searchCount + 1 }
             getMem @ExploreMem
-          (result, finalStore) = runPureEff $ runMemoryScoped "test" defaultMem emptyMemoryStore action
+          (result, finalStore) = run $ runMemoryScoped "test" defaultMem emptyMemoryStore action
       result.searchCount `shouldBe` 1
       -- Verify it's actually in the store
       case getScope @ExploreMem "test" finalStore of
@@ -155,9 +155,9 @@ spec = do
                 $ emptyMemoryStore
           defaultMem = ExploreMem { urlsVisited = [], searchCount = 0 }
           -- Read from node1
-          (result1, _) = runPureEff $ runMemoryScoped "node1" defaultMem store (getMem @ExploreMem)
+          (result1, _) = run $ runMemoryScoped "node1" defaultMem store (getMem @ExploreMem)
           -- Read from node2
-          (result2, _) = runPureEff $ runMemoryScoped "node2" defaultMem store (getMem @ExploreMem)
+          (result2, _) = run $ runMemoryScoped "node2" defaultMem store (getMem @ExploreMem)
       result1 `shouldBe` mem1
       result2 `shouldBe` mem2
 

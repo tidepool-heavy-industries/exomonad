@@ -10,13 +10,13 @@ module GotoChoiceSpec (spec) where
 
 import Test.Hspec
 import Tidepool.Graph.Goto
-  ( OneOf(..)
-  , To
-  , GotoChoice(..)
+  ( To
+  , GotoChoice
   , gotoChoice
   , gotoExit
   , gotoSelf
   )
+import Tidepool.Graph.Goto.Internal (OneOf(..), GotoChoice(..))  -- For test assertions
 import Tidepool.Graph.Types (Exit, Self)
 
 -- | Simple target list for basic tests.
