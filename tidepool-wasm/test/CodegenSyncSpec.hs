@@ -19,24 +19,30 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Encoding (encodeUtf8)
 import Data.List (sort)
+import qualified Data.Map.Strict as Map
 
 import Tidepool.Wasm.Registry
-  ( graphIds
+  ( getRegistry
   , getGraphInfo
   , registryGraphSpecs
   )
+import Tidepool.Wasm.Registry.Default (setupDefaultRegistry)
 import Tidepool.Generated.GraphSpecs (GraphSpec(..))
 
 
 spec :: Spec
-spec = describe "Codegen Sync" $ do
+spec = beforeAll_ setupDefaultRegistry $ describe "Codegen Sync" $ do
   describe "Registry provides unified GraphSpecs" $ do
     it "registryGraphSpecs has entries for all graphIds" $ do
-      let specIds = map (\s -> s.gsId) registryGraphSpecs
+      specs <- registryGraphSpecs
+      registry <- getRegistry
+      let specIds = map (\s -> s.gsId) specs
+          graphIds = Map.keys registry
       sort specIds `shouldBe` sort graphIds
 
     it "graph IDs are unique" $ do
-      let ids = map (\s -> s.gsId) registryGraphSpecs
+      specs <- registryGraphSpecs
+      let ids = map (\s -> s.gsId) specs
           nub [] = []
           nub (x:xs) = x : nub (filter (/= x) xs)
       length ids `shouldBe` length (nub ids)
@@ -44,25 +50,26 @@ spec = describe "Codegen Sync" $ do
   describe "Unified FFI matches Registry specs" $ do
     it "test graph info matches spec" $ do
       json <- getGraphInfo "test"
-      let spec = findSpec "test"
+      spec <- findSpec "test"
       verifyGraphInfo json spec
 
     it "example graph info matches spec" $ do
       json <- getGraphInfo "example"
-      let spec = findSpec "example"
+      spec <- findSpec "example"
       verifyGraphInfo json spec
 
     it "habitica graph info matches spec" $ do
       json <- getGraphInfo "habitica"
-      let spec = findSpec "habitica"
+      spec <- findSpec "habitica"
       verifyGraphInfo json spec
 
 
 -- | Find a GraphSpec by ID.
-findSpec :: Text -> GraphSpec
-findSpec gid =
-  case filter (\s -> s.gsId == gid) registryGraphSpecs of
-    [s] -> s
+findSpec :: Text -> IO GraphSpec
+findSpec gid = do
+  specs <- registryGraphSpecs
+  case filter (\s -> s.gsId == gid) specs of
+    [s] -> pure s
     _ -> error $ "No spec found for: " ++ T.unpack gid
 
 

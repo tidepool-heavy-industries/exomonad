@@ -26,10 +26,11 @@ import Tidepool.Wasm.Registry
   , getGraphState
   , resetSession
   )
+import Tidepool.Wasm.Registry.Default (setupDefaultRegistry)
 
 
 spec :: Spec
-spec = do
+spec = beforeAll_ setupDefaultRegistry $ do
   describe "FFI Integration" $ do
     initializeSpec
     stepSpec

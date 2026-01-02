@@ -13,18 +13,24 @@ import Tidepool.Wasm.Registry
   , getGraphInfo
   , getGraphState
   , resetSession
-  , graphIds
+  , getRegistry
   )
+import Tidepool.Wasm.Registry.Default (setupDefaultRegistry)
+import qualified Data.Map.Strict as Map
 
 
 spec :: Spec
 spec = do
-  describe "Unified Registry" $ do
-    describe "graphIds" $ do
-      it "contains expected graph IDs" $ do
-        graphIds `shouldContain` ["test"]
-        graphIds `shouldContain` ["example"]
-        graphIds `shouldContain` ["habitica"]
+  -- Setup default registry before all tests
+  beforeAll_ setupDefaultRegistry $ do
+    describe "Unified Registry" $ do
+      describe "getRegistry" $ do
+        it "contains expected graph IDs" $ do
+          registry <- getRegistry
+          let ids = Map.keys registry
+          ids `shouldContain` ["test"]
+          ids `shouldContain` ["example"]
+          ids `shouldContain` ["habitica"]
 
     describe "initialize" $ do
       it "returns error for unknown graph" $ do

@@ -1,30 +1,33 @@
 {-# LANGUAGE OverloadedStrings #-}
 
--- | Unified Graph Registry - Single source of truth for all graphs.
+-- | Unified Graph Registry - configurable at init time.
 --
 -- This module provides:
 --
 -- 1. 'ActiveSession' - Runtime state for the currently executing graph
 -- 2. 'GraphEntry' - How to create sessions for a graph
--- 3. 'graphRegistry' - Map from graphId to GraphEntry
+-- 3. 'setRegistry' - Configure which graphs are available
 -- 4. Unified FFI: 4 exports that take graphId as parameter
 --
--- = Adding a New Graph
+-- = Usage (in your reactor)
 --
--- 1. Create your graph module (e.g., NewGraph.hs)
--- 2. Create a registry entry in Registry/NewGraph.hs
--- 3. Add entry to 'graphRegistry' in this file
--- 4. Regenerate TypeScript: @just regenerate@
+-- @
+-- import Tidepool.Wasm.Registry (setRegistry)
+-- import MyApp.Graphs (myGraphEntry)
 --
--- That's it! No more editing Ffi.hs, cabal linker flags, or GraphSpecs.hs.
+-- initRegistry :: IO ()
+-- initRegistry = setRegistry [("mygraph", myGraphEntry)]
+-- @
+--
+-- Call 'setRegistry' once at init before any FFI calls.
 module Tidepool.Wasm.Registry
   ( -- * Types (re-exported from Registry.Types)
     ActiveSession(..)
   , GraphEntry(..)
 
-    -- * Registry
-  , graphRegistry
-  , graphIds
+    -- * Registry Configuration
+  , setRegistry
+  , getRegistry
 
     -- * Graph Specs (for codegen)
   , registryGraphSpecs
@@ -37,6 +40,7 @@ module Tidepool.Wasm.Registry
 
     -- * Testing
   , resetSession
+  , resetRegistry
   ) where
 
 import Data.Aeson (Value(..), encode, eitherDecodeStrict)
@@ -60,38 +64,46 @@ import Tidepool.Wasm.WireTypes
 import Tidepool.Wasm.Ffi.Types (encodeStepOutput, mkErrorOutput)
 import Tidepool.Generated.Codegen (GraphSpec(..))
 
--- Types and graph entries
+-- Types
 import Tidepool.Wasm.Registry.Types (ActiveSession(..), GraphEntry(..))
-import Tidepool.Wasm.Registry.TestGraph (testGraphEntry)
-import Tidepool.Wasm.Registry.ExampleGraph (exampleGraphEntry)
-import Tidepool.Wasm.Registry.HabiticaGraph (habiticaGraphEntry)
 
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- REGISTRY
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | The graph registry - single source of truth.
---
--- To add a new graph: add one line here, regenerate TypeScript.
-graphRegistry :: Map Text GraphEntry
-graphRegistry = Map.fromList
-  [ ("test", testGraphEntry)
-  , ("example", exampleGraphEntry)
-  , ("habitica", habiticaGraphEntry)
-  ]
+-- | Global registry IORef. Set by application via 'setRegistry'.
+{-# NOINLINE registryRef #-}
+registryRef :: IORef (Map Text GraphEntry)
+registryRef = unsafePerformIO $ newIORef Map.empty
 
--- | List of valid graph IDs (for error messages).
-graphIds :: [Text]
-graphIds = Map.keys graphRegistry
+-- | Set the graph registry. Call once at init before any FFI calls.
+--
+-- @
+-- setRegistry [("habitica", habiticaGraphEntry), ("test", testGraphEntry)]
+-- @
+setRegistry :: [(Text, GraphEntry)] -> IO ()
+setRegistry entries = writeIORef registryRef (Map.fromList entries)
+
+-- | Get current registry (for FFI functions).
+getRegistry :: IO (Map Text GraphEntry)
+getRegistry = readIORef registryRef
+
+-- | Reset registry (for testing).
+resetRegistry :: IO ()
+resetRegistry = writeIORef registryRef Map.empty
+
+-- | Get list of valid graph IDs (for error messages).
+graphIds :: IO [Text]
+graphIds = Map.keys <$> getRegistry
 
 
 -- | Derive GraphSpecs from registry entries (for codegen).
 --
 -- This is the SINGLE SOURCE OF TRUTH for graph metadata.
 -- GraphSpecs.hs should import and re-export this.
-registryGraphSpecs :: [GraphSpec]
-registryGraphSpecs = map entryToSpec $ Map.toList graphRegistry
+registryGraphSpecs :: IO [GraphSpec]
+registryGraphSpecs = map entryToSpec . Map.toList <$> getRegistry
   where
     entryToSpec :: (Text, GraphEntry) -> GraphSpec
     entryToSpec (gid, entry) = GraphSpec
@@ -151,9 +163,11 @@ initialize graphId inputJson = do
   -- Always clear previous session (atomic, prevents state leakage)
   writeIORef activeSession Nothing
 
-  case Map.lookup graphId graphRegistry of
+  registry <- getRegistry
+  validIds <- graphIds
+  case Map.lookup graphId registry of
     Nothing -> pure $ encodeStepOutput $ mkErrorOutput $
-      "Unknown graph: " <> graphId <> ". Valid graphs: " <> T.intercalate ", " graphIds
+      "Unknown graph: " <> graphId <> ". Valid graphs: " <> T.intercalate ", " validIds
 
     Just entry -> do
       case eitherDecodeStrict (encodeUtf8 inputJson) of
@@ -209,10 +223,12 @@ step graphId resultJson = do
 -- Returns static graph metadata (nodes, edges). Does NOT require
 -- an active session - can be called anytime.
 getGraphInfo :: Text -> IO Text
-getGraphInfo graphId =
-  case Map.lookup graphId graphRegistry of
+getGraphInfo graphId = do
+  registry <- getRegistry
+  validIds <- graphIds
+  case Map.lookup graphId registry of
     Nothing -> pure $ encodeStepOutput $ mkErrorOutput $
-      "Unknown graph: " <> graphId <> ". Valid graphs: " <> T.intercalate ", " graphIds
+      "Unknown graph: " <> graphId <> ". Valid graphs: " <> T.intercalate ", " validIds
     Just entry ->
       pure $ TL.toStrict $ TLE.decodeUtf8 $ encode entry.geGraphInfo
 
