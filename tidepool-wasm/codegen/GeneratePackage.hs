@@ -22,7 +22,6 @@ module Main where
 
 import Control.Monad (forM_)
 import Data.Text (Text)
-import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import System.Directory (createDirectoryIfMissing, doesFileExist, copyFile)
 import System.Environment (getArgs)
@@ -34,6 +33,7 @@ import Tidepool.Generated.Codegen
   , generateExportsTs
   , generateDispatcherTs
   , generateRoutingTs
+  , generateHandlersTs
   , generateIndexTs
   , generatePackageJson
   , generateTsConfig
@@ -107,6 +107,9 @@ generatePackage outputDir = do
 
   putStrLn "  Generating routing.ts..."
   TIO.writeFile (outputDir </> "src" </> "routing.ts") (generateRoutingTs allEffectSpecs)
+
+  putStrLn "  Generating handlers.generated.ts..."
+  TIO.writeFile (outputDir </> "src" </> "handlers.generated.ts") (generateHandlersTs allEffectSpecs)
 
   putStrLn "  Generating index.ts..."
   TIO.writeFile (outputDir </> "src" </> "index.ts") generateIndexTs

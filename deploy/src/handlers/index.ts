@@ -2,18 +2,15 @@
  * Effect handler registry.
  *
  * Central dispatch for executing effects from WASM.
- * Each effect type maps to a handler function.
+ * Uses generated dispatcher from tidepool-generated.
  */
 
 import type {
   SerializableEffect,
   EffectResult,
-  LlmCompleteEffect,
-  LogInfoEffect,
-  LogErrorEffect,
-  HabiticaEffect,
+  InternalEffectHandlers,
 } from "tidepool-generated";
-import { errorResult } from "tidepool-generated";
+import { dispatchInternalEffect, errorResult, isYieldedEffect } from "tidepool-generated";
 
 import { handleLogInfo, handleLogError } from "./log.js";
 import { handleLlmComplete, type LlmEnv } from "./llm.js";
@@ -46,9 +43,27 @@ export interface Env extends LlmEnv {
 }
 
 /**
+ * Handler registry - implementations for each internal effect type.
+ * Wired to the generated InternalEffectHandlers interface.
+ */
+const internalHandlers: InternalEffectHandlers<Env> = {
+  LogInfo: (effect, _env) => handleLogInfo(effect),
+  LogError: (effect, _env) => handleLogError(effect),
+  LlmComplete: (effect, env) => handleLlmComplete(effect, env),
+  Habitica: (effect, env) => {
+    const config: HabiticaConfig = {
+      userId: env.HABITICA_USER_ID,
+      apiToken: env.HABITICA_API_TOKEN,
+    };
+    return handleHabitica(effect, config);
+  },
+};
+
+/**
  * Execute an effect and return the result.
  *
  * Dispatches to the appropriate handler based on effect type.
+ * Uses generated dispatcher for internal effects.
  * Wraps all handlers in try/catch for consistent error handling.
  */
 export async function executeEffect(
@@ -56,38 +71,16 @@ export async function executeEffect(
   env: Env
 ): Promise<EffectResult> {
   try {
-    switch (effect.type) {
-      case "LogInfo":
-        return await handleLogInfo(effect as LogInfoEffect);
-
-      case "LogError":
-        return await handleLogError(effect as LogErrorEffect);
-
-      case "LlmComplete":
-        return await handleLlmComplete(effect as LlmCompleteEffect, env);
-
-      case "Habitica": {
-        const config: HabiticaConfig = {
-          userId: env.HABITICA_USER_ID,
-          apiToken: env.HABITICA_API_TOKEN,
-        };
-        return await handleHabitica(effect as HabiticaEffect, config);
-      }
-
-      // Telegram effects require TelegramDO context (message queue, chat ID)
-      // They should be routed to TelegramDO via /effect endpoint, not executed here
-      case "telegram_send":
-      case "telegram_receive":
-      case "telegram_try_receive":
-      case "TelegramConfirm":
-        return errorResult(
-          `Telegram effect "${effect.type}" requires TelegramDO context. ` +
-            "Route this effect to TelegramDO via the /effect endpoint."
-        );
-
-      default:
-        return errorResult(`Unknown effect type: ${(effect as { type: string }).type}`);
+    // Yielded effects require caller context (e.g., TelegramDO for Telegram effects)
+    if (isYieldedEffect(effect)) {
+      return errorResult(
+        `Yielded effect "${effect.type}" requires caller context. ` +
+          "This effect should be yielded to the caller, not executed internally."
+      );
     }
+
+    // Use generated dispatcher for internal effects
+    return await dispatchInternalEffect(effect, internalHandlers, env);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return errorResult(`Effect execution failed: ${message}`);

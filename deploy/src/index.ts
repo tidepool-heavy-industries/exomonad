@@ -13,8 +13,9 @@ import type {
   ServerMessage,
   SessionState,
 } from "tidepool-generated";
-import { SESSION_TIMEOUT_MS, isYieldedEffect } from "tidepool-generated";
+import { SESSION_TIMEOUT_MS } from "tidepool-generated";
 import { executeEffect, type Env as HandlersEnv } from "./handlers/index.js";
+import { runLoop } from "./loop.js";
 import { routeWebhook, type WebhookEnv } from "./telegram/webhook.js";
 
 // Re-export TelegramDO for Cloudflare Workers
@@ -204,23 +205,30 @@ export class StateMachineDO extends DurableObject<Env> {
     const sessionId = this.sessionId!;
     const sessionKey = `session:${sessionId}`;
 
-    while (!output.done && output.effect) {
-      const effect = output.effect;
+    // Use the shared loop helper
+    const result = await runLoop(
+      (effectResult) => this.machine!.step(graphId as import("./loader.js").GraphId, effectResult),
+      output,
+      (effect) => {
+        const promise = executeEffect(effect, this.env);
+        promise.then((r) => {
+          console.log(`[StateMachineDO] effect ${effect.type}: ${r.type === "error" ? `error: ${r.message}` : "ok"}`);
+        });
+        return promise;
+      }
+    );
 
-      // Check if this is a yielded effect (e.g., Telegram) - return to caller
-      if (isYieldedEffect(effect)) {
-        // Save session state for resume
+    switch (result.type) {
+      case "yield":
+      case "error_yield": {
+        // Save session state for resume (error_yield shouldn't happen in HTTP mode)
         const session: SessionState = {
           graphId,
-          // Persist the current WASM machine state so we can restore after hibernation
           machineState:
             this.machine && "serialize" in this.machine
-              ? // `serialize` is provided by the GraphMachine implementation and
-                // must return a JSON-serializable snapshot suitable for Durable Object storage.
-                // We use a runtime check to avoid issues if some implementations lack it.
-                (this.machine as any).serialize()
+              ? (this.machine as { serialize: () => unknown }).serialize()
               : null,
-          pendingEffect: effect,
+          pendingEffect: result.effect,
           lastActivity: Date.now(),
         };
         await this.ctx.storage.put(sessionKey, session);
@@ -228,35 +236,25 @@ export class StateMachineDO extends DurableObject<Env> {
 
         return Response.json({
           type: "yield",
-          effect,
+          effect: result.effect,
           sessionId,
         });
       }
 
-      // Handle non-Telegram effects internally
-      const result = await executeEffect(effect, this.env);
-      console.log(`[StateMachineDO] effect ${effect.type}: ${result.type === "error" ? `error: ${result.message}` : "ok"}`);
+      case "done":
+        await this.ctx.storage.delete(sessionKey);
+        return Response.json({
+          type: "done",
+          result: result.result,
+        });
 
-      // Continue even on error - let the graph decide how to handle it
-
-      // Step with the result
-      output = await this.machine!.step(graphId as import("./loader.js").GraphId, result);
+      case "error":
+        await this.ctx.storage.delete(sessionKey);
+        return Response.json({
+          type: "error",
+          message: result.error,
+        });
     }
-
-    // Graph completed - clean up
-    await this.ctx.storage.delete(sessionKey);
-
-    if (output.graphState.phase.type === "failed") {
-      return Response.json({
-        type: "error",
-        message: output.graphState.phase.error,
-      });
-    }
-
-    return Response.json({
-      type: "done",
-      result: output.stepResult,
-    });
   }
 
   /**
@@ -485,31 +483,31 @@ export class StateMachineDO extends DurableObject<Env> {
   ): Promise<void> {
     const sessionKey = `session:${sessionId}`;
 
-    // Effect interpretation loop
-    while (!output.done && output.effect) {
-      const effect = output.effect;
+    // Use the shared loop helper with WS-specific options
+    const result = await runLoop(
+      (effectResult) => this.machine!.step(graphId as import("./loader.js").GraphId, effectResult),
+      output,
+      (effect) => executeEffect(effect, this.env),
+      {
+        onProgress: (effect) => {
+          this.send(ws, {
+            type: "progress",
+            effect,
+            status: "executing",
+          });
+        },
+        yieldOnError: true, // WS mode yields to client on error for retry
+      }
+    );
 
-      // Check if this effect should be yielded to client
-      // For now, all effects are handled server-side
-      // Future: add client-side effect types here
-
-      // Send progress update
-      this.send(ws, {
-        type: "progress",
-        effect,
-        status: "executing",
-      });
-
-      // Execute the effect server-side using handler registry
-      const result = await executeEffect(effect, this.env);
-
-      // Check if effect failed - yield to client for retry/handling
-      if (result.type === "error") {
-        // Save session state for potential retry
+    switch (result.type) {
+      case "yield":
+      case "error_yield": {
+        // Save session state for resume/retry
         const session: SessionState = {
           graphId,
           machineState: null, // WASM state is in memory
-          pendingEffect: effect,
+          pendingEffect: result.effect,
           lastActivity: Date.now(),
         };
         await this.ctx.storage.put(sessionKey, session);
@@ -517,31 +515,28 @@ export class StateMachineDO extends DurableObject<Env> {
 
         this.send(ws, {
           type: "yield",
-          effect,
+          effect: result.effect,
           sessionId,
         });
         return; // Wait for client to send resume
       }
 
-      // Step with the result
-      output = await this.machine!.step(graphId as import("./loader.js").GraphId, result);
-    }
+      case "done":
+        await this.ctx.storage.delete(sessionKey);
+        this.send(ws, {
+          type: "done",
+          result: result.result,
+        });
+        return;
 
-    // Graph completed - clean up session state (but keep sessionId for potential new graph)
-    await this.ctx.storage.delete(sessionKey);
-
-    // Check for completion or failure
-    if (output.graphState.phase.type === "failed") {
-      this.send(ws, {
-        type: "error",
-        message: output.graphState.phase.error,
-        recoverable: false,
-      });
-    } else {
-      this.send(ws, {
-        type: "done",
-        result: output.stepResult,
-      });
+      case "error":
+        await this.ctx.storage.delete(sessionKey);
+        this.send(ws, {
+          type: "error",
+          message: result.error,
+          recoverable: false,
+        });
+        return;
     }
   }
 
