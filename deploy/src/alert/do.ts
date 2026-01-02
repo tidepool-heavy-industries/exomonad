@@ -17,6 +17,7 @@
  */
 
 import { DurableObject } from "cloudflare:workers";
+import { z } from "zod";
 import type { GrafanaAlert } from "./types.js";
 import { extractChatId, toAlertInput } from "./types.js";
 
@@ -32,13 +33,35 @@ export interface AlertDOEnv {
   STATE_MACHINE: DurableObjectNamespace;
 }
 
+// =============================================================================
+// Zod Schemas - Runtime validation at storage boundary
+// =============================================================================
+
 /**
- * Alert state stored in DO storage.
+ * Alert state schema with defaults for missing fields.
+ *
+ * This is the source of truth for state shape. When loaded from storage:
+ * - Missing fields get defaults (schema evolution)
+ * - Invalid data throws (corruption detection)
+ * - Type safety is enforced at runtime, not just compile time
  */
-interface AlertState {
-  fingerprint: string;
-  lastFiredAt: number;
-  lastStatus: "firing" | "resolved";
+const AlertStateSchema = z.object({
+  fingerprint: z.string().default(""),
+  lastFiredAt: z.number().default(0),
+  lastStatus: z.enum(["firing", "resolved"]).default("resolved"),
+});
+
+type AlertState = z.infer<typeof AlertStateSchema>;
+
+/**
+ * Parse storage data into validated state.
+ * Returns default state if nothing stored, validates and migrates if stored.
+ */
+function parseState(stored: unknown): AlertState {
+  if (stored === undefined || stored === null) {
+    return AlertStateSchema.parse({});
+  }
+  return AlertStateSchema.parse(stored);
 }
 
 /**
@@ -51,13 +74,14 @@ export class AlertDO extends DurableObject<AlertDOEnv> {
 
   /**
    * Load state from storage.
+   *
+   * Always returns a valid AlertState (with defaults if nothing stored).
+   * Uses Zod schema for validation and schema evolution.
    */
-  private async loadState(): Promise<AlertState | null> {
+  private async loadState(): Promise<AlertState> {
     if (this.state) return this.state;
-    const stored = await this.ctx.storage.get<AlertState>("state");
-    if (stored) {
-      this.state = stored;
-    }
+    const stored = await this.ctx.storage.get("state");
+    this.state = parseState(stored);
     return this.state;
   }
 
@@ -89,12 +113,10 @@ export class AlertDO extends DurableObject<AlertDOEnv> {
       case "/status": {
         const state = await this.loadState();
         return Response.json({
-          fingerprint: state?.fingerprint ?? null,
-          lastFiredAt: state?.lastFiredAt ?? null,
-          lastStatus: state?.lastStatus ?? null,
-          cooldownRemaining: state
-            ? Math.max(0, COOLDOWN_MS - (Date.now() - state.lastFiredAt))
-            : 0,
+          fingerprint: state.fingerprint,
+          lastFiredAt: state.lastFiredAt,
+          lastStatus: state.lastStatus,
+          cooldownRemaining: Math.max(0, COOLDOWN_MS - (Date.now() - state.lastFiredAt)),
         });
       }
 
@@ -108,6 +130,7 @@ export class AlertDO extends DurableObject<AlertDOEnv> {
    *
    * - Resolved alerts always pass through (to notify resolution)
    * - Firing alerts are deduplicated with 15-minute cooldown
+   * - Cooldown applies regardless of lastStatus to rate-limit alert-resolve-alert loops
    */
   private async handleAlert(alert: GrafanaAlert): Promise<Response> {
     const now = Date.now();
@@ -124,16 +147,17 @@ export class AlertDO extends DurableObject<AlertDOEnv> {
       return new Response("Missing chat_id", { status: 400 });
     }
 
-    // Resolved alerts always pass through and reset the cooldown timer.
-    // This ensures the next firing alert isn't blocked by a stale timestamp.
+    // Resolved alerts always pass through (to notify resolution).
+    // We preserve lastFiredAt to maintain cooldown for subsequent firing alerts.
     if (alert.status === "resolved") {
-      console.log(`[AlertDO] Resolved alert, passing through and resetting cooldown`);
+      console.log(`[AlertDO] Resolved alert, passing through`);
       try {
         await this.routeToGraph(alert, chatId);
         // Only update state after successful routing
+        // Keep lastFiredAt to rate-limit alert-resolve-alert loops
         this.state = {
           fingerprint: alert.fingerprint,
-          lastFiredAt: 0, // Reset so next firing alert isn't incorrectly blocked
+          lastFiredAt: state.lastFiredAt,
           lastStatus: "resolved",
         };
         await this.saveState();
@@ -144,19 +168,19 @@ export class AlertDO extends DurableObject<AlertDOEnv> {
       }
     }
 
-    // Check cooldown for firing alerts
-    if (state && state.lastStatus === "firing") {
-      const elapsed = now - state.lastFiredAt;
-      if (elapsed < COOLDOWN_MS) {
-        const remaining = Math.ceil((COOLDOWN_MS - elapsed) / 1000);
-        console.log(
-          `[AlertDO] Alert in cooldown, ${remaining}s remaining, skipping`
-        );
-        return Response.json({
-          status: "deduplicated",
-          cooldownRemaining: remaining,
-        });
-      }
+    // Check cooldown for firing alerts (regardless of lastStatus).
+    // This rate-limits alert-resolve-alert loops where the same alert
+    // fires, resolves, and fires again rapidly.
+    const elapsed = now - state.lastFiredAt;
+    if (state.lastFiredAt > 0 && elapsed < COOLDOWN_MS) {
+      const remaining = Math.ceil((COOLDOWN_MS - elapsed) / 1000);
+      console.log(
+        `[AlertDO] Alert in cooldown, ${remaining}s remaining, skipping`
+      );
+      return Response.json({
+        status: "deduplicated",
+        cooldownRemaining: remaining,
+      });
     }
 
     // Route alert, then update state only on success
