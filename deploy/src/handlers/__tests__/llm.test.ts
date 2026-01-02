@@ -4,7 +4,7 @@
 
 import { describe, it, expect, vi } from "vitest";
 import { handleLlmComplete, type LlmEnv } from "../llm.js";
-import type { LlmCompleteEffect } from "tidepool-generated";
+import type { LlmCompleteEffect } from "tidepool-generated-ts";
 
 // Mock AI binding
 function createMockEnv(response: unknown): LlmEnv {

@@ -179,7 +179,7 @@ export function isAllowedUser(
 // IncomingMessage Conversion
 // =============================================================================
 
-import type { TelegramIncomingMessage } from "tidepool-generated";
+import type { TelegramIncomingMessage } from "tidepool-generated-ts";
 
 /**
  * Convert a TelegramUpdate to a TelegramIncomingMessage.

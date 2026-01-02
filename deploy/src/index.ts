@@ -12,8 +12,8 @@ import type {
   ClientMessage,
   ServerMessage,
   SessionState,
-} from "tidepool-generated";
-import { SESSION_TIMEOUT_MS } from "tidepool-generated";
+} from "tidepool-generated-ts";
+import { SESSION_TIMEOUT_MS } from "tidepool-generated-ts";
 import { executeEffect, type Env as HandlersEnv } from "./handlers/index.js";
 import { runLoop } from "./loop.js";
 import { routeWebhook, type WebhookEnv } from "./telegram/webhook.js";

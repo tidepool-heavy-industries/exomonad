@@ -9,8 +9,8 @@ import type {
   SerializableEffect,
   EffectResult,
   StepOutput,
-} from "tidepool-generated";
-import { isYieldedEffect } from "tidepool-generated";
+} from "tidepool-generated-ts";
+import { isYieldedEffect } from "tidepool-generated-ts";
 
 // =============================================================================
 // Loop Event Types

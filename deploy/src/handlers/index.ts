@@ -9,8 +9,8 @@ import type {
   SerializableEffect,
   EffectResult,
   InternalEffectHandlers,
-} from "tidepool-generated";
-import { dispatchInternalEffect, errorResult, isYieldedEffect } from "tidepool-generated";
+} from "tidepool-generated-ts";
+import { dispatchInternalEffect, errorResult, isYieldedEffect } from "tidepool-generated-ts";
 
 import { handleLogInfo, handleLogError } from "./log.js";
 import { handleLlmComplete, type LlmEnv } from "./llm.js";

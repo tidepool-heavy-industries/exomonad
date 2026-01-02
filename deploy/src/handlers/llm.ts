@@ -4,8 +4,8 @@
  * Handles LlmComplete effects by calling Cloudflare AI.
  */
 
-import type { LlmCompleteEffect, EffectResult } from "tidepool-generated";
-import { successResult, errorResult } from "tidepool-generated";
+import type { LlmCompleteEffect, EffectResult } from "tidepool-generated-ts";
+import { successResult, errorResult } from "tidepool-generated-ts";
 
 /**
  * Environment with AI binding.

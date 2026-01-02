@@ -1,19 +1,19 @@
 -- | WASM reactor entry point.
 --
 -- This module exists solely to produce a statically-linked WASM executable
--- that includes all the FFI exports from Tidepool.Wasm.Ffi.
+-- that includes all the FFI exports from the unified Registry.
 --
 -- When building a library for WASM, GHC produces a dynamically-linked .so
 -- that requires the GHC runtime to be loaded separately. By creating an
--- executable that imports the Ffi module, we get a self-contained WASM
+-- executable that imports the Ffi.Unified module, we get a self-contained WASM
 -- binary that can run standalone in Cloudflare Workers.
 --
 -- The -no-hs-main flag means main is never called - the foreign exports
--- (initialize, step, etc.) are the entry points.
+-- (initialize, step, getGraphInfo, getGraphState) are the entry points.
 module Main where
 
--- Import Ffi and Roundtrip to ensure the foreign exports are linked
-import Tidepool.Wasm.Ffi ()
+-- Import unified FFI and Roundtrip to ensure the foreign exports are linked
+import Tidepool.Wasm.Ffi.Unified ()
 import Tidepool.Wasm.Roundtrip ()
 
 -- Dummy main - never called when using -no-hs-main, but GHC requires it

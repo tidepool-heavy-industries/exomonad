@@ -5,7 +5,7 @@
  */
 
 import { WASI, File, OpenFile, ConsoleStdout } from "@bjorn3/browser_wasi_shim";
-import { createJsFFI, type WasmExports } from "tidepool-generated";
+import { createJsFFI, type WasmExports } from "tidepool-generated-ts";
 import type {
   StepOutput,
   EffectResult,
@@ -13,8 +13,8 @@ import type {
   GraphState,
   GraphId,
   GraphWasmExports,
-} from "tidepool-generated";
-import { getGraphFns } from "tidepool-generated";
+} from "tidepool-generated-ts";
+import { getGraphFns } from "tidepool-generated-ts";
 
 // =============================================================================
 // GraphMachine Interface
