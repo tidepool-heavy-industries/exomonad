@@ -16,10 +16,11 @@ import { successResult } from "tidepool-generated-ts";
  */
 export async function handleLogInfo(effect: LogInfoEffect): Promise<EffectResult> {
   const fields = effect.eff_fields ?? {};
+  // Spread fields first so level/msg can't be overridden by custom fields
   const entry = {
+    ...fields,
     level: "info",
     msg: effect.eff_message,
-    ...fields,
   };
   console.log(JSON.stringify(entry));
   return successResult(null);
@@ -33,10 +34,11 @@ export async function handleLogInfo(effect: LogInfoEffect): Promise<EffectResult
  */
 export async function handleLogError(effect: LogErrorEffect): Promise<EffectResult> {
   const fields = effect.eff_fields ?? {};
+  // Spread fields first so level/msg can't be overridden by custom fields
   const entry = {
+    ...fields,
     level: "error",
     msg: effect.eff_message,
-    ...fields,
   };
   console.error(JSON.stringify(entry));
   return successResult(null);

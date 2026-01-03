@@ -45,10 +45,10 @@ describe("handleLogInfo", () => {
 
     expect(console.log).toHaveBeenCalledWith(
       JSON.stringify({
-        level: "info",
-        msg: "Scoring daily",
         taskId: "abc123",
         direction: "up",
+        level: "info",
+        msg: "Scoring daily",
       })
     );
     expect(result).toEqual({ type: "success", value: null });
@@ -68,10 +68,10 @@ describe("handleLogInfo", () => {
 
     expect(console.log).toHaveBeenCalledWith(
       JSON.stringify({
-        level: "info",
-        msg: "LLM tool calls",
         count: 3,
         tools: ["ThinkAsDM", "SpeakAsNPC", "AskPlayer"],
+        level: "info",
+        msg: "LLM tool calls",
       })
     );
     expect(result).toEqual({ type: "success", value: null });
@@ -132,11 +132,11 @@ describe("handleLogError", () => {
 
     expect(console.error).toHaveBeenCalledWith(
       JSON.stringify({
-        level: "error",
-        msg: "API call failed",
         endpoint: "/api/tasks",
         status: 500,
         retryCount: 3,
+        level: "error",
+        msg: "API call failed",
       })
     );
     expect(result).toEqual({ type: "success", value: null });
