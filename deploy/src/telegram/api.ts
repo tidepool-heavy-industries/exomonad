@@ -147,49 +147,80 @@ export async function answerCallbackQuery(
 import type { TelegramInlineButton } from "tidepool-generated-ts";
 
 /**
- * Truncate callback_data to fit Telegram's 64-byte limit.
- * We keep the first 60 chars (leaving room for JSON quotes).
+ * Result of sending buttons with ID mapping.
  */
-function truncateCallbackData(data: unknown): string {
-  // Convert to string if not already
-  const str = typeof data === "string" ? data : JSON.stringify(data);
-  const MAX_LEN = 60; // Leave room for JSON encoding overhead
-  if (str.length <= MAX_LEN) {
-    return str;
-  }
-  // Truncate and add indicator
-  return str.slice(0, MAX_LEN - 3) + "...";
+export interface SendButtonsResult {
+  /** Message ID from Telegram */
+  message_id: number;
+  /** Mapping from short IDs (btn_0, btn_1, ...) to original callback data */
+  buttonMapping: Record<string, unknown>;
 }
 
 /**
- * Convert our InlineButton format to Telegram's InlineKeyboardButton.
- * We use callback_data which must be JSON-serialized string ≤ 64 bytes.
+ * Convert our InlineButton format to Telegram's InlineKeyboardButton,
+ * generating short IDs for callback_data to avoid the 64-byte limit.
+ *
+ * The callback_data includes both the short ID and nonce for validation:
+ * { "a": "btn_0", "n": "abc123" }
+ *
+ * @param button - The button to convert
+ * @param index - Unique index for this button (used to generate short ID)
+ * @param nonce - Nonce for validation (to detect stale buttons)
+ * @param buttonMapping - Mutable mapping to populate with short ID → original data
+ * @returns Telegram button with short callback_data containing ID and nonce
  */
-function toTelegramButton(button: TelegramInlineButton): Record<string, string> {
-  // truncateCallbackData handles any type and returns a truncated string
-  const truncatedData = truncateCallbackData(button.data);
+function toTelegramButtonWithMapping(
+  button: TelegramInlineButton,
+  index: number,
+  nonce: string,
+  buttonMapping: Record<string, unknown>
+): Record<string, string> {
+  const shortId = `btn_${index}`;
+  buttonMapping[shortId] = button.data;
+  // Use short keys ("a" for action, "n" for nonce) to minimize callback_data size
+  const callbackData = JSON.stringify({ a: shortId, n: nonce });
+
+  // Telegram enforces 64-byte limit for callback_data
+  if (callbackData.length > 64) {
+    throw new Error(
+      `Telegram callback_data exceeds 64-byte limit (${callbackData.length} bytes) for button "${shortId}"`
+    );
+  }
+
   return {
     text: button.text,
-    callback_data: truncatedData, // Already a string, no need to JSON.stringify again
+    callback_data: callbackData,
   };
 }
 
 /**
  * Send a text message with inline keyboard buttons.
+ * Uses short IDs for callback_data to avoid Telegram's 64-byte limit.
  *
  * @param token - Bot API token
  * @param chatId - Target chat ID
  * @param text - Message text
  * @param buttons - 2D array of buttons (rows x columns)
- * @returns Message result with message_id, or null on failure
+ * @param nonce - Nonce for validation (to detect stale buttons)
+ * @returns Result with message_id and buttonMapping, or null on failure
  */
 export async function sendMessageWithButtons(
   token: string,
   chatId: number,
   text: string,
-  buttons: TelegramInlineButton[][]
-): Promise<SendMessageResult | null> {
-  const inlineKeyboard = buttons.map((row) => row.map(toTelegramButton));
+  buttons: TelegramInlineButton[][],
+  nonce: string
+): Promise<SendButtonsResult | null> {
+  const buttonMapping: Record<string, unknown> = {};
+  let buttonIndex = 0;
+
+  const inlineKeyboard = buttons.map((row) =>
+    row.map((button) => {
+      const telegramButton = toTelegramButtonWithMapping(button, buttonIndex, nonce, buttonMapping);
+      buttonIndex++;
+      return telegramButton;
+    })
+  );
 
   const body: Record<string, unknown> = {
     chat_id: chatId,
@@ -204,7 +235,56 @@ export async function sendMessageWithButtons(
     console.error("sendMessageWithButtons failed:", result.description);
     return null;
   }
-  return result.result ?? null;
+  if (!result.result) {
+    return null;
+  }
+  return {
+    message_id: result.result.message_id,
+    buttonMapping,
+  };
+}
+
+// =============================================================================
+// Message Editing
+// =============================================================================
+
+/**
+ * Edit a message's text and optionally remove its inline keyboard.
+ * Used to update button messages after selection.
+ *
+ * @param token - Bot API token
+ * @param chatId - Target chat ID
+ * @param messageId - Message ID to edit
+ * @param text - New message text
+ * @param removeKeyboard - If true, removes the inline keyboard
+ * @returns true on success, false on failure
+ */
+export async function editMessageText(
+  token: string,
+  chatId: number,
+  messageId: number,
+  text: string,
+  removeKeyboard: boolean = true
+): Promise<boolean> {
+  const body: Record<string, unknown> = {
+    chat_id: chatId,
+    message_id: messageId,
+    text,
+  };
+
+  if (removeKeyboard) {
+    // Empty inline_keyboard array removes the keyboard
+    body.reply_markup = {
+      inline_keyboard: [],
+    };
+  }
+
+  const result = await callTelegram<SendMessageResult>(token, "editMessageText", body);
+  if (!result.ok) {
+    console.error("editMessageText failed:", result.description);
+    return false;
+  }
+  return true;
 }
 
 // =============================================================================
