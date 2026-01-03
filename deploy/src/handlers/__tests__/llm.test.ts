@@ -237,6 +237,21 @@ describe("handleLlmCall", () => {
   });
 
   describe("tool_use responses (needs_tools)", () => {
+    // Effect with tools - triggers Phase 1 (tool decision pass)
+    const effectWithTools: LlmCallEffect = {
+      ...baseEffect,
+      eff_tools: [
+        {
+          type: "function",
+          function: {
+            name: "ask_user",
+            description: "Ask user a question",
+            parameters: { type: "object", properties: {}, required: [] },
+          },
+        },
+      ],
+    };
+
     it("returns needs_tools with tool calls", async () => {
       // CF AI returns tool_calls array at top level
       const env = createMockLlmCallEnv({
@@ -249,7 +264,7 @@ describe("handleLlmCall", () => {
         ],
       });
 
-      const result = await handleLlmCall(baseEffect, env);
+      const result = await handleLlmCall(effectWithTools, env);
 
       expect(result.type).toBe("success");
       const llmResult = (result as { type: "success"; value: LlmCallResult }).value;
@@ -280,7 +295,7 @@ describe("handleLlmCall", () => {
         ],
       });
 
-      const result = await handleLlmCall(baseEffect, env);
+      const result = await handleLlmCall(effectWithTools, env);
 
       expect(result.type).toBe("success");
       const llmResult = (result as { type: "success"; value: LlmCallResult }).value;
@@ -304,7 +319,7 @@ describe("handleLlmCall", () => {
         ],
       });
 
-      const result = await handleLlmCall(baseEffect, env);
+      const result = await handleLlmCall(effectWithTools, env);
 
       expect(result.type).toBe("success");
       const llmResult = (result as { type: "success"; value: LlmCallResult }).value;
@@ -322,7 +337,7 @@ describe("handleLlmCall", () => {
         tool_calls: [{}] as Array<{ name: string; arguments: unknown }>, // All malformed
       });
 
-      const result = await handleLlmCall(baseEffect, env);
+      const result = await handleLlmCall(effectWithTools, env);
 
       expect(result.type).toBe("success");
       const llmResult = (result as { type: "success"; value: LlmCallResult }).value;

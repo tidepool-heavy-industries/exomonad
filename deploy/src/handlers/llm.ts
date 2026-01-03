@@ -197,17 +197,15 @@ function parseAiResponse(response: unknown): unknown {
 /**
  * Handle LlmCall effect - tool-aware LLM API call.
  *
- * Uses direct env.AI.run for single-shot LLM calls.
- * WASM handles the tool loop via runToolLoop in Automat.Graph.hs.
+ * Uses 2-phase approach when both tools and schema are provided:
+ * 1. Phase 1: Call with tools only (let model decide to use tools)
+ * 2. Phase 2: If no tools called, call with schema for structured output
+ *
+ * This prevents the conflict where "return JSON" instructions compete with tool use.
  *
  * Returns a discriminated result:
  * - `done`: LLM finished with final content
  * - `needs_tools`: LLM wants to call tools, caller should execute and continue
- *
- * The caller (graph handler) is responsible for the tool loop:
- * 1. Execute tools with full effect access (can yield TelegramAsk, etc.)
- * 2. Continue LLM conversation with tool results
- * 3. Repeat until `done`
  */
 export async function handleLlmCall(
   effect: LlmCallEffect,
@@ -222,63 +220,126 @@ export async function handleLlmCall(
   }
 
   try {
-    // Convert WireMessage format to Cloudflare AI RoleScopedChatInput format
     const messages: RoleScopedChatInput[] = effect.eff_messages.map((msg) => ({
       role: msg.role as "system" | "user" | "assistant",
       content: convertContentBlocks(msg.content),
     }));
 
-    // Convert WASM tool definitions to CF AI format
-    // WASM sends OpenAI format: {type: "function", function: {name, description, parameters}}
-    // CF AI wants: {name, description, parameters}
     const tools = convertToolsForCfAi(effect.eff_tools ?? []);
+    const hasTools = tools.length > 0;
+    const hasSchema = effect.eff_schema !== null && effect.eff_schema !== undefined;
 
     // Use llama-4-scout for tool calls - best function calling support on CF AI
-    // llama-3.3 returns malformed tool_calls: [{}]
-    // hermes-2-pro has max_tokens limit of 1024
     const model = "@cf/meta/llama-4-scout-17b-16e-instruct";
 
-    console.log("[LlmCall] Calling AI.run with", tools.length, "tools");
+    // ═══════════════════════════════════════════════════════════════════════
+    // PHASE 1: Tool decision pass (if tools provided)
+    // ═══════════════════════════════════════════════════════════════════════
+    if (hasTools) {
+      console.log("[LlmCall] Phase 1: Tool decision pass with", tools.length, "tools");
 
-    // Direct AI.run call - single invocation, no recursive loop
-    // This is intentionally NOT using runWithTools which makes a "final response" call
+      const toolResponse = (await env.AI.run(model, {
+        messages,
+        tools,
+        max_tokens: 2048,
+      })) as CfAiResponse;
+
+      console.log("[LlmCall] Phase 1 response:", JSON.stringify(toolResponse));
+
+      // Filter malformed tool calls (CF AI sometimes returns [{}])
+      const validToolCalls = (toolResponse.tool_calls ?? []).filter(
+        (tc) => tc.name !== undefined && tc.name !== null
+      );
+
+      if (validToolCalls.length > 0) {
+        // Model wants to use tools - return for WASM to handle
+        const responseText = toolResponse.response
+          ? typeof toolResponse.response === "string"
+            ? toolResponse.response
+            : JSON.stringify(toolResponse.response)
+          : null;
+
+        const result: LlmCallResult = {
+          type: "needs_tools",
+          tool_calls: validToolCalls.map((tc, idx) => ({
+            id: `tool_${idx}_${tc.name}`,
+            name: tc.name,
+            input: tc.arguments,
+          })),
+          content: responseText ? [{ type: "text" as const, text: responseText }] : [],
+        };
+        return successResult(result);
+      }
+
+      // No tools called - fall through to Phase 2 if schema exists
+      // If no schema, return the text response as-is
+      if (!hasSchema) {
+        const responseText = toolResponse.response
+          ? typeof toolResponse.response === "string"
+            ? toolResponse.response
+            : JSON.stringify(toolResponse.response)
+          : null;
+
+        const result: LlmCallResult = {
+          type: "done",
+          content: responseText ? [{ type: "text" as const, text: responseText }] : [],
+        };
+        return successResult(result);
+      }
+
+      console.log("[LlmCall] No tools called, proceeding to Phase 2 for structured output");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // PHASE 2: Structured output pass (if schema provided)
+    // ═══════════════════════════════════════════════════════════════════════
+    if (hasSchema) {
+      console.log("[LlmCall] Phase 2: Structured output with schema");
+
+      const schemaResponse = (await env.AI.run(model, {
+        messages,
+        max_tokens: 2048,
+        response_format: {
+          type: "json_schema",
+          json_schema: {
+            name: "effect_output",
+            strict: true,
+            schema: effect.eff_schema,
+          },
+        },
+      })) as CfAiResponse;
+
+      console.log("[LlmCall] Phase 2 response:", JSON.stringify(schemaResponse));
+
+      const responseText = schemaResponse.response
+        ? typeof schemaResponse.response === "string"
+          ? schemaResponse.response
+          : JSON.stringify(schemaResponse.response)
+        : null;
+
+      const result: LlmCallResult = {
+        type: "done",
+        content: responseText ? [{ type: "text" as const, text: responseText }] : [],
+      };
+      return successResult(result);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // No tools, no schema - simple text completion
+    // ═══════════════════════════════════════════════════════════════════════
+    console.log("[LlmCall] Simple text completion (no tools, no schema)");
+
     const response = (await env.AI.run(model, {
       messages,
-      tools: tools.length > 0 ? tools : undefined,
       max_tokens: 2048,
     })) as CfAiResponse;
 
-    // Debug: log raw response
-    console.log("[LlmCall] AI.run response:", JSON.stringify(response));
-
-    // Filter out malformed tool calls (CF AI sometimes returns [{}])
-    const validToolCalls = (response.tool_calls ?? []).filter(
-      (tc) => tc.name !== undefined && tc.name !== null
-    );
-
-    // Helper to convert response to string
     const responseText = response.response
       ? typeof response.response === "string"
         ? response.response
         : JSON.stringify(response.response)
       : null;
 
-    if (validToolCalls.length > 0) {
-      const result: LlmCallResult = {
-        type: "needs_tools",
-        tool_calls: validToolCalls.map((tc, idx) => ({
-          // Generate deterministic ID since CF AI doesn't provide one
-          id: `tool_${idx}_${tc.name}`,
-          name: tc.name,
-          input: tc.arguments,
-        })),
-        // Include any text response as content
-        content: responseText ? [{ type: "text" as const, text: responseText }] : [],
-      };
-      return successResult(result);
-    }
-
-    // LLM finished - return final content
     const result: LlmCallResult = {
       type: "done",
       content: responseText ? [{ type: "text" as const, text: responseText }] : [],
