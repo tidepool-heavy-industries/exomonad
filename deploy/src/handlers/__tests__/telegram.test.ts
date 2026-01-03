@@ -35,7 +35,7 @@ function createMockContext(
 
 describe("handleTelegramSend", () => {
   const baseEffect: TelegramSendEffect = {
-    type: "telegram_send",
+    type: "TelegramSend",
     message: { type: "text", text: "Hello, world!" },
   };
 
@@ -76,7 +76,7 @@ describe("handleTelegramSend", () => {
 
   it("sends buttons message correctly", async () => {
     const buttonsEffect: TelegramSendEffect = {
-      type: "telegram_send",
+      type: "TelegramSend",
       message: {
         type: "buttons",
         text: "Choose an option:",
@@ -153,7 +153,7 @@ describe("handleTelegramReceive", () => {
     ];
 
     const result = handleTelegramReceive(
-      { type: "telegram_receive" },
+      { type: "TelegramReceive" },
       createMockContext(pendingMessages)
     );
 
@@ -168,7 +168,7 @@ describe("handleTelegramReceive", () => {
 
   it("returns yield when no pending messages", () => {
     const result = handleTelegramReceive(
-      { type: "telegram_receive" },
+      { type: "TelegramReceive" },
       createMockContext([])
     );
 
@@ -183,7 +183,7 @@ describe("handleTelegramTryReceive", () => {
     ];
 
     const result = handleTelegramTryReceive(
-      { type: "telegram_try_receive" },
+      { type: "TelegramTryReceive" },
       createMockContext(pendingMessages)
     );
 
@@ -195,7 +195,7 @@ describe("handleTelegramTryReceive", () => {
 
   it("returns empty messages when none pending", () => {
     const result = handleTelegramTryReceive(
-      { type: "telegram_try_receive" },
+      { type: "TelegramTryReceive" },
       createMockContext([])
     );
 

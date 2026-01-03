@@ -11,6 +11,7 @@ export interface WasmExports {
   // Initialization exports
   _initialize: () => void;  // WASI/libc initialization (reactor mode)
   hs_init: (argc: number, argv: number) => void;  // GHC RTS initialization
+  initRegistry: () => void;  // Populate graph registry
   // GHC WASM exports use externref - JS values passed directly
   initialize: (input: string) => Promise<string>;
   step: (result: string) => Promise<string>;

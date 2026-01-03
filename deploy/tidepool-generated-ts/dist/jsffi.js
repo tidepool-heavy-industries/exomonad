@@ -100,16 +100,10 @@ export function createJsFFI(__exports) {
         "ZC0ZCghczminternalZCGHCziInternalziWasmziPrimziExportsZC": (p, msg) => {
             p.reject(new WebAssembly.RuntimeError(msg));
         },
-        // ZC1-19: Resolve promise with typed value
-        // GHC generates numbered variants for different Haskell return types.
-        // All have the same JS implementation - just resolve the promise with the value.
-        ...Object.fromEntries(Array.from({ length: 20 }, (_, i) => [
-            `ZC${i}ZCghczminternalZCGHCziInternalziWasmziPrimziExportsZC`,
-            (p, val) => {
-                p.resolve(val);
-            },
-        ]).filter(([name]) => name !== "ZC0ZCghczminternalZCGHCziInternalziWasmziPrimziExportsZC") // ZC0 is reject, handled separately
-        ),
+        // ZC1-18: Resolve promise with typed value (all same implementation)
+        "ZC18ZCghczminternalZCGHCziInternalziWasmziPrimziExportsZC": (p, val) => {
+            p.resolve(val);
+        },
         // ZC20: Set empty throwTo handler
         "ZC20ZCghczminternalZCGHCziInternalziWasmziPrimziExportsZC": (p) => {
             p.throwTo = () => { };

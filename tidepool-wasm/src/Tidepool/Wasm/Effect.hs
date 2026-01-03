@@ -46,6 +46,17 @@ module Tidepool.Wasm.Effect
   , telegramHtml
   , telegramAsk
   , TelegramAskResult(..)
+    -- ** State
+  , getState
+  , setState
+  , modifyState
+    -- ** Events
+  , emitEvent
+    -- ** Random
+  , randomInt
+  , rollDice
+    -- ** Time
+  , getTime
 
     -- * Habitica (typed API)
   , habitica
@@ -292,6 +303,114 @@ telegramAsk message buttons = do
       Error err         -> error $ "Telegram ask: failed to parse result: " <> err
     ResSuccess Nothing  -> error "Telegram ask: no response"
     ResError msg        -> error $ "Telegram ask failed: " <> T.unpack msg
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- STATE EFFECTS
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Get state by key.
+--
+-- Yields 'EffGetState', returns the state value (or Null if not found).
+getState :: Member (Yield SerializableEffect EffectResult) effs
+         => Text  -- ^ State key (e.g., "worldState")
+         -> Eff effs Value
+getState key = do
+  result <- yield (EffGetState key) (id @EffectResult)
+  case result of
+    ResSuccess (Just v) -> pure v
+    ResSuccess Nothing  -> pure Null
+    ResError msg        -> error $ "getState failed: " <> T.unpack msg
+
+-- | Set state by key.
+--
+-- Yields 'EffSetState', fire-and-forget semantics.
+setState :: Member (Yield SerializableEffect EffectResult) effs
+         => Text   -- ^ State key
+         -> Value  -- ^ New state value
+         -> Eff effs ()
+setState key value = do
+  _ <- yield (EffSetState key value) (id @EffectResult)
+  pure ()
+
+-- | Modify state with a function.
+--
+-- Convenience wrapper that performs get → modify → set.
+-- The modifier function receives the current state (or Null if not found).
+modifyState :: Member (Yield SerializableEffect EffectResult) effs
+            => Text            -- ^ State key
+            -> (Value -> Value)  -- ^ Modifier function
+            -> Eff effs ()
+modifyState key f = do
+  current <- getState key
+  setState key (f current)
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- EVENT EFFECTS
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Emit an event for observability/GUI updates.
+--
+-- Yields 'EffEmitEvent', fire-and-forget semantics.
+-- Events are forwarded to connected clients (WebSocket) for real-time updates.
+emitEvent :: Member (Yield SerializableEffect EffectResult) effs
+          => Text   -- ^ Event name (e.g., "StressChanged", "ClockAdvanced")
+          -> Value  -- ^ Event payload
+          -> Eff effs ()
+emitEvent name payload = do
+  _ <- yield (EffEmitEvent name payload) (id @EffectResult)
+  pure ()
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- RANDOM EFFECTS
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Get a random integer in range [min, max] (inclusive).
+--
+-- Yields 'EffRandomInt', returns a random integer.
+randomInt :: Member (Yield SerializableEffect EffectResult) effs
+          => Int  -- ^ Minimum value (inclusive)
+          -> Int  -- ^ Maximum value (inclusive)
+          -> Eff effs Int
+randomInt minVal maxVal = do
+  result <- yield (EffRandomInt minVal maxVal) (id @EffectResult)
+  case result of
+    ResSuccess (Just v) -> case v of
+      Number n -> pure $ round n
+      _        -> error "randomInt: expected number"
+    ResSuccess Nothing  -> error "randomInt: no response"
+    ResError msg        -> error $ "randomInt failed: " <> T.unpack msg
+
+-- | Roll multiple dice (e.g., for FitD mechanics).
+--
+-- Convenience function that rolls n dice with sides [1..sides].
+rollDice :: Member (Yield SerializableEffect EffectResult) effs
+         => Int  -- ^ Number of dice
+         -> Int  -- ^ Number of sides per die
+         -> Eff effs [Int]
+rollDice n sides = mapM (\_ -> randomInt 1 sides) [1..n]
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- TIME EFFECTS
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Get current UTC time as ISO8601 string.
+--
+-- Yields 'EffGetTime', returns time like "2024-01-15T10:30:00Z".
+getTime :: Member (Yield SerializableEffect EffectResult) effs
+        => Eff effs Text
+getTime = do
+  result <- yield EffGetTime (id @EffectResult)
+  case result of
+    ResSuccess (Just v) -> case v of
+      String s -> pure s
+      _        -> error "getTime: expected string"
+    ResSuccess Nothing  -> error "getTime: no response"
+    ResError msg        -> error $ "getTime failed: " <> T.unpack msg
+
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- RUNNING EFFECTS

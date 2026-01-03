@@ -1,5 +1,5 @@
 import type { SerializableEffect, EffectResult } from './protocol.js';
-export type InternalEffectType = "LogInfo" | "LogError" | "LlmComplete" | "LlmCall" | "Habitica";
+export type InternalEffectType = "LogInfo" | "LogError" | "LlmComplete" | "LlmCall" | "Habitica" | "GetState" | "SetState" | "RandomInt" | "GetTime";
 /**
  * Handler interface for internal effects.
  *
@@ -21,6 +21,18 @@ export interface InternalEffectHandlers<TEnv> {
     }>, env: TEnv) => Promise<EffectResult>;
     Habitica: (effect: Extract<SerializableEffect, {
         type: "Habitica";
+    }>, env: TEnv) => Promise<EffectResult>;
+    GetState: (effect: Extract<SerializableEffect, {
+        type: "GetState";
+    }>, env: TEnv) => Promise<EffectResult>;
+    SetState: (effect: Extract<SerializableEffect, {
+        type: "SetState";
+    }>, env: TEnv) => Promise<EffectResult>;
+    RandomInt: (effect: Extract<SerializableEffect, {
+        type: "RandomInt";
+    }>, env: TEnv) => Promise<EffectResult>;
+    GetTime: (effect: Extract<SerializableEffect, {
+        type: "GetTime";
     }>, env: TEnv) => Promise<EffectResult>;
 }
 /**
