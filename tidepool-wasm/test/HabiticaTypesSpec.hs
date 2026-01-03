@@ -28,6 +28,15 @@ import Tidepool.Wasm.Habitica
   )
 
 
+-- | Helper to parse a task type string through a minimal HabiticaTask JSON.
+parseTaskType :: T.Text -> Maybe TaskType
+parseTaskType t = fmap (.htType) $ (decode $ encode $ object
+  [ "taskId" .= ("x" :: T.Text)
+  , "taskText" .= ("x" :: T.Text)
+  , "taskType" .= t
+  ] :: Maybe HabiticaTask)
+
+
 spec :: Spec
 spec = do
   userInfoSpec
@@ -133,29 +142,16 @@ habiticaTaskSpec = describe "HabiticaTask" $ do
       Nothing -> expectationFailure "Expected successful parse"
 
   it "parses all task types" $ do
-    let parseType :: T.Text -> Maybe TaskType
-        parseType t = fmap (.htType) $ (decode $ encode $ object
-          [ "taskId" .= ("x" :: T.Text)
-          , "taskText" .= ("x" :: T.Text)
-          , "taskType" .= t
-          ] :: Maybe HabiticaTask)
-
-    parseType "Habits" `shouldBe` Just Habits
-    parseType "Dailys" `shouldBe` Just Dailys
-    parseType "Todos" `shouldBe` Just Todos
-    parseType "Rewards" `shouldBe` Just Rewards
+    parseTaskType "Habits" `shouldBe` Just Habits
+    parseTaskType "Dailys" `shouldBe` Just Dailys
+    parseTaskType "Todos" `shouldBe` Just Todos
+    parseTaskType "Rewards" `shouldBe` Just Rewards
 
   it "parses task types case-insensitively" $ do
-    let parseType :: T.Text -> Maybe TaskType
-        parseType t = fmap (.htType) $ (decode $ encode $ object
-          [ "taskId" .= ("x" :: T.Text)
-          , "taskText" .= ("x" :: T.Text)
-          , "taskType" .= t
-          ] :: Maybe HabiticaTask)
-
-    parseType "habits" `shouldBe` Just Habits
-    parseType "DAILYS" `shouldBe` Just Dailys
-    parseType "todos" `shouldBe` Just Todos
+    parseTaskType "habits" `shouldBe` Just Habits
+    parseTaskType "DAILYS" `shouldBe` Just Dailys
+    parseTaskType "todos" `shouldBe` Just Todos
+    parseTaskType "rewards" `shouldBe` Just Rewards
 
   it "parses null taskCompleted as Nothing" $ do
     let json = [aesonQQ|{
@@ -219,10 +215,12 @@ fetchedTodoSpec = describe "FetchedTodo" $ do
         length todo.ftChecklist `shouldBe` 2
         todo.ftCompleted `shouldBe` False
 
-        let item1 = head todo.ftChecklist
-        item1.fciId `shouldBe` "cl-1"
-        item1.fciText `shouldBe` "Unit tests"
-        item1.fciCompleted `shouldBe` True
+        case todo.ftChecklist of
+          (item1:_) -> do
+            item1.fciId `shouldBe` "cl-1"
+            item1.fciText `shouldBe` "Unit tests"
+            item1.fciCompleted `shouldBe` True
+          [] -> expectationFailure "Expected non-empty checklist"
       Nothing -> expectationFailure "Expected successful parse"
 
   it "parses todo with empty checklist" $ do
