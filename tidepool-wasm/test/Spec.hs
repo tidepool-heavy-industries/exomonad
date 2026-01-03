@@ -15,7 +15,6 @@ import qualified ExecutorSpec
 import qualified CodegenSyncSpec
 import qualified RoundtripSpec
 import qualified RegistrySpec
-import qualified HabiticaTypesSpec
 import qualified TypedToolSpec
 
 main :: IO ()
@@ -34,5 +33,4 @@ main = hspec $ do
     describe "Codegen Sync" CodegenSyncSpec.spec
     describe "Roundtrip" RoundtripSpec.spec
     describe "Registry" RegistrySpec.spec
-    describe "HabiticaTypes" HabiticaTypesSpec.spec
     describe "TypedTool" TypedToolSpec.spec

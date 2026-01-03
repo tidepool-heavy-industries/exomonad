@@ -2,6 +2,7 @@ packages:
     tidepool-core
     tidepool-wasm
     tidepool-generated-ts
+    tidepool-habitica
 
 -- Disabled packages (heavy deps, not needed for WASM deployment):
 -- tidepool-platform   -- threepenny-gui, http-client, sqlite
