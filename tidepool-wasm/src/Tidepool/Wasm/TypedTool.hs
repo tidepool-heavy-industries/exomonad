@@ -155,29 +155,25 @@ askUser AskUserInput{..} = do
       -- Show a prompt button; user must type a response (clicking button errors)
       eitherResult <- telegramAsk auiQuestion [("Type your response", "freeform")]
       case eitherResult of
-        Left err ->
-          error $ "askUser: telegram effect failed: " <> show err
-        Right result -> case result of
-          TelegramButton _ ->
-            error $ "askUser: user clicked button instead of typing for freeform question: "
-                 <> T.unpack auiQuestion
-          TelegramText txt -> pure txt
-          TelegramStaleButton ->
-            error $ "askUser: stale button clicked for freeform question: "
-                 <> T.unpack auiQuestion
+        Left err -> error $ "askUser: telegram error: " <> show err
+        Right (TelegramButton _) ->
+          error $ "askUser: user clicked button instead of typing for freeform question: "
+               <> T.unpack auiQuestion
+        Right (TelegramText txt) -> pure txt
+        Right TelegramStaleButton ->
+          error $ "askUser: stale button clicked for freeform question: "
+               <> T.unpack auiQuestion
     Just opts -> do
       -- With options = inline keyboard buttons
       let buttons = [(opt, opt) | opt <- opts]  -- label = callback data
       eitherResult <- telegramAsk auiQuestion buttons
       case eitherResult of
-        Left err ->
-          error $ "askUser: telegram effect failed: " <> show err
-        Right result -> case result of
-          TelegramButton response -> pure response  -- The callback_data = option text
-          TelegramText txt -> pure txt  -- User typed instead of clicking
-          TelegramStaleButton ->
-            error $ "askUser: stale button clicked for question: "
-                 <> T.unpack auiQuestion
+        Left err -> error $ "askUser: telegram error: " <> show err
+        Right (TelegramButton response) -> pure response  -- The callback_data = option text
+        Right (TelegramText txt) -> pure txt  -- User typed instead of clicking
+        Right TelegramStaleButton ->
+          error $ "askUser: stale button clicked for question: "
+               <> T.unpack auiQuestion
 
 
 -- | Ask user with a fallback for when no options are provided.
