@@ -179,6 +179,14 @@ function toTelegramButtonWithMapping(
   buttonMapping[shortId] = button.data;
   // Use short keys ("a" for action, "n" for nonce) to minimize callback_data size
   const callbackData = JSON.stringify({ a: shortId, n: nonce });
+
+  // Telegram enforces 64-byte limit for callback_data
+  if (callbackData.length > 64) {
+    throw new Error(
+      `Telegram callback_data exceeds 64-byte limit (${callbackData.length} bytes) for button "${shortId}"`
+    );
+  }
+
   return {
     text: button.text,
     callback_data: callbackData,

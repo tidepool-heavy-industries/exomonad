@@ -314,16 +314,24 @@ export async function handleTelegramAsk(
 
         // Edit the original button message to show selection and remove buttons
         if (ctx.buttonMessageId) {
-          // Find the button label for the selected option
           const buttonLabel = findButtonLabel(effect.eff_buttons, responseValue);
           const displayText = buttonLabel ?? truncateForDisplay(responseValue, 50);
           const confirmationText = `${ctx.buttonQuestionText ?? "Question"}\n\n✓ ${displayText}`;
-          await editMessageText(
-            env.TELEGRAM_TOKEN,
-            ctx.chatId,
-            ctx.buttonMessageId,
-            confirmationText
-          );
+          try {
+            await editMessageText(
+              env.TELEGRAM_TOKEN,
+              ctx.chatId,
+              ctx.buttonMessageId,
+              confirmationText
+            );
+          } catch (err) {
+            // Non-critical: user's selection is still recorded even if edit fails
+            console.error("[TelegramAsk] Failed to edit confirmation message:", {
+              chatId: ctx.chatId,
+              messageId: ctx.buttonMessageId,
+              error: err,
+            });
+          }
         }
 
         const result: TelegramAskResult = {
@@ -363,12 +371,21 @@ export async function handleTelegramAsk(
     // Edit the original button message to show text response and remove buttons
     if (ctx.buttonMessageId) {
       const confirmationText = `${ctx.buttonQuestionText ?? "Question"}\n\n✓ (typed) ${truncateForDisplay(textMsg.text, 50)}`;
-      await editMessageText(
-        env.TELEGRAM_TOKEN,
-        ctx.chatId,
-        ctx.buttonMessageId,
-        confirmationText
-      );
+      try {
+        await editMessageText(
+          env.TELEGRAM_TOKEN,
+          ctx.chatId,
+          ctx.buttonMessageId,
+          confirmationText
+        );
+      } catch (err) {
+        // Non-critical: user's response is still recorded even if edit fails
+        console.error("[TelegramAsk] Failed to edit confirmation message:", {
+          chatId: ctx.chatId,
+          messageId: ctx.buttonMessageId,
+          error: err,
+        });
+      }
     }
 
     const result: TelegramAskResult = { type: "text", text: textMsg.text };
@@ -376,11 +393,21 @@ export async function handleTelegramAsk(
   }
 
   // 3. Nothing yet - keep waiting (preserve existing state)
+  // Note: If storedNonce exists but buttonMessageId is null/0, that's an inconsistent state
+  // (buttons were sent but we don't know their message ID). Log a warning but continue.
+  // The editMessageText calls are guarded by `if (ctx.buttonMessageId)` which will skip
+  // editing if messageId is 0 (falsy), so using 0 as fallback is safe.
+  if (!ctx.buttonMessageId) {
+    console.warn("[TelegramAsk] Waiting with stored nonce but missing buttonMessageId:", {
+      chatId: ctx.chatId,
+      nonce: storedNonce,
+    });
+  }
   return {
     type: "yield",
     nonce: storedNonce,
     buttonMapping: ctx.buttonMapping ?? {},
-    messageId: ctx.buttonMessageId ?? 0, // 0 is safe here - only used if buttons already sent
+    messageId: ctx.buttonMessageId ?? 0,
     questionText: ctx.buttonQuestionText ?? "",
   };
 }
