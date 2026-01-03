@@ -26,7 +26,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Typeable (Typeable)
 import Data.Proxy (Proxy(..))
-import Control.Monad.Freer (Eff, Member)
+import Control.Monad.Freer (Member)
 import GHC.Generics (Generic)
 
 import Tidepool.Effect (State, get)
@@ -35,12 +35,12 @@ import Text.Parsec.Pos (SourcePos)
 import Tidepool.Graph.Types (type (:@), Needs, Schema, Template, UsesEffects, Exit)
 import Tidepool.Graph.Generic (GraphMode(..), AsHandler)
 import qualified Tidepool.Graph.Generic as G (Entry, Exit, LLMNode, LogicNode, ValidGraphRecord)
-import Tidepool.Graph.Goto (Goto, To, GotoChoice, gotoChoice, gotoExit, LLMHandler(..))
+import Tidepool.Graph.Goto (Goto, gotoChoice, gotoExit, LLMHandler(..))
 import Tidepool.Graph.Reify (ReifyRecordGraph(..), makeGraphInfo)
 import Tidepool.Graph.Tool (ToolDef(..))
 import Tidepool.Graph.Template (TemplateDef(..), TypedTemplate, typedTemplateFile)
 import Tidepool.Graph.Example.Context (ClassifyContext(..))
-import Tidepool.Schema (HasJSONSchema(..), JSONSchema(..), SchemaType(..), objectSchema, arraySchema, describeField, emptySchema)
+import Tidepool.Schema (HasJSONSchema(..), SchemaType(..), objectSchema, arraySchema, describeField, emptySchema)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- EXAMPLE TYPES
@@ -303,8 +303,8 @@ supportHandlers = SupportGraph
 -- * All Goto targets reference valid field names
 --
 -- If any validation fails, you get a compile-time error.
-validRecordGraph :: G.ValidGraphRecord SupportGraph => ()
-validRecordGraph = ()
+_validRecordGraph :: G.ValidGraphRecord SupportGraph => ()
+_validRecordGraph = ()
 
 -- | ReifyRecordGraph instance for SupportGraph.
 --
@@ -353,8 +353,8 @@ data RoutingGraph mode = RoutingGraph
   deriving Generic
 
 -- | Handler record demonstrating all three LLMHandler variants.
-routingHandlers :: RoutingGraph (AsHandler '[State SessionState])
-routingHandlers = RoutingGraph
+_routingHandlers :: RoutingGraph (AsHandler '[State SessionState])
+_routingHandlers = RoutingGraph
   { rgEntry   = Proxy @Message
 
     -- LLMBefore: builds context for the analyze template
@@ -378,7 +378,7 @@ routingHandlers = RoutingGraph
   , rgProcess = LLMBoth
       Nothing  -- no system template
       (templateCompiled @RefundTpl)  -- user template
-      (\intent -> pure SimpleContext { scContent = T.pack $ "Processing: " ++ show intent })
+      (\intent -> pure SimpleContext { scContent = T.pack $ "Processing: " ++ showIntent intent })
       (pure . gotoExit)
 
   , rgExit    = Proxy @Response
@@ -388,11 +388,11 @@ routingHandlers = RoutingGraph
     msgContent (Message s) = s
 
     -- Need Show instance for Intent in the example
-    show :: Intent -> String
-    show IntentRefund = "refund"
-    show IntentQuestion = "question"
-    show IntentComplaint = "complaint"
+    showIntent :: Intent -> String
+    showIntent IntentRefund = "refund"
+    showIntent IntentQuestion = "question"
+    showIntent IntentComplaint = "complaint"
 
 -- | Validate RoutingGraph at compile time.
-validRoutingGraph :: G.ValidGraphRecord RoutingGraph => ()
-validRoutingGraph = ()
+_validRoutingGraph :: G.ValidGraphRecord RoutingGraph => ()
+_validRoutingGraph = ()

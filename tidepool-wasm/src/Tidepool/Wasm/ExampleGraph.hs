@@ -1,6 +1,8 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
+{-# OPTIONS_GHC -Wno-incomplete-patterns #-}
+-- Pattern exhaustiveness checker doesn't understand GADT constraints for OneOf
 
 -- | Example graph demonstrating multi-node branching with effects.
 --
@@ -49,10 +51,10 @@ import GHC.Generics (Generic)
 import Tidepool.Graph.Types (type (:@), Needs, UsesEffects, Exit, Self)
 import Tidepool.Graph.Generic (GraphMode(..), type (:-))
 import qualified Tidepool.Graph.Generic as G (Entry, Exit, LogicNode)
-import Tidepool.Graph.Goto (Goto, GotoChoice, OneOf, To, gotoChoice, gotoExit, gotoSelf)
+import Tidepool.Graph.Goto (Goto, GotoChoice, To, gotoChoice, gotoExit)
 import Tidepool.Graph.Goto.Internal (GotoChoice(..), OneOf(..))  -- For dispatch
 
-import Tidepool.Wasm.Effect (WasmM, logInfo, logError, llmComplete)
+import Tidepool.Wasm.Effect (WasmM, logInfo, llmComplete)
 
 
 -- ============================================================================

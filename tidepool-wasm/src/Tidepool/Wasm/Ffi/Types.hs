@@ -25,11 +25,9 @@ module Tidepool.Wasm.Ffi.Types
   , module Tidepool.Wasm.Runner
   ) where
 
-import Data.Aeson (encode, eitherDecodeStrict)
+import Data.Aeson (encode)
 import Data.IORef (IORef, writeIORef)
 import Data.Text (Text)
-import qualified Data.Text as T
-import Data.Text.Encoding (encodeUtf8)
 import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.Encoding as TLE
 
@@ -90,7 +88,7 @@ wasmResultToOutputGeneric
   -> WasmResult a       -- ^ The result to convert
   -> (a -> StepOutput)  -- ^ How to convert the final value
   -> IO StepOutput
-wasmResultToOutputGeneric stateRef nodeName (WasmComplete a) toOutput = do
+wasmResultToOutputGeneric stateRef _nodeName (WasmComplete a) toOutput = do
   writeIORef stateRef Idle
   pure $ toOutput a
 

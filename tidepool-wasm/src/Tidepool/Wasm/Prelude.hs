@@ -62,7 +62,6 @@ module Tidepool.Wasm.Prelude
   , Exit
   , LogicNode
     -- ** Mode Application
-  , type (:-)
   , GraphMode(..)
   , AsGraph
     -- ** Annotations
@@ -146,8 +145,8 @@ import Tidepool.Graph.Generic
 -- Transitions
 import Tidepool.Graph.Goto
   ( Goto
-  , GotoChoice(..)
-  , OneOf(..)
+  , GotoChoice
+  , OneOf
   , To
   , gotoChoice
   , gotoExit
