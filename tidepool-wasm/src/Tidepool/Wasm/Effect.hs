@@ -45,6 +45,11 @@ module Tidepool.Wasm.Effect
   , telegramMarkdown
   , telegramHtml
   , telegramAsk
+    -- ** Telegram (thread-aware)
+  , telegramSendTo
+  , telegramMarkdownTo
+  , telegramHtmlTo
+  , telegramAskIn
   , TelegramAskResult(..)
     -- ** State
   , getState
@@ -262,7 +267,7 @@ telegramSend :: Member (Yield SerializableEffect EffectResult) effs
              => Text  -- ^ Message text
              -> Eff effs Int
 telegramSend txt = do
-  result <- yield (EffTelegramSend txt "PlainText") (id @EffectResult)
+  result <- yield (EffTelegramSend txt "PlainText" Nothing) (id @EffectResult)
   case result of
     ResSuccess (Just v) -> case v of
       Number n -> pure $ round n
@@ -277,7 +282,7 @@ telegramMarkdown :: Member (Yield SerializableEffect EffectResult) effs
                  => Text  -- ^ Markdown text
                  -> Eff effs Int
 telegramMarkdown txt = do
-  result <- yield (EffTelegramSend txt "Markdown") (id @EffectResult)
+  result <- yield (EffTelegramSend txt "Markdown" Nothing) (id @EffectResult)
   case result of
     ResSuccess (Just v) -> case v of
       Number n -> pure $ round n
@@ -292,7 +297,7 @@ telegramHtml :: Member (Yield SerializableEffect EffectResult) effs
              => Text  -- ^ HTML text
              -> Eff effs Int
 telegramHtml txt = do
-  result <- yield (EffTelegramSend txt "HTML") (id @EffectResult)
+  result <- yield (EffTelegramSend txt "HTML" Nothing) (id @EffectResult)
   case result of
     ResSuccess (Just v) -> case v of
       Number n -> pure $ round n
@@ -314,7 +319,89 @@ telegramAsk :: Member (Yield SerializableEffect EffectResult) effs
             -> [(Text, Text)] -- ^ [(button label, callback data)]
             -> Eff effs (Either WasmError TelegramAskResult)
 telegramAsk message buttons = do
-  let eff = EffTelegramAsk message "Markdown" buttons
+  let eff = EffTelegramAsk message "Markdown" buttons Nothing
+  result <- yield eff (id @EffectResult)
+  pure $ case result of
+    ResSuccess (Just v) -> case fromJSON v of
+      Success askResult -> Right askResult
+      Error err         -> Left $ parseFailed eff "TelegramAskResult" v (T.pack err)
+    ResSuccess Nothing  -> Left $ emptyResult eff "Telegram user response"
+    ResError msg        -> Left $ effectFailed eff msg
+
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- Thread-Aware Telegram Functions
+-- ────────────────────────────────────────────────────────────────────────────
+
+-- | Send a plain text message to a specific Telegram thread/topic.
+--
+-- Yields 'EffTelegramSend' with thread ID, returns message ID.
+-- Fire-and-forget semantics - doesn't block for response.
+--
+-- Use for:
+-- - Group forums with topics enabled
+-- - Private chats with topics (if bot supports it)
+telegramSendTo :: Member (Yield SerializableEffect EffectResult) effs
+               => Int   -- ^ Thread/topic ID
+               -> Text  -- ^ Message text
+               -> Eff effs Int
+telegramSendTo threadId txt = do
+  result <- yield (EffTelegramSend txt "PlainText" (Just threadId)) (id @EffectResult)
+  case result of
+    ResSuccess (Just v) -> case v of
+      Number n -> pure $ round n
+      _        -> pure 0
+    ResSuccess Nothing  -> pure 0
+    ResError msg        -> error $ "Telegram send failed: " <> T.unpack msg
+
+-- | Send a Markdown-formatted message to a specific Telegram thread/topic.
+--
+-- Yields 'EffTelegramSend' with Markdown parse mode and thread ID.
+telegramMarkdownTo :: Member (Yield SerializableEffect EffectResult) effs
+                   => Int   -- ^ Thread/topic ID
+                   -> Text  -- ^ Markdown text
+                   -> Eff effs Int
+telegramMarkdownTo threadId txt = do
+  result <- yield (EffTelegramSend txt "Markdown" (Just threadId)) (id @EffectResult)
+  case result of
+    ResSuccess (Just v) -> case v of
+      Number n -> pure $ round n
+      _        -> pure 0
+    ResSuccess Nothing  -> pure 0
+    ResError msg        -> error $ "Telegram send failed: " <> T.unpack msg
+
+-- | Send an HTML-formatted message to a specific Telegram thread/topic.
+--
+-- Yields 'EffTelegramSend' with HTML parse mode and thread ID.
+telegramHtmlTo :: Member (Yield SerializableEffect EffectResult) effs
+               => Int   -- ^ Thread/topic ID
+               -> Text  -- ^ HTML text
+               -> Eff effs Int
+telegramHtmlTo threadId txt = do
+  result <- yield (EffTelegramSend txt "HTML" (Just threadId)) (id @EffectResult)
+  case result of
+    ResSuccess (Just v) -> case v of
+      Number n -> pure $ round n
+      _        -> pure 0
+    ResSuccess Nothing  -> pure 0
+    ResError msg        -> error $ "Telegram send failed: " <> T.unpack msg
+
+-- | Ask user with custom buttons in a specific Telegram thread/topic.
+--
+-- Yields 'EffTelegramAsk' with thread ID, blocks until user responds.
+-- The user can:
+-- 1. Click a button → 'TelegramButton' with the action
+-- 2. Send text instead → 'TelegramText' with the message
+-- 3. Click a stale button → 'TelegramStaleButton'
+--
+-- Returns @Left WasmError@ on failure, @Right TelegramAskResult@ on success.
+telegramAskIn :: Member (Yield SerializableEffect EffectResult) effs
+              => Int            -- ^ Thread/topic ID
+              -> Text           -- ^ Message to display
+              -> [(Text, Text)] -- ^ [(button label, callback data)]
+              -> Eff effs (Either WasmError TelegramAskResult)
+telegramAskIn threadId message buttons = do
+  let eff = EffTelegramAsk message "Markdown" buttons (Just threadId)
   result <- yield eff (id @EffectResult)
   pure $ case result of
     ResSuccess (Just v) -> case fromJSON v of

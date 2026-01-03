@@ -106,10 +106,12 @@ instance Arbitrary SerializableEffect where
     , EffTelegramSend
         <$> arbitrary
         <*> elements ["PlainText", "Markdown", "HTML"]
+        <*> arbitrary  -- threadId: Maybe Int
     , EffTelegramAsk
         <$> arbitrary
         <*> elements ["PlainText", "Markdown", "HTML"]
         <*> listOf ((,) <$> arbitrary <*> arbitrary)
+        <*> arbitrary  -- threadId: Maybe Int
     ]
 
   shrink (EffLlmComplete node sys user schema model) =
@@ -132,13 +134,15 @@ instance Arbitrary SerializableEffect where
   shrink (EffHabitica op payload) =
     [ EffLogInfo op Nothing ]
     ++ [ EffHabitica op payload' | payload' <- shrink payload ]
-  shrink (EffTelegramSend txt parseMode) =
+  shrink (EffTelegramSend txt parseMode threadId) =
     [ EffLogInfo txt Nothing ]
-    ++ [ EffTelegramSend txt' parseMode | txt' <- shrink txt ]
-  shrink (EffTelegramAsk txt parseMode buttons) =
+    ++ [ EffTelegramSend txt' parseMode threadId | txt' <- shrink txt ]
+    ++ [ EffTelegramSend txt parseMode Nothing | Just _ <- [threadId] ]  -- Remove threadId
+  shrink (EffTelegramAsk txt parseMode buttons threadId) =
     [ EffLogInfo txt Nothing ]
-    ++ [ EffTelegramAsk txt' parseMode buttons | txt' <- shrink txt ]
-    ++ [ EffTelegramAsk txt parseMode buttons' | buttons' <- shrink buttons ]
+    ++ [ EffTelegramAsk txt' parseMode buttons threadId | txt' <- shrink txt ]
+    ++ [ EffTelegramAsk txt parseMode buttons' threadId | buttons' <- shrink buttons ]
+    ++ [ EffTelegramAsk txt parseMode buttons Nothing | Just _ <- [threadId] ]  -- Remove threadId
 
 
 -- | Arbitrary EffectResult covering success and error cases

@@ -61,13 +61,15 @@ export interface SendMessageResult {
  * @param chatId - Target chat ID
  * @param text - Message text
  * @param parseMode - Optional: "HTML" or "Markdown"
+ * @param threadId - Optional: Thread/topic ID for group forums or private chat topics
  * @returns Message result with message_id, or null on failure
  */
 export async function sendMessage(
   token: string,
   chatId: number,
   text: string,
-  parseMode?: "HTML" | "Markdown"
+  parseMode?: "HTML" | "Markdown",
+  threadId?: number
 ): Promise<SendMessageResult | null> {
   const body: Record<string, unknown> = {
     chat_id: chatId,
@@ -75,6 +77,9 @@ export async function sendMessage(
   };
   if (parseMode) {
     body.parse_mode = parseMode;
+  }
+  if (threadId !== undefined) {
+    body.message_thread_id = threadId;
   }
 
   const result = await callTelegram<SendMessageResult>(token, "sendMessage", body);
@@ -202,6 +207,7 @@ function toTelegramButtonWithMapping(
  * @param text - Message text
  * @param buttons - 2D array of buttons (rows x columns)
  * @param nonce - Nonce for validation (to detect stale buttons)
+ * @param threadId - Optional: Thread/topic ID for group forums or private chat topics
  * @returns Result with message_id and buttonMapping, or null on failure
  */
 export async function sendMessageWithButtons(
@@ -209,7 +215,8 @@ export async function sendMessageWithButtons(
   chatId: number,
   text: string,
   buttons: TelegramInlineButton[][],
-  nonce: string
+  nonce: string,
+  threadId?: number
 ): Promise<SendButtonsResult | null> {
   const buttonMapping: Record<string, unknown> = {};
   let buttonIndex = 0;
@@ -229,6 +236,9 @@ export async function sendMessageWithButtons(
       inline_keyboard: inlineKeyboard,
     },
   };
+  if (threadId !== undefined) {
+    body.message_thread_id = threadId;
+  }
 
   const result = await callTelegram<SendMessageResult>(token, "sendMessage", body);
   if (!result.ok) {
@@ -251,6 +261,9 @@ export async function sendMessageWithButtons(
 /**
  * Edit a message's text and optionally remove its inline keyboard.
  * Used to update button messages after selection.
+ *
+ * Note: message_thread_id is not needed for editing - edits always go to the same thread
+ * as the original message.
  *
  * @param token - Bot API token
  * @param chatId - Target chat ID

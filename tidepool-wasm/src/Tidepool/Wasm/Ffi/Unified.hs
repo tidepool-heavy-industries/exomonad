@@ -38,6 +38,7 @@ import GHC.Wasm.Prim (JSString(..), fromJSString, toJSString)
 #endif
 
 -- Import the registry which has all the logic
+import qualified Data.Text as T
 import qualified Tidepool.Wasm.Registry as R
 
 

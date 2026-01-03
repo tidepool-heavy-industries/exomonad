@@ -269,6 +269,8 @@ data SerializableEffect
       -- ^ Message text to send
       , effTgParseMode :: Text
       -- ^ Parse mode: "PlainText" | "Markdown" | "HTML"
+      , effTgThreadId :: Maybe Int
+      -- ^ Optional thread/topic ID for group forums or private chat topics
       }
   | EffTelegramAsk
       { effTgAskText :: Text
@@ -277,6 +279,8 @@ data SerializableEffect
       -- ^ Parse mode: "PlainText" | "Markdown" | "HTML"
       , effTgButtons :: [(Text, Text)]
       -- ^ Button options: [(label, callback)]
+      , effTgAskThreadId :: Maybe Int
+      -- ^ Optional thread/topic ID for group forums or private chat topics
       }
   | EffLlmCall
       { effLlmNode :: Text
@@ -350,17 +354,17 @@ instance ToJSON SerializableEffect where
     , "eff_hab_op" .= op
     , "eff_hab_payload" .= payload
     ]
-  toJSON (EffTelegramSend txt parseMode) = object
+  toJSON (EffTelegramSend txt parseMode threadId) = object $
     [ "type" .= ("TelegramSend" :: Text)
     , "eff_tg_text" .= txt
     , "eff_tg_parse_mode" .= parseMode
-    ]
-  toJSON (EffTelegramAsk txt parseMode buttons) = object
+    ] ++ maybe [] (\tid -> ["eff_tg_thread_id" .= tid]) threadId
+  toJSON (EffTelegramAsk txt parseMode buttons threadId) = object $
     [ "type" .= ("TelegramAsk" :: Text)
     , "eff_tg_text" .= txt
     , "eff_tg_parse_mode" .= parseMode
     , "eff_buttons" .= [[label, val] | (label, val) <- buttons]
-    ]
+    ] ++ maybe [] (\tid -> ["eff_tg_thread_id" .= tid]) threadId
   toJSON (EffLlmCall node msgs schema tools model) = object $
     [ "type" .= ("LlmCall" :: Text)
     , "eff_node" .= node
@@ -413,12 +417,14 @@ instance FromJSON SerializableEffect where
       "TelegramSend" -> EffTelegramSend
         <$> o .: "eff_tg_text"
         <*> o .: "eff_tg_parse_mode"
+        <*> o .:? "eff_tg_thread_id"
       "TelegramAsk" -> do
         txt <- o .: "eff_tg_text"
         parseMode <- o .: "eff_tg_parse_mode"
         buttonArrays <- o .: "eff_buttons" :: Parser [[Text]]
+        threadId <- o .:? "eff_tg_thread_id"
         let buttons = [(l, v) | [l, v] <- buttonArrays]
-        pure $ EffTelegramAsk txt parseMode buttons
+        pure $ EffTelegramAsk txt parseMode buttons threadId
       "LlmCall" -> EffLlmCall
         <$> o .: "eff_node"
         <*> o .: "eff_messages"
