@@ -147,13 +147,30 @@ export async function answerCallbackQuery(
 import type { TelegramInlineButton } from "tidepool-generated-ts";
 
 /**
+ * Truncate callback_data to fit Telegram's 64-byte limit.
+ * We keep the first 60 chars (leaving room for JSON quotes).
+ */
+function truncateCallbackData(data: unknown): string {
+  // Convert to string if not already
+  const str = typeof data === "string" ? data : JSON.stringify(data);
+  const MAX_LEN = 60; // Leave room for JSON encoding overhead
+  if (str.length <= MAX_LEN) {
+    return str;
+  }
+  // Truncate and add indicator
+  return str.slice(0, MAX_LEN - 3) + "...";
+}
+
+/**
  * Convert our InlineButton format to Telegram's InlineKeyboardButton.
  * We use callback_data which must be JSON-serialized string ≤ 64 bytes.
  */
 function toTelegramButton(button: TelegramInlineButton): Record<string, string> {
+  // truncateCallbackData handles any type and returns a truncated string
+  const truncatedData = truncateCallbackData(button.data);
   return {
     text: button.text,
-    callback_data: JSON.stringify(button.data),
+    callback_data: truncatedData, // Already a string, no need to JSON.stringify again
   };
 }
 
