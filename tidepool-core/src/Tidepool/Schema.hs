@@ -172,9 +172,22 @@ typeToText = \case
 --
 -- == Why These Constraints?
 --
--- - @getDoc@ needs compiled interface files to read docs
--- - @NoFieldSelectors@ (project default) suppresses field selectors
--- - Without selectors, @getDoc (DeclDoc fieldName)@ fails
+-- __Staging__: TH's @reify@ can only introspect types from already-compiled
+-- modules. Types in the same module haven't been compiled yet when the splice
+-- runs.
+--
+-- __FieldSelectors__: This is specifically required for @getDoc@, not @reify@.
+-- TH can see the record structure without field selectors via @reify@. However,
+-- we use @getDoc (DeclDoc fieldName)@ to retrieve Haddock comments, which looks
+-- for documentation attached to a /declaration/ with that name. With
+-- @FieldSelectors@, each record field generates a top-level accessor function
+-- (@name :: Person -> Text@), and Haddock attaches the @-- ^@ comment to that
+-- function. Without @FieldSelectors@, no such function exists, so @getDoc@
+-- returns @Nothing@.
+--
+-- If you don't need field descriptions in your schema, you could use the
+-- manual combinators (@objectSchema@, @emptySchema@) which don't require
+-- @FieldSelectors@.
 deriveJSONSchema :: Name -> Q Exp
 deriveJSONSchema typeName = do
   info <- reify typeName
@@ -216,10 +229,24 @@ deriveFieldSchema typeName _conName _fieldIdx (fieldName, _, fieldType) = do
 -- | Generate helpful error message for missing field docs
 schemaFieldError :: Name -> Name -> Type -> String
 schemaFieldError typeName fieldName fieldType = unlines
-  [ "Field '" ++ nameBase fieldName ++ "' in '" ++ nameBase typeName ++ "' needs docs for schema."
+  [ "deriveJSONSchema: Can't get docs for field '" ++ nameBase fieldName ++ "' in '" ++ nameBase typeName ++ "'"
   , ""
-  , "Add:  " ++ nameBase fieldName ++ " :: " ++ prettyType fieldType
-  , "      -- ^ " ++ typeHint fieldType
+  , "This happens when either:"
+  , ""
+  , "  1. The field is missing a Haddock comment (must use -- ^ format after field)"
+  , ""
+  , "  2. The type's module doesn't have {-# LANGUAGE FieldSelectors #-}"
+  , "     (getDoc uses DeclDoc which looks up the field selector function;"
+  , "     without FieldSelectors, that function doesn't exist)"
+  , ""
+  , "Fix option 1 - Add documentation:"
+  , ""
+  , "  " ++ nameBase fieldName ++ " :: " ++ prettyType fieldType
+  , "    -- ^ " ++ typeHint fieldType
+  , ""
+  , "Fix option 2 - Enable FieldSelectors in the module defining '" ++ nameBase typeName ++ "':"
+  , ""
+  , "  {-# LANGUAGE FieldSelectors #-}"
   ]
 
 -- | Pretty-print a type without internal module qualifiers
@@ -303,9 +330,11 @@ class HasJSONSchema a where
 --
 -- Same requirements as 'deriveJSONSchema':
 --
--- 1. Type must be in a separate, already-compiled module
--- 2. That module must have @{-\# LANGUAGE FieldSelectors \#-}@
--- 3. All fields must have Haddock documentation
+-- 1. Type must be in a separate, already-compiled module (TH staging)
+-- 2. That module must have @{-\# LANGUAGE FieldSelectors \#-}@ (for @getDoc@)
+-- 3. All fields must have @-- ^@ Haddock documentation
+--
+-- See 'deriveJSONSchema' for detailed explanation of why these are required.
 --
 -- @
 -- $(deriveHasJSONSchema ''MyInput)
