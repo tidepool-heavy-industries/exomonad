@@ -362,7 +362,7 @@ describe("handleLlmCall", () => {
       await handleLlmCall(effect, env);
 
       expect(env.AI.run).toHaveBeenCalledWith(
-        "@cf/meta/llama-4-scout-17b-16e-instruct",
+        "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
         expect.objectContaining({
           messages: [{ role: "user", content: "Hello" }],
         })

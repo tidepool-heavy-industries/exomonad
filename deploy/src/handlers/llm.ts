@@ -229,8 +229,12 @@ export async function handleLlmCall(
     const hasTools = tools.length > 0;
     const hasSchema = effect.eff_schema !== null && effect.eff_schema !== undefined;
 
-    // Use llama-4-scout for tool calls - best function calling support on CF AI
-    const model = "@cf/meta/llama-4-scout-17b-16e-instruct";
+    // Use llama-3.3-70b for tool calls
+    // Note: llama-4-scout outputs tool calls as text instead of populating tool_calls array
+    // Note: hermes-2-pro has 1024 token context limit (too small for our prompts)
+    // Note: llama-3.3 sometimes returns malformed [{}] in tool_calls (we filter these)
+    const model = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+    const maxTokens = 2048;
 
     // ═══════════════════════════════════════════════════════════════════════
     // PHASE 1: Tool decision pass (if tools provided)
@@ -241,7 +245,7 @@ export async function handleLlmCall(
       const toolResponse = (await env.AI.run(model, {
         messages,
         tools,
-        max_tokens: 2048,
+        max_tokens: maxTokens,
       })) as CfAiResponse;
 
       console.log("[LlmCall] Phase 1 response:", JSON.stringify(toolResponse));
@@ -298,7 +302,7 @@ export async function handleLlmCall(
 
       const schemaResponse = (await env.AI.run(model, {
         messages,
-        max_tokens: 2048,
+        max_tokens: maxTokens,
         response_format: {
           type: "json_schema",
           json_schema: {
@@ -331,7 +335,7 @@ export async function handleLlmCall(
 
     const response = (await env.AI.run(model, {
       messages,
-      max_tokens: 2048,
+      max_tokens: maxTokens,
     })) as CfAiResponse;
 
     const responseText = response.response
