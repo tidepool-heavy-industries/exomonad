@@ -272,14 +272,53 @@ type family NodeHandler nodeDef es where
 
 -- | Unified accumulator that peels annotations and dispatches based on base kind.
 --
--- Parameters:
---   nodeDef  - current node being processed (may have :@ annotations)
---   origNode - original full node definition (for error messages)
---   es       - effect stack from AsHandler
---   needs    - accumulated Needs types (collected in order, not reversed)
---   mTpl     - Maybe found Template type (for LLM nodes)
---   mSchema  - Maybe found Schema type (for LLM nodes)
---   mEffs    - Maybe found UsesEffects (for Logic nodes, or LLM with routing)
+-- = Strategy: Outside-In Annotation Peeling
+--
+-- Given a node like:
+--
+-- @
+-- LLMNode :@ Needs '[A, B] :@ Template T :@ Schema S :@ Vision
+-- @
+--
+-- The family processes annotations from left to right (outside-in), accumulating:
+--
+-- - Needs types → @needs@ parameter
+-- - Template type → @mTpl@ (Maybe)
+-- - Schema type → @mSchema@ (Maybe)
+-- - UsesEffects → @mEffs@ (Maybe)
+--
+-- When it reaches the bare @LLMNode@ or @LogicNode@, it has all the information
+-- needed to construct the handler type.
+--
+-- = Parameters (7 total)
+--
+-- @
+-- NodeHandlerDispatch nodeDef origNode es needs mTpl mSchema mEffs
+--                     ^        ^         ^  ^     ^    ^       ^
+--                     |        |         |  |     |    |       |
+--                     |        |         |  |     |    |       +-- Maybe UsesEffects (for routing)
+--                     |        |         |  |     |    +---------- Maybe Schema type (LLM output)
+--                     |        |         |  |     +--------------- Maybe Template type (LLM context)
+--                     |        |         |  +--------------------- Accumulated Needs types (handler params)
+--                     |        |         +------------------------ Effect stack from AsHandler
+--                     |        +---------------------------------- Original node (for errors)
+--                     +------------------------------------------- Current node being processed
+-- @
+--
+-- = Clause Groups
+--
+-- 1. **Lines 286-287**: Needs accumulation (appends to list)
+-- 2. **Lines 289-329**: Template/Schema recording (with duplicate detection)
+-- 3. **Lines 331-339**: Skipped annotations (Vision, Tools, Memory, System)
+-- 4. **Lines 341-360**: UsesEffects recording (with duplicate detection)
+-- 5. **Lines 362-468**: LLMNode terminal cases (3 handler variants)
+-- 6. **Lines 470-510**: LogicNode terminal cases
+--
+-- = Why origNode is Preserved
+--
+-- The @origNode@ parameter never changes. It's the original full node definition
+-- used in error messages to show the user what they wrote, even after annotations
+-- have been peeled away.
 type NodeHandlerDispatch :: Type -> Type -> [Effect] -> [Type] -> Maybe Type -> Maybe Type -> Maybe Type -> Type
 type family NodeHandlerDispatch nodeDef origNode es needs mTpl mSchema mEffs where
   -- Peel Needs annotation - accumulate types
@@ -361,6 +400,31 @@ type family NodeHandlerDispatch nodeDef origNode es needs mTpl mSchema mEffs whe
 
   -- ══════════════════════════════════════════════════════════════════════════
   -- LLMNode Base Cases
+  -- ══════════════════════════════════════════════════════════════════════════
+  --
+  -- LLM handlers come in three variants based on what annotations are present:
+  --
+  -- 1. **BEFORE-ONLY** (Template + Schema, no UsesEffects)
+  --
+  --    Handler: @needs -> Eff es (TemplateContext tpl)@
+  --    Flow: Build context → Render template → LLM call → Parse schema
+  --    Routing: Implicit via Schema → Needs data flow
+  --    Use case: Linear graphs where LLM output flows to next node
+  --
+  -- 2. **AFTER-ONLY** (Schema + UsesEffects, no Template)
+  --
+  --    Handler: @needs -> Eff es (GotoChoice targets)@
+  --    Flow: Use default context → LLM call → Route based on output
+  --    Routing: Explicit via gotoChoice/gotoExit
+  --    Use case: Branching based on LLM classification
+  --
+  -- 3. **BOTH** (Template + Schema + UsesEffects)
+  --
+  --    Handler: @LLMHandler needs schema targets es tpl@
+  --    Flow: Build context → Render template → LLM call → Route based on output
+  --    Routing: Explicit via gotoChoice/gotoExit
+  --    Use case: Custom prompts AND custom routing
+  --
   -- ══════════════════════════════════════════════════════════════════════════
 
   -- LLMNode with Template only (before-only): handler must use LLMBefore constructor

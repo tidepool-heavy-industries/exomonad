@@ -14,6 +14,7 @@ library
     exposed-modules:
         Tidepool.Wasm.Prelude
         Tidepool.Wasm.Effect
+        Tidepool.Wasm.Error
         Tidepool.Wasm.CfTool
         Tidepool.Wasm.TypedTool
         Tidepool.Wasm.ExampleGraph

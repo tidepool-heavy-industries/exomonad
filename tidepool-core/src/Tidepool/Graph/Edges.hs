@@ -81,12 +81,41 @@ type family GetSchema node where
 
 -- | Extract the UsesEffects stack from a Logic node.
 --
+-- = Polykind Design
+--
+-- Uses @forall k@ to support polykinded effect lists. This is critical because:
+--
+-- 1. The 'Effect' kind is @(Type -> Type) -> Type -> Type@, not @Type@
+-- 2. Without polykind quantification, GHC cannot determine the kind of @effs@
+-- 3. Pattern matching on @Goto@ effects requires knowing the list has kind @[Effect]@
+--
+-- = How It Works
+--
+-- The type variable @k@ remains polymorphic, enabling this family to work with:
+--
+-- - @UsesEffects '[State S, Goto \"foo\" A]@ -- kind @[Effect]@
+-- - Future annotations with different kinds
+--
+-- This flexibility is essential for downstream type families like 'GetGotoTargets'
+-- (line 154) which need to pattern match on individual effects.
+--
+-- = Usage Example
+--
 -- @
--- GetUsesEffects (LogicNode :@ Needs '[A] :@ UsesEffects '[State S, Goto "bar" B])
---   = 'Just '[State S, Goto "bar" B]
+-- GetUsesEffects (LogicNode :@ Needs '[A] :@ UsesEffects '[State S, Goto \"bar\" B])
+--   = 'Just '[State S, Goto \"bar\" B]  -- kind: Maybe [Effect]
 -- @
 --
--- Note: The effect list can have any kind (usually Effect).
+-- = Why This Matters
+--
+-- Downstream type families like 'GotoTargetsFromDef' in Generic.hs apply @\@Effect@
+-- explicitly to resolve kind ambiguity:
+--
+-- @
+-- type GotoTargetsFromDef def = GotoTargetsFromEffects (GetUsesEffects \@Effect def)
+-- @
+--
+-- Without polykind here, that explicit kind application would fail.
 type GetUsesEffects :: forall k. Type -> Maybe [k]
 type family GetUsesEffects node where
   GetUsesEffects (node :@ UsesEffects effs) = 'Just effs
@@ -144,13 +173,40 @@ type family GetMemory node where
 
 -- | Extract all Goto targets from an effect list.
 --
--- Returns a list of (target, payload) type pairs.
--- Note: This works with the polykinded Effect type.
+-- Returns a list of (target, payload) type pairs for named node targets.
+-- 'Goto Exit' transitions are excluded (handled separately by 'HasGotoExit').
+--
+-- = Pattern Matching Strategy
+--
+-- The type family uses three distinct patterns:
+--
+-- 1. @Goto (name :: Symbol) payload@ -- Named node targets
+--
+--    - The @:: Symbol@ annotation disambiguates from @Goto Exit@
+--    - Yields @'(name, payload)@ pair
+--
+-- 2. @Goto Exit payload@ -- Exit transitions (skipped)
+--
+--    - Not included in named targets
+--    - See 'GetGotoExitPayload' for exit handling
+--
+-- 3. @_ ': rest@ -- All other effects
+--
+--    - Recursively process the rest of the list
+--
+-- = Example
 --
 -- @
--- GetGotoTargets '[State S, Goto "foo" A, Log, Goto "bar" B]
---   = '[ '("foo", A), '("bar", B) ]
+-- GetGotoTargets '[State S, Goto \"foo\" A, Log, Goto \"bar\" B, Goto Exit R]
+--   = '[ '(\"foo\", A), '(\"bar\", B) ]
+--   -- Exit is excluded, non-Goto effects are skipped
 -- @
+--
+-- = Polykind Context
+--
+-- Note the @forall k@ on line 183. This allows the effect list to have kind @[Effect]@
+-- while still pattern matching on individual effects. The polykind is inherited from
+-- 'GetUsesEffects' (line 119) which initially extracts the effect list.
 type GetGotoTargets :: forall k. [k] -> [(Symbol, Type)]
 type family GetGotoTargets effs where
   GetGotoTargets '[] = '[]

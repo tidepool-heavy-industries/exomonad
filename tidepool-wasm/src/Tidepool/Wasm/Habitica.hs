@@ -76,6 +76,12 @@ import qualified Data.Text as T
 import GHC.Generics (Generic)
 
 import Tidepool.Wasm.WireTypes (SerializableEffect(..), EffectResult(..))
+import Tidepool.Wasm.Error
+  ( WasmError
+  , effectFailed
+  , parseFailed
+  , emptyResult
+  )
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -261,23 +267,27 @@ data HabiticaOp a where
 -- This function encodes the operation to the wire format, yields to TypeScript
 -- for execution, and decodes the response to the expected type.
 --
+-- Returns @Left WasmError@ on failure, @Right a@ on success.
+--
 -- Example:
 --
 -- @
--- todos <- habitica FetchTodos
--- todoId <- habitica (CreateTodo "Buy groceries")
--- _ <- habitica (AddChecklistItem todoId "Milk")
+-- result <- habitica FetchTodos
+-- case result of
+--   Left err -> -- handle error
+--   Right todos -> -- use todos
 -- @
 habitica :: Member (Yield SerializableEffect EffectResult) effs
          => HabiticaOp a
-         -> Eff effs a
+         -> Eff effs (Either WasmError a)
 habitica op = do
   let (opName, payload) = encodeOp op
-  result <- yield (EffHabitica opName payload) (id @EffectResult)
-  case result of
-    ResSuccess (Just v) -> decodeResult op v
-    ResSuccess Nothing  -> error "Habitica: unexpected empty result"
-    ResError msg        -> error $ "Habitica call failed: " <> T.unpack msg
+      eff = EffHabitica opName payload
+  result <- yield eff (id @EffectResult)
+  pure $ case result of
+    ResSuccess (Just v) -> decodeResult eff op v
+    ResSuccess Nothing  -> Left $ emptyResult eff "Habitica API response"
+    ResError msg        -> Left $ effectFailed eff msg
 
 -- | Encode an operation to wire format (operation name + JSON payload).
 encodeOp :: HabiticaOp a -> (Text, Value)
@@ -307,31 +317,31 @@ encodeOp = \case
       ])
 
 -- | Decode the result based on the operation type.
-decodeResult :: HabiticaOp a -> Value -> Eff effs a
-decodeResult op v = case op of
-  GetUser -> parse @UserInfo v
-  GetTasks _ -> parse @[HabiticaTask] v
-  FetchTodos -> parse @[FetchedTodo] v
-  ScoreTask _ _ -> parse @ScoreResult v
+decodeResult :: SerializableEffect -> HabiticaOp a -> Value -> Either WasmError a
+decodeResult eff op v = case op of
+  GetUser -> parse @UserInfo "UserInfo" v
+  GetTasks _ -> parse @[HabiticaTask] "[HabiticaTask]" v
+  FetchTodos -> parse @[FetchedTodo] "[FetchedTodo]" v
+  ScoreTask _ _ -> parse @ScoreResult "ScoreResult" v
   CreateTodo _ -> parseTodoId v
   AddChecklistItem _ _ -> parseChecklistItemId v
   where
-    parse :: FromJSON a => Value -> Eff effs a
-    parse val = case fromJSON val of
-      Success a -> pure a
-      Error err -> error $ "Failed to parse Habitica response: " <> err
+    parse :: FromJSON a => Text -> Value -> Either WasmError a
+    parse typeName val = case fromJSON val of
+      Success a -> Right a
+      Error err -> Left $ parseFailed eff typeName val (T.pack err)
 
     -- CreateTodo returns { unTodoId: "..." }
-    parseTodoId :: Value -> Eff effs TodoId
+    parseTodoId :: Value -> Either WasmError TodoId
     parseTodoId val = case fromJSON val of
-      Success (tid :: TodoIdResponse) -> pure (TodoId tid.tirTodoId)
-      Error err -> error $ "Failed to parse TodoId: " <> err
+      Success (tid :: TodoIdResponse) -> Right (TodoId tid.tirTodoId)
+      Error err -> Left $ parseFailed eff "TodoId" val (T.pack err)
 
     -- AddChecklistItem returns just the string ID
-    parseChecklistItemId :: Value -> Eff effs ChecklistItemId
+    parseChecklistItemId :: Value -> Either WasmError ChecklistItemId
     parseChecklistItemId val = case fromJSON val of
-      Success (t :: Text) -> pure (ChecklistItemId t)
-      Error err -> error $ "Failed to parse ChecklistItemId: " <> err
+      Success (t :: Text) -> Right (ChecklistItemId t)
+      Error err -> Left $ parseFailed eff "ChecklistItemId" val (T.pack err)
 
 -- Helper newtype for parsing CreateTodo response
 newtype TodoIdResponse = TodoIdResponse { tirTodoId :: Text }
