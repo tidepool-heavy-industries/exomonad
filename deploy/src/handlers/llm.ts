@@ -2,6 +2,7 @@
  * LLM effect handlers.
  *
  * Handles LlmComplete and LlmCall effects by calling Cloudflare AI.
+ * Uses direct env.AI.run for tool-aware calls (WASM handles the tool loop).
  */
 
 import type {
@@ -12,6 +13,7 @@ import type {
   LlmCallResult,
 } from "tidepool-generated-ts";
 import { successResult, errorResult } from "tidepool-generated-ts";
+import type { RoleScopedChatInput } from "@cloudflare/workers-types";
 
 /**
  * Rate limit configuration.
@@ -195,6 +197,9 @@ function parseAiResponse(response: unknown): unknown {
 /**
  * Handle LlmCall effect - tool-aware LLM API call.
  *
+ * Uses direct env.AI.run for single-shot LLM calls.
+ * WASM handles the tool loop via runToolLoop in Automat.Graph.hs.
+ *
  * Returns a discriminated result:
  * - `done`: LLM finished with final content
  * - `needs_tools`: LLM wants to call tools, caller should execute and continue
@@ -203,10 +208,6 @@ function parseAiResponse(response: unknown): unknown {
  * 1. Execute tools with full effect access (can yield TelegramAsk, etc.)
  * 2. Continue LLM conversation with tool results
  * 3. Repeat until `done`
- *
- * Uses Cloudflare Workers AI function calling format:
- * - Response has `tool_calls` array when model wants to call tools
- * - Response has `response` string for text output
  */
 export async function handleLlmCall(
   effect: LlmCallEffect,
@@ -221,54 +222,58 @@ export async function handleLlmCall(
   }
 
   try {
-    // Convert WireMessage format to Cloudflare AI format
-    const messages = effect.eff_messages.map((msg) => ({
+    // Convert WireMessage format to Cloudflare AI RoleScopedChatInput format
+    const messages: RoleScopedChatInput[] = effect.eff_messages.map((msg) => ({
       role: msg.role as "system" | "user" | "assistant",
       content: convertContentBlocks(msg.content),
     }));
 
-    // Build request options
-    const options: Record<string, unknown> = {
+    // Convert WASM tool definitions to CF AI format
+    // WASM sends OpenAI format: {type: "function", function: {name, description, parameters}}
+    // CF AI wants: {name, description, parameters}
+    const tools = convertToolsForCfAi(effect.eff_tools ?? []);
+
+    // Use llama-4-scout for tool calls - best function calling support on CF AI
+    // llama-3.3 returns malformed tool_calls: [{}]
+    // hermes-2-pro has max_tokens limit of 1024
+    const model = "@cf/meta/llama-4-scout-17b-16e-instruct";
+
+    console.log("[LlmCall] Calling AI.run with", tools.length, "tools");
+
+    // Direct AI.run call - single invocation, no recursive loop
+    // This is intentionally NOT using runWithTools which makes a "final response" call
+    const response = (await env.AI.run(model, {
       messages,
-      max_tokens: 4096,
-    };
+      tools: tools.length > 0 ? tools : undefined,
+      max_tokens: 2048,
+    })) as CfAiResponse;
 
-    // Add tools if provided (using Cloudflare AI format)
-    if (effect.eff_tools && effect.eff_tools.length > 0) {
-      options.tools = effect.eff_tools;
-    }
+    // Debug: log raw response
+    console.log("[LlmCall] AI.run response:", JSON.stringify(response));
 
-    // Add response schema if provided (for structured output on final response)
-    if (effect.eff_schema) {
-      options.response_format = {
-        type: "json_schema",
-        json_schema: {
-          name: "effect_output",
-          strict: true,
-          schema: effect.eff_schema,
-        },
-      };
-    }
+    // Filter out malformed tool calls (CF AI sometimes returns [{}])
+    const validToolCalls = (response.tool_calls ?? []).filter(
+      (tc) => tc.name !== undefined && tc.name !== null
+    );
 
-    // Use llama for all calls - it's higher quality and we'll iterate on tool support
-    const model = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+    // Helper to convert response to string
+    const responseText = response.response
+      ? typeof response.response === "string"
+        ? response.response
+        : JSON.stringify(response.response)
+      : null;
 
-    const response = (await env.AI.run(model, options)) as CfAiResponse;
-
-    // Check if LLM wants to use tools (CF AI returns tool_calls array)
-    if (response.tool_calls && response.tool_calls.length > 0) {
+    if (validToolCalls.length > 0) {
       const result: LlmCallResult = {
         type: "needs_tools",
-        tool_calls: response.tool_calls.map((tc, idx) => ({
+        tool_calls: validToolCalls.map((tc, idx) => ({
           // Generate deterministic ID since CF AI doesn't provide one
           id: `tool_${idx}_${tc.name}`,
           name: tc.name,
           input: tc.arguments,
         })),
         // Include any text response as content
-        content: response.response
-          ? [{ type: "text" as const, text: response.response }]
-          : [],
+        content: responseText ? [{ type: "text" as const, text: responseText }] : [],
       };
       return successResult(result);
     }
@@ -276,9 +281,7 @@ export async function handleLlmCall(
     // LLM finished - return final content
     const result: LlmCallResult = {
       type: "done",
-      content: response.response
-        ? [{ type: "text" as const, text: response.response }]
-        : [],
+      content: responseText ? [{ type: "text" as const, text: responseText }] : [],
     };
     return successResult(result);
   } catch (err) {
@@ -294,6 +297,71 @@ export async function handleLlmCall(
 
     return errorResult(`LLM error: ${message}`);
   }
+}
+
+/**
+ * Tool definition format for Cloudflare AI.
+ * CF AI expects OpenAI format: {type: "function", function: {...}}
+ */
+interface CfAiToolDef {
+  type: "function";
+  function: {
+    name: string;
+    description: string;
+    parameters?: {
+      type: "object" | string;
+      properties: Record<string, { type: string; description?: string }>;
+      required: string[];
+    };
+  };
+}
+
+/**
+ * Convert WASM tool definitions to Cloudflare AI format.
+ *
+ * WASM already sends OpenAI format, but we normalize/validate here.
+ * CF AI expects: {type: "function", function: {name, description, parameters}}
+ */
+function convertToolsForCfAi(wasmTools: unknown[]): CfAiToolDef[] {
+  return wasmTools
+    .map((tool) => {
+      const t = tool as {
+        type?: string;
+        function?: { name: string; description: string; parameters?: unknown };
+        name?: string;
+        description?: string;
+        parameters?: unknown;
+      };
+
+      // Handle OpenAI format: {type: "function", function: {...}}
+      // This is what WASM sends, just pass through
+      if (t.type === "function" && t.function) {
+        return {
+          type: "function" as const,
+          function: {
+            name: t.function.name,
+            description: t.function.description,
+            parameters: t.function.parameters as CfAiToolDef["function"]["parameters"],
+          },
+        };
+      }
+
+      // Handle flat format: wrap in OpenAI format
+      if (t.name) {
+        return {
+          type: "function" as const,
+          function: {
+            name: t.name,
+            description: t.description ?? "",
+            parameters: t.parameters as CfAiToolDef["function"]["parameters"],
+          },
+        };
+      }
+
+      console.warn("[LlmCall] Unknown tool format:", tool);
+      return null;
+    })
+    .filter((t): t is NonNullable<typeof t> => t !== null);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

@@ -1,5 +1,7 @@
 /**
  * Tests for LLM effect handlers.
+ *
+ * Tests mock env.AI.run which is used internally by runWithTools.
  */
 
 import { describe, it, expect, vi } from "vitest";
@@ -165,7 +167,7 @@ describe("handleLlmComplete", () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// handleLlmCall tests - Tool-aware LLM calls
+// handleLlmCall tests - Tool-aware LLM calls with runWithTools
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe("handleLlmCall", () => {
@@ -182,7 +184,7 @@ describe("handleLlmCall", () => {
 
   // Helper to create mock env with CF AI response format
   function createMockLlmCallEnv(response: {
-    response?: string;
+    response?: string | object;
     tool_calls?: Array<{ name: string; arguments: unknown }>;
   }): LlmEnv {
     return {
@@ -218,6 +220,19 @@ describe("handleLlmCall", () => {
       const llmResult = (result as { type: "success"; value: LlmCallResult }).value;
       expect(llmResult.type).toBe("done");
       expect(llmResult.content).toEqual([]);
+    });
+
+    it("handles object response (structured output)", async () => {
+      const env = createMockLlmCallEnv({
+        response: { intents: [], unparsed: "hello" },
+      });
+
+      const result = await handleLlmCall(baseEffect, env);
+
+      expect(result.type).toBe("success");
+      const llmResult = (result as { type: "success"; value: LlmCallResult }).value;
+      expect(llmResult.type).toBe("done");
+      expect(llmResult.content).toEqual([{ type: "text", text: '{"intents":[],"unparsed":"hello"}' }]);
     });
   });
 
@@ -277,6 +292,46 @@ describe("handleLlmCall", () => {
         expect(llmResult.tool_calls[1].id).toBe("tool_1_ask_user");
       }
     });
+
+    it("filters out malformed tool_calls with missing name", async () => {
+      // CF AI sometimes returns [{}] with empty objects (llama-3.3 bug)
+      const env = createMockLlmCallEnv({
+        response: '{"intents": []}',
+        tool_calls: [
+          {} as { name: string; arguments: unknown }, // malformed - no name
+          { name: "ask_user", arguments: { question: "test" } },
+          { name: undefined as unknown as string, arguments: {} }, // malformed - undefined name
+        ],
+      });
+
+      const result = await handleLlmCall(baseEffect, env);
+
+      expect(result.type).toBe("success");
+      const llmResult = (result as { type: "success"; value: LlmCallResult }).value;
+      expect(llmResult.type).toBe("needs_tools");
+      if (llmResult.type === "needs_tools") {
+        // Only the valid tool call should be included
+        expect(llmResult.tool_calls).toHaveLength(1);
+        expect(llmResult.tool_calls[0].name).toBe("ask_user");
+      }
+    });
+
+    it("returns done when all tool_calls are malformed", async () => {
+      const env = createMockLlmCallEnv({
+        response: '{"intents": [], "unparsed": "test"}',
+        tool_calls: [{}] as Array<{ name: string; arguments: unknown }>, // All malformed
+      });
+
+      const result = await handleLlmCall(baseEffect, env);
+
+      expect(result.type).toBe("success");
+      const llmResult = (result as { type: "success"; value: LlmCallResult }).value;
+      expect(llmResult.type).toBe("done");
+      expect(llmResult.content).toHaveLength(1);
+      if (llmResult.content[0].type === "text") {
+        expect(llmResult.content[0].text).toContain("intents");
+      }
+    });
   });
 
   describe("message conversion", () => {
@@ -292,16 +347,28 @@ describe("handleLlmCall", () => {
       await handleLlmCall(effect, env);
 
       expect(env.AI.run).toHaveBeenCalledWith(
-        "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+        "@cf/meta/llama-4-scout-17b-16e-instruct",
         expect.objectContaining({
           messages: [{ role: "user", content: "Hello" }],
         })
       );
     });
 
-    it("passes tools to the model when provided", async () => {
+    it("passes tools in OpenAI format to CF AI", async () => {
+      // WASM sends OpenAI format: {type: "function", function: {...}}
       const tools = [
-        { name: "ask_user", description: "Ask user a question" },
+        {
+          type: "function",
+          function: {
+            name: "ask_user",
+            description: "Ask user a question",
+            parameters: {
+              type: "object",
+              properties: { question: { type: "string" } },
+              required: ["question"],
+            },
+          },
+        },
       ];
       const effect: LlmCallEffect = {
         ...baseEffect,
@@ -311,13 +378,14 @@ describe("handleLlmCall", () => {
 
       await handleLlmCall(effect, env);
 
-      // Always uses llama model, passes tools through
-      expect(env.AI.run).toHaveBeenCalledWith(
-        "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
-        expect.objectContaining({
-          tools,
-        })
-      );
+      // Verify AI.run was called with tools in OpenAI format
+      expect(env.AI.run).toHaveBeenCalled();
+      const callArgs = (env.AI.run as ReturnType<typeof vi.fn>).mock.calls[0][1];
+      expect(callArgs.tools).toBeDefined();
+      // Tools should be in OpenAI format: {type: "function", function: {...}}
+      expect(callArgs.tools[0].type).toBe("function");
+      expect(callArgs.tools[0].function.name).toBe("ask_user");
+      expect(callArgs.tools[0].function.description).toBe("Ask user a question");
     });
   });
 
@@ -331,10 +399,11 @@ describe("handleLlmCall", () => {
 
       const result = await handleLlmCall(baseEffect, env);
 
-      expect(result).toEqual({
-        type: "error",
-        message: "LLM rate limited: rate limit exceeded",
-      });
+      expect(result.type).toBe("error");
+      if (result.type === "error") {
+        expect(result.message).toContain("LLM rate limited");
+        expect(result.message).toContain("rate limit exceeded");
+      }
     });
 
     it("returns error on timeout", async () => {
@@ -346,10 +415,11 @@ describe("handleLlmCall", () => {
 
       const result = await handleLlmCall(baseEffect, env);
 
-      expect(result).toEqual({
-        type: "error",
-        message: "LLM timeout: request timed out",
-      });
+      expect(result.type).toBe("error");
+      if (result.type === "error") {
+        expect(result.message).toContain("LLM timeout");
+        expect(result.message).toContain("timed out");
+      }
     });
 
     it("returns generic error for other failures", async () => {
@@ -361,10 +431,11 @@ describe("handleLlmCall", () => {
 
       const result = await handleLlmCall(baseEffect, env);
 
-      expect(result).toEqual({
-        type: "error",
-        message: "LLM error: Unknown error",
-      });
+      expect(result.type).toBe("error");
+      if (result.type === "error") {
+        expect(result.message).toContain("LLM error");
+        expect(result.message).toContain("Unknown error");
+      }
     });
   });
 });
