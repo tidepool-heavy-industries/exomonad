@@ -144,6 +144,7 @@ export function getCurrentNode(phase: ExecutionPhase): string | null {
  */
 export type SerializableEffect =
   | LlmCompleteEffect
+  | LlmCallEffect
   | LogInfoEffect
   | LogErrorEffect
   | HabiticaEffect
@@ -167,6 +168,67 @@ export interface LlmCompleteEffect {
   /** JSON schema for structured output */
   eff_schema: JsonSchema | null;
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LLM CALL EFFECT (tool-aware LLM calls)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Wire-format message for LLM conversation history.
+ * Matches Haskell WireMessage.
+ */
+export interface WireMessage {
+  /** Role: "user" | "assistant" | "system" */
+  role: "user" | "assistant" | "system";
+  /** Content blocks */
+  content: WireContentBlock[];
+}
+
+/**
+ * Wire-format content block for LLM messages.
+ * Matches Haskell WireContentBlock.
+ */
+export type WireContentBlock =
+  | { type: "text"; text: string }
+  | { type: "tool_use"; id: string; name: string; input: unknown }
+  | { type: "tool_result"; tool_use_id: string; content: string; is_error: boolean };
+
+/**
+ * Tool call request from LLM.
+ * Matches Haskell WireToolCall.
+ */
+export interface WireToolCall {
+  /** Unique ID for this tool call (used in tool_result) */
+  id: string;
+  /** Tool name (e.g., "ask_user") */
+  name: string;
+  /** Tool arguments (JSON) */
+  input: unknown;
+}
+
+/**
+ * LLM call with tool support - matches Haskell EffLlmCall.
+ * TypeScript calls the LLM API and returns either "done" or "needs_tools".
+ */
+export interface LlmCallEffect {
+  type: "LlmCall";
+  /** Which node is making this call */
+  eff_node: string;
+  /** Full conversation history */
+  eff_messages: WireMessage[];
+  /** JSON schema for structured output */
+  eff_schema: JsonSchema | null;
+  /** Tool definitions (Anthropic format) */
+  eff_tools: unknown[];
+}
+
+/**
+ * Result from LLM API call - either done or needs tools.
+ * Matches Haskell LlmCallResult.
+ */
+export type LlmCallResult =
+  | { type: "done"; content: WireContentBlock[] }
+  | { type: "needs_tools"; tool_calls: WireToolCall[]; content: WireContentBlock[] };
 
 /**
  * Info log - matches Haskell EffLogInfo.

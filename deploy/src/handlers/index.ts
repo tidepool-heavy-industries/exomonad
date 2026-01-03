@@ -13,13 +13,13 @@ import type {
 import { dispatchInternalEffect, errorResult, isYieldedEffect } from "tidepool-generated-ts";
 
 import { handleLogInfo, handleLogError } from "./log.js";
-import { handleLlmComplete, type LlmEnv } from "./llm.js";
+import { handleLlmComplete, handleLlmCall, type LlmEnv } from "./llm.js";
 import { handleHabitica, type HabiticaConfig } from "./habitica.js";
 import { logEffectExecution, type LogContext } from "../structured-log.js";
 
 // Re-export handlers for direct testing
 export { handleLogInfo, handleLogError } from "./log.js";
-export { handleLlmComplete } from "./llm.js";
+export { handleLlmComplete, handleLlmCall } from "./llm.js";
 export { handleHabitica } from "./habitica.js";
 
 // Telegram handlers (used by TelegramDO, not executeEffect - they need chat context)
@@ -51,6 +51,7 @@ const internalHandlers: InternalEffectHandlers<Env> = {
   LogInfo: (effect, _env) => handleLogInfo(effect),
   LogError: (effect, _env) => handleLogError(effect),
   LlmComplete: (effect, env) => handleLlmComplete(effect, env),
+  LlmCall: (effect, env) => handleLlmCall(effect, env),
   Habitica: (effect, env) => {
     const config: HabiticaConfig = {
       userId: env.HABITICA_USER_ID,

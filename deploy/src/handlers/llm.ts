@@ -1,10 +1,16 @@
 /**
- * LLM completion effect handler.
+ * LLM effect handlers.
  *
- * Handles LlmComplete effects by calling Cloudflare AI.
+ * Handles LlmComplete and LlmCall effects by calling Cloudflare AI.
  */
 
-import type { LlmCompleteEffect, EffectResult } from "tidepool-generated-ts";
+import type {
+  LlmCompleteEffect,
+  LlmCallEffect,
+  EffectResult,
+  WireContentBlock,
+  LlmCallResult,
+} from "tidepool-generated-ts";
 import { successResult, errorResult } from "tidepool-generated-ts";
 
 /**
@@ -184,4 +190,158 @@ function parseAiResponse(response: unknown): unknown {
 
   // Fallback for unexpected response types
   return {};
+}
+
+/**
+ * Handle LlmCall effect - tool-aware LLM API call.
+ *
+ * Returns a discriminated result:
+ * - `done`: LLM finished with final content
+ * - `needs_tools`: LLM wants to call tools, caller should execute and continue
+ *
+ * The caller (graph handler) is responsible for the tool loop:
+ * 1. Execute tools with full effect access (can yield TelegramAsk, etc.)
+ * 2. Continue LLM conversation with tool results
+ * 3. Repeat until `done`
+ *
+ * Uses Cloudflare Workers AI function calling format:
+ * - Response has `tool_calls` array when model wants to call tools
+ * - Response has `response` string for text output
+ */
+export async function handleLlmCall(
+  effect: LlmCallEffect,
+  env: LlmEnv
+): Promise<EffectResult> {
+  // Check rate limits if KV is available
+  if (env.RATE_LIMIT_KV) {
+    const rateLimitError = await checkRateLimit(env.RATE_LIMIT_KV);
+    if (rateLimitError) {
+      return errorResult(rateLimitError);
+    }
+  }
+
+  try {
+    // Convert WireMessage format to Cloudflare AI format
+    const messages = effect.eff_messages.map((msg) => ({
+      role: msg.role as "system" | "user" | "assistant",
+      content: convertContentBlocks(msg.content),
+    }));
+
+    // Build request options
+    const options: Record<string, unknown> = {
+      messages,
+      max_tokens: 4096,
+    };
+
+    // Add tools if provided (using Cloudflare AI format)
+    if (effect.eff_tools && effect.eff_tools.length > 0) {
+      options.tools = effect.eff_tools;
+    }
+
+    // Add response schema if provided (for structured output on final response)
+    if (effect.eff_schema) {
+      options.response_format = {
+        type: "json_schema",
+        json_schema: {
+          name: "effect_output",
+          strict: true,
+          schema: effect.eff_schema,
+        },
+      };
+    }
+
+    // Use llama for all calls - it's higher quality and we'll iterate on tool support
+    const model = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+
+    const response = (await env.AI.run(model, options)) as CfAiResponse;
+
+    // Check if LLM wants to use tools (CF AI returns tool_calls array)
+    if (response.tool_calls && response.tool_calls.length > 0) {
+      const result: LlmCallResult = {
+        type: "needs_tools",
+        tool_calls: response.tool_calls.map((tc, idx) => ({
+          // Generate deterministic ID since CF AI doesn't provide one
+          id: `tool_${idx}_${tc.name}`,
+          name: tc.name,
+          input: tc.arguments,
+        })),
+        // Include any text response as content
+        content: response.response
+          ? [{ type: "text" as const, text: response.response }]
+          : [],
+      };
+      return successResult(result);
+    }
+
+    // LLM finished - return final content
+    const result: LlmCallResult = {
+      type: "done",
+      content: response.response
+        ? [{ type: "text" as const, text: response.response }]
+        : [],
+    };
+    return successResult(result);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+
+    if (message.includes("rate limit") || message.includes("429")) {
+      return errorResult(`LLM rate limited: ${message}`);
+    }
+
+    if (message.includes("timeout") || message.includes("timed out")) {
+      return errorResult(`LLM timeout: ${message}`);
+    }
+
+    return errorResult(`LLM error: ${message}`);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// HELPER TYPES AND FUNCTIONS FOR LlmCall
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Cloudflare Workers AI response structure.
+ *
+ * When tools are provided and the model wants to call them,
+ * `tool_calls` array will be populated. Otherwise, `response`
+ * contains the text output.
+ */
+interface CfAiResponse {
+  /** Text response from the model */
+  response?: string;
+  /** Tool calls the model wants to make */
+  tool_calls?: CfToolCall[];
+}
+
+/**
+ * Tool call in CF AI response.
+ *
+ * Note: CF AI doesn't provide an ID, we generate one.
+ */
+interface CfToolCall {
+  name: string;
+  arguments: unknown;
+}
+
+/**
+ * Convert WireContentBlock array to format expected by Cloudflare AI.
+ *
+ * For CF AI, messages are typically just strings. We extract text content
+ * and concatenate. Tool results are formatted as text for context.
+ */
+function convertContentBlocks(blocks: WireContentBlock[]): string {
+  return blocks
+    .map((block) => {
+      switch (block.type) {
+        case "text":
+          return block.text;
+        case "tool_use":
+          // Include tool use context for multi-turn conversations
+          return `[Tool Call: ${block.name}(${JSON.stringify(block.input)})]`;
+        case "tool_result":
+          return `[Tool Result for ${block.tool_use_id}]: ${block.content}`;
+      }
+    })
+    .join("\n");
 }

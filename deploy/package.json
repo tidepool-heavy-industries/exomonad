@@ -29,7 +29,7 @@
   },
   "dependencies": {
     "@bjorn3/browser_wasi_shim": "^0.3.0",
-    "tidepool-generated-ts": "file:./tidepool-generated-ts",
+    "tidepool-generated-ts": "workspace:*",
     "zod": "^4.3.4"
   }
 }

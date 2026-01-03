@@ -586,6 +586,7 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
       case "LogInfo":
       case "LogError":
       case "LlmComplete":
+      case "LlmCall":
       case "Habitica": {
         console.error(
           `[TelegramDO] Received internal effect "${effect.type}" that should be handled by StateMachineDO`
