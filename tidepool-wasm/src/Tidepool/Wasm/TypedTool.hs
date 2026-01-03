@@ -1,59 +1,54 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 
--- | Typed tool results for LLM tool calling.
+-- | Typed tool execution helpers for LLM tool calling.
 --
--- This module provides type-safe wrappers around common tool patterns,
--- eliminating manual JSON parsing in tool handlers. Instead of:
+-- This module provides type-safe helpers for parsing and executing tool calls
+-- that have already been requested by the LLM. Instead of manual JSON parsing:
 --
 -- @
--- case result of
---   NeedsTools toolCalls -> do
---     forM toolCalls $ \tc -> case tcName tc of
---       "ask_user" -> do
---         let question = fromMaybe "" $ tcInput tc ^? key "question" . _String
---         -- manual JSON parsing...
+-- case toolCall of
+--   WireToolCall { wtcName = "ask_user", wtcInput = input } -> do
+--     let question = fromMaybe "" $ input ^? key "question" . _String
+--     -- manual JSON parsing...
 -- @
 --
 -- You can write:
 --
 -- @
--- let input = AskUserInput "Which meds?" (Just ["Morning meds", "HRT Shot"])
+-- input <- parseToolInputM @AskUserInput toolCall
 -- selected <- askUser input
 -- -- selected is the Text of the option the user clicked
 -- @
 --
 -- = Design
 --
--- Tools are defined with three components:
+-- Each tool helper works with three types:
 --
--- 1. **Input type** - What the LLM passes to the tool (parsed from tool call)
--- 2. **Output type** - What the tool returns (from external execution)
--- 3. **Result type** - What the smart constructor returns (may be simpler)
+-- 1. **Input type** - Parsed from the 'WireToolCall' JSON (e.g., 'AskUserInput')
+-- 2. **Output type** - Raw result from the executor (e.g., 'TelegramAskResult')
+-- 3. **Result type** - Simplified return value (e.g., 'Text')
 --
 -- For example, @ask_user@ has:
 --
--- * Input: @AskUserInput { question, options }@ - What LLM specifies
+-- * Input: @AskUserInput { question, options }@ - Parsed from tool call
 -- * Output: @TelegramAskResult@ - Raw result from Telegram
 -- * Result: @Text@ - Just the selected option text
 --
--- The smart constructor handles:
---
--- 1. Building the tool schema for the LLM
--- 2. Yielding the tool call to TypeScript
--- 3. Parsing the result
--- 4. Extracting the useful information
---
 -- = Adding New Tools
 --
--- To add a typed wrapper for a new tool:
+-- To add a typed helper for a new tool:
 --
--- 1. Define the input type with FromJSON
--- 2. Create the CfTool schema
--- 3. Write a smart constructor that:
---    - Calls llmCall with the tool
---    - Handles NeedsTools by yielding appropriate effects
---    - Returns the typed result
+-- 1. Define the input type with 'FromJSON' to parse from 'WireToolCall'
+-- 2. Implement an executor that yields the appropriate effect
+-- 3. Use 'parseToolInput' or 'parseToolInputM' in your dispatcher:
+--
+-- @
+-- myToolHandler :: WireToolCall -> Eff effs (Either Text Result)
+-- myToolHandler tc = do
+--   input <- parseToolInputM tc
+--   executeMyTool input
+-- @
 module Tidepool.Wasm.TypedTool
   ( -- * ask_user Tool
     AskUserInput(..)
@@ -77,7 +72,6 @@ module Tidepool.Wasm.TypedTool
 import Control.Monad (forM)
 import Control.Monad.Freer (Member, Eff)
 import Control.Monad.Freer.Coroutine (Yield)
-import Data.Maybe (fromMaybe)
 import Data.Aeson
   ( FromJSON(..)
   , ToJSON(..)
@@ -101,6 +95,7 @@ import Tidepool.Wasm.WireTypes
 import Tidepool.Wasm.Effect
   ( telegramAsk
   , logInfo
+  , logError
   )
 
 
@@ -157,8 +152,7 @@ askUser AskUserInput{..} = do
   case auiOptions of
     Nothing -> do
       -- No options = freeform text response
-      -- For now, show as single "Continue" button that user can ignore
-      -- and type instead
+      -- Show a prompt button; user must type a response (clicking button errors)
       result <- telegramAsk auiQuestion [("Type your response", "freeform")]
       case result of
         TelegramButton _ ->
@@ -182,15 +176,19 @@ askUser AskUserInput{..} = do
 
 -- | Ask user with a fallback for when no options are provided.
 --
--- If the LLM provides options, shows them as buttons.
--- If no options, shows the fallback options instead.
+-- If the LLM provides non-empty options, shows them as buttons.
+-- If no options or empty list, shows the fallback options instead.
 askUserWithFallback
   :: Member (Yield SerializableEffect EffectResult) effs
   => [Text]  -- ^ Fallback options if LLM doesn't provide any
   -> AskUserInput
   -> Eff effs Text
 askUserWithFallback fallbackOpts input =
-  askUser input { auiOptions = Just $ fromMaybe fallbackOpts input.auiOptions }
+  let effectiveOpts = case input.auiOptions of
+        Nothing -> fallbackOpts
+        Just [] -> fallbackOpts
+        Just opts -> opts
+  in askUser input { auiOptions = Just effectiveOpts }
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -275,7 +273,7 @@ parseToolInputM
 parseToolInputM tc = case parseToolInput tc of
   Right a -> pure a
   Left err -> do
-    logInfo $ "[ERROR] " <> err
+    logError err
     error $ T.unpack err
 
 
@@ -285,13 +283,15 @@ parseToolInputM tc = case parseToolInput tc of
 
 -- | Execute an ask_user tool call from a WireToolCall.
 --
--- This is the most convenient way to handle ask_user:
+-- Returns 'Left' for parse errors only. Note that 'askUser' may still
+-- throw errors for edge cases (stale buttons, unexpected button clicks
+-- in freeform mode). If you need to catch those, wrap in exception handling.
 --
 -- @
 -- case lcrToolCalls of
 --   [tc] | tc.wtcName == "ask_user" -> do
 --     result <- executeAskUser tc
---     -- result is Right Text (user's selection) or Left Text (error)
+--     -- result is Right Text (user's selection) or Left Text (parse error)
 --   ...
 -- @
 executeAskUser
