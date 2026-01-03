@@ -181,7 +181,7 @@ multiYieldJsonBoundarySpec = describe "JSON boundary (wire types)" $ do
     decode (encode ack) `shouldBe` Just ack
 
     -- Error mid-sequence would look like this (but Log ignores it)
-    let err = ResError "mid-sequence failure"
+    let err = ResError "mid-sequence failure" Nothing
     decode (encode err) `shouldBe` Just err
 
 
@@ -199,11 +199,11 @@ multiYieldEdgeCasesSpec = describe "Edge cases" $ do
     case result of
       WasmYield _ resume1 ->
         -- Send error instead of success - Log ignores it
-        case resume1 (ResError "error 1") of
+        case resume1 (ResError "error 1" Nothing) of
           WasmYield _ resume2 ->
-            case resume2 (ResError "error 2") of
+            case resume2 (ResError "error 2" Nothing) of
               WasmYield _ resume3 ->
-                case resume3 (ResError "error 3") of
+                case resume3 (ResError "error 3" Nothing) of
                   WasmComplete (GotoChoice (Here n)) ->
                     -- Still completes successfully!
                     n `shouldBe` 6

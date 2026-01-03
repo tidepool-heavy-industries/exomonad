@@ -102,7 +102,7 @@ resumeCycleSpec = describe "resuming with EffectResult" $ do
     case result of
       WasmYield _ resume ->
         -- Even with ResError, the computation continues because logInfo ignores the result
-        case resume (ResError "simulated failure") of
+        case resume (ResError "simulated failure" Nothing) of
           WasmComplete (GotoChoice (Here n)) ->
             n `shouldBe` 6
           _ -> expectationFailure "Expected WasmComplete despite error"

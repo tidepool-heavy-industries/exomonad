@@ -167,7 +167,11 @@ effectResultSpec = describe "EffectResult" $ do
     decode (encode result) `shouldBe` Just result
 
   it "round-trips ResError" $ do
-    let result = ResError "something went wrong"
+    let result = ResError "something went wrong" Nothing
+    decode (encode result) `shouldBe` Just result
+
+  it "round-trips ResError with error_code" $ do
+    let result = ResError "Rate limited" (Just "rate_limited")
     decode (encode result) `shouldBe` Just result
 
   it "encodes ResSuccess with correct JSON structure" $ do
@@ -180,12 +184,23 @@ effectResultSpec = describe "EffectResult" $ do
       _ -> expectationFailure "Expected JSON object"
 
   it "encodes ResError with correct JSON structure" $ do
-    let result = ResError "oops"
+    let result = ResError "oops" Nothing
         json = decode (encode result) :: Maybe Value
     case json of
       Just (Object obj) -> do
         KM.lookup "type" obj `shouldBe` Just (String "error")
         KM.lookup "message" obj `shouldBe` Just (String "oops")
+        KM.lookup "error_code" obj `shouldBe` Nothing  -- No error_code when Nothing
+      _ -> expectationFailure "Expected JSON object"
+
+  it "encodes ResError with error_code in JSON" $ do
+    let result = ResError "rate limited" (Just "rate_limited")
+        json = decode (encode result) :: Maybe Value
+    case json of
+      Just (Object obj) -> do
+        KM.lookup "type" obj `shouldBe` Just (String "error")
+        KM.lookup "message" obj `shouldBe` Just (String "rate limited")
+        KM.lookup "error_code" obj `shouldBe` Just (String "rate_limited")
       _ -> expectationFailure "Expected JSON object"
 
 

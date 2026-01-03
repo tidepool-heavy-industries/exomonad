@@ -484,27 +484,36 @@ effectMetadata = \case
 -- For Log effects, TypeScript just acknowledges (success with null value).
 -- For LLM effects (future), success contains parsed output.
 --
--- JSON encoding: @{type: "success", value: ...}@ or @{type: "error", message: "..."}@
+-- JSON encoding: @{type: "success", value: ...}@ or @{type: "error", message: "...", error_code: "..."}@
+--
+-- The 'resErrorCode' field enables structured error handling:
+-- - "rate_limited" → effect-specific rate limit error
+-- - "timeout" → request timed out
+-- - "context_too_long" → LLM context exceeded
+-- - "network_error" → connection failure
+-- - "unauthorized" → auth failure
+-- - "parse_failed" → response parsing error
+-- - "other" → catch-all for unclassified errors
 data EffectResult
   = ResSuccess { resValue :: Maybe Value }
-  | ResError { resMessage :: Text }
+  | ResError { resMessage :: Text, resErrorCode :: Maybe Text }
   deriving stock (Show, Eq, Generic)
 
 instance ToJSON EffectResult where
   toJSON (ResSuccess val) = object $
     ("type" .= ("success" :: Text))
     : maybe [] (\v -> ["value" .= v]) val
-  toJSON (ResError msg) = object
+  toJSON (ResError msg code) = object $
     [ "type" .= ("error" :: Text)
     , "message" .= msg
-    ]
+    ] ++ maybe [] (\c -> ["error_code" .= c]) code
 
 instance FromJSON EffectResult where
   parseJSON = withObject "EffectResult" $ \o -> do
     (typ :: Text) <- o .: "type"
     case typ of
       "success" -> ResSuccess <$> lookupValue o
-      "error"   -> ResError <$> o .: "message"
+      "error"   -> ResError <$> o .: "message" <*> o .:? "error_code"
       _         -> fail $ "Unknown result type: " ++ show typ
 
 -- | Look up "value" field, distinguishing missing from null.

@@ -145,15 +145,16 @@ instance Arbitrary SerializableEffect where
 instance Arbitrary EffectResult where
   arbitrary = oneof
     [ ResSuccess <$> arbitrary
-    , ResError <$> arbitrary
+    , ResError <$> arbitrary <*> arbitrary
     ]
 
   shrink (ResSuccess val) =
     [ ResSuccess Nothing ]
     ++ [ ResSuccess val' | val' <- shrink val ]
-  shrink (ResError msg) =
+  shrink (ResError msg code) =
     [ ResSuccess Nothing ]  -- Error to success with nothing
-    ++ [ ResError msg' | msg' <- shrink msg ]
+    ++ [ ResError msg' code | msg' <- shrink msg ]
+    ++ [ ResError msg code' | code' <- shrink code ]
 
 
 -- | Arbitrary ExecutionPhase covering all variants
@@ -311,7 +312,7 @@ effectResultPropertySpec = describe "EffectResult properties" $ do
          _ -> False
 
   prop "error results have 'message' field" $ \msg ->
-    let result = ResError msg
+    let result = ResError msg Nothing
         json = decode (encode result) :: Maybe Value
     in case json of
          Just (Object obj) -> KM.member "message" obj
@@ -462,7 +463,7 @@ edgeCaseSpec = describe "Edge cases" $ do
       decode (encode effect) `shouldBe` Just effect
 
     it "roundtrips ResError with empty message" $ do
-      let result = ResError ""
+      let result = ResError "" Nothing
       decode (encode result) `shouldBe` Just result
 
     it "roundtrips PhaseFailed with empty error" $ do

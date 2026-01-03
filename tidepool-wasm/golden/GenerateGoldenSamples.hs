@@ -88,9 +88,10 @@ sampleResults =
       , "tokens" .= (150 :: Int)
       ])
   , ResSuccess (Just $ Array mempty)  -- Empty array
-  , ResError "Network timeout"
-  , ResError ""  -- Empty error message edge case
-  , ResError "Error with newline:\nSecond line"
+  , ResError "Network timeout" Nothing
+  , ResError "" Nothing  -- Empty error message edge case
+  , ResError "Error with newline:\nSecond line" Nothing
+  , ResError "Rate limited" (Just "rate_limited")  -- With structured error code
   ]
 
 

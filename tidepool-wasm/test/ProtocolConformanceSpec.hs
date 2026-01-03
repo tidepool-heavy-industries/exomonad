@@ -120,12 +120,22 @@ effectResultConformanceSpec = describe "EffectResult matches protocol.ts" $ do
 
   describe "error" $ do
     it "encodes as {type: \"error\", message: ...}" $ do
-      let result = ResError "Something went wrong"
+      let result = ResError "Something went wrong" Nothing
           json = decode (encode result) :: Maybe Value
       case json of
         Just (Object obj) -> do
           KM.lookup "type" obj `shouldBe` Just (String "error")
           KM.lookup "message" obj `shouldBe` Just (String "Something went wrong")
+        _ -> expectationFailure "Expected JSON object"
+
+    it "encodes error_code when present" $ do
+      let result = ResError "Rate limited" (Just "rate_limited")
+          json = decode (encode result) :: Maybe Value
+      case json of
+        Just (Object obj) -> do
+          KM.lookup "type" obj `shouldBe` Just (String "error")
+          KM.lookup "message" obj `shouldBe` Just (String "Rate limited")
+          KM.lookup "error_code" obj `shouldBe` Just (String "rate_limited")
         _ -> expectationFailure "Expected JSON object"
 
 
