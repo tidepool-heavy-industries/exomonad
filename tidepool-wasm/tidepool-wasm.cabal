@@ -15,6 +15,7 @@ library
         Tidepool.Wasm.Prelude
         Tidepool.Wasm.Effect
         Tidepool.Wasm.CfTool
+        Tidepool.Wasm.TypedTool
         Tidepool.Wasm.ExampleGraph
         Tidepool.Wasm.Habitica
         Tidepool.Wasm.TestGraph
@@ -106,6 +107,7 @@ test-suite tidepool-wasm-tests
         RoundtripSpec
         RegistrySpec
         HabiticaTypesSpec
+        TypedToolSpec
     build-depends:
         base >= 4.17 && < 5,
         hspec >= 2.10 && < 3,
