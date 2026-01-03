@@ -299,7 +299,7 @@ describe("handleLlmCall", () => {
       );
     });
 
-    it("passes tools when provided and uses function-calling model", async () => {
+    it("passes tools to the model when provided", async () => {
       const tools = [
         { name: "ask_user", description: "Ask user a question" },
       ];
@@ -311,29 +311,11 @@ describe("handleLlmCall", () => {
 
       await handleLlmCall(effect, env);
 
-      // When tools are provided, uses function-calling capable model
-      expect(env.AI.run).toHaveBeenCalledWith(
-        "@hf/nousresearch/hermes-2-pro-mistral-7b",
-        expect.objectContaining({
-          tools,
-        })
-      );
-    });
-
-    it("uses standard model when no tools provided", async () => {
-      const effect: LlmCallEffect = {
-        ...baseEffect,
-        eff_tools: [],
-      };
-      const env = createMockLlmCallEnv({ response: "Hello" });
-
-      await handleLlmCall(effect, env);
-
-      // When no tools, uses standard llama model
+      // Always uses llama model, passes tools through
       expect(env.AI.run).toHaveBeenCalledWith(
         "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
         expect.objectContaining({
-          messages: expect.any(Array),
+          tools,
         })
       );
     });

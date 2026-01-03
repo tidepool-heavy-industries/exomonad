@@ -250,10 +250,8 @@ export async function handleLlmCall(
       };
     }
 
-    // Use function-calling capable model when tools are provided
-    const model = effect.eff_tools && effect.eff_tools.length > 0
-      ? "@hf/nousresearch/hermes-2-pro-mistral-7b"  // Supports function calling
-      : "@cf/meta/llama-3.3-70b-instruct-fp8-fast"; // Standard model
+    // Use llama for all calls - it's higher quality and we'll iterate on tool support
+    const model = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 
     const response = (await env.AI.run(model, options)) as CfAiResponse;
 
