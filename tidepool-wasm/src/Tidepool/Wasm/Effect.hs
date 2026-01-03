@@ -29,7 +29,9 @@ module Tidepool.Wasm.Effect
   , logInfo
   , logError
   , llmComplete
+  , llmCompleteWith
   , llmCall
+  , llmCallWith
     -- ** LLM Call Types (for tool-aware calls)
   , LlmCallResult(..)
   , WireMessage(..)
@@ -112,17 +114,32 @@ logError msg = do
   _ <- yield (EffLogError msg) (id @EffectResult)
   pure ()
 
--- | Make an LLM completion call.
+-- | Make an LLM completion call with default model.
 --
 -- Yields 'EffLlmComplete', expects JSON response on success.
+-- Uses the default model configured in the TypeScript handler.
 llmComplete :: Member (Yield SerializableEffect EffectResult) effs
             => Text           -- ^ Node name (for observability)
             -> Text           -- ^ System prompt
             -> Text           -- ^ User content
             -> Maybe Value    -- ^ Output schema (optional)
             -> Eff effs Value
-llmComplete node systemPrompt userContent schema = do
-  result <- yield (EffLlmComplete node systemPrompt userContent schema) (id @EffectResult)
+llmComplete = llmCompleteWith Nothing
+
+-- | Make an LLM completion call with explicit model.
+--
+-- Yields 'EffLlmComplete', expects JSON response on success.
+-- Pass @Just "@cf/meta/llama-3.2-1b-instruct"@ for a specific model,
+-- or @Nothing@ to use the TypeScript handler's default.
+llmCompleteWith :: Member (Yield SerializableEffect EffectResult) effs
+                => Maybe Text     -- ^ Model to use (Nothing for default)
+                -> Text           -- ^ Node name (for observability)
+                -> Text           -- ^ System prompt
+                -> Text           -- ^ User content
+                -> Maybe Value    -- ^ Output schema (optional)
+                -> Eff effs Value
+llmCompleteWith model node systemPrompt userContent schema = do
+  result <- yield (EffLlmComplete node systemPrompt userContent schema model) (id @EffectResult)
   case result of
     ResSuccess (Just v) -> pure v
     ResSuccess Nothing  -> pure (toJSON ())
@@ -132,14 +149,30 @@ llmComplete node systemPrompt userContent schema = do
 --
 -- Yields 'EffLlmCall', returns the raw LLM response including any tool calls.
 -- Use this when you need tool calling or multi-turn conversation support.
+-- Uses the default model configured in the TypeScript handler.
 llmCall :: Member (Yield SerializableEffect EffectResult) effs
         => Text           -- ^ Node name (for observability)
         -> [WireMessage]  -- ^ Full message history
         -> Maybe Value    -- ^ Output schema (optional)
         -> [Value]        -- ^ Tool definitions (CF AI flat format)
         -> Eff effs LlmCallResult
-llmCall node messages schema tools = do
-  result <- yield (EffLlmCall node messages schema tools) (id @EffectResult)
+llmCall = llmCallWith Nothing
+
+-- | Make a raw LLM call with explicit model.
+--
+-- Yields 'EffLlmCall', returns the raw LLM response including any tool calls.
+-- Use this when you need tool calling or multi-turn conversation support.
+-- Pass @Just "@cf/meta/llama-3.2-1b-instruct"@ for a specific model,
+-- or @Nothing@ to use the TypeScript handler's default.
+llmCallWith :: Member (Yield SerializableEffect EffectResult) effs
+            => Maybe Text     -- ^ Model to use (Nothing for default)
+            -> Text           -- ^ Node name (for observability)
+            -> [WireMessage]  -- ^ Full message history
+            -> Maybe Value    -- ^ Output schema (optional)
+            -> [Value]        -- ^ Tool definitions (CF AI flat format)
+            -> Eff effs LlmCallResult
+llmCallWith model node messages schema tools = do
+  result <- yield (EffLlmCall node messages schema tools model) (id @EffectResult)
   case result of
     ResSuccess (Just v) -> case fromJSON v of
       Success r -> pure r

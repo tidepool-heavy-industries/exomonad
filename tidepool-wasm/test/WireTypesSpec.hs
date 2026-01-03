@@ -54,17 +54,21 @@ serializableEffectSpec = describe "SerializableEffect" $ do
 
   -- LlmComplete tests
   it "round-trips EffLlmComplete without schema" $ do
-    let effect = EffLlmComplete "mynode" "You are helpful" "Hello" Nothing
+    let effect = EffLlmComplete "mynode" "You are helpful" "Hello" Nothing Nothing
     decode (encode effect) `shouldBe` Just effect
 
   it "round-trips EffLlmComplete with schema" $ do
     let schema = object ["type" .= ("string" :: String)]
-        effect = EffLlmComplete "classify" "Classify intent" "User message" (Just schema)
+        effect = EffLlmComplete "classify" "Classify intent" "User message" (Just schema) Nothing
+    decode (encode effect) `shouldBe` Just effect
+
+  it "round-trips EffLlmComplete with model" $ do
+    let effect = EffLlmComplete "mynode" "You are helpful" "Hello" Nothing (Just "@cf/meta/llama-3.2-1b-instruct")
     decode (encode effect) `shouldBe` Just effect
 
   it "encodes EffLlmComplete with correct JSON structure" $ do
     let schema = object ["type" .= ("object" :: String)]
-        effect = EffLlmComplete "node1" "sys prompt" "user content" (Just schema)
+        effect = EffLlmComplete "node1" "sys prompt" "user content" (Just schema) Nothing
         json = decode (encode effect) :: Maybe Value
     case json of
       Just (Object obj) -> do
@@ -79,11 +83,27 @@ serializableEffectSpec = describe "SerializableEffect" $ do
       _ -> expectationFailure "Expected JSON object"
 
   it "omits eff_schema field when Nothing" $ do
-    let effect = EffLlmComplete "node" "sys" "user" Nothing
+    let effect = EffLlmComplete "node" "sys" "user" Nothing Nothing
         json = decode (encode effect) :: Maybe Value
     case json of
       Just (Object obj) ->
         KM.lookup "eff_schema" obj `shouldBe` Nothing
+      _ -> expectationFailure "Expected JSON object"
+
+  it "omits eff_model field when Nothing" $ do
+    let effect = EffLlmComplete "node" "sys" "user" Nothing Nothing
+        json = decode (encode effect) :: Maybe Value
+    case json of
+      Just (Object obj) ->
+        KM.lookup "eff_model" obj `shouldBe` Nothing
+      _ -> expectationFailure "Expected JSON object"
+
+  it "includes eff_model field when Just" $ do
+    let effect = EffLlmComplete "node" "sys" "user" Nothing (Just "@cf/meta/llama-3.2-1b-instruct")
+        json = decode (encode effect) :: Maybe Value
+    case json of
+      Just (Object obj) ->
+        KM.lookup "eff_model" obj `shouldBe` Just (String "@cf/meta/llama-3.2-1b-instruct")
       _ -> expectationFailure "Expected JSON object"
 
 

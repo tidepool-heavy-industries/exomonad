@@ -82,6 +82,7 @@ instance Arbitrary SerializableEffect where
         <*> arbitrary
         <*> arbitrary
         <*> arbMaybeNonNullValue  -- Avoid Just Null (doesn't roundtrip)
+        <*> arbitrary             -- model: Maybe Text
     , EffLogInfo <$> arbitrary
     , EffLogError <$> arbitrary
     , EffHabitica
@@ -96,15 +97,16 @@ instance Arbitrary SerializableEffect where
         <*> listOf ((,) <$> arbitrary <*> arbitrary)
     ]
 
-  shrink (EffLlmComplete node sys user schema) =
+  shrink (EffLlmComplete node sys user schema model) =
     [ EffLogInfo node ]  -- Simplify to simpler effect
-    ++ [ EffLlmComplete node' sys user schema | node' <- shrink node ]
-    ++ [ EffLlmComplete node sys' user schema | sys' <- shrink sys ]
-    ++ [ EffLlmComplete node sys user' schema | user' <- shrink user ]
-    ++ [ EffLlmComplete node sys user schema'
+    ++ [ EffLlmComplete node' sys user schema model | node' <- shrink node ]
+    ++ [ EffLlmComplete node sys' user schema model | sys' <- shrink sys ]
+    ++ [ EffLlmComplete node sys user' schema model | user' <- shrink user ]
+    ++ [ EffLlmComplete node sys user schema' model
        | schema' <- shrink schema
        , schema' /= Just Null  -- Avoid Just Null (doesn't roundtrip)
        ]
+    ++ [ EffLlmComplete node sys user schema model' | model' <- shrink model ]
   shrink (EffLogInfo msg) =
     [ EffLogInfo msg' | msg' <- shrink msg ]
   shrink (EffLogError msg) =
@@ -496,14 +498,14 @@ edgeCaseSpec = describe "Edge cases" $ do
         _ -> expectationFailure "Expected JSON object"
 
     it "EffLlmComplete with Nothing schema omits eff_schema field" $ do
-      let effect = EffLlmComplete "node" "sys" "user" Nothing
+      let effect = EffLlmComplete "node" "sys" "user" Nothing Nothing
           json = decode (encode effect) :: Maybe Value
       case json of
         Just (Object obj) -> KM.lookup "eff_schema" obj `shouldBe` Nothing
         _ -> expectationFailure "Expected JSON object"
 
     it "EffLlmComplete with Just Null schema includes eff_schema as null" $ do
-      let effect = EffLlmComplete "node" "sys" "user" (Just Null)
+      let effect = EffLlmComplete "node" "sys" "user" (Just Null) Nothing
           json = decode (encode effect) :: Maybe Value
       case json of
         Just (Object obj) -> KM.lookup "eff_schema" obj `shouldBe` Just Null
@@ -554,7 +556,7 @@ edgeCaseSpec = describe "Edge cases" $ do
   describe "Sum type encoding (variant tags)" $ do
     it "all SerializableEffect variants have distinct 'type' values" $ do
       let effects =
-            [ EffLlmComplete "n" "s" "u" Nothing
+            [ EffLlmComplete "n" "s" "u" Nothing Nothing
             , EffLogInfo "msg"
             , EffLogError "err"
             , EffHabitica "GetUser" (object [])

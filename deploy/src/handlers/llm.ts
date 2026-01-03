@@ -94,6 +94,9 @@ async function checkRateLimit(kv: KVNamespace): Promise<string | null> {
  * Supports both free-form text and JSON schema-constrained output.
  * Returns parsed output in the result.
  */
+// Default model for LLM calls
+const DEFAULT_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+
 export async function handleLlmComplete(
   effect: LlmCompleteEffect,
   env: LlmEnv
@@ -130,8 +133,12 @@ export async function handleLlmComplete(
       };
     }
 
-    const response = await env.AI.run(
-      "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+    // Use model from effect, or fall back to default
+    const model = effect.eff_model ?? DEFAULT_MODEL;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const response = await (env.AI.run as any)(
+      model,
       options
     ) as { response?: string | object };
 
@@ -229,11 +236,11 @@ export async function handleLlmCall(
     const hasTools = tools.length > 0;
     const hasSchema = effect.eff_schema !== null && effect.eff_schema !== undefined;
 
-    // Use llama-3.3-70b for tool calls
+    // Use model from effect, or fall back to default
     // Note: llama-4-scout outputs tool calls as text instead of populating tool_calls array
     // Note: hermes-2-pro has 1024 token context limit (too small for our prompts)
     // Note: llama-3.3 sometimes returns malformed [{}] in tool_calls (we filter these)
-    const model = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+    const model = effect.eff_model ?? DEFAULT_MODEL;
     const maxTokens = 2048;
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -242,7 +249,8 @@ export async function handleLlmCall(
     if (hasTools) {
       console.log("[LlmCall] Phase 1: Tool decision pass with", tools.length, "tools");
 
-      const toolResponse = (await env.AI.run(model, {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const toolResponse = (await (env.AI.run as any)(model, {
         messages,
         tools,
         max_tokens: maxTokens,
@@ -300,7 +308,8 @@ export async function handleLlmCall(
     if (hasSchema) {
       console.log("[LlmCall] Phase 2: Structured output with schema");
 
-      const schemaResponse = (await env.AI.run(model, {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const schemaResponse = (await (env.AI.run as any)(model, {
         messages,
         max_tokens: maxTokens,
         response_format: {
@@ -333,7 +342,8 @@ export async function handleLlmCall(
     // ═══════════════════════════════════════════════════════════════════════
     console.log("[LlmCall] Simple text completion (no tools, no schema)");
 
-    const response = (await env.AI.run(model, {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const response = (await (env.AI.run as any)(model, {
       messages,
       max_tokens: maxTokens,
     })) as CfAiResponse;

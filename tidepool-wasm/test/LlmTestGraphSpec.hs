@@ -88,24 +88,24 @@ graphStructureSpec = describe "LlmTestGraph structure" $ do
 
   it "handler includes node name 'echo'" $ do
     case initializeWasm (echoHandlerWasm "test") of
-      WasmYield (EffLlmComplete node _ _ _) _ ->
+      WasmYield (EffLlmComplete node _ _ _ _) _ ->
         node `shouldBe` "echo"
       _ -> expectationFailure "Expected EffLlmComplete yield"
 
   it "handler includes user message in content" $ do
     case initializeWasm (echoHandlerWasm "hello world") of
-      WasmYield (EffLlmComplete _ _ userContent _) _ -> do
+      WasmYield (EffLlmComplete _ _ userContent _ _) _ -> do
         T.unpack userContent `shouldContain` "hello world"
       _ -> expectationFailure "Expected EffLlmComplete yield"
 
   it "handler uses system prompt for echo bot" $ do
     case initializeWasm (echoHandlerWasm "test") of
-      WasmYield (EffLlmComplete _ sysPrompt _ _) _ -> do
+      WasmYield (EffLlmComplete _ sysPrompt _ _ _) _ -> do
         T.unpack sysPrompt `shouldContain` "echo"
       _ -> expectationFailure "Expected EffLlmComplete yield"
 
   it "handler uses no schema (free-form response)" $ do
     case initializeWasm (echoHandlerWasm "test") of
-      WasmYield (EffLlmComplete _ _ _ schema) _ ->
+      WasmYield (EffLlmComplete _ _ _ schema _) _ ->
         schema `shouldBe` Nothing
       _ -> expectationFailure "Expected EffLlmComplete yield"

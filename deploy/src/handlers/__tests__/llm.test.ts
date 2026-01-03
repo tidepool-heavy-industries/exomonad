@@ -164,6 +164,34 @@ describe("handleLlmComplete", () => {
       message: "LLM error: Unknown error",
     });
   });
+
+  describe("model selection", () => {
+    it("uses default model when eff_model is not provided", async () => {
+      const env = createMockEnv({ intent: "test" });
+
+      await handleLlmComplete(baseEffect, env);
+
+      expect(env.AI.run).toHaveBeenCalledWith(
+        "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+        expect.any(Object)
+      );
+    });
+
+    it("uses specified model when eff_model is provided", async () => {
+      const effectWithModel: LlmCompleteEffect = {
+        ...baseEffect,
+        eff_model: "@cf/meta/llama-3.2-1b-instruct",
+      };
+      const env = createMockEnv({ intent: "test" });
+
+      await handleLlmComplete(effectWithModel, env);
+
+      expect(env.AI.run).toHaveBeenCalledWith(
+        "@cf/meta/llama-3.2-1b-instruct",
+        expect.any(Object)
+      );
+    });
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -451,6 +479,68 @@ describe("handleLlmCall", () => {
         expect(result.message).toContain("LLM error");
         expect(result.message).toContain("Unknown error");
       }
+    });
+  });
+
+  describe("model selection", () => {
+    it("uses default model when eff_model is not provided", async () => {
+      const env = createMockLlmCallEnv({ response: "test" });
+
+      await handleLlmCall(baseEffect, env);
+
+      expect(env.AI.run).toHaveBeenCalledWith(
+        "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+        expect.any(Object)
+      );
+    });
+
+    it("uses specified model when eff_model is provided", async () => {
+      const effectWithModel: LlmCallEffect = {
+        ...baseEffect,
+        eff_model: "@cf/meta/llama-3.2-1b-instruct",
+      };
+      const env = createMockLlmCallEnv({ response: "test" });
+
+      await handleLlmCall(effectWithModel, env);
+
+      expect(env.AI.run).toHaveBeenCalledWith(
+        "@cf/meta/llama-3.2-1b-instruct",
+        expect.any(Object)
+      );
+    });
+
+    it("uses specified model for all phases when tools and schema provided", async () => {
+      const customModel = "@cf/meta/llama-3.2-1b-instruct";
+      const effectWithModelAndTools: LlmCallEffect = {
+        ...baseEffect,
+        eff_model: customModel,
+        eff_schema: { type: "object", properties: { result: { type: "string" } } },
+        eff_tools: [
+          {
+            type: "function",
+            function: {
+              name: "test_tool",
+              description: "A test tool",
+              parameters: { type: "object", properties: {}, required: [] },
+            },
+          },
+        ],
+      };
+      // Simulate Phase 1 returning no tool calls, triggering Phase 2
+      const env: LlmEnv = {
+        AI: {
+          run: vi.fn()
+            .mockResolvedValueOnce({ response: "" })        // Phase 1: no tools called
+            .mockResolvedValueOnce({ response: '{"result": "done"}' }),  // Phase 2: structured output
+        } as unknown as Ai,
+      };
+
+      await handleLlmCall(effectWithModelAndTools, env);
+
+      // Both phases should use the custom model
+      expect(env.AI.run).toHaveBeenCalledTimes(2);
+      expect(env.AI.run).toHaveBeenNthCalledWith(1, customModel, expect.any(Object));
+      expect(env.AI.run).toHaveBeenNthCalledWith(2, customModel, expect.any(Object));
     });
   });
 });
