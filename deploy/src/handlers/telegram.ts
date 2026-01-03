@@ -27,6 +27,7 @@ import {
   sendMessageWithButtons,
   sendPhoto,
   sendDocument,
+  editMessageText,
 } from "../telegram/api.js";
 
 /**
@@ -44,6 +45,12 @@ export interface TelegramHandlerContext {
   chatId: number;
   /** Current pending messages (for Receive/TryReceive) */
   pendingMessages: TelegramIncomingMessage[];
+  /** Button ID mapping (btn_0 → original data) for resolving callbacks */
+  buttonMapping?: Record<string, unknown>;
+  /** Message ID of the button message (for editing after selection) */
+  buttonMessageId?: number | null;
+  /** Original question text (for showing selection confirmation) */
+  buttonQuestionText?: string | null;
 }
 
 // =============================================================================
@@ -182,34 +189,43 @@ export function handleTelegramTryReceive(
  * - Nothing yet → caller should block/yield until input arrives
  *
  * When yielding, returns the nonce for storage so it can be validated
- * when the callback arrives.
+ * when the callback arrives. Also returns buttonMapping for ID resolution,
+ * messageId for editing after selection, and questionText for the confirmation.
  */
 export type AskHandlerResult =
   | { type: "result"; result: EffectResult }
-  | { type: "yield"; nonce: string };
+  | {
+      type: "yield";
+      nonce: string;
+      buttonMapping: Record<string, unknown>;
+      messageId: number;
+      questionText: string;
+    };
 
 /**
  * Button callback data format with nonce for validation.
  */
 interface ButtonCallbackData {
-  action: string;
-  nonce: string;
+  action: string;  // Short button ID (btn_0, btn_1, ...)
+  nonce: string;   // For detecting stale buttons
 }
 
 /**
  * Parse button callback data from a button click.
+ * Supports compact format { a, n } and legacy format { action, nonce }.
  * Returns null if the data is not in the expected format.
  */
 function parseButtonCallbackData(data: unknown): ButtonCallbackData | null {
   if (typeof data === "object" && data !== null) {
     const obj = data as Record<string, unknown>;
+    // Compact format: { a: "btn_0", n: "nonce" }
+    if (typeof obj.a === "string" && typeof obj.n === "string") {
+      return { action: obj.a, nonce: obj.n };
+    }
+    // Legacy format: { action: "...", nonce: "..." }
     if (typeof obj.action === "string" && typeof obj.nonce === "string") {
       return { action: obj.action, nonce: obj.nonce };
     }
-  }
-  // Legacy format: plain string (no nonce)
-  if (typeof data === "string") {
-    return null; // No nonce means we can't validate
   }
   return null;
 }
@@ -223,14 +239,19 @@ function parseButtonCallbackData(data: unknown): ButtonCallbackData | null {
  * 2. Send text instead → returns { type: "text", text: "..." }
  * 3. Click a stale button → returns { type: "stale_button" }
  *
+ * Button ID mapping:
+ * - When buttons are sent, short IDs (btn_0, btn_1, ...) are used as callback_data
+ * - The mapping from short IDs to original data is stored and returned
+ * - When a button click arrives, the short ID is resolved back to original data
+ *
  * Nonce-based validation:
- * - When buttons are sent, a nonce is embedded in callback_data
+ * - When buttons are sent, a nonce is embedded in callback_data alongside the short ID
  * - When a button click arrives, the nonce is validated
  * - Mismatched nonces mean the button is from an old session
  *
  * @param effect - The TelegramAsk effect from Haskell
  * @param env - Environment with TELEGRAM_TOKEN
- * @param ctx - Context with chatId and pendingMessages
+ * @param ctx - Context with chatId, pendingMessages, and buttonMapping
  * @param storedNonce - Nonce from previous yield, or null if buttons not sent
  */
 export async function handleTelegramAsk(
@@ -242,23 +263,30 @@ export async function handleTelegramAsk(
   // If no stored nonce, buttons haven't been sent yet - send them
   if (storedNonce === null) {
     const nonce = crypto.randomUUID().slice(0, 12);
-    const buttons = convertButtonsToInlineKeyboardWithNonce(effect.eff_buttons, nonce);
-    const success = await sendMessageWithButtons(
+    const buttons = convertButtonsToInlineKeyboard(effect.eff_buttons);
+    const sendResult = await sendMessageWithButtons(
       env.TELEGRAM_TOKEN,
       ctx.chatId,
       effect.eff_tg_text,
-      buttons
+      buttons,
+      nonce
     );
 
-    if (!success) {
+    if (!sendResult) {
       return {
         type: "result",
         result: errorResult("Failed to send buttons"),
       };
     }
 
-    // Yield with the nonce for storage
-    return { type: "yield", nonce };
+    // Yield with the nonce, button mapping, message ID, and question text for storage
+    return {
+      type: "yield",
+      nonce,
+      buttonMapping: sendResult.buttonMapping,
+      messageId: sendResult.message_id,
+      questionText: effect.eff_tg_text,
+    };
   }
 
   // Buttons were sent - check for responses in pending messages
@@ -274,11 +302,52 @@ export async function handleTelegramAsk(
 
     if (callbackData && callbackData.nonce === storedNonce) {
       // Valid button click with matching nonce
-      const result: TelegramAskResult = {
-        type: "button",
-        response: callbackData.action,
-      };
-      return { type: "result", result: successResult(result) };
+      // Resolve the short button ID back to original data
+      const shortId = callbackData.action;
+      const storedData = ctx.buttonMapping?.[shortId];
+
+      if (storedData !== undefined) {
+        // storedData is the original button data (typically a string)
+        const responseValue = typeof storedData === "string"
+          ? storedData
+          : JSON.stringify(storedData);
+
+        // Edit the original button message to show selection and remove buttons
+        if (ctx.buttonMessageId) {
+          const buttonLabel = findButtonLabel(effect.eff_buttons, responseValue);
+          const displayText = buttonLabel ?? truncateForDisplay(responseValue, 50);
+          const confirmationText = `${ctx.buttonQuestionText ?? "Question"}\n\n✓ ${displayText}`;
+          try {
+            await editMessageText(
+              env.TELEGRAM_TOKEN,
+              ctx.chatId,
+              ctx.buttonMessageId,
+              confirmationText
+            );
+          } catch (err) {
+            // Non-critical: user's selection is still recorded even if edit fails
+            console.error("[TelegramAsk] Failed to edit confirmation message:", {
+              chatId: ctx.chatId,
+              messageId: ctx.buttonMessageId,
+              error: err,
+            });
+          }
+        }
+
+        const result: TelegramAskResult = {
+          type: "button",
+          response: responseValue,
+        };
+        return { type: "result", result: successResult(result) };
+      } else {
+        // Button ID not found in mapping - shouldn't happen but handle gracefully
+        console.error(`[TelegramAsk] Button ID "${shortId}" not found in mapping:`, ctx.buttonMapping);
+        const result: TelegramAskResult = {
+          type: "button",
+          response: shortId, // Fallback to the short ID
+        };
+        return { type: "result", result: successResult(result) };
+      }
     } else {
       // Stale button click (no nonce or mismatched nonce)
       console.log(`[TelegramAsk] Stale button click detected. Expected nonce: ${storedNonce}, got: ${callbackData?.nonce ?? "none"}`);
@@ -299,27 +368,83 @@ export async function handleTelegramAsk(
   );
 
   if (textMsg) {
+    // Edit the original button message to show text response and remove buttons
+    if (ctx.buttonMessageId) {
+      const confirmationText = `${ctx.buttonQuestionText ?? "Question"}\n\n✓ (typed) ${truncateForDisplay(textMsg.text, 50)}`;
+      try {
+        await editMessageText(
+          env.TELEGRAM_TOKEN,
+          ctx.chatId,
+          ctx.buttonMessageId,
+          confirmationText
+        );
+      } catch (err) {
+        // Non-critical: user's response is still recorded even if edit fails
+        console.error("[TelegramAsk] Failed to edit confirmation message:", {
+          chatId: ctx.chatId,
+          messageId: ctx.buttonMessageId,
+          error: err,
+        });
+      }
+    }
+
     const result: TelegramAskResult = { type: "text", text: textMsg.text };
     return { type: "result", result: successResult(result) };
   }
 
-  // 3. Nothing yet - keep waiting
-  return { type: "yield", nonce: storedNonce };
+  // 3. Nothing yet - keep waiting (preserve existing state)
+  // Note: If storedNonce exists but buttonMessageId is null/0, that's an inconsistent state
+  // (buttons were sent but we don't know their message ID). Log a warning but continue.
+  // The editMessageText calls are guarded by `if (ctx.buttonMessageId)` which will skip
+  // editing if messageId is 0 (falsy), so using 0 as fallback is safe.
+  if (!ctx.buttonMessageId) {
+    console.warn("[TelegramAsk] Waiting with stored nonce but missing buttonMessageId:", {
+      chatId: ctx.chatId,
+      nonce: storedNonce,
+    });
+  }
+  return {
+    type: "yield",
+    nonce: storedNonce,
+    buttonMapping: ctx.buttonMapping ?? {},
+    messageId: ctx.buttonMessageId ?? 0,
+    questionText: ctx.buttonQuestionText ?? "",
+  };
 }
 
 /**
- * Convert Haskell-style button pairs to Telegram inline keyboard format,
- * embedding a nonce in each button's callback data.
+ * Find the button label for a given action value.
  */
-function convertButtonsToInlineKeyboardWithNonce(
-  buttons: [string, string][],
-  nonce: string
+function findButtonLabel(buttons: [string, string][], action: string): string | null {
+  for (const [label, value] of buttons) {
+    if (value === action) {
+      return label;
+    }
+  }
+  return null;
+}
+
+/**
+ * Truncate a string for display, adding ellipsis if too long.
+ */
+function truncateForDisplay(text: string, maxLength: number): string {
+  if (text.length <= maxLength) {
+    return text;
+  }
+  return text.slice(0, maxLength - 1) + "…";
+}
+
+/**
+ * Convert Haskell-style button pairs to Telegram inline keyboard format.
+ * Each button goes in its own row with the action as data.
+ */
+function convertButtonsToInlineKeyboard(
+  buttons: [string, string][]
 ): TelegramInlineButton[][] {
-  // Put each button in its own row, with nonce embedded in data
   return buttons.map(([label, action]) => [
     {
       text: label,
-      data: { action, nonce } satisfies ButtonCallbackData,
+      data: action,  // Original action value, will be stored in mapping
     },
   ]);
 }

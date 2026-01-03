@@ -16,6 +16,7 @@ library
         Tidepool.Wasm.Effect
         Tidepool.Wasm.Error
         Tidepool.Wasm.CfTool
+        Tidepool.Wasm.TypedTool
         Tidepool.Wasm.ExampleGraph
         Tidepool.Wasm.Habitica
         Tidepool.Wasm.TestGraph
@@ -106,11 +107,14 @@ test-suite tidepool-wasm-tests
         CodegenSyncSpec
         RoundtripSpec
         RegistrySpec
+        HabiticaTypesSpec
+        TypedToolSpec
     build-depends:
         base >= 4.17 && < 5,
         hspec >= 2.10 && < 3,
         QuickCheck >= 2.14 && < 3,
         aeson >= 2.1 && < 3,
+        aeson-qq >= 0.8 && < 1,
         bytestring >= 0.11 && < 1,
         containers >= 0.6 && < 1,
         scientific >= 0.3 && < 1,

@@ -4,7 +4,7 @@ import type { SerializableEffect, EffectResult } from './protocol.js';
 import { errorResult } from './protocol.js';
 
 // Internal effect types (handled by StateMachineDO, not yielded to caller)
-export type InternalEffectType = "LogInfo" | "LogError" | "LlmComplete" | "LlmCall" | "Habitica";
+export type InternalEffectType = "LogInfo" | "LogError" | "LlmComplete" | "LlmCall" | "Habitica" | "GetState" | "SetState" | "RandomInt" | "GetTime";
 
 /**
  * Handler interface for internal effects.
@@ -18,6 +18,10 @@ export interface InternalEffectHandlers<TEnv> {
   LlmComplete: (effect: Extract<SerializableEffect, { type: "LlmComplete" }>, env: TEnv) => Promise<EffectResult>;
   LlmCall: (effect: Extract<SerializableEffect, { type: "LlmCall" }>, env: TEnv) => Promise<EffectResult>;
   Habitica: (effect: Extract<SerializableEffect, { type: "Habitica" }>, env: TEnv) => Promise<EffectResult>;
+  GetState: (effect: Extract<SerializableEffect, { type: "GetState" }>, env: TEnv) => Promise<EffectResult>;
+  SetState: (effect: Extract<SerializableEffect, { type: "SetState" }>, env: TEnv) => Promise<EffectResult>;
+  RandomInt: (effect: Extract<SerializableEffect, { type: "RandomInt" }>, env: TEnv) => Promise<EffectResult>;
+  GetTime: (effect: Extract<SerializableEffect, { type: "GetTime" }>, env: TEnv) => Promise<EffectResult>;
 }
 
 /**
@@ -61,6 +65,30 @@ export function dispatchInternalEffect<TEnv>(
     case "Habitica":
       return handlers.Habitica(
         effect as Extract<SerializableEffect, { type: "Habitica" }>,
+        env
+      );
+
+    case "GetState":
+      return handlers.GetState(
+        effect as Extract<SerializableEffect, { type: "GetState" }>,
+        env
+      );
+
+    case "SetState":
+      return handlers.SetState(
+        effect as Extract<SerializableEffect, { type: "SetState" }>,
+        env
+      );
+
+    case "RandomInt":
+      return handlers.RandomInt(
+        effect as Extract<SerializableEffect, { type: "RandomInt" }>,
+        env
+      );
+
+    case "GetTime":
+      return handlers.GetTime(
+        effect as Extract<SerializableEffect, { type: "GetTime" }>,
         env
       );
 

@@ -11,7 +11,7 @@ export interface WasmExports {
   // Initialization exports
   _initialize: () => void;  // WASI/libc initialization (reactor mode)
   hs_init: (argc: number, argv: number) => void;  // GHC RTS initialization
-  initRegistry: () => void;  // Populate graph registry (call after hs_init)
+  initRegistry: () => void;  // Populate graph registry
   // GHC WASM exports use externref - JS values passed directly
   initialize: (input: string) => Promise<string>;
   step: (result: string) => Promise<string>;
@@ -175,12 +175,12 @@ export function createJsFFI(
     // GHC generates numbered variants for different Haskell return types.
     // All have the same JS implementation - just resolve the promise with the value.
     ...Object.fromEntries(
-      Array.from({ length: 20 }, (_, i) => [
-        `ZC${i}ZCghczminternalZCGHCziInternalziWasmziPrimziExportsZC`,
+      Array.from({ length: 19 }, (_, i) => [
+        `ZC${i + 1}ZCghczminternalZCGHCziInternalziWasmziPrimziExportsZC`,
         (p: PromiseWithResolvers<unknown>, val: unknown): void => {
           p.resolve(val);
         },
-      ]).filter(([name]) => name !== "ZC0ZCghczminternalZCGHCziInternalziWasmziPrimziExportsZC") // ZC0 is reject, handled separately
+      ])
     ),
 
     // ZC20: Set empty throwTo handler

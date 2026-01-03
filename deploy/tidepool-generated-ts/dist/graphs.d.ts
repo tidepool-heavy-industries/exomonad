@@ -1,4 +1,4 @@
-export type GraphId = "example" | "habitica" | "test";
+export type GraphId = "example" | "test";
 export interface GraphEdge {
     from: string;
     to: string;

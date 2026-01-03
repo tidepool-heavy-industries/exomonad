@@ -32,7 +32,6 @@ module Tidepool.Wasm.Ffi.Unified
   ) where
 
 import Data.Text (Text)
-import qualified Data.Text as T
 
 #if defined(wasm32_HOST_ARCH)
 import GHC.Wasm.Prim (JSString(..), fromJSString, toJSString)

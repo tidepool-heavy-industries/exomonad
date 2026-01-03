@@ -15,12 +15,18 @@ import { dispatchInternalEffect, errorResult, isYieldedEffect } from "tidepool-g
 import { handleLogInfo, handleLogError } from "./log.js";
 import { handleLlmComplete, handleLlmCall, type LlmEnv } from "./llm.js";
 import { handleHabitica, type HabiticaConfig } from "./habitica.js";
+import { handleGetState, handleSetState, type StateEnv } from "./state.js";
+import { handleRandomInt } from "./random.js";
+import { handleGetTime } from "./time.js";
 import { logEffectExecution, type LogContext } from "../structured-log.js";
 
 // Re-export handlers for direct testing
 export { handleLogInfo, handleLogError } from "./log.js";
 export { handleLlmComplete, handleLlmCall } from "./llm.js";
 export { handleHabitica } from "./habitica.js";
+export { handleGetState, handleSetState, clearState, getStateSnapshot } from "./state.js";
+export { handleRandomInt } from "./random.js";
+export { handleGetTime } from "./time.js";
 
 // Telegram handlers (used by TelegramDO, not executeEffect - they need chat context)
 export {
@@ -38,7 +44,7 @@ export {
  * Environment interface with all required bindings.
  * Note: Telegram effects are handled by TelegramDO, not executeEffect.
  */
-export interface Env extends LlmEnv {
+export interface Env extends LlmEnv, StateEnv {
   HABITICA_USER_ID: string;
   HABITICA_API_TOKEN: string;
 }
@@ -59,6 +65,10 @@ const internalHandlers: InternalEffectHandlers<Env> = {
     };
     return handleHabitica(effect, config);
   },
+  GetState: (effect, env) => handleGetState(effect, env),
+  SetState: (effect, env) => handleSetState(effect, env),
+  RandomInt: (effect, _env) => handleRandomInt(effect),
+  GetTime: (effect, _env) => handleGetTime(effect),
 };
 
 // Re-export LogContext for callers

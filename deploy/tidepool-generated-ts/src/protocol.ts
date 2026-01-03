@@ -151,7 +151,12 @@ export type SerializableEffect =
   | TelegramSendEffect
   | TelegramReceiveEffect
   | TelegramTryReceiveEffect
-  | TelegramAskEffect;
+  | TelegramAskEffect
+  | GetStateEffect
+  | SetStateEffect
+  | EmitEventEffect
+  | RandomIntEffect
+  | GetTimeEffect;
 
 /**
  * LLM completion request - matches Haskell EffLlmComplete.
@@ -240,6 +245,8 @@ export type LlmCallResult =
 export interface LogInfoEffect {
   type: "LogInfo";
   eff_message: string;
+  /** Optional structured fields for queryable log data */
+  eff_fields?: Record<string, unknown>;
 }
 
 /**
@@ -248,6 +255,8 @@ export interface LogInfoEffect {
 export interface LogErrorEffect {
   type: "LogError";
   eff_message: string;
+  /** Optional structured fields for queryable log data */
+  eff_fields?: Record<string, unknown>;
 }
 
 /**
@@ -260,6 +269,76 @@ export interface HabiticaEffect {
   eff_hab_op: string;
   /** Operation-specific payload (JSON) */
   eff_hab_payload: unknown;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// STATE EFFECTS (for DM and other stateful graphs)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Get state by key - matches Haskell EffGetState.
+ * TypeScript reads from Durable Object storage or in-memory store.
+ */
+export interface GetStateEffect {
+  type: "GetState";
+  /** State key (e.g., "worldState", "sessionState") */
+  eff_state_key: string;
+}
+
+/**
+ * Set state by key - matches Haskell EffSetState.
+ * TypeScript writes to Durable Object storage or in-memory store.
+ */
+export interface SetStateEffect {
+  type: "SetState";
+  /** State key */
+  eff_state_key: string;
+  /** New state value (full replacement) */
+  eff_state_value: unknown;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// EVENT EFFECTS (for observability/GUI updates)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Emit an event for observability/GUI updates - matches Haskell EffEmitEvent.
+ * TypeScript forwards to connected WebSocket clients.
+ */
+export interface EmitEventEffect {
+  type: "EmitEvent";
+  /** Event name (e.g., "StressChanged", "ClockAdvanced") */
+  eff_event_name: string;
+  /** Event-specific payload */
+  eff_event_payload: unknown;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// RANDOM EFFECTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Get a random integer - matches Haskell EffRandomInt.
+ * TypeScript uses crypto.getRandomValues or Math.random.
+ */
+export interface RandomIntEffect {
+  type: "RandomInt";
+  /** Minimum value (inclusive) */
+  eff_min: number;
+  /** Maximum value (inclusive) */
+  eff_max: number;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TIME EFFECTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Get current UTC time - matches Haskell EffGetTime.
+ * TypeScript returns ISO8601 string (e.g., "2024-01-15T10:30:00Z").
+ */
+export interface GetTimeEffect {
+  type: "GetTime";
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -299,7 +378,7 @@ export type TelegramIncomingMessage =
  * Mirrors Haskell: Send :: OutgoingMessage -> Telegram m ()
  */
 export interface TelegramSendEffect {
-  type: "telegram_send";
+  type: "TelegramSend";
   message: TelegramOutgoingMessage;
 }
 
@@ -310,7 +389,7 @@ export interface TelegramSendEffect {
  * Mirrors Haskell: Receive :: Telegram m (NonEmpty IncomingMessage)
  */
 export interface TelegramReceiveEffect {
-  type: "telegram_receive";
+  type: "TelegramReceive";
 }
 
 /**
@@ -319,7 +398,7 @@ export interface TelegramReceiveEffect {
  * Mirrors Haskell: TryReceive :: Telegram m [IncomingMessage]
  */
 export interface TelegramTryReceiveEffect {
-  type: "telegram_try_receive";
+  type: "TelegramTryReceive";
 }
 
 /**

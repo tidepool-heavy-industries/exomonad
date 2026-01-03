@@ -20,6 +20,8 @@ import Test.QuickCheck
   )
 import Data.Aeson (encode, decode, Value(..), object, (.=))
 import Data.Aeson.KeyMap qualified as KM
+import Data.Map.Strict (Map)
+import Data.Map.Strict qualified as Map
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Vector qualified as V
@@ -74,6 +76,19 @@ arbMaybeNonNullValue = do
     Null -> Nothing
     _    -> Just v
 
+-- | Generate Maybe (Map Text Value) for log fields.
+-- Avoid null values in the map since they don't roundtrip correctly.
+arbMaybeFields :: Gen (Maybe (Map Text Value))
+arbMaybeFields = oneof
+  [ pure Nothing
+  , Just . Map.fromList <$> listOf ((,) <$> arbitrary <*> arbNonNullValue)
+  ]
+  where
+    arbNonNullValue = arbitrary `suchThat` (/= Null)
+    suchThat gen p = do
+      x <- gen
+      if p x then pure x else suchThat gen p
+
 -- | Arbitrary SerializableEffect covering all constructors
 instance Arbitrary SerializableEffect where
   arbitrary = oneof
@@ -83,8 +98,8 @@ instance Arbitrary SerializableEffect where
         <*> arbitrary
         <*> arbMaybeNonNullValue  -- Avoid Just Null (doesn't roundtrip)
         <*> arbitrary             -- model: Maybe Text
-    , EffLogInfo <$> arbitrary
-    , EffLogError <$> arbitrary
+    , EffLogInfo <$> arbitrary <*> arbMaybeFields
+    , EffLogError <$> arbitrary <*> arbMaybeFields
     , EffHabitica
         <$> elements ["GetUser", "ScoreTask", "GetTasks", "FetchTodos", "CreateTodo", "AddChecklistItem"]
         <*> scale (`div` 2) arbitrary
@@ -98,7 +113,7 @@ instance Arbitrary SerializableEffect where
     ]
 
   shrink (EffLlmComplete node sys user schema model) =
-    [ EffLogInfo node ]  -- Simplify to simpler effect
+    [ EffLogInfo node Nothing ]  -- Simplify to simpler effect
     ++ [ EffLlmComplete node' sys user schema model | node' <- shrink node ]
     ++ [ EffLlmComplete node sys' user schema model | sys' <- shrink sys ]
     ++ [ EffLlmComplete node sys user' schema model | user' <- shrink user ]
@@ -107,19 +122,21 @@ instance Arbitrary SerializableEffect where
        , schema' /= Just Null  -- Avoid Just Null (doesn't roundtrip)
        ]
     ++ [ EffLlmComplete node sys user schema model' | model' <- shrink model ]
-  shrink (EffLogInfo msg) =
-    [ EffLogInfo msg' | msg' <- shrink msg ]
-  shrink (EffLogError msg) =
-    [ EffLogInfo msg ]  -- Error to Info
-    ++ [ EffLogError msg' | msg' <- shrink msg ]
+  shrink (EffLogInfo msg fields) =
+    [ EffLogInfo msg Nothing | Just _ <- [fields] ]  -- Remove fields first
+    ++ [ EffLogInfo msg' fields | msg' <- shrink msg ]
+  shrink (EffLogError msg fields) =
+    [ EffLogInfo msg Nothing ]  -- Error to Info
+    ++ [ EffLogError msg Nothing | Just _ <- [fields] ]  -- Remove fields first
+    ++ [ EffLogError msg' fields | msg' <- shrink msg ]
   shrink (EffHabitica op payload) =
-    [ EffLogInfo op ]
+    [ EffLogInfo op Nothing ]
     ++ [ EffHabitica op payload' | payload' <- shrink payload ]
   shrink (EffTelegramSend txt parseMode) =
-    [ EffLogInfo txt ]
+    [ EffLogInfo txt Nothing ]
     ++ [ EffTelegramSend txt' parseMode | txt' <- shrink txt ]
   shrink (EffTelegramAsk txt parseMode buttons) =
-    [ EffLogInfo txt ]
+    [ EffLogInfo txt Nothing ]
     ++ [ EffTelegramAsk txt' parseMode buttons | txt' <- shrink txt ]
     ++ [ EffTelegramAsk txt parseMode buttons' | buttons' <- shrink buttons ]
 
@@ -441,7 +458,7 @@ edgeCaseSpec = describe "Edge cases" $ do
 
   describe "Empty strings" $ do
     it "roundtrips EffLogInfo with empty message" $ do
-      let effect = EffLogInfo ""
+      let effect = EffLogInfo "" Nothing
       decode (encode effect) `shouldBe` Just effect
 
     it "roundtrips ResError with empty message" $ do
@@ -454,32 +471,32 @@ edgeCaseSpec = describe "Edge cases" $ do
 
   describe "Unicode and special characters" $ do
     it "roundtrips effect with emoji" $ do
-      let effect = EffLogInfo "Status: \x1F600 \x1F4A9 \x2764"
+      let effect = EffLogInfo "Status: \x1F600 \x1F4A9 \x2764" Nothing
       decode (encode effect) `shouldBe` Just effect
 
     it "roundtrips effect with null bytes" $ do
-      let effect = EffLogInfo "before\x0000after"
+      let effect = EffLogInfo "before\x0000after" Nothing
       decode (encode effect) `shouldBe` Just effect
 
     it "roundtrips effect with newlines and tabs" $ do
-      let effect = EffLogInfo "line1\nline2\ttabbed"
+      let effect = EffLogInfo "line1\nline2\ttabbed" Nothing
       decode (encode effect) `shouldBe` Just effect
 
     it "roundtrips effect with backslashes" $ do
-      let effect = EffLogInfo "path\\to\\file"
+      let effect = EffLogInfo "path\\to\\file" Nothing
       decode (encode effect) `shouldBe` Just effect
 
     it "roundtrips effect with quotes" $ do
-      let effect = EffLogInfo "He said \"hello\""
+      let effect = EffLogInfo "He said \"hello\"" Nothing
       decode (encode effect) `shouldBe` Just effect
 
     it "roundtrips effect with JSON-like content" $ do
-      let effect = EffLogInfo "{\"key\": \"value\", \"nested\": {\"a\": 1}}"
+      let effect = EffLogInfo "{\"key\": \"value\", \"nested\": {\"a\": 1}}" Nothing
       decode (encode effect) `shouldBe` Just effect
 
     it "roundtrips effect with very long string (10KB)" $ do
       let longStr = T.replicate 10000 "x"
-          effect = EffLogInfo longStr
+          effect = EffLogInfo longStr Nothing
       decode (encode effect) `shouldBe` Just effect
 
   describe "Nothing vs Just Null (proper roundtrip)" $ do
@@ -557,8 +574,8 @@ edgeCaseSpec = describe "Edge cases" $ do
     it "all SerializableEffect variants have distinct 'type' values" $ do
       let effects =
             [ EffLlmComplete "n" "s" "u" Nothing Nothing
-            , EffLogInfo "msg"
-            , EffLogError "err"
+            , EffLogInfo "msg" Nothing
+            , EffLogError "err" Nothing
             , EffHabitica "GetUser" (object [])
             ]
           getType eff = case decode (encode eff) :: Maybe Value of

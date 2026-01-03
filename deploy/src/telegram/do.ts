@@ -83,6 +83,12 @@ const ConversationStateSchema = z.object({
   pendingEffect: z.unknown().default(null),
   effectNonce: z.string().nullable().default(null),
   lastActivity: z.number().default(() => Date.now()),
+  /** Maps short button IDs (btn_0, btn_1, ...) to original callback data */
+  buttonMapping: z.record(z.string(), z.unknown()).default({}),
+  /** Message ID of the current button message (for editing after selection) */
+  buttonMessageId: z.number().nullable().default(null),
+  /** Original question text (for showing "Question: You chose X" after selection) */
+  buttonQuestionText: z.string().nullable().default(null),
 });
 
 /**
@@ -93,6 +99,9 @@ const ConversationStateSchema = z.object({
 interface ConversationState extends Omit<z.infer<typeof ConversationStateSchema>, 'pendingEffect'> {
   pendingEffect: SerializableEffect | null;
   effectNonce: string | null;
+  buttonMapping: Record<string, unknown>;
+  buttonMessageId: number | null;
+  buttonQuestionText: string | null;
 }
 
 /**
@@ -252,6 +261,10 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
     // If we're waiting for a Receive/Confirm, resume processing
     if (state.waitingForReceive && state.pendingEffect && state.wasmSessionId) {
       console.log(`[TelegramDO] Resuming blocked effect: ${state.pendingEffect.type}`);
+
+      // Send typing indicator since resume may trigger LLM calls (fire-and-forget)
+      void sendTypingAction(this.env.TELEGRAM_TOKEN, chatId);
+
       state.waitingForReceive = false;
       const effect = state.pendingEffect;
       // Don't clear pendingEffect yet - handleYieldedEffect may need to check if buttons sent
@@ -319,8 +332,8 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
     const sessionId = `telegram-${chatId}-${Date.now()}`;
     console.log(`[TelegramDO] Starting graph session: ${sessionId}`);
 
-    // Show typing indicator while processing
-    await sendTypingAction(this.env.TELEGRAM_TOKEN, chatId);
+    // Show typing indicator while processing (fire-and-forget)
+    void sendTypingAction(this.env.TELEGRAM_TOKEN, chatId);
 
     // Store session ID before starting (in case we need to resume)
     if (this.state) {
@@ -474,6 +487,9 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
           }
 
           // Resume graph with the result
+          // Send typing indicator since resume may trigger LLM calls (fire-and-forget)
+          void sendTypingAction(this.env.TELEGRAM_TOKEN, chatId);
+
           const resumeResponse = await stub.fetch(
             new Request(`https://do/resume`, {
               method: "POST",
@@ -516,6 +532,9 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
     const ctx: TelegramHandlerContext = {
       chatId,
       pendingMessages: state.pendingMessages,
+      buttonMapping: state.buttonMapping,
+      buttonMessageId: state.buttonMessageId,
+      buttonQuestionText: state.buttonQuestionText,
     };
 
     switch (effect.type) {
@@ -523,12 +542,12 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
       // Telegram effects - handled locally by TelegramDO
       // ─────────────────────────────────────────────────────────────────────
 
-      case "telegram_send": {
+      case "TelegramSend": {
         const result = await handleTelegramSend(effect, this.env, ctx);
         return { outcome: "handled", result };
       }
 
-      case "telegram_receive": {
+      case "TelegramReceive": {
         const receiveResult = handleTelegramReceive(effect, ctx);
         if (receiveResult.type === "yield") {
           // Block until messages arrive
@@ -543,7 +562,7 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
         return { outcome: "handled", result: receiveResult.result };
       }
 
-      case "telegram_try_receive": {
+      case "TelegramTryReceive": {
         const result = handleTelegramTryReceive(effect, ctx);
         state.pendingMessages = [];
         await this.saveState();
@@ -562,10 +581,13 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
         );
 
         if (askResult.type === "yield") {
-          // Block until input arrives, store the nonce for validation
+          // Block until input arrives, store nonce, button mapping, and message info
           state.waitingForReceive = true;
           state.pendingEffect = effect;
           state.effectNonce = askResult.nonce;
+          state.buttonMapping = askResult.buttonMapping;
+          state.buttonMessageId = askResult.messageId;
+          state.buttonQuestionText = askResult.questionText;
           await this.saveState();
           return { outcome: "blocking" };
         }
@@ -574,6 +596,9 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
         state.pendingMessages = [];
         state.pendingEffect = null;
         state.effectNonce = null;
+        state.buttonMapping = {};
+        state.buttonMessageId = null;
+        state.buttonQuestionText = null;
         await this.saveState();
         return { outcome: "handled", result: askResult.result };
       }
@@ -587,7 +612,11 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
       case "LogError":
       case "LlmComplete":
       case "LlmCall":
-      case "Habitica": {
+      case "Habitica":
+      case "GetState":
+      case "SetState":
+      case "RandomInt":
+      case "GetTime": {
         console.error(
           `[TelegramDO] Received internal effect "${effect.type}" that should be handled by StateMachineDO`
         );
@@ -597,6 +626,16 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
             type: "error",
             message: `Effect "${effect.type}" was unexpectedly yielded to TelegramDO`,
           },
+        };
+      }
+
+      // EmitEvent is yielded - forward to client
+      case "EmitEvent": {
+        // EmitEvent is fire-and-forget - log it and return success
+        console.log(`[TelegramDO] Event: ${effect.eff_event_name}`, effect.eff_event_payload);
+        return {
+          outcome: "handled",
+          result: { type: "success", value: null },
         };
       }
 
@@ -642,16 +681,19 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
     const ctx: TelegramHandlerContext = {
       chatId: state.chatId,
       pendingMessages: state.pendingMessages,
+      buttonMapping: state.buttonMapping,
+      buttonMessageId: state.buttonMessageId,
+      buttonQuestionText: state.buttonQuestionText,
     };
 
     let result: EffectResult;
 
     switch (effect.type) {
-      case "telegram_send":
+      case "TelegramSend":
         result = await handleTelegramSend(effect, this.env, ctx);
         break;
 
-      case "telegram_receive": {
+      case "TelegramReceive": {
         const receiveResult = handleTelegramReceive(effect, ctx);
         if (receiveResult.type === "yield") {
           // Need to block until messages arrive
@@ -668,7 +710,7 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
         break;
       }
 
-      case "telegram_try_receive":
+      case "TelegramTryReceive":
         result = handleTelegramTryReceive(effect, ctx);
         // Clear the queue after reading
         state.pendingMessages = [];
@@ -695,7 +737,8 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
     chatId: number,
     message: TelegramIncomingMessage
   ): Promise<void> {
-    await sendTypingAction(this.env.TELEGRAM_TOKEN, chatId);
+    // Fire-and-forget typing indicator
+    void sendTypingAction(this.env.TELEGRAM_TOKEN, chatId);
 
     let result: { message_id: number } | null = null;
 

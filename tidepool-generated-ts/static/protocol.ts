@@ -144,13 +144,19 @@ export function getCurrentNode(phase: ExecutionPhase): string | null {
  */
 export type SerializableEffect =
   | LlmCompleteEffect
+  | LlmCallEffect
   | LogInfoEffect
   | LogErrorEffect
   | HabiticaEffect
   | TelegramSendEffect
   | TelegramReceiveEffect
   | TelegramTryReceiveEffect
-  | TelegramConfirmEffect;
+  | TelegramAskEffect
+  | GetStateEffect
+  | SetStateEffect
+  | EmitEventEffect
+  | RandomIntEffect
+  | GetTimeEffect;
 
 /**
  * LLM completion request - matches Haskell EffLlmComplete.
@@ -166,7 +172,72 @@ export interface LlmCompleteEffect {
   eff_user_content: string;
   /** JSON schema for structured output */
   eff_schema: JsonSchema | null;
+  /** Model to use (e.g., "@cf/meta/llama-3.3-70b-instruct-fp8-fast"). If undefined, uses default. */
+  eff_model?: string;
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LLM CALL EFFECT (tool-aware LLM calls)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Wire-format message for LLM conversation history.
+ * Matches Haskell WireMessage.
+ */
+export interface WireMessage {
+  /** Role: "user" | "assistant" | "system" */
+  role: "user" | "assistant" | "system";
+  /** Content blocks */
+  content: WireContentBlock[];
+}
+
+/**
+ * Wire-format content block for LLM messages.
+ * Matches Haskell WireContentBlock.
+ */
+export type WireContentBlock =
+  | { type: "text"; text: string }
+  | { type: "tool_use"; id: string; name: string; input: unknown }
+  | { type: "tool_result"; tool_use_id: string; content: string; is_error: boolean };
+
+/**
+ * Tool call request from LLM.
+ * Matches Haskell WireToolCall.
+ */
+export interface WireToolCall {
+  /** Unique ID for this tool call (used in tool_result) */
+  id: string;
+  /** Tool name (e.g., "ask_user") */
+  name: string;
+  /** Tool arguments (JSON) */
+  input: unknown;
+}
+
+/**
+ * LLM call with tool support - matches Haskell EffLlmCall.
+ * TypeScript calls the LLM API and returns either "done" or "needs_tools".
+ */
+export interface LlmCallEffect {
+  type: "LlmCall";
+  /** Which node is making this call */
+  eff_node: string;
+  /** Full conversation history */
+  eff_messages: WireMessage[];
+  /** JSON schema for structured output */
+  eff_schema: JsonSchema | null;
+  /** Tool definitions (Anthropic format) */
+  eff_tools: unknown[];
+  /** Model to use (e.g., "@cf/meta/llama-3.3-70b-instruct-fp8-fast"). If undefined, uses default. */
+  eff_model?: string;
+}
+
+/**
+ * Result from LLM API call - either done or needs tools.
+ * Matches Haskell LlmCallResult.
+ */
+export type LlmCallResult =
+  | { type: "done"; content: WireContentBlock[] }
+  | { type: "needs_tools"; tool_calls: WireToolCall[]; content: WireContentBlock[] };
 
 /**
  * Info log - matches Haskell EffLogInfo.
@@ -174,6 +245,8 @@ export interface LlmCompleteEffect {
 export interface LogInfoEffect {
   type: "LogInfo";
   eff_message: string;
+  /** Optional structured fields for queryable log data */
+  eff_fields?: Record<string, unknown>;
 }
 
 /**
@@ -182,6 +255,8 @@ export interface LogInfoEffect {
 export interface LogErrorEffect {
   type: "LogError";
   eff_message: string;
+  /** Optional structured fields for queryable log data */
+  eff_fields?: Record<string, unknown>;
 }
 
 /**
@@ -194,6 +269,76 @@ export interface HabiticaEffect {
   eff_hab_op: string;
   /** Operation-specific payload (JSON) */
   eff_hab_payload: unknown;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// STATE EFFECTS (for DM and other stateful graphs)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Get state by key - matches Haskell EffGetState.
+ * TypeScript reads from Durable Object storage or in-memory store.
+ */
+export interface GetStateEffect {
+  type: "GetState";
+  /** State key (e.g., "worldState", "sessionState") */
+  eff_state_key: string;
+}
+
+/**
+ * Set state by key - matches Haskell EffSetState.
+ * TypeScript writes to Durable Object storage or in-memory store.
+ */
+export interface SetStateEffect {
+  type: "SetState";
+  /** State key */
+  eff_state_key: string;
+  /** New state value (full replacement) */
+  eff_state_value: unknown;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// EVENT EFFECTS (for observability/GUI updates)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Emit an event for observability/GUI updates - matches Haskell EffEmitEvent.
+ * TypeScript forwards to connected WebSocket clients.
+ */
+export interface EmitEventEffect {
+  type: "EmitEvent";
+  /** Event name (e.g., "StressChanged", "ClockAdvanced") */
+  eff_event_name: string;
+  /** Event-specific payload */
+  eff_event_payload: unknown;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// RANDOM EFFECTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Get a random integer - matches Haskell EffRandomInt.
+ * TypeScript uses crypto.getRandomValues or Math.random.
+ */
+export interface RandomIntEffect {
+  type: "RandomInt";
+  /** Minimum value (inclusive) */
+  eff_min: number;
+  /** Maximum value (inclusive) */
+  eff_max: number;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TIME EFFECTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Get current UTC time - matches Haskell EffGetTime.
+ * TypeScript returns ISO8601 string (e.g., "2024-01-15T10:30:00Z").
+ */
+export interface GetTimeEffect {
+  type: "GetTime";
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -233,7 +378,7 @@ export type TelegramIncomingMessage =
  * Mirrors Haskell: Send :: OutgoingMessage -> Telegram m ()
  */
 export interface TelegramSendEffect {
-  type: "telegram_send";
+  type: "TelegramSend";
   message: TelegramOutgoingMessage;
 }
 
@@ -244,7 +389,7 @@ export interface TelegramSendEffect {
  * Mirrors Haskell: Receive :: Telegram m (NonEmpty IncomingMessage)
  */
 export interface TelegramReceiveEffect {
-  type: "telegram_receive";
+  type: "TelegramReceive";
 }
 
 /**
@@ -253,30 +398,40 @@ export interface TelegramReceiveEffect {
  * Mirrors Haskell: TryReceive :: Telegram m [IncomingMessage]
  */
 export interface TelegramTryReceiveEffect {
-  type: "telegram_try_receive";
+  type: "TelegramTryReceive";
 }
 
 /**
- * Request user confirmation via Telegram inline buttons.
- * Blocking effect - waits for user to click a button.
- * Mirrors Haskell: EffTelegramConfirm
+ * Request user input via Telegram inline buttons.
+ * Blocking effect - waits for user to click a button OR send text.
+ * Mirrors Haskell: EffTelegramAsk
  *
  * Default buttons from Haskell:
  * - "✓ Yes" -> "approved"
  * - "✗ No" -> "denied"
  * - "Skip" -> "skipped"
  */
-export interface TelegramConfirmEffect {
-  type: "TelegramConfirm";
+export interface TelegramAskEffect {
+  type: "TelegramAsk";
   /** Message to display above buttons */
-  eff_message: string;
+  eff_tg_text: string;
+  /** Parse mode: "PlainText" | "Markdown" | "HTML" */
+  eff_tg_parse_mode: string;
   /** Buttons as [label, value] pairs */
   eff_buttons: [string, string][];
 }
 
 /**
- * Response format for TelegramConfirmEffect.
- * Parsed by Haskell's parseConfirmation in HabiticaRoutingGraph.hs
+ * Result from TelegramAskEffect.
+ * Sum type: user can click button, send text, or click stale button.
+ */
+export type TelegramAskResult =
+  | { type: "button"; response: string }
+  | { type: "text"; text: string }
+  | { type: "stale_button" };
+
+/**
+ * @deprecated Use TelegramAskResult instead
  */
 export interface TelegramConfirmResponse {
   response: "approved" | "denied" | "skipped";

@@ -61,6 +61,7 @@ import Data.Aeson.Key (fromText)
 import Data.Aeson.Types (Parser)
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Map.Strict (Map)
 import GHC.Generics (Generic)
 
 -- Re-export effect metadata from the single source of truth
@@ -230,7 +231,7 @@ instance FromJSON LlmCallResult where
 
 -- | Effects that Haskell yields for TypeScript to execute.
 --
--- JSON encoding matches protocol.ts: @{type: "LogInfo", eff_message: "..."}@
+-- JSON encoding matches protocol.ts: @{type: "LogInfo", eff_message: "...", eff_fields: {...}}@
 data SerializableEffect
   = EffLlmComplete
       { effNode :: Text
@@ -245,8 +246,18 @@ data SerializableEffect
       -- ^ Model to use (e.g., "@cf/meta/llama-3.3-70b-instruct-fp8-fast")
       -- If Nothing, TypeScript uses its default model
       }
-  | EffLogInfo { effMessage :: Text }
-  | EffLogError { effMessage :: Text }
+  | EffLogInfo
+      { effMessage :: Text
+      -- ^ Log message
+      , effFields :: Maybe (Map Text Value)
+      -- ^ Optional structured fields for queryable log data
+      }
+  | EffLogError
+      { effMessage :: Text
+      -- ^ Log message
+      , effFields :: Maybe (Map Text Value)
+      -- ^ Optional structured fields for queryable log data
+      }
   | EffHabitica
       { effHabOp :: Text
       -- ^ Operation name: "GetUser", "ScoreTask", "GetTasks", etc.
@@ -280,6 +291,42 @@ data SerializableEffect
       -- ^ Model to use (e.g., "@cf/meta/llama-3.3-70b-instruct-fp8-fast")
       -- If Nothing, TypeScript uses its default model
       }
+  -- ══════════════════════════════════════════════════════════════════════════
+  -- State Effects (for DM and other stateful graphs)
+  -- ══════════════════════════════════════════════════════════════════════════
+  | EffGetState
+      { effStateKey :: Text
+      -- ^ State key (e.g., "worldState", "sessionState")
+      }
+  | EffSetState
+      { effStateKey :: Text
+      -- ^ State key
+      , effStateValue :: Value
+      -- ^ New state value (full replacement)
+      }
+  -- ══════════════════════════════════════════════════════════════════════════
+  -- Event Emission (for observability/GUI)
+  -- ══════════════════════════════════════════════════════════════════════════
+  | EffEmitEvent
+      { effEventName :: Text
+      -- ^ Event name (e.g., "StressChanged", "ClockAdvanced")
+      , effEventPayload :: Value
+      -- ^ Event-specific payload
+      }
+  -- ══════════════════════════════════════════════════════════════════════════
+  -- Random Number Generation
+  -- ══════════════════════════════════════════════════════════════════════════
+  | EffRandomInt
+      { effRandomMin :: Int
+      -- ^ Minimum value (inclusive)
+      , effRandomMax :: Int
+      -- ^ Maximum value (inclusive)
+      }
+  -- ══════════════════════════════════════════════════════════════════════════
+  -- Time
+  -- ══════════════════════════════════════════════════════════════════════════
+  | EffGetTime
+      -- ^ Get current UTC time (returns ISO8601 string)
   deriving stock (Show, Eq, Generic)
 
 instance ToJSON SerializableEffect where
@@ -290,14 +337,14 @@ instance ToJSON SerializableEffect where
     , "eff_user_content" .= user
     ] ++ maybe [] (\s -> ["eff_schema" .= s]) schema
       ++ maybe [] (\m -> ["eff_model" .= m]) model
-  toJSON (EffLogInfo msg) = object
+  toJSON (EffLogInfo msg fields) = object $
     [ "type" .= ("LogInfo" :: Text)
     , "eff_message" .= msg
-    ]
-  toJSON (EffLogError msg) = object
+    ] ++ maybe [] (\f -> ["eff_fields" .= f]) fields
+  toJSON (EffLogError msg fields) = object $
     [ "type" .= ("LogError" :: Text)
     , "eff_message" .= msg
-    ]
+    ] ++ maybe [] (\f -> ["eff_fields" .= f]) fields
   toJSON (EffHabitica op payload) = object
     [ "type" .= ("Habitica" :: Text)
     , "eff_hab_op" .= op
@@ -321,6 +368,28 @@ instance ToJSON SerializableEffect where
     , "eff_tools" .= tools
     ] ++ maybe [] (\s -> ["eff_schema" .= s]) schema
       ++ maybe [] (\m -> ["eff_model" .= m]) model
+  toJSON (EffGetState key) = object
+    [ "type" .= ("GetState" :: Text)
+    , "eff_state_key" .= key
+    ]
+  toJSON (EffSetState key value) = object
+    [ "type" .= ("SetState" :: Text)
+    , "eff_state_key" .= key
+    , "eff_state_value" .= value
+    ]
+  toJSON (EffEmitEvent name payload) = object
+    [ "type" .= ("EmitEvent" :: Text)
+    , "eff_event_name" .= name
+    , "eff_event_payload" .= payload
+    ]
+  toJSON (EffRandomInt minVal maxVal) = object
+    [ "type" .= ("RandomInt" :: Text)
+    , "eff_min" .= minVal
+    , "eff_max" .= maxVal
+    ]
+  toJSON EffGetTime = object
+    [ "type" .= ("GetTime" :: Text)
+    ]
 
 instance FromJSON SerializableEffect where
   parseJSON = withObject "SerializableEffect" $ \o -> do
@@ -332,8 +401,12 @@ instance FromJSON SerializableEffect where
         <*> o .: "eff_user_content"
         <*> o .:? "eff_schema"
         <*> o .:? "eff_model"
-      "LogInfo" -> EffLogInfo <$> o .: "eff_message"
-      "LogError" -> EffLogError <$> o .: "eff_message"
+      "LogInfo" -> EffLogInfo
+        <$> o .: "eff_message"
+        <*> o .:? "eff_fields"
+      "LogError" -> EffLogError
+        <$> o .: "eff_message"
+        <*> o .:? "eff_fields"
       "Habitica" -> EffHabitica
         <$> o .: "eff_hab_op"
         <*> o .: "eff_hab_payload"
@@ -352,6 +425,17 @@ instance FromJSON SerializableEffect where
         <*> o .:? "eff_schema"
         <*> o .: "eff_tools"
         <*> o .:? "eff_model"
+      "GetState" -> EffGetState <$> o .: "eff_state_key"
+      "SetState" -> EffSetState
+        <$> o .: "eff_state_key"
+        <*> o .: "eff_state_value"
+      "EmitEvent" -> EffEmitEvent
+        <$> o .: "eff_event_name"
+        <*> o .: "eff_event_payload"
+      "RandomInt" -> EffRandomInt
+        <$> o .: "eff_min"
+        <*> o .: "eff_max"
+      "GetTime" -> pure EffGetTime
       _         -> fail $ "Unknown effect type: " ++ show typ
 
 
@@ -380,6 +464,15 @@ effectMetadata = \case
   EffHabitica{}      -> (Internal, Blocking)
   EffTelegramSend{}  -> (Yielded, FireAndForget)  -- Send and continue
   EffTelegramAsk{}   -> (Yielded, Blocking)       -- Wait for button click
+  -- State effects (for DM and other stateful graphs)
+  EffGetState{}      -> (Internal, Blocking)      -- Read state from storage
+  EffSetState{}      -> (Internal, FireAndForget) -- Write state to storage
+  -- Event emission (for observability/GUI updates)
+  EffEmitEvent{}     -> (Yielded, FireAndForget)  -- Notify listeners
+  -- Random number generation
+  EffRandomInt{}     -> (Internal, Blocking)      -- Get random int
+  -- Time
+  EffGetTime{}       -> (Internal, Blocking)      -- Get current time
 
 
 -- ════════════════════════════════════════════════════════════════════════════

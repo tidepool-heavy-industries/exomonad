@@ -98,6 +98,15 @@ allEffectMeta =
   , EffectMeta "Habitica"        Internal Blocking
   , EffectMeta "TelegramSend"    Yielded  FireAndForget
   , EffectMeta "TelegramAsk"     Yielded  Blocking
+  -- State effects (for DM and other stateful graphs)
+  , EffectMeta "GetState"        Internal Blocking
+  , EffectMeta "SetState"        Internal FireAndForget
+  -- Event emission (for observability/GUI)
+  , EffectMeta "EmitEvent"       Yielded  FireAndForget
+  -- Random number generation
+  , EffectMeta "RandomInt"       Internal Blocking
+  -- Time
+  , EffectMeta "GetTime"         Internal Blocking
   ]
 
 

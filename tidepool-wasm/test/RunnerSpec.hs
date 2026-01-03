@@ -37,21 +37,21 @@ initializeWasmSpec = describe "initializeWasm" $ do
   it "yields Log effect with input value in message" $ do
     let result = initializeWasm (computeHandlerWasm 5)
     case result of
-      WasmYield (EffLogInfo msg) _ ->
+      WasmYield (EffLogInfo msg _) _ ->
         msg `shouldBe` "Computing: 5"
       _ -> expectationFailure "Expected WasmYield with EffLogInfo"
 
   it "yields Log effect for zero" $ do
     let result = initializeWasm (computeHandlerWasm 0)
     case result of
-      WasmYield (EffLogInfo msg) _ ->
+      WasmYield (EffLogInfo msg _) _ ->
         msg `shouldBe` "Computing: 0"
       _ -> expectationFailure "Expected WasmYield with EffLogInfo"
 
   it "yields Log effect for negative numbers" $ do
     let result = initializeWasm (computeHandlerWasm (-10))
     case result of
-      WasmYield (EffLogInfo msg) _ ->
+      WasmYield (EffLogInfo msg _) _ ->
         msg `shouldBe` "Computing: -10"
       _ -> expectationFailure "Expected WasmYield with EffLogInfo"
 
@@ -122,7 +122,7 @@ fullCycleSpec = describe "Full yield/resume cycle" $ do
 
     -- Step 1: Initialize - yields Log effect
     case initializeWasm (computeHandlerWasm input) of
-      WasmYield (EffLogInfo msg) resume -> do
+      WasmYield (EffLogInfo msg _) resume -> do
         T.unpack msg `shouldContain` "Computing: 10"
 
         -- Step 2: TypeScript executes log, sends success
@@ -139,7 +139,7 @@ fullCycleSpec = describe "Full yield/resume cycle" $ do
         result2 = initializeWasm (computeHandlerWasm 200)
 
     case (result1, result2) of
-      (WasmYield (EffLogInfo msg1) _, WasmYield (EffLogInfo msg2) _) -> do
+      (WasmYield (EffLogInfo msg1 _) _, WasmYield (EffLogInfo msg2 _) _) -> do
         msg1 `shouldBe` "Computing: 100"
         msg2 `shouldBe` "Computing: 200"
       _ -> expectationFailure "Expected both to yield"

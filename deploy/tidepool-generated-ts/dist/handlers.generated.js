@@ -20,6 +20,14 @@ export function dispatchInternalEffect(effect, handlers, env) {
             return handlers.LlmCall(effect, env);
         case "Habitica":
             return handlers.Habitica(effect, env);
+        case "GetState":
+            return handlers.GetState(effect, env);
+        case "SetState":
+            return handlers.SetState(effect, env);
+        case "RandomInt":
+            return handlers.RandomInt(effect, env);
+        case "GetTime":
+            return handlers.GetTime(effect, env);
         default:
             return Promise.resolve(errorResult(`Unknown internal effect type: ${effect.type}`));
     }

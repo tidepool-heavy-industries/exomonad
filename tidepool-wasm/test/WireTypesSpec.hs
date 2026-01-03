@@ -10,6 +10,7 @@ module WireTypesSpec (spec) where
 import Test.Hspec
 import Data.Aeson (encode, decode, object, (.=), Value(..))
 import Data.Aeson.KeyMap qualified as KM
+import Data.Map.Strict qualified as Map
 import Data.Vector qualified as V
 
 import Tidepool.Wasm.WireTypes
@@ -31,26 +32,69 @@ spec = do
 serializableEffectSpec :: Spec
 serializableEffectSpec = describe "SerializableEffect" $ do
 
-  it "round-trips EffLogInfo" $ do
-    let effect = EffLogInfo "test message"
+  it "round-trips EffLogInfo without fields" $ do
+    let effect = EffLogInfo "test message" Nothing
     decode (encode effect) `shouldBe` Just effect
 
   it "round-trips EffLogInfo with empty message" $ do
-    let effect = EffLogInfo ""
+    let effect = EffLogInfo "" Nothing
     decode (encode effect) `shouldBe` Just effect
 
   it "round-trips EffLogInfo with unicode" $ do
-    let effect = EffLogInfo "Hello \x1F600 world"
+    let effect = EffLogInfo "Hello \x1F600 world" Nothing
     decode (encode effect) `shouldBe` Just effect
 
-  it "encodes EffLogInfo with correct JSON structure" $ do
-    let effect = EffLogInfo "test"
+  it "round-trips EffLogInfo with structured fields" $ do
+    let fields = Map.fromList
+          [ ("taskId", String "abc123")
+          , ("direction", String "up")
+          ]
+        effect = EffLogInfo "Scoring daily" (Just fields)
+    decode (encode effect) `shouldBe` Just effect
+
+  it "round-trips EffLogInfo with numeric fields" $ do
+    let fields = Map.fromList
+          [ ("count", Number 3)
+          , ("latency_ms", Number 42.5)
+          ]
+        effect = EffLogInfo "LLM call complete" (Just fields)
+    decode (encode effect) `shouldBe` Just effect
+
+  it "encodes EffLogInfo with correct JSON structure (no fields)" $ do
+    let effect = EffLogInfo "test" Nothing
         json = decode (encode effect) :: Maybe Value
     case json of
       Just (Object obj) -> do
         KM.lookup "type" obj `shouldBe` Just (String "LogInfo")
         KM.lookup "eff_message" obj `shouldBe` Just (String "test")
+        KM.lookup "eff_fields" obj `shouldBe` Nothing
       _ -> expectationFailure "Expected JSON object"
+
+  it "encodes EffLogInfo with correct JSON structure (with fields)" $ do
+    let fields = Map.fromList [("taskId", String "xyz")]
+        effect = EffLogInfo "test" (Just fields)
+        json = decode (encode effect) :: Maybe Value
+    case json of
+      Just (Object obj) -> do
+        KM.lookup "type" obj `shouldBe` Just (String "LogInfo")
+        KM.lookup "eff_message" obj `shouldBe` Just (String "test")
+        case KM.lookup "eff_fields" obj of
+          Just (Object fieldsObj) ->
+            KM.lookup "taskId" fieldsObj `shouldBe` Just (String "xyz")
+          _ -> expectationFailure "Expected eff_fields object"
+      _ -> expectationFailure "Expected JSON object"
+
+  it "round-trips EffLogError without fields" $ do
+    let effect = EffLogError "error message" Nothing
+    decode (encode effect) `shouldBe` Just effect
+
+  it "round-trips EffLogError with structured fields" $ do
+    let fields = Map.fromList
+          [ ("endpoint", String "/api/tasks")
+          , ("status", Number 500)
+          ]
+        effect = EffLogError "API call failed" (Just fields)
+    decode (encode effect) `shouldBe` Just effect
 
   -- LlmComplete tests
   it "round-trips EffLlmComplete without schema" $ do
@@ -154,7 +198,7 @@ stepOutputSpec = describe "StepOutput" $ do
   let idleState = GraphState PhaseIdle []
 
   it "round-trips StepYield" $ do
-    let output = StepYield (EffLogInfo "computing") idleState
+    let output = StepYield (EffLogInfo "computing" Nothing) idleState
     decode (encode output) `shouldBe` Just output
 
   it "round-trips StepDone" $ do
@@ -170,7 +214,7 @@ stepOutputSpec = describe "StepOutput" $ do
     decode (encode output) `shouldBe` Just output
 
   it "encodes StepYield with correct JSON structure" $ do
-    let output = StepYield (EffLogInfo "test") idleState
+    let output = StepYield (EffLogInfo "test" Nothing) idleState
         json = decode (encode output) :: Maybe Value
     case json of
       Just (Object obj) -> do
