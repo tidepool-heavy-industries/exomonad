@@ -287,7 +287,7 @@ habitica op = do
   pure $ case result of
     ResSuccess (Just v) -> decodeResult eff op v
     ResSuccess Nothing  -> Left $ emptyResult eff "Habitica API response"
-    ResError msg        -> Left $ effectFailed eff msg
+    ResError msg _      -> Left $ effectFailed eff msg
 
 -- | Encode an operation to wire format (operation name + JSON payload).
 encodeOp :: HabiticaOp a -> (Text, Value)

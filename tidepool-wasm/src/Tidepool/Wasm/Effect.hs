@@ -193,7 +193,7 @@ llmCompleteWith model node systemPrompt userContent schema = do
   pure $ case result of
     ResSuccess (Just v) -> Right v
     ResSuccess Nothing  -> Left $ emptyResult eff "LLM response"
-    ResError msg        -> Left $ effectFailed eff msg
+    ResError msg _      -> Left $ effectFailed eff msg
 
 -- | Make a raw LLM call with full message history and optional tools.
 --
@@ -233,7 +233,7 @@ llmCallWith model node messages schema tools = do
       Success r -> Right r
       Error err -> Left $ parseFailed eff "LlmCallResult" v (T.pack err)
     ResSuccess Nothing  -> Left $ emptyResult eff "LLM call response"
-    ResError msg        -> Left $ effectFailed eff msg
+    ResError msg _      -> Left $ effectFailed eff msg
 
 -- | Tool schema for asking user a clarifying question (CF AI flat format).
 askUserToolSchema :: Value
@@ -268,7 +268,7 @@ telegramSend txt = do
       Number n -> pure $ round n
       _        -> pure 0  -- Fire-and-forget OK
     ResSuccess Nothing  -> pure 0
-    ResError msg        -> error $ "Telegram send failed: " <> T.unpack msg
+    ResError msg _      -> error $ "Telegram send failed: " <> T.unpack msg
 
 -- | Send a Markdown-formatted message via Telegram.
 --
@@ -283,7 +283,7 @@ telegramMarkdown txt = do
       Number n -> pure $ round n
       _        -> pure 0
     ResSuccess Nothing  -> pure 0
-    ResError msg        -> error $ "Telegram send failed: " <> T.unpack msg
+    ResError msg _      -> error $ "Telegram send failed: " <> T.unpack msg
 
 -- | Send an HTML-formatted message via Telegram.
 --
@@ -298,7 +298,7 @@ telegramHtml txt = do
       Number n -> pure $ round n
       _        -> pure 0
     ResSuccess Nothing  -> pure 0
-    ResError msg        -> error $ "Telegram send failed: " <> T.unpack msg
+    ResError msg _      -> error $ "Telegram send failed: " <> T.unpack msg
 
 -- | Ask user with custom buttons, returns the result.
 --
@@ -321,7 +321,7 @@ telegramAsk message buttons = do
       Success askResult -> Right askResult
       Error err         -> Left $ parseFailed eff "TelegramAskResult" v (T.pack err)
     ResSuccess Nothing  -> Left $ emptyResult eff "Telegram user response"
-    ResError msg        -> Left $ effectFailed eff msg
+    ResError msg _      -> Left $ effectFailed eff msg
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -339,7 +339,7 @@ getState key = do
   case result of
     ResSuccess (Just v) -> pure v
     ResSuccess Nothing  -> pure Null
-    ResError msg        -> error $ "getState failed: " <> T.unpack msg
+    ResError msg _      -> error $ "getState failed: " <> T.unpack msg
 
 -- | Set state by key.
 --
@@ -400,7 +400,7 @@ randomInt minVal maxVal = do
       Number n -> pure $ round n
       _        -> error "randomInt: expected number"
     ResSuccess Nothing  -> error "randomInt: no response"
-    ResError msg        -> error $ "randomInt failed: " <> T.unpack msg
+    ResError msg _      -> error $ "randomInt failed: " <> T.unpack msg
 
 -- | Roll multiple dice (e.g., for FitD mechanics).
 --
@@ -428,7 +428,7 @@ getTime = do
       String s -> pure s
       _        -> error "getTime: expected string"
     ResSuccess Nothing  -> error "getTime: no response"
-    ResError msg        -> error $ "getTime failed: " <> T.unpack msg
+    ResError msg _      -> error $ "getTime failed: " <> T.unpack msg
 
 
 -- ════════════════════════════════════════════════════════════════════════════
