@@ -147,49 +147,63 @@ export async function answerCallbackQuery(
 import type { TelegramInlineButton } from "tidepool-generated-ts";
 
 /**
- * Truncate callback_data to fit Telegram's 64-byte limit.
- * We keep the first 60 chars (leaving room for JSON quotes).
+ * Result of sending buttons with ID mapping.
  */
-function truncateCallbackData(data: unknown): string {
-  // Convert to string if not already
-  const str = typeof data === "string" ? data : JSON.stringify(data);
-  const MAX_LEN = 60; // Leave room for JSON encoding overhead
-  if (str.length <= MAX_LEN) {
-    return str;
-  }
-  // Truncate and add indicator
-  return str.slice(0, MAX_LEN - 3) + "...";
+export interface SendButtonsResult {
+  /** Message ID from Telegram */
+  message_id: number;
+  /** Mapping from short IDs (btn_0, btn_1, ...) to original callback data */
+  buttonMapping: Record<string, unknown>;
 }
 
 /**
- * Convert our InlineButton format to Telegram's InlineKeyboardButton.
- * We use callback_data which must be JSON-serialized string ≤ 64 bytes.
+ * Convert our InlineButton format to Telegram's InlineKeyboardButton,
+ * generating short IDs for callback_data to avoid the 64-byte limit.
+ *
+ * @param button - The button to convert
+ * @param index - Unique index for this button (used to generate short ID)
+ * @param buttonMapping - Mutable mapping to populate with short ID → original data
+ * @returns Telegram button with short callback_data
  */
-function toTelegramButton(button: TelegramInlineButton): Record<string, string> {
-  // truncateCallbackData handles any type and returns a truncated string
-  const truncatedData = truncateCallbackData(button.data);
+function toTelegramButtonWithMapping(
+  button: TelegramInlineButton,
+  index: number,
+  buttonMapping: Record<string, unknown>
+): Record<string, string> {
+  const shortId = `btn_${index}`;
+  buttonMapping[shortId] = button.data;
   return {
     text: button.text,
-    callback_data: truncatedData, // Already a string, no need to JSON.stringify again
+    callback_data: shortId,
   };
 }
 
 /**
  * Send a text message with inline keyboard buttons.
+ * Uses short IDs for callback_data to avoid Telegram's 64-byte limit.
  *
  * @param token - Bot API token
  * @param chatId - Target chat ID
  * @param text - Message text
  * @param buttons - 2D array of buttons (rows x columns)
- * @returns Message result with message_id, or null on failure
+ * @returns Result with message_id and buttonMapping, or null on failure
  */
 export async function sendMessageWithButtons(
   token: string,
   chatId: number,
   text: string,
   buttons: TelegramInlineButton[][]
-): Promise<SendMessageResult | null> {
-  const inlineKeyboard = buttons.map((row) => row.map(toTelegramButton));
+): Promise<SendButtonsResult | null> {
+  const buttonMapping: Record<string, unknown> = {};
+  let buttonIndex = 0;
+
+  const inlineKeyboard = buttons.map((row) =>
+    row.map((button) => {
+      const telegramButton = toTelegramButtonWithMapping(button, buttonIndex, buttonMapping);
+      buttonIndex++;
+      return telegramButton;
+    })
+  );
 
   const body: Record<string, unknown> = {
     chat_id: chatId,
@@ -204,7 +218,13 @@ export async function sendMessageWithButtons(
     console.error("sendMessageWithButtons failed:", result.description);
     return null;
   }
-  return result.result ?? null;
+  if (!result.result) {
+    return null;
+  }
+  return {
+    message_id: result.result.message_id,
+    buttonMapping,
+  };
 }
 
 // =============================================================================

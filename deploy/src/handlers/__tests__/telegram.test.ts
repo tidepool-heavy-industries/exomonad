@@ -7,10 +7,11 @@ import {
   handleTelegramSend,
   handleTelegramReceive,
   handleTelegramTryReceive,
+  handleTelegramAsk,
   type TelegramHandlerEnv,
   type TelegramHandlerContext,
 } from "../telegram.js";
-import type { TelegramSendEffect, TelegramIncomingMessage } from "tidepool-generated-ts";
+import type { TelegramSendEffect, TelegramAskEffect, TelegramIncomingMessage } from "tidepool-generated-ts";
 
 // Store original fetch
 const originalFetch = globalThis.fetch;
@@ -202,5 +203,144 @@ describe("handleTelegramTryReceive", () => {
       type: "success",
       value: { type: "messages", messages: [] },
     });
+  });
+});
+
+describe("handleTelegramAsk button ID mapping", () => {
+  const askEffect: TelegramAskEffect = {
+    type: "TelegramAsk",
+    eff_tg_text: "Choose a task:",
+    eff_buttons: [
+      ["First option", "Reach out to someone I haven't talked to in a little while"],
+      ["Second option", "This is another very long option text that exceeds 64 bytes easily"],
+    ],
+  };
+
+  beforeEach(() => {
+    globalThis.fetch = vi.fn();
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("sends buttons with short IDs and returns mapping", async () => {
+    const mockResponse = {
+      ok: true,
+      result: { message_id: 42 },
+    };
+    vi.mocked(globalThis.fetch).mockResolvedValue({
+      json: () => Promise.resolve(mockResponse),
+    } as Response);
+
+    const result = await handleTelegramAsk(
+      askEffect,
+      createMockEnv(),
+      createMockContext([]),
+      null // No stored nonce - first call
+    );
+
+    // Should yield with nonce and buttonMapping
+    expect(result.type).toBe("yield");
+    if (result.type === "yield") {
+      expect(result.nonce).toBeDefined();
+      // buttonMapping stores the full button data (including action and nonce)
+      expect(result.buttonMapping.btn_0).toMatchObject({
+        action: "Reach out to someone I haven't talked to in a little while",
+        nonce: result.nonce,
+      });
+      expect(result.buttonMapping.btn_1).toMatchObject({
+        action: "This is another very long option text that exceeds 64 bytes easily",
+        nonce: result.nonce,
+      });
+    }
+
+    // Verify fetch was called with short IDs in callback_data
+    const fetchCall = vi.mocked(globalThis.fetch).mock.calls[0];
+    const body = JSON.parse(fetchCall[1]?.body as string);
+    expect(body.reply_markup.inline_keyboard[0][0].callback_data).toBe("btn_0");
+    expect(body.reply_markup.inline_keyboard[1][0].callback_data).toBe("btn_1");
+  });
+
+  it("resolves button ID back to original data on callback", async () => {
+    const nonce = "test-nonce-1";
+    // buttonMapping stores the full button data with {action, nonce}
+    const buttonMapping = {
+      btn_0: { action: "Reach out to someone I haven't talked to in a little while", nonce },
+      btn_1: { action: "Another long option", nonce },
+    };
+
+    // Simulate a button click with the short ID
+    const pendingMessages: TelegramIncomingMessage[] = [
+      {
+        type: "button_click",
+        data: { action: "btn_0", nonce: nonce },
+      },
+    ];
+
+    const ctx: TelegramHandlerContext = {
+      chatId: 123456,
+      pendingMessages,
+      buttonMapping,
+    };
+
+    const result = await handleTelegramAsk(
+      askEffect,
+      createMockEnv(),
+      ctx,
+      nonce // Stored nonce from previous yield
+    );
+
+    // Should return result with the ORIGINAL long data, not the short ID
+    expect(result.type).toBe("result");
+    if (result.type === "result") {
+      expect(result.result).toEqual({
+        type: "success",
+        value: {
+          type: "button",
+          response: "Reach out to someone I haven't talked to in a little while",
+        },
+      });
+    }
+  });
+
+  it("handles string data directly in button mapping", async () => {
+    const nonce = "test-nonce-2";
+    // In some cases, the mapping might store a plain string
+    // (for backwards compatibility or simpler use cases)
+    const buttonMapping = {
+      btn_0: "A plain string value",
+    };
+
+    const pendingMessages: TelegramIncomingMessage[] = [
+      {
+        type: "button_click",
+        data: { action: "btn_0", nonce: nonce },
+      },
+    ];
+
+    const ctx: TelegramHandlerContext = {
+      chatId: 123456,
+      pendingMessages,
+      buttonMapping,
+    };
+
+    const result = await handleTelegramAsk(
+      askEffect,
+      createMockEnv(),
+      ctx,
+      nonce
+    );
+
+    expect(result.type).toBe("result");
+    if (result.type === "result") {
+      expect(result.result).toEqual({
+        type: "success",
+        value: {
+          type: "button",
+          response: "A plain string value",
+        },
+      });
+    }
   });
 });

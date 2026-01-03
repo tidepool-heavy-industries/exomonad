@@ -44,6 +44,8 @@ export interface TelegramHandlerContext {
   chatId: number;
   /** Current pending messages (for Receive/TryReceive) */
   pendingMessages: TelegramIncomingMessage[];
+  /** Button ID mapping (btn_0 → original data) for resolving callbacks */
+  buttonMapping?: Record<string, unknown>;
 }
 
 // =============================================================================
@@ -182,11 +184,11 @@ export function handleTelegramTryReceive(
  * - Nothing yet → caller should block/yield until input arrives
  *
  * When yielding, returns the nonce for storage so it can be validated
- * when the callback arrives.
+ * when the callback arrives. Also returns buttonMapping for ID resolution.
  */
 export type AskHandlerResult =
   | { type: "result"; result: EffectResult }
-  | { type: "yield"; nonce: string };
+  | { type: "yield"; nonce: string; buttonMapping: Record<string, unknown> };
 
 /**
  * Button callback data format with nonce for validation.
@@ -223,14 +225,19 @@ function parseButtonCallbackData(data: unknown): ButtonCallbackData | null {
  * 2. Send text instead → returns { type: "text", text: "..." }
  * 3. Click a stale button → returns { type: "stale_button" }
  *
+ * Button ID mapping:
+ * - When buttons are sent, short IDs (btn_0, btn_1, ...) are used as callback_data
+ * - The mapping from short IDs to original data is stored and returned
+ * - When a button click arrives, the short ID is resolved back to original data
+ *
  * Nonce-based validation:
- * - When buttons are sent, a nonce is embedded in callback_data
+ * - When buttons are sent, a nonce is embedded in callback_data alongside the short ID
  * - When a button click arrives, the nonce is validated
  * - Mismatched nonces mean the button is from an old session
  *
  * @param effect - The TelegramAsk effect from Haskell
  * @param env - Environment with TELEGRAM_TOKEN
- * @param ctx - Context with chatId and pendingMessages
+ * @param ctx - Context with chatId, pendingMessages, and buttonMapping
  * @param storedNonce - Nonce from previous yield, or null if buttons not sent
  */
 export async function handleTelegramAsk(
@@ -243,22 +250,22 @@ export async function handleTelegramAsk(
   if (storedNonce === null) {
     const nonce = crypto.randomUUID().slice(0, 12);
     const buttons = convertButtonsToInlineKeyboardWithNonce(effect.eff_buttons, nonce);
-    const success = await sendMessageWithButtons(
+    const sendResult = await sendMessageWithButtons(
       env.TELEGRAM_TOKEN,
       ctx.chatId,
       effect.eff_tg_text,
       buttons
     );
 
-    if (!success) {
+    if (!sendResult) {
       return {
         type: "result",
         result: errorResult("Failed to send buttons"),
       };
     }
 
-    // Yield with the nonce for storage
-    return { type: "yield", nonce };
+    // Yield with the nonce and button mapping for storage
+    return { type: "yield", nonce, buttonMapping: sendResult.buttonMapping };
   }
 
   // Buttons were sent - check for responses in pending messages
@@ -274,11 +281,41 @@ export async function handleTelegramAsk(
 
     if (callbackData && callbackData.nonce === storedNonce) {
       // Valid button click with matching nonce
-      const result: TelegramAskResult = {
-        type: "button",
-        response: callbackData.action,
-      };
-      return { type: "result", result: successResult(result) };
+      // Resolve the short button ID back to original data
+      const shortId = callbackData.action;
+      const storedData = ctx.buttonMapping?.[shortId];
+
+      if (storedData !== undefined) {
+        // storedData contains the original button data (which includes {action, nonce})
+        // Extract just the action (original value) from it
+        let responseValue: string;
+        if (typeof storedData === "object" && storedData !== null && "action" in storedData) {
+          // Standard case: stored data is {action: "original value", nonce: "..."}
+          const originalAction = (storedData as { action: unknown }).action;
+          responseValue = typeof originalAction === "string"
+            ? originalAction
+            : JSON.stringify(originalAction);
+        } else if (typeof storedData === "string") {
+          // Simple case: stored data is just a string
+          responseValue = storedData;
+        } else {
+          // Complex case: stored data is something else, stringify it
+          responseValue = JSON.stringify(storedData);
+        }
+        const result: TelegramAskResult = {
+          type: "button",
+          response: responseValue,
+        };
+        return { type: "result", result: successResult(result) };
+      } else {
+        // Button ID not found in mapping - shouldn't happen but handle gracefully
+        console.error(`[TelegramAsk] Button ID "${shortId}" not found in mapping:`, ctx.buttonMapping);
+        const result: TelegramAskResult = {
+          type: "button",
+          response: shortId, // Fallback to the short ID
+        };
+        return { type: "result", result: successResult(result) };
+      }
     } else {
       // Stale button click (no nonce or mismatched nonce)
       console.log(`[TelegramAsk] Stale button click detected. Expected nonce: ${storedNonce}, got: ${callbackData?.nonce ?? "none"}`);
@@ -303,8 +340,8 @@ export async function handleTelegramAsk(
     return { type: "result", result: successResult(result) };
   }
 
-  // 3. Nothing yet - keep waiting
-  return { type: "yield", nonce: storedNonce };
+  // 3. Nothing yet - keep waiting (preserve existing mapping)
+  return { type: "yield", nonce: storedNonce, buttonMapping: ctx.buttonMapping ?? {} };
 }
 
 /**

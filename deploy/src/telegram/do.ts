@@ -83,6 +83,8 @@ const ConversationStateSchema = z.object({
   pendingEffect: z.unknown().default(null),
   effectNonce: z.string().nullable().default(null),
   lastActivity: z.number().default(() => Date.now()),
+  /** Maps short button IDs (btn_0, btn_1, ...) to original callback data */
+  buttonMapping: z.record(z.string(), z.unknown()).default({}),
 });
 
 /**
@@ -93,6 +95,7 @@ const ConversationStateSchema = z.object({
 interface ConversationState extends Omit<z.infer<typeof ConversationStateSchema>, 'pendingEffect'> {
   pendingEffect: SerializableEffect | null;
   effectNonce: string | null;
+  buttonMapping: Record<string, unknown>;
 }
 
 /**
@@ -516,6 +519,7 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
     const ctx: TelegramHandlerContext = {
       chatId,
       pendingMessages: state.pendingMessages,
+      buttonMapping: state.buttonMapping,
     };
 
     switch (effect.type) {
@@ -562,10 +566,11 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
         );
 
         if (askResult.type === "yield") {
-          // Block until input arrives, store the nonce for validation
+          // Block until input arrives, store nonce and button mapping
           state.waitingForReceive = true;
           state.pendingEffect = effect;
           state.effectNonce = askResult.nonce;
+          state.buttonMapping = askResult.buttonMapping;
           await this.saveState();
           return { outcome: "blocking" };
         }
@@ -574,6 +579,7 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
         state.pendingMessages = [];
         state.pendingEffect = null;
         state.effectNonce = null;
+        state.buttonMapping = {};
         await this.saveState();
         return { outcome: "handled", result: askResult.result };
       }
@@ -642,6 +648,7 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
     const ctx: TelegramHandlerContext = {
       chatId: state.chatId,
       pendingMessages: state.pendingMessages,
+      buttonMapping: state.buttonMapping,
     };
 
     let result: EffectResult;
