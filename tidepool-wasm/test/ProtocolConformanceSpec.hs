@@ -73,7 +73,7 @@ serializableEffectConformanceSpec = describe "SerializableEffect matches protoco
 
   describe "LogInfoEffect" $ do
     it "encodes with correct field names: type, eff_message" $ do
-      let effect = EffLogInfo "Processing request..."
+      let effect = EffLogInfo "Processing request..." Nothing
           json = decode (encode effect) :: Maybe Value
       case json of
         Just (Object obj) -> do
@@ -83,7 +83,7 @@ serializableEffectConformanceSpec = describe "SerializableEffect matches protoco
 
   describe "LogErrorEffect" $ do
     it "encodes with correct field names: type, eff_message" $ do
-      let effect = EffLogError "Connection failed"
+      let effect = EffLogError "Connection failed" Nothing
           json = decode (encode effect) :: Maybe Value
       case json of
         Just (Object obj) -> do
@@ -254,7 +254,7 @@ stepOutputConformanceSpec :: Spec
 stepOutputConformanceSpec = describe "StepOutput matches protocol.ts" $ do
 
   it "has all required fields: effect, done, stepResult, graphState" $ do
-    let output = StepYield (EffLogInfo "computing") (GraphState (PhaseInNode "compute") [])
+    let output = StepYield (EffLogInfo "computing" Nothing) (GraphState (PhaseInNode "compute") [])
         json = decode (encode output) :: Maybe Value
     case json of
       Just (Object obj) -> do
@@ -274,7 +274,7 @@ stepOutputConformanceSpec = describe "StepOutput matches protocol.ts" $ do
       _ -> expectationFailure "Expected JSON object"
 
   it "encodes effect correctly when present" $ do
-    let output = StepYield (EffLogInfo "test") (GraphState PhaseIdle [])
+    let output = StepYield (EffLogInfo "test" Nothing) (GraphState PhaseIdle [])
         json = decode (encode output) :: Maybe Value
     case json of
       Just (Object obj) -> do
@@ -296,14 +296,14 @@ stepOutputConformanceSpec = describe "StepOutput matches protocol.ts" $ do
       _ -> expectationFailure "Expected JSON object"
 
   it "round-trips StepOutput with graphState" $ do
-    let output = StepYield (EffLogInfo "msg") (GraphState (PhaseInNode "test") ["a", "b"])
+    let output = StepYield (EffLogInfo "msg" Nothing) (GraphState (PhaseInNode "test") ["a", "b"])
     decode (encode output) `shouldBe` Just output
 
   describe "graphState field (critical for TypeScript compatibility)" $ do
     it "is always present in output, never omitted" $ do
       -- Test all three StepOutput variants - graphState is always present
       let outputs =
-            [ StepYield (EffLogInfo "x") (GraphState PhaseIdle [])
+            [ StepYield (EffLogInfo "x" Nothing) (GraphState PhaseIdle [])
             , StepDone (String "done") (GraphState (PhaseCompleted (String "done")) [])
             , StepFailed "error" (GraphState (PhaseFailed "error") [])
             ]
@@ -326,7 +326,7 @@ stepOutputConformanceSpec = describe "StepOutput matches protocol.ts" $ do
       forM_ testCases $ \(phase, expectedType) -> do
         let state = GraphState phase []
             -- Use StepYield to test graphState encoding for each phase
-            output = StepYield (EffLogInfo "test") state
+            output = StepYield (EffLogInfo "test" Nothing) state
             json = decode (encode output) :: Maybe Value
         case json of
           Just (Object obj) -> do

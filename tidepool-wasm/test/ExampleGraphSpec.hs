@@ -52,12 +52,12 @@ classifySpec = describe "classifyHandlerWasm" $ do
   it "routes greetings to handleGreeting" $ do
     let msg = UserMessage "Hello there!"
     case initializeWasm (classifyHandlerWasm msg) of
-      WasmYield (EffLogInfo logMsg) resume -> do
+      WasmYield (EffLogInfo logMsg _) resume -> do
         T.unpack logMsg `shouldContain` "Classifying message"
         T.unpack logMsg `shouldContain` "Hello there!"
         -- Resume the first log, get the second
         case resume (ResSuccess Nothing) of
-          WasmYield (EffLogInfo logMsg2) resume2 -> do
+          WasmYield (EffLogInfo logMsg2 _) resume2 -> do
             T.unpack logMsg2 `shouldContain` "Greeting"
             -- Resume and check final result
             case resume2 (ResSuccess Nothing) of
@@ -132,7 +132,7 @@ greetingHandlerSpec = describe "greetingHandlerWasm" $ do
   it "yields log effect before responding" $ do
     let msg = UserMessage "Hello!"
     case initializeWasm (greetingHandlerWasm msg) of
-      WasmYield (EffLogInfo logMsg) _ -> do
+      WasmYield (EffLogInfo logMsg _) _ -> do
         T.unpack logMsg `shouldContain` "Handling greeting"
         T.unpack logMsg `shouldContain` "Hello!"
       _ -> expectationFailure "Expected Log effect yield"
@@ -159,7 +159,7 @@ questionHandlerSpec = describe "questionHandlerWasm" $ do
   it "yields log effect first" $ do
     let msg = UserMessage "What time is it?"
     case initializeWasm (questionHandlerWasm msg) of
-      WasmYield (EffLogInfo logMsg) _ -> do
+      WasmYield (EffLogInfo logMsg _) _ -> do
         T.unpack logMsg `shouldContain` "Handling question"
       _ -> expectationFailure "Expected Log effect yield"
 
@@ -195,7 +195,7 @@ runQuestionHandlerWithLLM :: UserMessage -> Value -> IO Response
 runQuestionHandlerWithLLM msg llmResponse = go (initializeWasm (questionHandlerWasm msg))
   where
     go :: WasmResult (GotoChoice '[To Exit Response, To Self UserMessage]) -> IO Response
-    go (WasmYield (EffLogInfo _) resume) = go (resume (ResSuccess Nothing))
+    go (WasmYield (EffLogInfo _ _) resume) = go (resume (ResSuccess Nothing))
     go (WasmYield (EffLlmComplete _ _ _ _ _) resume) = go (resume (ResSuccess (Just llmResponse)))
     go (WasmYield _ resume) = go (resume (ResSuccess Nothing))  -- Handle any other effects
     go (WasmComplete (GotoChoice (Here response))) = pure response
@@ -213,7 +213,7 @@ statementHandlerSpec = describe "statementHandlerWasm" $ do
   it "yields log effect before responding" $ do
     let msg = UserMessage "The weather is nice today."
     case initializeWasm (statementHandlerWasm msg) of
-      WasmYield (EffLogInfo logMsg) _ -> do
+      WasmYield (EffLogInfo logMsg _) _ -> do
         T.unpack logMsg `shouldContain` "Handling statement"
         T.unpack logMsg `shouldContain` "The weather is nice today."
       _ -> expectationFailure "Expected Log effect yield"

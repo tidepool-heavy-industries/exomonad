@@ -35,9 +35,14 @@ module Tidepool.Effect.Types
   , requestCustom
   , requestQuestion
   , logMsg
+  , logMsgWith
   , logDebug
+  , logDebugWith
   , logInfo
+  , logInfoWith
   , logWarn
+  , logWarnWith
+  , LogFields
   , getHistory
   , appendMessages
   , clearHistory
@@ -504,24 +509,63 @@ runQuestionUI handler = interpret $ \case
 data LogLevel = Debug | Info | Warn
   deriving (Show, Eq, Ord, Enum, Bounded)
 
+-- | Structured log fields: key-value pairs for queryable log data.
+--
+-- Example:
+-- @
+-- logInfoWith "Scoring daily"
+--   [ ("taskId", toJSON taskId)
+--   , ("direction", toJSON ("up" :: Text))
+--   ]
+-- @
+type LogFields = [(Text, Value)]
+
 data Log r where
-  LogMsg :: LogLevel -> Text -> Log ()
+  LogMsg :: LogLevel -> Text -> Maybe LogFields -> Log ()
 
+-- | Log a message at the given level (no structured fields).
 logMsg :: Member Log effs => LogLevel -> Text -> Eff effs ()
-logMsg level msg = send (LogMsg level msg)
+logMsg level msg = send (LogMsg level msg Nothing)
 
+-- | Log a message at the given level with structured fields.
+logMsgWith :: Member Log effs => LogLevel -> Text -> LogFields -> Eff effs ()
+logMsgWith level msg fields = send (LogMsg level msg (Just fields))
+
+-- | Log a debug message.
 logDebug :: Member Log effs => Text -> Eff effs ()
 logDebug = logMsg Debug
 
+-- | Log a debug message with structured fields.
+logDebugWith :: Member Log effs => Text -> LogFields -> Eff effs ()
+logDebugWith = logMsgWith Debug
+
+-- | Log an info message.
 logInfo :: Member Log effs => Text -> Eff effs ()
 logInfo = logMsg Info
 
+-- | Log an info message with structured fields.
+--
+-- Example:
+-- @
+-- logInfoWith "LLM tool calls"
+--   [ ("count", toJSON (length toolCalls))
+--   , ("tools", toJSON (map tcName toolCalls))
+--   ]
+-- @
+logInfoWith :: Member Log effs => Text -> LogFields -> Eff effs ()
+logInfoWith = logMsgWith Info
+
+-- | Log a warning message.
 logWarn :: Member Log effs => Text -> Eff effs ()
 logWarn = logMsg Warn
 
+-- | Log a warning message with structured fields.
+logWarnWith :: Member Log effs => Text -> LogFields -> Eff effs ()
+logWarnWith = logMsgWith Warn
+
 runLog :: LastMember IO effs => LogLevel -> Eff (Log ': effs) a -> Eff effs a
 runLog minLevel = interpret $ \case
-  LogMsg level _msg
+  LogMsg level _msg _fields
     | level >= minLevel -> pure ()
     | otherwise -> pure ()
 

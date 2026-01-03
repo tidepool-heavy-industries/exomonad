@@ -27,7 +27,9 @@ module Tidepool.Wasm.Effect
 
     -- * Smart Constructors
   , logInfo
+  , logInfoWith
   , logError
+  , logErrorWith
   , llmComplete
   , llmCompleteWith
   , llmCall
@@ -96,22 +98,48 @@ type WasmStatus a = Status '[] SerializableEffect EffectResult a
 -- SMART CONSTRUCTORS
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Log an info message.
+-- | Log an info message (no structured fields).
 --
 -- Yields 'EffLogInfo', expects acknowledgment (result ignored).
 logInfo :: Member (Yield SerializableEffect EffectResult) effs
         => Text -> Eff effs ()
 logInfo msg = do
-  _ <- yield (EffLogInfo msg) (id @EffectResult)
+  _ <- yield (EffLogInfo msg Nothing) (id @EffectResult)
   pure ()
 
--- | Log an error message.
+-- | Log an info message with structured fields for queryable log data.
+--
+-- Example:
+-- @
+-- logInfoWith "Scoring daily"
+--   [ ("taskId", toJSON taskId)
+--   , ("direction", toJSON ("up" :: Text))
+--   ]
+-- @
+--
+-- Yields 'EffLogInfo' with fields, expects acknowledgment (result ignored).
+logInfoWith :: Member (Yield SerializableEffect EffectResult) effs
+            => Text -> [(Text, Value)] -> Eff effs ()
+logInfoWith msg fields = do
+  _ <- yield (EffLogInfo msg (Just (Map.fromList fields))) (id @EffectResult)
+  pure ()
+
+-- | Log an error message (no structured fields).
 --
 -- Yields 'EffLogError', expects acknowledgment (result ignored).
 logError :: Member (Yield SerializableEffect EffectResult) effs
          => Text -> Eff effs ()
 logError msg = do
-  _ <- yield (EffLogError msg) (id @EffectResult)
+  _ <- yield (EffLogError msg Nothing) (id @EffectResult)
+  pure ()
+
+-- | Log an error message with structured fields for queryable log data.
+--
+-- Yields 'EffLogError' with fields, expects acknowledgment (result ignored).
+logErrorWith :: Member (Yield SerializableEffect EffectResult) effs
+             => Text -> [(Text, Value)] -> Eff effs ()
+logErrorWith msg fields = do
+  _ <- yield (EffLogError msg (Just (Map.fromList fields))) (id @EffectResult)
   pure ()
 
 -- | Make an LLM completion call with default model.

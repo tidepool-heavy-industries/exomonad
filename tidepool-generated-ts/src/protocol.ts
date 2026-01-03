@@ -174,6 +174,8 @@ export interface LlmCompleteEffect {
 export interface LogInfoEffect {
   type: "LogInfo";
   eff_message: string;
+  /** Optional structured fields for queryable log data */
+  eff_fields?: Record<string, unknown>;
 }
 
 /**
@@ -182,6 +184,8 @@ export interface LogInfoEffect {
 export interface LogErrorEffect {
   type: "LogError";
   eff_message: string;
+  /** Optional structured fields for queryable log data */
+  eff_fields?: Record<string, unknown>;
 }
 
 /**
