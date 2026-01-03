@@ -13,7 +13,6 @@ import type {
   LlmCallResult,
 } from "tidepool-generated-ts";
 import { successResult, errorResult } from "tidepool-generated-ts";
-import type { RoleScopedChatInput } from "@cloudflare/workers-types";
 
 /**
  * Rate limit configuration.
@@ -227,7 +226,7 @@ export async function handleLlmCall(
   }
 
   try {
-    const messages: RoleScopedChatInput[] = effect.eff_messages.map((msg) => ({
+    const messages = effect.eff_messages.map((msg) => ({
       role: msg.role as "system" | "user" | "assistant",
       content: convertContentBlocks(msg.content),
     }));

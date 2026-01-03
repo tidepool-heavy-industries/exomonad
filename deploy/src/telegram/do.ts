@@ -27,12 +27,14 @@ import {
   sendPhoto,
   sendDocument,
   createForumTopic,
+  downloadFile,
 } from "./api.js";
 import { GRAPH_REGISTRY, type TopicBinding } from "./registry.js";
 import type {
   TelegramIncomingMessage,
   SerializableEffect,
   EffectResult,
+  GraphInput,
 } from "tidepool-generated-ts";
 import {
   handleTelegramSend,
@@ -266,33 +268,98 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
     const token = this.env.TELEGRAM_TOKEN;
     const chatId = this.chatId;
 
+    // Check for graph spawn commands (e.g., /habitica, /dm, /tidying)
+    const graphCmd = cmd.startsWith("/") ? cmd.slice(1) : null;
+    const graphDef = graphCmd ? GRAPH_REGISTRY.find(g => g.id === graphCmd) : null;
+
+    if (graphDef) {
+      // Check if topic already exists for this graph
+      if (this.graphTopics.has(graphDef.id)) {
+        await sendMessage(
+          token,
+          chatId,
+          `${graphDef.displayName} already exists. Switch to that topic to continue.`
+        );
+        return;
+      }
+
+      // Try to create topic for this graph
+      console.log(`[TelegramDO] Creating topic for graph: ${graphDef.id}`);
+      const result = await createForumTopic(token, chatId, graphDef.displayName);
+
+      if (result) {
+        const binding: TopicBinding = {
+          threadId: result.message_thread_id,
+          graphId: graphDef.id,
+          topicName: graphDef.displayName,
+          active: true,
+          createdAt: Date.now(),
+        };
+
+        this.topicBindings.set(result.message_thread_id, binding);
+        this.graphTopics.set(graphDef.id, result.message_thread_id);
+        await this.saveTopicBindings();
+
+        // Send welcome message to the new topic
+        await sendMessage(
+          token,
+          chatId,
+          `Welcome to ${graphDef.displayName}!\n\n${graphDef.description}`,
+          undefined,
+          result.message_thread_id
+        );
+
+        await sendMessage(token, chatId, `✅ Created ${graphDef.displayName} topic. Switch to it to start.`);
+      } else {
+        await sendMessage(
+          token,
+          chatId,
+          `❌ Failed to create topic for ${graphDef.displayName}.\n\n` +
+          `Private chat topics may not support bot-created topics. ` +
+          `Try creating a topic manually in Telegram, then use /bind ${graphDef.id} in that topic.`
+        );
+      }
+      return;
+    }
+
     if (cmd === "/status") {
       let response = "📊 Topic Status:\n\n";
-      for (const threadId of this.graphTopics.values()) {
-        const binding = this.topicBindings.get(threadId);
-        if (binding) {
-          const status = binding.active ? "✅" : "❌";
-          response += `${status} ${binding.topicName} (${binding.graphId})\n`;
+      if (this.graphTopics.size === 0) {
+        response += "No topics created yet.\n\nUse /<graph> to create one (e.g., /habitica)";
+      } else {
+        for (const threadId of this.graphTopics.values()) {
+          const binding = this.topicBindings.get(threadId);
+          if (binding) {
+            const status = binding.active ? "✅" : "❌";
+            response += `${status} ${binding.topicName} (${binding.graphId})\n`;
+          }
         }
       }
       await sendMessage(token, chatId, response);
     } else if (cmd === "/list") {
       let response = "📋 Available Graphs:\n\n";
       for (const graph of GRAPH_REGISTRY) {
-        response += `${graph.displayName}\n${graph.description}\n\n`;
+        const hasTopicIcon = this.graphTopics.has(graph.id) ? "✅ " : "";
+        response += `${hasTopicIcon}/${graph.id} - ${graph.displayName}\n${graph.description}\n\n`;
       }
       await sendMessage(token, chatId, response);
-    } else if (cmd === "/recreate") {
-      // TODO: Implement topic recreation
-      await sendMessage(token, chatId, "Topic recreation not yet implemented.");
+    } else if (cmd.startsWith("/bind ")) {
+      await sendMessage(token, chatId, "Use /bind inside a topic, not in main chat.");
     } else {
+      // Build help with available graph commands
+      let graphCommands = "";
+      for (const graph of GRAPH_REGISTRY) {
+        graphCommands += `/${graph.id} - Create ${graph.displayName} topic\n`;
+      }
+
       const help =
         "🤖 Admin Console\n\n" +
-        "Available commands:\n" +
+        "Create a topic:\n" +
+        graphCommands + "\n" +
+        "Other commands:\n" +
         "/status - Show all topics and their status\n" +
-        "/list - List available graphs\n" +
-        "/recreate - Recreate topics for current registry\n\n" +
-        "Each graph runs in its own topic. Switch to a topic to interact with that graph.";
+        "/list - List available graphs\n\n" +
+        "Each graph runs in its own topic.";
       await sendMessage(token, chatId, help);
     }
   }
@@ -368,8 +435,8 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
       return new Response("OK");
     }
 
-    // Ensure topics exist for all graphs (lazy init)
-    await this.ensureTopicsExist();
+    // Load topic bindings (don't auto-create - doesn't work for private chats)
+    await this.loadTopicBindings();
 
     // Extract thread ID for routing
     const threadId = extractThreadId(update);
@@ -399,11 +466,64 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
     // Look up which graph this topic belongs to
     const binding = this.topicBindings.get(threadId);
     if (!binding) {
-      // Unknown topic - shouldn't happen, but handle gracefully
+      // Unknown topic - check for /bind command
+      if (incomingMessage.type === "text" && incomingMessage.text.startsWith("/bind ")) {
+        const graphId = incomingMessage.text.slice(6).trim().toLowerCase();
+        const graphDef = GRAPH_REGISTRY.find(g => g.id === graphId);
+
+        if (!graphDef) {
+          const availableGraphs = GRAPH_REGISTRY.map(g => g.id).join(", ");
+          await sendMessage(
+            this.env.TELEGRAM_TOKEN,
+            chatId,
+            `Unknown graph: ${graphId}\n\nAvailable: ${availableGraphs}`,
+            undefined,
+            threadId
+          );
+          return new Response("OK");
+        }
+
+        // Check if this graph already has a topic
+        if (this.graphTopics.has(graphDef.id)) {
+          await sendMessage(
+            this.env.TELEGRAM_TOKEN,
+            chatId,
+            `${graphDef.displayName} is already bound to another topic.`,
+            undefined,
+            threadId
+          );
+          return new Response("OK");
+        }
+
+        // Bind this topic to the graph
+        const newBinding: TopicBinding = {
+          threadId,
+          graphId: graphDef.id,
+          topicName: graphDef.displayName,
+          active: true,
+          createdAt: Date.now(),
+        };
+
+        this.topicBindings.set(threadId, newBinding);
+        this.graphTopics.set(graphDef.id, threadId);
+        await this.saveTopicBindings();
+
+        await sendMessage(
+          this.env.TELEGRAM_TOKEN,
+          chatId,
+          `✅ Bound this topic to ${graphDef.displayName}!\n\n${graphDef.description}\n\nSend a message to start.`,
+          undefined,
+          threadId
+        );
+        return new Response("OK");
+      }
+
+      // Unknown topic without bind command
+      const availableGraphs = GRAPH_REGISTRY.map(g => `/bind ${g.id}`).join("\n");
       await sendMessage(
         this.env.TELEGRAM_TOKEN,
         chatId,
-        "Unknown topic. Use main chat for admin commands.",
+        `Unbound topic. Bind it to a graph:\n\n${availableGraphs}\n\nOr use main chat for admin commands.`,
         undefined,
         threadId
       );
@@ -497,15 +617,11 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
     chatId: number,
     message: TelegramIncomingMessage
   ): Promise<void> {
-    // Convert message to RawInput text
-    const rawInput = this.messageToRawInput(message);
-    if (!rawInput) {
-      console.log(`[TelegramDO] Message type ${message.type} cannot be converted to RawInput`);
-      await sendMessage(
-        this.env.TELEGRAM_TOKEN,
-        chatId,
-        "Sorry, I can only process text messages right now."
-      );
+    // Convert message to graph input (now async!)
+    const rawInput = await this.messageToRawInput(message);
+
+    if (rawInput === null) {
+      console.log(`[TelegramDO] Ignoring message type: ${message.type}`);
       return;
     }
 
@@ -536,7 +652,7 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             graphId: "habitica",
-            input: { type: "text", text: rawInput }, // RawInput expects {type, text}
+            input: rawInput,  // Now GraphInput instead of { type: "text", text: string }
             telegramChatId: chatId,
           }),
         })
@@ -568,22 +684,46 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
   }
 
   /**
-   * Convert incoming message to RawInput text for the graph.
-   * Returns null if message type is not supported.
+   * Convert incoming Telegram message to graph input.
+   * Downloads photos and converts to base64.
    */
-  private messageToRawInput(message: TelegramIncomingMessage): string | null {
+  private async messageToRawInput(
+    message: TelegramIncomingMessage
+  ): Promise<GraphInput | null> {
     switch (message.type) {
       case "text":
-        return message.text;
-      case "photo":
-        // Could potentially use caption, but photos need special handling
-        return message.caption ?? null;
+        return { type: "text", text: message.text };
+
+      case "photo": {
+        // Download the photo using Telegram API
+        const imageData = await downloadFile(
+          this.env.TELEGRAM_TOKEN,
+          message.media
+        );
+
+        if (!imageData) {
+          // Download failed - fall back to caption-only if present
+          if (message.caption) {
+            return { type: "text", text: message.caption };
+          }
+          return null;
+        }
+
+        return {
+          type: "photo",
+          caption: message.caption,
+          image: imageData,
+        };
+      }
+
       case "document":
         // Documents not supported for task extraction
         return null;
+
       case "button_click":
         // Button clicks are handled separately in the confirm flow
         return null;
+
       default: {
         const _exhaustive: never = message;
         console.error(`[TelegramDO] Unknown message type:`, _exhaustive);

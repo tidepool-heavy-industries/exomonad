@@ -152,6 +152,16 @@ export type WireContentBlock = {
     type: "text";
     text: string;
 } | {
+    type: "image";
+    source: {
+        type: "base64";
+        media_type: string;
+        data: string;
+    } | {
+        type: "url";
+        url: string;
+    };
+} | {
     type: "tool_use";
     id: string;
     name: string;
@@ -209,6 +219,8 @@ export type LlmCallResult = {
 export interface LogInfoEffect {
     type: "LogInfo";
     eff_message: string;
+    /** Optional structured fields for queryable log data */
+    eff_fields?: Record<string, unknown>;
 }
 /**
  * Error log - matches Haskell EffLogError.
@@ -216,6 +228,8 @@ export interface LogInfoEffect {
 export interface LogErrorEffect {
     type: "LogError";
     eff_message: string;
+    /** Optional structured fields for queryable log data */
+    eff_fields?: Record<string, unknown>;
 }
 /**
  * Habitica API effect - matches Haskell EffHabitica.
@@ -322,6 +336,21 @@ export type TelegramIncomingMessage = {
 } | {
     type: 'button_click';
     data: unknown;
+};
+/**
+ * Input format for graph initialization.
+ * Supports text-only or photo with optional caption.
+ */
+export type GraphInput = {
+    type: "text";
+    text: string;
+} | {
+    type: "photo";
+    caption?: string;
+    image: {
+        mediaType: string;
+        data: string;
+    };
 };
 /**
  * Send a message (fire and forget).

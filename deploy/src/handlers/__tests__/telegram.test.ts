@@ -210,6 +210,7 @@ describe("handleTelegramAsk button ID mapping", () => {
   const askEffect: TelegramAskEffect = {
     type: "TelegramAsk",
     eff_tg_text: "Choose a task:",
+    eff_tg_parse_mode: "PlainText",
     eff_buttons: [
       ["First option", "Reach out to someone I haven't talked to in a little while"],
       ["Second option", "This is another very long option text that exceeds 64 bytes easily"],

@@ -380,6 +380,21 @@ export type TelegramIncomingMessage =
   | { type: 'button_click'; data: unknown };
 
 /**
+ * Input format for graph initialization.
+ * Supports text-only or photo with optional caption.
+ */
+export type GraphInput =
+  | { type: "text"; text: string }
+  | {
+      type: "photo";
+      caption?: string;
+      image: {
+        mediaType: string;  // e.g., "image/jpeg"
+        data: string;       // base64-encoded
+      }
+    };
+
+/**
  * Send a message (fire and forget).
  * Mirrors Haskell: Send :: OutgoingMessage -> Telegram m ()
  */

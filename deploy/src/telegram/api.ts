@@ -364,6 +364,72 @@ export async function sendDocument(
   return result.result ?? null;
 }
 
+/**
+ * Result from getFile API call.
+ */
+export interface TelegramFileInfo {
+  file_id: string;
+  file_unique_id: string;
+  file_size?: number;
+  file_path?: string;
+}
+
+/**
+ * Download a file from Telegram using file_id.
+ * Returns base64-encoded data and media type.
+ *
+ * @param token - Bot API token
+ * @param fileId - Telegram file_id from photo/document message
+ * @returns Object with mediaType and base64 data, or null on failure
+ */
+export async function downloadFile(
+  token: string,
+  fileId: string
+): Promise<{ mediaType: string; data: string } | null> {
+  try {
+    // Step 1: Get file path from Telegram getFile API
+    const fileInfo = await callTelegram<TelegramFileInfo>(
+      token,
+      "getFile",
+      { file_id: fileId }
+    );
+
+    if (!fileInfo.ok || !fileInfo.result?.file_path) {
+      console.error("[Telegram] getFile failed:", fileInfo.description);
+      return null;
+    }
+
+    // Step 2: Download file from Telegram CDN
+    const fileUrl = `https://api.telegram.org/file/bot${token}/${fileInfo.result.file_path}`;
+    const response = await fetch(fileUrl);
+
+    if (!response.ok) {
+      console.error(`[Telegram] File download failed: ${response.status}`);
+      return null;
+    }
+
+    // Step 3: Convert to base64
+    const arrayBuffer = await response.arrayBuffer();
+    const bytes = new Uint8Array(arrayBuffer);
+    const base64 = btoa(String.fromCharCode(...bytes));
+
+    // Step 4: Determine media type from file extension
+    const extension = fileInfo.result.file_path.split('.').pop()?.toLowerCase();
+    const mediaType = extension === 'jpg' || extension === 'jpeg'
+      ? 'image/jpeg'
+      : extension === 'png'
+      ? 'image/png'
+      : extension === 'webp'
+      ? 'image/webp'
+      : 'image/jpeg'; // Default to JPEG
+
+    return { mediaType, data: base64 };
+  } catch (err) {
+    console.error("[Telegram] Error downloading file:", err);
+    return null;
+  }
+}
+
 // =============================================================================
 // Forum Topic Support (Bot API 9.3+)
 // =============================================================================
