@@ -1,10 +1,17 @@
 /**
- * LLM completion effect handler.
+ * LLM effect handlers.
  *
- * Handles LlmComplete effects by calling Cloudflare AI.
+ * Handles LlmComplete and LlmCall effects by calling Cloudflare AI.
  */
 
-import type { LlmCompleteEffect, EffectResult } from "tidepool-generated-ts";
+import type {
+  LlmCompleteEffect,
+  LlmCallEffect,
+  EffectResult,
+  WireContentBlock,
+  WireToolCall,
+  LlmCallResult,
+} from "tidepool-generated-ts";
 import { successResult, errorResult } from "tidepool-generated-ts";
 
 /**
@@ -184,4 +191,217 @@ function parseAiResponse(response: unknown): unknown {
 
   // Fallback for unexpected response types
   return {};
+}
+
+/**
+ * Handle LlmCall effect - tool-aware LLM API call.
+ *
+ * Returns a discriminated result:
+ * - `done`: LLM finished with final content
+ * - `needs_tools`: LLM wants to call tools, caller should execute and continue
+ *
+ * The caller (graph handler) is responsible for the tool loop:
+ * 1. Execute tools with full effect access (can yield TelegramAsk, etc.)
+ * 2. Continue LLM conversation with tool results
+ * 3. Repeat until `done`
+ */
+export async function handleLlmCall(
+  effect: LlmCallEffect,
+  env: LlmEnv
+): Promise<EffectResult> {
+  // Check rate limits if KV is available
+  if (env.RATE_LIMIT_KV) {
+    const rateLimitError = await checkRateLimit(env.RATE_LIMIT_KV);
+    if (rateLimitError) {
+      return errorResult(rateLimitError);
+    }
+  }
+
+  try {
+    // Convert WireMessage format to Cloudflare AI format
+    const messages = effect.eff_messages.map((msg) => ({
+      role: msg.role as "system" | "user" | "assistant",
+      content: convertContentBlocks(msg.content),
+    }));
+
+    // Build request options
+    const options: Record<string, unknown> = {
+      messages,
+      max_tokens: 4096,
+    };
+
+    // Add tools if provided
+    if (effect.eff_tools && effect.eff_tools.length > 0) {
+      options.tools = effect.eff_tools;
+    }
+
+    // Add response schema if provided (for structured output on final response)
+    if (effect.eff_schema) {
+      options.response_format = {
+        type: "json_schema",
+        json_schema: {
+          name: "effect_output",
+          strict: true,
+          schema: effect.eff_schema,
+        },
+      };
+    }
+
+    const response = (await env.AI.run(
+      "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+      options
+    )) as AiResponse;
+
+    // Check if LLM wants to use tools
+    if (response.stop_reason === "tool_use") {
+      const result: LlmCallResult = {
+        type: "needs_tools",
+        tool_calls: extractToolCalls(response.content),
+        content: extractTextContent(response.content),
+      };
+      return successResult(result);
+    }
+
+    // LLM finished - return final content
+    const result: LlmCallResult = {
+      type: "done",
+      content: extractAllContent(response.content),
+    };
+    return successResult(result);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+
+    if (message.includes("rate limit") || message.includes("429")) {
+      return errorResult(`LLM rate limited: ${message}`);
+    }
+
+    if (message.includes("timeout") || message.includes("timed out")) {
+      return errorResult(`LLM timeout: ${message}`);
+    }
+
+    return errorResult(`LLM error: ${message}`);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// HELPER TYPES AND FUNCTIONS FOR LlmCall
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Cloudflare AI response structure (simplified).
+ */
+interface AiResponse {
+  stop_reason?: "end_turn" | "tool_use" | string;
+  content?: AiContentBlock[] | string;
+  response?: string;
+}
+
+/**
+ * Content block in AI response.
+ */
+type AiContentBlock =
+  | { type: "text"; text: string }
+  | { type: "tool_use"; id: string; name: string; input: unknown };
+
+/**
+ * Convert WireContentBlock array to format expected by Cloudflare AI.
+ */
+function convertContentBlocks(
+  blocks: WireContentBlock[]
+): string | AiContentBlock[] {
+  // If single text block, return as string for simpler API
+  if (blocks.length === 1 && blocks[0].type === "text") {
+    return blocks[0].text;
+  }
+
+  // Convert to Cloudflare AI format
+  return blocks.map((block) => {
+    switch (block.type) {
+      case "text":
+        return { type: "text" as const, text: block.text };
+      case "tool_use":
+        return {
+          type: "tool_use" as const,
+          id: block.id,
+          name: block.name,
+          input: block.input,
+        };
+      case "tool_result":
+        // Tool results are sent as text with special formatting
+        return {
+          type: "text" as const,
+          text: `[Tool Result for ${block.tool_use_id}]: ${block.content}`,
+        };
+    }
+  });
+}
+
+/**
+ * Extract tool calls from AI response content.
+ */
+function extractToolCalls(
+  content: AiContentBlock[] | string | undefined
+): WireToolCall[] {
+  if (!content || typeof content === "string") {
+    return [];
+  }
+
+  return content
+    .filter((block): block is Extract<AiContentBlock, { type: "tool_use" }> =>
+      block.type === "tool_use"
+    )
+    .map((block) => ({
+      id: block.id,
+      name: block.name,
+      input: block.input,
+    }));
+}
+
+/**
+ * Extract text content blocks from AI response (excluding tool_use).
+ */
+function extractTextContent(
+  content: AiContentBlock[] | string | undefined
+): WireContentBlock[] {
+  if (!content) {
+    return [];
+  }
+
+  if (typeof content === "string") {
+    return [{ type: "text", text: content }];
+  }
+
+  return content
+    .filter((block): block is Extract<AiContentBlock, { type: "text" }> =>
+      block.type === "text"
+    )
+    .map((block) => ({ type: "text", text: block.text }));
+}
+
+/**
+ * Extract all content blocks from AI response.
+ */
+function extractAllContent(
+  content: AiContentBlock[] | string | undefined
+): WireContentBlock[] {
+  if (!content) {
+    return [];
+  }
+
+  if (typeof content === "string") {
+    return [{ type: "text", text: content }];
+  }
+
+  return content.map((block) => {
+    if (block.type === "text") {
+      return { type: "text" as const, text: block.text };
+    } else {
+      return {
+        type: "tool_use" as const,
+        id: block.id,
+        name: block.name,
+        input: block.input,
+      };
+    }
+  });
 }

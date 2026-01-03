@@ -4,7 +4,7 @@ import type { SerializableEffect, EffectResult } from './protocol.js';
 import { errorResult } from './protocol.js';
 
 // Internal effect types (handled by StateMachineDO, not yielded to caller)
-export type InternalEffectType = "LogInfo" | "LogError" | "LlmComplete" | "Habitica";
+export type InternalEffectType = "LogInfo" | "LogError" | "LlmComplete" | "LlmCall" | "Habitica";
 
 /**
  * Handler interface for internal effects.
@@ -16,6 +16,7 @@ export interface InternalEffectHandlers<TEnv> {
   LogInfo: (effect: Extract<SerializableEffect, { type: "LogInfo" }>, env: TEnv) => Promise<EffectResult>;
   LogError: (effect: Extract<SerializableEffect, { type: "LogError" }>, env: TEnv) => Promise<EffectResult>;
   LlmComplete: (effect: Extract<SerializableEffect, { type: "LlmComplete" }>, env: TEnv) => Promise<EffectResult>;
+  LlmCall: (effect: Extract<SerializableEffect, { type: "LlmCall" }>, env: TEnv) => Promise<EffectResult>;
   Habitica: (effect: Extract<SerializableEffect, { type: "Habitica" }>, env: TEnv) => Promise<EffectResult>;
 }
 
@@ -48,6 +49,12 @@ export function dispatchInternalEffect<TEnv>(
     case "LlmComplete":
       return handlers.LlmComplete(
         effect as Extract<SerializableEffect, { type: "LlmComplete" }>,
+        env
+      );
+
+    case "LlmCall":
+      return handlers.LlmCall(
+        effect as Extract<SerializableEffect, { type: "LlmCall" }>,
         env
       );
 

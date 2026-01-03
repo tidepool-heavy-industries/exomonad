@@ -4,6 +4,7 @@ export function getEffectCategory(effect) {
         case "LogInfo": return "internal";
         case "LogError": return "internal";
         case "LlmComplete": return "internal";
+        case "LlmCall": return "internal";
         case "Habitica": return "internal";
         case "TelegramAsk": return "yielded";
         case "telegram_send": return "yielded";
@@ -19,6 +20,7 @@ export function getEffectSemantics(effect) {
         case "LogInfo": return "fire_and_forget";
         case "LogError": return "fire_and_forget";
         case "LlmComplete": return "blocking";
+        case "LlmCall": return "blocking";
         case "Habitica": return "blocking";
         case "TelegramAsk": return "blocking";
         case "telegram_send": return "fire_and_forget";

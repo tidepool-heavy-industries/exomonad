@@ -1,5 +1,5 @@
 import type { SerializableEffect, EffectResult } from './protocol.js';
-export type InternalEffectType = "LogInfo" | "LogError" | "LlmComplete" | "Habitica";
+export type InternalEffectType = "LogInfo" | "LogError" | "LlmComplete" | "LlmCall" | "Habitica";
 /**
  * Handler interface for internal effects.
  *
@@ -15,6 +15,9 @@ export interface InternalEffectHandlers<TEnv> {
     }>, env: TEnv) => Promise<EffectResult>;
     LlmComplete: (effect: Extract<SerializableEffect, {
         type: "LlmComplete";
+    }>, env: TEnv) => Promise<EffectResult>;
+    LlmCall: (effect: Extract<SerializableEffect, {
+        type: "LlmCall";
     }>, env: TEnv) => Promise<EffectResult>;
     Habitica: (effect: Extract<SerializableEffect, {
         type: "Habitica";

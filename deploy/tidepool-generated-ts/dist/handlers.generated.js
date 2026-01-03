@@ -16,6 +16,8 @@ export function dispatchInternalEffect(effect, handlers, env) {
             return handlers.LogError(effect, env);
         case "LlmComplete":
             return handlers.LlmComplete(effect, env);
+        case "LlmCall":
+            return handlers.LlmCall(effect, env);
         case "Habitica":
             return handlers.Habitica(effect, env);
         default:

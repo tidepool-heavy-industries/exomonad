@@ -20,6 +20,12 @@ module Tidepool.Wasm.WireTypes
   , EffectSemantics(..)
   , effectMetadata
 
+    -- * LLM Call Types (for tool-aware LLM calls)
+  , WireMessage(..)
+  , WireContentBlock(..)
+  , WireToolCall(..)
+  , LlmCallResult(..)
+
     -- * Results (TypeScript → WASM)
   , EffectResult(..)
   , TelegramAskResult(..)
@@ -62,6 +68,163 @@ import Tidepool.Effect.Metadata (EffectCategory(..), EffectSemantics(..))
 
 
 -- ════════════════════════════════════════════════════════════════════════════
+-- LLM CALL TYPES (for tool-aware LLM calls)
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Wire-format message for LLM conversation history.
+--
+-- JSON encoding: @{role: "user", content: [...]}@
+data WireMessage = WireMessage
+  { wmRole :: Text
+  -- ^ Role: "user" | "assistant" | "system"
+  , wmContent :: [WireContentBlock]
+  -- ^ Content blocks
+  }
+  deriving stock (Show, Eq, Generic)
+
+instance ToJSON WireMessage where
+  toJSON msg = object
+    [ "role" .= msg.wmRole
+    , "content" .= msg.wmContent
+    ]
+
+instance FromJSON WireMessage where
+  parseJSON = withObject "WireMessage" $ \o -> WireMessage
+    <$> o .: "role"
+    <*> o .: "content"
+
+
+-- | Wire-format content block for LLM messages.
+--
+-- JSON encoding uses "type" discriminator:
+-- - @{type: "text", text: "hello"}@
+-- - @{type: "tool_use", id: "...", name: "ask_user", input: {...}}@
+-- - @{type: "tool_result", tool_use_id: "...", content: "...", is_error: false}@
+data WireContentBlock
+  = WCBText { wcbText :: Text }
+    -- ^ Plain text content
+  | WCBToolUse
+      { wcbToolId :: Text
+      -- ^ Unique tool use ID
+      , wcbToolName :: Text
+      -- ^ Tool name
+      , wcbToolInput :: Value
+      -- ^ Tool input (JSON)
+      }
+    -- ^ LLM is calling a tool
+  | WCBToolResult
+      { wcbToolUseId :: Text
+      -- ^ ID of the tool_use this is responding to
+      , wcbResultContent :: Text
+      -- ^ Result content (stringified)
+      , wcbIsError :: Bool
+      -- ^ Whether this is an error result
+      }
+    -- ^ Result of a tool execution
+  deriving stock (Show, Eq, Generic)
+
+instance ToJSON WireContentBlock where
+  toJSON (WCBText txt) = object
+    [ "type" .= ("text" :: Text)
+    , "text" .= txt
+    ]
+  toJSON (WCBToolUse tid name input) = object
+    [ "type" .= ("tool_use" :: Text)
+    , "id" .= tid
+    , "name" .= name
+    , "input" .= input
+    ]
+  toJSON (WCBToolResult tid content isErr) = object
+    [ "type" .= ("tool_result" :: Text)
+    , "tool_use_id" .= tid
+    , "content" .= content
+    , "is_error" .= isErr
+    ]
+
+instance FromJSON WireContentBlock where
+  parseJSON = withObject "WireContentBlock" $ \o -> do
+    (typ :: Text) <- o .: "type"
+    case typ of
+      "text" -> WCBText <$> o .: "text"
+      "tool_use" -> WCBToolUse
+        <$> o .: "id"
+        <*> o .: "name"
+        <*> o .: "input"
+      "tool_result" -> WCBToolResult
+        <$> o .: "tool_use_id"
+        <*> o .: "content"
+        <*> o .: "is_error"
+      _ -> fail $ "Unknown WireContentBlock type: " ++ T.unpack typ
+
+
+-- | Tool call request from LLM.
+--
+-- JSON encoding: @{id: "...", name: "ask_user", input: {...}}@
+data WireToolCall = WireToolCall
+  { wtcId :: Text
+  -- ^ Unique ID for this tool call (used in tool_result)
+  , wtcName :: Text
+  -- ^ Tool name (e.g., "ask_user")
+  , wtcInput :: Value
+  -- ^ Tool arguments (JSON)
+  }
+  deriving stock (Show, Eq, Generic)
+
+instance ToJSON WireToolCall where
+  toJSON tc = object
+    [ "id" .= tc.wtcId
+    , "name" .= tc.wtcName
+    , "input" .= tc.wtcInput
+    ]
+
+instance FromJSON WireToolCall where
+  parseJSON = withObject "WireToolCall" $ \o -> WireToolCall
+    <$> o .: "id"
+    <*> o .: "name"
+    <*> o .: "input"
+
+
+-- | Result from LLM API call - either done or needs tools.
+--
+-- JSON encoding uses "type" discriminator:
+-- - @{type: "done", content: [...]}@
+-- - @{type: "needs_tools", tool_calls: [...], content: [...]}@
+data LlmCallResult
+  = LlmDone
+      { lcrContent :: [WireContentBlock]
+      -- ^ Final response content
+      }
+  | LlmNeedsTools
+      { lcrToolCalls :: [WireToolCall]
+      -- ^ Tools the LLM wants to call
+      , lcrTextContent :: [WireContentBlock]
+      -- ^ Any text content before tools (for logging)
+      }
+  deriving stock (Show, Eq, Generic)
+
+instance ToJSON LlmCallResult where
+  toJSON (LlmDone content) = object
+    [ "type" .= ("done" :: Text)
+    , "content" .= content
+    ]
+  toJSON (LlmNeedsTools calls content) = object
+    [ "type" .= ("needs_tools" :: Text)
+    , "tool_calls" .= calls
+    , "content" .= content
+    ]
+
+instance FromJSON LlmCallResult where
+  parseJSON = withObject "LlmCallResult" $ \o -> do
+    (typ :: Text) <- o .: "type"
+    case typ of
+      "done" -> LlmDone <$> o .: "content"
+      "needs_tools" -> LlmNeedsTools
+        <$> o .: "tool_calls"
+        <*> o .: "content"
+      _ -> fail $ "Unknown LlmCallResult type: " ++ T.unpack typ
+
+
+-- ════════════════════════════════════════════════════════════════════════════
 -- EFFECTS (WASM → TypeScript)
 -- ════════════════════════════════════════════════════════════════════════════
 
@@ -101,6 +264,16 @@ data SerializableEffect
       , effTgButtons :: [(Text, Text)]
       -- ^ Button options: [(label, callback)]
       }
+  | EffLlmCall
+      { effLlmNode :: Text
+      -- ^ Which node is making this call
+      , effLlmMessages :: [WireMessage]
+      -- ^ Full conversation history
+      , effLlmSchema :: Maybe Value
+      -- ^ JSON schema for structured output
+      , effLlmTools :: [Value]
+      -- ^ Tool definitions (Anthropic format)
+      }
   deriving stock (Show, Eq, Generic)
 
 instance ToJSON SerializableEffect where
@@ -134,6 +307,12 @@ instance ToJSON SerializableEffect where
     , "eff_tg_parse_mode" .= parseMode
     , "eff_buttons" .= [[label, val] | (label, val) <- buttons]
     ]
+  toJSON (EffLlmCall node msgs schema tools) = object $
+    [ "type" .= ("LlmCall" :: Text)
+    , "eff_node" .= node
+    , "eff_messages" .= msgs
+    , "eff_tools" .= tools
+    ] ++ maybe [] (\s -> ["eff_schema" .= s]) schema
 
 instance FromJSON SerializableEffect where
   parseJSON = withObject "SerializableEffect" $ \o -> do
@@ -158,6 +337,11 @@ instance FromJSON SerializableEffect where
         buttonArrays <- o .: "eff_buttons" :: Parser [[Text]]
         let buttons = [(l, v) | [l, v] <- buttonArrays]
         pure $ EffTelegramAsk txt parseMode buttons
+      "LlmCall" -> EffLlmCall
+        <$> o .: "eff_node"
+        <*> o .: "eff_messages"
+        <*> o .:? "eff_schema"
+        <*> o .: "eff_tools"
       _         -> fail $ "Unknown effect type: " ++ show typ
 
 
@@ -182,6 +366,7 @@ effectMetadata = \case
   EffLogInfo{}       -> (Internal, FireAndForget)
   EffLogError{}      -> (Internal, FireAndForget)
   EffLlmComplete{}   -> (Internal, Blocking)
+  EffLlmCall{}       -> (Internal, Blocking)      -- Raw LLM API call
   EffHabitica{}      -> (Internal, Blocking)
   EffTelegramSend{}  -> (Yielded, FireAndForget)  -- Send and continue
   EffTelegramAsk{}   -> (Yielded, Blocking)       -- Wait for button click
