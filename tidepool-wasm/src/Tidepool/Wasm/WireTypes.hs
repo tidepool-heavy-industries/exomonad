@@ -67,6 +67,9 @@ import GHC.Generics (Generic)
 -- Re-export effect metadata from the single source of truth
 import Tidepool.Effect.Metadata (EffectCategory(..), EffectSemantics(..))
 
+-- Import ImageSource for image content blocks
+import Tidepool.Anthropic.Types (ImageSource(..))
+
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- LLM CALL TYPES (for tool-aware LLM calls)
@@ -99,11 +102,14 @@ instance FromJSON WireMessage where
 --
 -- JSON encoding uses "type" discriminator:
 -- - @{type: "text", text: "hello"}@
+-- - @{type: "image", source: {type: "base64", media_type: "...", data: "..."}}@
 -- - @{type: "tool_use", id: "...", name: "ask_user", input: {...}}@
 -- - @{type: "tool_result", tool_use_id: "...", content: "...", is_error: false}@
 data WireContentBlock
   = WCBText { wcbText :: Text }
     -- ^ Plain text content
+  | WCBImage { wcbImageSource :: ImageSource }
+    -- ^ Image content (base64 or URL)
   | WCBToolUse
       { wcbToolId :: Text
       -- ^ Unique tool use ID
@@ -129,6 +135,10 @@ instance ToJSON WireContentBlock where
     [ "type" .= ("text" :: Text)
     , "text" .= txt
     ]
+  toJSON (WCBImage source) = object
+    [ "type" .= ("image" :: Text)
+    , "source" .= source
+    ]
   toJSON (WCBToolUse tid name input) = object
     [ "type" .= ("tool_use" :: Text)
     , "id" .= tid
@@ -147,6 +157,7 @@ instance FromJSON WireContentBlock where
     (typ :: Text) <- o .: "type"
     case typ of
       "text" -> WCBText <$> o .: "text"
+      "image" -> WCBImage <$> o .: "source"
       "tool_use" -> WCBToolUse
         <$> o .: "id"
         <*> o .: "name"

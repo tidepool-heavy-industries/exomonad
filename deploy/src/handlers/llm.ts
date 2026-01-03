@@ -468,23 +468,54 @@ interface CfToolCall {
 }
 
 /**
- * Convert WireContentBlock array to format expected by Cloudflare AI.
- *
- * For CF AI, messages are typically just strings. We extract text content
- * and concatenate. Tool results are formatted as text for context.
+ * Content item for Cloudflare AI multimodal messages.
+ * Supports text and images for vision-capable models like Llama 4.
  */
-function convertContentBlocks(blocks: WireContentBlock[]): string {
-  return blocks
-    .map((block) => {
-      switch (block.type) {
-        case "text":
-          return block.text;
-        case "tool_use":
-          // Include tool use context for multi-turn conversations
-          return `[Tool Call: ${block.name}(${JSON.stringify(block.input)})]`;
-        case "tool_result":
-          return `[Tool Result for ${block.tool_use_id}]: ${block.content}`;
+type ContentItem =
+  | { type: "text"; text: string }
+  | { type: "image"; image: string };
+
+/**
+ * Convert WireContentBlock array to Cloudflare AI message content format.
+ * Supports multimodal (text + images) for vision models like Llama 4.
+ *
+ * Returns string for simple text-only messages, or array format for
+ * messages with images or multiple blocks.
+ */
+function convertContentBlocks(blocks: WireContentBlock[]): string | ContentItem[] {
+  // If only one text block, return as string (simpler format)
+  if (blocks.length === 1 && blocks[0].type === "text") {
+    return blocks[0].text;
+  }
+
+  // Multiple blocks or has images → use array format
+  return blocks.map((block): ContentItem => {
+    switch (block.type) {
+      case "text":
+        return { type: "text", text: block.text };
+      case "image": {
+        const source = block.source;
+        if (source.type === "base64") {
+          // Cloudflare AI expects base64 data URI format
+          const dataUri = `data:${source.media_type};base64,${source.data}`;
+          return { type: "image", image: dataUri };
+        } else {
+          // URL format (if CF AI supports it, otherwise error)
+          console.warn("[LLM] URL images may not be supported by CF AI, prefer base64");
+          return { type: "image", image: source.url };
+        }
       }
-    })
-    .join("\n");
+      case "tool_use":
+        // Tool calls are handled separately in the API, not in content
+        return {
+          type: "text",
+          text: `[Tool Call: ${block.name}(${JSON.stringify(block.input)})]`,
+        };
+      case "tool_result":
+        return {
+          type: "text",
+          text: `[Tool Result for ${block.tool_use_id}]: ${block.content}`,
+        };
+    }
+  });
 }

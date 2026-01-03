@@ -27,6 +27,7 @@ import Data.Text qualified as T
 import Data.Vector qualified as V
 
 import Tidepool.Wasm.WireTypes
+import Tidepool.Anthropic.Types (ImageSource(..))
 
 
 spec :: Spec
@@ -37,6 +38,7 @@ spec = do
   graphStatePropertySpec
   stepOutputPropertySpec
   graphInfoPropertySpec
+  wireContentBlockPropertySpec
   edgeCaseSpec
 
 
@@ -284,6 +286,43 @@ instance Arbitrary GraphInfoWire where
     ++ [ GraphInfoWire name entry exit nodes edges' | edges' <- shrink edges ]
 
 
+-- | Arbitrary ImageSource
+instance Arbitrary ImageSource where
+  arbitrary = oneof
+    [ Base64Image
+        <$> elements ["image/jpeg", "image/png", "image/webp", "image/gif"]
+        <*> arbitrary  -- Base64 text
+    , UrlImage <$> arbitrary  -- URL text
+    ]
+
+  shrink (Base64Image mediaType imgData) =
+    [ UrlImage "http://example.com/image.png" ]  -- Simplify to URL
+    ++ [ Base64Image mediaType imgData' | imgData' <- shrink imgData ]
+  shrink (UrlImage url) =
+    [ UrlImage url' | url' <- shrink url ]
+
+
+-- | Arbitrary WireContentBlock
+instance Arbitrary WireContentBlock where
+  arbitrary = oneof
+    [ WCBText <$> arbitrary
+    , WCBImage <$> arbitrary  -- Uses Arbitrary ImageSource
+    , WCBToolUse <$> arbitrary <*> arbitrary <*> arbitrary
+    , WCBToolResult <$> arbitrary <*> arbitrary <*> arbitrary
+    ]
+
+  shrink (WCBText txt) = [WCBText txt' | txt' <- shrink txt]
+  shrink (WCBImage source) = [WCBImage source' | source' <- shrink source]
+  shrink (WCBToolUse toolId name input) =
+    [WCBText "tool"]  -- Simplify to text
+    ++ [WCBToolUse toolId' name input | toolId' <- shrink toolId]
+    ++ [WCBToolUse toolId name' input | name' <- shrink name]
+  shrink (WCBToolResult toolId content isErr) =
+    [WCBText content]  -- Simplify to text
+    ++ [WCBToolResult toolId' content isErr | toolId' <- shrink toolId]
+    ++ [WCBToolResult toolId content' isErr | content' <- shrink content]
+
+
 -- ════════════════════════════════════════════════════════════════════════════
 -- PROPERTY TESTS
 -- ════════════════════════════════════════════════════════════════════════════
@@ -451,6 +490,55 @@ graphInfoPropertySpec = describe "GraphInfo wire type properties" $ do
           KM.member "nodes" obj &&
           KM.member "edges" obj
         _ -> False
+
+
+wireContentBlockPropertySpec :: Spec
+wireContentBlockPropertySpec = describe "WireContentBlock properties" $ do
+
+  prop "decode . encode ≡ id (roundtrip)" $ \(block :: WireContentBlock) ->
+    decode (encode block) == Just block
+
+  prop "all variants produce valid JSON with 'type' field" $ \(block :: WireContentBlock) ->
+    case decode (encode block) :: Maybe Value of
+      Just (Object obj) -> KM.member "type" obj
+      _ -> False
+
+  describe "WCBImage with base64 source" $ do
+    it "round-trips WCBImage with base64 source" $ do
+      let img = WCBImage (Base64Image "image/jpeg" "base64data")
+      decode (encode img) `shouldBe` Just img
+
+    it "encodes WCBImage with correct JSON structure" $ do
+      let img = WCBImage (Base64Image "image/png" "abc123")
+      let json = decode (encode img) :: Maybe Value
+      case json of
+        Just (Object obj) -> do
+          KM.lookup "type" obj `shouldBe` Just (String "image")
+          case KM.lookup "source" obj of
+            Just (Object srcObj) -> do
+              KM.lookup "type" srcObj `shouldBe` Just (String "base64")
+              KM.lookup "media_type" srcObj `shouldBe` Just (String "image/png")
+              KM.lookup "data" srcObj `shouldBe` Just (String "abc123")
+            _ -> expectationFailure "Expected source to be an object"
+        _ -> expectationFailure "Expected JSON object"
+
+  describe "WCBImage with URL source" $ do
+    it "round-trips WCBImage with URL source" $ do
+      let img = WCBImage (UrlImage "https://example.com/image.png")
+      decode (encode img) `shouldBe` Just img
+
+    it "encodes WCBImage URL with correct JSON structure" $ do
+      let img = WCBImage (UrlImage "https://example.com/image.png")
+      let json = decode (encode img) :: Maybe Value
+      case json of
+        Just (Object obj) -> do
+          KM.lookup "type" obj `shouldBe` Just (String "image")
+          case KM.lookup "source" obj of
+            Just (Object srcObj) -> do
+              KM.lookup "type" srcObj `shouldBe` Just (String "url")
+              KM.lookup "url" srcObj `shouldBe` Just (String "https://example.com/image.png")
+            _ -> expectationFailure "Expected source to be an object"
+        _ -> expectationFailure "Expected JSON object"
 
 
 -- ════════════════════════════════════════════════════════════════════════════
