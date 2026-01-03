@@ -139,11 +139,7 @@ telegramAskTry msg buttons = do
   result <- send $ TelegramAskTryOp
     (TelegramMessage msg Markdown)
     [TelegramButton lbl (CallbackData cb') | (lbl, cb') <- buttons]
-  pure $ case result of
-    Left err -> Left err
-    Right (CallbackData cb) -> Right cb
-
-
+  pure $ fmap (\(CallbackData cb) -> cb) result
 -- Helpers
 
 -- | Convert ParseMode to text for serialization
