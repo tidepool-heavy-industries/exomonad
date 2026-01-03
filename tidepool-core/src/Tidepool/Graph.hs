@@ -158,6 +158,7 @@ module Tidepool.Graph
   , GetSchema
   , GetUsesEffects
   , GetGotoTargets
+  , GotosToTos
   , GetMemory
   , GetGlobal
 
