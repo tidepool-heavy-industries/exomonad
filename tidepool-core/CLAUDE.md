@@ -1104,21 +1104,71 @@ See `tidepool-wasm/test/ExecutorSpec.hs` for comprehensive examples:
 - **DiamondGraph**: Convergent paths with merge node
 - **LoopGraph**: Self-loops with bounded iteration
 
+## Effect vs Effects Naming Convention
+
+The `tidepool-core` package uses a clear distinction between `Effect` (singular) and `Effects` (plural) modules:
+
+### Effect (Singular) - Core Infrastructure
+
+**Location**: `Tidepool.Effect` and `Tidepool.Effect.*`
+
+**Purpose**: Core effect system infrastructure - effect types, metadata, and runtime machinery.
+
+**Files**:
+- `Tidepool.Effect` - Re-export module (convenience import for core infrastructure)
+- `Tidepool.Effect.Types` - Core effect type definitions (LLM, State, Emit, etc.)
+- `Tidepool.Effect.Metadata` - Effect metadata for runtime introspection
+
+**Usage**: Import when you're working with the effect system itself, defining new effect types, or need access to effect metadata.
+
+```haskell
+import Tidepool.Effect (LLM(..), State, Emit)
+import Tidepool.Effect.Metadata (EffectMetadata)
+```
+
+### Effects (Plural) - Concrete Integrations
+
+**Location**: `Tidepool.Effects.*` (directory with multiple modules)
+
+**Purpose**: Concrete effect implementations for external services - these are the "contrib" integrations.
+
+**Files**:
+- `Tidepool.Effects.Habitica` - Habitica API integration (legacy freer-based)
+- `Tidepool.Effects.Telegram` - Telegram bot API integration
+- `Tidepool.Effects.Obsidian` - Obsidian note-taking integration
+- `Tidepool.Effects.GitHub` - GitHub API integration
+- `Tidepool.Effects.Calendar` - Calendar integration
+
+**Usage**: Import when you need a specific integration in your agent code.
+
+```haskell
+import Tidepool.Effects.Habitica (habiticaScoreTask, habiticaGetTasks)
+import Tidepool.Effects.Telegram (telegramSendMessage)
+```
+
+### When to Use Which
+
+- **Defining a new effect type?** → Add to `Tidepool.Effect.Types`
+- **Implementing an integration with an external service?** → Add new module under `Tidepool.Effects.*`
+- **Building an agent that uses effects?** → Import from `Tidepool.Effect` (core) and specific `Tidepool.Effects.*` modules (integrations)
+
+This follows the xmonad/xmonad-contrib pattern: core framework vs reusable integrations.
+
 ## File Inventory
 
-| File | Lines | Purpose |
-|------|-------|---------|
-| Types.hs | ~270 | Core DSL syntax types |
-| Generic.hs | ~380 | Servant-style record modes (GraphMode, AsHandler) |
-| Goto.hs | ~460 | Goto effect, OneOf GADT, GotoChoice, Inject typeclasses |
-| Execute.hs | ~140 | DispatchGoto typeclass for typed graph dispatch |
-| Memory.hs | ~210 | Memory effect for persistent state |
-| Template.hs | ~250 | TemplateDef typeclass for typed prompts |
-| Tool.hs | ~150 | Unified tool definitions (ToolDef typeclass) |
-| Edges.hs | ~375 | Edge derivation type families |
-| Validate.hs | ~400 | Compile-time validation |
-| Reify.hs | ~560 | Runtime graph info extraction (now includes Goto target reification) |
-| Mermaid.hs | ~510 | Diagram generation (graphToMermaid, toMermaid, state/sequence diagrams) |
-| Docs.hs | ~80 | Template dependency tree documentation |
-| Example.hs | ~570 | Usage examples (type-level list + record syntax) |
-| Example/Context.hs | ~40 | Example context types (for TH staging) |
+| File | Purpose |
+|------|---------|
+| Types.hs | Core DSL syntax types |
+| Generic.hs | Servant-style record modes (GraphMode, AsHandler) |
+| Goto.hs | Goto effect, OneOf GADT, GotoChoice, Inject typeclasses |
+| Execute.hs | DispatchGoto typeclass for typed graph dispatch |
+| Memory.hs | Memory effect for persistent state |
+| Template.hs | TemplateDef typeclass for typed prompts |
+| Tool.hs | Unified tool definitions (ToolDef typeclass) |
+| Edges.hs | Edge derivation type families |
+| Validate.hs | Compile-time validation |
+| Reify.hs | Runtime graph info extraction (now includes Goto target reification) |
+| Mermaid.hs | Diagram generation (graphToMermaid, toMermaid, state/sequence diagrams) |
+| Docs.hs | Template dependency tree documentation |
+| Example.hs | Usage examples (type-level list + record syntax) |
+| Example/Context.hs | Example context types (for TH staging) |
