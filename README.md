@@ -4,7 +4,7 @@
 
 ## What Is This?
 
-A sketch of Tidepool's core architecture: **freer-simple** for sandboxed effects with reified continuations, **mustache** templates validated at compile time, and **structured output** for LLM → state mutations.
+A sketch of Tidepool's core architecture: **freer-simple** for sandboxed effects with reified continuations, **ginger** (Jinja) templates validated at compile time, and **structured output** for LLM → state mutations.
 
 The key insight: LLMs don't need raw IO access. They need:
 1. **Typed state** they can read (via templates)
@@ -20,7 +20,7 @@ The Haskell code controls what's possible. The LLM controls what happens.
 │                    Game Loop                        │
 │                                                     │
 │  1. Build context (Haskell: state → DMContext)     │
-│  2. Render template (mustache: context → prompt)    │
+│  2. Render template (ginger: context → prompt)      │
 │  3. Call LLM (API: prompt + tools → response)      │
 │  4. Parse output (JSON: response → TurnOutput)      │
 │  5. Apply changes (Haskell: output → state')       │
@@ -44,10 +44,10 @@ type GameEffects s event =
 
 ### Templates (what the LLM sees)
 
-Mustache templates validated at compile time:
+Ginger (Jinja) templates validated at compile time:
 
 ```haskell
-mkTemplate ''DMContext "templates/dm_turn.mustache"
+$(typedTemplateFile ''DMContext "templates/dm_turn.jinja")
 -- Compile error if template references nonexistent fields
 ```
 
@@ -140,7 +140,7 @@ data CompressionOutput = CompressionOutput
 
 ### For Humans
 - All state in Haskell, reviewable
-- Templates are just mustache, editable
+- Templates are just Jinja, editable
 - Structured output is JSON schema, inspectable
 
 ## Building
@@ -168,23 +168,15 @@ src/
 │   ├── Templates.hs    # Template definitions
 │   └── Loop.hs         # DM game loop
 templates/
-├── dm_turn.mustache    # Main DM prompt
-├── compression.mustache # Scene compression prompt
+├── dm_turn.jinja       # Main DM prompt
+├── compression.jinja   # Scene compression prompt
 └── partials/           # Reusable template blocks
 app/
 └── Main.hs             # Example setup
 ```
 
-## Next Steps
-
-- [ ] Implement TH template validation (parse mustache, check paths)
-- [ ] Wire up actual LLM calls (Anthropic API)
-- [ ] Build interpreter for effects
-- [ ] Add player I/O layer
-- [ ] Sleeptime agent that evolves templates/state/output
-
 ## See Also
 
 - [freer-simple](https://hackage.haskell.org/package/freer-simple) - Effect system with reified continuations
-- [stache](https://hackage.haskell.org/package/stache) - Mustache templates
+- [ginger](https://hackage.haskell.org/package/ginger) - Jinja template engine for Haskell
 - Blades in the Dark - Inspiration for faction/clock mechanics
