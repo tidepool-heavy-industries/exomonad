@@ -1,6 +1,7 @@
 name = "tidepool"
 main = "src/index.ts"
 compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
 
 # Durable Objects for state machine instances
 [durable_objects]

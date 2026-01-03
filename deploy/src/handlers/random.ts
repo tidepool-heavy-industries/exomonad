@@ -2,9 +2,10 @@
  * Random effect handlers.
  *
  * Handles RandomInt effect for dice rolling and other random needs.
- * Uses crypto.getRandomValues for better randomness.
+ * Uses Node.js crypto.randomInt for unbiased cryptographically secure randomness.
  */
 
+import { randomInt } from "node:crypto";
 import type {
   RandomIntEffect,
   EffectResult,
@@ -12,9 +13,14 @@ import type {
 import { successResult, errorResult } from "tidepool-generated-ts";
 
 /**
- * Handle RandomInt effect - get random integer in range [min, max].
+ * Handle RandomInt effect - get random integer in range [min, max] (inclusive).
  *
- * Uses crypto.getRandomValues for cryptographically secure randomness.
+ * Uses Node.js crypto.randomInt which provides:
+ * - Cryptographically secure randomness
+ * - Unbiased distribution (no modulo bias)
+ * - Standard library implementation (not handrolled)
+ *
+ * Requires nodejs_compat flag in wrangler.toml for Cloudflare Workers.
  */
 export async function handleRandomInt(
   effect: RandomIntEffect
@@ -27,26 +33,14 @@ export async function handleRandomInt(
       return errorResult(`RandomInt: min (${min}) > max (${max})`);
     }
 
-    // Generate random integer in range [min, max]
-    const range = max - min + 1;
-
-    // Use crypto.getRandomValues if available, otherwise Math.random
-    let randomValue: number;
-    if (typeof crypto !== "undefined" && crypto.getRandomValues) {
-      const array = new Uint32Array(1);
-      // Rejection sampling to avoid modulo bias when mapping 32-bit values into [min, max]
-      // Without this, ranges that don't evenly divide 2^32 would have slight bias
-      const maxUint32 = 0xFFFFFFFF;
-      const maxValid = Math.floor((maxUint32 + 1) / range) * range - 1;
-      let candidate: number;
-      do {
-        crypto.getRandomValues(array);
-        candidate = array[0];
-      } while (candidate > maxValid);
-      randomValue = min + (candidate % range);
-    } else {
-      randomValue = min + Math.floor(Math.random() * range);
+    // Handle edge case: min === max
+    if (min === max) {
+      return successResult(min);
     }
+
+    // crypto.randomInt(min, max) returns min <= result < max (exclusive max)
+    // We want inclusive max, so add 1
+    const randomValue = randomInt(min, max + 1);
 
     return successResult(randomValue);
   } catch (err) {
