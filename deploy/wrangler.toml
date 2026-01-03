@@ -48,3 +48,13 @@ ENVIRONMENT = "development"
 
 # WASM module configuration
 # The WASM binary is imported directly in TypeScript
+
+# OpenTelemetry export to Grafana Cloud
+# See docs/GRAFANA_CLOUD_SETUP.md for setup instructions
+[observability.traces]
+enabled = true
+destinations = [ "grafana-traces" ]
+
+[observability.logs]
+enabled = true
+destinations = [ "grafana-logs" ]

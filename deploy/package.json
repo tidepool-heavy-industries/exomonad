@@ -24,11 +24,12 @@
     "tsx": "^4.7.0",
     "typescript": "^5.7.2",
     "vitest": "^3.2.4",
-    "wrangler": "^3.99.0",
+    "wrangler": "^4.54.0",
     "ws": "^8.18.3"
   },
   "dependencies": {
     "@bjorn3/browser_wasi_shim": "^0.3.0",
+    "@cloudflare/ai-utils": "^1.0.1",
     "tidepool-generated-ts": "workspace:*",
     "zod": "^4.3.4"
   }

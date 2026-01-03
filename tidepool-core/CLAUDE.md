@@ -808,6 +808,518 @@ type AnnotatedGraph = Graph
   :& Requires '[IOE, Log]
 ```
 
+## LLM Node Handler Variants
+
+LLM nodes can have handlers in three forms, controlling template context building and post-LLM routing:
+
+### LLMBefore - Implicit Routing
+
+**Use when:** LLM output flows implicitly via Needs-based data flow (no branching after LLM).
+
+```haskell
+-- Graph definition - no UsesEffects means implicit routing
+sgClassify :: mode :- G.LLMNode :@ Needs '[Message] :@ Template ClassifyTpl :@ Schema Intent
+
+-- Handler - builds template context before LLM call
+sgClassify = LLMBefore $ \msg -> do
+  st <- get @SessionState
+  pure ClassifyContext
+    { topic = msgContent msg
+    , categories = T.intercalate ", " st.sessionNotes
+    }
+```
+
+**What happens:**
+1. Handler builds template context from input (`Message`)
+2. Runner renders template with context
+3. Runner calls LLM with rendered template + schema
+4. LLM output (`Intent`) flows to next node via Needs-based routing
+
+### LLMAfter - Explicit Routing
+
+**Use when:** LLM output determines which node to transition to (branching after LLM).
+
+```haskell
+-- Graph definition - has UsesEffects for routing
+rgRoute :: mode :- G.LLMNode :@ Needs '[Intent] :@ Schema Intent
+           :@ UsesEffects '[Goto "rgProcess" Intent, Goto Exit Response]
+
+-- Handler - makes routing decision based on LLM output
+rgRoute = LLMAfter $ \intent -> pure $ case intent of
+  IntentRefund    -> gotoChoice @"rgProcess" intent
+  IntentQuestion  -> gotoExit (Response "FAQ response")
+  IntentComplaint -> gotoChoice @"rgProcess" intent
+```
+
+**What happens:**
+1. Runner uses default template context (or template's `buildContext`)
+2. Runner calls LLM
+3. Handler receives LLM output and returns `GotoChoice` for routing
+
+### LLMBoth - Full Control
+
+**Use when:** You need custom template context AND explicit routing.
+
+```haskell
+-- Graph definition - has Template and UsesEffects
+rgProcess :: mode :- G.LLMNode :@ Needs '[Intent] :@ Template RefundTpl :@ Schema Response
+               :@ UsesEffects '[Goto Exit Response]
+
+-- Handler - controls both phases
+rgProcess = LLMBoth
+  Nothing  -- no system template (or Just systemTpl)
+  (templateCompiled @RefundTpl)  -- user template
+  (\intent -> pure SimpleContext { scContent = "Processing: " ++ show intent })  -- before
+  (pure . gotoExit)  -- after: routing based on LLM output
+```
+
+**What happens:**
+1. Before handler builds template context
+2. Runner renders template and calls LLM
+3. After handler receives LLM output and returns `GotoChoice`
+
+### Choosing the Right Variant
+
+| Scenario | Variant | Reason |
+|----------|---------|--------|
+| LLM output → next node (linear flow) | `LLMBefore` | Implicit routing via Needs |
+| Branch based on LLM output | `LLMAfter` | Explicit routing with `GotoChoice` |
+| Custom context + branching | `LLMBoth` | Full control over both phases |
+| Default context + branching | `LLMAfter` | Let template's `buildContext` handle it |
+
+## Practical Patterns for DM
+
+### Mood State Machine
+
+DM has four moods (Scene/Action/Aftermath/Downtime) that cycle. This maps naturally to Logic nodes:
+
+```haskell
+data DMGraph mode = DMGraph
+  { dmEntry :: mode :- Entry PlayerAction
+  , dmScene :: mode :- LLMNode :@ Needs '[PlayerAction] :@ Template SceneTpl :@ Schema SceneNarrative
+                  :@ UsesEffects '[Goto "dmAction" SceneNarrative]
+  , dmAction :: mode :- LogicNode :@ Needs '[SceneNarrative]
+                   :@ UsesEffects '[Goto "dmAftermath" Outcome, Goto "dmScene" SceneNarrative]
+  , dmAftermath :: mode :- LLMNode :@ Needs '[Outcome] :@ Template AftermathTpl :@ Schema Consequences
+                      :@ UsesEffects '[Goto "dmDowntime" Consequences, Goto Exit Response]
+  , dmDowntime :: mode :- LogicNode :@ Needs '[Consequences]
+                     :@ UsesEffects '[Goto "dmScene" PlayerAction, Goto Exit Response]
+  , dmExit :: mode :- Exit Response
+  }
+```
+
+**Key patterns:**
+- LLM nodes for narrative generation (Scene, Aftermath)
+- Logic nodes for mechanics/state updates (Action for dice, Downtime for recovery)
+- Self-loops via Goto to same node (e.g., Action → Scene if re-roll)
+- UsesEffects declares all possible transitions
+
+### FitD Dice Mechanics
+
+Dice selection is a RequestInput over Telegram:
+
+```haskell
+dmAction = \sceneNarrative -> do
+  worldState <- getMem @WorldState
+
+  -- Build dice pool from character stats
+  let pool = buildDicePool worldState sceneNarrative.position
+
+  -- Request dice selection via Telegram
+  dieValue <- requestDiceSelection pool  -- yields to TypeScript
+
+  -- Determine outcome tier
+  let tier = determineTier dieValue sceneNarrative.position
+
+  -- Apply consequences
+  updateMem @WorldState $ applyOutcome tier
+
+  -- Route based on outcome
+  pure $ case tier of
+    Critical -> gotoChoice @"dmAftermath" (Outcome tier ...)
+    Bad      -> gotoChoice @"dmDowntime" (Consequences ...)
+```
+
+**RequestInput pattern:**
+- Logic node yields RequestInput effect
+- TypeScript harness sends Telegram message with keyboard
+- User selects die
+- Result resumes Haskell handler
+- Handler updates state and routes based on choice
+
+### Template Context Building
+
+Templates need different context per mood:
+
+```haskell
+instance TemplateDef SceneTpl where
+  type TemplateContext SceneTpl = SceneContext
+  type TemplateConstraint SceneTpl es = (Memory WorldState :> es)
+
+  buildContext = do
+    world <- getMem @WorldState
+    pure SceneContext
+      { playerName = world.playerState.name
+      , currentLocation = world.location
+      , activeFactions = filter (\f -> f.clockProgress > 0) world.factions
+      , precarity = calculatePrecarity world
+      , recentBeats = take 3 world.sceneBeats
+      }
+```
+
+**Context sources:**
+- `Memory WorldState` for game state
+- `Needs` inputs for immediate data (player action, previous output)
+- Computed fields (precarity, recent history)
+
+### State Management
+
+DM needs two levels of state:
+
+```haskell
+-- Node-private: Per-mood state (e.g., Action tracks current roll)
+data ActionMem = ActionMem
+  { pendingRoll :: Maybe PendingOutcome
+  , dicePoolContext :: Text
+  }
+
+-- Graph-global: Shared world state
+data WorldState = WorldState
+  { playerState :: PlayerState
+  , clocks :: [Clock]
+  , factions :: [Faction]
+  , sceneBeats :: [SceneBeat]
+  }
+
+-- Graph definition with both
+:& Global WorldState
+
+dmAction :: mode :- LogicNode :@ Memory ActionMem :@ ...
+```
+
+**Access pattern:**
+```haskell
+dmAction = \input -> do
+  actionMem <- getMem @ActionMem      -- Node's private state
+  worldState <- getMem @WorldState    -- Graph's global state
+
+  -- Update both as needed
+  updateMem @ActionMem $ \m -> m { pendingRoll = Just ... }
+  updateMem @WorldState $ applyStressDelta 2
+```
+
+## Porting DM to V2 Graph + Telegram
+
+### What Needs to Be Built
+
+To port DM to v2 graph with Telegram interface:
+
+1. **Graph Definition** (`dm-v2-graph/src/DM/Graph.hs`)
+   - Define `DMGraph mode` record with Entry/Exit and mood nodes
+   - Annotate with Needs, Template, Schema, UsesEffects, Memory
+   - Derive Generic for validation
+
+2. **State Types** (`dm-v2-graph/src/DM/State.hs`)
+   - Port WorldState, PlayerState, Clock, Faction from tidepool-dm
+   - Define per-mood Memory types (ActionMem, DowntimeMem if needed)
+   - Add ToJSON/FromJSON for serialization (WASM boundary)
+
+3. **Output Schema Types** (`dm-v2-graph/src/DM/Schema.hs`)
+   - SceneNarrative (LLM → dmAction)
+   - Outcome (dmAction → dmAftermath)
+   - Consequences (dmAftermath → dmDowntime)
+   - Response (final exit)
+   - Derive HasJSONSchema for structured output
+
+4. **Template Context Types** (`dm-v2-graph/src/DM/Context.hs`)
+   - SceneContext, AftermathContext, etc.
+   - Must be in separate module for TH staging
+   - Implement ToGVal for jinja rendering
+
+5. **Templates** (`dm-v2-graph/templates/*.jinja`)
+   - scene.jinja - Generates narrative scene description
+   - aftermath.jinja - Narrates consequences of outcome
+   - System prompts for noir tone, FitD mechanics
+
+6. **Template Definitions** (`dm-v2-graph/src/DM/Templates.hs`)
+   - TemplateDef instances for each template
+   - Connect context types to compiled templates
+   - Specify TemplateConstraint effects
+
+7. **Handlers** (`dm-v2-graph/src/DM/Handlers.hs`)
+   - Implement DMGraph (AsHandler '[...]) with all handlers
+   - LLMBefore for scene/aftermath (build context)
+   - Logic handlers for action/downtime (dice, recovery mechanics)
+   - Use getMem/updateMem for state access
+   - Use gotoChoice/gotoExit for routing
+
+8. **Effects Layer** (deploy TypeScript)
+   - RequestInput → Telegram keyboard for dice selection
+   - Memory → Durable Object storage
+   - LLM → Cloudflare AI binding
+   - Random → crypto.randomInt
+
+### Integration Points with Telegram
+
+**TelegramDO modifications needed:**
+
+```typescript
+// In deploy/src/telegram.ts
+
+async handleUpdate(update: TelegramUpdate): Promise<void> {
+  // Extract message from update
+  const msg = update.message?.text || "";
+
+  // Initialize WASM graph
+  const initResult = initializeWasm(wasmGraphRunner);
+
+  // Run to completion with effect handling
+  const finalResult = await this.runWasmWithEffects(initResult, {
+    initialInput: { playerAction: msg }
+  });
+
+  // Send response back to Telegram
+  await this.sendMessage(update.message.from.id, finalResult.responseText);
+}
+
+async runWasmWithEffects(wasmResult: WasmResult, ctx: RunContext): Promise<any> {
+  switch (wasmResult.type) {
+    case 'yield':
+      const effect = wasmResult.effect;
+
+      // Handle RequestInput for dice selection
+      if (effect.type === 'RequestInput') {
+        const keyboard = this.buildDiceKeyboard(effect.payload.dice);
+        await this.sendMessageWithKeyboard(ctx.userId, effect.payload.prompt, keyboard);
+
+        // Wait for callback_query (user clicks button)
+        const selection = await this.waitForCallback(ctx.userId);
+
+        // Resume WASM with selection
+        return this.runWasmWithEffects(
+          wasmResult.resume({ type: 'success', value: selection }),
+          ctx
+        );
+      }
+
+      // Handle Memory load/save
+      if (effect.type === 'GetMem') {
+        const state = await this.state.storage.get(`worldState:${ctx.userId}`);
+        return this.runWasmWithEffects(
+          wasmResult.resume({ type: 'success', value: state }),
+          ctx
+        );
+      }
+
+      // ... other effects
+
+    case 'complete':
+      return wasmResult.value;
+
+    case 'error':
+      throw new Error(wasmResult.message);
+  }
+}
+
+buildDiceKeyboard(dice: number[]): TelegramKeyboard {
+  // Build inline keyboard with dice values + tier colors
+  return {
+    inline_keyboard: dice.map((value, idx) => [{
+      text: `🎲 ${value} (${tierLabel(value)})`,
+      callback_data: `dice:${idx}`
+    }])
+  };
+}
+```
+
+### Deployment Workflow
+
+```bash
+# In dm-v2-graph/
+nix develop .#wasm
+wasm32-wasi-cabal build dm-v2-graph
+cp dist-newstyle/.../dm.wasm ../deploy/public/dm.wasm
+
+# In deploy/
+pnpm deploy
+```
+
+**Friction point:** This is the multi-step deploy that shoal-automat complained about. Could be scripted with `just deploy-dm`.
+
+### What Works Out of the Box
+
+- ✅ Type-safe graph definition with validation
+- ✅ Template rendering with ginger
+- ✅ Structured output via JSON Schema
+- ✅ State persistence via Memory effect
+- ✅ Typed transitions via GotoChoice
+- ✅ Mermaid diagram generation
+
+## LLM Tool Use (PR #95 - MERGED)
+
+**Status:** ✅ Merged (commits 6972834, a4b7c5f, 178bf19). Uses `llama-3.3-70b-instruct-fp8-fast` for all LlmCall requests.
+
+Tool-aware LLM calls enable graphs to handle multi-turn tool loops where tools can yield arbitrary effects.
+
+**Implementation details:**
+- Uses Cloudflare AI's `tool_calls` array format (not Anthropic's)
+- Returns discriminated `LlmCallResult`: `{type: "done", content}` or `{type: "needs_tools", tool_calls, content}`
+- Generates deterministic IDs for tool calls (CF AI doesn't provide them)
+- Handler: `deploy/src/handlers/llm.ts:handleLlmCall`
+
+**Open questions** (will be discovered when testing with real tool definitions):
+1. **Tool definition format** - CF AI may expect OpenAI-style (`type: "function", function: {parameters}`) vs Anthropic-style (`input_schema`)
+2. **Llama function calling support** - Whether llama-3.3-70b actually supports function calling on CF AI. If not, it'll always return `done` (never `needs_tools`).
+
+### LlmCall Effect
+
+```haskell
+-- Discriminated result
+data LlmCallResult
+  = LlmDone Text                    -- LLM finished, here's the content
+  | LlmNeedsTools [WireToolCall]    -- LLM wants to call tools
+
+-- Effect definition
+data LlmCall :: Effect where
+  LlmCallOp :: Text -> [ContentBlock] -> [ToolDef] -> LlmCall m LlmCallResult
+```
+
+### Tool Loop Pattern
+
+**Handler owns the loop:**
+
+```haskell
+-- DM scene handler with AskPlayer tool
+dmScene = LLMBoth systemTpl userTpl buildContext $ \playerAction -> do
+  world <- getMem @WorldState
+
+  -- Call LLM with tools available
+  result <- llmCall "Generate scene" [textBlock context] [askPlayerTool, rollDiceTool]
+
+  case result of
+    LlmDone narrative ->
+      -- LLM finished, continue graph
+      pure $ gotoChoice @"dmAction" (SceneNarrative narrative)
+
+    LlmNeedsTools toolCalls -> do
+      -- Execute each tool call
+      toolResults <- forM toolCalls $ \call ->
+        case call.function of
+          "ask_player" -> do
+            -- Tool yields TelegramAsk effect
+            response <- telegramAsk (parseQuestion call.arguments)
+            pure $ ToolResult call.id response
+
+          "roll_dice" -> do
+            -- Tool yields Random effect
+            die <- randomInt 1 6
+            pure $ ToolResult call.id (show die)
+
+      -- Resume LLM with tool results
+      result' <- llmCall "Continue scene" [toolResultsBlock toolResults] [askPlayerTool]
+
+      case result' of
+        LlmDone narrative -> pure $ gotoChoice @"dmAction" (SceneNarrative narrative)
+        LlmNeedsTools _ -> error "Too many tool rounds"  -- Or recurse with limit
+```
+
+### Architecture
+
+```
+Graph Handler                         TypeScript
+    │                                     │
+    │── yield LlmCall (with tools) ──────►│ calls CF AI
+    │◄── LlmNeedsTools [ask_user] ────────│
+    │                                     │
+    │ Handler executes ask_user:          │
+    │── yield TelegramAsk ────────────────►│ yields to Telegram
+    │◄── user response ────────────────────│
+    │                                     │
+    │── yield LlmCall (with results) ─────►│ continues LLM
+    │◄── LlmDone { content } ──────────────│
+```
+
+**Key insight:** Tools can yield effects (TelegramAsk, Random, Memory, etc.) via normal WASM mechanism. The handler orchestrates the tool loop, not the LLM runner.
+
+### DM Tools
+
+```haskell
+-- Tool that yields TelegramAsk
+data AskPlayerTool
+
+instance ToolDef AskPlayerTool where
+  type ToolInput AskPlayerTool = AskPlayerInput
+  type ToolOutput AskPlayerTool = AskPlayerOutput
+  type ToolEffects AskPlayerTool = '[TelegramAsk]  -- Can yield effects!
+
+  toolExecute _ input = do
+    response <- telegramAsk input.question input.choices
+    pure AskPlayerOutput { playerChoice = response }
+
+-- Tool for dice mechanics
+data ChooseDieTool
+
+instance ToolDef ChooseDieTool where
+  type ToolInput ChooseDieTool = ChooseDieInput
+  type ToolOutput ChooseDieTool = OutcomeTier
+  type ToolEffects ChooseDieTool = '[TelegramAsk, Memory WorldState]
+
+  toolExecute _ input = do
+    -- Show dice pool to player via Telegram keyboard
+    selectedDie <- telegramAsk "Choose a die" (map showDie input.pool)
+
+    -- Determine tier from selected die
+    let tier = determineTier selectedDie input.position
+
+    -- Update world state with outcome
+    updateMem @WorldState $ applyStressDelta tier
+
+    pure tier
+```
+
+### What This Enables for DM
+
+- **Branching narrative** - LLM can ask player questions mid-scene
+- **Dice mechanics** - ChooseDie tool handles full FitD flow
+- **Dynamic prompting** - LLM decides when it needs more info
+- **No RequestInput in graph** - All player interaction via tools
+
+**Before (RequestInput):**
+- Handler explicitly yields RequestInput
+- Graph structure encodes when to ask player
+
+**After (Tools):**
+- LLM decides when to call ask_player tool
+- Handler loops until LlmDone
+- More flexible, less graph structure needed
+
+### What Needs Work
+
+- ❓ TelegramAsk effect (not RequestInput) - yields callback ID, resumes on click
+- ❓ Tool result rendering in Telegram (show what tool did)
+- ❓ Tool loop depth limit (prevent infinite loops)
+- ❓ Session resumption (if user abandons mid-tool-loop)
+- ❓ Clock/faction state UI (text-only vs future web UI)
+- ❓ Photo upload for scene setting (Vision annotation, multimodal)
+
+### Minimal Viable DM
+
+**Simplest version to prove it works:**
+
+1. Single mood cycle: Entry → Scene → Action (dice) → Exit
+2. No clocks/factions yet
+3. Fixed character stats (no progression)
+4. Telegram text + inline keyboard only
+5. WorldState = { stress: Int, recentBeats: [Text] }
+
+This tests:
+- Graph execution end-to-end
+- Template rendering with context
+- LLM narrative generation
+- RequestInput for dice
+- State persistence across turns
+- Telegram integration
+
 ## Design Decisions
 
 ### Why Polykinded Type Families?

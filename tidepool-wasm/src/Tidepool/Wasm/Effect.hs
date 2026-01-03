@@ -29,6 +29,13 @@ module Tidepool.Wasm.Effect
   , logInfo
   , logError
   , llmComplete
+  , llmCall
+    -- ** LLM Call Types (for tool-aware calls)
+  , LlmCallResult(..)
+  , WireMessage(..)
+  , WireContentBlock(..)
+  , WireToolCall(..)
+  , askUserToolSchema
     -- ** Telegram
   , telegramSend
   , telegramMarkdown
@@ -49,8 +56,18 @@ import Control.Monad.Freer.Coroutine (Yield, yield, runC, Status(..))
 import Data.Aeson (Value(..), toJSON, fromJSON, Result(..))
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Map.Strict as Map
 
-import Tidepool.Wasm.WireTypes (SerializableEffect(..), EffectResult(..), TelegramAskResult(..))
+import Tidepool.Wasm.CfTool (CfTool(..), CfObjectSchema(..), CfProperty(..), cfToolToValue)
+import Tidepool.Wasm.WireTypes
+  ( SerializableEffect(..)
+  , EffectResult(..)
+  , TelegramAskResult(..)
+  , LlmCallResult(..)
+  , WireMessage(..)
+  , WireContentBlock(..)
+  , WireToolCall(..)
+  )
 import Tidepool.Wasm.Habitica (habitica)
 
 
@@ -110,6 +127,43 @@ llmComplete node systemPrompt userContent schema = do
     ResSuccess (Just v) -> pure v
     ResSuccess Nothing  -> pure (toJSON ())
     ResError msg        -> error $ "LLM call failed: " <> T.unpack msg
+
+-- | Make a raw LLM call with full message history and optional tools.
+--
+-- Yields 'EffLlmCall', returns the raw LLM response including any tool calls.
+-- Use this when you need tool calling or multi-turn conversation support.
+llmCall :: Member (Yield SerializableEffect EffectResult) effs
+        => Text           -- ^ Node name (for observability)
+        -> [WireMessage]  -- ^ Full message history
+        -> Maybe Value    -- ^ Output schema (optional)
+        -> [Value]        -- ^ Tool definitions (CF AI flat format)
+        -> Eff effs LlmCallResult
+llmCall node messages schema tools = do
+  result <- yield (EffLlmCall node messages schema tools) (id @EffectResult)
+  case result of
+    ResSuccess (Just v) -> case fromJSON v of
+      Success r -> pure r
+      Error err -> error $ "LlmCall: failed to parse result: " <> err
+    ResSuccess Nothing  -> error "LlmCall: no response"
+    ResError msg        -> error $ "[v2-tools-only] LlmCall failed: " <> T.unpack msg
+
+-- | Tool schema for asking user a clarifying question (CF AI flat format).
+askUserToolSchema :: Value
+askUserToolSchema = cfToolToValue askUserTool
+
+-- | Tool definition for ask_user.
+askUserTool :: CfTool
+askUserTool = CfTool
+  { ctName = "ask_user"
+  , ctDescription = "Ask the user a clarifying question. Use when the input is ambiguous and you need more information to proceed accurately."
+  , ctParameters = CfObjectSchema
+      { cosProperties = Map.fromList
+          [ ("question", CfString "The question to ask the user")
+          , ("options", CfArray "Optional button choices. If provided, user clicks one. If omitted, user types freeform response." CfStringType)
+          ]
+      , cosRequired = ["question"]
+      }
+  }
 
 
 -- | Send a plain text message via Telegram.
