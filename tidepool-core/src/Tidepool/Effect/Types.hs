@@ -319,7 +319,13 @@ llmCallWithTools systemPrompt userInput schema tools = do
     TurnCompleted (TurnParsed tr) -> pure $ Right tr.trOutput
     TurnCompleted (TurnParseFailed {tpfError}) -> pure $ Left $ "Parse failed: " <> T.pack tpfError
 
--- | Structured error type for LLM call failures
+-- | Structured error type for LLM call failures.
+--
+-- Note: Currently llmCallTry/llmCallWithToolsTry only produce 'LlmTurnBroken'
+-- and 'LlmParseFailed'. The other variants (RateLimited, Timeout, NetworkError,
+-- etc.) are defined for future use when the LLM runner is updated to return
+-- errors instead of crashing. This matches the pattern used in Habitica/Telegram
+-- where the stub runners return Left but real implementations will use all variants.
 data LlmError
   = LlmRateLimited              -- ^ Rate limit hit, retry later
   | LlmTimeout                  -- ^ Request timed out
