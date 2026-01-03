@@ -1,4 +1,40 @@
 -- | Obsidian/PKM integration effect
+--
+-- = ⚠️  STUB IMPLEMENTATION - Not Yet Functional
+--
+-- This module provides type signatures for Obsidian vault integration
+-- but all runner functions call @error@ at runtime.
+--
+-- __Intended use:__
+--
+-- * Type checking and effect composition
+-- * Template for implementing real Obsidian integration
+--
+-- __Not suitable for:__
+--
+-- * Production use
+-- * Runtime execution (will crash with @error@)
+--
+-- == Implementation TODO
+--
+-- To make this functional, implement a real runner:
+--
+-- @
+-- runObsidianVault :: FilePath -> Eff (Obsidian : es) a -> Eff es a
+-- runObsidianVault vaultPath = interpret $ \\case
+--   ListPages -> do
+--     -- List .md files in vault
+--     ...
+--   ReadPage path -> do
+--     -- Read file contents
+--     ...
+--   AppendToPage path content -> do
+--     -- Append to file
+--     ...
+--   CreatePage path content -> do
+--     -- Create new .md file
+--     ...
+-- @
 module Tidepool.Effects.Obsidian
   ( -- * Effect
     Obsidian(..)

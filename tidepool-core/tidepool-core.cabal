@@ -87,6 +87,16 @@ library
         TypeOperators
         QuasiQuotes
         TemplateHaskell
+        -- Graph DSL type-level programming extensions
+        AllowAmbiguousTypes
+        FlexibleContexts
+        FlexibleInstances
+        PolyKinds
+        RankNTypes
+        ScopedTypeVariables
+        StandaloneKindSignatures
+        TypeApplications
+        UndecidableInstances
 
 -- test-llm executable moved to tidepool-platform (requires HTTP client)
 
