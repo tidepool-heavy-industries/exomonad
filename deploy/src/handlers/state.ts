@@ -24,7 +24,12 @@ export interface StateEnv {
 
 /**
  * In-memory state store (for development/testing).
- * In production, this would use Durable Object storage.
+ *
+ * TODO(#107): Replace with Durable Object storage for production.
+ * This module-level Map is shared across all requests, which is acceptable
+ * only because each Durable Object instance runs in isolation. For true
+ * multi-tenant support, state must be scoped per-session and persisted
+ * to DO storage (this.state.storage.get/put).
  */
 const stateStore: Map<string, unknown> = new Map();
 

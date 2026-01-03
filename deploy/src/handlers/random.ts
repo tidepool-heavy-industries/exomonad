@@ -34,8 +34,16 @@ export async function handleRandomInt(
     let randomValue: number;
     if (typeof crypto !== "undefined" && crypto.getRandomValues) {
       const array = new Uint32Array(1);
-      crypto.getRandomValues(array);
-      randomValue = min + (array[0] % range);
+      // Rejection sampling to avoid modulo bias when mapping 32-bit values into [min, max]
+      // Without this, ranges that don't evenly divide 2^32 would have slight bias
+      const maxUint32 = 0xFFFFFFFF;
+      const maxValid = Math.floor((maxUint32 + 1) / range) * range - 1;
+      let candidate: number;
+      do {
+        crypto.getRandomValues(array);
+        candidate = array[0];
+      } while (candidate > maxValid);
+      randomValue = min + (candidate % range);
     } else {
       randomValue = min + Math.floor(Math.random() * range);
     }
