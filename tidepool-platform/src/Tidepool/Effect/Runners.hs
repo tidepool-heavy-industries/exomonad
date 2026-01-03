@@ -215,12 +215,17 @@ runLLMCore hooks config mChatOps dispatcher = interpret $ \_ -> \case
     loopResult <- toolLoop clientConfig systemPrompt outputSchema tools initialMessages [] [] []
 
     case loopResult of
-      Left breakReason -> do
+      ToolLoopError err -> do
+        logWarn $ "[LLM] LLM error: " <> T.pack (show err)
+        liftIO hooks.onTurnEnd
+        return (TurnError err)
+
+      ToolLoopBreak breakReason -> do
         logInfo $ "[LLM] Turn broken by tool: " <> breakReason
         liftIO hooks.onTurnEnd
         return (TurnBroken breakReason)
 
-      Right (result, finalContent) -> do
+      ToolLoopSuccess result finalContent -> do
         -- Only append to history if we have ChatHistory operations
         case mChatOps of
           Nothing -> pure ()
@@ -233,6 +238,12 @@ runLLMCore hooks config mChatOps dispatcher = interpret $ \_ -> \case
         liftIO hooks.onTurnEnd
         return (TurnCompleted result)
   where
+    -- | Result of the tool loop - either an error, a tool break, or success
+    data ToolLoopResult
+      = ToolLoopError LlmError
+      | ToolLoopBreak Text
+      | ToolLoopSuccess (TurnResult Value) [ContentBlock]
+
     toolLoop
       :: Client.ClientConfig
       -> Text
@@ -242,7 +253,7 @@ runLLMCore hooks config mChatOps dispatcher = interpret $ \_ -> \case
       -> [ToolInvocation]
       -> [Text]
       -> [Text]
-      -> Eff es (Either Text (TurnResult Value, [ContentBlock]))
+      -> Eff es ToolLoopResult
     toolLoop cConfig sysPrompt outSchema tls msgs invs narrs thinks = do
       let req = SingleCallRequest
             { scrMessages = msgs
@@ -254,7 +265,7 @@ runLLMCore hooks config mChatOps dispatcher = interpret $ \_ -> \case
       apiResult <- liftIO $ Client.callMessagesOnce cConfig req
 
       case apiResult of
-        Left err -> error $ "LLM API error: " <> show err
+        Left err -> pure $ ToolLoopError (LlmNetworkError $ T.pack $ show err)
         Right resp -> processResponse cConfig sysPrompt outSchema tls msgs resp invs narrs thinks
 
     processResponse
@@ -267,7 +278,7 @@ runLLMCore hooks config mChatOps dispatcher = interpret $ \_ -> \case
       -> [ToolInvocation]
       -> [Text]
       -> [Text]
-      -> Eff es (Either Text (TurnResult Value, [ContentBlock]))
+      -> Eff es ToolLoopResult
     processResponse cConfig sysPrompt outSchema tls msgs resp invs narrs thinks = do
       let content = resp.scrContent
           newNarratives = [t | TextBlock t <- content]
@@ -284,12 +295,12 @@ runLLMCore hooks config mChatOps dispatcher = interpret $ \_ -> \case
                 , trNarrative = T.intercalate "\n\n" allNarratives
                 , trThinking = T.intercalate "\n\n" allThinkings
                 }
-          pure $ Right (turnResult, content)
+          pure $ ToolLoopSuccess turnResult content
 
         ToolUseStop -> do
           toolExecResult <- executeToolsWithDispatcher resp.scrToolUses
           case toolExecResult of
-            Left breakReason -> pure $ Left breakReason
+            Left breakReason -> pure $ ToolLoopBreak breakReason
             Right (newInvocations, toolResults) -> do
               let allInvocations = invs ++ newInvocations
                   assistantMsg = Message Assistant content
@@ -297,7 +308,7 @@ runLLMCore hooks config mChatOps dispatcher = interpret $ \_ -> \case
                   newMessages = msgs ++ [assistantMsg, userMsg]
               toolLoop cConfig sysPrompt outSchema tls newMessages allInvocations allNarratives allThinkings
 
-        MaxTokens -> error "Response hit max tokens limit"
+        MaxTokens -> pure $ ToolLoopError LlmContextTooLong
         StopSequence -> do
           let finalOutput = extractFinalOutputWithFallback content allNarratives
               turnResult = TurnResult
@@ -306,9 +317,9 @@ runLLMCore hooks config mChatOps dispatcher = interpret $ \_ -> \case
                 , trNarrative = T.intercalate "\n\n" allNarratives
                 , trThinking = T.intercalate "\n\n" allThinkings
                 }
-          pure $ Right (turnResult, content)
-        Refusal -> error "Model refused to respond (safety)"
-        PauseTurn -> error "Server tool pause not supported"
+          pure $ ToolLoopSuccess turnResult content
+        Refusal -> pure $ ToolLoopError (LlmOther "Model refused to respond (safety)")
+        PauseTurn -> pure $ ToolLoopError (LlmOther "Server tool pause not supported")
 
     executeToolsWithDispatcher :: [ToolUse] -> Eff es (Either Text ([ToolInvocation], [Client.ToolResult]))
     executeToolsWithDispatcher uses = go uses [] []

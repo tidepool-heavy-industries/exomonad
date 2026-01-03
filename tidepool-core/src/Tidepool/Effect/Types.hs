@@ -204,7 +204,8 @@ data LLM r where
 -- | Outcome of running a turn
 data TurnOutcome a
   = TurnCompleted a
-  | TurnBroken Text
+  | TurnBroken Text      -- ^ Turn was broken by a tool (state transition)
+  | TurnError LlmError   -- ^ LLM API or execution error (recoverable)
   deriving (Show, Eq, Functor)
 
 -- | Result of running an LLM turn
@@ -283,6 +284,7 @@ runTurnContent
 runTurnContent systemPrompt userContent schema tools = do
   rawResult <- send (RunTurnOp systemPrompt userContent schema tools)
   case rawResult of
+    TurnError err -> return (TurnError err)
     TurnBroken reason -> return (TurnBroken reason)
     TurnCompleted tr -> do
       let rawJson = tr.trOutput
@@ -310,6 +312,7 @@ llmCallEither
 llmCallEither systemPrompt userInput schema = do
   result <- runTurn @output systemPrompt userInput schema []
   case result of
+    TurnError err -> pure $ Left $ "LLM error: " <> T.pack (show err)
     TurnBroken reason -> pure $ Left $ "Unexpected break: " <> reason
     TurnCompleted (TurnParsed tr) -> pure $ Right tr.trOutput
     TurnCompleted (TurnParseFailed {tpfError}) -> pure $ Left $ "Parse failed: " <> T.pack tpfError
@@ -320,6 +323,7 @@ llmCallWithTools
 llmCallWithTools systemPrompt userInput schema tools = do
   result <- runTurn @output systemPrompt userInput schema tools
   case result of
+    TurnError err -> pure $ Left $ "LLM error: " <> T.pack (show err)
     TurnBroken reason -> pure $ Left $ "Turn broken: " <> reason
     TurnCompleted (TurnParsed tr) -> pure $ Right tr.trOutput
     TurnCompleted (TurnParseFailed {tpfError}) -> pure $ Left $ "Parse failed: " <> T.pack tpfError
@@ -349,6 +353,7 @@ llmCallTry
 llmCallTry systemPrompt userInput schema = do
   result <- runTurn @output systemPrompt userInput schema []
   case result of
+    TurnError err -> pure $ Left err
     TurnBroken reason -> pure $ Left $ LlmTurnBroken reason
     TurnCompleted (TurnParsed tr) -> pure $ Right tr.trOutput
     TurnCompleted (TurnParseFailed {tpfError}) -> pure $ Left $ LlmParseFailed (T.pack tpfError)
@@ -360,6 +365,7 @@ llmCallWithToolsTry
 llmCallWithToolsTry systemPrompt userInput schema tools = do
   result <- runTurn @output systemPrompt userInput schema tools
   case result of
+    TurnError err -> pure $ Left err
     TurnBroken reason -> pure $ Left $ LlmTurnBroken reason
     TurnCompleted (TurnParsed tr) -> pure $ Right tr.trOutput
     TurnCompleted (TurnParseFailed {tpfError}) -> pure $ Left $ LlmParseFailed (T.pack tpfError)

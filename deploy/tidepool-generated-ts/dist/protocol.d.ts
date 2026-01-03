@@ -388,9 +388,16 @@ export interface TelegramConfirmResponse {
     feedback?: string;
 }
 /**
+ * Structured LLM error codes matching Haskell LlmError variants.
+ * Used for typed error handling across the WASM boundary.
+ */
+export type LlmErrorCode = "rate_limited" | "timeout" | "context_too_long" | "parse_failed" | "network_error" | "unauthorized" | "other";
+/**
  * Result of effect execution.
  * Aeson TaggedObject puts single-field records directly at top level (no contents wrapper).
  * fieldLabelModifier drops "res" prefix: resValue -> value, resMessage -> message
+ *
+ * For LLM errors, error_code provides structured error type matching Haskell LlmError.
  */
 export type EffectResult = {
     type: "success";
@@ -398,9 +405,11 @@ export type EffectResult = {
 } | {
     type: "error";
     message: string;
+    error_code?: LlmErrorCode;
 };
 export declare function successResult(value: unknown): EffectResult;
 export declare function errorResult(message: string): EffectResult;
+export declare function llmErrorResult(code: LlmErrorCode, message: string): EffectResult;
 /**
  * Result from LLM call (for LlmComplete effect).
  * This is what goes in the `value` field of a success result.

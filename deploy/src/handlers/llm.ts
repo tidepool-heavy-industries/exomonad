@@ -12,7 +12,7 @@ import type {
   WireContentBlock,
   LlmCallResult,
 } from "tidepool-generated-ts";
-import { successResult, errorResult } from "tidepool-generated-ts";
+import { successResult, llmErrorResult } from "tidepool-generated-ts";
 import type { RoleScopedChatInput } from "@cloudflare/workers-types";
 
 /**
@@ -105,7 +105,7 @@ export async function handleLlmComplete(
   if (env.RATE_LIMIT_KV) {
     const rateLimitError = await checkRateLimit(env.RATE_LIMIT_KV);
     if (rateLimitError) {
-      return errorResult(rateLimitError);
+      return llmErrorResult("rate_limited", rateLimitError);
     }
   }
 
@@ -147,21 +147,53 @@ export async function handleLlmComplete(
 
     return successResult(output);
   } catch (err) {
-    // Handle specific error types
-    const message = err instanceof Error ? err.message : String(err);
-
-    // Check for rate limiting
-    if (message.includes("rate limit") || message.includes("429")) {
-      return errorResult(`LLM rate limited: ${message}`);
-    }
-
-    // Check for timeout
-    if (message.includes("timeout") || message.includes("timed out")) {
-      return errorResult(`LLM timeout: ${message}`);
-    }
-
-    return errorResult(`LLM error: ${message}`);
+    return classifyLlmError(err);
   }
+}
+
+/**
+ * Classify an error into a structured LlmErrorCode.
+ * Matches Haskell LlmError variants for consistent error handling across WASM boundary.
+ */
+function classifyLlmError(err: unknown): EffectResult {
+  const message = err instanceof Error ? err.message : String(err);
+
+  // Rate limiting (429 or explicit rate limit message)
+  if (message.includes("rate limit") || message.includes("429")) {
+    return llmErrorResult("rate_limited", message);
+  }
+
+  // Timeout errors
+  if (message.includes("timeout") || message.includes("timed out")) {
+    return llmErrorResult("timeout", message);
+  }
+
+  // Context too long (token limit exceeded)
+  if (message.includes("context") && message.includes("too long") ||
+      message.includes("max_tokens") ||
+      message.includes("token limit")) {
+    return llmErrorResult("context_too_long", message);
+  }
+
+  // Authorization errors (401 or explicit unauthorized)
+  if (message.includes("401") || message.includes("unauthorized") || message.includes("invalid api key")) {
+    return llmErrorResult("unauthorized", message);
+  }
+
+  // Network errors (connection failures, DNS, etc.)
+  if (message.includes("network") || message.includes("connection") ||
+      message.includes("ECONNREFUSED") || message.includes("ETIMEDOUT") ||
+      message.includes("fetch failed")) {
+    return llmErrorResult("network_error", message);
+  }
+
+  // Parse errors (JSON parsing failures)
+  if (message.includes("parse") || message.includes("JSON") || message.includes("syntax")) {
+    return llmErrorResult("parse_failed", message);
+  }
+
+  // Default: other error
+  return llmErrorResult("other", message);
 }
 
 /**
@@ -222,7 +254,7 @@ export async function handleLlmCall(
   if (env.RATE_LIMIT_KV) {
     const rateLimitError = await checkRateLimit(env.RATE_LIMIT_KV);
     if (rateLimitError) {
-      return errorResult(rateLimitError);
+      return llmErrorResult("rate_limited", rateLimitError);
     }
   }
 
@@ -360,17 +392,7 @@ export async function handleLlmCall(
     };
     return successResult(result);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-
-    if (message.includes("rate limit") || message.includes("429")) {
-      return errorResult(`LLM rate limited: ${message}`);
-    }
-
-    if (message.includes("timeout") || message.includes("timed out")) {
-      return errorResult(`LLM timeout: ${message}`);
-    }
-
-    return errorResult(`LLM error: ${message}`);
+    return classifyLlmError(err);
   }
 }
 

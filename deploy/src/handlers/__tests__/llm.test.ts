@@ -129,10 +129,11 @@ describe("handleLlmComplete", () => {
 
     const result = await handleLlmComplete(baseEffect, env);
 
-    expect(result).toEqual({
-      type: "error",
-      message: "LLM rate limited: rate limit exceeded",
-    });
+    expect(result.type).toBe("error");
+    if (result.type === "error") {
+      expect(result.error_code).toBe("rate_limited");
+      expect(result.message).toContain("rate limit exceeded");
+    }
   });
 
   it("returns error result on timeout", async () => {
@@ -144,10 +145,11 @@ describe("handleLlmComplete", () => {
 
     const result = await handleLlmComplete(baseEffect, env);
 
-    expect(result).toEqual({
-      type: "error",
-      message: "LLM timeout: request timed out",
-    });
+    expect(result.type).toBe("error");
+    if (result.type === "error") {
+      expect(result.error_code).toBe("timeout");
+      expect(result.message).toContain("timed out");
+    }
   });
 
   it("returns generic error for other failures", async () => {
@@ -159,10 +161,11 @@ describe("handleLlmComplete", () => {
 
     const result = await handleLlmComplete(baseEffect, env);
 
-    expect(result).toEqual({
-      type: "error",
-      message: "LLM error: Unknown error",
-    });
+    expect(result.type).toBe("error");
+    if (result.type === "error") {
+      expect(result.error_code).toBe("other");
+      expect(result.message).toContain("Unknown error");
+    }
   });
 
   describe("model selection", () => {
@@ -444,7 +447,7 @@ describe("handleLlmCall", () => {
 
       expect(result.type).toBe("error");
       if (result.type === "error") {
-        expect(result.message).toContain("LLM rate limited");
+        expect(result.error_code).toBe("rate_limited");
         expect(result.message).toContain("rate limit exceeded");
       }
     });
@@ -460,7 +463,7 @@ describe("handleLlmCall", () => {
 
       expect(result.type).toBe("error");
       if (result.type === "error") {
-        expect(result.message).toContain("LLM timeout");
+        expect(result.error_code).toBe("timeout");
         expect(result.message).toContain("timed out");
       }
     });
@@ -476,7 +479,7 @@ describe("handleLlmCall", () => {
 
       expect(result.type).toBe("error");
       if (result.type === "error") {
-        expect(result.message).toContain("LLM error");
+        expect(result.error_code).toBe("other");
         expect(result.message).toContain("Unknown error");
       }
     });

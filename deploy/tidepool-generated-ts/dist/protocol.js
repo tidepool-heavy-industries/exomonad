@@ -20,9 +20,13 @@ export function getCurrentNode(phase) {
 export function successResult(value) {
     return { type: "success", value };
 }
-// Helper to create error result
+// Helper to create error result (generic, for backwards compatibility)
 export function errorResult(message) {
     return { type: "error", message };
+}
+// Helper to create typed LLM error result
+export function llmErrorResult(code, message) {
+    return { type: "error", message, error_code: code };
 }
 /** Create a unit result. */
 export function telegramUnitResult() {
