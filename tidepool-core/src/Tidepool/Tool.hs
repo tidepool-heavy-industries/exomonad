@@ -28,7 +28,7 @@ import Data.Kind (Type)
 import Data.Proxy (Proxy(..))
 import GHC.Generics (Generic)
 import Tidepool.Effect (Emit, RequestInput, Random, State, ToolDispatcher, ToolResult(..))
-import Tidepool.Schema (HasJSONSchema(..), schemaToValue)
+import Tidepool.Schema ()
 import Control.Monad.Freer (Eff, Member)
 
 -- | Tools are mid-turn capabilities the LLM can invoke

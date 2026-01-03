@@ -1,4 +1,6 @@
 {-# LANGUAGE FunctionalDependencies #-}
+{-# OPTIONS_GHC -Wno-incomplete-patterns #-}
+-- Pattern exhaustiveness checker doesn't understand GADT constraints for OneOf
 
 -- | Typed graph executor using OneOf dispatch.
 --
@@ -56,7 +58,7 @@ import Tidepool.Graph.Edges (GetNeeds)
 import Tidepool.Graph.Generic (AsHandler, FieldsWithNamesOf)
 import Tidepool.Graph.Generic.Core (Entry, AsGraph)
 import qualified Tidepool.Graph.Generic.Core as G (Exit)
-import Tidepool.Graph.Goto (GotoChoice, OneOf, To, LLMHandler(..))
+import Tidepool.Graph.Goto (GotoChoice, To, LLMHandler(..))
 import Tidepool.Graph.Goto.Internal (GotoChoice(..), OneOf(..))
 import Tidepool.Graph.Template (GingerContext)
 import Tidepool.Graph.Types (Exit, Self)

@@ -106,7 +106,7 @@ import Data.Time (UTCTime)
 import qualified Data.Time as Time
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Aeson (Value(..), FromJSON, ToJSON, fromJSON, toJSON, Result(..), encode)
+import Data.Aeson (Value(..), FromJSON, ToJSON, fromJSON, Result(..), encode)
 import qualified Data.Text.Encoding as TE
 import qualified Data.ByteString.Lazy as LBS
 import GHC.Generics (Generic)
