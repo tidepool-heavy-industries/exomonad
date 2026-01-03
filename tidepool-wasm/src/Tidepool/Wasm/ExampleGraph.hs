@@ -55,6 +55,7 @@ import Tidepool.Graph.Goto (Goto, GotoChoice, To, gotoChoice, gotoExit)
 import Tidepool.Graph.Goto.Internal (GotoChoice(..), OneOf(..))  -- For dispatch
 
 import Tidepool.Wasm.Effect (WasmM, logInfo, llmComplete)
+import Tidepool.Wasm.Error (formatWasmError)
 
 
 -- ============================================================================
@@ -197,16 +198,17 @@ questionHandlerWasm msg = do
 
   -- Use LLM to generate a thoughtful response
   -- In tests, this will yield to TypeScript which can mock the response
-  llmResult <- llmComplete
+  result <- llmComplete
     "question_handler"
     "You are a helpful assistant. Answer the user's question concisely."
     msg.unUserMessage
     Nothing  -- No schema, free-form response
 
-  -- Extract the response text from the LLM result
-  let responseText = case llmResult of
-        String t -> t
-        _        -> "I'm thinking about that question: \"" <> msg.unUserMessage <> "\""
+  -- Extract the response text from the LLM result or handle error
+  let responseText = case result of
+        Left err -> "Error: " <> formatWasmError err
+        Right (String t) -> t
+        Right _  -> "I'm thinking about that question: \"" <> msg.unUserMessage <> "\""
 
   logInfo "Generated answer for question"
   pure $ gotoExit (Response responseText)

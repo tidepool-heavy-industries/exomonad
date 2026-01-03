@@ -29,6 +29,7 @@ import qualified Tidepool.Graph.Generic as G (Entry, Exit, LogicNode)
 import Tidepool.Graph.Goto (Goto, GotoChoice, To, gotoExit)
 
 import Tidepool.Wasm.Effect (WasmM, llmComplete)
+import Tidepool.Wasm.Error (formatWasmError)
 
 
 -- | LLM test graph: Text in, Text out.
@@ -49,19 +50,21 @@ data LlmTestGraph mode = LlmTestGraph
 --
 -- This handler:
 -- 1. Makes an LLM call with "Echo back: {input}" (yields to TypeScript)
--- 2. Extracts the response text from the JSON result
--- 3. Returns gotoExit with the response
+-- 2. Handles errors or extracts the response text from the JSON result
+-- 3. Returns gotoExit with the response (or error message)
 --
 -- The LLM effect causes execution to suspend. TypeScript executes the LLM call,
 -- then calls resume with the result. Execution continues and returns the GotoChoice.
 echoHandlerWasm :: Text -> WasmM (GotoChoice '[To Exit Text])
 echoHandlerWasm userMsg = do
-  response <- llmComplete
+  result <- llmComplete
     "echo"                              -- node name
     "You are an echo bot. Echo back whatever the user says."  -- system prompt
     ("Echo back: " <> userMsg)          -- user content
     Nothing                             -- no schema (free-form response)
-  pure $ gotoExit (extractResponseText response)
+  case result of
+    Left err -> pure $ gotoExit ("Error: " <> formatWasmError err)
+    Right response -> pure $ gotoExit (extractResponseText response)
 
 
 -- | Extract response text from LLM result.

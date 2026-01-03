@@ -55,7 +55,7 @@ module Tidepool.Wasm.Effect
 
 import Control.Monad.Freer (Eff, Member, run)
 import Control.Monad.Freer.Coroutine (Yield, yield, runC, Status(..))
-import Data.Aeson (Value(..), toJSON, fromJSON, Result(..))
+import Data.Aeson (Value(..), fromJSON, Result(..))
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Map.Strict as Map
@@ -69,6 +69,12 @@ import Tidepool.Wasm.WireTypes
   , WireMessage(..)
   , WireContentBlock(..)
   , WireToolCall(..)
+  )
+import Tidepool.Wasm.Error
+  ( WasmError
+  , effectFailed
+  , parseFailed
+  , emptyResult
   )
 import Tidepool.Wasm.Habitica (habitica)
 
@@ -118,12 +124,14 @@ logError msg = do
 --
 -- Yields 'EffLlmComplete', expects JSON response on success.
 -- Uses the default model configured in the TypeScript handler.
+--
+-- Returns @Left WasmError@ on failure, @Right Value@ on success.
 llmComplete :: Member (Yield SerializableEffect EffectResult) effs
             => Text           -- ^ Node name (for observability)
             -> Text           -- ^ System prompt
             -> Text           -- ^ User content
             -> Maybe Value    -- ^ Output schema (optional)
-            -> Eff effs Value
+            -> Eff effs (Either WasmError Value)
 llmComplete = llmCompleteWith Nothing
 
 -- | Make an LLM completion call with explicit model.
@@ -131,31 +139,36 @@ llmComplete = llmCompleteWith Nothing
 -- Yields 'EffLlmComplete', expects JSON response on success.
 -- Pass @Just "@cf/meta/llama-3.2-1b-instruct"@ for a specific model,
 -- or @Nothing@ to use the TypeScript handler's default.
+--
+-- Returns @Left WasmError@ on failure, @Right Value@ on success.
 llmCompleteWith :: Member (Yield SerializableEffect EffectResult) effs
                 => Maybe Text     -- ^ Model to use (Nothing for default)
                 -> Text           -- ^ Node name (for observability)
                 -> Text           -- ^ System prompt
                 -> Text           -- ^ User content
                 -> Maybe Value    -- ^ Output schema (optional)
-                -> Eff effs Value
+                -> Eff effs (Either WasmError Value)
 llmCompleteWith model node systemPrompt userContent schema = do
-  result <- yield (EffLlmComplete node systemPrompt userContent schema model) (id @EffectResult)
-  case result of
-    ResSuccess (Just v) -> pure v
-    ResSuccess Nothing  -> pure (toJSON ())
-    ResError msg        -> error $ "LLM call failed: " <> T.unpack msg
+  let eff = EffLlmComplete node systemPrompt userContent schema model
+  result <- yield eff (id @EffectResult)
+  pure $ case result of
+    ResSuccess (Just v) -> Right v
+    ResSuccess Nothing  -> Left $ emptyResult eff "LLM response"
+    ResError msg        -> Left $ effectFailed eff msg
 
 -- | Make a raw LLM call with full message history and optional tools.
 --
 -- Yields 'EffLlmCall', returns the raw LLM response including any tool calls.
 -- Use this when you need tool calling or multi-turn conversation support.
 -- Uses the default model configured in the TypeScript handler.
+--
+-- Returns @Left WasmError@ on failure, @Right LlmCallResult@ on success.
 llmCall :: Member (Yield SerializableEffect EffectResult) effs
         => Text           -- ^ Node name (for observability)
         -> [WireMessage]  -- ^ Full message history
         -> Maybe Value    -- ^ Output schema (optional)
         -> [Value]        -- ^ Tool definitions (CF AI flat format)
-        -> Eff effs LlmCallResult
+        -> Eff effs (Either WasmError LlmCallResult)
 llmCall = llmCallWith Nothing
 
 -- | Make a raw LLM call with explicit model.
@@ -164,21 +177,24 @@ llmCall = llmCallWith Nothing
 -- Use this when you need tool calling or multi-turn conversation support.
 -- Pass @Just "@cf/meta/llama-3.2-1b-instruct"@ for a specific model,
 -- or @Nothing@ to use the TypeScript handler's default.
+--
+-- Returns @Left WasmError@ on failure, @Right LlmCallResult@ on success.
 llmCallWith :: Member (Yield SerializableEffect EffectResult) effs
             => Maybe Text     -- ^ Model to use (Nothing for default)
             -> Text           -- ^ Node name (for observability)
             -> [WireMessage]  -- ^ Full message history
             -> Maybe Value    -- ^ Output schema (optional)
             -> [Value]        -- ^ Tool definitions (CF AI flat format)
-            -> Eff effs LlmCallResult
+            -> Eff effs (Either WasmError LlmCallResult)
 llmCallWith model node messages schema tools = do
-  result <- yield (EffLlmCall node messages schema tools model) (id @EffectResult)
-  case result of
+  let eff = EffLlmCall node messages schema tools model
+  result <- yield eff (id @EffectResult)
+  pure $ case result of
     ResSuccess (Just v) -> case fromJSON v of
-      Success r -> pure r
-      Error err -> error $ "LlmCall: failed to parse result: " <> err
-    ResSuccess Nothing  -> error "LlmCall: no response"
-    ResError msg        -> error $ "[v2-tools-only] LlmCall failed: " <> T.unpack msg
+      Success r -> Right r
+      Error err -> Left $ parseFailed eff "LlmCallResult" v (T.pack err)
+    ResSuccess Nothing  -> Left $ emptyResult eff "LLM call response"
+    ResError msg        -> Left $ effectFailed eff msg
 
 -- | Tool schema for asking user a clarifying question (CF AI flat format).
 askUserToolSchema :: Value
@@ -252,18 +268,21 @@ telegramHtml txt = do
 -- 1. Click a button → 'TelegramButton' with the action
 -- 2. Send text instead → 'TelegramText' with the message
 -- 3. Click a stale button → 'TelegramStaleButton'
+--
+-- Returns @Left WasmError@ on failure, @Right TelegramAskResult@ on success.
 telegramAsk :: Member (Yield SerializableEffect EffectResult) effs
             => Text           -- ^ Message to display
             -> [(Text, Text)] -- ^ [(button label, callback data)]
-            -> Eff effs TelegramAskResult
+            -> Eff effs (Either WasmError TelegramAskResult)
 telegramAsk message buttons = do
-  result <- yield (EffTelegramAsk message "Markdown" buttons) (id @EffectResult)
-  case result of
+  let eff = EffTelegramAsk message "Markdown" buttons
+  result <- yield eff (id @EffectResult)
+  pure $ case result of
     ResSuccess (Just v) -> case fromJSON v of
-      Success askResult -> pure askResult
-      Error err         -> error $ "Telegram ask: failed to parse result: " <> err
-    ResSuccess Nothing  -> error "Telegram ask: no response"
-    ResError msg        -> error $ "Telegram ask failed: " <> T.unpack msg
+      Success askResult -> Right askResult
+      Error err         -> Left $ parseFailed eff "TelegramAskResult" v (T.pack err)
+    ResSuccess Nothing  -> Left $ emptyResult eff "Telegram user response"
+    ResError msg        -> Left $ effectFailed eff msg
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- RUNNING EFFECTS
