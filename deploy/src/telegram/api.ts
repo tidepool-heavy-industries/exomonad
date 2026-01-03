@@ -160,21 +160,28 @@ export interface SendButtonsResult {
  * Convert our InlineButton format to Telegram's InlineKeyboardButton,
  * generating short IDs for callback_data to avoid the 64-byte limit.
  *
+ * The callback_data includes both the short ID and nonce for validation:
+ * { "a": "btn_0", "n": "abc123" }
+ *
  * @param button - The button to convert
  * @param index - Unique index for this button (used to generate short ID)
+ * @param nonce - Nonce for validation (to detect stale buttons)
  * @param buttonMapping - Mutable mapping to populate with short ID → original data
- * @returns Telegram button with short callback_data
+ * @returns Telegram button with short callback_data containing ID and nonce
  */
 function toTelegramButtonWithMapping(
   button: TelegramInlineButton,
   index: number,
+  nonce: string,
   buttonMapping: Record<string, unknown>
 ): Record<string, string> {
   const shortId = `btn_${index}`;
   buttonMapping[shortId] = button.data;
+  // Use short keys ("a" for action, "n" for nonce) to minimize callback_data size
+  const callbackData = JSON.stringify({ a: shortId, n: nonce });
   return {
     text: button.text,
-    callback_data: shortId,
+    callback_data: callbackData,
   };
 }
 
@@ -186,20 +193,22 @@ function toTelegramButtonWithMapping(
  * @param chatId - Target chat ID
  * @param text - Message text
  * @param buttons - 2D array of buttons (rows x columns)
+ * @param nonce - Nonce for validation (to detect stale buttons)
  * @returns Result with message_id and buttonMapping, or null on failure
  */
 export async function sendMessageWithButtons(
   token: string,
   chatId: number,
   text: string,
-  buttons: TelegramInlineButton[][]
+  buttons: TelegramInlineButton[][],
+  nonce: string
 ): Promise<SendButtonsResult | null> {
   const buttonMapping: Record<string, unknown> = {};
   let buttonIndex = 0;
 
   const inlineKeyboard = buttons.map((row) =>
     row.map((button) => {
-      const telegramButton = toTelegramButtonWithMapping(button, buttonIndex, buttonMapping);
+      const telegramButton = toTelegramButtonWithMapping(button, buttonIndex, nonce, buttonMapping);
       buttonIndex++;
       return telegramButton;
     })

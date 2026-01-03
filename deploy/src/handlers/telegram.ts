@@ -206,24 +206,26 @@ export type AskHandlerResult =
  * Button callback data format with nonce for validation.
  */
 interface ButtonCallbackData {
-  action: string;
-  nonce: string;
+  action: string;  // Short button ID (btn_0, btn_1, ...)
+  nonce: string;   // For detecting stale buttons
 }
 
 /**
  * Parse button callback data from a button click.
+ * Supports compact format { a, n } and legacy format { action, nonce }.
  * Returns null if the data is not in the expected format.
  */
 function parseButtonCallbackData(data: unknown): ButtonCallbackData | null {
   if (typeof data === "object" && data !== null) {
     const obj = data as Record<string, unknown>;
+    // Compact format: { a: "btn_0", n: "nonce" }
+    if (typeof obj.a === "string" && typeof obj.n === "string") {
+      return { action: obj.a, nonce: obj.n };
+    }
+    // Legacy format: { action: "...", nonce: "..." }
     if (typeof obj.action === "string" && typeof obj.nonce === "string") {
       return { action: obj.action, nonce: obj.nonce };
     }
-  }
-  // Legacy format: plain string (no nonce)
-  if (typeof data === "string") {
-    return null; // No nonce means we can't validate
   }
   return null;
 }
@@ -261,12 +263,13 @@ export async function handleTelegramAsk(
   // If no stored nonce, buttons haven't been sent yet - send them
   if (storedNonce === null) {
     const nonce = crypto.randomUUID().slice(0, 12);
-    const buttons = convertButtonsToInlineKeyboardWithNonce(effect.eff_buttons, nonce);
+    const buttons = convertButtonsToInlineKeyboard(effect.eff_buttons);
     const sendResult = await sendMessageWithButtons(
       env.TELEGRAM_TOKEN,
       ctx.chatId,
       effect.eff_tg_text,
-      buttons
+      buttons,
+      nonce
     );
 
     if (!sendResult) {
@@ -304,22 +307,10 @@ export async function handleTelegramAsk(
       const storedData = ctx.buttonMapping?.[shortId];
 
       if (storedData !== undefined) {
-        // storedData contains the original button data (which includes {action, nonce})
-        // Extract just the action (original value) from it
-        let responseValue: string;
-        if (typeof storedData === "object" && storedData !== null && "action" in storedData) {
-          // Standard case: stored data is {action: "original value", nonce: "..."}
-          const originalAction = (storedData as { action: unknown }).action;
-          responseValue = typeof originalAction === "string"
-            ? originalAction
-            : JSON.stringify(originalAction);
-        } else if (typeof storedData === "string") {
-          // Simple case: stored data is just a string
-          responseValue = storedData;
-        } else {
-          // Complex case: stored data is something else, stringify it
-          responseValue = JSON.stringify(storedData);
-        }
+        // storedData is the original button data (typically a string)
+        const responseValue = typeof storedData === "string"
+          ? storedData
+          : JSON.stringify(storedData);
 
         // Edit the original button message to show selection and remove buttons
         if (ctx.buttonMessageId) {
@@ -389,7 +380,7 @@ export async function handleTelegramAsk(
     type: "yield",
     nonce: storedNonce,
     buttonMapping: ctx.buttonMapping ?? {},
-    messageId: ctx.buttonMessageId ?? 0,
+    messageId: ctx.buttonMessageId ?? 0, // 0 is safe here - only used if buttons already sent
     questionText: ctx.buttonQuestionText ?? "",
   };
 }
@@ -417,18 +408,16 @@ function truncateForDisplay(text: string, maxLength: number): string {
 }
 
 /**
- * Convert Haskell-style button pairs to Telegram inline keyboard format,
- * embedding a nonce in each button's callback data.
+ * Convert Haskell-style button pairs to Telegram inline keyboard format.
+ * Each button goes in its own row with the action as data.
  */
-function convertButtonsToInlineKeyboardWithNonce(
-  buttons: [string, string][],
-  nonce: string
+function convertButtonsToInlineKeyboard(
+  buttons: [string, string][]
 ): TelegramInlineButton[][] {
-  // Put each button in its own row, with nonce embedded in data
   return buttons.map(([label, action]) => [
     {
       text: label,
-      data: { action, nonce } satisfies ButtonCallbackData,
+      data: action,  // Original action value, will be stored in mapping
     },
   ]);
 }
