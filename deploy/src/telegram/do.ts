@@ -261,6 +261,10 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
     // If we're waiting for a Receive/Confirm, resume processing
     if (state.waitingForReceive && state.pendingEffect && state.wasmSessionId) {
       console.log(`[TelegramDO] Resuming blocked effect: ${state.pendingEffect.type}`);
+
+      // Send typing indicator since resume may trigger LLM calls (fire-and-forget)
+      void sendTypingAction(this.env.TELEGRAM_TOKEN, chatId);
+
       state.waitingForReceive = false;
       const effect = state.pendingEffect;
       // Don't clear pendingEffect yet - handleYieldedEffect may need to check if buttons sent
@@ -328,8 +332,8 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
     const sessionId = `telegram-${chatId}-${Date.now()}`;
     console.log(`[TelegramDO] Starting graph session: ${sessionId}`);
 
-    // Show typing indicator while processing
-    await sendTypingAction(this.env.TELEGRAM_TOKEN, chatId);
+    // Show typing indicator while processing (fire-and-forget)
+    void sendTypingAction(this.env.TELEGRAM_TOKEN, chatId);
 
     // Store session ID before starting (in case we need to resume)
     if (this.state) {
@@ -483,6 +487,9 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
           }
 
           // Resume graph with the result
+          // Send typing indicator since resume may trigger LLM calls (fire-and-forget)
+          void sendTypingAction(this.env.TELEGRAM_TOKEN, chatId);
+
           const resumeResponse = await stub.fetch(
             new Request(`https://do/resume`, {
               method: "POST",
@@ -716,7 +723,8 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
     chatId: number,
     message: TelegramIncomingMessage
   ): Promise<void> {
-    await sendTypingAction(this.env.TELEGRAM_TOKEN, chatId);
+    // Fire-and-forget typing indicator
+    void sendTypingAction(this.env.TELEGRAM_TOKEN, chatId);
 
     let result: { message_id: number } | null = null;
 
