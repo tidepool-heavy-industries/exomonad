@@ -16,10 +16,19 @@ import type { TelegramUpdate, TelegramEnv } from "./types.js";
 import {
   extractChatId,
   extractUser,
+  extractThreadId,
   isAllowedUser,
   updateToIncomingMessage,
 } from "./types.js";
-import { sendMessage, sendTypingAction, answerCallbackQuery, sendPhoto, sendDocument } from "./api.js";
+import {
+  sendMessage,
+  sendTypingAction,
+  answerCallbackQuery,
+  sendPhoto,
+  sendDocument,
+  createForumTopic,
+} from "./api.js";
+import { GRAPH_REGISTRY, type TopicBinding } from "./registry.js";
 import type {
   TelegramIncomingMessage,
   SerializableEffect,
@@ -135,6 +144,11 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
   private chatId: number | null = null;
   private state: ConversationState | null = null;
 
+  // Topic management (Bot API 9.3+)
+  private topicBindings: Map<number, TopicBinding> = new Map(); // threadId → binding
+  private graphTopics: Map<string, number> = new Map();          // graphId → threadId
+  private topicsInitialized: boolean = false;
+
   /**
    * Load state from storage.
    * Uses zod schema to validate and provide defaults for missing fields.
@@ -161,6 +175,125 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
   private async saveState(): Promise<void> {
     if (this.state) {
       await this.ctx.storage.put("state", this.state);
+    }
+  }
+
+  /**
+   * Load topic bindings from storage.
+   */
+  private async loadTopicBindings(): Promise<void> {
+    const stored = await this.ctx.storage.get<TopicBinding[]>("topicBindings");
+    if (stored) {
+      this.topicBindings.clear();
+      this.graphTopics.clear();
+      for (const binding of stored) {
+        this.topicBindings.set(binding.threadId, binding);
+        this.graphTopics.set(binding.graphId, binding.threadId);
+      }
+      this.topicsInitialized = true;
+    }
+  }
+
+  /**
+   * Save topic bindings to storage.
+   */
+  private async saveTopicBindings(): Promise<void> {
+    const bindings = Array.from(this.topicBindings.values());
+    await this.ctx.storage.put("topicBindings", bindings);
+  }
+
+  /**
+   * Ensure topics exist for all graphs in the registry.
+   * Creates topics lazily on first message to the bot.
+   */
+  private async ensureTopicsExist(): Promise<void> {
+    if (this.topicsInitialized) return;
+    if (!this.chatId) return;
+
+    await this.loadTopicBindings();
+
+    const token = this.env.TELEGRAM_TOKEN;
+    const chatId = this.chatId;
+
+    // Create topics for any graphs that don't have one yet
+    for (const graphDef of GRAPH_REGISTRY) {
+      if (!this.graphTopics.has(graphDef.id)) {
+        console.log(`[TelegramDO] Creating topic for graph: ${graphDef.id}`);
+
+        const result = await createForumTopic(
+          token,
+          chatId,
+          graphDef.displayName
+        );
+
+        if (result) {
+          const binding: TopicBinding = {
+            threadId: result.message_thread_id,
+            graphId: graphDef.id,
+            topicName: graphDef.displayName,
+            active: true,
+            createdAt: Date.now(),
+          };
+
+          this.topicBindings.set(result.message_thread_id, binding);
+          this.graphTopics.set(graphDef.id, result.message_thread_id);
+
+          // Send welcome message to topic
+          await sendMessage(
+            token,
+            chatId,
+            `Welcome to ${graphDef.displayName}!\n\n${graphDef.description}`,
+            undefined,
+            result.message_thread_id
+          );
+        } else {
+          console.error(`[TelegramDO] Failed to create topic for graph: ${graphDef.id}`);
+        }
+      }
+    }
+
+    await this.saveTopicBindings();
+    this.topicsInitialized = true;
+  }
+
+  /**
+   * Handle admin commands sent to main chat (no threadId).
+   */
+  private async handleAdminCommand(command: string): Promise<void> {
+    if (!this.chatId) return;
+
+    const cmd = command.trim().toLowerCase();
+    const token = this.env.TELEGRAM_TOKEN;
+    const chatId = this.chatId;
+
+    if (cmd === "/status") {
+      let response = "📊 Topic Status:\n\n";
+      for (const threadId of this.graphTopics.values()) {
+        const binding = this.topicBindings.get(threadId);
+        if (binding) {
+          const status = binding.active ? "✅" : "❌";
+          response += `${status} ${binding.topicName} (${binding.graphId})\n`;
+        }
+      }
+      await sendMessage(token, chatId, response);
+    } else if (cmd === "/list") {
+      let response = "📋 Available Graphs:\n\n";
+      for (const graph of GRAPH_REGISTRY) {
+        response += `${graph.displayName}\n${graph.description}\n\n`;
+      }
+      await sendMessage(token, chatId, response);
+    } else if (cmd === "/recreate") {
+      // TODO: Implement topic recreation
+      await sendMessage(token, chatId, "Topic recreation not yet implemented.");
+    } else {
+      const help =
+        "🤖 Admin Console\n\n" +
+        "Available commands:\n" +
+        "/status - Show all topics and their status\n" +
+        "/list - List available graphs\n" +
+        "/recreate - Recreate topics for current registry\n\n" +
+        "Each graph runs in its own topic. Switch to a topic to interact with that graph.";
+      await sendMessage(token, chatId, help);
     }
   }
 
@@ -235,6 +368,13 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
       return new Response("OK");
     }
 
+    // Ensure topics exist for all graphs (lazy init)
+    await this.ensureTopicsExist();
+
+    // Extract thread ID for routing
+    const threadId = extractThreadId(update);
+    console.log(`[TelegramDO] threadId: ${threadId ?? 'main chat'}`);
+
     // Answer callback query if present (to remove loading indicator)
     if (update.callback_query?.id) {
       await answerCallbackQuery(this.env.TELEGRAM_TOKEN, update.callback_query.id);
@@ -246,6 +386,47 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
       console.log(`[TelegramDO] Could not convert update to IncomingMessage`);
       return new Response("OK");
     }
+
+    // Route based on threadId
+    if (threadId === null || threadId === undefined) {
+      // Main chat (no topic) - Admin console
+      if (incomingMessage.type === "text") {
+        await this.handleAdminCommand(incomingMessage.text);
+      }
+      return new Response("OK");
+    }
+
+    // Look up which graph this topic belongs to
+    const binding = this.topicBindings.get(threadId);
+    if (!binding) {
+      // Unknown topic - shouldn't happen, but handle gracefully
+      await sendMessage(
+        this.env.TELEGRAM_TOKEN,
+        chatId,
+        "Unknown topic. Use main chat for admin commands.",
+        undefined,
+        threadId
+      );
+      return new Response("OK");
+    }
+
+    if (!binding.active) {
+      // Inactive graph
+      await sendMessage(
+        this.env.TELEGRAM_TOKEN,
+        chatId,
+        "This graph is no longer available. Use main chat for admin commands.",
+        undefined,
+        threadId
+      );
+      return new Response("OK");
+    }
+
+    console.log(`[TelegramDO] Routing to graph: ${binding.graphId} (topic: ${binding.topicName})`);
+
+    // TODO: Route to graph-specific handler
+    // For now, continue with existing logic (which assumes single graph)
+    // This will be implemented in a follow-up change
 
     console.log(
       `[TelegramDO] Received message from ${user?.username ?? user?.id}: ${JSON.stringify(incomingMessage)}`

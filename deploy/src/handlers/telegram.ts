@@ -43,6 +43,8 @@ export interface TelegramHandlerEnv {
 export interface TelegramHandlerContext {
   /** The chat ID this DO is handling */
   chatId: number;
+  /** Thread ID for topic-based routing (Bot API 9.3+) */
+  threadId?: number | null;
   /** Current pending messages (for Receive/TryReceive) */
   pendingMessages: TelegramIncomingMessage[];
   /** Button ID mapping (btn_0 → original data) for resolving callbacks */
@@ -59,15 +61,20 @@ export interface TelegramHandlerContext {
 
 /**
  * Send an outgoing message based on its type.
+ * Auto-injects threadId if provided in context.
  */
 async function sendOutgoingMessage(
   token: string,
   chatId: number,
-  message: TelegramOutgoingMessage
+  message: TelegramOutgoingMessage,
+  threadId?: number | null
 ): Promise<boolean> {
+  // Convert null to undefined for API calls
+  const thread = threadId ?? undefined;
+
   switch (message.type) {
     case "text": {
-      const result = await sendMessage(token, chatId, message.text);
+      const result = await sendMessage(token, chatId, message.text, undefined, thread);
       return result !== null;
     }
     case "buttons": {
@@ -75,7 +82,9 @@ async function sendOutgoingMessage(
         token,
         chatId,
         message.text,
-        message.buttons
+        message.buttons,
+        "nonce-placeholder", // TODO: Get actual nonce from context
+        thread
       );
       return result !== null;
     }
@@ -116,7 +125,8 @@ export async function handleTelegramSend(
     const success = await sendOutgoingMessage(
       env.TELEGRAM_TOKEN,
       ctx.chatId,
-      effect.message
+      effect.message,
+      ctx.threadId  // Auto-inject threadId from context
     );
 
     if (!success) {
@@ -269,7 +279,8 @@ export async function handleTelegramAsk(
       ctx.chatId,
       effect.eff_tg_text,
       buttons,
-      nonce
+      nonce,
+      ctx.threadId ?? undefined  // Auto-inject threadId from context
     );
 
     if (!sendResult) {
@@ -354,7 +365,9 @@ export async function handleTelegramAsk(
       await sendMessage(
         env.TELEGRAM_TOKEN,
         ctx.chatId,
-        "That button has expired. Please use the current buttons above, or type a message."
+        "That button has expired. Please use the current buttons above, or type a message.",
+        undefined,
+        ctx.threadId ?? undefined
       );
       const result: TelegramAskResult = { type: "stale_button" };
       return { type: "result", result: successResult(result) };

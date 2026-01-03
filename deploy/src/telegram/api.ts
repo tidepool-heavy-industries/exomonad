@@ -363,3 +363,53 @@ export async function sendDocument(
   }
   return result.result ?? null;
 }
+
+// =============================================================================
+// Forum Topic Support (Bot API 9.3+)
+// =============================================================================
+
+/**
+ * Result of creating a forum topic.
+ */
+export interface ForumTopicResult {
+  message_thread_id: number;
+  name: string;
+  icon_color: number;
+  icon_custom_emoji_id?: string;
+}
+
+/**
+ * Create a forum topic in a private chat (requires Bot API 9.3 and forum mode enabled).
+ *
+ * @param token - Bot API token
+ * @param chatId - Target chat ID
+ * @param name - Topic name (1-128 characters)
+ * @param iconColor - Optional RGB color (as integer)
+ * @param iconCustomEmojiId - Optional custom emoji ID
+ * @returns ForumTopic result with message_thread_id, or null on failure
+ */
+export async function createForumTopic(
+  token: string,
+  chatId: number,
+  name: string,
+  iconColor?: number,
+  iconCustomEmojiId?: string
+): Promise<ForumTopicResult | null> {
+  const body: Record<string, unknown> = {
+    chat_id: chatId,
+    name,
+  };
+  if (iconColor !== undefined) {
+    body.icon_color = iconColor;
+  }
+  if (iconCustomEmojiId) {
+    body.icon_custom_emoji_id = iconCustomEmojiId;
+  }
+
+  const result = await callTelegram<ForumTopicResult>(token, "createForumTopic", body);
+  if (!result.ok) {
+    console.error("createForumTopic failed:", result.description);
+    return null;
+  }
+  return result.result ?? null;
+}

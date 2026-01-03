@@ -35,6 +35,8 @@ export interface TelegramMessage {
   photo?: TelegramPhotoSize[];
   /** Document attachment */
   document?: TelegramDocument;
+  /** Thread ID for private chat topics (Bot API 9.3+) */
+  message_thread_id?: number;
 }
 
 /**
@@ -152,6 +154,20 @@ export function extractUser(update: TelegramUpdate): TelegramUser | null {
   }
   if (update.callback_query?.from) {
     return update.callback_query.from;
+  }
+  return null;
+}
+
+/**
+ * Extract thread ID (topic ID) from an update.
+ * Only present in private chats with forum topics enabled (Bot API 9.3+).
+ */
+export function extractThreadId(update: TelegramUpdate): number | null {
+  if (update.message?.message_thread_id) {
+    return update.message.message_thread_id;
+  }
+  if (update.callback_query?.message?.message_thread_id) {
+    return update.callback_query.message.message_thread_id;
   }
   return null;
 }
