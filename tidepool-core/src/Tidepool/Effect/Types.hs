@@ -50,8 +50,13 @@ module Tidepool.Effect.Types
   , runTurnContent
   , llmCall
   , llmCallEither
+  , llmCallTry
   , llmCallWithTools
+  , llmCallWithToolsTry
   , withImages
+
+    -- * LLM Error Types
+  , LlmError(..)
 
     -- * Result Types
   , TurnResult(..)
@@ -313,6 +318,40 @@ llmCallWithTools systemPrompt userInput schema tools = do
     TurnBroken reason -> pure $ Left $ "Turn broken: " <> reason
     TurnCompleted (TurnParsed tr) -> pure $ Right tr.trOutput
     TurnCompleted (TurnParseFailed {tpfError}) -> pure $ Left $ "Parse failed: " <> T.pack tpfError
+
+-- | Structured error type for LLM call failures
+data LlmError
+  = LlmRateLimited              -- ^ Rate limit hit, retry later
+  | LlmTimeout                  -- ^ Request timed out
+  | LlmContextTooLong           -- ^ Input too long for context window
+  | LlmParseFailed Text         -- ^ Schema parsing failed (includes error message)
+  | LlmTurnBroken Text          -- ^ Turn was broken by tool (unexpected)
+  | LlmNetworkError Text        -- ^ Network/connection failure
+  | LlmUnauthorized             -- ^ Invalid API key
+  | LlmOther Text               -- ^ Other errors with message
+  deriving (Show, Eq, Generic, FromJSON, ToJSON)
+
+-- | Try variant: structured error instead of Text
+llmCallTry
+  :: forall output effs. (Member LLM effs, FromJSON output)
+  => Text -> Text -> Value -> Eff effs (Either LlmError output)
+llmCallTry systemPrompt userInput schema = do
+  result <- runTurn @output systemPrompt userInput schema []
+  case result of
+    TurnBroken reason -> pure $ Left $ LlmTurnBroken reason
+    TurnCompleted (TurnParsed tr) -> pure $ Right tr.trOutput
+    TurnCompleted (TurnParseFailed {tpfError}) -> pure $ Left $ LlmParseFailed (T.pack tpfError)
+
+-- | Try variant with tools: structured error instead of Text
+llmCallWithToolsTry
+  :: forall output effs. (Member LLM effs, FromJSON output)
+  => Text -> Text -> Value -> [Value] -> Eff effs (Either LlmError output)
+llmCallWithToolsTry systemPrompt userInput schema tools = do
+  result <- runTurn @output systemPrompt userInput schema tools
+  case result of
+    TurnBroken reason -> pure $ Left $ LlmTurnBroken reason
+    TurnCompleted (TurnParsed tr) -> pure $ Right tr.trOutput
+    TurnCompleted (TurnParseFailed {tpfError}) -> pure $ Left $ LlmParseFailed (T.pack tpfError)
 
 -- ══════════════════════════════════════════════════════════════
 -- CHAT HISTORY EFFECT
