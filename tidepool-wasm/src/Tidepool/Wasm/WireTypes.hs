@@ -61,6 +61,7 @@ import Data.Aeson.Key (fromText)
 import Data.Aeson.Types (Parser)
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Map.Strict (Map)
 import GHC.Generics (Generic)
 
 -- Re-export effect metadata from the single source of truth
@@ -230,7 +231,7 @@ instance FromJSON LlmCallResult where
 
 -- | Effects that Haskell yields for TypeScript to execute.
 --
--- JSON encoding matches protocol.ts: @{type: "LogInfo", eff_message: "..."}@
+-- JSON encoding matches protocol.ts: @{type: "LogInfo", eff_message: "...", eff_fields: {...}}@
 data SerializableEffect
   = EffLlmComplete
       { effNode :: Text
@@ -245,8 +246,18 @@ data SerializableEffect
       -- ^ Model to use (e.g., "@cf/meta/llama-3.3-70b-instruct-fp8-fast")
       -- If Nothing, TypeScript uses its default model
       }
-  | EffLogInfo { effMessage :: Text }
-  | EffLogError { effMessage :: Text }
+  | EffLogInfo
+      { effMessage :: Text
+      -- ^ Log message
+      , effFields :: Maybe (Map Text Value)
+      -- ^ Optional structured fields for queryable log data
+      }
+  | EffLogError
+      { effMessage :: Text
+      -- ^ Log message
+      , effFields :: Maybe (Map Text Value)
+      -- ^ Optional structured fields for queryable log data
+      }
   | EffHabitica
       { effHabOp :: Text
       -- ^ Operation name: "GetUser", "ScoreTask", "GetTasks", etc.
@@ -290,14 +301,14 @@ instance ToJSON SerializableEffect where
     , "eff_user_content" .= user
     ] ++ maybe [] (\s -> ["eff_schema" .= s]) schema
       ++ maybe [] (\m -> ["eff_model" .= m]) model
-  toJSON (EffLogInfo msg) = object
+  toJSON (EffLogInfo msg fields) = object $
     [ "type" .= ("LogInfo" :: Text)
     , "eff_message" .= msg
-    ]
-  toJSON (EffLogError msg) = object
+    ] ++ maybe [] (\f -> ["eff_fields" .= f]) fields
+  toJSON (EffLogError msg fields) = object $
     [ "type" .= ("LogError" :: Text)
     , "eff_message" .= msg
-    ]
+    ] ++ maybe [] (\f -> ["eff_fields" .= f]) fields
   toJSON (EffHabitica op payload) = object
     [ "type" .= ("Habitica" :: Text)
     , "eff_hab_op" .= op
@@ -332,8 +343,12 @@ instance FromJSON SerializableEffect where
         <*> o .: "eff_user_content"
         <*> o .:? "eff_schema"
         <*> o .:? "eff_model"
-      "LogInfo" -> EffLogInfo <$> o .: "eff_message"
-      "LogError" -> EffLogError <$> o .: "eff_message"
+      "LogInfo" -> EffLogInfo
+        <$> o .: "eff_message"
+        <*> o .:? "eff_fields"
+      "LogError" -> EffLogError
+        <$> o .: "eff_message"
+        <*> o .:? "eff_fields"
       "Habitica" -> EffHabitica
         <$> o .: "eff_hab_op"
         <*> o .: "eff_hab_payload"

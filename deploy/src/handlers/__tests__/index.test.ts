@@ -41,7 +41,9 @@ describe("executeEffect", () => {
     const result = await executeEffect(effect, env);
 
     expect(result).toEqual({ type: "success", value: null });
-    expect(console.log).toHaveBeenCalledWith("[Graph Log] Test log");
+    expect(console.log).toHaveBeenCalledWith(
+      JSON.stringify({ level: "info", msg: "Test log" })
+    );
   });
 
   it("dispatches LogError to log handler", async () => {
@@ -54,7 +56,9 @@ describe("executeEffect", () => {
     const result = await executeEffect(effect, env);
 
     expect(result).toEqual({ type: "success", value: null });
-    expect(console.error).toHaveBeenCalledWith("[Graph Error] Test error");
+    expect(console.error).toHaveBeenCalledWith(
+      JSON.stringify({ level: "error", msg: "Test error" })
+    );
   });
 
   it("dispatches LlmComplete to llm handler", async () => {

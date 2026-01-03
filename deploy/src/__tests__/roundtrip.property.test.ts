@@ -97,15 +97,33 @@ const arbLlmCompleteEffect = fc.record({
   eff_schema: arbJsonSchema,
 });
 
-const arbLogInfoEffect = fc.record({
-  type: fc.constant("LogInfo" as const),
-  eff_message: arbText,
-});
+const arbLogInfoEffect = fc.oneof(
+  // Without fields
+  fc.record({
+    type: fc.constant("LogInfo" as const),
+    eff_message: arbText,
+  }),
+  // With fields
+  fc.record({
+    type: fc.constant("LogInfo" as const),
+    eff_message: arbText,
+    eff_fields: fc.dictionary(arbText, arbJsonValue),
+  })
+);
 
-const arbLogErrorEffect = fc.record({
-  type: fc.constant("LogError" as const),
-  eff_message: arbText,
-});
+const arbLogErrorEffect = fc.oneof(
+  // Without fields
+  fc.record({
+    type: fc.constant("LogError" as const),
+    eff_message: arbText,
+  }),
+  // With fields
+  fc.record({
+    type: fc.constant("LogError" as const),
+    eff_message: arbText,
+    eff_fields: fc.dictionary(arbText, arbJsonValue),
+  })
+);
 
 const arbHabiticaEffect = fc.record({
   type: fc.constant("Habitica" as const),

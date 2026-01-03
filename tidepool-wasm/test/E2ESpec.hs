@@ -58,17 +58,17 @@ multiYieldRunnerSpec = describe "Multi-yield through Runner" $ do
 
     -- First yield: "Step 1: received 5"
     case result1 of
-      WasmYield (EffLogInfo msg1) resume1 -> do
+      WasmYield (EffLogInfo msg1 _) resume1 -> do
         msg1 `shouldBe` "Step 1: received 5"
 
         -- Second yield: "Step 2: computing"
         case resume1 (ResSuccess Nothing) of
-          WasmYield (EffLogInfo msg2) resume2 -> do
+          WasmYield (EffLogInfo msg2 _) resume2 -> do
             msg2 `shouldBe` "Step 2: computing"
 
             -- Third yield: "Step 3: returning 6"
             case resume2 (ResSuccess Nothing) of
-              WasmYield (EffLogInfo msg3) resume3 -> do
+              WasmYield (EffLogInfo msg3 _) resume3 -> do
                 msg3 `shouldBe` "Step 3: returning 6"
 
                 -- Completion with result
@@ -119,14 +119,14 @@ multiYieldEffectSequenceSpec = describe "Effect sequence verification" $ do
 
     -- Verify each effect message
     case effects of
-      [EffLogInfo m1, EffLogInfo m2, EffLogInfo m3] -> do
+      [EffLogInfo m1 _, EffLogInfo m2 _, EffLogInfo m3 _] -> do
         m1 `shouldBe` "Step 1: received 42"
         m2 `shouldBe` "Step 2: computing"
         m3 `shouldBe` "Step 3: returning 43"
       _ -> expectationFailure $ "Unexpected effects: " ++ show effects
 
   it "all effects are LogInfo type" $ do
-    let isLogInfo (EffLogInfo _) = True
+    let isLogInfo (EffLogInfo _ _) = True
         isLogInfo _ = False
 
         collectEffects :: WasmResult a -> [SerializableEffect]
@@ -148,7 +148,7 @@ multiYieldJsonBoundarySpec = describe "JSON boundary (wire types)" $ do
   it "StepOutput encodes multi-yield correctly" $ do
     -- Simulate what FFI would produce for each step
     let state = GraphState (PhaseInNode "compute") []
-        step1Output = StepYield (EffLogInfo "Step 1: received 5") state
+        step1Output = StepYield (EffLogInfo "Step 1: received 5" Nothing) state
 
     case decode (encode step1Output) :: Maybe Value of
       Nothing -> expectationFailure "Failed to decode StepOutput JSON"
@@ -236,7 +236,7 @@ multiYieldEdgeCasesSpec = describe "Edge cases" $ do
         run2 = initializeWasm (computeMultiEffectWasm 200)
 
     case (run1, run2) of
-      (WasmYield (EffLogInfo m1) _, WasmYield (EffLogInfo m2) _) -> do
+      (WasmYield (EffLogInfo m1 _) _, WasmYield (EffLogInfo m2 _) _) -> do
         m1 `shouldBe` "Step 1: received 100"
         m2 `shouldBe` "Step 1: received 200"
       _ -> expectationFailure "Expected both to yield"

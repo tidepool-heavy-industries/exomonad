@@ -73,14 +73,14 @@ graphStructureSpec = describe "TestGraph structure" $ do
 
   it "handler yields Log effect with correct message format" $ do
     case initializeWasm (computeHandlerWasm 42) of
-      WasmYield (EffLogInfo msg) _ -> do
+      WasmYield (EffLogInfo msg _) _ -> do
         T.unpack msg `shouldContain` "Computing:"
         T.unpack msg `shouldContain` "42"
       _ -> expectationFailure "Expected Log effect yield"
 
   it "handler uses EffLogInfo (not EffLogError)" $ do
     case initializeWasm (computeHandlerWasm 7) of
-      WasmYield (EffLogInfo _) _ -> pure ()
-      WasmYield (EffLogError _) _ ->
+      WasmYield (EffLogInfo _ _) _ -> pure ()
+      WasmYield (EffLogError _ _) _ ->
         expectationFailure "Expected EffLogInfo, got EffLogError"
       _ -> expectationFailure "Expected yield"

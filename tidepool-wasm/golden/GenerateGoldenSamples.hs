@@ -58,12 +58,12 @@ sampleEffects =
       , effSchema = Nothing
       , effModel = Just "@cf/meta/llama-3.2-1b-instruct"  -- With explicit model
       }
-  -- Log effects
-  , EffLogInfo "Processing request..."
-  , EffLogInfo ""  -- Empty message edge case
-  , EffLogInfo "Unicode test: \x1F600 \x2764"  -- Emoji
-  , EffLogError "Connection failed: timeout"
-  , EffLogError "Error with special chars: \"quoted\" and \\backslash\\"
+  -- Log effects (without fields)
+  , EffLogInfo "Processing request..." Nothing
+  , EffLogInfo "" Nothing -- Empty message edge case
+  , EffLogInfo "Unicode test: \x1F600 \x2764" Nothing -- Emoji
+  , EffLogError "Connection failed: timeout" Nothing
+  , EffLogError "Error with special chars: \"quoted\" and \\backslash\\" Nothing
   -- Habitica effects
   , EffHabitica "GetUser" (object [])
   , EffHabitica "ScoreTask" (object
@@ -128,7 +128,7 @@ sampleStepOutputs :: [StepOutput]
 sampleStepOutputs =
   [ -- StepYield with Log effect
     StepYield
-      (EffLogInfo "Computing...")
+      (EffLogInfo "Computing..." Nothing)
       (GraphState (PhaseInNode "compute") [])
   -- StepYield with LLM effect
   , StepYield
