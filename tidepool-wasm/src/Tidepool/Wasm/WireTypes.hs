@@ -241,6 +241,9 @@ data SerializableEffect
       -- ^ User content
       , effSchema :: Maybe Value
       -- ^ JSON schema for structured output
+      , effModel :: Maybe Text
+      -- ^ Model to use (e.g., "@cf/meta/llama-3.3-70b-instruct-fp8-fast")
+      -- If Nothing, TypeScript uses its default model
       }
   | EffLogInfo { effMessage :: Text }
   | EffLogError { effMessage :: Text }
@@ -273,16 +276,20 @@ data SerializableEffect
       -- ^ JSON schema for structured output
       , effLlmTools :: [Value]
       -- ^ Tool definitions (Anthropic format)
+      , effLlmModel :: Maybe Text
+      -- ^ Model to use (e.g., "@cf/meta/llama-3.3-70b-instruct-fp8-fast")
+      -- If Nothing, TypeScript uses its default model
       }
   deriving stock (Show, Eq, Generic)
 
 instance ToJSON SerializableEffect where
-  toJSON (EffLlmComplete node sys user schema) = object $
+  toJSON (EffLlmComplete node sys user schema model) = object $
     [ "type" .= ("LlmComplete" :: Text)
     , "eff_node" .= node
     , "eff_system_prompt" .= sys
     , "eff_user_content" .= user
     ] ++ maybe [] (\s -> ["eff_schema" .= s]) schema
+      ++ maybe [] (\m -> ["eff_model" .= m]) model
   toJSON (EffLogInfo msg) = object
     [ "type" .= ("LogInfo" :: Text)
     , "eff_message" .= msg
@@ -307,12 +314,13 @@ instance ToJSON SerializableEffect where
     , "eff_tg_parse_mode" .= parseMode
     , "eff_buttons" .= [[label, val] | (label, val) <- buttons]
     ]
-  toJSON (EffLlmCall node msgs schema tools) = object $
+  toJSON (EffLlmCall node msgs schema tools model) = object $
     [ "type" .= ("LlmCall" :: Text)
     , "eff_node" .= node
     , "eff_messages" .= msgs
     , "eff_tools" .= tools
     ] ++ maybe [] (\s -> ["eff_schema" .= s]) schema
+      ++ maybe [] (\m -> ["eff_model" .= m]) model
 
 instance FromJSON SerializableEffect where
   parseJSON = withObject "SerializableEffect" $ \o -> do
@@ -323,6 +331,7 @@ instance FromJSON SerializableEffect where
         <*> o .: "eff_system_prompt"
         <*> o .: "eff_user_content"
         <*> o .:? "eff_schema"
+        <*> o .:? "eff_model"
       "LogInfo" -> EffLogInfo <$> o .: "eff_message"
       "LogError" -> EffLogError <$> o .: "eff_message"
       "Habitica" -> EffHabitica
@@ -342,6 +351,7 @@ instance FromJSON SerializableEffect where
         <*> o .: "eff_messages"
         <*> o .:? "eff_schema"
         <*> o .: "eff_tools"
+        <*> o .:? "eff_model"
       _         -> fail $ "Unknown effect type: " ++ show typ
 
 

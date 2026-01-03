@@ -167,6 +167,8 @@ export interface LlmCompleteEffect {
   eff_user_content: string;
   /** JSON schema for structured output */
   eff_schema: JsonSchema | null;
+  /** Model to use (e.g., "@cf/meta/llama-3.3-70b-instruct-fp8-fast"). If undefined, uses default. */
+  eff_model?: string;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -220,6 +222,8 @@ export interface LlmCallEffect {
   eff_schema: JsonSchema | null;
   /** Tool definitions (Anthropic format) */
   eff_tools: unknown[];
+  /** Model to use (e.g., "@cf/meta/llama-3.3-70b-instruct-fp8-fast"). If undefined, uses default. */
+  eff_model?: string;
 }
 
 /**

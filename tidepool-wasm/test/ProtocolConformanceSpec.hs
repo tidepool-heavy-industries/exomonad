@@ -33,12 +33,13 @@ serializableEffectConformanceSpec :: Spec
 serializableEffectConformanceSpec = describe "SerializableEffect matches protocol.ts" $ do
 
   describe "LlmCompleteEffect" $ do
-    it "encodes with correct field names: type, eff_node, eff_system_prompt, eff_user_content, eff_schema" $ do
+    it "encodes with correct field names: type, eff_node, eff_system_prompt, eff_user_content, eff_schema, eff_model" $ do
       let effect = EffLlmComplete
             { effNode = "classify"
             , effSystemPrompt = "You are a classifier."
             , effUserContent = "Classify this text."
             , effSchema = Just (object ["type" .= ("string" :: String)])
+            , effModel = Just "@cf/meta/llama-3.2-1b-instruct"
             }
           json = decode (encode effect) :: Maybe Value
       case json of
@@ -52,19 +53,22 @@ serializableEffectConformanceSpec = describe "SerializableEffect matches protoco
             Just (Object schemaObj) ->
               KM.lookup "type" schemaObj `shouldBe` Just (String "string")
             _ -> expectationFailure "Expected eff_schema to be an object"
+          KM.lookup "eff_model" obj `shouldBe` Just (String "@cf/meta/llama-3.2-1b-instruct")
         _ -> expectationFailure "Expected JSON object"
 
-    it "omits eff_schema field when Nothing" $ do
+    it "omits eff_schema and eff_model fields when Nothing" $ do
       let effect = EffLlmComplete
             { effNode = "node"
             , effSystemPrompt = "sys"
             , effUserContent = "user"
             , effSchema = Nothing
+            , effModel = Nothing
             }
           json = decode (encode effect) :: Maybe Value
       case json of
         Just (Object obj) -> do
           KM.lookup "eff_schema" obj `shouldBe` Nothing
+          KM.lookup "eff_model" obj `shouldBe` Nothing
         _ -> expectationFailure "Expected JSON object"
 
   describe "LogInfoEffect" $ do

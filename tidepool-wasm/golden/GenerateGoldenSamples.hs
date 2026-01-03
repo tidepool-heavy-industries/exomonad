@@ -48,6 +48,7 @@ sampleEffects =
               , "confidence" .= object ["type" .= ("number" :: Text)]
               ]
           ]
+      , effModel = Nothing
       }
   -- LlmComplete without schema
   , EffLlmComplete
@@ -55,6 +56,7 @@ sampleEffects =
       , effSystemPrompt = "You are a friendly assistant."
       , effUserContent = "Hello!"
       , effSchema = Nothing
+      , effModel = Just "@cf/meta/llama-3.2-1b-instruct"  -- With explicit model
       }
   -- Log effects
   , EffLogInfo "Processing request..."
@@ -130,7 +132,7 @@ sampleStepOutputs =
       (GraphState (PhaseInNode "compute") [])
   -- StepYield with LLM effect
   , StepYield
-      (EffLlmComplete "classify" "sys" "user" Nothing)
+      (EffLlmComplete "classify" "sys" "user" Nothing Nothing)
       (GraphState (PhaseInNode "classify") ["entry"])
   -- StepDone with various results
   , StepDone

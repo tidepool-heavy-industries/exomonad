@@ -168,7 +168,7 @@ questionHandlerSpec = describe "questionHandlerWasm" $ do
     case initializeWasm (questionHandlerWasm msg) of
       WasmYield _ resume ->
         case resume (ResSuccess Nothing) of
-          WasmYield (EffLlmComplete node sys user _schema) _ -> do
+          WasmYield (EffLlmComplete node sys user _schema _model) _ -> do
             node `shouldBe` "question_handler"
             T.unpack sys `shouldContain` "helpful assistant"
             user `shouldBe` "Why is the sky blue?"
@@ -196,7 +196,7 @@ runQuestionHandlerWithLLM msg llmResponse = go (initializeWasm (questionHandlerW
   where
     go :: WasmResult (GotoChoice '[To Exit Response, To Self UserMessage]) -> IO Response
     go (WasmYield (EffLogInfo _) resume) = go (resume (ResSuccess Nothing))
-    go (WasmYield (EffLlmComplete _ _ _ _) resume) = go (resume (ResSuccess (Just llmResponse)))
+    go (WasmYield (EffLlmComplete _ _ _ _ _) resume) = go (resume (ResSuccess (Just llmResponse)))
     go (WasmYield _ resume) = go (resume (ResSuccess Nothing))  -- Handle any other effects
     go (WasmComplete (GotoChoice (Here response))) = pure response
     go (WasmComplete _) = error "Expected Exit, got Self"
@@ -284,7 +284,7 @@ runFullGraphWithLLM :: UserMessage -> Value -> IO Response
 runFullGraphWithLLM msg llmResponse = go (initializeWasm (runExampleGraph msg))
   where
     go :: WasmResult Response -> IO Response
-    go (WasmYield (EffLlmComplete _ _ _ _) resume) = go (resume (ResSuccess (Just llmResponse)))
+    go (WasmYield (EffLlmComplete _ _ _ _ _) resume) = go (resume (ResSuccess (Just llmResponse)))
     go (WasmYield _ resume) = go (resume (ResSuccess Nothing))
     go (WasmComplete response) = pure response
     go (WasmError err) = error $ "Unexpected error: " <> T.unpack err
