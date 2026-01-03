@@ -7,7 +7,7 @@
 -- the JSON structures produced by the TypeScript handler (deploy/src/handlers/habitica.ts).
 --
 -- This catches protocol mismatches before they become runtime errors.
-module HabiticaTypesSpec (spec) where
+module ResponseSpec (spec) where
 
 import Test.Hspec
 import Data.Aeson (decode, encode, object, (.=))
@@ -15,7 +15,7 @@ import Data.Aeson.QQ (aesonQQ)
 import Data.Maybe (isJust)
 import qualified Data.Text as T
 
-import Tidepool.Wasm.Habitica
+import Tidepool.Habitica
   ( UserInfo(..)
   , UserStats(..)
   , HabiticaTask(..)

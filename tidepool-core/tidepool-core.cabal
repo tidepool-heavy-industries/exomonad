@@ -51,6 +51,8 @@ library
         Tidepool.Graph.Docs
         Tidepool.Question
         Tidepool.Template.DependencyTree
+      build-depends:
+        tidepool-habitica
     build-depends:
         base >= 4.17 && < 5,
         freer-simple >= 1.2 && < 2,

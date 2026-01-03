@@ -1,4 +1,7 @@
--- | Habitica integration effect
+-- | Habitica integration effect for freer-simple.
+--
+-- This module provides the freer-simple effect interface for Habitica operations.
+-- Types are imported from "Tidepool.Habitica".
 module Tidepool.Effects.Habitica
   ( -- * Effect
     Habitica(..)
@@ -17,159 +20,115 @@ module Tidepool.Effects.Habitica
   , scoreTaskTry
   , getTasksTry
 
-    -- * Error Types
-  , HabiticaError(..)
-
-    -- * Types
-  , Todo(..)
-  , TodoId(..)
-  , ChecklistItem(..)
-  , TaskId(..)
-  , Direction(..)
+    -- * Re-exported Types
   , TaskType(..)
-  , User(..)
+  , Direction(..)
+  , TaskId(..)
+  , TodoId(..)
+  , ChecklistItemId(..)
+  , UserInfo(..)
   , UserStats(..)
-  , Task(..)
+  , HabiticaTask(..)
+  , FetchedTodo(..)
+  , FetchedChecklistItem(..)
   , ScoreResult(..)
+  , HabiticaError(..)
 
     -- * Runner (stub)
   , runHabiticaStub
   ) where
 
 import Data.Text (Text)
-import Data.Aeson (FromJSON, ToJSON)
-import GHC.Generics (Generic)
 import Control.Monad.Freer (Eff, Member, send, interpret)
 
 import Tidepool.Effect (Log, logInfo)
+import Tidepool.Habitica
+  ( TaskType(..)
+  , Direction(..)
+  , TaskId(..)
+  , TodoId(..)
+  , ChecklistItemId(..)
+  , UserInfo(..)
+  , UserStats(..)
+  , HabiticaTask(..)
+  , FetchedTodo(..)
+  , FetchedChecklistItem(..)
+  , ScoreResult(..)
+  , HabiticaError(..)
+  )
 
--- Types
 
-newtype TodoId = TodoId { unTodoId :: Text }
-  deriving (Show, Eq, Generic)
-  deriving newtype (FromJSON, ToJSON)
-
-data Todo = Todo
-  { todoId        :: TodoId
-  , todoTitle     :: Text
-  , todoChecklist :: [ChecklistItem]
-  , todoCompleted :: Bool
-  }
-  deriving (Show, Eq, Generic, FromJSON, ToJSON)
-
-data ChecklistItem = ChecklistItem
-  { checklistId   :: Text
-  , checklistText :: Text
-  , checklistDone :: Bool
-  }
-  deriving (Show, Eq, Generic, FromJSON, ToJSON)
-
-newtype TaskId = TaskId { unTaskId :: Text }
-  deriving (Show, Eq, Generic)
-  deriving newtype (FromJSON, ToJSON)
-
-data Direction = Up | Down
-  deriving (Show, Eq, Generic, FromJSON, ToJSON)
-
-data TaskType = Habits | Dailys | Todos | Rewards
-  deriving (Show, Eq, Generic, FromJSON, ToJSON)
-
-data User = User
-  { userId    :: Text
-  , userName  :: Text
-  , userStats :: UserStats
-  }
-  deriving (Show, Eq, Generic, FromJSON, ToJSON)
-
-data UserStats = UserStats
-  { usHp  :: Double
-  , usMp  :: Double
-  , usExp :: Double
-  , usGp  :: Double
-  }
-  deriving (Show, Eq, Generic, FromJSON, ToJSON)
-
-data Task = Task
-  { taskId        :: TaskId
-  , taskText      :: Text
-  , taskType      :: TaskType
-  , taskCompleted :: Maybe Bool
-  }
-  deriving (Show, Eq, Generic, FromJSON, ToJSON)
-
-data ScoreResult = ScoreResult
-  { srDelta :: Double     -- ^ HP/gold change
-  , srDrop  :: Maybe Text -- ^ Item drop if any
-  }
-  deriving (Show, Eq, Generic, FromJSON, ToJSON)
-
--- | Structured error type for Habitica API failures
-data HabiticaError
-  = HabiticaSessionExpired    -- ^ "Your session is outdated" - need re-auth
-  | HabiticaRateLimited       -- ^ Rate limit hit, retry later
-  | HabiticaNotFound Text     -- ^ Task/item not found (includes ID)
-  | HabiticaUnauthorized      -- ^ Invalid credentials
-  | HabiticaOther Text        -- ^ Other errors with message
-  deriving (Show, Eq, Generic, FromJSON, ToJSON)
-
--- Effect
+-- ════════════════════════════════════════════════════════════════════════════
+-- EFFECT
+-- ════════════════════════════════════════════════════════════════════════════
 
 data Habitica r where
   -- | Original operations (crash on error)
-  FetchTodos       :: Habitica [Todo]
-  AddChecklistItem :: TodoId -> Text -> Habitica Text
+  FetchTodos       :: Habitica [FetchedTodo]
+  AddChecklistItem :: TodoId -> Text -> Habitica ChecklistItemId
   CreateTodo       :: Text -> Habitica TodoId
-  GetUser          :: Habitica User
+  GetUser          :: Habitica UserInfo
   ScoreTask        :: TaskId -> Direction -> Habitica ScoreResult
-  GetTasks         :: TaskType -> Habitica [Task]
+  GetTasks         :: TaskType -> Habitica [HabiticaTask]
 
   -- | Try variants (return Either)
-  FetchTodosTry       :: Habitica (Either HabiticaError [Todo])
-  AddChecklistItemTry :: TodoId -> Text -> Habitica (Either HabiticaError Text)
+  FetchTodosTry       :: Habitica (Either HabiticaError [FetchedTodo])
+  AddChecklistItemTry :: TodoId -> Text -> Habitica (Either HabiticaError ChecklistItemId)
   CreateTodoTry       :: Text -> Habitica (Either HabiticaError TodoId)
-  GetUserTry          :: Habitica (Either HabiticaError User)
+  GetUserTry          :: Habitica (Either HabiticaError UserInfo)
   ScoreTaskTry        :: TaskId -> Direction -> Habitica (Either HabiticaError ScoreResult)
-  GetTasksTry         :: TaskType -> Habitica (Either HabiticaError [Task])
+  GetTasksTry         :: TaskType -> Habitica (Either HabiticaError [HabiticaTask])
 
-fetchTodos :: Member Habitica effs => Eff effs [Todo]
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- SMART CONSTRUCTORS
+-- ════════════════════════════════════════════════════════════════════════════
+
+fetchTodos :: Member Habitica effs => Eff effs [FetchedTodo]
 fetchTodos = send FetchTodos
 
-addChecklistItem :: Member Habitica effs => TodoId -> Text -> Eff effs Text
+addChecklistItem :: Member Habitica effs => TodoId -> Text -> Eff effs ChecklistItemId
 addChecklistItem tid item = send (AddChecklistItem tid item)
 
 createTodo :: Member Habitica effs => Text -> Eff effs TodoId
 createTodo title = send (CreateTodo title)
 
-getUser :: Member Habitica effs => Eff effs User
+getUser :: Member Habitica effs => Eff effs UserInfo
 getUser = send GetUser
 
 scoreTask :: Member Habitica effs => TaskId -> Direction -> Eff effs ScoreResult
 scoreTask tid dir = send (ScoreTask tid dir)
 
-getTasks :: Member Habitica effs => TaskType -> Eff effs [Task]
+getTasks :: Member Habitica effs => TaskType -> Eff effs [HabiticaTask]
 getTasks tt = send (GetTasks tt)
 
--- | Try variants: return Either instead of crashing
 
-fetchTodosTry :: Member Habitica effs => Eff effs (Either HabiticaError [Todo])
+-- ════════════════════════════════════════════════════════════════════════════
+-- TRY VARIANTS
+-- ════════════════════════════════════════════════════════════════════════════
+
+fetchTodosTry :: Member Habitica effs => Eff effs (Either HabiticaError [FetchedTodo])
 fetchTodosTry = send FetchTodosTry
 
-addChecklistItemTry :: Member Habitica effs => TodoId -> Text -> Eff effs (Either HabiticaError Text)
+addChecklistItemTry :: Member Habitica effs => TodoId -> Text -> Eff effs (Either HabiticaError ChecklistItemId)
 addChecklistItemTry tid item = send (AddChecklistItemTry tid item)
 
 createTodoTry :: Member Habitica effs => Text -> Eff effs (Either HabiticaError TodoId)
 createTodoTry title = send (CreateTodoTry title)
 
-getUserTry :: Member Habitica effs => Eff effs (Either HabiticaError User)
+getUserTry :: Member Habitica effs => Eff effs (Either HabiticaError UserInfo)
 getUserTry = send GetUserTry
 
 scoreTaskTry :: Member Habitica effs => TaskId -> Direction -> Eff effs (Either HabiticaError ScoreResult)
 scoreTaskTry tid dir = send (ScoreTaskTry tid dir)
 
-getTasksTry :: Member Habitica effs => TaskType -> Eff effs (Either HabiticaError [Task])
+getTasksTry :: Member Habitica effs => TaskType -> Eff effs (Either HabiticaError [HabiticaTask])
 getTasksTry tt = send (GetTasksTry tt)
 
--- Stub runner (errors on call)
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- STUB RUNNER
+-- ════════════════════════════════════════════════════════════════════════════
 
 runHabiticaStub :: Member Log effs => Eff (Habitica ': effs) a -> Eff effs a
 runHabiticaStub = interpret $ \case
@@ -212,6 +171,11 @@ runHabiticaStub = interpret $ \case
   GetTasksTry tt -> do
     logInfo $ "[Habitica:stub] GetTasksTry called: " <> taskTypeText tt
     pure $ Left (HabiticaOther "Habitica.getTasks: not implemented (stub)")
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- HELPERS
+-- ════════════════════════════════════════════════════════════════════════════
 
 dirText :: Direction -> Text
 dirText Up = "Up"
