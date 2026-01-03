@@ -183,7 +183,7 @@ whenM mb action = mb >>= \b -> when b action
 -- | Lifted 'unless' - run action when monadic condition is false.
 --
 -- @
--- unlessM (hasErrors state) $ continue processing
+-- unlessM (hasErrors state) $ logInfo "Processing complete"
 -- @
 unlessM :: Monad m => m Bool -> m () -> m ()
 unlessM mb action = mb >>= \b -> unless b action
