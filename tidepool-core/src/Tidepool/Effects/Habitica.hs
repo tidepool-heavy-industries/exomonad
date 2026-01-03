@@ -9,6 +9,17 @@ module Tidepool.Effects.Habitica
   , scoreTask
   , getTasks
 
+    -- * Try Variants (return Either instead of crashing)
+  , fetchTodosTry
+  , addChecklistItemTry
+  , createTodoTry
+  , getUserTry
+  , scoreTaskTry
+  , getTasksTry
+
+    -- * Error Types
+  , HabiticaError(..)
+
     -- * Types
   , Todo(..)
   , TodoId(..)
@@ -92,15 +103,33 @@ data ScoreResult = ScoreResult
   }
   deriving (Show, Eq, Generic, FromJSON, ToJSON)
 
+-- | Structured error type for Habitica API failures
+data HabiticaError
+  = HabiticaSessionExpired    -- ^ "Your session is outdated" - need re-auth
+  | HabiticaRateLimited       -- ^ Rate limit hit, retry later
+  | HabiticaNotFound Text     -- ^ Task/item not found (includes ID)
+  | HabiticaUnauthorized      -- ^ Invalid credentials
+  | HabiticaOther Text        -- ^ Other errors with message
+  deriving (Show, Eq, Generic, FromJSON, ToJSON)
+
 -- Effect
 
 data Habitica r where
+  -- | Original operations (crash on error)
   FetchTodos       :: Habitica [Todo]
   AddChecklistItem :: TodoId -> Text -> Habitica Text
   CreateTodo       :: Text -> Habitica TodoId
   GetUser          :: Habitica User
   ScoreTask        :: TaskId -> Direction -> Habitica ScoreResult
   GetTasks         :: TaskType -> Habitica [Task]
+
+  -- | Try variants (return Either)
+  FetchTodosTry       :: Habitica (Either HabiticaError [Todo])
+  AddChecklistItemTry :: TodoId -> Text -> Habitica (Either HabiticaError Text)
+  CreateTodoTry       :: Text -> Habitica (Either HabiticaError TodoId)
+  GetUserTry          :: Habitica (Either HabiticaError User)
+  ScoreTaskTry        :: TaskId -> Direction -> Habitica (Either HabiticaError ScoreResult)
+  GetTasksTry         :: TaskType -> Habitica (Either HabiticaError [Task])
 
 fetchTodos :: Member Habitica effs => Eff effs [Todo]
 fetchTodos = send FetchTodos
@@ -120,10 +149,31 @@ scoreTask tid dir = send (ScoreTask tid dir)
 getTasks :: Member Habitica effs => TaskType -> Eff effs [Task]
 getTasks tt = send (GetTasks tt)
 
+-- | Try variants: return Either instead of crashing
+
+fetchTodosTry :: Member Habitica effs => Eff effs (Either HabiticaError [Todo])
+fetchTodosTry = send FetchTodosTry
+
+addChecklistItemTry :: Member Habitica effs => TodoId -> Text -> Eff effs (Either HabiticaError Text)
+addChecklistItemTry tid item = send (AddChecklistItemTry tid item)
+
+createTodoTry :: Member Habitica effs => Text -> Eff effs (Either HabiticaError TodoId)
+createTodoTry title = send (CreateTodoTry title)
+
+getUserTry :: Member Habitica effs => Eff effs (Either HabiticaError User)
+getUserTry = send GetUserTry
+
+scoreTaskTry :: Member Habitica effs => TaskId -> Direction -> Eff effs (Either HabiticaError ScoreResult)
+scoreTaskTry tid dir = send (ScoreTaskTry tid dir)
+
+getTasksTry :: Member Habitica effs => TaskType -> Eff effs (Either HabiticaError [Task])
+getTasksTry tt = send (GetTasksTry tt)
+
 -- Stub runner (errors on call)
 
 runHabiticaStub :: Member Log effs => Eff (Habitica ': effs) a -> Eff effs a
 runHabiticaStub = interpret $ \case
+  -- Original operations (crash on call)
   FetchTodos -> do
     logInfo "[Habitica:stub] FetchTodos called"
     error "Habitica.fetchTodos: not implemented"
@@ -142,6 +192,26 @@ runHabiticaStub = interpret $ \case
   GetTasks tt -> do
     logInfo $ "[Habitica:stub] GetTasks called: " <> taskTypeText tt
     error "Habitica.getTasks: not implemented"
+
+  -- Try variants (return Left with error instead of crashing)
+  FetchTodosTry -> do
+    logInfo "[Habitica:stub] FetchTodosTry called"
+    pure $ Left (HabiticaOther "Habitica.fetchTodos: not implemented (stub)")
+  AddChecklistItemTry _ item -> do
+    logInfo $ "[Habitica:stub] AddChecklistItemTry called: " <> item
+    pure $ Left (HabiticaOther "Habitica.addChecklistItem: not implemented (stub)")
+  CreateTodoTry title -> do
+    logInfo $ "[Habitica:stub] CreateTodoTry called: " <> title
+    pure $ Left (HabiticaOther "Habitica.createTodo: not implemented (stub)")
+  GetUserTry -> do
+    logInfo "[Habitica:stub] GetUserTry called"
+    pure $ Left (HabiticaOther "Habitica.getUser: not implemented (stub)")
+  ScoreTaskTry tid dir -> do
+    logInfo $ "[Habitica:stub] ScoreTaskTry called: " <> tid.unTaskId <> " " <> dirText dir
+    pure $ Left (HabiticaOther "Habitica.scoreTask: not implemented (stub)")
+  GetTasksTry tt -> do
+    logInfo $ "[Habitica:stub] GetTasksTry called: " <> taskTypeText tt
+    pure $ Left (HabiticaOther "Habitica.getTasks: not implemented (stub)")
 
 dirText :: Direction -> Text
 dirText Up = "Up"

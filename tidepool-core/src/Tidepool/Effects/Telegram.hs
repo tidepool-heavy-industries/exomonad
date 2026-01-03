@@ -7,6 +7,15 @@ module Tidepool.Effects.Telegram
   , telegramHtml
   , telegramAsk
 
+    -- * Try Variants (return Either instead of crashing)
+  , telegramSendTry
+  , telegramMarkdownTry
+  , telegramHtmlTry
+  , telegramAskTry
+
+    -- * Error Types
+  , TelegramError(..)
+
     -- * Types
   , MessageId(..)
   , CallbackData(..)
@@ -60,6 +69,16 @@ data TelegramButton = TelegramButton
   }
   deriving (Show, Eq, Generic, FromJSON, ToJSON)
 
+-- | Structured error type for Telegram API failures
+data TelegramError
+  = TelegramNetworkError Text   -- ^ Network/connection failure
+  | TelegramRateLimited         -- ^ Rate limit hit
+  | TelegramInvalidChat Text    -- ^ Chat not found or bot kicked
+  | TelegramUnauthorized        -- ^ Invalid bot token
+  | TelegramTimeout             -- ^ Request timed out (for ask operations)
+  | TelegramOther Text          -- ^ Other errors with message
+  deriving (Show, Eq, Generic, FromJSON, ToJSON)
+
 -- Effect
 
 -- | Telegram messaging effect
@@ -69,6 +88,10 @@ data Telegram r where
 
   -- | Send message with inline keyboard, blocks until user clicks a button
   TelegramAskOp :: TelegramMessage -> [TelegramButton] -> Telegram CallbackData
+
+  -- | Try variants (return Either instead of crashing)
+  TelegramSendTryOp :: TelegramMessage -> Telegram (Either TelegramError MessageId)
+  TelegramAskTryOp :: TelegramMessage -> [TelegramButton] -> Telegram (Either TelegramError CallbackData)
 
 -- | Send plain text message
 telegramSend :: Member Telegram effs => Text -> Eff effs MessageId
@@ -93,6 +116,31 @@ telegramAsk msg buttons = do
     [TelegramButton lbl (CallbackData cb') | (lbl, cb') <- buttons]
   pure cb
 
+-- | Try variants: return Either instead of crashing
+
+-- | Send plain text message (try variant)
+telegramSendTry :: Member Telegram effs => Text -> Eff effs (Either TelegramError MessageId)
+telegramSendTry txt = send $ TelegramSendTryOp (TelegramMessage txt PlainText)
+
+-- | Send Markdown-formatted message (try variant)
+telegramMarkdownTry :: Member Telegram effs => Text -> Eff effs (Either TelegramError MessageId)
+telegramMarkdownTry txt = send $ TelegramSendTryOp (TelegramMessage txt Markdown)
+
+-- | Send HTML-formatted message (try variant)
+telegramHtmlTry :: Member Telegram effs => Text -> Eff effs (Either TelegramError MessageId)
+telegramHtmlTry txt = send $ TelegramSendTryOp (TelegramMessage txt HTML)
+
+-- | Ask with custom buttons (try variant)
+telegramAskTry :: Member Telegram effs
+               => Text
+               -> [(Text, Text)]  -- ^ [(label, callback)]
+               -> Eff effs (Either TelegramError Text)
+telegramAskTry msg buttons = do
+  result <- send $ TelegramAskTryOp
+    (TelegramMessage msg Markdown)
+    [TelegramButton lbl (CallbackData cb') | (lbl, cb') <- buttons]
+  pure $ fmap (\(CallbackData cb) -> cb) result
+
 
 -- Helpers
 
@@ -106,12 +154,21 @@ parseModeText HTML = "HTML"
 
 runTelegramStub :: Member Log effs => Eff (Telegram ': effs) a -> Eff effs a
 runTelegramStub = interpret $ \case
+  -- Original operations (crash on call)
   TelegramSendOp msg -> do
     logInfo $ "[Telegram:stub] TelegramSend called: " <> msg.tmText
     error "Telegram.telegramSend: not implemented"
   TelegramAskOp msg buttons -> do
     logInfo $ "[Telegram:stub] TelegramAsk called: " <> msg.tmText <> " with " <> showButtons buttons
     error "Telegram.telegramAsk: not implemented"
+
+  -- Try variants (return Left with error instead of crashing)
+  TelegramSendTryOp msg -> do
+    logInfo $ "[Telegram:stub] TelegramSendTry called: " <> msg.tmText
+    pure $ Left (TelegramOther "Telegram.telegramSend: not implemented (stub)")
+  TelegramAskTryOp msg buttons -> do
+    logInfo $ "[Telegram:stub] TelegramAskTry called: " <> msg.tmText <> " with " <> showButtons buttons
+    pure $ Left (TelegramOther "Telegram.telegramAsk: not implemented (stub)")
 
 showButtons :: [TelegramButton] -> Text
 showButtons bs = "[" <> mconcat [b.tbLabel <> "," | b <- bs] <> "]"
