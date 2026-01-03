@@ -126,7 +126,10 @@ import Tidepool.Graph.Types (type (:@), Needs, Schema, Template, Vision, Tools, 
 import Tidepool.Graph.Template (TemplateContext)
 import Tidepool.Graph.Edges (GetUsesEffects, GetGotoTargets, GotoEffectsToTargets)
 import Tidepool.Graph.Goto (Goto, goto, GotoChoice, LLMHandler(..))
-import Tidepool.Graph.Validate.RecordStructure (AllFieldsReachable, AllLogicFieldsReachExit, NoDeadGotosRecord)
+import Tidepool.Graph.Validate.RecordStructure
+  ( AllFieldsReachable, AllLogicFieldsReachExit, NoDeadGotosRecord
+  , AllLogicNodesHaveGoto, NoGotoSelfOnly
+  )
 import Tidepool.Graph.Generic.Core
   ( GraphMode(..)
   , AsGraph
@@ -980,15 +983,45 @@ type family InvalidGotoTargetError target fieldNames where
 -- * All nodes are reachable from Entry
 -- * All Logic nodes have a path to Exit
 -- * All Goto targets can receive their payload type
+-- * All Logic nodes have at least one Goto effect
+-- * No nodes have only Goto Self (infinite loop)
 type ValidGraphRecord :: (Type -> Type) -> Constraint
 type ValidGraphRecord graph =
-  ( Generic (graph AsGraph)
+  ( RequireGeneric graph
   , ValidateEntryExit graph
   , ValidateGotoTargets graph
   -- Structural validation
   , AllFieldsReachable graph
   , AllLogicFieldsReachExit graph
   , NoDeadGotosRecord graph
+  -- Transition validation
+  , AllLogicNodesHaveGoto graph
+  , NoGotoSelfOnly graph
+  )
+
+-- | Require Generic instance with a helpful error message.
+--
+-- This is a class rather than a type family so that GHC produces
+-- a clearer "No instance" error that mentions deriving Generic.
+class Generic (graph AsGraph) => RequireGeneric (graph :: Type -> Type)
+
+-- Default instance for all types that have Generic
+instance Generic (graph AsGraph) => RequireGeneric graph
+
+-- | Error message when Generic is missing (as a type error for documentation)
+type MissingGenericError :: (Type -> Type) -> Constraint
+type MissingGenericError graph = TypeError
+  ('Text "Graph validation failed: missing Generic instance"
+   ':$$: 'Text ""
+   ':$$: 'Text "Your graph type needs 'deriving Generic' to work with ValidGraphRecord."
+   ':$$: 'Text ""
+   ':$$: 'Text "Fix: Add Generic to the deriving clause:"
+   ':$$: 'Text ""
+   ':$$: 'Text "  data MyGraph mode = MyGraph"
+   ':$$: 'Text "    { entry :: mode :- Entry Input"
+   ':$$: 'Text "    , ..."
+   ':$$: 'Text "    }"
+   ':$$: 'Text "    deriving Generic  -- <- Add this"
   )
 
 -- ════════════════════════════════════════════════════════════════════════════

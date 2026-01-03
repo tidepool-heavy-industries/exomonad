@@ -24,12 +24,16 @@ module Tidepool.Graph.Validate.RecordStructure
     AllFieldsReachable
   , AllLogicFieldsReachExit
   , NoDeadGotosRecord
+  , AllLogicNodesHaveGoto
+  , NoGotoSelfOnly
 
     -- * Error Messages
   , UnreachableFieldError
   , NoExitPathFieldError
   , DeadGotoFieldError
   , GotoTypeMismatchError
+  , LogicNodeNoGotoError
+  , GotoSelfOnlyError
 
     -- * Error Formatting
   , FormatTypeList
@@ -45,7 +49,7 @@ import Data.Kind (Type, Constraint)
 import GHC.TypeLits (Symbol, TypeError, ErrorMessage(..), Nat, type (-), type (+))
 import GHC.Generics (Generic(..), K1(..), M1(..), (:*:)(..), Meta(..), S, D, C, Rep)
 
-import Tidepool.Graph.Types (type (:@), Needs, Schema, UsesEffects)
+import Tidepool.Graph.Types (type (:@), Needs, Schema, UsesEffects, Self)
 import qualified Tidepool.Graph.Types as Types (Exit)
 import Tidepool.Graph.Edges (GetNeeds, GetSchema)
 import Tidepool.Graph.Goto (Goto)
@@ -525,6 +529,136 @@ type GotoTypeMismatchError srcName targetName payload targetNeeds = TypeError
 type DeadGotoFieldError :: Symbol -> Symbol -> Type -> Constraint
 type DeadGotoFieldError srcName targetName payload =
   GotoTypeMismatchError srcName targetName payload '[]
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- LOGIC NODE TRANSITION VALIDATION
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Validates that all Logic nodes have at least one Goto effect.
+--
+-- A Logic node with UsesEffects but no Goto cannot transition and will deadlock.
+type AllLogicNodesHaveGoto :: (Type -> Type) -> Constraint
+type family AllLogicNodesHaveGoto graph where
+  AllLogicNodesHaveGoto graph =
+    CheckLogicNodesHaveGoto (FieldsWithNamesOf graph)
+
+-- | Check each field for Logic-without-Goto violation.
+type CheckLogicNodesHaveGoto :: [(Symbol, Type)] -> Constraint
+type family CheckLogicNodesHaveGoto fields where
+  CheckLogicNodesHaveGoto '[] = ()
+  CheckLogicNodesHaveGoto ('(name, def) ': rest) =
+    (CheckSingleLogicNodeHasGoto name def, CheckLogicNodesHaveGoto rest)
+
+-- | Check a single node.
+type CheckSingleLogicNodeHasGoto :: Symbol -> Type -> Constraint
+type family CheckSingleLogicNodeHasGoto name def where
+  CheckSingleLogicNodeHasGoto name def =
+    If (And (IsLogicDef def) (Not (HasAnyGoto def)))
+       (LogicNodeNoGotoError name)
+       (() :: Constraint)
+
+-- | Check if a node definition has any Goto (including Exit, Self, or named).
+type HasAnyGoto :: Type -> Bool
+type family HasAnyGoto def where
+  HasAnyGoto def = HasAnyGotoInMaybeEffects (GetUsesEffectsFixed def)
+
+-- | Check Maybe effect list for any Goto.
+type HasAnyGotoInMaybeEffects :: Maybe [Effect] -> Bool
+type family HasAnyGotoInMaybeEffects mEffs where
+  HasAnyGotoInMaybeEffects 'Nothing = 'False
+  HasAnyGotoInMaybeEffects ('Just effs) = HasAnyGotoInEffects effs
+
+-- | Check effect list for any Goto.
+type HasAnyGotoInEffects :: [Effect] -> Bool
+type family HasAnyGotoInEffects effs where
+  HasAnyGotoInEffects '[] = 'False
+  HasAnyGotoInEffects (Goto _ _ ': _) = 'True
+  HasAnyGotoInEffects (_ ': rest) = HasAnyGotoInEffects rest
+
+-- | Error when a Logic node has no Goto effects.
+type LogicNodeNoGotoError :: Symbol -> Constraint
+type LogicNodeNoGotoError name = TypeError
+  ('Text "Graph validation failed: Logic node cannot transition"
+   ':$$: 'Text ""
+   ':$$: 'Text "Node '" ':<>: 'Text name ':<>: 'Text "' is a Logic node but has no Goto effects."
+   ':$$: 'Text "Without a Goto, the node cannot transition and will deadlock at runtime."
+   ':$$: 'Text ""
+   ':$$: 'Text "Fix: Add Goto to UsesEffects:"
+   ':$$: 'Text "  LogicNode :@ UsesEffects '[Goto \"nextNode\" Payload]"
+   ':$$: 'Text "  LogicNode :@ UsesEffects '[Goto Exit Result]"
+  )
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- GOTO SELF ONLY VALIDATION
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Validates that nodes with Goto Self also have another exit path.
+--
+-- A node with only Goto Self creates an infinite loop with no escape.
+type NoGotoSelfOnly :: (Type -> Type) -> Constraint
+type family NoGotoSelfOnly graph where
+  NoGotoSelfOnly graph = CheckNoGotoSelfOnly (FieldsWithNamesOf graph)
+
+-- | Check each field for Goto-Self-only violation.
+type CheckNoGotoSelfOnly :: [(Symbol, Type)] -> Constraint
+type family CheckNoGotoSelfOnly fields where
+  CheckNoGotoSelfOnly '[] = ()
+  CheckNoGotoSelfOnly ('(name, def) ': rest) =
+    (CheckSingleNodeGotoSelfOnly name def, CheckNoGotoSelfOnly rest)
+
+-- | Check a single node for Goto Self only.
+type CheckSingleNodeGotoSelfOnly :: Symbol -> Type -> Constraint
+type family CheckSingleNodeGotoSelfOnly name def where
+  CheckSingleNodeGotoSelfOnly name def =
+    If (And (HasGotoSelf def) (Not (HasNonSelfGoto def)))
+       (GotoSelfOnlyError name)
+       (() :: Constraint)
+
+-- | Check if node has Goto Self.
+type HasGotoSelf :: Type -> Bool
+type family HasGotoSelf def where
+  HasGotoSelf def = HasGotoSelfInMaybeEffects (GetUsesEffectsFixed def)
+
+type HasGotoSelfInMaybeEffects :: Maybe [Effect] -> Bool
+type family HasGotoSelfInMaybeEffects mEffs where
+  HasGotoSelfInMaybeEffects 'Nothing = 'False
+  HasGotoSelfInMaybeEffects ('Just effs) = HasGotoSelfInEffects effs
+
+type HasGotoSelfInEffects :: [Effect] -> Bool
+type family HasGotoSelfInEffects effs where
+  HasGotoSelfInEffects '[] = 'False
+  HasGotoSelfInEffects (Goto Self _ ': _) = 'True
+  HasGotoSelfInEffects (_ ': rest) = HasGotoSelfInEffects rest
+
+-- | Check if node has any non-Self Goto (named target or Exit).
+type HasNonSelfGoto :: Type -> Bool
+type family HasNonSelfGoto def where
+  HasNonSelfGoto def = HasNonSelfGotoInMaybeEffects (GetUsesEffectsFixed def)
+
+type HasNonSelfGotoInMaybeEffects :: Maybe [Effect] -> Bool
+type family HasNonSelfGotoInMaybeEffects mEffs where
+  HasNonSelfGotoInMaybeEffects 'Nothing = 'False
+  HasNonSelfGotoInMaybeEffects ('Just effs) = HasNonSelfGotoInEffects effs
+
+type HasNonSelfGotoInEffects :: [Effect] -> Bool
+type family HasNonSelfGotoInEffects effs where
+  HasNonSelfGotoInEffects '[] = 'False
+  HasNonSelfGotoInEffects (Goto Self _ ': rest) = HasNonSelfGotoInEffects rest
+  HasNonSelfGotoInEffects (Goto _ _ ': _) = 'True  -- Named or Exit
+  HasNonSelfGotoInEffects (_ ': rest) = HasNonSelfGotoInEffects rest
+
+-- | Error when a node only has Goto Self.
+type GotoSelfOnlyError :: Symbol -> Constraint
+type GotoSelfOnlyError name = TypeError
+  ('Text "Graph validation failed: infinite loop detected"
+   ':$$: 'Text ""
+   ':$$: 'Text "Node '" ':<>: 'Text name ':<>: 'Text "' only has Goto Self with no other exit."
+   ':$$: 'Text "This creates an infinite loop - the node can never terminate."
+   ':$$: 'Text ""
+   ':$$: 'Text "Fix: Add an exit path:"
+   ':$$: 'Text "  UsesEffects '[Goto Self Payload, Goto Exit Result]"
+   ':$$: 'Text "  UsesEffects '[Goto Self Payload, Goto \"nextNode\" Payload]"
+  )
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TYPE-LEVEL UTILITIES
