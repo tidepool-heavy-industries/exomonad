@@ -15,7 +15,9 @@
 -- import Tidepool.Wasm.Effect (WasmM, logInfo, llmComplete)
 -- import GHC.Generics (Generic)
 -- import Data.Text (Text)
--- import Data.Aeson (FromJSON, ToJSON)
+-- import Data.Aeson (FromJSON, ToJSON, Value, object, (.=))
+-- import Control.Monad (forM, forM_, when, unless, void)
+-- import Data.Maybe (fromMaybe, catMaybes, mapMaybe)
 --
 -- -- After (1 line):
 -- import Tidepool.Wasm.Prelude
@@ -45,6 +47,14 @@
 -- * 'Text' - Text type
 -- * 'Generic' - For deriving
 -- * 'FromJSON', 'ToJSON' - JSON serialization
+-- * 'Value', 'object', '.=', '.:' - Aeson JSON construction
+--
+-- == Common Combinators
+-- * 'forM', 'forM_', 'when', 'unless', 'void' - Control.Monad
+-- * 'fromMaybe', 'catMaybes', 'mapMaybe', 'isJust', 'isNothing' - Data.Maybe
+-- * 'lefts', 'rights', 'partitionEithers' - Data.Either
+-- * 'pack', 'unpack' - Data.Text conversions
+-- * 'whenM', 'unlessM' - Lifted monad conditionals
 module Tidepool.Wasm.Prelude
   ( -- * Graph Structure
     -- ** Node Types
@@ -83,6 +93,42 @@ module Tidepool.Wasm.Prelude
   , Generic
   , FromJSON(..)
   , ToJSON(..)
+
+    -- * JSON (Aeson)
+  , Value(..)
+  , object
+  , (.=)
+  , (.:)
+  , (.:?)
+
+    -- * Control.Monad
+  , forM
+  , forM_
+  , when
+  , unless
+  , void
+  , (>=>)
+  , (<=<)
+
+    -- * Data.Maybe
+  , fromMaybe
+  , catMaybes
+  , mapMaybe
+  , isJust
+  , isNothing
+
+    -- * Data.Either
+  , lefts
+  , rights
+  , partitionEithers
+
+    -- * Data.Text
+  , pack
+  , unpack
+
+    -- * Lifted Conditionals
+  , whenM
+  , unlessM
   ) where
 
 -- Graph structure
@@ -112,9 +158,35 @@ import Tidepool.Graph.Goto
 import Tidepool.Wasm.Effect (WasmM, logInfo, logError, llmComplete)
 
 -- Common types
-import Data.Text (Text)
+import Data.Text (Text, pack, unpack)
 import GHC.Generics (Generic)
-import Data.Aeson (FromJSON(..), ToJSON(..))
+import Data.Aeson (FromJSON(..), ToJSON(..), Value(..), object, (.=), (.:), (.:?))
+
+-- Common combinators
+import Control.Monad (forM, forM_, when, unless, void, (>=>), (<=<))
+import Data.Maybe (fromMaybe, catMaybes, mapMaybe, isJust, isNothing)
+import Data.Either (lefts, rights, partitionEithers)
+
+
+-- ============================================================================
+-- Lifted Conditionals
+-- ============================================================================
+
+-- | Lifted 'when' - run action when monadic condition is true.
+--
+-- @
+-- whenM (isReady state) $ logInfo "Ready to proceed"
+-- @
+whenM :: Monad m => m Bool -> m () -> m ()
+whenM mb action = mb >>= \b -> when b action
+
+-- | Lifted 'unless' - run action when monadic condition is false.
+--
+-- @
+-- unlessM (hasErrors state) $ logInfo "Processing complete"
+-- @
+unlessM :: Monad m => m Bool -> m () -> m ()
+unlessM mb action = mb >>= \b -> unless b action
 
 -- | Type alias for Exit as a Goto target.
 --
