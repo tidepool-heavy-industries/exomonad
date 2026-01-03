@@ -180,10 +180,10 @@ describe("handleLlmCall", () => {
     eff_tools: [],
   };
 
-  // Helper to create mock env with specific response
+  // Helper to create mock env with CF AI response format
   function createMockLlmCallEnv(response: {
-    stop_reason?: string;
-    content?: unknown;
+    response?: string;
+    tool_calls?: Array<{ name: string; arguments: unknown }>;
   }): LlmEnv {
     return {
       AI: {
@@ -193,10 +193,10 @@ describe("handleLlmCall", () => {
   }
 
   describe("end_turn responses (done)", () => {
-    it("returns done with text content on end_turn", async () => {
+    it("returns done with text content", async () => {
+      // CF AI returns text in the `response` field
       const env = createMockLlmCallEnv({
-        stop_reason: "end_turn",
-        content: [{ type: "text", text: "Hello! How can I help you?" }],
+        response: "Hello! How can I help you?",
       });
 
       const result = await handleLlmCall(baseEffect, env);
@@ -207,24 +207,9 @@ describe("handleLlmCall", () => {
       expect(llmResult.content).toEqual([{ type: "text", text: "Hello! How can I help you?" }]);
     });
 
-    it("handles string content response", async () => {
+    it("handles empty response", async () => {
       const env = createMockLlmCallEnv({
-        stop_reason: "end_turn",
-        content: "Just a string response",
-      });
-
-      const result = await handleLlmCall(baseEffect, env);
-
-      expect(result.type).toBe("success");
-      const llmResult = (result as { type: "success"; value: LlmCallResult }).value;
-      expect(llmResult.type).toBe("done");
-      expect(llmResult.content).toEqual([{ type: "text", text: "Just a string response" }]);
-    });
-
-    it("handles empty content", async () => {
-      const env = createMockLlmCallEnv({
-        stop_reason: "end_turn",
-        content: undefined,
+        response: undefined,
       });
 
       const result = await handleLlmCall(baseEffect, env);
@@ -238,15 +223,13 @@ describe("handleLlmCall", () => {
 
   describe("tool_use responses (needs_tools)", () => {
     it("returns needs_tools with tool calls", async () => {
+      // CF AI returns tool_calls array at top level
       const env = createMockLlmCallEnv({
-        stop_reason: "tool_use",
-        content: [
-          { type: "text", text: "I need to ask you something" },
+        response: "I need to ask you something",
+        tool_calls: [
           {
-            type: "tool_use",
-            id: "tool_123",
             name: "ask_user",
-            input: { question: "What would you like to do?" },
+            arguments: { question: "What would you like to do?" },
           },
         ],
       });
@@ -259,7 +242,7 @@ describe("handleLlmCall", () => {
       if (llmResult.type === "needs_tools") {
         expect(llmResult.tool_calls).toEqual([
           {
-            id: "tool_123",
+            id: "tool_0_ask_user",  // Generated ID since CF AI doesn't provide one
             name: "ask_user",
             input: { question: "What would you like to do?" },
           },
@@ -270,19 +253,14 @@ describe("handleLlmCall", () => {
 
     it("handles multiple tool calls", async () => {
       const env = createMockLlmCallEnv({
-        stop_reason: "tool_use",
-        content: [
+        tool_calls: [
           {
-            type: "tool_use",
-            id: "tool_1",
             name: "ask_user",
-            input: { question: "First question?" },
+            arguments: { question: "First question?" },
           },
           {
-            type: "tool_use",
-            id: "tool_2",
             name: "ask_user",
-            input: { question: "Second question?" },
+            arguments: { question: "Second question?" },
           },
         ],
       });
@@ -294,8 +272,9 @@ describe("handleLlmCall", () => {
       expect(llmResult.type).toBe("needs_tools");
       if (llmResult.type === "needs_tools") {
         expect(llmResult.tool_calls).toHaveLength(2);
-        expect(llmResult.tool_calls[0].id).toBe("tool_1");
-        expect(llmResult.tool_calls[1].id).toBe("tool_2");
+        // Generated IDs include index and tool name
+        expect(llmResult.tool_calls[0].id).toBe("tool_0_ask_user");
+        expect(llmResult.tool_calls[1].id).toBe("tool_1_ask_user");
       }
     });
   });
@@ -308,7 +287,7 @@ describe("handleLlmCall", () => {
           { role: "user", content: [{ type: "text", text: "Hello" }] },
         ],
       };
-      const env = createMockLlmCallEnv({ stop_reason: "end_turn", content: [] });
+      const env = createMockLlmCallEnv({ response: "" });
 
       await handleLlmCall(effect, env);
 
@@ -320,7 +299,7 @@ describe("handleLlmCall", () => {
       );
     });
 
-    it("passes tools when provided", async () => {
+    it("passes tools when provided and uses function-calling model", async () => {
       const tools = [
         { name: "ask_user", description: "Ask user a question" },
       ];
@@ -328,14 +307,33 @@ describe("handleLlmCall", () => {
         ...baseEffect,
         eff_tools: tools,
       };
-      const env = createMockLlmCallEnv({ stop_reason: "end_turn", content: [] });
+      const env = createMockLlmCallEnv({ response: "" });
 
       await handleLlmCall(effect, env);
 
+      // When tools are provided, uses function-calling capable model
+      expect(env.AI.run).toHaveBeenCalledWith(
+        "@hf/nousresearch/hermes-2-pro-mistral-7b",
+        expect.objectContaining({
+          tools,
+        })
+      );
+    });
+
+    it("uses standard model when no tools provided", async () => {
+      const effect: LlmCallEffect = {
+        ...baseEffect,
+        eff_tools: [],
+      };
+      const env = createMockLlmCallEnv({ response: "Hello" });
+
+      await handleLlmCall(effect, env);
+
+      // When no tools, uses standard llama model
       expect(env.AI.run).toHaveBeenCalledWith(
         "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
         expect.objectContaining({
-          tools,
+          messages: expect.any(Array),
         })
       );
     });

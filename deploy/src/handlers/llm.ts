@@ -9,7 +9,6 @@ import type {
   LlmCallEffect,
   EffectResult,
   WireContentBlock,
-  WireToolCall,
   LlmCallResult,
 } from "tidepool-generated-ts";
 import { successResult, errorResult } from "tidepool-generated-ts";
@@ -204,6 +203,10 @@ function parseAiResponse(response: unknown): unknown {
  * 1. Execute tools with full effect access (can yield TelegramAsk, etc.)
  * 2. Continue LLM conversation with tool results
  * 3. Repeat until `done`
+ *
+ * Uses Cloudflare Workers AI function calling format:
+ * - Response has `tool_calls` array when model wants to call tools
+ * - Response has `response` string for text output
  */
 export async function handleLlmCall(
   effect: LlmCallEffect,
@@ -230,7 +233,7 @@ export async function handleLlmCall(
       max_tokens: 4096,
     };
 
-    // Add tools if provided
+    // Add tools if provided (using Cloudflare AI format)
     if (effect.eff_tools && effect.eff_tools.length > 0) {
       options.tools = effect.eff_tools;
     }
@@ -247,17 +250,27 @@ export async function handleLlmCall(
       };
     }
 
-    const response = (await env.AI.run(
-      "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
-      options
-    )) as AiResponse;
+    // Use function-calling capable model when tools are provided
+    const model = effect.eff_tools && effect.eff_tools.length > 0
+      ? "@hf/nousresearch/hermes-2-pro-mistral-7b"  // Supports function calling
+      : "@cf/meta/llama-3.3-70b-instruct-fp8-fast"; // Standard model
 
-    // Check if LLM wants to use tools
-    if (response.stop_reason === "tool_use") {
+    const response = (await env.AI.run(model, options)) as CfAiResponse;
+
+    // Check if LLM wants to use tools (CF AI returns tool_calls array)
+    if (response.tool_calls && response.tool_calls.length > 0) {
       const result: LlmCallResult = {
         type: "needs_tools",
-        tool_calls: extractToolCalls(response.content),
-        content: extractTextContent(response.content),
+        tool_calls: response.tool_calls.map((tc, idx) => ({
+          // Generate deterministic ID since CF AI doesn't provide one
+          id: `tool_${idx}_${tc.name}`,
+          name: tc.name,
+          input: tc.arguments,
+        })),
+        // Include any text response as content
+        content: response.response
+          ? [{ type: "text" as const, text: response.response }]
+          : [],
       };
       return successResult(result);
     }
@@ -265,7 +278,9 @@ export async function handleLlmCall(
     // LLM finished - return final content
     const result: LlmCallResult = {
       type: "done",
-      content: extractAllContent(response.content),
+      content: response.response
+        ? [{ type: "text" as const, text: response.response }]
+        : [],
     };
     return successResult(result);
   } catch (err) {
@@ -288,120 +303,47 @@ export async function handleLlmCall(
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
- * Cloudflare AI response structure (simplified).
+ * Cloudflare Workers AI response structure.
+ *
+ * When tools are provided and the model wants to call them,
+ * `tool_calls` array will be populated. Otherwise, `response`
+ * contains the text output.
  */
-interface AiResponse {
-  stop_reason?: "end_turn" | "tool_use" | string;
-  content?: AiContentBlock[] | string;
+interface CfAiResponse {
+  /** Text response from the model */
   response?: string;
+  /** Tool calls the model wants to make */
+  tool_calls?: CfToolCall[];
 }
 
 /**
- * Content block in AI response.
+ * Tool call in CF AI response.
+ *
+ * Note: CF AI doesn't provide an ID, we generate one.
  */
-type AiContentBlock =
-  | { type: "text"; text: string }
-  | { type: "tool_use"; id: string; name: string; input: unknown };
+interface CfToolCall {
+  name: string;
+  arguments: unknown;
+}
 
 /**
  * Convert WireContentBlock array to format expected by Cloudflare AI.
+ *
+ * For CF AI, messages are typically just strings. We extract text content
+ * and concatenate. Tool results are formatted as text for context.
  */
-function convertContentBlocks(
-  blocks: WireContentBlock[]
-): string | AiContentBlock[] {
-  // If single text block, return as string for simpler API
-  if (blocks.length === 1 && blocks[0].type === "text") {
-    return blocks[0].text;
-  }
-
-  // Convert to Cloudflare AI format
-  return blocks.map((block) => {
-    switch (block.type) {
-      case "text":
-        return { type: "text" as const, text: block.text };
-      case "tool_use":
-        return {
-          type: "tool_use" as const,
-          id: block.id,
-          name: block.name,
-          input: block.input,
-        };
-      case "tool_result":
-        // Tool results are sent as text with special formatting
-        return {
-          type: "text" as const,
-          text: `[Tool Result for ${block.tool_use_id}]: ${block.content}`,
-        };
-    }
-  });
-}
-
-/**
- * Extract tool calls from AI response content.
- */
-function extractToolCalls(
-  content: AiContentBlock[] | string | undefined
-): WireToolCall[] {
-  if (!content || typeof content === "string") {
-    return [];
-  }
-
-  return content
-    .filter((block): block is Extract<AiContentBlock, { type: "tool_use" }> =>
-      block.type === "tool_use"
-    )
-    .map((block) => ({
-      id: block.id,
-      name: block.name,
-      input: block.input,
-    }));
-}
-
-/**
- * Extract text content blocks from AI response (excluding tool_use).
- */
-function extractTextContent(
-  content: AiContentBlock[] | string | undefined
-): WireContentBlock[] {
-  if (!content) {
-    return [];
-  }
-
-  if (typeof content === "string") {
-    return [{ type: "text", text: content }];
-  }
-
-  return content
-    .filter((block): block is Extract<AiContentBlock, { type: "text" }> =>
-      block.type === "text"
-    )
-    .map((block) => ({ type: "text", text: block.text }));
-}
-
-/**
- * Extract all content blocks from AI response.
- */
-function extractAllContent(
-  content: AiContentBlock[] | string | undefined
-): WireContentBlock[] {
-  if (!content) {
-    return [];
-  }
-
-  if (typeof content === "string") {
-    return [{ type: "text", text: content }];
-  }
-
-  return content.map((block) => {
-    if (block.type === "text") {
-      return { type: "text" as const, text: block.text };
-    } else {
-      return {
-        type: "tool_use" as const,
-        id: block.id,
-        name: block.name,
-        input: block.input,
-      };
-    }
-  });
+function convertContentBlocks(blocks: WireContentBlock[]): string {
+  return blocks
+    .map((block) => {
+      switch (block.type) {
+        case "text":
+          return block.text;
+        case "tool_use":
+          // Include tool use context for multi-turn conversations
+          return `[Tool Call: ${block.name}(${JSON.stringify(block.input)})]`;
+        case "tool_result":
+          return `[Tool Result for ${block.tool_use_id}]: ${block.content}`;
+      }
+    })
+    .join("\n");
 }
