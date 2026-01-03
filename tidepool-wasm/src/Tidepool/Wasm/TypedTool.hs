@@ -134,10 +134,12 @@ instance ToJSON AskUserInput where
 
 -- | Execute the ask_user tool: ask the user a question via Telegram.
 --
--- Handles the full flow:
--- 1. Parses the tool input
+-- Handles the effectful flow:
+-- 1. Takes already-parsed 'AskUserInput'
 -- 2. Yields TelegramAsk effect
 -- 3. Returns the selected option or typed text
+--
+-- Errors loudly on edge cases (stale buttons, unexpected button clicks).
 --
 -- Example:
 --
@@ -159,11 +161,13 @@ askUser AskUserInput{..} = do
       -- and type instead
       result <- telegramAsk auiQuestion [("Type your response", "freeform")]
       case result of
-        TelegramButton _ -> pure ""  -- They clicked instead of typing
+        TelegramButton _ ->
+          error $ "askUser: user clicked button instead of typing for freeform question: "
+               <> T.unpack auiQuestion
         TelegramText txt -> pure txt
-        TelegramStaleButton -> do
-          logInfo $ "Stale button clicked for freeform question: " <> auiQuestion
-          pure ""
+        TelegramStaleButton ->
+          error $ "askUser: stale button clicked for freeform question: "
+               <> T.unpack auiQuestion
     Just opts -> do
       -- With options = inline keyboard buttons
       let buttons = [(opt, opt) | opt <- opts]  -- label = callback data
@@ -171,9 +175,9 @@ askUser AskUserInput{..} = do
       case result of
         TelegramButton response -> pure response  -- The callback_data = option text
         TelegramText txt -> pure txt  -- User typed instead of clicking
-        TelegramStaleButton -> do
-          logInfo $ "Stale button clicked for question: " <> auiQuestion
-          pure ""  -- Stale button, treat as empty
+        TelegramStaleButton ->
+          error $ "askUser: stale button clicked for question: "
+               <> T.unpack auiQuestion
 
 
 -- | Ask user with a fallback for when no options are provided.
