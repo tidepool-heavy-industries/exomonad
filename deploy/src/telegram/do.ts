@@ -85,6 +85,10 @@ const ConversationStateSchema = z.object({
   lastActivity: z.number().default(() => Date.now()),
   /** Maps short button IDs (btn_0, btn_1, ...) to original callback data */
   buttonMapping: z.record(z.string(), z.unknown()).default({}),
+  /** Message ID of the current button message (for editing after selection) */
+  buttonMessageId: z.number().nullable().default(null),
+  /** Original question text (for showing "Question: You chose X" after selection) */
+  buttonQuestionText: z.string().nullable().default(null),
 });
 
 /**
@@ -96,6 +100,8 @@ interface ConversationState extends Omit<z.infer<typeof ConversationStateSchema>
   pendingEffect: SerializableEffect | null;
   effectNonce: string | null;
   buttonMapping: Record<string, unknown>;
+  buttonMessageId: number | null;
+  buttonQuestionText: string | null;
 }
 
 /**
@@ -520,6 +526,8 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
       chatId,
       pendingMessages: state.pendingMessages,
       buttonMapping: state.buttonMapping,
+      buttonMessageId: state.buttonMessageId,
+      buttonQuestionText: state.buttonQuestionText,
     };
 
     switch (effect.type) {
@@ -566,11 +574,13 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
         );
 
         if (askResult.type === "yield") {
-          // Block until input arrives, store nonce and button mapping
+          // Block until input arrives, store nonce, button mapping, and message info
           state.waitingForReceive = true;
           state.pendingEffect = effect;
           state.effectNonce = askResult.nonce;
           state.buttonMapping = askResult.buttonMapping;
+          state.buttonMessageId = askResult.messageId;
+          state.buttonQuestionText = askResult.questionText;
           await this.saveState();
           return { outcome: "blocking" };
         }
@@ -580,6 +590,8 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
         state.pendingEffect = null;
         state.effectNonce = null;
         state.buttonMapping = {};
+        state.buttonMessageId = null;
+        state.buttonQuestionText = null;
         await this.saveState();
         return { outcome: "handled", result: askResult.result };
       }
@@ -649,6 +661,8 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
       chatId: state.chatId,
       pendingMessages: state.pendingMessages,
       buttonMapping: state.buttonMapping,
+      buttonMessageId: state.buttonMessageId,
+      buttonQuestionText: state.buttonQuestionText,
     };
 
     let result: EffectResult;

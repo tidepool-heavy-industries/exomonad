@@ -27,6 +27,7 @@ import {
   sendMessageWithButtons,
   sendPhoto,
   sendDocument,
+  editMessageText,
 } from "../telegram/api.js";
 
 /**
@@ -46,6 +47,10 @@ export interface TelegramHandlerContext {
   pendingMessages: TelegramIncomingMessage[];
   /** Button ID mapping (btn_0 → original data) for resolving callbacks */
   buttonMapping?: Record<string, unknown>;
+  /** Message ID of the button message (for editing after selection) */
+  buttonMessageId?: number | null;
+  /** Original question text (for showing selection confirmation) */
+  buttonQuestionText?: string | null;
 }
 
 // =============================================================================
@@ -184,11 +189,18 @@ export function handleTelegramTryReceive(
  * - Nothing yet → caller should block/yield until input arrives
  *
  * When yielding, returns the nonce for storage so it can be validated
- * when the callback arrives. Also returns buttonMapping for ID resolution.
+ * when the callback arrives. Also returns buttonMapping for ID resolution,
+ * messageId for editing after selection, and questionText for the confirmation.
  */
 export type AskHandlerResult =
   | { type: "result"; result: EffectResult }
-  | { type: "yield"; nonce: string; buttonMapping: Record<string, unknown> };
+  | {
+      type: "yield";
+      nonce: string;
+      buttonMapping: Record<string, unknown>;
+      messageId: number;
+      questionText: string;
+    };
 
 /**
  * Button callback data format with nonce for validation.
@@ -264,8 +276,14 @@ export async function handleTelegramAsk(
       };
     }
 
-    // Yield with the nonce and button mapping for storage
-    return { type: "yield", nonce, buttonMapping: sendResult.buttonMapping };
+    // Yield with the nonce, button mapping, message ID, and question text for storage
+    return {
+      type: "yield",
+      nonce,
+      buttonMapping: sendResult.buttonMapping,
+      messageId: sendResult.message_id,
+      questionText: effect.eff_tg_text,
+    };
   }
 
   // Buttons were sent - check for responses in pending messages
@@ -302,6 +320,21 @@ export async function handleTelegramAsk(
           // Complex case: stored data is something else, stringify it
           responseValue = JSON.stringify(storedData);
         }
+
+        // Edit the original button message to show selection and remove buttons
+        if (ctx.buttonMessageId) {
+          // Find the button label for the selected option
+          const buttonLabel = findButtonLabel(effect.eff_buttons, responseValue);
+          const displayText = buttonLabel ?? truncateForDisplay(responseValue, 50);
+          const confirmationText = `${ctx.buttonQuestionText ?? "Question"}\n\n✓ ${displayText}`;
+          await editMessageText(
+            env.TELEGRAM_TOKEN,
+            ctx.chatId,
+            ctx.buttonMessageId,
+            confirmationText
+          );
+        }
+
         const result: TelegramAskResult = {
           type: "button",
           response: responseValue,
@@ -336,12 +369,51 @@ export async function handleTelegramAsk(
   );
 
   if (textMsg) {
+    // Edit the original button message to show text response and remove buttons
+    if (ctx.buttonMessageId) {
+      const confirmationText = `${ctx.buttonQuestionText ?? "Question"}\n\n✓ (typed) ${truncateForDisplay(textMsg.text, 50)}`;
+      await editMessageText(
+        env.TELEGRAM_TOKEN,
+        ctx.chatId,
+        ctx.buttonMessageId,
+        confirmationText
+      );
+    }
+
     const result: TelegramAskResult = { type: "text", text: textMsg.text };
     return { type: "result", result: successResult(result) };
   }
 
-  // 3. Nothing yet - keep waiting (preserve existing mapping)
-  return { type: "yield", nonce: storedNonce, buttonMapping: ctx.buttonMapping ?? {} };
+  // 3. Nothing yet - keep waiting (preserve existing state)
+  return {
+    type: "yield",
+    nonce: storedNonce,
+    buttonMapping: ctx.buttonMapping ?? {},
+    messageId: ctx.buttonMessageId ?? 0,
+    questionText: ctx.buttonQuestionText ?? "",
+  };
+}
+
+/**
+ * Find the button label for a given action value.
+ */
+function findButtonLabel(buttons: [string, string][], action: string): string | null {
+  for (const [label, value] of buttons) {
+    if (value === action) {
+      return label;
+    }
+  }
+  return null;
+}
+
+/**
+ * Truncate a string for display, adding ellipsis if too long.
+ */
+function truncateForDisplay(text: string, maxLength: number): string {
+  if (text.length <= maxLength) {
+    return text;
+  }
+  return text.slice(0, maxLength - 1) + "…";
 }
 
 /**

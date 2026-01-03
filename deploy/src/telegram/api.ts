@@ -228,6 +228,49 @@ export async function sendMessageWithButtons(
 }
 
 // =============================================================================
+// Message Editing
+// =============================================================================
+
+/**
+ * Edit a message's text and optionally remove its inline keyboard.
+ * Used to update button messages after selection.
+ *
+ * @param token - Bot API token
+ * @param chatId - Target chat ID
+ * @param messageId - Message ID to edit
+ * @param text - New message text
+ * @param removeKeyboard - If true, removes the inline keyboard
+ * @returns true on success, false on failure
+ */
+export async function editMessageText(
+  token: string,
+  chatId: number,
+  messageId: number,
+  text: string,
+  removeKeyboard: boolean = true
+): Promise<boolean> {
+  const body: Record<string, unknown> = {
+    chat_id: chatId,
+    message_id: messageId,
+    text,
+  };
+
+  if (removeKeyboard) {
+    // Empty inline_keyboard array removes the keyboard
+    body.reply_markup = {
+      inline_keyboard: [],
+    };
+  }
+
+  const result = await callTelegram<SendMessageResult>(token, "editMessageText", body);
+  if (!result.ok) {
+    console.error("editMessageText failed:", result.description);
+    return false;
+  }
+  return true;
+}
+
+// =============================================================================
 // Media Support (for future use)
 // =============================================================================
 

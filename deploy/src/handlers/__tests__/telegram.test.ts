@@ -224,7 +224,7 @@ describe("handleTelegramAsk button ID mapping", () => {
     globalThis.fetch = originalFetch;
   });
 
-  it("sends buttons with short IDs and returns mapping", async () => {
+  it("sends buttons with short IDs and returns mapping with message info", async () => {
     const mockResponse = {
       ok: true,
       result: { message_id: 42 },
@@ -240,10 +240,12 @@ describe("handleTelegramAsk button ID mapping", () => {
       null // No stored nonce - first call
     );
 
-    // Should yield with nonce and buttonMapping
+    // Should yield with nonce, buttonMapping, messageId, and questionText
     expect(result.type).toBe("yield");
     if (result.type === "yield") {
       expect(result.nonce).toBeDefined();
+      expect(result.messageId).toBe(42);
+      expect(result.questionText).toBe("Choose a task:");
       // buttonMapping stores the full button data (including action and nonce)
       expect(result.buttonMapping.btn_0).toMatchObject({
         action: "Reach out to someone I haven't talked to in a little while",
@@ -262,13 +264,19 @@ describe("handleTelegramAsk button ID mapping", () => {
     expect(body.reply_markup.inline_keyboard[1][0].callback_data).toBe("btn_1");
   });
 
-  it("resolves button ID back to original data on callback", async () => {
+  it("resolves button ID and edits message to show selection", async () => {
     const nonce = "test-nonce-1";
     // buttonMapping stores the full button data with {action, nonce}
     const buttonMapping = {
       btn_0: { action: "Reach out to someone I haven't talked to in a little while", nonce },
       btn_1: { action: "Another long option", nonce },
     };
+
+    // Mock the editMessageText call
+    const mockResponse = { ok: true, result: { message_id: 42 } };
+    vi.mocked(globalThis.fetch).mockResolvedValue({
+      json: () => Promise.resolve(mockResponse),
+    } as Response);
 
     // Simulate a button click with the short ID
     const pendingMessages: TelegramIncomingMessage[] = [
@@ -282,6 +290,8 @@ describe("handleTelegramAsk button ID mapping", () => {
       chatId: 123456,
       pendingMessages,
       buttonMapping,
+      buttonMessageId: 42,
+      buttonQuestionText: "Choose a task:",
     };
 
     const result = await handleTelegramAsk(
@@ -302,6 +312,17 @@ describe("handleTelegramAsk button ID mapping", () => {
         },
       });
     }
+
+    // Verify editMessageText was called to update the message
+    const fetchCall = vi.mocked(globalThis.fetch).mock.calls[0];
+    expect(fetchCall[0]).toContain("editMessageText");
+    const body = JSON.parse(fetchCall[1]?.body as string);
+    expect(body.message_id).toBe(42);
+    expect(body.text).toContain("Choose a task:");
+    expect(body.text).toContain("✓");
+    expect(body.text).toContain("First option"); // Uses button label
+    // Should have empty keyboard to remove buttons
+    expect(body.reply_markup.inline_keyboard).toEqual([]);
   });
 
   it("handles string data directly in button mapping", async () => {
