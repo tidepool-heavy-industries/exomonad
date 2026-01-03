@@ -542,12 +542,12 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
       // Telegram effects - handled locally by TelegramDO
       // ─────────────────────────────────────────────────────────────────────
 
-      case "telegram_send": {
+      case "TelegramSend": {
         const result = await handleTelegramSend(effect, this.env, ctx);
         return { outcome: "handled", result };
       }
 
-      case "telegram_receive": {
+      case "TelegramReceive": {
         const receiveResult = handleTelegramReceive(effect, ctx);
         if (receiveResult.type === "yield") {
           // Block until messages arrive
@@ -562,7 +562,7 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
         return { outcome: "handled", result: receiveResult.result };
       }
 
-      case "telegram_try_receive": {
+      case "TelegramTryReceive": {
         const result = handleTelegramTryReceive(effect, ctx);
         state.pendingMessages = [];
         await this.saveState();
@@ -612,7 +612,11 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
       case "LogError":
       case "LlmComplete":
       case "LlmCall":
-      case "Habitica": {
+      case "Habitica":
+      case "GetState":
+      case "SetState":
+      case "RandomInt":
+      case "GetTime": {
         console.error(
           `[TelegramDO] Received internal effect "${effect.type}" that should be handled by StateMachineDO`
         );
@@ -622,6 +626,16 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
             type: "error",
             message: `Effect "${effect.type}" was unexpectedly yielded to TelegramDO`,
           },
+        };
+      }
+
+      // EmitEvent is yielded - forward to client
+      case "EmitEvent": {
+        // EmitEvent is fire-and-forget - log it and return success
+        console.log(`[TelegramDO] Event: ${effect.eff_event_name}`, effect.eff_event_payload);
+        return {
+          outcome: "handled",
+          result: { type: "success", value: null },
         };
       }
 
@@ -675,11 +689,11 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
     let result: EffectResult;
 
     switch (effect.type) {
-      case "telegram_send":
+      case "TelegramSend":
         result = await handleTelegramSend(effect, this.env, ctx);
         break;
 
-      case "telegram_receive": {
+      case "TelegramReceive": {
         const receiveResult = handleTelegramReceive(effect, ctx);
         if (receiveResult.type === "yield") {
           // Need to block until messages arrive
@@ -696,7 +710,7 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
         break;
       }
 
-      case "telegram_try_receive":
+      case "TelegramTryReceive":
         result = handleTelegramTryReceive(effect, ctx);
         // Clear the queue after reading
         state.pendingMessages = [];

@@ -291,6 +291,42 @@ data SerializableEffect
       -- ^ Model to use (e.g., "@cf/meta/llama-3.3-70b-instruct-fp8-fast")
       -- If Nothing, TypeScript uses its default model
       }
+  -- ══════════════════════════════════════════════════════════════════════════
+  -- State Effects (for DM and other stateful graphs)
+  -- ══════════════════════════════════════════════════════════════════════════
+  | EffGetState
+      { effStateKey :: Text
+      -- ^ State key (e.g., "worldState", "sessionState")
+      }
+  | EffSetState
+      { effStateKey :: Text
+      -- ^ State key
+      , effStateValue :: Value
+      -- ^ New state value (full replacement)
+      }
+  -- ══════════════════════════════════════════════════════════════════════════
+  -- Event Emission (for observability/GUI)
+  -- ══════════════════════════════════════════════════════════════════════════
+  | EffEmitEvent
+      { effEventName :: Text
+      -- ^ Event name (e.g., "StressChanged", "ClockAdvanced")
+      , effEventPayload :: Value
+      -- ^ Event-specific payload
+      }
+  -- ══════════════════════════════════════════════════════════════════════════
+  -- Random Number Generation
+  -- ══════════════════════════════════════════════════════════════════════════
+  | EffRandomInt
+      { effRandomMin :: Int
+      -- ^ Minimum value (inclusive)
+      , effRandomMax :: Int
+      -- ^ Maximum value (inclusive)
+      }
+  -- ══════════════════════════════════════════════════════════════════════════
+  -- Time
+  -- ══════════════════════════════════════════════════════════════════════════
+  | EffGetTime
+      -- ^ Get current UTC time (returns ISO8601 string)
   deriving stock (Show, Eq, Generic)
 
 instance ToJSON SerializableEffect where
@@ -332,6 +368,28 @@ instance ToJSON SerializableEffect where
     , "eff_tools" .= tools
     ] ++ maybe [] (\s -> ["eff_schema" .= s]) schema
       ++ maybe [] (\m -> ["eff_model" .= m]) model
+  toJSON (EffGetState key) = object
+    [ "type" .= ("GetState" :: Text)
+    , "eff_state_key" .= key
+    ]
+  toJSON (EffSetState key value) = object
+    [ "type" .= ("SetState" :: Text)
+    , "eff_state_key" .= key
+    , "eff_state_value" .= value
+    ]
+  toJSON (EffEmitEvent name payload) = object
+    [ "type" .= ("EmitEvent" :: Text)
+    , "eff_event_name" .= name
+    , "eff_event_payload" .= payload
+    ]
+  toJSON (EffRandomInt minVal maxVal) = object
+    [ "type" .= ("RandomInt" :: Text)
+    , "eff_min" .= minVal
+    , "eff_max" .= maxVal
+    ]
+  toJSON EffGetTime = object
+    [ "type" .= ("GetTime" :: Text)
+    ]
 
 instance FromJSON SerializableEffect where
   parseJSON = withObject "SerializableEffect" $ \o -> do
@@ -367,6 +425,17 @@ instance FromJSON SerializableEffect where
         <*> o .:? "eff_schema"
         <*> o .: "eff_tools"
         <*> o .:? "eff_model"
+      "GetState" -> EffGetState <$> o .: "eff_state_key"
+      "SetState" -> EffSetState
+        <$> o .: "eff_state_key"
+        <*> o .: "eff_state_value"
+      "EmitEvent" -> EffEmitEvent
+        <$> o .: "eff_event_name"
+        <*> o .: "eff_event_payload"
+      "RandomInt" -> EffRandomInt
+        <$> o .: "eff_min"
+        <*> o .: "eff_max"
+      "GetTime" -> pure EffGetTime
       _         -> fail $ "Unknown effect type: " ++ show typ
 
 
@@ -395,6 +464,15 @@ effectMetadata = \case
   EffHabitica{}      -> (Internal, Blocking)
   EffTelegramSend{}  -> (Yielded, FireAndForget)  -- Send and continue
   EffTelegramAsk{}   -> (Yielded, Blocking)       -- Wait for button click
+  -- State effects (for DM and other stateful graphs)
+  EffGetState{}      -> (Internal, Blocking)      -- Read state from storage
+  EffSetState{}      -> (Internal, FireAndForget) -- Write state to storage
+  -- Event emission (for observability/GUI updates)
+  EffEmitEvent{}     -> (Yielded, FireAndForget)  -- Notify listeners
+  -- Random number generation
+  EffRandomInt{}     -> (Internal, Blocking)      -- Get random int
+  -- Time
+  EffGetTime{}       -> (Internal, Blocking)      -- Get current time
 
 
 -- ════════════════════════════════════════════════════════════════════════════

@@ -2,21 +2,15 @@
 export const graphRegistry = {
     "example": {
         id: "example",
-        name: "ExampleGraph",
+        name: "example",
         nodes: ["entry", "classify", "handleGreeting", "handleQuestion", "handleStatement", "exit"],
-        edges: [{ from: "entry", to: "classify" }, { from: "classify", to: "handleGreeting" }, { from: "classify", to: "handleQuestion" }, { from: "classify", to: "handleStatement" }, { from: "handleGreeting", to: "exit" }, { from: "handleQuestion", to: "exit" }, { from: "handleStatement", to: "exit" }]
-    },
-    "habitica": {
-        id: "habitica",
-        name: "HabiticaRoutingGraph",
-        nodes: ["entry", "extractTask", "fetchExisting", "matchTask", "suggestAction", "confirmWithUser", "executeAction", "exit"],
-        edges: [{ from: "entry", to: "extractTask" }, { from: "extractTask", to: "fetchExisting" }, { from: "fetchExisting", to: "matchTask" }, { from: "matchTask", to: "suggestAction" }, { from: "suggestAction", to: "confirmWithUser" }, { from: "confirmWithUser", to: "executeAction" }, { from: "confirmWithUser", to: "suggestAction" }, { from: "confirmWithUser", to: "exit" }, { from: "executeAction", to: "exit" }]
+        edges: [{ from: "Entry", to: "classify" }, { from: "Entry", to: "handleGreeting" }, { from: "Entry", to: "handleQuestion" }, { from: "Entry", to: "handleStatement" }, { from: "classify", to: "handleGreeting" }, { from: "classify", to: "handleQuestion" }, { from: "classify", to: "handleStatement" }, { from: "handleGreeting", to: "Exit" }, { from: "handleQuestion", to: "Exit" }, { from: "handleStatement", to: "Exit" }]
     },
     "test": {
         id: "test",
-        name: "TestGraph",
+        name: "test",
         nodes: ["entry", "compute", "exit"],
-        edges: [{ from: "entry", to: "compute" }, { from: "compute", to: "exit" }]
+        edges: [{ from: "Entry", to: "compute" }, { from: "compute", to: "Exit" }]
     }
 };
 //# sourceMappingURL=graphs.js.map
