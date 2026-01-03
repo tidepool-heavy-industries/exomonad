@@ -1,9 +1,3 @@
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE PolyKinds #-}
-{-# LANGUAGE StandaloneKindSignatures #-}
-{-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE TypeOperators #-}
-{-# LANGUAGE UndecidableInstances #-}
 
 -- | Educational type errors for the Graph DSL.
 --

@@ -1,9 +1,3 @@
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE GADTs #-}
-{-# LANGUAGE PolyKinds #-}
-{-# LANGUAGE StandaloneKindSignatures #-}
-{-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE TypeOperators #-}
 
 -- | Internal module exposing OneOf and GotoChoice constructors.
 --

@@ -1,9 +1,3 @@
-{-# LANGUAGE AllowAmbiguousTypes #-}
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE PolyKinds #-}
-{-# LANGUAGE StandaloneKindSignatures #-}
-{-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE UndecidableInstances #-}
 
 -- | Unified tool definitions for the Graph DSL.
 --

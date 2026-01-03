@@ -1,4 +1,34 @@
 -- | GitHub integration effect
+--
+-- = ⚠️  STUB IMPLEMENTATION - Not Yet Functional
+--
+-- This module provides type signatures for GitHub API integration
+-- but all runner functions call @error@ at runtime.
+--
+-- __Intended use:__
+--
+-- * Type checking and effect composition
+-- * Template for implementing real GitHub integration
+--
+-- __Not suitable for:__
+--
+-- * Production use
+-- * Runtime execution (will crash with @error@)
+--
+-- == Implementation TODO
+--
+-- To make this functional, implement a real runner using the GitHub API:
+--
+-- @
+-- runGitHubAPI :: GitHubToken -> Eff (GitHub : es) a -> Eff es a
+-- runGitHubAPI token = interpret $ \\case
+--   CreateIssue repo title body labels -> do
+--     -- Call GitHub REST API
+--     ...
+--   ListIssues repo labels -> do
+--     -- Call GitHub REST API
+--     ...
+-- @
 module Tidepool.Effects.GitHub
   ( -- * Effect
     GitHub(..)

@@ -1,7 +1,3 @@
-{-# LANGUAGE AllowAmbiguousTypes #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE ScopedTypeVariables #-}
 
 -- | Mermaid diagram generation for Graph definitions.
 --
