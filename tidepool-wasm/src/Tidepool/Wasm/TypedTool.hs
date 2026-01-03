@@ -18,7 +18,8 @@
 -- You can write:
 --
 -- @
--- selected <- askUser "Which meds?" ["Morning meds", "HRT Shot"]
+-- let input = AskUserInput "Which meds?" (Just ["Morning meds", "HRT Shot"])
+-- selected <- askUser input
 -- -- selected is the Text of the option the user clicked
 -- @
 --
@@ -81,7 +82,6 @@ import Data.Aeson
   ( FromJSON(..)
   , ToJSON(..)
   , Result(..)
-  , Value
   , fromJSON
   , object
   , (.=)
@@ -142,12 +142,9 @@ instance ToJSON AskUserInput where
 -- Example:
 --
 -- @
--- case toolCall of
---   WireToolCall { wtcName = "ask_user", wtcInput = input } -> do
---     result <- askUser input
---     case result of
---       Right selectedText -> useSelection selectedText
---       Left err -> handleError err
+-- let input = AskUserInput "What next?" (Just ["Continue", "Stop"])
+-- selectedText <- askUser input
+-- useSelection selectedText
 -- @
 askUser
   :: Member (Yield SerializableEffect EffectResult) effs
@@ -161,18 +158,22 @@ askUser AskUserInput{..} = do
       -- For now, show as single "Continue" button that user can ignore
       -- and type instead
       result <- telegramAsk auiQuestion [("Type your response", "freeform")]
-      pure $ case result of
-        TelegramButton _ -> ""  -- They clicked instead of typing
-        TelegramText txt -> txt
-        TelegramStaleButton -> ""
+      case result of
+        TelegramButton _ -> pure ""  -- They clicked instead of typing
+        TelegramText txt -> pure txt
+        TelegramStaleButton -> do
+          logInfo $ "Stale button clicked for freeform question: " <> auiQuestion
+          pure ""
     Just opts -> do
       -- With options = inline keyboard buttons
       let buttons = [(opt, opt) | opt <- opts]  -- label = callback data
       result <- telegramAsk auiQuestion buttons
-      pure $ case result of
-        TelegramButton response -> response  -- The callback_data = option text
-        TelegramText txt -> txt  -- User typed instead of clicking
-        TelegramStaleButton -> ""  -- Stale button, treat as empty
+      case result of
+        TelegramButton response -> pure response  -- The callback_data = option text
+        TelegramText txt -> pure txt  -- User typed instead of clicking
+        TelegramStaleButton -> do
+          logInfo $ "Stale button clicked for question: " <> auiQuestion
+          pure ""  -- Stale button, treat as empty
 
 
 -- | Ask user with a fallback for when no options are provided.
@@ -252,9 +253,17 @@ parseToolInput tc = case fromJSON tc.wtcInput of
                    <> tc.wtcName <> "': " <> T.pack err
 
 
--- | Parse tool input, failing with error in the effect monad.
+-- | Parse tool input, failing hard if parsing fails.
 --
--- Logs the error and terminates with error if parsing fails.
+-- This is the "fail fast" variant of 'parseToolInput'. Use this when:
+--
+-- * Tool input schema is defined by you (not external)
+-- * Parse failure indicates a bug in the LLM or tool definition
+-- * You want to abort rather than handle malformed input gracefully
+--
+-- For graceful error handling, use 'parseToolInput' which returns 'Either'.
+--
+-- Logs the error before terminating.
 parseToolInputM
   :: (FromJSON a, Member (Yield SerializableEffect EffectResult) effs)
   => WireToolCall
