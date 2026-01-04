@@ -1,26 +1,24 @@
-{-# LANGUAGE QuasiQuotes #-}
 -- | BD executor integration tests.
 --
 -- Tests JSON parsing and CLI integration with mock bd commands.
 -- Uses System.IO.Temp for isolated test environments.
 module Main (main) where
 
-import Control.Exception (bracket, try, SomeException)
+import Control.Exception (try, SomeException)
 import Control.Monad (forM_, when, void)
-import Control.Monad.Freer (Eff, runM, interpret)
+import Control.Monad.Freer (Eff, runM)
 import Data.Aeson (eitherDecode, encode)
 import Data.ByteString.Lazy qualified as LBS
-import Data.List (isInfixOf)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
 import Data.Text.IO qualified as TIO
 import System.Directory (createDirectoryIfMissing, setPermissions, getPermissions, setOwnerExecutable)
-import System.Environment (setEnv, getEnv, lookupEnv)
+import System.Environment (setEnv, lookupEnv)
 import System.Exit (ExitCode(..))
 import System.FilePath ((</>))
 import System.IO.Temp (withSystemTempDirectory)
-import System.Process (readProcessWithExitCode, callProcess, readProcess)
+import System.Process (readProcessWithExitCode, callProcess)
 import Test.Hspec
 
 import Tidepool.Effects.BD
@@ -374,7 +372,6 @@ withMockBdEnv action = withSystemTempDirectory "bd-test" $ \tmpDir -> do
 writeMockBd :: FilePath -> String -> IO ()
 writeMockBd tmpDir body = do
   let bdPath = tmpDir </> "bin" </> "bd"
-  -- Use printf instead of echo for portability, escape properly
   TIO.writeFile bdPath $ T.pack $ unlines
     [ "#!/bin/sh"
     , "# Mock bd script for testing"
