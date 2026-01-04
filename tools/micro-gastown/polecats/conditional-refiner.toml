@@ -1,0 +1,62 @@
+# Conditional Refiner Polecat
+# Drafts targeted changes to Tidepool DSL based on pattern analysis
+
+[polecat]
+name = "conditional-refiner"
+description = "Drafts DSL improvements based on log pattern analysis"
+role = "modifier"
+
+[model]
+provider = "anthropic"
+name = "claude-haiku-4-20250514"
+max_tokens = 8192
+temperature = 0.2
+
+[prompt.system]
+content = """
+You are the Conditional Refiner for Tidepool's sleeptime evolution system.
+
+You receive a PatternReport from the Log Analyzer and propose targeted
+improvements to the graph DSL. Your changes should be:
+
+1. **Minimal**: Change only what's necessary to address the pattern
+2. **Reversible**: Easy to revert if the change doesn't help
+3. **Measurable**: Include success criteria for A/B testing
+4. **Documented**: Explain why this change should improve the metric
+
+Types of changes you can propose:
+- Template refinements (reduce token count, improve clarity)
+- Schema adjustments (fix parsing failures)
+- Graph restructuring (add/remove edges, merge nodes)
+- Tool improvements (fix recurring tool errors)
+- Threshold tuning (adjust retry counts, timeouts)
+
+Output a unified diff with inline rationale comments.
+Never make speculative changes - every change must trace to a specific pattern.
+"""
+
+[tools]
+available = [
+  "read_template",           # Read existing templates
+  "read_schema",             # Read existing schemas
+  "read_graph_def",          # Read graph definitions
+  "propose_diff"             # Generate unified diff
+]
+
+[output]
+format = "diff"
+include_rationale = true
+include_metrics = true
+
+[guardrails]
+max_files_changed = 5        # Don't touch too many files at once
+max_lines_changed = 200      # Keep changes small
+require_pattern_link = true  # Every change must cite a pattern
+forbidden_paths = [
+  "src/Tidepool/Effect/",    # Don't touch core effects
+  "deploy/src/handlers/"     # Don't touch TypeScript handlers
+]
+
+[validation]
+require_typecheck = true     # Must pass `cabal build`
+require_tests = true         # Must pass existing tests

@@ -1,0 +1,60 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://tidepool.dev/schemas/PRResult.json",
+  "title": "PRResult",
+  "description": "Result of filing a sleeptime evolution PR",
+  "type": "object",
+  "required": ["pr_url", "branch_name", "commit_sha", "files_changed", "status"],
+  "properties": {
+    "pr_url": {
+      "type": "string",
+      "format": "uri",
+      "description": "URL of the created pull request"
+    },
+    "branch_name": {
+      "type": "string",
+      "description": "Name of the branch created",
+      "pattern": "^sleeptime/[0-9]{4}-[0-9]{2}-[0-9]{2}-[a-z0-9-]+$"
+    },
+    "commit_sha": {
+      "type": "string",
+      "description": "SHA of the commit",
+      "pattern": "^[a-f0-9]{40}$"
+    },
+    "files_changed": {
+      "type": "array",
+      "description": "List of files modified",
+      "items": {
+        "type": "string"
+      }
+    },
+    "patterns_addressed": {
+      "type": "array",
+      "description": "Pattern IDs addressed by this PR",
+      "items": {
+        "type": "string"
+      }
+    },
+    "status": {
+      "type": "string",
+      "enum": ["draft", "ready", "merged", "closed"],
+      "description": "Current PR status"
+    },
+    "pr_number": {
+      "type": "integer",
+      "description": "PR number in the repository"
+    },
+    "labels": {
+      "type": "array",
+      "description": "Labels applied to the PR",
+      "items": {
+        "type": "string"
+      }
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the PR was created"
+    }
+  }
+}
