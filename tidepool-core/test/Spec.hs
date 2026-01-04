@@ -2,6 +2,8 @@ module Main (main) where
 
 import Test.Hspec
 
+import qualified CLISpec
+import qualified CLIGraphSpec
 import qualified GraphValidationSpec
 import qualified LLMNodeExecuteSpec
 import qualified MemorySerializationSpec
@@ -15,6 +17,12 @@ import qualified DispatchGotoSpec
 
 main :: IO ()
 main = hspec $ do
+  describe "CLI Derivation" $ do
+    CLISpec.spec
+
+  describe "CLI Graph E2E" $ do
+    CLIGraphSpec.spec
+
   describe "Graph DSL" $ do
     GraphValidationSpec.spec
 

@@ -31,12 +31,13 @@ module Tidepool.Effects.LLMProvider
   , complete
   ) where
 
-import Data.Text (Text)
-import Data.Aeson (Value, ToJSON(..), FromJSON(..), object, (.=), withObject, (.:), (.:?))
-import qualified Data.Aeson.Types as Aeson
-import GHC.Generics (Generic)
+import Control.Applicative ((<|>))
 import Control.Monad.Freer (Eff, Member, send)
+import Data.Aeson (Value, ToJSON(..), FromJSON(..), object, (.=), withObject, (.:), (.:?))
+import Data.Aeson.Types qualified as Aeson
 import Data.Kind (Type)
+import Data.Text (Text)
+import GHC.Generics (Generic)
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -232,7 +233,10 @@ instance ToJSON Usage where
 
 instance FromJSON Usage where
   parseJSON = withObject "Usage" $ \v ->
-    Usage <$> v .: "prompt_tokens" <*> v .: "completion_tokens"
+    -- Handle both Anthropic (input_tokens) and OpenAI (prompt_tokens) field names
+    Usage
+      <$> (v .: "input_tokens" <|> v .: "prompt_tokens")
+      <*> (v .: "output_tokens" <|> v .: "completion_tokens")
 
 
 -- ════════════════════════════════════════════════════════════════════════════

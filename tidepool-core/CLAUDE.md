@@ -809,6 +809,94 @@ diagram = graphToMermaid (Proxy @MyGraph)
 - Implicit (Schema → Needs): `-->` solid arrow
 - Explicit (Goto): `-->` solid arrow
 
+### CLI.hs - CLI Derivation
+
+Enables wrapping any tidepool graph as a CLI tool where the Entry type
+determines CLI arguments and the Exit type determines output formatting.
+
+#### deriveCLIParser
+
+TH macro that generates optparse-applicative parsers from Haddock-documented
+record types:
+
+```haskell
+-- Input type must be in separate module with FieldSelectors
+{-# LANGUAGE FieldSelectors #-}
+
+data ProcessInput = ProcessInput
+  { inputFile :: FilePath
+    -- ^ Path to input file to process
+  , verbose :: Bool
+    -- ^ Enable verbose logging
+  }
+
+-- In Main.hs
+main = runGraphCLIWith
+  "Process files"
+  $(deriveCLIParser ''ProcessInput)
+  runMyGraph
+```
+
+**Field Type Mapping:**
+
+| Haskell Type | CLI Parser | Flag Format |
+|--------------|------------|-------------|
+| `Text`/`String`/`FilePath` | `strOption` | `--field-name TEXT` |
+| `Int`/`Integer`/`Double` | `option auto` | `--field-name NUM` |
+| `Bool` | `switch` | `--field-name` (flag) |
+| `Maybe a` | `optional` | Optional flag |
+| `[a]` | `many` | Repeatable flag |
+
+**Sum Types as Subcommands:**
+
+```haskell
+data Command
+  = Process { file :: FilePath }  -- ^ Process a file
+  | Validate { strict :: Bool }   -- ^ Validate
+
+-- Generates: mycli process --file FILE
+--            mycli validate [--strict]
+```
+
+#### runGraphCLIWith
+
+Wires parser + executor + output formatting:
+
+```haskell
+runGraphCLIWith
+  :: (Show output, ToJSON output)
+  => Text             -- ^ Description for --help
+  -> Parser input     -- ^ From deriveCLIParser
+  -> (input -> IO output) -> IO ()
+```
+
+#### Output Formatting
+
+```haskell
+-- --format json  → JSON output (via ToJSON)
+-- --format text  → Text output (via Show, default)
+formatOutput :: (Show a, ToJSON a) => OutputFormat -> a -> Text
+```
+
+#### Type Families
+
+```haskell
+-- Extract Entry/Exit types from graph records
+type GraphEntryType graph  -- Entry Input → Input
+type GraphExitType graph   -- Exit Output → Output
+
+-- Validation (produce helpful errors if missing)
+type ValidEntry :: Type -> Constraint
+type ValidExit :: Type -> Constraint
+```
+
+#### Requirements (TH Staging)
+
+Same as `deriveJSONSchema`:
+1. Input type in separate, already-compiled module
+2. Module has `{-# LANGUAGE FieldSelectors #-}`
+3. All fields have `-- ^` Haddock documentation
+
 ## Usage Patterns
 
 ### Basic Linear Graph
@@ -1748,6 +1836,7 @@ This follows the xmonad/xmonad-contrib pattern: core framework vs reusable integ
 | Memory.hs | Memory effect for persistent state |
 | Template.hs | TemplateDef typeclass for typed prompts |
 | Tool.hs | Unified tool definitions (ToolDef typeclass) |
+| CLI.hs | CLI derivation (deriveCLIParser, runGraphCLIWith, formatOutput) |
 | Edges.hs | Edge derivation type families |
 | Validate.hs | Compile-time validation |
 | Reify.hs | Runtime graph info extraction (now includes Goto target reification) |
