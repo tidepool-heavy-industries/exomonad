@@ -1,11 +1,13 @@
--- | Observability effect for structured logging and tracing.
+-- | Observability effect for structured logging.
 --
 -- Effect type only - executors live in tidepool-observability-executor.
+--
+-- NOTE: Span tracking (WithSpan) has been removed for simplicity.
+-- Observability is WIP - we keep only basic event publishing for now.
 module Tidepool.Effects.Observability
   ( -- * Effect
     Observability(..)
   , publishEvent
-  , withSpan
 
     -- * Event Types
   , TidepoolEvent(..)
@@ -105,10 +107,11 @@ instance FromJSON TidepoolEvent where
 -- EFFECT
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Observability effect for publishing events and tracing spans.
+-- | Observability effect for publishing structured events.
+--
+-- Events are published to Loki for querying and dashboards.
 data Observability r where
   PublishEvent :: TidepoolEvent -> Observability ()
-  WithSpan :: Text -> Eff '[Observability] a -> Observability a
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -118,7 +121,3 @@ data Observability r where
 -- | Publish an observability event.
 publishEvent :: Member Observability effs => TidepoolEvent -> Eff effs ()
 publishEvent = send . PublishEvent
-
--- | Execute an action within a named span for tracing.
-withSpan :: Member Observability effs => Text -> Eff '[Observability] a -> Eff effs a
-withSpan name action = send (WithSpan name action)
