@@ -185,18 +185,20 @@ depId (DependencyInfo { diId = i }) = i
 
 -- | Get labels for a bead.
 --
--- Uses @bd label list@ command.
+-- Uses @bd label list --json@ command.
 bdLabels :: BDConfig -> Text -> IO [Text]
 bdLabels config beadId = do
-  let args = ["label", "list", T.unpack beadId]
+  let args = ["label", "list", "--json", T.unpack beadId]
             ++ maybe [] (\d -> ["--db", d]) config.bcBeadsDir
 
   result <- runBdCommand config args
   case result of
     Left _err -> pure []
     Right output ->
-      -- bd label list outputs one label per line
-      pure $ filter (not . T.null) $ T.lines output
+      -- bd label list --json returns ["label1", "label2", ...]
+      case eitherDecode (LBS.fromStrict $ TE.encodeUtf8 output) of
+        Right labels -> pure labels
+        Left _ -> pure []  -- Parse error, return empty
 
 
 -- ════════════════════════════════════════════════════════════════════════════
