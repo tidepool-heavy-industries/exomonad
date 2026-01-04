@@ -529,3 +529,117 @@ realBdTests = do
         let config = BDConfig { bcBeadsDir = Just (fixture.tfTmpDir </> ".beads" </> "beads.db"), bcQuiet = True }
         result <- bdLabels config fixture.tfChildId
         result `shouldBe` []
+
+  -- Write operation tests
+  describe "write operations with real bd CLI" $ do
+    it "bdCreate creates a new bead and returns ID" $ do
+      bdAvailable <- isBdAvailable
+      when (not bdAvailable) $ pendingWith "bd CLI not available"
+      withTestBeadsDb $ \fixture -> do
+        let config = BDConfig { bcBeadsDir = Just (fixture.tfTmpDir </> ".beads" </> "beads.db"), bcQuiet = True }
+        let input = CreateBeadInput
+              { cbiTitle = "Test Created Bead"
+              , cbiDescription = Just "A test description"
+              , cbiType = TypeTask
+              , cbiPriority = 3
+              , cbiParent = Nothing
+              , cbiLabels = []
+              , cbiAssignee = Nothing
+              , cbiDeps = []
+              }
+        newId <- bdCreate config input
+        newId `shouldSatisfy` (not . T.null)
+        -- Verify we can read it back
+        result <- bdShow config newId
+        case result of
+          Nothing -> expectationFailure "Created bead not found"
+          Just bead -> do
+            bead.biTitle `shouldBe` "Test Created Bead"
+            bead.biType `shouldBe` TypeTask
+            bead.biPriority `shouldBe` 3
+
+    it "bdCreate creates child under parent" $ do
+      bdAvailable <- isBdAvailable
+      when (not bdAvailable) $ pendingWith "bd CLI not available"
+      withTestBeadsDb $ \fixture -> do
+        let config = BDConfig { bcBeadsDir = Just (fixture.tfTmpDir </> ".beads" </> "beads.db"), bcQuiet = True }
+        let input = CreateBeadInput
+              { cbiTitle = "Child of Parent"
+              , cbiDescription = Nothing
+              , cbiType = TypeTask
+              , cbiPriority = 2
+              , cbiParent = Just fixture.tfParentId
+              , cbiLabels = []
+              , cbiAssignee = Nothing
+              , cbiDeps = []
+              }
+        childId <- bdCreate config input
+        -- Verify parent relationship
+        result <- bdShow config childId
+        case result of
+          Nothing -> expectationFailure "Created child bead not found"
+          Just bead -> bead.biParent `shouldBe` Just fixture.tfParentId
+
+    it "bdClose and bdReopen toggle bead status" $ do
+      bdAvailable <- isBdAvailable
+      when (not bdAvailable) $ pendingWith "bd CLI not available"
+      withTestBeadsDb $ \fixture -> do
+        let config = BDConfig { bcBeadsDir = Just (fixture.tfTmpDir </> ".beads" </> "beads.db"), bcQuiet = True }
+        -- Initially open
+        result1 <- bdShow config fixture.tfChildId
+        case result1 of
+          Just bead -> bead.biStatus `shouldBe` StatusOpen
+          Nothing -> expectationFailure "Bead not found"
+        -- Close it
+        bdClose config fixture.tfChildId
+        result2 <- bdShow config fixture.tfChildId
+        case result2 of
+          Just bead -> bead.biStatus `shouldBe` StatusClosed
+          Nothing -> expectationFailure "Bead not found after close"
+        -- Reopen it
+        bdReopen config fixture.tfChildId
+        result3 <- bdShow config fixture.tfChildId
+        case result3 of
+          Just bead -> bead.biStatus `shouldBe` StatusOpen
+          Nothing -> expectationFailure "Bead not found after reopen"
+
+    it "bdAddLabel and bdRemoveLabel manage labels" $ do
+      bdAvailable <- isBdAvailable
+      when (not bdAvailable) $ pendingWith "bd CLI not available"
+      withTestBeadsDb $ \fixture -> do
+        let config = BDConfig { bcBeadsDir = Just (fixture.tfTmpDir </> ".beads" </> "beads.db"), bcQuiet = True }
+        -- Child starts with no labels
+        labels1 <- bdLabels config fixture.tfChildId
+        labels1 `shouldBe` []
+        -- Add a label
+        bdAddLabel config fixture.tfChildId "test-label"
+        labels2 <- bdLabels config fixture.tfChildId
+        labels2 `shouldContain` ["test-label"]
+        -- Remove it
+        bdRemoveLabel config fixture.tfChildId "test-label"
+        labels3 <- bdLabels config fixture.tfChildId
+        labels3 `shouldNotContain` ["test-label"]
+
+    it "bdChildren returns child beads" $ do
+      bdAvailable <- isBdAvailable
+      when (not bdAvailable) $ pendingWith "bd CLI not available"
+      withTestBeadsDb $ \fixture -> do
+        let config = BDConfig { bcBeadsDir = Just (fixture.tfTmpDir </> ".beads" </> "beads.db"), bcQuiet = True }
+        -- Create an actual child (with --parent, not --deps)
+        let childInput = CreateBeadInput
+              { cbiTitle = "Actual Child"
+              , cbiDescription = Nothing
+              , cbiType = TypeTask
+              , cbiPriority = 2
+              , cbiParent = Just fixture.tfParentId
+              , cbiLabels = []
+              , cbiAssignee = Nothing
+              , cbiDeps = []
+              }
+        actualChildId <- bdCreate config childInput
+        -- Now query children
+        children <- bdChildren config fixture.tfParentId
+        length children `shouldSatisfy` (>= 1)
+        -- Our child should be in the list
+        let childIds = map (\b -> b.biId) children
+        childIds `shouldContain` [actualChildId]
