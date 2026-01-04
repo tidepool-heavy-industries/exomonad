@@ -97,8 +97,7 @@ executable lsp-test
     default-language: Haskell2010
 EOF
 
-# Run test
-cd /home/inanna/dev/tidepool/worktrees/lsp
+# Run test (from tidepool repo root)
 cabal run lsp-smoke-test
 ```
 

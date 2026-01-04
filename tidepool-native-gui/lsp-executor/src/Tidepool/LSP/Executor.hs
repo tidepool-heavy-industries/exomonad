@@ -12,14 +12,14 @@ module Tidepool.LSP.Executor
   , runLSP
   ) where
 
+import Control.Exception (bracket)
 import Control.Monad.Freer (Eff, LastMember, sendM, interpret)
 import Control.Monad.IO.Class (liftIO)
-import Data.IORef
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Map.Strict as Map
 import System.IO (Handle)
-import System.Process (CreateProcess(..), StdStream(..), ProcessHandle, createProcess, proc, terminateProcess)
+import System.Process (CreateProcess(..), StdStream(..), ProcessHandle, createProcess, proc, terminateProcess, cwd)
 
 import Language.LSP.Client (runSessionWithHandles)
 import Language.LSP.Client.Session (Session, initialize, request)
@@ -48,26 +48,25 @@ data LSPSession = LSPSession
 --   pure result
 -- @
 withLSPSession
-  :: FilePath           -- ^ Project root directory
+  :: FilePath              -- ^ Project root directory
   -> (LSPSession -> IO a)  -- ^ Action to run with session
   -> IO a
-withLSPSession _rootDir action = do
-  -- Spawn HLS
-  (Just stdin, Just stdout, _, ph) <- createProcess
-    (proc "haskell-language-server-wrapper" ["--lsp"])
-      { std_in = CreatePipe
-      , std_out = CreatePipe
-      , std_err = CreatePipe
-      }
+withLSPSession rootDir action =
+  bracket acquire release $ \session ->
+    action session
+  where
+    acquire = do
+      (Just stdin, Just stdout, _, ph) <- createProcess
+        (proc "haskell-language-server-wrapper" ["--lsp"])
+          { std_in = CreatePipe
+          , std_out = CreatePipe
+          , std_err = CreatePipe
+          , cwd = Just rootDir
+          }
+      pure $ LSPSession stdin stdout ph
 
-  let session = LSPSession stdin stdout ph
-
-  -- Run action
-  result <- action session
-
-  -- Cleanup
-  terminateProcess ph
-  pure result
+    release session =
+      terminateProcess (lspProcess session)
 
 
 -- ════════════════════════════════════════════════════════════════════════════

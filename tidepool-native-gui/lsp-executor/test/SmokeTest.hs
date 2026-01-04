@@ -11,12 +11,12 @@
 module Main where
 
 import Control.Concurrent (threadDelay)
-import Control.Exception (try, SomeException)
+import Control.Exception (bracket, try, SomeException)
 import Control.Monad.IO.Class (liftIO)
 import Data.Text (Text)
 import qualified Data.Text as T
 import System.IO (Handle, BufferMode(..), hFlush, hSetBuffering, stdout)
-import System.Process (CreateProcess(..), StdStream(..), createProcess, proc, terminateProcess, cwd)
+import System.Process (CreateProcess(..), StdStream(..), ProcessHandle, createProcess, proc, terminateProcess, cwd)
 
 import Language.LSP.Client (runSessionWithHandles)
 import Language.LSP.Client.Session (Session, initialize, request, openDoc)
@@ -31,39 +31,66 @@ log' s = putStrLn s >> hFlush stdout
 slog :: String -> Session ()
 slog = liftIO . log'
 
+-- | Test project directory (must exist with Test.hs and lsp-test.cabal)
+testProjectDir :: FilePath
+testProjectDir = "/tmp/lsp-test-project"
+
+-- | HLS session with handles and process
+data HLSSession = HLSSession
+  { hlsStdin  :: Handle
+  , hlsStdout :: Handle
+  , hlsProcess :: ProcessHandle
+  }
+
 main :: IO ()
 main = do
   log' "=== LSP Smoke Test (lsp-client) ==="
   log' ""
 
-  -- Start HLS in the project directory
-  log' "[1] Starting HLS in /tmp/lsp-test-project..."
+  -- Start HLS with exception-safe cleanup
+  log' $ "[1] Starting HLS in " ++ testProjectDir ++ "..."
+  result <- bracket startHLS stopHLS runTests
+
+  case result of
+    Left (e :: SomeException) -> do
+      log' $ "FAILED: " ++ show e
+    Right () -> do
+      log' ""
+      log' "[5] Session closed cleanly"
+      log' "=== Test Complete ==="
+
+-- | Start HLS process in test project directory
+startHLS :: IO HLSSession
+startHLS = do
   (Just stdin', Just stdout', Just _stderr', ph) <- createProcess
     (proc "haskell-language-server-wrapper" ["--lsp"])
       { std_in = CreatePipe
       , std_out = CreatePipe
       , std_err = CreatePipe
-      , cwd = Just "/tmp/lsp-test-project"
+      , cwd = Just testProjectDir
       }
-
-  -- Set no buffering for LSP protocol
   hSetBuffering stdin' NoBuffering
   hSetBuffering stdout' NoBuffering
-
   log' "OK - HLS process started"
   log' ""
+  pure $ HLSSession stdin' stdout' ph
 
-  -- Run all tests in a single session
+-- | Terminate HLS process
+stopHLS :: HLSSession -> IO ()
+stopHLS = terminateProcess . hlsProcess
+
+-- | Run all LSP tests in a single session
+runTests :: HLSSession -> IO (Either SomeException ())
+runTests hls = do
   log' "[2] Running tests in single session..."
-  result <- try $ runSessionWithHandles stdout' stdin' $ do
-    -- Initialize once
+  try $ runSessionWithHandles (hlsStdout hls) (hlsStdin hls) $ do
     _ <- initialize Nothing
     slog "OK - Session initialized"
     slog ""
 
     -- Open the document (REQUIRED before any requests)
     slog "[2.5] Opening document..."
-    doc <- openDoc "/tmp/lsp-test-project/Test.hs" "haskell"
+    doc <- openDoc (testProjectDir ++ "/Test.hs") "haskell"
     slog $ "OK - Opened: " ++ show doc._uri
 
     -- Wait for HLS to process the file (it needs to typecheck)
@@ -81,17 +108,6 @@ main = do
     testDefinitionDoc doc
 
     pure ()
-
-  -- Cleanup
-  terminateProcess ph
-
-  case result of
-    Left (e :: SomeException) -> do
-      log' $ "FAILED: " ++ show e
-    Right () -> do
-      log' ""
-      log' "[5] Session closed cleanly"
-      log' "=== Test Complete ==="
 
 -- | Test hover on a known position
 testHoverDoc :: L.TextDocumentIdentifier -> Session ()
