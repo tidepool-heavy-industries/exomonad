@@ -1,79 +1,33 @@
-# GraphCLI Work Stream
+# Schema Format Switching Work Stream
 
-## Status: Complete
+## Context
 
-GraphCLI typeclass enables wrapping any tidepool graph as a CLI tool. Entry type determines CLI arguments (derived from Haddock via TH), Exit type determines output format.
+Different LLM providers use different formats for tool definitions and structured output schemas:
+- **Anthropic** - Uses `input_schema` for tools, specific structured output format
+- **Cloudflare AI** - Uses OpenAI-style `type: "function", function: {parameters}` format
 
-## Implementation
+The executor needs to derive the correct format based on context (which provider is being used).
 
-### Files Modified
-- `tidepool-core/src/Tidepool/Graph/CLI.hs` - Complete rewrite
+## Current State
 
-### Key Components
+- LLM executor: `tidepool-native-gui/llm-executor/src/Tidepool/LLM/Executor.hs`
+- Type-level provider switching via `SProvider` singleton (SAnthropic, SOpenAI)
+- Effect definition: `tidepool-core/src/Tidepool/Effects/LLMProvider.hs`
 
-1. **`deriveCLIParser`** - TH macro that generates optparse-applicative parsers from record types
-   - Reads Haddock comments for help text
-   - Converts camelCase field names to kebab-case flags
-   - Supports: Text, String, FilePath, Int, Integer, Double, Bool, Maybe, []
-   - Sum types become subcommands
-   - Rejects nested records with clear error message
+## Key Questions
 
-2. **`runGraphCLIWith`** - Wires parser + executor + output formatting
-   ```haskell
-   runGraphCLIWith
-     :: (Show output, ToJSON output)
-     => Text -> Parser input -> (input -> IO output) -> IO ()
-   ```
+1. How does tool definition format differ between providers?
+2. How does structured output schema format differ?
+3. Can we derive the correct format from the provider type at compile time?
+4. How does this interact with the WASM/CF AI path vs native Anthropic path?
 
-3. **`formatOutput`** - JSON or text output via `--format` flag
-   ```haskell
-   formatOutput :: (Show a, ToJSON a) => OutputFormat -> a -> Text
-   ```
+## Key Files
 
-4. **Type families** - `GraphEntryType` / `GraphExitType` extract Entry/Exit types from graph records
+- `tidepool-native-gui/llm-executor/src/Tidepool/LLM/Executor.hs` - Native interpreter
+- `tidepool-native-gui/llm-executor/src/Tidepool/LLM/Types.hs` - Config types
+- `tidepool-core/src/Tidepool/Effects/LLMProvider.hs` - Effect definition with provider types
+- `deploy/src/handlers/llm.ts` - CF AI handler (for reference)
 
-5. **Validation constraints** - `ValidEntry` / `ValidExit` produce helpful type errors for missing Entry/Exit
+## Goal
 
-### Requirements (TH Staging)
-Same as `deriveJSONSchema`:
-1. Input type in separate, already-compiled module
-2. Module has `{-# LANGUAGE FieldSelectors #-}`
-3. All fields have `-- ^` Haddock documentation
-
-### Example Usage
-
-```haskell
--- Types.hs (separate module)
-{-# LANGUAGE FieldSelectors #-}
-
-data ProcessInput = ProcessInput
-  { inputFile :: FilePath
-    -- ^ Path to input file
-  , verbose :: Bool
-    -- ^ Enable verbose output
-  }
-
--- Main.hs
-main :: IO ()
-main = runGraphCLIWith
-  "Process files"
-  $(deriveCLIParser ''ProcessInput)
-  processGraph
-```
-
-## Tests
-
-Test suite in `tidepool-core/test/`:
-- `CLITestTypes.hs` - Test types with Haddock (flat record + sum type)
-- `CLISpec.hs` - Tests for deriveCLIParser, formatOutput, outputFormatParser
-- `CLIGraphTypes.hs` - E2E test types (CounterInput/CounterOutput)
-- `CLIGraphSpec.hs` - E2E tests: logic-only graph wired via CLI
-
-All 120 tests pass including:
-- 15 CLI derivation tests
-- 11 CLI Graph E2E tests (CLI → parse → graph execute → formatted output)
-
-## Research
-
-- `docs/cli-research.md` - optparse-generic limitations documented
-- Conclusion: TH derivation with manual optparse-applicative is the right approach
+Ensure schema format switching works correctly for both tool definitions and structured output across providers.
