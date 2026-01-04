@@ -22,6 +22,9 @@
               cabal-install
               haskell-language-server
 
+              # Runtime deps for HTTP clients
+              zlib
+
               # Node/TypeScript (wrangler installed via pnpm in deploy/)
               nodejs_20
               pnpm
