@@ -10,6 +10,7 @@ packages:
     tidepool-native-gui/habitica-executor
     tidepool-native-gui/observability-executor
     tidepool-native-gui/llm-executor
+    tidepool-native-gui/issue-executor
     tidepool-native-gui/server
 
     -- Tooling packages (Agent 8)
