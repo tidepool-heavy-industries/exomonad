@@ -9,6 +9,11 @@ tidepool-native-gui/
 ├── wire-types/               # Agent 3 - UIState, UserAction, protocol
 │   ├── src/Tidepool/Wire/Types.hs
 │   └── tidepool-wire-types.cabal
+├── solid-frontend/           # Agent 2 - SolidJS frontend
+│   ├── src/App.tsx
+│   ├── src/components/
+│   ├── src/lib/socket.ts
+│   └── package.json
 ├── ui-executor/              # Agent 4 - interpreter for UI effects
 │   ├── src/Tidepool/UI/Executor.hs
 │   └── tidepool-ui-executor.cabal
@@ -37,7 +42,7 @@ Effect *types* live in `tidepool-core/src/Tidepool/Effects/`, shared by WASM and
 ```
 wire-types (Agent 3) ──────► ui-executor (Agent 4)
                        ├───► server (Agent 1)
-                       └───► [Solid frontend, Agent 2]
+                       └───► solid-frontend (Agent 2)
 
 habitica-executor (Agent 5) ───► server
 observability-executor (Agent 6) ───► server
@@ -54,17 +59,26 @@ llm-executor (Agent 7) ───► server
 ## Building
 
 ```bash
-# From repo root
+# Haskell packages (from repo root)
 cabal build all
+
+# Solid frontend
+cd tidepool-native-gui/solid-frontend
+npm install
+npm run build     # Production build
+npm run dev       # Dev server on port 3000
 ```
+
+Set `VITE_WS_URL` to override the WebSocket URL (default: `ws://localhost:8080`).
 
 ## Status
 
-**All effect executors implemented and building:**
+**All components implemented and building:**
 
+- Agent 1 (server): Complete - Effect runner with SSE streaming
+- Agent 2 (solid-frontend): Complete - SolidJS + Tailwind CSS frontend with WebSocket, chat rendering, text/photo input, button groups
 - Agent 3 (wire-types): Complete - UIState, UserAction, protocol types
 - Agent 4 (ui-executor): Complete - UI effect interpreter with wire bridging
 - Agent 5 (habitica-executor): Complete - Native Habitica HTTP client
 - Agent 6 (observability-executor): Complete - Loki push API client
 - Agent 7 (llm-executor): Complete - Anthropic/OpenAI native HTTP clients
-- Agent 1 (server): Complete - Effect runner with SSE streaming
