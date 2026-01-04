@@ -1,0 +1,56 @@
+cabal-version:      3.0
+name:               tidepool-mcp
+version:            0.1.0.0
+synopsis:           Inter-Gas Town routing MCP server types
+description:        Haskell types for the Inter-Gas Town Routing MCP server.
+                    Defines RoutingGraph, domain types, and effects for
+                    routing requests between Gas Town instances.
+license:            MIT
+author:             Inanna
+build-type:         Simple
+
+common warnings
+    ghc-options: -Wall -Wno-missing-export-lists -Wincomplete-patterns
+
+library
+    import:           warnings
+    exposed-modules:
+        Tidepool.MCP.Routing
+        Tidepool.MCP.Routing.Types
+        Tidepool.MCP.Routing.Effects
+        Tidepool.MCP.Routing.Graph
+    build-depends:
+        base >= 4.17 && < 5,
+        freer-simple >= 1.2 && < 2,
+        aeson >= 2.1 && < 3,
+        text >= 2.0 && < 3,
+        containers >= 0.6 && < 1,
+        time >= 1.12 && < 2,
+        tidepool-core
+    hs-source-dirs:   src
+    default-language: GHC2021
+    default-extensions:
+        DataKinds
+        DeriveAnyClass
+        DeriveGeneric
+        DerivingStrategies
+        DerivingVia
+        DuplicateRecordFields
+        GADTs
+        LambdaCase
+        MultiParamTypeClasses
+        NoFieldSelectors
+        OverloadedRecordDot
+        OverloadedStrings
+        TypeFamilies
+        TypeOperators
+        -- Graph DSL type-level programming extensions
+        AllowAmbiguousTypes
+        FlexibleContexts
+        FlexibleInstances
+        PolyKinds
+        RankNTypes
+        ScopedTypeVariables
+        StandaloneKindSignatures
+        TypeApplications
+        UndecidableInstances
