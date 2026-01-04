@@ -14,11 +14,9 @@ module Main where
 
 import Control.Monad (when)
 import Control.Monad.Freer (runM)
-import Data.Aeson (Value(..), object, (.=), encode)
-import Data.Aeson.KeyMap qualified as KM
+import Data.Aeson (Value(..), object, (.=))
 import Data.Text (Text)
 import Data.Text qualified as T
-import Data.Text.IO qualified as TIO
 import System.Environment (lookupEnv)
 import System.Exit (exitFailure, exitSuccess)
 

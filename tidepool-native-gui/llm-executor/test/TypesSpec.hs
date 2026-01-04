@@ -5,7 +5,6 @@ module TypesSpec (spec) where
 
 import Data.Aeson (Value(..), decode, encode, object, (.=))
 import Data.Aeson.KeyMap qualified as KM
-import Data.Maybe (fromJust)
 import Test.Hspec
 
 import Tidepool.LLM.Types (AnthropicTool(..), anthropicToolToJSON)

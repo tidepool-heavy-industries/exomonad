@@ -3,10 +3,8 @@
 -- Verifies that API requests are built with correct formats for each provider.
 module RequestBuildingSpec (spec) where
 
-import Data.Aeson (Value(..), decode, eitherDecode, object, (.=))
+import Data.Aeson (Value(..), decode, object, (.=))
 import Data.Aeson.KeyMap qualified as KM
-import Data.ByteString.Lazy qualified as LBS
-import Data.Maybe (fromJust, isJust)
 import Data.Vector qualified as V
 import Test.Hspec
 
