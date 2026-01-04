@@ -12,6 +12,9 @@ packages:
     tidepool-native-gui/llm-executor
     tidepool-native-gui/server
 
+    -- Tooling packages (Agent 8)
+    tools/sleeptime-logs
+
 -- Disabled packages (heavy deps, not needed for WASM deployment):
 -- tidepool-platform   -- threepenny-gui, http-client, sqlite
 -- tidepool-dm         -- GUI app, depends on platform
