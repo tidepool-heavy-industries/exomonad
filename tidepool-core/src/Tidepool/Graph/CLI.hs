@@ -71,11 +71,13 @@ module Tidepool.Graph.CLI
 
     -- * CLI Runner
   , runGraphCLIWith
+  , runGraphCLIPure
 
     -- * Helpers (exported for testing)
   , toKebabCase
   ) where
 
+import Control.Monad.Freer (Eff, run)
 import Data.Aeson (ToJSON)
 import Data.Aeson.Text qualified as Aeson
 import Data.Char (isUpper, toLower)
@@ -86,11 +88,14 @@ import Data.Text.IO qualified as TIO
 import Data.Text.Lazy qualified as TL
 import GHC.Generics (Generic(..), M1(..), K1(..), (:*:))
 import GHC.Generics qualified as G
-import GHC.TypeLits (TypeError, ErrorMessage(..))
+import GHC.Records (HasField)
+import GHC.TypeLits (TypeError, ErrorMessage(..), KnownSymbol)
 import Language.Haskell.TH hiding (Type)
 import Language.Haskell.TH qualified as TH
 import Options.Applicative
 
+import Tidepool.Graph.Execute (runGraph, FindEntryHandler, CallHandler, DispatchGoto)
+import Tidepool.Graph.Generic (AsHandler, FieldsWithNamesOf)
 import Tidepool.Graph.Generic.Core (AsGraph, Entry, Exit)
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -479,6 +484,48 @@ runGraphCLIWith desc inputParser executor = do
   (input, fmt) <- execParser parserInfo'
   result <- executor input
   TIO.putStrLn (formatOutput fmt result)
+
+-- | Run a logic-only graph (no LLM/IO effects) as CLI.
+--
+-- This wires a graph with empty effect stack @'[]@ directly to CLI.
+-- For graphs with LLM/IO effects, use @runGraphCLI@ from tidepool-platform.
+--
+-- = Example
+--
+-- @
+-- main :: IO ()
+-- main = runGraphCLIPure
+--   "Counter graph CLI"
+--   $(deriveCLIParser ''CounterInput)
+--   counterHandlers
+-- @
+--
+-- = Constraints
+--
+-- The graph must:
+--
+-- * Have @Entry@ and @Exit@ fields (detected via @GraphEntryType@ and @GraphExitType@)
+-- * Have a handler that accepts the entry type via @Needs@ (found via @FindEntryHandler@)
+-- * Use empty effect stack @'[]@ (all handlers must be pure)
+-- * Exit type must have @Show@ and @ToJSON@ instances for output formatting
+runGraphCLIPure
+  :: forall graph entryHandlerName handler targets.
+     ( Show (GraphExitType graph)
+     , ToJSON (GraphExitType graph)
+     , Generic (graph AsGraph)
+     , FindEntryHandler (GraphEntryType graph) (FieldsWithNamesOf graph) ~ 'Just entryHandlerName
+     , KnownSymbol entryHandlerName
+     , HasField entryHandlerName (graph (AsHandler '[])) handler
+     , CallHandler handler (GraphEntryType graph) '[] targets
+     , DispatchGoto graph targets '[] (GraphExitType graph)
+     )
+  => Text                              -- ^ Description for --help
+  -> Parser (GraphEntryType graph)     -- ^ Input parser (use deriveCLIParser)
+  -> graph (AsHandler '[])             -- ^ Handlers (empty effect stack)
+  -> IO ()
+runGraphCLIPure desc parser handlers =
+  runGraphCLIWith desc parser $ \input ->
+    pure $ run $ runGraph @graph @(GraphEntryType graph) @targets @(GraphExitType graph) @'[] @entryHandlerName @handler handlers input
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- HELPERS
