@@ -5,7 +5,27 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Ensure jq is available
+if ! command -v jq &> /dev/null; then
+    echo "Error: jq is required but not installed"
+    exit 1
+fi
+
+# Find zellij-cc binary (prefer release, fall back to debug)
 ZELLIJ_CC="${SCRIPT_DIR}/target/release/zellij-cc"
+DEBUG_ZELLIJ_CC="${SCRIPT_DIR}/target/debug/zellij-cc"
+
+if [ ! -x "$ZELLIJ_CC" ]; then
+    if [ -x "$DEBUG_ZELLIJ_CC" ]; then
+        echo "Warning: Using debug build"
+        ZELLIJ_CC="$DEBUG_ZELLIJ_CC"
+    else
+        echo "Error: zellij-cc binary not found"
+        echo "Run: cargo build --release"
+        exit 1
+    fi
+fi
 
 # Get current zellij session
 SESSION=$(zellij list-sessions 2>/dev/null | grep "(current)" | awk '{print $1}')
@@ -31,8 +51,8 @@ SCHEMA='{
   "required": ["summary", "file_count", "key_files"]
 }'
 
-# Test directory
-TEST_DIR="/home/inanna/dev/tidepool/worktrees/micro-gastown/tools/zellij-cc"
+# Test directory (defaults to script dir; override with TEST_DIR env var)
+: "${TEST_DIR:="$SCRIPT_DIR"}"
 OUTPUT_FILE="/tmp/zellij-cc-workflow-test.json"
 
 echo "Running workflow test..."
@@ -56,16 +76,16 @@ echo ""
 
 echo ""
 echo "=== Raw Output ==="
-cat "$OUTPUT_FILE" | jq '.'
+jq '.' "$OUTPUT_FILE"
 
 echo ""
 echo "=== Prose Result ==="
-cat "$OUTPUT_FILE" | jq -r '.result' | head -5
+jq -r '.result' "$OUTPUT_FILE" | head -5
 echo "..."
 
 echo ""
 echo "=== Structured Output (from --json-schema) ==="
-cat "$OUTPUT_FILE" | jq '.structured_output'
+jq '.structured_output' "$OUTPUT_FILE"
 
 echo ""
 echo "=== Stderr (if any) ==="
@@ -74,7 +94,8 @@ cat "${OUTPUT_FILE%.json}.stderr" 2>/dev/null || echo "(empty)"
 echo ""
 echo "=== Validation ==="
 # Check if structured_output matches schema
-STRUCTURED=$(cat "$OUTPUT_FILE" | jq '.structured_output')
+set +e
+STRUCTURED=$(jq '.structured_output' "$OUTPUT_FILE")
 if echo "$STRUCTURED" | jq -e '.summary and .file_count and .key_files' > /dev/null 2>&1; then
     echo "SUCCESS: structured_output matches schema"
     echo "  Summary: $(echo "$STRUCTURED" | jq -r '.summary' | head -c 100)..."
@@ -84,3 +105,4 @@ else
     echo "WARNING: structured_output may not match expected schema"
     echo "Got: $STRUCTURED"
 fi
+set -e

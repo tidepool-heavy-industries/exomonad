@@ -138,7 +138,7 @@ fn run_cc_session(
     let stderr_file = output_file.with_extension("stderr");
     let stderr_path = stderr_file.display().to_string();
 
-    // Build shell command with proper escaping (using shell-escape crate)
+    // Build shell command with proper escaping via shell_quote (uses shell-escape crate)
     // Captures stdout to output_file, stderr to stderr_file
     // Both streams shown in pane via process substitution
     let mut cmd_parts = vec![
@@ -207,7 +207,8 @@ fn run_cc_session(
         output_path
     );
 
-    loop {
+    // Poll until we get valid JSON with expected structure
+    let cc_json: serde_json::Value = loop {
         // Check timeout
         if let Some(t) = timeout {
             if start.elapsed() > t {
@@ -250,7 +251,7 @@ fn run_cc_session(
                 if let Ok(json) = serde_json::from_str::<serde_json::Value>(&contents) {
                     if json.get("type").is_some() {
                         eprintln!("Claude Code completed after {:?}", start.elapsed());
-                        break;
+                        break json; // Return parsed JSON, avoid re-reading file
                     }
                 }
             }
@@ -258,13 +259,7 @@ fn run_cc_session(
 
         // Wait before polling again
         thread::sleep(Duration::from_millis(500));
-    }
-
-    // Parse the Claude Code JSON output to extract fields
-    let cc_output = std::fs::read_to_string(output_file)
-        .context("Failed to read output file")?;
-    let cc_json: serde_json::Value = serde_json::from_str(&cc_output)
-        .context("Failed to parse Claude Code JSON output")?;
+    };
 
     let result = RunResult {
         exit_code: 0,
