@@ -8,6 +8,17 @@
 const API_BASE = "https://api.telegram.org/bot";
 
 /**
+ * Maximum file size for downloads (5MB).
+ * Telegram resizes photos, but we add a safety limit to prevent memory issues.
+ */
+const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
+
+/**
+ * Timeout for file downloads (30 seconds).
+ */
+const DOWNLOAD_TIMEOUT_MS = 30000;
+
+/**
  * Standard Telegram API response wrapper.
  */
 interface TelegramApiResponse<T = unknown> {
@@ -375,8 +386,29 @@ export interface TelegramFileInfo {
 }
 
 /**
+ * Convert Uint8Array to base64 using chunked approach to prevent stack overflow.
+ *
+ * Using spread operator on large arrays (>1MB) can exceed call stack size.
+ * This function processes the array in 32KB chunks to avoid the issue.
+ *
+ * @param bytes - Uint8Array to encode
+ * @returns Base64-encoded string
+ */
+function uint8ArrayToBase64(bytes: Uint8Array): string {
+  const CHUNK_SIZE = 0x8000; // 32KB chunks
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += CHUNK_SIZE) {
+    const chunk = bytes.subarray(i, i + CHUNK_SIZE);
+    binary += String.fromCharCode(...chunk);
+  }
+  return btoa(binary);
+}
+
+/**
  * Download a file from Telegram using file_id.
  * Returns base64-encoded data and media type.
+ *
+ * Enforces size limit (MAX_FILE_SIZE) and timeout (DOWNLOAD_TIMEOUT_MS).
  *
  * @param token - Bot API token
  * @param fileId - Telegram file_id from photo/document message
@@ -399,31 +431,52 @@ export async function downloadFile(
       return null;
     }
 
-    // Step 2: Download file from Telegram CDN
-    const fileUrl = `https://api.telegram.org/file/bot${token}/${fileInfo.result.file_path}`;
-    const response = await fetch(fileUrl);
-
-    if (!response.ok) {
-      console.error(`[Telegram] File download failed: ${response.status}`);
+    // Check file size before downloading
+    if (fileInfo.result.file_size && fileInfo.result.file_size > MAX_FILE_SIZE) {
+      console.error(
+        `[Telegram] File too large: ${fileInfo.result.file_size} bytes (max: ${MAX_FILE_SIZE})`
+      );
       return null;
     }
 
-    // Step 3: Convert to base64
-    const arrayBuffer = await response.arrayBuffer();
-    const bytes = new Uint8Array(arrayBuffer);
-    const base64 = btoa(String.fromCharCode(...bytes));
+    // Step 2: Download file from Telegram CDN with timeout
+    const fileUrl = `https://api.telegram.org/file/bot${token}/${fileInfo.result.file_path}`;
 
-    // Step 4: Determine media type from file extension
-    const extension = fileInfo.result.file_path.split('.').pop()?.toLowerCase();
-    const mediaType = extension === 'jpg' || extension === 'jpeg'
-      ? 'image/jpeg'
-      : extension === 'png'
-      ? 'image/png'
-      : extension === 'webp'
-      ? 'image/webp'
-      : 'image/jpeg'; // Default to JPEG
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS);
 
-    return { mediaType, data: base64 };
+    try {
+      const response = await fetch(fileUrl, { signal: controller.signal });
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        console.error(`[Telegram] File download failed: ${response.status}`);
+        return null;
+      }
+
+      // Step 3: Convert to base64 using chunked approach
+      const arrayBuffer = await response.arrayBuffer();
+      const bytes = new Uint8Array(arrayBuffer);
+      const base64 = uint8ArrayToBase64(bytes);
+
+      // Step 4: Determine media type from file extension
+      const extension = fileInfo.result.file_path.split('.').pop()?.toLowerCase();
+      const mediaType =
+        extension === 'jpg' || extension === 'jpeg' ? 'image/jpeg'
+        : extension === 'png' ? 'image/png'
+        : extension === 'webp' ? 'image/webp'
+        : extension === 'gif' ? 'image/gif'
+        : 'image/jpeg'; // Default to JPEG
+
+      return { mediaType, data: base64 };
+    } catch (err) {
+      clearTimeout(timeoutId);
+      if (err instanceof Error && err.name === 'AbortError') {
+        console.error(`[Telegram] Download timeout after ${DOWNLOAD_TIMEOUT_MS}ms`);
+        return null;
+      }
+      throw err;
+    }
   } catch (err) {
     console.error("[Telegram] Error downloading file:", err);
     return null;

@@ -15,6 +15,7 @@ library
         Tidepool.Wasm.Prelude
         Tidepool.Wasm.Effect
         Tidepool.Wasm.Error
+        Tidepool.Wasm.GraphInput
         Tidepool.Wasm.CfTool
         Tidepool.Wasm.TypedTool
         Tidepool.Wasm.ExampleGraph

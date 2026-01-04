@@ -100,6 +100,8 @@ const ConversationStateSchema = z.object({
   buttonMessageId: z.number().nullable().default(null),
   /** Original question text (for showing "Question: You chose X" after selection) */
   buttonQuestionText: z.string().nullable().default(null),
+  /** Thread ID for current session (topic-based routing, Bot API 9.3+) */
+  currentThreadId: z.number().nullable().default(null),
 });
 
 /**
@@ -555,6 +557,9 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
     // Log state for debugging resume logic
     console.log(`[TelegramDO] state: waiting=${state.waitingForReceive}, effect=${state.pendingEffect?.type ?? 'none'}, session=${state.wasmSessionId ?? 'none'}`);
 
+    // Track which thread this session belongs to (for reply routing)
+    state.currentThreadId = threadId;
+
     // Add to pending messages queue
     state.pendingMessages.push(incomingMessage);
     state.lastActivity = Date.now();
@@ -617,13 +622,25 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
     chatId: number,
     message: TelegramIncomingMessage
   ): Promise<void> {
-    // Convert message to graph input (now async!)
-    const rawInput = await this.messageToRawInput(message);
+    // Convert message to graph input (now async with error tracking!)
+    const result = await this.messageToRawInput(message);
 
-    if (rawInput === null) {
+    // Send user feedback if there was an error
+    if (result.error) {
+      console.warn(`[TelegramDO] ${result.error}`);
+      await sendMessage(
+        this.env.TELEGRAM_TOKEN,
+        chatId,
+        `⚠️ ${result.error}`
+      );
+    }
+
+    if (result.input === null) {
       console.log(`[TelegramDO] Ignoring message type: ${message.type}`);
       return;
     }
+
+    const rawInput = result.input;
 
     // Generate session ID based on chat ID + timestamp for uniqueness
     const sessionId = `telegram-${chatId}-${Date.now()}`;
@@ -686,13 +703,15 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
   /**
    * Convert incoming Telegram message to graph input.
    * Downloads photos and converts to base64.
+   *
+   * @returns Object with input and optional error message
    */
   private async messageToRawInput(
     message: TelegramIncomingMessage
-  ): Promise<GraphInput | null> {
+  ): Promise<{ input: GraphInput | null; error?: string }> {
     switch (message.type) {
       case "text":
-        return { type: "text", text: message.text };
+        return { input: { type: "text", text: message.text } };
 
       case "photo": {
         // Download the photo using Telegram API
@@ -702,32 +721,42 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
         );
 
         if (!imageData) {
-          // Download failed - fall back to caption-only if present
+          // Download failed
           if (message.caption) {
-            return { type: "text", text: message.caption };
+            // Fall back to caption with warning
+            return {
+              input: { type: "text", text: message.caption },
+              error: "Photo download failed (timeout, too large, or network error). Using caption only.",
+            };
           }
-          return null;
+          // No caption - complete failure
+          return {
+            input: null,
+            error: "Failed to download photo and no caption provided.",
+          };
         }
 
         return {
-          type: "photo",
-          caption: message.caption,
-          image: imageData,
+          input: {
+            type: "photo",
+            caption: message.caption,
+            image: imageData,
+          },
         };
       }
 
       case "document":
         // Documents not supported for task extraction
-        return null;
+        return { input: null };
 
       case "button_click":
         // Button clicks are handled separately in the confirm flow
-        return null;
+        return { input: null };
 
       default: {
         const _exhaustive: never = message;
         console.error(`[TelegramDO] Unknown message type:`, _exhaustive);
-        return null;
+        return { input: null };
       }
     }
   }
@@ -852,6 +881,7 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
     const state = await this.loadState();
     const ctx: TelegramHandlerContext = {
       chatId,
+      threadId: state.currentThreadId,
       pendingMessages: state.pendingMessages,
       buttonMapping: state.buttonMapping,
       buttonMessageId: state.buttonMessageId,
@@ -1001,6 +1031,7 @@ export class TelegramDO extends DurableObject<TelegramDOEnv> {
   ): Promise<Response> {
     const ctx: TelegramHandlerContext = {
       chatId: state.chatId,
+      threadId: state.currentThreadId,
       pendingMessages: state.pendingMessages,
       buttonMapping: state.buttonMapping,
       buttonMessageId: state.buttonMessageId,
