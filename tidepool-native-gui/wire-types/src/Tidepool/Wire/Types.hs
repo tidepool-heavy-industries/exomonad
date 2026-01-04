@@ -7,6 +7,9 @@ module Tidepool.Wire.Types
     UIState(..)
   , ChatMessage(..)
   , MessageRole(..)
+  , TextInputConfig(..)
+  , PhotoUploadConfig(..)
+  , ButtonConfig(..)
 
     -- * Client → Server
   , UserAction(..)
@@ -92,20 +95,41 @@ instance FromJSON MessageRole where
 data TextInputConfig = TextInputConfig
   { ticPlaceholder :: Text
   }
-  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+  deriving (Show, Eq, Generic)
+
+instance ToJSON TextInputConfig where
+  toJSON c = object ["placeholder" .= ticPlaceholder c]
+
+instance FromJSON TextInputConfig where
+  parseJSON = withObject "TextInputConfig" $ \v ->
+    TextInputConfig <$> v .: "placeholder"
 
 -- | Photo upload configuration.
 data PhotoUploadConfig = PhotoUploadConfig
   { pucPrompt :: Text
   }
-  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+  deriving (Show, Eq, Generic)
+
+instance ToJSON PhotoUploadConfig where
+  toJSON c = object ["prompt" .= pucPrompt c]
+
+instance FromJSON PhotoUploadConfig where
+  parseJSON = withObject "PhotoUploadConfig" $ \v ->
+    PhotoUploadConfig <$> v .: "prompt"
 
 -- | Button configuration.
 data ButtonConfig = ButtonConfig
   { bcId :: Text
   , bcLabel :: Text
   }
-  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+  deriving (Show, Eq, Generic)
+
+instance ToJSON ButtonConfig where
+  toJSON c = object ["id" .= bcId c, "label" .= bcLabel c]
+
+instance FromJSON ButtonConfig where
+  parseJSON = withObject "ButtonConfig" $ \v ->
+    ButtonConfig <$> v .: "id" <*> v .: "label"
 
 
 -- ════════════════════════════════════════════════════════════════════════════
