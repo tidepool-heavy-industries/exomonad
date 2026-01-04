@@ -28,6 +28,7 @@ import Tidepool.Wasm.ExampleGraph
   , statementHandlerWasm
   , runExampleGraph
   )
+import Tidepool.Wasm.GraphInput (GraphInput(..))
 import Tidepool.Wasm.Runner (initializeWasm, WasmResult(..))
 import Tidepool.Wasm.WireTypes (SerializableEffect(..), EffectResult(..))
 import Data.Aeson (Value(..))
@@ -51,7 +52,8 @@ classifySpec = describe "classifyHandlerWasm" $ do
 
   it "routes greetings to handleGreeting" $ do
     let msg = UserMessage "Hello there!"
-    case initializeWasm (classifyHandlerWasm msg) of
+        input = TextInput msg.unUserMessage
+    case initializeWasm (classifyHandlerWasm input) of
       WasmYield (EffLogInfo logMsg _) resume -> do
         T.unpack logMsg `shouldContain` "Classifying message"
         T.unpack logMsg `shouldContain` "Hello there!"
@@ -109,7 +111,9 @@ runClassifyToCompletion
   -> IO (GotoChoice '[To "handleGreeting" UserMessage
                     , To "handleQuestion" UserMessage
                     , To "handleStatement" UserMessage])
-runClassifyToCompletion msg = go (initializeWasm (classifyHandlerWasm msg))
+runClassifyToCompletion msg =
+  let input = TextInput msg.unUserMessage
+  in go (initializeWasm (classifyHandlerWasm input))
   where
     go :: WasmResult (GotoChoice '[To "handleGreeting" UserMessage
                                  , To "handleQuestion" UserMessage
@@ -281,7 +285,9 @@ runFullGraph msg = runFullGraphWithLLM msg (String "Default LLM response")
 
 -- | Run the full graph with a specific LLM response for questions.
 runFullGraphWithLLM :: UserMessage -> Value -> IO Response
-runFullGraphWithLLM msg llmResponse = go (initializeWasm (runExampleGraph msg))
+runFullGraphWithLLM msg llmResponse =
+  let input = TextInput msg.unUserMessage
+  in go (initializeWasm (runExampleGraph input))
   where
     go :: WasmResult Response -> IO Response
     go (WasmYield (EffLlmComplete _ _ _ _ _) resume) = go (resume (ResSuccess (Just llmResponse)))

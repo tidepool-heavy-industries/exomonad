@@ -44,6 +44,7 @@ module Tidepool.Wasm.ExampleGraph
   ) where
 
 import Data.Aeson (Value(..), FromJSON(..), ToJSON(..))
+import Data.Maybe (fromMaybe)
 import qualified Data.Text as T
 import Data.Text (Text)
 import GHC.Generics (Generic)
@@ -56,6 +57,7 @@ import Tidepool.Graph.Goto.Internal (GotoChoice(..), OneOf(..))  -- For dispatch
 
 import Tidepool.Wasm.Effect (WasmM, logInfo, llmComplete)
 import Tidepool.Wasm.Error (formatWasmError)
+import Tidepool.Wasm.GraphInput (GraphInput(..))
 
 
 -- ============================================================================
@@ -98,10 +100,13 @@ instance ToJSON Response where
 -- - Statement -> handleStatement
 --
 -- Each handler returns directly to Exit with a Response.
+--
+-- Updated to accept GraphInput (text or photo) from TypeScript/Telegram.
+-- The classify handler extracts text content and creates UserMessage for downstream handlers.
 data ExampleGraph mode = ExampleGraph
-  { entry           :: mode :- G.Entry UserMessage
+  { entry           :: mode :- G.Entry GraphInput
   , classify        :: mode :- G.LogicNode
-                           :@ Needs '[UserMessage]
+                           :@ Needs '[GraphInput]
                            :@ UsesEffects '[Goto "handleGreeting" UserMessage
                                           , Goto "handleQuestion" UserMessage
                                           , Goto "handleStatement" UserMessage]
@@ -151,17 +156,37 @@ classifyMessage msg
 -- | Classify handler - determines which handler to route to.
 --
 -- This handler:
--- 1. Logs the incoming message
--- 2. Classifies it using heuristics
--- 3. Returns a GotoChoice pointing to the appropriate handler
+-- 1. Extracts text from GraphInput (text directly, or photo caption)
+-- 2. Logs the incoming message
+-- 3. Classifies it using heuristics
+-- 4. Returns a GotoChoice pointing to the appropriate handler
+--
+-- Photos are treated as text via their caption. If no caption exists,
+-- a default placeholder is used. Vision-based classification would be
+-- a future enhancement.
 classifyHandlerWasm
-  :: UserMessage
+  :: GraphInput
   -> WasmM (GotoChoice '[To "handleGreeting" UserMessage
                        , To "handleQuestion" UserMessage
                        , To "handleStatement" UserMessage])
-classifyHandlerWasm msg = do
-  logInfo $ "Classifying message: " <> msg.unUserMessage
-  let classification = classifyMessage msg.unUserMessage
+classifyHandlerWasm input = do
+  -- Extract text content from GraphInput
+  let (textContent, isPhoto) = case input of
+        TextInput txt -> (txt, False)
+        PhotoInput mCaption _imgSource ->
+          let caption = fromMaybe "(photo without caption)" mCaption
+          in (caption, True)
+
+  -- Log what we received
+  if isPhoto
+    then logInfo $ "Received photo with caption: " <> textContent
+    else logInfo $ "Classifying message: " <> textContent
+
+  -- Create UserMessage for downstream handlers
+  let msg = UserMessage textContent
+
+  -- Classify and route
+  let classification = classifyMessage textContent
   logInfo $ "Classification result: " <> T.pack (show classification)
   pure $ case classification of
     Greeting  -> gotoChoice @"handleGreeting" msg
@@ -251,17 +276,17 @@ type SimpleExitTargets =
 -- | Run the example graph from entry to exit.
 --
 -- This function orchestrates the full graph execution:
--- 1. Classify the input message
+-- 1. Classify the input (GraphInput: text or photo)
 -- 2. Dispatch to the appropriate handler
 -- 3. Return the final response
 --
 -- Note: The Self-loop in questionHandler is not exercised here since
 -- we always exit on first pass. A more complex graph could use Self
 -- for retry logic.
-runExampleGraph :: UserMessage -> WasmM Response
-runExampleGraph msg = do
+runExampleGraph :: GraphInput -> WasmM Response
+runExampleGraph input = do
   -- Step 1: Classify
-  classifyResult <- classifyHandlerWasm msg
+  classifyResult <- classifyHandlerWasm input
 
   -- Step 2: Dispatch based on classification
   dispatchClassify classifyResult

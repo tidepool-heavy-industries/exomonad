@@ -50,9 +50,9 @@ spec = do
         result `shouldSatisfy` T.isInfixOf "LogInfo"
         result `shouldSatisfy` T.isInfixOf "Computing: 5"
 
-      it "initializes example graph with string input" $ do
+      it "initializes example graph with GraphInput" $ do
         resetSession
-        result <- initialize "example" "\"hello\""
+        result <- initialize "example" "{\"type\":\"text\",\"text\":\"hello\"}"
         -- Should yield a Log effect for classification
         result `shouldSatisfy` T.isInfixOf "LogInfo"
 
@@ -120,7 +120,7 @@ spec = do
         -- Start first session
         _ <- initialize "test" "5"
         -- Start new session (should clear previous)
-        _ <- initialize "example" "\"hello\""
+        _ <- initialize "example" "{\"type\":\"text\",\"text\":\"hello\"}"
         -- Stepping old graph should fail
         result <- step "test" "{\"type\": \"success\"}"
         result `shouldSatisfy` T.isInfixOf "Graph mismatch"
