@@ -1,6 +1,8 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use serde::Serialize;
+use shell_escape::escape;
+use std::borrow::Cow;
 use std::path::PathBuf;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -36,7 +38,7 @@ enum Commands {
         #[arg(long)]
         prompt: String,
 
-        /// Output file for JSON result
+        /// Output file for JSON result (stderr goes to <file>.stderr)
         #[arg(long)]
         output_file: PathBuf,
 
@@ -52,8 +54,11 @@ enum Commands {
 
 #[derive(Serialize)]
 struct RunResult {
+    /// Always 0 - we cannot get actual exit code from zellij pane.
+    /// Check the JSON in output_file for errors instead.
     exit_code: i32,
     output_file: PathBuf,
+    stderr_file: PathBuf,
 }
 
 fn main() -> Result<()> {
@@ -69,7 +74,15 @@ fn main() -> Result<()> {
             cwd,
             timeout,
         } => {
-            run_cc_session(&session, &name, &model, &prompt, &output_file, cwd.as_ref(), timeout)?;
+            run_cc_session(
+                &session,
+                &name,
+                &model,
+                &prompt,
+                &output_file,
+                cwd.as_ref(),
+                timeout,
+            )?;
         }
     }
 
@@ -85,30 +98,43 @@ fn run_cc_session(
     cwd: Option<&PathBuf>,
     timeout_secs: u64,
 ) -> Result<()> {
-    // Build the command to run in the pane
-    // Uses tee to both show output in pane AND capture to file
+    // Validate output file's parent directory exists
+    if let Some(parent) = output_file.parent() {
+        if !parent.as_os_str().is_empty() && !parent.exists() {
+            anyhow::bail!(
+                "Output file parent directory does not exist: '{}'",
+                parent.display()
+            );
+        }
+    }
+
     let output_path = output_file.display().to_string();
 
-    // Build shell command with proper quoting
-    // -p enables print mode (non-interactive, exits after response)
-    // --dangerously-skip-permissions bypasses tool permission prompts
-    // --output-format json returns structured JSON
+    // Stderr goes to a separate file
+    let stderr_file = output_file.with_extension("stderr");
+    let stderr_path = stderr_file.display().to_string();
+
+    // Build shell command with proper escaping (using shell-escape crate)
+    // Captures stdout to output_file, stderr to stderr_file
+    // Both streams shown in pane via process substitution
     let shell_cmd = format!(
-        "claude --dangerously-skip-permissions --output-format json --model {} -p {} | tee {}",
+        "claude --dangerously-skip-permissions --output-format json --model {} -p {} \
+         > >(tee {}) 2> >(tee {} >&2)",
         shell_quote(model),
         shell_quote(prompt),
         shell_quote(&output_path),
+        shell_quote(&stderr_path),
     );
 
     let os_input = get_cli_client_os_input()
         .context("Failed to get zellij OS input - is zellij running?")?;
 
     // Spawn pane with the command
-    // NewTiledPane(direction, command, pane_name)
+    // Use bash for process substitution support
     let actions = vec![Action::NewTiledPane(
         None, // direction
         Some(RunCommandAction {
-            command: PathBuf::from("sh"),
+            command: PathBuf::from("bash"),
             args: vec!["-c".into(), shell_cmd],
             cwd: cwd.cloned(),
             direction: None,
@@ -130,23 +156,56 @@ fn run_cc_session(
         None
     };
 
-    eprintln!("Waiting for Claude Code to complete (output: {})...", output_path);
+    eprintln!(
+        "Waiting for Claude Code to complete (output: '{}')...",
+        output_path
+    );
 
     loop {
         // Check timeout
         if let Some(t) = timeout {
             if start.elapsed() > t {
-                anyhow::bail!("Timeout waiting for Claude Code to complete");
+                // Include context in timeout error
+                let partial = std::fs::read_to_string(output_file)
+                    .ok()
+                    .filter(|s| !s.trim().is_empty());
+                let stderr_content = std::fs::read_to_string(&stderr_file)
+                    .ok()
+                    .filter(|s| !s.trim().is_empty());
+
+                let mut msg = format!(
+                    "Timeout after {:?} waiting for Claude Code to complete.\n\
+                     Session: {}, Pane: {}\n\
+                     Output file: '{}'\n\
+                     Stderr file: '{}'",
+                    t, session, name, output_path, stderr_path
+                );
+
+                if let Some(out) = partial {
+                    let lines: Vec<&str> = out.lines().collect();
+                    let tail: Vec<&str> = lines.iter().rev().take(5).rev().cloned().collect();
+                    msg.push_str(&format!("\n\nPartial stdout:\n{}", tail.join("\n")));
+                }
+                if let Some(err) = stderr_content {
+                    let lines: Vec<&str> = err.lines().collect();
+                    let tail: Vec<&str> = lines.iter().rev().take(5).rev().cloned().collect();
+                    msg.push_str(&format!("\n\nStderr:\n{}", tail.join("\n")));
+                }
+
+                anyhow::bail!(msg);
             }
         }
 
         // Try to read and parse the output file
         if let Ok(contents) = std::fs::read_to_string(output_file) {
-            // Claude headless JSON output is complete when we can parse it
             if !contents.trim().is_empty() {
-                if let Ok(_json) = serde_json::from_str::<serde_json::Value>(&contents) {
-                    eprintln!("Claude Code completed after {:?}", start.elapsed());
-                    break;
+                // Check for Claude Code's expected JSON structure to avoid false positives
+                // Claude outputs: {"type": "result", ...} or {"type": "error", ...}
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&contents) {
+                    if json.get("type").is_some() {
+                        eprintln!("Claude Code completed after {:?}", start.elapsed());
+                        break;
+                    }
                 }
             }
         }
@@ -156,8 +215,9 @@ fn run_cc_session(
     }
 
     let result = RunResult {
-        exit_code: 0, // We can't easily get the actual exit code from zellij
+        exit_code: 0,
         output_file: output_file.clone(),
+        stderr_file,
     };
 
     println!("{}", serde_json::to_string_pretty(&result)?);
@@ -165,7 +225,7 @@ fn run_cc_session(
     Ok(())
 }
 
-/// Simple shell quoting (wrap in single quotes, escape internal quotes)
-fn shell_quote(s: &str) -> String {
-    format!("'{}'", s.replace('\'', "'\\''"))
+/// Shell-escape a string for safe use in shell commands
+fn shell_quote(s: &str) -> Cow<'_, str> {
+    escape(Cow::Borrowed(s))
 }
