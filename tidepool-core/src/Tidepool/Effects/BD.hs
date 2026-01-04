@@ -44,6 +44,7 @@ import Data.Aeson
   , (.=)
   , (.:)
   , (.:?)
+  , (.!=)
   )
 import Data.Text (Text)
 import Data.Time (UTCTime)
@@ -220,10 +221,8 @@ instance FromJSON BeadInfo where
       <*> v .:? "created_by"
       <*> v .:? "updated_at"
       <*> v .:? "parent"
-      <*> (v .: "dependencies" <|> pure [])
-      <*> (v .: "dependents" <|> pure [])
-    where
-      (<|>) = \ma mb -> ma >>= \a -> if null a then mb else pure a
+      <*> v .:? "dependencies" .!= []
+      <*> v .:? "dependents" .!= []
 
 
 -- ════════════════════════════════════════════════════════════════════════════
