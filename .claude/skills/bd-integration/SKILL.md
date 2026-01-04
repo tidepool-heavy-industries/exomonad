@@ -1,11 +1,11 @@
 ---
 name: bd-integration
-description: Use when working with the BD (Beads) effect for issue/task tracking, querying bead info, dependencies, or labels.
+description: Use when working with the BD (Beads) effect for issue/task tracking, reading/writing bead info, dependencies, labels, or hierarchies.
 ---
 
 # BD (Beads) Integration
 
-BD is a git-native issue tracker. The Tidepool BD integration provides typed access to beads from agent code.
+BD is a git-native issue tracker. The Tidepool BD integration provides typed read/write access to beads from agent code.
 
 ## Architecture
 
@@ -14,7 +14,8 @@ BD is a git-native issue tracker. The Tidepool BD integration provides typed acc
 │  tidepool-core/src/Tidepool/Effects/BD.hs                   │
 │  - Effect type (BD)                                          │
 │  - Types (BeadInfo, BeadStatus, BeadType, DependencyInfo)   │
-│  - Smart constructors (getBead, getDeps, getBlocking, etc.) │
+│  - Input types (CreateBeadInput, UpdateBeadInput)           │
+│  - Smart constructors (read + write operations)             │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
@@ -22,22 +23,23 @@ BD is a git-native issue tracker. The Tidepool BD integration provides typed acc
 │  tidepool-native-gui/bd-executor/                           │
 │  - BDConfig (database path, quiet mode)                     │
 │  - runBDIO (CLI executor)                                   │
-│  - runBD (pure handler for testing)                         │
+│  - runBD (pure handler for testing - read-only)             │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
 │  bd CLI                                                      │
-│  - bd show --json <id>                                       │
-│  - bd label list --json <id>                                 │
-│  - bd dep list <id>                                          │
+│  - bd show/create/update/close/reopen                        │
+│  - bd label add/remove/list                                  │
+│  - bd dep add/remove                                         │
+│  - bd list --parent                                          │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## Effect Operations
+## Read Operations
 
 ```haskell
-import Tidepool.Effects.BD (BD, getBead, getDeps, getBlocking, getLabels)
+import Tidepool.Effects.BD
 
 -- Get full bead info by ID
 getBead :: Member BD effs => Text -> Eff effs (Maybe BeadInfo)
@@ -50,9 +52,71 @@ getBlocking :: Member BD effs => Text -> Eff effs [BeadInfo]
 
 -- Get labels attached to a bead
 getLabels :: Member BD effs => Text -> Eff effs [Text]
+
+-- Get child beads (beads with this as parent)
+getChildren :: Member BD effs => Text -> Eff effs [BeadInfo]
 ```
 
-## Types
+## Write Operations
+
+```haskell
+-- Create a new bead, returns generated ID
+createBead :: Member BD effs => CreateBeadInput -> Eff effs Text
+
+-- Update an existing bead
+updateBead :: Member BD effs => Text -> UpdateBeadInput -> Eff effs ()
+
+-- Close a bead (status → closed)
+closeBead :: Member BD effs => Text -> Eff effs ()
+
+-- Reopen a bead (status → open)
+reopenBead :: Member BD effs => Text -> Eff effs ()
+
+-- Add/remove labels
+addLabel :: Member BD effs => Text -> Text -> Eff effs ()
+removeLabel :: Member BD effs => Text -> Text -> Eff effs ()
+
+-- Add/remove dependencies
+addDep :: Member BD effs => Text -> Text -> DependencyType -> Eff effs ()
+removeDep :: Member BD effs => Text -> Text -> Eff effs ()
+```
+
+## Input Types
+
+### CreateBeadInput
+
+```haskell
+data CreateBeadInput = CreateBeadInput
+  { cbiTitle       :: Text              -- Required: bead title
+  , cbiDescription :: Maybe Text        -- Optional description
+  , cbiType        :: BeadType          -- Bead type (default: Task)
+  , cbiPriority    :: Int               -- Priority 0-4 (default: 2)
+  , cbiParent      :: Maybe Text        -- Parent bead ID for hierarchy
+  , cbiLabels      :: [Text]            -- Initial labels
+  , cbiAssignee    :: Maybe Text        -- Assignee
+  , cbiDeps        :: [(Text, DependencyType)]  -- Dependencies
+  }
+
+-- Convenience default
+defaultCreateInput :: CreateBeadInput
+```
+
+### UpdateBeadInput
+
+```haskell
+data UpdateBeadInput = UpdateBeadInput
+  { ubiTitle       :: Maybe Text        -- New title
+  , ubiDescription :: Maybe Text        -- New description
+  , ubiStatus      :: Maybe BeadStatus  -- New status
+  , ubiPriority    :: Maybe Int         -- New priority
+  , ubiAssignee    :: Maybe Text        -- New assignee
+  }
+
+-- Convenience default (no changes)
+emptyUpdateInput :: UpdateBeadInput
+```
+
+## Data Types
 
 ### BeadStatus
 
@@ -95,12 +159,12 @@ data BeadInfo = BeadInfo
   , biCreatedBy   :: Maybe Text
   , biUpdatedAt   :: Maybe UTCTime
   , biParent      :: Maybe Text
-  , biDependencies :: [DependencyInfo]  -- What this blocks on
-  , biDependents   :: [DependencyInfo]  -- What depends on this
+  , biDependencies :: [DependencyInfo]
+  , biDependents   :: [DependencyInfo]
   }
 ```
 
-### DependencyInfo
+### DependencyInfo / DependencyType
 
 ```haskell
 data DependencyInfo = DependencyInfo
@@ -118,104 +182,84 @@ data DependencyType
   | DepDependsOn    -- This depends on another
 ```
 
-## Executor Configuration
-
-```haskell
-import Tidepool.BD.Executor (BDConfig(..), runBDIO, defaultBDConfig)
-
-data BDConfig = BDConfig
-  { bcBeadsDir :: Maybe FilePath  -- SQLite file path (.beads/beads.db)
-  , bcQuiet    :: Bool            -- Suppress stderr warnings
-  }
-
-defaultBDConfig :: BDConfig
-defaultBDConfig = BDConfig { bcBeadsDir = Nothing, bcQuiet = True }
-```
-
 ## Usage Patterns
 
-### Basic Query
+### Reading Bead Context
 
 ```haskell
 import Tidepool.Effects.BD
 import Tidepool.BD.Executor
 
-example :: IO ()
-example = do
-  let config = defaultBDConfig
-  runM $ runBDIO config $ do
-    maybeBead <- getBead "gt-hda.2.2"
-    case maybeBead of
-      Nothing -> pure ()
-      Just bead -> do
-        deps <- getDeps bead.biId
-        labels <- getLabels bead.biId
-        -- Process bead info...
+getBeadContext :: Member BD effs => Text -> Eff effs BeadContext
+getBeadContext beadId = do
+  maybeBead <- getBead beadId
+  case maybeBead of
+    Nothing -> error "Bead not found"
+    Just bead -> do
+      deps <- getDeps beadId
+      blocking <- getBlocking beadId
+      labels <- getLabels beadId
+      children <- getChildren beadId
+      pure BeadContext { .. }
 ```
 
-### With Specific Database
+### Creating Child Tasks
 
 ```haskell
--- Point to a specific beads database
-let config = BDConfig
-      { bcBeadsDir = Just "/path/to/project/.beads/beads.db"
-      , bcQuiet = True
+breakdownEpic :: Member BD effs => Text -> [Text] -> Eff effs [Text]
+breakdownEpic parentId subtaskTitles = do
+  forM subtaskTitles $ \title -> do
+    createBead $ defaultCreateInput
+      { cbiTitle = title
+      , cbiParent = Just parentId
+      , cbiType = TypeTask
       }
 ```
 
-### Pure Handler (Testing)
+### Managing Work Status
 
 ```haskell
-import Tidepool.BD.Executor (runBD)
+claimAndWork :: Member BD effs => Text -> Eff effs ()
+claimAndWork beadId = do
+  -- Claim it
+  updateBead beadId $ emptyUpdateInput
+    { ubiStatus = Just StatusInProgress
+    , ubiAssignee = Just "agent/polecat-1"
+    }
+  addLabel beadId "in-progress"
 
-testExample :: IO (Maybe BeadInfo, [Text])
-testExample = runM $ runBD mockGetBead mockGetDeps mockGetBlocking mockGetLabels $ do
-  bead <- getBead "any-id"
-  labels <- getLabels "any-id"
-  pure (bead, labels)
-  where
-    mockGetBead _ = pure $ Just BeadInfo { biId = "mock-1", ... }
-    mockGetDeps _ = pure []
-    mockGetBlocking _ = pure []
-    mockGetLabels _ = pure ["label1", "label2"]
+  -- ... do work ...
+
+  -- Complete
+  removeLabel beadId "in-progress"
+  closeBead beadId
 ```
 
-## JSON Schema
+### Running with Real CLI
 
-The executor parses JSON from `bd show --json` and `bd label list --json`:
+```haskell
+main :: IO ()
+main = do
+  let config = BDConfig
+        { bcBeadsDir = Just "/project/.beads/beads.db"
+        , bcQuiet = True
+        }
+  runM $ runBDIO config $ do
+    -- Create a task
+    taskId <- createBead $ defaultCreateInput
+      { cbiTitle = "Investigate bug"
+      , cbiType = TypeBug
+      , cbiPriority = 1
+      }
 
-```json
-// bd show --json returns array with single element
-[{
-  "id": "gt-hda.1",
-  "title": "Foundation Layer",
-  "description": "Build the integration layer",
-  "status": "open",
-  "priority": 1,
-  "issue_type": "epic",
-  "assignee": "tidepool/polecats/slit",
-  "created_at": "2026-01-03T21:20:49Z",
-  "parent": "gt-hda",
-  "dependencies": [{
-    "id": "gt-hda",
-    "title": "Parent Epic",
-    "status": "hooked",
-    "priority": 2,
-    "issue_type": "epic",
-    "dependency_type": "parent-child"
-  }],
-  "dependents": [{
-    "id": "gt-hda.2",
-    "title": "Child Task",
-    "status": "open",
-    "priority": 2,
-    "issue_type": "task",
-    "dependency_type": "blocks"
-  }]
-}]
+    -- Add context
+    addLabel taskId "needs-triage"
 
-// bd label list --json returns array of strings
-["infrastructure", "urgent", "blocked"]
+    -- Query it
+    maybeBead <- getBead taskId
+    case maybeBead of
+      Just bead -> putStrLn $ "Created: " <> bead.biTitle
+      Nothing -> putStrLn "Failed to create"
 ```
 
 ## Common Issues
@@ -232,33 +276,23 @@ bcBeadsDir = Just "/project/.beads/beads.db"
 bcBeadsDir = Just "/project/.beads"
 ```
 
-### Optional Fields
+### Parent vs Dependency
 
-The `dependencies` and `dependents` fields are optional in JSON. The `FromJSON`
-instance handles this correctly with `.!= []`:
-
-```haskell
-instance FromJSON BeadInfo where
-  parseJSON = withObject "BeadInfo" $ \v ->
-    BeadInfo
-      <$> v .:  "id"
-      -- ...
-      <*> v .:? "dependencies" .!= []  -- Optional, defaults to []
-      <*> v .:? "dependents" .!= []    -- Optional, defaults to []
-```
-
-### bd CLI Availability
-
-Tests skip gracefully when `bd` is not in PATH:
+- `cbiParent` creates a **hierarchical** relationship (shows in `getChildren`)
+- `cbiDeps` creates **dependencies** (shows in `getDeps`/`getBlocking`)
 
 ```haskell
-isBdAvailable :: IO Bool
-isBdAvailable = do
-  result <- try $ readProcessWithExitCode "bd" ["--help"] ""
-  pure $ case result of
-    Left (_ :: SomeException) -> False
-    Right (ExitSuccess, _, _) -> True
-    Right _ -> False
+-- Child task (hierarchical)
+createBead $ defaultCreateInput
+  { cbiTitle = "Subtask"
+  , cbiParent = Just epicId
+  }
+
+-- Dependent task (blocks/depends-on)
+createBead $ defaultCreateInput
+  { cbiTitle = "Depends on other"
+  , cbiDeps = [(blockerId, DepDependsOn)]
+  }
 ```
 
 ## Test Suite
@@ -267,7 +301,8 @@ Located at `tidepool-native-gui/bd-executor/test/Main.hs`:
 
 - **JSON parsing tests** (23): All types round-trip correctly
 - **Mock CLI tests** (5): Executor handles edge cases
-- **Real CLI tests** (6): Integration with actual `bd` CLI
+- **Real CLI read tests** (6): Read operations against real `bd`
+- **Real CLI write tests** (5): Write operations against real `bd`
 
 Run with:
 ```bash
