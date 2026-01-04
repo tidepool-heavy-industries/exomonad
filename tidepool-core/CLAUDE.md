@@ -238,6 +238,71 @@ UsesEffects '[Effect, ...]    -- Effect stack (Logic nodes, includes Goto)
 Memory Type           -- Node-private persistent state
 ```
 
+#### Graph-Level Annotations
+
+```haskell
+type (:&) :: Type -> Type -> Type
+data graph :& annotation
+infixl 4 :&
+
+-- Available graph-level annotations:
+Global Type           -- Shared state accessible to all nodes
+Backend Type          -- API backend selection (CloudflareAI | NativeAnthropic)
+Groups [...]          -- Node grouping for Mermaid subgraphs
+Requires [...]        -- Required effects documentation
+```
+
+#### API Backend Selection
+
+```haskell
+-- Backend types
+data CloudflareAI      -- Cloudflare Workers AI backend
+data NativeAnthropic   -- Native Anthropic API backend
+
+-- Usage (graph-level annotation)
+type MyGraph = Graph '[...] :& Backend NativeAnthropic
+```
+
+#### ClaudeCode Annotation
+
+Marks an LLM node as executed via Claude Code subprocess instead of API call.
+Only valid with `NativeAnthropic` backend (compile-time error with `CloudflareAI`).
+
+```haskell
+-- Model selection
+data ModelChoice = Haiku | Sonnet | Opus
+
+-- ClaudeCode annotation: model + optional working directory
+type ClaudeCode :: ModelChoice -> Maybe Symbol -> Type
+data ClaudeCode model cwd
+
+-- Usage on LLM nodes
+"work" := LLM
+    :@ Needs '[BeadInfo]
+    :@ Template WorkTpl
+    :@ Schema WorkResult
+    :@ ClaudeCode 'Sonnet ('Just "/path/to/worktree")
+
+-- With inherited cwd (from runner context)
+"quick" := LLM :@ Schema Answer :@ ClaudeCode 'Haiku 'Nothing
+```
+
+When `ClaudeCode` is present:
+- Template is rendered and passed to `claude -p` via zellij-cc
+- Claude Code spawns as subprocess with file system access
+- JSON output is parsed according to `Schema`
+
+**Backend validation**: Using `ClaudeCode` with `CloudflareAI` produces:
+```
+Graph validation failed: incompatible backend for ClaudeCode
+
+Node 'work' has ClaudeCode annotation,
+but this graph uses CloudflareAI backend.
+
+ClaudeCode spawns a local subprocess via zellij-cc,
+which is not available in Cloudflare Workers.
+```
+
 #### Operator Precedence
 
 ```

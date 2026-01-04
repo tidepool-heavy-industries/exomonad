@@ -23,6 +23,18 @@ module Tidepool.Graph.Types
   , Groups
   , Requires
   , Global
+  , Backend
+
+    -- * API Backend Types
+  , CloudflareAI
+  , NativeAnthropic
+
+    -- * ClaudeCode Annotation
+  , ClaudeCode
+  , ModelChoice(..)
+  , Haiku
+  , Sonnet
+  , Opus
 
     -- * Special Goto Targets
   , Exit
@@ -149,6 +161,68 @@ data Requires effects
 -- Used with the (:&) operator for graph-level annotations.
 type Global :: Type -> Type
 data Global stateType
+
+-- | API backend selection. Determines whether LLM calls go to Cloudflare AI
+-- or the native Anthropic API. Used with the (:&) operator.
+--
+-- @
+-- type MyGraph = Graph '[...] :& Backend NativeAnthropic
+-- @
+--
+-- Note: 'ClaudeCode' annotation is only valid with 'NativeAnthropic' backend.
+-- Using ClaudeCode with CloudflareAI will produce a compile-time error.
+type Backend :: Type -> Type
+data Backend backendType
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- API BACKEND TYPES
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Cloudflare AI backend. Uses Cloudflare Workers AI for LLM calls.
+-- Does not support 'ClaudeCode' annotation (no local subprocess access).
+data CloudflareAI
+
+-- | Native Anthropic API backend. Calls Anthropic API directly.
+-- Supports 'ClaudeCode' annotation for spawning Claude Code sessions.
+data NativeAnthropic
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- CLAUDE CODE ANNOTATION
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Model selection for Claude Code sessions.
+data ModelChoice
+  = Haiku   -- ^ Fast, cost-effective model
+  | Sonnet  -- ^ Balanced performance/cost
+  | Opus    -- ^ Most capable model
+
+-- | Type-level aliases for promoted ModelChoice constructors.
+type Haiku = 'Haiku
+type Sonnet = 'Sonnet
+type Opus = 'Opus
+
+-- | Marks an LLM node as executed via Claude Code subprocess instead of API.
+--
+-- When present, the node's template is rendered and passed to @claude -p@
+-- via zellij-cc, which spawns a Claude Code session and returns JSON output.
+--
+-- @
+-- "work" := LLM
+--     :@ Needs '[BeadInfo]
+--     :@ Template WorkTpl
+--     :@ Schema WorkResult
+--     :@ ClaudeCode 'Sonnet ('Just "/path/to/worktree")
+-- @
+--
+-- Parameters:
+--
+-- * @model@ - Which Claude model to use (Haiku, Sonnet, Opus)
+-- * @cwd@ - Working directory for file access ('Nothing' inherits from runner)
+--
+-- Note: Only valid with 'Backend NativeAnthropic'. Using with CloudflareAI
+-- will produce a compile-time type error.
+type ClaudeCode :: ModelChoice -> Maybe Symbol -> Type
+data ClaudeCode model cwd
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- SPECIAL GOTO TARGET
