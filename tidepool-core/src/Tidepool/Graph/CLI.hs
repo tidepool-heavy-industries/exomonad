@@ -71,6 +71,9 @@ module Tidepool.Graph.CLI
 
     -- * CLI Runner
   , runGraphCLIWith
+
+    -- * Helpers (exported for testing)
+  , toKebabCase
   ) where
 
 import Data.Aeson (ToJSON)
@@ -490,12 +493,15 @@ runGraphCLIWith desc inputParser executor = do
 toKebabCase :: String -> String
 toKebabCase = \case
   [] -> []
-  (c:cs) -> toLower c : go cs
+  (c:cs) -> toLower c : go c cs
   where
-    go [] = []
-    go (c:cs)
-      | isUpper c = '-' : toLower c : go cs
-      | otherwise = c : go cs
+    go :: Char -> String -> String
+    go _ [] = []
+    go prev (c:cs)
+      | isUpper c && not (isUpper prev)
+          = '-' : toLower c : go c cs
+      | otherwise
+          = toLower c : go c cs
 
 -- | Generate error message for missing field documentation.
 cliFieldError :: Name -> Name -> TH.Type -> String

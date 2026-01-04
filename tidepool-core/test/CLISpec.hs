@@ -126,3 +126,11 @@ spec = do
           isRight (Right _) = True
           isRight _ = False
       result `shouldSatisfy` isRight
+
+    it "handles consecutive uppercase letters (processURL -> process-url)" $ do
+      -- Only insert hyphen when transitioning from lowercase to uppercase
+      -- "processURL" should become "process-url", not "process-u-r-l"
+      -- We test this indirectly via the internal function
+      toKebabCase "processURL" `shouldBe` "process-url"
+      toKebabCase "inputFile" `shouldBe` "input-file"
+      toKebabCase "XMLParser" `shouldBe` "xmlparser"  -- All caps at start
