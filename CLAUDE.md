@@ -533,12 +533,13 @@ The `tidepool-lsp-executor` package provides an LSP effect interpreter using the
 import Tidepool.Effects.LSP
 import Tidepool.LSP.Executor (withLSPSession, runLSP)
 
--- Run LSP-enabled action
+-- Run LSP-enabled action (freer-simple based)
 withLSPSession "/path/to/project" $ \session -> do
-  result <- runEff $ runLSP session $ do
-    info <- hover doc pos
-    defs <- definition doc pos
-    pure (info, defs)
+  let action = runLSP session $ do
+        info <- hover doc pos
+        defs <- definition doc pos
+        pure (info, defs)
+  result <- runM action  -- runM from Control.Monad.Freer
   print result
 ```
 

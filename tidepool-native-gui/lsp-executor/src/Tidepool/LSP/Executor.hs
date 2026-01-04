@@ -14,7 +14,7 @@ module Tidepool.LSP.Executor
 
 import Control.Exception (bracket)
 import Control.Monad.Freer (Eff, LastMember, sendM, interpret)
-import Control.Monad.IO.Class (liftIO)
+import Data.Function ((&))
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Map.Strict as Map
@@ -66,7 +66,7 @@ withLSPSession rootDir action =
       pure $ LSPSession stdin stdout ph
 
     release session =
-      terminateProcess (lspProcess session)
+      terminateProcess session.lspProcess
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -277,7 +277,8 @@ fromCodeActionKind k = case k of
   L.CodeActionKind_SourceOrganizeImports -> SourceOrganizeImports
   L.CodeActionKind_SourceFixAll -> SourceFixAll
   L.CodeActionKind_Custom t -> OtherKind t
-  _ -> OtherKind "unknown"
+  -- lsp-types may add new constructors; map unknown ones to OtherKind
+  L.CodeActionKind_Empty -> OtherKind ""
 
 -- Result type is WorkspaceEdit |? Null
 fromWorkspaceEdit :: L.WorkspaceEdit L.|? L.Null -> WorkspaceEdit
@@ -352,6 +353,3 @@ fromCompletionItemKind k = case k of
   L.CompletionItemKind_Operator -> CIKOperator
   L.CompletionItemKind_TypeParameter -> CIKTypeParameter
 
--- Helper for optional application
-(&) :: a -> (a -> b) -> b
-(&) = flip ($)
