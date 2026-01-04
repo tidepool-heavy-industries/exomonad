@@ -1,0 +1,79 @@
+# Analyze Formula
+# Skill: Query logs and identify patterns for DSL evolution
+
+[formula]
+name = "analyze"
+version = "0.1.0"
+description = "Query production logs and identify improvement patterns"
+category = "observability"
+
+[input]
+required = ["since"]
+optional = ["query_type", "min_occurrences", "output_format"]
+
+[input.since]
+type = "duration"
+description = "Time range to query (e.g., '24h', '7d', '1h')"
+default = "24h"
+
+[input.query_type]
+type = "enum"
+values = ["all", "transitions", "llm-calls", "errors", "sessions"]
+description = "Type of events to query"
+default = "all"
+
+[input.min_occurrences]
+type = "integer"
+description = "Minimum pattern occurrences to report"
+default = 3
+
+[input.output_format]
+type = "enum"
+values = ["json", "text", "markdown"]
+description = "Output format for pattern report"
+default = "json"
+
+[output]
+type = "PatternReport"
+description = "Structured report of identified patterns"
+
+[execution]
+polecat = "log-analyzer"
+timeout_seconds = 120
+retry_count = 2
+
+[steps]
+1 = "Query graph transitions for failures"
+2 = "Query LLM calls for latency issues"
+3 = "Query errors for recurring patterns"
+4 = "Classify patterns by severity"
+5 = "Generate PatternReport with recommendations"
+
+[metrics]
+track = ["query_count", "patterns_found", "execution_time_ms"]
+
+[example]
+command = "micro-gastown analyze --since 24h --query-type all"
+output = """
+{
+  "patterns": [
+    {
+      "type": "slow_llm",
+      "severity": "warning",
+      "occurrences": 12,
+      "details": {
+        "node": "dmScene",
+        "avg_latency_ms": 4200,
+        "prompt_tokens_avg": 3800
+      },
+      "recommendation": "Consider splitting prompt or reducing context"
+    }
+  ],
+  "summary": {
+    "total_patterns": 3,
+    "critical": 0,
+    "warning": 2,
+    "info": 1
+  }
+}
+"""

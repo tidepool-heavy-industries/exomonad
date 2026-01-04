@@ -1,0 +1,120 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://tidepool.dev/schemas/PatternReport.json",
+  "title": "PatternReport",
+  "description": "Report of patterns identified from production log analysis",
+  "type": "object",
+  "required": ["patterns", "summary"],
+  "properties": {
+    "patterns": {
+      "type": "array",
+      "description": "List of identified patterns",
+      "items": {
+        "$ref": "#/$defs/Pattern"
+      }
+    },
+    "summary": {
+      "$ref": "#/$defs/Summary"
+    },
+    "metadata": {
+      "$ref": "#/$defs/Metadata"
+    }
+  },
+  "$defs": {
+    "Pattern": {
+      "type": "object",
+      "required": ["id", "type", "severity", "occurrences", "details", "recommendation"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for this pattern",
+          "pattern": "^[a-z0-9-]+$"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["slow_llm", "failed_transition", "repeated_error", "dead_path", "token_bloat"],
+          "description": "Category of pattern"
+        },
+        "severity": {
+          "type": "string",
+          "enum": ["critical", "warning", "info"],
+          "description": "Severity level"
+        },
+        "occurrences": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Number of times this pattern was observed"
+        },
+        "details": {
+          "type": "object",
+          "description": "Pattern-specific details",
+          "additionalProperties": true
+        },
+        "recommendation": {
+          "type": "string",
+          "description": "Suggested action to address this pattern"
+        },
+        "grafana_query": {
+          "type": "string",
+          "description": "LogQL query to reproduce this pattern"
+        },
+        "sample_events": {
+          "type": "array",
+          "description": "Sample log events demonstrating the pattern",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "maxItems": 5
+        }
+      }
+    },
+    "Summary": {
+      "type": "object",
+      "required": ["total_patterns", "critical", "warning", "info"],
+      "properties": {
+        "total_patterns": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "critical": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "warning": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "info": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "query_range": {
+          "type": "string",
+          "description": "Time range queried (ISO 8601 interval)"
+        },
+        "events_analyzed": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Total number of events analyzed"
+        }
+      }
+    },
+    "Metadata": {
+      "type": "object",
+      "properties": {
+        "generated_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "generator_version": {
+          "type": "string"
+        },
+        "query_duration_ms": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  }
+}
