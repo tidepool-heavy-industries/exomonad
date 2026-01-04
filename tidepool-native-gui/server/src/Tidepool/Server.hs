@@ -1,31 +1,35 @@
--- | Native tidepool server - Servant + WebSocket handling.
+-- | Native tidepool server - Servant + WebSocket + static files.
 --
 -- Ties together all executors and exposes WebSocket endpoint.
+-- Uses Servant's type-level API for static file serving.
 --
 -- = Architecture
 --
 -- The server:
--- 1. Accepts WebSocket connections
+-- 1. Accepts WebSocket connections (via wai-websockets)
 -- 2. Creates a session per connection
 -- 3. Bridges WebSocket messages to the UI effect callback
 -- 4. Runs the agent graph with all executors composed
+-- 5. Serves static files for non-WebSocket HTTP requests
 --
 -- = Usage
 --
 -- @
--- import Tidepool.Server (runServer, ServerConfig(..))
+-- import Tidepool.Server (runServer, ServerConfig(..), ServerMode(..))
 --
 -- main :: IO ()
 -- main = runServer ServerConfig
 --   { scPort = 8080
 --   , scHost = "0.0.0.0"
 --   , scExecutorConfig = defaultExecutorConfig
+--   , scMode = StaticFiles "dist"
 --   }
 -- @
 module Tidepool.Server
   ( -- * Server
     runServer
   , ServerConfig(..)
+  , ServerMode(..)
 
     -- * Executor Configuration
   , ExecutorConfig(..)
@@ -41,14 +45,20 @@ import Control.Concurrent.MVar
 import Control.Exception (catch, SomeException)
 import Control.Monad (forever)
 import Data.Aeson (encode, eitherDecode)
+import Data.Proxy (Proxy(..))
 import Data.String (fromString)
 import Data.Text (Text)
 import Data.Text qualified as T
-import Network.HTTP.Types.Status (status400)
+import Network.HTTP.Types.Status (status200)
 import Network.Wai (Application, responseLBS)
 import Network.Wai.Handler.Warp (defaultSettings, setPort, setHost, runSettings)
 import Network.Wai.Handler.WebSockets (websocketsOr)
 import Network.WebSockets qualified as WS
+import Data.Tagged (Tagged(..))
+import Servant (Raw, serve)
+import Servant.Server (Handler)
+import Servant.Server.StaticFiles (serveDirectoryWebApp)
+import System.Directory (doesDirectoryExist)
 
 import Tidepool.Wire.Types
   ( UIState(..)
@@ -65,6 +75,12 @@ import Tidepool.Server.EffectRunner (ExecutorConfig(..), defaultExecutorConfig)
 -- CONFIGURATION
 -- ════════════════════════════════════════════════════════════════════════════
 
+-- | Server mode - static files or dev proxy.
+data ServerMode
+  = StaticFiles FilePath   -- ^ Serve static files from directory (production)
+  | DevProxy Int           -- ^ Proxy to Vite dev server on given port (development)
+  deriving (Show, Eq)
+
 -- | Server configuration.
 data ServerConfig = ServerConfig
   { scPort :: Int
@@ -73,6 +89,8 @@ data ServerConfig = ServerConfig
     -- ^ Host to bind to (default: "0.0.0.0")
   , scExecutorConfig :: ExecutorConfig
     -- ^ Executor configuration (LLM keys, Habitica creds, etc.)
+  , scMode :: ServerMode
+    -- ^ Static file serving mode
   }
 
 
@@ -83,28 +101,46 @@ data ServerConfig = ServerConfig
 -- | Run the server.
 --
 -- This starts a Warp server with WebSocket support. Each WebSocket connection
--- gets its own session with a fresh UI context.
+-- gets its own session with a fresh UI context. Non-WebSocket requests are
+-- served by Servant (static files in production, placeholder in dev mode).
 runServer :: ServerConfig -> IO ()
 runServer config = do
   putStrLn $ "[Server] Starting on " <> T.unpack (scHost config) <> ":" <> show (scPort config)
   putStrLn "[Server] WebSocket endpoint: ws://localhost:<port>/"
+
+  case scMode config of
+    StaticFiles dir -> do
+      exists <- doesDirectoryExist dir
+      if exists
+        then putStrLn $ "[Server] Serving static files from: " <> dir
+        else putStrLn $ "[Server] Warning: static directory does not exist: " <> dir <> " (will return 404)"
+    DevProxy port ->
+      putStrLn $ "[Server] Dev proxy mode - frontend expected at localhost:" <> show port
+
   putStrLn "[Server] Press Ctrl+C to stop"
 
   let settings = setPort (scPort config)
                $ setHost (fromString $ T.unpack $ scHost config)
                $ defaultSettings
 
-  runSettings settings $ app config
+  servantApp <- makeServantApp config
+  runSettings settings $ websocketsOr WS.defaultConnectionOptions (wsApp config) servantApp
 
--- | WAI application with WebSocket upgrade support.
-app :: ServerConfig -> Application
-app config = websocketsOr WS.defaultConnectionOptions (wsApp config) fallbackApp
-  where
-    -- Fallback for non-WebSocket requests
-    fallbackApp :: Application
-    fallbackApp _req respond = respond $
-      responseLBS status400 [("Content-Type", "text/plain")]
-        "This server only accepts WebSocket connections"
+-- | Create Servant application for static file serving.
+makeServantApp :: ServerConfig -> IO Application
+makeServantApp config = pure $ case scMode config of
+  StaticFiles dir -> serve (Proxy :: Proxy Raw) (serveDirectoryWebApp dir)
+  DevProxy _port -> serve (Proxy :: Proxy Raw) devProxyHandler
+
+-- | Placeholder handler for dev proxy mode.
+--
+-- In production, static files are served directly. In dev mode,
+-- the frontend runs on a separate Vite server and connects directly.
+devProxyHandler :: Tagged Handler Application
+devProxyHandler = Tagged $ \_req respond -> respond $ responseLBS
+  status200
+  [("Content-Type", "text/plain")]
+  "Dev proxy mode - run Vite dev server on port 3000 and connect directly."
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -140,7 +176,7 @@ handleConnection config conn = do
   responseMVar <- newEmptyMVar :: IO (MVar UserAction)
 
   -- Fork a thread to read incoming messages and put them in the MVar
-  readerThread <- forkIO $ forever $ do
+  _readerThread <- forkIO $ forever $ do
     msg <- WS.receiveData conn
     case eitherDecode msg of
       Left err -> do
@@ -221,4 +257,3 @@ handleConnection config conn = do
         Right (PhotoAction _ _) -> do
           putStrLn "[WebSocket] Photo received"
           mainLoop ctx callback
-
