@@ -18,6 +18,14 @@ module Tidepool.Effects.LLMProvider
   , AnthropicResponse(..)
   , OpenAIResponse(..)
 
+    -- * Response Component Types
+  , ContentBlock(..)
+  , Usage(..)
+  , Choice(..)
+  , Message(..)
+  , ToolCall(..)
+  , FunctionCall(..)
+
     -- * Effect
   , LLMComplete(..)
   , complete

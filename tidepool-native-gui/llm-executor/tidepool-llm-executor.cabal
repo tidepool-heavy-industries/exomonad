@@ -2,6 +2,8 @@ cabal-version:      3.0
 name:               tidepool-llm-executor
 version:            0.1.0.0
 synopsis:           LLM effect executor - Anthropic/OpenAI native HTTP client
+description:        Native HTTP implementation of LLMComplete effect.
+                    Supports Anthropic and OpenAI with type-level provider switch.
 license:            MIT
 author:             Inanna
 build-type:         Simple
@@ -21,10 +23,15 @@ library
     hs-source-dirs:   src
     default-language: GHC2021
     default-extensions:
+        DataKinds
         DeriveAnyClass
         DeriveGeneric
         DerivingStrategies
+        DuplicateRecordFields
         GADTs
         LambdaCase
+        NoFieldSelectors
+        OverloadedRecordDot
         OverloadedStrings
         TypeFamilies
+        TypeOperators
