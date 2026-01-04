@@ -311,6 +311,13 @@ tidepool-tidying/          # Tidying agent (executive function prosthetic)
 │   └── TestTidying.hs     # Test harness
 └── templates/tidying/     # Tidying prompt templates
 
+tidepool-native-gui/       # Native GUI tooling
+└── lsp-executor/          # LSP effect interpreter using lsp-client
+    ├── src/Tidepool/LSP/
+    │   └── Executor.hs    # LSP effect interpreter, session management
+    └── test/
+        └── SmokeTest.hs   # Smoke test against real HLS
+
 deploy/                    # Cloudflare Worker Durable Object harness
 ├── src/                   # TypeScript harness for WASM state machines
 └── wrangler.toml          # CF Worker configuration
@@ -515,6 +522,54 @@ Check diagnostics for type errors
 ```
 
 See `docs/gas-town-lsp-integration.md` for full details.
+
+## LSP Executor Package (`tidepool-native-gui/lsp-executor/`)
+
+The `tidepool-lsp-executor` package provides an LSP effect interpreter using the `lsp-client` library from Hackage.
+
+### Usage
+
+```haskell
+import Tidepool.Effects.LSP
+import Tidepool.LSP.Executor (withLSPSession, runLSP)
+
+-- Run LSP-enabled action
+withLSPSession "/path/to/project" $ \session -> do
+  result <- runEff $ runLSP session $ do
+    info <- hover doc pos
+    defs <- definition doc pos
+    pure (info, defs)
+  print result
+```
+
+### Key Dependencies
+
+- `lsp-client` - Session management and request/response handling
+- `lsp-types` - LSP protocol types (version 2.3)
+
+### lsp-types 2.3 Patterns
+
+Result types use `X |? Null` (not `Maybe X`):
+
+```haskell
+fromHover :: L.Hover L.|? L.Null -> Maybe HoverInfo
+fromHover (L.InR L.Null) = Nothing
+fromHover (L.InL h) = Just HoverInfo { ... }
+```
+
+Newtypes wrap `|?` types:
+
+```haskell
+-- Definition is: newtype Definition = Definition (Location |? [Location])
+-- MarkedString is: newtype MarkedString = MarkedString (Text |? MarkedStringWithLanguage)
+```
+
+### Running the Smoke Test
+
+```bash
+# Requires minimal test project at /tmp/lsp-test-project/
+cabal run lsp-smoke-test
+```
 
 ## References
 
