@@ -484,6 +484,38 @@ pnpm deploy       # Deploy to Cloudflare
 { type: "error", message: "..." }
 ```
 
+## LSP Integration (Gas Town)
+
+Claude Code agents (polecats, witnesses, mayor) can use LSP for code intelligence.
+
+### Enabling LSP
+
+1. Set `ENABLE_LSP_TOOL=1` in your shell profile
+2. Install the HLS plugin: `/plugin marketplace add m4dc4p/claude-hls`
+3. Restart Claude Code
+
+### LSP Operations
+
+| Operation | Use Case |
+|-----------|----------|
+| `hover` | Get type info and documentation |
+| `goToDefinition` | Find where a symbol is defined |
+| `findReferences` | Find all usages (impact analysis) |
+| `documentSymbol` | Get file structure overview |
+
+### Example Usage
+
+```
+# Before editing a function, understand it:
+LSP hover on function name → get type signature
+LSP findReferences → see all call sites
+
+# Validate changes:
+Check diagnostics for type errors
+```
+
+See `docs/gas-town-lsp-integration.md` for full details.
+
 ## References
 
 - freer-simple: https://hackage.haskell.org/package/freer-simple
