@@ -29,6 +29,14 @@ module Tidepool.LLM.Executor
   , LLMEnv
   , LLMConfig(..)
   , mkLLMEnv
+
+    -- * Tool Types
+  , AnthropicTool(..)
+  , anthropicToolToJSON
+
+    -- * Request Building (exported for testing)
+  , buildAnthropicRequest
+  , buildOpenAIRequest
   ) where
 
 import Control.Exception (try, SomeException)
@@ -67,6 +75,8 @@ import Tidepool.LLM.Types
   , AnthropicSecrets(..)
   , OpenAISecrets(..)
   , mkLLMEnv
+  , AnthropicTool(..)
+  , anthropicToolToJSON
   )
 import Tidepool.Effects.LLMProvider
   ( LLMComplete(..)
@@ -120,6 +130,9 @@ anthropicRequest env config userMsg maybeTools = do
         Right resp -> parseAnthropicResponse resp
 
 -- | Build Anthropic Messages API request body.
+--
+-- Tools should be in Anthropic format (with @input_schema@, not @parameters@).
+-- Use 'AnthropicTool' or 'Tidepool.Tool.toolToJSON' which produce the correct format.
 buildAnthropicRequest :: AnthropicConfig -> Text -> Maybe [Value] -> LBS.ByteString
 buildAnthropicRequest config userMsg maybeTools =
   encode $ object $ filter ((/= Null) . snd)
@@ -204,6 +217,13 @@ buildOpenAIRequest config userMsg maybeTools =
     ]
 
 -- | Wrap tool definitions in OpenAI's function format.
+--
+-- __Note__: This is for OpenAI API compatibility only. Currently unused
+-- since native OpenAI support routes through CF AI (see tidepool-wasm/CfTool.hs).
+--
+-- __Warning__: This wrapper assumes @toolDef@ uses @parameters@ (OpenAI style).
+-- If the input uses @input_schema@ (Anthropic style), the result will be incorrect.
+-- For Anthropic tools, use 'AnthropicTool' directly without wrapping.
 wrapOpenAITool :: Value -> Value
 wrapOpenAITool toolDef = object
   [ "type" .= ("function" :: Text)

@@ -3,9 +3,9 @@
 
 -- | CF AI tool schema types.
 --
--- Cloudflare Workers AI uses a flat tool format (unlike OpenAI's nested
--- @{type: "function", function: {...}}@ wrapper). These types ensure
--- tools are serialized in the correct format.
+-- Cloudflare Workers AI uses OpenAI-compatible tool format:
+-- @{type: "function", function: {name, description, parameters}}@.
+-- This format works with llama-3.3, llama-4-scout, and other CF AI models.
 --
 -- Example:
 --
@@ -85,8 +85,7 @@ data CfProperty
 -- ════════════════════════════════════════════════════════════════════════════
 
 instance ToJSON CfTool where
-  -- Use OpenAI-compatible format: {type: "function", function: {...}}
-  -- Some CF AI models (like llama-4-scout) require this format
+  -- OpenAI-compatible format used by CF AI (llama-3.3, llama-4-scout, etc.)
   toJSON CfTool{..} = object
     [ "type" .= ("function" :: Text)
     , "function" .= object
