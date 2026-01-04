@@ -1,0 +1,45 @@
+cabal-version:      3.0
+name:               tidepool-native-server
+version:            0.1.0.0
+synopsis:           Native tidepool server - Servant + WebSocket + all executors
+license:            MIT
+author:             Inanna
+build-type:         Simple
+
+library
+    exposed-modules:
+        Tidepool.Server
+        Tidepool.Server.EffectRunner
+    build-depends:
+        base >= 4.17 && < 5,
+        freer-simple >= 1.2 && < 2,
+        text >= 2.0 && < 3,
+        aeson >= 2.1 && < 3,
+        servant >= 0.20 && < 1,
+        servant-server >= 0.20 && < 1,
+        warp >= 3.3 && < 4,
+        websockets >= 0.12 && < 1,
+        tidepool-core,
+        tidepool-wire-types,
+        tidepool-ui-executor,
+        tidepool-habitica-executor,
+        tidepool-observability-executor,
+        tidepool-llm-executor
+    hs-source-dirs:   src
+    default-language: GHC2021
+    default-extensions:
+        DeriveAnyClass
+        DeriveGeneric
+        DerivingStrategies
+        GADTs
+        LambdaCase
+        OverloadedStrings
+        TypeOperators
+
+executable tidepool-native
+    main-is:          Main.hs
+    build-depends:
+        base >= 4.17 && < 5,
+        tidepool-native-server
+    hs-source-dirs:   app
+    default-language: GHC2021

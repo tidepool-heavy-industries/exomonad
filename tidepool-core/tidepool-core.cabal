@@ -45,6 +45,10 @@ library
         Tidepool.Effects.Obsidian
         Tidepool.Effects.GitHub
         Tidepool.Effects.Calendar
+        Tidepool.Effects.Observability
+        Tidepool.Effects.UI
+        Tidepool.Effects.LLMProvider
+        Tidepool.Effects.Issue
         Tidepool.Graph.Mermaid
         Tidepool.Graph.Example
         Tidepool.Graph.Example.Context

@@ -4,6 +4,14 @@ packages:
     tidepool-generated-ts
     tidepool-habitica
 
+    -- Native GUI packages (Agent 0 scaffolding)
+    tidepool-native-gui/wire-types
+    tidepool-native-gui/ui-executor
+    tidepool-native-gui/habitica-executor
+    tidepool-native-gui/observability-executor
+    tidepool-native-gui/llm-executor
+    tidepool-native-gui/server
+
 -- Disabled packages (heavy deps, not needed for WASM deployment):
 -- tidepool-platform   -- threepenny-gui, http-client, sqlite
 -- tidepool-dm         -- GUI app, depends on platform

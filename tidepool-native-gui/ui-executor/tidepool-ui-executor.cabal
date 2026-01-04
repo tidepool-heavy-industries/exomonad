@@ -1,0 +1,26 @@
+cabal-version:      3.0
+name:               tidepool-ui-executor
+version:            0.1.0.0
+synopsis:           UI effect executor - bridges UI effects to wire types
+license:            MIT
+author:             Inanna
+build-type:         Simple
+
+library
+    exposed-modules:
+        Tidepool.UI.Executor
+    build-depends:
+        base >= 4.17 && < 5,
+        freer-simple >= 1.2 && < 2,
+        text >= 2.0 && < 3,
+        tidepool-core,
+        tidepool-wire-types
+    hs-source-dirs:   src
+    default-language: GHC2021
+    default-extensions:
+        DeriveAnyClass
+        DeriveGeneric
+        DerivingStrategies
+        GADTs
+        LambdaCase
+        OverloadedStrings
