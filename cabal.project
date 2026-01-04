@@ -13,6 +13,7 @@ packages:
     tidepool-native-gui/llm-executor
     tidepool-native-gui/issue-executor
     tidepool-native-gui/lsp-executor
+    tidepool-native-gui/bd-executor
     tidepool-native-gui/server
 
     -- Tooling packages (Agent 8)
