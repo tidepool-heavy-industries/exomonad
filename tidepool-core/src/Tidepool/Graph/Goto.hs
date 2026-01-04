@@ -1,4 +1,8 @@
 {-# LANGUAGE ConstraintKinds #-}
+{-# OPTIONS_GHC -Wno-incomplete-patterns #-}
+-- Note: -Wno-incomplete-patterns is needed because unwrapSingleChoice has a pattern
+-- that IS exhaustive for single-element OneOf lists, but GHC can't prove this.
+-- By suppressing the warning here, we absorb it so users don't see it.
 
 -- | The Goto effect for graph transitions.
 --
@@ -58,6 +62,7 @@ module Tidepool.Graph.Goto
   , gotoChoice
   , gotoExit
   , gotoSelf
+  , unwrapSingleChoice
 
     -- * LLM Handler Variants
   , LLMHandler(..)
@@ -340,6 +345,27 @@ gotoSelf
      )
   => payload -> GotoChoice targets
 gotoSelf payload = GotoChoice (injectTarget @(To Self payload) @targets payload)
+
+-- | Extract the payload from a single-target 'GotoChoice'.
+--
+-- This is useful for exit-only handlers where you need to extract the result
+-- without pattern matching (which would trigger incomplete pattern warnings
+-- even though the pattern is actually exhaustive for single-element lists).
+--
+-- @
+-- -- Handler that can only exit
+-- exitOnlyHandler :: Input -> Eff es (GotoChoice '[To Exit Response])
+-- exitOnlyHandler input = pure $ gotoExit (processInput input)
+--
+-- -- Extract the response without pattern matching
+-- let response = unwrapSingleChoice choice  -- :: Response
+-- @
+--
+-- Note: This only works for single-target 'GotoChoice' types. For multi-target
+-- choices, use pattern matching via "Tidepool.Graph.Goto.Internal" or dispatch
+-- via 'DispatchGoto'.
+unwrapSingleChoice :: GotoChoice '[To name payload] -> payload
+unwrapSingleChoice (GotoChoice (Here p)) = p
 
 -- Note: gotoChoiceToResult has been removed. The typed executor in Execute.hs
 -- dispatches directly on OneOf without needing to convert to Dynamic-based GotoResult.

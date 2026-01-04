@@ -125,7 +125,7 @@ import Control.Monad.Freer (Eff, Member)
 import Tidepool.Graph.Types (type (:@), Needs, Schema, Template, Vision, Tools, Memory, System, UsesEffects)
 import Tidepool.Graph.Template (TemplateContext)
 import Tidepool.Graph.Edges (GetUsesEffects, GetGotoTargets, GotoEffectsToTargets)
-import Tidepool.Graph.Goto (Goto, goto, GotoChoice, LLMHandler(..))
+import Tidepool.Graph.Goto (Goto, goto, GotoChoice, To, LLMHandler(..))
 import Tidepool.Graph.Validate.RecordStructure
   ( AllFieldsReachable, AllLogicFieldsReachExit, NoDeadGotosRecord
   , AllLogicNodesHaveGoto, NoGotoSelfOnly
@@ -378,6 +378,7 @@ type family NodeHandlerDispatch nodeDef origNode es needs mTpl mSchema mEffs whe
     NodeHandlerDispatch node orig es needs mTpl mSchema mEffs
 
   -- Peel UsesEffects annotation - record effects
+  -- (Validation that To is not used here happens at ValidGraphRecord level)
   NodeHandlerDispatch (node :@ UsesEffects effs) orig es needs mTpl mSchema 'Nothing =
     NodeHandlerDispatch node orig es needs mTpl mSchema ('Just (EffStack effs))
 
@@ -616,6 +617,74 @@ type family TupleOf ts where
 
 -- | Wrapper to distinguish Template types from EffStack in the Maybe
 data EffStack (effs :: [Effect])
+
+-- | Validate that UsesEffects doesn't contain 'To' markers.
+--
+-- 'To' markers are for 'GotoChoice' return types in handler signatures,
+-- not for 'UsesEffects' in graph definitions. This validation catches
+-- the common mistake of using the wrong type constructor.
+--
+-- = Example Error Scenario
+--
+-- @
+-- -- Wrong: Using 'To' markers in UsesEffects
+-- type MyEffects = '[To "nodeA" Data, To Exit Result]
+--
+-- myNode :: mode :- LogicNode :@ Needs '[Input] :@ UsesEffects MyEffects
+--          -- ERROR: UsesEffects needs 'Goto' effects, not 'To' markers
+--
+-- -- Correct: Using 'Goto' effects in UsesEffects
+-- type MyEffects = '[Goto "nodeA" Data, Goto Exit Result]
+--
+-- myNode :: mode :- LogicNode :@ Needs '[Input] :@ UsesEffects MyEffects
+--          -- OK: Goto effects are correct for UsesEffects
+-- @
+--
+-- = Why This Distinction Exists
+--
+-- 'Goto' is an Effect (kind @(Type -> Type) -> Type -> Type@) that represents
+-- a possible transition. 'To' is a phantom marker (kind @k -> Type -> Type@)
+-- that appears in 'GotoChoice' to indicate which target was selected.
+--
+-- The 'GotosToTos' type family converts between them:
+--
+-- @
+-- type MyGotos = '[Goto "a" A, Goto Exit R]           -- For UsesEffects
+-- type MyTargets = GotosToTos MyGotos                 -- '[To "a" A, To Exit R] for GotoChoice
+-- @
+type ValidateNotToMarkers :: forall k. [k] -> Constraint
+type family ValidateNotToMarkers effs where
+  ValidateNotToMarkers '[] = ()
+  ValidateNotToMarkers (To name payload ': _) = TypeError
+    ( HR
+      ':$$: 'Text "  Wrong type in UsesEffects"
+      ':$$: HR
+      ':$$: Blank
+      ':$$: WhatHappened
+      ':$$: Indent "UsesEffects contains 'To' markers, but needs 'Goto' effects."
+      ':$$: Blank
+      ':$$: CodeLine "UsesEffects '[To \"x\" A, ...]   -- WRONG (To is for GotoChoice)"
+      ':$$: CodeLine "UsesEffects '[Goto \"x\" A, ...]  -- CORRECT (Goto is the effect)"
+      ':$$: Blank
+      ':$$: HowItWorks
+      ':$$: Indent "'Goto' is the effect type used in graph definitions (UsesEffects)."
+      ':$$: Indent "'To' is the target marker used in handler return types (GotoChoice)."
+      ':$$: Blank
+      ':$$: Indent "They look similar but have different kinds and purposes:"
+      ':$$: CodeLine "  Goto :: k -> Type -> Effect   -- for declaring transitions"
+      ':$$: CodeLine "  To   :: k -> Type -> Type     -- for selecting transitions"
+      ':$$: Blank
+      ':$$: Fixes
+      ':$$: Bullet "Change 'To' to 'Goto' in your UsesEffects list"
+      ':$$: Blank
+      ':$$: Example
+      ':$$: CodeLine "-- If you have:"
+      ':$$: CodeLine "type MyEffects = '[To \"process\" Data, To Exit Result]"
+      ':$$: CodeLine ""
+      ':$$: CodeLine "-- Change to:"
+      ':$$: CodeLine "type MyEffects = '[Goto \"process\" Data, Goto Exit Result]"
+    )
+  ValidateNotToMarkers (_ ': rest) = ValidateNotToMarkers rest
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TYPE-LEVEL UTILITIES
@@ -1003,6 +1072,51 @@ type family ValidateGotoTargetsList fieldNames gotos where
     , ValidateGotoTargetsList fieldNames rest
     )
 
+-- | Validate that no UsesEffects annotation contains To markers.
+--
+-- To markers are for GotoChoice return types, not for UsesEffects.
+-- This catches a common mistake when maintaining parallel type aliases.
+type ValidateNoToInEffects :: (Type -> Type) -> Constraint
+type family ValidateNoToInEffects graph where
+  ValidateNoToInEffects graph =
+    ValidateNoToInEffectsList (FieldsWithNamesOf graph)
+
+-- | Validate each field's UsesEffects doesn't contain To markers.
+type ValidateNoToInEffectsList :: [(Symbol, Type)] -> Constraint
+type family ValidateNoToInEffectsList fields where
+  ValidateNoToInEffectsList '[] = ()
+  ValidateNoToInEffectsList ('(_name, def) ': rest) =
+    ( ValidateEffectsFromDef def
+    , ValidateNoToInEffectsList rest
+    )
+
+-- | Extract and validate effects from a node definition.
+--
+-- We check both @Effect and @Type kinds because:
+-- - Correct usage: UsesEffects '[Goto "x" A] has kind [Effect]
+-- - Incorrect usage: UsesEffects '[To "x" A] has kind [Type]
+--
+-- By checking both, we catch when users accidentally use To markers.
+type ValidateEffectsFromDef :: Type -> Constraint
+type family ValidateEffectsFromDef def where
+  ValidateEffectsFromDef def =
+    ( ValidateEffectsMaybeEffect (GetUsesEffects @Effect def)
+    , ValidateEffectsMaybeType (GetUsesEffects @Type def)
+    )
+
+-- | Apply validation to Maybe effect list (Effect kind).
+type ValidateEffectsMaybeEffect :: Maybe [Effect] -> Constraint
+type family ValidateEffectsMaybeEffect mEffs where
+  ValidateEffectsMaybeEffect 'Nothing = ()
+  ValidateEffectsMaybeEffect ('Just effs) = ValidateNotToMarkers effs
+
+-- | Apply validation to Maybe type list (Type kind).
+-- This catches To markers which have kind Type, not Effect.
+type ValidateEffectsMaybeType :: Maybe [Type] -> Constraint
+type family ValidateEffectsMaybeType mTypes where
+  ValidateEffectsMaybeType 'Nothing = ()
+  ValidateEffectsMaybeType ('Just types) = ValidateNotToMarkers types
+
 -- | Error for invalid Goto target.
 type InvalidGotoTargetError :: Symbol -> [Symbol] -> Constraint
 type family InvalidGotoTargetError target fieldNames where
@@ -1054,6 +1168,7 @@ type ValidGraphRecord graph =
   ( RequireGeneric graph
   , ValidateEntryExit graph
   , ValidateGotoTargets graph
+  , ValidateNoToInEffects graph  -- Check for To markers in UsesEffects
   -- Structural validation
   , AllFieldsReachable graph
   , AllLogicFieldsReachExit graph

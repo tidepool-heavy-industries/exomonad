@@ -79,6 +79,77 @@ The runner handles template rendering, LLM API call, and structured output parsi
 lifts `LLM` (kind `NodeKind`) to `Type`. In record syntax, field names serve as
 node names, so we need `LLMNode`/`LogicNode` which have kind `Type` directly.
 
+#### Handler Signature Patterns
+
+Logic node handlers return `GotoChoice` to indicate their transition. There are
+three approaches to typing these handlers:
+
+**Option 1: Manual typing (requires parallel aliases)**
+
+```haskell
+-- Define Goto list for graph definition
+type MyGotos = '[Goto "process" Data, Goto "fallback" Data, Goto Exit Result]
+
+-- Define To list for handler signature (must match exactly!)
+type MyTargets = '[To "process" Data, To "fallback" Data, To Exit Result]
+
+-- In graph:
+myRouter :: mode :- LogicNode :@ Needs '[Input] :@ UsesEffects MyGotos
+
+-- Handler signature uses To markers:
+myRouterHandler :: Input -> Eff es (GotoChoice MyTargets)
+```
+
+This approach requires maintaining two parallel type aliases that must stay in sync.
+
+**Option 2: Derive with GotosToTos (recommended)**
+
+```haskell
+-- Define Goto list for graph definition
+type MyGotos = '[Goto "process" Data, Goto "fallback" Data, Goto Exit Result]
+
+-- In graph:
+myRouter :: mode :- LogicNode :@ Needs '[Input] :@ UsesEffects MyGotos
+
+-- Handler signature derives To markers automatically:
+myRouterHandler :: Input -> Eff es (GotoChoice (GotosToTos MyGotos))
+-- GotosToTos MyGotos = '[To "process" Data, To "fallback" Data, To Exit Result]
+```
+
+The `GotosToTos` type family (from `Tidepool.Graph.Edges`) converts `Goto` effects
+to `To` markers, eliminating duplication.
+
+**Option 3: Let GHC infer (cleanest)**
+
+```haskell
+-- Just wire the handler to the graph field without an explicit signature:
+handlers = MyGraph
+  { myRouter = \input -> case classify input of
+      Process x -> pure $ gotoChoice @"process" x
+      Fallback x -> pure $ gotoChoice @"fallback" x
+      Done r -> pure $ gotoExit r
+  , ...
+  }
+```
+
+GHC infers the handler type from the graph field's `NodeHandler` computation.
+This works when handlers are defined inline or in the same module.
+
+**Common mistake: Using To in UsesEffects**
+
+```haskell
+-- WRONG: To markers in UsesEffects
+type WrongEffects = '[To "process" Data, To Exit Result]
+myNode :: mode :- LogicNode :@ UsesEffects WrongEffects  -- Compile error!
+
+-- CORRECT: Goto effects in UsesEffects
+type CorrectEffects = '[Goto "process" Data, Goto Exit Result]
+myNode :: mode :- LogicNode :@ UsesEffects CorrectEffects  -- OK
+```
+
+The type system catches this mistake with a helpful error message explaining
+that `UsesEffects` requires `Goto` effects, not `To` markers.
+
 ## Architecture
 
 ```

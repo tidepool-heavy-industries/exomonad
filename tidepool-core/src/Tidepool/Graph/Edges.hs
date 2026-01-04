@@ -26,6 +26,7 @@ module Tidepool.Graph.Edges
     -- * Goto Extraction
   , GetGotoTargets
   , GotoEffectsToTargets
+  , GotosToTos
   , HasGotoExit
   , ExtractGotoTarget
   , ExtractGotoPayload
@@ -233,6 +234,38 @@ type family GotoEffectsToTargets effs where
   GotoEffectsToTargets (Goto Self payload ': rest) =
     To Self payload ': GotoEffectsToTargets rest
   GotoEffectsToTargets (_ ': rest) = GotoEffectsToTargets rest
+
+-- | Alias for 'GotoEffectsToTargets' for use in handler signatures.
+--
+-- When you have a type alias for your graph's UsesEffects:
+--
+-- @
+-- type MyEffects = '[Goto "process" Data, Goto "fallback" Data, Goto Exit Result]
+-- @
+--
+-- You can derive the handler return type without duplicating the list:
+--
+-- @
+-- myHandler :: Input -> Eff es (GotoChoice (GotosToTos MyEffects))
+-- myHandler input = case classify input of
+--   Process x -> pure $ gotoChoice @"process" x
+--   Fallback x -> pure $ gotoChoice @"fallback" x
+--   Done r -> pure $ gotoExit r
+-- @
+--
+-- This eliminates the need for parallel type aliases like:
+--
+-- @
+-- -- Before: Two aliases that must stay in sync
+-- type MyGotos = '[Goto "a" A, Goto "b" B]    -- for UsesEffects
+-- type MyTargets = '[To "a" A, To "b" B]      -- for GotoChoice
+--
+-- -- After: One alias, derive the other
+-- type MyGotos = '[Goto "a" A, Goto "b" B]
+-- -- GotosToTos MyGotos = '[To "a" A, To "b" B]
+-- @
+type GotosToTos :: forall k. [k] -> [Type]
+type GotosToTos effs = GotoEffectsToTargets effs
 
 -- | Extract the target from a Goto effect type.
 type ExtractGotoTarget :: forall k. k -> Maybe Symbol
