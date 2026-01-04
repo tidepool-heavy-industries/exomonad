@@ -32,8 +32,9 @@ import Tidepool.Graph.CLI
   ( deriveCLIParser
   , formatOutput
   , OutputFormat(..)
+  , runGraphCLIPure
   )
-import Tidepool.Graph.Execute (DispatchGoto(..))
+import Tidepool.Graph.Execute (runGraph)
 import Tidepool.Graph.Generic (GraphMode(..), type (:-), AsHandler)
 import Tidepool.Graph.Generic.Core (Entry)
 import Tidepool.Graph.Goto (gotoExit, Goto)
@@ -72,11 +73,20 @@ counterHandlers = CounterGraph
 
 -- | Execute the counter graph.
 --
--- Takes CounterInput and returns CounterOutput via GotoChoice dispatch.
+-- Uses runGraph which automatically finds the entry handler via FindEntryHandler
+-- and dispatches through the graph until Exit is reached.
 runCounterGraph :: CounterInput -> CounterOutput
-runCounterGraph input = run $ do
-  choice <- counterHandlers.cgCompute input
-  dispatchGoto counterHandlers choice
+runCounterGraph input = run $ runGraph counterHandlers input
+
+-- | Compile-time test that runGraphCLIPure type constraints resolve correctly.
+--
+-- This function is never called (prefixed with _), but if it compiles,
+-- it proves that the type machinery works for our CounterGraph.
+_counterCLI :: IO ()
+_counterCLI = runGraphCLIPure
+  "Counter graph CLI"
+  counterParser
+  counterHandlers
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- CLI PARSER (TH-derived)

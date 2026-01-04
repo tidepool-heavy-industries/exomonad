@@ -62,7 +62,7 @@ data Command
 
 ### runGraphCLIWith
 
-Wires parser + executor + output formatting:
+Wires parser + executor + output formatting (low-level):
 
 ```haskell
 runGraphCLIWith
@@ -72,6 +72,26 @@ runGraphCLIWith
   -> (input -> IO output)   -- ^ Graph executor
   -> IO ()
 ```
+
+### runGraphCLIPure
+
+Wires a logic-only graph (no effects) directly to CLI:
+
+```haskell
+runGraphCLIPure
+  :: forall graph ...
+  => Text                              -- ^ Description for --help
+  -> Parser (GraphEntryType graph)     -- ^ From deriveCLIParser
+  -> graph (AsHandler '[])             -- ^ Handlers (empty effect stack)
+  -> IO ()
+```
+
+Key constraints:
+- Graph must have `Entry` and `Exit` fields
+- Handlers must use empty effect stack `'[]`
+- Exit type must have `Show` and `ToJSON`
+
+This is the recommended way to wire pure graphs to CLI - no manual `runGraph` call needed.
 
 ### formatOutput
 
@@ -155,11 +175,21 @@ data CounterGraph mode = CounterGraph
   , cgExit :: mode :- Exit CounterOutput
   }
 
--- Main.hs
-main = runGraphCLIWith
+counterHandlers :: CounterGraph (AsHandler '[])
+counterHandlers = CounterGraph
+  { cgEntry   = Proxy
+  , cgCompute = \input -> pure $ gotoExit CounterOutput
+      { finalValue = input.startValue + (input.increment * input.times)
+      , operationsPerformed = input.times
+      }
+  , cgExit    = Proxy
+  }
+
+-- Main.hs (using runGraphCLIPure - recommended)
+main = runGraphCLIPure
   "Counter graph CLI"
   $(deriveCLIParser ''CounterInput)
-  (\input -> pure $ runGraph counterHandlers input)
+  counterHandlers
 ```
 
 Usage:
