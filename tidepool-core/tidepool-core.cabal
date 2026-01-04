@@ -49,6 +49,7 @@ library
         Tidepool.Effects.UI
         Tidepool.Effects.LLMProvider
         Tidepool.Effects.Issue
+        Tidepool.Effects.LSP
         Tidepool.Graph.Mermaid
         Tidepool.Graph.Example
         Tidepool.Graph.Example.Context

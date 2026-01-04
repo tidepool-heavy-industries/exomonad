@@ -1,0 +1,40 @@
+cabal-version:      3.0
+name:               tidepool-lsp-executor
+version:            0.1.0.0
+synopsis:           LSP effect executor - native LSP client over stdin/stdout
+license:            MIT
+author:             Inanna
+build-type:         Simple
+
+library
+    exposed-modules:
+        Tidepool.LSP.Protocol
+        Tidepool.LSP.Client
+        Tidepool.LSP.Executor
+    build-depends:
+        base >= 4.17 && < 5,
+        freer-simple >= 1.2 && < 2,
+        text >= 2.0 && < 3,
+        bytestring >= 0.11 && < 1,
+        aeson >= 2.1 && < 3,
+        containers >= 0.6 && < 1,
+        process >= 1.6 && < 2,
+        async >= 2.2 && < 3,
+        stm >= 2.5 && < 3,
+        unordered-containers >= 0.2 && < 1,
+        tidepool-core
+    hs-source-dirs:   src
+    default-language: GHC2021
+    default-extensions:
+        DataKinds
+        DeriveAnyClass
+        DeriveGeneric
+        DerivingStrategies
+        DuplicateRecordFields
+        GADTs
+        LambdaCase
+        NoFieldSelectors
+        OverloadedRecordDot
+        OverloadedStrings
+        TypeApplications
+        TypeOperators
