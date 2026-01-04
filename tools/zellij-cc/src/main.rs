@@ -46,6 +46,14 @@ enum Commands {
         #[arg(long)]
         cwd: Option<PathBuf>,
 
+        /// JSON schema for structured output validation
+        #[arg(long)]
+        json_schema: Option<String>,
+
+        /// Tools to allow (e.g., "Glob,Read" or "" for none)
+        #[arg(long)]
+        tools: Option<String>,
+
         /// Timeout in seconds (0 = no timeout)
         #[arg(long, default_value = "300")]
         timeout: u64,
@@ -55,10 +63,20 @@ enum Commands {
 #[derive(Serialize)]
 struct RunResult {
     /// Always 0 - we cannot get actual exit code from zellij pane.
-    /// Check the JSON in output_file for errors instead.
+    /// Check is_error field for actual success/failure.
     exit_code: i32,
     output_file: PathBuf,
     stderr_file: PathBuf,
+    /// Whether Claude Code reported an error
+    is_error: bool,
+    /// Prose result from Claude Code
+    result: Option<String>,
+    /// Structured output (when --json-schema was provided)
+    structured_output: Option<serde_json::Value>,
+    /// Cost in USD
+    cost_usd: Option<f64>,
+    /// Number of turns (tool use iterations)
+    num_turns: Option<i64>,
 }
 
 fn main() -> Result<()> {
@@ -72,6 +90,8 @@ fn main() -> Result<()> {
             prompt,
             output_file,
             cwd,
+            json_schema,
+            tools,
             timeout,
         } => {
             run_cc_session(
@@ -81,6 +101,8 @@ fn main() -> Result<()> {
                 &prompt,
                 &output_file,
                 cwd.as_ref(),
+                json_schema.as_deref(),
+                tools.as_deref(),
                 timeout,
             )?;
         }
@@ -96,6 +118,8 @@ fn run_cc_session(
     prompt: &str,
     output_file: &PathBuf,
     cwd: Option<&PathBuf>,
+    json_schema: Option<&str>,
+    tools: Option<&str>,
     timeout_secs: u64,
 ) -> Result<()> {
     // Validate output file's parent directory exists
@@ -117,11 +141,33 @@ fn run_cc_session(
     // Build shell command with proper escaping (using shell-escape crate)
     // Captures stdout to output_file, stderr to stderr_file
     // Both streams shown in pane via process substitution
+    let mut cmd_parts = vec![
+        "claude".to_string(),
+        "--dangerously-skip-permissions".to_string(),
+        "--output-format".to_string(),
+        "json".to_string(),
+        "--model".to_string(),
+        shell_quote(model).into_owned(),
+    ];
+
+    // Add optional flags
+    if let Some(schema) = json_schema {
+        cmd_parts.push("--json-schema".to_string());
+        cmd_parts.push(shell_quote(schema).into_owned());
+    }
+
+    if let Some(t) = tools {
+        cmd_parts.push("--tools".to_string());
+        cmd_parts.push(shell_quote(t).into_owned());
+    }
+
+    // Add prompt
+    cmd_parts.push("-p".to_string());
+    cmd_parts.push(shell_quote(prompt).into_owned());
+
     let shell_cmd = format!(
-        "claude --dangerously-skip-permissions --output-format json --model {} -p {} \
-         > >(tee {}) 2> >(tee {} >&2)",
-        shell_quote(model),
-        shell_quote(prompt),
+        "{} > >(tee {}) 2> >(tee {} >&2)",
+        cmd_parts.join(" "),
         shell_quote(&output_path),
         shell_quote(&stderr_path),
     );
@@ -214,10 +260,21 @@ fn run_cc_session(
         thread::sleep(Duration::from_millis(500));
     }
 
+    // Parse the Claude Code JSON output to extract fields
+    let cc_output = std::fs::read_to_string(output_file)
+        .context("Failed to read output file")?;
+    let cc_json: serde_json::Value = serde_json::from_str(&cc_output)
+        .context("Failed to parse Claude Code JSON output")?;
+
     let result = RunResult {
         exit_code: 0,
         output_file: output_file.clone(),
         stderr_file,
+        is_error: cc_json.get("is_error").and_then(|v| v.as_bool()).unwrap_or(false),
+        result: cc_json.get("result").and_then(|v| v.as_str()).map(String::from),
+        structured_output: cc_json.get("structured_output").cloned(),
+        cost_usd: cc_json.get("total_cost_usd").and_then(|v| v.as_f64()),
+        num_turns: cc_json.get("num_turns").and_then(|v| v.as_i64()),
     };
 
     println!("{}", serde_json::to_string_pretty(&result)?);
