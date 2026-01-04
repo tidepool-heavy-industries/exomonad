@@ -29,6 +29,7 @@ library
     hs-source-dirs:   src
     default-language: GHC2021
     default-extensions:
+        DataKinds
         DeriveAnyClass
         DeriveGeneric
         DerivingStrategies
@@ -37,3 +38,4 @@ library
         OverloadedStrings
         OverloadedRecordDot
         TypeFamilies
+        TypeOperators
