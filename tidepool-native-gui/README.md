@@ -75,7 +75,7 @@ Set `VITE_WS_URL` to override the WebSocket URL (default: `ws://localhost:8080`)
 
 **All components implemented and building:**
 
-- Agent 1 (server): Complete - Effect runner with SSE streaming
+- Agent 1 (server): Complete - WebSocket server with effect composition
 - Agent 2 (solid-frontend): Complete - SolidJS + Tailwind CSS frontend with WebSocket, chat rendering, text/photo input, button groups
 - Agent 3 (wire-types): Complete - UIState, UserAction, protocol types
 - Agent 4 (ui-executor): Complete - UI effect interpreter with wire bridging
