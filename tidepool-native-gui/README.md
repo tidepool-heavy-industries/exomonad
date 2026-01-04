@@ -60,5 +60,11 @@ cabal build all
 
 ## Status
 
-**Scaffolding complete.** All packages have stub implementations that compile.
-Actual executor implementations are TODO for Agents 1, 4, 5, 6, 7.
+**All effect executors implemented and building:**
+
+- Agent 3 (wire-types): Complete - UIState, UserAction, protocol types
+- Agent 4 (ui-executor): Complete - UI effect interpreter with wire bridging
+- Agent 5 (habitica-executor): Complete - Native Habitica HTTP client
+- Agent 6 (observability-executor): Complete - Loki push API client
+- Agent 7 (llm-executor): Complete - Anthropic/OpenAI native HTTP clients
+- Agent 1 (server): Complete - Effect runner with SSE streaming
