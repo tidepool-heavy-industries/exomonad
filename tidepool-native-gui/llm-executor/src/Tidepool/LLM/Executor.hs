@@ -1,356 +1,297 @@
-{-# LANGUAGE TypeFamilies #-}
 -- | LLM effect executor - Anthropic/OpenAI HTTP client.
 --
 -- Implements LLMComplete effect with native HTTP client.
 -- Type-level provider determines request/response schema.
+--
+-- = Usage
+--
+-- @
+-- import Tidepool.LLM.Executor (runLLMComplete, LLMEnv, mkLLMEnv)
+-- import Tidepool.LLM.Types (LLMConfig(..), AnthropicSecrets(..))
+-- import Tidepool.Effects.LLMProvider (LLMComplete, complete, SAnthropic, AnthropicConfig(..))
+--
+-- config = LLMConfig
+--   { lcAnthropicSecrets = Just $ defaultAnthropicConfig "sk-..."
+--   , lcOpenAISecrets = Nothing
+--   }
+--
+-- main = do
+--   env <- mkLLMEnv config
+--   runM $ runLLMComplete env $ do
+--     response <- complete SAnthropic anthropicCfg "Hello" Nothing
+--     -- process response
+-- @
 module Tidepool.LLM.Executor
   ( -- * Executor
     runLLMComplete
 
-    -- * Configuration
-  , LLMSecrets(..)
-
-    -- * Errors
-  , LLMError(..)
+    -- * Re-exports for convenience
+  , LLMEnv
+  , LLMConfig(..)
+  , mkLLMEnv
   ) where
 
-import Control.Monad.Freer (Eff, LastMember, sendM, interpret)
+import Control.Exception (try, SomeException)
+import Control.Monad.Freer (Eff, LastMember, interpret, sendM)
 import Data.Aeson
-import Data.Aeson.Types (Parser, parseMaybe)
-import qualified Data.Aeson.KeyMap as KM
-import Data.Maybe (mapMaybe)
+  ( FromJSON(..)
+  , ToJSON(..)
+  , Value(..)
+  , eitherDecode
+  , encode
+  , object
+  , withObject
+  , (.:)
+  , (.:?)
+  , (.=)
+  )
+import Data.Aeson.Key qualified as Key
+import Data.Aeson.KeyMap qualified as KM
+import Data.ByteString.Lazy qualified as LBS
 import Data.Text (Text)
-import qualified Data.Text as T
-import qualified Data.Text.Encoding as TE
+import Data.Text qualified as T
+import Data.Text.Encoding qualified as TE
 import Network.HTTP.Client
-import Network.HTTP.Client.TLS (tlsManagerSettings)
+  ( Request(..)
+  , RequestBody(..)
+  , Response(..)
+  , httpLbs
+  , parseRequest
+  )
+import Network.HTTP.Types.Status (statusCode)
 
+import Tidepool.LLM.Types
+  ( LLMEnv(..)
+  , LLMConfig(..)
+  , LLMError(..)
+  , AnthropicSecrets(..)
+  , OpenAISecrets(..)
+  , mkLLMEnv
+  )
 import Tidepool.Effects.LLMProvider
   ( LLMComplete(..)
   , SProvider(..)
-  , LLMProvider(..)
-  , LLMProviderConfig
-  , LLMProviderResponse
   , AnthropicConfig(..)
   , OpenAIConfig(..)
   , AnthropicResponse(..)
   , OpenAIResponse(..)
   , ContentBlock(..)
-  , Usage(..)
   , Choice(..)
   , Message(..)
   , ToolCall(..)
   , FunctionCall(..)
+  , Usage(..)
   )
 
 
 -- ════════════════════════════════════════════════════════════════════════════
--- CONFIGURATION
+-- ANTHROPIC HTTP CLIENT
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | LLM API secrets.
-data LLMSecrets = LLMSecrets
-  { lsAnthropicKey :: Maybe Text
-  , lsOpenAIKey :: Maybe Text
-  }
-  deriving (Show, Eq)
+-- | Make a request to the Anthropic Messages API.
+anthropicRequest
+  :: LLMEnv
+  -> AnthropicConfig
+  -> Text              -- ^ User message
+  -> Maybe [Value]     -- ^ Optional tools
+  -> IO (Either LLMError AnthropicResponse)
+anthropicRequest env config userMsg maybeTools = do
+  case env.leConfig.lcAnthropicSecrets of
+    Nothing -> pure $ Left LLMNoProviderConfigured
+    Just secrets -> do
+      let url = T.unpack secrets.asBaseUrl <> "/v1/messages"
+          body = buildAnthropicRequest config userMsg maybeTools
+
+      result <- try @SomeException $ do
+        req0 <- parseRequest url
+        let req = req0
+              { method = "POST"
+              , requestHeaders =
+                  [ ("x-api-key", TE.encodeUtf8 secrets.asApiKey)
+                  , ("anthropic-version", "2023-06-01")
+                  , ("content-type", "application/json")
+                  ]
+              , requestBody = RequestBodyLBS body
+              }
+        httpLbs req env.leManager
+
+      case result of
+        Left exc -> pure $ Left $ LLMHttpError $ T.pack (show exc)
+        Right resp -> parseAnthropicResponse resp
+
+-- | Build Anthropic Messages API request body.
+buildAnthropicRequest :: AnthropicConfig -> Text -> Maybe [Value] -> LBS.ByteString
+buildAnthropicRequest config userMsg maybeTools =
+  encode $ object $ filter ((/= Null) . snd)
+    [ "model" .= config.acModel
+    , "max_tokens" .= config.acMaxTokens
+    , "messages" .= [object ["role" .= ("user" :: Text), "content" .= userMsg]]
+    , "system" .= config.acSystemPrompt
+    , "tools" .= maybeTools
+    , "thinking" .= case config.acThinkingBudget of
+        Nothing -> Null
+        Just budget -> object
+          [ "type" .= ("enabled" :: Text)
+          , "budget_tokens" .= budget
+          ]
+    ]
+
+-- | Parse Anthropic API response.
+parseAnthropicResponse :: Response LBS.ByteString -> IO (Either LLMError AnthropicResponse)
+parseAnthropicResponse resp = do
+  let status = statusCode (responseStatus resp)
+      body = responseBody resp
+
+  case status of
+    401 -> pure $ Left LLMUnauthorized
+    429 -> pure $ Left LLMRateLimited
+    529 -> pure $ Left LLMOverloaded
+    _ | status >= 200 && status < 300 ->
+        case eitherDecode body of
+          Left err -> pure $ Left $ LLMParseError $ T.pack err
+          Right r -> pure $ Right r
+      | otherwise ->
+        pure $ Left $ parseErrorResponse body
 
 
 -- ════════════════════════════════════════════════════════════════════════════
--- ERRORS
+-- OPENAI HTTP CLIENT
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Errors that can occur during LLM calls.
-data LLMError
-  = MissingApiKey Text           -- ^ API key not configured
-  | HttpError Text               -- ^ Network or HTTP error
-  | ParseError Text              -- ^ Failed to parse response
-  | ApiError Text                -- ^ API returned an error
-  deriving (Show, Eq)
+-- | Make a request to the OpenAI Chat Completions API.
+openaiRequest
+  :: LLMEnv
+  -> OpenAIConfig
+  -> Text              -- ^ User message
+  -> Maybe [Value]     -- ^ Optional tools
+  -> IO (Either LLMError OpenAIResponse)
+openaiRequest env config userMsg maybeTools = do
+  case env.leConfig.lcOpenAISecrets of
+    Nothing -> pure $ Left LLMNoProviderConfigured
+    Just secrets -> do
+      let url = T.unpack secrets.osBaseUrl <> "/v1/chat/completions"
+          body = buildOpenAIRequest config userMsg maybeTools
+
+      result <- try @SomeException $ do
+        req0 <- parseRequest url
+        let req = req0
+              { method = "POST"
+              , requestHeaders =
+                  [ ("Authorization", "Bearer " <> TE.encodeUtf8 secrets.osApiKey)
+                  , ("Content-Type", "application/json")
+                  ] <> maybe [] (\org -> [("OpenAI-Organization", TE.encodeUtf8 org)]) secrets.osOrgId
+              , requestBody = RequestBodyLBS body
+              }
+        httpLbs req env.leManager
+
+      case result of
+        Left exc -> pure $ Left $ LLMHttpError $ T.pack (show exc)
+        Right resp -> parseOpenAIResponse resp
+
+-- | Build OpenAI Chat Completions API request body.
+buildOpenAIRequest :: OpenAIConfig -> Text -> Maybe [Value] -> LBS.ByteString
+buildOpenAIRequest config userMsg maybeTools =
+  encode $ object $ filter ((/= Null) . snd)
+    [ "model" .= config.oaModel
+    , "max_tokens" .= config.oaMaxTokens
+    , "messages" .=
+        (maybe [] (\sys -> [object ["role" .= ("system" :: Text), "content" .= sys]]) config.oaSystemPrompt
+         ++ [object ["role" .= ("user" :: Text), "content" .= userMsg]])
+    , "temperature" .= config.oaTemperature
+    , "tools" .= case maybeTools of
+        Nothing -> Null
+        Just ts -> toJSON $ map wrapOpenAITool ts
+    ]
+
+-- | Wrap tool definitions in OpenAI's function format.
+wrapOpenAITool :: Value -> Value
+wrapOpenAITool toolDef = object
+  [ "type" .= ("function" :: Text)
+  , "function" .= toolDef
+  ]
+
+-- | Parse OpenAI API response.
+parseOpenAIResponse :: Response LBS.ByteString -> IO (Either LLMError OpenAIResponse)
+parseOpenAIResponse resp = do
+  let status = statusCode (responseStatus resp)
+      body = responseBody resp
+
+  case status of
+    401 -> pure $ Left LLMUnauthorized
+    429 -> pure $ Left LLMRateLimited
+    _ | status >= 200 && status < 300 ->
+        case eitherDecode body of
+          Left err -> pure $ Left $ LLMParseError $ T.pack err
+          Right r -> pure $ Right r
+      | otherwise ->
+        pure $ Left $ parseErrorResponse body
 
 
 -- ════════════════════════════════════════════════════════════════════════════
--- INTERPRETER
+-- ERROR PARSING
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Run LLMComplete effects by making actual HTTP calls.
+-- | Parse error response body.
+parseErrorResponse :: LBS.ByteString -> LLMError
+parseErrorResponse body = case eitherDecode body of
+  Left _ -> LLMApiError "unknown" "Failed to parse error response"
+  Right val -> parseErrorValue val
+
+-- | Parse error from JSON value.
+parseErrorValue :: Value -> LLMError
+parseErrorValue (Object obj) =
+  case KM.lookup (Key.fromText "error") obj of
+    Just (Object errObj) ->
+      let errType = case KM.lookup (Key.fromText "type") errObj of
+            Just (String t) -> t
+            _ -> "unknown"
+          errMsg = case KM.lookup (Key.fromText "message") errObj of
+            Just (String m) -> m
+            _ -> ""
+      in  checkContextLength errType errMsg
+    _ -> LLMApiError "unknown" "Malformed error response"
+parseErrorValue _ = LLMApiError "unknown" "Non-object error response"
+
+-- | Check for context length errors.
+checkContextLength :: Text -> Text -> LLMError
+checkContextLength errType errMsg
+  | "context" `T.isInfixOf` T.toLower errMsg && "long" `T.isInfixOf` T.toLower errMsg
+    = LLMContextTooLong
+  | otherwise
+    = LLMApiError errType errMsg
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- EFFECT INTERPRETER
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Run LLMComplete effects using native HTTP client.
 --
--- This interpreter handles both Anthropic and OpenAI providers
--- based on the type-level provider switch.
+-- This interpreter makes real API calls to Anthropic or OpenAI based on
+-- the type-level provider in the effect.
 --
--- Note: Requires IO as the last effect in the stack.
---
--- Example usage:
+-- = Example
 --
 -- @
 -- import Control.Monad.Freer (runM)
 --
--- main :: IO ()
--- main = runM $ runLLMComplete secrets $ do
---   response <- complete SAnthropic config "Hello" Nothing
---   -- use response
+-- main = do
+--   let config = LLMConfig { lcAnthropicSecrets = Just secrets, ... }
+--   env <- mkLLMEnv config
+--   runM $ runLLMComplete env $ do
+--     response <- complete SAnthropic cfg "Hello" Nothing
+--     -- response :: AnthropicResponse
 -- @
-runLLMComplete
-  :: LastMember IO effs
-  => LLMSecrets
-  -> Eff (LLMComplete ': effs) a
-  -> Eff effs a
-runLLMComplete secrets = interpret $ \case
-  Complete provider config msg mTools ->
-    sendM $ dispatchLLMIO secrets provider config msg mTools
+runLLMComplete :: LastMember IO effs => LLMEnv -> Eff (LLMComplete ': effs) a -> Eff effs a
+runLLMComplete env = interpret $ \case
+  Complete SAnthropic config msg tools -> sendM $ do
+    result <- anthropicRequest env config msg tools
+    case result of
+      Left err -> error $ "LLMComplete (Anthropic): " <> show err
+      Right resp -> pure resp
 
-
--- | Dispatch to the appropriate provider based on the singleton.
-dispatchLLMIO
-  :: LLMSecrets
-  -> SProvider p
-  -> LLMProviderConfig p
-  -> Text
-  -> Maybe [Value]
-  -> IO (LLMProviderResponse p)
-dispatchLLMIO secrets provider config msg mTools = case provider of
-  SAnthropic -> callAnthropicIO secrets config msg mTools
-  SOpenAI    -> callOpenAIIO secrets config msg mTools
-
-
--- ════════════════════════════════════════════════════════════════════════════
--- ANTHROPIC IMPLEMENTATION
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Call Anthropic Messages API.
-callAnthropicIO
-  :: LLMSecrets
-  -> AnthropicConfig
-  -> Text
-  -> Maybe [Value]
-  -> IO AnthropicResponse
-callAnthropicIO secrets config msg mTools = do
-  apiKey <- case secrets.lsAnthropicKey of
-    Nothing -> fail "Anthropic API key not configured"
-    Just k -> pure k
-
-  manager <- newManager tlsManagerSettings
-
-  -- Build request body
-  let body = object $ filter ((/= Null) . snd)
-        [ "model" .= config.acModel
-        , "max_tokens" .= config.acMaxTokens
-        , "messages" .= [object
-            [ "role" .= ("user" :: Text)
-            , "content" .= msg
-            ]]
-        , "system" .= config.acSystemPrompt
-        , "tools" .= mTools
-        , "thinking" .= ((\budget -> object
-            [ "type" .= ("enabled" :: Text)
-            , "budget_tokens" .= budget
-            ]) <$> config.acThinkingBudget)
-        ]
-
-  -- Build HTTP request
-  initReq <- parseRequest "https://api.anthropic.com/v1/messages"
-  let request = initReq
-        { method = "POST"
-        , requestHeaders =
-            [ ("content-type", "application/json")
-            , ("x-api-key", TE.encodeUtf8 apiKey)
-            , ("anthropic-version", "2023-06-01")
-            , ("anthropic-beta", "interleaved-thinking-2025-05-14")
-            ]
-        , requestBody = RequestBodyLBS (encode body)
-        }
-
-  -- Make request
-  response <- httpLbs request manager
-
-  -- Parse response
-  let respBody = responseBody response
-  case eitherDecode respBody of
-    Left err -> fail $ "Parse error: " <> err
-    Right jsonVal -> case parseAnthropicResponse jsonVal of
-      Nothing -> fail "Failed to parse Anthropic response structure"
-      Just resp -> pure resp
-
-
--- | Parse Anthropic API response JSON.
-parseAnthropicResponse :: Value -> Maybe AnthropicResponse
-parseAnthropicResponse = parseMaybe $ withObject "AnthropicResponse" $ \v -> do
-  -- Check for error first
-  errorObj <- v .:? "error"
-  case errorObj of
-    Just (Object o) -> do
-      errMsg <- o .:? "message" .!= "Unknown error"
-      fail $ "API Error: " <> T.unpack errMsg
-    Just _ -> fail "API Error: Unknown error"
-    Nothing -> do
-      -- Parse success response
-      content <- v .: "content"
-      stopReason <- v .: "stop_reason"
-      usage <- v .: "usage"
-      promptTokens <- usage .: "input_tokens"
-      completionTokens <- usage .: "output_tokens"
-      pure AnthropicResponse
-        { arContent = parseContentBlocks content
-        , arStopReason = stopReason
-        , arUsage = Usage
-            { uPromptTokens = promptTokens
-            , uCompletionTokens = completionTokens
-            }
-        }
-
-
--- | Parse content blocks from response.
-parseContentBlocks :: [Value] -> [ContentBlock]
-parseContentBlocks = mapMaybe parseBlock
-  where
-    parseBlock :: Value -> Maybe ContentBlock
-    parseBlock = parseMaybe $ withObject "ContentBlock" $ \v -> do
-      blockType <- v .: "type" :: Parser Text
-      case blockType of
-        "text" -> TextContent <$> v .: "text"
-        "tool_use" -> ToolUseContent <$> v .: "name" <*> v .: "input"
-        _ -> fail "Unknown content block type"
-
-
--- ════════════════════════════════════════════════════════════════════════════
--- OPENAI IMPLEMENTATION
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Call OpenAI Chat Completions API.
-callOpenAIIO
-  :: LLMSecrets
-  -> OpenAIConfig
-  -> Text
-  -> Maybe [Value]
-  -> IO OpenAIResponse
-callOpenAIIO secrets config msg mTools = do
-  apiKey <- case secrets.lsOpenAIKey of
-    Nothing -> fail "OpenAI API key not configured"
-    Just k -> pure k
-
-  manager <- newManager tlsManagerSettings
-
-  -- Build messages
-  let messages = case config.oaSystemPrompt of
-        Nothing -> [userMsg]
-        Just sys -> [systemMsg sys, userMsg]
-      userMsg = object
-        [ "role" .= ("user" :: Text)
-        , "content" .= msg
-        ]
-      systemMsg sys = object
-        [ "role" .= ("system" :: Text)
-        , "content" .= sys
-        ]
-
-  -- Build request body
-  let body = object $ filter ((/= Null) . snd)
-        [ "model" .= config.oaModel
-        , "max_tokens" .= config.oaMaxTokens
-        , "messages" .= messages
-        , "temperature" .= config.oaTemperature
-        , "tools" .= (convertToolsToOpenAI <$> mTools)
-        ]
-
-  -- Build HTTP request
-  initReq <- parseRequest "https://api.openai.com/v1/chat/completions"
-  let request = initReq
-        { method = "POST"
-        , requestHeaders =
-            [ ("content-type", "application/json")
-            , ("Authorization", "Bearer " <> TE.encodeUtf8 apiKey)
-            ]
-        , requestBody = RequestBodyLBS (encode body)
-        }
-
-  -- Make request
-  response <- httpLbs request manager
-
-  -- Parse response
-  let respBody = responseBody response
-  case eitherDecode respBody of
-    Left err -> fail $ "Parse error: " <> err
-    Right jsonVal -> case parseOpenAIResponse jsonVal of
-      Nothing -> fail "Failed to parse OpenAI response structure"
-      Just resp -> pure resp
-
-
--- | Convert Anthropic-style tool definitions to OpenAI format.
-convertToolsToOpenAI :: [Value] -> [Value]
-convertToolsToOpenAI = map convertTool
-  where
-    convertTool :: Value -> Value
-    convertTool (Object o) = object
-      [ "type" .= ("function" :: Text)
-      , "function" .= object
-          [ "name" .= KM.lookup "name" o
-          , "description" .= KM.lookup "description" o
-          , "parameters" .= KM.lookup "input_schema" o
-          ]
-      ]
-    convertTool v = v
-
-
--- | Parse OpenAI API response JSON.
-parseOpenAIResponse :: Value -> Maybe OpenAIResponse
-parseOpenAIResponse = parseMaybe $ withObject "OpenAIResponse" $ \v -> do
-  -- Check for error first
-  errorObj <- v .:? "error"
-  case errorObj of
-    Just (Object o) -> do
-      errMsg <- o .:? "message" .!= "Unknown error"
-      fail $ "API Error: " <> T.unpack errMsg
-    Just _ -> fail "API Error: Unknown error"
-    Nothing -> do
-      -- Parse success response
-      choices <- v .: "choices"
-      usage <- v .: "usage"
-      promptTokens <- usage .: "prompt_tokens"
-      completionTokens <- usage .: "completion_tokens"
-      pure OpenAIResponse
-        { orChoices = parseChoices choices
-        , orUsage = Usage
-            { uPromptTokens = promptTokens
-            , uCompletionTokens = completionTokens
-            }
-        }
-
-
--- | Parse choices from OpenAI response.
-parseChoices :: [Value] -> [Choice]
-parseChoices = mapMaybe parseChoice
-  where
-    parseChoice :: Value -> Maybe Choice
-    parseChoice = parseMaybe $ withObject "Choice" $ \v -> do
-      message <- v .: "message"
-      finishReason <- v .:? "finish_reason"
-      msgRole <- message .: "role"
-      msgContent <- message .:? "content"
-      msgToolCalls <- message .:? "tool_calls"
-      pure Choice
-        { cMessage = Message
-            { mRole = msgRole
-            , mContent = msgContent
-            , mToolCalls = parseToolCalls <$> msgToolCalls
-            }
-        , cFinishReason = finishReason
-        }
-
-    parseToolCalls :: [Value] -> [ToolCall]
-    parseToolCalls = mapMaybe parseToolCall
-
-    parseToolCall :: Value -> Maybe ToolCall
-    parseToolCall = parseMaybe $ withObject "ToolCall" $ \v -> do
-      tcId <- v .: "id"
-      tcType <- v .: "type"
-      func <- v .: "function"
-      funcName <- func .: "name"
-      funcArgs <- func .: "arguments"
-      pure ToolCall
-        { tcId = tcId
-        , tcType = tcType
-        , tcFunction = FunctionCall
-            { fcName = funcName
-            , fcArguments = funcArgs
-            }
-        }
+  Complete SOpenAI config msg tools -> sendM $ do
+    result <- openaiRequest env config msg tools
+    case result of
+      Left err -> error $ "LLMComplete (OpenAI): " <> show err
+      Right resp -> pure resp
