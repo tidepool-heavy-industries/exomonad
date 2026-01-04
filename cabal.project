@@ -3,6 +3,7 @@ packages:
     tidepool-wasm
     tidepool-generated-ts
     tidepool-habitica
+    tidepool-mcp
 
     -- Native GUI packages (Agent 0 scaffolding)
     tidepool-native-gui/wire-types
