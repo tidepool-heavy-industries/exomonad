@@ -1,33 +1,70 @@
-# Schema Format Switching Work Stream
+# Micro-Gas Town Work Stream
 
 ## Context
 
-Different LLM providers use different formats for tool definitions and structured output schemas:
-- **Anthropic** - Uses `input_schema` for tools, specific structured output format
-- **Cloudflare AI** - Uses OpenAI-style `type: "function", function: {parameters}` format
-
-The executor needs to derive the correct format based on context (which provider is being used).
+Micro-Gas Town is a Haiku-only agent system for automated DSL evolution based on production logs. It observes graph execution via Grafana/Loki, identifies patterns, and proposes improvements.
 
 ## Current State
 
-- LLM executor: `tidepool-native-gui/llm-executor/src/Tidepool/LLM/Executor.hs`
-- Type-level provider switching via `SProvider` singleton (SAnthropic, SOpenAI)
-- Effect definition: `tidepool-core/src/Tidepool/Effects/LLMProvider.hs`
+Config and schema definitions exist in `tools/micro-gastown/`:
 
-## Key Questions
+**Polecats:**
+- `polecats/log-analyzer.toml` - Queries Loki for patterns
+- `polecats/conditional-refiner.toml` - Drafts DSL changes
+- `polecats/pr-filer.toml` - Commits changes with evidence
 
-1. How does tool definition format differ between providers?
-2. How does structured output schema format differ?
-3. Can we derive the correct format from the provider type at compile time?
-4. How does this interact with the WASM/CF AI path vs native Anthropic path?
+**Formulas:**
+- `formulas/analyze.formula.toml`
+- `formulas/refine.formula.toml`
+- `formulas/file-pr.formula.toml`
+
+**Schemas:**
+- `schemas/PatternReport.json` - Output of log analysis
+- `schemas/ProposedChanges.json` - Output of refiner
+- `schemas/PRResult.json` - Output of PR filing
+
+## Integration Points
+
+- Uses `sleeptime-logs` CLI (`tools/sleeptime-logs/`) to query Grafana/Loki
+- May use BD effect directly for bead context
+- Haiku-only for cost efficiency (20x cheaper than Opus)
 
 ## Key Files
 
-- `tidepool-native-gui/llm-executor/src/Tidepool/LLM/Executor.hs` - Native interpreter
-- `tidepool-native-gui/llm-executor/src/Tidepool/LLM/Types.hs` - Config types
-- `tidepool-core/src/Tidepool/Effects/LLMProvider.hs` - Effect definition with provider types
-- `deploy/src/handlers/llm.ts` - CF AI handler (for reference)
+- `tools/micro-gastown/README.md` - Architecture overview
+- `tools/micro-gastown/polecats/*.toml` - Polecat definitions
+- `tools/micro-gastown/formulas/*.toml` - Skill formulas
+- `tools/micro-gastown/schemas/*.json` - JSON schemas
+- `tools/sleeptime-logs/` - Loki query CLI
+- `tools/zellij-cc/` - Rust CLI for spawning Claude Code in zellij panes
+
+## zellij-cc Tool
+
+Rust CLI that spawns Claude Code sessions in zellij panes with visibility:
+
+```bash
+# Install
+~/.local/bin/zellij-cc
+
+# Run a Claude Code session (blocks until complete)
+zellij-cc run \
+  --session <zellij-session> \
+  --name <pane-name> \
+  --model haiku \
+  --prompt "Your prompt here" \
+  --output-file /tmp/result.json \
+  --cwd /path/to/project
+
+# Output: JSON with exit_code and output_file path
+```
+
+Features:
+- Uses zellij-client crate for native IPC (no CLI wrapping)
+- Runs `claude --dangerously-skip-permissions --output-format json | tee <file>`
+- User sees output in zellij pane while JSON captured to file
+- Polls output file for valid JSON to detect completion
+- 5-minute default timeout (configurable via `--timeout`)
 
 ## Goal
 
-Ensure schema format switching works correctly for both tool definitions and structured output across providers.
+Implement runtime for micro-gastown that can execute the defined polecats and formulas.
