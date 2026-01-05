@@ -14,7 +14,9 @@ module ImpactAnalysis.Analyze
   ) where
 
 import Control.Concurrent (threadDelay)
+import Control.Concurrent.MVar (newEmptyMVar, tryPutMVar, takeMVar)
 import Control.Exception (bracket, try, SomeException)
+import Control.Monad (void, when)
 import Control.Monad.Freer (Eff, LastMember, sendM, runM)
 import Control.Monad.IO.Class (liftIO)
 import Data.List (isSuffixOf, sortBy)
@@ -27,9 +29,10 @@ import System.Directory (makeAbsolute, doesFileExist, listDirectory)
 import System.FilePath (takeDirectory, (</>))
 import System.IO (Handle, BufferMode(..), hSetBuffering)
 import System.Process (CreateProcess(..), StdStream(..), ProcessHandle, createProcess, proc, terminateProcess, cwd)
+import System.Timeout (timeout)
 
 import Language.LSP.Client (runSessionWithHandles)
-import Language.LSP.Client.Session (Session, initialize, request, openDoc)
+import Language.LSP.Client.Session (Session, initialize, request, openDoc, receiveNotification)
 import qualified Language.LSP.Protocol.Types as L
 import qualified Language.LSP.Protocol.Message as L
 
@@ -101,11 +104,28 @@ doLSPAnalysis input = do
         runSessionWithHandles hls.hlsStdout hls.hlsStdin $ do
           _ <- initialize Nothing
 
+          -- Set up MVar to signal when HLS is ready
+          hlsReady <- liftIO newEmptyMVar
+          let targetUri = L.filePathToUri absPath
+
+          -- HLS sends progress notifications while indexing/typechecking.
+          -- When progress ends, HLS is ready for queries.
+          receiveNotification L.SMethod_Progress $ \_notif ->
+            void $ tryPutMVar hlsReady ()
+
+          -- Also listen for diagnostics as a fallback signal
+          receiveNotification L.SMethod_TextDocumentPublishDiagnostics $ \notif ->
+            when (notif._params._uri == targetUri) $
+              void $ tryPutMVar hlsReady ()
+
           -- Open document (REQUIRED before any requests)
           doc <- openDoc absPath "haskell"
 
-          -- Wait for HLS to typecheck (2 seconds should be enough for most files)
-          liftIO $ threadDelay 2000000
+          -- Wait for HLS to signal readiness (progress or diagnostics)
+          -- with a 10s timeout, then small delay to ensure indexing completes
+          liftIO $ do
+            void $ timeout 10000000 $ takeMVar hlsReady
+            threadDelay 500000  -- 500ms buffer for HLS to finish
 
           -- Convert 1-indexed user input to 0-indexed LSP positions
           let pos = L.Position
@@ -132,7 +152,7 @@ findProjectRoot :: FilePath -> IO (Maybe FilePath)
 findProjectRoot path = go (takeDirectory path)
   where
     go dir
-      | dir == "/" = pure Nothing
+      | takeDirectory dir == dir = pure Nothing  -- Reached filesystem root (cross-platform)
       | otherwise = do
           hasCabalProject <- doesFileExist (dir </> "cabal.project")
           hasStack <- doesFileExist (dir </> "stack.yaml")
@@ -162,16 +182,21 @@ withHLSSession :: FilePath -> (HLSSession -> IO a) -> IO a
 withHLSSession projectRoot = bracket acquire release
   where
     acquire = do
-      (Just stdin', Just stdout', Just _stderr', ph) <- createProcess
+      -- createProcess with CreatePipe always returns Just handles,
+      -- but we handle the Nothing case explicitly for safety
+      (mStdin, mStdout, mStderr, ph) <- createProcess
         (proc "haskell-language-server-wrapper" ["--lsp"])
           { std_in = CreatePipe
           , std_out = CreatePipe
           , std_err = CreatePipe
           , cwd = Just projectRoot
           }
-      hSetBuffering stdin' NoBuffering
-      hSetBuffering stdout' NoBuffering
-      pure $ HLSSession stdin' stdout' ph
+      case (mStdin, mStdout, mStderr) of
+        (Just stdin', Just stdout', Just _stderr') -> do
+          hSetBuffering stdin' NoBuffering
+          hSetBuffering stdout' NoBuffering
+          pure $ HLSSession stdin' stdout' ph
+        _ -> fail "Failed to create HLS process: missing standard IO handles"
 
     release hls = terminateProcess hls.hlsProcess
 
