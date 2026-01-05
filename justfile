@@ -119,7 +119,7 @@ install-hooks:
     @echo "Installing git hooks..."
     @mkdir -p .git/hooks
     @echo '#!/bin/bash' > .git/hooks/pre-commit
-    @echo 'export PATH="$HOME/.local/bin:$HOME/.ghcup/bin:$PATH"' >> .git/hooks/pre-commit
+    @echo 'export PATH="$HOME/.nix-profile/bin:$HOME/.local/bin:$HOME/.ghcup/bin:$PATH"' >> .git/hooks/pre-commit
     @echo 'exec just pre-commit' >> .git/hooks/pre-commit
     @chmod +x .git/hooks/pre-commit
     @echo "✓ Installed pre-commit hook (runs 'just pre-commit' - build + lint + tests)"

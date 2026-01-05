@@ -77,7 +77,7 @@ module Tidepool.Graph.CLI
   , toKebabCase
   ) where
 
-import Control.Monad.Freer (Eff, run)
+import Control.Monad.Freer (run)
 import Data.Aeson (ToJSON)
 import Data.Aeson.Text qualified as Aeson
 import Data.Char (isUpper, toLower)
