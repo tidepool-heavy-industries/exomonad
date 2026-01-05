@@ -1,0 +1,44 @@
+cabal-version:      3.0
+name:               tidepool-claude-code-executor
+version:            0.1.0.0
+synopsis:           ClaudeCode effect executor - shells out to zellij-cc
+description:
+    Implements ClaudeCodeExec effect by calling the zellij-cc CLI tool.
+    .
+    Enables graphs to execute LLM nodes via Claude Code subprocess instead
+    of API calls. Used when a node has the ClaudeCode annotation.
+license:            MIT
+author:             Inanna
+build-type:         Simple
+
+library
+    exposed-modules:
+        Tidepool.ClaudeCode.Types
+        Tidepool.ClaudeCode.Config
+        Tidepool.ClaudeCode.Executor
+        Tidepool.ClaudeCode.Effect
+    build-depends:
+        base >= 4.17 && < 5,
+        freer-simple >= 1.2 && < 2,
+        text >= 2.0 && < 3,
+        aeson >= 2.1 && < 3,
+        bytestring >= 0.11 && < 1,
+        process >= 1.6 && < 2,
+        temporary >= 1.3 && < 2,
+        filepath >= 1.4 && < 2,
+        directory >= 1.3 && < 2,
+        uuid >= 1.3 && < 2,
+        tidepool-core
+    hs-source-dirs:   src
+    default-language: GHC2021
+    default-extensions:
+        DataKinds
+        DeriveAnyClass
+        DeriveGeneric
+        DerivingStrategies
+        GADTs
+        LambdaCase
+        OverloadedStrings
+        OverloadedRecordDot
+        TypeFamilies
+        TypeOperators
