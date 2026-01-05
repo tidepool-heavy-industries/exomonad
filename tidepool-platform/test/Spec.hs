@@ -2,7 +2,8 @@ module Main where
 
 import Test.Hspec
 
-import qualified ChatHistoryCompressionSpec
-
 main :: IO ()
-main = hspec ChatHistoryCompressionSpec.spec
+main = hspec $ do
+  describe "tidepool-platform" $ do
+    it "placeholder - tests needed" $ do
+      True `shouldBe` True

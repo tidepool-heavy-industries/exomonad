@@ -1,23 +1,18 @@
 # tidepool-platform - Runtime Platform & Effect Interpreters
 
-Core runtime support for running Tidepool agents: effect interpreters, LLM integration, GUI infrastructure.
+Core runtime support for running Tidepool agents: effect interpreters and LLM integration.
 
 ## What This Is
 
 Shared runtime infrastructure providing:
 - **Effect Runners**: Interpreters for LLM, RequestInput, Log, Time, etc.
 - **LLM Integration**: Anthropic API client with retry logic and tool dispatch
-- **GUI Core**: GUIBridge pattern for threepenny-gui with TVar/MVar communication
-- **Theme System**: Color palettes and CSS generation for agent UIs
 
 ## Key Modules
 
 | Module | Purpose |
 |--------|---------|
 | `Tidepool.Effect.Runners` | Effect interpreters (runLLM, runRequestInput, runLog, etc.) |
-| `Tidepool.GUI.Core` | GUIBridge type, state synchronization, polling pattern |
-| `Tidepool.GUI.Theme` | Theme system with color palettes and CSS generation |
-| `Tidepool.GUI.Widgets` | Generic widgets (textInput, choiceCards, narrativePane) |
 
 ## Effect Runners
 
@@ -32,24 +27,11 @@ runRequestInput :: (Text -> IO Text) -> Eff (RequestInput : es) a -> Eff es a
 runTime :: IOE :> es => Eff (Time : es) a -> Eff es a
 ```
 
-## GUI Pattern
-
-The GUIBridge pattern enables game loops to communicate with threepenny-gui:
-
-```haskell
-data GUIBridge state = GUIBridge
-  { gbState            :: TVar state
-  , gbStateVersion     :: TVar Int
-  , gbPendingRequest   :: TVar (Maybe PendingRequest)
-  , gbRequestResponse  :: MVar RequestResponse
-  , gbNarrativeLog     :: TVar (Seq Text)
-  , gbDebugLog         :: TVar (Seq DebugEntry)
-  , gbLLMActive        :: TVar Bool
-  }
-```
-
-Game loops block on `gbRequestResponse`, GUI polls TVars for updates.
-
 ## Dependencies
 
-Used by: agents in user repos (e.g., `~/dev/anemone`) that need GUI or LLM effects.
+Used by: agents in consuming repos (e.g., `~/dev/anemone`) that need LLM effects.
+
+## Legacy Code (Deprecated)
+
+The `Tidepool.GUI.*` modules contain threepenny-gui infrastructure that is no longer actively used.
+New development should use the native server (`tidepool-native-gui/server`) or Cloudflare Worker (`deploy/`) instead.

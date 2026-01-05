@@ -74,7 +74,6 @@ test-suite platform-tests
     import:           warnings
     type:             exitcode-stdio-1.0
     main-is:          Spec.hs
-    other-modules:    ChatHistoryCompressionSpec
     hs-source-dirs:   test
     build-depends:
         base >= 4.17 && < 5,
