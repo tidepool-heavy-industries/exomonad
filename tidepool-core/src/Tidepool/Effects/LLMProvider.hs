@@ -29,6 +29,10 @@ module Tidepool.Effects.LLMProvider
     -- * Effect
   , LLMComplete(..)
   , complete
+  , completeTry
+
+    -- * Error Types
+  , LLMError(..)
   ) where
 
 import Control.Applicative ((<|>))
@@ -240,6 +244,26 @@ instance FromJSON Usage where
 
 
 -- ════════════════════════════════════════════════════════════════════════════
+-- ERROR TYPES
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | LLM API errors.
+--
+-- These are returned by 'completeTry' and can be pattern-matched to handle
+-- specific error conditions.
+data LLMError
+  = LLMHttpError Text           -- ^ Network/HTTP error
+  | LLMParseError Text          -- ^ JSON parsing failed
+  | LLMRateLimited              -- ^ Rate limit hit (429)
+  | LLMUnauthorized             -- ^ Invalid API key (401)
+  | LLMContextTooLong           -- ^ Input too long (400 with specific error)
+  | LLMOverloaded               -- ^ Service overloaded (529)
+  | LLMApiError Text Text       -- ^ API error (type, message)
+  | LLMNoProviderConfigured     -- ^ No provider secrets configured
+  deriving stock (Eq, Show, Generic)
+
+
+-- ════════════════════════════════════════════════════════════════════════════
 -- EFFECT
 -- ════════════════════════════════════════════════════════════════════════════
 
@@ -249,6 +273,24 @@ instance FromJSON Usage where
 -- - Request schema (Anthropic messages API vs OpenAI chat completions)
 -- - Response parsing
 -- - Auth mechanism
+--
+-- = Error Handling
+--
+-- The effect provides two variants:
+--
+-- * 'Complete' - throws on error (use when errors are fatal)
+-- * 'CompleteTry' - returns @Either LLMError@ (use when you want to handle errors)
+--
+-- @
+-- -- Throwing variant (crashes on error)
+-- response <- complete SAnthropic config msg tools
+--
+-- -- Try variant (returns Either)
+-- result <- completeTry SAnthropic config msg tools
+-- case result of
+--   Left err -> handleError err
+--   Right response -> processResponse response
+-- @
 data LLMComplete r where
   Complete
     :: SProvider p
@@ -257,12 +299,21 @@ data LLMComplete r where
     -> Maybe [Value]             -- optional tools
     -> LLMComplete (LLMProviderResponse p)
 
+  CompleteTry
+    :: SProvider p
+    -> LLMProviderConfig p
+    -> Text                      -- user message
+    -> Maybe [Value]             -- optional tools
+    -> LLMComplete (Either LLMError (LLMProviderResponse p))
+
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- SMART CONSTRUCTORS
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Call an LLM with provider-specific config.
+--
+-- This variant throws on error. For error handling, use 'completeTry'.
 complete
   :: forall p effs. Member LLMComplete effs
   => SProvider p
@@ -271,3 +322,25 @@ complete
   -> Maybe [Value]
   -> Eff effs (LLMProviderResponse p)
 complete provider config msg tools = send (Complete provider config msg tools)
+
+-- | Call an LLM with provider-specific config, returning errors as 'Either'.
+--
+-- Use this when you want to handle errors gracefully:
+--
+-- @
+-- result <- completeTry SAnthropic config msg tools
+-- case result of
+--   Left LLMRateLimited -> do
+--     liftIO $ threadDelay 1000000
+--     completeTry SAnthropic config msg tools  -- retry
+--   Left err -> logError $ "LLM failed: " <> show err
+--   Right response -> processResponse response
+-- @
+completeTry
+  :: forall p effs. Member LLMComplete effs
+  => SProvider p
+  -> LLMProviderConfig p
+  -> Text
+  -> Maybe [Value]
+  -> Eff effs (Either LLMError (LLMProviderResponse p))
+completeTry provider config msg tools = send (CompleteTry provider config msg tools)

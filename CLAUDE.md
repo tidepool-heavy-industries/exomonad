@@ -10,6 +10,36 @@ The key insight: LLMs don't need raw IO - they need typed state they can read (v
 
 **Status**: Compiles successfully. DM agent has stubbed logic. Tidying agent is functional with GUI.
 
+## Start Here
+
+New to this codebase? Here's the reading order:
+
+1. **Graph DSL** - Read `tidepool-core/CLAUDE.md` first. The Graph DSL is the core abstraction for defining LLM agents as typed state machines.
+
+2. **Effect System** - See `Tidepool.Effect.Types` for effect definitions. Agents are IO-blind; all IO happens via effect interpreters.
+
+3. **Tool Definitions** - See `Tidepool.Graph.Tool` for the `ToolDef` typeclass. Tools are typed actions LLMs can invoke.
+
+4. **Example Agent** - See `tidepool-native-gui/server/src/Tidepool/Server/SimpleAgent.hs` for a minimal working agent.
+
+5. **Run Something** - `just native` starts the native server at localhost:8080.
+
+### Where Things Go
+
+| Thing | Location |
+|-------|----------|
+| New effect type | `tidepool-core/src/Tidepool/Effect/Types.hs` |
+| New integration (API) | `tidepool-core/src/Tidepool/Effects/` (plural) |
+| New graph annotation | `tidepool-core/src/Tidepool/Graph/Types.hs` |
+| Tool definitions | Use `ToolDef` from `Tidepool.Graph.Tool` |
+| Agents | Create in a separate repo (e.g., `~/dev/anemone`) |
+
+### Key Naming Conventions
+
+- **Effect** (singular) = core infrastructure (`Tidepool.Effect.*`)
+- **Effects** (plural) = integrations/contrib (`Tidepool.Effects.*`)
+- **Graph.Tool** = canonical tool definitions (not the deprecated `Tidepool.Tool`)
+
 ## Task Tracking (Beads)
 
 This repo uses BD (Beads) for git-native task tracking. The beads database is at `~/dev/tidepool/.beads/` (gitignored, shared by all worktrees).

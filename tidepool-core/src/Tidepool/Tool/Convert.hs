@@ -12,6 +12,12 @@
 -- Both typeclasses have default implementations that work for any
 -- 'ToolDef' instance, using the typed schemas from 'HasJSONSchema'.
 --
+-- = See Also
+--
+-- * "Tidepool.Graph.Tool" - The 'ToolDef' typeclass for defining tools
+-- * "Tidepool.Tool.Wire" - Wire format types ('AnthropicTool', 'CfTool')
+-- * "Tidepool.Schema" - 'HasJSONSchema' used by default implementations
+--
 -- = Usage
 --
 -- @
