@@ -1,28 +1,47 @@
--- | Loki push API types.
+-- | Observability types for Loki (logs) and OTLP (traces).
 --
--- See: https://grafana.com/docs/loki/latest/reference/loki-http-api/
+-- Supports both:
+-- - Loki push API: https://grafana.com/docs/loki/latest/reference/loki-http-api/
+-- - OTLP HTTP: https://opentelemetry.io/docs/specs/otlp/
 module Tidepool.Observability.Types
-  ( -- * Loki Configuration
-    LokiConfig(..)
+  ( -- * Configuration
+    ObservabilityConfig(..)
+  , LokiConfig(..)
+  , OTLPConfig(..)
   , defaultLokiConfig
+  , defaultOTLPConfig
   , grafanaCloudConfig
+  , grafanaCloudOTLPConfig
 
     -- * Loki Push API Types
   , LokiPushRequest(..)
   , LokiStream(..)
   , StreamLabels(..)
 
-    -- * Span Context
-  , SpanContext(..)
-  , newSpanContext
-  , pushSpan
-  , popSpan
-  , currentSpan
+    -- * OTLP Types
+  , OTLPTraceRequest(..)
+  , OTLPResourceSpans(..)
+  , OTLPScopeSpans(..)
+  , OTLPSpan(..)
+  , OTLPStatus(..)
+  , OTLPStatusCode(..)
+
+    -- * Trace Context
+  , TraceContext(..)
+  , newTraceContext
+  , ActiveSpan(..)
+  , pushActiveSpan
+  , popActiveSpan
+  , currentActiveSpan
+  , generateTraceId
+  , generateSpanId
 
     -- * Helpers
   , eventToLabels
   , eventToLine
   , nowNanos
+  , nowNanosInt
+  , spanKindToInt
   ) where
 
 import Data.Aeson
@@ -33,14 +52,25 @@ import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.Encoding as TLE
 import qualified Data.ByteString.Lazy as LBS
 import Data.Time.Clock.POSIX (getPOSIXTime)
+import Data.Word (Word64)
 import GHC.Generics (Generic)
+import System.Random (randomIO)
+import Numeric (showHex)
 
-import Tidepool.Effects.Observability (TidepoolEvent(..))
+import Tidepool.Effects.Observability (TidepoolEvent(..), SpanKind(..), SpanAttribute(..))
 
 
 -- ════════════════════════════════════════════════════════════════════════════
--- LOKI CONFIGURATION
+-- CONFIGURATION
 -- ════════════════════════════════════════════════════════════════════════════
+
+-- | Combined observability configuration.
+data ObservabilityConfig = ObservabilityConfig
+  { ocLoki :: Maybe LokiConfig   -- ^ Loki config (for logs)
+  , ocOTLP :: Maybe OTLPConfig   -- ^ OTLP config (for traces)
+  , ocServiceName :: Text        -- ^ Service name for resource attributes
+  }
+  deriving (Show, Eq, Generic)
 
 -- | Loki push endpoint configuration.
 data LokiConfig = LokiConfig
@@ -48,6 +78,14 @@ data LokiConfig = LokiConfig
   , lcUser     :: Maybe Text  -- ^ Username for basic auth (Grafana Cloud user ID)
   , lcToken    :: Maybe Text  -- ^ API token for basic auth
   , lcJobLabel :: Text      -- ^ Job label for all logs (e.g., "tidepool-native")
+  }
+  deriving (Show, Eq, Generic)
+
+-- | OTLP HTTP endpoint configuration.
+data OTLPConfig = OTLPConfig
+  { otlpEndpoint :: Text       -- ^ OTLP endpoint (e.g., "https://otlp-gateway.../otlp/v1/traces")
+  , otlpUser     :: Maybe Text -- ^ Username for basic auth
+  , otlpToken    :: Maybe Text -- ^ API token for basic auth
   }
   deriving (Show, Eq, Generic)
 
@@ -60,7 +98,15 @@ defaultLokiConfig = LokiConfig
   , lcJobLabel = "tidepool-native"
   }
 
--- | Create config for Grafana Cloud.
+-- | Default config for local OTLP collector.
+defaultOTLPConfig :: OTLPConfig
+defaultOTLPConfig = OTLPConfig
+  { otlpEndpoint = "http://localhost:4318/v1/traces"
+  , otlpUser     = Nothing
+  , otlpToken    = Nothing
+  }
+
+-- | Create Loki config for Grafana Cloud.
 --
 -- @
 -- grafanaCloudConfig
@@ -74,6 +120,21 @@ grafanaCloudConfig url userId token = LokiConfig
   , lcUser     = Just userId
   , lcToken    = Just token
   , lcJobLabel = "tidepool-native"
+  }
+
+-- | Create OTLP config for Grafana Cloud Tempo.
+--
+-- @
+-- grafanaCloudOTLPConfig
+--   "https://otlp-gateway-prod-us-west-0.grafana.net/otlp/v1/traces"
+--   "123456"
+--   "glc_your_token_here"
+-- @
+grafanaCloudOTLPConfig :: Text -> Text -> Text -> OTLPConfig
+grafanaCloudOTLPConfig endpoint userId token = OTLPConfig
+  { otlpEndpoint = endpoint
+  , otlpUser     = Just userId
+  , otlpToken    = Just token
   }
 
 
@@ -129,30 +190,164 @@ instance ToJSON StreamLabels where
 
 
 -- ════════════════════════════════════════════════════════════════════════════
--- SPAN CONTEXT
+-- OTLP TYPES
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Mutable span context for tracking nested spans.
-newtype SpanContext = SpanContext
-  { scStack :: IORef [Text]  -- ^ Stack of active span names
+-- | OTLP trace request (JSON format).
+--
+-- See: https://opentelemetry.io/docs/specs/otlp/#otlphttp-request
+newtype OTLPTraceRequest = OTLPTraceRequest
+  { otrResourceSpans :: [OTLPResourceSpans]
+  }
+  deriving (Show, Eq, Generic)
+
+instance ToJSON OTLPTraceRequest where
+  toJSON req = object ["resourceSpans" .= req.otrResourceSpans]
+
+-- | Resource spans group spans by resource (service, host, etc.).
+data OTLPResourceSpans = OTLPResourceSpans
+  { orsResource :: Value           -- ^ Resource attributes (service.name, etc.)
+  , orsScopeSpans :: [OTLPScopeSpans]
+  }
+  deriving (Show, Eq, Generic)
+
+instance ToJSON OTLPResourceSpans where
+  toJSON rs = object
+    [ "resource" .= rs.orsResource
+    , "scopeSpans" .= rs.orsScopeSpans
+    ]
+
+-- | Scope spans group spans by instrumentation scope.
+data OTLPScopeSpans = OTLPScopeSpans
+  { ossScope :: Value        -- ^ Instrumentation scope (name, version)
+  , ossSpans :: [OTLPSpan]
+  }
+  deriving (Show, Eq, Generic)
+
+instance ToJSON OTLPScopeSpans where
+  toJSON ss = object
+    [ "scope" .= ss.ossScope
+    , "spans" .= ss.ossSpans
+    ]
+
+-- | Individual OTLP span.
+data OTLPSpan = OTLPSpan
+  { ospTraceId :: Text           -- ^ 32 hex chars (16 bytes)
+  , ospSpanId :: Text            -- ^ 16 hex chars (8 bytes)
+  , ospParentSpanId :: Maybe Text -- ^ Parent span ID (if nested)
+  , ospName :: Text              -- ^ Span name
+  , ospKind :: Int               -- ^ Span kind (0=unspec, 1=internal, 2=server, 3=client)
+  , ospStartTimeUnixNano :: Integer
+  , ospEndTimeUnixNano :: Integer
+  , ospAttributes :: [Value]     -- ^ SpanAttribute as JSON
+  , ospStatus :: OTLPStatus
+  }
+  deriving (Show, Eq, Generic)
+
+instance ToJSON OTLPSpan where
+  toJSON s = object $ catMaybes
+    [ Just ("traceId" .= s.ospTraceId)
+    , Just ("spanId" .= s.ospSpanId)
+    , ("parentSpanId" .=) <$> s.ospParentSpanId
+    , Just ("name" .= s.ospName)
+    , Just ("kind" .= s.ospKind)
+    , Just ("startTimeUnixNano" .= show s.ospStartTimeUnixNano)
+    , Just ("endTimeUnixNano" .= show s.ospEndTimeUnixNano)
+    , Just ("attributes" .= s.ospAttributes)
+    , Just ("status" .= s.ospStatus)
+    ]
+    where
+      catMaybes = foldr (\mx acc -> maybe acc (:acc) mx) []
+
+-- | Span status.
+data OTLPStatus = OTLPStatus
+  { osCode :: OTLPStatusCode
+  , osMessage :: Maybe Text
+  }
+  deriving (Show, Eq, Generic)
+
+instance ToJSON OTLPStatus where
+  toJSON st = object $ catMaybes
+    [ Just ("code" .= statusCodeToInt st.osCode)
+    , ("message" .=) <$> st.osMessage
+    ]
+    where
+      catMaybes = foldr (\mx acc -> maybe acc (:acc) mx) []
+      statusCodeToInt :: OTLPStatusCode -> Int
+      statusCodeToInt StatusUnset = 0
+      statusCodeToInt StatusOk    = 1
+      statusCodeToInt StatusError = 2
+
+-- | OTLP status codes.
+data OTLPStatusCode = StatusUnset | StatusOk | StatusError
+  deriving (Show, Eq, Generic)
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- TRACE CONTEXT
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Active span information.
+data ActiveSpan = ActiveSpan
+  { asSpanId :: Text           -- ^ Span ID (16 hex chars)
+  , asName :: Text             -- ^ Span name
+  , asKind :: SpanKind         -- ^ Span kind
+  , asStartTime :: Integer     -- ^ Start time in nanos
+  , asAttributes :: [SpanAttribute] -- ^ Accumulated attributes
+  }
+  deriving (Show, Eq, Generic)
+
+-- | Mutable trace context for tracking the current trace and span stack.
+data TraceContext = TraceContext
+  { tcTraceId :: IORef Text       -- ^ Current trace ID (32 hex chars)
+  , tcSpanStack :: IORef [ActiveSpan]  -- ^ Stack of active spans
+  , tcCompletedSpans :: IORef [OTLPSpan] -- ^ Spans ready to export
   }
 
--- | Create a new empty span context.
-newSpanContext :: IO SpanContext
-newSpanContext = SpanContext <$> newIORef []
+-- | Create a new trace context with a fresh trace ID.
+newTraceContext :: IO TraceContext
+newTraceContext = do
+  traceId <- generateTraceId
+  TraceContext
+    <$> newIORef traceId
+    <*> newIORef []
+    <*> newIORef []
 
--- | Push a span onto the stack.
-pushSpan :: SpanContext -> Text -> IO ()
-pushSpan ctx name = modifyIORef ctx.scStack (name :)
+-- | Generate a random 128-bit trace ID (32 hex chars).
+generateTraceId :: IO Text
+generateTraceId = do
+  w1 <- randomIO :: IO Word64
+  w2 <- randomIO :: IO Word64
+  pure $ T.pack $ padLeft 16 (showHex w1 "") <> padLeft 16 (showHex w2 "")
+  where
+    padLeft n s = replicate (n - length s) '0' <> s
 
--- | Pop a span from the stack.
-popSpan :: SpanContext -> IO ()
-popSpan ctx = modifyIORef ctx.scStack (drop 1)
+-- | Generate a random 64-bit span ID (16 hex chars).
+generateSpanId :: IO Text
+generateSpanId = do
+  w <- randomIO :: IO Word64
+  pure $ T.pack $ padLeft 16 (showHex w "")
+  where
+    padLeft n s = replicate (n - length s) '0' <> s
 
--- | Get the current (innermost) span name.
-currentSpan :: SpanContext -> IO (Maybe Text)
-currentSpan ctx = do
-  stack <- readIORef ctx.scStack
+-- | Push an active span onto the stack.
+pushActiveSpan :: TraceContext -> ActiveSpan -> IO ()
+pushActiveSpan ctx span_ = modifyIORef ctx.tcSpanStack (span_ :)
+
+-- | Pop an active span from the stack.
+popActiveSpan :: TraceContext -> IO (Maybe ActiveSpan)
+popActiveSpan ctx = do
+  stack <- readIORef ctx.tcSpanStack
+  case stack of
+    [] -> pure Nothing
+    (s:rest) -> do
+      writeIORef ctx.tcSpanStack rest
+      pure (Just s)
+
+-- | Get the current (innermost) active span.
+currentActiveSpan :: TraceContext -> IO (Maybe ActiveSpan)
+currentActiveSpan ctx = do
+  stack <- readIORef ctx.tcSpanStack
   pure $ case stack of
     []    -> Nothing
     (s:_) -> Just s
@@ -161,6 +356,12 @@ currentSpan ctx = do
 -- ════════════════════════════════════════════════════════════════════════════
 -- HELPERS
 -- ════════════════════════════════════════════════════════════════════════════
+
+-- | Convert SpanKind to OTLP integer.
+spanKindToInt :: SpanKind -> Int
+spanKindToInt SpanInternal = 1
+spanKindToInt SpanServer   = 2
+spanKindToInt SpanClient   = 3
 
 -- | Extract event type for label.
 eventToLabels :: Text -> TidepoolEvent -> StreamLabels
@@ -182,8 +383,10 @@ eventToLine event = TL.toStrict . TLE.decodeUtf8 . encode $ toJSON event
 
 -- | Get current time in nanoseconds as text (Loki timestamp format).
 nowNanos :: IO Text
-nowNanos = do
+nowNanos = T.pack . show <$> nowNanosInt
+
+-- | Get current time in nanoseconds as Integer.
+nowNanosInt :: IO Integer
+nowNanosInt = do
   t <- getPOSIXTime
-  -- Convert to nanoseconds
-  let nanos = floor (t * 1e9) :: Integer
-  pure $ T.pack $ show nanos
+  pure $ floor (t * 1e9)

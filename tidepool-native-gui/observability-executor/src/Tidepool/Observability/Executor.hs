@@ -1,9 +1,8 @@
--- | Observability effect executor - Loki push API client.
+-- | Observability effect executor - Loki and OTLP HTTP clients.
 --
--- Publishes structured JSON logs to Grafana Loki.
---
--- NOTE: Span tracking has been removed for simplicity. This executor
--- now only handles basic event publishing.
+-- Publishes:
+-- - Structured JSON logs to Grafana Loki
+-- - OpenTelemetry spans to Grafana Tempo via OTLP HTTP
 --
 -- = Usage
 --
@@ -14,36 +13,51 @@
 -- main :: IO ()
 -- main = do
 --   let config = defaultLokiConfig
---   runM $ runObservability config $ do
---     publishEvent $ GraphTransition "entry" "classify" "user_input"
---     publishEvent $ LLMCallEvent "claude-3" 100 50 250
+--   ctx <- newTraceContext
+--   runM $ runObservabilityWithContext ctx config $ do
+--     withSpan "graph:example" SpanServer [] $ do
+--       publishEvent $ GraphTransition "entry" "classify" "user_input"
+--       publishEvent $ LLMCallEvent "claude-3" 100 50 250
 -- @
 module Tidepool.Observability.Executor
   ( -- * Executor
     runObservability
+  , runObservabilityWithContext
 
     -- * Configuration
   , LokiConfig(..)
+  , OTLPConfig(..)
+  , ObservabilityConfig(..)
   , defaultLokiConfig
+  , defaultOTLPConfig
   , grafanaCloudConfig
+  , grafanaCloudOTLPConfig
+
+    -- * Trace Context
+  , TraceContext(..)
+  , newTraceContext
 
     -- * Low-level API
   , pushToLoki
+  , pushToOTLP
+  , flushTraces
   ) where
 
 import Control.Exception (try, SomeException)
-import Control.Monad (void)
+import Control.Monad (void, when)
 import Control.Monad.Freer (Eff, LastMember, interpret, sendM)
-import Data.Aeson (encode)
+import Data.Aeson (encode, object, (.=), Value, toJSON)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as LBS
+import Data.IORef (readIORef, writeIORef, modifyIORef)
 import Network.HTTP.Req
 import qualified Data.ByteString.Base64 as B64
 
-import Tidepool.Effects.Observability (Observability(..), TidepoolEvent)
+import Tidepool.Effects.Observability
+  ( Observability(..), TidepoolEvent, SpanKind(..), SpanAttribute(..) )
 import Tidepool.Observability.Types
 
 
@@ -112,19 +126,133 @@ authHeadersHttps config = case (config.lcUser, config.lcToken) of
 
 
 -- ════════════════════════════════════════════════════════════════════════════
+-- OTLP HTTP CLIENT
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Push traces to OTLP endpoint.
+--
+-- Returns Nothing on success, Just error message on failure.
+pushToOTLP :: OTLPConfig -> OTLPTraceRequest -> IO (Maybe Text)
+pushToOTLP config traceReq = do
+  result <- try @SomeException $ runReq defaultHttpConfig $ do
+    let body = ReqBodyLbs (encode traceReq)
+
+    case parseOTLPUrl config.otlpEndpoint of
+      Left (httpUrl, _) -> do
+        let hdrs = header "Content-Type" ("application/json" :: BS.ByteString)
+                <> authHeadersHttp' config
+        void $ req POST httpUrl body ignoreResponse hdrs
+      Right (httpsUrl, _) -> do
+        let hdrs = header "Content-Type" ("application/json" :: BS.ByteString)
+                <> authHeadersHttps' config
+        void $ req POST httpsUrl body ignoreResponse hdrs
+
+  pure $ case result of
+    Left e  -> Just $ "OTLP push failed: " <> T.pack (show e)
+    Right _ -> Nothing
+
+-- | Parse OTLP URL into http or https variant.
+parseOTLPUrl :: Text -> Either (Url 'Http, Option 'Http) (Url 'Https, Option 'Https)
+parseOTLPUrl urlText
+  | "https://" `T.isPrefixOf` urlText =
+      let host = T.drop 8 urlText
+          (hostPart, pathPart) = T.break (== '/') host
+          pathSegments = filter (not . T.null) $ T.splitOn "/" pathPart
+          baseUrl = https hostPart
+          urlWithPath = foldl (/:) baseUrl pathSegments
+      in Right (urlWithPath, mempty)
+  | "http://" `T.isPrefixOf` urlText =
+      let host = T.drop 7 urlText
+          (hostPart, pathPart) = T.break (== '/') host
+          pathSegments = filter (not . T.null) $ T.splitOn "/" pathPart
+          baseUrl = http hostPart
+          urlWithPath = foldl (/:) baseUrl pathSegments
+      in Left (urlWithPath, mempty)
+  | otherwise =
+      Left (http urlText, mempty)
+
+-- | Build auth headers for OTLP (HTTP).
+authHeadersHttp' :: OTLPConfig -> Option 'Http
+authHeadersHttp' config = case (config.otlpUser, config.otlpToken) of
+  (Just user, Just token) ->
+    let creds = TE.encodeUtf8 $ user <> ":" <> token
+        b64 = B64.encode creds
+        authValue = "Basic " <> b64
+    in header "Authorization" authValue
+  _ -> mempty
+
+-- | Build auth headers for OTLP (HTTPS).
+authHeadersHttps' :: OTLPConfig -> Option 'Https
+authHeadersHttps' config = case (config.otlpUser, config.otlpToken) of
+  (Just user, Just token) ->
+    let creds = TE.encodeUtf8 $ user <> ":" <> token
+        b64 = B64.encode creds
+        authValue = "Basic " <> b64
+    in header "Authorization" authValue
+  _ -> mempty
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- TRACE FLUSHING
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Flush completed spans to OTLP endpoint.
+flushTraces :: OTLPConfig -> Text -> TraceContext -> IO ()
+flushTraces config serviceName ctx = do
+  spans <- readIORef ctx.tcCompletedSpans
+  when (not $ null spans) $ do
+    -- Clear completed spans
+    writeIORef ctx.tcCompletedSpans []
+
+    -- Build OTLP request
+    let resource = object
+          [ "attributes" .=
+              [ object ["key" .= ("service.name" :: Text), "value" .= object ["stringValue" .= serviceName]]
+              ]
+          ]
+        scope = object
+          [ "name" .= ("tidepool" :: Text)
+          , "version" .= ("0.1.0" :: Text)
+          ]
+        scopeSpans = OTLPScopeSpans scope spans
+        resourceSpans = OTLPResourceSpans resource [scopeSpans]
+        traceReq = OTLPTraceRequest [resourceSpans]
+
+    -- Push to OTLP
+    mErr <- pushToOTLP config traceReq
+    case mErr of
+      Just err -> putStrLn $ "[OTLP] " <> T.unpack err
+      Nothing  -> pure ()
+
+
+-- ════════════════════════════════════════════════════════════════════════════
 -- EFFECT INTERPRETER
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Run Observability effects by pushing to Loki.
+-- | Run Observability effects with Loki-only config (backward compatible).
+--
+-- Creates a fresh trace context for each run.
+runObservability :: LastMember IO effs => LokiConfig -> Eff (Observability ': effs) a -> Eff effs a
+runObservability lokiConfig action = do
+  ctx <- sendM newTraceContext
+  runObservabilityWithContext ctx lokiConfig action
+
+-- | Run Observability effects with explicit trace context.
 --
 -- This interpreter:
 -- 1. Publishes events to Loki with appropriate labels
--- 2. Handles errors gracefully (logs but doesn't throw)
+-- 2. Tracks spans in the trace context
+-- 3. Handles errors gracefully (logs but doesn't throw)
 --
--- The interpreter is polymorphic over remaining effects, enabling composition
--- with other effect interpreters (UI, Habitica, LLM, etc.).
-runObservability :: LastMember IO effs => LokiConfig -> Eff (Observability ': effs) a -> Eff effs a
-runObservability config = interpret $ \case
+-- Note: Traces are accumulated but not automatically flushed.
+-- Call 'flushTraces' to export completed spans to OTLP.
+runObservabilityWithContext
+  :: LastMember IO effs
+  => TraceContext
+  -> LokiConfig
+  -> Eff (Observability ': effs) a
+  -> Eff effs a
+runObservabilityWithContext ctx config = interpret $ \case
   PublishEvent event -> sendM $ do
     let labels = eventToLabels config.lcJobLabel event
         line = eventToLine event
@@ -132,9 +260,69 @@ runObservability config = interpret $ \case
     -- Build and send request
     ts <- nowNanos
     let stream = LokiStream labels [(ts, line)]
-        req = LokiPushRequest [stream]
+        pushReq = LokiPushRequest [stream]
 
-    mErr <- pushToLoki config req
+    mErr <- pushToLoki config pushReq
     case mErr of
       Just err -> putStrLn $ "[Observability] " <> T.unpack err
       Nothing  -> pure ()
+
+  StartSpan name kind attrs -> sendM $ do
+    spanId <- generateSpanId
+    startTime <- nowNanosInt
+
+    -- Get parent span ID if any
+    parentSpan <- currentActiveSpan ctx
+
+    let activeSpan = ActiveSpan
+          { asSpanId = spanId
+          , asName = name
+          , asKind = kind
+          , asStartTime = startTime
+          , asAttributes = attrs
+          }
+
+    pushActiveSpan ctx activeSpan
+    pure spanId
+
+  EndSpan isError extraAttrs -> sendM $ do
+    mSpan <- popActiveSpan ctx
+    case mSpan of
+      Nothing -> pure ()  -- No active span, ignore
+      Just activeSpan -> do
+        endTime <- nowNanosInt
+        traceId <- readIORef ctx.tcTraceId
+
+        -- Get parent span ID (the one now on top of stack)
+        parentSpan <- currentActiveSpan ctx
+        let parentSpanId = asSpanId <$> parentSpan
+
+        -- Build OTLP span
+        let allAttrs = activeSpan.asAttributes <> extraAttrs
+            attrValues = map toJSON allAttrs
+            status = if isError
+                     then OTLPStatus StatusError (Just "error")
+                     else OTLPStatus StatusOk Nothing
+            otlpSpan = OTLPSpan
+              { ospTraceId = traceId
+              , ospSpanId = activeSpan.asSpanId
+              , ospParentSpanId = parentSpanId
+              , ospName = activeSpan.asName
+              , ospKind = spanKindToInt activeSpan.asKind
+              , ospStartTimeUnixNano = activeSpan.asStartTime
+              , ospEndTimeUnixNano = endTime
+              , ospAttributes = attrValues
+              , ospStatus = status
+              }
+
+        -- Add to completed spans
+        modifyIORef ctx.tcCompletedSpans (otlpSpan :)
+
+  AddSpanAttribute attr -> sendM $ do
+    -- Modify the current span's attributes
+    stack <- readIORef ctx.tcSpanStack
+    case stack of
+      [] -> pure ()  -- No active span, ignore
+      (s:rest) -> do
+        let s' = s { asAttributes = s.asAttributes <> [attr] }
+        writeIORef ctx.tcSpanStack (s':rest)

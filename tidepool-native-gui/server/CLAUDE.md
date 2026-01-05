@@ -28,27 +28,37 @@ The server composes these effect interpreters via `runEffects`:
 | UI | ui-executor | WebSocket ↔ UIState/UserAction bridging |
 | Habitica | habitica-executor | Habitica API calls (optional) |
 | LLMComplete | llm-executor | Anthropic/OpenAI API calls |
-| Observability | observability-executor | Loki/Grafana structured logging |
+| ClaudeCodeExec | claudecode-executor | Claude Code subprocess execution |
+| Observability | observability-executor | Loki logs + OTLP traces |
 
 Composition order (EffectRunner.hs):
 
 ```haskell
 runEffects :: ExecutorEnv -> UIContext -> UICallback
-           -> Eff '[UI, Habitica, LLMComplete, Observability, IO] a
+           -> Eff '[UI, Habitica, LLMComplete, ClaudeCodeExec, Observability, IO] a
            -> IO a
-runEffects env ctx callback =
-  runM
-    . runObservability (ecLokiConfig $ eeConfig env)
+runEffects env ctx callback action = do
+  traceCtx <- newTraceContext
+  result <- runM
+    . runObservabilityWithContext traceCtx (ecLokiConfig $ eeConfig env)
+    . runClaudeCodeExecIO (ecClaudeCodeConfig $ eeConfig env)
     . runLLMComplete (eeLLMEnv env)
     . runHabitica (eeHabiticaEnv env)
     . runUI ctx callback
+    $ action
+  -- Flush traces to OTLP if configured
+  case ecOTLPConfig (eeConfig env) of
+    Just otlpConfig -> flushTraces otlpConfig (ecServiceName $ eeConfig env) traceCtx
+    Nothing -> pure ()
+  pure result
 ```
 
 Effects are peeled from the outside in:
 1. **UI** (first) - handles user interaction via WebSocket
 2. **Habitica** - makes Habitica API calls
 3. **LLMComplete** - makes LLM API calls
-4. **Observability** (last) - records events to Loki
+4. **ClaudeCodeExec** - executes nodes via Claude Code subprocess
+5. **Observability** (last) - records events to Loki, spans to Tempo
 
 ## Running
 
@@ -67,8 +77,12 @@ TIDEPOOL_DIST=tidepool-native-gui/solid-frontend/dist cabal run tidepool-native
 | `HABITICA_USER_ID` | No | Habitica user ID |
 | `HABITICA_API_TOKEN` | No | Habitica API token |
 | `LOKI_URL` | No | Loki push endpoint (default: localhost:3100) |
-| `LOKI_USER` | No | Grafana Cloud user ID |
-| `LOKI_TOKEN` | No | Grafana Cloud API token |
+| `LOKI_USER` | No | Grafana Cloud user ID for Loki |
+| `LOKI_TOKEN` | No | Grafana Cloud API token for Loki |
+| `OTLP_ENDPOINT` | No | OTLP traces endpoint (enables tracing) |
+| `OTLP_USER` | No | Grafana Cloud user ID for Tempo |
+| `OTLP_TOKEN` | No | Grafana Cloud API token for Tempo |
+| `SERVICE_NAME` | No | Service name for traces (default: tidepool-native) |
 
 ## REST Endpoints
 

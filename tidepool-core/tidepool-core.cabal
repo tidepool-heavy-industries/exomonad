@@ -59,6 +59,7 @@ library
         Tidepool.Graph.Example
         Tidepool.Graph.Example.Context
         Tidepool.Graph.Docs
+        Tidepool.Graph.Execute.Instrumented
         Tidepool.Question
         Tidepool.Template.DependencyTree
       build-depends:

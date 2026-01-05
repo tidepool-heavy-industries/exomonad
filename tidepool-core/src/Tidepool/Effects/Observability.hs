@@ -1,16 +1,29 @@
--- | Observability effect for structured logging.
+-- | Observability effect for structured logging and tracing.
 --
 -- Effect type only - executors live in tidepool-observability-executor.
 --
--- NOTE: Span tracking (WithSpan) has been removed for simplicity.
--- Observability is WIP - we keep only basic event publishing for now.
+-- Supports two observability primitives:
+-- 1. Events (logs) - Published to Loki for queryability
+-- 2. Spans (traces) - Published to Tempo via OTLP for distributed tracing
 module Tidepool.Effects.Observability
   ( -- * Effect
     Observability(..)
+
+    -- * Event Operations
   , publishEvent
+
+    -- * Span Operations
+  , startSpan
+  , endSpan
+  , withSpan
+  , addSpanAttribute
 
     -- * Event Types
   , TidepoolEvent(..)
+
+    -- * Span Types
+  , SpanKind(..)
+  , SpanAttribute(..)
   ) where
 
 import Data.Text (Text)
@@ -104,14 +117,62 @@ instance FromJSON TidepoolEvent where
 
 
 -- ════════════════════════════════════════════════════════════════════════════
+-- SPAN TYPES
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Span kind for OpenTelemetry traces.
+data SpanKind
+  = SpanInternal  -- ^ Internal operation within the application
+  | SpanClient    -- ^ Outgoing request (LLM call, API call)
+  | SpanServer    -- ^ Incoming request (graph entry)
+  deriving (Show, Eq, Generic)
+
+instance ToJSON SpanKind where
+  toJSON SpanInternal = "internal"
+  toJSON SpanClient   = "client"
+  toJSON SpanServer   = "server"
+
+instance FromJSON SpanKind where
+  parseJSON = Aeson.withText "SpanKind" $ \case
+    "internal" -> pure SpanInternal
+    "client"   -> pure SpanClient
+    "server"   -> pure SpanServer
+    other      -> fail $ "Unknown SpanKind: " <> show other
+
+-- | Span attributes for enriching traces.
+data SpanAttribute
+  = AttrText Text Text      -- ^ Text attribute (key, value)
+  | AttrInt Text Int        -- ^ Integer attribute (key, value)
+  | AttrBool Text Bool      -- ^ Boolean attribute (key, value)
+  deriving (Show, Eq, Generic)
+
+instance ToJSON SpanAttribute where
+  toJSON (AttrText k v) = object ["key" .= k, "value" .= object ["stringValue" .= v]]
+  toJSON (AttrInt k v) = object ["key" .= k, "value" .= object ["intValue" .= v]]
+  toJSON (AttrBool k v) = object ["key" .= k, "value" .= object ["boolValue" .= v]]
+
+
+-- ════════════════════════════════════════════════════════════════════════════
 -- EFFECT
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Observability effect for publishing structured events.
+-- | Observability effect for publishing structured events and traces.
 --
 -- Events are published to Loki for querying and dashboards.
+-- Spans are published to Tempo via OTLP for distributed tracing.
+--
+-- Span tracking uses start/end operations. Use 'withSpan' for bracket-style
+-- span management that ensures spans are properly closed.
 data Observability r where
   PublishEvent :: TidepoolEvent -> Observability ()
+  -- | Start a new span, pushing onto the span stack.
+  -- Returns a span ID for correlation.
+  StartSpan :: Text -> SpanKind -> [SpanAttribute] -> Observability Text
+  -- | End the current span with optional status and additional attributes.
+  -- If isError is True, the span is marked as failed.
+  EndSpan :: Bool -> [SpanAttribute] -> Observability ()
+  -- | Add an attribute to the current span (no-op if no span active).
+  AddSpanAttribute :: SpanAttribute -> Observability ()
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -121,3 +182,55 @@ data Observability r where
 -- | Publish an observability event.
 publishEvent :: Member Observability effs => TidepoolEvent -> Eff effs ()
 publishEvent = send . PublishEvent
+
+-- | Start a new span.
+--
+-- Returns a span ID. Must be paired with 'endSpan'.
+-- Prefer 'withSpan' for automatic span management.
+startSpan
+  :: Member Observability effs
+  => Text           -- ^ Span name
+  -> SpanKind       -- ^ Span kind
+  -> [SpanAttribute] -- ^ Initial attributes
+  -> Eff effs Text  -- ^ Span ID
+startSpan name kind attrs = send (StartSpan name kind attrs)
+
+-- | End the current span.
+--
+-- @isError@ should be True if the span represents a failed operation.
+endSpan
+  :: Member Observability effs
+  => Bool           -- ^ Is error?
+  -> [SpanAttribute] -- ^ Final attributes to add
+  -> Eff effs ()
+endSpan isError attrs = send (EndSpan isError attrs)
+
+-- | Run an action within a span.
+--
+-- The span tracks the execution time and status of the action.
+-- Span name should be descriptive (e.g., "graph:classify", "llm:call").
+--
+-- @
+-- withSpan "node:classify" SpanInternal [] $ do
+--   result <- classifyInput input
+--   addSpanAttribute (AttrText "result" (show result))
+--   pure result
+-- @
+withSpan
+  :: Member Observability effs
+  => Text           -- ^ Span name
+  -> SpanKind       -- ^ Span kind
+  -> [SpanAttribute] -- ^ Initial attributes
+  -> Eff effs a     -- ^ Action to run
+  -> Eff effs a
+withSpan name kind attrs action = do
+  _ <- startSpan name kind attrs
+  result <- action
+  endSpan False []
+  pure result
+
+-- | Add an attribute to the current span.
+--
+-- No-op if no span is active.
+addSpanAttribute :: Member Observability effs => SpanAttribute -> Eff effs ()
+addSpanAttribute = send . AddSpanAttribute

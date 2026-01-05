@@ -48,8 +48,12 @@ import Tidepool.Habitica.Executor
   )
 import Tidepool.Observability.Executor
   ( LokiConfig(..)
-  , runObservability
+  , OTLPConfig(..)
+  , runObservabilityWithContext
+  , newTraceContext
+  , flushTraces
   , defaultLokiConfig
+  , defaultOTLPConfig
   )
 import Tidepool.LLM.Executor
   ( LLMEnv
@@ -88,7 +92,11 @@ data ExecutorConfig = ExecutorConfig
   , ecHabiticaConfig :: HabiticaConfig
     -- ^ Habitica API configuration
   , ecLokiConfig :: LokiConfig
-    -- ^ Loki/Grafana observability configuration
+    -- ^ Loki/Grafana observability configuration (logs)
+  , ecOTLPConfig :: Maybe OTLPConfig
+    -- ^ OTLP/Grafana Tempo configuration (traces)
+  , ecServiceName :: Text
+    -- ^ Service name for trace attribution
   , ecClaudeCodeConfig :: ClaudeCodeConfig
     -- ^ ClaudeCode (zellij-cc) configuration
   }
@@ -105,6 +113,8 @@ defaultExecutorConfig = ExecutorConfig
       }
   , ecHabiticaConfig = defaultHabiticaConfig
   , ecLokiConfig = defaultLokiConfig
+  , ecOTLPConfig = Nothing  -- Disabled by default
+  , ecServiceName = "tidepool-native"
   , ecClaudeCodeConfig = defaultClaudeCodeConfig
   }
 
@@ -119,6 +129,10 @@ defaultExecutorConfig = ExecutorConfig
 -- * @LOKI_URL@ - Loki push endpoint (default: http://localhost:3100)
 -- * @LOKI_USER@ - Grafana Cloud user ID (optional)
 -- * @LOKI_TOKEN@ - Grafana Cloud API token (optional)
+-- * @OTLP_ENDPOINT@ - OTLP trace endpoint (optional, e.g., https://otlp-gateway.../otlp/v1/traces)
+-- * @OTLP_USER@ - OTLP basic auth user (optional)
+-- * @OTLP_TOKEN@ - OTLP basic auth token (optional)
+-- * @SERVICE_NAME@ - Service name for traces (default: tidepool-native)
 -- * @ZELLIJ_SESSION@ - Zellij session for ClaudeCode (default: tidepool)
 -- * @ZELLIJ_CC_PATH@ - Path to zellij-cc binary (default: zellij-cc)
 -- * @ZELLIJ_CC_TIMEOUT@ - ClaudeCode timeout in seconds (default: 300)
@@ -136,6 +150,12 @@ loadExecutorConfig = do
   lokiUrl <- lookupEnv "LOKI_URL"
   lokiUser <- lookupEnv "LOKI_USER"
   lokiToken <- lookupEnv "LOKI_TOKEN"
+
+  -- OTLP config
+  otlpEndpoint <- lookupEnv "OTLP_ENDPOINT"
+  otlpUser <- lookupEnv "OTLP_USER"
+  otlpToken <- lookupEnv "OTLP_TOKEN"
+  serviceName <- lookupEnv "SERVICE_NAME"
 
   -- ClaudeCode config
   zellijSession <- lookupEnv "ZELLIJ_SESSION"
@@ -169,6 +189,14 @@ loadExecutorConfig = do
         , lcToken = T.pack <$> lokiToken
         , lcJobLabel = "tidepool-native"
         }
+    , ecOTLPConfig = case otlpEndpoint of
+        Just endpoint -> Just OTLPConfig
+          { otlpEndpoint = T.pack endpoint
+          , otlpUser = T.pack <$> otlpUser
+          , otlpToken = T.pack <$> otlpToken
+          }
+        Nothing -> Nothing
+    , ecServiceName = maybe "tidepool-native" T.pack serviceName
     , ecClaudeCodeConfig = ClaudeCodeConfig
         { ccZellijSession = maybe "tidepool" T.pack zellijSession
         , ccDefaultTimeout = maybe 300 id (zellijCcTimeout >>= readMaybe)
@@ -216,7 +244,7 @@ mkExecutorEnv config = do
 --
 -- @
 -- Eff '[UI, Habitica, LLMComplete, ClaudeCodeExec, Observability, IO] a
---   → runObservability (interpret Observability)
+--   → runObservabilityWithContext (interpret Observability)
 --   → runClaudeCodeExecIO (interpret ClaudeCodeExec)
 --   → runLLMComplete (interpret LLMComplete)
 --   → runHabitica (interpret Habitica)
@@ -229,7 +257,10 @@ mkExecutorEnv config = do
 -- 2. Habitica - makes Habitica API calls
 -- 3. LLMComplete - makes LLM API calls
 -- 4. ClaudeCodeExec - executes nodes via Claude Code subprocess
--- 5. Observability (last to peel) - records events
+-- 5. Observability (last to peel) - records events and spans
+--
+-- Traces are automatically flushed to OTLP (Grafana Tempo) after execution
+-- if @OTLP_ENDPOINT@ is configured.
 --
 -- Example:
 --
@@ -249,10 +280,24 @@ runEffects
   -> UICallback
   -> Eff '[UI, Habitica, LLMComplete, ClaudeCodeExec, Observability, IO] a
   -> IO a
-runEffects env ctx callback =
-  runM
-    . runObservability (ecLokiConfig $ eeConfig env)
+runEffects env ctx callback action = do
+  -- Create a fresh trace context for this request
+  traceCtx <- newTraceContext
+
+  -- Run the effect stack
+  result <- runM
+    . runObservabilityWithContext traceCtx (ecLokiConfig $ eeConfig env)
     . runClaudeCodeExecIO (ecClaudeCodeConfig $ eeConfig env)
     . runLLMComplete (eeLLMEnv env)
     . runHabitica (eeHabiticaEnv env)
     . runUI ctx callback
+    $ action
+
+  -- Flush traces to OTLP if configured
+  case ecOTLPConfig (eeConfig env) of
+    Just otlpConfig ->
+      flushTraces otlpConfig (ecServiceName $ eeConfig env) traceCtx
+    Nothing ->
+      pure ()
+
+  pure result
