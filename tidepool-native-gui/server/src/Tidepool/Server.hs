@@ -10,7 +10,7 @@
 -- 2. Accepts WebSocket connections (via wai-websockets overlay)
 -- 3. Creates a session per WebSocket connection
 -- 4. Bridges WebSocket messages to the UI effect callback
--- 5. Runs the agent (echo agent for now) with all executors composed
+-- 5. Runs the agent with full effect composition (UI, LLM, Observability)
 -- 6. Serves static files for non-API HTTP requests
 --
 -- = Usage
@@ -66,7 +66,7 @@ import Tidepool.Server.EffectRunner
   , ExecutorEnv
   , defaultExecutorConfig
   , mkExecutorEnv
-  , runUIOnly
+  , runEffects
   )
 import Tidepool.Server.Session
   ( SessionMap
@@ -83,7 +83,7 @@ import Tidepool.Server.API
   , HealthStatus(..)
   , api
   )
-import Tidepool.Server.Echo (echoAgent)
+import Tidepool.Server.SimpleAgent (simpleAgent)
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -237,9 +237,9 @@ wsApp sessions env pending = do
 -- | Handle a single WebSocket connection.
 --
 -- Creates a UI callback that bridges WebSocket to the effect system,
--- then runs the echo agent.
+-- then runs the agent with full effect composition.
 handleConnection :: SessionMap -> ExecutorEnv -> Session -> WS.Connection -> IO ()
-handleConnection _sessions _env session conn = do
+handleConnection _sessions env session conn = do
   -- Create UI context for this session
   ctx <- newUIContext "entry"
 
@@ -269,6 +269,5 @@ handleConnection _sessions _env session conn = do
             atomically $ writeTVar (sActionVar session) (Just action)
             pure action
 
-  -- Run the echo agent with UI effects only for now
-  -- TODO: Use runEffects for full effect stack when we have a real agent
-  runUIOnly ctx callback echoAgent
+  -- Run simple agent with full effect stack (UI, LLM, Observability)
+  runEffects env ctx callback simpleAgent

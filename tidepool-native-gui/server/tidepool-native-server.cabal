@@ -10,9 +10,9 @@ library
     exposed-modules:
         Tidepool.Server
         Tidepool.Server.API
-        Tidepool.Server.Echo
         Tidepool.Server.EffectRunner
         Tidepool.Server.Session
+        Tidepool.Server.SimpleAgent
     build-depends:
         base >= 4.17 && < 5,
         freer-simple >= 1.2 && < 2,
