@@ -52,4 +52,4 @@ Game loops block on `gbRequestResponse`, GUI polls TVars for updates.
 
 ## Dependencies
 
-Used by: tidepool-dm, tidepool-tidying, any agent with GUI or LLM effects.
+Used by: agents in external repos (e.g., ~/dev/anemone), any agent with GUI or LLM effects.

@@ -53,24 +53,13 @@ tidepool-core/              # Core library (reusable)
 │   ├── Graph/              # Type-level DSL for agent graphs
 │   └── GUI/                # Generic threepenny-gui components
 
-tidepool-dm/                # DM agent (Blades in the Dark)
-├── src/DM/
-│   ├── State.hs            # WorldState, PlayerState, dice mechanics, factions
-│   ├── Output.hs           # TurnOutput with delta fields, applyTurnOutput
-│   ├── Tools.hs            # ThinkAsDM, SpeakAsNPC, AskPlayer, Choose
-│   ├── Context.hs          # DMContext, DiceContext, Precarity
-│   ├── Templates.hs        # dmTurnTemplate, compressionTemplate
-│   ├── Loop.hs             # dmTurn, handleDiceSelection, runDMGame
-│   └── GUI/                # DM-specific GUI (noir aesthetic)
-
-tidepool-tidying/           # Tidying agent
-├── src/Tidying/
-│   ├── Agent.hs            # Agent definition, TidyingM monad
-│   ├── State.hs            # SessionState, Phase, Piles, Photo
-│   ├── Loop.hs             # OODA loop: tidyingTurn, photo analysis
-│   ├── Decide.hs           # Pure routing: (State, Extract) → (Action, Phase)
-│   ├── Action.hs           # Action ADT
-│   └── GUI/                # Tidying-specific GUI
+tidepool-native-gui/        # Native GUI executors
+├── server/                 # Servant + WebSocket server
+├── llm-executor/           # Anthropic API executor
+├── ui-executor/            # UI effect executor
+├── bd-executor/            # Beads task tracking executor
+├── claude-code-executor/   # Claude Code subprocess executor
+└── lsp-executor/           # LSP effect executor
 
 deploy/                     # Cloudflare Worker Durable Object harness
 ├── src/                    # TypeScript harness for WASM state machines
@@ -139,17 +128,9 @@ just pre-commit
 ### Running Applications
 
 ```bash
-# DM CLI
-just dm
-# or: cabal run tidepool-dm
-
-# DM GUI (browser opens at localhost:8023)
-just dm-gui
-# or: cabal run tidepool-dm-gui
-
-# Tidying GUI (browser opens at localhost:8024)
-just tidy-gui
-# or: cabal run tidepool-tidy-gui
+# Native server (localhost:8080)
+just native
+# or: TIDEPOOL_DIST=tidepool-native-gui/solid-frontend/dist cabal run tidepool-native
 ```
 
 ## Code Conventions

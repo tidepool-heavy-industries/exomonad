@@ -9,7 +9,7 @@ Analyze a DM agent play session for storytelling quality and prompt effectivenes
 
 ## How to Use
 
-1. Paste a session transcript (from tidepool-dm output)
+1. Paste a session transcript (from agent output)
 2. This skill will analyze from multiple perspectives
 3. Outputs: bugs, flow moments, confusion moments, prompt fixes
 
