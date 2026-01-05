@@ -1,343 +1,355 @@
--- | LSP effect executor.
+-- | LSP effect executor using lsp-client.
 --
 -- Interprets 'LSP' effects by communicating with a language server
--- via 'LSPClient'.
---
--- == Example Usage
---
--- @
--- import Tidepool.LSP.Executor
--- import Tidepool.Effects.LSP
---
--- main = do
---   client <- startLSPClient "haskell-language-server-wrapper" ["--lsp"]
---   result <- runLSP client myAgentLogic
---   stopLSPClient client
--- @
+-- via the lsp-client library.
 --
 module Tidepool.LSP.Executor
-  ( -- * Executor
-    runLSP
+  ( -- * Session Management
+    LSPSession
+  , withLSPSession
 
-    -- * Re-exports
-  , module Tidepool.LSP.Client
+    -- * Effect Interpreter
+  , runLSP
   ) where
 
+import Control.Exception (bracket)
 import Control.Monad.Freer (Eff, LastMember, sendM, interpret)
-import Data.Aeson
-import Data.Aeson.Key (Key, toText, fromText)
-import qualified Data.Aeson.KeyMap as KM
-import qualified Data.Map.Strict as Map
+import Data.Function ((&))
 import Data.Text (Text)
+import qualified Data.Text as T
+import qualified Data.Map.Strict as Map
+import System.IO (Handle)
+import System.Process (CreateProcess(..), StdStream(..), ProcessHandle, createProcess, proc, terminateProcess, cwd)
+
+import Language.LSP.Client (runSessionWithHandles)
+import Language.LSP.Client.Session (Session, initialize, request)
+import qualified Language.LSP.Protocol.Types as L
+import qualified Language.LSP.Protocol.Message as L
 
 import Tidepool.Effects.LSP
-import Tidepool.LSP.Client
-import Tidepool.LSP.Protocol (hoverMethod, referencesMethod, definitionMethod, codeActionMethod, renameMethod, completionMethod)
 
 
 -- ════════════════════════════════════════════════════════════════════════════
--- EXECUTOR
+-- SESSION MANAGEMENT
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Run LSP effects by communicating with a language server.
+-- | An active LSP session with a language server.
+data LSPSession = LSPSession
+  { lspStdin   :: !Handle
+  , lspStdout  :: !Handle
+  , lspProcess :: !ProcessHandle
+  }
+
+-- | Start an LSP session with HLS and run an action.
 --
--- The client must be initialized before calling this function.
-runLSP :: LastMember IO effs => LSPClient -> Eff (LSP ': effs) a -> Eff effs a
-runLSP client = interpret $ \case
-  Diagnostics doc -> sendM $ getDiagnostics client doc
-  Hover doc pos -> sendM $ getHover client doc pos
-  References doc pos -> sendM $ getReferences client doc pos
-  Definition doc pos -> sendM $ getDefinition client doc pos
-  CodeActions doc rng -> sendM $ getCodeActions client doc rng
-  Rename doc pos newName -> sendM $ doRename client doc pos newName
-  Completion doc pos -> sendM $ getCompletion client doc pos
-
-
--- ════════════════════════════════════════════════════════════════════════════
--- LSP OPERATIONS
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Get diagnostics for a document.
---
--- Note: LSP doesn't have a request for this - diagnostics come via
--- notifications. For now, return empty list.
--- TODO: Track diagnostics from notifications.
-getDiagnostics :: LSPClient -> TextDocumentIdentifier -> IO [Diagnostic]
-getDiagnostics _client _doc = do
-  -- Diagnostics are pushed via notifications, not requested
-  -- We'd need to track them in LSPClient state
-  pure []
-
--- | Get hover information.
-getHover :: LSPClient -> TextDocumentIdentifier -> Position -> IO (Maybe HoverInfo)
-getHover client doc pos = do
-  let params = object
-        [ "textDocument" .= object ["uri" .= doc.tdiUri]
-        , "position" .= positionToLSP pos
-        ]
-  result <- sendRequest client hoverMethod params
-  case result of
-    Left _ -> pure Nothing
-    Right val -> pure $ parseHoverResult val
-
--- | Get references to a symbol.
-getReferences :: LSPClient -> TextDocumentIdentifier -> Position -> IO [Location]
-getReferences client doc pos = do
-  let params = object
-        [ "textDocument" .= object ["uri" .= doc.tdiUri]
-        , "position" .= positionToLSP pos
-        , "context" .= object ["includeDeclaration" .= True]
-        ]
-  result <- sendRequest client referencesMethod params
-  case result of
-    Left _ -> pure []
-    Right val -> pure $ parseLocations val
-
--- | Get definition of a symbol.
-getDefinition :: LSPClient -> TextDocumentIdentifier -> Position -> IO [Location]
-getDefinition client doc pos = do
-  let params = object
-        [ "textDocument" .= object ["uri" .= doc.tdiUri]
-        , "position" .= positionToLSP pos
-        ]
-  result <- sendRequest client definitionMethod params
-  case result of
-    Left _ -> pure []
-    Right val -> pure $ parseLocations val
-
--- | Get code actions for a range.
-getCodeActions :: LSPClient -> TextDocumentIdentifier -> Range -> IO [CodeAction]
-getCodeActions client doc rng = do
-  let params = object
-        [ "textDocument" .= object ["uri" .= doc.tdiUri]
-        , "range" .= rangeToLSP rng
-        , "context" .= object ["diagnostics" .= ([] :: [Value])]
-        ]
-  result <- sendRequest client codeActionMethod params
-  case result of
-    Left _ -> pure []
-    Right val -> pure $ parseCodeActions val
-
--- | Rename a symbol.
-doRename :: LSPClient -> TextDocumentIdentifier -> Position -> Text -> IO WorkspaceEdit
-doRename client doc pos newName = do
-  let params = object
-        [ "textDocument" .= object ["uri" .= doc.tdiUri]
-        , "position" .= positionToLSP pos
-        , "newName" .= newName
-        ]
-  result <- sendRequest client renameMethod params
-  case result of
-    Left _ -> pure $ WorkspaceEdit Map.empty
-    Right val -> pure $ parseWorkspaceEdit val
-
--- | Get completion suggestions.
-getCompletion :: LSPClient -> TextDocumentIdentifier -> Position -> IO [CompletionItem]
-getCompletion client doc pos = do
-  let params = object
-        [ "textDocument" .= object ["uri" .= doc.tdiUri]
-        , "position" .= positionToLSP pos
-        ]
-  result <- sendRequest client completionMethod params
-  case result of
-    Left _ -> pure []
-    Right val -> pure $ parseCompletionItems val
-
-
--- ════════════════════════════════════════════════════════════════════════════
--- CONVERSIONS
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Convert Position to LSP JSON format.
-positionToLSP :: Position -> Value
-positionToLSP pos = object
-  [ "line" .= pos.posLine
-  , "character" .= pos.posCharacter
-  ]
-
--- | Convert Range to LSP JSON format.
-rangeToLSP :: Range -> Value
-rangeToLSP rng = object
-  [ "start" .= positionToLSP rng.rangeStart
-  , "end" .= positionToLSP rng.rangeEnd
-  ]
-
-
--- ════════════════════════════════════════════════════════════════════════════
--- PARSING HELPERS
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Parse hover result from LSP response.
-parseHoverResult :: Value -> Maybe HoverInfo
-parseHoverResult val = case val of
-  Null -> Nothing
-  Object o -> do
-    contents <- case lookupKey "contents" o of
-      Just (String s) -> Just s
-      Just (Object c) -> case lookupKey "value" c of
-        Just (String s) -> Just s
-        _ -> Nothing
-      Just (Array arr) -> case foldr (:) [] arr of
-        [] -> Nothing
-        (x:_) -> case x of
-          String s -> Just s
-          Object c -> case lookupKey "value" c of
-            Just (String s) -> Just s
-            _ -> Nothing
-          _ -> Nothing
-      _ -> Nothing
-    pure HoverInfo
-      { hoverContents = contents
-      , hoverRange = Nothing  -- TODO: Parse range if present
-      }
-  _ -> Nothing
-
--- | Parse locations from LSP response.
-parseLocations :: Value -> [Location]
-parseLocations val = case val of
-  Null -> []
-  Array arr -> mapMaybe parseLocation (toList arr)
-  Object _ -> maybeToList $ parseLocation val  -- Single location
-  _ -> []
+-- @
+-- withLSPSession "/path/to/project" $ \session -> do
+--   result <- runLSP session myLSPAction
+--   pure result
+-- @
+withLSPSession
+  :: FilePath              -- ^ Project root directory
+  -> (LSPSession -> IO a)  -- ^ Action to run with session
+  -> IO a
+withLSPSession rootDir action =
+  bracket acquire release $ \session ->
+    action session
   where
-    toList = foldr (:) []
+    acquire = do
+      (Just stdin, Just stdout, _, ph) <- createProcess
+        (proc "haskell-language-server-wrapper" ["--lsp"])
+          { std_in = CreatePipe
+          , std_out = CreatePipe
+          , std_err = CreatePipe
+          , cwd = Just rootDir
+          }
+      pure $ LSPSession stdin stdout ph
 
--- | Parse a single location.
-parseLocation :: Value -> Maybe Location
-parseLocation = \case
-  Object o -> do
-    uri <- case lookupKey "uri" o of
-      Just (String s) -> Just s
-      _ -> Nothing
-    rng <- case lookupKey "range" o of
-      Just r -> parseRange r
-      _ -> Nothing
-    pure Location { locUri = uri, locRange = rng }
-  _ -> Nothing
-
--- | Parse a range.
-parseRange :: Value -> Maybe Range
-parseRange = \case
-  Object o -> do
-    start <- case lookupKey "start" o of
-      Just p -> parsePosition p
-      _ -> Nothing
-    end <- case lookupKey "end" o of
-      Just p -> parsePosition p
-      _ -> Nothing
-    pure Range { rangeStart = start, rangeEnd = end }
-  _ -> Nothing
-
--- | Parse a position.
-parsePosition :: Value -> Maybe Position
-parsePosition = \case
-  Object o -> do
-    line <- case lookupKey "line" o of
-      Just (Number n) -> Just (round n)
-      _ -> Nothing
-    char <- case lookupKey "character" o of
-      Just (Number n) -> Just (round n)
-      _ -> Nothing
-    pure Position { posLine = line, posCharacter = char }
-  _ -> Nothing
-
--- | Parse code actions.
-parseCodeActions :: Value -> [CodeAction]
-parseCodeActions = \case
-  Array arr -> mapMaybe parseCodeAction (foldr (:) [] arr)
-  _ -> []
-
--- | Parse a single code action.
-parseCodeAction :: Value -> Maybe CodeAction
-parseCodeAction = \case
-  Object o -> Just CodeAction
-    { caTitle = case lookupKey "title" o of
-        Just (String s) -> s
-        _ -> "Unknown"
-    , caKind = Nothing  -- TODO: Parse kind
-    , caEdit = Nothing  -- TODO: Parse edit
-    , caCommand = case lookupKey "command" o of
-        Just (String s) -> Just s
-        _ -> Nothing
-    }
-  _ -> Nothing
-
--- | Parse workspace edit.
-parseWorkspaceEdit :: Value -> WorkspaceEdit
-parseWorkspaceEdit = \case
-  Object o -> case lookupKey "changes" o of
-    Just (Object changes) ->
-      let edits = foldr (\(k, v) acc ->
-                          case parseTextEdits v of
-                            [] -> acc
-                            es -> Map.insert (toText k) es acc
-                        ) Map.empty (KM.toList changes)
-      in WorkspaceEdit edits
-    _ -> WorkspaceEdit Map.empty
-  _ -> WorkspaceEdit Map.empty
-
--- | Parse text edits.
-parseTextEdits :: Value -> [TextEdit]
-parseTextEdits = \case
-  Array arr -> mapMaybe parseTextEdit (foldr (:) [] arr)
-  _ -> []
-
--- | Parse a single text edit.
-parseTextEdit :: Value -> Maybe TextEdit
-parseTextEdit = \case
-  Object o -> do
-    rng <- case lookupKey "range" o of
-      Just r -> parseRange r
-      _ -> Nothing
-    newText <- case lookupKey "newText" o of
-      Just (String s) -> Just s
-      _ -> Nothing
-    pure TextEdit { teRange = rng, teNewText = newText }
-  _ -> Nothing
-
--- | Parse completion items.
-parseCompletionItems :: Value -> [CompletionItem]
-parseCompletionItems = \case
-  Object o -> case lookupKey "items" o of
-    Just (Array arr) -> mapMaybe parseCompletionItem (foldr (:) [] arr)
-    _ -> []
-  Array arr -> mapMaybe parseCompletionItem (foldr (:) [] arr)
-  _ -> []
-
--- | Parse a single completion item.
-parseCompletionItem :: Value -> Maybe CompletionItem
-parseCompletionItem = \case
-  Object o -> Just CompletionItem
-    { ciLabel = case lookupKey "label" o of
-        Just (String s) -> s
-        _ -> ""
-    , ciKind = Nothing  -- TODO: Parse kind
-    , ciDetail = case lookupKey "detail" o of
-        Just (String s) -> Just s
-        _ -> Nothing
-    , ciDocumentation = case lookupKey "documentation" o of
-        Just (String s) -> Just s
-        _ -> Nothing
-    , ciInsertText = case lookupKey "insertText" o of
-        Just (String s) -> Just s
-        _ -> Nothing
-    }
-  _ -> Nothing
+    release session =
+      terminateProcess session.lspProcess
 
 
--- | Lookup a key in an aeson Object.
-lookupKey :: Text -> Object -> Maybe Value
-lookupKey k o = KM.lookup (fromText k) o
+-- ════════════════════════════════════════════════════════════════════════════
+-- EFFECT INTERPRETER
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Run LSP effects using an active session.
+runLSP :: LastMember IO effs => LSPSession -> Eff (LSP ': effs) a -> Eff effs a
+runLSP session = interpret $ \case
+  Diagnostics _doc ->
+    -- Diagnostics come via notifications, not requests
+    -- Would need to track them in session state
+    pure []
+
+  Hover doc pos -> sendM $ runSession session $ do
+    resp <- request L.SMethod_TextDocumentHover $ L.HoverParams
+      { L._textDocument = toTextDocumentId doc
+      , L._position = toPosition pos
+      , L._workDoneToken = Nothing
+      }
+    pure $ case resp._result of
+      Right result -> fromHover result
+      Left _err -> Nothing
+
+  References doc pos -> sendM $ runSession session $ do
+    resp <- request L.SMethod_TextDocumentReferences $ L.ReferenceParams
+      { L._textDocument = toTextDocumentId doc
+      , L._position = toPosition pos
+      , L._workDoneToken = Nothing
+      , L._partialResultToken = Nothing
+      , L._context = L.ReferenceContext { L._includeDeclaration = True }
+      }
+    pure $ case resp._result of
+      Right result -> fromLocations result
+      Left _err -> []
+
+  Definition doc pos -> sendM $ runSession session $ do
+    resp <- request L.SMethod_TextDocumentDefinition $ L.DefinitionParams
+      { L._textDocument = toTextDocumentId doc
+      , L._position = toPosition pos
+      , L._workDoneToken = Nothing
+      , L._partialResultToken = Nothing
+      }
+    pure $ case resp._result of
+      Right result -> fromDefinition result
+      Left _err -> []
+
+  CodeActions doc rng -> sendM $ runSession session $ do
+    resp <- request L.SMethod_TextDocumentCodeAction $ L.CodeActionParams
+      { L._textDocument = toTextDocumentId doc
+      , L._range = toRange rng
+      , L._context = L.CodeActionContext
+          { L._diagnostics = []
+          , L._only = Nothing
+          , L._triggerKind = Nothing
+          }
+      , L._workDoneToken = Nothing
+      , L._partialResultToken = Nothing
+      }
+    pure $ case resp._result of
+      Right result -> fromCodeActions result
+      Left _err -> []
+
+  Rename doc pos newName -> sendM $ runSession session $ do
+    resp <- request L.SMethod_TextDocumentRename $ L.RenameParams
+      { L._textDocument = toTextDocumentId doc
+      , L._position = toPosition pos
+      , L._newName = newName
+      , L._workDoneToken = Nothing
+      }
+    pure $ case resp._result of
+      Right result -> fromWorkspaceEdit result
+      Left _err -> WorkspaceEdit Map.empty
+
+  Completion doc pos -> sendM $ runSession session $ do
+    resp <- request L.SMethod_TextDocumentCompletion $ L.CompletionParams
+      { L._textDocument = toTextDocumentId doc
+      , L._position = toPosition pos
+      , L._workDoneToken = Nothing
+      , L._partialResultToken = Nothing
+      , L._context = Nothing
+      }
+    pure $ case resp._result of
+      Right result -> fromCompletions result
+      Left _err -> []
+
+-- | Run a Session action within an LSPSession.
+-- runSessionWithHandles takes: (serverOutput, serverInput) i.e. (read, write)
+runSession :: LSPSession -> Session a -> IO a
+runSession session action =
+  runSessionWithHandles session.lspStdout session.lspStdin $ do
+    _ <- initialize Nothing
+    action
 
 
--- | Maybe to list helper.
-maybeToList :: Maybe a -> [a]
-maybeToList Nothing = []
-maybeToList (Just x) = [x]
+-- ════════════════════════════════════════════════════════════════════════════
+-- TYPE CONVERSIONS: Our types -> lsp-types
+-- ════════════════════════════════════════════════════════════════════════════
 
--- | Map maybe helper.
-mapMaybe :: (a -> Maybe b) -> [a] -> [b]
-mapMaybe _ [] = []
-mapMaybe f (x:xs) = case f x of
-  Nothing -> mapMaybe f xs
-  Just y -> y : mapMaybe f xs
+toTextDocumentId :: TextDocumentIdentifier -> L.TextDocumentIdentifier
+toTextDocumentId doc = L.TextDocumentIdentifier
+  { L._uri = L.Uri doc.tdiUri
+  }
+
+toPosition :: Position -> L.Position
+toPosition pos = L.Position
+  { L._line = fromIntegral pos.posLine
+  , L._character = fromIntegral pos.posCharacter
+  }
+
+toRange :: Range -> L.Range
+toRange rng = L.Range
+  { L._start = toPosition rng.rangeStart
+  , L._end = toPosition rng.rangeEnd
+  }
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- TYPE CONVERSIONS: lsp-types -> Our types
+-- ════════════════════════════════════════════════════════════════════════════
+
+fromPosition :: L.Position -> Position
+fromPosition pos = Position
+  { posLine = fromIntegral pos._line
+  , posCharacter = fromIntegral pos._character
+  }
+
+fromRange :: L.Range -> Range
+fromRange rng = Range
+  { rangeStart = fromPosition rng._start
+  , rangeEnd = fromPosition rng._end
+  }
+
+fromLocation :: L.Location -> Location
+fromLocation loc = Location
+  { locUri = let L.Uri u = loc._uri in u
+  , locRange = fromRange loc._range
+  }
+
+-- Result type is Hover |? Null (not Maybe Hover)
+fromHover :: L.Hover L.|? L.Null -> Maybe HoverInfo
+fromHover (L.InR L.Null) = Nothing
+fromHover (L.InL h) = Just HoverInfo
+  { hoverContents = extractMarkupContent h._contents
+  , hoverRange = fromRange <$> h._range
+  }
+
+extractMarkupContent :: L.MarkupContent L.|? (L.MarkedString L.|? [L.MarkedString]) -> Text
+extractMarkupContent content = case content of
+  L.InL mc -> mc._value  -- MarkupContent has _value field
+  L.InR msOrList -> case msOrList of
+    L.InL ms -> markedStringToText ms
+    L.InR msList -> T.intercalate "\n" (map markedStringToText msList)
+
+-- MarkedString is a newtype: newtype MarkedString = MarkedString (Text |? MarkedStringWithLanguage)
+markedStringToText :: L.MarkedString -> Text
+markedStringToText (L.MarkedString inner) = case inner of
+  L.InL t -> t
+  L.InR mswl -> mswl._value
+
+-- Result type is [Location] |? Null
+fromLocations :: [L.Location] L.|? L.Null -> [Location]
+fromLocations (L.InR L.Null) = []
+fromLocations (L.InL locs) = map fromLocation locs
+
+-- Result type is Definition |? ([DefinitionLink] |? Null)
+fromDefinition :: L.Definition L.|? ([L.DefinitionLink] L.|? L.Null) -> [Location]
+fromDefinition defOrLinksOrNull = case defOrLinksOrNull of
+  L.InL (L.Definition locOrLocs) -> case locOrLocs of
+    L.InL loc -> [fromLocation loc]
+    L.InR locs -> map fromLocation locs
+  L.InR linksOrNull -> case linksOrNull of
+    L.InL links -> map fromDefinitionLink links
+    L.InR L.Null -> []
+
+fromDefinitionLink :: L.DefinitionLink -> Location
+fromDefinitionLink (L.DefinitionLink link) = Location
+  { locUri = let L.Uri u = link._targetUri in u
+  , locRange = fromRange link._targetRange
+  }
+
+-- Result type is [Command |? CodeAction] |? Null
+fromCodeActions :: [L.Command L.|? L.CodeAction] L.|? L.Null -> [CodeAction]
+fromCodeActions (L.InR L.Null) = []
+fromCodeActions (L.InL items) = concatMap fromCommandOrAction items
+
+fromCommandOrAction :: L.Command L.|? L.CodeAction -> [CodeAction]
+fromCommandOrAction cmdOrAction = case cmdOrAction of
+  L.InL _cmd -> []  -- Skip commands, only return code actions
+  L.InR ca -> [fromCodeAction ca]
+
+fromCodeAction :: L.CodeAction -> CodeAction
+fromCodeAction ca = CodeAction
+  { caTitle = ca._title
+  , caKind = fromCodeActionKind <$> ca._kind
+  , caEdit = fromWorkspaceEditMaybe ca._edit
+  , caCommand = fmap (._title) ca._command
+  }
+
+fromCodeActionKind :: L.CodeActionKind -> CodeActionKind
+fromCodeActionKind k = case k of
+  L.CodeActionKind_QuickFix -> QuickFix
+  L.CodeActionKind_Refactor -> Refactor
+  L.CodeActionKind_RefactorExtract -> RefactorExtract
+  L.CodeActionKind_RefactorInline -> RefactorInline
+  L.CodeActionKind_RefactorRewrite -> RefactorRewrite
+  L.CodeActionKind_Source -> Source
+  L.CodeActionKind_SourceOrganizeImports -> SourceOrganizeImports
+  L.CodeActionKind_SourceFixAll -> SourceFixAll
+  L.CodeActionKind_Custom t -> OtherKind t
+  -- lsp-types may add new constructors; map unknown ones to OtherKind
+  L.CodeActionKind_Empty -> OtherKind ""
+
+-- Result type is WorkspaceEdit |? Null
+fromWorkspaceEdit :: L.WorkspaceEdit L.|? L.Null -> WorkspaceEdit
+fromWorkspaceEdit (L.InR L.Null) = WorkspaceEdit Map.empty
+fromWorkspaceEdit (L.InL we) = fromWorkspaceEditMaybe (Just we)
+  & maybe (WorkspaceEdit Map.empty) id
+
+fromWorkspaceEditMaybe :: Maybe L.WorkspaceEdit -> Maybe WorkspaceEdit
+fromWorkspaceEditMaybe Nothing = Nothing
+fromWorkspaceEditMaybe (Just we) = Just $ WorkspaceEdit $
+  case we._changes of
+    Nothing -> Map.empty
+    Just changes -> Map.fromList
+      [ (uri, map fromTextEdit edits)
+      | (L.Uri uri, edits) <- Map.toList changes
+      ]
+
+fromTextEdit :: L.TextEdit -> TextEdit
+fromTextEdit te = TextEdit
+  { teRange = fromRange te._range
+  , teNewText = te._newText
+  }
+
+-- Result type is [CompletionItem] |? (CompletionList |? Null)
+fromCompletions :: [L.CompletionItem] L.|? (L.CompletionList L.|? L.Null) -> [CompletionItem]
+fromCompletions result = case result of
+  L.InL items -> map fromCompletionItem items
+  L.InR listOrNull -> case listOrNull of
+    L.InL cl -> map fromCompletionItem cl._items
+    L.InR L.Null -> []
+
+fromCompletionItem :: L.CompletionItem -> CompletionItem
+fromCompletionItem ci = CompletionItem
+  { ciLabel = ci._label
+  , ciKind = fromCompletionItemKind <$> ci._kind
+  , ciDetail = ci._detail
+  , ciDocumentation = extractDocumentation <$> ci._documentation
+  , ciInsertText = ci._insertText
+  }
+
+-- CompletionItem._documentation is Text |? MarkupContent (in that order)
+extractDocumentation :: Text L.|? L.MarkupContent -> Text
+extractDocumentation doc = case doc of
+  L.InL t -> t
+  L.InR mc -> mc._value
+
+fromCompletionItemKind :: L.CompletionItemKind -> CompletionItemKind
+fromCompletionItemKind k = case k of
+  L.CompletionItemKind_Text -> CIKText
+  L.CompletionItemKind_Method -> CIKMethod
+  L.CompletionItemKind_Function -> CIKFunction
+  L.CompletionItemKind_Constructor -> CIKConstructor
+  L.CompletionItemKind_Field -> CIKField
+  L.CompletionItemKind_Variable -> CIKVariable
+  L.CompletionItemKind_Class -> CIKClass
+  L.CompletionItemKind_Interface -> CIKInterface
+  L.CompletionItemKind_Module -> CIKModule
+  L.CompletionItemKind_Property -> CIKProperty
+  L.CompletionItemKind_Unit -> CIKUnit
+  L.CompletionItemKind_Value -> CIKValue
+  L.CompletionItemKind_Enum -> CIKEnum
+  L.CompletionItemKind_Keyword -> CIKKeyword
+  L.CompletionItemKind_Snippet -> CIKSnippet
+  L.CompletionItemKind_Color -> CIKColor
+  L.CompletionItemKind_File -> CIKFile
+  L.CompletionItemKind_Reference -> CIKReference
+  L.CompletionItemKind_Folder -> CIKFolder
+  L.CompletionItemKind_EnumMember -> CIKEnumMember
+  L.CompletionItemKind_Constant -> CIKConstant
+  L.CompletionItemKind_Struct -> CIKStruct
+  L.CompletionItemKind_Event -> CIKEvent
+  L.CompletionItemKind_Operator -> CIKOperator
+  L.CompletionItemKind_TypeParameter -> CIKTypeParameter
+

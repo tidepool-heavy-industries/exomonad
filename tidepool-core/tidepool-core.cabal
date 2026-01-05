@@ -37,6 +37,8 @@ library
         Tidepool.Template
         Tidepool.Tool
         Tidepool.Schema
+        Tidepool.Tool.Wire
+        Tidepool.Tool.Convert
         Tidepool.Graph.CLI
         Tidepool.Graph.Tool
         Tidepool.Graph.Template
@@ -118,6 +120,10 @@ test-suite graph-validation-tests
     type:             exitcode-stdio-1.0
     main-is:          Spec.hs
     other-modules:
+        CLISpec
+        CLITestTypes
+        CLIGraphSpec
+        CLIGraphTypes
         GraphValidationSpec
         LLMNodeExecuteSpec
         MemorySerializationSpec
@@ -133,6 +139,7 @@ test-suite graph-validation-tests
         process >= 1.6 && < 2,
         aeson >= 2.1 && < 3,
         bytestring >= 0.11 && < 1,
+        optparse-applicative >= 0.18 && < 1,
         text >= 2.0 && < 3,
         freer-simple >= 1.2 && < 2,
         tidepool-core

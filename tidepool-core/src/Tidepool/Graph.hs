@@ -73,6 +73,18 @@ module Tidepool.Graph
   , Groups
   , Requires
   , Global
+  , Backend
+
+    -- * API Backend Types
+  , CloudflareAI
+  , NativeAnthropic
+
+    -- * ClaudeCode Annotation
+  , ClaudeCode
+  , ModelChoice(..)
+  , Haiku
+  , Sonnet
+  , Opus
 
     -- * The Goto Effect
   , Goto(..)
@@ -161,6 +173,12 @@ module Tidepool.Graph
   , GotosToTos
   , GetMemory
   , GetGlobal
+  , GetBackend
+  , GetClaudeCode
+  , HasClaudeCode
+
+    -- * Backend Compatibility Validation
+  , ClaudeCodeCFBackendError
 
     -- * Tools
   , ToolDef(..)

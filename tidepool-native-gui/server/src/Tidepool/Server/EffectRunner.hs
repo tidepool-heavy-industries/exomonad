@@ -24,13 +24,13 @@ module Tidepool.Server.EffectRunner
 
     -- * Running Effects
   , runEffects
-  , runUIOnly
   ) where
 
 import Control.Monad.Freer (Eff, runM)
 import Data.Text (Text)
 import qualified Data.Text as T
 import System.Environment (lookupEnv)
+import Text.Read (readMaybe)
 
 -- Executor imports
 import Tidepool.UI.Executor
@@ -51,7 +51,6 @@ import Tidepool.Observability.Executor
   , runObservability
   , defaultLokiConfig
   )
-import Tidepool.Observability.Types (SpanContext, newSpanContext)
 import Tidepool.LLM.Executor
   ( LLMEnv
   , LLMConfig(..)
@@ -61,6 +60,14 @@ import Tidepool.LLM.Executor
 import Tidepool.LLM.Types
   ( AnthropicSecrets(..)
   , OpenAISecrets(..)
+  )
+import Tidepool.ClaudeCode.Effect
+  ( ClaudeCodeExec
+  , runClaudeCodeExecIO
+  )
+import Tidepool.ClaudeCode.Config
+  ( ClaudeCodeConfig(..)
+  , defaultClaudeCodeConfig
   )
 
 -- Effect imports
@@ -82,6 +89,8 @@ data ExecutorConfig = ExecutorConfig
     -- ^ Habitica API configuration
   , ecLokiConfig :: LokiConfig
     -- ^ Loki/Grafana observability configuration
+  , ecClaudeCodeConfig :: ClaudeCodeConfig
+    -- ^ ClaudeCode (zellij-cc) configuration
   }
   deriving stock (Show, Eq)
 
@@ -96,6 +105,7 @@ defaultExecutorConfig = ExecutorConfig
       }
   , ecHabiticaConfig = defaultHabiticaConfig
   , ecLokiConfig = defaultLokiConfig
+  , ecClaudeCodeConfig = defaultClaudeCodeConfig
   }
 
 -- | Load configuration from environment variables.
@@ -109,6 +119,9 @@ defaultExecutorConfig = ExecutorConfig
 -- * @LOKI_URL@ - Loki push endpoint (default: http://localhost:3100)
 -- * @LOKI_USER@ - Grafana Cloud user ID (optional)
 -- * @LOKI_TOKEN@ - Grafana Cloud API token (optional)
+-- * @ZELLIJ_SESSION@ - Zellij session for ClaudeCode (default: tidepool)
+-- * @ZELLIJ_CC_PATH@ - Path to zellij-cc binary (default: zellij-cc)
+-- * @ZELLIJ_CC_TIMEOUT@ - ClaudeCode timeout in seconds (default: 300)
 loadExecutorConfig :: IO ExecutorConfig
 loadExecutorConfig = do
   -- LLM secrets
@@ -123,6 +136,11 @@ loadExecutorConfig = do
   lokiUrl <- lookupEnv "LOKI_URL"
   lokiUser <- lookupEnv "LOKI_USER"
   lokiToken <- lookupEnv "LOKI_TOKEN"
+
+  -- ClaudeCode config
+  zellijSession <- lookupEnv "ZELLIJ_SESSION"
+  zellijCcPath <- lookupEnv "ZELLIJ_CC_PATH"
+  zellijCcTimeout <- lookupEnv "ZELLIJ_CC_TIMEOUT"
 
   pure ExecutorConfig
     { ecLLMConfig = LLMConfig
@@ -151,6 +169,12 @@ loadExecutorConfig = do
         , lcToken = T.pack <$> lokiToken
         , lcJobLabel = "tidepool-native"
         }
+    , ecClaudeCodeConfig = ClaudeCodeConfig
+        { ccZellijSession = maybe "tidepool" T.pack zellijSession
+        , ccDefaultTimeout = maybe 300 id (zellijCcTimeout >>= readMaybe)
+        , ccTempDir = "/tmp"
+        , ccZellijCcPath = maybe "zellij-cc" id zellijCcPath
+        }
     }
 
 
@@ -166,8 +190,6 @@ data ExecutorEnv = ExecutorEnv
     -- ^ Initialized LLM client (with HTTP manager)
   , eeHabiticaEnv :: HabiticaEnv
     -- ^ Initialized Habitica client (with HTTP manager)
-  , eeSpanContext :: SpanContext
-    -- ^ Observability span context
   }
 
 -- | Create a new executor environment.
@@ -177,12 +199,10 @@ mkExecutorEnv :: ExecutorConfig -> IO ExecutorEnv
 mkExecutorEnv config = do
   llmEnv <- mkLLMEnv (ecLLMConfig config)
   habiticaEnv <- mkHabiticaEnv (ecHabiticaConfig config)
-  spanCtx <- newSpanContext
   pure ExecutorEnv
     { eeConfig = config
     , eeLLMEnv = llmEnv
     , eeHabiticaEnv = habiticaEnv
-    , eeSpanContext = spanCtx
     }
 
 
@@ -190,20 +210,14 @@ mkExecutorEnv config = do
 -- EFFECT RUNNERS
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Run a UI-only program.
---
--- This is useful for simple agents that only use UI effects without
--- LLM, Habitica, or observability.
-runUIOnly :: UIContext -> UICallback -> Eff '[UI] a -> IO a
-runUIOnly = runUI
-
 -- | Run a program with all effects composed.
 --
 -- This composes the full effect stack:
 --
 -- @
--- Eff '[UI, Habitica, LLMComplete, Observability] a
+-- Eff '[UI, Habitica, LLMComplete, ClaudeCodeExec, Observability, IO] a
 --   → runObservability (interpret Observability)
+--   → runClaudeCodeExecIO (interpret ClaudeCodeExec)
 --   → runLLMComplete (interpret LLMComplete)
 --   → runHabitica (interpret Habitica)
 --   → runUI (interpret UI)
@@ -211,15 +225,16 @@ runUIOnly = runUI
 -- @
 --
 -- Note: Effect stack ordering matters. Effects are peeled from the outside in:
--- 1. Observability (outermost) - records spans/events
--- 2. LLMComplete - makes LLM API calls
--- 3. Habitica - makes Habitica API calls
--- 4. UI (innermost) - handles user interaction
+-- 1. UI (first to peel) - handles user interaction
+-- 2. Habitica - makes Habitica API calls
+-- 3. LLMComplete - makes LLM API calls
+-- 4. ClaudeCodeExec - executes nodes via Claude Code subprocess
+-- 5. Observability (last to peel) - records events
 --
 -- Example:
 --
 -- @
--- myAgent :: Eff '[UI, Habitica, LLMComplete, Observability] String
+-- myAgent :: Eff '[UI, Habitica, LLMComplete, ClaudeCodeExec, Observability, IO] String
 -- myAgent = do
 --   publishEvent $ GraphTransition "entry" "greeting" "start"
 --   showText "Welcome!"
@@ -232,42 +247,12 @@ runEffects
   :: ExecutorEnv
   -> UIContext
   -> UICallback
-  -> Eff '[UI, Habitica, LLMComplete, Observability] a
+  -> Eff '[UI, Habitica, LLMComplete, ClaudeCodeExec, Observability, IO] a
   -> IO a
-runEffects env ctx callback program = do
-  -- We need to interpret effects from inside out (right to left in type)
-  -- But the current executor types have constraints that make this tricky.
-  --
-  -- For now, we provide a simplified runner that handles the most common case:
-  -- UI effects only. Full composition requires aligning effect interpreters.
-  --
-  -- TODO: Implement full effect composition with proper interpreter stacking
-  error "Full effect composition not yet implemented - use runUIOnly for UI-only agents"
-
-
--- ════════════════════════════════════════════════════════════════════════════
--- NOTES ON EFFECT COMPOSITION
--- ════════════════════════════════════════════════════════════════════════════
-
--- The executors have different type signatures:
---
--- runUI :: UIContext -> UICallback -> Eff '[UI] a -> IO a
---   - Interprets UI into IO directly
---   - No effect stack polymorphism
---
--- runHabitica :: LastMember IO effs => HabiticaEnv -> Eff (Habitica ': effs) a -> Eff effs a
---   - Polymorphic over remaining effects
---   - Requires IO at the bottom
---
--- runLLMComplete :: LastMember IO effs => LLMSecrets -> Eff (LLMComplete ': effs) a -> Eff effs a
---   - Same pattern as Habitica
---
--- runObservability :: LokiConfig -> Eff '[Observability] a -> IO a
---   - Like UI, interprets directly to IO
---
--- To compose these properly, we need either:
--- 1. Make all interpreters polymorphic (runHabitica pattern)
--- 2. Use a different composition strategy (e.g., interpret each in sequence)
--- 3. Create a unified effect stack with custom handling
---
--- For now, agents should use individual executors or the simplified runUIOnly.
+runEffects env ctx callback =
+  runM
+    . runObservability (ecLokiConfig $ eeConfig env)
+    . runClaudeCodeExecIO (ecClaudeCodeConfig $ eeConfig env)
+    . runLLMComplete (eeLLMEnv env)
+    . runHabitica (eeHabiticaEnv env)
+    . runUI ctx callback

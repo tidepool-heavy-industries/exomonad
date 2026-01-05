@@ -29,6 +29,9 @@ module Tidepool.Graph.Validate
   , UnreachableNodeError
   , NoExitPathError
   , DeadGotoError
+
+    -- * Backend Compatibility Errors
+  , ClaudeCodeCFBackendError
   ) where
 
 import Data.Kind (Type, Constraint)
@@ -177,4 +180,36 @@ type DuplicateSchemaError t = TypeError
    ':$$: 'Text "  Schema " ':<>: 'ShowType t ':<>: 'Text " is produced by multiple nodes."
    ':$$: 'Text "This creates ambiguous Needs resolution."
    ':$$: 'Text "Fix: Use distinct types for each node's Schema output."
+  )
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- BACKEND COMPATIBILITY ERRORS
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Error when ClaudeCode annotation is used with CloudflareAI backend.
+--
+-- ClaudeCode spawns a local subprocess via zellij-cc, which is not available
+-- in Cloudflare Workers. This error triggers at compile time when a graph
+-- has both ':& Backend CloudflareAI' and any node with ':@ ClaudeCode'.
+--
+-- @
+-- -- This will produce the error:
+-- type BadGraph = Graph '[...]
+--   :@ ClaudeCode 'Sonnet 'Nothing
+--   :& Backend CloudflareAI
+-- @
+type ClaudeCodeCFBackendError :: Symbol -> Constraint
+type ClaudeCodeCFBackendError nodeName = TypeError
+  ('Text "Graph validation failed: incompatible backend for ClaudeCode"
+   ':$$: 'Text ""
+   ':$$: 'Text "Node '" ':<>: 'Text nodeName ':<>: 'Text "' has ClaudeCode annotation,"
+   ':$$: 'Text "but this graph uses CloudflareAI backend."
+   ':$$: 'Text ""
+   ':$$: 'Text "ClaudeCode spawns a local subprocess via zellij-cc,"
+   ':$$: 'Text "which is not available in Cloudflare Workers."
+   ':$$: 'Text ""
+   ':$$: 'Text "Fix options:"
+   ':$$: 'Text "  1. Use 'Backend NativeAnthropic' for this graph"
+   ':$$: 'Text "  2. Remove the ClaudeCode annotation from node '" ':<>: 'Text nodeName ':<>: 'Text "'"
+   ':$$: 'Text "  3. Move ClaudeCode nodes to a separate NativeAnthropic graph"
   )

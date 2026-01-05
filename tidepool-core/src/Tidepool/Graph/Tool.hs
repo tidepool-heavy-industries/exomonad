@@ -9,6 +9,12 @@
 -- * The tool marker type @t@ is passed to methods (can carry config)
 -- * Effect stacks are declared as associated types
 --
+-- = See Also
+--
+-- * "Tidepool.Tool.Wire" - Wire format types for Anthropic and OpenAI APIs
+-- * "Tidepool.Tool.Convert" - Conversion typeclasses ('ToAnthropicTool', 'ToCfTool')
+-- * "Tidepool.Schema" - JSON Schema derivation for tool input types
+--
 -- = Design Principle
 --
 -- Everything hangs off the 'ToolDef' typeclass:
@@ -68,6 +74,13 @@ module Tidepool.Graph.Tool
 
     -- * Tool List Reification
   , ReifyToolList(..)
+
+    -- * Wire Format Types
+    -- | Re-exported from "Tidepool.Tool.Wire"
+  , AnthropicTool(..)
+  , CfTool(..)
+  , CfObjectSchema(..)
+  , CfProperty(..)
   ) where
 
 import Data.Aeson (Value, ToJSON, FromJSON, object, (.=))
@@ -78,6 +91,14 @@ import Data.Typeable (TypeRep, Typeable, typeRep)
 import Control.Monad.Freer (Eff)
 
 import Tidepool.Schema (HasJSONSchema(..), JSONSchema, schemaToValue)
+
+-- Re-exports (wire types only - Convert has its own module to avoid cycles)
+import Tidepool.Tool.Wire
+  ( AnthropicTool(..)
+  , CfTool(..)
+  , CfObjectSchema(..)
+  , CfProperty(..)
+  )
 
 -- | Effect type alias (freer-simple effects have kind Type -> Type).
 type Effect = Type -> Type

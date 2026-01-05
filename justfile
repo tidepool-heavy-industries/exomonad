@@ -101,8 +101,12 @@ test-roundtrip:
     cd deploy && pnpm test -- --grep "roundtrip"
 
 # ─────────────────────────────────────────────────────────────
-# Running (disabled - GUI packages removed from build)
+# Running
 # ─────────────────────────────────────────────────────────────
+
+# Run native server (REST + WebSocket + static files)
+native:
+    TIDEPOOL_DIST=tidepool-native-gui/solid-frontend/dist cabal run tidepool-native
 
 # NOTE: dm, dm-gui, tidy-gui disabled - see cabal.project for details
 

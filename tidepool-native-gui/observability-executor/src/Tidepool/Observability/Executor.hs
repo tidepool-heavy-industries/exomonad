@@ -2,6 +2,9 @@
 --
 -- Publishes structured JSON logs to Grafana Loki.
 --
+-- NOTE: Span tracking has been removed for simplicity. This executor
+-- now only handles basic event publishing.
+--
 -- = Usage
 --
 -- @
@@ -11,15 +14,13 @@
 -- main :: IO ()
 -- main = do
 --   let config = defaultLokiConfig
---   runObservability config $ do
+--   runM $ runObservability config $ do
 --     publishEvent $ GraphTransition "entry" "classify" "user_input"
---     withSpan "llm_call" $ do
---       publishEvent $ LLMCallEvent "claude-3" 100 50 250
+--     publishEvent $ LLMCallEvent "claude-3" 100 50 250
 -- @
 module Tidepool.Observability.Executor
   ( -- * Executor
     runObservability
-  , runObservabilityIO
 
     -- * Configuration
   , LokiConfig(..)
@@ -32,8 +33,7 @@ module Tidepool.Observability.Executor
 
 import Control.Exception (try, SomeException)
 import Control.Monad (void)
-import Control.Monad.Freer
-import Control.Monad.Freer.Internal (Eff(..), Arrs, decomp, qApp)
+import Control.Monad.Freer (Eff, LastMember, interpret, sendM)
 import Data.Aeson (encode)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -43,7 +43,7 @@ import qualified Data.ByteString.Lazy as LBS
 import Network.HTTP.Req
 import qualified Data.ByteString.Base64 as B64
 
-import Tidepool.Effects.Observability
+import Tidepool.Effects.Observability (Observability(..), TidepoolEvent)
 import Tidepool.Observability.Types
 
 
@@ -117,66 +117,19 @@ authHeadersHttps config = case (config.lcUser, config.lcToken) of
 
 -- | Run Observability effects by pushing to Loki.
 --
--- This is the main interpreter. It:
--- 1. Maintains span context for nested withSpan calls
--- 2. Publishes events to Loki with appropriate labels
--- 3. Handles errors gracefully (logs but doesn't throw)
-runObservability :: LokiConfig -> Eff '[Observability] a -> IO a
-runObservability config eff = do
-  spanCtx <- newSpanContext
-  runObservabilityWithContext config spanCtx eff
-
--- | Run with an existing span context (for nested interpreters).
-runObservabilityWithContext :: LokiConfig -> SpanContext -> Eff '[Observability] a -> IO a
-runObservabilityWithContext config spanCtx = loop
-  where
-    loop :: Eff '[Observability] a -> IO a
-    loop (Val x) = pure x
-    loop (E u q) = case decomp u of
-      Right (PublishEvent event) -> do
-        -- Get current span for labels
-        span <- currentSpan spanCtx
-        let labels = (eventToLabels config.lcJobLabel event) { slSpan = span }
-            line = eventToLine event
-
-        -- Build and send request
-        ts <- nowNanos
-        let stream = LokiStream labels [(ts, line)]
-            req = LokiPushRequest [stream]
-
-        mErr <- pushToLoki config req
-        case mErr of
-          Just err -> putStrLn $ "[Observability] " <> T.unpack err
-          Nothing  -> pure ()
-
-        -- Continue with unit result
-        loop (qApp q ())
-
-      Right (WithSpan name innerEff) -> do
-        -- Push span, run inner effect, pop span
-        pushSpan spanCtx name
-
-        -- Run the inner effect with same context
-        result <- runObservabilityWithContext config spanCtx innerEff
-
-        popSpan spanCtx
-
-        -- Continue with result
-        loop (qApp q result)
-
-      Left _ -> error "Impossible: no other effects in stack"
-
--- | Run Observability effects in an existing IO context.
+-- This interpreter:
+-- 1. Publishes events to Loki with appropriate labels
+-- 2. Handles errors gracefully (logs but doesn't throw)
 --
--- Useful when Observability is part of a larger effect stack
--- and you're using a different interpreter pattern.
-runObservabilityIO :: LokiConfig -> SpanContext -> Observability a -> IO a
-runObservabilityIO config spanCtx = \case
-  PublishEvent event -> do
-    span <- currentSpan spanCtx
-    let labels = (eventToLabels config.lcJobLabel event) { slSpan = span }
+-- The interpreter is polymorphic over remaining effects, enabling composition
+-- with other effect interpreters (UI, Habitica, LLM, etc.).
+runObservability :: LastMember IO effs => LokiConfig -> Eff (Observability ': effs) a -> Eff effs a
+runObservability config = interpret $ \case
+  PublishEvent event -> sendM $ do
+    let labels = eventToLabels config.lcJobLabel event
         line = eventToLine event
 
+    -- Build and send request
     ts <- nowNanos
     let stream = LokiStream labels [(ts, line)]
         req = LokiPushRequest [stream]
@@ -185,9 +138,3 @@ runObservabilityIO config spanCtx = \case
     case mErr of
       Just err -> putStrLn $ "[Observability] " <> T.unpack err
       Nothing  -> pure ()
-
-  WithSpan name innerEff -> do
-    pushSpan spanCtx name
-    result <- runObservabilityWithContext config spanCtx innerEff
-    popSpan spanCtx
-    pure result

@@ -1,12 +1,12 @@
--- | BD (Beads) effect for querying issue/task tracking data.
+-- | BD (Beads) effect for issue/task tracking.
 --
 -- Effect type only - executors live in tidepool-bd-executor.
--- Enables graphs to read bead info, dependencies, and labels.
+-- Enables graphs to read and write bead info, dependencies, and labels.
 --
 -- = Example Usage
 --
 -- @
--- import Tidepool.Effects.BD (BD, getBead, getDeps, getLabels)
+-- import Tidepool.Effects.BD
 --
 -- myHandler :: Member BD effs => Text -> Eff effs ()
 -- myHandler beadId = do
@@ -17,18 +17,46 @@
 --       deps <- getDeps beadId
 --       labels <- getLabels beadId
 --       -- process bead info...
+--
+-- createTask :: Member BD effs => Text -> Eff effs Text
+-- createTask parentId = do
+--   newId <- createBead $ defaultCreateInput
+--     { cbiTitle = "Subtask"
+--     , cbiParent = Just parentId
+--     }
+--   addLabel newId "auto-created"
+--   pure newId
 -- @
 module Tidepool.Effects.BD
   ( -- * Effect
     BD(..)
+
+    -- * Read Operations
   , getBead
   , getDeps
   , getBlocking
   , getLabels
+  , getChildren
   , listByStatus
   , listByType
 
-    -- * Types
+    -- * Write Operations
+  , createBead
+  , updateBead
+  , closeBead
+  , reopenBead
+  , addLabel
+  , removeLabel
+  , addDep
+  , removeDep
+
+    -- * Input Types
+  , CreateBeadInput(..)
+  , defaultCreateInput
+  , UpdateBeadInput(..)
+  , emptyUpdateInput
+
+    -- * Data Types
   , BeadInfo(..)
   , BeadStatus(..)
   , BeadType(..)
@@ -228,13 +256,68 @@ instance FromJSON BeadInfo where
 
 
 -- ════════════════════════════════════════════════════════════════════════════
+-- INPUT TYPES
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Input for creating a new bead.
+data CreateBeadInput = CreateBeadInput
+  { cbiTitle       :: Text              -- ^ Required: bead title
+  , cbiDescription :: Maybe Text        -- ^ Optional description
+  , cbiType        :: BeadType          -- ^ Bead type (default: Task)
+  , cbiPriority    :: Int               -- ^ Priority 0-4 (default: 2)
+  , cbiParent      :: Maybe Text        -- ^ Parent bead ID for hierarchy
+  , cbiLabels      :: [Text]            -- ^ Initial labels
+  , cbiAssignee    :: Maybe Text        -- ^ Assignee
+  , cbiDeps        :: [(Text, DependencyType)]  -- ^ Dependencies: (beadId, depType)
+  }
+  deriving (Show, Eq, Generic)
+
+-- | Default create input with just a title.
+defaultCreateInput :: CreateBeadInput
+defaultCreateInput = CreateBeadInput
+  { cbiTitle       = ""
+  , cbiDescription = Nothing
+  , cbiType        = TypeTask
+  , cbiPriority    = 2
+  , cbiParent      = Nothing
+  , cbiLabels      = []
+  , cbiAssignee    = Nothing
+  , cbiDeps        = []
+  }
+
+
+-- | Input for updating an existing bead.
+--
+-- All fields are optional - 'Nothing' means "don't change".
+data UpdateBeadInput = UpdateBeadInput
+  { ubiTitle       :: Maybe Text        -- ^ New title
+  , ubiDescription :: Maybe Text        -- ^ New description
+  , ubiStatus      :: Maybe BeadStatus  -- ^ New status
+  , ubiPriority    :: Maybe Int         -- ^ New priority
+  , ubiAssignee    :: Maybe Text        -- ^ New assignee
+  }
+  deriving (Show, Eq, Generic)
+
+-- | Empty update input (no changes).
+emptyUpdateInput :: UpdateBeadInput
+emptyUpdateInput = UpdateBeadInput
+  { ubiTitle       = Nothing
+  , ubiDescription = Nothing
+  , ubiStatus      = Nothing
+  , ubiPriority    = Nothing
+  , ubiAssignee    = Nothing
+  }
+
+
+-- ════════════════════════════════════════════════════════════════════════════
 -- EFFECT
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | BD (Beads) effect for querying issue/task tracking.
+-- | BD (Beads) effect for issue/task tracking.
 --
--- Read-only queries against the beads database.
+-- Supports both read and write operations against the beads database.
 data BD r where
+  -- Read operations
   -- | Get full bead info by ID.
   GetBead :: Text -> BD (Maybe BeadInfo)
 
@@ -247,15 +330,43 @@ data BD r where
   -- | Get labels attached to a bead.
   GetLabels :: Text -> BD [Text]
 
+  -- | Get child beads (beads with this as parent).
+  GetChildren :: Text -> BD [BeadInfo]
+
   -- | List beads by status.
   ListByStatus :: BeadStatus -> BD [BeadInfo]
 
   -- | List beads by type.
   ListByType :: BeadType -> BD [BeadInfo]
 
+  -- Write operations
+  -- | Create a new bead, returns the generated ID.
+  CreateBead :: CreateBeadInput -> BD Text
+
+  -- | Update an existing bead.
+  UpdateBead :: Text -> UpdateBeadInput -> BD ()
+
+  -- | Close a bead (set status to closed).
+  CloseBead :: Text -> BD ()
+
+  -- | Reopen a bead (set status to open).
+  ReopenBead :: Text -> BD ()
+
+  -- | Add a label to a bead.
+  AddLabel :: Text -> Text -> BD ()
+
+  -- | Remove a label from a bead.
+  RemoveLabel :: Text -> Text -> BD ()
+
+  -- | Add a dependency between beads.
+  AddDep :: Text -> Text -> DependencyType -> BD ()
+
+  -- | Remove a dependency between beads.
+  RemoveDep :: Text -> Text -> BD ()
+
 
 -- ════════════════════════════════════════════════════════════════════════════
--- SMART CONSTRUCTORS
+-- SMART CONSTRUCTORS - READ
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Get bead info by ID.
@@ -274,6 +385,10 @@ getBlocking = send . GetBlocking
 getLabels :: Member BD effs => Text -> Eff effs [Text]
 getLabels = send . GetLabels
 
+-- | Get child beads (beads with this as parent).
+getChildren :: Member BD effs => Text -> Eff effs [BeadInfo]
+getChildren = send . GetChildren
+
 -- | List beads by status.
 listByStatus :: Member BD effs => BeadStatus -> Eff effs [BeadInfo]
 listByStatus = send . ListByStatus
@@ -281,3 +396,62 @@ listByStatus = send . ListByStatus
 -- | List beads by type.
 listByType :: Member BD effs => BeadType -> Eff effs [BeadInfo]
 listByType = send . ListByType
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- SMART CONSTRUCTORS - WRITE
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Create a new bead, returns the generated ID.
+--
+-- Example:
+--
+-- @
+-- newId <- createBead $ defaultCreateInput
+--   { cbiTitle = "Fix bug in login"
+--   , cbiType = TypeBug
+--   , cbiPriority = 1
+--   , cbiLabels = ["urgent", "auth"]
+--   }
+-- @
+createBead :: Member BD effs => CreateBeadInput -> Eff effs Text
+createBead = send . CreateBead
+
+-- | Update an existing bead.
+--
+-- Example:
+--
+-- @
+-- updateBead "bd-123" $ emptyUpdateInput
+--   { ubiStatus = Just StatusInProgress
+--   , ubiAssignee = Just "alice"
+--   }
+-- @
+updateBead :: Member BD effs => Text -> UpdateBeadInput -> Eff effs ()
+updateBead beadId input = send $ UpdateBead beadId input
+
+-- | Close a bead (set status to closed).
+closeBead :: Member BD effs => Text -> Eff effs ()
+closeBead = send . CloseBead
+
+-- | Reopen a closed bead (set status to open).
+reopenBead :: Member BD effs => Text -> Eff effs ()
+reopenBead = send . ReopenBead
+
+-- | Add a label to a bead.
+addLabel :: Member BD effs => Text -> Text -> Eff effs ()
+addLabel beadId label = send $ AddLabel beadId label
+
+-- | Remove a label from a bead.
+removeLabel :: Member BD effs => Text -> Text -> Eff effs ()
+removeLabel beadId label = send $ RemoveLabel beadId label
+
+-- | Add a dependency between beads.
+--
+-- @addDep fromId toId depType@ creates a dependency where @fromId@ depends on @toId@.
+addDep :: Member BD effs => Text -> Text -> DependencyType -> Eff effs ()
+addDep fromId toId depType = send $ AddDep fromId toId depType
+
+-- | Remove a dependency between beads.
+removeDep :: Member BD effs => Text -> Text -> Eff effs ()
+removeDep fromId toId = send $ RemoveDep fromId toId

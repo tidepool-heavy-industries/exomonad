@@ -10,6 +10,74 @@ The key insight: LLMs don't need raw IO - they need typed state they can read (v
 
 **Status**: Compiles successfully. DM agent has stubbed logic. Tidying agent is functional with GUI.
 
+## Start Here
+
+New to this codebase? Here's the reading order:
+
+1. **Graph DSL** - Read `tidepool-core/CLAUDE.md` first. The Graph DSL is the core abstraction for defining LLM agents as typed state machines.
+
+2. **Effect System** - See `Tidepool.Effect.Types` for effect definitions. Agents are IO-blind; all IO happens via effect interpreters.
+
+3. **Tool Definitions** - See `Tidepool.Graph.Tool` for the `ToolDef` typeclass. Tools are typed actions LLMs can invoke.
+
+4. **Example Agent** - See `tidepool-native-gui/server/src/Tidepool/Server/SimpleAgent.hs` for a minimal working agent.
+
+5. **Run Something** - `just native` starts the native server at localhost:8080.
+
+### Where Things Go
+
+| Thing | Location |
+|-------|----------|
+| New effect type | `tidepool-core/src/Tidepool/Effect/Types.hs` |
+| New integration (API) | `tidepool-core/src/Tidepool/Effects/` (plural) |
+| New graph annotation | `tidepool-core/src/Tidepool/Graph/Types.hs` |
+| Tool definitions | Use `ToolDef` from `Tidepool.Graph.Tool` |
+| Agents | Create in a separate repo (e.g., `~/dev/anemone`) |
+
+### Key Naming Conventions
+
+- **Effect** (singular) = core infrastructure (`Tidepool.Effect.*`)
+- **Effects** (plural) = integrations/contrib (`Tidepool.Effects.*`)
+- **Graph.Tool** = canonical tool definitions (not the deprecated `Tidepool.Tool`)
+
+## Task Tracking (Beads)
+
+This repo uses BD (Beads) for git-native task tracking. The beads database is at `~/dev/tidepool/.beads/` (gitignored, shared by all worktrees).
+
+### Quick Reference
+
+```bash
+# From any worktree, use bd at repo root
+cd ~/dev/tidepool
+
+# List all tasks
+bd list --all
+
+# Create an epic
+bd create -t epic "Feature name"
+
+# Create a child task under an epic
+bd create -t task --parent tidepool-XXX "Task description"
+
+# Update status
+bd update tidepool-XXX.Y -s in_progress
+bd update tidepool-XXX.Y -s closed
+
+# View task details
+bd show tidepool-XXX
+```
+
+### Workflow
+
+1. **Starting work**: Mark your task `in_progress`
+2. **Creating PRs**: Reference bead ID in PR description
+3. **Completing work**: Mark task `closed` after PR merge
+4. **Tracking across worktrees**: All worktrees share the same db
+
+### Current Tasks
+
+Run `bd list --all` from `~/dev/tidepool` to see current tasks.
+
 ## Architecture
 
 ```
@@ -311,6 +379,13 @@ tidepool-tidying/          # Tidying agent (executive function prosthetic)
 │   └── TestTidying.hs     # Test harness
 └── templates/tidying/     # Tidying prompt templates
 
+tidepool-native-gui/       # Native GUI tooling
+└── lsp-executor/          # LSP effect interpreter using lsp-client
+    ├── src/Tidepool/LSP/
+    │   └── Executor.hs    # LSP effect interpreter, session management
+    └── test/
+        └── SmokeTest.hs   # Smoke test against real HLS
+
 deploy/                    # Cloudflare Worker Durable Object harness
 ├── src/                   # TypeScript harness for WASM state machines
 └── wrangler.toml          # CF Worker configuration
@@ -484,6 +559,35 @@ pnpm deploy       # Deploy to Cloudflare
 { type: "error", message: "..." }
 ```
 
+## Native Server (`tidepool-native-gui/server/`)
+
+For local development without Cloudflare Workers. Runs agents natively with full effect composition.
+
+### Quick Start
+
+```bash
+just native  # Starts server at localhost:8080
+# Or directly:
+TIDEPOOL_DIST=tidepool-native-gui/solid-frontend/dist cabal run tidepool-native
+```
+
+### Architecture
+
+- **Servant** for REST API (`/health`, `/sessions`)
+- **wai-websockets** for WebSocket overlay
+- **freer-simple** effect composition via `runEffects`
+- **STM sessions** for per-connection state
+
+### Effect Stack
+
+```haskell
+runEffects :: ExecutorEnv -> UIContext -> UICallback
+           -> Eff '[UI, Habitica, LLMComplete, Observability, IO] a
+           -> IO a
+```
+
+See `tidepool-native-gui/server/CLAUDE.md` for full documentation.
+
 ## LSP Integration (Gas Town)
 
 Claude Code agents (polecats, witnesses, mayor) can use LSP for code intelligence.
@@ -515,6 +619,55 @@ Check diagnostics for type errors
 ```
 
 See `docs/gas-town-lsp-integration.md` for full details.
+
+## LSP Executor Package (`tidepool-native-gui/lsp-executor/`)
+
+The `tidepool-lsp-executor` package provides an LSP effect interpreter using the `lsp-client` library from Hackage.
+
+### Usage
+
+```haskell
+import Tidepool.Effects.LSP
+import Tidepool.LSP.Executor (withLSPSession, runLSP)
+
+-- Run LSP-enabled action (freer-simple based)
+withLSPSession "/path/to/project" $ \session -> do
+  let action = runLSP session $ do
+        info <- hover doc pos
+        defs <- definition doc pos
+        pure (info, defs)
+  result <- runM action  -- runM from Control.Monad.Freer
+  print result
+```
+
+### Key Dependencies
+
+- `lsp-client` - Session management and request/response handling
+- `lsp-types` - LSP protocol types (version 2.3)
+
+### lsp-types 2.3 Patterns
+
+Result types use `X |? Null` (not `Maybe X`):
+
+```haskell
+fromHover :: L.Hover L.|? L.Null -> Maybe HoverInfo
+fromHover (L.InR L.Null) = Nothing
+fromHover (L.InL h) = Just HoverInfo { ... }
+```
+
+Newtypes wrap `|?` types:
+
+```haskell
+-- Definition is: newtype Definition = Definition (Location |? [Location])
+-- MarkedString is: newtype MarkedString = MarkedString (Text |? MarkedStringWithLanguage)
+```
+
+### Running the Smoke Test
+
+```bash
+# Requires minimal test project at /tmp/lsp-test-project/
+cabal run lsp-smoke-test
+```
 
 ## References
 

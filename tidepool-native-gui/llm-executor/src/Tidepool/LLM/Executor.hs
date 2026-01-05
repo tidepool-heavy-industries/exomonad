@@ -29,6 +29,14 @@ module Tidepool.LLM.Executor
   , LLMEnv
   , LLMConfig(..)
   , mkLLMEnv
+
+    -- * Tool Types
+  , AnthropicTool(..)
+  , anthropicToolToJSON
+
+    -- * Request Building (exported for testing)
+  , buildAnthropicRequest
+  , buildOpenAIRequest
   ) where
 
 import Control.Exception (try, SomeException)
@@ -63,13 +71,15 @@ import Network.HTTP.Types.Status (statusCode)
 import Tidepool.LLM.Types
   ( LLMEnv(..)
   , LLMConfig(..)
-  , LLMError(..)
   , AnthropicSecrets(..)
   , OpenAISecrets(..)
   , mkLLMEnv
+  , AnthropicTool(..)
+  , anthropicToolToJSON
   )
 import Tidepool.Effects.LLMProvider
   ( LLMComplete(..)
+  , LLMError(..)
   , SProvider(..)
   , AnthropicConfig(..)
   , OpenAIConfig(..)
@@ -120,6 +130,9 @@ anthropicRequest env config userMsg maybeTools = do
         Right resp -> parseAnthropicResponse resp
 
 -- | Build Anthropic Messages API request body.
+--
+-- Tools should be in Anthropic format (with @input_schema@, not @parameters@).
+-- Use 'AnthropicTool' or 'Tidepool.Tool.toolToJSON' which produce the correct format.
 buildAnthropicRequest :: AnthropicConfig -> Text -> Maybe [Value] -> LBS.ByteString
 buildAnthropicRequest config userMsg maybeTools =
   encode $ object $ filter ((/= Null) . snd)
@@ -189,6 +202,15 @@ openaiRequest env config userMsg maybeTools = do
         Right resp -> parseOpenAIResponse resp
 
 -- | Build OpenAI Chat Completions API request body.
+--
+-- __Tools format__: Tools should be in OpenAI function format:
+--
+-- @
+-- { "type": "function", "function": { "name": "...", "description": "...", "parameters": {...} } }
+-- @
+--
+-- Use 'CfTool' from "Tidepool.Tool.Wire" or the 'ToCfTool' typeclass to produce
+-- correctly formatted tools. Do NOT pass Anthropic-format tools here.
 buildOpenAIRequest :: OpenAIConfig -> Text -> Maybe [Value] -> LBS.ByteString
 buildOpenAIRequest config userMsg maybeTools =
   encode $ object $ filter ((/= Null) . snd)
@@ -198,17 +220,8 @@ buildOpenAIRequest config userMsg maybeTools =
         (maybe [] (\sys -> [object ["role" .= ("system" :: Text), "content" .= sys]]) config.oaSystemPrompt
          ++ [object ["role" .= ("user" :: Text), "content" .= userMsg]])
     , "temperature" .= config.oaTemperature
-    , "tools" .= case maybeTools of
-        Nothing -> Null
-        Just ts -> toJSON $ map wrapOpenAITool ts
+    , "tools" .= maybeTools  -- Tools should already be in OpenAI format (via CfTool)
     ]
-
--- | Wrap tool definitions in OpenAI's function format.
-wrapOpenAITool :: Value -> Value
-wrapOpenAITool toolDef = object
-  [ "type" .= ("function" :: Text)
-  , "function" .= toolDef
-  ]
 
 -- | Parse OpenAI API response.
 parseOpenAIResponse :: Response LBS.ByteString -> IO (Either LLMError OpenAIResponse)
@@ -270,6 +283,11 @@ checkContextLength errType errMsg
 -- This interpreter makes real API calls to Anthropic or OpenAI based on
 -- the type-level provider in the effect.
 --
+-- = Error Handling
+--
+-- * 'Complete' - throws via 'error' on failure (use for fatal errors)
+-- * 'CompleteTry' - returns @Either LLMError@ (use for graceful handling)
+--
 -- = Example
 --
 -- @
@@ -279,11 +297,18 @@ checkContextLength errType errMsg
 --   let config = LLMConfig { lcAnthropicSecrets = Just secrets, ... }
 --   env <- mkLLMEnv config
 --   runM $ runLLMComplete env $ do
+--     -- Throwing variant (crashes on error)
 --     response <- complete SAnthropic cfg "Hello" Nothing
---     -- response :: AnthropicResponse
+--
+--     -- Try variant (returns Either)
+--     result <- completeTry SAnthropic cfg "Hello" Nothing
+--     case result of
+--       Left err -> handleError err
+--       Right response -> pure response
 -- @
 runLLMComplete :: LastMember IO effs => LLMEnv -> Eff (LLMComplete ': effs) a -> Eff effs a
 runLLMComplete env = interpret $ \case
+  -- Throwing variants (for when errors are fatal)
   Complete SAnthropic config msg tools -> sendM $ do
     result <- anthropicRequest env config msg tools
     case result of
@@ -295,3 +320,10 @@ runLLMComplete env = interpret $ \case
     case result of
       Left err -> error $ "LLMComplete (OpenAI): " <> show err
       Right resp -> pure resp
+
+  -- Try variants (for graceful error handling)
+  CompleteTry SAnthropic config msg tools -> sendM $
+    anthropicRequest env config msg tools
+
+  CompleteTry SOpenAI config msg tools -> sendM $
+    openaiRequest env config msg tools

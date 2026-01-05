@@ -1,3 +1,6 @@
+# Rust
+target/
+
 dist-newstyle/
 .cabal/
 *.hi
@@ -22,3 +25,4 @@ deploy/.dev.vars
 tidepool-generated-ts/output/
 a.out
 result
+.beads/
