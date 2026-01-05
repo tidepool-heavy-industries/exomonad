@@ -22,9 +22,10 @@ import System.Process (readProcessWithExitCode, callProcess)
 import Test.Hspec
 
 import Tidepool.Effects.BD
+import Tidepool.Effects.Git (WorktreeInfo(..))
 import Tidepool.BD.Executor
-import Tidepool.BD.Prime
-import Tidepool.BD.Prime.Worktree
+import Tidepool.BD.Prime.Graph (PrimeContext(..), renderPrime, renderPrimeJSON)
+import Tidepool.BD.Prime.Worktree (worktreeName)
 
 
 main :: IO ()
@@ -331,8 +332,10 @@ executorTests = describe "Executor CLI Integration" $ do
     let mockGetDeps _ = pure []
     let mockGetBlocking _ = pure []
     let mockGetLabels _ = pure ["test-label"]
+    let mockListByStatus _ = pure []
+    let mockListByType _ = pure []
 
-    result <- runM $ runBD mockGetBead mockGetDeps mockGetBlocking mockGetLabels $ do
+    result <- runM $ runBD mockGetBead mockGetDeps mockGetBlocking mockGetLabels mockListByStatus mockListByType $ do
       bead <- getBead "any"
       labels <- getLabels "any"
       pure (bead, labels)

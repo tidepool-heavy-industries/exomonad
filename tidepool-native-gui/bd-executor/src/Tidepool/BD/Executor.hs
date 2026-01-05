@@ -31,6 +31,8 @@ module Tidepool.BD.Executor
   , bdDeps
   , bdBlocking
   , bdLabels
+  , bdListByStatus
+  , bdListByType
   ) where
 
 import Control.Exception (try, SomeException)
@@ -51,7 +53,7 @@ import System.Process
 import GHC.IO.Handle (hGetContents)
 import System.Exit (ExitCode(..))
 
-import Tidepool.Effects.BD (BD(..), BeadInfo(..), DependencyInfo(..))
+import Tidepool.Effects.BD (BD(..), BeadInfo(..), BeadStatus(..), BeadType(..), DependencyInfo(..))
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -87,13 +89,17 @@ runBD
   -> (Text -> Eff effs [BeadInfo])        -- ^ Handler for GetDeps
   -> (Text -> Eff effs [BeadInfo])        -- ^ Handler for GetBlocking
   -> (Text -> Eff effs [Text])            -- ^ Handler for GetLabels
+  -> (BeadStatus -> Eff effs [BeadInfo])  -- ^ Handler for ListByStatus
+  -> (BeadType -> Eff effs [BeadInfo])    -- ^ Handler for ListByType
   -> Eff (BD ': effs) a
   -> Eff effs a
-runBD hGetBead hGetDeps hGetBlocking hGetLabels = interpret $ \case
+runBD hGetBead hGetDeps hGetBlocking hGetLabels hListByStatus hListByType = interpret $ \case
   GetBead beadId     -> hGetBead beadId
   GetDeps beadId     -> hGetDeps beadId
   GetBlocking beadId -> hGetBlocking beadId
   GetLabels beadId   -> hGetLabels beadId
+  ListByStatus s     -> hListByStatus s
+  ListByType t       -> hListByType t
 
 
 -- | Run BD effects using the bd CLI.
@@ -124,6 +130,10 @@ runBDIO config = interpret $ \case
         pure $ [b | Just b <- beads]
 
   GetLabels beadId -> sendM $ bdLabels config beadId
+
+  ListByStatus status -> sendM $ bdListByStatus config status
+
+  ListByType btype -> sendM $ bdListByType config btype
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -199,6 +209,56 @@ bdLabels config beadId = do
       case eitherDecode (LBS.fromStrict $ TE.encodeUtf8 output) of
         Right labels -> pure labels
         Left _ -> pure []  -- Parse error, return empty
+
+
+-- | List beads by status.
+--
+-- Uses @bd list --status=STATUS --json@ command.
+bdListByStatus :: BDConfig -> BeadStatus -> IO [BeadInfo]
+bdListByStatus config status = do
+  let statusStr = case status of
+        StatusOpen       -> "open"
+        StatusInProgress -> "in_progress"
+        StatusClosed     -> "closed"
+        StatusHooked     -> "hooked"
+        StatusBlocked    -> "blocked"
+  let args = ["list", "--json", "--status=" ++ statusStr]
+            ++ maybe [] (\d -> ["--db", d]) config.bcBeadsDir
+
+  result <- runBdCommand config args
+  case result of
+    Left _err -> pure []
+    Right output ->
+      case eitherDecode (LBS.fromStrict $ TE.encodeUtf8 output) of
+        Right beads -> pure beads
+        Left _ -> pure []
+
+
+-- | List beads by type.
+--
+-- Uses @bd list --type=TYPE --json@ command.
+bdListByType :: BDConfig -> BeadType -> IO [BeadInfo]
+bdListByType config btype = do
+  let typeStr = case btype of
+        TypeTask         -> "task"
+        TypeBug          -> "bug"
+        TypeFeature      -> "feature"
+        TypeEpic         -> "epic"
+        TypeMergeRequest -> "merge-request"
+        TypeMessage      -> "message"
+        TypeMolecule     -> "molecule"
+        TypeAgent        -> "agent"
+        TypeOther t      -> T.unpack t
+  let args = ["list", "--json", "--type=" ++ typeStr]
+            ++ maybe [] (\d -> ["--db", d]) config.bcBeadsDir
+
+  result <- runBdCommand config args
+  case result of
+    Left _err -> pure []
+    Right output ->
+      case eitherDecode (LBS.fromStrict $ TE.encodeUtf8 output) of
+        Right beads -> pure beads
+        Left _ -> pure []
 
 
 -- ════════════════════════════════════════════════════════════════════════════

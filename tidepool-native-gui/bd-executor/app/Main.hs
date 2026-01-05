@@ -1,15 +1,15 @@
 -- | Urchin CLI - Context generation for Claude Code sessions.
+--
+-- Uses the Tidepool graph DSL with Git and BD effects for context gathering.
 module Main where
 
-import Data.Text (Text)
-import Data.Text qualified as T
 import Data.Text.IO qualified as TIO
 import Options.Applicative
-import System.Exit (exitFailure)
 
-import Tidepool.BD.Prime (gatherContext, gatherContextFromCwd, renderPrime, renderPrimeJSON)
-import Tidepool.BD.Prime.Worktree (detectWorktree, WorktreeInfo(..))
-import Tidepool.BD.Executor (BDConfig(..), defaultBDConfig)
+import Tidepool.BD.Prime.Runner
+  ( runUrchinPrime
+  , runUrchinPrimeJSON
+  )
 
 
 -- | Output format for prime command.
@@ -18,12 +18,8 @@ data OutputFormat = FormatMarkdown | FormatJSON
 
 -- | Options for the prime subcommand.
 data PrimeOptions = PrimeOptions
-  { poWorktree :: Maybe Text
-    -- ^ Override worktree detection
-  , poFormat   :: OutputFormat
+  { poFormat   :: OutputFormat
     -- ^ Output format (markdown or json)
-  , poEpic     :: Maybe Text
-    -- ^ Focus on specific epic (TODO: not yet implemented)
   }
   deriving (Show)
 
@@ -46,25 +42,13 @@ parseFormat = eitherReader $ \s ->
 -- | Parser for prime options.
 primeOptionsParser :: Parser PrimeOptions
 primeOptionsParser = PrimeOptions
-  <$> optional (strOption
-        ( long "worktree"
-       <> short 'w'
-       <> metavar "NAME"
-       <> help "Override worktree detection (e.g., 'bd', 'native-server')"
-        ))
-  <*> option parseFormat
+  <$> option parseFormat
         ( long "format"
        <> short 'f'
        <> metavar "FORMAT"
        <> value FormatMarkdown
        <> help "Output format: markdown (default), json"
         )
-  <*> optional (strOption
-        ( long "epic"
-       <> short 'e'
-       <> metavar "ID"
-       <> help "Focus on specific epic's children (e.g., 'tidepool-6qa')"
-        ))
 
 
 -- | Parser for the prime subcommand.
@@ -88,42 +72,13 @@ opts = info (commandParser <**> helper)
   )
 
 
--- | Run the prime command.
+-- | Run the prime command using graph-based runner.
 runPrime :: PrimeOptions -> IO ()
 runPrime options = do
-  -- Detect or use explicit worktree
-  mWorktree <- case options.poWorktree of
-    Nothing -> detectWorktree
-    Just name -> do
-      -- If explicit name given, still detect but could override
-      -- For now, just detect and warn if mismatch
-      mDetected <- detectWorktree
-      case mDetected of
-        Nothing -> do
-          TIO.putStrLn $ "Warning: Not in a git repository, using name: " <> name
-          pure Nothing
-        Just wt ->
-          if wt.wiName == name
-            then pure (Just wt)
-            else do
-              TIO.putStrLn $ "Warning: Detected worktree '" <> wt.wiName
-                          <> "' but --worktree=" <> name <> " specified"
-              pure (Just wt)
-
-  case mWorktree of
-    Nothing -> do
-      TIO.putStrLn "Error: Not in a git repository"
-      exitFailure
-    Just worktree -> do
-      -- Gather context
-      ctx <- gatherContext defaultBDConfig worktree
-
-      -- Render output
-      let output = case options.poFormat of
-            FormatMarkdown -> renderPrime ctx
-            FormatJSON     -> renderPrimeJSON ctx
-
-      TIO.putStr output
+  output <- case options.poFormat of
+    FormatMarkdown -> runUrchinPrime
+    FormatJSON     -> runUrchinPrimeJSON
+  TIO.putStr output
 
 
 -- | Main entry point.

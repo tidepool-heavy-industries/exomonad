@@ -14,7 +14,9 @@ build-type:         Simple
 library
     exposed-modules:
         Tidepool.BD.Executor
-        Tidepool.BD.Prime
+        Tidepool.BD.GitExecutor
+        Tidepool.BD.Prime.Graph
+        Tidepool.BD.Prime.Runner
         Tidepool.BD.Prime.Worktree
     build-depends:
         base >= 4.17 && < 5,

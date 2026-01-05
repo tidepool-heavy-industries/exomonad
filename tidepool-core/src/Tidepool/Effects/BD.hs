@@ -25,6 +25,8 @@ module Tidepool.Effects.BD
   , getDeps
   , getBlocking
   , getLabels
+  , listByStatus
+  , listByType
 
     -- * Types
   , BeadInfo(..)
@@ -245,6 +247,12 @@ data BD r where
   -- | Get labels attached to a bead.
   GetLabels :: Text -> BD [Text]
 
+  -- | List beads by status.
+  ListByStatus :: BeadStatus -> BD [BeadInfo]
+
+  -- | List beads by type.
+  ListByType :: BeadType -> BD [BeadInfo]
+
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- SMART CONSTRUCTORS
@@ -265,3 +273,11 @@ getBlocking = send . GetBlocking
 -- | Get labels for a bead.
 getLabels :: Member BD effs => Text -> Eff effs [Text]
 getLabels = send . GetLabels
+
+-- | List beads by status.
+listByStatus :: Member BD effs => BeadStatus -> Eff effs [BeadInfo]
+listByStatus = send . ListByStatus
+
+-- | List beads by type.
+listByType :: Member BD effs => BeadType -> Eff effs [BeadInfo]
+listByType = send . ListByType
