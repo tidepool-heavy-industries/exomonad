@@ -2,7 +2,7 @@
 
 ## Language-Specific Guidance
 
-### Haskell (tidepool-core/, tidepool-dm/, tidepool-tidying/)
+### Haskell (tidepool-core/, tidepool-native-gui/)
 
 **Effect System (effectful)**
 - Effect constraints should be ordered correctly - effects are interpreted outermost-first

@@ -2,13 +2,11 @@
 
 ## What This Is
 
-A type-safe LLM agent loop library (Tidepool) with two demonstration agents:
-1. **DM Agent** - Blades in the Dark-style Dungeon Master
-2. **Tidying Agent** - Prosthetic executive function for tackling overwhelming spaces
+A type-safe LLM agent loop library for building LLM agents as typed state machines.
 
 The key insight: LLMs don't need raw IO - they need typed state they can read (via templates) and typed mutations they can express (via structured output).
 
-**Status**: Compiles successfully. DM agent has stubbed logic. Tidying agent is functional with GUI.
+**Status**: Core library compiles. Example agents live in separate repos (e.g., `~/dev/anemone`).
 
 ## Start Here
 
@@ -95,17 +93,14 @@ Run `bd list --all` from `~/dev/tidepool` to see current tasks.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                      Game Loop (dmTurn)                     │
+│                      Agent Turn Loop                         │
 │                                                             │
-│  1. Record player action as scene beat                      │
-│  2. Build context (Haskell: WorldState → DMContext)         │
-│  3. Render template (Jinja: DMContext → prompt)             │
-│  4. Call LLM (runTurn: prompt + schema + tools → result)    │
-│  5. Apply structured output (TurnOutput → WorldState')      │
-│  6. Handle dice mechanics (RequestInput for player choice)  │
-│  7. Check clock consequences                                │
-│  8. Compress if needed                                      │
-│  9. Return narrative response                               │
+│  1. Build context (Haskell: State → Context)                │
+│  2. Render template (Jinja: Context → prompt)               │
+│  3. Call LLM (runTurn: prompt + schema + tools → result)    │
+│  4. Apply structured output (Output → State')               │
+│  5. Handle user input (RequestInput for choices)            │
+│  6. Return response                                         │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -117,177 +112,43 @@ Run `bd list --all` from `~/dev/tidepool` to see current tasks.
 
 2. **Typed Jinja templates** (via ginger library)
    - Compile-time validation against Haskell types
-   - `$(typedTemplateFile ''DMContext "templates/dm_turn.jinja")`
+   - `$(typedTemplateFile ''MyContext "templates/turn.jinja")`
    - LLMs know Jinja from training data
 
 3. **Type-safe tool lists**
-   - `ToolList` GADT: `TCons (Proxy @ThinkAsDM) $ TCons (Proxy @SpeakAsNPC) $ TNil`
+   - `ToolList` GADT: `TCons (Proxy @MyTool) $ TCons (Proxy @OtherTool) $ TNil`
    - Tools have access to: `State`, `Emit`, `RequestInput`, `Random`
 
 4. **Delta fields for mutations**
-   - LLM outputs `+2 stress`, not `stress = 5`
+   - LLM outputs deltas, not absolute values
    - `because` fields on every mutation for training data
 
-5. **FitD dice mechanics**
-   - Player sees full dice pool, chooses which die to use
-   - Position (Controlled/Risky/Desperate) + Effect (Limited/Standard/Great)
-   - Precarity system scales narrative tone
-
-6. **Typed graph execution** (via `OneOf` sum type)
+5. **Typed graph execution** (via `OneOf` sum type)
    - `GotoChoice` wraps `OneOf` for fully typed dispatch
    - `DispatchGoto` typeclass pattern matches to call handlers
    - No Dynamic or unsafeCoerce - exact types at every step
 
 ## GUI Architecture
 
-The GUI uses threepenny-gui with a polling-based update model:
+The native server uses a SolidJS frontend with WebSocket communication:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                      Single Process                          │
+│                    Native Server Architecture                │
 │                                                              │
 │   ┌──────────────────┐         ┌──────────────────────────┐ │
-│   │   Game Loop      │◄──MVar──│   Threepenny GUI         │ │
+│   │   Agent Loop     │◄──WS───│   SolidJS Frontend       │ │
 │   │   (freer-simple) │         │   (browser)              │ │
 │   │                  │         │                          │ │
-│   │ RequestInput ────┼──TVar──►│ Polls for PendingRequest │ │
-│   │ blocks on MVar   │         │ User clicks → MVar put   │ │
+│   │ UI effect ───────┼──JSON──►│ Renders state            │ │
+│   │ RequestInput ────┼──JSON──►│ Shows choices/text input │ │
 │   │                  │         │                          │ │
-│   │ WorldState ──────┼──TVar──►│ Updates stats/narrative  │ │
-│   │ Emit events ─────┼──TVar──►│ Debug log / UI updates   │ │
+│   │ State ───────────┼──JSON──►│ Updates display          │ │
 │   └──────────────────┘         └──────────────────────────┘ │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### Key GUI Types (Tidepool.GUI.Core)
-
-```haskell
--- | Bridge between game loop and GUI (parameterized by state type)
-data GUIBridge state = GUIBridge
-  { gbState            :: TVar state           -- Game state for display
-  , gbStateVersion     :: TVar Int             -- Version for change detection
-  , gbPendingRequest   :: TVar (Maybe PendingRequest)
-  , gbRequestResponse  :: MVar RequestResponse -- Blocks game loop
-  , gbNarrativeLog     :: TVar (Seq Text)
-  , gbNarrativeVersion :: TVar Int
-  , gbDebugLog         :: TVar (Seq DebugEntry)
-  , gbDebugVersion     :: TVar Int
-  , gbLLMActive        :: TVar Bool            -- Loading spinner
-  }
-
--- | Input requests posted by game loop
-data PendingRequest
-  = PendingChoice Text [(Text, Int)]  -- Choice cards
-  | PendingText Text                  -- Free-form text
-  | PendingDice Text [(Int, Int)]     -- Dice with (value, index)
-
--- | Responses from GUI
-data RequestResponse
-  = ChoiceResponse Int
-  | TextResponse Text
-```
-
-### Communication Flow
-
-1. **Game loop posts request**: `writeTVar gbPendingRequest (Just request)`
-2. **Game loop blocks**: `takeMVar gbRequestResponse`
-3. **GUI polls**: Timer reads `gbPendingRequest` every 100ms
-4. **GUI renders**: Shows input widget (text field, cards, or dice)
-5. **User interacts**: Click/enter triggers `tryPutMVar gbRequestResponse`
-6. **Game loop unblocks**: Continues with response value
-
-### Widget Update Pattern
-
-All DM widgets follow a consistent create/update pattern:
-
-```haskell
--- Create widget, returns element reference
-clocksPanel :: GUIBridge WorldState -> UI Element
-clocksPanel bridge = do
-  panel <- UI.div #. "clocks-panel"
-  updateClocksPanel panel bridge
-  pure panel
-
--- Update existing element (for polling loop)
-updateClocksPanel :: Element -> GUIBridge WorldState -> UI ()
-updateClocksPanel panel bridge = do
-  void $ element panel # set children []
-  -- Rebuild contents from state...
-```
-
-### Polling and Version Detection
-
-The polling loop uses version numbers for efficient change detection:
-
-```haskell
--- In setupPolling (DM.GUI.App)
-on UI.tick timer $ const $ do
-  stateVersion <- liftIO $ atomically $ readTVar bridge.gbStateVersion
-  prevStateVersion <- liftIO $ readIORef prevStateVersionRef
-
-  when (stateVersion /= prevStateVersion) $ do
-    liftIO $ writeIORef prevStateVersionRef stateVersion
-    refreshStats bridge elements
-    refreshMood bridge elements
-    refreshClocks bridge elements
-```
-
-### Tab Switching (Show/Hide Pattern)
-
-Tabs use show/hide rather than recreate to preserve element references:
-
-```haskell
-switchToGameTab :: GUIElements -> UI ()
-switchToGameTab elements = do
-  void $ element (geGameTab elements) #. "tab active"
-  void $ element (geHistoryTab elements) #. "tab"
-  -- Show/hide, don't recreate
-  void $ element (geNarrativePane elements) # set style [("display", "block")]
-  void $ element (geHistoryPane elements) # set style [("display", "none")]
-```
-
-### Accessibility
-
-Interactive elements include full keyboard support:
-- **Choice cards**: Tab navigation, Enter/Space to select, 1-9 shortcuts
-- **Dice cards**: Same keyboard nav plus ARIA labels with tier info
-- **Focus states**: Visual outlines on focus, active transforms
-
-```haskell
--- Dice cards include ARIA labels
-card <- UI.div #. "dice-card"
-  # set (attr "tabindex") "0"
-  # set (attr "role") "option"
-  # set (attr "aria-label") (T.unpack $ tierLabel tier <> " - die showing " <> T.pack (show dieValue))
-```
-
-### Theme System
-
-Themes define colors as CSS custom properties:
-
-```haskell
--- Tidepool.GUI.Theme
-data Theme = Theme
-  { themeName    :: Text
-  , themeColors  :: ColorPalette
-  , themeFontMain :: Text
-  , themeFontMono :: Text
-  }
-
--- DM.GUI.Theme (noir aesthetic)
-noirTheme = Theme
-  { themeName = "noir"
-  , themeColors = noirPalette  -- Deep charcoal, muted gold
-  , ...
-  }
-
--- Tier colors for dice
-tierColor TierCritical = "#c9a227"  -- Gold
-tierColor TierSuccess  = "#4a7c4a"  -- Muted green
-tierColor TierPartial  = "#8b7420"  -- Amber
-tierColor TierBad      = "#7c4a4a"  -- Muted red
-tierColor TierDisaster = "#4a0000"  -- Deep red
-```
+See `tidepool-native-gui/server/CLAUDE.md` for full architecture details.
 
 ## Effect System
 
@@ -362,22 +223,6 @@ tidepool-core/             # Core library (reusable)
 ├── templates/             # Example templates
 └── test/                  # Graph validation tests
 
-tidepool-dm/               # DM agent (Blades in the Dark)
-├── src/DM/
-│   ├── State.hs           # WorldState, PlayerState, dice mechanics, factions
-│   ├── Output.hs          # TurnOutput with delta fields, applyTurnOutput
-│   ├── Tools.hs           # ThinkAsDM, SpeakAsNPC, AskPlayer, Choose
-│   ├── Context.hs         # DMContext, DiceContext, Precarity
-│   ├── Templates.hs       # dmTurnTemplate, compressionTemplate
-│   ├── Loop.hs            # dmTurn, handleDiceSelection, runDMGame
-│   └── GUI/               # DM-specific GUI (noir aesthetic)
-├── app/
-│   ├── Main.hs            # CLI entry point
-│   ├── MainGUI.hs         # GUI entry point
-│   └── TestSchema.hs      # Schema test
-├── docs/                  # DM-specific docs
-└── templates/             # DM prompt templates (jinja/mustache)
-
 tidepool-tidying/          # Tidying agent (executive function prosthetic)
 ├── src/Tidying/
 │   ├── Agent.hs           # Agent definition, TidyingM monad
@@ -404,46 +249,6 @@ deploy/                    # Cloudflare Worker Durable Object harness
 └── wrangler.toml          # CF Worker configuration
 ```
 
-## Key Types
-
-### Dice Mechanics (FitD-inspired)
-```haskell
-data Position = Controlled | Risky | Desperate
-data Effect = Limited | Standard | Great
-data OutcomeTier = Critical | Success | Partial | Bad | Disaster
-
-data PendingOutcome = PendingOutcome
-  { outcomeContext :: Text
-  , outcomePosition :: Position
-  , outcomeEffect :: Effect
-  , outcomeStakes :: Text
-  , chosenDie :: Maybe Int
-  , chosenTier :: Maybe OutcomeTier
-  }
-```
-
-### Precarity (narrative tone scaling)
-```haskell
-data Precarity
-  = OperatingFromStrength  -- < 5: expansive but careless
-  | RoomToManeuver         -- 5-9: noir cool
-  | WallsClosingIn         -- 10-14: tense
-  | HangingByThread        -- >= 15: urgent
-
--- precarity = stress + heat + wanted*2 + (hunted?3) + (recovering?2)
-```
-
-### Delta Fields
-```haskell
-data PlayerDeltas = PlayerDeltas
-  { stressDelta :: Int      -- +2, not "set to 5"
-  , coinDelta :: Int
-  , heatDelta :: Int
-  , wantedDelta :: Int
-  , deltaBecause :: Text    -- "caught by guard" - training data
-  }
-```
-
 ## Implementation Status
 
 ### Complete
@@ -451,23 +256,11 @@ data PlayerDeltas = PlayerDeltas
 - Type-safe tool list (ToolList GADT)
 - Template system (ginger library with TH compile-time validation)
 - JSON Schema derivation via Template Haskell (`deriveJSONSchema`)
-- FitD dice mechanics types
-- Precarity calculation
-- Delta-based mutation types
-- DM loop structure with RequestInput for dice selection
 - **Graph: OneOf sum type** - Type-indexed GADT for fully typed dispatch
 - **Graph: GotoChoice** - Handler return type wrapping OneOf
 - **Graph: DispatchGoto** - Typeclass for typed graph execution (no Dynamic/unsafeCoerce)
-- **GUI: Core bridge** - GUIBridge with TVar/MVar communication
-- **GUI: Generic widgets** - textInput, choiceCards, narrativePane, debugPanel, loadingOverlay
-- **GUI: DM widgets** - Stats, Mood, Clocks, History, Narrative (with NPC bubbles), Dice
-- **GUI: Theme system** - ColorPalette, CSS generation, noir theme
-- **GUI: Polling loop** - Version-based change detection, efficient updates
-- **GUI: Accessibility** - Keyboard navigation, ARIA labels, focus states
-- **GUI: Handler** - makeGUIHandler for choice/text, guiDice for dice selection
-
-### Stubbed / Partial
-- GUI: Clock face SVG (currently text circles)
+- **Native Server** - Servant + wai-websockets with SolidJS frontend
+- **Effect Executors** - LLM, UI, Habitica, Observability, LSP, BD, ClaudeCode
 
 ## Running
 
@@ -475,31 +268,20 @@ data PlayerDeltas = PlayerDeltas
 # Build all packages
 cabal build all
 
-# DM Agent
-cabal run tidepool-dm      # CLI mode (hits TODO errors)
-cabal run tidepool-dm-gui  # GUI mode (opens browser at localhost:8023)
-
-# Tidying Agent
-cabal run tidepool-tidy-gui  # GUI mode (opens browser at localhost:8024)
-                             # Requires ANTHROPIC_API_KEY env var
+# Native server (SimpleAgent example)
+just native  # Starts at localhost:8080
 
 # Tests
 cabal run test-llm         # LLM integration test (tidepool-core)
-cabal run test-schema      # Schema derivation test (tidepool-dm)
 cabal test all             # Run all test suites
 ```
 
-## Next Steps
-
-### GUI Integration
-1. **Clock SVG rendering** - Replace text circles with pie charts
-
 ## What Sleeptime Would Evolve
 
-The "sleeptime" learning agent reads run logs and evolves:
+The "sleeptime" learning agent reads run logs and evolves agent definitions:
 
-1. **State fields** - Add new fields to WorldState
-2. **Output schema** - New mutation types in TurnOutput
+1. **State fields** - Add new fields to agent state
+2. **Output schema** - New mutation types in turn output
 3. **Apply logic** - How mutations affect state
 4. **Templates** - What context surfaces to LLM
 5. **Tool behavior** - How tools execute
@@ -686,6 +468,4 @@ cabal run lsp-smoke-test
 
 - freer-simple: https://hackage.haskell.org/package/freer-simple
 - Anthropic tool use: https://docs.anthropic.com/en/docs/tool-use
-- Blades in the Dark SRD: https://bladesinthedark.com/
-- heist-engine (v1 reference): ~/dev/shoal-automat/machines/heist-engine
 - GHC WASM: https://ghc.gitlab.haskell.org/ghc/doc/users_guide/wasm.html
