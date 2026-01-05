@@ -128,34 +128,12 @@ Run `bd list --all` from `~/dev/tidepool` to see current tasks.
    - `DispatchGoto` typeclass pattern matches to call handlers
    - No Dynamic or unsafeCoerce - exact types at every step
 
-## GUI Architecture
-
-The native server uses a SolidJS frontend with WebSocket communication:
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Native Server Architecture                │
-│                                                              │
-│   ┌──────────────────┐         ┌──────────────────────────┐ │
-│   │   Agent Loop     │◄──WS───│   SolidJS Frontend       │ │
-│   │   (freer-simple) │         │   (browser)              │ │
-│   │                  │         │                          │ │
-│   │ UI effect ───────┼──JSON──►│ Renders state            │ │
-│   │ RequestInput ────┼──JSON──►│ Shows choices/text input │ │
-│   │                  │         │                          │ │
-│   │ State ───────────┼──JSON──►│ Updates display          │ │
-│   └──────────────────┘         └──────────────────────────┘ │
-└─────────────────────────────────────────────────────────────┘
-```
-
-See `tidepool-native-gui/server/CLAUDE.md` for full architecture details.
-
 ## Effect System
 
 ### IO-Blind Architecture
 
 Agents are **IO-blind**: they cannot use `IOE` directly. All IO happens in the runner via effect interpreters. This enables:
-- Eventual WASM compilation
+- WASM compilation
 - Deterministic testing
 - Clear separation of pure logic from IO
 
@@ -190,17 +168,6 @@ data Time :: Effect where
 runTime :: IOE :> es => Eff (Time : es) a -> Eff es a
 ```
 
-### QuestionUI Effect (Tidying-specific)
-
-For mid-turn user interaction during tool execution:
-
-```haskell
-data QuestionUI :: Effect where
-  AskQuestion :: Question -> QuestionUI m Answer
-
-type QuestionHandler = Question -> IO Answer
-```
-
 ## Project Structure (Monorepo)
 
 ```
@@ -223,30 +190,27 @@ tidepool-core/             # Core library (reusable)
 ├── templates/             # Example templates
 └── test/                  # Graph validation tests
 
-tidepool-tidying/          # Tidying agent (executive function prosthetic)
-├── src/Tidying/
-│   ├── Agent.hs           # Agent definition, TidyingM monad
-│   ├── State.hs           # SessionState, Phase, Piles, Photo
-│   ├── Loop.hs            # OODA loop: tidyingTurn, photo analysis, extraction
-│   ├── Decide.hs          # Pure routing: (State, Extract) → (Action, Phase)
-│   ├── Action.hs          # Action ADT (InstructTrash, InstructPlace, etc.)
-│   ├── Tools.hs           # ProposeDisposition, AskSpaceFunction, ConfirmDone
-│   └── GUI/               # Tidying-specific GUI (calm aesthetic)
-├── app/
-│   ├── MainTidyGUI.hs     # GUI entry point
-│   └── TestTidying.hs     # Test harness
-└── templates/tidying/     # Tidying prompt templates
+tidepool-native-gui/       # Native execution layer
+├── server/                # Servant + WebSocket server
+├── ui-executor/           # UI effect interpreter
+├── llm-executor/          # LLM effect interpreter (Anthropic)
+├── habitica-executor/     # Habitica API integration
+├── observability-executor/# OTLP traces + Loki logs
+├── claude-code-executor/  # Claude Code subprocess
+├── lsp-executor/          # LSP client for code intelligence
+├── bd-executor/           # Beads issue tracking
+├── issue-executor/        # GitHub issues
+└── wire-types/            # Shared wire protocol types
 
-tidepool-native-gui/       # Native GUI tooling
-└── lsp-executor/          # LSP effect interpreter using lsp-client
-    ├── src/Tidepool/LSP/
-    │   └── Executor.hs    # LSP effect interpreter, session management
-    └── test/
-        └── SmokeTest.hs   # Smoke test against real HLS
-
+tidepool-wasm/             # WASM compilation target
 deploy/                    # Cloudflare Worker Durable Object harness
 ├── src/                   # TypeScript harness for WASM state machines
 └── wrangler.toml          # CF Worker configuration
+
+tidepool-platform/         # CLI-enabled agent base
+tools/                     # Agent 8 tooling
+├── sleeptime-logs/        # Log analysis for agent evolution
+└── impact-analysis/       # Code change impact analysis
 ```
 
 ## Implementation Status

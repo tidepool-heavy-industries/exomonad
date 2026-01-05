@@ -253,8 +253,8 @@ This skeleton does not include a runner executable. To run an agent, you need:
 2. **A graph executor** - dispatches to handlers based on graph structure
 3. **An entry point** - calls the executor with initial input
 
-See `tidepool-platform` for the Anthropic LLM interpreter and `tidepool-native-gui/server`
-for a complete runnable example.
+See `tidepool-platform` for the Anthropic LLM interpreter and `~/dev/anemone`
+for complete runnable agents.
 
 ## What This Skeleton Provides
 

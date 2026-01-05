@@ -1,6 +1,6 @@
 # Tidepool
 
-> Type-safe LLM agent loops with structured state and templates
+> Type-safe LLM agent framework with structured state and templates
 
 ## What Is This?
 
@@ -16,16 +16,16 @@ The Haskell code controls what's possible. The LLM controls what happens.
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                    Agent Turn Loop                   │
-│                                                     │
-│  1. Build context (Haskell: state → context)        │
-│  2. Render template (ginger: context → prompt)      │
-│  3. Call LLM (API: prompt + tools → response)       │
-│  4. Parse output (JSON: response → output)          │
-│  5. Apply changes (Haskell: output → state')        │
-│  6. Repeat                                          │
-└─────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                      Agent Turn Loop                         │
+│                                                             │
+│  1. Build context (Haskell: State → Context)                │
+│  2. Render template (Jinja: Context → prompt)               │
+│  3. Call LLM (runTurn: prompt + schema + tools → result)    │
+│  4. Apply structured output (Output → State')               │
+│  5. Handle user input (RequestInput for choices)            │
+│  6. Return response                                         │
+└─────────────────────────────────────────────────────────────┘
 ```
 
 ### Effects (what agents can do)
@@ -36,6 +36,7 @@ type AgentEffects s event =
    , Random           -- dice rolls, weighted choices
    , LLM              -- template-based LLM calls
    , Emit event       -- observable events
+   , RequestInput     -- user input
    ]
 
 -- Notably absent: IO, Network, FileSystem
@@ -53,12 +54,12 @@ $(typedTemplateFile ''MyContext "templates/turn.jinja")
 
 ### Structured Output (what the LLM can express)
 
-Every mutation includes `because` for sleeptime learning:
+Every mutation includes `because` for training data:
 
 ```haskell
-data StatusChange = StatusChange
-  { newStatus :: Status
-  , changeBecause :: Text  -- "User completed the task"
+data StateDelta = StateDelta
+  { deltaValue :: Int
+  , deltaBecause :: Text  -- "User requested change"
   }
 ```
 
@@ -68,39 +69,29 @@ data StatusChange = StatusChange
 # Build all packages
 cabal build all
 
-# Run native server (example agent)
+# Run native server with SimpleAgent example
 just native  # Starts at localhost:8080
-
-# Run tests
-cabal test all
 ```
 
 ## Project Structure
 
 ```
-tidepool-core/           # Core library
-├── src/Tidepool/
-│   ├── Effect/          # Effect types
-│   ├── Graph/           # Type-level DSL for agent graphs
-│   ├── Template.hs      # Template type + TH validation
-│   └── Tool.hs          # Tool typeclass
-
-tidepool-native-gui/     # Native executors
-├── server/              # Servant + WebSocket server
-├── llm-executor/        # Anthropic API executor
-├── ui-executor/         # UI effect executor
-├── bd-executor/         # Beads task tracking executor
-├── claude-code-executor/  # Claude Code subprocess executor
-└── lsp-executor/        # LSP effect executor
-
+tidepool-core/           # Core library (Graph DSL, effects, templates)
+tidepool-native-gui/     # Native execution layer (server + effect executors)
+tidepool-wasm/           # WASM compilation target
 deploy/                  # Cloudflare Worker harness
+tools/                   # Agent evolution tooling (sleeptime)
 ```
 
-## Documentation
+For detailed documentation, see `CLAUDE.md`.
 
-See `CLAUDE.md` for full architecture documentation and effect system details.
+## Example Agents
+
+Agents live in separate repos to keep the library clean:
+- `~/dev/anemone` - DM agent, Tidying agent, etc.
 
 ## See Also
 
 - [freer-simple](https://hackage.haskell.org/package/freer-simple) - Effect system with reified continuations
 - [ginger](https://hackage.haskell.org/package/ginger) - Jinja template engine for Haskell
+- [Anthropic Tool Use](https://docs.anthropic.com/en/docs/tool-use) - LLM tool calling

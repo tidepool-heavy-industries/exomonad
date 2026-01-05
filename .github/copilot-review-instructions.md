@@ -4,11 +4,10 @@
 
 ### Haskell (tidepool-core/, tidepool-native-gui/)
 
-**Effect System (effectful)**
+**Effect System (freer-simple)**
 - Effect constraints should be ordered correctly - effects are interpreted outermost-first
 - Agent code must NOT use `IOE` directly (IO-blind architecture)
-- Check that `DispatchOf` is set to `'Dynamic` for new effects
-- Effect handlers should be in runner code, not agent code
+- Effect handlers should be in executor packages, not core library
 
 **Tool Definitions**
 - Every `Tool` instance needs `deriveJSONSchema` for the input type
@@ -18,7 +17,6 @@
 **Delta Fields**
 - Mutation types should use deltas (`+2`), not absolute values
 - Every delta type needs a `because :: Text` field for explainability
-- Check `applyTurnOutput` correctly handles all delta fields
 
 **Templates**
 - `typedTemplateFile` requires the context type to match template variables
@@ -27,7 +25,6 @@
 
 **Common Mistakes**
 - Using `unsafeCoerce` or `Dynamic` (should use `OneOf` pattern instead)
-- Missing `INLINE` pragmas (not needed with effectful, flag if present)
 - Partial functions (`head`, `tail`, `!!`) without guards
 
 ### TypeScript (deploy/)
