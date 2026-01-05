@@ -107,10 +107,12 @@ module Tidepool.Effect.Types
 import Control.Monad.Freer (Eff, Member, send, interpret, sendM, LastMember)
 import Control.Monad.Freer.Internal (handleRelayS)
 import System.Random (randomRIO)
+import System.IO (stderr)
 import Data.Time (UTCTime)
 import qualified Data.Time as Time
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.IO as TIO
 import Data.Aeson (Value(..), FromJSON, ToJSON, fromJSON, Result(..), encode)
 import qualified Data.Text.Encoding as TE
 import qualified Data.ByteString.Lazy as LBS
@@ -565,16 +567,11 @@ logWarnWith = logMsgWith Warn
 
 runLog :: LastMember IO effs => LogLevel -> Eff (Log ': effs) a -> Eff effs a
 runLog minLevel = interpret $ \case
-  LogMsg level _msg _fields
-    | level >= minLevel -> pure ()
+  LogMsg level msg maybeFields
+    | level >= minLevel -> do
+        let fieldStr = case maybeFields of
+              Nothing -> ""
+              Just fs -> " | " <> T.intercalate ", " (map fst fs)
+        sendM $ TIO.hPutStrLn stderr ("[" <> T.pack (show level) <> "] " <> msg <> fieldStr)
     | otherwise -> pure ()
 
--- ══════════════════════════════════════════════════════════════
--- HELPERS
--- ══════════════════════════════════════════════════════════════
-
--- Internal helper: encode Value to Text
-_encodeText :: Value -> Text
-_encodeText v = case v of
-  String t -> t
-  _ -> TE.decodeUtf8 . LBS.toStrict . encode $ v
