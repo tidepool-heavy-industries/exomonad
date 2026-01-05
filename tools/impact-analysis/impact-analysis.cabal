@@ -9,7 +9,9 @@ build-type:         Simple
 library
     exposed-modules:
         ImpactAnalysis.Types
+        ImpactAnalysis.Graph
         ImpactAnalysis.Analyze
+    ghc-options:      -haddock
     build-depends:
         base >= 4.17 && < 5,
         text >= 2.0 && < 3,
@@ -17,12 +19,15 @@ library
         containers >= 0.6 && < 1,
         directory >= 1.3 && < 2,
         filepath >= 1.4 && < 2,
+        freer-simple >= 1.2 && < 2,
         lsp-client >= 0.4 && < 0.5,
         lsp-types >= 2.3 && < 3,
-        process >= 1.6 && < 2
+        process >= 1.6 && < 2,
+        tidepool-core
     hs-source-dirs:   src
     default-language: GHC2021
     default-extensions:
+        DataKinds
         DeriveAnyClass
         DeriveGeneric
         DerivingStrategies
@@ -31,18 +36,17 @@ library
         NoFieldSelectors
         OverloadedRecordDot
         OverloadedStrings
+        TypeOperators
 
 executable impact-analysis
     main-is:          Main.hs
     hs-source-dirs:   app
+    ghc-options:      -haddock
     build-depends:
         base >= 4.17 && < 5,
-        text >= 2.0 && < 3,
-        aeson >= 2.1 && < 3,
-        aeson-pretty >= 0.8 && < 1,
-        bytestring >= 0.11 && < 1,
-        optparse-applicative >= 0.17 && < 1,
+        tidepool-core,
         impact-analysis
     default-language: GHC2021
     default-extensions:
         OverloadedStrings
+        TemplateHaskell

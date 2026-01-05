@@ -1,19 +1,25 @@
--- | Core analysis logic using LSP
+-- | Core analysis logic using LSP, structured as a v2 graph handler.
 --
 -- Queries a language server for symbol information at a given position,
 -- including hover info, definition location, and all references.
 --
 module ImpactAnalysis.Analyze
-  ( runAnalysis
+  ( -- * Graph Execution
+    runImpactGraph
+    -- * Graph Components (for testing)
+  , impactHandlers
+  , analyzeHandler
+    -- * Utilities
   , findProjectRoot
   ) where
 
 import Control.Concurrent (threadDelay)
 import Control.Exception (bracket, try, SomeException)
+import Control.Monad.Freer (Eff, LastMember, sendM, runM)
 import Control.Monad.IO.Class (liftIO)
 import Data.List (isSuffixOf, sortBy)
-import Data.Maybe (fromMaybe)
 import Data.Ord (comparing, Down(..))
+import Data.Proxy (Proxy(..))
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Map.Strict as Map
@@ -27,24 +33,64 @@ import Language.LSP.Client.Session (Session, initialize, request, openDoc)
 import qualified Language.LSP.Protocol.Types as L
 import qualified Language.LSP.Protocol.Message as L
 
+import Tidepool.Graph.Generic (AsHandler)
+import Tidepool.Graph.Types (Exit)
+import Tidepool.Graph.Goto (GotoChoice, gotoExit, To)
+import Tidepool.Graph.Execute (runGraph)
+
 import ImpactAnalysis.Types
+import ImpactAnalysis.Graph
 
 
 -- ════════════════════════════════════════════════════════════════════════════
--- PUBLIC API
+-- GRAPH HANDLERS
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Graph handlers - IO is the base effect for LSP operations.
+impactHandlers :: ImpactGraph (AsHandler '[IO])
+impactHandlers = ImpactGraph
+  { igEntry = Proxy
+  , igAnalyze = analyzeHandler
+  , igExit = Proxy
+  }
+
+-- | LogicNode handler - lifts LSP analysis into effect stack.
+analyzeHandler
+  :: LastMember IO effs
+  => ImpactInput
+  -> Eff effs (GotoChoice '[To Exit ImpactOutput])
+analyzeHandler input = do
+  result <- sendM $ doLSPAnalysis input
+  case result of
+    Left err -> do
+      -- On error, return empty output with error in symbol name
+      let errorOutput = ImpactOutput
+            { symbol = Just $ SymbolInfo ("Error: " <> err) ""
+            , definedAt = []
+            , references = []
+            , stats = ImpactStats 0 0 []
+            }
+      pure $ gotoExit errorOutput
+    Right output ->
+      pure $ gotoExit output
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- GRAPH EXECUTION
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Run the complete graph: Entry → Analyze → Exit
+runImpactGraph :: ImpactInput -> IO ImpactOutput
+runImpactGraph input = runM $ runGraph impactHandlers input
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- CORE LSP ANALYSIS (unchanged from IO version)
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Run full impact analysis for a symbol at the given position.
---
--- @
--- runAnalysis ImpactInput
---   { file = "src/Foo.hs"
---   , line = 42
---   , col = 10
---   }
--- @
-runAnalysis :: ImpactInput -> IO (Either Text ImpactOutput)
-runAnalysis input = do
+doLSPAnalysis :: ImpactInput -> IO (Either Text ImpactOutput)
+doLSPAnalysis input = do
   absPath <- makeAbsolute (file input)
   mProjectRoot <- findProjectRoot absPath
 
