@@ -14,7 +14,9 @@ library
     exposed-modules:
         Tidepool
         Tidepool.WASM
+        Tidepool.Platform
         Tidepool.Effect
+        Tidepool.Effect.LSP
         Tidepool.Effect.Metadata
         Tidepool.Effect.Types
         Tidepool.Graph
@@ -84,6 +86,11 @@ library
         directory >= 1.3 && < 2,
         filepath >= 1.4 && < 2
     hs-source-dirs:   src
+    -- Platform-specific source directories for NativeOnly constraint
+    if os(wasi)
+      hs-source-dirs: src-platform-wasm
+    else
+      hs-source-dirs: src-platform-native
     default-language: GHC2021
     default-extensions:
         DataKinds

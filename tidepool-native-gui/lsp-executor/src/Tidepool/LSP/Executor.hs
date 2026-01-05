@@ -26,7 +26,7 @@ import Language.LSP.Client.Session (Session, initialize, request)
 import qualified Language.LSP.Protocol.Types as L
 import qualified Language.LSP.Protocol.Message as L
 
-import Tidepool.Effects.LSP
+import Tidepool.Effect.LSP
 
 
 -- ════════════════════════════════════════════════════════════════════════════
