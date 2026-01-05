@@ -529,6 +529,35 @@ pnpm deploy       # Deploy to Cloudflare
 { type: "error", message: "..." }
 ```
 
+## Native Server (`tidepool-native-gui/server/`)
+
+For local development without Cloudflare Workers. Runs agents natively with full effect composition.
+
+### Quick Start
+
+```bash
+just native  # Starts server at localhost:8080
+# Or directly:
+TIDEPOOL_DIST=tidepool-native-gui/solid-frontend/dist cabal run tidepool-native
+```
+
+### Architecture
+
+- **Servant** for REST API (`/health`, `/sessions`)
+- **wai-websockets** for WebSocket overlay
+- **freer-simple** effect composition via `runEffects`
+- **STM sessions** for per-connection state
+
+### Effect Stack
+
+```haskell
+runEffects :: ExecutorEnv -> UIContext -> UICallback
+           -> Eff '[UI, Habitica, LLMComplete, Observability, IO] a
+           -> IO a
+```
+
+See `tidepool-native-gui/server/CLAUDE.md` for full documentation.
+
 ## LSP Integration (Gas Town)
 
 Claude Code agents (polecats, witnesses, mayor) can use LSP for code intelligence.

@@ -24,7 +24,6 @@ module Tidepool.Server.EffectRunner
 
     -- * Running Effects
   , runEffects
-  , runUIOnly
   ) where
 
 import Control.Monad.Freer (Eff, runM)
@@ -184,17 +183,6 @@ mkExecutorEnv config = do
 -- ════════════════════════════════════════════════════════════════════════════
 -- EFFECT RUNNERS
 -- ════════════════════════════════════════════════════════════════════════════
-
--- | Run a UI-only program.
---
--- This is useful for simple agents that only use UI effects without
--- LLM, Habitica, or observability.
---
--- Note: The effect stack must end with IO for the interpreters to work.
--- Agents use polymorphic types like @Member UI effs => Eff effs a@
--- which get instantiated to this concrete stack when run.
-runUIOnly :: UIContext -> UICallback -> Eff '[UI, IO] a -> IO a
-runUIOnly ctx callback = runM . runUI ctx callback
 
 -- | Run a program with all effects composed.
 --
