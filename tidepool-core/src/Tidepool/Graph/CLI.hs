@@ -81,6 +81,7 @@ import Control.Monad.Freer (Eff, run)
 import Data.Aeson (ToJSON)
 import Data.Aeson.Text qualified as Aeson
 import Data.Char (isUpper, toLower)
+import Data.Maybe (fromMaybe)
 import Data.Kind (Type, Constraint)
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -395,7 +396,7 @@ deriveCommand typeName con = case con of
     parser <- deriveRecordParser typeName conName fields
     let cmdName = toKebabCase (nameBase conName)
     mDoc <- getDoc (DeclDoc conName)
-    let desc = maybe ("Run " ++ nameBase conName) id mDoc
+    let desc = fromMaybe ("Run " ++ nameBase conName) mDoc
     [| command cmdName (info $(pure parser) (progDesc $(litE (stringL desc)))) |]
 
   NormalC conName [] -> do
@@ -403,7 +404,7 @@ deriveCommand typeName con = case con of
     let cmdName = toKebabCase (nameBase conName)
         con' = conE conName
     mDoc <- getDoc (DeclDoc conName)
-    let desc = maybe ("Run " ++ nameBase conName) id mDoc
+    let desc = fromMaybe ("Run " ++ nameBase conName) mDoc
     [| command cmdName (info (pure $con') (progDesc $(litE (stringL desc)))) |]
 
   _ -> fail $ "deriveCLIParser: Constructor " ++ show con

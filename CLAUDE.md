@@ -74,6 +74,19 @@ bd show tidepool-XXX
 3. **Completing work**: Mark task `closed` after PR merge
 4. **Tracking across worktrees**: All worktrees share the same db
 
+### Landing the Plane (Session Completion)
+
+When ending a work session, complete ALL steps. Work is NOT complete until `git push` succeeds.
+
+1. **File issues for remaining work** - Create beads for anything that needs follow-up
+2. **Run quality gates** (if code changed) - Tests, linters, builds
+3. **Update issue status** - Close finished work, update in-progress items
+4. **Push to remote**:
+   ```bash
+   git pull --rebase && bd sync && git push
+   ```
+5. **Verify** - `git status` shows "up to date with origin"
+
 ### Current Tasks
 
 Run `bd list --all` from `~/dev/tidepool` to see current tasks.

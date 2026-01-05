@@ -9,7 +9,7 @@ module Main where
 
 import Tidepool.Graph.CLI (deriveCLIParser, runGraphCLIWith)
 
-import ImpactAnalysis.Types (ImpactInput)
+import ImpactAnalysis.Types (ImpactInput(..))
 import ImpactAnalysis.Analyze (runImpactGraph)
 
 
