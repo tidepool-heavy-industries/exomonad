@@ -18,6 +18,9 @@ module Tidepool.BD.GitExecutor
   ( -- * Executor
     runGit
   , runGitIO
+
+    -- * Utilities (for testing)
+  , worktreeName
   ) where
 
 import Control.Exception (try, SomeException)

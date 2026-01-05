@@ -25,7 +25,7 @@ import Tidepool.Effects.BD
 import Tidepool.Effects.Git (WorktreeInfo(..))
 import Tidepool.BD.Executor
 import Tidepool.BD.Prime.Graph (PrimeContext(..), renderPrime, renderPrimeJSON)
-import Tidepool.BD.Prime.Worktree (worktreeName)
+import Tidepool.BD.GitExecutor (worktreeName)
 
 
 main :: IO ()

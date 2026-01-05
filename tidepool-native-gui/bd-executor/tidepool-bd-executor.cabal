@@ -17,7 +17,6 @@ library
         Tidepool.BD.GitExecutor
         Tidepool.BD.Prime.Graph
         Tidepool.BD.Prime.Runner
-        Tidepool.BD.Prime.Worktree
     build-depends:
         base >= 4.17 && < 5,
         freer-simple >= 1.2 && < 2,
