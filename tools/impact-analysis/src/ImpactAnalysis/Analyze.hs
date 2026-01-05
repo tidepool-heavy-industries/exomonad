@@ -203,10 +203,49 @@ getLSPCommand mCliCmd = do
     Nothing -> ("haskell-language-server-wrapper", ["--lsp"])
 
 -- | Parse a command string into executable and arguments.
+-- Handles shell-style quoting (single/double quotes, backslash escapes).
 parseCommand :: String -> (String, [String])
-parseCommand s = case words s of
+parseCommand s = case shellWords s of
   [] -> ("haskell-language-server-wrapper", ["--lsp"])
   (x:xs) -> (x, xs)
+
+-- | Quote parsing mode for shell-style word splitting.
+data ShellMode = ShellUnquoted | ShellInSingle | ShellInDouble
+
+-- | Simple shell-style word splitter supporting:
+--   * Unquoted words separated by whitespace
+--   * Single quotes: 'literal text' (no escapes)
+--   * Double quotes: "text with \" and \\ escapes"
+--   * Backslash escapes in unquoted context
+shellWords :: String -> [String]
+shellWords = go [] [] ShellUnquoted
+  where
+    go :: [String] -> String -> ShellMode -> String -> [String]
+    go acc cur _ [] = finishToken acc cur
+    go acc cur mode (c:cs) = case mode of
+      ShellUnquoted -> case c of
+        ' '  -> go (finishToken acc cur) [] ShellUnquoted cs
+        '\t' -> go (finishToken acc cur) [] ShellUnquoted cs
+        '\'' -> go acc cur ShellInSingle cs
+        '"'  -> go acc cur ShellInDouble cs
+        '\\' -> case cs of
+          (e:rest) -> go acc (e:cur) ShellUnquoted rest
+          []       -> go acc ('\\':cur) ShellUnquoted []
+        _    -> go acc (c:cur) ShellUnquoted cs
+      ShellInSingle -> case c of
+        '\'' -> go acc cur ShellUnquoted cs
+        _    -> go acc (c:cur) ShellInSingle cs
+      ShellInDouble -> case c of
+        '"'  -> go acc cur ShellUnquoted cs
+        '\\' -> case cs of
+          (e:rest) | e `elem` ("\"\\$`" :: String) -> go acc (e:cur) ShellInDouble rest
+          (e:rest) -> go acc (e:'\\':cur) ShellInDouble rest
+          []       -> go acc ('\\':cur) ShellInDouble []
+        _    -> go acc (c:cur) ShellInDouble cs
+
+    finishToken :: [String] -> String -> [String]
+    finishToken acc [] = acc
+    finishToken acc cur = acc ++ [reverse cur]
 
 withHLSSession :: Maybe String -> FilePath -> (HLSSession -> IO a) -> IO a
 withHLSSession mLspCmd projectRoot = bracket acquire release
