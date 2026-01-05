@@ -57,6 +57,14 @@ enum Commands {
         /// Timeout in seconds (0 = no timeout)
         #[arg(long, default_value = "300")]
         timeout: u64,
+
+        /// Resume an existing Claude Code session by ID
+        #[arg(long)]
+        resume: Option<String>,
+
+        /// Fork the session (read-only resume, doesn't modify original)
+        #[arg(long)]
+        fork_session: bool,
     },
 }
 
@@ -77,6 +85,8 @@ struct RunResult {
     cost_usd: Option<f64>,
     /// Number of turns (tool use iterations)
     num_turns: Option<i64>,
+    /// Session ID for resumption (can be passed back via --resume)
+    session_id: Option<String>,
 }
 
 fn main() -> Result<()> {
@@ -93,6 +103,8 @@ fn main() -> Result<()> {
             json_schema,
             tools,
             timeout,
+            resume,
+            fork_session,
         } => {
             run_cc_session(
                 &session,
@@ -104,6 +116,8 @@ fn main() -> Result<()> {
                 json_schema.as_deref(),
                 tools.as_deref(),
                 timeout,
+                resume.as_deref(),
+                fork_session,
             )?;
         }
     }
@@ -121,6 +135,8 @@ fn run_cc_session(
     json_schema: Option<&str>,
     tools: Option<&str>,
     timeout_secs: u64,
+    resume: Option<&str>,
+    fork_session: bool,
 ) -> Result<()> {
     // Validate output file's parent directory exists
     if let Some(parent) = output_file.parent() {
@@ -159,6 +175,16 @@ fn run_cc_session(
     if let Some(t) = tools {
         cmd_parts.push("--tools".to_string());
         cmd_parts.push(shell_quote(t).into_owned());
+    }
+
+    // Add session resumption flags
+    if let Some(session_id) = resume {
+        cmd_parts.push("--resume".to_string());
+        cmd_parts.push(shell_quote(session_id).into_owned());
+    }
+
+    if fork_session {
+        cmd_parts.push("--fork-session".to_string());
     }
 
     // Add prompt
@@ -270,6 +296,7 @@ fn run_cc_session(
         structured_output: cc_json.get("structured_output").cloned(),
         cost_usd: cc_json.get("total_cost_usd").and_then(|v| v.as_f64()),
         num_turns: cc_json.get("num_turns").and_then(|v| v.as_i64()),
+        session_id: cc_json.get("session_id").and_then(|v| v.as_str()).map(String::from),
     };
 
     println!("{}", serde_json::to_string_pretty(&result)?);

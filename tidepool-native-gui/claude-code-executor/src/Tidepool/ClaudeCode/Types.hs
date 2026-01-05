@@ -50,6 +50,8 @@ data ClaudeCodeResult = ClaudeCodeResult
     -- ^ Cost in USD
   , ccrNumTurns :: Maybe Int
     -- ^ Number of turns (tool use iterations)
+  , ccrSessionId :: Maybe Text
+    -- ^ Session ID for resumption (pass back via --resume)
   }
   deriving stock (Show, Eq, Generic)
 
@@ -63,6 +65,7 @@ instance FromJSON ClaudeCodeResult where
     ccrStructuredOutput <- o .:? "structured_output"
     ccrCostUsd <- o .:? "cost_usd"
     ccrNumTurns <- o .:? "num_turns"
+    ccrSessionId <- o .:? "session_id"
     pure ClaudeCodeResult{..}
 
 

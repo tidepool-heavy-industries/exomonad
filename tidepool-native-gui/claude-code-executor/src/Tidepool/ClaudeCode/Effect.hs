@@ -60,6 +60,9 @@ import Tidepool.ClaudeCode.Executor (runClaudeCodeRequest)
 --
 -- This is a sibling effect to LLM, not a wrapper. The type system determines
 -- at compile time which effect a handler uses based on HasClaudeCode.
+--
+-- Returns @(structuredOutput, sessionId)@ where sessionId can be passed back
+-- via resumeSession parameter to continue the conversation.
 data ClaudeCodeExec r where
   ClaudeCodeExecOp
     :: ModelChoice      -- ^ Model: Haiku, Sonnet, Opus
@@ -67,12 +70,14 @@ data ClaudeCodeExec r where
     -> Text             -- ^ Rendered prompt
     -> Maybe Value      -- ^ JSON schema for structured output
     -> Maybe Text       -- ^ Tools to allow
-    -> ClaudeCodeExec Value
+    -> Maybe Text       -- ^ Session ID to resume (for conversation continuity)
+    -> ClaudeCodeExec (Value, Maybe Text)  -- ^ (output, sessionId)
 
 
 -- | Execute a ClaudeCode request.
 --
--- Returns the structured output from Claude Code.
+-- Returns @(structuredOutput, sessionId)@ from Claude Code.
+-- The sessionId can be passed to a subsequent call to continue the conversation.
 -- Fails if Claude Code reports an error or returns no structured output.
 execClaudeCode
   :: Member ClaudeCodeExec effs
@@ -81,21 +86,22 @@ execClaudeCode
   -> Text             -- ^ Rendered prompt
   -> Maybe Value      -- ^ JSON schema for structured output
   -> Maybe Text       -- ^ Tools to allow
-  -> Eff effs Value
-execClaudeCode model cwd prompt schema tools =
-  send $ ClaudeCodeExecOp model cwd prompt schema tools
+  -> Maybe Text       -- ^ Session ID to resume (Nothing for new session)
+  -> Eff effs (Value, Maybe Text)  -- ^ (output, sessionId)
+execClaudeCode model cwd prompt schema tools resumeSession =
+  send $ ClaudeCodeExecOp model cwd prompt schema tools resumeSession
 
 
 -- | Run ClaudeCodeExec effect with a pure handler.
 --
 -- Used for testing or alternative implementations.
 runClaudeCodeExec
-  :: (ModelChoice -> Maybe FilePath -> Text -> Maybe Value -> Maybe Text -> Eff effs Value)
+  :: (ModelChoice -> Maybe FilePath -> Text -> Maybe Value -> Maybe Text -> Maybe Text -> Eff effs (Value, Maybe Text))
   -> Eff (ClaudeCodeExec ': effs) a
   -> Eff effs a
 runClaudeCodeExec handler = interpret $ \case
-  ClaudeCodeExecOp model cwd prompt schema tools ->
-    handler model cwd prompt schema tools
+  ClaudeCodeExecOp model cwd prompt schema tools resumeSession ->
+    handler model cwd prompt schema tools resumeSession
 
 
 -- | Run ClaudeCodeExec effect using zellij-cc.
@@ -105,14 +111,17 @@ runClaudeCodeExec handler = interpret $ \case
 -- - zellij-cc process fails
 -- - Claude Code reports an error (is_error = true)
 -- - No structured output is returned
+--
+-- Returns @(structuredOutput, sessionId)@ on success.
 runClaudeCodeExecIO
   :: LastMember IO effs
   => ClaudeCodeConfig
   -> Eff (ClaudeCodeExec ': effs) a
   -> Eff effs a
 runClaudeCodeExecIO cfg = interpret $ \case
-  ClaudeCodeExecOp model cwd prompt schema tools -> sendM $ do
-    result <- runClaudeCodeRequest cfg model cwd prompt schema tools
+  ClaudeCodeExecOp model cwd prompt schema tools resumeSession -> sendM $ do
+    -- Pass resumeSession, forkSession=False (we always mutate the session)
+    result <- runClaudeCodeRequest cfg model cwd prompt schema tools resumeSession False
     case result of
       Left err ->
         error $ "ClaudeCode execution failed: " <> formatError err
@@ -123,7 +132,7 @@ runClaudeCodeExecIO cfg = interpret $ \case
               maybe "(no message)" T.unpack ccr.ccrResult
 
         | Just val <- ccr.ccrStructuredOutput ->
-            pure val
+            pure (val, ccr.ccrSessionId)
 
         | otherwise ->
             error "ClaudeCode returned no structured output (schema validation may have failed)"

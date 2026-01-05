@@ -36,7 +36,7 @@ import Tidepool.ClaudeCode.Types (ClaudeCodeResult(..), ClaudeCodeError(..))
 -- 4. Parses the JSON output
 --
 -- @
--- result <- runClaudeCodeRequest config Sonnet (Just "/my/project") "Analyze this code" schema tools
+-- result <- runClaudeCodeRequest config Sonnet (Just "/my/project") "Analyze this code" schema tools Nothing False
 -- case result of
 --   Left err -> handleError err
 --   Right ccr -> use ccr.ccrStructuredOutput
@@ -48,14 +48,16 @@ runClaudeCodeRequest
   -> Text             -- ^ Rendered prompt
   -> Maybe Value      -- ^ JSON schema for structured output
   -> Maybe Text       -- ^ Tools to allow (comma-separated, e.g. "Glob,Read")
+  -> Maybe Text       -- ^ Session ID to resume (for conversation continuity)
+  -> Bool             -- ^ Fork session (read-only resume, doesn't modify original)
   -> IO (Either ClaudeCodeError ClaudeCodeResult)
-runClaudeCodeRequest cfg model cwd prompt schema tools = do
+runClaudeCodeRequest cfg model cwd prompt schema tools resumeSession forkSession = do
   -- Generate unique output file
   uuid <- nextRandom
   let outputFile = cfg.ccTempDir </> ("cc-" <> T.unpack (toText uuid) <> ".json")
 
   -- Build arguments
-  let args = buildArgs cfg model cwd prompt schema tools outputFile
+  let args = buildArgs cfg model cwd prompt schema tools outputFile resumeSession forkSession
 
   -- Run zellij-cc
   result <- try $ readProcessWithExitCode cfg.ccZellijCcPath args ""
@@ -90,8 +92,10 @@ buildArgs
   -> Maybe Value
   -> Maybe Text
   -> FilePath
+  -> Maybe Text       -- ^ Session ID to resume
+  -> Bool             -- ^ Fork session
   -> [String]
-buildArgs cfg model cwd prompt schema tools outputFile =
+buildArgs cfg model cwd prompt schema tools outputFile resumeSession forkSession =
   [ "run"
   , "--session", T.unpack cfg.ccZellijSession
   , "--name", "cc-node"  -- Could make this configurable
@@ -103,6 +107,8 @@ buildArgs cfg model cwd prompt schema tools outputFile =
   ++ cwdArgs
   ++ schemaArgs
   ++ toolsArgs
+  ++ resumeArgs
+  ++ forkArgs
   where
     cwdArgs = case cwd of
       Nothing -> []
@@ -115,6 +121,12 @@ buildArgs cfg model cwd prompt schema tools outputFile =
     toolsArgs = case tools of
       Nothing -> []
       Just t -> ["--tools", T.unpack t]
+
+    resumeArgs = case resumeSession of
+      Nothing -> []
+      Just sid -> ["--resume", T.unpack sid]
+
+    forkArgs = if forkSession then ["--fork-session"] else []
 
 
 -- | Convert ModelChoice to zellij-cc model string.
