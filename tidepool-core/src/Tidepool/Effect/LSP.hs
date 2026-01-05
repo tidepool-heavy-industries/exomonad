@@ -6,23 +6,31 @@
 -- LSP requires a local language server subprocess (e.g., HLS) which
 -- is not available in WASM/browser environments.
 --
--- All smart constructors have a 'NativeOnly' constraint that produces
+-- All operations have a 'NativeOnly' constraint that produces
 -- a helpful compile-time error if used in WASM builds.
 --
 -- = Architecture
 --
 -- @
 --  +-------------------+
---  | Tidepool.Effect.LSP |  <- This module (pure types + effect)
+--  | Tidepool.Effect.LSP | <- This module (types, effect, utilities)
 --  +-------------------+
 --           |
 --   +-------v-------+
---   | lsp-executor  |  <- Native interpreter (via lsp-client)
+--   | lsp-executor  | <- Native interpreter (via lsp-client)
 --   | (lsp-client)  |
 --   +---------------+
 -- @
 --
+-- Includes:
+--   - Effect definition (LSP GADT)
+--   - Smart constructors for LSP queries
+--   - Type definitions (Position, Diagnostic, etc.)
+--   - Stub runner for testing (runLSPStub)
+--
 -- = Usage
+--
+-- Effectful handler:
 --
 -- @
 -- myHandler :: (Member LSP effs, NativeOnly) => Eff effs Text
@@ -31,6 +39,17 @@
 --   case info of
 --     Just h -> pure (hoverContents h)
 --     Nothing -> pure "No hover info"
+-- @
+--
+-- Stub runner for testing:
+--
+-- @
+-- import Tidepool.Effect (runLog, LogLevel(..))
+--
+-- test :: IO ()
+-- test = void $ runM $ runLog InfoLevel $ runLSPStub $ do
+--   diags <- diagnostics (textDocument "src/Main.hs")
+--   pure ()
 -- @
 --
 module Tidepool.Effect.LSP
@@ -70,15 +89,20 @@ module Tidepool.Effect.LSP
   , TextEdit(..)
   , CompletionItem(..)
   , CompletionItemKind(..)
+
+    -- * Native-only utilities
+  , runLSPStub
   ) where
 
-import Control.Monad.Freer (Eff, Member, send)
+import Control.Monad.Freer (Eff, Member, interpret, send)
 import Data.Aeson (FromJSON, ToJSON)
 import Data.Map.Strict (Map)
+import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
 
+import Tidepool.Effect (Log, logInfo)
 import Tidepool.Platform (NativeOnly)
 
 
@@ -341,3 +365,51 @@ rename doc pos newName = send (Rename doc pos newName)
 -- Note: This operation requires native execution (not available in WASM).
 completion :: (Member LSP effs, NativeOnly) => TextDocumentIdentifier -> Position -> Eff effs [CompletionItem]
 completion doc pos = send (Completion doc pos)
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- NATIVE-ONLY UTILITIES
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Stub runner that logs operations and returns empty/error results.
+--
+-- This is a placeholder for testing and development. For real LSP
+-- functionality, use 'Tidepool.LSP.Executor.runLSP' from lsp-executor.
+runLSPStub :: Member Log effs => Eff (LSP ': effs) a -> Eff effs a
+runLSPStub = interpret $ \case
+  Diagnostics doc -> do
+    logInfo $ "[LSP:stub] Diagnostics called for: " <> doc.tdiUri
+    pure []  -- Return empty list instead of erroring
+
+  Hover doc pos -> do
+    logInfo $ "[LSP:stub] Hover at " <> doc.tdiUri <> " " <> showPos pos
+    pure Nothing
+
+  References doc pos -> do
+    logInfo $ "[LSP:stub] References at " <> doc.tdiUri <> " " <> showPos pos
+    pure []
+
+  Definition doc pos -> do
+    logInfo $ "[LSP:stub] Definition at " <> doc.tdiUri <> " " <> showPos pos
+    pure []
+
+  CodeActions doc rng -> do
+    logInfo $ "[LSP:stub] CodeActions at " <> doc.tdiUri <> " " <> showRange rng
+    pure []
+
+  Rename doc pos newName -> do
+    logInfo $ "[LSP:stub] Rename at " <> doc.tdiUri <> " " <> showPos pos <> " to " <> newName
+    pure (WorkspaceEdit Map.empty)
+
+  Completion doc pos -> do
+    logInfo $ "[LSP:stub] Completion at " <> doc.tdiUri <> " " <> showPos pos
+    pure []
+  where
+    showPos :: Position -> Text
+    showPos p = "(" <> showT p.posLine <> ":" <> showT p.posCharacter <> ")"
+
+    showRange :: Range -> Text
+    showRange r = showPos r.rangeStart <> "-" <> showPos r.rangeEnd
+
+    showT :: Show a => a -> Text
+    showT = T.pack . show

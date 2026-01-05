@@ -4,17 +4,17 @@
 
 -- | Effect metadata for routing decisions.
 --
--- This module is the SINGLE SOURCE OF TRUTH for effect routing metadata.
--- Both the Haskell runtime (WireTypes.hs) and TypeScript codegen (GraphSpecs.hs)
--- derive their routing logic from this module.
+-- This module defines metadata for all effect types (Log, LLM, State, etc.).
+-- It's used by executors to determine how to route and schedule effects.
 --
 -- = Adding a New Effect
 --
--- When adding a new effect type to SerializableEffect:
+-- When adding a new effect GADT (e.g., data Foo r where ...):
 --
--- 1. Add the constructor to SerializableEffect in WireTypes.hs
--- 2. Add an entry to 'allEffectMeta' here
--- 3. The rest is automatic - codegen and runtime both use this list
+-- 1. Define the effect type in Tidepool.Effect.Types
+-- 2. Add a corresponding EffectMeta entry to 'allEffectMeta' here
+-- 3. Decide: Internal (handled by framework) or Yielded (sent back to caller)
+-- 4. Decide: FireAndForget or Blocking semantics
 module Tidepool.Effect.Metadata
   ( -- * Effect Categories
     EffectCategory(..)
@@ -88,25 +88,20 @@ data EffectMeta = EffectMeta
 -- - Internal effects are handled by StateMachineDO
 -- - Yielded effects are sent back to the caller
 --
--- Keep in sync with SerializableEffect constructors in WireTypes.hs!
+-- Keep in sync with effect types in Tidepool.Effect.Types!
+-- For each effect GADT (State, LLM, Random, etc.), add one entry here.
 allEffectMeta :: [EffectMeta]
 allEffectMeta =
-  [ EffectMeta "LogInfo"         Internal FireAndForget
-  , EffectMeta "LogError"        Internal FireAndForget
-  , EffectMeta "LlmComplete"     Internal Blocking
-  , EffectMeta "LlmCall"         Internal Blocking      -- Tool-aware LLM calls
-  , EffectMeta "Habitica"        Internal Blocking
-  , EffectMeta "TelegramSend"    Yielded  FireAndForget
-  , EffectMeta "TelegramAsk"     Yielded  Blocking
-  -- State effects (for DM and other stateful graphs)
-  , EffectMeta "GetState"        Internal Blocking
-  , EffectMeta "SetState"        Internal FireAndForget
-  -- Event emission (for observability/GUI)
-  , EffectMeta "EmitEvent"       Yielded  FireAndForget
-  -- Random number generation
-  , EffectMeta "RandomInt"       Internal Blocking
-  -- Time
-  , EffectMeta "GetTime"         Internal Blocking
+  -- Core IO-blind effects
+  [ EffectMeta "Log"             Internal FireAndForget  -- LogMsg with various levels
+  , EffectMeta "LLM"             Internal Blocking       -- RunTurnOp (tool-aware LLM calls)
+  , EffectMeta "State"           Internal Blocking       -- Get/Put for agent state
+  , EffectMeta "Random"          Internal Blocking       -- RandomInt/RandomDouble
+  , EffectMeta "Time"            Internal Blocking       -- GetCurrentTime
+  , EffectMeta "ChatHistory"     Internal Blocking       -- GetHistory/AppendMessages
+  , EffectMeta "Emit"            Yielded  FireAndForget  -- EmitEvent for observability
+  , EffectMeta "RequestInput"    Yielded  Blocking       -- RequestChoice/RequestText (user input)
+  , EffectMeta "QuestionUI"      Yielded  Blocking       -- AskQuestion (structured questions)
   ]
 
 

@@ -55,7 +55,6 @@ library
         Tidepool.Effects.UI
         Tidepool.Effects.LLMProvider
         Tidepool.Effects.Issue
-        Tidepool.Effects.LSP
         Tidepool.Effects.BD
         Tidepool.Effects.Git
         Tidepool.Graph.Mermaid

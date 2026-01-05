@@ -14,7 +14,7 @@ module Tidepool.Effect.Types
   , LLM(..)
   , ChatHistory(..)
   , Emit(..)
-  , RequestInput(..)
+  , RequestInput        -- ^ Use smart constructors (requestChoice, requestText, etc.)
   , Log(..)
   , LogLevel(..)
   , QuestionUI(..)
@@ -55,9 +55,9 @@ module Tidepool.Effect.Types
   , runTurnContent
   , llmCall
   , llmCallEither
-  , llmCallTry
-  , llmCallWithTools
-  , llmCallWithToolsTry
+  , llmCallEitherWithTools
+  , llmCallStructured
+  , llmCallStructuredWithTools
   , withImages
 
     -- * LLM Error Types
@@ -297,6 +297,11 @@ runTurnContent systemPrompt userContent schema tools = do
           , tpfToolsInvoked = tr.trToolsInvoked
           }
 
+-- | Make an LLM call that throws on error.
+--
+-- Throws an exception if the LLM call fails. For error handling, use
+-- 'llmCallEither' (returns Either with Text errors) or 'llmCallStructured'
+-- (returns Either with structured LlmError type).
 llmCall
   :: forall output effs. (Member LLM effs, FromJSON output)
   => Text -> Text -> Value -> Eff effs output
@@ -306,6 +311,11 @@ llmCall systemPrompt userInput schema = do
     Left err -> error $ "LLM call failed: " <> T.unpack err
     Right output -> pure output
 
+-- | Make an LLM call returning Either with simple Text errors (no tools).
+--
+-- Returns @Left (error message)@ on failure or @Right output@ on success.
+-- Errors are represented as plain Text. Use 'llmCallStructured' for structured
+-- error types (rate limits, timeouts, etc.).
 llmCallEither
   :: forall output effs. (Member LLM effs, FromJSON output)
   => Text -> Text -> Value -> Eff effs (Either Text output)
@@ -316,10 +326,14 @@ llmCallEither systemPrompt userInput schema = do
     TurnCompleted (TurnParsed tr) -> pure $ Right tr.trOutput
     TurnCompleted (TurnParseFailed {tpfError}) -> pure $ Left $ "Parse failed: " <> T.pack tpfError
 
-llmCallWithTools
+-- | Make an LLM call with tool support, returning Either with simple Text errors.
+--
+-- Like 'llmCallEither' but supports tool definitions and invocations.
+-- Returns @Left (error message)@ on failure or @Right output@ on success.
+llmCallEitherWithTools
   :: forall output effs. (Member LLM effs, FromJSON output)
   => Text -> Text -> Value -> [Value] -> Eff effs (Either Text output)
-llmCallWithTools systemPrompt userInput schema tools = do
+llmCallEitherWithTools systemPrompt userInput schema tools = do
   result <- runTurn @output systemPrompt userInput schema tools
   case result of
     TurnBroken reason -> pure $ Left $ "Turn broken: " <> reason
@@ -328,11 +342,12 @@ llmCallWithTools systemPrompt userInput schema tools = do
 
 -- | Structured error type for LLM call failures.
 --
--- Note: Currently llmCallTry/llmCallWithToolsTry only produce 'LlmTurnBroken'
--- and 'LlmParseFailed'. The other variants (RateLimited, Timeout, NetworkError,
--- etc.) are defined for future use when the LLM runner is updated to return
--- errors instead of crashing. This matches the pattern used in Habitica/Telegram
--- where the stub runners return Left but real implementations will use all variants.
+-- Note: Currently 'llmCallStructured' and 'llmCallStructuredWithTools' only
+-- produce 'LlmTurnBroken' and 'LlmParseFailed'. The other variants (RateLimited,
+-- Timeout, NetworkError, etc.) are defined for future use when the LLM runner
+-- is updated to return errors instead of crashing. This matches the pattern used
+-- in Habitica/Telegram where stub runners return Left but real implementations
+-- will use all variants.
 data LlmError
   = LlmRateLimited              -- ^ Rate limit hit, retry later
   | LlmTimeout                  -- ^ Request timed out
@@ -344,22 +359,29 @@ data LlmError
   | LlmOther Text               -- ^ Other errors with message
   deriving (Show, Eq, Generic, FromJSON, ToJSON)
 
--- | Try variant: structured error instead of Text
-llmCallTry
+-- | Make an LLM call returning Either with structured errors (no tools).
+--
+-- Like 'llmCallEither' but returns structured 'LlmError' type instead of Text.
+-- This allows better error handling with pattern matching on specific error cases
+-- (rate limits, timeouts, etc.).
+llmCallStructured
   :: forall output effs. (Member LLM effs, FromJSON output)
   => Text -> Text -> Value -> Eff effs (Either LlmError output)
-llmCallTry systemPrompt userInput schema = do
+llmCallStructured systemPrompt userInput schema = do
   result <- runTurn @output systemPrompt userInput schema []
   case result of
     TurnBroken reason -> pure $ Left $ LlmTurnBroken reason
     TurnCompleted (TurnParsed tr) -> pure $ Right tr.trOutput
     TurnCompleted (TurnParseFailed {tpfError}) -> pure $ Left $ LlmParseFailed (T.pack tpfError)
 
--- | Try variant with tools: structured error instead of Text
-llmCallWithToolsTry
+-- | Make an LLM call with tool support, returning Either with structured errors.
+--
+-- Like 'llmCallEitherWithTools' but returns structured 'LlmError' type instead of Text.
+-- This allows better error handling with pattern matching on specific error cases.
+llmCallStructuredWithTools
   :: forall output effs. (Member LLM effs, FromJSON output)
   => Text -> Text -> Value -> [Value] -> Eff effs (Either LlmError output)
-llmCallWithToolsTry systemPrompt userInput schema tools = do
+llmCallStructuredWithTools systemPrompt userInput schema tools = do
   result <- runTurn @output systemPrompt userInput schema tools
   case result of
     TurnBroken reason -> pure $ Left $ LlmTurnBroken reason
@@ -448,6 +470,14 @@ runEmit handler = interpret $ \case
 -- REQUEST INPUT EFFECT
 -- ══════════════════════════════════════════════════════════════
 
+-- | User input request effect (choice, text, dice, etc.).
+--
+-- This effect is opaque - use the smart constructors:
+-- - 'requestChoice' for multiple-choice questions
+-- - 'requestText' for free text input
+-- - 'requestDice' for dice rolls with descriptions
+-- - 'requestTextWithPhoto' for text input with photo support
+-- - 'requestCustom' for custom request types
 data RequestInput r where
   RequestChoice :: Text -> [(Text, a)] -> RequestInput a
   RequestText :: Text -> RequestInput Text
@@ -455,18 +485,31 @@ data RequestInput r where
   RequestTextWithPhoto :: Text -> RequestInput (Text, [(Text, Text)])
   RequestCustom :: Text -> Value -> RequestInput Value
 
+-- | Ask user to choose from a list of options.
+--
+-- @
+-- result <- requestChoice "Which option?" [("Option A", 1), ("Option B", 2)]
+-- @
 requestChoice :: Member RequestInput effs => Text -> [(Text, a)] -> Eff effs a
 requestChoice prompt choices = send (RequestChoice prompt choices)
 
+-- | Ask user for free text input.
 requestText :: Member RequestInput effs => Text -> Eff effs Text
 requestText = send . RequestText
 
+-- | Ask user to roll dice. Each entry is (min, max, description).
+--
+-- @
+-- result <- requestDice "Roll attack dice:" [(1, 6, "d6"), (1, 6, "d6")]
+-- @
 requestDice :: Member RequestInput effs => Text -> [(Int, Int, Text)] -> Eff effs Int
 requestDice prompt diceWithHints = send (RequestDice prompt diceWithHints)
 
+-- | Ask user for text input with photo support.
 requestTextWithPhoto :: Member RequestInput effs => Text -> Eff effs (Text, [(Text, Text)])
 requestTextWithPhoto = send . RequestTextWithPhoto
 
+-- | Send a custom request to the UI (extensibility point).
 requestCustom :: Member RequestInput effs => Text -> Value -> Eff effs Value
 requestCustom tag payload = send (RequestCustom tag payload)
 
