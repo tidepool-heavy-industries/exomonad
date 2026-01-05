@@ -23,6 +23,8 @@ import Test.Hspec
 
 import Tidepool.Effects.BD
 import Tidepool.BD.Executor
+import Tidepool.BD.Prime
+import Tidepool.BD.Prime.Worktree
 
 
 main :: IO ()
@@ -39,6 +41,12 @@ main = hspec $ do
 
   describe "BD Executor - Real CLI" $ do
     realBdTests
+
+  describe "Urchin Prime - Worktree Detection" $ do
+    worktreeNameTests
+
+  describe "Urchin Prime - Context Rendering" $ do
+    primeRenderingTests
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -529,3 +537,134 @@ realBdTests = do
         let config = BDConfig { bcBeadsDir = Just (fixture.tfTmpDir </> ".beads" </> "beads.db"), bcQuiet = True }
         result <- bdLabels config fixture.tfChildId
         result `shouldBe` []
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- WORKTREE NAME TESTS
+-- ════════════════════════════════════════════════════════════════════════════
+
+worktreeNameTests :: Spec
+worktreeNameTests = describe "worktreeName" $ do
+  it "extracts name from worktrees path" $ do
+    worktreeName "/home/user/project/worktrees/bd" `shouldBe` "bd"
+
+  it "extracts name from nested worktrees path" $ do
+    worktreeName "/home/inanna/dev/tidepool/worktrees/native-server" `shouldBe` "native-server"
+
+  it "falls back to last component for non-worktree path" $ do
+    worktreeName "/home/user/some-project" `shouldBe` "some-project"
+
+  it "handles trailing slash" $ do
+    worktreeName "/home/user/project/worktrees/bd/" `shouldBe` "bd"
+
+  it "extracts from path with multiple worktrees directories" $ do
+    -- Takes the component after the first "worktrees"
+    worktreeName "/worktrees/old/worktrees/new-feature" `shouldBe` "old"
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- PRIME RENDERING TESTS
+-- ════════════════════════════════════════════════════════════════════════════
+
+primeRenderingTests :: Spec
+primeRenderingTests = describe "renderPrime" $ do
+  it "renders header with worktree and branch" $ do
+    let ctx = minimalContext
+    let output = renderPrime ctx
+    output `shouldSatisfy` T.isInfixOf "# Urchin Prime: test-wt / main"
+
+  it "renders git section with branch and dirty count" $ do
+    let ctx = minimalContext { pcDirtyFiles = ["file1.hs", "file2.hs"] }
+    let output = renderPrime ctx
+    output `shouldSatisfy` T.isInfixOf "**Branch**: main"
+    output `shouldSatisfy` T.isInfixOf "**Dirty files**: 2"
+
+  it "renders recent commit if present" $ do
+    let ctx = minimalContext { pcRecentCommits = ["Initial commit", "Second commit"] }
+    let output = renderPrime ctx
+    output `shouldSatisfy` T.isInfixOf "**Recent**: Initial commit"
+
+  it "renders propulsion section when hooked work exists" $ do
+    let hookedBead = testBead { biId = "hooked-1", biTitle = "Urgent work", biStatus = StatusHooked }
+    let ctx = minimalContext { pcHooked = [hookedBead] }
+    let output = renderPrime ctx
+    output `shouldSatisfy` T.isInfixOf "## Propulsion"
+    output `shouldSatisfy` T.isInfixOf "**HOOKED WORK**"
+    output `shouldSatisfy` T.isInfixOf "[hooked-1] Urgent work"
+
+  it "renders no propulsion message when no hooked work" $ do
+    let ctx = minimalContext { pcHooked = [] }
+    let output = renderPrime ctx
+    output `shouldSatisfy` T.isInfixOf "No hooked work"
+
+  it "renders in-progress beads" $ do
+    let inProgressBead = testBead { biId = "wip-1", biTitle = "Working on it", biPriority = 1 }
+    let ctx = minimalContext { pcInProgress = [inProgressBead] }
+    let output = renderPrime ctx
+    output `shouldSatisfy` T.isInfixOf "## In Progress (1)"
+    output `shouldSatisfy` T.isInfixOf "[wip-1] Working on it (P1)"
+
+  it "renders ready beads" $ do
+    let readyBead = testBead { biId = "ready-1", biTitle = "Ready to go", biPriority = 2 }
+    let ctx = minimalContext { pcReady = [readyBead] }
+    let output = renderPrime ctx
+    output `shouldSatisfy` T.isInfixOf "## Ready (1)"
+    output `shouldSatisfy` T.isInfixOf "[ready-1] Ready to go (P2)"
+
+  it "renders epic context when present" $ do
+    let epicBead = testBead { biId = "epic-1", biTitle = "Big Feature Epic", biType = TypeEpic }
+    let ctx = minimalContext { pcEpicContext = Just epicBead }
+    let output = renderPrime ctx
+    output `shouldSatisfy` T.isInfixOf "## Epic Context"
+    output `shouldSatisfy` T.isInfixOf "**epic-1**: Big Feature Epic"
+
+  it "omits epic section when no epic" $ do
+    let ctx = minimalContext { pcEpicContext = Nothing }
+    let output = renderPrime ctx
+    output `shouldSatisfy` (not . T.isInfixOf "## Epic Context")
+
+  it "renderPrimeJSON produces valid JSON" $ do
+    let ctx = minimalContext
+    let jsonOutput = renderPrimeJSON ctx
+    jsonOutput `shouldSatisfy` T.isPrefixOf "{"
+    jsonOutput `shouldSatisfy` T.isInfixOf "\"worktree\""
+    jsonOutput `shouldSatisfy` T.isInfixOf "\"git\""
+    jsonOutput `shouldSatisfy` T.isInfixOf "\"in_progress\""
+
+
+-- | Minimal context for testing.
+minimalContext :: PrimeContext
+minimalContext = PrimeContext
+  { pcWorktree = WorktreeInfo
+      { wiName = "test-wt"
+      , wiPath = "/tmp/test"
+      , wiBranch = "main"
+      , wiRepoRoot = "/tmp/test"
+      , wiIsWorktree = False
+      }
+  , pcDirtyFiles = []
+  , pcRecentCommits = []
+  , pcInProgress = []
+  , pcReady = []
+  , pcHooked = []
+  , pcEpicContext = Nothing
+  }
+
+
+-- | Test bead template.
+testBead :: BeadInfo
+testBead = BeadInfo
+  { biId = "test-1"
+  , biTitle = "Test"
+  , biDescription = Nothing
+  , biStatus = StatusOpen
+  , biPriority = 1
+  , biType = TypeTask
+  , biAssignee = Nothing
+  , biCreatedAt = Nothing
+  , biCreatedBy = Nothing
+  , biUpdatedAt = Nothing
+  , biParent = Nothing
+  , biDependencies = []
+  , biDependents = []
+  }
