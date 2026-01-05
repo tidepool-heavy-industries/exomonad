@@ -1,6 +1,6 @@
 -- | LLM effect executor - Anthropic/OpenAI HTTP client.
 --
--- Implements LLMComplete effect with native HTTP client.
+-- Implements LLMComplete effect with servant-client.
 -- Type-level provider determines request/response schema.
 --
 -- = Usage
@@ -37,35 +37,28 @@ module Tidepool.LLM.Executor
     -- * Request Building (exported for testing)
   , buildAnthropicRequest
   , buildOpenAIRequest
+
+    -- * Helpers (exported for testing)
+  , parseBaseUrl
+  , clientErrorToLLMError
   ) where
 
-import Control.Exception (try, SomeException)
 import Control.Monad.Freer (Eff, LastMember, interpret, sendM)
-import Data.Aeson
-  ( FromJSON(..)
-  , ToJSON(..)
-  , Value(..)
-  , eitherDecode
-  , encode
-  , object
-  , withObject
-  , (.:)
-  , (.:?)
-  , (.=)
-  )
-import Data.Aeson.Key qualified as Key
-import Data.Aeson.KeyMap qualified as KM
+import Data.Aeson (Value)
 import Data.ByteString.Lazy qualified as LBS
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
-import Network.HTTP.Client
-  ( Request(..)
-  , RequestBody(..)
-  , Response(..)
-  , httpLbs
-  , parseRequest
+import Network.HTTP.Client (Manager)
+import Servant.Client
+  ( BaseUrl(..)
+  , ClientError(..)
+  , ClientM
+  , Scheme(..)
+  , mkClientEnv
+  , runClientM
   )
+import Servant.Client.Core (ResponseF(..))
 import Network.HTTP.Types.Status (statusCode)
 
 import Tidepool.LLM.Types
@@ -85,20 +78,16 @@ import Tidepool.Effects.LLMProvider
   , OpenAIConfig(..)
   , AnthropicResponse(..)
   , OpenAIResponse(..)
-  , ContentBlock(..)
-  , Choice(..)
-  , Message(..)
-  , ToolCall(..)
-  , FunctionCall(..)
-  , Usage(..)
   )
+import Tidepool.LLM.API.Anthropic qualified as Anthropic
+import Tidepool.LLM.API.OpenAI qualified as OpenAI
 
 
 -- ════════════════════════════════════════════════════════════════════════════
--- ANTHROPIC HTTP CLIENT
+-- ANTHROPIC CLIENT
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Make a request to the Anthropic Messages API.
+-- | Make a request to the Anthropic Messages API using servant-client.
 anthropicRequest
   :: LLMEnv
   -> AnthropicConfig
@@ -109,69 +98,38 @@ anthropicRequest env config userMsg maybeTools = do
   case env.leConfig.lcAnthropicSecrets of
     Nothing -> pure $ Left LLMNoProviderConfigured
     Just secrets -> do
-      let url = T.unpack secrets.asBaseUrl <> "/v1/messages"
-          body = buildAnthropicRequest config userMsg maybeTools
+      let baseUrl = parseBaseUrl secrets.asBaseUrl
+          clientEnv = mkClientEnv env.leManager baseUrl
+          req = buildAnthropicRequest config userMsg maybeTools
 
-      result <- try @SomeException $ do
-        req0 <- parseRequest url
-        let req = req0
-              { method = "POST"
-              , requestHeaders =
-                  [ ("x-api-key", TE.encodeUtf8 secrets.asApiKey)
-                  , ("anthropic-version", "2023-06-01")
-                  , ("content-type", "application/json")
-                  ]
-              , requestBody = RequestBodyLBS body
-              }
-        httpLbs req env.leManager
+      result <- runClientM (Anthropic.anthropicComplete secrets.asApiKey req) clientEnv
+      pure $ either (Left . clientErrorToLLMError) Right result
 
-      case result of
-        Left exc -> pure $ Left $ LLMHttpError $ T.pack (show exc)
-        Right resp -> parseAnthropicResponse resp
-
--- | Build Anthropic Messages API request body.
+-- | Build Anthropic Messages API request.
 --
 -- Tools should be in Anthropic format (with @input_schema@, not @parameters@).
 -- Use 'AnthropicTool' or 'Tidepool.Tool.toolToJSON' which produce the correct format.
-buildAnthropicRequest :: AnthropicConfig -> Text -> Maybe [Value] -> LBS.ByteString
-buildAnthropicRequest config userMsg maybeTools =
-  encode $ object $ filter ((/= Null) . snd)
-    [ "model" .= config.acModel
-    , "max_tokens" .= config.acMaxTokens
-    , "messages" .= [object ["role" .= ("user" :: Text), "content" .= userMsg]]
-    , "system" .= config.acSystemPrompt
-    , "tools" .= maybeTools
-    , "thinking" .= case config.acThinkingBudget of
-        Nothing -> Null
-        Just budget -> object
-          [ "type" .= ("enabled" :: Text)
-          , "budget_tokens" .= budget
-          ]
-    ]
-
--- | Parse Anthropic API response.
-parseAnthropicResponse :: Response LBS.ByteString -> IO (Either LLMError AnthropicResponse)
-parseAnthropicResponse resp = do
-  let status = statusCode (responseStatus resp)
-      body = responseBody resp
-
-  case status of
-    401 -> pure $ Left LLMUnauthorized
-    429 -> pure $ Left LLMRateLimited
-    529 -> pure $ Left LLMOverloaded
-    _ | status >= 200 && status < 300 ->
-        case eitherDecode body of
-          Left err -> pure $ Left $ LLMParseError $ T.pack err
-          Right r -> pure $ Right r
-      | otherwise ->
-        pure $ Left $ parseErrorResponse body
+buildAnthropicRequest :: AnthropicConfig -> Text -> Maybe [Value] -> Anthropic.AnthropicRequest
+buildAnthropicRequest config userMsg maybeTools = Anthropic.AnthropicRequest
+  { Anthropic.arModel = config.acModel
+  , Anthropic.arMaxTokens = config.acMaxTokens
+  , Anthropic.arMessages = [Anthropic.AnthropicMessage "user" userMsg]
+  , Anthropic.arSystem = config.acSystemPrompt
+  , Anthropic.arTools = maybeTools
+  , Anthropic.arThinking = case config.acThinkingBudget of
+      Nothing -> Nothing
+      Just budget -> Just Anthropic.ThinkingConfig
+        { Anthropic.tcType = "enabled"
+        , Anthropic.tcBudgetTokens = budget
+        }
+  }
 
 
 -- ════════════════════════════════════════════════════════════════════════════
--- OPENAI HTTP CLIENT
+-- OPENAI CLIENT
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Make a request to the OpenAI Chat Completions API.
+-- | Make a request to the OpenAI Chat Completions API using servant-client.
 openaiRequest
   :: LLMEnv
   -> OpenAIConfig
@@ -182,26 +140,14 @@ openaiRequest env config userMsg maybeTools = do
   case env.leConfig.lcOpenAISecrets of
     Nothing -> pure $ Left LLMNoProviderConfigured
     Just secrets -> do
-      let url = T.unpack secrets.osBaseUrl <> "/v1/chat/completions"
-          body = buildOpenAIRequest config userMsg maybeTools
+      let baseUrl = parseBaseUrl secrets.osBaseUrl
+          clientEnv = mkClientEnv env.leManager baseUrl
+          req = buildOpenAIRequest config userMsg maybeTools
 
-      result <- try @SomeException $ do
-        req0 <- parseRequest url
-        let req = req0
-              { method = "POST"
-              , requestHeaders =
-                  [ ("Authorization", "Bearer " <> TE.encodeUtf8 secrets.osApiKey)
-                  , ("Content-Type", "application/json")
-                  ] <> maybe [] (\org -> [("OpenAI-Organization", TE.encodeUtf8 org)]) secrets.osOrgId
-              , requestBody = RequestBodyLBS body
-              }
-        httpLbs req env.leManager
+      result <- runClientM (OpenAI.openaiComplete secrets.osApiKey secrets.osOrgId req) clientEnv
+      pure $ either (Left . clientErrorToLLMError) Right result
 
-      case result of
-        Left exc -> pure $ Left $ LLMHttpError $ T.pack (show exc)
-        Right resp -> parseOpenAIResponse resp
-
--- | Build OpenAI Chat Completions API request body.
+-- | Build OpenAI Chat Completions API request.
 --
 -- __Tools format__: Tools should be in OpenAI function format:
 --
@@ -211,67 +157,84 @@ openaiRequest env config userMsg maybeTools = do
 --
 -- Use 'CfTool' from "Tidepool.Tool.Wire" or the 'ToCfTool' typeclass to produce
 -- correctly formatted tools. Do NOT pass Anthropic-format tools here.
-buildOpenAIRequest :: OpenAIConfig -> Text -> Maybe [Value] -> LBS.ByteString
-buildOpenAIRequest config userMsg maybeTools =
-  encode $ object $ filter ((/= Null) . snd)
-    [ "model" .= config.oaModel
-    , "max_tokens" .= config.oaMaxTokens
-    , "messages" .=
-        (maybe [] (\sys -> [object ["role" .= ("system" :: Text), "content" .= sys]]) config.oaSystemPrompt
-         ++ [object ["role" .= ("user" :: Text), "content" .= userMsg]])
-    , "temperature" .= config.oaTemperature
-    , "tools" .= maybeTools  -- Tools should already be in OpenAI format (via CfTool)
-    ]
-
--- | Parse OpenAI API response.
-parseOpenAIResponse :: Response LBS.ByteString -> IO (Either LLMError OpenAIResponse)
-parseOpenAIResponse resp = do
-  let status = statusCode (responseStatus resp)
-      body = responseBody resp
-
-  case status of
-    401 -> pure $ Left LLMUnauthorized
-    429 -> pure $ Left LLMRateLimited
-    _ | status >= 200 && status < 300 ->
-        case eitherDecode body of
-          Left err -> pure $ Left $ LLMParseError $ T.pack err
-          Right r -> pure $ Right r
-      | otherwise ->
-        pure $ Left $ parseErrorResponse body
+buildOpenAIRequest :: OpenAIConfig -> Text -> Maybe [Value] -> OpenAI.OpenAIRequest
+buildOpenAIRequest config userMsg maybeTools = OpenAI.OpenAIRequest
+  { OpenAI.orModel = config.oaModel
+  , OpenAI.orMaxTokens = config.oaMaxTokens
+  , OpenAI.orMessages = systemMsgs ++ [OpenAI.OpenAIMessage "user" (Just userMsg)]
+  , OpenAI.orTemperature = config.oaTemperature
+  , OpenAI.orTools = maybeTools
+  }
+  where
+    systemMsgs = case config.oaSystemPrompt of
+      Nothing -> []
+      Just sys -> [OpenAI.OpenAIMessage "system" (Just sys)]
 
 
 -- ════════════════════════════════════════════════════════════════════════════
--- ERROR PARSING
+-- HELPERS
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Parse error response body.
-parseErrorResponse :: LBS.ByteString -> LLMError
-parseErrorResponse body = case eitherDecode body of
-  Left _ -> LLMApiError "unknown" "Failed to parse error response"
-  Right val -> parseErrorValue val
+-- | Parse a base URL from Text.
+--
+-- Defaults to HTTPS on port 443 if not specified.
+-- Handles edge cases like empty strings, missing ports, malformed URLs.
+parseBaseUrl :: Text -> BaseUrl
+parseBaseUrl url =
+  let -- Strip trailing slash if present
+      cleanUrl = case T.stripSuffix "/" url of
+        Just t  -> t
+        Nothing -> url
+      -- Check for scheme
+      (scheme, rest) = case T.stripPrefix "https://" cleanUrl of
+        Just r -> (Https, T.unpack r)
+        Nothing -> case T.stripPrefix "http://" cleanUrl of
+          Just r -> (Http, T.unpack r)
+          Nothing -> (Https, T.unpack cleanUrl)
+      -- Default port based on scheme
+      defaultPort = if scheme == Https then 443 else 80
+      -- Split host and path
+      (hostPort, path) = break (== '/') rest
+      -- Split host and port (safely)
+      (host, port) = case break (== ':') hostPort of
+        (h, ':':p) -> case safeReadPort p of
+          Just port' -> (h, port')
+          Nothing    -> (h, defaultPort)
+        (h, _) -> (h, defaultPort)
+      -- Safe port parsing
+      safeReadPort :: String -> Maybe Int
+      safeReadPort s = case reads s of
+        [(n, "")] -> Just n
+        _         -> Nothing
+  in BaseUrl scheme host port path
 
--- | Parse error from JSON value.
-parseErrorValue :: Value -> LLMError
-parseErrorValue (Object obj) =
-  case KM.lookup (Key.fromText "error") obj of
-    Just (Object errObj) ->
-      let errType = case KM.lookup (Key.fromText "type") errObj of
-            Just (String t) -> t
-            _ -> "unknown"
-          errMsg = case KM.lookup (Key.fromText "message") errObj of
-            Just (String m) -> m
-            _ -> ""
-      in  checkContextLength errType errMsg
-    _ -> LLMApiError "unknown" "Malformed error response"
-parseErrorValue _ = LLMApiError "unknown" "Non-object error response"
-
--- | Check for context length errors.
-checkContextLength :: Text -> Text -> LLMError
-checkContextLength errType errMsg
-  | "context" `T.isInfixOf` T.toLower errMsg && "long" `T.isInfixOf` T.toLower errMsg
-    = LLMContextTooLong
-  | otherwise
-    = LLMApiError errType errMsg
+-- | Convert servant-client errors to LLMError.
+--
+-- Note: Error messages are sanitized to avoid leaking credentials.
+-- The full exception details (which may contain API keys in request headers)
+-- are NOT included in the error message.
+clientErrorToLLMError :: ClientError -> LLMError
+clientErrorToLLMError err = case err of
+  FailureResponse _ resp ->
+    let status = statusCode (responseStatusCode resp)
+        -- Check response body for context length error (safely)
+        bodyText = T.toLower $ TE.decodeUtf8Lenient $ LBS.toStrict $ responseBody resp
+        isContextError = "context" `T.isInfixOf` bodyText && "long" `T.isInfixOf` bodyText
+    in case status of
+      401 -> LLMUnauthorized
+      429 -> LLMRateLimited
+      529 -> LLMOverloaded
+      _ | isContextError -> LLMContextTooLong
+        | otherwise -> LLMApiError "http_error" (T.pack $ "Status " <> show status)
+  DecodeFailure msg _ ->
+    LLMParseError msg
+  -- Sanitized error messages - do NOT expose request details which contain API keys
+  UnsupportedContentType{} ->
+    LLMApiError "unsupported_content_type" "Unsupported content type in response"
+  InvalidContentTypeHeader{} ->
+    LLMApiError "invalid_content_type_header" "Invalid Content-Type header in response"
+  ConnectionError{} ->
+    LLMHttpError "Connection error while calling LLM provider"
 
 
 -- ════════════════════════════════════════════════════════════════════════════
