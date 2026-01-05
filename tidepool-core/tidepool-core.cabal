@@ -17,6 +17,7 @@ library
         Tidepool.Platform
         Tidepool.Effect
         Tidepool.Effect.LSP
+        Tidepool.Effect.DevLog
         Tidepool.Effect.Metadata
         Tidepool.Effect.Types
         Tidepool.Graph
@@ -27,6 +28,7 @@ library
         Tidepool.Graph.Goto.Internal
         Tidepool.Graph.Errors
         Tidepool.Graph.Execute
+        Tidepool.Graph.Execute.Instrumented
         Tidepool.Graph.Edges
         Tidepool.Graph.Validate
         Tidepool.Graph.Validate.RecordStructure

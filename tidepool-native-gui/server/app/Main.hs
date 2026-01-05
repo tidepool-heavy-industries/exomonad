@@ -2,7 +2,7 @@
 module Main where
 
 import System.Environment (lookupEnv)
-import Tidepool.Server (runServer, ServerConfig(..), ServerMode(..))
+import Tidepool.Server (runServer, ServerConfig(..), ServerMode(..), simpleAgent)
 import Tidepool.Server.EffectRunner (loadExecutorConfig)
 
 main :: IO ()
@@ -23,4 +23,5 @@ main = do
     , scHost = "0.0.0.0"
     , scExecutorConfig = executorConfig
     , scMode = mode
+    , scAgent = simpleAgent
     }
