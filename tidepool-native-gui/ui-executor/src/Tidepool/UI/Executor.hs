@@ -40,8 +40,7 @@ module Tidepool.UI.Executor
   ) where
 
 import Control.Monad (void, when)
-import Control.Monad.Freer
-import Control.Monad.Freer.Internal (Eff(..), decomp, qApp)
+import Control.Monad.Freer (Eff, LastMember, interpret, sendM)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Base64 as B64
 import Data.IORef
@@ -217,110 +216,102 @@ buildThinkingState msgs node thinking = UIState
 -- 2. On Request* effects, builds UIState and invokes callback
 -- 3. Blocks on callback, then resumes with the user's response
 --
+-- The interpreter is polymorphic over remaining effects, enabling composition
+-- with other effect interpreters (Habitica, LLM, Observability, etc.).
+--
 -- = Example
 --
 -- @
 -- ctx <- newUIContext "entry"
--- result <- runUI ctx myCallback $ do
+-- result <- runM $ runUI ctx myCallback $ do
 --   showText "Welcome!"
 --   name <- requestTextInput "What's your name?"
 --   pure name
 -- @
-runUI :: UIContext -> UICallback -> Eff '[UI] a -> IO a
-runUI ctx callback = loop
-  where
-    loop :: Eff '[UI] a -> IO a
-    loop (Val x) = pure x
-    loop (E u q) = case decomp u of
-      Right (ShowText content) -> do
-        -- Append assistant message to context
-        appendMessage ctx Assistant content
-        -- Continue (no callback needed, just state update)
-        loop (qApp q ())
+runUI :: LastMember IO effs => UIContext -> UICallback -> Eff (UI ': effs) a -> Eff effs a
+runUI ctx callback = interpret $ \case
+  ShowText content -> sendM $ do
+    -- Append assistant message to context
+    appendMessage ctx Assistant content
 
-      Right (SetThinking thinking) -> do
-        -- Update thinking flag
-        writeIORef (ucThinking ctx) thinking
-        -- If setting thinking to true, emit state update via callback
-        -- (This lets the frontend show spinner immediately)
-        when thinking $ do
-          (msgs, node, _) <- readContext ctx
-          let state = buildThinkingState msgs node True
-          -- Fire and forget - we don't wait for response
-          void $ callback state
-        -- Continue
-        loop (qApp q ())
+  SetThinking thinking -> sendM $ do
+    -- Update thinking flag
+    writeIORef (ucThinking ctx) thinking
+    -- If setting thinking to true, emit state update via callback
+    -- (This lets the frontend show spinner immediately)
+    when thinking $ do
+      (msgs, node, _) <- readContext ctx
+      let state = buildThinkingState msgs node True
+      -- Fire and forget - we don't wait for response
+      void $ callback state
 
-      Right (RequestTextInput prompt) -> do
-        -- Build state with text input enabled
-        (msgs, node, _) <- readContext ctx
-        let state = buildTextInputState msgs node prompt
+  RequestTextInput prompt -> sendM $ do
+    -- Build state with text input enabled
+    (msgs, node, _) <- readContext ctx
+    let state = buildTextInputState msgs node prompt
 
-        -- Invoke callback (blocking)
-        action <- callback state
+    -- Invoke callback (blocking)
+    action <- callback state
 
-        -- Extract text from response
-        case action of
-          TextAction content -> do
-            -- Record user message in context
-            appendMessage ctx User content
-            -- Continue with the text
-            loop (qApp q content)
+    -- Extract text from response
+    case action of
+      TextAction content -> do
+        -- Record user message in context
+        appendMessage ctx User content
+        -- Return the text
+        pure content
+      _ ->
+        -- Wrong action type - return empty string
+        pure ""
+
+  RequestPhotoInput prompt -> sendM $ do
+    -- Build state with photo upload enabled
+    (msgs, node, _) <- readContext ctx
+    let state = buildPhotoUploadState msgs node prompt
+
+    -- Invoke callback (blocking)
+    action <- callback state
+
+    -- Extract photo data from response
+    case action of
+      PhotoAction base64Data _mimeType ->
+        -- Decode base64 to ByteString
+        case B64.decode (TE.encodeUtf8 base64Data) of
+          Left _ -> pure ""  -- Invalid base64, return empty
+          Right bytes -> pure bytes
+      _ ->
+        -- Wrong action type
+        pure ""
+
+  RequestChoice prompt choices -> sendM $ do
+    -- Build state with buttons
+    (msgs, node, _) <- readContext ctx
+    -- Add prompt as system message
+    appendMessage ctx System prompt
+    (msgs', _, _) <- readContext ctx
+    let state = buildChoiceState msgs' node prompt choices
+
+    -- Invoke callback (blocking)
+    action <- callback state
+
+    -- Extract choice from response
+    case action of
+      ButtonAction buttonId ->
+        -- Parse button ID as index
+        case reads (T.unpack buttonId) of
+          [(idx, "")] | idx >= 0 && idx < length choices ->
+            -- Return the value at that index
+            pure (snd (choices !! idx))
           _ ->
-            -- Wrong action type - this shouldn't happen if frontend is correct
-            -- For robustness, return empty string and continue
-            loop (qApp q "")
-
-      Right (RequestPhotoInput prompt) -> do
-        -- Build state with photo upload enabled
-        (msgs, node, _) <- readContext ctx
-        let state = buildPhotoUploadState msgs node prompt
-
-        -- Invoke callback (blocking)
-        action <- callback state
-
-        -- Extract photo data from response
-        case action of
-          PhotoAction base64Data _mimeType -> do
-            -- Decode base64 to ByteString
-            case B64.decode (TE.encodeUtf8 base64Data) of
-              Left _ -> loop (qApp q "")  -- Invalid base64, return empty
-              Right bytes -> loop (qApp q bytes)
-          _ ->
-            -- Wrong action type
-            loop (qApp q "")
-
-      Right (RequestChoice prompt choices) -> do
-        -- Build state with buttons
-        (msgs, node, _) <- readContext ctx
-        -- Add prompt as system message
-        appendMessage ctx System prompt
-        (msgs', _, _) <- readContext ctx
-        let state = buildChoiceState msgs' node prompt choices
-
-        -- Invoke callback (blocking)
-        action <- callback state
-
-        -- Extract choice from response
-        case action of
-          ButtonAction buttonId -> do
-            -- Parse button ID as index
-            case reads (T.unpack buttonId) of
-              [(idx, "")] | idx >= 0 && idx < length choices ->
-                -- Return the value at that index
-                loop (qApp q (snd (choices !! idx)))
-              _ ->
-                -- Invalid index - return first choice as fallback
-                case choices of
-                  ((_, val):_) -> loop (qApp q val)
-                  [] -> error "RequestChoice called with empty choices"
-          _ ->
-            -- Wrong action type - return first choice as fallback
+            -- Invalid index - return first choice as fallback
             case choices of
-              ((_, val):_) -> loop (qApp q val)
+              ((_, val):_) -> pure val
               [] -> error "RequestChoice called with empty choices"
-
-      Left _ -> error "Impossible: no other effects in stack"
+      _ ->
+        -- Wrong action type - return first choice as fallback
+        case choices of
+          ((_, val):_) -> pure val
+          [] -> error "RequestChoice called with empty choices"
 
 -- | Helper to convert Seq to list.
 toList :: Seq a -> [a]

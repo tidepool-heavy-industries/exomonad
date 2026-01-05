@@ -1,69 +1,67 @@
 -- | Server API definition - Servant types for HTTP endpoints.
+--
+-- Defines REST endpoints for health checks and session management.
+-- WebSocket is handled at the WAI level via wai-websockets.
 module Tidepool.Server.API
   ( -- * API Types
     TidepoolAPI
-  , StaticAPI
+  , HealthAPI
+  , SessionAPI
   , api
-    -- * Server
-  , staticServer
-  , tidepoolApp
+
+    -- * Response Types
+  , HealthStatus(..)
   ) where
 
-import qualified Data.Text as T
-import qualified Data.ByteString.Lazy as LBS
-import Network.HTTP.Types (status200, status404)
-import Network.Wai (responseLBS, pathInfo)
+import Data.Aeson (ToJSON(..), object, (.=))
+import Data.Text (Text)
+import Data.UUID (UUID)
+import GHC.Generics (Generic)
 import Servant
-import System.Directory (doesFileExist)
-import System.FilePath ((</>), takeExtension)
 
--- | Static file serving API.
-type StaticAPI = Raw
+import Tidepool.Server.Session (SessionInfo)
 
--- | Combined API.
-type TidepoolAPI = StaticAPI
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- RESPONSE TYPES
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Health check response.
+data HealthStatus = HealthStatus
+  { hsStatus  :: Text
+  , hsVersion :: Text
+  }
+  deriving (Generic, Show, Eq)
+
+instance ToJSON HealthStatus where
+  toJSON hs = object
+    [ "status" .= hsStatus hs
+    , "version" .= hsVersion hs
+    ]
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- API TYPES
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Health check endpoint.
+--
+-- GET /health -> HealthStatus
+type HealthAPI = "health" :> Get '[JSON] HealthStatus
+
+-- | Session management endpoints.
+--
+-- GET /sessions -> [SessionInfo]
+-- GET /sessions/:id -> Maybe SessionInfo
+type SessionAPI =
+       "sessions" :> Get '[JSON] [SessionInfo]
+  :<|> "sessions" :> Capture "id" UUID :> Get '[JSON] (Maybe SessionInfo)
+
+-- | Combined API (REST endpoints only).
+--
+-- Static files are served via Raw combinator in the server.
+-- WebSocket is handled at WAI level via websocketsOr.
+type TidepoolAPI = HealthAPI :<|> SessionAPI
 
 api :: Proxy TidepoolAPI
 api = Proxy
-
--- | Content type for file extension.
-contentTypeFor :: FilePath -> LBS.ByteString
-contentTypeFor path = case takeExtension path of
-  ".html" -> "text/html; charset=utf-8"
-  ".css"  -> "text/css; charset=utf-8"
-  ".js"   -> "application/javascript; charset=utf-8"
-  ".json" -> "application/json; charset=utf-8"
-  ".svg"  -> "image/svg+xml"
-  ".png"  -> "image/png"
-  ".jpg"  -> "image/jpeg"
-  ".jpeg" -> "image/jpeg"
-  ".ico"  -> "image/x-icon"
-  ".woff" -> "font/woff"
-  ".woff2" -> "font/woff2"
-  _       -> "application/octet-stream"
-
--- | Static file server that serves from a directory.
-staticServer :: FilePath -> Server StaticAPI
-staticServer staticDir = Tagged $ \req sendResponse -> do
-  let pathParts = pathInfo req
-      requestedPath = T.unpack $ T.intercalate "/" pathParts
-      -- Default to index.html for root
-      filePath = if null requestedPath || requestedPath == "/"
-                 then staticDir </> "index.html"
-                 else staticDir </> requestedPath
-
-  exists <- doesFileExist filePath
-  if exists
-    then do
-      content <- LBS.readFile filePath
-      sendResponse $ responseLBS status200
-        [("Content-Type", LBS.toStrict $ contentTypeFor filePath)]
-        content
-    else
-      sendResponse $ responseLBS status404
-        [("Content-Type", "text/plain")]
-        "Not Found"
-
--- | Create the WAI application.
-tidepoolApp :: FilePath -> Application
-tidepoolApp staticDir = serve api (staticServer staticDir)

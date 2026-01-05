@@ -51,7 +51,6 @@ import Tidepool.Observability.Executor
   , runObservability
   , defaultLokiConfig
   )
-import Tidepool.Observability.Types (SpanContext, newSpanContext)
 import Tidepool.LLM.Executor
   ( LLMEnv
   , LLMConfig(..)
@@ -166,8 +165,6 @@ data ExecutorEnv = ExecutorEnv
     -- ^ Initialized LLM client (with HTTP manager)
   , eeHabiticaEnv :: HabiticaEnv
     -- ^ Initialized Habitica client (with HTTP manager)
-  , eeSpanContext :: SpanContext
-    -- ^ Observability span context
   }
 
 -- | Create a new executor environment.
@@ -177,12 +174,10 @@ mkExecutorEnv :: ExecutorConfig -> IO ExecutorEnv
 mkExecutorEnv config = do
   llmEnv <- mkLLMEnv (ecLLMConfig config)
   habiticaEnv <- mkHabiticaEnv (ecHabiticaConfig config)
-  spanCtx <- newSpanContext
   pure ExecutorEnv
     { eeConfig = config
     , eeLLMEnv = llmEnv
     , eeHabiticaEnv = habiticaEnv
-    , eeSpanContext = spanCtx
     }
 
 
@@ -194,8 +189,12 @@ mkExecutorEnv config = do
 --
 -- This is useful for simple agents that only use UI effects without
 -- LLM, Habitica, or observability.
-runUIOnly :: UIContext -> UICallback -> Eff '[UI] a -> IO a
-runUIOnly = runUI
+--
+-- Note: The effect stack must end with IO for the interpreters to work.
+-- Agents use polymorphic types like @Member UI effs => Eff effs a@
+-- which get instantiated to this concrete stack when run.
+runUIOnly :: UIContext -> UICallback -> Eff '[UI, IO] a -> IO a
+runUIOnly ctx callback = runM . runUI ctx callback
 
 -- | Run a program with all effects composed.
 --
@@ -211,10 +210,10 @@ runUIOnly = runUI
 -- @
 --
 -- Note: Effect stack ordering matters. Effects are peeled from the outside in:
--- 1. Observability (outermost) - records spans/events
--- 2. LLMComplete - makes LLM API calls
--- 3. Habitica - makes Habitica API calls
--- 4. UI (innermost) - handles user interaction
+-- 1. UI (first to peel) - handles user interaction
+-- 2. Habitica - makes Habitica API calls
+-- 3. LLMComplete - makes LLM API calls
+-- 4. Observability (last to peel) - records events
 --
 -- Example:
 --
@@ -232,42 +231,11 @@ runEffects
   :: ExecutorEnv
   -> UIContext
   -> UICallback
-  -> Eff '[UI, Habitica, LLMComplete, Observability] a
+  -> Eff '[UI, Habitica, LLMComplete, Observability, IO] a
   -> IO a
-runEffects env ctx callback program = do
-  -- We need to interpret effects from inside out (right to left in type)
-  -- But the current executor types have constraints that make this tricky.
-  --
-  -- For now, we provide a simplified runner that handles the most common case:
-  -- UI effects only. Full composition requires aligning effect interpreters.
-  --
-  -- TODO: Implement full effect composition with proper interpreter stacking
-  error "Full effect composition not yet implemented - use runUIOnly for UI-only agents"
-
-
--- ════════════════════════════════════════════════════════════════════════════
--- NOTES ON EFFECT COMPOSITION
--- ════════════════════════════════════════════════════════════════════════════
-
--- The executors have different type signatures:
---
--- runUI :: UIContext -> UICallback -> Eff '[UI] a -> IO a
---   - Interprets UI into IO directly
---   - No effect stack polymorphism
---
--- runHabitica :: LastMember IO effs => HabiticaEnv -> Eff (Habitica ': effs) a -> Eff effs a
---   - Polymorphic over remaining effects
---   - Requires IO at the bottom
---
--- runLLMComplete :: LastMember IO effs => LLMSecrets -> Eff (LLMComplete ': effs) a -> Eff effs a
---   - Same pattern as Habitica
---
--- runObservability :: LokiConfig -> Eff '[Observability] a -> IO a
---   - Like UI, interprets directly to IO
---
--- To compose these properly, we need either:
--- 1. Make all interpreters polymorphic (runHabitica pattern)
--- 2. Use a different composition strategy (e.g., interpret each in sequence)
--- 3. Create a unified effect stack with custom handling
---
--- For now, agents should use individual executors or the simplified runUIOnly.
+runEffects env ctx callback =
+  runM
+    . runObservability (ecLokiConfig $ eeConfig env)
+    . runLLMComplete (eeLLMEnv env)
+    . runHabitica (eeHabiticaEnv env)
+    . runUI ctx callback

@@ -1,16 +1,17 @@
 -- | Native tidepool server - Servant + WebSocket + static files.
 --
 -- Ties together all executors and exposes WebSocket endpoint.
--- Uses Servant's type-level API for static file serving.
+-- Uses Servant's type-level API for REST endpoints and static file serving.
 --
 -- = Architecture
 --
 -- The server:
--- 1. Accepts WebSocket connections (via wai-websockets)
--- 2. Creates a session per connection
--- 3. Bridges WebSocket messages to the UI effect callback
--- 4. Runs the agent graph with all executors composed
--- 5. Serves static files for non-WebSocket HTTP requests
+-- 1. Provides REST endpoints for health check and session management
+-- 2. Accepts WebSocket connections (via wai-websockets overlay)
+-- 3. Creates a session per WebSocket connection
+-- 4. Bridges WebSocket messages to the UI effect callback
+-- 5. Runs the agent (echo agent for now) with all executors composed
+-- 6. Serves static files for non-API HTTP requests
 --
 -- = Usage
 --
@@ -34,41 +35,55 @@ module Tidepool.Server
     -- * Executor Configuration
   , ExecutorConfig(..)
   , defaultExecutorConfig
-
-    -- * WebSocket Bridge
-  , wsApp
-  , handleConnection
   ) where
 
-import Control.Concurrent (forkIO)
 import Control.Concurrent.MVar
-import Control.Exception (catch, SomeException)
-import Control.Monad (forever)
+import Control.Concurrent.STM (atomically, writeTVar, readTVarIO)
+import Control.Exception (catch, finally, SomeException)
+import Control.Monad.IO.Class (liftIO)
 import Data.Aeson (encode, eitherDecode)
 import Data.Proxy (Proxy(..))
 import Data.String (fromString)
 import Data.Text (Text)
-import Data.Text qualified as T
+import qualified Data.Text as T
+import Data.UUID (UUID)
 import Network.HTTP.Types.Status (status200)
 import Network.Wai (Application, responseLBS)
 import Network.Wai.Handler.Warp (defaultSettings, setPort, setHost, runSettings)
 import Network.Wai.Handler.WebSockets (websocketsOr)
-import Network.WebSockets qualified as WS
+import qualified Network.WebSockets as WS
 import Data.Tagged (Tagged(..))
-import Servant (Raw, serve)
-import Servant.Server (Handler)
-import Servant.Server.StaticFiles (serveDirectoryWebApp)
+import Servant
+import Servant.Server.StaticFiles (serveDirectoryWith)
+import WaiAppStatic.Storage.Filesystem (defaultWebAppSettings)
+import WaiAppStatic.Types (ssIndices, unsafeToPiece)
 import System.Directory (doesDirectoryExist)
 
-import Tidepool.Wire.Types
-  ( UIState(..)
-  , UserAction(..)
-  , ChatMessage(..)
-  , MessageRole(..)
-  , TextInputConfig(..)
-  )
+import Tidepool.Wire.Types (UIState(..), UserAction(..))
 import Tidepool.UI.Executor (UIContext, newUIContext, UICallback)
-import Tidepool.Server.EffectRunner (ExecutorConfig(..), defaultExecutorConfig)
+import Tidepool.Server.EffectRunner
+  ( ExecutorConfig(..)
+  , ExecutorEnv
+  , defaultExecutorConfig
+  , mkExecutorEnv
+  , runUIOnly
+  )
+import Tidepool.Server.Session
+  ( SessionMap
+  , Session(..)
+  , SessionInfo(..)
+  , newSessionMap
+  , createSession
+  , deleteSession
+  , listSessions
+  , getSession
+  )
+import Tidepool.Server.API
+  ( TidepoolAPI
+  , HealthStatus(..)
+  , api
+  )
+import Tidepool.Server.Echo (echoAgent)
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -102,11 +117,16 @@ data ServerConfig = ServerConfig
 --
 -- This starts a Warp server with WebSocket support. Each WebSocket connection
 -- gets its own session with a fresh UI context. Non-WebSocket requests are
--- served by Servant (static files in production, placeholder in dev mode).
+-- served by Servant (REST endpoints + static files).
 runServer :: ServerConfig -> IO ()
 runServer config = do
   putStrLn $ "[Server] Starting on " <> T.unpack (scHost config) <> ":" <> show (scPort config)
+  putStrLn "[Server] REST endpoints: /health, /sessions"
   putStrLn "[Server] WebSocket endpoint: ws://localhost:<port>/"
+
+  -- Create shared state
+  sessions <- newSessionMap
+  env <- mkExecutorEnv (scExecutorConfig config)
 
   case scMode config of
     StaticFiles dir -> do
@@ -123,19 +143,65 @@ runServer config = do
                $ setHost (fromString $ T.unpack $ scHost config)
                $ defaultSettings
 
-  servantApp <- makeServantApp config
-  runSettings settings $ websocketsOr WS.defaultConnectionOptions (wsApp config) servantApp
+  -- Create the Servant application with REST endpoints + static files
+  let servantApp = makeServantApp config sessions
 
--- | Create Servant application for static file serving.
-makeServantApp :: ServerConfig -> IO Application
-makeServantApp config = pure $ case scMode config of
-  StaticFiles dir -> serve (Proxy :: Proxy Raw) (serveDirectoryWebApp dir)
-  DevProxy _port -> serve (Proxy :: Proxy Raw) devProxyHandler
+  -- Layer WebSocket on top via WAI
+  runSettings settings $
+    websocketsOr WS.defaultConnectionOptions (wsApp sessions env) servantApp
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- SERVANT APPLICATION
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Combined API type: REST endpoints + static files.
+type FullAPI = TidepoolAPI :<|> Raw
+
+-- | Create Servant application with REST handlers and static files.
+makeServantApp :: ServerConfig -> SessionMap -> Application
+makeServantApp config sessions =
+  serve (Proxy :: Proxy FullAPI) $
+    restHandlers sessions :<|> staticHandler
+  where
+    staticHandler = case scMode config of
+      StaticFiles dir -> serveDirectoryWith settings
+        where
+          settings = (defaultWebAppSettings dir)
+            { ssIndices = [unsafeToPiece "index.html"] }
+      DevProxy _port  -> devProxyHandler
+
+-- | REST API handlers.
+restHandlers :: SessionMap -> Server TidepoolAPI
+restHandlers sessions =
+  healthHandler :<|> (listSessionsHandler sessions :<|> getSessionHandler sessions)
+
+-- | Health check handler.
+healthHandler :: Handler HealthStatus
+healthHandler = pure HealthStatus
+  { hsStatus = "ok"
+  , hsVersion = "0.1.0"
+  }
+
+-- | List all sessions.
+listSessionsHandler :: SessionMap -> Handler [SessionInfo]
+listSessionsHandler sessions = liftIO $ listSessions sessions
+
+-- | Get a specific session.
+getSessionHandler :: SessionMap -> UUID -> Handler (Maybe SessionInfo)
+getSessionHandler sessions sessionId = liftIO $ do
+  mSession <- getSession sessions sessionId
+  case mSession of
+    Nothing -> pure Nothing
+    Just s -> do
+      node <- readTVarIO (sGraphNode s)
+      pure $ Just SessionInfo
+        { siId = sId s
+        , siCreatedAt = sCreatedAt s
+        , siGraphNode = node
+        }
 
 -- | Placeholder handler for dev proxy mode.
---
--- In production, static files are served directly. In dev mode,
--- the frontend runs on a separate Vite server and connects directly.
 devProxyHandler :: Tagged Handler Application
 devProxyHandler = Tagged $ \_req respond -> respond $ responseLBS
   status200
@@ -150,110 +216,59 @@ devProxyHandler = Tagged $ \_req respond -> respond $ responseLBS
 -- | WebSocket application handler.
 --
 -- Accepts incoming connections and spawns a handler for each.
-wsApp :: ServerConfig -> WS.ServerApp
-wsApp config pending = do
+wsApp :: SessionMap -> ExecutorEnv -> WS.ServerApp
+wsApp sessions env pending = do
   conn <- WS.acceptRequest pending
   putStrLn "[WebSocket] Connection accepted"
 
+  -- Create session for this connection
+  session <- createSession sessions
+  putStrLn $ "[WebSocket] Created session: " <> show (sId session)
+
   -- Fork ping thread to keep connection alive
-  WS.withPingThread conn 30 (pure ()) $ do
-    handleConnection config conn
-      `catch` \(e :: SomeException) ->
-        putStrLn $ "[WebSocket] Connection closed: " <> show e
+  WS.withPingThread conn 30 (pure ()) $
+    (handleConnection sessions env session conn
+      `catch` (\(e :: SomeException) ->
+        putStrLn $ "[WebSocket] Connection error: " <> show e))
+      `finally` do
+        deleteSession sessions (sId session)
+        putStrLn $ "[WebSocket] Session cleaned up: " <> show (sId session)
 
 -- | Handle a single WebSocket connection.
 --
--- Creates a session with:
--- 1. UI context for accumulating state
--- 2. MVar bridge for request/response
--- 3. Reader thread for incoming messages
-handleConnection :: ServerConfig -> WS.Connection -> IO ()
-handleConnection config conn = do
+-- Creates a UI callback that bridges WebSocket to the effect system,
+-- then runs the echo agent.
+handleConnection :: SessionMap -> ExecutorEnv -> Session -> WS.Connection -> IO ()
+handleConnection _sessions _env session conn = do
   -- Create UI context for this session
   ctx <- newUIContext "entry"
 
   -- Create MVar for bridging async message reception to sync callback
   responseMVar <- newEmptyMVar :: IO (MVar UserAction)
 
-  -- Fork a thread to read incoming messages and put them in the MVar
-  _readerThread <- forkIO $ forever $ do
-    msg <- WS.receiveData conn
-    case eitherDecode msg of
-      Left err -> do
-        putStrLn $ "[WebSocket] Failed to decode UserAction: " <> err
-        -- Don't put anything in MVar - let callback timeout or retry
-      Right action -> do
-        putStrLn $ "[WebSocket] Received: " <> show action
-        putMVar responseMVar action
-
   -- Create the UI callback that bridges to WebSocket
   let callback :: UICallback
       callback uiState = do
+        -- Update session's current graph node
+        atomically $ writeTVar (sGraphNode session) (usGraphNode uiState)
+        atomically $ writeTVar (sStateVar session) (Just uiState)
+
         -- Send UIState over WebSocket
         putStrLn $ "[WebSocket] Sending UIState for node: " <> T.unpack (usGraphNode uiState)
         WS.sendTextData conn (encode uiState)
 
         -- Wait for user response
-        action <- takeMVar responseMVar
-        pure action
+        msg <- WS.receiveData conn
+        case eitherDecode msg of
+          Left err -> do
+            putStrLn $ "[WebSocket] Failed to decode UserAction: " <> err
+            -- Return a default action to avoid blocking forever
+            pure $ TextAction ""
+          Right action -> do
+            putStrLn $ "[WebSocket] Received: " <> show action
+            atomically $ writeTVar (sActionVar session) (Just action)
+            pure action
 
-  -- Send initial greeting state
-  let initialState = UIState
-        { usMessages = [ChatMessage
-            { cmRole = Assistant
-            , cmContent = "Welcome! How can I help you today?"
-            , cmTimestamp = ""
-            }]
-        , usTextInput = Just $ TextInputConfig { ticPlaceholder = "Type your message..." }
-        , usPhotoUpload = Nothing
-        , usButtons = Nothing
-        , usGraphNode = "entry"
-        , usThinking = False
-        }
-  WS.sendTextData conn (encode initialState)
-
-  -- Main interaction loop
-  -- In a real implementation, this would run the agent graph
-  -- For now, we echo back user messages
-  mainLoop ctx callback
-  where
-    mainLoop :: UIContext -> UICallback -> IO ()
-    mainLoop ctx callback = do
-      -- Wait for user action
-      msg <- WS.receiveData conn
-      case eitherDecode msg of
-        Left err -> do
-          putStrLn $ "[WebSocket] Decode error: " <> err
-          mainLoop ctx callback
-
-        Right (TextAction content) -> do
-          putStrLn $ "[WebSocket] User said: " <> T.unpack content
-
-          -- Echo back with a response
-          let responseState = UIState
-                { usMessages = [ChatMessage
-                    { cmRole = User
-                    , cmContent = content
-                    , cmTimestamp = ""
-                    }
-                  , ChatMessage
-                    { cmRole = Assistant
-                    , cmContent = "I received your message: " <> content
-                    , cmTimestamp = ""
-                    }]
-                , usTextInput = Just $ TextInputConfig { ticPlaceholder = "Type your message..." }
-                , usPhotoUpload = Nothing
-                , usButtons = Nothing
-                , usGraphNode = "echo"
-                , usThinking = False
-                }
-          WS.sendTextData conn (encode responseState)
-          mainLoop ctx callback
-
-        Right (ButtonAction buttonId) -> do
-          putStrLn $ "[WebSocket] Button pressed: " <> T.unpack buttonId
-          mainLoop ctx callback
-
-        Right (PhotoAction _ _) -> do
-          putStrLn "[WebSocket] Photo received"
-          mainLoop ctx callback
+  -- Run the echo agent with UI effects only for now
+  -- TODO: Use runEffects for full effect stack when we have a real agent
+  runUIOnly ctx callback echoAgent
