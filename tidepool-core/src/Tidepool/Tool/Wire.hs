@@ -53,6 +53,7 @@ module Tidepool.Tool.Wire
 
 import Data.Aeson (ToJSON(..), Value, object, (.=))
 import Data.Map.Strict (Map)
+import Data.Maybe (fromMaybe)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 
@@ -264,4 +265,4 @@ schemaToCfProperty schema = case schema.schemaType of
   TObject  -> CfObject (schemaToCfObject schema)
   TNull    -> CfString (descOrEmpty schema)  -- treat null as string
   where
-    descOrEmpty s = maybe "" id s.schemaDescription
+    descOrEmpty s = fromMaybe "" s.schemaDescription

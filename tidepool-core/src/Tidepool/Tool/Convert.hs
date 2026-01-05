@@ -47,9 +47,7 @@ module Tidepool.Tool.Convert
   , toolDefsToCf
   ) where
 
-import Data.Text (Text)
-
-import Tidepool.Schema (HasJSONSchema(..), JSONSchema)
+import Tidepool.Schema (HasJSONSchema(..))
 import Tidepool.Graph.Tool (ToolDef(..))
 import Tidepool.Tool.Wire
   ( AnthropicTool(..)
@@ -82,7 +80,7 @@ import Tidepool.Tool.Wire
 class ToolDef t => ToAnthropicTool t where
   toAnthropicTool :: t -> AnthropicTool
 
-  default toAnthropicTool :: t -> AnthropicTool
+  default toAnthropicTool :: HasJSONSchema (ToolInput t) => t -> AnthropicTool
   toAnthropicTool tool = schemaToAnthropicTool
     (toolName tool)
     (toolDescription tool)
@@ -112,7 +110,7 @@ class ToolDef t => ToAnthropicTool t where
 class ToolDef t => ToCfTool t where
   toCfTool :: t -> CfTool
 
-  default toCfTool :: t -> CfTool
+  default toCfTool :: HasJSONSchema (ToolInput t) => t -> CfTool
   toCfTool tool = schemaToCfTool
     (toolName tool)
     (toolDescription tool)
