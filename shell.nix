@@ -78,7 +78,7 @@ pkgs.mkShell {
     echo ""
     echo "───────────────────────────────────────────────────────────"
     echo "Commands:"
-    echo "  cabal build                    - Build all targets"
+    echo "  cabal build all                - Build all targets"
     echo "  just native                    - Run native server at localhost:8080"
     echo "  claude                         - Start Claude Code"
     echo ""

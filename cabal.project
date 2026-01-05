@@ -28,11 +28,9 @@ packages:
     -- Platform package (enabled for CLI with LLM effects)
     tidepool-platform
 
--- Removed/disabled packages:
--- tidepool-tidying    -- GUI app, depends on platform
+-- Disabled packages:
 -- template            -- unused template skeleton
 -- tidepool-telegram-hs -- types only, not used by tidepool-wasm
--- NOTE: tidepool-dm moved to ~/dev/anemone
 
 -- Use GHC 9.6+ for best GHC2021 support
 -- with-compiler: ghc-9.6

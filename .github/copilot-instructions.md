@@ -2,37 +2,34 @@
 
 ## Project Overview
 
-Tidepool is a type-safe LLM agent framework written in Haskell. It demonstrates how to build LLM agents with:
+Tidepool is a type-safe LLM agent framework library written in Haskell. It provides:
 - **Typed state** that LLMs read via templates
 - **Typed mutations** that LLMs express via structured output
 - **Typed tools** for mid-turn capabilities
-- **IO-blind architecture** enabling deterministic testing and eventual WASM compilation
+- **IO-blind architecture** enabling deterministic testing and WASM compilation
 
-The framework includes two demonstration agents:
-1. **DM Agent** - Blades in the Dark-style Dungeon Master with faction mechanics, clocks, and FitD dice
-2. **Tidying Agent** - Executive function prosthetic for tackling overwhelming spaces with photo analysis
+Agents are built in separate repos (e.g., `~/dev/anemone`) using this library.
 
 ## Architecture
 
 ### Core Design Principles
 
-1. **effectful for effects** - MTL-equivalent performance without INLINE pragma dance
+1. **freer-simple for effects** - Reified continuations for yield/resume across FFI
    - Effects: `LLM`, `RequestInput`, `State`, `Emit`, `Random`, `Log`, `ChatHistory`, `Time`
    - Agents are **IO-blind**: they cannot use `IOE` directly
    - All IO happens in runners via effect interpreters
 
 2. **Typed Jinja templates** (via ginger library fork)
    - Compile-time validation against Haskell types
-   - Template Haskell: `$(typedTemplateFile ''DMContext "templates/dm_turn.jinja")`
+   - Template Haskell: `$(typedTemplateFile ''MyContext "templates/turn.jinja")`
    - LLMs know Jinja from training data
 
 3. **Type-safe tool lists**
    - `ToolList` GADT ensures compile-time tool type safety
-   - Example: `TCons (Proxy @ThinkAsDM) $ TCons (Proxy @SpeakAsNPC) $ TNil`
    - Tools have access to: `State`, `Emit`, `RequestInput`, `Random`
 
 4. **Delta fields for mutations**
-   - LLM outputs `+2 stress`, not `stress = 5`
+   - LLM outputs deltas, not absolute values
    - Every mutation has a `because` field for explainability/training data
 
 5. **Typed graph execution** (via `OneOf` sum type)
@@ -43,23 +40,20 @@ The framework includes two demonstration agents:
 ## Project Structure
 
 ```
-tidepool-core/              # Core library (reusable)
+tidepool-core/              # Core library (Graph DSL, effects, templates)
 ├── src/Tidepool/
-│   ├── Effect.hs           # Core effects: LLM, RequestInput, State, Emit, Random, Time
-│   ├── Template.hs         # TypedTemplate, Template (jinja + schema + tools)
+│   ├── Effect.hs           # Core effects
+│   ├── Template.hs         # TypedTemplate
 │   ├── Tool.hs             # Tool typeclass, ToolList GADT
-│   ├── Schema.hs           # JSON Schema derivation (deriveSchema)
-│   ├── Storage.hs          # SQLite persistence
-│   ├── Graph/              # Type-level DSL for agent graphs
-│   └── GUI/                # Generic threepenny-gui components
+│   ├── Schema.hs           # JSON Schema derivation
+│   └── Graph/              # Type-level DSL for agent graphs
 
-tidepool-native-gui/        # Native GUI executors
+tidepool-native-gui/        # Native execution layer
 ├── server/                 # Servant + WebSocket server
-├── llm-executor/           # Anthropic API executor
-├── ui-executor/            # UI effect executor
-├── bd-executor/            # Beads task tracking executor
-├── claude-code-executor/   # Claude Code subprocess executor
-└── lsp-executor/           # LSP effect executor
+├── llm-executor/           # Anthropic API interpreter
+├── ui-executor/            # UI effect interpreter
+├── observability-executor/ # OTLP + Loki
+└── ...                     # Other effect executors
 
 deploy/                     # Cloudflare Worker Durable Object harness
 ├── src/                    # TypeScript harness for WASM state machines
@@ -68,69 +62,18 @@ deploy/                     # Cloudflare Worker Durable Object harness
 
 ## Building and Testing
 
-### Build Commands
-
 ```bash
 # Build all packages
-just build
-# or: cabal build all
+cabal build all
 
-# Build with warnings as errors
-just build-strict
+# Run native server
+just native  # Starts at localhost:8080
 
-# Clean build artifacts
-just clean
-```
+# Run tests
+cabal test all
 
-### Testing
-
-```bash
-# Run all Haskell tests
-just test
-# or: cabal test all
-
-# Run graph validation tests only
-just test-graph
-
-# Run TypeScript tests
-just test-ts
-
-# Verify protocol conformance (Haskell ↔ TypeScript)
-just test-protocol-conformance
-```
-
-### Linting
-
-```bash
-# Lint Haskell (hlint)
-just lint-hs
-
-# Lint TypeScript (ESLint)
-just lint-ts
-
-# Typecheck TypeScript
-just typecheck-ts
-
-# Run all lints
-just lint
-```
-
-### Pre-commit Checks
-
-```bash
-# Fast: build + lint
-just pre-commit-fast
-
-# Full: build + lint + tests
-just pre-commit
-```
-
-### Running Applications
-
-```bash
-# Native server (localhost:8080)
-just native
-# or: TIDEPOOL_DIST=tidepool-native-gui/solid-frontend/dist cabal run tidepool-native
+# TypeScript (deploy/)
+cd deploy && pnpm dev
 ```
 
 ## Code Conventions
@@ -141,36 +84,18 @@ just native
    ```haskell
    data MyEffect :: Effect where
      DoThing :: Arg -> MyEffect m Result
-   
-   type instance DispatchOf MyEffect = 'Dynamic
-   
-   doThing :: MyEffect :> es => Arg -> Eff es Result
-   doThing = send . DoThing
    ```
 
 2. **Effect Constraints**
    ```haskell
-   myFunction 
-     :: ( State WorldState :> es
-        , Emit DMEvent :> es
-        , Random :> es
+   myFunction
+     :: ( State MyState :> es
+        , Emit MyEvent :> es
         )
      => Eff es ()
    ```
 
-3. **Effect Order Matters**
-   - Outermost runs first
-   - `runLLMWithTools` needs `State`, `Emit`, `RequestInput` below it
-   ```haskell
-   runEff
-     . runRandom
-     . runEmit eventHandler
-     . runState initialState
-     . runLLMWithTools config dispatcher
-     $ computation
-   ```
-
-4. **IO-Blind Architecture**
+3. **IO-Blind Architecture**
    - Agent code uses `BaseEffects` (no `IOE`)
    - Runners use `RunnerEffects` (includes `IOE`)
    - This enables WASM compilation and deterministic testing
@@ -179,92 +104,47 @@ just native
 
 1. **Typed Templates** use Template Haskell for compile-time validation:
    ```haskell
-   dmTurnTemplate :: Template DMContext
-   dmTurnTemplate = $(typedTemplateFile ''DMContext "templates/dm_turn.jinja")
+   myTemplate :: Template MyContext
+   myTemplate = $(typedTemplateFile ''MyContext "templates/turn.jinja")
    ```
 
-2. **Template Context** types define what LLM sees:
-   ```haskell
-   data DMContext = DMContext
-     { stress :: Int
-     , clocks :: [Clock]
-     , npcs :: [Npc]
-     -- ... fields accessible in template
-     }
-   ```
-
-3. **Template includes** and extends are supported via Jinja
+2. **Template Context** types define what LLM sees
 
 ### Tool System
 
 1. **Tool Definition**
    ```haskell
-   data ThinkAsDM = ThinkAsDM { thought :: Text }
-   
-   instance Tool ThinkAsDM where
-     toolName _ = "think"
-     toolDescription _ = "Internal reasoning"
+   data MyTool = MyTool { input :: Text }
+
+   instance Tool MyTool where
+     toolName _ = "my_tool"
+     toolDescription _ = "Description"
      executeTool input = do
-       emit (DMThought input.thought)
-       return ()
+       emit (MyEvent input)
+       return result
    ```
 
-2. **Tool Lists** are type-safe GADTs:
-   ```haskell
-   type DMTools = 
-     TCons (Proxy @ThinkAsDM) $
-     TCons (Proxy @SpeakAsNPC) $
-     TNil
-   ```
-
-3. **ToolBreak** for state transitions:
-   - Transition tools return `ToolBreak` to restart turn
-   - Example: mood transitions (engage, resolve, accept)
+2. **Tool Lists** are type-safe GADTs
 
 ### Delta Fields
 
 Always include a `because` field for mutations:
 
 ```haskell
-data PlayerDeltas = PlayerDeltas
-  { stressDelta :: Int      -- +2, not "set to 5"
-  , coinDelta :: Int
-  , deltaBecause :: Text    -- "caught by guard"
+data StateDelta = StateDelta
+  { valueDelta :: Int       -- +2, not "set to 5"
+  , deltaBecause :: Text    -- "reason for change"
   }
-```
-
-### GUI Architecture
-
-1. **Polling-based updates** via `TVar` version numbers
-2. **Communication**: `MVar` for blocking requests, `TVar` for state
-3. **Widget pattern**: Create widget, return `Element`, update via polling
-4. **Accessibility**: Full keyboard support, ARIA labels, focus states
-
-```haskell
--- Widget creation
-clocksPanel :: GUIBridge WorldState -> UI Element
-clocksPanel bridge = do
-  panel <- UI.div #. "clocks-panel"
-  updateClocksPanel panel bridge
-  pure panel
-
--- Widget update (called by polling loop)
-updateClocksPanel :: Element -> GUIBridge WorldState -> UI ()
-updateClocksPanel panel bridge = do
-  void $ element panel # set children []
-  -- Rebuild contents from state...
 ```
 
 ## Dependencies
 
 ### Haskell
 
-- **effectful** - Effect system (no MTL)
+- **freer-simple** - Effect system with reified continuations
 - **ginger** - Jinja templating (custom fork with typed templates)
 - **aeson** - JSON serialization
-- **threepenny-gui** - Browser-based GUI
-- **anthropic-sdk** - Anthropic API client
-- **stm** - Software Transactional Memory (for GUI bridge)
+- **servant** - REST API + WebSocket
 
 ### TypeScript (deploy/)
 
@@ -276,55 +156,15 @@ updateClocksPanel panel bridge = do
 ### Error Handling
 
 - Use `Either` for recoverable errors
-- Use exceptions for truly exceptional conditions
 - Effect handlers catch and log errors
 
 ### Testing
 
 - Graph validation tests check type-level graph structure
 - Protocol conformance tests verify Haskell ↔ TypeScript JSON contract
-- Property tests for pure functions (when present)
-
-### FitD Dice Mechanics (DM Agent)
-
-- Position: Controlled/Risky/Desperate
-- Effect: Limited/Standard/Great
-- Outcome: Critical/Success/Partial/Bad/Disaster
-- **Precarity** scales narrative tone based on stress + heat + wanted
-
-### Compression
-
-Long scenes compress into durable state via dedicated template:
-- SceneOutcome (summary, key beats)
-- WorldDeltas (faction/NPC changes)
-- Extractions (threads, rumors, promises)
-- Decay (what fades)
-
-## Development Workflow
-
-1. **Make changes** to Haskell or TypeScript code
-2. **Build**: `just build`
-3. **Lint**: `just lint`
-4. **Test**: `just test` (Haskell) and/or `just test-ts` (TypeScript)
-5. **Run**: `just dm-gui` or `just tidy-gui` to test interactively
-
-For TypeScript (deploy/):
-```bash
-cd deploy
-pnpm install
-pnpm dev          # Local dev server
-pnpm deploy       # Deploy to Cloudflare
-```
 
 ## Additional Resources
 
-- [effectful documentation](https://hackage.haskell.org/package/effectful)
+- [freer-simple documentation](https://hackage.haskell.org/package/freer-simple)
 - [Anthropic tool use docs](https://docs.anthropic.com/en/docs/tool-use)
-- [Blades in the Dark SRD](https://bladesinthedark.com/) - Inspiration for DM mechanics
 - [GHC WASM docs](https://ghc.gitlab.haskell.org/ghc/doc/users_guide/wasm.html)
-
-## Notes
-
-- **WASM compilation**: The deploy/ directory uses a standin WASM module from `~/dev/tidepool`. Full Haskell→WASM compilation is planned.
-- **Claude skills**: The `.claude/skills/` directory contains specialized agent instructions for Claude AI (not Copilot).
-- **Git hooks**: Run `just install-hooks` to add pre-commit checks.
