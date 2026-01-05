@@ -1,0 +1,5 @@
+packages: .
+jobs: $ncpus
+
+package freer-simple
+  ghc-options: -j

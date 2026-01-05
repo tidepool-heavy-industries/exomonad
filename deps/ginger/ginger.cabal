@@ -1,0 +1,107 @@
+cabal-version:       2.2
+name:                ginger
+version:             0.10.6.0
+synopsis:            An implementation of the Jinja2 template language in Haskell
+description:         Ginger is Jinja, minus the most blatant pythonisms. Wants
+                     to be feature complete, but isn't quite there yet.
+homepage:            https://ginger.tobiasdammers.nl/
+license:             MIT
+license-file:        LICENSE
+author:              Tobias Dammers
+maintainer:          tdammers@gmail.com
+-- copyright:
+category:            Text
+build-type:          Simple
+extra-source-files:  README.md
+                  ,  CHANGELOG.md
+data-files: test/fixtures/*.json
+bug-reports:         https://github.com/tdammers/ginger/issues
+
+source-repository head
+    type: git
+    location: https://github.com/tdammers/ginger
+
+common deps
+  build-depends: base >=4.8 && <5
+               , aeson >=1.4.2.0 && <2.3
+               , bytestring >=0.10.8.2 && <0.13
+               , data-default >= 0.5 && <0.9
+               , mtl >= 2.2 && <2.4
+               , text >=1.2.3.1 && <2.2
+               , time >= 0.1.6.0 && <1.15
+               , transformers >= 0.3 && <0.7
+               , unordered-containers >= 0.2.5 && <0.3
+               , utf8-string >=1.0.1.1 && <1.1
+
+library
+  import: deps
+  exposed-modules: Text.Ginger
+                 , Text.Ginger.AST
+                 , Text.Ginger.GVal
+                 , Text.Ginger.GVal.Generic
+                 , Text.Ginger.Html
+                 , Text.Ginger.Optimizer
+                 , Text.Ginger.Parse
+                 , Text.Ginger.Run
+                 , Text.Ginger.Run.Type
+                 , Text.Ginger.Run.Builtins
+                 , Text.PrintfA
+                 , Text.Ginger.Run.VM
+                 , Text.Ginger.Run.FuncUtils
+                 , Text.Ginger.TH
+                 , Text.Ginger.TH.Types
+                 , Text.Ginger.TH.Builtins
+                 , Text.Ginger.TH.Extract
+                 , Text.Ginger.TH.QuasiQuote
+                 , Text.Ginger.TH.Schema
+                 , Text.Ginger.TH.Validate
+  -- other-modules:
+  -- other-extensions:
+  build-depends: aeson-pretty >=0.8.7 && <0.9
+               , containers >=0.6.4 && <0.8
+               , directory >= 1.3 && <1.4
+               , filepath >= 1.3 && <1.6
+               , http-types >= 0.8 && (< 0.11 || >= 0.12) && <0.13
+               , parsec >= 3.0 && <3.2
+               , regex-tdfa >=1.2.3 && <=1.4
+               , safe >= 0.3 && <0.4
+               , scientific >= 0.3 && <0.4
+               , template-haskell >= 2.11 && <2.23
+               , vector >=0.12.0.2 && <0.14
+  if !impl(ghc >= 8.0)
+    build-depends: semigroups == 0.18.*
+  hs-source-dirs:      src
+  default-language:    Haskell2010
+
+executable ginger
+    import: deps
+    if impl(ghcjs)
+        buildable: False
+    main-is: GingerCLI.hs
+    other-modules: Options
+    hs-source-dirs: cli
+    default-language:    Haskell2010
+    build-depends: ginger
+                 , optparse-applicative >=0.14.3.0 && <0.20
+                 , process >=1.6.5.0 && <1.7
+                 , yaml >=0.11.0.0 && <0.12
+
+test-suite tests
+    import: deps
+    type: exitcode-stdio-1.0
+    main-is: Spec.hs
+    other-modules: Text.Ginger.PropertyTests
+                 , Text.Ginger.SimulationTests
+                 , Text.Ginger.TH.Tests
+                 , Text.Ginger.TH.TestTypes
+    hs-source-dirs: test
+    default-language: Haskell2010
+    build-depends: ginger
+                 , containers >=0.6.4 && <0.8
+                 , parsec >= 3.0 && <3.2
+                 , tasty >=1.2 && <1.6
+                 , tasty-hunit >=0.10.0.1 && <0.11
+                 , tasty-quickcheck >=0.10 && <0.12
+                 , template-haskell >= 2.11 && <2.23
+                 , text >=1.2.3.1 && <2.2
+                 , vector >= 0.12 && <0.14
