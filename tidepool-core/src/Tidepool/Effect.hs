@@ -6,6 +6,9 @@
 module Tidepool.Effect
   ( -- * Effect Stacks
     module Tidepool.Effect.Types
+    -- * DevLog
+  , module Tidepool.Effect.DevLog
   ) where
 
 import Tidepool.Effect.Types
+import Tidepool.Effect.DevLog

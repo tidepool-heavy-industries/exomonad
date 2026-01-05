@@ -73,6 +73,13 @@ import Tidepool.ClaudeCode.Config
   ( ClaudeCodeConfig(..)
   , defaultClaudeCodeConfig
   )
+import Tidepool.DevLog.Executor
+  ( runDevLog
+  , DevLogConfig(..)
+  , DevLogOutput(..)
+  , defaultDevLogConfig
+  )
+import Tidepool.Effect.DevLog (DevLog, Verbosity(..))
 
 -- Effect imports
 import Tidepool.Effects.UI (UI)
@@ -99,8 +106,10 @@ data ExecutorConfig = ExecutorConfig
     -- ^ Service name for trace attribution
   , ecClaudeCodeConfig :: ClaudeCodeConfig
     -- ^ ClaudeCode (zellij-cc) configuration
+  , ecDevLogConfig :: DevLogConfig
+    -- ^ DevLog (session-scoped file logging) configuration
   }
-  deriving stock (Show, Eq)
+  deriving stock (Show)
 
 -- | Default configuration with empty credentials.
 --
@@ -116,6 +125,7 @@ defaultExecutorConfig = ExecutorConfig
   , ecOTLPConfig = Nothing  -- Disabled by default
   , ecServiceName = "tidepool-native"
   , ecClaudeCodeConfig = defaultClaudeCodeConfig
+  , ecDevLogConfig = defaultDevLogConfig
   }
 
 -- | Load configuration from environment variables.
@@ -136,6 +146,9 @@ defaultExecutorConfig = ExecutorConfig
 -- * @ZELLIJ_SESSION@ - Zellij session for ClaudeCode (default: tidepool)
 -- * @ZELLIJ_CC_PATH@ - Path to zellij-cc binary (default: zellij-cc)
 -- * @ZELLIJ_CC_TIMEOUT@ - ClaudeCode timeout in seconds (default: 300)
+-- * @DEVLOG_DIR@ - DevLog output directory (default: disabled)
+-- * @DEVLOG_VERBOSITY@ - Verbosity level: quiet|normal|verbose|trace (default: normal)
+-- * @DEVLOG_LATEST@ - Create latest.log symlink: true|false (default: true)
 loadExecutorConfig :: IO ExecutorConfig
 loadExecutorConfig = do
   -- LLM secrets
@@ -161,6 +174,25 @@ loadExecutorConfig = do
   zellijSession <- lookupEnv "ZELLIJ_SESSION"
   zellijCcPath <- lookupEnv "ZELLIJ_CC_PATH"
   zellijCcTimeout <- lookupEnv "ZELLIJ_CC_TIMEOUT"
+
+  -- DevLog config
+  devLogDir <- lookupEnv "DEVLOG_DIR"
+  devLogVerbosity <- lookupEnv "DEVLOG_VERBOSITY"
+  devLogLatest <- lookupEnv "DEVLOG_LATEST"
+
+  let verbosity = case devLogVerbosity of
+        Just "quiet"   -> VQuiet
+        Just "verbose" -> VVerbose
+        Just "trace"   -> VTrace
+        _              -> VNormal
+
+      devLogOutput = case devLogDir of
+        Just dir -> OutputFile dir
+        Nothing  -> OutputStderr  -- Default to stderr if no dir specified
+
+      createLatest = case devLogLatest of
+        Just "false" -> False
+        _            -> True
 
   pure ExecutorConfig
     { ecLLMConfig = LLMConfig
@@ -203,6 +235,13 @@ loadExecutorConfig = do
         , ccTempDir = "/tmp"
         , ccZellijCcPath = maybe "zellij-cc" id zellijCcPath
         }
+    , ecDevLogConfig = DevLogConfig
+        { dcVerbosity = verbosity
+        , dcOutput = devLogOutput
+        , dcSymlinkLatest = createLatest
+        , dcSessionId = Nothing  -- Auto-generated
+        , dcSessionName = Nothing
+        }
     }
 
 
@@ -243,8 +282,9 @@ mkExecutorEnv config = do
 -- This composes the full effect stack:
 --
 -- @
--- Eff '[UI, Habitica, LLMComplete, ClaudeCodeExec, Observability, IO] a
+-- Eff '[UI, Habitica, LLMComplete, ClaudeCodeExec, DevLog, Observability, IO] a
 --   → runObservabilityWithContext (interpret Observability)
+--   → runDevLog (interpret DevLog)
 --   → runClaudeCodeExecIO (interpret ClaudeCodeExec)
 --   → runLLMComplete (interpret LLMComplete)
 --   → runHabitica (interpret Habitica)
@@ -257,7 +297,8 @@ mkExecutorEnv config = do
 -- 2. Habitica - makes Habitica API calls
 -- 3. LLMComplete - makes LLM API calls
 -- 4. ClaudeCodeExec - executes nodes via Claude Code subprocess
--- 5. Observability (last to peel) - records events and spans
+-- 5. DevLog - session-scoped dev logging
+-- 6. Observability (last to peel) - records events and spans
 --
 -- Traces are automatically flushed to OTLP (Grafana Tempo) after execution
 -- if @OTLP_ENDPOINT@ is configured.
@@ -265,7 +306,7 @@ mkExecutorEnv config = do
 -- Example:
 --
 -- @
--- myAgent :: Eff '[UI, Habitica, LLMComplete, ClaudeCodeExec, Observability, IO] String
+-- myAgent :: Eff '[UI, Habitica, LLMComplete, ClaudeCodeExec, DevLog, Observability, IO] String
 -- myAgent = do
 --   publishEvent $ GraphTransition "entry" "greeting" "start"
 --   showText "Welcome!"
@@ -278,7 +319,7 @@ runEffects
   :: ExecutorEnv
   -> UIContext
   -> UICallback
-  -> Eff '[UI, Habitica, LLMComplete, ClaudeCodeExec, Observability, IO] a
+  -> Eff '[UI, Habitica, LLMComplete, ClaudeCodeExec, DevLog, Observability, IO] a
   -> IO a
 runEffects env ctx callback action = do
   -- Create a fresh trace context for this request
@@ -287,6 +328,7 @@ runEffects env ctx callback action = do
   -- Run the effect stack
   result <- runM
     . runObservabilityWithContext traceCtx (ecLokiConfig $ eeConfig env)
+    . runDevLog (ecDevLogConfig $ eeConfig env)
     . runClaudeCodeExecIO (ecClaudeCodeConfig $ eeConfig env)
     . runLLMComplete (eeLLMEnv env)
     . runHabitica (eeHabiticaEnv env)

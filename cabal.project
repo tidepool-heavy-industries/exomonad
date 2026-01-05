@@ -16,6 +16,7 @@ packages:
     tidepool-native-gui/bd-executor
     tidepool-native-gui/github-executor
     tidepool-native-gui/claude-code-executor
+    tidepool-native-gui/devlog-executor
     tidepool-native-gui/server
 
     -- Tooling packages (Agent 8)
