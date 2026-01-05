@@ -25,7 +25,7 @@
 -- = Usage
 --
 -- @
--- myHandler :: (LSP :> es, NativeOnly) => Eff es Text
+-- myHandler :: (Member LSP effs, NativeOnly) => Eff effs Text
 -- myHandler = do
 --   info <- hover (textDocument "src/Main.hs") (position 42 10)
 --   case info of
@@ -272,7 +272,7 @@ data CompletionItem = CompletionItem
 -- This effect is IO-blind - interpreters handle the actual communication:
 --
 -- * Native: Use 'Tidepool.LSP.Executor.runLSP' with lsp-client
--- * WASM: Effect serializes and yields to TypeScript harness
+-- * WASM: Not available – 'NativeOnly' constraint prevents use in WASM builds
 data LSP r where
   -- | Get diagnostics (errors, warnings) for a document.
   Diagnostics :: TextDocumentIdentifier -> LSP [Diagnostic]
