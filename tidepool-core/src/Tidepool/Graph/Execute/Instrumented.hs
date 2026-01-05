@@ -32,8 +32,12 @@
 -- Node spans include attributes:
 --
 -- * @node.name@ - The handler field name
--- * @node.type@ - "logic" or "llm"
--- * @graph.name@ - The graph type name (if available)
+--
+-- = Limitations
+--
+-- Exception safety: If a handler throws an exception, the current span
+-- will not be closed. For production use, wrap graph execution in
+-- exception-safe bracketing at the runner level.
 module Tidepool.Graph.Execute.Instrumented
   ( -- * Traced Graph Execution
     runGraphWithSpans
@@ -49,7 +53,6 @@ module Tidepool.Graph.Execute.Instrumented
   , executeLLMHandler
   ) where
 
-import Data.Aeson (FromJSON)
 import Data.Kind (Constraint, Type)
 import Control.Monad.Freer (Eff, Member)
 import Data.Text (Text)
@@ -59,7 +62,6 @@ import GHC.Records (HasField(..))
 import GHC.TypeLits (Symbol, KnownSymbol, symbolVal)
 import Data.Proxy (Proxy(..))
 
-import Tidepool.Effect (LLM)
 import Tidepool.Effects.Observability
   ( Observability, SpanKind(..), SpanAttribute(..)
   , startSpan, endSpan
@@ -72,7 +74,7 @@ import Tidepool.Graph.Generic (AsHandler, FieldsWithNamesOf)
 import Tidepool.Graph.Generic.Core (AsGraph)
 import Tidepool.Graph.Goto (GotoChoice, To)
 import Tidepool.Graph.Goto.Internal (GotoChoice(..), OneOf(..))
-import Tidepool.Graph.Types (Exit, Self)
+import Tidepool.Graph.Types (Exit)
 
 
 -- | Effect type alias.

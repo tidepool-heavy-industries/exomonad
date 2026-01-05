@@ -1,3 +1,5 @@
+{-# LANGUAGE LambdaCase #-}
+
 -- | Observability effect executor - Loki and OTLP HTTP clients.
 --
 -- Publishes:
@@ -86,7 +88,8 @@ pushToLoki config pushReq = do
                    body ignoreResponse hdrs
 
   pure $ case result of
-    Left e  -> Just $ "Loki push failed: " <> T.pack (show e)
+    -- Don't log full exception - it may contain auth headers/credentials
+    Left _  -> Just "Loki push failed (check endpoint and credentials)"
     Right _ -> Nothing
 
 -- | Parse URL into http or https variant.
@@ -148,7 +151,8 @@ pushToOTLP config traceReq = do
         void $ req POST httpsUrl body ignoreResponse hdrs
 
   pure $ case result of
-    Left e  -> Just $ "OTLP push failed: " <> T.pack (show e)
+    -- Don't log full exception - it may contain auth headers/credentials
+    Left _  -> Just "OTLP push failed (check endpoint and credentials)"
     Right _ -> Nothing
 
 -- | Parse OTLP URL into http or https variant.
@@ -319,10 +323,7 @@ runObservabilityWithContext ctx config = interpret $ \case
         modifyIORef ctx.tcCompletedSpans (otlpSpan :)
 
   AddSpanAttribute attr -> sendM $ do
-    -- Modify the current span's attributes
-    stack <- readIORef ctx.tcSpanStack
-    case stack of
-      [] -> pure ()  -- No active span, ignore
-      (s:rest) -> do
-        let s' = s { asAttributes = s.asAttributes <> [attr] }
-        writeIORef ctx.tcSpanStack (s':rest)
+    -- Modify the current span's attributes atomically
+    modifyIORef ctx.tcSpanStack $ \case
+      [] -> []  -- No active span, ignore
+      (s:rest) -> s { asAttributes = s.asAttributes <> [attr] } : rest
