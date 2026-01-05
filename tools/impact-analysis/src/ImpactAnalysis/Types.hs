@@ -26,6 +26,9 @@ data ImpactInput = ImpactInput
     -- ^ Line number (1-indexed, as displayed in editors)
   , col :: Int
     -- ^ Column number (1-indexed, as displayed in editors)
+  , lspCmd :: Maybe String
+    -- ^ Custom LSP server command (e.g., "lspmux client --server-path haskell-language-server-wrapper")
+    -- Overrides IMPACT_LSP_CMD env var. If neither set, uses haskell-language-server-wrapper.
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (ToJSON, FromJSON)
