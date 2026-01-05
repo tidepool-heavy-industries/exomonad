@@ -37,6 +37,8 @@ library
         Tidepool.Template
         Tidepool.Tool
         Tidepool.Schema
+        Tidepool.Tool.Wire
+        Tidepool.Tool.Convert
         Tidepool.Graph.CLI
         Tidepool.Graph.Tool
         Tidepool.Graph.Template

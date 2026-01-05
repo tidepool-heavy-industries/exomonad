@@ -202,6 +202,15 @@ openaiRequest env config userMsg maybeTools = do
         Right resp -> parseOpenAIResponse resp
 
 -- | Build OpenAI Chat Completions API request body.
+--
+-- __Tools format__: Tools should be in OpenAI function format:
+--
+-- @
+-- { "type": "function", "function": { "name": "...", "description": "...", "parameters": {...} } }
+-- @
+--
+-- Use 'CfTool' from "Tidepool.Tool.Wire" or the 'ToCfTool' typeclass to produce
+-- correctly formatted tools. Do NOT pass Anthropic-format tools here.
 buildOpenAIRequest :: OpenAIConfig -> Text -> Maybe [Value] -> LBS.ByteString
 buildOpenAIRequest config userMsg maybeTools =
   encode $ object $ filter ((/= Null) . snd)
@@ -211,24 +220,8 @@ buildOpenAIRequest config userMsg maybeTools =
         (maybe [] (\sys -> [object ["role" .= ("system" :: Text), "content" .= sys]]) config.oaSystemPrompt
          ++ [object ["role" .= ("user" :: Text), "content" .= userMsg]])
     , "temperature" .= config.oaTemperature
-    , "tools" .= case maybeTools of
-        Nothing -> Null
-        Just ts -> toJSON $ map wrapOpenAITool ts
+    , "tools" .= maybeTools  -- Tools should already be in OpenAI format (via CfTool)
     ]
-
--- | Wrap tool definitions in OpenAI's function format.
---
--- __Note__: This is for OpenAI API compatibility only. Currently unused
--- since native OpenAI support routes through CF AI (see tidepool-wasm/CfTool.hs).
---
--- __Warning__: This wrapper assumes @toolDef@ uses @parameters@ (OpenAI style).
--- If the input uses @input_schema@ (Anthropic style), the result will be incorrect.
--- For Anthropic tools, use 'AnthropicTool' directly without wrapping.
-wrapOpenAITool :: Value -> Value
-wrapOpenAITool toolDef = object
-  [ "type" .= ("function" :: Text)
-  , "function" .= toolDef
-  ]
 
 -- | Parse OpenAI API response.
 parseOpenAIResponse :: Response LBS.ByteString -> IO (Either LLMError OpenAIResponse)

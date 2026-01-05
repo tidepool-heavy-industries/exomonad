@@ -15,7 +15,7 @@
 -- }
 -- @
 --
--- __OpenAI__ (used by CF AI, see tidepool-wasm/CfTool.hs):
+-- __OpenAI__ (used by CF AI, see "Tidepool.Tool.Wire"):
 --
 -- @
 -- { "type": "function",
@@ -23,7 +23,7 @@
 -- }
 -- @
 --
--- This module provides 'AnthropicTool' for type-safe Anthropic tool definitions.
+-- Tool wire types are now consolidated in "Tidepool.Tool.Wire" and re-exported here.
 module Tidepool.LLM.Types
   ( -- * Configuration
     LLMConfig(..)
@@ -38,16 +38,18 @@ module Tidepool.LLM.Types
     -- * Error Types
   , LLMError(..)
 
-    -- * Tool Definitions
+    -- * Tool Definitions (re-exported from "Tidepool.Tool.Wire")
   , AnthropicTool(..)
   , anthropicToolToJSON
   ) where
 
-import Data.Aeson (ToJSON(..), Value, object, (.=))
 import Data.Text (Text)
 import GHC.Generics (Generic)
 import Network.HTTP.Client (Manager, newManager)
 import Network.HTTP.Client.TLS (tlsManagerSettings)
+
+-- Re-export wire types
+import Tidepool.Tool.Wire (AnthropicTool(..), anthropicToolToJSON)
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -119,51 +121,3 @@ data LLMError
   deriving stock (Eq, Show, Generic)
 
 
--- ════════════════════════════════════════════════════════════════════════════
--- TOOL DEFINITIONS
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Anthropic tool definition.
---
--- Anthropic uses @input_schema@ (not @parameters@) for the JSON Schema.
--- This type ensures tools are serialized correctly for the Anthropic API.
---
--- @
--- AnthropicTool
---   { atName = "search"
---   , atDescription = "Search the knowledge base"
---   , atInputSchema = object
---       [ "type" .= "object"
---       , "properties" .= object [("query", object [("type", "string")])]
---       , "required" .= ["query"]
---       ]
---   }
--- @
---
--- Serializes to:
---
--- @
--- { "name": "search",
---   "description": "Search the knowledge base",
---   "input_schema": { "type": "object", ... }
--- }
--- @
-data AnthropicTool = AnthropicTool
-  { atName        :: !Text   -- ^ Tool name (used in tool_use blocks)
-  , atDescription :: !Text   -- ^ Human-readable description (shown to LLM)
-  , atInputSchema :: !Value  -- ^ JSON Schema for tool input
-  }
-  deriving stock (Eq, Show, Generic)
-
-instance ToJSON AnthropicTool where
-  toJSON t = object
-    [ "name" .= t.atName
-    , "description" .= t.atDescription
-    , "input_schema" .= t.atInputSchema
-    ]
-
--- | Convert an Anthropic tool to a JSON Value.
---
--- Equivalent to 'toJSON' but explicit for clarity.
-anthropicToolToJSON :: AnthropicTool -> Value
-anthropicToolToJSON = toJSON
