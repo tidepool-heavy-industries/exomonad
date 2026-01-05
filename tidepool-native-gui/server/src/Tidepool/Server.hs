@@ -31,10 +31,14 @@ module Tidepool.Server
     runServer
   , ServerConfig(..)
   , ServerMode(..)
+  , Agent
 
     -- * Executor Configuration
   , ExecutorConfig(..)
   , defaultExecutorConfig
+
+    -- * Default Agent
+  , simpleAgent
   ) where
 
 import Control.Concurrent.MVar
@@ -85,6 +89,13 @@ import Tidepool.Server.API
   )
 import Tidepool.Server.SimpleAgent (simpleAgent)
 
+import Control.Monad.Freer (Eff)
+import Tidepool.Effects.UI (UI)
+import Tidepool.Effects.Habitica (Habitica)
+import Tidepool.Effects.LLMProvider (LLMComplete)
+import Tidepool.Effects.Observability (Observability)
+import Tidepool.ClaudeCode.Effect (ClaudeCodeExec)
+
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- CONFIGURATION
@@ -96,6 +107,9 @@ data ServerMode
   | DevProxy Int           -- ^ Proxy to Vite dev server on given port (development)
   deriving (Show, Eq)
 
+-- | Agent type - a computation using UI, LLM, and Observability effects.
+type Agent = Eff '[UI, Habitica, LLMComplete, ClaudeCodeExec, Observability, IO] ()
+
 -- | Server configuration.
 data ServerConfig = ServerConfig
   { scPort :: Int
@@ -106,6 +120,8 @@ data ServerConfig = ServerConfig
     -- ^ Executor configuration (LLM keys, Habitica creds, etc.)
   , scMode :: ServerMode
     -- ^ Static file serving mode
+  , scAgent :: Agent
+    -- ^ Agent to run for each WebSocket connection
   }
 
 
@@ -148,7 +164,7 @@ runServer config = do
 
   -- Layer WebSocket on top via WAI
   runSettings settings $
-    websocketsOr WS.defaultConnectionOptions (wsApp sessions env) servantApp
+    websocketsOr WS.defaultConnectionOptions (wsApp sessions env (scAgent config)) servantApp
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -216,8 +232,8 @@ devProxyHandler = Tagged $ \_req respond -> respond $ responseLBS
 -- | WebSocket application handler.
 --
 -- Accepts incoming connections and spawns a handler for each.
-wsApp :: SessionMap -> ExecutorEnv -> WS.ServerApp
-wsApp sessions env pending = do
+wsApp :: SessionMap -> ExecutorEnv -> Agent -> WS.ServerApp
+wsApp sessions env agent pending = do
   conn <- WS.acceptRequest pending
   putStrLn "[WebSocket] Connection accepted"
 
@@ -227,7 +243,7 @@ wsApp sessions env pending = do
 
   -- Fork ping thread to keep connection alive
   WS.withPingThread conn 30 (pure ()) $
-    (handleConnection sessions env session conn
+    (handleConnection env session conn agent
       `catch` (\(e :: SomeException) ->
         putStrLn $ "[WebSocket] Connection error: " <> show e))
       `finally` do
@@ -238,8 +254,8 @@ wsApp sessions env pending = do
 --
 -- Creates a UI callback that bridges WebSocket to the effect system,
 -- then runs the agent with full effect composition.
-handleConnection :: SessionMap -> ExecutorEnv -> Session -> WS.Connection -> IO ()
-handleConnection _sessions env session conn = do
+handleConnection :: ExecutorEnv -> Session -> WS.Connection -> Agent -> IO ()
+handleConnection env session conn agent = do
   -- Create UI context for this session
   ctx <- newUIContext "entry"
 
@@ -269,5 +285,5 @@ handleConnection _sessions env session conn = do
             atomically $ writeTVar (sActionVar session) (Just action)
             pure action
 
-  -- Run simple agent with full effect stack (UI, LLM, Observability)
-  runEffects env ctx callback simpleAgent
+  -- Run agent with full effect stack (UI, LLM, Observability)
+  runEffects env ctx callback agent
