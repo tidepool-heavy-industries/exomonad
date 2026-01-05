@@ -22,6 +22,11 @@ module Tidepool.Graph.Edges
 
     -- * Graph-Level Extraction
   , GetGlobal
+  , GetBackend
+
+    -- * ClaudeCode Extraction
+  , GetClaudeCode
+  , HasClaudeCode
 
     -- * Goto Extraction
   , GetGotoTargets
@@ -40,6 +45,12 @@ import Data.Kind (Type)
 import GHC.TypeLits (Symbol)
 
 import Tidepool.Graph.Types
+  ( type (:@), type (:&)
+  , Needs, Schema, System, Template, Vision, Tools, UsesEffects, Memory
+  , Global, Backend
+  , ClaudeCode, ModelChoice
+  , Exit, Self
+  )
 import Tidepool.Graph.Goto (Goto, To)
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -315,6 +326,8 @@ type family SameAnnotationType ann target where
   SameAnnotationType (UsesEffects _) (UsesEffects _) = 'True
   SameAnnotationType (Memory _) (Memory _) = 'True
   SameAnnotationType Vision Vision = 'True
+  SameAnnotationType (ClaudeCode _ _) (ClaudeCode _ _) = 'True
+  SameAnnotationType (Backend _) (Backend _) = 'True
   SameAnnotationType _ _ = 'False
 
 -- | Find a specific annotation in a node.
@@ -337,6 +350,48 @@ type family GetGlobal graph where
   GetGlobal (graph :& Global t) = 'Just t
   GetGlobal (graph :& _) = GetGlobal graph
   GetGlobal _ = 'Nothing
+
+-- | Get the Backend type from a graph-level annotation.
+--
+-- @
+-- GetBackend (graph :& Backend NativeAnthropic)
+--   = 'Just NativeAnthropic
+-- @
+type GetBackend :: Type -> Maybe Type
+type family GetBackend graph where
+  GetBackend (graph :& Backend t) = 'Just t
+  GetBackend (graph :& _) = GetBackend graph
+  GetBackend _ = 'Nothing
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- CLAUDE CODE EXTRACTION
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Extract ClaudeCode annotation from a node.
+--
+-- Returns the model and cwd as a type-level tuple.
+--
+-- @
+-- GetClaudeCode (LLMNode :@ Schema Result :@ ClaudeCode 'Sonnet ('Just "/path"))
+--   = 'Just '( 'Sonnet, 'Just "/path")
+-- @
+type GetClaudeCode :: Type -> Maybe (ModelChoice, Maybe Symbol)
+type family GetClaudeCode node where
+  GetClaudeCode (node :@ ClaudeCode m c) = 'Just '(m, c)
+  GetClaudeCode (node :@ _) = GetClaudeCode node
+  GetClaudeCode _ = 'Nothing
+
+-- | Check if a node has the ClaudeCode annotation.
+--
+-- @
+-- HasClaudeCode (LLMNode :@ ClaudeCode 'Haiku 'Nothing) = 'True
+-- HasClaudeCode (LLMNode :@ Schema Result) = 'False
+-- @
+type HasClaudeCode :: Type -> Bool
+type family HasClaudeCode node where
+  HasClaudeCode (node :@ ClaudeCode _ _) = 'True
+  HasClaudeCode (node :@ _) = HasClaudeCode node
+  HasClaudeCode _ = 'False
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TYPE-LEVEL UTILITIES
