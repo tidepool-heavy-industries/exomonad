@@ -71,7 +71,6 @@ import Network.HTTP.Types.Status (statusCode)
 import Tidepool.LLM.Types
   ( LLMEnv(..)
   , LLMConfig(..)
-  , LLMError(..)
   , AnthropicSecrets(..)
   , OpenAISecrets(..)
   , mkLLMEnv
@@ -80,6 +79,7 @@ import Tidepool.LLM.Types
   )
 import Tidepool.Effects.LLMProvider
   ( LLMComplete(..)
+  , LLMError(..)
   , SProvider(..)
   , AnthropicConfig(..)
   , OpenAIConfig(..)
@@ -283,6 +283,11 @@ checkContextLength errType errMsg
 -- This interpreter makes real API calls to Anthropic or OpenAI based on
 -- the type-level provider in the effect.
 --
+-- = Error Handling
+--
+-- * 'Complete' - throws via 'error' on failure (use for fatal errors)
+-- * 'CompleteTry' - returns @Either LLMError@ (use for graceful handling)
+--
 -- = Example
 --
 -- @
@@ -292,11 +297,18 @@ checkContextLength errType errMsg
 --   let config = LLMConfig { lcAnthropicSecrets = Just secrets, ... }
 --   env <- mkLLMEnv config
 --   runM $ runLLMComplete env $ do
+--     -- Throwing variant (crashes on error)
 --     response <- complete SAnthropic cfg "Hello" Nothing
---     -- response :: AnthropicResponse
+--
+--     -- Try variant (returns Either)
+--     result <- completeTry SAnthropic cfg "Hello" Nothing
+--     case result of
+--       Left err -> handleError err
+--       Right response -> pure response
 -- @
 runLLMComplete :: LastMember IO effs => LLMEnv -> Eff (LLMComplete ': effs) a -> Eff effs a
 runLLMComplete env = interpret $ \case
+  -- Throwing variants (for when errors are fatal)
   Complete SAnthropic config msg tools -> sendM $ do
     result <- anthropicRequest env config msg tools
     case result of
@@ -308,3 +320,10 @@ runLLMComplete env = interpret $ \case
     case result of
       Left err -> error $ "LLMComplete (OpenAI): " <> show err
       Right resp -> pure resp
+
+  -- Try variants (for graceful error handling)
+  CompleteTry SAnthropic config msg tools -> sendM $
+    anthropicRequest env config msg tools
+
+  CompleteTry SOpenAI config msg tools -> sendM $
+    openaiRequest env config msg tools

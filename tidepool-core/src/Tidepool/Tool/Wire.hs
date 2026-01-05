@@ -11,6 +11,12 @@
 -- These are "wire types" - simple records for JSON serialization.
 -- For type-safe tool definitions with schemas, see 'Tidepool.Graph.Tool.ToolDef'.
 --
+-- = See Also
+--
+-- * "Tidepool.Graph.Tool" - The 'ToolDef' typeclass for defining tools
+-- * "Tidepool.Tool.Convert" - Conversion from 'ToolDef' to wire types
+-- * "Tidepool.Schema" - 'JSONSchema' type used by these wire formats
+--
 -- = Format Differences
 --
 -- __Anthropic__:
