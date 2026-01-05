@@ -18,7 +18,6 @@ import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
 import Data.UUID (toText)
 import Data.UUID.V4 (nextRandom)
-import System.Directory (doesFileExist)
 import System.Exit (ExitCode(..))
 import System.FilePath ((</>))
 import System.Process (readProcessWithExitCode)

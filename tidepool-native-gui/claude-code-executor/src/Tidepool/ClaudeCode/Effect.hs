@@ -26,7 +26,7 @@
 -- Handlers for ClaudeCode-annotated nodes use this effect:
 --
 -- @
--- myHandler :: ClaudeCodeExec :> es => ... -> Eff es Value
+-- myHandler :: Member ClaudeCodeExec es => ... -> Eff es Value
 -- myHandler input = do
 --   result <- execClaudeCode Sonnet (Just "/my/project") prompt schema tools
 --   ...

@@ -30,6 +30,7 @@ import Control.Monad.Freer (Eff, runM)
 import Data.Text (Text)
 import qualified Data.Text as T
 import System.Environment (lookupEnv)
+import Text.Read (readMaybe)
 
 -- Executor imports
 import Tidepool.UI.Executor
@@ -170,7 +171,7 @@ loadExecutorConfig = do
         }
     , ecClaudeCodeConfig = ClaudeCodeConfig
         { ccZellijSession = maybe "tidepool" T.pack zellijSession
-        , ccDefaultTimeout = maybe 300 read zellijCcTimeout
+        , ccDefaultTimeout = maybe 300 id (zellijCcTimeout >>= readMaybe)
         , ccTempDir = "/tmp"
         , ccZellijCcPath = maybe "zellij-cc" id zellijCcPath
         }
