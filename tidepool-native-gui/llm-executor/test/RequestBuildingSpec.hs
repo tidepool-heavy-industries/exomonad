@@ -3,7 +3,7 @@
 -- Verifies that API requests are built with correct formats for each provider.
 module RequestBuildingSpec (spec) where
 
-import Data.Aeson (Value(..), decode, object, (.=))
+import Data.Aeson (Value(..), ToJSON(..), object, (.=))
 import Data.Aeson.KeyMap qualified as KM
 import Data.Vector qualified as V
 import Test.Hspec
@@ -24,17 +24,15 @@ spec = do
 
     describe "basic request structure" $ do
       it "includes model and max_tokens" $ do
-        let body = buildAnthropicRequest baseConfig "Hello" Nothing
-            Just obj = decode body :: Maybe Value
-            Object fields = obj
+        let req = buildAnthropicRequest baseConfig "Hello" Nothing
+            Object fields = toJSON req
 
         KM.lookup "model" fields `shouldBe` Just (String "claude-sonnet-4-20250514")
         KM.lookup "max_tokens" fields `shouldBe` Just (Number 1024)
 
       it "includes user message in messages array" $ do
-        let body = buildAnthropicRequest baseConfig "Hello world" Nothing
-            Just obj = decode body :: Maybe Value
-            Object fields = obj
+        let req = buildAnthropicRequest baseConfig "Hello world" Nothing
+            Object fields = toJSON req
             Just (Array messages) = KM.lookup "messages" fields
             [Object msg] = V.toList messages
 
@@ -43,16 +41,14 @@ spec = do
 
       it "includes system prompt when provided" $ do
         let configWithSystem = baseConfig { acSystemPrompt = Just "You are a helpful assistant" }
-            body = buildAnthropicRequest configWithSystem "Hi" Nothing
-            Just obj = decode body :: Maybe Value
-            Object fields = obj
+            req = buildAnthropicRequest configWithSystem "Hi" Nothing
+            Object fields = toJSON req
 
         KM.lookup "system" fields `shouldBe` Just (String "You are a helpful assistant")
 
       it "omits system prompt when not provided" $ do
-        let body = buildAnthropicRequest baseConfig "Hi" Nothing
-            Just obj = decode body :: Maybe Value
-            Object fields = obj
+        let req = buildAnthropicRequest baseConfig "Hi" Nothing
+            Object fields = toJSON req
 
         -- Null values are filtered out, so 'system' should not be present
         KM.member "system" fields `shouldBe` False
@@ -69,9 +65,8 @@ spec = do
                       ]
                   ]
               ]
-            body = buildAnthropicRequest baseConfig "Search for cats" (Just [anthropicTool])
-            Just obj = decode body :: Maybe Value
-            Object fields = obj
+            req = buildAnthropicRequest baseConfig "Search for cats" (Just [anthropicTool])
+            Object fields = toJSON req
             Just (Array tools) = KM.lookup "tools" fields
             [Object tool] = V.toList tools
 
@@ -98,9 +93,8 @@ spec = do
               , "description" .= tool.atDescription
               , "input_schema" .= tool.atInputSchema
               ]
-            body = buildAnthropicRequest baseConfig "What's the weather?" (Just [toolJson])
-            Just obj = decode body :: Maybe Value
-            Object fields = obj
+            req = buildAnthropicRequest baseConfig "What's the weather?" (Just [toolJson])
+            Object fields = toJSON req
             Just (Array tools) = KM.lookup "tools" fields
             [Object parsedTool] = V.toList tools
 
@@ -109,27 +103,24 @@ spec = do
         KM.member "parameters" parsedTool `shouldBe` False
 
       it "omits tools when None provided" $ do
-        let body = buildAnthropicRequest baseConfig "Hello" Nothing
-            Just obj = decode body :: Maybe Value
-            Object fields = obj
+        let req = buildAnthropicRequest baseConfig "Hello" Nothing
+            Object fields = toJSON req
 
         KM.member "tools" fields `shouldBe` False
 
     describe "thinking budget" $ do
       it "includes thinking config when budget provided" $ do
         let configWithThinking = baseConfig { acThinkingBudget = Just 5000 }
-            body = buildAnthropicRequest configWithThinking "Think hard" Nothing
-            Just obj = decode body :: Maybe Value
-            Object fields = obj
+            req = buildAnthropicRequest configWithThinking "Think hard" Nothing
+            Object fields = toJSON req
             Just (Object thinking) = KM.lookup "thinking" fields
 
         KM.lookup "type" thinking `shouldBe` Just (String "enabled")
         KM.lookup "budget_tokens" thinking `shouldBe` Just (Number 5000)
 
       it "omits thinking when no budget" $ do
-        let body = buildAnthropicRequest baseConfig "Hello" Nothing
-            Just obj = decode body :: Maybe Value
-            Object fields = obj
+        let req = buildAnthropicRequest baseConfig "Hello" Nothing
+            Object fields = toJSON req
 
         KM.member "thinking" fields `shouldBe` False
 
@@ -143,18 +134,16 @@ spec = do
 
     describe "basic request structure" $ do
       it "includes model and max_tokens" $ do
-        let body = buildOpenAIRequest baseConfig "Hello" Nothing
-            Just obj = decode body :: Maybe Value
-            Object fields = obj
+        let req = buildOpenAIRequest baseConfig "Hello" Nothing
+            Object fields = toJSON req
 
         KM.lookup "model" fields `shouldBe` Just (String "gpt-4o")
         KM.lookup "max_tokens" fields `shouldBe` Just (Number 2048)
 
       it "puts system prompt in messages array (not top-level)" $ do
         let configWithSystem = baseConfig { oaSystemPrompt = Just "Be helpful" }
-            body = buildOpenAIRequest configWithSystem "Hi" Nothing
-            Just obj = decode body :: Maybe Value
-            Object fields = obj
+            req = buildOpenAIRequest configWithSystem "Hi" Nothing
+            Object fields = toJSON req
             Just (Array messages) = KM.lookup "messages" fields
 
         -- OpenAI uses messages array for system prompt
@@ -176,9 +165,8 @@ spec = do
                   , "parameters" .= object ["type" .= ("object" :: String)]
                   ]
               ]
-            body = buildOpenAIRequest baseConfig "Search" (Just [openaiTool])
-            Just obj = decode body :: Maybe Value
-            Object fields = obj
+            req = buildOpenAIRequest baseConfig "Search" (Just [openaiTool])
+            Object fields = toJSON req
             Just (Array tools) = KM.lookup "tools" fields
             [Object passedTool] = V.toList tools
 
@@ -220,11 +208,11 @@ spec = do
                 ]
             ]
 
-          anthropicBody = buildAnthropicRequest anthropicConfig "Test" (Just [anthropicTool])
-          openaiBody = buildOpenAIRequest openaiConfig "Test" (Just [openaiTool])
+          anthropicReq = buildAnthropicRequest anthropicConfig "Test" (Just [anthropicTool])
+          openaiReq = buildOpenAIRequest openaiConfig "Test" (Just [openaiTool])
 
-          Just (Object anthropicFields) = decode anthropicBody
-          Just (Object openaiFields) = decode openaiBody
+          Object anthropicFields = toJSON anthropicReq
+          Object openaiFields = toJSON openaiReq
 
           Just (Array anthropicTools) = KM.lookup "tools" anthropicFields
           Just (Array openaiTools) = KM.lookup "tools" openaiFields
