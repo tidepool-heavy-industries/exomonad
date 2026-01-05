@@ -383,6 +383,71 @@ runEffects :: ExecutorEnv -> UIContext -> UICallback
 
 See `tidepool-native-gui/server/CLAUDE.md` for full documentation.
 
+## Observability (OpenTelemetry Traces)
+
+The native server exports OpenTelemetry traces to Grafana Tempo via OTLP HTTP.
+
+### Quick Setup
+
+```bash
+# Set OTLP endpoint and credentials
+export OTLP_ENDPOINT="https://otlp-gateway-prod-us-west-0.grafana.net/otlp/v1/traces"
+export OTLP_USER="<instance-id>"
+export OTLP_TOKEN="glc_..."
+
+# Optional: custom service name (default: tidepool-native)
+export SERVICE_NAME="my-agent"
+
+# Run server - traces are automatically exported
+just native
+```
+
+### Instrumented Graph Execution
+
+Use `Execute.Instrumented` for automatic span emission on graph dispatch:
+
+```haskell
+import Tidepool.Graph.Execute.Instrumented
+
+-- Wrap graph execution with a root span
+result <- withGraphSpan "agent:handle-request" $
+  runGraphWithSpans handlers inputValue
+```
+
+This creates a span hierarchy:
+```
+agent:handle-request (root span)
+├── node:classify
+├── node:route
+└── node:respond
+```
+
+### Manual Spans
+
+For custom spans within handlers:
+
+```haskell
+import Tidepool.Effects.Observability
+
+myHandler input = do
+  _ <- startSpan "custom-operation" SpanInternal
+    [AttrText "input.type" "message"]
+  result <- doWork input
+  endSpan False [AttrInt "result.count" (length result)]
+  pure result
+```
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| `Tidepool.Effects.Observability` | Span effect types and smart constructors |
+| `Tidepool.Graph.Execute.Instrumented` | Traced graph dispatch (`runGraphWithSpans`) |
+| `Tidepool.Observability.Executor` | OTLP HTTP exporter and Loki client |
+| `Tidepool.Observability.Types` | OTLP span types and TraceContext |
+
+See `.claude/skills/tidepool-observability/SKILL.md` for full documentation.
+
 ## LSP Integration (Gas Town)
 
 Claude Code agents (polecats, witnesses, mayor) can use LSP for code intelligence.

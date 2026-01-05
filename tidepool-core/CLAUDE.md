@@ -176,6 +176,11 @@ that `UsesEffects` requires `Goto` effects, not `To` markers.
 │  (transition       (DispatchGoto       (persistent                           │
 │   effect,           typeclass,          state effect)                        │
 │   OneOf GADT)       typed dispatch)                                          │
+│                          │                                                   │
+│                          ▼                                                   │
+│                    Execute/Instrumented.hs                                   │
+│                    (traced dispatch with                                     │
+│                     OpenTelemetry spans)                                     │
 │                                                                              │
 │  Docs.hs                                                                     │
 │  (template dependency documentation)                                         │
@@ -1585,6 +1590,7 @@ This follows the xmonad/xmonad-contrib pattern: core framework vs reusable integ
 | Generic.hs | Servant-style record modes (GraphMode, AsHandler) |
 | Goto.hs | Goto effect, OneOf GADT, GotoChoice, Inject typeclasses |
 | Execute.hs | DispatchGoto typeclass for typed graph dispatch |
+| Execute/Instrumented.hs | Traced dispatch with OpenTelemetry span emission |
 | Memory.hs | Memory effect for persistent state |
 | Template.hs | TemplateDef typeclass for typed prompts |
 | Tool.hs | Unified tool definitions (ToolDef typeclass) |

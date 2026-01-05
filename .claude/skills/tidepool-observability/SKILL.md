@@ -5,7 +5,7 @@ description: Use when setting up Grafana Cloud observability for Cloudflare Work
 
 # Tidepool Observability
 
-Grafana Cloud native integration for Cloudflare Workers (works on any plan).
+Grafana Cloud integration for both Cloudflare Workers and native server.
 
 ## Quick Setup
 
@@ -103,3 +103,113 @@ Access:
 
 Full setup: `deploy/docs/GRAFANA_CLOUD_SETUP.md`
 Query examples: `deploy/docs/GRAFANA_QUERIES.md`
+
+---
+
+# Native Server Traces (OTLP)
+
+The native server (`tidepool-native`) can export OpenTelemetry traces to Grafana Tempo via OTLP HTTP.
+
+## Quick Setup
+
+1. **Set environment variables**:
+   ```bash
+   # Required: OTLP endpoint for Grafana Tempo
+   export OTLP_ENDPOINT="https://otlp-gateway-prod-us-west-0.grafana.net/otlp/v1/traces"
+
+   # Required: Grafana Cloud credentials
+   export OTLP_USER="123456"  # Your Grafana Cloud instance ID
+   export OTLP_TOKEN="glc_..."  # API token with push scope
+
+   # Optional: Service name (default: tidepool-native)
+   export SERVICE_NAME="my-agent"
+   ```
+
+2. **Run the server**:
+   ```bash
+   just native
+   # Or: cabal run tidepool-native
+   ```
+
+3. **View traces in Grafana**:
+   - Go to Explore → Tempo
+   - Search by service.name = "tidepool-native" (or your custom SERVICE_NAME)
+
+## Instrumented Graph Execution
+
+Graph handlers emit spans automatically when using instrumented dispatch:
+
+```haskell
+import Tidepool.Graph.Execute.Instrumented
+
+-- Wrap graph execution with a root span
+result <- withGraphSpan "agent:my-request" $
+  runGraphWithSpans handlers inputValue
+
+-- Each node transition creates a child span:
+-- agent:my-request
+-- └── node:classify
+-- └── node:route
+-- └── node:respond
+```
+
+## Span Hierarchy
+
+```
+graph:MyGraph (root span, SpanServer)
+├── node:entry (first handler)
+├── node:process (subsequent handlers)
+└── node:exit (final handler)
+```
+
+Each node span includes attributes:
+- `node.name` - Handler field name
+- `node.type` - "logic" or "llm"
+
+## Manual Spans
+
+For custom spans within handlers:
+
+```haskell
+import Tidepool.Effects.Observability
+
+myHandler input = do
+  _ <- startSpan "custom-operation" SpanInternal
+    [AttrText "input.type" (typeof input)]
+
+  result <- doWork input
+
+  endSpan False [AttrInt "result.count" (length result)]
+  pure result
+```
+
+## Environment Variables
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `OTLP_ENDPOINT` | For traces | none | OTLP HTTP traces endpoint |
+| `OTLP_USER` | For Grafana Cloud | none | Instance ID for basic auth |
+| `OTLP_TOKEN` | For Grafana Cloud | none | API token for basic auth |
+| `SERVICE_NAME` | No | tidepool-native | Service name in traces |
+| `LOKI_URL` | For logs | localhost:3100 | Loki push endpoint |
+| `LOKI_USER` | For Grafana Cloud | none | Instance ID for Loki |
+| `LOKI_TOKEN` | For Grafana Cloud | none | API token for Loki |
+
+## Getting Grafana Cloud Credentials
+
+1. Go to: https://grafana.com/orgs/<your-org>/api-keys
+2. Create a new API key with "Push" scope
+3. Copy the instance ID from the OTLP gateway URL (the number in the URL)
+
+## Querying Traces (TraceQL)
+
+```traceql
+# All traces from native server
+{service.name="tidepool-native"}
+
+# Traces with specific node
+{service.name="tidepool-native"} | node.name="classify"
+
+# Error traces
+{service.name="tidepool-native" && status=error}
+```
