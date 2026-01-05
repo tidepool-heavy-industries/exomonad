@@ -37,6 +37,8 @@ module Tidepool.Effects.BD
   , getBlocking
   , getLabels
   , getChildren
+  , listByStatus
+  , listByType
 
     -- * Write Operations
   , createBead
@@ -331,6 +333,12 @@ data BD r where
   -- | Get child beads (beads with this as parent).
   GetChildren :: Text -> BD [BeadInfo]
 
+  -- | List beads by status.
+  ListByStatus :: BeadStatus -> BD [BeadInfo]
+
+  -- | List beads by type.
+  ListByType :: BeadType -> BD [BeadInfo]
+
   -- Write operations
   -- | Create a new bead, returns the generated ID.
   CreateBead :: CreateBeadInput -> BD Text
@@ -380,6 +388,14 @@ getLabels = send . GetLabels
 -- | Get child beads (beads with this as parent).
 getChildren :: Member BD effs => Text -> Eff effs [BeadInfo]
 getChildren = send . GetChildren
+
+-- | List beads by status.
+listByStatus :: Member BD effs => BeadStatus -> Eff effs [BeadInfo]
+listByStatus = send . ListByStatus
+
+-- | List beads by type.
+listByType :: Member BD effs => BeadType -> Eff effs [BeadInfo]
+listByType = send . ListByType
 
 
 -- ════════════════════════════════════════════════════════════════════════════

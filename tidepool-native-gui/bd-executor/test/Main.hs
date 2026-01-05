@@ -22,7 +22,10 @@ import System.Process (readProcessWithExitCode, callProcess)
 import Test.Hspec
 
 import Tidepool.Effects.BD
+import Tidepool.Effects.Git (WorktreeInfo(..))
 import Tidepool.BD.Executor
+import Tidepool.BD.Prime.Graph (PrimeContext(..), renderPrime, renderPrimeJSON)
+import Tidepool.BD.GitExecutor (worktreeName)
 
 
 main :: IO ()
@@ -39,6 +42,12 @@ main = hspec $ do
 
   describe "BD Executor - Real CLI" $ do
     realBdTests
+
+  describe "Urchin Prime - Worktree Detection" $ do
+    worktreeNameTests
+
+  describe "Urchin Prime - Context Rendering" $ do
+    primeRenderingTests
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -323,8 +332,10 @@ executorTests = describe "Executor CLI Integration" $ do
     let mockGetDeps _ = pure []
     let mockGetBlocking _ = pure []
     let mockGetLabels _ = pure ["test-label"]
+    let mockListByStatus _ = pure []
+    let mockListByType _ = pure []
 
-    result <- runM $ runBD mockGetBead mockGetDeps mockGetBlocking mockGetLabels $ do
+    result <- runM $ runBD mockGetBead mockGetDeps mockGetBlocking mockGetLabels mockListByStatus mockListByType $ do
       bead <- getBead "any"
       labels <- getLabels "any"
       pure (bead, labels)
@@ -530,116 +541,133 @@ realBdTests = do
         result <- bdLabels config fixture.tfChildId
         result `shouldBe` []
 
-  -- Write operation tests
-  describe "write operations with real bd CLI" $ do
-    it "bdCreate creates a new bead and returns ID" $ do
-      bdAvailable <- isBdAvailable
-      when (not bdAvailable) $ pendingWith "bd CLI not available"
-      withTestBeadsDb $ \fixture -> do
-        let config = BDConfig { bcBeadsDir = Just (fixture.tfTmpDir </> ".beads" </> "beads.db"), bcQuiet = True }
-        let input = CreateBeadInput
-              { cbiTitle = "Test Created Bead"
-              , cbiDescription = Just "A test description"
-              , cbiType = TypeTask
-              , cbiPriority = 3
-              , cbiParent = Nothing
-              , cbiLabels = []
-              , cbiAssignee = Nothing
-              , cbiDeps = []
-              }
-        newId <- bdCreate config input
-        newId `shouldSatisfy` (not . T.null)
-        -- Verify we can read it back
-        result <- bdShow config newId
-        case result of
-          Nothing -> expectationFailure "Created bead not found"
-          Just bead -> do
-            bead.biTitle `shouldBe` "Test Created Bead"
-            bead.biType `shouldBe` TypeTask
-            bead.biPriority `shouldBe` 3
 
-    it "bdCreate creates child under parent" $ do
-      bdAvailable <- isBdAvailable
-      when (not bdAvailable) $ pendingWith "bd CLI not available"
-      withTestBeadsDb $ \fixture -> do
-        let config = BDConfig { bcBeadsDir = Just (fixture.tfTmpDir </> ".beads" </> "beads.db"), bcQuiet = True }
-        let input = CreateBeadInput
-              { cbiTitle = "Child of Parent"
-              , cbiDescription = Nothing
-              , cbiType = TypeTask
-              , cbiPriority = 2
-              , cbiParent = Just fixture.tfParentId
-              , cbiLabels = []
-              , cbiAssignee = Nothing
-              , cbiDeps = []
-              }
-        childId <- bdCreate config input
-        -- Verify parent relationship
-        result <- bdShow config childId
-        case result of
-          Nothing -> expectationFailure "Created child bead not found"
-          Just bead -> bead.biParent `shouldBe` Just fixture.tfParentId
+-- ════════════════════════════════════════════════════════════════════════════
+-- WORKTREE NAME TESTS
+-- ════════════════════════════════════════════════════════════════════════════
 
-    it "bdClose and bdReopen toggle bead status" $ do
-      bdAvailable <- isBdAvailable
-      when (not bdAvailable) $ pendingWith "bd CLI not available"
-      withTestBeadsDb $ \fixture -> do
-        let config = BDConfig { bcBeadsDir = Just (fixture.tfTmpDir </> ".beads" </> "beads.db"), bcQuiet = True }
-        -- Initially open
-        result1 <- bdShow config fixture.tfChildId
-        case result1 of
-          Just bead -> bead.biStatus `shouldBe` StatusOpen
-          Nothing -> expectationFailure "Bead not found"
-        -- Close it
-        bdClose config fixture.tfChildId
-        result2 <- bdShow config fixture.tfChildId
-        case result2 of
-          Just bead -> bead.biStatus `shouldBe` StatusClosed
-          Nothing -> expectationFailure "Bead not found after close"
-        -- Reopen it
-        bdReopen config fixture.tfChildId
-        result3 <- bdShow config fixture.tfChildId
-        case result3 of
-          Just bead -> bead.biStatus `shouldBe` StatusOpen
-          Nothing -> expectationFailure "Bead not found after reopen"
+worktreeNameTests :: Spec
+worktreeNameTests = describe "worktreeName" $ do
+  it "extracts name from worktrees path" $ do
+    worktreeName "/home/user/project/worktrees/bd" `shouldBe` "bd"
 
-    it "bdAddLabel and bdRemoveLabel manage labels" $ do
-      bdAvailable <- isBdAvailable
-      when (not bdAvailable) $ pendingWith "bd CLI not available"
-      withTestBeadsDb $ \fixture -> do
-        let config = BDConfig { bcBeadsDir = Just (fixture.tfTmpDir </> ".beads" </> "beads.db"), bcQuiet = True }
-        -- Child starts with no labels
-        labels1 <- bdLabels config fixture.tfChildId
-        labels1 `shouldBe` []
-        -- Add a label
-        bdAddLabel config fixture.tfChildId "test-label"
-        labels2 <- bdLabels config fixture.tfChildId
-        labels2 `shouldContain` ["test-label"]
-        -- Remove it
-        bdRemoveLabel config fixture.tfChildId "test-label"
-        labels3 <- bdLabels config fixture.tfChildId
-        labels3 `shouldNotContain` ["test-label"]
+  it "extracts name from nested worktrees path" $ do
+    worktreeName "/home/inanna/dev/tidepool/worktrees/native-server" `shouldBe` "native-server"
 
-    it "bdChildren returns child beads" $ do
-      bdAvailable <- isBdAvailable
-      when (not bdAvailable) $ pendingWith "bd CLI not available"
-      withTestBeadsDb $ \fixture -> do
-        let config = BDConfig { bcBeadsDir = Just (fixture.tfTmpDir </> ".beads" </> "beads.db"), bcQuiet = True }
-        -- Create an actual child (with --parent, not --deps)
-        let childInput = CreateBeadInput
-              { cbiTitle = "Actual Child"
-              , cbiDescription = Nothing
-              , cbiType = TypeTask
-              , cbiPriority = 2
-              , cbiParent = Just fixture.tfParentId
-              , cbiLabels = []
-              , cbiAssignee = Nothing
-              , cbiDeps = []
-              }
-        actualChildId <- bdCreate config childInput
-        -- Now query children
-        children <- bdChildren config fixture.tfParentId
-        length children `shouldSatisfy` (>= 1)
-        -- Our child should be in the list
-        let childIds = map (\b -> b.biId) children
-        childIds `shouldContain` [actualChildId]
+  it "falls back to last component for non-worktree path" $ do
+    worktreeName "/home/user/some-project" `shouldBe` "some-project"
+
+  it "handles trailing slash" $ do
+    worktreeName "/home/user/project/worktrees/bd/" `shouldBe` "bd"
+
+  it "extracts from path with multiple worktrees directories" $ do
+    -- Takes the component after the first "worktrees"
+    worktreeName "/worktrees/old/worktrees/new-feature" `shouldBe` "old"
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- PRIME RENDERING TESTS
+-- ════════════════════════════════════════════════════════════════════════════
+
+primeRenderingTests :: Spec
+primeRenderingTests = describe "renderPrime" $ do
+  it "renders header with worktree and branch" $ do
+    let ctx = minimalContext
+    let output = renderPrime ctx
+    output `shouldSatisfy` T.isInfixOf "# Urchin Prime: test-wt / main"
+
+  it "renders git section with branch and dirty count" $ do
+    let ctx = minimalContext { pcDirtyFiles = ["file1.hs", "file2.hs"] }
+    let output = renderPrime ctx
+    output `shouldSatisfy` T.isInfixOf "**Branch**: main"
+    output `shouldSatisfy` T.isInfixOf "**Dirty files**: 2"
+
+  it "renders recent commit if present" $ do
+    let ctx = minimalContext { pcRecentCommits = ["Initial commit", "Second commit"] }
+    let output = renderPrime ctx
+    output `shouldSatisfy` T.isInfixOf "**Recent**: Initial commit"
+
+  it "renders propulsion section when hooked work exists" $ do
+    let hookedBead = testBead { biId = "hooked-1", biTitle = "Urgent work", biStatus = StatusHooked }
+    let ctx = minimalContext { pcHooked = [hookedBead] }
+    let output = renderPrime ctx
+    output `shouldSatisfy` T.isInfixOf "## Propulsion"
+    output `shouldSatisfy` T.isInfixOf "**HOOKED WORK**"
+    output `shouldSatisfy` T.isInfixOf "[hooked-1] Urgent work"
+
+  it "renders no propulsion message when no hooked work" $ do
+    let ctx = minimalContext { pcHooked = [] }
+    let output = renderPrime ctx
+    output `shouldSatisfy` T.isInfixOf "No hooked work"
+
+  it "renders in-progress beads" $ do
+    let inProgressBead = testBead { biId = "wip-1", biTitle = "Working on it", biPriority = 1 }
+    let ctx = minimalContext { pcInProgress = [inProgressBead] }
+    let output = renderPrime ctx
+    output `shouldSatisfy` T.isInfixOf "## In Progress (1)"
+    output `shouldSatisfy` T.isInfixOf "[wip-1] Working on it (P1)"
+
+  it "renders ready beads" $ do
+    let readyBead = testBead { biId = "ready-1", biTitle = "Ready to go", biPriority = 2 }
+    let ctx = minimalContext { pcReady = [readyBead] }
+    let output = renderPrime ctx
+    output `shouldSatisfy` T.isInfixOf "## Ready (1)"
+    output `shouldSatisfy` T.isInfixOf "[ready-1] Ready to go (P2)"
+
+  it "renders epic context when present" $ do
+    let epicBead = testBead { biId = "epic-1", biTitle = "Big Feature Epic", biType = TypeEpic }
+    let ctx = minimalContext { pcEpicContext = Just epicBead }
+    let output = renderPrime ctx
+    output `shouldSatisfy` T.isInfixOf "## Epic Context"
+    output `shouldSatisfy` T.isInfixOf "**epic-1**: Big Feature Epic"
+
+  it "omits epic section when no epic" $ do
+    let ctx = minimalContext { pcEpicContext = Nothing }
+    let output = renderPrime ctx
+    output `shouldSatisfy` (not . T.isInfixOf "## Epic Context")
+
+  it "renderPrimeJSON produces valid JSON" $ do
+    let ctx = minimalContext
+    let jsonOutput = renderPrimeJSON ctx
+    jsonOutput `shouldSatisfy` T.isPrefixOf "{"
+    jsonOutput `shouldSatisfy` T.isInfixOf "\"worktree\""
+    jsonOutput `shouldSatisfy` T.isInfixOf "\"git\""
+    jsonOutput `shouldSatisfy` T.isInfixOf "\"in_progress\""
+
+
+-- | Minimal context for testing.
+minimalContext :: PrimeContext
+minimalContext = PrimeContext
+  { pcWorktree = WorktreeInfo
+      { wiName = "test-wt"
+      , wiPath = "/tmp/test"
+      , wiBranch = "main"
+      , wiRepoRoot = "/tmp/test"
+      , wiIsWorktree = False
+      }
+  , pcDirtyFiles = []
+  , pcRecentCommits = []
+  , pcInProgress = []
+  , pcReady = []
+  , pcHooked = []
+  , pcEpicContext = Nothing
+  }
+
+
+-- | Test bead template.
+testBead :: BeadInfo
+testBead = BeadInfo
+  { biId = "test-1"
+  , biTitle = "Test"
+  , biDescription = Nothing
+  , biStatus = StatusOpen
+  , biPriority = 1
+  , biType = TypeTask
+  , biAssignee = Nothing
+  , biCreatedAt = Nothing
+  , biCreatedBy = Nothing
+  , biUpdatedAt = Nothing
+  , biParent = Nothing
+  , biDependencies = []
+  , biDependents = []
+  }

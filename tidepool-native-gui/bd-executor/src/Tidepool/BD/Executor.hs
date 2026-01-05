@@ -34,6 +34,8 @@ module Tidepool.BD.Executor
   , bdBlocking
   , bdLabels
   , bdChildren
+  , bdListByStatus
+  , bdListByType
 
     -- * Low-Level CLI Access (Write)
   , bdCreate
@@ -102,13 +104,27 @@ runBD
   -> (Text -> Eff effs [BeadInfo])        -- ^ Handler for GetDeps
   -> (Text -> Eff effs [BeadInfo])        -- ^ Handler for GetBlocking
   -> (Text -> Eff effs [Text])            -- ^ Handler for GetLabels
+  -> (BeadStatus -> Eff effs [BeadInfo])  -- ^ Handler for ListByStatus
+  -> (BeadType -> Eff effs [BeadInfo])    -- ^ Handler for ListByType
   -> Eff (BD ': effs) a
   -> Eff effs a
-runBD hGetBead hGetDeps hGetBlocking hGetLabels = interpret $ \case
+runBD hGetBead hGetDeps hGetBlocking hGetLabels hListByStatus hListByType = interpret $ \case
   GetBead beadId     -> hGetBead beadId
   GetDeps beadId     -> hGetDeps beadId
   GetBlocking beadId -> hGetBlocking beadId
   GetLabels beadId   -> hGetLabels beadId
+  ListByStatus s     -> hListByStatus s
+  ListByType t       -> hListByType t
+  -- Note: GetChildren and write operations are handled by runBDIO, not runBD
+  GetChildren _      -> error "runBD: GetChildren not supported, use runBDIO"
+  CreateBead _       -> error "runBD: CreateBead not supported, use runBDIO"
+  UpdateBead _ _     -> error "runBD: UpdateBead not supported, use runBDIO"
+  CloseBead _        -> error "runBD: CloseBead not supported, use runBDIO"
+  ReopenBead _       -> error "runBD: ReopenBead not supported, use runBDIO"
+  AddLabel _ _       -> error "runBD: AddLabel not supported, use runBDIO"
+  RemoveLabel _ _    -> error "runBD: RemoveLabel not supported, use runBDIO"
+  AddDep _ _ _       -> error "runBD: AddDep not supported, use runBDIO"
+  RemoveDep _ _      -> error "runBD: RemoveDep not supported, use runBDIO"
 
 
 -- | Run BD effects using the bd CLI.
@@ -142,6 +158,9 @@ runBDIO config = interpret $ \case
   GetLabels beadId -> sendM $ bdLabels config beadId
 
   GetChildren parentId -> sendM $ bdChildren config parentId
+
+  ListByStatus status -> sendM $ bdListByStatus config status
+  ListByType btype -> sendM $ bdListByType config btype
 
   -- Write operations
   CreateBead input -> sendM $ bdCreate config input
@@ -235,6 +254,56 @@ bdLabels config beadId = do
 bdChildren :: BDConfig -> Text -> IO [BeadInfo]
 bdChildren config parentId = do
   let args = ["list", "--parent", T.unpack parentId, "--json"]
+            ++ maybe [] (\d -> ["--db", d]) config.bcBeadsDir
+
+  result <- runBdCommand config args
+  case result of
+    Left _err -> pure []
+    Right output ->
+      case eitherDecode (LBS.fromStrict $ TE.encodeUtf8 output) of
+        Right beads -> pure beads
+        Left _ -> pure []
+
+
+-- | List beads by status.
+--
+-- Uses @bd list --status=STATUS --json@ command.
+bdListByStatus :: BDConfig -> BeadStatus -> IO [BeadInfo]
+bdListByStatus config status = do
+  let statusStr = case status of
+        StatusOpen       -> "open"
+        StatusInProgress -> "in_progress"
+        StatusClosed     -> "closed"
+        StatusHooked     -> "hooked"
+        StatusBlocked    -> "blocked"
+  let args = ["list", "--json", "--status=" ++ statusStr]
+            ++ maybe [] (\d -> ["--db", d]) config.bcBeadsDir
+
+  result <- runBdCommand config args
+  case result of
+    Left _err -> pure []
+    Right output ->
+      case eitherDecode (LBS.fromStrict $ TE.encodeUtf8 output) of
+        Right beads -> pure beads
+        Left _ -> pure []
+
+
+-- | List beads by type.
+--
+-- Uses @bd list --type=TYPE --json@ command.
+bdListByType :: BDConfig -> BeadType -> IO [BeadInfo]
+bdListByType config btype = do
+  let typeStr = case btype of
+        TypeTask         -> "task"
+        TypeBug          -> "bug"
+        TypeFeature      -> "feature"
+        TypeEpic         -> "epic"
+        TypeMergeRequest -> "merge-request"
+        TypeMessage      -> "message"
+        TypeMolecule     -> "molecule"
+        TypeAgent        -> "agent"
+        TypeOther t      -> T.unpack t
+  let args = ["list", "--json", "--type=" ++ typeStr]
             ++ maybe [] (\d -> ["--db", d]) config.bcBeadsDir
 
   result <- runBdCommand config args
