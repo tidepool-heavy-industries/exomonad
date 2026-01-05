@@ -162,6 +162,14 @@ deploy: build-wasm deploy-worker
     @echo "✓ Full deploy complete"
 
 # ─────────────────────────────────────────────────────────────
+# Analysis
+# ─────────────────────────────────────────────────────────────
+
+# Analyze blast radius of current branch vs base (default: main)
+blast-radius base="main":
+    @./tools/blast-radius.sh {{base}}
+
+# ─────────────────────────────────────────────────────────────
 # Observability
 # ─────────────────────────────────────────────────────────────
 
