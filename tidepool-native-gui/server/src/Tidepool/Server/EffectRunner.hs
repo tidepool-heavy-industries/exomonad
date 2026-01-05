@@ -30,6 +30,7 @@ import Control.Monad.Freer (Eff, runM)
 import Data.Text (Text)
 import qualified Data.Text as T
 import System.Environment (lookupEnv)
+import Text.Read (readMaybe)
 
 -- Executor imports
 import Tidepool.UI.Executor
@@ -60,6 +61,14 @@ import Tidepool.LLM.Types
   ( AnthropicSecrets(..)
   , OpenAISecrets(..)
   )
+import Tidepool.ClaudeCode.Effect
+  ( ClaudeCodeExec
+  , runClaudeCodeExecIO
+  )
+import Tidepool.ClaudeCode.Config
+  ( ClaudeCodeConfig(..)
+  , defaultClaudeCodeConfig
+  )
 
 -- Effect imports
 import Tidepool.Effects.UI (UI)
@@ -80,6 +89,8 @@ data ExecutorConfig = ExecutorConfig
     -- ^ Habitica API configuration
   , ecLokiConfig :: LokiConfig
     -- ^ Loki/Grafana observability configuration
+  , ecClaudeCodeConfig :: ClaudeCodeConfig
+    -- ^ ClaudeCode (zellij-cc) configuration
   }
   deriving stock (Show, Eq)
 
@@ -94,6 +105,7 @@ defaultExecutorConfig = ExecutorConfig
       }
   , ecHabiticaConfig = defaultHabiticaConfig
   , ecLokiConfig = defaultLokiConfig
+  , ecClaudeCodeConfig = defaultClaudeCodeConfig
   }
 
 -- | Load configuration from environment variables.
@@ -107,6 +119,9 @@ defaultExecutorConfig = ExecutorConfig
 -- * @LOKI_URL@ - Loki push endpoint (default: http://localhost:3100)
 -- * @LOKI_USER@ - Grafana Cloud user ID (optional)
 -- * @LOKI_TOKEN@ - Grafana Cloud API token (optional)
+-- * @ZELLIJ_SESSION@ - Zellij session for ClaudeCode (default: tidepool)
+-- * @ZELLIJ_CC_PATH@ - Path to zellij-cc binary (default: zellij-cc)
+-- * @ZELLIJ_CC_TIMEOUT@ - ClaudeCode timeout in seconds (default: 300)
 loadExecutorConfig :: IO ExecutorConfig
 loadExecutorConfig = do
   -- LLM secrets
@@ -121,6 +136,11 @@ loadExecutorConfig = do
   lokiUrl <- lookupEnv "LOKI_URL"
   lokiUser <- lookupEnv "LOKI_USER"
   lokiToken <- lookupEnv "LOKI_TOKEN"
+
+  -- ClaudeCode config
+  zellijSession <- lookupEnv "ZELLIJ_SESSION"
+  zellijCcPath <- lookupEnv "ZELLIJ_CC_PATH"
+  zellijCcTimeout <- lookupEnv "ZELLIJ_CC_TIMEOUT"
 
   pure ExecutorConfig
     { ecLLMConfig = LLMConfig
@@ -148,6 +168,12 @@ loadExecutorConfig = do
         , lcUser = T.pack <$> lokiUser
         , lcToken = T.pack <$> lokiToken
         , lcJobLabel = "tidepool-native"
+        }
+    , ecClaudeCodeConfig = ClaudeCodeConfig
+        { ccZellijSession = maybe "tidepool" T.pack zellijSession
+        , ccDefaultTimeout = maybe 300 id (zellijCcTimeout >>= readMaybe)
+        , ccTempDir = "/tmp"
+        , ccZellijCcPath = maybe "zellij-cc" id zellijCcPath
         }
     }
 
@@ -189,8 +215,9 @@ mkExecutorEnv config = do
 -- This composes the full effect stack:
 --
 -- @
--- Eff '[UI, Habitica, LLMComplete, Observability] a
+-- Eff '[UI, Habitica, LLMComplete, ClaudeCodeExec, Observability, IO] a
 --   → runObservability (interpret Observability)
+--   → runClaudeCodeExecIO (interpret ClaudeCodeExec)
 --   → runLLMComplete (interpret LLMComplete)
 --   → runHabitica (interpret Habitica)
 --   → runUI (interpret UI)
@@ -201,12 +228,13 @@ mkExecutorEnv config = do
 -- 1. UI (first to peel) - handles user interaction
 -- 2. Habitica - makes Habitica API calls
 -- 3. LLMComplete - makes LLM API calls
--- 4. Observability (last to peel) - records events
+-- 4. ClaudeCodeExec - executes nodes via Claude Code subprocess
+-- 5. Observability (last to peel) - records events
 --
 -- Example:
 --
 -- @
--- myAgent :: Eff '[UI, Habitica, LLMComplete, Observability] String
+-- myAgent :: Eff '[UI, Habitica, LLMComplete, ClaudeCodeExec, Observability, IO] String
 -- myAgent = do
 --   publishEvent $ GraphTransition "entry" "greeting" "start"
 --   showText "Welcome!"
@@ -219,11 +247,12 @@ runEffects
   :: ExecutorEnv
   -> UIContext
   -> UICallback
-  -> Eff '[UI, Habitica, LLMComplete, Observability, IO] a
+  -> Eff '[UI, Habitica, LLMComplete, ClaudeCodeExec, Observability, IO] a
   -> IO a
 runEffects env ctx callback =
   runM
     . runObservability (ecLokiConfig $ eeConfig env)
+    . runClaudeCodeExecIO (ecClaudeCodeConfig $ eeConfig env)
     . runLLMComplete (eeLLMEnv env)
     . runHabitica (eeHabiticaEnv env)
     . runUI ctx callback

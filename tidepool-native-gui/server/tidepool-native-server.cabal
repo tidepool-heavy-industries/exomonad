@@ -39,7 +39,8 @@ library
         tidepool-ui-executor,
         tidepool-habitica-executor,
         tidepool-observability-executor,
-        tidepool-llm-executor
+        tidepool-llm-executor,
+        tidepool-claude-code-executor
     hs-source-dirs:   src
     default-language: GHC2021
     default-extensions:
