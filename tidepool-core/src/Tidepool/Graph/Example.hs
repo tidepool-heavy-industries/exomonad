@@ -197,20 +197,7 @@ instance TemplateDef ClassifyTpl where
 
 -- | A customer support graph using the record-based syntax.
 --
--- This is equivalent to:
---
--- @
--- type SupportGraphList = Graph
---   '[ Entry :~> Message
---    , "classify" := LLM :@ Needs '[Message] :@ Template ClassifyTpl :@ Schema Intent
---    , "route"    := Logic :@ Needs '[Intent] :@ UsesEffects '[Goto "refund", Goto "faq", Goto Exit]
---    , "refund"   := LLM :@ Needs '[Message] :@ Schema Response
---    , "faq"      := LLM :@ Needs '[Message] :@ Schema Response
---    , Exit :<~ Response
---    ]
--- @
---
--- But with record syntax, field names become node names automatically.
+-- Field names become node names automatically.
 -- | Dummy template for refund handler
 data RefundTpl
 

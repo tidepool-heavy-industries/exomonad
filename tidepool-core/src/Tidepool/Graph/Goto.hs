@@ -23,11 +23,11 @@
 -- = Example
 --
 -- @
--- "router" := Logic
+-- gRouter :: mode :- G.LogicNode
 --     :@ Needs '[Message, Intent]
---     :@ Eff '[
---         Goto "refund" Message      -- Can transition to refund node
---       , Goto "support" Message     -- Or to support node
+--     :@ UsesEffects '[
+--         Goto "gRefund" Message     -- Can transition to refund node
+--       , Goto "gSupport" Message    -- Or to support node
 --       , Goto Exit Response         -- Or exit the graph
 --       ]
 -- @

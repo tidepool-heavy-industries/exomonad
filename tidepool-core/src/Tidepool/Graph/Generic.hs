@@ -10,17 +10,7 @@
 --
 -- "The record IS the graph. Modes determine interpretation."
 --
--- Instead of type-level lists:
---
--- @
--- type MyGraph = Graph '[
---     Entry :~> Message
---   , "classify" := LLM :@ Needs '[Message] :@ Schema Intent
---   , Exit :<~ Response
---   ]
--- @
---
--- We use mode-parameterized records:
+-- Graphs are defined as mode-parameterized records:
 --
 -- @
 -- data MyGraph mode = MyGraph

@@ -23,12 +23,11 @@
 -- For a graph with node-private and global memory:
 --
 -- @
--- type MyGraph = Graph
---   '[ Entry :~> Message
---    , "explore" := LLM :@ Needs '[Message] :@ Schema Findings :@ Memory ExploreMem
---    , Exit :<~ Response
---    ]
---   :& Global SessionState
+-- data MyGraph mode = MyGraph
+--   { gEntry   :: mode :- G.Entry Message
+--   , gExplore :: mode :- G.LLMNode :@ Needs '[Message] :@ Schema Findings :@ Memory ExploreMem
+--   , gExit    :: mode :- G.Exit Response
+--   }
 -- @
 --
 -- A node handler can access both:

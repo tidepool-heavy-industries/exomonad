@@ -299,15 +299,12 @@ import qualified Tidepool.Graph.Generic as G
 -- validGraph = ()
 -- @
 --
--- Key differences from list-based syntax:
+-- Key features:
 --
--- * Use 'G.LLMNode' and 'G.LogicNode' instead of @LLM@ and @Logic@ (different kinds)
--- * Use 'G.Entry' and 'G.Exit' (parameterized) instead of @Entry :~>@ and @Exit :<~@
+-- * Use 'G.LLMNode' and 'G.LogicNode' for node types
+-- * Use 'G.Entry' and 'G.Exit' for entry/exit points
 -- * Field names become node names automatically
--- * Use 'G.ValidGraphRecord' instead of 'ValidGraph' for validation
---
--- Note: Import @Tidepool.Graph.Generic@ qualified to access 'G.Entry' and 'G.Exit'
--- (they conflict with the unparameterized markers from @Tidepool.Graph.Types@).
+-- * Use 'G.ValidGraphRecord' for validation
 
 -- $recordReification
 --

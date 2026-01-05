@@ -56,14 +56,14 @@
 -- Templates integrate with the Graph DSL via the @Template@ annotation:
 --
 -- @
--- type MyGraph = Graph
---   '[ Entry :~> Message
---    , "classify" := LLM
+-- data MyGraph mode = MyGraph
+--   { gEntry    :: mode :- G.Entry Message
+--   , gClassify :: mode :- G.LLMNode
 --        :@ Needs '[Message]
 --        :@ Template ClassifyTpl
 --        :@ Schema Intent
---    , Exit :<~ Intent
---    ]
+--   , gExit     :: mode :- G.Exit Intent
+--   }
 -- @
 --
 -- The graph runner will use 'renderTemplate' to generate prompts for LLM nodes.

@@ -62,8 +62,8 @@ data NodeKind
 -- ANNOTATIONS
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Attach an annotation to a node. Annotations are applied right-to-left:
--- @"node" := LLM :@ Needs '[A] :@ Schema B@ has Needs and Schema annotations.
+-- | Attach an annotation to a node. Annotations are applied left-to-right:
+-- @mode :- G.LLMNode :@ Needs '[A] :@ Schema B@ has Needs and Schema annotations.
 type (:@) :: Type -> Type -> Type
 data node :@ annotation
 infixl 7 :@
@@ -83,7 +83,7 @@ data Schema output
 -- Uses a separate TemplateDef from the user 'Template' annotation.
 --
 -- @
--- "classify" := LLM
+-- gClassify :: mode :- G.LLMNode
 --     :@ System ClassifySystemTpl   -- System prompt (optional)
 --     :@ Template ClassifyUserTpl   -- User prompt
 --     :@ Schema Intent
@@ -121,7 +121,7 @@ data UsesEffects effects
 -- that persists across graph runs. Only this node can access its Memory.
 --
 -- @
--- "explore" := LLM
+-- gExplore :: mode :- G.LLMNode
 --     :@ Needs '[Query]
 --     :@ Schema Findings
 --     :@ Memory ExploreMem   -- Private state for this node
@@ -133,8 +133,7 @@ data Memory stateType
 -- GRAPH-LEVEL ANNOTATIONS
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Attach a graph-level annotation. Applied after the Graph declaration:
--- @Graph '[...] :& Groups '[...] :& Requires '[...]@
+-- | Attach a graph-level annotation (not commonly used with record-based graphs).
 type (:&) :: Type -> Type -> Type
 data graph :& annotation
 infixl 4 :&
@@ -143,8 +142,8 @@ infixl 4 :&
 --
 -- @
 -- Groups '[
---     "intake"   := '["classify", "route"]
---   , "handlers" := '["refund", "technical", "billing"]
+--     '("intake", '["gClassify", "gRoute"])
+--   , '("handlers", '["gRefund", "gTechnical", "gBilling"])
 --   ]
 -- @
 type Groups :: [(Symbol, [Symbol])] -> Type
@@ -207,7 +206,7 @@ type Opus = 'Opus
 -- via zellij-cc, which spawns a Claude Code session and returns JSON output.
 --
 -- @
--- "work" := LLM
+-- gWork :: mode :- G.LLMNode
 --     :@ Needs '[BeadInfo]
 --     :@ Template WorkTpl
 --     :@ Schema WorkResult
@@ -232,12 +231,10 @@ data ClaudeCode model cwd
 --
 -- @
 -- -- In a Logic node's effect stack:
--- UsesEffects '[State S, Goto "nextNode" A, Goto Exit FinalResult]
+-- UsesEffects '[State S, Goto "gNextNode" A, Goto Exit FinalResult]
 -- @
 --
--- Note: The old list-based DSL syntax @Exit :<~ Type@ has been removed.
--- This @Exit@ type is retained solely as a special target for the @Goto@
--- effect in the record-based Graph DSL. Record-based graphs use @G.Exit@
+-- This @Exit@ type is used as a Goto target. Record-based graphs use @G.Exit@
 -- from "Tidepool.Graph.Generic" for their exit field definitions.
 data Exit
 

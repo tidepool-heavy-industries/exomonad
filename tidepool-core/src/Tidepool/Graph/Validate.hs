@@ -92,7 +92,7 @@ type UnsatisfiedNeedError nodeName needType = TypeError
    ':$$: 'Text ""
    ':$$: 'Text "Fix options:"
    ':$$: 'Text "  1. Add a node with 'Schema " ':<>: 'ShowType needType ':<>: 'Text "'"
-   ':$$: 'Text "  2. Change Entry to provide this type: Entry :~> " ':<>: 'ShowType needType
+   ':$$: 'Text "  2. Change Entry to provide this type: mode :- G.Entry " ':<>: 'ShowType needType
    ':$$: 'Text "  3. Remove " ':<>: 'ShowType needType ':<>: 'Text " from this node's Needs"
   )
 

@@ -49,14 +49,14 @@
 -- = Using Tools in Graphs
 --
 -- @
--- type MyGraph = Graph
---   '[ Entry :~> Query
---    , "search" := LLM
+-- data MyGraph mode = MyGraph
+--   { gEntry  :: mode :- G.Entry Query
+--   , gSearch :: mode :- G.LLMNode
 --        :@ Needs '[Query]
 --        :@ Schema Results
 --        :@ Tools '[SearchTool]
---    , Exit :<~ Results
---    ]
+--   , gExit   :: mode :- G.Exit Results
+--   }
 -- @
 module Tidepool.Graph.Tool
   ( -- * Tool Definition
