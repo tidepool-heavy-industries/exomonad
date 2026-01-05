@@ -3,6 +3,19 @@
 -- Queries a language server for symbol information at a given position,
 -- including hover info, definition location, and all references.
 --
+-- == Using lspmux for persistent HLS
+--
+-- By default, this spawns a fresh HLS process per invocation (~10s cold start).
+-- For faster repeated queries, use lspmux to keep HLS warm:
+--
+-- @
+-- 1. Install: cargo install lspmux
+-- 2. Start server: lspmux server &
+-- 3. Either:
+--    - Set env: export IMPACT_LSP_CMD="lspmux client --server-path haskell-language-server-wrapper"
+--    - Or use flag: impact-analysis --lsp-cmd "lspmux client --server-path haskell-language-server-wrapper"
+-- @
+--
 module ImpactAnalysis.Analyze
   ( -- * Graph Execution
     runImpactGraph
@@ -13,6 +26,7 @@ module ImpactAnalysis.Analyze
   , findProjectRoot
   ) where
 
+import Control.Applicative ((<|>))
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.MVar (newEmptyMVar, tryPutMVar, takeMVar)
 import Control.Exception (bracket, try, SomeException)
@@ -26,6 +40,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Map.Strict as Map
 import System.Directory (makeAbsolute, doesFileExist, listDirectory)
+import System.Environment (lookupEnv)
 import System.FilePath (takeDirectory, (</>))
 import System.IO (Handle, BufferMode(..), hSetBuffering)
 import System.Process (CreateProcess(..), StdStream(..), ProcessHandle, createProcess, proc, terminateProcess, cwd)
@@ -100,7 +115,7 @@ doLSPAnalysis input = do
   case mProjectRoot of
     Nothing -> pure $ Left $ "Could not find project root for: " <> T.pack absPath
     Just projectRoot -> do
-      result <- try $ withHLSSession projectRoot $ \hls ->
+      result <- try $ withHLSSession (lspCmd input) projectRoot $ \hls ->
         runSessionWithHandles hls.hlsStdout hls.hlsStdin $ do
           _ <- initialize Nothing
 
@@ -178,14 +193,69 @@ data HLSSession = HLSSession
   , hlsProcess :: ProcessHandle
   }
 
-withHLSSession :: FilePath -> (HLSSession -> IO a) -> IO a
-withHLSSession projectRoot = bracket acquire release
+-- | Get LSP server command. Priority: CLI flag > env var > default.
+getLSPCommand :: Maybe String -> IO (String, [String])
+getLSPCommand mCliCmd = do
+  mEnvCmd <- lookupEnv "IMPACT_LSP_CMD"
+  let cmd = mCliCmd <|> mEnvCmd
+  pure $ case cmd of
+    Just cmdStr -> parseCommand cmdStr
+    Nothing -> ("haskell-language-server-wrapper", ["--lsp"])
+
+-- | Parse a command string into executable and arguments.
+-- Handles shell-style quoting (single/double quotes, backslash escapes).
+parseCommand :: String -> (String, [String])
+parseCommand s = case shellWords s of
+  [] -> ("haskell-language-server-wrapper", ["--lsp"])
+  (x:xs) -> (x, xs)
+
+-- | Quote parsing mode for shell-style word splitting.
+data ShellMode = ShellUnquoted | ShellInSingle | ShellInDouble
+
+-- | Simple shell-style word splitter supporting:
+--   * Unquoted words separated by whitespace
+--   * Single quotes: 'literal text' (no escapes)
+--   * Double quotes: "text with \" and \\ escapes"
+--   * Backslash escapes in unquoted context
+shellWords :: String -> [String]
+shellWords = go [] [] ShellUnquoted
+  where
+    go :: [String] -> String -> ShellMode -> String -> [String]
+    go acc cur _ [] = finishToken acc cur
+    go acc cur mode (c:cs) = case mode of
+      ShellUnquoted -> case c of
+        ' '  -> go (finishToken acc cur) [] ShellUnquoted cs
+        '\t' -> go (finishToken acc cur) [] ShellUnquoted cs
+        '\'' -> go acc cur ShellInSingle cs
+        '"'  -> go acc cur ShellInDouble cs
+        '\\' -> case cs of
+          (e:rest) -> go acc (e:cur) ShellUnquoted rest
+          []       -> go acc ('\\':cur) ShellUnquoted []
+        _    -> go acc (c:cur) ShellUnquoted cs
+      ShellInSingle -> case c of
+        '\'' -> go acc cur ShellUnquoted cs
+        _    -> go acc (c:cur) ShellInSingle cs
+      ShellInDouble -> case c of
+        '"'  -> go acc cur ShellUnquoted cs
+        '\\' -> case cs of
+          (e:rest) | e `elem` ("\"\\$`" :: String) -> go acc (e:cur) ShellInDouble rest
+          (e:rest) -> go acc (e:'\\':cur) ShellInDouble rest
+          []       -> go acc ('\\':cur) ShellInDouble []
+        _    -> go acc (c:cur) ShellInDouble cs
+
+    finishToken :: [String] -> String -> [String]
+    finishToken acc [] = acc
+    finishToken acc cur = acc ++ [reverse cur]
+
+withHLSSession :: Maybe String -> FilePath -> (HLSSession -> IO a) -> IO a
+withHLSSession mLspCmd projectRoot = bracket acquire release
   where
     acquire = do
+      (cmd, args) <- getLSPCommand mLspCmd
       -- createProcess with CreatePipe always returns Just handles,
       -- but we handle the Nothing case explicitly for safety
       (mStdin, mStdout, mStderr, ph) <- createProcess
-        (proc "haskell-language-server-wrapper" ["--lsp"])
+        (proc cmd args)
           { std_in = CreatePipe
           , std_out = CreatePipe
           , std_err = CreatePipe
