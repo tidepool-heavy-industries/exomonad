@@ -10,6 +10,44 @@ The key insight: LLMs don't need raw IO - they need typed state they can read (v
 
 **Status**: Compiles successfully. DM agent has stubbed logic. Tidying agent is functional with GUI.
 
+## Task Tracking (Beads)
+
+This repo uses BD (Beads) for git-native task tracking. The beads database is at `~/dev/tidepool/.beads/` (gitignored, shared by all worktrees).
+
+### Quick Reference
+
+```bash
+# From any worktree, use bd at repo root
+cd ~/dev/tidepool
+
+# List all tasks
+bd list --all
+
+# Create an epic
+bd create -t epic "Feature name"
+
+# Create a child task under an epic
+bd create -t task --parent tidepool-XXX "Task description"
+
+# Update status
+bd update tidepool-XXX.Y -s in_progress
+bd update tidepool-XXX.Y -s closed
+
+# View task details
+bd show tidepool-XXX
+```
+
+### Workflow
+
+1. **Starting work**: Mark your task `in_progress`
+2. **Creating PRs**: Reference bead ID in PR description
+3. **Completing work**: Mark task `closed` after PR merge
+4. **Tracking across worktrees**: All worktrees share the same db
+
+### Current Tasks
+
+Run `bd list --all` from `~/dev/tidepool` to see current tasks.
+
 ## Architecture
 
 ```
