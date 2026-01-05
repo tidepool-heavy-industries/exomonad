@@ -36,9 +36,8 @@ module Tidepool.Effect.Runners
   , runGame
   ) where
 
-import Effectful
-import Effectful.Dispatch.Dynamic
-import Data.Kind (Constraint)
+import Control.Monad.Freer (Eff, Member, interpret, sendM, LastMember, runM)
+import Data.Kind (Constraint, Type)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Aeson (Value(..), toJSON, encode, decode)
@@ -63,6 +62,7 @@ import qualified Tidepool.Storage as Storage
 import Tidepool.Effect.Types
 
 -- | The effect stack for runners (interpreters).
+-- IO must be the last member for freer-simple's 'LastMember' constraint.
 type RunnerEffects s event =
   '[ LLM
    , RequestInput
@@ -72,7 +72,7 @@ type RunnerEffects s event =
    , Emit event
    , Random
    , Time
-   , IOE
+   , IO
    ]
 
 -- ToolDispatcher is re-exported from Tidepool.Effect.Types
@@ -83,7 +83,8 @@ type RunnerEffects s event =
 
 -- | Type family that produces a compile error if an effect is present in the stack.
 -- Used to enforce that compression LLM cannot access ChatHistory (prevents recursion).
-type family NotMember (e :: Effect) (es :: [Effect]) :: Constraint where
+-- In freer-simple, effects have kind (Type -> Type).
+type family NotMember (e :: Type -> Type) (es :: [Type -> Type]) :: Constraint where
   NotMember e '[] = ()
   NotMember e (e : _) = TypeError
     ('Text "Effect " ':<>: 'ShowType e ':<>: 'Text " must not be in effect stack for compression")
@@ -95,8 +96,9 @@ type family NotMember (e :: Effect) (es :: [Effect]) :: Constraint where
 
 -- | Effects available to compression tools (NO ChatHistory, NO Goto).
 -- This restricted stack prevents recursion in the compression LLM.
+-- IO is accessed via 'LastMember IO effs', not included in the list.
 type CompressionEffects state event =
-  '[ State state, Emit event, RequestInput, Random, Log, IOE ]
+  '[ State state, Emit event, RequestInput, Random, Log ]
 
 -- | Tool dispatcher for compression - polymorphic in effect stack.
 -- The actual effect constraints are enforced at call site via 'runLLMForCompression'.
@@ -183,17 +185,17 @@ data ChatHistoryOps es = ChatHistoryOps
 -- This allows both normal LLM runners (with ChatHistory) and compression
 -- LLM runners (without ChatHistory) to share the same core logic.
 runLLMCore
-  :: forall es a.
-     (IOE :> es, Log :> es)
+  :: forall effs a.
+     (LastMember IO effs, Member Log effs)
   => LLMHooks
   -> LLMConfig
-  -> Maybe (ChatHistoryOps es)  -- Nothing for compression, Just for normal
-  -> (Text -> Value -> Eff es (Either Text ToolResult))  -- Tool dispatcher
-  -> Eff (LLM : es) a
-  -> Eff es a
-runLLMCore hooks config mChatOps dispatcher = interpret $ \_ -> \case
+  -> Maybe (ChatHistoryOps effs)  -- Nothing for compression, Just for normal
+  -> (Text -> Value -> Eff effs (Either Text ToolResult))  -- Tool dispatcher
+  -> Eff (LLM ': effs) a
+  -> Eff effs a
+runLLMCore hooks config mChatOps dispatcher = interpret $ \case
   RunTurnOp systemPrompt userContent schema tools -> do
-    liftIO hooks.onTurnStart
+    sendM hooks.onTurnStart
 
     priorHistory <- case mChatOps of
       Nothing -> pure []  -- Compression: no prior history
@@ -217,7 +219,7 @@ runLLMCore hooks config mChatOps dispatcher = interpret $ \_ -> \case
     case loopResult of
       Left breakReason -> do
         logInfo $ "[LLM] Turn broken by tool: " <> breakReason
-        liftIO hooks.onTurnEnd
+        sendM hooks.onTurnEnd
         return (TurnBroken breakReason)
 
       Right (result, finalContent) -> do
@@ -230,7 +232,7 @@ runLLMCore hooks config mChatOps dispatcher = interpret $ \_ -> \case
 
         logDebug $ "[LLM] Assistant response:\n" <> result.trNarrative
 
-        liftIO hooks.onTurnEnd
+        sendM hooks.onTurnEnd
         return (TurnCompleted result)
   where
     toolLoop
@@ -242,7 +244,7 @@ runLLMCore hooks config mChatOps dispatcher = interpret $ \_ -> \case
       -> [ToolInvocation]
       -> [Text]
       -> [Text]
-      -> Eff es (Either Text (TurnResult Value, [ContentBlock]))
+      -> Eff effs (Either Text (TurnResult Value, [ContentBlock]))
     toolLoop cConfig sysPrompt outSchema tls msgs invs narrs thinks = do
       let req = SingleCallRequest
             { scrMessages = msgs
@@ -251,7 +253,7 @@ runLLMCore hooks config mChatOps dispatcher = interpret $ \_ -> \case
             , scrTools = tls
             , scrThinkingBudget = config.llmThinkingBudget
             }
-      apiResult <- liftIO $ Client.callMessagesOnce cConfig req
+      apiResult <- sendM $ Client.callMessagesOnce cConfig req
 
       case apiResult of
         Left err -> error $ "LLM API error: " <> show err
@@ -267,7 +269,7 @@ runLLMCore hooks config mChatOps dispatcher = interpret $ \_ -> \case
       -> [ToolInvocation]
       -> [Text]
       -> [Text]
-      -> Eff es (Either Text (TurnResult Value, [ContentBlock]))
+      -> Eff effs (Either Text (TurnResult Value, [ContentBlock]))
     processResponse cConfig sysPrompt outSchema tls msgs resp invs narrs thinks = do
       let content = resp.scrContent
           newNarratives = [t | TextBlock t <- content]
@@ -310,7 +312,7 @@ runLLMCore hooks config mChatOps dispatcher = interpret $ \_ -> \case
         Refusal -> error "Model refused to respond (safety)"
         PauseTurn -> error "Server tool pause not supported"
 
-    executeToolsWithDispatcher :: [ToolUse] -> Eff es (Either Text ([ToolInvocation], [Client.ToolResult]))
+    executeToolsWithDispatcher :: [ToolUse] -> Eff effs (Either Text ([ToolInvocation], [Client.ToolResult]))
     executeToolsWithDispatcher uses = go uses [] []
       where
         go [] invs results = pure $ Right (reverse invs, reverse results)
@@ -379,8 +381,8 @@ runLLMCore hooks config mChatOps dispatcher = interpret $ \_ -> \case
 -- ══════════════════════════════════════════════════════════════
 
 -- | Run the LLM effect by calling the Anthropic API
-runLLM :: (IOE :> es, ChatHistory :> es, Log :> es) => LLMConfig -> Eff (LLM : es) a -> Eff es a
-runLLM config = interpret $ \_ -> \case
+runLLM :: (LastMember IO effs, Member ChatHistory effs, Member Log effs) => LLMConfig -> Eff (LLM ': effs) a -> Eff effs a
+runLLM config = interpret $ \case
   RunTurnOp systemPrompt userContent schema tools -> do
     priorHistory <- getHistory
 
@@ -405,7 +407,7 @@ runLLM config = interpret $ \_ -> \case
           , Client.thinkingBudget = config.llmThinkingBudget
           }
 
-    result <- liftIO $ Client.runTurnRequest clientConfig turnReq
+    result <- sendM $ Client.runTurnRequest clientConfig turnReq
     case result of
       Left err -> do
         logWarn $ "[LLM] API error: " <> T.pack (show err)
@@ -440,24 +442,24 @@ runLLM config = interpret $ \_ -> \case
 
 -- | Run the LLM effect with full tool execution support
 runLLMWithTools
-  :: forall es event a.
-     (IOE :> es, Emit event :> es, RequestInput :> es, Random :> es, ChatHistory :> es, Log :> es)
+  :: forall effs event a.
+     (LastMember IO effs, Member (Emit event) effs, Member RequestInput effs, Member Random effs, Member ChatHistory effs, Member Log effs)
   => LLMConfig
-  -> ToolDispatcher event es
-  -> Eff (LLM : es) a
-  -> Eff es a
-runLLMWithTools = runLLMWithToolsHooked @es @event noHooks
+  -> ToolDispatcher event effs
+  -> Eff (LLM ': effs) a
+  -> Eff effs a
+runLLMWithTools = runLLMWithToolsHooked @effs @event noHooks
 
 -- | Run the LLM effect with hooks for lifecycle events
 -- Uses shared 'runLLMCore' with ChatHistory operations enabled.
 runLLMWithToolsHooked
-  :: forall es event a.
-     (IOE :> es, Emit event :> es, RequestInput :> es, Random :> es, ChatHistory :> es, Log :> es)
+  :: forall effs event a.
+     (LastMember IO effs, Member (Emit event) effs, Member RequestInput effs, Member Random effs, Member ChatHistory effs, Member Log effs)
   => LLMHooks
   -> LLMConfig
-  -> ToolDispatcher event es
-  -> Eff (LLM : es) a
-  -> Eff es a
+  -> ToolDispatcher event effs
+  -> Eff (LLM ': effs) a
+  -> Eff effs a
 runLLMWithToolsHooked hooks config dispatcher =
   let chatOps = ChatHistoryOps
         { choGetHistory = getHistory
@@ -467,18 +469,18 @@ runLLMWithToolsHooked hooks config dispatcher =
 
 -- | Run the LLM effect for compression - NO ChatHistory access.
 -- This is used during history compression to prevent infinite recursion.
--- The 'NotMember ChatHistory es' constraint is a compile-time guarantee
+-- The 'NotMember ChatHistory effs' constraint is a compile-time guarantee
 -- that ChatHistory cannot be accessed by the compression LLM or its tools.
 runLLMForCompression
-  :: forall es a.
-     ( NotMember ChatHistory es  -- Compile error if ChatHistory in scope
-     , Log :> es
-     , IOE :> es
+  :: forall effs a.
+     ( NotMember ChatHistory effs  -- Compile error if ChatHistory in scope
+     , Member Log effs
+     , LastMember IO effs
      )
   => LLMConfig
-  -> (Text -> Value -> Eff es (Either Text ToolResult))  -- Tool dispatcher
-  -> Eff (LLM : es) a
-  -> Eff es a
+  -> (Text -> Value -> Eff effs (Either Text ToolResult))  -- Tool dispatcher
+  -> Eff (LLM ': effs) a
+  -> Eff effs a
 runLLMForCompression config =
   runLLMCore noHooks config Nothing  -- Nothing = no ChatHistory ops
 
@@ -488,25 +490,25 @@ runLLMForCompression config =
 
 -- | Run the ChatHistory effect backed by SQLite database
 runChatHistoryWithDB
-  :: IOE :> es
+  :: LastMember IO effs
   => Connection
   -> Storage.GameId
   -> Maybe Int
-  -> Eff (ChatHistory : es) a
-  -> Eff es a
+  -> Eff (ChatHistory ': effs) a
+  -> Eff effs a
 runChatHistoryWithDB conn gameId mCursor action = do
-  initialHistory <- liftIO $ case mCursor of
+  initialHistory <- sendM $ case mCursor of
     Nothing     -> Storage.loadMessages conn gameId
     Just cursor -> Storage.loadMessagesAfter conn gameId cursor
 
-  ref <- liftIO $ newIORef initialHistory
+  ref <- sendM $ newIORef initialHistory
 
-  interpret (\_ -> \case
-    GetHistory -> liftIO $ readIORef ref
-    AppendMessages msgs -> liftIO $ do
+  interpret (\case
+    GetHistory -> sendM $ readIORef ref
+    AppendMessages msgs -> sendM $ do
       modifyIORef ref (++ msgs)
       Storage.appendMessages conn gameId msgs
-    ClearHistory -> liftIO $ writeIORef ref []
+    ClearHistory -> sendM $ writeIORef ref []
     ) action
 
 -- | Run the ChatHistory effect with automatic compression.
@@ -520,27 +522,27 @@ runChatHistoryWithDB conn gameId mCursor action = do
 -- If the compression LLM call takes significant time (likely for API calls),
 -- this will block the caller until compression completes.
 runChatHistoryWithCompression
-  :: forall es a.
-     ( LLM :> es  -- LLM effect for compression (caller provides interpreter)
-     , RequestInput :> es
-     , Random :> es
-     , Log :> es
-     , IOE :> es
-     , NotMember ChatHistory es  -- Ensure es doesn't have ChatHistory
+  :: forall effs a.
+     ( Member LLM effs  -- LLM effect for compression (caller provides interpreter)
+     , Member RequestInput effs
+     , Member Random effs
+     , Member Log effs
+     , LastMember IO effs
+     , NotMember ChatHistory effs  -- Ensure effs doesn't have ChatHistory
      )
-  => ChatHistoryConfig es
-  -> Eff (ChatHistory : es) a
-  -> Eff es a
+  => ChatHistoryConfig effs
+  -> Eff (ChatHistory ': effs) a
+  -> Eff effs a
 runChatHistoryWithCompression config action = do
-  historyRef <- liftIO $ newIORef ([] :: [Message])
+  historyRef <- sendM $ newIORef ([] :: [Message])
 
-  interpret (\_ -> \case
-    GetHistory -> liftIO $ readIORef historyRef
+  interpret (\case
+    GetHistory -> sendM $ readIORef historyRef
 
-    ClearHistory -> liftIO $ writeIORef historyRef []
+    ClearHistory -> sendM $ writeIORef historyRef []
 
     AppendMessages newMsgs -> do
-      currentHistory <- liftIO $ readIORef historyRef
+      currentHistory <- sendM $ readIORef historyRef
       let updatedHistory = currentHistory ++ newMsgs
           tokenCount = estimateTokens updatedHistory
 
@@ -549,24 +551,24 @@ runChatHistoryWithCompression config action = do
           logInfo $ "[ChatHistory] Compressing: " <> T.pack (show tokenCount)
                  <> " tokens > " <> T.pack (show config.chcTokenThreshold) <> " threshold"
           compressed <- compressHistory config updatedHistory
-          liftIO $ writeIORef historyRef compressed
+          sendM $ writeIORef historyRef compressed
         else
-          liftIO $ writeIORef historyRef updatedHistory
+          sendM $ writeIORef historyRef updatedHistory
     ) action
 
 -- | Compress old messages using the compression LLM
 compressHistory
-  :: forall es.
-     ( LLM :> es
-     , RequestInput :> es
-     , Random :> es
-     , Log :> es
-     , IOE :> es
-     , NotMember ChatHistory es
+  :: forall effs.
+     ( Member LLM effs
+     , Member RequestInput effs
+     , Member Random effs
+     , Member Log effs
+     , LastMember IO effs
+     , NotMember ChatHistory effs
      )
-  => ChatHistoryConfig es
+  => ChatHistoryConfig effs
   -> [Message]
-  -> Eff es [Message]
+  -> Eff effs [Message]
 compressHistory config history = do
   let recentCount = config.chcRecentToKeep
       (toCompress, toKeep) = splitAt (length history - recentCount) history
@@ -593,14 +595,14 @@ compressHistory config history = do
 -- The NotMember ChatHistory constraint ensures the compression LLM
 -- cannot access chat history, preventing infinite recursion.
 runCompressionLLM
-  :: forall es.
-     ( LLM :> es
-     , Log :> es
-     , NotMember ChatHistory es
+  :: forall effs.
+     ( Member LLM effs
+     , Member Log effs
+     , NotMember ChatHistory effs
      )
-  => ChatHistoryConfig es
+  => ChatHistoryConfig effs
   -> Text  -- User prompt with formatted messages
-  -> Eff es [Message]
+  -> Eff effs [Message]
 runCompressionLLM config userPrompt = do
   let cc = config.chcCompression
 
@@ -659,14 +661,14 @@ formatMessagesForCompression = T.intercalate "\n\n" . map formatMessage
 
 -- | Run the Log effect, logging to GUI bridge debug panel
 runLogWithBridge
-  :: IOE :> es
+  :: LastMember IO effs
   => GUIBridge state
   -> LogLevel
-  -> Eff (Log : es) a
-  -> Eff es a
-runLogWithBridge bridge minLevel = interpret $ \_ -> \case
-  LogMsg level msg
-    | level >= minLevel -> liftIO $ do
+  -> Eff (Log ': effs) a
+  -> Eff effs a
+runLogWithBridge bridge minLevel = interpret $ \case
+  LogMsg level msg _fields
+    | level >= minLevel -> sendM $ do
         let guiLevel = case level of
               Debug -> GUICore.Debug
               Info  -> GUICore.Info
@@ -684,7 +686,7 @@ runGame
   -> Eff (RunnerEffects s event) a
   -> IO (a, s)
 runGame initialState llmConfig eventHandler inputHandler minLogLevel =
-  runEff
+  runM
     . runTime
     . runRandom
     . runEmit eventHandler

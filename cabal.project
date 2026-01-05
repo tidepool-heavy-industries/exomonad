@@ -23,8 +23,10 @@ packages:
     deps/freer-simple
     deps/ginger
 
+    -- Platform package (enabled for CLI with LLM effects)
+    tidepool-platform
+
 -- Disabled packages (heavy deps, not needed for WASM deployment):
--- tidepool-platform   -- threepenny-gui, http-client, sqlite
 -- tidepool-dm         -- GUI app, depends on platform
 -- tidepool-tidying    -- GUI app, depends on platform
 -- template            -- unused template skeleton
