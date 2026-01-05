@@ -378,16 +378,19 @@ runUI ctx callback = interpret $ \case
 
   -- DEPRECATED: Handle RequestDice by forwarding to RequestChoice logic
   RequestDice prompt diceInfo -> sendM $ do
-    (msgs, node, _) <- readContext ctx
-    appendMessage ctx System prompt
-    (msgs', _, _) <- readContext ctx
+    case NE.nonEmpty diceInfo of
+      Nothing -> pure 0  -- Empty dice list, return 0 as fallback
+      Just neInfo -> do
+        (msgs, node, _) <- readContext ctx
+        appendMessage ctx System prompt
+        (msgs', _, _) <- readContext ctx
 
-    -- Convert dice info to simple choices
-    let choices = NE.fromList $ map (\(val, _, hint) -> (hint, val)) diceInfo
-    let state = buildSimpleChoiceState msgs' node prompt choices False
+        -- Convert dice info to simple choices
+        let choices = NE.map (\(val, _, hint) -> (hint, val)) neInfo
+        let state = buildSimpleChoiceState msgs' node prompt choices False
 
-    action <- callback state
-    extractChoice choices action
+        action <- callback state
+        extractChoice choices action
 
 
 -- | Extract a single choice from UserAction for simple choices.
@@ -418,13 +421,14 @@ extractChoiceDesc choices action = case action of
 
 -- | Extract a single choice from UserAction for meta choices.
 -- Validates that disabled options aren't selected.
+-- Returns IO error (via fail) if a disabled option is selected.
 extractChoiceMeta :: NonEmpty (Text, ChoiceMeta, a) -> UserAction -> IO a
 extractChoiceMeta choices action = case action of
   ChoiceAction idx
     | idx >= 0 && idx < NE.length choices ->
         let (_, ChoiceMeta _ _ disabled, val) = NE.toList choices !! idx in
         case disabled of
-          Just reason -> error $ "Selected disabled option: " <> T.unpack reason
+          Just reason -> fail $ "Selected disabled option: " <> T.unpack reason
           Nothing -> pure val
     | otherwise ->
         let (_, _, val) = NE.head choices in pure val
