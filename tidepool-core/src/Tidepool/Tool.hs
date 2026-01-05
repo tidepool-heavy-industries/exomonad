@@ -1,6 +1,28 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
--- | Tool types for mid-turn LLM capabilities
+{-# OPTIONS_GHC -Wno-deprecations #-}
+
+-- | Tool types for mid-turn LLM capabilities.
+--
+-- __DEPRECATED__: This module uses a legacy 3-parameter 'Tool' typeclass
+-- that requires threading @event@ and @state@ types everywhere.
+--
+-- For new code, use 'Tidepool.Graph.Tool.ToolDef' instead, which:
+--
+-- * Uses a single type parameter
+-- * Derives schemas via 'HasJSONSchema'
+-- * Supports conversion to wire formats via 'ToAnthropicTool' and 'ToCfTool'
+--
+-- @
+-- -- Old (deprecated):
+-- instance Tool MyTool MyEvent MyState where ...
+--
+-- -- New (recommended):
+-- instance ToolDef MyTool where ...
+-- instance ToAnthropicTool MyTool  -- uses default
+-- instance ToCfTool MyTool         -- uses default
+-- @
 module Tidepool.Tool
+  {-# DEPRECATED "Use Tidepool.Graph.Tool (ToolDef typeclass) instead" #-}
   ( -- * Tool Class
     Tool(..)
 

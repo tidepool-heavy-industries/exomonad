@@ -165,26 +165,31 @@ spec = do
         KM.lookup "role" userMsg `shouldBe` Just (String "user")
 
     describe "tool format" $ do
-      it "wraps tools in OpenAI function format" $ do
+      it "passes pre-formatted OpenAI tools directly" $ do
         -- OpenAI expects: { "type": "function", "function": { "name": ..., "parameters": ... } }
-        let flatTool = object
-              [ "name" .= ("search" :: String)
-              , "description" .= ("Search" :: String)
-              , "parameters" .= object ["type" .= ("object" :: String)]
+        -- Callers should pass tools already in this format (via CfTool)
+        let openaiTool = object
+              [ "type" .= ("function" :: String)
+              , "function" .= object
+                  [ "name" .= ("search" :: String)
+                  , "description" .= ("Search" :: String)
+                  , "parameters" .= object ["type" .= ("object" :: String)]
+                  ]
               ]
-            body = buildOpenAIRequest baseConfig "Search" (Just [flatTool])
+            body = buildOpenAIRequest baseConfig "Search" (Just [openaiTool])
             Just obj = decode body :: Maybe Value
             Object fields = obj
             Just (Array tools) = KM.lookup "tools" fields
-            [Object wrappedTool] = V.toList tools
+            [Object passedTool] = V.toList tools
 
-        -- Should be wrapped in OpenAI format
-        KM.lookup "type" wrappedTool `shouldBe` Just (String "function")
-        KM.member "function" wrappedTool `shouldBe` True
+        -- Tool should be passed through unchanged
+        KM.lookup "type" passedTool `shouldBe` Just (String "function")
+        KM.member "function" passedTool `shouldBe` True
 
   describe "format comparison" $ do
-    it "Anthropic and OpenAI use different tool key names" $ do
-      -- Document the key difference: input_schema vs parameters
+    it "Anthropic and OpenAI use different tool formats" $ do
+      -- Document the key difference: Anthropic is flat with input_schema,
+      -- OpenAI is wrapped with type: "function" and function: {..., parameters}
       let anthropicConfig = AnthropicConfig
             { acModel = "claude-sonnet-4-20250514"
             , acMaxTokens = 1024
@@ -198,18 +203,21 @@ spec = do
             , oaSystemPrompt = Nothing
             }
 
-          -- Anthropic tool uses input_schema
+          -- Anthropic tool uses input_schema (flat format)
           anthropicTool = object
             [ "name" .= ("test" :: String)
             , "description" .= ("Test" :: String)
             , "input_schema" .= object ["type" .= ("object" :: String)]
             ]
 
-          -- OpenAI tool uses parameters
+          -- OpenAI tool uses wrapped format with parameters (via CfTool)
           openaiTool = object
-            [ "name" .= ("test" :: String)
-            , "description" .= ("Test" :: String)
-            , "parameters" .= object ["type" .= ("object" :: String)]
+            [ "type" .= ("function" :: String)
+            , "function" .= object
+                [ "name" .= ("test" :: String)
+                , "description" .= ("Test" :: String)
+                , "parameters" .= object ["type" .= ("object" :: String)]
+                ]
             ]
 
           anthropicBody = buildAnthropicRequest anthropicConfig "Test" (Just [anthropicTool])
@@ -221,12 +229,12 @@ spec = do
           Just (Array anthropicTools) = KM.lookup "tools" anthropicFields
           Just (Array openaiTools) = KM.lookup "tools" openaiFields
           [Object anthropicParsedTool] = V.toList anthropicTools
-          [Object openaiWrappedTool] = V.toList openaiTools
+          [Object openaiPassedTool] = V.toList openaiTools
 
       -- Anthropic: flat with input_schema
       KM.member "input_schema" anthropicParsedTool `shouldBe` True
       KM.member "function" anthropicParsedTool `shouldBe` False
 
-      -- OpenAI: wrapped with function containing parameters
-      KM.member "type" openaiWrappedTool `shouldBe` True
-      KM.member "function" openaiWrappedTool `shouldBe` True
+      -- OpenAI: wrapped with type and function (passed through from CfTool format)
+      KM.member "type" openaiPassedTool `shouldBe` True
+      KM.member "function" openaiPassedTool `shouldBe` True
