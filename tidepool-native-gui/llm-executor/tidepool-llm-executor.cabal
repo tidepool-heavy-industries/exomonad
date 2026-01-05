@@ -67,6 +67,7 @@ test-suite llm-executor-tests
     other-modules:
         TypesSpec
         RequestBuildingSpec
+        HelpersSpec
     build-depends:
         base >= 4.17 && < 5,
         tidepool-llm-executor,
@@ -76,7 +77,8 @@ test-suite llm-executor-tests
         text >= 2.0 && < 3,
         vector >= 0.13 && < 1,
         hspec >= 2.10 && < 3,
-        aeson-pretty >= 0.8 && < 1
+        aeson-pretty >= 0.8 && < 1,
+        servant-client >= 0.20 && < 1
     build-tool-depends:
         hspec-discover:hspec-discover >= 2.10 && < 3
     ghc-options: -threaded -rtsopts -with-rtsopts=-N

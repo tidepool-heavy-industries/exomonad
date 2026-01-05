@@ -119,6 +119,17 @@ type AnthropicAPI =
 
 -- | Call the Anthropic Messages API.
 --
+-- Uses Anthropic API version @2023-06-01@, which is the stable version
+-- supporting messages, tools, and extended thinking. This version is
+-- hardcoded because:
+--
+-- 1. API versions are rarely updated (last major version was 2023-06-01)
+-- 2. Version changes require testing against actual API behavior
+-- 3. Newer versions may have breaking changes in request/response format
+--
+-- If you need a different API version, you'll need to update this constant
+-- and verify compatibility with the request/response types.
+--
 -- @
 -- result <- runClientM (anthropicComplete apiKey req) env
 -- @
@@ -126,4 +137,11 @@ anthropicComplete
   :: Text              -- ^ API key
   -> AnthropicRequest  -- ^ Request body
   -> ClientM AnthropicResponse
-anthropicComplete apiKey req = client (Proxy @AnthropicAPI) apiKey "2023-06-01" req
+anthropicComplete apiKey req = client (Proxy @AnthropicAPI) apiKey anthropicApiVersion req
+
+-- | Anthropic API version.
+--
+-- This is the stable version supporting messages, tools, and extended thinking.
+-- See: https://docs.anthropic.com/en/api/versioning
+anthropicApiVersion :: Text
+anthropicApiVersion = "2023-06-01"

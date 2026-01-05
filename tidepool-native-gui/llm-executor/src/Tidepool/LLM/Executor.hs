@@ -37,12 +37,18 @@ module Tidepool.LLM.Executor
     -- * Request Building (exported for testing)
   , buildAnthropicRequest
   , buildOpenAIRequest
+
+    -- * Helpers (exported for testing)
+  , parseBaseUrl
+  , clientErrorToLLMError
   ) where
 
 import Control.Monad.Freer (Eff, LastMember, interpret, sendM)
 import Data.Aeson (Value)
+import Data.ByteString.Lazy qualified as LBS
 import Data.Text (Text)
 import Data.Text qualified as T
+import Data.Text.Encoding qualified as TE
 import Network.HTTP.Client (Manager)
 import Servant.Client
   ( BaseUrl(..)
@@ -172,45 +178,63 @@ buildOpenAIRequest config userMsg maybeTools = OpenAI.OpenAIRequest
 -- | Parse a base URL from Text.
 --
 -- Defaults to HTTPS on port 443 if not specified.
+-- Handles edge cases like empty strings, missing ports, malformed URLs.
 parseBaseUrl :: Text -> BaseUrl
 parseBaseUrl url =
-  let urlStr = T.unpack url
-      -- Strip trailing slash if present
-      cleanUrl = if last urlStr == '/' then init urlStr else urlStr
+  let -- Strip trailing slash if present
+      cleanUrl = case T.stripSuffix "/" url of
+        Just t  -> t
+        Nothing -> url
       -- Check for scheme
-      (scheme, rest) = case T.stripPrefix "https://" url of
+      (scheme, rest) = case T.stripPrefix "https://" cleanUrl of
         Just r -> (Https, T.unpack r)
-        Nothing -> case T.stripPrefix "http://" url of
+        Nothing -> case T.stripPrefix "http://" cleanUrl of
           Just r -> (Http, T.unpack r)
-          Nothing -> (Https, cleanUrl)
+          Nothing -> (Https, T.unpack cleanUrl)
+      -- Default port based on scheme
+      defaultPort = if scheme == Https then 443 else 80
       -- Split host and path
       (hostPort, path) = break (== '/') rest
-      -- Split host and port
+      -- Split host and port (safely)
       (host, port) = case break (== ':') hostPort of
-        (h, ':':p) -> (h, read p)
-        (h, _) -> (h, if scheme == Https then 443 else 80)
+        (h, ':':p) -> case safeReadPort p of
+          Just port' -> (h, port')
+          Nothing    -> (h, defaultPort)
+        (h, _) -> (h, defaultPort)
+      -- Safe port parsing
+      safeReadPort :: String -> Maybe Int
+      safeReadPort s = case reads s of
+        [(n, "")] -> Just n
+        _         -> Nothing
   in BaseUrl scheme host port path
 
 -- | Convert servant-client errors to LLMError.
+--
+-- Note: Error messages are sanitized to avoid leaking credentials.
+-- The full exception details (which may contain API keys in request headers)
+-- are NOT included in the error message.
 clientErrorToLLMError :: ClientError -> LLMError
 clientErrorToLLMError err = case err of
   FailureResponse _ resp ->
     let status = statusCode (responseStatusCode resp)
+        -- Check response body for context length error (safely)
+        bodyText = T.toLower $ TE.decodeUtf8Lenient $ LBS.toStrict $ responseBody resp
+        isContextError = "context" `T.isInfixOf` bodyText && "long" `T.isInfixOf` bodyText
     in case status of
       401 -> LLMUnauthorized
       429 -> LLMRateLimited
       529 -> LLMOverloaded
-      _ | "context" `T.isInfixOf` T.toLower (T.pack $ show resp)
-          && "long" `T.isInfixOf` T.toLower (T.pack $ show resp)
-        -> LLMContextTooLong
-        | otherwise
-        -> LLMApiError "http_error" (T.pack $ "Status " <> show status)
+      _ | isContextError -> LLMContextTooLong
+        | otherwise -> LLMApiError "http_error" (T.pack $ "Status " <> show status)
   DecodeFailure msg _ ->
     LLMParseError msg
-  ConnectionError exc ->
-    LLMHttpError (T.pack $ show exc)
-  _ ->
-    LLMHttpError (T.pack $ show err)
+  -- Sanitized error messages - do NOT expose request details which contain API keys
+  UnsupportedContentType{} ->
+    LLMApiError "unsupported_content_type" "Unsupported content type in response"
+  InvalidContentTypeHeader{} ->
+    LLMApiError "invalid_content_type_header" "Invalid Content-Type header in response"
+  ConnectionError{} ->
+    LLMHttpError "Connection error while calling LLM provider"
 
 
 -- ════════════════════════════════════════════════════════════════════════════
