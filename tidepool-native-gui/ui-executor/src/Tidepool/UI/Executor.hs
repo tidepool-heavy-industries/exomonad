@@ -44,6 +44,8 @@ import Control.Monad.Freer (Eff, LastMember, interpret, sendM)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Base64 as B64
 import Data.IORef
+import Data.List.NonEmpty (NonEmpty)
+import qualified Data.List.NonEmpty as NE
 import Data.Sequence (Seq)
 import qualified Data.Sequence as Seq
 import Data.Text (Text)
@@ -52,7 +54,7 @@ import qualified Data.Text.Encoding as TE
 import Data.Time (getCurrentTime)
 import Data.Time.Format.ISO8601 (iso8601Show)
 
-import Tidepool.Effects.UI (UI(..))
+import Tidepool.Effects.UI (UI(..), ChoiceMeta(..))
 import Tidepool.Wire.Types
 
 
@@ -142,7 +144,7 @@ buildTextInputState msgs node placeholder = UIState
   { usMessages = toList msgs
   , usTextInput = Just TextInputConfig { ticPlaceholder = placeholder }
   , usPhotoUpload = Nothing
-  , usButtons = Nothing
+  , usChoices = Nothing
   , usGraphNode = node
   , usThinking = False
   }
@@ -157,37 +159,65 @@ buildPhotoUploadState msgs node prompt = UIState
   { usMessages = toList msgs
   , usTextInput = Nothing
   , usPhotoUpload = Just PhotoUploadConfig { pucPrompt = prompt }
-  , usButtons = Nothing
+  , usChoices = Nothing
   , usGraphNode = node
   , usThinking = False
   }
 
--- | Build UIState with buttons (choice) enabled.
+-- | Build UIState with choices enabled.
 buildChoiceState
   :: Seq ChatMessage
-  -> Text              -- ^ Graph node
-  -> Text              -- ^ Prompt
-  -> [(Text, a)]       -- ^ Choices (label, value)
+  -> Text                            -- ^ Graph node
+  -> Text                            -- ^ Prompt
+  -> NonEmpty (Text, ChoiceMeta, a)  -- ^ (label, meta, value)
+  -> Bool                            -- ^ Multi-select
   -> UIState
-buildChoiceState msgs node prompt choices = UIState
-  { usMessages = toList (msgs Seq.|> promptMsg)
+buildChoiceState msgs node prompt choices multiSelect = UIState
+  { usMessages = toList msgs
   , usTextInput = Nothing
   , usPhotoUpload = Nothing
-  , usButtons = Just $ zipWith mkButton [0..] choices
+  , usChoices = Just ChoiceConfig
+      { ccPrompt = prompt
+      , ccOptions = zipWith mkOption [0..] (NE.toList choices)
+      , ccMultiSelect = multiSelect
+      }
   , usGraphNode = node
   , usThinking = False
   }
   where
-    promptMsg = ChatMessage
-      { cmRole = System
-      , cmContent = prompt
-      , cmTimestamp = ""  -- Will be set properly by the effect
+    mkOption idx (label, ChoiceMeta desc costs disabled, _) = ChoiceOption
+      { coIndex = idx
+      , coLabel = label
+      , coDescription = desc
+      , coCosts = costs
+      , coDisabled = disabled
       }
-    mkButton :: Int -> (Text, a) -> ButtonConfig
-    mkButton idx (label, _) = ButtonConfig
-      { bcId = T.pack (show idx)
-      , bcLabel = label
-      }
+
+-- | Build UIState for simple choices (no metadata).
+buildSimpleChoiceState
+  :: Seq ChatMessage
+  -> Text              -- ^ Graph node
+  -> Text              -- ^ Prompt
+  -> NonEmpty (Text, a)
+  -> Bool              -- ^ Multi-select
+  -> UIState
+buildSimpleChoiceState msgs node prompt choices multiSelect =
+  buildChoiceState msgs node prompt choicesWithMeta multiSelect
+  where
+    choicesWithMeta = NE.map (\(label, val) -> (label, defaultMeta, val)) choices
+    defaultMeta = ChoiceMeta Nothing [] Nothing
+
+-- | Build UIState for choices with descriptions.
+buildDescChoiceState
+  :: Seq ChatMessage
+  -> Text                          -- ^ Graph node
+  -> Text                          -- ^ Prompt
+  -> NonEmpty (Text, Text, a)      -- ^ (label, description, value)
+  -> UIState
+buildDescChoiceState msgs node prompt choices =
+  buildChoiceState msgs node prompt choicesWithMeta False
+  where
+    choicesWithMeta = NE.map (\(label, desc, val) -> (label, ChoiceMeta (Just desc) [] Nothing, val)) choices
 
 -- | Build UIState with thinking indicator.
 buildThinkingState
@@ -199,7 +229,7 @@ buildThinkingState msgs node thinking = UIState
   { usMessages = toList msgs
   , usTextInput = Nothing
   , usPhotoUpload = Nothing
-  , usButtons = Nothing
+  , usChoices = Nothing
   , usGraphNode = node
   , usThinking = thinking
   }
@@ -284,34 +314,127 @@ runUI ctx callback = interpret $ \case
         pure ""
 
   RequestChoice prompt choices -> sendM $ do
-    -- Build state with buttons
+    -- Build state with simple choices
     (msgs, node, _) <- readContext ctx
     -- Add prompt as system message
     appendMessage ctx System prompt
     (msgs', _, _) <- readContext ctx
-    let state = buildChoiceState msgs' node prompt choices
+    let state = buildSimpleChoiceState msgs' node prompt choices False
 
     -- Invoke callback (blocking)
     action <- callback state
 
     -- Extract choice from response
+    extractChoice choices action
+
+  RequestMultiChoice prompt choices -> sendM $ do
+    -- Build state with multi-select choices
+    (msgs, node, _) <- readContext ctx
+    appendMessage ctx System prompt
+    (msgs', _, _) <- readContext ctx
+    let state = buildSimpleChoiceState msgs' node prompt choices True
+
+    -- Invoke callback (blocking)
+    action <- callback state
+
+    -- Extract multiple choices from response
     case action of
-      ButtonAction buttonId ->
-        -- Parse button ID as index
-        case reads (T.unpack buttonId) of
-          [(idx, "")] | idx >= 0 && idx < length choices ->
-            -- Return the value at that index
-            pure (snd (choices !! idx))
-          _ ->
-            -- Invalid index - return first choice as fallback
-            case choices of
-              ((_, val):_) -> pure val
-              [] -> error "RequestChoice called with empty choices"
-      _ ->
-        -- Wrong action type - return first choice as fallback
-        case choices of
-          ((_, val):_) -> pure val
-          [] -> error "RequestChoice called with empty choices"
+      MultiChoiceAction idxs -> do
+        let len = NE.length choices
+        pure [snd (NE.toList choices !! i) | i <- idxs, i >= 0, i < len]
+      ChoiceAction idx -> do
+        -- Single choice sent for multi-select - treat as single selection
+        let len = NE.length choices
+        if idx >= 0 && idx < len
+          then pure [snd (NE.toList choices !! idx)]
+          else pure []
+      _ -> pure []
+
+  RequestChoiceDesc prompt choices -> sendM $ do
+    -- Build state with described choices
+    (msgs, node, _) <- readContext ctx
+    appendMessage ctx System prompt
+    (msgs', _, _) <- readContext ctx
+    let state = buildDescChoiceState msgs' node prompt choices
+
+    -- Invoke callback (blocking)
+    action <- callback state
+
+    -- Extract choice - map back to third element (value)
+    extractChoiceDesc choices action
+
+  RequestChoiceMeta prompt choices -> sendM $ do
+    -- Build state with full metadata choices
+    (msgs, node, _) <- readContext ctx
+    appendMessage ctx System prompt
+    (msgs', _, _) <- readContext ctx
+    let state = buildChoiceState msgs' node prompt choices False
+
+    -- Invoke callback (blocking)
+    action <- callback state
+
+    -- Extract choice with disabled validation
+    extractChoiceMeta choices action
+
+  -- DEPRECATED: Handle RequestDice by forwarding to RequestChoice logic
+  RequestDice prompt diceInfo -> sendM $ do
+    case NE.nonEmpty diceInfo of
+      Nothing -> pure 0  -- Empty dice list, return 0 as fallback
+      Just neInfo -> do
+        (msgs, node, _) <- readContext ctx
+        appendMessage ctx System prompt
+        (msgs', _, _) <- readContext ctx
+
+        -- Convert dice info to simple choices
+        let choices = NE.map (\(val, _, hint) -> (hint, val)) neInfo
+        let state = buildSimpleChoiceState msgs' node prompt choices False
+
+        action <- callback state
+        extractChoice choices action
+
+
+-- | Extract a single choice from UserAction for simple choices.
+extractChoice :: NonEmpty (Text, a) -> UserAction -> IO a
+extractChoice choices action = case action of
+  ChoiceAction idx
+    | idx >= 0 && idx < NE.length choices ->
+        pure $ snd (NE.toList choices !! idx)
+    | otherwise ->
+        -- Invalid index - return first choice as fallback
+        pure $ snd (NE.head choices)
+  _ ->
+    -- Wrong action type - return first choice as fallback
+    pure $ snd (NE.head choices)
+
+
+-- | Extract a single choice from UserAction for described choices.
+extractChoiceDesc :: NonEmpty (Text, Text, a) -> UserAction -> IO a
+extractChoiceDesc choices action = case action of
+  ChoiceAction idx
+    | idx >= 0 && idx < NE.length choices ->
+        let (_, _, val) = NE.toList choices !! idx in pure val
+    | otherwise ->
+        let (_, _, val) = NE.head choices in pure val
+  _ ->
+    let (_, _, val) = NE.head choices in pure val
+
+
+-- | Extract a single choice from UserAction for meta choices.
+-- Validates that disabled options aren't selected.
+-- Returns IO error (via fail) if a disabled option is selected.
+extractChoiceMeta :: NonEmpty (Text, ChoiceMeta, a) -> UserAction -> IO a
+extractChoiceMeta choices action = case action of
+  ChoiceAction idx
+    | idx >= 0 && idx < NE.length choices ->
+        let (_, ChoiceMeta _ _ disabled, val) = NE.toList choices !! idx in
+        case disabled of
+          Just reason -> fail $ "Selected disabled option: " <> T.unpack reason
+          Nothing -> pure val
+    | otherwise ->
+        let (_, _, val) = NE.head choices in pure val
+  _ ->
+    let (_, _, val) = NE.head choices in pure val
+
 
 -- | Helper to convert Seq to list.
 toList :: Seq a -> [a]

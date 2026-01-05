@@ -13,7 +13,7 @@ const DEFAULT_UI_STATE: UIState = {
   messages: [],
   textInput: { placeholder: "Type a message..." },
   photoUpload: null,
-  buttons: null,
+  choices: null,
   graphNode: "init",
   thinking: false,
 };

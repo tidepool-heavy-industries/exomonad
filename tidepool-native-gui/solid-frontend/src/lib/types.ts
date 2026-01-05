@@ -11,7 +11,7 @@ export interface UIState {
   messages: ChatMessage[];
   textInput: TextInputConfig | null;
   photoUpload: PhotoUploadConfig | null;
-  buttons: ButtonConfig[] | null;
+  choices: ChoiceConfig | null;
   graphNode: string;
   thinking: boolean;
 }
@@ -32,25 +32,44 @@ export interface PhotoUploadConfig {
   prompt: string;
 }
 
-export interface ButtonConfig {
-  id: string;
+/** Choice option with rich metadata. */
+export interface ChoiceOption {
+  index: number;
   label: string;
+  description?: string;
+  costs: string[];
+  disabled?: string; // reason if disabled
 }
+
+/** Choice configuration with multi-select support. */
+export interface ChoiceConfig {
+  prompt: string;
+  options: ChoiceOption[];
+  multiSelect: boolean;
+}
+
+/** @deprecated Use ChoiceOption instead */
+export type ButtonConfig = ChoiceOption;
 
 // ============================================================================
 // UserAction (Client -> Server)
 // ============================================================================
 
-export type UserAction = TextAction | ButtonAction | PhotoAction;
+export type UserAction = TextAction | ChoiceAction | MultiChoiceAction | PhotoAction;
 
 export interface TextAction {
   type: "text";
   content: string;
 }
 
-export interface ButtonAction {
-  type: "button";
-  id: string;
+export interface ChoiceAction {
+  type: "choice";
+  index: number;
+}
+
+export interface MultiChoiceAction {
+  type: "multiChoice";
+  indices: number[];
 }
 
 export interface PhotoAction {
@@ -67,10 +86,19 @@ export function textAction(content: string): TextAction {
   return { type: "text", content };
 }
 
-export function buttonAction(id: string): ButtonAction {
-  return { type: "button", id };
+export function choiceAction(index: number): ChoiceAction {
+  return { type: "choice", index };
+}
+
+export function multiChoiceAction(indices: number[]): MultiChoiceAction {
+  return { type: "multiChoice", indices };
 }
 
 export function photoAction(data: string, mimeType: string): PhotoAction {
   return { type: "photo", data, mimeType };
+}
+
+/** @deprecated Use choiceAction instead */
+export function buttonAction(id: string): ChoiceAction {
+  return { type: "choice", index: parseInt(id, 10) };
 }

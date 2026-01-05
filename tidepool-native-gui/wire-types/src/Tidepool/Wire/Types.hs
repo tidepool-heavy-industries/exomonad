@@ -9,7 +9,9 @@ module Tidepool.Wire.Types
   , MessageRole(..)
   , TextInputConfig(..)
   , PhotoUploadConfig(..)
-  , ButtonConfig(..)
+  , ChoiceOption(..)
+  , ChoiceConfig(..)
+  , ButtonConfig
 
     -- * Client → Server
   , UserAction(..)
@@ -30,7 +32,7 @@ data UIState = UIState
   { usMessages :: [ChatMessage]
   , usTextInput :: Maybe TextInputConfig
   , usPhotoUpload :: Maybe PhotoUploadConfig
-  , usButtons :: Maybe [ButtonConfig]
+  , usChoices :: Maybe ChoiceConfig
   , usGraphNode :: Text
   , usThinking :: Bool
   }
@@ -41,7 +43,7 @@ instance ToJSON UIState where
     [ "messages" .= usMessages s
     , "textInput" .= usTextInput s
     , "photoUpload" .= usPhotoUpload s
-    , "buttons" .= usButtons s
+    , "choices" .= usChoices s
     , "graphNode" .= usGraphNode s
     , "thinking" .= usThinking s
     ]
@@ -52,7 +54,7 @@ instance FromJSON UIState where
       <$> v .: "messages"
       <*> v .:? "textInput"
       <*> v .:? "photoUpload"
-      <*> v .:? "buttons"
+      <*> v .:? "choices"
       <*> v .: "graphNode"
       <*> v .: "thinking"
 
@@ -117,19 +119,59 @@ instance FromJSON PhotoUploadConfig where
   parseJSON = withObject "PhotoUploadConfig" $ \v ->
     PhotoUploadConfig <$> v .: "prompt"
 
--- | Button configuration.
-data ButtonConfig = ButtonConfig
-  { bcId :: Text
-  , bcLabel :: Text
+-- | Choice option with rich metadata.
+data ChoiceOption = ChoiceOption
+  { coIndex :: Int              -- ^ 0-based index for response
+  , coLabel :: Text             -- ^ Display label
+  , coDescription :: Maybe Text -- ^ Optional descriptive text
+  , coCosts :: [Text]           -- ^ Cost tags e.g. ["2 Stress", "1 Heat"]
+  , coDisabled :: Maybe Text    -- ^ Nothing = enabled, Just reason = disabled
   }
   deriving (Show, Eq, Generic)
 
-instance ToJSON ButtonConfig where
-  toJSON c = object ["id" .= bcId c, "label" .= bcLabel c]
+instance ToJSON ChoiceOption where
+  toJSON c = object
+    [ "index" .= coIndex c
+    , "label" .= coLabel c
+    , "description" .= coDescription c
+    , "costs" .= coCosts c
+    , "disabled" .= coDisabled c
+    ]
 
-instance FromJSON ButtonConfig where
-  parseJSON = withObject "ButtonConfig" $ \v ->
-    ButtonConfig <$> v .: "id" <*> v .: "label"
+instance FromJSON ChoiceOption where
+  parseJSON = withObject "ChoiceOption" $ \v ->
+    ChoiceOption
+      <$> v .: "index"
+      <*> v .: "label"
+      <*> v .:? "description"
+      <*> v .: "costs"
+      <*> v .:? "disabled"
+
+-- | Choice configuration with multi-select support.
+data ChoiceConfig = ChoiceConfig
+  { ccPrompt :: Text            -- ^ Prompt text shown above choices
+  , ccOptions :: [ChoiceOption] -- ^ Available options
+  , ccMultiSelect :: Bool       -- ^ True = checkboxes, False = radio buttons
+  }
+  deriving (Show, Eq, Generic)
+
+instance ToJSON ChoiceConfig where
+  toJSON c = object
+    [ "prompt" .= ccPrompt c
+    , "options" .= ccOptions c
+    , "multiSelect" .= ccMultiSelect c
+    ]
+
+instance FromJSON ChoiceConfig where
+  parseJSON = withObject "ChoiceConfig" $ \v ->
+    ChoiceConfig
+      <$> v .: "prompt"
+      <*> v .: "options"
+      <*> v .: "multiSelect"
+
+-- | Deprecated alias for backwards compatibility.
+{-# DEPRECATED ButtonConfig "Use ChoiceOption instead" #-}
+type ButtonConfig = ChoiceOption
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -138,9 +180,10 @@ instance FromJSON ButtonConfig where
 
 -- | User action sent from client to server.
 data UserAction
-  = TextAction Text
-  | ButtonAction Text        -- button id
-  | PhotoAction Text Text    -- base64 data, mimeType
+  = TextAction Text           -- ^ Free-form text input
+  | ChoiceAction Int          -- ^ Single selection (index)
+  | MultiChoiceAction [Int]   -- ^ Multiple selections (indices)
+  | PhotoAction Text Text     -- ^ Photo upload (base64 data, mimeType)
   deriving (Show, Eq, Generic)
 
 instance ToJSON UserAction where
@@ -148,9 +191,13 @@ instance ToJSON UserAction where
     [ "type" .= ("text" :: Text)
     , "content" .= content_
     ]
-  toJSON (ButtonAction id_) = object
-    [ "type" .= ("button" :: Text)
-    , "id" .= id_
+  toJSON (ChoiceAction idx) = object
+    [ "type" .= ("choice" :: Text)
+    , "index" .= idx
+    ]
+  toJSON (MultiChoiceAction idxs) = object
+    [ "type" .= ("multiChoice" :: Text)
+    , "indices" .= idxs
     ]
   toJSON (PhotoAction data_ mimeType_) = object
     [ "type" .= ("photo" :: Text)
@@ -163,6 +210,7 @@ instance FromJSON UserAction where
     ty <- v .: "type" :: Aeson.Parser Text
     case ty of
       "text" -> TextAction <$> v .: "content"
-      "button" -> ButtonAction <$> v .: "id"
+      "choice" -> ChoiceAction <$> v .: "index"
+      "multiChoice" -> MultiChoiceAction <$> v .: "indices"
       "photo" -> PhotoAction <$> v .: "data" <*> v .: "mimeType"
       _ -> fail $ "Unknown action type: " ++ show ty

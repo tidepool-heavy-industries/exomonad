@@ -3,7 +3,7 @@ import { createSocket, type ConnectionStatus } from "./lib/socket";
 import type { UserAction } from "./lib/types";
 import ChatMessage from "./components/ChatMessage";
 import InputArea from "./components/InputArea";
-import ButtonGroup from "./components/ButtonGroup";
+import ChoiceGroup from "./components/ChoiceGroup";
 
 const App: Component = () => {
   // Default to port 8080, allow override via env
@@ -114,12 +114,14 @@ const App: Component = () => {
       </div>
 
       {/* Input area - shows based on server affordances */}
-      <Show when={socket.state().uiState?.buttons?.length}>
-        <ButtonGroup
-          buttons={socket.state().uiState!.buttons!}
-          disabled={socket.state().uiState?.thinking ?? false}
-          onSend={handleSend}
-        />
+      <Show when={socket.state().uiState?.choices}>
+        {(config) => (
+          <ChoiceGroup
+            config={config()}
+            disabled={socket.state().uiState?.thinking ?? false}
+            onSend={handleSend}
+          />
+        )}
       </Show>
 
       <Show when={socket.state().uiState?.textInput || socket.state().uiState?.photoUpload}>
