@@ -314,24 +314,25 @@ Node shapes:
 
 ## LLM Handler
 
-LLM handlers use the `LLMHandler` constructor with four arguments:
+LLM handlers use the `LLMHandler` constructor with named record fields:
 
 ```haskell
 gProcess = LLMHandler
-  Nothing                           -- optional system template
-  (templateCompiled @ProcessTpl)    -- user template (required)
-  (\input -> do                     -- before: build context
-    st <- get @SessionState
-    pure ProcessContext { ... })
-  (\output -> do                    -- after: route based on output
-    pure $ gotoExit result)
+  { llmSystem = Nothing                           -- optional system template
+  , llmUser   = templateCompiled @ProcessTpl      -- user template (required)
+  , llmBefore = \input -> do                      -- builds template context
+      st <- get @SessionState
+      pure ProcessContext { ... }
+  , llmAfter  = \output -> do                     -- routes based on output
+      pure $ gotoExit result
+  }
 ```
 
-All four components are required:
-1. System template (optional, use `Nothing` if not needed)
-2. User template (required)
-3. Before handler: builds template context from input
-4. After handler: routes based on LLM output
+All four fields are required:
+- `llmSystem`: System template (use `Nothing` if not needed)
+- `llmUser`: User template (required)
+- `llmBefore`: Builds template context from input
+- `llmAfter`: Routes based on LLM output
 
 ## Validation
 

@@ -251,16 +251,17 @@ supportHandlers :: SupportGraph (AsHandler '[State SessionState])
 supportHandlers = SupportGraph
   { sgEntry    = Proxy @Message
   , sgClassify = LLMHandler
-      Nothing  -- no system template
-      (templateCompiled @ClassifyTpl)
-      (\msg -> do
-        -- Before handler: builds context for the classify template
-        st <- get @SessionState
-        pure ClassifyContext
-          { topic = msgContent msg
-          , categories = T.intercalate ", " st.sessionNotes
-          })
-      (\intent -> pure $ gotoChoice @"sgRoute" intent)  -- After handler: route to sgRoute
+      { llmSystem = Nothing
+      , llmUser   = templateCompiled @ClassifyTpl
+      , llmBefore = \msg -> do
+          -- Before handler: builds context for the classify template
+          st <- get @SessionState
+          pure ClassifyContext
+            { topic = msgContent msg
+            , categories = T.intercalate ", " st.sessionNotes
+            }
+      , llmAfter  = \intent -> pure $ gotoChoice @"sgRoute" intent
+      }
   , sgRoute    = \intent -> do
       -- Logic handler: returns GotoChoice to specify transition
       --
@@ -274,15 +275,17 @@ supportHandlers = SupportGraph
         IntentQuestion  -> gotoChoice @"sgFaq" msg
         IntentComplaint -> gotoChoice @"sgFaq" msg  -- Complaints go to FAQ for now
   , sgRefund   = LLMHandler
-      Nothing
-      (templateCompiled @RefundTpl)
-      (\_msg -> pure SimpleContext { scContent = "Processing refund..." })
-      (pure . gotoExit)  -- Route to exit with response
+      { llmSystem = Nothing
+      , llmUser   = templateCompiled @RefundTpl
+      , llmBefore = \_msg -> pure SimpleContext { scContent = "Processing refund..." }
+      , llmAfter  = pure . gotoExit
+      }
   , sgFaq      = LLMHandler
-      Nothing
-      (templateCompiled @FaqTpl)
-      (\_msg -> pure SimpleContext { scContent = "Here are some common questions..." })
-      (pure . gotoExit)  -- Route to exit with response
+      { llmSystem = Nothing
+      , llmUser   = templateCompiled @FaqTpl
+      , llmBefore = \_msg -> pure SimpleContext { scContent = "Here are some common questions..." }
+      , llmAfter  = pure . gotoExit
+      }
   , sgExit     = Proxy @Response
   }
   where

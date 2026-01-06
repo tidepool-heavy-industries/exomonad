@@ -24,29 +24,29 @@ data MyGraph mode = MyGraph
 
 ## LLMHandler
 
-LLM handlers use the `LLMHandler` constructor with four arguments:
+LLM handlers use the `LLMHandler` constructor with named record fields:
 
 ```haskell
 sgProcess = LLMHandler
-  Nothing                           -- optional system template
-  (templateCompiled @ProcessTpl)    -- user template (required)
-  (\input -> do                     -- before: build context
-    st <- get @SessionState
-    pure ProcessContext
-      { topic = msgContent input
-      , history = take 3 $ stPastTopics st
-      })
-  (\output -> do                    -- after: route based on output
-    case output of
+  { llmSystem = Nothing
+  , llmUser   = templateCompiled @ProcessTpl
+  , llmBefore = \input -> do
+      st <- get @SessionState
+      pure ProcessContext
+        { topic = msgContent input
+        , history = take 3 $ stPastTopics st
+        }
+  , llmAfter  = \output -> case output of
       RefundIntent -> pure $ gotoChoice @"refund" output
-      _ -> pure $ gotoExit response)
+      _ -> pure $ gotoExit response
+  }
 ```
 
-All four components are required:
-1. System template (optional, use `Nothing` if not needed)
-2. User template (required)
-3. Before handler: builds template context from input
-4. After handler: routes based on LLM output
+All four fields are required:
+- `llmSystem`: System template (use `Nothing` if not needed)
+- `llmUser`: User template (required)
+- `llmBefore`: Builds template context from input
+- `llmAfter`: Routes based on LLM output
 
 ## Typed Routing
 
