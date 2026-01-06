@@ -48,7 +48,7 @@ import Control.Concurrent.MVar
 import Control.Concurrent.STM (atomically, writeTVar, readTVarIO)
 import Control.Exception (catch, finally, SomeException)
 import Control.Monad.IO.Class (liftIO)
-import Data.Aeson (encode, eitherDecode)
+import Data.Aeson (encode, eitherDecode, object, (.=))
 import Data.Proxy (Proxy(..))
 import Data.String (fromString)
 import Data.Text (Text)
@@ -236,7 +236,10 @@ getSessionHandler sessions sessionId = liftIO $ do
 -- Returns 404 if no graph is configured.
 graphInfoHandler :: Maybe GraphExport -> Handler GraphExport
 graphInfoHandler Nothing = throwError err404
-  { errBody = "No graph configured. Server is running a plain agent." }
+  { errBody = encode (object
+      [ "error" .= ("No graph configured. Server is running a plain agent." :: Text)
+      ])
+  }
 graphInfoHandler (Just ge) = pure ge
 
 -- | Placeholder handler for dev proxy mode.

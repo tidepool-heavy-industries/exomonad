@@ -37,6 +37,7 @@ import Tidepool.Graph.Reify
   , ToolInfo(..)
   , RuntimeNodeKind(..)
   , RuntimeEdgeKind(..)
+  , simplifyTypeName
   )
 import Tidepool.Schema (schemaToValue)
 
@@ -262,7 +263,3 @@ kindToText RuntimeLogic = "Logic"
 edgeKindToText :: RuntimeEdgeKind -> Text
 edgeKindToText RuntimeImplicit = "implicit"
 edgeKindToText RuntimeExplicit = "explicit"
-
--- | Simplify a TypeRep to just the type name.
-simplifyTypeName :: TypeRep -> Text
-simplifyTypeName = T.pack . show

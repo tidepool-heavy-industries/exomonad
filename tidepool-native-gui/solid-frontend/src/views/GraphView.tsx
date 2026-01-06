@@ -1,4 +1,4 @@
-import { type Component, createSignal, onMount, Show } from "solid-js";
+import { type Component, createSignal, createEffect, onMount, Show } from "solid-js";
 import { A } from "@solidjs/router";
 import { renderGraph } from "../lib/graphRenderer";
 import type { GraphExport } from "../lib/types";
@@ -7,7 +7,7 @@ const GraphView: Component = () => {
   const [graph, setGraph] = createSignal<GraphExport | null>(null);
   const [error, setError] = createSignal<string | null>(null);
   const [loading, setLoading] = createSignal(true);
-  let svgContainer: HTMLDivElement | undefined;
+  const [container, setContainer] = createSignal<HTMLDivElement | null>(null);
 
   onMount(async () => {
     try {
@@ -20,17 +20,19 @@ const GraphView: Component = () => {
       }
       const data: GraphExport = await response.json();
       setGraph(data);
-
-      // Render after state update
-      setTimeout(() => {
-        if (svgContainer && data) {
-          renderGraph(svgContainer, data);
-        }
-      }, 0);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Unknown error");
     } finally {
       setLoading(false);
+    }
+  });
+
+  // Render graph when both container and data are available
+  createEffect(() => {
+    const el = container();
+    const data = graph();
+    if (el && data) {
+      renderGraph(el, data);
     }
   });
 
@@ -84,7 +86,7 @@ const GraphView: Component = () => {
         </Show>
 
         <Show when={graph() && !loading() && !error()}>
-          <div ref={svgContainer} class="w-full h-full" />
+          <div ref={setContainer} class="w-full h-full" />
         </Show>
       </div>
 

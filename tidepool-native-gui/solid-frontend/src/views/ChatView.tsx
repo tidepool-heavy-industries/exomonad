@@ -1,4 +1,4 @@
-import { createEffect, For, onMount, Show, type Component } from "solid-js";
+import { createEffect, createSignal, For, onMount, Show, type Component } from "solid-js";
 import { A } from "@solidjs/router";
 import { createSocket, type ConnectionStatus } from "../lib/socket";
 import type { UserAction } from "../lib/types";
@@ -11,7 +11,7 @@ const ChatView: Component = () => {
   const wsUrl = import.meta.env.VITE_WS_URL || "ws://localhost:8080";
   const socket = createSocket(wsUrl);
 
-  let chatContainerRef: HTMLDivElement | undefined;
+  const [chatContainer, setChatContainer] = createSignal<HTMLDivElement | null>(null);
 
   onMount(() => {
     socket.connect();
@@ -20,8 +20,9 @@ const ChatView: Component = () => {
   // Auto-scroll to bottom when messages change
   createEffect(() => {
     const state = socket.state();
-    if (state.uiState?.messages.length && chatContainerRef) {
-      chatContainerRef.scrollTop = chatContainerRef.scrollHeight;
+    const container = chatContainer();
+    if (state.uiState?.messages.length && container) {
+      container.scrollTop = container.scrollHeight;
     }
   });
 
@@ -98,7 +99,7 @@ const ChatView: Component = () => {
 
       {/* Chat messages */}
       <div
-        ref={chatContainerRef}
+        ref={setChatContainer}
         class="flex-1 overflow-y-auto p-4 chat-scroll"
         role="list"
         aria-label="Chat messages"

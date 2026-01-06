@@ -65,6 +65,9 @@ module Tidepool.Graph.Reify
   , GotoTargetsFromEffects
   , HasGotoExitInDef
   , HasGotoExitFromEffects
+
+    -- * Utilities
+  , simplifyTypeName
   ) where
 
 import Data.Char (isAsciiUpper)
