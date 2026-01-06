@@ -2,7 +2,6 @@
  * Telegram Bot API types.
  *
  * Minimal subset for text-only messaging.
- * Ported from shoal/anemone-telegram with simplifications.
  */
 
 // =============================================================================

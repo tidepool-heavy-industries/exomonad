@@ -170,7 +170,7 @@ data CounterInput = CounterInput
 -- Graph.hs
 data CounterGraph mode = CounterGraph
   { cgEntry :: mode :- Entry CounterInput
-  , cgCompute :: mode :- LogicNode :@ Needs '[CounterInput]
+  , cgCompute :: mode :- LogicNode :@ Input CounterInput
                :@ UsesEffects '[Goto Exit CounterOutput]
   , cgExit :: mode :- Exit CounterOutput
   }
