@@ -39,6 +39,7 @@ import Data.Aeson
   )
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Types as Aeson
+import Data.Maybe (mapMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Lazy as TL
@@ -246,11 +247,3 @@ parseWireTurnResult val =
       , trThinking = thinking
       }
 
-
--- ════════════════════════════════════════════════════════════════════════════
--- UTILITY
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Filter-map: apply function and keep Just results
-mapMaybe :: (a -> Maybe b) -> [a] -> [b]
-mapMaybe f = foldr (\x acc -> maybe acc (:acc) (f x)) []
