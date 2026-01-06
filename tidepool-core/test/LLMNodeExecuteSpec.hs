@@ -23,19 +23,19 @@
 -- on the CallHandler abstraction and Logic node paths.
 module LLMNodeExecuteSpec (spec) where
 
-import Data.Aeson (FromJSON, ToJSON, Value, object, (.=))
+import Data.Aeson (FromJSON, ToJSON, object, (.=))
 import Data.Proxy (Proxy(..))
-import Control.Monad.Freer (Eff, run, Member, interpret)
+import Control.Monad.Freer (Eff, run)
 import GHC.Generics (Generic)
 import Test.Hspec
 
-import Tidepool.Effect (LLM(..), TurnOutcome(..), TurnResult(..))
-import Tidepool.Graph.Types (type (:@), Input, Schema, UsesEffects, Exit)
+import Test.Tidepool.MockLLM (runMockLLM)
+import Tidepool.Graph.Types (type (:@), Input, UsesEffects, Exit)
 import Tidepool.Graph.Generic (GraphMode(..), AsHandler)
 import qualified Tidepool.Graph.Generic as G
-import Tidepool.Graph.Goto (Goto, To, GotoChoice, OneOf, gotoExit, LLMHandler(..))
+import Tidepool.Graph.Goto (Goto, To, GotoChoice, gotoExit)
 import Tidepool.Graph.Goto.Internal (GotoChoice(..), OneOf(..))  -- For test assertions
-import Tidepool.Graph.Execute (DispatchGoto(..), CallHandler(..))
+import Tidepool.Graph.Execute (CallHandler(..))
 import Tidepool.Schema (HasJSONSchema(..), SchemaType(..), objectSchema, describeField, emptySchema)
 
 
@@ -74,24 +74,6 @@ logicHandlers = LogicGraph
   , lgCompute = \n -> pure $ gotoExit (n + 1)
   , lgExit    = Proxy @Int
   }
-
-
--- ════════════════════════════════════════════════════════════════════════════
--- MOCK LLM INTERPRETER
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Run LLM effect with a mock that returns a fixed value
-runMockLLM :: Value -> Eff '[LLM] a -> a
-runMockLLM fixedOutput =
-  run
-  . interpret (\(RunTurnOp _sysPmt _userContent _schema _tools) ->
-      pure $ TurnCompleted TurnResult
-        { trOutput = fixedOutput
-        , trToolsInvoked = []
-        , trNarrative = ""
-        , trThinking = ""
-        }
-    )
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -151,7 +133,7 @@ spec = do
   describe "CallHandler for LLM nodes" $ do
     it "mock LLM interpreter works" $ do
       let mockOutput = object ["result" .= (42 :: Int)]
-      let result = runMockLLM mockOutput $ pure (42 :: Int)
+      let result = run $ runMockLLM mockOutput $ pure (42 :: Int)
       result `shouldBe` 42
 
   describe "Graph handler types" $ do

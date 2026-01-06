@@ -141,6 +141,7 @@ test-suite graph-validation-tests
         GotoChoiceSpec
         CallHandlerSpec
         DispatchGotoSpec
+        Test.Tidepool.MockLLM
     build-depends:
         base >= 4.17 && < 5,
         hspec >= 2.10 && < 3,
