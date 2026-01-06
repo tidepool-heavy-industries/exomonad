@@ -1,4 +1,4 @@
-# Revision history for haskell-shoal-sketch
+# Revision history for tidepool
 
 ## 0.1.0.0 -- YYYY-mm-dd
 

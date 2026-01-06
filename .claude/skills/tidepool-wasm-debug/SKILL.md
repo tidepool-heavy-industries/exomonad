@@ -17,7 +17,7 @@ Debug issues with WASM compilation, effect protocol, or cabal package resolution
 
 1. **Check package resolution**:
    ```bash
-   cd shoal-automat
+   cd tidepool
    grep -A 5 "tidepool-wasm" cabal.project
    # Should show: packages: ../tidepool/tidepool-wasm
    ```

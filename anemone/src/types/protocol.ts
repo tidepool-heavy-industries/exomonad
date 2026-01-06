@@ -42,7 +42,7 @@ export type NodeKind = "LLM" | "Logic";
 export interface NodeInfo {
   niName: string;
   niKind: NodeKind;
-  niNeeds: TypeInfo[];
+  niInput: TypeInfo | null;
   niSchema: TypeInfo | null;
   niGotoTargets: GotoTarget[];
 }

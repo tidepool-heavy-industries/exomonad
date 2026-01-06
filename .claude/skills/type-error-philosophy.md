@@ -213,7 +213,7 @@ type family ValidateNode (node :: Type) :: Constraint where
 type family ValidateNodeImpl (node :: Type) (needs :: [Type]) (schema :: Maybe Type) :: Constraint where
   ValidateNodeImpl node '[] 'Nothing = TypeError
     ('Text "Node " ':<>: 'ShowType node ':<>: 'Text " has no inputs or outputs"
-     ':$$: 'Text "Add :@ Needs '[...] or :@ Schema ...")
+     ':$$: 'Text "Add :@ Input <type> or :@ Schema ...")
   ValidateNodeImpl _ _ _ = ()
 ```
 
