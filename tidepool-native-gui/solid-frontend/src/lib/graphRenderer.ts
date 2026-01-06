@@ -217,7 +217,13 @@ export function renderGraph(container: HTMLElement, graph: GraphExport): void {
   svg.call(zoom);
 
   // Center the graph
-  const graphBounds = g.node()?.getBBox();
+  // getBBox can throw if element is not yet rendered, so wrap in try-catch
+  let graphBounds: SVGRect | undefined;
+  try {
+    graphBounds = g.node()?.getBBox();
+  } catch {
+    // Ignore - graph centering is optional
+  }
   if (graphBounds) {
     const scale = Math.min(
       width / (graphBounds.width + 100),
