@@ -8,7 +8,10 @@ module Tidepool.Effect
     module Tidepool.Effect.Types
     -- * DevLog
   , module Tidepool.Effect.DevLog
+    -- * ClaudeCode
+  , module Tidepool.Effect.ClaudeCode
   ) where
 
 import Tidepool.Effect.Types
 import Tidepool.Effect.DevLog
+import Tidepool.Effect.ClaudeCode

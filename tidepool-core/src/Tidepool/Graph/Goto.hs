@@ -66,6 +66,7 @@ module Tidepool.Graph.Goto
 
     -- * LLM Handler Variants
   , LLMHandler(..)
+  , ClaudeCodeLLMHandler(..)
 
     -- * Target Validation
   , GotoElem
@@ -96,7 +97,7 @@ import Tidepool.Graph.Errors
 import Text.Ginger.TH (TypedTemplate)
 import Text.Parsec.Pos (SourcePos)
 
-import Tidepool.Graph.Types (Exit, Self)
+import Tidepool.Graph.Types (Exit, Self, ModelChoice)
 
 -- Import from Internal (re-exports types, we hide constructors in this module's exports)
 import Tidepool.Graph.Goto.Internal (OneOf(..), GotoChoice(..), To, Payloads, PayloadOf)
@@ -412,6 +413,44 @@ data LLMHandler needs schema targets effs tpl where
          -- ^ Routes based on LLM output
        }
     -> LLMHandler needs schema targets effs tpl
+
+
+-- | Handler for ClaudeCode-annotated LLM nodes.
+--
+-- Like 'LLMHandler', but executed via Claude Code subprocess instead of API.
+-- The @model@ and @cwd@ parameters specify which model to use and which
+-- directory to run Claude Code in.
+--
+-- = Usage
+--
+-- @
+-- gWork :: mode :- G.LLMNode
+--     :@ Needs '[TaskInfo]
+--     :@ Template WorkTpl
+--     :@ Schema WorkResult
+--     :@ ClaudeCode 'Sonnet ('Just "/worktree")
+--
+-- -- Handler includes model and cwd matching the annotation:
+-- gWork = ClaudeCodeLLMHandler
+--   Sonnet                               -- model (must match annotation)
+--   (Just "/worktree")                   -- cwd (must match annotation)
+--   Nothing                              -- no system template
+--   (templateCompiled @WorkTpl)          -- user template
+--   (\\task -> pure WorkContext { ... })  -- context builder
+--   (\\result -> pure $ gotoExit result)  -- router
+-- @
+type ClaudeCodeLLMHandler :: Type -> Type -> [Type] -> [Type -> Type] -> Type -> Type
+data ClaudeCodeLLMHandler needs schema targets effs tpl where
+  ClaudeCodeLLMHandler
+    :: forall tpl needs schema targets effs.
+       ModelChoice                                 -- ^ Model to use (Haiku, Sonnet, Opus)
+    -> Maybe FilePath                              -- ^ Working directory for Claude Code
+    -> Maybe (TypedTemplate tpl SourcePos)         -- ^ Optional system prompt template
+    -> TypedTemplate tpl SourcePos                 -- ^ User prompt template (required)
+    -> (needs -> Eff effs tpl)                     -- ^ Builds context for both templates
+    -> (schema -> Eff effs (GotoChoice targets))   -- ^ Routes based on LLM output
+    -> ClaudeCodeLLMHandler needs schema targets effs tpl
+
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- GOTO RESULT TYPES (DEPRECATED)
