@@ -141,11 +141,62 @@ src/handlers/
 ├── llm.ts        # LlmComplete, LlmCall → Cloudflare AI
 ├── habitica.ts   # Habitica API operations
 ├── state.ts      # GetState, SetState → Durable Object storage
-├── random.ts     # RandomInt → Math.random
+├── random.ts     # RandomInt → crypto.randomInt
 ├── time.ts       # GetTime → Date.now (ISO8601)
 ├── telegram.ts   # TelegramSend, TelegramAsk, TelegramConfirm (yielded to caller)
 └── __tests__/    # Vitest tests for each handler
 ```
+
+### Handler Details
+
+#### state.ts - State Persistence
+
+| Function | Effect | Description |
+|----------|--------|-------------|
+| `handleGetState` | `GetState` | Read state by key, returns `null` if not found |
+| `handleSetState` | `SetState` | Write state by key (fire-and-forget) |
+
+**Implementation**: Currently uses in-memory Map (dev/testing). Production TODO: use DO storage.
+
+```typescript
+// Testing utilities
+clearState()           // Reset all state
+getStateSnapshot()     // Debug: get all state as Record
+```
+
+#### random.ts - Random Numbers
+
+| Function | Effect | Description |
+|----------|--------|-------------|
+| `handleRandomInt` | `RandomInt` | Random int in [min, max] inclusive |
+
+**Implementation**: Uses `crypto.randomInt` for unbiased, cryptographically secure randomness.
+Requires `nodejs_compat` flag in wrangler.toml.
+
+#### time.ts - Current Time
+
+| Function | Effect | Description |
+|----------|--------|-------------|
+| `handleGetTime` | `GetTime` | Current UTC time as ISO8601 string |
+
+Returns format: `"2024-01-15T10:30:00.000Z"`
+
+#### telegram.ts - Telegram Bot Integration
+
+| Function | Effect | Description |
+|----------|--------|-------------|
+| `handleTelegramSend` | `telegram_send` | Send message (fire-and-forget) |
+| `handleTelegramReceive` | `telegram_receive` | Block until messages arrive |
+| `handleTelegramTryReceive` | `telegram_try_receive` | Return pending messages (non-blocking) |
+| `handleTelegramAsk` | `TelegramAsk` | Present buttons, wait for response |
+
+**TelegramAsk Protocol**:
+1. First call sends buttons with a nonce, returns `{ type: "yield", nonce, buttonMapping, messageId }`
+2. Caller stores nonce and waits for user interaction
+3. Resume call checks pending messages against stored nonce
+4. Returns `TelegramAskResult`: `{ type: "button", response }` | `{ type: "text", text }` | `{ type: "stale_button" }`
+
+**Button ID Mapping**: Short IDs (`btn_0`, `btn_1`) are used in callback_data to stay within Telegram's 64-byte limit. Original data is stored in `buttonMapping` and resolved on click.
 
 ### Handler Interface
 
@@ -173,6 +224,12 @@ The `executeEffect()` wrapper catches any uncaught exceptions and converts them 
 2. Add effect type to `protocol.ts` (must match Haskell side)
 3. Add case to `executeEffect()` in `src/handlers/index.ts`
 4. Add tests in `src/handlers/__tests__/myeffect.test.ts`
+
+## Related Documentation
+
+- [tidepool-core/CLAUDE.md](../tidepool-core/CLAUDE.md) - Graph DSL and effect definitions
+- [tidepool-wasm/CLAUDE.md](../tidepool-wasm/CLAUDE.md) - WASM compilation and FFI
+- [tidepool-generated-ts/CLAUDE.md](../tidepool-generated-ts/CLAUDE.md) - Generated TypeScript types
 
 ## Running
 

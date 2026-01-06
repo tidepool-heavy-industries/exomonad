@@ -681,3 +681,10 @@ All paths relative to `tidepool-core/src/Tidepool/Graph/`.
 | `Effect/ClaudeCode.hs` | `ClaudeCodeExec`, `execClaudeCode` | Claude Code subprocess effect |
 | `Schema.hs` | `HasJSONSchema`, `JSONSchema`, `schemaToValue` | JSON Schema for structured output |
 | `Effects/*.hs` | `BD`, `GitHub`, `Habitica`, `Telegram`, `Git`, etc. | Integration effects |
+
+## Related Documentation
+
+- [tidepool-wasm/CLAUDE.md](../tidepool-wasm/CLAUDE.md) - WASM compilation, FFI, wire types
+- [tidepool-generated-ts/CLAUDE.md](../tidepool-generated-ts/CLAUDE.md) - Generated TypeScript types
+- [deploy/CLAUDE.md](../deploy/CLAUDE.md) - Cloudflare Worker harness and effect handlers
+- [Root CLAUDE.md](../CLAUDE.md) - Project overview and consuming repo patterns
