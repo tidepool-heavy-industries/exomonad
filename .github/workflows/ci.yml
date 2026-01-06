@@ -1,18 +1,9 @@
 name: CI
 
+# TEMPORARILY DISABLED - manual trigger only while we bootstrap container cache
+# After container is built, will re-enable with: push: branches: [main]
 on:
-  pull_request:
-    types: [opened, ready_for_review]  # Only run when PR is opened or marked ready
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
-      - '.github/README.md'
-  push:
-    branches: [main]
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
-      - '.github/README.md'
+  workflow_dispatch:
 
 jobs:
   haskell:
