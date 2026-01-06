@@ -23,7 +23,9 @@
 --
 --   it "verifies prompts sent" $ do
 --     let (requests, _) = run $ runMockLLMCapture (object []) $ runGraph handlers input
---     (head requests).lrSystemPrompt \`shouldContain\` "classify"
+--     case requests of
+--       (req:_) -> req.lrSystemPrompt \`shouldContain\` "classify"
+--       []      -> expectationFailure "expected at least one request"
 -- @
 module Test.Tidepool.MockLLM
   ( -- * Simple Mocks
@@ -172,7 +174,9 @@ runMockLLMMatched matchers defaultOutput = interpret $ \case
 -- @
 -- let (requests, result) = run $ runMockLLMCapture (object []) $ runGraph handlers input
 -- length requests \`shouldBe\` 2
--- (head requests).lrSystemPrompt \`shouldContain\` "classify"
+-- case requests of
+--   (req:_) -> req.lrSystemPrompt \`shouldContain\` "classify"
+--   []      -> expectationFailure "expected at least one request"
 -- @
 runMockLLMCapture
   :: Value
