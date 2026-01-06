@@ -17,7 +17,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
 
-import Tidepool.Graph.Types (type (:@), Needs, Schema, UsesEffects)
+import Tidepool.Graph.Types (type (:@), Input, Schema, UsesEffects)
 import Tidepool.Graph.Generic (GraphMode(..), Entry, Exit, LLMNode, LogicNode)
 import Tidepool.Graph.Goto (Goto)
 import Tidepool.Graph.Mermaid (graphToMermaid)
@@ -37,7 +37,7 @@ data OutputB
 -- | Simple graph for testing Mermaid output: Entry -> llmNode -> Exit
 data SimpleTestGraph mode = SimpleTestGraph
   { stgEntry   :: mode :- Entry InputA
-  , stgProcess :: mode :- LLMNode :@ Needs '[InputA] :@ Schema OutputB
+  , stgProcess :: mode :- LLMNode :@ Input InputA :@ Schema OutputB
   , stgExit    :: mode :- Exit OutputB
   }
   deriving Generic
@@ -50,8 +50,8 @@ data TypeZ
 -- Logic nodes use UsesEffects with Goto targets, not Schema
 data BranchingTestGraph mode = BranchingTestGraph
   { btgEntry  :: mode :- Entry TypeX
-  , btgRouter :: mode :- LogicNode :@ Needs '[TypeX] :@ UsesEffects '[Goto "btgLlm" TypeY]
-  , btgLlm    :: mode :- LLMNode :@ Needs '[TypeY] :@ Schema TypeZ
+  , btgRouter :: mode :- LogicNode :@ Input TypeX :@ UsesEffects '[Goto "btgLlm" TypeY]
+  , btgLlm    :: mode :- LLMNode :@ Input TypeY :@ Schema TypeZ
   , btgExit   :: mode :- Exit TypeZ
   }
   deriving Generic

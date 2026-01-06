@@ -52,8 +52,8 @@ export interface NodeInfo {
     niName: string;
     /** LLM nodes yield effects; Logic nodes run Haskell code */
     niKind: NodeKind;
-    /** Types this node needs (from context) */
-    niNeeds: TypeInfo[];
+    /** Input type this node needs (single type) */
+    niInput: TypeInfo | null;
     /** Output type (LLM nodes only - from Schema annotation) */
     niSchema: TypeInfo | null;
     /** Possible Goto targets (Logic nodes only) */

@@ -17,7 +17,7 @@
 -- Edges are derived automatically from:
 --
 -- * __Implicit edges__: When a node's 'Schema' output matches another
---   node's 'Needs' input
+--   node's 'Input' type
 -- * __Explicit edges__: Each 'Goto' effect creates an edge to its target
 --
 -- == Effects
@@ -33,10 +33,10 @@
 -- @
 -- data SupportGraph mode = SupportGraph
 --   { sgEntry    :: mode :- G.Entry Message
---   , sgClassify :: mode :- G.LLMNode :@ Needs '[Message] :@ Template ClassifyTpl :@ Schema Intent
---   , sgRoute    :: mode :- G.LogicNode :@ Needs '[Intent] :@ UsesEffects '[Goto "sgRefund", Goto "sgFaq"]
---   , sgRefund   :: mode :- G.LLMNode :@ Needs '[Message] :@ Template RefundTpl :@ Schema Response
---   , sgFaq      :: mode :- G.LLMNode :@ Needs '[Message] :@ Template FaqTpl :@ Schema Response
+--   , sgClassify :: mode :- G.LLMNode :@ Input Message :@ Template ClassifyTpl :@ Schema Intent
+--   , sgRoute    :: mode :- G.LogicNode :@ Input Intent :@ UsesEffects '[Goto "sgRefund", Goto "sgFaq"]
+--   , sgRefund   :: mode :- G.LLMNode :@ Input Message :@ Template RefundTpl :@ Schema Response
+--   , sgFaq      :: mode :- G.LLMNode :@ Input Message :@ Template FaqTpl :@ Schema Response
 --   , sgExit     :: mode :- G.Exit Response
 --   }
 --   deriving Generic
@@ -47,7 +47,7 @@
 -- Graphs are validated at compile time:
 --
 -- * Must have exactly one Entry and one Exit field
--- * All 'Needs' must be satisfied by Entry or some 'Schema'
+-- * All 'Input' types must be satisfied by Entry or some 'Schema'
 -- * All 'Goto' targets must reference valid field names
 --
 -- = Diagram Generation
@@ -59,7 +59,7 @@ module Tidepool.Graph
 
     -- * Annotations
   , type (:@)
-  , Needs
+  , Input
   , Schema
   , System
   , Template
@@ -166,7 +166,7 @@ module Tidepool.Graph
   , G.GenericGraph
 
     -- * Annotation Extraction (used by record DSL)
-  , GetNeeds
+  , GetInput
   , GetSchema
   , GetUsesEffects
   , GetGotoTargets
@@ -286,10 +286,10 @@ import qualified Tidepool.Graph.Generic as G
 -- @
 -- data SupportGraph mode = SupportGraph
 --   { sgEntry    :: mode :- G.Entry Message
---   , sgClassify :: mode :- G.LLMNode :@ Needs '[Message] :@ Template ClassifyTpl :@ Schema Intent
---   , sgRoute    :: mode :- G.LogicNode :@ Needs '[Intent] :@ UsesEffects '[Goto "refund", Goto "faq"]
---   , sgRefund   :: mode :- G.LLMNode :@ Needs '[Message] :@ Template RefundTpl :@ Schema Response
---   , sgFaq      :: mode :- G.LLMNode :@ Needs '[Message] :@ Template FaqTpl :@ Schema Response
+--   , sgClassify :: mode :- G.LLMNode :@ Input Message :@ Template ClassifyTpl :@ Schema Intent
+--   , sgRoute    :: mode :- G.LogicNode :@ Input Intent :@ UsesEffects '[Goto "refund", Goto "faq"]
+--   , sgRefund   :: mode :- G.LLMNode :@ Input Message :@ Template RefundTpl :@ Schema Response
+--   , sgFaq      :: mode :- G.LLMNode :@ Input Message :@ Template FaqTpl :@ Schema Response
 --   , sgExit     :: mode :- G.Exit Response
 --   }
 --   deriving Generic
@@ -322,4 +322,4 @@ import qualified Tidepool.Graph.Generic as G
 -- Note: Due to polykind limitations with @UsesEffects '[Effect]@, the
 -- @niGotoTargets@ field is always empty. Goto transitions are validated
 -- at compile-time but not represented at runtime. The generated Mermaid
--- diagram shows implicit edges (Entry/Schema → Needs) only.
+-- diagram shows implicit edges (Entry/Schema → Input) only.

@@ -18,13 +18,13 @@
 -- edges in the Graph DSL are derived from:
 --
 -- * 'Goto' effects in Logic node effect stacks (explicit transitions)
--- * 'Schema' outputs that flow to 'Needs' declarations (implicit data flow)
+-- * 'Schema' outputs that flow to 'Input' declarations (implicit data flow)
 --
 -- = Example
 --
 -- @
 -- gRouter :: mode :- G.LogicNode
---     :@ Needs '[Message, Intent]
+--     :@ Input (Message, Intent)
 --     :@ UsesEffects '[
 --         Goto "gRefund" Message     -- Can transition to refund node
 --       , Goto "gSupport" Message    -- Or to support node

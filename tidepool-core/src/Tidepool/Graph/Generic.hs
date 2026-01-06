@@ -15,7 +15,7 @@
 -- @
 -- data MyGraph mode = MyGraph
 --   { entry    :: mode :- Entry Message
---   , classify :: mode :- LLM :@ Needs '[Message] :@ Schema Intent
+--   , classify :: mode :- LLM :@ Input Message :@ Schema Intent
 --   , exit     :: mode :- Exit Response
 --   }
 --   deriving Generic
@@ -78,7 +78,6 @@ module Tidepool.Graph.Generic
   , ElemCWithOptions
   , If
   , Append
-  , TupleOf
   , type (||)
   , OrMaybe
 
@@ -112,7 +111,7 @@ import Tidepool.Graph.Errors
 import Tidepool.Graph.Validate (FormatSymbolList)
 import Control.Monad.Freer (Eff, Member)
 
-import Tidepool.Graph.Types (type (:@), Needs, Schema, Template, Vision, Tools, Memory, System, UsesEffects)
+import Tidepool.Graph.Types (type (:@), Input, Schema, Template, Vision, Tools, Memory, System, UsesEffects)
 import Tidepool.Graph.Template (TemplateContext)
 import Tidepool.Graph.Edges (GetUsesEffects, GetGotoTargets, GotoEffectsToTargets)
 import Tidepool.Graph.Goto (Goto, goto, GotoChoice, To, LLMHandler(..))
@@ -153,8 +152,8 @@ type Effect = Type -> Type
 --
 -- Handler types are computed by 'NodeHandler':
 --
--- * LLM nodes: @Needs[0] -> Needs[1] -> ... -> Eff es (TemplateContext tpl)@
--- * Logic nodes: @Needs[0] -> Needs[1] -> ... -> Eff '[effects...] ()@
+-- * LLM nodes: @Input -> Eff es (TemplateContext tpl)@
+-- * Logic nodes: @Input -> Eff es (GotoChoice targets)@
 -- * Entry\/Exit: @Proxy inputType@ / @Proxy outputType@
 type AsHandler :: [Effect] -> Type
 data AsHandler es
@@ -171,16 +170,16 @@ instance GraphMode (AsHandler es) where
 -- This is the core type family that transforms node declarations into
 -- handler function signatures.
 --
--- Strategy: Peel annotations from the outside in, accumulating Needs types
--- and finding Template/UsesEffects. When we hit bare LLM or Logic, build
--- the final function type.
+-- Strategy: Peel annotations from the outside in, finding Input/Template/
+-- Schema/UsesEffects. When we hit bare LLM or Logic, build the final
+-- function type.
 --
 -- @
--- NodeHandler (LLM :@ Needs '[Message] :@ Template ClassifyTpl :@ Schema Intent) es
+-- NodeHandler (LLM :@ Input Message :@ Template ClassifyTpl :@ Schema Intent) es
 --   = Message -> Eff es ClassifyContext
 --
--- NodeHandler (Logic :@ Needs '[Intent] :@ UsesEffects '[Goto "respond", GotoExit]) es
---   = Intent -> Eff '[Goto "respond", GotoExit] ()
+-- NodeHandler (Logic :@ Input Intent :@ UsesEffects '[Goto "respond", GotoExit]) es
+--   = Intent -> Eff es (GotoChoice targets)
 --
 -- NodeHandler (Entry Message) es = Proxy Message
 -- NodeHandler (Exit Response) es = Proxy Response
@@ -193,8 +192,8 @@ type family NodeHandler nodeDef es where
 
   -- Any annotated node: dispatch to the appropriate accumulator based on base kind
   -- We peel from outside, so start with the full node
-  -- Accumulator: (nodeDef, origNode, es, needs, mTpl, mSchema, mEffs)
-  NodeHandler (node :@ ann) es = NodeHandlerDispatch (node :@ ann) (node :@ ann) es '[] 'Nothing 'Nothing 'Nothing
+  -- Accumulator: (nodeDef, origNode, es, mInput, mTpl, mSchema, mEffs)
+  NodeHandler (node :@ ann) es = NodeHandlerDispatch (node :@ ann) (node :@ ann) es 'Nothing 'Nothing 'Nothing 'Nothing
 
   -- Bare LLMNode/LogicNode without annotations - error
   NodeHandler LLMNode es = TypeError
@@ -217,7 +216,7 @@ type family NodeHandler nodeDef es where
       ':$$: Blank
       ':$$: Fixes
       ':$$: Bullet "Add Template and Schema annotations:"
-      ':$$: CodeLine "  myNode :: mode :- LLMNode :@ Needs '[Input] :@ Template MyTpl :@ Schema Output"
+      ':$$: CodeLine "  myNode :: mode :- LLMNode :@ Input MyInput :@ Template MyTpl :@ Schema Output"
       ':$$: Blank
       ':$$: Example
       ':$$: CodeLine "-- In Context.hs (separate module for TH staging):"
@@ -225,7 +224,7 @@ type family NodeHandler nodeDef es where
       ':$$: CodeLine ""
       ':$$: CodeLine "-- In your graph definition:"
       ':$$: CodeLine "classify :: mode :- LLMNode"
-      ':$$: CodeLine "            :@ Needs '[Message]"
+      ':$$: CodeLine "            :@ Input Message"
       ':$$: CodeLine "            :@ Template ClassifyTpl  -- references your context type"
       ':$$: CodeLine "            :@ Schema Intent         -- what the LLM returns"
     )
@@ -249,7 +248,7 @@ type family NodeHandler nodeDef es where
       ':$$: Fixes
       ':$$: Bullet "Add UsesEffects with your transitions:"
       ':$$: CodeLine "  myRouter :: mode :- LogicNode"
-      ':$$: CodeLine "               :@ Needs '[Intent]"
+      ':$$: CodeLine "               :@ Input Intent"
       ':$$: CodeLine "               :@ UsesEffects '[Goto \"process\" Data, Goto Exit Result]"
       ':$$: Blank
       ':$$: Example
@@ -267,12 +266,12 @@ type family NodeHandler nodeDef es where
 -- Given a node like:
 --
 -- @
--- LLMNode :@ Needs '[A, B] :@ Template T :@ Schema S :@ Vision
+-- LLMNode :@ Input A :@ Template T :@ Schema S :@ Vision
 -- @
 --
--- The family processes annotations from left to right (outside-in), accumulating:
+-- The family processes annotations from left to right (outside-in), recording:
 --
--- - Needs types → @needs@ parameter
+-- - Input type → @mInput@ (Maybe)
 -- - Template type → @mTpl@ (Maybe)
 -- - Schema type → @mSchema@ (Maybe)
 -- - UsesEffects → @mEffs@ (Maybe)
@@ -283,44 +282,59 @@ type family NodeHandler nodeDef es where
 -- = Parameters (7 total)
 --
 -- @
--- NodeHandlerDispatch nodeDef origNode es needs mTpl mSchema mEffs
---                     ^        ^         ^  ^     ^    ^       ^
---                     |        |         |  |     |    |       |
---                     |        |         |  |     |    |       +-- Maybe UsesEffects (for routing)
---                     |        |         |  |     |    +---------- Maybe Schema type (LLM output)
---                     |        |         |  |     +--------------- Maybe Template type (LLM context)
---                     |        |         |  +--------------------- Accumulated Needs types (handler params)
---                     |        |         +------------------------ Effect stack from AsHandler
---                     |        +---------------------------------- Original node (for errors)
---                     +------------------------------------------- Current node being processed
+-- NodeHandlerDispatch nodeDef origNode es mInput mTpl mSchema mEffs
+--                     ^        ^         ^  ^      ^    ^       ^
+--                     |        |         |  |      |    |       |
+--                     |        |         |  |      |    |       +-- Maybe UsesEffects (for routing)
+--                     |        |         |  |      |    +---------- Maybe Schema type (LLM output)
+--                     |        |         |  |      +--------------- Maybe Template type (LLM context)
+--                     |        |         |  +---------------------- Maybe Input type (handler param)
+--                     |        |         +------------------------- Effect stack from AsHandler
+--                     |        +----------------------------------- Original node (for errors)
+--                     +-------------------------------------------- Current node being processed
 -- @
 --
 -- = Clause Groups
 --
--- 1. **Lines 286-287**: Needs accumulation (appends to list)
--- 2. **Lines 289-329**: Template/Schema recording (with duplicate detection)
--- 3. **Lines 331-339**: Skipped annotations (Vision, Tools, Memory, System)
--- 4. **Lines 341-360**: UsesEffects recording (with duplicate detection)
--- 5. **Lines 362-468**: LLMNode terminal cases (3 handler variants)
--- 6. **Lines 470-510**: LogicNode terminal cases
+-- 1. Input recording (with duplicate detection)
+-- 2. Template/Schema recording (with duplicate detection)
+-- 3. Skipped annotations (Vision, Tools, Memory, System)
+-- 4. UsesEffects recording (with duplicate detection)
+-- 5. LLMNode terminal cases (3 handler variants)
+-- 6. LogicNode terminal cases
 --
 -- = Why origNode is Preserved
 --
 -- The @origNode@ parameter never changes. It's the original full node definition
 -- used in error messages to show the user what they wrote, even after annotations
 -- have been peeled away.
-type NodeHandlerDispatch :: Type -> Type -> [Effect] -> [Type] -> Maybe Type -> Maybe Type -> Maybe Type -> Type
-type family NodeHandlerDispatch nodeDef origNode es needs mTpl mSchema mEffs where
-  -- Peel Needs annotation - accumulate types
-  NodeHandlerDispatch (node :@ Needs ts) orig es needs mTpl mSchema mEffs =
-    NodeHandlerDispatch node orig es (Append needs ts) mTpl mSchema mEffs
+type NodeHandlerDispatch :: Type -> Type -> [Effect] -> Maybe Type -> Maybe Type -> Maybe Type -> Maybe Type -> Type
+type family NodeHandlerDispatch nodeDef origNode es mInput mTpl mSchema mEffs where
+  -- Peel Input annotation - record it
+  NodeHandlerDispatch (node :@ Input t) orig es 'Nothing mTpl mSchema mEffs =
+    NodeHandlerDispatch node orig es ('Just t) mTpl mSchema mEffs
+
+  -- Detect duplicate Input annotations
+  NodeHandlerDispatch (node :@ Input _) orig es ('Just _) mTpl mSchema mEffs = TypeError
+    ( HR
+      ':$$: 'Text "  Duplicate Input annotation"
+      ':$$: HR
+      ':$$: Blank
+      ':$$: WhatHappened
+      ':$$: Indent "Your node has multiple Input annotations."
+      ':$$: Indent "Each node can only have one input type."
+      ':$$: Blank
+      ':$$: Fixes
+      ':$$: Bullet "Remove the duplicate Input annotation"
+      ':$$: Bullet "Use a tuple or custom type to combine inputs: Input (A, B)"
+    )
 
   -- Peel Template annotation - record it (for LLM nodes)
-  NodeHandlerDispatch (node :@ Template tpl) orig es needs 'Nothing mSchema mEffs =
-    NodeHandlerDispatch node orig es needs ('Just tpl) mSchema mEffs
+  NodeHandlerDispatch (node :@ Template tpl) orig es mInput 'Nothing mSchema mEffs =
+    NodeHandlerDispatch node orig es mInput ('Just tpl) mSchema mEffs
 
   -- Detect duplicate Template annotations
-  NodeHandlerDispatch (node :@ Template _) orig es needs ('Just _) mSchema mEffs = TypeError
+  NodeHandlerDispatch (node :@ Template _) orig es mInput ('Just _) mSchema mEffs = TypeError
     ( HR
       ':$$: 'Text "  Duplicate Template annotation"
       ':$$: HR
@@ -335,11 +349,11 @@ type family NodeHandlerDispatch nodeDef origNode es needs mTpl mSchema mEffs whe
     )
 
   -- Peel Schema annotation - record it (for LLM nodes)
-  NodeHandlerDispatch (node :@ Schema s) orig es needs mTpl 'Nothing mEffs =
-    NodeHandlerDispatch node orig es needs mTpl ('Just s) mEffs
+  NodeHandlerDispatch (node :@ Schema s) orig es mInput mTpl 'Nothing mEffs =
+    NodeHandlerDispatch node orig es mInput mTpl ('Just s) mEffs
 
   -- Detect duplicate Schema annotations
-  NodeHandlerDispatch (node :@ Schema _) orig es needs mTpl ('Just _) mEffs = TypeError
+  NodeHandlerDispatch (node :@ Schema _) orig es mInput mTpl ('Just _) mEffs = TypeError
     ( HR
       ':$$: 'Text "  Duplicate Schema annotation"
       ':$$: HR
@@ -358,22 +372,22 @@ type family NodeHandlerDispatch nodeDef origNode es needs mTpl mSchema mEffs whe
     )
 
   -- Skip other annotations (Vision, Tools, Memory, System)
-  NodeHandlerDispatch (node :@ Vision) orig es needs mTpl mSchema mEffs =
-    NodeHandlerDispatch node orig es needs mTpl mSchema mEffs
-  NodeHandlerDispatch (node :@ Tools _) orig es needs mTpl mSchema mEffs =
-    NodeHandlerDispatch node orig es needs mTpl mSchema mEffs
-  NodeHandlerDispatch (node :@ Memory _) orig es needs mTpl mSchema mEffs =
-    NodeHandlerDispatch node orig es needs mTpl mSchema mEffs
-  NodeHandlerDispatch (node :@ System _) orig es needs mTpl mSchema mEffs =
-    NodeHandlerDispatch node orig es needs mTpl mSchema mEffs
+  NodeHandlerDispatch (node :@ Vision) orig es mInput mTpl mSchema mEffs =
+    NodeHandlerDispatch node orig es mInput mTpl mSchema mEffs
+  NodeHandlerDispatch (node :@ Tools _) orig es mInput mTpl mSchema mEffs =
+    NodeHandlerDispatch node orig es mInput mTpl mSchema mEffs
+  NodeHandlerDispatch (node :@ Memory _) orig es mInput mTpl mSchema mEffs =
+    NodeHandlerDispatch node orig es mInput mTpl mSchema mEffs
+  NodeHandlerDispatch (node :@ System _) orig es mInput mTpl mSchema mEffs =
+    NodeHandlerDispatch node orig es mInput mTpl mSchema mEffs
 
   -- Peel UsesEffects annotation - record effects
   -- (Validation that To is not used here happens at ValidGraphRecord level)
-  NodeHandlerDispatch (node :@ UsesEffects effs) orig es needs mTpl mSchema 'Nothing =
-    NodeHandlerDispatch node orig es needs mTpl mSchema ('Just (EffStack effs))
+  NodeHandlerDispatch (node :@ UsesEffects effs) orig es mInput mTpl mSchema 'Nothing =
+    NodeHandlerDispatch node orig es mInput mTpl mSchema ('Just (EffStack effs))
 
   -- Detect duplicate UsesEffects annotations
-  NodeHandlerDispatch (node :@ UsesEffects _) orig es needs mTpl mSchema ('Just _) = TypeError
+  NodeHandlerDispatch (node :@ UsesEffects _) orig es mInput mTpl mSchema ('Just _) = TypeError
     ( HR
       ':$$: 'Text "  Duplicate UsesEffects annotation"
       ':$$: HR
@@ -395,14 +409,14 @@ type family NodeHandlerDispatch nodeDef origNode es needs mTpl mSchema mEffs whe
   --
   -- LLM handlers require Template + Schema + UsesEffects for full execution:
   --
-  --    Handler: @LLMHandler needs schema targets es tpl@
+  --    Handler: @LLMHandler input schema targets es tpl@
   --    Flow: Build context → Render template → LLM call → Route based on output
   --    Routing: Explicit via gotoChoice/gotoExit
   --
   -- ══════════════════════════════════════════════════════════════════════════
 
   -- LLMNode with Template only - missing UsesEffects for routing
-  NodeHandlerDispatch LLMNode orig es needs ('Just tpl) ('Just schema) 'Nothing = TypeError
+  NodeHandlerDispatch LLMNode orig es mInput ('Just tpl) ('Just schema) 'Nothing = TypeError
     ( HR
       ':$$: 'Text "  LLM node missing routing: has Template but no UsesEffects"
       ':$$: HR
@@ -420,18 +434,18 @@ type family NodeHandlerDispatch nodeDef origNode es needs mTpl mSchema mEffs whe
       ':$$: Fixes
       ':$$: Bullet "Add UsesEffects to specify routing:"
       ':$$: CodeLine "  myNode :: mode :- LLMNode"
-      ':$$: CodeLine "             :@ Needs '[Input]"
+      ':$$: CodeLine "             :@ Input MyInput"
       ':$$: CodeLine "             :@ Template MyTpl"
       ':$$: CodeLine "             :@ Schema " ':<>: 'ShowType schema
       ':$$: CodeLine "             :@ UsesEffects '[Goto Exit Result]"
     )
 
   -- LLMNode with Template AND UsesEffects: the complete form
-  NodeHandlerDispatch LLMNode orig es needs ('Just tpl) ('Just schema) ('Just (EffStack effs)) =
-    LLMHandler (TupleOf needs) schema (GotoEffectsToTargets effs) es (TemplateContext tpl)
+  NodeHandlerDispatch LLMNode orig es ('Just input) ('Just tpl) ('Just schema) ('Just (EffStack effs)) =
+    LLMHandler input schema (GotoEffectsToTargets effs) es (TemplateContext tpl)
 
   -- LLMNode with UsesEffects but no Template - missing context for prompts
-  NodeHandlerDispatch LLMNode orig es needs 'Nothing ('Just schema) ('Just (EffStack effs)) = TypeError
+  NodeHandlerDispatch LLMNode orig es mInput 'Nothing ('Just schema) ('Just (EffStack effs)) = TypeError
     ( HR
       ':$$: 'Text "  LLM node missing Template: has UsesEffects but no context for prompts"
       ':$$: HR
@@ -449,14 +463,14 @@ type family NodeHandlerDispatch nodeDef origNode es needs mTpl mSchema mEffs whe
       ':$$: Fixes
       ':$$: Bullet "Add Template to specify the prompt context:"
       ':$$: CodeLine "  myNode :: mode :- LLMNode"
-      ':$$: CodeLine "             :@ Needs '[Input]"
+      ':$$: CodeLine "             :@ Input MyInput"
       ':$$: CodeLine "             :@ Template MyTpl"
       ':$$: CodeLine "             :@ Schema " ':<>: 'ShowType schema
       ':$$: CodeLine "             :@ UsesEffects '[...]"
     )
 
   -- LLMNode with Schema only (no Template or UsesEffects) - error
-  NodeHandlerDispatch LLMNode orig es needs 'Nothing ('Just schema) 'Nothing = TypeError
+  NodeHandlerDispatch LLMNode orig es _ 'Nothing ('Just schema) 'Nothing = TypeError
     ( HR
       ':$$: 'Text "  LLM node incomplete: has Schema but missing Template and UsesEffects"
       ':$$: HR
@@ -478,14 +492,14 @@ type family NodeHandlerDispatch nodeDef origNode es needs mTpl mSchema mEffs whe
       ':$$: Fixes
       ':$$: Bullet "Add Template and UsesEffects:"
       ':$$: CodeLine "  myNode :: mode :- LLMNode"
-      ':$$: CodeLine "             :@ Needs '[Input]"
+      ':$$: CodeLine "             :@ Input MyInput"
       ':$$: CodeLine "             :@ Template MyTpl"
       ':$$: CodeLine "             :@ Schema " ':<>: 'ShowType schema
       ':$$: CodeLine "             :@ UsesEffects '[Goto Exit Result]"
     )
 
   -- LLMNode missing both Template and Schema - error
-  NodeHandlerDispatch LLMNode orig es needs 'Nothing 'Nothing _ = TypeError
+  NodeHandlerDispatch LLMNode orig es _ 'Nothing 'Nothing _ = TypeError
     ( HR
       ':$$: 'Text "  LLM node missing required annotations"
       ':$$: HR
@@ -502,14 +516,14 @@ type family NodeHandlerDispatch nodeDef origNode es needs mTpl mSchema mEffs whe
       ':$$: Fixes
       ':$$: Bullet "Add Template, Schema, and UsesEffects:"
       ':$$: CodeLine "  myNode :: mode :- LLMNode"
-      ':$$: CodeLine "             :@ Needs '[Input]"
+      ':$$: CodeLine "             :@ Input MyInput"
       ':$$: CodeLine "             :@ Template MyContextTpl"
       ':$$: CodeLine "             :@ Schema MyOutputType"
       ':$$: CodeLine "             :@ UsesEffects '[Goto Exit Result]"
     )
 
   -- LLMNode missing Schema - error
-  NodeHandlerDispatch LLMNode orig es needs _ 'Nothing _ = TypeError
+  NodeHandlerDispatch LLMNode orig es _ _ 'Nothing _ = TypeError
     ( HR
       ':$$: 'Text "  LLM node missing Schema annotation"
       ':$$: HR
@@ -541,12 +555,12 @@ type family NodeHandlerDispatch nodeDef origNode es needs mTpl mSchema mEffs whe
   -- LogicNode Base Cases
   -- ══════════════════════════════════════════════════════════════════════════
 
-  -- LogicNode with UsesEffects: returns GotoChoice
-  NodeHandlerDispatch LogicNode orig es needs _ _ ('Just (EffStack effs)) =
-    BuildFunctionType needs (Eff es (GotoChoice (GotoEffectsToTargets effs)))
+  -- LogicNode with Input and UsesEffects: returns GotoChoice
+  NodeHandlerDispatch LogicNode orig es ('Just input) _ _ ('Just (EffStack effs)) =
+    input -> Eff es (GotoChoice (GotoEffectsToTargets effs))
 
   -- LogicNode without UsesEffects - error
-  NodeHandlerDispatch LogicNode orig es needs _ _ 'Nothing = TypeError
+  NodeHandlerDispatch LogicNode orig es _ _ _ 'Nothing = TypeError
     ( HR
       ':$$: 'Text "  Logic node missing UsesEffects annotation"
       ':$$: HR
@@ -575,49 +589,8 @@ type family NodeHandlerDispatch nodeDef origNode es needs mTpl mSchema mEffs whe
       ':$$: Fixes
       ':$$: Bullet "Add UsesEffects with your transitions:"
       ':$$: CodeLine "  myRouter :: mode :- LogicNode"
-      ':$$: CodeLine "               :@ Needs '[YourInput]"
+      ':$$: CodeLine "               :@ Input YourInput"
       ':$$: CodeLine "               :@ UsesEffects '[Goto \"target\" Payload, Goto Exit Result]"
-    )
-
--- | Convert a Needs list to a single type (unit, single, or tuple).
-type TupleOf :: [Type] -> Type
-type family TupleOf ts where
-  TupleOf '[] = ()
-  TupleOf '[t] = t
-  TupleOf '[t1, t2] = (t1, t2)
-  TupleOf '[t1, t2, t3] = (t1, t2, t3)
-  TupleOf '[t1, t2, t3, t4] = (t1, t2, t3, t4)
-  TupleOf '[t1, t2, t3, t4, t5] = (t1, t2, t3, t4, t5)
-  TupleOf '[t1, t2, t3, t4, t5, t6] = (t1, t2, t3, t4, t5, t6)
-  TupleOf '[t1, t2, t3, t4, t5, t6, t7] = (t1, t2, t3, t4, t5, t6, t7)
-  TupleOf '[t1, t2, t3, t4, t5, t6, t7, t8] = (t1, t2, t3, t4, t5, t6, t7, t8)
-  TupleOf ts = TypeError
-    ( HR
-      ':$$: 'Text "  Too many Needs types (maximum 8)"
-      ':$$: HR
-      ':$$: Blank
-      ':$$: WhatHappened
-      ':$$: Indent "Your node has more than 8 Needs types."
-      ':$$: Indent "The tuple-based handler signature can't accommodate this many."
-      ':$$: Blank
-      ':$$: HowItWorks
-      ':$$: Indent "Handler parameters come from the Needs list:"
-      ':$$: Blank
-      ':$$: CodeLine "Needs '[A]           -> handler :: A -> Eff es ..."
-      ':$$: CodeLine "Needs '[A, B]        -> handler :: A -> B -> Eff es ..."
-      ':$$: CodeLine "Needs '[A, B, C]     -> handler :: (A, B, C) -> Eff es ..."
-      ':$$: CodeLine "Needs '[A, B, ..., H] -> handler :: (A, B, ..., H) -> Eff es ..."
-      ':$$: Blank
-      ':$$: Indent "Beyond 8 types, we can't form a tuple."
-      ':$$: Blank
-      ':$$: Fixes
-      ':$$: Bullet "Group related types into a record:"
-      ':$$: CodeLine "  -- Instead of: Needs '[A, B, C, D, E, F, G, H, I]"
-      ':$$: CodeLine "  -- Use:"
-      ':$$: CodeLine "  data MyContext = MyContext { a :: A, b :: B, ... }"
-      ':$$: CodeLine "  Needs '[MyContext]"
-      ':$$: Blank
-      ':$$: Bullet "Or split the node into multiple nodes"
     )
 
 -- | Wrapper to distinguish Template types from EffStack in the Maybe
@@ -635,13 +608,13 @@ data EffStack (effs :: [Effect])
 -- -- Wrong: Using 'To' markers in UsesEffects
 -- type MyEffects = '[To "nodeA" Data, To Exit Result]
 --
--- myNode :: mode :- LogicNode :@ Needs '[Input] :@ UsesEffects MyEffects
+-- myNode :: mode :- LogicNode :@ Input SomeType :@ UsesEffects MyEffects
 --          -- ERROR: UsesEffects needs 'Goto' effects, not 'To' markers
 --
 -- -- Correct: Using 'Goto' effects in UsesEffects
 -- type MyEffects = '[Goto "nodeA" Data, Goto Exit Result]
 --
--- myNode :: mode :- LogicNode :@ Needs '[Input] :@ UsesEffects MyEffects
+-- myNode :: mode :- LogicNode :@ Input SomeInput :@ UsesEffects MyEffects
 --          -- OK: Goto effects are correct for UsesEffects
 -- @
 --
@@ -694,17 +667,6 @@ type family ValidateNotToMarkers effs where
 -- ════════════════════════════════════════════════════════════════════════════
 -- TYPE-LEVEL UTILITIES
 -- ════════════════════════════════════════════════════════════════════════════
-
--- | Build a function type from a list of parameters and a return type.
---
--- @
--- BuildFunctionType '[A, B, C] R = A -> B -> C -> R
--- BuildFunctionType '[] R = R
--- @
-type BuildFunctionType :: [Type] -> Type -> Type
-type family BuildFunctionType params ret where
-  BuildFunctionType '[] ret = ret
-  BuildFunctionType (p ': ps) ret = p -> BuildFunctionType ps ret
 
 -- | Append two type-level lists.
 type Append :: [k] -> [k] -> [k]
@@ -824,7 +786,7 @@ type family FieldDefs f where
 -- @
 -- FieldsWithNames (Rep (MyGraph AsGraph))
 --   = '[ '("entry", Entry Message)
---      , '("classify", LLM :@ Needs '[Message] :@ Schema Intent)
+--      , '("classify", LLM :@ Input Message :@ Schema Intent)
 --      ]
 -- @
 type FieldsWithNames :: (Type -> Type) -> [(Symbol, Type)]

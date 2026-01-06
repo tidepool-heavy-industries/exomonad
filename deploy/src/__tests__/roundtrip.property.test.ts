@@ -238,7 +238,7 @@ const arbGotoTarget: fc.Arbitrary<GotoTarget> = fc.record({
 const arbNodeInfo: fc.Arbitrary<NodeInfo> = fc.record({
   niName: arbText,
   niKind: fc.constantFrom("LLM" as const, "Logic" as const),
-  niNeeds: fc.array(arbTypeInfo, { maxLength: 5 }),
+  niInput: fc.option(arbTypeInfo, { nil: null }),
   niSchema: fc.option(arbTypeInfo, { nil: null }),
   niGotoTargets: fc.array(arbGotoTarget, { maxLength: 5 }),
 });

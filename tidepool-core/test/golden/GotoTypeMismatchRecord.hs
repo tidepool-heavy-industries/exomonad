@@ -12,24 +12,24 @@
 --   Graph validation failed: Goto payload type mismatch
 --   Node 'router' sends:
 --     Goto "handler" String
---   But target 'handler' needs:
---     • Int
+--   But target 'handler' expects:
+--     Input Int
 module GotoTypeMismatchRecord where
 
 import GHC.Generics (Generic)
 
-import Tidepool.Graph.Types (type (:@), Needs, Schema, UsesEffects)
+import Tidepool.Graph.Types (type (:@), Input, Schema, UsesEffects)
 import Tidepool.Graph.Generic (GraphMode(..), Entry, Exit, LLMNode, LogicNode, ValidGraphRecord)
 import Tidepool.Graph.Goto (Goto)
 
-data Input
+data InputData
 data Result
 
--- | Graph with type mismatch: router sends String but handler needs Int
+-- | Graph with type mismatch: router sends String but handler expects Int
 data TypeMismatchGraph mode = TypeMismatchGraph
-  { entry   :: mode :- Entry Input
-  , router  :: mode :- LogicNode :@ Needs '[Input] :@ UsesEffects '[Goto "handler" String]  -- Sends String
-  , handler :: mode :- LLMNode :@ Needs '[Int] :@ Schema Result  -- Needs Int!
+  { entry   :: mode :- Entry InputData
+  , router  :: mode :- LogicNode :@ Input InputData :@ UsesEffects '[Goto "handler" String]  -- Sends String
+  , handler :: mode :- LLMNode :@ Input Int :@ Schema Result  -- Expects Int!
   , exit    :: mode :- Exit Result
   }
   deriving Generic

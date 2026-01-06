@@ -24,7 +24,7 @@ module Tidepool.WASM
   ( -- * Graph System
     -- ** Core Type-Level Operators
     type (:@)
-  , Needs
+  , Input
   , UsesEffects
   , Self
 
@@ -48,7 +48,7 @@ module Tidepool.WASM
   ) where
 
 -- Graph types (selective re-export to avoid Exit conflict)
-import Tidepool.Graph.Types (type (:@), Needs, UsesEffects, Self)
+import Tidepool.Graph.Types (type (:@), Input, UsesEffects, Self)
 import Tidepool.Graph.Generic
   ( GraphMode(..)
   , type (:-)

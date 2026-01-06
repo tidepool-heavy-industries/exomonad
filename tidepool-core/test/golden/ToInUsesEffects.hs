@@ -18,12 +18,12 @@ module ToInUsesEffects where
 
 import GHC.Generics (Generic)
 
-import Tidepool.Graph.Types (type (:@), Needs, UsesEffects, Exit)
+import Tidepool.Graph.Types (type (:@), Input, UsesEffects, Exit)
 import Tidepool.Graph.Generic (GraphMode(..), type (:-), LogicNode, ValidGraphRecord)
 import qualified Tidepool.Graph.Generic as G (Entry, Exit)
 import Tidepool.Graph.Goto (To)  -- Imported to demonstrate incorrect usage in UsesEffects
 
-data Input
+data InputData
 data Output
 data Result
 
@@ -35,9 +35,9 @@ type WrongEffects = '[To "handler" Output, To Exit Result]
 
 -- | Graph with wrong effect type - should produce a helpful error
 data BadGraph mode = BadGraph
-  { entry   :: mode :- G.Entry Input
-  , router  :: mode :- LogicNode :@ Needs '[Input] :@ UsesEffects WrongEffects
-  , handler :: mode :- LogicNode :@ Needs '[Output] :@ UsesEffects '[To Exit Result]
+  { entry   :: mode :- G.Entry InputData
+  , router  :: mode :- LogicNode :@ Input InputData :@ UsesEffects WrongEffects
+  , handler :: mode :- LogicNode :@ Input Output :@ UsesEffects '[To Exit Result]
   , exit    :: mode :- G.Exit Result
   }
   deriving Generic

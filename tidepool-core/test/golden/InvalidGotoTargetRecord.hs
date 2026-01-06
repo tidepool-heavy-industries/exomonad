@@ -15,7 +15,7 @@ module InvalidGotoTargetRecord where
 
 import GHC.Generics (Generic)
 
-import Tidepool.Graph.Types (type (:@), Needs, Schema, UsesEffects)
+import Tidepool.Graph.Types (type (:@), Input, Schema, UsesEffects)
 import Tidepool.Graph.Generic (GraphMode(..), Entry, Exit, LLMNode, LogicNode, ValidGraphRecord)
 import Tidepool.Graph.Goto (Goto)
 
@@ -26,8 +26,8 @@ data C
 -- | Graph with Logic node pointing to nonexistent field - invalid!
 data BadGraph mode = BadGraph
   { entry  :: mode :- Entry A
-  , router :: mode :- LogicNode :@ Needs '[A] :@ UsesEffects '[Goto "nonexistent" B, Goto "handler" B]
-  , handler :: mode :- LLMNode :@ Needs '[B] :@ Schema C
+  , router :: mode :- LogicNode :@ Input A :@ UsesEffects '[Goto "nonexistent" B, Goto "handler" B]
+  , handler :: mode :- LLMNode :@ Input B :@ Schema C
   , exit   :: mode :- Exit C
   }
   deriving Generic

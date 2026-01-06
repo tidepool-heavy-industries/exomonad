@@ -15,7 +15,7 @@ module MissingEntryRecord where
 
 import GHC.Generics (Generic)
 
-import Tidepool.Graph.Types (type (:@), Needs, Schema)
+import Tidepool.Graph.Types (type (:@), Input, Schema)
 import Tidepool.Graph.Generic (GraphMode(..), Exit, LLMNode, ValidGraphRecord)
 
 data A
@@ -23,7 +23,7 @@ data B
 
 -- | Graph missing Entry field - invalid!
 data BadGraph mode = BadGraph
-  { node :: mode :- LLMNode :@ Needs '[A] :@ Schema B
+  { node :: mode :- LLMNode :@ Input A :@ Schema B
   , exit :: mode :- Exit B
   }
   deriving Generic

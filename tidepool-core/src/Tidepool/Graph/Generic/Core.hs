@@ -35,7 +35,7 @@ import Data.Kind (Type)
 -- @
 -- data MyGraph mode = MyGraph
 --   { entry    :: mode :- Entry Message
---   , classify :: mode :- LLMNode :@ Needs '[Message] :@ Schema Intent
+--   , classify :: mode :- LLMNode :@ Input Message :@ Schema Intent
 --   , exit     :: mode :- Exit Response
 --   }
 -- @
@@ -71,7 +71,7 @@ instance GraphMode AsGraph where
 --
 -- @
 -- data MyGraph mode = MyGraph
---   { classify :: mode :- LLMNode :@ Needs '[Message] :@ Schema Intent
+--   { classify :: mode :- LLMNode :@ Input Message :@ Schema Intent
 --   }
 -- @
 --
@@ -84,7 +84,7 @@ data LLMNode
 --
 -- @
 -- data MyGraph mode = MyGraph
---   { router :: mode :- LogicNode :@ Needs '[Intent] :@ UsesEffects '[Goto "next" ...]
+--   { router :: mode :- LogicNode :@ Input Intent :@ UsesEffects '[Goto "next" ...]
 --   }
 -- @
 data LogicNode

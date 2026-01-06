@@ -792,14 +792,14 @@ instance FromJSON GotoTargetWire where
 -- | Node metadata - matches protocol.ts NodeInfo.
 --
 -- JSON encoding:
--- @{niName: "classify", niKind: "LLM", niNeeds: [...], niSchema: null, niGotoTargets: [...]}@
+-- @{niName: "classify", niKind: "LLM", niInput: {...}, niSchema: null, niGotoTargets: [...]}@
 data NodeInfoWire = NodeInfoWire
   { niwName :: Text
   -- ^ Node name (record field name in Servant-style)
   , niwKind :: Text
   -- ^ "LLM" or "Logic"
-  , niwNeeds :: [TypeInfoWire]
-  -- ^ Types this node needs (from context)
+  , niwInput :: Maybe TypeInfoWire
+  -- ^ Input type this node needs (single type)
   , niwSchema :: Maybe TypeInfoWire
   -- ^ Output type (LLM nodes only)
   , niwGotoTargets :: [GotoTargetWire]
@@ -811,7 +811,7 @@ instance ToJSON NodeInfoWire where
   toJSON ni = object
     [ "niName" .= ni.niwName
     , "niKind" .= ni.niwKind
-    , "niNeeds" .= ni.niwNeeds
+    , "niInput" .= ni.niwInput
     , "niSchema" .= ni.niwSchema
     , "niGotoTargets" .= ni.niwGotoTargets
     ]
@@ -820,7 +820,7 @@ instance FromJSON NodeInfoWire where
   parseJSON = withObject "NodeInfoWire" $ \o -> NodeInfoWire
     <$> o .: "niName"
     <*> o .: "niKind"
-    <*> o .: "niNeeds"
+    <*> o .: "niInput"
     <*> o .: "niSchema"
     <*> o .: "niGotoTargets"
 

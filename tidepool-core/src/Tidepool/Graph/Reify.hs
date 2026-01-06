@@ -71,7 +71,7 @@ import Tidepool.Graph.Types (NodeKind(..), type (:@))
 import Tidepool.Graph.Tool (ToolInfo(..))
 import Tidepool.Graph.Generic.Core (Entry, Exit, LLMNode, LogicNode, AsGraph)
 import Tidepool.Graph.Edges
-  ( GetNeeds, GetSchema, GetTemplate, GetSystem
+  ( GetInput, GetSchema, GetTemplate, GetSystem
   , GetVision, GetTools, GetMemory, GetUsesEffects
   , GetGotoTargets, HasGotoExit
   )
@@ -135,7 +135,7 @@ data GraphInfo = GraphInfo
 data NodeInfo = NodeInfo
   { niName :: Text               -- ^ Node name (from Symbol)
   , niKind :: RuntimeNodeKind    -- ^ LLM or Logic
-  , niNeeds :: [TypeRep]         -- ^ Types this node needs
+  , niInput :: Maybe TypeRep     -- ^ Input type this node needs
   , niSchema :: Maybe TypeRep    -- ^ Schema output type (LLM nodes)
   , niGotoTargets :: [(Text, TypeRep)]  -- ^ Goto targets (Logic nodes)
   , niHasGotoExit :: Bool        -- ^ Can this node exit the graph?
@@ -426,7 +426,7 @@ class ReifyAnnotatedNode (def :: Type) (isLLM :: Bool) (isLogic :: Bool) where
                      -> (forall name. KnownSymbol name => Proxy name -> Proxy def -> [NodeInfo])
 
 -- LLMNode case
-instance ( ReifyTypeList (GetNeeds def)
+instance ( ReifyMaybeType (GetInput def)
          , ReifyMaybeType (GetSchema def)
          , ReifyMaybeType (GetTemplate def)
          , ReifyMaybeType (GetSystem def)
@@ -437,7 +437,7 @@ instance ( ReifyTypeList (GetNeeds def)
   reifyAnnotatedNode _ _ _ pName _ = [NodeInfo
     { niName = T.pack (symbolVal pName)
     , niKind = RuntimeLLM
-    , niNeeds = reifyTypeList (Proxy @(GetNeeds def))
+    , niInput = reifyMaybeType (Proxy @(GetInput def))
     , niSchema = reifyMaybeType (Proxy @(GetSchema def))
     , niGotoTargets = []  -- LLM nodes don't have Goto
     , niHasGotoExit = False
@@ -453,7 +453,7 @@ instance ( ReifyTypeList (GetNeeds def)
 --
 -- Now extracts Goto targets by using GotoTargetsFromDef, which applies
 -- @Effect kind explicitly to resolve polykind ambiguity.
-instance ( ReifyTypeList (GetNeeds def)
+instance ( ReifyMaybeType (GetInput def)
          , ReifyMaybeType (GetMemory def)
          , ReifyGotoTargets (GotoTargetsFromDef def)
          , ReifyBool (HasGotoExitInDef def)
@@ -461,7 +461,7 @@ instance ( ReifyTypeList (GetNeeds def)
   reifyAnnotatedNode _ _ _ pName _ = [NodeInfo
     { niName = T.pack (symbolVal pName)
     , niKind = RuntimeLogic
-    , niNeeds = reifyTypeList (Proxy @(GetNeeds def))
+    , niInput = reifyMaybeType (Proxy @(GetInput def))
     , niSchema = Nothing  -- Logic nodes don't have Schema
     , niGotoTargets = reifyGotoTargets (Proxy @(GotoTargetsFromDef def))
     , niHasGotoExit = reifyBool (Proxy @(HasGotoExitInDef def))
@@ -498,7 +498,7 @@ deriveImplicitEdges mEntryType nodes = entryEdges ++ schemaEdges
       Just entryTy ->
         [ EdgeInfo "Entry" n.niName (Just entryTy) RuntimeImplicit
         | n <- nodes
-        , entryTy `elem` n.niNeeds
+        , n.niInput == Just entryTy
         ]
 
     -- Edges from nodes with Schema to nodes that need that type
@@ -507,7 +507,7 @@ deriveImplicitEdges mEntryType nodes = entryEdges ++ schemaEdges
       | producer <- nodes
       , Just schemaTy <- [producer.niSchema]
       , consumer <- nodes
-      , schemaTy `elem` consumer.niNeeds
+      , consumer.niInput == Just schemaTy
       ]
 
 -- | Derive edges to Exit from Schema matching.

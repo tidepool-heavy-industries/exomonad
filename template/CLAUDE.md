@@ -81,10 +81,10 @@ data MyGraph mode = MyGraph
 mode :- G.Entry InputType
 
 -- LLM node - calls language model, produces structured output
-mode :- G.LLMNode :@ Needs '[InputType] :@ Schema OutputType
+mode :- G.LLMNode :@ Input InputType :@ Schema OutputType
 
 -- Logic node - pure routing based on inputs
-mode :- G.LogicNode :@ Needs '[InputType] :@ UsesEffects '[Goto "target" PayloadType]
+mode :- G.LogicNode :@ Input InputType :@ UsesEffects '[Goto "target" PayloadType]
 
 -- Exit point - where data leaves the graph
 mode :- G.Exit OutputType
@@ -94,7 +94,7 @@ mode :- G.Exit OutputType
 
 | Annotation | Applies To | Purpose |
 |------------|-----------|---------|
-| `Needs '[T1, T2]` | LLM, Logic | Input types this node consumes |
+| `Input T` | LLM, Logic | Input type this node consumes (use tuple for multiple) |
 | `Schema T` | LLM | Structured output type (JSON schema derived) |
 | `Template T` | LLM | Jinja template for prompt (requires TemplateDef) |
 | `UsesEffects '[E1, E2]` | LLM, Logic | Effects/transitions (Goto targets) |
@@ -104,7 +104,7 @@ mode :- G.Exit OutputType
 
 ### Data Flow
 
-- **Schema → Needs**: Implicit edges. If node A has `Schema T` and node B has `Needs '[T]`, there's an edge A → B
+- **Schema → Input**: Implicit edges. If node A has `Schema T` and node B has `Input T`, there's an edge A → B
 - **Goto**: Explicit transitions. `UsesEffects '[Goto "nodeName" Payload]` creates edge to that node
 
 ### Full Documentation

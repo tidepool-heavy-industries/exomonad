@@ -23,7 +23,8 @@ module Template.Graph
 
 import GHC.Generics (Generic)
 
-import Tidepool.Graph.Types (type (:@), Needs, Schema, Template, UsesEffects, Exit)
+import Tidepool.Graph.Types (type (:@), Schema, Template, UsesEffects, Exit)
+import qualified Tidepool.Graph.Types as Types (Input)
 import Tidepool.Graph.Generic (GraphMode(..))
 import qualified Tidepool.Graph.Generic as G
 import Tidepool.Graph.Goto (Goto)
@@ -56,7 +57,7 @@ resultSchema = $(deriveJSONSchema ''Result)
 data SimpleGraph mode = SimpleGraph
   { sgEntry   :: mode :- G.Entry Input
   , sgProcess :: mode :- G.LLMNode
-      :@ Needs '[Input]
+      :@ Types.Input Input
       :@ Template ProcessTpl
       :@ Schema Output
       :@ UsesEffects '[Goto Exit Result]

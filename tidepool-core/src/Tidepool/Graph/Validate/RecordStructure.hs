@@ -7,7 +7,7 @@
 -- @
 -- data MyGraph mode = MyGraph
 --   { entry    :: mode :- Entry Message
---   , classify :: mode :- LLMNode :@ Needs '[Message] :@ Schema Intent
+--   , classify :: mode :- LLMNode :@ Input Message :@ Schema Intent
 --   , exit     :: mode :- Exit Response
 --   }
 -- @
@@ -49,9 +49,9 @@ import Data.Kind (Type, Constraint)
 import GHC.TypeLits (Symbol, TypeError, ErrorMessage(..), Nat, type (-), type (+))
 import GHC.Generics (Generic(..), K1(..), M1(..), (:*:)(..), Meta(..), S, D, C, Rep)
 
-import Tidepool.Graph.Types (type (:@), Needs, Schema, UsesEffects, Self)
+import Tidepool.Graph.Types (type (:@), Input, Schema, UsesEffects, Self)
 import qualified Tidepool.Graph.Types as Types (Exit)
-import Tidepool.Graph.Edges (GetNeeds, GetSchema)
+import Tidepool.Graph.Edges (GetInput, GetSchema)
 import Tidepool.Graph.Goto (Goto)
 import Tidepool.Graph.Generic.Core (GraphMode(..), AsGraph, LLMNode, LogicNode, Entry, Exit)
 
@@ -116,8 +116,8 @@ type family OrMaybe a b where
 -- | Validates that all nodes in a graph record are reachable from Entry.
 --
 -- A node is reachable if:
--- * Its Needs can be satisfied by the Entry type, OR
--- * Its Needs can be satisfied by Entry + Schema outputs of reachable nodes, OR
+-- * Its Input type can be satisfied by the Entry type, OR
+-- * Its Input type can be satisfied by Entry + Schema outputs of reachable nodes, OR
 -- * It is the target of a Goto from a reachable Logic node
 type AllFieldsReachable :: (Type -> Type) -> Constraint
 type family AllFieldsReachable graph where
@@ -205,9 +205,15 @@ type family FindNewlyReachableFields fields available reached where
   FindNewlyReachableFields '[] _ _ = '[]
   FindNewlyReachableFields ('(name, def) ': rest) available reached =
     If (And (Not (ElemSymbol name reached))
-            (And (IsNodeDef def) (AllIn (GetNeeds def) available)))
+            (And (IsNodeDef def) (InputSatisfied (GetInput def) available)))
        (name ': FindNewlyReachableFields rest available reached)
        (FindNewlyReachableFields rest available reached)
+
+-- | Check if the Input type is satisfied by available types.
+type InputSatisfied :: Maybe Type -> [Type] -> Bool
+type family InputSatisfied mInput available where
+  InputSatisfied 'Nothing _ = 'True  -- No Input means always satisfied
+  InputSatisfied ('Just t) available = ElemType t available
 
 -- | Add Schema types from newly reached fields.
 type AddFieldSchemaTypes :: [(Symbol, Type)] -> [Symbol] -> [Type] -> [Type]
@@ -382,22 +388,22 @@ type family NoDeadGotosRecord graph where
         (GetRecordEntryType graph))
 
 -- | Check if dead goto list is empty.
--- The tuple now includes target's Needs for better error messages.
-type CheckNoDeadGotosRecord :: [(Symbol, Symbol, Type, [Type])] -> Constraint
+-- The tuple now includes target's Input for better error messages.
+type CheckNoDeadGotosRecord :: [(Symbol, Symbol, Type, Maybe Type)] -> Constraint
 type family CheckNoDeadGotosRecord deadGotos where
   CheckNoDeadGotosRecord '[] = ()
-  CheckNoDeadGotosRecord ('(src, target, payload, targetNeeds) ': _) =
-    GotoTypeMismatchError src target payload targetNeeds
+  CheckNoDeadGotosRecord ('(src, target, payload, targetInput) ': _) =
+    GotoTypeMismatchError src target payload targetInput
 
 -- | Find dead Gotos in all fields.
--- Returns 4-tuples: (srcName, targetName, payload, targetNeeds)
-type FindDeadGotosInFields :: [(Symbol, Type)] -> Type -> [(Symbol, Symbol, Type, [Type])]
+-- Returns 4-tuples: (srcName, targetName, payload, targetInput)
+type FindDeadGotosInFields :: [(Symbol, Type)] -> Type -> [(Symbol, Symbol, Type, Maybe Type)]
 type family FindDeadGotosInFields fields entryType where
   FindDeadGotosInFields fields entryType =
     FindDeadGotosHelper fields fields entryType
 
 -- | Helper that keeps track of all fields while iterating.
-type FindDeadGotosHelper :: [(Symbol, Type)] -> [(Symbol, Type)] -> Type -> [(Symbol, Symbol, Type, [Type])]
+type FindDeadGotosHelper :: [(Symbol, Type)] -> [(Symbol, Type)] -> Type -> [(Symbol, Symbol, Type, Maybe Type)]
 type family FindDeadGotosHelper remaining allFields entryType where
   FindDeadGotosHelper '[] _ _ = '[]
   FindDeadGotosHelper ('(name, def) ': rest) allFields entryType =
@@ -406,7 +412,7 @@ type family FindDeadGotosHelper remaining allFields entryType where
       (FindDeadGotosHelper rest allFields entryType)
 
 -- | Check Gotos in a single field.
-type CheckFieldGotos :: Symbol -> Type -> [(Symbol, Type)] -> Type -> [(Symbol, Symbol, Type, [Type])]
+type CheckFieldGotos :: Symbol -> Type -> [(Symbol, Type)] -> Type -> [(Symbol, Symbol, Type, Maybe Type)]
 type family CheckFieldGotos srcName def allFields entryType where
   CheckFieldGotos srcName def allFields entryType =
     CheckGotoList srcName (GetFieldGotoTargetsWithPayloads def) allFields entryType
@@ -433,7 +439,7 @@ type family GetGotoTargetsFromEffects effs where
   GetGotoTargetsFromEffects (_ ': rest) = GetGotoTargetsFromEffects rest
 
 -- | Check a list of Gotos.
-type CheckGotoList :: Symbol -> [(Symbol, Type)] -> [(Symbol, Type)] -> Type -> [(Symbol, Symbol, Type, [Type])]
+type CheckGotoList :: Symbol -> [(Symbol, Type)] -> [(Symbol, Type)] -> Type -> [(Symbol, Symbol, Type, Maybe Type)]
 type family CheckGotoList srcName gotos allFields entryType where
   CheckGotoList _ '[] _ _ = '[]
   CheckGotoList srcName ('(target, payload) ': rest) allFields entryType =
@@ -442,24 +448,24 @@ type family CheckGotoList srcName gotos allFields entryType where
       (CheckGotoList srcName rest allFields entryType)
 
 -- | Check a single Goto.
-type CheckSingleFieldGoto :: Symbol -> Symbol -> Type -> [(Symbol, Type)] -> Type -> [(Symbol, Symbol, Type, [Type])]
+type CheckSingleFieldGoto :: Symbol -> Symbol -> Type -> [(Symbol, Type)] -> Type -> [(Symbol, Symbol, Type, Maybe Type)]
 type family CheckSingleFieldGoto srcName targetName payload allFields entryType where
   CheckSingleFieldGoto srcName targetName payload allFields entryType =
     CheckGotoWithTarget
       srcName
       targetName
       payload
-      (GetFieldNeeds allFields targetName)
+      (GetFieldInput allFields targetName)
       (payload ': entryType ': CollectAllFieldSchemas allFields)
 
--- | Get Needs for a field by name.
-type GetFieldNeeds :: [(Symbol, Type)] -> Symbol -> [Type]
-type family GetFieldNeeds fields name where
-  GetFieldNeeds '[] _ = '[]
-  GetFieldNeeds ('(n, def) ': rest) name =
+-- | Get Input type for a field by name.
+type GetFieldInput :: [(Symbol, Type)] -> Symbol -> Maybe Type
+type family GetFieldInput fields name where
+  GetFieldInput '[] _ = 'Nothing
+  GetFieldInput ('(n, def) ': rest) name =
     If (n == name)
-       (GetNeeds def)
-       (GetFieldNeeds rest name)
+       (GetInput def)
+       (GetFieldInput rest name)
 
 -- | Collect all Schema types from fields.
 type CollectAllFieldSchemas :: [(Symbol, Type)] -> [Type]
@@ -468,14 +474,14 @@ type family CollectAllFieldSchemas fields where
   CollectAllFieldSchemas ('(_, def) ': rest) =
     AppendMaybeType (GetSchema def) (CollectAllFieldSchemas rest)
 
--- | Check Goto with resolved target needs.
--- Returns 4-tuple including targetNeeds for better error messages.
-type CheckGotoWithTarget :: Symbol -> Symbol -> Type -> [Type] -> [Type] -> [(Symbol, Symbol, Type, [Type])]
-type family CheckGotoWithTarget srcName targetName payload targetNeeds available where
-  CheckGotoWithTarget srcName targetName payload targetNeeds available =
-    If (AllIn targetNeeds available)
+-- | Check Goto with resolved target input.
+-- Returns 4-tuple including targetInput for better error messages.
+type CheckGotoWithTarget :: Symbol -> Symbol -> Type -> Maybe Type -> [Type] -> [(Symbol, Symbol, Type, Maybe Type)]
+type family CheckGotoWithTarget srcName targetName payload targetInput available where
+  CheckGotoWithTarget srcName targetName payload targetInput available =
+    If (InputSatisfied targetInput available)
        '[]
-       '[ '(srcName, targetName, payload, targetNeeds) ]
+       '[ '(srcName, targetName, payload, targetInput) ]
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- ERROR MESSAGES
@@ -488,11 +494,11 @@ type UnreachableFieldError name = TypeError
    ':$$: 'Text "Field '" ':<>: 'Text name ':<>: 'Text "' cannot be reached from Entry."
    ':$$: 'Text ""
    ':$$: 'Text "A node is reachable if:"
-   ':$$: 'Text "  - Its Needs are satisfied by Entry"
-   ':$$: 'Text "  - Its Needs are satisfied by Schema outputs of reachable nodes"
+   ':$$: 'Text "  - Its Input type matches the Entry type"
+   ':$$: 'Text "  - Its Input type matches a Schema output from a reachable node"
    ':$$: 'Text "  - It is the target of a Goto from a reachable Logic node"
    ':$$: 'Text ""
-   ':$$: 'Text "Fix: Ensure some reachable node provides what this node Needs."
+   ':$$: 'Text "Fix: Ensure some reachable node provides this node's Input type."
   )
 
 -- | Error when a Logic field can't reach Exit.
@@ -507,28 +513,28 @@ type NoExitPathFieldError name = TypeError
    ':$$: 'Text "     or add Goto to a node that reaches Exit."
   )
 
--- | Error when a Goto payload type doesn't satisfy target's Needs.
+-- | Error when a Goto payload type doesn't match target's Input.
 --
 -- This improved error shows both what was sent and what was expected,
 -- making type mismatches much easier to debug.
-type GotoTypeMismatchError :: Symbol -> Symbol -> Type -> [Type] -> Constraint
-type GotoTypeMismatchError srcName targetName payload targetNeeds = TypeError
+type GotoTypeMismatchError :: Symbol -> Symbol -> Type -> Maybe Type -> Constraint
+type GotoTypeMismatchError srcName targetName payload targetInput = TypeError
   ('Text "Graph validation failed: Goto payload type mismatch"
    ':$$: 'Text ""
    ':$$: 'Text "Node '" ':<>: 'Text srcName ':<>: 'Text "' sends:"
    ':$$: 'Text "  Goto \"" ':<>: 'Text targetName ':<>: 'Text "\" " ':<>: 'ShowType payload
    ':$$: 'Text ""
-   ':$$: 'Text "But target '" ':<>: 'Text targetName ':<>: 'Text "' needs:"
-   ':$$: FormatTypeList targetNeeds
+   ':$$: 'Text "But target '" ':<>: 'Text targetName ':<>: 'Text "' expects:"
+   ':$$: FormatMaybeType targetInput
    ':$$: 'Text ""
-   ':$$: 'Text "The Goto payload must provide all types the target Needs."
-   ':$$: 'Text "Fix: Change the payload type or adjust the target's Needs."
+   ':$$: 'Text "The Goto payload must match the target's Input type."
+   ':$$: 'Text "Fix: Change the payload type or adjust the target's Input."
   )
 
 -- | Legacy alias for backwards compatibility with Validate.hs exports.
 type DeadGotoFieldError :: Symbol -> Symbol -> Type -> Constraint
 type DeadGotoFieldError srcName targetName payload =
-  GotoTypeMismatchError srcName targetName payload '[]
+  GotoTypeMismatchError srcName targetName payload 'Nothing
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- LOGIC NODE TRANSITION VALIDATION
@@ -671,6 +677,12 @@ type family FormatTypeList ts where
   FormatTypeList '[t] = 'Text "  • " ':<>: 'ShowType t
   FormatTypeList (t ': rest) = 'Text "  • " ':<>: 'ShowType t ':$$: FormatTypeList rest
 
+-- | Format a Maybe Type for display in error messages.
+type FormatMaybeType :: Maybe Type -> ErrorMessage
+type family FormatMaybeType mt where
+  FormatMaybeType 'Nothing = 'Text "  (no Input - accepts any type)"
+  FormatMaybeType ('Just t) = 'Text "  Input " ':<>: 'ShowType t
+
 -- | Type-level If.
 type If :: Bool -> k -> k -> k
 type family If cond t f where
@@ -744,7 +756,7 @@ type family AppendMaybeType m xs where
   AppendMaybeType ('Just x) xs = x ': xs
 
 -- | Append 4-tuple lists (for dead goto tracking).
-type AppendQuads :: [(Symbol, Symbol, Type, [Type])] -> [(Symbol, Symbol, Type, [Type])] -> [(Symbol, Symbol, Type, [Type])]
+type AppendQuads :: [(Symbol, Symbol, Type, Maybe Type)] -> [(Symbol, Symbol, Type, Maybe Type)] -> [(Symbol, Symbol, Type, Maybe Type)]
 type family AppendQuads xs ys where
   AppendQuads '[] ys = ys
   AppendQuads (x ': rest) ys = x ': AppendQuads rest ys

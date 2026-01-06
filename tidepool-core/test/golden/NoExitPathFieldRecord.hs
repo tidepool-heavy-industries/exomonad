@@ -15,7 +15,7 @@ module NoExitPathFieldRecord where
 
 import GHC.Generics (Generic)
 
-import Tidepool.Graph.Types (type (:@), Needs, UsesEffects)
+import Tidepool.Graph.Types (type (:@), Input, UsesEffects)
 import Tidepool.Graph.Generic (GraphMode(..), Entry, Exit, LogicNode, ValidGraphRecord)
 import Tidepool.Graph.Goto (Goto)
 
@@ -26,7 +26,7 @@ data B
 -- 'loop' only goes back to 'loop', creating an infinite loop.
 data BadGraph mode = BadGraph
   { entry :: mode :- Entry A
-  , loop  :: mode :- LogicNode :@ Needs '[A] :@ UsesEffects '[Goto "loop" A]  -- Loops forever!
+  , loop  :: mode :- LogicNode :@ Input A :@ UsesEffects '[Goto "loop" A]  -- Loops forever!
   , exit  :: mode :- Exit B
   }
   deriving Generic
