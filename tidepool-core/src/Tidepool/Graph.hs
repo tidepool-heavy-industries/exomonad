@@ -1,7 +1,10 @@
 -- | Type-Safe Graph DSL for LLM Agent State Machines
 --
--- This module provides a record-based DSL for defining state machine graphs
--- that are validated at compile time and can generate Mermaid diagrams.
+-- This module provides the record-based (Servant-style) DSL for defining
+-- state machine graphs that are validated at compile time and can generate
+-- Mermaid diagrams.
+--
+-- This is the only supported graph syntax.
 --
 -- = Core Concepts
 --
@@ -122,9 +125,9 @@ module Tidepool.Graph
   , Docs.renderDepTreeCompact
   , Docs.templateDocBlock
 
-    -- * Validation (record-based graphs only)
+    -- * Validation
     -- These constraints operate on graphs of kind @Type -> Type@,
-    -- i.e. record-based graphs defined with @mode@ parameter.
+    -- i.e. graphs defined with @mode@ parameter.
   , AllNodesReachable
   , AllLogicNodesReachExit
   , NoDeadGotos
@@ -291,7 +294,7 @@ import qualified Tidepool.Graph.Generic as G
 
 -- $recordDSL
 --
--- An alternative syntax uses mode-parameterized records, inspired by Servant's
+-- The Graph DSL uses mode-parameterized records, inspired by Servant's
 -- @NamedRoutes@ pattern. This provides:
 --
 -- * __Field names as node names__ — No @:=@ annotation needed

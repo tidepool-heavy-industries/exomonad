@@ -71,14 +71,6 @@ module Tidepool.Graph.Goto
     -- * Target Validation
   , GotoElem
   , GotoElemC
-
-    -- * Goto Result Types (deprecated)
-  , GotoResult(..)
-  , SomeGoto(..)
-
-    -- * Effect Interpretation (deprecated)
-  , runGotoCapture
-  , runGotoIgnore
   ) where
 
 import Data.Aeson (ToJSON(..))
