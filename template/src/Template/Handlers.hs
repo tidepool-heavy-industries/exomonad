@@ -31,15 +31,16 @@ simpleHandlers = SimpleGraph
 
     -- LLMHandler: Build template context, call LLM, then route to exit
   , sgProcess = LLMHandler
-      Nothing  -- no system template
-      (templateCompiled @ProcessTpl)
-      (\input -> do
-        msgs <- getHistory
-        pure ProcessContext
-          { input = T.pack input.inputText
-          , history = formatHistory msgs
-          })
-      (\output -> pure $ gotoExit (Result output.outputText))
+      { llmSystem = Nothing
+      , llmUser   = templateCompiled @ProcessTpl
+      , llmBefore = \input -> do
+          msgs <- getHistory
+          pure ProcessContext
+            { input = T.pack input.inputText
+            , history = formatHistory msgs
+            }
+      , llmAfter  = \output -> pure $ gotoExit (Result output.outputText)
+      }
 
   , sgExit    = Proxy @Result
   }

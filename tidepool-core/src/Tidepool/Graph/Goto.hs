@@ -388,10 +388,11 @@ unwrapSingleChoice (GotoChoice (Here p)) = p
 -- @
 -- sgClassify :: LLMHandler Message Intent '[To Exit Response] effs ClassifyContext
 -- sgClassify = LLMHandler
---   Nothing                              -- no system template
---   (templateCompiled @ClassifyTpl)      -- user template
---   (\\msg -> pure ClassifyContext { topic = msg.content })  -- context builder
---   (\\intent -> pure $ gotoExit response)  -- router
+--   { llmSystem = Nothing
+--   , llmUser   = templateCompiled @ClassifyTpl
+--   , llmBefore = \\msg -> pure ClassifyContext { topic = msg.content }
+--   , llmAfter  = \\intent -> pure $ gotoExit response
+--   }
 -- @
 type LLMHandler :: Type -> Type -> [Type] -> [Type -> Type] -> Type -> Type
 data LLMHandler needs schema targets effs tpl where
@@ -401,10 +402,15 @@ data LLMHandler needs schema targets effs tpl where
   -- Both templates share the same context type (tpl).
   LLMHandler
     :: forall tpl needs schema targets effs.
-       Maybe (TypedTemplate tpl SourcePos)      -- ^ Optional system prompt template
-    -> TypedTemplate tpl SourcePos              -- ^ User prompt template (required)
-    -> (needs -> Eff effs tpl)                  -- ^ Builds context for both templates
-    -> (schema -> Eff effs (GotoChoice targets))  -- ^ Routes based on LLM output
+       { llmSystem :: Maybe (TypedTemplate tpl SourcePos)
+         -- ^ Optional system prompt template
+       , llmUser   :: TypedTemplate tpl SourcePos
+         -- ^ User prompt template (required)
+       , llmBefore :: needs -> Eff effs tpl
+         -- ^ Builds context for both templates
+       , llmAfter  :: schema -> Eff effs (GotoChoice targets)
+         -- ^ Routes based on LLM output
+       }
     -> LLMHandler needs schema targets effs tpl
 
 -- ════════════════════════════════════════════════════════════════════════════

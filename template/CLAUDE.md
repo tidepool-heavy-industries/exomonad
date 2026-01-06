@@ -122,16 +122,15 @@ See `tidepool-core/src/Tidepool/Graph/CLAUDE.md` for comprehensive DSL documenta
 
 ### LLM Node Handlers
 
-LLM handlers use the `LLMHandler` constructor with four arguments:
+LLM handlers use the `LLMHandler` constructor with named record fields:
 
 ```haskell
 sgProcess = LLMHandler
-  Nothing                    -- optional system template
-  (templateCompiled @MyTpl)  -- user template
-  (\input -> do              -- before: build context
-    pure ContextType { ... })
-  (\output -> do             -- after: route based on output
-    pure $ gotoExit result)
+  { llmSystem = Nothing
+  , llmUser   = templateCompiled @MyTpl
+  , llmBefore = \input -> pure ContextType { ... }
+  , llmAfter  = \output -> pure $ gotoExit result
+  }
 ```
 
 ### Logic Node Handlers
