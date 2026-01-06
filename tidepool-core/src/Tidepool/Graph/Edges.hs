@@ -5,7 +5,7 @@
 -- | Annotation extraction for the Graph DSL.
 --
 -- This module provides type families to extract information from node annotations.
--- These work with both list-based and record-based graph definitions.
+-- These type families power the record-based (Servant-style) graph definitions.
 module Tidepool.Graph.Edges
   ( -- * Edge Type
     EdgeKind(..)

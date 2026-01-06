@@ -1,8 +1,9 @@
 
 -- | Core types for the Tidepool Graph DSL.
 --
--- This module defines annotations and shared types for the Graph DSL.
--- The record-based DSL (see Tidepool.Graph.Generic) is now the preferred syntax.
+-- This module defines core types for the Graph DSL.
+-- Users should use the record-based DSL via Tidepool.Graph.Generic;
+-- the NodeKind types (LLM, Logic) below are for internal use only.
 module Tidepool.Graph.Types
   ( -- * Node Kind
     NodeKind(..)
@@ -58,7 +59,9 @@ import GHC.TypeLits (Symbol, KnownSymbol, symbolVal)
 -- * 'LLM' nodes call the language model and produce output via 'Schema'
 -- * 'Logic' nodes run pure or effect-based code and transition via 'Goto'
 --
--- Note: For the record-based DSL, use LLMNode and LogicNode from Tidepool.Graph.Generic
+-- Note: The bare NodeKind types (LLM, Logic) are obsolete.
+-- For the record-based DSL (the only supported syntax), use LLMNode and LogicNode
+-- from Tidepool.Graph.Generic.
 data NodeKind
   = LLM    -- ^ Node that invokes the LLM. Output flows implicitly via Schema.
   | Logic  -- ^ Node with effect stack. Transitions explicitly via Goto.

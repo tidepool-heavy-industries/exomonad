@@ -39,8 +39,6 @@ library
     if !os(wasi)
       exposed-modules:
         Tidepool.Delta
-        Tidepool.Template
-        Tidepool.Tool
         Tidepool.Schema
         Tidepool.Tool.Wire
         Tidepool.Tool.Convert
