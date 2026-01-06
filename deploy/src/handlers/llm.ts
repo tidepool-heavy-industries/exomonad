@@ -2,7 +2,7 @@
  * LLM effect handlers.
  *
  * Handles LlmComplete and LlmCall effects by calling Cloudflare AI.
- * Uses direct env.AI.run for tool-aware calls (WASM handles the tool loop).
+ * TypeScript manages the tool loop internally, returning final TurnResult.
  */
 
 import type {
@@ -10,9 +10,53 @@ import type {
   LlmCallEffect,
   EffectResult,
   WireContentBlock,
-  LlmCallResult,
 } from "tidepool-generated-ts";
 import { successResult, errorResult } from "tidepool-generated-ts";
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TURN RESULT TYPES (TypeScript manages tool loop, returns final result)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Record of a single tool invocation during the turn.
+ */
+export interface ToolInvocation {
+  /** Tool name that was called */
+  name: string;
+  /** Arguments passed to the tool */
+  input: unknown;
+  /** Result of the tool execution */
+  result: unknown;
+  /** Whether the tool execution failed */
+  isError: boolean;
+}
+
+/**
+ * Final result from an LLM turn after all tool calls are resolved.
+ * TypeScript handles the tool loop; this is the final output.
+ */
+export interface TurnResult {
+  /** Final content blocks from the LLM */
+  content: WireContentBlock[];
+  /** All tools that were invoked during this turn */
+  toolsInvoked: ToolInvocation[];
+  /** Extracted text content (narrative) */
+  narrative: string | null;
+  /** Extracted thinking content (if any) */
+  thinking: string | null;
+}
+
+/**
+ * Tools that require external handling (yielded to WASM/UI).
+ * These tools cannot be executed internally by TypeScript.
+ */
+const UI_REQUIRING_TOOLS = new Set([
+  "ask_user",
+  "ask_user_input",
+  "request_input",
+  "request_text_input",
+  "request_choice",
+]);
 
 /**
  * Rate limit configuration.
@@ -85,6 +129,51 @@ async function checkRateLimit(kv: KVNamespace): Promise<string | null> {
   ]);
 
   return null;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TOOL EXECUTION
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Execute a tool call and return the result.
+ *
+ * For tools that require UI interaction (ask_user, etc.), returns an error
+ * result indicating the tool cannot be executed server-side.
+ *
+ * For unknown tools, returns an error result to the model so it can try
+ * a different approach.
+ */
+async function executeToolCall(
+  toolName: string,
+  _toolInput: unknown,
+  _env: LlmEnv
+): Promise<{ result: unknown; isError: boolean }> {
+  // Tools requiring UI cannot be executed server-side
+  if (UI_REQUIRING_TOOLS.has(toolName)) {
+    return {
+      result: `Tool '${toolName}' requires user interaction and cannot be executed server-side.`,
+      isError: true,
+    };
+  }
+
+  // Unknown tools return an error to the model
+  // This allows the model to try a different approach
+  return {
+    result: `Unknown tool: ${toolName}. Available tools do not include this.`,
+    isError: true,
+  };
+}
+
+/**
+ * Extract text narrative from content blocks.
+ */
+function extractNarrative(content: WireContentBlock[]): string | null {
+  const textBlocks = content
+    .filter((b): b is { type: "text"; text: string } => b.type === "text")
+    .map((b) => b.text);
+
+  return textBlocks.length > 0 ? textBlocks.join("\n") : null;
 }
 
 /**
@@ -201,17 +290,15 @@ function parseAiResponse(response: unknown): unknown {
 }
 
 /**
- * Handle LlmCall effect - tool-aware LLM API call.
+ * Handle LlmCall effect - tool-aware LLM API call with internal tool loop.
  *
- * Uses 2-phase approach when both tools and schema are provided:
- * 1. Phase 1: Call with tools only (let model decide to use tools)
- * 2. Phase 2: If no tools called, call with schema for structured output
+ * TypeScript manages the tool loop internally:
+ * 1. Call LLM with tools
+ * 2. If model requests tools, execute them and continue
+ * 3. Repeat until model finishes (no more tool calls)
+ * 4. If schema provided, do a final structured output pass
  *
- * This prevents the conflict where "return JSON" instructions compete with tool use.
- *
- * Returns a discriminated result:
- * - `done`: LLM finished with final content
- * - `needs_tools`: LLM wants to call tools, caller should execute and continue
+ * Returns TurnResult with all tool invocations tracked.
  */
 export async function handleLlmCall(
   effect: LlmCallEffect,
@@ -226,7 +313,8 @@ export async function handleLlmCall(
   }
 
   try {
-    const messages = effect.eff_messages.map((msg) => ({
+    // Build initial messages from effect
+    const conversationMessages: CfAiMessage[] = effect.eff_messages.map((msg) => ({
       role: msg.role as "system" | "user" | "assistant",
       content: convertContentBlocks(msg.content),
     }));
@@ -236,80 +324,121 @@ export async function handleLlmCall(
     const hasSchema = effect.eff_schema !== null && effect.eff_schema !== undefined;
 
     // Use model from effect, or fall back to default
-    // Note: llama-4-scout outputs tool calls as text instead of populating tool_calls array
-    // Note: hermes-2-pro has 1024 token context limit (too small for our prompts)
-    // Note: llama-3.3 sometimes returns malformed [{}] in tool_calls (we filter these)
     const model = effect.eff_model ?? DEFAULT_MODEL;
     const maxTokens = 2048;
 
+    // Track all tool invocations across the loop
+    const allToolInvocations: ToolInvocation[] = [];
+
+    // Maximum tool loop iterations to prevent infinite loops
+    const MAX_TOOL_ITERATIONS = 10;
+    let iterations = 0;
+
+    // Final content from the last LLM response
+    let finalContent: WireContentBlock[] = [];
+
     // ═══════════════════════════════════════════════════════════════════════
-    // PHASE 1: Tool decision pass (if tools provided)
+    // TOOL LOOP: Continue until model stops calling tools
     // ═══════════════════════════════════════════════════════════════════════
     if (hasTools) {
-      console.log("[LlmCall] Phase 1: Tool decision pass with", tools.length, "tools");
+      while (iterations < MAX_TOOL_ITERATIONS) {
+        iterations++;
+        console.log(`[LlmCall] Tool loop iteration ${iterations}`);
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const toolResponse = (await (env.AI.run as any)(model, {
-        messages,
-        tools,
-        max_tokens: maxTokens,
-      })) as CfAiResponse;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const toolResponse = (await (env.AI.run as any)(model, {
+          messages: conversationMessages,
+          tools,
+          max_tokens: maxTokens,
+        })) as CfAiResponse;
 
-      console.log("[LlmCall] Phase 1 response:", JSON.stringify(toolResponse));
+        console.log(`[LlmCall] Iteration ${iterations} response:`, JSON.stringify(toolResponse));
 
-      // Filter malformed tool calls (CF AI sometimes returns [{}])
-      const validToolCalls = (toolResponse.tool_calls ?? []).filter(
-        (tc) => tc.name !== undefined && tc.name !== null
-      );
+        // Filter malformed tool calls (CF AI sometimes returns [{}])
+        const validToolCalls = (toolResponse.tool_calls ?? []).filter(
+          (tc) => tc.name !== undefined && tc.name !== null
+        );
 
-      if (validToolCalls.length > 0) {
-        // Model wants to use tools - return for WASM to handle
+        // Extract response text for content
         const responseText = toolResponse.response
           ? typeof toolResponse.response === "string"
             ? toolResponse.response
             : JSON.stringify(toolResponse.response)
           : null;
 
-        const result: LlmCallResult = {
-          type: "needs_tools",
-          tool_calls: validToolCalls.map((tc, idx) => ({
-            id: `tool_${idx}_${tc.name}`,
+        // No tool calls - we're done with the tool loop
+        if (validToolCalls.length === 0) {
+          finalContent = responseText ? [{ type: "text" as const, text: responseText }] : [];
+          break;
+        }
+
+        // Model wants to call tools - execute them
+        // Add assistant message with tool calls to conversation
+        const assistantContent: string | ContentItem[] = responseText
+          ? [{ type: "text" as const, text: responseText }]
+          : [];
+
+        // Build tool call representations for conversation history
+        const toolCallMessages: string[] = validToolCalls.map((tc, idx) =>
+          `[Tool Call ${idx}: ${tc.name}(${JSON.stringify(tc.arguments)})]`
+        );
+
+        conversationMessages.push({
+          role: "assistant",
+          content: typeof assistantContent === "string"
+            ? assistantContent + "\n" + toolCallMessages.join("\n")
+            : toolCallMessages.join("\n"),
+        });
+
+        // Execute each tool and collect results
+        const toolResults: string[] = [];
+
+        for (let idx = 0; idx < validToolCalls.length; idx++) {
+          const tc = validToolCalls[idx];
+          const toolId = `tool_${iterations}_${idx}_${tc.name}`;
+
+          console.log(`[LlmCall] Executing tool: ${tc.name}`);
+          const { result, isError } = await executeToolCall(tc.name, tc.arguments, env);
+
+          // Track the invocation
+          allToolInvocations.push({
             name: tc.name,
             input: tc.arguments,
-          })),
-          content: responseText ? [{ type: "text" as const, text: responseText }] : [],
-        };
-        return successResult(result);
+            result,
+            isError,
+          });
+
+          // Format result for conversation
+          const resultStr = typeof result === "string" ? result : JSON.stringify(result);
+          toolResults.push(
+            isError
+              ? `[Tool Error ${toolId}]: ${resultStr}`
+              : `[Tool Result ${toolId}]: ${resultStr}`
+          );
+        }
+
+        // Add tool results as user message
+        conversationMessages.push({
+          role: "user",
+          content: toolResults.join("\n"),
+        });
       }
 
-      // No tools called - fall through to Phase 2 if schema exists
-      // If no schema, return the text response as-is
-      if (!hasSchema) {
-        const responseText = toolResponse.response
-          ? typeof toolResponse.response === "string"
-            ? toolResponse.response
-            : JSON.stringify(toolResponse.response)
-          : null;
-
-        const result: LlmCallResult = {
-          type: "done",
-          content: responseText ? [{ type: "text" as const, text: responseText }] : [],
-        };
-        return successResult(result);
+      // Check if we hit the iteration limit
+      if (iterations >= MAX_TOOL_ITERATIONS) {
+        console.warn(`[LlmCall] Hit max tool iterations (${MAX_TOOL_ITERATIONS})`);
       }
-
-      console.log("[LlmCall] No tools called, proceeding to Phase 2 for structured output");
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    // PHASE 2: Structured output pass (if schema provided)
+    // STRUCTURED OUTPUT: If schema provided, do final pass
     // ═══════════════════════════════════════════════════════════════════════
     if (hasSchema) {
-      console.log("[LlmCall] Phase 2: Structured output with schema");
+      console.log("[LlmCall] Final structured output pass with schema");
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const schemaResponse = (await (env.AI.run as any)(model, {
-        messages,
+        messages: conversationMessages,
         max_tokens: maxTokens,
         response_format: {
           type: "json_schema",
@@ -321,7 +450,7 @@ export async function handleLlmCall(
         },
       })) as CfAiResponse;
 
-      console.log("[LlmCall] Phase 2 response:", JSON.stringify(schemaResponse));
+      console.log("[LlmCall] Schema response:", JSON.stringify(schemaResponse));
 
       const responseText = schemaResponse.response
         ? typeof schemaResponse.response === "string"
@@ -329,34 +458,36 @@ export async function handleLlmCall(
           : JSON.stringify(schemaResponse.response)
         : null;
 
-      const result: LlmCallResult = {
-        type: "done",
-        content: responseText ? [{ type: "text" as const, text: responseText }] : [],
-      };
-      return successResult(result);
+      finalContent = responseText ? [{ type: "text" as const, text: responseText }] : [];
+    } else if (!hasTools) {
+      // No tools, no schema - simple text completion
+      console.log("[LlmCall] Simple text completion (no tools, no schema)");
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const response = (await (env.AI.run as any)(model, {
+        messages: conversationMessages,
+        max_tokens: maxTokens,
+      })) as CfAiResponse;
+
+      const responseText = response.response
+        ? typeof response.response === "string"
+          ? response.response
+          : JSON.stringify(response.response)
+        : null;
+
+      finalContent = responseText ? [{ type: "text" as const, text: responseText }] : [];
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    // No tools, no schema - simple text completion
+    // BUILD TURN RESULT
     // ═══════════════════════════════════════════════════════════════════════
-    console.log("[LlmCall] Simple text completion (no tools, no schema)");
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const response = (await (env.AI.run as any)(model, {
-      messages,
-      max_tokens: maxTokens,
-    })) as CfAiResponse;
-
-    const responseText = response.response
-      ? typeof response.response === "string"
-        ? response.response
-        : JSON.stringify(response.response)
-      : null;
-
-    const result: LlmCallResult = {
-      type: "done",
-      content: responseText ? [{ type: "text" as const, text: responseText }] : [],
+    const result: TurnResult = {
+      content: finalContent,
+      toolsInvoked: allToolInvocations,
+      narrative: extractNarrative(finalContent),
+      thinking: null, // CF AI doesn't expose thinking blocks
     };
+
     return successResult(result);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -464,6 +595,14 @@ interface CfAiResponse {
 interface CfToolCall {
   name: string;
   arguments: unknown;
+}
+
+/**
+ * Message format for Cloudflare AI conversation.
+ */
+interface CfAiMessage {
+  role: "system" | "user" | "assistant";
+  content: string | ContentItem[];
 }
 
 /**

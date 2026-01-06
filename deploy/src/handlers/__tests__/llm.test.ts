@@ -1,12 +1,13 @@
 /**
  * Tests for LLM effect handlers.
  *
- * Tests mock env.AI.run which is used internally by runWithTools.
+ * Tests mock env.AI.run which is used internally.
+ * handleLlmCall now returns TurnResult (TypeScript manages tool loop).
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { handleLlmComplete, handleLlmCall, type LlmEnv } from "../llm.js";
-import type { LlmCompleteEffect, LlmCallEffect, LlmCallResult } from "tidepool-generated-ts";
+import { handleLlmComplete, handleLlmCall, type LlmEnv, type TurnResult } from "../llm.js";
+import type { LlmCompleteEffect, LlmCallEffect } from "tidepool-generated-ts";
 
 // Mock AI binding
 function createMockEnv(response: unknown): LlmEnv {
@@ -195,7 +196,7 @@ describe("handleLlmComplete", () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// handleLlmCall tests - Tool-aware LLM calls with runWithTools
+// handleLlmCall tests - Returns TurnResult (TypeScript manages tool loop)
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe("handleLlmCall", () => {
@@ -222,9 +223,8 @@ describe("handleLlmCall", () => {
     };
   }
 
-  describe("end_turn responses (done)", () => {
-    it("returns done with text content", async () => {
-      // CF AI returns text in the `response` field
+  describe("TurnResult format", () => {
+    it("returns TurnResult with text content", async () => {
       const env = createMockLlmCallEnv({
         response: "Hello! How can I help you?",
       });
@@ -232,9 +232,11 @@ describe("handleLlmCall", () => {
       const result = await handleLlmCall(baseEffect, env);
 
       expect(result.type).toBe("success");
-      const llmResult = (result as { type: "success"; value: LlmCallResult }).value;
-      expect(llmResult.type).toBe("done");
-      expect(llmResult.content).toEqual([{ type: "text", text: "Hello! How can I help you?" }]);
+      const turnResult = (result as { type: "success"; value: TurnResult }).value;
+      expect(turnResult.content).toEqual([{ type: "text", text: "Hello! How can I help you?" }]);
+      expect(turnResult.toolsInvoked).toEqual([]);
+      expect(turnResult.narrative).toBe("Hello! How can I help you?");
+      expect(turnResult.thinking).toBeNull();
     });
 
     it("handles empty response", async () => {
@@ -245,9 +247,10 @@ describe("handleLlmCall", () => {
       const result = await handleLlmCall(baseEffect, env);
 
       expect(result.type).toBe("success");
-      const llmResult = (result as { type: "success"; value: LlmCallResult }).value;
-      expect(llmResult.type).toBe("done");
-      expect(llmResult.content).toEqual([]);
+      const turnResult = (result as { type: "success"; value: TurnResult }).value;
+      expect(turnResult.content).toEqual([]);
+      expect(turnResult.toolsInvoked).toEqual([]);
+      expect(turnResult.narrative).toBeNull();
     });
 
     it("handles object response (structured output)", async () => {
@@ -258,14 +261,14 @@ describe("handleLlmCall", () => {
       const result = await handleLlmCall(baseEffect, env);
 
       expect(result.type).toBe("success");
-      const llmResult = (result as { type: "success"; value: LlmCallResult }).value;
-      expect(llmResult.type).toBe("done");
-      expect(llmResult.content).toEqual([{ type: "text", text: '{"intents":[],"unparsed":"hello"}' }]);
+      const turnResult = (result as { type: "success"; value: TurnResult }).value;
+      expect(turnResult.content).toEqual([{ type: "text", text: '{"intents":[],"unparsed":"hello"}' }]);
+      expect(turnResult.narrative).toBe('{"intents":[],"unparsed":"hello"}');
     });
   });
 
-  describe("tool_use responses (needs_tools)", () => {
-    // Effect with tools - triggers Phase 1 (tool decision pass)
+  describe("tool loop execution", () => {
+    // Effect with tools - now TypeScript handles the loop
     const effectWithTools: LlmCallEffect = {
       ...baseEffect,
       eff_tools: [
@@ -280,99 +283,120 @@ describe("handleLlmCall", () => {
       ],
     };
 
-    it("returns needs_tools with tool calls", async () => {
-      // CF AI returns tool_calls array at top level
-      const env = createMockLlmCallEnv({
-        response: "I need to ask you something",
-        tool_calls: [
-          {
-            name: "ask_user",
-            arguments: { question: "What would you like to do?" },
-          },
-        ],
-      });
+    it("executes tool and tracks invocation (UI-requiring tool returns error)", async () => {
+      // Model calls tool, then gets error response and finishes
+      const env: LlmEnv = {
+        AI: {
+          run: vi.fn()
+            .mockResolvedValueOnce({
+              response: "I need to ask you something",
+              tool_calls: [{ name: "ask_user", arguments: { question: "What?" } }],
+            })
+            .mockResolvedValueOnce({
+              response: "Understood, I cannot ask the user directly.",
+            }),
+        } as unknown as Ai,
+      };
 
       const result = await handleLlmCall(effectWithTools, env);
 
       expect(result.type).toBe("success");
-      const llmResult = (result as { type: "success"; value: LlmCallResult }).value;
-      expect(llmResult.type).toBe("needs_tools");
-      if (llmResult.type === "needs_tools") {
-        expect(llmResult.tool_calls).toEqual([
-          {
-            id: "tool_0_ask_user",  // Generated ID since CF AI doesn't provide one
-            name: "ask_user",
-            input: { question: "What would you like to do?" },
-          },
-        ]);
-        expect(llmResult.content).toEqual([{ type: "text", text: "I need to ask you something" }]);
-      }
+      const turnResult = (result as { type: "success"; value: TurnResult }).value;
+
+      // Tool was invoked but returned error
+      expect(turnResult.toolsInvoked).toHaveLength(1);
+      expect(turnResult.toolsInvoked[0].name).toBe("ask_user");
+      expect(turnResult.toolsInvoked[0].isError).toBe(true);
+      expect(turnResult.toolsInvoked[0].result).toContain("requires user interaction");
+
+      // Final content from the second LLM call
+      expect(turnResult.content).toEqual([
+        { type: "text", text: "Understood, I cannot ask the user directly." },
+      ]);
     });
 
-    it("handles multiple tool calls", async () => {
-      const env = createMockLlmCallEnv({
-        tool_calls: [
+    it("handles unknown tools with error result", async () => {
+      const effectWithUnknownTool: LlmCallEffect = {
+        ...baseEffect,
+        eff_tools: [
           {
-            name: "ask_user",
-            arguments: { question: "First question?" },
-          },
-          {
-            name: "ask_user",
-            arguments: { question: "Second question?" },
+            type: "function",
+            function: {
+              name: "unknown_tool",
+              description: "An unknown tool",
+              parameters: { type: "object", properties: {}, required: [] },
+            },
           },
         ],
-      });
+      };
 
-      const result = await handleLlmCall(effectWithTools, env);
+      const env: LlmEnv = {
+        AI: {
+          run: vi.fn()
+            .mockResolvedValueOnce({
+              tool_calls: [{ name: "unknown_tool", arguments: {} }],
+            })
+            .mockResolvedValueOnce({
+              response: "I see that tool is not available.",
+            }),
+        } as unknown as Ai,
+      };
+
+      const result = await handleLlmCall(effectWithUnknownTool, env);
 
       expect(result.type).toBe("success");
-      const llmResult = (result as { type: "success"; value: LlmCallResult }).value;
-      expect(llmResult.type).toBe("needs_tools");
-      if (llmResult.type === "needs_tools") {
-        expect(llmResult.tool_calls).toHaveLength(2);
-        // Generated IDs include index and tool name
-        expect(llmResult.tool_calls[0].id).toBe("tool_0_ask_user");
-        expect(llmResult.tool_calls[1].id).toBe("tool_1_ask_user");
-      }
+      const turnResult = (result as { type: "success"; value: TurnResult }).value;
+
+      expect(turnResult.toolsInvoked).toHaveLength(1);
+      expect(turnResult.toolsInvoked[0].name).toBe("unknown_tool");
+      expect(turnResult.toolsInvoked[0].isError).toBe(true);
+      expect(turnResult.toolsInvoked[0].result).toContain("Unknown tool");
     });
 
     it("filters out malformed tool_calls with missing name", async () => {
-      // CF AI sometimes returns [{}] with empty objects (llama-3.3 bug)
-      const env = createMockLlmCallEnv({
-        response: '{"intents": []}',
-        tool_calls: [
-          {} as { name: string; arguments: unknown }, // malformed - no name
-          { name: "ask_user", arguments: { question: "test" } },
-          { name: undefined as unknown as string, arguments: {} }, // malformed - undefined name
-        ],
-      });
+      const env: LlmEnv = {
+        AI: {
+          run: vi.fn()
+            .mockResolvedValueOnce({
+              response: '{"intents": []}',
+              tool_calls: [
+                {} as { name: string; arguments: unknown }, // malformed
+                { name: "ask_user", arguments: { question: "test" } },
+              ],
+            })
+            .mockResolvedValueOnce({
+              response: "Final response",
+            }),
+        } as unknown as Ai,
+      };
 
       const result = await handleLlmCall(effectWithTools, env);
 
       expect(result.type).toBe("success");
-      const llmResult = (result as { type: "success"; value: LlmCallResult }).value;
-      expect(llmResult.type).toBe("needs_tools");
-      if (llmResult.type === "needs_tools") {
-        // Only the valid tool call should be included
-        expect(llmResult.tool_calls).toHaveLength(1);
-        expect(llmResult.tool_calls[0].name).toBe("ask_user");
-      }
+      const turnResult = (result as { type: "success"; value: TurnResult }).value;
+
+      // Only valid tool call should be executed
+      expect(turnResult.toolsInvoked).toHaveLength(1);
+      expect(turnResult.toolsInvoked[0].name).toBe("ask_user");
     });
 
-    it("returns done when all tool_calls are malformed", async () => {
+    it("returns immediately when all tool_calls are malformed", async () => {
       const env = createMockLlmCallEnv({
         response: '{"intents": [], "unparsed": "test"}',
-        tool_calls: [{}] as Array<{ name: string; arguments: unknown }>, // All malformed
+        tool_calls: [{}] as Array<{ name: string; arguments: unknown }>,
       });
 
       const result = await handleLlmCall(effectWithTools, env);
 
       expect(result.type).toBe("success");
-      const llmResult = (result as { type: "success"; value: LlmCallResult }).value;
-      expect(llmResult.type).toBe("done");
-      expect(llmResult.content).toHaveLength(1);
-      if (llmResult.content[0].type === "text") {
-        expect(llmResult.content[0].text).toContain("intents");
+      const turnResult = (result as { type: "success"; value: TurnResult }).value;
+
+      // No tools executed
+      expect(turnResult.toolsInvoked).toEqual([]);
+      // Content from the response
+      expect(turnResult.content).toHaveLength(1);
+      if (turnResult.content[0].type === "text") {
+        expect(turnResult.content[0].text).toContain("intents");
       }
     });
   });
@@ -398,7 +422,6 @@ describe("handleLlmCall", () => {
     });
 
     it("passes tools in OpenAI format to CF AI", async () => {
-      // WASM sends OpenAI format: {type: "function", function: {...}}
       const tools = [
         {
           type: "function",
@@ -421,11 +444,9 @@ describe("handleLlmCall", () => {
 
       await handleLlmCall(effect, env);
 
-      // Verify AI.run was called with tools in OpenAI format
       expect(env.AI.run).toHaveBeenCalled();
       const callArgs = (env.AI.run as ReturnType<typeof vi.fn>).mock.calls[0][1];
       expect(callArgs.tools).toBeDefined();
-      // Tools should be in OpenAI format: {type: "function", function: {...}}
       expect(callArgs.tools[0].type).toBe("function");
       expect(callArgs.tools[0].function.name).toBe("ask_user");
       expect(callArgs.tools[0].function.description).toBe("Ask user a question");
@@ -509,7 +530,7 @@ describe("handleLlmCall", () => {
       );
     });
 
-    it("uses specified model for all phases when tools and schema provided", async () => {
+    it("uses specified model for tool loop and schema phases", async () => {
       const customModel = "@cf/meta/llama-3.2-1b-instruct";
       const effectWithModelAndTools: LlmCallEffect = {
         ...baseEffect,
@@ -526,18 +547,17 @@ describe("handleLlmCall", () => {
           },
         ],
       };
-      // Simulate Phase 1 returning no tool calls, triggering Phase 2
+      // Tool loop iteration 1: no tools called, then schema pass
       const env: LlmEnv = {
         AI: {
           run: vi.fn()
-            .mockResolvedValueOnce({ response: "" })        // Phase 1: no tools called
-            .mockResolvedValueOnce({ response: '{"result": "done"}' }),  // Phase 2: structured output
+            .mockResolvedValueOnce({ response: "" })  // Tool loop: no tools called
+            .mockResolvedValueOnce({ response: '{"result": "done"}' }),  // Schema pass
         } as unknown as Ai,
       };
 
       await handleLlmCall(effectWithModelAndTools, env);
 
-      // Both phases should use the custom model
       expect(env.AI.run).toHaveBeenCalledTimes(2);
       expect(env.AI.run).toHaveBeenNthCalledWith(1, customModel, expect.any(Object));
       expect(env.AI.run).toHaveBeenNthCalledWith(2, customModel, expect.any(Object));
