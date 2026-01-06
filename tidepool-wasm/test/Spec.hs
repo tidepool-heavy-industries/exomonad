@@ -16,6 +16,7 @@ import qualified CodegenSyncSpec
 import qualified RoundtripSpec
 import qualified RegistrySpec
 import qualified TypedToolSpec
+import qualified ConversionSpec
 
 main :: IO ()
 main = hspec $ do
@@ -34,3 +35,4 @@ main = hspec $ do
     describe "Roundtrip" RoundtripSpec.spec
     describe "Registry" RegistrySpec.spec
     describe "TypedTool" TypedToolSpec.spec
+    describe "Conversion" ConversionSpec.spec
