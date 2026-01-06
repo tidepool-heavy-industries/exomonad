@@ -26,6 +26,9 @@ module Tidepool.Wasm.WireTypes
   , WireToolCall(..)
   , LlmCallResult(..)
 
+    -- * Tool Result Outcomes (tool dispatcher results)
+  , ToolResultOutcome(..)
+
     -- * Results (TypeScript → WASM)
   , EffectResult(..)
   , TelegramAskResult(..)
@@ -234,6 +237,49 @@ instance FromJSON LlmCallResult where
         <$> o .: "tool_calls"
         <*> o .: "content"
       _ -> fail $ "Unknown LlmCallResult type: " ++ T.unpack typ
+
+
+-- | Tool dispatcher result outcome - what a tool execution produces.
+--
+-- This is separate from WCBToolResult (which is for Anthropic message blocks).
+-- ToolResultOutcome represents the result of executing a tool via the dispatcher.
+--
+-- JSON encoding uses "tag" discriminator:
+-- - @{tag: "success", value: {...}}@
+-- - @{tag: "break", reason: "..."}@
+-- - @{tag: "transition", target: "nodeA", payload: {...}}@  (NEW: tool-initiated transitions)
+data ToolResultOutcome
+  = TROSuccess Value
+    -- ^ Tool succeeded with output value
+  | TROBreak Text
+    -- ^ Tool requested turn break
+  | TROTransition Text Value
+    -- ^ Tool-initiated graph transition (target node name + payload)
+  deriving stock (Show, Eq, Generic)
+
+instance ToJSON ToolResultOutcome where
+  toJSON (TROSuccess val) = object
+    [ "tag" .= ("success" :: Text)
+    , "value" .= val
+    ]
+  toJSON (TROBreak reason) = object
+    [ "tag" .= ("break" :: Text)
+    , "reason" .= reason
+    ]
+  toJSON (TROTransition target payload) = object
+    [ "tag" .= ("transition" :: Text)
+    , "target" .= target
+    , "payload" .= payload
+    ]
+
+instance FromJSON ToolResultOutcome where
+  parseJSON = withObject "ToolResultOutcome" $ \o -> do
+    (tag :: Text) <- o .: "tag"
+    case tag of
+      "success" -> TROSuccess <$> o .: "value"
+      "break" -> TROBreak <$> o .: "reason"
+      "transition" -> TROTransition <$> o .: "target" <*> o .: "payload"
+      _ -> fail $ "Unknown ToolResultOutcome tag: " ++ T.unpack tag
 
 
 -- ════════════════════════════════════════════════════════════════════════════

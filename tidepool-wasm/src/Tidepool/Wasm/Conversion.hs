@@ -16,11 +16,13 @@ module Tidepool.Wasm.Conversion
     contentBlockToWire
   , contentBlocksToWireMessages
   , messageToWire
+  , toToolResultOutcome
 
     -- * Wire → Native (for receiving from TypeScript)
   , wireContentBlockToNative
   , wireMessageToNative
   , wireMessagesToNative
+  , fromToolResultOutcome
 
     -- * TurnResult parsing (from TypeScript response)
   , parseWireTurnResult
@@ -47,19 +49,24 @@ import qualified Data.Text.Lazy.Encoding as TLE
 import GHC.Generics (Generic)
 
 -- Native types from tidepool-core
+import qualified Tidepool.Anthropic.Types as Anthropic
 import Tidepool.Anthropic.Types
   ( ContentBlock(..)
   , Message(..)
   , Role(..)
   , ToolUse(..)
-  , ToolResult(..)
   )
-import Tidepool.Effect.Types (TurnResult(..), ToolInvocation(..))
+import qualified Tidepool.Effect.Types as Effect
+import Tidepool.Effect.Types
+  ( TurnResult(..)
+  , ToolInvocation(..)
+  )
 
 -- Wire types
 import Tidepool.Wasm.WireTypes
   ( WireMessage(..)
   , WireContentBlock(..)
+  , ToolResultOutcome(..)
   )
 
 
@@ -163,7 +170,7 @@ wireContentBlockToNative = \case
       }
 
   WCBToolResult tid content isErr ->
-    ToolResultBlock ToolResult
+    ToolResultBlock Anthropic.ToolResult
       { toolResultId = tid
       , toolResultContent = content
       , toolResultIsError = isErr
@@ -246,4 +253,36 @@ parseWireTurnResult val =
       , trNarrative = narrative
       , trThinking = thinking
       }
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- TOOL RESULT OUTCOME CONVERSIONS (dispatcher results)
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Convert a parameterized ToolResult to wire ToolResultOutcome.
+--
+-- Note: This loses type information at the boundary (parameterized → untyped).
+-- Type safety is restored at the executor level via ConvertTransitionHint typeclass.
+toToolResultOutcome :: Effect.ToolResult targets -> ToolResultOutcome
+toToolResultOutcome = \case
+  Effect.ToolSuccess val ->
+    TROSuccess val
+  Effect.ToolBreak reason ->
+    TROBreak reason
+  Effect.ToolTransition target payload ->
+    TROTransition target payload
+
+
+-- | Convert a wire ToolResultOutcome back to untyped ToolResult.
+--
+-- Returns ToolResult with empty target list ('[]') since type information is lost at FFI boundary.
+-- The executor's ConvertTransitionHint typeclass will convert to properly-typed GotoChoice.
+fromToolResultOutcome :: ToolResultOutcome -> Effect.ToolResult '[]
+fromToolResultOutcome = \case
+  TROSuccess val ->
+    Effect.ToolSuccess val
+  TROBreak reason ->
+    Effect.ToolBreak reason
+  TROTransition target payload ->
+    Effect.ToolTransition target payload
 

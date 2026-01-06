@@ -20,7 +20,6 @@ packages:
 
     -- Tooling packages (Agent 8)
     tools/sleeptime-logs
-    tools/impact-analysis
 
     -- Vendored dependencies (avoid source-repository-package git issues in worktrees)
     deps/freer-simple
