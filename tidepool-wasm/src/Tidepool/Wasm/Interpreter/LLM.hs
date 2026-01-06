@@ -37,6 +37,7 @@ module Tidepool.Wasm.Interpreter.LLM
 import Control.Monad.Freer (Eff, Member, interpret)
 import Control.Monad.Freer.Coroutine (Yield, yield)
 import Data.Aeson (Value)
+import Data.Text (Text)
 
 import Tidepool.Effect.Types
   ( LLM(..)
@@ -51,6 +52,13 @@ import Tidepool.Wasm.Conversion
   ( contentBlocksToWireMessages
   , parseWireTurnResult
   )
+
+
+-- | Default node name used when no context is provided.
+--
+-- In production, this should be passed from the graph executor context.
+defaultNodeName :: Text
+defaultNodeName = "graph-node"
 
 
 -- | Interpret @LLM@ effect by yielding to TypeScript.
@@ -69,7 +77,7 @@ import Tidepool.Wasm.Conversion
 --
 -- = Node Name
 --
--- Currently uses "graph-node" as a placeholder. In production, this should
+-- Currently uses 'defaultNodeName' as a placeholder. In production, this should
 -- be passed from the graph executor context.
 runLLMAsYield
   :: Member (Yield SerializableEffect EffectResult) effs
@@ -85,7 +93,7 @@ runLLMAsYield = interpret handleLLM
 
       -- Build the effect to yield
       let effect = EffLlmCall
-            { effLlmNode = "graph-node"  -- TODO: Pass from executor context
+            { effLlmNode = defaultNodeName
             , effLlmMessages = wireMessages
             , effLlmSchema = Just outputSchema
             , effLlmTools = toolDefs

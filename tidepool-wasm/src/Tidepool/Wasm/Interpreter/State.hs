@@ -16,7 +16,7 @@
 --
 -- = State Key
 --
--- Currently uses "graphState" as the default key. In production, this could
+-- Currently uses 'defaultStateKey' as the default key. In production, this could
 -- be parameterized per-graph or per-node.
 --
 -- = Type Safety
@@ -40,9 +40,16 @@ import Tidepool.Wasm.WireTypes
   )
 
 
+-- | Default state key used when no custom key is provided.
+--
+-- In production, this could be parameterized per-graph or per-node.
+defaultStateKey :: Text
+defaultStateKey = "graphState"
+
+
 -- | Interpret @State s@ effect by yielding to TypeScript.
 --
--- Uses "graphState" as the default state key.
+-- Uses 'defaultStateKey' as the default state key.
 -- The state type @s@ must have @ToJSON@ and @FromJSON@ instances.
 --
 -- State is stored in the Durable Object and persists across FFI calls.
@@ -55,7 +62,7 @@ runStateAsYield
   => s  -- ^ Initial state (used if storage is empty)
   -> Eff (State s ': effs) a
   -> Eff effs a
-runStateAsYield = runStateAsYieldWith "graphState"
+runStateAsYield = runStateAsYieldWith defaultStateKey
 
 
 -- | Interpret @State s@ effect with a custom state key.
