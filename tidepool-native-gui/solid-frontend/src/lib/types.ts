@@ -102,3 +102,65 @@ export function photoAction(data: string, mimeType: string): PhotoAction {
 export function buttonAction(id: string): ChoiceAction {
   return { type: "choice", index: parseInt(id, 10) };
 }
+
+// ============================================================================
+// GraphExport Types (from /graph/info endpoint)
+// ============================================================================
+
+/** Complete graph export for visualization. */
+export interface GraphExport {
+  entryType: string | null;
+  exitType: string | null;
+  nodes: Record<string, NodeExport>;
+  edges: EdgeExport[];
+}
+
+/** Node export with full metadata. */
+export interface NodeExport {
+  kind: "LLM" | "Logic";
+  needs: string[];
+  schema: SchemaExport | null;
+  template: TemplateExport | null;
+  system: TemplateExport | null;
+  tools: ToolExport[];
+  memory: MemoryExport | null;
+  transitions: string[];
+  canExit: boolean;
+  hasVision: boolean;
+}
+
+/** Edge between nodes. */
+export interface EdgeExport {
+  from: string;
+  to: string;
+  payload: string | null;
+  kind: "implicit" | "explicit";
+}
+
+/** Schema info for structured output. */
+export interface SchemaExport {
+  typeName: string;
+  fields: Array<{ name: string; type: string; required: boolean }>;
+  jsonSchema: unknown;
+}
+
+/** Template info for prompt rendering. */
+export interface TemplateExport {
+  typeName: string;
+  path: string;
+  deps: string[];
+  accessedFields: string[];
+  contextType: string;
+}
+
+/** Memory info for persistent state. */
+export interface MemoryExport {
+  typeName: string;
+}
+
+/** Tool info for LLM-invocable actions. */
+export interface ToolExport {
+  name: string;
+  description: string;
+  inputSchema: unknown;
+}

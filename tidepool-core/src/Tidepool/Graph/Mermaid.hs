@@ -66,6 +66,7 @@ data MermaidConfig = MermaidConfig
   , mcShowNodeKind :: Bool       -- ^ Show LLM/Logic labels in nodes
   , mcEntryLabel :: Text         -- ^ Label for entry node
   , mcExitLabel :: Text          -- ^ Label for exit node
+  , mcIncludeComments :: Bool    -- ^ Include structured comments for LLM context
   }
   deriving (Show, Eq)
 
@@ -77,6 +78,7 @@ defaultConfig = MermaidConfig
   , mcShowNodeKind = True
   , mcEntryLabel = "start"
   , mcExitLabel = "end"
+  , mcIncludeComments = True
   }
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -158,7 +160,71 @@ toMermaidWithConfig config info = T.unlines $
 -- | Generate node declarations.
 nodeDeclarations :: MermaidConfig -> GraphInfo -> [Text]
 nodeDeclarations config info =
-  "    %% Nodes" : map (renderNode config) info.giNodes
+  "    %% Nodes" : concatMap (renderNodeWithComments config) info.giNodes
+
+-- | Render a node with optional structured comments.
+renderNodeWithComments :: MermaidConfig -> NodeInfo -> [Text]
+renderNodeWithComments config node =
+  comments ++ [declaration]
+  where
+    comments = if config.mcIncludeComments
+               then renderNodeComments node
+               else []
+    declaration = renderNode config node
+
+-- | Render structured comments for a node (for LLM context).
+renderNodeComments :: NodeInfo -> [Text]
+renderNodeComments node = filter (not . T.null)
+  [ "    %% NODE: " <> node.niName
+  , "    %% kind: " <> kindText node.niKind
+  , renderTemplateComment node.niTemplate
+  , renderSchemaComment node.niSchema
+  , renderToolsComment node.niToolInfos
+  , renderMemoryComment node.niMemory
+  , renderTransitionsComment node
+  ]
+  where
+    kindText RuntimeLLM = "LLM"
+    kindText RuntimeLogic = "Logic"
+
+-- | Render template comment.
+renderTemplateComment :: Maybe TemplateInfo -> Text
+renderTemplateComment Nothing = ""
+renderTemplateComment (Just ti) = T.intercalate "\n"
+  [ "    %% template: " <> T.pack ti.tiPath
+  , "    %%   deps: " <> T.pack (show ti.tiDeps)
+  , "    %%   fields: " <> T.pack (show ti.tiAccessedFields)
+  , "    %%   context: " <> ti.tiContextType
+  ]
+
+-- | Render schema comment.
+renderSchemaComment :: Maybe SchemaInfo -> Text
+renderSchemaComment Nothing = ""
+renderSchemaComment (Just si) = T.intercalate "\n"
+  [ "    %% schema: " <> si.siTypeName
+  , "    %%   fields: " <> renderFields si.siFields
+  ]
+  where
+    renderFields = T.intercalate ", " . map (\(n,t,_) -> n <> ": " <> t)
+
+-- | Render tools comment.
+renderToolsComment :: [ToolInfo] -> Text
+renderToolsComment [] = "    %% tools: none"
+renderToolsComment tools = "    %% tools: " <> T.intercalate ", " (map (.tiName) tools)
+
+-- | Render memory comment.
+renderMemoryComment :: Maybe MemoryInfo -> Text
+renderMemoryComment Nothing = ""
+renderMemoryComment (Just mi) = "    %% memory: " <> mi.miTypeName
+
+-- | Render transitions comment.
+renderTransitionsComment :: NodeInfo -> Text
+renderTransitionsComment node
+  | null node.niGotoTargets && not node.niHasGotoExit = ""
+  | otherwise = "    %% transitions: " <> T.intercalate ", " targets
+  where
+    targets = map fst node.niGotoTargets
+           ++ ["Exit" | node.niHasGotoExit]
 
 -- | Render a single node declaration.
 renderNode :: MermaidConfig -> NodeInfo -> Text
@@ -223,10 +289,10 @@ nodeToNodeEdges config info node =
     -- Schema → Input edges (implicit)
     schemaEdges = case node.niSchema of
       Nothing -> []
-      Just schemaType ->
-        [ "    " <> escapeName node.niName <> " --> |" <> typeLabel config schemaType <> "| " <> escapeName target.niName
+      Just schemaInfo ->
+        [ "    " <> escapeName node.niName <> " --> |" <> typeLabel config schemaInfo.siType <> "| " <> escapeName target.niName
         | target <- info.giNodes
-        , target.niInput == Just schemaType
+        , target.niInput == Just schemaInfo.siType
         , target.niName /= node.niName  -- No self-loops from schema
         ]
 
@@ -362,10 +428,10 @@ nodeStateEdges config info node =
     -- Schema → Input transitions (implicit data flow)
     schemaTransitions = case node.niSchema of
       Nothing -> []
-      Just schemaType ->
-        [ "    " <> escapeName node.niName <> " --> " <> escapeName target.niName <> ": " <> typeLabel config schemaType
+      Just schemaInfo ->
+        [ "    " <> escapeName node.niName <> " --> " <> escapeName target.niName <> ": " <> typeLabel config schemaInfo.siType
         | target <- info.giNodes
-        , target.niInput == Just schemaType
+        , target.niInput == Just schemaInfo.siType
         , target.niName /= node.niName
         ]
 
@@ -472,7 +538,7 @@ makeMessage config info fromNode toNode =
           Nothing ->
             -- Must be Schema → Needs
             case node.niSchema of
-              Just schemaType -> typeLabel config schemaType
+              Just schemaInfo -> typeLabel config schemaInfo.siType
               Nothing -> ""
 
 -- | Find a node by name.
@@ -502,7 +568,7 @@ hasIncomingEdge info targetName = any sendsTo info.giNodes
       -- Schema→Input edge to this node?
       case node.niSchema of
         Nothing -> False
-        Just schemaType ->
+        Just schemaInfo ->
           case findNodeByName info targetName of
             Nothing -> False
-            Just target -> target.niInput == Just schemaType
+            Just target -> target.niInput == Just schemaInfo.siType

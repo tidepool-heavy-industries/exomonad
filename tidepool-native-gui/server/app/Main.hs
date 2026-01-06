@@ -24,4 +24,5 @@ main = do
     , scExecutorConfig = executorConfig
     , scMode = mode
     , scAgent = simpleAgent
+    , scGraphInfo = Nothing  -- SimpleAgent is a plain agent, no graph to visualize
     }

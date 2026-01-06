@@ -21,6 +21,8 @@ import Tidepool.Graph.Types (type (:@), Input, Schema, UsesEffects)
 import Tidepool.Graph.Generic (GraphMode(..), Entry, Exit, LLMNode, LogicNode)
 import Tidepool.Graph.Goto (Goto)
 import Tidepool.Graph.Mermaid (graphToMermaid)
+import Tidepool.Schema (HasJSONSchema(..), JSONSchema(..), SchemaType(..))
+import qualified Data.Map.Strict as Map
 import Tidepool.Template.DependencyTree
   ( parseTemplateIncludes
   , parseTemplateExtends
@@ -33,6 +35,32 @@ import Tidepool.Template.DependencyTree
 
 data InputA
 data OutputB
+data TypeX
+data TypeY
+data TypeZ
+
+-- Minimal HasJSONSchema instances for test types
+instance HasJSONSchema OutputB where
+  jsonSchema = JSONSchema
+    { schemaType = TObject
+    , schemaDescription = Nothing
+    , schemaProperties = Map.empty
+    , schemaRequired = []
+    , schemaItems = Nothing
+    , schemaEnum = Nothing
+    , schemaOneOf = Nothing
+    }
+
+instance HasJSONSchema TypeZ where
+  jsonSchema = JSONSchema
+    { schemaType = TObject
+    , schemaDescription = Nothing
+    , schemaProperties = Map.empty
+    , schemaRequired = []
+    , schemaItems = Nothing
+    , schemaEnum = Nothing
+    , schemaOneOf = Nothing
+    }
 
 -- | Simple graph for testing Mermaid output: Entry -> llmNode -> Exit
 data SimpleTestGraph mode = SimpleTestGraph
@@ -41,10 +69,6 @@ data SimpleTestGraph mode = SimpleTestGraph
   , stgExit    :: mode :- Exit OutputB
   }
   deriving Generic
-
-data TypeX
-data TypeY
-data TypeZ
 
 -- | Branching graph with Logic node for more complex Mermaid output
 -- Logic nodes use UsesEffects with Goto targets, not Schema

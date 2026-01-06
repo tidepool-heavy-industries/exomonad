@@ -40,7 +40,7 @@ import Tidepool.Graph.Reify (ReifyRecordGraph(..), makeGraphInfo)
 import Tidepool.Graph.Tool (ToolDef(..))
 import Tidepool.Graph.Template (TemplateDef(..), TypedTemplate, typedTemplateFile)
 import Tidepool.Graph.Example.Context (ClassifyContext(..))
-import Tidepool.Schema (HasJSONSchema(..), SchemaType(..), objectSchema, arraySchema, describeField, emptySchema)
+import Tidepool.Schema (HasJSONSchema(..), SchemaType(..), objectSchema, arraySchema, describeField, emptySchema, enumSchema)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- EXAMPLE TYPES
@@ -49,6 +49,22 @@ import Tidepool.Schema (HasJSONSchema(..), SchemaType(..), objectSchema, arraySc
 newtype Message = Message { msgContent :: String }
 data Intent = IntentRefund | IntentQuestion | IntentComplaint
 newtype Response = Response { respText :: String }
+
+-- HasJSONSchema instances for example types (normally derived via TH)
+instance HasJSONSchema Message where
+  jsonSchema = objectSchema
+    [ ("msgContent", describeField "msgContent" "The message content" (emptySchema TString))
+    ]
+    ["msgContent"]
+
+instance HasJSONSchema Intent where
+  jsonSchema = enumSchema ["refund", "question", "complaint"]
+
+instance HasJSONSchema Response where
+  jsonSchema = objectSchema
+    [ ("respText", describeField "respText" "The response text" (emptySchema TString))
+    ]
+    ["respText"]
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- V2 TOOL EXAMPLE
