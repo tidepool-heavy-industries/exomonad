@@ -16,10 +16,10 @@ import qualified Tidepool.Graph.Generic as G
 
 data SupportGraph mode = SupportGraph
   { sgEntry    :: mode :- G.Entry Message
-  , sgClassify :: mode :- G.LLMNode :@ Needs '[Message] :@ Template ClassifyTpl :@ Schema Intent
-  , sgRoute    :: mode :- G.LogicNode :@ Needs '[Intent] :@ UsesEffects '[Goto "refund", Goto "faq"]
-  , sgRefund   :: mode :- G.LLMNode :@ Needs '[Message] :@ Template RefundTpl :@ Schema Response
-  , sgFaq      :: mode :- G.LLMNode :@ Needs '[Message] :@ Template FaqTpl :@ Schema Response
+  , sgClassify :: mode :- G.LLMNode :@ Input Message :@ Template ClassifyTpl :@ Schema Intent
+  , sgRoute    :: mode :- G.LogicNode :@ Input Intent :@ UsesEffects '[Goto "refund", Goto "faq"]
+  , sgRefund   :: mode :- G.LLMNode :@ Input Message :@ Template RefundTpl :@ Schema Response
+  , sgFaq      :: mode :- G.LLMNode :@ Input Message :@ Template FaqTpl :@ Schema Response
   , sgExit     :: mode :- G.Exit Response
   }
   deriving Generic
@@ -59,8 +59,8 @@ The `NodeHandler` type family computes handler types from node definitions:
 |-----------------|--------------|
 | `G.Entry Message` | `Proxy Message` |
 | `G.Exit Response` | `Proxy Response` |
-| `G.LLMNode :@ Needs '[A] :@ Template T :@ Schema B` | `A -> Eff es (TemplateContext T)` |
-| `G.LogicNode :@ Needs '[A] :@ UsesEffects effs` | `A -> Eff es (GotoChoice targets)` |
+| `G.LLMNode :@ Input A :@ Template T :@ Schema B` | `A -> Eff es (TemplateContext T)` |
+| `G.LogicNode :@ Input A :@ UsesEffects effs` | `A -> Eff es (GotoChoice targets)` |
 
 **Key insight: LLM handlers return template context, not Schema output.**
 The runner handles template rendering, LLM API call, and structured output parsing.
@@ -117,7 +117,7 @@ Calls a language model with a template and produces structured output:
 
 ```haskell
 gClassify :: mode :- G.LLMNode
-    :@ Needs '[Message]           -- Input dependencies
+    :@ Input Message              -- Input type (single type, use tuple for multiple)
     :@ Template ClassifyTpl       -- Jinja template for prompt
     :@ Schema Intent              -- Structured output type
 ```
@@ -128,7 +128,7 @@ Pure or effectful routing logic:
 
 ```haskell
 gRoute :: mode :- G.LogicNode
-    :@ Needs '[Intent]
+    :@ Input Intent
     :@ UsesEffects '[Goto "gProcess" Data, Goto Exit Response]
 ```
 
@@ -137,14 +137,14 @@ gRoute :: mode :- G.LogicNode
 Annotations are attached with `:@` (left-associative):
 
 ```haskell
-gNode :: mode :- G.LLMNode :@ Needs '[A] :@ Template T :@ Schema B :@ Vision :@ Tools '[MyTool]
+gNode :: mode :- G.LLMNode :@ Input A :@ Template T :@ Schema B :@ Vision :@ Tools '[MyTool]
 ```
 
 ### Available Annotations
 
 | Annotation | Applies To | Purpose |
 |------------|-----------|---------|
-| `Needs '[T1, T2]` | LLM, Logic | Input dependencies (becomes handler params) |
+| `Input T` | LLM, Logic | Input type (single type; use tuple `(A, B)` for multiple inputs) |
 | `Schema T` | LLM | Output type (JSON schema derived) |
 | `Template T` | LLM | User prompt template |
 | `System T` | LLM | System prompt template (optional) |
@@ -160,7 +160,7 @@ Marks an LLM node as executed via Claude Code subprocess:
 
 ```haskell
 gWork :: mode :- G.LLMNode
-    :@ Needs '[BeadInfo]
+    :@ Input BeadInfo
     :@ Template WorkTpl
     :@ Schema WorkResult
     :@ ClaudeCode 'Sonnet ('Just "/path/to/worktree")
@@ -178,7 +178,7 @@ Logic nodes transition to other nodes via `Goto` effects. Handlers return `GotoC
 ```haskell
 -- Graph definition uses Goto in UsesEffects
 gRoute :: mode :- G.LogicNode
-    :@ Needs '[Intent]
+    :@ Input Intent
     :@ UsesEffects '[Goto "gProcess" Data, Goto "gFallback" Data, Goto Exit Response]
 
 -- Handler returns GotoChoice with To markers
@@ -340,14 +340,14 @@ Compile-time validation via type families:
 
 - `HasEntry` - Must have an Entry node
 - `HasExit` - Must have an Exit node
-- `AllNeedsSatisfied` - All Needs provided by Schema/Entry
+- `InputSatisfied` - Input type provided by Schema/Entry
 - `AllGotoTargetsExist` - All Goto targets reference existing nodes
 
 Error messages are clear:
 
 ```
 Graph validation failed: unsatisfied dependency
-Node 'gClassify' needs type: Message
+Node 'gClassify' has Input: Message
 But no node provides it via Schema and Entry doesn't provide it.
 ```
 

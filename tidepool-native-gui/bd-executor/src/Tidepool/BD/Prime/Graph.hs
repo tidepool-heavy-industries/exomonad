@@ -42,7 +42,7 @@ import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
 import GHC.Generics (Generic)
 
-import Tidepool.Graph.Types (type (:@), Needs, UsesEffects, Exit)
+import Tidepool.Graph.Types (type (:@), Input, UsesEffects, Exit)
 import Tidepool.Graph.Generic (GraphMode(..), AsHandler)
 import qualified Tidepool.Graph.Generic as G (Entry, Exit, LogicNode, ValidGraphRecord)
 import Tidepool.Graph.Goto (Goto, gotoChoice, gotoExit)
@@ -123,15 +123,15 @@ data UrchinPrimeGraph mode = UrchinPrimeGraph
   { upEntry  :: mode :- G.Entry ()
     -- ^ Entry point, no input needed
 
-  , upDetect :: mode :- G.LogicNode :@ Needs '[()]
+  , upDetect :: mode :- G.LogicNode :@ Input ()
                :@ UsesEffects DetectGotos
     -- ^ Detect worktree info. Exits early with error if not in git repo.
 
-  , upGather :: mode :- G.LogicNode :@ Needs '[WorktreeInfo]
+  , upGather :: mode :- G.LogicNode :@ Input WorktreeInfo
                :@ UsesEffects GatherGotos
     -- ^ Gather full context using Git + BD effects.
 
-  , upRender :: mode :- G.LogicNode :@ Needs '[PrimeContext]
+  , upRender :: mode :- G.LogicNode :@ Input PrimeContext
                :@ UsesEffects RenderGotos
     -- ^ Render context to markdown.
 

@@ -32,7 +32,7 @@ import Tidepool.Wasm.Prelude
 -- The compute node logs a message (yielding to TypeScript) then exits with n+1.
 data TestGraph mode = TestGraph
   { entry   :: mode :- Entry Int
-  , compute :: mode :- LogicNode :@ Needs '[Int] :@ UsesEffects '[Goto ExitTarget Int]
+  , compute :: mode :- LogicNode :@ Input Int :@ UsesEffects '[Goto ExitTarget Int]
   , exit    :: mode :- Exit Int
   }
   deriving Generic

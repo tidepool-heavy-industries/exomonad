@@ -49,7 +49,7 @@ import qualified Data.Text as T
 import Data.Text (Text)
 import GHC.Generics (Generic)
 
-import Tidepool.Graph.Types (type (:@), Needs, UsesEffects, Exit, Self)
+import Tidepool.Graph.Types (type (:@), Input, UsesEffects, Exit, Self)
 import Tidepool.Graph.Generic (GraphMode(..), type (:-))
 import qualified Tidepool.Graph.Generic as G (Entry, Exit, LogicNode)
 import Tidepool.Graph.Goto (Goto, GotoChoice, To, gotoChoice, gotoExit)
@@ -106,18 +106,18 @@ instance ToJSON Response where
 data ExampleGraph mode = ExampleGraph
   { entry           :: mode :- G.Entry GraphInput
   , classify        :: mode :- G.LogicNode
-                           :@ Needs '[GraphInput]
+                           :@ Input GraphInput
                            :@ UsesEffects '[Goto "handleGreeting" UserMessage
                                           , Goto "handleQuestion" UserMessage
                                           , Goto "handleStatement" UserMessage]
   , handleGreeting  :: mode :- G.LogicNode
-                           :@ Needs '[UserMessage]
+                           :@ Input UserMessage
                            :@ UsesEffects '[Goto Exit Response]
   , handleQuestion  :: mode :- G.LogicNode
-                           :@ Needs '[UserMessage]
+                           :@ Input UserMessage
                            :@ UsesEffects '[Goto Exit Response, Goto Self UserMessage]
   , handleStatement :: mode :- G.LogicNode
-                           :@ Needs '[UserMessage]
+                           :@ Input UserMessage
                            :@ UsesEffects '[Goto Exit Response]
   , exit            :: mode :- G.Exit Response
   }

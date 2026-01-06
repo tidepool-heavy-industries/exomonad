@@ -13,7 +13,7 @@ module ImpactAnalysis.Graph
 import GHC.Generics (Generic)
 import Tidepool.Graph.Generic (GraphMode(..), Entry, LogicNode)
 import qualified Tidepool.Graph.Generic as G
-import Tidepool.Graph.Types (Needs, UsesEffects, Exit, type (:@))
+import Tidepool.Graph.Types (Input, UsesEffects, Exit, type (:@))
 import Tidepool.Graph.Goto (Goto)
 
 import ImpactAnalysis.Types
@@ -26,7 +26,7 @@ import ImpactAnalysis.Types
 data ImpactGraph mode = ImpactGraph
   { igEntry   :: mode :- Entry ImpactInput
   , igAnalyze :: mode :- LogicNode
-                    :@ Needs '[ImpactInput]
+                    :@ Input ImpactInput
                     :@ UsesEffects '[Goto Exit ImpactOutput]
   , igExit    :: mode :- G.Exit ImpactOutput
   }

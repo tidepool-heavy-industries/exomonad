@@ -114,5 +114,6 @@ spec = do
         [ "Graph validation failed: Goto payload type mismatch"
         , "Node 'router' sends:"
         , "Goto \"handler\""
-        , "But target 'handler' needs:"
+        , "But target 'handler' expects:"
+        , "Input Int"
         ]

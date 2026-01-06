@@ -49,7 +49,7 @@ import qualified Data.Text as T
 import Effectful
 import GHC.Generics (Generic)
 
-import Tidepool.Graph.Types (Needs, UsesEffects, Exit, type (:@))
+import Tidepool.Graph.Types (Input, UsesEffects, Exit, type (:@))
 import Tidepool.Graph.Generic (AsHandler, type (:-))
 import qualified Tidepool.Graph.Generic as G
 import Tidepool.Graph.Goto (Goto, To, GotoChoice, gotoChoice, gotoExit)
@@ -79,7 +79,7 @@ newtype ChatId = ChatId Int
 data EchoGraph mode = EchoGraph
   { egEntry    :: mode :- G.Entry ChatId
   , egMainLoop :: mode :- G.LogicNode
-                    :@ Needs '[ChatId]
+                    :@ Input ChatId
                     :@ UsesEffects '[Goto "egMainLoop" ChatId, Goto Exit ()]
   , egExit     :: mode :- G.Exit ()
   }

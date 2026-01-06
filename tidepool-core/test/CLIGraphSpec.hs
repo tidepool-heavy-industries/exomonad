@@ -38,7 +38,7 @@ import Tidepool.Graph.Execute (runGraph)
 import Tidepool.Graph.Generic (GraphMode(..), type (:-), AsHandler)
 import Tidepool.Graph.Generic.Core (Entry)
 import Tidepool.Graph.Goto (gotoExit, Goto)
-import Tidepool.Graph.Types (Needs, UsesEffects, type (:@))
+import Tidepool.Graph.Types (Input, UsesEffects, type (:@))
 import qualified Tidepool.Graph.Generic as G
 import qualified Tidepool.Graph.Types as Types (Exit)
 
@@ -54,7 +54,7 @@ import qualified Tidepool.Graph.Types as Types (Exit)
 -- 3. Returns CounterOutput with the result
 data CounterGraph mode = CounterGraph
   { cgEntry   :: mode :- Entry CounterInput
-  , cgCompute :: mode :- G.LogicNode :@ Needs '[CounterInput]
+  , cgCompute :: mode :- G.LogicNode :@ Input CounterInput
                     :@ UsesEffects '[Goto Types.Exit CounterOutput]
   , cgExit    :: mode :- G.Exit CounterOutput
   }

@@ -24,9 +24,9 @@ Agents are defined as typed state machine graphs:
 ```haskell
 data MyAgent mode = MyAgent
   { entry    :: mode :- Entry Message
-  , classify :: mode :- LLMNode :@ Needs '[Message] :@ Schema Intent
-  , route    :: mode :- LogicNode :@ Needs '[Intent] :@ UsesEffects '[Goto "handle" Message, Goto Exit Response]
-  , handle   :: mode :- LLMNode :@ Needs '[Message] :@ Schema Response
+  , classify :: mode :- LLMNode :@ Input Message :@ Schema Intent
+  , route    :: mode :- LogicNode :@ Input Intent :@ UsesEffects '[Goto "handle" Message, Goto Exit Response]
+  , handle   :: mode :- LLMNode :@ Input Message :@ Schema Response
   , exit     :: mode :- Exit Response
   }
 ```
@@ -108,7 +108,7 @@ The cron jobs live in the consuming repo (anemone, urchin), not in tidepool itse
 Spawn Claude Code as a graph node:
 ```haskell
 "work" := LLM
-    :@ Needs '[TaskInfo]
+    :@ Input TaskInfo
     :@ Schema WorkResult
     :@ ClaudeCode 'Sonnet ('Just "/path/to/worktree")
 ```

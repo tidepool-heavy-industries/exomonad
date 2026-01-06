@@ -11,7 +11,7 @@ module Tidepool.Graph.Edges
     EdgeKind(..)
 
     -- * Annotation Extraction
-  , GetNeeds
+  , GetInput
   , GetSchema
   , GetUsesEffects
   , GetSystem
@@ -46,7 +46,7 @@ import GHC.TypeLits (Symbol)
 
 import Tidepool.Graph.Types
   ( type (:@), type (:&)
-  , Needs, Schema, System, Template, Vision, Tools, UsesEffects, Memory
+  , Input, Schema, System, Template, Vision, Tools, UsesEffects, Memory
   , Global, Backend
   , ClaudeCode, ModelChoice
   , Exit, Self
@@ -59,7 +59,7 @@ import Tidepool.Graph.Goto (Goto, To)
 
 -- | Classification of edges for Mermaid rendering.
 data EdgeKind
-  = ImplicitEdge      -- ^ Data flow via Schema → Needs (solid arrow)
+  = ImplicitEdge      -- ^ Data flow via Schema → Input (solid arrow)
   | ExplicitEdge      -- ^ Transition via Goto (solid arrow)
   deriving (Show, Eq)
 
@@ -67,22 +67,22 @@ data EdgeKind
 -- ANNOTATION EXTRACTION
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Extract the Needs types from a node declaration.
+-- | Extract the Input type from a node declaration.
 --
 -- @
--- GetNeeds (LLMNode :@ Needs '[A, B] :@ Schema C)
---   = '[A, B]
+-- GetInput (LLMNode :@ Input A :@ Schema B)
+--   = 'Just A
 -- @
-type GetNeeds :: Type -> [Type]
-type family GetNeeds node where
-  GetNeeds (node :@ Needs ts) = ts
-  GetNeeds (node :@ _) = GetNeeds node
-  GetNeeds _ = '[]
+type GetInput :: Type -> Maybe Type
+type family GetInput node where
+  GetInput (node :@ Input t) = 'Just t
+  GetInput (node :@ _) = GetInput node
+  GetInput _ = 'Nothing
 
 -- | Extract the Schema output type from a node declaration.
 --
 -- @
--- GetSchema (LLMNode :@ Needs '[A] :@ Schema B)
+-- GetSchema (LLMNode :@ Input A :@ Schema B)
 --   = 'Just B
 -- @
 type GetSchema :: Type -> Maybe Type
@@ -114,7 +114,7 @@ type family GetSchema node where
 -- = Usage Example
 --
 -- @
--- GetUsesEffects (LogicNode :@ Needs '[A] :@ UsesEffects '[State S, Goto \"bar\" B])
+-- GetUsesEffects (LogicNode :@ Input A :@ UsesEffects '[State S, Goto \"bar\" B])
 --   = 'Just '[State S, Goto \"bar\" B]  -- kind: Maybe [Effect]
 -- @
 --
@@ -318,7 +318,7 @@ type family HasAnnotation node annType where
 -- | Helper to check if annotation matches a type constructor.
 type SameAnnotationType :: Type -> Type -> Bool
 type family SameAnnotationType ann target where
-  SameAnnotationType (Needs _) (Needs _) = 'True
+  SameAnnotationType (Input _) (Input _) = 'True
   SameAnnotationType (Schema _) (Schema _) = 'True
   SameAnnotationType (System _) (System _) = 'True
   SameAnnotationType (Template _) (Template _) = 'True

@@ -2,7 +2,7 @@
  * Protocol types for WASM ↔ TypeScript communication.
  *
  * Design principle: TypeScript is a graph-aware effect executor.
- * - Haskell owns: graph structure, DAG ordering, Needs resolution, Goto/exitWith
+ * - Haskell owns: graph structure, DAG ordering, Input resolution, Goto/exitWith
  * - TypeScript owns: domain-specific effects (LLM, Habitica), persistence, logging, observability
  * - No general-purpose primitives (HTTP fetch) - only domain-specific effects
  *
@@ -39,7 +39,7 @@ export interface TypeInfo {
 
 /**
  * Detailed graph metadata - matches Haskell GraphInfo with full type information.
- * Edges are derived from Needs/Schema relationships (implicit data flow)
+ * Edges are derived from Input/Schema relationships (implicit data flow)
  * and GotoTargets (explicit control flow).
  *
  * Note: The simple GraphInfo type used by the loader is in graphs.ts.
@@ -54,7 +54,7 @@ export interface DetailedGraphInfo {
   exitType: TypeInfo;
   /** All nodes in the graph (excludes Entry/Exit) */
   nodes: NodeInfo[];
-  /** Edges for visualization (from Needs/Schema and Goto) */
+  /** Edges for visualization (from Input/Schema and Goto) */
   edges: EdgeInfo[];
 }
 
@@ -69,8 +69,8 @@ export interface NodeInfo {
   niName: string;
   /** LLM nodes yield effects; Logic nodes run Haskell code */
   niKind: NodeKind;
-  /** Types this node needs (from context) */
-  niNeeds: TypeInfo[];
+  /** Input type this node needs (single type) */
+  niInput: TypeInfo | null;
   /** Output type (LLM nodes only - from Schema annotation) */
   niSchema: TypeInfo | null;
   /** Possible Goto targets (Logic nodes only) */
@@ -92,7 +92,7 @@ export interface EdgeInfo {
 /**
  * Goto target - control flow destination.
  * In Servant-style: Goto is control-flow only, no payload.
- * Target node pulls data from accumulated context via Needs.
+ * Target node pulls data from accumulated context via Input.
  */
 export interface GotoTarget {
   /** Target node name, or "Exit" */

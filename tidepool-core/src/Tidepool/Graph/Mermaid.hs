@@ -12,7 +12,7 @@
 --
 -- = Edge Styles
 --
--- * Implicit (Schema → Needs): @-->@ solid arrow
+-- * Implicit (Schema → Input): @-->@ solid arrow
 -- * Explicit (Goto): @-->@ solid arrow
 --
 -- = Example Output
@@ -99,10 +99,10 @@ toMermaid = toMermaidWithConfig defaultConfig
 -- @
 -- data SupportGraph mode = SupportGraph
 --   { sgEntry    :: mode :- Entry Message
---   , sgClassify :: mode :- LLMNode :@ Needs '[Message] :@ Schema Intent
---   , sgRoute    :: mode :- LogicNode :@ Needs '[Intent] :@ UsesEffects '[Goto "sgRefund" Message, Goto "sgFaq" Message]
---   , sgRefund   :: mode :- LLMNode :@ Needs '[Message] :@ Schema Response
---   , sgFaq      :: mode :- LLMNode :@ Needs '[Message] :@ Schema Response
+--   , sgClassify :: mode :- LLMNode :@ Input Message :@ Schema Intent
+--   , sgRoute    :: mode :- LogicNode :@ Input Intent :@ UsesEffects '[Goto "sgRefund" Message, Goto "sgFaq" Message]
+--   , sgRefund   :: mode :- LLMNode :@ Input Message :@ Schema Response
+--   , sgFaq      :: mode :- LLMNode :@ Input Message :@ Schema Response
 --   , sgExit     :: mode :- Exit Response
 --   }
 --   deriving Generic
@@ -220,13 +220,13 @@ nodeToNodeEdges :: MermaidConfig -> GraphInfo -> NodeInfo -> [Text]
 nodeToNodeEdges config info node =
   schemaEdges ++ gotoEdges
   where
-    -- Schema → Needs edges (implicit)
+    -- Schema → Input edges (implicit)
     schemaEdges = case node.niSchema of
       Nothing -> []
       Just schemaType ->
         [ "    " <> escapeName node.niName <> " --> |" <> typeLabel config schemaType <> "| " <> escapeName target.niName
         | target <- info.giNodes
-        , schemaType `elem` target.niNeeds
+        , target.niInput == Just schemaType
         , target.niName /= node.niName  -- No self-loops from schema
         ]
 
@@ -359,13 +359,13 @@ nodeStateEdges :: MermaidConfig -> GraphInfo -> NodeInfo -> [Text]
 nodeStateEdges config info node =
   schemaTransitions ++ gotoTransitions
   where
-    -- Schema → Needs transitions (implicit data flow)
+    -- Schema → Input transitions (implicit data flow)
     schemaTransitions = case node.niSchema of
       Nothing -> []
       Just schemaType ->
         [ "    " <> escapeName node.niName <> " --> " <> escapeName target.niName <> ": " <> typeLabel config schemaType
         | target <- info.giNodes
-        , schemaType `elem` target.niNeeds
+        , target.niInput == Just schemaType
         , target.niName /= node.niName
         ]
 
@@ -499,10 +499,10 @@ hasIncomingEdge info targetName = any sendsTo info.giNodes
     sendsTo node =
       -- Goto edge to this node?
       targetName `elem` map fst node.niGotoTargets ||
-      -- Schema→Needs edge to this node?
+      -- Schema→Input edge to this node?
       case node.niSchema of
         Nothing -> False
         Just schemaType ->
           case findNodeByName info targetName of
             Nothing -> False
-            Just target -> schemaType `elem` target.niNeeds
+            Just target -> target.niInput == Just schemaType

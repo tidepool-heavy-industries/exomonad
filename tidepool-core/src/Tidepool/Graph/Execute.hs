@@ -54,7 +54,7 @@ import Text.Ginger.TH (TypedTemplate, runTypedTemplate)
 import Text.Parsec.Pos (SourcePos)
 
 import Tidepool.Effect (LLM, llmCall)
-import Tidepool.Graph.Edges (GetNeeds)
+import Tidepool.Graph.Edges (GetInput)
 import Tidepool.Graph.Generic (AsHandler, FieldsWithNamesOf)
 import Tidepool.Graph.Generic.Core (Entry, AsGraph)
 import qualified Tidepool.Graph.Generic.Core as G (Exit)
@@ -77,13 +77,6 @@ type family IfMaybe cond t f where
   IfMaybe 'True  t _ = t
   IfMaybe 'False _ f = f
 
--- | Check if an element is in a type-level list (polykinded).
-type ElemType :: k -> [k] -> Bool
-type family ElemType x xs where
-  ElemType _ '[] = 'False
-  ElemType x (x ': _) = 'True
-  ElemType x (_ ': rest) = ElemType x rest
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- ENTRY HANDLER DISCOVERY
@@ -92,12 +85,12 @@ type family ElemType x xs where
 -- | Find the first field whose node definition accepts the entry type.
 --
 -- Iterates through (fieldName, nodeDef) pairs from 'FieldsWithNamesOf' and
--- returns the first field name where 'GetNeeds' contains the entry type.
+-- returns the first field name where 'GetInput' matches the entry type.
 --
 -- @
 -- -- For a graph with:
 -- --   entry   :: mode :- Entry Int
--- --   compute :: mode :- LogicNode :@ Needs '[Int] :@ UsesEffects '[...]
+-- --   compute :: mode :- LogicNode :@ Input Int :@ UsesEffects '[...]
 -- --   exit    :: mode :- Exit Int
 -- --
 -- FindEntryHandler Int fields = 'Just "compute"
@@ -110,9 +103,16 @@ type family FindEntryHandler entryType fields where
   FindEntryHandler entryType ('(name, G.Exit _) ': rest) =
     FindEntryHandler entryType rest  -- Skip Exit marker
   FindEntryHandler entryType ('(name, def) ': rest) =
-    IfMaybe (ElemType entryType (GetNeeds def))
+    IfMaybe (MatchesInput entryType (GetInput def))
             ('Just name)
             (FindEntryHandler entryType rest)
+
+-- | Check if the entry type matches the Input type.
+type MatchesInput :: Type -> Maybe Type -> Bool
+type family MatchesInput entryType mInput where
+  MatchesInput _ 'Nothing = 'False   -- No Input annotation means no match
+  MatchesInput t ('Just t) = 'True   -- Exact match
+  MatchesInput _ _ = 'False          -- Different types
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -146,14 +146,14 @@ runGraphFrom graph input = do
 -- | Run a graph from Entry to Exit.
 --
 -- Automatically discovers the first handler that accepts the entry type
--- (via the 'Needs' annotation), calls it with the input, and dispatches
+-- (via the 'Input' annotation), calls it with the input, and dispatches
 -- through the graph until Exit is reached.
 --
 -- @
 -- -- Define graph
 -- data TestGraph mode = TestGraph
 --   { entry   :: mode :- Entry Int
---   , compute :: mode :- LogicNode :@ Needs '[Int] :@ UsesEffects '[Goto Exit Int]
+--   , compute :: mode :- LogicNode :@ Input Int :@ UsesEffects '[Goto Exit Int]
 --   , exit    :: mode :- Exit Int
 --   }
 --

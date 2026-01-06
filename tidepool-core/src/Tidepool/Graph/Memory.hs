@@ -25,7 +25,7 @@
 -- @
 -- data MyGraph mode = MyGraph
 --   { gEntry   :: mode :- G.Entry Message
---   , gExplore :: mode :- G.LLMNode :@ Needs '[Message] :@ Schema Findings :@ Memory ExploreMem
+--   , gExplore :: mode :- G.LLMNode :@ Input Message :@ Schema Findings :@ Memory ExploreMem
 --   , gExit    :: mode :- G.Exit Response
 --   }
 -- @

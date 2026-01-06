@@ -245,15 +245,15 @@ instance Arbitrary NodeInfoWire where
   arbitrary = NodeInfoWire
     <$> arbitrary
     <*> elements ["LLM", "Logic"]
-    <*> scale (`div` 2) (listOf arbitrary)
+    <*> arbitrary
     <*> arbitrary
     <*> scale (`div` 2) (listOf arbitrary)
 
-  shrink (NodeInfoWire name kind needs schema targets) =
-    [ NodeInfoWire name' kind needs schema targets | name' <- shrink name ]
-    ++ [ NodeInfoWire name kind needs' schema targets | needs' <- shrink needs ]
-    ++ [ NodeInfoWire name kind needs schema' targets | schema' <- shrink schema ]
-    ++ [ NodeInfoWire name kind needs schema targets' | targets' <- shrink targets ]
+  shrink (NodeInfoWire name kind input_ schema targets) =
+    [ NodeInfoWire name' kind input_ schema targets | name' <- shrink name ]
+    ++ [ NodeInfoWire name kind input_' schema targets | input_' <- shrink input_ ]
+    ++ [ NodeInfoWire name kind input_ schema' targets | schema' <- shrink schema ]
+    ++ [ NodeInfoWire name kind input_ schema targets' | targets' <- shrink targets ]
 
 
 -- | Arbitrary EdgeInfoWire
@@ -461,7 +461,7 @@ graphInfoPropertySpec = describe "GraphInfo wire type properties" $ do
         Just (Object obj) ->
           KM.member "niName" obj &&
           KM.member "niKind" obj &&
-          KM.member "niNeeds" obj &&
+          KM.member "niInput" obj &&
           KM.member "niGotoTargets" obj
         _ -> False
 

@@ -48,7 +48,7 @@ Purpose-built graph for proving WASM works. Uses record-based (Servant-style) sy
 ```haskell
 data TestGraph mode = TestGraph
   { entry   :: mode :- Entry Int
-  , compute :: mode :- LogicNode :@ Needs '[Int] :@ UsesEffects '[Log, Goto Exit Int]
+  , compute :: mode :- LogicNode :@ Input Int :@ UsesEffects '[Log, Goto Exit Int]
   , exit    :: mode :- Exit Int
   }
 ```

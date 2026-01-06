@@ -12,7 +12,7 @@ The v2 graph uses record-based (Servant-style) syntax with mode-parameterized re
 ```haskell
 data MyGraph mode = MyGraph
   { entry     :: mode :- Entry InputType
-  , myHandler :: mode :- LLMHandler :@ Needs '[Dep1, Dep2]
+  , myHandler :: mode :- LLMHandler :@ Input (Dep1, Dep2)
                                     :@ UsesEffects '[Log, Goto Exit OutputType]
   , exit      :: mode :- Exit OutputType
   }
@@ -66,13 +66,13 @@ case result of
 ```haskell
 data DMGraph mode = DMGraph
   { entry      :: mode :- Entry UserInput
-  , classify   :: mode :- LLMHandler :@ Needs '[UserInput]
+  , classify   :: mode :- LLMHandler :@ Input UserInput
                                      :@ UsesEffects '[Log, Telegram, Goto ChoiceOfThree Intent]
-  , scene      :: mode :- LLMHandler :@ Needs '[SceneState]
+  , scene      :: mode :- LLMHandler :@ Input SceneState
                                      :@ UsesEffects '[Log, Telegram, Habitica, Goto Exit DMResponse]
-  , action     :: mode :- LLMHandler :@ Needs '[ActionState]
+  , action     :: mode :- LLMHandler :@ Input ActionState
                                      :@ UsesEffects '[Log, Telegram, Habitica, Goto Exit DMResponse]
-  , downtime   :: mode :- LLMHandler :@ Needs '[DowntimeState]
+  , downtime   :: mode :- LLMHandler :@ Input DowntimeState
                                      :@ UsesEffects '[Log, Telegram, Goto Exit DMResponse]
   , exit       :: mode :- Exit DMResponse
   }
@@ -109,7 +109,7 @@ case result of
 
 ## Common Patterns
 
-1. **State in context** - Use `Needs '[StateType]` + `LLMBefore` to build context
+1. **State in context** - Use `Input StateType` + `LLMBefore` to build context
 2. **Branching** - Use `ChoiceOfN` for multi-way routing
 3. **Tool loops** - Handler owns the loop, calling `llmCall` until `LlmDone`
 4. **Telegram UI** - Use `telegramAsk` for buttons, `telegramSend` for narration

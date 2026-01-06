@@ -12,19 +12,19 @@ module SelfLoopRecord where
 
 import GHC.Generics (Generic)
 
-import Tidepool.Graph.Types (type (:@), Needs, UsesEffects, Exit, Self)
+import Tidepool.Graph.Types (type (:@), Input, UsesEffects, Exit, Self)
 import Tidepool.Graph.Generic (GraphMode(..))
 import qualified Tidepool.Graph.Generic as G
 import Tidepool.Graph.Goto (Goto)
 
-data Input
+data InputData
 data Result
 
 -- | Graph with a self-loop: the 'loop' node can transition back to itself.
 data SelfLoopGraph mode = SelfLoopGraph
-  { entry :: mode :- G.Entry Input
-  , loop  :: mode :- G.LogicNode :@ Needs '[Input]
-            :@ UsesEffects '[Goto Self Input, Goto Exit Result]
+  { entry :: mode :- G.Entry InputData
+  , loop  :: mode :- G.LogicNode :@ Input InputData
+            :@ UsesEffects '[Goto Self InputData, Goto Exit Result]
   , exit  :: mode :- G.Exit Result
   }
   deriving Generic

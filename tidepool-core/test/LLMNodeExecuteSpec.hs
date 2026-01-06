@@ -30,7 +30,7 @@ import GHC.Generics (Generic)
 import Test.Hspec
 
 import Tidepool.Effect (LLM(..), TurnOutcome(..), TurnResult(..))
-import Tidepool.Graph.Types (type (:@), Needs, Schema, UsesEffects, Exit)
+import Tidepool.Graph.Types (type (:@), Input, Schema, UsesEffects, Exit)
 import Tidepool.Graph.Generic (GraphMode(..), AsHandler)
 import qualified Tidepool.Graph.Generic as G
 import Tidepool.Graph.Goto (Goto, To, GotoChoice, OneOf, gotoExit, LLMHandler(..))
@@ -62,7 +62,7 @@ instance HasJSONSchema TestOutput where
 -- | Simple logic graph: Entry → compute → Exit
 data LogicGraph mode = LogicGraph
   { lgEntry   :: mode :- G.Entry Int
-  , lgCompute :: mode :- G.LogicNode :@ Needs '[Int] :@ UsesEffects '[Goto Exit Int]
+  , lgCompute :: mode :- G.LogicNode :@ Input Int :@ UsesEffects '[Goto Exit Int]
   , lgExit    :: mode :- G.Exit Int
   }
   deriving Generic

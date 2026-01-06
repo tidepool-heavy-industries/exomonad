@@ -9,7 +9,7 @@ module Tidepool.Graph.Types
 
     -- * Annotations
   , type (:@)
-  , Needs
+  , Input
   , Schema
   , System
   , Template
@@ -63,19 +63,23 @@ data NodeKind
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Attach an annotation to a node. Annotations are applied left-to-right:
--- @mode :- G.LLMNode :@ Needs '[A] :@ Schema B@ has Needs and Schema annotations.
+-- @mode :- G.LLMNode :@ Input A :@ Schema B@ has Input and Schema annotations.
 type (:@) :: Type -> Type -> Type
 data node :@ annotation
 infixl 7 :@
 
--- | Declares what types a node needs as input. These become handler parameters.
--- Edges are derived: any node producing a needed type (via Schema or Goto)
--- creates an edge to this node.
-type Needs :: [Type] -> Type
-data Needs types
+-- | Declares the input type for a node. The handler receives exactly this type.
+--
+-- For fan-in patterns (multiple sources), use 'Either':
+-- @Input (Either FromNodeA FromNodeB)@
+--
+-- For multiple simultaneous inputs, use tuples:
+-- @Input (A, B)@
+type Input :: Type -> Type
+data Input inputType
 
--- | Declares the output type of an LLM node. This output flows implicitly
--- to any node that 'Needs' this type.
+-- | Declares the output type of an LLM node. This output becomes available
+-- as input to downstream nodes.
 type Schema :: Type -> Type
 data Schema output
 
@@ -122,7 +126,7 @@ data UsesEffects effects
 --
 -- @
 -- gExplore :: mode :- G.LLMNode
---     :@ Needs '[Query]
+--     :@ Input Query
 --     :@ Schema Findings
 --     :@ Memory ExploreMem   -- Private state for this node
 -- @
@@ -207,7 +211,7 @@ type Opus = 'Opus
 --
 -- @
 -- gWork :: mode :- G.LLMNode
---     :@ Needs '[BeadInfo]
+--     :@ Input BeadInfo
 --     :@ Template WorkTpl
 --     :@ Schema WorkResult
 --     :@ ClaudeCode 'Sonnet ('Just "/path/to/worktree")

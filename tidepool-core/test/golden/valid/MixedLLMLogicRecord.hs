@@ -10,7 +10,7 @@ module MixedLLMLogicRecord where
 
 import GHC.Generics (Generic)
 
-import Tidepool.Graph.Types (type (:@), Needs, Schema, UsesEffects, Exit)
+import Tidepool.Graph.Types (type (:@), Input, Schema, UsesEffects, Exit)
 import Tidepool.Graph.Generic (GraphMode(..))
 import qualified Tidepool.Graph.Generic as G
 import Tidepool.Graph.Goto (Goto)
@@ -23,9 +23,9 @@ data Response
 -- Uses Goto Exit to demonstrate exit transitions from Logic nodes
 data MixedGraph mode = MixedGraph
   { mgEntry    :: mode :- G.Entry Query
-  , mgClassify :: mode :- G.LLMNode :@ Needs '[Query] :@ Schema Intent
-  , mgRouter   :: mode :- G.LogicNode :@ Needs '[Intent] :@ UsesEffects '[Goto "mgHandler" Query, Goto Exit Response]
-  , mgHandler  :: mode :- G.LLMNode :@ Needs '[Query] :@ Schema Response
+  , mgClassify :: mode :- G.LLMNode :@ Input Query :@ Schema Intent
+  , mgRouter   :: mode :- G.LogicNode :@ Input Intent :@ UsesEffects '[Goto "mgHandler" Query, Goto Exit Response]
+  , mgHandler  :: mode :- G.LLMNode :@ Input Query :@ Schema Response
   , mgExit     :: mode :- G.Exit Response
   }
   deriving Generic

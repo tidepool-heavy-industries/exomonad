@@ -95,7 +95,7 @@ nodeDocumentation info = concatMap nodeDoc info.giNodes
       [ "### `" <> node.niName <> "` (" <> kindName node.niKind <> ")"
       , ""
       ]
-      ++ needsDoc node
+      ++ inputDoc node
       ++ outputDoc node
       ++ gotoDoc node
       ++ [""]
@@ -103,11 +103,9 @@ nodeDocumentation info = concatMap nodeDoc info.giNodes
     kindName RuntimeLLM = "LLM Node"
     kindName RuntimeLogic = "Logic Node"
 
-    needsDoc node
-      | null node.niNeeds = []
-      | otherwise =
-          [ "**Inputs**: " <> T.intercalate ", " (map formatType node.niNeeds)
-          ]
+    inputDoc node = case node.niInput of
+      Nothing -> []
+      Just inputType -> ["**Input**: " <> formatType inputType]
 
     outputDoc node = case node.niSchema of
       Nothing -> []
@@ -132,7 +130,7 @@ edgeDocumentation info =
       Just ty ->
         [ "| Entry | " <> node.niName <> " | " <> formatType ty <> " |"
         | node <- info.giNodes
-        , ty `elem` node.niNeeds
+        , node.niInput == Just ty
         ]
 
     schemaEdges =
@@ -140,7 +138,7 @@ edgeDocumentation info =
       | producer <- info.giNodes
       , Just ty <- [producer.niSchema]
       , consumer <- info.giNodes
-      , ty `elem` consumer.niNeeds
+      , consumer.niInput == Just ty
       ]
 
     gotoEdges =

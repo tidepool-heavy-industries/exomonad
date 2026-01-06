@@ -52,7 +52,7 @@
 -- data MyGraph mode = MyGraph
 --   { gEntry  :: mode :- G.Entry Query
 --   , gSearch :: mode :- G.LLMNode
---        :@ Needs '[Query]
+--        :@ Input Query
 --        :@ Schema Results
 --        :@ Tools '[SearchTool]
 --   , gExit   :: mode :- G.Exit Results

@@ -59,7 +59,7 @@
 -- data MyGraph mode = MyGraph
 --   { gEntry    :: mode :- G.Entry Message
 --   , gClassify :: mode :- G.LLMNode
---        :@ Needs '[Message]
+--        :@ Input Message
 --        :@ Template ClassifyTpl
 --        :@ Schema Intent
 --   , gExit     :: mode :- G.Exit Intent

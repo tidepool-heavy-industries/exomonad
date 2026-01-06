@@ -8,7 +8,7 @@
 --
 -- @
 -- -- Before (12+ lines):
--- import Tidepool.Graph.Types (type (:@), Needs, UsesEffects, Exit, Self)
+-- import Tidepool.Graph.Types (type (:@), Input, UsesEffects, Exit, Self)
 -- import Tidepool.Graph.Generic (GraphMode(..), type (:-))
 -- import qualified Tidepool.Graph.Generic as G (Entry, Exit, LogicNode)
 -- import Tidepool.Graph.Goto (Goto, GotoChoice(..), To, gotoChoice, gotoExit, gotoSelf)
@@ -29,7 +29,7 @@
 -- * 'Entry', 'Exit', 'LogicNode' - Node type markers
 -- * '(:-)' - Mode application (e.g., @mode :- Entry Int@)
 -- * '(:@)' - Annotation attachment
--- * 'Needs', 'UsesEffects' - Node annotations
+-- * 'Input', 'UsesEffects' - Node annotations
 -- * 'GraphMode', 'AsGraph' - Mode types
 --
 -- == Transitions
@@ -66,7 +66,7 @@ module Tidepool.Wasm.Prelude
   , AsGraph
     -- ** Annotations
   , type (:@)
-  , Needs
+  , Input
   , UsesEffects
     -- ** Goto Targets (for UsesEffects)
   , ExitTarget   -- Use: Goto ExitTarget Result (or just use gotoExit at value level)
@@ -131,7 +131,7 @@ module Tidepool.Wasm.Prelude
   ) where
 
 -- Graph structure
-import Tidepool.Graph.Types (type (:@), Needs, UsesEffects, Self)
+import Tidepool.Graph.Types (type (:@), Input, UsesEffects, Self)
 import qualified Tidepool.Graph.Types as Types (Exit)
 import Tidepool.Graph.Generic
   ( GraphMode(..)

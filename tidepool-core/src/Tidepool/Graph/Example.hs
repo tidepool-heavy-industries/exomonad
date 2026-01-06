@@ -32,7 +32,7 @@ import GHC.Generics (Generic)
 import Tidepool.Effect (State, get)
 import Text.Parsec.Pos (SourcePos)
 
-import Tidepool.Graph.Types (type (:@), Needs, Schema, Template, UsesEffects, Exit)
+import Tidepool.Graph.Types (type (:@), Input, Schema, Template, UsesEffects, Exit)
 import Tidepool.Graph.Generic (GraphMode(..), AsHandler)
 import qualified Tidepool.Graph.Generic as G (Entry, Exit, LLMNode, LogicNode, ValidGraphRecord)
 import Tidepool.Graph.Goto (Goto, gotoChoice, gotoExit, LLMHandler(..))
@@ -178,7 +178,7 @@ instance TemplateDef ClassifyTpl where
 -- @
 -- data MyGraph mode = MyGraph
 --   { entry    :: mode :- Entry Message
---   , classify :: mode :- LLM :@ Needs '[Message] :@ Schema Intent
+--   , classify :: mode :- LLM :@ Input Message :@ Schema Intent
 --   , exit     :: mode :- Exit Response
 --   }
 --   deriving Generic
@@ -227,13 +227,13 @@ instance TemplateDef FaqTpl where
 
 data SupportGraph mode = SupportGraph
   { sgEntry    :: mode :- G.Entry Message
-  , sgClassify :: mode :- G.LLMNode :@ Needs '[Message] :@ Template ClassifyTpl :@ Schema Intent
+  , sgClassify :: mode :- G.LLMNode :@ Input Message :@ Template ClassifyTpl :@ Schema Intent
                     :@ UsesEffects '[Goto "sgRoute" Intent]
     -- Note: Goto targets must match actual field names for gotoField validation
-  , sgRoute    :: mode :- G.LogicNode :@ Needs '[Intent] :@ UsesEffects '[Goto "sgRefund" Message, Goto "sgFaq" Message]
-  , sgRefund   :: mode :- G.LLMNode :@ Needs '[Message] :@ Template RefundTpl :@ Schema Response
+  , sgRoute    :: mode :- G.LogicNode :@ Input Intent :@ UsesEffects '[Goto "sgRefund" Message, Goto "sgFaq" Message]
+  , sgRefund   :: mode :- G.LLMNode :@ Input Message :@ Template RefundTpl :@ Schema Response
                     :@ UsesEffects '[Goto Exit Response]
-  , sgFaq      :: mode :- G.LLMNode :@ Needs '[Message] :@ Template FaqTpl :@ Schema Response
+  , sgFaq      :: mode :- G.LLMNode :@ Input Message :@ Template FaqTpl :@ Schema Response
                     :@ UsesEffects '[Goto Exit Response]
   , sgExit     :: mode :- G.Exit Response
   }
@@ -244,8 +244,8 @@ data SupportGraph mode = SupportGraph
 -- In 'AsHandler es' mode, the NodeHandler type family computes:
 --
 -- * Entry -> Proxy Message (marker, not a handler)
--- * LLM :@ Needs '[A] :@ Template T :@ Schema B :@ UsesEffects effs -> LLMHandler A B targets es (TemplateContext T)
--- * Logic :@ Needs '[A] :@ UsesEffects effs -> A -> Eff es (GotoChoice targets)
+-- * LLM :@ Input A :@ Template T :@ Schema B :@ UsesEffects effs -> LLMHandler A B targets es (TemplateContext T)
+-- * Logic :@ Input A :@ UsesEffects effs -> A -> Eff es (GotoChoice targets)
 -- * Exit -> Proxy Response (marker, not a handler)
 supportHandlers :: SupportGraph (AsHandler '[State SessionState])
 supportHandlers = SupportGraph
@@ -316,7 +316,7 @@ _validRecordGraph = ()
 -- @
 --
 -- Note: Due to polykind limitations, Goto targets are not extracted at runtime.
--- The diagram will show implicit edges (Entry/Schema → Needs) but not
+-- The diagram will show implicit edges (Entry/Schema → Input) but not
 -- explicit Goto transitions.
 instance ReifyRecordGraph SupportGraph where
   reifyRecordGraph = makeGraphInfo
