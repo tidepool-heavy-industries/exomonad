@@ -1,107 +1,40 @@
--- | ClaudeCodeExec effect for executing LLM nodes via Claude Code subprocess.
+-- | IO interpreter for ClaudeCodeExec effect.
 --
--- This effect is a sibling to the LLM effect. The graph's NodeHandler type
--- family determines at compile time which effect to use based on whether
--- the node has a ClaudeCode annotation.
---
--- = Architecture
---
--- @
--- Graph Definition (type level)
---          │
---          ▼
--- HasClaudeCode type family
---          │
---     ┌────┴────┐
---     │         │
---     ▼         ▼
---  'False     'True
---     │         │
---     ▼         ▼
---   LLM      ClaudeCodeExec
--- @
+-- This module provides the IO-based interpreter that shells out to zellij-cc.
+-- The effect type itself is defined in tidepool-core (Tidepool.Effect.ClaudeCode).
 --
 -- = Usage
 --
--- Handlers for ClaudeCode-annotated nodes use this effect:
---
 -- @
--- myHandler :: Member ClaudeCodeExec es => ... -> Eff es Value
--- myHandler input = do
---   result <- execClaudeCode Sonnet (Just "/my/project") prompt schema tools
---   ...
--- @
+-- import Tidepool.Effect.ClaudeCode (ClaudeCodeExec, execClaudeCode)
+-- import Tidepool.ClaudeCode.Effect (runClaudeCodeExecIO)
 --
--- The interpreter runs zellij-cc which spawns Claude Code in a zellij pane.
+-- result <- runClaudeCodeExecIO config $ do
+--   execClaudeCode Sonnet (Just "/my/project") prompt schema tools Nothing
+-- @
 module Tidepool.ClaudeCode.Effect
-  ( -- * Effect
+  ( -- * Effect (re-exported from tidepool-core)
     ClaudeCodeExec(..)
-
-    -- * Smart Constructors
   , execClaudeCode
-
-    -- * Interpreter
   , runClaudeCodeExec
+
+    -- * IO Interpreter
   , runClaudeCodeExecIO
   ) where
 
-import Control.Monad.Freer (Eff, Member, LastMember, interpret, send, sendM)
-import Data.Aeson (Value)
-import Data.Text (Text)
+import Control.Monad.Freer (Eff, LastMember, interpret, sendM)
 import Data.Text qualified as T
 
-import Tidepool.Graph.Types (ModelChoice)
+-- Re-export effect type from core
+import Tidepool.Effect.ClaudeCode
+  ( ClaudeCodeExec(..)
+  , execClaudeCode
+  , runClaudeCodeExec
+  )
+
 import Tidepool.ClaudeCode.Config (ClaudeCodeConfig)
 import Tidepool.ClaudeCode.Types (ClaudeCodeResult(..), ClaudeCodeError(..))
 import Tidepool.ClaudeCode.Executor (runClaudeCodeRequest)
-
-
--- | Effect for executing ClaudeCode subprocess.
---
--- This is a sibling effect to LLM, not a wrapper. The type system determines
--- at compile time which effect a handler uses based on HasClaudeCode.
---
--- Returns @(structuredOutput, sessionId)@ where sessionId can be passed back
--- via resumeSession parameter to continue the conversation.
-data ClaudeCodeExec r where
-  ClaudeCodeExecOp
-    :: ModelChoice      -- ^ Model: Haiku, Sonnet, Opus
-    -> Maybe FilePath   -- ^ cwd (from annotation or Nothing to inherit)
-    -> Text             -- ^ Rendered prompt
-    -> Maybe Value      -- ^ JSON schema for structured output
-    -> Maybe Text       -- ^ Tools to allow
-    -> Maybe Text       -- ^ Session ID to resume (for conversation continuity)
-    -> ClaudeCodeExec (Value, Maybe Text)  -- ^ (output, sessionId)
-
-
--- | Execute a ClaudeCode request.
---
--- Returns @(structuredOutput, sessionId)@ from Claude Code.
--- The sessionId can be passed to a subsequent call to continue the conversation.
--- Fails if Claude Code reports an error or returns no structured output.
-execClaudeCode
-  :: Member ClaudeCodeExec effs
-  => ModelChoice      -- ^ Model: Haiku, Sonnet, Opus
-  -> Maybe FilePath   -- ^ Working directory
-  -> Text             -- ^ Rendered prompt
-  -> Maybe Value      -- ^ JSON schema for structured output
-  -> Maybe Text       -- ^ Tools to allow
-  -> Maybe Text       -- ^ Session ID to resume (Nothing for new session)
-  -> Eff effs (Value, Maybe Text)  -- ^ (output, sessionId)
-execClaudeCode model cwd prompt schema tools resumeSession =
-  send $ ClaudeCodeExecOp model cwd prompt schema tools resumeSession
-
-
--- | Run ClaudeCodeExec effect with a pure handler.
---
--- Used for testing or alternative implementations.
-runClaudeCodeExec
-  :: (ModelChoice -> Maybe FilePath -> Text -> Maybe Value -> Maybe Text -> Maybe Text -> Eff effs (Value, Maybe Text))
-  -> Eff (ClaudeCodeExec ': effs) a
-  -> Eff effs a
-runClaudeCodeExec handler = interpret $ \case
-  ClaudeCodeExecOp model cwd prompt schema tools resumeSession ->
-    handler model cwd prompt schema tools resumeSession
 
 
 -- | Run ClaudeCodeExec effect using zellij-cc.

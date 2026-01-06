@@ -35,13 +35,16 @@ module Tidepool.Graph.Execute
   , CallHandler(..)
     -- * LLM Handler Execution
   , executeLLMHandler
+  , executeClaudeCodeHandler
 
     -- * Self-Loop Dispatch
   , DispatchGotoWithSelf(..)
   ) where
 
 import Data.Aeson (FromJSON)
+import qualified Data.Aeson as Aeson
 import Data.Kind (Constraint, Type)
+import Data.Text (Text)
 import Control.Monad.Freer (Eff, Member)
 import GHC.Generics (Generic(..))
 import GHC.Records (HasField(..))
@@ -54,14 +57,15 @@ import Text.Ginger.TH (TypedTemplate, runTypedTemplate)
 import Text.Parsec.Pos (SourcePos)
 
 import Tidepool.Effect (LLM, llmCall)
+import Tidepool.Effect.ClaudeCode (ClaudeCodeExec, execClaudeCode)
 import Tidepool.Graph.Edges (GetInput)
 import Tidepool.Graph.Generic (AsHandler, FieldsWithNamesOf)
 import Tidepool.Graph.Generic.Core (Entry, AsGraph)
 import qualified Tidepool.Graph.Generic.Core as G (Exit)
-import Tidepool.Graph.Goto (GotoChoice, To, LLMHandler(..))
+import Tidepool.Graph.Goto (GotoChoice, To, LLMHandler(..), ClaudeCodeLLMHandler(..))
 import Tidepool.Graph.Goto.Internal (GotoChoice(..), OneOf(..))
 import Tidepool.Graph.Template (GingerContext)
-import Tidepool.Graph.Types (Exit, Self)
+import Tidepool.Graph.Types (Exit, Self, ModelChoice(..), SingModelChoice(..), KnownMaybeCwd(..))
 import Tidepool.Schema (HasJSONSchema(..), schemaToValue)
 
 -- | Effect type alias (freer-simple effects have kind Type -> Type).
@@ -233,6 +237,71 @@ executeLLMHandler mSystemTpl userTpl beforeFn afterFn input = do
 
 
 -- ════════════════════════════════════════════════════════════════════════════
+-- CLAUDE CODE HANDLER EXECUTION
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Execute a ClaudeCodeLLMHandler, returning a GotoChoice.
+--
+-- Similar to 'executeLLMHandler', but uses the ClaudeCodeExec effect to spawn
+-- a Claude Code subprocess instead of calling the LLM API directly.
+--
+-- This function:
+-- 1. Calls the before-handler to build template context
+-- 2. Renders the user template (system template appended to prompt)
+-- 3. Calls the ClaudeCodeExec effect with the prompt and schema
+-- 4. Parses the structured output from Claude Code
+-- 5. Calls the after-handler to determine the next transition
+--
+-- = Type Parameters
+--
+-- * @model@ - The ModelChoice from ClaudeCode annotation (type-level)
+-- * @cwd@ - The working directory from ClaudeCode annotation (type-level)
+-- * @needs@ - The input type from Input annotation
+-- * @schema@ - The LLM output schema type
+-- * @targets@ - The transition targets from UsesEffects
+-- * @es@ - The effect stack (must include ClaudeCodeExec)
+-- * @tpl@ - The template context type
+executeClaudeCodeHandler
+  :: forall model cwd needs schema targets es tpl.
+     ( Member ClaudeCodeExec es
+     , FromJSON schema
+     , HasJSONSchema schema
+     , GingerContext tpl
+     , SingModelChoice model
+     , KnownMaybeCwd cwd
+     )
+  => Maybe (TypedTemplate tpl SourcePos)         -- ^ Optional system prompt template
+  -> TypedTemplate tpl SourcePos                 -- ^ User prompt template (required)
+  -> (needs -> Eff es tpl)                       -- ^ Before handler: builds context
+  -> (schema -> Eff es (GotoChoice targets))     -- ^ After handler: routes based on output
+  -> needs                                       -- ^ Input from Input annotation
+  -> Eff es (GotoChoice targets)
+executeClaudeCodeHandler mSystemTpl userTpl beforeFn afterFn input = do
+  let model = singModelChoice @model
+      cwd = knownMaybeCwd @cwd
+  -- Build context from before-handler
+  ctx <- beforeFn input
+  -- Render templates
+  let systemPrompt :: Text
+      systemPrompt = maybe "" (runTypedTemplate ctx) mSystemTpl
+      userPrompt :: Text
+      userPrompt = runTypedTemplate ctx userTpl
+      -- Combine system and user prompts for Claude Code
+      -- (Claude Code doesn't have separate system prompt, so prepend it)
+      fullPrompt :: Text
+      fullPrompt = if systemPrompt == ""
+                   then userPrompt
+                   else systemPrompt <> "\n\n" <> userPrompt
+      schemaVal = Just $ schemaToValue (jsonSchema @schema)
+  -- Call ClaudeCodeExec effect
+  (outputVal, _sessionId) <- execClaudeCode model cwd fullPrompt schemaVal Nothing Nothing
+  -- Parse the structured output
+  case Aeson.fromJSON outputVal of
+    Aeson.Error msg -> error $ "ClaudeCode output parse error: " <> msg
+    Aeson.Success output -> afterFn output
+
+
+-- ════════════════════════════════════════════════════════════════════════════
 -- HANDLER INVOCATION TYPECLASS
 -- ════════════════════════════════════════════════════════════════════════════
 
@@ -261,6 +330,22 @@ instance
   ) => CallHandler (LLMHandler payload schema targets es tpl) payload es targets where
   callHandler (LLMHandler mSysTpl userTpl beforeFn afterFn) =
     executeLLMHandler mSysTpl userTpl beforeFn afterFn
+
+-- | ClaudeCode LLM node handler: execute via executeClaudeCodeHandler.
+--
+-- Dispatches to Claude Code subprocess instead of LLM API.
+-- Model and cwd are derived from type parameters, ensuring compile-time
+-- validation that the handler matches the ClaudeCode annotation.
+instance
+  ( Member ClaudeCodeExec es
+  , FromJSON schema
+  , HasJSONSchema schema
+  , GingerContext tpl
+  , SingModelChoice model
+  , KnownMaybeCwd cwd
+  ) => CallHandler (ClaudeCodeLLMHandler model cwd payload schema targets es tpl) payload es targets where
+  callHandler (ClaudeCodeLLMHandler mSysTpl userTpl beforeFn afterFn) =
+    executeClaudeCodeHandler @model @cwd mSysTpl userTpl beforeFn afterFn
 
 
 -- ════════════════════════════════════════════════════════════════════════════

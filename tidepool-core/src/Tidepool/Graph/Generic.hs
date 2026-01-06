@@ -83,6 +83,8 @@ module Tidepool.Graph.Generic
 
     -- * Re-exports for LLM Handlers
   , LLMHandler(..)
+  , ClaudeCodeLLMHandler(..)
+  , ChooseLLMHandler
 
     -- * Record Validation
   , HasEntryField
@@ -111,10 +113,10 @@ import Tidepool.Graph.Errors
 import Tidepool.Graph.Validate (FormatSymbolList)
 import Control.Monad.Freer (Eff, Member)
 
-import Tidepool.Graph.Types (type (:@), Input, Schema, Template, Vision, Tools, Memory, System, UsesEffects)
+import Tidepool.Graph.Types (type (:@), Input, Schema, Template, Vision, Tools, Memory, System, UsesEffects, ClaudeCode, ModelChoice)
 import Tidepool.Graph.Template (TemplateContext)
-import Tidepool.Graph.Edges (GetUsesEffects, GetGotoTargets, GotoEffectsToTargets)
-import Tidepool.Graph.Goto (Goto, goto, GotoChoice, To, LLMHandler(..))
+import Tidepool.Graph.Edges (GetUsesEffects, GetGotoTargets, GotoEffectsToTargets, HasClaudeCode, GetClaudeCode)
+import Tidepool.Graph.Goto (Goto, goto, GotoChoice, To, LLMHandler(..), ClaudeCodeLLMHandler(..))
 import Tidepool.Graph.Validate.RecordStructure
   ( AllFieldsReachable, AllLogicFieldsReachExit, NoDeadGotosRecord
   , AllLogicNodesHaveGoto, NoGotoSelfOnly
@@ -308,6 +310,19 @@ type family NodeHandler nodeDef es where
 -- The @origNode@ parameter never changes. It's the original full node definition
 -- used in error messages to show the user what they wrote, even after annotations
 -- have been peeled away.
+
+-- | Choose between LLMHandler and ClaudeCodeLLMHandler based on GetClaudeCode.
+--
+-- When a node has the ClaudeCode annotation, we use ClaudeCodeLLMHandler with
+-- the model and cwd from the annotation. The type parameters ensure compile-time
+-- validation that the handler matches the annotation.
+type ChooseLLMHandler :: Maybe (ModelChoice, Maybe Symbol) -> Type -> Type -> [Type] -> [Effect] -> Type -> Type
+type family ChooseLLMHandler mClaudeCode input schema targets effs tpl where
+  ChooseLLMHandler ('Just '(model, cwd)) input schema targets effs tpl =
+    ClaudeCodeLLMHandler model cwd input schema targets effs tpl
+  ChooseLLMHandler 'Nothing input schema targets effs tpl =
+    LLMHandler input schema targets effs tpl
+
 type NodeHandlerDispatch :: Type -> Type -> [Effect] -> Maybe Type -> Maybe Type -> Maybe Type -> Maybe Type -> Type
 type family NodeHandlerDispatch nodeDef origNode es mInput mTpl mSchema mEffs where
   -- Peel Input annotation - record it
@@ -371,7 +386,7 @@ type family NodeHandlerDispatch nodeDef origNode es mInput mTpl mSchema mEffs wh
       ':$$: Bullet "Use a sum type if you need multiple output shapes"
     )
 
-  -- Skip other annotations (Vision, Tools, Memory, System)
+  -- Skip other annotations (Vision, Tools, Memory, System, ClaudeCode)
   NodeHandlerDispatch (node :@ Vision) orig es mInput mTpl mSchema mEffs =
     NodeHandlerDispatch node orig es mInput mTpl mSchema mEffs
   NodeHandlerDispatch (node :@ Tools _) orig es mInput mTpl mSchema mEffs =
@@ -379,6 +394,8 @@ type family NodeHandlerDispatch nodeDef origNode es mInput mTpl mSchema mEffs wh
   NodeHandlerDispatch (node :@ Memory _) orig es mInput mTpl mSchema mEffs =
     NodeHandlerDispatch node orig es mInput mTpl mSchema mEffs
   NodeHandlerDispatch (node :@ System _) orig es mInput mTpl mSchema mEffs =
+    NodeHandlerDispatch node orig es mInput mTpl mSchema mEffs
+  NodeHandlerDispatch (node :@ ClaudeCode _ _) orig es mInput mTpl mSchema mEffs =
     NodeHandlerDispatch node orig es mInput mTpl mSchema mEffs
 
   -- Peel UsesEffects annotation - record effects
@@ -441,8 +458,10 @@ type family NodeHandlerDispatch nodeDef origNode es mInput mTpl mSchema mEffs wh
     )
 
   -- LLMNode with Template AND UsesEffects: the complete form
+  -- Uses ChooseLLMHandler to dispatch between regular LLM and ClaudeCode execution.
+  -- GetClaudeCode extracts model/cwd from the annotation for compile-time validation.
   NodeHandlerDispatch LLMNode orig es ('Just input) ('Just tpl) ('Just schema) ('Just (EffStack effs)) =
-    LLMHandler input schema (GotoEffectsToTargets effs) es (TemplateContext tpl)
+    ChooseLLMHandler (GetClaudeCode orig) input schema (GotoEffectsToTargets effs) es (TemplateContext tpl)
 
   -- LLMNode with UsesEffects but no Template - missing context for prompts
   NodeHandlerDispatch LLMNode orig es mInput 'Nothing ('Just schema) ('Just (EffStack effs)) = TypeError

@@ -36,13 +36,18 @@ module Tidepool.Graph.Types
   , Sonnet
   , Opus
 
+    -- * ClaudeCode Singletons (demote type-level to runtime)
+  , SingModelChoice(..)
+  , KnownMaybeCwd(..)
+
     -- * Special Goto Targets
   , Exit
   , Self
   ) where
 
 import Data.Kind (Type, Constraint)
-import GHC.TypeLits (Symbol)
+import Data.Proxy (Proxy(..))
+import GHC.TypeLits (Symbol, KnownSymbol, symbolVal)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- NODE KIND
@@ -226,6 +231,33 @@ type Opus = 'Opus
 -- will produce a compile-time type error.
 type ClaudeCode :: ModelChoice -> Maybe Symbol -> Type
 data ClaudeCode model cwd
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- CLAUDECODE SINGLETONS
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Demote type-level ModelChoice to runtime value.
+--
+-- This enables compile-time validated ClaudeCode handlers where the model
+-- is derived from the type annotation rather than passed as a runtime argument.
+class SingModelChoice (m :: ModelChoice) where
+  singModelChoice :: ModelChoice
+
+instance SingModelChoice 'Haiku where singModelChoice = Haiku
+instance SingModelChoice 'Sonnet where singModelChoice = Sonnet
+instance SingModelChoice 'Opus where singModelChoice = Opus
+
+-- | Demote type-level Maybe Symbol to runtime Maybe FilePath.
+--
+-- Used to derive the working directory from the ClaudeCode annotation.
+class KnownMaybeCwd (m :: Maybe Symbol) where
+  knownMaybeCwd :: Maybe FilePath
+
+instance KnownMaybeCwd 'Nothing where knownMaybeCwd = Nothing
+instance KnownSymbol s => KnownMaybeCwd ('Just s) where
+  knownMaybeCwd = Just (symbolVal (Proxy @s))
+
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- SPECIAL GOTO TARGET
