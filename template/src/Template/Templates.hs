@@ -33,5 +33,5 @@ instance TemplateDef ProcessTpl where
   templateDescription = "Process input and produce structured output"
   templateCompiled = processCompiled
 
-  -- Node uses LLMBefore, so buildContext is never called at runtime.
+  -- Handler uses explicit context builder in LLMHandler, so buildContext is not used.
   buildContext = undefined

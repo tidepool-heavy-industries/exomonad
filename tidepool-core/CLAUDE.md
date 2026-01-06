@@ -312,39 +312,26 @@ Node shapes:
 - `[[double brackets]]` - LLM nodes
 - `{{hexagon}}` - Logic nodes
 
-## LLM Handler Variants
+## LLM Handler
 
-### LLMBefore - Implicit Routing
-
-Use when LLM output flows implicitly via Needs (no branching):
+LLM handlers use the `LLMHandler` constructor with four arguments:
 
 ```haskell
-gClassify = LLMBefore $ \msg -> do
-  st <- get @SessionState
-  pure ClassifyContext { topic = msg.content, ... }
+gProcess = LLMHandler
+  Nothing                           -- optional system template
+  (templateCompiled @ProcessTpl)    -- user template (required)
+  (\input -> do                     -- before: build context
+    st <- get @SessionState
+    pure ProcessContext { ... })
+  (\output -> do                    -- after: route based on output
+    pure $ gotoExit result)
 ```
 
-### LLMAfter - Explicit Routing
-
-Use when LLM output determines which node to transition to:
-
-```haskell
-gRoute = LLMAfter $ \intent -> pure $ case intent of
-  RefundIntent -> gotoChoice @"gRefund" intent
-  FaqIntent -> gotoChoice @"gFaq" intent
-```
-
-### LLMBoth - Full Control
-
-Custom template context AND explicit routing:
-
-```haskell
-gProcess = LLMBoth
-  Nothing  -- no system template
-  (templateCompiled @RefundTpl)
-  (\intent -> pure SimpleContext { ... })  -- before
-  (pure . gotoExit)  -- after
-```
+All four components are required:
+1. System template (optional, use `Nothing` if not needed)
+2. User template (required)
+3. Before handler: builds template context from input
+4. After handler: routes based on LLM output
 
 ## Validation
 

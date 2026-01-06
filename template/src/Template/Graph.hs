@@ -45,21 +45,21 @@ outputSchema = $(deriveJSONSchema ''Output)
 resultSchema :: JSONSchema
 resultSchema = $(deriveJSONSchema ''Result)
 
--- | A minimal graph: Entry -> process (LLM) -> route (Logic) -> Exit
+-- | A minimal graph: Entry -> process (LLM) -> Exit
 --
 -- This demonstrates the core pattern with chat history integration.
 -- See tidepool-core/src/Tidepool/Graph/CLAUDE.md for DSL documentation.
 --
 -- Pattern:
 -- - LLM node uses Template to render prompt, produces structured output (Schema)
--- - Logic node routes based on that output (UsesEffects with Goto)
+-- - LLM node routes explicitly via UsesEffects (Goto targets)
 data SimpleGraph mode = SimpleGraph
   { sgEntry   :: mode :- G.Entry Input
   , sgProcess :: mode :- G.LLMNode
       :@ Needs '[Input]
       :@ Template ProcessTpl
       :@ Schema Output
-  , sgRoute   :: mode :- G.LogicNode :@ Needs '[Output] :@ UsesEffects '[Goto Exit Result]
+      :@ UsesEffects '[Goto Exit Result]
   , sgExit    :: mode :- G.Exit Result
   }
   deriving Generic

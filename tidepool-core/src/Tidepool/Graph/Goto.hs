@@ -374,57 +374,32 @@ unwrapSingleChoice (GotoChoice (Here p)) = p
 -- LLM HANDLER VARIANTS
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Handler variants for LLM nodes.
+-- | Handler for LLM nodes.
 --
--- LLM nodes can have before-only, after-only, or both handlers:
+-- An LLM handler provides all four phases of LLM execution:
 --
--- * 'LLMBefore': Provides template context before LLM call, uses Needs-based data flow
--- * 'LLMAfter': Routes based on LLM output, uses default context
--- * 'LLMBoth': Custom context AND explicit routing
+-- 1. Build template context from input (before handler)
+-- 2. Render templates using the context
+-- 3. Call LLM with rendered prompts
+-- 4. Route based on LLM output (after handler)
 --
--- The constructor explicitly declares which phases are handled, making the
--- handler type self-documenting.
---
--- = Examples
+-- = Example
 --
 -- @
--- -- Before-only: classifier with custom context
--- sgClassify :: LLMHandler Message Intent '[] effs ClassifyContext
--- sgClassify = LLMBefore $ \\msg -> pure ClassifyContext { topic = msg.content }
---
--- -- After-only: router using LLM output (no access to before-phase data)
--- sgRouter :: LLMHandler () Intent '[To "refund" Intent, To "faq" Intent] effs ()
--- sgRouter = LLMAfter $ \\intent -> pure $ case intent of
---   IntentRefund -> gotoChoice @"refund" intent
---   IntentFaq    -> gotoChoice @"faq" intent
---
--- -- Both: custom context AND explicit routing (with templates)
--- sgSmart :: LLMHandler Message Intent '[To "a" X, To "b" Y] effs SmartContext
--- sgSmart = LLMBoth
+-- sgClassify :: LLMHandler Message Intent '[To Exit Response] effs ClassifyContext
+-- sgClassify = LLMHandler
 --   Nothing                              -- no system template
---   (templateCompiled @SmartTpl)         -- user template
---   (\\msg -> pure SmartContext { ... }) -- context builder
---   (\\intent -> pure $ gotoChoice @"a" (processIntent intent))  -- router
+--   (templateCompiled @ClassifyTpl)      -- user template
+--   (\\msg -> pure ClassifyContext { topic = msg.content })  -- context builder
+--   (\\intent -> pure $ gotoExit response)  -- router
 -- @
 type LLMHandler :: Type -> Type -> [Type] -> [Type -> Type] -> Type -> Type
 data LLMHandler needs schema targets effs tpl where
-  -- | Before-only: provides template context, uses Needs-based data flow after LLM
-  LLMBefore
-    :: forall tpl needs schema effs.
-       (needs -> Eff effs tpl)
-    -> LLMHandler needs schema '[] effs tpl
-
-  -- | After-only: uses default context, explicit routing based on LLM output
-  LLMAfter
-    :: forall needs schema targets effs.
-       (schema -> Eff effs (GotoChoice targets))
-    -> LLMHandler needs schema targets effs ()
-
-  -- | Both: custom context AND explicit routing
+  -- | LLM handler with custom context AND explicit routing.
   --
   -- Takes optional system template, required user template, before handler, and after handler.
   -- Both templates share the same context type (tpl).
-  LLMBoth
+  LLMHandler
     :: forall tpl needs schema targets effs.
        Maybe (TypedTemplate tpl SourcePos)      -- ^ Optional system prompt template
     -> TypedTemplate tpl SourcePos              -- ^ User prompt template (required)

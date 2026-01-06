@@ -154,11 +154,10 @@ The graph is validated at compile time:
 
 ## Available Effects
 
-| Node Type | Handler Returns | Available Effects |
-|-----------|-----------------|-------------------|
-| LLM Node (LLMBefore) | `Eff es TemplateContext` | Graph-level effects |
-| LLM Node (LLMAfter) | `Eff es (GotoChoice targets)` | Graph-level effects + Goto |
-| Logic Node | `Eff es (GotoChoice targets)` | Graph-level effects + Goto |
+| Node Type | Handler Type | Available Effects |
+|-----------|--------------|-------------------|
+| LLM Node | `LLMHandler needs schema targets es tpl` | Graph-level effects + Goto |
+| Logic Node | `needs -> Eff es (GotoChoice targets)` | Graph-level effects + Goto |
 
 Common effects: `State s`, `Memory s`, `Emit event`, `RequestInput`, `Log`
 

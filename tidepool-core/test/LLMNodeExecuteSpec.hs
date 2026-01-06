@@ -154,21 +154,6 @@ spec = do
       let result = runMockLLM mockOutput $ pure (42 :: Int)
       result `shouldBe` 42
 
-    it "LLMAfter handler type compiles" $ do
-      -- Verify LLMHandler constructors work correctly
-      -- Note: LLMAfter is not usable for graph dispatch (lacks context builder)
-      -- but we verify the type machinery compiles
-      let afterHandler :: LLMHandler Int TestOutput '[To Exit TestOutput] '[] ()
-          afterHandler = LLMAfter (\out -> pure $ gotoExit out)
-      afterHandler `seq` True `shouldBe` True
-
-    it "LLMBefore handler type compiles" $ do
-      -- LLMBefore is not usable for graph dispatch (lacks routing)
-      -- Note: LLMBefore has targets='[] because it doesn't provide routing
-      let beforeHandler :: LLMHandler Int TestOutput '[] '[] Int
-          beforeHandler = LLMBefore pure
-      beforeHandler `seq` True `shouldBe` True
-
   describe "Graph handler types" $ do
     it "Logic handler has correct type and behavior" $ do
       let handler :: Int -> Eff '[] (GotoChoice '[To Exit Int])

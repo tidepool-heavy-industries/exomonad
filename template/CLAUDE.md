@@ -122,19 +122,16 @@ See `tidepool-core/src/Tidepool/Graph/CLAUDE.md` for comprehensive DSL documenta
 
 ### LLM Node Handlers
 
-LLM handlers use one of three variants:
+LLM handlers use the `LLMHandler` constructor with four arguments:
 
 ```haskell
--- Before only: build template context, use implicit routing
-sgProcess = LLMBefore $ \input -> do
-  pure ContextType { ... }
-
--- After only: default context, explicit routing
-sgProcess = LLMAfter $ \output -> do
-  pure $ gotoChoice @"nextNode" payload
-
--- Both: custom context and explicit routing
-sgProcess = LLMBoth Nothing compiledTemplate beforeFn afterFn
+sgProcess = LLMHandler
+  Nothing                    -- optional system template
+  (templateCompiled @MyTpl)  -- user template
+  (\input -> do              -- before: build context
+    pure ContextType { ... })
+  (\output -> do             -- after: route based on output
+    pure $ gotoExit result)
 ```
 
 ### Logic Node Handlers
@@ -158,7 +155,7 @@ The `sgProcess` LLM node has a `Template ProcessTpl` annotation. This wires:
 1. **`Template.Context`** - Defines `ProcessContext` with `ToGVal` instance
 2. **`Template.Templates`** - Compiles `templates/process.jinja` at build time via TH
 3. **`Template.Graph`** - The node has `:@ Template ProcessTpl` annotation
-4. **`Template.Handlers`** - Uses `LLMBefore` to build `ProcessContext` from `Input`
+4. **`Template.Handlers`** - Uses `LLMHandler` to build `ProcessContext` and route output
 
 At runtime: Handler builds context → Template renders to prompt → LLM called → Schema parsed.
 

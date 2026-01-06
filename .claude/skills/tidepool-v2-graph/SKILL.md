@@ -22,47 +22,31 @@ data MyGraph mode = MyGraph
 - `AsGraph` - Type-level specification (structure, edges, effect requirements)
 - `AsHandler` - Value-level handlers (actual implementations)
 
-## LLMHandler Variants
+## LLMHandler
 
-### LLMBefore - Implicit Routing
-
-Build context, let `Needs` drive routing from output:
+LLM handlers use the `LLMHandler` constructor with four arguments:
 
 ```haskell
-sgClassify :: LLMHandler AsHandler '[UserMessage] '[Log, Goto ChoiceOfThree Intent]
-sgClassify = LLMBefore $ \msg -> do
-  st <- get @SessionState
-  pure ClassifyContext
-    { topic = msgContent msg
-    , history = take 3 $ stPastTopics st
-    }
+sgProcess = LLMHandler
+  Nothing                           -- optional system template
+  (templateCompiled @ProcessTpl)    -- user template (required)
+  (\input -> do                     -- before: build context
+    st <- get @SessionState
+    pure ProcessContext
+      { topic = msgContent input
+      , history = take 3 $ stPastTopics st
+      })
+  (\output -> do                    -- after: route based on output
+    case output of
+      RefundIntent -> pure $ gotoChoice @"refund" output
+      _ -> pure $ gotoExit response)
 ```
 
-Template returns `Intent`, `Needs '[Intent]` implies routing.
-
-### LLMAfter - Explicit Routing
-
-Use default context, route based on output:
-
-```haskell
-rgRoute :: LLMHandler AsHandler '[Intent] '[Goto ChoiceOfTwo Response]
-rgRoute = LLMAfter $ \intent -> pure $ case intent of
-  IntentRefund   -> gotoChoice @"rgProcess" intent
-  IntentQuestion -> gotoExit (Response "FAQ response")
-```
-
-### LLMBoth - Full Control
-
-Both phases explicit:
-
-```haskell
-rgProcess :: LLMHandler AsHandler '[Intent] '[Goto Exit Response]
-rgProcess = LLMBoth
-  Nothing  -- No Needs (manual context)
-  (templateCompiled @RefundTpl)
-  (\intent -> pure SimpleContext { intentText = show intent })  -- before
-  (pure . gotoExit)                                              -- after
-```
+All four components are required:
+1. System template (optional, use `Nothing` if not needed)
+2. User template (required)
+3. Before handler: builds template context from input
+4. After handler: routes based on LLM output
 
 ## Typed Routing
 
