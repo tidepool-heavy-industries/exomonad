@@ -210,9 +210,11 @@ type family FindNewlyReachableFields fields available reached where
        (FindNewlyReachableFields rest available reached)
 
 -- | Check if the Input type is satisfied by available types.
+-- Handles tuples by checking if all components are available.
 type InputSatisfied :: Maybe Type -> [Type] -> Bool
 type family InputSatisfied mInput available where
   InputSatisfied 'Nothing _ = 'True  -- No Input means always satisfied
+  InputSatisfied ('Just (a, b)) available = And (ElemType a available) (ElemType b available)
   InputSatisfied ('Just t) available = ElemType t available
 
 -- | Add Schema types from newly reached fields.
