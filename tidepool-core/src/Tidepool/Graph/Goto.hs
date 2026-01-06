@@ -97,7 +97,7 @@ import Tidepool.Graph.Errors
 import Text.Ginger.TH (TypedTemplate)
 import Text.Parsec.Pos (SourcePos)
 
-import Tidepool.Graph.Types (Exit, Self, ModelChoice)
+import Tidepool.Graph.Types (Exit, Self, ModelChoice(..), SingModelChoice(..), KnownMaybeCwd(..))
 
 -- Import from Internal (re-exports types, we hide constructors in this module's exports)
 import Tidepool.Graph.Goto.Internal (OneOf(..), GotoChoice(..), To, Payloads, PayloadOf)
@@ -418,38 +418,39 @@ data LLMHandler needs schema targets effs tpl where
 -- | Handler for ClaudeCode-annotated LLM nodes.
 --
 -- Like 'LLMHandler', but executed via Claude Code subprocess instead of API.
--- The @model@ and @cwd@ parameters specify which model to use and which
--- directory to run Claude Code in.
+-- The model and cwd are compile-time validated through type parameters that
+-- must match the node's ClaudeCode annotation.
 --
 -- = Usage
 --
 -- @
 -- gWork :: mode :- G.LLMNode
---     :@ Needs '[TaskInfo]
+--     :@ Input TaskInfo
 --     :@ Template WorkTpl
 --     :@ Schema WorkResult
 --     :@ ClaudeCode 'Sonnet ('Just "/worktree")
 --
--- -- Handler includes model and cwd matching the annotation:
--- gWork = ClaudeCodeLLMHandler
---   Sonnet                               -- model (must match annotation)
---   (Just "/worktree")                   -- cwd (must match annotation)
+-- -- Handler: model and cwd are derived from types, not passed as arguments
+-- gWork = ClaudeCodeLLMHandler @'Sonnet @('Just "/worktree")
 --   Nothing                              -- no system template
 --   (templateCompiled @WorkTpl)          -- user template
 --   (\\task -> pure WorkContext { ... })  -- context builder
 --   (\\result -> pure $ gotoExit result)  -- router
 -- @
-type ClaudeCodeLLMHandler :: Type -> Type -> [Type] -> [Type -> Type] -> Type -> Type
-data ClaudeCodeLLMHandler needs schema targets effs tpl where
+--
+-- Note: The @model@ and @cwd@ type parameters MUST match the ClaudeCode
+-- annotation. Mismatches result in compile-time type errors, preventing
+-- runtime inconsistencies.
+type ClaudeCodeLLMHandler :: ModelChoice -> Maybe Symbol -> Type -> Type -> [Type] -> [Type -> Type] -> Type -> Type
+data ClaudeCodeLLMHandler model cwd needs schema targets effs tpl where
   ClaudeCodeLLMHandler
-    :: forall tpl needs schema targets effs.
-       ModelChoice                                 -- ^ Model to use (Haiku, Sonnet, Opus)
-    -> Maybe FilePath                              -- ^ Working directory for Claude Code
-    -> Maybe (TypedTemplate tpl SourcePos)         -- ^ Optional system prompt template
+    :: forall model cwd tpl needs schema targets effs.
+       (SingModelChoice model, KnownMaybeCwd cwd)
+    => Maybe (TypedTemplate tpl SourcePos)         -- ^ Optional system prompt template
     -> TypedTemplate tpl SourcePos                 -- ^ User prompt template (required)
     -> (needs -> Eff effs tpl)                     -- ^ Builds context for both templates
     -> (schema -> Eff effs (GotoChoice targets))   -- ^ Routes based on LLM output
-    -> ClaudeCodeLLMHandler needs schema targets effs tpl
+    -> ClaudeCodeLLMHandler model cwd needs schema targets effs tpl
 
 
 -- ════════════════════════════════════════════════════════════════════════════
