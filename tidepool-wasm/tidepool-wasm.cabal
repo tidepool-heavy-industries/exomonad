@@ -23,6 +23,14 @@ library
         Tidepool.Wasm.TestGraph
         Tidepool.Wasm.LlmTestGraph
         Tidepool.Wasm.WireTypes
+        Tidepool.Wasm.Conversion
+        -- Interpreters (effects → Yield effect)
+        Tidepool.Wasm.Interpreter
+        Tidepool.Wasm.Interpreter.LLM
+        Tidepool.Wasm.Interpreter.Log
+        Tidepool.Wasm.Interpreter.State
+        -- High-level runner for portable handlers
+        Tidepool.Wasm.Run
         Tidepool.Wasm.Ffi.Types
         Tidepool.Wasm.Runner
         Tidepool.Wasm.Roundtrip
@@ -110,6 +118,7 @@ test-suite tidepool-wasm-tests
         RoundtripSpec
         RegistrySpec
         TypedToolSpec
+        ConversionSpec
     build-depends:
         base >= 4.17 && < 5,
         hspec >= 2.10 && < 3,
