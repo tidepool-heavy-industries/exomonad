@@ -393,47 +393,72 @@ type family NodeHandlerDispatch nodeDef origNode es needs mTpl mSchema mEffs whe
   -- LLMNode Base Cases
   -- ══════════════════════════════════════════════════════════════════════════
   --
-  -- LLM handlers come in three variants based on what annotations are present:
-  --
-  -- 1. **BEFORE-ONLY** (Template + Schema, no UsesEffects)
-  --
-  --    Handler: @needs -> Eff es (TemplateContext tpl)@
-  --    Flow: Build context → Render template → LLM call → Parse schema
-  --    Routing: Implicit via Schema → Needs data flow
-  --    Use case: Linear graphs where LLM output flows to next node
-  --
-  -- 2. **AFTER-ONLY** (Schema + UsesEffects, no Template)
-  --
-  --    Handler: @needs -> Eff es (GotoChoice targets)@
-  --    Flow: Use default context → LLM call → Route based on output
-  --    Routing: Explicit via gotoChoice/gotoExit
-  --    Use case: Branching based on LLM classification
-  --
-  -- 3. **BOTH** (Template + Schema + UsesEffects)
+  -- LLM handlers require Template + Schema + UsesEffects for full execution:
   --
   --    Handler: @LLMHandler needs schema targets es tpl@
   --    Flow: Build context → Render template → LLM call → Route based on output
   --    Routing: Explicit via gotoChoice/gotoExit
-  --    Use case: Custom prompts AND custom routing
   --
   -- ══════════════════════════════════════════════════════════════════════════
 
-  -- LLMNode with Template only (before-only): handler must use LLMBefore constructor
-  NodeHandlerDispatch LLMNode orig es needs ('Just tpl) ('Just schema) 'Nothing =
-    LLMHandler (TupleOf needs) schema '[] es (TemplateContext tpl)
+  -- LLMNode with Template only - missing UsesEffects for routing
+  NodeHandlerDispatch LLMNode orig es needs ('Just tpl) ('Just schema) 'Nothing = TypeError
+    ( HR
+      ':$$: 'Text "  LLM node missing routing: has Template but no UsesEffects"
+      ':$$: HR
+      ':$$: Blank
+      ':$$: WhatHappened
+      ':$$: Indent "Your LLM node has Template and Schema but no UsesEffects."
+      ':$$: Indent "We don't know where to route after the LLM call."
+      ':$$: Blank
+      ':$$: HowItWorks
+      ':$$: Indent "LLM nodes need all three annotations:"
+      ':$$: CodeLine "  Template    -> Context type for prompt rendering"
+      ':$$: CodeLine "  Schema      -> Output type from LLM"
+      ':$$: CodeLine "  UsesEffects -> Where to route (Goto targets)"
+      ':$$: Blank
+      ':$$: Fixes
+      ':$$: Bullet "Add UsesEffects to specify routing:"
+      ':$$: CodeLine "  myNode :: mode :- LLMNode"
+      ':$$: CodeLine "             :@ Needs '[Input]"
+      ':$$: CodeLine "             :@ Template MyTpl"
+      ':$$: CodeLine "             :@ Schema " ':<>: 'ShowType schema
+      ':$$: CodeLine "             :@ UsesEffects '[Goto Exit Result]"
+    )
 
-  -- LLMNode with Template AND UsesEffects (both): handler must use LLMBoth constructor
+  -- LLMNode with Template AND UsesEffects: the complete form
   NodeHandlerDispatch LLMNode orig es needs ('Just tpl) ('Just schema) ('Just (EffStack effs)) =
     LLMHandler (TupleOf needs) schema (GotoEffectsToTargets effs) es (TemplateContext tpl)
 
-  -- LLMNode with UsesEffects but no Template (after-only): handler must use LLMAfter constructor
-  NodeHandlerDispatch LLMNode orig es needs 'Nothing ('Just schema) ('Just (EffStack effs)) =
-    LLMHandler (TupleOf needs) schema (GotoEffectsToTargets effs) es ()
+  -- LLMNode with UsesEffects but no Template - missing context for prompts
+  NodeHandlerDispatch LLMNode orig es needs 'Nothing ('Just schema) ('Just (EffStack effs)) = TypeError
+    ( HR
+      ':$$: 'Text "  LLM node missing Template: has UsesEffects but no context for prompts"
+      ':$$: HR
+      ':$$: Blank
+      ':$$: WhatHappened
+      ':$$: Indent "Your LLM node has Schema and UsesEffects but no Template."
+      ':$$: Indent "We don't know what context type to use for prompt rendering."
+      ':$$: Blank
+      ':$$: HowItWorks
+      ':$$: Indent "LLM nodes need all three annotations:"
+      ':$$: CodeLine "  Template    -> Context type for prompt rendering"
+      ':$$: CodeLine "  Schema      -> Output type from LLM"
+      ':$$: CodeLine "  UsesEffects -> Where to route (Goto targets)"
+      ':$$: Blank
+      ':$$: Fixes
+      ':$$: Bullet "Add Template to specify the prompt context:"
+      ':$$: CodeLine "  myNode :: mode :- LLMNode"
+      ':$$: CodeLine "             :@ Needs '[Input]"
+      ':$$: CodeLine "             :@ Template MyTpl"
+      ':$$: CodeLine "             :@ Schema " ':<>: 'ShowType schema
+      ':$$: CodeLine "             :@ UsesEffects '[...]"
+    )
 
   -- LLMNode with Schema only (no Template or UsesEffects) - error
   NodeHandlerDispatch LLMNode orig es needs 'Nothing ('Just schema) 'Nothing = TypeError
     ( HR
-      ':$$: 'Text "  LLM node incomplete: has Schema but no Template or routing"
+      ':$$: 'Text "  LLM node incomplete: has Schema but missing Template and UsesEffects"
       ':$$: HR
       ':$$: Blank
       ':$$: WhatHappened
@@ -445,25 +470,18 @@ type family NodeHandlerDispatch nodeDef origNode es needs mTpl mSchema mEffs whe
       ':$$: Bullet "Where to go next (no UsesEffects routing)"
       ':$$: Blank
       ':$$: HowItWorks
-      ':$$: Indent "LLM nodes have three possible configurations:"
-      ':$$: Blank
-      ':$$: CodeLine "1. BEFORE-ONLY (most common):"
-      ':$$: CodeLine "   LLMNode :@ Template T :@ Schema S"
-      ':$$: CodeLine "   -> Handler builds context, routing is implicit via Needs"
-      ':$$: Blank
-      ':$$: CodeLine "2. AFTER-ONLY (custom routing):"
-      ':$$: CodeLine "   LLMNode :@ Schema S :@ UsesEffects '[Goto ...]"
-      ':$$: CodeLine "   -> Uses default context, handler routes based on output"
-      ':$$: Blank
-      ':$$: CodeLine "3. BOTH (full control):"
-      ':$$: CodeLine "   LLMNode :@ Template T :@ Schema S :@ UsesEffects '[Goto ...]"
-      ':$$: CodeLine "   -> Custom context AND custom routing"
+      ':$$: Indent "LLM nodes need all three annotations:"
+      ':$$: CodeLine "  Template    -> Context type for prompt rendering"
+      ':$$: CodeLine "  Schema      -> Output type from LLM"
+      ':$$: CodeLine "  UsesEffects -> Where to route (Goto targets)"
       ':$$: Blank
       ':$$: Fixes
-      ':$$: Bullet "Add Template for custom prompts:"
-      ':$$: CodeLine "  myNode :: mode :- LLMNode :@ Template MyTpl :@ Schema " ':<>: 'ShowType schema
-      ':$$: Bullet "Or add UsesEffects for custom routing:"
-      ':$$: CodeLine "  myNode :: mode :- LLMNode :@ Schema " ':<>: 'ShowType schema ':<>: 'Text " :@ UsesEffects '[Goto \"next\" X]"
+      ':$$: Bullet "Add Template and UsesEffects:"
+      ':$$: CodeLine "  myNode :: mode :- LLMNode"
+      ':$$: CodeLine "             :@ Needs '[Input]"
+      ':$$: CodeLine "             :@ Template MyTpl"
+      ':$$: CodeLine "             :@ Schema " ':<>: 'ShowType schema
+      ':$$: CodeLine "             :@ UsesEffects '[Goto Exit Result]"
     )
 
   -- LLMNode missing both Template and Schema - error
@@ -474,23 +492,20 @@ type family NodeHandlerDispatch nodeDef origNode es needs mTpl mSchema mEffs whe
       ':$$: Blank
       ':$$: WhatHappened
       ':$$: Indent "Your LLM node has neither Template nor Schema."
-      ':$$: Indent "We need at least Schema to know what the LLM returns."
       ':$$: Blank
       ':$$: HowItWorks
-      ':$$: Indent "The LLM call flow requires knowing:"
-      ':$$: Blank
-      ':$$: CodeLine "Template  -> What prompt to render (context type)"
-      ':$$: CodeLine "Schema    -> What the LLM returns (output type)"
-      ':$$: Blank
-      ':$$: Indent "Schema is ALWAYS required."
-      ':$$: Indent "Template is required unless you use UsesEffects for after-only routing."
+      ':$$: Indent "LLM nodes need all three annotations:"
+      ':$$: CodeLine "  Template    -> Context type for prompt rendering"
+      ':$$: CodeLine "  Schema      -> Output type from LLM"
+      ':$$: CodeLine "  UsesEffects -> Where to route (Goto targets)"
       ':$$: Blank
       ':$$: Fixes
-      ':$$: Bullet "Add both Template and Schema:"
+      ':$$: Bullet "Add Template, Schema, and UsesEffects:"
       ':$$: CodeLine "  myNode :: mode :- LLMNode"
       ':$$: CodeLine "             :@ Needs '[Input]"
       ':$$: CodeLine "             :@ Template MyContextTpl"
       ':$$: CodeLine "             :@ Schema MyOutputType"
+      ':$$: CodeLine "             :@ UsesEffects '[Goto Exit Result]"
     )
 
   -- LLMNode missing Schema - error

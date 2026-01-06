@@ -228,10 +228,13 @@ instance TemplateDef FaqTpl where
 data SupportGraph mode = SupportGraph
   { sgEntry    :: mode :- G.Entry Message
   , sgClassify :: mode :- G.LLMNode :@ Needs '[Message] :@ Template ClassifyTpl :@ Schema Intent
+                    :@ UsesEffects '[Goto "sgRoute" Intent]
     -- Note: Goto targets must match actual field names for gotoField validation
   , sgRoute    :: mode :- G.LogicNode :@ Needs '[Intent] :@ UsesEffects '[Goto "sgRefund" Message, Goto "sgFaq" Message]
   , sgRefund   :: mode :- G.LLMNode :@ Needs '[Message] :@ Template RefundTpl :@ Schema Response
+                    :@ UsesEffects '[Goto Exit Response]
   , sgFaq      :: mode :- G.LLMNode :@ Needs '[Message] :@ Template FaqTpl :@ Schema Response
+                    :@ UsesEffects '[Goto Exit Response]
   , sgExit     :: mode :- G.Exit Response
   }
   deriving Generic
@@ -241,22 +244,23 @@ data SupportGraph mode = SupportGraph
 -- In 'AsHandler es' mode, the NodeHandler type family computes:
 --
 -- * Entry -> Proxy Message (marker, not a handler)
--- * LLM :@ Needs '[A] :@ Template T :@ Schema B -> LLMHandler A B '[] es (TemplateContext T)
+-- * LLM :@ Needs '[A] :@ Template T :@ Schema B :@ UsesEffects effs -> LLMHandler A B targets es (TemplateContext T)
 -- * Logic :@ Needs '[A] :@ UsesEffects effs -> A -> Eff es (GotoChoice targets)
 -- * Exit -> Proxy Response (marker, not a handler)
---
--- Note: LLM handlers are wrapped in LLMBefore/LLMAfter/LLMBoth to specify
--- which phases they handle. The runner uses these to orchestrate the LLM call.
 supportHandlers :: SupportGraph (AsHandler '[State SessionState])
 supportHandlers = SupportGraph
   { sgEntry    = Proxy @Message
-  , sgClassify = LLMBefore $ \msg -> do
-      -- Before handler: builds context for the classify template
-      st <- get @SessionState
-      pure ClassifyContext
-        { topic = msgContent msg
-        , categories = T.intercalate ", " st.sessionNotes
-        }
+  , sgClassify = LLMHandler
+      Nothing  -- no system template
+      (templateCompiled @ClassifyTpl)
+      (\msg -> do
+        -- Before handler: builds context for the classify template
+        st <- get @SessionState
+        pure ClassifyContext
+          { topic = msgContent msg
+          , categories = T.intercalate ", " st.sessionNotes
+          })
+      (\intent -> pure $ gotoChoice @"sgRoute" intent)  -- After handler: route to sgRoute
   , sgRoute    = \intent -> do
       -- Logic handler: returns GotoChoice to specify transition
       --
@@ -269,12 +273,16 @@ supportHandlers = SupportGraph
         IntentRefund    -> gotoChoice @"sgRefund" msg
         IntentQuestion  -> gotoChoice @"sgFaq" msg
         IntentComplaint -> gotoChoice @"sgFaq" msg  -- Complaints go to FAQ for now
-  , sgRefund   = LLMBefore $ \_msg -> do
-      -- Before handler: builds refund template context
-      pure SimpleContext { scContent = "Processing refund..." }
-  , sgFaq      = LLMBefore $ \_msg -> do
-      -- Before handler: builds FAQ template context
-      pure SimpleContext { scContent = "Here are some common questions..." }
+  , sgRefund   = LLMHandler
+      Nothing
+      (templateCompiled @RefundTpl)
+      (\_msg -> pure SimpleContext { scContent = "Processing refund..." })
+      (pure . gotoExit)  -- Route to exit with response
+  , sgFaq      = LLMHandler
+      Nothing
+      (templateCompiled @FaqTpl)
+      (\_msg -> pure SimpleContext { scContent = "Here are some common questions..." })
+      (pure . gotoExit)  -- Route to exit with response
   , sgExit     = Proxy @Response
   }
   where
@@ -309,77 +317,3 @@ _validRecordGraph = ()
 -- explicit Goto transitions.
 instance ReifyRecordGraph SupportGraph where
   reifyRecordGraph = makeGraphInfo
-
--- ════════════════════════════════════════════════════════════════════════════
--- LLM HANDLER VARIANTS EXAMPLE
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Example graph demonstrating all three LLMHandler variants.
---
--- This shows:
---
--- * 'LLMBefore' - Provides template context, uses Needs-based data flow after LLM
--- * 'LLMAfter' - Uses default context, explicit routing based on LLM output
--- * 'LLMBoth' - Custom context AND explicit routing
---
--- @
--- Entry(Message) → analyze(LLMBefore) → route(LLMAfter) → process(LLMBoth) → Exit
--- @
-data RoutingGraph mode = RoutingGraph
-  { rgEntry   :: mode :- G.Entry Message
-    -- LLMBefore: provides context, uses Needs-based routing after LLM
-  , rgAnalyze :: mode :- G.LLMNode :@ Needs '[Message] :@ Template ClassifyTpl :@ Schema Intent
-    -- LLMAfter: no context (uses default), explicit routing based on LLM output
-  , rgRoute   :: mode :- G.LLMNode :@ Needs '[Intent] :@ Schema Intent
-                   :@ UsesEffects '[Goto "rgProcess" Intent, Goto Exit Response]
-    -- LLMBoth: custom context AND explicit routing
-  , rgProcess :: mode :- G.LLMNode :@ Needs '[Intent] :@ Template RefundTpl :@ Schema Response
-                   :@ UsesEffects '[Goto Exit Response]
-  , rgExit    :: mode :- G.Exit Response
-  }
-  deriving Generic
-
--- | Handler record demonstrating all three LLMHandler variants.
-_routingHandlers :: RoutingGraph (AsHandler '[State SessionState])
-_routingHandlers = RoutingGraph
-  { rgEntry   = Proxy @Message
-
-    -- LLMBefore: builds context for the analyze template
-    -- After the LLM call, routing is implicit via Needs-based data flow
-  , rgAnalyze = LLMBefore $ \msg -> do
-      st <- get @SessionState
-      pure ClassifyContext
-        { topic = T.pack (msgContent msg)
-        , categories = T.intercalate ", " st.sessionNotes
-        }
-
-    -- LLMAfter: no before-phase context, explicit routing after LLM
-    -- The runner uses default context; handler decides where to go based on output
-  , rgRoute   = LLMAfter $ \intent -> pure $ case intent of
-      IntentRefund    -> gotoChoice @"rgProcess" intent
-      IntentQuestion  -> gotoExit (Response "FAQ response")
-      IntentComplaint -> gotoChoice @"rgProcess" intent
-
-    -- LLMBoth: custom context before LLM, explicit routing after
-    -- Full control over both phases. Takes system template (optional), user template, before handler, after handler.
-  , rgProcess = LLMBoth
-      Nothing  -- no system template
-      (templateCompiled @RefundTpl)  -- user template
-      (\intent -> pure SimpleContext { scContent = T.pack $ "Processing: " ++ showIntent intent })
-      (pure . gotoExit)
-
-  , rgExit    = Proxy @Response
-  }
-  where
-    msgContent :: Message -> String
-    msgContent (Message s) = s
-
-    -- Need Show instance for Intent in the example
-    showIntent :: Intent -> String
-    showIntent IntentRefund = "refund"
-    showIntent IntentQuestion = "question"
-    showIntent IntentComplaint = "complaint"
-
--- | Validate RoutingGraph at compile time.
-_validRoutingGraph :: G.ValidGraphRecord RoutingGraph => ()
-_validRoutingGraph = ()

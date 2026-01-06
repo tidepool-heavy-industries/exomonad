@@ -253,27 +253,14 @@ instance CallHandler (payload -> Eff es (GotoChoice targets)) payload es targets
   callHandler = id
 
 -- | LLM node handler: execute via executeLLMHandler.
---
--- Only LLMBoth is supported for graph execution. LLMBefore and LLMAfter
--- will error at runtime because they lack complete routing logic.
 instance
   ( Member LLM es
   , FromJSON schema
   , HasJSONSchema schema
   , GingerContext tpl
   ) => CallHandler (LLMHandler payload schema targets es tpl) payload es targets where
-  callHandler (LLMBoth mSysTpl userTpl beforeFn afterFn) p =
-    executeLLMHandler mSysTpl userTpl beforeFn afterFn p
-  callHandler (LLMBefore _) _ =
-    -- UNREACHABLE: This error is only hit if there's a bug in the graph type system.
-    -- LLMBefore handlers should never reach graph execution because they lack routing
-    -- targets (no UsesEffects), and NodeHandler validation should catch this at compile time.
-    error "LLMBefore is not supported for graph dispatch: it has no explicit routing targets. Use LLMBoth instead and move any pre-processing into the before function."
-  callHandler (LLMAfter _) _ =
-    -- UNREACHABLE: This error is only hit if there's a bug in the graph type system.
-    -- LLMAfter handlers should never reach graph execution because they lack template context,
-    -- and NodeHandler validation should catch this at compile time.
-    error "LLMAfter is not supported for graph dispatch: it lacks the template context needed to build LLM prompts. Use LLMBoth instead and move any post-processing into the after function."
+  callHandler (LLMHandler mSysTpl userTpl beforeFn afterFn) =
+    executeLLMHandler mSysTpl userTpl beforeFn afterFn
 
 
 -- ════════════════════════════════════════════════════════════════════════════

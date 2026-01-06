@@ -17,28 +17,29 @@ import Tidepool.Graph.Goto (LLMHandler(..), gotoExit)
 
 import Template.Context (ProcessContext(..), HistoryMessage(HistoryMessage))
 import Template.Graph (SimpleGraph(..), Input(..), Output(..), Result(..))
+import Template.Templates (ProcessTpl)
+import Tidepool.Graph.Template (templateCompiled)
 
 -- | Handlers for SimpleGraph.
 --
--- - sgProcess: LLMBefore builds template context from Input + ChatHistory
--- - sgRoute: Routes LLM output to Exit
+-- - sgProcess: LLMHandler builds template context and routes to exit
 --
 -- Uses ChatHistory effect to include conversation history in context.
 simpleHandlers :: SimpleGraph (AsHandler '[ChatHistory])
 simpleHandlers = SimpleGraph
   { sgEntry   = Proxy @Input
 
-    -- LLMBefore: Build template context with input and history
-    -- The template (process.jinja) receives this context for rendering
-  , sgProcess = LLMBefore $ \input -> do
-      msgs <- getHistory
-      pure ProcessContext
-        { input = T.pack input.inputText
-        , history = formatHistory msgs
-        }
-
-    -- Logic handler: Routes based on LLM output
-  , sgRoute   = \output -> pure $ gotoExit (Result output.outputText)
+    -- LLMHandler: Build template context, call LLM, then route to exit
+  , sgProcess = LLMHandler
+      Nothing  -- no system template
+      (templateCompiled @ProcessTpl)
+      (\input -> do
+        msgs <- getHistory
+        pure ProcessContext
+          { input = T.pack input.inputText
+          , history = formatHistory msgs
+          })
+      (\output -> pure $ gotoExit (Result output.outputText))
 
   , sgExit    = Proxy @Result
   }
