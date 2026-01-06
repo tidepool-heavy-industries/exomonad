@@ -1,15 +1,9 @@
 name: Build CI Container
 
+# Manual-only to avoid burning credits on every cabal change
+# Rebuild when you add significant new dependencies
 on:
-  push:
-    branches: [main]
-    paths:
-      - '**/*.cabal'
-      - 'cabal.project'
-      - 'cabal.project.freeze'
-      - '.github/Dockerfile.ci'
-      - '.github/workflows/build-container.yml'
-  workflow_dispatch:  # Allow manual trigger
+  workflow_dispatch:
 
 env:
   REGISTRY: ghcr.io

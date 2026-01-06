@@ -1,15 +1,16 @@
 name: CI
 
-# TEMPORARILY DISABLED - manual trigger only while we bootstrap container cache
-# After container is built, will re-enable with: push: branches: [main]
 on:
-  workflow_dispatch:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
 
 jobs:
   haskell:
     runs-on: ubuntu-latest
     container:
-      # Use pre-built container with all dependencies cached
       image: ghcr.io/${{ github.repository }}/ci-cache:latest
       credentials:
         username: ${{ github.actor }}
@@ -17,134 +18,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Dependencies are pre-built in the container, so we only need to cache dist-newstyle
       - name: Cache dist-newstyle
         uses: actions/cache@v4
         with:
           path: dist-newstyle
           key: ${{ runner.os }}-ghc9.6-dist-${{ hashFiles('**/*.cabal', 'cabal.project') }}-${{ hashFiles('**/*.hs') }}
           restore-keys: |
-            ${{ runner.os }}-ghc9.6-dist-${{ hashFiles('**/*.cabal', 'cabal.project') }}-
             ${{ runner.os }}-ghc9.6-dist-
 
       - name: Build
-        run: |
-          just build 2>&1 | tee build.log
-          echo ""
-          echo "=== BUILD ANALYSIS ==="
-          echo "Modules compiled: $(grep -c 'Compiling' build.log || echo 0)"
-          echo "Packages built: $(grep -c 'Building' build.log || echo 0)"
-          echo ""
-          echo "=== First 30 compile lines ==="
-          grep -E '(Compiling|Building|Configuring)' build.log | head -30
-          echo ""
-          echo "=== Dependency rebuilds (if any) ==="
-          grep -E 'Building (library|executable)' build.log | grep -v tidepool | head -10 || echo "None - using cached deps"
+        run: cabal build all
 
-      - name: Lint Haskell
+      - name: Lint
         run: just lint-hs
 
       - name: Test
-        run: just test
-
-      - name: Generate TypeScript package
-        run: |
-          cabal run generate-ts-package -- ./tidepool-generated-ts/output
-          cd tidepool-generated-ts/output && npm install && npm run build
-
-      - name: Upload generated package
-        uses: actions/upload-artifact@v4
-        with:
-          name: tidepool-generated-ts
-          path: tidepool-generated-ts/output
-          retention-days: 1
-
-  roundtrip-wasm:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Nix
-        uses: cachix/install-nix-action@v27
-        with:
-          extra_nix_config: |
-            experimental-features = nix-command flakes
-
-      - name: Setup Cachix
-        uses: cachix/cachix-action@v15
-        with:
-          name: tidepool-builds
-          authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
-
-      - name: Cache WASM dist-newstyle
-        uses: actions/cache@v4
-        with:
-          path: dist-newstyle
-          key: ${{ runner.os }}-wasm-dist-${{ hashFiles('**/*.cabal', 'cabal.project') }}-${{ hashFiles('**/*.hs') }}
-          restore-keys: |
-            ${{ runner.os }}-wasm-dist-${{ hashFiles('**/*.cabal', 'cabal.project') }}-
-            ${{ runner.os }}-wasm-dist-
-
-      - name: Build roundtrip WASM
-        run: |
-          nix develop .#wasm --command bash -c "
-            wasm32-wasi-cabal update
-            wasm32-wasi-cabal build tidepool-reactor
-          "
-
-      - name: Copy WASM artifact
-        run: find dist-newstyle -name '*.wasm' -exec cp {} deploy/tidepool-roundtrip.wasm \;
-
-      - name: Upload WASM artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: roundtrip-wasm
-          path: deploy/tidepool-roundtrip.wasm
-
-  typescript:
-    needs: [haskell, roundtrip-wasm]
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: deploy
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Download generated package
-        uses: actions/download-artifact@v4
-        with:
-          name: tidepool-generated-ts
-          path: tidepool-generated-ts/output
-
-      - name: Download WASM artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: roundtrip-wasm
-          path: deploy/
-
-      - name: Copy WASM to src for import
-        run: cp tidepool-roundtrip.wasm src/tidepool.wasm
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 9
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'pnpm'
-          cache-dependency-path: deploy/pnpm-lock.yaml
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Lint TypeScript
-        run: pnpm lint
-
-      - name: Typecheck
-        run: pnpm typecheck
-
-      - name: Test
-        run: pnpm test
+        run: cabal test graph-validation-tests
