@@ -136,6 +136,20 @@ module Tidepool.Graph
   , EdgeInfo(..)
   , RuntimeNodeKind(..)
   , RuntimeEdgeKind(..)
+    -- ** Rich Node Info Types
+  , SchemaInfo(..)
+  , TemplateInfo(..)
+  , MemoryInfo(..)
+
+    -- * JSON Export
+  , graphToExport
+  , graphToJSON
+  , GraphExport(..)
+  , NodeExport(..)
+  , EdgeExport(..)
+  , SchemaExport(..)
+  , TemplateExport(..)
+  , MemoryExport(..)
 
     -- * Record-Based Reification
     -- $recordReification
@@ -196,6 +210,7 @@ import Tidepool.Graph.Goto
 import Tidepool.Graph.Edges
 import Tidepool.Graph.Validate
 import Tidepool.Graph.Reify
+import Tidepool.Graph.Export
 import Tidepool.Graph.Mermaid
 import Tidepool.Graph.Tool
 import qualified Tidepool.Graph.Memory as Mem

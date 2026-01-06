@@ -1,12 +1,13 @@
 -- | Server API definition - Servant types for HTTP endpoints.
 --
--- Defines REST endpoints for health checks and session management.
+-- Defines REST endpoints for health checks, session management, and graph introspection.
 -- WebSocket is handled at the WAI level via wai-websockets.
 module Tidepool.Server.API
   ( -- * API Types
     TidepoolAPI
   , HealthAPI
   , SessionAPI
+  , GraphAPI
   , api
 
     -- * Response Types
@@ -20,6 +21,7 @@ import GHC.Generics (Generic)
 import Servant
 
 import Tidepool.Server.Session (SessionInfo)
+import Tidepool.Graph.Export (GraphExport)
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -57,11 +59,19 @@ type SessionAPI =
        "sessions" :> Get '[JSON] [SessionInfo]
   :<|> "sessions" :> Capture "id" UUID :> Get '[JSON] (Maybe SessionInfo)
 
+-- | Graph introspection endpoint.
+--
+-- GET /graph/info -> GraphExport
+--
+-- Returns the graph structure for visualization (D3, Mermaid, etc.)
+-- Only available when server is configured with a graph.
+type GraphAPI = "graph" :> "info" :> Get '[JSON] GraphExport
+
 -- | Combined API (REST endpoints only).
 --
 -- Static files are served via Raw combinator in the server.
 -- WebSocket is handled at WAI level via websocketsOr.
-type TidepoolAPI = HealthAPI :<|> SessionAPI
+type TidepoolAPI = HealthAPI :<|> SessionAPI :<|> GraphAPI
 
 api :: Proxy TidepoolAPI
 api = Proxy

@@ -39,6 +39,9 @@ module Tidepool.Server
 
     -- * Default Agent
   , simpleAgent
+
+    -- * Graph Introspection (re-export)
+  , GraphExport
   ) where
 
 import Control.Concurrent.MVar
@@ -87,6 +90,7 @@ import Tidepool.Server.API
   , HealthStatus(..)
   , api
   )
+import Tidepool.Graph.Export (GraphExport)
 import Tidepool.Server.SimpleAgent (simpleAgent)
 
 import Control.Monad.Freer (Eff)
@@ -123,6 +127,9 @@ data ServerConfig = ServerConfig
     -- ^ Static file serving mode
   , scAgent :: Agent
     -- ^ Agent to run for each WebSocket connection
+  , scGraphInfo :: Maybe GraphExport
+    -- ^ Optional graph structure for /graph/info endpoint.
+    -- Compute with: Just (graphToExport $ reifyRecordGraph $ Proxy @MyGraph)
   }
 
 
@@ -138,8 +145,11 @@ data ServerConfig = ServerConfig
 runServer :: ServerConfig -> IO ()
 runServer config = do
   putStrLn $ "[Server] Starting on " <> T.unpack (scHost config) <> ":" <> show (scPort config)
-  putStrLn "[Server] REST endpoints: /health, /sessions"
+  putStrLn "[Server] REST endpoints: /health, /sessions, /graph/info"
   putStrLn "[Server] WebSocket endpoint: ws://localhost:<port>/"
+  case scGraphInfo config of
+    Just _ -> putStrLn "[Server] Graph introspection enabled at /graph/info"
+    Nothing -> putStrLn "[Server] No graph configured (plain agent mode)"
 
   -- Create shared state
   sessions <- newSessionMap
@@ -179,7 +189,7 @@ type FullAPI = TidepoolAPI :<|> Raw
 makeServantApp :: ServerConfig -> SessionMap -> Application
 makeServantApp config sessions =
   serve (Proxy :: Proxy FullAPI) $
-    restHandlers sessions :<|> staticHandler
+    restHandlers (scGraphInfo config) sessions :<|> staticHandler
   where
     staticHandler = case scMode config of
       StaticFiles dir -> serveDirectoryWith settings
@@ -189,9 +199,11 @@ makeServantApp config sessions =
       DevProxy _port  -> devProxyHandler
 
 -- | REST API handlers.
-restHandlers :: SessionMap -> Server TidepoolAPI
-restHandlers sessions =
-  healthHandler :<|> (listSessionsHandler sessions :<|> getSessionHandler sessions)
+restHandlers :: Maybe GraphExport -> SessionMap -> Server TidepoolAPI
+restHandlers mGraphInfo sessions =
+  healthHandler
+    :<|> (listSessionsHandler sessions :<|> getSessionHandler sessions)
+    :<|> graphInfoHandler mGraphInfo
 
 -- | Health check handler.
 healthHandler :: Handler HealthStatus
@@ -217,6 +229,15 @@ getSessionHandler sessions sessionId = liftIO $ do
         , siCreatedAt = sCreatedAt s
         , siGraphNode = node
         }
+
+-- | Graph introspection handler.
+--
+-- Returns the graph structure for D3/Mermaid visualization.
+-- Returns 404 if no graph is configured.
+graphInfoHandler :: Maybe GraphExport -> Handler GraphExport
+graphInfoHandler Nothing = throwError err404
+  { errBody = "No graph configured. Server is running a plain agent." }
+graphInfoHandler (Just ge) = pure ge
 
 -- | Placeholder handler for dev proxy mode.
 devProxyHandler :: Tagged Handler Application

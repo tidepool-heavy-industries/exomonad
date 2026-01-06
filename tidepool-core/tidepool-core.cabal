@@ -33,6 +33,7 @@ library
         Tidepool.Graph.Validate
         Tidepool.Graph.Validate.RecordStructure
         Tidepool.Graph.Reify
+        Tidepool.Graph.Export
         Tidepool.Graph.Memory
     -- Development/tooling modules (excluded from WASM builds)
     if !os(wasi)
@@ -149,6 +150,7 @@ test-suite graph-validation-tests
         process >= 1.6 && < 2,
         aeson >= 2.1 && < 3,
         bytestring >= 0.11 && < 1,
+        containers >= 0.6 && < 1,
         optparse-applicative >= 0.18 && < 1,
         text >= 2.0 && < 3,
         freer-simple >= 1.2 && < 2,
