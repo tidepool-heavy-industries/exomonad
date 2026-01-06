@@ -4,21 +4,6 @@ Standalone tools for development, analysis, and sleeptime workflows.
 
 ## Tools
 
-### impact-analysis
-
-Analyzes impact of code changes using LSP to build a dependency graph.
-
-```bash
-cabal run impact-analysis -- <args>
-```
-
-**Modules:**
-- `ImpactAnalysis.Types` - Core types for analysis
-- `ImpactAnalysis.Graph` - Dependency graph construction
-- `ImpactAnalysis.Analyze` - Analysis logic
-
-**Uses:** LSP via lsp-client, tidepool-core effects
-
 ### sleeptime-logs
 
 CLI for querying Grafana/Loki logs during sleeptime evolution workflows.
@@ -49,6 +34,5 @@ Zellij integration for Claude Code sessions.
 
 ## Related Documentation
 
-- [tidepool-core/CLAUDE.md](../tidepool-core/CLAUDE.md) - Graph DSL used by impact-analysis
 - [tidepool-native-gui/CLAUDE.md](../tidepool-native-gui/CLAUDE.md) - observability-executor used with sleeptime-logs
 - [Root CLAUDE.md](../CLAUDE.md) - Sleeptime concept overview

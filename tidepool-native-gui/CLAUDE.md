@@ -1,6 +1,6 @@
 # tidepool-native-gui/ - Native Effect Executors
 
-Native Haskell build with localhost GUI for fast iteration on tidepool graphs. Bypasses CF Workers deployment, uses Anthropic API directly. Full observability via Grafana.
+Native Haskell runtime with WebSocket GUI. Production deployment option alongside Cloudflare Workers. Uses Anthropic API directly with full observability via Grafana.
 
 ## What This Is
 
