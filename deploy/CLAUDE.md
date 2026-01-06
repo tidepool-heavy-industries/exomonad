@@ -93,14 +93,42 @@ Client                    TypeScript                    WASM (Haskell)
 
 ## Effect Types
 
-Currently defined in `protocol.ts`:
+Effects are divided into two categories:
 
-| Effect | Status | Handler |
-|--------|--------|---------|
-| `LogInfo` | ✅ Ready | Console log |
-| `LogError` | ✅ Ready | Console error |
-| `LlmComplete` | ✅ Ready | Cloudflare AI binding |
-| `Habitica` | ✅ Ready | Habitica API |
+### Internal Effects (handled by StateMachineDO)
+
+| Effect | Status | Handler | Semantics |
+|--------|--------|---------|-----------|
+| `LogInfo` | ✅ Ready | Console log | Fire-and-forget |
+| `LogError` | ✅ Ready | Console error | Fire-and-forget |
+| `LlmComplete` | ✅ Ready | Cloudflare AI | Blocking |
+| `LlmCall` | ✅ Ready | Cloudflare AI (multi-turn) | Blocking |
+| `Habitica` | ✅ Ready | Habitica API | Blocking |
+| `GetState` | ✅ Ready | DO storage read | Blocking |
+| `SetState` | ✅ Ready | DO storage write | Fire-and-forget |
+| `RandomInt` | ✅ Ready | Math.random | Blocking |
+| `GetTime` | ✅ Ready | Date.now | Blocking |
+
+### Yielded Effects (returned to caller for handling)
+
+| Effect | Status | Handler | Semantics |
+|--------|--------|---------|-----------|
+| `TelegramSend` | ✅ Ready | Caller-provided | Fire-and-forget |
+| `TelegramAsk` | ✅ Ready | Caller-provided | Blocking |
+| `TelegramConfirm` | ✅ Ready | Caller-provided | Blocking |
+| `EmitEvent` | ✅ Ready | Caller-provided | Fire-and-forget |
+
+### Effect Routing
+
+Effects are routed based on `EffectCategory`:
+- **Internal**: Executed by StateMachineDO, result returned to WASM
+- **Yielded**: Sent to WebSocket client for external handling
+
+And `EffectSemantics`:
+- **Blocking**: WASM waits for result before continuing
+- **Fire-and-forget**: WASM continues immediately (result is `null`)
+
+> **Types**: `tidepool-generated-ts/src/protocol.ts`, `tidepool-wasm/src/Tidepool/Wasm/WireTypes.hs`
 
 ## Effect Handlers
 
@@ -110,8 +138,12 @@ Effect handlers are implemented in `src/handlers/`:
 src/handlers/
 ├── index.ts      # Registry: executeEffect() dispatches to handlers
 ├── log.ts        # LogInfo, LogError → console output
-├── llm.ts        # LlmComplete → Cloudflare AI (@cf/meta/llama-3.3-70b-instruct-fp8-fast)
+├── llm.ts        # LlmComplete, LlmCall → Cloudflare AI
 ├── habitica.ts   # Habitica API operations
+├── state.ts      # GetState, SetState → Durable Object storage
+├── random.ts     # RandomInt → Math.random
+├── time.ts       # GetTime → Date.now (ISO8601)
+├── telegram.ts   # TelegramSend, TelegramAsk, TelegramConfirm (yielded to caller)
 └── __tests__/    # Vitest tests for each handler
 ```
 
