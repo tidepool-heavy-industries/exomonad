@@ -134,7 +134,7 @@ newtype AgentDispatcher s evt = AgentDispatcher
          )
       => Text   -- Tool name
       -> Value  -- Tool input (JSON)
-      -> Eff effs (Either Text ToolResult)
+      -> Eff effs (Either Text (ToolResult '[]))  -- Empty target list (no transitions for agents)
   }
 
 -- | Default dispatcher for agents without tools

@@ -78,6 +78,10 @@ module Tidepool.Effect.Types
     -- * Tool Dispatcher Type
   , ToolDispatcher
 
+    -- * Goto Types (for tool transitions)
+  , GotoChoice
+  , To
+
     -- * Simple Runners (pure/IO)
   , runState
   , runRandom
@@ -118,6 +122,7 @@ import qualified Data.Text.Encoding as TE
 import qualified Data.ByteString.Lazy as LBS
 import GHC.Generics (Generic)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef, modifyIORef)
+import Data.Kind (Type)
 
 -- Re-exports from Anthropic.Types (pure types)
 -- Note: We import ToolUse but not ToolResult from Anthropic.Types
@@ -131,6 +136,9 @@ import qualified Tidepool.Anthropic.Types as AT (ToolResult(..))
 
 -- Question DSL types (shared across agents)
 import Tidepool.Question (Question(..), Answer(..), ItemDisposition(..), Choice(..), ChoiceOption(..))
+
+-- Goto types for tool transitions
+import Tidepool.Graph.Goto (GotoChoice, To)
 
 -- ══════════════════════════════════════════════════════════════
 -- STATE EFFECT
@@ -204,9 +212,13 @@ data LLM r where
     -> LLM (TurnOutcome (TurnResult Value))
 
 -- | Outcome of running a turn
+--
+-- Internal representation (unparameterized) used by the LLM effect.
+-- Transitions are carried as untyped values and typed by the executor.
 data TurnOutcome a
   = TurnCompleted a
   | TurnBroken Text
+  | TurnTransitionHint Text Value  -- target name + payload (untyped)
   deriving (Show, Eq, Functor)
 
 -- | Result of running an LLM turn
@@ -238,10 +250,26 @@ data ToolInvocation = ToolInvocation
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
 -- | Result of executing a tool
-data ToolResult
+--
+-- Parameterized by @targets@ to allow tools to trigger graph transitions.
+-- Tools that don't transition can use an empty list: @ToolResult '[]@
+-- Note: ToolTransition carries untyped target information; the executor will type-check
+-- and convert it to a GotoChoice when the target types are known.
+data ToolResult (targets :: [Type])
   = ToolSuccess Value
   | ToolBreak Text
-  deriving (Show, Eq)
+  | ToolTransition Text Value  -- target name + payload (untyped, will be type-checked at executor)
+
+instance Show (ToolResult targets) where
+  show (ToolSuccess val) = "ToolSuccess " <> show val
+  show (ToolBreak reason) = "ToolBreak " <> show reason
+  show (ToolTransition target payload) = "ToolTransition " <> show target <> " " <> show payload
+
+instance Eq (ToolResult targets) where
+  (ToolSuccess v1) == (ToolSuccess v2) = v1 == v2
+  (ToolBreak t1) == (ToolBreak t2) = t1 == t2
+  (ToolTransition t1 p1) == (ToolTransition t2 p2) = t1 == t2 && p1 == p2
+  _ == _ = False
 
 -- | LLM configuration
 data LLMConfig = LLMConfig
@@ -262,8 +290,11 @@ noHooks :: LLMHooks
 noHooks = LLMHooks (pure ()) (pure ())
 
 -- | A tool dispatcher executes tools by name, returning results
-type ToolDispatcher event effs =
-  Text -> Value -> Eff effs (Either Text ToolResult)
+--
+-- Parameterized by @targets@ to match the node's 'UsesEffects' targets.
+-- Tools that don't transition can use an empty list.
+type ToolDispatcher (targets :: [Type]) event effs =
+  Text -> Value -> Eff effs (Either Text (ToolResult targets))
 
 -- | Build content blocks from text + images
 withImages :: Text -> [ImageSource] -> [ContentBlock]
@@ -286,6 +317,7 @@ runTurnContent systemPrompt userContent schema tools = do
   rawResult <- send (RunTurnOp systemPrompt userContent schema tools)
   case rawResult of
     TurnBroken reason -> return (TurnBroken reason)
+    TurnTransitionHint target payload -> return (TurnTransitionHint target payload)
     TurnCompleted tr -> do
       let rawJson = tr.trOutput
       case fromJSON rawJson of
@@ -323,6 +355,7 @@ llmCallEither systemPrompt userInput schema = do
   result <- runTurn @output systemPrompt userInput schema []
   case result of
     TurnBroken reason -> pure $ Left $ "Unexpected break: " <> reason
+    TurnTransitionHint target _payload -> pure $ Left $ "Unexpected transition to " <> target <> " (no tools available)"
     TurnCompleted (TurnParsed tr) -> pure $ Right tr.trOutput
     TurnCompleted (TurnParseFailed {tpfError}) -> pure $ Left $ "Parse failed: " <> T.pack tpfError
 
@@ -337,6 +370,7 @@ llmCallEitherWithTools systemPrompt userInput schema tools = do
   result <- runTurn @output systemPrompt userInput schema tools
   case result of
     TurnBroken reason -> pure $ Left $ "Turn broken: " <> reason
+    TurnTransitionHint target _payload -> pure $ Left $ "Unexpected transition to " <> target <> " (not in executor context)"
     TurnCompleted (TurnParsed tr) -> pure $ Right tr.trOutput
     TurnCompleted (TurnParseFailed {tpfError}) -> pure $ Left $ "Parse failed: " <> T.pack tpfError
 
@@ -371,6 +405,7 @@ llmCallStructured systemPrompt userInput schema = do
   result <- runTurn @output systemPrompt userInput schema []
   case result of
     TurnBroken reason -> pure $ Left $ LlmTurnBroken reason
+    TurnTransitionHint target _payload -> pure $ Left $ LlmTurnBroken $ "Unexpected transition to " <> target <> " (no tools available)"
     TurnCompleted (TurnParsed tr) -> pure $ Right tr.trOutput
     TurnCompleted (TurnParseFailed {tpfError}) -> pure $ Left $ LlmParseFailed (T.pack tpfError)
 
@@ -385,6 +420,7 @@ llmCallStructuredWithTools systemPrompt userInput schema tools = do
   result <- runTurn @output systemPrompt userInput schema tools
   case result of
     TurnBroken reason -> pure $ Left $ LlmTurnBroken reason
+    TurnTransitionHint target _payload -> pure $ Left $ LlmTurnBroken $ "Unexpected transition to " <> target <> " (not in executor context)"
     TurnCompleted (TurnParsed tr) -> pure $ Right tr.trOutput
     TurnCompleted (TurnParseFailed {tpfError}) -> pure $ Left $ LlmParseFailed (T.pack tpfError)
 

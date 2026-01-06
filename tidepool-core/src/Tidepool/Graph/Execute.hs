@@ -39,16 +39,21 @@ module Tidepool.Graph.Execute
 
     -- * Self-Loop Dispatch
   , DispatchGotoWithSelf(..)
+
+    -- * Transition Conversion
+  , ConvertTransitionHint(..)
   ) where
 
-import Data.Aeson (FromJSON)
+import Data.Aeson (FromJSON, Value)
 import qualified Data.Aeson as Aeson
 import Data.Kind (Constraint, Type)
+import Data.Proxy (Proxy(..))
 import Data.Text (Text)
+import qualified Data.Text as T
 import Control.Monad.Freer (Eff, Member)
 import GHC.Generics (Generic(..))
 import GHC.Records (HasField(..))
-import GHC.TypeLits (Symbol, KnownSymbol, TypeError, ErrorMessage(..))
+import GHC.TypeLits (Symbol, KnownSymbol, TypeError, ErrorMessage(..), symbolVal)
 import Tidepool.Graph.Errors
   ( HR, Blank, WhatHappened, HowItWorks, Fixes
   , Indent, CodeLine, Bullet
@@ -58,6 +63,7 @@ import Text.Parsec.Pos (SourcePos)
 
 import Tidepool.Effect (LLM, llmCall)
 import Tidepool.Effect.ClaudeCode (ClaudeCodeExec, execClaudeCode)
+import Tidepool.Effect.Types (TurnOutcome(..), TurnParseResult(..), TurnResult(..), runTurn)
 import Tidepool.Graph.Edges (GetInput)
 import Tidepool.Graph.Generic (AsHandler, FieldsWithNamesOf)
 import Tidepool.Graph.Generic.Core (Entry, AsGraph)
@@ -216,6 +222,7 @@ executeLLMHandler
      , FromJSON schema
      , HasJSONSchema schema
      , GingerContext tpl
+     , ConvertTransitionHint targets
      )
   => Maybe (TypedTemplate tpl SourcePos)      -- ^ Optional system prompt template
   -> TypedTemplate tpl SourcePos              -- ^ User prompt template (required)
@@ -230,10 +237,16 @@ executeLLMHandler mSystemTpl userTpl beforeFn afterFn input = do
   let systemPrompt = maybe "" (runTypedTemplate ctx) mSystemTpl
       userPrompt = runTypedTemplate ctx userTpl
       schemaVal = schemaToValue (jsonSchema @schema)
-  -- Call LLM with rendered prompts
-  output <- llmCall @schema systemPrompt userPrompt schemaVal
-  -- Route based on output
-  afterFn output
+  -- Call LLM with rendered prompts and handle tool-initiated transitions
+  turnResult <- runTurn @schema systemPrompt userPrompt schemaVal []
+  case turnResult of
+    TurnBroken reason -> error $ "LLM turn broken: " <> T.unpack reason
+    TurnTransitionHint targetName payload ->
+      case convertTransitionHint @targets targetName payload of
+        Just choice -> pure choice
+        Nothing -> error $ "Tool transition to unknown target or wrong type: " <> T.unpack targetName
+    TurnCompleted (TurnParsed (TurnResult {trOutput})) -> afterFn trOutput
+    TurnCompleted (TurnParseFailed {tpfError}) -> error $ "Parse failed: " <> tpfError
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -269,6 +282,7 @@ executeClaudeCodeHandler
      , GingerContext tpl
      , SingModelChoice model
      , KnownMaybeCwd cwd
+     , ConvertTransitionHint targets
      )
   => Maybe (TypedTemplate tpl SourcePos)         -- ^ Optional system prompt template
   -> TypedTemplate tpl SourcePos                 -- ^ User prompt template (required)
@@ -327,6 +341,7 @@ instance
   , FromJSON schema
   , HasJSONSchema schema
   , GingerContext tpl
+  , ConvertTransitionHint targets
   ) => CallHandler (LLMHandler payload schema targets es tpl) payload es targets where
   callHandler (LLMHandler mSysTpl userTpl beforeFn afterFn) =
     executeLLMHandler mSysTpl userTpl beforeFn afterFn
@@ -343,6 +358,7 @@ instance
   , GingerContext tpl
   , SingModelChoice model
   , KnownMaybeCwd cwd
+  , ConvertTransitionHint targets
   ) => CallHandler (ClaudeCodeLLMHandler model cwd payload schema targets es tpl) payload es targets where
   callHandler (ClaudeCodeLLMHandler mSysTpl userTpl beforeFn afterFn) =
     executeClaudeCodeHandler @model @cwd mSysTpl userTpl beforeFn afterFn
@@ -388,6 +404,94 @@ instance
 type DispatchGoto :: (Type -> Type) -> [Type] -> [Effect] -> Type -> Constraint
 class DispatchGoto graph targets es exitType where
   dispatchGoto :: graph (AsHandler es) -> GotoChoice targets -> Eff es exitType
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- CONVERT UNTYPED TRANSITIONS TO TYPED CHOICES
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Convert untyped transition (Text + Value) to typed GotoChoice by matching
+-- against node's UsesEffects targets.
+--
+-- When a tool returns ToolTransition with an untyped target name and payload,
+-- this typeclass recursively matches the target name against the list of valid
+-- targets, constructs the correct OneOf position, and type-checks the payload JSON.
+--
+-- = How It Works
+--
+-- Given targets @'[To \"nodeA\" Int, To \"nodeB\" Text, To Exit Bool]@:
+--
+-- 1. Check if target name == "nodeA"
+--    - If yes, parse payload as Int, construct @Here (To payload)@
+--    - If no, skip to rest
+-- 2. Check if target name == "nodeB"
+--    - If yes, parse payload as Text, construct @There (Here (To payload))@
+--    - If no, skip to rest
+-- 3. Check if target name == "Exit"
+--    - If yes, parse payload as Bool, construct @There (There (Here (To payload)))@
+--    - If no, return Nothing
+--
+-- The recursive structure ensures we find the right target and type-check the payload.
+type ConvertTransitionHint :: [Type] -> Constraint
+class ConvertTransitionHint targets where
+  convertTransitionHint :: Text -> Value -> Maybe (GotoChoice targets)
+
+-- | Base case: empty target list has no valid transitions.
+instance ConvertTransitionHint '[] where
+  convertTransitionHint _ _ = Nothing
+
+-- | Recursive case: named target (symbol literal like @"nodeA"@).
+--
+-- Check if the target name matches the symbol, parse payload if it does,
+-- and recurse for the rest of the target list.
+instance
+  ( KnownSymbol name
+  , FromJSON payload
+  , ConvertTransitionHint rest
+  ) => ConvertTransitionHint (To name payload ': rest) where
+  convertTransitionHint targetName payload
+    | targetName == T.pack (symbolVal (Proxy @name)) =
+        case Aeson.fromJSON payload of
+          Aeson.Success val -> Just $ GotoChoice (Here val)
+          Aeson.Error _ -> Nothing
+    | otherwise =
+        case convertTransitionHint @rest targetName payload of
+          Just (GotoChoice oneOf) -> Just $ GotoChoice (There oneOf)
+          Nothing -> Nothing
+
+-- | Exit target case.
+--
+-- Check if target name is "Exit", parse payload if it is, and recurse for rest.
+instance
+  ( FromJSON payload
+  , ConvertTransitionHint rest
+  ) => ConvertTransitionHint (To Exit payload ': rest) where
+  convertTransitionHint targetName payload
+    | targetName == "Exit" =
+        case Aeson.fromJSON payload of
+          Aeson.Success val -> Just $ GotoChoice (Here val)
+          Aeson.Error _ -> Nothing
+    | otherwise =
+        case convertTransitionHint @rest targetName payload of
+          Just (GotoChoice oneOf) -> Just $ GotoChoice (There oneOf)
+          Nothing -> Nothing
+
+-- | Self target case (for nodes with self-loops).
+--
+-- Check if target name is "Self", parse payload if it is, and recurse for rest.
+instance
+  ( FromJSON payload
+  , ConvertTransitionHint rest
+  ) => ConvertTransitionHint (To Self payload ': rest) where
+  convertTransitionHint targetName payload
+    | targetName == "Self" =
+        case Aeson.fromJSON payload of
+          Aeson.Success val -> Just $ GotoChoice (Here val)
+          Aeson.Error _ -> Nothing
+    | otherwise =
+        case convertTransitionHint @rest targetName payload of
+          Just (GotoChoice oneOf) -> Just $ GotoChoice (There oneOf)
+          Nothing -> Nothing
 
 
 -- ════════════════════════════════════════════════════════════════════════════

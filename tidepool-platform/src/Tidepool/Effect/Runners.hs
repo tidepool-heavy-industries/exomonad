@@ -91,6 +91,22 @@ type family NotMember (e :: Type -> Type) (es :: [Type -> Type]) :: Constraint w
   NotMember e (_ : es) = NotMember e es
 
 -- ══════════════════════════════════════════════════════════════
+-- TOOL EXECUTION OUTCOMES
+-- ══════════════════════════════════════════════════════════════
+
+-- | Result of executing tools (untyped for internal use)
+data ToolExecOutcome
+  = ToolExecContinue [ToolInvocation] [Client.ToolResult]
+  | ToolExecBreak Text
+  | ToolExecTransition Text Value  -- target name + payload (untyped)
+
+-- | Result of tool loop execution (may break or transition)
+data ToolLoopResult
+  = ToolLoopSuccess (TurnResult Value) [ContentBlock]
+  | ToolLoopBroke Text
+  | ToolLoopTransitioned Text Value  -- target name + payload
+
+-- ══════════════════════════════════════════════════════════════
 -- COMPRESSION TYPES
 -- ══════════════════════════════════════════════════════════════
 
@@ -102,8 +118,9 @@ type CompressionEffects state event =
 
 -- | Tool dispatcher for compression - polymorphic in effect stack.
 -- The actual effect constraints are enforced at call site via 'runLLMForCompression'.
+-- Uses empty target list since compression doesn't support transitions.
 type CompressionDispatcher es =
-  Text -> Value -> Eff es (Either Text ToolResult)
+  Text -> Value -> Eff es (Either Text (ToolResult '[]))
 
 -- | Configuration for the compression LLM
 -- The 'es' type parameter is the effect stack available to tools.
@@ -185,12 +202,12 @@ data ChatHistoryOps es = ChatHistoryOps
 -- This allows both normal LLM runners (with ChatHistory) and compression
 -- LLM runners (without ChatHistory) to share the same core logic.
 runLLMCore
-  :: forall effs a.
+  :: forall targets effs a.
      (LastMember IO effs, Member Log effs)
   => LLMHooks
   -> LLMConfig
   -> Maybe (ChatHistoryOps effs)  -- Nothing for compression, Just for normal
-  -> (Text -> Value -> Eff effs (Either Text ToolResult))  -- Tool dispatcher
+  -> (Text -> Value -> Eff effs (Either Text (ToolResult targets)))  -- Tool dispatcher
   -> Eff (LLM ': effs) a
   -> Eff effs a
 runLLMCore hooks config mChatOps dispatcher = interpret $ \case
@@ -217,12 +234,17 @@ runLLMCore hooks config mChatOps dispatcher = interpret $ \case
     loopResult <- toolLoop clientConfig systemPrompt outputSchema tools initialMessages [] [] []
 
     case loopResult of
-      Left breakReason -> do
+      ToolLoopBroke breakReason -> do
         logInfo $ "[LLM] Turn broken by tool: " <> breakReason
         sendM hooks.onTurnEnd
         return (TurnBroken breakReason)
 
-      Right (result, finalContent) -> do
+      ToolLoopTransitioned target payload -> do
+        logInfo $ "[LLM] Tool initiated transition to " <> target
+        sendM hooks.onTurnEnd
+        return (TurnTransitionHint target payload)
+
+      ToolLoopSuccess result finalContent -> do
         -- Only append to history if we have ChatHistory operations
         case mChatOps of
           Nothing -> pure ()
@@ -244,7 +266,7 @@ runLLMCore hooks config mChatOps dispatcher = interpret $ \case
       -> [ToolInvocation]
       -> [Text]
       -> [Text]
-      -> Eff effs (Either Text (TurnResult Value, [ContentBlock]))
+      -> Eff effs ToolLoopResult
     toolLoop cConfig sysPrompt outSchema tls msgs invs narrs thinks = do
       let req = SingleCallRequest
             { scrMessages = msgs
@@ -269,7 +291,7 @@ runLLMCore hooks config mChatOps dispatcher = interpret $ \case
       -> [ToolInvocation]
       -> [Text]
       -> [Text]
-      -> Eff effs (Either Text (TurnResult Value, [ContentBlock]))
+      -> Eff effs ToolLoopResult
     processResponse cConfig sysPrompt outSchema tls msgs resp invs narrs thinks = do
       let content = resp.scrContent
           newNarratives = [t | TextBlock t <- content]
@@ -286,13 +308,14 @@ runLLMCore hooks config mChatOps dispatcher = interpret $ \case
                 , trNarrative = T.intercalate "\n\n" allNarratives
                 , trThinking = T.intercalate "\n\n" allThinkings
                 }
-          pure $ Right (turnResult, content)
+          pure $ ToolLoopSuccess turnResult content
 
         ToolUseStop -> do
           toolExecResult <- executeToolsWithDispatcher resp.scrToolUses
           case toolExecResult of
-            Left breakReason -> pure $ Left breakReason
-            Right (newInvocations, toolResults) -> do
+            ToolExecBreak breakReason -> pure $ ToolLoopBroke breakReason
+            ToolExecTransition target payload -> pure $ ToolLoopTransitioned target payload
+            ToolExecContinue newInvocations toolResults -> do
               let allInvocations = invs ++ newInvocations
                   assistantMsg = Message Assistant content
                   userMsg = Message User (map ToolResultBlock toolResults)
@@ -308,14 +331,14 @@ runLLMCore hooks config mChatOps dispatcher = interpret $ \case
                 , trNarrative = T.intercalate "\n\n" allNarratives
                 , trThinking = T.intercalate "\n\n" allThinkings
                 }
-          pure $ Right (turnResult, content)
+          pure $ ToolLoopSuccess turnResult content
         Refusal -> error "Model refused to respond (safety)"
         PauseTurn -> error "Server tool pause not supported"
 
-    executeToolsWithDispatcher :: [ToolUse] -> Eff effs (Either Text ([ToolInvocation], [Client.ToolResult]))
+    executeToolsWithDispatcher :: [ToolUse] -> Eff effs ToolExecOutcome
     executeToolsWithDispatcher uses = go uses [] []
       where
-        go [] invs results = pure $ Right (reverse invs, reverse results)
+        go [] invs results = pure $ ToolExecContinue (reverse invs) (reverse results)
         go (use:rest) invs results = do
           toolResult <- dispatcher use.toolName use.toolInput
           case toolResult of
@@ -331,7 +354,7 @@ runLLMCore hooks config mChatOps dispatcher = interpret $ \case
                     , Client.toolResultIsError = True
                     }
               in go rest (inv:invs) (res:results)
-            Right (ToolBreak reason) -> pure $ Left reason
+            Right (ToolBreak reason) -> pure $ ToolExecBreak reason
             Right (ToolSuccess val) ->
               let inv = ToolInvocation
                     { tiName = use.toolName
@@ -344,6 +367,8 @@ runLLMCore hooks config mChatOps dispatcher = interpret $ \case
                     , Client.toolResultIsError = False
                     }
               in go rest (inv:invs) (res:results)
+            Right (ToolTransition target payload) ->
+              pure $ ToolExecTransition target payload
 
     encodeText :: Value -> Text
     encodeText v = case v of
@@ -442,22 +467,22 @@ runLLM config = interpret $ \case
 
 -- | Run the LLM effect with full tool execution support
 runLLMWithTools
-  :: forall effs event a.
+  :: forall targets effs event a.
      (LastMember IO effs, Member (Emit event) effs, Member RequestInput effs, Member Random effs, Member ChatHistory effs, Member Log effs)
   => LLMConfig
-  -> ToolDispatcher event effs
+  -> ToolDispatcher targets event effs
   -> Eff (LLM ': effs) a
   -> Eff effs a
-runLLMWithTools = runLLMWithToolsHooked @effs @event noHooks
+runLLMWithTools config = runLLMWithToolsHooked @targets @effs @event @a noHooks config
 
 -- | Run the LLM effect with hooks for lifecycle events
 -- Uses shared 'runLLMCore' with ChatHistory operations enabled.
 runLLMWithToolsHooked
-  :: forall effs event a.
+  :: forall targets effs event a.
      (LastMember IO effs, Member (Emit event) effs, Member RequestInput effs, Member Random effs, Member ChatHistory effs, Member Log effs)
   => LLMHooks
   -> LLMConfig
-  -> ToolDispatcher event effs
+  -> ToolDispatcher targets event effs
   -> Eff (LLM ': effs) a
   -> Eff effs a
 runLLMWithToolsHooked hooks config dispatcher =
@@ -478,7 +503,7 @@ runLLMForCompression
      , LastMember IO effs
      )
   => LLMConfig
-  -> (Text -> Value -> Eff effs (Either Text ToolResult))  -- Tool dispatcher
+  -> (Text -> Value -> Eff effs (Either Text (ToolResult '[])))  -- Tool dispatcher
   -> Eff (LLM ': effs) a
   -> Eff effs a
 runLLMForCompression config =
@@ -613,6 +638,10 @@ runCompressionLLM config userPrompt = do
     TurnBroken reason ->
       -- Fallback: just use a placeholder
       [Message Assistant [TextBlock $ "[Compressed history - interrupted: " <> reason <> "]"]]
+
+    TurnTransitionHint target _payload ->
+      -- Fallback: compression shouldn't trigger transitions
+      [Message Assistant [TextBlock $ "[Compressed history - unexpected transition to " <> target <> "]"]]
 
     TurnCompleted parseResult -> case parseResult of
       TurnParsed tr ->
