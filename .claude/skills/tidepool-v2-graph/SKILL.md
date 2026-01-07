@@ -61,20 +61,20 @@ case result of
 - `GotoChoice targets ret` - Wraps `OneOf targets ret`
 - `DispatchGoto` - Typeclass for typed dispatch (no Dynamic!)
 
-## Porting Pattern (DM Example)
+## Example: Support Agent Graph
 
 ```haskell
-data DMGraph mode = DMGraph
-  { entry      :: mode :- Entry UserInput
-  , classify   :: mode :- LLMHandler :@ Input UserInput
-                                     :@ UsesEffects '[Log, Telegram, Goto ChoiceOfThree Intent]
-  , scene      :: mode :- LLMHandler :@ Input SceneState
-                                     :@ UsesEffects '[Log, Telegram, Habitica, Goto Exit DMResponse]
-  , action     :: mode :- LLMHandler :@ Input ActionState
-                                     :@ UsesEffects '[Log, Telegram, Habitica, Goto Exit DMResponse]
-  , downtime   :: mode :- LLMHandler :@ Input DowntimeState
-                                     :@ UsesEffects '[Log, Telegram, Goto Exit DMResponse]
-  , exit       :: mode :- Exit DMResponse
+data SupportGraph mode = SupportGraph
+  { entry      :: mode :- Entry UserMessage
+  , classify   :: mode :- LLMHandler :@ Input UserMessage
+                                     :@ UsesEffects '[Log, Goto ChoiceOfThree Intent]
+  , refund     :: mode :- LLMHandler :@ Input RefundRequest
+                                     :@ UsesEffects '[Log, Goto Exit SupportResponse]
+  , faq        :: mode :- LLMHandler :@ Input FaqQuery
+                                     :@ UsesEffects '[Log, Goto Exit SupportResponse]
+  , escalate   :: mode :- LLMHandler :@ Input EscalationInfo
+                                     :@ UsesEffects '[Log, Goto Exit SupportResponse]
+  , exit       :: mode :- Exit SupportResponse
   }
 ```
 
@@ -83,17 +83,17 @@ data DMGraph mode = DMGraph
 In LLMHandler implementations, use these via smart constructors:
 
 ```haskell
--- From Tidepool.Wasm.Effect
+-- From Tidepool.Wasm.Effect (core effects)
 logInfo :: Text -> Eff effs ()
-telegramSend :: Text -> Eff effs Int
-telegramAsk :: Text -> [(Text, Text)] -> Eff effs TelegramAskResult
 llmCall :: Text -> [WireMessage] -> Maybe Value -> [Value] -> Eff effs LlmCallResult
-habitica :: HabiticaOp a -> Eff effs a
+
+-- Integration effects (defined in consuming repos)
+-- e.g., telegramSend, habitica, slack, etc.
 ```
 
 ## Tool Use Pattern
 
-For LLM-driven tool calling (requires PR #95):
+For LLM-driven tool calling:
 
 ```haskell
 result <- llmCall "extract" messages (Just schema) [askUserToolSchema]
@@ -103,7 +103,7 @@ case result of
     results <- forM toolCalls $ \call -> case wtcFunction call of
       "ask_user" -> do
         let args = parseArgs (wtcInput call)
-        telegramAsk (args.question) (maybe [] id args.options)
+        requestInput (args.question) (maybe [] id args.options)
     llmCall "extract" (messages ++ toolResultMsgs results) schema tools
 ```
 
@@ -112,4 +112,4 @@ case result of
 1. **State in context** - Use `Input StateType` + `LLMBefore` to build context
 2. **Branching** - Use `ChoiceOfN` for multi-way routing
 3. **Tool loops** - Handler owns the loop, calling `llmCall` until `LlmDone`
-4. **Telegram UI** - Use `telegramAsk` for buttons, `telegramSend` for narration
+4. **User input** - Use `RequestInput` effect for choices/text from user
