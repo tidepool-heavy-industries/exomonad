@@ -9,10 +9,45 @@ use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use zellij_client::{cli_client::start_cli_client, os_input_output::get_cli_client_os_input};
 use zellij_utils::input::{actions::Action, command::RunCommandAction};
+
+// ============================================================================
+// FIFO Cleanup Guard
+// ============================================================================
+
+/// Guard that removes a FIFO on drop, ensuring cleanup even on error paths.
+struct FifoGuard {
+    path: PathBuf,
+}
+
+impl FifoGuard {
+    fn new(path: PathBuf) -> Result<Self> {
+        // Remove any stale FIFO from previous runs (e.g., after crash)
+        if path.exists() {
+            std::fs::remove_file(&path).ok();
+        }
+        mkfifo(&path, Mode::S_IRUSR | Mode::S_IWUSR)
+            .with_context(|| format!("Failed to create FIFO at {}", path.display()))?;
+        Ok(Self { path })
+    }
+
+    fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for FifoGuard {
+    fn drop(&mut self) {
+        if let Err(err) = std::fs::remove_file(&self.path) {
+            eprintln!("warning: failed to remove FIFO {}: {err}", self.path.display());
+        }
+    }
+}
 
 // ============================================================================
 // CLI Types
@@ -361,10 +396,9 @@ fn run_cc_session(
     fork_session: bool,
     session_tag: Option<&str>,
 ) -> Result<()> {
-    // Create FIFO for result communication
+    // Create FIFO for result communication (guard ensures cleanup on all paths)
     let fifo_path = PathBuf::from(format!("/tmp/zellij-cc-{}.fifo", std::process::id()));
-    mkfifo(&fifo_path, Mode::S_IRUSR | Mode::S_IWUSR)
-        .context("Failed to create FIFO")?;
+    let fifo_guard = FifoGuard::new(fifo_path)?;
 
     // Build claude args
     let mut claude_args = vec![
@@ -411,7 +445,7 @@ fn run_cc_session(
         "zellij-cc".to_string(),
         "wrap".to_string(),
         "--result-fifo".to_string(),
-        shell_quote(&fifo_path.display().to_string()).into_owned(),
+        shell_quote(&fifo_guard.path().display().to_string()).into_owned(),
     ];
 
     // Add cwd if specified
@@ -453,18 +487,16 @@ fn run_cc_session(
     start_cli_client(Box::new(os_input), session, actions);
 
     // Block reading from FIFO (no polling!)
+    // Use Duration::ZERO as sentinel for "no timeout" - read_result_from_fifo handles this
     let timeout = if timeout_secs > 0 {
         Duration::from_secs(timeout_secs)
     } else {
-        Duration::from_secs(u64::MAX)
+        Duration::ZERO // Sentinel for "no timeout"
     };
 
-    let result = read_result_from_fifo(&fifo_path, timeout)?;
+    let result = read_result_from_fifo(fifo_guard.path(), timeout)?;
 
-    // Cleanup FIFO
-    if let Err(err) = std::fs::remove_file(&fifo_path) {
-        eprintln!("warning: failed to remove FIFO {}: {err}", fifo_path.display());
-    }
+    // fifo_guard handles cleanup on drop (including error paths)
 
     // Print final JSON to stdout (for Haskell caller)
     println!("{}", serde_json::to_string_pretty(&result)?);
@@ -480,17 +512,16 @@ fn wrap_claude(result_fifo: &Path, cwd: Option<&PathBuf>, session_tag: Option<&s
     use std::sync::mpsc;
     use std::thread;
 
-    // Create signal FIFO for interrupt communication
+    // Create signal FIFO for interrupt communication (guard ensures cleanup on all paths)
     let signal_fifo_path = PathBuf::from(format!("/tmp/zellij-cc-{}.signal", std::process::id()));
-    mkfifo(&signal_fifo_path, Mode::S_IRUSR | Mode::S_IWUSR)
-        .context("Failed to create signal FIFO")?;
+    let signal_fifo_guard = FifoGuard::new(signal_fifo_path)?;
 
     // Spawn claude with captured stdout and signal FIFO env var
     let mut cmd = Command::new("claude");
     cmd.args(claude_args)
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit()) // Pass stderr through
-        .env("TIDEPOOL_SIGNAL_FIFO", &signal_fifo_path);
+        .env("TIDEPOOL_SIGNAL_FIFO", signal_fifo_guard.path());
 
     if let Some(dir) = cwd {
         cmd.current_dir(dir);
@@ -504,17 +535,22 @@ fn wrap_claude(result_fifo: &Path, cwd: Option<&PathBuf>, session_tag: Option<&s
     // Channel to receive signals from the signal FIFO reader thread
     let (signal_tx, signal_rx) = mpsc::channel::<InterruptSignal>();
 
+    // Termination flag for the signal reader thread
+    let should_stop = Arc::new(AtomicBool::new(false));
+    let should_stop_clone = Arc::clone(&should_stop);
+
     // Spawn a thread to read from signal FIFO
-    let signal_fifo_clone = signal_fifo_path.clone();
+    let signal_fifo_clone = signal_fifo_guard.path().to_path_buf();
     let signal_thread = thread::spawn(move || {
         // Open FIFO in read mode - this blocks until writer opens it
         // Using O_RDONLY | O_NONBLOCK would be ideal but for simplicity
         // we just try to open and read in a loop
-        loop {
+        while !should_stop_clone.load(Ordering::Relaxed) {
             match std::fs::File::open(&signal_fifo_clone) {
                 Ok(file) => {
                     let reader = BufReader::new(file);
                     for line in reader.lines() {
+                        if should_stop_clone.load(Ordering::Relaxed) { break; }
                         if let Ok(line) = line {
                             if line.trim().is_empty() { continue; }
                             if let Ok(signal) = serde_json::from_str::<InterruptSignal>(&line) {
@@ -572,11 +608,13 @@ fn wrap_claude(result_fifo: &Path, cwd: Option<&PathBuf>, session_tag: Option<&s
     // Wait for claude to exit
     let status = child.wait()?;
 
-    // Cleanup signal FIFO and thread (thread will exit when we drop the sender)
-    drop(signal_thread); // Let thread terminate naturally
-    if let Err(err) = std::fs::remove_file(&signal_fifo_path) {
-        eprintln!("warning: failed to remove signal FIFO {}: {err}", signal_fifo_path.display());
-    }
+    // Signal the reader thread to stop and wait for it
+    should_stop.store(true, Ordering::Relaxed);
+    // The thread may be blocked on FIFO read, so we give it a moment then move on
+    // (the thread will exit on next poll cycle or when FIFO is removed)
+    let _ = signal_thread.join();
+
+    // signal_fifo_guard handles cleanup on drop (including error paths)
 
     // Build final result
     let result = build_run_result(events, result_event, status, session_tag, interrupts)?;

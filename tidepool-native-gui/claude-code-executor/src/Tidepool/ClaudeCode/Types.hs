@@ -65,7 +65,7 @@ import GHC.Generics (Generic)
 -- @
 data ClaudeCodeResult = ClaudeCodeResult
   { ccrExitCode :: Int
-    -- ^ Exit code from zellij-cc (always 0, check is_error for actual status)
+    -- ^ Exit code from Claude process (reflects actual process exit status; see ccrIsError for Claude Code-level errors)
   , ccrIsError :: Bool
     -- ^ Whether Claude Code reported an error
   , ccrResult :: Maybe Text
@@ -73,7 +73,7 @@ data ClaudeCodeResult = ClaudeCodeResult
   , ccrStructuredOutput :: Maybe Value
     -- ^ Structured output (when --json-schema was provided)
   , ccrSessionId :: Text
-    -- ^ Session ID (always present, available from init event)
+    -- ^ Session ID (from init event; may be "unknown" if parsing failed)
   , ccrSessionTag :: Maybe Text
     -- ^ Tag for correlating with orchestrator state (e.g., worktree name)
   , ccrTotalCostUsd :: Double
