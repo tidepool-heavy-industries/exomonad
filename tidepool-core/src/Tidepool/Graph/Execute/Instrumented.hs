@@ -43,6 +43,7 @@ module Tidepool.Graph.Execute.Instrumented
     runGraphWithSpans
   , runGraphFromWithSpans
   , withGraphSpan
+  , withNodeSpan
 
     -- * Traced Dispatch
   , DispatchGotoTraced(..)
@@ -79,6 +80,32 @@ import Tidepool.Graph.Types (Exit)
 
 -- | Effect type alias.
 type Effect = Type -> Type
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- NODE SPAN HELPER
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Wrap a handler call with span emission for a named node.
+--
+-- This extracts the common pattern of:
+-- 1. Start span for node
+-- 2. Execute action
+-- 3. End span
+--
+-- Used by 'DispatchGotoTraced' instances to reduce duplication.
+-- The span name follows the pattern @node:<handler-name>@.
+withNodeSpan
+  :: Member Observability es
+  => Text           -- ^ Handler name
+  -> Eff es a       -- ^ Action to run (handler call + continuation)
+  -> Eff es a
+withNodeSpan handlerName action = do
+  _ <- startSpan ("node:" <> handlerName) SpanInternal
+    [AttrText "node.name" handlerName]
+  result <- action
+  endSpan False []
+  pure result
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -126,20 +153,10 @@ runGraphFromWithSpans
   -> Eff es exitType
 runGraphFromWithSpans graph input = do
   let handlerName = T.pack $ symbolVal (Proxy @name)
-
-  -- Start span for this node
-  _ <- startSpan ("node:" <> handlerName) SpanInternal
-    [AttrText "node.name" handlerName]
-
-  -- Call the handler
-  let handler = getField @name graph
-  choice <- callHandler handler input
-
-  -- End the node span
-  endSpan False []
-
-  -- Dispatch to next node (traced)
-  dispatchGotoTraced graph choice
+  withNodeSpan handlerName $ do
+    let handler = getField @name graph
+    choice <- callHandler handler input
+    dispatchGotoTraced graph choice
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -185,22 +202,11 @@ instance
   , Member Observability es
   ) => DispatchGotoTraced graph '[To (name :: Symbol) payload] es exitType where
 
-  dispatchGotoTraced graph (GotoChoice (Here payload)) = do
-    let handlerName = T.pack $ symbolVal (Proxy @name)
-
-    -- Start span for this node
-    _ <- startSpan ("node:" <> handlerName) SpanInternal
-      [AttrText "node.name" handlerName]
-
-    -- Call handler
-    let handler = getField @name graph
-    nextChoice <- callHandler handler payload
-
-    -- End the node span
-    endSpan False []
-
-    -- Continue dispatch
-    dispatchGotoTraced graph nextChoice
+  dispatchGotoTraced graph (GotoChoice (Here payload)) =
+    withNodeSpan (T.pack $ symbolVal (Proxy @name)) $ do
+      let handler = getField @name graph
+      nextChoice <- callHandler handler payload
+      dispatchGotoTraced graph nextChoice
 
 
 -- | Named node target with more targets, with tracing.
@@ -213,22 +219,11 @@ instance {-# OVERLAPPABLE #-}
   , Member Observability es
   ) => DispatchGotoTraced graph (To (name :: Symbol) payload ': rest) es exitType where
 
-  dispatchGotoTraced graph (GotoChoice (Here payload)) = do
-    let handlerName = T.pack $ symbolVal (Proxy @name)
-
-    -- Start span for this node
-    _ <- startSpan ("node:" <> handlerName) SpanInternal
-      [AttrText "node.name" handlerName]
-
-    -- Call handler
-    let handler = getField @name graph
-    nextChoice <- callHandler handler payload
-
-    -- End the node span
-    endSpan False []
-
-    -- Continue dispatch
-    dispatchGotoTraced graph nextChoice
+  dispatchGotoTraced graph (GotoChoice (Here payload)) =
+    withNodeSpan (T.pack $ symbolVal (Proxy @name)) $ do
+      let handler = getField @name graph
+      nextChoice <- callHandler handler payload
+      dispatchGotoTraced graph nextChoice
 
   dispatchGotoTraced graph (GotoChoice (There rest)) =
     dispatchGotoTraced @graph @rest graph (GotoChoice rest)

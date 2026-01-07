@@ -13,6 +13,10 @@ module Tidepool.Observability.Types
   , grafanaCloudConfig
   , grafanaCloudOTLPConfig
 
+    -- * ID Newtypes (type-safe trace/span IDs)
+  , TraceId(..)
+  , SpanId(..)
+
     -- * Loki Push API Types
   , LokiPushRequest(..)
   , LokiStream(..)
@@ -58,6 +62,29 @@ import System.Random (randomIO)
 import Numeric (showHex)
 
 import Tidepool.Effects.Observability (TidepoolEvent(..), SpanKind(..), SpanAttribute(..))
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- ID NEWTYPES (Type-Safe Trace/Span IDs)
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Type-safe wrapper for trace IDs (128-bit, 32 hex chars).
+--
+-- Prevents accidental confusion between trace IDs and span IDs.
+newtype TraceId = TraceId { unTraceId :: Text }
+  deriving (Show, Eq, Generic)
+
+instance ToJSON TraceId where
+  toJSON (TraceId t) = toJSON t
+
+-- | Type-safe wrapper for span IDs (64-bit, 16 hex chars).
+--
+-- Prevents accidental confusion between span IDs and trace IDs.
+newtype SpanId = SpanId { unSpanId :: Text }
+  deriving (Show, Eq, Generic)
+
+instance ToJSON SpanId where
+  toJSON (SpanId t) = toJSON t
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -232,9 +259,9 @@ instance ToJSON OTLPScopeSpans where
 
 -- | Individual OTLP span.
 data OTLPSpan = OTLPSpan
-  { ospTraceId :: Text           -- ^ 32 hex chars (16 bytes)
-  , ospSpanId :: Text            -- ^ 16 hex chars (8 bytes)
-  , ospParentSpanId :: Maybe Text -- ^ Parent span ID (if nested)
+  { ospTraceId :: TraceId        -- ^ Type-safe 32 hex chars (16 bytes)
+  , ospSpanId :: SpanId          -- ^ Type-safe 16 hex chars (8 bytes)
+  , ospParentSpanId :: Maybe SpanId -- ^ Parent span ID (if nested)
   , ospName :: Text              -- ^ Span name
   , ospKind :: Int               -- ^ Span kind (0=unspec, 1=internal, 2=server, 3=client)
   , ospStartTimeUnixNano :: Integer
@@ -289,7 +316,7 @@ data OTLPStatusCode = StatusUnset | StatusOk | StatusError
 
 -- | Active span information.
 data ActiveSpan = ActiveSpan
-  { asSpanId :: Text           -- ^ Span ID (16 hex chars)
+  { asSpanId :: SpanId         -- ^ Type-safe span ID (16 hex chars)
   , asName :: Text             -- ^ Span name
   , asKind :: SpanKind         -- ^ Span kind
   , asStartTime :: Integer     -- ^ Start time in nanos
@@ -299,8 +326,8 @@ data ActiveSpan = ActiveSpan
 
 -- | Mutable trace context for tracking the current trace and span stack.
 data TraceContext = TraceContext
-  { tcTraceId :: IORef Text       -- ^ Current trace ID (32 hex chars)
-  , tcSpanStack :: IORef [ActiveSpan]  -- ^ Stack of active spans
+  { tcTraceId :: IORef TraceId        -- ^ Type-safe current trace ID (32 hex chars)
+  , tcSpanStack :: IORef [ActiveSpan] -- ^ Stack of active spans
   , tcCompletedSpans :: IORef [OTLPSpan] -- ^ Spans ready to export
   }
 
@@ -314,19 +341,19 @@ newTraceContext = do
     <*> newIORef []
 
 -- | Generate a random 128-bit trace ID (32 hex chars).
-generateTraceId :: IO Text
+generateTraceId :: IO TraceId
 generateTraceId = do
   w1 <- randomIO :: IO Word64
   w2 <- randomIO :: IO Word64
-  pure $ T.pack $ padLeft 16 (showHex w1 "") <> padLeft 16 (showHex w2 "")
+  pure $ TraceId $ T.pack $ padLeft 16 (showHex w1 "") <> padLeft 16 (showHex w2 "")
   where
     padLeft n s = replicate (n - length s) '0' <> s
 
 -- | Generate a random 64-bit span ID (16 hex chars).
-generateSpanId :: IO Text
+generateSpanId :: IO SpanId
 generateSpanId = do
   w <- randomIO :: IO Word64
-  pure $ T.pack $ padLeft 16 (showHex w "")
+  pure $ SpanId $ T.pack $ padLeft 16 (showHex w "")
   where
     padLeft n s = replicate (n - length s) '0' <> s
 

@@ -15,6 +15,11 @@ module Tidepool.Anthropic.Types
   , ThinkingContent(..)
   , RedactedThinking(..)
 
+    -- * ID Newtypes (type-safe IDs)
+  , ToolUseId(..)
+  , ToolResultId(..)
+  , toolUseToResultId
+
     -- * Response Types
   , MessagesResponse(..)
   , StopReason(..)
@@ -29,6 +34,42 @@ import Data.Aeson.Types (Parser)
 import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
+
+-- ══════════════════════════════════════════════════════════════
+-- ID NEWTYPES (Type-Safe IDs)
+-- ══════════════════════════════════════════════════════════════
+
+-- | Type-safe wrapper for tool use IDs.
+--
+-- Prevents accidental confusion between tool use IDs and other Text values.
+newtype ToolUseId = ToolUseId { unToolUseId :: Text }
+  deriving (Show, Eq, Generic)
+
+instance ToJSON ToolUseId where
+  toJSON (ToolUseId t) = toJSON t
+
+instance FromJSON ToolUseId where
+  parseJSON = fmap ToolUseId . parseJSON
+
+-- | Type-safe wrapper for tool result IDs.
+--
+-- Must match a corresponding 'ToolUseId' from a tool use request.
+newtype ToolResultId = ToolResultId { unToolResultId :: Text }
+  deriving (Show, Eq, Generic)
+
+instance ToJSON ToolResultId where
+  toJSON (ToolResultId t) = toJSON t
+
+instance FromJSON ToolResultId where
+  parseJSON = fmap ToolResultId . parseJSON
+
+-- | Convert a ToolUseId to a ToolResultId.
+--
+-- When responding to a tool use request, the result must reference
+-- the original tool use by ID. This converts the type safely.
+toolUseToResultId :: ToolUseId -> ToolResultId
+toolUseToResultId (ToolUseId t) = ToolResultId t
+
 
 -- ══════════════════════════════════════════════════════════════
 -- REQUEST TYPES
@@ -259,7 +300,7 @@ instance FromJSON ContentBlock where
 
 -- | A tool use request from the model
 data ToolUse = ToolUse
-  { toolUseId :: Text
+  { toolUseId :: ToolUseId    -- ^ Type-safe tool use ID
   , toolName :: Text
   , toolInput :: Value
   }
@@ -267,7 +308,7 @@ data ToolUse = ToolUse
 
 -- | A tool result to send back to the model
 data ToolResult = ToolResult
-  { toolResultId :: Text
+  { toolResultId :: ToolResultId  -- ^ Must match a ToolUseId from request
   , toolResultContent :: Text
   , toolResultIsError :: Bool
   }

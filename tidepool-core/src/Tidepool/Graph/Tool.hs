@@ -72,6 +72,9 @@ module Tidepool.Graph.Tool
   , toolInfoToJSON
   , toolToInfo
 
+    -- * Tool Validation (Parse Don't Validate)
+  , validateToolInput
+
     -- * Tool List Reification
   , ReifyToolList(..)
 
@@ -83,14 +86,16 @@ module Tidepool.Graph.Tool
   , CfProperty(..)
   ) where
 
-import Data.Aeson (Value, ToJSON, FromJSON, object, (.=))
+import Data.Aeson (Value, ToJSON, FromJSON, object, (.=), fromJSON, Result(..))
 import Data.Kind (Type, Constraint)
 import Data.Proxy (Proxy(..))
 import Data.Text (Text)
+import qualified Data.Text as T
 import Data.Typeable (TypeRep, Typeable, typeRep)
 import Control.Monad.Freer (Eff)
 
 import Tidepool.Schema (HasJSONSchema(..), JSONSchema, schemaToValue)
+import Tidepool.Effect.Types (ValidatedToolInput(..), ToolError(..))
 
 -- Re-exports (wire types only - Convert has its own module to avoid cycles)
 import Tidepool.Tool.Wire
@@ -250,6 +255,63 @@ toolToInfo tool = ToolInfo
   , tiInputType = typeRep (Proxy @(ToolInput t))
   , tiOutputType = typeRep (Proxy @(ToolOutput t))
   }
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- TOOL VALIDATION (Parse Don't Validate)
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Validate tool input JSON against a tool's schema, returning evidence.
+--
+-- This implements the "parse don't validate" pattern: instead of checking
+-- validity and returning Bool, we parse the input and return either an error
+-- or a 'ValidatedToolInput' that proves the data is valid.
+--
+-- = Usage
+--
+-- @
+-- case validateToolInput tool inputJson of
+--   Left err -> handleError err
+--   Right validated -> executeTool tool (getValidated validated)
+-- @
+--
+-- The 'ValidatedToolInput' wrapper proves that parsing succeeded. Downstream
+-- code receiving @ValidatedToolInput (ToolInput t)@ can trust that the JSON
+-- was valid without re-checking.
+--
+-- = Why This Matters
+--
+-- Without evidence types:
+--
+-- @
+-- -- BAD: validation result lost
+-- if isValid input then executeTool input else error "invalid"
+-- -- executeTool receives raw Value, must re-validate or trust blindly
+-- @
+--
+-- With evidence types:
+--
+-- @
+-- -- GOOD: proof carried in type
+-- case validateToolInput tool input of
+--   Right validated -> executeTool validated
+--   -- executeTool receives ValidatedToolInput, knows it's valid
+-- @
+validateToolInput
+  :: forall t. ToolDef t
+  => t
+  -> Value
+  -> Either ToolError (ValidatedToolInput (ToolInput t))
+validateToolInput tool inputJson =
+  case fromJSON inputJson of
+    Success parsed ->
+      Right (ValidatedToolInput parsed)
+    Error errMsg ->
+      Left ToolValidationFailed
+        { tveToolName = toolName tool
+        , tveExpectedSchema = schemaToValue (jsonSchema @(ToolInput t))
+        , tveActualInput = inputJson
+        , tveParseError = T.pack errMsg
+        }
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TOOL LIST REIFICATION

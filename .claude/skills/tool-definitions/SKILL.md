@@ -30,7 +30,7 @@ data MyTool = MyTool
 data MyInput = MyInput { field :: Text }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
-instance Tool MyTool DMEvent WorldState where
+instance Tool MyTool MyEvent AppState where
   type ToolInput MyTool = MyInput
   type ToolOutput MyTool = ()
 
@@ -70,38 +70,15 @@ describeField "name" "Description here" (emptySchema TString)
 
 ```haskell
 -- Type-safe list of tools
-dmToolList :: ToolList DMEvent WorldState '[Tool1, Tool2, Tool3]
-dmToolList = TCons (Proxy @Tool1)
+myToolList :: ToolList MyEvent AppState '[Tool1, Tool2, Tool3]
+myToolList = TCons (Proxy @Tool1)
            $ TCons (Proxy @Tool2)
            $ TCons (Proxy @Tool3)
            $ TNil
 
 -- Convert to JSON for API
-dmTools :: [Value]
-dmTools = toolListToJSON dmToolList
-```
-
-## Transition Tools
-
-Tools that change mood should be detected in the dispatcher:
-
-```haskell
-transitionToolNames :: [Text]
-transitionToolNames = ["engage", "resolve", "accept"]
-
-makeDMDispatcher name input = do
-  moodBefore <- get @WorldState >>= \s -> return s.mood
-  result <- makeDispatcher dmToolList name input
-  
-  if name `elem` transitionToolNames
-    then case result of
-      Right (ToolSuccess val) -> do
-        moodAfter <- get @WorldState >>= \s -> return s.mood
-        if moodChanged moodBefore moodAfter
-          then return (Right (ToolBreak ("mood transition: " <> name)))
-          else return (Right (ToolSuccess val))
-      other -> return other
-    else return result
+myTools :: [Value]
+myTools = toolListToJSON myToolList
 ```
 
 ## Tools That Request Input

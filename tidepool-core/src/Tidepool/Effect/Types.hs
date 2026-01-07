@@ -82,6 +82,11 @@ module Tidepool.Effect.Types
   , GotoChoice
   , To
 
+    -- * Tool Validation (Parse Don't Validate)
+  , ValidatedToolInput(..)
+  , ToolError(..)
+  , toolErrorToText
+
     -- * Simple Runners (pure/IO)
   , runState
   , runRandom
@@ -295,6 +300,82 @@ noHooks = LLMHooks (pure ()) (pure ())
 -- Tools that don't transition can use an empty list.
 type ToolDispatcher (targets :: [Type]) event effs =
   Text -> Value -> Eff effs (Either Text (ToolResult targets))
+
+-- ══════════════════════════════════════════════════════════════
+-- TOOL VALIDATION (Parse Don't Validate)
+-- ══════════════════════════════════════════════════════════════
+
+-- | Evidence that a tool input has been validated against its schema.
+--
+-- This newtype provides proof that JSON was successfully parsed into
+-- the tool's input type. Functions receiving @ValidatedToolInput a@
+-- can trust that validation has already occurred - no need to re-check.
+--
+-- = The "Parse Don't Validate" Pattern
+--
+-- Instead of:
+--
+-- @
+-- validateInput :: Value -> Bool
+-- executeIfValid :: Value -> IO Result
+-- executeIfValid val = if validateInput val then ... else error "invalid"
+-- @
+--
+-- Use:
+--
+-- @
+-- parseInput :: Value -> Either ToolError (ValidatedToolInput MyInput)
+-- execute :: ValidatedToolInput MyInput -> IO Result
+-- execute (ValidatedToolInput input) = ...  -- validation guaranteed
+-- @
+--
+-- The type carries the proof that validation succeeded.
+newtype ValidatedToolInput a = ValidatedToolInput { getValidated :: a }
+  deriving (Show, Eq, Functor)
+
+-- | Structured errors for tool execution.
+--
+-- Use pattern matching to handle specific error cases:
+--
+-- @
+-- case result of
+--   Left (ToolNotFound name) -> logWarn $ "Unknown tool: " <> name
+--   Left (ToolValidationFailed err) -> logWarn $ "Bad input: " <> tveParseError err
+--   Left (ToolExecutionFailed msg) -> logWarn $ "Execution error: " <> msg
+--   Right output -> ...
+-- @
+data ToolError
+  = ToolNotFound Text
+    -- ^ Tool name not recognized in registry
+  | ToolValidationFailed
+    { tveToolName :: Text
+      -- ^ Name of the tool that failed validation
+    , tveExpectedSchema :: Value
+      -- ^ JSON Schema the input should have matched
+    , tveActualInput :: Value
+      -- ^ The actual input that failed to parse
+    , tveParseError :: Text
+      -- ^ The parse error message
+    }
+    -- ^ Tool input failed schema validation
+  | ToolExecutionFailed Text
+    -- ^ Tool execution threw an error
+  deriving (Show, Eq, Generic)
+
+instance ToJSON ToolError
+instance FromJSON ToolError
+
+-- | Convert a ToolError to a human-readable message.
+--
+-- Useful for compatibility with code expecting @Either Text ToolResult@.
+toolErrorToText :: ToolError -> Text
+toolErrorToText = \case
+  ToolNotFound name ->
+    "Unknown tool: " <> name
+  ToolValidationFailed{tveToolName, tveParseError} ->
+    "Tool '" <> tveToolName <> "' input validation failed: " <> tveParseError
+  ToolExecutionFailed msg ->
+    "Tool execution failed: " <> msg
 
 -- | Build content blocks from text + images
 withImages :: Text -> [ImageSource] -> [ContentBlock]

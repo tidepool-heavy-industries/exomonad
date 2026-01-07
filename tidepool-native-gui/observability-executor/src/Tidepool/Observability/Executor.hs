@@ -26,6 +26,12 @@ module Tidepool.Observability.Executor
     runObservability
   , runObservabilityWithContext
 
+    -- * Tracing via Interposition
+    -- | Use @interpose@-based tracing to transparently wrap effects without
+    -- removing them from the stack. This enables composable tracing that can
+    -- be added or removed without changing the effect stack type.
+  , interposeWithLLMTracing
+
     -- * Configuration
   , LokiConfig(..)
   , OTLPConfig(..)
@@ -47,7 +53,7 @@ module Tidepool.Observability.Executor
 
 import Control.Exception (try, SomeException)
 import Control.Monad (void, when)
-import Control.Monad.Freer (Eff, LastMember, interpret, sendM)
+import Control.Monad.Freer (Eff, LastMember, interpret, sendM, Member, send, interpose)
 import Data.Aeson (encode, object, (.=), Value, toJSON)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -59,7 +65,10 @@ import Network.HTTP.Req
 import qualified Data.ByteString.Base64 as B64
 
 import Tidepool.Effects.Observability
-  ( Observability(..), TidepoolEvent, SpanKind(..), SpanAttribute(..) )
+  ( Observability(..), TidepoolEvent, SpanKind(..), SpanAttribute(..)
+  , startSpan, endSpan
+  )
+import Tidepool.Effect.Types (LLM(..), TurnOutcome(..))
 import Tidepool.Observability.Types
 
 
@@ -287,7 +296,8 @@ runObservabilityWithContext ctx config = interpret $ \case
           }
 
     pushActiveSpan ctx activeSpan
-    pure spanId
+    -- Return unwrapped Text since effect interface expects Text
+    pure (unSpanId spanId)
 
   EndSpan isError extraAttrs -> sendM $ do
     mSpan <- popActiveSpan ctx
@@ -327,3 +337,81 @@ runObservabilityWithContext ctx config = interpret $ \case
     modifyIORef ctx.tcSpanStack $ \case
       [] -> []  -- No active span, ignore
       (s:rest) -> s { asAttributes = s.asAttributes <> [attr] } : rest
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- TRACING VIA INTERPOSITION
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Intercept LLM effects and wrap them in spans.
+--
+-- This uses freer-simple's @interpose@ to transparently trace LLM calls
+-- without removing the LLM effect from the stack. The original effect is
+-- re-sent after wrapping, so the actual LLM handler elsewhere in the stack
+-- still executes the call.
+--
+-- = The Interpose Pattern
+--
+-- Unlike @interpret@ which removes an effect from the stack, @interpose@
+-- intercepts effects while leaving them in place:
+--
+-- @
+-- -- interpret: removes effect, handles completely
+-- interpret :: (e a -> Eff es a) -> Eff (e ': es) a -> Eff es a
+--
+-- -- interpose: intercepts effect, can re-send it
+-- interpose :: Member e es => (e a -> Eff es a) -> Eff es a -> Eff es a
+-- @
+--
+-- = Usage
+--
+-- Add tracing to any computation that uses LLM effects:
+--
+-- @
+-- -- Without tracing
+-- result <- runLLM config $ myAgent input
+--
+-- -- With tracing (just wrap the computation)
+-- result <- runLLM config $ interposeWithLLMTracing $ myAgent input
+-- @
+--
+-- = Why This Matters
+--
+-- Traditional approach requires duplicating logic:
+--
+-- @
+-- -- BAD: Must duplicate dispatch typeclass for traced/untraced versions
+-- class DispatchGoto graph ...        -- Untraced
+-- class DispatchGotoTraced graph ...  -- Traced (duplicate instances!)
+-- @
+--
+-- With interposition:
+--
+-- @
+-- -- GOOD: Single dispatch, optional tracing wrapper
+-- result <- interposeWithLLMTracing $ dispatchGoto graph choice
+-- @
+--
+-- The tracing concern is separated from the dispatch logic.
+interposeWithLLMTracing
+  :: (Member LLM es, Member Observability es)
+  => Eff es a
+  -> Eff es a
+interposeWithLLMTracing = interpose $ \case
+  op@(RunTurnOp systemPrompt userContent schema tools) -> do
+    -- Start span before LLM call
+    _ <- startSpan "llm:turn" SpanClient
+      [ AttrText "llm.system_prompt_length" (T.pack $ show $ T.length systemPrompt)
+      , AttrInt "llm.tool_count" (fromIntegral $ length tools)
+      ]
+
+    -- Re-send the original effect to the actual handler
+    result <- send op
+
+    -- End span after LLM call completes
+    let isError = case result of
+          TurnBroken _ -> True
+          _ -> False
+    endSpan isError []
+
+    pure result

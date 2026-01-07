@@ -55,6 +55,8 @@ import Tidepool.Anthropic.Types
   , Message(..)
   , Role(..)
   , ToolUse(..)
+  , ToolUseId(..)
+  , ToolResultId(..)
   )
 import qualified Tidepool.Effect.Types as Effect
 import Tidepool.Effect.Types
@@ -89,15 +91,17 @@ contentBlockToWire = \case
     Just $ WCBImage source
 
   ToolUseBlock tu ->
-    Just $ WCBToolUse
-      { wcbToolId = tu.toolUseId
+    let ToolUseId tid = tu.toolUseId
+    in Just $ WCBToolUse
+      { wcbToolId = tid
       , wcbToolName = tu.toolName
       , wcbToolInput = tu.toolInput
       }
 
   ToolResultBlock tr ->
-    Just $ WCBToolResult
-      { wcbToolUseId = tr.toolResultId
+    let ToolResultId tid = tr.toolResultId
+    in Just $ WCBToolResult
+      { wcbToolUseId = tid
       , wcbResultContent = tr.toolResultContent
       , wcbIsError = tr.toolResultIsError
       }
@@ -164,16 +168,16 @@ wireContentBlockToNative = \case
 
   WCBToolUse tid name input ->
     ToolUseBlock ToolUse
-      { toolUseId = tid
+      { toolUseId = ToolUseId tid
       , toolName = name
       , toolInput = input
       }
 
   WCBToolResult tid content isErr ->
     ToolResultBlock Anthropic.ToolResult
-      { toolResultId = tid
-      , toolResultContent = content
-      , toolResultIsError = isErr
+      { Anthropic.toolResultId = ToolResultId tid
+      , Anthropic.toolResultContent = content
+      , Anthropic.toolResultIsError = isErr
       }
 
 
