@@ -16,7 +16,8 @@ import Control.Monad.Freer.Reader (Reader, ask)
 import Data.Maybe (fromMaybe)
 import Data.Proxy (Proxy(..))
 import Data.Text (Text)
-import Data.Text.IO qualified as T
+import qualified Data.Text as T
+import Data.Text.IO qualified as TIO
 import qualified Data.Aeson as Aeson
 
 import Tidepool.ClaudeCode.Config (ClaudeCodeConfig)
@@ -139,11 +140,9 @@ forkHandler input = do
         { moduleName = input.fiModuleName
         , dataType = input.fiTypeDefs.tdDataType
         , signatures = input.fiTypeDefs.tdSignatures
-        , moduleHeader = input.fiTypeDefs.tdModuleHeader
         }
       implCtx = ImplContext
         { moduleName = input.fiModuleName
-        , moduleHeader = input.fiTypeDefs.tdModuleHeader
         , dataType = input.fiTypeDefs.tdDataType
         , signatures = input.fiTypeDefs.tdSignatures
         }
@@ -222,7 +221,7 @@ writeGeneratedFiles spec results = do
       testPath = projectPath <> "/test/Main.hs"
 
   -- Write implementation
-  T.writeFile implPath results.prImplCode.implModuleCode
+  TIO.writeFile implPath results.prImplCode.implModuleCode
 
   -- Write tests
-  T.writeFile testPath results.prTestDefs.testModuleCode
+  TIO.writeFile testPath results.prTestDefs.testModuleCode

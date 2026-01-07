@@ -15,16 +15,8 @@ The data type to test:
 The function signatures to test:
 
 {% for sig in signatures %}
-```haskell
-{{ sig }}
-```
+- `{{ sig.name }} :: {{ sig.signature }}` — {{ sig.description }}
 {% endfor %}
-
-The module header:
-
-```haskell
-{{ moduleHeader }}
-```
 
 ## Requirements
 

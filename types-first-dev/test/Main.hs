@@ -27,8 +27,7 @@ main = hspec $ do
       it "roundtrips through JSON" $ do
         let td = TypeDefinitions
               { tdDataType = "data Stack a = Empty | Push a (Stack a)"
-              , tdSignatures = ["push :: a -> Stack a -> Stack a"]
-              , tdModuleHeader = "module Data.Stack where"
+              , tdSignatures = [FunctionSig "push" "a -> Stack a -> Stack a" "Add element to stack"]
               }
         decode (encode td) `shouldBe` Just td
 
