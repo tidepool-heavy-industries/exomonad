@@ -253,11 +253,18 @@ listWorktreesIO config = do
 -- HELPERS
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Generate a random hex string of the given length.
+-- | Generate a random hex string of the given length (in hex characters).
 randomHex :: Int -> IO String
 randomHex n = do
-  bytes <- sequence $ replicate n (randomRIO (0, 255 :: Int))
-  pure $ concatMap (`showHex` "") $ take n bytes
+  -- Each byte produces 2 hex chars, so we need ceiling(n/2) bytes
+  let byteCount = (n + 1) `div` 2
+  bytes <- sequence $ replicate byteCount (randomRIO (0, 255 :: Int))
+  pure $ take n $ concatMap toHex2 bytes
+  where
+    -- Zero-pad to exactly 2 hex digits
+    toHex2 b = case showHex b "" of
+      [c] -> ['0', c]
+      s   -> s
 
 -- | Parse git worktree list --porcelain output.
 --

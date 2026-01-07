@@ -6,12 +6,12 @@
 -- = Example Usage
 --
 -- @
--- import Tidepool.Effects.Worktree (Worktree, createWorktree, deleteWorktree)
+-- import Tidepool.Effects.Worktree (Worktree, WorktreeSpec(..), createWorktree, deleteWorktree)
 --
 -- forkHandler :: Member Worktree effs => Eff effs ()
 -- forkHandler = do
---   wtTests <- createWorktree "types-first-tests"
---   wtImpl  <- createWorktree "types-first-impl"
+--   wtTests <- createWorktree (WorktreeSpec "types-first-tests" Nothing)
+--   wtImpl  <- createWorktree (WorktreeSpec "types-first-impl" Nothing)
 --   -- ... run parallel agents in each worktree ...
 --   deleteWorktree wtTests
 --   deleteWorktree wtImpl
