@@ -3628,6 +3628,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap 4.5.54",
+ "nix 0.29.0",
  "openssl-sys",
  "serde",
  "serde_json",

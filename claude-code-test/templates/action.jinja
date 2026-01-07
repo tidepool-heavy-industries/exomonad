@@ -1,0 +1,30 @@
+You are taking a follow-up action based on previous exploration results.
+
+## Previous Exploration Summary
+{{ summary }}
+
+## Files Found ({{ fileCount }} total)
+{% for file in files %}
+- {{ file }}
+{% endfor %}
+
+## Recommendation from Exploration
+{{ recommendation }}
+
+## Action to Take
+{{ action }}
+
+## Instructions
+
+Execute the recommended action based on your exploration findings. This might involve:
+- Reading specific files in more detail
+- Creating a summary document
+- Modifying files if appropriate
+- Generating output based on the content
+
+Use the tools available to you (Read, Write, Glob, Bash) as needed.
+
+Produce structured output describing:
+- Whether the action succeeded
+- What you did
+- Any artifact produced (file contents, summary, etc.)

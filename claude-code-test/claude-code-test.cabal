@@ -1,0 +1,61 @@
+cabal-version:      3.0
+name:               claude-code-test
+version:            0.1.0.0
+synopsis:           Standalone ClaudeCode integration test graph
+description:
+    Demonstrates ClaudeCode graph integration with a multi-node graph:
+    Entry → ClaudeCode explore → Logic route → ClaudeCode action → Exit.
+    .
+    Uses zellij-cc for supervision capability.
+license:            MIT
+author:             Inanna
+build-type:         Simple
+data-dir:           templates
+data-files:         *.jinja
+
+library
+    exposed-modules:
+        ClaudeCodeTest.Types
+        ClaudeCodeTest.Context
+        ClaudeCodeTest.Templates
+        ClaudeCodeTest.Graph
+        ClaudeCodeTest.Handlers
+    build-depends:
+        base >= 4.17 && < 5,
+        freer-simple >= 1.2 && < 2,
+        text >= 2.0 && < 3,
+        aeson >= 2.1 && < 3,
+        ginger >= 0.10,
+        mtl >= 2.3,
+        parsec >= 3.1,
+        tidepool-core,
+        tidepool-claude-code-executor
+    hs-source-dirs:   src
+    default-language: GHC2021
+    default-extensions:
+        DataKinds
+        DeriveAnyClass
+        DeriveGeneric
+        DerivingStrategies
+        GADTs
+        LambdaCase
+        OverloadedStrings
+        OverloadedRecordDot
+        TemplateHaskell
+        TypeFamilies
+        TypeOperators
+
+executable claude-code-test
+    main-is:          Main.hs
+    build-depends:
+        base >= 4.17 && < 5,
+        freer-simple >= 1.2 && < 2,
+        text >= 2.0 && < 3,
+        claude-code-test,
+        tidepool-core,
+        tidepool-claude-code-executor
+    hs-source-dirs:   app
+    default-language: GHC2021
+    default-extensions:
+        OverloadedStrings
+        OverloadedRecordDot

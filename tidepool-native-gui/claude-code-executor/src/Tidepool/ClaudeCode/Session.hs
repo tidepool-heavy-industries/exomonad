@@ -96,10 +96,9 @@ runClaudeCodeWithSession cfg sessionStore nodeName = interpret $ \case
 
         | Just val <- ccr.ccrStructuredOutput -> do
             -- Store the session ID for future iterations
-            case ccr.ccrSessionId of
-              Just sid -> atomically $ modifyTVar' sessionStore (Map.insert nodeName sid)
-              Nothing -> pure ()
-            pure (val, ccr.ccrSessionId)
+            -- (always present in stream-json format)
+            atomically $ modifyTVar' sessionStore (Map.insert nodeName ccr.ccrSessionId)
+            pure (val, Just ccr.ccrSessionId)
 
         | otherwise ->
             error "ClaudeCode returned no structured output (schema validation may have failed)"

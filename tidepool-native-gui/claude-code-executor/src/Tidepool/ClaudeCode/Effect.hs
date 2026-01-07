@@ -65,7 +65,7 @@ runClaudeCodeExecIO cfg = interpret $ \case
               maybe "(no message)" T.unpack ccr.ccrResult
 
         | Just val <- ccr.ccrStructuredOutput ->
-            pure (val, ccr.ccrSessionId)
+            pure (val, Just ccr.ccrSessionId)
 
         | otherwise ->
             error "ClaudeCode returned no structured output (schema validation may have failed)"
