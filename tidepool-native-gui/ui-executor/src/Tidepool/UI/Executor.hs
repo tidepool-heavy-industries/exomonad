@@ -54,7 +54,7 @@ import qualified Data.Text.Encoding as TE
 import Data.Time (getCurrentTime)
 import Data.Time.Format.ISO8601 (iso8601Show)
 
-import Tidepool.Effects.UI (UI(..), ChoiceMeta(..))
+import Tidepool.Effects.UI (UI(..), ChoiceMeta(..), ChoiceAvailability(..))
 import Tidepool.Wire.Types
 
 
@@ -185,13 +185,15 @@ buildChoiceState msgs node prompt choices multiSelect = UIState
   , usThinking = False
   }
   where
-    mkOption idx (label, ChoiceMeta desc costs disabled, _) = ChoiceOption
+    mkOption idx (label, ChoiceMeta desc costs availability, _) = ChoiceOption
       { coIndex = idx
       , coLabel = label
       , coDescription = desc
       , coCosts = costs
-      , coDisabled = disabled
+      , coDisabled = availabilityToMaybe availability
       }
+    availabilityToMaybe Available = Nothing
+    availabilityToMaybe (DisabledBecause reason) = Just reason
 
 -- | Build UIState for simple choices (no metadata).
 buildSimpleChoiceState
@@ -205,7 +207,7 @@ buildSimpleChoiceState msgs node prompt choices multiSelect =
   buildChoiceState msgs node prompt choicesWithMeta multiSelect
   where
     choicesWithMeta = NE.map (\(label, val) -> (label, defaultMeta, val)) choices
-    defaultMeta = ChoiceMeta Nothing [] Nothing
+    defaultMeta = ChoiceMeta Nothing [] Available
 
 -- | Build UIState for choices with descriptions.
 buildDescChoiceState
@@ -217,7 +219,7 @@ buildDescChoiceState
 buildDescChoiceState msgs node prompt choices =
   buildChoiceState msgs node prompt choicesWithMeta False
   where
-    choicesWithMeta = NE.map (\(label, desc, val) -> (label, ChoiceMeta (Just desc) [] Nothing, val)) choices
+    choicesWithMeta = NE.map (\(label, desc, val) -> (label, ChoiceMeta (Just desc) [] Available, val)) choices
 
 -- | Build UIState with thinking indicator.
 buildThinkingState
@@ -426,10 +428,10 @@ extractChoiceMeta :: NonEmpty (Text, ChoiceMeta, a) -> UserAction -> IO a
 extractChoiceMeta choices action = case action of
   ChoiceAction idx
     | idx >= 0 && idx < NE.length choices ->
-        let (_, ChoiceMeta _ _ disabled, val) = NE.toList choices !! idx in
-        case disabled of
-          Just reason -> fail $ "Selected disabled option: " <> T.unpack reason
-          Nothing -> pure val
+        let (_, ChoiceMeta _ _ availability, val) = NE.toList choices !! idx in
+        case availability of
+          DisabledBecause reason -> fail $ "Selected disabled option: " <> T.unpack reason
+          Available -> pure val
     | otherwise ->
         let (_, _, val) = NE.head choices in pure val
   _ ->

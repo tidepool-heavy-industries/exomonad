@@ -69,6 +69,8 @@ import Tidepool.LLM.Types
   , mkLLMEnv
   , AnthropicTool(..)
   , anthropicToolToJSON
+  , getApiKey
+  , getBaseUrl
   )
 import Tidepool.Effects.LLMProvider
   ( LLMComplete(..)
@@ -76,6 +78,7 @@ import Tidepool.Effects.LLMProvider
   , SProvider(..)
   , AnthropicConfig(..)
   , OpenAIConfig(..)
+  , ThinkingBudget(..)
   , AnthropicResponse(..)
   , OpenAIResponse(..)
   )
@@ -98,11 +101,11 @@ anthropicRequest env config userMsg maybeTools = do
   case env.leConfig.lcAnthropicSecrets of
     Nothing -> pure $ Left LLMNoProviderConfigured
     Just secrets -> do
-      let baseUrl = parseBaseUrl secrets.asBaseUrl
+      let baseUrl = parseBaseUrl (getBaseUrl secrets.asBaseUrl)
           clientEnv = mkClientEnv env.leManager baseUrl
           req = buildAnthropicRequest config userMsg maybeTools
 
-      result <- runClientM (Anthropic.anthropicComplete secrets.asApiKey req) clientEnv
+      result <- runClientM (Anthropic.anthropicComplete (getApiKey secrets.asApiKey) req) clientEnv
       pure $ either (Left . clientErrorToLLMError) Right result
 
 -- | Build Anthropic Messages API request.
@@ -116,9 +119,9 @@ buildAnthropicRequest config userMsg maybeTools = Anthropic.AnthropicRequest
   , Anthropic.arMessages = [Anthropic.AnthropicMessage "user" userMsg]
   , Anthropic.arSystem = config.acSystemPrompt
   , Anthropic.arTools = maybeTools
-  , Anthropic.arThinking = case config.acThinkingBudget of
-      Nothing -> Nothing
-      Just budget -> Just Anthropic.ThinkingConfig
+  , Anthropic.arThinking = case config.acThinking of
+      ThinkingDisabled -> Nothing
+      ThinkingEnabled budget -> Just Anthropic.ThinkingConfig
         { Anthropic.tcType = "enabled"
         , Anthropic.tcBudgetTokens = budget
         }
@@ -140,11 +143,11 @@ openaiRequest env config userMsg maybeTools = do
   case env.leConfig.lcOpenAISecrets of
     Nothing -> pure $ Left LLMNoProviderConfigured
     Just secrets -> do
-      let baseUrl = parseBaseUrl secrets.osBaseUrl
+      let baseUrl = parseBaseUrl (getBaseUrl secrets.osBaseUrl)
           clientEnv = mkClientEnv env.leManager baseUrl
           req = buildOpenAIRequest config userMsg maybeTools
 
-      result <- runClientM (OpenAI.openaiComplete secrets.osApiKey secrets.osOrgId req) clientEnv
+      result <- runClientM (OpenAI.openaiComplete (getApiKey secrets.osApiKey) secrets.osOrgId req) clientEnv
       pure $ either (Left . clientErrorToLLMError) Right result
 
 -- | Build OpenAI Chat Completions API request.

@@ -27,13 +27,14 @@ import Tidepool.LLM.Executor
   , AnthropicTool(..)
   , anthropicToolToJSON
   )
-import Tidepool.LLM.Types (AnthropicSecrets(..), defaultAnthropicConfig)
+import Tidepool.LLM.Types (AnthropicSecrets(..), defaultAnthropicConfig, ApiKey(..))
 import Tidepool.Effects.LLMProvider
   ( complete
   , SProvider(..)
   , AnthropicConfig(..)
   , AnthropicResponse(..)
   , ContentBlock(..)
+  , ThinkingBudget(..)
   )
 
 
@@ -54,7 +55,7 @@ main = do
 
     Just apiKey -> do
       let config = LLMConfig
-            { lcAnthropicSecrets = Just $ defaultAnthropicConfig (T.pack apiKey)
+            { lcAnthropicSecrets = Just $ defaultAnthropicConfig (ApiKey $ T.pack apiKey)
             , lcOpenAISecrets = Nothing
             }
 
@@ -128,7 +129,7 @@ basicConfig :: AnthropicConfig
 basicConfig = AnthropicConfig
   { acModel = "claude-haiku-4-5-20251001"
   , acMaxTokens = 256
-  , acThinkingBudget = Nothing
+  , acThinking = ThinkingDisabled
   , acSystemPrompt = Just "You are a helpful assistant. Be concise."
   }
 

@@ -55,6 +55,7 @@ import Tidepool.Anthropic.Client
   ( SingleCallRequest(..), SingleCallResponse(..)
   , StopReason(..), ToolUse(..)
   )
+import Tidepool.Anthropic.Types (toolUseToResultId)
 import qualified Tidepool.GUI.Core as GUICore
 import Tidepool.GUI.Core (GUIBridge)
 import qualified Tidepool.Storage as Storage
@@ -349,7 +350,7 @@ runLLMCore hooks config mChatOps dispatcher = interpret $ \case
                     , tiOutput = toJSON err
                     }
                   res = Client.ToolResult
-                    { Client.toolResultId = use.toolUseId
+                    { Client.toolResultId = toolUseToResultId use.toolUseId
                     , Client.toolResultContent = err
                     , Client.toolResultIsError = True
                     }
@@ -362,7 +363,7 @@ runLLMCore hooks config mChatOps dispatcher = interpret $ \case
                     , tiOutput = val
                     }
                   res = Client.ToolResult
-                    { Client.toolResultId = use.toolUseId
+                    { Client.toolResultId = toolUseToResultId use.toolUseId
                     , Client.toolResultContent = encodeText val
                     , Client.toolResultIsError = False
                     }

@@ -29,7 +29,7 @@ import qualified Data.Text as T
 import Tidepool.Effects.UI (UI, showText, requestTextInput)
 import Tidepool.Effects.LLMProvider
   ( LLMComplete, complete, SProvider(..), AnthropicConfig(..)
-  , AnthropicResponse(..), ContentBlock(..)
+  , AnthropicResponse(..), ContentBlock(..), ThinkingBudget(..)
   )
 import Tidepool.Effects.Observability (Observability, publishEvent, TidepoolEvent(..))
 
@@ -39,7 +39,7 @@ defaultConfig :: AnthropicConfig
 defaultConfig = AnthropicConfig
   { acModel = "claude-sonnet-4-20250514"
   , acMaxTokens = 1024
-  , acThinkingBudget = Nothing
+  , acThinking = ThinkingDisabled
   , acSystemPrompt = Just "You are a helpful assistant. Be concise."
   }
 

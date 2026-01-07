@@ -64,6 +64,8 @@ import Tidepool.LLM.Executor
 import Tidepool.LLM.Types
   ( AnthropicSecrets(..)
   , OpenAISecrets(..)
+  , ApiKey(..)
+  , BaseUrl(..)
   )
 import Tidepool.ClaudeCode.Effect
   ( ClaudeCodeExec
@@ -198,14 +200,14 @@ loadExecutorConfig = do
     { ecLLMConfig = LLMConfig
         { lcAnthropicSecrets = case anthropicKey of
             Just k -> Just AnthropicSecrets
-              { asApiKey = T.pack k
-              , asBaseUrl = "https://api.anthropic.com"
+              { asApiKey = ApiKey (T.pack k)
+              , asBaseUrl = BaseUrl "https://api.anthropic.com"
               }
             Nothing -> Nothing
         , lcOpenAISecrets = case openaiKey of
             Just k -> Just OpenAISecrets
-              { osApiKey = T.pack k
-              , osBaseUrl = "https://api.openai.com"
+              { osApiKey = ApiKey (T.pack k)
+              , osBaseUrl = BaseUrl "https://api.openai.com"
               , osOrgId = Nothing
               }
             Nothing -> Nothing

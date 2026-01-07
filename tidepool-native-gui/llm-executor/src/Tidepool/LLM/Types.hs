@@ -36,6 +36,12 @@ module Tidepool.LLM.Types
   , OpenAISecrets(..)
   , defaultAnthropicConfig
 
+    -- * Credential Newtypes (type-safe credentials)
+  , ApiKey(..)
+  , getApiKey
+  , BaseUrl(..)
+  , getBaseUrl
+
     -- * Environment
   , LLMEnv(..)
   , mkLLMEnv
@@ -61,6 +67,36 @@ import Tidepool.Tool.Wire (AnthropicTool(..), anthropicToolToJSON)
 
 
 -- ════════════════════════════════════════════════════════════════════════════
+-- CREDENTIAL NEWTYPES (Type-Safe Credentials)
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Type-safe wrapper for API keys.
+--
+-- Prevents accidental confusion between API keys and other Text values
+-- (e.g., swapping API key and base URL).
+newtype ApiKey = ApiKey Text
+  deriving stock (Eq, Generic)
+
+-- Show instance redacts the key for safety
+instance Show ApiKey where
+  show (ApiKey _) = "ApiKey <redacted>"
+
+-- | Unwrap an API key to get the underlying text.
+getApiKey :: ApiKey -> Text
+getApiKey (ApiKey t) = t
+
+-- | Type-safe wrapper for API base URLs.
+--
+-- Prevents accidental confusion between URLs and other credentials.
+newtype BaseUrl = BaseUrl Text
+  deriving stock (Eq, Show, Generic)
+
+-- | Unwrap a base URL to get the underlying text.
+getBaseUrl :: BaseUrl -> Text
+getBaseUrl (BaseUrl t) = t
+
+
+-- ════════════════════════════════════════════════════════════════════════════
 -- CONFIGURATION
 -- ════════════════════════════════════════════════════════════════════════════
 
@@ -73,25 +109,25 @@ data LLMConfig = LLMConfig
 
 -- | Anthropic API secrets.
 data AnthropicSecrets = AnthropicSecrets
-  { asApiKey  :: Text  -- ^ Anthropic API key (x-api-key header)
-  , asBaseUrl :: Text  -- ^ API base URL (default: https://api.anthropic.com)
+  { asApiKey  :: ApiKey   -- ^ Type-safe API key (x-api-key header)
+  , asBaseUrl :: BaseUrl  -- ^ Type-safe base URL (default: https://api.anthropic.com)
   }
   deriving stock (Eq, Show, Generic)
 
 -- | OpenAI API secrets.
 data OpenAISecrets = OpenAISecrets
-  { osApiKey  :: Text  -- ^ OpenAI API key (Authorization: Bearer)
-  , osBaseUrl :: Text  -- ^ API base URL (default: https://api.openai.com)
+  { osApiKey  :: ApiKey      -- ^ Type-safe API key (Authorization: Bearer)
+  , osBaseUrl :: BaseUrl     -- ^ Type-safe base URL (default: https://api.openai.com)
   , osOrgId   :: Maybe Text  -- ^ Optional organization ID
   }
   deriving stock (Eq, Show, Generic)
 
 -- | Default Anthropic configuration.
 -- API key must be filled in.
-defaultAnthropicConfig :: Text -> AnthropicSecrets
+defaultAnthropicConfig :: ApiKey -> AnthropicSecrets
 defaultAnthropicConfig apiKey = AnthropicSecrets
   { asApiKey  = apiKey
-  , asBaseUrl = "https://api.anthropic.com"
+  , asBaseUrl = BaseUrl "https://api.anthropic.com"
   }
 
 

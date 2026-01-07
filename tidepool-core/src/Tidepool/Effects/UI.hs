@@ -37,6 +37,7 @@ module Tidepool.Effects.UI
   , requestChoiceMeta
   , setThinking
     -- * Rich Choice Metadata
+  , ChoiceAvailability(..)
   , ChoiceMeta(..)
     -- * Convenience Helpers
   , confirm
@@ -59,19 +60,27 @@ import GHC.Generics (Generic)
 -- CHOICE METADATA
 -- ════════════════════════════════════════════════════════════════════════════
 
+-- | Availability state for a choice option.
+--
+-- Sum type makes the state explicit - no more "Nothing means enabled".
+data ChoiceAvailability
+  = Available                    -- ^ Option can be selected
+  | DisabledBecause Text         -- ^ Option disabled with reason
+  deriving (Show, Eq, Generic)
+
 -- | Metadata for rich choice options.
 --
 -- Used with 'requestChoiceMeta' to provide descriptions, costs, and disabled states.
 data ChoiceMeta = ChoiceMeta
-  { cmDescription :: Maybe Text  -- ^ Descriptive text below label
-  , cmCosts :: [Text]            -- ^ Cost tags e.g. ["2 Stress", "1 Heat"]
-  , cmDisabled :: Maybe Text     -- ^ Nothing = enabled, Just reason = disabled
+  { cmDescription :: Maybe Text       -- ^ Descriptive text below label
+  , cmCosts :: [Text]                 -- ^ Cost tags e.g. ["2 Stress", "1 Heat"]
+  , cmAvailability :: ChoiceAvailability -- ^ Whether option is selectable
   }
   deriving (Show, Eq, Generic)
 
 -- | Default metadata (no description, no costs, enabled).
 defaultChoiceMeta :: ChoiceMeta
-defaultChoiceMeta = ChoiceMeta Nothing [] Nothing
+defaultChoiceMeta = ChoiceMeta Nothing [] Available
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -183,9 +192,9 @@ requestChoiceDesc prompt choices = send (RequestChoiceDesc prompt choices)
 --
 -- @
 -- choice <- requestChoiceMeta "Choose action:" $ NE.fromList
---   [ ("Push yourself", ChoiceMeta (Just "Take +1d") ["2 Stress"] Nothing, PushAction)
---   , ("Devil's bargain", ChoiceMeta (Just "Complication later") [] Nothing, BargainAction)
---   , ("Give up", ChoiceMeta Nothing [] (Just "Not available"), GiveUpAction)
+--   [ ("Push yourself", ChoiceMeta (Just "Take +1d") ["2 Stress"] Available, PushAction)
+--   , ("Devil's bargain", ChoiceMeta (Just "Complication later") [] Available, BargainAction)
+--   , ("Give up", ChoiceMeta Nothing [] (DisabledBecause "Not available"), GiveUpAction)
 --   ]
 -- @
 requestChoiceMeta :: Member UI effs

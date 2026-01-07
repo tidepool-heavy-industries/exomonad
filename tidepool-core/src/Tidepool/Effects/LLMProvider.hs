@@ -12,6 +12,7 @@ module Tidepool.Effects.LLMProvider
   , LLMProviderConfig(..)
   , AnthropicConfig(..)
   , OpenAIConfig(..)
+  , ThinkingBudget(..)
 
     -- * Provider-Specific Response
   , LLMProviderResponse(..)
@@ -38,7 +39,8 @@ module Tidepool.Effects.LLMProvider
 import Control.Applicative ((<|>))
 import Control.Monad.Freer (Eff, Member, send)
 import Data.Aeson (Value, ToJSON(..), FromJSON(..), object, (.=), withObject, (.:), (.:?))
-import Data.Aeson.Types qualified as Aeson
+import qualified Data.Aeson as Aeson
+import Data.Aeson.Types qualified as AesonTypes
 import Data.Kind (Type)
 import Data.Text (Text)
 import GHC.Generics (Generic)
@@ -62,6 +64,22 @@ data SProvider (p :: LLMProvider) where
 -- PROVIDER-SPECIFIC CONFIG
 -- ════════════════════════════════════════════════════════════════════════════
 
+-- | Extended thinking budget configuration.
+--
+-- Sum type makes the enabled/disabled state explicit - no more "Nothing means disabled".
+data ThinkingBudget
+  = ThinkingDisabled           -- ^ Extended thinking is disabled
+  | ThinkingEnabled Int        -- ^ Extended thinking enabled with token budget
+  deriving (Show, Eq, Generic)
+
+instance ToJSON ThinkingBudget where
+  toJSON ThinkingDisabled = Aeson.Null
+  toJSON (ThinkingEnabled n) = toJSON n
+
+instance FromJSON ThinkingBudget where
+  parseJSON Aeson.Null = pure ThinkingDisabled
+  parseJSON v = ThinkingEnabled <$> parseJSON v
+
 -- | Type family mapping provider to its config type.
 type family LLMProviderConfig (p :: LLMProvider) :: Type where
   LLMProviderConfig 'Anthropic = AnthropicConfig
@@ -71,7 +89,7 @@ type family LLMProviderConfig (p :: LLMProvider) :: Type where
 data AnthropicConfig = AnthropicConfig
   { acModel :: Text           -- e.g., "claude-sonnet-4-20250514"
   , acMaxTokens :: Int
-  , acThinkingBudget :: Maybe Int
+  , acThinking :: ThinkingBudget  -- ^ Extended thinking configuration
   , acSystemPrompt :: Maybe Text
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
@@ -144,7 +162,7 @@ instance ToJSON ContentBlock where
 
 instance FromJSON ContentBlock where
   parseJSON = withObject "ContentBlock" $ \v -> do
-    ty <- v .: "type" :: Aeson.Parser Text
+    ty <- v .: "type" :: AesonTypes.Parser Text
     case ty of
       "text" -> TextContent <$> v .: "text"
       "tool_use" -> ToolUseContent <$> v .: "name" <*> v .: "input"

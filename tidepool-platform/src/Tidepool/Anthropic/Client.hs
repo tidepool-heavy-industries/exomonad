@@ -36,7 +36,7 @@ import Tidepool.Anthropic.Types
   ( MessagesRequest(..), MessagesResponse(..), Message(..), Role(..)
   , ContentBlock(..), ImageSource(..), ToolUse(..), ToolResult(..), ToolChoice(..)
   , OutputFormat(..), ThinkingConfig(..), ThinkingContent(..), RedactedThinking(..)
-  , StopReason(..), ApiError(..)
+  , StopReason(..), ApiError(..), toolUseToResultId
   )
 
 import Data.Aeson
@@ -301,7 +301,7 @@ runTurnRequest config turnReq = do
                 , invocationOutput = outputVal
                 }
               toolResult = ToolResult
-                { toolResultId = use.toolUseId
+                { toolResultId = toolUseToResultId use.toolUseId
                 , toolResultContent = resultText
                 , toolResultIsError = isError
                 }
