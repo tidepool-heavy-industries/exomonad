@@ -66,6 +66,7 @@ data ClaudeCodeExec r where
     -> Maybe Value      -- ^ JSON schema for structured output
     -> Maybe Text       -- ^ Tools to allow
     -> Maybe Text       -- ^ Session ID to resume (for conversation continuity)
+    -> Bool             -- ^ Fork session (read-only resume, doesn't modify original)
     -> ClaudeCodeExec (Value, Maybe Text)  -- ^ (output, sessionId)
 
 
@@ -82,9 +83,10 @@ execClaudeCode
   -> Maybe Value      -- ^ JSON schema for structured output
   -> Maybe Text       -- ^ Tools to allow
   -> Maybe Text       -- ^ Session ID to resume (Nothing for new session)
+  -> Bool             -- ^ Fork session (read-only resume for parallel agents)
   -> Eff effs (Value, Maybe Text)  -- ^ (output, sessionId)
-execClaudeCode model cwd prompt schema tools resumeSession =
-  send $ ClaudeCodeExecOp model cwd prompt schema tools resumeSession
+execClaudeCode model cwd prompt schema tools resumeSession forkSession =
+  send $ ClaudeCodeExecOp model cwd prompt schema tools resumeSession forkSession
 
 
 -- | Run ClaudeCodeExec effect with a pure handler.
@@ -92,9 +94,9 @@ execClaudeCode model cwd prompt schema tools resumeSession =
 -- Used for testing or alternative implementations.
 -- For IO-based execution, see @runClaudeCodeExecIO@ in tidepool-claude-code-executor.
 runClaudeCodeExec
-  :: (ModelChoice -> Maybe FilePath -> Text -> Maybe Value -> Maybe Text -> Maybe Text -> Eff effs (Value, Maybe Text))
+  :: (ModelChoice -> Maybe FilePath -> Text -> Maybe Value -> Maybe Text -> Maybe Text -> Bool -> Eff effs (Value, Maybe Text))
   -> Eff (ClaudeCodeExec ': effs) a
   -> Eff effs a
 runClaudeCodeExec handler = interpret $ \case
-  ClaudeCodeExecOp model cwd prompt schema tools resumeSession ->
-    handler model cwd prompt schema tools resumeSession
+  ClaudeCodeExecOp model cwd prompt schema tools resumeSession forkSession ->
+    handler model cwd prompt schema tools resumeSession forkSession

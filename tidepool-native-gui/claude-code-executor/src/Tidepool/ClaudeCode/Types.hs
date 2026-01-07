@@ -7,6 +7,9 @@ module Tidepool.ClaudeCode.Types
   ( -- * Result Types
     ClaudeCodeResult(..)
 
+    -- * Interrupt Signals
+  , InterruptSignal(..)
+
     -- * Stream Event Types
   , StreamEvent(..)
   , SystemEvent(..)
@@ -71,6 +74,8 @@ data ClaudeCodeResult = ClaudeCodeResult
     -- ^ Structured output (when --json-schema was provided)
   , ccrSessionId :: Text
     -- ^ Session ID (always present, available from init event)
+  , ccrSessionTag :: Maybe Text
+    -- ^ Tag for correlating with orchestrator state (e.g., worktree name)
   , ccrTotalCostUsd :: Double
     -- ^ Total cost in USD
   , ccrNumTurns :: Int
@@ -81,6 +86,8 @@ data ClaudeCodeResult = ClaudeCodeResult
     -- ^ Permission denials that occurred
   , ccrModelUsage :: Map Text ModelUsage
     -- ^ Per-model usage breakdown
+  , ccrInterrupts :: [InterruptSignal]
+    -- ^ Interrupt signals received during execution
   }
   deriving stock (Show, Eq, Generic)
 
@@ -91,11 +98,13 @@ instance FromJSON ClaudeCodeResult where
     ccrResult <- o .:? "result"
     ccrStructuredOutput <- o .:? "structured_output"
     ccrSessionId <- o .: "session_id"
+    ccrSessionTag <- o .:? "session_tag"
     ccrTotalCostUsd <- o .: "total_cost_usd"
     ccrNumTurns <- o .: "num_turns"
     ccrEvents <- o .:? "events" .!= []
     ccrPermissionDenials <- o .:? "permission_denials" .!= []
     ccrModelUsage <- o .:? "model_usage" .!= mempty
+    ccrInterrupts <- o .:? "interrupts" .!= []
     pure ClaudeCodeResult{..}
 
 
@@ -279,6 +288,31 @@ instance FromJSON ModelUsage where
     <*> o .:? "cacheReadInputTokens" .!= 0
     <*> o .:? "cacheCreationInputTokens" .!= 0
     <*> o .:? "costUSD" .!= 0
+
+
+-- ============================================================================
+-- Interrupt Signals
+-- ============================================================================
+
+-- | An interrupt signal sent by Claude via @zellij-cc signal@.
+--
+-- These allow Claude to signal non-happy-path transitions in the workflow,
+-- such as requesting more context or escalating to a human.
+data InterruptSignal = InterruptSignal
+  { isSignalType :: Text
+    -- ^ Signal type: "transition", "escalate", "request_review", etc.
+  , isState :: Maybe Text
+    -- ^ Target state for transitions (e.g., "need_more_types")
+  , isReason :: Maybe Text
+    -- ^ Human-readable reason for the signal
+  }
+  deriving stock (Show, Eq, Generic)
+
+instance FromJSON InterruptSignal where
+  parseJSON = withObject "InterruptSignal" $ \o -> InterruptSignal
+    <$> o .: "signal_type"
+    <*> o .:? "state"
+    <*> o .:? "reason"
 
 
 -- ============================================================================
