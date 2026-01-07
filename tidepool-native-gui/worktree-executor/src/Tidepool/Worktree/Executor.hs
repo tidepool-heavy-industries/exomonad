@@ -30,11 +30,12 @@ module Tidepool.Worktree.Executor
 
 import Control.Exception (try, SomeException)
 import Control.Monad.Freer (Eff, LastMember, interpret, sendM)
+import Data.List (isPrefixOf)
 import Data.Text (Text)
 import Data.Text qualified as T
 import System.Exit (ExitCode(..))
-import System.FilePath ((</>))
-import System.Directory (createDirectoryIfMissing, doesDirectoryExist, removeDirectoryRecursive)
+import System.FilePath ((</>), takeDirectory)
+import System.Directory (createDirectoryIfMissing, copyFile, doesDirectoryExist, removeDirectoryRecursive)
 import System.Process (readProcessWithExitCode)
 import System.Random (randomRIO)
 import Numeric (showHex)
@@ -219,6 +220,9 @@ mergeWorktreeIO config wtPath commitMsg = do
                 else pure $ MergeError $ T.pack mergeErr
 
 -- | Copy specific files from source to destination.
+--
+-- Handles nested paths by creating parent directories as needed.
+-- Uses portable Haskell file operations (not shell commands).
 cherryPickFilesIO :: FilePath -> [FilePath] -> FilePath -> IO ()
 cherryPickFilesIO srcWorktree files destDir = do
   createDirectoryIfMissing True destDir
@@ -227,14 +231,10 @@ cherryPickFilesIO srcWorktree files destDir = do
     copyFile' relPath = do
       let srcPath = srcWorktree </> relPath
           dstPath = destDir </> relPath
-      (exitCode, _, stderr) <- readProcessWithExitCode
-        "cp"
-        ["-p", srcPath, dstPath]
-        ""
-      case exitCode of
-        ExitSuccess -> pure ()
-        ExitFailure code -> error $
-          "Failed to copy " <> relPath <> " (exit " <> show code <> "): " <> stderr
+          dstParentDir = takeDirectory dstPath
+      -- Create parent directories for nested paths
+      createDirectoryIfMissing True dstParentDir
+      copyFile srcPath dstPath
 
 -- | List all worktrees in the repository.
 listWorktreesIO :: WorktreeConfig -> IO [(FilePath, Text)]
@@ -287,11 +287,20 @@ parseWorktreeList output = go [] (lines output)
     parseEntry :: [String] -> Maybe ((FilePath, Text), [String])
     parseEntry ls = do
       let (entryLines, rest) = break null ls
-      path <- lookup "worktree" $ map parseLine entryLines
-      branch <- lookup "branch" $ map parseLine entryLines
-      -- Strip "refs/heads/" prefix (11 chars)
-      let branchName = T.pack $ drop 11 branch
+          fields = map parseLine entryLines
+      path <- lookup "worktree" fields
+      -- Branch may be missing for detached HEAD worktrees
+      let branch = lookup "branch" fields
+          branchName = case branch of
+            Just b -> T.pack $ stripRefsHeads b
+            Nothing -> "(detached)"
       pure ((path, branchName), drop 1 rest)
+
+    -- Strip "refs/heads/" prefix if present
+    stripRefsHeads :: String -> String
+    stripRefsHeads s
+      | "refs/heads/" `isPrefixOf` s = drop 11 s
+      | otherwise = s
 
     parseLine :: String -> (String, String)
     parseLine line =
