@@ -50,6 +50,7 @@ test-suite worktree-executor-test
         base >= 4.17 && < 5,
         tidepool-core,
         tidepool-worktree-executor,
+        filepath >= 1.4 && < 2,
         text >= 2.0 && < 3,
         hspec >= 2.10 && < 3
     ghc-options:      -threaded -rtsopts -with-rtsopts=-N
