@@ -1,6 +1,7 @@
 module Main where
 
 import Data.Aeson (encode, decode)
+import Data.Proxy (Proxy(..))
 import Data.Text qualified as T
 import Test.Hspec
 
@@ -75,16 +76,10 @@ main = hspec $ do
       rendered `shouldSatisfy` T.isInfixOf "signature"
 
   describe "Handler Construction" $ do
-    it "typesFirstHandlers can be constructed" $ do
-      -- Force evaluation of the handlers record
-      -- This verifies all handler types align correctly
+    it "typesFirstHandlers entry and exit are correctly typed Proxies" $ do
+      -- The entry and exit fields are Proxy markers that establish the graph's
+      -- input and output types. Verify they have the expected types.
       let handlers = typesFirstHandlers
-      -- Access each field to ensure they're not bottom
-      case handlers.entry of
-        _ -> pure ()
-      case handlers.exit of
-        _ -> pure ()
-      -- The types handler is a ClaudeCodeLLMHandler - verify it exists
-      case handlers.types of
-        _ -> pure ()
-      True `shouldBe` True
+      -- These compile only if the types match
+      handlers.entry `shouldBe` (Proxy :: Proxy StackSpec)
+      handlers.exit `shouldBe` (Proxy :: Proxy TypeDefinitions)
