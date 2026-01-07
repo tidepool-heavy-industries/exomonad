@@ -141,16 +141,66 @@ export function getCurrentNode(phase: ExecutionPhase): string | null {
 /**
  * Effect types that Haskell yields for TypeScript to execute.
  * Haskell uses flat encoding: {type: "LlmComplete", eff_node: "...", ...}
+ *
+ * This union must match the SerializableEffect type in WireTypes.hs exactly.
  */
 export type SerializableEffect =
   | LlmCompleteEffect
+  | LlmCallEffect
   | LogInfoEffect
   | LogErrorEffect
   | HabiticaEffect
   | TelegramSendEffect
+  | TelegramAskEffect
   | TelegramReceiveEffect
   | TelegramTryReceiveEffect
-  | TelegramConfirmEffect;
+  | TelegramConfirmEffect
+  | GetStateEffect
+  | SetStateEffect
+  | EmitEventEffect
+  | RandomIntEffect
+  | GetTimeEffect;
+
+/**
+ * Internal effects are executed by the StateMachineDO directly.
+ * Yielded effects are sent to the caller for external handling.
+ */
+export type InternalEffect =
+  | LlmCompleteEffect
+  | LlmCallEffect
+  | LogInfoEffect
+  | LogErrorEffect
+  | HabiticaEffect
+  | GetStateEffect
+  | SetStateEffect
+  | RandomIntEffect
+  | GetTimeEffect;
+
+export type YieldedEffect =
+  | TelegramSendEffect
+  | TelegramAskEffect
+  | TelegramReceiveEffect
+  | TelegramTryReceiveEffect
+  | TelegramConfirmEffect
+  | EmitEventEffect;
+
+/**
+ * Type guard for internal effects (type narrowing).
+ * Use this when you need TypeScript to narrow the effect type.
+ * For runtime routing decisions, routing.ts also exports isInternalEffect.
+ */
+export function narrowToInternalEffect(effect: SerializableEffect): effect is InternalEffect {
+  return ["LlmComplete", "LlmCall", "LogInfo", "LogError", "Habitica", "GetState", "SetState", "RandomInt", "GetTime"].includes(effect.type);
+}
+
+/**
+ * Type guard for yielded effects (type narrowing).
+ * Use this when you need TypeScript to narrow the effect type.
+ * For runtime routing decisions, routing.ts also exports isYieldedEffect.
+ */
+export function narrowToYieldedEffect(effect: SerializableEffect): effect is YieldedEffect {
+  return ["TelegramSend", "TelegramAsk", "telegram_send", "telegram_receive", "telegram_try_receive", "TelegramConfirm", "EmitEvent"].includes(effect.type);
+}
 
 /**
  * LLM completion request - matches Haskell EffLlmComplete.
@@ -166,6 +216,57 @@ export interface LlmCompleteEffect {
   eff_user_content: string;
   /** JSON schema for structured output */
   eff_schema: JsonSchema | null;
+  /** Model to use (e.g., "@cf/meta/llama-3.3-70b-instruct-fp8-fast"). If null, use default. */
+  eff_model?: string | null;
+}
+
+/**
+ * Full LLM API call with conversation history - matches Haskell EffLlmCall.
+ * Supports tool use and multi-turn conversations.
+ */
+export interface LlmCallEffect {
+  type: "LlmCall";
+  /** Which node is making this call */
+  eff_node: string;
+  /** Full conversation history */
+  eff_messages: WireMessage[];
+  /** JSON schema for structured output */
+  eff_schema?: JsonSchema | null;
+  /** Tool definitions (Anthropic format) */
+  eff_tools: unknown[];
+  /** Model to use. If null, use default. */
+  eff_model?: string | null;
+}
+
+/**
+ * Wire-format message for LLM conversation history.
+ * Matches Haskell WireMessage.
+ */
+export interface WireMessage {
+  /** Role: "user" | "assistant" | "system" */
+  role: string;
+  /** Content blocks */
+  content: WireContentBlock[];
+}
+
+/**
+ * Wire-format content block for LLM messages.
+ * Matches Haskell WireContentBlock.
+ */
+export type WireContentBlock =
+  | { type: "text"; text: string }
+  | { type: "image"; source: ImageSource }
+  | { type: "tool_use"; id: string; name: string; input: unknown }
+  | { type: "tool_result"; tool_use_id: string; content: string; is_error: boolean };
+
+/**
+ * Image source for vision content.
+ */
+export interface ImageSource {
+  type: "base64" | "url";
+  media_type?: string;
+  data?: string;
+  url?: string;
 }
 
 /**
@@ -198,6 +299,73 @@ export interface HabiticaEffect {
   eff_hab_op: string;
   /** Operation-specific payload (JSON) */
   eff_hab_payload: unknown;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// STATE EFFECTS (for DM and other stateful graphs)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Read state from Durable Object storage - matches Haskell EffGetState.
+ */
+export interface GetStateEffect {
+  type: "GetState";
+  /** State key (e.g., "worldState", "sessionState") */
+  eff_state_key: string;
+}
+
+/**
+ * Write state to Durable Object storage - matches Haskell EffSetState.
+ */
+export interface SetStateEffect {
+  type: "SetState";
+  /** State key */
+  eff_state_key: string;
+  /** New state value (full replacement) */
+  eff_state_value: unknown;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// EVENT EMISSION (for observability/GUI updates)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Emit an event for external observers - matches Haskell EffEmitEvent.
+ * Used for GUI updates, analytics, logging pipelines.
+ */
+export interface EmitEventEffect {
+  type: "EmitEvent";
+  /** Event name (e.g., "StressChanged", "ClockAdvanced") */
+  eff_event_name: string;
+  /** Event-specific payload */
+  eff_event_payload: unknown;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// RANDOM NUMBER GENERATION
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Generate a random integer in range - matches Haskell EffRandomInt.
+ */
+export interface RandomIntEffect {
+  type: "RandomInt";
+  /** Minimum value (inclusive) */
+  eff_min: number;
+  /** Maximum value (inclusive) */
+  eff_max: number;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TIME
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Get current UTC time - matches Haskell EffGetTime.
+ * Returns ISO8601 string.
+ */
+export interface GetTimeEffect {
+  type: "GetTime";
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -240,6 +408,30 @@ export interface TelegramSendEffect {
   type: "telegram_send";
   message: TelegramOutgoingMessage;
 }
+
+/**
+ * Ask user with inline buttons - matches Haskell EffTelegramAsk.
+ * Blocking effect - waits for button click or text response.
+ */
+export interface TelegramAskEffect {
+  type: "TelegramAsk";
+  /** Message text to display */
+  eff_tg_text: string;
+  /** Parse mode: "PlainText" | "Markdown" | "HTML" */
+  eff_tg_parse_mode: string;
+  /** Button options: [[label, callback], ...] */
+  eff_buttons: [string, string][];
+  /** Optional thread/topic ID for group forums */
+  eff_tg_thread_id?: number | null;
+}
+
+/**
+ * Result from TelegramAsk effect - matches Haskell TelegramAskResult.
+ */
+export type TelegramAskResult =
+  | { type: "button"; response: string }
+  | { type: "text"; text: string }
+  | { type: "stale_button" };
 
 /**
  * Block until at least one message arrives.
@@ -288,14 +480,14 @@ export interface TelegramConfirmResponse {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// FUTURE EFFECTS (not yet in Haskell, but planned)
+// PLANNED EFFECTS (not yet in Haskell)
 // ═══════════════════════════════════════════════════════════════════════════
 
-// These will be added as the Haskell side gains more effect types:
-// - ToolCallEffect (LLM tool use)
+// Future effect types that may be added:
 // - DbQueryEffect (D1 database)
 // - KvGetEffect / KvPutEffect (Workers KV)
 // - ScheduleAlarmEffect (Durable Object alarms)
+// - ClaudeCodeEffect (subprocess execution - native only)
 
 // ═══════════════════════════════════════════════════════════════════════════
 // EFFECT RESULTS (what TypeScript returns to WASM - matches Haskell EffectResult)

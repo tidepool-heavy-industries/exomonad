@@ -246,3 +246,10 @@ if os(wasi)
     -optl-Wl,--export=getExampleGraphInfo
     -optl-Wl,--export=getExampleGraphState
 ```
+
+## Related Documentation
+
+- [tidepool-core/CLAUDE.md](../tidepool-core/CLAUDE.md) - Graph DSL, effects, validation
+- [tidepool-generated-ts/CLAUDE.md](../tidepool-generated-ts/CLAUDE.md) - Generated TypeScript types (matches WireTypes.hs)
+- [deploy/CLAUDE.md](../deploy/CLAUDE.md) - Cloudflare Worker harness that consumes WASM blob
+- [Root CLAUDE.md](../CLAUDE.md) - Project overview and architecture

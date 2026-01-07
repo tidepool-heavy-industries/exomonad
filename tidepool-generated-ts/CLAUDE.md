@@ -40,3 +40,10 @@ To modify:
 | `jsffi.ts` | JavaScript FFI for GHC WASM |
 | `graphs.ts` | Graph registry metadata |
 | `handlers.generated.ts` | Generated effect handler stubs |
+
+## Related Documentation
+
+- [tidepool-wasm/CLAUDE.md](../tidepool-wasm/CLAUDE.md) - Source Haskell types (WireTypes.hs) and generator
+- [tidepool-core/CLAUDE.md](../tidepool-core/CLAUDE.md) - Graph DSL and effect definitions
+- [deploy/CLAUDE.md](../deploy/CLAUDE.md) - Cloudflare Worker harness that uses these types
+- [Root CLAUDE.md](../CLAUDE.md) - Project overview

@@ -17,6 +17,7 @@ import qualified RoundtripSpec
 import qualified RegistrySpec
 import qualified TypedToolSpec
 import qualified ConversionSpec
+import qualified ToolResultOutcomeSpec
 
 main :: IO ()
 main = hspec $ do
@@ -36,3 +37,4 @@ main = hspec $ do
     describe "Registry" RegistrySpec.spec
     describe "TypedTool" TypedToolSpec.spec
     describe "Conversion" ConversionSpec.spec
+    describe "ToolResultOutcome" ToolResultOutcomeSpec.spec

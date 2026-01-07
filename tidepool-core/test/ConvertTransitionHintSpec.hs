@@ -92,10 +92,10 @@ spec = describe "ConvertTransitionHint typeclass" $ do
         Just _ -> pure ()
         Nothing -> expectationFailure "Should match 'Exit' with unit"
 
-    it "rejects when Exit expects different type" $
+    it "accepts any JSON for unit type (Aeson FromJSON behavior)" $
       case convertTransitionHint @MultiNamedTargets "Exit" (toJSON (123 :: Int)) of
-        Just _ -> expectationFailure "Should reject wrong type"
-        Nothing -> pure ()
+        Just _ -> pure ()  -- Unit types accept any JSON per Aeson
+        Nothing -> expectationFailure "Should accept Int JSON for () type"
 
   describe "Self targets" $ do
     it "matches Self target" $

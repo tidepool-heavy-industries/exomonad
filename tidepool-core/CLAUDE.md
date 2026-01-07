@@ -156,7 +156,7 @@ gNode :: mode :- G.LLMNode :@ Input A :@ Template T :@ Schema B :@ Vision :@ Too
 
 ### ClaudeCode Annotation
 
-Marks an LLM node as executed via Claude Code subprocess:
+Marks an LLM node as executed via Claude Code subprocess instead of the standard LLM API:
 
 ```haskell
 gWork :: mode :- G.LLMNode
@@ -166,10 +166,37 @@ gWork :: mode :- G.LLMNode
     :@ ClaudeCode 'Sonnet ('Just "/path/to/worktree")
 ```
 
-When present:
-- Template is rendered and passed to `claude -p` via zellij-cc
-- Claude Code spawns as subprocess with file system access
-- JSON output is parsed according to Schema
+**Type parameters:**
+- `model :: ModelChoice` - One of `'Haiku`, `'Sonnet`, `'Opus`
+- `cwd :: Maybe Symbol` - Working directory path, or `'Nothing` for current dir
+
+**How it works:**
+1. Handler's `before` function builds template context from input
+2. System and user templates are rendered and concatenated
+3. Prompt is passed to `claude -p` via the zellij-cc executor
+4. Claude Code spawns with file system access to `cwd`
+5. JSON output is parsed according to `Schema` type
+6. Handler's `after` function routes based on parsed output
+
+**Handler type:** When `ClaudeCode` is present, the `NodeHandler` type family produces a `ClaudeCodeLLMHandler` instead of regular `LLMHandler`:
+
+```haskell
+-- Standard LLM handler (API call)
+type LLMHandler payload schema targets es tpl
+
+-- ClaudeCode handler (subprocess)
+type ClaudeCodeLLMHandler model cwd payload schema targets es tpl
+```
+
+Both have the same 4 fields (`llmSystem`, `llmUser`, `llmBefore`, `llmAfter`), but dispatch differently at runtime.
+
+**Use cases:**
+- Tasks requiring file system access (code generation, refactoring)
+- Long-running operations that benefit from Claude Code's context management
+- Tasks needing Claude Code's built-in tools (file editing, bash execution)
+
+> **Source**: `tidepool-core/src/Tidepool/Graph/Types.hs` (ClaudeCode, ModelChoice),
+> `tidepool-core/src/Tidepool/Graph/Execute.hs:264-302` (executeClaudeCodeHandler)
 
 ## Goto and GotoChoice
 
@@ -241,21 +268,97 @@ class DispatchGoto graph targets es exitType where
 
 Pattern matches on `OneOf` to call the correct handler, recursing until Exit.
 
+### Self-Loop Dispatch
+
+When a node can transition back to itself via `Goto Self`, the standard `dispatchGoto` doesn't know which handler to re-invoke. Use `DispatchGotoWithSelf` instead:
+
+```haskell
+-- Define handler that may loop back to itself
+loopHandler :: Int -> Eff es (GotoChoice '[To Self Int, To Exit Int])
+loopHandler n
+  | n >= 10   = pure $ gotoExit n
+  | otherwise = pure $ gotoSelf (n + 1)
+
+-- Run with explicit self-handler
+initialChoice <- loopHandler 0
+result <- dispatchGotoWithSelf loopHandler graph initialChoice
+```
+
+The typeclass signature:
+
+```haskell
+class DispatchGotoWithSelf graph selfPayload allTargets targets es exitType where
+  dispatchGotoWithSelf
+    :: (selfPayload -> Eff es (GotoChoice allTargets))  -- Self-handler
+    -> graph (AsHandler es)                              -- Graph handlers
+    -> GotoChoice targets                                -- Current choice
+    -> Eff es exitType
+```
+
+**Why is this needed?** The graph record has fields like `compute`, `route`, etc., but there's no `self` field. When `Goto Self` is encountered, the dispatcher needs to know which handler to re-invoke. `dispatchGotoWithSelf` takes the self-handler as an explicit parameter.
+
+**Error guidance**: If you try to use `dispatchGoto` with a handler that returns `Goto Self`, you'll get a clear `TypeError` directing you to use `dispatchGotoWithSelf`.
+
+> **Source**: `tidepool-core/src/Tidepool/Graph/Execute.hs:599-677`
+
 ## Memory Effect
 
-Typed persistent state for nodes:
+Typed persistent state that survives across node invocations. There are two scopes:
+
+### Node-Private Memory
+
+Each node can have its own private state via the `Memory` annotation:
+
+```haskell
+-- Graph definition
+gExplore :: mode :- G.LLMNode
+    :@ Input URL
+    :@ Template ExploreTpl
+    :@ Schema Findings
+    :@ Memory ExploreMem  -- Node-private state
+
+-- State type
+data ExploreMem = ExploreMem
+  { visited :: [URL]
+  , depth :: Int
+  }
+
+-- Usage in handler
+exploreHandler = do
+  mem <- getMem @ExploreMem
+  updateMem @ExploreMem $ \m -> m { visited = url : m.visited, depth = m.depth + 1 }
+```
+
+### Graph-Global Memory
+
+Shared state across all nodes via the `:&` graph-level annotation:
+
+```haskell
+-- Graph definition with global state
+type MyGraphWithGlobal = MyGraph :& Global SessionState
+
+-- Access in any handler
+anyHandler = do
+  session <- getMem @SessionState  -- Available to all nodes
+  updateMem @SessionState $ \s -> s { turnCount = s.turnCount + 1 }
+```
+
+### Memory Effect API
 
 ```haskell
 data Memory (s :: Type) :: Effect where
   GetMem    :: Memory s m s
   UpdateMem :: (s -> s) -> Memory s m ()
 
--- Usage in handler
-exploreHandler = do
-  nodeMem <- getMem @ExploreMem      -- Node's private state
-  globalMem <- getMem @SessionState  -- Graph's shared state (via :& Global)
-  updateMem @ExploreMem $ \m -> m { visited = url : m.visited }
+-- Smart constructors
+getMem :: forall s es. Member (Memory s) es => Eff es s
+updateMem :: forall s es. Member (Memory s) es => (s -> s) -> Eff es ()
+modifyMem :: forall s es. Member (Memory s) es => (s -> (a, s)) -> Eff es a
 ```
+
+**Persistence:** Memory state is serialized between graph steps. For WASM execution, it's included in the `StepOutput`'s `GraphState`. For native execution, it's held in the runner's state.
+
+> **Source**: `tidepool-core/src/Tidepool/Graph/Memory.hs`
 
 ## Template.hs - Typed Prompt Templates
 
@@ -298,6 +401,68 @@ class ToolDef t where
   toolExecute :: Value -> Eff es (Either Text Value)
 ```
 
+## Schema.hs - JSON Schema for Structured Output
+
+LLM nodes use the `Schema` annotation to specify output types. The `HasJSONSchema` typeclass generates JSON Schema for these types:
+
+```haskell
+class HasJSONSchema a where
+  jsonSchema :: JSONSchema
+```
+
+### Deriving JSON Schema
+
+**Generic derivation (recommended):**
+
+```haskell
+{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE DeriveAnyClass #-}
+
+data Intent
+  = RefundIntent { reason :: Text, amount :: Double }
+  | FaqIntent { question :: Text }
+  deriving (Generic, FromJSON, ToJSON, HasJSONSchema)
+```
+
+**Manual instance (for custom schemas):**
+
+```haskell
+instance HasJSONSchema CustomType where
+  jsonSchema = JSONSchema
+    { schemaType = Just "object"
+    , schemaProperties = Just $ M.fromList
+        [ ("field1", JSONSchema { schemaType = Just "string", ... })
+        , ("field2", JSONSchema { schemaType = Just "integer", ... })
+        ]
+    , schemaRequired = Just ["field1"]
+    , ...
+    }
+```
+
+### How Schema Flows to the LLM
+
+1. **At compile time**: `Schema Intent` annotation on LLM node links the type
+2. **At handler definition**: `executeLLMHandler` calls `jsonSchema @schema`
+3. **At runtime**: Schema is converted to Anthropic's format via `schemaToValue`
+4. **In LLM call**: Schema passed to API as `tool_schema` or structured output constraint
+5. **Response parsing**: LLM output parsed via `FromJSON` instance
+
+### Schema Requirements
+
+Types used with `Schema` must have:
+- `HasJSONSchema` instance (for schema generation)
+- `FromJSON` instance (for parsing LLM response)
+- Ideally `ToJSON` instance (for debugging/logging)
+
+```haskell
+gClassify :: mode :- G.LLMNode
+    :@ Input Message
+    :@ Template ClassifyTpl
+    :@ Schema Intent  -- Intent needs HasJSONSchema + FromJSON
+```
+
+> **Source**: `tidepool-core/src/Tidepool/Schema.hs`
+
 ## Mermaid.hs - Diagram Generation
 
 Generate Mermaid diagrams from graph types:
@@ -336,20 +501,135 @@ All four fields are required:
 
 ## Validation
 
-Compile-time validation via type families:
+The `ValidGraphRecord` constraint bundles all compile-time validation checks. When validation fails, you get clear error messages explaining what's wrong and how to fix it.
 
-- `HasEntry` - Must have an Entry node
-- `HasExit` - Must have an Exit node
-- `InputSatisfied` - Input type provided by Schema/Entry
-- `AllGotoTargetsExist` - All Goto targets reference existing nodes
+### Complete Validation Inventory
 
-Error messages are clear:
+| Check | Purpose | Error Indicates |
+|-------|---------|-----------------|
+| `RequireGeneric` | Graph type must derive `Generic` | Add `deriving Generic` to your graph type |
+| `ValidateEntryExit` | Exactly one `Entry` and one `Exit` node | Add missing Entry/Exit or remove duplicates |
+| `ValidateGotoTargets` | All `Goto "name"` targets must exist as fields | Typo in target name, or missing node |
+| `ValidateNoToInEffects` | `To` markers belong in handlers, not `UsesEffects` | Use `Goto` in graph definition, `To` in handler return types |
+| `AllFieldsReachable` | All nodes must be reachable from Entry | Orphaned nodes with no incoming edges |
+| `AllLogicFieldsReachExit` | Logic nodes must have path to Exit | Logic node that can never complete |
+| `NoDeadGotosRecord` | Goto targets must lead somewhere | Dead-end transitions |
+| `AllLogicNodesHaveGoto` | Logic nodes must have at least one Goto | Logic node with no transitions |
+| `NoGotoSelfOnly` | Self-loops must have exit path | Infinite loop with no escape |
+
+### Example Error Messages
+
+**Missing node target:**
+```
+═══════════════════════════════════════════════════════════════════
+  Goto target "gProces" doesn't exist in graph
+═══════════════════════════════════════════════════════════════════
+
+WHAT HAPPENED
+  Node 'gRoute' has: Goto "gProces" SomeType
+  But there's no field named "gProces" in your graph.
+
+HOW TO FIX
+  • Check spelling: did you mean "gProcess"?
+  • Add the missing node to your graph type
+  • Remove the Goto if the target was deleted
+```
+
+**Self-loop only (no exit):**
+```
+═══════════════════════════════════════════════════════════════════
+  Node "gLoop" can only Goto Self - infinite loop!
+═══════════════════════════════════════════════════════════════════
+
+WHAT HAPPENED
+  UsesEffects contains only: Goto Self Payload
+  This node has no way to exit the loop.
+
+HOW TO FIX
+  Add an exit path:
+    UsesEffects '[Goto Self Payload, Goto Exit Result]
+    UsesEffects '[Goto Self Payload, Goto "nextNode" Data]
+```
+
+> **Source**: `tidepool-core/src/Tidepool/Graph/Generic.hs:1152-1165` (ValidGraphRecord),
+> `tidepool-core/src/Tidepool/Graph/Validate/RecordStructure.hs` (reachability checks)
+
+## Type-Level Error Messages
+
+The Graph DSL uses GHC's custom `TypeError` mechanism to provide clear, actionable error messages. These are not just error text - they're **documentation embedded in the type system**.
+
+### Error Message Structure
+
+All error messages follow a consistent format:
 
 ```
-Graph validation failed: unsatisfied dependency
-Node 'gClassify' has Input: Message
-But no node provides it via Schema and Entry doesn't provide it.
+═══════════════════════════════════════════════════════════════════
+  [Title: What went wrong]
+═══════════════════════════════════════════════════════════════════
+
+WHAT HAPPENED
+  [Explanation of what the type checker found]
+
+HOW IT WORKS
+  [Background on why this constraint exists]
+
+HOW TO FIX
+  • [Actionable fix option 1]
+  • [Actionable fix option 2]
+
+  [Code examples if applicable]
 ```
+
+### Error Categories
+
+**Graph Structure Errors** (`Generic.hs`):
+- Missing or duplicate Entry/Exit nodes
+- Invalid Goto targets (typos, missing nodes)
+- Using `To` instead of `Goto` in graph definitions
+
+**Dispatch Errors** (`Execute.hs`):
+- Empty target list (handler has no exit points)
+- Self-loop with `dispatchGoto` (should use `dispatchGotoWithSelf`)
+
+**Goto Constraint Errors** (`Goto.hs`):
+- Empty `GotoChoice` (invalid construction)
+- Target not in list (type mismatch)
+
+### Example: Self-Loop Guidance
+
+When you try to use `dispatchGoto` with a self-looping handler:
+
+```
+═══════════════════════════════════════════════════════════════════
+  Self-loop requires special dispatch
+═══════════════════════════════════════════════════════════════════
+
+WHAT HAPPENED
+  Your handler can 'gotoSelf', but you called 'dispatchGoto'.
+  The standard dispatcher doesn't know which handler to re-invoke.
+
+HOW IT WORKS
+  Normal dispatch:  GotoChoice -> find handler by name -> call it
+  Self dispatch:    GotoChoice -> ??? -> call... which handler?
+
+  The graph record has fields like 'compute', 'route', etc.
+  But there's no 'self' field! We need you to tell us what
+  'self' means for this particular dispatch.
+
+HOW TO FIX
+  • Use dispatchGotoWithSelf and pass the self-handler:
+
+  -- Instead of:
+  choice <- loopHandler input
+  result <- dispatchGoto handlers choice        -- ERROR
+
+  -- Use:
+  choice <- loopHandler input
+  result <- dispatchGotoWithSelf loopHandler handlers choice  -- OK
+```
+
+> **Source**: Error formatting helpers in `tidepool-core/src/Tidepool/Graph/Errors.hs`,
+> `TypeError` instances throughout `Generic.hs`, `Execute.hs`, `Goto.hs`
 
 ## Effect vs Effects
 
@@ -374,17 +654,37 @@ Uses `freer-simple` for reified continuations (required for WASM).
 
 ## File Inventory
 
-| File | Purpose |
-|------|---------|
-| Generic.hs | Record modes (GraphMode, AsHandler, NodeHandler) |
-| Goto.hs | Goto effect, OneOf GADT, GotoChoice |
-| Execute.hs | DispatchGoto typeclass |
-| Execute/Instrumented.hs | Traced dispatch with OpenTelemetry |
-| Memory.hs | Memory effect for persistent state |
-| Template.hs | TemplateDef typeclass |
-| Tool.hs | ToolDef typeclass |
-| Edges.hs | Edge derivation type families |
-| Validate.hs | Compile-time validation |
-| Reify.hs | Runtime graph info extraction |
-| Mermaid.hs | Diagram generation |
-| Types.hs | Core type definitions (internal) |
+All paths relative to `tidepool-core/src/Tidepool/Graph/`.
+
+| File | Key Exports | Purpose |
+|------|-------------|---------|
+| `Types.hs` | `(:@)`, `Input`, `Schema`, `Goto`, `Exit`, `Self`, `ClaudeCode`, `ModelChoice` | Core DSL syntax and annotations |
+| `Generic.hs` | `GraphMode`, `AsHandler`, `AsGraph`, `NodeHandler`, `ValidGraphRecord` | Mode system and handler type computation |
+| `Edges.hs` | `GetInput`, `GetSchema`, `GetUsesEffects`, `GotoEffectsToTargets`, `GotosToTos` | Type families for annotation extraction |
+| `Goto.hs` | `Goto`, `To`, `OneOf`, `GotoChoice`, `gotoChoice`, `gotoExit`, `gotoSelf`, `LLMHandler` | Transition types and smart constructors |
+| `Execute.hs` | `DispatchGoto`, `DispatchGotoWithSelf`, `runGraph`, `runGraphFrom`, `CallHandler` | Typed graph dispatch |
+| `Execute/Instrumented.hs` | Traced `DispatchGoto` instances | OpenTelemetry span emission |
+| `Memory.hs` | `Memory`, `getMem`, `updateMem`, `modifyMem` | Node-private persistent state |
+| `Template.hs` | `TemplateDef`, `TemplateContext`, `templateCompiled`, `buildContext` | Typed Jinja templates |
+| `Tool.hs` | `ToolDef`, `toolName`, `toolSchema`, `toolExecute` | LLM-invocable tools |
+| `Validate/Validate.hs` | Error message templates (`UnsatisfiedNeedError`, etc.) | Validation error formatting |
+| `Validate/RecordStructure.hs` | `AllFieldsReachable`, `AllLogicFieldsReachExit`, `NoDeadGotosRecord` | Reachability validation |
+| `Reify.hs` | `GraphInfo`, `NodeInfo`, `reifyGraph` | Runtime graph introspection |
+| `Mermaid.hs` | `graphToMermaid` | Diagram generation |
+| `Errors.hs` | `HR`, `WhatHappened`, `HowItWorks`, `Fixes`, `CodeLine`, `Bullet` | Error formatting primitives |
+
+### Related Modules (outside Graph/)
+
+| Path | Key Exports | Purpose |
+|------|-------------|---------|
+| `Effect/Types.hs` | `State`, `LLM`, `Log`, `Emit`, `RequestInput`, `Time`, `Random` | Core effect definitions |
+| `Effect/ClaudeCode.hs` | `ClaudeCodeExec`, `execClaudeCode` | Claude Code subprocess effect |
+| `Schema.hs` | `HasJSONSchema`, `JSONSchema`, `schemaToValue` | JSON Schema for structured output |
+| `Effects/*.hs` | `BD`, `GitHub`, `Habitica`, `Telegram`, `Git`, etc. | Integration effects |
+
+## Related Documentation
+
+- [tidepool-wasm/CLAUDE.md](../tidepool-wasm/CLAUDE.md) - WASM compilation, FFI, wire types
+- [tidepool-generated-ts/CLAUDE.md](../tidepool-generated-ts/CLAUDE.md) - Generated TypeScript types
+- [deploy/CLAUDE.md](../deploy/CLAUDE.md) - Cloudflare Worker harness and effect handlers
+- [Root CLAUDE.md](../CLAUDE.md) - Project overview and consuming repo patterns

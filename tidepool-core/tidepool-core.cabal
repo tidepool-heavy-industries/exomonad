@@ -142,6 +142,7 @@ test-suite graph-validation-tests
         CallHandlerSpec
         DispatchGotoSpec
         ConvertTransitionHintSpec
+        ToolTransitionIntegrationSpec
         Test.Tidepool.MockLLM
     build-depends:
         base >= 4.17 && < 5,
