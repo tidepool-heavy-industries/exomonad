@@ -462,7 +462,9 @@ fn run_cc_session(
     let result = read_result_from_fifo(&fifo_path, timeout)?;
 
     // Cleanup FIFO
-    std::fs::remove_file(&fifo_path).ok();
+    if let Err(err) = std::fs::remove_file(&fifo_path) {
+        eprintln!("warning: failed to remove FIFO {}: {err}", fifo_path.display());
+    }
 
     // Print final JSON to stdout (for Haskell caller)
     println!("{}", serde_json::to_string_pretty(&result)?);
@@ -556,7 +558,8 @@ fn wrap_claude(result_fifo: &Path, cwd: Option<&PathBuf>, session_tag: Option<&s
                 events.push(event);
             }
             Err(e) => {
-                eprintln!("[parse error] {} (line: {}...)", e, &line[..line.len().min(50)]);
+                let truncated: String = line.chars().take(50).collect();
+                eprintln!("[parse error] {} (line: {}...)", e, truncated);
             }
         }
     }
@@ -571,7 +574,9 @@ fn wrap_claude(result_fifo: &Path, cwd: Option<&PathBuf>, session_tag: Option<&s
 
     // Cleanup signal FIFO and thread (thread will exit when we drop the sender)
     drop(signal_thread); // Let thread terminate naturally
-    std::fs::remove_file(&signal_fifo_path).ok();
+    if let Err(err) = std::fs::remove_file(&signal_fifo_path) {
+        eprintln!("warning: failed to remove signal FIFO {}: {err}", signal_fifo_path.display());
+    }
 
     // Build final result
     let result = build_run_result(events, result_event, status, session_tag, interrupts)?;
@@ -613,8 +618,9 @@ fn print_event_humanized(event: &StreamEvent) {
                         if let Some(obj) = input.as_object() {
                             for (k, v) in obj.iter().take(3) {
                                 let v_str = v.to_string();
+                                let char_count = v_str.chars().count();
                                 let preview: String = v_str.chars().take(60).collect();
-                                if v_str.len() > 60 {
+                                if char_count > 60 {
                                     println!("│ {}: {}...", k, preview);
                                 } else {
                                     println!("│ {}: {}", k, preview);
@@ -628,8 +634,9 @@ fn print_event_humanized(event: &StreamEvent) {
                     }
                     ContentBlock::ToolResult { content, is_error, .. } => {
                         let status = if is_error.unwrap_or(false) { "✗" } else { "✓" };
+                        let char_count = content.chars().count();
                         let preview: String = content.chars().take(100).collect();
-                        if content.len() > 100 {
+                        if char_count > 100 {
                             println!("  {} {}...", status, preview);
                         } else {
                             println!("  {} {}", status, preview);
@@ -716,12 +723,19 @@ fn read_result_from_fifo(fifo_path: &Path, timeout: Duration) -> Result<RunResul
         .context("Failed to open FIFO for reading")?;
 
     // Use poll with timeout
+    // Note: PollTimeout::from takes u16, so we clamp to avoid overflow.
+    // For very long timeouts (>65s), we use NONE (infinite) since the
+    // outer process will handle overall timeout.
     let mut poll_fds = [PollFd::new(file.as_fd(), PollFlags::POLLIN)];
-    let timeout_ms = timeout.as_millis() as i32;
-    let poll_timeout = if timeout_ms > 0 {
-        PollTimeout::from(timeout_ms as u16)
-    } else {
+    let timeout_ms = timeout.as_millis();
+    let poll_timeout = if timeout_ms == 0 {
         PollTimeout::NONE
+    } else if timeout_ms > u16::MAX as u128 {
+        // For very long timeouts, just wait indefinitely at the poll level
+        // (the overall timeout is handled at the process level)
+        PollTimeout::NONE
+    } else {
+        PollTimeout::from(timeout_ms as u16)
     };
 
     match poll(&mut poll_fds, poll_timeout)? {
@@ -863,10 +877,14 @@ mod tests {
         };
 
         let json = serde_json::to_string(&result).unwrap();
-        assert!(json.contains("\"session_id\":\"sess-123\""));
-        assert!(json.contains("\"session_tag\":\"test-worktree\""));
-        assert!(json.contains("\"num_turns\":5"));
-        // Empty interrupts should be omitted
+
+        // Test round-trip deserialization
+        let decoded: RunResult = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.session_id, "sess-123");
+        assert_eq!(decoded.session_tag, Some("test-worktree".to_string()));
+        assert_eq!(decoded.num_turns, 5);
+
+        // Empty interrupts should be omitted from JSON
         assert!(!json.contains("interrupts"));
     }
 
@@ -888,8 +906,13 @@ mod tests {
         };
 
         let json = serde_json::to_string(&result).unwrap();
-        assert!(json.contains("\"session_id\":\"sess-123\""));
-        // session_tag should be omitted when None
+
+        // Test round-trip deserialization
+        let decoded: RunResult = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.session_id, "sess-123");
+        assert_eq!(decoded.session_tag, None);
+
+        // session_tag should be omitted from JSON when None
         assert!(!json.contains("session_tag"));
     }
 

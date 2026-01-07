@@ -46,7 +46,7 @@ instance ToGVal (Run SourcePos (Writer Text) Text) ExploreContext where
 --
 -- Field names correspond to template variables:
 --   {{ summary }} - what was found
---   {{ file_count }} - number of files
+--   {{ fileCount }} - number of files
 --   {{ files }} - list of file paths
 --   {{ recommendation }} - suggested action
 --   {{ action }} - what to do

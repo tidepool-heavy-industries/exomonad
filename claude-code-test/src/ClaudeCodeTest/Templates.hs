@@ -44,7 +44,7 @@ instance TemplateDef ExploreTpl where
   templateCompiled = exploreCompiled
 
   -- Handler uses explicit context builder in ClaudeCodeLLMHandler, so buildContext is not used.
-  buildContext = undefined
+  buildContext = error "ExploreTpl.buildContext should not be called for ClaudeCode handlers"
 
 
 -- ============================================================================
@@ -67,4 +67,4 @@ instance TemplateDef ActionTpl where
   templateCompiled = actionCompiled
 
   -- Handler uses explicit context builder in ClaudeCodeLLMHandler, so buildContext is not used.
-  buildContext = undefined
+  buildContext = error "ActionTpl.buildContext should not be called for ClaudeCode handlers"
