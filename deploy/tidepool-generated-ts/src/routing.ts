@@ -7,18 +7,15 @@ export type EffectSemantics = 'fire_and_forget' | 'blocking';
 
 export function getEffectCategory(effect: SerializableEffect): EffectCategory {
   switch (effect.type) {
-    case "LogInfo": return "internal";
-    case "LogError": return "internal";
-    case "LlmComplete": return "internal";
-    case "LlmCall": return "internal";
-    case "Habitica": return "internal";
-    case "TelegramSend": return "yielded";
-    case "TelegramAsk": return "yielded";
-    case "GetState": return "internal";
-    case "SetState": return "internal";
-    case "EmitEvent": return "yielded";
-    case "RandomInt": return "internal";
-    case "GetTime": return "internal";
+    case "Log": return "internal";
+    case "LLM": return "internal";
+    case "State": return "internal";
+    case "Random": return "internal";
+    case "Time": return "internal";
+    case "ChatHistory": return "internal";
+    case "Emit": return "yielded";
+    case "RequestInput": return "yielded";
+    case "QuestionUI": return "yielded";
     default:
       // Exhaustiveness check: unknown effects default to internal
       return 'internal';
@@ -27,18 +24,15 @@ export function getEffectCategory(effect: SerializableEffect): EffectCategory {
 
 export function getEffectSemantics(effect: SerializableEffect): EffectSemantics {
   switch (effect.type) {
-    case "LogInfo": return "fire_and_forget";
-    case "LogError": return "fire_and_forget";
-    case "LlmComplete": return "blocking";
-    case "LlmCall": return "blocking";
-    case "Habitica": return "blocking";
-    case "TelegramSend": return "fire_and_forget";
-    case "TelegramAsk": return "blocking";
-    case "GetState": return "blocking";
-    case "SetState": return "fire_and_forget";
-    case "EmitEvent": return "fire_and_forget";
-    case "RandomInt": return "blocking";
-    case "GetTime": return "blocking";
+    case "Log": return "fire_and_forget";
+    case "LLM": return "blocking";
+    case "State": return "blocking";
+    case "Random": return "blocking";
+    case "Time": return "blocking";
+    case "ChatHistory": return "blocking";
+    case "Emit": return "fire_and_forget";
+    case "RequestInput": return "blocking";
+    case "QuestionUI": return "blocking";
     default:
       // Exhaustiveness check: unknown effects default to blocking
       return 'blocking';

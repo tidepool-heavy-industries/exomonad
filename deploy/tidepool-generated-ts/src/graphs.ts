@@ -19,7 +19,7 @@ export const graphRegistry: Record<GraphId, GraphInfo> = {
     id: "example",
     name: "example",
     nodes: ["entry", "classify", "handleGreeting", "handleQuestion", "handleStatement", "exit"],
-    edges: [{ from: "Entry", to: "classify" }, { from: "Entry", to: "handleGreeting" }, { from: "Entry", to: "handleQuestion" }, { from: "Entry", to: "handleStatement" }, { from: "classify", to: "handleGreeting" }, { from: "classify", to: "handleQuestion" }, { from: "classify", to: "handleStatement" }, { from: "handleGreeting", to: "Exit" }, { from: "handleQuestion", to: "Exit" }, { from: "handleStatement", to: "Exit" }]
+    edges: [{ from: "Entry", to: "classify" }, { from: "classify", to: "handleGreeting" }, { from: "classify", to: "handleQuestion" }, { from: "classify", to: "handleStatement" }, { from: "handleGreeting", to: "Exit" }, { from: "handleQuestion", to: "Exit" }, { from: "handleStatement", to: "Exit" }]
   }
 ,
   "test": {

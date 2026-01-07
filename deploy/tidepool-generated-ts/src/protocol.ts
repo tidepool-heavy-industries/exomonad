@@ -2,7 +2,7 @@
  * Protocol types for WASM ↔ TypeScript communication.
  *
  * Design principle: TypeScript is a graph-aware effect executor.
- * - Haskell owns: graph structure, DAG ordering, Needs resolution, Goto/exitWith
+ * - Haskell owns: graph structure, DAG ordering, Input resolution, Goto/exitWith
  * - TypeScript owns: domain-specific effects (LLM, Habitica), persistence, logging, observability
  * - No general-purpose primitives (HTTP fetch) - only domain-specific effects
  *
@@ -39,7 +39,7 @@ export interface TypeInfo {
 
 /**
  * Detailed graph metadata - matches Haskell GraphInfo with full type information.
- * Edges are derived from Needs/Schema relationships (implicit data flow)
+ * Edges are derived from Input/Schema relationships (implicit data flow)
  * and GotoTargets (explicit control flow).
  *
  * Note: The simple GraphInfo type used by the loader is in graphs.ts.
@@ -54,7 +54,7 @@ export interface DetailedGraphInfo {
   exitType: TypeInfo;
   /** All nodes in the graph (excludes Entry/Exit) */
   nodes: NodeInfo[];
-  /** Edges for visualization (from Needs/Schema and Goto) */
+  /** Edges for visualization (from Input/Schema and Goto) */
   edges: EdgeInfo[];
 }
 
@@ -92,7 +92,7 @@ export interface EdgeInfo {
 /**
  * Goto target - control flow destination.
  * In Servant-style: Goto is control-flow only, no payload.
- * Target node pulls data from accumulated context via Needs.
+ * Target node pulls data from accumulated context via Input.
  */
 export interface GotoTarget {
   /** Target node name, or "Exit" */
@@ -197,12 +197,6 @@ export interface WireMessage {
  */
 export type WireContentBlock =
   | { type: "text"; text: string }
-  | {
-      type: "image";
-      source:
-        | { type: "base64"; media_type: string; data: string }
-        | { type: "url"; url: string };
-    }
   | { type: "tool_use"; id: string; name: string; input: unknown }
   | { type: "tool_result"; tool_use_id: string; content: string; is_error: boolean };
 
@@ -378,21 +372,6 @@ export type TelegramIncomingMessage =
   | { type: 'photo'; media: string; caption?: string }
   | { type: 'document'; media: string; filename: string }
   | { type: 'button_click'; data: unknown };
-
-/**
- * Input format for graph initialization.
- * Supports text-only or photo with optional caption.
- */
-export type GraphInput =
-  | { type: "text"; text: string }
-  | {
-      type: "photo";
-      caption?: string;
-      image: {
-        mediaType: string;  // e.g., "image/jpeg"
-        data: string;       // base64-encoded
-      }
-    };
 
 /**
  * Send a message (fire and forget).

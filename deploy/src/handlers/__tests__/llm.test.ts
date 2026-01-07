@@ -543,4 +543,128 @@ describe("handleLlmCall", () => {
       expect(env.AI.run).toHaveBeenNthCalledWith(2, customModel, expect.any(Object));
     });
   });
+
+  describe("tool transition handling", () => {
+    /**
+     * Note: Tool transitions (ToolTransition ToolResultOutcome) are handled in WASM.
+     * This test verifies that the LlmCall handler correctly returns "needs_tools"
+     * when the LLM decides to invoke a tool, allowing the graph executor to handle
+     * tool results and potential transitions.
+     */
+
+    it("returns needs_tools when LLM wants to use a tool", async () => {
+      const effect: LlmCallEffect = {
+        ...baseEffect,
+        eff_tools: [
+          {
+            type: "function",
+            function: {
+              name: "transition_tool",
+              description: "Tool that can trigger graph transitions",
+              parameters: {
+                type: "object",
+                properties: { target: { type: "string" } },
+                required: ["target"],
+              },
+            },
+          },
+        ],
+      };
+
+      const env: LlmEnv = {
+        AI: {
+          run: vi.fn().mockResolvedValue({
+            response: "",
+            tool_calls: [
+              {
+                name: "transition_tool",
+                arguments: { target: "success" },
+              },
+            ],
+          }),
+        } as unknown as Ai,
+      };
+
+      const result = await handleLlmCall(effect, env);
+
+      expect(result.type).toBe("success");
+      if (result.type === "success" && result.value) {
+        const llmResult = result.value as {
+          type: "needs_tools" | "done";
+          tool_calls?: Array<{ name: string }>;
+        };
+        expect(llmResult.type).toBe("needs_tools");
+        expect(llmResult.tool_calls).toBeDefined();
+        if (llmResult.tool_calls) {
+          expect(llmResult.tool_calls[0].name).toBe("transition_tool");
+        }
+      }
+    });
+
+    it("completes LLM turn when tool succeeds without further tools", async () => {
+      // When tool execution succeeds and returns ToolSuccess,
+      // the graph executor processes the result and may route to next node.
+      // LlmCall just returns the tool call to executor.
+      const effect: LlmCallEffect = {
+        ...baseEffect,
+        eff_tools: [
+          {
+            type: "function",
+            function: {
+              name: "simple_tool",
+              description: "A simple tool",
+              parameters: {
+                type: "object",
+                properties: { query: { type: "string" } },
+                required: ["query"],
+              },
+            },
+          },
+        ],
+      };
+
+      const env = createMockLlmCallEnv({
+        response: "",
+        tool_calls: [{ name: "simple_tool", arguments: { query: "test" } }],
+      });
+
+      const result = await handleLlmCall(effect, env);
+
+      expect(result.type).toBe("success");
+      if (result.type === "success" && result.value) {
+        const llmResult = result.value as { type: "needs_tools" | "done" };
+        // Should indicate tool use - executor handles tool results and transitions
+        expect(llmResult.type).toBe("needs_tools");
+      }
+    });
+
+    it("ends LLM turn when model doesn't call tools", async () => {
+      const effect: LlmCallEffect = {
+        ...baseEffect,
+        eff_tools: [
+          {
+            type: "function",
+            function: {
+              name: "some_tool",
+              description: "Available tool",
+              parameters: { type: "object", properties: {}, required: [] },
+            },
+          },
+        ],
+      };
+
+      // Model decides not to use tool
+      const env = createMockLlmCallEnv({
+        response: "No tools needed, here is the answer.",
+      });
+
+      const result = await handleLlmCall(effect, env);
+
+      expect(result.type).toBe("success");
+      if (result.type === "success" && result.value) {
+        const llmResult = result.value as { type: "needs_tools" | "done" };
+        expect(llmResult.type).toBe("done");
+      }
+    });
+  });
 });

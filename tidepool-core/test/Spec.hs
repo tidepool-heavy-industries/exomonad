@@ -14,6 +14,8 @@ import qualified InjectTargetSpec
 import qualified GotoChoiceSpec
 import qualified CallHandlerSpec
 import qualified DispatchGotoSpec
+import qualified ConvertTransitionHintSpec
+import qualified ToolTransitionIntegrationSpec
 
 main :: IO ()
 main = hspec $ do
@@ -48,3 +50,9 @@ main = hspec $ do
 
   describe "DispatchGoto" $ do
     DispatchGotoSpec.spec
+
+  describe "ConvertTransitionHint" $ do
+    ConvertTransitionHintSpec.spec
+
+  describe "Tool Transition Integration" $ do
+    ToolTransitionIntegrationSpec.spec

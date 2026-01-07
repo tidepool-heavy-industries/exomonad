@@ -4,7 +4,7 @@ import type { SerializableEffect, EffectResult } from './protocol.js';
 import { errorResult } from './protocol.js';
 
 // Internal effect types (handled by StateMachineDO, not yielded to caller)
-export type InternalEffectType = "LogInfo" | "LogError" | "LlmComplete" | "LlmCall" | "Habitica" | "GetState" | "SetState" | "RandomInt" | "GetTime";
+export type InternalEffectType = "Log" | "LLM" | "State" | "Random" | "Time" | "ChatHistory";
 
 /**
  * Handler interface for internal effects.
@@ -13,15 +13,12 @@ export type InternalEffectType = "LogInfo" | "LogError" | "LlmComplete" | "LlmCa
  * Each handler receives the specific effect type and environment.
  */
 export interface InternalEffectHandlers<TEnv> {
-  LogInfo: (effect: Extract<SerializableEffect, { type: "LogInfo" }>, env: TEnv) => Promise<EffectResult>;
-  LogError: (effect: Extract<SerializableEffect, { type: "LogError" }>, env: TEnv) => Promise<EffectResult>;
-  LlmComplete: (effect: Extract<SerializableEffect, { type: "LlmComplete" }>, env: TEnv) => Promise<EffectResult>;
-  LlmCall: (effect: Extract<SerializableEffect, { type: "LlmCall" }>, env: TEnv) => Promise<EffectResult>;
-  Habitica: (effect: Extract<SerializableEffect, { type: "Habitica" }>, env: TEnv) => Promise<EffectResult>;
-  GetState: (effect: Extract<SerializableEffect, { type: "GetState" }>, env: TEnv) => Promise<EffectResult>;
-  SetState: (effect: Extract<SerializableEffect, { type: "SetState" }>, env: TEnv) => Promise<EffectResult>;
-  RandomInt: (effect: Extract<SerializableEffect, { type: "RandomInt" }>, env: TEnv) => Promise<EffectResult>;
-  GetTime: (effect: Extract<SerializableEffect, { type: "GetTime" }>, env: TEnv) => Promise<EffectResult>;
+  Log: (effect: Extract<SerializableEffect, { type: "Log" }>, env: TEnv) => Promise<EffectResult>;
+  LLM: (effect: Extract<SerializableEffect, { type: "LLM" }>, env: TEnv) => Promise<EffectResult>;
+  State: (effect: Extract<SerializableEffect, { type: "State" }>, env: TEnv) => Promise<EffectResult>;
+  Random: (effect: Extract<SerializableEffect, { type: "Random" }>, env: TEnv) => Promise<EffectResult>;
+  Time: (effect: Extract<SerializableEffect, { type: "Time" }>, env: TEnv) => Promise<EffectResult>;
+  ChatHistory: (effect: Extract<SerializableEffect, { type: "ChatHistory" }>, env: TEnv) => Promise<EffectResult>;
 }
 
 /**
@@ -38,57 +35,39 @@ export function dispatchInternalEffect<TEnv>(
   env: TEnv
 ): Promise<EffectResult> {
   switch (effect.type) {
-    case "LogInfo":
-      return handlers.LogInfo(
-        effect as Extract<SerializableEffect, { type: "LogInfo" }>,
+    case "Log":
+      return handlers.Log(
+        effect as Extract<SerializableEffect, { type: "Log" }>,
         env
       );
 
-    case "LogError":
-      return handlers.LogError(
-        effect as Extract<SerializableEffect, { type: "LogError" }>,
+    case "LLM":
+      return handlers.LLM(
+        effect as Extract<SerializableEffect, { type: "LLM" }>,
         env
       );
 
-    case "LlmComplete":
-      return handlers.LlmComplete(
-        effect as Extract<SerializableEffect, { type: "LlmComplete" }>,
+    case "State":
+      return handlers.State(
+        effect as Extract<SerializableEffect, { type: "State" }>,
         env
       );
 
-    case "LlmCall":
-      return handlers.LlmCall(
-        effect as Extract<SerializableEffect, { type: "LlmCall" }>,
+    case "Random":
+      return handlers.Random(
+        effect as Extract<SerializableEffect, { type: "Random" }>,
         env
       );
 
-    case "Habitica":
-      return handlers.Habitica(
-        effect as Extract<SerializableEffect, { type: "Habitica" }>,
+    case "Time":
+      return handlers.Time(
+        effect as Extract<SerializableEffect, { type: "Time" }>,
         env
       );
 
-    case "GetState":
-      return handlers.GetState(
-        effect as Extract<SerializableEffect, { type: "GetState" }>,
-        env
-      );
-
-    case "SetState":
-      return handlers.SetState(
-        effect as Extract<SerializableEffect, { type: "SetState" }>,
-        env
-      );
-
-    case "RandomInt":
-      return handlers.RandomInt(
-        effect as Extract<SerializableEffect, { type: "RandomInt" }>,
-        env
-      );
-
-    case "GetTime":
-      return handlers.GetTime(
-        effect as Extract<SerializableEffect, { type: "GetTime" }>,
+    case "ChatHistory":
+      return handlers.ChatHistory(
+        effect as Extract<SerializableEffect, { type: "ChatHistory" }>,
         env
       );
 
