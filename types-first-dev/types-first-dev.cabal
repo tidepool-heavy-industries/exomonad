@@ -1,0 +1,93 @@
+cabal-version:      3.0
+name:               types-first-dev
+version:            0.1.0.0
+synopsis:           Types-first Haskell development workflow graph
+description:
+    Multi-stage graph implementing a types-first development workflow:
+    .
+    1. Types agent writes type signatures
+    2. Fork to parallel agents in separate worktrees
+    3. Tests agent writes QuickCheck properties
+    4. Impl agent writes implementation
+    5. Merge and run test loop
+    .
+    This validates the full graph execution pipeline with parallel agents,
+    git worktrees, and deterministic test loops.
+license:            MIT
+author:             Inanna
+build-type:         Simple
+
+library
+    exposed-modules:
+        TypesFirstDev.Types
+        TypesFirstDev.Context
+        TypesFirstDev.Templates
+        TypesFirstDev.Graph
+        TypesFirstDev.Handlers
+    build-depends:
+        base >= 4.17 && < 5,
+        freer-simple >= 1.2 && < 2,
+        text >= 2.0 && < 3,
+        aeson >= 2.1 && < 3,
+        containers >= 0.6 && < 1,
+        filepath >= 1.4 && < 2,
+        mtl >= 2.2 && < 3,
+        ginger >= 0.10 && < 1,
+        parsec >= 3.1 && < 4,
+        tidepool-core,
+        tidepool-claude-code-executor
+    hs-source-dirs:   src
+    default-language: GHC2021
+    default-extensions:
+        DataKinds
+        DeriveAnyClass
+        DeriveGeneric
+        DerivingStrategies
+        GADTs
+        LambdaCase
+        OverloadedStrings
+        OverloadedRecordDot
+        RecordWildCards
+        TemplateHaskell
+        TypeFamilies
+        TypeOperators
+    ghc-options:
+        -Wall
+        -Wno-name-shadowing
+
+executable types-first-dev
+    main-is:          Main.hs
+    hs-source-dirs:   app
+    default-language: GHC2021
+    default-extensions:
+        DataKinds
+        OverloadedStrings
+        OverloadedRecordDot
+    build-depends:
+        base >= 4.17 && < 5,
+        freer-simple >= 1.2 && < 2,
+        text >= 2.0 && < 3,
+        types-first-dev,
+        tidepool-core,
+        tidepool-claude-code-executor
+    ghc-options:
+        -threaded
+        -rtsopts
+        -with-rtsopts=-N
+
+test-suite types-first-dev-test
+    type:             exitcode-stdio-1.0
+    main-is:          Main.hs
+    hs-source-dirs:   test
+    default-language: GHC2021
+    default-extensions:
+        OverloadedStrings
+        OverloadedRecordDot
+    build-depends:
+        base >= 4.17 && < 5,
+        types-first-dev,
+        tidepool-core,
+        aeson >= 2.1 && < 3,
+        text >= 2.0 && < 3,
+        hspec >= 2.10 && < 3
+    ghc-options:      -threaded -rtsopts -with-rtsopts=-N

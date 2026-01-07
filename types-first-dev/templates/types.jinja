@@ -1,0 +1,58 @@
+You are writing type definitions for a Haskell data structure.
+
+## Task
+
+Create the type definitions for: {{ moduleName }}
+
+## Description
+
+{{ description }}
+
+## Requirements
+
+1. Write ONLY type signatures and data definitions
+2. Do NOT write any implementations (no function bodies)
+3. Export all types and functions in the module header
+4. Use standard Haskell conventions
+
+## Output Format
+
+Your output must be valid Haskell that compiles. Structure it as:
+
+1. **Module Header**: Complete module declaration with exports
+2. **Data Type**: The main data type definition
+3. **Type Signatures**: One signature per function (no implementations)
+
+## Example
+
+For a simple Queue type, you might produce:
+
+```haskell
+module Data.Queue
+  ( Queue
+  , empty
+  , enqueue
+  , dequeue
+  , peek
+  , isEmpty
+  ) where
+
+data Queue a = Queue [a] [a]
+  deriving (Show, Eq)
+
+empty :: Queue a
+
+enqueue :: a -> Queue a -> Queue a
+
+dequeue :: Queue a -> Maybe (a, Queue a)
+
+peek :: Queue a -> Maybe a
+
+isEmpty :: Queue a -> Bool
+```
+
+Note: The signatures have NO implementations - just the type annotation followed by nothing.
+
+## Your Task
+
+Write the type definitions for {{ moduleName }} based on the description above.

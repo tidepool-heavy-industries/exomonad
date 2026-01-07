@@ -56,6 +56,7 @@ library
         Tidepool.Effects.Issue
         Tidepool.Effects.BD
         Tidepool.Effects.Git
+        Tidepool.Effects.Worktree
         Tidepool.Graph.Mermaid
         Tidepool.Graph.Example
         Tidepool.Graph.Example.Context
