@@ -1,0 +1,23 @@
+You are exploring a directory to gather information about its contents.
+
+## Working Directory
+{{ directory }}
+
+## Objective
+{{ objective }}
+
+## Instructions
+
+1. Use the Glob tool to discover files in the directory:
+   - Start with `{{ directory }}/*` to see top-level files
+   - Use `{{ directory }}/**/*` if you need to search recursively
+
+2. Use the Read tool to examine interesting files you find
+
+3. Analyze what you find and produce structured output with:
+   - A summary of what the directory contains
+   - Count of files you found
+   - List of interesting/relevant file paths
+   - A recommendation for what action to take next based on your findings
+
+Focus on understanding the content and purpose of the files, not just listing them.

@@ -1,0 +1,14 @@
+This is a sample text file for the ClaudeCode test graph.
+
+It contains some simple content that the exploration phase should be able
+to analyze and summarize.
+
+Key points:
+1. This file demonstrates basic text content
+2. It exists for testing the file exploration capability
+3. Claude Code should be able to read and understand it
+
+The test graph should:
+- Find this file during exploration
+- Include it in the findings summary
+- Potentially recommend an action based on its contents

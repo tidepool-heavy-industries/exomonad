@@ -52,9 +52,9 @@ runClaudeCodeExecIO
   -> Eff (ClaudeCodeExec ': effs) a
   -> Eff effs a
 runClaudeCodeExecIO cfg = interpret $ \case
-  ClaudeCodeExecOp model cwd prompt schema tools resumeSession -> sendM $ do
-    -- Pass resumeSession, forkSession=False (we always mutate the session)
-    result <- runClaudeCodeRequest cfg model cwd prompt schema tools resumeSession False
+  ClaudeCodeExecOp model cwd prompt schema tools resumeSession forkSession -> sendM $ do
+    -- Pass fork parameter through (True for parallel agents sharing parent history)
+    result <- runClaudeCodeRequest cfg model cwd prompt schema tools resumeSession forkSession
     case result of
       Left err ->
         error $ "ClaudeCode execution failed: " <> formatError err
@@ -65,7 +65,7 @@ runClaudeCodeExecIO cfg = interpret $ \case
               maybe "(no message)" T.unpack ccr.ccrResult
 
         | Just val <- ccr.ccrStructuredOutput ->
-            pure (val, ccr.ccrSessionId)
+            pure (val, Just ccr.ccrSessionId)
 
         | otherwise ->
             error "ClaudeCode returned no structured output (schema validation may have failed)"

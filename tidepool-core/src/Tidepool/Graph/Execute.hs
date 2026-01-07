@@ -61,7 +61,7 @@ import Tidepool.Graph.Errors
 import Text.Ginger.TH (TypedTemplate, runTypedTemplate)
 import Text.Parsec.Pos (SourcePos)
 
-import Tidepool.Effect (LLM, llmCall)
+import Tidepool.Effect (LLM)
 import Tidepool.Effect.ClaudeCode (ClaudeCodeExec, execClaudeCode)
 import Tidepool.Effect.Types (TurnOutcome(..), TurnParseResult(..), TurnResult(..), runTurn)
 import Tidepool.Graph.Edges (GetInput)
@@ -71,7 +71,7 @@ import qualified Tidepool.Graph.Generic.Core as G (Exit)
 import Tidepool.Graph.Goto (GotoChoice, To, LLMHandler(..), ClaudeCodeLLMHandler(..))
 import Tidepool.Graph.Goto.Internal (GotoChoice(..), OneOf(..))
 import Tidepool.Graph.Template (GingerContext)
-import Tidepool.Graph.Types (Exit, Self, ModelChoice(..), SingModelChoice(..), KnownMaybeCwd(..))
+import Tidepool.Graph.Types (Exit, Self, SingModelChoice(..), KnownMaybeCwd(..))
 import Tidepool.Schema (HasJSONSchema(..), schemaToValue)
 
 -- | Effect type alias (freer-simple effects have kind Type -> Type).
@@ -307,8 +307,8 @@ executeClaudeCodeHandler mSystemTpl userTpl beforeFn afterFn input = do
                    then userPrompt
                    else systemPrompt <> "\n\n" <> userPrompt
       schemaVal = Just $ schemaToValue (jsonSchema @schema)
-  -- Call ClaudeCodeExec effect
-  (outputVal, _sessionId) <- execClaudeCode model cwd fullPrompt schemaVal Nothing Nothing
+  -- Call ClaudeCodeExec effect (forkSession=False for normal execution)
+  (outputVal, _sessionId) <- execClaudeCode model cwd fullPrompt schemaVal Nothing Nothing False
   -- Parse the structured output
   case Aeson.fromJSON outputVal of
     Aeson.Error msg -> error $ "ClaudeCode output parse error: " <> msg

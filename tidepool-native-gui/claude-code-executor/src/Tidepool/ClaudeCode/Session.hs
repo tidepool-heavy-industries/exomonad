@@ -77,13 +77,14 @@ runClaudeCodeWithSession
   -> Eff (ClaudeCodeExec ': effs) a
   -> Eff effs a
 runClaudeCodeWithSession cfg sessionStore nodeName = interpret $ \case
-  ClaudeCodeExecOp model cwd prompt schema tools _callerSession -> sendM $ do
+  ClaudeCodeExecOp model cwd prompt schema tools _callerSession _forkSession -> sendM $ do
     -- Look up existing session for this node (overrides caller-provided session)
+    -- Note: We ignore forkSession here because session tracking always mutates
     existingSession <- atomically $ do
       store <- readTVar sessionStore
       pure $ Map.lookup nodeName store
 
-    -- Run the request with session resumption if available
+    -- Run the request with session resumption if available (forkSession=False for tracking)
     result <- runClaudeCodeRequest cfg model cwd prompt schema tools existingSession False
     case result of
       Left err ->
@@ -96,10 +97,9 @@ runClaudeCodeWithSession cfg sessionStore nodeName = interpret $ \case
 
         | Just val <- ccr.ccrStructuredOutput -> do
             -- Store the session ID for future iterations
-            case ccr.ccrSessionId of
-              Just sid -> atomically $ modifyTVar' sessionStore (Map.insert nodeName sid)
-              Nothing -> pure ()
-            pure (val, ccr.ccrSessionId)
+            -- (always present in stream-json format)
+            atomically $ modifyTVar' sessionStore (Map.insert nodeName ccr.ccrSessionId)
+            pure (val, Just ccr.ccrSessionId)
 
         | otherwise ->
             error "ClaudeCode returned no structured output (schema validation may have failed)"

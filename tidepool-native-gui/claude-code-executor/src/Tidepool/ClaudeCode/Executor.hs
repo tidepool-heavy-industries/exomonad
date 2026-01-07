@@ -16,10 +16,7 @@ import Data.ByteString.Lazy qualified as LBS
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
-import Data.UUID (toText)
-import Data.UUID.V4 (nextRandom)
 import System.Exit (ExitCode(..))
-import System.FilePath ((</>))
 import System.Process (readProcessWithExitCode)
 
 import Tidepool.Graph.Types (ModelChoice(..))
@@ -52,12 +49,8 @@ runClaudeCodeRequest
   -> Bool             -- ^ Fork session (read-only resume, doesn't modify original)
   -> IO (Either ClaudeCodeError ClaudeCodeResult)
 runClaudeCodeRequest cfg model cwd prompt schema tools resumeSession forkSession = do
-  -- Generate unique output file
-  uuid <- nextRandom
-  let outputFile = cfg.ccTempDir </> ("cc-" <> T.unpack (toText uuid) <> ".json")
-
   -- Build arguments
-  let args = buildArgs cfg model cwd prompt schema tools outputFile resumeSession forkSession
+  let args = buildArgs cfg model cwd prompt schema tools resumeSession forkSession
 
   -- Run zellij-cc
   result <- try $ readProcessWithExitCode cfg.ccZellijCcPath args ""
@@ -91,17 +84,15 @@ buildArgs
   -> Text
   -> Maybe Value
   -> Maybe Text
-  -> FilePath
   -> Maybe Text       -- ^ Session ID to resume
   -> Bool             -- ^ Fork session
   -> [String]
-buildArgs cfg model cwd prompt schema tools outputFile resumeSession forkSession =
+buildArgs cfg model cwd prompt schema tools resumeSession forkSession =
   [ "run"
   , "--session", T.unpack cfg.ccZellijSession
   , "--name", "cc-node"  -- Could make this configurable
   , "--model", modelToString model
   , "--prompt", T.unpack prompt
-  , "--output-file", outputFile
   , "--timeout", show cfg.ccDefaultTimeout
   ]
   ++ cwdArgs

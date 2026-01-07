@@ -21,6 +21,9 @@ packages:
     -- Tooling packages (Agent 8)
     tools/sleeptime-logs
 
+    -- Test/example packages
+    claude-code-test
+
     -- Vendored dependencies (avoid source-repository-package git issues in worktrees)
     deps/freer-simple
     deps/ginger
