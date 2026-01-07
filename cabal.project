@@ -16,6 +16,7 @@ packages:
     tidepool-native-gui/github-executor
     tidepool-native-gui/claude-code-executor
     tidepool-native-gui/devlog-executor
+    tidepool-native-gui/worktree-executor
     tidepool-native-gui/server
 
     -- Tooling packages (Agent 8)
@@ -23,6 +24,7 @@ packages:
 
     -- Test/example packages
     claude-code-test
+    types-first-dev
 
     -- Vendored dependencies (avoid source-repository-package git issues in worktrees)
     deps/freer-simple
