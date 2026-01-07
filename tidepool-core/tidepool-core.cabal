@@ -38,7 +38,6 @@ library
     -- Development/tooling modules (excluded from WASM builds)
     if !os(wasi)
       exposed-modules:
-        Tidepool.Delta
         Tidepool.Schema
         Tidepool.Tool.Wire
         Tidepool.Tool.Convert
