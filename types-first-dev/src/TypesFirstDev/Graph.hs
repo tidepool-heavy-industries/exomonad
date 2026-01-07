@@ -3,17 +3,20 @@
 
 -- | Graph definition for the types-first development workflow.
 --
--- Sequential execution graph (no parallel agents):
+-- Parallel execution graph:
 -- @
 -- Entry(StackSpec)
 --     ↓
 -- types (ClaudeCode 'Sonnet) - writes type signatures
 --     ↓
--- Exit(TypeDefinitions)
+-- fork (LogicNode) - creates worktrees, spawns parallel agents
+--     ├── tests-worktree: tests agent → TestDefinitions
+--     └── impl-worktree: impl agent → ImplementationCode
+--     ↓
+-- merge (LogicNode) - collects results, cleans up worktrees
+--     ↓
+-- Exit(ParallelResults)
 -- @
---
--- This validates the basic ClaudeCode execution path.
--- Future iterations will add fork/merge/testLoop for parallel execution.
 module TypesFirstDev.Graph
   ( TypesFirstGraph(..)
   ) where
@@ -34,16 +37,16 @@ import Tidepool.Graph.Generic (GraphMode(..))
 import qualified Tidepool.Graph.Generic as G
 import Tidepool.Graph.Goto (Goto)
 
-import TypesFirstDev.Types (StackSpec, TypeDefinitions)
+import TypesFirstDev.Types (StackSpec, TypeDefinitions, ForkInput, ParallelResults)
 import TypesFirstDev.Templates (TypesTpl)
 
 
--- | Types-first development workflow graph (sequential version).
+-- | Types-first development workflow graph (parallel version).
 --
--- This simplified graph validates:
--- 1. ClaudeCode handler execution
--- 2. Template rendering
--- 3. Structured output parsing
+-- Nodes:
+-- 1. types: Claude Code writes type signatures
+-- 2. fork: Creates worktrees and spawns parallel agents
+-- 3. merge: Collects results and cleans up
 data TypesFirstGraph mode = TypesFirstGraph
   { -- | Entry point - receives Stack specification
     entry :: mode :- G.Entry StackSpec
@@ -51,15 +54,31 @@ data TypesFirstGraph mode = TypesFirstGraph
     -- | Types node - uses Claude Code to write type signatures
     --
     -- Output: TypeDefinitions (data type + signatures)
-    -- Exits directly with the type definitions
+    -- Routes to fork node with session ID for parallel agents
   , types :: mode :- G.LLMNode
       :@ Types.Input StackSpec
       :@ Template TypesTpl
       :@ Schema TypeDefinitions
-      :@ UsesEffects '[Goto Exit TypeDefinitions]
+      :@ UsesEffects '[Goto "fork" ForkInput]
       :@ ClaudeCode 'Sonnet 'Nothing
 
-    -- | Exit point - returns type definitions
-  , exit :: mode :- G.Exit TypeDefinitions
+    -- | Fork node - creates worktrees and spawns parallel agents
+    --
+    -- Input: ForkInput (session ID + type definitions)
+    -- Output: ParallelResults (worktree paths + agent outputs)
+  , fork :: mode :- G.LogicNode
+      :@ Types.Input ForkInput
+      :@ UsesEffects '[Goto "merge" ParallelResults]
+
+    -- | Merge node - collects results and cleans up worktrees
+    --
+    -- Input: ParallelResults from fork
+    -- Output: ParallelResults to exit (unchanged, just cleanup)
+  , merge :: mode :- G.LogicNode
+      :@ Types.Input ParallelResults
+      :@ UsesEffects '[Goto Exit ParallelResults]
+
+    -- | Exit point - returns parallel results
+  , exit :: mode :- G.Exit ParallelResults
   }
   deriving Generic

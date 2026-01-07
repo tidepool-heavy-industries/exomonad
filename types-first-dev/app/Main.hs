@@ -1,23 +1,25 @@
--- | Types-first development workflow runner (sequential version).
+-- | Types-first development workflow runner (parallel version).
 --
--- This runner executes a simplified graph:
---   Entry(StackSpec) → types(ClaudeCode) → Exit(TypeDefinitions)
+-- This runner executes the full graph:
+--   Entry(StackSpec) → types(ClaudeCode) → fork → (tests || impl) → merge → Exit
 --
--- It validates the ClaudeCode execution path end-to-end without
--- parallel agents, worktrees, or fork/merge nodes.
+-- It demonstrates parallel agent execution with git worktrees for isolation.
 module Main where
 
 import Control.Monad.Freer (runM)
+import Control.Monad.Freer.Reader (runReader)
 import Data.Text qualified as T
+import System.Directory (getCurrentDirectory)
 import System.Environment (lookupEnv)
 
 import Tidepool.ClaudeCode.Config (mkClaudeCodeConfig, ClaudeCodeConfig(..))
 import Tidepool.ClaudeCode.Effect (runClaudeCodeExecIO)
 import Tidepool.Graph.Execute (callHandler, dispatchGoto)
+import Tidepool.Worktree.Executor (runWorktreeIO, defaultWorktreeConfig)
 
 import TypesFirstDev.Graph (TypesFirstGraph(..))
 import TypesFirstDev.Handlers (typesFirstHandlers)
-import TypesFirstDev.Types (StackSpec(..), TypeDefinitions(..))
+import TypesFirstDev.Types (StackSpec(..), ParallelResults(..), TestDefinitions(..), ImplementationCode(..))
 
 
 -- | Main entry point.
@@ -25,34 +27,44 @@ import TypesFirstDev.Types (StackSpec(..), TypeDefinitions(..))
 -- Runs the types-first workflow to generate type definitions for a Stack.
 main :: IO ()
 main = do
-  putStrLn "Types-First Development Workflow (Sequential)"
-  putStrLn "============================================="
+  putStrLn "Types-First Development Workflow (Parallel)"
+  putStrLn "============================================"
   putStrLn ""
 
   -- Get zellij session from env or use default
   sessionName <- maybe "types-first-dev" T.pack <$> lookupEnv "ZELLIJ_SESSION"
 
-  let config = (mkClaudeCodeConfig sessionName)
+  let claudeConfig = (mkClaudeCodeConfig sessionName)
         { ccDefaultTimeout = 600 }  -- 10 min timeout
+
+  -- Get project path from env or use current directory
+  projectPath <- maybe getCurrentDirectory pure =<< lookupEnv "PROJECT_PATH"
+  let worktreeConfig = defaultWorktreeConfig projectPath
 
   -- Define what we want to implement
   let spec = StackSpec
-        { ssProjectPath = "."
+        { ssProjectPath = projectPath
         , ssModuleName = "Data.Stack"
         , ssDescription = "A LIFO (last-in-first-out) stack data structure with operations: \
                           \push (add element to top), pop (remove and return top element), \
                           \peek (view top element without removing), isEmpty (check if empty)"
         }
 
-  putStrLn $ "Target: " <> T.unpack spec.ssModuleName
-  putStrLn $ "Description: " <> T.unpack spec.ssDescription
+  putStrLn $ "Project: " <> projectPath
+  putStrLn $ "Module: " <> T.unpack spec.ssModuleName
+  putStrLn $ "Session: " <> T.unpack sessionName
   putStrLn ""
   putStrLn "Starting Claude Code execution..."
   putStrLn ""
 
-  -- Run the graph
+  -- Run the graph with full effect stack
+  -- Note: Interpreter order must match DevEffects = '[Reader ClaudeCodeConfig, Reader StackSpec, ...]
+  -- Innermost interpreter handles last effect in the list.
   result <- runM
-    . runClaudeCodeExecIO config
+    . runWorktreeIO worktreeConfig
+    . runClaudeCodeExecIO claudeConfig
+    . runReader spec          -- Reader StackSpec (second in DevEffects)
+    . runReader claudeConfig  -- Reader ClaudeCodeConfig (first in DevEffects)
     $ do
         choice <- callHandler (types typesFirstHandlers) spec
         dispatchGoto typesFirstHandlers choice
@@ -60,17 +72,20 @@ main = do
   printResult result
 
 
--- | Print the type definitions result.
-printResult :: TypeDefinitions -> IO ()
-printResult td = do
+-- | Print the parallel results.
+printResult :: ParallelResults -> IO ()
+printResult pr = do
   putStrLn ""
-  putStrLn "=== Type Definitions ==="
+  putStrLn "=== Parallel Results ==="
   putStrLn ""
-  putStrLn "Data type:"
-  putStrLn $ T.unpack td.tdDataType
+  putStrLn "Tests worktree:"
+  putStrLn $ "  " <> pr.prTestsWorktree
   putStrLn ""
-  putStrLn "Signatures:"
-  mapM_ (\s -> putStrLn $ "  " <> T.unpack s) td.tdSignatures
+  putStrLn "Impl worktree:"
+  putStrLn $ "  " <> pr.prImplWorktree
   putStrLn ""
-  putStrLn "Module header:"
-  putStrLn $ T.unpack td.tdModuleHeader
+  putStrLn "=== Test Module ==="
+  putStrLn $ T.unpack pr.prTestDefs.testModuleCode
+  putStrLn ""
+  putStrLn "=== Implementation Module ==="
+  putStrLn $ T.unpack pr.prImplCode.implModuleCode

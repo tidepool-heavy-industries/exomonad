@@ -67,6 +67,7 @@ module Tidepool.Graph.Goto
     -- * LLM Handler Variants
   , LLMHandler(..)
   , ClaudeCodeLLMHandler(..)
+  , ClaudeCodeResult(..)
 
     -- * Target Validation
   , GotoElem
@@ -407,6 +408,20 @@ data LLMHandler needs schema targets effs tpl where
     -> LLMHandler needs schema targets effs tpl
 
 
+-- | Result from ClaudeCode execution with metadata.
+--
+-- Wraps the parsed structured output along with session metadata.
+-- Use 'ccrParsedOutput' to get the schema output, 'ccrSessionId' for
+-- session forking in parallel execution.
+data ClaudeCodeResult schema = ClaudeCodeResult
+  { ccrParsedOutput :: schema
+    -- ^ The parsed structured output from Claude Code.
+  , ccrSessionId :: Maybe Text
+    -- ^ Session ID from Claude Code (for forking parallel sessions).
+  }
+  deriving stock (Show, Eq, Functor)
+
+
 -- | Handler for ClaudeCode-annotated LLM nodes.
 --
 -- Like 'LLMHandler', but executed via Claude Code subprocess instead of API.
@@ -427,7 +442,7 @@ data LLMHandler needs schema targets effs tpl where
 --   Nothing                              -- no system template
 --   (templateCompiled @WorkTpl)          -- user template
 --   (\\task -> pure WorkContext { ... })  -- context builder
---   (\\result -> pure $ gotoExit result)  -- router
+--   (\\ccResult -> pure $ gotoExit ccResult.ccrParsedOutput)  -- router receives ClaudeCodeResult
 -- @
 --
 -- Note: The @model@ and @cwd@ type parameters MUST match the ClaudeCode
@@ -438,10 +453,10 @@ data ClaudeCodeLLMHandler model cwd needs schema targets effs tpl where
   ClaudeCodeLLMHandler
     :: forall model cwd tpl needs schema targets effs.
        (SingModelChoice model, KnownMaybeCwd cwd)
-    => Maybe (TypedTemplate tpl SourcePos)         -- ^ Optional system prompt template
-    -> TypedTemplate tpl SourcePos                 -- ^ User prompt template (required)
-    -> (needs -> Eff effs tpl)                     -- ^ Builds context for both templates
-    -> (schema -> Eff effs (GotoChoice targets))   -- ^ Routes based on LLM output
+    => Maybe (TypedTemplate tpl SourcePos)                    -- ^ Optional system prompt template
+    -> TypedTemplate tpl SourcePos                            -- ^ User prompt template (required)
+    -> (needs -> Eff effs tpl)                                -- ^ Builds context for both templates
+    -> (ClaudeCodeResult schema -> Eff effs (GotoChoice targets))  -- ^ Routes based on LLM output + session metadata
     -> ClaudeCodeLLMHandler model cwd needs schema targets effs tpl
 
 

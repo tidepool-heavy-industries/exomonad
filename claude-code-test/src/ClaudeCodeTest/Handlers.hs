@@ -15,7 +15,7 @@ import Control.Monad.Freer (Eff)
 
 import Tidepool.Effect.ClaudeCode (ClaudeCodeExec)
 import Tidepool.Graph.Generic (AsHandler)
-import Tidepool.Graph.Goto (GotoChoice, To, ClaudeCodeLLMHandler(..), gotoChoice, gotoExit)
+import Tidepool.Graph.Goto (GotoChoice, To, ClaudeCodeLLMHandler(..), ClaudeCodeResult(..), gotoChoice, gotoExit)
 import Tidepool.Graph.Template (templateCompiled)
 import Tidepool.Graph.Types (ModelChoice(..), Exit)
 
@@ -74,9 +74,9 @@ buildExploreContext input = pure ExploreContext
 --
 -- Always continues to the route node with findings.
 routeAfterExplore
-  :: Findings
+  :: ClaudeCodeResult Findings
   -> Eff '[ClaudeCodeExec, IO] (GotoChoice '[To "route" Findings])
-routeAfterExplore findings = pure $ gotoChoice @"route" findings
+routeAfterExplore result = pure $ gotoChoice @"route" result.ccrParsedOutput
 
 
 -- ============================================================================
@@ -122,8 +122,8 @@ buildActionContext input = pure ActionContext
 --
 -- Always exits with the action result.
 routeAfterAction
-  :: ActionResult
+  :: ClaudeCodeResult ActionResult
   -> Eff '[ClaudeCodeExec, IO] (GotoChoice '[To Exit ActionResult])
-routeAfterAction result = pure $ gotoExit result
+routeAfterAction result = pure $ gotoExit result.ccrParsedOutput
 
 

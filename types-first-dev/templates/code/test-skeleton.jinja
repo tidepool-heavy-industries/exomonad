@@ -1,0 +1,78 @@
+{#
+  Template: test-skeleton.jinja
+  Generates: test/Main.hs
+
+  Input context:
+    - moduleName: Text (e.g., "Data.Stack")
+    - dataTypeName: Text (e.g., "Stack")
+    - signatures: [FunctionSig] where FunctionSig = {name, type, doc}
+    - testPriorities: [TestPriority] where TestPriority = {name, description}
+
+  The generated tests use `error "SPEC: ..."` as placeholders.
+  These error messages ARE the test specifications - the test agent
+  reads them and replaces with actual test implementations.
+#}
+module Main where
+
+import Test.QuickCheck
+import {{ moduleName }}
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- Per-Function Property Tests
+--
+-- Each exported function gets a property test. The error message specifies
+-- what the test should verify. Test agent replaces these with real tests.
+-- ════════════════════════════════════════════════════════════════════════════
+
+{% for fn in signatures %}
+-- | Property test for '{{ fn.name }}'
+--
+-- Specification: {{ fn.doc }}
+prop_{{ fn.name }} :: {{ dataTypeName }} Int -> Bool
+prop_{{ fn.name }} = error "SPEC[{{ fn.name }}]: Write a property test that verifies: {{ fn.doc }}"
+
+{% endfor %}
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- Priority Property Tests
+--
+-- High-level properties that aren't tied to a single function.
+-- These test important invariants and behaviors of the data structure.
+-- ════════════════════════════════════════════════════════════════════════════
+
+{% for tp in testPriorities %}
+-- | {{ tp.description }}
+prop_{{ tp.name }} :: {{ dataTypeName }} Int -> Bool
+prop_{{ tp.name }} = error "SPEC[{{ tp.name }}]: Write a property test that verifies: {{ tp.description }}"
+
+{% endfor %}
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- Test Runner
+-- ════════════════════════════════════════════════════════════════════════════
+
+main :: IO ()
+main = do
+  putStrLn "════════════════════════════════════════════════════════════════"
+  putStrLn " {{ moduleName }} Property Tests"
+  putStrLn "════════════════════════════════════════════════════════════════"
+  putStrLn ""
+
+  putStrLn "── Per-Function Tests ──"
+{% for fn in signatures %}
+  putStr "  {{ fn.name }}: "
+  quickCheck prop_{{ fn.name }}
+{% endfor %}
+  putStrLn ""
+
+  putStrLn "── Priority Tests ──"
+{% for tp in testPriorities %}
+  putStr "  {{ tp.name }}: "
+  quickCheck prop_{{ tp.name }}
+{% endfor %}
+  putStrLn ""
+
+  putStrLn "════════════════════════════════════════════════════════════════"
+  putStrLn " All tests complete."
+  putStrLn "════════════════════════════════════════════════════════════════"

@@ -68,7 +68,7 @@ import Tidepool.Graph.Edges (GetInput)
 import Tidepool.Graph.Generic (AsHandler, FieldsWithNamesOf)
 import Tidepool.Graph.Generic.Core (Entry, AsGraph)
 import qualified Tidepool.Graph.Generic.Core as G (Exit)
-import Tidepool.Graph.Goto (GotoChoice, To, LLMHandler(..), ClaudeCodeLLMHandler(..))
+import Tidepool.Graph.Goto (GotoChoice, To, LLMHandler(..), ClaudeCodeLLMHandler(..), ClaudeCodeResult(..))
 import Tidepool.Graph.Goto.Internal (GotoChoice(..), OneOf(..))
 import Tidepool.Graph.Template (GingerContext)
 import Tidepool.Graph.Types (Exit, Self, SingModelChoice(..), KnownMaybeCwd(..))
@@ -284,11 +284,11 @@ executeClaudeCodeHandler
      , KnownMaybeCwd cwd
      , ConvertTransitionHint targets
      )
-  => Maybe (TypedTemplate tpl SourcePos)         -- ^ Optional system prompt template
-  -> TypedTemplate tpl SourcePos                 -- ^ User prompt template (required)
-  -> (needs -> Eff es tpl)                       -- ^ Before handler: builds context
-  -> (schema -> Eff es (GotoChoice targets))     -- ^ After handler: routes based on output
-  -> needs                                       -- ^ Input from Input annotation
+  => Maybe (TypedTemplate tpl SourcePos)                    -- ^ Optional system prompt template
+  -> TypedTemplate tpl SourcePos                            -- ^ User prompt template (required)
+  -> (needs -> Eff es tpl)                                  -- ^ Before handler: builds context
+  -> (ClaudeCodeResult schema -> Eff es (GotoChoice targets))  -- ^ After handler: routes based on output + session metadata
+  -> needs                                                  -- ^ Input from Input annotation
   -> Eff es (GotoChoice targets)
 executeClaudeCodeHandler mSystemTpl userTpl beforeFn afterFn input = do
   let model = singModelChoice @model
@@ -308,11 +308,11 @@ executeClaudeCodeHandler mSystemTpl userTpl beforeFn afterFn input = do
                    else systemPrompt <> "\n\n" <> userPrompt
       schemaVal = Just $ schemaToValue (jsonSchema @schema)
   -- Call ClaudeCodeExec effect (forkSession=False for normal execution)
-  (outputVal, _sessionId) <- execClaudeCode model cwd fullPrompt schemaVal Nothing Nothing False
-  -- Parse the structured output
+  (outputVal, sessionId) <- execClaudeCode model cwd fullPrompt schemaVal Nothing Nothing False
+  -- Parse the structured output and wrap with session metadata
   case Aeson.fromJSON outputVal of
     Aeson.Error msg -> error $ "ClaudeCode output parse error: " <> msg
-    Aeson.Success output -> afterFn output
+    Aeson.Success output -> afterFn (ClaudeCodeResult output sessionId)
 
 
 -- ════════════════════════════════════════════════════════════════════════════

@@ -82,4 +82,4 @@ main = hspec $ do
       let handlers = typesFirstHandlers
       -- These compile only if the types match
       handlers.entry `shouldBe` (Proxy :: Proxy StackSpec)
-      handlers.exit `shouldBe` (Proxy :: Proxy TypeDefinitions)
+      handlers.exit `shouldBe` (Proxy :: Proxy ParallelResults)

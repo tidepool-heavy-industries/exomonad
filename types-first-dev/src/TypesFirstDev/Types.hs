@@ -1,3 +1,5 @@
+{-# LANGUAGE FieldSelectors #-}
+
 -- | Schema types for the types-first development workflow.
 --
 -- These are the structured outputs from Claude Code sessions.
@@ -32,7 +34,6 @@ import Data.Aeson (FromJSON(..), ToJSON(..))
 import Data.Text (Text)
 import GHC.Generics (Generic)
 
-import Tidepool.Schema (HasJSONSchema)
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -51,7 +52,7 @@ data StackSpec = StackSpec
     -- ^ Natural language description of the data structure.
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON, HasJSONSchema)
+  deriving anyclass (FromJSON, ToJSON)
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -71,7 +72,7 @@ data TypeDefinitions = TypeDefinitions
     -- ^ Module header with exports
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON, HasJSONSchema)
+  deriving anyclass (FromJSON, ToJSON)
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -86,7 +87,7 @@ data TestDefinitions = TestDefinitions
     -- ^ Complete test module code with properties.
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON, HasJSONSchema)
+  deriving anyclass (FromJSON, ToJSON)
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -101,7 +102,7 @@ data ImplementationCode = ImplementationCode
     -- ^ Complete implementation module code.
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON, HasJSONSchema)
+  deriving anyclass (FromJSON, ToJSON)
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -122,7 +123,7 @@ data TestLoopState = TestLoopState
     -- ^ Path to implementation file.
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON, HasJSONSchema)
+  deriving anyclass (FromJSON, ToJSON)
 
 -- | Result of running tests.
 data TestResult
@@ -131,7 +132,7 @@ data TestResult
   | TestsFailed Text
     -- ^ Tests failed with error message.
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON, HasJSONSchema)
+  deriving anyclass (FromJSON, ToJSON)
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -148,7 +149,7 @@ data ImplementationResult = ImplementationResult
     -- ^ Summary of what was accomplished.
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON, HasJSONSchema)
+  deriving anyclass (FromJSON, ToJSON)
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -169,7 +170,7 @@ data ForkInput = ForkInput
     -- ^ Module name for generated files.
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON, HasJSONSchema)
+  deriving anyclass (FromJSON, ToJSON)
 
 -- | Results from parallel agents.
 --
@@ -185,4 +186,4 @@ data ParallelResults = ParallelResults
     -- ^ Implementation code from impl agent.
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON, HasJSONSchema)
+  deriving anyclass (FromJSON, ToJSON)

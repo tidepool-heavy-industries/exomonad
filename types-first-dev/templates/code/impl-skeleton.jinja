@@ -1,0 +1,35 @@
+{#
+  Template: impl-skeleton.jinja
+  Generates: src/<ModulePath>.hs
+
+  Input context:
+    - moduleName: Text (e.g., "Data.Stack")
+    - dataTypeName: Text (e.g., "Stack")
+    - dataType: Text (full data type definition)
+    - signatures: [FunctionSig] where FunctionSig = {name, type, doc}
+#}
+module {{ moduleName }}
+  ( {{ dataTypeName }}
+{% for fn in signatures %}
+  , {{ fn.name }}
+{% endfor %}
+  ) where
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- Data Type
+-- ════════════════════════════════════════════════════════════════════════════
+
+{{ dataType }}
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- Functions
+-- ════════════════════════════════════════════════════════════════════════════
+
+{% for fn in signatures %}
+-- | {{ fn.doc }}
+{{ fn.name }} :: {{ fn.type }}
+{{ fn.name }} = error "TODO[{{ fn.name }}]: {{ fn.doc }}"
+
+{% endfor %}
