@@ -25,6 +25,7 @@ tidepool-native-gui/
 ├── bd-executor/              # Beads integration + urchin CLI
 ├── lsp-executor/             # LSP via lsp-client
 ├── claude-code-executor/     # Claude Code subprocess (WIP)
+├── worktree-executor/        # Git worktree management
 ├── github-executor/          # GitHub API integration
 ├── issue-executor/           # Issue tracking
 └── devlog-executor/          # Devlog effect executor
@@ -41,6 +42,7 @@ tidepool-native-gui/
 | `bd-executor` | `BD` | Beads database operations |
 | `lsp-executor` | `LSP` | lsp-client subprocess |
 | `claude-code-executor` | `ClaudeCodeExec` | claude CLI subprocess |
+| `worktree-executor` | `Worktree` | Git worktree via subprocess |
 | `github-executor` | `GitHub` | GitHub REST API |
 | `issue-executor` | `FileIssue` | Issue tracking |
 

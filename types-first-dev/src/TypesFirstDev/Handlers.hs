@@ -11,6 +11,7 @@ module TypesFirstDev.Handlers
   ) where
 
 import Control.Concurrent.Async (concurrently)
+import Control.Exception (SomeException, try, throwIO)
 import Control.Monad.Freer (Eff, sendM)
 import Control.Monad.Freer.Reader (Reader, ask)
 import Data.Maybe (fromMaybe)
@@ -19,6 +20,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.IO qualified as TIO
 import qualified Data.Aeson as Aeson
+import qualified System.Directory
 
 import Tidepool.ClaudeCode.Config (ClaudeCodeConfig)
 import Tidepool.ClaudeCode.Executor (runClaudeCodeRequest)
@@ -28,7 +30,6 @@ import Tidepool.Effects.Worktree
   ( Worktree
   , WorktreePath(..)
   , WorktreeSpec(..)
-  , WorktreeError(..)
   , createWorktree
   , deleteWorktree
   )
@@ -131,7 +132,8 @@ routeToFork result = do
 -- | Fork handler spawns parallel agents in separate worktrees.
 --
 -- Creates two worktrees, spawns tests and impl agents concurrently,
--- then collects results for the merge node.
+-- then collects results for the merge node. Worktrees are cleaned up
+-- on any failure to prevent resource leaks.
 forkHandler
   :: ForkInput
   -> Eff DevEffects (GotoChoice '[To "merge" ParallelResults])
@@ -172,19 +174,35 @@ forkHandler input = do
       testsSchema = Just $ schemaToValue (jsonSchema @TestDefinitions)
       implSchema = Just $ schemaToValue (jsonSchema @ImplementationCode)
 
-  -- Run both agents in parallel at IO level (freer-simple doesn't support parallel Eff)
-  -- Note: Session forking disabled for now - each agent starts fresh
+  -- Run both agents in parallel at IO level with cleanup on failure.
+  -- If anything throws, we clean up both worktrees before re-raising.
   let WorktreePath testsWtPath = testsWt
       WorktreePath implWtPath = implWt
-  (testsResponse, implResponse) <- sendM $ concurrently
-    (runClaudeCodeRequest config Sonnet (Just testsWtPath) testsPrompt testsSchema
-       Nothing Nothing False)  -- No session forking for now
-    (runClaudeCodeRequest config Sonnet (Just implWtPath) implPrompt implSchema
-       Nothing Nothing False)
 
-  -- Parse results
-  testDefs <- parseOrError "tests" testsResponse
-  implCode <- parseOrError "impl" implResponse
+      cleanupWorktrees :: IO ()
+      cleanupWorktrees = do
+        -- Best effort cleanup - ignore errors
+        _ <- try @SomeException $ runWorktreeCleanup testsWt
+        _ <- try @SomeException $ runWorktreeCleanup implWt
+        pure ()
+
+      -- Run agents with cleanup on failure
+      runAgentsWithCleanup :: IO (TestDefinitions, ImplementationCode)
+      runAgentsWithCleanup = do
+        result <- try @SomeException $ do
+          (testsResponse, implResponse) <- concurrently
+            (runClaudeCodeRequest config Sonnet (Just testsWtPath) testsPrompt testsSchema
+               Nothing Nothing False)
+            (runClaudeCodeRequest config Sonnet (Just implWtPath) implPrompt implSchema
+               Nothing Nothing False)
+          testDefs <- parseOrErrorIO "tests" testsResponse
+          implCode <- parseOrErrorIO "impl" implResponse
+          pure (testDefs, implCode)
+        case result of
+          Left exc -> cleanupWorktrees >> throwIO exc
+          Right r -> pure r
+
+  (testDefs, implCode) <- sendM runAgentsWithCleanup
 
   pure $ gotoChoice @"merge" ParallelResults
     { prTestsWorktree = testsWt
@@ -193,15 +211,26 @@ forkHandler input = do
     , prImplCode = implCode
     }
 
--- | Parse ClaudeCode response or error.
-parseOrError
+-- | Cleanup a worktree via direct git command (for use in IO cleanup).
+-- This is a simplified version that doesn't go through the effect system.
+runWorktreeCleanup :: WorktreePath -> IO ()
+runWorktreeCleanup (WorktreePath path) = do
+  -- Just remove the directory - git worktree prune will clean up the refs
+  -- This is safe because we're in a failure path and best-effort cleanup
+  _ <- try @SomeException $ removeDirectoryRecursive path
+  pure ()
+  where
+    removeDirectoryRecursive = System.Directory.removeDirectoryRecursive
+
+-- | Parse ClaudeCode response or error (IO version for use in cleanup blocks).
+parseOrErrorIO
   :: (Aeson.FromJSON a)
   => Text
   -> Either CC.ClaudeCodeError CC.ClaudeCodeResult
-  -> Eff DevEffects a
-parseOrError agentName (Left err) =
+  -> IO a
+parseOrErrorIO agentName (Left err) =
   error $ "Claude Code " <> show agentName <> " agent failed: " <> show err
-parseOrError agentName (Right result) =
+parseOrErrorIO agentName (Right result) =
   case CC.ccrStructuredOutput result of
     Nothing -> error $ "Claude Code " <> show agentName <> " agent returned no structured output"
     Just val -> case Aeson.fromJSON val of
