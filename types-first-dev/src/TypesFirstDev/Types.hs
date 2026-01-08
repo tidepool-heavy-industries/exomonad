@@ -21,10 +21,10 @@ module TypesFirstDev.Types
   , TypeDefinitions(..)
 
     -- * Tests Agent Output
-  , TestDefinitions(..)
+  , TestsResult(..)
 
     -- * Impl Agent Output
-  , ImplementationCode(..)
+  , ImplResult(..)
 
     -- * Test Loop State
   , TestLoopState(..)
@@ -64,6 +64,8 @@ data StackSpec = StackSpec
     -- ^ Module name (e.g., "Data.Stack").
   , ssDescription :: Text
     -- ^ Natural language description of the data structure.
+  , ssAcceptanceCriteria :: [Text]
+    -- ^ High-level acceptance criteria to inform test priorities.
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)
@@ -85,21 +87,21 @@ data FunctionSig = FunctionSig
     -- ^ Brief description of what the function does.
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON, HasJSONSchema)
+  deriving anyclass (FromJSON, ToJSON)
+  -- HasJSONSchema derived via TH in Schema.hs
 
 -- | Test priority for incremental development.
 --
 -- Guides which functions to test first based on dependency order.
 data TestPriority = TestPriority
-  { tpFunction :: Text
-    -- ^ Function name this test targets.
-  , tpPriority :: Int
-    -- ^ Priority (1 = most critical, higher = less critical).
-  , tpRationale :: Text
-    -- ^ Why this priority ranking.
+  { tpName :: Text
+    -- ^ Property name (e.g., "lifo_order", "push_pop_inverse").
+  , tpDescription :: Text
+    -- ^ What to test (e.g., "Stack maintains LIFO order").
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON, HasJSONSchema)
+  deriving anyclass (FromJSON, ToJSON)
+  -- HasJSONSchema derived via TH in Schema.hs
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -118,7 +120,7 @@ data IncrementalProgress = IncrementalProgress
     -- ^ Functions not yet attempted.
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON, HasJSONSchema)
+  deriving anyclass (FromJSON, ToJSON)
 
 -- | Work status for coordination between agents.
 --
@@ -130,7 +132,7 @@ data WorkStatus = WorkStatus
     -- ^ Status detail: current focus if not blocked, reason if blocked.
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON, HasJSONSchema)
+  deriving anyclass (FromJSON, ToJSON)
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -143,10 +145,14 @@ data WorkStatus = WorkStatus
 -- no implementations. This constrains the search space for impl.
 -- Module header is derived by templates from the signatures.
 data TypeDefinitions = TypeDefinitions
-  { tdDataType :: Text
+  { tdTypeName :: Text
+    -- ^ Type constructor name (e.g., "Stack").
+  , tdDataType :: Text
     -- ^ The data type definition (e.g., "data Stack a = Empty | Push a (Stack a)")
   , tdSignatures :: [FunctionSig]
     -- ^ Structured function signatures with metadata.
+  , tdTestPriorities :: [TestPriority]
+    -- ^ Test priorities for incremental development.
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)
@@ -185,30 +191,69 @@ data SkeletonGenerated = SkeletonGenerated
 -- TESTS AGENT OUTPUT
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Output from the Tests agent - QuickCheck property tests.
+-- | Result from the tests agent.
 --
--- Written in parallel with implementation, both working from type signatures.
-data TestDefinitions = TestDefinitions
-  { testModuleCode :: Text
-    -- ^ Complete test module code with properties.
+-- You edited the test skeleton to add QuickCheck property tests.
+-- Report your results here so the handler can commit and merge your work.
+data TestsResult = TestsResult
+  { trBuildPassed :: Bool
+    -- ^ Did `cabal build test-repo-test` succeed after your edits?
+    -- This compiles the test suite. You MUST verify this before returning.
+
+  , trAllPropertiesWritten :: Bool
+    -- ^ Did you write properties for ALL functions AND acceptance criteria?
+    -- Set False if any required property is missing or placeholder.
+
+  , trCommitMessage :: Text
+    -- ^ Git commit message (50 chars max, imperative mood).
+    -- Example: "Add QuickCheck properties for Stack LIFO behavior"
+
+  , trTestingStrategy :: Text
+    -- ^ Explain your testing approach. What properties did you focus on?
+    -- Any assumptions about the implementation? Edge cases covered?
+
+  , trBlocker :: Maybe Text
+    -- ^ If blocked or incomplete, explain why. Missing Arbitrary instances?
+    -- Type issues? Null if work completed successfully.
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)
+  -- HasJSONSchema derived via TH in Schema.hs
 
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- IMPL AGENT OUTPUT
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Output from the Impl agent - function implementations.
+-- | Result from the implementation agent.
 --
--- Must satisfy the type signatures from TypeDefinitions.
-data ImplementationCode = ImplementationCode
-  { implModuleCode :: Text
-    -- ^ Complete implementation module code.
+-- You edited the skeleton file to replace `undefined` stubs with working code.
+-- Report your results here so the handler can commit and merge your work.
+data ImplResult = ImplResult
+  { irBuildPassed :: Bool
+    -- ^ Did `cabal build test-repo` succeed after your edits?
+    -- You MUST run this command before returning. Set False if build failed.
+
+  , irAllFunctionsImplemented :: Bool
+    -- ^ Did you implement ALL functions listed in the task?
+    -- Set False if any function still has `undefined` or is incomplete.
+
+  , irCommitMessage :: Text
+    -- ^ Git commit message (50 chars max, imperative mood).
+    -- Example: "Implement Stack with recursive data type"
+    -- Be specific about WHAT you built, not HOW.
+
+  , irDesignNotes :: Text
+    -- ^ Explain key design decisions. What data representation did you choose?
+    -- Any tradeoffs? Edge cases handled? This helps the test agent understand.
+
+  , irBlocker :: Maybe Text
+    -- ^ If blocked or incomplete, explain why. What would unblock you?
+    -- Null if work completed successfully. Used for retry/escalation.
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)
+  -- HasJSONSchema derived via TH in Schema.hs
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -286,10 +331,10 @@ data ParallelResults = ParallelResults
     -- ^ Path to tests worktree.
   , prImplWorktree :: WorktreePath
     -- ^ Path to impl worktree.
-  , prTestDefs :: TestDefinitions
-    -- ^ Test definitions from tests agent.
-  , prImplCode :: ImplementationCode
-    -- ^ Implementation code from impl agent.
+  , prTestsResult :: TestsResult
+    -- ^ Result metadata from tests agent.
+  , prImplResult :: ImplResult
+    -- ^ Result metadata from impl agent.
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)

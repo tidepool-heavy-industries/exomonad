@@ -4,6 +4,9 @@ You are writing QuickCheck property tests for a Haskell data structure.
 
 Create property tests for: {{ moduleName }}
 
+A skeleton test file already exists at `test/Main.hs` with placeholder stubs.
+Your job is to **edit that file** and replace the placeholders with real QuickCheck properties.
+
 ## Type Definitions
 
 The data type to test:
@@ -18,23 +21,23 @@ The function signatures to test:
 - `{{ sig.name }} :: {{ sig.signature }}` — {{ sig.description }}
 {% endfor %}
 
+## Instructions
+
+1. **Read** the skeleton file at `test/Main.hs`
+   (You do NOT need to read the implementation - all type info is above)
+2. **Edit** the file to replace placeholder properties with real QuickCheck tests
+3. **Verify** the test suite compiles: `cabal build test-repo-test`
+   (Do NOT use `cabal build all` - it doesn't build tests by default)
+4. Return result metadata in structured output (NOT the code - it's already in the file)
+
 ## Requirements
 
-1. Write QuickCheck property tests
-2. Test all exported functions
-3. Use meaningful property names (prop_*)
-4. Assume the implementation will satisfy the types
-5. Focus on algebraic properties (identity, associativity, etc.)
-
-## Output Format
-
-Write a complete test module that:
-
-1. Imports Test.QuickCheck
-2. Imports the module under test
-3. Defines Arbitrary instances if needed
-4. Defines property tests for each function
-5. Has a main function that runs all properties
+- Write QuickCheck property tests for all functions
+- Use meaningful property names (prop_*)
+- Define Arbitrary instances if needed
+- Focus on algebraic properties (identity, associativity, LIFO order, etc.)
+- Include a main function that runs all properties
+- **Type annotations**: When using polymorphic values like `empty`, add explicit types: `(empty :: Stack Int)` to avoid ambiguous type errors
 
 ## Example Properties
 
@@ -45,6 +48,17 @@ For a Stack type, good properties might be:
 - `prop_pushNotEmpty`: isEmpty (push x s) == False
 - `prop_peekAfterPush`: peek (push x s) == Just x
 
+## Structured Output
+
+Your structured output describes your work - the handler will commit your file edits.
+Read the field descriptions carefully - they tell you what to report:
+
+- `trBuildPassed`: Did `cabal build test-repo-test` succeed?
+- `trAllPropertiesWritten`: Did you write properties for ALL functions and acceptance criteria?
+- `trCommitMessage`: Short commit message (50 chars, imperative mood)
+- `trTestingStrategy`: Explain your testing approach and properties written
+- `trBlocker`: If blocked, explain why (null if successful)
+
 ## Your Task
 
-Write the complete test module for {{ moduleName }}.
+Edit `test/Main.hs` to create comprehensive property tests for {{ moduleName }}.

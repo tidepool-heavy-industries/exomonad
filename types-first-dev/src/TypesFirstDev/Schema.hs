@@ -15,9 +15,12 @@ import TypesFirstDev.Types
 
 -- Derive HasJSONSchema instances for record types used in graph execution.
 -- Note: Sum types like TestResult can't use deriveHasJSONSchema.
+$(deriveHasJSONSchema ''FunctionSig)
+$(deriveHasJSONSchema ''TestPriority)
 $(deriveHasJSONSchema ''StackSpec)
 $(deriveHasJSONSchema ''TypeDefinitions)
-$(deriveHasJSONSchema ''TestDefinitions)
-$(deriveHasJSONSchema ''ImplementationCode)
+$(deriveHasJSONSchema ''TestsResult)
+$(deriveHasJSONSchema ''ImplResult)
 $(deriveHasJSONSchema ''ForkInput)
-$(deriveHasJSONSchema ''ParallelResults)
+-- ParallelResults not derived - it's internal and contains WorktreePath
+-- which has no HasJSONSchema instance

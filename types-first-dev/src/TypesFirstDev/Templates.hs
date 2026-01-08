@@ -2,6 +2,7 @@
 
 -- | Template definitions for the types-first workflow graph.
 --
+--
 -- This module compiles Jinja templates at build time and defines TemplateDef instances.
 -- Must import context types from TypesFirstDev.Context (TH staging requirement).
 module TypesFirstDev.Templates
