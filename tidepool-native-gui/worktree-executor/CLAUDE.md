@@ -19,8 +19,6 @@ data WorktreeSpec = WorktreeSpec
 -- Structured errors (no crashes, explicit handling required)
 data WorktreeError
   = WorktreeGitError { wgeCommand :: Text, wgeExitCode :: Int, wgeStderr :: Text }
-  | WorktreeNotFound FilePath
-  | WorktreeParseError Text
   | WorktreeFileCopyError { wfceSrcPath, wfceDestPath :: FilePath, wfceReason :: Text }
 
 -- GADT operations (all return Either for explicit error handling)

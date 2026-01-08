@@ -107,7 +107,6 @@ instance FromJSON MergeResult
 -- @
 -- case result of
 --   Left (WorktreeGitError cmd code stderr) -> logError stderr
---   Left (WorktreeNotFound path) -> warn "worktree missing"
 --   Left (WorktreeFileCopyError src dest reason) -> retry
 --   Right value -> proceed value
 -- @
@@ -121,10 +120,6 @@ data WorktreeError
         -- ^ Stderr output from git
       }
     -- ^ Git command failed
-  | WorktreeNotFound FilePath
-    -- ^ Worktree doesn't exist at specified path
-  | WorktreeParseError Text
-    -- ^ Failed to parse git output (e.g., worktree list)
   | WorktreeFileCopyError
       { wfceSrcPath :: FilePath
       , wfceDestPath :: FilePath
