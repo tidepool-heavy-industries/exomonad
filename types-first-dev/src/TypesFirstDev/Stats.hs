@@ -8,10 +8,12 @@ module TypesFirstDev.Stats
     AgentStats(..)
   , RunMetadata(..)
   , ExperimentParams(..)
+  , AggregateStats(..)
 
     -- * Stats Extraction
   , captureAgentStats
   , aggregateModelUsage
+  , aggregateCosts
 
     -- * Time Utilities
   , formatTimestamp
@@ -198,3 +200,59 @@ formatTimestamp = formatTime defaultTimeLocale "%Y%m%dT%H%M%S"
 -- | Generate a unique run ID from a timestamp.
 generateRunId :: UTCTime -> Text
 generateRunId t = "run-" <> T.pack (formatTimestamp t)
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- AGGREGATE STATS (for session chains)
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Aggregate statistics from a session chain.
+--
+-- When using fork/resume, multiple sessions contribute to one logical operation.
+-- This aggregates costs across all sessions in a chain.
+data AggregateStats = AggregateStats
+  { asTotalCost :: Double
+    -- ^ Sum of costs from all sessions
+  , asTotalInputTokens :: Int
+    -- ^ Sum of input tokens from all sessions
+  , asTotalOutputTokens :: Int
+    -- ^ Sum of output tokens from all sessions
+  , asSessionCount :: Int
+    -- ^ Number of sessions in the chain
+  }
+  deriving stock (Show, Eq, Generic)
+
+instance ToJSON AggregateStats where
+  toJSON AggregateStats{..} = object
+    [ "totalCost" .= asTotalCost
+    , "totalInputTokens" .= asTotalInputTokens
+    , "totalOutputTokens" .= asTotalOutputTokens
+    , "sessionCount" .= asSessionCount
+    ]
+
+instance FromJSON AggregateStats where
+  parseJSON = withObject "AggregateStats" $ \o -> AggregateStats
+    <$> o .: "totalCost"
+    <*> o .: "totalInputTokens"
+    <*> o .: "totalOutputTokens"
+    <*> o .: "sessionCount"
+
+
+-- | Aggregate costs from multiple ClaudeCodeResults.
+--
+-- Used to compute total cost across forked sessions.
+aggregateCosts :: [ClaudeCodeResult] -> AggregateStats
+aggregateCosts results =
+  let costs = map ccrTotalCostUsd results
+      usages = map ccrModelUsage results
+      (inputToks, outputToks) = foldl addUsage (0, 0) usages
+  in AggregateStats
+    { asTotalCost = sum costs
+    , asTotalInputTokens = inputToks
+    , asTotalOutputTokens = outputToks
+    , asSessionCount = length results
+    }
+  where
+    addUsage (accIn, accOut) usage =
+      let (inToks, outToks) = aggregateModelUsage usage
+      in (accIn + inToks, accOut + outToks)
