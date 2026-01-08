@@ -597,6 +597,26 @@ strictMode = StrictnessConfig
   , scRequireCoverage  = True
   }
 
+-- | Coordination spec for cross-cutting functions after children merge.
+-- Used by CoordinationGraph (partial variant, shared handlers).
+data CoordSpec = CoordSpec
+  { coordModuleName   :: Text             -- "Data.Stack.Persist"
+  , coordDescription  :: Text             -- What we're gluing
+  , coordGiven        :: [FilePath]       -- Already-implemented child modules
+  , coordFunctions    :: [FunctionSpec]   -- Cross-cutting functions to implement
+  , coordImplPath     :: FilePath         -- Where to write glue code
+  , coordTestPath     :: FilePath         -- Where to write relationship tests
+  , coordStrictness   :: StrictnessConfig
+  }
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (FromJSON, ToJSON)
+
+-- | Scope level for adversary aperture.
+-- Same templates, different framing based on scope.
+data ScopeLevel = Leaf | Coordination | System
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (FromJSON, ToJSON)
+
 -- | Concrete example: specific input/output pair.
 -- Used for alignment - both agents see the same concrete cases.
 data ConcreteExample = ConcreteExample
@@ -647,6 +667,7 @@ data FunctionSpec = FunctionSpec
   , fnExamples    :: NonEmpty ConcreteExample   -- REQUIRED: Type enforces ≥1
   , fnProperties  :: NonEmpty PropertySketch    -- REQUIRED: Type enforces ≥1
   , fnPriority    :: Int                        -- Implementation order hint
+  , fnDependsOn   :: [Text]                     -- Advisory: ["push"] means impl after push
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)
@@ -940,6 +961,13 @@ data MutationTemplateCtx = MutationTemplateCtx
   { mtcImplPath    :: FilePath           -- Agent reads this
   , mtcTestPath    :: FilePath           -- Agent reads this
   , mtcFunctions   :: [FunctionSpec]     -- For reference
+  , mtcScopeLevel  :: ScopeLevel         -- Leaf, Coordination, or System
+  }
+
+-- | Context for TypeAdversaryTpl.
+data TypeAdversaryTemplateCtx = TypeAdversaryTemplateCtx
+  { tatcTypes      :: TypesAgentOutput   -- The types to attack
+  , tatcScopeLevel :: ScopeLevel         -- Affects question framing
   }
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -1891,20 +1919,36 @@ Return JSON matching `ImplAgentOutput`:
 
 ### TypeAdversaryTpl (Red team for types)
 
-Template context: `TypesAgentOutput` (the types agent's output)
+Template context: `TypeAdversaryTemplateCtx`
 
 ```jinja
 # Task: Find Type System Holes
 
 You are a RED TEAM agent. Your mission: BREAK the type system.
 
+{% if ctx.tatcScopeLevel == 'Leaf' %}
+## Scope: Single Module
+
+Find bugs in THIS module's type design. Focus on internal consistency.
+{% elif ctx.tatcScopeLevel == 'Coordination' %}
+## Scope: Module Composition
+
+Find bugs in how these modules COMPOSE. Focus on interface mismatches,
+constraint conflicts, and invalid compositions.
+{% elif ctx.tatcScopeLevel == 'System' %}
+## Scope: System Requirements
+
+Find bugs in the SYSTEM's type safety. Does the full interface satisfy
+the original requirements? Can the system enter globally inconsistent state?
+{% endif %}
+
 ## The Type Design
 
 ```haskell
--- Type: {{ ctx.taoTypeName }}
--- Constructors: {{ ctx.taoConstructors | join(", ") }}
+-- Type: {{ ctx.tatcTypes.taoTypeName }}
+-- Constructors: {{ ctx.tatcTypes.taoConstructors | join(", ") }}
 
-{% for fn in ctx.taoFunctions %}
+{% for fn in ctx.tatcTypes.taoFunctions %}
 {{ fn.fnName }} :: {{ fn.fnSignature }}
 -- {{ fn.fnBrief }}
 {% endfor %}
@@ -1912,7 +1956,7 @@ You are a RED TEAM agent. Your mission: BREAK the type system.
 
 ## Claimed Invariants
 
-{% for fn in ctx.taoFunctions %}
+{% for fn in ctx.tatcTypes.taoFunctions %}
 {% for prop in fn.fnProperties %}
 - {{ prop.psInvariant }}
 {% endfor %}
@@ -2034,6 +2078,24 @@ Template context: `MutationTemplateCtx`
 # Task: Find Test Suite Gaps
 
 You are a MUTATION TESTING agent. Find bugs the tests DON'T catch.
+
+{% if ctx.mtcScopeLevel == 'Leaf' %}
+## Scope: Unit Level
+
+Find mutations in single functions. Does removing a guard break any property?
+Does changing a boundary condition slip through?
+{% elif ctx.mtcScopeLevel == 'Coordination' %}
+## Scope: Integration Level
+
+Find mutations in cross-module interactions. Does swapping call order break
+integration tests? Are there composition-level mutations that unit tests miss?
+{% elif ctx.mtcScopeLevel == 'System' %}
+## Scope: System Level
+
+Find mutations that lead to globally inconsistent state. Can the system enter
+states that violate the original requirements? Are there cross-cutting bugs
+that module-level tests don't catch?
+{% endif %}
 
 ## The Implementation
 
@@ -2167,16 +2229,9 @@ The graph produces structured outputs designed for actionable iteration:
 ### What Gets Captured
 
 ```haskell
--- Final result includes adversary findings
-data HybridResult = HybridResult
-  { hrSuccess           :: Bool
-  , hrAttempts          :: Int
-  , hrSpec              :: [FunctionSpec]
-  , hrTestsCoverage     :: CoverageReport
-  , hrTypeAdversary     :: Maybe TypeAdversaryResult
-  , hrMutationAdversary :: Maybe MutationAdversaryResult
-  , hrTotalCost         :: Double
-  }
+-- Final result includes adversary findings (see full definition in Type Definitions)
+-- HybridResult contains: hrSuccess, hrSpec, hrTestsCoverage, hrUnderstanding,
+-- hrTypeAdversary, hrMutationAdversary, hrWitness, hrTotalCost
 ```
 
 ### How Findings Drive Iteration
@@ -2206,6 +2261,133 @@ Run 3: Clean run, high confidence
 ```
 
 The adversaries don't just verify - they **generate the next iteration's work items**.
+
+---
+
+## Composition Patterns
+
+The Hybrid TDD Graph runs on **leaf-sized specs** - a single data type with its
+operations. Larger systems require decomposition (above) and recomposition (below).
+
+### Hylo Embedding
+
+The graph sits at the inflection point of a hylomorphism:
+
+```
+                    ana (unfold)
+                         │
+     ┌───────────────────┴───────────────────┐
+     │          Decomposition Layer          │
+     │   "Stack with persistence" decomposes │
+     │   into: Stack, Store, Serialization   │
+     └───────────────────┬───────────────────┘
+                         │
+                         ▼
+        ┌────────────────────────────────────┐
+        │        Hybrid TDD Graph            │
+        │   Runs N times in parallel         │
+        │   (one per leaf spec)              │
+        └────────────────────────────────────┘
+                         │
+                         ▼
+     ┌───────────────────┴───────────────────┐
+     │          Coordination Layer           │
+     │   Merge children, type cross-cutting  │
+     │   functions, verify composition       │
+     └───────────────────┬───────────────────┘
+                         │
+                    cata (fold)
+```
+
+The decomposition layer (ana) is NOT part of this graph. It produces leaf specs
+that this graph consumes. The coordination layer (cata) runs AFTER child graphs
+complete, handling what children couldn't see in isolation.
+
+### CoordinationGraph
+
+After children merge, some functions can only be typed with inter-module knowledge:
+
+```haskell
+-- Child 1: Stack module
+push :: a -> Stack a -> Stack a
+
+-- Child 2: Store module
+save :: Storable a => a -> Store -> IO ()
+
+-- Coordination level: persistence function
+persistStack :: Stack a -> Store -> IO ()
+-- Can only be typed when we know: Stack + Store + Serializable constraint
+```
+
+The **CoordinationGraph** is a partial variant of the Hybrid TDD Graph:
+
+| Phase | CoordinationGraph | Full Graph |
+|-------|-------------------|------------|
+| Types | Cross-cutting signatures | Full type design |
+| TypeAdversary | Interface composition holes | Internal type holes |
+| Tests | Relationship properties | Unit properties |
+| Impl | Glue code only | Full impl |
+| MutationAdversary | Integration mutations | Unit mutations |
+
+CoordinationGraph receives child artifacts as input, not raw specs.
+
+### Cumulative Test Suites
+
+Each composition level adds tests about relationships children couldn't see:
+
+```
+Level 0 (leaves):     prop_pushPop, prop_saveThenLoad
+Level 1 (coord):      prop_persistThenRestore (uses both)
+Level 2 (system):     prop_concurrentPersistence (system behavior)
+```
+
+The test suite is additive - higher levels don't replace lower ones.
+
+**Mechanics**: Git does the work. When the coordination level creates its merge
+worktree and cherry-picks child commits (`a1-final` + `a2-final`), all test files
+land in the same worktree. `cabal test` discovery finds them automatically.
+No explicit import/re-run logic - test files are additive (different property
+names, same discovery pattern).
+
+```
+main
+ │
+ ├── feat/stack: Stack properties (10 props)
+ │      └── test/StackSpec.hs
+ │
+ ├── feat/store: Store properties (8 props)
+ │      └── test/StoreSpec.hs
+ │
+ └── feat/persist: Coordination properties (5 props)
+        ├── cherry-pick feat/stack, feat/store
+        ├── test/PersistSpec.hs (NEW - relationship tests)
+        └── cabal test finds all 3 Spec files → 23 properties
+```
+
+### Adversary Scope Escalation
+
+Adversaries ask different questions at different levels:
+
+| Level | TypeAdversary | MutationAdversary |
+|-------|---------------|-------------------|
+| Leaf | "Can Stack represent invalid state?" | "Does removing this guard break any property?" |
+| Coord | "Do Stack and Store compose safely?" | "Does swapping call order break integration?" |
+| System | "Does the full interface satisfy the original requirement?" | "Can the system enter inconsistent global state?" |
+
+Same agents, same templates, different aperture. Template context includes
+`scopeLevel :: ScopeLevel` that changes prompt framing:
+
+```jinja
+{% if ctx.scopeLevel == 'Leaf' %}
+Find bugs in THIS function's implementation.
+{% elif ctx.scopeLevel == 'Coordination' %}
+Find bugs in how these modules COMPOSE.
+{% elif ctx.scopeLevel == 'System' %}
+Find bugs in the SYSTEM behavior under the original requirements.
+{% endif %}
+```
+
+Keeps template coherent, avoids family proliferation.
 
 ---
 
