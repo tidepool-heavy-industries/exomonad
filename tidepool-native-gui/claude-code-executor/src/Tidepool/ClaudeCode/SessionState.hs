@@ -9,7 +9,11 @@
 -- and incremental work.
 --
 -- Session state is persisted per-worktree at:
--- @<worktree>/.claude/tidepool-session.json@
+-- @<worktree-path>/.claude/tidepool-session.json@
+--
+-- For example, if the worktree path is @\/home\/user\/project\/worktrees\/impl@,
+-- the session state file will be at:
+-- @\/home\/user\/project\/worktrees\/impl\/.claude\/tidepool-session.json@
 module Tidepool.ClaudeCode.SessionState
   ( -- * Exit Reason
     SessionExitReason(..)

@@ -616,11 +616,11 @@ runAgentWithBuildValidationV2 ccConfig wtPath basePrompt schema agentName strate
                 { hcOnSessionEndTyped = handleSessionEnd wtPath agentName
                 }
 
-          -- Run agent with hooks
+          -- Run agent with hooks (using Sonnet for capability)
           result <- runClaudeCodeRequestWithHooks
             ccConfig
             callbacks
-            Haiku
+            Sonnet
             (Just wtPath)
             fullPrompt
             schema
@@ -697,6 +697,11 @@ handleSessionEnd wtPath agentName ctx = do
 --
 -- This enables parallel agents to stay aware of each other's progress
 -- without explicit coordination.
+--
+-- NOTE: Session resumption on retry is not supported with crosstalk.
+-- Each retry starts a fresh session. This is intentional: crosstalk agents
+-- fork from a parent session and we want each retry attempt to have the
+-- same starting context (the parent's state at fork time).
 runAgentWithCrosstalk
   :: ClaudeCodeConfig
   -> FilePath          -- ^ Working directory (worktree path)
@@ -733,11 +738,11 @@ runAgentWithCrosstalk ccConfig wtPath basePrompt schema agentName resumeSession 
                     crosstalkPostToolUse crosstalk ctx.ptcToolName ctx.ptcToolInput ctx.ptcToolResponse
                 }
 
-          -- Run agent with hooks
+          -- Run agent with hooks (using Sonnet for capability)
           result <- runClaudeCodeRequestWithHooks
             ccConfig
             callbacks
-            Haiku
+            Sonnet
             (Just wtPath)
             fullPrompt
             schema
