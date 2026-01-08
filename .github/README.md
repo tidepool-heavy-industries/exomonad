@@ -17,10 +17,7 @@ Pre-build a Docker container with all dependencies and push it to GitHub Contain
 
 ### 1. Build Container (`build-container.yml`)
 
-Triggers when dependencies change:
-- Any `*.cabal` file
-- `cabal.project` or `cabal.project.freeze`
-- Dockerfile changes
+**Manual trigger only** (`workflow_dispatch`) to avoid burning GitHub Actions minutes on every dependency change. Rebuild when you add significant new dependencies.
 
 Workflow:
 1. Uses multi-stage Dockerfile to build all dependencies
@@ -55,25 +52,21 @@ On a new fork or repo:
 
 3. **CI will now use cached container**:
    - All subsequent CI runs will be fast
-   - Container only rebuilds when dependencies change
+   - Manually rebuild container when adding dependencies
 
 ## Maintenance
 
 ### When to Rebuild Container
 
-Container auto-rebuilds when you push changes to:
-- Any `*.cabal` file (new dependencies)
-- `cabal.project` (project config)
-- `.github/Dockerfile.ci` (container definition)
+Rebuild the container manually when you:
+- Add new dependencies to any `*.cabal` file
+- Change `cabal.project` (project config)
+- Modify `.github/Dockerfile.ci` (container definition)
 
-You can also manually trigger rebuild:
+To trigger a rebuild:
 ```bash
 # Via GitHub web UI
 Actions → Build CI Container → Run workflow
-
-# Or push a change
-git commit --allow-empty -m "Rebuild CI container"
-git push
 ```
 
 ### Troubleshooting

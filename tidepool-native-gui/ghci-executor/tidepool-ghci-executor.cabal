@@ -30,6 +30,7 @@ library
     hs-source-dirs:   src
     default-language: GHC2021
     default-extensions:
+        DataKinds
         DeriveAnyClass
         DeriveGeneric
         DerivingStrategies
@@ -38,6 +39,7 @@ library
         OverloadedStrings
         RecordWildCards
         StrictData
+        TypeOperators
 
 test-suite ghci-executor-test
     type:             exitcode-stdio-1.0
