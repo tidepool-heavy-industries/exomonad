@@ -10,14 +10,9 @@ TDD's sequential execution enforces an **information barrier through time** - te
 
 If two agents work in separate worktrees, blind to each other's code, they can run in parallel while maintaining the same honesty guarantee. The trick is: **verify the TDD properties post-hoc**.
 
-### The Joyous Swarm
+### Parallel LLM Spawning
 
-This design embraces parallel LLM spawning not just for speed, but for **epistemic diversity**:
-
-- **Builder agents** (types, tests, impl): Creative, constructive
-- **Adversary agents** (typeAdversary, mutationAdversary): Destructive, stress-testing
-
-Fresh-spawned adversaries bring no sunk cost bias. Their job is to break what the builders made.
+Parallel spawning provides both speed and **epistemic diversity**: builder agents create (types, tests, impl), while adversary agents destroy (typeAdversary, mutationAdversary). Fresh-spawned adversaries have no sunk cost bias.
 
 ### Key Properties
 
@@ -547,6 +542,7 @@ The code lives on disk. The output is semantic metadata for analysis and templat
 module TypesFirstDev.Types.Hybrid where
 
 import Data.Text (Text)
+import Data.List.NonEmpty (NonEmpty)
 import GHC.Generics (Generic)
 import Data.Aeson (FromJSON, ToJSON)
 
@@ -632,28 +628,23 @@ data PropertyType
 -- | Complete specification for a function.
 -- Single source of truth - no duplicate name/signature fields.
 --
--- INVARIANT: Both examples AND properties are REQUIRED.
--- - fnExamples must be non-empty (concrete alignment anchors)
--- - fnProperties must be non-empty (formal verification targets)
--- Handler validates this invariant on TypesAgentOutput.
+-- INVARIANT ENFORCED BY TYPES: Both examples AND properties are REQUIRED.
+-- Using NonEmpty guarantees at least one element at parse time.
+-- No runtime validation needed - the type system enforces it.
 data FunctionSpec = FunctionSpec
-  { fnName        :: Text               -- "push"
-  , fnSignature   :: Text               -- "a -> Stack a -> Stack a"
-  , fnBrief       :: Text               -- One-line for code comments
-  , fnBehavior    :: Text               -- Detailed prose for agents
-  , fnExamples    :: [ConcreteExample]  -- REQUIRED: Concrete I/O pairs (min 1)
-  , fnProperties  :: [PropertySketch]   -- REQUIRED: Property specs (min 1)
-  , fnPriority    :: Int                -- Implementation order hint
+  { fnName        :: Text                       -- "push"
+  , fnSignature   :: Text                       -- "a -> Stack a -> Stack a"
+  , fnBrief       :: Text                       -- One-line for code comments
+  , fnBehavior    :: Text                       -- Detailed prose for agents
+  , fnExamples    :: NonEmpty ConcreteExample   -- REQUIRED: Type enforces ≥1
+  , fnProperties  :: NonEmpty PropertySketch    -- REQUIRED: Type enforces ≥1
+  , fnPriority    :: Int                        -- Implementation order hint
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)
 
--- | Validate that FunctionSpec has both examples AND properties.
-validateFunctionSpec :: FunctionSpec -> Either Text ()
-validateFunctionSpec fs
-  | null (fnExamples fs) = Left $ "Function " <> fnName fs <> " missing examples"
-  | null (fnProperties fs) = Left $ "Function " <> fnName fs <> " missing properties"
-  | otherwise = Right ()
+-- No validateFunctionSpec needed - NonEmpty enforces the invariant at parse time.
+-- If JSON has empty array for fnExamples or fnProperties, parsing fails.
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TYPES AGENT OUTPUT (Schema)
@@ -944,6 +935,73 @@ data MutationTemplateCtx = MutationTemplateCtx
   }
 
 -- ════════════════════════════════════════════════════════════════════════════
+-- TEMPLATE CONTEXT DERIVATION (Internal state → Template context)
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- These functions transform internal state into template contexts.
+-- They extract only what templates need, avoiding leaky abstractions.
+
+-- | Derive tests template context from gated state.
+-- Used in hFork handler to prepare tests agent input.
+gatedStateToTestsCtx
+  :: GatedState
+  -> Maybe TrivialTestsFeedback  -- From rejected prior attempt
+  -> Maybe EchoChannel           -- From parallel impl (if available)
+  -> TestsTemplateCtx
+gatedStateToTestsCtx gs feedback echoes = TestsTemplateCtx
+  { ttcTypeName       = taoTypeName typesOut
+  , ttcConstructors   = taoConstructors typesOut
+  , ttcFunctions      = taoFunctions typesOut
+  , ttcTestPath       = ssTestPath skel
+  , ttcPriorFeedback  = feedback
+  , ttcEchoes         = echoes
+  , ttcHardeningHints = deriveHardeningHints (gsTypeAdversary gs)
+  }
+  where
+    skel     = gsSkeleton gs
+    typesOut = trOutput $ ssTypesResult skel
+
+-- | Derive impl template context from gated state.
+gatedStateToImplCtx
+  :: GatedState
+  -> Maybe EchoChannel
+  -> ImplTemplateCtx
+gatedStateToImplCtx gs echoes = ImplTemplateCtx
+  { itcTypeName       = taoTypeName typesOut
+  , itcConstructors   = taoConstructors typesOut
+  , itcFunctions      = taoFunctions typesOut
+  , itcImplPath       = ssImplPath skel
+  , itcEchoes         = echoes
+  , itcHardeningHints = deriveHardeningHints (gsTypeAdversary gs)
+  }
+  where
+    skel     = gsSkeleton gs
+    typesOut = trOutput $ ssTypesResult skel
+
+-- | Convert type adversary findings to hardening hints.
+deriveHardeningHints :: TypeAdversaryResult -> [HardeningHint]
+deriveHardeningHints tar =
+  map holeToHint $ filter isActionable $ taoHoles $ tarOutput tar
+  where
+    isActionable h = thSeverity h `elem` [Critical, Major]
+
+    holeToHint h = HardeningHint
+      { hhContext  = thDescription h
+      , hhGuidance = thSuggestedFix h
+      , hhSource   = "typeAdversary"
+      }
+
+-- | Derive mutation template context from validated state.
+-- Note: FunctionSpecs come from the original StackSpec since types are
+-- defined at entry. ValidatedState has the paths from merged worktree.
+validatedToMutationCtx :: StackSpec -> ValidatedState -> [FunctionSpec] -> MutationTemplateCtx
+validatedToMutationCtx spec _vs functions = MutationTemplateCtx
+  { mtcImplPath  = specImplPath spec
+  , mtcTestPath  = specTestPath spec
+  , mtcFunctions = functions
+  }
+
+-- ════════════════════════════════════════════════════════════════════════════
 -- INTERNAL STATE TYPES (Handler-managed, not LLM-produced)
 -- ════════════════════════════════════════════════════════════════════════════
 
@@ -951,11 +1009,18 @@ data MutationTemplateCtx = MutationTemplateCtx
 -- They are NOT structured output schemas.
 
 -- | Input to typesFix when adversary found holes.
+-- Includes attempt tracking for retry budget.
 data TypeHolesFound = TypeHolesFound
   { thfOriginalTypes :: TypesAgentOutput
   , thfHoles         :: [TypeHole]
-  , thfAttempt       :: Int
+  , thfAttempt       :: Int       -- Current attempt (1-indexed)
+  , thfMaxAttempts   :: Int       -- From StrictnessConfig.scMaxFixAttempts
+  , thfPriorFixes    :: [Text]    -- What was tried before (for context)
   }
+
+-- | Maximum type fix attempts before escalation.
+maxTypeFixAttempts :: StrictnessConfig -> Int
+maxTypeFixAttempts = scMaxFixAttempts  -- Uses per-task config
 
 -- | Error when tests pass on skeleton - includes feedback for re-run.
 data TrivialTestsError = TrivialTestsError
@@ -1170,7 +1235,82 @@ All checks that must pass for success:
 | `tests(skeleton)` | hVerifyTDD | FAIL | **Yes** | Double-check |
 | `build(impl)` | hImpl | PASS | **Yes** | Impl compiles |
 | `tests(merged)` | hValidate | PASS | **Yes** | Impl is correct |
-| `mutants(impl)` | hMutationAdversary | caught | No (advisory) | Tests are robust |
+| `mutants(impl)` | hMutationAdversary | caught | Configurable | Tests are robust |
+| `coverage(tests)` | hVerifyTDD | LSP-verified | **Yes** | Claims match reality |
+| `stubs(skeleton)` | hSkeleton | all undefined | **Yes** | TDD property holds |
+
+---
+
+## LSP Verification Layer
+
+LLM claims are unverified assertions. LSP provides ground truth.
+
+### The Problem
+
+```haskell
+-- Tests agent CLAIMS this:
+PropertyWritten { pwTargetFunctions = ["push", "pop"] }
+
+-- But did the property actually CALL push and pop?
+-- Self-reported claims are a vulnerability.
+```
+
+### LSP-Backed Verification
+
+| Claim | Verification | LSP Operation |
+|-------|--------------|---------------|
+| "Property tests push" | Does prop call push? | `outgoingCalls` from property |
+| "Skeleton has stubs" | All functions undefined? | `documentSymbol` → check bodies |
+| "Impl covers spec" | Functions implemented? | `documentSymbol` → verify definitions |
+| "Coverage complete" | Examples exercised? | Parse test output + trace |
+
+### Handler Integration
+
+```haskell
+-- In hVerifyTDD, after checking tests fail on skeleton:
+verifyCoverageClaims :: BlindResults -> LSPSession -> Eff effs VerifiedCoverage
+verifyCoverageClaims blind session = do
+  let claimed = testsProperties $ testsOutput $ brTests blind
+
+  -- For each property, verify it actually calls what it claims
+  forM_ claimed $ \prop -> do
+    calls <- LSP.outgoingCalls session (propLocation prop)
+    let actualTargets = extractFunctionNames calls
+        claimedTargets = pwTargetFunctions prop
+
+    unless (claimedTargets `isSubsetOf` actualTargets) $
+      throwError $ CoverageClaimMismatch prop actualTargets
+
+-- In hSkeleton, verify all stubs are undefined:
+verifyAllStubsUndefined :: FilePath -> LSPSession -> Eff effs ()
+verifyAllStubsUndefined implPath session = do
+  symbols <- LSP.documentSymbol session implPath
+  let functionBodies = extractFunctionBodies symbols
+
+  forM_ functionBodies $ \(name, body) ->
+    unless (isUndefined body) $
+      throwError $ StubNotUndefined name
+```
+
+### Adversary Enhancement
+
+Adversaries become sharper with LSP guidance:
+
+```haskell
+-- MutationAdversary uses documentSymbol to find mutation targets
+getMutationTargets :: FilePath -> LSPSession -> Eff effs [MutationTarget]
+getMutationTargets implPath session = do
+  symbols <- LSP.documentSymbol session implPath
+  pure $ map toMutationTarget $ filter isFunction symbols
+
+-- TypeAdversary uses hover to understand type constraints
+analyzeTypeConstraints :: FilePath -> LSPSession -> Eff effs [TypeConstraint]
+analyzeTypeConstraints implPath session = do
+  symbols <- LSP.documentSymbol session implPath
+  forM (filter isDataType symbols) $ \sym -> do
+    info <- LSP.hover session (symbolLocation sym)
+    parseTypeConstraints info
+```
 
 ---
 
@@ -1178,9 +1318,35 @@ All checks that must pass for success:
 
 Handlers bridge graph nodes. They:
 1. Receive LLM output (schema types)
-2. Add infrastructure context (paths, session IDs, costs)
-3. Derive computed fields (verdicts from raw data)
-4. Route to next node
+2. **Validate output against disk** (prevent drift)
+3. Add infrastructure context (paths, session IDs, costs)
+4. Derive computed fields (verdicts from raw data)
+5. Route to next node
+
+### Output Validation Pattern
+
+LLM writes to disk AND returns structured output. These can drift.
+Handlers validate output claims against disk reality:
+
+```haskell
+-- Validate that claimed function names actually exist on disk
+validateTypesOutput :: TypesAgentOutput -> FilePath -> LSPSession -> Eff effs ()
+validateTypesOutput output implPath session = do
+  -- Get actual symbols from disk via LSP
+  symbols <- LSP.documentSymbol session implPath
+  let actualFunctions = map symbolName $ filter isFunction symbols
+      claimedFunctions = map fnName (taoFunctions output)
+
+  -- Every claimed function must exist
+  forM_ claimedFunctions $ \claimed ->
+    unless (claimed `elem` actualFunctions) $
+      throwError $ ClaimedFunctionNotOnDisk claimed
+
+  -- Every actual function must be claimed (no hidden functions)
+  forM_ actualFunctions $ \actual ->
+    unless (actual `elem` claimedFunctions) $
+      throwError $ UndeclaredFunctionOnDisk actual
+```
 
 ### hTypes Handler
 
@@ -1232,14 +1398,16 @@ deriveVerdict holes
 
 ```haskell
 -- Strict mode: ANY hole (Critical or Major) blocks.
-handleGate :: (SkeletonState, TypeAdversaryResult) -> Eff effs GateDecision
-handleGate (skeleton, adversary) = case adversary.tarVerdict of
+handleGate :: StackSpec -> (SkeletonState, TypeAdversaryResult) -> Eff effs GateDecision
+handleGate spec (skeleton, adversary) = case adversary.tarVerdict of
   TypeSystemHasHoles ->
     -- ANY significant hole: must fix before proceeding
     pure $ GotoTypesFix TypeHolesFound
       { thfOriginalTypes = skeleton.ssTypesResult.trOutput
       , thfHoles         = adversary.tarOutput.taoHoles
       , thfAttempt       = 1
+      , thfMaxAttempts   = scMaxFixAttempts (specStrictness spec)
+      , thfPriorFixes    = []
       }
 
   TypeSystemSound ->
@@ -1248,6 +1416,32 @@ handleGate (skeleton, adversary) = case adversary.tarVerdict of
       { gsSkeleton       = skeleton
       , gsTypeAdversary  = adversary
       }
+
+-- | Handle type fix results - either re-run adversary or escalate.
+handleTypesFixResult :: StackSpec -> TypeHolesFound -> TypesAgentOutput -> Eff effs TypesResult
+handleTypesFixResult spec holesFound fixOutput = do
+  -- Check retry budget BEFORE running adversary again
+  when (thfAttempt holesFound >= thfMaxAttempts holesFound) $
+    throwError $ TypeFixBudgetExhausted
+      { tfbeAttempts = thfAttempt holesFound
+      , tfbeLastHoles = thfHoles holesFound
+      , tfbePriorFixes = thfPriorFixes holesFound
+      }
+
+  -- Return result - will flow to hSkeleton then hTypeAdversary again
+  pure TypesResult
+    { trOutput    = fixOutput
+    , trSessionId = ...
+    , trCost      = ...
+    }
+
+-- | Type fix budget exhausted error.
+-- Requires human intervention or architectural changes.
+data TypeFixBudgetExhausted = TypeFixBudgetExhausted
+  { tfbeAttempts   :: Int
+  , tfbeLastHoles  :: [TypeHole]
+  , tfbePriorFixes :: [Text]
+  }
 ```
 
 ### hVerifyTDD Handler
@@ -1352,6 +1546,68 @@ assessConvergence :: UnderstandingState -> FixAgentOutput -> Bool
 assessConvergence understanding fix =
   -- Heuristics: fewer failures, different patterns, fixes addressing root causes
   length (fixChanges fix) > 0  -- At least we changed something
+```
+
+### hPostValidate Handler (Advisory vs Blocking Mode)
+
+```haskell
+-- Post-validation branches on StrictnessConfig.scMutationBlocking
+handlePostValidate :: StackSpec -> ValidatedState -> Eff effs PostValidateDecision
+handlePostValidate spec validated = do
+  -- Always spawn mutation adversary
+  mutResult <- spawnMutationAdversary spec validated
+
+  -- Branch on strictness configuration
+  if scMutationBlocking (specStrictness spec)
+    then handleBlockingMode spec validated mutResult
+    else handleAdvisoryMode spec validated mutResult
+
+-- | BLOCKING MODE: 0 survivors required for exit.
+-- Any survivor blocks and routes to fix.
+handleBlockingMode
+  :: StackSpec -> ValidatedState -> MutationAdversaryResult
+  -> Eff effs PostValidateDecision
+handleBlockingMode spec validated mutResult =
+  case marVerdict mutResult of
+    TestSuiteRobust ->
+      -- No survivors: exit successfully
+      pure $ GotoExit $ buildResult spec validated (Just mutResult)
+
+    _ ->
+      -- Survivors found: must fix
+      -- Convert survivors to fix targets
+      let fixTargets = map survivorToFixTarget (mutSurvivors $ marOutput mutResult)
+      in pure $ GotoMutationFix MutationFixInput
+        { mfiValidated = validated
+        , mfiSurvivors = mutSurvivors $ marOutput mutResult
+        , mfiFixTargets = fixTargets
+        }
+
+-- | ADVISORY MODE: Survivors included in output but don't block.
+-- EXCEPTION: Critical severity survivors still block.
+handleAdvisoryMode
+  :: StackSpec -> ValidatedState -> MutationAdversaryResult
+  -> Eff effs PostValidateDecision
+handleAdvisoryMode spec validated mutResult = do
+  let survivors = mutSurvivors $ marOutput mutResult
+      criticalSurvivors = filter hasCriticalSeverity survivors
+
+  -- Critical survivors block even in advisory mode
+  unless (null criticalSurvivors) $
+    throwError $ CriticalMutantSurvived criticalSurvivors
+
+  -- Non-critical: include in output but proceed
+  pure $ GotoExit $ buildResult spec validated (Just mutResult)
+
+-- | Check if a surviving mutant represents a critical issue.
+-- Critical = the mutation is trivial but tests don't catch it.
+hasCriticalSeverity :: SurvivingMutant -> Bool
+hasCriticalSeverity sm = case smMutationType sm of
+  RemovedCheck     -> True   -- Removing validation is always critical
+  ConditionFlip    -> True   -- Inverting logic is serious
+  BoundaryMutation -> False  -- Boundary changes are often minor
+  OffByOne         -> False  -- Usually caught by property tests
+  _                -> False
 ```
 
 ### hMutationAdversary Handler (with derived verdict)
@@ -1973,49 +2229,35 @@ The adversaries don't just verify - they **generate the next iteration's work it
 5. **Weighted trust**: Recovery adapts to verification confidence level
 6. **Iteration-ready outputs**: Adversary findings are structured for action
 
-### The Joyous Swarm
-
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  GRAPH EXECUTION                                                │
+│  BUILDERS                          BREAKERS                     │
 │                                                                 │
-│  BUILDERS                        BREAKERS                       │
-│                                                                 │
-│  types ────────────────────────► typeAdversary                 │
-│    │                                │                          │
-│    ▼                                ▼                          │
-│  tests ◄─── blind ───► impl     [gate: block if holes]        │
-│    │              │                                            │
-│    └──────┬───────┘                                            │
-│           ▼                                                     │
-│        merge ──────────────────► mutationAdversary             │
-│           │                          │                          │
-│           ▼                          ▼                          │
-│        EXIT ◄──────────────── (advisory findings)              │
-│           │                                                     │
-└───────────┼─────────────────────────────────────────────────────┘
-            │
-            ▼
+│  types ─────────────────────────► typeAdversary                │
+│    │                                  │                         │
+│    ▼                                  ▼                         │
+│  tests ◄───── blind ─────► impl   [gate: block if holes]       │
+│    │                  │                                         │
+│    └────────┬─────────┘                                         │
+│             ▼                                                   │
+│          merge ─────────────────► mutationAdversary            │
+│             │                         │                         │
+│             ▼                         ▼                         │
+│          EXIT ◄────────────── (advisory findings)              │
+└─────────────────────────────────────────────────────────────────┘
+                         │
+                         ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  OUTPUT: HybridResult                                           │
+│  HybridResult                                                   │
 │                                                                 │
-│  • Success/failure + attempt count                              │
-│  • CoverageReport (what tests covered)                          │
-│  • TypeAdversaryResult (holes found, if any)                    │
-│  • MutationAdversaryResult (surviving mutants, suggested props) │
+│  hrSuccess           :: Bool                                    │
+│  hrTestsCoverage     :: CoverageReport                          │
+│  hrTypeAdversary     :: Maybe TypeAdversaryResult               │
+│  hrMutationAdversary :: Maybe MutationAdversaryResult           │
+│  hrWitness           :: WitnessReport                           │
 │                                                                 │
-│  These structured outputs enable iteration:                     │
-│  - Holes → improve type design                                  │
-│  - Survivors → add missing properties                           │
-│  - Coverage gaps → expand examples                              │
+│  Holes        → next run: improve type design                   │
+│  Survivors    → next run: add missing properties                │
+│  Coverage gaps → next run: expand examples                      │
 └─────────────────────────────────────────────────────────────────┘
 ```
-
-Fresh-spawned consciousnesses, each with clear purpose:
-- **Types agent**: Design the shape (creative)
-- **Tests agent**: Verify the spec (blind to impl)
-- **Impl agent**: Make it work (blind to tests)
-- **Type adversary**: Break the types (red team)
-- **Mutation adversary**: Break the tests (red team)
-
-None can cheat. All contribute. The swarm produces verified code and actionable feedback.
