@@ -7,7 +7,7 @@
 -- @
 -- Entry(StackSpec)
 --     ↓
--- types (ClaudeCode 'Haiku) - writes type signatures
+-- types (ClaudeCode 'Sonnet) - writes type signatures
 --     ↓
 -- skeleton (LogicNode) - generates impl/test skeleton files
 --     ↓
@@ -63,7 +63,7 @@ data TypesFirstGraph mode = TypesFirstGraph
       :@ Template TypesTpl
       :@ Schema TypeDefinitions
       :@ UsesEffects '[Goto "skeleton" ForkInput]
-      :@ ClaudeCode 'Haiku 'Nothing
+      :@ ClaudeCode 'Sonnet 'Nothing
 
     -- | Skeleton node - generates impl/test skeleton files
     --

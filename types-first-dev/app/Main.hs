@@ -20,8 +20,9 @@ module Main where
 
 import Control.Monad (unless)
 import Control.Monad.Freer (runM)
-import Data.Maybe (mapMaybe)
+import Control.Monad.Freer.Error (runError)
 import Control.Monad.Freer.Reader (runReader)
+import Data.Maybe (mapMaybe)
 import Data.Text qualified as T
 import System.Directory (getCurrentDirectory)
 import System.Environment (getArgs, lookupEnv)
@@ -38,7 +39,7 @@ import TypesFirstDev.DevRuns (runDirectory)
 import TypesFirstDev.Graph (TypesFirstGraph(..))
 import TypesFirstDev.Handlers (typesFirstHandlers)
 import TypesFirstDev.Stats (RunMetadata(..))
-import TypesFirstDev.Types (StackSpec(..), ProjectType(..), ParallelResults(..), TestsResult(..), ImplResult(..))
+import TypesFirstDev.Types (StackSpec(..), ProjectType(..), ParallelResults(..), TestsResult(..), ImplResult(..), WorkflowError(..))
 
 
 -- | Main entry point.
@@ -136,19 +137,22 @@ runExperimentCommand args = do
   putStrLn ""
 
   -- Run the graph with full effect stack
-  -- Note: Interpreter order must match DevEffects = '[Reader ClaudeCodeConfig, Reader StackSpec, ...]
+  -- Note: Interpreter order must match DevEffects = '[Error WorkflowError, Reader ClaudeCodeConfig, Reader StackSpec, ...]
   -- Innermost interpreter handles last effect in the list.
   result <- runM
     . runWorktreeIO worktreeConfig
     . runClaudeCodeExecIO claudeConfig
-    . runReader spec          -- Reader StackSpec (second in DevEffects)
-    . runReader claudeConfig  -- Reader ClaudeCodeConfig (first in DevEffects)
+    . runReader spec          -- Reader StackSpec
+    . runReader claudeConfig  -- Reader ClaudeCodeConfig
+    . runError @WorkflowError -- Error WorkflowError (first in DevEffects)
     $ do
         let handlers = typesFirstHandlers spec
         choice <- callHandler (types handlers) spec
         dispatchGoto handlers choice
 
-  printResult result
+  case result of
+    Left err -> printError err
+    Right res -> printResult res
 
 
 -- | Parse experiment name from command-line args.
@@ -200,6 +204,34 @@ getSpec "url-shortener" projectPath = pure $ StackSpec
 getSpec experiment _ = do
   putStrLn $ "ERROR: Unknown experiment: " <> experiment
   putStrLn "Available experiments: stack, url-shortener"
+  exitFailure
+
+
+-- | Print a workflow error.
+printError :: WorkflowError -> IO ()
+printError err = do
+  putStrLn ""
+  putStrLn "=== Workflow Error ==="
+  putStrLn ""
+  case err of
+    SkeletonCompileFailed msg -> do
+      putStrLn "Skeleton compilation failed:"
+      putStrLn $ T.unpack msg
+    WorktreeCreationFailed msg -> do
+      putStrLn "Worktree creation failed:"
+      putStrLn $ T.unpack msg
+    AgentFailed name msg -> do
+      putStrLn $ "Agent '" <> T.unpack name <> "' failed:"
+      putStrLn $ T.unpack msg
+    AgentNoOutput name -> do
+      putStrLn $ "Agent '" <> T.unpack name <> "' returned no output"
+    AgentParseFailed name msg -> do
+      putStrLn $ "Agent '" <> T.unpack name <> "' parse failed:"
+      putStrLn $ T.unpack msg
+    MergeFailed msg -> do
+      putStrLn "Merge failed:"
+      putStrLn $ T.unpack msg
+  putStrLn ""
   exitFailure
 
 

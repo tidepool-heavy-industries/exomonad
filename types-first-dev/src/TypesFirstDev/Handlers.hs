@@ -21,6 +21,7 @@ module TypesFirstDev.Handlers
 import Control.Concurrent.Async (concurrently)
 import Control.Monad (when)
 import Control.Monad.Freer (Eff, sendM)
+import Control.Monad.Freer.Error (Error, throwError)
 import Control.Monad.Freer.Reader (Reader, ask)
 import Data.Maybe (fromMaybe, isJust)
 import Data.Proxy (Proxy(..))
@@ -54,6 +55,7 @@ import TypesFirstDev.Graph (TypesFirstGraph(..))
 import TypesFirstDev.Types
   ( StackSpec(..)
   , ProjectType(..)
+  , WorkflowError(..)
   , TypeDefinitions(..)
   , ForkInput(..)
   , SkeletonGenerated(..)
@@ -164,12 +166,13 @@ logClaudeCodeEvents agentName events = do
 
 -- | Effect stack for the types-first workflow (parallel version).
 --
+-- - Error WorkflowError: Workflow failures (compile errors, agent failures, etc.)
 -- - Reader ClaudeCodeConfig: Config for spawning Claude Code subprocesses
 -- - Reader StackSpec: The original specification (for routing)
 -- - ClaudeCodeExec: For spawning Claude Code subprocesses
 -- - Worktree: For managing git worktrees (parallel isolation)
 -- - IO: For system operations
-type DevEffects = '[Reader ClaudeCodeConfig, Reader StackSpec, ClaudeCodeExec, Worktree, IO]
+type DevEffects = '[Error WorkflowError, Reader ClaudeCodeConfig, Reader StackSpec, ClaudeCodeExec, Worktree, IO]
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -190,7 +193,7 @@ typesFirstHandlers spec = TypesFirstGraph
 
     -- Types handler: Writes type signatures, routes to skeleton
     -- Template selection based on project type
-  , types = ClaudeCodeLLMHandler @'Haiku @'Nothing
+  , types = ClaudeCodeLLMHandler @'Sonnet @'Nothing
       Nothing                              -- no system template
       (selectTypesTemplate spec.ssProjectType)  -- dynamic template selection
       buildTypesContext                    -- before: builds context
@@ -263,6 +266,7 @@ skeletonHandler input = do
       modulePath = T.unpack $ T.replace "." "/" input.fiModuleName
       implPath = projectPath <> "/src/" <> modulePath <> ".hs"
       testPath = projectPath <> "/test/Main.hs"
+      gitignorePath = projectPath <> "/.gitignore"
 
       -- Build skeleton context from type definitions
       skeletonCtx = SkeletonContext
@@ -284,7 +288,7 @@ skeletonHandler input = do
       implCode = runTypedTemplate skeletonCtx implTemplate
       testCode = runTypedTemplate skeletonCtx testTemplate
 
-  -- Write skeleton files and commit to git (so worktrees have them)
+  -- Write skeleton files
   sendM $ do
     logPhase "SKELETON GENERATION"
     logDetail "projectPath" projectPath
@@ -301,27 +305,28 @@ skeletonHandler input = do
     logMsg $ "Wrote test skeleton: " <> testPath
 
     -- Write .gitignore to prevent build artifacts from being committed
-    let gitignorePath = projectPath <> "/.gitignore"
     writeFile gitignorePath "dist-newstyle/\n*.hi\n*.o\n*.dyn_hi\n*.dyn_o\n"
     logMsg $ "Wrote .gitignore: " <> gitignorePath
 
-    -- Validate skeleton compiles before committing
-    logMsg "Validating skeleton compiles..."
-    (exitCode, buildOut, buildErr) <- withCurrentDirectory projectPath $
-      readProcessWithExitCode "cabal" ["build", "-v0", "all"] ""  -- -v0 for quiet output
-    case exitCode of
-      ExitSuccess -> logMsg "Skeleton validation passed"
-      ExitFailure code -> do
+  -- Validate skeleton compiles before committing
+  sendM $ logMsg "Validating skeleton compiles..."
+  (exitCode, buildOut, buildErr) <- sendM $ withCurrentDirectory projectPath $
+    readProcessWithExitCode "cabal" ["build", "-v0", "all"] ""
+
+  case exitCode of
+    ExitSuccess -> sendM $ logMsg "Skeleton validation passed"
+    ExitFailure code -> do
+      sendM $ do
         logError $ "Skeleton failed to compile (exit code " <> show code <> "):"
         logError buildErr
         logError buildOut
-        error "Skeleton compilation failed - fix templates before proceeding"
+      throwError $ SkeletonCompileFailed $ T.pack (buildErr <> "\n" <> buildOut)
 
-    -- Commit skeletons so worktrees will have them
+  -- Commit skeletons so worktrees will have them
+  sendM $ do
     logGit "Committing skeleton files" $ withCurrentDirectory projectPath $ do
       callProcess "git" ["add", implPath, testPath, gitignorePath]
       callProcess "git" ["commit", "-m", "Add skeleton files for " <> T.unpack input.fiModuleName]
-
     logMsg "Skeleton generation complete"
 
   -- Route to fork with generated paths and session ID for forking parallel agents
@@ -384,7 +389,7 @@ runAgentWithBuildValidation ccConfig (WorktreePath wtPath) basePrompt schema age
           let (thisResumeSession, thisForkSession) = case agentSessionId of
                 Nothing -> (resumeSession, forkSession)  -- First attempt: use parent settings
                 Just sid -> (Just sid, False)            -- Retry: resume agent's own session
-          result <- runClaudeCodeRequest ccConfig Haiku (Just wtPath) fullPrompt schema Nothing thisResumeSession thisForkSession
+          result <- runClaudeCodeRequest ccConfig Sonnet (Just wtPath) fullPrompt schema Nothing thisResumeSession thisForkSession
 
           case result of
             Left err -> pure $ Left err
@@ -445,7 +450,7 @@ runStubsAgentWithBuildValidation ccConfig projectPath basePrompt schema resumeSe
           let (thisResumeSession, thisForkSession) = case agentSessionId of
                 Nothing -> (resumeSession, forkSession)  -- First attempt
                 Just sid -> (Just sid, False)            -- Retry: resume agent's session
-          result <- runClaudeCodeRequest ccConfig Haiku (Just projectPath) fullPrompt schema Nothing thisResumeSession thisForkSession
+          result <- runClaudeCodeRequest ccConfig Sonnet (Just projectPath) fullPrompt schema Nothing thisResumeSession thisForkSession
 
           case result of
             Left err -> pure $ Left err
@@ -584,12 +589,12 @@ forkHandler input = do
   -- Handle worktree creation errors
   (testsWt, implWt) <- case (testsWtResult, implWtResult) of
     (Right t, Right i) -> pure (t, i)
-    (Left err, _) -> sendM $ do
-      logError $ "Failed to create tests worktree: " <> show err
-      error "Worktree creation failed"
-    (_, Left err) -> sendM $ do
-      logError $ "Failed to create impl worktree: " <> show err
-      error "Worktree creation failed"
+    (Left err, _) -> do
+      sendM $ logError $ "Failed to create tests worktree: " <> show err
+      throwError $ WorktreeCreationFailed $ T.pack $ show err
+    (_, Left err) -> do
+      sendM $ logError $ "Failed to create impl worktree: " <> show err
+      throwError $ WorktreeCreationFailed $ T.pack $ show err
 
   sendM $ do
     logDetail "testsWorktree" testsWt.unWorktreePath
@@ -721,7 +726,7 @@ parseOrError agentName (Left err) = do
   sendM $ do
     logError $ "Claude Code " <> T.unpack agentName <> " agent failed"
     logDetail "error" (show err)
-  error $ "Claude Code " <> show agentName <> " agent failed: " <> show err
+  throwError $ AgentFailed agentName (T.pack $ show err)
 parseOrError agentName (Right result) = do
   -- Log the full event stream (all tool calls, reasoning, etc.)
   sendM $ logClaudeCodeEvents agentName (CC.ccrEvents result)
@@ -739,14 +744,14 @@ parseOrError agentName (Right result) = do
   case CC.ccrStructuredOutput result of
     Nothing -> do
       sendM $ logError $ "Claude Code " <> T.unpack agentName <> " agent returned no structured output"
-      error $ "Claude Code " <> show agentName <> " agent returned no structured output"
+      throwError $ AgentNoOutput agentName
     Just val -> case parseStructured val of
       Left diag -> do
         sendM $ do
           logError $ "JSON parse error for " <> T.unpack agentName <> " agent"
           logDetail "parseError" (T.unpack $ formatDiagnostic diag)
           logDetail "rawJSON" (take 1000 $ show val)
-        error $ "Failed to parse " <> show agentName <> " response: " <> T.unpack (formatDiagnostic diag)
+        throwError $ AgentParseFailed agentName (formatDiagnostic diag)
       Right a -> do
         sendM $ logMsg $ T.unpack agentName <> " agent response parsed successfully"
         pure a
