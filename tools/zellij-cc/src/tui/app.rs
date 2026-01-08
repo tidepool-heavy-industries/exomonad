@@ -98,7 +98,8 @@ impl App {
             (KeyCode::Char('e'), KeyModifiers::NONE) => {
                 self.state.expand_all();
             }
-            (KeyCode::Char('c'), KeyModifiers::NONE) => {
+            (KeyCode::Char('C'), KeyModifiers::SHIFT) => {
+                // Use Shift-C to avoid confusion with Ctrl-C force quit
                 self.state.collapse_all();
             }
             _ => {}
@@ -260,7 +261,7 @@ impl App {
             Span::styled(": scroll  ", desc_style),
             Span::styled("Enter", key_style),
             Span::styled(": expand  ", desc_style),
-            Span::styled("e/c", key_style),
+            Span::styled("e/C", key_style),
             Span::styled(": expand/collapse all  ", desc_style),
             Span::styled("g/G", key_style),
             Span::styled(": top/bottom  ", desc_style),

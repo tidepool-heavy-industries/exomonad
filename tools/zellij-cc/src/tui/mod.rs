@@ -20,7 +20,7 @@
 //! - `J`/`K` or Page Up/Down: Page scroll
 //! - `g`/`G`: Jump to top/bottom
 //! - `Enter`: Toggle expand/collapse on tool details
-//! - `e`/`c`: Expand all / Collapse all
+//! - `e`/`C` (Shift): Expand all / Collapse all
 //! - `q`: Quit (only after session completes)
 //! - `Ctrl-C`: Force quit (even if session is running)
 

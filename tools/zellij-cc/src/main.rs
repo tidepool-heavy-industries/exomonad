@@ -450,6 +450,9 @@ fn wrap_claude(
         while let Ok(signal) = signal_rx.try_recv() {
             interrupts.push(signal);
         }
+
+        // Signal reader thread to stop (Claude stdout is done)
+        should_stop.store(true, Ordering::Relaxed);
     } else {
         // TUI mode
         let (event_tx, event_rx) = mpsc::channel::<tui::TuiEvent>();
@@ -503,10 +506,25 @@ fn wrap_claude(
         let _ = signal_forward_thread.join();
     }
 
-    // Wait for claude to exit
-    let status = child.wait()?;
+    // Wait for claude to exit without blocking indefinitely
+    // If force-quit was requested (Ctrl-C in TUI), kill the child process
+    let status = loop {
+        match child.try_wait()? {
+            Some(status) => break status,
+            None => {
+                // If shutdown was requested, terminate the child
+                if should_stop.load(Ordering::Relaxed) {
+                    let _ = child.kill();
+                    let status = child.wait()?;
+                    break status;
+                }
+                // Child still running; sleep briefly before polling again
+                thread::sleep(Duration::from_millis(100));
+            }
+        }
+    };
 
-    // Signal the reader thread to stop
+    // Ensure flag is set for signal thread cleanup (needed for no-TUI mode)
     should_stop.store(true, Ordering::Relaxed);
 
     // Drop the FIFO guard BEFORE joining the thread - this removes the FIFO,

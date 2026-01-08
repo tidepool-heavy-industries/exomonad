@@ -44,8 +44,10 @@ impl DisplayEvent {
                 for block in &a.message.content {
                     match block {
                         ContentBlock::Text { text } => {
+                            // Cache char count to avoid iterating twice
+                            let char_count = text.chars().count();
                             let preview: String = text.chars().take(60).collect();
-                            if text.chars().count() > 60 {
+                            if char_count > 60 {
                                 summaries.push(format!("{}...", preview));
                             } else {
                                 summaries.push(preview);
@@ -58,8 +60,10 @@ impl DisplayEvent {
                                 let total_params = obj.len();
                                 for (k, v) in obj.iter().take(5) {
                                     let v_str = v.to_string();
+                                    // Cache char count to avoid iterating twice
+                                    let char_count = v_str.chars().count();
                                     let preview: String = v_str.chars().take(60).collect();
-                                    if v_str.chars().count() > 60 {
+                                    if char_count > 60 {
                                         all_details.push(format!("  {}: {}...", k, preview));
                                     } else {
                                         all_details.push(format!("  {}: {}", k, preview));
@@ -73,8 +77,10 @@ impl DisplayEvent {
                         }
                         ContentBlock::ToolResult { content, is_error, .. } => {
                             let status = if is_error.unwrap_or(false) { "✗" } else { "✓" };
+                            // Cache char count to avoid iterating twice
+                            let char_count = content.chars().count();
                             let preview: String = content.chars().take(50).collect();
-                            if content.chars().count() > 50 {
+                            if char_count > 50 {
                                 summaries.push(format!("{} {}...", status, preview));
                             } else {
                                 summaries.push(format!("{} {}", status, preview));
@@ -249,7 +255,10 @@ impl AppState {
 
     /// Jump to top
     pub fn go_to_top(&mut self) {
-        self.selected_index = 0;
+        // Check empty for consistency with go_to_bottom()
+        if !self.display_events.is_empty() {
+            self.selected_index = 0;
+        }
     }
 
     /// Jump to bottom
