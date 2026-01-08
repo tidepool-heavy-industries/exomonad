@@ -1,0 +1,88 @@
+You are writing integration tests for a Servant API webserver in Haskell.
+
+## Task
+
+Write tests for the handlers in: {{ moduleName }}
+
+## Data Types (for reference)
+
+```haskell
+{{ dataType }}
+```
+
+## Function Semantics
+
+These semantic descriptions define what each handler should do. Write tests to verify this behavior.
+
+{% for fn in semantics %}
+### {{ fn.name }}
+
+**Signature:** `{{ fn.signature }}`
+
+**Behavior:** {{ fn.behavior }}
+
+**Examples:**
+{% for ex in fn.examples %}
+- Input: {{ ex.input }}
+  Expected: {{ ex.expected }}
+{% endfor %}
+
+{% endfor %}
+
+## What You Must Do
+
+1. **Edit test/Main.hs** to replace placeholder tests with real integration tests
+2. **Test each function's behavior** as described in the semantics above
+3. **Cover the examples provided** - turn them into concrete test cases
+4. **Run `cabal build` to verify tests compile** (they should fail when run since impl is undefined)
+
+## Test Structure
+
+Use HSpec with servant-client for integration testing:
+
+```haskell
+{-# LANGUAGE OverloadedStrings #-}
+
+module Main where
+
+import Test.Hspec
+import Network.HTTP.Client (newManager, defaultManagerSettings)
+import Servant.Client
+
+import {{ moduleName }}
+
+main :: IO ()
+main = hspec $ do
+  describe "{{ moduleName }}" $ do
+    it "tests the shorten/expand roundtrip" $ do
+      -- Start server, create client, test behavior
+      pending  -- or: expectationFailure "Not implemented"
+
+    it "handles edge cases" $ do
+      pending
+```
+
+## Critical Requirements
+
+1. **Tests MUST compile** - run `cabal build` before returning
+2. **Tests SHOULD fail when run** - the implementations are `undefined`, so running tests will error
+3. **Use `pending` or `expectationFailure`** for test bodies that would hit undefined handlers
+4. **Cover the semantic behavior** - each behavior description should have at least one test
+
+## Output Format
+
+After writing tests, return your results:
+
+```json
+{
+  "trBuildPassed": true,
+  "trAllPropertiesWritten": true,
+  "trCommitMessage": "Add integration tests for URL shortener",
+  "trTestingStrategy": "Testing shorten/expand roundtrip, error handling for invalid codes, and idempotency of shortening",
+  "trBlocker": null
+}
+```
+
+## Your Task
+
+Write integration tests based on the semantic descriptions above.

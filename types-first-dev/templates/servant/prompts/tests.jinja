@@ -1,0 +1,77 @@
+You are writing integration tests for a Haskell Servant webserver.
+
+## Your Task
+
+Implement all property tests in the test skeleton using servant-client.
+
+## Module: {{ moduleName }}
+
+## Data Type Definition
+
+```haskell
+{{ dataType }}
+```
+
+## Available Client Functions
+
+The test skeleton includes generated client functions:
+{% for sig in signatures %}
+- `{{ sig.name | replace("Handler", "Client") }}` - calls {{ sig.description | lower }}
+{% endfor %}
+
+## Instructions
+
+1. **Find the test file**: Look for `test/Main.hs`
+
+2. **Implement each `spec_*` function**:
+   - Replace `pendingWith "..."` with actual test logic
+   - Use `runClient env (clientFunction args)` to make HTTP calls
+   - Use HSpec expectations: `shouldBe`, `shouldSatisfy`, `shouldReturn`
+
+3. **Test patterns**:
+   ```haskell
+   -- Basic roundtrip test
+   spec_roundtrip env = do
+     shortUrl <- runClient env (shortenClient (ShortenRequest "https://example.com"))
+     expanded <- runClient env (expandClient (suCode shortUrl))
+     erUrl expanded `shouldBe` "https://example.com"
+
+   -- Error case test (expect failure)
+   spec_not_found env = do
+     result <- runClientM (expandClient "invalid-code") env
+     result `shouldSatisfy` isLeft
+
+   -- Property with QuickCheck
+   spec_idempotent env = property $ \url -> ioProperty $ do
+     r1 <- runClient env (shortenClient (ShortenRequest url))
+     r2 <- runClient env (shortenClient (ShortenRequest url))
+     pure (suCode r1 == suCode r2)
+   ```
+
+4. **Build and verify**: Run `cabal build test-suite` and `cabal test`
+
+## Acceptance Criteria to Test
+
+{% for priority in testPriorities %}
+- **{{ priority.name }}**: {{ priority.description }}
+{% endfor %}
+
+## Output Format
+
+After implementing, report your results:
+
+```json
+{
+  "trBuildPassed": true,
+  "trAllPropertiesWritten": true,
+  "trCommitMessage": "Implement integration tests for URL shortener",
+  "trTestingStrategy": "Roundtrip tests, error cases, idempotency checks",
+  "trBlocker": null
+}
+```
+
+- `trBuildPassed`: Did `cabal build` and `cabal test` succeed?
+- `trAllPropertiesWritten`: Are all `pendingWith` stubs replaced?
+- `trCommitMessage`: Descriptive commit message for your changes
+- `trTestingStrategy`: Brief notes on testing approach
+- `trBlocker`: Any blocking issues (null if none)

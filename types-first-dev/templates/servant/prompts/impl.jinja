@@ -1,0 +1,65 @@
+You are implementing a Haskell Servant webserver.
+
+## Your Task
+
+Implement all handler functions in the server skeleton.
+
+## Module: {{ moduleName }}
+
+## Data Type Definition
+
+```haskell
+{{ dataType }}
+```
+
+## Handler Signatures to Implement
+
+{% for sig in signatures %}
+- `{{ sig.name }} :: IORef AppState -> {{ sig.signature }}`
+  - {{ sig.description }}
+{% endfor %}
+
+## Instructions
+
+1. **Find the skeleton file**: Look for `src/{{ moduleName | replace(".", "/") }}.hs`
+
+2. **Implement each handler**: Replace `undefined` with working code
+   - Each handler has access to `IORef AppState` for state management
+   - Use `liftIO` to run IO actions inside Handler
+   - Use `throwError` to return HTTP errors (e.g., `err404`)
+
+3. **Common patterns**:
+   ```haskell
+   -- Read state
+   state <- liftIO $ readIORef ref
+
+   -- Modify state
+   liftIO $ modifyIORef' ref $ \s -> s { asUrls = Map.insert code url (asUrls s) }
+
+   -- Return 404
+   case Map.lookup code (asUrls state) of
+     Nothing -> throwError err404
+     Just url -> pure url
+   ```
+
+4. **Build and verify**: Run `cabal build` to ensure it compiles
+
+## Output Format
+
+After implementing, report your results:
+
+```json
+{
+  "irBuildPassed": true,
+  "irAllFunctionsImplemented": true,
+  "irCommitMessage": "Implement URL shortener handlers",
+  "irDesignNotes": "Used Map for storage, hash-based short codes",
+  "irBlocker": null
+}
+```
+
+- `irBuildPassed`: Did `cabal build` succeed?
+- `irAllFunctionsImplemented`: Are all `undefined` values replaced?
+- `irCommitMessage`: Descriptive commit message for your changes
+- `irDesignNotes`: Brief notes on implementation choices
+- `irBlocker`: Any blocking issues (null if none)
