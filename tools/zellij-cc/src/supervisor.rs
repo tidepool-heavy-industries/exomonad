@@ -263,6 +263,13 @@ impl Supervisor {
     pub fn pid(&self) -> Pid {
         self.child_pid
     }
+
+    /// Non-blocking check if child has exited.
+    ///
+    /// Returns `Ok(Some(status))` if exited, `Ok(None)` if still running.
+    pub fn try_wait(&mut self) -> Result<Option<ExitStatus>> {
+        self.child.try_wait().map_err(ZellijCcError::Io)
+    }
 }
 
 impl Drop for Supervisor {
