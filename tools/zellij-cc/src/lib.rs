@@ -11,6 +11,9 @@
 //! - [`fifo`]: FIFO abstractions for IPC (result and signal pipes)
 //! - [`humanize`]: Human-readable output formatting for terminal display
 //! - [`supervisor`]: Process lifecycle management with timeout/signals
+//! - [`protocol`]: Control envelope protocol types (hook events, MCP calls)
+//! - [`socket`]: Unix socket client for control envelope communication
+//! - [`hooks`]: Hook configuration generation for Claude Code
 //!
 //! ## Example
 //!
@@ -40,11 +43,17 @@
 pub mod error;
 pub mod events;
 pub mod fifo;
+pub mod hooks;
 pub mod humanize;
+pub mod protocol;
+pub mod socket;
 pub mod supervisor;
 
 // Re-export commonly used types at crate root
 pub use error::{Result, ZellijCcError};
 pub use events::{InterruptSignal, RunResult, StreamEvent};
 pub use fifo::{ResultFifo, SignalFifo};
+pub use hooks::{find_zellij_cc_binary, HookConfig};
+pub use protocol::{ControlMessage, ControlResponse, HookInput, HookOutput};
+pub use socket::ControlSocket;
 pub use supervisor::Supervisor;

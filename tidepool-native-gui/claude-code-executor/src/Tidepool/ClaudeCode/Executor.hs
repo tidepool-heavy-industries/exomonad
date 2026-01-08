@@ -2,9 +2,32 @@
 --
 -- This module provides the IO functions to run zellij-cc commands.
 -- The Effect module builds on this to provide an effect-based interface.
+--
+-- == Hook Support
+--
+-- When 'HookCallbacks' are provided, the executor starts a control socket
+-- server that receives hook events from zellij-cc and routes them to your
+-- callbacks. This enables:
+--
+-- * Intercepting tool calls before execution (PreToolUse)
+-- * Adding context after tool execution (PostToolUse)
+-- * Controlling permission prompts (PermissionRequest)
+-- * Preventing unwanted stops (Stop)
+--
+-- @
+-- -- Example: Deny writes to /etc
+-- let callbacks = defaultHookCallbacks
+--       { hcOnPreToolUse = \\toolName input -> do
+--           case toolName of
+--             "Write" | isEtcPath input -> pure $ HookDeny "Cannot write to /etc"
+--             _ -> pure HookAllow
+--       }
+-- result <- runClaudeCodeRequest cfg Sonnet Nothing "Do something" Nothing Nothing Nothing False (Just callbacks)
+-- @
 module Tidepool.ClaudeCode.Executor
   ( -- * Executor
     runClaudeCodeRequest
+  , runClaudeCodeRequestWithHooks
 
     -- * Helpers
   , modelToString
@@ -22,15 +45,14 @@ import System.Process (readProcessWithExitCode)
 import Tidepool.Graph.Types (ModelChoice(..))
 import Tidepool.ClaudeCode.Config (ClaudeCodeConfig(..))
 import Tidepool.ClaudeCode.Types (ClaudeCodeResult(..), ClaudeCodeError(..))
+import Tidepool.ClaudeCode.Hooks (HookCallbacks)
+import Tidepool.ClaudeCode.ControlSocket (withControlSocket)
 
 
 -- | Run a ClaudeCode request by shelling out to zellij-cc.
 --
--- This function:
--- 1. Generates a unique output file path
--- 2. Builds zellij-cc arguments
--- 3. Runs zellij-cc (blocks until Claude Code completes)
--- 4. Parses the JSON output
+-- This is the simple version without hook callbacks. For hook support,
+-- use 'runClaudeCodeRequestWithHooks'.
 --
 -- @
 -- result <- runClaudeCodeRequest config Sonnet (Just "/my/project") "Analyze this code" schema tools Nothing False
@@ -48,9 +70,55 @@ runClaudeCodeRequest
   -> Maybe Text       -- ^ Session ID to resume (for conversation continuity)
   -> Bool             -- ^ Fork session (read-only resume, doesn't modify original)
   -> IO (Either ClaudeCodeError ClaudeCodeResult)
-runClaudeCodeRequest cfg model cwd prompt schema tools resumeSession forkSession = do
+runClaudeCodeRequest cfg model cwd prompt schema tools resumeSession forkSession =
+  runClaudeCodeImpl cfg model cwd prompt schema tools resumeSession forkSession Nothing
+
+
+-- | Run a ClaudeCode request with hook callbacks.
+--
+-- This version starts a control socket server that receives hook events
+-- from zellij-cc and routes them to your callbacks. Use this when you need
+-- to intercept tool calls, add context, or control Claude Code behavior.
+--
+-- @
+-- let callbacks = defaultHookCallbacks
+--       { hcOnPreToolUse = \\toolName input -> do
+--           putStrLn $ "Tool: " <> T.unpack toolName
+--           pure HookAllow
+--       }
+-- result <- runClaudeCodeRequestWithHooks config callbacks Sonnet Nothing prompt schema tools Nothing False
+-- @
+runClaudeCodeRequestWithHooks
+  :: ClaudeCodeConfig
+  -> HookCallbacks    -- ^ Callbacks for hook events
+  -> ModelChoice      -- ^ Model: Haiku, Sonnet, or Opus
+  -> Maybe FilePath   -- ^ Working directory (Nothing inherits from runner)
+  -> Text             -- ^ Rendered prompt
+  -> Maybe Value      -- ^ JSON schema for structured output
+  -> Maybe Text       -- ^ Tools to allow (comma-separated, e.g. "Glob,Read")
+  -> Maybe Text       -- ^ Session ID to resume (for conversation continuity)
+  -> Bool             -- ^ Fork session (read-only resume, doesn't modify original)
+  -> IO (Either ClaudeCodeError ClaudeCodeResult)
+runClaudeCodeRequestWithHooks cfg callbacks model cwd prompt schema tools resumeSession forkSession =
+  withControlSocket callbacks $ \socketPath ->
+    runClaudeCodeImpl cfg model cwd prompt schema tools resumeSession forkSession (Just socketPath)
+
+
+-- | Internal implementation that runs zellij-cc with optional socket path.
+runClaudeCodeImpl
+  :: ClaudeCodeConfig
+  -> ModelChoice
+  -> Maybe FilePath
+  -> Text
+  -> Maybe Value
+  -> Maybe Text
+  -> Maybe Text
+  -> Bool
+  -> Maybe FilePath   -- ^ Control socket path (for hook support)
+  -> IO (Either ClaudeCodeError ClaudeCodeResult)
+runClaudeCodeImpl cfg model cwd prompt schema tools resumeSession forkSession socketPath = do
   -- Build arguments
-  let args = buildArgs cfg model cwd prompt schema tools resumeSession forkSession
+  let args = buildArgs cfg model cwd prompt schema tools resumeSession forkSession socketPath
 
   -- Run zellij-cc
   result <- try $ readProcessWithExitCode cfg.ccZellijCcPath args ""
@@ -89,8 +157,9 @@ buildArgs
   -> Maybe Text
   -> Maybe Text       -- ^ Session ID to resume
   -> Bool             -- ^ Fork session
+  -> Maybe FilePath   -- ^ Control socket path (for hook support)
   -> [String]
-buildArgs cfg model cwd prompt schema tools resumeSession forkSession =
+buildArgs cfg model cwd prompt schema tools resumeSession forkSession socketPath =
   [ "run"
   , "--session", T.unpack cfg.ccZellijSession
   , "--name", "cc-node"  -- Could make this configurable
@@ -103,6 +172,7 @@ buildArgs cfg model cwd prompt schema tools resumeSession forkSession =
   ++ toolsArgs
   ++ resumeArgs
   ++ forkArgs
+  ++ socketArgs
   where
     cwdArgs = case cwd of
       Nothing -> []
@@ -121,6 +191,10 @@ buildArgs cfg model cwd prompt schema tools resumeSession forkSession =
       Just sid -> ["--resume", T.unpack sid]
 
     forkArgs = if forkSession then ["--fork-session"] else []
+
+    socketArgs = case socketPath of
+      Nothing -> []
+      Just path -> ["--control-socket", path]
 
 
 -- | Convert ModelChoice to zellij-cc model string.

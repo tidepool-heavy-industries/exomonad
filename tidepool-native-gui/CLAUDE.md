@@ -26,6 +26,7 @@ tidepool-native-gui/
 ├── lsp-executor/             # LSP via lsp-client
 ├── claude-code-executor/     # Claude Code subprocess (WIP)
 ├── worktree-executor/        # Git worktree management
+├── ghci-executor/            # GHCi Oracle thin client
 ├── github-executor/          # GitHub API integration
 ├── issue-executor/           # Issue tracking
 └── devlog-executor/          # Devlog effect executor
@@ -43,6 +44,7 @@ tidepool-native-gui/
 | `lsp-executor` | `LSP` | lsp-client subprocess |
 | `claude-code-executor` | `ClaudeCodeExec` | claude CLI subprocess |
 | `worktree-executor` | `Worktree` | Git worktree via subprocess |
+| `ghci-executor` | `GHCi` | Socket client to ghci-oracle server |
 | `github-executor` | `GitHub` | GitHub REST API |
 | `issue-executor` | `FileIssue` | Issue tracking |
 

@@ -1,0 +1,190 @@
+//! Unix socket client for control envelope communication.
+//!
+//! Provides a synchronous socket client for sending hook events and MCP tool
+//! calls to the Haskell control server and receiving responses.
+//!
+//! ## Design Decision: Synchronous
+//!
+//! This module uses synchronous I/O (std::os::unix::net) rather than async.
+//! This is a deliberate choice because:
+//!
+//! 1. Hook commands block anyway - Claude Code waits for hook completion
+//! 2. Simpler code without async runtime overhead
+//! 3. Each hook invocation is a separate process with one request/response
+//!
+//! **Future consideration**: Switch to async (tokio) if it reduces complexity,
+//! particularly for the MCP server which may handle concurrent requests.
+//!
+//! ## Protocol
+//!
+//! - Transport: Unix domain socket (stream)
+//! - Framing: Newline-delimited JSON (NDJSON)
+//! - Flow: Connect -> Write message + newline -> Read response + newline -> Close
+
+use crate::error::{Result, ZellijCcError};
+use crate::protocol::{ControlMessage, ControlResponse};
+use std::io::{BufRead, BufReader, Write};
+use std::os::unix::net::UnixStream;
+use std::path::Path;
+use std::time::Duration;
+use tracing::{debug, trace};
+
+/// Default timeout for socket operations (30 seconds).
+const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Unix socket client for control envelope communication.
+pub struct ControlSocket {
+    stream: UnixStream,
+}
+
+impl ControlSocket {
+    /// Connect to the control socket at the given path.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the socket doesn't exist or connection fails.
+    pub fn connect(path: &Path) -> Result<Self> {
+        debug!(path = %path.display(), "Connecting to control socket");
+
+        let stream = UnixStream::connect(path).map_err(|e| ZellijCcError::SocketConnect {
+            path: path.to_path_buf(),
+            source: e,
+        })?;
+
+        // Set default timeouts
+        stream
+            .set_read_timeout(Some(DEFAULT_TIMEOUT))
+            .map_err(|e| ZellijCcError::SocketConfig { source: e })?;
+        stream
+            .set_write_timeout(Some(DEFAULT_TIMEOUT))
+            .map_err(|e| ZellijCcError::SocketConfig { source: e })?;
+
+        debug!("Connected to control socket");
+        Ok(Self { stream })
+    }
+
+    /// Set custom read/write timeout.
+    pub fn set_timeout(&self, timeout: Duration) -> Result<()> {
+        self.stream
+            .set_read_timeout(Some(timeout))
+            .map_err(|e| ZellijCcError::SocketConfig { source: e })?;
+        self.stream
+            .set_write_timeout(Some(timeout))
+            .map_err(|e| ZellijCcError::SocketConfig { source: e })?;
+        Ok(())
+    }
+
+    /// Send a message and receive the response.
+    ///
+    /// Protocol: Write JSON + newline, read JSON + newline.
+    pub fn send(&mut self, message: &ControlMessage) -> Result<ControlResponse> {
+        // Serialize and send
+        let json = serde_json::to_string(message).map_err(ZellijCcError::JsonSerialize)?;
+        trace!(json = %json, "Sending message");
+
+        self.stream
+            .write_all(json.as_bytes())
+            .map_err(|e| ZellijCcError::SocketWrite { source: e })?;
+        self.stream
+            .write_all(b"\n")
+            .map_err(|e| ZellijCcError::SocketWrite { source: e })?;
+        self.stream
+            .flush()
+            .map_err(|e| ZellijCcError::SocketWrite { source: e })?;
+
+        // Read response
+        let mut reader = BufReader::new(&self.stream);
+        let mut response_line = String::new();
+
+        reader
+            .read_line(&mut response_line)
+            .map_err(|e| ZellijCcError::SocketRead { source: e })?;
+
+        trace!(response = %response_line.trim(), "Received response");
+
+        let response: ControlResponse = serde_json::from_str(response_line.trim())
+            .map_err(|e| ZellijCcError::JsonParse { source: e })?;
+
+        Ok(response)
+    }
+}
+
+/// Check if the control socket environment variable is set.
+///
+/// Returns the socket path if `TIDEPOOL_CONTROL_SOCKET` is set and non-empty.
+pub fn control_socket_path() -> Option<String> {
+    std::env::var("TIDEPOOL_CONTROL_SOCKET")
+        .ok()
+        .filter(|s| !s.is_empty())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::net::UnixListener;
+    use std::thread;
+
+    #[test]
+    fn test_socket_roundtrip() {
+        // Create a temp socket
+        let dir = tempfile::tempdir().unwrap();
+        let socket_path = dir.path().join("test.sock");
+
+        // Start a simple echo server
+        let listener = UnixListener::bind(&socket_path).unwrap();
+        let server_handle = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(&stream);
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap();
+
+            // Parse the message and echo back a response
+            let _msg: ControlMessage = serde_json::from_str(&line).unwrap();
+
+            use crate::protocol::{HookOutput, ControlResponse};
+            let response = ControlResponse::hook_success(HookOutput::pre_tool_use_allow(None, None));
+            let response_json = serde_json::to_string(&response).unwrap();
+
+            use std::io::Write;
+            let mut stream = stream;
+            writeln!(stream, "{}", response_json).unwrap();
+        });
+
+        // Connect and send
+        let mut client = ControlSocket::connect(&socket_path).unwrap();
+
+        use crate::protocol::HookInput;
+        let message = ControlMessage::HookEvent {
+            input: HookInput {
+                session_id: "test".to_string(),
+                transcript_path: String::new(),
+                cwd: String::new(),
+                permission_mode: "default".to_string(),
+                hook_event_name: "PreToolUse".to_string(),
+                tool_name: Some("Write".to_string()),
+                tool_input: None,
+                tool_use_id: None,
+                tool_response: None,
+                prompt: None,
+                message: None,
+                notification_type: None,
+                stop_hook_active: None,
+                trigger: None,
+                custom_instructions: None,
+                source: None,
+                reason: None,
+            },
+        };
+
+        let response = client.send(&message).unwrap();
+
+        match response {
+            ControlResponse::HookResponse { exit_code, .. } => {
+                assert_eq!(exit_code, 0);
+            }
+            _ => panic!("Unexpected response type"),
+        }
+
+        server_handle.join().unwrap();
+    }
+}
