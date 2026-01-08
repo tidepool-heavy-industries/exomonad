@@ -141,6 +141,7 @@ This renders a template, spawns `claude -p` via zellij-cc, and parses JSON outpu
 | `tidepool-lsp-executor` | LSP via lsp-client |
 | `tidepool-observability-executor` | OpenTelemetry traces to Grafana |
 | `tidepool-claude-code-executor` | Claude Code subprocess (WIP) |
+| `tidepool-ghci-executor` | GHCi Oracle thin client |
 | `tidepool-issue-executor` | Issue tracking |
 | `tidepool-github-executor` | GitHub API integration |
 | `tidepool-wire-types` | Shared wire format types |
@@ -157,6 +158,7 @@ This renders a template, spawns `claude -p` via zellij-cc, and parses JSON outpu
 ### Tools (`tools/`)
 | Package | Purpose |
 |---------|---------|
+| `ghci-oracle` | Persistent GHCi session server (standalone) |
 | `impact-analysis` | PR blast radius analysis |
 | `tidepool-sleeptime-logs` | Log analysis for sleeptime |
 
