@@ -12,6 +12,7 @@ module Tidepool.Graph.Export
   , SchemaExport(..)
   , TemplateExport(..)
   , MemoryExport(..)
+  , ClaudeCodeExport(..)
   , ToolExport(..)
 
     -- * Conversion
@@ -34,6 +35,7 @@ import Tidepool.Graph.Reify
   , SchemaInfo(..)
   , TemplateInfo(..)
   , MemoryInfo(..)
+  , ClaudeCodeInfo(..)
   , ToolInfo(..)
   , RuntimeNodeKind(..)
   , RuntimeEdgeKind(..)
@@ -64,16 +66,17 @@ instance ToJSON GraphExport where
 
 -- | Export format for a single node.
 data NodeExport = NodeExport
-  { neKind :: Text                     -- ^ "LLM" | "Logic"
-  , neNeeds :: [Text]                  -- ^ Input type names
-  , neSchema :: Maybe SchemaExport     -- ^ Structured output info
-  , neTemplate :: Maybe TemplateExport -- ^ User template info
-  , neSystem :: Maybe TemplateExport   -- ^ System template info
-  , neTools :: [ToolExport]            -- ^ Available tools
-  , neMemory :: Maybe MemoryExport     -- ^ Node-private state info
-  , neTransitions :: [Text]            -- ^ Explicit Goto target names
-  , neCanExit :: Bool                  -- ^ Has Goto Exit?
-  , neHasVision :: Bool                -- ^ Vision enabled?
+  { neKind :: Text                         -- ^ "LLM" | "ClaudeCode" | "Logic"
+  , neNeeds :: [Text]                      -- ^ Input type names
+  , neSchema :: Maybe SchemaExport         -- ^ Structured output info
+  , neTemplate :: Maybe TemplateExport     -- ^ User template info
+  , neSystem :: Maybe TemplateExport       -- ^ System template info
+  , neTools :: [ToolExport]                -- ^ Available tools
+  , neMemory :: Maybe MemoryExport         -- ^ Node-private state info
+  , neClaudeCode :: Maybe ClaudeCodeExport -- ^ ClaudeCode annotation info
+  , neTransitions :: [Text]                -- ^ Explicit Goto target names
+  , neCanExit :: Bool                      -- ^ Has Goto Exit?
+  , neHasVision :: Bool                    -- ^ Vision enabled?
   }
   deriving (Show, Eq, Generic)
 
@@ -86,6 +89,7 @@ instance ToJSON NodeExport where
     , "system" .= ne.neSystem
     , "tools" .= ne.neTools
     , "memory" .= ne.neMemory
+    , "claudeCode" .= ne.neClaudeCode
     , "transitions" .= ne.neTransitions
     , "canExit" .= ne.neCanExit
     , "hasVision" .= ne.neHasVision
@@ -159,6 +163,19 @@ instance ToJSON MemoryExport where
     [ "typeName" .= me.meTypeName
     ]
 
+-- | Export format for ClaudeCode info.
+data ClaudeCodeExport = ClaudeCodeExport
+  { ceModel :: Text        -- ^ Model: "Haiku", "Sonnet", or "Opus"
+  , ceCwd :: Maybe Text    -- ^ Working directory if specified
+  }
+  deriving (Show, Eq, Generic)
+
+instance ToJSON ClaudeCodeExport where
+  toJSON ce = object
+    [ "model" .= ce.ceModel
+    , "cwd" .= ce.ceCwd
+    ]
+
 -- | Export format for tool info.
 data ToolExport = ToolExport
   { txName :: Text            -- ^ Tool name
@@ -204,6 +221,7 @@ nodeToExport ni = NodeExport
   , neSystem = templateToExport <$> ni.niSystem
   , neTools = map toolToExport ni.niToolInfos
   , neMemory = memoryToExport <$> ni.niMemory
+  , neClaudeCode = claudeCodeToExport <$> ni.niClaudeCode
   , neTransitions = map fst ni.niGotoTargets
   , neCanExit = ni.niHasGotoExit
   , neHasVision = ni.niHasVision
@@ -250,6 +268,13 @@ toolToExport ti = ToolExport
   , txInputSchema = schemaToValue ti.tiInputSchema
   }
 
+-- | Convert ClaudeCodeInfo to ClaudeCodeExport.
+claudeCodeToExport :: ClaudeCodeInfo -> ClaudeCodeExport
+claudeCodeToExport cci = ClaudeCodeExport
+  { ceModel = cci.cciModel
+  , ceCwd = cci.cciCwd
+  }
+
 -- ════════════════════════════════════════════════════════════════════════════
 -- HELPERS
 -- ════════════════════════════════════════════════════════════════════════════
@@ -257,6 +282,7 @@ toolToExport ti = ToolExport
 -- | Convert RuntimeNodeKind to text.
 kindToText :: RuntimeNodeKind -> Text
 kindToText RuntimeLLM = "LLM"
+kindToText RuntimeClaudeCode = "ClaudeCode"
 kindToText RuntimeLogic = "Logic"
 
 -- | Convert RuntimeEdgeKind to text.
