@@ -81,6 +81,36 @@ pub enum ZellijCcError {
     /// Generic I/O error (for cases not covered above).
     #[error("I/O error: {0}")]
     Io(#[source] io::Error),
+
+    // ---- Socket errors (for control envelope) ----
+    /// Failed to connect to control socket.
+    #[error("failed to connect to control socket at {path}: {source}")]
+    SocketConnect {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
+
+    /// Failed to configure socket options.
+    #[error("failed to configure socket: {source}")]
+    SocketConfig {
+        #[source]
+        source: io::Error,
+    },
+
+    /// Failed to write to socket.
+    #[error("failed to write to socket: {source}")]
+    SocketWrite {
+        #[source]
+        source: io::Error,
+    },
+
+    /// Failed to read from socket.
+    #[error("failed to read from socket: {source}")]
+    SocketRead {
+        #[source]
+        source: io::Error,
+    },
 }
 
 /// Result type alias using ZellijCcError.

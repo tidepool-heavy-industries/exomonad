@@ -17,3 +17,6 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # Vendored OpenSSL to avoid system library mismatch
 openssl-sys = { version = "0.9", features = ["vendored"] }
+
+[dev-dependencies]
+tempfile = "3"
