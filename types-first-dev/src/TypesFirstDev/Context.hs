@@ -17,6 +17,8 @@ module TypesFirstDev.Context
     -- * v3 Stubs Workflow
   , StubsContext(..)
   , TestsContextV3(..)
+    -- * TDD Fix Context
+  , FixContext(..)
   ) where
 
 import Control.Monad.Writer (Writer)
@@ -26,6 +28,7 @@ import Text.Ginger.GVal (ToGVal(..), dict, list)
 import Text.Ginger.Run.Type (Run)
 import Text.Parsec.Pos (SourcePos)
 
+import Tidepool.Effects.Cabal (TestFailure(..))
 import TypesFirstDev.Types (FunctionSig(..), TestPriority(..), FunctionSemantics(..), FunctionExample(..))
 
 
@@ -231,4 +234,49 @@ instance ToGVal (Run SourcePos (Writer Text) Text) TestsContextV3 where
     [ ("moduleName", toGVal moduleName)
     , ("dataType", toGVal dataType)
     , ("semantics", list $ map toGVal semantics)
+    ]
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- TDD FIX CONTEXT
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Context for the fix template (TDD validation loop).
+--
+-- When tests fail after implementation, this context provides
+-- structured failure information for the fix agent.
+--
+-- Template variables:
+--   {{ moduleName }} - module name
+--   {{ implPath }} - path to implementation file
+--   {{ failures }} - list of TestFailure objects with .tfPropertyName, .tfMessage, etc.
+--   {{ attempt }} - current fix attempt number
+data FixContext = FixContext
+  { moduleName :: Text
+    -- ^ Module name for the implementation.
+  , implPath :: Text
+    -- ^ Path to implementation file (for LLM to read/edit).
+  , failures :: [TestFailure]
+    -- ^ Structured test failures.
+  , attempt :: Int
+    -- ^ Current fix attempt number (for retry context).
+  }
+  deriving (Show, Eq, Generic)
+
+-- | ToGVal for TestFailure - exposes failure details to templates
+instance ToGVal (Run SourcePos (Writer Text) Text) TestFailure where
+  toGVal tf = dict
+    [ ("tfPropertyName", toGVal tf.tfPropertyName)
+    , ("tfMessage", toGVal tf.tfMessage)
+    , ("tfCounterexample", maybe (toGVal ("" :: Text)) toGVal tf.tfCounterexample)
+    , ("tfSeed", maybe (toGVal (0 :: Int)) toGVal tf.tfSeed)
+    , ("tfLocation", maybe (toGVal ("" :: Text)) toGVal tf.tfLocation)
+    ]
+
+instance ToGVal (Run SourcePos (Writer Text) Text) FixContext where
+  toGVal FixContext{..} = dict
+    [ ("moduleName", toGVal moduleName)
+    , ("implPath", toGVal implPath)
+    , ("failures", list $ map toGVal failures)
+    , ("attempt", toGVal attempt)
     ]

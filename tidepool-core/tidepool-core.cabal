@@ -60,6 +60,7 @@ library
         Tidepool.Effects.BD
         Tidepool.Effects.Git
         Tidepool.Effects.Worktree
+        Tidepool.Effects.Cabal
         Tidepool.Graph.Mermaid
         Tidepool.Graph.Example
         Tidepool.Graph.Example.Context

@@ -17,6 +17,7 @@ packages:
     tidepool-native-gui/devlog-executor
     tidepool-native-gui/worktree-executor
     tidepool-native-gui/ghci-executor
+    tidepool-native-gui/cabal-executor
     tidepool-native-gui/server
 
     -- Tooling packages (Agent 8)

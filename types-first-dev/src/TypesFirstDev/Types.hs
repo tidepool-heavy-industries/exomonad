@@ -1,3 +1,4 @@
+{-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE FieldSelectors #-}
 
 -- | Schema types for the types-first development workflow.
@@ -57,12 +58,22 @@ module TypesFirstDev.Types
     -- * Session State (Memory effect)
   , SessionContext(..)
   , emptySessionContext
+
+    -- * TDD Workflow Types (Sequential)
+  , SkeletonState(..)
+  , TestsWritten(..)
+  , TestsVerified(..)
+  , ImplWritten(..)
+  , ValidationFailure(..)
+  , FixResult(..)
+  , TDDResult(..)
   ) where
 
 import Data.Aeson (FromJSON, ToJSON)
 import Data.Text (Text)
 import GHC.Generics (Generic)
 
+import Tidepool.Effects.Cabal (TestFailure)
 import Tidepool.Effects.Worktree (WorktreePath)
 import Tidepool.StructuredOutput (StructuredOutput)
 
@@ -147,6 +158,7 @@ data FunctionSig = FunctionSig
     -- ^ Brief description of what the function does.
   }
   deriving stock (Show, Eq, Generic)
+  deriving anyclass (FromJSON, ToJSON)
 
 instance StructuredOutput FunctionSig
 
@@ -160,6 +172,7 @@ data TestPriority = TestPriority
     -- ^ What to test (e.g., "Stack maintains LIFO order").
   }
   deriving stock (Show, Eq, Generic)
+  deriving anyclass (FromJSON, ToJSON)
 
 instance StructuredOutput TestPriority
 
@@ -281,6 +294,7 @@ data TypeDefinitions = TypeDefinitions
     -- The skeleton generator will include these in the generated module.
   }
   deriving stock (Show, Eq, Generic)
+  deriving anyclass (FromJSON, ToJSON)
 
 instance StructuredOutput TypeDefinitions
 
@@ -549,3 +563,129 @@ emptySessionContext = SessionContext
   { scSessionId = ""
   , scProjectPath = ""
   }
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- TDD WORKFLOW TYPES (Sequential - tests before impl)
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | State after skeleton generation in TDD workflow.
+--
+-- Contains paths to generated files and type definitions for downstream use.
+data SkeletonState = SkeletonState
+  { ssTypeDefs :: TypeDefinitions
+    -- ^ Type definitions from the types agent.
+  , ssImplPath :: FilePath
+    -- ^ Path to generated implementation skeleton.
+  , ssTestPath :: FilePath
+    -- ^ Path to generated test skeleton.
+  , ssProjectPath :: FilePath
+    -- ^ Project root path.
+  }
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (FromJSON, ToJSON)
+
+instance StructuredOutput SkeletonState
+
+-- | State after tests are written (TDD step 1).
+--
+-- Tests have been written but not yet verified to fail.
+data TestsWritten = TestsWritten
+  { twSkeletonState :: SkeletonState
+    -- ^ State from skeleton generation.
+  , twTestsResult :: TestsResult
+    -- ^ Result metadata from tests agent.
+  }
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (FromJSON, ToJSON)
+
+instance StructuredOutput TestsWritten
+
+-- | State after verifying tests fail as expected (TDD step 2).
+--
+-- Tests have been verified to fail before implementation.
+-- This proves the tests are meaningful (not trivially passing).
+data TestsVerified = TestsVerified
+  { tvTestsWritten :: TestsWritten
+    -- ^ State from tests writing.
+  , tvFailingTests :: [TestFailure]
+    -- ^ Expected failures before implementation.
+    -- Used to track which tests should eventually pass.
+  }
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (FromJSON, ToJSON)
+
+instance StructuredOutput TestsVerified
+
+-- | State after implementation is written (TDD step 3).
+--
+-- Implementation has been written and compiles, but not yet validated.
+data ImplWritten = ImplWritten
+  { iwTestsVerified :: TestsVerified
+    -- ^ State from test verification.
+  , iwImplResult :: ImplResult
+    -- ^ Result metadata from impl agent.
+  , iwAttempt :: Int
+    -- ^ Current attempt number (for retry tracking).
+  }
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (FromJSON, ToJSON)
+
+instance StructuredOutput ImplWritten
+
+-- | Validation failure with structured test output.
+--
+-- When tests fail after implementation, this captures the failures
+-- for the fix agent to address.
+data ValidationFailure = ValidationFailure
+  { vfImplWritten :: ImplWritten
+    -- ^ State from implementation.
+  , vfFailures :: [TestFailure]
+    -- ^ Structured test failures for LLM consumption.
+  , vfAttempt :: Int
+    -- ^ Current fix attempt number.
+  }
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (FromJSON, ToJSON)
+
+instance StructuredOutput ValidationFailure
+
+-- | Result from the fix agent.
+--
+-- The fix agent analyzes test failures and modifies the implementation.
+data FixResult = FixResult
+  { frBuildPassed :: Bool
+    -- ^ Did `cabal build` succeed after fixes?
+  , frChangesMade :: [Text]
+    -- ^ Summary of changes made (for logging).
+  , frCommitMessage :: Text
+    -- ^ Git commit message (50 chars max).
+  , frBlocker :: Maybe Text
+    -- ^ If blocked, explain why. Null if successful.
+  }
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (FromJSON, ToJSON)
+
+instance StructuredOutput FixResult
+
+-- | Final result of the TDD workflow.
+--
+-- Indicates whether the workflow succeeded and how many attempts it took.
+data TDDResult = TDDResult
+  { tdrSuccess :: Bool
+    -- ^ Whether all tests pass.
+  , tdrAttempts :: Int
+    -- ^ Number of fix attempts needed (1 = first try succeeded).
+  , tdrTypeDefs :: TypeDefinitions
+    -- ^ Final type definitions.
+  , tdrTestsResult :: TestsResult
+    -- ^ Final tests result.
+  , tdrImplResult :: ImplResult
+    -- ^ Final impl result.
+  , tdrFinalTestOutput :: Text
+    -- ^ Final test output (for logging).
+  }
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (FromJSON, ToJSON)
+
+instance StructuredOutput TDDResult

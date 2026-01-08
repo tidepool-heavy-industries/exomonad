@@ -10,6 +10,7 @@ module TypesFirstDev.Templates
     TypesTpl
   , TestsTpl
   , ImplTpl
+  , FixTpl
   , ImplSkeletonTpl
   , TestSkeletonTpl
 
@@ -28,6 +29,7 @@ module TypesFirstDev.Templates
   , typesCompiled
   , testsCompiled
   , implCompiled
+  , fixCompiled
   , implSkeletonCompiled
   , testSkeletonCompiled
 
@@ -47,7 +49,7 @@ import Text.Parsec.Pos (SourcePos)
 
 import Tidepool.Graph.Template (TemplateDef(..), TypedTemplate, typedTemplateFile)
 
-import TypesFirstDev.Context (TypesContext(..), TestsContext(..), ImplContext(..), SkeletonContext(..), StubsContext(..), TestsContextV3(..))
+import TypesFirstDev.Context (TypesContext(..), TestsContext(..), ImplContext(..), SkeletonContext(..), StubsContext(..), TestsContextV3(..), FixContext(..))
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -115,6 +117,28 @@ instance TemplateDef ImplTpl where
   templateCompiled = implCompiled
 
   buildContext = error "ImplTpl.buildContext should not be called for ClaudeCode handlers"
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- Fix Template (TDD validation loop)
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Compile the fix template at build time.
+fixCompiled :: TypedTemplate FixContext SourcePos
+fixCompiled = $(typedTemplateFile ''FixContext "templates/prompts/fix.jinja")
+
+-- | Template type marker for the fix node.
+data FixTpl
+
+instance TemplateDef FixTpl where
+  type TemplateContext FixTpl = FixContext
+  type TemplateConstraint FixTpl es = ()
+
+  templateName = "fix"
+  templateDescription = "Fix implementation based on test failures"
+  templateCompiled = fixCompiled
+
+  buildContext = error "FixTpl.buildContext should not be called for ClaudeCode handlers"
 
 
 -- ════════════════════════════════════════════════════════════════════════════

@@ -21,6 +21,8 @@
 -- @
 module TypesFirstDev.Graph
   ( TypesFirstGraph(..)
+    -- * TDD Graph (Sequential)
+  , TypesFirstGraphTDD(..)
   ) where
 
 import GHC.Generics (Generic)
@@ -39,8 +41,13 @@ import Tidepool.Graph.Generic (GraphMode(..))
 import qualified Tidepool.Graph.Generic as G
 import Tidepool.Graph.Goto (Goto)
 
-import TypesFirstDev.Types (StackSpec, TypeDefinitions, ForkInput, SkeletonGenerated, ParallelResults)
-import TypesFirstDev.Templates (TypesTpl)
+import TypesFirstDev.Types
+  ( StackSpec, TypeDefinitions, ForkInput, SkeletonGenerated, ParallelResults
+  -- TDD types
+  , SkeletonState, TestsWritten, TestsVerified, ImplWritten
+  , ValidationFailure, FixResult, TDDResult, TestsResult, ImplResult
+  )
+import TypesFirstDev.Templates (TypesTpl, TestsTpl, ImplTpl, FixTpl)
 
 
 -- | Types-first development workflow graph (parallel version).
@@ -92,5 +99,126 @@ data TypesFirstGraph mode = TypesFirstGraph
 
     -- | Exit point - returns parallel results
   , exit :: mode :- G.Exit ParallelResults
+  }
+  deriving Generic
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- TDD GRAPH (Sequential - tests first, validation loop)
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Sequential TDD graph - tests written before implementation.
+--
+-- This graph implements true TDD:
+-- 1. Write type signatures (types node)
+-- 2. Generate skeleton files (skeleton node)
+-- 3. Write tests (tests node) - LLM writes QuickCheck properties
+-- 4. Verify tests fail (verifyTestsFail node) - proves tests are meaningful
+-- 5. Implement functions (impl node) - LLM implements to make tests pass
+-- 6. Validate tests pass (validate node) - runs cabal test
+-- 7. If tests fail, fix implementation (fix node) and loop back to validate
+--
+-- @
+-- Entry(StackSpec)
+--     ↓
+-- types (ClaudeCode) → TypeDefinitions
+--     ↓
+-- skeleton (LogicNode) → SkeletonState
+--     ↓
+-- tests (ClaudeCode) → TestsWritten
+--     ↓
+-- verifyTestsFail (LogicNode) → TestsVerified
+--     ↓
+-- impl (ClaudeCode) → ImplWritten
+--     ↓
+-- ┌─────────────────────────────────┐
+-- │     VALIDATION LOOP             │
+-- │                                 │
+-- │ validate (LogicNode)            │
+-- │     ↓ [pass]    ↓ [fail]       │
+-- │   Exit      fix (ClaudeCode)   │
+-- │              ↓                 │
+-- │            validate (loop)     │
+-- └─────────────────────────────────┘
+--     ↓
+-- Exit(TDDResult)
+-- @
+data TypesFirstGraphTDD mode = TypesFirstGraphTDD
+  { -- | Entry point - receives Stack specification
+    tddEntry :: mode :- G.Entry StackSpec
+
+    -- | Phase 1: Design types
+    --
+    -- Uses Claude Code to design the data type and function signatures.
+    -- Output: TypeDefinitions with data type, signatures, and test priorities.
+  , tddTypes :: mode :- G.LLMNode
+      :@ Types.Input StackSpec
+      :@ Template TypesTpl
+      :@ Schema TypeDefinitions
+      :@ UsesEffects '[Goto "tddSkeleton" TypeDefinitions]
+      :@ ClaudeCode 'Haiku 'Nothing
+
+    -- | Phase 2: Generate skeleton files
+    --
+    -- Generates impl skeleton with undefined stubs and test skeleton.
+    -- Validates that the skeleton compiles.
+  , tddSkeleton :: mode :- G.LogicNode
+      :@ Types.Input TypeDefinitions
+      :@ UsesEffects '[Goto "tddTests" SkeletonState]
+
+    -- | Phase 3: Write tests (TDD step 1)
+    --
+    -- Uses Claude Code to write QuickCheck property tests.
+    -- Tests should be written against the skeleton (will fail until impl).
+  , tddTests :: mode :- G.LLMNode
+      :@ Types.Input SkeletonState
+      :@ Template TestsTpl
+      :@ Schema TestsResult
+      :@ UsesEffects '[Goto "tddVerifyTestsFail" TestsWritten]
+      :@ ClaudeCode 'Haiku 'Nothing
+
+    -- | Phase 4: Verify tests fail (TDD step 2)
+    --
+    -- Runs `cabal test` and verifies that tests FAIL.
+    -- This proves the tests are meaningful (not trivially passing).
+    -- If tests pass, the tests are likely wrong.
+  , tddVerifyTestsFail :: mode :- G.LogicNode
+      :@ Types.Input TestsWritten
+      :@ UsesEffects '[Goto "tddImpl" TestsVerified]
+
+    -- | Phase 5: Implement functions (TDD step 3)
+    --
+    -- Uses Claude Code to implement functions to make tests pass.
+    -- Replaces undefined stubs with working implementations.
+  , tddImpl :: mode :- G.LLMNode
+      :@ Types.Input TestsVerified
+      :@ Template ImplTpl
+      :@ Schema ImplResult
+      :@ UsesEffects '[Goto "tddValidate" ImplWritten]
+      :@ ClaudeCode 'Haiku 'Nothing
+
+    -- | Phase 6: Validate tests pass
+    --
+    -- Runs `cabal test` to verify implementation passes all tests.
+    -- On success: exit with TDDResult.
+    -- On failure: route to fix node for iteration.
+  , tddValidate :: mode :- G.LogicNode
+      :@ Types.Input ImplWritten
+      :@ UsesEffects '[Goto "tddFix" ValidationFailure, Goto Exit TDDResult]
+
+    -- | Phase 7: Fix loop
+    --
+    -- If tests fail, uses Claude Code to analyze failures and fix impl.
+    -- Routes back to validate for re-testing.
+    -- Maximum 5 attempts before hard failure.
+  , tddFix :: mode :- G.LLMNode
+      :@ Types.Input ValidationFailure
+      :@ Template FixTpl
+      :@ Schema FixResult
+      :@ UsesEffects '[Goto "tddValidate" ImplWritten]
+      :@ ClaudeCode 'Haiku 'Nothing
+
+    -- | Exit point - returns TDD result
+  , tddExit :: mode :- G.Exit TDDResult
   }
   deriving Generic
