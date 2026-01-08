@@ -97,6 +97,10 @@ enum Commands {
         #[arg(long)]
         session_tag: Option<String>,
 
+        /// Timeout in seconds (0 = no timeout)
+        #[arg(long, default_value = "0")]
+        timeout: u64,
+
         /// All remaining args passed to claude
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         claude_args: Vec<String>,
@@ -164,8 +168,9 @@ fn main() {
             result_fifo,
             cwd,
             session_tag,
+            timeout,
             claude_args,
-        } => wrap_claude(&result_fifo, cwd.as_ref(), session_tag.as_deref(), &claude_args),
+        } => wrap_claude(&result_fifo, cwd.as_ref(), session_tag.as_deref(), timeout, &claude_args),
         Commands::Signal {
             signal_type,
             state,
@@ -282,6 +287,12 @@ fn run_cc_session(
         wrap_cmd_parts.push(shell_quote(tag).into_owned());
     }
 
+    // Pass timeout to wrap command so it can enforce it on the subprocess
+    if timeout_secs > 0 {
+        wrap_cmd_parts.push("--timeout".to_string());
+        wrap_cmd_parts.push(timeout_secs.to_string());
+    }
+
     wrap_cmd_parts.push("--".to_string());
     wrap_cmd_parts.extend(escaped_args);
 
@@ -343,6 +354,7 @@ fn wrap_claude(
     result_fifo: &PathBuf,
     cwd: Option<&PathBuf>,
     session_tag: Option<&str>,
+    timeout_secs: u64,
     claude_args: &[String],
 ) -> Result<()> {
     // Install signal handlers for SIGINT/SIGTERM forwarding
@@ -354,9 +366,13 @@ fn wrap_claude(
     // Build and spawn claude with supervisor
     let cmd = build_claude_command(claude_args, cwd.map(|p| p.as_path()), signal_fifo.path());
 
-    // No timeout here - timeout is enforced by run_cc_session reading the result FIFO.
-    // The supervisor here is for signal forwarding and cleanup on drop.
-    let mut supervisor = Supervisor::spawn(cmd, None)?;
+    // Spawn with timeout if specified (0 = no timeout)
+    let timeout = if timeout_secs > 0 {
+        Some(Duration::from_secs(timeout_secs))
+    } else {
+        None
+    };
+    let mut supervisor = Supervisor::spawn(cmd, timeout)?;
 
     // Take stdout for reading
     let stdout = supervisor.take_stdout();

@@ -55,14 +55,6 @@ pub enum ZellijCcError {
     #[error("child process killed after {elapsed:?} timeout")]
     ProcessTimeout { elapsed: Duration },
 
-    /// Child process exited with an error.
-    #[error("child process exited with code {code}")]
-    ProcessExit { code: i32 },
-
-    /// Failed to kill child process.
-    #[error("failed to kill child process: {0}")]
-    ProcessKill(#[source] io::Error),
-
     /// JSON parse error while processing stream.
     #[error("JSON parse error: {source}")]
     JsonParse {

@@ -48,7 +48,7 @@ impl FifoGuard {
         }
         mkfifo(&path, Mode::S_IRUSR | Mode::S_IWUSR).map_err(|e| ZellijCcError::FifoCreate {
             path: path.clone(),
-            source: std::io::Error::from_raw_os_error(e as i32),
+            source: std::io::Error::from(e), // Errno implements Into<io::Error>
         })?;
         debug!(path = %path.display(), "Created FIFO");
         Ok(Self { path })

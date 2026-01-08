@@ -152,3 +152,39 @@ fn test_spawn_failure() {
     let result = Supervisor::spawn(cmd, None);
     assert!(matches!(result, Err(ZellijCcError::Spawn(_))));
 }
+
+/// Test that child processes can be killed by signals.
+///
+/// This test verifies that when we send SIGKILL directly to a child,
+/// the child terminates. This is the observable behavior that matters
+/// for cleanup - if SIGKILL works, SIGTERM will too (with proper handling).
+#[test]
+fn test_child_can_be_killed() {
+    use nix::sys::signal::{kill, Signal};
+    use std::os::unix::process::ExitStatusExt;
+    use std::thread;
+
+    // Spawn a process that sleeps
+    let mut cmd = Command::new("sleep");
+    cmd.arg("60").stdout(Stdio::piped());
+
+    let mut sup = Supervisor::spawn(cmd, Some(Duration::from_secs(10))).unwrap();
+    let _stdout = sup.take_stdout();
+
+    // Small delay to ensure process is running
+    thread::sleep(Duration::from_millis(50));
+
+    // Send SIGKILL directly to the child (cannot be caught/ignored)
+    let child_pid = sup.pid();
+    kill(child_pid, Signal::SIGKILL).expect("Failed to send SIGKILL to child");
+
+    // Wait for the child - it should be killed
+    let status = sup.wait_with_timeout().unwrap();
+
+    // Process killed by SIGKILL should have signal 9
+    assert_eq!(
+        status.signal(),
+        Some(9),
+        "Child should have been killed by SIGKILL (signal 9)"
+    );
+}

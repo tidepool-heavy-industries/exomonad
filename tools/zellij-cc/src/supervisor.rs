@@ -11,6 +11,11 @@
 //! Uses a global atomic flag to track received signals. The main loop
 //! checks this flag and forwards signals to the child process. This
 //! approach avoids the complexity of async signal handlers.
+//!
+//! **Limitation**: Because signal state is global, only one `Supervisor`
+//! can correctly receive forwarded signals at a time. This is appropriate
+//! for zellij-cc's use case (single subprocess per wrap invocation), but
+//! would need redesign for multi-process supervision scenarios.
 
 use crate::error::{Result, ZellijCcError};
 use nix::libc;
@@ -60,10 +65,17 @@ pub fn install_signal_handlers() {
 }
 
 /// Check if a signal was received and get the signal number.
+///
+/// Uses `compare_exchange` to atomically check-and-clear the flag,
+/// preventing race conditions where a second signal arrives between
+/// the check and the clear.
 fn check_signal() -> Option<Signal> {
-    if SIGNAL_RECEIVED.load(Ordering::Acquire) {
-        // Reset the flag
-        SIGNAL_RECEIVED.store(false, Ordering::Release);
+    // Atomically check if signal received AND clear the flag
+    // This prevents losing signals that arrive between check and clear
+    if SIGNAL_RECEIVED
+        .compare_exchange(true, false, Ordering::AcqRel, Ordering::Relaxed)
+        .is_ok()
+    {
         let signum = SIGNAL_NUMBER.load(Ordering::Acquire);
         Signal::try_from(signum).ok()
     } else {
@@ -235,6 +247,11 @@ impl Supervisor {
     /// Get elapsed time since spawn.
     pub fn elapsed(&self) -> Duration {
         self.start_time.elapsed()
+    }
+
+    /// Get the child's PID.
+    pub fn pid(&self) -> Pid {
+        self.child_pid
     }
 }
 
