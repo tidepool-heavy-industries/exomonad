@@ -25,7 +25,6 @@ import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Typeable (TypeRep)
 import GHC.Generics (Generic)
 
 import Tidepool.Graph.Reify

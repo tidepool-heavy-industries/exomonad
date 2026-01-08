@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -Wno-redundant-constraints #-}
 -- | IO-blind Language Server Protocol effect (Native-only)
 --
 -- = Overview

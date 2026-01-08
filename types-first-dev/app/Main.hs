@@ -18,6 +18,7 @@ module Main where
 
 import Control.Monad (unless)
 import Control.Monad.Freer (runM)
+import Data.Maybe (mapMaybe)
 import Control.Monad.Freer.Reader (runReader)
 import Data.Text qualified as T
 import System.Directory (getCurrentDirectory)
@@ -187,8 +188,10 @@ validateZellijSession sessionName = do
   -- Strip ANSI codes and extract just the session name (first word of each line)
   let sessionLines = lines sessions
       -- Session name is the first word after stripping ANSI codes
-      extractName line = head $ words $ stripAnsi line
-      knownSessions = map extractName $ filter (not . null) sessionLines
+      extractName line = case words (stripAnsi line) of
+        (name:_) -> Just name
+        [] -> Nothing
+      knownSessions = mapMaybe extractName $ filter (not . null) sessionLines
       sessionExists = T.unpack sessionName `elem` knownSessions
   unless sessionExists $ do
     putStrLn ""

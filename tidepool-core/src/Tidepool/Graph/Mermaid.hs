@@ -115,8 +115,7 @@ toMermaid = toMermaidWithConfig defaultConfig
 -- @
 graphToMermaid
   :: forall (graph :: Type -> Type).
-     ( Generic (graph AsGraph)
-     , GReifyFields (Rep (graph AsGraph))
+     ( GReifyFields (Rep (graph AsGraph))
      , ReifyMaybeType (GetEntryTypeFromGraph graph)
      , ReifyMaybeType (GetExitTypeFromGraph graph)
      )
@@ -127,8 +126,7 @@ graphToMermaid p = toMermaid (makeGraphInfo p)
 -- | Generate Mermaid diagram with custom configuration from a graph type.
 graphToMermaidWithConfig
   :: forall (graph :: Type -> Type).
-     ( Generic (graph AsGraph)
-     , GReifyFields (Rep (graph AsGraph))
+     ( GReifyFields (Rep (graph AsGraph))
      , ReifyMaybeType (GetEntryTypeFromGraph graph)
      , ReifyMaybeType (GetExitTypeFromGraph graph)
      )

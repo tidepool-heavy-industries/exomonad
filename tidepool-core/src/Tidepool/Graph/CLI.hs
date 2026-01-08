@@ -7,6 +7,7 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# OPTIONS_GHC -Wno-name-shadowing #-}
 
 -- | CLI derivation for tidepool graphs.
 --
@@ -567,10 +568,10 @@ cliFieldError typeName fieldName fieldType = unlines
 
 -- | Generate error message for nested record type.
 nestedRecordError :: Name -> String -> Name -> String
-nestedRecordError typeName flag nestedType = unlines
+nestedRecordError typeName flagName nestedType = unlines
   [ "deriveCLIParser: Nested record type not supported"
   , ""
-  , "Field --" ++ flag ++ " in '" ++ nameBase typeName
+  , "Field --" ++ flagName ++ " in '" ++ nameBase typeName
     ++ "' has type '" ++ nameBase nestedType ++ "' which is a record."
   , ""
   , "CLI derivation only supports flat types. Options:"
@@ -581,8 +582,8 @@ nestedRecordError typeName flag nestedType = unlines
 
 -- | Generate error message for unsupported type.
 unsupportedTypeError :: String -> Name -> String
-unsupportedTypeError flag typeName = unlines
-  [ "deriveCLIParser: Unsupported type for field --" ++ flag
+unsupportedTypeError flagName typeName = unlines
+  [ "deriveCLIParser: Unsupported type for field --" ++ flagName
   , ""
   , "Type '" ++ nameBase typeName ++ "' is not supported."
   , ""

@@ -8,6 +8,7 @@ import qualified GraphValidationSpec
 import qualified LLMNodeExecuteSpec
 import qualified MemorySerializationSpec
 import qualified MermaidSpec
+import qualified StructuredOutputSpec
 
 import qualified OneOfSpec
 import qualified InjectTargetSpec
@@ -36,6 +37,10 @@ main = hspec $ do
 
   describe "Mermaid Generation" $ do
     MermaidSpec.spec
+
+  describe "StructuredOutput" $ do
+    StructuredOutputSpec.spec
+
   describe "OneOf GADT" $ do
     OneOfSpec.spec
 

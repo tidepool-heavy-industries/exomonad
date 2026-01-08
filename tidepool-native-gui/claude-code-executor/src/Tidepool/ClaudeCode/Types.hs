@@ -46,7 +46,6 @@ import Data.Aeson
   , Object
   , Value(..)
   , withObject
-  , withText
   , object
   , (.:)
   , (.:?)

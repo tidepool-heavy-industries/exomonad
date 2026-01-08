@@ -20,7 +20,6 @@ build-type:         Simple
 library
     exposed-modules:
         TypesFirstDev.Types
-        TypesFirstDev.Schema
         TypesFirstDev.Context
         TypesFirstDev.Templates
         TypesFirstDev.Graph

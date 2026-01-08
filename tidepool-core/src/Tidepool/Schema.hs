@@ -61,6 +61,7 @@ data JSONSchema = JSONSchema
   , schemaProperties :: Map Text JSONSchema
   , schemaRequired :: [Text]
   , schemaItems :: Maybe JSONSchema
+  , schemaMinItems :: Maybe Int
   , schemaEnum :: Maybe [Text]
   , schemaOneOf :: Maybe [JSONSchema]
   }
@@ -78,7 +79,7 @@ data SchemaType
 
 -- | Empty schema of given type
 emptySchema :: SchemaType -> JSONSchema
-emptySchema t = JSONSchema t Nothing Map.empty [] Nothing Nothing Nothing
+emptySchema t = JSONSchema t Nothing Map.empty [] Nothing Nothing Nothing Nothing
 
 -- | Object schema combinator
 objectSchema :: [(Text, JSONSchema)] -> [Text] -> JSONSchema
@@ -106,7 +107,7 @@ describeField _fieldName desc schema = schema { schemaDescription = Just desc }
 -- | Convert schema to Aeson Value (JSON Schema draft-07 format)
 -- Note: Anthropic API requires additionalProperties: false on all object types
 schemaToValue :: JSONSchema -> Value
-schemaToValue (JSONSchema typ desc props req items enum_ oneOf_) = object $ catMaybes
+schemaToValue (JSONSchema typ desc props req items minItems_ enum_ oneOf_) = object $ catMaybes
   [ Just $ "type" .= typeToText typ
   , ("description" .=) <$> desc
   , if Map.null props
@@ -120,6 +121,7 @@ schemaToValue (JSONSchema typ desc props req items enum_ oneOf_) = object $ catM
     then Just $ "additionalProperties" .= False
     else Nothing
   , ("items" .=) . schemaToValue <$> items
+  , ("minItems" .=) <$> minItems_
   , ("enum" .=) <$> enum_
   , ("oneOf" .=) . fmap schemaToValue <$> oneOf_
   ]

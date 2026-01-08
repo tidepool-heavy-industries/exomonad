@@ -46,11 +46,12 @@ import Tidepool.Graph.Goto (GotoChoice, To, ClaudeCodeLLMHandler(..), ClaudeCode
 import Tidepool.Graph.Template (runTypedTemplate, TypedTemplate)
 import Text.Parsec.Pos (SourcePos)
 import Tidepool.Graph.Types (ModelChoice(..), Exit)
-import Tidepool.Schema (HasJSONSchema(..), schemaToValue)
+import Tidepool.Schema (schemaToValue)
+import Tidepool.StructuredOutput (StructuredOutput(..), formatDiagnostic)
 
 import TypesFirstDev.Context (TypesContext(..), TestsContext(..), ImplContext(..), SkeletonContext(..), StubsContext(..), TestsContextV3(..))
 import TypesFirstDev.Graph (TypesFirstGraph(..))
-import TypesFirstDev.Schema
+import TypesFirstDev.Types
   ( StackSpec(..)
   , ProjectType(..)
   , TypeDefinitions(..)
@@ -474,7 +475,7 @@ stubsHandlerV3 spec config = do
       stubsPrompt = runTypedTemplate stubsCtx servantStubsCompiled
 
       -- Build schema for StubsOutput
-      stubsSchema = Just $ schemaToValue (jsonSchema @StubsOutput)
+      stubsSchema = Just $ schemaToValue (structuredSchema @StubsOutput)
 
   logDetail "implPath" implPath
   logDetail "stubsPromptLength" (show $ T.length stubsPrompt)
@@ -602,8 +603,8 @@ forkHandler input = do
       implPrompt = runTypedTemplate implCtx implTemplate
 
       -- Build schemas (using new result types - no code, just metadata)
-      testsSchema = Just $ schemaToValue (jsonSchema @TestsResult)
-      implSchema = Just $ schemaToValue (jsonSchema @ImplResult)
+      testsSchema = Just $ schemaToValue (structuredSchema @TestsResult)
+      implSchema = Just $ schemaToValue (structuredSchema @ImplResult)
 
   sendM $ do
     logPhase "FORK - Spawning parallel agents"
@@ -659,7 +660,7 @@ forkHandler input = do
 --
 -- Logs errors with full context before failing.
 parseOrError
-  :: (Aeson.FromJSON a)
+  :: (StructuredOutput a)
   => Text
   -> Either CC.ClaudeCodeError CC.ClaudeCodeResult
   -> Eff DevEffects a
@@ -686,14 +687,14 @@ parseOrError agentName (Right result) = do
     Nothing -> do
       sendM $ logError $ "Claude Code " <> T.unpack agentName <> " agent returned no structured output"
       error $ "Claude Code " <> show agentName <> " agent returned no structured output"
-    Just val -> case Aeson.fromJSON val of
-      Aeson.Error msg -> do
+    Just val -> case parseStructured val of
+      Left diag -> do
         sendM $ do
           logError $ "JSON parse error for " <> T.unpack agentName <> " agent"
-          logDetail "parseError" msg
+          logDetail "parseError" (T.unpack $ formatDiagnostic diag)
           logDetail "rawJSON" (take 1000 $ show val)
-        error $ "Failed to parse " <> show agentName <> " response: " <> msg
-      Aeson.Success a -> do
+        error $ "Failed to parse " <> show agentName <> " response: " <> T.unpack (formatDiagnostic diag)
+      Right a -> do
         sendM $ logMsg $ T.unpack agentName <> " agent response parsed successfully"
         pure a
 
@@ -756,8 +757,8 @@ forkHandlerV3 input config spec = do
       implPrompt = runTypedTemplate implCtx servantImplCompiled
 
       -- Build schemas
-      testsSchema = Just $ schemaToValue (jsonSchema @TestsResult)
-      implSchema = Just $ schemaToValue (jsonSchema @ImplResult)
+      testsSchema = Just $ schemaToValue (structuredSchema @TestsResult)
+      implSchema = Just $ schemaToValue (structuredSchema @ImplResult)
 
   logPhase "v3 FORK - Spawning parallel agents"
   logDetail "testsPromptLength" (show $ T.length testsPrompt)
@@ -1054,8 +1055,8 @@ mergeHandler results = do
   if bothMergeSuccess
     then do
       sendM $ logMsg "Cleaning up worktrees..."
-      deleteWorktree results.prTestsWorktree
-      deleteWorktree results.prImplWorktree
+      _ <- deleteWorktree results.prTestsWorktree
+      _ <- deleteWorktree results.prImplWorktree
       sendM $ logMsg "Worktrees deleted"
     else do
       sendM $ do

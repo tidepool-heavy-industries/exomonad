@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -Wno-redundant-constraints #-}
 -- | IO-blind GHCi Oracle effect (Native-only)
 --
 -- = Overview
