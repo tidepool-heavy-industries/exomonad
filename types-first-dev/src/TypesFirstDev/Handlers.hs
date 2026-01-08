@@ -22,6 +22,13 @@ module TypesFirstDev.Handlers
     -- * TDD Workflow (sequential with validation loop)
   , typesFirstHandlersTDD
   , maxFixAttempts
+
+    -- * Session-Aware Execution
+  , runAgentWithBuildValidationV2
+  , handleSessionEnd
+
+    -- * Crosstalk (Parallel Agent Communication)
+  , runAgentWithCrosstalk
   ) where
 
 import Control.Concurrent.Async (concurrently)
@@ -44,8 +51,23 @@ import Data.Time.Clock (getCurrentTime)
 import Data.Time.Format (formatTime, defaultTimeLocale)
 
 import Tidepool.ClaudeCode.Config (ClaudeCodeConfig)
-import Tidepool.ClaudeCode.Executor (runClaudeCodeRequest)
+import Tidepool.ClaudeCode.Executor (runClaudeCodeRequest, runClaudeCodeRequestWithHooks)
 import Tidepool.ClaudeCode.Types qualified as CC
+import Tidepool.ClaudeCode.Hooks (HookCallbacks(..), defaultHookCallbacks, SessionEndContext(..), SessionEndAction(..))
+import Tidepool.ClaudeCode.SessionState
+  ( SessionState(..)
+  , SessionExitReason(..)
+  , loadSessionState
+  , saveSessionState
+  , clearSessionState
+  , shouldResume
+  )
+import Tidepool.ClaudeCode.Crosstalk
+  ( CrosstalkState
+  , newCrosstalkStatePair
+  , crosstalkPostToolUse
+  , PostToolUseContext(..)
+  )
 import Tidepool.Effect.ClaudeCode (ClaudeCodeExec)
 import Tidepool.Effects.Worktree (Worktree, createWorktree, deleteWorktree, mergeWorktree, WorktreeSpec(..), WorktreePath(..), MergeResult(..), WorktreeError(..))
 import Tidepool.Graph.Generic (AsHandler)
@@ -73,6 +95,7 @@ import TypesFirstDev.Types
   , TestsResult(..)
   , ImplResult(..)
   , SessionContext(..)
+  , ResumeStrategy(..)
     -- TDD workflow types
   , SkeletonState(..)
   , TestsWritten(..)
@@ -519,6 +542,233 @@ runStubsAgentWithBuildValidation ccConfig projectPath basePrompt schema resumeSe
 
 
 -- ════════════════════════════════════════════════════════════════════════════
+-- SESSION-AWARE AGENT EXECUTION (v2)
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Run agent with build validation and session continuity support.
+--
+-- Enhanced version of 'runAgentWithBuildValidation' that:
+--
+-- 1. Loads existing session state from disk
+-- 2. Uses the configured 'ResumeStrategy' to decide whether to resume
+-- 3. Registers a typed 'SessionEnd' callback to persist state
+-- 4. Passes session ID to Claude Code when resuming
+--
+-- Session state is stored per-worktree at @.claude/tidepool-session.json@.
+--
+-- == Resume Strategies
+--
+-- * 'AlwaysFresh': Always start a new session (current default behavior)
+-- * 'ResumeOnRetry': Resume only when retrying after build failure
+-- * 'AlwaysResume': Resume if session state exists
+-- * 'SmartResume': Resume based on previous exit reason
+runAgentWithBuildValidationV2
+  :: ClaudeCodeConfig
+  -> FilePath        -- ^ Working directory (worktree path)
+  -> Text            -- ^ Base prompt
+  -> Maybe Aeson.Value -- ^ JSON schema for structured output
+  -> Text            -- ^ Agent name (for logging and state)
+  -> ResumeStrategy  -- ^ Resume strategy
+  -> IO (Either CC.ClaudeCodeError CC.ClaudeCodeResult)
+runAgentWithBuildValidationV2 ccConfig wtPath basePrompt schema agentName strategy = do
+  -- Load existing session state
+  existingState <- loadSessionState wtPath
+
+  -- Determine initial session ID based on strategy
+  let initialSessionId = case strategy of
+        AlwaysFresh -> Nothing
+        AlwaysResume ->
+          existingState >>= \st -> Just st.ssSessionId
+        SmartResume ->
+          existingState >>= \st ->
+            case st.ssLastExitReason of
+              Just reason | shouldResume reason -> Just st.ssSessionId
+              _ -> Nothing
+        ResumeOnRetry ->
+          -- Only resume after first attempt (handled in the loop)
+          Nothing
+
+  logMsg $ T.unpack agentName <> " agent: strategy=" <> show strategy
+  case initialSessionId of
+    Nothing -> logMsg $ T.unpack agentName <> " agent: starting fresh session"
+    Just sid -> logMsg $ T.unpack agentName <> " agent: resuming session " <> T.unpack sid
+
+  go 0 Nothing initialSessionId
+  where
+    go :: Int -> Maybe Text -> Maybe Text -> IO (Either CC.ClaudeCodeError CC.ClaudeCodeResult)
+    go attempt lastBuildError sessionId
+      | attempt >= maxAgentRetries = do
+          logError $ T.unpack agentName <> " agent: max retries (" <> show maxAgentRetries <> ") exceeded"
+          case lastBuildError of
+            Just err -> pure $ Left $ CC.ClaudeCodeExecutionError $
+              "Build failed after " <> T.pack (show maxAgentRetries) <> " attempts: " <> err
+            Nothing -> pure $ Left $ CC.ClaudeCodeExecutionError "Max retries exceeded with no error"
+      | otherwise = do
+          -- Build prompt with retry context if we have a previous error
+          let fullPrompt = case lastBuildError of
+                Nothing -> basePrompt
+                Just buildErr -> basePrompt <> "\n\n## PREVIOUS ATTEMPT FAILED\n\nYour code did not compile. The build failed with:\n```\n" <> buildErr <> "\n```\n\nPlease fix these issues and try again."
+
+          logMsg $ T.unpack agentName <> " agent attempt " <> show (attempt + 1) <> "/" <> show maxAgentRetries
+
+          -- Create callbacks with typed SessionEnd handler
+          let callbacks = defaultHookCallbacks
+                { hcOnSessionEndTyped = handleSessionEnd wtPath agentName
+                }
+
+          -- Run agent with hooks (using Sonnet for capability)
+          result <- runClaudeCodeRequestWithHooks
+            ccConfig
+            callbacks
+            Sonnet
+            (Just wtPath)
+            fullPrompt
+            schema
+            Nothing      -- tools
+            sessionId    -- resume session ID
+            False        -- don't fork session
+
+          case result of
+            Left err -> pure $ Left err
+            Right ccResult -> do
+              -- Validate build
+              logMsg $ T.unpack agentName <> " agent completed, validating build..."
+              (exitCode, buildOut, buildErr) <- withCurrentDirectory wtPath $
+                readProcessWithExitCode "cabal" ["build", "-v0"] ""
+              case exitCode of
+                ExitSuccess -> do
+                  logMsg $ T.unpack agentName <> " agent: build passed"
+                  pure $ Right ccResult
+                ExitFailure code -> do
+                  let errorMsg = T.pack $ "Exit code " <> show code <> ":\n" <> buildErr <> buildOut
+                  logError $ T.unpack agentName <> " agent: build failed, retrying..."
+                  logError $ T.unpack errorMsg
+
+                  -- Determine next session ID based on strategy
+                  let nextSessionId = case strategy of
+                        ResumeOnRetry -> Just $ CC.ccrSessionId ccResult
+                        SmartResume -> Just $ CC.ccrSessionId ccResult
+                        _ -> Nothing
+
+                  go (attempt + 1) (Just errorMsg) nextSessionId
+
+-- | Handle SessionEnd hook - persists session state.
+handleSessionEnd :: FilePath -> Text -> SessionEndContext -> IO SessionEndAction
+handleSessionEnd wtPath agentName ctx = do
+  now <- getCurrentTime
+  let state = SessionState
+        { ssSessionId = ctx.secSessionId
+        , ssLastExitReason = Just ctx.secReason
+        , ssTimestamp = now
+        , ssAgentName = agentName
+        , ssRetryCount = 0
+        , ssTranscriptPath = Just ctx.secTranscriptPath
+        }
+
+  logMsg $ T.unpack agentName <> " session ended: " <> show ctx.secReason
+
+  case ctx.secReason of
+    NormalExit -> do
+      saveSessionState wtPath state
+      pure $ CommitWork "Auto-commit: Agent completed successfully"
+
+    ClearExit -> do
+      saveSessionState wtPath state
+      pure PreserveForResume
+
+    LogoutExit -> do
+      clearSessionState wtPath
+      pure Cleanup
+
+    PromptInputExit -> do
+      clearSessionState wtPath
+      pure Cleanup
+
+    UnknownExit _ -> do
+      saveSessionState wtPath state
+      pure NoAction
+
+
+-- | Run agent with build validation and crosstalk support.
+--
+-- Combines build validation with crosstalk for parallel agent communication.
+-- After each tool use (Write, Edit, Bash), checks if the other agent has
+-- committed new work and injects context about those commits.
+--
+-- This enables parallel agents to stay aware of each other's progress
+-- without explicit coordination.
+--
+-- NOTE: Session resumption on retry is not supported with crosstalk.
+-- Each retry starts a fresh session. This is intentional: crosstalk agents
+-- fork from a parent session and we want each retry attempt to have the
+-- same starting context (the parent's state at fork time).
+runAgentWithCrosstalk
+  :: ClaudeCodeConfig
+  -> FilePath          -- ^ Working directory (worktree path)
+  -> Text              -- ^ Base prompt
+  -> Maybe Aeson.Value -- ^ JSON schema for structured output
+  -> Text              -- ^ Agent name (for logging)
+  -> Maybe Text        -- ^ Resume session ID (for forking from parent)
+  -> Bool              -- ^ Fork session (True for parallel agents forking from parent)
+  -> CrosstalkState    -- ^ Crosstalk state for tracking other agent
+  -> IO (Either CC.ClaudeCodeError CC.ClaudeCodeResult)
+runAgentWithCrosstalk ccConfig wtPath basePrompt schema agentName resumeSession forkSession crosstalk = go 0 Nothing
+  where
+    go :: Int -> Maybe Text -> IO (Either CC.ClaudeCodeError CC.ClaudeCodeResult)
+    go attempt lastBuildError
+      | attempt >= maxAgentRetries = do
+          logError $ T.unpack agentName <> " agent: max retries (" <> show maxAgentRetries <> ") exceeded"
+          case lastBuildError of
+            Just err -> pure $ Left $ CC.ClaudeCodeExecutionError $
+              "Build failed after " <> T.pack (show maxAgentRetries) <> " attempts: " <> err
+            Nothing -> pure $ Left $ CC.ClaudeCodeExecutionError "Max retries exceeded with no error"
+      | otherwise = do
+          -- Build prompt with retry context if we have a previous error
+          let fullPrompt = case lastBuildError of
+                Nothing -> basePrompt
+                Just buildErr -> basePrompt <> "\n\n## PREVIOUS ATTEMPT FAILED\n\nYour code did not compile. The build failed with:\n```\n" <> buildErr <> "\n```\n\nPlease fix these issues and try again."
+
+          logMsg $ T.unpack agentName <> " agent attempt " <> show (attempt + 1) <> "/" <> show maxAgentRetries
+
+          -- Create callbacks with crosstalk support
+          -- Both SessionEnd (for state persistence) and PostToolUse (for crosstalk)
+          let callbacks = defaultHookCallbacks
+                { hcOnSessionEndTyped = handleSessionEnd wtPath agentName
+                , hcOnPostToolUseTyped = \ctx ->
+                    crosstalkPostToolUse crosstalk ctx.ptcToolName ctx.ptcToolInput ctx.ptcToolResponse
+                }
+
+          -- Run agent with hooks (using Sonnet for capability)
+          result <- runClaudeCodeRequestWithHooks
+            ccConfig
+            callbacks
+            Sonnet
+            (Just wtPath)
+            fullPrompt
+            schema
+            Nothing        -- tools
+            resumeSession  -- session ID for forking from parent
+            forkSession    -- fork session flag
+
+          case result of
+            Left err -> pure $ Left err
+            Right ccResult -> do
+              -- Validate build
+              logMsg $ T.unpack agentName <> " agent completed, validating build..."
+              (exitCode, buildOut, buildErr) <- withCurrentDirectory wtPath $
+                readProcessWithExitCode "cabal" ["build", "-v0"] ""
+              case exitCode of
+                ExitSuccess -> do
+                  logMsg $ T.unpack agentName <> " agent: build passed"
+                  pure $ Right ccResult
+                ExitFailure code -> do
+                  let errorMsg = T.pack $ "Exit code " <> show code <> ":\n" <> buildErr <> buildOut
+                  logError $ T.unpack agentName <> " agent: build failed, retrying..."
+                  logError $ T.unpack errorMsg
+                  go (attempt + 1) (Just errorMsg)
+
+
+-- ════════════════════════════════════════════════════════════════════════════
 -- v3 STUBS HANDLER
 -- ════════════════════════════════════════════════════════════════════════════
 
@@ -838,7 +1088,7 @@ forkHandlerV3
   -> ClaudeCodeConfig
   -> StackSpec
   -> IO (Either String ParallelResults)
-forkHandlerV3 input config spec = do
+forkHandlerV3 input config _spec = do
   logPhase "v3 FORK - Creating worktrees"
   logDetail "projectPath" input.stgProjectPath
   logDetail "moduleName" (T.unpack input.stgModuleName)
@@ -896,17 +1146,24 @@ forkHandlerV3 input config spec = do
       shouldFork = isJust parentSessionMaybe
   logDetail "parentSessionId" (maybe "(none - starting fresh)" T.unpack parentSessionMaybe)
 
-  -- Run both agents in parallel, forking from the stubs session
-  logMsg "Launching parallel agents with build validation..."
+  -- Create crosstalk state for parallel agent communication
+  -- Each agent tracks the other's worktree for commit notifications
+  logMsg "Setting up crosstalk between parallel agents..."
+  (testsCrosstalk, implCrosstalk) <- newCrosstalkStatePair
+    testsWtPath "tests"
+    implWtPath "impl"
+
+  -- Run both agents in parallel with session forking and crosstalk
+  logMsg "Launching parallel agents with build validation and crosstalk..."
   (testsResponse, implResponse) <- concurrently
     (do
       logMsg $ "Tests agent starting in worktree: " <> testsWtPath
-      runAgentWithBuildValidation config (WorktreePath testsWtPath) testsPrompt testsSchema "tests"
-        parentSessionMaybe shouldFork)  -- Fork from stubs session if available
+      runAgentWithCrosstalk config testsWtPath testsPrompt testsSchema "tests"
+        parentSessionMaybe shouldFork testsCrosstalk)
     (do
       logMsg $ "Impl agent starting in worktree: " <> implWtPath
-      runAgentWithBuildValidation config (WorktreePath implWtPath) implPrompt implSchema "impl"
-        parentSessionMaybe shouldFork)  -- Fork from stubs session if available
+      runAgentWithCrosstalk config implWtPath implPrompt implSchema "impl"
+        parentSessionMaybe shouldFork implCrosstalk)
 
   logPhase "v3 FORK - Agents completed, parsing results"
 

@@ -25,6 +25,8 @@ library
         Tidepool.ClaudeCode.Budget
         Tidepool.ClaudeCode.Hooks
         Tidepool.ClaudeCode.ControlSocket
+        Tidepool.ClaudeCode.SessionState
+        Tidepool.ClaudeCode.Crosstalk
     build-depends:
         base >= 4.17 && < 5,
         freer-simple >= 1.2 && < 2,

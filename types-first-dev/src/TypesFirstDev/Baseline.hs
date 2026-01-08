@@ -31,7 +31,7 @@ import TypesFirstDev.DevRuns (persistRunMetadata)
 import TypesFirstDev.Graph (TypesFirstGraph(..))
 import TypesFirstDev.Handlers (typesFirstHandlers)
 import TypesFirstDev.Stats
-import TypesFirstDev.Types (StackSpec(..), ProjectType(..), ParallelResults(..), TestsResult(..), ImplResult(..), WorkflowError(..), emptySessionContext)
+import TypesFirstDev.Types (StackSpec(..), ProjectType(..), ParallelResults(..), TestsResult(..), ImplResult(..), WorkflowError(..), emptySessionContext, ResumeStrategy(..))
 
 
 -- | Run the baseline workflow with the default Stack spec.
@@ -205,6 +205,7 @@ defaultStackSpec projectPath = StackSpec
       , "empty stack invariants: isEmpty empty, pop empty == Nothing"
       ]
   , ssProjectType = PureLibrary
+  , ssResumeStrategy = SmartResume
   }
 
 
