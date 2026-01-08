@@ -12,8 +12,8 @@ newtype WorktreePath = WorktreePath FilePath
 
 -- Specification for creating a worktree
 data WorktreeSpec = WorktreeSpec
-  { wsName :: Text           -- Base name for the worktree
-  , wsBaseBranch :: Maybe Text  -- Branch to base on (Nothing = HEAD)
+  { wsBaseName :: Text          -- Base name for the worktree
+  , wsFromBranch :: Maybe Text  -- Branch to base on (Nothing = HEAD)
   }
 
 -- Structured errors (no crashes, explicit handling required)
@@ -84,7 +84,7 @@ result <- runM
 
 ```haskell
 data WorktreeConfig = WorktreeConfig
-  { wcRepoPath :: FilePath      -- Git repository root
+  { wcRepoRoot :: FilePath      -- Git repository root
   , wcWorktreeDir :: FilePath   -- Where to create worktrees (default: .worktrees/)
   }
 

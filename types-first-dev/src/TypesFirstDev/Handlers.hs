@@ -21,6 +21,8 @@ import qualified Data.Text as T
 import Data.Text.IO qualified as TIO
 import qualified Data.Aeson as Aeson
 import qualified System.Directory
+import qualified System.Exit
+import qualified System.Process
 
 import Tidepool.ClaudeCode.Config (ClaudeCodeConfig)
 import Tidepool.ClaudeCode.Executor (runClaudeCodeRequest)
@@ -211,16 +213,20 @@ forkHandler input = do
     , prImplCode = implCode
     }
 
--- | Cleanup a worktree via direct git command (for use in IO cleanup).
--- This is a simplified version that doesn't go through the effect system.
+-- | Cleanup a worktree via git command (for use in IO cleanup).
+-- Uses git worktree remove to properly clean up refs, falls back to
+-- directory removal if git command fails.
 runWorktreeCleanup :: WorktreePath -> IO ()
 runWorktreeCleanup (WorktreePath path) = do
-  -- Just remove the directory - git worktree prune will clean up the refs
-  -- This is safe because we're in a failure path and best-effort cleanup
-  _ <- try @SomeException $ removeDirectoryRecursive path
-  pure ()
-  where
-    removeDirectoryRecursive = System.Directory.removeDirectoryRecursive
+  -- Try git worktree remove first (properly cleans up refs)
+  (exitCode, _, _) <- System.Process.readProcessWithExitCode
+    "git" ["worktree", "remove", "--force", path] ""
+  -- Fall back to directory removal if git command fails
+  case exitCode of
+    System.Exit.ExitSuccess -> pure ()
+    System.Exit.ExitFailure _ -> do
+      _ <- try @SomeException $ System.Directory.removeDirectoryRecursive path
+      pure ()
 
 -- | Parse ClaudeCode response or error (IO version for use in cleanup blocks).
 parseOrErrorIO

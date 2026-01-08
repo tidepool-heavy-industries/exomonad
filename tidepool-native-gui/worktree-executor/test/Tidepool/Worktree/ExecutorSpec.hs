@@ -5,12 +5,14 @@ module Tidepool.Worktree.ExecutorSpec (spec) where
 
 import Control.Exception (bracket)
 import Control.Monad (void)
-import Control.Monad.Freer (runM)
+import Control.Monad.Freer (runM, sendM, Eff)
+import Data.OpenUnion (LastMember)
 import Data.Either (isRight, isLeft)
 import Data.Text qualified as T
 import System.Directory
   ( createDirectoryIfMissing
   , doesDirectoryExist
+  , doesFileExist
   , removeDirectoryRecursive
   , getTemporaryDirectory
   )
@@ -22,10 +24,13 @@ import Tidepool.Effects.Worktree
   ( WorktreePath(..)
   , WorktreeSpec(..)
   , WorktreeError(..)
+  , MergeResult(..)
   , createWorktree
   , deleteWorktree
   , listWorktrees
   , withWorktree
+  , mergeWorktree
+  , cherryPickFiles
   )
 import Tidepool.Worktree.Executor (runWorktreeIO, defaultWorktreeConfig)
 
@@ -42,8 +47,8 @@ withTempGitRepo action = bracket setup teardown action
       let testDir = tmpDir </> "worktree-test-" <> show pid
       createDirectoryIfMissing True testDir
 
-      -- Initialize git repo
-      void $ readProcessWithExitCode "git" ["-C", testDir, "init"] ""
+      -- Initialize git repo with main as default branch
+      void $ readProcessWithExitCode "git" ["-C", testDir, "init", "-b", "main"] ""
 
       -- Configure git user (required for commits)
       void $ readProcessWithExitCode "git"
@@ -198,3 +203,101 @@ spec = describe "Worktree Executor" $ do
           Left _ -> pure False
 
       actionRan `shouldBe` False
+
+
+  describe "mergeWorktree" $ do
+
+    it "merges worktree changes back to main" $ withTempGitRepo $ \repoDir -> do
+      let config = defaultWorktreeConfig repoDir
+      result <- runM $ runWorktreeIO config $ do
+        -- Create a worktree
+        createResult <- createWorktree (WorktreeSpec "merge-test" Nothing)
+        case createResult of
+          Left err -> pure $ Left err
+          Right wtPath@(WorktreePath wtDir) -> do
+            -- Create a file and commit in worktree (via IO)
+            liftIO $ do
+              writeFile (wtDir </> "test.txt") "test content"
+              void $ readProcessWithExitCode "git" ["-C", wtDir, "add", "test.txt"] ""
+              void $ readProcessWithExitCode "git" ["-C", wtDir, "commit", "-m", "Add test file"] ""
+            -- Merge back to main
+            mergeWorktree wtPath "Merge test changes"
+
+      result `shouldSatisfy` isRight
+      case result of
+        Right MergeSuccess -> pure ()
+        Right (MergeConflict _) -> expectationFailure "Expected MergeSuccess, got MergeConflict"
+        Left err -> expectationFailure $ "Expected Right, got: " <> show err
+
+    it "returns error for non-existent worktree" $ withTempGitRepo $ \repoDir -> do
+      let config = defaultWorktreeConfig repoDir
+      result <- runM $ runWorktreeIO config $
+        mergeWorktree (WorktreePath "/nonexistent/worktree") "Test merge"
+
+      result `shouldSatisfy` isLeft
+
+
+  describe "cherryPickFiles" $ do
+
+    it "copies files from worktree to destination" $ withTempGitRepo $ \repoDir -> do
+      let config = defaultWorktreeConfig repoDir
+          destDir = repoDir </> "cherry-pick-dest"
+      createDirectoryIfMissing True destDir
+
+      result <- runM $ runWorktreeIO config $ do
+        -- Create a worktree
+        createResult <- createWorktree (WorktreeSpec "cherry-test" Nothing)
+        case createResult of
+          Left err -> pure $ Left err
+          Right wtPath@(WorktreePath wtDir) -> do
+            -- Create test files in worktree
+            liftIO $ do
+              createDirectoryIfMissing True (wtDir </> "subdir")
+              writeFile (wtDir </> "file1.txt") "content1"
+              writeFile (wtDir </> "subdir" </> "file2.txt") "content2"
+            -- Cherry-pick files to destination
+            cherryPickFiles wtPath ["file1.txt", "subdir/file2.txt"] destDir
+
+      result `shouldSatisfy` isRight
+      -- Verify files were copied
+      file1Exists <- doesFileExist (destDir </> "file1.txt")
+      file2Exists <- doesFileExist (destDir </> "subdir" </> "file2.txt")
+      file1Exists `shouldBe` True
+      file2Exists `shouldBe` True
+
+    it "returns error for non-existent source files" $ withTempGitRepo $ \repoDir -> do
+      let config = defaultWorktreeConfig repoDir
+          destDir = repoDir </> "cherry-pick-dest2"
+      createDirectoryIfMissing True destDir
+
+      result <- runM $ runWorktreeIO config $ do
+        createResult <- createWorktree (WorktreeSpec "cherry-err" Nothing)
+        case createResult of
+          Left err -> pure $ Left err
+          Right wtPath -> do
+            -- Try to cherry-pick non-existent file
+            cherryPickFiles wtPath ["nonexistent.txt"] destDir
+
+      result `shouldSatisfy` isLeft
+      case result of
+        Left (WorktreeFileCopyError {}) -> pure ()
+        Left err -> expectationFailure $ "Expected WorktreeFileCopyError, got: " <> show err
+        Right () -> expectationFailure "Expected Left, got Right"
+
+    it "succeeds with empty file list" $ withTempGitRepo $ \repoDir -> do
+      let config = defaultWorktreeConfig repoDir
+          destDir = repoDir </> "cherry-pick-empty"
+      createDirectoryIfMissing True destDir
+
+      result <- runM $ runWorktreeIO config $ do
+        createResult <- createWorktree (WorktreeSpec "cherry-empty" Nothing)
+        case createResult of
+          Left err -> pure $ Left err
+          Right wtPath -> cherryPickFiles wtPath [] destDir
+
+      result `shouldBe` Right ()
+
+
+-- | Helper to lift IO into Eff
+liftIO :: LastMember IO effs => IO a -> Eff effs a
+liftIO = sendM

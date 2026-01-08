@@ -36,6 +36,7 @@ library
         mtl >= 2.2 && < 3,
         ginger >= 0.10 && < 1,
         parsec >= 3.1 && < 4,
+        process >= 1.6 && < 2,
         tidepool-core,
         tidepool-claude-code-executor,
         tidepool-worktree-executor,
