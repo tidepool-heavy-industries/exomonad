@@ -315,6 +315,14 @@ import Tidepool.Graph.Goto (Goto)
 
 import TypesFirstDev.Types.Hybrid
 
+-- | Hybrid graph interleaving:
+--   LLMNode   = nondeterministic (creative, reasoning)
+--   LogicNode = mechanistic (file ops, git, build)
+--   JoinNode  = synchronization barrier
+--
+-- Pattern: LLM creates → Logic validates → LLM fixes (if needed)
+-- Bridge: structured output (LLM returns typed metadata, Logic verifies via LSP)
+
 data TypesFirstGraphHybrid mode = TypesFirstGraphHybrid
   { ----------------------------------------------------------------------------
     -- ENTRY
@@ -322,7 +330,7 @@ data TypesFirstGraphHybrid mode = TypesFirstGraphHybrid
     hEntry :: mode :- G.Entry StackSpec
 
     ----------------------------------------------------------------------------
-    -- PHASE 1: TYPE DESIGN
+    -- PHASE 1: TYPE DESIGN [LLM → nondeterministic]
     ----------------------------------------------------------------------------
 
     -- | Design types with semantic descriptions and examples.
@@ -340,7 +348,7 @@ data TypesFirstGraphHybrid mode = TypesFirstGraphHybrid
       :@ ClaudeCode 'Haiku 'Nothing
 
     ----------------------------------------------------------------------------
-    -- PHASE 2: PARALLEL GATE (skeleton || typeAdversary)
+    -- PHASE 2: PARALLEL GATE [Logic + LLM in parallel → mechanistic barrier]
     ----------------------------------------------------------------------------
 
     -- | Generate skeleton with undefined stubs.
@@ -381,7 +389,7 @@ data TypesFirstGraphHybrid mode = TypesFirstGraphHybrid
       :@ ClaudeCode 'Haiku 'Nothing
 
     ----------------------------------------------------------------------------
-    -- PHASE 3: PARALLEL BLIND EXECUTION (tests || impl)
+    -- PHASE 3: PARALLEL BLIND EXECUTION [Logic forks → dual LLM → Logic joins]
     ----------------------------------------------------------------------------
 
     -- | Fork into parallel blind agents.
@@ -423,7 +431,7 @@ data TypesFirstGraphHybrid mode = TypesFirstGraphHybrid
       :@ UsesEffects '[Goto "hVerifyTDD" BlindResults]
 
     ----------------------------------------------------------------------------
-    -- PHASE 4: TDD VERIFICATION (external double-check)
+    -- PHASE 4: TDD VERIFICATION [Logic → mechanistic verification]
     ----------------------------------------------------------------------------
 
     -- | External TDD verification.
@@ -441,7 +449,7 @@ data TypesFirstGraphHybrid mode = TypesFirstGraphHybrid
       :@ UsesEffects '[Goto "hFork" GatedState]  -- Re-run tests agent
 
     ----------------------------------------------------------------------------
-    -- PHASE 5: MERGE
+    -- PHASE 5: MERGE [Logic → git operations]
     ----------------------------------------------------------------------------
 
     -- | Merge into fresh worktree.
@@ -451,7 +459,7 @@ data TypesFirstGraphHybrid mode = TypesFirstGraphHybrid
       :@ UsesEffects '[Goto "hValidate" MergedState]
 
     ----------------------------------------------------------------------------
-    -- PHASE 6: VALIDATION LOOP
+    -- PHASE 6: VALIDATION LOOP [Logic test → LLM fix → Logic test ...]
     ----------------------------------------------------------------------------
 
     -- | Run tests on merged code.
@@ -473,7 +481,7 @@ data TypesFirstGraphHybrid mode = TypesFirstGraphHybrid
       :@ ClaudeCode 'Haiku 'Nothing
 
     ----------------------------------------------------------------------------
-    -- PHASE 7: POST-VALIDATION (advisory mutation testing)
+    -- PHASE 7: POST-VALIDATION [Logic routes → async LLM adversary]
     ----------------------------------------------------------------------------
 
     -- | Post-validation: spawn mutation adversary, route to exit.
