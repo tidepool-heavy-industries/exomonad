@@ -94,6 +94,7 @@ data StackSpec = StackSpec
     -- ^ Type of project (determines template set).
   }
   deriving stock (Show, Eq, Generic)
+  deriving anyclass (FromJSON, ToJSON)
 
 instance StructuredOutput StackSpec
 

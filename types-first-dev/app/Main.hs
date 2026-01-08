@@ -8,6 +8,8 @@
 -- Usage:
 --   types-first-dev                    # Run default Stack experiment
 --   types-first-dev --experiment url-shortener  # Run URL shortener experiment
+--   types-first-dev baseline           # Run baseline and save to dev-runs/
+--   types-first-dev baseline --spec stack  # Run specific spec as baseline
 --
 -- Environment variables:
 --   PROJECT_PATH: Path to the project directory
@@ -31,8 +33,11 @@ import Tidepool.ClaudeCode.Effect (runClaudeCodeExecIO)
 import Tidepool.Graph.Execute (callHandler, dispatchGoto)
 import Tidepool.Worktree.Executor (runWorktreeIO, defaultWorktreeConfig)
 
+import TypesFirstDev.Baseline (runBaselineWithSpec)
+import TypesFirstDev.DevRuns (runDirectory)
 import TypesFirstDev.Graph (TypesFirstGraph(..))
 import TypesFirstDev.Handlers (typesFirstHandlers)
+import TypesFirstDev.Stats (RunMetadata(..))
 import TypesFirstDev.Types (StackSpec(..), ProjectType(..), ParallelResults(..), TestsResult(..), ImplResult(..))
 
 
@@ -42,12 +47,67 @@ import TypesFirstDev.Types (StackSpec(..), ProjectType(..), ParallelResults(..),
 -- Supports multiple experiments via command-line args or env vars.
 main :: IO ()
 main = do
+  args <- getArgs
+  case args of
+    ("baseline":rest) -> runBaselineCommand rest
+    _ -> runExperimentCommand args
+
+
+-- | Run the baseline command - saves results to dev-runs/.
+runBaselineCommand :: [String] -> IO ()
+runBaselineCommand args = do
+  putStrLn "Types-First Development Workflow - Baseline Run"
+  putStrLn "================================================"
+  putStrLn ""
+
+  -- Parse spec name from args
+  let specName = parseSpecName args
+
+  -- Get session and project path
+  sessionName <- maybe "types-first-dev" T.pack <$> lookupEnv "ZELLIJ_SESSION"
+  projectPath <- maybe getCurrentDirectory pure =<< lookupEnv "PROJECT_PATH"
+
+  -- Validate zellij session exists
+  validateZellijSession sessionName
+
+  -- Get spec
+  spec <- getSpec specName projectPath
+
+  putStrLn $ "Spec: " <> specName
+  putStrLn $ "Project: " <> projectPath
+  putStrLn $ "Module: " <> T.unpack spec.ssModuleName
+  putStrLn $ "Session: " <> T.unpack sessionName
+  putStrLn ""
+  putStrLn "Starting baseline run..."
+  putStrLn ""
+
+  -- Run and persist
+  meta <- runBaselineWithSpec sessionName spec
+
+  -- Print summary
+  putStrLn ""
+  putStrLn "=== Baseline Complete ==="
+  putStrLn $ "Run ID: " <> T.unpack meta.rmRunId
+  putStrLn $ "Duration: " <> show meta.rmDurationSeconds <> "s"
+  putStrLn $ "Success: " <> show meta.rmSuccess
+  putStrLn $ "Output: " <> runDirectory meta
+
+
+-- | Parse spec name from baseline args.
+parseSpecName :: [String] -> String
+parseSpecName ("--spec":name:_) = name
+parseSpecName ("-s":name:_) = name
+parseSpecName _ = "stack"
+
+
+-- | Run the normal experiment command.
+runExperimentCommand :: [String] -> IO ()
+runExperimentCommand args = do
   putStrLn "Types-First Development Workflow (Parallel)"
   putStrLn "============================================"
   putStrLn ""
 
   -- Parse experiment from command line
-  args <- getArgs
   let experiment = parseExperiment args
 
   -- Get zellij session from env or use default

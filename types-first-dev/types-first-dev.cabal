@@ -24,6 +24,9 @@ library
         TypesFirstDev.Templates
         TypesFirstDev.Graph
         TypesFirstDev.Handlers
+        TypesFirstDev.Stats
+        TypesFirstDev.DevRuns
+        TypesFirstDev.Baseline
     build-depends:
         base >= 4.17 && < 5,
         freer-simple >= 1.2 && < 2,
