@@ -178,9 +178,6 @@ data PendingRequest
     -- ^ Choice selection: prompt and (label, index) pairs
   | PendingText Text
     -- ^ Free-form text input with prompt
-  | PendingDice Text [(Int, Int, Text)]
-    -- ^ Dice selection: prompt and (die value, index, hint) triples
-    -- Hints are LLM-generated previews of what each outcome means
   | PendingPhoto Text
     -- ^ Photo upload request with prompt
     -- Used by tidying agent to request photos of spaces/items

@@ -12,7 +12,11 @@ license:            MIT
 author:             Inanna
 build-type:         Simple
 
+common warnings
+    ghc-options: -Wall -Wincomplete-patterns -Wredundant-constraints -Wunused-packages
+
 library
+    import:           warnings
     exposed-modules:
         Tidepool.Worktree.Executor
     build-depends:

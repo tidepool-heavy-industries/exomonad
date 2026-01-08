@@ -113,36 +113,6 @@ instance ToGVal (Run SourcePos (Writer Text) Text) ImplContext where
 -- SKELETON TEMPLATE CONTEXT
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Context for skeleton generation templates.
---
--- These templates generate compilable Haskell stubs (not LLM prompts).
--- Template variables:
---   {{ moduleName }} - module name (e.g., "Data.Stack")
---   {{ typeName }} - type constructor name (e.g., "Stack")
---   {{ dataType }} - full data type definition
---   {{ signatures }} - list of FunctionSig objects with .name, .signature, .description
-data SkeletonContext = SkeletonContext
-  { moduleName :: Text
-  , typeName :: Text
-    -- ^ Type constructor name extracted from dataType (e.g., "Stack")
-  , dataType :: Text
-  , signatures :: [FunctionSig]
-  }
-  deriving (Show, Eq, Generic)
-
-instance ToGVal (Run SourcePos (Writer Text) Text) SkeletonContext where
-  toGVal SkeletonContext{..} = dict
-    [ ("moduleName", toGVal moduleName)
-    , ("typeName", toGVal typeName)
-    , ("dataType", toGVal dataType)
-    , ("signatures", list $ map toGVal signatures)
-    ]
-
-
--- ════════════════════════════════════════════════════════════════════════════
--- SKELETON TEMPLATE CONTEXT
--- ════════════════════════════════════════════════════════════════════════════
-
 -- | Information about a type signature.
 --
 -- Template variables:
@@ -160,7 +130,9 @@ instance ToGVal (Run SourcePos (Writer Text) Text) SignatureInfo where
   toGVal SignatureInfo{..} = dict
     [ ("name", toGVal name)
     , ("type", toGVal sigType)
+    , ("signature", toGVal sigType)  -- Alias for template compatibility
     , ("doc", toGVal doc)
+    , ("description", toGVal doc)  -- Alias for template compatibility
     ]
 
 -- | Test priority information.
@@ -191,6 +163,7 @@ instance ToGVal (Run SourcePos (Writer Text) Text) TestPriority where
 data SkeletonContext = SkeletonContext
   { moduleName :: Text
   , dataTypeName :: Text
+  , typeName :: Text  -- ^ Alias of dataTypeName for template compatibility
   , dataType :: Text
   , signatures :: [SignatureInfo]
   , testPriorities :: [TestPriority]
@@ -201,6 +174,7 @@ instance ToGVal (Run SourcePos (Writer Text) Text) SkeletonContext where
   toGVal SkeletonContext{..} = dict
     [ ("moduleName", toGVal moduleName)
     , ("dataTypeName", toGVal dataTypeName)
+    , ("typeName", toGVal dataTypeName)  -- Alias for template compatibility
     , ("dataType", toGVal dataType)
     , ("signatures", list $ map toGVal signatures)
     , ("testPriorities", list $ map toGVal testPriorities)

@@ -7,7 +7,7 @@ author:             Inanna
 build-type:         Simple
 
 common warnings
-    ghc-options: -Wall -Wno-missing-export-lists -Wincomplete-patterns
+    ghc-options: -Wall -Wno-missing-export-lists -Wincomplete-patterns -Wredundant-constraints -Wunused-packages
 
 library
     import:           warnings

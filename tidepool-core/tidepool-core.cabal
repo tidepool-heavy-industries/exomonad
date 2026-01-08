@@ -7,7 +7,7 @@ author:             Inanna
 build-type:         Simple
 
 common warnings
-    ghc-options: -Wall -Wno-missing-export-lists -Wincomplete-patterns -haddock -fwrite-interface
+    ghc-options: -Wall -Wincomplete-patterns -Wredundant-constraints -Wunused-packages -haddock -fwrite-interface
 
 library
     import:           warnings
@@ -46,14 +46,10 @@ library
         Tidepool.Graph.Template
         Tidepool.Anthropic.Types
         Tidepool.Effects.Habitica
-        Tidepool.Effects.Telegram
-        Tidepool.Effects.Obsidian
         Tidepool.Effects.GitHub
-        Tidepool.Effects.Calendar
         Tidepool.Effects.Observability
         Tidepool.Effects.UI
         Tidepool.Effects.LLMProvider
-        Tidepool.Effects.Issue
         Tidepool.Effects.BD
         Tidepool.Effects.Git
         Tidepool.Effects.Worktree

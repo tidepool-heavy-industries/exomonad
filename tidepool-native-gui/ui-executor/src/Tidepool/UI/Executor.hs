@@ -378,22 +378,6 @@ runUI ctx callback = interpret $ \case
     -- Extract choice with disabled validation
     extractChoiceMeta choices action
 
-  -- DEPRECATED: Handle RequestDice by forwarding to RequestChoice logic
-  RequestDice prompt diceInfo -> sendM $ do
-    case NE.nonEmpty diceInfo of
-      Nothing -> pure 0  -- Empty dice list, return 0 as fallback
-      Just neInfo -> do
-        (msgs, node, _) <- readContext ctx
-        appendMessage ctx System prompt
-        (msgs', _, _) <- readContext ctx
-
-        -- Convert dice info to simple choices
-        let choices = NE.map (\(val, _, hint) -> (hint, val)) neInfo
-        let state = buildSimpleChoiceState msgs' node prompt choices False
-
-        action <- callback state
-        extractChoice choices action
-
 
 -- | Extract a single choice from UserAction for simple choices.
 extractChoice :: NonEmpty (Text, a) -> UserAction -> IO a

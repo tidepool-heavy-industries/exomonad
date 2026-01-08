@@ -11,7 +11,6 @@ module Tidepool.Wire.Types
   , PhotoUploadConfig(..)
   , ChoiceOption(..)
   , ChoiceConfig(..)
-  , ButtonConfig
 
     -- * Client → Server
   , UserAction(..)
@@ -168,10 +167,6 @@ instance FromJSON ChoiceConfig where
       <$> v .: "prompt"
       <*> v .: "options"
       <*> v .: "multiSelect"
-
--- | Deprecated alias for backwards compatibility.
-{-# DEPRECATED ButtonConfig "Use ChoiceOption instead" #-}
-type ButtonConfig = ChoiceOption
 
 
 -- ════════════════════════════════════════════════════════════════════════════

@@ -77,12 +77,10 @@ module Tidepool.Graph.Goto
 import Data.Aeson (ToJSON(..))
 import Data.Kind (Type, Constraint)
 import Data.Proxy (Proxy(..))
-import Data.Dynamic (Dynamic, toDyn, Typeable)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Control.Monad.Freer (Eff, Member, send, interpret)
-import Control.Monad.Freer.Internal (handleRelayS)
-import GHC.TypeLits (Symbol, KnownSymbol, symbolVal, TypeError, ErrorMessage(..))
+import Control.Monad.Freer (Eff, Member, send)
+import GHC.TypeLits (Symbol, KnownSymbol, TypeError, ErrorMessage(..))
 import Tidepool.Graph.Errors
   ( HR, Blank, WhatHappened, HowItWorks, Fixes, Example
   , Indent, CodeLine, Bullet, FormatTargetList
@@ -458,69 +456,3 @@ data ClaudeCodeLLMHandler model cwd needs schema targets effs tpl where
     -> (needs -> Eff effs tpl)                                -- ^ Builds context for both templates
     -> (ClaudeCodeResult schema -> Eff effs (GotoChoice targets))  -- ^ Routes based on LLM output + session metadata
     -> ClaudeCodeLLMHandler model cwd needs schema targets effs tpl
-
-
--- ════════════════════════════════════════════════════════════════════════════
--- GOTO RESULT TYPES (DEPRECATED)
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Result of capturing a Goto from a Logic node handler.
---
--- This is used by the graph runner to determine which node to execute next.
---
--- __DEPRECATED__: Use 'GotoChoice' with 'DispatchGoto' for type-safe dispatch.
--- This type uses 'Dynamic' which loses type safety at the boundary.
-data GotoResult
-  = GotoNode Text Dynamic   -- ^ Transition to named node with payload
-  | GotoExit' Dynamic       -- ^ Exit graph with result
-  | GotoSelf' Dynamic       -- ^ Self-loop with updated state
-  deriving (Show)
-
-{-# DEPRECATED GotoResult "Use GotoChoice with DispatchGoto for type-safe dispatch" #-}
-{-# DEPRECATED GotoNode "Use gotoChoice @name from GotoChoice API instead" #-}
-
--- | Existential wrapper for any Goto effect.
---
--- Used internally by the runner to handle multiple Goto effects uniformly.
---
--- __DEPRECATED__: Use 'GotoChoice' with 'DispatchGoto' for type-safe dispatch.
-data SomeGoto where
-  SomeGotoNode
-    :: forall (name :: Symbol) a.
-       (KnownSymbol name, Typeable a)
-    => Proxy name -> a -> SomeGoto
-  SomeGotoExit
-    :: forall a. Typeable a
-    => a -> SomeGoto
-  SomeGotoSelf
-    :: forall a. Typeable a
-    => a -> SomeGoto
-
-{-# DEPRECATED SomeGoto "Use GotoChoice with DispatchGoto for type-safe dispatch" #-}
-
--- ════════════════════════════════════════════════════════════════════════════
--- EFFECT INTERPRETATION (DEPRECATED)
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Run a Goto effect by capturing the transition.
---
--- __DEPRECATED__: Use handlers that return 'GotoChoice' and dispatch with
--- 'DispatchGoto' instead. This approach loses type safety via 'Dynamic'.
-{-# DEPRECATED runGotoCapture "Use GotoChoice return type with DispatchGoto instead" #-}
-runGotoCapture
-  :: forall name a effs b.
-     (KnownSymbol name, Typeable a)
-  => Eff (Goto name a ': effs) b
-  -> Eff effs (Maybe GotoResult, b)
-runGotoCapture = handleRelayS Nothing (\s a -> pure (s, a)) $ \s -> \case
-  GotoOp payload -> \k -> do
-    let target = T.pack $ symbolVal (Proxy @name)
-    k (Just $ GotoNode target (toDyn payload)) ()
-
--- | Run a Goto effect by ignoring it (for testing/debugging).
-runGotoIgnore
-  :: forall name a effs b.
-     Eff (Goto name a ': effs) b
-  -> Eff effs b
-runGotoIgnore = interpret $ \case
-  GotoOp _ -> pure ()
