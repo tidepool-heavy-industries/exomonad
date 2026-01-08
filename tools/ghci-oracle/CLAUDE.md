@@ -96,6 +96,16 @@ Response types:
 | `GHCiLoadError` | Module failed to load | Session remains valid |
 | `GHCiSessionCrashed` | GHCi process died | Auto-restart if enabled |
 
+## Security Considerations
+
+**⚠️ Local development only.** The oracle server:
+- Binds to `127.0.0.1` (localhost only) by default
+- Has **no authentication** - any local process can connect
+- Can **execute arbitrary Haskell code** via `Evaluate` requests
+- Runs with the permissions of the invoking user
+
+Do not expose this server to untrusted networks. The lack of authentication is intentional for local development convenience, but means any local process can execute code in the GHCi session.
+
 ## Building
 
 ```bash

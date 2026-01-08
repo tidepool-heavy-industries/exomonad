@@ -73,7 +73,10 @@ runServer config = withSocketsDo $ do
 createServerSocket :: OracleConfig -> IO Socket
 createServerSocket config = do
   let hints = defaultHints { addrSocketType = Stream }
-  addr:_ <- getAddrInfo (Just hints) (Just "127.0.0.1") (Just $ show $ ocPort config)
+  addrs <- getAddrInfo (Just hints) (Just "127.0.0.1") (Just $ show $ ocPort config)
+  addr <- case addrs of
+    (a:_) -> pure a
+    []    -> ioError (userError "getAddrInfo: no addresses for 127.0.0.1")
   sock <- socket (addrFamily addr) (addrSocketType addr) (addrProtocol addr)
   setSocketOption sock ReuseAddr 1
   bind sock (addrAddress addr)

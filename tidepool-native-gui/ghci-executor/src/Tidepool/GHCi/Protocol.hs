@@ -62,7 +62,10 @@ connect :: String -> Int -> IO (Either GHCiError GHCiConnection)
 connect host port = withSocketsDo $ do
   result <- try @SomeException $ do
     let hints = defaultHints { addrSocketType = Stream }
-    addr:_ <- getAddrInfo (Just hints) (Just host) (Just $ show port)
+    addrs <- getAddrInfo (Just hints) (Just host) (Just $ show port)
+    addr <- case addrs of
+      (a:_) -> pure a
+      []    -> ioError (userError "getAddrInfo: no addresses found")
     sock <- socket (addrFamily addr) (addrSocketType addr) (addrProtocol addr)
     bracketOnError (pure sock) close $ \s -> do
       NS.connect s (addrAddress addr)
