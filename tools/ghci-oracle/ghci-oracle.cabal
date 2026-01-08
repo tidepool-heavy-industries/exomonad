@@ -1,0 +1,46 @@
+cabal-version:      3.0
+name:               ghci-oracle
+version:            0.1.0.0
+synopsis:           Standalone GHCi Oracle server for type queries
+description:
+    A standalone server that maintains a persistent GHCi session and
+    exposes it via a socket interface. Clients can query types, evaluate
+    expressions, and check if code compiles without spawning new processes.
+
+    This package is intentionally kept separate from tidepool to avoid
+    pulling GHCi/process dependencies into the main build.
+
+license:            MIT
+author:             Inanna
+build-type:         Simple
+
+common warnings
+    ghc-options: -Wall -Wincomplete-patterns -Wredundant-constraints
+
+executable ghci-oracle
+    import:           warnings
+    main-is:          Main.hs
+    other-modules:
+        GHCi.Oracle.Session
+        GHCi.Oracle.Protocol
+        GHCi.Oracle.Server
+        GHCi.Oracle.Types
+    build-depends:
+        base >= 4.17 && < 5,
+        text >= 2.0 && < 3,
+        bytestring >= 0.11 && < 1,
+        aeson >= 2.1 && < 3,
+        process >= 1.6 && < 2,
+        network >= 3.1 && < 4,
+        stm >= 2.5 && < 3,
+        optparse-applicative >= 0.17 && < 1
+    hs-source-dirs:   src, app
+    default-language: GHC2021
+    default-extensions:
+        DeriveAnyClass
+        DeriveGeneric
+        DerivingStrategies
+        LambdaCase
+        OverloadedStrings
+        RecordWildCards
+        StrictData

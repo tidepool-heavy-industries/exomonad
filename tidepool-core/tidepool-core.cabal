@@ -18,6 +18,7 @@ library
         Tidepool.Effect
         Tidepool.Effect.ClaudeCode
         Tidepool.Effect.LSP
+        Tidepool.Effect.GHCi
         Tidepool.Effect.DevLog
         Tidepool.Effect.Metadata
         Tidepool.Effect.Types
