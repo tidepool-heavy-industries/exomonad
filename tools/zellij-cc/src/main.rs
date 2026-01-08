@@ -1,8 +1,10 @@
+mod fifo;
+mod types;
+mod tui;
+
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use nix::sys::stat::Mode;
-use nix::unistd::mkfifo;
-use serde::{Deserialize, Serialize};
+use fifo::FifoGuard;
 use shell_escape::escape;
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -12,42 +14,10 @@ use std::process::{Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
+use types::*;
 
 use zellij_client::{cli_client::start_cli_client, os_input_output::get_cli_client_os_input};
 use zellij_utils::input::{actions::Action, command::RunCommandAction};
-
-// ============================================================================
-// FIFO Cleanup Guard
-// ============================================================================
-
-/// Guard that removes a FIFO on drop, ensuring cleanup even on error paths.
-struct FifoGuard {
-    path: PathBuf,
-}
-
-impl FifoGuard {
-    fn new(path: PathBuf) -> Result<Self> {
-        // Remove any stale FIFO from previous runs (e.g., after crash)
-        if path.exists() {
-            std::fs::remove_file(&path).ok();
-        }
-        mkfifo(&path, Mode::S_IRUSR | Mode::S_IWUSR)
-            .with_context(|| format!("Failed to create FIFO at {}", path.display()))?;
-        Ok(Self { path })
-    }
-
-    fn path(&self) -> &Path {
-        &self.path
-    }
-}
-
-impl Drop for FifoGuard {
-    fn drop(&mut self) {
-        if let Err(err) = std::fs::remove_file(&self.path) {
-            eprintln!("warning: failed to remove FIFO {}: {err}", self.path.display());
-        }
-    }
-}
 
 // ============================================================================
 // CLI Types
@@ -108,6 +78,10 @@ enum Commands {
         /// Tag for correlating this session with orchestrator state (e.g., worktree name)
         #[arg(long)]
         session_tag: Option<String>,
+
+        /// Disable TUI, use simple println output (for CI/headless)
+        #[arg(long)]
+        no_tui: bool,
     },
 
     /// Internal: Wrap claude as subprocess, humanize output
@@ -124,6 +98,10 @@ enum Commands {
         /// Tag for correlating this session with orchestrator state
         #[arg(long)]
         session_tag: Option<String>,
+
+        /// Disable TUI, use simple println output (for CI/headless)
+        #[arg(long)]
+        no_tui: bool,
 
         /// All remaining args passed to claude
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
@@ -150,154 +128,6 @@ enum Commands {
 }
 
 // ============================================================================
-// Interrupt Signal Types
-// ============================================================================
-
-/// An interrupt signal sent by Claude via `zellij-cc signal`
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct InterruptSignal {
-    /// Signal type: "transition", "escalate", "request_review", etc.
-    pub signal_type: String,
-    /// Target state for transitions (e.g., "need_more_types")
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub state: Option<String>,
-    /// Human-readable reason for the signal
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub reason: Option<String>,
-}
-
-// ============================================================================
-// Stream Event Types (for parsing Claude Code's stream-json output)
-// ============================================================================
-
-/// A single event from Claude Code's stream-json output.
-/// Each line of output is one of these variants.
-#[derive(Deserialize, Serialize, Debug, Clone)]
-#[serde(tag = "type")]
-#[serde(rename_all = "snake_case")]
-pub enum StreamEvent {
-    System(SystemEvent),
-    Assistant(AssistantEvent),
-    User(UserEvent),
-    Result(ResultEvent),
-}
-
-#[derive(Deserialize, Serialize, Debug, Clone)]
-pub struct SystemEvent {
-    pub subtype: String,
-    pub session_id: String,
-    #[serde(default)]
-    pub tools: Vec<String>,
-    pub model: String,
-}
-
-#[derive(Deserialize, Serialize, Debug, Clone)]
-pub struct AssistantEvent {
-    pub message: AssistantMessage,
-}
-
-#[derive(Deserialize, Serialize, Debug, Clone)]
-pub struct AssistantMessage {
-    #[serde(default)]
-    pub content: Vec<ContentBlock>,
-}
-
-#[derive(Deserialize, Serialize, Debug, Clone)]
-#[serde(tag = "type")]
-#[serde(rename_all = "snake_case")]
-pub enum ContentBlock {
-    Text { text: String },
-    ToolUse { name: String, id: String, input: serde_json::Value },
-    ToolResult { tool_use_id: String, content: String, is_error: Option<bool> },
-}
-
-#[derive(Deserialize, Serialize, Debug, Clone)]
-pub struct UserEvent {
-    #[serde(default)]
-    pub tool_use_result: Option<String>,
-    #[serde(default)]
-    pub message: Option<UserMessage>,
-}
-
-#[derive(Deserialize, Serialize, Debug, Clone)]
-pub struct UserMessage {
-    #[serde(default)]
-    pub content: Vec<ContentBlock>,
-}
-
-#[derive(Deserialize, Serialize, Debug, Clone)]
-pub struct ResultEvent {
-    pub subtype: String,
-    pub is_error: bool,
-    pub result: Option<String>,
-    pub session_id: Option<String>,
-    pub total_cost_usd: Option<f64>,
-    pub num_turns: Option<i64>,
-    pub structured_output: Option<serde_json::Value>,
-    #[serde(default)]
-    pub permission_denials: Vec<PermissionDenial>,
-    #[serde(default, rename = "modelUsage")]
-    pub model_usage: HashMap<String, ModelUsage>,
-}
-
-#[derive(Deserialize, Serialize, Debug, Clone)]
-pub struct PermissionDenial {
-    pub tool_name: String,
-    pub tool_use_id: String,
-    #[serde(default)]
-    pub tool_input: serde_json::Value,
-}
-
-#[derive(Deserialize, Serialize, Debug, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct ModelUsage {
-    #[serde(default)]
-    pub input_tokens: i64,
-    #[serde(default)]
-    pub output_tokens: i64,
-    #[serde(default)]
-    pub cache_read_input_tokens: i64,
-    #[serde(default)]
-    pub cache_creation_input_tokens: i64,
-    #[serde(default)]
-    pub cost_usd: f64,
-}
-
-// ============================================================================
-// Output Types (what zellij-cc returns to callers)
-// ============================================================================
-
-#[derive(Serialize, Deserialize)]
-struct RunResult {
-    /// Exit code from claude process
-    exit_code: i32,
-    /// Whether Claude Code reported an error
-    is_error: bool,
-    /// Prose result from Claude Code
-    result: Option<String>,
-    /// Structured output (when --json-schema was provided)
-    structured_output: Option<serde_json::Value>,
-    /// Session ID (available immediately from init event)
-    session_id: String,
-    /// Tag for correlating with orchestrator state (e.g., worktree name)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    session_tag: Option<String>,
-    /// Cost in USD
-    total_cost_usd: f64,
-    /// Number of turns (tool use iterations)
-    num_turns: i64,
-    /// Full event stream for debugging/replay
-    events: Vec<StreamEvent>,
-    /// Permission denials with details
-    permission_denials: Vec<PermissionDenial>,
-    /// Per-model usage breakdown
-    model_usage: HashMap<String, ModelUsage>,
-    /// Interrupt signals received during execution
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    interrupts: Vec<InterruptSignal>,
-}
-
-// ============================================================================
 // Main
 // ============================================================================
 
@@ -317,6 +147,7 @@ fn main() -> Result<()> {
             resume,
             fork_session,
             session_tag,
+            no_tui,
         } => {
             run_cc_session(
                 &session,
@@ -330,15 +161,17 @@ fn main() -> Result<()> {
                 resume.as_deref(),
                 fork_session,
                 session_tag.as_deref(),
+                no_tui,
             )?;
         }
         Commands::Wrap {
             result_fifo,
             cwd,
             session_tag,
+            no_tui,
             claude_args,
         } => {
-            wrap_claude(&result_fifo, cwd.as_ref(), session_tag.as_deref(), &claude_args)?;
+            wrap_claude(&result_fifo, cwd.as_ref(), session_tag.as_deref(), no_tui, &claude_args)?;
         }
         Commands::Signal {
             signal_type,
@@ -395,6 +228,7 @@ fn run_cc_session(
     resume: Option<&str>,
     fork_session: bool,
     session_tag: Option<&str>,
+    no_tui: bool,
 ) -> Result<()> {
     // Create FIFO for result communication (guard ensures cleanup on all paths)
     let fifo_path = PathBuf::from(format!("/tmp/zellij-cc-{}.fifo", std::process::id()));
@@ -460,6 +294,11 @@ fn run_cc_session(
         wrap_cmd_parts.push(shell_quote(tag).into_owned());
     }
 
+    // Add no-tui flag if specified
+    if no_tui {
+        wrap_cmd_parts.push("--no-tui".to_string());
+    }
+
     wrap_cmd_parts.push("--".to_string());
     wrap_cmd_parts.extend(escaped_args);
 
@@ -508,7 +347,13 @@ fn run_cc_session(
 // Wrap Command (runs claude as subprocess, humanizes output)
 // ============================================================================
 
-fn wrap_claude(result_fifo: &Path, cwd: Option<&PathBuf>, session_tag: Option<&str>, claude_args: &[String]) -> Result<()> {
+fn wrap_claude(
+    result_fifo: &Path,
+    cwd: Option<&PathBuf>,
+    session_tag: Option<&str>,
+    no_tui: bool,
+    claude_args: &[String],
+) -> Result<()> {
     use std::sync::mpsc;
     use std::thread;
 
@@ -571,50 +416,98 @@ fn wrap_claude(result_fifo: &Path, cwd: Option<&PathBuf>, session_tag: Option<&s
     let mut result_event: Option<ResultEvent> = None;
     let mut interrupts: Vec<InterruptSignal> = Vec::new();
 
-    // Process each JSONL line from claude stdout
-    for line in reader.lines() {
-        // Check for signals (non-blocking)
+    if no_tui {
+        // Simple println mode (original behavior)
+        for line in reader.lines() {
+            // Check for signals (non-blocking)
+            while let Ok(signal) = signal_rx.try_recv() {
+                println!("\n⚡ Interrupt: {} (state: {:?})", signal.signal_type, signal.state);
+                interrupts.push(signal);
+            }
+
+            let line = line?;
+            if line.trim().is_empty() {
+                continue;
+            }
+
+            match serde_json::from_str::<StreamEvent>(&line) {
+                Ok(event) => {
+                    print_event_humanized(&event); // Human-readable to stdout (pane)
+
+                    if let StreamEvent::Result(ref r) = event {
+                        result_event = Some(r.clone());
+                    }
+                    events.push(event);
+                }
+                Err(e) => {
+                    let truncated: String = line.chars().take(50).collect();
+                    eprintln!("[parse error] {} (line: {}...)", e, truncated);
+                }
+            }
+        }
+
+        // Drain any remaining signals
         while let Ok(signal) = signal_rx.try_recv() {
-            println!("\n⚡ Interrupt: {} (state: {:?})", signal.signal_type, signal.state);
             interrupts.push(signal);
         }
+    } else {
+        // TUI mode
+        let (event_tx, event_rx) = mpsc::channel::<tui::TuiEvent>();
+        let event_tx_clone = event_tx.clone();
 
-        let line = line?;
-        if line.trim().is_empty() {
-            continue;
-        }
-
-        match serde_json::from_str::<StreamEvent>(&line) {
-            Ok(event) => {
-                print_event_humanized(&event); // Human-readable to stdout (pane)
-
-                if let StreamEvent::Result(ref r) = event {
-                    result_event = Some(r.clone());
+        // Spawn stdout reader thread that sends to TUI channel
+        let stdout_reader = thread::spawn(move || {
+            for line in reader.lines().map_while(Result::ok) {
+                if line.trim().is_empty() { continue; }
+                if let Ok(event) = serde_json::from_str::<StreamEvent>(&line) {
+                    let _ = event_tx_clone.send(tui::TuiEvent::Claude(event));
                 }
-                events.push(event);
             }
-            Err(e) => {
-                let truncated: String = line.chars().take(50).collect();
-                eprintln!("[parse error] {} (line: {}...)", e, truncated);
-            }
-        }
-    }
+            // Signal end of stream
+            let _ = event_tx_clone.send(tui::TuiEvent::ProcessExit);
+        });
 
-    // Drain any remaining signals
-    while let Ok(signal) = signal_rx.try_recv() {
-        interrupts.push(signal);
+        // Forward signals to TUI channel
+        let event_tx_for_signals = event_tx.clone();
+        let should_stop_for_signals = Arc::clone(&should_stop);
+        let signal_forward_thread = thread::spawn(move || {
+            while !should_stop_for_signals.load(Ordering::Relaxed) {
+                match signal_rx.recv_timeout(Duration::from_millis(100)) {
+                    Ok(signal) => {
+                        let _ = event_tx_for_signals.send(tui::TuiEvent::Interrupt(signal));
+                    }
+                    Err(mpsc::RecvTimeoutError::Timeout) => continue,
+                    Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                }
+            }
+        });
+
+        // Run TUI (propagate errors - we can't recover meaningfully without the TUI state)
+        let tui_state = tui::run_tui(event_rx)?;
+
+        // TUI done - extract collected data
+        events = tui_state.events;
+        result_event = tui_state.result_event;
+        interrupts = tui_state.interrupts;
+
+        // Wait for threads
+        should_stop.store(true, Ordering::Relaxed);
+        let _ = stdout_reader.join();
+        let _ = signal_forward_thread.join();
     }
 
     // Wait for claude to exit
     let status = child.wait()?;
 
-    // Signal the reader thread to stop and wait for it
+    // Signal the reader thread to stop
     should_stop.store(true, Ordering::Relaxed);
-    // The thread may be blocked on FIFO read, so we give it a moment then move on
-    // (the thread will exit on next poll cycle or when FIFO is removed)
-    let _ = signal_thread.join();
 
-    // signal_fifo_guard handles cleanup on drop (including error paths)
+    // Drop the FIFO guard BEFORE joining the thread - this removes the FIFO,
+    // which unblocks the thread if it's blocked on file open/read
+    drop(signal_fifo_guard);
+
+    // Now safe to join - the thread will exit due to FIFO removal
+    let _ = signal_thread.join();
 
     // Build final result
     let result = build_run_result(events, result_event, status, session_tag, interrupts)?;
@@ -629,17 +522,14 @@ fn wrap_claude(result_fifo: &Path, cwd: Option<&PathBuf>, session_tag: Option<&s
 }
 
 // ============================================================================
-// Human-Readable Output
+// Human-Readable Output (for --no-tui mode)
 // ============================================================================
 
 fn print_event_humanized(event: &StreamEvent) {
     match event {
         StreamEvent::System(s) => {
-            let short_id = if s.session_id.len() >= 8 {
-                &s.session_id[..8]
-            } else {
-                &s.session_id
-            };
+            // Use chars() to safely truncate UTF-8 strings without panicking
+            let short_id: String = s.session_id.chars().take(8).collect();
             println!("━━━ Session {} ━━━", short_id);
             println!("Model: {}", s.model);
             println!();

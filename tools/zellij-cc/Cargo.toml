@@ -15,3 +15,7 @@ shell-escape = "0.1"
 nix = { version = "0.29", features = ["poll", "fs"] }
 # Vendored OpenSSL to avoid system library mismatch
 openssl-sys = { version = "0.9", features = ["vendored"] }
+
+# TUI
+crossterm = "0.28"
+ratatui = "0.29"
