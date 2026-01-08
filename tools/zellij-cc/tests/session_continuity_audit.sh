@@ -1,8 +1,14 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # WT-3: Session Continuity Audit
 # Probes what --resume actually preserves in Claude Code sessions
 
 set -euo pipefail
+
+# Check dependencies
+if ! command -v jq &> /dev/null; then
+    echo "Error: jq is required but not installed. Please install jq first."
+    exit 1
+fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ZELLIJ_CC="${SCRIPT_DIR}/../target/release/zellij-cc"
@@ -122,7 +128,7 @@ extract_ground_truth() {
     local session_id="$2"
     log "Phase 4: Extracting ground truth from session JSONL..."
 
-    # Derive project path (slashes become dashes, leading dash)
+    # Derive project path: leading slash becomes dash, all other slashes become dashes
     local project_path
     project_path=$(echo "$testdir" | sed 's|^/|-|; s|/|-|g')
 
@@ -133,7 +139,8 @@ extract_ground_truth() {
         # Try to find it
         log "Searching for session JSONL..."
         find "$HOME/.claude/projects" -name "${session_id}.jsonl" 2>/dev/null || true
-        return 1
+        # Non-fatal: caller handles missing ground truth gracefully
+        return 0
     fi
 
     log "Found session JSONL: $session_jsonl"
@@ -245,7 +252,7 @@ main() {
     fi
 
     resume_result=$(run_resume_session "$testdir" "$session_id")
-    ground_truth=$(extract_ground_truth "$testdir" "$session_id") || true
+    ground_truth=$(extract_ground_truth "$testdir" "$session_id")
 
     if [[ -n "$ground_truth" && -f "$ground_truth" ]]; then
         compare_and_report "$ground_truth" "$resume_result"
@@ -256,4 +263,4 @@ main() {
     fi
 }
 
-main "$@"
+main

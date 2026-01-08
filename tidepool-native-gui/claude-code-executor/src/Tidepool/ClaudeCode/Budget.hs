@@ -79,8 +79,13 @@ instance Semigroup Cost where
   a <> b = Cost
     { costUsd = costUsd a + costUsd b
     , costTokens = costTokens a <> costTokens b
-    , costSource = if T.null (costSource a) then costSource b else costSource a
+    , costSource = combineSources (costSource a) (costSource b)
     }
+    where
+      combineSources s1 s2
+        | T.null s1 = s2
+        | T.null s2 = s1
+        | otherwise = s1 <> " + " <> s2
 
 instance Monoid Cost where
   mempty = zeroCost
@@ -284,7 +289,7 @@ handleBudget stateVar = \case
                       , bsWarned = False  -- Reset warning flag for new cycle
                       }
               else
-                error $ "Budget exceeded: $" <> show spent <> " (limit: $" <> show (costUsd limit) <> ")"
+                fail $ "Budget exceeded: $" <> show spent <> " (limit: $" <> show (costUsd limit) <> ")"
         | otherwise -> pure ()
 
   GetSpent -> sendM $ bsSpent <$> readTVarIO stateVar
