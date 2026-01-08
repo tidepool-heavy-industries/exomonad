@@ -278,15 +278,15 @@ typeHint _ = "<describe valid values and meaning>"
 -- | Convert a Haskell type to a JSONSchema expression
 typeToSchemaExp :: Type -> Q Exp
 typeToSchemaExp typ = case typ of
-  -- Text, String -> TString
-  ConT name | nameBase name == "Text"   -> [| emptySchema TString |]
-            | nameBase name == "String" -> [| emptySchema TString |]
+  -- Text, String, FilePath -> TString
+  ConT name | nameBase name `elem` ["Text", "String", "FilePath"] ->
+    [| emptySchema TString |]
   -- Int, Integer -> TInteger
-  ConT name | nameBase name == "Int"     -> [| emptySchema TInteger |]
-            | nameBase name == "Integer" -> [| emptySchema TInteger |]
+  ConT name | nameBase name `elem` ["Int", "Integer"] ->
+    [| emptySchema TInteger |]
   -- Double, Float -> TNumber
-  ConT name | nameBase name == "Double" -> [| emptySchema TNumber |]
-            | nameBase name == "Float"  -> [| emptySchema TNumber |]
+  ConT name | nameBase name `elem` ["Double", "Float"] ->
+    [| emptySchema TNumber |]
   -- Bool -> TBoolean
   ConT name | nameBase name == "Bool" -> [| emptySchema TBoolean |]
   -- [a] -> array of a
@@ -296,7 +296,13 @@ typeToSchemaExp typ = case typ of
   -- Maybe a -> same as a (optional handled by not being in required)
   AppT (ConT name) innerType | nameBase name == "Maybe" ->
     typeToSchemaExp innerType
-  -- Fallback: treat as string
+  -- Named type with HasJSONSchema instance -> use its schema
+  ConT name -> do
+    -- Check if the type has a HasJSONSchema instance by trying to generate
+    -- an expression that uses it. If the instance doesn't exist, this will
+    -- cause a compile error at the call site, which is the desired behavior.
+    [| jsonSchema @($(conT name)) |]
+  -- Fallback: treat as string (for complex types without HasJSONSchema)
   _ -> [| emptySchema TString |]
 
 -- ══════════════════════════════════════════════════════════════

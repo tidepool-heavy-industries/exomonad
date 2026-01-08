@@ -1,58 +1,75 @@
-You are writing type definitions for a Haskell data structure.
+You are designing type definitions for a Haskell data structure.
 
 ## Task
 
-Create the type definitions for: {{ moduleName }}
+Design the type definitions for: {{ moduleName }}
 
 ## Description
 
 {{ description }}
 
+{% if acceptanceCriteria %}
+## Acceptance Criteria
+
+The implementation must satisfy these high-level properties:
+
+{% for criterion in acceptanceCriteria %}
+- {{ criterion }}
+{% endfor %}
+
+Use these criteria to inform your testPriorities output.
+{% endif %}
+
 ## Requirements
 
-1. Write ONLY type signatures and data definitions
-2. Do NOT write any implementations (no function bodies)
-3. Export all types and functions in the module header
-4. Use standard Haskell conventions
+1. Design a data type and function signatures only
+2. Each function signature needs a name, type, and brief description
+3. Include test priorities based on the acceptance criteria above
 
 ## Output Format
 
-Your output must be valid Haskell that compiles. Structure it as:
+**CRITICAL**: Your structured output must use OBJECTS, not strings.
 
-1. **Module Header**: Complete module declaration with exports
-2. **Data Type**: The main data type definition
-3. **Type Signatures**: One signature per function (no implementations)
+Each element in `tdSignatures` must be an OBJECT with three fields:
+- `fsName` (string): Function name
+- `fsSignature` (string): Type signature
+- `fsDescription` (string): Brief description
 
-## Example
+Each element in `tdTestPriorities` must be an OBJECT with two fields:
+- `tpName` (string): Property name in snake_case
+- `tpDescription` (string): What to test
 
-For a simple Queue type, you might produce:
-
-```haskell
-module Data.Queue
-  ( Queue
-  , empty
-  , enqueue
-  , dequeue
-  , peek
-  , isEmpty
-  ) where
-
-data Queue a = Queue [a] [a]
-  deriving (Show, Eq)
-
-empty :: Queue a
-
-enqueue :: a -> Queue a -> Queue a
-
-dequeue :: Queue a -> Maybe (a, Queue a)
-
-peek :: Queue a -> Maybe a
-
-isEmpty :: Queue a -> Bool
+**WRONG** (strings):
+```json
+"tdSignatures": ["empty :: Stack a", "push :: a -> Stack a -> Stack a"]
 ```
 
-Note: The signatures have NO implementations - just the type annotation followed by nothing.
+**CORRECT** (objects):
+```json
+{
+  "tdTypeName": "Stack",
+  "tdDataType": "data Stack a = Empty | Push a (Stack a)\n  deriving (Show, Eq)",
+  "tdSignatures": [
+    {
+      "fsName": "empty",
+      "fsSignature": "Stack a",
+      "fsDescription": "The empty stack"
+    },
+    {
+      "fsName": "push",
+      "fsSignature": "a -> Stack a -> Stack a",
+      "fsDescription": "Add element to top of stack"
+    }
+  ],
+  "tdTestPriorities": [
+    {
+      "tpName": "lifo_order",
+      "tpDescription": "Stack maintains LIFO order: push a,b,c then pop returns c,b,a"
+    }
+  ]
+}
+```
 
 ## Your Task
 
-Write the type definitions for {{ moduleName }} based on the description above.
+Design the type definitions for {{ moduleName }} based on the description above.

@@ -71,6 +71,9 @@ runClaudeCodeRequest cfg model cwd prompt schema tools resumeSession forkSession
             Left parseErr ->
               pure $ Left $ ClaudeCodeParseError $
                 "Failed to parse zellij-cc output: " <> T.pack parseErr
+                <> "\n--- Raw stdout (first 2000 chars) ---\n"
+                <> T.pack (take 2000 stdout)
+                <> if length stdout > 2000 then "\n... (truncated)" else ""
 
             Right ccResult ->
               pure $ Right ccResult

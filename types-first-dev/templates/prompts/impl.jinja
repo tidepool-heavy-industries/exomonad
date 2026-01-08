@@ -4,9 +4,10 @@ You are implementing a Haskell data structure.
 
 Implement the functions for: {{ moduleName }}
 
-## Type Definitions
+A skeleton file already exists at `src/{{ moduleName | replace(".", "/") }}.hs` with `undefined` stubs.
+Your job is to **edit that file** and replace the `undefined` stubs with real implementations.
 
-You must implement functions matching these exact types:
+## Type Definitions
 
 The data type:
 
@@ -14,29 +15,37 @@ The data type:
 {{ dataType }}
 ```
 
-The function signatures:
+The function signatures to implement:
 
 {% for sig in signatures %}
 - `{{ sig.name }} :: {{ sig.signature }}` — {{ sig.description }}
 {% endfor %}
 
+## Instructions
+
+1. **Read** the skeleton file at `src/{{ moduleName | replace(".", "/") }}.hs`
+2. **Edit** the file to replace each `undefined` with a working implementation
+3. **Verify** the library compiles: `cabal build test-repo`
+4. Return result metadata in structured output (NOT the code - it's already in the file)
+
 ## Requirements
 
-1. Implement ALL functions listed above
-2. Each function MUST match its type signature exactly
-3. Export all functions in the module header
-4. Use idiomatic Haskell patterns
-5. Keep implementations simple and correct
+- Each function MUST match its type signature exactly
+- Use idiomatic Haskell patterns
+- Keep implementations simple and correct
+- Do NOT change the module header or exports
 
-## Output Format
+## Structured Output
 
-Write the complete module with all implementations. Include:
+Your structured output describes your work - the handler will commit your file edits.
+Read the field descriptions carefully - they tell you what to report:
 
-1. The exact module header from above
-2. Any necessary imports (minimal)
-3. The data type definition
-4. All function implementations
+- `irBuildPassed`: Did `cabal build test-repo` succeed?
+- `irAllFunctionsImplemented`: Did you implement ALL functions (no `undefined` left)?
+- `irCommitMessage`: Short commit message (50 chars, imperative mood)
+- `irDesignNotes`: Explain your design choices and tradeoffs
+- `irBlocker`: If blocked, explain why (null if successful)
 
 ## Your Task
 
-Write the complete implementation module for {{ moduleName }}.
+Edit `src/{{ moduleName | replace(".", "/") }}.hs` to implement all functions for {{ moduleName }}.

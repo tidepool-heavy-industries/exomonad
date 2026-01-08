@@ -63,6 +63,9 @@ data WorktreeConfig = WorktreeConfig
   , wcWorktreeDir :: FilePath
     -- ^ Directory where worktrees are created (relative to repo root).
     -- Defaults to ".worktrees".
+  , wcTargetBranch :: String
+    -- ^ Branch to merge worktrees into. Defaults to "main".
+    -- Set to "master" for repos using traditional naming.
   , wcQuiet :: Bool
     -- ^ Suppress verbose output.
   }
@@ -73,6 +76,7 @@ defaultWorktreeConfig :: FilePath -> WorktreeConfig
 defaultWorktreeConfig repoRoot = WorktreeConfig
   { wcRepoRoot = repoRoot
   , wcWorktreeDir = ".worktrees"
+  , wcTargetBranch = "main"
   , wcQuiet = True
   }
 
@@ -231,16 +235,17 @@ mergeWorktreeIO config (WorktreePath wtPath) commitMsg = do
         }
       ExitSuccess -> do
         let branch = T.strip $ T.pack branchOut
+            targetBranch = config.wcTargetBranch
 
-        -- Checkout main in repo root
+        -- Checkout target branch in repo root
         (checkoutExit, _, checkoutErr) <- readProcessWithExitCode
           "git"
-          ["-C", config.wcRepoRoot, "checkout", "main"]
+          ["-C", config.wcRepoRoot, "checkout", targetBranch]
           ""
 
         case checkoutExit of
           ExitFailure code -> pure $ Left WorktreeGitError
-            { wgeCommand = "checkout main"
+            { wgeCommand = T.pack $ "checkout " <> targetBranch
             , wgeExitCode = code
             , wgeStderr = T.pack checkoutErr
             }

@@ -13,8 +13,6 @@ module TypesFirstDev.Context
   , TestsContext(..)
   , ImplContext(..)
   , SkeletonContext(..)
-  , SignatureInfo(..)
-  , TestPriority(..)
   ) where
 
 import Control.Monad.Writer (Writer)
@@ -24,7 +22,7 @@ import Text.Ginger.GVal (ToGVal(..), dict, list)
 import Text.Ginger.Run.Type (Run)
 import Text.Parsec.Pos (SourcePos)
 
-import TypesFirstDev.Types (FunctionSig(..))
+import TypesFirstDev.Types (FunctionSig(..), TestPriority(..))
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -36,11 +34,14 @@ import TypesFirstDev.Types (FunctionSig(..))
 -- Template variables:
 --   {{ moduleName }} - e.g., "Data.Stack"
 --   {{ description }} - natural language description
+--   {{ acceptanceCriteria }} - list of acceptance criteria strings
 data TypesContext = TypesContext
   { moduleName :: Text
     -- ^ Module name for the data structure.
   , description :: Text
     -- ^ Natural language description.
+  , acceptanceCriteria :: [Text]
+    -- ^ High-level acceptance criteria to inform test priorities.
   }
   deriving (Show, Eq, Generic)
 
@@ -48,6 +49,7 @@ instance ToGVal (Run SourcePos (Writer Text) Text) TypesContext where
   toGVal ctx = dict
     [ ("moduleName", toGVal ctx.moduleName)
     , ("description", toGVal ctx.description)
+    , ("acceptanceCriteria", list $ map toGVal ctx.acceptanceCriteria)
     ]
 
 
@@ -110,64 +112,30 @@ instance ToGVal (Run SourcePos (Writer Text) Text) ImplContext where
 
 
 -- ════════════════════════════════════════════════════════════════════════════
--- SKELETON TEMPLATE CONTEXT
+-- SKELETON TEMPLATE CONTEXT (v2)
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Information about a type signature.
---
--- Template variables:
---   {{ sig.name }} - function name
---   {{ sig.type }} - type signature
---   {{ sig.doc }} - documentation string
-data SignatureInfo = SignatureInfo
-  { name :: Text
-  , sigType :: Text  -- ^ Called "type" in template
-  , doc :: Text
-  }
-  deriving (Show, Eq, Generic)
-
-instance ToGVal (Run SourcePos (Writer Text) Text) SignatureInfo where
-  toGVal SignatureInfo{..} = dict
-    [ ("name", toGVal name)
-    , ("type", toGVal sigType)
-    , ("signature", toGVal sigType)  -- Alias for template compatibility
-    , ("doc", toGVal doc)
-    , ("description", toGVal doc)  -- Alias for template compatibility
-    ]
-
--- | Test priority information.
---
--- Template variables:
---   {{ priority.name }} - test name
---   {{ priority.description }} - why this test matters
-data TestPriority = TestPriority
-  { name :: Text
-  , description :: Text
-  }
-  deriving (Show, Eq, Generic)
-
+-- | ToGVal for TestPriority - maps tpName → name, tpDescription → description
 instance ToGVal (Run SourcePos (Writer Text) Text) TestPriority where
-  toGVal TestPriority{..} = dict
-    [ ("name", toGVal name)
-    , ("description", toGVal description)
+  toGVal tp = dict
+    [ ("name", toGVal tp.tpName)
+    , ("description", toGVal tp.tpDescription)
     ]
 
 -- | Context for skeleton templates (impl-skeleton, test-skeleton).
 --
 -- Template variables:
 --   {{ moduleName }} - e.g., "Data.Stack"
---   {{ dataTypeName }} - e.g., "Stack"
+--   {{ typeName }} - e.g., "Stack"
 --   {{ dataType }} - full type definition
---   {{ signatures }} - list of SignatureInfo
---   {{ testPriorities }} - list of TestPriority
+--   {{ signatures }} - list of FunctionSig with .name, .signature, .description
+--   {{ testPriorities }} - list of TestPriority with .name, .description
 data SkeletonContext = SkeletonContext
   { moduleName :: Text
   , typeName :: Text
-    -- ^ Type constructor name (e.g., "Stack")
-  , dataTypeName :: Text
-    -- ^ Alias for typeName (for template compatibility)
+    -- ^ Type constructor name extracted from dataType (e.g., "Stack")
   , dataType :: Text
-  , signatures :: [SignatureInfo]
+  , signatures :: [FunctionSig]
   , testPriorities :: [TestPriority]
   }
   deriving (Show, Eq, Generic)
@@ -176,7 +144,6 @@ instance ToGVal (Run SourcePos (Writer Text) Text) SkeletonContext where
   toGVal SkeletonContext{..} = dict
     [ ("moduleName", toGVal moduleName)
     , ("typeName", toGVal typeName)
-    , ("dataTypeName", toGVal dataTypeName)
     , ("dataType", toGVal dataType)
     , ("signatures", list $ map toGVal signatures)
     , ("testPriorities", list $ map toGVal testPriorities)

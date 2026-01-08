@@ -7,7 +7,9 @@
 -- @
 -- Entry(StackSpec)
 --     ↓
--- types (ClaudeCode 'Sonnet) - writes type signatures
+-- types (ClaudeCode 'Haiku) - writes type signatures
+--     ↓
+-- skeleton (LogicNode) - generates impl/test skeleton files
 --     ↓
 -- fork (LogicNode) - creates worktrees, spawns parallel agents
 --     ├── tests-worktree: tests agent → TestDefinitions
@@ -37,7 +39,7 @@ import Tidepool.Graph.Generic (GraphMode(..))
 import qualified Tidepool.Graph.Generic as G
 import Tidepool.Graph.Goto (Goto)
 
-import TypesFirstDev.Types (StackSpec, TypeDefinitions, ForkInput, ParallelResults)
+import TypesFirstDev.Types (StackSpec, TypeDefinitions, ForkInput, SkeletonGenerated, ParallelResults)
 import TypesFirstDev.Templates (TypesTpl)
 
 
@@ -45,29 +47,39 @@ import TypesFirstDev.Templates (TypesTpl)
 --
 -- Nodes:
 -- 1. types: Claude Code writes type signatures
--- 2. fork: Creates worktrees and spawns parallel agents
--- 3. merge: Collects results and cleans up
+-- 2. skeleton: Generate impl/test skeleton files
+-- 3. fork: Creates worktrees and spawns parallel agents
+-- 4. merge: Collects results and cleans up
 data TypesFirstGraph mode = TypesFirstGraph
   { -- | Entry point - receives Stack specification
     entry :: mode :- G.Entry StackSpec
 
     -- | Types node - uses Claude Code to write type signatures
     --
-    -- Output: TypeDefinitions (data type + signatures)
-    -- Routes to fork node with session ID for parallel agents
+    -- Output: TypeDefinitions (data type + signatures + test priorities)
+    -- Routes to skeleton node for file generation
   , types :: mode :- G.LLMNode
       :@ Types.Input StackSpec
       :@ Template TypesTpl
       :@ Schema TypeDefinitions
-      :@ UsesEffects '[Goto "fork" ForkInput]
-      :@ ClaudeCode 'Sonnet 'Nothing
+      :@ UsesEffects '[Goto "skeleton" ForkInput]
+      :@ ClaudeCode 'Haiku 'Nothing
+
+    -- | Skeleton node - generates impl/test skeleton files
+    --
+    -- Input: ForkInput (session ID + type definitions)
+    -- Output: SkeletonGenerated (paths to generated files)
+    -- Renders templates, writes files, verifies compilation
+  , skeleton :: mode :- G.LogicNode
+      :@ Types.Input ForkInput
+      :@ UsesEffects '[Goto "fork" SkeletonGenerated]
 
     -- | Fork node - creates worktrees and spawns parallel agents
     --
-    -- Input: ForkInput (session ID + type definitions)
+    -- Input: SkeletonGenerated (paths + type definitions)
     -- Output: ParallelResults (worktree paths + agent outputs)
   , fork :: mode :- G.LogicNode
-      :@ Types.Input ForkInput
+      :@ Types.Input SkeletonGenerated
       :@ UsesEffects '[Goto "merge" ParallelResults]
 
     -- | Merge node - collects results and cleans up worktrees
