@@ -9,6 +9,14 @@ module TypesFirstDev.Types
   ( -- * Entry Type
     StackSpec(..)
 
+    -- * Structured Signature Types (v2)
+  , FunctionSig(..)
+  , TestPriority(..)
+
+    -- * Progress Tracking (v2)
+  , IncrementalProgress(..)
+  , WorkStatus(..)
+
     -- * Types Agent Output
   , TypeDefinitions(..)
 
@@ -25,6 +33,9 @@ module TypesFirstDev.Types
     -- * Final Result
   , ImplementationResult(..)
 
+    -- * Skeleton Generation Output
+  , SkeletonGenerated(..)
+
     -- * Internal Types
   , ForkInput(..)
   , ParallelResults(..)
@@ -33,6 +44,8 @@ module TypesFirstDev.Types
 import Data.Aeson (FromJSON(..), ToJSON(..))
 import Data.Text (Text)
 import GHC.Generics (Generic)
+
+import Tidepool.Schema (HasJSONSchema)
 
 
 
@@ -56,6 +69,70 @@ data StackSpec = StackSpec
 
 
 -- ════════════════════════════════════════════════════════════════════════════
+-- STRUCTURED SIGNATURE TYPES (v2)
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Structured function signature with metadata.
+--
+-- Replaces plain text signatures for richer LLM context.
+data FunctionSig = FunctionSig
+  { fsName :: Text
+    -- ^ Function name (e.g., "push").
+  , fsSignature :: Text
+    -- ^ Full type signature (e.g., "a -> Stack a -> Stack a").
+  , fsDescription :: Text
+    -- ^ Brief description of what the function does.
+  }
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (FromJSON, ToJSON, HasJSONSchema)
+
+-- | Test priority for incremental development.
+--
+-- Guides which functions to test first based on dependency order.
+data TestPriority = TestPriority
+  { tpFunction :: Text
+    -- ^ Function name this test targets.
+  , tpPriority :: Int
+    -- ^ Priority (1 = most critical, higher = less critical).
+  , tpRationale :: Text
+    -- ^ Why this priority ranking.
+  }
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (FromJSON, ToJSON, HasJSONSchema)
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- PROGRESS TRACKING (v2)
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Incremental progress tracking for multi-function implementations.
+--
+-- Tracks which functions have passing tests vs need work.
+data IncrementalProgress = IncrementalProgress
+  { ipCompletedFunctions :: [Text]
+    -- ^ Functions with passing implementations.
+  , ipFailingFunctions :: [Text]
+    -- ^ Functions with failing tests.
+  , ipPendingFunctions :: [Text]
+    -- ^ Functions not yet attempted.
+  }
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (FromJSON, ToJSON, HasJSONSchema)
+
+-- | Work status for coordination between agents.
+--
+-- Uses bool + text to avoid sum type oneOf schema issues.
+data WorkStatus = WorkStatus
+  { wsIsBlocked :: Bool
+    -- ^ True if work is blocked and cannot proceed.
+  , wsDetail :: Text
+    -- ^ Status detail: current focus if not blocked, reason if blocked.
+  }
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (FromJSON, ToJSON, HasJSONSchema)
+
+
+-- ════════════════════════════════════════════════════════════════════════════
 -- TYPES AGENT OUTPUT
 -- ════════════════════════════════════════════════════════════════════════════
 
@@ -63,13 +140,41 @@ data StackSpec = StackSpec
 --
 -- The types agent writes only type signatures and data definitions,
 -- no implementations. This constrains the search space for impl.
+-- Module header is derived by templates from the signatures.
 data TypeDefinitions = TypeDefinitions
   { tdDataType :: Text
     -- ^ The data type definition (e.g., "data Stack a = Empty | Push a (Stack a)")
-  , tdSignatures :: [Text]
-    -- ^ Type signatures for functions (e.g., ["push :: a -> Stack a -> Stack a"])
-  , tdModuleHeader :: Text
-    -- ^ Module header with exports
+  , tdSignatures :: [FunctionSig]
+    -- ^ Structured function signatures with metadata.
+  }
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (FromJSON, ToJSON)
+  -- HasJSONSchema derived in TypesFirstDev.Schema via TH
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- SKELETON GENERATION OUTPUT
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Output from skeleton generation - paths to generated stub files.
+--
+-- After the types node produces TypeDefinitions, skeleton generation:
+-- 1. Renders impl-skeleton.jinja → src/<ModulePath>.hs (with undefined stubs)
+-- 2. Renders test-skeleton.jinja → test/Main.hs (with QuickCheck scaffolding)
+-- 3. Runs `cabal build` to verify skeletons compile
+--
+-- This ensures the parallel impl/test agents start from a compiling baseline.
+data SkeletonGenerated = SkeletonGenerated
+  { sgImplPath :: FilePath
+    -- ^ Path to generated implementation skeleton (e.g., "src/Data/Stack.hs").
+  , sgTestPath :: FilePath
+    -- ^ Path to generated test skeleton (e.g., "test/Main.hs").
+  , sgTypeDefs :: TypeDefinitions
+    -- ^ Type definitions from the types agent.
+  , sgProjectPath :: FilePath
+    -- ^ Project root path.
+  , sgModuleName :: Text
+    -- ^ Module name (e.g., "Data.Stack").
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)

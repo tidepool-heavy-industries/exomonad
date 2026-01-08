@@ -17,22 +17,14 @@ The data type:
 The function signatures:
 
 {% for sig in signatures %}
-```haskell
-{{ sig }}
-```
+- `{{ sig.name }} :: {{ sig.signature }}` — {{ sig.description }}
 {% endfor %}
-
-The module header (use exactly this):
-
-```haskell
-{{ moduleHeader }}
-```
 
 ## Requirements
 
 1. Implement ALL functions listed above
 2. Each function MUST match its type signature exactly
-3. The module header MUST match exactly (same exports)
+3. Export all functions in the module header
 4. Use idiomatic Haskell patterns
 5. Keep implementations simple and correct
 

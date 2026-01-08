@@ -24,6 +24,8 @@ import Text.Ginger.GVal (ToGVal(..), dict, list)
 import Text.Ginger.Run.Type (Run)
 import Text.Parsec.Pos (SourcePos)
 
+import TypesFirstDev.Types (FunctionSig(..))
+
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TYPES TEMPLATE CONTEXT
@@ -58,22 +60,27 @@ instance ToGVal (Run SourcePos (Writer Text) Text) TypesContext where
 -- Template variables:
 --   {{ moduleName }} - module name
 --   {{ dataType }} - data type definition
---   {{ signatures }} - list of type signatures
---   {{ moduleHeader }} - module header with exports
+--   {{ signatures }} - list of FunctionSig objects with .name, .signature, .description
 data TestsContext = TestsContext
   { moduleName :: Text
   , dataType :: Text
-  , signatures :: [Text]
-  , moduleHeader :: Text
+  , signatures :: [FunctionSig]
   }
   deriving (Show, Eq, Generic)
+
+-- | ToGVal for FunctionSig - exposes name, signature, description to templates
+instance ToGVal (Run SourcePos (Writer Text) Text) FunctionSig where
+  toGVal sig = dict
+    [ ("name", toGVal sig.fsName)
+    , ("signature", toGVal sig.fsSignature)
+    , ("description", toGVal sig.fsDescription)
+    ]
 
 instance ToGVal (Run SourcePos (Writer Text) Text) TestsContext where
   toGVal TestsContext{..} = dict
     [ ("moduleName", toGVal moduleName)
     , ("dataType", toGVal dataType)
     , ("signatures", list $ map toGVal signatures)
-    , ("moduleHeader", toGVal moduleHeader)
     ]
 
 
@@ -86,13 +93,11 @@ instance ToGVal (Run SourcePos (Writer Text) Text) TestsContext where
 -- Template variables:
 --   {{ moduleName }} - module name
 --   {{ dataType }} - data type definition
---   {{ signatures }} - list of type signatures
---   {{ moduleHeader }} - module header with exports
+--   {{ signatures }} - list of FunctionSig objects with .name, .signature, .description
 data ImplContext = ImplContext
   { moduleName :: Text
   , dataType :: Text
-  , signatures :: [Text]
-  , moduleHeader :: Text
+  , signatures :: [FunctionSig]
   }
   deriving (Show, Eq, Generic)
 
@@ -101,7 +106,36 @@ instance ToGVal (Run SourcePos (Writer Text) Text) ImplContext where
     [ ("moduleName", toGVal moduleName)
     , ("dataType", toGVal dataType)
     , ("signatures", list $ map toGVal signatures)
-    , ("moduleHeader", toGVal moduleHeader)
+    ]
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- SKELETON TEMPLATE CONTEXT
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Context for skeleton generation templates.
+--
+-- These templates generate compilable Haskell stubs (not LLM prompts).
+-- Template variables:
+--   {{ moduleName }} - module name (e.g., "Data.Stack")
+--   {{ typeName }} - type constructor name (e.g., "Stack")
+--   {{ dataType }} - full data type definition
+--   {{ signatures }} - list of FunctionSig objects with .name, .signature, .description
+data SkeletonContext = SkeletonContext
+  { moduleName :: Text
+  , typeName :: Text
+    -- ^ Type constructor name extracted from dataType (e.g., "Stack")
+  , dataType :: Text
+  , signatures :: [FunctionSig]
+  }
+  deriving (Show, Eq, Generic)
+
+instance ToGVal (Run SourcePos (Writer Text) Text) SkeletonContext where
+  toGVal SkeletonContext{..} = dict
+    [ ("moduleName", toGVal moduleName)
+    , ("typeName", toGVal typeName)
+    , ("dataType", toGVal dataType)
+    , ("signatures", list $ map toGVal signatures)
     ]
 
 
