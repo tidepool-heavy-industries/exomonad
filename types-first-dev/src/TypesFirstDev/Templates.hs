@@ -9,18 +9,22 @@ module TypesFirstDev.Templates
     TypesTpl
   , TestsTpl
   , ImplTpl
+  , ImplSkeletonTpl
+  , TestSkeletonTpl
 
     -- * Compiled Templates
   , typesCompiled
   , testsCompiled
   , implCompiled
+  , implSkeletonCompiled
+  , testSkeletonCompiled
   ) where
 
 import Text.Parsec.Pos (SourcePos)
 
 import Tidepool.Graph.Template (TemplateDef(..), TypedTemplate, typedTemplateFile)
 
-import TypesFirstDev.Context (TypesContext(..), TestsContext(..), ImplContext(..))
+import TypesFirstDev.Context (TypesContext(..), TestsContext(..), ImplContext(..), SkeletonContext(..))
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -88,3 +92,47 @@ instance TemplateDef ImplTpl where
   templateCompiled = implCompiled
 
   buildContext = error "ImplTpl.buildContext should not be called for ClaudeCode handlers"
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- Impl Skeleton Template
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Compile the impl-skeleton template at build time.
+implSkeletonCompiled :: TypedTemplate SkeletonContext SourcePos
+implSkeletonCompiled = $(typedTemplateFile ''SkeletonContext "templates/impl-skeleton.jinja")
+
+-- | Template type marker for the impl skeleton node.
+data ImplSkeletonTpl
+
+instance TemplateDef ImplSkeletonTpl where
+  type TemplateContext ImplSkeletonTpl = SkeletonContext
+  type TemplateConstraint ImplSkeletonTpl es = ()
+
+  templateName = "impl-skeleton"
+  templateDescription = "Generate implementation skeleton with stubs"
+  templateCompiled = implSkeletonCompiled
+
+  buildContext = error "ImplSkeletonTpl.buildContext should not be called for ClaudeCode handlers"
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- Test Skeleton Template
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Compile the test-skeleton template at build time.
+testSkeletonCompiled :: TypedTemplate SkeletonContext SourcePos
+testSkeletonCompiled = $(typedTemplateFile ''SkeletonContext "templates/test-skeleton.jinja")
+
+-- | Template type marker for the test skeleton node.
+data TestSkeletonTpl
+
+instance TemplateDef TestSkeletonTpl where
+  type TemplateContext TestSkeletonTpl = SkeletonContext
+  type TemplateConstraint TestSkeletonTpl es = ()
+
+  templateName = "test-skeleton"
+  templateDescription = "Generate test skeleton with pending stubs"
+  templateCompiled = testSkeletonCompiled
+
+  buildContext = error "TestSkeletonTpl.buildContext should not be called for ClaudeCode handlers"
