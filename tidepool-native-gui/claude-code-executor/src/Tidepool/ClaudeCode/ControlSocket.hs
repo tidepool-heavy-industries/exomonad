@@ -24,6 +24,7 @@ import Control.Monad (forever)
 import Data.Aeson (eitherDecode, encode)
 import Data.ByteString.Lazy qualified as LBS
 import Data.ByteString.Char8 qualified as BS
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Network.Socket
@@ -266,7 +267,7 @@ dispatchHook callbacks input = case hiHookEventName input of
 
   "Notification" ->
     hcOnNotification callbacks
-      (maybe "unknown" id $ hiNotificationType input)
+      (fromMaybe "unknown" $ hiNotificationType input)
       (hiMessage input)
 
   "Stop" -> hcOnStop callbacks
@@ -274,16 +275,16 @@ dispatchHook callbacks input = case hiHookEventName input of
   "SubagentStop" -> hcOnSubagentStop callbacks
 
   "PreCompact" ->
-    hcOnPreCompact callbacks (maybe "manual" id $ hiTrigger input)
+    hcOnPreCompact callbacks (fromMaybe "manual" $ hiTrigger input)
 
   "SessionStart" ->
-    hcOnSessionStart callbacks (maybe "startup" id $ hiSource input)
+    hcOnSessionStart callbacks (fromMaybe "startup" $ hiSource input)
 
   "SessionEnd" ->
-    hcOnSessionEnd callbacks (maybe "unknown" id $ hiReason input)
+    hcOnSessionEnd callbacks (fromMaybe "unknown" $ hiReason input)
 
   "UserPromptSubmit" ->
-    hcOnUserPromptSubmit callbacks (maybe "" id $ hiPrompt input)
+    hcOnUserPromptSubmit callbacks (fromMaybe "" $ hiPrompt input)
 
   _ -> pure HookAllow  -- Unknown event, allow
 

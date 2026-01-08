@@ -46,19 +46,30 @@ fn find_test_server() -> PathBuf {
         .parent()
         .unwrap(); // silas/
 
-    // Find the executable in dist-newstyle
-    let dist = silas_dir.join("dist-newstyle/build/x86_64-linux");
+    // Find the executable in dist-newstyle (platform-agnostic)
+    let dist = silas_dir.join("dist-newstyle/build");
 
-    // Find ghc version directory
-    for entry in std::fs::read_dir(&dist).expect("dist-newstyle not found") {
-        let entry = entry.unwrap();
-        let path = entry.path();
-        if path.is_dir() && path.file_name().unwrap().to_string_lossy().starts_with("ghc-") {
-            let exe = path.join(
-                "tidepool-claude-code-executor-0.1.0.0/x/control-socket-test-server/build/control-socket-test-server/control-socket-test-server",
-            );
-            if exe.exists() {
-                return exe;
+    // Find platform directory (e.g., x86_64-linux, aarch64-darwin, etc.)
+    for platform_entry in std::fs::read_dir(&dist).expect("dist-newstyle/build not found") {
+        let platform_entry = platform_entry.unwrap();
+        let platform_path = platform_entry.path();
+        if !platform_path.is_dir() {
+            continue;
+        }
+
+        // Find ghc version directory
+        if let Ok(ghc_entries) = std::fs::read_dir(&platform_path) {
+            for entry in ghc_entries {
+                let entry = entry.unwrap();
+                let path = entry.path();
+                if path.is_dir() && path.file_name().unwrap().to_string_lossy().starts_with("ghc-") {
+                    let exe = path.join(
+                        "tidepool-claude-code-executor-0.1.0.0/x/control-socket-test-server/build/control-socket-test-server/control-socket-test-server",
+                    );
+                    if exe.exists() {
+                        return exe;
+                    }
+                }
             }
         }
     }
