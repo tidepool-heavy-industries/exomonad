@@ -9,7 +9,7 @@ import Data.Vector qualified as V
 import Test.Hspec
 
 import Tidepool.LLM.Executor (buildAnthropicRequest, buildOpenAIRequest, AnthropicTool(..))
-import Tidepool.Effects.LLMProvider (AnthropicConfig(..), OpenAIConfig(..))
+import Tidepool.Effects.LLMProvider (AnthropicConfig(..), OpenAIConfig(..), ThinkingBudget(..))
 
 
 spec :: Spec
@@ -18,7 +18,7 @@ spec = do
     let baseConfig = AnthropicConfig
           { acModel = "claude-sonnet-4-20250514"
           , acMaxTokens = 1024
-          , acThinkingBudget = Nothing
+          , acThinking = ThinkingDisabled
           , acSystemPrompt = Nothing
           }
 
@@ -110,7 +110,7 @@ spec = do
 
     describe "thinking budget" $ do
       it "includes thinking config when budget provided" $ do
-        let configWithThinking = baseConfig { acThinkingBudget = Just 5000 }
+        let configWithThinking = baseConfig { acThinking = ThinkingEnabled 5000 }
             req = buildAnthropicRequest configWithThinking "Think hard" Nothing
             Object fields = toJSON req
             Just (Object thinking) = KM.lookup "thinking" fields
@@ -181,7 +181,7 @@ spec = do
       let anthropicConfig = AnthropicConfig
             { acModel = "claude-sonnet-4-20250514"
             , acMaxTokens = 1024
-            , acThinkingBudget = Nothing
+            , acThinking = ThinkingDisabled
             , acSystemPrompt = Nothing
             }
           openaiConfig = OpenAIConfig
