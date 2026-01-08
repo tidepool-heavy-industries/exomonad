@@ -11,6 +11,7 @@ module TypesFirstDev.Handlers
   ) where
 
 import Control.Concurrent.Async (concurrently)
+import Control.Exception (SomeException, try, throwIO)
 import Control.Monad.Freer (Eff, sendM)
 import Control.Monad.Freer.Reader (Reader, ask)
 import Data.Maybe (fromMaybe)
@@ -19,12 +20,21 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.IO qualified as TIO
 import qualified Data.Aeson as Aeson
+import qualified System.Directory
+import qualified System.Exit
+import qualified System.Process
 
 import Tidepool.ClaudeCode.Config (ClaudeCodeConfig)
 import Tidepool.ClaudeCode.Executor (runClaudeCodeRequest)
 import Tidepool.ClaudeCode.Types qualified as CC
 import Tidepool.Effect.ClaudeCode (ClaudeCodeExec)
-import Tidepool.Effects.Worktree (Worktree, createWorktree, deleteWorktree, WorktreeSpec(..))
+import Tidepool.Effects.Worktree
+  ( Worktree
+  , WorktreePath(..)
+  , WorktreeSpec(..)
+  , createWorktree
+  , deleteWorktree
+  )
 import Tidepool.Graph.Generic (AsHandler)
 import Tidepool.Graph.Goto (GotoChoice, To, ClaudeCodeLLMHandler(..), ClaudeCodeResult(..), gotoChoice, gotoExit)
 import Tidepool.Graph.Template (templateCompiled, runTypedTemplate)
@@ -124,16 +134,27 @@ routeToFork result = do
 -- | Fork handler spawns parallel agents in separate worktrees.
 --
 -- Creates two worktrees, spawns tests and impl agents concurrently,
--- then collects results for the merge node.
+-- then collects results for the merge node. Worktrees are cleaned up
+-- on any failure to prevent resource leaks.
 forkHandler
   :: ForkInput
   -> Eff DevEffects (GotoChoice '[To "merge" ParallelResults])
 forkHandler input = do
   config <- ask @ClaudeCodeConfig
 
-  -- Create worktrees for isolation
-  testsWt <- createWorktree (WorktreeSpec "tests" Nothing)
-  implWt <- createWorktree (WorktreeSpec "impl" Nothing)
+  -- Create worktrees for isolation (with error handling)
+  testsWtResult <- createWorktree (WorktreeSpec "tests" Nothing)
+  testsWt <- case testsWtResult of
+    Left err -> error $ "Failed to create tests worktree: " <> show err
+    Right wt -> pure wt
+
+  implWtResult <- createWorktree (WorktreeSpec "impl" Nothing)
+  implWt <- case implWtResult of
+    Left err -> do
+      -- Cleanup tests worktree on failure
+      _ <- deleteWorktree testsWt
+      error $ "Failed to create impl worktree: " <> show err
+    Right wt -> pure wt
 
   -- Build contexts for each agent
   let testsCtx = TestsContext
@@ -155,17 +176,35 @@ forkHandler input = do
       testsSchema = Just $ schemaToValue (jsonSchema @TestDefinitions)
       implSchema = Just $ schemaToValue (jsonSchema @ImplementationCode)
 
-  -- Run both agents in parallel at IO level (freer-simple doesn't support parallel Eff)
-  -- Note: Session forking disabled for now - each agent starts fresh
-  (testsResponse, implResponse) <- sendM $ concurrently
-    (runClaudeCodeRequest config Sonnet (Just testsWt) testsPrompt testsSchema
-       Nothing Nothing False)  -- No session forking for now
-    (runClaudeCodeRequest config Sonnet (Just implWt) implPrompt implSchema
-       Nothing Nothing False)
+  -- Run both agents in parallel at IO level with cleanup on failure.
+  -- If anything throws, we clean up both worktrees before re-raising.
+  let WorktreePath testsWtPath = testsWt
+      WorktreePath implWtPath = implWt
 
-  -- Parse results
-  testDefs <- parseOrError "tests" testsResponse
-  implCode <- parseOrError "impl" implResponse
+      cleanupWorktrees :: IO ()
+      cleanupWorktrees = do
+        -- Best effort cleanup - ignore errors
+        _ <- try @SomeException $ runWorktreeCleanup testsWt
+        _ <- try @SomeException $ runWorktreeCleanup implWt
+        pure ()
+
+      -- Run agents with cleanup on failure
+      runAgentsWithCleanup :: IO (TestDefinitions, ImplementationCode)
+      runAgentsWithCleanup = do
+        result <- try @SomeException $ do
+          (testsResponse, implResponse) <- concurrently
+            (runClaudeCodeRequest config Sonnet (Just testsWtPath) testsPrompt testsSchema
+               Nothing Nothing False)
+            (runClaudeCodeRequest config Sonnet (Just implWtPath) implPrompt implSchema
+               Nothing Nothing False)
+          testDefs <- parseOrErrorIO "tests" testsResponse
+          implCode <- parseOrErrorIO "impl" implResponse
+          pure (testDefs, implCode)
+        case result of
+          Left exc -> cleanupWorktrees >> throwIO exc
+          Right r -> pure r
+
+  (testDefs, implCode) <- sendM runAgentsWithCleanup
 
   pure $ gotoChoice @"merge" ParallelResults
     { prTestsWorktree = testsWt
@@ -174,15 +213,30 @@ forkHandler input = do
     , prImplCode = implCode
     }
 
--- | Parse ClaudeCode response or error.
-parseOrError
+-- | Cleanup a worktree via git command (for use in IO cleanup).
+-- Uses git worktree remove to properly clean up refs, falls back to
+-- directory removal if git command fails.
+runWorktreeCleanup :: WorktreePath -> IO ()
+runWorktreeCleanup (WorktreePath path) = do
+  -- Try git worktree remove first (properly cleans up refs)
+  (exitCode, _, _) <- System.Process.readProcessWithExitCode
+    "git" ["worktree", "remove", "--force", path] ""
+  -- Fall back to directory removal if git command fails
+  case exitCode of
+    System.Exit.ExitSuccess -> pure ()
+    System.Exit.ExitFailure _ -> do
+      _ <- try @SomeException $ System.Directory.removeDirectoryRecursive path
+      pure ()
+
+-- | Parse ClaudeCode response or error (IO version for use in cleanup blocks).
+parseOrErrorIO
   :: (Aeson.FromJSON a)
   => Text
   -> Either CC.ClaudeCodeError CC.ClaudeCodeResult
-  -> Eff DevEffects a
-parseOrError agentName (Left err) =
+  -> IO a
+parseOrErrorIO agentName (Left err) =
   error $ "Claude Code " <> show agentName <> " agent failed: " <> show err
-parseOrError agentName (Right result) =
+parseOrErrorIO agentName (Right result) =
   case CC.ccrStructuredOutput result of
     Nothing -> error $ "Claude Code " <> show agentName <> " agent returned no structured output"
     Just val -> case Aeson.fromJSON val of
@@ -204,9 +258,9 @@ mergeHandler results = do
   -- Write generated code to project
   sendM $ writeGeneratedFiles spec results
 
-  -- Clean up worktrees
-  deleteWorktree results.prTestsWorktree
-  deleteWorktree results.prImplWorktree
+  -- Clean up worktrees (best effort - ignore errors)
+  _ <- deleteWorktree results.prTestsWorktree
+  _ <- deleteWorktree results.prImplWorktree
 
   -- Exit with the results
   pure $ gotoExit results
