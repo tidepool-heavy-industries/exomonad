@@ -10,7 +10,7 @@ import {{ moduleName }}
 
 -- Placeholder Arbitrary instance
 -- TODO: LLM will replace with proper instance
-instance Arbitrary a => Arbitrary ({{ typeName }} a) where
+instance Arbitrary a => Arbitrary ({{ dataTypeName }} a) where
   arbitrary = pure empty
 
 {% for sig in signatures %}

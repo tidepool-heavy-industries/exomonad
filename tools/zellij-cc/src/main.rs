@@ -81,6 +81,10 @@ enum Commands {
         #[arg(long)]
         prompt: String,
 
+        /// Context to inject before the prompt (for session resume with fresh context)
+        #[arg(long)]
+        inject_context: Option<String>,
+
         /// Working directory for Claude Code
         #[arg(long)]
         cwd: Option<PathBuf>,
@@ -310,6 +314,7 @@ fn main() -> Result<()> {
             name,
             model,
             prompt,
+            inject_context,
             cwd,
             json_schema,
             tools,
@@ -323,6 +328,7 @@ fn main() -> Result<()> {
                 &name,
                 &model,
                 &prompt,
+                inject_context.as_deref(),
                 cwd.as_ref(),
                 json_schema.as_deref(),
                 tools.as_deref(),
@@ -388,6 +394,7 @@ fn run_cc_session(
     name: &str,
     model: &str,
     prompt: &str,
+    inject_context: Option<&str>,
     cwd: Option<&PathBuf>,
     json_schema: Option<&str>,
     tools: Option<&str>,
@@ -431,9 +438,9 @@ fn run_cc_session(
         claude_args.push("--fork-session".to_string());
     }
 
-    // Add prompt
+    // Add prompt (with optional injected context prefix)
     claude_args.push("-p".to_string());
-    claude_args.push(prompt.to_string());
+    claude_args.push(build_prompt(prompt, inject_context));
 
     // Build wrap command - escape args properly
     let escaped_args: Vec<String> = claude_args
@@ -793,6 +800,17 @@ fn shell_quote(s: &str) -> Cow<'_, str> {
     escape(Cow::Borrowed(s))
 }
 
+/// Build the final prompt, optionally prepending injected context.
+///
+/// When context is provided, it's prepended with a double newline separator
+/// to clearly delineate it from the actual prompt.
+fn build_prompt(prompt: &str, inject_context: Option<&str>) -> String {
+    match inject_context {
+        Some(ctx) => format!("{}\n\n{}", ctx, prompt),
+        None => prompt.to_string(),
+    }
+}
+
 // ============================================================================
 // Tests
 // ============================================================================
@@ -994,5 +1012,34 @@ mod tests {
         assert!(json.contains("\"reason\":\"Need human review\""));
         // state should be omitted when None
         assert!(!json.contains("\"state\""));
+    }
+
+    #[test]
+    fn test_build_prompt_without_context() {
+        let result = build_prompt("do the thing", None);
+        assert_eq!(result, "do the thing");
+    }
+
+    #[test]
+    fn test_build_prompt_with_context() {
+        let result = build_prompt("continue working", Some("CONTEXT: file.rs was modified"));
+        assert_eq!(result, "CONTEXT: file.rs was modified\n\ncontinue working");
+    }
+
+    #[test]
+    fn test_build_prompt_with_multiline_context() {
+        let ctx = "CONTEXT:\n- file1.rs modified\n- file2.rs added";
+        let result = build_prompt("proceed", Some(ctx));
+        assert_eq!(result, "CONTEXT:\n- file1.rs modified\n- file2.rs added\n\nproceed");
+    }
+
+    #[test]
+    fn test_build_prompt_with_special_chars() {
+        // Verify special chars pass through (shell escaping happens later)
+        let ctx = "CONTEXT: user said \"hello\" & 'goodbye'";
+        let result = build_prompt("continue", Some(ctx));
+        assert!(result.contains("\"hello\""));
+        assert!(result.contains("&"));
+        assert!(result.contains("'goodbye'"));
     }
 }
