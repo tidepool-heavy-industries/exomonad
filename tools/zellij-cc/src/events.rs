@@ -166,9 +166,6 @@ pub struct RunResult {
     /// Interrupt signals received during execution.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub interrupts: Vec<InterruptSignal>,
-    /// JSON parse errors from stream-json output (for debugging).
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub parse_errors: Vec<String>,
 }
 
 impl RunResult {
@@ -179,7 +176,6 @@ impl RunResult {
         exit_code: i32,
         session_tag: Option<String>,
         interrupts: Vec<InterruptSignal>,
-        parse_errors: Vec<String>,
     ) -> Self {
         // Extract session_id from init event
         let session_id = events
@@ -219,7 +215,6 @@ impl RunResult {
             permission_denials: result_event.permission_denials.clone(),
             model_usage: result_event.model_usage.clone(),
             interrupts,
-            parse_errors,
         }
     }
 }
@@ -344,7 +339,6 @@ mod tests {
             permission_denials: vec![],
             model_usage: HashMap::new(),
             interrupts: vec![],
-            parse_errors: vec![],
         };
 
         let json = serde_json::to_string(&result).unwrap();
@@ -374,7 +368,6 @@ mod tests {
             permission_denials: vec![],
             model_usage: HashMap::new(),
             interrupts: vec![],
-            parse_errors: vec![],
         };
 
         let json = serde_json::to_string(&result).unwrap();
@@ -407,7 +400,6 @@ mod tests {
                 state: Some("need_more_types".to_string()),
                 reason: Some("Missing Foo type".to_string()),
             }],
-            parse_errors: vec![],
         };
 
         let json = serde_json::to_string(&result).unwrap();
