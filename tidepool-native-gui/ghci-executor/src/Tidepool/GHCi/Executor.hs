@@ -91,6 +91,10 @@ disconnectFromOracle = disconnect
 
 -- | Bracket for connection lifecycle.
 --
+-- Returns @Left GHCiNotConnected@ if the initial connection fails.
+-- If the action throws an exception, the connection is still closed
+-- but the exception propagates (not wrapped in @Left@).
+--
 -- @
 -- withGHCiConnection "127.0.0.1" 9999 $ \conn -> do
 --   result <- runM $ runGHCiIO conn $ queryType "fmap"

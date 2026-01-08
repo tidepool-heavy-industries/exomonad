@@ -13,6 +13,7 @@ module GHCi.Oracle.Protocol
   ) where
 
 import Data.Aeson (FromJSON, ToJSON, encode, eitherDecode')
+import Data.Bits (shiftR)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BL
@@ -96,9 +97,6 @@ encodeLen n = BS.pack
   , fromIntegral (n `shiftR` 8)
   , fromIntegral n
   ]
-  where
-    shiftR :: Int -> Int -> Int
-    shiftR x s = x `div` (2 ^ s)
 
 
 -- | Decode 4 big-endian bytes to length.

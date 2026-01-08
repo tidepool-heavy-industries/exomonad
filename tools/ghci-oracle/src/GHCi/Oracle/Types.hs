@@ -13,10 +13,14 @@ module GHCi.Oracle.Types
     -- * Configuration
   , OracleConfig(..)
   , defaultConfig
+
+    -- * Helpers
+  , isLoadError
   ) where
 
 import Data.Aeson (FromJSON, ToJSON)
 import Data.Text (Text)
+import qualified Data.Text as T
 import GHC.Generics (Generic)
 
 
@@ -126,3 +130,13 @@ defaultConfig = OracleConfig
   , ocMaxRestarts = 3
   , ocVerbose = False
   }
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- HELPERS
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Check if GHCi output indicates a load error.
+isLoadError :: Text -> Bool
+isLoadError t =
+  "Failed" `T.isInfixOf` t || "Could not find module" `T.isInfixOf` t

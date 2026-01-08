@@ -187,12 +187,6 @@ cleanKindOutput t =
     _ -> t
 
 
--- | Check if output indicates a load error.
-isLoadError :: Text -> Bool
-isLoadError t =
-  "Failed" `T.isInfixOf` t || "Could not find module" `T.isInfixOf` t
-
-
 -- | Log info message.
 logInfo :: OracleConfig -> Text -> IO ()
 logInfo _config msg = TIO.putStrLn $ "[ghci-oracle] " <> msg

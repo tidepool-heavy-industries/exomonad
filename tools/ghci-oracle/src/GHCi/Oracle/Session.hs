@@ -51,7 +51,7 @@ import System.Process
   )
 import System.Timeout (timeout)
 
-import GHCi.Oracle.Types
+import GHCi.Oracle.Types (GHCiError(..), OracleConfig(..), isLoadError)
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -409,12 +409,6 @@ loadInitialModules handle session (m:ms) = do
 isErrorOutput :: Text -> Bool
 isErrorOutput t =
   "<interactive>:" `T.isInfixOf` t && "error:" `T.isInfixOf` t
-
-
--- | Check if output indicates a load error.
-isLoadError :: Text -> Bool
-isLoadError t =
-  "Failed" `T.isInfixOf` t || "Could not find module" `T.isInfixOf` t
 
 
 -- | Convert ExitCode to Int.
