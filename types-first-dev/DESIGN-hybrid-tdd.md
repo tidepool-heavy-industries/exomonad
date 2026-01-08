@@ -280,10 +280,10 @@ Entry(StackSpec)
                                       ▼                    ▼
     ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓    ┏━━━━━━━━━━━━━━━━━━━━━━━┓
     ┃  hPostValidate (LogicNode)            ┃    ┃  hFix (LLMNode)       ┃
-    ┃  1. Spawn mutationAdversary (async)   ┃    ┃  Weighted trust:      ┃
-    ┃  2. Route to Exit                     ┃    ┃  - HighTrust: fix impl┃
-    ┃                                       ┃    ┃  - MedTrust: fix impl ┃
-    ┃  mutationAdversary runs in background ┃    ┃  - LowTrust: reject   ┃
+    ┃  1. Spawn mutationAdversary (async)   ┃    ┃  Organic learning:    ┃
+    ┃  2. Route to Exit                     ┃    ┃  - Accumulate patterns┃
+    ┃                                       ┃    ┃  - Exit if stuck      ┃
+    ┃  mutationAdversary runs in background ┃    ┃  - Exit if not convg  ┃
     ┃  → findings included in output        ┃    ┃  → back to hValidate  ┃
     ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛    ┗━━━━━━━━━━━━━━━━━━━━━━━┛
                       │
@@ -291,7 +291,7 @@ Entry(StackSpec)
     ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
     ┃  hExit                                                            ┃
     ┃  → HybridResult                                                   ┃
-    ┃     (includes: success, attempts, confidence, adversary findings) ┃
+    ┃     (includes: success, coverage, understanding, adversary findings) ┃
     ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
 ```
 
@@ -470,7 +470,7 @@ data TypesFirstGraphHybrid mode = TypesFirstGraphHybrid
                       ]
 
     -- | Fix implementation based on test failures.
-    -- Uses weighted trust: verified tests are gospel.
+    -- Strict mode: verified tests are gospel. Accumulates understanding.
     --
     -- Schema: FixAgentOutput (changes made, fix types)
   , hFix :: mode :- G.LLMNode
@@ -2416,7 +2416,7 @@ Keeps template coherent, avoids family proliferation.
 2. **TDD guarantees**: Tests verified to fail (self + external double-check)
 3. **Type soundness**: Adversary catches holes before wasting work on impl
 4. **Test robustness**: Mutation adversary finds gaps (advisory)
-5. **Weighted trust**: Recovery adapts to verification confidence level
+5. **Organic learning**: Fix loop accumulates understanding, exits when stuck
 6. **Iteration-ready outputs**: Adversary findings are structured for action
 
 ```
