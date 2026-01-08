@@ -3,10 +3,10 @@
 //! CLI tool for running Claude Code in isolated zellij panes with
 //! supervision, timeout handling, and inter-process communication.
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use shell_escape::escape;
 use std::borrow::Cow;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read as _};
 use std::path::PathBuf;
 use std::time::Duration;
 use tracing::{debug, error, info, warn};
@@ -19,6 +19,8 @@ use zellij_cc::error::{Result, ZellijCcError};
 use zellij_cc::events::{InterruptSignal, ResultEvent, RunResult, StreamEvent};
 use zellij_cc::fifo::{write_result, write_signal, ResultFifo, SignalFifo};
 use zellij_cc::humanize::{print_event_humanized, print_interrupt};
+use zellij_cc::protocol::{ControlMessage, ControlResponse, HookInput, HookOutput};
+use zellij_cc::socket::{control_socket_path, ControlSocket};
 use zellij_cc::supervisor::{build_claude_command, install_signal_handlers, Supervisor};
 
 // ============================================================================
@@ -84,6 +86,10 @@ enum Commands {
         /// Tag for correlating this session with orchestrator state (e.g., worktree name)
         #[arg(long)]
         session_tag: Option<String>,
+
+        /// Control socket path (enables hook interception via Haskell)
+        #[arg(long)]
+        control_socket: Option<PathBuf>,
     },
 
     /// Internal: Wrap claude as subprocess, humanize output
@@ -104,6 +110,10 @@ enum Commands {
         /// Timeout in seconds (0 = no timeout)
         #[arg(long, default_value = "0")]
         timeout: u64,
+
+        /// Control socket path (enables hook interception)
+        #[arg(long)]
+        control_socket: Option<PathBuf>,
 
         /// All remaining args passed to claude
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
@@ -127,6 +137,49 @@ enum Commands {
         #[arg(long, env = "TIDEPOOL_SIGNAL_FIFO")]
         fifo: PathBuf,
     },
+
+    /// Handle a Claude Code hook event (called by generated hook scripts)
+    ///
+    /// This subcommand is invoked by hook scripts that zellij-cc generates.
+    /// It reads the hook payload from stdin (as provided by Claude Code),
+    /// forwards it to the control socket, and outputs the response.
+    Hook {
+        /// The hook event type to handle
+        #[arg(value_enum)]
+        event: HookEventType,
+
+        /// Control socket path (defaults to TIDEPOOL_CONTROL_SOCKET env var)
+        #[arg(long, env = "TIDEPOOL_CONTROL_SOCKET")]
+        socket: Option<PathBuf>,
+    },
+}
+
+/// Hook event types supported by Claude Code.
+///
+/// Each variant corresponds to a hook event that Claude Code emits.
+/// See: https://code.claude.com/docs/en/hooks
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum HookEventType {
+    /// Before tool execution (can allow/deny/modify)
+    PreToolUse,
+    /// After tool completion
+    PostToolUse,
+    /// When a notification is shown
+    Notification,
+    /// When Claude Code wants to stop
+    Stop,
+    /// When a subagent (Task tool) finishes
+    SubagentStop,
+    /// Before a compact operation
+    PreCompact,
+    /// When a session starts or resumes
+    SessionStart,
+    /// When a session ends
+    SessionEnd,
+    /// When permission dialog is shown
+    PermissionRequest,
+    /// When user submits a prompt
+    UserPromptSubmit,
 }
 
 // ============================================================================
@@ -156,6 +209,7 @@ fn main() {
             resume,
             fork_session,
             session_tag,
+            control_socket,
         } => run_cc_session(
             &session,
             &name,
@@ -169,20 +223,30 @@ fn main() {
             resume.as_deref(),
             fork_session,
             session_tag.as_deref(),
+            control_socket.as_ref(),
         ),
         Commands::Wrap {
             result_fifo,
             cwd,
             session_tag,
             timeout,
+            control_socket,
             claude_args,
-        } => wrap_claude(&result_fifo, cwd.as_ref(), session_tag.as_deref(), timeout, &claude_args),
+        } => wrap_claude(
+            &result_fifo,
+            cwd.as_ref(),
+            session_tag.as_deref(),
+            timeout,
+            control_socket.as_ref(),
+            &claude_args,
+        ),
         Commands::Signal {
             signal_type,
             state,
             reason,
             fifo,
         } => send_signal(&fifo, &signal_type, state.as_deref(), reason.as_deref()),
+        Commands::Hook { event, socket } => handle_hook(event, socket.as_ref()),
     };
 
     if let Err(e) = result {
@@ -214,6 +278,135 @@ fn send_signal(
 }
 
 // ============================================================================
+// Hook Command (handles Claude Code hook events)
+// ============================================================================
+
+/// Handle a hook event from Claude Code.
+///
+/// This function:
+/// 1. Reads the hook payload JSON from stdin (provided by CC)
+/// 2. Connects to the control socket
+/// 3. Sends the hook event and waits for response
+/// 4. Outputs the response JSON to stdout
+/// 5. Exits with appropriate code (0=allow, 2=deny/error)
+///
+/// If no control socket is available, we "fail open" - allow the hook
+/// to proceed without orchestration. This ensures CC still works
+/// when not running under Tidepool control.
+fn handle_hook(event_type: HookEventType, socket_path: Option<&PathBuf>) -> Result<()> {
+    // Determine socket path (arg > env var)
+    let socket_path = socket_path
+        .map(|p| p.to_path_buf())
+        .or_else(|| control_socket_path().map(PathBuf::from));
+
+    // Read hook payload from stdin
+    let mut stdin_content = String::new();
+    std::io::stdin()
+        .read_to_string(&mut stdin_content)
+        .map_err(|e| ZellijCcError::Io(e))?;
+
+    debug!(
+        event = ?event_type,
+        payload_len = stdin_content.len(),
+        "Received hook event"
+    );
+
+    // Parse the hook input
+    let hook_input: HookInput = serde_json::from_str(&stdin_content)?;
+
+    // Verify event type matches what CC sent
+    let expected_event = hook_event_name(event_type);
+    if hook_input.hook_event_name != expected_event {
+        warn!(
+            expected = %expected_event,
+            got = %hook_input.hook_event_name,
+            "Hook event name mismatch"
+        );
+    }
+
+    // If no socket available, fail open (allow everything)
+    let Some(socket_path) = socket_path else {
+        debug!("No control socket, failing open (allowing hook)");
+        let output = default_allow_response(event_type);
+        println!("{}", serde_json::to_string(&output).map_err(ZellijCcError::JsonSerialize)?);
+        return Ok(());
+    };
+
+    // Connect to control socket
+    let mut socket = match ControlSocket::connect(&socket_path) {
+        Ok(s) => s,
+        Err(e) => {
+            warn!(error = %e, "Failed to connect to control socket, failing open");
+            let output = default_allow_response(event_type);
+            println!("{}", serde_json::to_string(&output).map_err(ZellijCcError::JsonSerialize)?);
+            return Ok(());
+        }
+    };
+
+    // Send hook event to Haskell
+    let message = ControlMessage::HookEvent { input: hook_input };
+    let response = socket.send(&message)?;
+
+    // Handle response
+    match response {
+        ControlResponse::HookResponse { output, exit_code } => {
+            // Output the response JSON for CC
+            println!("{}", serde_json::to_string(&output).map_err(ZellijCcError::JsonSerialize)?);
+
+            // Exit with the code from Haskell (0=allow, 2=deny)
+            if exit_code != 0 {
+                std::process::exit(exit_code);
+            }
+        }
+        ControlResponse::McpToolResponse { .. } => {
+            // Unexpected response type
+            error!("Received MCP response for hook request");
+            std::process::exit(1);
+        }
+    }
+
+    Ok(())
+}
+
+/// Convert HookEventType enum to the string name CC uses.
+fn hook_event_name(event_type: HookEventType) -> &'static str {
+    match event_type {
+        HookEventType::PreToolUse => "PreToolUse",
+        HookEventType::PostToolUse => "PostToolUse",
+        HookEventType::Notification => "Notification",
+        HookEventType::Stop => "Stop",
+        HookEventType::SubagentStop => "SubagentStop",
+        HookEventType::PreCompact => "PreCompact",
+        HookEventType::SessionStart => "SessionStart",
+        HookEventType::SessionEnd => "SessionEnd",
+        HookEventType::PermissionRequest => "PermissionRequest",
+        HookEventType::UserPromptSubmit => "UserPromptSubmit",
+    }
+}
+
+/// Create a default "allow" response for when no control socket is available.
+fn default_allow_response(event_type: HookEventType) -> HookOutput {
+    use zellij_cc::protocol::HookSpecificOutput;
+
+    match event_type {
+        HookEventType::PreToolUse => HookOutput::pre_tool_use_allow(None, None),
+        HookEventType::PostToolUse => HookOutput::post_tool_use_allow(None),
+        HookEventType::PermissionRequest => HookOutput {
+            continue_: true,
+            hook_specific_output: Some(HookSpecificOutput::PermissionRequest {
+                decision: zellij_cc::protocol::PermissionDecision::Allow { updated_input: None },
+            }),
+            ..Default::default()
+        },
+        // Other hooks just need continue: true
+        _ => HookOutput {
+            continue_: true,
+            ..Default::default()
+        },
+    }
+}
+
+// ============================================================================
 // Run Command (orchestrator)
 // ============================================================================
 
@@ -230,6 +423,7 @@ fn run_cc_session(
     resume: Option<&str>,
     fork_session: bool,
     session_tag: Option<&str>,
+    control_socket: Option<&PathBuf>,
 ) -> Result<()> {
     // Create FIFO for result communication
     let result_fifo = ResultFifo::new()?;
@@ -300,6 +494,12 @@ fn run_cc_session(
         wrap_cmd_parts.push(timeout_secs.to_string());
     }
 
+    // Pass control socket to wrap command for hook interception
+    if let Some(socket) = control_socket {
+        wrap_cmd_parts.push("--control-socket".to_string());
+        wrap_cmd_parts.push(shell_quote(&socket.display().to_string()).into_owned());
+    }
+
     wrap_cmd_parts.push("--".to_string());
     wrap_cmd_parts.extend(escaped_args);
 
@@ -362,6 +562,7 @@ fn wrap_claude(
     cwd: Option<&PathBuf>,
     session_tag: Option<&str>,
     timeout_secs: u64,
+    control_socket: Option<&PathBuf>,
     claude_args: &[String],
 ) -> Result<()> {
     // Install signal handlers for SIGINT/SIGTERM forwarding
@@ -370,8 +571,33 @@ fn wrap_claude(
     // Create signal FIFO for interrupt communication
     let signal_fifo = SignalFifo::new()?;
 
-    // Build and spawn claude with supervisor
-    let cmd = build_claude_command(claude_args, cwd.map(|p| p.as_path()), signal_fifo.path());
+    // Generate hook configuration if control socket is provided
+    let _hook_config = if let Some(socket_path) = control_socket {
+        let effective_cwd = cwd
+            .map(|p| p.clone())
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+
+        let zellij_cc_path = zellij_cc::find_zellij_cc_binary();
+
+        info!(
+            socket = %socket_path.display(),
+            cwd = %effective_cwd.display(),
+            "Generating hook configuration"
+        );
+
+        Some(zellij_cc::HookConfig::generate(&effective_cwd, &zellij_cc_path)?)
+    } else {
+        None
+    };
+
+    // Build claude command with optional control socket env
+    let mut cmd = build_claude_command(claude_args, cwd.map(|p| p.as_path()), signal_fifo.path());
+
+    // Set TIDEPOOL_CONTROL_SOCKET env var if provided
+    if let Some(socket_path) = control_socket {
+        cmd.env("TIDEPOOL_CONTROL_SOCKET", socket_path);
+        debug!(socket = %socket_path.display(), "Set TIDEPOOL_CONTROL_SOCKET env");
+    }
 
     // Spawn with timeout if specified (0 = no timeout)
     let timeout = if timeout_secs > 0 {
