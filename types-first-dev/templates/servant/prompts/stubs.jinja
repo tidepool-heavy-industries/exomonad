@@ -1,0 +1,170 @@
+You are writing stub code for a Servant API webserver in Haskell.
+
+## Task
+
+Write the implementation file with `undefined` stubs for: {{ moduleName }}
+
+## Description
+
+{{ description }}
+
+{% if acceptanceCriteria %}
+## Acceptance Criteria
+
+The implementation must satisfy these requirements:
+
+{% for criterion in acceptanceCriteria %}
+- {{ criterion }}
+{% endfor %}
+{% endif %}
+
+## What You Must Do
+
+1. **Write the actual .hs source file** at `src/{{ modulePath }}.hs`
+2. **Use `undefined` for all handler implementations** - do NOT implement them yet
+3. **Return semantic descriptions** of what each handler should do
+
+## File Structure
+
+Write a complete, compilable Haskell module. Example structure:
+
+```haskell
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE DerivingVia #-}
+{-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE OverloadedStrings #-}
+
+module {{ moduleName }} where
+
+import Data.Aeson (FromJSON, ToJSON)
+import Data.IORef (IORef, newIORef, readIORef, modifyIORef')
+import Data.Proxy (Proxy(..))
+import Data.Text (Text)
+import qualified Data.Map.Strict as Map
+import GHC.Generics (Generic)
+import Network.Wai (Application)
+import Network.Wai.Handler.Warp (run)
+import Servant
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- API Type and Data Types
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- API type
+type MyAPI = ...
+
+-- Request/Response types
+data MyRequest = ...
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (FromJSON, ToJSON)
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Application State
+-- ═══════════════════════════════════════════════════════════════════════════
+
+data AppState = AppState
+  { ... }
+  deriving (Show, Eq)
+
+initialState :: AppState
+initialState = ...
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Server Implementation
+-- ═══════════════════════════════════════════════════════════════════════════
+
+server :: IORef AppState -> Server MyAPI
+server ref = handler1 ref :<|> handler2 ref :<|> handler3 ref
+
+app :: IORef AppState -> Application
+app ref = serve (Proxy @MyAPI) (server ref)
+
+runServer :: Int -> IO ()
+runServer port = do
+  ref <- newIORef initialState
+  run port (app ref)
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Handler Implementations (STUBS)
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- | Description of what handler1 does
+handler1 :: IORef AppState -> ... -> Handler ...
+handler1 _ref = undefined  -- TODO: implement
+
+-- | Description of what handler2 does
+handler2 :: IORef AppState -> ... -> Handler ...
+handler2 _ref = undefined  -- TODO: implement
+```
+
+## Critical Requirements
+
+1. **The code MUST compile!** Run `cabal build` before returning.
+2. **Use `undefined` for all handler bodies** - no actual implementation
+3. **Match server :<|> order to API type order** - e.g., if API is `A :<|> B :<|> C`, server must be `handlerA :<|> handlerB :<|> handlerC`
+4. **Handlers take IORef AppState as first parameter**
+5. **Use correct deriving syntax:**
+   - `deriving stock (Show, Eq, Generic)` on one line
+   - `deriving anyclass (FromJSON, ToJSON)` on next line
+   - `deriving newtype (FromHttpApiData, ToHttpApiData)` for newtypes that need URL parsing
+
+## Semantic Descriptions
+
+After writing the file, return semantic descriptions of each function's behavior.
+
+For each handler, describe:
+- What it should do (behavior)
+- Example inputs and expected outputs
+- Edge cases to consider
+
+These descriptions will drive test generation, so be specific and concrete.
+
+**Example output:**
+```json
+{
+  "soModuleName": "UrlShortener",
+  "soDataType": "type UrlShortenerAPI = ...\n\ndata ShortenRequest = ...",
+  "soFunctions": [
+    {
+      "fsmName": "shortenHandler",
+      "fsmSignature": "IORef AppState -> ShortenRequest -> Handler ShortUrlResponse",
+      "fsmBehavior": "Creates a new short code for the given URL. If the URL was previously shortened, returns the existing short code (idempotent).",
+      "fsmExamples": [
+        {
+          "feInput": "ShortenRequest { srUrl = \"https://example.com\" }",
+          "feExpected": "ShortUrlResponse with a 6-character alphanumeric code"
+        },
+        {
+          "feInput": "Same URL shortened twice",
+          "feExpected": "Same short code both times"
+        }
+      ]
+    },
+    {
+      "fsmName": "expandHandler",
+      "fsmSignature": "IORef AppState -> ShortCode -> Handler ExpandResponse",
+      "fsmBehavior": "Expands a short code to the original URL. Increments the hit counter each time.",
+      "fsmExamples": [
+        {
+          "feInput": "Valid short code \"abc123\"",
+          "feExpected": "ExpandResponse with original URL"
+        },
+        {
+          "feInput": "Invalid short code \"nonexistent\"",
+          "feExpected": "404 Not Found error"
+        }
+      ]
+    }
+  ],
+  "soImports": [],
+  "soCommitMessage": "Add URL shortener stubs with undefined handlers",
+  "soBlocker": null
+}
+```
+
+## Your Task
+
+1. Write `src/{{ modulePath }}.hs` with complete stub implementation
+2. Run `cabal build` to verify it compiles
+3. Return semantic descriptions for test generation

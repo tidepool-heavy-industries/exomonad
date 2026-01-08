@@ -9,9 +9,17 @@ module TypesFirstDev.Types
   ( -- * Entry Type
     StackSpec(..)
 
+    -- * Project Type
+  , ProjectType(..)
+
     -- * Structured Signature Types (v2)
   , FunctionSig(..)
   , TestPriority(..)
+
+    -- * Semantic Descriptions (v3)
+  , FunctionExample(..)
+  , FunctionSemantics(..)
+  , StubsOutput(..)
 
     -- * Progress Tracking (v2)
   , IncrementalProgress(..)
@@ -36,6 +44,9 @@ module TypesFirstDev.Types
     -- * Skeleton Generation Output
   , SkeletonGenerated(..)
 
+    -- * v3 Stubs Output (for fork)
+  , StubsGenerated(..)
+
     -- * Internal Types
   , ForkInput(..)
   , ParallelResults(..)
@@ -54,18 +65,33 @@ import Tidepool.Schema (HasJSONSchema)
 -- ENTRY TYPE
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Specification for the Stack data type to implement.
+-- | Type of project to generate.
+--
+-- Determines which templates to use for skeleton generation.
+data ProjectType
+  = PureLibrary
+    -- ^ Pure Haskell library (like Stack example)
+  | ServantServer
+    -- ^ Servant webserver with HTTP endpoints
+  | CLIApp
+    -- ^ Command-line application
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (FromJSON, ToJSON)
+
+-- | Specification for the data type / service to implement.
 --
 -- This is the entry point to the graph - defines what to build.
 data StackSpec = StackSpec
   { ssProjectPath :: FilePath
     -- ^ Path to the project root.
   , ssModuleName :: Text
-    -- ^ Module name (e.g., "Data.Stack").
+    -- ^ Module name (e.g., "Data.Stack" or "UrlShortener").
   , ssDescription :: Text
     -- ^ Natural language description of the data structure.
   , ssAcceptanceCriteria :: [Text]
     -- ^ High-level acceptance criteria to inform test priorities.
+  , ssProjectType :: ProjectType
+    -- ^ Type of project (determines template set).
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)
@@ -98,6 +124,69 @@ data TestPriority = TestPriority
     -- ^ Property name (e.g., "lifo_order", "push_pop_inverse").
   , tpDescription :: Text
     -- ^ What to test (e.g., "Stack maintains LIFO order").
+  }
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (FromJSON, ToJSON)
+  -- HasJSONSchema derived via TH in Schema.hs
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- SEMANTIC DESCRIPTIONS (v3 - stubs-driven workflow)
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Example input/output pair demonstrating function behavior.
+--
+-- Used by stubs agent to describe what each function should do.
+-- The tests agent uses these to write property tests.
+data FunctionExample = FunctionExample
+  { feInput :: Text
+    -- ^ Description of input (e.g., "push 1 (push 2 empty)")
+  , feExpected :: Text
+    -- ^ Expected output description (e.g., "Stack with 1 on top")
+  }
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (FromJSON, ToJSON)
+  -- HasJSONSchema derived via TH in Schema.hs
+
+-- | Semantic description of a function's behavior.
+--
+-- The contract between stubs and tests agents. Stubs agent describes
+-- what each function should do; tests agent writes tests to verify it.
+data FunctionSemantics = FunctionSemantics
+  { fsmName :: Text
+    -- ^ Function name (e.g., "push")
+  , fsmSignature :: Text
+    -- ^ Type signature (e.g., "a -> Stack a -> Stack a")
+  , fsmBehavior :: Text
+    -- ^ Natural language description of what the function does.
+    -- e.g., "Adds an element to the top of the stack"
+  , fsmExamples :: [FunctionExample]
+    -- ^ Example inputs/outputs demonstrating the behavior.
+    -- Used to derive concrete test cases.
+  }
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (FromJSON, ToJSON)
+  -- HasJSONSchema derived via TH in Schema.hs
+
+-- | Output from the stubs agent (v3 workflow).
+--
+-- The stubs agent:
+-- 1. Writes actual .hs files with `undefined` implementations
+-- 2. Returns semantic descriptions for each function
+-- 3. cabal build must pass before returning
+data StubsOutput = StubsOutput
+  { soModuleName :: Text
+    -- ^ Module name (e.g., "Data.Stack", "UrlShortener")
+  , soDataType :: Text
+    -- ^ The data type definition that was written
+  , soFunctions :: [FunctionSemantics]
+    -- ^ Semantic descriptions for each function (drives test generation)
+  , soImports :: [Text]
+    -- ^ Additional imports used in the stubs
+  , soCommitMessage :: Text
+    -- ^ Git commit message for the stubs
+  , soBlocker :: Maybe Text
+    -- ^ If blocked, explain why. Null if successful.
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)
@@ -153,6 +242,10 @@ data TypeDefinitions = TypeDefinitions
     -- ^ Structured function signatures with metadata.
   , tdTestPriorities :: [TestPriority]
     -- ^ Test priorities for incremental development.
+  , tdImports :: [Text]
+    -- ^ Additional imports needed by the data types.
+    -- Each entry is a full import statement like "import Data.ByteString (ByteString)"
+    -- The skeleton generator will include these in the generated module.
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)
@@ -182,6 +275,32 @@ data SkeletonGenerated = SkeletonGenerated
     -- ^ Project root path.
   , sgModuleName :: Text
     -- ^ Module name (e.g., "Data.Stack").
+  }
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (FromJSON, ToJSON)
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- v3 STUBS OUTPUT (for fork)
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Output from stubs agent for the fork handler (v3 workflow).
+--
+-- The stubs agent writes actual .hs files and returns semantic descriptions.
+-- This replaces SkeletonGenerated in the v3 flow.
+data StubsGenerated = StubsGenerated
+  { stgImplPath :: FilePath
+    -- ^ Path to impl file written by stubs agent (e.g., "src/UrlShortener.hs").
+  , stgTestPath :: FilePath
+    -- ^ Path to test file (test/Main.hs - may be template-generated or empty).
+  , stgSemantics :: [FunctionSemantics]
+    -- ^ Semantic descriptions from stubs agent (drives test generation).
+  , stgDataType :: Text
+    -- ^ Data type definitions (for reference in tests).
+  , stgProjectPath :: FilePath
+    -- ^ Project root path.
+  , stgModuleName :: Text
+    -- ^ Module name (e.g., "UrlShortener").
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)

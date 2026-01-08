@@ -1,0 +1,56 @@
+cabal-version: 3.0
+name:          url-shortener
+version:       0.1.0.0
+synopsis:      URL shortening service
+build-type:    Simple
+
+common common-opts
+    default-language: GHC2021
+    default-extensions:
+        DataKinds
+        DeriveAnyClass
+        DeriveGeneric
+        DerivingStrategies
+        DerivingVia
+        DuplicateRecordFields
+        OverloadedRecordDot
+        OverloadedStrings
+        TypeFamilies
+        TypeOperators
+    ghc-options: -Wall
+
+library
+    import: common-opts
+    exposed-modules:  UrlShortener
+    hs-source-dirs:   src
+    build-depends:
+        base >= 4.17 && < 5,
+        aeson >= 2.0,
+        containers >= 0.6,
+        hashable >= 1.4,
+        servant >= 0.20,
+        servant-server >= 0.20,
+        text >= 2.0,
+        time >= 1.12,
+        wai >= 3.2,
+        warp >= 3.3
+
+test-suite url-shortener-test
+    import: common-opts
+    type:             exitcode-stdio-1.0
+    main-is:          Main.hs
+    hs-source-dirs:   test
+    ghc-options:      -threaded -rtsopts -with-rtsopts=-N
+    build-depends:
+        base >= 4.17 && < 5,
+        aeson >= 2.0,
+        hspec >= 2.10,
+        http-client >= 0.7,
+        QuickCheck >= 2.14,
+        servant >= 0.20,
+        servant-client >= 0.20,
+        servant-server >= 0.20,
+        text >= 2.0,
+        wai >= 3.2,
+        warp >= 3.3,
+        url-shortener

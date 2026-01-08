@@ -6,26 +6,48 @@
 -- This module compiles Jinja templates at build time and defines TemplateDef instances.
 -- Must import context types from TypesFirstDev.Context (TH staging requirement).
 module TypesFirstDev.Templates
-  ( -- * Template Types
+  ( -- * Template Types (Pure Library)
     TypesTpl
   , TestsTpl
   , ImplTpl
   , ImplSkeletonTpl
   , TestSkeletonTpl
 
-    -- * Compiled Templates
+    -- * Template Types (Servant)
+  , ServantTypesTpl
+  , ServantTestsTpl
+  , ServantImplTpl
+  , ServantImplSkeletonTpl
+  , ServantTestSkeletonTpl
+
+    -- * Template Types (v3 Stubs Workflow)
+  , ServantStubsTpl
+  , ServantTestsV3Tpl
+
+    -- * Compiled Templates (Pure Library)
   , typesCompiled
   , testsCompiled
   , implCompiled
   , implSkeletonCompiled
   , testSkeletonCompiled
+
+    -- * Compiled Templates (Servant)
+  , servantTypesCompiled
+  , servantTestsCompiled
+  , servantImplCompiled
+  , servantImplSkeletonCompiled
+  , servantTestSkeletonCompiled
+
+    -- * Compiled Templates (v3 Stubs Workflow)
+  , servantStubsCompiled
+  , servantTestsV3Compiled
   ) where
 
 import Text.Parsec.Pos (SourcePos)
 
 import Tidepool.Graph.Template (TemplateDef(..), TypedTemplate, typedTemplateFile)
 
-import TypesFirstDev.Context (TypesContext(..), TestsContext(..), ImplContext(..), SkeletonContext(..))
+import TypesFirstDev.Context (TypesContext(..), TestsContext(..), ImplContext(..), SkeletonContext(..), StubsContext(..), TestsContextV3(..))
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -137,3 +159,165 @@ instance TemplateDef TestSkeletonTpl where
   templateCompiled = testSkeletonCompiled
 
   buildContext = error "TestSkeletonTpl.buildContext should not be called for ClaudeCode handlers"
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- SERVANT TEMPLATES
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- Servant Types Template
+-- ────────────────────────────────────────────────────────────────────────────
+
+-- | Compile the servant types template at build time.
+servantTypesCompiled :: TypedTemplate TypesContext SourcePos
+servantTypesCompiled = $(typedTemplateFile ''TypesContext "templates/servant/prompts/types.jinja")
+
+-- | Template type marker for the servant types node.
+data ServantTypesTpl
+
+instance TemplateDef ServantTypesTpl where
+  type TemplateContext ServantTypesTpl = TypesContext
+  type TemplateConstraint ServantTypesTpl es = ()
+
+  templateName = "servant-types"
+  templateDescription = "Design Servant API type and data types"
+  templateCompiled = servantTypesCompiled
+
+  buildContext = error "ServantTypesTpl.buildContext should not be called for ClaudeCode handlers"
+
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- Servant Tests Template
+-- ────────────────────────────────────────────────────────────────────────────
+
+-- | Compile the servant tests template at build time.
+servantTestsCompiled :: TypedTemplate TestsContext SourcePos
+servantTestsCompiled = $(typedTemplateFile ''TestsContext "templates/servant/prompts/tests.jinja")
+
+-- | Template type marker for the servant tests node.
+data ServantTestsTpl
+
+instance TemplateDef ServantTestsTpl where
+  type TemplateContext ServantTestsTpl = TestsContext
+  type TemplateConstraint ServantTestsTpl es = ()
+
+  templateName = "servant-tests"
+  templateDescription = "Write integration tests using servant-client"
+  templateCompiled = servantTestsCompiled
+
+  buildContext = error "ServantTestsTpl.buildContext should not be called for ClaudeCode handlers"
+
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- Servant Impl Template
+-- ────────────────────────────────────────────────────────────────────────────
+
+-- | Compile the servant impl template at build time.
+servantImplCompiled :: TypedTemplate ImplContext SourcePos
+servantImplCompiled = $(typedTemplateFile ''ImplContext "templates/servant/prompts/impl.jinja")
+
+-- | Template type marker for the servant impl node.
+data ServantImplTpl
+
+instance TemplateDef ServantImplTpl where
+  type TemplateContext ServantImplTpl = ImplContext
+  type TemplateConstraint ServantImplTpl es = ()
+
+  templateName = "servant-impl"
+  templateDescription = "Implement Servant handler functions"
+  templateCompiled = servantImplCompiled
+
+  buildContext = error "ServantImplTpl.buildContext should not be called for ClaudeCode handlers"
+
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- Servant Impl Skeleton Template
+-- ────────────────────────────────────────────────────────────────────────────
+
+-- | Compile the servant impl-skeleton template at build time.
+servantImplSkeletonCompiled :: TypedTemplate SkeletonContext SourcePos
+servantImplSkeletonCompiled = $(typedTemplateFile ''SkeletonContext "templates/servant/impl-skeleton.jinja")
+
+-- | Template type marker for the servant impl skeleton node.
+data ServantImplSkeletonTpl
+
+instance TemplateDef ServantImplSkeletonTpl where
+  type TemplateContext ServantImplSkeletonTpl = SkeletonContext
+  type TemplateConstraint ServantImplSkeletonTpl es = ()
+
+  templateName = "servant-impl-skeleton"
+  templateDescription = "Generate Servant server skeleton with undefined handlers"
+  templateCompiled = servantImplSkeletonCompiled
+
+  buildContext = error "ServantImplSkeletonTpl.buildContext should not be called for ClaudeCode handlers"
+
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- Servant Test Skeleton Template
+-- ────────────────────────────────────────────────────────────────────────────
+
+-- | Compile the servant test-skeleton template at build time.
+servantTestSkeletonCompiled :: TypedTemplate SkeletonContext SourcePos
+servantTestSkeletonCompiled = $(typedTemplateFile ''SkeletonContext "templates/servant/test-skeleton.jinja")
+
+-- | Template type marker for the servant test skeleton node.
+data ServantTestSkeletonTpl
+
+instance TemplateDef ServantTestSkeletonTpl where
+  type TemplateContext ServantTestSkeletonTpl = SkeletonContext
+  type TemplateConstraint ServantTestSkeletonTpl es = ()
+
+  templateName = "servant-test-skeleton"
+  templateDescription = "Generate Servant integration test skeleton"
+  templateCompiled = servantTestSkeletonCompiled
+
+  buildContext = error "ServantTestSkeletonTpl.buildContext should not be called for ClaudeCode handlers"
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- v3 STUBS WORKFLOW TEMPLATES
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- Servant Stubs Template (v3)
+-- ────────────────────────────────────────────────────────────────────────────
+
+-- | Compile the servant stubs template at build time.
+servantStubsCompiled :: TypedTemplate StubsContext SourcePos
+servantStubsCompiled = $(typedTemplateFile ''StubsContext "templates/servant/prompts/stubs.jinja")
+
+-- | Template type marker for the servant stubs node.
+data ServantStubsTpl
+
+instance TemplateDef ServantStubsTpl where
+  type TemplateContext ServantStubsTpl = StubsContext
+  type TemplateConstraint ServantStubsTpl es = ()
+
+  templateName = "servant-stubs"
+  templateDescription = "Write Servant stubs with undefined handlers, return semantic descriptions"
+  templateCompiled = servantStubsCompiled
+
+  buildContext = error "ServantStubsTpl.buildContext should not be called for ClaudeCode handlers"
+
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- Servant Tests Template v3 (driven by semantic descriptions)
+-- ────────────────────────────────────────────────────────────────────────────
+
+-- | Compile the servant tests v3 template at build time.
+servantTestsV3Compiled :: TypedTemplate TestsContextV3 SourcePos
+servantTestsV3Compiled = $(typedTemplateFile ''TestsContextV3 "templates/servant/prompts/tests-v3.jinja")
+
+-- | Template type marker for the servant tests v3 node.
+data ServantTestsV3Tpl
+
+instance TemplateDef ServantTestsV3Tpl where
+  type TemplateContext ServantTestsV3Tpl = TestsContextV3
+  type TemplateConstraint ServantTestsV3Tpl es = ()
+
+  templateName = "servant-tests-v3"
+  templateDescription = "Write Servant integration tests from semantic descriptions"
+  templateCompiled = servantTestsV3Compiled
+
+  buildContext = error "ServantTestsV3Tpl.buildContext should not be called for ClaudeCode handlers"
