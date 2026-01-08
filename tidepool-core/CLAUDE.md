@@ -652,6 +652,63 @@ computeHandler n = do
 
 Uses `freer-simple` for reified continuations (required for WASM).
 
+## Common Patterns
+
+### Parallel Execution (Fork/Join)
+
+The graph DSL doesn't express parallel fan-out directly. Use `LogicNode` with `concurrently`:
+
+```haskell
+-- Graph definition: linear transitions (parallelism not visible)
+, fork  :: mode :- G.LogicNode :@ Input ForkInput :@ UsesEffects '[Goto "merge" Results]
+, merge :: mode :- G.LogicNode :@ Input Results :@ UsesEffects '[Goto Exit Output]
+
+-- Handler: parallel execution hidden inside
+forkHandler input = do
+  (result1, result2) <- sendM $ concurrently
+    (runAgent1 input)
+    (runAgent2 input)
+  pure $ gotoChoice @"merge" Results { r1 = result1, r2 = result2 }
+```
+
+**Why this works:**
+- Graph shows workflow steps (fork, merge) as distinct phases
+- Parallelism is an implementation detail, not a structural concern
+- Results are collected before transitioning to merge
+
+### Retry Logic: Local Recursion vs Self-Loop
+
+Choose based on visibility needs:
+
+**Local recursion** (retry is implementation detail):
+```haskell
+runWithRetry :: Int -> IO Result
+runWithRetry attempt
+  | attempt >= maxRetries = error "Max retries"
+  | otherwise = do
+      result <- tryOperation
+      case result of
+        Success r -> pure r
+        Failure _ -> runWithRetry (attempt + 1)
+```
+
+**Graph self-loop** (retry is workflow step, visible in tracing):
+```haskell
+-- Graph definition
+, validate :: mode :- G.LogicNode
+    :@ Input Attempt
+    :@ UsesEffects '[Goto Self Attempt, Goto "next" ValidResult]
+
+-- Handler
+validateHandler attempt
+  | attempt.count >= maxRetries = pure $ gotoChoice @"next" (errorResult attempt)
+  | otherwise = case validate attempt.data of
+      Valid r   -> pure $ gotoChoice @"next" r
+      Invalid e -> pure $ gotoSelf attempt { count = attempt.count + 1, lastError = e }
+```
+
+Use self-loops when retry attempts should be observable (telemetry, debugging). Use local recursion when retry is purely an implementation detail.
+
 ## File Inventory
 
 All paths relative to `tidepool-core/src/Tidepool/Graph/`.

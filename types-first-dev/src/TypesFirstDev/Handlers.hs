@@ -356,6 +356,27 @@ maxAgentRetries = 3
 -- Session parameters:
 -- - resumeSession: Session ID to resume (for multi-turn or forking from parent)
 -- - forkSession: If True, fork the session (read-only, doesn't modify original)
+-- | Run a Claude Code agent with automatic retry on build failure.
+--
+-- == Design Note: Local Recursion vs Graph Self-Loop
+--
+-- This uses local @go@ recursion rather than the graph DSL's @Goto Self@ pattern.
+-- Both are valid approaches with different trade-offs:
+--
+-- * **Local recursion** (used here): The retry logic is encapsulated within the
+--   function and not visible in the graph topology. Appropriate when:
+--   - The retry is an implementation detail, not a workflow step
+--   - The function is called within parallel execution (@concurrently@)
+--   - You want simple, self-contained retry logic
+--
+-- * **Graph self-loop** (@Goto Self@): The retry is a visible node transition,
+--   handled by @dispatchGotoWithSelf@. Appropriate when:
+--   - Retry attempts should be observable in graph tracing/telemetry
+--   - The retry is a conceptually separate workflow step
+--   - You need to compose with other graph dispatch features
+--
+-- Here, retry is an implementation detail of "spawn agent with build validation"
+-- rather than a workflow-level concept, so local recursion is the right choice.
 runAgentWithBuildValidation
   :: ClaudeCodeConfig
   -> WorktreePath
@@ -573,6 +594,26 @@ stubsHandlerV3 spec config = do
 --
 -- Creates two worktrees, spawns tests and impl agents concurrently,
 -- then collects results for the merge node.
+--
+-- == Design Note: Parallelism Pattern
+--
+-- The graph DSL doesn't currently express parallel fan-out. Instead, we use
+-- a 'LogicNode' with @sendM $ concurrently@ to spawn parallel IO operations.
+--
+-- @
+-- Graph topology:  fork ──► merge (linear transition)
+-- Actual execution: fork ──┬──► tests agent ──┐
+--                          └──► impl agent  ──┴──► merge
+-- @
+--
+-- This is the blessed pattern for parallel execution within graphs:
+--
+-- 1. **Graph shows workflow steps** - fork and merge are distinct phases
+-- 2. **Parallelism is implementation detail** - hidden in handler, not graph
+-- 3. **Results collected before transition** - merge receives complete results
+--
+-- A future DSL enhancement could add explicit 'ForkNode' and 'JoinNode'
+-- annotations, but for now @LogicNode + concurrently@ works well.
 forkHandler
   :: SkeletonGenerated
   -> Eff DevEffects (GotoChoice '[To "merge" ParallelResults])
