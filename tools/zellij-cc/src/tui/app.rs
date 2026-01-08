@@ -60,6 +60,10 @@ impl App {
                     self.quit = true;
                 }
             }
+            (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
+                // Force-quit: allow exiting even when the session is not complete
+                self.quit = true;
+            }
             (KeyCode::Char('j'), KeyModifiers::NONE) | (KeyCode::Down, KeyModifiers::NONE) => {
                 self.state.scroll_down();
                 self.list_state.select(Some(self.state.selected_index));
@@ -145,6 +149,9 @@ impl App {
         let status = if self.state.is_complete {
             if self.state.is_error {
                 Span::styled(" ERROR ", Style::default().fg(Color::White).bg(Color::Red))
+            } else if self.state.channel_disconnected && self.state.result_event.is_none() {
+                // Channel disconnected without receiving a result event - process may have crashed
+                Span::styled(" EXITED ", Style::default().fg(Color::White).bg(Color::Magenta))
             } else {
                 Span::styled(" DONE ", Style::default().fg(Color::Black).bg(Color::Green))
             }
@@ -247,7 +254,7 @@ impl App {
             .add_modifier(Modifier::BOLD);
         let desc_style = Style::default().fg(Color::Gray);
 
-        let line = Line::from(vec![
+        let mut spans = vec![
             Span::raw(" "),
             Span::styled("j/k", key_style),
             Span::styled(": scroll  ", desc_style),
@@ -257,11 +264,18 @@ impl App {
             Span::styled(": expand/collapse all  ", desc_style),
             Span::styled("g/G", key_style),
             Span::styled(": top/bottom  ", desc_style),
-            Span::styled("q", key_style),
-            Span::styled(": quit", desc_style),
-        ]);
+        ];
 
-        let paragraph = Paragraph::new(line)
+        // Show appropriate quit option based on state
+        if self.state.is_complete {
+            spans.push(Span::styled("q", key_style));
+            spans.push(Span::styled(": quit", desc_style));
+        } else {
+            spans.push(Span::styled("Ctrl-C", key_style));
+            spans.push(Span::styled(": force quit", desc_style));
+        }
+
+        let paragraph = Paragraph::new(Line::from(spans))
             .style(Style::default().bg(Color::DarkGray));
 
         frame.render_widget(paragraph, area);
@@ -289,6 +303,8 @@ pub fn run(event_rx: Receiver<TuiEvent>) -> Result<TuiResult> {
                 Ok(tui_event) => app.handle_tui_event(tui_event),
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => {
+                    // Mark channel as disconnected for status display
+                    app.state.channel_disconnected = true;
                     if !app.state.is_complete {
                         app.state.is_complete = true;
                     }

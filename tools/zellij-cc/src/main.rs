@@ -459,8 +459,15 @@ fn wrap_claude(
         let stdout_reader = thread::spawn(move || {
             for line in reader.lines().map_while(Result::ok) {
                 if line.trim().is_empty() { continue; }
-                if let Ok(event) = serde_json::from_str::<StreamEvent>(&line) {
-                    let _ = event_tx_clone.send(tui::TuiEvent::Claude(event));
+                match serde_json::from_str::<StreamEvent>(&line) {
+                    Ok(event) => {
+                        let _ = event_tx_clone.send(tui::TuiEvent::Claude(event));
+                    }
+                    Err(e) => {
+                        // Log parse errors to stderr for debugging
+                        let truncated: String = line.chars().take(50).collect();
+                        eprintln!("[parse error] {} (line: {}...)", e, truncated);
+                    }
                 }
             }
             // Signal end of stream

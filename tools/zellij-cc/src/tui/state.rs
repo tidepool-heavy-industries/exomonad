@@ -55,6 +55,7 @@ impl DisplayEvent {
                             has_expandable = true;
                             summaries.push(format!("Tool: {}", name));
                             if let Some(obj) = input.as_object() {
+                                let total_params = obj.len();
                                 for (k, v) in obj.iter().take(5) {
                                     let v_str = v.to_string();
                                     let preview: String = v_str.chars().take(60).collect();
@@ -63,6 +64,10 @@ impl DisplayEvent {
                                     } else {
                                         all_details.push(format!("  {}: {}", k, preview));
                                     }
+                                }
+                                // Show truncation indicator if there are more parameters
+                                if total_params > 5 {
+                                    all_details.push(format!("  ... and {} more", total_params - 5));
                                 }
                             }
                         }
@@ -128,6 +133,9 @@ pub struct AppState {
     pub is_complete: bool,
     pub is_error: bool,
 
+    // Channel state
+    pub channel_disconnected: bool,
+
     // Interrupts
     pub interrupts: Vec<InterruptSignal>,
 
@@ -148,6 +156,7 @@ impl Default for AppState {
             num_turns: 0,
             is_complete: false,
             is_error: false,
+            channel_disconnected: false,
             interrupts: Vec::new(),
             result_event: None,
         }
