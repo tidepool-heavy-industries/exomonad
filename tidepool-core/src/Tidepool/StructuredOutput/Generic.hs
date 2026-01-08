@@ -44,7 +44,7 @@ import Tidepool.StructuredOutput.Error (ParseDiagnostic(..), expectedObject, mis
 
 -- | Pass through datatype metadata.
 instance GStructuredOutput f => GStructuredOutput (M1 D d f) where
-  gStructuredSchema opts = gStructuredSchema @f opts
+  gStructuredSchema = gStructuredSchema @f
   gEncodeStructured opts (M1 x) = gEncodeStructured opts x
   gParseStructured opts path v = M1 <$> gParseStructured @f opts path v
 
@@ -294,7 +294,7 @@ instance GStructuredSum (l :+: r) => GStructuredOutput (l :+: r) where
              (Just (String tag), Just contents) ->
                case gSumParse @(l :+: r) opts path (T.unpack tag) contents of
                  Just result -> result
-                 Nothing -> Left $ typeMismatch path ("one of known constructors") (String tag)
+                 Nothing -> Left $ typeMismatch path "one of known constructors" (String tag)
              (Just _, _) -> Left $ typeMismatch path "string tag" (Object obj)
              (Nothing, _) -> Left $ missingField (path ++ [T.pack tagField])
       ObjectWithSingleField ->
