@@ -4,6 +4,16 @@
 --   Entry(StackSpec) → types(ClaudeCode) → fork → (tests || impl) → merge → Exit
 --
 -- It demonstrates parallel agent execution with git worktrees for isolation.
+--
+-- Usage:
+--   types-first-dev                    # Run default Stack experiment
+--   types-first-dev --experiment url-shortener  # Run URL shortener experiment
+--
+-- Environment variables:
+--   PROJECT_PATH: Path to the project directory
+--   PROJECT_TYPE: PureLibrary | ServantServer | CLIApp
+--   MODULE_NAME: Module name to generate
+--   ZELLIJ_SESSION: Zellij session name
 module Main where
 
 import Control.Monad (unless)
@@ -11,7 +21,7 @@ import Control.Monad.Freer (runM)
 import Control.Monad.Freer.Reader (runReader)
 import Data.Text qualified as T
 import System.Directory (getCurrentDirectory)
-import System.Environment (lookupEnv)
+import System.Environment (getArgs, lookupEnv)
 import System.Exit (exitFailure)
 import System.Process (readProcess)
 
@@ -22,17 +32,22 @@ import Tidepool.Worktree.Executor (runWorktreeIO, defaultWorktreeConfig)
 
 import TypesFirstDev.Graph (TypesFirstGraph(..))
 import TypesFirstDev.Handlers (typesFirstHandlers)
-import TypesFirstDev.Types (StackSpec(..), ParallelResults(..), TestsResult(..), ImplResult(..))
+import TypesFirstDev.Types (StackSpec(..), ProjectType(..), ParallelResults(..), TestsResult(..), ImplResult(..))
 
 
 -- | Main entry point.
 --
--- Runs the types-first workflow to generate type definitions for a Stack.
+-- Runs the types-first workflow to generate type definitions.
+-- Supports multiple experiments via command-line args or env vars.
 main :: IO ()
 main = do
   putStrLn "Types-First Development Workflow (Parallel)"
   putStrLn "============================================"
   putStrLn ""
+
+  -- Parse experiment from command line
+  args <- getArgs
+  let experiment = parseExperiment args
 
   -- Get zellij session from env or use default
   sessionName <- maybe "types-first-dev" T.pack <$> lookupEnv "ZELLIJ_SESSION"
@@ -47,22 +62,13 @@ main = do
   projectPath <- maybe getCurrentDirectory pure =<< lookupEnv "PROJECT_PATH"
   let worktreeConfig = defaultWorktreeConfig projectPath
 
-  -- Define what we want to implement
-  let spec = StackSpec
-        { ssProjectPath = projectPath
-        , ssModuleName = "Data.Stack"
-        , ssDescription = "A LIFO (last-in-first-out) stack data structure with operations: \
-                          \push (add element to top), pop (remove and return top element), \
-                          \peek (view top element without removing), isEmpty (check if empty)"
-        , ssAcceptanceCriteria =
-            [ "LIFO order: push a,b,c then pop returns c,b,a"
-            , "push then pop is identity: pop (push x s) == Just (x, s)"
-            , "empty stack invariants: isEmpty empty, pop empty == Nothing"
-            ]
-        }
+  -- Get spec based on experiment
+  spec <- getSpec experiment projectPath
 
+  putStrLn $ "Experiment: " <> experiment
   putStrLn $ "Project: " <> projectPath
   putStrLn $ "Module: " <> T.unpack spec.ssModuleName
+  putStrLn $ "Type: " <> show spec.ssProjectType
   putStrLn $ "Session: " <> T.unpack sessionName
   putStrLn ""
   putStrLn "Starting Claude Code execution..."
@@ -77,10 +83,63 @@ main = do
     . runReader spec          -- Reader StackSpec (second in DevEffects)
     . runReader claudeConfig  -- Reader ClaudeCodeConfig (first in DevEffects)
     $ do
-        choice <- callHandler (types typesFirstHandlers) spec
-        dispatchGoto typesFirstHandlers choice
+        let handlers = typesFirstHandlers spec
+        choice <- callHandler (types handlers) spec
+        dispatchGoto handlers choice
 
   printResult result
+
+
+-- | Parse experiment name from command-line args.
+parseExperiment :: [String] -> String
+parseExperiment ("--experiment":name:_) = name
+parseExperiment ("-e":name:_) = name
+parseExperiment _ = "stack"  -- default
+
+
+-- | Get the spec for a given experiment.
+getSpec :: String -> FilePath -> IO StackSpec
+getSpec "stack" projectPath = pure $ StackSpec
+  { ssProjectPath = projectPath
+  , ssModuleName = "Data.Stack"
+  , ssDescription = "A LIFO (last-in-first-out) stack data structure with operations: \
+                    \push (add element to top), pop (remove and return top element), \
+                    \peek (view top element without removing), isEmpty (check if empty)"
+  , ssAcceptanceCriteria =
+      [ "LIFO order: push a,b,c then pop returns c,b,a"
+      , "push then pop is identity: pop (push x s) == Just (x, s)"
+      , "empty stack invariants: isEmpty empty, pop empty == Nothing"
+      ]
+  , ssProjectType = PureLibrary
+  }
+
+getSpec "url-shortener" projectPath = pure $ StackSpec
+  { ssProjectPath = projectPath
+  , ssModuleName = "UrlShortener"
+  , ssDescription = T.unlines
+      [ "A URL shortening service with three endpoints:"
+      , "- POST /shorten: Accept a JSON body with 'url' field, return a short URL"
+      , "- GET /:code: Expand a short code to the original URL"
+      , "- GET /:code/stats: Get usage statistics (hit count) for a short code"
+      , ""
+      , "The service should store mappings in memory using an IORef with a Map."
+      , "Short codes should be generated deterministically (e.g., hash-based) so that"
+      , "the same URL always produces the same short code."
+      ]
+  , ssAcceptanceCriteria =
+      [ "Roundtrip: POST /shorten with a URL, then GET /:code returns the original URL"
+      , "Idempotent: POSTing the same URL twice returns the same short code"
+      , "Stats increment: Each GET /:code request increments the hit count in stats"
+      , "Not found: GET with an invalid code returns HTTP 404"
+      , "Validation: POST with invalid/empty URL returns HTTP 400"
+      ]
+  , ssProjectType = ServantServer
+  }
+
+getSpec experiment _ = do
+  putStrLn $ "ERROR: Unknown experiment: " <> experiment
+  putStrLn "Available experiments: stack, url-shortener"
+  exitFailure
 
 
 -- | Print the parallel results.
