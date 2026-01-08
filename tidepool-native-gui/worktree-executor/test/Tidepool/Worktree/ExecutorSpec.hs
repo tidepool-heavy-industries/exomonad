@@ -15,7 +15,7 @@ import System.Directory
   , getTemporaryDirectory
   )
 import System.FilePath ((</>))
-import System.Process (readProcessWithExitCode)
+import System.Process (readProcessWithExitCode, getCurrentPid)
 import Test.Hspec
 
 import Tidepool.Effects.Worktree
@@ -38,7 +38,8 @@ withTempGitRepo action = bracket setup teardown action
   where
     setup = do
       tmpDir <- getTemporaryDirectory
-      let testDir = tmpDir </> "worktree-test-" <> show (abs $ hash "worktree-test")
+      pid <- getCurrentPid
+      let testDir = tmpDir </> "worktree-test-" <> show pid
       createDirectoryIfMissing True testDir
 
       -- Initialize git repo
@@ -61,11 +62,6 @@ withTempGitRepo action = bracket setup teardown action
       if exists
         then removeDirectoryRecursive dir
         else pure ()
-
-    -- Simple hash for unique directory names
-    hash :: String -> Int
-    hash = foldr (\c acc -> ord c + acc * 31) 0
-      where ord c = fromEnum c
 
 
 spec :: Spec

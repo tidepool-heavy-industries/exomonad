@@ -199,8 +199,8 @@ createWorktree = send . CreateWorktree
 
 -- | Delete a worktree and its associated branch.
 --
--- Returns 'Right ()' on success, 'Left WorktreeNotFound' if it doesn't exist,
--- or 'Left WorktreeGitError' if git fails.
+-- Returns 'Right ()' on success (including when the worktree doesn't exist),
+-- or 'Left WorktreeGitError' if git fails unexpectedly.
 deleteWorktree
   :: Member Worktree effs
   => WorktreePath
@@ -257,6 +257,11 @@ listWorktrees = send ListWorktrees
 --   pure output
 -- -- Worktree is automatically deleted here
 -- @
+--
+-- __Cleanup semantics:__ The worktree is ALWAYS deleted after the action
+-- completes, whether it succeeds or fails. This is "temporary workspace"
+-- semantics - use manual 'createWorktree'/'deleteWorktree' if you need
+-- the worktree to persist beyond the action.
 --
 -- Note: If the action throws an exception at the IO level, cleanup may not
 -- occur. For full IO-level safety, the executor also uses IO bracket.
