@@ -12,6 +12,16 @@
 -- result <- runClaudeCodeExecIO config $ do
 --   execClaudeCode Sonnet (Just "/my/project") prompt schema tools Nothing
 -- @
+--
+-- = With Budget Tracking
+--
+-- @
+-- import Tidepool.ClaudeCode.Budget (runBudgetIO, defaultBudgetConfig)
+--
+-- (result, budgetState) <- runBudgetIO defaultBudgetConfig $
+--   runClaudeCodeExecWithBudget config $ do
+--     execClaudeCode Sonnet cwd prompt schema tools Nothing
+-- @
 module Tidepool.ClaudeCode.Effect
   ( -- * Effect (re-exported from tidepool-core)
     ClaudeCodeExec(..)
@@ -20,9 +30,12 @@ module Tidepool.ClaudeCode.Effect
 
     -- * IO Interpreter
   , runClaudeCodeExecIO
+
+    -- * IO Interpreter with Budget
+  , runClaudeCodeExecWithBudget
   ) where
 
-import Control.Monad.Freer (Eff, LastMember, interpret, sendM)
+import Control.Monad.Freer (Eff, Member, LastMember, interpret, sendM)
 import Data.Text qualified as T
 
 -- Re-export effect type from core
@@ -32,6 +45,7 @@ import Tidepool.Effect.ClaudeCode
   , runClaudeCodeExec
   )
 
+import Tidepool.ClaudeCode.Budget (Budget, recordSpend, checkBudget, fromClaudeCodeResult)
 import Tidepool.ClaudeCode.Config (ClaudeCodeConfig)
 import Tidepool.ClaudeCode.Types (ClaudeCodeResult(..), ClaudeCodeError(..))
 import Tidepool.ClaudeCode.Executor (runClaudeCodeRequest)
@@ -69,6 +83,43 @@ runClaudeCodeExecIO cfg = interpret $ \case
 
         | otherwise ->
             error "ClaudeCode returned no structured output (schema validation may have failed)"
+
+
+-- | Run ClaudeCodeExec effect with budget tracking.
+--
+-- Same as 'runClaudeCodeExecIO' but records spending and checks budget
+-- after each call. Use with 'runBudgetIO' from "Tidepool.ClaudeCode.Budget".
+--
+-- Example:
+--
+-- @
+-- (result, budgetState) <- runBudgetIO (BudgetConfig (Just (usdCost 5.0)) (Just 0.8)) $
+--   runClaudeCodeExecWithBudget config $ do
+--     execClaudeCode Sonnet cwd prompt schema tools Nothing
+-- @
+runClaudeCodeExecWithBudget
+  :: (LastMember IO effs, Member Budget effs)
+  => ClaudeCodeConfig
+  -> Eff (ClaudeCodeExec ': effs) a
+  -> Eff effs a
+runClaudeCodeExecWithBudget cfg = interpret $ \case
+  ClaudeCodeExecOp model cwd prompt schema tools resumeSession forkSession -> do
+    result <- sendM $ runClaudeCodeRequest cfg model cwd prompt schema tools resumeSession forkSession
+    case result of
+      Left err ->
+        error $ "ClaudeCode execution failed: " <> formatError err
+
+      Right ccr -> do
+        -- Record spending and check budget
+        recordSpend (fromClaudeCodeResult ccr)
+        checkBudget
+
+        if ccr.ccrIsError
+          then error $ "ClaudeCode reported error: " <>
+                 maybe "(no message)" T.unpack ccr.ccrResult
+          else case ccr.ccrStructuredOutput of
+            Just val -> pure (val, Just ccr.ccrSessionId)
+            Nothing -> error "ClaudeCode returned no structured output (schema validation may have failed)"
 
 
 -- | Format ClaudeCodeError for error messages.
