@@ -53,6 +53,10 @@ enum Commands {
         #[arg(long)]
         prompt: String,
 
+        /// Context to inject before the prompt (for session resume with fresh context)
+        #[arg(long)]
+        inject_context: Option<String>,
+
         /// Working directory for Claude Code
         #[arg(long)]
         cwd: Option<PathBuf>,
@@ -144,6 +148,7 @@ fn main() {
             name,
             model,
             prompt,
+            inject_context,
             cwd,
             json_schema,
             tools,
@@ -156,6 +161,7 @@ fn main() {
             &name,
             &model,
             &prompt,
+            inject_context.as_deref(),
             cwd.as_ref(),
             json_schema.as_deref(),
             tools.as_deref(),
@@ -216,6 +222,7 @@ fn run_cc_session(
     name: &str,
     model: &str,
     prompt: &str,
+    inject_context: Option<&str>,
     cwd: Option<&PathBuf>,
     json_schema: Option<&str>,
     tools: Option<&str>,
@@ -258,9 +265,9 @@ fn run_cc_session(
         claude_args.push("--fork-session".to_string());
     }
 
-    // Add prompt
+    // Add prompt (with optional injected context prefix)
     claude_args.push("-p".to_string());
-    claude_args.push(prompt.to_string());
+    claude_args.push(build_prompt(prompt, inject_context));
 
     // Build wrap command - escape args properly
     let escaped_args: Vec<String> = claude_args
@@ -451,4 +458,250 @@ fn wrap_claude(
 /// Shell-escape a string for safe use in shell commands
 fn shell_quote(s: &str) -> Cow<'_, str> {
     escape(Cow::Borrowed(s))
+}
+
+/// Build the final prompt, optionally prepending injected context.
+///
+/// When context is provided, it's prepended with a double newline separator
+/// to clearly delineate it from the actual prompt.
+fn build_prompt(prompt: &str, inject_context: Option<&str>) -> String {
+    match inject_context {
+        Some(ctx) => format!("{}\n\n{}", ctx, prompt),
+        None => prompt.to_string(),
+    }
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+    use zellij_cc::events::ContentBlock;
+
+    const SAMPLE_INIT: &str = r#"{"type":"system","subtype":"init","session_id":"abc-123","tools":["Read","Glob"],"model":"claude-sonnet-4-20250514"}"#;
+    const SAMPLE_TEXT: &str = r#"{"type":"assistant","message":{"content":[{"type":"text","text":"hello world"}]}}"#;
+    const SAMPLE_TOOL: &str = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","id":"toolu_123","input":{"file_path":"/foo/bar"}}]}}"#;
+    const SAMPLE_RESULT: &str = r#"{"type":"result","subtype":"success","is_error":false,"result":"done","session_id":"abc-123","total_cost_usd":0.05,"num_turns":2,"permission_denials":[],"modelUsage":{}}"#;
+    const SAMPLE_RESULT_WITH_USAGE: &str = r#"{"type":"result","subtype":"success","is_error":false,"result":"done","session_id":"abc-123","total_cost_usd":0.15,"num_turns":3,"permission_denials":[],"modelUsage":{"claude-sonnet-4-20250514":{"inputTokens":100,"outputTokens":50,"cacheReadInputTokens":1000,"cacheCreationInputTokens":500,"costUSD":0.15}}}"#;
+
+    #[test]
+    fn parse_system_event() {
+        let event: StreamEvent = serde_json::from_str(SAMPLE_INIT).unwrap();
+        assert!(matches!(event, StreamEvent::System(_)));
+        if let StreamEvent::System(s) = event {
+            assert_eq!(s.session_id, "abc-123");
+            assert_eq!(s.model, "claude-sonnet-4-20250514");
+            assert_eq!(s.tools, vec!["Read", "Glob"]);
+        }
+    }
+
+    #[test]
+    fn parse_assistant_text() {
+        let event: StreamEvent = serde_json::from_str(SAMPLE_TEXT).unwrap();
+        if let StreamEvent::Assistant(a) = event {
+            assert_eq!(a.message.content.len(), 1);
+            if let ContentBlock::Text { text } = &a.message.content[0] {
+                assert_eq!(text, "hello world");
+            } else {
+                panic!("Expected Text block");
+            }
+        } else {
+            panic!("Expected Assistant event");
+        }
+    }
+
+    #[test]
+    fn parse_assistant_tool_use() {
+        let event: StreamEvent = serde_json::from_str(SAMPLE_TOOL).unwrap();
+        if let StreamEvent::Assistant(a) = event {
+            assert_eq!(a.message.content.len(), 1);
+            if let ContentBlock::ToolUse { name, id, input } = &a.message.content[0] {
+                assert_eq!(name, "Read");
+                assert_eq!(id, "toolu_123");
+                assert_eq!(input["file_path"], "/foo/bar");
+            } else {
+                panic!("Expected ToolUse block");
+            }
+        } else {
+            panic!("Expected Assistant event");
+        }
+    }
+
+    #[test]
+    fn parse_result_event() {
+        let event: StreamEvent = serde_json::from_str(SAMPLE_RESULT).unwrap();
+        if let StreamEvent::Result(r) = event {
+            assert!(!r.is_error);
+            assert_eq!(r.subtype, "success");
+            assert_eq!(r.result, Some("done".to_string()));
+            assert_eq!(r.session_id, Some("abc-123".to_string()));
+            assert_eq!(r.num_turns, Some(2));
+            assert!((r.total_cost_usd.unwrap() - 0.05).abs() < 0.001);
+        } else {
+            panic!("Expected Result event");
+        }
+    }
+
+    #[test]
+    fn parse_result_with_model_usage() {
+        let event: StreamEvent = serde_json::from_str(SAMPLE_RESULT_WITH_USAGE).unwrap();
+        if let StreamEvent::Result(r) = event {
+            assert_eq!(r.model_usage.len(), 1);
+            let usage = r.model_usage.get("claude-sonnet-4-20250514").unwrap();
+            assert_eq!(usage.input_tokens, 100);
+            assert_eq!(usage.output_tokens, 50);
+            assert_eq!(usage.cache_read_input_tokens, 1000);
+        } else {
+            panic!("Expected Result event");
+        }
+    }
+
+    #[test]
+    fn parse_full_stream() {
+        let stream = format!(
+            "{}\n{}\n{}\n{}",
+            SAMPLE_INIT, SAMPLE_TEXT, SAMPLE_TOOL, SAMPLE_RESULT
+        );
+        let events: Vec<StreamEvent> = stream
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+
+        assert_eq!(events.len(), 4);
+        assert!(matches!(&events[0], StreamEvent::System(_)));
+        assert!(matches!(&events[1], StreamEvent::Assistant(_)));
+        assert!(matches!(&events[2], StreamEvent::Assistant(_)));
+        assert!(matches!(&events[3], StreamEvent::Result(_)));
+    }
+
+    #[test]
+    fn run_result_serialization() {
+        let result = RunResult {
+            exit_code: 0,
+            is_error: false,
+            result: Some("test".to_string()),
+            structured_output: None,
+            session_id: "sess-123".to_string(),
+            session_tag: Some("test-worktree".to_string()),
+            total_cost_usd: 0.1,
+            num_turns: 5,
+            events: vec![],
+            permission_denials: vec![],
+            model_usage: HashMap::new(),
+            interrupts: vec![],
+        };
+
+        let json = serde_json::to_string(&result).unwrap();
+
+        // Test round-trip deserialization
+        let decoded: RunResult = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.session_id, "sess-123");
+        assert_eq!(decoded.session_tag, Some("test-worktree".to_string()));
+        assert_eq!(decoded.num_turns, 5);
+
+        // Empty interrupts should be omitted from JSON
+        assert!(!json.contains("interrupts"));
+    }
+
+    #[test]
+    fn run_result_without_tag() {
+        let result = RunResult {
+            exit_code: 0,
+            is_error: false,
+            result: Some("test".to_string()),
+            structured_output: None,
+            session_id: "sess-123".to_string(),
+            session_tag: None,
+            total_cost_usd: 0.1,
+            num_turns: 5,
+            events: vec![],
+            permission_denials: vec![],
+            model_usage: HashMap::new(),
+            interrupts: vec![],
+        };
+
+        let json = serde_json::to_string(&result).unwrap();
+
+        // Test round-trip deserialization
+        let decoded: RunResult = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.session_id, "sess-123");
+        assert_eq!(decoded.session_tag, None);
+
+        // session_tag should be omitted from JSON when None
+        assert!(!json.contains("session_tag"));
+    }
+
+    #[test]
+    fn run_result_with_interrupt() {
+        let result = RunResult {
+            exit_code: 0,
+            is_error: false,
+            result: Some("test".to_string()),
+            structured_output: None,
+            session_id: "sess-123".to_string(),
+            session_tag: None,
+            total_cost_usd: 0.1,
+            num_turns: 5,
+            events: vec![],
+            permission_denials: vec![],
+            model_usage: HashMap::new(),
+            interrupts: vec![InterruptSignal {
+                signal_type: "transition".to_string(),
+                state: Some("need_more_types".to_string()),
+                reason: Some("Missing Foo type".to_string()),
+            }],
+        };
+
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains("\"interrupts\""));
+        assert!(json.contains("\"signal_type\":\"transition\""));
+        assert!(json.contains("\"state\":\"need_more_types\""));
+    }
+
+    #[test]
+    fn interrupt_signal_serialization() {
+        let signal = InterruptSignal {
+            signal_type: "escalate".to_string(),
+            state: None,
+            reason: Some("Need human review".to_string()),
+        };
+
+        let json = serde_json::to_string(&signal).unwrap();
+        assert!(json.contains("\"signal_type\":\"escalate\""));
+        assert!(json.contains("\"reason\":\"Need human review\""));
+        // state should be omitted when None
+        assert!(!json.contains("\"state\""));
+    }
+
+    #[test]
+    fn test_build_prompt_without_context() {
+        let result = build_prompt("do the thing", None);
+        assert_eq!(result, "do the thing");
+    }
+
+    #[test]
+    fn test_build_prompt_with_context() {
+        let result = build_prompt("continue working", Some("CONTEXT: file.rs was modified"));
+        assert_eq!(result, "CONTEXT: file.rs was modified\n\ncontinue working");
+    }
+
+    #[test]
+    fn test_build_prompt_with_multiline_context() {
+        let ctx = "CONTEXT:\n- file1.rs modified\n- file2.rs added";
+        let result = build_prompt("proceed", Some(ctx));
+        assert_eq!(result, "CONTEXT:\n- file1.rs modified\n- file2.rs added\n\nproceed");
+    }
+
+    #[test]
+    fn test_build_prompt_with_special_chars() {
+        // Verify special chars pass through (shell escaping happens later)
+        let ctx = "CONTEXT: user said \"hello\" & 'goodbye'";
+        let result = build_prompt("continue", Some(ctx));
+        assert!(result.contains("\"hello\""));
+        assert!(result.contains("&"));
+        assert!(result.contains("'goodbye'"));
+    }
 }

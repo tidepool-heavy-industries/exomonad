@@ -177,7 +177,6 @@ instance ToGVal (Run SourcePos (Writer Text) Text) SkeletonContext where
     [ ("moduleName", toGVal moduleName)
     , ("typeName", toGVal typeName)
     , ("dataTypeName", toGVal dataTypeName)
-    , ("typeName", toGVal dataTypeName)  -- Alias for template compatibility
     , ("dataType", toGVal dataType)
     , ("signatures", list $ map toGVal signatures)
     , ("testPriorities", list $ map toGVal testPriorities)
