@@ -15,6 +15,7 @@
 //! ## Example
 //!
 //! ```ignore
+//! use std::time::Duration;
 //! use zellij_cc::{supervisor::Supervisor, fifo::SignalFifo};
 //!
 //! // Create signal FIFO for interrupt communication

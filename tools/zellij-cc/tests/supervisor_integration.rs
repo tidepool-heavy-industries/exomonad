@@ -1,9 +1,9 @@
-//! Integration tests for Supervisor timeout and signal behavior.
+//! Integration tests for Supervisor timeout and process lifecycle.
 //!
 //! These tests spawn actual processes to verify:
 //! - Timeout enforcement (child is killed when timeout fires)
-//! - Signal forwarding (SIGINT/SIGTERM forwarded to child)
-//! - Cleanup on drop (no orphan processes)
+//! - Process cleanup on drop (no orphan processes)
+//! - Child processes can be killed by signals
 
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -64,11 +64,9 @@ fn test_drop_kills_process() {
 
     let sup = Supervisor::spawn(cmd, None).unwrap();
 
-    // Get the child PID before drop
-    // Note: We can't easily get the PID from Supervisor's public API,
-    // but we can verify the behavior by checking process doesn't hang
-
     // Drop the supervisor - it should kill the child
+    // If Drop doesn't kill the child, this test would hang waiting for
+    // the 60-second sleep to complete.
     drop(sup);
 
     // If we get here without hanging, the child was killed

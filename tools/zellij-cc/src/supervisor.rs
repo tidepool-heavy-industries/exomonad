@@ -198,8 +198,18 @@ impl Supervisor {
                 }
             }
 
-            // Sleep briefly to avoid busy-waiting
-            std::thread::sleep(Duration::from_millis(50));
+            // Sleep briefly to avoid busy-waiting, but cap by remaining timeout
+            // to avoid overshooting the timeout by a full poll interval
+            let sleep_duration = if let Some(timeout) = self.timeout {
+                let remaining = timeout.saturating_sub(self.start_time.elapsed());
+                remaining.min(Duration::from_millis(50))
+            } else {
+                Duration::from_millis(50)
+            };
+
+            if !sleep_duration.is_zero() {
+                std::thread::sleep(sleep_duration);
+            }
         }
     }
 
