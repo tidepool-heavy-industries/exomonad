@@ -68,6 +68,9 @@ module Tidepool.StructuredOutput
   , ParseDiagnostic(..)
   , formatDiagnostic
 
+    -- * String Enum Wrapper
+  , StringEnum(..)
+
     -- * Field Label Utilities
   , stripFieldPrefix
   , defaultFieldLabel
@@ -75,7 +78,7 @@ module Tidepool.StructuredOutput
 
 -- Import instances to bring them into scope
 import Tidepool.StructuredOutput.Generic ()  -- GStructuredOutput instances for M1, :*:, etc.
-import Tidepool.StructuredOutput.Instances ()  -- Base type instances (Text, Int, etc.)
+import Tidepool.StructuredOutput.Instances (StringEnum(..))  -- Base type instances + StringEnum
 
 -- Re-export from submodules
 import Tidepool.StructuredOutput.Class

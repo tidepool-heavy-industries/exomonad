@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
@@ -7,7 +8,11 @@
 --
 -- Provides instances for primitive types like 'Text', 'Int', 'Bool',
 -- as well as container types like 'Maybe' and lists.
-module Tidepool.StructuredOutput.Instances () where
+--
+-- Also provides 'StringEnum' for LLM-compatible enum schemas.
+module Tidepool.StructuredOutput.Instances
+  ( StringEnum(..)
+  ) where
 
 import Data.Aeson (Value(..))
 import Data.Bifunctor (first)
@@ -20,7 +25,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Vector as V
 
-import Tidepool.Schema (JSONSchema(..), SchemaType(..), emptySchema, arraySchema)
+import Tidepool.Schema (JSONSchema(..), SchemaType(..), emptySchema, arraySchema, enumSchema)
 import Tidepool.StructuredOutput.Class (StructuredOutput(..))
 import Tidepool.StructuredOutput.Error
   ( ParseDiagnostic(..)
@@ -170,3 +175,58 @@ instance StructuredOutput Value where
   structuredSchema = emptySchema TObject
   encodeStructured = id
   parseStructured = Right
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- STRING ENUM WRAPPER
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Wrapper for enum types that should serialize as plain string enums in JSON Schema.
+--
+-- LLM tool calling expects string enums like @{"enum": ["controlled", "risky", "desperate"]}@,
+-- but StructuredOutput's default sum type encoding uses TaggedObject.
+--
+-- Use this wrapper in record fields to get plain string enum schemas:
+--
+-- @
+-- data WirePosition = WireControlled | WireRisky | WireDesperate
+--   deriving (Show, Bounded, Enum)
+--
+-- data EngageInput = EngageInput
+--   { position :: StringEnum WirePosition
+--   , ...
+--   }
+--   deriving (Generic, StructuredOutput)
+--
+-- -- Schema for position field: {"type": "string", "enum": ["wirecontrolled", "wirerisky", "wiredesperate"]}
+-- @
+--
+-- == Show Instance Transformation
+--
+-- The enum values are derived from @show@ and lowercased. If you need custom
+-- string values (e.g., "controlled" instead of "wirecontrolled"), provide a
+-- custom @Show@ instance or use @stringEnumWith@ for explicit values.
+--
+-- == JSON Parsing
+--
+-- Note: This wrapper only affects schema generation. For parsing, your inner
+-- type should have its own @FromJSON@ instance (typically case-insensitive).
+newtype StringEnum a = StringEnum { unStringEnum :: a }
+  deriving (Show, Eq)
+
+-- | StructuredOutput instance for StringEnum.
+--
+-- Generates a plain string enum schema from @Bounded + Enum + Show@.
+instance (Bounded a, Enum a, Show a) => StructuredOutput (StringEnum a) where
+  structuredSchema = enumSchema (map (T.toLower . T.pack . show) [minBound @a .. maxBound])
+
+  encodeStructured (StringEnum x) = String (T.toLower . T.pack $ show x)
+
+  parseStructured (String s) =
+    let vals = [minBound @a .. maxBound]
+        matches = filter (\v -> T.toLower (T.pack (show v)) == T.toLower s) vals
+    in case matches of
+      [v] -> Right (StringEnum v)
+      []  -> Left $ typeMismatch [] ("one of: " <> T.intercalate ", " (map (T.toLower . T.pack . show) vals)) (String s)
+      _   -> Left $ typeMismatch [] "unique enum value" (String s)
+  parseStructured v = Left $ expectedString [] v
