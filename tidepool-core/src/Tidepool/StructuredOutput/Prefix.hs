@@ -24,6 +24,7 @@ module Tidepool.StructuredOutput.Prefix
   ) where
 
 import Data.Char (isLower, toLower, toUpper)
+import Data.List (foldl')
 
 
 -- | Strip common lowercase prefix from a field name and lowercase the first char.

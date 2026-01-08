@@ -475,7 +475,7 @@ stubsHandlerV3 spec config = do
       stubsPrompt = runTypedTemplate stubsCtx servantStubsCompiled
 
       -- Build schema for StubsOutput
-      stubsSchema = Just $ schemaToValue (jsonSchema @StubsOutput)
+      stubsSchema = Just $ schemaToValue (structuredSchema @StubsOutput)
 
   logDetail "implPath" implPath
   logDetail "stubsPromptLength" (show $ T.length stubsPrompt)
@@ -757,8 +757,8 @@ forkHandlerV3 input config spec = do
       implPrompt = runTypedTemplate implCtx servantImplCompiled
 
       -- Build schemas
-      testsSchema = Just $ schemaToValue (jsonSchema @TestsResult)
-      implSchema = Just $ schemaToValue (jsonSchema @ImplResult)
+      testsSchema = Just $ schemaToValue (structuredSchema @TestsResult)
+      implSchema = Just $ schemaToValue (structuredSchema @ImplResult)
 
   logPhase "v3 FORK - Spawning parallel agents"
   logDetail "testsPromptLength" (show $ T.length testsPrompt)

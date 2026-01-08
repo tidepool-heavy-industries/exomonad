@@ -193,6 +193,15 @@ spec = do
           KeyMap.member "contents" obj `shouldBe` True
         _ -> expectationFailure "Expected Object"
 
+  describe "NonEmpty schema" $ do
+    it "sets minItems to 1" $ do
+      let schema = structuredSchema @(NonEmpty Text)
+      schema.schemaMinItems `shouldBe` Just 1
+
+    it "regular list has no minItems" $ do
+      let schema = structuredSchema @[Text]
+      schema.schemaMinItems `shouldBe` Nothing
+
   describe "Parse errors" $ do
     it "reports missing required field" $ do
       let json = Object mempty

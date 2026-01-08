@@ -52,6 +52,7 @@ module TypesFirstDev.Types
   , ParallelResults(..)
   ) where
 
+import Data.Aeson (FromJSON, ToJSON)
 import Data.Text (Text)
 import GHC.Generics (Generic)
 
@@ -75,7 +76,7 @@ data ProjectType
   | CLIApp
     -- ^ Command-line application
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
 
 -- | Specification for the data type / service to implement.
 --
@@ -145,8 +146,7 @@ data FunctionExample = FunctionExample
     -- ^ Expected output description (e.g., "Stack with 1 on top")
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
-  -- HasJSONSchema derived via TH in Schema.hs
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
 
 -- | Semantic description of a function's behavior.
 --
@@ -165,8 +165,7 @@ data FunctionSemantics = FunctionSemantics
     -- Used to derive concrete test cases.
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
-  -- HasJSONSchema derived via TH in Schema.hs
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
 
 -- | Output from the stubs agent (v3 workflow).
 --
@@ -189,8 +188,7 @@ data StubsOutput = StubsOutput
     -- ^ If blocked, explain why. Null if successful.
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
-  -- HasJSONSchema derived via TH in Schema.hs
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -339,6 +337,7 @@ data TestsResult = TestsResult
     -- Type issues? Null if work completed successfully.
   }
   deriving stock (Show, Eq, Generic)
+  deriving anyclass (FromJSON, ToJSON)
 
 instance StructuredOutput TestsResult
 
@@ -374,6 +373,7 @@ data ImplResult = ImplResult
     -- Null if work completed successfully. Used for retry/escalation.
   }
   deriving stock (Show, Eq, Generic)
+  deriving anyclass (FromJSON, ToJSON)
 
 instance StructuredOutput ImplResult
 

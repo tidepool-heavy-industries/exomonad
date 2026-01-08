@@ -20,7 +20,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Vector as V
 
-import Tidepool.Schema (SchemaType(..), emptySchema, arraySchema)
+import Tidepool.Schema (JSONSchema(..), SchemaType(..), emptySchema, arraySchema)
 import Tidepool.StructuredOutput.Class (StructuredOutput(..))
 import Tidepool.StructuredOutput.Error
   ( ParseDiagnostic(..)
@@ -122,7 +122,7 @@ instance (StructuredOutput a, Ord a) => StructuredOutput (Set a) where
 
 -- | NonEmpty list as JSON array (must have at least one element).
 instance StructuredOutput a => StructuredOutput (NonEmpty a) where
-  structuredSchema = arraySchema (structuredSchema @a)
+  structuredSchema = (arraySchema (structuredSchema @a)) { schemaMinItems = Just 1 }
   encodeStructured = encodeStructured . NonEmpty.toList
   parseStructured v = do
     list <- parseStructured @[a] v
