@@ -38,7 +38,6 @@ module Tidepool.ClaudeCode.Session
 
 import Control.Concurrent.STM (TVar, atomically, newTVarIO, readTVar, modifyTVar')
 import Control.Monad.Freer (Eff, LastMember, interpret, sendM)
-import Data.Aeson (Value)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Text (Text)

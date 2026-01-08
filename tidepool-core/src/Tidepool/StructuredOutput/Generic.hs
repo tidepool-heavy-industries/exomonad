@@ -4,6 +4,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# OPTIONS_GHC -Wno-orphans #-}
 
 -- | Generic derivation machinery for 'StructuredOutput'.
 --
@@ -32,7 +33,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics
 
-import Tidepool.Schema (JSONSchema(..), SchemaType(..), emptySchema, objectSchema, arraySchema)
+import Tidepool.Schema (JSONSchema(..), SchemaType(..), emptySchema, objectSchema)
 import Tidepool.StructuredOutput.Class (GStructuredOutput(..), StructuredOutput(..), StructuredOptions(..), SumEncoding(..))
 import Tidepool.StructuredOutput.Error (ParseDiagnostic(..), expectedObject, missingField, typeMismatch)
 
@@ -87,7 +88,44 @@ class GStructuredProduct (f :: Type -> Type) where
   gProductParse :: StructuredOptions -> [Text] -> KeyMap.KeyMap Value -> Either ParseDiagnostic (f p)
 
 
--- | Handle a single record field with selector.
+-- | Handle Maybe fields - NOT required, handles missing/null specially.
+--
+-- This OVERLAPPING instance pattern-matches on Maybe to detect optional fields
+-- at the type level. Maybe fields are:
+-- - Never in the required list
+-- - Encoded as null (or omitted if soOmitNothingFields)
+-- - Parsed as Nothing when missing or null
+instance {-# OVERLAPPING #-} (Selector s, StructuredOutput a)
+    => GStructuredProduct (M1 S s (K1 i (Maybe a))) where
+  gProductSchema opts =
+    let rawName = selName (undefined :: M1 S s (K1 i (Maybe a)) p)
+        jsonName = opts.soFieldLabelModifier rawName
+    -- Schema is the inner type - Maybe just makes it optional
+    in [(jsonName, structuredSchema @a)]
+
+  -- Maybe fields are NEVER required
+  gProductRequired _ = []
+
+  gProductEncode opts (M1 (K1 mx)) =
+    let rawName = selName (undefined :: M1 S s (K1 i (Maybe a)) p)
+        jsonName = opts.soFieldLabelModifier rawName
+    in case mx of
+         Nothing | opts.soOmitNothingFields -> []  -- Omit field entirely
+         Nothing -> [(jsonName, Null)]             -- Explicit null
+         Just x  -> [(jsonName, encodeStructured x)]
+
+  gProductParse opts path obj =
+    let rawName = selName (undefined :: M1 S s (K1 i (Maybe a)) p)
+        jsonName = opts.soFieldLabelModifier rawName
+        jsonKey = Key.fromString jsonName
+        fieldPath = path ++ [T.pack jsonName]
+    in case KeyMap.lookup jsonKey obj of
+         Nothing -> Right (M1 (K1 Nothing))    -- Missing = Nothing
+         Just Null -> Right (M1 (K1 Nothing))  -- Explicit null = Nothing
+         Just v -> M1 . K1 . Just <$> first (prependPath fieldPath) (parseStructured @a v)
+
+
+-- | Handle a single record field with selector (non-Maybe fields).
 instance (Selector s, StructuredOutput a) => GStructuredProduct (M1 S s (K1 i a)) where
   gProductSchema opts =
     let rawName = selName (undefined :: M1 S s (K1 i a) p)
@@ -187,16 +225,16 @@ instance (GStructuredSum l, GStructuredSum r) => GStructuredSum (l :+: r) where
 -- | Single constructor in a sum type.
 instance (Constructor c, GStructuredProduct f) => GStructuredSum (M1 C c f) where
   gSumVariants opts =
-    let conName = opts.soConstructorTagModifier $ conName' (undefined :: M1 C c f p)
+    let constructorName = opts.soConstructorTagModifier $ conName' (undefined :: M1 C c f p)
         fields = gProductSchema @f opts
         required = gProductRequired @f opts
         schema = objectSchema (map (\(k, v) -> (T.pack k, v)) fields) (map T.pack required)
-    in [(conName, schema)]
+    in [(constructorName, schema)]
 
   gSumEncode opts (M1 x) =
-    let conName = opts.soConstructorTagModifier $ conName' (undefined :: M1 C c f p)
+    let constructorName = opts.soConstructorTagModifier $ conName' (undefined :: M1 C c f p)
         fields = gProductEncode opts x
-    in (conName, Object $ KeyMap.fromList $ map (first Key.fromString) fields)
+    in (constructorName, Object $ KeyMap.fromList $ map (first Key.fromString) fields)
 
   gSumParse opts path tag v
     | tag == opts.soConstructorTagModifier (conName' (undefined :: M1 C c f p)) =
@@ -216,14 +254,18 @@ conName' _ = conName (undefined :: M1 C c f p)
 instance GStructuredSum (l :+: r) => GStructuredOutput (l :+: r) where
   gStructuredSchema opts =
     let variants = gSumVariants @(l :+: r) opts
-        TaggedObject tagField contentsField = opts.soSumEncoding
-        -- Create oneOf schema with all variants
-        variantSchemas = map (makeVariantSchema tagField contentsField) variants
-    in (emptySchema TObject) { schemaOneOf = Just variantSchemas }
+    in case opts.soSumEncoding of
+         TaggedObject tagField contentsField ->
+           let variantSchemas = map (makeVariantSchema tagField contentsField) variants
+           in (emptySchema TObject) { schemaOneOf = Just variantSchemas }
+         ObjectWithSingleField ->
+           error "StructuredOutput: ObjectWithSingleField sum encoding not yet supported"
+         TwoElemArray ->
+           error "StructuredOutput: TwoElemArray sum encoding not yet supported"
     where
-      makeVariantSchema tagField contentsField (conName, contentsSchema) =
+      makeVariantSchema tagField contentsField (constructorName, contentsSchema) =
         -- Tag field uses enum to constrain to this constructor
-        let tagSchema = (emptySchema TString) { schemaEnum = Just [T.pack conName] }
+        let tagSchema = (emptySchema TString) { schemaEnum = Just [T.pack constructorName] }
         in objectSchema
              [ (T.pack tagField, tagSchema)
              , (T.pack contentsField, contentsSchema)
@@ -231,22 +273,32 @@ instance GStructuredSum (l :+: r) => GStructuredOutput (l :+: r) where
              [T.pack tagField, T.pack contentsField]
 
   gEncodeStructured opts x =
-    let (conName, contents) = gSumEncode opts x
-        TaggedObject tagField contentsField = opts.soSumEncoding
-    in Object $ KeyMap.fromList
-         [ (Key.fromString tagField, String $ T.pack conName)
-         , (Key.fromString contentsField, contents)
-         ]
+    let (constructorName, contents) = gSumEncode opts x
+    in case opts.soSumEncoding of
+         TaggedObject tagField contentsField ->
+           Object $ KeyMap.fromList
+             [ (Key.fromString tagField, String $ T.pack constructorName)
+             , (Key.fromString contentsField, contents)
+             ]
+         ObjectWithSingleField ->
+           error "StructuredOutput: ObjectWithSingleField sum encoding not yet supported"
+         TwoElemArray ->
+           error "StructuredOutput: TwoElemArray sum encoding not yet supported"
 
   gParseStructured opts path (Object obj) =
-    let TaggedObject tagField contentsField = opts.soSumEncoding
-        tagKey = Key.fromString tagField
-        contentsKey = Key.fromString contentsField
-    in case (KeyMap.lookup tagKey obj, KeyMap.lookup contentsKey obj) of
-         (Just (String tag), Just contents) ->
-           case gSumParse @(l :+: r) opts path (T.unpack tag) contents of
-             Just result -> result
-             Nothing -> Left $ typeMismatch path ("one of known constructors") (String tag)
-         (Just _, _) -> Left $ typeMismatch path "string tag" (Object obj)
-         (Nothing, _) -> Left $ missingField (path ++ [T.pack tagField])
+    case opts.soSumEncoding of
+      TaggedObject tagField contentsField ->
+        let tagKey = Key.fromString tagField
+            contentsKey = Key.fromString contentsField
+        in case (KeyMap.lookup tagKey obj, KeyMap.lookup contentsKey obj) of
+             (Just (String tag), Just contents) ->
+               case gSumParse @(l :+: r) opts path (T.unpack tag) contents of
+                 Just result -> result
+                 Nothing -> Left $ typeMismatch path ("one of known constructors") (String tag)
+             (Just _, _) -> Left $ typeMismatch path "string tag" (Object obj)
+             (Nothing, _) -> Left $ missingField (path ++ [T.pack tagField])
+      ObjectWithSingleField ->
+        error "StructuredOutput: ObjectWithSingleField sum encoding not yet supported"
+      TwoElemArray ->
+        error "StructuredOutput: TwoElemArray sum encoding not yet supported"
   gParseStructured _ path v = Left $ expectedObject path v

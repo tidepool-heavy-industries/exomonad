@@ -1,5 +1,6 @@
-{-# OPTIONS_GHC -Wno-incomplete-patterns #-}
+{-# OPTIONS_GHC -Wno-incomplete-patterns -Wno-redundant-constraints #-}
 -- Pattern exhaustiveness checker doesn't understand GADT constraints for OneOf
+-- Redundant constraints are documentation for type-level dispatch
 
 -- | Instrumented graph executor with OpenTelemetry tracing.
 --

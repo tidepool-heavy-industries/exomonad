@@ -11,7 +11,11 @@ module Tidepool.StructuredOutput.Instances () where
 
 import Data.Aeson (Value(..))
 import Data.Bifunctor (first)
+import Data.List.NonEmpty (NonEmpty(..))
+import qualified Data.List.NonEmpty as NonEmpty
 import Data.Scientific (toBoundedInteger, fromFloatDigits)
+import Data.Set (Set)
+import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Vector as V
@@ -108,6 +112,24 @@ instance {-# OVERLAPPABLE #-} StructuredOutput a => StructuredOutput [a] where
 
   parseStructured v = Left $ expectedArray [] v
 
+-- | Set as JSON array (elements deduplicated, order not guaranteed).
+instance (StructuredOutput a, Ord a) => StructuredOutput (Set a) where
+  structuredSchema = arraySchema (structuredSchema @a)
+  encodeStructured = Array . V.fromList . map encodeStructured . Set.toList
+  parseStructured (Array arr) =
+    Set.fromList <$> traverse parseStructured (V.toList arr)
+  parseStructured v = Left $ expectedArray [] v
+
+-- | NonEmpty list as JSON array (must have at least one element).
+instance StructuredOutput a => StructuredOutput (NonEmpty a) where
+  structuredSchema = arraySchema (structuredSchema @a)
+  encodeStructured = encodeStructured . NonEmpty.toList
+  parseStructured v = do
+    list <- parseStructured @[a] v
+    case NonEmpty.nonEmpty list of
+      Nothing -> Left $ typeMismatch [] "non-empty array" v
+      Just ne -> Right ne
+
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TUPLE TYPES (common arities)
@@ -115,16 +137,17 @@ instance {-# OVERLAPPABLE #-} StructuredOutput a => StructuredOutput [a] where
 
 instance (StructuredOutput a, StructuredOutput b) => StructuredOutput (a, b) where
   structuredSchema = arraySchema (emptySchema TObject)  -- Simplified
-  encodeStructured (a, b) = Array $ V.fromList [encodeStructured a, encodeStructured b]
+  encodeStructured (x, y) = Array $ V.fromList [encodeStructured x, encodeStructured y]
   parseStructured (Array arr)
     | V.length arr == 2 = do
-        a <- first (addIndex 0) $ parseStructured @a (arr V.! 0)
-        b <- first (addIndex 1) $ parseStructured @b (arr V.! 1)
-        pure (a, b)
+        x <- first (addIndex (0 :: Int)) $ parseStructured @a (arr V.! 0)
+        y <- first (addIndex (1 :: Int)) $ parseStructured @b (arr V.! 1)
+        pure (x, y)
     | otherwise = Left $ typeMismatch [] "array of 2 elements" (Array arr)
     where
-      addIndex i (ParseDiagnostic p e a m) =
-        ParseDiagnostic (T.pack ("[" ++ show i ++ "]") : p) e a m
+      addIndex :: Int -> ParseDiagnostic -> ParseDiagnostic
+      addIndex i (ParseDiagnostic path expected actual msg) =
+        ParseDiagnostic (T.pack ("[" ++ show i ++ "]") : path) expected actual msg
   parseStructured v = Left $ expectedArray [] v
 
 

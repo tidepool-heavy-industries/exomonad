@@ -532,8 +532,7 @@ class ReifyRecordGraph (graph :: Type -> Type) where
 -- * @ReifyMaybeType (GetExitTypeFromGraph graph)@ - for exit type
 makeGraphInfo
   :: forall graph.
-     ( Generic (graph AsGraph)
-     , GReifyFields (Rep (graph AsGraph))
+     ( GReifyFields (Rep (graph AsGraph))
      , ReifyMaybeType (GetEntryTypeFromGraph graph)
      , ReifyMaybeType (GetExitTypeFromGraph graph)
      )

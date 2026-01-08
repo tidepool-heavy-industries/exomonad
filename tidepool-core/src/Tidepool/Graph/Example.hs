@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -Wno-unused-top-binds -Wno-redundant-constraints #-}
 
 -- | Example graph definitions for the record-based Graph DSL.
 --

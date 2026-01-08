@@ -123,7 +123,6 @@ import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import Data.Aeson (Value(..), FromJSON, ToJSON, encode)
 import Tidepool.StructuredOutput (StructuredOutput(..), formatDiagnostic)
-import qualified Data.Text.Encoding as TE
 import qualified Data.ByteString.Lazy as LBS
 import GHC.Generics (Generic)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef, modifyIORef)

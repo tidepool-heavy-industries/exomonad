@@ -1055,8 +1055,8 @@ mergeHandler results = do
   if bothMergeSuccess
     then do
       sendM $ logMsg "Cleaning up worktrees..."
-      deleteWorktree results.prTestsWorktree
-      deleteWorktree results.prImplWorktree
+      _ <- deleteWorktree results.prTestsWorktree
+      _ <- deleteWorktree results.prImplWorktree
       sendM $ logMsg "Worktrees deleted"
     else do
       sendM $ do
