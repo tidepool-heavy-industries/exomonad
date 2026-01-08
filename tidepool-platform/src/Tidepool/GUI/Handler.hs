@@ -5,7 +5,6 @@
 -- to the bridge and blocks until the GUI responds.
 module Tidepool.GUI.Handler
   ( makeGUIHandler
-  , guiDice
   , guiPhoto
   , guiTextWithPhoto
   , guiCustom
@@ -29,7 +28,6 @@ makeGUIHandler bridge = InputHandler
   { ihChoice = guiChoice bridge
   , ihText = guiText bridge
   , ihTextWithPhoto = guiTextWithPhoto bridge
-  , ihDice = guiDice bridge
   , ihCustom = guiCustom bridge
   }
 
@@ -91,43 +89,6 @@ guiText bridge prompt = do
     ChoiceResponse _ -> error "Expected TextResponse, got ChoiceResponse"
     PhotoResponse _ _ -> error "Expected TextResponse, got PhotoResponse"
     CustomResponse _ -> error "Expected TextResponse, got CustomResponse"
-
--- | Handle a dice selection request via the GUI
---
--- Shows dice cards with LLM-generated hints for each outcome.
--- Returns the selected die's index.
---
--- Example usage:
---
--- @
--- -- In your game loop
--- let dicePool = [(4, 0, "Guard spots you"), (2, 1, "Clean escape"), (6, 2, "Perfect timing")]
--- selectedIdx <- guiDice bridge "Choose a die from your pool:" dicePool
--- @
-guiDice :: GUIBridge state -> Text -> [(Int, Int, Text)] -> IO Int
-guiDice bridge prompt diceWithHints = do
-  -- Hide spinner while waiting for player input
-  atomically $ writeTVar bridge.gbLLMActive False
-
-  -- Post the dice request to the GUI (includes hints for display)
-  atomically $ writeTVar bridge.gbPendingRequest
-    (Just $ PendingDice prompt diceWithHints)
-
-  -- Block until GUI responds
-  response <- takeMVar bridge.gbRequestResponse
-
-  -- Clear the pending request and re-enable spinner (LLM continues processing)
-  atomically $ do
-    writeTVar bridge.gbPendingRequest Nothing
-    writeTVar bridge.gbLLMActive True
-
-  -- Return the selected index
-  case response of
-    ChoiceResponse idx -> pure idx
-    TextResponse _ -> error "Expected ChoiceResponse, got TextResponse"
-    PhotoResponse _ _ -> error "Expected ChoiceResponse, got PhotoResponse"
-    TextWithPhotoResponse {} -> error "Expected ChoiceResponse, got TextWithPhotoResponse"
-    CustomResponse _ -> error "Expected ChoiceResponse, got CustomResponse"
 
 -- | Handle a photo upload request via the GUI
 --

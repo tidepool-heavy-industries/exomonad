@@ -43,8 +43,6 @@ module Tidepool.Effects.UI
   , confirm
   , requestDie
   , selectMultiple
-    -- * Deprecated
-  , requestDice
   ) where
 
 import Data.Text (Text)
@@ -125,9 +123,6 @@ data UI r where
   -- | Set the "thinking" indicator state.
   SetThinking :: Bool -> UI ()
 
-  -- | DEPRECATED: Use 'requestChoice' with formatted die labels.
-  RequestDice :: Text -> [(Int, Int, Text)] -> UI Int
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- SMART CONSTRUCTORS
@@ -207,11 +202,6 @@ requestChoiceMeta prompt choices = send (RequestChoiceMeta prompt choices)
 setThinking :: Member UI effs => Bool -> Eff effs ()
 setThinking = send . SetThinking
 
--- | DEPRECATED: Use 'requestChoice' with formatted die labels.
-{-# DEPRECATED requestDice "Use requestChoice with formatted die labels instead" #-}
-requestDice :: Member UI effs => Text -> [(Int, Int, Text)] -> Eff effs Int
-requestDice prompt diceInfo = send (RequestDice prompt diceInfo)
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- CONVENIENCE HELPERS
@@ -228,8 +218,6 @@ confirm prompt = requestChoice prompt $ NE.fromList
   [("Yes", True), ("No", False)]
 
 -- | Die selection helper (formats dice with Unicode faces).
---
--- This is the recommended migration path from deprecated 'RequestDice'.
 --
 -- @
 -- die <- requestDie "Spend a die from your pool:" $ NE.fromList [4, 4, 3, 2]

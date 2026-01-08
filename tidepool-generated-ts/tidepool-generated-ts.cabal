@@ -10,7 +10,7 @@ maintainer:      tidepool@example.com
 build-type:      Simple
 
 common warnings
-    ghc-options: -Wall
+    ghc-options: -Wall -Wincomplete-patterns -Wredundant-constraints -Wunused-packages
 
 library
     import:           warnings

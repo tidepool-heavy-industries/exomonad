@@ -31,7 +31,6 @@ module Tidepool.Effect.Types
   , requestChoice
   , requestText
   , requestTextWithPhoto
-  , requestDice
   , requestCustom
   , requestQuestion
   , logMsg
@@ -587,18 +586,16 @@ runEmit handler = interpret $ \case
 -- REQUEST INPUT EFFECT
 -- ══════════════════════════════════════════════════════════════
 
--- | User input request effect (choice, text, dice, etc.).
+-- | User input request effect (choice, text, etc.).
 --
 -- This effect is opaque - use the smart constructors:
 -- - 'requestChoice' for multiple-choice questions
 -- - 'requestText' for free text input
--- - 'requestDice' for dice rolls with descriptions
 -- - 'requestTextWithPhoto' for text input with photo support
 -- - 'requestCustom' for custom request types
 data RequestInput r where
   RequestChoice :: Text -> [(Text, a)] -> RequestInput a
   RequestText :: Text -> RequestInput Text
-  RequestDice :: Text -> [(Int, Int, Text)] -> RequestInput Int
   RequestTextWithPhoto :: Text -> RequestInput (Text, [(Text, Text)])
   RequestCustom :: Text -> Value -> RequestInput Value
 
@@ -614,14 +611,6 @@ requestChoice prompt choices = send (RequestChoice prompt choices)
 requestText :: Member RequestInput effs => Text -> Eff effs Text
 requestText = send . RequestText
 
--- | Ask user to roll dice. Each entry is (min, max, description).
---
--- @
--- result <- requestDice "Roll attack dice:" [(1, 6, "d6"), (1, 6, "d6")]
--- @
-requestDice :: Member RequestInput effs => Text -> [(Int, Int, Text)] -> Eff effs Int
-requestDice prompt diceWithHints = send (RequestDice prompt diceWithHints)
-
 -- | Ask user for text input with photo support.
 requestTextWithPhoto :: Member RequestInput effs => Text -> Eff effs (Text, [(Text, Text)])
 requestTextWithPhoto = send . RequestTextWithPhoto
@@ -634,7 +623,6 @@ data InputHandler = InputHandler
   { ihChoice :: forall a. Text -> [(Text, a)] -> IO a
   , ihText   :: Text -> IO Text
   , ihTextWithPhoto :: Text -> IO (Text, [(Text, Text)])
-  , ihDice   :: Text -> [(Int, Int, Text)] -> IO Int
   , ihCustom :: Text -> Value -> IO Value
   }
 
@@ -645,7 +633,6 @@ runRequestInput handler = interpret $ \case
     in sendM $ choiceHandler prompt choices
   RequestText prompt -> sendM $ handler.ihText prompt
   RequestTextWithPhoto prompt -> sendM $ handler.ihTextWithPhoto prompt
-  RequestDice prompt diceWithHints -> sendM $ handler.ihDice prompt diceWithHints
   RequestCustom tag payload -> sendM $ handler.ihCustom tag payload
 
 -- ══════════════════════════════════════════════════════════════
