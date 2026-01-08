@@ -22,6 +22,7 @@ import Control.Monad (unless)
 import Control.Monad.Freer (runM)
 import Control.Monad.Freer.Error (runError)
 import Control.Monad.Freer.Reader (runReader)
+import Tidepool.Graph.Memory (evalMemory)
 import Data.Maybe (mapMaybe)
 import Data.Text qualified as T
 import System.Directory (getCurrentDirectory)
@@ -39,7 +40,7 @@ import TypesFirstDev.DevRuns (runDirectory)
 import TypesFirstDev.Graph (TypesFirstGraph(..))
 import TypesFirstDev.Handlers (typesFirstHandlers)
 import TypesFirstDev.Stats (RunMetadata(..))
-import TypesFirstDev.Types (StackSpec(..), ProjectType(..), ParallelResults(..), TestsResult(..), ImplResult(..), WorkflowError(..))
+import TypesFirstDev.Types (StackSpec(..), ProjectType(..), ParallelResults(..), TestsResult(..), ImplResult(..), WorkflowError(..), emptySessionContext)
 
 
 -- | Main entry point.
@@ -137,14 +138,15 @@ runExperimentCommand args = do
   putStrLn ""
 
   -- Run the graph with full effect stack
-  -- Note: Interpreter order must match DevEffects = '[Error WorkflowError, Reader ClaudeCodeConfig, Reader StackSpec, ...]
-  -- Innermost interpreter handles last effect in the list.
+  -- Note: Interpreter order must match DevEffects = '[Error WorkflowError, Memory SessionContext, Reader ClaudeCodeConfig, ...]
+  -- Innermost interpreter handles first effect in the list.
   result <- runM
     . runWorktreeIO worktreeConfig
     . runClaudeCodeExecIO claudeConfig
-    . runReader spec          -- Reader StackSpec
-    . runReader claudeConfig  -- Reader ClaudeCodeConfig
-    . runError @WorkflowError -- Error WorkflowError (first in DevEffects)
+    . runReader spec              -- Reader StackSpec
+    . runReader claudeConfig      -- Reader ClaudeCodeConfig
+    . evalMemory emptySessionContext  -- Memory SessionContext
+    . runError @WorkflowError     -- Error WorkflowError (first in DevEffects = innermost)
     $ do
         let handlers = typesFirstHandlers spec
         choice <- callHandler (types handlers) spec

@@ -53,6 +53,10 @@ module TypesFirstDev.Types
     -- * Internal Types
   , ForkInput(..)
   , ParallelResults(..)
+
+    -- * Session State (Memory effect)
+  , SessionContext(..)
+  , emptySessionContext
   ) where
 
 import Data.Aeson (FromJSON, ToJSON)
@@ -293,6 +297,7 @@ instance StructuredOutput TypeDefinitions
 -- 3. Runs `cabal build` to verify skeletons compile
 --
 -- This ensures the parallel impl/test agents start from a compiling baseline.
+-- Session ID is tracked via Memory effect (SessionContext), not passed explicitly.
 data SkeletonGenerated = SkeletonGenerated
   { sgImplPath :: FilePath
     -- ^ Path to generated implementation skeleton (e.g., "src/Data/Stack.hs").
@@ -304,8 +309,6 @@ data SkeletonGenerated = SkeletonGenerated
     -- ^ Project root path.
   , sgModuleName :: Text
     -- ^ Module name (e.g., "Data.Stack").
-  , sgSessionId :: Text
-    -- ^ Session ID from types agent (for forking parallel agents).
   }
   deriving stock (Show, Eq, Generic)
 
@@ -467,11 +470,10 @@ instance StructuredOutput ImplementationResult
 
 -- | Input to the fork handler.
 --
--- Contains the session ID from the types agent and the type definitions.
+-- Contains type definitions and project info. Session ID is now tracked
+-- via the Memory effect (SessionContext) rather than passed explicitly.
 data ForkInput = ForkInput
-  { fiSessionId :: Text
-    -- ^ Session ID from types agent (for forking).
-  , fiTypeDefs :: TypeDefinitions
+  { fiTypeDefs :: TypeDefinitions
     -- ^ Type definitions from types agent.
   , fiProjectPath :: FilePath
     -- ^ Project root path.
@@ -509,3 +511,41 @@ data ParallelResults = ParallelResults
   deriving stock (Show, Eq, Generic)
 
 instance StructuredOutput ParallelResults
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- SESSION STATE (Memory Effect)
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Session context tracked via Memory effect.
+--
+-- Replaces explicit session ID threading through intermediate types
+-- (ForkInput.fiSessionId, SkeletonGenerated.sgSessionId, etc.).
+--
+-- The Memory effect provides typed persistent state that handlers can
+-- read/write without explicit parameter passing.
+--
+-- @
+-- -- Store after types agent completes
+-- updateMem \@SessionContext (\\s -> s { scSessionId = result.sessionId })
+--
+-- -- Read in later handlers
+-- ctx <- getMem \@SessionContext
+-- let sessionId = ctx.scSessionId
+-- @
+data SessionContext = SessionContext
+  { scSessionId :: Text
+    -- ^ Current parent session ID (from types/stubs agent).
+    -- Used by fork handler to spawn parallel agents that share context.
+  , scProjectPath :: FilePath
+    -- ^ Project root path (set at entry, used throughout).
+  }
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (FromJSON, ToJSON)
+
+-- | Empty session context (initial state).
+emptySessionContext :: SessionContext
+emptySessionContext = SessionContext
+  { scSessionId = ""
+  , scProjectPath = ""
+  }

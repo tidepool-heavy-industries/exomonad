@@ -44,6 +44,7 @@ import Tidepool.Effect.ClaudeCode (ClaudeCodeExec)
 import Tidepool.Effects.Worktree (Worktree, createWorktree, deleteWorktree, mergeWorktree, WorktreeSpec(..), WorktreePath(..), MergeResult(..), WorktreeError(..))
 import Tidepool.Graph.Generic (AsHandler)
 import Tidepool.Graph.Goto (GotoChoice, To, ClaudeCodeLLMHandler(..), ClaudeCodeResult(..), gotoChoice, gotoExit)
+import Tidepool.Graph.Memory (Memory, getMem, updateMem)
 import Tidepool.Graph.Template (runTypedTemplate, TypedTemplate)
 import Text.Parsec.Pos (SourcePos)
 import Tidepool.Graph.Types (ModelChoice(..), Exit)
@@ -65,6 +66,7 @@ import TypesFirstDev.Types
   , ParallelResults(..)
   , TestsResult(..)
   , ImplResult(..)
+  , SessionContext(..)
   )
 import TypesFirstDev.Templates
   ( typesCompiled, testsCompiled, implCompiled, implSkeletonCompiled, testSkeletonCompiled
@@ -167,12 +169,13 @@ logClaudeCodeEvents agentName events = do
 -- | Effect stack for the types-first workflow (parallel version).
 --
 -- - Error WorkflowError: Workflow failures (compile errors, agent failures, etc.)
+-- - Memory SessionContext: Persistent session state (session ID, project path)
 -- - Reader ClaudeCodeConfig: Config for spawning Claude Code subprocesses
 -- - Reader StackSpec: The original specification (for routing)
 -- - ClaudeCodeExec: For spawning Claude Code subprocesses
 -- - Worktree: For managing git worktrees (parallel isolation)
 -- - IO: For system operations
-type DevEffects = '[Error WorkflowError, Reader ClaudeCodeConfig, Reader StackSpec, ClaudeCodeExec, Worktree, IO]
+type DevEffects = '[Error WorkflowError, Memory SessionContext, Reader ClaudeCodeConfig, Reader StackSpec, ClaudeCodeExec, Worktree, IO]
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -235,14 +238,19 @@ buildTypesContext spec = pure TypesContext
 -- | Route after types agent completes.
 --
 -- Routes to skeleton node for file generation.
+-- Also stores the session ID in Memory for use by subsequent handlers.
 routeToSkeleton
   :: ClaudeCodeResult TypeDefinitions
   -> Eff DevEffects (GotoChoice '[To "skeleton" ForkInput])
 routeToSkeleton result = do
   spec <- ask @StackSpec
+  -- Store session context in Memory (accessible by all subsequent handlers)
+  updateMem @SessionContext $ \ctx -> ctx
+    { scSessionId = fromMaybe "" result.ccrSessionId
+    , scProjectPath = spec.ssProjectPath
+    }
   pure $ gotoChoice @"skeleton" ForkInput
-    { fiSessionId = fromMaybe "" result.ccrSessionId
-    , fiTypeDefs = result.ccrParsedOutput
+    { fiTypeDefs = result.ccrParsedOutput
     , fiProjectPath = spec.ssProjectPath
     , fiModuleName = spec.ssModuleName
     }
@@ -329,14 +337,13 @@ skeletonHandler input = do
       callProcess "git" ["commit", "-m", "Add skeleton files for " <> T.unpack input.fiModuleName]
     logMsg "Skeleton generation complete"
 
-  -- Route to fork with generated paths and session ID for forking parallel agents
+  -- Route to fork with generated paths (session ID is in Memory)
   pure $ gotoChoice @"fork" SkeletonGenerated
     { sgImplPath = implPath
     , sgTestPath = testPath
     , sgTypeDefs = input.fiTypeDefs
     , sgProjectPath = projectPath
     , sgModuleName = input.fiModuleName
-    , sgSessionId = input.fiSessionId
     }
 
 
@@ -356,6 +363,27 @@ maxAgentRetries = 3
 -- Session parameters:
 -- - resumeSession: Session ID to resume (for multi-turn or forking from parent)
 -- - forkSession: If True, fork the session (read-only, doesn't modify original)
+-- | Run a Claude Code agent with automatic retry on build failure.
+--
+-- == Design Note: Local Recursion vs Graph Self-Loop
+--
+-- This uses local @go@ recursion rather than the graph DSL's @Goto Self@ pattern.
+-- Both are valid approaches with different trade-offs:
+--
+-- * **Local recursion** (used here): The retry logic is encapsulated within the
+--   function and not visible in the graph topology. Appropriate when:
+--   - The retry is an implementation detail, not a workflow step
+--   - The function is called within parallel execution (@concurrently@)
+--   - You want simple, self-contained retry logic
+--
+-- * **Graph self-loop** (@Goto Self@): The retry is a visible node transition,
+--   handled by @dispatchGotoWithSelf@. Appropriate when:
+--   - Retry attempts should be observable in graph tracing/telemetry
+--   - The retry is a conceptually separate workflow step
+--   - You need to compose with other graph dispatch features
+--
+-- Here, retry is an implementation detail of "spawn agent with build validation"
+-- rather than a workflow-level concept, so local recursion is the right choice.
 runAgentWithBuildValidation
   :: ClaudeCodeConfig
   -> WorktreePath
@@ -573,12 +601,33 @@ stubsHandlerV3 spec config = do
 --
 -- Creates two worktrees, spawns tests and impl agents concurrently,
 -- then collects results for the merge node.
+--
+-- == Design Note: Parallelism Pattern
+--
+-- The graph DSL doesn't currently express parallel fan-out. Instead, we use
+-- a 'LogicNode' with @sendM $ concurrently@ to spawn parallel IO operations.
+--
+-- @
+-- Graph topology:  fork ──► merge (linear transition)
+-- Actual execution: fork ──┬──► tests agent ──┐
+--                          └──► impl agent  ──┴──► merge
+-- @
+--
+-- This is the blessed pattern for parallel execution within graphs:
+--
+-- 1. **Graph shows workflow steps** - fork and merge are distinct phases
+-- 2. **Parallelism is implementation detail** - hidden in handler, not graph
+-- 3. **Results collected before transition** - merge receives complete results
+--
+-- A future DSL enhancement could add explicit 'ForkNode' and 'JoinNode'
+-- annotations, but for now @LogicNode + concurrently@ works well.
 forkHandler
   :: SkeletonGenerated
   -> Eff DevEffects (GotoChoice '[To "merge" ParallelResults])
 forkHandler input = do
   config <- ask @ClaudeCodeConfig
   spec <- ask @StackSpec
+  sessionCtx <- getMem @SessionContext  -- Read session from Memory
 
   sendM $ logPhase "FORK - Creating worktrees"
 
@@ -649,7 +698,7 @@ forkHandler input = do
   -- Each agent runs with build validation - if build fails, retries with error context
   -- Both agents fork from the types agent's session to share context
   -- If parent session ID is empty, start fresh sessions instead of trying to fork
-  let parentSessionId = if T.null input.sgSessionId then Nothing else Just input.sgSessionId
+  let parentSessionId = if T.null sessionCtx.scSessionId then Nothing else Just sessionCtx.scSessionId
       shouldFork = isJust parentSessionId
   (testsResponse, implResponse) <- sendM $ do
     logMsg "Launching parallel agents with build validation..."
