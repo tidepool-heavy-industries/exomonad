@@ -12,6 +12,9 @@ module TypesFirstDev.Types
     -- * Project Type
   , ProjectType(..)
 
+    -- * Workflow Errors
+  , WorkflowError(..)
+
     -- * Structured Signature Types (v2)
   , FunctionSig(..)
   , TestPriority(..)
@@ -97,6 +100,31 @@ data StackSpec = StackSpec
   deriving anyclass (FromJSON, ToJSON)
 
 instance StructuredOutput StackSpec
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- WORKFLOW ERRORS
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Errors that can occur during workflow execution.
+--
+-- These are modeled as data rather than exceptions so the effect system
+-- can handle them properly.
+data WorkflowError
+  = SkeletonCompileFailed Text
+    -- ^ Skeleton generation produced code that doesn't compile
+  | WorktreeCreationFailed Text
+    -- ^ Failed to create git worktree
+  | AgentFailed Text Text
+    -- ^ Agent name and error message
+  | AgentNoOutput Text
+    -- ^ Agent returned no structured output
+  | AgentParseFailed Text Text
+    -- ^ Agent name and parse error
+  | MergeFailed Text
+    -- ^ Merge operation failed
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (FromJSON, ToJSON)
 
 
 -- ════════════════════════════════════════════════════════════════════════════

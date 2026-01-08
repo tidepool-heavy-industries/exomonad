@@ -1,3 +1,4 @@
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE RecordWildCards #-}
 
 -- | Baseline runner for types-first-dev workflow.
@@ -14,6 +15,7 @@ module TypesFirstDev.Baseline
   ) where
 
 import Control.Monad.Freer (runM)
+import Control.Monad.Freer.Error (runError)
 import Control.Monad.Freer.Reader (runReader)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
@@ -28,7 +30,7 @@ import TypesFirstDev.DevRuns (persistRunMetadata)
 import TypesFirstDev.Graph (TypesFirstGraph(..))
 import TypesFirstDev.Handlers (typesFirstHandlers)
 import TypesFirstDev.Stats
-import TypesFirstDev.Types (StackSpec(..), ProjectType(..), ParallelResults(..), TestsResult(..), ImplResult(..))
+import TypesFirstDev.Types (StackSpec(..), ProjectType(..), ParallelResults(..), TestsResult(..), ImplResult(..), WorkflowError(..))
 
 
 -- | Run the baseline workflow with the default Stack spec.
@@ -53,6 +55,7 @@ runBaselineWithSpec sessionName spec = do
     . runClaudeCodeExecIO claudeConfig
     . runReader spec
     . runReader claudeConfig
+    . runError @WorkflowError
     $ do
         let handlers = typesFirstHandlers spec
         choice <- callHandler (types handlers) spec
@@ -61,8 +64,10 @@ runBaselineWithSpec sessionName spec = do
   endTime <- getCurrentTime
   let duration = realToFrac (diffUTCTime endTime startTime)
 
-  -- Convert to metadata
-  let meta = resultsToMetadata startTime duration spec result
+  -- Convert to metadata (handle workflow errors)
+  let meta = case result of
+        Left err -> errorToMetadata startTime duration spec err
+        Right res -> resultsToMetadata startTime duration spec res
 
   -- Persist to disk
   _ <- persistRunMetadata meta
@@ -105,6 +110,50 @@ resultsToMetadata startTime duration spec ParallelResults{..} =
     , rmTotalTokens = 0  -- Token aggregation requires executor instrumentation
     , rmExperiment = Nothing
     }
+
+
+-- | Convert WorkflowError to RunMetadata.
+--
+-- Records the failure with error details.
+errorToMetadata
+  :: UTCTime       -- ^ Start timestamp
+  -> Double        -- ^ Duration in seconds
+  -> StackSpec     -- ^ Input spec
+  -> WorkflowError -- ^ The error
+  -> RunMetadata
+errorToMetadata startTime duration spec err =
+  RunMetadata
+    { rmRunId = generateRunId startTime
+    , rmTimestamp = startTime
+    , rmDurationSeconds = duration
+    , rmSuccess = False
+    , rmSpec = spec
+    , rmAgentStats = Map.singleton "error" (errorToStats err)
+    , rmTotalCost = 0
+    , rmTotalTokens = 0
+    , rmExperiment = Nothing
+    }
+
+-- | Convert WorkflowError to AgentStats.
+errorToStats :: WorkflowError -> AgentStats
+errorToStats err = AgentStats
+  { asNodeName = "workflow"
+  , asDurationSeconds = 0
+  , asInputTokens = 0
+  , asOutputTokens = 0
+  , asCost = 0
+  , asRetries = 0
+  , asSuccess = False
+  , asErrorMessage = Just (errorMessage err)
+  }
+  where
+    errorMessage = \case
+      SkeletonCompileFailed msg -> "Skeleton compile failed: " <> msg
+      WorktreeCreationFailed msg -> "Worktree creation failed: " <> msg
+      AgentFailed name msg -> "Agent " <> name <> " failed: " <> msg
+      AgentNoOutput name -> "Agent " <> name <> " returned no output"
+      AgentParseFailed name msg -> "Agent " <> name <> " parse failed: " <> msg
+      MergeFailed msg -> "Merge failed: " <> msg
 
 
 -- | Convert ImplResult to AgentStats.

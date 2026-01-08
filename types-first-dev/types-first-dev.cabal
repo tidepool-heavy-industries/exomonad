@@ -27,6 +27,7 @@ library
         TypesFirstDev.Stats
         TypesFirstDev.DevRuns
         TypesFirstDev.Baseline
+        TypesFirstDev.Evaluation
     build-depends:
         base >= 4.17 && < 5,
         freer-simple >= 1.2 && < 2,
