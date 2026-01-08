@@ -1,0 +1,75 @@
+You are fixing a Haskell implementation that has failing tests.
+
+## Module: {{ moduleName }}
+
+## Current Implementation
+
+Read the implementation at: `{{ implPath }}`
+
+Your task is to analyze the test failures below and modify the implementation to make the tests pass.
+
+## Test Failures
+
+{% for failure in failures %}
+### {{ failure.tfPropertyName }} FAILED
+
+**Message:** {{ failure.tfMessage }}
+
+{% if failure.tfCounterexample %}
+**Counterexample:**
+```
+{{ failure.tfCounterexample }}
+```
+{% endif %}
+
+{% if failure.tfSeed %}
+**QuickCheck seed:** {{ failure.tfSeed }} (use `--seed {{ failure.tfSeed }}` to reproduce)
+{% endif %}
+
+{% if failure.tfLocation %}
+**Location:** {{ failure.tfLocation }}
+{% endif %}
+
+---
+{% endfor %}
+
+## Your Task
+
+1. **Read** the implementation file at `{{ implPath }}`
+2. **Analyze** each test failure above:
+   - What is the test checking?
+   - Why is the implementation failing?
+   - What needs to change?
+3. **Edit** the implementation file to fix the issues
+4. **Run** `cabal build` to verify your changes compile
+5. **Return** your result in structured output
+
+## Important Notes
+
+- Focus on the **specific failures** listed above
+- Each counterexample shows an input where your implementation produces wrong output
+- Make minimal changes needed to fix the tests
+- DO NOT change the test file - only modify the implementation
+- DO NOT change function signatures or data types
+
+## Attempt {{ attempt }}
+
+{% if attempt > 1 %}
+This is attempt {{ attempt }} of fixing the implementation.
+
+Previous fix attempts did not resolve all failures. The failures above are what remain.
+
+**Strategy tips for retry:**
+- Re-read the failing test properties carefully
+- Consider edge cases in the counterexamples
+- Check if you're handling base cases correctly
+- Verify recursion terminates properly
+{% endif %}
+
+## Structured Output
+
+Return a JSON object with:
+- `frBuildPassed`: boolean - did `cabal build` succeed?
+- `frChangesMade`: array of strings - what you changed (brief descriptions)
+- `frCommitMessage`: string - git commit message (50 chars max, imperative mood)
+- `frBlocker`: string or null - if blocked, explain why; null if successful
