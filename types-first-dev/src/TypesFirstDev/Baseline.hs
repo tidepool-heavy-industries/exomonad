@@ -72,8 +72,8 @@ runBaselineWithSpec sessionName spec = do
 
 -- | Convert ParallelResults to RunMetadata.
 --
--- Extracts success/failure and basic stats from the workflow results.
--- Per-node detailed stats require executor-level instrumentation (future work).
+-- Extracts success/failure and stats from the workflow results.
+-- Now includes actual costs from ClaudeCodeResult.
 resultsToMetadata
   :: UTCTime         -- ^ Start timestamp
   -> Double          -- ^ Duration in seconds
@@ -85,11 +85,13 @@ resultsToMetadata startTime duration spec ParallelResults{..} =
       testsSuccess = prTestsResult.trBuildPassed && prTestsResult.trAllPropertiesWritten
       overallSuccess = implSuccess && testsSuccess
 
-      -- Create basic stats from what we can extract
-      -- (detailed stats require executor instrumentation)
+      -- Total cost from both agents
+      totalCost = prTestsCost + prImplCost
+
+      -- Create stats with actual costs from ClaudeCodeResult
       agentStats = Map.fromList
-        [ ("impl", implResultToStats prImplResult)
-        , ("tests", testsResultToStats prTestsResult)
+        [ ("impl", implResultToStats prImplResult prImplCost)
+        , ("tests", testsResultToStats prTestsResult prTestsCost)
         ]
 
   in RunMetadata
@@ -99,22 +101,22 @@ resultsToMetadata startTime duration spec ParallelResults{..} =
     , rmSuccess = overallSuccess
     , rmSpec = spec
     , rmAgentStats = agentStats
-    , rmTotalCost = 0  -- Not available without executor instrumentation
-    , rmTotalTokens = 0  -- Not available without executor instrumentation
+    , rmTotalCost = totalCost
+    , rmTotalTokens = 0  -- Token aggregation requires executor instrumentation
     , rmExperiment = Nothing
     }
 
 
 -- | Convert ImplResult to AgentStats.
 --
--- Limited stats - cost and tokens require executor instrumentation.
-implResultToStats :: ImplResult -> AgentStats
-implResultToStats ImplResult{..} = AgentStats
+-- Includes cost from ClaudeCodeResult. Tokens require executor instrumentation.
+implResultToStats :: ImplResult -> Double -> AgentStats
+implResultToStats ImplResult{..} cost = AgentStats
   { asNodeName = "impl"
   , asDurationSeconds = 0  -- Not measured yet
   , asInputTokens = 0
   , asOutputTokens = 0
-  , asCost = 0
+  , asCost = cost
   , asRetries = 0
   , asSuccess = irBuildPassed && irAllFunctionsImplemented
   , asErrorMessage = irBlocker
@@ -122,13 +124,15 @@ implResultToStats ImplResult{..} = AgentStats
 
 
 -- | Convert TestsResult to AgentStats.
-testsResultToStats :: TestsResult -> AgentStats
-testsResultToStats TestsResult{..} = AgentStats
+--
+-- Includes cost from ClaudeCodeResult. Tokens require executor instrumentation.
+testsResultToStats :: TestsResult -> Double -> AgentStats
+testsResultToStats TestsResult{..} cost = AgentStats
   { asNodeName = "tests"
   , asDurationSeconds = 0
   , asInputTokens = 0
   , asOutputTokens = 0
-  , asCost = 0
+  , asCost = cost
   , asRetries = 0
   , asSuccess = trBuildPassed && trAllPropertiesWritten
   , asErrorMessage = trBlocker

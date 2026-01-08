@@ -276,6 +276,8 @@ data SkeletonGenerated = SkeletonGenerated
     -- ^ Project root path.
   , sgModuleName :: Text
     -- ^ Module name (e.g., "Data.Stack").
+  , sgSessionId :: Text
+    -- ^ Session ID from types agent (for forking parallel agents).
   }
   deriving stock (Show, Eq, Generic)
 
@@ -303,6 +305,8 @@ data StubsGenerated = StubsGenerated
     -- ^ Project root path.
   , stgModuleName :: Text
     -- ^ Module name (e.g., "UrlShortener").
+  , stgSessionId :: Text
+    -- ^ Session ID from stubs agent (for forking parallel agents).
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)
@@ -453,6 +457,7 @@ instance StructuredOutput ForkInput
 -- | Results from parallel agents.
 --
 -- Combined output from tests and impl agents for merging.
+-- Includes session IDs and costs for tracking and aggregation.
 data ParallelResults = ParallelResults
   { prTestsWorktree :: WorktreePath
     -- ^ Path to tests worktree.
@@ -462,6 +467,16 @@ data ParallelResults = ParallelResults
     -- ^ Result metadata from tests agent.
   , prImplResult :: ImplResult
     -- ^ Result metadata from impl agent.
+  , prTestsSessionId :: Text
+    -- ^ Session ID from tests agent.
+  , prImplSessionId :: Text
+    -- ^ Session ID from impl agent.
+  , prTestsCost :: Double
+    -- ^ Cost (USD) from tests agent.
+  , prImplCost :: Double
+    -- ^ Cost (USD) from impl agent.
+  , prParentSessionId :: Text
+    -- ^ Parent session ID (from types/stubs agent) for lineage tracking.
   }
   deriving stock (Show, Eq, Generic)
 
