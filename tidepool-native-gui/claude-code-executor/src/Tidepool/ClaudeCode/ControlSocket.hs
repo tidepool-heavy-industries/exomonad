@@ -128,16 +128,20 @@ data ServerState = ServerState
 
 
 -- | Start the socket server.
+--
+-- Note: No race condition here - the socket is in listening state (and can
+-- queue connections via kernel backlog) before we fork the accept loop.
+-- Clients can connect as soon as 'listen' returns.
 startServer :: FilePath -> ControlSocketConfig -> HookCallbacks -> IO ServerState
 startServer socketPath config callbacks = do
   -- Create socket
   sock <- socket AF_UNIX Stream 0
 
-  -- Bind and listen
+  -- Bind and listen - socket is ready to accept after this
   bind sock (SockAddrUnix socketPath)
   listen sock (cscBacklog config)
 
-  -- Start listener thread
+  -- Start listener thread (socket already listening, no race)
   tid <- forkIO $ listenLoop sock callbacks
 
   pure $ ServerState tid sock
