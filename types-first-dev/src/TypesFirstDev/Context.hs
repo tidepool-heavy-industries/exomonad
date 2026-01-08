@@ -163,7 +163,6 @@ instance ToGVal (Run SourcePos (Writer Text) Text) TestPriority where
 data SkeletonContext = SkeletonContext
   { moduleName :: Text
   , dataTypeName :: Text
-  , typeName :: Text  -- ^ Alias of dataTypeName for template compatibility
   , dataType :: Text
   , signatures :: [SignatureInfo]
   , testPriorities :: [TestPriority]
@@ -174,7 +173,6 @@ instance ToGVal (Run SourcePos (Writer Text) Text) SkeletonContext where
   toGVal SkeletonContext{..} = dict
     [ ("moduleName", toGVal moduleName)
     , ("dataTypeName", toGVal dataTypeName)
-    , ("typeName", toGVal dataTypeName)  -- Alias for template compatibility
     , ("dataType", toGVal dataType)
     , ("signatures", list $ map toGVal signatures)
     , ("testPriorities", list $ map toGVal testPriorities)
