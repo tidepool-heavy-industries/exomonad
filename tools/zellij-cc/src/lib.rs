@@ -42,6 +42,7 @@ pub mod events;
 pub mod fifo;
 pub mod humanize;
 pub mod supervisor;
+pub mod tui;
 
 // Re-export commonly used types at crate root
 pub use error::{Result, ZellijCcError};

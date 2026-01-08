@@ -97,3 +97,9 @@ impl From<nix::Error> for ZellijCcError {
         ZellijCcError::Poll(e)
     }
 }
+
+impl From<std::io::Error> for ZellijCcError {
+    fn from(e: std::io::Error) -> Self {
+        ZellijCcError::Io(e)
+    }
+}
