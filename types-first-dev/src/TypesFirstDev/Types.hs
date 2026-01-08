@@ -45,6 +45,7 @@ import Data.Aeson (FromJSON(..), ToJSON(..))
 import Data.Text (Text)
 import GHC.Generics (Generic)
 
+import Tidepool.Effects.Worktree (WorktreePath)
 import Tidepool.Schema (HasJSONSchema)
 
 
@@ -281,9 +282,9 @@ data ForkInput = ForkInput
 --
 -- Combined output from tests and impl agents for merging.
 data ParallelResults = ParallelResults
-  { prTestsWorktree :: FilePath
+  { prTestsWorktree :: WorktreePath
     -- ^ Path to tests worktree.
-  , prImplWorktree :: FilePath
+  , prImplWorktree :: WorktreePath
     -- ^ Path to impl worktree.
   , prTestDefs :: TestDefinitions
     -- ^ Test definitions from tests agent.

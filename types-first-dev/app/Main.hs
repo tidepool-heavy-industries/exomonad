@@ -15,6 +15,7 @@ import System.Environment (lookupEnv)
 import Tidepool.ClaudeCode.Config (mkClaudeCodeConfig, ClaudeCodeConfig(..))
 import Tidepool.ClaudeCode.Effect (runClaudeCodeExecIO)
 import Tidepool.Graph.Execute (callHandler, dispatchGoto)
+import Tidepool.Effects.Worktree (WorktreePath(..))
 import Tidepool.Worktree.Executor (runWorktreeIO, defaultWorktreeConfig)
 
 import TypesFirstDev.Graph (TypesFirstGraph(..))
@@ -75,14 +76,16 @@ main = do
 -- | Print the parallel results.
 printResult :: ParallelResults -> IO ()
 printResult pr = do
+  let WorktreePath testsPath = pr.prTestsWorktree
+      WorktreePath implPath = pr.prImplWorktree
   putStrLn ""
   putStrLn "=== Parallel Results ==="
   putStrLn ""
   putStrLn "Tests worktree:"
-  putStrLn $ "  " <> pr.prTestsWorktree
+  putStrLn $ "  " <> testsPath
   putStrLn ""
   putStrLn "Impl worktree:"
-  putStrLn $ "  " <> pr.prImplWorktree
+  putStrLn $ "  " <> implPath
   putStrLn ""
   putStrLn "=== Test Module ==="
   putStrLn $ T.unpack pr.prTestDefs.testModuleCode

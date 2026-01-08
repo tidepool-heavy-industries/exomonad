@@ -6,15 +6,15 @@
 -- = Example Usage
 --
 -- @
--- import Tidepool.Effects.Worktree (Worktree, WorktreeSpec(..), createWorktree, deleteWorktree)
+-- import Tidepool.Effects.Worktree
 --
--- forkHandler :: Member Worktree effs => Eff effs ()
+-- forkHandler :: Member Worktree effs => Eff effs (Either WorktreeError ())
 -- forkHandler = do
---   wtTests <- createWorktree (WorktreeSpec "types-first-tests" Nothing)
---   wtImpl  <- createWorktree (WorktreeSpec "types-first-impl" Nothing)
---   -- ... run parallel agents in each worktree ...
---   deleteWorktree wtTests
---   deleteWorktree wtImpl
+--   result <- withWorktree (WorktreeSpec "tests" Nothing) $ \wtTests ->
+--     withWorktree (WorktreeSpec "impl" Nothing) $ \wtImpl -> do
+--       -- ... run parallel agents in each worktree ...
+--       pure ()
+--   pure result
 -- @
 --
 -- = Design Notes
@@ -24,6 +24,11 @@
 -- - Changes in one worktree don't affect others
 -- - Claude Code can be spawned with --cwd pointing to a worktree
 -- - After work completes, files can be cherry-picked back to main
+--
+-- = Error Handling
+--
+-- All operations return @Either WorktreeError a@ for explicit error handling.
+-- Use 'withWorktree' for bracket-style resource safety (automatic cleanup).
 module Tidepool.Effects.Worktree
   ( -- * Effect
     Worktree(..)
@@ -33,28 +38,51 @@ module Tidepool.Effects.Worktree
   , cherryPickFiles
   , listWorktrees
 
+    -- * Bracket
+  , withWorktree
+
     -- * Types
+  , WorktreePath(..)
   , WorktreeSpec(..)
   , MergeResult(..)
+  , WorktreeError(..)
   ) where
 
 import Control.Monad.Freer (Eff, Member, send)
+import Data.Aeson (FromJSON, ToJSON)
+import Data.String (IsString)
 import Data.Text (Text)
+import GHC.Generics (Generic)
 
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TYPES
 -- ════════════════════════════════════════════════════════════════════════════
 
+-- | Type-safe wrapper for worktree paths.
+--
+-- Prevents accidental confusion between worktree paths and regular FilePath values.
+-- Use 'unWorktreePath' to extract the underlying path when needed.
+--
+-- @
+-- path <- createWorktree spec
+-- case path of
+--   Right (WorktreePath p) -> runClaudeCode p
+--   Left err -> handleError err
+-- @
+newtype WorktreePath = WorktreePath { unWorktreePath :: FilePath }
+  deriving stock (Eq, Ord, Show)
+  deriving newtype (IsString, ToJSON, FromJSON)
+
 -- | Specification for creating a worktree.
 data WorktreeSpec = WorktreeSpec
   { wsBaseName :: Text
     -- ^ Base name for the worktree (e.g., "types-first-tests").
-    -- A unique suffix may be added by the executor.
+    -- A unique suffix will be added by the executor.
   , wsFromBranch :: Maybe Text
     -- ^ Branch to create worktree from. Nothing = current HEAD.
   }
-  deriving (Show, Eq)
+  deriving stock (Show, Eq)
 
 -- | Result of merging a worktree back to main.
 data MergeResult
@@ -62,9 +90,51 @@ data MergeResult
     -- ^ Merge completed successfully.
   | MergeConflict Text
     -- ^ Merge had conflicts. Text describes the conflicts.
-  | MergeError Text
-    -- ^ Merge failed for other reasons.
-  deriving (Show, Eq)
+  deriving stock (Show, Eq, Generic)
+
+instance ToJSON MergeResult
+instance FromJSON MergeResult
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- ERRORS
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Errors that can occur during worktree operations.
+--
+-- Use pattern matching to handle specific error cases:
+--
+-- @
+-- case result of
+--   Left (WorktreeGitError cmd code stderr) -> logError stderr
+--   Left (WorktreeNotFound path) -> warn "worktree missing"
+--   Left (WorktreeFileCopyError src dest reason) -> retry
+--   Right value -> proceed value
+-- @
+data WorktreeError
+  = WorktreeGitError
+      { wgeCommand :: Text
+        -- ^ Git command that failed (e.g., "worktree add")
+      , wgeExitCode :: Int
+        -- ^ Exit code from git
+      , wgeStderr :: Text
+        -- ^ Stderr output from git
+      }
+    -- ^ Git command failed
+  | WorktreeNotFound FilePath
+    -- ^ Worktree doesn't exist at specified path
+  | WorktreeParseError Text
+    -- ^ Failed to parse git output (e.g., worktree list)
+  | WorktreeFileCopyError
+      { wfceSrcPath :: FilePath
+      , wfceDestPath :: FilePath
+      , wfceReason :: Text
+      }
+    -- ^ Failed to copy files during cherry-pick
+  deriving stock (Eq, Show, Generic)
+
+instance ToJSON WorktreeError
+instance FromJSON WorktreeError
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -73,39 +143,40 @@ data MergeResult
 
 -- | Worktree effect for managing git worktrees.
 --
+-- All operations return @Either WorktreeError@ for explicit error handling.
 -- Provides isolation for parallel agent execution.
 data Worktree r where
   -- | Create a new worktree with a branch.
-  -- Returns the absolute path to the created worktree.
+  -- Returns the path to the created worktree, or an error.
   CreateWorktree
     :: WorktreeSpec
-    -> Worktree FilePath
+    -> Worktree (Either WorktreeError WorktreePath)
 
   -- | Delete a worktree and its branch.
-  -- Fails silently if worktree doesn't exist.
+  -- Returns () on success, or an error if deletion failed.
   DeleteWorktree
-    :: FilePath        -- ^ Worktree path
-    -> Worktree ()
+    :: WorktreePath
+    -> Worktree (Either WorktreeError ())
 
   -- | Merge changes from a worktree back to main branch.
-  -- The worktree should have committed changes to merge.
+  -- Returns MergeSuccess or MergeConflict on success, or an error.
   MergeWorktree
-    :: FilePath        -- ^ Worktree path to merge from
-    -> Text            -- ^ Commit message for the merge
-    -> Worktree MergeResult
+    :: WorktreePath        -- ^ Worktree path to merge from
+    -> Text                -- ^ Commit message for the merge
+    -> Worktree (Either WorktreeError MergeResult)
 
   -- | Cherry-pick specific files from a worktree to a destination.
   -- Copies files without committing - useful for combining outputs.
   CherryPickFiles
-    :: FilePath        -- ^ Source worktree
-    -> [FilePath]      -- ^ Relative file paths to copy
-    -> FilePath        -- ^ Destination directory
-    -> Worktree ()
+    :: WorktreePath        -- ^ Source worktree
+    -> [FilePath]          -- ^ Relative file paths to copy
+    -> FilePath            -- ^ Destination directory
+    -> Worktree (Either WorktreeError ())
 
   -- | List all worktrees for the repository.
   -- Returns list of (path, branch) pairs.
   ListWorktrees
-    :: Worktree [(FilePath, Text)]
+    :: Worktree (Either WorktreeError [(WorktreePath, Text)])
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -115,23 +186,37 @@ data Worktree r where
 -- | Create a new worktree.
 --
 -- @
--- path <- createWorktree (WorktreeSpec "my-feature" Nothing)
--- -- path is now something like "/repo/worktrees/my-feature-abc123"
+-- result <- createWorktree (WorktreeSpec "my-feature" Nothing)
+-- case result of
+--   Right path -> -- path is like "/repo/.worktrees/my-feature-abc123"
+--   Left err -> handleError err
 -- @
-createWorktree :: Member Worktree effs => WorktreeSpec -> Eff effs FilePath
+createWorktree
+  :: Member Worktree effs
+  => WorktreeSpec
+  -> Eff effs (Either WorktreeError WorktreePath)
 createWorktree = send . CreateWorktree
 
 -- | Delete a worktree and its associated branch.
 --
--- Safe to call on non-existent worktrees (no-op).
-deleteWorktree :: Member Worktree effs => FilePath -> Eff effs ()
+-- Returns 'Right ()' on success, 'Left WorktreeNotFound' if it doesn't exist,
+-- or 'Left WorktreeGitError' if git fails.
+deleteWorktree
+  :: Member Worktree effs
+  => WorktreePath
+  -> Eff effs (Either WorktreeError ())
 deleteWorktree = send . DeleteWorktree
 
 -- | Merge a worktree's changes back to main branch.
 --
 -- The worktree should have changes committed to its branch.
--- Returns 'MergeSuccess' if clean, 'MergeConflict' if conflicts occurred.
-mergeWorktree :: Member Worktree effs => FilePath -> Text -> Eff effs MergeResult
+-- Returns 'MergeSuccess' if clean, 'MergeConflict' if conflicts occurred,
+-- or 'Left WorktreeGitError' if git fails.
+mergeWorktree
+  :: Member Worktree effs
+  => WorktreePath
+  -> Text
+  -> Eff effs (Either WorktreeError MergeResult)
 mergeWorktree path msg = send (MergeWorktree path msg)
 
 -- | Copy specific files from a worktree to a destination.
@@ -139,11 +224,54 @@ mergeWorktree path msg = send (MergeWorktree path msg)
 -- Useful for combining outputs from parallel agents without full merge.
 --
 -- @
--- cherryPickFiles "/worktrees/tests" ["test/StackSpec.hs"] "/worktrees/impl"
+-- cherryPickFiles testsWt ["test/StackSpec.hs"] implWt
 -- @
-cherryPickFiles :: Member Worktree effs => FilePath -> [FilePath] -> FilePath -> Eff effs ()
+cherryPickFiles
+  :: Member Worktree effs
+  => WorktreePath
+  -> [FilePath]
+  -> FilePath
+  -> Eff effs (Either WorktreeError ())
 cherryPickFiles src files dest = send (CherryPickFiles src files dest)
 
 -- | List all worktrees in the repository.
-listWorktrees :: Member Worktree effs => Eff effs [(FilePath, Text)]
+listWorktrees
+  :: Member Worktree effs
+  => Eff effs (Either WorktreeError [(WorktreePath, Text)])
 listWorktrees = send ListWorktrees
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- BRACKET
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Bracket-style worktree management with guaranteed cleanup.
+--
+-- Creates a worktree, runs an action, and deletes the worktree afterward
+-- regardless of success or failure of the action.
+--
+-- @
+-- result <- withWorktree (WorktreeSpec "tests" Nothing) $ \wtPath -> do
+--   -- Work in the worktree (wtPath :: WorktreePath)
+--   output <- runAgent (unWorktreePath wtPath)
+--   pure output
+-- -- Worktree is automatically deleted here
+-- @
+--
+-- Note: If the action throws an exception at the IO level, cleanup may not
+-- occur. For full IO-level safety, the executor also uses IO bracket.
+withWorktree
+  :: Member Worktree effs
+  => WorktreeSpec
+  -> (WorktreePath -> Eff effs a)
+  -> Eff effs (Either WorktreeError a)
+withWorktree spec action = do
+  createResult <- createWorktree spec
+  case createResult of
+    Left err -> pure $ Left err
+    Right wtPath -> do
+      -- Run the action
+      result <- action wtPath
+      -- Always cleanup (best effort - ignore delete errors)
+      _ <- deleteWorktree wtPath
+      pure $ Right result
