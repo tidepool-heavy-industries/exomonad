@@ -36,6 +36,7 @@ module Tidepool.Graph.Reify
   , SchemaInfo(..)
   , TemplateInfo(..)
   , MemoryInfo(..)
+  , ClaudeCodeInfo(..)
 
     -- * Reification Typeclasses
   , ReifyGraph(..)
@@ -59,6 +60,7 @@ module Tidepool.Graph.Reify
   , ReifySchemaInfo(..)
   , ReifyTemplateInfo(..)
   , ReifyMemoryInfo(..)
+  , ReifyClaudeCodeInfo(..)
 
     -- * Goto Target Extraction
   , GotoTargetsFromDef
@@ -80,13 +82,14 @@ import GHC.Generics (Generic(..), K1(..), M1(..), (:*:)(..), Meta(..), S, D, C)
 import GHC.TypeLits (Symbol, KnownSymbol, symbolVal)
 import qualified Data.Map.Strict as Map
 
-import Tidepool.Graph.Types (NodeKind(..), type (:@))
+import Tidepool.Graph.Types (NodeKind(..), type (:@), ModelChoice(..))
 import Tidepool.Graph.Tool (ToolInfo(..))
 import Tidepool.Graph.Generic.Core (Entry, Exit, LLMNode, LogicNode, AsGraph)
 import Tidepool.Graph.Edges
   ( GetInput, GetSchema, GetTemplate, GetSystem
   , GetVision, GetTools, GetMemory, GetUsesEffects
   , GetGotoTargets, HasGotoExit
+  , GetClaudeCode
   )
 import Tidepool.Schema (JSONSchema(..), HasJSONSchema(..), SchemaType(..))
 import Tidepool.Graph.Template
@@ -161,7 +164,7 @@ data GraphInfo = GraphInfo
 -- of truth for Mermaid diagrams, JSON export, and D3 visualization.
 data NodeInfo = NodeInfo
   { niName :: Text                      -- ^ Node name (from Symbol)
-  , niKind :: RuntimeNodeKind           -- ^ LLM or Logic
+  , niKind :: RuntimeNodeKind           -- ^ LLM, ClaudeCode, or Logic
   , niInput :: Maybe TypeRep            -- ^ Input type this node needs
   , niSchema :: Maybe SchemaInfo        -- ^ Rich schema info (LLM nodes)
   , niGotoTargets :: [(Text, TypeRep)]  -- ^ Goto targets (Logic nodes)
@@ -172,6 +175,7 @@ data NodeInfo = NodeInfo
   , niSystem :: Maybe TemplateInfo      -- ^ System prompt template (rich info)
   , niTemplate :: Maybe TemplateInfo    -- ^ User prompt template (rich info)
   , niMemory :: Maybe MemoryInfo        -- ^ Memory type (rich info)
+  , niClaudeCode :: Maybe ClaudeCodeInfo -- ^ ClaudeCode annotation (rich info)
   }
   deriving (Show, Eq)
 
@@ -185,7 +189,10 @@ data EdgeInfo = EdgeInfo
   deriving (Show, Eq)
 
 -- | Runtime node kind.
-data RuntimeNodeKind = RuntimeLLM | RuntimeLogic
+data RuntimeNodeKind
+  = RuntimeLLM         -- ^ Standard LLM API call
+  | RuntimeClaudeCode  -- ^ Claude Code subprocess
+  | RuntimeLogic       -- ^ Pure routing logic
   deriving (Show, Eq)
 
 -- | Runtime edge kind.
@@ -228,6 +235,13 @@ data TemplateInfo = TemplateInfo
 data MemoryInfo = MemoryInfo
   { miType :: TypeRep                   -- ^ The memory type
   , miTypeName :: Text                  -- ^ Simplified type name
+  }
+  deriving (Show, Eq)
+
+-- | Rich ClaudeCode information for nodes executed via Claude Code subprocess.
+data ClaudeCodeInfo = ClaudeCodeInfo
+  { cciModel :: Text                    -- ^ Model choice: "Haiku", "Sonnet", or "Opus"
+  , cciCwd :: Maybe Text                -- ^ Working directory if specified
   }
   deriving (Show, Eq)
 
@@ -393,6 +407,54 @@ instance Typeable t => ReifyMemoryInfo ('Just t) where
   reifyMemoryInfo _ = Just MemoryInfo
     { miType = typeRep (Proxy @t)
     , miTypeName = simplifyTypeName (typeRep (Proxy @t))
+    }
+
+-- | Reify a type-level Maybe ClaudeCode annotation to runtime Maybe ClaudeCodeInfo.
+--
+-- The type-level representation is @Maybe (ModelChoice, Maybe Symbol)@ where:
+-- * @ModelChoice@ is 'Haiku, 'Sonnet, or 'Opus
+-- * @Maybe Symbol@ is the optional working directory path
+type ReifyClaudeCodeInfo :: Maybe (ModelChoice, Maybe Symbol) -> Constraint
+class ReifyClaudeCodeInfo (mcc :: Maybe (ModelChoice, Maybe Symbol)) where
+  reifyClaudeCodeInfo :: Proxy mcc -> Maybe ClaudeCodeInfo
+
+instance ReifyClaudeCodeInfo 'Nothing where
+  reifyClaudeCodeInfo _ = Nothing
+
+instance KnownSymbol cwd => ReifyClaudeCodeInfo ('Just '( 'Haiku, 'Just cwd)) where
+  reifyClaudeCodeInfo _ = Just ClaudeCodeInfo
+    { cciModel = "Haiku"
+    , cciCwd = Just $ T.pack (symbolVal (Proxy @cwd))
+    }
+
+instance ReifyClaudeCodeInfo ('Just '( 'Haiku, 'Nothing)) where
+  reifyClaudeCodeInfo _ = Just ClaudeCodeInfo
+    { cciModel = "Haiku"
+    , cciCwd = Nothing
+    }
+
+instance KnownSymbol cwd => ReifyClaudeCodeInfo ('Just '( 'Sonnet, 'Just cwd)) where
+  reifyClaudeCodeInfo _ = Just ClaudeCodeInfo
+    { cciModel = "Sonnet"
+    , cciCwd = Just $ T.pack (symbolVal (Proxy @cwd))
+    }
+
+instance ReifyClaudeCodeInfo ('Just '( 'Sonnet, 'Nothing)) where
+  reifyClaudeCodeInfo _ = Just ClaudeCodeInfo
+    { cciModel = "Sonnet"
+    , cciCwd = Nothing
+    }
+
+instance KnownSymbol cwd => ReifyClaudeCodeInfo ('Just '( 'Opus, 'Just cwd)) where
+  reifyClaudeCodeInfo _ = Just ClaudeCodeInfo
+    { cciModel = "Opus"
+    , cciCwd = Just $ T.pack (symbolVal (Proxy @cwd))
+    }
+
+instance ReifyClaudeCodeInfo ('Just '( 'Opus, 'Nothing)) where
+  reifyClaudeCodeInfo _ = Just ClaudeCodeInfo
+    { cciModel = "Opus"
+    , cciCwd = Nothing
     }
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -580,28 +642,36 @@ class ReifyAnnotatedNode (def :: Type) (isLLM :: Bool) (isLogic :: Bool) where
 -- LLMNode case
 --
 -- Uses rich info typeclasses to extract template paths, schema fields, etc.
+-- ClaudeCode annotation is extracted to determine if this is a ClaudeCode node.
 instance ( ReifyMaybeType (GetInput def)
          , ReifySchemaInfo (GetSchema def)
          , ReifyTemplateInfo (GetTemplate def)
          , ReifyTemplateInfo (GetSystem def)
          , ReifyMemoryInfo (GetMemory def)
+         , ReifyClaudeCodeInfo (GetClaudeCode def)
          , ReifyBool (GetVision def)
          , ReifyTypeList (GetTools def)
          ) => ReifyAnnotatedNode def 'True 'False where
-  reifyAnnotatedNode _ _ _ pName _ = [NodeInfo
-    { niName = T.pack (symbolVal pName)
-    , niKind = RuntimeLLM
-    , niInput = reifyMaybeType (Proxy @(GetInput def))
-    , niSchema = reifySchemaInfo (Proxy @(GetSchema def))
-    , niGotoTargets = []  -- LLM nodes don't have Goto
-    , niHasGotoExit = False
-    , niHasVision = reifyBool (Proxy @(GetVision def))
-    , niTools = reifyTypeList (Proxy @(GetTools def))
-    , niToolInfos = []  -- Would require ToolDef instances
-    , niSystem = reifyTemplateInfo (Proxy @(GetSystem def))
-    , niTemplate = reifyTemplateInfo (Proxy @(GetTemplate def))
-    , niMemory = reifyMemoryInfo (Proxy @(GetMemory def))
-    }]
+  reifyAnnotatedNode _ _ _ pName _ =
+    let claudeCodeInfo = reifyClaudeCodeInfo (Proxy @(GetClaudeCode def))
+        nodeKind = case claudeCodeInfo of
+          Just _  -> RuntimeClaudeCode
+          Nothing -> RuntimeLLM
+    in [NodeInfo
+      { niName = T.pack (symbolVal pName)
+      , niKind = nodeKind
+      , niInput = reifyMaybeType (Proxy @(GetInput def))
+      , niSchema = reifySchemaInfo (Proxy @(GetSchema def))
+      , niGotoTargets = []  -- LLM nodes don't have Goto
+      , niHasGotoExit = False
+      , niHasVision = reifyBool (Proxy @(GetVision def))
+      , niTools = reifyTypeList (Proxy @(GetTools def))
+      , niToolInfos = []  -- Would require ToolDef instances
+      , niSystem = reifyTemplateInfo (Proxy @(GetSystem def))
+      , niTemplate = reifyTemplateInfo (Proxy @(GetTemplate def))
+      , niMemory = reifyMemoryInfo (Proxy @(GetMemory def))
+      , niClaudeCode = claudeCodeInfo
+      }]
 
 -- LogicNode case
 --
@@ -625,6 +695,7 @@ instance ( ReifyMaybeType (GetInput def)
     , niSystem = Nothing
     , niTemplate = Nothing
     , niMemory = reifyMemoryInfo (Proxy @(GetMemory def))
+    , niClaudeCode = Nothing  -- Logic nodes don't use ClaudeCode
     }]
 
 -- Neither LLM nor Logic - unknown node type, return empty

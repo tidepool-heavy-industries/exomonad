@@ -177,6 +177,7 @@ renderNodeComments :: NodeInfo -> [Text]
 renderNodeComments node = filter (not . T.null)
   [ "    %% NODE: " <> node.niName
   , "    %% kind: " <> kindText node.niKind
+  , renderClaudeCodeComment node.niClaudeCode
   , renderTemplateComment node.niTemplate
   , renderSchemaComment node.niSchema
   , renderToolsComment node.niToolInfos
@@ -185,6 +186,7 @@ renderNodeComments node = filter (not . T.null)
   ]
   where
     kindText RuntimeLLM = "LLM"
+    kindText RuntimeClaudeCode = "ClaudeCode"
     kindText RuntimeLogic = "Logic"
 
 -- | Render template comment.
@@ -217,6 +219,16 @@ renderMemoryComment :: Maybe MemoryInfo -> Text
 renderMemoryComment Nothing = ""
 renderMemoryComment (Just mi) = "    %% memory: " <> mi.miTypeName
 
+-- | Render ClaudeCode comment.
+renderClaudeCodeComment :: Maybe ClaudeCodeInfo -> Text
+renderClaudeCodeComment Nothing = ""
+renderClaudeCodeComment (Just cci) =
+  "    %% claudeCode: " <> cci.cciModel <> cwdText
+  where
+    cwdText = case cci.cciCwd of
+      Nothing -> ""
+      Just cwd -> " @ " <> cwd
+
 -- | Render transitions comment.
 renderTransitionsComment :: NodeInfo -> Text
 renderTransitionsComment node
@@ -232,14 +244,20 @@ renderNode config node =
   "    " <> escapeName node.niName <> shape
   where
     label = if config.mcShowNodeKind
-            then node.niName <> "<br/>" <> kindLabel node.niKind
+            then node.niName <> "<br/>" <> kindLabel node
             else node.niName
     shape = case node.niKind of
-      RuntimeLLM   -> "[[\"" <> label <> "\"]]"
-      RuntimeLogic -> "{{\"" <> label <> "\"}}"
+      RuntimeLLM       -> "[[\"" <> label <> "\"]]"
+      RuntimeClaudeCode -> "[[\"" <> label <> "\"]]"  -- Same shape as LLM
+      RuntimeLogic     -> "{{\"" <> label <> "\"}}"
 
-    kindLabel RuntimeLLM   = "LLM"
-    kindLabel RuntimeLogic = "Logic"
+    -- For ClaudeCode nodes, include the model name in the label
+    kindLabel n = case n.niKind of
+      RuntimeLLM -> "LLM"
+      RuntimeClaudeCode -> case n.niClaudeCode of
+        Just cci -> "CC " <> cci.cciModel  -- e.g., "CC Sonnet"
+        Nothing  -> "ClaudeCode"
+      RuntimeLogic -> "Logic"
 
 -- | Generate group (subgraph) declarations.
 groupDeclarations :: GraphInfo -> [Text]
@@ -390,11 +408,15 @@ stateDefinitions config info =
 renderState :: MermaidConfig -> NodeInfo -> Text
 renderState config node =
   if config.mcShowNodeKind
-  then "    " <> escapeName node.niName <> " : " <> kindAnnotation node.niKind
+  then "    " <> escapeName node.niName <> " : " <> kindAnnotation node
   else ""
   where
-    kindAnnotation RuntimeLLM   = "LLM"
-    kindAnnotation RuntimeLogic = "Logic"
+    kindAnnotation n = case n.niKind of
+      RuntimeLLM -> "LLM"
+      RuntimeClaudeCode -> case n.niClaudeCode of
+        Just cci -> "CC " <> cci.cciModel
+        Nothing  -> "ClaudeCode"
+      RuntimeLogic -> "Logic"
 
 -- | Generate state transitions.
 stateTransitions :: MermaidConfig -> GraphInfo -> [Text]
