@@ -8,6 +8,8 @@ use shell_escape::escape;
 use std::borrow::Cow;
 use std::io::{BufRead, BufReader, Read as _};
 use std::path::PathBuf;
+use std::sync::mpsc;
+use std::thread;
 use std::time::Duration;
 use tracing::{debug, error, info, warn};
 use tracing_subscriber::EnvFilter;
@@ -22,6 +24,7 @@ use zellij_cc::humanize::{print_event_humanized, print_interrupt};
 use zellij_cc::protocol::{ControlMessage, ControlResponse, HookInput, HookOutput};
 use zellij_cc::socket::{control_socket_path, ControlSocket};
 use zellij_cc::supervisor::{build_claude_command, install_signal_handlers, Supervisor};
+use zellij_cc::tui::{run_tui, TuiEvent};
 
 // ============================================================================
 // CLI Types
@@ -114,6 +117,10 @@ enum Commands {
         /// Control socket path (enables hook interception)
         #[arg(long)]
         control_socket: Option<PathBuf>,
+
+        /// Disable TUI, use simple println output (for CI/headless)
+        #[arg(long)]
+        no_tui: bool,
 
         /// All remaining args passed to claude
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
@@ -231,6 +238,7 @@ fn main() {
             session_tag,
             timeout,
             control_socket,
+            no_tui,
             claude_args,
         } => wrap_claude(
             &result_fifo,
@@ -238,6 +246,7 @@ fn main() {
             session_tag.as_deref(),
             timeout,
             control_socket.as_ref(),
+            no_tui,
             &claude_args,
         ),
         Commands::Signal {
@@ -563,6 +572,7 @@ fn wrap_claude(
     session_tag: Option<&str>,
     timeout_secs: u64,
     control_socket: Option<&PathBuf>,
+    no_tui: bool,
     claude_args: &[String],
 ) -> Result<()> {
     // Install signal handlers for SIGINT/SIGTERM forwarding
@@ -609,6 +619,24 @@ fn wrap_claude(
 
     // Take stdout for reading
     let stdout = supervisor.take_stdout();
+
+    if no_tui {
+        // Simple println mode for CI/headless
+        wrap_claude_simple(stdout, &signal_fifo, &mut supervisor, result_fifo, session_tag)
+    } else {
+        // Full TUI mode
+        wrap_claude_tui(stdout, &signal_fifo, &mut supervisor, result_fifo, session_tag)
+    }
+}
+
+/// Simple println mode (original behavior, for CI/headless)
+fn wrap_claude_simple(
+    stdout: std::process::ChildStdout,
+    signal_fifo: &SignalFifo,
+    supervisor: &mut Supervisor,
+    result_fifo: &PathBuf,
+    session_tag: Option<&str>,
+) -> Result<()> {
     let reader = BufReader::new(stdout);
 
     let mut events: Vec<StreamEvent> = Vec::new();
@@ -669,6 +697,115 @@ fn wrap_claude(
         exit_code,
         session_tag.map(|s| s.to_string()),
         interrupts,
+    );
+
+    // Write to result FIFO (unblocks the waiting `run` process)
+    write_result(result_fifo, &result)?;
+
+    Ok(())
+}
+
+/// TUI mode with interactive display
+fn wrap_claude_tui(
+    stdout: std::process::ChildStdout,
+    signal_fifo: &SignalFifo,
+    supervisor: &mut Supervisor,
+    result_fifo: &PathBuf,
+    session_tag: Option<&str>,
+) -> Result<()> {
+    // Create channel for TUI events
+    let (tx, rx) = mpsc::channel::<TuiEvent>();
+    let tx_signal = tx.clone();
+
+    // Spawn stdout reader thread
+    let stdout_handle = thread::spawn(move || {
+        let reader = BufReader::new(stdout);
+        for line in reader.lines() {
+            let line = match line {
+                Ok(l) => l,
+                Err(e) => {
+                    warn!(error = %e, "Error reading line from claude stdout");
+                    continue;
+                }
+            };
+
+            if line.trim().is_empty() {
+                continue;
+            }
+
+            match serde_json::from_str::<StreamEvent>(&line) {
+                Ok(event) => {
+                    if tx.send(TuiEvent::Claude(event)).is_err() {
+                        break; // TUI closed
+                    }
+                }
+                Err(e) => {
+                    let truncated: String = line.chars().take(50).collect();
+                    warn!(
+                        error = %e,
+                        line = %truncated,
+                        "JSON parse error"
+                    );
+                }
+            }
+        }
+        // Signal that stdout is done
+        let _ = tx.send(TuiEvent::ProcessExit);
+    });
+
+    // Clone signal_fifo path for the thread
+    let signal_path = signal_fifo.path().to_path_buf();
+
+    // Spawn signal reader thread
+    let signal_handle = thread::spawn(move || {
+        // Create a new SignalFifo for this thread using the same path
+        // We poll periodically to check for signals
+        loop {
+            // Try to read signal from the FIFO
+            if let Ok(contents) = std::fs::read_to_string(&signal_path) {
+                for line in contents.lines() {
+                    if let Ok(signal) = serde_json::from_str::<InterruptSignal>(line) {
+                        if tx_signal.send(TuiEvent::Interrupt(signal)).is_err() {
+                            return; // TUI closed
+                        }
+                    }
+                }
+                // Clear the file after reading
+                let _ = std::fs::write(&signal_path, "");
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+    });
+
+    // Run TUI (blocks until user quits)
+    let tui_result = run_tui(rx)?;
+
+    // Wait for stdout thread to finish
+    let _ = stdout_handle.join();
+
+    // Signal thread runs forever, so we don't join it - it'll be terminated when we exit
+    drop(signal_handle);
+
+    // Wait for the child process (non-blocking check in loop)
+    let exit_code = loop {
+        match supervisor.try_wait()? {
+            Some(status) => {
+                break status.code().unwrap_or(-1);
+            }
+            None => {
+                // Process still running, wait a bit
+                thread::sleep(Duration::from_millis(100));
+            }
+        }
+    };
+
+    // Build final result from TUI state
+    let result = RunResult::from_events(
+        tui_result.events,
+        tui_result.result_event,
+        exit_code,
+        session_tag.map(|s| s.to_string()),
+        tui_result.interrupts,
     );
 
     // Write to result FIFO (unblocks the waiting `run` process)
