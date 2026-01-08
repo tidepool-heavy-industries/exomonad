@@ -54,6 +54,8 @@ import Data.String (IsString)
 import Data.Text (Text)
 import GHC.Generics (Generic)
 
+import Tidepool.StructuredOutput (StructuredOutput(..))
+
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TYPES
@@ -73,6 +75,12 @@ import GHC.Generics (Generic)
 newtype WorktreePath = WorktreePath { unWorktreePath :: FilePath }
   deriving stock (Eq, Ord, Show)
   deriving newtype (IsString, ToJSON, FromJSON)
+
+-- | StructuredOutput for WorktreePath delegates to String.
+instance StructuredOutput WorktreePath where
+  structuredSchema = structuredSchema @String
+  encodeStructured (WorktreePath p) = encodeStructured p
+  parseStructured v = WorktreePath <$> parseStructured v
 
 -- | Specification for creating a worktree.
 data WorktreeSpec = WorktreeSpec

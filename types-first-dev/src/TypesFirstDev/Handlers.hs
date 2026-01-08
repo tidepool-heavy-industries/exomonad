@@ -22,7 +22,6 @@ import Data.Proxy (Proxy(..))
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.IO qualified as TIO
-import qualified Data.Aeson as Aeson
 import System.Directory (createDirectoryIfMissing, withCurrentDirectory)
 import System.FilePath (takeDirectory)
 import System.IO (hFlush, stdout)
@@ -40,11 +39,12 @@ import Tidepool.Graph.Generic (AsHandler)
 import Tidepool.Graph.Goto (GotoChoice, To, ClaudeCodeLLMHandler(..), ClaudeCodeResult(..), gotoChoice, gotoExit)
 import Tidepool.Graph.Template (templateCompiled, runTypedTemplate)
 import Tidepool.Graph.Types (ModelChoice(..), Exit)
-import Tidepool.Schema (HasJSONSchema(..), schemaToValue)
+import Tidepool.Schema (schemaToValue)
+import Tidepool.StructuredOutput (StructuredOutput(..), formatDiagnostic)
 
 import TypesFirstDev.Context (TypesContext(..), TestsContext(..), ImplContext(..), SkeletonContext(..))
 import TypesFirstDev.Graph (TypesFirstGraph(..))
-import TypesFirstDev.Schema
+import TypesFirstDev.Types
   ( StackSpec(..)
   , TypeDefinitions(..)
   , ForkInput(..)
@@ -340,8 +340,8 @@ forkHandler input = do
       implPrompt = runTypedTemplate implCtx implCompiled
 
       -- Build schemas (using new result types - no code, just metadata)
-      testsSchema = Just $ schemaToValue (jsonSchema @TestsResult)
-      implSchema = Just $ schemaToValue (jsonSchema @ImplResult)
+      testsSchema = Just $ schemaToValue (structuredSchema @TestsResult)
+      implSchema = Just $ schemaToValue (structuredSchema @ImplResult)
 
   sendM $ do
     logPhase "FORK - Spawning parallel agents"
@@ -403,7 +403,7 @@ forkHandler input = do
 --
 -- Logs errors with full context before failing.
 parseOrError
-  :: (Aeson.FromJSON a)
+  :: (StructuredOutput a)
   => Text
   -> Either CC.ClaudeCodeError CC.ClaudeCodeResult
   -> Eff DevEffects a
@@ -430,14 +430,14 @@ parseOrError agentName (Right result) = do
     Nothing -> do
       sendM $ logError $ "Claude Code " <> T.unpack agentName <> " agent returned no structured output"
       error $ "Claude Code " <> show agentName <> " agent returned no structured output"
-    Just val -> case Aeson.fromJSON val of
-      Aeson.Error msg -> do
+    Just val -> case parseStructured val of
+      Left diag -> do
         sendM $ do
           logError $ "JSON parse error for " <> T.unpack agentName <> " agent"
-          logDetail "parseError" msg
+          logDetail "parseError" (T.unpack $ formatDiagnostic diag)
           logDetail "rawJSON" (take 1000 $ show val)
-        error $ "Failed to parse " <> show agentName <> " response: " <> msg
-      Aeson.Success a -> do
+        error $ "Failed to parse " <> show agentName <> " response: " <> T.unpack (formatDiagnostic diag)
+      Right a -> do
         sendM $ logMsg $ T.unpack agentName <> " agent response parsed successfully"
         pure a
 
