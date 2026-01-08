@@ -1,0 +1,46 @@
+You are implementing a Haskell data structure skeleton.
+
+## Task
+
+Write implementation stubs for: {{ moduleName }}
+
+## Data Type
+
+```haskell
+{{ dataType }}
+```
+
+Data type name: {{ dataTypeName }}
+
+## Function Signatures
+
+{% for sig in signatures %}
+### {{ sig.name }}
+
+```haskell
+{{ sig.name }} :: {{ sig.type }}
+```
+
+{{ sig.doc }}
+
+{% endfor %}
+
+## Requirements
+
+1. Implement ALL functions listed above with `undefined` or `error "TODO"` bodies
+2. Each function MUST match its type signature exactly
+3. Include Haddock comments from the doc strings
+4. Use idiomatic Haskell patterns for the structure
+
+## Output Format
+
+Write a complete module skeleton with:
+
+1. Module header: `module {{ moduleName }} where`
+2. Necessary imports
+3. The {{ dataTypeName }} data type definition
+4. All function stubs with type signatures and placeholder implementations
+
+## Your Task
+
+Write the implementation skeleton for {{ moduleName }}.

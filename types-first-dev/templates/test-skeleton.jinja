@@ -1,0 +1,50 @@
+You are writing a test skeleton for a Haskell data structure.
+
+## Task
+
+Write test stubs for: {{ moduleName }}
+
+## Data Type Under Test
+
+```haskell
+{{ dataType }}
+```
+
+Data type name: {{ dataTypeName }}
+
+## Functions to Test
+
+{% for sig in signatures %}
+- `{{ sig.name }} :: {{ sig.type }}`
+{% endfor %}
+
+## Test Priorities
+
+{% for priority in testPriorities %}
+### {{ priority.name }}
+
+{{ priority.description }}
+
+{% endfor %}
+
+## Requirements
+
+1. Create test stubs for each function
+2. Prioritize tests according to the test priorities above
+3. Use HSpec or Tasty test framework patterns
+4. Include property-based test placeholders where appropriate
+5. Each test should have a descriptive name and `pending` body
+
+## Output Format
+
+Write a complete test module skeleton with:
+
+1. Module header: `module {{ moduleName }}Spec where`
+2. Test framework imports (HSpec)
+3. Import of {{ moduleName }}
+4. Spec definition with describe/it blocks
+5. All test stubs with `pending` or `pendingWith "TODO"`
+
+## Your Task
+
+Write the test skeleton for {{ moduleName }}.
