@@ -81,16 +81,16 @@ cd deploy && pnpm dev  # Local CF worker
 
 Tidepool is a library. Agents live in separate repos:
 
-### anemone (`~/dev/anemone`)
+### anemone (`~/tidepool-labs/anemone`)
 Example consuming repo with working agents:
 - Native and Cloudflare WIPs (both work e2e)
 - Agent definitions using Graph DSL
 - Templates and schemas
 
-### urchin (`~/dev/urchin`, currently in tidepool-bd-executor)
+### urchin (`~/tidepool-labs/urchin`)
 Context generation tooling for coding agents:
 - `urchin prime` - Generate context from git/bd/LSP for agent bootstrap
-- Will be extracted to its own repo
+- `urchin lsp` - LSP impact analysis for Haskell code
 
 ## Sleeptime
 

@@ -1,8 +1,8 @@
 # Claude Code Session Resumption Research
 
-**Bead**: tidepool-98i.4
 **Date**: 2026-01-04
-**Source**: `~/dev/gastown/internal/cmd/seance.go`
+
+Research on Claude Code session resumption patterns from Gas Town's `seance` command.
 
 ## Key Claude Code CLI Flags
 

@@ -8,7 +8,7 @@ Tidepool is a type-safe LLM agent framework library written in Haskell. It provi
 - **Typed tools** for mid-turn capabilities
 - **IO-blind architecture** enabling deterministic testing and WASM compilation
 
-Agents are built in separate repos (e.g., `~/dev/anemone`) using this library.
+Agents are built in separate repos (e.g., `~/tidepool-labs/anemone`) using this library.
 
 ## Architecture
 

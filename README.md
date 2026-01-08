@@ -88,7 +88,7 @@ For detailed documentation, see `CLAUDE.md`.
 ## Example Agents
 
 Agents live in separate repos to keep the library clean:
-- `~/dev/anemone` - DM agent, Tidying agent, etc.
+- `~/tidepool-labs/anemone` - DM agent, Tidying agent, etc.
 
 ## See Also
 

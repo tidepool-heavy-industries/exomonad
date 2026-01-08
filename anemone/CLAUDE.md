@@ -4,7 +4,7 @@ Debug/diagnostic frontend for Tidepool agents. Connects to either:
 - Cloudflare Worker (`deploy/`) via WebSocket
 - Native server (`tidepool-native-gui/server/`) via WebSocket
 
-**Note**: This is the frontend UI, not the consuming repo at `~/dev/anemone` which contains actual agent definitions.
+**Note**: This is the frontend UI, not the consuming repo at `~/tidepool-labs/anemone` which contains actual agent definitions.
 
 ## Tech Stack
 

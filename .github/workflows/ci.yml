@@ -18,6 +18,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Update cabal package index
+        run: cabal update
+
       - name: Cache dist-newstyle
         uses: actions/cache@v4
         with:

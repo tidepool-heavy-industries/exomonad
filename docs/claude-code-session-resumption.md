@@ -137,5 +137,4 @@ data ClaudeCodeExec r where
 
 ## References
 
-- Gas Town seance implementation: `~/dev/gastown/internal/cmd/seance.go`
 - Claude Code documentation: `/help` within a Claude Code session

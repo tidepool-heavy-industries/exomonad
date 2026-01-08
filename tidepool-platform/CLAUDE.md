@@ -29,7 +29,7 @@ runTime :: IOE :> es => Eff (Time : es) a -> Eff es a
 
 ## Dependencies
 
-Used by: agents in consuming repos (e.g., `~/dev/anemone`) that need LLM effects.
+Used by: agents in consuming repos (e.g., `~/tidepool-labs/anemone`) that need LLM effects.
 
 ## Legacy Code (Deprecated)
 
