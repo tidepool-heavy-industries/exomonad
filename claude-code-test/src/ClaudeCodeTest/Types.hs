@@ -29,6 +29,7 @@ import Tidepool.Schema
   , emptySchema
   , SchemaType(..)
   )
+import Tidepool.StructuredOutput (StructuredOutput)
 
 
 -- ============================================================================
@@ -80,6 +81,8 @@ data Findings = Findings
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)
 
+instance StructuredOutput Findings
+
 -- | Manual HasJSONSchema instance for Findings.
 --
 -- This schema tells ClaudeCode what structured output to produce.
@@ -114,6 +117,8 @@ data ActionResult = ActionResult
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)
+
+instance StructuredOutput ActionResult
 
 -- | Manual HasJSONSchema instance for ActionResult.
 instance HasJSONSchema ActionResult where

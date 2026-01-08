@@ -3,8 +3,8 @@
 -- | Schema types for the types-first development workflow.
 --
 -- These are the structured outputs from Claude Code sessions.
--- Each type has FromJSON/ToJSON for parsing LLM output and
--- HasJSONSchema for passing to the LLM as a schema constraint.
+-- Types derive Generic and use StructuredOutput for unified schema+parsing.
+-- Field name prefixes (like "td" in "tdTypeName") are automatically stripped.
 module TypesFirstDev.Types
   ( -- * Entry Type
     StackSpec(..)
@@ -52,12 +52,11 @@ module TypesFirstDev.Types
   , ParallelResults(..)
   ) where
 
-import Data.Aeson (FromJSON(..), ToJSON(..))
 import Data.Text (Text)
 import GHC.Generics (Generic)
 
 import Tidepool.Effects.Worktree (WorktreePath)
-import Tidepool.Schema (HasJSONSchema)
+import Tidepool.StructuredOutput (StructuredOutput)
 
 
 
@@ -94,7 +93,8 @@ data StackSpec = StackSpec
     -- ^ Type of project (determines template set).
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+
+instance StructuredOutput StackSpec
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -113,8 +113,8 @@ data FunctionSig = FunctionSig
     -- ^ Brief description of what the function does.
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
-  -- HasJSONSchema derived via TH in Schema.hs
+
+instance StructuredOutput FunctionSig
 
 -- | Test priority for incremental development.
 --
@@ -126,8 +126,8 @@ data TestPriority = TestPriority
     -- ^ What to test (e.g., "Stack maintains LIFO order").
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
-  -- HasJSONSchema derived via TH in Schema.hs
+
+instance StructuredOutput TestPriority
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -209,7 +209,8 @@ data IncrementalProgress = IncrementalProgress
     -- ^ Functions not yet attempted.
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+
+instance StructuredOutput IncrementalProgress
 
 -- | Work status for coordination between agents.
 --
@@ -221,7 +222,8 @@ data WorkStatus = WorkStatus
     -- ^ Status detail: current focus if not blocked, reason if blocked.
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+
+instance StructuredOutput WorkStatus
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -248,8 +250,8 @@ data TypeDefinitions = TypeDefinitions
     -- The skeleton generator will include these in the generated module.
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
-  -- HasJSONSchema derived in TypesFirstDev.Schema via TH
+
+instance StructuredOutput TypeDefinitions
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -277,7 +279,8 @@ data SkeletonGenerated = SkeletonGenerated
     -- ^ Module name (e.g., "Data.Stack").
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+
+instance StructuredOutput SkeletonGenerated
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -336,8 +339,8 @@ data TestsResult = TestsResult
     -- Type issues? Null if work completed successfully.
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
-  -- HasJSONSchema derived via TH in Schema.hs
+
+instance StructuredOutput TestsResult
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -371,8 +374,8 @@ data ImplResult = ImplResult
     -- Null if work completed successfully. Used for retry/escalation.
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
-  -- HasJSONSchema derived via TH in Schema.hs
+
+instance StructuredOutput ImplResult
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -393,7 +396,8 @@ data TestLoopState = TestLoopState
     -- ^ Path to implementation file.
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+
+instance StructuredOutput TestLoopState
 
 -- | Result of running tests.
 data TestResult
@@ -402,7 +406,8 @@ data TestResult
   | TestsFailed Text
     -- ^ Tests failed with error message.
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+
+instance StructuredOutput TestResult
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -419,7 +424,8 @@ data ImplementationResult = ImplementationResult
     -- ^ Summary of what was accomplished.
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+
+instance StructuredOutput ImplementationResult
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -440,7 +446,8 @@ data ForkInput = ForkInput
     -- ^ Module name for generated files.
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+
+instance StructuredOutput ForkInput
 
 -- | Results from parallel agents.
 --
@@ -456,4 +463,5 @@ data ParallelResults = ParallelResults
     -- ^ Result metadata from impl agent.
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+
+instance StructuredOutput ParallelResults

@@ -44,8 +44,7 @@ module Tidepool.Graph.Execute
   , ConvertTransitionHint(..)
   ) where
 
-import Data.Aeson (FromJSON, Value)
-import qualified Data.Aeson as Aeson
+import Data.Aeson (Value)
 import Data.Kind (Constraint, Type)
 import Data.Proxy (Proxy(..))
 import Data.Text (Text)
@@ -72,7 +71,8 @@ import Tidepool.Graph.Goto (GotoChoice, To, LLMHandler(..), ClaudeCodeLLMHandler
 import Tidepool.Graph.Goto.Internal (GotoChoice(..), OneOf(..))
 import Tidepool.Graph.Template (GingerContext)
 import Tidepool.Graph.Types (Exit, Self, SingModelChoice(..), KnownMaybeCwd(..))
-import Tidepool.Schema (HasJSONSchema(..), schemaToValue)
+import Tidepool.Schema (schemaToValue)
+import Tidepool.StructuredOutput (StructuredOutput(..), formatDiagnostic)
 
 -- | Effect type alias (freer-simple effects have kind Type -> Type).
 type Effect = Type -> Type
@@ -219,8 +219,7 @@ runGraph = runGraphFrom @entryHandlerName
 executeLLMHandler
   :: forall needs schema targets es tpl.
      ( Member LLM es
-     , FromJSON schema
-     , HasJSONSchema schema
+     , StructuredOutput schema
      , GingerContext tpl
      , ConvertTransitionHint targets
      )
@@ -236,7 +235,7 @@ executeLLMHandler mSystemTpl userTpl beforeFn afterFn input = do
   -- Render templates
   let systemPrompt = maybe "" (runTypedTemplate ctx) mSystemTpl
       userPrompt = runTypedTemplate ctx userTpl
-      schemaVal = schemaToValue (jsonSchema @schema)
+      schemaVal = schemaToValue (structuredSchema @schema)
   -- Call LLM with rendered prompts and handle tool-initiated transitions
   turnResult <- runTurn @schema systemPrompt userPrompt schemaVal []
   case turnResult of
@@ -277,8 +276,7 @@ executeLLMHandler mSystemTpl userTpl beforeFn afterFn input = do
 executeClaudeCodeHandler
   :: forall model cwd needs schema targets es tpl.
      ( Member ClaudeCodeExec es
-     , FromJSON schema
-     , HasJSONSchema schema
+     , StructuredOutput schema
      , GingerContext tpl
      , SingModelChoice model
      , KnownMaybeCwd cwd
@@ -306,13 +304,13 @@ executeClaudeCodeHandler mSystemTpl userTpl beforeFn afterFn input = do
       fullPrompt = if systemPrompt == ""
                    then userPrompt
                    else systemPrompt <> "\n\n" <> userPrompt
-      schemaVal = Just $ schemaToValue (jsonSchema @schema)
+      schemaVal = Just $ schemaToValue (structuredSchema @schema)
   -- Call ClaudeCodeExec effect (forkSession=False for normal execution)
   (outputVal, sessionId) <- execClaudeCode model cwd fullPrompt schemaVal Nothing Nothing False
   -- Parse the structured output and wrap with session metadata
-  case Aeson.fromJSON outputVal of
-    Aeson.Error msg -> error $ "ClaudeCode output parse error: " <> msg
-    Aeson.Success output -> afterFn (ClaudeCodeResult output sessionId)
+  case parseStructured outputVal of
+    Left diag -> error $ "ClaudeCode output parse error: " <> T.unpack (formatDiagnostic diag)
+    Right output -> afterFn (ClaudeCodeResult output sessionId)
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -338,8 +336,7 @@ instance CallHandler (payload -> Eff es (GotoChoice targets)) payload es targets
 -- | LLM node handler: execute via executeLLMHandler.
 instance
   ( Member LLM es
-  , FromJSON schema
-  , HasJSONSchema schema
+  , StructuredOutput schema
   , GingerContext tpl
   , ConvertTransitionHint targets
   ) => CallHandler (LLMHandler payload schema targets es tpl) payload es targets where
@@ -353,8 +350,7 @@ instance
 -- validation that the handler matches the ClaudeCode annotation.
 instance
   ( Member ClaudeCodeExec es
-  , FromJSON schema
-  , HasJSONSchema schema
+  , StructuredOutput schema
   , GingerContext tpl
   , SingModelChoice model
   , KnownMaybeCwd cwd
@@ -446,16 +442,16 @@ instance ConvertTransitionHint '[] where
 -- and recurse for the rest of the target list.
 instance
   ( KnownSymbol name
-  , FromJSON payload
+  , StructuredOutput payload
   , ConvertTransitionHint rest
   ) => ConvertTransitionHint (To name payload ': rest) where
-  convertTransitionHint targetName payload
+  convertTransitionHint targetName payloadVal
     | targetName == T.pack (symbolVal (Proxy @name)) =
-        case Aeson.fromJSON payload of
-          Aeson.Success val -> Just $ GotoChoice (Here val)
-          Aeson.Error _ -> Nothing
+        case parseStructured payloadVal of
+          Right val -> Just $ GotoChoice (Here val)
+          Left _ -> Nothing
     | otherwise =
-        case convertTransitionHint @rest targetName payload of
+        case convertTransitionHint @rest targetName payloadVal of
           Just (GotoChoice oneOf) -> Just $ GotoChoice (There oneOf)
           Nothing -> Nothing
 
@@ -463,16 +459,16 @@ instance
 --
 -- Check if target name is "Exit", parse payload if it is, and recurse for rest.
 instance
-  ( FromJSON payload
+  ( StructuredOutput payload
   , ConvertTransitionHint rest
   ) => ConvertTransitionHint (To Exit payload ': rest) where
-  convertTransitionHint targetName payload
+  convertTransitionHint targetName payloadVal
     | targetName == "Exit" =
-        case Aeson.fromJSON payload of
-          Aeson.Success val -> Just $ GotoChoice (Here val)
-          Aeson.Error _ -> Nothing
+        case parseStructured payloadVal of
+          Right val -> Just $ GotoChoice (Here val)
+          Left _ -> Nothing
     | otherwise =
-        case convertTransitionHint @rest targetName payload of
+        case convertTransitionHint @rest targetName payloadVal of
           Just (GotoChoice oneOf) -> Just $ GotoChoice (There oneOf)
           Nothing -> Nothing
 
@@ -480,16 +476,16 @@ instance
 --
 -- Check if target name is "Self", parse payload if it is, and recurse for rest.
 instance
-  ( FromJSON payload
+  ( StructuredOutput payload
   , ConvertTransitionHint rest
   ) => ConvertTransitionHint (To Self payload ': rest) where
-  convertTransitionHint targetName payload
+  convertTransitionHint targetName payloadVal
     | targetName == "Self" =
-        case Aeson.fromJSON payload of
-          Aeson.Success val -> Just $ GotoChoice (Here val)
-          Aeson.Error _ -> Nothing
+        case parseStructured payloadVal of
+          Right val -> Just $ GotoChoice (Here val)
+          Left _ -> Nothing
     | otherwise =
-        case convertTransitionHint @rest targetName payload of
+        case convertTransitionHint @rest targetName payloadVal of
           Just (GotoChoice oneOf) -> Just $ GotoChoice (There oneOf)
           Nothing -> Nothing
 
