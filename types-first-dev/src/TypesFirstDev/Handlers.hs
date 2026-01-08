@@ -44,6 +44,7 @@ import Tidepool.Effect.ClaudeCode (ClaudeCodeExec)
 import Tidepool.Effects.Worktree (Worktree, createWorktree, deleteWorktree, mergeWorktree, WorktreeSpec(..), WorktreePath(..), MergeResult(..), WorktreeError(..))
 import Tidepool.Graph.Generic (AsHandler)
 import Tidepool.Graph.Goto (GotoChoice, To, ClaudeCodeLLMHandler(..), ClaudeCodeResult(..), gotoChoice, gotoExit)
+import Tidepool.Graph.Memory (Memory, getMem, updateMem)
 import Tidepool.Graph.Template (runTypedTemplate, TypedTemplate)
 import Text.Parsec.Pos (SourcePos)
 import Tidepool.Graph.Types (ModelChoice(..), Exit)
@@ -65,6 +66,7 @@ import TypesFirstDev.Types
   , ParallelResults(..)
   , TestsResult(..)
   , ImplResult(..)
+  , SessionContext(..)
   )
 import TypesFirstDev.Templates
   ( typesCompiled, testsCompiled, implCompiled, implSkeletonCompiled, testSkeletonCompiled
@@ -167,12 +169,13 @@ logClaudeCodeEvents agentName events = do
 -- | Effect stack for the types-first workflow (parallel version).
 --
 -- - Error WorkflowError: Workflow failures (compile errors, agent failures, etc.)
+-- - Memory SessionContext: Persistent session state (session ID, project path)
 -- - Reader ClaudeCodeConfig: Config for spawning Claude Code subprocesses
 -- - Reader StackSpec: The original specification (for routing)
 -- - ClaudeCodeExec: For spawning Claude Code subprocesses
 -- - Worktree: For managing git worktrees (parallel isolation)
 -- - IO: For system operations
-type DevEffects = '[Error WorkflowError, Reader ClaudeCodeConfig, Reader StackSpec, ClaudeCodeExec, Worktree, IO]
+type DevEffects = '[Error WorkflowError, Memory SessionContext, Reader ClaudeCodeConfig, Reader StackSpec, ClaudeCodeExec, Worktree, IO]
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -235,14 +238,19 @@ buildTypesContext spec = pure TypesContext
 -- | Route after types agent completes.
 --
 -- Routes to skeleton node for file generation.
+-- Also stores the session ID in Memory for use by subsequent handlers.
 routeToSkeleton
   :: ClaudeCodeResult TypeDefinitions
   -> Eff DevEffects (GotoChoice '[To "skeleton" ForkInput])
 routeToSkeleton result = do
   spec <- ask @StackSpec
+  -- Store session context in Memory (accessible by all subsequent handlers)
+  updateMem @SessionContext $ \ctx -> ctx
+    { scSessionId = fromMaybe "" result.ccrSessionId
+    , scProjectPath = spec.ssProjectPath
+    }
   pure $ gotoChoice @"skeleton" ForkInput
-    { fiSessionId = fromMaybe "" result.ccrSessionId
-    , fiTypeDefs = result.ccrParsedOutput
+    { fiTypeDefs = result.ccrParsedOutput
     , fiProjectPath = spec.ssProjectPath
     , fiModuleName = spec.ssModuleName
     }
@@ -329,14 +337,13 @@ skeletonHandler input = do
       callProcess "git" ["commit", "-m", "Add skeleton files for " <> T.unpack input.fiModuleName]
     logMsg "Skeleton generation complete"
 
-  -- Route to fork with generated paths and session ID for forking parallel agents
+  -- Route to fork with generated paths (session ID is in Memory)
   pure $ gotoChoice @"fork" SkeletonGenerated
     { sgImplPath = implPath
     , sgTestPath = testPath
     , sgTypeDefs = input.fiTypeDefs
     , sgProjectPath = projectPath
     , sgModuleName = input.fiModuleName
-    , sgSessionId = input.fiSessionId
     }
 
 
@@ -620,6 +627,7 @@ forkHandler
 forkHandler input = do
   config <- ask @ClaudeCodeConfig
   spec <- ask @StackSpec
+  sessionCtx <- getMem @SessionContext  -- Read session from Memory
 
   sendM $ logPhase "FORK - Creating worktrees"
 
@@ -690,7 +698,7 @@ forkHandler input = do
   -- Each agent runs with build validation - if build fails, retries with error context
   -- Both agents fork from the types agent's session to share context
   -- If parent session ID is empty, start fresh sessions instead of trying to fork
-  let parentSessionId = if T.null input.sgSessionId then Nothing else Just input.sgSessionId
+  let parentSessionId = if T.null sessionCtx.scSessionId then Nothing else Just sessionCtx.scSessionId
       shouldFork = isJust parentSessionId
   (testsResponse, implResponse) <- sendM $ do
     logMsg "Launching parallel agents with build validation..."

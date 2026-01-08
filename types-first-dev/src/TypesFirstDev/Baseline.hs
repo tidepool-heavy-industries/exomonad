@@ -24,13 +24,14 @@ import Data.Time (UTCTime, getCurrentTime, diffUTCTime)
 import Tidepool.ClaudeCode.Config (mkClaudeCodeConfig, ClaudeCodeConfig(..))
 import Tidepool.ClaudeCode.Effect (runClaudeCodeExecIO)
 import Tidepool.Graph.Execute (callHandler, dispatchGoto)
+import Tidepool.Graph.Memory (evalMemory)
 import Tidepool.Worktree.Executor (runWorktreeIO, defaultWorktreeConfig)
 
 import TypesFirstDev.DevRuns (persistRunMetadata)
 import TypesFirstDev.Graph (TypesFirstGraph(..))
 import TypesFirstDev.Handlers (typesFirstHandlers)
 import TypesFirstDev.Stats
-import TypesFirstDev.Types (StackSpec(..), ProjectType(..), ParallelResults(..), TestsResult(..), ImplResult(..), WorkflowError(..))
+import TypesFirstDev.Types (StackSpec(..), ProjectType(..), ParallelResults(..), TestsResult(..), ImplResult(..), WorkflowError(..), emptySessionContext)
 
 
 -- | Run the baseline workflow with the default Stack spec.
@@ -50,11 +51,13 @@ runBaselineWithSpec sessionName spec = do
       worktreeConfig = defaultWorktreeConfig spec.ssProjectPath
 
   -- Run the workflow
+  -- Memory effect holds session context (session ID, project path)
   result <- runM
     . runWorktreeIO worktreeConfig
     . runClaudeCodeExecIO claudeConfig
     . runReader spec
     . runReader claudeConfig
+    . evalMemory emptySessionContext
     . runError @WorkflowError
     $ do
         let handlers = typesFirstHandlers spec
