@@ -52,6 +52,15 @@ import Tidepool.ClaudeCode.Types
   , hookDecisionToOutput
   )
 import Tidepool.ClaudeCode.Hooks (HookCallbacks(..))
+import Tidepool.ClaudeCode.SessionState
+  ( SessionEndContext(..)
+  , SessionEndAction(..)
+  , parseExitReason
+  )
+import Tidepool.ClaudeCode.Crosstalk
+  ( PostToolUseContext(..)
+  , PostToolUseAction(..)
+  )
 
 
 -- | Configuration for the control socket server.
@@ -260,8 +269,23 @@ dispatchHook callbacks input = case hiHookEventName input of
 
   "PostToolUse" ->
     case (hiToolName input, hiToolInput input, hiToolResponse input) of
-      (Just name, Just toolInput, Just toolResponse) ->
-        hcOnPostToolUse callbacks name toolInput toolResponse
+      (Just name, Just toolInput, Just toolResponse) -> do
+        -- Call the simple callback first
+        _ <- hcOnPostToolUse callbacks name toolInput toolResponse
+
+        -- Build rich context and call typed callback
+        let ctx = PostToolUseContext
+              { ptcToolName = name
+              , ptcToolInput = toolInput
+              , ptcToolResponse = toolResponse
+              }
+        action <- hcOnPostToolUseTyped callbacks ctx
+
+        -- Convert action to decision
+        pure $ case action of
+          PostToolAllow -> HookAllow
+          PostToolAddContext context -> HookAddContext context
+
       _ -> pure HookAllow
 
   "PermissionRequest" ->
@@ -284,8 +308,30 @@ dispatchHook callbacks input = case hiHookEventName input of
   "SessionStart" ->
     hcOnSessionStart callbacks (fromMaybe "startup" $ hiSource input)
 
-  "SessionEnd" ->
-    hcOnSessionEnd callbacks (fromMaybe "unknown" $ hiReason input)
+  "SessionEnd" -> do
+    -- Call the simple callback first
+    _ <- hcOnSessionEnd callbacks (fromMaybe "unknown" $ hiReason input)
+
+    -- Build rich context and call typed callback
+    let ctx = SessionEndContext
+          { secSessionId = hiSessionId input
+          , secTranscriptPath = hiTranscriptPath input
+          , secCwd = hiCwd input
+          , secReason = parseExitReason (hiReason input)
+          }
+
+    -- Call typed handler - action indicates what state management was performed
+    -- The callback itself executes the action (save/clear state); we log it here
+    action <- hcOnSessionEndTyped callbacks ctx
+
+    -- Log the action for debugging/audit (SessionEnd can't block, always allow)
+    case action of
+      CommitWork msg -> putStrLn $ "SessionEnd action: CommitWork \"" <> T.unpack msg <> "\""
+      PreserveForResume -> putStrLn "SessionEnd action: PreserveForResume"
+      Cleanup -> putStrLn "SessionEnd action: Cleanup"
+      NoAction -> pure ()
+
+    pure HookAllow
 
   "UserPromptSubmit" ->
     hcOnUserPromptSubmit callbacks (fromMaybe "" $ hiPrompt input)

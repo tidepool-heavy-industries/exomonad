@@ -527,6 +527,8 @@ data HookDecision
     -- ^ Modify tool input (for PreToolUse/PermissionRequest)
   | HookBlock Text
     -- ^ Block and stop processing
+  | HookAddContext Text
+    -- ^ Allow and add context (for PostToolUse - shown as system message)
   deriving stock (Show, Eq)
 
 -- | Default "allow" HookOutput.
@@ -580,3 +582,6 @@ hookDecisionToOutput eventName decision = case decision of
     { hoContinue = False
     , hoStopReason = Just reason
     }
+  HookAddContext ctx -> case eventName of
+    "PostToolUse" -> postToolUseOutput (Just ctx)
+    _ -> defaultHookOutput  -- Context only applies to PostToolUse

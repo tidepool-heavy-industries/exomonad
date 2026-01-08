@@ -40,7 +40,7 @@ import TypesFirstDev.DevRuns (runDirectory)
 import TypesFirstDev.Graph (TypesFirstGraph(..))
 import TypesFirstDev.Handlers (typesFirstHandlers)
 import TypesFirstDev.Stats (RunMetadata(..))
-import TypesFirstDev.Types (StackSpec(..), ProjectType(..), ParallelResults(..), TestsResult(..), ImplResult(..), WorkflowError(..), emptySessionContext)
+import TypesFirstDev.Types (StackSpec(..), ProjectType(..), ParallelResults(..), TestsResult(..), ImplResult(..), WorkflowError(..), emptySessionContext, ResumeStrategy(..))
 
 
 -- | Main entry point.
@@ -178,6 +178,7 @@ getSpec "stack" projectPath = pure $ StackSpec
       , "empty stack invariants: isEmpty empty, pop empty == Nothing"
       ]
   , ssProjectType = PureLibrary
+  , ssResumeStrategy = SmartResume
   }
 
 getSpec "url-shortener" projectPath = pure $ StackSpec
@@ -201,6 +202,7 @@ getSpec "url-shortener" projectPath = pure $ StackSpec
       , "Validation: POST with invalid/empty URL returns HTTP 400"
       ]
   , ssProjectType = ServantServer
+  , ssResumeStrategy = SmartResume
   }
 
 getSpec experiment _ = do

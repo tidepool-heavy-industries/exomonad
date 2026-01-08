@@ -16,6 +16,9 @@ module TypesFirstDev.Types
     -- * Workflow Errors
   , WorkflowError(..)
 
+    -- * Re-exports for session management
+  , ResumeStrategy(..)
+
     -- * Structured Signature Types (v2)
   , FunctionSig(..)
   , TestPriority(..)
@@ -76,6 +79,7 @@ import GHC.Generics (Generic)
 import Tidepool.Effects.Cabal (TestFailure)
 import Tidepool.Effects.Worktree (WorktreePath)
 import Tidepool.StructuredOutput (StructuredOutput)
+import Tidepool.ClaudeCode.SessionState (ResumeStrategy(..))
 
 
 
@@ -110,6 +114,9 @@ data StackSpec = StackSpec
     -- ^ High-level acceptance criteria to inform test priorities.
   , ssProjectType :: ProjectType
     -- ^ Type of project (determines template set).
+  , ssResumeStrategy :: ResumeStrategy
+    -- ^ Strategy for resuming Claude Code sessions across retries.
+    -- 'SmartResume' is recommended for most workflows.
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)

@@ -22,6 +22,14 @@ module Tidepool.ClaudeCode.Hooks
     -- * Re-exports
   , HookDecision(..)
   , HookInput(..)
+
+    -- * Session End Types
+  , SessionEndContext(..)
+  , SessionEndAction(..)
+
+    -- * PostToolUse Types
+  , PostToolUseContext(..)
+  , PostToolUseAction(..)
   ) where
 
 import Data.Aeson (Value)
@@ -30,6 +38,14 @@ import Data.Text (Text)
 import Tidepool.ClaudeCode.Types
   ( HookDecision(..)
   , HookInput(..)
+  )
+import Tidepool.ClaudeCode.SessionState
+  ( SessionEndContext(..)
+  , SessionEndAction(..)
+  )
+import Tidepool.ClaudeCode.Crosstalk
+  ( PostToolUseContext(..)
+  , PostToolUseAction(..)
   )
 
 
@@ -46,9 +62,16 @@ data HookCallbacks = HookCallbacks
     -- Can return 'HookAllow', 'HookDeny', or 'HookModify'.
 
   , hcOnPostToolUse :: Text -> Value -> Value -> IO HookDecision
-    -- ^ Called after tool execution.
+    -- ^ Called after tool execution (simple callback).
     -- Args: tool name, tool input, tool response.
     -- Typically returns 'HookAllow' (can add context but not deny).
+
+  , hcOnPostToolUseTyped :: PostToolUseContext -> IO PostToolUseAction
+    -- ^ Called after tool execution (typed callback).
+    -- Provides structured context and allows returning additional context
+    -- that will be shown to Claude as a system message.
+    -- This is called AFTER 'hcOnPostToolUse'.
+    -- Use for crosstalk between parallel agents.
 
   , hcOnPermissionRequest :: Text -> Value -> IO HookDecision
     -- ^ Called when permission dialog would be shown.
@@ -75,8 +98,15 @@ data HookCallbacks = HookCallbacks
     -- Arg: source ("startup", "resume", "clear", "compact").
 
   , hcOnSessionEnd :: Text -> IO HookDecision
-    -- ^ Called when session ends.
+    -- ^ Called when session ends (simple callback).
     -- Arg: reason.
+    -- For richer handling, use 'hcOnSessionEndTyped'.
+
+  , hcOnSessionEndTyped :: SessionEndContext -> IO SessionEndAction
+    -- ^ Called when session ends (typed callback).
+    -- Provides full context including session ID, transcript path, and exit reason.
+    -- Returns an action to perform (commit, preserve for resume, cleanup, etc.).
+    -- This is called AFTER 'hcOnSessionEnd'.
 
   , hcOnUserPromptSubmit :: Text -> IO HookDecision
     -- ^ Called when user submits a prompt.
@@ -97,6 +127,7 @@ defaultHookCallbacks :: HookCallbacks
 defaultHookCallbacks = HookCallbacks
   { hcOnPreToolUse = \_ _ -> pure HookAllow
   , hcOnPostToolUse = \_ _ _ -> pure HookAllow
+  , hcOnPostToolUseTyped = \_ -> pure PostToolAllow
   , hcOnPermissionRequest = \_ _ -> pure HookAllow
   , hcOnNotification = \_ _ -> pure HookAllow
   , hcOnStop = pure HookAllow
@@ -104,5 +135,6 @@ defaultHookCallbacks = HookCallbacks
   , hcOnPreCompact = \_ -> pure HookAllow
   , hcOnSessionStart = \_ -> pure HookAllow
   , hcOnSessionEnd = \_ -> pure HookAllow
+  , hcOnSessionEndTyped = \_ -> pure NoAction
   , hcOnUserPromptSubmit = \_ -> pure HookAllow
   }
