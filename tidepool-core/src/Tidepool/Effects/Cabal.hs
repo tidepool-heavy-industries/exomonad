@@ -12,7 +12,7 @@
 -- validateHandler path = do
 --   buildResult <- cabalBuild path
 --   case buildResult of
---     CabalBuildSuccess -> cabalTest path
+--     CabalSuccess -> cabalTest path
 --     failure -> pure failure
 -- @
 --
