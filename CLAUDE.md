@@ -127,6 +127,7 @@ This renders a template, spawns `claude -p` via zellij-cc, and parses JSON outpu
 | Package | Purpose |
 |---------|---------|
 | `tidepool-core` | Graph DSL, effects, templates, validation |
+| `tidepool-parallel` | Parallel fan-out/fan-in execution with ki |
 | `tidepool-wasm` | WASM deployment scaffolding |
 | `tidepool-platform` | Platform abstraction layer |
 
