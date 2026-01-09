@@ -14,10 +14,9 @@ module TypesFirstDev.Handlers
     -- * Logging
   , logToFile
 
-    -- * v3 Workflow (semantic descriptions)
-  , stubsHandlerV3
-  , forkHandlerV3
-  , runWorkflowV3
+    -- * Build Validation (for graph handlers)
+  , runAgentWithBuildValidation
+  , runStubsAgentWithBuildValidation
 
     -- * TDD Workflow (sequential with validation loop)
   , typesFirstHandlersTDD
@@ -32,11 +31,11 @@ module TypesFirstDev.Handlers
   ) where
 
 import Control.Concurrent.Async (concurrently)
-import Control.Monad (when, unless, forM_)
+import Control.Monad (when)
 import Control.Monad.Freer (Eff, sendM)
 import Control.Monad.Freer.Error (Error, throwError)
 import Control.Monad.Freer.Reader (Reader, ask)
-import Data.Maybe (fromMaybe, isJust)
+import Data.Maybe (fromMaybe)
 import Data.Proxy (Proxy(..))
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -64,7 +63,6 @@ import Tidepool.ClaudeCode.SessionState
   )
 import Tidepool.ClaudeCode.Crosstalk
   ( CrosstalkState
-  , newCrosstalkStatePair
   , crosstalkPostToolUse
   , PostToolUseContext(..)
   )
@@ -79,7 +77,7 @@ import Tidepool.Graph.Types (ModelChoice(..), Exit)
 import Tidepool.Schema (schemaToValue)
 import Tidepool.StructuredOutput (StructuredOutput(..), formatDiagnostic)
 
-import TypesFirstDev.Context (TypesContext(..), TestsContext(..), ImplContext(..), SkeletonContext(..), StubsContext(..), TestsContextV3(..), FixContext(..))
+import TypesFirstDev.Context (TypesContext(..), TestsContext(..), ImplContext(..), SkeletonContext(..), FixContext(..))
 import TypesFirstDev.Graph (TypesFirstGraph(..), TypesFirstGraphTDD(..))
 import TypesFirstDev.Types
   ( StackSpec(..)
@@ -88,9 +86,6 @@ import TypesFirstDev.Types
   , TypeDefinitions(..)
   , ForkInput(..)
   , SkeletonGenerated(..)
-  , StubsGenerated(..)
-  , StubsOutput(..)
-  , FunctionSemantics(..)
   , ParallelResults(..)
   , TestsResult(..)
   , ImplResult(..)
@@ -101,7 +96,6 @@ import TypesFirstDev.Types
   , BuildTarget(..)
   , buildTargetArgs
   , BuildValidationResult(..)
-  , WorkflowResult(..)
     -- TDD workflow types
   , SkeletonState(..)
   , TestsWritten(..)
@@ -111,12 +105,11 @@ import TypesFirstDev.Types
   , FixResult(..)
   , TDDResult(..)
   )
-import TypesFirstDev.MechanicalChecks (checkUndefined, findUndefined, UndefinedLocation(..))
+import TypesFirstDev.MechanicalChecks (checkUndefined)
 import TypesFirstDev.Templates
   ( typesCompiled, testsCompiled, implCompiled, implSkeletonCompiled, testSkeletonCompiled
   , servantTypesCompiled, servantTestsCompiled, servantImplCompiled
   , servantImplSkeletonCompiled, servantTestSkeletonCompiled
-  , servantStubsCompiled, servantTestsV3Compiled
   , fixCompiled
   )
 
@@ -799,109 +792,6 @@ runAgentWithCrosstalk ccConfig wtPath basePrompt schema agentName target resumeS
 
 
 -- ════════════════════════════════════════════════════════════════════════════
--- v3 STUBS HANDLER
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Stubs handler for v3 workflow.
---
--- Runs Claude Code to write actual .hs files with undefined implementations.
--- Returns semantic descriptions that drive test generation.
---
--- This replaces both types + skeleton handlers from v2.
-stubsHandlerV3
-  :: StackSpec
-  -> ClaudeCodeConfig
-  -> IO (Either CC.ClaudeCodeError StubsGenerated)
-stubsHandlerV3 spec config = do
-  logPhase "v3 STUBS - Writing implementation stubs"
-  logDetail "projectPath" spec.ssProjectPath
-  logDetail "moduleName" (T.unpack spec.ssModuleName)
-
-  let projectPath = spec.ssProjectPath
-      modulePath = T.replace "." "/" spec.ssModuleName
-      implPath = projectPath <> "/src/" <> T.unpack modulePath <> ".hs"
-      testPath = projectPath <> "/test/Main.hs"
-
-      -- Build stubs context for the prompt
-      stubsCtx = StubsContext
-        { moduleName = spec.ssModuleName
-        , modulePath = modulePath
-        , description = spec.ssDescription
-        , acceptanceCriteria = spec.ssAcceptanceCriteria
-        }
-
-      -- Render the stubs prompt
-      stubsPrompt = runTypedTemplate stubsCtx servantStubsCompiled
-
-      -- Build schema for StubsOutput
-      stubsSchema = Just $ schemaToValue (structuredSchema @StubsOutput)
-
-  logDetail "implPath" implPath
-  logDetail "stubsPromptLength" (show $ T.length stubsPrompt)
-
-  -- Run stubs agent with build validation (no parent session to fork from)
-  -- Skeleton must compile completely: library + tests + benchmarks
-  result <- runStubsAgentWithBuildValidation config projectPath stubsPrompt stubsSchema BuildAll Nothing False
-
-  -- Extract result - BuildNeedsFix still has output we can use
-  ccResult <- case result of
-    BuildFatalError err -> do
-      logError $ "Stubs agent failed fatally: " <> T.unpack err
-      pure $ Left $ CC.ClaudeCodeExecutionError err
-    BuildNeedsFix err attempts r -> do
-      logError $ "Stubs agent needs fix after " <> show attempts <> " attempts: " <> T.unpack err
-      -- Continue with the result anyway - the graph can handle build errors
-      pure $ Right r
-    BuildSuccess r -> pure $ Right r
-
-  case ccResult of
-    Left err -> pure $ Left err
-    Right r -> do
-      -- Parse the structured output
-      case CC.ccrStructuredOutput r of
-        Nothing -> do
-          logError "Stubs agent returned no structured output"
-          pure $ Left $ CC.ClaudeCodeExecutionError "No structured output"
-        Just val -> case Aeson.fromJSON val of
-          Aeson.Error msg -> do
-            logError $ "Failed to parse StubsOutput: " <> msg
-            pure $ Left $ CC.ClaudeCodeExecutionError $ "JSON parse error: " <> T.pack msg
-          Aeson.Success (stubsOutput :: StubsOutput) -> do
-            logMsg "Stubs agent completed successfully"
-            logDetail "numFunctions" (show $ length stubsOutput.soFunctions)
-            logDetail "commitMessage" (T.unpack stubsOutput.soCommitMessage)
-
-            -- Log semantic descriptions
-            logMsg "=== Semantic Descriptions ==="
-            mapM_ logSemantics stubsOutput.soFunctions
-
-            -- Commit the stubs (so worktrees will have them)
-            logGit "Committing stubs" $ withCurrentDirectory projectPath $ do
-              -- Write .gitignore if needed
-              let gitignorePath = projectPath <> "/.gitignore"
-              writeFile gitignorePath "dist-newstyle/\n*.hi\n*.o\n*.dyn_hi\n*.dyn_o\n"
-
-              callProcess "git" ["add", implPath, testPath, gitignorePath]
-              callProcess "git" ["commit", "-m", T.unpack stubsOutput.soCommitMessage]
-
-            pure $ Right StubsGenerated
-              { stgImplPath = implPath
-              , stgTestPath = testPath
-              , stgSemantics = stubsOutput.soFunctions
-              , stgDataType = stubsOutput.soDataType
-              , stgProjectPath = projectPath
-              , stgModuleName = spec.ssModuleName
-              , stgSessionId = CC.ccrSessionId r
-              }
-  where
-    logSemantics :: FunctionSemantics -> IO ()
-    logSemantics sem = do
-      logMsg $ "  " <> T.unpack sem.fsmName <> " :: " <> T.unpack sem.fsmSignature
-      logDetail "    behavior" (T.unpack sem.fsmBehavior)
-      logDetail "    examples" (show $ length sem.fsmExamples)
-
-
--- ════════════════════════════════════════════════════════════════════════════
 -- FORK NODE
 -- ════════════════════════════════════════════════════════════════════════════
 
@@ -1134,345 +1024,6 @@ parseClaudeCodeResult agentName result = do
       Right a -> do
         sendM $ logMsg $ T.unpack agentName <> " agent response parsed successfully"
         pure a
-
-
--- ════════════════════════════════════════════════════════════════════════════
--- v3 FORK HANDLER (semantic descriptions)
--- ════════════════════════════════════════════════════════════════════════════
-
--- | v3 Fork handler using semantic descriptions.
---
--- Like forkHandler but receives StubsGenerated (with semantic descriptions)
--- instead of SkeletonGenerated. The tests agent prompt includes semantic
--- descriptions to guide test writing.
-forkHandlerV3
-  :: StubsGenerated
-  -> ClaudeCodeConfig
-  -> StackSpec
-  -> IO (Either String ParallelResults)
-forkHandlerV3 input config _spec = do
-  logPhase "v3 FORK - Creating worktrees"
-  logDetail "projectPath" input.stgProjectPath
-  logDetail "moduleName" (T.unpack input.stgModuleName)
-
-  let projectPath = input.stgProjectPath
-
-  -- Create worktrees for isolation
-  -- Note: In real use, this would use the Worktree effect
-  -- For now, we use the simpler git worktree commands directly
-  testsWtPath <- createWorktreeIO projectPath "tests"
-  implWtPath <- createWorktreeIO projectPath "impl"
-
-  logDetail "testsWorktree" testsWtPath
-  logDetail "implWorktree" implWtPath
-
-  -- Copy build artifacts from parent for faster builds
-  let parentDistNewstyle = projectPath </> "dist-newstyle"
-  parentHasArtifacts <- doesDirectoryExist parentDistNewstyle
-  when parentHasArtifacts $ do
-    logMsg "Copying build artifacts to worktrees..."
-    callProcess "cp" ["-r", parentDistNewstyle, testsWtPath </> "dist-newstyle"]
-    callProcess "cp" ["-r", parentDistNewstyle, implWtPath </> "dist-newstyle"]
-    logMsg "Build artifacts copied"
-
-  -- Build v3 tests context (uses semantic descriptions instead of signatures)
-  let testsCtxV3 = TestsContextV3
-        { moduleName = input.stgModuleName
-        , dataType = input.stgDataType
-        , semantics = input.stgSemantics
-        }
-
-      -- Build impl context (still uses minimal info - impl agent reads the stubs)
-      implCtx = ImplContext
-        { moduleName = input.stgModuleName
-        , dataType = input.stgDataType
-        , signatures = []  -- Empty - impl agent reads stubs directly
-        }
-
-      -- Render prompts
-      testsPrompt = runTypedTemplate testsCtxV3 servantTestsV3Compiled
-      implPrompt = runTypedTemplate implCtx servantImplCompiled
-
-      -- Build schemas
-      testsSchema = Just $ schemaToValue (structuredSchema @TestsResult)
-      implSchema = Just $ schemaToValue (structuredSchema @ImplResult)
-
-  logPhase "v3 FORK - Spawning parallel agents"
-  logDetail "testsPromptLength" (show $ T.length testsPrompt)
-  logDetail "implPromptLength" (show $ T.length implPrompt)
-
-  -- Both agents fork from the stubs agent's session to share context
-  -- If parent session ID is empty, start fresh sessions instead of trying to fork
-  let parentSessionId = input.stgSessionId
-      parentSessionMaybe = if T.null parentSessionId then Nothing else Just parentSessionId
-      shouldFork = isJust parentSessionMaybe
-  logDetail "parentSessionId" (maybe "(none - starting fresh)" T.unpack parentSessionMaybe)
-
-  -- Create crosstalk state for parallel agent communication
-  -- Each agent tracks the other's worktree for commit notifications
-  logMsg "Setting up crosstalk between parallel agents..."
-  (testsCrosstalk, implCrosstalk) <- newCrosstalkStatePair
-    testsWtPath "tests"
-    implWtPath "impl"
-
-  -- Run both agents in parallel with session forking and crosstalk
-  logMsg "Launching parallel agents with build validation and crosstalk..."
-  (testsResponse, implResponse) <- concurrently
-    (do
-      logMsg $ "Tests agent starting in worktree: " <> testsWtPath
-      -- Tests agent uses BuildAll: must compile library AND test suite
-      runAgentWithCrosstalk config testsWtPath testsPrompt testsSchema "tests"
-        BuildAll parentSessionMaybe shouldFork testsCrosstalk)
-    (do
-      logMsg $ "Impl agent starting in worktree: " <> implWtPath
-      -- Impl agent uses BuildLib: just the library
-      runAgentWithCrosstalk config implWtPath implPrompt implSchema "impl"
-        BuildLib parentSessionMaybe shouldFork implCrosstalk)
-
-  logPhase "v3 FORK - Agents completed, parsing results"
-
-  -- Extract results from BuildValidationResult
-  let extractResult = \case
-        BuildFatalError err -> Left $ T.unpack err
-        BuildNeedsFix _ _ r -> Right r  -- Still have output, graph can fix
-        BuildSuccess r -> Right r
-
-  -- Parse results
-  case (extractResult testsResponse, extractResult implResponse) of
-    (Left err, _) -> pure $ Left $ "Tests agent failed: " <> err
-    (_, Left err) -> pure $ Left $ "Impl agent failed: " <> err
-    (Right testsCC, Right implCC) -> do
-      -- Parse structured output
-      testsResult <- parseStructuredOutput "tests" testsCC
-      implResult <- parseStructuredOutput "impl" implCC
-
-      case (testsResult, implResult) of
-        (Left err, _) -> pure $ Left err
-        (_, Left err) -> pure $ Left err
-        (Right tr, Right ir) -> do
-          -- Extract session IDs and costs for tracking
-          let testsSessionId = CC.ccrSessionId testsCC
-              implSessionId = CC.ccrSessionId implCC
-              testsCost = CC.ccrTotalCostUsd testsCC
-              implCost = CC.ccrTotalCostUsd implCC
-
-          logMsg "=== Tests Agent Result ==="
-          logDetail "functionRubrics" (show $ length tr.trFunctionRubrics)
-          logDetail "commitMessage" (T.unpack tr.trCommitMessage)
-          logDetail "sessionId" (T.unpack testsSessionId)
-          logDetail "cost" (show testsCost)
-
-          logMsg "=== Impl Agent Result ==="
-          logDetail "functionRubrics" (show $ length ir.irFunctionRubrics)
-          logDetail "commitMessage" (T.unpack ir.irCommitMessage)
-          logDetail "sessionId" (T.unpack implSessionId)
-          logDetail "cost" (show implCost)
-
-          pure $ Right ParallelResults
-            { prTestsWorktree = WorktreePath testsWtPath
-            , prImplWorktree = WorktreePath implWtPath
-            , prTestsResult = tr
-            , prImplResult = ir
-            , prTestsSessionId = testsSessionId
-            , prImplSessionId = implSessionId
-            , prTestsCost = testsCost
-            , prImplCost = implCost
-            , prParentSessionId = parentSessionId
-            }
-
--- | Create a git worktree (simple IO version for v3 handler).
-createWorktreeIO :: FilePath -> String -> IO FilePath
-createWorktreeIO projectPath name = do
-  let worktreePath = projectPath </> ".worktrees" </> name
-      branchName = "worktree-" <> name
-
-  -- Create parent directory
-  createDirectoryIfMissing True (projectPath </> ".worktrees")
-
-  -- Create worktree with new branch
-  withCurrentDirectory projectPath $ do
-    -- Remove existing worktree if present
-    existingWt <- doesDirectoryExist worktreePath
-    when existingWt $ do
-      callProcess "git" ["worktree", "remove", "-f", worktreePath]
-
-    callProcess "git" ["worktree", "add", "-B", branchName, worktreePath]
-
-  pure worktreePath
-
--- | Parse structured output from Claude Code result.
-parseStructuredOutput :: Aeson.FromJSON a => String -> CC.ClaudeCodeResult -> IO (Either String a)
-parseStructuredOutput name result = do
-  case CC.ccrStructuredOutput result of
-    Nothing -> pure $ Left $ name <> " agent returned no structured output"
-    Just val -> case Aeson.fromJSON val of
-      Aeson.Error msg -> pure $ Left $ "Failed to parse " <> name <> " response: " <> msg
-      Aeson.Success a -> pure $ Right a
-
-
--- ════════════════════════════════════════════════════════════════════════════
--- v3 WORKFLOW ORCHESTRATOR
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Run the complete v3 workflow.
---
--- This is the entry point for the semantic descriptions workflow:
--- 1. Stubs agent writes code files, returns semantic descriptions
--- 2. Fork creates worktrees, spawns parallel tests + impl agents
--- 3. Merge combines results and runs tests
---
--- Returns WorkflowResult for route-back on failure.
--- Design: Almost nothing should fail outright - use route-back to fix issues.
-runWorkflowV3
-  :: StackSpec
-  -> ClaudeCodeConfig
-  -> IO WorkflowResult
-runWorkflowV3 spec config = do
-  logPhase "v3 WORKFLOW START"
-  logDetail "moduleName" (T.unpack spec.ssModuleName)
-  logDetail "projectPath" spec.ssProjectPath
-  logDetail "projectType" (show spec.ssProjectType)
-
-  -- Phase 1: Stubs
-  stubsResult <- stubsHandlerV3 spec config
-  case stubsResult of
-    Left err -> do
-      logError $ "Stubs phase failed: " <> show err
-      pure $ WorkflowFatal $ T.pack $ "Stubs phase failed: " <> show err
-    Right stubsGen -> do
-      logMsg "Stubs phase complete, proceeding to fork..."
-
-      -- Phase 2: Fork (parallel agents)
-      forkResult <- forkHandlerV3 stubsGen config spec
-      case forkResult of
-        Left err -> do
-          logError $ "Fork phase failed: " <> err
-          pure $ WorkflowFatal $ T.pack $ "Fork phase failed: " <> err
-        Right parallelResults -> do
-          logMsg "Fork phase complete, proceeding to merge..."
-
-          -- Phase 3: Merge
-          -- Returns WorkflowResult for route-back on failure
-          let projectPath = stubsGen.stgProjectPath
-          mergeHandlerV3 parallelResults projectPath 1
-
-
--- | v3 Merge handler (simplified IO version).
---
--- Commits agent work, merges worktrees, runs tests.
--- Returns WorkflowResult for route-back on failure instead of terminating.
---
--- Design principle: Almost nothing should fail. This function returns:
--- - NeedsImplFix: if impl has undefined (with locations for agent to fix)
--- - NeedsTestsFix: if tests agent produced no rubrics
--- - NeedsMergeResolution: if git merge conflicts
--- - NeedsPostMergeFix: if tests fail after merge
--- - WorkflowSuccess: only when tests pass
-mergeHandlerV3 :: ParallelResults -> FilePath -> Int -> IO WorkflowResult
-mergeHandlerV3 results projectPath attemptCount = do
-  logPhase "v3 MERGE - Committing and merging agent work"
-  logMsg $ "Attempt: " <> show attemptCount
-
-  -- Step 1: Check for undefined/placeholders in impl worktree
-  undefinedLocs <- findUndefined (results.prImplWorktree.unWorktreePath </> "src")
-  unless (null undefinedLocs) $ do
-    logError $ "Found " <> show (length undefinedLocs) <> " undefined locations in impl:"
-    forM_ undefinedLocs $ \loc ->
-      logError $ "  " <> ulFile loc <> ":" <> show (ulLine loc) <> ": " <> T.unpack (ulContent loc)
-
-  -- If impl has undefined, route back to impl agent (don't skip!)
-  case undefinedLocs of
-    (_:_) -> do
-      logPhase "ROUTE-BACK: Impl agent needs to fix undefined stubs"
-      let locs = [(ulFile l, ulLine l, ulContent l) | l <- undefinedLocs]
-      pure $ NeedsImplFix locs attemptCount
-    [] -> do
-      -- Step 2: Check tests agent produced rubrics
-      let testsSuccess = not (null results.prTestsResult.trFunctionRubrics)
-      unless testsSuccess $ do
-        logError "Tests agent produced no rubrics"
-
-      if not testsSuccess
-        then do
-          logPhase "ROUTE-BACK: Tests agent needs to produce rubrics"
-          pure $ NeedsTestsFix "No function rubrics produced" attemptCount
-        else do
-          -- Step 3: Commit both agents' work
-          logMsg "Committing impl work..."
-          commitWorktreeWork results.prImplWorktree.unWorktreePath results.prImplResult.irCommitMessage
-          logMsg "Committing tests work..."
-          commitWorktreeWork results.prTestsWorktree.unWorktreePath results.prTestsResult.trCommitMessage
-
-          -- Step 4: Merge worktrees
-          logMsg "Merging impl to main..."
-          implMergeOk <- mergeWorktreeIO projectPath results.prImplWorktree.unWorktreePath "Merge impl agent work"
-          logMsg "Merging tests to main..."
-          testsMergeOk <- mergeWorktreeIO projectPath results.prTestsWorktree.unWorktreePath "Merge tests agent work"
-
-          if not (implMergeOk && testsMergeOk)
-            then do
-              logPhase "ROUTE-BACK: Merge conflict needs resolution"
-              -- Find conflicted files
-              (_, conflictOut, _) <- withCurrentDirectory projectPath $
-                readProcessWithExitCode "git" ["diff", "--name-only", "--diff-filter=U"] ""
-              let conflictedFiles = filter (not . null) $ lines conflictOut
-              pure $ NeedsMergeResolution conflictedFiles attemptCount
-            else do
-              -- Step 5: Run post-merge tests
-              logPhase "POST-MERGE TEST VALIDATION"
-              logMsg "Running cabal test to verify implementation..."
-              (testExit, testOut, testErr) <- withCurrentDirectory projectPath $
-                readProcessWithExitCode "cabal" ["test", "--test-show-details=always"] ""
-              case testExit of
-                ExitSuccess -> do
-                  logMsg "POST-MERGE TESTS PASSED!"
-                  logMsg testOut
-                  -- Cleanup worktrees on success
-                  logMsg "Cleaning up worktrees..."
-                  removeWorktreeIO projectPath results.prTestsWorktree.unWorktreePath
-                  removeWorktreeIO projectPath results.prImplWorktree.unWorktreePath
-                  logMsg "Worktrees deleted"
-                  -- Log final state
-                  logPhase "WORKFLOW COMPLETE (tests passed)"
-                  (_, gitLog, _) <- readProcessWithExitCode "git" ["-C", projectPath, "log", "--oneline", "-10"] ""
-                  logMsg $ "Final git log:\n" <> gitLog
-                  pure WorkflowSuccess
-                ExitFailure code -> do
-                  logError $ "POST-MERGE TESTS FAILED (exit code " <> show code <> ")"
-                  logError testErr
-                  logError testOut
-                  logPhase "ROUTE-BACK: Fix agent needs to fix test failures"
-                  -- Don't cleanup worktrees - preserve for fix agent
-                  let fullOutput = T.pack $ testOut <> "\n" <> testErr
-                  pure $ NeedsPostMergeFix fullOutput attemptCount
-
-
--- | Merge a worktree branch to main (simple IO version).
-mergeWorktreeIO :: FilePath -> FilePath -> String -> IO Bool
-mergeWorktreeIO projectPath worktreePath commitMsg = do
-  -- Get worktree branch name
-  let branchName = "worktree-" <> takeBaseName worktreePath
-  withCurrentDirectory projectPath $ do
-    (mergeCode, _, mergeErr) <- readProcessWithExitCode "git" ["merge", branchName, "-m", commitMsg] ""
-    case mergeCode of
-      ExitSuccess -> do
-        logMsg $ "Merged " <> branchName <> " successfully"
-        pure True
-      ExitFailure _ -> do
-        logError $ "Failed to merge " <> branchName <> ": " <> mergeErr
-        -- Try to abort the merge
-        _ <- readProcessWithExitCode "git" ["merge", "--abort"] ""
-        pure False
-  where
-    takeBaseName :: FilePath -> String
-    takeBaseName = reverse . takeWhile (/= '/') . reverse
-
-
--- | Remove a worktree (simple IO version).
-removeWorktreeIO :: FilePath -> FilePath -> IO ()
-removeWorktreeIO projectPath worktreePath = do
-  withCurrentDirectory projectPath $ do
-    callProcess "git" ["worktree", "remove", "-f", worktreePath]
 
 
 -- ════════════════════════════════════════════════════════════════════════════
