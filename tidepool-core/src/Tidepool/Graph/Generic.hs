@@ -66,6 +66,7 @@ module Tidepool.Graph.Generic
 
     -- * Fork/Barrier Handler Types
   , SpawnPayloads
+  , SpawnPayloadsInner
   , AwaitsHList
 
     -- * Field Name Extraction
@@ -74,6 +75,10 @@ module Tidepool.Graph.Generic
   , FieldsWithNames
   , FieldNamesOf
   , FieldsWithNamesOf
+
+    -- * Node Definition Lookup
+  , GetNodeDef
+  , LookupField
 
     -- * Graph-Validated Goto
   , gotoField
@@ -1015,6 +1020,35 @@ type FieldNamesOf graph = FieldNames (Rep (graph AsGraph))
 -- | Get fields with names from a graph type.
 type FieldsWithNamesOf :: (Type -> Type) -> [(Symbol, Type)]
 type FieldsWithNamesOf graph = FieldsWithNames (Rep (graph AsGraph))
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- NODE DEFINITION LOOKUP
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Get the node definition for a named field in a graph.
+--
+-- This enables type-level dispatch based on node kind. For example:
+--
+-- @
+-- IsForkNode (GetNodeDef "myFork" MyGraph) ~ 'True
+-- GetSpawnTargets (GetNodeDef "myFork" MyGraph) ~ '[To "w1" A, To "w2" B]
+-- @
+--
+-- Used by ForkNode-specific DispatchGoto instances to detect when a named
+-- target is a ForkNode and handle it specially.
+type GetNodeDef :: Symbol -> (Type -> Type) -> Type
+type GetNodeDef name graph = LookupField name (FieldsWithNamesOf graph)
+
+-- | Look up a field definition by name in a list of (name, def) pairs.
+--
+-- Returns the definition type if found. Behavior is undefined if not found
+-- (relies on HasField constraint to ensure field exists).
+type LookupField :: Symbol -> [(Symbol, Type)] -> Type
+type family LookupField name fields where
+  LookupField name ('(name, def) ': _) = def
+  LookupField name (_ ': rest) = LookupField name rest
+
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- RECORD VALIDATION
