@@ -15,6 +15,7 @@ module TypesFirstDev.Handlers.Hybrid.Witness
 
 import Control.Monad.Freer (Eff, sendM)
 import Control.Monad.Freer.Reader (Reader, ask)
+import Data.List (nub)
 import Data.Text (Text)
 import qualified Data.Text as T
 
@@ -24,6 +25,23 @@ import Tidepool.Graph.Types (Exit)
 
 import TypesFirstDev.Types.Hybrid
 import TypesFirstDev.Handlers.Hybrid.Effects (HybridEffects, SessionContext(..))
+
+
+-- | Compute coverage from properties (handler-computed, not LLM-reported).
+-- VALUE-NEUTRAL: LLM reports what it wrote, handler computes coverage metrics.
+computeCoverage :: [FunctionSpec] -> [PropertyWritten] -> CoverageReport
+computeCoverage specFns props = CoverageReport
+  { crFunctionsCovered = covered
+  , crFunctionsUncovered = uncovered
+  , crExamplesCovered = length $ nub $ concatMap pwCoversExamples props
+  , crExamplesTotal = sum $ map (length . examples) specFns
+  , crSketchesCovered = nub [s | pw <- props, Just s <- [pwCoversSketch pw]]
+  , crSketchesUncovered = []  -- Would need spec sketches to compute
+  }
+  where
+    specFnNames = map (.name) specFns  -- Disambiguate: FunctionSpec.name
+    covered = nub $ concatMap pwTargetFunctions props
+    uncovered = filter (`notElem` covered) specFnNames
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -113,8 +131,9 @@ formatMutationResults Nothing = "Mutation testing was not performed."
 formatMutationResults (Just result) =
   let output = marOutput result
       verdict = marVerdict result
+      mutationsAttempted = length (mutationTypesAttempted output)
   in T.unlines
-      [ "Mutations attempted: " <> T.pack (show $ mutMutantsTried output)
+      [ "Mutations attempted: " <> T.pack (show mutationsAttempted)
       , "Survivors: " <> T.pack (show $ length $ mutSurvivors output)
       , "Verdict: " <> formatVerdict verdict
       ]
@@ -142,6 +161,10 @@ assembleHybridResult spec validatedState maybeMutation witnessReport =
       testsResult = brTests blindResults
       testsAgentOut = TypesFirstDev.Types.Hybrid.testsOutput testsResult
 
+      -- Compute coverage from properties (handler-computed, not LLM-reported)
+      -- Note: Without full spec, we can only report what's covered, not what's missing
+      coverage = computeCoverage [] (testsProperties testsAgentOut)
+
       -- Determine success based on strictness config
       success = case maybeMutation of
         Nothing -> True  -- No mutation testing = success
@@ -153,7 +176,7 @@ assembleHybridResult spec validatedState maybeMutation witnessReport =
   in HybridResult
       { hrSuccess = success
       , hrSpec = []  -- TODO: Get from original StackSpec or testsOutput
-      , hrTestsCoverage = TypesFirstDev.Types.Hybrid.testsCoverage testsAgentOut
+      , hrTestsCoverage = coverage
       , hrUnderstanding = msUnderstanding mergedState
       , hrTypeAdversary = Nothing  -- Would come from earlier phase
       , hrMutationAdversary = maybeMutation

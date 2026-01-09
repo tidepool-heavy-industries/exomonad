@@ -29,8 +29,13 @@ You must return JSON matching `TypesAgentOutput`:
 - `constructors`: List of constructor names
 - `functions`: List of FunctionSpec (see below)
 - `imports`: Required module imports
-- `designNotes`: Why you chose this representation
+- `designChoices`: List of design decisions (see DesignChoice below)
 - `blocker`: If blocked, explain (otherwise null)
+
+For each design choice in `designChoices`:
+- `dcArea`: Area of the design (e.g., "data representation", "error handling")
+- `dcChoice`: What you chose (e.g., "recursive ADT", "Either-based errors")
+- `dcTradeoff`: What tradeoff this represents (e.g., "simplicity over performance")
 
 For each function, provide a `FunctionSpec`:
 - `name`: Function name

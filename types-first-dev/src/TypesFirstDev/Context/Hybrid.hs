@@ -74,6 +74,13 @@ instance ToGVal GingerM FunctionSpec where
 -- TYPES AGENT OUTPUT
 -- ════════════════════════════════════════════════════════════════════════════
 
+instance ToGVal GingerM DesignChoice where
+  toGVal dc = dict
+    [ ("dcArea", toGVal dc.dcArea)
+    , ("dcChoice", toGVal dc.dcChoice)
+    , ("dcTradeoff", toGVal dc.dcTradeoff)
+    ]
+
 instance ToGVal GingerM TypesAgentOutput where
   toGVal tao = dict
     [ ("typeName", toGVal tao.typeName)
@@ -82,7 +89,7 @@ instance ToGVal GingerM TypesAgentOutput where
     , ("constructors", list (toGVal <$> tao.constructors))
     , ("functions", list (toGVal <$> tao.functions))
     , ("imports", list (toGVal <$> tao.imports))
-    , ("designNotes", toGVal tao.designNotes)
+    , ("designChoices", list (toGVal <$> tao.designChoices))
     , ("blocker", toGVal tao.blocker)
     ]
 
@@ -299,4 +306,30 @@ instance ToGVal GingerM SurvivingMutant where
     , ("whyDangerous", toGVal (smWhyDangerous sm))
     , ("missingTest", toGVal (smMissingTest sm))
     , ("suggestedProp", toGVal (smSuggestedProp sm))
+    ]
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- VALUE-NEUTRAL RUBRIC TYPES
+-- ════════════════════════════════════════════════════════════════════════════
+
+instance ToGVal GingerM PropertyCategory where
+  toGVal = \case
+    PCInvariant      -> toGVal ("Invariant" :: Text)
+    PCEdgeCase       -> toGVal ("EdgeCase" :: Text)
+    PCBoundary       -> toGVal ("Boundary" :: Text)
+    PCComposition    -> toGVal ("Composition" :: Text)
+    PCErrorHandling  -> toGVal ("ErrorHandling" :: Text)
+    PCOther t        -> toGVal t
+
+instance ToGVal GingerM FailureCause where
+  toGVal = \case
+    WrongFix         -> toGVal ("WrongFix" :: Text)
+    PartialFix       -> toGVal ("PartialFix" :: Text)
+    UnrelatedFailure -> toGVal ("UnrelatedFailure" :: Text)
+
+instance ToGVal GingerM FailureCorrelation where
+  toGVal fc = dict
+    [ ("fcPriorFix", toGVal (fcPriorFix fc))
+    , ("fcStillFailing", list (toGVal <$> fcStillFailing fc))
+    , ("fcLikelihood", toGVal (fcLikelihood fc))
     ]

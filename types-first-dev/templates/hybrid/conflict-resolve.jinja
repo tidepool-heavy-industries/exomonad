@@ -49,16 +49,17 @@ each conflict semantically.
 
 Return JSON matching `ConflictResolveOutput`:
 - `croFilesResolved`: List of file paths you resolved
-- `croBuildPassed`: Boolean - did `cabal build` succeed after resolution?
 - `croResolutionNotes`: Brief notes on how each conflict was resolved
 - `croBlocker`: If resolution failed, explain why (otherwise null)
+
+**Note**: Build verification is done by the handler after you return.
+Focus on resolving conflicts semantically.
 
 ## Example Output
 
 ```json
 {
   "croFilesResolved": ["stack-demo.cabal", "src/Data/Stack.hs"],
-  "croBuildPassed": true,
   "croResolutionNotes": "Merged cabal dependencies (both needed QuickCheck). Kept impl's Stack definition with tests' export additions.",
   "croBlocker": null
 }

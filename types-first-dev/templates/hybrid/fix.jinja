@@ -59,7 +59,12 @@ No learnings recorded yet.
 {% if understanding.usConverging %}
 Progress is being made toward passing tests.
 {% else %}
-**WARNING**: Fixes are not converging. Consider a different approach.
+**WARNING**: Fixes are not converging.
+
+Consider:
+- Revisit the type design
+- Check if the test itself tests something unexpected
+- Break the problem into smaller functions
 {% endif %}
 
 ## Function Specifications (Reference)
@@ -86,7 +91,6 @@ Progress is being made toward passing tests.
 
 You must return JSON matching `FixAgentOutput`:
 - `fixChanges`: List of fixes applied (see below)
-- `fixBuildPassed`: Boolean - did `cabal build` pass after your changes?
 - `fixCommitMsg`: Commit message for your changes
 - `fixBlocker`: If blocked, explain (otherwise null)
 
@@ -95,6 +99,9 @@ For each fix in `fixChanges`, provide:
 - `faWhatChanged`: Specific change made
 - `faWhyFailed`: Root cause analysis - why was it failing?
 - `faFixType`: One of: EdgeCaseFix, LogicFix, TypeFix, BoundaryFix, InitializationFix, or OtherFix
+- `faRelatedFailures`: List of property names this fix should address
+
+**Note**: Build verification is done by the handler. Focus on making correct fixes.
 
 ## Example Output
 
@@ -105,10 +112,10 @@ For each fix in `fixChanges`, provide:
       "faFunction": "push",
       "faWhatChanged": "Fixed off-by-one in size tracking",
       "faWhyFailed": "Size was incremented before adding element",
-      "faFixType": "BoundaryFix"
+      "faFixType": "BoundaryFix",
+      "faRelatedFailures": ["prop_pushSize", "prop_pushPopInverse"]
     }
   ],
-  "fixBuildPassed": true,
   "fixCommitMsg": "fix(stack): correct size tracking in push operation",
   "fixBlocker": null
 }

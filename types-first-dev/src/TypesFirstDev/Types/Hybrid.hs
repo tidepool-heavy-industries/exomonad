@@ -19,6 +19,12 @@ module TypesFirstDev.Types.Hybrid
   , CoordSpec(..)
   , ScopeLevel(..)
 
+    -- * Value-Neutral Rubric Types
+  , DesignChoice(..)
+  , PropertyCategory(..)
+  , FailureCorrelation(..)
+  , FailureCause(..)
+
     -- * Shared Contract Types
   , ConcreteExample(..)
   , PropertySketch(..)
@@ -36,7 +42,7 @@ module TypesFirstDev.Types.Hybrid
 
     -- * Tests Agent Output (Schema)
   , PropertyWritten(..)
-  , CoverageReport(..)
+  , CoverageReport(..)   -- Handler-computed, not LLM-reported
   , TestsAgentOutput(..)
 
     -- * Impl Agent Output (Schema)
@@ -175,6 +181,49 @@ data ScopeLevel = Leaf | Coordination | System
   deriving anyclass (FromJSON, ToJSON, StructuredOutput)
 
 -- ════════════════════════════════════════════════════════════════════════════
+-- VALUE-NEUTRAL RUBRIC TYPES
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Structured design choice - replaces vague prose "designNotes".
+-- Each choice is a concrete decision that can be evaluated.
+data DesignChoice = DesignChoice
+  { dcArea     :: Text     -- "data representation", "error handling"
+  , dcChoice   :: Text     -- "recursive ADT", "Either-based errors"
+  , dcTradeoff :: Text     -- "memory safety over speed"
+  }
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
+
+-- | Category of properties covered - for coverage analysis without asking "how complete?"
+data PropertyCategory
+  = PCInvariant          -- Core invariants (pushPop inverse)
+  | PCEdgeCase           -- Edge case handling (empty stack)
+  | PCBoundary           -- Boundary conditions (capacity limits)
+  | PCComposition        -- Function composition laws
+  | PCErrorHandling      -- Error path testing
+  | PCOther Text
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
+
+-- | Failure correlation - tracks whether fixes actually addressed failures.
+-- Handler computes this, not LLM.
+data FailureCorrelation = FailureCorrelation
+  { fcPriorFix     :: Text        -- What we tried
+  , fcStillFailing :: [Text]      -- Property names still broken
+  , fcLikelihood   :: FailureCause
+  }
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
+
+-- | Classification of why a fix didn't work.
+data FailureCause
+  = WrongFix           -- Fix was incorrect or incomplete
+  | PartialFix         -- Fix helped but didn't fully resolve
+  | UnrelatedFailure   -- This failure isn't related to the fix
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
+
+-- ════════════════════════════════════════════════════════════════════════════
 -- SHARED CONTRACT TYPES
 -- ════════════════════════════════════════════════════════════════════════════
 
@@ -242,14 +291,14 @@ data FunctionSpec = FunctionSpec
 -- The agent WRITES code to disk; this describes what was written.
 -- NOTE: Field names match template variables for TH validation.
 data TypesAgentOutput = TypesAgentOutput
-  { typeName        :: Text           -- "Stack"
-  , typeKind        :: Text           -- "* -> *" or "Type -> Type"
-  , typeDescription :: Text           -- Prose: what this type represents
-  , constructors    :: [Text]         -- Constructor names: ["Empty", "Push"]
-  , functions       :: [FunctionSpec] -- Full specs for each function
-  , imports         :: [Text]         -- Module imports needed
-  , designNotes     :: Text           -- Why this representation?
-  , blocker         :: Maybe Text     -- If blocked, explain
+  { typeName        :: Text             -- "Stack"
+  , typeKind        :: Text             -- "* -> *" or "Type -> Type"
+  , typeDescription :: Text             -- Prose: what this type represents
+  , constructors    :: [Text]           -- Constructor names: ["Empty", "Push"]
+  , functions       :: [FunctionSpec]   -- Full specs for each function
+  , imports         :: [Text]           -- Module imports needed
+  , designChoices   :: [DesignChoice]   -- VALUE-NEUTRAL: Structured decisions (was: designNotes)
+  , blocker         :: Maybe Text       -- If blocked, explain
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON, StructuredOutput)
@@ -285,10 +334,13 @@ data Severity = Critical | Major | Minor | Informational
   deriving anyclass (FromJSON, ToJSON, StructuredOutput)
 
 -- | Type adversary output. No verdict field - derived from holes.
+-- VALUE-NEUTRAL: Instead of asking "are you confident?", we ask
+-- "what areas did you check?" and "what did you skip?" - actionable lists.
 data TypeAdversaryOutput = TypeAdversaryOutput
-  { tadHoles     :: [TypeHole]
-  , tadAnalysis  :: Text        -- Approach taken, areas examined
-  , tadConfident :: Bool        -- "I thoroughly checked" vs "might have missed"
+  { tadHoles          :: [TypeHole]
+  , areasExamined     :: [Text]    -- VALUE-NEUTRAL: What was actually checked
+  , uncheckedAreas    :: [Text]    -- VALUE-NEUTRAL: What was skipped (actionable!)
+  , analysisApproach  :: Text      -- High-level strategy (prose ok here)
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON, StructuredOutput)
@@ -323,13 +375,15 @@ data CoverageReport = CoverageReport
   deriving anyclass (FromJSON, ToJSON, StructuredOutput)
 
 -- | Tests agent output. Describes what was written, not the code.
+-- VALUE-NEUTRAL: Removed testsSelfVerified (handler verifies mechanically).
+-- Added propertyCategories and uncoveredPatterns for actionable coverage info.
 data TestsAgentOutput = TestsAgentOutput
-  { testsProperties   :: [PropertyWritten]
-  , testsCoverage     :: CoverageReport
-  , testsSelfVerified :: Bool           -- "I ran tests, they fail on skeleton"
-  , testsCommitMsg    :: Text           -- For the commit
-  , testsStrategy     :: Text           -- Prose: approach taken
-  , testsBlocker      :: Maybe Text
+  { testsProperties     :: [PropertyWritten]
+  , propertyCategories  :: [PropertyCategory]  -- VALUE-NEUTRAL: What types of properties
+  , uncoveredPatterns   :: [Text]              -- VALUE-NEUTRAL: What's NOT covered (actionable!)
+  , testsCommitMsg      :: Text                -- For the commit
+  , strategyApproach    :: Text                -- How they thought about it
+  , testsBlocker        :: Maybe Text
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON, StructuredOutput)
@@ -349,11 +403,12 @@ data FunctionImplemented = FunctionImplemented
   deriving anyclass (FromJSON, ToJSON, StructuredOutput)
 
 -- | Impl agent output. Describes implementation decisions, not code.
+-- VALUE-NEUTRAL: Removed implBuildPassed (handler verifies mechanically).
+-- Replaced implDesignNotes with structured designDecisions.
 data ImplAgentOutput = ImplAgentOutput
   { implFunctions      :: [FunctionImplemented]
-  , implDataRepr       :: Text          -- "Recursive ADT with spine"
-  , implDesignNotes    :: Text          -- Key decisions, tradeoffs
-  , implBuildPassed    :: Bool          -- "cabal build succeeded"
+  , implDataRepr       :: Text            -- "Recursive ADT with spine"
+  , designDecisions    :: [DesignChoice]  -- VALUE-NEUTRAL: Structured decisions
   , implCommitMsg      :: Text
   , implBlocker        :: Maybe Text
   }
@@ -365,11 +420,13 @@ data ImplAgentOutput = ImplAgentOutput
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Description of a fix applied.
+-- VALUE-NEUTRAL: faRelatedFailures lets handler correlate fixes to failures.
 data FixApplied = FixApplied
-  { faFunction     :: Text              -- "push"
-  , faWhatChanged  :: Text              -- "Fixed off-by-one in size tracking"
-  , faWhyFailed    :: Text              -- "Wasn't handling empty stack edge case"
-  , faFixType      :: FixType
+  { faFunction        :: Text           -- "push"
+  , faWhatChanged     :: Text           -- "Fixed off-by-one in size tracking"
+  , faWhyFailed       :: Text           -- "Wasn't handling empty stack edge case"
+  , faFixType         :: FixType
+  , faRelatedFailures :: [Text]         -- VALUE-NEUTRAL: Which failures this addresses
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON, StructuredOutput)
@@ -384,11 +441,12 @@ data FixType
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON, StructuredOutput)
 
+-- | Fix agent output.
+-- VALUE-NEUTRAL: Removed fixBuildPassed (handler verifies mechanically).
 data FixAgentOutput = FixAgentOutput
-  { fixChanges     :: [FixApplied]
-  , fixBuildPassed :: Bool
-  , fixCommitMsg   :: Text
-  , fixBlocker     :: Maybe Text
+  { fixChanges   :: [FixApplied]
+  , fixCommitMsg :: Text
+  , fixBlocker   :: Maybe Text
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON, StructuredOutput)
@@ -424,10 +482,12 @@ data SurvivingMutant = SurvivingMutant
   deriving anyclass (FromJSON, ToJSON, StructuredOutput)
 
 -- | Mutation adversary output. Survivor count derived from list.
+-- VALUE-NEUTRAL: Replaced mutMutantsTried (gameable count) with
+-- mutationTypesAttempted (what kinds of mutations - handler counts).
 data MutationAdversaryOutput = MutationAdversaryOutput
-  { mutMutantsTried :: Int
-  , mutSurvivors    :: [SurvivingMutant]
-  , mutAnalysis     :: Text             -- Areas tested, approach
+  { mutationTypesAttempted :: [MutationType]  -- VALUE-NEUTRAL: What kinds (handler counts)
+  , mutSurvivors           :: [SurvivingMutant]
+  , mutAnalysis            :: Text            -- Areas tested, approach
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON, StructuredOutput)
@@ -438,9 +498,9 @@ data MutationAdversaryOutput = MutationAdversaryOutput
 
 -- | Conflict resolution agent output (schema).
 -- Semantic metadata about how conflicts were resolved.
+-- VALUE-NEUTRAL: Removed croBuildPassed (handler verifies mechanically).
 data ConflictResolveOutput = ConflictResolveOutput
   { croFilesResolved   :: [Text]             -- Paths that were resolved
-  , croBuildPassed     :: Bool               -- Did resolution compile?
   , croResolutionNotes :: Text               -- How each conflict was resolved
   , croBlocker         :: Maybe Text         -- If resolution failed, why
   }

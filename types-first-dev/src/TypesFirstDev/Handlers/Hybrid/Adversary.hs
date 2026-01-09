@@ -96,11 +96,13 @@ hMutationAdversaryHandler = ClaudeCodeLLMHandler @'Haiku @'Nothing
         TestSuiteWeak -> sendM $ putStrLn "[MUTATION-ADVERSARY] Test suite is WEAK (many survivors)"
 
       -- Build partial witness report with mutation observations
+      -- Note: mutationTypesAttempted is a list of mutation types, length gives count
+      let mutationsTried = length (mutationTypesAttempted mutationOutput)
       let mutationObservation = NodeObservation
             { noNode = "hMutationAdversary"
             , noPhase = "post-validation"
-            , noProgress = "Completed mutation testing: " <> T.pack (show (mutMutantsTried mutationOutput))
-                        <> " mutations tried, " <> T.pack (show (length $ mutSurvivors mutationOutput)) <> " survived"
+            , noProgress = "Completed mutation testing: " <> T.pack (show mutationsTried)
+                        <> " mutation types, " <> T.pack (show (length $ mutSurvivors mutationOutput)) <> " survived"
             , noConcerns = survivorConcerns mutationOutput
             }
 
@@ -122,11 +124,13 @@ deriveTestSuiteVerdict output
   | survivorRate > 0.5 = TestSuiteWeak
   | otherwise = TestSuiteHasGaps
   where
+    -- Handler derives count from list length (value-neutral)
+    mutantsTried = length (mutationTypesAttempted output)
     survivorRate :: Double
     survivorRate
-      | mutMutantsTried output == 0 = 0
+      | mutantsTried == 0 = 0
       | otherwise = fromIntegral (length $ mutSurvivors output)
-                  / fromIntegral (mutMutantsTried output)
+                  / fromIntegral mutantsTried
 
 
 -- | Extract concerns from surviving mutants

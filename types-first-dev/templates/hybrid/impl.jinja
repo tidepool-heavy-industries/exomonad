@@ -47,8 +47,7 @@ what properties will be tested, only the function specifications.
 Return JSON matching `ImplAgentOutput`:
 - `implFunctions`: List of functions implemented (see FunctionImplemented below)
 - `implDataRepr`: How you represented the data (e.g., "Recursive ADT with spine")
-- `implDesignNotes`: Key design decisions and tradeoffs
-- `implBuildPassed`: Boolean - true ONLY if `cabal build` succeeded
+- `designDecisions`: List of design decisions (see DesignChoice below)
 - `implCommitMsg`: Git commit message
 - `implBlocker`: If blocked, explain (otherwise null)
 
@@ -58,17 +57,21 @@ For each function in `implFunctions`:
 - `fiComplexity`: Time complexity if known (e.g., "O(1)") - null if unsure
 - `fiHandlesEdges`: List of edge cases explicitly handled
 
-## CRITICAL: Build Verification
+For each design decision in `designDecisions`:
+- `dcArea`: Area of the design (e.g., "data representation", "error handling")
+- `dcChoice`: What you chose (e.g., "recursive ADT", "Either-based errors")
+- `dcTradeoff`: What tradeoff this represents (e.g., "memory safety over speed")
 
-**Build MUST pass before you return.**
+**Note**: Build verification is done by the handler after you return.
+Focus on implementing correctly - if the build fails, you'll get feedback.
 
-You must:
-1. Run `cabal build` after implementing
-2. Fix any compilation errors
-3. Set `implBuildPassed: true` ONLY after successful build
+## Build Expectation
 
-If the build fails, fix the errors before returning. Do not return with
-`implBuildPassed: false` unless you are truly blocked and cannot proceed.
+**Run `cabal build` after implementing to verify your code compiles.**
+
+If you encounter build errors:
+1. Fix them before returning
+2. If truly blocked, set `implBlocker` with details
 
 {% if hardeningHints %}
 ## Hardening Hints (from Type Adversary)

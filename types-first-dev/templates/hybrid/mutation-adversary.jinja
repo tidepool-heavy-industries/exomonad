@@ -65,9 +65,12 @@ For each function, try introducing these mutations and check if tests catch them
 ## Output Schema
 
 You must return JSON matching `MutationAdversaryOutput`:
-- `mutMutantsTried`: Total number of mutations attempted
+- `mutationTypesAttempted`: List of mutation types you tried (see Mutation Types above)
 - `mutSurvivors`: List of mutations that survived (tests didn't catch)
 - `mutAnalysis`: Prose description of your approach and coverage
+
+**Note**: The handler computes mutation count from the `mutationTypesAttempted` list length.
+Report which types you actually tried - don't just list all types.
 
 For each survivor in `mutSurvivors`, provide:
 - `smFunction`: Function containing the mutation
@@ -105,7 +108,7 @@ The `smSuggestedProp` should contain:
 
 ```json
 {
-  "mutMutantsTried": 15,
+  "mutationTypesAttempted": ["BoundaryMutation", "ConditionFlip", "OffByOne", "SwappedArgs"],
   "mutSurvivors": [
     {
       "smFunction": "push",

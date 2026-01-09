@@ -50,10 +50,10 @@ you cannot see how the functions are implemented, only their specifications.
 
 Return JSON matching `TestsAgentOutput`:
 - `testsProperties`: List of properties written (see PropertyWritten below)
-- `testsCoverage`: Coverage report
-- `testsSelfVerified`: Boolean - true ONLY if tests fail on skeleton
 - `testsCommitMsg`: Git commit message
-- `testsStrategy`: Prose describing your approach
+- `strategyApproach`: Prose describing how you approached property design
+- `propertyCategories`: List of PropertyCategory values covered (Invariant, EdgeCase, Boundary, Composition, ErrorHandling, Other)
+- `uncoveredPatterns`: List of patterns NOT covered (actionable - what's missing)
 - `testsBlocker`: If blocked, explain (otherwise null)
 
 For each property in `testsProperties`:
@@ -64,38 +64,33 @@ For each property in `testsProperties`:
 - `pwCoversExamples`: Indices of examples this property covers
 - `pwCoversSketch`: Name of PropertySketch this implements (or null)
 
-For `testsCoverage`:
-- `crFunctionsCovered`: Functions with at least one property
-- `crFunctionsUncovered`: Functions with no properties
-- `crExamplesCovered`: Number of examples covered
-- `crExamplesTotal`: Total examples in spec
-- `crSketchesCovered`: PropertySketch names implemented
-- `crSketchesUncovered`: PropertySketch names NOT implemented
+**Note**: Coverage metrics are computed by the handler from your `testsProperties`.
+Focus on writing comprehensive properties - the system tracks coverage automatically.
 
-## CRITICAL: Self-Verification
+## CRITICAL: Tests Must Exercise Code
 
-**Tests MUST FAIL on the skeleton stubs.**
+**Write properties that CALL the actual functions.**
 
-The skeleton has `undefined` stubs. If your tests pass on undefined stubs,
-they are trivial or broken. You MUST:
+The skeleton has `undefined` stubs. The handler will verify your tests fail
+on the skeleton (proving they actually exercise the code). If your tests pass
+on undefined stubs, they're trivial and will be rejected.
 
-1. Run `cabal test` after writing properties
-2. Verify tests FAIL (hit undefined or produce counterexamples)
-3. Set `testsSelfVerified: true` ONLY after confirming failure
-
-If tests pass on undefined stubs, your work will be rejected and you'll need
-to write meaningful properties that actually exercise the code.
+Write properties that:
+1. Call the function under test
+2. Assert meaningful invariants
+3. Use generated inputs (QuickCheck)
 
 {% if priorFeedback %}
 ## Prior Rejection Feedback
 
-Your previous tests were rejected. Here's why:
-
-**Reason**: {{ priorFeedback.whyRejected }}
+**Why rejected**: {{ priorFeedback.whyRejected }}
 **Properties you wrote**: {{ priorFeedback.propertiesWrote | join(", ") }}
-**Suggestion**: {{ priorFeedback.suggestion }}
 
-Write NEW, MEANINGFUL properties that actually test the functions.
+### What to Do Differently
+{{ priorFeedback.suggestion }}
+
+> The handler will detect if you write the same properties again.
+> Write NEW properties that actually call the functions.
 {% endif %}
 
 {% if hardeningHints %}

@@ -258,12 +258,17 @@ hMergeHandler verifiedResults = do
       -- Read conflict markers from each file
       conflictedWithContent <- sendM $ mapM (readConflictedFile mergePath) conflictPaths
 
+      -- Format design decisions into context text
+      let implDecisions = designDecisions (results.vrBlindResults.brImpl.implOutput)
+          implContext = T.intercalate "; " $
+            map (\d -> dcArea d <> ": " <> dcChoice d) implDecisions
+
       let conflictState = ConflictState
             { csVerifiedResults = results
             , csMergeWorktree = mergePath
             , csConflictedFiles = conflictedWithContent
-            , csTestsContext = results.vrBlindResults.brTests.testsOutput.testsStrategy
-            , csImplContext = results.vrBlindResults.brImpl.implOutput.implDesignNotes
+            , csTestsContext = results.vrBlindResults.brTests.testsOutput.strategyApproach
+            , csImplContext = implContext
             }
 
       -- Stash for the LLM handler
@@ -328,7 +333,7 @@ hConflictResolveHandler = ClaudeCodeLLMHandler @'Haiku @'Nothing
         Just conflictState -> do
           let output = ccResult.ccrParsedOutput
           sendM $ putStrLn $ "[CONFLICT_RESOLVE] Resolved " <> show (length output.croFilesResolved) <> " files"
-          sendM $ putStrLn $ "[CONFLICT_RESOLVE] Build passed: " <> show output.croBuildPassed
+          -- Note: Build verification is done mechanically by handler, not claimed by LLM
           sendM $ putStrLn $ "[CONFLICT_RESOLVE] Notes: " <> T.unpack output.croResolutionNotes
 
           -- Check for blocker
