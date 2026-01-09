@@ -35,23 +35,39 @@ import Tidepool.ClaudeCode.Effect (runClaudeCodeExecIO)
 import Tidepool.Graph.Execute (callHandler, dispatchGoto)
 import Tidepool.Worktree.Executor (runWorktreeIO, defaultWorktreeConfig)
 
+-- Old graph imports
 import TypesFirstDev.Baseline (runBaselineWithSpec)
 import TypesFirstDev.DevRuns (runDirectory)
 import TypesFirstDev.Graph (TypesFirstGraph(..))
 import TypesFirstDev.Handlers (typesFirstHandlers)
 import TypesFirstDev.Stats (RunMetadata(..))
-import TypesFirstDev.Types (StackSpec(..), ProjectType(..), ParallelResults(..), TestsResult(..), ImplResult(..), WorkflowError(..), emptySessionContext, ResumeStrategy(..), Blocker(..))
+import TypesFirstDev.Types (ProjectType(..), ParallelResults(..), TestsResult(..), ImplResult(..), Blocker(..))
+import qualified TypesFirstDev.Types as Old (StackSpec(..), WorkflowError(..), emptySessionContext, ResumeStrategy(..))
+
+-- Hybrid graph imports
+import TypesFirstDev.Graph.Hybrid (TypesFirstGraphHybrid(..))
+import TypesFirstDev.Handlers.Hybrid.Genesis (hybridGenesisHandlers)
+import TypesFirstDev.Handlers.Hybrid.Effects (WorkflowError(..), initialSessionContext)
+import TypesFirstDev.Types.Hybrid (StackSpec(..), HybridResult(..), MutationAdversaryResult(..), WitnessReport(..), defaultStrictness)
+import TypesFirstDev.Effect.Build (runBuildIO)
 
 
 -- | Main entry point.
 --
 -- Runs the types-first workflow to generate type definitions.
 -- Supports multiple experiments via command-line args or env vars.
+--
+-- Modes:
+--   types-first-dev                        # Run old sequential graph (default)
+--   types-first-dev --hybrid               # Run new hybrid TDD graph
+--   types-first-dev --experiment name      # Run specific experiment
+--   types-first-dev baseline               # Run baseline evaluation
 main :: IO ()
 main = do
   args <- getArgs
   case args of
     ("baseline":rest) -> runBaselineCommand rest
+    ("--hybrid":rest) -> runHybridCommand rest
     _ -> runExperimentCommand args
 
 
@@ -145,15 +161,15 @@ runExperimentCommand args = do
     . runClaudeCodeExecIO claudeConfig
     . runReader spec              -- Reader StackSpec
     . runReader claudeConfig      -- Reader ClaudeCodeConfig
-    . evalMemory emptySessionContext  -- Memory SessionContext
-    . runError @WorkflowError     -- Error WorkflowError (first in DevEffects = innermost)
+    . evalMemory Old.emptySessionContext  -- Memory SessionContext
+    . runError @Old.WorkflowError -- Error WorkflowError (first in DevEffects = innermost)
     $ do
         let handlers = typesFirstHandlers spec
         choice <- callHandler (types handlers) spec
         dispatchGoto handlers choice
 
   case result of
-    Left err -> printError err
+    Left err -> printOldError err
     Right res -> printResult res
 
 
@@ -164,27 +180,79 @@ parseExperiment ("-e":name:_) = name
 parseExperiment _ = "stack"  -- default
 
 
--- | Get the spec for a given experiment.
-getSpec :: String -> FilePath -> IO StackSpec
-getSpec "stack" projectPath = pure $ StackSpec
-  { ssProjectPath = projectPath
-  , ssModuleName = "Data.Stack"
-  , ssDescription = "A LIFO (last-in-first-out) stack data structure with operations: \
-                    \push (add element to top), pop (remove and return top element), \
-                    \peek (view top element without removing), isEmpty (check if empty)"
-  , ssAcceptanceCriteria =
+-- ════════════════════════════════════════════════════════════════════════════
+-- HYBRID GRAPH RUNNER
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Run the hybrid TDD graph.
+runHybridCommand :: [String] -> IO ()
+runHybridCommand args = do
+  putStrLn "Types-First Development Workflow (Hybrid TDD Graph)"
+  putStrLn "===================================================="
+  putStrLn ""
+
+  let experiment = parseExperiment args
+
+  sessionName <- maybe "types-first-dev" T.pack <$> lookupEnv "ZELLIJ_SESSION"
+  validateZellijSession sessionName
+
+  let claudeConfig = (mkClaudeCodeConfig sessionName)
+        { ccDefaultTimeout = 600 }  -- 10 min timeout
+
+  projectPath <- maybe getCurrentDirectory pure =<< lookupEnv "PROJECT_PATH"
+  let worktreeConfig = defaultWorktreeConfig projectPath
+
+  spec <- getHybridSpec experiment projectPath
+
+  putStrLn $ "Experiment: " <> experiment
+  putStrLn $ "Project: " <> projectPath
+  putStrLn $ "Module: " <> T.unpack (specModuleName spec)
+  putStrLn $ "Session: " <> T.unpack sessionName
+  putStrLn ""
+  putStrLn "Starting hybrid TDD workflow..."
+  putStrLn ""
+
+  -- Run the hybrid graph with full effect stack
+  -- Effect order matches HybridEffects = '[Error, Memory, Reader, Build, ClaudeCodeExec, Worktree, IO]
+  result <- runM
+    . runWorktreeIO worktreeConfig
+    . runClaudeCodeExecIO claudeConfig
+    . runBuildIO
+    . runReader spec
+    . evalMemory (initialSessionContext sessionName)
+    . runError @WorkflowError
+    $ do
+        let handlers = hybridGenesisHandlers
+        -- Entry point is hTypes, which receives the spec
+        -- dispatchGoto continues until Exit is reached, returning HybridResult
+        choice <- callHandler (hTypes handlers) spec
+        dispatchGoto handlers choice
+
+  case result of
+    Left err -> printHybridError err
+    Right res -> printHybridResult res
+
+
+-- | Get the hybrid StackSpec for a given experiment.
+getHybridSpec :: String -> FilePath -> IO StackSpec
+getHybridSpec "stack" projectPath = pure $ StackSpec
+  { specModuleName = "Data.Stack"
+  , specDescription = "A LIFO (last-in-first-out) stack data structure with operations: \
+                      \push (add element to top), pop (remove and return top element), \
+                      \peek (view top element without removing), isEmpty (check if empty)"
+  , specAcceptanceCriteria =
       [ "LIFO order: push a,b,c then pop returns c,b,a"
       , "push then pop is identity: pop (push x s) == Just (x, s)"
       , "empty stack invariants: isEmpty empty, pop empty == Nothing"
       ]
-  , ssProjectType = PureLibrary
-  , ssResumeStrategy = SmartResume
+  , specImplPath = projectPath <> "/src/Data/Stack.hs"
+  , specTestPath = projectPath <> "/test/Data/StackSpec.hs"
+  , specStrictness = defaultStrictness
   }
 
-getSpec "url-shortener" projectPath = pure $ StackSpec
-  { ssProjectPath = projectPath
-  , ssModuleName = "UrlShortener"
-  , ssDescription = T.unlines
+getHybridSpec "url-shortener" projectPath = pure $ StackSpec
+  { specModuleName = "UrlShortener"
+  , specDescription = T.unlines
       [ "A URL shortening service with three endpoints:"
       , "- POST /shorten: Accept a JSON body with 'url' field, return a short URL"
       , "- GET /:code: Expand a short code to the original URL"
@@ -194,15 +262,116 @@ getSpec "url-shortener" projectPath = pure $ StackSpec
       , "Short codes should be generated deterministically (e.g., hash-based) so that"
       , "the same URL always produces the same short code."
       ]
-  , ssAcceptanceCriteria =
+  , specAcceptanceCriteria =
       [ "Roundtrip: POST /shorten with a URL, then GET /:code returns the original URL"
       , "Idempotent: POSTing the same URL twice returns the same short code"
       , "Stats increment: Each GET /:code request increments the hit count in stats"
       , "Not found: GET with an invalid code returns HTTP 404"
       , "Validation: POST with invalid/empty URL returns HTTP 400"
       ]
-  , ssProjectType = ServantServer
-  , ssResumeStrategy = SmartResume
+  , specImplPath = projectPath <> "/src/UrlShortener.hs"
+  , specTestPath = projectPath <> "/test/Main.hs"
+  , specStrictness = defaultStrictness
+  }
+
+getHybridSpec experiment _ = do
+  putStrLn $ "ERROR: Unknown experiment: " <> experiment
+  putStrLn "Available experiments: stack, url-shortener"
+  exitFailure
+
+
+-- | Print a hybrid workflow error.
+printHybridError :: WorkflowError -> IO ()
+printHybridError err = do
+  putStrLn ""
+  putStrLn "=== Hybrid Workflow Error ==="
+  putStrLn ""
+  case err of
+    BuildFailed msg -> do
+      putStrLn "Build failed:"
+      putStrLn $ T.unpack msg
+    TypeCheckFailed msg -> do
+      putStrLn "Type check failed:"
+      putStrLn $ T.unpack msg
+    MaxAttemptsExceeded n -> do
+      putStrLn $ "Max fix attempts exceeded: " <> show n
+    HoleFixFailed msg -> do
+      putStrLn "Hole fix failed:"
+      putStrLn $ T.unpack msg
+    StuckOnPattern msg -> do
+      putStrLn "Stuck on failure pattern:"
+      putStrLn $ T.unpack msg
+    NotConverging -> do
+      putStrLn "Fixes not converging - stopping to avoid infinite loop"
+  putStrLn ""
+  exitFailure
+
+
+-- | Print the hybrid results.
+printHybridResult :: HybridResult -> IO ()
+printHybridResult hr = do
+  putStrLn ""
+  putStrLn "=== Hybrid TDD Complete ==="
+  putStrLn ""
+  putStrLn $ "Success: " <> show hr.hrSuccess
+  putStrLn $ "Functions: " <> show (length hr.hrSpec)
+  putStrLn $ "Total cost: $" <> show hr.hrTotalCost
+  putStrLn ""
+  putStrLn "Mutation Testing:"
+  case hr.hrMutationAdversary of
+    Nothing -> putStrLn "  Not performed"
+    Just mar -> putStrLn $ "  Verdict: " <> show mar.marVerdict
+  putStrLn ""
+  let concerns = hr.hrWitness.wrConcerns
+  unless (null concerns) $ do
+    putStrLn "Concerns:"
+    mapM_ (\c -> putStrLn $ "  - " <> T.unpack c) concerns
+    putStrLn ""
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- OLD GRAPH SUPPORT
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Get the spec for a given experiment (OLD graph).
+getSpec :: String -> FilePath -> IO Old.StackSpec
+getSpec "stack" projectPath = pure $ Old.StackSpec
+  { Old.ssProjectPath = projectPath
+  , Old.ssModuleName = "Data.Stack"
+  , Old.ssDescription = "A LIFO (last-in-first-out) stack data structure with operations: \
+                    \push (add element to top), pop (remove and return top element), \
+                    \peek (view top element without removing), isEmpty (check if empty)"
+  , Old.ssAcceptanceCriteria =
+      [ "LIFO order: push a,b,c then pop returns c,b,a"
+      , "push then pop is identity: pop (push x s) == Just (x, s)"
+      , "empty stack invariants: isEmpty empty, pop empty == Nothing"
+      ]
+  , Old.ssProjectType = PureLibrary
+  , Old.ssResumeStrategy = Old.SmartResume
+  }
+
+getSpec "url-shortener" projectPath = pure $ Old.StackSpec
+  { Old.ssProjectPath = projectPath
+  , Old.ssModuleName = "UrlShortener"
+  , Old.ssDescription = T.unlines
+      [ "A URL shortening service with three endpoints:"
+      , "- POST /shorten: Accept a JSON body with 'url' field, return a short URL"
+      , "- GET /:code: Expand a short code to the original URL"
+      , "- GET /:code/stats: Get usage statistics (hit count) for a short code"
+      , ""
+      , "The service should store mappings in memory using an IORef with a Map."
+      , "Short codes should be generated deterministically (e.g., hash-based) so that"
+      , "the same URL always produces the same short code."
+      ]
+  , Old.ssAcceptanceCriteria =
+      [ "Roundtrip: POST /shorten with a URL, then GET /:code returns the original URL"
+      , "Idempotent: POSTing the same URL twice returns the same short code"
+      , "Stats increment: Each GET /:code request increments the hit count in stats"
+      , "Not found: GET with an invalid code returns HTTP 404"
+      , "Validation: POST with invalid/empty URL returns HTTP 400"
+      ]
+  , Old.ssProjectType = ServantServer
+  , Old.ssResumeStrategy = Old.SmartResume
   }
 
 getSpec experiment _ = do
@@ -211,28 +380,28 @@ getSpec experiment _ = do
   exitFailure
 
 
--- | Print a workflow error.
-printError :: WorkflowError -> IO ()
-printError err = do
+-- | Print a workflow error (OLD graph).
+printOldError :: Old.WorkflowError -> IO ()
+printOldError err = do
   putStrLn ""
   putStrLn "=== Workflow Error ==="
   putStrLn ""
   case err of
-    SkeletonCompileFailed msg -> do
+    Old.SkeletonCompileFailed msg -> do
       putStrLn "Skeleton compilation failed:"
       putStrLn $ T.unpack msg
-    WorktreeCreationFailed msg -> do
+    Old.WorktreeCreationFailed msg -> do
       putStrLn "Worktree creation failed:"
       putStrLn $ T.unpack msg
-    AgentFailed name msg -> do
+    Old.AgentFailed name msg -> do
       putStrLn $ "Agent '" <> T.unpack name <> "' failed:"
       putStrLn $ T.unpack msg
-    AgentNoOutput name -> do
+    Old.AgentNoOutput name -> do
       putStrLn $ "Agent '" <> T.unpack name <> "' returned no output"
-    AgentParseFailed name msg -> do
+    Old.AgentParseFailed name msg -> do
       putStrLn $ "Agent '" <> T.unpack name <> "' parse failed:"
       putStrLn $ T.unpack msg
-    MergeFailed msg -> do
+    Old.MergeFailed msg -> do
       putStrLn "Merge failed:"
       putStrLn $ T.unpack msg
   putStrLn ""

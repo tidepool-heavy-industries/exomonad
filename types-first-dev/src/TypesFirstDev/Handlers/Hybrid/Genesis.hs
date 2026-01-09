@@ -27,8 +27,13 @@ module TypesFirstDev.Handlers.Hybrid.Genesis
   ) where
 
 import Control.Monad.Freer (Eff, sendM)
+import Control.Monad.Freer.Error (throwError)
 import Control.Monad.Freer.Reader (ask)
 import Data.Proxy (Proxy(..))
+import qualified Data.Text as T
+import System.Directory (getCurrentDirectory)
+
+import TypesFirstDev.Effect.Build (buildAll, BuildResult(..))
 
 import Tidepool.Graph.Generic (AsHandler)
 import Tidepool.Graph.Goto
@@ -124,24 +129,40 @@ hTypesHandler = ClaudeCodeLLMHandler @'Haiku @'Nothing
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Handler for hSkeleton node.
--- Generates skeleton files with undefined stubs.
+-- Validates skeleton files written by hTypes via ClaudeCode.
+--
+-- In the hybrid workflow, hTypes uses ClaudeCode which writes files to disk.
+-- This handler:
+-- 1. Gets the current project path
+-- 2. Validates the skeleton compiles (belt and suspenders)
+-- 3. Routes to type adversary with skeleton state
 hSkeletonHandler
   :: TypesResult
   -> Eff HybridEffects (GotoChoice '[To "hTypeAdversary" SkeletonState])
 hSkeletonHandler typesResult = do
   spec <- ask @StackSpec
 
-  -- TODO: Generate skeleton files
-  -- 1. Render impl skeleton template
-  -- 2. Render test skeleton template
-  -- 3. Write files to disk
-  -- 4. Run cabal build to verify
+  -- Get project path (current working directory in the worktree)
+  projectPath <- sendM getCurrentDirectory
+
+  sendM $ putStrLn $ "[SKELETON] Validating skeleton in: " <> projectPath
+  sendM $ putStrLn $ "  Impl path: " <> spec.specImplPath
+  sendM $ putStrLn $ "  Test path: " <> spec.specTestPath
+
+  -- Validate skeleton compiles (belt and suspenders - hTypes should have done this)
+  buildResult <- buildAll projectPath
+
+  if brSuccess buildResult
+    then sendM $ putStrLn "[SKELETON] Build validation passed"
+    else do
+      sendM $ putStrLn $ "[SKELETON] Build failed: " <> T.unpack (brErrors buildResult)
+      throwError $ BuildFailed (brErrors buildResult <> "\n" <> brOutput buildResult)
 
   let skeletonState = SkeletonState
         { ssTypesResult = typesResult
         , ssImplPath = spec.specImplPath
         , ssTestPath = spec.specTestPath
-        , ssProjectPath = "."  -- TODO: Get from config
+        , ssProjectPath = projectPath
         }
 
   pure $ gotoChoice @"hTypeAdversary" skeletonState

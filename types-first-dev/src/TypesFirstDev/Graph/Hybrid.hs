@@ -71,7 +71,12 @@ import Tidepool.Graph.Goto (Goto, To)
 
 import TypesFirstDev.Types.Hybrid
 
-import TypesFirstDev.Templates.Hybrid (HTypesTpl, HTypeAdversaryTpl, HTypesFixTpl, HTestsTpl, HImplTpl, HConflictResolveTpl)
+import TypesFirstDev.Templates.Hybrid
+  ( HTypesTpl, HTypeAdversaryTpl, HTypesFixTpl
+  , HTestsTpl, HImplTpl
+  , HConflictResolveTpl
+  , HFixTpl, HMutationAdversaryTpl
+  )
 
 
 -- | Hybrid TDD workflow graph.
@@ -235,11 +240,14 @@ data TypesFirstGraphHybrid mode = TypesFirstGraphHybrid
                       ]
 
     -- | Fix implementation based on test failures.
-    --
-    -- NOTE: WS4 stub - needs FixTpl template.
-  , hFix :: mode :- G.LogicNode
+    -- Uses ClaudeCode to analyze failures and apply fixes.
+    -- Exit conditions (stuck, not converging) checked before LLM call.
+  , hFix :: mode :- G.LLMNode
       :@ Types.Input ValidationFailure
+      :@ Template HFixTpl
+      :@ Schema FixAgentOutput
       :@ UsesEffects '[Goto "hValidate" MergedState]
+      :@ ClaudeCode 'Haiku 'Nothing
 
     --------------------------------------------------------------------------
     -- PHASE 7: POST-VALIDATION [WS4]
@@ -252,11 +260,15 @@ data TypesFirstGraphHybrid mode = TypesFirstGraphHybrid
       :@ UsesEffects '[Goto "hMutationAdversary" MutationTemplateCtx]
 
     -- | MUTATION ADVERSARY: Red team for test suite.
+    -- Uses ClaudeCode to introduce mutations and verify tests catch them.
     -- ADVISORY: Findings included in output, don't block exit.
     -- Routes to hWitness with partial WitnessReport; stashes MutationAdversaryResult in Memory.
-  , hMutationAdversary :: mode :- G.LogicNode
+  , hMutationAdversary :: mode :- G.LLMNode
       :@ Types.Input MutationTemplateCtx
+      :@ Template HMutationAdversaryTpl
+      :@ Schema MutationAdversaryOutput
       :@ UsesEffects '[Goto "hWitness" WitnessReport]
+      :@ ClaudeCode 'Haiku 'Nothing
 
     -- | Witness: Observes flow and maintains coherent understanding.
   , hWitness :: mode :- G.LogicNode

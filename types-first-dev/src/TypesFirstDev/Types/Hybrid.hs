@@ -128,7 +128,7 @@ data StackSpec = StackSpec
   , specStrictness        :: StrictnessConfig   -- Per-task strictness
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
 
 -- | Per-task strictness configuration.
 -- Controls when mutation adversary blocks vs advises.
@@ -138,7 +138,7 @@ data StrictnessConfig = StrictnessConfig
   , scRequireCoverage  :: Bool        -- Block if PropertySketches unimplemented
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
 
 -- | Default strictness for normal development.
 defaultStrictness :: StrictnessConfig
@@ -167,12 +167,12 @@ data CoordSpec = CoordSpec
   , coordStrictness   :: StrictnessConfig
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
 
 -- | Scope level for adversary aperture.
 data ScopeLevel = Leaf | Coordination | System
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- SHARED CONTRACT TYPES
@@ -485,7 +485,7 @@ data EchoChannel = EchoChannel
   , fromTests :: [Text]  -- Property names tests is asserting
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
 
 -- | Hardening hint from adversary agents.
 -- Instead of just blocking, adversaries TEACH downstream agents.
@@ -495,7 +495,7 @@ data HardeningHint = HardeningHint
   , hhSource    :: Text    -- "typeAdversary" or "mutationAdversary"
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- INTERNAL STATE TYPES (Handler-managed, not LLM-produced)
@@ -508,7 +508,7 @@ data TypesResult = TypesResult
   , trCost        :: Double             -- API cost
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
 
 -- | State after skeleton generation (handler-produced).
 data SkeletonState = SkeletonState
@@ -518,7 +518,7 @@ data SkeletonState = SkeletonState
   , ssProjectPath :: FilePath
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
 
 -- | Handler combines type adversary output with derived verdict.
 -- Includes skeleton state for join point routing.
@@ -528,14 +528,14 @@ data TypeAdversaryResult = TypeAdversaryResult
   , tarSkeleton :: SkeletonState         -- JOIN: needed by hGate for routing
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
 
 data TypeSystemVerdict
   = TypeSystemSound      -- No holes
   | TypeSystemMinorHoles -- Only Minor/Informational
   | TypeSystemHasHoles   -- Has Critical or Major
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
 
 -- | State after gate passes (type adversary found no significant holes).
 data GatedState = GatedState
@@ -543,7 +543,7 @@ data GatedState = GatedState
   , gsTypeAdversary  :: TypeAdversaryResult
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
 
 -- | Input to typesFix when adversary found holes.
 -- Includes attempt tracking for retry budget.
@@ -555,7 +555,7 @@ data TypeHolesFound = TypeHolesFound
   , thfPriorFixes    :: [Text]    -- What was tried before (for context)
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
 
 -- | Handler combines tests output with verification.
 data TestsResult = TestsResult
@@ -567,7 +567,7 @@ data TestsResult = TestsResult
   , testsFailureProof :: [StructuredFailure]  -- From running tests on skeleton
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
 
 -- | Handler combines impl output with metadata.
 data ImplResult = ImplResult
@@ -578,7 +578,7 @@ data ImplResult = ImplResult
   , implCost       :: Double
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
 
 -- | Combined blind results.
 data BlindResults = BlindResults
@@ -586,12 +586,12 @@ data BlindResults = BlindResults
   , brImpl  :: ImplResult
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
 
 -- | Verification status - strict mode, no nuance.
 data VerificationStatus = Verified | NotVerified
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
 
 -- | After external TDD verification.
 -- Strict mode: we only get here if tests failed on skeleton (good).
@@ -600,7 +600,7 @@ data VerifiedResults = VerifiedResults
   , vrExternalVerified :: Bool          -- Always True in strict mode
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
 
 -- | After merge into fresh worktree.
 data MergedState = MergedState
@@ -609,7 +609,7 @@ data MergedState = MergedState
   , msUnderstanding   :: UnderstandingState
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
 
 -- | State when cherry-pick produces git conflicts.
 data ConflictState = ConflictState
@@ -620,7 +620,7 @@ data ConflictState = ConflictState
   , csImplContext      :: Text
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
 
 -- | Understanding accumulated through the fix loop.
 data UnderstandingState = UnderstandingState
@@ -630,7 +630,7 @@ data UnderstandingState = UnderstandingState
   , usConverging    :: Bool
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
 
 -- | Pattern extracted from test failures.
 data FailurePattern = FailurePattern
@@ -640,7 +640,7 @@ data FailurePattern = FailurePattern
   , fpOccurrences :: Int
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
 
 -- | Initial understanding state.
 initialUnderstanding :: UnderstandingState
@@ -653,7 +653,7 @@ data ValidationFailure = ValidationFailure
   , vfNewPatterns   :: [FailurePattern]
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
 
 -- | After validation passes.
 data ValidatedState = ValidatedState
@@ -661,7 +661,7 @@ data ValidatedState = ValidatedState
   , vsTestsPassed  :: Int
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
 
 -- | Handler combines mutation output with derived verdict.
 data MutationAdversaryResult = MutationAdversaryResult
@@ -669,14 +669,14 @@ data MutationAdversaryResult = MutationAdversaryResult
   , marVerdict :: TestSuiteVerdict
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
 
 data TestSuiteVerdict
   = TestSuiteRobust   -- No survivors
   | TestSuiteHasGaps  -- Some survivors
   | TestSuiteWeak     -- Many survivors (>50% survival rate)
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
 
 -- | Error when tests pass on skeleton.
 data TrivialTestsError = TrivialTestsError
@@ -686,7 +686,7 @@ data TrivialTestsError = TrivialTestsError
   , tteFeedback     :: TrivialTestsFeedback
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
 
 -- | Feedback for tests agent when previous tests were trivial.
 -- NOTE: Field names match template variables for TH validation.
@@ -696,7 +696,7 @@ data TrivialTestsFeedback = TrivialTestsFeedback
   , suggestion      :: Text
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- WITNESS TYPES
@@ -710,7 +710,7 @@ data NodeObservation = NodeObservation
   , noConcerns  :: [Text]
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
 
 -- | Accumulated report from witness.
 data WitnessReport = WitnessReport
@@ -720,7 +720,7 @@ data WitnessReport = WitnessReport
   , wrSuggestions  :: [Text]
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- FINAL RESULT
@@ -737,7 +737,7 @@ data HybridResult = HybridResult
   , hrTotalCost         :: Double
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TEMPLATE CONTEXT TYPES
@@ -752,7 +752,7 @@ data TypesTemplateCtx = TypesTemplateCtx
   , implPath          :: FilePath
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
 
 -- | Context for TestsTpl - what the tests agent sees.
 -- NOTE: Field names match template variables for TH validation.
@@ -766,7 +766,7 @@ data TestsTemplateCtx = TestsTemplateCtx
   , hardeningHints :: [HardeningHint]
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
 
 -- | Context for ImplTpl - what the impl agent sees.
 -- NOTE: Field names match template variables for TH validation.
@@ -779,7 +779,7 @@ data ImplTemplateCtx = ImplTemplateCtx
   , hardeningHints :: [HardeningHint]
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
 
 -- | Context for MutationAdversaryTpl.
 data MutationTemplateCtx = MutationTemplateCtx
@@ -789,7 +789,7 @@ data MutationTemplateCtx = MutationTemplateCtx
   , mtcScopeLevel  :: ScopeLevel
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
 
 -- | Context for TypeAdversaryTpl.
 -- NOTE: Field names match template variables for TH validation.
@@ -798,7 +798,7 @@ data TypeAdversaryTemplateCtx = TypeAdversaryTemplateCtx
   , scopeLevel :: ScopeLevel
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
 
 -- | Context for TypesFixTpl.
 -- NOTE: Field names match template variables for TH validation.
@@ -809,7 +809,7 @@ data TypesFixTemplateCtx = TypesFixTemplateCtx
   , priorFixes    :: [Text]
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
 
 -- | Context for ConflictResolveTpl.
 -- Provides conflict markers and agent context for resolution.
@@ -821,7 +821,7 @@ data ConflictResolveTemplateCtx = ConflictResolveTemplateCtx
   , mergeWorktree   :: FilePath            -- Where to write resolved files
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
 
 -- | Context for FixTpl (WS4 validation loop).
 -- Shows test failures and accumulated understanding to the fix agent.
@@ -833,4 +833,4 @@ data FixTemplateCtx = FixTemplateCtx
   , worktreePath   :: FilePath                 -- Where the code lives
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)

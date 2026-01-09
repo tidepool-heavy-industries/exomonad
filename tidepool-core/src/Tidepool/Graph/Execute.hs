@@ -495,6 +495,24 @@ instance
           Just (GotoChoice oneOf) -> Just $ GotoChoice (There oneOf)
           Nothing -> Nothing
 
+-- | Arrive target case (for parallel workers depositing results at barrier).
+--
+-- Check if target name is "Arrive", parse payload if it is, and recurse for rest.
+-- Used by ForkNode workers to signal completion and deliver their result.
+instance
+  ( StructuredOutput payload
+  , ConvertTransitionHint rest
+  ) => ConvertTransitionHint (To Arrive payload ': rest) where
+  convertTransitionHint targetName payloadVal
+    | targetName == "Arrive" =
+        case parseStructured payloadVal of
+          Right val -> Just $ GotoChoice (Here val)
+          Left _ -> Nothing
+    | otherwise =
+        case convertTransitionHint @rest targetName payloadVal of
+          Just (GotoChoice oneOf) -> Just $ GotoChoice (There oneOf)
+          Nothing -> Nothing
+
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- ERROR CASE: EMPTY TARGET LIST

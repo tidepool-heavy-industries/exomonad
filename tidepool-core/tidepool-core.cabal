@@ -12,6 +12,7 @@ common warnings
 library
     import:           warnings
     exposed-modules:
+        Data.Stack
         Tidepool
         Tidepool.WASM
         Tidepool.Platform

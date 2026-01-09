@@ -20,76 +20,98 @@ import qualified Data.Text as T
 
 import Tidepool.Effect.ClaudeCode (ClaudeCodeExec)
 import Tidepool.Effects.Worktree (Worktree)
-import Tidepool.Graph.Goto (GotoChoice, To, gotoChoice)
-import Tidepool.Graph.Memory (Memory, updateMem)
+import Tidepool.Graph.Goto
+  ( GotoChoice
+  , To
+  , ClaudeCodeLLMHandler(..)
+  , ClaudeCodeResult(..)
+  , gotoChoice
+  )
+import Tidepool.Graph.Memory (Memory, getMem, updateMem)
+import Tidepool.Graph.Types (ModelChoice(..))
 
 import TypesFirstDev.Types.Hybrid
 import TypesFirstDev.Handlers.Hybrid.Effects (HybridEffects, SessionContext(..))
+import TypesFirstDev.Templates.Hybrid (hMutationAdversaryCompiled)
 
 
 -- ════════════════════════════════════════════════════════════════════════════
--- MUTATION ADVERSARY HANDLER (Logic Node with internal ClaudeCode call)
+-- MUTATION ADVERSARY HANDLER (LLM Node with ClaudeCode)
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Handler for hMutationAdversary node.
 -- Red teams the test suite by attempting to introduce bugs that tests miss.
 --
--- Note: Although this is a LogicNode in the graph, it internally calls
--- ClaudeCode to perform the mutation testing. Results are ADVISORY.
+-- Uses ClaudeCodeLLMHandler pattern:
+-- - Before: Stash context (passthrough - input IS template context)
+-- - LLM: ClaudeCode performs mutation testing
+-- - After: Derive verdict, stash result, build witness report
+--
+-- Results are ADVISORY - included in output but don't block exit.
 hMutationAdversaryHandler
-  :: MutationTemplateCtx
-  -> Eff HybridEffects (GotoChoice '[To "hWitness" WitnessReport])
-hMutationAdversaryHandler mutationCtx = do
-  spec <- ask @StackSpec
+  :: ClaudeCodeLLMHandler
+       'Haiku                                -- model
+       'Nothing                              -- cwd (Nothing = use default)
+       MutationTemplateCtx                   -- input
+       MutationAdversaryOutput               -- schema
+       '[To "hWitness" WitnessReport]        -- targets
+       HybridEffects                         -- effects
+       MutationTemplateCtx                   -- template context type
+hMutationAdversaryHandler = ClaudeCodeLLMHandler @'Haiku @'Nothing
+  Nothing                      -- no system template
+  hMutationAdversaryCompiled   -- user template
+  buildMutationContext         -- before: passthrough with stash
+  routeAfterMutation           -- after: build witness report
+  where
+    buildMutationContext :: MutationTemplateCtx -> Eff HybridEffects MutationTemplateCtx
+    buildMutationContext mutationCtx = do
+      sendM $ putStrLn $ "[MUTATION-ADVERSARY] Red teaming test suite at scope: " <> show (mtcScopeLevel mutationCtx)
 
-  sendM $ putStrLn $ "[MUTATION-ADVERSARY] Red teaming test suite at scope: " <> show (mtcScopeLevel mutationCtx)
+      -- Stash context for after-handler to retrieve
+      updateMem (\ctx -> ctx { scMutationCtxStash = Just mutationCtx })
 
-  -- TODO: Call ClaudeCode with mutation-adversary template
-  -- For now, simulate mutation testing results
-  sendM $ putStrLn "[MUTATION-ADVERSARY] Calling ClaudeCode to test mutations..."
+      -- Passthrough: input IS the template context
+      pure mutationCtx
 
-  -- Simulate mutation adversary result
-  let mutationOutput = MutationAdversaryOutput
-        { mutMutantsTried = 15
-        , mutSurvivors = []  -- No survivors = robust test suite
-        , mutAnalysis = "Tested boundary conditions, operator swaps, and condition flips. All mutations were caught by the test suite."
-        }
+    routeAfterMutation :: ClaudeCodeResult MutationAdversaryOutput -> Eff HybridEffects (GotoChoice '[To "hWitness" WitnessReport])
+    routeAfterMutation ccResult = do
+      let mutationOutput = ccResult.ccrParsedOutput
 
-  -- Derive verdict from output
-  let verdict = deriveTestSuiteVerdict mutationOutput
+      -- Derive verdict from output (handler logic, NOT asked of LLM)
+      let verdict = deriveTestSuiteVerdict mutationOutput
 
-  -- Build the result
-  let mutationResult = MutationAdversaryResult
-        { marOutput = mutationOutput
-        , marVerdict = verdict
-        }
+      -- Build the result
+      let mutationResult = MutationAdversaryResult
+            { marOutput = mutationOutput
+            , marVerdict = verdict
+            }
 
-  -- Stash result for witness to retrieve
-  updateMem (\ctx -> ctx { scMutationResultStash = Just mutationResult })
+      -- Stash result for witness to retrieve
+      updateMem (\ctx -> ctx { scMutationResultStash = Just mutationResult })
 
-  -- Log verdict
-  case verdict of
-    TestSuiteRobust -> sendM $ putStrLn "[MUTATION-ADVERSARY] Test suite is ROBUST (no survivors)"
-    TestSuiteHasGaps -> sendM $ putStrLn "[MUTATION-ADVERSARY] Test suite has GAPS (some survivors)"
-    TestSuiteWeak -> sendM $ putStrLn "[MUTATION-ADVERSARY] Test suite is WEAK (many survivors)"
+      -- Log verdict
+      case verdict of
+        TestSuiteRobust -> sendM $ putStrLn "[MUTATION-ADVERSARY] Test suite is ROBUST (no survivors)"
+        TestSuiteHasGaps -> sendM $ putStrLn "[MUTATION-ADVERSARY] Test suite has GAPS (some survivors)"
+        TestSuiteWeak -> sendM $ putStrLn "[MUTATION-ADVERSARY] Test suite is WEAK (many survivors)"
 
-  -- Build partial witness report with mutation observations
-  let mutationObservation = NodeObservation
-        { noNode = "hMutationAdversary"
-        , noPhase = "post-validation"
-        , noProgress = "Completed mutation testing: " <> T.pack (show (mutMutantsTried mutationOutput))
-                    <> " mutations tried, " <> T.pack (show (length $ mutSurvivors mutationOutput)) <> " survived"
-        , noConcerns = survivorConcerns mutationOutput
-        }
+      -- Build partial witness report with mutation observations
+      let mutationObservation = NodeObservation
+            { noNode = "hMutationAdversary"
+            , noPhase = "post-validation"
+            , noProgress = "Completed mutation testing: " <> T.pack (show (mutMutantsTried mutationOutput))
+                        <> " mutations tried, " <> T.pack (show (length $ mutSurvivors mutationOutput)) <> " survived"
+            , noConcerns = survivorConcerns mutationOutput
+            }
 
-      witnessReport = WitnessReport
-        { wrObservations = [mutationObservation]
-        , wrNarrative = ""  -- Will be filled in by witness
-        , wrConcerns = survivorConcerns mutationOutput
-        , wrSuggestions = survivorSuggestions mutationOutput
-        }
+          witnessReport = WitnessReport
+            { wrObservations = [mutationObservation]
+            , wrNarrative = ""  -- Will be filled in by witness
+            , wrConcerns = survivorConcerns mutationOutput
+            , wrSuggestions = survivorSuggestions mutationOutput
+            }
 
-  pure $ gotoChoice @"hWitness" witnessReport
+      pure $ gotoChoice @"hWitness" witnessReport
 
 
 -- | Derive test suite verdict from mutation output.

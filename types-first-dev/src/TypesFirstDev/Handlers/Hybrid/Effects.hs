@@ -23,6 +23,7 @@ import Tidepool.Effect.ClaudeCode (ClaudeCodeExec)
 import Tidepool.Effects.Worktree (Worktree)
 import Tidepool.Graph.Memory (Memory)
 
+import TypesFirstDev.Effect.Build (Build)
 import TypesFirstDev.Types.Hybrid
 
 
@@ -31,10 +32,20 @@ import TypesFirstDev.Types.Hybrid
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Effect stack for hybrid workflow handlers.
+--
+-- Effects are listed innermost-first:
+-- - Error: Workflow failures (build, test, stuck patterns)
+-- - Memory: Session state (stashes, cost tracking)
+-- - Reader: Immutable config (StackSpec)
+-- - Build: Cabal build/test operations
+-- - ClaudeCodeExec: LLM agent spawning
+-- - Worktree: Git worktree management
+-- - IO: Base effect
 type HybridEffects =
   '[ Error WorkflowError
    , Memory SessionContext
    , Reader StackSpec
+   , Build
    , ClaudeCodeExec
    , Worktree
    , IO
@@ -52,6 +63,8 @@ data SessionContext = SessionContext
   , scConflictStash        :: Maybe ConflictState    -- For hConflictResolve LLM join
   , scValidatedStash       :: Maybe ValidatedState   -- For hPostValidate → hWitness join
   , scMutationResultStash  :: Maybe MutationAdversaryResult  -- For hMutationAdversary → hWitness join
+  , scValidationFailureStash :: Maybe ValidationFailure  -- For hFix LLM join
+  , scMutationCtxStash     :: Maybe MutationTemplateCtx  -- For hMutationAdversary LLM join
   }
 
 
@@ -65,6 +78,8 @@ initialSessionContext sessionId = SessionContext
   , scConflictStash = Nothing
   , scValidatedStash = Nothing
   , scMutationResultStash = Nothing
+  , scValidationFailureStash = Nothing
+  , scMutationCtxStash = Nothing
   }
 
 

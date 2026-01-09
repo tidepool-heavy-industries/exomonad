@@ -20,19 +20,29 @@ module TypesFirstDev.Handlers.Hybrid.Validation
 
 import Control.Monad (unless)
 import Control.Monad.Freer (Eff, sendM)
-import Control.Monad.Freer.Error (Error, throwError)
-import Control.Monad.Freer.Reader (Reader, ask)
+import Control.Monad.Freer.Error (throwError)
+import Control.Monad.Freer.Reader (ask)
+import Data.Char (isAlphaNum)
 import Data.List (nub)
+import Data.Maybe (mapMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 
-import Tidepool.Effect.ClaudeCode (ClaudeCodeExec)
-import Tidepool.Effects.Worktree (Worktree)
-import Tidepool.Graph.Goto (GotoChoice, To, gotoChoice)
-import Tidepool.Graph.Memory (Memory, getMem, updateMem)
+import Tidepool.Graph.Goto
+  ( GotoChoice
+  , To
+  , ClaudeCodeLLMHandler(..)
+  , ClaudeCodeResult(..)
+  , gotoChoice
+  )
+import Tidepool.Graph.Memory (getMem, updateMem)
+import Tidepool.Graph.Types (ModelChoice(..))
 
+import TypesFirstDev.Effect.Build (testWithDetails)
+import qualified TypesFirstDev.Effect.Build as Build
 import TypesFirstDev.Types.Hybrid
 import TypesFirstDev.Handlers.Hybrid.Effects (HybridEffects, SessionContext(..), WorkflowError(..))
+import TypesFirstDev.Templates.Hybrid (hFixCompiled)
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -51,8 +61,7 @@ hValidateHandler mergedState = do
   -- Run cabal test in the merge worktree
   sendM $ putStrLn $ "[VALIDATE] Running tests in " <> worktree
 
-  -- TODO: Actually run cabal test via Worktree effect
-  -- For now, simulate test execution
+  -- Run tests via Build effect
   testOutput <- runTests worktree
 
   case testOutput of
@@ -87,81 +96,129 @@ hValidateHandler mergedState = do
       pure $ gotoChoice @"hFix" validationFailure
 
 
--- | Test execution result
-data TestResult
+-- | Local test result type for routing decisions.
+data LocalTestResult
   = TestsPassed Int  -- number of tests
   | TestsFailed [StructuredFailure]
 
--- | Run tests in the given worktree
--- TODO: Implement actual test execution via Worktree effect
-runTests :: FilePath -> Eff HybridEffects TestResult
-runTests _worktree = do
-  -- Placeholder: In reality, would run `cabal test` and parse output
-  -- For now, simulate success
-  pure $ TestsPassed 10
+-- | Run tests in the given worktree using Build effect.
+runTests :: FilePath -> Eff HybridEffects LocalTestResult
+runTests worktree = do
+  sendM $ putStrLn $ "[VALIDATE] Running: cabal test --test-show-details=always"
+
+  result <- testWithDetails worktree
+
+  if Build.trSuccess result
+    then do
+      sendM $ putStrLn "[VALIDATE] Test run succeeded"
+      pure $ TestsPassed (Build.trPassedCount result)
+    else do
+      sendM $ putStrLn $ "[VALIDATE] Test run failed (" <> show (Build.trFailedCount result) <> " failures)"
+      -- Convert Build.TestFailure to StructuredFailure
+      let failures = map convertFailure (Build.trFailures result)
+      if null failures
+        then do
+          -- Build failure, not test failure - create a parse error
+          sendM $ putStrLn "[VALIDATE] No test failures parsed, likely build error"
+          pure $ TestsFailed [StructuredFailure
+            { sfPropertyName = "build"
+            , sfFailureType = ParseError
+            , sfCounterexample = Nothing
+            , sfExpected = Nothing
+            , sfActual = Nothing
+            , sfMessage = T.take 500 (Build.trOutput result <> Build.trErrors result)
+            }]
+        else pure $ TestsFailed failures
+
+-- | Convert Build.TestFailure to StructuredFailure
+convertFailure :: Build.TestFailure -> StructuredFailure
+convertFailure bf = StructuredFailure
+  { sfPropertyName = Build.tfName bf
+  , sfFailureType = PropertyFailed  -- Default; Build effect doesn't distinguish
+  , sfCounterexample = Build.tfCounterexample bf
+  , sfExpected = Nothing
+  , sfActual = Nothing
+  , sfMessage = Build.tfMessage bf
+  }
 
 
 -- ════════════════════════════════════════════════════════════════════════════
--- FIX HANDLER (Logic Node with internal ClaudeCode call)
+-- FIX HANDLER (LLM Node with ClaudeCode)
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Handler for hFix node.
 -- Checks exit conditions, fixes implementation based on test failures.
 --
--- Note: Although this is a LogicNode in the graph, it internally calls
--- ClaudeCode to perform the fix. This gives us control over exit conditions
--- before and after the LLM call.
+-- Uses ClaudeCodeLLMHandler pattern:
+-- - Before: Check exit conditions, stash ValidationFailure
+-- - LLM: ClaudeCode analyzes and fixes failures
+-- - After: Update understanding state, route back to validate
 hFixHandler
-  :: ValidationFailure
-  -> Eff HybridEffects (GotoChoice '[To "hValidate" MergedState])
-hFixHandler validationFailure = do
-  spec <- ask @StackSpec
-  let mergedState = vfMergedState validationFailure
-      understanding = mergedState.msUnderstanding
-      maxAttempts = spec.specStrictness.scMaxFixAttempts
+  :: ClaudeCodeLLMHandler
+       'Haiku                                -- model
+       'Nothing                              -- cwd (Nothing = use default)
+       ValidationFailure                     -- input
+       FixAgentOutput                        -- schema
+       '[To "hValidate" MergedState]         -- targets
+       HybridEffects                         -- effects
+       FixTemplateCtx                        -- template context type
+hFixHandler = ClaudeCodeLLMHandler @'Haiku @'Nothing
+  Nothing         -- no system template
+  hFixCompiled    -- user template
+  buildFixContext -- before: checks exit conditions, builds context
+  routeAfterFix   -- after: updates understanding, routes back
+  where
+    buildFixContext :: ValidationFailure -> Eff HybridEffects FixTemplateCtx
+    buildFixContext validationFailure = do
+      spec <- ask @StackSpec
+      let mergedState = vfMergedState validationFailure
+          understanding = mergedState.msUnderstanding
+          maxAttempts = spec.specStrictness.scMaxFixAttempts
 
-  -- Check exit conditions BEFORE calling LLM
-  checkExitConditions understanding
+      -- Check exit conditions BEFORE calling LLM
+      checkExitConditions understanding
 
-  -- Count current attempt
-  let attemptNum = length (usFixesApplied understanding) + 1
-  sendM $ putStrLn $ "[FIX] Attempt " <> show attemptNum <> "/" <> show maxAttempts
+      -- Count current attempt
+      let attemptNum = length (usFixesApplied understanding) + 1
+      sendM $ putStrLn $ "[FIX] Attempt " <> show attemptNum <> "/" <> show maxAttempts
 
-  -- Check max attempts
-  unless (attemptNum <= maxAttempts) $
-    throwError $ MaxAttemptsExceeded attemptNum
+      -- Check max attempts
+      unless (attemptNum <= maxAttempts) $
+        throwError $ MaxAttemptsExceeded attemptNum
 
-  -- Build context for fix template
-  let fixCtx = FixTemplateCtx
+      -- Stash ValidationFailure for after-handler to retrieve
+      updateMem (\ctx -> ctx { scValidationFailureStash = Just validationFailure })
+
+      pure FixTemplateCtx
         { failures = vfFailures validationFailure
         , understanding = understanding
         , fixFunctions = getFunctionsFromMergedState mergedState
         , worktreePath = msMergeWorktree mergedState
         }
 
-  -- TODO: Call ClaudeCode with fix template
-  -- For now, simulate a fix
-  sendM $ putStrLn "[FIX] Calling ClaudeCode to analyze and fix failures..."
+    routeAfterFix :: ClaudeCodeResult FixAgentOutput -> Eff HybridEffects (GotoChoice '[To "hValidate" MergedState])
+    routeAfterFix ccResult = do
+      -- Retrieve stashed ValidationFailure
+      ctx <- getMem @SessionContext
+      case ctx.scValidationFailureStash of
+        Nothing -> error "BUG: ValidationFailure not stashed before LLM call"
+        Just validationFailure -> do
+          let mergedState = vfMergedState validationFailure
+              understanding = mergedState.msUnderstanding
+              output = ccResult.ccrParsedOutput
+              attemptNum = length (usFixesApplied understanding) + 1
 
-  -- Simulate fix result
-  let fixResult = FixAgentOutput
-        { fixChanges = []  -- Would come from LLM
-        , fixBuildPassed = True
-        , fixCommitMsg = "fix: address test failures"
-        , fixBlocker = Nothing
-        }
+          -- Update understanding with applied fixes
+          let updatedUnderstanding = understanding
+                { usFixesApplied = usFixesApplied understanding ++ fixChanges output
+                , usLearnings = usLearnings understanding ++ ["Applied fix attempt " <> T.pack (show attemptNum)]
+                , usConverging = checkConvergence understanding (vfNewPatterns validationFailure)
+                }
+              updatedMerged = mergedState
+                { msUnderstanding = updatedUnderstanding
+                }
 
-  -- Update understanding with applied fixes
-  let updatedUnderstanding = understanding
-        { usFixesApplied = usFixesApplied understanding ++ fixChanges fixResult
-        , usLearnings = usLearnings understanding ++ ["Applied fix attempt " <> T.pack (show attemptNum)]
-        , usConverging = checkConvergence understanding (vfNewPatterns validationFailure)
-        }
-      updatedMerged = mergedState
-        { msUnderstanding = updatedUnderstanding
-        }
-
-  pure $ gotoChoice @"hValidate" updatedMerged
+          pure $ gotoChoice @"hValidate" updatedMerged
 
 
 -- | Check exit conditions before attempting fix
@@ -232,10 +289,108 @@ hPostValidateHandler validatedState = do
 -- UTILITIES
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Parse test output into structured failures
--- TODO: Implement actual QuickCheck output parsing
+-- | Parse test output into structured failures.
+-- Handles QuickCheck/HSpec output format.
+--
+-- QuickCheck failure format:
+-- @
+-- *** Failed! Falsified (after 5 tests):
+-- [1,2,3]
+-- prop_pushPopInverse:                             FAIL
+-- @
 parseTestOutput :: Text -> [StructuredFailure]
-parseTestOutput _output = []
+parseTestOutput output =
+  let blocks = T.splitOn "*** Failed!" output
+      -- Skip the first block (before any failures)
+      failureBlocks = drop 1 blocks
+  in mapMaybe parseFailureBlock failureBlocks
+
+-- | Parse a single failure block into a StructuredFailure
+parseFailureBlock :: Text -> Maybe StructuredFailure
+parseFailureBlock block =
+  let lines' = T.lines block
+      -- First line contains the failure message (e.g., "Falsified (after 5 tests):")
+      msg = maybe "" T.strip (listToMaybe lines')
+      -- Extract property name from the block
+      propName = extractPropertyName block
+      -- Extract counterexample from lines after the message
+      counterex = extractCounterexample (drop 1 lines')
+      -- Determine failure type from message
+      failType = detectFailureType msg
+  in if T.null propName
+     then Nothing
+     else Just StructuredFailure
+       { sfPropertyName = propName
+       , sfFailureType = failType
+       , sfCounterexample = counterex
+       , sfExpected = Nothing
+       , sfActual = Nothing
+       , sfMessage = T.take 200 msg
+       }
+
+-- | Extract property name from failure block.
+-- Looks for patterns like "prop_pushPopInverse" or "property: pushPopInverse"
+extractPropertyName :: Text -> Text
+extractPropertyName block =
+  -- Look for prop_ prefix
+  case T.breakOn "prop_" block of
+    (_, rest) | not (T.null rest) ->
+      let propWithPrefix = T.takeWhile isAlphaNumOrUnderscore rest
+      in if T.null propWithPrefix then fallbackExtract block else propWithPrefix
+    _ -> fallbackExtract block
+  where
+    isAlphaNumOrUnderscore c = isAlphaNum c || c == '_'
+
+    -- Fallback: look for ":property" or "Test:" patterns
+    fallbackExtract blk =
+      let lines' = T.lines blk
+          testLines = filter hasTestName lines'
+      in maybe "unknown" extractTestName (listToMaybe testLines)
+
+    hasTestName line =
+      "FAIL" `T.isInfixOf` line ||
+      "Test:" `T.isInfixOf` line
+
+    extractTestName line =
+      -- Try to extract the test name from patterns like "test_name: FAIL"
+      let stripped = T.strip line
+          colonParts = T.splitOn ":" stripped
+      in maybe "unknown" T.strip (listToMaybe colonParts)
+
+-- | Extract counterexample from failure output lines.
+-- QuickCheck shows the counterexample on lines after the failure message.
+extractCounterexample :: [Text] -> Maybe Text
+extractCounterexample lines' =
+  let -- Filter out non-counterexample lines
+      counterexLines = filter isCounterexampleLine lines'
+      combined = T.intercalate "\n" (take 3 counterexLines)
+  in if T.null combined then Nothing else Just combined
+  where
+    isCounterexampleLine line =
+      let stripped = T.strip line
+      in not (T.null stripped) &&
+         not ("prop_" `T.isPrefixOf` stripped) &&
+         not ("***" `T.isPrefixOf` stripped) &&
+         not ("====" `T.isPrefixOf` stripped) &&
+         not ("FAIL" `T.isSuffixOf` stripped) &&
+         not ("PASS" `T.isSuffixOf` stripped) &&
+         not ("Use --seed" `T.isPrefixOf` stripped)
+
+-- | Detect failure type from message.
+detectFailureType :: Text -> FailureType
+detectFailureType msg
+  | "Falsified" `T.isInfixOf` msg = PropertyFailed
+  | "Exception" `T.isInfixOf` msg = ExceptionThrown
+  | "error" `T.isInfixOf` T.toLower msg = ExceptionThrown
+  | "Timeout" `T.isInfixOf` msg = Timeout
+  | "undefined" `T.isInfixOf` T.toLower msg = UndefinedHit
+  | "Prelude.undefined" `T.isInfixOf` msg = UndefinedHit
+  | otherwise = PropertyFailed  -- Default to PropertyFailed for QuickCheck
+
+-- | Safe head
+listToMaybe :: [a] -> Maybe a
+listToMaybe [] = Nothing
+listToMaybe (x:_) = Just x
 
 
 -- | Extract failure patterns from structured failures
@@ -255,9 +410,6 @@ extractFailurePatterns failures =
       , fpCategory = maybe ParseError sfFailureType (listToMaybe fs)
       , fpOccurrences = length fs
       }
-
-    listToMaybe [] = Nothing
-    listToMaybe (x:_) = Just x
 
 
 -- | Merge old and new patterns, incrementing occurrence counts

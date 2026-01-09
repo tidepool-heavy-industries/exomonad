@@ -18,7 +18,7 @@ module TypesFirstDev.Handlers.Hybrid.Merge
   ) where
 
 import Control.Monad.Freer (Eff, sendM)
-import Control.Monad.Freer.Reader (Reader, ask)
+import Control.Monad.Freer.Reader (ask)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
@@ -27,8 +27,10 @@ import System.Process (readProcessWithExitCode)
 import System.Directory (withCurrentDirectory)
 import System.FilePath ((</>))
 
-import Tidepool.Effect.ClaudeCode (ClaudeCodeExec)
 import Tidepool.Effects.Worktree (Worktree, createWorktree, WorktreeSpec(..), WorktreePath(..))
+
+import TypesFirstDev.Effect.Build (testWithDetails, buildAll)
+import qualified TypesFirstDev.Effect.Build as Build
 import Tidepool.Graph.Goto
   ( GotoChoice
   , To
@@ -102,14 +104,13 @@ hVerifyTDDHandler blindResults = do
       -> Eff HybridEffects (GotoChoice '[To "hMerge" VerifiedResults, To "hTestsReject" TrivialTestsError])
     verifyWithPath results projectPath attempt = do
       -- Run tests on the skeleton (impl stubs are undefined)
-      (exitCode, testOut, testErr) <- sendM $ withCurrentDirectory projectPath $
-        readProcessWithExitCode "cabal" ["test", "--test-show-details=always"] ""
+      testResult <- testWithDetails projectPath
 
-      case exitCode of
-        ExitSuccess -> do
+      if Build.trSuccess testResult
+        then do
           -- Tests passed on skeleton - BAD! Tests are trivial/broken
           sendM $ putStrLn "[VERIFY_TDD] FAILED - Tests passed on skeleton (they should fail)"
-          sendM $ putStrLn $ "  Output: " <> take 500 testOut
+          sendM $ putStrLn $ "  Output: " <> T.unpack (T.take 500 (Build.trOutput testResult))
 
           let feedback = TrivialTestsFeedback
                 { whyRejected = "Tests passed on skeleton with undefined stubs. Tests must fail on skeleton to verify they actually exercise the implementation."
@@ -125,10 +126,10 @@ hVerifyTDDHandler blindResults = do
 
           pure $ gotoChoice @"hTestsReject" trivialError
 
-        ExitFailure _ -> do
+        else do
           -- Tests failed on skeleton - GOOD! TDD verified
           sendM $ putStrLn "[VERIFY_TDD] SUCCESS - Tests fail on skeleton (as expected)"
-          sendM $ putStrLn $ "  Error output (expected): " <> take 200 testErr
+          sendM $ putStrLn $ "  Error output (expected): " <> T.unpack (T.take 200 (Build.trErrors testResult))
 
           let verifiedResults = VerifiedResults
                 { vrBlindResults = results
@@ -216,11 +217,10 @@ hMergeHandler verifiedResults = do
 
               -- Both cherry-picks succeeded - verify build
               sendM $ putStrLn "[MERGE] Verifying merged code builds..."
-              (buildCode, buildOut, buildErr) <- sendM $ withCurrentDirectory mergePath $
-                readProcessWithExitCode "cabal" ["build", "-v0", "all"] ""
+              buildResult <- buildAll mergePath
 
-              case buildCode of
-                ExitSuccess -> do
+              if Build.brSuccess buildResult
+                then do
                   sendM $ putStrLn "[MERGE] Build passed - routing to validation"
                   let mergedState = MergedState
                         { msVerifiedResults = verifiedResults
@@ -229,8 +229,8 @@ hMergeHandler verifiedResults = do
                         }
                   pure $ gotoChoice @"hValidate" mergedState
 
-                ExitFailure _ -> do
-                  sendM $ putStrLn $ "[MERGE] Build failed after merge: " <> buildErr
+                else do
+                  sendM $ putStrLn $ "[MERGE] Build failed after merge: " <> T.unpack (Build.brErrors buildResult)
                   -- Build failure after clean merge - treat as conflict
                   routeToConflictResolve verifiedResults mergePath []
 
