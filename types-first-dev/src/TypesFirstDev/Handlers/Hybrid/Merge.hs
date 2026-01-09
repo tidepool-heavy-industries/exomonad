@@ -37,7 +37,7 @@ import Tidepool.Graph.Goto
   , gotoChoice
   )
 import Tidepool.Graph.Memory (Memory, getMem, updateMem)
-import Tidepool.Graph.Types (ModelChoice(..))
+import Tidepool.Graph.Types (ModelChoice(..), HList(..))
 
 import TypesFirstDev.Types.Hybrid
 import TypesFirstDev.Templates.Hybrid (hConflictResolveCompiled)
@@ -48,13 +48,17 @@ import TypesFirstDev.Handlers.Hybrid.Effects (HybridEffects, SessionContext(..))
 -- JOIN HANDLER (Logic Node - Barrier)
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Handler for hJoin node.
+-- | Handler for hJoin node (BarrierNode).
 -- Collects results from parallel tests and impl agents.
--- Simple passthrough - the actual barrier logic is in WS2's hFork.
+-- Receives HList from barrier, constructs BlindResults.
 hJoinHandler
-  :: BlindResults
+  :: HList '[TestsResult, ImplResult]
   -> Eff HybridEffects (GotoChoice '[To "hVerifyTDD" BlindResults])
-hJoinHandler blindResults = do
+hJoinHandler (testsResult ::: implResult ::: HNil) = do
+  let blindResults = BlindResults
+        { brTests = testsResult
+        , brImpl = implResult
+        }
   sendM $ putStrLn "[JOIN] Collected blind results from parallel agents"
   sendM $ putStrLn $ "  Tests worktree: " <> blindResults.brTests.testsWorktree
   sendM $ putStrLn $ "  Impl worktree: " <> blindResults.brImpl.implWorktree
@@ -108,9 +112,9 @@ hVerifyTDDHandler blindResults = do
           sendM $ putStrLn $ "  Output: " <> take 500 testOut
 
           let feedback = TrivialTestsFeedback
-                { ttfWhyRejected = "Tests passed on skeleton with undefined stubs. Tests must fail on skeleton to verify they actually exercise the implementation."
-                , ttfPropertiesWrote = map (pwName) results.brTests.testsOutput.testsProperties
-                , ttfSuggestion = "Write tests that call the actual functions and check their behavior. Properties like `prop_pushPopInverse` should fail when push/pop are undefined."
+                { whyRejected = "Tests passed on skeleton with undefined stubs. Tests must fail on skeleton to verify they actually exercise the implementation."
+                , propertiesWrote = map (pwName) results.brTests.testsOutput.testsProperties
+                , suggestion = "Write tests that call the actual functions and check their behavior. Properties like `prop_pushPopInverse` should fail when push/pop are undefined."
                 }
               trivialError = TrivialTestsError
                 { tteBlindResults = results
@@ -148,7 +152,7 @@ hTestsRejectHandler trivialError = do
   sendM $ putStrLn "[TESTS_REJECT] Handling trivial tests"
   sendM $ putStrLn $ "  Attempt: " <> show trivialError.tteAttempt
   sendM $ putStrLn $ "  Message: " <> T.unpack trivialError.tteMessage
-  sendM $ putStrLn $ "  Why rejected: " <> T.unpack trivialError.tteFeedback.ttfWhyRejected
+  sendM $ putStrLn $ "  Why rejected: " <> T.unpack trivialError.tteFeedback.whyRejected
 
   -- Retrieve GatedState from memory to route back to hFork
   ctx <- getMem @SessionContext

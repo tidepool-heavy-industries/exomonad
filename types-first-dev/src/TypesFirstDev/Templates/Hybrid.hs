@@ -10,16 +10,24 @@ module TypesFirstDev.Templates.Hybrid
   , HTypeAdversaryTpl
   , HTypesFixTpl
   , HConflictResolveTpl
+    -- WS4 templates
   , HFixTpl
   , HMutationAdversaryTpl
+    -- Parallel blind execution (WS2)
+  , HTestsTpl
+  , HImplTpl
 
     -- * Compiled Templates
   , hTypesCompiled
   , hTypeAdversaryCompiled
   , hTypesFixCompiled
   , hConflictResolveCompiled
+    -- WS4
   , hFixCompiled
   , hMutationAdversaryCompiled
+    -- Parallel execution (WS2)
+  , hTestsCompiled
+  , hImplCompiled
   ) where
 
 import Text.Parsec.Pos (SourcePos)
@@ -31,8 +39,12 @@ import TypesFirstDev.Context.Hybrid
   , TypeAdversaryTemplateCtx(..)
   , TypesFixTemplateCtx(..)
   , ConflictResolveTemplateCtx(..)
+    -- WS4
   , FixTemplateCtx(..)
   , MutationTemplateCtx(..)
+    -- Parallel execution (WS2)
+  , TestsTemplateCtx(..)
+  , ImplTemplateCtx(..)
   )
 
 
@@ -167,3 +179,47 @@ instance TemplateDef HMutationAdversaryTpl where
   templateCompiled = hMutationAdversaryCompiled
 
   buildContext = error "HMutationAdversaryTpl.buildContext should not be called for ClaudeCode handlers"
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- PARALLEL: TESTS TEMPLATE (WS2)
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Compile the tests agent template at build time.
+hTestsCompiled :: TypedTemplate TestsTemplateCtx SourcePos
+hTestsCompiled = $(typedTemplateFile ''TestsTemplateCtx "templates/hybrid/tests.jinja")
+
+-- | Template type marker for the tests agent node.
+data HTestsTpl
+
+instance TemplateDef HTestsTpl where
+  type TemplateContext HTestsTpl = TestsTemplateCtx
+  type TemplateConstraint HTestsTpl es = ()
+
+  templateName = "hybrid-tests"
+  templateDescription = "Write QuickCheck properties (blind to impl)"
+  templateCompiled = hTestsCompiled
+
+  buildContext = error "HTestsTpl.buildContext should not be called for ClaudeCode handlers"
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- PARALLEL: IMPL TEMPLATE (WS2)
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Compile the impl agent template at build time.
+hImplCompiled :: TypedTemplate ImplTemplateCtx SourcePos
+hImplCompiled = $(typedTemplateFile ''ImplTemplateCtx "templates/hybrid/impl.jinja")
+
+-- | Template type marker for the impl agent node.
+data HImplTpl
+
+instance TemplateDef HImplTpl where
+  type TemplateContext HImplTpl = ImplTemplateCtx
+  type TemplateConstraint HImplTpl es = ()
+
+  templateName = "hybrid-impl"
+  templateDescription = "Implement functions (blind to tests)"
+  templateCompiled = hImplCompiled
+
+  buildContext = error "HImplTpl.buildContext should not be called for ClaudeCode handlers"
