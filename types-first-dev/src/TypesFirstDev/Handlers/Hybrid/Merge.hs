@@ -25,6 +25,7 @@ import qualified Data.Text.IO as TIO
 import System.Exit (ExitCode(..))
 import System.Process (readProcessWithExitCode)
 import System.Directory (withCurrentDirectory)
+import System.FilePath ((</>))
 
 import Tidepool.Effect.ClaudeCode (ClaudeCodeExec)
 import Tidepool.Effects.Worktree (Worktree, createWorktree, WorktreeSpec(..), WorktreePath(..))
@@ -278,7 +279,7 @@ getConflictedFiles dir = do
 -- | Read a conflicted file's content including conflict markers.
 readConflictedFile :: FilePath -> FilePath -> IO (FilePath, Text)
 readConflictedFile dir relPath = do
-  content <- TIO.readFile (dir <> "/" <> relPath)
+  content <- TIO.readFile (dir </> relPath)
   pure (relPath, content)
 
 
