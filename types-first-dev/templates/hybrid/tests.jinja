@@ -9,7 +9,6 @@ you cannot see how the functions are implemented, only their specifications.
 ## Type Under Test
 
 **Type**: `{{ typeName }}`
-**Constructors**: {{ constructors | join(", ") }}
 
 ## Functions to Test
 
@@ -20,15 +19,14 @@ you cannot see how the functions are implemented, only their specifications.
 **Brief**: {{ fn.brief }}
 **Behavior**: {{ fn.behavior }}
 
-**Concrete Examples** (ground your properties in these):
+**Examples**:
 {% for ex in fn.examples %}
-- {{ ex.description }}: `{{ ex.input }}` → `{{ ex.expected }}`{% if ex.edgeCase %} (edge case){% endif %}
+- {{ ex }}
 {% endfor %}
 
-**Property Sketches** (implement these as QuickCheck properties):
+**Properties to verify**:
 {% for prop in fn.properties %}
-- **{{ prop.name }}** ({{ prop.type }}): {{ prop.description }}
-  - Invariant: `{{ prop.invariant }}`
+- {{ prop }}
 {% endfor %}
 
 {% endfor %}
@@ -41,31 +39,14 @@ you cannot see how the functions are implemented, only their specifications.
    - Run `cabal build` to verify compilation
    - Run `cabal test` to verify tests **FAIL on undefined stubs**
 
-2. **Return structured output** describing what you wrote:
-   - Which properties you wrote
-   - Coverage report
-   - Self-verification result
+2. **Return structured output** describing what you wrote
 
 ## Output Schema
 
 Return JSON matching `TestsAgentOutput`:
-- `testsProperties`: List of properties written (see PropertyWritten below)
-- `testsCommitMsg`: Git commit message
-- `strategyApproach`: Prose describing how you approached property design
-- `propertyCategories`: List of PropertyCategory values covered (Invariant, EdgeCase, Boundary, Composition, ErrorHandling, Other)
-- `uncoveredPatterns`: List of patterns NOT covered (actionable - what's missing)
-- `testsBlocker`: If blocked, explain (otherwise null)
-
-For each property in `testsProperties`:
-- `pwName`: Property name (e.g., "prop_pushPopInverse")
-- `pwTargetFunctions`: Functions tested by this property
-- `pwPropertyType`: One of Inverse, Idempotent, etc.
-- `pwDescription`: What the property verifies
-- `pwCoversExamples`: Indices of examples this property covers
-- `pwCoversSketch`: Name of PropertySketch this implements (or null)
-
-**Note**: Coverage metrics are computed by the handler from your `testsProperties`.
-Focus on writing comprehensive properties - the system tracks coverage automatically.
+- `propertiesWritten`: List of property names you wrote
+- `commitMessage`: Git commit message
+- `blocker`: If blocked, explain (otherwise null)
 
 ## CRITICAL: Tests Must Exercise Code
 
@@ -75,43 +56,20 @@ The skeleton has `undefined` stubs. The handler will verify your tests fail
 on the skeleton (proving they actually exercise the code). If your tests pass
 on undefined stubs, they're trivial and will be rejected.
 
-Write properties that:
-1. Call the function under test
-2. Assert meaningful invariants
-3. Use generated inputs (QuickCheck)
-
 {% if priorFeedback %}
 ## Prior Rejection Feedback
 
 **Why rejected**: {{ priorFeedback.whyRejected }}
-**Properties you wrote**: {{ priorFeedback.propertiesWrote | join(", ") }}
 
-### What to Do Differently
-{{ priorFeedback.suggestion }}
-
-> The handler will detect if you write the same properties again.
 > Write NEW properties that actually call the functions.
 {% endif %}
 
 {% if hardeningHints %}
 ## Hardening Hints (from Type Adversary)
 
-The type adversary found these concerns - consider writing properties that
-exercise these edge cases:
-
 {% for hint in hardeningHints %}
-- **{{ hint.source }}**: {{ hint.context }}
-  - Guidance: {{ hint.guidance }}
+- **{{ hint.source }}**: {{ hint.guidance }}
 {% endfor %}
-{% endif %}
-
-{% if echoes %}
-## Echo Channel (shape, not content)
-
-The impl agent is working on these functions: {{ echoes.fromImpl | join(", ") }}
-
-You cannot see their implementation, but knowing what they're focused on
-may help you prioritize which properties to write first.
 {% endif %}
 
 ## Your Task

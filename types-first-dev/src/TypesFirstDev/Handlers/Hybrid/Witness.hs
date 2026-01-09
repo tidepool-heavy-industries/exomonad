@@ -15,7 +15,6 @@ module TypesFirstDev.Handlers.Hybrid.Witness
 
 import Control.Monad.Freer (Eff, sendM)
 import Control.Monad.Freer.Reader (Reader, ask)
-import Data.List (nub)
 import Data.Text (Text)
 import qualified Data.Text as T
 
@@ -27,21 +26,18 @@ import TypesFirstDev.Types.Hybrid
 import TypesFirstDev.Handlers.Hybrid.Effects (HybridEffects, SessionContext(..))
 
 
--- | Compute coverage from properties (handler-computed, not LLM-reported).
--- VALUE-NEUTRAL: LLM reports what it wrote, handler computes coverage metrics.
-computeCoverage :: [FunctionSpec] -> [PropertyWritten] -> CoverageReport
-computeCoverage specFns props = CoverageReport
-  { crFunctionsCovered = covered
-  , crFunctionsUncovered = uncovered
-  , crExamplesCovered = length $ nub $ concatMap pwCoversExamples props
-  , crExamplesTotal = sum $ map (length . examples) specFns
-  , crSketchesCovered = nub [s | pw <- props, Just s <- [pwCoversSketch pw]]
-  , crSketchesUncovered = []  -- Would need spec sketches to compute
+-- | Create a stub coverage report.
+-- With simplified schema, we no longer have structured property data.
+-- TODO: Restore coverage computation when schema is re-enriched.
+stubCoverageReport :: CoverageReport
+stubCoverageReport = CoverageReport
+  { crFunctionsCovered = []
+  , crFunctionsUncovered = []
+  , crExamplesCovered = 0
+  , crExamplesTotal = 0
+  , crSketchesCovered = []
+  , crSketchesUncovered = []
   }
-  where
-    specFnNames = map (.name) specFns  -- Disambiguate: FunctionSpec.name
-    covered = nub $ concatMap pwTargetFunctions props
-    uncovered = filter (`notElem` covered) specFnNames
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -161,9 +157,8 @@ assembleHybridResult spec validatedState maybeMutation witnessReport =
       testsResult = brTests blindResults
       testsAgentOut = TypesFirstDev.Types.Hybrid.testsOutput testsResult
 
-      -- Compute coverage from properties (handler-computed, not LLM-reported)
-      -- Note: Without full spec, we can only report what's covered, not what's missing
-      coverage = computeCoverage [] (testsProperties testsAgentOut)
+      -- Coverage is stubbed until schema is re-enriched with structured property data
+      coverage = stubCoverageReport
 
       -- Determine success based on strictness config
       success = case maybeMutation of

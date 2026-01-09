@@ -58,7 +58,6 @@ hForkHandler gated = do
       -- Build TestsTemplateCtx
       testsCtx = TestsTemplateCtx
         { typeName = typesOutput.typeName
-        , constructors = typesOutput.constructors
         , functions = typesOutput.functions
         , testPath = spec.specTestPath
         , priorFeedback = Nothing  -- First attempt
@@ -69,7 +68,6 @@ hForkHandler gated = do
       -- Build ImplTemplateCtx
       implCtx = ImplTemplateCtx
         { typeName = typesOutput.typeName
-        , constructors = typesOutput.constructors
         , functions = typesOutput.functions
         , implPath = spec.specImplPath
         , echoes = Nothing         -- No crosstalk yet

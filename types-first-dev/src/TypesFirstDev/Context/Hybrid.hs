@@ -62,13 +62,9 @@ instance ToGVal GingerM FunctionSpec where
     , ("signature", toGVal fn.signature)
     , ("brief", toGVal fn.brief)
     , ("behavior", toGVal fn.behavior)
-    , ("examples", list (toGVal <$> toList fn.examples))
-    , ("properties", list (toGVal <$> toList fn.properties))
-    , ("priority", toGVal fn.priority)
-    , ("dependsOn", list (toGVal <$> fn.dependsOn))
+    , ("examples", list (toGVal <$> fn.examples))
+    , ("properties", list (toGVal <$> fn.properties))
     ]
-    where
-      toList = foldr (:) []
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TYPES AGENT OUTPUT
@@ -84,12 +80,9 @@ instance ToGVal GingerM DesignChoice where
 instance ToGVal GingerM TypesAgentOutput where
   toGVal tao = dict
     [ ("typeName", toGVal tao.typeName)
-    , ("typeKind", toGVal tao.typeKind)
     , ("typeDescription", toGVal tao.typeDescription)
-    , ("constructors", list (toGVal <$> tao.constructors))
     , ("functions", list (toGVal <$> tao.functions))
-    , ("imports", list (toGVal <$> tao.imports))
-    , ("designChoices", list (toGVal <$> tao.designChoices))
+    , ("designNotes", toGVal tao.designNotes)
     , ("blocker", toGVal tao.blocker)
     ]
 
@@ -166,7 +159,6 @@ instance ToGVal GingerM TypesTemplateCtx where
 instance ToGVal GingerM TestsTemplateCtx where
   toGVal ctx = dict
     [ ("typeName", toGVal ctx.typeName)
-    , ("constructors", list (toGVal <$> ctx.constructors))
     , ("functions", list (toGVal <$> ctx.functions))
     , ("testPath", toGVal ctx.testPath)
     , ("priorFeedback", toGVal ctx.priorFeedback)
@@ -177,7 +169,6 @@ instance ToGVal GingerM TestsTemplateCtx where
 instance ToGVal GingerM ImplTemplateCtx where
   toGVal ctx = dict
     [ ("typeName", toGVal ctx.typeName)
-    , ("constructors", list (toGVal <$> ctx.constructors))
     , ("functions", list (toGVal <$> ctx.functions))
     , ("implPath", toGVal ctx.implPath)
     , ("echoes", toGVal ctx.echoes)

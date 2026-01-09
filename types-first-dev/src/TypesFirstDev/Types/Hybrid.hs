@@ -46,7 +46,6 @@ module TypesFirstDev.Types.Hybrid
   , TestsAgentOutput(..)
 
     -- * Impl Agent Output (Schema)
-  , FunctionImplemented(..)
   , ImplAgentOutput(..)
 
     -- * Fix Agent Output (Schema)
@@ -267,18 +266,15 @@ data PropertyType
 -- | Complete specification for a function.
 -- Single source of truth - no duplicate name/signature fields.
 --
--- INVARIANT ENFORCED BY TYPES: Both examples AND properties are REQUIRED.
--- Using NonEmpty guarantees at least one element at parse time.
--- NOTE: Field names match template variables for TH validation.
+-- NOTE: Uses regular lists for LLM schema simplicity.
+-- Handler can validate non-empty if needed.
 data FunctionSpec = FunctionSpec
   { name        :: Text                       -- "push"
   , signature   :: Text                       -- "a -> Stack a -> Stack a"
   , brief       :: Text                       -- One-line for code comments
   , behavior    :: Text                       -- Detailed prose for agents
-  , examples    :: NonEmpty ConcreteExample   -- REQUIRED: Type enforces >=1
-  , properties  :: NonEmpty PropertySketch    -- REQUIRED: Type enforces >=1
-  , priority    :: Int                        -- Implementation order hint
-  , dependsOn   :: [Text]                     -- Advisory: ["push"] means impl after push
+  , examples    :: [Text]                     -- Example descriptions (simplified)
+  , properties  :: [Text]                     -- Property descriptions (simplified)
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON, StructuredOutput)
@@ -289,15 +285,13 @@ data FunctionSpec = FunctionSpec
 
 -- | Output from types agent. Semantic descriptions, not code.
 -- The agent WRITES code to disk; this describes what was written.
--- NOTE: Field names match template variables for TH validation.
+--
+-- SIMPLIFIED SCHEMA: Flat structure for reliable LLM JSON generation.
 data TypesAgentOutput = TypesAgentOutput
   { typeName        :: Text             -- "Stack"
-  , typeKind        :: Text             -- "* -> *" or "Type -> Type"
   , typeDescription :: Text             -- Prose: what this type represents
-  , constructors    :: [Text]           -- Constructor names: ["Empty", "Push"]
-  , functions       :: [FunctionSpec]   -- Full specs for each function
-  , imports         :: [Text]           -- Module imports needed
-  , designChoices   :: [DesignChoice]   -- VALUE-NEUTRAL: Structured decisions (was: designNotes)
+  , functions       :: [FunctionSpec]   -- Specs for each function
+  , designNotes     :: Text             -- Free-form design rationale
   , blocker         :: Maybe Text       -- If blocked, explain
   }
   deriving stock (Show, Eq, Generic)
@@ -374,16 +368,11 @@ data CoverageReport = CoverageReport
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON, StructuredOutput)
 
--- | Tests agent output. Describes what was written, not the code.
--- VALUE-NEUTRAL: Removed testsSelfVerified (handler verifies mechanically).
--- Added propertyCategories and uncoveredPatterns for actionable coverage info.
+-- | Tests agent output. SIMPLIFIED for reliable LLM JSON generation.
 data TestsAgentOutput = TestsAgentOutput
-  { testsProperties     :: [PropertyWritten]
-  , propertyCategories  :: [PropertyCategory]  -- VALUE-NEUTRAL: What types of properties
-  , uncoveredPatterns   :: [Text]              -- VALUE-NEUTRAL: What's NOT covered (actionable!)
-  , testsCommitMsg      :: Text                -- For the commit
-  , strategyApproach    :: Text                -- How they thought about it
-  , testsBlocker        :: Maybe Text
+  { propertiesWritten :: [Text]       -- List of property names written
+  , commitMessage     :: Text         -- Git commit message
+  , blocker           :: Maybe Text   -- If blocked, explain
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON, StructuredOutput)
@@ -392,25 +381,12 @@ data TestsAgentOutput = TestsAgentOutput
 -- IMPL AGENT OUTPUT (Schema)
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Description of a function that was implemented.
-data FunctionImplemented = FunctionImplemented
-  { fiName           :: Text            -- "push"
-  , fiApproach       :: Text            -- "Recursive cons-cell construction"
-  , fiComplexity     :: Maybe Text      -- "O(1)" - if agent knows
-  , fiHandlesEdges   :: [Text]          -- Edge cases explicitly handled
-  }
-  deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
-
--- | Impl agent output. Describes implementation decisions, not code.
--- VALUE-NEUTRAL: Removed implBuildPassed (handler verifies mechanically).
--- Replaced implDesignNotes with structured designDecisions.
+-- | Impl agent output. SIMPLIFIED for reliable LLM JSON generation.
 data ImplAgentOutput = ImplAgentOutput
-  { implFunctions      :: [FunctionImplemented]
-  , implDataRepr       :: Text            -- "Recursive ADT with spine"
-  , designDecisions    :: [DesignChoice]  -- VALUE-NEUTRAL: Structured decisions
-  , implCommitMsg      :: Text
-  , implBlocker        :: Maybe Text
+  { functionsImplemented :: [Text]       -- List of function names implemented
+  , designNotes          :: Text         -- How you approached the implementation
+  , commitMessage        :: Text         -- Git commit message
+  , blocker              :: Maybe Text   -- If blocked, explain
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON, StructuredOutput)
@@ -818,7 +794,6 @@ data TypesTemplateCtx = TypesTemplateCtx
 -- NOTE: Field names match template variables for TH validation.
 data TestsTemplateCtx = TestsTemplateCtx
   { typeName       :: Text
-  , constructors   :: [Text]
   , functions      :: [FunctionSpec]
   , testPath       :: FilePath
   , priorFeedback  :: Maybe TrivialTestsFeedback
@@ -832,7 +807,6 @@ data TestsTemplateCtx = TestsTemplateCtx
 -- NOTE: Field names match template variables for TH validation.
 data ImplTemplateCtx = ImplTemplateCtx
   { typeName       :: Text
-  , constructors   :: [Text]
   , functions      :: [FunctionSpec]
   , implPath       :: FilePath
   , echoes         :: Maybe EchoChannel

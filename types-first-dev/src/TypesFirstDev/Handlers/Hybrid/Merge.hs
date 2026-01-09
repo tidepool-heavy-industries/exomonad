@@ -114,7 +114,7 @@ hVerifyTDDHandler blindResults = do
 
           let feedback = TrivialTestsFeedback
                 { whyRejected = "Tests passed on skeleton with undefined stubs. Tests must fail on skeleton to verify they actually exercise the implementation."
-                , propertiesWrote = map (pwName) results.brTests.testsOutput.testsProperties
+                , propertiesWrote = results.brTests.testsOutput.propertiesWritten
                 , suggestion = "Write tests that call the actual functions and check their behavior. Properties like `prop_pushPopInverse` should fail when push/pop are undefined."
                 }
               trivialError = TrivialTestsError
@@ -258,16 +258,17 @@ hMergeHandler verifiedResults = do
       -- Read conflict markers from each file
       conflictedWithContent <- sendM $ mapM (readConflictedFile mergePath) conflictPaths
 
-      -- Format design decisions into context text
-      let implDecisions = designDecisions (results.vrBlindResults.brImpl.implOutput)
-          implContext = T.intercalate "; " $
-            map (\d -> dcArea d <> ": " <> dcChoice d) implDecisions
+      -- Use design notes from impl agent (simplified schema)
+      let implContext = results.vrBlindResults.brImpl.implOutput.designNotes
+          -- Tests context is just a summary of what was written (simplified schema)
+          testsProps = results.vrBlindResults.brTests.testsOutput.propertiesWritten
+          testsContext = "Properties written: " <> T.intercalate ", " testsProps
 
       let conflictState = ConflictState
             { csVerifiedResults = results
             , csMergeWorktree = mergePath
             , csConflictedFiles = conflictedWithContent
-            , csTestsContext = results.vrBlindResults.brTests.testsOutput.strategyApproach
+            , csTestsContext = testsContext
             , csImplContext = implContext
             }
 

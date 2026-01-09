@@ -9,7 +9,6 @@ what properties will be tested, only the function specifications.
 ## Type to Implement
 
 **Type**: `{{ typeName }}`
-**Constructors**: {{ constructors | join(", ") }}
 
 ## Functions to Implement
 
@@ -20,13 +19,10 @@ what properties will be tested, only the function specifications.
 **Brief**: {{ fn.brief }}
 **Behavior**: {{ fn.behavior }}
 
-**Concrete Examples** (your implementation must handle these):
+**Examples**:
 {% for ex in fn.examples %}
-- {{ ex.description }}: `{{ ex.input }}` → `{{ ex.expected }}`{% if ex.edgeCase %} (edge case){% endif %}
+- {{ ex }}
 {% endfor %}
-
-**Dependencies**: {% if fn.dependsOn %}{{ fn.dependsOn | join(", ") }}{% else %}None{% endif %}
-**Priority**: {{ fn.priority }}
 
 {% endfor %}
 
@@ -37,33 +33,15 @@ what properties will be tested, only the function specifications.
    - Follow the type signatures exactly
    - Run `cabal build` to verify compilation passes
 
-2. **Return structured output** describing what you wrote:
-   - Which functions you implemented
-   - Your approach for each
-   - Design decisions
+2. **Return structured output** describing what you wrote
 
 ## Output Schema
 
 Return JSON matching `ImplAgentOutput`:
-- `implFunctions`: List of functions implemented (see FunctionImplemented below)
-- `implDataRepr`: How you represented the data (e.g., "Recursive ADT with spine")
-- `designDecisions`: List of design decisions (see DesignChoice below)
-- `implCommitMsg`: Git commit message
-- `implBlocker`: If blocked, explain (otherwise null)
-
-For each function in `implFunctions`:
-- `fiName`: Function name
-- `fiApproach`: How you implemented it (e.g., "Recursive pattern matching")
-- `fiComplexity`: Time complexity if known (e.g., "O(1)") - null if unsure
-- `fiHandlesEdges`: List of edge cases explicitly handled
-
-For each design decision in `designDecisions`:
-- `dcArea`: Area of the design (e.g., "data representation", "error handling")
-- `dcChoice`: What you chose (e.g., "recursive ADT", "Either-based errors")
-- `dcTradeoff`: What tradeoff this represents (e.g., "memory safety over speed")
-
-**Note**: Build verification is done by the handler after you return.
-Focus on implementing correctly - if the build fails, you'll get feedback.
+- `functionsImplemented`: List of function names you implemented
+- `designNotes`: How you approached the implementation
+- `commitMessage`: Git commit message
+- `blocker`: If blocked, explain (otherwise null)
 
 ## Build Expectation
 
@@ -71,34 +49,21 @@ Focus on implementing correctly - if the build fails, you'll get feedback.
 
 If you encounter build errors:
 1. Fix them before returning
-2. If truly blocked, set `implBlocker` with details
+2. If truly blocked, set `blocker` with details
 
 {% if hardeningHints %}
 ## Hardening Hints (from Type Adversary)
 
-The type adversary found these concerns - consider implementing defensively:
-
 {% for hint in hardeningHints %}
-- **{{ hint.source }}**: {{ hint.context }}
-  - Guidance: {{ hint.guidance }}
+- **{{ hint.source }}**: {{ hint.guidance }}
 {% endfor %}
-{% endif %}
-
-{% if echoes %}
-## Echo Channel (shape, not content)
-
-The tests agent is writing properties for: {{ echoes.fromTests | join(", ") }}
-
-You cannot see their tests, but knowing what properties they're asserting
-may help you ensure your implementation handles those aspects correctly.
 {% endif %}
 
 ## Implementation Guidelines
 
 1. **Follow the behavior description exactly** - it specifies the contract
-2. **Handle all edge cases** - especially those marked in examples
-3. **Respect dependencies** - implement functions in priority order if they depend on each other
-4. **Keep it simple** - prefer clarity over cleverness
+2. **Handle all edge cases** - especially those mentioned in examples
+3. **Keep it simple** - prefer clarity over cleverness
 
 ## Your Task
 

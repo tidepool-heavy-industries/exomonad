@@ -5,7 +5,7 @@ The type adversary found holes in the type design. Fix them.
 ## Current Types
 
 Type: `{{ originalTypes.typeName }}`
-Kind: `{{ originalTypes.typeKind }}`
+{{ originalTypes.typeDescription }}
 
 ```haskell
 {% for fn in originalTypes.functions %}
@@ -50,9 +50,7 @@ Try a DIFFERENT approach this time.
    - Consider using newtypes, smart constructors, or refined types
    - Ensure `cabal build` passes
 
-2. **Return structured output**:
-   - Updated TypesAgentOutput with fixed types
-   - All the same fields as before, but with holes addressed
+2. **Return structured output** (same schema as before)
 
 ## Common Fixes
 
@@ -65,11 +63,8 @@ Try a DIFFERENT approach this time.
 
 Return JSON matching `TypesAgentOutput`:
 - `typeName`: The main type name
-- `typeKind`: The kind
 - `typeDescription`: What this type represents (updated if changed)
-- `constructors`: List of constructor names (may have changed)
-- `functions`: List of FunctionSpec (may have updated signatures)
-- `imports`: Required module imports
+- `functions`: List of function specs (may have updated signatures)
 - `designNotes`: Why you made these changes
 - `blocker`: If still blocked, explain (otherwise null)
 

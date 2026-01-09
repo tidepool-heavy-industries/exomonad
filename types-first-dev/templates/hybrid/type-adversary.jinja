@@ -22,8 +22,7 @@ the original requirements? Can the system enter globally inconsistent state?
 
 ```haskell
 -- Type: {{ types.typeName }}
--- Kind: {{ types.typeKind }}
--- Constructors: {{ types.constructors | join(", ") }}
+-- {{ types.typeDescription }}
 
 {% for fn in types.functions %}
 {{ fn.name }} :: {{ fn.signature }}
@@ -31,11 +30,12 @@ the original requirements? Can the system enter globally inconsistent state?
 {% endfor %}
 ```
 
-## Claimed Invariants
+## Claimed Properties
 
 {% for fn in types.functions %}
+### {{ fn.name }}
 {% for prop in fn.properties %}
-- {{ prop.name }}: {{ prop.invariant }}
+- {{ prop }}
 {% endfor %}
 {% endfor %}
 
