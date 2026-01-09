@@ -1,0 +1,64 @@
+cabal-version:      3.0
+name:               tidepool-actor
+version:            0.1.0.0
+synopsis:           Actor runtime backend for tidepool graphs
+license:            MIT
+author:             Inanna
+build-type:         Simple
+
+common warnings
+    ghc-options: -Wall -Wno-missing-export-lists -Wincomplete-patterns -Wredundant-constraints -Wunused-packages
+
+library
+    import:           warnings
+    exposed-modules:
+        Tidepool.Actor
+        Tidepool.Actor.Types
+        Tidepool.Actor.Mailbox
+        Tidepool.Actor.Spawn
+        Tidepool.Actor.Runtime
+    build-depends:
+        base >= 4.17 && < 5,
+        ki >= 1.0 && < 2,
+        stm >= 2.5 && < 3,
+        aeson >= 2.1 && < 3,
+        containers >= 0.6 && < 1,
+        text >= 2.0 && < 3
+
+    hs-source-dirs:   src
+    default-language: GHC2021
+    default-extensions:
+        DataKinds
+        DeriveAnyClass
+        DeriveGeneric
+        DerivingStrategies
+        GADTs
+        LambdaCase
+        OverloadedRecordDot
+        OverloadedStrings
+        TypeFamilies
+        TypeOperators
+
+test-suite tidepool-actor-tests
+    import:           warnings
+    type:             exitcode-stdio-1.0
+    main-is:          Spec.hs
+    other-modules:
+        MailboxSpec
+        SpawnSpec
+        RuntimeSpec
+        IntegrationSpec
+    build-depends:
+        base >= 4.17 && < 5,
+        hspec >= 2.10 && < 3,
+        ki >= 1.0 && < 2,
+        aeson >= 2.1 && < 3,
+        containers >= 0.6 && < 1,
+        text >= 2.0 && < 3,
+        vector >= 0.12 && < 1,
+        tidepool-actor
+    hs-source-dirs:   test
+    default-language: GHC2021
+    default-extensions:
+        LambdaCase
+        OverloadedStrings
