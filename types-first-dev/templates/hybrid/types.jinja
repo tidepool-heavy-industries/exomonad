@@ -1,0 +1,88 @@
+# Task: Design Types for {{ moduleName }}
+
+## What to Build
+{{ description }}
+
+## Acceptance Criteria
+{% for criterion in acceptanceCriteria %}
+- {{ criterion }}
+{% endfor %}
+
+## Your Deliverables
+
+1. **Write to disk** (via ClaudeCode):
+   - Data type definition in `{{ implPath }}`
+   - Function signatures (with `undefined` stubs)
+   - Ensure `cabal build` passes
+
+2. **Return structured output** describing what you wrote:
+   - Type name and constructors
+   - Function specs with examples and properties
+   - Design rationale
+
+## Output Schema
+
+You must return JSON matching `TypesAgentOutput`:
+- `typeName`: The main type name (e.g., "Stack")
+- `typeKind`: The kind (e.g., "* -> *")
+- `typeDescription`: What this type represents
+- `constructors`: List of constructor names
+- `functions`: List of FunctionSpec (see below)
+- `imports`: Required module imports
+- `designNotes`: Why you chose this representation
+- `blocker`: If blocked, explain (otherwise null)
+
+For each function, provide a `FunctionSpec`:
+- `name`: Function name
+- `signature`: Type signature
+- `brief`: One-line description
+- `behavior`: Detailed prose description
+- `examples`: Concrete input/output pairs (REQUIRED - min 1)
+- `properties`: Informal property sketches (REQUIRED - min 1)
+- `priority`: Implementation order hint (lower = earlier)
+- `dependsOn`: List of function names this depends on
+
+For each example in `examples`, provide:
+- `description`: Brief description
+- `input`: Input expression
+- `expected`: Expected output
+- `edgeCase`: Boolean - is this an edge case?
+
+For each property in `properties`, provide:
+- `name`: Property name (snake_case)
+- `description`: What it tests
+- `invariant`: Formal/semi-formal statement
+- `type`: One of: Inverse, Idempotent, Commutative, Associative, Identity, Preservation, Boundary, Monotonic, or Other
+
+## Example FunctionSpec
+
+```json
+{
+  "name": "push",
+  "signature": "a -> Stack a -> Stack a",
+  "brief": "Add element to top of stack",
+  "behavior": "Adds an element to the top of the stack. The new element becomes the first to be popped. Stack size increases by one.",
+  "examples": [
+    {"description": "Push onto empty", "input": "push 1 empty", "expected": "Stack containing 1", "edgeCase": true},
+    {"description": "Push onto non-empty", "input": "push 1 (push 2 empty)", "expected": "Stack with 1 on top, 2 below", "edgeCase": false}
+  ],
+  "properties": [
+    {"name": "pushPopInverse", "description": "Push then pop returns original", "invariant": "forall x s. pop (push x s) == (x, s)", "type": "Inverse"}
+  ],
+  "priority": 1,
+  "dependsOn": []
+}
+```
+
+## Critical Requirements
+
+**BOTH examples AND properties are REQUIRED for each function.**
+The graph will reject specs missing either. Examples ground the agents in
+concrete cases; properties define the formal verification targets.
+
+Think carefully about edge cases and invariants. Your examples and properties
+guide the tests and impl agents - they only see what you specify here.
+
+## Your Task
+
+Design the type definitions for {{ moduleName }} based on the description above.
