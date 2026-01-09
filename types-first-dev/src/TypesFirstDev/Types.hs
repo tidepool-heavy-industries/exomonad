@@ -28,6 +28,12 @@ module TypesFirstDev.Types
   , FunctionSemantics(..)
   , StubsOutput(..)
 
+    -- * Per-Function Rubrics (LLM sensor output - semantic only)
+  , FunctionRubric(..)
+  , BoundaryNote(..)
+  , TestFunctionRubric(..)
+  , Blocker(..)
+
     -- * Progress Tracking (v2)
   , IncrementalProgress(..)
   , WorkStatus(..)
@@ -245,6 +251,101 @@ data StubsOutput = StubsOutput
 
 
 -- ════════════════════════════════════════════════════════════════════════════
+-- PER-FUNCTION RUBRICS (LLM sensor output - semantic only)
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Per-function rubric from implementation agent.
+--
+-- Design principle: LLM is sensor, code is controller.
+-- We ask for SEMANTIC information we can't mechanically derive.
+-- Handler computes mechanical checks (build, undefined, tests) separately.
+--
+-- Key insight: Ask for useful information without hinting at consequences.
+data FunctionRubric = FunctionRubric
+  { frFunctionName :: Text
+    -- ^ Which function this rubric evaluates
+
+  , frApproach :: Text
+    -- ^ How did you implement it?
+    -- "recursion" | "fold" | "unfold" | "pattern-match" | "library" | "lens" | "state-monad" | "other"
+    -- Category only - no value ordering (recursion isn't "better" than fold)
+
+  , frOpenQuestions :: [Text]
+    -- ^ What are you unsure about?
+    -- Empty = confident; non-empty = specific questions for review
+    -- REPLACES confidence score - list length is derived metric
+
+  , frUnhandledCases :: [Text]
+    -- ^ What inputs/scenarios does this NOT handle?
+    -- Empty = handles everything you're aware of
+    -- REPLACES edge case coverage score - content is actionable
+
+  , frBoundaryReasoning :: [BoundaryNote]
+    -- ^ Design intent for boundary cases
+    -- The "what happens" is testable; the "why" requires understanding
+  }
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
+
+-- | Boundary case reasoning from implementation.
+--
+-- Captures design intent for edge cases - semantic info we can't grep for.
+data BoundaryNote = BoundaryNote
+  { bnCase :: Text
+    -- ^ Which boundary: "empty-input" | "single-element" | "negative" | "overflow" | etc.
+  , bnIntendedBehavior :: Text
+    -- ^ What SHOULD happen and why (design intent, not just observed)
+  }
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
+
+-- | Per-function rubric from tests agent.
+--
+-- Semantic information about test coverage - things we can't mechanically derive.
+data TestFunctionRubric = TestFunctionRubric
+  { tfrFunctionName :: Text
+    -- ^ Which function these tests cover
+
+  , tfrPropertiesWritten :: [Text]
+    -- ^ Descriptions of what each property tests
+    -- List content is semantic; length is derived metric
+
+  , tfrApproach :: Text
+    -- ^ Test approach: "property-based" | "example-based" | "integration" | "golden" | "mixed"
+
+  , tfrScenariosNotTested :: [Text]
+    -- ^ What scenarios did you consciously NOT test?
+    -- Empty = comprehensive; non-empty = roadmap for more tests
+
+  , tfrAssumptionsMade :: [Text]
+    -- ^ What did you assume about the implementation?
+    -- Enables probing: generate counter-assumption tests
+  }
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
+
+-- | Structured blocker information.
+--
+-- Semantic info about what's blocking and what would unblock.
+-- No severity field - controller infers from content.
+data Blocker = Blocker
+  { blCategory :: Text
+    -- ^ What kind: "dependency" | "tooling" | "spec-unclear" | "type-system" | "environment" | "other"
+
+  , blDescription :: Text
+    -- ^ What's the blocker?
+
+  , blAttemptedSolutions :: [Text]
+    -- ^ What did you try? (semantic - can't mechanically know)
+
+  , blWouldUnblock :: Text
+    -- ^ What would resolve this? (requires reasoning)
+  }
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
+
+
+-- ════════════════════════════════════════════════════════════════════════════
 -- PROGRESS TRACKING (v2)
 -- ════════════════════════════════════════════════════════════════════════════
 
@@ -370,16 +471,14 @@ data StubsGenerated = StubsGenerated
 
 -- | Result from the tests agent.
 --
--- You edited the test skeleton to add QuickCheck property tests.
--- Report your results here so the handler can commit and merge your work.
+-- SEMANTIC output only - handler computes mechanical checks (build status).
+--
+-- Design: LLM is sensor, code is controller.
+-- You report semantic rubrics; handler verifies build and decides routing.
 data TestsResult = TestsResult
-  { trBuildPassed :: Bool
-    -- ^ Did `cabal build test-repo-test` succeed after your edits?
-    -- This compiles the test suite. You MUST verify this before returning.
-
-  , trAllPropertiesWritten :: Bool
-    -- ^ Did you write properties for ALL functions AND acceptance criteria?
-    -- Set False if any required property is missing or placeholder.
+  { trFunctionRubrics :: [TestFunctionRubric]
+    -- ^ Per-function test rubrics (semantic info).
+    -- One entry for each function you wrote tests for.
 
   , trCommitMessage :: Text
     -- ^ Git commit message (50 chars max, imperative mood).
@@ -387,11 +486,9 @@ data TestsResult = TestsResult
 
   , trTestingStrategy :: Text
     -- ^ Explain your testing approach. What properties did you focus on?
-    -- Any assumptions about the implementation? Edge cases covered?
 
-  , trBlocker :: Maybe Text
-    -- ^ If blocked or incomplete, explain why. Missing Arbitrary instances?
-    -- Type issues? Null if work completed successfully.
+  , trBlocker :: Maybe Blocker
+    -- ^ If blocked, provide structured blocker info. Null if successful.
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)
@@ -405,29 +502,24 @@ instance StructuredOutput TestsResult
 
 -- | Result from the implementation agent.
 --
--- You edited the skeleton file to replace `undefined` stubs with working code.
--- Report your results here so the handler can commit and merge your work.
+-- SEMANTIC output only - handler computes mechanical checks (build, undefined).
+--
+-- Design: LLM is sensor, code is controller.
+-- You report semantic rubrics; handler verifies build and decides routing.
 data ImplResult = ImplResult
-  { irBuildPassed :: Bool
-    -- ^ Did `cabal build test-repo` succeed after your edits?
-    -- You MUST run this command before returning. Set False if build failed.
-
-  , irAllFunctionsImplemented :: Bool
-    -- ^ Did you implement ALL functions listed in the task?
-    -- Set False if any function still has `undefined` or is incomplete.
+  { irFunctionRubrics :: [FunctionRubric]
+    -- ^ Per-function implementation rubrics (semantic info).
+    -- One entry for each function you implemented.
 
   , irCommitMessage :: Text
     -- ^ Git commit message (50 chars max, imperative mood).
     -- Example: "Implement Stack with recursive data type"
-    -- Be specific about WHAT you built, not HOW.
 
   , irDesignNotes :: Text
     -- ^ Explain key design decisions. What data representation did you choose?
-    -- Any tradeoffs? Edge cases handled? This helps the test agent understand.
 
-  , irBlocker :: Maybe Text
-    -- ^ If blocked or incomplete, explain why. What would unblock you?
-    -- Null if work completed successfully. Used for retry/escalation.
+  , irBlocker :: Maybe Blocker
+    -- ^ If blocked, provide structured blocker info. Null if successful.
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)
@@ -659,16 +751,23 @@ instance StructuredOutput ValidationFailure
 
 -- | Result from the fix agent.
 --
--- The fix agent analyzes test failures and modifies the implementation.
+-- SEMANTIC output only - handler computes mechanical checks.
+--
+-- Design: LLM is sensor, code is controller.
+-- You report semantic rubrics; handler verifies build and decides routing.
+--
+-- Note: Uses "fix" prefix (not "fr") to avoid confusion with FunctionRubric
+-- which also uses "fr" prefix. ImplResult uses "ir", TestsResult uses "tr".
 data FixResult = FixResult
-  { frBuildPassed :: Bool
-    -- ^ Did `cabal build` succeed after fixes?
-  , frChangesMade :: [Text]
+  { fixFunctionRubrics :: [FunctionRubric]
+    -- ^ Per-function rubrics for functions you fixed (semantic info).
+    -- Controller compares to previous rubrics to detect progress.
+  , fixChangesMade :: [Text]
     -- ^ Summary of changes made (for logging).
-  , frCommitMessage :: Text
+  , fixCommitMessage :: Text
     -- ^ Git commit message (50 chars max).
-  , frBlocker :: Maybe Text
-    -- ^ If blocked, explain why. Null if successful.
+  , fixBlocker :: Maybe Blocker
+    -- ^ If blocked, provide structured blocker info. Null if successful.
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)

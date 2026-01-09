@@ -46,20 +46,31 @@ Implement all handler functions in the server skeleton.
 
 ## Output Format
 
-After implementing, report your results:
+After implementing, report your results with per-function rubrics.
 
-```json
-{
-  "irBuildPassed": true,
-  "irAllFunctionsImplemented": true,
-  "irCommitMessage": "Implement URL shortener handlers",
-  "irDesignNotes": "Used Map for storage, hash-based short codes",
-  "irBlocker": null
-}
-```
+**Important:** Do NOT report build status - the handler verifies that mechanically.
 
-- `irBuildPassed`: Did `cabal build` succeed?
-- `irAllFunctionsImplemented`: Are all `undefined` values replaced?
+### Required Fields
+
+- `irFunctionRubrics`: One rubric per function you implemented (see below)
 - `irCommitMessage`: Descriptive commit message for your changes
 - `irDesignNotes`: Brief notes on implementation choices
-- `irBlocker`: Any blocking issues (null if none)
+- `irBlocker`: Structured blocker info or null
+
+### Per-Function Rubric
+
+For EACH function, provide:
+- `frFunctionName`: Which function this is for
+- `frApproach`: How did you implement it? (recursion | fold | unfold | pattern-match | library | lens | state-monad | other)
+- `frOpenQuestions`: What are you unsure about? (list each, or empty array if confident)
+- `frUnhandledCases`: What inputs/scenarios does this NOT handle? (list each, or empty if complete)
+- `frBoundaryReasoning`: For edge cases you considered (array of objects):
+  - `bnCase`: Which boundary (empty-input, invalid-url, missing-key, concurrent-access, etc.)
+  - `bnIntendedBehavior`: What should happen and why
+
+### Blocker Structure (if blocked)
+
+- `blCategory`: "dependency" | "tooling" | "spec-unclear" | "type-system" | "environment" | "other"
+- `blDescription`: What's the blocker?
+- `blAttemptedSolutions`: What did you try? (list of strings)
+- `blWouldUnblock`: What would resolve this?

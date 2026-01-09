@@ -96,6 +96,7 @@ import TypesFirstDev.Types
   , ImplResult(..)
   , SessionContext(..)
   , ResumeStrategy(..)
+  , Blocker(..)
     -- TDD workflow types
   , SkeletonState(..)
   , TestsWritten(..)
@@ -105,6 +106,7 @@ import TypesFirstDev.Types
   , FixResult(..)
   , TDDResult(..)
   )
+import TypesFirstDev.MechanicalChecks (checkUndefined)
 import TypesFirstDev.Templates
   ( typesCompiled, testsCompiled, implCompiled, implSkeletonCompiled, testSkeletonCompiled
   , servantTypesCompiled, servantTestsCompiled, servantImplCompiled
@@ -995,29 +997,27 @@ forkHandler input = do
   testsResult <- parseOrError "tests" testsResponse
   implResult <- parseOrError "impl" implResponse
 
-  -- Log the parsed results
+  -- Log the parsed results (semantic rubrics only - build status is mechanical)
   sendM $ do
     logMsg "=== Tests Agent Result ==="
-    logDetail "buildPassed" (show testsResult.trBuildPassed)
-    logDetail "allPropertiesWritten" (show testsResult.trAllPropertiesWritten)
+    logDetail "functionRubrics" (show $ length testsResult.trFunctionRubrics)
     logDetail "commitMessage" (T.unpack testsResult.trCommitMessage)
     logDetail "testingStrategy" (T.unpack testsResult.trTestingStrategy)
     logDetail "sessionId" (T.unpack testsSessionId)
     logDetail "cost" (show testsCost)
     case testsResult.trBlocker of
       Nothing -> logMsg "  (no blocker)"
-      Just b -> logDetail "BLOCKER" (T.unpack b)
+      Just b -> logDetail "BLOCKER" (T.unpack (blCategory b))
 
     logMsg "=== Impl Agent Result ==="
-    logDetail "buildPassed" (show implResult.irBuildPassed)
-    logDetail "allFunctionsImplemented" (show implResult.irAllFunctionsImplemented)
+    logDetail "functionRubrics" (show $ length implResult.irFunctionRubrics)
     logDetail "commitMessage" (T.unpack implResult.irCommitMessage)
     logDetail "designNotes" (T.unpack implResult.irDesignNotes)
     logDetail "sessionId" (T.unpack implSessionId)
     logDetail "cost" (show implCost)
     case implResult.irBlocker of
       Nothing -> logMsg "  (no blocker)"
-      Just b -> logDetail "BLOCKER" (T.unpack b)
+      Just b -> logDetail "BLOCKER" (T.unpack (blCategory b))
 
   pure $ gotoChoice @"merge" ParallelResults
     { prTestsWorktree = testsWt
@@ -1187,15 +1187,13 @@ forkHandlerV3 input config _spec = do
               implCost = CC.ccrTotalCostUsd implCC
 
           logMsg "=== Tests Agent Result ==="
-          logDetail "buildPassed" (show tr.trBuildPassed)
-          logDetail "allPropertiesWritten" (show tr.trAllPropertiesWritten)
+          logDetail "functionRubrics" (show $ length tr.trFunctionRubrics)
           logDetail "commitMessage" (T.unpack tr.trCommitMessage)
           logDetail "sessionId" (T.unpack testsSessionId)
           logDetail "cost" (show testsCost)
 
           logMsg "=== Impl Agent Result ==="
-          logDetail "buildPassed" (show ir.irBuildPassed)
-          logDetail "allFunctionsImplemented" (show ir.irAllFunctionsImplemented)
+          logDetail "functionRubrics" (show $ length ir.irFunctionRubrics)
           logDetail "commitMessage" (T.unpack ir.irCommitMessage)
           logDetail "sessionId" (T.unpack implSessionId)
           logDetail "cost" (show implCost)
@@ -1296,14 +1294,18 @@ mergeHandlerV3 :: ParallelResults -> FilePath -> IO (Either String Bool)
 mergeHandlerV3 results projectPath = do
   logPhase "v3 MERGE - Committing and merging agent work"
 
-  -- Commit impl work
-  let implSuccess = results.prImplResult.irBuildPassed && results.prImplResult.irAllFunctionsImplemented
+  -- Check for undefined/placeholders in impl worktree (mechanical check)
+  implHasUndefined <- checkUndefined (results.prImplWorktree.unWorktreePath </> "src")
+
+  -- Commit impl work (success = no undefined placeholders)
+  -- Note: With two-stream architecture, build success is computed mechanically
+  let implSuccess = not implHasUndefined
   when implSuccess $ do
     logMsg "Committing impl work..."
     commitWorktreeWork results.prImplWorktree.unWorktreePath results.prImplResult.irCommitMessage
 
-  -- Commit tests work
-  let testsSuccess = results.prTestsResult.trBuildPassed && results.prTestsResult.trAllPropertiesWritten
+  -- Commit tests work (success = has rubrics)
+  let testsSuccess = not (null results.prTestsResult.trFunctionRubrics)
   when testsSuccess $ do
     logMsg "Committing tests work..."
     commitWorktreeWork results.prTestsWorktree.unWorktreePath results.prTestsResult.trCommitMessage
@@ -1404,16 +1406,19 @@ mergeHandler
 mergeHandler results = do
   sendM $ logPhase "MERGE - Committing and merging agent work"
 
-  -- Step 1: Commit impl work in its worktree (if successful)
-  let implSuccess = results.prImplResult.irBuildPassed && results.prImplResult.irAllFunctionsImplemented
+  -- Step 1: Check for undefined/placeholders (mechanical check)
+  implHasUndefined <- sendM $ checkUndefined (results.prImplWorktree.unWorktreePath </> "src")
+
+  -- Commit impl work in its worktree (if no undefined placeholders)
+  let implSuccess = not implHasUndefined
   sendM $ do
-    logMsg $ "Impl agent success: " <> show implSuccess
+    logMsg $ "Impl agent success (no undefined): " <> show implSuccess
     logDetail "implWorktree" results.prImplWorktree.unWorktreePath
   when implSuccess $ do
     sendM $ commitWorktreeWork results.prImplWorktree.unWorktreePath results.prImplResult.irCommitMessage
 
-  -- Step 2: Commit tests work in its worktree (if successful)
-  let testsSuccess = results.prTestsResult.trBuildPassed && results.prTestsResult.trAllPropertiesWritten
+  -- Step 2: Commit tests work in its worktree (if has rubrics)
+  let testsSuccess = not (null results.prTestsResult.trFunctionRubrics)
   sendM $ do
     logMsg $ "Tests agent success: " <> show testsSuccess
     logDetail "testsWorktree" results.prTestsWorktree.unWorktreePath
@@ -1834,8 +1839,7 @@ tddRouteToValidate result = do
       testsWritten = TestsWritten
         { twSkeletonState = skeleton
         , twTestsResult = TestsResult
-            { trBuildPassed = True
-            , trAllPropertiesWritten = True
+            { trFunctionRubrics = []  -- Placeholder: actual rubrics come from agent
             , trCommitMessage = ""
             , trTestingStrategy = ""
             , trBlocker = Nothing
@@ -1935,8 +1939,7 @@ tddRouteAfterFix
 tddRouteAfterFix result = do
   sendM $ do
     logMsg "Fix agent completed"
-    logDetail "buildPassed" (show result.ccrParsedOutput.frBuildPassed)
-    mapM_ (\c -> logDetail "change" (T.unpack c)) result.ccrParsedOutput.frChangesMade
+    mapM_ (\c -> logDetail "change" (T.unpack c)) result.ccrParsedOutput.fixChangesMade
 
   -- Reconstruct ImplWritten for the next validation attempt
   spec <- ask @StackSpec
@@ -1958,8 +1961,7 @@ tddRouteAfterFix result = do
       testsWritten = TestsWritten
         { twSkeletonState = skeleton
         , twTestsResult = TestsResult
-            { trBuildPassed = True
-            , trAllPropertiesWritten = True
+            { trFunctionRubrics = []  -- Placeholder: actual rubrics come from agent
             , trCommitMessage = ""
             , trTestingStrategy = ""
             , trBlocker = Nothing
@@ -1973,11 +1975,10 @@ tddRouteAfterFix result = do
       -- This is another design issue - we need to pass attempt through
       -- For now, assume attempt counter is managed elsewhere
       newImplResult = ImplResult
-        { irBuildPassed = result.ccrParsedOutput.frBuildPassed
-        , irAllFunctionsImplemented = True
-        , irCommitMessage = result.ccrParsedOutput.frCommitMessage
+        { irFunctionRubrics = result.ccrParsedOutput.fixFunctionRubrics
+        , irCommitMessage = result.ccrParsedOutput.fixCommitMessage
         , irDesignNotes = ""
-        , irBlocker = result.ccrParsedOutput.frBlocker
+        , irBlocker = result.ccrParsedOutput.fixBlocker
         }
   -- TODO: We need to track attempt count properly - for now increment
   pure $ gotoChoice @"tddValidate" ImplWritten

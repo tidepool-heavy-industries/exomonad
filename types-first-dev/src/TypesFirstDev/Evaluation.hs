@@ -31,7 +31,8 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
 
-import TypesFirstDev.Types (StackSpec(..), ParallelResults(..), TestsResult(..), ImplResult(..))
+import TypesFirstDev.Types (StackSpec(..), ParallelResults(..), TestFunctionRubric(..))
+import TypesFirstDev.MechanicalChecks (MechanicalChecks(..))
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -157,16 +158,20 @@ data AgentNarrative = AgentNarrative
 -- EVALUATION
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Compute automated scores from parallel results.
+-- | Compute automated scores from mechanical checks.
+--
+-- With the two-stream architecture:
+-- - Build/test pass status comes from MechanicalChecks (handler computes)
+-- - Semantic rubrics are NOT used here (they inform routing, not scoring)
 evaluateAutomated
   :: Double          -- ^ Duration in seconds
   -> Int             -- ^ Total tokens
   -> Int             -- ^ Endpoint count (from code analysis)
-  -> ParallelResults
+  -> MechanicalChecks
   -> AutomatedScores
-evaluateAutomated duration tokens endpoints ParallelResults{..} = AutomatedScores
-  { asCompiles = prImplResult.irBuildPassed && prTestsResult.trBuildPassed
-  , asTestsPass = prTestsResult.trAllPropertiesWritten  -- Proxy for tests passing
+evaluateAutomated duration tokens endpoints mech = AutomatedScores
+  { asCompiles = mcBuildPassed mech && not (mcHasUndefined mech)
+  , asTestsPass = mcTestsPassed mech
   , asEndpointCount = endpoints
   , asTypesRetries = 0  -- TODO: capture from workflow
   , asImplRetries = 0   -- TODO: capture from workflow

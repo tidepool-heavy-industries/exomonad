@@ -18,6 +18,7 @@ import Control.Monad.Freer (runM)
 import Control.Monad.Freer.Error (runError)
 import Control.Monad.Freer.Reader (runReader)
 import qualified Data.Map.Strict as Map
+import Data.Maybe (isNothing)
 import Data.Text (Text)
 import Data.Time (UTCTime, getCurrentTime, diffUTCTime)
 
@@ -31,7 +32,7 @@ import TypesFirstDev.DevRuns (persistRunMetadata)
 import TypesFirstDev.Graph (TypesFirstGraph(..))
 import TypesFirstDev.Handlers (typesFirstHandlers)
 import TypesFirstDev.Stats
-import TypesFirstDev.Types (StackSpec(..), ProjectType(..), ParallelResults(..), TestsResult(..), ImplResult(..), WorkflowError(..), emptySessionContext, ResumeStrategy(..))
+import TypesFirstDev.Types (StackSpec(..), ProjectType(..), ParallelResults(..), TestsResult(..), ImplResult(..), WorkflowError(..), emptySessionContext, ResumeStrategy(..), Blocker(..))
 
 
 -- | Run the baseline workflow with the default Stack spec.
@@ -89,8 +90,12 @@ resultsToMetadata
   -> ParallelResults -- ^ Workflow results
   -> RunMetadata
 resultsToMetadata startTime duration spec ParallelResults{..} =
-  let implSuccess = prImplResult.irBuildPassed && prImplResult.irAllFunctionsImplemented
-      testsSuccess = prTestsResult.trBuildPassed && prTestsResult.trAllPropertiesWritten
+  -- With two-stream architecture: build success was already verified by handlers
+  -- Success means: has rubrics, no blockers
+  let implSuccess = not (null prImplResult.irFunctionRubrics)
+                 && isNothing prImplResult.irBlocker
+      testsSuccess = not (null prTestsResult.trFunctionRubrics)
+                  && isNothing prTestsResult.trBlocker
       overallSuccess = implSuccess && testsSuccess
 
       -- Total cost from both agents
@@ -162,6 +167,7 @@ errorToStats err = AgentStats
 -- | Convert ImplResult to AgentStats.
 --
 -- Includes cost from ClaudeCodeResult. Tokens require executor instrumentation.
+-- With two-stream architecture: build success was verified by handlers.
 implResultToStats :: ImplResult -> Double -> AgentStats
 implResultToStats ImplResult{..} cost = AgentStats
   { asNodeName = "impl"
@@ -170,14 +176,15 @@ implResultToStats ImplResult{..} cost = AgentStats
   , asOutputTokens = 0
   , asCost = cost
   , asRetries = 0
-  , asSuccess = irBuildPassed && irAllFunctionsImplemented
-  , asErrorMessage = irBlocker
+  , asSuccess = not (null irFunctionRubrics) && isNothing irBlocker
+  , asErrorMessage = blockerToText irBlocker
   }
 
 
 -- | Convert TestsResult to AgentStats.
 --
 -- Includes cost from ClaudeCodeResult. Tokens require executor instrumentation.
+-- With two-stream architecture: build success was verified by handlers.
 testsResultToStats :: TestsResult -> Double -> AgentStats
 testsResultToStats TestsResult{..} cost = AgentStats
   { asNodeName = "tests"
@@ -186,9 +193,17 @@ testsResultToStats TestsResult{..} cost = AgentStats
   , asOutputTokens = 0
   , asCost = cost
   , asRetries = 0
-  , asSuccess = trBuildPassed && trAllPropertiesWritten
-  , asErrorMessage = trBlocker
+  , asSuccess = not (null trFunctionRubrics) && isNothing trBlocker
+  , asErrorMessage = blockerToText trBlocker
   }
+
+
+-- | Convert structured Blocker to Text for logging.
+-- With two-stream architecture: Blocker has category + description + wouldUnblock
+blockerToText :: Maybe Blocker -> Maybe Text
+blockerToText Nothing = Nothing
+blockerToText (Just b) = Just $
+  "[" <> blCategory b <> "] " <> blDescription b
 
 
 -- | Default Stack experiment spec.
