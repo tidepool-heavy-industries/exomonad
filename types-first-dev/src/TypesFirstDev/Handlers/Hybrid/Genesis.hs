@@ -61,6 +61,19 @@ import TypesFirstDev.Handlers.Hybrid.Merge
   , hConflictResolveHandler
   )
 
+-- WS4 handler imports
+import TypesFirstDev.Handlers.Hybrid.Validation
+  ( hValidateHandler
+  , hFixHandler
+  , hPostValidateHandler
+  )
+import TypesFirstDev.Handlers.Hybrid.Adversary
+  ( hMutationAdversaryHandler
+  )
+import TypesFirstDev.Handlers.Hybrid.Witness
+  ( hWitnessHandler
+  )
+
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TYPES HANDLER (LLM Node)
@@ -298,11 +311,11 @@ hybridGenesisHandlers = TypesFirstGraphHybrid
   , hTestsReject    = hTestsRejectHandler
   , hMerge          = hMergeHandler
   , hConflictResolve = hConflictResolveHandler
-  -- WS4 stubs
-  , hValidate       = error "WS4 TODO: hValidate"
-  , hFix            = error "WS4 TODO: hFix"
-  , hPostValidate   = error "WS4 TODO: hPostValidate"
-  , hMutationAdversary = error "WS4 TODO: hMutationAdversary"
-  , hWitness        = error "WS4 TODO: hWitness"
+  -- WS4 handlers
+  , hValidate       = hValidateHandler
+  , hFix            = hFixHandler
+  , hPostValidate   = hPostValidateHandler
+  , hMutationAdversary = hMutationAdversaryHandler
+  , hWitness        = hWitnessHandler
   , hExit           = Proxy @HybridResult
   }

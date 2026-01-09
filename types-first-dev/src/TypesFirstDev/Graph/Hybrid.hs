@@ -234,20 +234,18 @@ data TypesFirstGraphHybrid mode = TypesFirstGraphHybrid
     -- PHASE 7: POST-VALIDATION [WS4]
     --------------------------------------------------------------------------
 
-    -- | Post-validation: spawn mutation adversary, route to exit.
+    -- | Post-validation: route to mutation adversary.
+    -- For synchronous MVP, always runs mutation adversary before witness.
   , hPostValidate :: mode :- G.LogicNode
       :@ Types.Input ValidatedState
-      :@ UsesEffects '[ Goto "hMutationAdversary" MutationTemplateCtx
-                      , Goto "hWitness" ValidatedState
-                      ]
+      :@ UsesEffects '[Goto "hMutationAdversary" MutationTemplateCtx]
 
     -- | MUTATION ADVERSARY: Red team for test suite.
     -- ADVISORY: Findings included in output, don't block exit.
-    --
-    -- NOTE: WS4 stub - needs MutationAdversaryTpl template.
+    -- Routes to hWitness with partial WitnessReport; stashes MutationAdversaryResult in Memory.
   , hMutationAdversary :: mode :- G.LogicNode
       :@ Types.Input MutationTemplateCtx
-      :@ UsesEffects '[Goto "hWitness" MutationAdversaryResult]
+      :@ UsesEffects '[Goto "hWitness" WitnessReport]
 
     -- | Witness: Observes flow and maintains coherent understanding.
   , hWitness :: mode :- G.LogicNode

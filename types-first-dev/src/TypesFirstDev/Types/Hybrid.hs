@@ -103,6 +103,7 @@ module TypesFirstDev.Types.Hybrid
   , TypeAdversaryTemplateCtx(..)
   , TypesFixTemplateCtx(..)
   , ConflictResolveTemplateCtx(..)
+  , FixTemplateCtx(..)
   ) where
 
 import Data.Aeson (FromJSON, ToJSON)
@@ -814,6 +815,18 @@ data ConflictResolveTemplateCtx = ConflictResolveTemplateCtx
   , testsContext    :: Text                -- What tests agent intended
   , implContext     :: Text                -- What impl agent intended
   , mergeWorktree   :: FilePath            -- Where to write resolved files
+  }
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (FromJSON, ToJSON)
+
+-- | Context for FixTpl (WS4 validation loop).
+-- Shows test failures and accumulated understanding to the fix agent.
+-- NOTE: Field names match template variables for TH validation.
+data FixTemplateCtx = FixTemplateCtx
+  { failures       :: [StructuredFailure]      -- Current test failures
+  , understanding  :: UnderstandingState       -- Accumulated learning
+  , fixFunctions   :: [FunctionSpec]           -- Function specs for reference (prefixed to avoid collision)
+  , worktreePath   :: FilePath                 -- Where the code lives
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)
