@@ -102,6 +102,7 @@ module TypesFirstDev.Types.Hybrid
   , MutationTemplateCtx(..)
   , TypeAdversaryTemplateCtx(..)
   , TypesFixTemplateCtx(..)
+  , ConflictResolveTemplateCtx(..)
   ) where
 
 import Data.Aeson (FromJSON, ToJSON)
@@ -801,6 +802,18 @@ data TypesFixTemplateCtx = TypesFixTemplateCtx
   , holes         :: [TypeHole]
   , attempt       :: Int
   , priorFixes    :: [Text]
+  }
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (FromJSON, ToJSON)
+
+-- | Context for ConflictResolveTpl.
+-- Provides conflict markers and agent context for resolution.
+-- NOTE: Field names match template variables for TH validation.
+data ConflictResolveTemplateCtx = ConflictResolveTemplateCtx
+  { conflictedFiles :: [(FilePath, Text)]  -- (path, content with markers)
+  , testsContext    :: Text                -- What tests agent intended
+  , implContext     :: Text                -- What impl agent intended
+  , mergeWorktree   :: FilePath            -- Where to write resolved files
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)

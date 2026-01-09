@@ -65,7 +65,7 @@ import qualified Tidepool.Graph.Generic as G
 import Tidepool.Graph.Goto (Goto)
 
 import TypesFirstDev.Types.Hybrid
-import TypesFirstDev.Templates.Hybrid (HTypesTpl, HTypeAdversaryTpl, HTypesFixTpl)
+import TypesFirstDev.Templates.Hybrid (HTypesTpl, HTypeAdversaryTpl, HTypesFixTpl, HConflictResolveTpl)
 
 
 -- | Hybrid TDD workflow graph.
@@ -204,11 +204,13 @@ data TypesFirstGraphHybrid mode = TypesFirstGraphHybrid
                       ]
 
     -- | Resolve git conflicts via LLM agent.
-    --
-    -- NOTE: WS3 stub - needs ConflictResolveTpl template.
-  , hConflictResolve :: mode :- G.LogicNode
+    -- ClaudeCode agent resolves conflicts with context from both agents.
+  , hConflictResolve :: mode :- G.LLMNode
       :@ Types.Input ConflictState
+      :@ Template HConflictResolveTpl
+      :@ Schema ConflictResolveOutput
       :@ UsesEffects '[Goto "hValidate" MergedState]
+      :@ ClaudeCode 'Haiku 'Nothing
 
     --------------------------------------------------------------------------
     -- PHASE 6: VALIDATION LOOP [WS4]
