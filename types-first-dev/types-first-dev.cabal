@@ -28,6 +28,7 @@ library
         TypesFirstDev.Handlers.Hybrid.Stubs
         TypesFirstDev.Handlers.Hybrid.Genesis
         TypesFirstDev.Handlers.Hybrid.Merge
+        TypesFirstDev.Handlers.Hybrid.Parallel
         TypesFirstDev.Handlers.Hybrid.Validation
         TypesFirstDev.Handlers.Hybrid.Adversary
         TypesFirstDev.Handlers.Hybrid.Witness
