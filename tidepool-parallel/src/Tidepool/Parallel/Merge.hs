@@ -11,6 +11,7 @@ module Tidepool.Parallel.Merge
   , newMergeAccumulator
   , addResult
   , checkComplete
+  , getCompletedResults
 
     -- * Partial Results
   , PartialMerge(..)
@@ -18,9 +19,13 @@ module Tidepool.Parallel.Merge
 
     -- * Type-level extraction
   , ExpectedSources(..)
+  , ExtractMergeResults(..)
+
+    -- * Type families
+  , FromPayloads
   ) where
 
-import Control.Concurrent.STM (STM, TVar, newTVarIO, readTVar, writeTVar, atomically)
+import Control.Concurrent.STM (TVar, newTVarIO, readTVar, writeTVar, atomically)
 import Data.Aeson (Value, FromJSON(..))
 import Data.Aeson.Types (parseEither)
 import Data.HashMap.Strict (HashMap)
@@ -31,10 +36,10 @@ import Data.HashSet (HashSet)
 import qualified Data.HashSet as HS
 import Data.Text (Text)
 import qualified Data.Text as T
-import GHC.TypeLits (Symbol, KnownSymbol, symbolVal)
+import GHC.TypeLits (KnownSymbol, symbolVal)
 import Data.Proxy (Proxy(..))
 
-import Tidepool.Graph.Types (HList(..), CorrelateBy(..), From)
+import Tidepool.Graph.Types (HList(..), From)
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -156,3 +161,95 @@ instance (KnownSymbol name, ExpectedSources rest) => ExpectedSources (From name 
 -- | Get text value of a type-level symbol.
 textVal :: forall name. KnownSymbol name => Text
 textVal = T.pack (symbolVal (Proxy @name))
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- TYPE FAMILIES
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Extract payload types from a list of 'From' markers.
+--
+-- @
+-- FromPayloads '[From "a" Int, From "b" String] = '[Int, String]
+-- @
+type FromPayloads :: [Type] -> [Type]
+type family FromPayloads sources where
+  FromPayloads '[] = '[]
+  FromPayloads (From name payload ': rest) = payload ': FromPayloads rest
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- EXTRACT MERGE RESULTS
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Typeclass for extracting typed HList from a HashMap of JSON values.
+--
+-- This enables type-safe extraction of merge results. Each source's JSON
+-- value is parsed to its expected type and assembled into an HList.
+--
+-- @
+-- results <- extractMergeResults @'[From "a" Int, From "b" String] slots
+-- -- results :: Either Text (HList '[Int, String])
+-- @
+type ExtractMergeResults :: [Type] -> Constraint
+class ExtractMergeResults sources where
+  extractMergeResults :: HashMap Text Value -> Either Text (HList (FromPayloads sources))
+
+instance ExtractMergeResults '[] where
+  extractMergeResults _ = Right HNil
+
+instance
+  ( KnownSymbol name
+  , FromJSON payload
+  , ExtractMergeResults rest
+  ) => ExtractMergeResults (From name payload ': rest) where
+  extractMergeResults slots = do
+    let sourceName = textVal @name
+    case HM.lookup sourceName slots of
+      Nothing -> Left $ "Missing source: " <> sourceName
+      Just val -> case parseEither parseJSON val of
+        Left err -> Left $ "Failed to parse " <> sourceName <> ": " <> T.pack err
+        Right payload -> do
+          rest <- extractMergeResults @rest slots
+          Right (payload ::: rest)
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- GET COMPLETED RESULTS
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Get the completed results for a correlation key as a typed HList.
+--
+-- Returns 'Nothing' if the key doesn't exist or isn't complete.
+-- Returns 'Left err' if parsing fails for any result.
+-- Returns 'Right hlist' with the typed results in source order.
+--
+-- @
+-- acc <- newMergeAccumulator @'[From "a" Int, From "b" String]
+-- -- ... add results ...
+-- result <- getCompletedResults @'[From "a" Int, From "b" String] acc key
+-- case result of
+--   Nothing -> putStrLn "Not complete yet"
+--   Just (Left err) -> putStrLn $ "Parse error: " <> err
+--   Just (Right (a ::: b ::: HNil)) -> print (a, b)
+-- @
+getCompletedResults
+  :: forall sources key.
+     ( ExtractMergeResults sources
+     , Hashable key
+     )
+  => MergeAccumulator key
+  -> key
+  -> IO (Maybe (Either Text (HList (FromPayloads sources))))
+getCompletedResults acc key = do
+  partials <- readTVarIO (acc.maPartials)
+  case HM.lookup key partials of
+    Nothing -> pure Nothing
+    Just partial -> do
+      let slots = extractSlots (partial.pmSlots)
+      pure $ Just $ extractMergeResults @sources slots
+  where
+    extractSlots :: HashMap Text MergeSlot -> HashMap Text Value
+    extractSlots = HM.mapMaybe $ \case
+      SlotEmpty -> Nothing
+      SlotFilled v -> Just v

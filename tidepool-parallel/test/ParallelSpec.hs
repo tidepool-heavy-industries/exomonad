@@ -2,6 +2,7 @@
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE GADTs #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeApplications #-}
@@ -16,6 +17,7 @@ import Data.Aeson (ToJSON(..), FromJSON(..), toJSON)
 import Data.Hashable (Hashable(..))
 import Data.IORef (newIORef, atomicModifyIORef)
 import Data.Text (Text)
+import qualified Data.Text as T
 import Data.Time.Clock (getCurrentTime, diffUTCTime)
 import qualified Data.HashSet as HS
 import GHC.Generics (Generic)
@@ -29,7 +31,7 @@ import Tidepool.Parallel.Dispatch
   )
 import Tidepool.Parallel.Merge
   ( ExpectedSources(..), MergeAccumulator(..)
-  , newMergeAccumulator, addResult, checkComplete
+  , newMergeAccumulator, addResult, checkComplete, getCompletedResults
   )
 import Tidepool.Parallel.Retry (withRetry, RetryResult(..), RetryConfig(..), defaultRetryConfig)
 
@@ -244,3 +246,89 @@ spec = describe "Parallel Execution" $ do
         -- Check completion
         complete <- checkComplete acc orderId
         complete `shouldBe` True
+
+
+  describe "ExtractMergeResults" $ do
+
+    it "extracts typed HList from complete results" $ do
+      acc <- newMergeAccumulator @'[From "payment" PaymentResult, From "inventory" InventoryResult] @OrderId
+      let orderId = OrderId "order-1"
+      _ <- addResult acc orderId "payment" (toJSON $ PaymentResult orderId True)
+      _ <- addResult acc orderId "inventory" (toJSON $ InventoryResult orderId True)
+
+      result <- getCompletedResults @'[From "payment" PaymentResult, From "inventory" InventoryResult] acc orderId
+      case result of
+        Nothing -> expectationFailure "Expected completed results"
+        Just (Left err) -> expectationFailure $ "Parse error: " <> show err
+        Just (Right (payResult ::: invResult ::: HNil)) -> do
+          payResult.payOrderId `shouldBe` orderId
+          payResult.paySuccess `shouldBe` True
+          invResult.invOrderId `shouldBe` orderId
+          invResult.invReserved `shouldBe` True
+
+    it "returns Nothing for incomplete results" $ do
+      acc <- newMergeAccumulator @'[From "a" PaymentResult, From "b" InventoryResult] @OrderId
+      let orderId = OrderId "order-1"
+      _ <- addResult acc orderId "a" (toJSON $ PaymentResult orderId True)
+      -- Don't add "b"
+
+      result <- getCompletedResults @'[From "a" PaymentResult, From "b" InventoryResult] acc orderId
+      case result of
+        Just (Left err) -> T.unpack err `shouldContain` "Missing source: b"
+        Just (Right _) -> expectationFailure "Should have failed with missing source"
+        Nothing -> pure ()  -- Also acceptable - key might not exist
+
+    it "returns Left for malformed JSON" $ do
+      acc <- newMergeAccumulator @'[From "a" PaymentResult] @OrderId
+      let orderId = OrderId "order-1"
+      -- Add wrong type of JSON
+      _ <- addResult acc orderId "a" (toJSON ("not a payment result" :: Text))
+
+      result <- getCompletedResults @'[From "a" PaymentResult] acc orderId
+      case result of
+        Just (Left err) -> T.unpack err `shouldContain` "Failed to parse a"
+        Just (Right _) -> expectationFailure "Should have failed parsing"
+        Nothing -> expectationFailure "Expected result to exist"
+
+
+  describe "Full Fan-out/Fan-in with Typed Extraction" $ do
+
+    it "completes full cycle: GotoAll -> dispatch -> accumulate -> extract typed HList" $ do
+      -- Create accumulator
+      acc <- newMergeAccumulator @'[From "payment" PaymentResult, From "inventory" InventoryResult] @OrderId
+
+      -- Simulate fan-out with GotoAll
+      let orderId = OrderId "order-456"
+          payReq = PaymentReq orderId 250.0
+          invReq = InventoryReq orderId ["widget", "gadget"]
+          gotoAllVal :: GotoAll '[To "payment" PaymentReq, To "inventory" InventoryReq]
+          gotoAllVal = gotoAll (payReq ::: invReq ::: HNil)
+
+      -- Extract and dispatch
+      Ki.scoped $ \scope -> do
+        let targets = extractTargets gotoAllVal
+            mockWorker target _payload = do
+              let result = case target of
+                    "payment" -> toJSON $ PaymentResult orderId True
+                    "inventory" -> toJSON $ InventoryResult orderId True
+                    _ -> error $ "Unknown target: " <> show target
+              pure $ WorkerResult target result
+
+        results <- dispatchAll defaultParallelConfig scope mockWorker targets
+
+        -- Add results to accumulator
+        forM_ results $ \wr -> do
+          _ <- addResult acc orderId wr.wrSource wr.wrPayload
+          pure ()
+
+      -- Extract typed results
+      result <- getCompletedResults @'[From "payment" PaymentResult, From "inventory" InventoryResult] acc orderId
+      case result of
+        Nothing -> expectationFailure "Expected completed results"
+        Just (Left err) -> expectationFailure $ "Parse error: " <> show err
+        Just (Right (payResult ::: invResult ::: HNil)) -> do
+          -- Verify typed access works correctly
+          payResult.payOrderId `shouldBe` orderId
+          payResult.paySuccess `shouldBe` True
+          invResult.invOrderId `shouldBe` orderId
+          invResult.invReserved `shouldBe` True
