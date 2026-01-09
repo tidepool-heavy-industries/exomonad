@@ -19,6 +19,12 @@ module Tidepool.Graph.Types
   , UsesEffects
   , Memory
 
+    -- * Fork/Barrier Annotations
+  , Spawn
+  , Barrier
+  , Awaits
+  , Arrive(..)
+
     -- * Graph-Level Annotations
   , type (:&)
   , Groups
@@ -44,9 +50,12 @@ module Tidepool.Graph.Types
     -- * Special Goto Targets
   , Exit
   , Self
+
+    -- * Heterogeneous Lists
+  , HList(..)
   ) where
 
-import Data.Kind (Type, Constraint)
+import Data.Kind (Type)
 import Data.Proxy (Proxy(..))
 import GHC.TypeLits (Symbol, KnownSymbol, symbolVal)
 
@@ -140,6 +149,70 @@ data UsesEffects effects
 -- @
 type Memory :: Type -> Type
 data Memory stateType
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- FORK/BARRIER ANNOTATIONS
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Spawn targets for ForkNode. Lists which nodes to spawn in parallel.
+--
+-- Uses 'To' markers (from Goto module) to specify target name and payload type:
+--
+-- @
+-- fork :: mode :- ForkNode
+--     :@ Input Task
+--     :@ Spawn '[To "worker1" Task, To "worker2" Task]
+--     :@ Barrier "merge"
+-- @
+--
+-- The ForkNode handler returns an HList of payloads, one per spawn target.
+type Spawn :: [Type] -> Type
+data Spawn targets
+
+-- | Barrier target for ForkNode. Names which BarrierNode collects the results.
+--
+-- @
+-- fork :: mode :- ForkNode
+--     :@ Input Task
+--     :@ Spawn '[To "w1" Task, To "w2" Task]
+--     :@ Barrier "merge"   -- Results collected at "merge" node
+-- @
+type Barrier :: Symbol -> Type
+data Barrier target
+
+-- | Types expected by a BarrierNode. Lists the result types from each path.
+--
+-- @
+-- merge :: mode :- BarrierNode
+--     :@ Awaits '[ResultA, ResultB]   -- Expects two results
+--     :@ UsesEffects '[Goto Exit (ResultA, ResultB)]
+-- @
+--
+-- The BarrierNode handler receives the collected results as an HList.
+-- Supports heterogeneous types: different workers can produce different types.
+type Awaits :: [Type] -> Type
+data Awaits resultTypes
+
+-- | Arrive annotation for worker nodes spawned by ForkNode.
+--
+-- Used in UsesEffects to indicate the worker deposits a result at its barrier:
+--
+-- @
+-- worker :: mode :- LLMNode
+--     :@ Input Task
+--     :@ Schema StepResult
+--     :@ UsesEffects '[Goto Self Task, Arrive Result]
+-- @
+--
+-- Unlike 'Goto Exit', which terminates the graph, 'Arrive' suspends the
+-- current path and deposits the result for the barrier to collect.
+-- Workers can self-loop ('Goto Self') until ready, then 'Arrive'.
+--
+-- Note: The extra type parameter @r@ gives 'Arrive' the same kind as other
+-- effects (Type -> Type), so it can appear in 'UsesEffects' alongside 'Goto'.
+type Arrive :: Type -> Type -> Type
+data Arrive resultType r where
+  ArriveOp :: result -> Arrive result ()
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- GRAPH-LEVEL ANNOTATIONS
@@ -285,3 +358,41 @@ data Exit
 -- Goto Self UpdatedState
 -- @
 data Self
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- HETEROGENEOUS LISTS
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Type-indexed heterogeneous list.
+--
+-- Used for spawn payloads and barrier awaits where each element can have
+-- a different type. Enables recursive type class instances for dispatch.
+--
+-- @
+-- -- A list containing Int, Text, and Bool:
+-- myList :: HList '[Int, Text, Bool]
+-- myList = 42 ::: "hello" ::: True ::: HNil
+--
+-- -- Pattern matching:
+-- processFirst :: HList '[a, b, c] -> a
+-- processFirst (x ::: _ ::: _ ::: HNil) = x
+-- @
+--
+-- For ForkNode spawn payloads:
+--
+-- @
+-- SpawnPayloads '[To "w1" TaskA, To "w2" TaskB]
+--   = HList '[TaskA, TaskB]
+-- @
+--
+-- For BarrierNode awaits:
+--
+-- @
+-- AwaitsHList '[ResultA, ResultB]
+--   = HList '[ResultA, ResultB]
+-- @
+data HList (ts :: [Type]) where
+  HNil  :: HList '[]
+  (:::) :: t -> HList ts -> HList (t ': ts)
+
+infixr 5 :::

@@ -186,6 +186,8 @@ renderNodeComments node = filter (not . T.null)
     kindText RuntimeLLM = "LLM"
     kindText RuntimeClaudeCode = "ClaudeCode"
     kindText RuntimeLogic = "Logic"
+    kindText RuntimeFork = "Fork"
+    kindText RuntimeBarrier = "Barrier"
 
 -- | Render template comment.
 renderTemplateComment :: Maybe TemplateInfo -> Text
@@ -245,9 +247,11 @@ renderNode config node =
             then node.niName <> "<br/>" <> kindLabel node
             else node.niName
     shape = case node.niKind of
-      RuntimeLLM       -> "[[\"" <> label <> "\"]]"
+      RuntimeLLM        -> "[[\"" <> label <> "\"]]"
       RuntimeClaudeCode -> "[[\"" <> label <> "\"]]"  -- Same shape as LLM
-      RuntimeLogic     -> "{{\"" <> label <> "\"}}"
+      RuntimeLogic      -> "{{\"" <> label <> "\"}}"
+      RuntimeFork       -> "{\"" <> label <> "\"}"     -- Diamond for fork
+      RuntimeBarrier    -> "[/\"" <> label <> "\"/]"   -- Trapezoid for barrier
 
     -- For ClaudeCode nodes, include the model name in the label
     kindLabel n = case n.niKind of
@@ -256,6 +260,8 @@ renderNode config node =
         Just cci -> "CC " <> cci.cciModel  -- e.g., "CC Sonnet"
         Nothing  -> "ClaudeCode"
       RuntimeLogic -> "Logic"
+      RuntimeFork -> "Fork"
+      RuntimeBarrier -> "Barrier"
 
 -- | Generate group (subgraph) declarations.
 groupDeclarations :: GraphInfo -> [Text]
@@ -415,6 +421,8 @@ renderState config node =
         Just cci -> "CC " <> cci.cciModel
         Nothing  -> "ClaudeCode"
       RuntimeLogic -> "Logic"
+      RuntimeFork -> "Fork"
+      RuntimeBarrier -> "Barrier"
 
 -- | Generate state transitions.
 stateTransitions :: MermaidConfig -> GraphInfo -> [Text]

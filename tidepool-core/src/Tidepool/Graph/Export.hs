@@ -283,6 +283,8 @@ kindToText :: RuntimeNodeKind -> Text
 kindToText RuntimeLLM = "LLM"
 kindToText RuntimeClaudeCode = "ClaudeCode"
 kindToText RuntimeLogic = "Logic"
+kindToText RuntimeFork = "Fork"
+kindToText RuntimeBarrier = "Barrier"
 
 -- | Convert RuntimeEdgeKind to text.
 edgeKindToText :: RuntimeEdgeKind -> Text
