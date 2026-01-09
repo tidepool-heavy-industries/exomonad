@@ -17,8 +17,6 @@ library
         Tidepool.Platform
         Tidepool.Effect
         Tidepool.Effect.ClaudeCode
-        Tidepool.Effect.LSP
-        Tidepool.Effect.GHCi
         Tidepool.Effect.DevLog
         Tidepool.Effect.Metadata
         Tidepool.Effect.Types
@@ -36,22 +34,27 @@ library
         Tidepool.Graph.Reify
         Tidepool.Graph.Export
         Tidepool.Graph.Memory
+        -- Types needed by WASM (no native dependencies)
+        Tidepool.Anthropic.Types
+        Tidepool.Tool.Wire
+        Tidepool.StructuredOutput
+        Tidepool.StructuredOutput.Class
     -- Development/tooling modules (excluded from WASM builds)
     if !os(wasi)
       exposed-modules:
+        -- Native-only effects (require subprocesses)
+        Tidepool.Effect.LSP
+        Tidepool.Effect.GHCi
+        -- Native-only tooling
         Tidepool.Schema
-        Tidepool.StructuredOutput
-        Tidepool.StructuredOutput.Class
         Tidepool.StructuredOutput.Error
         Tidepool.StructuredOutput.Generic
         Tidepool.StructuredOutput.Instances
         Tidepool.StructuredOutput.Prefix
-        Tidepool.Tool.Wire
         Tidepool.Tool.Convert
         Tidepool.Graph.CLI
         Tidepool.Graph.Tool
         Tidepool.Graph.Template
-        Tidepool.Anthropic.Types
         Tidepool.Effects.Habitica
         Tidepool.Effects.GitHub
         Tidepool.Effects.Observability
