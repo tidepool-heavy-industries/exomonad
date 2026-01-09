@@ -14,7 +14,6 @@ module TypesFirstDev.MechanicalChecks
 
 import Data.Text (Text)
 import qualified Data.Text as T
-import qualified Data.Text.IO as TIO
 import System.Exit (ExitCode(..))
 import System.Process (readProcessWithExitCode)
 
@@ -79,21 +78,30 @@ checkTests projectPath = do
   pure (exitCode == ExitSuccess, output)
 
 
--- | Check if file contains `undefined` or stub patterns.
+-- | Check if file or directory contains `undefined` or stub patterns.
 --
+-- Uses grep to search recursively if given a directory.
 -- Looks for:
 -- - `undefined`
 -- - `error "TODO"`
 -- - `error "not implemented"`
 checkUndefined :: FilePath -> IO Bool
-checkUndefined filePath = do
-  content <- TIO.readFile filePath
-  pure $ any (`T.isInfixOf` content) stubPatterns
+checkUndefined path = do
+  -- Use grep -r to handle both files and directories
+  -- Returns exit code 0 if pattern found, 1 if not found, 2 on error
+  (exitCode, _, _) <- readProcessWithExitCode
+    "grep"
+    [ "-r"                    -- recursive
+    , "-q"                    -- quiet (just return exit code)
+    , "-E"                    -- extended regex
+    , "--include=*.hs"        -- only Haskell files
+    , stubPattern
+    , path
+    ]
+    ""
+  -- Exit code 0 means pattern was found (has undefined)
+  pure (exitCode == ExitSuccess)
   where
-    stubPatterns =
-      [ "undefined"
-      , "error \"TODO\""
-      , "error \"Not implemented\""
-      , "error \"not implemented\""
-      , "= error"  -- common pattern: foo = error "..."
-      ]
+    -- Combined pattern for all stub indicators
+    -- Use word boundary for 'undefined' to avoid false positives
+    stubPattern = "\\bundefined\\b|error \"TODO\"|error \"[Nn]ot implemented\"| = error \""

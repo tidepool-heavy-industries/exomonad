@@ -755,6 +755,9 @@ instance StructuredOutput ValidationFailure
 --
 -- Design: LLM is sensor, code is controller.
 -- You report semantic rubrics; handler verifies build and decides routing.
+--
+-- Note: Uses "fix" prefix (not "fr") to avoid confusion with FunctionRubric
+-- which also uses "fr" prefix. ImplResult uses "ir", TestsResult uses "tr".
 data FixResult = FixResult
   { fixFunctionRubrics :: [FunctionRubric]
     -- ^ Per-function rubrics for functions you fixed (semantic info).
