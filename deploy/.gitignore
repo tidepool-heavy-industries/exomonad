@@ -4,3 +4,5 @@
 *.wasm
 src/*.wasm
 .grafana-cloud-token
+
+node_modules/*

@@ -1,40 +1,47 @@
 packages:
-    tidepool-core
-    tidepool-wasm
-    tidepool-actor
-    tidepool-parallel
-    tidepool-generated-ts
-    tidepool-habitica
+    -- Core DSL
+    haskell/dsl/core
 
-    -- Native GUI packages (Agent 0 scaffolding)
-    tidepool-native-gui/wire-types
-    tidepool-native-gui/ui-executor
-    tidepool-native-gui/habitica-executor
-    tidepool-native-gui/observability-executor
-    tidepool-native-gui/llm-executor
-    tidepool-native-gui/lsp-executor
-    tidepool-native-gui/bd-executor
-    tidepool-native-gui/github-executor
-    tidepool-native-gui/claude-code-executor
-    tidepool-native-gui/devlog-executor
-    tidepool-native-gui/worktree-executor
-    tidepool-native-gui/ghci-executor
-    tidepool-native-gui/cabal-executor
-    tidepool-native-gui/server
+    -- Runtime
+    haskell/runtime/wasm
+    haskell/runtime/actor
+    haskell/runtime/parallel
+    haskell/platform
 
-    -- Tooling packages (Agent 8)
-    tools/sleeptime-logs
+    -- Effect interpreters
+    haskell/effects/llm-executor
+    haskell/effects/bd-executor
+    haskell/effects/claude-code-executor
+    haskell/effects/habitica-executor
+    haskell/effects/ui-executor
+    haskell/effects/observability-executor
+    haskell/effects/lsp-executor
+    haskell/effects/ghci-executor
+    haskell/effects/github-executor
+    haskell/effects/worktree-executor
+    haskell/effects/cabal-executor
+    haskell/effects/devlog-executor
+
+    -- Effect types (standalone)
+    haskell/effects/habitica
+
+    -- Protocol
+    haskell/protocol/wire-types
+    haskell/protocol/generated-ts
+
+    -- Native server
+    haskell/native-server
+
+    -- Tools
+    haskell/tools/sleeptime
 
     -- Test/example packages
     claude-code-test
     types-first-dev
 
-    -- Vendored dependencies (avoid source-repository-package git issues in worktrees)
-    deps/freer-simple
-    deps/ginger
-
-    -- Platform package (enabled for CLI with LLM effects)
-    tidepool-platform
+    -- Vendored dependencies
+    haskell/vendor/freer-simple
+    haskell/vendor/ginger
 
 -- Disabled packages:
 -- template            -- unused template skeleton

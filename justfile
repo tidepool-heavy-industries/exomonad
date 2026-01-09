@@ -51,7 +51,7 @@ test-protocol-conformance:
 # Run hlint on Haskell sources (errors only, not suggestions)
 lint-hs:
     @echo "── Running hlint ──"
-    hlint tidepool-core tidepool-wasm --ignore-suggestions
+    hlint haskell/dsl/core haskell/runtime/wasm --ignore-suggestions
 
 # Run ESLint on TypeScript sources
 lint-ts:
@@ -106,7 +106,7 @@ test-roundtrip:
 
 # Run native server (REST + WebSocket + static files)
 native:
-    TIDEPOOL_DIST=tidepool-native-gui/solid-frontend/dist cabal run tidepool-native
+    TIDEPOOL_DIST=tidepool-native-gui/solid-frontend/dist cabal run haskell/native-server:tidepool-native-server
 
 # NOTE: dm, dm-gui, tidy-gui disabled - see cabal.project for details
 

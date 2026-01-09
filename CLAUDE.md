@@ -31,7 +31,7 @@ data MyAgent mode = MyAgent
   }
 ```
 
-See `tidepool-core/CLAUDE.md` for the full Graph DSL reference.
+See `haskell/dsl/core/CLAUDE.md` for the full Graph DSL reference.
 
 ### Effects
 Agents yield effects; runners interpret them:
@@ -123,45 +123,49 @@ This renders a template, spawns `claude -p` via mantle, and parses JSON output. 
 
 ## Package Inventory
 
-### Core
-| Package | Purpose |
-|---------|---------|
-| `tidepool-core` | Graph DSL, effects, templates, validation |
-| `tidepool-parallel` | Parallel fan-out/fan-in execution with ki |
-| `tidepool-wasm` | WASM deployment scaffolding |
-| `tidepool-platform` | Platform abstraction layer |
+All Haskell packages now live under `haskell/`. See `haskell/CLAUDE.md` for full details.
 
-### Effect Executors (`tidepool-native-gui/`)
+### Core (`haskell/dsl/`, `haskell/runtime/`)
 | Package | Purpose |
 |---------|---------|
-| `tidepool-native-server` | Servant + WebSocket server |
-| `tidepool-llm-executor` | Anthropic/OpenAI API calls |
-| `tidepool-ui-executor` | WebSocket ↔ UI bridging |
-| `tidepool-habitica-executor` | Habitica API |
-| `tidepool-bd-executor` | Beads integration + urchin CLI |
-| `tidepool-lsp-executor` | LSP via lsp-client |
-| `tidepool-observability-executor` | OpenTelemetry traces to Grafana |
-| `tidepool-claude-code-executor` | Claude Code subprocess (WIP) |
-| `tidepool-ghci-executor` | GHCi Oracle thin client |
-| `tidepool-issue-executor` | Issue tracking |
-| `tidepool-github-executor` | GitHub API integration |
-| `tidepool-wire-types` | Shared wire format types |
+| `haskell/dsl/core` | Graph DSL, effects, templates, validation |
+| `haskell/runtime/actor` | Actor runtime with graph-to-actor execution |
+| `haskell/runtime/parallel` | Parallel fan-out/fan-in execution with ki |
+| `haskell/runtime/wasm` | WASM deployment scaffolding |
+| `haskell/platform` | Platform abstraction layer (deprecated) |
 
-### Integrations
+### Effect Interpreters (`haskell/effects/`)
 | Package | Purpose |
 |---------|---------|
-| `tidepool-habitica` | Habitica effect types |
-| `tidepool-mcp` | Model Context Protocol |
-| `tidepool-telegram-hs` | Telegram bot (Haskell) |
+| `haskell/native-server` | Servant + WebSocket server (facade) |
+| `haskell/effects/llm-executor` | Anthropic/OpenAI API calls |
+| `haskell/effects/bd-executor` | Beads integration + urchin CLI |
+| `haskell/effects/claude-code-executor` | Claude Code subprocess via mantle |
+| `haskell/effects/habitica-executor` | Habitica API |
+| `haskell/effects/ui-executor` | WebSocket ↔ UI bridging |
+| `haskell/effects/observability-executor` | OpenTelemetry traces to Grafana |
+| `haskell/effects/lsp-executor` | LSP via lsp-client |
+| `haskell/effects/ghci-executor` | GHCi Oracle thin client |
+| `haskell/effects/github-executor` | GitHub API integration |
+| `haskell/effects/worktree-executor` | Git worktree management |
+| `haskell/effects/cabal-executor` | Cabal build operations |
+| `haskell/effects/devlog-executor` | Devlog effect executor |
+
+### Integrations (`haskell/effects/`, `haskell/protocol/`)
+| Package | Purpose |
+|---------|---------|
+| `haskell/effects/habitica` | Habitica effect types (standalone) |
+| `haskell/protocol/wire-types` | Native protocol types |
+| `haskell/protocol/generated-ts` | TypeScript type generation |
+| `tidepool-telegram-hs` | Telegram bot (Haskell - disabled) |
 | `tidepool-telegram-ts` | Telegram bot (TypeScript) |
-| `tidepool-generated-ts` | Generated TypeScript types |
 
-### Tools (`tools/`)
+### Tools (`haskell/tools/`)
 | Package | Purpose |
 |---------|---------|
-| `ghci-oracle` | Persistent GHCi session server (standalone) |
-| `impact-analysis` | PR blast radius analysis |
-| `tidepool-sleeptime-logs` | Log analysis for sleeptime |
+| `haskell/tools/ghci-oracle` | Persistent GHCi session server |
+| `haskell/tools/sleeptime` | Log analysis for agent evolution |
+| `tools/micro-gastown` | Experimental tooling (non-Haskell) |
 
 ### Deployment
 | Directory | Purpose |
@@ -173,15 +177,16 @@ This renders a template, spawns `claude -p` via mantle, and parses JSON output. 
 
 | Thing | Location |
 |-------|----------|
-| New effect type | `tidepool-core/src/Tidepool/Effect/Types.hs` |
-| New integration | `tidepool-core/src/Tidepool/Effects/` (plural) |
-| New graph annotation | `tidepool-core/src/Tidepool/Graph/Types.hs` |
-| New executor | `tidepool-native-gui/<name>-executor/` |
+| New effect type | `haskell/dsl/core/src/Tidepool/Effect/Types.hs` |
+| New integration | `haskell/dsl/core/src/Tidepool/Effects/` (plural) |
+| New graph annotation | `haskell/dsl/core/src/Tidepool/Graph/Types.hs` |
+| New interpreter | `haskell/effects/<name>-executor/` |
 | Agents | Separate repo (anemone, urchin, etc.) |
 
 ### Naming Conventions
 - **Effect** (singular) = core infrastructure (`Tidepool.Effect.*`)
 - **Effects** (plural) = integrations/contrib (`Tidepool.Effects.*`)
+- **Interpreter** = effect implementation (replaces "executor" terminology)
 
 ## Task Tracking (Beads)
 
