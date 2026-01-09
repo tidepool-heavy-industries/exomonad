@@ -1,24 +1,24 @@
 //! Hook configuration generation for Claude Code.
 //!
-//! Generates `settings.local.json` with hooks that forward to `zellij-cc hook <event>`.
+//! Generates `settings.local.json` with hooks that forward to `mantle hook <event>`.
 //! The configuration is per-session and cleaned up when the session ends.
 //!
 //! ## Hook Flow
 //!
 //! ```text
-//! Claude Code         settings.local.json       zellij-cc hook
+//! Claude Code         settings.local.json       mantle hook
 //! [hook trigger] ---> [hook command]       ---> [subcommand]
 //!                                               reads stdin, forwards to socket
 //! ```
 //!
 //! ## Configuration Structure
 //!
-//! Generated hooks use the zellij-cc binary path to call `hook <event>`:
+//! Generated hooks use the mantle binary path to call `hook <event>`:
 //! ```json
 //! {
 //!   "hooks": {
 //!     "PreToolUse": [{"matcher": "*", "hooks": [
-//!       {"type": "command", "command": "/path/to/zellij-cc hook pre-tool-use"}
+//!       {"type": "command", "command": "/path/to/mantle hook pre-tool-use"}
 //!     ]}]
 //!   }
 //! }
@@ -70,17 +70,17 @@ impl HookConfig {
     /// Generate hook configuration for a Claude Code session.
     ///
     /// Creates or updates `.claude/settings.local.json` in the given working
-    /// directory with hooks that forward to `zellij-cc hook <event>`.
+    /// directory with hooks that forward to `mantle hook <event>`.
     ///
     /// # Arguments
     ///
     /// * `cwd` - Working directory for the Claude Code session
-    /// * `zellij_cc_path` - Path to the zellij-cc binary
+    /// * `mantle_path` - Path to the mantle binary
     ///
     /// # Returns
     ///
     /// A `HookConfig` guard that will clean up on drop.
-    pub fn generate(cwd: &Path, zellij_cc_path: &Path) -> Result<Self> {
+    pub fn generate(cwd: &Path, mantle_path: &Path) -> Result<Self> {
         let claude_dir = cwd.join(".claude");
         let settings_path = claude_dir.join("settings.local.json");
 
@@ -103,7 +103,7 @@ impl HookConfig {
         let created_file = original_content.is_none();
 
         // Generate hook commands
-        let hooks = generate_hook_config(zellij_cc_path);
+        let hooks = generate_hook_config(mantle_path);
 
         // Merge our hooks with existing
         if let Some(existing_hooks) = settings.get("hooks") {
@@ -213,11 +213,11 @@ impl Drop for HookConfig {
 }
 
 /// Generate the hooks configuration object.
-fn generate_hook_config(zellij_cc_path: &Path) -> Value {
+fn generate_hook_config(mantle_path: &Path) -> Value {
     let mut hooks = serde_json::Map::new();
 
     for (event_name, subcommand, needs_matcher) in HOOK_EVENTS {
-        let command = format!("{} hook {}", zellij_cc_path.display(), subcommand);
+        let command = format!("{} hook {}", mantle_path.display(), subcommand);
 
         let hook_entry = json!({
             "type": "command",
@@ -250,7 +250,7 @@ fn is_tidepool_hook(entries: &Value) -> bool {
             if let Some(hooks_arr) = entry.get("hooks").and_then(|h| h.as_array()) {
                 for hook in hooks_arr {
                     if let Some(cmd) = hook.get("command").and_then(|c| c.as_str()) {
-                        if cmd.contains("zellij-cc hook") {
+                        if cmd.contains("mantle hook") {
                             return true;
                         }
                     }
@@ -261,17 +261,17 @@ fn is_tidepool_hook(entries: &Value) -> bool {
     false
 }
 
-/// Find the zellij-cc binary path.
+/// Find the mantle binary path.
 ///
 /// Looks for the binary in:
 /// 1. The current executable's directory
 /// 2. PATH
-/// 3. Falls back to "zellij-cc" (relies on PATH at runtime)
-pub fn find_zellij_cc_binary() -> PathBuf {
+/// 3. Falls back to "mantle" (relies on PATH at runtime)
+pub fn find_mantle_binary() -> PathBuf {
     // Try current executable's directory
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
-            let candidate = dir.join("zellij-cc");
+            let candidate = dir.join("mantle");
             if candidate.exists() {
                 return candidate;
             }
@@ -280,7 +280,7 @@ pub fn find_zellij_cc_binary() -> PathBuf {
 
     // Try which/where
     if let Ok(output) = std::process::Command::new("which")
-        .arg("zellij-cc")
+        .arg("mantle")
         .output()
     {
         if output.status.success() {
@@ -292,7 +292,7 @@ pub fn find_zellij_cc_binary() -> PathBuf {
     }
 
     // Fallback - will use PATH at runtime
-    PathBuf::from("zellij-cc")
+    PathBuf::from("mantle")
 }
 
 #[cfg(test)]
@@ -302,7 +302,7 @@ mod tests {
 
     #[test]
     fn test_generate_hook_config() {
-        let path = PathBuf::from("/usr/bin/zellij-cc");
+        let path = PathBuf::from("/usr/bin/mantle");
         let config = generate_hook_config(&path);
 
         // Check PreToolUse has matcher
@@ -330,10 +330,10 @@ mod tests {
     fn test_hook_config_lifecycle() {
         let temp_dir = TempDir::new().unwrap();
         let cwd = temp_dir.path();
-        let zellij_cc = PathBuf::from("/test/zellij-cc");
+        let mantle = PathBuf::from("/test/mantle");
 
         // Generate config
-        let config = HookConfig::generate(cwd, &zellij_cc).unwrap();
+        let config = HookConfig::generate(cwd, &mantle).unwrap();
 
         // Verify file was created
         assert!(config.settings_path().exists());
@@ -341,7 +341,7 @@ mod tests {
         // Verify content
         let content = fs::read_to_string(config.settings_path()).unwrap();
         assert!(content.contains("PreToolUse"));
-        assert!(content.contains("zellij-cc hook pre-tool-use"));
+        assert!(content.contains("mantle hook pre-tool-use"));
         assert!(content.contains(TIDEPOOL_MARKER));
 
         // Drop config (triggers cleanup)
@@ -370,8 +370,8 @@ mod tests {
         fs::write(&settings_path, serde_json::to_string_pretty(&existing).unwrap()).unwrap();
 
         // Generate our config
-        let zellij_cc = PathBuf::from("/test/zellij-cc");
-        let config = HookConfig::generate(cwd, &zellij_cc).unwrap();
+        let mantle = PathBuf::from("/test/mantle");
+        let config = HookConfig::generate(cwd, &mantle).unwrap();
 
         // Verify merge
         let content = fs::read_to_string(config.settings_path()).unwrap();
@@ -398,7 +398,7 @@ mod tests {
     fn test_is_tidepool_hook() {
         let our_hook = json!([{
             "matcher": "*",
-            "hooks": [{"type": "command", "command": "/bin/zellij-cc hook pre-tool-use"}]
+            "hooks": [{"type": "command", "command": "/bin/mantle hook pre-tool-use"}]
         }]);
         assert!(is_tidepool_hook(&our_hook));
 

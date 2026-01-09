@@ -1,4 +1,4 @@
-//! Terminal UI (TUI) integration for `zellij-cc`.
+//! Terminal UI (TUI) integration for `mantle`.
 //!
 //! This module provides an interactive terminal user interface for monitoring
 //! Claude Code sessions inside a Zellij pane. It exposes:

@@ -10,7 +10,7 @@ import Data.Text (Text)
 
 -- | Configuration for ClaudeCode executor.
 --
--- Used to configure how zellij-cc is invoked.
+-- Used to configure how mantle is invoked.
 data ClaudeCodeConfig = ClaudeCodeConfig
   { ccZellijSession :: Text
     -- ^ Zellij session name to attach to
@@ -19,21 +19,21 @@ data ClaudeCodeConfig = ClaudeCodeConfig
   , ccTempDir :: FilePath
     -- ^ Directory for temporary output files
   , ccZellijCcPath :: FilePath
-    -- ^ Path to zellij-cc binary
+    -- ^ Path to mantle binary
   }
   deriving (Show, Eq)
 
 
 -- | Default configuration.
 --
--- Uses @zellij-cc@ from PATH, /tmp for output, 5 minute timeout.
+-- Uses @mantle@ from PATH, /tmp for output, 5 minute timeout.
 -- Session defaults to "tidepool" but should be overridden.
 defaultClaudeCodeConfig :: ClaudeCodeConfig
 defaultClaudeCodeConfig = ClaudeCodeConfig
   { ccZellijSession = "tidepool"
   , ccDefaultTimeout = 300  -- 5 minutes
   , ccTempDir = "/tmp"
-  , ccZellijCcPath = "zellij-cc"
+  , ccZellijCcPath = "mantle"
   }
 
 -- | Create config with specific session name.
@@ -42,5 +42,5 @@ mkClaudeCodeConfig session = ClaudeCodeConfig
   { ccZellijSession = session
   , ccDefaultTimeout = 300  -- 5 minutes
   , ccTempDir = "/tmp"
-  , ccZellijCcPath = "zellij-cc"
+  , ccZellijCcPath = "mantle"
   }

@@ -9,8 +9,8 @@ use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
 use serde_json::json;
-use zellij_cc::protocol::{ControlMessage, ControlResponse, HookInput, HookSpecificOutput};
-use zellij_cc::socket::ControlSocket;
+use mantle::protocol::{ControlMessage, ControlResponse, HookInput, HookSpecificOutput};
+use mantle::socket::ControlSocket;
 
 /// Helper to create a HookInput with defaults filled in.
 fn make_hook_input(event_name: &str) -> HookInput {
@@ -38,7 +38,7 @@ fn make_hook_input(event_name: &str) -> HookInput {
 /// Find the built test server executable.
 fn find_test_server() -> PathBuf {
     // dist-newstyle is at the silas level (parent of tools/)
-    // CARGO_MANIFEST_DIR = .../silas/tools/zellij-cc
+    // CARGO_MANIFEST_DIR = .../silas/tools/mantle
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let silas_dir = manifest_dir
         .parent()

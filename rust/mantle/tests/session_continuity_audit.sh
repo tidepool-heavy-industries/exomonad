@@ -11,7 +11,7 @@ if ! command -v jq &> /dev/null; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ZELLIJ_CC="${SCRIPT_DIR}/../target/release/zellij-cc"
+ZELLIJ_CC="${SCRIPT_DIR}/../target/release/mantle"
 ZELLIJ_SESSION="${ZELLIJ_SESSION:-types-first-dev}"
 OUTPUT_DIR="${OUTPUT_DIR:-/tmp/session-continuity-audit}"
 
@@ -234,10 +234,10 @@ main() {
     log "Starting Session Continuity Audit"
     log "Using zellij session: $ZELLIJ_SESSION"
 
-    # Check zellij-cc exists
+    # Check mantle exists
     if [[ ! -x "$ZELLIJ_CC" ]]; then
-        error "zellij-cc not found at $ZELLIJ_CC"
-        error "Build it with: cd tools/zellij-cc && cargo build --release"
+        error "mantle not found at $ZELLIJ_CC"
+        error "Build it with: cd tools/mantle && cargo build --release"
         exit 1
     fi
 

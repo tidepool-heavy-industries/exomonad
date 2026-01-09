@@ -8,8 +8,8 @@
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-use zellij_cc::error::ZellijCcError;
-use zellij_cc::supervisor::Supervisor;
+use mantle::error::ZellijCcError;
+use mantle::supervisor::Supervisor;
 
 /// Test that a process that exits quickly is handled correctly.
 #[test]

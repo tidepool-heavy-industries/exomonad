@@ -120,7 +120,7 @@ Since `--resume` preserves internal memory, use `--inject-context` for **externa
 **Implementation options:**
 - `urchin prime` - context generator for coding agents (like `gt prime` for hooks)
 - Graph DSL template - Tidepool orchestration renders context before ClaudeCode node
-- Shell function - zellij-cc wrapper that gathers context before resume
+- Shell function - mantle wrapper that gathers context before resume
 
 **Example usage:**
 
@@ -147,7 +147,7 @@ EOF
 }
 
 # Resume with built context
-zellij-cc run \
+mantle run \
   --resume $SESSION_ID \
   --inject-context "$(build_context)" \
   --prompt "Continue with the task"
@@ -169,7 +169,7 @@ zellij-cc run \
 
 ## Artifacts
 
-- Test script: `tools/zellij-cc/tests/session_continuity_audit.sh`
+- Test script: `rust/mantle/tests/session_continuity_audit.sh`
 - Session 1 result: `/tmp/session-continuity-audit/session1_result.json`
 - Session 2 result: `/tmp/session-continuity-audit/session2_result.json`
 - Session JSONL: `~/.claude/projects/-tmp-session-continuity-audit-probe-54cpR/d9598136-a96c-4edd-91f1-aec18e241e0f.jsonl`

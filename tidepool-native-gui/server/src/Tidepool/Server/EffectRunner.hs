@@ -107,7 +107,7 @@ data ExecutorConfig = ExecutorConfig
   , ecServiceName :: Text
     -- ^ Service name for trace attribution
   , ecClaudeCodeConfig :: ClaudeCodeConfig
-    -- ^ ClaudeCode (zellij-cc) configuration
+    -- ^ ClaudeCode (mantle) configuration
   , ecDevLogConfig :: DevLogConfig
     -- ^ DevLog (session-scoped file logging) configuration
   }
@@ -146,7 +146,7 @@ defaultExecutorConfig = ExecutorConfig
 -- * @OTLP_TOKEN@ - OTLP basic auth token (optional)
 -- * @SERVICE_NAME@ - Service name for traces (default: tidepool-native)
 -- * @ZELLIJ_SESSION@ - Zellij session for ClaudeCode (default: tidepool)
--- * @ZELLIJ_CC_PATH@ - Path to zellij-cc binary (default: zellij-cc)
+-- * @ZELLIJ_CC_PATH@ - Path to mantle binary (default: mantle)
 -- * @ZELLIJ_CC_TIMEOUT@ - ClaudeCode timeout in seconds (default: 300)
 -- * @DEVLOG_DIR@ - DevLog output directory (default: disabled)
 -- * @DEVLOG_VERBOSITY@ - Verbosity level: quiet|normal|verbose|trace (default: normal)
@@ -235,7 +235,7 @@ loadExecutorConfig = do
         { ccZellijSession = maybe "tidepool" T.pack zellijSession
         , ccDefaultTimeout = maybe 300 id (zellijCcTimeout >>= readMaybe)
         , ccTempDir = "/tmp"
-        , ccZellijCcPath = maybe "zellij-cc" id zellijCcPath
+        , ccZellijCcPath = maybe "mantle" id zellijCcPath
         }
     , ecDevLogConfig = DevLogConfig
         { dcVerbosity = verbosity

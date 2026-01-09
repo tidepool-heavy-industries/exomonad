@@ -1,12 +1,12 @@
--- | Low-level executor for ClaudeCode - shells out to zellij-cc.
+-- | Low-level executor for ClaudeCode - shells out to mantle.
 --
--- This module provides the IO functions to run zellij-cc commands.
+-- This module provides the IO functions to run mantle commands.
 -- The Effect module builds on this to provide an effect-based interface.
 --
 -- == Hook Support
 --
 -- When 'HookCallbacks' are provided, the executor starts a control socket
--- server that receives hook events from zellij-cc and routes them to your
+-- server that receives hook events from mantle and routes them to your
 -- callbacks. This enables:
 --
 -- * Intercepting tool calls before execution (PreToolUse)
@@ -49,7 +49,7 @@ import Tidepool.ClaudeCode.Hooks (HookCallbacks)
 import Tidepool.ClaudeCode.ControlSocket (withControlSocket)
 
 
--- | Run a ClaudeCode request by shelling out to zellij-cc.
+-- | Run a ClaudeCode request by shelling out to mantle.
 --
 -- This is the simple version without hook callbacks. For hook support,
 -- use 'runClaudeCodeRequestWithHooks'.
@@ -77,7 +77,7 @@ runClaudeCodeRequest cfg model cwd prompt schema tools resumeSession forkSession
 -- | Run a ClaudeCode request with hook callbacks.
 --
 -- This version starts a control socket server that receives hook events
--- from zellij-cc and routes them to your callbacks. Use this when you need
+-- from mantle and routes them to your callbacks. Use this when you need
 -- to intercept tool calls, add context, or control Claude Code behavior.
 --
 -- @
@@ -104,7 +104,7 @@ runClaudeCodeRequestWithHooks cfg callbacks model cwd prompt schema tools resume
     runClaudeCodeImpl cfg model cwd prompt schema tools resumeSession forkSession (Just socketPath)
 
 
--- | Internal implementation that runs zellij-cc with optional socket path.
+-- | Internal implementation that runs mantle with optional socket path.
 runClaudeCodeImpl
   :: ClaudeCodeConfig
   -> ModelChoice
@@ -120,25 +120,25 @@ runClaudeCodeImpl cfg model cwd prompt schema tools resumeSession forkSession so
   -- Build arguments
   let args = buildArgs cfg model cwd prompt schema tools resumeSession forkSession socketPath
 
-  -- Run zellij-cc
+  -- Run mantle
   result <- try $ readProcessWithExitCode cfg.ccZellijCcPath args ""
   case result of
     Left (e :: SomeException) ->
       pure $ Left $ ClaudeCodeProcessError $
-        "zellij-cc failed to start: " <> T.pack (show e)
+        "mantle failed to start: " <> T.pack (show e)
 
     Right (exitCode, stdout, stderr) ->
       case exitCode of
         ExitFailure code ->
           pure $ Left $ ClaudeCodeProcessError $
-            "zellij-cc exited with code " <> T.pack (show code) <> ": " <> T.pack stderr
+            "mantle exited with code " <> T.pack (show code) <> ": " <> T.pack stderr
 
         ExitSuccess -> do
-          -- zellij-cc prints JSON result to stdout
+          -- mantle prints JSON result to stdout
           case eitherDecode (LBS.fromStrict $ TE.encodeUtf8 $ T.pack stdout) of
             Left parseErr ->
               pure $ Left $ ClaudeCodeParseError $
-                "Failed to parse zellij-cc output: " <> T.pack parseErr
+                "Failed to parse mantle output: " <> T.pack parseErr
                 <> "\n--- Raw stdout (first 2000 chars) ---\n"
                 <> T.pack (take 2000 stdout)
                 <> if length stdout > 2000 then "\n... (truncated)" else ""
@@ -147,7 +147,7 @@ runClaudeCodeImpl cfg model cwd prompt schema tools resumeSession forkSession so
               pure $ Right ccResult
 
 
--- | Build command-line arguments for zellij-cc.
+-- | Build command-line arguments for mantle.
 buildArgs
   :: ClaudeCodeConfig
   -> ModelChoice
@@ -197,7 +197,7 @@ buildArgs cfg model cwd prompt schema tools resumeSession forkSession socketPath
       Just path -> ["--control-socket", path]
 
 
--- | Convert ModelChoice to zellij-cc model string.
+-- | Convert ModelChoice to mantle model string.
 modelToString :: ModelChoice -> String
 modelToString Haiku  = "haiku"
 modelToString Sonnet = "sonnet"

@@ -1728,6 +1728,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "mantle"
+version = "0.1.0"
+dependencies = [
+ "clap 4.5.54",
+ "crossterm",
+ "nix 0.29.0",
+ "openssl-sys",
+ "ratatui",
+ "serde",
+ "serde_json",
+ "shell-escape",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tracing",
+ "tracing-subscriber",
+ "zellij-client",
+ "zellij-utils",
+]
+
+[[package]]
 name = "matchers"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3933,26 +3953,6 @@ dependencies = [
  "quote",
  "syn 2.0.113",
  "synstructure",
-]
-
-[[package]]
-name = "zellij-cc"
-version = "0.1.0"
-dependencies = [
- "clap 4.5.54",
- "crossterm",
- "nix 0.29.0",
- "openssl-sys",
- "ratatui",
- "serde",
- "serde_json",
- "shell-escape",
- "tempfile",
- "thiserror 1.0.69",
- "tracing",
- "tracing-subscriber",
- "zellij-client",
- "zellij-utils",
 ]
 
 [[package]]

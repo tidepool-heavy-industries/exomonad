@@ -1,5 +1,5 @@
 #!/bin/bash
-# Test script for zellij-cc LLM node style workflows
+# Test script for mantle LLM node style workflows
 # Tests: multi-tool-use, structured output, task-driven execution
 
 set -e
@@ -12,16 +12,16 @@ if ! command -v jq &> /dev/null; then
     exit 1
 fi
 
-# Find zellij-cc binary (prefer release, fall back to debug)
-ZELLIJ_CC="${SCRIPT_DIR}/target/release/zellij-cc"
-DEBUG_ZELLIJ_CC="${SCRIPT_DIR}/target/debug/zellij-cc"
+# Find mantle binary (prefer release, fall back to debug)
+ZELLIJ_CC="${SCRIPT_DIR}/target/release/mantle"
+DEBUG_ZELLIJ_CC="${SCRIPT_DIR}/target/debug/mantle"
 
 if [ ! -x "$ZELLIJ_CC" ]; then
     if [ -x "$DEBUG_ZELLIJ_CC" ]; then
         echo "Warning: Using debug build"
         ZELLIJ_CC="$DEBUG_ZELLIJ_CC"
     else
-        echo "Error: zellij-cc binary not found"
+        echo "Error: mantle binary not found"
         echo "Run: cargo build --release"
         exit 1
     fi
@@ -53,7 +53,7 @@ SCHEMA='{
 
 # Test directory (defaults to script dir; override with TEST_DIR env var)
 : "${TEST_DIR:="$SCRIPT_DIR"}"
-OUTPUT_FILE="/tmp/zellij-cc-workflow-test.json"
+OUTPUT_FILE="/tmp/mantle-workflow-test.json"
 
 echo "Running workflow test..."
 echo "  Tools: Glob,Read"
@@ -62,7 +62,7 @@ echo "  CWD: $TEST_DIR"
 echo "  Output: $OUTPUT_FILE"
 echo ""
 
-# Run zellij-cc with structured output
+# Run mantle with structured output
 "$ZELLIJ_CC" run \
   --session "$SESSION" \
   --name "workflow-test" \

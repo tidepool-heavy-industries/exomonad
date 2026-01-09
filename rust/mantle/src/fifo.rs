@@ -82,7 +82,7 @@ pub struct ResultFifo {
 impl ResultFifo {
     /// Create a new result FIFO with a unique path based on PID.
     pub fn new() -> Result<Self> {
-        let path = PathBuf::from(format!("/tmp/zellij-cc-{}.fifo", std::process::id()));
+        let path = PathBuf::from(format!("/tmp/mantle-{}.fifo", std::process::id()));
         Ok(Self {
             guard: FifoGuard::new(path)?,
         })
@@ -190,7 +190,7 @@ pub struct SignalFifo {
 impl SignalFifo {
     /// Create a new signal FIFO and start the reader thread.
     pub fn new() -> Result<Self> {
-        let path = PathBuf::from(format!("/tmp/zellij-cc-{}.signal", std::process::id()));
+        let path = PathBuf::from(format!("/tmp/mantle-{}.signal", std::process::id()));
         let guard = FifoGuard::new(path)?;
 
         let (tx, rx) = mpsc::channel::<InterruptSignal>();
@@ -315,7 +315,7 @@ impl Drop for SignalFifo {
 
 /// Write an interrupt signal to a signal FIFO.
 ///
-/// Used by the `zellij-cc signal` subcommand to send signals from
+/// Used by the `mantle signal` subcommand to send signals from
 /// Claude Code to the wrap process.
 pub fn write_signal(fifo_path: &Path, signal: &InterruptSignal) -> Result<()> {
     let json = serde_json::to_string(signal).map_err(ZellijCcError::JsonSerialize)?;

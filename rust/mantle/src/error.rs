@@ -1,4 +1,4 @@
-//! Error types for zellij-cc.
+//! Error types for mantle.
 //!
 //! Provides typed errors for all failure modes, replacing anyhow with
 //! structured error handling.
@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 use thiserror::Error;
 
-/// All error types that can occur in zellij-cc operations.
+/// All error types that can occur in mantle operations.
 #[derive(Debug, Error)]
 pub enum ZellijCcError {
     /// Failed to create a FIFO (named pipe).

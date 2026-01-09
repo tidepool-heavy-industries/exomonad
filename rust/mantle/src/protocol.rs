@@ -1,12 +1,12 @@
 //! Protocol types for the control envelope.
 //!
 //! Defines message types for hook events and MCP tool calls that flow
-//! between zellij-cc subcommands and the Haskell control socket server.
+//! between mantle subcommands and the Haskell control socket server.
 //!
 //! ## Message Flow
 //!
 //! ```text
-//! Claude Code hooks       zellij-cc hook <event>      Control Socket
+//! Claude Code hooks       mantle hook <event>      Control Socket
 //!      (stdin JSON)  -->   (parse & forward)   -->   (Haskell server)
 //!                    <--   (response JSON)     <--
 //! ```

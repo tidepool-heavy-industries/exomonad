@@ -14,7 +14,7 @@
 //!
 //! **Limitation**: Because signal state is global, only one `Supervisor`
 //! can correctly receive forwarded signals at a time. This is appropriate
-//! for zellij-cc's use case (single subprocess per wrap invocation), but
+//! for mantle's use case (single subprocess per wrap invocation), but
 //! would need redesign for multi-process supervision scenarios.
 
 use crate::error::{Result, ZellijCcError};

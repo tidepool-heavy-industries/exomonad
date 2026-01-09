@@ -113,7 +113,7 @@ Spawn Claude Code as a graph node:
     :@ ClaudeCode 'Sonnet ('Just "/path/to/worktree")
 ```
 
-This renders a template, spawns `claude -p` via zellij-cc, and parses JSON output. Enables Tidepool graphs that orchestrate Claude Code sessions.
+This renders a template, spawns `claude -p` via mantle, and parses JSON output. Enables Tidepool graphs that orchestrate Claude Code sessions.
 
 **Status**: WIP in `tidepool-claude-code-executor`
 

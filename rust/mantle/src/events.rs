@@ -10,7 +10,7 @@ use std::collections::HashMap;
 // Interrupt Signal Types
 // ============================================================================
 
-/// An interrupt signal sent by Claude via `zellij-cc signal`.
+/// An interrupt signal sent by Claude via `mantle signal`.
 ///
 /// Used for out-of-band communication from Claude Code to the orchestrator,
 /// typically for graph state transitions or escalation requests.
@@ -134,10 +134,10 @@ pub struct ModelUsage {
 }
 
 // ============================================================================
-// Output Types (what zellij-cc returns to callers)
+// Output Types (what mantle returns to callers)
 // ============================================================================
 
-/// The final result returned by zellij-cc to the Haskell orchestrator.
+/// The final result returned by mantle to the Haskell orchestrator.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct RunResult {
     /// Exit code from claude process.

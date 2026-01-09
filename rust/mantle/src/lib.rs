@@ -1,4 +1,4 @@
-//! zellij-cc: Spawn and manage Claude Code sessions in zellij panes.
+//! mantle: Spawn and manage Claude Code sessions in zellij panes.
 //!
 //! This library provides the core functionality for running Claude Code
 //! sessions in isolated zellij panes with proper supervision, timeout
@@ -19,7 +19,7 @@
 //!
 //! ```ignore
 //! use std::time::Duration;
-//! use zellij_cc::{supervisor::Supervisor, fifo::SignalFifo};
+//! use mantle::{supervisor::Supervisor, fifo::SignalFifo};
 //!
 //! // Create signal FIFO for interrupt communication
 //! let signal_fifo = SignalFifo::new()?;
@@ -54,7 +54,7 @@ pub mod tui;
 pub use error::{Result, ZellijCcError};
 pub use events::{InterruptSignal, RunResult, StreamEvent};
 pub use fifo::{ResultFifo, SignalFifo};
-pub use hooks::{find_zellij_cc_binary, HookConfig};
+pub use hooks::{find_mantle_binary, HookConfig};
 pub use protocol::{ControlMessage, ControlResponse, HookInput, HookOutput};
 pub use socket::ControlSocket;
 pub use supervisor::Supervisor;

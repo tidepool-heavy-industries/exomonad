@@ -47,10 +47,6 @@ Shell script for quick blast radius analysis of code changes.
 
 Experimental micro-service tooling.
 
-### zellij-cc
-
-Zellij integration for Claude Code sessions.
-
 ## Related Documentation
 
 - [tidepool-native-gui/CLAUDE.md](../tidepool-native-gui/CLAUDE.md) - observability-executor used with sleeptime-logs

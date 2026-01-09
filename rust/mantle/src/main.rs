@@ -1,4 +1,4 @@
-//! zellij-cc: Spawn and manage Claude Code sessions in zellij panes.
+//! mantle: Spawn and manage Claude Code sessions in zellij panes.
 //!
 //! CLI tool for running Claude Code in isolated zellij panes with
 //! supervision, timeout handling, and inter-process communication.
@@ -17,21 +17,21 @@ use tracing_subscriber::EnvFilter;
 use zellij_client::{cli_client::start_cli_client, os_input_output::get_cli_client_os_input};
 use zellij_utils::input::{actions::Action, command::RunCommandAction};
 
-use zellij_cc::error::{Result, ZellijCcError};
-use zellij_cc::events::{InterruptSignal, ResultEvent, RunResult, StreamEvent};
-use zellij_cc::fifo::{write_result, write_signal, ResultFifo, SignalFifo};
-use zellij_cc::humanize::{print_event_humanized, print_interrupt};
-use zellij_cc::protocol::{ControlMessage, ControlResponse, HookInput, HookOutput};
-use zellij_cc::socket::{control_socket_path, ControlSocket};
-use zellij_cc::supervisor::{build_claude_command, install_signal_handlers, Supervisor};
-use zellij_cc::tui::{run_tui, TuiEvent};
+use mantle::error::{Result, ZellijCcError};
+use mantle::events::{InterruptSignal, ResultEvent, RunResult, StreamEvent};
+use mantle::fifo::{write_result, write_signal, ResultFifo, SignalFifo};
+use mantle::humanize::{print_event_humanized, print_interrupt};
+use mantle::protocol::{ControlMessage, ControlResponse, HookInput, HookOutput};
+use mantle::socket::{control_socket_path, ControlSocket};
+use mantle::supervisor::{build_claude_command, install_signal_handlers, Supervisor};
+use mantle::tui::{run_tui, TuiEvent};
 
 // ============================================================================
 // CLI Types
 // ============================================================================
 
 #[derive(Parser)]
-#[command(name = "zellij-cc")]
+#[command(name = "mantle")]
 #[command(about = "Spawn and manage Claude Code sessions in zellij panes")]
 struct Cli {
     #[command(subcommand)]
@@ -147,7 +147,7 @@ enum Commands {
 
     /// Handle a Claude Code hook event (called by generated hook scripts)
     ///
-    /// This subcommand is invoked by hook scripts that zellij-cc generates.
+    /// This subcommand is invoked by hook scripts that mantle generates.
     /// It reads the hook payload from stdin (as provided by Claude Code),
     /// forwards it to the control socket, and outputs the response.
     Hook {
@@ -395,7 +395,7 @@ fn hook_event_name(event_type: HookEventType) -> &'static str {
 
 /// Create a default "allow" response for when no control socket is available.
 fn default_allow_response(event_type: HookEventType) -> HookOutput {
-    use zellij_cc::protocol::HookSpecificOutput;
+    use mantle::protocol::HookSpecificOutput;
 
     match event_type {
         HookEventType::PreToolUse => HookOutput::pre_tool_use_allow(None, None),
@@ -403,7 +403,7 @@ fn default_allow_response(event_type: HookEventType) -> HookOutput {
         HookEventType::PermissionRequest => HookOutput {
             continue_: true,
             hook_specific_output: Some(HookSpecificOutput::PermissionRequest {
-                decision: zellij_cc::protocol::PermissionDecision::Allow { updated_input: None },
+                decision: mantle::protocol::PermissionDecision::Allow { updated_input: None },
             }),
             ..Default::default()
         },
@@ -479,7 +479,7 @@ fn run_cc_session(
         .collect();
 
     let mut wrap_cmd_parts = vec![
-        "zellij-cc".to_string(),
+        "mantle".to_string(),
         "wrap".to_string(),
         "--result-fifo".to_string(),
         shell_quote(&result_fifo.path().display().to_string()).into_owned(),
@@ -587,7 +587,7 @@ fn wrap_claude(
             .map(|p| p.clone())
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
 
-        let zellij_cc_path = zellij_cc::find_zellij_cc_binary();
+        let mantle_path = mantle::find_mantle_binary();
 
         info!(
             socket = %socket_path.display(),
@@ -595,7 +595,7 @@ fn wrap_claude(
             "Generating hook configuration"
         );
 
-        Some(zellij_cc::HookConfig::generate(&effective_cwd, &zellij_cc_path)?)
+        Some(mantle::HookConfig::generate(&effective_cwd, &mantle_path)?)
     } else {
         None
     };
@@ -842,7 +842,7 @@ fn build_prompt(prompt: &str, inject_context: Option<&str>) -> String {
 mod tests {
     use super::*;
     use std::collections::HashMap;
-    use zellij_cc::events::ContentBlock;
+    use mantle::events::ContentBlock;
 
     const SAMPLE_INIT: &str = r#"{"type":"system","subtype":"init","session_id":"abc-123","tools":["Read","Glob"],"model":"claude-sonnet-4-20250514"}"#;
     const SAMPLE_TEXT: &str = r#"{"type":"assistant","message":{"content":[{"type":"text","text":"hello world"}]}}"#;

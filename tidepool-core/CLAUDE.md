@@ -173,7 +173,7 @@ gWork :: mode :- G.LLMNode
 **How it works:**
 1. Handler's `before` function builds template context from input
 2. System and user templates are rendered and concatenated
-3. Prompt is passed to `claude -p` via the zellij-cc executor
+3. Prompt is passed to `claude -p` via the mantle executor
 4. Claude Code spawns with file system access to `cwd`
 5. JSON output is parsed according to `Schema` type
 6. Handler's `after` function routes based on parsed output

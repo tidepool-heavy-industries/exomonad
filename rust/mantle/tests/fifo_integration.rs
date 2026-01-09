@@ -6,14 +6,14 @@
 use std::thread;
 use std::time::Duration;
 
-use zellij_cc::error::ZellijCcError;
-use zellij_cc::events::InterruptSignal;
-use zellij_cc::fifo::write_signal;
+use mantle::error::ZellijCcError;
+use mantle::events::InterruptSignal;
+use mantle::fifo::write_signal;
 
 /// Test ResultFifo creation and cleanup.
 #[test]
 fn test_result_fifo_lifecycle() {
-    use zellij_cc::fifo::ResultFifo;
+    use mantle::fifo::ResultFifo;
 
     let path = {
         let result_fifo = ResultFifo::new().unwrap();
