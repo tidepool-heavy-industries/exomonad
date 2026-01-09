@@ -142,17 +142,13 @@ export class GraphWebSocket {
 
 /** Create a new session and get the WebSocket URL */
 export async function createSession(
-  baseUrl: string
+  _baseUrl: string
 ): Promise<{ sessionId: string; wsUrl: string }> {
-  const response = await fetch(`${baseUrl}/new`, { method: "POST" });
-
-  if (!response.ok) {
-    throw new Error(`Failed to create session: ${response.statusText}`);
-  }
-
-  const data = await response.json();
+  // dm-native creates sessions on WebSocket connect, no REST endpoint needed
+  // Generate a client-side ID for tracking, server will assign real session ID
+  const clientId = crypto.randomUUID();
   return {
-    sessionId: data.sessionId,
-    wsUrl: data.wsUrl,
+    sessionId: clientId,
+    wsUrl: "/",  // Connect to root WebSocket path
   };
 }

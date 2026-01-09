@@ -36,6 +36,7 @@ import GHC.Generics
 import Tidepool.Schema (JSONSchema(..), SchemaType(..), emptySchema, objectSchema)
 import Tidepool.StructuredOutput.Class (GStructuredOutput(..), StructuredOutput(..), StructuredOptions(..), SumEncoding(..))
 import Tidepool.StructuredOutput.Error (ParseDiagnostic(..), expectedObject, missingField, typeMismatch)
+import Tidepool.StructuredOutput.Prefix (detectPrefix, makeStripPrefix)
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -54,17 +55,32 @@ instance GStructuredOutput f => GStructuredOutput (M1 D d f) where
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Handle single-constructor types (records).
+-- Detects common prefix across all fields and strips it.
 instance GStructuredProduct f => GStructuredOutput (M1 C c f) where
   gStructuredSchema opts =
-    let fields = gProductSchema @f opts
-        required = gProductRequired @f opts
+    let -- Collect all raw field names and detect common prefix
+        rawNames = gProductRawFieldNames @f
+        commonPfx = detectPrefix rawNames
+        -- Create modifier that strips this specific prefix
+        prefixModifier = makeStripPrefix commonPfx
+        opts' = opts { soFieldLabelModifier = prefixModifier }
+        fields = gProductSchema @f opts'
+        required = gProductRequired @f opts'
     in objectSchema (map (\(k, v) -> (T.pack k, v)) fields) (map T.pack required)
 
   gEncodeStructured opts (M1 x) =
-    Object $ KeyMap.fromList $ map (first Key.fromString) $ gProductEncode opts x
+    let rawNames = gProductRawFieldNames @f
+        commonPfx = detectPrefix rawNames
+        prefixModifier = makeStripPrefix commonPfx
+        opts' = opts { soFieldLabelModifier = prefixModifier }
+    in Object $ KeyMap.fromList $ map (first Key.fromString) $ gProductEncode opts' x
 
   gParseStructured opts path (Object obj) =
-    M1 <$> gProductParse opts path obj
+    let rawNames = gProductRawFieldNames @f
+        commonPfx = detectPrefix rawNames
+        prefixModifier = makeStripPrefix commonPfx
+        opts' = opts { soFieldLabelModifier = prefixModifier }
+    in M1 <$> gProductParse opts' path obj
   gParseStructured _ path v =
     Left $ expectedObject path v
 
@@ -75,6 +91,10 @@ instance GStructuredProduct f => GStructuredOutput (M1 C c f) where
 
 -- | Class for handling product (record) fields.
 class GStructuredProduct (f :: Type -> Type) where
+  -- | Get all raw field names (before any modification).
+  -- Used to detect common prefixes across the record.
+  gProductRawFieldNames :: [String]
+
   -- | Generate schema entries for all fields.
   gProductSchema :: StructuredOptions -> [(String, JSONSchema)]
 
@@ -97,6 +117,9 @@ class GStructuredProduct (f :: Type -> Type) where
 -- - Parsed as Nothing when missing or null
 instance {-# OVERLAPPING #-} (Selector s, StructuredOutput a)
     => GStructuredProduct (M1 S s (K1 i (Maybe a))) where
+  gProductRawFieldNames =
+    [selName (undefined :: M1 S s (K1 i (Maybe a)) p)]
+
   gProductSchema opts =
     let rawName = selName (undefined :: M1 S s (K1 i (Maybe a)) p)
         jsonName = opts.soFieldLabelModifier rawName
@@ -127,6 +150,9 @@ instance {-# OVERLAPPING #-} (Selector s, StructuredOutput a)
 
 -- | Handle a single record field with selector (non-Maybe fields).
 instance (Selector s, StructuredOutput a) => GStructuredProduct (M1 S s (K1 i a)) where
+  gProductRawFieldNames =
+    [selName (undefined :: M1 S s (K1 i a) p)]
+
   gProductSchema opts =
     let rawName = selName (undefined :: M1 S s (K1 i a) p)
         jsonName = opts.soFieldLabelModifier rawName
@@ -159,6 +185,9 @@ instance (Selector s, StructuredOutput a) => GStructuredProduct (M1 S s (K1 i a)
 
 -- | Handle product of two field groups.
 instance (GStructuredProduct l, GStructuredProduct r) => GStructuredProduct (l :*: r) where
+  gProductRawFieldNames =
+    gProductRawFieldNames @l ++ gProductRawFieldNames @r
+
   gProductSchema opts =
     gProductSchema @l opts ++ gProductSchema @r opts
 
@@ -176,6 +205,7 @@ instance (GStructuredProduct l, GStructuredProduct r) => GStructuredProduct (l :
 
 -- | Handle empty product (no fields).
 instance GStructuredProduct U1 where
+  gProductRawFieldNames = []
   gProductSchema _ = []
   gProductRequired _ = []
   gProductEncode _ U1 = []
@@ -223,23 +253,37 @@ instance (GStructuredSum l, GStructuredSum r) => GStructuredSum (l :+: r) where
 
 
 -- | Single constructor in a sum type.
+-- Also detects common prefix within each constructor's fields.
 instance (Constructor c, GStructuredProduct f) => GStructuredSum (M1 C c f) where
   gSumVariants opts =
     let constructorName = opts.soConstructorTagModifier $ conName' (undefined :: M1 C c f p)
-        fields = gProductSchema @f opts
-        required = gProductRequired @f opts
+        -- Detect common prefix for this constructor's fields
+        rawNames = gProductRawFieldNames @f
+        commonPfx = detectPrefix rawNames
+        prefixModifier = makeStripPrefix commonPfx
+        opts' = opts { soFieldLabelModifier = prefixModifier }
+        fields = gProductSchema @f opts'
+        required = gProductRequired @f opts'
         schema = objectSchema (map (\(k, v) -> (T.pack k, v)) fields) (map T.pack required)
     in [(constructorName, schema)]
 
   gSumEncode opts (M1 x) =
     let constructorName = opts.soConstructorTagModifier $ conName' (undefined :: M1 C c f p)
-        fields = gProductEncode opts x
+        rawNames = gProductRawFieldNames @f
+        commonPfx = detectPrefix rawNames
+        prefixModifier = makeStripPrefix commonPfx
+        opts' = opts { soFieldLabelModifier = prefixModifier }
+        fields = gProductEncode opts' x
     in (constructorName, Object $ KeyMap.fromList $ map (first Key.fromString) fields)
 
   gSumParse opts path tag v
     | tag == opts.soConstructorTagModifier (conName' (undefined :: M1 C c f p)) =
-        case v of
-          Object obj -> Just (M1 <$> gProductParse @f opts path obj)
+        let rawNames = gProductRawFieldNames @f
+            commonPfx = detectPrefix rawNames
+            prefixModifier = makeStripPrefix commonPfx
+            opts' = opts { soFieldLabelModifier = prefixModifier }
+        in case v of
+          Object obj -> Just (M1 <$> gProductParse @f opts' path obj)
           _ -> Just (Left $ expectedObject path v)
     | otherwise = Nothing
 

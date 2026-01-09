@@ -5,17 +5,17 @@ import tailwindcss from "@tailwindcss/vite";
 export default defineConfig({
   plugins: [solid(), tailwindcss()],
   server: {
-    port: 5173,
+    port: 3000,
     proxy: {
-      // Proxy API calls to the Cloudflare Worker
+      // Proxy API calls to dm-native server
       "/api": {
-        target: "http://localhost:8787",
+        target: "http://localhost:8080",
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, ""),
       },
-      // Proxy WebSocket connections
+      // Proxy WebSocket connections to dm-native server
       "/ws": {
-        target: "ws://localhost:8787",
+        target: "ws://localhost:8080",
         ws: true,
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/ws/, ""),
