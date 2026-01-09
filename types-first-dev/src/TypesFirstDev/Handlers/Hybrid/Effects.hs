@@ -2,10 +2,16 @@
 
 -- | Shared effect stack and context for hybrid TDD workflow handlers.
 --
--- This module is separate to avoid cyclic imports between Genesis and Merge.
+-- This module is separate to avoid cyclic imports between Genesis, Merge, and WS4 handlers.
 module TypesFirstDev.Handlers.Hybrid.Effects
-  ( HybridEffects
+  ( -- * Effect Stack
+    HybridEffects
+
+    -- * Session Context
   , SessionContext(..)
+  , initialSessionContext
+
+    -- * Workflow Errors
   , WorkflowError(..)
   ) where
 
@@ -34,16 +40,33 @@ type HybridEffects =
    , IO
    ]
 
+
 -- | Session context for hybrid workflow.
 -- Includes stash slots for join point patterns where handlers need
 -- to pass data that isn't in the ClaudeCodeLLMHandler signature.
 data SessionContext = SessionContext
-  { scSessionId      :: Text
-  , scTotalCost      :: Double
-  , scSkeletonStash  :: Maybe SkeletonState   -- For hTypeAdversary → hGate join
-  , scGatedStash     :: Maybe GatedState      -- For hFork → hVerifyTDD → hTestsReject
-  , scConflictStash  :: Maybe ConflictState   -- For hConflictResolve LLM join
+  { scSessionId            :: Text
+  , scTotalCost            :: Double
+  , scSkeletonStash        :: Maybe SkeletonState    -- For hTypeAdversary → hGate join
+  , scGatedStash           :: Maybe GatedState       -- For hFork → hVerifyTDD → hTestsReject
+  , scConflictStash        :: Maybe ConflictState    -- For hConflictResolve LLM join
+  , scValidatedStash       :: Maybe ValidatedState   -- For hPostValidate → hWitness join
+  , scMutationResultStash  :: Maybe MutationAdversaryResult  -- For hMutationAdversary → hWitness join
   }
+
+
+-- | Initial session context.
+initialSessionContext :: Text -> SessionContext
+initialSessionContext sessionId = SessionContext
+  { scSessionId = sessionId
+  , scTotalCost = 0.0
+  , scSkeletonStash = Nothing
+  , scGatedStash = Nothing
+  , scConflictStash = Nothing
+  , scValidatedStash = Nothing
+  , scMutationResultStash = Nothing
+  }
+
 
 -- | Workflow errors.
 data WorkflowError
@@ -51,4 +74,6 @@ data WorkflowError
   | TypeCheckFailed Text
   | MaxAttemptsExceeded Int
   | HoleFixFailed Text
+  | StuckOnPattern Text        -- Same failure pattern 3+ times
+  | NotConverging              -- Fixes not making progress
   deriving (Show, Eq)

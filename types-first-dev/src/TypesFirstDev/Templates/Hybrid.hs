@@ -10,12 +10,16 @@ module TypesFirstDev.Templates.Hybrid
   , HTypeAdversaryTpl
   , HTypesFixTpl
   , HConflictResolveTpl
+  , HFixTpl
+  , HMutationAdversaryTpl
 
     -- * Compiled Templates
   , hTypesCompiled
   , hTypeAdversaryCompiled
   , hTypesFixCompiled
   , hConflictResolveCompiled
+  , hFixCompiled
+  , hMutationAdversaryCompiled
   ) where
 
 import Text.Parsec.Pos (SourcePos)
@@ -27,6 +31,8 @@ import TypesFirstDev.Context.Hybrid
   , TypeAdversaryTemplateCtx(..)
   , TypesFixTemplateCtx(..)
   , ConflictResolveTemplateCtx(..)
+  , FixTemplateCtx(..)
+  , MutationTemplateCtx(..)
   )
 
 
@@ -98,7 +104,7 @@ instance TemplateDef HTypesFixTpl where
 
 
 -- ════════════════════════════════════════════════════════════════════════════
--- CONFLICT RESOLVE TEMPLATE
+-- CONFLICT RESOLVE TEMPLATE (WS3)
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Compile the conflict resolve template at build time.
@@ -117,3 +123,47 @@ instance TemplateDef HConflictResolveTpl where
   templateCompiled = hConflictResolveCompiled
 
   buildContext = error "HConflictResolveTpl.buildContext should not be called for ClaudeCode handlers"
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- FIX TEMPLATE (WS4)
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Compile the fix template at build time.
+hFixCompiled :: TypedTemplate FixTemplateCtx SourcePos
+hFixCompiled = $(typedTemplateFile ''FixTemplateCtx "templates/hybrid/fix.jinja")
+
+-- | Template type marker for the fix node.
+data HFixTpl
+
+instance TemplateDef HFixTpl where
+  type TemplateContext HFixTpl = FixTemplateCtx
+  type TemplateConstraint HFixTpl es = ()
+
+  templateName = "hybrid-fix"
+  templateDescription = "Fix implementation based on test failures"
+  templateCompiled = hFixCompiled
+
+  buildContext = error "HFixTpl.buildContext should not be called for ClaudeCode handlers"
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- MUTATION ADVERSARY TEMPLATE (WS4)
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Compile the mutation adversary template at build time.
+hMutationAdversaryCompiled :: TypedTemplate MutationTemplateCtx SourcePos
+hMutationAdversaryCompiled = $(typedTemplateFile ''MutationTemplateCtx "templates/hybrid/mutation-adversary.jinja")
+
+-- | Template type marker for the mutation adversary node.
+data HMutationAdversaryTpl
+
+instance TemplateDef HMutationAdversaryTpl where
+  type TemplateContext HMutationAdversaryTpl = MutationTemplateCtx
+  type TemplateConstraint HMutationAdversaryTpl es = ()
+
+  templateName = "hybrid-mutation-adversary"
+  templateDescription = "RED TEAM: Find weaknesses in test suite via mutation testing"
+  templateCompiled = hMutationAdversaryCompiled
+
+  buildContext = error "HMutationAdversaryTpl.buildContext should not be called for ClaudeCode handlers"

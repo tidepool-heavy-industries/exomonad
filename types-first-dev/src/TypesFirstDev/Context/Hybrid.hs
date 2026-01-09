@@ -212,3 +212,91 @@ instance ToGVal GingerM ConflictResolveTemplateCtx where
         [ ("path", toGVal path)
         , ("content", toGVal content)
         ]
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- WS4: VALIDATION LOOP TYPES
+-- ════════════════════════════════════════════════════════════════════════════
+
+instance ToGVal GingerM FailureType where
+  toGVal = \case
+    PropertyFailed -> toGVal ("PropertyFailed" :: Text)
+    ExceptionThrown -> toGVal ("ExceptionThrown" :: Text)
+    Timeout -> toGVal ("Timeout" :: Text)
+    UndefinedHit -> toGVal ("UndefinedHit" :: Text)
+    ParseError -> toGVal ("ParseError" :: Text)
+
+instance ToGVal GingerM StructuredFailure where
+  toGVal sf = dict
+    [ ("propertyName", toGVal (sfPropertyName sf))
+    , ("failureType", toGVal (sfFailureType sf))
+    , ("counterexample", toGVal (sfCounterexample sf))
+    , ("expected", toGVal (sfExpected sf))
+    , ("actual", toGVal (sfActual sf))
+    , ("message", toGVal (sfMessage sf))
+    ]
+
+instance ToGVal GingerM FailurePattern where
+  toGVal fp = dict
+    [ ("signature", toGVal (fpSignature fp))
+    , ("affectedFns", list (toGVal <$> fpAffectedFns fp))
+    , ("category", toGVal (fpCategory fp))
+    , ("occurrences", toGVal (fpOccurrences fp))
+    ]
+
+instance ToGVal GingerM FixType where
+  toGVal = \case
+    EdgeCaseFix -> toGVal ("EdgeCaseFix" :: Text)
+    LogicFix -> toGVal ("LogicFix" :: Text)
+    TypeFix -> toGVal ("TypeFix" :: Text)
+    BoundaryFix -> toGVal ("BoundaryFix" :: Text)
+    InitializationFix -> toGVal ("InitializationFix" :: Text)
+    OtherFix t -> toGVal t
+
+instance ToGVal GingerM FixApplied where
+  toGVal fa = dict
+    [ ("function", toGVal (faFunction fa))
+    , ("whatChanged", toGVal (faWhatChanged fa))
+    , ("whyFailed", toGVal (faWhyFailed fa))
+    , ("fixType", toGVal (faFixType fa))
+    ]
+
+instance ToGVal GingerM UnderstandingState where
+  toGVal us = dict
+    [ ("failuresSeen", list (toGVal <$> usFailuresSeen us))
+    , ("fixesApplied", list (toGVal <$> usFixesApplied us))
+    , ("learnings", list (toGVal <$> usLearnings us))
+    , ("converging", toGVal (usConverging us))
+    ]
+
+instance ToGVal GingerM FixTemplateCtx where
+  toGVal ctx = dict
+    [ ("failures", list (toGVal <$> failures ctx))
+    , ("understanding", toGVal (understanding ctx))
+    , ("fixFunctions", list (toGVal <$> fixFunctions ctx))
+    , ("worktreePath", toGVal (worktreePath ctx))
+    ]
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- WS4: MUTATION ADVERSARY TYPES
+-- ════════════════════════════════════════════════════════════════════════════
+
+instance ToGVal GingerM MutationType where
+  toGVal = \case
+    BoundaryMutation -> toGVal ("BoundaryMutation" :: Text)
+    ConditionFlip -> toGVal ("ConditionFlip" :: Text)
+    OffByOne -> toGVal ("OffByOne" :: Text)
+    SwappedArgs -> toGVal ("SwappedArgs" :: Text)
+    RemovedCheck -> toGVal ("RemovedCheck" :: Text)
+    ChangedOperator -> toGVal ("ChangedOperator" :: Text)
+    ReturnedWrongBranch -> toGVal ("ReturnedWrongBranch" :: Text)
+    OtherMutation t -> toGVal t
+
+instance ToGVal GingerM SurvivingMutant where
+  toGVal sm = dict
+    [ ("function", toGVal (smFunction sm))
+    , ("mutationType", toGVal (smMutationType sm))
+    , ("description", toGVal (smDescription sm))
+    , ("whyDangerous", toGVal (smWhyDangerous sm))
+    , ("missingTest", toGVal (smMissingTest sm))
+    , ("suggestedProp", toGVal (smSuggestedProp sm))
+    ]
