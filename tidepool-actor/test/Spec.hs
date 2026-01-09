@@ -5,6 +5,7 @@ import qualified MailboxSpec
 import qualified SpawnSpec
 import qualified RuntimeSpec
 import qualified IntegrationSpec
+import qualified GraphSpec
 
 main :: IO ()
 main = hspec $ do
@@ -12,3 +13,4 @@ main = hspec $ do
   describe "Spawn" SpawnSpec.spec
   describe "Runtime" RuntimeSpec.spec
   describe "Integration" IntegrationSpec.spec
+  describe "Graph" GraphSpec.spec
