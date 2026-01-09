@@ -17,7 +17,7 @@
 //! for mantle's use case (single subprocess per wrap invocation), but
 //! would need redesign for multi-process supervision scenarios.
 
-use crate::error::{Result, ZellijCcError};
+use crate::error::{Result, MantleError};
 use nix::libc;
 use nix::sys::signal::{kill, Signal};
 use nix::unistd::Pid;
@@ -102,7 +102,7 @@ impl Supervisor {
     /// * `cmd` - The command to spawn (must have stdout set to Stdio::piped())
     /// * `timeout` - Optional timeout; child will be killed if exceeded
     pub fn spawn(mut cmd: Command, timeout: Option<Duration>) -> Result<Self> {
-        let child = cmd.spawn().map_err(ZellijCcError::Spawn)?;
+        let child = cmd.spawn().map_err(MantleError::Spawn)?;
         let child_pid = Pid::from_raw(child.id() as i32);
 
         info!(
@@ -167,7 +167,7 @@ impl Supervisor {
                     // Child still running
                 }
                 Err(e) => {
-                    return Err(ZellijCcError::Io(e));
+                    return Err(MantleError::Io(e));
                 }
             }
 
@@ -182,7 +182,7 @@ impl Supervisor {
                         "Child process timeout, killing"
                     );
                     self.kill()?;
-                    return Err(ZellijCcError::ProcessTimeout { elapsed });
+                    return Err(MantleError::ProcessTimeout { elapsed });
                 }
             }
 
@@ -243,14 +243,14 @@ impl Supervisor {
                 }
             }
             Err(e) => {
-                return Err(ZellijCcError::Io(e));
+                return Err(MantleError::Io(e));
             }
         }
 
         // Wait for it to die
         match self.child.wait() {
             Ok(_) => Ok(()),
-            Err(e) => Err(ZellijCcError::Io(e)),
+            Err(e) => Err(MantleError::Io(e)),
         }
     }
 
@@ -268,7 +268,7 @@ impl Supervisor {
     ///
     /// Returns `Ok(Some(status))` if exited, `Ok(None)` if still running.
     pub fn try_wait(&mut self) -> Result<Option<ExitStatus>> {
-        self.child.try_wait().map_err(ZellijCcError::Io)
+        self.child.try_wait().map_err(MantleError::Io)
     }
 }
 

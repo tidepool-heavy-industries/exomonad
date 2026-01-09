@@ -17,7 +17,7 @@ use tracing_subscriber::EnvFilter;
 use zellij_client::{cli_client::start_cli_client, os_input_output::get_cli_client_os_input};
 use zellij_utils::input::{actions::Action, command::RunCommandAction};
 
-use mantle::error::{Result, ZellijCcError};
+use mantle::error::{Result, MantleError};
 use mantle::events::{InterruptSignal, ResultEvent, RunResult, StreamEvent};
 use mantle::fifo::{write_result, write_signal, ResultFifo, SignalFifo};
 use mantle::humanize::{print_event_humanized, print_interrupt};
@@ -312,7 +312,7 @@ fn handle_hook(event_type: HookEventType, socket_path: Option<&PathBuf>) -> Resu
     let mut stdin_content = String::new();
     std::io::stdin()
         .read_to_string(&mut stdin_content)
-        .map_err(|e| ZellijCcError::Io(e))?;
+        .map_err(|e| MantleError::Io(e))?;
 
     debug!(
         event = ?event_type,
@@ -337,7 +337,7 @@ fn handle_hook(event_type: HookEventType, socket_path: Option<&PathBuf>) -> Resu
     let Some(socket_path) = socket_path else {
         debug!("No control socket, failing open (allowing hook)");
         let output = default_allow_response(event_type);
-        println!("{}", serde_json::to_string(&output).map_err(ZellijCcError::JsonSerialize)?);
+        println!("{}", serde_json::to_string(&output).map_err(MantleError::JsonSerialize)?);
         return Ok(());
     };
 
@@ -347,7 +347,7 @@ fn handle_hook(event_type: HookEventType, socket_path: Option<&PathBuf>) -> Resu
         Err(e) => {
             warn!(error = %e, "Failed to connect to control socket, failing open");
             let output = default_allow_response(event_type);
-            println!("{}", serde_json::to_string(&output).map_err(ZellijCcError::JsonSerialize)?);
+            println!("{}", serde_json::to_string(&output).map_err(MantleError::JsonSerialize)?);
             return Ok(());
         }
     };
@@ -360,7 +360,7 @@ fn handle_hook(event_type: HookEventType, socket_path: Option<&PathBuf>) -> Resu
     match response {
         ControlResponse::HookResponse { output, exit_code } => {
             // Output the response JSON for CC
-            println!("{}", serde_json::to_string(&output).map_err(ZellijCcError::JsonSerialize)?);
+            println!("{}", serde_json::to_string(&output).map_err(MantleError::JsonSerialize)?);
 
             // Exit with the code from Haskell (0=allow, 2=deny)
             if exit_code != 0 {
@@ -517,7 +517,7 @@ fn run_cc_session(
     debug!(wrap_cmd = %wrap_cmd, "Building wrap command");
 
     let os_input = get_cli_client_os_input()
-        .map_err(|e| ZellijCcError::Zellij(format!("Failed to get zellij OS input: {}", e)))?;
+        .map_err(|e| MantleError::Zellij(format!("Failed to get zellij OS input: {}", e)))?;
 
     // Spawn pane running wrap command
     let actions = vec![Action::NewTiledPane(
@@ -556,7 +556,7 @@ fn run_cc_session(
     // Print final JSON to stdout (for Haskell caller)
     println!(
         "{}",
-        serde_json::to_string_pretty(&result).map_err(ZellijCcError::JsonSerialize)?
+        serde_json::to_string_pretty(&result).map_err(MantleError::JsonSerialize)?
     );
 
     Ok(())

@@ -51,7 +51,7 @@ pub mod supervisor;
 pub mod tui;
 
 // Re-export commonly used types at crate root
-pub use error::{Result, ZellijCcError};
+pub use error::{Result, MantleError};
 pub use events::{InterruptSignal, RunResult, StreamEvent};
 pub use fifo::{ResultFifo, SignalFifo};
 pub use hooks::{find_mantle_binary, HookConfig};

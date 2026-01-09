@@ -24,7 +24,7 @@
 //! }
 //! ```
 
-use crate::error::{Result, ZellijCcError};
+use crate::error::{Result, MantleError};
 use serde_json::{json, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -86,15 +86,15 @@ impl HookConfig {
 
         // Ensure .claude directory exists
         if !claude_dir.exists() {
-            fs::create_dir_all(&claude_dir).map_err(|e| ZellijCcError::Io(e))?;
+            fs::create_dir_all(&claude_dir).map_err(|e| MantleError::Io(e))?;
             debug!(path = %claude_dir.display(), "Created .claude directory");
         }
 
         // Read existing settings if present
         let (original_content, mut settings) = if settings_path.exists() {
-            let content = fs::read_to_string(&settings_path).map_err(|e| ZellijCcError::Io(e))?;
+            let content = fs::read_to_string(&settings_path).map_err(|e| MantleError::Io(e))?;
             let settings: Value =
-                serde_json::from_str(&content).map_err(|e| ZellijCcError::JsonParse { source: e })?;
+                serde_json::from_str(&content).map_err(|e| MantleError::JsonParse { source: e })?;
             (Some(content), settings)
         } else {
             (None, json!({}))
@@ -125,8 +125,8 @@ impl HookConfig {
 
         // Write settings
         let content = serde_json::to_string_pretty(&settings)
-            .map_err(|e| ZellijCcError::JsonSerialize(e))?;
-        fs::write(&settings_path, &content).map_err(|e| ZellijCcError::Io(e))?;
+            .map_err(|e| MantleError::JsonSerialize(e))?;
+        fs::write(&settings_path, &content).map_err(|e| MantleError::Io(e))?;
 
         debug!(
             path = %settings_path.display(),
@@ -157,14 +157,14 @@ impl HookConfig {
 
         if self.created_file {
             // We created the file, just delete it
-            fs::remove_file(&self.settings_path).map_err(|e| ZellijCcError::Io(e))?;
+            fs::remove_file(&self.settings_path).map_err(|e| MantleError::Io(e))?;
             debug!(
                 path = %self.settings_path.display(),
                 "Removed generated settings.local.json"
             );
         } else if let Some(ref original) = self.original_content {
             // Restore original content
-            fs::write(&self.settings_path, original).map_err(|e| ZellijCcError::Io(e))?;
+            fs::write(&self.settings_path, original).map_err(|e| MantleError::Io(e))?;
             debug!(
                 path = %self.settings_path.display(),
                 "Restored original settings.local.json"

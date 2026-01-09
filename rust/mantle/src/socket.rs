@@ -21,7 +21,7 @@
 //! - Framing: Newline-delimited JSON (NDJSON)
 //! - Flow: Connect -> Write message + newline -> Read response + newline -> Close
 
-use crate::error::{Result, ZellijCcError};
+use crate::error::{Result, MantleError};
 use crate::protocol::{ControlMessage, ControlResponse};
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
@@ -46,7 +46,7 @@ impl ControlSocket {
     pub fn connect(path: &Path) -> Result<Self> {
         debug!(path = %path.display(), "Connecting to control socket");
 
-        let stream = UnixStream::connect(path).map_err(|e| ZellijCcError::SocketConnect {
+        let stream = UnixStream::connect(path).map_err(|e| MantleError::SocketConnect {
             path: path.to_path_buf(),
             source: e,
         })?;
@@ -54,10 +54,10 @@ impl ControlSocket {
         // Set default timeouts
         stream
             .set_read_timeout(Some(DEFAULT_TIMEOUT))
-            .map_err(|e| ZellijCcError::SocketConfig { source: e })?;
+            .map_err(|e| MantleError::SocketConfig { source: e })?;
         stream
             .set_write_timeout(Some(DEFAULT_TIMEOUT))
-            .map_err(|e| ZellijCcError::SocketConfig { source: e })?;
+            .map_err(|e| MantleError::SocketConfig { source: e })?;
 
         debug!("Connected to control socket");
         Ok(Self { stream })
@@ -67,10 +67,10 @@ impl ControlSocket {
     pub fn set_timeout(&self, timeout: Duration) -> Result<()> {
         self.stream
             .set_read_timeout(Some(timeout))
-            .map_err(|e| ZellijCcError::SocketConfig { source: e })?;
+            .map_err(|e| MantleError::SocketConfig { source: e })?;
         self.stream
             .set_write_timeout(Some(timeout))
-            .map_err(|e| ZellijCcError::SocketConfig { source: e })?;
+            .map_err(|e| MantleError::SocketConfig { source: e })?;
         Ok(())
     }
 
@@ -79,18 +79,18 @@ impl ControlSocket {
     /// Protocol: Write JSON + newline, read JSON + newline.
     pub fn send(&mut self, message: &ControlMessage) -> Result<ControlResponse> {
         // Serialize and send
-        let json = serde_json::to_string(message).map_err(ZellijCcError::JsonSerialize)?;
+        let json = serde_json::to_string(message).map_err(MantleError::JsonSerialize)?;
         trace!(json = %json, "Sending message");
 
         self.stream
             .write_all(json.as_bytes())
-            .map_err(|e| ZellijCcError::SocketWrite { source: e })?;
+            .map_err(|e| MantleError::SocketWrite { source: e })?;
         self.stream
             .write_all(b"\n")
-            .map_err(|e| ZellijCcError::SocketWrite { source: e })?;
+            .map_err(|e| MantleError::SocketWrite { source: e })?;
         self.stream
             .flush()
-            .map_err(|e| ZellijCcError::SocketWrite { source: e })?;
+            .map_err(|e| MantleError::SocketWrite { source: e })?;
 
         // Read response
         let mut reader = BufReader::new(&self.stream);
@@ -98,12 +98,12 @@ impl ControlSocket {
 
         reader
             .read_line(&mut response_line)
-            .map_err(|e| ZellijCcError::SocketRead { source: e })?;
+            .map_err(|e| MantleError::SocketRead { source: e })?;
 
         trace!(response = %response_line.trim(), "Received response");
 
         let response: ControlResponse = serde_json::from_str(response_line.trim())
-            .map_err(|e| ZellijCcError::JsonParse { source: e })?;
+            .map_err(|e| MantleError::JsonParse { source: e })?;
 
         Ok(response)
     }

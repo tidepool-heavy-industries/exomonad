@@ -10,7 +10,7 @@ use thiserror::Error;
 
 /// All error types that can occur in mantle operations.
 #[derive(Debug, Error)]
-pub enum ZellijCcError {
+pub enum MantleError {
     /// Failed to create a FIFO (named pipe).
     #[error("failed to create FIFO at {path}: {source}")]
     FifoCreate {
@@ -113,23 +113,23 @@ pub enum ZellijCcError {
     },
 }
 
-/// Result type alias using ZellijCcError.
-pub type Result<T> = std::result::Result<T, ZellijCcError>;
+/// Result type alias using MantleError.
+pub type Result<T> = std::result::Result<T, MantleError>;
 
-impl From<serde_json::Error> for ZellijCcError {
+impl From<serde_json::Error> for MantleError {
     fn from(e: serde_json::Error) -> Self {
-        ZellijCcError::JsonParse { source: e }
+        MantleError::JsonParse { source: e }
     }
 }
 
-impl From<nix::Error> for ZellijCcError {
+impl From<nix::Error> for MantleError {
     fn from(e: nix::Error) -> Self {
-        ZellijCcError::Poll(e)
+        MantleError::Poll(e)
     }
 }
 
-impl From<std::io::Error> for ZellijCcError {
+impl From<std::io::Error> for MantleError {
     fn from(e: std::io::Error) -> Self {
-        ZellijCcError::Io(e)
+        MantleError::Io(e)
     }
 }

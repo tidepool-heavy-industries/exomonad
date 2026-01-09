@@ -12,7 +12,7 @@
 //! Thread synchronization uses `Acquire`/`Release` ordering on the stop flag
 //! to ensure visibility of the termination signal across threads.
 
-use crate::error::{Result, ZellijCcError};
+use crate::error::{Result, MantleError};
 use crate::events::{InterruptSignal, RunResult};
 use nix::poll::{poll, PollFd, PollFlags, PollTimeout};
 use nix::sys::stat::Mode;
@@ -46,7 +46,7 @@ impl FifoGuard {
         if path.exists() {
             std::fs::remove_file(&path).ok();
         }
-        mkfifo(&path, Mode::S_IRUSR | Mode::S_IWUSR).map_err(|e| ZellijCcError::FifoCreate {
+        mkfifo(&path, Mode::S_IRUSR | Mode::S_IWUSR).map_err(|e| MantleError::FifoCreate {
             path: path.clone(),
             source: std::io::Error::from(e), // Errno implements Into<io::Error>
         })?;
@@ -105,7 +105,7 @@ impl ResultFifo {
         let path = self.guard.path();
 
         // Open FIFO for reading (blocks until writer opens it)
-        let file = File::open(path).map_err(|e| ZellijCcError::FifoOpen {
+        let file = File::open(path).map_err(|e| MantleError::FifoOpen {
             path: path.to_path_buf(),
             source: e,
         })?;
@@ -117,7 +117,7 @@ impl ResultFifo {
 
             // Check timeout (Duration::ZERO means no timeout)
             if timeout != Duration::ZERO && elapsed >= timeout {
-                return Err(ZellijCcError::FifoTimeout { elapsed });
+                return Err(MantleError::FifoTimeout { elapsed });
             }
 
             // Calculate remaining time, capped at 60s to avoid u16 overflow.
@@ -131,7 +131,7 @@ impl ResultFifo {
 
             let poll_timeout = if remaining.is_zero() {
                 // Shouldn't happen due to timeout check above, but be safe
-                return Err(ZellijCcError::FifoTimeout { elapsed });
+                return Err(MantleError::FifoTimeout { elapsed });
             } else {
                 // Cap at 60000ms to be safely under u16::MAX
                 let ms = remaining.as_millis().min(60000) as u16;
@@ -149,13 +149,13 @@ impl ResultFifo {
                 _ => {
                     // Data available, read and parse
                     let content =
-                        std::io::read_to_string(&file).map_err(|e| ZellijCcError::FifoRead {
+                        std::io::read_to_string(&file).map_err(|e| MantleError::FifoRead {
                             path: path.to_path_buf(),
                             source: e,
                         })?;
 
                     let result: RunResult =
-                        serde_json::from_str(&content).map_err(|e| ZellijCcError::JsonParse {
+                        serde_json::from_str(&content).map_err(|e| MantleError::JsonParse {
                             source: e,
                         })?;
 
@@ -318,22 +318,22 @@ impl Drop for SignalFifo {
 /// Used by the `mantle signal` subcommand to send signals from
 /// Claude Code to the wrap process.
 pub fn write_signal(fifo_path: &Path, signal: &InterruptSignal) -> Result<()> {
-    let json = serde_json::to_string(signal).map_err(ZellijCcError::JsonSerialize)?;
+    let json = serde_json::to_string(signal).map_err(MantleError::JsonSerialize)?;
 
     let mut file = std::fs::OpenOptions::new()
         .write(true)
         .open(fifo_path)
-        .map_err(|e| ZellijCcError::FifoOpen {
+        .map_err(|e| MantleError::FifoOpen {
             path: fifo_path.to_path_buf(),
             source: e,
         })?;
 
     file.write_all(json.as_bytes())
-        .map_err(|e| ZellijCcError::FifoWrite {
+        .map_err(|e| MantleError::FifoWrite {
             path: fifo_path.to_path_buf(),
             source: e,
         })?;
-    file.write_all(b"\n").map_err(|e| ZellijCcError::FifoWrite {
+    file.write_all(b"\n").map_err(|e| MantleError::FifoWrite {
         path: fifo_path.to_path_buf(),
         source: e,
     })?;
@@ -352,15 +352,15 @@ pub fn write_signal(fifo_path: &Path, signal: &InterruptSignal) -> Result<()> {
 
 /// Write a RunResult to a result FIFO.
 pub fn write_result(fifo_path: &Path, result: &RunResult) -> Result<()> {
-    let json = serde_json::to_string(result).map_err(ZellijCcError::JsonSerialize)?;
+    let json = serde_json::to_string(result).map_err(MantleError::JsonSerialize)?;
 
-    let mut file = File::create(fifo_path).map_err(|e| ZellijCcError::FifoOpen {
+    let mut file = File::create(fifo_path).map_err(|e| MantleError::FifoOpen {
         path: fifo_path.to_path_buf(),
         source: e,
     })?;
 
     file.write_all(json.as_bytes())
-        .map_err(|e| ZellijCcError::FifoWrite {
+        .map_err(|e| MantleError::FifoWrite {
             path: fifo_path.to_path_buf(),
             source: e,
         })?;
