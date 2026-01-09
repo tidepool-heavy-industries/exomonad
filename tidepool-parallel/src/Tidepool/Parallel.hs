@@ -3,35 +3,37 @@
 -- This module provides parallel fan-out/fan-in execution using ki for
 -- structured concurrency. Key concepts:
 --
--- * 'GotoAll' - Fan-out to multiple targets simultaneously
+-- * 'GotoAll' - Fan-out to multiple targets simultaneously (product type)
 -- * 'Merge' - Gather results from parallel workers, grouped by correlation key
 -- * 'CorrelateBy' - Typeclass for extracting correlation keys from results
 --
--- = Example
+-- = Usage Pattern
 --
 -- @
--- -- Define a graph with parallel processing
--- data OrderGraph mode = OrderGraph
---   { entry   :: mode :- Entry Order
---   , fanout  :: mode :- LogicNode :@ Input Order
---                    :@ UsesEffects '[GotoAllEffect '[To "payment" PayReq, To "inventory" InvReq]]
---   , payment :: mode :- LLMNode :@ Input PayReq :@ Schema PayResult
---                    :@ UsesEffects '[Arrive PayResult]
---   , inventory :: mode :- LLMNode :@ Input InvReq :@ Schema InvResult
---                    :@ UsesEffects '[Arrive InvResult]
---   , gather  :: mode :- LogicNode
---                    :@ Input (Merge '[From "payment" PayResult, From "inventory" InvResult])
---                    :@ GroupBy OrderId
---                    :@ UsesEffects '[Goto Exit OrderResult]
---   , exit    :: mode :- Exit OrderResult
---   }
+-- -- 1. Create fan-out with GotoAll
+-- let targets = gotoAll (payReq ::: invReq ::: HNil)
+--     extractedTargets = extractTargets targets  -- [(Text, Value)]
 --
--- -- Correlation instances
+-- -- 2. Dispatch workers in parallel
+-- results <- Ki.scoped $ \\scope ->
+--   dispatchAll defaultParallelConfig scope workerDispatch extractedTargets
+--
+-- -- 3. Collect results in accumulator
+-- acc <- newMergeAccumulator @'[From "payment" PayResult, From "inventory" InvResult]
+-- forM_ results $ \\wr -> addResult acc correlationKey wr.wrSource wr.wrPayload
+--
+-- -- 4. Extract typed results when complete
+-- Just (Right (payResult ::: invResult ::: HNil)) <-
+--   getCompletedResults @'[From "payment" PayResult, From "inventory" InvResult] acc key
+-- @
+--
+-- = Correlation Keys
+--
+-- Results are grouped by correlation key, enabling multiple in-flight fan-outs:
+--
+-- @
 -- instance CorrelateBy OrderId PayResult where correlationKey = (.orderId)
 -- instance CorrelateBy OrderId InvResult where correlationKey = (.orderId)
---
--- -- Run with parallel execution
--- result <- runParallel handlers (toJSON order)
 -- @
 module Tidepool.Parallel
   ( -- * Parallel Execution

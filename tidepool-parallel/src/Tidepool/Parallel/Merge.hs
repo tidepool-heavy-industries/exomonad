@@ -25,7 +25,7 @@ module Tidepool.Parallel.Merge
   , FromPayloads
   ) where
 
-import Control.Concurrent.STM (TVar, newTVarIO, readTVar, writeTVar, atomically)
+import Control.Concurrent.STM (TVar, newTVarIO, readTVar, readTVarIO, writeTVar, atomically)
 import Data.Aeson (Value, FromJSON(..))
 import Data.Aeson.Types (parseEither)
 import Data.HashMap.Strict (HashMap)
@@ -64,9 +64,7 @@ data MergeAccumulator key = MergeAccumulator
 -- @
 newMergeAccumulator
   :: forall sources key.
-     ( ExpectedSources sources
-     , Hashable key
-     )
+     ( ExpectedSources sources )
   => IO (MergeAccumulator key)
 newMergeAccumulator = do
   partialsVar <- newTVarIO HM.empty
@@ -93,12 +91,24 @@ data MergeSlot
   | SlotFilled Value
   deriving stock (Show, Eq)
 
+-- | Get the set of source names that have been filled in a partial merge.
+filledSources :: PartialMerge -> HashSet Text
+filledSources partial = HM.keysSet $ HM.filter isFilled (partial.pmSlots)
+  where
+    isFilled SlotEmpty = False
+    isFilled (SlotFilled _) = True
+
 -- | Add a result to the accumulator.
 --
 -- Returns 'Just' the completed source set if this result completed a key,
 -- 'Nothing' otherwise.
+--
+-- __Duplicate handling__: If a source reports multiple times for the same
+-- correlation key, the later result overwrites the earlier one. This is
+-- intentional - it allows retry logic to replace failed attempts with
+-- successful ones without special handling.
 addResult
-  :: (Hashable key, Eq key)
+  :: (Hashable key)
   => MergeAccumulator key
   -> key           -- ^ Correlation key
   -> Text          -- ^ Source name
@@ -112,18 +122,16 @@ addResult acc key source payload = atomically $ do
   writeTVar (acc.maPartials) partials'
 
   -- Check if complete
-  let filled = HM.keysSet $ HM.filter isFilled (partial'.pmSlots)
+  let filled = filledSources partial'
   if filled == acc.maExpectedSources
     then pure (Just filled)
     else pure Nothing
   where
     emptyPartial = PartialMerge HM.empty
-    isFilled SlotEmpty = False
-    isFilled (SlotFilled _) = True
 
 -- | Check if a correlation key has all expected results.
 checkComplete
-  :: (Hashable key, Eq key)
+  :: (Hashable key)
   => MergeAccumulator key
   -> key
   -> IO Bool
@@ -131,16 +139,8 @@ checkComplete acc key = do
   partials <- readTVarIO (acc.maPartials)
   case HM.lookup key partials of
     Nothing -> pure False
-    Just partial -> do
-      let filled = HM.keysSet $ HM.filter isFilled (partial.pmSlots)
-      pure $ filled == acc.maExpectedSources
-  where
-    isFilled SlotEmpty = False
-    isFilled (SlotFilled _) = True
-
--- | Read a TVar in IO.
-readTVarIO :: TVar a -> IO a
-readTVarIO = atomically . readTVar
+    Just partial ->
+      pure $ filledSources partial == acc.maExpectedSources
 
 
 -- ════════════════════════════════════════════════════════════════════════════
