@@ -13,6 +13,7 @@ module Tidepool.StructuredOutput.Prefix
   ( -- * Field Label Modification
     stripFieldPrefix
   , defaultFieldLabel
+  , makeStripPrefix
 
     -- * Prefix Detection
   , detectPrefix
@@ -27,19 +28,14 @@ import Data.Char (isLower, toLower, toUpper)
 import Data.List (foldl')
 
 
--- | Strip common lowercase prefix from a field name and lowercase the first char.
+-- | Strip a known common prefix from a field name.
 --
--- This is the default field label modifier for 'StructuredOutput'.
---
--- Algorithm:
--- 1. Find the lowercase prefix (characters before first uppercase)
--- 2. Strip that prefix
--- 3. Lowercase the first character of the remainder
+-- This function is NOT the default - use 'id' by default.
+-- Only use this when you KNOW all fields share a common prefix.
 --
 -- @
 -- stripFieldPrefix "tdTypeName"     = "typeName"
 -- stripFieldPrefix "fsDescription"  = "description"
--- stripFieldPrefix "trBuildPassed"  = "buildPassed"
 -- stripFieldPrefix "name"           = "name"  (no prefix to strip)
 -- stripFieldPrefix "URL"            = "url"   (all caps -> lowercase)
 -- @
@@ -48,9 +44,7 @@ stripFieldPrefix fieldName =
   let prefix = takeWhile isLower fieldName
       remainder = drop (length prefix) fieldName
   in case remainder of
-       -- If there's a remainder after stripping prefix, use it (lowercased first char)
        (c:cs) | not (null prefix) -> toLower c : cs
-       -- No uppercase found after prefix, or no prefix - just lowercase first char
        _ -> lcFirst fieldName
 
 
@@ -60,6 +54,33 @@ stripFieldPrefix fieldName =
 -- for use in 'StructuredOptions'.
 defaultFieldLabel :: String -> String
 defaultFieldLabel = stripFieldPrefix
+
+
+-- | Create a field modifier that strips a specific prefix.
+--
+-- If the prefix is empty, returns 'lcFirst' (just lowercase first char).
+-- Otherwise, strips the exact prefix and lowercases the next character.
+--
+-- @
+-- makeStripPrefix "td" "tdTypeName"  = "typeName"
+-- makeStripPrefix "td" "tdDataType"  = "dataType"
+-- makeStripPrefix "td" "otherField"  = "otherField"  -- no match, unchanged
+-- makeStripPrefix ""   "SomeField"   = "someField"   -- empty prefix = lcFirst
+-- @
+makeStripPrefix :: String -> (String -> String)
+makeStripPrefix "" = lcFirst
+makeStripPrefix prefix = \fieldName ->
+  case stripPrefixExact prefix fieldName of
+    Just (c:cs) -> toLower c : cs
+    Just []     -> fieldName  -- prefix was the whole name, keep as-is
+    Nothing     -> fieldName  -- didn't match, keep as-is
+  where
+    stripPrefixExact :: String -> String -> Maybe String
+    stripPrefixExact [] ys = Just ys
+    stripPrefixExact _ [] = Nothing
+    stripPrefixExact (x:xs) (y:ys)
+      | x == y    = stripPrefixExact xs ys
+      | otherwise = Nothing
 
 
 -- | Detect the common lowercase prefix from a list of field names.

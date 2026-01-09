@@ -160,13 +160,15 @@ data SumEncoding
 
 -- | Default options.
 --
--- - Field labels: Strip common lowercase prefix ('stripFieldPrefix')
+-- - Field labels: Identity (no modification) - field names match Haskell exactly
 -- - Constructor tags: No modification
 -- - Omit Nothing: True
 -- - Sum encoding: Tagged object with "tag" and "contents"
+--
+-- Use 'stripFieldPrefix' in a custom instance if all fields share a common prefix.
 defaultOptions :: StructuredOptions
 defaultOptions = StructuredOptions
-  { soFieldLabelModifier = stripFieldPrefix
+  { soFieldLabelModifier = id
   , soConstructorTagModifier = id
   , soOmitNothingFields = True
   , soSumEncoding = TaggedObject "tag" "contents"
