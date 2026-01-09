@@ -53,10 +53,11 @@ import qualified Data.Text as T
 import Control.Monad.Freer (Eff, Member)
 import GHC.Generics (Generic(..))
 import GHC.Records (HasField(..))
-import GHC.TypeLits (Symbol, KnownSymbol, TypeError, ErrorMessage(..), symbolVal)
+import GHC.TypeLits (Symbol, KnownSymbol, ErrorMessage(..), symbolVal)
 import Tidepool.Graph.Errors
   ( HR, Blank, WhatHappened, HowItWorks, Fixes
   , Indent, CodeLine, Bullet
+  , Unsatisfiable, unsatisfiable
   )
 import Text.Ginger.TH (TypedTemplate, runTypedTemplate)
 import Text.Parsec.Pos (SourcePos)
@@ -499,7 +500,10 @@ instance
 --
 -- A GotoChoice must have at least one target. This instance produces a clear
 -- type error rather than an opaque "No instance" message.
-instance TypeError
+--
+-- Uses 'Unsatisfiable' rather than 'TypeError' because an empty target list
+-- is logically impossible - there's no way to construct 'OneOf '[]'.
+instance Unsatisfiable
   ( HR
     ':$$: 'Text "  Cannot dispatch: handler has no exit points"
     ':$$: HR
@@ -523,9 +527,9 @@ instance TypeError
     ':$$: Bullet "Or add transitions to other nodes:"
     ':$$: CodeLine "  UsesEffects '[Goto \"nextNode\" Payload, Goto Exit Result]"
   ) => DispatchGoto graph '[] es exitType where
-  -- UNREACHABLE: The TypeError instance means this code is never executed.
-  -- If a GotoChoice '[] type is constructed, compilation fails with the TypeError message above.
-  dispatchGoto = error "unreachable: empty target list"
+  -- UNREACHABLE: The Unsatisfiable constraint means this code is never executed.
+  -- If a GotoChoice '[] type is constructed, compilation fails with the error message above.
+  dispatchGoto = unsatisfiable
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -558,7 +562,11 @@ instance {-# OVERLAPPABLE #-}
 --
 -- Self-loops require tracking the "current" handler to re-invoke.
 -- This instance provides a clear error directing users to the correct API.
-instance TypeError
+--
+-- Uses 'Unsatisfiable' rather than 'TypeError' because using 'dispatchGoto'
+-- with a self-looping handler is API misuse that cannot be fixed by adding
+-- annotations - it requires using a different function entirely.
+instance Unsatisfiable
   ( HR
     ':$$: 'Text "  Self-loop requires special dispatch"
     ':$$: HR
@@ -588,13 +596,17 @@ instance TypeError
     ':$$: CodeLine "                               ^^^^^^^^^^^"
     ':$$: CodeLine "                               \"when you see Self, call this\""
   ) => DispatchGoto graph '[To Self payload] es exitType where
-  -- UNREACHABLE: The TypeError instance means this code is never executed.
+  -- UNREACHABLE: The Unsatisfiable constraint means this code is never executed.
   -- If gotoSelf is used with dispatchGoto (instead of dispatchGotoWithSelf),
-  -- compilation fails with the TypeError directing to the correct API.
-  dispatchGoto = error "unreachable: self-loop"
+  -- compilation fails with the error directing to the correct API.
+  dispatchGoto = unsatisfiable
 
 -- | Self first with more targets: use DispatchGotoWithSelf instead.
-instance {-# OVERLAPPABLE #-} TypeError
+--
+-- Uses 'Unsatisfiable' rather than 'TypeError' because using 'dispatchGoto'
+-- with a self-looping handler is API misuse that cannot be fixed by adding
+-- annotations - it requires using a different function entirely.
+instance {-# OVERLAPPABLE #-} Unsatisfiable
   ( HR
     ':$$: 'Text "  Self-loop requires special dispatch"
     ':$$: HR
@@ -624,10 +636,10 @@ instance {-# OVERLAPPABLE #-} TypeError
     ':$$: CodeLine "                               ^^^^^^^^^^^"
     ':$$: CodeLine "                               \"when you see Self, call this\""
   ) => DispatchGoto graph (To Self payload ': rest) es exitType where
-  -- UNREACHABLE: The TypeError instance means this code is never executed.
+  -- UNREACHABLE: The Unsatisfiable constraint means this code is never executed.
   -- If gotoSelf is used with dispatchGoto (instead of dispatchGotoWithSelf),
-  -- compilation fails with the TypeError directing to the correct API.
-  dispatchGoto = error "unreachable: self-loop"
+  -- compilation fails with the error directing to the correct API.
+  dispatchGoto = unsatisfiable
 
 
 -- ════════════════════════════════════════════════════════════════════════════

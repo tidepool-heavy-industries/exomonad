@@ -48,10 +48,23 @@ module Tidepool.Graph.Errors
   , FormatSymbolList
   , FormatTargetList
   , ExtractTargetNames
+
+    -- * Type Error Infrastructure (from GHC.TypeError)
+    -- | Re-exported from "GHC.TypeError" for use in validation modules.
+    --
+    -- == Semantic Distinction
+    --
+    -- * 'TypeError' - "You're missing something" (user can add annotation, fix typo)
+    -- * 'Unsatisfiable' - "These constraints are contradictory" (fundamental redesign needed)
+    -- * 'Assert' - Conditional check that emits error on failure
+  , Unsatisfiable
+  , unsatisfiable
+  , Assert
   ) where
 
 import Data.Kind (Type)
 import GHC.TypeLits (Symbol, ErrorMessage(..))
+import GHC.TypeError (Unsatisfiable, unsatisfiable, Assert)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- FORMATTING PRIMITIVES
