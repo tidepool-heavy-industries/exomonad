@@ -9,11 +9,25 @@ module TypesFirstDev.Templates.Hybrid
     HTypesTpl
   , HTypeAdversaryTpl
   , HTypesFixTpl
+  , HConflictResolveTpl
+    -- WS4 templates
+  , HFixTpl
+  , HMutationAdversaryTpl
+    -- Parallel blind execution (WS2)
+  , HTestsTpl
+  , HImplTpl
 
     -- * Compiled Templates
   , hTypesCompiled
   , hTypeAdversaryCompiled
   , hTypesFixCompiled
+  , hConflictResolveCompiled
+    -- WS4
+  , hFixCompiled
+  , hMutationAdversaryCompiled
+    -- Parallel execution (WS2)
+  , hTestsCompiled
+  , hImplCompiled
   ) where
 
 import Text.Parsec.Pos (SourcePos)
@@ -24,6 +38,13 @@ import TypesFirstDev.Context.Hybrid
   ( TypesTemplateCtx(..)
   , TypeAdversaryTemplateCtx(..)
   , TypesFixTemplateCtx(..)
+  , ConflictResolveTemplateCtx(..)
+    -- WS4
+  , FixTemplateCtx(..)
+  , MutationTemplateCtx(..)
+    -- Parallel execution (WS2)
+  , TestsTemplateCtx(..)
+  , ImplTemplateCtx(..)
   )
 
 
@@ -92,3 +113,113 @@ instance TemplateDef HTypesFixTpl where
   templateCompiled = hTypesFixCompiled
 
   buildContext = error "HTypesFixTpl.buildContext should not be called for ClaudeCode handlers"
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- CONFLICT RESOLVE TEMPLATE (WS3)
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Compile the conflict resolve template at build time.
+hConflictResolveCompiled :: TypedTemplate ConflictResolveTemplateCtx SourcePos
+hConflictResolveCompiled = $(typedTemplateFile ''ConflictResolveTemplateCtx "templates/hybrid/conflict-resolve.jinja")
+
+-- | Template type marker for the conflict resolve node.
+data HConflictResolveTpl
+
+instance TemplateDef HConflictResolveTpl where
+  type TemplateContext HConflictResolveTpl = ConflictResolveTemplateCtx
+  type TemplateConstraint HConflictResolveTpl es = ()
+
+  templateName = "hybrid-conflict-resolve"
+  templateDescription = "Resolve git merge conflicts via LLM"
+  templateCompiled = hConflictResolveCompiled
+
+  buildContext = error "HConflictResolveTpl.buildContext should not be called for ClaudeCode handlers"
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- FIX TEMPLATE (WS4)
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Compile the fix template at build time.
+hFixCompiled :: TypedTemplate FixTemplateCtx SourcePos
+hFixCompiled = $(typedTemplateFile ''FixTemplateCtx "templates/hybrid/fix.jinja")
+
+-- | Template type marker for the fix node.
+data HFixTpl
+
+instance TemplateDef HFixTpl where
+  type TemplateContext HFixTpl = FixTemplateCtx
+  type TemplateConstraint HFixTpl es = ()
+
+  templateName = "hybrid-fix"
+  templateDescription = "Fix implementation based on test failures"
+  templateCompiled = hFixCompiled
+
+  buildContext = error "HFixTpl.buildContext should not be called for ClaudeCode handlers"
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- MUTATION ADVERSARY TEMPLATE (WS4)
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Compile the mutation adversary template at build time.
+hMutationAdversaryCompiled :: TypedTemplate MutationTemplateCtx SourcePos
+hMutationAdversaryCompiled = $(typedTemplateFile ''MutationTemplateCtx "templates/hybrid/mutation-adversary.jinja")
+
+-- | Template type marker for the mutation adversary node.
+data HMutationAdversaryTpl
+
+instance TemplateDef HMutationAdversaryTpl where
+  type TemplateContext HMutationAdversaryTpl = MutationTemplateCtx
+  type TemplateConstraint HMutationAdversaryTpl es = ()
+
+  templateName = "hybrid-mutation-adversary"
+  templateDescription = "RED TEAM: Find weaknesses in test suite via mutation testing"
+  templateCompiled = hMutationAdversaryCompiled
+
+  buildContext = error "HMutationAdversaryTpl.buildContext should not be called for ClaudeCode handlers"
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- PARALLEL: TESTS TEMPLATE (WS2)
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Compile the tests agent template at build time.
+hTestsCompiled :: TypedTemplate TestsTemplateCtx SourcePos
+hTestsCompiled = $(typedTemplateFile ''TestsTemplateCtx "templates/hybrid/tests.jinja")
+
+-- | Template type marker for the tests agent node.
+data HTestsTpl
+
+instance TemplateDef HTestsTpl where
+  type TemplateContext HTestsTpl = TestsTemplateCtx
+  type TemplateConstraint HTestsTpl es = ()
+
+  templateName = "hybrid-tests"
+  templateDescription = "Write QuickCheck properties (blind to impl)"
+  templateCompiled = hTestsCompiled
+
+  buildContext = error "HTestsTpl.buildContext should not be called for ClaudeCode handlers"
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- PARALLEL: IMPL TEMPLATE (WS2)
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Compile the impl agent template at build time.
+hImplCompiled :: TypedTemplate ImplTemplateCtx SourcePos
+hImplCompiled = $(typedTemplateFile ''ImplTemplateCtx "templates/hybrid/impl.jinja")
+
+-- | Template type marker for the impl agent node.
+data HImplTpl
+
+instance TemplateDef HImplTpl where
+  type TemplateContext HImplTpl = ImplTemplateCtx
+  type TemplateConstraint HImplTpl es = ()
+
+  templateName = "hybrid-impl"
+  templateDescription = "Implement functions (blind to tests)"
+  templateCompiled = hImplCompiled
+
+  buildContext = error "HImplTpl.buildContext should not be called for ClaudeCode handlers"

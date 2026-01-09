@@ -10,6 +10,8 @@ module TypesFirstDev.MechanicalChecks
   , checkBuild
   , checkTests
   , checkUndefined
+  , UndefinedLocation(..)
+  , findUndefined
   ) where
 
 import Data.Text (Text)
@@ -78,6 +80,56 @@ checkTests projectPath = do
   pure (exitCode == ExitSuccess, output)
 
 
+-- | A location where undefined/stub was found.
+data UndefinedLocation = UndefinedLocation
+  { ulFile :: FilePath
+  , ulLine :: Int
+  , ulContent :: Text
+  }
+  deriving stock (Show, Eq)
+
+
+-- | Find all undefined/stub locations in a file or directory.
+--
+-- Returns detailed info that can be fed back to the agent for fixing.
+findUndefined :: FilePath -> IO [UndefinedLocation]
+findUndefined path = do
+  -- Use grep -rn to get file:line:content
+  (exitCode, stdout, _) <- readProcessWithExitCode
+    "grep"
+    [ "-rn"                   -- recursive with line numbers
+    , "-E"                    -- extended regex
+    , "--include=*.hs"        -- only Haskell files
+    , stubPattern
+    , path
+    ]
+    ""
+  case exitCode of
+    ExitSuccess -> pure $ parseGrepOutput stdout
+    _ -> pure []  -- No matches or error
+  where
+    stubPattern = "\\bundefined\\b|error \"TODO\"|error \"[Nn]ot implemented\"| = error \""
+
+    parseGrepOutput :: String -> [UndefinedLocation]
+    parseGrepOutput = mapMaybe parseLine . lines
+
+    parseLine :: String -> Maybe UndefinedLocation
+    parseLine s = case break (== ':') s of
+      (file, ':':rest) -> case break (== ':') rest of
+        (lineStr, ':':content) -> case reads lineStr of
+          [(lineNum, "")] -> Just UndefinedLocation
+            { ulFile = file
+            , ulLine = lineNum
+            , ulContent = T.pack content
+            }
+          _ -> Nothing
+        _ -> Nothing
+      _ -> Nothing
+
+    mapMaybe :: (a -> Maybe b) -> [a] -> [b]
+    mapMaybe f = foldr (\x acc -> maybe acc (:acc) (f x)) []
+
+
 -- | Check if file or directory contains `undefined` or stub patterns.
 --
 -- Uses grep to search recursively if given a directory.
@@ -85,23 +137,9 @@ checkTests projectPath = do
 -- - `undefined`
 -- - `error "TODO"`
 -- - `error "not implemented"`
+--
+-- Note: Prefer `findUndefined` which returns locations for route-back.
 checkUndefined :: FilePath -> IO Bool
 checkUndefined path = do
-  -- Use grep -r to handle both files and directories
-  -- Returns exit code 0 if pattern found, 1 if not found, 2 on error
-  (exitCode, _, _) <- readProcessWithExitCode
-    "grep"
-    [ "-r"                    -- recursive
-    , "-q"                    -- quiet (just return exit code)
-    , "-E"                    -- extended regex
-    , "--include=*.hs"        -- only Haskell files
-    , stubPattern
-    , path
-    ]
-    ""
-  -- Exit code 0 means pattern was found (has undefined)
-  pure (exitCode == ExitSuccess)
-  where
-    -- Combined pattern for all stub indicators
-    -- Use word boundary for 'undefined' to avoid false positives
-    stubPattern = "\\bundefined\\b|error \"TODO\"|error \"[Nn]ot implemented\"| = error \""
+  locations <- findUndefined path
+  pure $ not (null locations)

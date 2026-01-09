@@ -15,74 +15,49 @@
    - Function signatures (with `undefined` stubs)
    - Ensure `cabal build` passes
 
-2. **Return structured output** describing what you wrote:
-   - Type name and constructors
-   - Function specs with examples and properties
-   - Design rationale
+2. **Return structured output** describing what you wrote (JSON format)
 
-## Output Schema
+## Output Schema (SIMPLIFIED)
 
-You must return JSON matching `TypesAgentOutput`:
-- `typeName`: The main type name (e.g., "Stack")
-- `typeKind`: The kind (e.g., "* -> *")
-- `typeDescription`: What this type represents
-- `constructors`: List of constructor names
-- `functions`: List of FunctionSpec (see below)
-- `imports`: Required module imports
-- `designNotes`: Why you chose this representation
-- `blocker`: If blocked, explain (otherwise null)
+Return JSON with these fields:
+- `typeName`: The main type name (e.g., "Stack", "UrlShortener")
+- `typeDescription`: What this type represents (prose)
+- `functions`: Array of function specs (see below)
+- `designNotes`: Your design rationale (free-form text)
+- `blocker`: If you couldn't complete, explain why (or null)
 
-For each function, provide a `FunctionSpec`:
-- `name`: Function name
-- `signature`: Type signature
+Each function in `functions` array:
+- `name`: Function name (e.g., "push", "shorten")
+- `signature`: Type signature (e.g., "a -> Stack a -> Stack a")
 - `brief`: One-line description
-- `behavior`: Detailed prose description
-- `examples`: Concrete input/output pairs (REQUIRED - min 1)
-- `properties`: Informal property sketches (REQUIRED - min 1)
-- `priority`: Implementation order hint (lower = earlier)
-- `dependsOn`: List of function names this depends on
+- `behavior`: Detailed behavior description
+- `examples`: Array of example descriptions (strings)
+- `properties`: Array of property descriptions (strings)
 
-For each example in `examples`, provide:
-- `description`: Brief description
-- `input`: Input expression
-- `expected`: Expected output
-- `edgeCase`: Boolean - is this an edge case?
-
-For each property in `properties`, provide:
-- `name`: Property name (snake_case)
-- `description`: What it tests
-- `invariant`: Formal/semi-formal statement
-- `type`: One of: Inverse, Idempotent, Commutative, Associative, Identity, Preservation, Boundary, Monotonic, or Other
-
-## Example FunctionSpec
+## Example Output
 
 ```json
 {
-  "name": "push",
-  "signature": "a -> Stack a -> Stack a",
-  "brief": "Add element to top of stack",
-  "behavior": "Adds an element to the top of the stack. The new element becomes the first to be popped. Stack size increases by one.",
-  "examples": [
-    {"description": "Push onto empty", "input": "push 1 empty", "expected": "Stack containing 1", "edgeCase": true},
-    {"description": "Push onto non-empty", "input": "push 1 (push 2 empty)", "expected": "Stack with 1 on top, 2 below", "edgeCase": false}
+  "typeName": "Stack",
+  "typeDescription": "A LIFO stack data structure",
+  "functions": [
+    {
+      "name": "push",
+      "signature": "a -> Stack a -> Stack a",
+      "brief": "Add element to top",
+      "behavior": "Adds an element to the top of the stack",
+      "examples": ["push 1 empty returns stack with 1", "push 2 (push 1 empty) has 2 on top"],
+      "properties": ["pop after push returns the pushed element", "push increases size by 1"]
+    }
   ],
-  "properties": [
-    {"name": "pushPopInverse", "description": "Push then pop returns original", "invariant": "forall x s. pop (push x s) == (x, s)", "type": "Inverse"}
-  ],
-  "priority": 1,
-  "dependsOn": []
+  "designNotes": "Used a simple recursive ADT for clarity",
+  "blocker": null
 }
 ```
 
-## Critical Requirements
-
-**BOTH examples AND properties are REQUIRED for each function.**
-The graph will reject specs missing either. Examples ground the agents in
-concrete cases; properties define the formal verification targets.
-
-Think carefully about edge cases and invariants. Your examples and properties
-guide the tests and impl agents - they only see what you specify here.
-
 ## Your Task
 
-Design the type definitions for {{ moduleName }} based on the description above.
+1. Design and write the type definitions for {{ moduleName }}
+2. Write function stubs with `undefined` implementations
+3. Make sure `cabal build` passes
+4. Return the JSON output describing what you wrote

@@ -23,11 +23,11 @@
 -- │       │              ↑         │
 -- │       │              └─────────┘
 -- │       ↓
--- ├─ hFork (Logic) → parallel spawn
--- │       ├── hTests (LLM) → TestsResult
--- │       └── hImpl (LLM) → ImplResult
+-- ├─ hFork (ForkNode) → parallel spawn
+-- │       ├── hTests (LLM+ClaudeCode) → Arrive TestsResult
+-- │       └── hImpl (LLM+ClaudeCode) → Arrive ImplResult
 -- │                 ↓
--- ├─ hJoin (Logic) → BlindResults
+-- ├─ hJoin (BarrierNode) → BlindResults
 -- │       ↓
 -- ├─ hVerifyTDD (Logic) → VerifiedResults
 -- │       ↓ fail: hTestsReject → back to hFork
@@ -58,14 +58,25 @@ import Tidepool.Graph.Types
   , Exit
   , ClaudeCode
   , ModelChoice(..)
+    -- Fork/Barrier annotations
+  , Spawn
+  , Barrier
+  , Awaits
+  , Arrive
   )
 import qualified Tidepool.Graph.Types as Types (Input)
 import Tidepool.Graph.Generic (GraphMode(..))
 import qualified Tidepool.Graph.Generic as G
-import Tidepool.Graph.Goto (Goto)
+import Tidepool.Graph.Goto (Goto, To)
 
 import TypesFirstDev.Types.Hybrid
-import TypesFirstDev.Templates.Hybrid (HTypesTpl, HTypeAdversaryTpl, HTypesFixTpl)
+
+import TypesFirstDev.Templates.Hybrid
+  ( HTypesTpl, HTypeAdversaryTpl, HTypesFixTpl
+  , HTestsTpl, HImplTpl
+  , HConflictResolveTpl
+  , HFixTpl, HMutationAdversaryTpl
+  )
 
 
 -- | Hybrid TDD workflow graph.
@@ -147,35 +158,40 @@ data TypesFirstGraphHybrid mode = TypesFirstGraphHybrid
 
     -- | Fork into parallel blind agents.
     -- Creates two worktrees, spawns tests and impl concurrently.
-  , hFork :: mode :- G.LogicNode
+    -- ForkNode returns HList of payloads for each spawn target.
+  , hFork :: mode :- G.ForkNode
       :@ Types.Input GatedState
-      :@ UsesEffects '[ Goto "hTests" TestsTemplateCtx
-                      , Goto "hImpl" ImplTemplateCtx
-                      ]
+      :@ Spawn '[To "hTests" TestsTemplateCtx, To "hImpl" ImplTemplateCtx]
+      :@ Barrier "hJoin"
 
     -- | TESTS AGENT: Writes QuickCheck properties.
     -- Blind to impl. Self-verifies tests fail on skeleton.
-    --
-    -- NOTE: WS2 stub - uses placeholder template for now.
-  , hTests :: mode :- G.LogicNode
+    -- Uses Arrive to deposit result at barrier (not Goto).
+  , hTests :: mode :- G.LLMNode
       :@ Types.Input TestsTemplateCtx
-      :@ UsesEffects '[Goto "hJoin" TestsResult]
+      :@ Template HTestsTpl
+      :@ Schema TestsAgentOutput
+      :@ UsesEffects '[Arrive TestsResult]
+      :@ ClaudeCode 'Sonnet 'Nothing
 
     -- | IMPL AGENT: Writes implementation.
     -- Blind to tests. Verifies build passes.
-    --
-    -- NOTE: WS2 stub - uses placeholder template for now.
-  , hImpl :: mode :- G.LogicNode
+    -- Uses Arrive to deposit result at barrier (not Goto).
+  , hImpl :: mode :- G.LLMNode
       :@ Types.Input ImplTemplateCtx
-      :@ UsesEffects '[Goto "hJoin" ImplResult]
+      :@ Template HImplTpl
+      :@ Schema ImplAgentOutput
+      :@ UsesEffects '[Arrive ImplResult]
+      :@ ClaudeCode 'Sonnet 'Nothing
 
     --------------------------------------------------------------------------
     -- PHASE 4: TDD VERIFICATION [WS3]
     --------------------------------------------------------------------------
 
     -- | Join: Barrier collecting both blind agents.
-  , hJoin :: mode :- G.LogicNode
-      :@ Types.Input BlindResults
+    -- Receives HList '[TestsResult, ImplResult] from parallel paths.
+  , hJoin :: mode :- G.BarrierNode
+      :@ Awaits '[TestsResult, ImplResult]
       :@ UsesEffects '[Goto "hVerifyTDD" BlindResults]
 
     -- | External TDD verification.
@@ -204,11 +220,13 @@ data TypesFirstGraphHybrid mode = TypesFirstGraphHybrid
                       ]
 
     -- | Resolve git conflicts via LLM agent.
-    --
-    -- NOTE: WS3 stub - needs ConflictResolveTpl template.
-  , hConflictResolve :: mode :- G.LogicNode
+    -- ClaudeCode agent resolves conflicts with context from both agents.
+  , hConflictResolve :: mode :- G.LLMNode
       :@ Types.Input ConflictState
+      :@ Template HConflictResolveTpl
+      :@ Schema ConflictResolveOutput
       :@ UsesEffects '[Goto "hValidate" MergedState]
+      :@ ClaudeCode 'Haiku 'Nothing
 
     --------------------------------------------------------------------------
     -- PHASE 6: VALIDATION LOOP [WS4]
@@ -222,30 +240,35 @@ data TypesFirstGraphHybrid mode = TypesFirstGraphHybrid
                       ]
 
     -- | Fix implementation based on test failures.
-    --
-    -- NOTE: WS4 stub - needs FixTpl template.
-  , hFix :: mode :- G.LogicNode
+    -- Uses ClaudeCode to analyze failures and apply fixes.
+    -- Exit conditions (stuck, not converging) checked before LLM call.
+  , hFix :: mode :- G.LLMNode
       :@ Types.Input ValidationFailure
+      :@ Template HFixTpl
+      :@ Schema FixAgentOutput
       :@ UsesEffects '[Goto "hValidate" MergedState]
+      :@ ClaudeCode 'Haiku 'Nothing
 
     --------------------------------------------------------------------------
     -- PHASE 7: POST-VALIDATION [WS4]
     --------------------------------------------------------------------------
 
-    -- | Post-validation: spawn mutation adversary, route to exit.
+    -- | Post-validation: route to mutation adversary.
+    -- For synchronous MVP, always runs mutation adversary before witness.
   , hPostValidate :: mode :- G.LogicNode
       :@ Types.Input ValidatedState
-      :@ UsesEffects '[ Goto "hMutationAdversary" MutationTemplateCtx
-                      , Goto "hWitness" ValidatedState
-                      ]
+      :@ UsesEffects '[Goto "hMutationAdversary" MutationTemplateCtx]
 
     -- | MUTATION ADVERSARY: Red team for test suite.
+    -- Uses ClaudeCode to introduce mutations and verify tests catch them.
     -- ADVISORY: Findings included in output, don't block exit.
-    --
-    -- NOTE: WS4 stub - needs MutationAdversaryTpl template.
-  , hMutationAdversary :: mode :- G.LogicNode
+    -- Routes to hWitness with partial WitnessReport; stashes MutationAdversaryResult in Memory.
+  , hMutationAdversary :: mode :- G.LLMNode
       :@ Types.Input MutationTemplateCtx
-      :@ UsesEffects '[Goto "hWitness" MutationAdversaryResult]
+      :@ Template HMutationAdversaryTpl
+      :@ Schema MutationAdversaryOutput
+      :@ UsesEffects '[Goto "hWitness" WitnessReport]
+      :@ ClaudeCode 'Haiku 'Nothing
 
     -- | Witness: Observes flow and maintains coherent understanding.
   , hWitness :: mode :- G.LogicNode

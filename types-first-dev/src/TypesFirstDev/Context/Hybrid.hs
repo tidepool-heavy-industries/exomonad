@@ -15,6 +15,7 @@ module TypesFirstDev.Context.Hybrid
 import Control.Monad.Writer (Writer)
 import Data.Text (Text)
 import Text.Ginger.GVal (ToGVal(..), dict, list)
+import qualified Text.Ginger.GVal
 import Text.Ginger.Run.Type (Run)
 import Text.Parsec.Pos (SourcePos)
 
@@ -61,26 +62,26 @@ instance ToGVal GingerM FunctionSpec where
     , ("signature", toGVal fn.signature)
     , ("brief", toGVal fn.brief)
     , ("behavior", toGVal fn.behavior)
-    , ("examples", list (toGVal <$> toList fn.examples))
-    , ("properties", list (toGVal <$> toList fn.properties))
-    , ("priority", toGVal fn.priority)
-    , ("dependsOn", list (toGVal <$> fn.dependsOn))
+    , ("examples", list (toGVal <$> fn.examples))
+    , ("properties", list (toGVal <$> fn.properties))
     ]
-    where
-      toList = foldr (:) []
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TYPES AGENT OUTPUT
 -- ════════════════════════════════════════════════════════════════════════════
 
+instance ToGVal GingerM DesignChoice where
+  toGVal dc = dict
+    [ ("dcArea", toGVal dc.dcArea)
+    , ("dcChoice", toGVal dc.dcChoice)
+    , ("dcTradeoff", toGVal dc.dcTradeoff)
+    ]
+
 instance ToGVal GingerM TypesAgentOutput where
   toGVal tao = dict
     [ ("typeName", toGVal tao.typeName)
-    , ("typeKind", toGVal tao.typeKind)
     , ("typeDescription", toGVal tao.typeDescription)
-    , ("constructors", list (toGVal <$> tao.constructors))
     , ("functions", list (toGVal <$> tao.functions))
-    , ("imports", list (toGVal <$> tao.imports))
     , ("designNotes", toGVal tao.designNotes)
     , ("blocker", toGVal tao.blocker)
     ]
@@ -119,8 +120,8 @@ instance ToGVal GingerM TypeHole where
 
 instance ToGVal GingerM EchoChannel where
   toGVal ec = dict
-    [ ("fromImpl", list (toGVal <$> ecFromImpl ec))
-    , ("fromTests", list (toGVal <$> ecFromTests ec))
+    [ ("fromImpl", list (toGVal <$> ec.fromImpl))
+    , ("fromTests", list (toGVal <$> ec.fromTests))
     ]
 
 instance ToGVal GingerM HardeningHint where
@@ -132,9 +133,9 @@ instance ToGVal GingerM HardeningHint where
 
 instance ToGVal GingerM TrivialTestsFeedback where
   toGVal ttf = dict
-    [ ("whyRejected", toGVal (ttfWhyRejected ttf))
-    , ("propertiesWrote", list (toGVal <$> ttfPropertiesWrote ttf))
-    , ("suggestion", toGVal (ttfSuggestion ttf))
+    [ ("whyRejected", toGVal ttf.whyRejected)
+    , ("propertiesWrote", list (toGVal <$> ttf.propertiesWrote))
+    , ("suggestion", toGVal ttf.suggestion)
     ]
 
 instance ToGVal GingerM ScopeLevel where
@@ -157,23 +158,21 @@ instance ToGVal GingerM TypesTemplateCtx where
 
 instance ToGVal GingerM TestsTemplateCtx where
   toGVal ctx = dict
-    [ ("typeName", toGVal (ttcTypeName ctx))
-    , ("constructors", list (toGVal <$> ttcConstructors ctx))
-    , ("functions", list (toGVal <$> ttcFunctions ctx))
-    , ("testPath", toGVal (ttcTestPath ctx))
-    , ("priorFeedback", toGVal (ttcPriorFeedback ctx))
-    , ("echoes", toGVal (ttcEchoes ctx))
-    , ("hardeningHints", list (toGVal <$> ttcHardeningHints ctx))
+    [ ("typeName", toGVal ctx.typeName)
+    , ("functions", list (toGVal <$> ctx.functions))
+    , ("testPath", toGVal ctx.testPath)
+    , ("priorFeedback", toGVal ctx.priorFeedback)
+    , ("echoes", toGVal ctx.echoes)
+    , ("hardeningHints", list (toGVal <$> ctx.hardeningHints))
     ]
 
 instance ToGVal GingerM ImplTemplateCtx where
   toGVal ctx = dict
-    [ ("typeName", toGVal (itcTypeName ctx))
-    , ("constructors", list (toGVal <$> itcConstructors ctx))
-    , ("functions", list (toGVal <$> itcFunctions ctx))
-    , ("implPath", toGVal (itcImplPath ctx))
-    , ("echoes", toGVal (itcEchoes ctx))
-    , ("hardeningHints", list (toGVal <$> itcHardeningHints ctx))
+    [ ("typeName", toGVal ctx.typeName)
+    , ("functions", list (toGVal <$> ctx.functions))
+    , ("implPath", toGVal ctx.implPath)
+    , ("echoes", toGVal ctx.echoes)
+    , ("hardeningHints", list (toGVal <$> ctx.hardeningHints))
     ]
 
 instance ToGVal GingerM MutationTemplateCtx where
@@ -196,4 +195,132 @@ instance ToGVal GingerM TypesFixTemplateCtx where
     , ("holes", list (toGVal <$> ctx.holes))
     , ("attempt", toGVal ctx.attempt)
     , ("priorFixes", list (toGVal <$> ctx.priorFixes))
+    ]
+
+instance ToGVal GingerM ConflictResolveTemplateCtx where
+  toGVal ctx = dict
+    [ ("conflictedFiles", list (conflictedFilePair <$> conflictedFiles ctx))
+    , ("testsContext", toGVal (testsContext ctx))
+    , ("implContext", toGVal (implContext ctx))
+    , ("mergeWorktree", toGVal (mergeWorktree ctx))
+    ]
+    where
+      conflictedFilePair :: (FilePath, Text) -> Text.Ginger.GVal.GVal GingerM
+      conflictedFilePair (path, content) = dict
+        [ ("path", toGVal path)
+        , ("content", toGVal content)
+        ]
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- WS4: VALIDATION LOOP TYPES
+-- ════════════════════════════════════════════════════════════════════════════
+
+instance ToGVal GingerM FailureType where
+  toGVal = \case
+    PropertyFailed -> toGVal ("PropertyFailed" :: Text)
+    ExceptionThrown -> toGVal ("ExceptionThrown" :: Text)
+    Timeout -> toGVal ("Timeout" :: Text)
+    UndefinedHit -> toGVal ("UndefinedHit" :: Text)
+    ParseError -> toGVal ("ParseError" :: Text)
+
+instance ToGVal GingerM StructuredFailure where
+  toGVal sf = dict
+    [ ("propertyName", toGVal (sfPropertyName sf))
+    , ("failureType", toGVal (sfFailureType sf))
+    , ("counterexample", toGVal (sfCounterexample sf))
+    , ("expected", toGVal (sfExpected sf))
+    , ("actual", toGVal (sfActual sf))
+    , ("message", toGVal (sfMessage sf))
+    ]
+
+instance ToGVal GingerM FailurePattern where
+  toGVal fp = dict
+    [ ("signature", toGVal (fpSignature fp))
+    , ("affectedFns", list (toGVal <$> fpAffectedFns fp))
+    , ("category", toGVal (fpCategory fp))
+    , ("occurrences", toGVal (fpOccurrences fp))
+    ]
+
+instance ToGVal GingerM FixType where
+  toGVal = \case
+    EdgeCaseFix -> toGVal ("EdgeCaseFix" :: Text)
+    LogicFix -> toGVal ("LogicFix" :: Text)
+    TypeFix -> toGVal ("TypeFix" :: Text)
+    BoundaryFix -> toGVal ("BoundaryFix" :: Text)
+    InitializationFix -> toGVal ("InitializationFix" :: Text)
+    OtherFix t -> toGVal t
+
+instance ToGVal GingerM FixApplied where
+  toGVal fa = dict
+    [ ("function", toGVal (faFunction fa))
+    , ("whatChanged", toGVal (faWhatChanged fa))
+    , ("whyFailed", toGVal (faWhyFailed fa))
+    , ("fixType", toGVal (faFixType fa))
+    ]
+
+instance ToGVal GingerM UnderstandingState where
+  toGVal us = dict
+    [ ("failuresSeen", list (toGVal <$> usFailuresSeen us))
+    , ("fixesApplied", list (toGVal <$> usFixesApplied us))
+    , ("learnings", list (toGVal <$> usLearnings us))
+    , ("converging", toGVal (usConverging us))
+    ]
+
+instance ToGVal GingerM FixTemplateCtx where
+  toGVal ctx = dict
+    [ ("failures", list (toGVal <$> failures ctx))
+    , ("understanding", toGVal (understanding ctx))
+    , ("fixFunctions", list (toGVal <$> fixFunctions ctx))
+    , ("worktreePath", toGVal (worktreePath ctx))
+    ]
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- WS4: MUTATION ADVERSARY TYPES
+-- ════════════════════════════════════════════════════════════════════════════
+
+instance ToGVal GingerM MutationType where
+  toGVal = \case
+    BoundaryMutation -> toGVal ("BoundaryMutation" :: Text)
+    ConditionFlip -> toGVal ("ConditionFlip" :: Text)
+    OffByOne -> toGVal ("OffByOne" :: Text)
+    SwappedArgs -> toGVal ("SwappedArgs" :: Text)
+    RemovedCheck -> toGVal ("RemovedCheck" :: Text)
+    ChangedOperator -> toGVal ("ChangedOperator" :: Text)
+    ReturnedWrongBranch -> toGVal ("ReturnedWrongBranch" :: Text)
+    OtherMutation t -> toGVal t
+
+instance ToGVal GingerM SurvivingMutant where
+  toGVal sm = dict
+    [ ("function", toGVal (smFunction sm))
+    , ("mutationType", toGVal (smMutationType sm))
+    , ("description", toGVal (smDescription sm))
+    , ("whyDangerous", toGVal (smWhyDangerous sm))
+    , ("missingTest", toGVal (smMissingTest sm))
+    , ("suggestedProp", toGVal (smSuggestedProp sm))
+    ]
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- VALUE-NEUTRAL RUBRIC TYPES
+-- ════════════════════════════════════════════════════════════════════════════
+
+instance ToGVal GingerM PropertyCategory where
+  toGVal = \case
+    PCInvariant      -> toGVal ("Invariant" :: Text)
+    PCEdgeCase       -> toGVal ("EdgeCase" :: Text)
+    PCBoundary       -> toGVal ("Boundary" :: Text)
+    PCComposition    -> toGVal ("Composition" :: Text)
+    PCErrorHandling  -> toGVal ("ErrorHandling" :: Text)
+    PCOther t        -> toGVal t
+
+instance ToGVal GingerM FailureCause where
+  toGVal = \case
+    WrongFix         -> toGVal ("WrongFix" :: Text)
+    PartialFix       -> toGVal ("PartialFix" :: Text)
+    UnrelatedFailure -> toGVal ("UnrelatedFailure" :: Text)
+
+instance ToGVal GingerM FailureCorrelation where
+  toGVal fc = dict
+    [ ("fcPriorFix", toGVal (fcPriorFix fc))
+    , ("fcStillFailing", list (toGVal <$> fcStillFailing fc))
+    , ("fcLikelihood", toGVal (fcLikelihood fc))
     ]

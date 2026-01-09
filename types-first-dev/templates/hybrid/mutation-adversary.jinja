@@ -1,0 +1,136 @@
+# Task: Mutation Testing - Red Team the Test Suite
+
+## Your Role
+
+You are a **mutation adversary**. Your job is to find weaknesses in the test suite by introducing bugs that the tests DON'T catch.
+
+## Scope Level: {{ mtcScopeLevel }}
+
+{% if mtcScopeLevel == "Leaf" %}
+**Single Module Scope**: Focus on mutations within individual functions.
+- Off-by-one errors in bounds checks
+- Swapped comparison operators (>, <, >=, <=)
+- Wrong return values in edge cases
+- Flipped boolean conditions
+{% elif mtcScopeLevel == "Coordination" %}
+**Cross-Module Scope**: Focus on interactions between modules.
+- Swapped call order between dependent functions
+- Missing synchronization between related operations
+- Inconsistent state across module boundaries
+{% else %}
+**System Scope**: Focus on global invariants and state.
+- Race conditions in concurrent access
+- Global state corruption
+- Resource leaks and cleanup failures
+{% endif %}
+
+## Target Code
+
+- **Implementation**: `{{ mtcImplPath }}`
+- **Test Suite**: `{{ mtcTestPath }}`
+
+## Function Specifications
+
+{% for fn in mtcFunctions %}
+### {{ fn.name }}
+- **Signature**: `{{ fn.signature }}`
+- **Expected Properties**:
+{% for prop in fn.properties %}
+  - {{ prop.name }}: {{ prop.invariant }}
+{% endfor %}
+{% endfor %}
+
+## Mutation Types to Try
+
+For each function, try introducing these mutations and check if tests catch them:
+
+1. **BoundaryMutation**: Change >, <, >=, <= operators
+2. **ConditionFlip**: Negate boolean conditions
+3. **OffByOne**: Add/subtract 1 from indices or counts
+4. **SwappedArgs**: Swap argument order in function calls
+5. **RemovedCheck**: Delete a guard or validation
+6. **ChangedOperator**: Swap +/-, */÷, &&/||
+7. **ReturnedWrongBranch**: Swap if/else return values
+
+## Your Process
+
+1. **Read the implementation** at `{{ mtcImplPath }}`
+2. **Read the tests** at `{{ mtcTestPath }}`
+3. **For each function**, try multiple mutation types:
+   - Introduce the mutation (conceptually or actually)
+   - Would the tests catch it?
+   - If NOT caught → record as survivor
+4. **Report survivors** with actionable suggestions
+
+## Output Schema
+
+You must return JSON matching `MutationAdversaryOutput`:
+- `mutationTypesAttempted`: List of mutation types you tried (see Mutation Types above)
+- `mutSurvivors`: List of mutations that survived (tests didn't catch)
+- `mutAnalysis`: Prose description of your approach and coverage
+
+**Note**: The handler computes mutation count from the `mutationTypesAttempted` list length.
+Report which types you actually tried - don't just list all types.
+
+For each survivor in `mutSurvivors`, provide:
+- `smFunction`: Function containing the mutation
+- `smMutationType`: Type of mutation (see list above)
+- `smDescription`: What you changed (e.g., "Changed > to >= in length check")
+- `smWhyDangerous`: Why this bug would be problematic
+- `smMissingTest`: What test would catch this
+- `smSuggestedProp`: Property sketch for the missing test
+
+The `smSuggestedProp` should contain:
+- `name`: Property name
+- `psDescription`: What it tests
+- `invariant`: Formal/semi-formal statement
+- `psType`: Property type (Boundary, Inverse, etc.)
+
+## Example Survivor
+
+```json
+{
+  "smFunction": "push",
+  "smMutationType": "BoundaryMutation",
+  "smDescription": "Changed 'size < maxSize' to 'size <= maxSize'",
+  "smWhyDangerous": "Allows one extra element, causing buffer overflow",
+  "smMissingTest": "Need property testing push at capacity",
+  "smSuggestedProp": {
+    "name": "pushAtCapacity",
+    "psDescription": "Push at max capacity should fail gracefully",
+    "invariant": "forall s. size s == maxSize => push x s == Err Overflow",
+    "psType": "Boundary"
+  }
+}
+```
+
+## Example Output
+
+```json
+{
+  "mutationTypesAttempted": ["BoundaryMutation", "ConditionFlip", "OffByOne", "SwappedArgs"],
+  "mutSurvivors": [
+    {
+      "smFunction": "push",
+      "smMutationType": "BoundaryMutation",
+      "smDescription": "Changed 'size < maxSize' to 'size <= maxSize'",
+      "smWhyDangerous": "Allows buffer overflow",
+      "smMissingTest": "Test push at exact capacity",
+      "smSuggestedProp": { "name": "pushAtCapacity", "psDescription": "...", "invariant": "...", "psType": "Boundary" }
+    }
+  ],
+  "mutAnalysis": "Tested all functions with boundary and condition mutations. Push/pop inverse properties are well-tested, but capacity edge cases have gaps."
+}
+```
+
+## Critical Guidelines
+
+1. **Be thorough** - Try multiple mutation types per function
+2. **Be honest** - Only report actual survivors
+3. **Be actionable** - Each survivor should have a clear suggested property
+4. **Don't just count** - Quality of analysis matters more than quantity
+5. **Focus on {{ mtcScopeLevel }} scope** - Match your mutations to the scope level
+
+## Your Task
+
+Red team the test suite. Find the bugs that would slip through. Every survivor you find makes the test suite stronger.

@@ -16,6 +16,12 @@ module TypesFirstDev.Types
     -- * Workflow Errors
   , WorkflowError(..)
 
+    -- * Build Targets (for validation wrapper)
+  , BuildTarget(..)
+  , buildTargetArgs
+  , BuildValidationResult(..)
+  , WorkflowResult(..)
+
     -- * Re-exports for session management
   , ResumeStrategy(..)
 
@@ -151,6 +157,84 @@ data WorkflowError
     -- ^ Agent name and parse error
   | MergeFailed Text
     -- ^ Merge operation failed
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (FromJSON, ToJSON)
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- BUILD TARGETS
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Build target for validation wrapper.
+--
+-- Specifies what to validate after an agent completes. This is a generic
+-- abstraction that can be shared across different nodes to ensure consistent
+-- validation behavior.
+--
+-- Design principle: Each agent declares what it should be validated against.
+-- - Tests agent: BuildAll (must compile library AND test suite)
+-- - Impl agent: BuildLib (just the library)
+-- - Fix agent: BuildAll (full validation after fix)
+data BuildTarget
+  = BuildLib
+    -- ^ Just the library (cabal build)
+  | BuildAll
+    -- ^ Everything (cabal build all) - library + tests + benchmarks
+  | BuildTests
+    -- ^ Build test suite specifically
+  | BuildAndTest
+    -- ^ Build all and run tests (cabal test)
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (FromJSON, ToJSON)
+
+-- | Get the cabal command args for a build target.
+buildTargetArgs :: BuildTarget -> [String]
+buildTargetArgs = \case
+  BuildLib -> ["build", "-v0"]
+  BuildAll -> ["build", "-v0", "all"]
+  BuildTests -> ["build", "-v0", "all"]  -- Build all to include tests
+  BuildAndTest -> ["test"]
+
+-- | Result of running an agent with build validation.
+--
+-- Build failures don't error out - they return BuildNeedsFix so the graph
+-- can route to a fix agent. This ensures ALL build failures are handled
+-- by the LLM rather than terminating the workflow.
+data BuildValidationResult a
+  = BuildSuccess a
+    -- ^ Build passed, here's the agent result
+  | BuildNeedsFix Text Int a
+    -- ^ Build failed: error message, attempt count, last agent result
+    -- Route this to a fix agent or back to the same agent with error context
+  | BuildFatalError Text
+    -- ^ Non-recoverable error (e.g., Claude Code crashed, network error)
+    -- This is the only case that should terminate the workflow
+  deriving stock (Show, Eq, Generic, Functor)
+  deriving anyclass (FromJSON, ToJSON)
+
+
+-- | Result of the post-fork validation/merge phase.
+--
+-- Design principle: Almost nothing should fail. Instead, route back to agents
+-- to fix issues. Only truly unrecoverable errors (network failure, etc.) should
+-- be WorkflowFatal.
+data WorkflowResult
+  = WorkflowSuccess
+    -- ^ Tests passed, implementation complete
+  | NeedsImplFix [(FilePath, Int, Text)] Int
+    -- ^ Impl has undefined: [(file, line, content)], attempt count
+    -- Route back to impl agent with these locations
+  | NeedsTestsFix Text Int
+    -- ^ Tests agent issue: reason, attempt count
+    -- Route back to tests agent
+  | NeedsMergeResolution [FilePath] Int
+    -- ^ Git merge conflict: conflicted files, attempt count
+    -- Route to conflict resolution agent
+  | NeedsPostMergeFix Text Int
+    -- ^ Post-merge tests failed: test output, attempt count
+    -- Route to fix agent
+  | WorkflowFatal Text
+    -- ^ Truly unrecoverable error (should be rare!)
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)
 

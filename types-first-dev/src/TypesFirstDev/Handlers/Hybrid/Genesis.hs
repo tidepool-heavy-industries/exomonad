@@ -1,8 +1,8 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
 
--- | Genesis handlers for WS1 nodes of the hybrid TDD graph.
+-- | Genesis handlers for the hybrid TDD graph.
 --
--- WS1 owns:
+-- Phase 1: Type Design
 -- * hEntry (entry point)
 -- * hTypes (LLM: design types)
 -- * hSkeleton (Logic: generate skeleton files)
@@ -10,8 +10,10 @@
 -- * hGate (Logic: route based on holes)
 -- * hTypesFix (LLM: fix type holes)
 module TypesFirstDev.Handlers.Hybrid.Genesis
-  ( -- * Effect Stack
+  ( -- * Effect Stack (re-exported from Effects)
     HybridEffects
+  , SessionContext(..)
+  , WorkflowError(..)
 
     -- * Handlers
   , hTypesHandler
@@ -25,13 +27,14 @@ module TypesFirstDev.Handlers.Hybrid.Genesis
   ) where
 
 import Control.Monad.Freer (Eff, sendM)
-import Control.Monad.Freer.Error (Error)
-import Control.Monad.Freer.Reader (Reader, ask)
+import Control.Monad.Freer.Error (throwError)
+import Control.Monad.Freer.Reader (ask)
 import Data.Proxy (Proxy(..))
-import Data.Text (Text)
+import qualified Data.Text as T
+import System.Directory (getCurrentDirectory)
 
-import Tidepool.Effect.ClaudeCode (ClaudeCodeExec)
-import Tidepool.Effects.Worktree (Worktree)
+import TypesFirstDev.Effect.Build (buildAll, BuildResult(..))
+
 import Tidepool.Graph.Generic (AsHandler)
 import Tidepool.Graph.Goto
   ( GotoChoice
@@ -40,9 +43,14 @@ import Tidepool.Graph.Goto
   , ClaudeCodeResult(..)
   , gotoChoice
   )
-import Tidepool.Graph.Memory (Memory, getMem, updateMem)
+import Tidepool.Graph.Memory (getMem, updateMem)
 import Tidepool.Graph.Types (ModelChoice(..))
 
+import TypesFirstDev.Handlers.Hybrid.Effects
+  ( HybridEffects
+  , SessionContext(..)
+  , WorkflowError(..)
+  )
 import TypesFirstDev.Types.Hybrid
 import TypesFirstDev.Templates.Hybrid
   ( hTypesCompiled
@@ -50,38 +58,31 @@ import TypesFirstDev.Templates.Hybrid
   , hTypesFixCompiled
   )
 import TypesFirstDev.Graph.Hybrid (TypesFirstGraphHybrid(..))
+import TypesFirstDev.Handlers.Hybrid.Parallel
+  ( hForkHandler
+  , hTestsHandler
+  , hImplHandler
+  )
+import TypesFirstDev.Handlers.Hybrid.Merge
+  ( hJoinHandler
+  , hVerifyTDDHandler
+  , hTestsRejectHandler
+  , hMergeHandler
+  , hConflictResolveHandler
+  )
 
-
--- ════════════════════════════════════════════════════════════════════════════
--- EFFECT STACK
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Effect stack for hybrid workflow handlers.
-type HybridEffects =
-  '[ Error WorkflowError
-   , Memory SessionContext
-   , Reader StackSpec
-   , ClaudeCodeExec
-   , Worktree
-   , IO
-   ]
-
--- | Session context for hybrid workflow.
--- Includes stash slots for join point patterns where handlers need
--- to pass data that isn't in the ClaudeCodeLLMHandler signature.
-data SessionContext = SessionContext
-  { scSessionId     :: Text
-  , scTotalCost     :: Double
-  , scSkeletonStash :: Maybe SkeletonState  -- For hTypeAdversary → hGate join
-  }
-
--- | Workflow errors.
-data WorkflowError
-  = BuildFailed Text
-  | TypeCheckFailed Text
-  | MaxAttemptsExceeded Int
-  | HoleFixFailed Text
-  deriving (Show, Eq)
+-- WS4 handler imports
+import TypesFirstDev.Handlers.Hybrid.Validation
+  ( hValidateHandler
+  , hFixHandler
+  , hPostValidateHandler
+  )
+import TypesFirstDev.Handlers.Hybrid.Adversary
+  ( hMutationAdversaryHandler
+  )
+import TypesFirstDev.Handlers.Hybrid.Witness
+  ( hWitnessHandler
+  )
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -128,24 +129,40 @@ hTypesHandler = ClaudeCodeLLMHandler @'Haiku @'Nothing
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Handler for hSkeleton node.
--- Generates skeleton files with undefined stubs.
+-- Validates skeleton files written by hTypes via ClaudeCode.
+--
+-- In the hybrid workflow, hTypes uses ClaudeCode which writes files to disk.
+-- This handler:
+-- 1. Gets the current project path
+-- 2. Validates the skeleton compiles (belt and suspenders)
+-- 3. Routes to type adversary with skeleton state
 hSkeletonHandler
   :: TypesResult
   -> Eff HybridEffects (GotoChoice '[To "hTypeAdversary" SkeletonState])
 hSkeletonHandler typesResult = do
   spec <- ask @StackSpec
 
-  -- TODO: Generate skeleton files
-  -- 1. Render impl skeleton template
-  -- 2. Render test skeleton template
-  -- 3. Write files to disk
-  -- 4. Run cabal build to verify
+  -- Get project path (current working directory in the worktree)
+  projectPath <- sendM getCurrentDirectory
+
+  sendM $ putStrLn $ "[SKELETON] Validating skeleton in: " <> projectPath
+  sendM $ putStrLn $ "  Impl path: " <> spec.specImplPath
+  sendM $ putStrLn $ "  Test path: " <> spec.specTestPath
+
+  -- Validate skeleton compiles (belt and suspenders - hTypes should have done this)
+  buildResult <- buildAll projectPath
+
+  if brSuccess buildResult
+    then sendM $ putStrLn "[SKELETON] Build validation passed"
+    else do
+      sendM $ putStrLn $ "[SKELETON] Build failed: " <> T.unpack (brErrors buildResult)
+      throwError $ BuildFailed (brErrors buildResult <> "\n" <> brOutput buildResult)
 
   let skeletonState = SkeletonState
         { ssTypesResult = typesResult
         , ssImplPath = spec.specImplPath
         , ssTestPath = spec.specTestPath
-        , ssProjectPath = "."  -- TODO: Get from config
+        , ssProjectPath = projectPath
         }
 
   pure $ gotoChoice @"hTypeAdversary" skeletonState
@@ -297,11 +314,11 @@ hTypesFixHandler = ClaudeCodeLLMHandler @'Haiku @'Nothing
 
 
 -- ════════════════════════════════════════════════════════════════════════════
--- HANDLER RECORD (Partial - WS1 only)
+-- HANDLER RECORD
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Genesis handlers for WS1 nodes.
--- Other nodes use stubs from Handlers.Hybrid.Stubs.
+-- | Genesis handlers for the hybrid TDD workflow.
+-- Combines handlers from Genesis, Parallel, and Merge modules.
 hybridGenesisHandlers :: TypesFirstGraphHybrid (AsHandler HybridEffects)
 hybridGenesisHandlers = TypesFirstGraphHybrid
   { hEntry          = Proxy @StackSpec
@@ -310,21 +327,21 @@ hybridGenesisHandlers = TypesFirstGraphHybrid
   , hTypeAdversary  = hTypeAdversaryHandler
   , hGate           = hGateHandler
   , hTypesFix       = hTypesFixHandler
-  -- WS2 stubs
-  , hFork           = error "WS2 TODO: hFork"
-  , hTests          = error "WS2 TODO: hTests"
-  , hImpl           = error "WS2 TODO: hImpl"
-  -- WS3 stubs
-  , hJoin           = error "WS3 TODO: hJoin"
-  , hVerifyTDD      = error "WS3 TODO: hVerifyTDD"
-  , hTestsReject    = error "WS3 TODO: hTestsReject"
-  , hMerge          = error "WS3 TODO: hMerge"
-  , hConflictResolve = error "WS3 TODO: hConflictResolve"
-  -- WS4 stubs
-  , hValidate       = error "WS4 TODO: hValidate"
-  , hFix            = error "WS4 TODO: hFix"
-  , hPostValidate   = error "WS4 TODO: hPostValidate"
-  , hMutationAdversary = error "WS4 TODO: hMutationAdversary"
-  , hWitness        = error "WS4 TODO: hWitness"
+  -- Phase 3: Parallel Blind Execution
+  , hFork           = hForkHandler
+  , hTests          = hTestsHandler
+  , hImpl           = hImplHandler
+  -- Phase 4-5: Verification + Merge
+  , hJoin           = hJoinHandler
+  , hVerifyTDD      = hVerifyTDDHandler
+  , hTestsReject    = hTestsRejectHandler
+  , hMerge          = hMergeHandler
+  , hConflictResolve = hConflictResolveHandler
+  -- WS4 handlers
+  , hValidate       = hValidateHandler
+  , hFix            = hFixHandler
+  , hPostValidate   = hPostValidateHandler
+  , hMutationAdversary = hMutationAdversaryHandler
+  , hWitness        = hWitnessHandler
   , hExit           = Proxy @HybridResult
   }

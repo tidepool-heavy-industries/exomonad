@@ -14,10 +14,9 @@ module TypesFirstDev.Handlers
     -- * Logging
   , logToFile
 
-    -- * v3 Workflow (semantic descriptions)
-  , stubsHandlerV3
-  , forkHandlerV3
-  , runWorkflowV3
+    -- * Build Validation (for graph handlers)
+  , runAgentWithBuildValidation
+  , runStubsAgentWithBuildValidation
 
     -- * TDD Workflow (sequential with validation loop)
   , typesFirstHandlersTDD
@@ -36,7 +35,7 @@ import Control.Monad (when)
 import Control.Monad.Freer (Eff, sendM)
 import Control.Monad.Freer.Error (Error, throwError)
 import Control.Monad.Freer.Reader (Reader, ask)
-import Data.Maybe (fromMaybe, isJust)
+import Data.Maybe (fromMaybe)
 import Data.Proxy (Proxy(..))
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -64,7 +63,6 @@ import Tidepool.ClaudeCode.SessionState
   )
 import Tidepool.ClaudeCode.Crosstalk
   ( CrosstalkState
-  , newCrosstalkStatePair
   , crosstalkPostToolUse
   , PostToolUseContext(..)
   )
@@ -79,7 +77,7 @@ import Tidepool.Graph.Types (ModelChoice(..), Exit)
 import Tidepool.Schema (schemaToValue)
 import Tidepool.StructuredOutput (StructuredOutput(..), formatDiagnostic)
 
-import TypesFirstDev.Context (TypesContext(..), TestsContext(..), ImplContext(..), SkeletonContext(..), StubsContext(..), TestsContextV3(..), FixContext(..))
+import TypesFirstDev.Context (TypesContext(..), TestsContext(..), ImplContext(..), SkeletonContext(..), FixContext(..))
 import TypesFirstDev.Graph (TypesFirstGraph(..), TypesFirstGraphTDD(..))
 import TypesFirstDev.Types
   ( StackSpec(..)
@@ -88,15 +86,16 @@ import TypesFirstDev.Types
   , TypeDefinitions(..)
   , ForkInput(..)
   , SkeletonGenerated(..)
-  , StubsGenerated(..)
-  , StubsOutput(..)
-  , FunctionSemantics(..)
   , ParallelResults(..)
   , TestsResult(..)
   , ImplResult(..)
   , SessionContext(..)
   , ResumeStrategy(..)
   , Blocker(..)
+    -- Build targets and validation
+  , BuildTarget(..)
+  , buildTargetArgs
+  , BuildValidationResult(..)
     -- TDD workflow types
   , SkeletonState(..)
   , TestsWritten(..)
@@ -111,7 +110,6 @@ import TypesFirstDev.Templates
   ( typesCompiled, testsCompiled, implCompiled, implSkeletonCompiled, testSkeletonCompiled
   , servantTypesCompiled, servantTestsCompiled, servantImplCompiled
   , servantImplSkeletonCompiled, servantTestSkeletonCompiled
-  , servantStubsCompiled, servantTestsV3Compiled
   , fixCompiled
   )
 
@@ -395,8 +393,13 @@ skeletonHandler input = do
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Maximum retries for agent build validation.
-maxAgentRetries :: Int
-maxAgentRetries = 3
+-- | Maximum build validation retries before escalation.
+--
+-- Build failures loop back to the same agent with error context.
+-- This limit is for escalation (return BuildNeedsFix) not hard failure.
+-- Set high because the LLM should fix its own build errors.
+maxBuildRetries :: Int
+maxBuildRetries = 10
 
 -- | Run agent with build validation loop.
 --
@@ -433,26 +436,29 @@ runAgentWithBuildValidation
   -> Text  -- ^ Base prompt
   -> Maybe Aeson.Value  -- ^ JSON schema
   -> Text  -- ^ Agent name (for logging)
+  -> BuildTarget  -- ^ What to validate (BuildLib for impl, BuildAll for tests)
   -> Maybe Text  -- ^ Resume session ID (for multi-turn or forking)
   -> Bool  -- ^ Fork session (True for parallel agents forking from parent)
-  -> IO (Either CC.ClaudeCodeError CC.ClaudeCodeResult)
-runAgentWithBuildValidation ccConfig (WorktreePath wtPath) basePrompt schema agentName resumeSession forkSession = go 0 Nothing Nothing
+  -> IO (BuildValidationResult CC.ClaudeCodeResult)
+runAgentWithBuildValidation ccConfig (WorktreePath wtPath) basePrompt schema agentName target resumeSession forkSession = go 0 Nothing Nothing Nothing
   where
-    -- go tracks: attempt count, last build error, agent's own session ID (for retries)
-    go :: Int -> Maybe Text -> Maybe Text -> IO (Either CC.ClaudeCodeError CC.ClaudeCodeResult)
-    go attempt lastBuildError agentSessionId
-      | attempt >= maxAgentRetries = do
-          logError $ T.unpack agentName <> " agent: max retries (" <> show maxAgentRetries <> ") exceeded"
-          case lastBuildError of
-            Just err -> pure $ Left $ CC.ClaudeCodeExecutionError $ "Build failed after " <> T.pack (show maxAgentRetries) <> " attempts: " <> err
-            Nothing -> pure $ Left $ CC.ClaudeCodeExecutionError "Max retries exceeded with no error"
+    -- go tracks: attempt count, last build error, agent's session ID, last result
+    go :: Int -> Maybe Text -> Maybe Text -> Maybe CC.ClaudeCodeResult -> IO (BuildValidationResult CC.ClaudeCodeResult)
+    go attempt lastBuildError agentSessionId lastResult
+      | attempt >= maxBuildRetries = do
+          -- Don't error out - return BuildNeedsFix so caller can route to escalation
+          logError $ T.unpack agentName <> " agent: max retries (" <> show maxBuildRetries <> ") reached, needs escalation"
+          let errMsg = fromMaybe "Unknown build error" lastBuildError
+          case lastResult of
+            Just r -> pure $ BuildNeedsFix errMsg attempt r
+            Nothing -> pure $ BuildFatalError $ "No result after " <> T.pack (show attempt) <> " attempts"
       | otherwise = do
           -- Build prompt with retry context if we have a previous error
           let fullPrompt = case lastBuildError of
                 Nothing -> basePrompt
                 Just buildErr -> basePrompt <> "\n\n## PREVIOUS ATTEMPT FAILED\n\nYour code did not compile. The build failed with:\n```\n" <> buildErr <> "\n```\n\nPlease fix these issues and try again."
 
-          logMsg $ T.unpack agentName <> " agent attempt " <> show (attempt + 1) <> "/" <> show maxAgentRetries
+          logMsg $ T.unpack agentName <> " agent attempt " <> show (attempt + 1) <> "/" <> show maxBuildRetries
 
           -- Run agent with session parameters
           -- Attempt 0: Fork from parent session (if provided)
@@ -463,29 +469,34 @@ runAgentWithBuildValidation ccConfig (WorktreePath wtPath) basePrompt schema age
           result <- runClaudeCodeRequest ccConfig Sonnet (Just wtPath) fullPrompt schema Nothing thisResumeSession thisForkSession
 
           case result of
-            Left err -> pure $ Left err
+            Left err -> pure $ BuildFatalError $ T.pack $ show err  -- Claude Code error, not build error
             Right ccResult -> do
               -- Capture agent's session ID for potential retries
               let newAgentSessionId = Just $ CC.ccrSessionId ccResult
-              -- Validate build
+              -- Validate build using the declared target
               logMsg $ T.unpack agentName <> " agent completed, validating build..."
+              let cabalArgs = buildTargetArgs target
+              logMsg $ T.unpack agentName <> " agent: running cabal " <> unwords cabalArgs
               (exitCode, buildOut, buildErr) <- withCurrentDirectory wtPath $
-                readProcessWithExitCode "cabal" ["build", "-v0"] ""
+                readProcessWithExitCode "cabal" cabalArgs ""
               case exitCode of
                 ExitSuccess -> do
                   logMsg $ T.unpack agentName <> " agent: build passed"
-                  pure $ Right ccResult
+                  pure $ BuildSuccess ccResult
                 ExitFailure code -> do
                   let errorMsg = T.pack $ "Exit code " <> show code <> ":\n" <> buildErr <> buildOut
                   logError $ T.unpack agentName <> " agent: build failed, retrying..."
                   logError $ T.unpack errorMsg
-                  go (attempt + 1) (Just errorMsg) newAgentSessionId
+                  go (attempt + 1) (Just errorMsg) newAgentSessionId (Just ccResult)
 
 
 -- | Run stubs agent with build validation (v3 workflow).
 --
 -- Like runAgentWithBuildValidation but works in a FilePath (not WorktreePath).
 -- Used for the initial stubs phase before worktrees are created.
+--
+-- Uses the unified BuildTarget validation - skeleton must compile completely
+-- including test stubs (BuildAll by default).
 --
 -- Session parameters:
 -- - resumeSession: Session ID to resume (for multi-turn)
@@ -495,26 +506,28 @@ runStubsAgentWithBuildValidation
   -> FilePath  -- ^ Project path
   -> Text  -- ^ Base prompt
   -> Maybe Aeson.Value  -- ^ JSON schema
+  -> BuildTarget  -- ^ What to validate (typically BuildAll for skeleton)
   -> Maybe Text  -- ^ Resume session ID
   -> Bool  -- ^ Fork session
-  -> IO (Either CC.ClaudeCodeError CC.ClaudeCodeResult)
-runStubsAgentWithBuildValidation ccConfig projectPath basePrompt schema resumeSession forkSession = go 0 Nothing Nothing
+  -> IO (BuildValidationResult CC.ClaudeCodeResult)
+runStubsAgentWithBuildValidation ccConfig projectPath basePrompt schema target resumeSession forkSession = go 0 Nothing Nothing Nothing
   where
-    -- go tracks: attempt count, last build error, agent's own session ID (for retries)
-    go :: Int -> Maybe Text -> Maybe Text -> IO (Either CC.ClaudeCodeError CC.ClaudeCodeResult)
-    go attempt lastBuildError agentSessionId
-      | attempt >= maxAgentRetries = do
-          logError $ "Stubs agent: max retries (" <> show maxAgentRetries <> ") exceeded"
-          case lastBuildError of
-            Just err -> pure $ Left $ CC.ClaudeCodeExecutionError $ "Build failed after " <> T.pack (show maxAgentRetries) <> " attempts: " <> err
-            Nothing -> pure $ Left $ CC.ClaudeCodeExecutionError "Max retries exceeded with no error"
+    -- go tracks: attempt count, last build error, agent's session ID, last result
+    go :: Int -> Maybe Text -> Maybe Text -> Maybe CC.ClaudeCodeResult -> IO (BuildValidationResult CC.ClaudeCodeResult)
+    go attempt lastBuildError agentSessionId lastResult
+      | attempt >= maxBuildRetries = do
+          logError $ "Stubs agent: max retries (" <> show maxBuildRetries <> ") reached, needs escalation"
+          let errMsg = fromMaybe "Unknown build error" lastBuildError
+          case lastResult of
+            Just r -> pure $ BuildNeedsFix errMsg attempt r
+            Nothing -> pure $ BuildFatalError $ "No result after " <> T.pack (show attempt) <> " attempts"
       | otherwise = do
           -- Build prompt with retry context if we have a previous error
           let fullPrompt = case lastBuildError of
                 Nothing -> basePrompt
                 Just buildErr -> basePrompt <> "\n\n## PREVIOUS ATTEMPT FAILED\n\nYour code did not compile. The build failed with:\n```\n" <> buildErr <> "\n```\n\nPlease fix the compilation errors and try again."
 
-          logMsg $ "Stubs agent attempt " <> show (attempt + 1) <> "/" <> show maxAgentRetries
+          logMsg $ "Stubs agent attempt " <> show (attempt + 1) <> "/" <> show maxBuildRetries
 
           -- Run agent in the project directory with session parameters
           -- Attempt 0: Use parent settings; Retries: resume agent's own session
@@ -524,23 +537,25 @@ runStubsAgentWithBuildValidation ccConfig projectPath basePrompt schema resumeSe
           result <- runClaudeCodeRequest ccConfig Sonnet (Just projectPath) fullPrompt schema Nothing thisResumeSession thisForkSession
 
           case result of
-            Left err -> pure $ Left err
+            Left err -> pure $ BuildFatalError $ T.pack $ show err
             Right ccResult -> do
               -- Capture agent's session ID for potential retries
               let newAgentSessionId = Just $ CC.ccrSessionId ccResult
-              -- Validate build
+              -- Validate build using the declared target
               logMsg "Stubs agent completed, validating build..."
+              let cabalArgs = buildTargetArgs target
+              logMsg $ "Stubs agent: running cabal " <> unwords cabalArgs
               (exitCode, buildOut, buildErr) <- withCurrentDirectory projectPath $
-                readProcessWithExitCode "cabal" ["build", "-v0"] ""
+                readProcessWithExitCode "cabal" cabalArgs ""
               case exitCode of
                 ExitSuccess -> do
                   logMsg "Stubs agent: build passed"
-                  pure $ Right ccResult
+                  pure $ BuildSuccess ccResult
                 ExitFailure code -> do
                   let errorMsg = T.pack $ "Exit code " <> show code <> ":\n" <> buildErr <> buildOut
                   logError $ "Stubs agent: build failed, retrying..."
                   logError $ T.unpack errorMsg
-                  go (attempt + 1) (Just errorMsg) newAgentSessionId
+                  go (attempt + 1) (Just errorMsg) newAgentSessionId (Just ccResult)
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -570,9 +585,10 @@ runAgentWithBuildValidationV2
   -> Text            -- ^ Base prompt
   -> Maybe Aeson.Value -- ^ JSON schema for structured output
   -> Text            -- ^ Agent name (for logging and state)
+  -> BuildTarget     -- ^ What to validate (BuildLib, BuildAll, etc.)
   -> ResumeStrategy  -- ^ Resume strategy
-  -> IO (Either CC.ClaudeCodeError CC.ClaudeCodeResult)
-runAgentWithBuildValidationV2 ccConfig wtPath basePrompt schema agentName strategy = do
+  -> IO (BuildValidationResult CC.ClaudeCodeResult)
+runAgentWithBuildValidationV2 ccConfig wtPath basePrompt schema agentName target strategy = do
   -- Load existing session state
   existingState <- loadSessionState wtPath
 
@@ -595,23 +611,23 @@ runAgentWithBuildValidationV2 ccConfig wtPath basePrompt schema agentName strate
     Nothing -> logMsg $ T.unpack agentName <> " agent: starting fresh session"
     Just sid -> logMsg $ T.unpack agentName <> " agent: resuming session " <> T.unpack sid
 
-  go 0 Nothing initialSessionId
+  go 0 Nothing initialSessionId Nothing
   where
-    go :: Int -> Maybe Text -> Maybe Text -> IO (Either CC.ClaudeCodeError CC.ClaudeCodeResult)
-    go attempt lastBuildError sessionId
-      | attempt >= maxAgentRetries = do
-          logError $ T.unpack agentName <> " agent: max retries (" <> show maxAgentRetries <> ") exceeded"
-          case lastBuildError of
-            Just err -> pure $ Left $ CC.ClaudeCodeExecutionError $
-              "Build failed after " <> T.pack (show maxAgentRetries) <> " attempts: " <> err
-            Nothing -> pure $ Left $ CC.ClaudeCodeExecutionError "Max retries exceeded with no error"
+    go :: Int -> Maybe Text -> Maybe Text -> Maybe CC.ClaudeCodeResult -> IO (BuildValidationResult CC.ClaudeCodeResult)
+    go attempt lastBuildError sessionId lastResult
+      | attempt >= maxBuildRetries = do
+          logError $ T.unpack agentName <> " agent: max retries (" <> show maxBuildRetries <> ") reached, needs escalation"
+          let errMsg = fromMaybe "Unknown build error" lastBuildError
+          case lastResult of
+            Just r -> pure $ BuildNeedsFix errMsg attempt r
+            Nothing -> pure $ BuildFatalError $ "No result after " <> T.pack (show attempt) <> " attempts"
       | otherwise = do
           -- Build prompt with retry context if we have a previous error
           let fullPrompt = case lastBuildError of
                 Nothing -> basePrompt
                 Just buildErr -> basePrompt <> "\n\n## PREVIOUS ATTEMPT FAILED\n\nYour code did not compile. The build failed with:\n```\n" <> buildErr <> "\n```\n\nPlease fix these issues and try again."
 
-          logMsg $ T.unpack agentName <> " agent attempt " <> show (attempt + 1) <> "/" <> show maxAgentRetries
+          logMsg $ T.unpack agentName <> " agent attempt " <> show (attempt + 1) <> "/" <> show maxBuildRetries
 
           -- Create callbacks with typed SessionEnd handler
           let callbacks = defaultHookCallbacks
@@ -631,16 +647,18 @@ runAgentWithBuildValidationV2 ccConfig wtPath basePrompt schema agentName strate
             False        -- don't fork session
 
           case result of
-            Left err -> pure $ Left err
+            Left err -> pure $ BuildFatalError $ T.pack $ show err
             Right ccResult -> do
-              -- Validate build
+              -- Validate build using the declared target
               logMsg $ T.unpack agentName <> " agent completed, validating build..."
+              let cabalArgs = buildTargetArgs target
+              logMsg $ T.unpack agentName <> " agent: running cabal " <> unwords cabalArgs
               (exitCode, buildOut, buildErr) <- withCurrentDirectory wtPath $
-                readProcessWithExitCode "cabal" ["build", "-v0"] ""
+                readProcessWithExitCode "cabal" cabalArgs ""
               case exitCode of
                 ExitSuccess -> do
                   logMsg $ T.unpack agentName <> " agent: build passed"
-                  pure $ Right ccResult
+                  pure $ BuildSuccess ccResult
                 ExitFailure code -> do
                   let errorMsg = T.pack $ "Exit code " <> show code <> ":\n" <> buildErr <> buildOut
                   logError $ T.unpack agentName <> " agent: build failed, retrying..."
@@ -652,7 +670,7 @@ runAgentWithBuildValidationV2 ccConfig wtPath basePrompt schema agentName strate
                         SmartResume -> Just $ CC.ccrSessionId ccResult
                         _ -> Nothing
 
-                  go (attempt + 1) (Just errorMsg) nextSessionId
+                  go (attempt + 1) (Just errorMsg) nextSessionId (Just ccResult)
 
 -- | Handle SessionEnd hook - persists session state.
 handleSessionEnd :: FilePath -> Text -> SessionEndContext -> IO SessionEndAction
@@ -710,27 +728,28 @@ runAgentWithCrosstalk
   -> Text              -- ^ Base prompt
   -> Maybe Aeson.Value -- ^ JSON schema for structured output
   -> Text              -- ^ Agent name (for logging)
+  -> BuildTarget       -- ^ What to validate (BuildLib, BuildAll, etc.)
   -> Maybe Text        -- ^ Resume session ID (for forking from parent)
   -> Bool              -- ^ Fork session (True for parallel agents forking from parent)
   -> CrosstalkState    -- ^ Crosstalk state for tracking other agent
-  -> IO (Either CC.ClaudeCodeError CC.ClaudeCodeResult)
-runAgentWithCrosstalk ccConfig wtPath basePrompt schema agentName resumeSession forkSession crosstalk = go 0 Nothing
+  -> IO (BuildValidationResult CC.ClaudeCodeResult)
+runAgentWithCrosstalk ccConfig wtPath basePrompt schema agentName target resumeSession forkSession crosstalk = go 0 Nothing Nothing
   where
-    go :: Int -> Maybe Text -> IO (Either CC.ClaudeCodeError CC.ClaudeCodeResult)
-    go attempt lastBuildError
-      | attempt >= maxAgentRetries = do
-          logError $ T.unpack agentName <> " agent: max retries (" <> show maxAgentRetries <> ") exceeded"
-          case lastBuildError of
-            Just err -> pure $ Left $ CC.ClaudeCodeExecutionError $
-              "Build failed after " <> T.pack (show maxAgentRetries) <> " attempts: " <> err
-            Nothing -> pure $ Left $ CC.ClaudeCodeExecutionError "Max retries exceeded with no error"
+    go :: Int -> Maybe Text -> Maybe CC.ClaudeCodeResult -> IO (BuildValidationResult CC.ClaudeCodeResult)
+    go attempt lastBuildError lastResult
+      | attempt >= maxBuildRetries = do
+          logError $ T.unpack agentName <> " agent: max retries (" <> show maxBuildRetries <> ") reached, needs escalation"
+          let errMsg = fromMaybe "Unknown build error" lastBuildError
+          case lastResult of
+            Just r -> pure $ BuildNeedsFix errMsg attempt r
+            Nothing -> pure $ BuildFatalError $ "No result after " <> T.pack (show attempt) <> " attempts"
       | otherwise = do
           -- Build prompt with retry context if we have a previous error
           let fullPrompt = case lastBuildError of
                 Nothing -> basePrompt
                 Just buildErr -> basePrompt <> "\n\n## PREVIOUS ATTEMPT FAILED\n\nYour code did not compile. The build failed with:\n```\n" <> buildErr <> "\n```\n\nPlease fix these issues and try again."
 
-          logMsg $ T.unpack agentName <> " agent attempt " <> show (attempt + 1) <> "/" <> show maxAgentRetries
+          logMsg $ T.unpack agentName <> " agent attempt " <> show (attempt + 1) <> "/" <> show maxBuildRetries
 
           -- Create callbacks with crosstalk support
           -- Both SessionEnd (for state persistence) and PostToolUse (for crosstalk)
@@ -753,114 +772,23 @@ runAgentWithCrosstalk ccConfig wtPath basePrompt schema agentName resumeSession 
             forkSession    -- fork session flag
 
           case result of
-            Left err -> pure $ Left err
+            Left err -> pure $ BuildFatalError $ T.pack $ show err
             Right ccResult -> do
-              -- Validate build
+              -- Validate build using declared target
               logMsg $ T.unpack agentName <> " agent completed, validating build..."
+              let cabalArgs = buildTargetArgs target
+              logMsg $ T.unpack agentName <> " agent: running cabal " <> unwords cabalArgs
               (exitCode, buildOut, buildErr) <- withCurrentDirectory wtPath $
-                readProcessWithExitCode "cabal" ["build", "-v0"] ""
+                readProcessWithExitCode "cabal" cabalArgs ""
               case exitCode of
                 ExitSuccess -> do
                   logMsg $ T.unpack agentName <> " agent: build passed"
-                  pure $ Right ccResult
+                  pure $ BuildSuccess ccResult
                 ExitFailure code -> do
                   let errorMsg = T.pack $ "Exit code " <> show code <> ":\n" <> buildErr <> buildOut
                   logError $ T.unpack agentName <> " agent: build failed, retrying..."
                   logError $ T.unpack errorMsg
-                  go (attempt + 1) (Just errorMsg)
-
-
--- ════════════════════════════════════════════════════════════════════════════
--- v3 STUBS HANDLER
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Stubs handler for v3 workflow.
---
--- Runs Claude Code to write actual .hs files with undefined implementations.
--- Returns semantic descriptions that drive test generation.
---
--- This replaces both types + skeleton handlers from v2.
-stubsHandlerV3
-  :: StackSpec
-  -> ClaudeCodeConfig
-  -> IO (Either CC.ClaudeCodeError StubsGenerated)
-stubsHandlerV3 spec config = do
-  logPhase "v3 STUBS - Writing implementation stubs"
-  logDetail "projectPath" spec.ssProjectPath
-  logDetail "moduleName" (T.unpack spec.ssModuleName)
-
-  let projectPath = spec.ssProjectPath
-      modulePath = T.replace "." "/" spec.ssModuleName
-      implPath = projectPath <> "/src/" <> T.unpack modulePath <> ".hs"
-      testPath = projectPath <> "/test/Main.hs"
-
-      -- Build stubs context for the prompt
-      stubsCtx = StubsContext
-        { moduleName = spec.ssModuleName
-        , modulePath = modulePath
-        , description = spec.ssDescription
-        , acceptanceCriteria = spec.ssAcceptanceCriteria
-        }
-
-      -- Render the stubs prompt
-      stubsPrompt = runTypedTemplate stubsCtx servantStubsCompiled
-
-      -- Build schema for StubsOutput
-      stubsSchema = Just $ schemaToValue (structuredSchema @StubsOutput)
-
-  logDetail "implPath" implPath
-  logDetail "stubsPromptLength" (show $ T.length stubsPrompt)
-
-  -- Run stubs agent with build validation (no parent session to fork from)
-  result <- runStubsAgentWithBuildValidation config projectPath stubsPrompt stubsSchema Nothing False
-
-  case result of
-    Left err -> do
-      logError $ "Stubs agent failed: " <> show err
-      pure $ Left err
-    Right ccResult -> do
-      -- Parse the structured output
-      case CC.ccrStructuredOutput ccResult of
-        Nothing -> do
-          logError "Stubs agent returned no structured output"
-          pure $ Left $ CC.ClaudeCodeExecutionError "No structured output"
-        Just val -> case Aeson.fromJSON val of
-          Aeson.Error msg -> do
-            logError $ "Failed to parse StubsOutput: " <> msg
-            pure $ Left $ CC.ClaudeCodeExecutionError $ "JSON parse error: " <> T.pack msg
-          Aeson.Success (stubsOutput :: StubsOutput) -> do
-            logMsg "Stubs agent completed successfully"
-            logDetail "numFunctions" (show $ length stubsOutput.soFunctions)
-            logDetail "commitMessage" (T.unpack stubsOutput.soCommitMessage)
-
-            -- Log semantic descriptions
-            logMsg "=== Semantic Descriptions ==="
-            mapM_ logSemantics stubsOutput.soFunctions
-
-            -- Commit the stubs (so worktrees will have them)
-            logGit "Committing stubs" $ withCurrentDirectory projectPath $ do
-              -- Write .gitignore if needed
-              let gitignorePath = projectPath <> "/.gitignore"
-              writeFile gitignorePath "dist-newstyle/\n*.hi\n*.o\n*.dyn_hi\n*.dyn_o\n"
-
-              callProcess "git" ["add", implPath, testPath, gitignorePath]
-              callProcess "git" ["commit", "-m", T.unpack stubsOutput.soCommitMessage]
-
-            pure $ Right StubsGenerated
-              { stgImplPath = implPath
-              , stgTestPath = testPath
-              , stgSemantics = stubsOutput.soFunctions
-              , stgDataType = stubsOutput.soDataType
-              , stgProjectPath = projectPath
-              , stgModuleName = spec.ssModuleName
-              , stgSessionId = CC.ccrSessionId ccResult
-              }
-  where
-    logSemantics :: FunctionSemantics -> IO ()
-    logSemantics sem = do
-      logMsg $ "  " <> T.unpack sem.fsmName <> " :: " <> T.unpack sem.fsmSignature
-      logDetail "    behavior" (T.unpack sem.fsmBehavior)
-      logDetail "    examples" (show $ length sem.fsmExamples)
+                  go (attempt + 1) (Just errorMsg) (Just ccResult)
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -966,32 +894,38 @@ forkHandler input = do
 
   -- Run both agents in parallel at IO level (freer-simple doesn't support parallel Eff)
   -- Each agent runs with build validation - if build fails, retries with error context
-  -- Both agents fork from the types agent's session to share context
-  -- If parent session ID is empty, start fresh sessions instead of trying to fork
-  let parentSessionId = if T.null sessionCtx.scSessionId then Nothing else Just sessionCtx.scSessionId
-      shouldFork = isJust parentSessionId
+  --
+  -- TODO: Re-enable session forking when Claude Code supports cross-path resume.
+  -- Currently sessions are path-bound, so --resume fails silently in worktrees.
+  -- When fixed, restore: parentSessionId = Just sessionCtx.scSessionId, shouldFork = True
+  -- This would let parallel agents share context from the types agent.
   (testsResponse, implResponse) <- sendM $ do
     logMsg "Launching parallel agents with build validation..."
-    logDetail "parentSessionId" (maybe "(none - starting fresh)" T.unpack parentSessionId)
+    logDetail "note" "Starting fresh sessions (worktrees have different paths)"
     concurrently
       (do
         logMsg $ "Tests agent starting in worktree: " <> testsWt.unWorktreePath
+        -- Tests agent uses BuildAll: must compile library AND test suite
+        -- This catches missing dependencies in test build-depends
         runAgentWithBuildValidation config testsWt testsPrompt testsSchema "tests"
-          parentSessionId shouldFork)  -- Fork from parent if available
+          BuildAll  -- Tests must compile: cabal build all
+          Nothing False)  -- Fresh session - TODO: fork from parent when supported
       (do
         logMsg $ "Impl agent starting in worktree: " <> implWt.unWorktreePath
+        -- Impl agent uses BuildLib: just the library (tests are skeleton stubs)
         runAgentWithBuildValidation config implWt implPrompt implSchema "impl"
-          parentSessionId shouldFork)  -- Fork from parent if available
+          BuildLib  -- Just library: cabal build
+          Nothing False)  -- Fresh session - TODO: fork from parent when supported
 
   sendM $ logPhase "FORK - Agents completed, parsing results"
 
   -- Extract session IDs and costs before parsing (for aggregation)
-  let (testsSessionId, testsCost) = case testsResponse of
-        Left _ -> ("", 0.0)
-        Right r -> (CC.ccrSessionId r, CC.ccrTotalCostUsd r)
-      (implSessionId, implCost) = case implResponse of
-        Left _ -> ("", 0.0)
-        Right r -> (CC.ccrSessionId r, CC.ccrTotalCostUsd r)
+  let extractInfo = \case
+        BuildFatalError _ -> ("", 0.0)
+        BuildNeedsFix _ _ r -> (CC.ccrSessionId r, CC.ccrTotalCostUsd r)
+        BuildSuccess r -> (CC.ccrSessionId r, CC.ccrTotalCostUsd r)
+      (testsSessionId, testsCost) = extractInfo testsResponse
+      (implSessionId, implCost) = extractInfo implResponse
 
   -- Parse results (now metadata only, not code)
   testsResult <- parseOrError "tests" testsResponse
@@ -1028,23 +962,41 @@ forkHandler input = do
     , prImplSessionId = implSessionId
     , prTestsCost = testsCost
     , prImplCost = implCost
-    , prParentSessionId = fromMaybe "" parentSessionId
+    , prParentSessionId = sessionCtx.scSessionId  -- Types agent's session
     }
 
 -- | Parse ClaudeCode response or error.
 --
 -- Logs errors with full context before failing.
+-- Handles BuildValidationResult - BuildNeedsFix is treated as success since
+-- the code exists (just didn't compile yet, which the graph can handle).
 parseOrError
   :: (StructuredOutput a)
   => Text
-  -> Either CC.ClaudeCodeError CC.ClaudeCodeResult
+  -> BuildValidationResult CC.ClaudeCodeResult
   -> Eff DevEffects a
-parseOrError agentName (Left err) = do
+parseOrError agentName (BuildFatalError err) = do
   sendM $ do
-    logError $ "Claude Code " <> T.unpack agentName <> " agent failed"
-    logDetail "error" (show err)
-  throwError $ AgentFailed agentName (T.pack $ show err)
-parseOrError agentName (Right result) = do
+    logError $ "Claude Code " <> T.unpack agentName <> " agent failed fatally"
+    logDetail "error" (T.unpack err)
+  throwError $ AgentFailed agentName err
+parseOrError agentName (BuildNeedsFix err attempts result) = do
+  -- BuildNeedsFix means the agent produced output but build failed after max retries
+  -- Parse the output anyway - the graph can route to fix agent
+  sendM $ do
+    logError $ "Claude Code " <> T.unpack agentName <> " agent needs fix after " <> show attempts <> " attempts"
+    logDetail "buildError" (T.unpack err)
+  parseClaudeCodeResult agentName result
+parseOrError agentName (BuildSuccess result) = do
+  parseClaudeCodeResult agentName result
+
+-- | Parse the structured output from a ClaudeCodeResult
+parseClaudeCodeResult
+  :: (StructuredOutput a)
+  => Text
+  -> CC.ClaudeCodeResult
+  -> Eff DevEffects a
+parseClaudeCodeResult agentName result = do
   -- Log the full event stream (all tool calls, reasoning, etc.)
   sendM $ logClaudeCodeEvents agentName (CC.ccrEvents result)
 
@@ -1072,321 +1024,6 @@ parseOrError agentName (Right result) = do
       Right a -> do
         sendM $ logMsg $ T.unpack agentName <> " agent response parsed successfully"
         pure a
-
-
--- ════════════════════════════════════════════════════════════════════════════
--- v3 FORK HANDLER (semantic descriptions)
--- ════════════════════════════════════════════════════════════════════════════
-
--- | v3 Fork handler using semantic descriptions.
---
--- Like forkHandler but receives StubsGenerated (with semantic descriptions)
--- instead of SkeletonGenerated. The tests agent prompt includes semantic
--- descriptions to guide test writing.
-forkHandlerV3
-  :: StubsGenerated
-  -> ClaudeCodeConfig
-  -> StackSpec
-  -> IO (Either String ParallelResults)
-forkHandlerV3 input config _spec = do
-  logPhase "v3 FORK - Creating worktrees"
-  logDetail "projectPath" input.stgProjectPath
-  logDetail "moduleName" (T.unpack input.stgModuleName)
-
-  let projectPath = input.stgProjectPath
-
-  -- Create worktrees for isolation
-  -- Note: In real use, this would use the Worktree effect
-  -- For now, we use the simpler git worktree commands directly
-  testsWtPath <- createWorktreeIO projectPath "tests"
-  implWtPath <- createWorktreeIO projectPath "impl"
-
-  logDetail "testsWorktree" testsWtPath
-  logDetail "implWorktree" implWtPath
-
-  -- Copy build artifacts from parent for faster builds
-  let parentDistNewstyle = projectPath </> "dist-newstyle"
-  parentHasArtifacts <- doesDirectoryExist parentDistNewstyle
-  when parentHasArtifacts $ do
-    logMsg "Copying build artifacts to worktrees..."
-    callProcess "cp" ["-r", parentDistNewstyle, testsWtPath </> "dist-newstyle"]
-    callProcess "cp" ["-r", parentDistNewstyle, implWtPath </> "dist-newstyle"]
-    logMsg "Build artifacts copied"
-
-  -- Build v3 tests context (uses semantic descriptions instead of signatures)
-  let testsCtxV3 = TestsContextV3
-        { moduleName = input.stgModuleName
-        , dataType = input.stgDataType
-        , semantics = input.stgSemantics
-        }
-
-      -- Build impl context (still uses minimal info - impl agent reads the stubs)
-      implCtx = ImplContext
-        { moduleName = input.stgModuleName
-        , dataType = input.stgDataType
-        , signatures = []  -- Empty - impl agent reads stubs directly
-        }
-
-      -- Render prompts
-      testsPrompt = runTypedTemplate testsCtxV3 servantTestsV3Compiled
-      implPrompt = runTypedTemplate implCtx servantImplCompiled
-
-      -- Build schemas
-      testsSchema = Just $ schemaToValue (structuredSchema @TestsResult)
-      implSchema = Just $ schemaToValue (structuredSchema @ImplResult)
-
-  logPhase "v3 FORK - Spawning parallel agents"
-  logDetail "testsPromptLength" (show $ T.length testsPrompt)
-  logDetail "implPromptLength" (show $ T.length implPrompt)
-
-  -- Both agents fork from the stubs agent's session to share context
-  -- If parent session ID is empty, start fresh sessions instead of trying to fork
-  let parentSessionId = input.stgSessionId
-      parentSessionMaybe = if T.null parentSessionId then Nothing else Just parentSessionId
-      shouldFork = isJust parentSessionMaybe
-  logDetail "parentSessionId" (maybe "(none - starting fresh)" T.unpack parentSessionMaybe)
-
-  -- Create crosstalk state for parallel agent communication
-  -- Each agent tracks the other's worktree for commit notifications
-  logMsg "Setting up crosstalk between parallel agents..."
-  (testsCrosstalk, implCrosstalk) <- newCrosstalkStatePair
-    testsWtPath "tests"
-    implWtPath "impl"
-
-  -- Run both agents in parallel with session forking and crosstalk
-  logMsg "Launching parallel agents with build validation and crosstalk..."
-  (testsResponse, implResponse) <- concurrently
-    (do
-      logMsg $ "Tests agent starting in worktree: " <> testsWtPath
-      runAgentWithCrosstalk config testsWtPath testsPrompt testsSchema "tests"
-        parentSessionMaybe shouldFork testsCrosstalk)
-    (do
-      logMsg $ "Impl agent starting in worktree: " <> implWtPath
-      runAgentWithCrosstalk config implWtPath implPrompt implSchema "impl"
-        parentSessionMaybe shouldFork implCrosstalk)
-
-  logPhase "v3 FORK - Agents completed, parsing results"
-
-  -- Parse results
-  case (testsResponse, implResponse) of
-    (Left err, _) -> pure $ Left $ "Tests agent failed: " <> show err
-    (_, Left err) -> pure $ Left $ "Impl agent failed: " <> show err
-    (Right testsCC, Right implCC) -> do
-      -- Parse structured output
-      testsResult <- parseStructuredOutput "tests" testsCC
-      implResult <- parseStructuredOutput "impl" implCC
-
-      case (testsResult, implResult) of
-        (Left err, _) -> pure $ Left err
-        (_, Left err) -> pure $ Left err
-        (Right tr, Right ir) -> do
-          -- Extract session IDs and costs for tracking
-          let testsSessionId = CC.ccrSessionId testsCC
-              implSessionId = CC.ccrSessionId implCC
-              testsCost = CC.ccrTotalCostUsd testsCC
-              implCost = CC.ccrTotalCostUsd implCC
-
-          logMsg "=== Tests Agent Result ==="
-          logDetail "functionRubrics" (show $ length tr.trFunctionRubrics)
-          logDetail "commitMessage" (T.unpack tr.trCommitMessage)
-          logDetail "sessionId" (T.unpack testsSessionId)
-          logDetail "cost" (show testsCost)
-
-          logMsg "=== Impl Agent Result ==="
-          logDetail "functionRubrics" (show $ length ir.irFunctionRubrics)
-          logDetail "commitMessage" (T.unpack ir.irCommitMessage)
-          logDetail "sessionId" (T.unpack implSessionId)
-          logDetail "cost" (show implCost)
-
-          pure $ Right ParallelResults
-            { prTestsWorktree = WorktreePath testsWtPath
-            , prImplWorktree = WorktreePath implWtPath
-            , prTestsResult = tr
-            , prImplResult = ir
-            , prTestsSessionId = testsSessionId
-            , prImplSessionId = implSessionId
-            , prTestsCost = testsCost
-            , prImplCost = implCost
-            , prParentSessionId = parentSessionId
-            }
-
--- | Create a git worktree (simple IO version for v3 handler).
-createWorktreeIO :: FilePath -> String -> IO FilePath
-createWorktreeIO projectPath name = do
-  let worktreePath = projectPath </> ".worktrees" </> name
-      branchName = "worktree-" <> name
-
-  -- Create parent directory
-  createDirectoryIfMissing True (projectPath </> ".worktrees")
-
-  -- Create worktree with new branch
-  withCurrentDirectory projectPath $ do
-    -- Remove existing worktree if present
-    existingWt <- doesDirectoryExist worktreePath
-    when existingWt $ do
-      callProcess "git" ["worktree", "remove", "-f", worktreePath]
-
-    callProcess "git" ["worktree", "add", "-B", branchName, worktreePath]
-
-  pure worktreePath
-
--- | Parse structured output from Claude Code result.
-parseStructuredOutput :: Aeson.FromJSON a => String -> CC.ClaudeCodeResult -> IO (Either String a)
-parseStructuredOutput name result = do
-  case CC.ccrStructuredOutput result of
-    Nothing -> pure $ Left $ name <> " agent returned no structured output"
-    Just val -> case Aeson.fromJSON val of
-      Aeson.Error msg -> pure $ Left $ "Failed to parse " <> name <> " response: " <> msg
-      Aeson.Success a -> pure $ Right a
-
-
--- ════════════════════════════════════════════════════════════════════════════
--- v3 WORKFLOW ORCHESTRATOR
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Run the complete v3 workflow.
---
--- This is the entry point for the semantic descriptions workflow:
--- 1. Stubs agent writes code files, returns semantic descriptions
--- 2. Fork creates worktrees, spawns parallel tests + impl agents
--- 3. Merge combines results and runs tests
---
--- Returns success/failure with final test results.
-runWorkflowV3
-  :: StackSpec
-  -> ClaudeCodeConfig
-  -> IO (Either String Bool)  -- ^ Left = error, Right = tests passed
-runWorkflowV3 spec config = do
-  logPhase "v3 WORKFLOW START"
-  logDetail "moduleName" (T.unpack spec.ssModuleName)
-  logDetail "projectPath" spec.ssProjectPath
-  logDetail "projectType" (show spec.ssProjectType)
-
-  -- Phase 1: Stubs
-  stubsResult <- stubsHandlerV3 spec config
-  case stubsResult of
-    Left err -> do
-      logError $ "Stubs phase failed: " <> show err
-      pure $ Left $ "Stubs phase failed: " <> show err
-    Right stubsGen -> do
-      logMsg "Stubs phase complete, proceeding to fork..."
-
-      -- Phase 2: Fork (parallel agents)
-      forkResult <- forkHandlerV3 stubsGen config spec
-      case forkResult of
-        Left err -> do
-          logError $ "Fork phase failed: " <> err
-          pure $ Left $ "Fork phase failed: " <> err
-        Right parallelResults -> do
-          logMsg "Fork phase complete, proceeding to merge..."
-
-          -- Phase 3: Merge
-          let projectPath = stubsGen.stgProjectPath
-          mergeResult <- mergeHandlerV3 parallelResults projectPath
-
-          pure mergeResult
-
-
--- | v3 Merge handler (simplified IO version).
---
--- Commits agent work, merges worktrees, runs tests.
-mergeHandlerV3 :: ParallelResults -> FilePath -> IO (Either String Bool)
-mergeHandlerV3 results projectPath = do
-  logPhase "v3 MERGE - Committing and merging agent work"
-
-  -- Check for undefined/placeholders in impl worktree (mechanical check)
-  implHasUndefined <- checkUndefined (results.prImplWorktree.unWorktreePath </> "src")
-
-  -- Commit impl work (success = no undefined placeholders)
-  -- Note: With two-stream architecture, build success is computed mechanically
-  let implSuccess = not implHasUndefined
-  when implSuccess $ do
-    logMsg "Committing impl work..."
-    commitWorktreeWork results.prImplWorktree.unWorktreePath results.prImplResult.irCommitMessage
-
-  -- Commit tests work (success = has rubrics)
-  let testsSuccess = not (null results.prTestsResult.trFunctionRubrics)
-  when testsSuccess $ do
-    logMsg "Committing tests work..."
-    commitWorktreeWork results.prTestsWorktree.unWorktreePath results.prTestsResult.trCommitMessage
-
-  -- Merge impl to main
-  logMsg "Merging impl to main..."
-  implMergeOk <- mergeWorktreeIO projectPath results.prImplWorktree.unWorktreePath "Merge impl agent work"
-
-  -- Merge tests to main
-  logMsg "Merging tests to main..."
-  testsMergeOk <- mergeWorktreeIO projectPath results.prTestsWorktree.unWorktreePath "Merge tests agent work"
-
-  let bothMergeSuccess = implMergeOk && testsMergeOk
-
-  -- Run tests post-merge
-  testsPassed <- if bothMergeSuccess
-    then do
-      logPhase "POST-MERGE TEST VALIDATION"
-      logMsg "Running cabal test to verify implementation..."
-      (testExit, testOut, testErr) <- withCurrentDirectory projectPath $
-        readProcessWithExitCode "cabal" ["test", "--test-show-details=always"] ""
-      case testExit of
-        ExitSuccess -> do
-          logMsg "POST-MERGE TESTS PASSED!"
-          logMsg testOut
-          pure True
-        ExitFailure code -> do
-          logError $ "POST-MERGE TESTS FAILED (exit code " <> show code <> ")"
-          logError testErr
-          logError testOut
-          pure False
-    else do
-      logError "Merge failed, skipping test validation"
-      pure False
-
-  -- Cleanup worktrees
-  if bothMergeSuccess
-    then do
-      logMsg "Cleaning up worktrees..."
-      removeWorktreeIO projectPath results.prTestsWorktree.unWorktreePath
-      removeWorktreeIO projectPath results.prImplWorktree.unWorktreePath
-      logMsg "Worktrees deleted"
-    else do
-      logMsg "WARNING: Merge failed, preserving worktrees for debugging"
-      logDetail "testsWorktree" results.prTestsWorktree.unWorktreePath
-      logDetail "implWorktree" results.prImplWorktree.unWorktreePath
-
-  -- Log final state
-  logPhase $ "v3 WORKFLOW " <> if testsPassed then "COMPLETE (tests passed)" else "COMPLETE (tests FAILED)"
-  (_, gitLog, _) <- readProcessWithExitCode "git" ["-C", projectPath, "log", "--oneline", "-10"] ""
-  logMsg $ "Final git log:\n" <> gitLog
-
-  pure $ Right testsPassed
-
-
--- | Merge a worktree branch to main (simple IO version).
-mergeWorktreeIO :: FilePath -> FilePath -> String -> IO Bool
-mergeWorktreeIO projectPath worktreePath commitMsg = do
-  -- Get worktree branch name
-  let branchName = "worktree-" <> takeBaseName worktreePath
-  withCurrentDirectory projectPath $ do
-    (mergeCode, _, mergeErr) <- readProcessWithExitCode "git" ["merge", branchName, "-m", commitMsg] ""
-    case mergeCode of
-      ExitSuccess -> do
-        logMsg $ "Merged " <> branchName <> " successfully"
-        pure True
-      ExitFailure _ -> do
-        logError $ "Failed to merge " <> branchName <> ": " <> mergeErr
-        -- Try to abort the merge
-        _ <- readProcessWithExitCode "git" ["merge", "--abort"] ""
-        pure False
-  where
-    takeBaseName :: FilePath -> String
-    takeBaseName = reverse . takeWhile (/= '/') . reverse
-
-
--- | Remove a worktree (simple IO version).
-removeWorktreeIO :: FilePath -> FilePath -> IO ()
-removeWorktreeIO projectPath worktreePath = do
-  withCurrentDirectory projectPath $ do
-    callProcess "git" ["worktree", "remove", "-f", worktreePath]
 
 
 -- ════════════════════════════════════════════════════════════════════════════

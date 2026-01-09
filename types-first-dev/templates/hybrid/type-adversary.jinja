@@ -22,8 +22,7 @@ the original requirements? Can the system enter globally inconsistent state?
 
 ```haskell
 -- Type: {{ types.typeName }}
--- Kind: {{ types.typeKind }}
--- Constructors: {{ types.constructors | join(", ") }}
+-- {{ types.typeDescription }}
 
 {% for fn in types.functions %}
 {{ fn.name }} :: {{ fn.signature }}
@@ -31,11 +30,12 @@ the original requirements? Can the system enter globally inconsistent state?
 {% endfor %}
 ```
 
-## Claimed Invariants
+## Claimed Properties
 
 {% for fn in types.functions %}
+### {{ fn.name }}
 {% for prop in fn.properties %}
-- {{ prop.name }}: {{ prop.invariant }}
+- {{ prop }}
 {% endfor %}
 {% endfor %}
 
@@ -68,8 +68,9 @@ And assign severity:
 
 Return JSON matching `TypeAdversaryOutput`:
 - `holes`: List of TypeHole (see below)
-- `analysis`: What areas you examined, approach taken
-- `confident`: Are you confident you found all holes?
+- `areasExamined`: List of areas you checked (e.g., "constructors", "type invariants", "function contracts")
+- `uncheckedAreas`: List of areas NOT checked (actionable - what might need review)
+- `analysisApproach`: Brief description of your approach
 
 For each hole in `holes`:
 - `holeType`: One of: RepresentableInvalid, LeakyAbstraction, PartialFunction, TypeConfusion
@@ -78,6 +79,9 @@ For each hole in `holes`:
 - `exploitSketch`: Pseudocode showing the exploit
 - `severity`: One of: Critical, Major, Minor, Informational
 - `suggestedFix`: How to fix it
+
+**Note**: Report what you checked and what you skipped. Empty `uncheckedAreas`
+tells the handler you were thorough. A non-empty list is actionable feedback.
 
 ## Important
 
