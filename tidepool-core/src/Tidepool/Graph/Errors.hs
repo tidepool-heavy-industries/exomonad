@@ -49,7 +49,7 @@ module Tidepool.Graph.Errors
   , FormatTargetList
   , ExtractTargetNames
 
-    -- * GHC 9.8+ Type Error Infrastructure
+    -- * Type Error Infrastructure (from GHC.TypeError)
     -- | Re-exported from "GHC.TypeError" for use in validation modules.
     --
     -- == Semantic Distinction
