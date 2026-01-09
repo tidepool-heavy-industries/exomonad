@@ -25,6 +25,12 @@ module Tidepool.Graph.Types
   , Awaits
   , Arrive(..)
 
+    -- * Parallel Fan-In (Merge)
+  , Merge
+  , From
+  , GroupBy
+  , CorrelateBy(..)
+
     -- * Graph-Level Annotations
   , type (:&)
   , Groups
@@ -213,6 +219,75 @@ data Awaits resultTypes
 type Arrive :: Type -> Type -> Type
 data Arrive resultType r where
   ArriveOp :: result -> Arrive result ()
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- PARALLEL FAN-IN (MERGE)
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Input annotation for nodes that gather results from parallel fan-out.
+--
+-- Unlike regular 'Input' which receives from a single source, 'Merge' declares
+-- that this node waits for results from multiple sources, grouped by a
+-- correlation key.
+--
+-- @
+-- gather :: mode :- LogicNode
+--     :@ Input (Merge '[From "payment" PaymentResult, From "inventory" InventoryResult])
+--     :@ GroupBy OrderId
+--     :@ UsesEffects '[Goto Exit OrderResult]
+-- @
+--
+-- The handler receives an 'HList' of results once all sources have arrived
+-- for a given correlation key.
+type Merge :: [Type] -> Type
+data Merge sources
+
+-- | Source marker for 'Merge'. Identifies which node the result came from.
+--
+-- @
+-- Merge '[From "payment" PaymentResult, From "inventory" InventoryResult]
+-- @
+--
+-- Each 'From' specifies:
+--   * The source node name (type-level Symbol)
+--   * The expected payload type from that source
+--
+-- This enables type-safe routing: even if two sources produce the same type,
+-- they're distinguished by their source node name.
+type From :: Symbol -> Type -> Type
+data From source payload
+
+-- | Annotation specifying the correlation key type for 'Merge'.
+--
+-- Results from parallel workers are grouped by this key. All result types
+-- in the 'Merge' must have a 'CorrelateBy' instance for this key type.
+--
+-- @
+-- gather :: mode :- LogicNode
+--     :@ Input (Merge '[From "a" ResultA, From "b" ResultB])
+--     :@ GroupBy OrderId  -- Group results by OrderId
+--     :@ UsesEffects '[Goto Exit Combined]
+-- @
+type GroupBy :: Type -> Type
+data GroupBy key
+
+-- | Typeclass for extracting a correlation key from a payload.
+--
+-- Used by 'Merge' nodes to group results from parallel workers. Each result
+-- type must provide a way to extract the correlation key.
+--
+-- @
+-- instance CorrelateBy OrderId PaymentResult where
+--   correlationKey = (.orderId)
+--
+-- instance CorrelateBy OrderId InventoryResult where
+--   correlationKey = (.orderId)
+-- @
+--
+-- This enables the runtime to match up results that belong to the same
+-- fan-out operation, even when multiple fan-outs are in flight.
+class CorrelateBy key a where
+  correlationKey :: a -> key
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- GRAPH-LEVEL ANNOTATIONS
