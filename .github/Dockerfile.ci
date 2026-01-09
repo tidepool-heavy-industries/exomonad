@@ -1,6 +1,6 @@
 # Single-stage Dockerfile for Tidepool CI
 # Pre-builds all Haskell dependencies
-FROM haskell:9.6
+FROM haskell:9.10
 
 WORKDIR /workspace
 

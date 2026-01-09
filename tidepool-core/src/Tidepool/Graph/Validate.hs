@@ -36,6 +36,7 @@ module Tidepool.Graph.Validate
 
 import Data.Kind (Type, Constraint)
 import GHC.TypeLits (Symbol, TypeError, ErrorMessage(..))
+import GHC.TypeError (Unsatisfiable)
 
 -- Re-export record-based structural validation (with type family wrappers for compatibility)
 import Tidepool.Graph.Validate.RecordStructure
@@ -198,8 +199,14 @@ type DuplicateSchemaError t = TypeError
 --   :@ ClaudeCode 'Sonnet 'Nothing
 --   :& Backend CloudflareAI
 -- @
+-- | Error for ClaudeCode annotation with CloudflareAI backend.
+--
+-- Uses 'Unsatisfiable' rather than 'TypeError' because this represents
+-- mutually exclusive requirements - ClaudeCode requires a local subprocess
+-- which is physically impossible in Cloudflare Workers. No annotation can
+-- fix this; it requires choosing a different backend or architecture.
 type ClaudeCodeCFBackendError :: Symbol -> Constraint
-type ClaudeCodeCFBackendError nodeName = TypeError
+type ClaudeCodeCFBackendError nodeName = Unsatisfiable
   ('Text "Graph validation failed: incompatible backend for ClaudeCode"
    ':$$: 'Text ""
    ':$$: 'Text "Node '" ':<>: 'Text nodeName ':<>: 'Text "' has ClaudeCode annotation,"

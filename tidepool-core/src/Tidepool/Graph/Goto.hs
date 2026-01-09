@@ -84,6 +84,7 @@ import GHC.TypeLits (Symbol, KnownSymbol, TypeError, ErrorMessage(..))
 import Tidepool.Graph.Errors
   ( HR, Blank, WhatHappened, HowItWorks, Fixes, Example
   , Indent, CodeLine, Bullet, FormatTargetList
+  , Unsatisfiable
   )
 import Text.Ginger.TH (TypedTemplate)
 import Text.Parsec.Pos (SourcePos)
@@ -107,9 +108,13 @@ import Tidepool.Graph.Goto.Internal (OneOf(..), GotoChoice(..), To, Payloads, Pa
 -- @
 -- myFunction :: NonEmptyList targets => GotoChoice targets -> ...
 -- @
+--
+-- Uses 'Unsatisfiable' for the empty case rather than 'TypeError' because
+-- an empty target list is logically impossible - 'OneOf '[]' has no constructors
+-- and cannot be instantiated.
 type NonEmptyList :: [Type] -> Constraint
 type family NonEmptyList ts where
-  NonEmptyList '[] = TypeError
+  NonEmptyList '[] = Unsatisfiable
     ( HR
       ':$$: 'Text "  Handler has no exit points (empty target list)"
       ':$$: HR
