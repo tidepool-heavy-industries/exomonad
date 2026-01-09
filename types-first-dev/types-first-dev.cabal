@@ -24,8 +24,10 @@ library
         TypesFirstDev.Context.Hybrid
         TypesFirstDev.Templates.Hybrid
         TypesFirstDev.Graph.Hybrid
+        TypesFirstDev.Handlers.Hybrid.Effects
         TypesFirstDev.Handlers.Hybrid.Stubs
         TypesFirstDev.Handlers.Hybrid.Genesis
+        TypesFirstDev.Handlers.Hybrid.Merge
         TypesFirstDev.Schema
         TypesFirstDev.Context
         TypesFirstDev.Templates

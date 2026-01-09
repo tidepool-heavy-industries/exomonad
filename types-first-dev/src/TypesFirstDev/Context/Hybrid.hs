@@ -15,6 +15,7 @@ module TypesFirstDev.Context.Hybrid
 import Control.Monad.Writer (Writer)
 import Data.Text (Text)
 import Text.Ginger.GVal (ToGVal(..), dict, list)
+import qualified Text.Ginger.GVal
 import Text.Ginger.Run.Type (Run)
 import Text.Parsec.Pos (SourcePos)
 
@@ -197,3 +198,17 @@ instance ToGVal GingerM TypesFixTemplateCtx where
     , ("attempt", toGVal ctx.attempt)
     , ("priorFixes", list (toGVal <$> ctx.priorFixes))
     ]
+
+instance ToGVal GingerM ConflictResolveTemplateCtx where
+  toGVal ctx = dict
+    [ ("conflictedFiles", list (conflictedFilePair <$> conflictedFiles ctx))
+    , ("testsContext", toGVal (testsContext ctx))
+    , ("implContext", toGVal (implContext ctx))
+    , ("mergeWorktree", toGVal (mergeWorktree ctx))
+    ]
+    where
+      conflictedFilePair :: (FilePath, Text) -> Text.Ginger.GVal.GVal GingerM
+      conflictedFilePair (path, content) = dict
+        [ ("path", toGVal path)
+        , ("content", toGVal content)
+        ]
