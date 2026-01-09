@@ -16,6 +16,13 @@ const DEFAULT_UI_STATE: UIState = {
   choices: null,
   graphNode: "init",
   thinking: false,
+  // DM fields - default to null/empty
+  dmStats: null,
+  dmClocks: [],
+  dmDicePool: null,
+  dmMood: null,
+  dmCharCreation: null,
+  dmHistory: [],
 };
 
 export function createSocket(url: string) {
