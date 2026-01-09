@@ -108,16 +108,16 @@ hFixStub
   -> Eff es (GotoChoice '[To "hValidate" MergedState])
 hFixStub _ = error "WS4 TODO: hFix - analyze failures, apply fixes, loop"
 
--- | Post-validate handler - spawn mutation adversary, route to witness.
+-- | Post-validate handler - route to mutation adversary.
 hPostValidateStub
   :: ValidatedState
-  -> Eff es (GotoChoice '[To "hMutationAdversary" MutationTemplateCtx, To "hWitness" ValidatedState])
-hPostValidateStub _ = error "WS4 TODO: hPostValidate - spawn mutation adversary"
+  -> Eff es (GotoChoice '[To "hMutationAdversary" MutationTemplateCtx])
+hPostValidateStub _ = error "WS4 TODO: hPostValidate - route to mutation adversary"
 
 -- | Mutation adversary handler - test suite red team.
 hMutationAdversaryStub
   :: MutationTemplateCtx
-  -> Eff es (GotoChoice '[To "hWitness" MutationAdversaryResult])
+  -> Eff es (GotoChoice '[To "hWitness" WitnessReport])
 hMutationAdversaryStub _ = error "WS4 TODO: hMutationAdversary - introduce bugs, check test catches"
 
 -- | Witness handler - observe and illuminate.

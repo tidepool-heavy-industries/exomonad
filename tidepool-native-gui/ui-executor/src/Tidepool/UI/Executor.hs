@@ -147,6 +147,12 @@ buildTextInputState msgs node placeholder = UIState
   , usChoices = Nothing
   , usGraphNode = node
   , usThinking = False
+  , usDMStats = Nothing
+  , usDMClocks = []
+  , usDMDicePool = Nothing
+  , usDMMood = Nothing
+  , usDMCharCreation = Nothing
+  , usDMHistory = []
   }
 
 -- | Build UIState with photo upload enabled.
@@ -162,6 +168,12 @@ buildPhotoUploadState msgs node prompt = UIState
   , usChoices = Nothing
   , usGraphNode = node
   , usThinking = False
+  , usDMStats = Nothing
+  , usDMClocks = []
+  , usDMDicePool = Nothing
+  , usDMMood = Nothing
+  , usDMCharCreation = Nothing
+  , usDMHistory = []
   }
 
 -- | Build UIState with choices enabled.
@@ -183,6 +195,12 @@ buildChoiceState msgs node prompt choices multiSelect = UIState
       }
   , usGraphNode = node
   , usThinking = False
+  , usDMStats = Nothing
+  , usDMClocks = []
+  , usDMDicePool = Nothing
+  , usDMMood = Nothing
+  , usDMCharCreation = Nothing
+  , usDMHistory = []
   }
   where
     mkOption idx (label, ChoiceMeta desc costs availability, _) = ChoiceOption
@@ -234,6 +252,12 @@ buildThinkingState msgs node thinking = UIState
   , usChoices = Nothing
   , usGraphNode = node
   , usThinking = thinking
+  , usDMStats = Nothing
+  , usDMClocks = []
+  , usDMDicePool = Nothing
+  , usDMMood = Nothing
+  , usDMCharCreation = Nothing
+  , usDMHistory = []
   }
 
 

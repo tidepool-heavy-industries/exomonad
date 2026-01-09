@@ -43,6 +43,9 @@ module Tidepool.Graph.Execute
 
     -- * Transition Conversion
   , ConvertTransitionHint(..)
+
+    -- * Fork/Barrier Orchestration
+  , SpawnWorkers(..)
   ) where
 
 import Data.Aeson (Value)
@@ -65,14 +68,15 @@ import Text.Parsec.Pos (SourcePos)
 import Tidepool.Effect (LLM)
 import Tidepool.Effect.ClaudeCode (ClaudeCodeExec, execClaudeCode)
 import Tidepool.Effect.Types (TurnOutcome(..), TurnParseResult(..), TurnResult(..), runTurn)
-import Tidepool.Graph.Edges (GetInput)
-import Tidepool.Graph.Generic (AsHandler, FieldsWithNamesOf)
+import Tidepool.Graph.Edges (GetInput, GetSpawnTargets, GetBarrierTarget, GetAwaits)
+import Tidepool.Graph.Generic (AsHandler, FieldsWithNamesOf, SpawnPayloads, SpawnPayloadsInner, AwaitsHList, GetNodeDef)
+import Tidepool.Graph.Reify (IsForkNode)
 import Tidepool.Graph.Generic.Core (Entry, AsGraph)
 import qualified Tidepool.Graph.Generic.Core as G (Exit)
 import Tidepool.Graph.Goto (GotoChoice, To, LLMHandler(..), ClaudeCodeLLMHandler(..), ClaudeCodeResult(..))
 import Tidepool.Graph.Goto.Internal (GotoChoice(..), OneOf(..))
 import Tidepool.Graph.Template (GingerContext)
-import Tidepool.Graph.Types (Exit, Self, Arrive, SingModelChoice(..), KnownMaybeCwd(..))
+import Tidepool.Graph.Types (Exit, Self, Arrive, SingModelChoice(..), KnownMaybeCwd(..), HList(..))
 import Tidepool.Schema (schemaToValue)
 import Tidepool.StructuredOutput (StructuredOutput(..), formatDiagnostic)
 
@@ -668,16 +672,77 @@ instance {-# OVERLAPPABLE #-} Unsatisfiable
 
 
 -- ════════════════════════════════════════════════════════════════════════════
--- NAMED NODE INSTANCES
+-- NAMED NODE DISPATCH (with automatic ForkNode detection)
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Single named node target: call the handler and recurse.
+-- | Helper class for dispatching named nodes, parameterized by IsForkNode result.
+--
+-- GHC distinguishes instances by their heads, not constraints. Since both regular
+-- nodes and ForkNodes have the same DispatchGoto head, we use this helper class
+-- with a type-level Bool to differentiate them.
+--
+-- The Bool parameter comes from @IsForkNode (GetNodeDef name graph)@:
+-- - 'False → regular dispatch (call handler, recurse on its targets)
+-- - 'True  → fork dispatch (spawn workers, collect results, route to barrier)
+type DispatchNamedNode :: (Type -> Type) -> Symbol -> Type -> [Effect] -> Type -> Bool -> Constraint
+class DispatchNamedNode graph name payload es exitType (isFork :: Bool) where
+  dispatchNamedNode
+    :: graph (AsHandler es)
+    -> payload
+    -> Eff es exitType
+
+-- | Regular node dispatch: call handler and recurse on its targets.
+instance
+  ( KnownSymbol name
+  , HasField name (graph (AsHandler es)) handler
+  , CallHandler handler payload es handlerTargets
+  , DispatchGoto graph handlerTargets es exitType
+  ) => DispatchNamedNode graph name payload es exitType 'False where
+  dispatchNamedNode graph payload = do
+    let handler = getField @name graph
+    nextChoice <- callHandler handler payload
+    dispatchGoto graph nextChoice
+
+-- | ForkNode dispatch: spawn workers, collect results, route to barrier.
+--
+-- When a named node is a ForkNode:
+-- 1. Call fork handler with payload → SpawnPayloads
+-- 2. Use SpawnWorkers to dispatch workers and collect results
+-- 3. Look up barrier handler (from Barrier annotation)
+-- 4. Call barrier handler with collected results
+-- 5. Continue dispatch from barrier's GotoChoice
+instance
+  ( KnownSymbol name
+  , Generic (graph AsGraph)
+  , HasField name (graph (AsHandler es)) (payload -> Eff es (SpawnPayloads spawnTargets))
+  , GetSpawnTargets (GetNodeDef name graph) ~ spawnTargets
+  , GetBarrierTarget (GetNodeDef name graph) ~ 'Just barrierName
+  , KnownSymbol barrierName
+  , GetAwaits (GetNodeDef barrierName graph) ~ resultTypes
+  , SpawnWorkers graph spawnTargets resultTypes es
+  , HasField barrierName (graph (AsHandler es)) barrierHandler
+  , CallHandler barrierHandler (AwaitsHList resultTypes) es barrierTargets
+  , DispatchGoto graph barrierTargets es exitType
+  ) => DispatchNamedNode graph name payload es exitType 'True where
+  dispatchNamedNode graph payload = do
+    let forkHandler = getField @name graph
+    spawnPayloads <- forkHandler payload
+    results <- spawnWorkers @graph @spawnTargets @resultTypes graph spawnPayloads
+    let barrierHandler = getField @barrierName graph
+    barrierChoice <- callHandler barrierHandler results
+    dispatchGoto graph barrierChoice
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- NAMED NODE INSTANCES (delegate to DispatchNamedNode)
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Single named node target: dispatch via DispatchNamedNode helper.
 --
 -- When there's only one target @To (name :: Symbol) payload@ and no rest:
 --
--- 1. Use 'HasField' to get the handler from the graph record
--- 2. Use 'CallHandler' to invoke the handler (works for both Logic and LLM nodes)
--- 3. Recursively dispatch on the handler's returned 'GotoChoice'
+-- 1. Compute @IsForkNode (GetNodeDef name graph)@ to get type-level Bool
+-- 2. Delegate to @DispatchNamedNode@ which has different instances for 'True/'False
 --
 -- This instance allows intermediate handlers to return single-target GotoChoice
 -- without requiring Exit or multiple targets in the type.
@@ -691,40 +756,31 @@ instance {-# OVERLAPPABLE #-} Unsatisfiable
 --   pure $ gotoChoice \@"process" data
 -- @
 instance {-# OVERLAPPING #-}
-  ( KnownSymbol name
-  , HasField name (graph (AsHandler es)) handler
-  , CallHandler handler payload es handlerTargets
-  , DispatchGoto graph handlerTargets es exitType
+  ( Generic (graph AsGraph)
+  , DispatchNamedNode graph name payload es exitType (IsForkNode (GetNodeDef name graph))
   ) => DispatchGoto graph '[To (name :: Symbol) payload] es exitType where
 
-  dispatchGoto graph (GotoChoice (Here payload)) = do
-    let handler = getField @name graph
-    nextChoice <- callHandler handler payload
-    dispatchGoto graph nextChoice
+  dispatchGoto graph (GotoChoice (Here payload)) =
+    dispatchNamedNode @graph @name @payload @es @exitType @(IsForkNode (GetNodeDef name graph)) graph payload
 
 
--- | Named node target with additional targets: call the handler via 'CallHandler' and recurse.
+-- | Named node target with additional targets: dispatch via DispatchNamedNode helper.
 --
 -- When the first target is @To (name :: Symbol) payload@:
 --
--- 1. Use 'HasField' to get the handler from the graph record
--- 2. Use 'CallHandler' to invoke the handler (works for both Logic and LLM nodes)
--- 3. Recursively dispatch on the handler's returned 'GotoChoice'
+-- 1. Compute @IsForkNode (GetNodeDef name graph)@ to get type-level Bool
+-- 2. Delegate to @DispatchNamedNode@ which handles both regular and ForkNode dispatch
 --
--- The @handler@ type is inferred from the graph record, and 'CallHandler'
--- determines how to invoke it based on whether it's a function or LLMHandler.
+-- The @handler@ type is inferred from the graph record, and 'DispatchNamedNode'
+-- determines how to invoke it based on whether it's a ForkNode or regular node.
 instance {-# OVERLAPPABLE #-}
-  ( KnownSymbol name
-  , HasField name (graph (AsHandler es)) handler
-  , CallHandler handler payload es handlerTargets
-  , DispatchGoto graph handlerTargets es exitType
+  ( Generic (graph AsGraph)
+  , DispatchNamedNode graph name payload es exitType (IsForkNode (GetNodeDef name graph))
   , DispatchGoto graph rest es exitType
   ) => DispatchGoto graph (To (name :: Symbol) payload ': rest) es exitType where
 
-  dispatchGoto graph (GotoChoice (Here payload)) = do
-    let handler = getField @name graph
-    nextChoice <- callHandler handler payload
-    dispatchGoto graph nextChoice
+  dispatchGoto graph (GotoChoice (Here payload)) =
+    dispatchNamedNode @graph @name @payload @es @exitType @(IsForkNode (GetNodeDef name graph)) graph payload
 
   dispatchGoto graph (GotoChoice (There rest)) =
     dispatchGoto @graph @rest graph (GotoChoice rest)
@@ -820,3 +876,111 @@ instance
     dispatchGotoWithSelf @graph @selfPayload @allTargets @handlerTargets selfHandler graph nextChoice
   dispatchGotoWithSelf selfHandler graph (GotoChoice (There rest)) =
     dispatchGotoWithSelf @graph @selfPayload @allTargets @rest selfHandler graph (GotoChoice rest)
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- FORK/BARRIER ORCHESTRATION
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Spawn workers for each target in a ForkNode's spawn list.
+--
+-- This typeclass recursively processes the spawn targets and expected result
+-- types together, dispatching a worker for each target and collecting results.
+--
+-- = Type Parameters
+--
+-- * @graph@ - The graph record type
+-- * @targets@ - Spawn targets list (e.g., @'[To \"w1\" TaskA, To \"w2\" TaskB]@)
+-- * @resultTypes@ - Expected result types (from BarrierNode's Awaits annotation)
+-- * @es@ - The effect stack
+--
+-- = Usage
+--
+-- @
+-- -- Given ForkNode with Spawn '[To "w1" Task, To "w2" Task]
+-- -- and BarrierNode with Awaits '[ResultA, ResultB]
+-- results <- spawnWorkers \@graph \@spawnTargets \@awaitsTypes graph payloads
+-- @
+--
+-- Note: Current implementation is sequential. Parallel execution with 'async'
+-- requires lifting to IO, which needs effect interpreter access. The sequential
+-- version validates the type infrastructure; parallelism can be added by
+-- interpreting workers to IO and using concurrently/async.
+type SpawnWorkers :: (Type -> Type) -> [Type] -> [Type] -> [Effect] -> Constraint
+class SpawnWorkers graph targets resultTypes es where
+  spawnWorkers
+    :: graph (AsHandler es)
+    -> SpawnPayloads targets
+    -> Eff es (AwaitsHList resultTypes)
+
+-- | Base case: no more targets, no more results.
+instance SpawnWorkers graph '[] '[] es where
+  spawnWorkers _ HNil = pure HNil
+
+-- | Recursive case: dispatch to named node, collect result, continue.
+--
+-- For each spawn target, we:
+-- 1. Get the handler from the graph by name
+-- 2. Call the handler with the payload (via CallHandler)
+-- 3. Dispatch the resulting GotoChoice until we hit Arrive
+-- 4. Collect the result and continue with remaining targets
+--
+-- Note: The HList pattern match gives us (payload, rest) where the rest
+-- has type HList (SpawnPayloadsInner restTargets). We need the recursive
+-- call to accept this type, which works because:
+--   SpawnPayloads restTargets ~ HList (SpawnPayloadsInner restTargets)
+-- for non-empty restTargets by definition of SpawnPayloads.
+instance
+  ( KnownSymbol name
+  , HasField name (graph (AsHandler es)) handler
+  , CallHandler handler payload es workerTargets
+  , DispatchGoto graph workerTargets es result
+  , SpawnWorkersInner graph restTargets restResults es
+  ) => SpawnWorkers graph (To name payload ': restTargets) (result ': restResults) es where
+  spawnWorkers graph (payload ::: rest) = do
+    let handler = getField @name graph
+    firstChoice <- callHandler handler payload
+    thisResult <- dispatchGoto graph firstChoice
+    restResults <- spawnWorkersInner @graph @restTargets @restResults graph rest
+    pure (thisResult ::: restResults)
+
+
+-- | Inner spawn workers that works directly with HList (SpawnPayloadsInner targets).
+--
+-- This helper avoids the type family reduction issue where GHC can't see that
+-- SpawnPayloads restTargets ~ HList (SpawnPayloadsInner restTargets).
+type SpawnWorkersInner :: (Type -> Type) -> [Type] -> [Type] -> [Effect] -> Constraint
+class SpawnWorkersInner graph targets resultTypes es where
+  spawnWorkersInner
+    :: graph (AsHandler es)
+    -> HList (SpawnPayloadsInner targets)
+    -> Eff es (HList resultTypes)
+
+-- | Base case: empty targets list.
+instance SpawnWorkersInner graph '[] '[] es where
+  spawnWorkersInner _ HNil = pure HNil
+
+-- | Recursive case for inner spawning.
+instance
+  ( KnownSymbol name
+  , HasField name (graph (AsHandler es)) handler
+  , CallHandler handler payload es workerTargets
+  , DispatchGoto graph workerTargets es result
+  , SpawnWorkersInner graph restTargets restResults es
+  ) => SpawnWorkersInner graph (To name payload ': restTargets) (result ': restResults) es where
+  spawnWorkersInner graph (payload ::: rest) = do
+    let handler = getField @name graph
+    firstChoice <- callHandler handler payload
+    thisResult <- dispatchGoto graph firstChoice
+    restResults <- spawnWorkersInner @graph @restTargets @restResults graph rest
+    pure (thisResult ::: restResults)
+
+
+-- Note: For parallel execution with 'async', we would need to:
+-- 1. Add 'async' to build-depends
+-- 2. Create a 'ParallelSpawnWorkers' variant that takes an interpreter
+-- 3. Use a typed async pool for heterogeneous result collection
+--
+-- The current sequential implementation validates the type infrastructure.
+-- Parallelism can be added incrementally when effect interpreter access is
+-- available (e.g., by passing a `forall a. Eff es a -> IO a` function).
