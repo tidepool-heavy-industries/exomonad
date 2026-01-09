@@ -25,6 +25,9 @@ module Tidepool.Graph.Goto.Internal
     -- * GotoChoice Constructor (for typed dispatch only)
   , GotoChoice(..)
 
+    -- * GotoAll Constructor (for parallel dispatch only)
+  , GotoAll(..)
+
     -- * Target Marker (re-exported for type families)
   , To
 
@@ -34,6 +37,7 @@ module Tidepool.Graph.Goto.Internal
   ) where
 
 import Data.Kind (Type)
+import Tidepool.Graph.Types (HList)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- ONEOF: TYPE-INDEXED SUM TYPE
@@ -97,3 +101,26 @@ type family PayloadOf t where
 -- Internally wraps 'OneOf' for fully typed dispatch.
 type GotoChoice :: [Type] -> Type
 newtype GotoChoice targets = GotoChoice { unGotoChoice :: OneOf (Payloads targets) }
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- GOTOALL: PARALLEL FAN-OUT RETURN TYPE
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Return type for handlers that fan-out to ALL targets in parallel.
+--
+-- Unlike 'GotoChoice' which picks ONE target (sum type), 'GotoAll' sends
+-- to ALL targets simultaneously (product type).
+--
+-- The handler provides a payload for each target, and the runtime dispatches
+-- to all of them concurrently.
+--
+-- @
+-- -- Fan-out to two workers
+-- fanoutHandler :: Task -> Eff es (key, GotoAll '[To "analyzer" Task, To "validator" Task])
+-- fanoutHandler task = pure (task.orderId, gotoAll (analyzerTask ::: validatorTask ::: HNil))
+-- @
+--
+-- Note: The handler also provides a correlation key that workers will use
+-- to identify which fan-out batch their results belong to.
+type GotoAll :: [Type] -> Type
+newtype GotoAll targets = GotoAll { unGotoAll :: HList (Payloads targets) }

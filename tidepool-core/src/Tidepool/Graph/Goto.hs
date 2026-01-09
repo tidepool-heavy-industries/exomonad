@@ -69,6 +69,10 @@ module Tidepool.Graph.Goto
   , gotoArrive
   , unwrapSingleChoice
 
+    -- * GotoAll Return Type (for parallel fan-out)
+  , GotoAll  -- Type only, constructor in Goto.Internal
+  , gotoAll
+
     -- * LLM Handler Variants
   , LLMHandler(..)
   , ClaudeCodeLLMHandler(..)
@@ -94,10 +98,10 @@ import Tidepool.Graph.Errors
 import Text.Ginger.TH (TypedTemplate)
 import Text.Parsec.Pos (SourcePos)
 
-import Tidepool.Graph.Types (Exit, Self, Arrive(..), ModelChoice(..), SingModelChoice(..), KnownMaybeCwd(..))
+import Tidepool.Graph.Types (Exit, Self, Arrive(..), ModelChoice(..), SingModelChoice(..), KnownMaybeCwd(..), HList(..))
 
 -- Import from Internal (re-exports types, we hide constructors in this module's exports)
-import Tidepool.Graph.Goto.Internal (OneOf(..), GotoChoice(..), To, Payloads, PayloadOf)
+import Tidepool.Graph.Goto.Internal (OneOf(..), GotoChoice(..), GotoAll(..), To, Payloads, PayloadOf)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- ONEOF CONSTRAINTS AND INJECTION
@@ -408,6 +412,34 @@ unwrapSingleChoice (GotoChoice (Here p)) = p
 
 -- Note: gotoChoiceToResult has been removed. The typed executor in Execute.hs
 -- dispatches directly on OneOf without needing to convert to Dynamic-based GotoResult.
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- GOTOALL: PARALLEL FAN-OUT
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Construct a 'GotoAll' for parallel fan-out to all targets.
+--
+-- Unlike 'gotoChoice' which picks ONE target, 'gotoAll' sends to ALL targets
+-- simultaneously. The runtime will dispatch to each target in parallel.
+--
+-- @
+-- -- Fan-out to two workers with their payloads
+-- gotoAll (analyzerTask ::: validatorTask ::: HNil)
+-- @
+--
+-- The handler typically returns a tuple of (correlationKey, GotoAll):
+--
+-- @
+-- fanoutHandler :: Order -> Eff es (OrderId, GotoAll '[To "payment" PaymentReq, To "inventory" InvReq])
+-- fanoutHandler order = pure
+--   ( order.orderId  -- Correlation key for gathering results
+--   , gotoAll (paymentReq ::: inventoryReq ::: HNil)
+--   )
+-- @
+gotoAll
+  :: forall targets.
+     HList (Payloads targets) -> GotoAll targets
+gotoAll = GotoAll
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- LLM HANDLER VARIANTS
