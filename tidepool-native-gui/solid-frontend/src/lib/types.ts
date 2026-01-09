@@ -14,6 +14,13 @@ export interface UIState {
   choices: ChoiceConfig | null;
   graphNode: string;
   thinking: boolean;
+  // DM-specific fields (optional)
+  dmStats: DMStats | null;
+  dmClocks: Clock[];
+  dmDicePool: DicePool | null;
+  dmMood: DMMood | null;
+  dmCharCreation: CharacterCreation | null;
+  dmHistory: HistoryEntry[];
 }
 
 export interface ChatMessage {
@@ -101,6 +108,173 @@ export function photoAction(data: string, mimeType: string): PhotoAction {
 /** @deprecated Use choiceAction instead */
 export function buttonAction(id: string): ChoiceAction {
   return { type: "choice", index: parseInt(id, 10) };
+}
+
+// ============================================================================
+// DM Game Types (mirrors wire-types/src/Tidepool/Wire/Types.hs)
+// ============================================================================
+
+/** Precarity level - drives narrative voice intensity. */
+export type Precarity =
+  | "operatingFromStrength"
+  | "roomToManeuver"
+  | "wallsClosingIn"
+  | "hangingByThread";
+
+/** Character stats for sidebar display. */
+export interface DMStats {
+  stress: number;        // 0-9, trauma at 9
+  heat: number;          // 0-9
+  coin: number;
+  wantedLevel: number;   // 0-4
+  trauma: string[];      // Freeform trauma names
+  precarity: Precarity;
+}
+
+/** Clock color/type. */
+export type ClockColor = "threat" | "opportunity" | "neutral";
+
+/** Progress clock for tracking threats and opportunities. */
+export interface Clock {
+  id: string;
+  name: string;
+  segments: number;      // 4-8
+  filled: number;
+  visible: boolean;      // False = hidden GM clock
+  color: ClockColor;
+}
+
+/** Action position (risk level). */
+export type Position = "controlled" | "risky" | "desperate";
+
+/** Action effect level. */
+export type Effect = "limited" | "standard" | "great";
+
+/** Outcome tier - calculated from die value and position. */
+export type OutcomeTier = "critical" | "success" | "partial" | "bad" | "disaster";
+
+/** Single die option with LLM-generated preview. */
+export interface DieOption {
+  value: number;         // 1-6
+  tier: OutcomeTier;
+  hint: string;          // LLM-generated preview of this outcome
+}
+
+/** Dice pool state. */
+export interface DicePool {
+  dice: DieOption[];
+  position: Position;
+  effect: Effect;
+  context: string;       // What they're attempting
+  pushAvailable: boolean;
+  devilBargain: string | null;
+}
+
+/** Scene urgency level. */
+export type Urgency = "low" | "medium" | "high" | "critical";
+
+/** Scene variant - what kind of scene this is. */
+export type SceneVariant =
+  | { variant: "encounter"; urgency: Urgency }
+  | { variant: "opportunity"; catch: string }
+  | { variant: "discovery"; implications: string };
+
+/** Action domain overlay. */
+export type ActionDomain = "infiltration" | "social" | "violence" | "pursuit" | "arcane";
+
+/** Action variant - risk level with context. */
+export type ActionVariant =
+  | { variant: "controlled"; threat: string; opportunity: string }
+  | { variant: "risky"; threat: string; opportunity: string }
+  | { variant: "desperate"; threat: string; opportunity: string };
+
+/** Aftermath variant - how the action resolved. */
+export type AftermathVariant =
+  | { variant: "clean" }
+  | { variant: "costly"; cost: string }
+  | { variant: "setback"; escape: string }
+  | { variant: "disaster" };
+
+/** Downtime variant - what kind of downtime activity. */
+export type DowntimeVariant =
+  | { variant: "recovery"; activities: string[] }
+  | { variant: "project"; name: string; progress: number }
+  | { variant: "entanglement"; description: string };
+
+/** Bargain cost types. */
+export type BargainCost =
+  | { type: "stress"; amount: number }
+  | { type: "heat"; amount: number }
+  | { type: "wanted" }
+  | { type: "clockTick"; clock: string; segments: number }
+  | { type: "factionDebt"; faction: string }
+  | { type: "trauma" }
+  | { type: "item"; item: string };
+
+/** Bargain option - LLM-generated contextual deal. */
+export interface BargainOption {
+  label: string;
+  cost: BargainCost;
+  description: string;
+}
+
+/** Current game phase/mood with rich variants. */
+export type DMMood =
+  | { mood: "scene"; scene: SceneVariant }
+  | { mood: "action"; action: ActionVariant; domain: ActionDomain | null }
+  | { mood: "aftermath"; aftermath: AftermathVariant }
+  | { mood: "downtime"; downtime: DowntimeVariant }
+  | { mood: "trauma" }
+  | { mood: "bargain"; options: BargainOption[] };
+
+/** Character archetype. */
+export type Archetype = "cutter" | "hound" | "leech" | "lurk" | "slide" | "spider" | "whisper";
+
+/** Character pronouns. */
+export type Pronouns =
+  | { type: "heHim" }
+  | { type: "sheHer" }
+  | { type: "theyThem" }
+  | { type: "custom"; pronouns: string };
+
+/** Tarot card for character creation spread. */
+export interface TarotCard {
+  name: string;
+  meaning: string;
+}
+
+/** Three-card tarot spread for character creation. */
+export interface TarotSpread {
+  past: TarotCard;
+  present: TarotCard;
+  future: TarotCard;
+}
+
+/** Character creation step. */
+export type CharCreationStep =
+  | { step: "enterName" }
+  | { step: "choosePronouns" }
+  | { step: "chooseArchetype" }
+  | { step: "enterBackground" }
+  | { step: "drawTarot" }
+  | { step: "confirm" };
+
+/** Character creation state. */
+export interface CharacterCreation {
+  step: CharCreationStep;
+  name: string | null;
+  pronouns: Pronouns | null;
+  archetype: Archetype | null;
+  background: string | null;
+  tarotSpread: TarotSpread | null;
+}
+
+/** History entry for session log. */
+export interface HistoryEntry {
+  timestamp: string;
+  type: string;          // "narration", "action", "roll", "clock"
+  summary: string;
+  details: string | null;
 }
 
 // ============================================================================
