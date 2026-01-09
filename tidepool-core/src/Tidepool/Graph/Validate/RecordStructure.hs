@@ -49,7 +49,7 @@ import Data.Kind (Type, Constraint)
 import GHC.TypeLits (Symbol, TypeError, ErrorMessage(..), Nat, type (-), type (+))
 import GHC.Generics (Generic(..), K1(..), M1(..), (:*:)(..), Meta(..), S, D, C, Rep)
 
-import Tidepool.Graph.Types (type (:@), Input, Schema, UsesEffects, Self)
+import Tidepool.Graph.Types (type (:@), Input, Schema, UsesEffects, Self, Arrive)
 import qualified Tidepool.Graph.Types as Types (Exit)
 import Tidepool.Graph.Edges (GetInput, GetSchema)
 import Tidepool.Graph.Goto (Goto)
@@ -576,11 +576,13 @@ type family HasAnyGotoInMaybeEffects mEffs where
   HasAnyGotoInMaybeEffects 'Nothing = 'False
   HasAnyGotoInMaybeEffects ('Just effs) = HasAnyGotoInEffects effs
 
--- | Check effect list for any Goto.
+-- | Check effect list for any Goto or Arrive.
+-- Both Goto and Arrive are valid exit paths for nodes.
 type HasAnyGotoInEffects :: [Effect] -> Bool
 type family HasAnyGotoInEffects effs where
   HasAnyGotoInEffects '[] = 'False
   HasAnyGotoInEffects (Goto _ _ ': _) = 'True
+  HasAnyGotoInEffects (Arrive _ ': _) = 'True  -- Arrive is also a valid exit path
   HasAnyGotoInEffects (_ ': rest) = HasAnyGotoInEffects rest
 
 -- | Error when a Logic node has no Goto effects.
@@ -653,6 +655,7 @@ type family HasNonSelfGotoInEffects effs where
   HasNonSelfGotoInEffects '[] = 'False
   HasNonSelfGotoInEffects (Goto Self _ ': rest) = HasNonSelfGotoInEffects rest
   HasNonSelfGotoInEffects (Goto _ _ ': _) = 'True  -- Named or Exit
+  HasNonSelfGotoInEffects (Arrive _ ': _) = 'True  -- Arrive is also an exit path (for ForkNode workers)
   HasNonSelfGotoInEffects (_ ': rest) = HasNonSelfGotoInEffects rest
 
 -- | Error when a node only has Goto Self.

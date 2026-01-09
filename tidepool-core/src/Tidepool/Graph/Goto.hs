@@ -46,6 +46,10 @@ module Tidepool.Graph.Goto
     Goto(..)
   , goto
 
+    -- * The Arrive Effect (for ForkNode workers)
+    -- Note: Arrive type is exported from Tidepool.Graph.Types
+  , arrive
+
     -- * OneOf Sum Type (constructors hidden - use smart constructors)
   , OneOf       -- Type only, constructors in Goto.Internal
   , NonEmptyList
@@ -62,6 +66,7 @@ module Tidepool.Graph.Goto
   , gotoChoice
   , gotoExit
   , gotoSelf
+  , gotoArrive
   , unwrapSingleChoice
 
     -- * LLM Handler Variants
@@ -89,7 +94,7 @@ import Tidepool.Graph.Errors
 import Text.Ginger.TH (TypedTemplate)
 import Text.Parsec.Pos (SourcePos)
 
-import Tidepool.Graph.Types (Exit, Self, ModelChoice(..), SingModelChoice(..), KnownMaybeCwd(..))
+import Tidepool.Graph.Types (Exit, Self, Arrive(..), ModelChoice(..), SingModelChoice(..), KnownMaybeCwd(..))
 
 -- Import from Internal (re-exports types, we hide constructors in this module's exports)
 import Tidepool.Graph.Goto.Internal (OneOf(..), GotoChoice(..), To, Payloads, PayloadOf)
@@ -219,6 +224,25 @@ goto :: forall {k} (target :: k) a effs. Member (Goto target a) effs => a -> Eff
 goto x = send (GotoOp x :: Goto target a ())
 
 -- ════════════════════════════════════════════════════════════════════════════
+-- ARRIVE EFFECT (FOR FORKNODE WORKERS)
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Deposit a result at the barrier and suspend this path.
+--
+-- Workers spawned by ForkNode use this to deposit results at the barrier.
+-- Unlike 'goto @Exit' which terminates the entire graph, 'arrive' just
+-- completes the current parallel path.
+--
+-- @
+-- arrive @MyResult value
+-- @
+--
+-- Note: The 'Arrive' type is defined in "Tidepool.Graph.Types" with the
+-- 'ArriveOp' constructor.
+arrive :: forall result effs. Member (Arrive result) effs => result -> Eff effs ()
+arrive r = send (ArriveOp r)
+
+-- ════════════════════════════════════════════════════════════════════════════
 -- JSON SERIALIZATION
 -- ════════════════════════════════════════════════════════════════════════════
 
@@ -342,6 +366,24 @@ gotoSelf
      )
   => payload -> GotoChoice targets
 gotoSelf payload = GotoChoice (injectTarget @(To Self payload) @targets payload)
+
+-- | Construct a 'GotoChoice' for arriving at a barrier.
+--
+-- Workers spawned by ForkNode use this to deposit their result at the barrier
+-- and suspend their path. Unlike 'gotoExit' which terminates the entire graph,
+-- 'gotoArrive' only completes the current parallel path.
+--
+-- @
+-- gotoArrive myResult
+-- @
+gotoArrive
+  :: forall payload targets.
+     ( NonEmptyList targets
+     , InjectTarget (To Arrive payload) targets
+     , GotoElemC (To Arrive payload) targets
+     )
+  => payload -> GotoChoice targets
+gotoArrive payload = GotoChoice (injectTarget @(To Arrive payload) @targets payload)
 
 -- | Extract the payload from a single-target 'GotoChoice'.
 --

@@ -84,7 +84,7 @@ import qualified Data.Map.Strict as Map
 
 import Tidepool.Graph.Types (NodeKind(..), type (:@), ModelChoice(..))
 import Tidepool.Graph.Tool (ToolInfo(..))
-import Tidepool.Graph.Generic.Core (Entry, Exit, LLMNode, LogicNode, AsGraph)
+import Tidepool.Graph.Generic.Core (Entry, Exit, LLMNode, LogicNode, ForkNode, BarrierNode, AsGraph)
 import Tidepool.Graph.Edges
   ( GetInput, GetSchema, GetTemplate, GetSystem
   , GetVision, GetTools, GetMemory, GetUsesEffects
@@ -193,6 +193,8 @@ data RuntimeNodeKind
   = RuntimeLLM         -- ^ Standard LLM API call
   | RuntimeClaudeCode  -- ^ Claude Code subprocess
   | RuntimeLogic       -- ^ Pure routing logic
+  | RuntimeFork        -- ^ Fork node - spawns parallel workers
+  | RuntimeBarrier     -- ^ Barrier node - collects parallel results
   deriving (Show, Eq)
 
 -- | Runtime edge kind.
@@ -626,6 +628,68 @@ type family IsLogicNode def where
   IsLogicNode LogicNode = 'True
   IsLogicNode (node :@ _) = IsLogicNode node
   IsLogicNode _ = 'False
+
+-- | Check if the base node is ForkNode.
+type IsForkNode :: Type -> Bool
+type family IsForkNode def where
+  IsForkNode ForkNode = 'True
+  IsForkNode (node :@ _) = IsForkNode node
+  IsForkNode _ = 'False
+
+-- | Check if the base node is BarrierNode.
+type IsBarrierNode :: Type -> Bool
+type family IsBarrierNode def where
+  IsBarrierNode BarrierNode = 'True
+  IsBarrierNode (node :@ _) = IsBarrierNode node
+  IsBarrierNode _ = 'False
+
+-- ForkNode instance - spawns parallel workers
+--
+-- Basic support: extracts input, produces RuntimeFork kind.
+-- TODO: Could extract Spawn targets, Barrier name for richer visualization.
+instance {-# OVERLAPPING #-}
+         ( ReifyMaybeType (GetInput (ForkNode :@ ann))
+         ) => ReifyNodeDef (ForkNode :@ ann) where
+  reifyNodeDef pName _ = [NodeInfo
+    { niName = T.pack (symbolVal pName)
+    , niKind = RuntimeFork
+    , niInput = reifyMaybeType (Proxy @(GetInput (ForkNode :@ ann)))
+    , niSchema = Nothing
+    , niGotoTargets = []  -- ForkNode uses Spawn, not Goto
+    , niHasGotoExit = False
+    , niHasVision = False
+    , niTools = []
+    , niToolInfos = []
+    , niSystem = Nothing
+    , niTemplate = Nothing
+    , niMemory = Nothing
+    , niClaudeCode = Nothing
+    }]
+
+-- BarrierNode instance - collects parallel results
+--
+-- Basic support: extracts input, produces RuntimeBarrier kind.
+-- TODO: Could extract Awaits types for richer visualization.
+instance {-# OVERLAPPING #-}
+         ( ReifyMaybeType (GetInput (BarrierNode :@ ann))
+         , ReifyGotoTargets (GotoTargetsFromDef (BarrierNode :@ ann))
+         , ReifyBool (HasGotoExitInDef (BarrierNode :@ ann))
+         ) => ReifyNodeDef (BarrierNode :@ ann) where
+  reifyNodeDef pName _ = [NodeInfo
+    { niName = T.pack (symbolVal pName)
+    , niKind = RuntimeBarrier
+    , niInput = reifyMaybeType (Proxy @(GetInput (BarrierNode :@ ann)))
+    , niSchema = Nothing
+    , niGotoTargets = reifyGotoTargets (Proxy @(GotoTargetsFromDef (BarrierNode :@ ann)))
+    , niHasGotoExit = reifyBool (Proxy @(HasGotoExitInDef (BarrierNode :@ ann)))
+    , niHasVision = False
+    , niTools = []
+    , niToolInfos = []
+    , niSystem = Nothing
+    , niTemplate = Nothing
+    , niMemory = Nothing
+    , niClaudeCode = Nothing
+    }]
 
 -- General instance for any annotated node: dispatch based on base type
 instance {-# OVERLAPPABLE #-}

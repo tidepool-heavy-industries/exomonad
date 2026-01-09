@@ -20,6 +20,10 @@ module Tidepool.Graph.Generic.Core
   , LogicNode
   , Entry
   , Exit
+
+    -- * Parallel Execution Markers
+  , ForkNode
+  , BarrierNode
   ) where
 
 import Data.Kind (Type)
@@ -108,3 +112,44 @@ data Entry inputType
 -- @
 type Exit :: Type -> Type
 data Exit outputType
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- PARALLEL EXECUTION MARKERS
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Fork node marker - spawns parallel execution paths.
+--
+-- ForkNode receives input and spawns multiple worker paths that execute
+-- in parallel. Each spawned path runs independently until it calls 'Arrive'
+-- to deposit its result at a barrier.
+--
+-- @
+-- data MyGraph mode = MyGraph
+--   { fork :: mode :- ForkNode
+--       :@ Input Task
+--       :@ Spawn '[To "worker1" Task, To "worker2" Task]
+--       :@ Barrier "merge"
+--   }
+-- @
+--
+-- The 'Spawn' annotation lists targets (using 'To' markers from Goto).
+-- The 'Barrier' annotation names which BarrierNode collects the results.
+data ForkNode
+
+-- | Barrier node marker - synchronizes parallel execution paths.
+--
+-- BarrierNode waits for all spawned paths to arrive, then continues
+-- with the collected results. It fires only when all expected arrivals
+-- have been deposited.
+--
+-- @
+-- data MyGraph mode = MyGraph
+--   { merge :: mode :- BarrierNode
+--       :@ Awaits '[ResultA, ResultB]
+--       :@ UsesEffects '[Goto Exit (ResultA, ResultB)]
+--   }
+-- @
+--
+-- The 'Awaits' annotation lists the types expected from each spawned path.
+-- The handler receives the collected results as an HList.
+data BarrierNode

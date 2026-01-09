@@ -36,6 +36,13 @@ module Tidepool.Graph.Edges
   , ExtractGotoTarget
   , ExtractGotoPayload
 
+    -- * Fork/Barrier Extraction
+  , GetSpawnTargets
+  , GetBarrierTarget
+  , GetAwaits
+  , HasArrive
+  , GetArriveType
+
     -- * Node Queries
   , HasAnnotation
   , FindAnnotation
@@ -47,6 +54,7 @@ import GHC.TypeLits (Symbol)
 import Tidepool.Graph.Types
   ( type (:@), type (:&)
   , Input, Schema, System, Template, Vision, Tools, UsesEffects, Memory
+  , Spawn, Barrier, Awaits, Arrive
   , Global, Backend
   , ClaudeCode, ModelChoice
   , Exit, Self
@@ -232,8 +240,8 @@ type family GetGotoTargets effs where
 -- | Convert Goto effects to To markers for GotoChoice.
 --
 -- @
--- GotoEffectsToTargets '[State S, Goto "foo" A, Goto Exit B, Goto Self C]
---   = '[To "foo" A, To Exit B, To Self C]
+-- GotoEffectsToTargets '[State S, Goto "foo" A, Goto Exit B, Goto Self C, Arrive R]
+--   = '[To "foo" A, To Exit B, To Self C, To Arrive R]
 -- @
 type GotoEffectsToTargets :: forall k. [k] -> [Type]
 type family GotoEffectsToTargets effs where
@@ -244,6 +252,8 @@ type family GotoEffectsToTargets effs where
     To Exit payload ': GotoEffectsToTargets rest
   GotoEffectsToTargets (Goto Self payload ': rest) =
     To Self payload ': GotoEffectsToTargets rest
+  GotoEffectsToTargets (Arrive result ': rest) =
+    To Arrive result ': GotoEffectsToTargets rest
   GotoEffectsToTargets (_ ': rest) = GotoEffectsToTargets rest
 
 -- | Alias for 'GotoEffectsToTargets' for use in handler signatures.
@@ -328,6 +338,10 @@ type family SameAnnotationType ann target where
   SameAnnotationType Vision Vision = 'True
   SameAnnotationType (ClaudeCode _ _) (ClaudeCode _ _) = 'True
   SameAnnotationType (Backend _) (Backend _) = 'True
+  SameAnnotationType (Spawn _) (Spawn _) = 'True
+  SameAnnotationType (Barrier _) (Barrier _) = 'True
+  SameAnnotationType (Awaits _) (Awaits _) = 'True
+  SameAnnotationType (Arrive _ _) (Arrive _ _) = 'True
   SameAnnotationType _ _ = 'False
 
 -- | Find a specific annotation in a node.
@@ -392,6 +406,70 @@ type family HasClaudeCode node where
   HasClaudeCode (node :@ ClaudeCode _ _) = 'True
   HasClaudeCode (node :@ _) = HasClaudeCode node
   HasClaudeCode _ = 'False
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- FORK/BARRIER EXTRACTION
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Extract Spawn targets from a ForkNode declaration.
+--
+-- @
+-- GetSpawnTargets (ForkNode :@ Input Task :@ Spawn '[To "w1" A, To "w2" B] :@ Barrier "merge")
+--   = '[To "w1" A, To "w2" B]
+-- @
+type GetSpawnTargets :: Type -> [Type]
+type family GetSpawnTargets node where
+  GetSpawnTargets (node :@ Spawn targets) = targets
+  GetSpawnTargets (node :@ _) = GetSpawnTargets node
+  GetSpawnTargets _ = '[]
+
+-- | Extract Barrier target name from a ForkNode declaration.
+--
+-- @
+-- GetBarrierTarget (ForkNode :@ Spawn '[...] :@ Barrier "merge")
+--   = 'Just "merge"
+-- @
+type GetBarrierTarget :: Type -> Maybe Symbol
+type family GetBarrierTarget node where
+  GetBarrierTarget (node :@ Barrier target) = 'Just target
+  GetBarrierTarget (node :@ _) = GetBarrierTarget node
+  GetBarrierTarget _ = 'Nothing
+
+-- | Extract Awaits types from a BarrierNode declaration.
+--
+-- @
+-- GetAwaits (BarrierNode :@ Awaits '[ResultA, ResultB] :@ UsesEffects '[...])
+--   = '[ResultA, ResultB]
+-- @
+type GetAwaits :: Type -> [Type]
+type family GetAwaits node where
+  GetAwaits (node :@ Awaits types) = types
+  GetAwaits (node :@ _) = GetAwaits node
+  GetAwaits _ = '[]
+
+-- | Check if an effect list contains Arrive.
+--
+-- @
+-- HasArrive '[Goto Self Task, Arrive Result] = 'True
+-- HasArrive '[Goto Self Task, Goto Exit Result] = 'False
+-- @
+type HasArrive :: forall k. [k] -> Bool
+type family HasArrive effs where
+  HasArrive '[] = 'False
+  HasArrive (Arrive _ ': _) = 'True
+  HasArrive (_ ': rest) = HasArrive rest
+
+-- | Extract the Arrive result type from an effect list.
+--
+-- @
+-- GetArriveType '[Goto Self Task, Arrive Result] = 'Just Result
+-- GetArriveType '[Goto Self Task, Goto Exit Result] = 'Nothing
+-- @
+type GetArriveType :: forall k. [k] -> Maybe Type
+type family GetArriveType effs where
+  GetArriveType '[] = 'Nothing
+  GetArriveType (Arrive result ': _) = 'Just result
+  GetArriveType (_ ': rest) = GetArriveType rest
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TYPE-LEVEL UTILITIES

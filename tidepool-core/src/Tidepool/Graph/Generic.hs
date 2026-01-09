@@ -61,6 +61,12 @@ module Tidepool.Graph.Generic
     -- * Node Kind Wrappers (for record DSL)
   , LLMNode
   , LogicNode
+  , ForkNode
+  , BarrierNode
+
+    -- * Fork/Barrier Handler Types
+  , SpawnPayloads
+  , AwaitsHList
 
     -- * Field Name Extraction
   , FieldNames
@@ -113,9 +119,9 @@ import Tidepool.Graph.Errors
 import Tidepool.Graph.Validate (FormatSymbolList)
 import Control.Monad.Freer (Eff, Member)
 
-import Tidepool.Graph.Types (type (:@), Input, Schema, Template, Vision, Tools, Memory, System, UsesEffects, ClaudeCode, ModelChoice)
+import Tidepool.Graph.Types (type (:@), Input, Schema, Template, Vision, Tools, Memory, System, UsesEffects, ClaudeCode, ModelChoice, Spawn, Barrier, Awaits, HList(..))
 import Tidepool.Graph.Template (TemplateContext)
-import Tidepool.Graph.Edges (GetUsesEffects, GetGotoTargets, GotoEffectsToTargets, HasClaudeCode, GetClaudeCode)
+import Tidepool.Graph.Edges (GetUsesEffects, GetGotoTargets, GotoEffectsToTargets, HasClaudeCode, GetClaudeCode, GetSpawnTargets, GetBarrierTarget, GetAwaits)
 import Tidepool.Graph.Goto (Goto, goto, GotoChoice, To, LLMHandler(..), ClaudeCodeLLMHandler(..))
 import Tidepool.Graph.Validate.RecordStructure
   ( AllFieldsReachable, AllLogicFieldsReachExit, NoDeadGotosRecord
@@ -126,6 +132,8 @@ import Tidepool.Graph.Generic.Core
   , AsGraph
   , LLMNode
   , LogicNode
+  , ForkNode
+  , BarrierNode
   , Entry
   , Exit
   )
@@ -259,6 +267,48 @@ type family NodeHandler nodeDef es where
       ':$$: CodeLine "router intent = case intent of"
       ':$$: CodeLine "  NeedsProcessing x -> pure $ gotoChoice @\"process\" x"
       ':$$: CodeLine "  Done result       -> pure $ gotoExit result"
+    )
+  NodeHandler ForkNode es = TypeError
+    ( HR
+      ':$$: 'Text "  ForkNode requires annotations"
+      ':$$: HR
+      ':$$: Blank
+      ':$$: WhatHappened
+      ':$$: Indent "You wrote: ForkNode with no annotations"
+      ':$$: Indent "The compiler can't determine what to spawn or where to collect results."
+      ':$$: Blank
+      ':$$: HowItWorks
+      ':$$: Indent "Fork nodes spawn parallel execution paths. They need to know:"
+      ':$$: CodeLine "  Input   -> What data to receive before spawning"
+      ':$$: CodeLine "  Spawn   -> Which nodes to spawn and with what payloads"
+      ':$$: CodeLine "  Barrier -> Where spawned paths deposit their results"
+      ':$$: Blank
+      ':$$: Fixes
+      ':$$: Bullet "Add Input, Spawn, and Barrier annotations:"
+      ':$$: CodeLine "  myFork :: mode :- ForkNode"
+      ':$$: CodeLine "             :@ Input Task"
+      ':$$: CodeLine "             :@ Spawn '[To \"worker1\" Task, To \"worker2\" Task]"
+      ':$$: CodeLine "             :@ Barrier \"merge\""
+    )
+  NodeHandler BarrierNode es = TypeError
+    ( HR
+      ':$$: 'Text "  BarrierNode requires annotations"
+      ':$$: HR
+      ':$$: Blank
+      ':$$: WhatHappened
+      ':$$: Indent "You wrote: BarrierNode with no annotations"
+      ':$$: Indent "The compiler can't determine what results to collect or where to go next."
+      ':$$: Blank
+      ':$$: HowItWorks
+      ':$$: Indent "Barrier nodes synchronize parallel paths. They need to know:"
+      ':$$: CodeLine "  Awaits      -> What result types to collect from spawned paths"
+      ':$$: CodeLine "  UsesEffects -> Where to route with the collected results"
+      ':$$: Blank
+      ':$$: Fixes
+      ':$$: Bullet "Add Awaits and UsesEffects annotations:"
+      ':$$: CodeLine "  myBarrier :: mode :- BarrierNode"
+      ':$$: CodeLine "               :@ Awaits '[ResultA, ResultB]"
+      ':$$: CodeLine "               :@ UsesEffects '[Goto Exit (ResultA, ResultB)]"
     )
 
 -- | Unified accumulator that peels annotations and dispatches based on base kind.
@@ -396,6 +446,14 @@ type family NodeHandlerDispatch nodeDef origNode es mInput mTpl mSchema mEffs wh
   NodeHandlerDispatch (node :@ System _) orig es mInput mTpl mSchema mEffs =
     NodeHandlerDispatch node orig es mInput mTpl mSchema mEffs
   NodeHandlerDispatch (node :@ ClaudeCode _ _) orig es mInput mTpl mSchema mEffs =
+    NodeHandlerDispatch node orig es mInput mTpl mSchema mEffs
+
+  -- Skip Fork/Barrier annotations (extracted directly in terminal cases)
+  NodeHandlerDispatch (node :@ Spawn _) orig es mInput mTpl mSchema mEffs =
+    NodeHandlerDispatch node orig es mInput mTpl mSchema mEffs
+  NodeHandlerDispatch (node :@ Barrier _) orig es mInput mTpl mSchema mEffs =
+    NodeHandlerDispatch node orig es mInput mTpl mSchema mEffs
+  NodeHandlerDispatch (node :@ Awaits _) orig es mInput mTpl mSchema mEffs =
     NodeHandlerDispatch node orig es mInput mTpl mSchema mEffs
 
   -- Peel UsesEffects annotation - record effects
@@ -612,8 +670,136 @@ type family NodeHandlerDispatch nodeDef origNode es mInput mTpl mSchema mEffs wh
       ':$$: CodeLine "               :@ UsesEffects '[Goto \"target\" Payload, Goto Exit Result]"
     )
 
+  -- ══════════════════════════════════════════════════════════════════════════
+  -- ForkNode Base Cases
+  -- ══════════════════════════════════════════════════════════════════════════
+  --
+  -- ForkNode handlers receive input and return spawn payloads as an HList.
+  -- The executor spawns parallel paths for each target.
+  --
+  -- Handler: @input -> Eff es (SpawnPayloads targets)@
+  --
+  -- ══════════════════════════════════════════════════════════════════════════
+
+  -- ForkNode with Input: extracts Spawn targets from original node
+  -- Handler returns HList of payloads for spawned paths
+  NodeHandlerDispatch ForkNode orig es ('Just input) _ _ _ =
+    input -> Eff es (SpawnPayloads (GetSpawnTargets orig))
+
+  -- ForkNode without Input - error
+  NodeHandlerDispatch ForkNode orig es 'Nothing _ _ _ = TypeError
+    ( HR
+      ':$$: 'Text "  ForkNode missing Input annotation"
+      ':$$: HR
+      ':$$: Blank
+      ':$$: WhatHappened
+      ':$$: Indent "Your ForkNode has no Input annotation."
+      ':$$: Indent "We don't know what type to receive before spawning parallel paths."
+      ':$$: Blank
+      ':$$: HowItWorks
+      ':$$: Indent "ForkNode receives input, then spawns parallel execution paths."
+      ':$$: Indent "Each spawned path runs independently until it calls Arrive."
+      ':$$: Blank
+      ':$$: Fixes
+      ':$$: Bullet "Add Input, Spawn, and Barrier annotations:"
+      ':$$: CodeLine "  myFork :: mode :- ForkNode"
+      ':$$: CodeLine "             :@ Input Task"
+      ':$$: CodeLine "             :@ Spawn '[To \"worker1\" Task, To \"worker2\" Task]"
+      ':$$: CodeLine "             :@ Barrier \"merge\""
+    )
+
+  -- ══════════════════════════════════════════════════════════════════════════
+  -- BarrierNode Base Cases
+  -- ══════════════════════════════════════════════════════════════════════════
+  --
+  -- BarrierNode handlers receive collected results and decide where to go.
+  --
+  -- Handler: @AwaitsHList awaits -> Eff es (GotoChoice targets)@
+  --
+  -- ══════════════════════════════════════════════════════════════════════════
+
+  -- BarrierNode with UsesEffects: extracts Awaits types from original node
+  -- Handler receives collected results as HList, returns GotoChoice
+  NodeHandlerDispatch BarrierNode orig es _ _ _ ('Just (EffStack effs)) =
+    AwaitsHList (GetAwaits orig) -> Eff es (GotoChoice (GotoEffectsToTargets effs))
+
+  -- BarrierNode without UsesEffects - error
+  NodeHandlerDispatch BarrierNode orig es _ _ _ 'Nothing = TypeError
+    ( HR
+      ':$$: 'Text "  BarrierNode missing UsesEffects annotation"
+      ':$$: HR
+      ':$$: Blank
+      ':$$: WhatHappened
+      ':$$: Indent "Your BarrierNode has no UsesEffects annotation."
+      ':$$: Indent "We don't know where to route after collecting results."
+      ':$$: Blank
+      ':$$: HowItWorks
+      ':$$: Indent "BarrierNode collects results from spawned paths, then continues."
+      ':$$: Indent "UsesEffects declares where to go with the collected results."
+      ':$$: Blank
+      ':$$: Fixes
+      ':$$: Bullet "Add Awaits and UsesEffects annotations:"
+      ':$$: CodeLine "  myBarrier :: mode :- BarrierNode"
+      ':$$: CodeLine "               :@ Awaits '[ResultA, ResultB]"
+      ':$$: CodeLine "               :@ UsesEffects '[Goto Exit (ResultA, ResultB)]"
+    )
+
 -- | Wrapper to distinguish Template types from EffStack in the Maybe
 data EffStack (effs :: [Effect])
+
+-- | Wrapper to distinguish Spawn targets in the accumulator
+data SpawnTargets (targets :: [Type])
+
+-- | Wrapper to distinguish Barrier target in the accumulator
+data BarrierTarget (target :: Symbol)
+
+-- | Wrapper to distinguish Awaits types in the accumulator
+data AwaitsTypes (types :: [Type])
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- FORK/BARRIER TYPE FAMILIES
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Extract payload types from spawn targets into an HList.
+--
+-- ForkNode handlers return an HList of payloads, one for each spawn target.
+-- Using HList enables recursive type class instances for parallel dispatch.
+--
+-- @
+-- SpawnPayloads '[To "w1" A, To "w2" B]
+--   = HList '[A, B]
+--
+-- -- Handler returns:
+-- forkHandler :: Task -> Eff es (HList '[TaskA, TaskB])
+-- forkHandler task = pure (taskA ::: taskB ::: HNil)
+-- @
+type SpawnPayloads :: [Type] -> Type
+type family SpawnPayloads targets where
+  SpawnPayloads '[] = HList '[]
+  SpawnPayloads (To _ a ': rest) = HList (a ': SpawnPayloadsInner rest)
+
+-- | Helper to extract inner payload types (returns type-level list, not HList).
+type SpawnPayloadsInner :: [Type] -> [Type]
+type family SpawnPayloadsInner targets where
+  SpawnPayloadsInner '[] = '[]
+  SpawnPayloadsInner (To _ a ': rest) = a ': SpawnPayloadsInner rest
+
+-- | Convert awaited types to an HList for BarrierNode handlers.
+--
+-- BarrierNode handlers receive collected results as an HList.
+-- Using HList enables recursive type class instances for collecting arrivals.
+--
+-- @
+-- AwaitsHList '[ResultA, ResultB]
+--   = HList '[ResultA, ResultB]
+--
+-- -- Handler receives:
+-- barrierHandler :: HList '[ResultA, ResultB] -> Eff es (GotoChoice targets)
+-- barrierHandler (ra ::: rb ::: HNil) = ...
+-- @
+type AwaitsHList :: [Type] -> Type
+type family AwaitsHList ts where
+  AwaitsHList ts = HList ts
 
 -- | Validate that UsesEffects doesn't contain 'To' markers.
 --
