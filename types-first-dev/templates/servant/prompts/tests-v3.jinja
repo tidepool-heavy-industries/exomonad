@@ -71,17 +71,32 @@ main = hspec $ do
 
 ## Output Format
 
-After writing tests, return your results:
+After writing tests, return your results with per-function rubrics.
 
-```json
-{
-  "trBuildPassed": true,
-  "trAllPropertiesWritten": true,
-  "trCommitMessage": "Add integration tests for URL shortener",
-  "trTestingStrategy": "Testing shorten/expand roundtrip, error handling for invalid codes, and idempotency of shortening",
-  "trBlocker": null
-}
-```
+**Important:** Do NOT report build status - the handler verifies that mechanically.
+
+### Required Fields
+
+- `trFunctionRubrics`: One rubric per function you tested (see below)
+- `trCommitMessage`: Descriptive commit message
+- `trTestingStrategy`: Testing approach and coverage
+- `trBlocker`: Structured blocker info or null
+
+### Per-Function Test Rubric
+
+For EACH function tested:
+- `tfrFunctionName`: Which function this is for
+- `tfrPropertiesWritten`: Descriptions of what each test checks (list of strings)
+- `tfrApproach`: Testing approach used (property-based | example-based | integration | golden | mixed)
+- `tfrScenariosNotTested`: What scenarios did you consciously NOT test? (list, or empty)
+- `tfrAssumptionsMade`: What did you assume about the implementation? (list, or empty)
+
+### Blocker Structure (if blocked)
+
+- `blCategory`: "dependency" | "tooling" | "spec-unclear" | "type-system" | "environment" | "other"
+- `blDescription`: What's the blocker?
+- `blAttemptedSolutions`: What did you try? (list of strings)
+- `blWouldUnblock`: What would resolve this?
 
 ## Your Task
 

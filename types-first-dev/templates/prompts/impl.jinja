@@ -38,13 +38,34 @@ The function signatures to implement:
 ## Structured Output
 
 Your structured output describes your work - the handler will commit your file edits.
-Read the field descriptions carefully - they tell you what to report:
+You report what you did; the controller decides if it's good enough.
 
-- `irBuildPassed`: Did `cabal build test-repo` succeed?
-- `irAllFunctionsImplemented`: Did you implement ALL functions (no `undefined` left)?
+**Important:** Do NOT report build status - the handler verifies that mechanically.
+
+### Required Fields
+
+- `irFunctionRubrics`: One rubric per function you implemented (see below)
 - `irCommitMessage`: Short commit message (50 chars, imperative mood)
 - `irDesignNotes`: Explain your design choices and tradeoffs
-- `irBlocker`: If blocked, explain why (null if successful)
+- `irBlocker`: If blocked, provide structured info (null if successful)
+
+### Per-Function Rubric
+
+For EACH function, provide a rubric with:
+- `frFunctionName`: Which function this is for
+- `frApproach`: How did you implement it? (recursion | fold | unfold | pattern-match | library | lens | state-monad | other)
+- `frOpenQuestions`: What are you unsure about? (list each, or empty array if confident)
+- `frUnhandledCases`: What inputs/scenarios does this NOT handle? (list each, or empty if complete)
+- `frBoundaryReasoning`: For edge cases you considered (array of objects):
+  - `bnCase`: Which boundary (empty-input, single-element, negative, overflow, etc.)
+  - `bnIntendedBehavior`: What should happen and why
+
+### Blocker Structure (if blocked)
+
+- `blCategory`: "dependency" | "tooling" | "spec-unclear" | "type-system" | "environment" | "other"
+- `blDescription`: What's the blocker?
+- `blAttemptedSolutions`: What did you try? (list of strings)
+- `blWouldUnblock`: What would resolve this?
 
 ## Your Task
 

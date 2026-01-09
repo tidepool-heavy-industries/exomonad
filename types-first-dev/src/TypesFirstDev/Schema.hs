@@ -19,20 +19,40 @@ import TypesFirstDev.Types
 instance HasJSONSchema ProjectType where
   jsonSchema = enumSchema ["PureLibrary", "ServantServer", "CLIApp"]
 
+-- | Manual HasJSONSchema for ResumeStrategy (string enum).
+-- ResumeStrategy comes from tidepool-claude-code-executor.
+instance HasJSONSchema ResumeStrategy where
+  jsonSchema = enumSchema ["NoResume", "AlwaysResume", "SmartResume"]
+
 
 -- Derive HasJSONSchema instances for record types used in graph execution.
 -- Note: Sum types like TestResult can't use deriveHasJSONSchema.
+-- Order matters due to TH staging: types must be derived before types that reference them.
+
+-- Basic types
 $(deriveHasJSONSchema ''FunctionSig)
 $(deriveHasJSONSchema ''TestPriority)
-$(deriveHasJSONSchema ''StackSpec)
-$(deriveHasJSONSchema ''TypeDefinitions)
-$(deriveHasJSONSchema ''TestsResult)
-$(deriveHasJSONSchema ''ImplResult)
-$(deriveHasJSONSchema ''ForkInput)
--- ParallelResults not derived - it's internal and contains WorktreePath
--- which has no HasJSONSchema instance
+
+-- Per-function rubric types (LLM sensor output - semantic only)
+-- BoundaryNote must come before FunctionRubric which uses it
+$(deriveHasJSONSchema ''BoundaryNote)
+$(deriveHasJSONSchema ''FunctionRubric)
+$(deriveHasJSONSchema ''TestFunctionRubric)
+$(deriveHasJSONSchema ''Blocker)
 
 -- v3 semantic description types
 $(deriveHasJSONSchema ''FunctionExample)
 $(deriveHasJSONSchema ''FunctionSemantics)
 $(deriveHasJSONSchema ''StubsOutput)
+
+-- Agent result types (use rubric types)
+$(deriveHasJSONSchema ''TestsResult)
+$(deriveHasJSONSchema ''ImplResult)
+$(deriveHasJSONSchema ''FixResult)
+
+-- Entry and internal types
+$(deriveHasJSONSchema ''StackSpec)
+$(deriveHasJSONSchema ''TypeDefinitions)
+$(deriveHasJSONSchema ''ForkInput)
+-- ParallelResults not derived - it's internal and contains WorktreePath
+-- which has no HasJSONSchema instance

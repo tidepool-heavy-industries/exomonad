@@ -40,7 +40,7 @@ import TypesFirstDev.DevRuns (runDirectory)
 import TypesFirstDev.Graph (TypesFirstGraph(..))
 import TypesFirstDev.Handlers (typesFirstHandlers)
 import TypesFirstDev.Stats (RunMetadata(..))
-import TypesFirstDev.Types (StackSpec(..), ProjectType(..), ParallelResults(..), TestsResult(..), ImplResult(..), WorkflowError(..), emptySessionContext, ResumeStrategy(..))
+import TypesFirstDev.Types (StackSpec(..), ProjectType(..), ParallelResults(..), TestsResult(..), ImplResult(..), WorkflowError(..), emptySessionContext, ResumeStrategy(..), Blocker(..))
 
 
 -- | Main entry point.
@@ -249,26 +249,24 @@ printResult pr = do
   putStrLn "=== Parallel Results ==="
   putStrLn ""
 
-  -- Impl result
+  -- Impl result (build status is mechanical - handler already verified)
   putStrLn "Implementation:"
-  putStrLn $ "  Build passed: " <> show pr.prImplResult.irBuildPassed
-  putStrLn $ "  All functions: " <> show pr.prImplResult.irAllFunctionsImplemented
+  putStrLn $ "  Function rubrics: " <> show (length pr.prImplResult.irFunctionRubrics)
   putStrLn $ "  Commit msg: " <> T.unpack pr.prImplResult.irCommitMessage
   putStrLn $ "  Design notes: " <> T.unpack pr.prImplResult.irDesignNotes
   case pr.prImplResult.irBlocker of
     Nothing -> pure ()
-    Just blocker -> putStrLn $ "  BLOCKED: " <> T.unpack blocker
+    Just blocker -> putStrLn $ "  BLOCKED: [" <> T.unpack (blCategory blocker) <> "] " <> T.unpack (blDescription blocker)
   putStrLn ""
 
-  -- Tests result
+  -- Tests result (build status is mechanical - handler already verified)
   putStrLn "Tests:"
-  putStrLn $ "  Build passed: " <> show pr.prTestsResult.trBuildPassed
-  putStrLn $ "  All properties: " <> show pr.prTestsResult.trAllPropertiesWritten
+  putStrLn $ "  Function rubrics: " <> show (length pr.prTestsResult.trFunctionRubrics)
   putStrLn $ "  Commit msg: " <> T.unpack pr.prTestsResult.trCommitMessage
   putStrLn $ "  Strategy: " <> T.unpack pr.prTestsResult.trTestingStrategy
   case pr.prTestsResult.trBlocker of
     Nothing -> pure ()
-    Just blocker -> putStrLn $ "  BLOCKED: " <> T.unpack blocker
+    Just blocker -> putStrLn $ "  BLOCKED: [" <> T.unpack (blCategory blocker) <> "] " <> T.unpack (blDescription blocker)
   putStrLn ""
 
   putStrLn "Work committed and merged. Check git log for agent commits."

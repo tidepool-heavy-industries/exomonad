@@ -51,13 +51,32 @@ For a Stack type, good properties might be:
 ## Structured Output
 
 Your structured output describes your work - the handler will commit your file edits.
-Read the field descriptions carefully - they tell you what to report:
+You report what you did; the controller decides if it's good enough.
 
-- `trBuildPassed`: Did `cabal build test-repo-test` succeed?
-- `trAllPropertiesWritten`: Did you write properties for ALL functions and acceptance criteria?
+**Important:** Do NOT report build status - the handler verifies that mechanically.
+
+### Required Fields
+
+- `trFunctionRubrics`: One rubric per function you wrote tests for (see below)
 - `trCommitMessage`: Short commit message (50 chars, imperative mood)
 - `trTestingStrategy`: Explain your testing approach and properties written
-- `trBlocker`: If blocked, explain why (null if successful)
+- `trBlocker`: If blocked, provide structured info (null if successful)
+
+### Per-Function Test Rubric
+
+For EACH function you tested, provide a rubric with:
+- `tfrFunctionName`: Which function this is for
+- `tfrPropertiesWritten`: Descriptions of what each property tests (list of strings)
+- `tfrApproach`: Testing approach used (property-based | example-based | integration | golden | mixed)
+- `tfrScenariosNotTested`: What scenarios did you consciously NOT test? (list, or empty)
+- `tfrAssumptionsMade`: What did you assume about the implementation? (list, or empty)
+
+### Blocker Structure (if blocked)
+
+- `blCategory`: "dependency" | "tooling" | "spec-unclear" | "type-system" | "environment" | "other"
+- `blDescription`: What's the blocker?
+- `blAttemptedSolutions`: What did you try? (list of strings)
+- `blWouldUnblock`: What would resolve this?
 
 ## Your Task
 
