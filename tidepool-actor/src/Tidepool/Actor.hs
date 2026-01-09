@@ -15,11 +15,13 @@
 -- = Basic Usage
 --
 -- @
--- import Tidepool.Actor
+-- import Tidepool.Actor.Graph (runGraphAsActors, pureHandler)
+-- import qualified Data.Map.Strict as Map
 --
 -- main :: IO ()
 -- main = do
---   result <- runActorSystem myGraph (toJSON initialInput)
+--   let handlers = Map.fromList [(\"entry\", pureHandler myHandler)]
+--   result <- runGraphAsActors handlers (toJSON initialInput)
 --   print result
 -- @
 module Tidepool.Actor

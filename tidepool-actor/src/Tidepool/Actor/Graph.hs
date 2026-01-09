@@ -413,7 +413,7 @@ effHandlerWithMem initial handler = do
 --   ↓ extractChoice
 -- (\"nodeA\", Number 42)      -- if Here payload
 -- (\"nodeB\", String \"hi\")  -- if There (Here payload)
--- (\"Exit\", Bool True)       -- if There (There (Here payload))
+-- (\"exit\", Bool True)       -- if There (There (Here payload))
 -- @
 --
 -- The typeclass recursively matches on @OneOf@ positions to determine
@@ -421,9 +421,9 @@ effHandlerWithMem initial handler = do
 --
 -- = Special Targets
 --
--- * @\"Exit\"@ - Graph termination
--- * @\"Self\"@ - Self-loop (re-invoke same handler)
--- * @\"Arrive\"@ - Worker completion at barrier
+-- * @\"exit\"@ - Graph termination (handled by 'runGraphAsActors')
+-- * @\"self\"@ - Self-loop (not yet supported by 'runGraphAsActors')
+-- * @\"arrive\"@ - Worker completion at barrier (not yet supported)
 type ExtractChoice :: [Type] -> Constraint
 class ExtractChoice targets where
   extractChoice :: GotoChoice targets -> (Text, Value)
