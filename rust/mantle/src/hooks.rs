@@ -24,7 +24,7 @@
 //! }
 //! ```
 
-use crate::error::{Result, MantleError};
+use crate::error::{MantleError, Result};
 use serde_json::{json, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -86,13 +86,13 @@ impl HookConfig {
 
         // Ensure .claude directory exists
         if !claude_dir.exists() {
-            fs::create_dir_all(&claude_dir).map_err(|e| MantleError::Io(e))?;
+            fs::create_dir_all(&claude_dir).map_err(MantleError::Io)?;
             debug!(path = %claude_dir.display(), "Created .claude directory");
         }
 
         // Read existing settings if present
         let (original_content, mut settings) = if settings_path.exists() {
-            let content = fs::read_to_string(&settings_path).map_err(|e| MantleError::Io(e))?;
+            let content = fs::read_to_string(&settings_path).map_err(MantleError::Io)?;
             let settings: Value =
                 serde_json::from_str(&content).map_err(|e| MantleError::JsonParse { source: e })?;
             (Some(content), settings)
@@ -124,9 +124,9 @@ impl HookConfig {
         settings[TIDEPOOL_MARKER] = json!(true);
 
         // Write settings
-        let content = serde_json::to_string_pretty(&settings)
-            .map_err(|e| MantleError::JsonSerialize(e))?;
-        fs::write(&settings_path, &content).map_err(|e| MantleError::Io(e))?;
+        let content =
+            serde_json::to_string_pretty(&settings).map_err(MantleError::JsonSerialize)?;
+        fs::write(&settings_path, &content).map_err(MantleError::Io)?;
 
         debug!(
             path = %settings_path.display(),
@@ -157,14 +157,14 @@ impl HookConfig {
 
         if self.created_file {
             // We created the file, just delete it
-            fs::remove_file(&self.settings_path).map_err(|e| MantleError::Io(e))?;
+            fs::remove_file(&self.settings_path).map_err(MantleError::Io)?;
             debug!(
                 path = %self.settings_path.display(),
                 "Removed generated settings.local.json"
             );
         } else if let Some(ref original) = self.original_content {
             // Restore original content
-            fs::write(&self.settings_path, original).map_err(|e| MantleError::Io(e))?;
+            fs::write(&self.settings_path, original).map_err(MantleError::Io)?;
             debug!(
                 path = %self.settings_path.display(),
                 "Restored original settings.local.json"
@@ -279,10 +279,7 @@ pub fn find_mantle_binary() -> PathBuf {
     }
 
     // Try which/where
-    if let Ok(output) = std::process::Command::new("which")
-        .arg("mantle")
-        .output()
-    {
+    if let Ok(output) = std::process::Command::new("which").arg("mantle").output() {
         if output.status.success() {
             let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
             if !path.is_empty() {
@@ -367,7 +364,11 @@ mod tests {
             }
         });
         let settings_path = claude_dir.join("settings.local.json");
-        fs::write(&settings_path, serde_json::to_string_pretty(&existing).unwrap()).unwrap();
+        fs::write(
+            &settings_path,
+            serde_json::to_string_pretty(&existing).unwrap(),
+        )
+        .unwrap();
 
         // Generate our config
         let mantle = PathBuf::from("/test/mantle");
@@ -391,7 +392,10 @@ mod tests {
         let restored: Value = serde_json::from_str(&restored).unwrap();
         assert_eq!(restored["some_setting"], true);
         // Our hooks removed
-        assert!(restored["hooks"]["PreToolUse"].is_null() || !restored["hooks"]["PreToolUse"].is_array());
+        assert!(
+            restored["hooks"]["PreToolUse"].is_null()
+                || !restored["hooks"]["PreToolUse"].is_array()
+        );
     }
 
     #[test]

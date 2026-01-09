@@ -1739,6 +1739,7 @@ dependencies = [
  "serde",
  "serde_json",
  "shell-escape",
+ "strum 0.26.3",
  "tempfile",
  "thiserror 1.0.69",
  "tracing",

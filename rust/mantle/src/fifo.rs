@@ -12,7 +12,7 @@
 //! Thread synchronization uses `Acquire`/`Release` ordering on the stop flag
 //! to ensure visibility of the termination signal across threads.
 
-use crate::error::{Result, MantleError};
+use crate::error::{MantleError, Result};
 use crate::events::{InterruptSignal, RunResult};
 use nix::poll::{poll, PollFd, PollFlags, PollTimeout};
 use nix::sys::stat::Mode;
@@ -154,10 +154,8 @@ impl ResultFifo {
                             source: e,
                         })?;
 
-                    let result: RunResult =
-                        serde_json::from_str(&content).map_err(|e| MantleError::JsonParse {
-                            source: e,
-                        })?;
+                    let result: RunResult = serde_json::from_str(&content)
+                        .map_err(|e| MantleError::JsonParse { source: e })?;
 
                     debug!(
                         session_id = %result.session_id,

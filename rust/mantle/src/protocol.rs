@@ -236,8 +236,8 @@ pub enum PermissionDecision {
 pub enum ControlMessage {
     /// Hook event from Claude Code.
     HookEvent {
-        /// The raw hook input from CC stdin.
-        input: HookInput,
+        /// The raw hook input from CC stdin (boxed to reduce enum size).
+        input: Box<HookInput>,
     },
 
     /// MCP tool call from Claude Code (future use).
@@ -395,7 +395,7 @@ mod tests {
     #[test]
     fn test_control_message_roundtrip() {
         let msg = ControlMessage::HookEvent {
-            input: HookInput {
+            input: Box::new(HookInput {
                 session_id: "test".to_string(),
                 transcript_path: String::new(),
                 cwd: String::new(),
@@ -413,7 +413,7 @@ mod tests {
                 custom_instructions: None,
                 source: None,
                 reason: None,
-            },
+            }),
         };
 
         let json = serde_json::to_string(&msg).unwrap();

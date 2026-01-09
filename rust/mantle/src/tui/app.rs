@@ -163,11 +163,7 @@ fn render_status_bar(state: &AppState, frame: &mut Frame, area: Rect) {
         })
         .unwrap_or_else(|| "...".to_string());
 
-    let model = state
-        .model
-        .as_ref()
-        .map(|s| s.as_str())
-        .unwrap_or("...");
+    let model = state.model.as_deref().unwrap_or("...");
 
     let status = if state.is_complete {
         if state.is_error {
@@ -235,7 +231,10 @@ fn render_event_list(state: &AppState, frame: &mut Frame, area: Rect) {
         // Add details if expanded
         if is_expanded {
             for detail in &event.details {
-                items.push(ListItem::new(format!("  {}", detail)).style(Style::default().fg(Color::DarkGray)));
+                items.push(
+                    ListItem::new(format!("  {}", detail))
+                        .style(Style::default().fg(Color::DarkGray)),
+                );
             }
         }
     }

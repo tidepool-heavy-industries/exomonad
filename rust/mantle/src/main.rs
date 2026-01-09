@@ -17,7 +17,7 @@ use tracing_subscriber::EnvFilter;
 use zellij_client::{cli_client::start_cli_client, os_input_output::get_cli_client_os_input};
 use zellij_utils::input::{actions::Action, command::RunCommandAction};
 
-use mantle::error::{Result, MantleError};
+use mantle::error::{MantleError, Result};
 use mantle::events::{InterruptSignal, ResultEvent, RunResult, StreamEvent};
 use mantle::fifo::{write_result, write_signal, ResultFifo, SignalFifo};
 use mantle::humanize::{print_event_humanized, print_interrupt};
@@ -165,7 +165,7 @@ enum Commands {
 ///
 /// Each variant corresponds to a hook event that Claude Code emits.
 /// See: https://code.claude.com/docs/en/hooks
-#[derive(Debug, Clone, Copy, ValueEnum)]
+#[derive(Debug, Clone, Copy, ValueEnum, strum::Display)]
 pub enum HookEventType {
     /// Before tool execution (can allow/deny/modify)
     PreToolUse,
@@ -247,12 +247,7 @@ impl EventCollector {
     }
 
     /// Build final result and write to FIFO.
-    fn finalize(
-        self,
-        exit_code: i32,
-        session_tag: Option<&str>,
-        result_fifo: &Path,
-    ) -> Result<()> {
+    fn finalize(self, exit_code: i32, session_tag: Option<&str>, result_fifo: &Path) -> Result<()> {
         let result = RunResult::from_events(
             self.events,
             self.result_event,
@@ -353,7 +348,7 @@ fn main() {
 // ============================================================================
 
 fn send_signal(
-    fifo: &PathBuf,
+    fifo: &Path,
     signal_type: &str,
     state: Option<&str>,
     reason: Option<&str>,
@@ -396,7 +391,7 @@ fn handle_hook(event_type: HookEventType, socket_path: Option<&PathBuf>) -> Resu
     let mut stdin_content = String::new();
     std::io::stdin()
         .read_to_string(&mut stdin_content)
-        .map_err(|e| MantleError::Io(e))?;
+        .map_err(MantleError::Io)?;
 
     debug!(
         event = ?event_type,
@@ -408,7 +403,7 @@ fn handle_hook(event_type: HookEventType, socket_path: Option<&PathBuf>) -> Resu
     let hook_input: HookInput = serde_json::from_str(&stdin_content)?;
 
     // Verify event type matches what CC sent
-    let expected_event = hook_event_name(event_type);
+    let expected_event = event_type.to_string();
     if hook_input.hook_event_name != expected_event {
         warn!(
             expected = %expected_event,
@@ -421,7 +416,10 @@ fn handle_hook(event_type: HookEventType, socket_path: Option<&PathBuf>) -> Resu
     let Some(socket_path) = socket_path else {
         debug!("No control socket, failing open (allowing hook)");
         let output = default_allow_response(event_type);
-        println!("{}", serde_json::to_string(&output).map_err(MantleError::JsonSerialize)?);
+        println!(
+            "{}",
+            serde_json::to_string(&output).map_err(MantleError::JsonSerialize)?
+        );
         return Ok(());
     };
 
@@ -431,20 +429,28 @@ fn handle_hook(event_type: HookEventType, socket_path: Option<&PathBuf>) -> Resu
         Err(e) => {
             warn!(error = %e, "Failed to connect to control socket, failing open");
             let output = default_allow_response(event_type);
-            println!("{}", serde_json::to_string(&output).map_err(MantleError::JsonSerialize)?);
+            println!(
+                "{}",
+                serde_json::to_string(&output).map_err(MantleError::JsonSerialize)?
+            );
             return Ok(());
         }
     };
 
     // Send hook event to Haskell
-    let message = ControlMessage::HookEvent { input: hook_input };
+    let message = ControlMessage::HookEvent {
+        input: Box::new(hook_input),
+    };
     let response = socket.send(&message)?;
 
     // Handle response
     match response {
         ControlResponse::HookResponse { output, exit_code } => {
             // Output the response JSON for CC
-            println!("{}", serde_json::to_string(&output).map_err(MantleError::JsonSerialize)?);
+            println!(
+                "{}",
+                serde_json::to_string(&output).map_err(MantleError::JsonSerialize)?
+            );
 
             // Exit with the code from Haskell (0=allow, 2=deny)
             if exit_code != 0 {
@@ -461,22 +467,6 @@ fn handle_hook(event_type: HookEventType, socket_path: Option<&PathBuf>) -> Resu
     Ok(())
 }
 
-/// Convert HookEventType enum to the string name CC uses.
-fn hook_event_name(event_type: HookEventType) -> &'static str {
-    match event_type {
-        HookEventType::PreToolUse => "PreToolUse",
-        HookEventType::PostToolUse => "PostToolUse",
-        HookEventType::Notification => "Notification",
-        HookEventType::Stop => "Stop",
-        HookEventType::SubagentStop => "SubagentStop",
-        HookEventType::PreCompact => "PreCompact",
-        HookEventType::SessionStart => "SessionStart",
-        HookEventType::SessionEnd => "SessionEnd",
-        HookEventType::PermissionRequest => "PermissionRequest",
-        HookEventType::UserPromptSubmit => "UserPromptSubmit",
-    }
-}
-
 /// Create a default "allow" response for when no control socket is available.
 fn default_allow_response(event_type: HookEventType) -> HookOutput {
     use mantle::protocol::HookSpecificOutput;
@@ -487,7 +477,9 @@ fn default_allow_response(event_type: HookEventType) -> HookOutput {
         HookEventType::PermissionRequest => HookOutput {
             continue_: true,
             hook_specific_output: Some(HookSpecificOutput::PermissionRequest {
-                decision: mantle::protocol::PermissionDecision::Allow { updated_input: None },
+                decision: mantle::protocol::PermissionDecision::Allow {
+                    updated_input: None,
+                },
             }),
             ..Default::default()
         },
@@ -651,7 +643,7 @@ fn run_cc_session(
 // ============================================================================
 
 fn wrap_claude(
-    result_fifo: &PathBuf,
+    result_fifo: &Path,
     cwd: Option<&PathBuf>,
     session_tag: Option<&str>,
     timeout_secs: u64,
@@ -667,8 +659,7 @@ fn wrap_claude(
 
     // Generate hook configuration if control socket is provided
     let _hook_config = if let Some(socket_path) = control_socket {
-        let effective_cwd = cwd
-            .map(|p| p.clone())
+        let effective_cwd = cwd.cloned()
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
 
         let mantle_path = mantle::find_mantle_binary();
@@ -706,10 +697,22 @@ fn wrap_claude(
 
     if no_tui {
         // Simple println mode for CI/headless
-        wrap_claude_simple(stdout, &signal_fifo, &mut supervisor, result_fifo, session_tag)
+        wrap_claude_simple(
+            stdout,
+            &signal_fifo,
+            &mut supervisor,
+            result_fifo,
+            session_tag,
+        )
     } else {
         // Full TUI mode
-        wrap_claude_tui(stdout, &signal_fifo, &mut supervisor, result_fifo, session_tag)
+        wrap_claude_tui(
+            stdout,
+            &signal_fifo,
+            &mut supervisor,
+            result_fifo,
+            session_tag,
+        )
     }
 }
 
@@ -718,7 +721,7 @@ fn wrap_claude_simple(
     stdout: std::process::ChildStdout,
     signal_fifo: &SignalFifo,
     supervisor: &mut Supervisor,
-    result_fifo: &PathBuf,
+    result_fifo: &Path,
     session_tag: Option<&str>,
 ) -> Result<()> {
     let reader = BufReader::new(stdout);
@@ -761,7 +764,7 @@ fn wrap_claude_tui(
     stdout: std::process::ChildStdout,
     signal_fifo: &SignalFifo,
     supervisor: &mut Supervisor,
-    result_fifo: &PathBuf,
+    result_fifo: &Path,
     session_tag: Option<&str>,
 ) -> Result<()> {
     // Create channel for TUI events
@@ -881,11 +884,12 @@ fn build_prompt(prompt: &str, inject_context: Option<&str>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
     use mantle::events::ContentBlock;
+    use std::collections::HashMap;
 
     const SAMPLE_INIT: &str = r#"{"type":"system","subtype":"init","session_id":"abc-123","tools":["Read","Glob"],"model":"claude-sonnet-4-20250514"}"#;
-    const SAMPLE_TEXT: &str = r#"{"type":"assistant","message":{"content":[{"type":"text","text":"hello world"}]}}"#;
+    const SAMPLE_TEXT: &str =
+        r#"{"type":"assistant","message":{"content":[{"type":"text","text":"hello world"}]}}"#;
     const SAMPLE_TOOL: &str = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","id":"toolu_123","input":{"file_path":"/foo/bar"}}]}}"#;
     const SAMPLE_RESULT: &str = r#"{"type":"result","subtype":"success","is_error":false,"result":"done","session_id":"abc-123","total_cost_usd":0.05,"num_turns":2,"permission_denials":[],"modelUsage":{}}"#;
     const SAMPLE_RESULT_WITH_USAGE: &str = r#"{"type":"result","subtype":"success","is_error":false,"result":"done","session_id":"abc-123","total_cost_usd":0.15,"num_turns":3,"permission_denials":[],"modelUsage":{"claude-sonnet-4-20250514":{"inputTokens":100,"outputTokens":50,"cacheReadInputTokens":1000,"cacheCreationInputTokens":500,"costUSD":0.15}}}"#;
@@ -1095,7 +1099,10 @@ mod tests {
     fn test_build_prompt_with_multiline_context() {
         let ctx = "CONTEXT:\n- file1.rs modified\n- file2.rs added";
         let result = build_prompt("proceed", Some(ctx));
-        assert_eq!(result, "CONTEXT:\n- file1.rs modified\n- file2.rs added\n\nproceed");
+        assert_eq!(
+            result,
+            "CONTEXT:\n- file1.rs modified\n- file2.rs added\n\nproceed"
+        );
     }
 
     #[test]

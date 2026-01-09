@@ -21,7 +21,7 @@
 //! - Framing: Newline-delimited JSON (NDJSON)
 //! - Flow: Connect -> Write message + newline -> Read response + newline -> Close
 
-use crate::error::{Result, MantleError};
+use crate::error::{MantleError, Result};
 use crate::protocol::{ControlMessage, ControlResponse};
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
@@ -141,8 +141,9 @@ mod tests {
             // Parse the message and echo back a response
             let _msg: ControlMessage = serde_json::from_str(&line).unwrap();
 
-            use crate::protocol::{HookOutput, ControlResponse};
-            let response = ControlResponse::hook_success(HookOutput::pre_tool_use_allow(None, None));
+            use crate::protocol::{ControlResponse, HookOutput};
+            let response =
+                ControlResponse::hook_success(HookOutput::pre_tool_use_allow(None, None));
             let response_json = serde_json::to_string(&response).unwrap();
 
             use std::io::Write;
@@ -155,7 +156,7 @@ mod tests {
 
         use crate::protocol::HookInput;
         let message = ControlMessage::HookEvent {
-            input: HookInput {
+            input: Box::new(HookInput {
                 session_id: "test".to_string(),
                 transcript_path: String::new(),
                 cwd: String::new(),
@@ -173,7 +174,7 @@ mod tests {
                 custom_instructions: None,
                 source: None,
                 reason: None,
-            },
+            }),
         };
 
         let response = client.send(&message).unwrap();

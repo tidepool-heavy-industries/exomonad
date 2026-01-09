@@ -17,7 +17,7 @@
 //! for mantle's use case (single subprocess per wrap invocation), but
 //! would need redesign for multi-process supervision scenarios.
 
-use crate::error::{Result, MantleError};
+use crate::error::{MantleError, Result};
 use nix::libc;
 use nix::sys::signal::{kill, Signal};
 use nix::unistd::Pid;
@@ -229,7 +229,10 @@ impl Supervisor {
         // Check if it's dead
         match self.child.try_wait() {
             Ok(Some(_)) => {
-                debug!(pid = self.child_pid.as_raw(), "Child terminated after SIGTERM");
+                debug!(
+                    pid = self.child_pid.as_raw(),
+                    "Child terminated after SIGTERM"
+                );
                 return Ok(());
             }
             Ok(None) => {

@@ -71,12 +71,19 @@ impl DisplayEvent {
                                 }
                                 // Show truncation indicator if there are more parameters
                                 if total_params > 5 {
-                                    all_details.push(format!("  ... and {} more", total_params - 5));
+                                    all_details
+                                        .push(format!("  ... and {} more", total_params - 5));
                                 }
                             }
                         }
-                        ContentBlock::ToolResult { content, is_error, .. } => {
-                            let status = if is_error.unwrap_or(false) { "✗" } else { "✓" };
+                        ContentBlock::ToolResult {
+                            content, is_error, ..
+                        } => {
+                            let status = if is_error.unwrap_or(false) {
+                                "✗"
+                            } else {
+                                "✓"
+                            };
                             // Cache char count to avoid iterating twice
                             let char_count = content.chars().count();
                             let preview: String = content.chars().take(50).collect();
@@ -89,11 +96,7 @@ impl DisplayEvent {
                     }
                 }
 
-                (
-                    has_expandable,
-                    summaries.join(" | "),
-                    all_details,
-                )
+                (has_expandable, summaries.join(" | "), all_details)
             }
             StreamEvent::User(_) => (false, "User input".to_string(), vec![]),
             StreamEvent::Result(r) => {

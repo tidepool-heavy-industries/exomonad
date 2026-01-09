@@ -8,9 +8,9 @@ use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
-use serde_json::json;
 use mantle::protocol::{ControlMessage, ControlResponse, HookInput, HookSpecificOutput};
 use mantle::socket::ControlSocket;
+use serde_json::json;
 
 /// Helper to create a HookInput with defaults filled in.
 fn make_hook_input(event_name: &str) -> HookInput {
@@ -62,7 +62,13 @@ fn find_test_server() -> PathBuf {
             for entry in ghc_entries {
                 let entry = entry.unwrap();
                 let path = entry.path();
-                if path.is_dir() && path.file_name().unwrap().to_string_lossy().starts_with("ghc-") {
+                if path.is_dir()
+                    && path
+                        .file_name()
+                        .unwrap()
+                        .to_string_lossy()
+                        .starts_with("ghc-")
+                {
                     let exe = path.join(
                         "tidepool-claude-code-executor-0.1.0.0/x/control-socket-test-server/build/control-socket-test-server/control-socket-test-server",
                     );
@@ -137,17 +143,16 @@ fn test_hook_allow() {
     input.tool_name = Some("Read".to_string());
     input.tool_input = Some(json!({"file_path": "/tmp/test.txt"}));
 
-    let message = ControlMessage::HookEvent { input };
+    let message = ControlMessage::HookEvent {
+        input: Box::new(input),
+    };
 
     let response = socket.send(&message).expect("Failed to send message");
 
     match response {
         ControlResponse::HookResponse { output, exit_code } => {
             assert_eq!(exit_code, 0, "Expected exit code 0 for allowed hook");
-            assert!(
-                output.continue_,
-                "Expected continue=true for allowed hook"
-            );
+            assert!(output.continue_, "Expected continue=true for allowed hook");
             // PreToolUse should have permission_decision = "allow"
             if let Some(HookSpecificOutput::PreToolUse {
                 permission_decision,
@@ -176,7 +181,9 @@ fn test_hook_deny() {
     input.tool_name = Some("test_deny".to_string());
     input.tool_input = Some(json!({}));
 
-    let message = ControlMessage::HookEvent { input };
+    let message = ControlMessage::HookEvent {
+        input: Box::new(input),
+    };
 
     let response = socket.send(&message).expect("Failed to send message");
 
@@ -212,7 +219,9 @@ fn test_hook_stop_blocked() {
 
     // Send a Stop hook event which should be blocked by test server
     let input = make_hook_input("Stop");
-    let message = ControlMessage::HookEvent { input };
+    let message = ControlMessage::HookEvent {
+        input: Box::new(input),
+    };
 
     let response = socket.send(&message).expect("Failed to send message");
 
@@ -252,7 +261,9 @@ fn test_multiple_connections() {
         input.notification_type = Some("info".to_string());
         input.message = Some(format!("Test message {}", i));
 
-        let message = ControlMessage::HookEvent { input };
+        let message = ControlMessage::HookEvent {
+            input: Box::new(input),
+        };
 
         let response = socket.send(&message).expect("Failed to send message");
 
