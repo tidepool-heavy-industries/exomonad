@@ -1,0 +1,88 @@
+# Task: Find Type System Holes
+
+You are a RED TEAM agent. Your mission: BREAK the type system.
+
+{% if scopeLevel == 'Leaf' %}
+## Scope: Single Module
+
+Find bugs in THIS module's type design. Focus on internal consistency.
+{% elif scopeLevel == 'Coordination' %}
+## Scope: Module Composition
+
+Find bugs in how these modules COMPOSE. Focus on interface mismatches,
+constraint conflicts, and invalid compositions.
+{% elif scopeLevel == 'System' %}
+## Scope: System Requirements
+
+Find bugs in the SYSTEM's type safety. Does the full interface satisfy
+the original requirements? Can the system enter globally inconsistent state?
+{% endif %}
+
+## The Type Design
+
+```haskell
+-- Type: {{ types.typeName }}
+-- Kind: {{ types.typeKind }}
+-- Constructors: {{ types.constructors | join(", ") }}
+
+{% for fn in types.functions %}
+{{ fn.name }} :: {{ fn.signature }}
+-- {{ fn.brief }}
+{% endfor %}
+```
+
+## Claimed Invariants
+
+{% for fn in types.functions %}
+{% for prop in fn.properties %}
+- {{ prop.name }}: {{ prop.invariant }}
+{% endfor %}
+{% endfor %}
+
+## Your Mission
+
+Find values that VIOLATE these invariants but are REPRESENTABLE in the type.
+
+Think adversarially:
+- Can you construct "empty" that claims "non-empty"?
+- Can you create invalid internal state?
+- Are there partial functions hiding?
+- Does the type conflate different semantic meanings?
+- Are there ways to violate the claimed properties?
+
+## Classification
+
+For each hole, classify it:
+- `RepresentableInvalid`: Can construct value violating invariant
+- `LeakyAbstraction`: Internal representation exposed unsafely
+- `PartialFunction`: Function undefined for some valid inputs
+- `TypeConfusion`: Different meanings share same type
+
+And assign severity:
+- `Critical`: Breaks core invariant, must fix before proceeding
+- `Major`: Significant issue that should be addressed
+- `Minor`: Nice to fix but not blocking
+- `Informational`: Note for future consideration
+
+## Output Schema
+
+Return JSON matching `TypeAdversaryOutput`:
+- `holes`: List of TypeHole (see below)
+- `analysis`: What areas you examined, approach taken
+- `confident`: Are you confident you found all holes?
+
+For each hole in `holes`:
+- `holeType`: One of: RepresentableInvalid, LeakyAbstraction, PartialFunction, TypeConfusion
+- `description`: What's wrong (e.g., "Empty stack can claim non-empty")
+- `invariantBroken`: Which invariant is violated
+- `exploitSketch`: Pseudocode showing the exploit
+- `severity`: One of: Critical, Major, Minor, Informational
+- `suggestedFix`: How to fix it
+
+## Important
+
+If you find no holes after thorough analysis, return an empty list for `holes`.
+Be creative. Find the bugs before they ship.
+
+A well-designed type system should make invalid states unrepresentable.
+If you can construct a value that violates invariants, that's a hole.

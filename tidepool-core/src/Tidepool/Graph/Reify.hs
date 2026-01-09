@@ -70,6 +70,10 @@ module Tidepool.Graph.Reify
 
     -- * Utilities
   , simplifyTypeName
+
+    -- * Node Type Predicates
+  , IsForkNode
+  , IsBarrierNode
   ) where
 
 import Data.Char (isAsciiUpper)
