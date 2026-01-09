@@ -15,7 +15,7 @@
 --   PROJECT_PATH: Path to the project directory
 --   PROJECT_TYPE: PureLibrary | ServantServer | CLIApp
 --   MODULE_NAME: Module name to generate
---   ZELLIJ_SESSION: Zellij session name
+--   ZELLIJ_SESSION: Zellij session name (or auto-detects ZELLIJ_SESSION_NAME)
 module Main where
 
 import Control.Monad (unless)
@@ -52,6 +52,22 @@ import TypesFirstDev.Types.Hybrid (StackSpec(..), HybridResult(..), MutationAdve
 import TypesFirstDev.Effect.Build (runBuildIO)
 
 
+-- | Get Zellij session name from environment.
+--
+-- Tries in order:
+-- 1. ZELLIJ_SESSION (explicit override)
+-- 2. ZELLIJ_SESSION_NAME (auto-set when inside a Zellij session)
+-- 3. Falls back to "types-first-dev"
+getZellijSession :: IO T.Text
+getZellijSession = do
+  explicit <- lookupEnv "ZELLIJ_SESSION"
+  case explicit of
+    Just s -> pure $ T.pack s
+    Nothing -> do
+      auto <- lookupEnv "ZELLIJ_SESSION_NAME"
+      pure $ maybe "types-first-dev" T.pack auto
+
+
 -- | Main entry point.
 --
 -- Runs the types-first workflow to generate type definitions.
@@ -82,7 +98,7 @@ runBaselineCommand args = do
   let specName = parseSpecName args
 
   -- Get session and project path
-  sessionName <- maybe "types-first-dev" T.pack <$> lookupEnv "ZELLIJ_SESSION"
+  sessionName <- getZellijSession
   projectPath <- maybe getCurrentDirectory pure =<< lookupEnv "PROJECT_PATH"
 
   -- Validate zellij session exists
@@ -128,8 +144,8 @@ runExperimentCommand args = do
   -- Parse experiment from command line
   let experiment = parseExperiment args
 
-  -- Get zellij session from env or use default
-  sessionName <- maybe "types-first-dev" T.pack <$> lookupEnv "ZELLIJ_SESSION"
+  -- Get zellij session from env or auto-detect
+  sessionName <- getZellijSession
 
   -- Validate that the Zellij session exists (fail fast instead of hanging)
   validateZellijSession sessionName
@@ -193,7 +209,7 @@ runHybridCommand args = do
 
   let experiment = parseExperiment args
 
-  sessionName <- maybe "types-first-dev" T.pack <$> lookupEnv "ZELLIJ_SESSION"
+  sessionName <- getZellijSession
   validateZellijSession sessionName
 
   let claudeConfig = (mkClaudeCodeConfig sessionName)
