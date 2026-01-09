@@ -190,6 +190,90 @@ pub enum HookEventType {
 }
 
 // ============================================================================
+// EventCollector - Shared event accumulation logic
+// ============================================================================
+
+use mantle::tui::TuiResult;
+use std::path::Path;
+
+/// Collects streaming events and builds the final RunResult.
+///
+/// Used by both TUI and simple modes to deduplicate event processing logic.
+struct EventCollector {
+    events: Vec<StreamEvent>,
+    result_event: Option<ResultEvent>,
+    interrupts: Vec<InterruptSignal>,
+}
+
+impl EventCollector {
+    /// Create a new empty collector.
+    fn new() -> Self {
+        Self {
+            events: Vec::new(),
+            result_event: None,
+            interrupts: Vec::new(),
+        }
+    }
+
+    /// Process a single JSON line. Returns parsed event on success.
+    fn process_line(&mut self, line: &str) -> Option<StreamEvent> {
+        if line.trim().is_empty() {
+            return None;
+        }
+        match serde_json::from_str::<StreamEvent>(line) {
+            Ok(event) => {
+                if let StreamEvent::Result(ref r) = event {
+                    self.result_event = Some(r.clone());
+                }
+                self.events.push(event.clone());
+                Some(event)
+            }
+            Err(e) => {
+                let truncated: String = line.chars().take(50).collect();
+                warn!(error = %e, line = %truncated, "JSON parse error");
+                None
+            }
+        }
+    }
+
+    /// Add an interrupt signal.
+    fn add_interrupt(&mut self, signal: InterruptSignal) {
+        self.interrupts.push(signal);
+    }
+
+    /// Drain all pending signals from FIFO.
+    fn drain_signals(&mut self, fifo: &SignalFifo) {
+        self.interrupts.extend(fifo.drain());
+    }
+
+    /// Build final result and write to FIFO.
+    fn finalize(
+        self,
+        exit_code: i32,
+        session_tag: Option<&str>,
+        result_fifo: &Path,
+    ) -> Result<()> {
+        let result = RunResult::from_events(
+            self.events,
+            self.result_event,
+            exit_code,
+            session_tag.map(|s| s.to_string()),
+            self.interrupts,
+        );
+        write_result(result_fifo, &result)
+    }
+
+    /// Create from TUI results.
+    fn from_tui_result(tui_result: TuiResult) -> Self {
+        Self {
+            events: tui_result.events,
+            result_event: tui_result.result_event,
+            interrupts: tui_result.interrupts,
+        }
+    }
+}
+
+// ============================================================================
 // Main
 // ============================================================================
 
@@ -638,17 +722,14 @@ fn wrap_claude_simple(
     session_tag: Option<&str>,
 ) -> Result<()> {
     let reader = BufReader::new(stdout);
-
-    let mut events: Vec<StreamEvent> = Vec::new();
-    let mut result_event: Option<ResultEvent> = None;
-    let mut interrupts: Vec<InterruptSignal> = Vec::new();
+    let mut collector = EventCollector::new();
 
     // Process each JSONL line from claude stdout
     for line in reader.lines() {
         // Check for signals (non-blocking)
         while let Some(signal) = signal_fifo.try_recv() {
             print_interrupt(&signal);
-            interrupts.push(signal);
+            collector.add_interrupt(signal);
         }
 
         let line = match line {
@@ -659,50 +740,20 @@ fn wrap_claude_simple(
             }
         };
 
-        if line.trim().is_empty() {
-            continue;
-        }
-
-        match serde_json::from_str::<StreamEvent>(&line) {
-            Ok(event) => {
-                print_event_humanized(&event); // Human-readable to stdout (pane)
-
-                if let StreamEvent::Result(ref r) = event {
-                    result_event = Some(r.clone());
-                }
-                events.push(event);
-            }
-            Err(e) => {
-                let truncated: String = line.chars().take(50).collect();
-                warn!(
-                    error = %e,
-                    line = %truncated,
-                    "JSON parse error"
-                );
-            }
+        if let Some(event) = collector.process_line(&line) {
+            print_event_humanized(&event); // Human-readable to stdout (pane)
         }
     }
 
     // Drain any remaining signals
-    interrupts.extend(signal_fifo.drain());
+    collector.drain_signals(signal_fifo);
 
     // Wait for claude to exit
     let status = supervisor.wait_with_timeout()?;
     let exit_code = status.code().unwrap_or(-1);
 
-    // Build final result
-    let result = RunResult::from_events(
-        events,
-        result_event,
-        exit_code,
-        session_tag.map(|s| s.to_string()),
-        interrupts,
-    );
-
-    // Write to result FIFO (unblocks the waiting `run` process)
-    write_result(result_fifo, &result)?;
-
-    Ok(())
+    // Build final result and write to FIFO (unblocks the waiting `run` process)
+    collector.finalize(exit_code, session_tag, result_fifo)
 }
 
 /// TUI mode with interactive display
@@ -799,19 +850,8 @@ fn wrap_claude_tui(
         }
     };
 
-    // Build final result from TUI state
-    let result = RunResult::from_events(
-        tui_result.events,
-        tui_result.result_event,
-        exit_code,
-        session_tag.map(|s| s.to_string()),
-        tui_result.interrupts,
-    );
-
-    // Write to result FIFO (unblocks the waiting `run` process)
-    write_result(result_fifo, &result)?;
-
-    Ok(())
+    // Build final result from TUI state and write to FIFO
+    EventCollector::from_tui_result(tui_result).finalize(exit_code, session_tag, result_fifo)
 }
 
 // ============================================================================

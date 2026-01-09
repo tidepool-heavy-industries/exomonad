@@ -8,7 +8,7 @@
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-use mantle::error::ZellijCcError;
+use mantle::error::MantleError;
 use mantle::supervisor::Supervisor;
 
 /// Test that a process that exits quickly is handled correctly.
@@ -41,7 +41,7 @@ fn test_timeout_kills_process() {
 
     // Should fail with ProcessTimeout
     match result {
-        Err(ZellijCcError::ProcessTimeout { elapsed: _ }) => {
+        Err(MantleError::ProcessTimeout { elapsed: _ }) => {
             // Expected
         }
         other => panic!("Expected ProcessTimeout, got {:?}", other),
@@ -126,7 +126,7 @@ fn test_longer_timeout() {
     let elapsed = start.elapsed();
 
     // Should timeout
-    assert!(matches!(result, Err(ZellijCcError::ProcessTimeout { .. })));
+    assert!(matches!(result, Err(MantleError::ProcessTimeout { .. })));
 
     // Should complete in roughly 2 seconds (with margin for kill overhead)
     assert!(
@@ -148,7 +148,7 @@ fn test_spawn_failure() {
     cmd.stdout(Stdio::piped());
 
     let result = Supervisor::spawn(cmd, None);
-    assert!(matches!(result, Err(ZellijCcError::Spawn(_))));
+    assert!(matches!(result, Err(MantleError::Spawn(_))));
 }
 
 /// Test that child processes can be killed by signals.

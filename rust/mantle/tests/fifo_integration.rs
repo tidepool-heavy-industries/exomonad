@@ -6,7 +6,7 @@
 use std::thread;
 use std::time::Duration;
 
-use mantle::error::ZellijCcError;
+use mantle::error::MantleError;
 use mantle::events::InterruptSignal;
 use mantle::fifo::write_signal;
 
@@ -55,7 +55,7 @@ fn test_write_signal_nonexistent_path() {
     };
 
     let result = write_signal(std::path::Path::new("/nonexistent/fifo"), &signal);
-    assert!(matches!(result, Err(ZellijCcError::FifoOpen { .. })));
+    assert!(matches!(result, Err(MantleError::FifoOpen { .. })));
 }
 
 /// Test InterruptSignal with None fields.
