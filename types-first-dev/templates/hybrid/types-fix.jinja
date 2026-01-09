@@ -1,0 +1,79 @@
+# Task: Fix Type System Holes
+
+The type adversary found holes in the type design. Fix them.
+
+## Current Types
+
+Type: `{{ originalTypes.typeName }}`
+Kind: `{{ originalTypes.typeKind }}`
+
+```haskell
+{% for fn in originalTypes.functions %}
+{{ fn.name }} :: {{ fn.signature }}
+-- {{ fn.brief }}
+{% endfor %}
+```
+
+## Holes to Fix
+
+{% for hole in holes %}
+### {{ hole.holeType }}: {{ hole.severity }}
+
+**Description:** {{ hole.description }}
+
+**Invariant Broken:** {{ hole.invariantBroken }}
+
+**Exploit Sketch:**
+```
+{{ hole.exploitSketch }}
+```
+
+**Suggested Fix:** {{ hole.suggestedFix }}
+
+{% endfor %}
+
+{% if priorFixes %}
+## Prior Attempts (Iteration {{ attempt }})
+
+These fixes were already tried:
+{% for fix in priorFixes %}
+- {{ fix }}
+{% endfor %}
+
+Try a DIFFERENT approach this time.
+{% endif %}
+
+## Your Deliverables
+
+1. **Fix the types** (via ClaudeCode):
+   - Edit the type definitions to close the holes
+   - Consider using newtypes, smart constructors, or refined types
+   - Ensure `cabal build` passes
+
+2. **Return structured output**:
+   - Updated TypesAgentOutput with fixed types
+   - All the same fields as before, but with holes addressed
+
+## Common Fixes
+
+- **RepresentableInvalid**: Use newtype with smart constructor, add phantom type, use NonEmpty
+- **LeakyAbstraction**: Hide constructors, provide only safe accessors
+- **PartialFunction**: Return Maybe, use refinement types, add preconditions
+- **TypeConfusion**: Use newtype wrappers, semantic type aliases
+
+## Output Schema
+
+Return JSON matching `TypesAgentOutput`:
+- `typeName`: The main type name
+- `typeKind`: The kind
+- `typeDescription`: What this type represents (updated if changed)
+- `constructors`: List of constructor names (may have changed)
+- `functions`: List of FunctionSpec (may have updated signatures)
+- `imports`: Required module imports
+- `designNotes`: Why you made these changes
+- `blocker`: If still blocked, explain (otherwise null)
+
+## Critical
+
+Address EVERY hole listed above. The gate will re-run the type adversary
+on your fixed types. If Critical or Major holes remain, you'll be back here.

@@ -20,6 +20,12 @@ build-type:         Simple
 library
     exposed-modules:
         TypesFirstDev.Types
+        TypesFirstDev.Types.Hybrid
+        TypesFirstDev.Context.Hybrid
+        TypesFirstDev.Templates.Hybrid
+        TypesFirstDev.Graph.Hybrid
+        TypesFirstDev.Handlers.Hybrid.Stubs
+        TypesFirstDev.Handlers.Hybrid.Genesis
         TypesFirstDev.Schema
         TypesFirstDev.Context
         TypesFirstDev.Templates
