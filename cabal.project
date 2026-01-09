@@ -1,6 +1,7 @@
 packages:
     tidepool-core
     tidepool-wasm
+    tidepool-actor
     tidepool-generated-ts
     tidepool-habitica
 
