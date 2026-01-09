@@ -7,7 +7,7 @@
 -- accumulated until all expected sources have reported.
 module Tidepool.Parallel.Merge
   ( -- * Merge Accumulator
-    MergeAccumulator
+    MergeAccumulator(..)
   , newMergeAccumulator
   , addResult
   , checkComplete
