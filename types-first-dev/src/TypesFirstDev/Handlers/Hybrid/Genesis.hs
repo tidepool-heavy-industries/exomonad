@@ -10,8 +10,10 @@
 -- * hGate (Logic: route based on holes)
 -- * hTypesFix (LLM: fix type holes)
 module TypesFirstDev.Handlers.Hybrid.Genesis
-  ( -- * Effect Stack
+  ( -- * Effect Stack (re-exported from Effects)
     HybridEffects
+  , SessionContext(..)
+  , WorkflowError(..)
 
     -- * Handlers
   , hTypesHandler
@@ -25,13 +27,9 @@ module TypesFirstDev.Handlers.Hybrid.Genesis
   ) where
 
 import Control.Monad.Freer (Eff, sendM)
-import Control.Monad.Freer.Error (Error)
-import Control.Monad.Freer.Reader (Reader, ask)
+import Control.Monad.Freer.Reader (ask)
 import Data.Proxy (Proxy(..))
-import Data.Text (Text)
 
-import Tidepool.Effect.ClaudeCode (ClaudeCodeExec)
-import Tidepool.Effects.Worktree (Worktree)
 import Tidepool.Graph.Generic (AsHandler)
 import Tidepool.Graph.Goto
   ( GotoChoice
@@ -40,7 +38,7 @@ import Tidepool.Graph.Goto
   , ClaudeCodeResult(..)
   , gotoChoice
   )
-import Tidepool.Graph.Memory (Memory, getMem, updateMem)
+import Tidepool.Graph.Memory (getMem, updateMem)
 import Tidepool.Graph.Types (ModelChoice(..))
 
 import TypesFirstDev.Types.Hybrid
@@ -50,38 +48,18 @@ import TypesFirstDev.Templates.Hybrid
   , hTypesFixCompiled
   )
 import TypesFirstDev.Graph.Hybrid (TypesFirstGraphHybrid(..))
-
-
--- ════════════════════════════════════════════════════════════════════════════
--- EFFECT STACK
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Effect stack for hybrid workflow handlers.
-type HybridEffects =
-  '[ Error WorkflowError
-   , Memory SessionContext
-   , Reader StackSpec
-   , ClaudeCodeExec
-   , Worktree
-   , IO
-   ]
-
--- | Session context for hybrid workflow.
--- Includes stash slots for join point patterns where handlers need
--- to pass data that isn't in the ClaudeCodeLLMHandler signature.
-data SessionContext = SessionContext
-  { scSessionId     :: Text
-  , scTotalCost     :: Double
-  , scSkeletonStash :: Maybe SkeletonState  -- For hTypeAdversary → hGate join
-  }
-
--- | Workflow errors.
-data WorkflowError
-  = BuildFailed Text
-  | TypeCheckFailed Text
-  | MaxAttemptsExceeded Int
-  | HoleFixFailed Text
-  deriving (Show, Eq)
+import TypesFirstDev.Handlers.Hybrid.Effects
+  ( HybridEffects
+  , SessionContext(..)
+  , WorkflowError(..)
+  )
+import TypesFirstDev.Handlers.Hybrid.Merge
+  ( hJoinHandler
+  , hVerifyTDDHandler
+  , hTestsRejectHandler
+  , hMergeHandler
+  , hConflictResolveHandler
+  )
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -314,12 +292,12 @@ hybridGenesisHandlers = TypesFirstGraphHybrid
   , hFork           = error "WS2 TODO: hFork"
   , hTests          = error "WS2 TODO: hTests"
   , hImpl           = error "WS2 TODO: hImpl"
-  -- WS3 stubs
-  , hJoin           = error "WS3 TODO: hJoin"
-  , hVerifyTDD      = error "WS3 TODO: hVerifyTDD"
-  , hTestsReject    = error "WS3 TODO: hTestsReject"
-  , hMerge          = error "WS3 TODO: hMerge"
-  , hConflictResolve = error "WS3 TODO: hConflictResolve"
+  -- WS3 handlers (Merge)
+  , hJoin           = hJoinHandler
+  , hVerifyTDD      = hVerifyTDDHandler
+  , hTestsReject    = hTestsRejectHandler
+  , hMerge          = hMergeHandler
+  , hConflictResolve = hConflictResolveHandler
   -- WS4 stubs
   , hValidate       = error "WS4 TODO: hValidate"
   , hFix            = error "WS4 TODO: hFix"

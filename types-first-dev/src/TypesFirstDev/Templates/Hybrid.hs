@@ -9,11 +9,13 @@ module TypesFirstDev.Templates.Hybrid
     HTypesTpl
   , HTypeAdversaryTpl
   , HTypesFixTpl
+  , HConflictResolveTpl
 
     -- * Compiled Templates
   , hTypesCompiled
   , hTypeAdversaryCompiled
   , hTypesFixCompiled
+  , hConflictResolveCompiled
   ) where
 
 import Text.Parsec.Pos (SourcePos)
@@ -24,6 +26,7 @@ import TypesFirstDev.Context.Hybrid
   ( TypesTemplateCtx(..)
   , TypeAdversaryTemplateCtx(..)
   , TypesFixTemplateCtx(..)
+  , ConflictResolveTemplateCtx(..)
   )
 
 
@@ -92,3 +95,25 @@ instance TemplateDef HTypesFixTpl where
   templateCompiled = hTypesFixCompiled
 
   buildContext = error "HTypesFixTpl.buildContext should not be called for ClaudeCode handlers"
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- CONFLICT RESOLVE TEMPLATE
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Compile the conflict resolve template at build time.
+hConflictResolveCompiled :: TypedTemplate ConflictResolveTemplateCtx SourcePos
+hConflictResolveCompiled = $(typedTemplateFile ''ConflictResolveTemplateCtx "templates/hybrid/conflict-resolve.jinja")
+
+-- | Template type marker for the conflict resolve node.
+data HConflictResolveTpl
+
+instance TemplateDef HConflictResolveTpl where
+  type TemplateContext HConflictResolveTpl = ConflictResolveTemplateCtx
+  type TemplateConstraint HConflictResolveTpl es = ()
+
+  templateName = "hybrid-conflict-resolve"
+  templateDescription = "Resolve git merge conflicts via LLM"
+  templateCompiled = hConflictResolveCompiled
+
+  buildContext = error "HConflictResolveTpl.buildContext should not be called for ClaudeCode handlers"
