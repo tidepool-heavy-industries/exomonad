@@ -479,9 +479,10 @@ data FailureType
 
 -- | Echo channel - shape without substance.
 -- Agents share what they're DOING (names), not HOW (implementations).
+-- NOTE: Field names match template variables for TH validation.
 data EchoChannel = EchoChannel
-  { ecFromImpl  :: [Text]  -- Function names impl is working on
-  , ecFromTests :: [Text]  -- Property names tests is asserting
+  { fromImpl  :: [Text]  -- Function names impl is working on
+  , fromTests :: [Text]  -- Property names tests is asserting
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)
@@ -688,10 +689,11 @@ data TrivialTestsError = TrivialTestsError
   deriving anyclass (FromJSON, ToJSON)
 
 -- | Feedback for tests agent when previous tests were trivial.
+-- NOTE: Field names match template variables for TH validation.
 data TrivialTestsFeedback = TrivialTestsFeedback
-  { ttfWhyRejected     :: Text
-  , ttfPropertiesWrote :: [Text]
-  , ttfSuggestion      :: Text
+  { whyRejected     :: Text
+  , propertiesWrote :: [Text]
+  , suggestion      :: Text
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)
@@ -753,26 +755,28 @@ data TypesTemplateCtx = TypesTemplateCtx
   deriving anyclass (FromJSON, ToJSON)
 
 -- | Context for TestsTpl - what the tests agent sees.
+-- NOTE: Field names match template variables for TH validation.
 data TestsTemplateCtx = TestsTemplateCtx
-  { ttcTypeName       :: Text
-  , ttcConstructors   :: [Text]
-  , ttcFunctions      :: [FunctionSpec]
-  , ttcTestPath       :: FilePath
-  , ttcPriorFeedback  :: Maybe TrivialTestsFeedback
-  , ttcEchoes         :: Maybe EchoChannel
-  , ttcHardeningHints :: [HardeningHint]
+  { typeName       :: Text
+  , constructors   :: [Text]
+  , functions      :: [FunctionSpec]
+  , testPath       :: FilePath
+  , priorFeedback  :: Maybe TrivialTestsFeedback
+  , echoes         :: Maybe EchoChannel
+  , hardeningHints :: [HardeningHint]
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)
 
 -- | Context for ImplTpl - what the impl agent sees.
+-- NOTE: Field names match template variables for TH validation.
 data ImplTemplateCtx = ImplTemplateCtx
-  { itcTypeName       :: Text
-  , itcConstructors   :: [Text]
-  , itcFunctions      :: [FunctionSpec]
-  , itcImplPath       :: FilePath
-  , itcEchoes         :: Maybe EchoChannel
-  , itcHardeningHints :: [HardeningHint]
+  { typeName       :: Text
+  , constructors   :: [Text]
+  , functions      :: [FunctionSpec]
+  , implPath       :: FilePath
+  , echoes         :: Maybe EchoChannel
+  , hardeningHints :: [HardeningHint]
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)

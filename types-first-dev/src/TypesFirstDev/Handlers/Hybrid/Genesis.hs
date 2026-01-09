@@ -1,8 +1,8 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
 
--- | Genesis handlers for WS1 nodes of the hybrid TDD graph.
+-- | Genesis handlers for the hybrid TDD graph.
 --
--- WS1 owns:
+-- Phase 1: Type Design
 -- * hEntry (entry point)
 -- * hTypes (LLM: design types)
 -- * hSkeleton (Logic: generate skeleton files)
@@ -41,6 +41,11 @@ import Tidepool.Graph.Goto
 import Tidepool.Graph.Memory (getMem, updateMem)
 import Tidepool.Graph.Types (ModelChoice(..))
 
+import TypesFirstDev.Handlers.Hybrid.Effects
+  ( HybridEffects
+  , SessionContext(..)
+  , WorkflowError(..)
+  )
 import TypesFirstDev.Types.Hybrid
 import TypesFirstDev.Templates.Hybrid
   ( hTypesCompiled
@@ -48,10 +53,10 @@ import TypesFirstDev.Templates.Hybrid
   , hTypesFixCompiled
   )
 import TypesFirstDev.Graph.Hybrid (TypesFirstGraphHybrid(..))
-import TypesFirstDev.Handlers.Hybrid.Effects
-  ( HybridEffects
-  , SessionContext(..)
-  , WorkflowError(..)
+import TypesFirstDev.Handlers.Hybrid.Parallel
+  ( hForkHandler
+  , hTestsHandler
+  , hImplHandler
   )
 import TypesFirstDev.Handlers.Hybrid.Merge
   ( hJoinHandler
@@ -288,11 +293,11 @@ hTypesFixHandler = ClaudeCodeLLMHandler @'Haiku @'Nothing
 
 
 -- ════════════════════════════════════════════════════════════════════════════
--- HANDLER RECORD (Partial - WS1 only)
+-- HANDLER RECORD
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Genesis handlers for WS1 nodes.
--- Other nodes use stubs from Handlers.Hybrid.Stubs.
+-- | Genesis handlers for the hybrid TDD workflow.
+-- Combines handlers from Genesis, Parallel, and Merge modules.
 hybridGenesisHandlers :: TypesFirstGraphHybrid (AsHandler HybridEffects)
 hybridGenesisHandlers = TypesFirstGraphHybrid
   { hEntry          = Proxy @StackSpec
@@ -301,11 +306,11 @@ hybridGenesisHandlers = TypesFirstGraphHybrid
   , hTypeAdversary  = hTypeAdversaryHandler
   , hGate           = hGateHandler
   , hTypesFix       = hTypesFixHandler
-  -- WS2 stubs
-  , hFork           = error "WS2 TODO: hFork"
-  , hTests          = error "WS2 TODO: hTests"
-  , hImpl           = error "WS2 TODO: hImpl"
-  -- WS3 handlers (Merge)
+  -- Phase 3: Parallel Blind Execution
+  , hFork           = hForkHandler
+  , hTests          = hTestsHandler
+  , hImpl           = hImplHandler
+  -- Phase 4-5: Verification + Merge
   , hJoin           = hJoinHandler
   , hVerifyTDD      = hVerifyTDDHandler
   , hTestsReject    = hTestsRejectHandler

@@ -120,8 +120,8 @@ instance ToGVal GingerM TypeHole where
 
 instance ToGVal GingerM EchoChannel where
   toGVal ec = dict
-    [ ("fromImpl", list (toGVal <$> ecFromImpl ec))
-    , ("fromTests", list (toGVal <$> ecFromTests ec))
+    [ ("fromImpl", list (toGVal <$> ec.fromImpl))
+    , ("fromTests", list (toGVal <$> ec.fromTests))
     ]
 
 instance ToGVal GingerM HardeningHint where
@@ -133,9 +133,9 @@ instance ToGVal GingerM HardeningHint where
 
 instance ToGVal GingerM TrivialTestsFeedback where
   toGVal ttf = dict
-    [ ("whyRejected", toGVal (ttfWhyRejected ttf))
-    , ("propertiesWrote", list (toGVal <$> ttfPropertiesWrote ttf))
-    , ("suggestion", toGVal (ttfSuggestion ttf))
+    [ ("whyRejected", toGVal ttf.whyRejected)
+    , ("propertiesWrote", list (toGVal <$> ttf.propertiesWrote))
+    , ("suggestion", toGVal ttf.suggestion)
     ]
 
 instance ToGVal GingerM ScopeLevel where
@@ -158,23 +158,23 @@ instance ToGVal GingerM TypesTemplateCtx where
 
 instance ToGVal GingerM TestsTemplateCtx where
   toGVal ctx = dict
-    [ ("typeName", toGVal (ttcTypeName ctx))
-    , ("constructors", list (toGVal <$> ttcConstructors ctx))
-    , ("functions", list (toGVal <$> ttcFunctions ctx))
-    , ("testPath", toGVal (ttcTestPath ctx))
-    , ("priorFeedback", toGVal (ttcPriorFeedback ctx))
-    , ("echoes", toGVal (ttcEchoes ctx))
-    , ("hardeningHints", list (toGVal <$> ttcHardeningHints ctx))
+    [ ("typeName", toGVal ctx.typeName)
+    , ("constructors", list (toGVal <$> ctx.constructors))
+    , ("functions", list (toGVal <$> ctx.functions))
+    , ("testPath", toGVal ctx.testPath)
+    , ("priorFeedback", toGVal ctx.priorFeedback)
+    , ("echoes", toGVal ctx.echoes)
+    , ("hardeningHints", list (toGVal <$> ctx.hardeningHints))
     ]
 
 instance ToGVal GingerM ImplTemplateCtx where
   toGVal ctx = dict
-    [ ("typeName", toGVal (itcTypeName ctx))
-    , ("constructors", list (toGVal <$> itcConstructors ctx))
-    , ("functions", list (toGVal <$> itcFunctions ctx))
-    , ("implPath", toGVal (itcImplPath ctx))
-    , ("echoes", toGVal (itcEchoes ctx))
-    , ("hardeningHints", list (toGVal <$> itcHardeningHints ctx))
+    [ ("typeName", toGVal ctx.typeName)
+    , ("constructors", list (toGVal <$> ctx.constructors))
+    , ("functions", list (toGVal <$> ctx.functions))
+    , ("implPath", toGVal ctx.implPath)
+    , ("echoes", toGVal ctx.echoes)
+    , ("hardeningHints", list (toGVal <$> ctx.hardeningHints))
     ]
 
 instance ToGVal GingerM MutationTemplateCtx where

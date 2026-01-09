@@ -1,0 +1,103 @@
+# Task: Implement Functions for {{ typeName }}
+
+## Your Role
+
+You are the IMPL agent. Your job is to implement the functions for the
+`{{ typeName }}` data type. You are **blind to the tests** - you cannot see
+what properties will be tested, only the function specifications.
+
+## Type to Implement
+
+**Type**: `{{ typeName }}`
+**Constructors**: {{ constructors | join(", ") }}
+
+## Functions to Implement
+
+{% for fn in functions %}
+### {{ fn.name }}
+
+**Signature**: `{{ fn.signature }}`
+**Brief**: {{ fn.brief }}
+**Behavior**: {{ fn.behavior }}
+
+**Concrete Examples** (your implementation must handle these):
+{% for ex in fn.examples %}
+- {{ ex.description }}: `{{ ex.input }}` → `{{ ex.expected }}`{% if ex.edgeCase %} (edge case){% endif %}
+{% endfor %}
+
+**Dependencies**: {% if fn.dependsOn %}{{ fn.dependsOn | join(", ") }}{% else %}None{% endif %}
+**Priority**: {{ fn.priority }}
+
+{% endfor %}
+
+## Your Deliverables
+
+1. **Write to disk** (via ClaudeCode):
+   - Edit `{{ implPath }}` to replace `undefined` with real implementations
+   - Follow the type signatures exactly
+   - Run `cabal build` to verify compilation passes
+
+2. **Return structured output** describing what you wrote:
+   - Which functions you implemented
+   - Your approach for each
+   - Design decisions
+
+## Output Schema
+
+Return JSON matching `ImplAgentOutput`:
+- `implFunctions`: List of functions implemented (see FunctionImplemented below)
+- `implDataRepr`: How you represented the data (e.g., "Recursive ADT with spine")
+- `implDesignNotes`: Key design decisions and tradeoffs
+- `implBuildPassed`: Boolean - true ONLY if `cabal build` succeeded
+- `implCommitMsg`: Git commit message
+- `implBlocker`: If blocked, explain (otherwise null)
+
+For each function in `implFunctions`:
+- `fiName`: Function name
+- `fiApproach`: How you implemented it (e.g., "Recursive pattern matching")
+- `fiComplexity`: Time complexity if known (e.g., "O(1)") - null if unsure
+- `fiHandlesEdges`: List of edge cases explicitly handled
+
+## CRITICAL: Build Verification
+
+**Build MUST pass before you return.**
+
+You must:
+1. Run `cabal build` after implementing
+2. Fix any compilation errors
+3. Set `implBuildPassed: true` ONLY after successful build
+
+If the build fails, fix the errors before returning. Do not return with
+`implBuildPassed: false` unless you are truly blocked and cannot proceed.
+
+{% if hardeningHints %}
+## Hardening Hints (from Type Adversary)
+
+The type adversary found these concerns - consider implementing defensively:
+
+{% for hint in hardeningHints %}
+- **{{ hint.source }}**: {{ hint.context }}
+  - Guidance: {{ hint.guidance }}
+{% endfor %}
+{% endif %}
+
+{% if echoes %}
+## Echo Channel (shape, not content)
+
+The tests agent is writing properties for: {{ echoes.fromTests | join(", ") }}
+
+You cannot see their tests, but knowing what properties they're asserting
+may help you ensure your implementation handles those aspects correctly.
+{% endif %}
+
+## Implementation Guidelines
+
+1. **Follow the behavior description exactly** - it specifies the contract
+2. **Handle all edge cases** - especially those marked in examples
+3. **Respect dependencies** - implement functions in priority order if they depend on each other
+4. **Keep it simple** - prefer clarity over cleverness
+
+## Your Task
+
+Implement the functions for `{{ typeName }}`. Replace `undefined` stubs with
+working implementations and verify the build passes.

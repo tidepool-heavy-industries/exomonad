@@ -23,11 +23,11 @@
 -- │       │              ↑         │
 -- │       │              └─────────┘
 -- │       ↓
--- ├─ hFork (Logic) → parallel spawn
--- │       ├── hTests (LLM) → TestsResult
--- │       └── hImpl (LLM) → ImplResult
+-- ├─ hFork (ForkNode) → parallel spawn
+-- │       ├── hTests (LLM+ClaudeCode) → Arrive TestsResult
+-- │       └── hImpl (LLM+ClaudeCode) → Arrive ImplResult
 -- │                 ↓
--- ├─ hJoin (Logic) → BlindResults
+-- ├─ hJoin (BarrierNode) → BlindResults
 -- │       ↓
 -- ├─ hVerifyTDD (Logic) → VerifiedResults
 -- │       ↓ fail: hTestsReject → back to hFork
@@ -58,14 +58,20 @@ import Tidepool.Graph.Types
   , Exit
   , ClaudeCode
   , ModelChoice(..)
+    -- Fork/Barrier annotations
+  , Spawn
+  , Barrier
+  , Awaits
+  , Arrive
   )
 import qualified Tidepool.Graph.Types as Types (Input)
 import Tidepool.Graph.Generic (GraphMode(..))
 import qualified Tidepool.Graph.Generic as G
-import Tidepool.Graph.Goto (Goto)
+import Tidepool.Graph.Goto (Goto, To)
 
 import TypesFirstDev.Types.Hybrid
-import TypesFirstDev.Templates.Hybrid (HTypesTpl, HTypeAdversaryTpl, HTypesFixTpl, HConflictResolveTpl)
+
+import TypesFirstDev.Templates.Hybrid (HTypesTpl, HTypeAdversaryTpl, HTypesFixTpl, HTestsTpl, HImplTpl, HConflictResolveTpl)
 
 
 -- | Hybrid TDD workflow graph.
@@ -147,35 +153,40 @@ data TypesFirstGraphHybrid mode = TypesFirstGraphHybrid
 
     -- | Fork into parallel blind agents.
     -- Creates two worktrees, spawns tests and impl concurrently.
-  , hFork :: mode :- G.LogicNode
+    -- ForkNode returns HList of payloads for each spawn target.
+  , hFork :: mode :- G.ForkNode
       :@ Types.Input GatedState
-      :@ UsesEffects '[ Goto "hTests" TestsTemplateCtx
-                      , Goto "hImpl" ImplTemplateCtx
-                      ]
+      :@ Spawn '[To "hTests" TestsTemplateCtx, To "hImpl" ImplTemplateCtx]
+      :@ Barrier "hJoin"
 
     -- | TESTS AGENT: Writes QuickCheck properties.
     -- Blind to impl. Self-verifies tests fail on skeleton.
-    --
-    -- NOTE: WS2 stub - uses placeholder template for now.
-  , hTests :: mode :- G.LogicNode
+    -- Uses Arrive to deposit result at barrier (not Goto).
+  , hTests :: mode :- G.LLMNode
       :@ Types.Input TestsTemplateCtx
-      :@ UsesEffects '[Goto "hJoin" TestsResult]
+      :@ Template HTestsTpl
+      :@ Schema TestsAgentOutput
+      :@ UsesEffects '[Arrive TestsResult]
+      :@ ClaudeCode 'Sonnet 'Nothing
 
     -- | IMPL AGENT: Writes implementation.
     -- Blind to tests. Verifies build passes.
-    --
-    -- NOTE: WS2 stub - uses placeholder template for now.
-  , hImpl :: mode :- G.LogicNode
+    -- Uses Arrive to deposit result at barrier (not Goto).
+  , hImpl :: mode :- G.LLMNode
       :@ Types.Input ImplTemplateCtx
-      :@ UsesEffects '[Goto "hJoin" ImplResult]
+      :@ Template HImplTpl
+      :@ Schema ImplAgentOutput
+      :@ UsesEffects '[Arrive ImplResult]
+      :@ ClaudeCode 'Sonnet 'Nothing
 
     --------------------------------------------------------------------------
     -- PHASE 4: TDD VERIFICATION [WS3]
     --------------------------------------------------------------------------
 
     -- | Join: Barrier collecting both blind agents.
-  , hJoin :: mode :- G.LogicNode
-      :@ Types.Input BlindResults
+    -- Receives HList '[TestsResult, ImplResult] from parallel paths.
+  , hJoin :: mode :- G.BarrierNode
+      :@ Awaits '[TestsResult, ImplResult]
       :@ UsesEffects '[Goto "hVerifyTDD" BlindResults]
 
     -- | External TDD verification.

@@ -1,0 +1,125 @@
+# Task: Write QuickCheck Properties for {{ typeName }}
+
+## Your Role
+
+You are the TESTS agent. Your job is to write QuickCheck property-based tests
+for the `{{ typeName }}` data type. You are **blind to the implementation** -
+you cannot see how the functions are implemented, only their specifications.
+
+## Type Under Test
+
+**Type**: `{{ typeName }}`
+**Constructors**: {{ constructors | join(", ") }}
+
+## Functions to Test
+
+{% for fn in functions %}
+### {{ fn.name }}
+
+**Signature**: `{{ fn.signature }}`
+**Brief**: {{ fn.brief }}
+**Behavior**: {{ fn.behavior }}
+
+**Concrete Examples** (ground your properties in these):
+{% for ex in fn.examples %}
+- {{ ex.description }}: `{{ ex.input }}` → `{{ ex.expected }}`{% if ex.edgeCase %} (edge case){% endif %}
+{% endfor %}
+
+**Property Sketches** (implement these as QuickCheck properties):
+{% for prop in fn.properties %}
+- **{{ prop.name }}** ({{ prop.type }}): {{ prop.description }}
+  - Invariant: `{{ prop.invariant }}`
+{% endfor %}
+
+{% endfor %}
+
+## Your Deliverables
+
+1. **Write to disk** (via ClaudeCode):
+   - Edit `{{ testPath }}` to add QuickCheck properties
+   - Add `Arbitrary` instances if needed
+   - Run `cabal build` to verify compilation
+   - Run `cabal test` to verify tests **FAIL on undefined stubs**
+
+2. **Return structured output** describing what you wrote:
+   - Which properties you wrote
+   - Coverage report
+   - Self-verification result
+
+## Output Schema
+
+Return JSON matching `TestsAgentOutput`:
+- `testsProperties`: List of properties written (see PropertyWritten below)
+- `testsCoverage`: Coverage report
+- `testsSelfVerified`: Boolean - true ONLY if tests fail on skeleton
+- `testsCommitMsg`: Git commit message
+- `testsStrategy`: Prose describing your approach
+- `testsBlocker`: If blocked, explain (otherwise null)
+
+For each property in `testsProperties`:
+- `pwName`: Property name (e.g., "prop_pushPopInverse")
+- `pwTargetFunctions`: Functions tested by this property
+- `pwPropertyType`: One of Inverse, Idempotent, etc.
+- `pwDescription`: What the property verifies
+- `pwCoversExamples`: Indices of examples this property covers
+- `pwCoversSketch`: Name of PropertySketch this implements (or null)
+
+For `testsCoverage`:
+- `crFunctionsCovered`: Functions with at least one property
+- `crFunctionsUncovered`: Functions with no properties
+- `crExamplesCovered`: Number of examples covered
+- `crExamplesTotal`: Total examples in spec
+- `crSketchesCovered`: PropertySketch names implemented
+- `crSketchesUncovered`: PropertySketch names NOT implemented
+
+## CRITICAL: Self-Verification
+
+**Tests MUST FAIL on the skeleton stubs.**
+
+The skeleton has `undefined` stubs. If your tests pass on undefined stubs,
+they are trivial or broken. You MUST:
+
+1. Run `cabal test` after writing properties
+2. Verify tests FAIL (hit undefined or produce counterexamples)
+3. Set `testsSelfVerified: true` ONLY after confirming failure
+
+If tests pass on undefined stubs, your work will be rejected and you'll need
+to write meaningful properties that actually exercise the code.
+
+{% if priorFeedback %}
+## Prior Rejection Feedback
+
+Your previous tests were rejected. Here's why:
+
+**Reason**: {{ priorFeedback.whyRejected }}
+**Properties you wrote**: {{ priorFeedback.propertiesWrote | join(", ") }}
+**Suggestion**: {{ priorFeedback.suggestion }}
+
+Write NEW, MEANINGFUL properties that actually test the functions.
+{% endif %}
+
+{% if hardeningHints %}
+## Hardening Hints (from Type Adversary)
+
+The type adversary found these concerns - consider writing properties that
+exercise these edge cases:
+
+{% for hint in hardeningHints %}
+- **{{ hint.source }}**: {{ hint.context }}
+  - Guidance: {{ hint.guidance }}
+{% endfor %}
+{% endif %}
+
+{% if echoes %}
+## Echo Channel (shape, not content)
+
+The impl agent is working on these functions: {{ echoes.fromImpl | join(", ") }}
+
+You cannot see their implementation, but knowing what they're focused on
+may help you prioritize which properties to write first.
+{% endif %}
+
+## Your Task
+
+Write QuickCheck properties for `{{ typeName }}`. Implement the property sketches
+provided, add edge case tests, and verify they fail on the skeleton stubs.
