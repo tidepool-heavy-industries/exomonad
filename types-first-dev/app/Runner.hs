@@ -329,7 +329,9 @@ main = do
   -- Build configuration
   let stackSpec = buildStackSpec targetDir
       worktreeConfig = defaultWorktreeConfig cwd
-      sessionConfig = defaultSessionConfig cwd
+      sessionConfig = (defaultSessionConfig cwd)
+        { scMantlePath = cwd <> "/rust/target/release/mantle"
+        }
 
   putStrLn "Configuration:"
   putStrLn $ "  Module: " <> T.unpack stackSpec.specModuleName

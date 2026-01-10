@@ -217,6 +217,14 @@ pub fn run_claude_direct(config: &ContainerConfig) -> Result<RunResult> {
     // Build result from parsed events
     let result = parser.build_result(exit_code, Some(config.session_id.clone()));
 
+    // Debug log structured output presence
+    if result.structured_output.is_some() {
+        info!("Structured output received ({} bytes)",
+              serde_json::to_string(&result.structured_output).unwrap_or_default().len());
+    } else {
+        warn!("No structured output in result. Full result: {:?}", result);
+    }
+
     Ok(result)
 }
 

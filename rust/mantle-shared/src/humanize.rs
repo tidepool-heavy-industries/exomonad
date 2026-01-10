@@ -2,6 +2,7 @@
 //!
 //! Provides terminal-friendly output for the wrap command's pane display.
 
+use std::io::{stderr, Write};
 use crate::events::{ContentBlock, InterruptSignal, StreamEvent};
 
 /// Print a stream event in human-readable format.
@@ -158,4 +159,6 @@ pub fn eprint_event_humanized(event: &StreamEvent) {
             eprintln!("Cost: ${:.4}", r.total_cost_usd.unwrap_or(0.0));
         }
     }
+    // Flush stderr to ensure output appears immediately
+    let _ = stderr().flush();
 }

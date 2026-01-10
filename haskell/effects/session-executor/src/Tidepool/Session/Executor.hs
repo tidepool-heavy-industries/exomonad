@@ -59,7 +59,7 @@ import Data.Text qualified as T
 import Data.Time.Clock (getCurrentTime, diffUTCTime)
 import System.Exit (ExitCode(..))
 import System.IO (hFlush, stdout)
-import System.Process (readProcessWithExitCode)
+import System.Process (readProcessWithExitCode, readCreateProcessWithExitCode, proc, CreateProcess(..), StdStream(..))
 
 import Tidepool.Effect.Session
   ( Session(..)
@@ -211,6 +211,8 @@ sessionInfoIO config sid = do
 --
 -- All session operations (start, continue, fork) return SessionOutput.
 -- On failure, returns a SessionOutput with error details.
+--
+-- Inherits stderr so stream-json output is visible in real-time.
 runMantleSession :: SessionConfig -> [String] -> IO SessionOutput
 runMantleSession config args = do
   -- Log command before execution
@@ -218,9 +220,8 @@ runMantleSession config args = do
   hFlush stdout
 
   startTime <- getCurrentTime
-  result <- try @SomeException $ readProcessWithExitCode
-    config.scMantlePath
-    args
+  result <- try @SomeException $ readCreateProcessWithExitCode
+    (proc config.scMantlePath args) { std_err = Inherit }
     ""
   endTime <- getCurrentTime
   let duration = realToFrac (diffUTCTime endTime startTime) :: Double
@@ -230,7 +231,7 @@ runMantleSession config args = do
       putStrLn $ "[SESSION] Failed to spawn mantle: " <> show e
       hFlush stdout
       pure $ errorOutput $ "Failed to spawn mantle: " <> T.pack (show e)
-    Right (exitCode, stdoutStr, stderrStr) -> do
+    Right (exitCode, stdoutStr, _stderrStr) -> do
       let exitCodeInt = case exitCode of
             ExitSuccess -> 0
             ExitFailure c -> c
@@ -241,11 +242,11 @@ runMantleSession config args = do
         Left parseErr -> do
           putStrLn $ "[SESSION] Failed to parse output: " <> parseErr
           hFlush stdout
-          -- Try to extract error from stderr or report parse failure
+          -- Report parse failure (stderr was inherited, so check terminal output)
           pure $ errorOutput $ case exitCode of
             ExitSuccess -> "Failed to parse mantle output: " <> T.pack parseErr
             ExitFailure code ->
-              "mantle exited with code " <> T.pack (show code) <> ": " <> T.pack stderrStr
+              "mantle exited with code " <> T.pack (show code) <> " (see stderr output above)"
 
 
 -- | Convert ModelChoice to mantle CLI argument.

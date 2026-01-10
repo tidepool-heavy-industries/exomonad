@@ -1,6 +1,7 @@
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeApplications #-}
 
@@ -18,7 +19,7 @@ module StructuredOutputSpec (spec) where
 import Test.Hspec
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Aeson (Value(..))
+import Data.Aeson (Value(..), withText)
 import qualified Data.Aeson.KeyMap as KeyMap
 import Data.List.NonEmpty (NonEmpty(..))
 import Data.Set (Set)
@@ -26,7 +27,8 @@ import qualified Data.Set as Set
 import GHC.Generics (Generic)
 
 import Tidepool.StructuredOutput
-import Tidepool.Schema (JSONSchema(..))
+import Tidepool.StructuredOutput.Error (ParseDiagnostic(..))
+import Tidepool.Schema (JSONSchema(..), SchemaType(..), enumSchema, schemaToValue)
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -62,6 +64,70 @@ data SumType
   | VariantB Int
   deriving stock (Show, Eq, Generic)
   deriving anyclass (StructuredOutput)
+
+-- | Simple enum with no data (default tag+contents encoding).
+--
+-- This uses generic deriving, which produces tag+contents format:
+-- @{"tag": "Low", "contents": {}}@
+--
+-- Schema size: ~500 bytes (oneOf with 3 variants)
+data Priority
+  = Low
+  | Medium
+  | High
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (StructuredOutput)
+
+-- | Simple enum with manual string encoding.
+--
+-- For simple enums with no data, override the default to use string encoding:
+-- @"Pending"@, @"Active"@, @"Completed"@
+--
+-- Schema size: ~100 bytes (string with enum constraint)
+--
+-- == Why Manual String Encoding?
+--
+-- Generic deriving creates tag+contents schemas which are 3-4x larger:
+--
+-- * Generic: @{"tag": "Pending", "contents": {}}@ + oneOf schema
+-- * Manual: @"Pending"@ + string enum schema
+--
+-- For LLM structured output, smaller schemas improve:
+-- - Token usage (schema in prompt)
+-- - Parse reliability (simpler format)
+-- - Output cost (shorter JSON)
+--
+-- == Pattern
+--
+-- @
+-- instance StructuredOutput MyEnum where
+--   structuredSchema = enumSchema [\"Variant1\", \"Variant2\", ...]
+--   encodeStructured = \\case
+--     Variant1 -> String \"Variant1\"
+--     Variant2 -> String \"Variant2\"
+--     ...
+--   parseStructured = \\case
+--     String \"Variant1\" -> Right Variant1
+--     String \"Variant2\" -> Right Variant2
+--     ...
+--     String other -> Left $ ParseDiagnostic [] \"expected\" other \"message\"
+--     other -> Left $ ParseDiagnostic [] \"string\" (T.pack $ show other) \"Expected string\"
+-- @
+data Status = Pending | Active | Completed
+  deriving stock (Show, Eq, Generic)
+
+instance StructuredOutput Status where
+  structuredSchema = enumSchema ["Pending", "Active", "Completed"]
+  encodeStructured = \case
+    Pending -> String "Pending"
+    Active -> String "Active"
+    Completed -> String "Completed"
+  parseStructured = \case
+    String "Pending" -> Right Pending
+    String "Active" -> Right Active
+    String "Completed" -> Right Completed
+    String other -> Left $ ParseDiagnostic [] "Pending | Active | Completed" other ("Unknown Status: " <> other)
+    other -> Left $ ParseDiagnostic [] "string" (T.pack $ show other) "Expected string for Status enum"
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -230,3 +296,47 @@ spec = do
       roundtrip (Number 42)
       roundtrip (Bool True)
       roundtrip Null
+
+  describe "Simple enum encoding" $ do
+    describe "Default tag+contents (generic deriving)" $ do
+      it "Priority uses tag+contents format" $ do
+        let encoded = encodeStructured Low
+        case encoded of
+          Object obj -> do
+            KeyMap.member "tag" obj `shouldBe` True
+            KeyMap.member "contents" obj `shouldBe` True
+          _ -> expectationFailure "Expected Object with tag+contents"
+
+      it "Priority roundtrips with tag+contents" $ do
+        roundtrip Low
+        roundtrip Medium
+        roundtrip High
+
+      it "Priority schema uses oneOf" $ do
+        let schema = structuredSchema @Priority
+        schema.schemaOneOf `shouldSatisfy` (/= Nothing)
+
+    describe "Manual string enum (recommended for simple enums)" $ do
+      it "Status uses simple string format" $ do
+        encodeStructured Pending `shouldBe` String "Pending"
+        encodeStructured Active `shouldBe` String "Active"
+        encodeStructured Completed `shouldBe` String "Completed"
+
+      it "Status roundtrips as strings" $ do
+        roundtrip Pending
+        roundtrip Active
+        roundtrip Completed
+
+      it "Status schema uses string enum" $ do
+        let schema = structuredSchema @Status
+        schema.schemaType `shouldBe` TString
+        schema.schemaEnum `shouldBe` Just ["Pending", "Active", "Completed"]
+        schema.schemaOneOf `shouldBe` Nothing
+
+      it "Status schema is much smaller than Priority" $ do
+        let statusJson = schemaToValue (structuredSchema @Status)
+        let priorityJson = schemaToValue (structuredSchema @Priority)
+        let statusSize = length (show statusJson)
+        let prioritySize = length (show priorityJson)
+        -- String enum should be significantly smaller than oneOf with tag+contents
+        statusSize `shouldSatisfy` (< prioritySize `div` 2)

@@ -1,5 +1,6 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# OPTIONS_GHC -Wno-orphans #-}
 
 -- | HasJSONSchema instances for Hybrid types with compile-time doc validation.
 --
