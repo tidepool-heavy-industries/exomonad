@@ -369,12 +369,12 @@ type family NodeHandler nodeDef es where
 -- | Choose between LLMHandler and ClaudeCodeLLMHandler based on GetClaudeCode.
 --
 -- When a node has the ClaudeCode annotation, we use ClaudeCodeLLMHandler with
--- the model and cwd from the annotation. The type parameters ensure compile-time
+-- the model from the annotation. The type parameter ensures compile-time
 -- validation that the handler matches the annotation.
-type ChooseLLMHandler :: Maybe (ModelChoice, Maybe Symbol) -> Type -> Type -> [Type] -> [Effect] -> Type -> Type
+type ChooseLLMHandler :: Maybe ModelChoice -> Type -> Type -> [Type] -> [Effect] -> Type -> Type
 type family ChooseLLMHandler mClaudeCode input schema targets effs tpl where
-  ChooseLLMHandler ('Just '(model, cwd)) input schema targets effs tpl =
-    ClaudeCodeLLMHandler model cwd input schema targets effs tpl
+  ChooseLLMHandler ('Just model) input schema targets effs tpl =
+    ClaudeCodeLLMHandler model input schema targets effs tpl
   ChooseLLMHandler 'Nothing input schema targets effs tpl =
     LLMHandler input schema targets effs tpl
 
@@ -450,7 +450,7 @@ type family NodeHandlerDispatch nodeDef origNode es mInput mTpl mSchema mEffs wh
     NodeHandlerDispatch node orig es mInput mTpl mSchema mEffs
   NodeHandlerDispatch (node :@ System _) orig es mInput mTpl mSchema mEffs =
     NodeHandlerDispatch node orig es mInput mTpl mSchema mEffs
-  NodeHandlerDispatch (node :@ ClaudeCode _ _) orig es mInput mTpl mSchema mEffs =
+  NodeHandlerDispatch (node :@ ClaudeCode _) orig es mInput mTpl mSchema mEffs =
     NodeHandlerDispatch node orig es mInput mTpl mSchema mEffs
 
   -- Skip Fork/Barrier annotations (extracted directly in terminal cases)
@@ -522,7 +522,7 @@ type family NodeHandlerDispatch nodeDef origNode es mInput mTpl mSchema mEffs wh
 
   -- LLMNode with Template AND UsesEffects: the complete form
   -- Uses ChooseLLMHandler to dispatch between regular LLM and ClaudeCode execution.
-  -- GetClaudeCode extracts model/cwd from the annotation for compile-time validation.
+  -- GetClaudeCode extracts the model from the annotation for compile-time validation.
   NodeHandlerDispatch LLMNode orig es ('Just input) ('Just tpl) ('Just schema) ('Just (EffStack effs)) =
     ChooseLLMHandler (GetClaudeCode orig) input schema (GotoEffectsToTargets effs) es (TemplateContext tpl)
 

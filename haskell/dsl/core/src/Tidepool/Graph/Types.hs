@@ -51,7 +51,6 @@ module Tidepool.Graph.Types
 
     -- * ClaudeCode Singletons (demote type-level to runtime)
   , SingModelChoice(..)
-  , KnownMaybeCwd(..)
 
     -- * Special Goto Targets
   , Exit
@@ -62,8 +61,7 @@ module Tidepool.Graph.Types
   ) where
 
 import Data.Kind (Type)
-import Data.Proxy (Proxy(..))
-import GHC.TypeLits (Symbol, KnownSymbol, symbolVal)
+import GHC.TypeLits (Symbol)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- NODE KIND
@@ -363,25 +361,25 @@ type Opus = 'Opus
 -- | Marks an LLM node as executed via Claude Code subprocess instead of API.
 --
 -- When present, the node's template is rendered and passed to @claude -p@
--- via zellij-cc, which spawns a Claude Code session and returns JSON output.
+-- via mantle, which spawns a Claude Code session in a managed worktree and
+-- returns JSON output.
 --
 -- @
 -- gWork :: mode :- G.LLMNode
 --     :@ Input BeadInfo
 --     :@ Template WorkTpl
 --     :@ Schema WorkResult
---     :@ ClaudeCode 'Sonnet ('Just "/path/to/worktree")
+--     :@ ClaudeCode 'Sonnet
 -- @
 --
 -- Parameters:
 --
 -- * @model@ - Which Claude model to use (Haiku, Sonnet, Opus)
--- * @cwd@ - Working directory for file access ('Nothing' inherits from runner)
 --
 -- Note: Only valid with 'Backend NativeAnthropic'. Using with CloudflareAI
 -- will produce a compile-time type error.
-type ClaudeCode :: ModelChoice -> Maybe Symbol -> Type
-data ClaudeCode model cwd
+type ClaudeCode :: ModelChoice -> Type
+data ClaudeCode model
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -398,16 +396,6 @@ class SingModelChoice (m :: ModelChoice) where
 instance SingModelChoice 'Haiku where singModelChoice = Haiku
 instance SingModelChoice 'Sonnet where singModelChoice = Sonnet
 instance SingModelChoice 'Opus where singModelChoice = Opus
-
--- | Demote type-level Maybe Symbol to runtime Maybe FilePath.
---
--- Used to derive the working directory from the ClaudeCode annotation.
-class KnownMaybeCwd (m :: Maybe Symbol) where
-  knownMaybeCwd :: Maybe FilePath
-
-instance KnownMaybeCwd 'Nothing where knownMaybeCwd = Nothing
-instance KnownSymbol s => KnownMaybeCwd ('Just s) where
-  knownMaybeCwd = Just (symbolVal (Proxy @s))
 
 
 -- ════════════════════════════════════════════════════════════════════════════

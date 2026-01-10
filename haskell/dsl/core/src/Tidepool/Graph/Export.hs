@@ -165,14 +165,12 @@ instance ToJSON MemoryExport where
 -- | Export format for ClaudeCode info.
 data ClaudeCodeExport = ClaudeCodeExport
   { ceModel :: Text        -- ^ Model: "Haiku", "Sonnet", or "Opus"
-  , ceCwd :: Maybe Text    -- ^ Working directory if specified
   }
   deriving (Show, Eq, Generic)
 
 instance ToJSON ClaudeCodeExport where
   toJSON ce = object
     [ "model" .= ce.ceModel
-    , "cwd" .= ce.ceCwd
     ]
 
 -- | Export format for tool info.
@@ -271,7 +269,6 @@ toolToExport ti = ToolExport
 claudeCodeToExport :: ClaudeCodeInfo -> ClaudeCodeExport
 claudeCodeToExport cci = ClaudeCodeExport
   { ceModel = cci.cciModel
-  , ceCwd = cci.cciCwd
   }
 
 -- ════════════════════════════════════════════════════════════════════════════

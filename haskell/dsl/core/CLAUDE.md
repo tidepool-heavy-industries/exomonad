@@ -735,7 +735,7 @@ All paths relative to `tidepool-core/src/Tidepool/Graph/`.
 | Path | Key Exports | Purpose |
 |------|-------------|---------|
 | `Effect/Types.hs` | `State`, `LLM`, `Log`, `Emit`, `RequestInput`, `Time`, `Random` | Core effect definitions |
-| `Effect/ClaudeCode.hs` | `ClaudeCodeExec`, `execClaudeCode` | Claude Code subprocess effect |
+| `Effect/Session.hs` | `Session`, `SessionOutput`, `startSession`, `continueSession` | Dockerized Claude Code sessions via mantle |
 | `Schema.hs` | `HasJSONSchema`, `JSONSchema`, `schemaToValue` | JSON Schema for structured output |
 | `Effects/*.hs` | `BD`, `GitHub`, `Habitica`, `Telegram`, `Git`, etc. | Integration effects |
 

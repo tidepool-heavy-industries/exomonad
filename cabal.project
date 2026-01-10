@@ -11,7 +11,6 @@ packages:
     -- Effect interpreters
     haskell/effects/llm-executor
     haskell/effects/bd-executor
-    haskell/effects/claude-code-executor
     haskell/effects/habitica-executor
     haskell/effects/ui-executor
     haskell/effects/observability-executor
@@ -19,6 +18,7 @@ packages:
     haskell/effects/ghci-executor
     haskell/effects/github-executor
     haskell/effects/worktree-executor
+    haskell/effects/session-executor
     haskell/effects/cabal-executor
     haskell/effects/devlog-executor
 
@@ -37,7 +37,7 @@ packages:
 
     -- Test/example packages
     claude-code-test
-    types-first-dev
+    -- types-first-dev  -- TODO: needs migration from ClaudeCodeExec to Session effect
 
     -- Vendored dependencies
     haskell/vendor/freer-simple

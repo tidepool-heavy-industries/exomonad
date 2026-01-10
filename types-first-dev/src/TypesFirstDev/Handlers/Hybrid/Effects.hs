@@ -19,7 +19,7 @@ import Control.Monad.Freer.Error (Error)
 import Control.Monad.Freer.Reader (Reader)
 import Data.Text (Text)
 
-import Tidepool.Effect.ClaudeCode (ClaudeCodeExec)
+import Tidepool.Effect.Session (Session)
 import Tidepool.Effects.Worktree (Worktree)
 import Tidepool.Graph.Memory (Memory)
 
@@ -38,7 +38,7 @@ import TypesFirstDev.Types.Hybrid
 -- - Memory: Session state (stashes, cost tracking)
 -- - Reader: Immutable config (StackSpec)
 -- - Build: Cabal build/test operations
--- - ClaudeCodeExec: LLM agent spawning
+-- - Session: LLM agent spawning via mantle
 -- - Worktree: Git worktree management
 -- - IO: Base effect
 type HybridEffects =
@@ -46,7 +46,7 @@ type HybridEffects =
    , Memory SessionContext
    , Reader StackSpec
    , Build
-   , ClaudeCodeExec
+   , Session
    , Worktree
    , IO
    ]

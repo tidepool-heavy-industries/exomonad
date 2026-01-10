@@ -13,7 +13,7 @@ import qualified Data.Text as T
 
 import Control.Monad.Freer (Eff)
 
-import Tidepool.Effect.ClaudeCode (ClaudeCodeExec)
+import Tidepool.Effect.Session (Session)
 import Tidepool.Graph.Generic (AsHandler)
 import Tidepool.Graph.Goto (GotoChoice, To, ClaudeCodeLLMHandler(..), ClaudeCodeResult(..), gotoChoice, gotoExit)
 import Tidepool.Graph.Template (templateCompiled)
@@ -27,17 +27,17 @@ import ClaudeCodeTest.Templates (ExploreTpl, ActionTpl)
 
 -- | Handlers for ClaudeCodeTestGraph.
 --
--- Effect stack: ClaudeCodeExec (for subprocess execution) + IO
+-- Effect stack: Session (for subprocess execution via mantle) + IO
 --
 -- - explore: ClaudeCodeLLMHandler that explores files
 -- - route: Logic handler that decides next step based on findings
 -- - act: ClaudeCodeLLMHandler that takes follow-up action
-testHandlers :: ClaudeCodeTestGraph (AsHandler '[ClaudeCodeExec, IO])
+testHandlers :: ClaudeCodeTestGraph (AsHandler '[Session, IO])
 testHandlers = ClaudeCodeTestGraph
   { entry = Proxy @ExploreInput
 
     -- Explore handler: Uses Claude Code to explore files in directory
-  , explore = ClaudeCodeLLMHandler @'Sonnet @'Nothing
+  , explore = ClaudeCodeLLMHandler @'Sonnet
       Nothing                                  -- no system template
       (templateCompiled @ExploreTpl)           -- user template
       buildExploreContext                      -- before: builds context
@@ -47,7 +47,7 @@ testHandlers = ClaudeCodeTestGraph
   , route = routeHandler
 
     -- Action handler: Uses Claude Code to take follow-up action
-  , act = ClaudeCodeLLMHandler @'Sonnet @'Nothing
+  , act = ClaudeCodeLLMHandler @'Sonnet
       Nothing                                  -- no system template
       (templateCompiled @ActionTpl)            -- user template
       buildActionContext                       -- before: builds context
@@ -64,7 +64,7 @@ testHandlers = ClaudeCodeTestGraph
 -- | Build context for the explore template.
 buildExploreContext
   :: ExploreInput
-  -> Eff '[ClaudeCodeExec, IO] ExploreContext
+  -> Eff '[Session, IO] ExploreContext
 buildExploreContext input = pure ExploreContext
   { directory = T.pack input.eiDirectory
   , objective = input.eiObjective
@@ -75,7 +75,7 @@ buildExploreContext input = pure ExploreContext
 -- Always continues to the route node with findings.
 routeAfterExplore
   :: ClaudeCodeResult Findings
-  -> Eff '[ClaudeCodeExec, IO] (GotoChoice '[To "route" Findings])
+  -> Eff '[Session, IO] (GotoChoice '[To "route" Findings])
 routeAfterExplore result = pure $ gotoChoice @"route" result.ccrParsedOutput
 
 
@@ -89,7 +89,7 @@ routeAfterExplore result = pure $ gotoChoice @"route" result.ccrParsedOutput
 -- Otherwise, exit with "nothing found" result.
 routeHandler
   :: Findings
-  -> Eff '[ClaudeCodeExec, IO] (GotoChoice '[To "act" ActionInput, To Exit ActionResult])
+  -> Eff '[Session, IO] (GotoChoice '[To "act" ActionInput, To Exit ActionResult])
 routeHandler findings
   | findings.fFileCount > 0 = pure $ gotoChoice @"act" ActionInput
       { aiFindings = findings
@@ -109,7 +109,7 @@ routeHandler findings
 -- | Build context for the action template.
 buildActionContext
   :: ActionInput
-  -> Eff '[ClaudeCodeExec, IO] ActionContext
+  -> Eff '[Session, IO] ActionContext
 buildActionContext input = pure ActionContext
   { summary = input.aiFindings.fSummary
   , fileCount = input.aiFindings.fFileCount
@@ -123,7 +123,7 @@ buildActionContext input = pure ActionContext
 -- Always exits with the action result.
 routeAfterAction
   :: ClaudeCodeResult ActionResult
-  -> Eff '[ClaudeCodeExec, IO] (GotoChoice '[To Exit ActionResult])
+  -> Eff '[Session, IO] (GotoChoice '[To Exit ActionResult])
 routeAfterAction result = pure $ gotoExit result.ccrParsedOutput
 
 

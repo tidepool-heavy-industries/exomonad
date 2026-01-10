@@ -120,10 +120,13 @@ All session commands (`start`, `continue`, `fork`) return this JSON to stdout:
 ### Effect Definition
 
 ```haskell
+{-# LANGUAGE DerivingVia, DataKinds, DeriveGeneric #-}
+
 module Tidepool.Effects.Session
   ( Session(..)
   , SessionId(..)
   , SessionOutput(..)
+  , SessionMetadata(..)
   , InterruptSignal(..)
   , startSession
   , continueSession
@@ -132,40 +135,55 @@ module Tidepool.Effects.Session
   ) where
 
 import Data.Text (Text)
-import Data.Aeson (FromJSON, ToJSON)
+import Data.Time (UTCTime)
+import Deriving.Aeson
 import GHC.Generics (Generic)
 
 newtype SessionId = SessionId { unSessionId :: Text }
   deriving (Eq, Show, FromJSON, ToJSON)
 
 -- | Result from a session turn (parsed from mantle JSON stdout)
--- Field names match mantle's snake_case output
+-- Uses "so" prefix (SessionOutput) stripped via deriving-aeson
 data SessionOutput = SessionOutput
-  { sessionId     :: SessionId      -- ^ Claude Code session ID
-  , branch        :: Text           -- ^ Git branch name
-  , worktree      :: FilePath       -- ^ Absolute path to worktree
-  , exitCode      :: Int            -- ^ Container exit code
-  , isError       :: Bool           -- ^ Whether Claude reported an error
-  , resultText    :: Maybe Text     -- ^ Final output text
-  , totalCostUsd  :: Double         -- ^ API cost for this turn
-  , numTurns      :: Int            -- ^ Number of turns in this run
-  , interrupts    :: [InterruptSignal] -- ^ Fork requests, escalations, etc.
-  , durationSecs  :: Double         -- ^ Wall-clock duration
-  , outputError   :: Maybe Text     -- ^ Error if failed before Claude ran
+  { soSessionId    :: SessionId      -- ^ Claude Code session ID
+  , soBranch       :: Text           -- ^ Git branch name
+  , soWorktree     :: FilePath       -- ^ Absolute path to worktree
+  , soExitCode     :: Int            -- ^ Container exit code
+  , soIsError      :: Bool           -- ^ Whether Claude reported an error
+  , soResultText   :: Maybe Text     -- ^ Final output text
+  , soTotalCostUsd :: Double         -- ^ API cost for this turn
+  , soNumTurns     :: Int            -- ^ Number of turns in this run
+  , soInterrupts   :: [InterruptSignal] -- ^ Fork requests, escalations, etc.
+  , soDurationSecs :: Double         -- ^ Wall-clock duration
+  , soError        :: Maybe Text     -- ^ Error if failed before Claude ran
   } deriving (Show, Generic)
+    deriving (FromJSON, ToJSON)
+      via CustomJSON '[FieldLabelModifier '[StripPrefix "so", CamelToSnake]] SessionOutput
 
-instance FromJSON SessionOutput where
-  -- Use aeson options to convert snake_case JSON to camelCase Haskell
-  parseJSON = genericParseJSON defaultOptions
-    { fieldLabelModifier = camelTo2 '_'
-    }
+-- | Session metadata from `mantle session info`
+data SessionMetadata = SessionMetadata
+  { smSessionId     :: SessionId
+  , smBranch        :: Text
+  , smWorktree      :: FilePath
+  , smParentSession :: Maybe SessionId
+  , smChildSessions :: [SessionId]
+  , smStatus        :: Text           -- ^ "idle", "active", "completed", "failed"
+  , smCreatedAt     :: UTCTime
+  , smUpdatedAt     :: UTCTime
+  , smLastExitCode  :: Int
+  , smTotalCostUsd  :: Double
+  } deriving (Show, Generic)
+    deriving (FromJSON, ToJSON)
+      via CustomJSON '[FieldLabelModifier '[StripPrefix "sm", CamelToSnake]] SessionMetadata
 
 -- | Signal from Claude (via `mantle signal` bash command)
 data InterruptSignal = InterruptSignal
-  { signalType :: Text           -- ^ "fork", "escalate", "transition", etc.
-  , state      :: Maybe Text     -- ^ e.g., child branch name for fork
-  , reason     :: Maybe Text     -- ^ e.g., child prompt for fork
-  } deriving (Show, Generic, FromJSON)
+  { isSignalType :: Text           -- ^ "fork", "escalate", "transition", etc.
+  , isState      :: Maybe Text     -- ^ e.g., child branch name for fork
+  , isReason     :: Maybe Text     -- ^ e.g., child prompt for fork
+  } deriving (Show, Generic)
+    deriving (FromJSON, ToJSON)
+      via CustomJSON '[FieldLabelModifier '[StripPrefix "is", CamelToSnake]] InterruptSignal
 
 -- | Session effects - each operation spawns a mantle process
 data Session r where
@@ -277,17 +295,17 @@ runMantle cfg args = do
 
 ## Fork Signal Handling
 
-Haskell detects fork requests by inspecting `interrupts` in the result:
+Haskell detects fork requests by inspecting `soInterrupts` in the result:
 
 ```haskell
 -- | Check if session requested a fork
 detectForkRequest :: SessionOutput -> Maybe (Text, Text)  -- (childBranch, childPrompt)
 detectForkRequest result =
-  case find isForkSignal (interrupts result) of
-    Just sig -> (,) <$> state sig <*> reason sig
+  case find isForkSignal (soInterrupts result) of
+    Just sig -> (,) <$> isState sig <*> isReason sig
     Nothing  -> Nothing
   where
-    isForkSignal sig = signalType sig == "fork"
+    isForkSignal sig = isSignalType sig == "fork"
 
 -- | Orchestration loop with fork handling
 runSessionLoop :: SessionId -> Eff '[Session, ...] FinalResult
@@ -300,7 +318,7 @@ runSessionLoop sid = do
       childResult <- forkSession sid childBranch childPrompt
 
       -- Run child to completion (recursive)
-      finalChildResult <- runChildToCompletion (sessionId childResult)
+      finalChildResult <- runChildToCompletion (soSessionId childResult)
 
       -- Notify parent and continue
       let summary = summarizeChildWork finalChildResult
@@ -341,7 +359,7 @@ typeDrivenWorkflow :: Task -> Eff '[Session, Log, ...] Result
 typeDrivenWorkflow task = do
   -- Start main session
   result <- startSession (taskBranch task) (taskPrompt task) Sonnet
-  let mainSession = sessionId result
+  let mainSession = soSessionId result
 
   -- Run to completion, handling forks
   loop mainSession result
@@ -352,7 +370,7 @@ typeDrivenWorkflow task = do
           -- Handle fork
           log $ "Fork requested: " <> branch
           childResult <- forkSession sid branch prompt
-          finalChild <- runToCompletion (sessionId childResult)
+          finalChild <- runToCompletion (soSessionId childResult)
 
           -- Notify parent
           parentResult <- continueSession sid $
@@ -367,34 +385,208 @@ typeDrivenWorkflow task = do
 
 ---
 
-## Files to Create (Post-Refactor)
+## File Locations
+
+Based on existing codebase structure:
+
+### New Files
 
 ```
-<location TBD>/
-├── Session.hs              -- Effect type definition
-├── Session/
-│   ├── Interpreter.hs      -- Spawns mantle processes
-│   ├── Types.hs            -- SessionOutput, InterruptSignal, etc.
-│   └── Orchestration.hs    -- Fork handling, parallel execution helpers
+haskell/dsl/core/src/Tidepool/Effect/Session.hs    -- Effect type (replaces ClaudeCode.hs)
+
+haskell/effects/session-executor/
+├── tidepool-session-executor.cabal
+└── src/Tidepool/Session/
+    ├── Executor.hs         -- Spawns mantle processes
+    ├── Types.hs            -- SessionOutput, InterruptSignal, SessionMetadata
+    ├── Config.hs           -- SessionConfig
+    └── Orchestration.hs    -- Fork detection, parallel helpers
 ```
+
+### Files to Modify
+
+```
+haskell/dsl/core/src/Tidepool/Graph/Execute.hs     -- Update executeClaudeCodeHandler
+haskell/dsl/core/src/Tidepool/Graph/Goto.hs        -- Update ClaudeCodeLLMHandler
+haskell/native-server/src/Tidepool/Server/EffectRunner.hs  -- Replace ClaudeCodeExec with Session
+cabal.project                                       -- Add session-executor package
+```
+
+### Files to Remove (After Migration)
+
+```
+haskell/dsl/core/src/Tidepool/Effect/ClaudeCode.hs -- Replaced by Session.hs
+haskell/effects/claude-code-executor/              -- Entire package replaced
+```
+
+---
+
+## Code Paths to Replace
+
+### 1. Effect Type: `ClaudeCodeExec` → `Session`
+
+**Current** (`Effect/ClaudeCode.hs`):
+```haskell
+-- Single operation with optional resume/fork as parameters
+ClaudeCodeExecOp
+  :: ModelChoice -> Maybe FilePath -> Text -> Maybe Value -> Maybe Text
+  -> Maybe Text    -- ^ Session ID to resume (optional)
+  -> Bool          -- ^ Fork session (optional)
+  -> ClaudeCodeExec (Value, Maybe Text)
+```
+
+**New** (`Effect/Session.hs`):
+```haskell
+-- First-class operations for session lifecycle
+data Session r where
+  StartSession    :: Text -> Text -> ModelChoice -> Session SessionOutput
+  ContinueSession :: SessionId -> Text -> Session SessionOutput
+  ForkSession     :: SessionId -> Text -> Text -> Session SessionOutput
+```
+
+### 2. Executor Package: `claude-code-executor` → `session-executor`
+
+| Old File | Status | Notes |
+|----------|--------|-------|
+| `Executor.hs` | **REPLACE** | Calls `mantle run` → new calls `mantle session start/continue/fork` |
+| `Session.hs` | **REMOVE** | STM session tracking → now in mantle's `.mantle/sessions.json` |
+| `SessionState.hs` | **REMOVE** | Same |
+| `ControlSocket.hs` | **EVALUATE** | May reuse for hook events from container |
+| `Hooks.hs` | **EVALUATE** | Hook handling may still be needed |
+| `Types.hs` | **REPLACE** | New types from mantle JSON output |
+| `Config.hs` | **REPLACE** | New config for session commands |
+
+### 3. Graph Dispatch: `executeClaudeCodeHandler`
+
+**Current** (`Graph/Execute.hs:256-319`):
+```haskell
+executeClaudeCodeHandler :: Member ClaudeCodeExec es => ...
+  -- Calls execClaudeCode with forkSession=False
+  (outputVal, sessionId) <- execClaudeCode model cwd fullPrompt schemaVal Nothing Nothing False
+```
+
+**New**: Two options:
+
+**Option A**: Keep `ClaudeCode` annotation, change underlying effect
+```haskell
+executeClaudeCodeHandler :: Member Session es => ...
+  -- Need to track session ID across self-loops
+  result <- startSession branch fullPrompt model  -- or continueSession if resuming
+```
+
+**Option B**: New annotation type (breaking change)
+```haskell
+-- Graph annotation becomes Session-aware
+gWork :: mode :- G.LLMNode :@ SessionNode 'Sonnet "feat-x"
+```
+
+**Recommendation**: Option A for backwards compatibility.
+
+### 4. Effect Runner Composition
+
+**Current** (`EffectRunner.hs:320-347`):
+```haskell
+runEffects :: ... -> Eff '[UI, Habitica, LLMComplete, ClaudeCodeExec, DevLog, Observability, IO] a
+  ...
+  . runClaudeCodeExecIO (ecClaudeCodeConfig $ eeConfig env)
+```
+
+**New**:
+```haskell
+runEffects :: ... -> Eff '[UI, Habitica, LLMComplete, Session, DevLog, Observability, IO] a
+  ...
+  . runSessionIO (ecSessionConfig $ eeConfig env)
+```
+
+### 5. Worktree Effect (Partial Overlap)
+
+**Key insight**: Mantle now manages worktrees at `.mantle/worktrees/<branch>/`. The `Worktree` effect has overlap:
+
+| Operation | Status | Rationale |
+|-----------|--------|-----------|
+| `CreateWorktree` | **OVERLAP** | Mantle creates worktrees internally |
+| `DeleteWorktree` | **OVERLAP** | Mantle `cleanup` handles this |
+| `ListWorktrees` | **OVERLAP** | Can query `mantle session list` |
+| `MergeWorktree` | **KEEP** | Still need to merge child work to parent branch |
+| `CherryPickFiles` | **KEEP** | Still need selective file operations |
+
+**Decision**: Keep `Worktree` effect for merge/cherry-pick operations that happen *after* session completes. Mantle handles worktree lifecycle *during* sessions.
+
+---
+
+## Migration Strategy
+
+### Phase 1: Add Session Effect (Non-Breaking)
+
+- [ ] Create `Effect/Session.hs` with new effect type
+- [ ] Create `session-executor` package
+- [ ] Add to `cabal.project`
+- [ ] Both `ClaudeCodeExec` and `Session` available in effect stack
+
+### Phase 2: Migrate Graph Dispatch
+
+- [ ] Update `executeClaudeCodeHandler` to use `Session` effect
+- [ ] Add session ID tracking for self-loops (graph-level state)
+- [ ] Keep `ClaudeCode` annotation working, just different underlying effect
+- [ ] Update tests
+
+### Phase 3: Update Effect Runner
+
+- [ ] Replace `ClaudeCodeExec` with `Session` in `runEffects` type signature
+- [ ] Update `ExecutorConfig` with `SessionConfig`
+- [ ] Update environment variable loading
+
+### Phase 4: Remove Deprecated Code
+
+- [ ] Delete `Effect/ClaudeCode.hs`
+- [ ] Delete `claude-code-executor` package
+- [ ] Remove from `cabal.project`
+- [ ] Update CLAUDE.md documentation
 
 ---
 
 ## Implementation Tasks
 
+### Prerequisites
 - [ ] Wait for Haskell refactor to settle
-- [ ] Create `Session` effect type (location TBD)
-- [ ] Create interpreter (spawn mantle, parse JSON)
-- [ ] Implement fork signal detection
-- [ ] Add parallel execution helpers
-- [ ] Deprecate/remove `ClaudeCodeExec`
-- [ ] Integration tests with mantle session commands
+- [ ] Mantle `session` subcommand complete (start/continue/fork/info/list/cleanup)
+
+### Phase 1: Add Session Effect
+- [ ] Create `haskell/dsl/core/src/Tidepool/Effect/Session.hs`
+- [ ] Create `haskell/effects/session-executor/` package structure
+- [ ] Implement `SessionConfig` and `runSessionIO` interpreter
+- [ ] Add `tidepool-session-executor` to `cabal.project`
+- [ ] Unit tests for JSON parsing (SessionOutput, SessionMetadata, InterruptSignal)
+
+### Phase 2: Migrate Graph Dispatch
+- [ ] Update `executeClaudeCodeHandler` to use `Session` effect
+- [ ] Handle session ID tracking for self-loops (graph Memory or separate state)
+- [ ] Update `ClaudeCodeLLMHandler` and `ClaudeCodeResult` types
+- [ ] Integration tests with mock mantle
+
+### Phase 3: Update Effect Runner
+- [ ] Add `Session` to `runEffects` effect stack
+- [ ] Add `ecSessionConfig` to `ExecutorConfig`
+- [ ] Add env vars: `MANTLE_PATH`, `MANTLE_REPO_ROOT`
+- [ ] Update native server CLAUDE.md
+
+### Phase 4: Remove Deprecated Code
+- [ ] Delete `haskell/dsl/core/src/Tidepool/Effect/ClaudeCode.hs`
+- [ ] Delete `haskell/effects/claude-code-executor/` package
+- [ ] Remove `ClaudeCodeExec` from `EffectRunner.hs`
+- [ ] Update `haskell/effects/CLAUDE.md` effect listing
 - [ ] Update consuming repos (anemone)
 
 ---
 
 ## Dependencies
 
+### Haskell Packages
+- `deriving-aeson` - Type-level JSON customization (StripPrefix, CamelToSnake)
+- `aeson` - JSON parsing
+- `time` - UTCTime for timestamps
+
+### External
 - Mantle `session` subcommand complete (start/continue/fork/info)
 - Mantle outputs JSON to stdout (SessionOutput format)
 - `.mantle/sessions.json` for session metadata queries

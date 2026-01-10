@@ -247,7 +247,6 @@ data MemoryInfo = MemoryInfo
 -- | Rich ClaudeCode information for nodes executed via Claude Code subprocess.
 data ClaudeCodeInfo = ClaudeCodeInfo
   { cciModel :: Text                    -- ^ Model choice: "Haiku", "Sonnet", or "Opus"
-  , cciCwd :: Maybe Text                -- ^ Working directory if specified
   }
   deriving (Show, Eq)
 
@@ -415,53 +414,22 @@ instance Typeable t => ReifyMemoryInfo ('Just t) where
     , miTypeName = simplifyTypeName (typeRep (Proxy @t))
     }
 
--- | Reify a type-level Maybe ClaudeCode annotation to runtime Maybe ClaudeCodeInfo.
---
--- The type-level representation is @Maybe (ModelChoice, Maybe Symbol)@ where:
--- * @ModelChoice@ is 'Haiku, 'Sonnet, or 'Opus
--- * @Maybe Symbol@ is the optional working directory path
-type ReifyClaudeCodeInfo :: Maybe (ModelChoice, Maybe Symbol) -> Constraint
-class ReifyClaudeCodeInfo (mcc :: Maybe (ModelChoice, Maybe Symbol)) where
+-- | Reify a type-level Maybe ModelChoice annotation to runtime Maybe ClaudeCodeInfo.
+type ReifyClaudeCodeInfo :: Maybe ModelChoice -> Constraint
+class ReifyClaudeCodeInfo (mcc :: Maybe ModelChoice) where
   reifyClaudeCodeInfo :: Proxy mcc -> Maybe ClaudeCodeInfo
 
 instance ReifyClaudeCodeInfo 'Nothing where
   reifyClaudeCodeInfo _ = Nothing
 
-instance KnownSymbol cwd => ReifyClaudeCodeInfo ('Just '( 'Haiku, 'Just cwd)) where
-  reifyClaudeCodeInfo _ = Just ClaudeCodeInfo
-    { cciModel = "Haiku"
-    , cciCwd = Just $ T.pack (symbolVal (Proxy @cwd))
-    }
+instance ReifyClaudeCodeInfo ('Just 'Haiku) where
+  reifyClaudeCodeInfo _ = Just ClaudeCodeInfo { cciModel = "Haiku" }
 
-instance ReifyClaudeCodeInfo ('Just '( 'Haiku, 'Nothing)) where
-  reifyClaudeCodeInfo _ = Just ClaudeCodeInfo
-    { cciModel = "Haiku"
-    , cciCwd = Nothing
-    }
+instance ReifyClaudeCodeInfo ('Just 'Sonnet) where
+  reifyClaudeCodeInfo _ = Just ClaudeCodeInfo { cciModel = "Sonnet" }
 
-instance KnownSymbol cwd => ReifyClaudeCodeInfo ('Just '( 'Sonnet, 'Just cwd)) where
-  reifyClaudeCodeInfo _ = Just ClaudeCodeInfo
-    { cciModel = "Sonnet"
-    , cciCwd = Just $ T.pack (symbolVal (Proxy @cwd))
-    }
-
-instance ReifyClaudeCodeInfo ('Just '( 'Sonnet, 'Nothing)) where
-  reifyClaudeCodeInfo _ = Just ClaudeCodeInfo
-    { cciModel = "Sonnet"
-    , cciCwd = Nothing
-    }
-
-instance KnownSymbol cwd => ReifyClaudeCodeInfo ('Just '( 'Opus, 'Just cwd)) where
-  reifyClaudeCodeInfo _ = Just ClaudeCodeInfo
-    { cciModel = "Opus"
-    , cciCwd = Just $ T.pack (symbolVal (Proxy @cwd))
-    }
-
-instance ReifyClaudeCodeInfo ('Just '( 'Opus, 'Nothing)) where
-  reifyClaudeCodeInfo _ = Just ClaudeCodeInfo
-    { cciModel = "Opus"
-    , cciCwd = Nothing
-    }
+instance ReifyClaudeCodeInfo ('Just 'Opus) where
+  reifyClaudeCodeInfo _ = Just ClaudeCodeInfo { cciModel = "Opus" }
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- GOTO TARGET REIFICATION

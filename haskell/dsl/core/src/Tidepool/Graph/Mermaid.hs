@@ -222,12 +222,7 @@ renderMemoryComment (Just mi) = "    %% memory: " <> mi.miTypeName
 -- | Render ClaudeCode comment.
 renderClaudeCodeComment :: Maybe ClaudeCodeInfo -> Text
 renderClaudeCodeComment Nothing = ""
-renderClaudeCodeComment (Just cci) =
-  "    %% claudeCode: " <> cci.cciModel <> cwdText
-  where
-    cwdText = case cci.cciCwd of
-      Nothing -> ""
-      Just cwd -> " @ " <> cwd
+renderClaudeCodeComment (Just cci) = "    %% claudeCode: " <> cci.cciModel
 
 -- | Render transitions comment.
 renderTransitionsComment :: NodeInfo -> Text

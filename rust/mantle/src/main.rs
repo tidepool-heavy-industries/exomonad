@@ -1,30 +1,36 @@
-//! mantle: Spawn and manage Claude Code sessions in zellij panes.
+//! mantle: Spawn and manage Claude Code sessions.
 //!
-//! CLI tool for running Claude Code in isolated zellij panes with
-//! supervision, timeout handling, and inter-process communication.
+//! CLI tool for running Claude Code sessions with process supervision,
+//! timeout handling, and inter-process communication.
+//!
+//! ## Commands
+//!
+//! - `session` - Manage sessions (start, continue, fork, list, info, cleanup)
+//! - `run` - Legacy: spawn in zellij pane (requires --features zellij)
 
-use clap::{Parser, Subcommand, ValueEnum};
-use shell_escape::escape;
-use std::borrow::Cow;
-use std::io::{BufRead, BufReader, Read as _};
-use std::path::PathBuf;
-use std::sync::mpsc;
-use std::thread;
-use std::time::Duration;
-use tracing::{debug, error, info, warn};
+use clap::{Parser, Subcommand};
+use tracing::error;
 use tracing_subscriber::EnvFilter;
 
-use zellij_client::{cli_client::start_cli_client, os_input_output::get_cli_client_os_input};
-use zellij_utils::input::{actions::Action, command::RunCommandAction};
+use mantle::session::{
+    cleanup_sessions, continue_session, fork_session, list_sessions, session_info, start_session,
+    CleanupConfig, ContinueConfig, ForkConfig, ListConfig, SessionState, StartConfig, StateManager,
+    WorktreeManager,
+};
 
-use mantle::error::{MantleError, Result};
-use mantle::events::{InterruptSignal, ResultEvent, RunResult, StreamEvent};
-use mantle::fifo::{write_result, write_signal, ResultFifo, SignalFifo};
-use mantle::humanize::{print_event_humanized, print_interrupt};
-use mantle::protocol::{ControlMessage, ControlResponse, HookInput, HookOutput};
-use mantle::socket::{control_socket_path, ControlSocket};
-use mantle::supervisor::{build_claude_command, install_signal_handlers, Supervisor};
-use mantle::tui::{run_tui, TuiEvent};
+// Zellij-specific imports
+#[cfg(feature = "zellij")]
+use std::path::PathBuf;
+#[cfg(feature = "zellij")]
+use std::time::Duration;
+#[cfg(feature = "zellij")]
+use tracing::{debug, info};
+#[cfg(feature = "zellij")]
+use zellij_client::{cli_client::start_cli_client, os_input_output::get_cli_client_os_input};
+#[cfg(feature = "zellij")]
+use zellij_utils::input::{actions::Action, command::RunCommandAction};
+#[cfg(feature = "zellij")]
+use mantle::{build_prompt, shell_quote, MantleError, Result, ResultFifo};
 
 // ============================================================================
 // CLI Types
@@ -32,7 +38,7 @@ use mantle::tui::{run_tui, TuiEvent};
 
 #[derive(Parser)]
 #[command(name = "mantle")]
-#[command(about = "Spawn and manage Claude Code sessions in zellij panes")]
+#[command(about = "Spawn and manage Claude Code sessions")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -40,7 +46,14 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Run a Claude Code session in a new pane, block until complete
+    /// Manage Claude Code sessions
+    Session {
+        #[command(subcommand)]
+        command: SessionCommands,
+    },
+
+    /// Run a Claude Code session in a new zellij pane (legacy, requires --features zellij)
+    #[cfg(feature = "zellij")]
     Run {
         /// Zellij session name to attach to
         #[arg(long)]
@@ -94,178 +107,80 @@ enum Commands {
         #[arg(long)]
         control_socket: Option<PathBuf>,
     },
+}
 
-    /// Internal: Wrap claude as subprocess, humanize output
-    #[command(hide = true)]
-    Wrap {
-        /// FIFO to write final JSON result to
+#[derive(Subcommand)]
+enum SessionCommands {
+    /// Start a new session
+    Start {
+        /// Semantic slug for the session (e.g., "implement/user-auth")
         #[arg(long)]
-        result_fifo: PathBuf,
+        slug: String,
 
-        /// Working directory for Claude Code
+        /// Prompt text for Claude Code
         #[arg(long)]
-        cwd: Option<PathBuf>,
+        prompt: String,
 
-        /// Tag for correlating this session with orchestrator state
-        #[arg(long)]
-        session_tag: Option<String>,
+        /// Model to use (haiku, sonnet, opus)
+        #[arg(long, default_value = "sonnet")]
+        model: String,
 
         /// Timeout in seconds (0 = no timeout)
-        #[arg(long, default_value = "0")]
+        #[arg(long, default_value = "300")]
         timeout: u64,
 
-        /// Control socket path (enables hook interception)
+        /// Use Docker container instead of local execution
         #[arg(long)]
-        control_socket: Option<PathBuf>,
-
-        /// Disable TUI, use simple println output (for CI/headless)
-        #[arg(long)]
-        no_tui: bool,
-
-        /// All remaining args passed to claude
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
-        claude_args: Vec<String>,
+        docker: bool,
     },
 
-    /// Signal an interrupt (called by Claude via Bash)
-    Signal {
-        /// Signal type: "transition", "escalate", "request_review", etc.
-        signal_type: String,
+    /// Continue an existing session with a new prompt
+    Continue {
+        /// Session ID to continue
+        session_id: String,
 
-        /// Target state for transitions
+        /// New prompt text
         #[arg(long)]
-        state: Option<String>,
-
-        /// Reason/payload for the signal
-        #[arg(long)]
-        reason: Option<String>,
-
-        /// FIFO to write to (set via TIDEPOOL_SIGNAL_FIFO env var by wrap)
-        #[arg(long, env = "TIDEPOOL_SIGNAL_FIFO")]
-        fifo: PathBuf,
+        prompt: String,
     },
 
-    /// Handle a Claude Code hook event (called by generated hook scripts)
-    ///
-    /// This subcommand is invoked by hook scripts that mantle generates.
-    /// It reads the hook payload from stdin (as provided by Claude Code),
-    /// forwards it to the control socket, and outputs the response.
-    Hook {
-        /// The hook event type to handle
-        #[arg(value_enum)]
-        event: HookEventType,
+    /// Fork a session (create child session from parent's context)
+    Fork {
+        /// Parent session ID to fork from
+        parent_id: String,
 
-        /// Control socket path (defaults to TIDEPOOL_CONTROL_SOCKET env var)
-        #[arg(long, env = "TIDEPOOL_CONTROL_SOCKET")]
-        socket: Option<PathBuf>,
+        /// Slug for the child session
+        #[arg(long)]
+        child_slug: String,
+
+        /// Prompt for the child session
+        #[arg(long)]
+        child_prompt: String,
     },
-}
 
-/// Hook event types supported by Claude Code.
-///
-/// Each variant corresponds to a hook event that Claude Code emits.
-/// See: https://code.claude.com/docs/en/hooks
-#[derive(Debug, Clone, Copy, ValueEnum, strum::Display)]
-pub enum HookEventType {
-    /// Before tool execution (can allow/deny/modify)
-    PreToolUse,
-    /// After tool completion
-    PostToolUse,
-    /// When a notification is shown
-    Notification,
-    /// When Claude Code wants to stop
-    Stop,
-    /// When a subagent (Task tool) finishes
-    SubagentStop,
-    /// Before a compact operation
-    PreCompact,
-    /// When a session starts or resumes
-    SessionStart,
-    /// When a session ends
-    SessionEnd,
-    /// When permission dialog is shown
-    PermissionRequest,
-    /// When user submits a prompt
-    UserPromptSubmit,
-}
+    /// Show detailed information about a session
+    Info {
+        /// Session ID
+        session_id: String,
+    },
 
-// ============================================================================
-// EventCollector - Shared event accumulation logic
-// ============================================================================
+    /// List all sessions
+    List {
+        /// Filter by state
+        #[arg(long, value_enum)]
+        state: Option<SessionState>,
+    },
 
-use mantle::tui::TuiResult;
-use std::path::Path;
+    /// Clean up old sessions
+    Cleanup {
+        /// Only clean up completed sessions
+        #[arg(long)]
+        completed: bool,
 
-/// Collects streaming events and builds the final RunResult.
-///
-/// Used by both TUI and simple modes to deduplicate event processing logic.
-struct EventCollector {
-    events: Vec<StreamEvent>,
-    result_event: Option<ResultEvent>,
-    interrupts: Vec<InterruptSignal>,
-}
-
-impl EventCollector {
-    /// Create a new empty collector.
-    fn new() -> Self {
-        Self {
-            events: Vec::new(),
-            result_event: None,
-            interrupts: Vec::new(),
-        }
-    }
-
-    /// Process a single JSON line. Returns parsed event on success.
-    fn process_line(&mut self, line: &str) -> Option<StreamEvent> {
-        if line.trim().is_empty() {
-            return None;
-        }
-        match serde_json::from_str::<StreamEvent>(line) {
-            Ok(event) => {
-                if let StreamEvent::Result(ref r) = event {
-                    self.result_event = Some(r.clone());
-                }
-                self.events.push(event.clone());
-                Some(event)
-            }
-            Err(e) => {
-                let truncated: String = line.chars().take(50).collect();
-                warn!(error = %e, line = %truncated, "JSON parse error");
-                None
-            }
-        }
-    }
-
-    /// Add an interrupt signal.
-    fn add_interrupt(&mut self, signal: InterruptSignal) {
-        self.interrupts.push(signal);
-    }
-
-    /// Drain all pending signals from FIFO.
-    fn drain_signals(&mut self, fifo: &SignalFifo) {
-        self.interrupts.extend(fifo.drain());
-    }
-
-    /// Build final result and write to FIFO.
-    fn finalize(self, exit_code: i32, session_tag: Option<&str>, result_fifo: &Path) -> Result<()> {
-        let result = RunResult::from_events(
-            self.events,
-            self.result_event,
-            exit_code,
-            session_tag.map(|s| s.to_string()),
-            self.interrupts,
-        );
-        write_result(result_fifo, &result)
-    }
-
-    /// Create from TUI results.
-    fn from_tui_result(tui_result: TuiResult) -> Self {
-        Self {
-            events: tui_result.events,
-            result_event: tui_result.result_event,
-            interrupts: tui_result.interrupts,
-        }
-    }
+        /// Show what would be cleaned up without doing it
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 // ============================================================================
@@ -282,6 +197,9 @@ fn main() {
     let cli = Cli::parse();
 
     let result = match cli.command {
+        Commands::Session { command } => handle_session_command(command),
+
+        #[cfg(feature = "zellij")]
         Commands::Run {
             session,
             name,
@@ -311,30 +229,6 @@ fn main() {
             session_tag.as_deref(),
             control_socket.as_ref(),
         ),
-        Commands::Wrap {
-            result_fifo,
-            cwd,
-            session_tag,
-            timeout,
-            control_socket,
-            no_tui,
-            claude_args,
-        } => wrap_claude(
-            &result_fifo,
-            cwd.as_ref(),
-            session_tag.as_deref(),
-            timeout,
-            control_socket.as_ref(),
-            no_tui,
-            &claude_args,
-        ),
-        Commands::Signal {
-            signal_type,
-            state,
-            reason,
-            fifo,
-        } => send_signal(&fifo, &signal_type, state.as_deref(), reason.as_deref()),
-        Commands::Hook { event, socket } => handle_hook(event, socket.as_ref()),
     };
 
     if let Err(e) = result {
@@ -344,157 +238,151 @@ fn main() {
 }
 
 // ============================================================================
-// Signal Command
+// Session Commands
 // ============================================================================
 
-fn send_signal(
-    fifo: &Path,
-    signal_type: &str,
-    state: Option<&str>,
-    reason: Option<&str>,
-) -> Result<()> {
-    let signal = InterruptSignal {
-        signal_type: signal_type.to_string(),
-        state: state.map(|s| s.to_string()),
-        reason: reason.map(|s| s.to_string()),
-    };
+fn handle_session_command(cmd: SessionCommands) -> std::result::Result<(), Box<dyn std::error::Error>> {
+    // Get repository root (current directory for now)
+    let repo_root = std::env::current_dir()?;
+    let state_manager = StateManager::new(&repo_root)?;
 
-    write_signal(fifo, &signal)?;
+    match cmd {
+        SessionCommands::Start { slug, prompt, model, timeout, docker } => {
+            let config = StartConfig {
+                slug,
+                prompt,
+                model,
+                timeout_secs: timeout,
+                docker,
+                base_branch: None,
+            };
 
-    println!("Signal sent: {} (state: {:?})", signal_type, state);
-    Ok(())
-}
-
-// ============================================================================
-// Hook Command (handles Claude Code hook events)
-// ============================================================================
-
-/// Handle a hook event from Claude Code.
-///
-/// This function:
-/// 1. Reads the hook payload JSON from stdin (provided by CC)
-/// 2. Connects to the control socket
-/// 3. Sends the hook event and waits for response
-/// 4. Outputs the response JSON to stdout
-/// 5. Exits with appropriate code (0=allow, 2=deny/error)
-///
-/// If no control socket is available, we "fail open" - allow the hook
-/// to proceed without orchestration. This ensures CC still works
-/// when not running under Tidepool control.
-fn handle_hook(event_type: HookEventType, socket_path: Option<&PathBuf>) -> Result<()> {
-    // Determine socket path (arg > env var)
-    let socket_path = socket_path
-        .map(|p| p.to_path_buf())
-        .or_else(|| control_socket_path().map(PathBuf::from));
-
-    // Read hook payload from stdin
-    let mut stdin_content = String::new();
-    std::io::stdin()
-        .read_to_string(&mut stdin_content)
-        .map_err(MantleError::Io)?;
-
-    debug!(
-        event = ?event_type,
-        payload_len = stdin_content.len(),
-        "Received hook event"
-    );
-
-    // Parse the hook input
-    let hook_input: HookInput = serde_json::from_str(&stdin_content)?;
-
-    // Verify event type matches what CC sent
-    let expected_event = event_type.to_string();
-    if hook_input.hook_event_name != expected_event {
-        warn!(
-            expected = %expected_event,
-            got = %hook_input.hook_event_name,
-            "Hook event name mismatch"
-        );
-    }
-
-    // If no socket available, fail open (allow everything)
-    let Some(socket_path) = socket_path else {
-        debug!("No control socket, failing open (allowing hook)");
-        let output = default_allow_response(event_type);
-        println!(
-            "{}",
-            serde_json::to_string(&output).map_err(MantleError::JsonSerialize)?
-        );
-        return Ok(());
-    };
-
-    // Connect to control socket
-    let mut socket = match ControlSocket::connect(&socket_path) {
-        Ok(s) => s,
-        Err(e) => {
-            warn!(error = %e, "Failed to connect to control socket, failing open");
-            let output = default_allow_response(event_type);
-            println!(
-                "{}",
-                serde_json::to_string(&output).map_err(MantleError::JsonSerialize)?
-            );
-            return Ok(());
-        }
-    };
-
-    // Send hook event to Haskell
-    let message = ControlMessage::HookEvent {
-        input: Box::new(hook_input),
-    };
-    let response = socket.send(&message)?;
-
-    // Handle response
-    match response {
-        ControlResponse::HookResponse { output, exit_code } => {
-            // Output the response JSON for CC
-            println!(
-                "{}",
-                serde_json::to_string(&output).map_err(MantleError::JsonSerialize)?
-            );
-
-            // Exit with the code from Haskell (0=allow, 2=deny)
-            if exit_code != 0 {
-                std::process::exit(exit_code);
+            match start_session(&repo_root, &config) {
+                Ok(output) => {
+                    println!("{}", serde_json::to_string_pretty(&output)?);
+                    if output.exit_code != 0 {
+                        std::process::exit(output.exit_code);
+                    }
+                    Ok(())
+                }
+                Err(e) => {
+                    eprintln!("Error starting session: {}", e);
+                    std::process::exit(1);
+                }
             }
         }
-        ControlResponse::McpToolResponse { .. } => {
-            // Unexpected response type
-            error!("Received MCP response for hook request");
-            std::process::exit(1);
+
+        SessionCommands::Continue { session_id, prompt } => {
+            let config = ContinueConfig {
+                session_id,
+                prompt,
+                timeout_secs: 300, // Default timeout
+                docker: false,
+            };
+
+            match continue_session(&repo_root, &config) {
+                Ok(output) => {
+                    println!("{}", serde_json::to_string_pretty(&output)?);
+                    if output.exit_code != 0 {
+                        std::process::exit(output.exit_code);
+                    }
+                    Ok(())
+                }
+                Err(e) => {
+                    eprintln!("Error continuing session: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+
+        SessionCommands::Fork { parent_id, child_slug, child_prompt } => {
+            let config = ForkConfig {
+                parent_id,
+                child_slug,
+                child_prompt,
+                timeout_secs: 300, // Default timeout
+                docker: false,
+            };
+
+            match fork_session(&repo_root, &config) {
+                Ok(output) => {
+                    println!("{}", serde_json::to_string_pretty(&output)?);
+                    if output.exit_code != 0 {
+                        std::process::exit(output.exit_code);
+                    }
+                    Ok(())
+                }
+                Err(e) => {
+                    eprintln!("Error forking session: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+
+        SessionCommands::Info { session_id } => {
+            match session_info(&state_manager, &session_id) {
+                Ok(info) => {
+                    // Output JSON for Haskell consumption
+                    println!("{}", serde_json::to_string(&info)?);
+                    Ok(())
+                }
+                Err(e) => {
+                    eprintln!("Error: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+
+        SessionCommands::List { state } => {
+            let config = ListConfig {
+                state,
+                parent_id: None,
+                limit: None,
+            };
+
+            match list_sessions(&state_manager, &config) {
+                Ok(output) => {
+                    // Output JSON for Haskell consumption
+                    println!("{}", serde_json::to_string(&output)?);
+                    Ok(())
+                }
+                Err(e) => {
+                    eprintln!("Error: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+
+        SessionCommands::Cleanup { completed, dry_run } => {
+            let worktree_manager = WorktreeManager::new(&repo_root, &state_manager.worktrees_dir())?;
+            let config = CleanupConfig {
+                completed_only: completed,
+                failed_only: false,
+                all_terminal: !completed, // If not just completed, clean all terminal states
+                dry_run,
+                session_ids: vec![],
+            };
+
+            match cleanup_sessions(&state_manager, &worktree_manager, &config) {
+                Ok(output) => {
+                    // Output JSON for Haskell consumption
+                    println!("{}", serde_json::to_string(&output)?);
+                    Ok(())
+                }
+                Err(e) => {
+                    eprintln!("Error: {}", e);
+                    std::process::exit(1);
+                }
+            }
         }
     }
-
-    Ok(())
-}
-
-/// Create a default "allow" response for when no control socket is available.
-fn default_allow_response(event_type: HookEventType) -> HookOutput {
-    use mantle::protocol::HookSpecificOutput;
-
-    match event_type {
-        HookEventType::PreToolUse => HookOutput::pre_tool_use_allow(None, None),
-        HookEventType::PostToolUse => HookOutput::post_tool_use_allow(None),
-        HookEventType::PermissionRequest => HookOutput {
-            continue_: true,
-            hook_specific_output: Some(HookSpecificOutput::PermissionRequest {
-                decision: mantle::protocol::PermissionDecision::Allow {
-                    updated_input: None,
-                },
-            }),
-            ..Default::default()
-        },
-        // Other hooks just need continue: true
-        _ => HookOutput {
-            continue_: true,
-            ..Default::default()
-        },
-    }
 }
 
 // ============================================================================
-// Run Command (orchestrator)
+// Legacy Run Command (zellij)
 // ============================================================================
 
+#[cfg(feature = "zellij")]
 fn run_cc_session(
     session: &str,
     name: &str,
@@ -509,7 +397,7 @@ fn run_cc_session(
     fork_session: bool,
     session_tag: Option<&str>,
     control_socket: Option<&PathBuf>,
-) -> Result<()> {
+) -> std::result::Result<(), Box<dyn std::error::Error>> {
     // Create FIFO for result communication
     let result_fifo = ResultFifo::new()?;
 
@@ -554,8 +442,9 @@ fn run_cc_session(
         .map(|a| shell_quote(a).into_owned())
         .collect();
 
+    // Use mantle-agent instead of mantle for the wrapper
     let mut wrap_cmd_parts = vec![
-        "mantle".to_string(),
+        "mantle-agent".to_string(),
         "wrap".to_string(),
         "--result-fifo".to_string(),
         shell_quote(&result_fifo.path().display().to_string()).into_owned(),
@@ -639,252 +528,13 @@ fn run_cc_session(
 }
 
 // ============================================================================
-// Wrap Command (runs claude as subprocess, humanizes output)
-// ============================================================================
-
-fn wrap_claude(
-    result_fifo: &Path,
-    cwd: Option<&PathBuf>,
-    session_tag: Option<&str>,
-    timeout_secs: u64,
-    control_socket: Option<&PathBuf>,
-    no_tui: bool,
-    claude_args: &[String],
-) -> Result<()> {
-    // Install signal handlers for SIGINT/SIGTERM forwarding
-    install_signal_handlers();
-
-    // Create signal FIFO for interrupt communication
-    let signal_fifo = SignalFifo::new()?;
-
-    // Generate hook configuration if control socket is provided
-    let _hook_config = if let Some(socket_path) = control_socket {
-        let effective_cwd = cwd.cloned()
-            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-
-        let mantle_path = mantle::find_mantle_binary();
-
-        info!(
-            socket = %socket_path.display(),
-            cwd = %effective_cwd.display(),
-            "Generating hook configuration"
-        );
-
-        Some(mantle::HookConfig::generate(&effective_cwd, &mantle_path)?)
-    } else {
-        None
-    };
-
-    // Build claude command with optional control socket env
-    let mut cmd = build_claude_command(claude_args, cwd.map(|p| p.as_path()), signal_fifo.path());
-
-    // Set TIDEPOOL_CONTROL_SOCKET env var if provided
-    if let Some(socket_path) = control_socket {
-        cmd.env("TIDEPOOL_CONTROL_SOCKET", socket_path);
-        debug!(socket = %socket_path.display(), "Set TIDEPOOL_CONTROL_SOCKET env");
-    }
-
-    // Spawn with timeout if specified (0 = no timeout)
-    let timeout = if timeout_secs > 0 {
-        Some(Duration::from_secs(timeout_secs))
-    } else {
-        None
-    };
-    let mut supervisor = Supervisor::spawn(cmd, timeout)?;
-
-    // Take stdout for reading
-    let stdout = supervisor.take_stdout();
-
-    if no_tui {
-        // Simple println mode for CI/headless
-        wrap_claude_simple(
-            stdout,
-            &signal_fifo,
-            &mut supervisor,
-            result_fifo,
-            session_tag,
-        )
-    } else {
-        // Full TUI mode
-        wrap_claude_tui(
-            stdout,
-            &signal_fifo,
-            &mut supervisor,
-            result_fifo,
-            session_tag,
-        )
-    }
-}
-
-/// Simple println mode (original behavior, for CI/headless)
-fn wrap_claude_simple(
-    stdout: std::process::ChildStdout,
-    signal_fifo: &SignalFifo,
-    supervisor: &mut Supervisor,
-    result_fifo: &Path,
-    session_tag: Option<&str>,
-) -> Result<()> {
-    let reader = BufReader::new(stdout);
-    let mut collector = EventCollector::new();
-
-    // Process each JSONL line from claude stdout
-    for line in reader.lines() {
-        // Check for signals (non-blocking)
-        while let Some(signal) = signal_fifo.try_recv() {
-            print_interrupt(&signal);
-            collector.add_interrupt(signal);
-        }
-
-        let line = match line {
-            Ok(l) => l,
-            Err(e) => {
-                warn!(error = %e, "Error reading line from claude stdout");
-                continue;
-            }
-        };
-
-        if let Some(event) = collector.process_line(&line) {
-            print_event_humanized(&event); // Human-readable to stdout (pane)
-        }
-    }
-
-    // Drain any remaining signals
-    collector.drain_signals(signal_fifo);
-
-    // Wait for claude to exit
-    let status = supervisor.wait_with_timeout()?;
-    let exit_code = status.code().unwrap_or(-1);
-
-    // Build final result and write to FIFO (unblocks the waiting `run` process)
-    collector.finalize(exit_code, session_tag, result_fifo)
-}
-
-/// TUI mode with interactive display
-fn wrap_claude_tui(
-    stdout: std::process::ChildStdout,
-    signal_fifo: &SignalFifo,
-    supervisor: &mut Supervisor,
-    result_fifo: &Path,
-    session_tag: Option<&str>,
-) -> Result<()> {
-    // Create channel for TUI events
-    let (tx, rx) = mpsc::channel::<TuiEvent>();
-    let tx_signal = tx.clone();
-
-    // Spawn stdout reader thread
-    let stdout_handle = thread::spawn(move || {
-        let reader = BufReader::new(stdout);
-        for line in reader.lines() {
-            let line = match line {
-                Ok(l) => l,
-                Err(e) => {
-                    warn!(error = %e, "Error reading line from claude stdout");
-                    continue;
-                }
-            };
-
-            if line.trim().is_empty() {
-                continue;
-            }
-
-            match serde_json::from_str::<StreamEvent>(&line) {
-                Ok(event) => {
-                    if tx.send(TuiEvent::Claude(event)).is_err() {
-                        break; // TUI closed
-                    }
-                }
-                Err(e) => {
-                    let truncated: String = line.chars().take(50).collect();
-                    warn!(
-                        error = %e,
-                        line = %truncated,
-                        "JSON parse error"
-                    );
-                }
-            }
-        }
-        // Signal that stdout is done
-        let _ = tx.send(TuiEvent::ProcessExit);
-    });
-
-    // Clone signal_fifo path for the thread
-    let signal_path = signal_fifo.path().to_path_buf();
-
-    // Spawn signal reader thread
-    let signal_handle = thread::spawn(move || {
-        // Create a new SignalFifo for this thread using the same path
-        // We poll periodically to check for signals
-        loop {
-            // Try to read signal from the FIFO
-            if let Ok(contents) = std::fs::read_to_string(&signal_path) {
-                for line in contents.lines() {
-                    if let Ok(signal) = serde_json::from_str::<InterruptSignal>(line) {
-                        if tx_signal.send(TuiEvent::Interrupt(signal)).is_err() {
-                            return; // TUI closed
-                        }
-                    }
-                }
-                // Clear the file after reading
-                let _ = std::fs::write(&signal_path, "");
-            }
-            thread::sleep(Duration::from_millis(100));
-        }
-    });
-
-    // Run TUI (blocks until user quits)
-    let tui_result = run_tui(rx)?;
-
-    // Wait for stdout thread to finish
-    let _ = stdout_handle.join();
-
-    // Signal thread runs forever, so we don't join it - it'll be terminated when we exit
-    drop(signal_handle);
-
-    // Wait for the child process (non-blocking check in loop)
-    let exit_code = loop {
-        match supervisor.try_wait()? {
-            Some(status) => {
-                break status.code().unwrap_or(-1);
-            }
-            None => {
-                // Process still running, wait a bit
-                thread::sleep(Duration::from_millis(100));
-            }
-        }
-    };
-
-    // Build final result from TUI state and write to FIFO
-    EventCollector::from_tui_result(tui_result).finalize(exit_code, session_tag, result_fifo)
-}
-
-// ============================================================================
-// Utilities
-// ============================================================================
-
-/// Shell-escape a string for safe use in shell commands
-fn shell_quote(s: &str) -> Cow<'_, str> {
-    escape(Cow::Borrowed(s))
-}
-
-/// Build the final prompt, optionally prepending injected context.
-///
-/// When context is provided, it's prepended with a double newline separator
-/// to clearly delineate it from the actual prompt.
-fn build_prompt(prompt: &str, inject_context: Option<&str>) -> String {
-    match inject_context {
-        Some(ctx) => format!("{}\n\n{}", ctx, prompt),
-        None => prompt.to_string(),
-    }
-}
-
-// ============================================================================
 // Tests
 // ============================================================================
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use mantle::events::ContentBlock;
+    use mantle::events::{ContentBlock, StreamEvent};
+    use mantle::{InterruptSignal, RunResult};
     use std::collections::HashMap;
 
     const SAMPLE_INIT: &str = r#"{"type":"system","subtype":"init","session_id":"abc-123","tools":["Read","Glob"],"model":"claude-sonnet-4-20250514"}"#;
@@ -1081,37 +731,5 @@ mod tests {
         assert!(json.contains("\"reason\":\"Need human review\""));
         // state should be omitted when None
         assert!(!json.contains("\"state\""));
-    }
-
-    #[test]
-    fn test_build_prompt_without_context() {
-        let result = build_prompt("do the thing", None);
-        assert_eq!(result, "do the thing");
-    }
-
-    #[test]
-    fn test_build_prompt_with_context() {
-        let result = build_prompt("continue working", Some("CONTEXT: file.rs was modified"));
-        assert_eq!(result, "CONTEXT: file.rs was modified\n\ncontinue working");
-    }
-
-    #[test]
-    fn test_build_prompt_with_multiline_context() {
-        let ctx = "CONTEXT:\n- file1.rs modified\n- file2.rs added";
-        let result = build_prompt("proceed", Some(ctx));
-        assert_eq!(
-            result,
-            "CONTEXT:\n- file1.rs modified\n- file2.rs added\n\nproceed"
-        );
-    }
-
-    #[test]
-    fn test_build_prompt_with_special_chars() {
-        // Verify special chars pass through (shell escaping happens later)
-        let ctx = "CONTEXT: user said \"hello\" & 'goodbye'";
-        let result = build_prompt("continue", Some(ctx));
-        assert!(result.contains("\"hello\""));
-        assert!(result.contains("&"));
-        assert!(result.contains("'goodbye'"));
     }
 }

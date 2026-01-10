@@ -28,20 +28,20 @@ The server composes these effect interpreters via `runEffects`:
 | UI | ui-executor | WebSocket ↔ UIState/UserAction bridging |
 | Habitica | habitica-executor | Habitica API calls (optional) |
 | LLMComplete | llm-executor | Anthropic/OpenAI API calls |
-| ClaudeCodeExec | claudecode-executor | Claude Code subprocess execution |
+| Session | session-executor | Dockerized Claude Code sessions via mantle |
 | Observability | observability-executor | Loki logs + OTLP traces |
 
 Composition order (EffectRunner.hs):
 
 ```haskell
 runEffects :: ExecutorEnv -> UIContext -> UICallback
-           -> Eff '[UI, Habitica, LLMComplete, ClaudeCodeExec, Observability, IO] a
+           -> Eff '[UI, Habitica, LLMComplete, Session, Observability, IO] a
            -> IO a
 runEffects env ctx callback action = do
   traceCtx <- newTraceContext
   result <- runM
     . runObservabilityWithContext traceCtx (ecLokiConfig $ eeConfig env)
-    . runClaudeCodeExecIO (ecClaudeCodeConfig $ eeConfig env)
+    . runSessionIO (ecSessionConfig $ eeConfig env)
     . runLLMComplete (eeLLMEnv env)
     . runHabitica (eeHabiticaEnv env)
     . runUI ctx callback
@@ -57,7 +57,7 @@ Effects are peeled from the outside in:
 1. **UI** (first) - handles user interaction via WebSocket
 2. **Habitica** - makes Habitica API calls
 3. **LLMComplete** - makes LLM API calls
-4. **ClaudeCodeExec** - executes nodes via Claude Code subprocess
+4. **Session** - executes ClaudeCode nodes via dockerized mantle sessions
 5. **Observability** (last) - records events to Loki, spans to Tempo
 
 ## Running
