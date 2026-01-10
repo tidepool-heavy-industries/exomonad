@@ -58,6 +58,7 @@ library
         parsec >= 3.1 && < 4,
         time >= 1.12 && < 2,
         tidepool-core,
+        tidepool-actor,
         tidepool-session-executor,
         tidepool-worktree-executor,
         tidepool-cabal-executor,

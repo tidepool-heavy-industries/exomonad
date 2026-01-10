@@ -91,7 +91,6 @@ import GHC.Generics (Generic)
 import Tidepool.Effects.Cabal (TestFailure)
 import Tidepool.Effects.Worktree (WorktreePath)
 import Tidepool.StructuredOutput (StructuredOutput)
-import Tidepool.ClaudeCode.SessionState (ResumeStrategy(..))
 
 
 
@@ -109,6 +108,15 @@ data ProjectType
     -- ^ Servant webserver with HTTP endpoints
   | CLIApp
     -- ^ Command-line application
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
+
+-- | Strategy for resuming Claude Code sessions across retries.
+data ResumeStrategy
+  = SmartResume
+    -- ^ Use full conversation history for context
+  | FreshStart
+    -- ^ Start with fresh context on retry
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON, StructuredOutput)
 

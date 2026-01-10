@@ -6,13 +6,21 @@
 use crate::error::Result;
 use crate::events::{InterruptSignal, ResultEvent, RunResult, StreamEvent};
 use crate::fifo::{write_result, SignalFifo};
-use crate::tui::TuiResult;
+use crate::hub::{run_result_to_session_result, write_result_to_socket};
 use std::path::Path;
 use tracing::warn;
 
+/// Destination for writing the final result.
+#[derive(Debug, Clone)]
+pub enum ResultDestination<'a> {
+    /// Write to a FIFO (legacy mode).
+    Fifo(&'a Path),
+    /// Write to hub socket with session ID.
+    HubSocket { path: &'a Path, session_id: &'a str },
+}
+
 /// Collects streaming events and builds the final RunResult.
 ///
-/// Used by both TUI and simple modes to deduplicate event processing logic.
 /// The collector accumulates:
 /// - All stream events from Claude's stdout
 /// - The final result event (success/error)
@@ -77,6 +85,18 @@ impl EventCollector {
         session_tag: Option<&str>,
         result_fifo: &Path,
     ) -> Result<()> {
+        self.finalize_to(exit_code, session_tag, ResultDestination::Fifo(result_fifo))
+    }
+
+    /// Build final result and write to the specified destination.
+    ///
+    /// Supports both FIFO (legacy) and hub socket (new) destinations.
+    pub fn finalize_to(
+        self,
+        exit_code: i32,
+        session_tag: Option<&str>,
+        destination: ResultDestination<'_>,
+    ) -> Result<()> {
         let result = RunResult::from_events(
             self.events,
             self.result_event,
@@ -84,18 +104,13 @@ impl EventCollector {
             session_tag.map(|s| s.to_string()),
             self.interrupts,
         );
-        write_result(result_fifo, &result)
-    }
 
-    /// Create from TUI results.
-    ///
-    /// The TUI maintains its own event state; this converts it back to
-    /// an EventCollector for finalization.
-    pub fn from_tui_result(tui_result: TuiResult) -> Self {
-        Self {
-            events: tui_result.events,
-            result_event: tui_result.result_event,
-            interrupts: tui_result.interrupts,
+        match destination {
+            ResultDestination::Fifo(path) => write_result(path, &result),
+            ResultDestination::HubSocket { path, session_id } => {
+                let session_result = run_result_to_session_result(&result, session_id);
+                write_result_to_socket(path, &session_result)
+            }
         }
     }
 }

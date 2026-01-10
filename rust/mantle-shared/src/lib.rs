@@ -12,6 +12,7 @@
 //!
 //! ### IPC
 //! - [`fifo`]: FIFO abstractions for IPC (result and signal pipes)
+//! - [`hub`]: Hub client for session coordination and visualization
 //! - [`socket`]: Unix socket client for control envelope communication
 //!
 //! ### Process Management
@@ -20,7 +21,6 @@
 //!
 //! ### Output
 //! - [`humanize`]: Human-readable output formatting for terminal display
-//! - [`tui`]: Terminal UI for interactive sessions
 //!
 //! ### Commands & Wrapper
 //! - [`commands`]: CLI command implementations (signal, hook)
@@ -34,6 +34,7 @@ pub mod protocol;
 
 // IPC
 pub mod fifo;
+pub mod hub;
 pub mod socket;
 
 // Process management
@@ -42,7 +43,6 @@ pub mod supervisor;
 
 // Output
 pub mod humanize;
-pub mod tui;
 
 // Commands & wrapper
 pub mod commands;
@@ -58,7 +58,10 @@ pub use protocol::{ControlMessage, ControlResponse, HookInput, HookOutput};
 pub use socket::ControlSocket;
 pub use supervisor::Supervisor;
 
+// Re-export hub types
+pub use hub::{HubClient, HubConfig, SessionInfo, SessionRegister, SessionResult, SessionState};
+
 // Re-export command and wrapper types
 pub use commands::{handle_hook, send_signal, HookEventType};
 pub use util::{build_prompt, find_mantle_agent_binary, shell_quote};
-pub use wrapper::{wrap_claude, EventCollector};
+pub use wrapper::{wrap_claude, wrap_claude_with_hub, EventCollector, ResultDestination};

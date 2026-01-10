@@ -3,226 +3,27 @@
 
 -- | Baseline runner for types-first-dev workflow.
 --
--- Runs the full workflow, captures statistics, and persists results
--- to ~/tidepool-labs/dev-runs/baseline/.
+-- DEPRECATED: This module contained the old baseline implementation.
+-- Use the hybrid handlers instead.
 module TypesFirstDev.Baseline
   ( -- * Running
     runBaseline
   , runBaselineWithSpec
-
     -- * Result Construction
   , resultsToMetadata
   ) where
 
-import Control.Monad.Freer (runM)
-import Control.Monad.Freer.Error (runError)
-import Control.Monad.Freer.Reader (runReader)
-import qualified Data.Map.Strict as Map
-import Data.Maybe (isNothing)
 import Data.Text (Text)
-import Data.Time (UTCTime, getCurrentTime, diffUTCTime)
+import Data.Time (UTCTime)
+import TypesFirstDev.Stats (RunMetadata)
+import TypesFirstDev.Types (StackSpec)
 
-import Tidepool.ClaudeCode.Config (mkClaudeCodeConfig, ClaudeCodeConfig(..))
-import Tidepool.ClaudeCode.Effect (runClaudeCodeExecIO)
-import Tidepool.Graph.Execute (callHandler, dispatchGoto)
-import Tidepool.Graph.Memory (evalMemory)
-import Tidepool.Worktree.Executor (runWorktreeIO, defaultWorktreeConfig)
-
-import TypesFirstDev.DevRuns (persistRunMetadata)
-import TypesFirstDev.Graph (TypesFirstGraph(..))
-import TypesFirstDev.Handlers (typesFirstHandlers)
-import TypesFirstDev.Stats
-import TypesFirstDev.Types (StackSpec(..), ProjectType(..), ParallelResults(..), TestsResult(..), ImplResult(..), WorkflowError(..), emptySessionContext, ResumeStrategy(..), Blocker(..))
-
-
--- | Run the baseline workflow with the default Stack spec.
+-- Stub implementations
 runBaseline :: Text -> FilePath -> IO RunMetadata
-runBaseline sessionName projectPath = do
-  let spec = defaultStackSpec projectPath
-  runBaselineWithSpec sessionName spec
+runBaseline _ _ = error "runBaseline: Deprecated. Use hybrid handlers instead."
 
-
--- | Run the baseline workflow with a custom spec.
 runBaselineWithSpec :: Text -> StackSpec -> IO RunMetadata
-runBaselineWithSpec sessionName spec = do
-  startTime <- getCurrentTime
+runBaselineWithSpec _ _ = error "runBaselineWithSpec: Deprecated. Use hybrid handlers instead."
 
-  let claudeConfig = (mkClaudeCodeConfig sessionName)
-        { ccDefaultTimeout = 600 }
-      worktreeConfig = defaultWorktreeConfig spec.ssProjectPath
-
-  -- Run the workflow
-  -- Memory effect holds session context (session ID, project path)
-  result <- runM
-    . runWorktreeIO worktreeConfig
-    . runClaudeCodeExecIO claudeConfig
-    . runReader spec
-    . runReader claudeConfig
-    . evalMemory emptySessionContext
-    . runError @WorkflowError
-    $ do
-        let handlers = typesFirstHandlers spec
-        choice <- callHandler (types handlers) spec
-        dispatchGoto handlers choice
-
-  endTime <- getCurrentTime
-  let duration = realToFrac (diffUTCTime endTime startTime)
-
-  -- Convert to metadata (handle workflow errors)
-  let meta = case result of
-        Left err -> errorToMetadata startTime duration spec err
-        Right res -> resultsToMetadata startTime duration spec res
-
-  -- Persist to disk
-  _ <- persistRunMetadata meta
-
-  pure meta
-
-
--- | Convert ParallelResults to RunMetadata.
---
--- Extracts success/failure and stats from the workflow results.
--- Now includes actual costs from ClaudeCodeResult.
-resultsToMetadata
-  :: UTCTime         -- ^ Start timestamp
-  -> Double          -- ^ Duration in seconds
-  -> StackSpec       -- ^ Input spec
-  -> ParallelResults -- ^ Workflow results
-  -> RunMetadata
-resultsToMetadata startTime duration spec ParallelResults{..} =
-  -- With two-stream architecture: build success was already verified by handlers
-  -- Success means: has rubrics, no blockers
-  let implSuccess = not (null prImplResult.irFunctionRubrics)
-                 && isNothing prImplResult.irBlocker
-      testsSuccess = not (null prTestsResult.trFunctionRubrics)
-                  && isNothing prTestsResult.trBlocker
-      overallSuccess = implSuccess && testsSuccess
-
-      -- Total cost from both agents
-      totalCost = prTestsCost + prImplCost
-
-      -- Create stats with actual costs from ClaudeCodeResult
-      agentStats = Map.fromList
-        [ ("impl", implResultToStats prImplResult prImplCost)
-        , ("tests", testsResultToStats prTestsResult prTestsCost)
-        ]
-
-  in RunMetadata
-    { rmRunId = generateRunId startTime
-    , rmTimestamp = startTime
-    , rmDurationSeconds = duration
-    , rmSuccess = overallSuccess
-    , rmSpec = spec
-    , rmAgentStats = agentStats
-    , rmTotalCost = totalCost
-    , rmTotalTokens = 0  -- Token aggregation requires executor instrumentation
-    , rmExperiment = Nothing
-    }
-
-
--- | Convert WorkflowError to RunMetadata.
---
--- Records the failure with error details.
-errorToMetadata
-  :: UTCTime       -- ^ Start timestamp
-  -> Double        -- ^ Duration in seconds
-  -> StackSpec     -- ^ Input spec
-  -> WorkflowError -- ^ The error
-  -> RunMetadata
-errorToMetadata startTime duration spec err =
-  RunMetadata
-    { rmRunId = generateRunId startTime
-    , rmTimestamp = startTime
-    , rmDurationSeconds = duration
-    , rmSuccess = False
-    , rmSpec = spec
-    , rmAgentStats = Map.singleton "error" (errorToStats err)
-    , rmTotalCost = 0
-    , rmTotalTokens = 0
-    , rmExperiment = Nothing
-    }
-
--- | Convert WorkflowError to AgentStats.
-errorToStats :: WorkflowError -> AgentStats
-errorToStats err = AgentStats
-  { asNodeName = "workflow"
-  , asDurationSeconds = 0
-  , asInputTokens = 0
-  , asOutputTokens = 0
-  , asCost = 0
-  , asRetries = 0
-  , asSuccess = False
-  , asErrorMessage = Just (errorMessage err)
-  }
-  where
-    errorMessage = \case
-      SkeletonCompileFailed msg -> "Skeleton compile failed: " <> msg
-      WorktreeCreationFailed msg -> "Worktree creation failed: " <> msg
-      AgentFailed name msg -> "Agent " <> name <> " failed: " <> msg
-      AgentNoOutput name -> "Agent " <> name <> " returned no output"
-      AgentParseFailed name msg -> "Agent " <> name <> " parse failed: " <> msg
-      MergeFailed msg -> "Merge failed: " <> msg
-
-
--- | Convert ImplResult to AgentStats.
---
--- Includes cost from ClaudeCodeResult. Tokens require executor instrumentation.
--- With two-stream architecture: build success was verified by handlers.
-implResultToStats :: ImplResult -> Double -> AgentStats
-implResultToStats ImplResult{..} cost = AgentStats
-  { asNodeName = "impl"
-  , asDurationSeconds = 0  -- Not measured yet
-  , asInputTokens = 0
-  , asOutputTokens = 0
-  , asCost = cost
-  , asRetries = 0
-  , asSuccess = not (null irFunctionRubrics) && isNothing irBlocker
-  , asErrorMessage = blockerToText irBlocker
-  }
-
-
--- | Convert TestsResult to AgentStats.
---
--- Includes cost from ClaudeCodeResult. Tokens require executor instrumentation.
--- With two-stream architecture: build success was verified by handlers.
-testsResultToStats :: TestsResult -> Double -> AgentStats
-testsResultToStats TestsResult{..} cost = AgentStats
-  { asNodeName = "tests"
-  , asDurationSeconds = 0
-  , asInputTokens = 0
-  , asOutputTokens = 0
-  , asCost = cost
-  , asRetries = 0
-  , asSuccess = not (null trFunctionRubrics) && isNothing trBlocker
-  , asErrorMessage = blockerToText trBlocker
-  }
-
-
--- | Convert structured Blocker to Text for logging.
--- With two-stream architecture: Blocker has category + description + wouldUnblock
-blockerToText :: Maybe Blocker -> Maybe Text
-blockerToText Nothing = Nothing
-blockerToText (Just b) = Just $
-  "[" <> blCategory b <> "] " <> blDescription b
-
-
--- | Default Stack experiment spec.
-defaultStackSpec :: FilePath -> StackSpec
-defaultStackSpec projectPath = StackSpec
-  { ssProjectPath = projectPath
-  , ssModuleName = "Data.Stack"
-  , ssDescription = "A LIFO (last-in-first-out) stack data structure with operations: \
-                    \push (add element to top), pop (remove and return top element), \
-                    \peek (view top element without removing), isEmpty (check if empty)"
-  , ssAcceptanceCriteria =
-      [ "LIFO order: push a,b,c then pop returns c,b,a"
-      , "push then pop is identity: pop (push x s) == Just (x, s)"
-      , "empty stack invariants: isEmpty empty, pop empty == Nothing"
-      ]
-  , ssProjectType = PureLibrary
-  , ssResumeStrategy = SmartResume
-  }
-
-
--- Re-export from Types
--- (These are already exported but needed for the spec)
+resultsToMetadata :: Text -> UTCTime -> IO RunMetadata
+resultsToMetadata _ _ = error "resultsToMetadata: Deprecated. Use hybrid handlers instead."

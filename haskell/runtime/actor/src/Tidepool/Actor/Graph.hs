@@ -76,7 +76,8 @@ module Tidepool.Actor.Graph
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
 import Control.Monad.Freer (Eff, Member, interpret, sendM, LastMember, runM)
 import qualified Control.Monad.Freer as Freer
-import Data.Aeson (Value, ToJSON(..), FromJSON(..))
+import Data.Aeson (Value, ToJSON(..), FromJSON(..), object, (.=), (.:))
+import qualified Data.Aeson as Aeson
 import Data.Aeson.Types (parseEither)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef, modifyIORef')
 import Data.Kind (Type, Constraint)
@@ -316,6 +317,24 @@ runGraphAsActors handlerBuilders entryPayload = do
               case parseEither parseJSON payload of
                 Left err -> error $ "Failed to parse exit payload: " <> err
                 Right result -> putMVar exitChan result
+
+          | target == "arrive" = do
+              -- Arrive: extract barrier name and dispatch to barrier actor
+              -- Message format: { "barrier": "hJoin", "payload": {...} }
+              case parseArriveMessage payload of
+                Left err -> error $ "Failed to parse arrive message: " <> err
+                Right (barrierName, sourceName, workerPayload) -> do
+                  actors <- readIORef actorsRef
+                  case Map.lookup barrierName actors of
+                    Nothing -> error $ "Unknown barrier target: " <> T.unpack barrierName
+                    Just barrierActor -> do
+                      -- Build message with source info for barrier
+                      let barrierMsg = object
+                            [ "source" .= sourceName
+                            , "payload" .= workerPayload
+                            ]
+                      send (actorMailbox barrierActor) barrierMsg
+
           | otherwise = do
               -- Normal dispatch: look up actor and send
               actors <- readIORef actorsRef
@@ -487,18 +506,52 @@ instance {-# OVERLAPPABLE #-}
 
 
 -- | Arrive target only (for ForkNode workers).
+--
+-- The barrier name is extracted from the type and included in the message,
+-- enabling the router to dispatch to the correct BarrierNode.
 instance {-# OVERLAPPING #-}
-  ToJSON payload => ExtractChoice '[To Arrive payload] where
+  ( KnownSymbol barrierName
+  , ToJSON payload
+  ) => ExtractChoice '[To (Arrive barrierName) payload] where
   extractChoice (GotoChoice (Here payload)) =
-    ("arrive", toJSON payload)
+    let barrierStr = T.pack (symbolVal (Proxy @barrierName))
+        msg = object ["barrier" .= barrierStr, "payload" .= payload]
+    in ("arrive", msg)
 
 
 -- | Arrive target with more targets following.
+--
+-- The barrier name is extracted from the type and included in the message,
+-- enabling the router to dispatch to the correct BarrierNode.
 instance {-# OVERLAPPABLE #-}
-  ( ToJSON payload
+  ( KnownSymbol barrierName
+  , ToJSON payload
   , ExtractChoice rest
-  ) => ExtractChoice (To Arrive payload ': rest) where
+  ) => ExtractChoice (To (Arrive barrierName) payload ': rest) where
   extractChoice (GotoChoice (Here payload)) =
-    ("arrive", toJSON payload)
+    let barrierStr = T.pack (symbolVal (Proxy @barrierName))
+        msg = object ["barrier" .= barrierStr, "payload" .= payload]
+    in ("arrive", msg)
   extractChoice (GotoChoice (There rest)) =
     extractChoice @rest (GotoChoice rest)
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- ARRIVE MESSAGE PARSING
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Parse an arrive message from a worker.
+--
+-- Expected format: { "barrier": "hJoin", "source": "hTests", "payload": {...} }
+--
+-- For MVP, source is optional - if missing, extracted from barrier name.
+-- This works when barrier names match source node names, which is common.
+--
+-- TODO: Require source in message or track provenance at router level.
+parseArriveMessage :: Value -> Either String (Text, Text, Value)
+parseArriveMessage = parseEither $ Aeson.withObject "ArriveMessage" $ \o -> do
+  barrier <- o .: "barrier"
+  -- Try to get source, default to barrier name if missing
+  source <- o Aeson..:? "source" Aeson..!= barrier
+  payload <- o .: "payload"
+  pure (barrier, source, payload)

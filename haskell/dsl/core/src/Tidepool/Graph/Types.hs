@@ -199,24 +199,28 @@ data Awaits resultTypes
 
 -- | Arrive annotation for worker nodes spawned by ForkNode.
 --
--- Used in UsesEffects to indicate the worker deposits a result at its barrier:
+-- Used in UsesEffects to indicate the worker deposits a result at its barrier.
+-- The barrier name (Symbol) identifies which BarrierNode receives the result:
 --
 -- @
 -- worker :: mode :- LLMNode
 --     :@ Input Task
 --     :@ Schema StepResult
---     :@ UsesEffects '[Goto Self Task, Arrive Result]
+--     :@ UsesEffects '[Goto Self Task, Arrive "hJoin" Result]
 -- @
 --
 -- Unlike 'Goto Exit', which terminates the graph, 'Arrive' suspends the
--- current path and deposits the result for the barrier to collect.
+-- current path and deposits the result for the named barrier to collect.
 -- Workers can self-loop ('Goto Self') until ready, then 'Arrive'.
+--
+-- The barrier name allows the router to dispatch arrive messages to the
+-- correct BarrierNode actor, enabling type-safe fan-in.
 --
 -- Note: The extra type parameter @r@ gives 'Arrive' the same kind as other
 -- effects (Type -> Type), so it can appear in 'UsesEffects' alongside 'Goto'.
-type Arrive :: Type -> Type -> Type
-data Arrive resultType r where
-  ArriveOp :: result -> Arrive result ()
+type Arrive :: Symbol -> Type -> Type -> Type
+data Arrive (barrierName :: Symbol) resultType r where
+  ArriveOp :: result -> Arrive barrierName result ()
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- PARALLEL FAN-IN (MERGE)

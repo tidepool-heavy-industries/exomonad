@@ -56,7 +56,6 @@ import Tidepool.Graph.Types
   , Template
   , UsesEffects
   , Exit
-  , ClaudeCode
   , ModelChoice(..)
     -- Fork/Barrier annotations
   , Spawn
@@ -114,7 +113,6 @@ data TypesFirstGraphHybrid mode = TypesFirstGraphHybrid
       :@ Template HTypesTpl
       :@ Schema TypesAgentOutput
       :@ UsesEffects '[Goto "hSkeleton" TypesResult]
-      :@ ClaudeCode 'Haiku 'Nothing
 
     --------------------------------------------------------------------------
     -- PHASE 2: SKELETON + TYPE ADVERSARY [WS1]
@@ -133,7 +131,6 @@ data TypesFirstGraphHybrid mode = TypesFirstGraphHybrid
       :@ Template HTypeAdversaryTpl
       :@ Schema TypeAdversaryOutput
       :@ UsesEffects '[Goto "hGate" TypeAdversaryResult]
-      :@ ClaudeCode 'Haiku 'Nothing
 
     -- | Gate: Collects skeleton + adversary results.
     -- Routes to fork (clean) or typesFix (holes found).
@@ -150,7 +147,6 @@ data TypesFirstGraphHybrid mode = TypesFirstGraphHybrid
       :@ Template HTypesFixTpl
       :@ Schema TypesAgentOutput
       :@ UsesEffects '[Goto "hSkeleton" TypesResult]
-      :@ ClaudeCode 'Haiku 'Nothing
 
     --------------------------------------------------------------------------
     -- PHASE 3: PARALLEL BLIND EXECUTION [WS2]
@@ -171,8 +167,7 @@ data TypesFirstGraphHybrid mode = TypesFirstGraphHybrid
       :@ Types.Input TestsTemplateCtx
       :@ Template HTestsTpl
       :@ Schema TestsAgentOutput
-      :@ UsesEffects '[Arrive TestsResult]
-      :@ ClaudeCode 'Sonnet 'Nothing
+      :@ UsesEffects '[Arrive "hJoin" TestsResult]
 
     -- | IMPL AGENT: Writes implementation.
     -- Blind to tests. Verifies build passes.
@@ -181,8 +176,7 @@ data TypesFirstGraphHybrid mode = TypesFirstGraphHybrid
       :@ Types.Input ImplTemplateCtx
       :@ Template HImplTpl
       :@ Schema ImplAgentOutput
-      :@ UsesEffects '[Arrive ImplResult]
-      :@ ClaudeCode 'Sonnet 'Nothing
+      :@ UsesEffects '[Arrive "hJoin" ImplResult]
 
     --------------------------------------------------------------------------
     -- PHASE 4: TDD VERIFICATION [WS3]
@@ -226,7 +220,6 @@ data TypesFirstGraphHybrid mode = TypesFirstGraphHybrid
       :@ Template HConflictResolveTpl
       :@ Schema ConflictResolveOutput
       :@ UsesEffects '[Goto "hValidate" MergedState]
-      :@ ClaudeCode 'Haiku 'Nothing
 
     --------------------------------------------------------------------------
     -- PHASE 6: VALIDATION LOOP [WS4]
@@ -247,7 +240,6 @@ data TypesFirstGraphHybrid mode = TypesFirstGraphHybrid
       :@ Template HFixTpl
       :@ Schema FixAgentOutput
       :@ UsesEffects '[Goto "hValidate" MergedState]
-      :@ ClaudeCode 'Haiku 'Nothing
 
     --------------------------------------------------------------------------
     -- PHASE 7: POST-VALIDATION [WS4]
@@ -268,7 +260,6 @@ data TypesFirstGraphHybrid mode = TypesFirstGraphHybrid
       :@ Template HMutationAdversaryTpl
       :@ Schema MutationAdversaryOutput
       :@ UsesEffects '[Goto "hWitness" WitnessReport]
-      :@ ClaudeCode 'Haiku 'Nothing
 
     -- | Witness: Observes flow and maintains coherent understanding.
   , hWitness :: mode :- G.LogicNode

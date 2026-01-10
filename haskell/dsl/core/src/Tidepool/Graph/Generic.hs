@@ -132,6 +132,7 @@ import Tidepool.Graph.Validate.RecordStructure
   ( AllFieldsReachable, AllLogicFieldsReachExit, NoDeadGotosRecord
   , AllLogicNodesHaveGoto, NoGotoSelfOnly
   )
+import Tidepool.Graph.Validate.ForkBarrier (ValidateForkBarrierPairs)
 import Tidepool.Graph.Generic.Core
   ( GraphMode(..)
   , AsGraph
@@ -1382,6 +1383,8 @@ type ValidGraphRecord graph =
   -- Transition validation
   , AllLogicNodesHaveGoto graph
   , NoGotoSelfOnly graph
+  -- Fork/Barrier validation
+  , ValidateForkBarrierPairs graph
   )
 
 -- | Require Generic instance with a helpful error message.

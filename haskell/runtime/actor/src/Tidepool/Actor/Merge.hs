@@ -3,9 +3,11 @@
 -- | Merge accumulator for collecting parallel worker results.
 --
 -- This module provides the mechanism for gathering results from parallel
--- workers at a Merge node. Results are grouped by correlation key and
+-- workers at a BarrierNode. Results are grouped by correlation key and
 -- accumulated until all expected sources have reported.
-module Tidepool.Parallel.Merge
+--
+-- Moved from tidepool-parallel for runtime consolidation.
+module Tidepool.Actor.Merge
   ( -- * Merge Accumulator
     MergeAccumulator(..)
   , newMergeAccumulator

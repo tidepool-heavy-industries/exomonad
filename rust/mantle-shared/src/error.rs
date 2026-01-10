@@ -70,10 +70,6 @@ pub enum MantleError {
     #[error("signal error: {0}")]
     Signal(String),
 
-    /// Zellij client error.
-    #[error("zellij client error: {0}")]
-    Zellij(String),
-
     /// Poll system call error.
     #[error("poll error: {0}")]
     Poll(#[source] nix::Error),
@@ -111,6 +107,11 @@ pub enum MantleError {
         #[source]
         source: io::Error,
     },
+
+    // ---- Hub errors ----
+    /// Hub communication error.
+    #[error("hub error: {0}")]
+    Hub(String),
 }
 
 /// Result type alias using MantleError.

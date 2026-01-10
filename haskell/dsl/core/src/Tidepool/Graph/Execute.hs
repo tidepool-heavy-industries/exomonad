@@ -503,14 +503,16 @@ instance
 
 -- | Arrive target case (for parallel workers depositing results at barrier).
 --
--- Check if target name is "Arrive", parse payload if it is, and recurse for rest.
+-- Check if target name is "arrive", parse payload if it is, and recurse for rest.
 -- Used by ForkNode workers to signal completion and deliver their result.
+-- The barrier name (Symbol) is encoded in the message for routing, but dispatch
+-- just needs to know it's an Arrive target.
 instance
   ( StructuredOutput payload
   , ConvertTransitionHint rest
-  ) => ConvertTransitionHint (To Arrive payload ': rest) where
+  ) => ConvertTransitionHint (To (Arrive barrierName) payload ': rest) where
   convertTransitionHint targetName payloadVal
-    | targetName == "Arrive" =
+    | targetName == "arrive" =
         case parseStructured payloadVal of
           Right val -> Just $ GotoChoice (Here val)
           Left _ -> Nothing
@@ -593,15 +595,17 @@ instance {-# OVERLAPPABLE #-}
 --
 -- Note: In standalone dispatch (outside Fork context), Arrive behaves like Exit
 -- for that path. The fork orchestration layer interprets this differently.
-instance {-# OVERLAPPING #-} DispatchGoto graph '[To Arrive resultType] es resultType where
+-- The barrier name (Symbol) is for routing; dispatch just returns the result.
+instance {-# OVERLAPPING #-} DispatchGoto graph '[To (Arrive barrierName) resultType] es resultType where
   dispatchGoto _ (GotoChoice (Here result)) = pure result
 
 -- | Arrive is first, but there are more targets.
 --
 -- Handle the Arrive case (return result) or skip to rest of targets.
+-- The barrier name (Symbol) is for routing; dispatch just returns the result.
 instance {-# OVERLAPPABLE #-}
   ( DispatchGoto graph rest es exitType
-  ) => DispatchGoto graph (To Arrive exitType ': rest) es exitType where
+  ) => DispatchGoto graph (To (Arrive barrierName) exitType ': rest) es exitType where
   dispatchGoto _ (GotoChoice (Here result)) = pure result
   dispatchGoto graph (GotoChoice (There rest)) =
     dispatchGoto @graph @rest graph (GotoChoice rest)
@@ -876,9 +880,10 @@ instance
     dispatchGotoWithSelf @graph @selfPayload @allTargets @rest selfHandler graph (GotoChoice rest)
 
 -- | Arrive in current position: return result or skip (like Exit for parallel workers).
+-- The barrier name (Symbol) is for routing; dispatch just returns the result.
 instance
   ( DispatchGotoWithSelf graph selfPayload allTargets rest es exitType
-  ) => DispatchGotoWithSelf graph selfPayload allTargets (To Arrive exitType ': rest) es exitType where
+  ) => DispatchGotoWithSelf graph selfPayload allTargets (To (Arrive barrierName) exitType ': rest) es exitType where
   dispatchGotoWithSelf _ _ (GotoChoice (Here result)) = pure result
   dispatchGotoWithSelf selfHandler graph (GotoChoice (There rest)) =
     dispatchGotoWithSelf @graph @selfPayload @allTargets @rest selfHandler graph (GotoChoice rest)

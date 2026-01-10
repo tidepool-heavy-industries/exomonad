@@ -239,13 +239,17 @@ goto x = send (GotoOp x :: Goto target a ())
 -- completes the current parallel path.
 --
 -- @
--- arrive @MyResult value
+-- arrive @"hJoin" @MyResult value  -- Deposit result at the "hJoin" barrier
 -- @
+--
+-- The barrier name (Symbol) identifies which BarrierNode receives the result.
+-- This allows multiple barriers in a graph, each collecting results from
+-- different worker groups.
 --
 -- Note: The 'Arrive' type is defined in "Tidepool.Graph.Types" with the
 -- 'ArriveOp' constructor.
-arrive :: forall result effs. Member (Arrive result) effs => result -> Eff effs ()
-arrive r = send (ArriveOp r)
+arrive :: forall barrierName result effs. Member (Arrive barrierName result) effs => result -> Eff effs ()
+arrive r = send (ArriveOp r :: Arrive barrierName result ())
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- JSON SERIALIZATION
@@ -379,16 +383,19 @@ gotoSelf payload = GotoChoice (injectTarget @(To Self payload) @targets payload)
 -- 'gotoArrive' only completes the current parallel path.
 --
 -- @
--- gotoArrive myResult
+-- gotoArrive @"hJoin" myResult  -- Deposit result at the "hJoin" barrier
 -- @
+--
+-- The barrier name (Symbol) identifies which BarrierNode receives the result.
+-- This enables type-safe routing even when multiple barriers exist in a graph.
 gotoArrive
-  :: forall payload targets.
+  :: forall barrierName payload targets.
      ( NonEmptyList targets
-     , InjectTarget (To Arrive payload) targets
-     , GotoElemC (To Arrive payload) targets
+     , InjectTarget (To (Arrive barrierName) payload) targets
+     , GotoElemC (To (Arrive barrierName) payload) targets
      )
   => payload -> GotoChoice targets
-gotoArrive payload = GotoChoice (injectTarget @(To Arrive payload) @targets payload)
+gotoArrive payload = GotoChoice (injectTarget @(To (Arrive barrierName) payload) @targets payload)
 
 -- | Extract the payload from a single-target 'GotoChoice'.
 --

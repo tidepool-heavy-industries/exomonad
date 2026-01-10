@@ -3,5 +3,6 @@ resolver = "2"
 members = [
     "mantle",
     "mantle-agent",
+    "mantle-hub",
     "mantle-shared",
 ]

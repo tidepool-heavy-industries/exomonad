@@ -18,7 +18,6 @@ module TypesFirstDev.Handlers.Hybrid.Merge
   ) where
 
 import Control.Monad.Freer (Eff, sendM)
-import Control.Monad.Freer.Reader (ask)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
@@ -27,7 +26,7 @@ import System.Process (readProcessWithExitCode)
 import System.Directory (withCurrentDirectory)
 import System.FilePath ((</>))
 
-import Tidepool.Effects.Worktree (Worktree, createWorktree, WorktreeSpec(..), WorktreePath(..))
+import Tidepool.Effects.Worktree (createWorktree, WorktreeSpec(..), WorktreePath(..))
 
 import TypesFirstDev.Effect.Build (testWithDetails, buildAll)
 import qualified TypesFirstDev.Effect.Build as Build
@@ -38,7 +37,7 @@ import Tidepool.Graph.Goto
   , ClaudeCodeResult(..)
   , gotoChoice
   )
-import Tidepool.Graph.Memory (Memory, getMem, updateMem)
+import Tidepool.Graph.Memory (getMem, updateMem)
 import Tidepool.Graph.Types (ModelChoice(..), HList(..))
 
 import TypesFirstDev.Types.Hybrid
@@ -181,8 +180,6 @@ hMergeHandler verifiedResults = do
 
   let testsCommit = verifiedResults.vrBlindResults.brTests.testsCommitHash
       implCommit = verifiedResults.vrBlindResults.brImpl.implCommitHash
-      testsWorktree = verifiedResults.vrBlindResults.brTests.testsWorktree
-      implWorktree = verifiedResults.vrBlindResults.brImpl.implWorktree
 
   sendM $ putStrLn $ "  Tests commit: " <> T.unpack testsCommit
   sendM $ putStrLn $ "  Impl commit: " <> T.unpack implCommit
@@ -302,13 +299,12 @@ readConflictedFile dir relPath = do
 hConflictResolveHandler
   :: ClaudeCodeLLMHandler
        'Haiku                                    -- model
-       'Nothing                                  -- cwd (use merge worktree)
-       ConflictState                             -- input
+       ConflictState                             -- needs
        ConflictResolveOutput                     -- schema
        '[To "hValidate" MergedState]             -- targets
-       HybridEffects                             -- effects
-       ConflictResolveTemplateCtx                -- template context type
-hConflictResolveHandler = ClaudeCodeLLMHandler @'Haiku @'Nothing
+       HybridEffects                             -- effs
+       ConflictResolveTemplateCtx                -- tpl
+hConflictResolveHandler = ClaudeCodeLLMHandler @'Haiku
   Nothing                      -- no system template
   hConflictResolveCompiled     -- user template
   buildConflictResolveContext  -- before: builds context

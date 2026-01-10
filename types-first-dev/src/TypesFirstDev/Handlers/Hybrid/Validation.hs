@@ -156,13 +156,12 @@ convertFailure bf = StructuredFailure
 hFixHandler
   :: ClaudeCodeLLMHandler
        'Haiku                                -- model
-       'Nothing                              -- cwd (Nothing = use default)
-       ValidationFailure                     -- input
+       ValidationFailure                     -- needs
        FixAgentOutput                        -- schema
        '[To "hValidate" MergedState]         -- targets
-       HybridEffects                         -- effects
-       FixTemplateCtx                        -- template context type
-hFixHandler = ClaudeCodeLLMHandler @'Haiku @'Nothing
+       HybridEffects                         -- effs
+       FixTemplateCtx                        -- tpl
+hFixHandler = ClaudeCodeLLMHandler @'Haiku
   Nothing         -- no system template
   hFixCompiled    -- user template
   buildFixContext -- before: checks exit conditions, builds context

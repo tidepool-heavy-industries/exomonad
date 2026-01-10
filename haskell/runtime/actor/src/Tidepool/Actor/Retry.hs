@@ -2,7 +2,12 @@
 --
 -- This module provides configurable retry behavior for failed workers.
 -- Supports exponential backoff with configurable max delay.
-module Tidepool.Parallel.Retry
+--
+-- Moved from tidepool-parallel for runtime consolidation.
+--
+-- TODO: Currently included for completeness but not used in MVP.
+--       Add retry integration to barrier handlers in future iteration.
+module Tidepool.Actor.Retry
   ( -- * Configuration
     RetryConfig(..)
   , defaultRetryConfig

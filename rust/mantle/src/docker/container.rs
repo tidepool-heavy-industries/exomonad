@@ -61,8 +61,10 @@ pub struct ContainerConfig {
     pub image: String,
     /// Path to the worktree to mount
     pub worktree_path: PathBuf,
-    /// Path to the FIFO directory for result communication
-    pub fifo_dir: PathBuf,
+    /// Path to the FIFO directory for result communication (legacy mode)
+    pub fifo_dir: Option<PathBuf>,
+    /// Path to hub socket for result communication (new mode)
+    pub hub_socket: Option<PathBuf>,
     /// Path to Claude config directory (~/.claude)
     pub claude_home: PathBuf,
     /// Session ID (used for container naming)
@@ -76,7 +78,7 @@ pub struct ContainerConfig {
 }
 
 impl ContainerConfig {
-    /// Create a new container config with defaults.
+    /// Create a new container config with FIFO mode (legacy).
     pub fn new(
         session_id: String,
         worktree_path: PathBuf,
@@ -92,7 +94,34 @@ impl ContainerConfig {
         Ok(Self {
             image: "mantle-agent:latest".to_string(),
             worktree_path,
-            fifo_dir,
+            fifo_dir: Some(fifo_dir),
+            hub_socket: None,
+            claude_home,
+            session_id,
+            claude_args,
+            timeout_secs: 0,
+            env_vars: HashMap::new(),
+        })
+    }
+
+    /// Create a new container config with hub socket mode.
+    pub fn new_with_hub(
+        session_id: String,
+        worktree_path: PathBuf,
+        hub_socket: PathBuf,
+        claude_args: Vec<String>,
+    ) -> Result<Self> {
+        // Find Claude home directory
+        let claude_home = dirs::home_dir()
+            .map(|h| h.join(".claude"))
+            .filter(|p| p.exists())
+            .ok_or_else(|| DockerError::ClaudeHomeNotFound(PathBuf::from("~/.claude")))?;
+
+        Ok(Self {
+            image: "mantle-agent:latest".to_string(),
+            worktree_path,
+            fifo_dir: None,
+            hub_socket: Some(hub_socket),
             claude_home,
             session_id,
             claude_args,
@@ -129,13 +158,21 @@ impl ContainerConfig {
         let mut cmd = vec![
             "mantle-agent".to_string(),
             "wrap".to_string(),
-            "--result-fifo".to_string(),
-            "/tmp/mantle/result.fifo".to_string(),
-            "--cwd".to_string(),
-            "/workspace".to_string(),
-            "--session-tag".to_string(),
-            self.session_id.clone(),
         ];
+
+        // Use hub socket mode if configured, otherwise fall back to FIFO
+        if self.hub_socket.is_some() {
+            cmd.push("--hub-socket".to_string());
+            cmd.push("/tmp/mantle.sock".to_string());
+        } else {
+            cmd.push("--result-fifo".to_string());
+            cmd.push("/tmp/mantle/result.fifo".to_string());
+        }
+
+        cmd.push("--cwd".to_string());
+        cmd.push("/workspace".to_string());
+        cmd.push("--session-tag".to_string());
+        cmd.push(self.session_id.clone());
 
         if self.timeout_secs > 0 {
             cmd.push("--timeout".to_string());
@@ -166,7 +203,7 @@ impl ContainerConfig {
 
     /// Build mount configuration.
     fn build_mounts(&self) -> Vec<Mount> {
-        vec![
+        let mut mounts = vec![
             // Worktree: read-write for Claude to modify code
             Mount {
                 target: Some("/workspace".to_string()),
@@ -183,15 +220,30 @@ impl ContainerConfig {
                 read_only: Some(true),
                 ..Default::default()
             },
-            // FIFO directory: read-write for result communication
-            Mount {
-                target: Some("/tmp/mantle".to_string()),
-                source: Some(self.fifo_dir.display().to_string()),
+        ];
+
+        // Add IPC mount: hub socket or FIFO directory
+        if let Some(hub_socket) = &self.hub_socket {
+            // Hub socket: mount the socket file directly
+            mounts.push(Mount {
+                target: Some("/tmp/mantle.sock".to_string()),
+                source: Some(hub_socket.display().to_string()),
                 typ: Some(MountTypeEnum::BIND),
                 read_only: Some(false),
                 ..Default::default()
-            },
-        ]
+            });
+        } else if let Some(fifo_dir) = &self.fifo_dir {
+            // FIFO directory: mount the entire directory
+            mounts.push(Mount {
+                target: Some("/tmp/mantle".to_string()),
+                source: Some(fifo_dir.display().to_string()),
+                typ: Some(MountTypeEnum::BIND),
+                read_only: Some(false),
+                ..Default::default()
+            });
+        }
+
+        mounts
     }
 }
 
@@ -285,7 +337,8 @@ impl ContainerManager {
 
         let mut stream = self.docker.wait_container(container_id, Some(options));
 
-        while let Some(result) = stream.next().await {
+        // Get the first (and typically only) result from the stream
+        if let Some(result) = stream.next().await {
             match result {
                 Ok(response) => {
                     let exit_code = response.status_code;
@@ -294,16 +347,14 @@ impl ContainerManager {
                         exit_code = %exit_code,
                         "Container exited"
                     );
-                    return Ok(exit_code);
+                    Ok(exit_code)
                 }
-                Err(e) => {
-                    return Err(DockerError::Wait(e));
-                }
+                Err(e) => Err(DockerError::Wait(e)),
             }
+        } else {
+            // Stream ended without result - container may have been removed
+            Ok(0)
         }
-
-        // Stream ended without result - container may have been removed
-        Ok(0)
     }
 
     /// Stop a running container.
@@ -464,7 +515,8 @@ mod tests {
         let config = ContainerConfig {
             image: "test:latest".to_string(),
             worktree_path: PathBuf::from("/tmp/worktree"),
-            fifo_dir: PathBuf::from("/tmp/fifo"),
+            fifo_dir: Some(PathBuf::from("/tmp/fifo")),
+            hub_socket: None,
             claude_home: PathBuf::from("/home/user/.claude"),
             session_id: "abc-123-def-456".to_string(),
             claude_args: vec!["-p".to_string(), "test prompt".to_string()],
@@ -486,7 +538,8 @@ mod tests {
         let config = ContainerConfig {
             image: "test:latest".to_string(),
             worktree_path: PathBuf::from("/tmp/worktree"),
-            fifo_dir: PathBuf::from("/tmp/fifo"),
+            fifo_dir: Some(PathBuf::from("/tmp/fifo")),
+            hub_socket: None,
             claude_home: PathBuf::from("/home/user/.claude"),
             session_id: "abc12345-def-456".to_string(),
             claude_args: vec![],
@@ -502,7 +555,8 @@ mod tests {
         let config = ContainerConfig {
             image: "test:latest".to_string(),
             worktree_path: PathBuf::from("/tmp/worktree"),
-            fifo_dir: PathBuf::from("/tmp/fifo"),
+            fifo_dir: Some(PathBuf::from("/tmp/fifo")),
+            hub_socket: None,
             claude_home: PathBuf::from("/home/user/.claude"),
             session_id: "abc-123".to_string(),
             claude_args: vec![],
@@ -533,7 +587,8 @@ mod tests {
         let mut config = ContainerConfig {
             image: "test:latest".to_string(),
             worktree_path: PathBuf::from("/tmp/worktree"),
-            fifo_dir: PathBuf::from("/tmp/fifo"),
+            fifo_dir: Some(PathBuf::from("/tmp/fifo")),
+            hub_socket: None,
             claude_home: PathBuf::from("/home/user/.claude"),
             session_id: "abc-123".to_string(),
             claude_args: vec![],
@@ -552,7 +607,8 @@ mod tests {
         let config = ContainerConfig {
             image: "test:latest".to_string(),
             worktree_path: PathBuf::from("/tmp/worktree"),
-            fifo_dir: PathBuf::from("/tmp/fifo"),
+            fifo_dir: Some(PathBuf::from("/tmp/fifo")),
+            hub_socket: None,
             claude_home: PathBuf::from("/home/user/.claude"),
             session_id: "abc-123-def-456".to_string(),
             claude_args: vec!["-p".to_string(), "hello".to_string()],
@@ -574,7 +630,8 @@ mod tests {
         let config = ContainerConfig {
             image: "test:latest".to_string(),
             worktree_path: PathBuf::from("/tmp/worktree"),
-            fifo_dir: PathBuf::from("/tmp/fifo"),
+            fifo_dir: Some(PathBuf::from("/tmp/fifo")),
+            hub_socket: None,
             claude_home: PathBuf::from("/home/user/.claude"),
             session_id: "abc-123".to_string(),
             claude_args: vec![],
@@ -627,7 +684,8 @@ mod tests {
         let config = ContainerConfig {
             image: "default:latest".to_string(),
             worktree_path: PathBuf::from("/tmp/worktree"),
-            fifo_dir: PathBuf::from("/tmp/fifo"),
+            fifo_dir: Some(PathBuf::from("/tmp/fifo")),
+            hub_socket: None,
             claude_home: PathBuf::from("/home/user/.claude"),
             session_id: "abc-123".to_string(),
             claude_args: vec![],
@@ -644,7 +702,8 @@ mod tests {
         let config = ContainerConfig {
             image: "test:latest".to_string(),
             worktree_path: PathBuf::from("/tmp/worktree"),
-            fifo_dir: PathBuf::from("/tmp/fifo"),
+            fifo_dir: Some(PathBuf::from("/tmp/fifo")),
+            hub_socket: None,
             claude_home: PathBuf::from("/home/user/.claude"),
             session_id: "abc-123".to_string(),
             claude_args: vec![],
@@ -661,7 +720,8 @@ mod tests {
         let config = ContainerConfig {
             image: "test:latest".to_string(),
             worktree_path: PathBuf::from("/tmp/worktree"),
-            fifo_dir: PathBuf::from("/tmp/fifo"),
+            fifo_dir: Some(PathBuf::from("/tmp/fifo")),
+            hub_socket: None,
             claude_home: PathBuf::from("/home/user/.claude"),
             session_id: "abc-123".to_string(),
             claude_args: vec![],
@@ -680,7 +740,8 @@ mod tests {
         let config = ContainerConfig {
             image: "test:latest".to_string(),
             worktree_path: PathBuf::from("/tmp/worktree"),
-            fifo_dir: PathBuf::from("/tmp/fifo"),
+            fifo_dir: Some(PathBuf::from("/tmp/fifo")),
+            hub_socket: None,
             claude_home: PathBuf::from("/home/user/.claude"),
             session_id: "my-unique-session-id".to_string(),
             claude_args: vec![],
@@ -701,7 +762,8 @@ mod tests {
         let config = ContainerConfig {
             image: "test:latest".to_string(),
             worktree_path: PathBuf::from("/tmp/worktree"),
-            fifo_dir: PathBuf::from("/tmp/fifo"),
+            fifo_dir: Some(PathBuf::from("/tmp/fifo")),
+            hub_socket: None,
             claude_home: PathBuf::from("/home/user/.claude"),
             session_id: "abc-123".to_string(),
             claude_args: vec![],

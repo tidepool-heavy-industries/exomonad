@@ -1,18 +1,19 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE RankNTypes #-}
 
--- | Parallel dispatch for GotoAll fan-out.
+-- | Parallel dispatch for ForkNode fan-out.
 --
--- This module provides the runtime execution of parallel graph dispatch.
--- When a handler returns 'GotoAll', workers are spawned concurrently using ki,
--- and results are collected at the 'Merge' node.
-module Tidepool.Parallel.Dispatch
+-- This module provides the runtime execution of parallel worker dispatch.
+-- When a ForkNode handler returns an HList of payloads, workers are spawned
+-- concurrently using ki, and results are collected at the BarrierNode.
+--
+-- Moved from tidepool-parallel for runtime consolidation.
+module Tidepool.Actor.Dispatch
   ( -- * Configuration
     ParallelConfig(..)
   , defaultParallelConfig
 
     -- * Execution
-  , runParallel
   , dispatchAll
 
     -- * Worker Management
@@ -24,8 +25,7 @@ module Tidepool.Parallel.Dispatch
   ) where
 
 import Control.Concurrent.STM (atomically)
-import Data.Aeson (Value, ToJSON(..), FromJSON(..))
-import Data.Aeson.Types (parseEither)
+import Data.Aeson (Value, ToJSON(..))
 import Data.Kind (Type, Constraint)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -36,7 +36,7 @@ import qualified Ki
 import Tidepool.Graph.Goto (To)
 import Tidepool.Graph.Goto.Internal (GotoAll(..))
 import Tidepool.Graph.Types (HList(..))
-import Tidepool.Parallel.Retry (RetryConfig(..), defaultRetryConfig, withRetry, RetryResult(..))
+import Tidepool.Actor.Retry (RetryConfig(..), defaultRetryConfig, withRetry, RetryResult(..))
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -74,61 +74,19 @@ data WorkerResult = WorkerResult
 
 
 -- ════════════════════════════════════════════════════════════════════════════
--- PARALLEL EXECUTION
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Run a graph with parallel execution support.
---
--- This is the top-level entry point for parallel graph execution. It handles:
---
--- * Spawning workers for 'GotoAll' fan-outs
--- * Collecting results at 'Merge' nodes with correlation key grouping
--- * Retry logic for failed workers
---
--- @
--- result <- runParallel defaultParallelConfig handlers (toJSON initialInput)
--- @
-runParallel
-  :: forall result.
-     FromJSON result
-  => ParallelConfig
-  -> (Text -> Value -> IO (Either GotoAllResult GotoOneResult))  -- ^ Handler dispatcher
-  -> Value                                                        -- ^ Initial input
-  -> IO result
-runParallel _config dispatch initialPayload = Ki.scoped $ \scope -> do
-  -- TODO: Full implementation with merge accumulator
-  -- For now, just dispatch to "entry" and handle single path
-  result <- dispatch "entry" initialPayload
-  case result of
-    Left _gotoAll -> error "GotoAll not yet fully implemented"
-    Right (GotoOneResult target payload)
-      | target == "exit" -> case parseEither parseJSON payload of
-          Left err -> error $ "Failed to parse exit: " <> err
-          Right r -> pure r
-      | otherwise -> error $ "Non-exit goto not yet implemented: " <> T.unpack target
-
-
--- | Result of a handler that chose one target.
-data GotoOneResult = GotoOneResult
-  { gorTarget :: Text
-  , gorPayload :: Value
-  }
-
--- | Result of a handler that fanned out to all targets.
-data GotoAllResult = GotoAllResult
-  { garCorrelationKey :: Value  -- JSON-serialized key
-  , garTargets :: [(Text, Value)]  -- [(targetName, payload)]
-  }
-
-
--- ════════════════════════════════════════════════════════════════════════════
 -- DISPATCH ALL
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Dispatch to all targets in a GotoAll concurrently.
+-- | Dispatch to all targets in a ForkNode concurrently.
 --
 -- Spawns one worker per target, waits for all to complete, returns results.
 -- Uses ki for structured concurrency (all workers cleaned up on scope exit).
+--
+-- @
+-- results <- Ki.scoped $ \scope ->
+--   dispatchAll defaultParallelConfig scope workerDispatch
+--     [("hTests", testsPayload), ("hImpl", implPayload)]
+-- @
 dispatchAll
   :: ParallelConfig
   -> Ki.Scope
@@ -160,6 +118,11 @@ spawnWorker config scope dispatch (target, payload) =
 --
 -- Extracts target names and payloads from the type-level list, serializes
 -- payloads to JSON, and returns (target, payload) pairs for dispatch.
+--
+-- @
+-- let targets = gotoAll (payReq ::: invReq ::: HNil)
+--     extracted = extractTargets targets  -- [(Text, Value)]
+-- @
 type SpawnWorkers :: [Type] -> Constraint
 class SpawnWorkers targets where
   -- | Extract (targetName, jsonPayload) pairs from a GotoAll.
@@ -187,6 +150,9 @@ instance
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Run an action with retry, failing if all attempts exhausted.
+--
+-- TODO: Better error handling for MVP - currently crashes on failure.
+--       Consider returning Either and letting barrier handle failures.
 runWithRetryOrFail :: RetryConfig -> IO a -> IO a
 runWithRetryOrFail config action = do
   result <- withRetry config action

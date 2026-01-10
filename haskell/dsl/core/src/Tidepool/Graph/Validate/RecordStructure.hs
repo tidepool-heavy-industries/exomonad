@@ -582,7 +582,7 @@ type HasAnyGotoInEffects :: [Effect] -> Bool
 type family HasAnyGotoInEffects effs where
   HasAnyGotoInEffects '[] = 'False
   HasAnyGotoInEffects (Goto _ _ ': _) = 'True
-  HasAnyGotoInEffects (Arrive _ ': _) = 'True  -- Arrive is also a valid exit path
+  HasAnyGotoInEffects (Arrive _ _ ': _) = 'True  -- Arrive is also a valid exit path
   HasAnyGotoInEffects (_ ': rest) = HasAnyGotoInEffects rest
 
 -- | Error when a Logic node has no Goto effects.
@@ -655,7 +655,7 @@ type family HasNonSelfGotoInEffects effs where
   HasNonSelfGotoInEffects '[] = 'False
   HasNonSelfGotoInEffects (Goto Self _ ': rest) = HasNonSelfGotoInEffects rest
   HasNonSelfGotoInEffects (Goto _ _ ': _) = 'True  -- Named or Exit
-  HasNonSelfGotoInEffects (Arrive _ ': _) = 'True  -- Arrive is also an exit path (for ForkNode workers)
+  HasNonSelfGotoInEffects (Arrive _ _ ': _) = 'True  -- Arrive is also an exit path (for ForkNode workers)
   HasNonSelfGotoInEffects (_ ': rest) = HasNonSelfGotoInEffects rest
 
 -- | Error when a node only has Goto Self.

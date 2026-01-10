@@ -32,6 +32,7 @@ library
         Tidepool.Graph.Edges
         Tidepool.Graph.Validate
         Tidepool.Graph.Validate.RecordStructure
+        Tidepool.Graph.Validate.ForkBarrier
         Tidepool.Graph.Reify
         Tidepool.Graph.Export
         Tidepool.Graph.Memory

@@ -17,6 +17,8 @@ module TypesFirstDev.Handlers.Hybrid.Parallel
 
 import Control.Monad.Freer (Eff)
 import Control.Monad.Freer.Reader (ask)
+import Data.Text (Text)
+import qualified Data.Text as T
 
 import Tidepool.Graph.Goto
   ( GotoChoice
@@ -99,13 +101,12 @@ mkHardeningHints adversaryOutput =
 hTestsHandler
   :: ClaudeCodeLLMHandler
        'Sonnet                               -- model
-       'Nothing                              -- cwd (set by orchestration)
-       TestsTemplateCtx                      -- input
+       TestsTemplateCtx                      -- needs
        TestsAgentOutput                      -- schema
-       '[To Arrive TestsResult]              -- targets (Arrive, not Goto)
-       HybridEffects                         -- effects
-       TestsTemplateCtx                      -- template context = input (passthrough)
-hTestsHandler = ClaudeCodeLLMHandler @'Sonnet @'Nothing
+       '[To (Arrive "hJoin") TestsResult]    -- targets (Arrive, not Goto)
+       HybridEffects                         -- effs
+       TestsTemplateCtx                      -- tpl (passthrough)
+hTestsHandler = ClaudeCodeLLMHandler @'Sonnet
   Nothing            -- no system template
   hTestsCompiled     -- user template
   buildTestsContext  -- before: passthrough (input IS the context)
@@ -115,17 +116,17 @@ hTestsHandler = ClaudeCodeLLMHandler @'Sonnet @'Nothing
     buildTestsContext :: TestsTemplateCtx -> Eff HybridEffects TestsTemplateCtx
     buildTestsContext = pure
 
-    routeAfterTests :: ClaudeCodeResult TestsAgentOutput -> Eff HybridEffects (GotoChoice '[To Arrive TestsResult])
+    routeAfterTests :: ClaudeCodeResult TestsAgentOutput -> Eff HybridEffects (GotoChoice '[To (Arrive "hJoin") TestsResult])
     routeAfterTests ccResult = do
       let result = TestsResult
             { testsOutput = ccResult.ccrParsedOutput
             , testsWorktree = ""  -- Set by orchestration layer
             , testsCommitHash = ""  -- Set by orchestration layer
-            , testsSessionId = maybe "unknown" id ccResult.ccrSessionId
+            , testsSessionId = T.pack (show ccResult.ccrSessionId)  -- Extract SessionId value
             , testsCost = 0.0  -- TODO: Extract from ClaudeCode metrics
             , testsFailureProof = []  -- Populated by external verification in hVerifyTDD
             }
-      pure $ gotoArrive result
+      pure $ gotoArrive @"hJoin" result
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -138,13 +139,12 @@ hTestsHandler = ClaudeCodeLLMHandler @'Sonnet @'Nothing
 hImplHandler
   :: ClaudeCodeLLMHandler
        'Sonnet                               -- model
-       'Nothing                              -- cwd (set by orchestration)
-       ImplTemplateCtx                       -- input
+       ImplTemplateCtx                       -- needs
        ImplAgentOutput                       -- schema
-       '[To Arrive ImplResult]               -- targets (Arrive, not Goto)
-       HybridEffects                         -- effects
-       ImplTemplateCtx                       -- template context = input (passthrough)
-hImplHandler = ClaudeCodeLLMHandler @'Sonnet @'Nothing
+       '[To (Arrive "hJoin") ImplResult]     -- targets (Arrive, not Goto)
+       HybridEffects                         -- effs
+       ImplTemplateCtx                       -- tpl (passthrough)
+hImplHandler = ClaudeCodeLLMHandler @'Sonnet
   Nothing           -- no system template
   hImplCompiled     -- user template
   buildImplContext  -- before: passthrough
@@ -153,13 +153,13 @@ hImplHandler = ClaudeCodeLLMHandler @'Sonnet @'Nothing
     buildImplContext :: ImplTemplateCtx -> Eff HybridEffects ImplTemplateCtx
     buildImplContext = pure
 
-    routeAfterImpl :: ClaudeCodeResult ImplAgentOutput -> Eff HybridEffects (GotoChoice '[To Arrive ImplResult])
+    routeAfterImpl :: ClaudeCodeResult ImplAgentOutput -> Eff HybridEffects (GotoChoice '[To (Arrive "hJoin") ImplResult])
     routeAfterImpl ccResult = do
       let result = ImplResult
             { implOutput = ccResult.ccrParsedOutput
             , implWorktree = ""  -- Set by orchestration layer
             , implCommitHash = ""  -- Set by orchestration layer
-            , implSessionId = maybe "unknown" id ccResult.ccrSessionId
+            , implSessionId = T.pack (show ccResult.ccrSessionId)  -- Extract SessionId value
             , implCost = 0.0  -- TODO: Extract from ClaudeCode metrics
             }
-      pure $ gotoArrive result
+      pure $ gotoArrive @"hJoin" result

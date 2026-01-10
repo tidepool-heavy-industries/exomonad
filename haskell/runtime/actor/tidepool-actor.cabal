@@ -18,6 +18,13 @@ library
         Tidepool.Actor.Spawn
         Tidepool.Actor.Runtime
         Tidepool.Actor.Graph
+        -- Parallel execution (moved from tidepool-parallel)
+        Tidepool.Actor.Merge
+        Tidepool.Actor.Dispatch
+        Tidepool.Actor.Retry
+        -- ForkNode/BarrierNode support
+        Tidepool.Actor.Fork
+        Tidepool.Actor.Barrier
     build-depends:
         base >= 4.17 && < 5,
         ki >= 1.0 && < 2,
@@ -26,6 +33,8 @@ library
         containers >= 0.6 && < 1,
         text >= 2.0 && < 3,
         freer-simple >= 1.2 && < 2,
+        hashable >= 1.4 && < 2,
+        unordered-containers >= 0.2 && < 1,
         tidepool-core
 
     hs-source-dirs:   src

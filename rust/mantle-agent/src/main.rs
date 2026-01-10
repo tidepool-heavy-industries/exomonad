@@ -1,6 +1,6 @@
 //! mantle-agent: Container-side agent for mantle sessions.
 //!
-//! This binary runs inside Docker containers (or zellij panes) and wraps Claude Code,
+//! This binary runs inside Docker containers and wraps Claude Code,
 //! handling process supervision, hook interception, and signal forwarding.
 //!
 //! ## Commands
@@ -15,7 +15,7 @@ use tracing::error;
 use tracing_subscriber::EnvFilter;
 
 use mantle_shared::commands::HookEventType;
-use mantle_shared::{handle_hook, send_signal, wrap_claude};
+use mantle_shared::{handle_hook, send_signal, wrap_claude, wrap_claude_with_hub};
 
 // ============================================================================
 // CLI Types
@@ -33,15 +33,19 @@ struct Cli {
 enum Commands {
     /// Wrap claude as subprocess, humanize output
     Wrap {
-        /// FIFO to write final JSON result to
-        #[arg(long)]
-        result_fifo: PathBuf,
+        /// FIFO to write final JSON result to (mutually exclusive with --hub-socket)
+        #[arg(long, required_unless_present = "hub_socket", conflicts_with = "hub_socket")]
+        result_fifo: Option<PathBuf>,
+
+        /// Hub socket to write final JSON result to (mutually exclusive with --result-fifo)
+        #[arg(long, required_unless_present = "result_fifo", conflicts_with = "result_fifo")]
+        hub_socket: Option<PathBuf>,
 
         /// Working directory for Claude Code
         #[arg(long)]
         cwd: Option<PathBuf>,
 
-        /// Tag for correlating this session with orchestrator state
+        /// Tag for correlating this session with orchestrator state (required with --hub-socket)
         #[arg(long)]
         session_tag: Option<String>,
 
@@ -52,10 +56,6 @@ enum Commands {
         /// Control socket path (enables hook interception)
         #[arg(long)]
         control_socket: Option<PathBuf>,
-
-        /// Disable TUI, use simple println output (for CI/headless)
-        #[arg(long)]
-        no_tui: bool,
 
         /// All remaining args passed to claude
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
@@ -108,21 +108,42 @@ fn main() {
     let result = match cli.command {
         Commands::Wrap {
             result_fifo,
+            hub_socket,
             cwd,
             session_tag,
             timeout,
             control_socket,
-            no_tui,
             claude_args,
-        } => wrap_claude(
-            &result_fifo,
-            cwd.as_ref(),
-            session_tag.as_deref(),
-            timeout,
-            control_socket.as_ref(),
-            no_tui,
-            &claude_args,
-        ),
+        } => {
+            if let Some(hub_socket) = hub_socket {
+                // Hub socket mode - requires session_tag
+                let session_id = session_tag.as_deref().unwrap_or_else(|| {
+                    error!("--session-tag is required when using --hub-socket");
+                    std::process::exit(1);
+                });
+                wrap_claude_with_hub(
+                    &hub_socket,
+                    session_id,
+                    cwd.as_ref(),
+                    timeout,
+                    control_socket.as_ref(),
+                    &claude_args,
+                )
+            } else if let Some(result_fifo) = result_fifo {
+                // Legacy FIFO mode
+                wrap_claude(
+                    &result_fifo,
+                    cwd.as_ref(),
+                    session_tag.as_deref(),
+                    timeout,
+                    control_socket.as_ref(),
+                    &claude_args,
+                )
+            } else {
+                error!("Either --result-fifo or --hub-socket must be provided");
+                std::process::exit(1);
+            }
+        }
 
         Commands::Signal {
             signal_type,

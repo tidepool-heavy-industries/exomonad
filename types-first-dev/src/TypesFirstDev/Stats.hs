@@ -28,8 +28,23 @@ import qualified Data.Text as T
 import Data.Time (UTCTime, formatTime, defaultTimeLocale)
 import GHC.Generics (Generic)
 
-import Tidepool.ClaudeCode.Types (ClaudeCodeResult(..), ModelUsage(..))
+-- ClaudeCodeResult imported from Tidepool.Graph.Goto below
+-- ModelUsage defined locally below since tidepool-core doesn't provide detailed stats
+import Tidepool.Graph.Goto (ClaudeCodeResult(..))
 import TypesFirstDev.Types (StackSpec)
+
+
+-- | Model usage statistics (tokens, costs).
+-- Locally defined since tidepool-core ClaudeCodeResult doesn't include metrics.
+data ModelUsage = ModelUsage
+  { muInputTokens :: Int
+    -- ^ Input tokens consumed
+  , muOutputTokens :: Int
+    -- ^ Output tokens generated
+  , muCost :: Double
+    -- ^ Cost in USD
+  }
+  deriving stock (Show, Eq, Generic)
 
 
 -- | Statistics for a single agent node execution.
@@ -157,27 +172,24 @@ instance FromJSON RunMetadata where
 
 -- | Capture statistics from a ClaudeCodeResult.
 --
--- Extracts token counts, cost, and error status from the result.
+-- MVP: Placeholder implementation since tidepool-core ClaudeCodeResult
+-- doesn't include detailed metrics yet. Returns default stats with nodeName.
 captureAgentStats
   :: Text              -- ^ Node name
   -> Double            -- ^ Duration in seconds (measured externally)
   -> Int               -- ^ Retry count
-  -> ClaudeCodeResult  -- ^ Result from Claude Code execution
+  -> ClaudeCodeResult schema  -- ^ Result from Claude Code execution
   -> AgentStats
-captureAgentStats nodeName duration retries result =
-  let (inputToks, outputToks) = aggregateModelUsage result.ccrModelUsage
-      errMsg = if result.ccrIsError
-               then result.ccrResult
-               else Nothing
-  in AgentStats
+captureAgentStats nodeName duration retries _result =
+  AgentStats
     { asNodeName = nodeName
     , asDurationSeconds = duration
-    , asInputTokens = inputToks
-    , asOutputTokens = outputToks
-    , asCost = result.ccrTotalCostUsd
+    , asInputTokens = 0      -- TODO: Extract from ClaudeCodeResult when available
+    , asOutputTokens = 0     -- TODO: Extract from ClaudeCodeResult when available
+    , asCost = 0.0           -- TODO: Extract from ClaudeCodeResult when available
     , asRetries = retries
-    , asSuccess = not result.ccrIsError
-    , asErrorMessage = errMsg
+    , asSuccess = True       -- TODO: Track success status in ClaudeCodeResult
+    , asErrorMessage = Nothing
     }
 
 
@@ -240,19 +252,12 @@ instance FromJSON AggregateStats where
 
 -- | Aggregate costs from multiple ClaudeCodeResults.
 --
--- Used to compute total cost across forked sessions.
-aggregateCosts :: [ClaudeCodeResult] -> AggregateStats
+-- MVP: Placeholder since ClaudeCodeResult doesn't include cost metrics yet.
+aggregateCosts :: [ClaudeCodeResult schema] -> AggregateStats
 aggregateCosts results =
-  let costs = map ccrTotalCostUsd results
-      usages = map ccrModelUsage results
-      (inputToks, outputToks) = foldl addUsage (0, 0) usages
-  in AggregateStats
-    { asTotalCost = sum costs
-    , asTotalInputTokens = inputToks
-    , asTotalOutputTokens = outputToks
+  AggregateStats
+    { asTotalCost = 0.0      -- TODO: Extract from ClaudeCodeResult when available
+    , asTotalInputTokens = 0 -- TODO: Extract from ClaudeCodeResult when available
+    , asTotalOutputTokens = 0 -- TODO: Extract from ClaudeCodeResult when available
     , asSessionCount = length results
     }
-  where
-    addUsage (accIn, accOut) usage =
-      let (inToks, outToks) = aggregateModelUsage usage
-      in (accIn + inToks, accOut + outToks)

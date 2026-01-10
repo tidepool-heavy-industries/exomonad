@@ -6,7 +6,6 @@
 //! ## Commands
 //!
 //! - `session` - Manage sessions (start, continue, fork, list, info, cleanup)
-//! - `run` - Legacy: spawn in zellij pane (requires --features zellij)
 
 use clap::{Parser, Subcommand};
 use tracing::error;
@@ -17,20 +16,6 @@ use mantle::session::{
     CleanupConfig, ContinueConfig, ForkConfig, ListConfig, SessionState, StartConfig, StateManager,
     WorktreeManager,
 };
-
-// Zellij-specific imports
-#[cfg(feature = "zellij")]
-use std::path::PathBuf;
-#[cfg(feature = "zellij")]
-use std::time::Duration;
-#[cfg(feature = "zellij")]
-use tracing::{debug, info};
-#[cfg(feature = "zellij")]
-use zellij_client::{cli_client::start_cli_client, os_input_output::get_cli_client_os_input};
-#[cfg(feature = "zellij")]
-use zellij_utils::input::{actions::Action, command::RunCommandAction};
-#[cfg(feature = "zellij")]
-use mantle::{build_prompt, shell_quote, MantleError, Result, ResultFifo};
 
 // ============================================================================
 // CLI Types
@@ -50,62 +35,6 @@ enum Commands {
     Session {
         #[command(subcommand)]
         command: SessionCommands,
-    },
-
-    /// Run a Claude Code session in a new zellij pane (legacy, requires --features zellij)
-    #[cfg(feature = "zellij")]
-    Run {
-        /// Zellij session name to attach to
-        #[arg(long)]
-        session: String,
-
-        /// Name for the new pane
-        #[arg(long)]
-        name: String,
-
-        /// Model to use (haiku, sonnet, opus)
-        #[arg(long, default_value = "haiku")]
-        model: String,
-
-        /// Prompt text for Claude Code
-        #[arg(long)]
-        prompt: String,
-
-        /// Context to inject before the prompt (for session resume with fresh context)
-        #[arg(long)]
-        inject_context: Option<String>,
-
-        /// Working directory for Claude Code
-        #[arg(long)]
-        cwd: Option<PathBuf>,
-
-        /// JSON schema for structured output validation
-        #[arg(long)]
-        json_schema: Option<String>,
-
-        /// Tools to allow (e.g., "Glob,Read" or "" for none)
-        #[arg(long)]
-        tools: Option<String>,
-
-        /// Timeout in seconds (0 = no timeout)
-        #[arg(long, default_value = "300")]
-        timeout: u64,
-
-        /// Resume an existing Claude Code session by ID
-        #[arg(long)]
-        resume: Option<String>,
-
-        /// Fork the session (read-only resume, doesn't modify original)
-        #[arg(long)]
-        fork_session: bool,
-
-        /// Tag for correlating this session with orchestrator state (e.g., worktree name)
-        #[arg(long)]
-        session_tag: Option<String>,
-
-        /// Control socket path (enables hook interception via Haskell)
-        #[arg(long)]
-        control_socket: Option<PathBuf>,
     },
 }
 
@@ -198,37 +127,6 @@ fn main() {
 
     let result = match cli.command {
         Commands::Session { command } => handle_session_command(command),
-
-        #[cfg(feature = "zellij")]
-        Commands::Run {
-            session,
-            name,
-            model,
-            prompt,
-            inject_context,
-            cwd,
-            json_schema,
-            tools,
-            timeout,
-            resume,
-            fork_session,
-            session_tag,
-            control_socket,
-        } => run_cc_session(
-            &session,
-            &name,
-            &model,
-            &prompt,
-            inject_context.as_deref(),
-            cwd.as_ref(),
-            json_schema.as_deref(),
-            tools.as_deref(),
-            timeout,
-            resume.as_deref(),
-            fork_session,
-            session_tag.as_deref(),
-            control_socket.as_ref(),
-        ),
     };
 
     if let Err(e) = result {
@@ -376,155 +274,6 @@ fn handle_session_command(cmd: SessionCommands) -> std::result::Result<(), Box<d
             }
         }
     }
-}
-
-// ============================================================================
-// Legacy Run Command (zellij)
-// ============================================================================
-
-#[cfg(feature = "zellij")]
-fn run_cc_session(
-    session: &str,
-    name: &str,
-    model: &str,
-    prompt: &str,
-    inject_context: Option<&str>,
-    cwd: Option<&PathBuf>,
-    json_schema: Option<&str>,
-    tools: Option<&str>,
-    timeout_secs: u64,
-    resume: Option<&str>,
-    fork_session: bool,
-    session_tag: Option<&str>,
-    control_socket: Option<&PathBuf>,
-) -> std::result::Result<(), Box<dyn std::error::Error>> {
-    // Create FIFO for result communication
-    let result_fifo = ResultFifo::new()?;
-
-    // Build claude args
-    let mut claude_args = vec![
-        "--dangerously-skip-permissions".to_string(),
-        "--output-format".to_string(),
-        "stream-json".to_string(),
-        "--verbose".to_string(),
-        "--model".to_string(),
-        model.to_string(),
-    ];
-
-    // Add optional flags
-    if let Some(schema) = json_schema {
-        claude_args.push("--json-schema".to_string());
-        claude_args.push(schema.to_string());
-    }
-
-    if let Some(t) = tools {
-        claude_args.push("--tools".to_string());
-        claude_args.push(t.to_string());
-    }
-
-    // Add session resumption flags
-    if let Some(session_id) = resume {
-        claude_args.push("--resume".to_string());
-        claude_args.push(session_id.to_string());
-    }
-
-    if fork_session {
-        claude_args.push("--fork-session".to_string());
-    }
-
-    // Add prompt (with optional injected context prefix)
-    claude_args.push("-p".to_string());
-    claude_args.push(build_prompt(prompt, inject_context));
-
-    // Build wrap command - escape args properly
-    let escaped_args: Vec<String> = claude_args
-        .iter()
-        .map(|a| shell_quote(a).into_owned())
-        .collect();
-
-    // Use mantle-agent instead of mantle for the wrapper
-    let mut wrap_cmd_parts = vec![
-        "mantle-agent".to_string(),
-        "wrap".to_string(),
-        "--result-fifo".to_string(),
-        shell_quote(&result_fifo.path().display().to_string()).into_owned(),
-    ];
-
-    // Add cwd if specified
-    if let Some(dir) = cwd {
-        wrap_cmd_parts.push("--cwd".to_string());
-        wrap_cmd_parts.push(shell_quote(&dir.display().to_string()).into_owned());
-    }
-
-    // Add session tag if specified
-    if let Some(tag) = session_tag {
-        wrap_cmd_parts.push("--session-tag".to_string());
-        wrap_cmd_parts.push(shell_quote(tag).into_owned());
-    }
-
-    // Pass timeout to wrap command so it can enforce it on the subprocess
-    if timeout_secs > 0 {
-        wrap_cmd_parts.push("--timeout".to_string());
-        wrap_cmd_parts.push(timeout_secs.to_string());
-    }
-
-    // Pass control socket to wrap command for hook interception
-    if let Some(socket) = control_socket {
-        wrap_cmd_parts.push("--control-socket".to_string());
-        wrap_cmd_parts.push(shell_quote(&socket.display().to_string()).into_owned());
-    }
-
-    wrap_cmd_parts.push("--".to_string());
-    wrap_cmd_parts.extend(escaped_args);
-
-    let wrap_cmd = wrap_cmd_parts.join(" ");
-
-    debug!(wrap_cmd = %wrap_cmd, "Building wrap command");
-
-    let os_input = get_cli_client_os_input()
-        .map_err(|e| MantleError::Zellij(format!("Failed to get zellij OS input: {}", e)))?;
-
-    // Spawn pane running wrap command
-    let actions = vec![Action::NewTiledPane(
-        None,
-        Some(RunCommandAction {
-            command: PathBuf::from("bash"),
-            args: vec!["-c".into(), wrap_cmd],
-            cwd: cwd.cloned(),
-            direction: None,
-            hold_on_close: true,
-            hold_on_start: false,
-            originating_plugin: None,
-            use_terminal_title: false,
-        }),
-        Some(name.to_string()),
-    )];
-
-    info!(
-        session = %session,
-        pane_name = %name,
-        model = %model,
-        "Spawning zellij pane"
-    );
-
-    start_cli_client(Box::new(os_input), session, actions);
-
-    // Block reading from FIFO
-    let timeout = if timeout_secs > 0 {
-        Duration::from_secs(timeout_secs)
-    } else {
-        Duration::ZERO // Sentinel for "no timeout"
-    };
-
-    let result = result_fifo.read_with_timeout(timeout)?;
-
-    // Print final JSON to stdout (for Haskell caller)
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&result).map_err(MantleError::JsonSerialize)?
-    );
-
-    Ok(())
 }
 
 // ============================================================================

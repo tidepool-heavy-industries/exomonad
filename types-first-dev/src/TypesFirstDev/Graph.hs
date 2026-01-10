@@ -33,7 +33,6 @@ import Tidepool.Graph.Types
   , Template
   , UsesEffects
   , Exit
-  , ClaudeCode
   , ModelChoice(..)
   )
 import qualified Tidepool.Graph.Types as Types (Input)
@@ -70,7 +69,6 @@ data TypesFirstGraph mode = TypesFirstGraph
       :@ Template TypesTpl
       :@ Schema TypeDefinitions
       :@ UsesEffects '[Goto "skeleton" ForkInput]
-      :@ ClaudeCode 'Sonnet 'Nothing
 
     -- | Skeleton node - generates impl/test skeleton files
     --
@@ -156,7 +154,6 @@ data TypesFirstGraphTDD mode = TypesFirstGraphTDD
       :@ Template TypesTpl
       :@ Schema TypeDefinitions
       :@ UsesEffects '[Goto "tddSkeleton" TypeDefinitions]
-      :@ ClaudeCode 'Haiku 'Nothing
 
     -- | Phase 2: Generate skeleton files
     --
@@ -175,7 +172,6 @@ data TypesFirstGraphTDD mode = TypesFirstGraphTDD
       :@ Template TestsTpl
       :@ Schema TestsResult
       :@ UsesEffects '[Goto "tddVerifyTestsFail" TestsWritten]
-      :@ ClaudeCode 'Haiku 'Nothing
 
     -- | Phase 4: Verify tests fail (TDD step 2)
     --
@@ -195,7 +191,6 @@ data TypesFirstGraphTDD mode = TypesFirstGraphTDD
       :@ Template ImplTpl
       :@ Schema ImplResult
       :@ UsesEffects '[Goto "tddValidate" ImplWritten]
-      :@ ClaudeCode 'Haiku 'Nothing
 
     -- | Phase 6: Validate tests pass
     --
@@ -216,7 +211,6 @@ data TypesFirstGraphTDD mode = TypesFirstGraphTDD
       :@ Template FixTpl
       :@ Schema FixResult
       :@ UsesEffects '[Goto "tddValidate" ImplWritten]
-      :@ ClaudeCode 'Haiku 'Nothing
 
     -- | Exit point - returns TDD result
   , tddExit :: mode :- G.Exit TDDResult

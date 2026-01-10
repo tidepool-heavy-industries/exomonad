@@ -3,31 +3,27 @@
 //! This module provides the core functionality for wrapping Claude Code as a subprocess:
 //! - Process supervision with timeout and signal handling
 //! - Hook configuration generation
-//! - JSONL stream parsing and event collection
-//! - TUI or simple output modes
+//! - JSON output parsing and event collection
 //!
 //! ## Architecture
 //!
 //! ```text
-//! wrap_claude()
+//! wrap_claude() / wrap_claude_with_hub()
 //!     │
-//!     ├── Install signal handlers (SIGINT/SIGTERM forwarding)
-//!     ├── Create signal FIFO for interrupt communication
-//!     ├── Generate hook configuration (if control socket provided)
-//!     ├── Spawn Claude with Supervisor
-//!     │
-//!     └── Either:
-//!         ├── wrap_claude_simple() - println mode for CI
-//!         └── wrap_claude_tui() - interactive TUI mode
+//!     └── wrap_claude_internal()
+//!             ├── Install signal handlers (SIGINT/SIGTERM forwarding)
+//!             ├── Create signal FIFO for interrupt communication
+//!             ├── Generate hook configuration (if control socket provided)
+//!             ├── Spawn Claude with Supervisor
+//!             │
+//!             └── wrap_claude_simple_to() - humanized output for terminal
 //! ```
 
 mod collector;
 mod simple;
-mod tui_mode;
 
-pub use collector::EventCollector;
-pub use simple::wrap_claude_simple;
-pub use tui_mode::wrap_claude_tui;
+pub use collector::{EventCollector, ResultDestination};
+pub use simple::{wrap_claude_simple, wrap_claude_simple_to};
 
 use crate::error::Result;
 use crate::fifo::SignalFifo;
@@ -40,31 +36,45 @@ use tracing::{debug, info};
 
 /// Wrap Claude Code as a subprocess with supervision and output processing.
 ///
-/// This is the main entry point for running Claude Code. It:
-/// 1. Sets up signal handlers for graceful shutdown
-/// 2. Creates FIFOs for IPC
-/// 3. Generates hook configuration if a control socket is provided
-/// 4. Spawns and supervises the Claude process
-/// 5. Processes output in TUI or simple mode
-/// 6. Writes final result to the result FIFO
-///
-/// # Arguments
-///
-/// * `result_fifo` - Path to write the final JSON result
-/// * `cwd` - Working directory for Claude Code
-/// * `session_tag` - Optional tag for correlating with orchestrator state
-/// * `timeout_secs` - Timeout in seconds (0 = no timeout)
-/// * `control_socket` - Path to control socket for hook interception
-/// * `no_tui` - If true, use simple println mode instead of TUI
-/// * `claude_args` - Arguments to pass to Claude
+/// Writes final result to the specified FIFO path.
 pub fn wrap_claude(
     result_fifo: &Path,
     cwd: Option<&PathBuf>,
     session_tag: Option<&str>,
     timeout_secs: u64,
     control_socket: Option<&PathBuf>,
-    no_tui: bool,
     claude_args: &[String],
+) -> Result<()> {
+    let destination = ResultDestination::Fifo(result_fifo);
+    wrap_claude_internal(cwd, session_tag, timeout_secs, control_socket, claude_args, destination)
+}
+
+/// Wrap Claude Code with result sent to hub socket.
+///
+/// Writes final result to the hub socket for centralized session tracking.
+pub fn wrap_claude_with_hub(
+    hub_socket: &Path,
+    session_id: &str,
+    cwd: Option<&PathBuf>,
+    timeout_secs: u64,
+    control_socket: Option<&PathBuf>,
+    claude_args: &[String],
+) -> Result<()> {
+    let destination = ResultDestination::HubSocket {
+        path: hub_socket,
+        session_id,
+    };
+    wrap_claude_internal(cwd, Some(session_id), timeout_secs, control_socket, claude_args, destination)
+}
+
+/// Internal implementation shared by wrap_claude and wrap_claude_with_hub.
+fn wrap_claude_internal(
+    cwd: Option<&PathBuf>,
+    session_tag: Option<&str>,
+    timeout_secs: u64,
+    control_socket: Option<&PathBuf>,
+    claude_args: &[String],
+    destination: ResultDestination<'_>,
 ) -> Result<()> {
     // Install signal handlers for SIGINT/SIGTERM forwarding
     install_signal_handlers();
@@ -78,7 +88,6 @@ pub fn wrap_claude(
             .cloned()
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
 
-        // Use mantle-agent binary for hooks
         let agent_path = find_mantle_agent_binary();
 
         info!(
@@ -88,15 +97,12 @@ pub fn wrap_claude(
             "Generating hook configuration"
         );
 
-        Some(HookConfig::generate_with_binary(
-            &effective_cwd,
-            &agent_path,
-        )?)
+        Some(HookConfig::generate_with_binary(&effective_cwd, &agent_path)?)
     } else {
         None
     };
 
-    // Build claude command with optional control socket env
+    // Build claude command
     let mut cmd = build_claude_command(claude_args, cwd.map(|p| p.as_path()), signal_fifo.path());
 
     // Set TIDEPOOL_CONTROL_SOCKET env var if provided
@@ -112,15 +118,7 @@ pub fn wrap_claude(
         None
     };
     let mut supervisor = Supervisor::spawn(cmd, timeout)?;
-
-    // Take stdout for reading
     let stdout = supervisor.take_stdout();
 
-    if no_tui {
-        // Simple println mode for CI/headless
-        wrap_claude_simple(stdout, &signal_fifo, &mut supervisor, result_fifo, session_tag)
-    } else {
-        // Full TUI mode
-        wrap_claude_tui(stdout, &signal_fifo, &mut supervisor, result_fifo, session_tag)
-    }
+    wrap_claude_simple_to(stdout, &signal_fifo, &mut supervisor, destination, session_tag)
 }

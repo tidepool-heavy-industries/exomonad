@@ -1,7 +1,7 @@
 //! mantle: Spawn and manage Claude Code sessions.
 //!
 //! This crate provides the orchestrator binary for managing Claude Code
-//! sessions in Docker containers or zellij panes.
+//! sessions in Docker containers.
 //!
 //! ## Modules
 //!

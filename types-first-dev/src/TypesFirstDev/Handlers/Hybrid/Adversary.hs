@@ -18,7 +18,6 @@ import Control.Monad.Freer.Reader (Reader, ask)
 import Data.Text (Text)
 import qualified Data.Text as T
 
-import Tidepool.Effect.ClaudeCode (ClaudeCodeExec)
 import Tidepool.Effects.Worktree (Worktree)
 import Tidepool.Graph.Goto
   ( GotoChoice
@@ -51,13 +50,12 @@ import TypesFirstDev.Templates.Hybrid (hMutationAdversaryCompiled)
 hMutationAdversaryHandler
   :: ClaudeCodeLLMHandler
        'Haiku                                -- model
-       'Nothing                              -- cwd (Nothing = use default)
-       MutationTemplateCtx                   -- input
+       MutationTemplateCtx                   -- needs
        MutationAdversaryOutput               -- schema
        '[To "hWitness" WitnessReport]        -- targets
-       HybridEffects                         -- effects
-       MutationTemplateCtx                   -- template context type
-hMutationAdversaryHandler = ClaudeCodeLLMHandler @'Haiku @'Nothing
+       HybridEffects                         -- effs
+       MutationTemplateCtx                   -- tpl
+hMutationAdversaryHandler = ClaudeCodeLLMHandler @'Haiku
   Nothing                      -- no system template
   hMutationAdversaryCompiled   -- user template
   buildMutationContext         -- before: passthrough with stash

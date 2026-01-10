@@ -240,8 +240,8 @@ type family GetGotoTargets effs where
 -- | Convert Goto effects to To markers for GotoChoice.
 --
 -- @
--- GotoEffectsToTargets '[State S, Goto "foo" A, Goto Exit B, Goto Self C, Arrive R]
---   = '[To "foo" A, To Exit B, To Self C, To Arrive R]
+-- GotoEffectsToTargets '[State S, Goto "foo" A, Goto Exit B, Goto Self C, Arrive "hJoin" R]
+--   = '[To "foo" A, To Exit B, To Self C, To (Arrive "hJoin") R]
 -- @
 type GotoEffectsToTargets :: forall k. [k] -> [Type]
 type family GotoEffectsToTargets effs where
@@ -252,8 +252,8 @@ type family GotoEffectsToTargets effs where
     To Exit payload ': GotoEffectsToTargets rest
   GotoEffectsToTargets (Goto Self payload ': rest) =
     To Self payload ': GotoEffectsToTargets rest
-  GotoEffectsToTargets (Arrive result ': rest) =
-    To Arrive result ': GotoEffectsToTargets rest
+  GotoEffectsToTargets (Arrive barrierName result ': rest) =
+    To (Arrive barrierName) result ': GotoEffectsToTargets rest
   GotoEffectsToTargets (_ ': rest) = GotoEffectsToTargets rest
 
 -- | Alias for 'GotoEffectsToTargets' for use in handler signatures.
@@ -341,7 +341,7 @@ type family SameAnnotationType ann target where
   SameAnnotationType (Spawn _) (Spawn _) = 'True
   SameAnnotationType (Barrier _) (Barrier _) = 'True
   SameAnnotationType (Awaits _) (Awaits _) = 'True
-  SameAnnotationType (Arrive _ _) (Arrive _ _) = 'True
+  SameAnnotationType (Arrive _ _ _) (Arrive _ _ _) = 'True
   SameAnnotationType _ _ = 'False
 
 -- | Find a specific annotation in a node.
@@ -449,25 +449,25 @@ type family GetAwaits node where
 -- | Check if an effect list contains Arrive.
 --
 -- @
--- HasArrive '[Goto Self Task, Arrive Result] = 'True
+-- HasArrive '[Goto Self Task, Arrive "hJoin" Result] = 'True
 -- HasArrive '[Goto Self Task, Goto Exit Result] = 'False
 -- @
 type HasArrive :: forall k. [k] -> Bool
 type family HasArrive effs where
   HasArrive '[] = 'False
-  HasArrive (Arrive _ ': _) = 'True
+  HasArrive (Arrive _ _ ': _) = 'True
   HasArrive (_ ': rest) = HasArrive rest
 
 -- | Extract the Arrive result type from an effect list.
 --
 -- @
--- GetArriveType '[Goto Self Task, Arrive Result] = 'Just Result
+-- GetArriveType '[Goto Self Task, Arrive "hJoin" Result] = 'Just Result
 -- GetArriveType '[Goto Self Task, Goto Exit Result] = 'Nothing
 -- @
 type GetArriveType :: forall k. [k] -> Maybe Type
 type family GetArriveType effs where
   GetArriveType '[] = 'Nothing
-  GetArriveType (Arrive result ': _) = 'Just result
+  GetArriveType (Arrive _ result ': _) = 'Just result
   GetArriveType (_ ': rest) = GetArriveType rest
 
 -- ════════════════════════════════════════════════════════════════════════════

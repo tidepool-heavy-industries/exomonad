@@ -5,7 +5,7 @@ packages:
     -- Runtime
     haskell/runtime/wasm
     haskell/runtime/actor
-    haskell/runtime/parallel
+    -- NOTE: tidepool-parallel merged into tidepool-actor
     haskell/platform
 
     -- Effect interpreters
@@ -37,7 +37,7 @@ packages:
 
     -- Test/example packages
     claude-code-test
-    -- types-first-dev  -- TODO: needs migration from ClaudeCodeExec to Session effect
+    types-first-dev
 
     -- Vendored dependencies
     haskell/vendor/freer-simple

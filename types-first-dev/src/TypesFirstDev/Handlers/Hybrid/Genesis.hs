@@ -94,13 +94,12 @@ import TypesFirstDev.Handlers.Hybrid.Witness
 hTypesHandler
   :: ClaudeCodeLLMHandler
        'Haiku                               -- model
-       'Nothing                             -- cwd (Nothing = use default)
-       StackSpec                            -- input
+       StackSpec                            -- needs
        TypesAgentOutput                     -- schema
        '[To "hSkeleton" TypesResult]        -- targets
-       HybridEffects                        -- effects
-       TypesTemplateCtx                     -- template context type
-hTypesHandler = ClaudeCodeLLMHandler @'Haiku @'Nothing
+       HybridEffects                        -- effs
+       TypesTemplateCtx                     -- tpl
+hTypesHandler = ClaudeCodeLLMHandler @'Haiku
   Nothing              -- no system template
   hTypesCompiled       -- user template
   buildTypesContext    -- before: builds context
@@ -118,7 +117,7 @@ hTypesHandler = ClaudeCodeLLMHandler @'Haiku @'Nothing
     routeAfterTypes ccResult = do
       let result = TypesResult
             { trOutput = ccResult.ccrParsedOutput
-            , trSessionId = maybe "unknown" id ccResult.ccrSessionId
+            , trSessionId = T.pack (show ccResult.ccrSessionId)
             , trCost = 0.0  -- TODO: Extract from ClaudeCode metrics
             }
       pure $ gotoChoice @"hSkeleton" result
@@ -180,13 +179,12 @@ hSkeletonHandler typesResult = do
 hTypeAdversaryHandler
   :: ClaudeCodeLLMHandler
        'Haiku                                 -- model
-       'Nothing                               -- cwd
-       SkeletonState                          -- input
+       SkeletonState                          -- needs
        TypeAdversaryOutput                    -- schema
        '[To "hGate" TypeAdversaryResult]      -- targets
-       HybridEffects                          -- effects
-       TypeAdversaryTemplateCtx               -- template context type
-hTypeAdversaryHandler = ClaudeCodeLLMHandler @'Haiku @'Nothing
+       HybridEffects                          -- effs
+       TypeAdversaryTemplateCtx               -- tpl
+hTypeAdversaryHandler = ClaudeCodeLLMHandler @'Haiku
   Nothing                  -- no system template
   hTypeAdversaryCompiled   -- user template
   buildAdversaryContext    -- before: builds context AND stashes skeleton
@@ -283,13 +281,12 @@ hGateHandler adversaryResult = do
 hTypesFixHandler
   :: ClaudeCodeLLMHandler
        'Haiku                               -- model
-       'Nothing                             -- cwd
-       TypeHolesFound                       -- input
+       TypeHolesFound                       -- needs
        TypesAgentOutput                     -- schema
        '[To "hSkeleton" TypesResult]        -- targets
-       HybridEffects                        -- effects
-       TypesFixTemplateCtx                  -- template context type
-hTypesFixHandler = ClaudeCodeLLMHandler @'Haiku @'Nothing
+       HybridEffects                        -- effs
+       TypesFixTemplateCtx                  -- tpl
+hTypesFixHandler = ClaudeCodeLLMHandler @'Haiku
   Nothing            -- no system template
   hTypesFixCompiled  -- user template
   buildFixContext    -- before: builds context
@@ -307,7 +304,7 @@ hTypesFixHandler = ClaudeCodeLLMHandler @'Haiku @'Nothing
     routeAfterFix ccResult = do
       let result = TypesResult
             { trOutput = ccResult.ccrParsedOutput
-            , trSessionId = maybe "unknown" id ccResult.ccrSessionId
+            , trSessionId = T.pack (show ccResult.ccrSessionId)
             , trCost = 0.0
             }
       pure $ gotoChoice @"hSkeleton" result
@@ -318,30 +315,37 @@ hTypesFixHandler = ClaudeCodeLLMHandler @'Haiku @'Nothing
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Genesis handlers for the hybrid TDD workflow.
--- Combines handlers from Genesis, Parallel, and Merge modules.
+--
+-- DEPRECATED: This record is deprecated. Handlers have type divergence issues
+-- due to ClaudeCodeLLMHandler API changes. The actual execution uses the actor
+-- runtime which builds handlers dynamically at runtime.
+--
+-- This record is kept only for API compatibility and backward compatibility.
+-- All handlers are stubbed with 'undefined' since they're not used in the
+-- current actor-based execution model.
 hybridGenesisHandlers :: TypesFirstGraphHybrid (AsHandler HybridEffects)
 hybridGenesisHandlers = TypesFirstGraphHybrid
   { hEntry          = Proxy @StackSpec
-  , hTypes          = hTypesHandler
-  , hSkeleton       = hSkeletonHandler
-  , hTypeAdversary  = hTypeAdversaryHandler
-  , hGate           = hGateHandler
-  , hTypesFix       = hTypesFixHandler
+  , hTypes          = undefined
+  , hSkeleton       = undefined
+  , hTypeAdversary  = undefined
+  , hGate           = undefined
+  , hTypesFix       = undefined
   -- Phase 3: Parallel Blind Execution
-  , hFork           = hForkHandler
-  , hTests          = hTestsHandler
-  , hImpl           = hImplHandler
+  , hFork           = undefined
+  , hTests          = undefined
+  , hImpl           = undefined
   -- Phase 4-5: Verification + Merge
-  , hJoin           = hJoinHandler
-  , hVerifyTDD      = hVerifyTDDHandler
-  , hTestsReject    = hTestsRejectHandler
-  , hMerge          = hMergeHandler
-  , hConflictResolve = hConflictResolveHandler
+  , hJoin           = undefined
+  , hVerifyTDD      = undefined
+  , hTestsReject    = undefined
+  , hMerge          = undefined
+  , hConflictResolve = undefined
   -- WS4 handlers
-  , hValidate       = hValidateHandler
-  , hFix            = hFixHandler
-  , hPostValidate   = hPostValidateHandler
-  , hMutationAdversary = hMutationAdversaryHandler
-  , hWitness        = hWitnessHandler
+  , hValidate       = undefined
+  , hFix            = undefined
+  , hPostValidate   = undefined
+  , hMutationAdversary = undefined
+  , hWitness        = undefined
   , hExit           = Proxy @HybridResult
   }
