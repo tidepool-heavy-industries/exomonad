@@ -56,7 +56,9 @@ import Data.ByteString.Char8 qualified as BS
 import Data.ByteString.Lazy qualified as LBS
 import Data.Text (Text)
 import Data.Text qualified as T
+import Data.Time.Clock (getCurrentTime, diffUTCTime)
 import System.Exit (ExitCode(..))
+import System.IO (hFlush, stdout)
 import System.Process (readProcessWithExitCode)
 
 import Tidepool.Effect.Session
@@ -78,8 +80,6 @@ data SessionConfig = SessionConfig
     -- ^ Path to mantle binary. Defaults to "mantle" (expects it on PATH).
   , scRepoRoot :: FilePath
     -- ^ Root of the git repository. Mantle creates worktrees relative to this.
-  , scQuiet :: Bool
-    -- ^ Suppress verbose output (passed as --quiet to mantle).
   }
   deriving (Show, Eq)
 
@@ -90,7 +90,6 @@ defaultSessionConfig :: FilePath -> SessionConfig
 defaultSessionConfig repoRoot = SessionConfig
   { scMantlePath = "mantle"
   , scRepoRoot = repoRoot
-  , scQuiet = True
   }
 
 
@@ -141,7 +140,7 @@ startSessionIO config slug prompt model schema = do
         , "--slug", T.unpack slug
         , "--prompt", T.unpack prompt
         , "--model", modelToArg model
-        ] <> schemaArg schema <> quietArg config
+        ] <> schemaArg schema
 
   runMantleSession config args
 
@@ -155,7 +154,7 @@ continueSessionIO config sid prompt schema = do
         [ "session", "continue"
         , T.unpack sid.unSessionId
         , "--prompt", T.unpack prompt
-        ] <> schemaArg schema <> quietArg config
+        ] <> schemaArg schema
 
   runMantleSession config args
 
@@ -173,7 +172,7 @@ forkSessionIO config parent childSlug childPrompt schema = do
         , T.unpack parent.unSessionId
         , "--child-slug", T.unpack childSlug
         , "--child-prompt", T.unpack childPrompt
-        ] <> schemaArg schema <> quietArg config
+        ] <> schemaArg schema
 
   runMantleSession config args
 
@@ -186,7 +185,7 @@ sessionInfoIO config sid = do
   let args =
         [ "session", "info"
         , T.unpack sid.unSessionId
-        ] <> quietArg config
+        ]
 
   result <- try @SomeException $ readProcessWithExitCode
     config.scMantlePath
@@ -195,11 +194,11 @@ sessionInfoIO config sid = do
 
   case result of
     Left _ -> pure Nothing
-    Right (exitCode, stdout, _) ->
+    Right (exitCode, stdoutStr, _) ->
       case exitCode of
         ExitFailure _ -> pure Nothing  -- Session not found
         ExitSuccess ->
-          case eitherDecodeStrict (BS.pack stdout) of
+          case eitherDecodeStrict (BS.pack stdoutStr) of
             Left _ -> pure Nothing
             Right metadata -> pure (Just metadata)
 
@@ -214,22 +213,39 @@ sessionInfoIO config sid = do
 -- On failure, returns a SessionOutput with error details.
 runMantleSession :: SessionConfig -> [String] -> IO SessionOutput
 runMantleSession config args = do
+  -- Log command before execution
+  putStrLn $ "[SESSION] Running: " <> config.scMantlePath <> " " <> unwords args
+  hFlush stdout
+
+  startTime <- getCurrentTime
   result <- try @SomeException $ readProcessWithExitCode
     config.scMantlePath
     args
     ""
+  endTime <- getCurrentTime
+  let duration = realToFrac (diffUTCTime endTime startTime) :: Double
 
   case result of
-    Left e -> pure $ errorOutput $ "Failed to spawn mantle: " <> T.pack (show e)
-    Right (exitCode, stdout, stderr) ->
-      case eitherDecodeStrict (BS.pack stdout) of
+    Left e -> do
+      putStrLn $ "[SESSION] Failed to spawn mantle: " <> show e
+      hFlush stdout
+      pure $ errorOutput $ "Failed to spawn mantle: " <> T.pack (show e)
+    Right (exitCode, stdoutStr, stderrStr) -> do
+      let exitCodeInt = case exitCode of
+            ExitSuccess -> 0
+            ExitFailure c -> c
+      putStrLn $ "[SESSION] Completed (exit: " <> show exitCodeInt <> ", " <> show (round duration :: Int) <> "s)"
+      hFlush stdout
+      case eitherDecodeStrict (BS.pack stdoutStr) of
         Right output -> pure output
-        Left parseErr ->
+        Left parseErr -> do
+          putStrLn $ "[SESSION] Failed to parse output: " <> parseErr
+          hFlush stdout
           -- Try to extract error from stderr or report parse failure
           pure $ errorOutput $ case exitCode of
             ExitSuccess -> "Failed to parse mantle output: " <> T.pack parseErr
             ExitFailure code ->
-              "mantle exited with code " <> T.pack (show code) <> ": " <> T.pack stderr
+              "mantle exited with code " <> T.pack (show code) <> ": " <> T.pack stderrStr
 
 
 -- | Convert ModelChoice to mantle CLI argument.
@@ -238,13 +254,6 @@ modelToArg = \case
   Haiku -> "haiku"
   Sonnet -> "sonnet"
   Opus -> "opus"
-
-
--- | Quiet flag if configured.
-quietArg :: SessionConfig -> [String]
-quietArg config
-  | config.scQuiet = ["--quiet"]
-  | otherwise = []
 
 
 -- | JSON schema argument if provided.

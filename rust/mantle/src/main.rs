@@ -58,9 +58,9 @@ enum SessionCommands {
         #[arg(long, default_value = "300")]
         timeout: u64,
 
-        /// Use Docker container instead of local execution
+        /// JSON schema for structured output (passed to Claude Code --json-schema)
         #[arg(long)]
-        docker: bool,
+        json_schema: Option<String>,
     },
 
     /// Continue an existing session with a new prompt
@@ -145,14 +145,14 @@ fn handle_session_command(cmd: SessionCommands) -> std::result::Result<(), Box<d
     let state_manager = StateManager::new(&repo_root)?;
 
     match cmd {
-        SessionCommands::Start { slug, prompt, model, timeout, docker } => {
+        SessionCommands::Start { slug, prompt, model, timeout, json_schema } => {
             let config = StartConfig {
                 slug,
                 prompt,
                 model,
                 timeout_secs: timeout,
-                docker,
                 base_branch: None,
+                json_schema,
             };
 
             match start_session(&repo_root, &config) {
@@ -408,8 +408,8 @@ mod tests {
         assert_eq!(decoded.session_tag, Some("test-worktree".to_string()));
         assert_eq!(decoded.num_turns, 5);
 
-        // Empty interrupts should be omitted from JSON
-        assert!(!json.contains("interrupts"));
+        // Empty interrupts should still be present in JSON (Haskell expects it)
+        assert!(json.contains("\"interrupts\":[]"));
     }
 
     #[test]

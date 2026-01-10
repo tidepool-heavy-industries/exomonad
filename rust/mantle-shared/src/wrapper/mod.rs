@@ -67,6 +67,20 @@ pub fn wrap_claude_with_hub(
     wrap_claude_internal(cwd, Some(session_id), timeout_secs, control_socket, claude_args, destination)
 }
 
+/// Wrap Claude Code with result written to stdout.
+///
+/// Used for attached container mode where the parent process reads stdout.
+pub fn wrap_claude_to_stdout(
+    cwd: Option<&PathBuf>,
+    session_tag: Option<&str>,
+    timeout_secs: u64,
+    control_socket: Option<&PathBuf>,
+    claude_args: &[String],
+) -> Result<()> {
+    let destination = ResultDestination::Stdout;
+    wrap_claude_internal(cwd, session_tag, timeout_secs, control_socket, claude_args, destination)
+}
+
 /// Internal implementation shared by wrap_claude and wrap_claude_with_hub.
 fn wrap_claude_internal(
     cwd: Option<&PathBuf>,

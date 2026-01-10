@@ -40,6 +40,7 @@ import Data.Proxy (Proxy(..))
 import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.TypeLits (Symbol, KnownSymbol, symbolVal)
+import System.IO (hFlush, stdout)
 
 import Tidepool.Graph.Goto (To)
 import Tidepool.Graph.Types (HList(..))
@@ -128,5 +129,7 @@ forkHandler interpret handler = NodeHandler $ \router jsonPayload ->
       hlist <- interpret (handler input)
       -- Extract targets and route to each worker
       let targets = extractSpawnTargets @targets @payloads hlist
+      putStrLn $ "[FORK] Dispatching to: " <> show (map fst targets)
+      hFlush stdout
       forM_ targets $ \(target, payload) ->
         router target payload

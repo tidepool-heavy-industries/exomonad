@@ -10,7 +10,7 @@ use tracing::{debug, info, warn};
 use super::state::StateManager;
 use super::types::{generate_branch_name, generate_session_id, SessionMetadata, SessionOutput};
 use super::worktree::WorktreeManager;
-use crate::docker::{cleanup_fifo_dir, create_fifo_dir, ContainerConfig, ContainerManager, FifoReader};
+use crate::docker::{run_attached, ContainerConfig};
 
 /// Error types for session fork operations.
 #[derive(Debug, thiserror::Error)]
@@ -50,28 +50,6 @@ pub enum ForkError {
 }
 
 pub type Result<T> = std::result::Result<T, ForkError>;
-
-/// RAII guard that cleans up FIFO directory on drop.
-struct FifoGuard {
-    path: std::path::PathBuf,
-    cleaned: bool,
-}
-
-impl FifoGuard {
-    fn new(path: std::path::PathBuf) -> Self {
-        Self { path, cleaned: false }
-    }
-}
-
-impl Drop for FifoGuard {
-    fn drop(&mut self) {
-        if !self.cleaned {
-            if let Err(e) = cleanup_fifo_dir(&self.path) {
-                eprintln!("Warning: Failed to cleanup FIFO directory {}: {}", self.path.display(), e);
-            }
-        }
-    }
-}
 
 /// Configuration for forking a session.
 #[derive(Debug, Clone)]
@@ -274,7 +252,7 @@ fn execute_fork(
     let claude_args = vec![
         "--dangerously-skip-permissions".to_string(),
         "--output-format".to_string(),
-        "stream-json".to_string(),
+        "json".to_string(),
         "--verbose".to_string(),
         "--model".to_string(),
         model.to_string(),
@@ -341,7 +319,7 @@ fn execute_fork(
     })
 }
 
-/// Execute session fork in a Docker container.
+/// Execute session fork in a Docker container (attached mode).
 fn execute_docker_fork(
     session_id: &str,
     branch: &str,
@@ -355,21 +333,14 @@ fn execute_docker_fork(
     use mantle_shared::RunResult;
     use std::collections::HashMap;
 
-    info!(session_id = %session_id, "Starting Docker fork execution");
-
-    // Create FIFO directory for result communication
-    let fifo_dir = create_fifo_dir(session_id)?;
-    let _fifo_guard = FifoGuard::new(fifo_dir.clone());
-    let fifo_path = fifo_dir.join("result.fifo");
-
-    debug!(fifo_dir = %fifo_dir.display(), "Created FIFO directory");
+    info!(session_id = %session_id, "Starting Docker fork execution (attached mode)");
 
     // Build Claude args with --resume and --fork-session flags
     // --fork-session makes it a read-only fork (doesn't modify parent's context)
     let claude_args = vec![
         "--dangerously-skip-permissions".to_string(),
         "--output-format".to_string(),
-        "stream-json".to_string(),
+        "json".to_string(),
         "--verbose".to_string(),
         "--model".to_string(),
         model.to_string(),
@@ -380,11 +351,10 @@ fn execute_docker_fork(
         prompt.to_string(),
     ];
 
-    // Create container configuration
+    // Create container configuration (attached mode)
     let container_config = ContainerConfig::new(
         session_id.to_string(),
         worktree_path.to_path_buf(),
-        fifo_dir.clone(),
         claude_args,
     )?
     .with_timeout(timeout_secs);
@@ -394,49 +364,36 @@ fn execute_docker_fork(
         s.mark_running(None);
     })?;
 
-    // Create tokio runtime for async Docker operations
-    let runtime = tokio::runtime::Runtime::new()
-        .map_err(|e| ForkError::Execution(format!("Failed to create tokio runtime: {}", e)))?;
-
-    // IMPORTANT: Spawn FIFO reader BEFORE container to avoid deadlock.
-    // See start.rs for detailed explanation.
-    let fifo_reader = FifoReader::spawn(fifo_path);
-
-    // Spawn container and wait for completion
-    let container_result = runtime.block_on(async {
-        let manager = ContainerManager::new()?;
-        let container_id = manager.spawn(&container_config).await?;
-
-        info!(container_id = %container_id, "Container spawned, waiting for completion");
-
-        // Wait for container to exit
-        let wait_result = manager.wait(&container_id).await;
-
-        // Get logs on error
-        if wait_result.as_ref().map(|c| *c != 0).unwrap_or(true) {
-            if let Ok(logs) = manager.logs(&container_id).await {
-                let code = wait_result.as_ref().map(|c| *c).unwrap_or(-1);
-                warn!(exit_code = %code, logs = %logs, "Container exited with non-zero code");
-            }
+    // Run container in attached mode - blocks until completion
+    let json_output = match run_attached(&container_config) {
+        Ok(output) => output,
+        Err(crate::docker::DockerError::ExitCode(code)) => {
+            warn!(exit_code = %code, "Container exited with non-zero code");
+            return Ok(SessionOutput {
+                session_id: session_id.to_string(),
+                branch: branch.to_string(),
+                worktree: worktree_path.to_path_buf(),
+                exit_code: code as i32,
+                is_error: true,
+                result_text: None,
+                structured_output: None,
+                total_cost_usd: 0.0,
+                num_turns: 0,
+                interrupts: vec![],
+                duration_secs: 0.0,
+                error: Some(format!("Container exited with code {}", code)),
+                model_usage: HashMap::new(),
+                cc_session_id: None,
+            });
         }
+        Err(e) => return Err(e.into()),
+    };
 
-        // Always remove container
-        if let Err(e) = manager.remove(&container_id, true).await {
-            warn!(container_id = %container_id, error = %e, "Failed to remove container");
-        }
-
-        wait_result
-    })?;
-
-    // Join the FIFO reader thread
-    let content = fifo_reader.join()
-        .map_err(|e| ForkError::Execution(format!("Failed to read result FIFO: {}", e)))?;
-
-    // Parse the result from FIFO content
-    let run_result: RunResult = if content.is_empty() {
-        warn!("Container exited without writing result to FIFO");
+    // Parse the result from stdout
+    let run_result: RunResult = if json_output.trim().is_empty() {
+        warn!("Container exited without writing result to stdout");
         RunResult {
-            exit_code: container_result as i32,
+            exit_code: 0,
             is_error: true,
             result: None,
             structured_output: None,
@@ -450,7 +407,7 @@ fn execute_docker_fork(
             interrupts: vec![],
         }
     } else {
-        serde_json::from_str(&content)?
+        serde_json::from_str(&json_output)?
     };
 
     Ok(SessionOutput {

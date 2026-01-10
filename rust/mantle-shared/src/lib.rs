@@ -64,4 +64,4 @@ pub use hub::{HubClient, HubConfig, SessionInfo, SessionRegister, SessionResult,
 // Re-export command and wrapper types
 pub use commands::{handle_hook, send_signal, HookEventType};
 pub use util::{build_prompt, find_mantle_agent_binary, shell_quote};
-pub use wrapper::{wrap_claude, wrap_claude_with_hub, EventCollector, ResultDestination};
+pub use wrapper::{wrap_claude, wrap_claude_with_hub, wrap_claude_to_stdout, EventCollector, ResultDestination};

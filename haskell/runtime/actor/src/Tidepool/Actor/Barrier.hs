@@ -43,6 +43,8 @@ import Data.Aeson.Types (parseEither, Parser)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Kind (Type, Constraint)
 import Data.Text (Text)
+import qualified Data.Text as T
+import System.IO (hFlush, stdout)
 
 import Tidepool.Graph.Goto (GotoChoice)
 import Tidepool.Graph.Types (HList)
@@ -164,12 +166,16 @@ barrierHandler interpret userHandler = do
     case parseArriveWithSource jsonPayload of
       Left err -> error $ "BarrierNode: Failed to parse arrive message: " <> err
       Right (source, payload) -> do
+        putStrLn $ "[BARRIER] " <> T.unpack source <> " arrived"
+        hFlush stdout
         -- Add result to accumulator
         maybeComplete <- addResult (state.bsAccumulator) () source payload
 
         case maybeComplete of
           Nothing -> pure ()  -- Still waiting for more workers
           Just _completedSources -> do
+            putStrLn "[BARRIER] All workers arrived, continuing"
+            hFlush stdout
             -- All workers arrived! Extract typed results
             results <- getCompletedResults @sources (state.bsAccumulator) ()
             case results of

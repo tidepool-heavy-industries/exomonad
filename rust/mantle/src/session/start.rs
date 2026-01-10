@@ -13,37 +13,7 @@ use tracing::{debug, info, warn};
 use super::state::StateManager;
 use super::types::{generate_branch_name, generate_session_id, SessionMetadata, SessionOutput};
 use super::worktree::WorktreeManager;
-use crate::docker::{cleanup_fifo_dir, create_fifo_dir, ContainerConfig, ContainerManager, FifoReader};
-
-/// RAII guard that cleans up FIFO directory on drop.
-/// Ensures cleanup happens even on early returns or panics.
-struct FifoGuard {
-    path: std::path::PathBuf,
-    cleaned: bool,
-}
-
-impl FifoGuard {
-    fn new(path: std::path::PathBuf) -> Self {
-        Self { path, cleaned: false }
-    }
-
-    /// Mark as cleaned (call this if you want to suppress automatic cleanup).
-    #[allow(dead_code)]
-    fn defuse(&mut self) {
-        self.cleaned = true;
-    }
-}
-
-impl Drop for FifoGuard {
-    fn drop(&mut self) {
-        if !self.cleaned {
-            if let Err(e) = cleanup_fifo_dir(&self.path) {
-                // Can't use tracing in Drop easily, just ignore errors
-                eprintln!("Warning: Failed to cleanup FIFO directory {}: {}", self.path.display(), e);
-            }
-        }
-    }
-}
+use crate::docker::{run_attached, ContainerConfig};
 
 /// Error types for session start operations.
 #[derive(Debug, thiserror::Error)]
@@ -80,10 +50,10 @@ pub struct StartConfig {
     pub model: String,
     /// Timeout in seconds (0 = no timeout)
     pub timeout_secs: u64,
-    /// Use Docker container
-    pub docker: bool,
     /// Optional base branch (defaults to HEAD)
     pub base_branch: Option<String>,
+    /// Optional JSON schema for structured output
+    pub json_schema: Option<String>,
 }
 
 /// Start a new session.
@@ -140,30 +110,8 @@ pub fn start_session(repo_root: &Path, config: &StartConfig) -> Result<SessionOu
     // Save session to state file
     state_manager.insert_session(session)?;
 
-    // Execute Claude Code via Docker or locally
-    if config.docker {
-        let result = execute_docker(&session_id, &branch, &worktree_path, config, &state_manager)?;
-
-        let duration = start_time.elapsed().as_secs_f64();
-
-        // Update session state based on result
-        state_manager.update_session(&session_id, |s| {
-            s.mark_completed(
-                result.exit_code,
-                result.total_cost_usd,
-                result.num_turns,
-                result.cc_session_id.clone(),
-            );
-        })?;
-
-        return Ok(SessionOutput {
-            duration_secs: duration,
-            ..result
-        });
-    }
-
-    // Direct execution mode - run mantle-agent wrap
-    let result = execute_local(&session_id, &branch, &worktree_path, config, &state_manager)?;
+    // Execute Claude Code via Docker
+    let result = execute_docker(&session_id, &branch, &worktree_path, config, &state_manager)?;
 
     let duration = start_time.elapsed().as_secs_f64();
 
@@ -183,97 +131,10 @@ pub fn start_session(repo_root: &Path, config: &StartConfig) -> Result<SessionOu
     })
 }
 
-/// Execute Claude Code locally (not in Docker).
-fn execute_local(
-    session_id: &str,
-    branch: &str,
-    worktree_path: &Path,
-    config: &StartConfig,
-    state_manager: &StateManager,
-) -> Result<SessionOutput> {
-    use std::process::{Command, Stdio};
-    use mantle_shared::{RunResult, ResultFifo};
-
-    // Mark session as running
-    state_manager.update_session(session_id, |s| {
-        s.mark_running(None);
-    })?;
-
-    // Create FIFO for result communication
-    let result_fifo = ResultFifo::new()
-        .map_err(|e| StartError::Execution(format!("Failed to create result FIFO: {}", e)))?;
-
-    // Build claude args
-    let claude_args = vec![
-        "--dangerously-skip-permissions".to_string(),
-        "--output-format".to_string(),
-        "stream-json".to_string(),
-        "--verbose".to_string(),
-        "--model".to_string(),
-        config.model.clone(),
-        "-p".to_string(),
-        config.prompt.clone(),
-    ];
-
-    // Build mantle-agent command
-    let mut cmd = Command::new("mantle-agent");
-    cmd.arg("wrap")
-        .arg("--result-fifo")
-        .arg(result_fifo.path())
-        .arg("--cwd")
-        .arg(worktree_path)
-        .arg("--session-tag")
-        .arg(session_id);
-
-    if config.timeout_secs > 0 {
-        cmd.arg("--timeout").arg(config.timeout_secs.to_string());
-    }
-
-    cmd.arg("--");
-    for arg in &claude_args {
-        cmd.arg(arg);
-    }
-
-    // Run in background and read from FIFO
-    cmd.stdout(Stdio::null())
-        .stderr(Stdio::null());
-
-    debug!(cmd = ?cmd, "Spawning mantle-agent");
-
-    let _child = cmd.spawn()
-        .map_err(|e| StartError::Execution(format!("Failed to spawn mantle-agent: {}", e)))?;
-
-    // Read result from FIFO (blocks until agent writes result)
-    let timeout = if config.timeout_secs > 0 {
-        std::time::Duration::from_secs(config.timeout_secs)
-    } else {
-        std::time::Duration::ZERO
-    };
-
-    let run_result: RunResult = result_fifo
-        .read_with_timeout(timeout)
-        .map_err(|e| StartError::Execution(format!("Failed to read result: {}", e)))?;
-
-    // Convert RunResult to SessionOutput
-    Ok(SessionOutput {
-        session_id: session_id.to_string(),
-        branch: branch.to_string(),
-        worktree: worktree_path.to_path_buf(),
-        exit_code: run_result.exit_code,
-        is_error: run_result.is_error,
-        result_text: run_result.result,
-        structured_output: run_result.structured_output,
-        total_cost_usd: run_result.total_cost_usd,
-        num_turns: run_result.num_turns,
-        interrupts: run_result.interrupts,
-        duration_secs: 0.0, // Will be filled in by caller
-        error: None,
-        model_usage: run_result.model_usage,
-        cc_session_id: Some(run_result.session_id),
-    })
-}
-
-/// Execute Claude Code in a Docker container.
+/// Execute Claude Code in a Docker container (attached mode).
+///
+/// Container runs in foreground - dies when this process dies.
+/// Result read from container stdout.
 fn execute_docker(
     session_id: &str,
     branch: &str,
@@ -284,21 +145,13 @@ fn execute_docker(
     use mantle_shared::RunResult;
     use std::collections::HashMap;
 
-    info!(session_id = %session_id, "Starting Docker execution");
-
-    // Create FIFO directory for result communication
-    // Use guard to ensure cleanup even on early returns
-    let fifo_dir = create_fifo_dir(session_id)?;
-    let _fifo_guard = FifoGuard::new(fifo_dir.clone());
-    let fifo_path = fifo_dir.join("result.fifo");
-
-    debug!(fifo_dir = %fifo_dir.display(), "Created FIFO directory");
+    info!(session_id = %session_id, "Starting Docker execution (attached mode)");
 
     // Build Claude args
-    let claude_args = vec![
+    let mut claude_args = vec![
         "--dangerously-skip-permissions".to_string(),
         "--output-format".to_string(),
-        "stream-json".to_string(),
+        "json".to_string(),
         "--verbose".to_string(),
         "--model".to_string(),
         config.model.clone(),
@@ -306,11 +159,16 @@ fn execute_docker(
         config.prompt.clone(),
     ];
 
-    // Create container configuration
+    // Add JSON schema if provided (for structured output)
+    if let Some(ref schema) = config.json_schema {
+        claude_args.push("--json-schema".to_string());
+        claude_args.push(schema.clone());
+    }
+
+    // Create container configuration (attached mode - no FIFO needed)
     let container_config = ContainerConfig::new(
         session_id.to_string(),
         worktree_path.to_path_buf(),
-        fifo_dir.clone(),
         claude_args,
     )?
     .with_timeout(config.timeout_secs);
@@ -320,63 +178,38 @@ fn execute_docker(
         s.mark_running(None);
     })?;
 
-    // Create tokio runtime for async Docker operations
-    let runtime = tokio::runtime::Runtime::new()
-        .map_err(|e| StartError::Execution(format!("Failed to create tokio runtime: {}", e)))?;
-
-    // IMPORTANT: Spawn FIFO reader BEFORE container.
-    // A FIFO blocks on open until both reader and writer are present.
-    // If we wait for container to exit before opening the FIFO, we deadlock:
-    // - Container blocks on write (waiting for reader)
-    // - We block on container wait (waiting for container)
-    // By spawning the reader first, we ensure the read side is ready when
-    // the container opens the write side.
-    let fifo_reader = FifoReader::spawn(fifo_path);
-
-    // Spawn container and wait for completion
-    // Uses a cleanup guard pattern to ensure container is always removed
-    let container_result = runtime.block_on(async {
-        let manager = ContainerManager::new()?;
-        let container_id = manager.spawn(&container_config).await?;
-
-        info!(container_id = %container_id, "Container spawned, waiting for completion");
-
-        // Wait for container to exit - capture result before cleanup
-        let wait_result = manager.wait(&container_id).await;
-
-        // Always cleanup container, regardless of wait result
-        // Get logs first if there was an error
-        if wait_result.as_ref().map(|c| *c != 0).unwrap_or(true) {
-            match manager.logs(&container_id).await {
-                Ok(logs) => {
-                    let code = wait_result.as_ref().map(|c| *c).unwrap_or(-1);
-                    warn!(exit_code = %code, logs = %logs, "Container exited with non-zero code or error");
-                }
-                Err(e) => {
-                    warn!(error = %e, "Failed to get container logs");
-                }
-            }
+    // Run container in attached mode - blocks until completion
+    // Container dies when this process dies (no orphans!)
+    let json_output = match run_attached(&container_config) {
+        Ok(output) => output,
+        Err(crate::docker::DockerError::ExitCode(code)) => {
+            // Container exited with non-zero - create error result
+            warn!(exit_code = %code, "Container exited with non-zero code");
+            return Ok(SessionOutput {
+                session_id: session_id.to_string(),
+                branch: branch.to_string(),
+                worktree: worktree_path.to_path_buf(),
+                exit_code: code as i32,
+                is_error: true,
+                result_text: None,
+                structured_output: None,
+                total_cost_usd: 0.0,
+                num_turns: 0,
+                interrupts: vec![],
+                duration_secs: 0.0,
+                error: Some(format!("Container exited with code {}", code)),
+                model_usage: HashMap::new(),
+                cc_session_id: None,
+            });
         }
+        Err(e) => return Err(e.into()),
+    };
 
-        // Always remove container (force=true to handle stuck containers)
-        if let Err(e) = manager.remove(&container_id, true).await {
-            warn!(container_id = %container_id, error = %e, "Failed to remove container");
-        }
-
-        // Now propagate any wait error
-        wait_result
-    })?;
-
-    // Join the FIFO reader thread - it should have completed when container wrote and exited
-    let content = fifo_reader.join()
-        .map_err(|e| StartError::Execution(format!("Failed to read result FIFO: {}", e)))?;
-
-    // Parse the result from FIFO content
-    let run_result: RunResult = if content.is_empty() {
-        // Container exited without writing result - create error result
-        warn!("Container exited without writing result to FIFO");
+    // Parse the result from stdout
+    let run_result: RunResult = if json_output.trim().is_empty() {
+        warn!("Container exited without writing result to stdout");
         RunResult {
-            exit_code: container_result as i32,
+            exit_code: 0,
             is_error: true,
             result: None,
             structured_output: None,
@@ -390,10 +223,8 @@ fn execute_docker(
             interrupts: vec![],
         }
     } else {
-        serde_json::from_str(&content)?
+        serde_json::from_str(&json_output)?
     };
-
-    // FIFO directory cleanup handled by _fifo_guard drop
 
     // Convert RunResult to SessionOutput
     Ok(SessionOutput {
@@ -512,8 +343,8 @@ mod tests {
             prompt: "Test prompt".to_string(),
             model: "sonnet".to_string(),
             timeout_secs: 0,
-            docker: false,
             base_branch: None,
+            json_schema: None,
         };
 
         let (session_id, branch, worktree_path) = prepare_session(temp_dir.path(), &config).unwrap();
@@ -544,8 +375,8 @@ mod tests {
             prompt: "Test prompt".to_string(),
             model: "haiku".to_string(),
             timeout_secs: 300,
-            docker: false,
             base_branch: None,
+            json_schema: None,
         };
 
         let (_, branch, worktree_path) = prepare_session(temp_dir.path(), &config).unwrap();
@@ -567,8 +398,8 @@ mod tests {
             prompt: "Test prompt".to_string(),
             model: "sonnet".to_string(),
             timeout_secs: 0,
-            docker: false,
             base_branch: None,
+            json_schema: None,
         };
 
         let (session_id, _, _) = prepare_session(temp_dir.path(), &config).unwrap();
@@ -589,8 +420,8 @@ mod tests {
             prompt: "Add authentication".to_string(),
             model: "sonnet".to_string(),
             timeout_secs: 0,
-            docker: false,
             base_branch: None,
+            json_schema: None,
         };
 
         let (id1, branch1, _) = prepare_session(temp_dir.path(), &config1).unwrap();
@@ -601,8 +432,8 @@ mod tests {
             prompt: "Add API endpoints".to_string(),
             model: "haiku".to_string(),
             timeout_secs: 0,
-            docker: false,
             base_branch: None,
+            json_schema: None,
         };
 
         let (id2, branch2, _) = prepare_session(temp_dir.path(), &config2).unwrap();
@@ -656,8 +487,8 @@ mod tests {
             prompt: "Fix urgent bug".to_string(),
             model: "sonnet".to_string(),
             timeout_secs: 0,
-            docker: false,
             base_branch: Some("develop".to_string()),
+            json_schema: None,
         };
 
         let (_, _, worktree_path) = prepare_session(temp_dir.path(), &config).unwrap();
@@ -673,14 +504,12 @@ mod tests {
             prompt: "test".to_string(),
             model: "sonnet".to_string(),
             timeout_secs: 0,
-            docker: false,
             base_branch: None,
+            json_schema: None,
         };
 
         // Verify zero timeout means no timeout
         assert_eq!(config.timeout_secs, 0);
-        // Verify docker is opt-in
-        assert!(!config.docker);
         // Verify no base branch means HEAD
         assert!(config.base_branch.is_none());
     }

@@ -1,25 +1,24 @@
 //! Docker container management for mantle sessions.
 //!
 //! Provides isolated execution environments for Claude Code sessions
-//! using Docker containers managed via the bollard crate.
+//! using Docker containers.
 //!
-//! ## Architecture
+//! ## Execution Modes
+//!
+//! ### Attached Mode (Primary)
+//! Container runs in foreground via `docker run`. Dies when parent dies.
+//! Result written to stdout, captured by parent.
 //!
 //! ```text
-//! Host                          Container
-//! ────                          ─────────
-//! .mantle/worktrees/foo/ ──────► /workspace (rw)
-//! ~/.claude/ ──────────────────► /root/.claude (ro)
-//! /tmp/mantle-fifo/ ───────────► /tmp/mantle (rw)
-//!                                   │
-//!                                   ▼
-//!                               mantle-agent wrap \
-//!                                 --result-fifo /tmp/mantle/result.fifo \
-//!                                 -- claude -p "..."
+//! mantle (parent)
+//!   └── docker run --rm mantle-agent:latest wrap --stdout ...
+//!         └── mantle-agent wrap --stdout
+//!               └── claude -p "..."
 //! ```
+//!
+//! ### Detached Mode (via bollard)
+//! For cleanup operations, container inspection, and hub socket mode.
 
 pub mod container;
 
-pub use container::{
-    cleanup_fifo_dir, create_fifo_dir, ContainerConfig, ContainerManager, DockerError, FifoReader,
-};
+pub use container::{run_attached, ContainerConfig, ContainerManager, DockerError};

@@ -38,6 +38,7 @@ packages:
     -- Test/example packages
     claude-code-test
     types-first-dev
+    types-first-dev/test-repo
 
     -- Vendored dependencies
     haskell/vendor/freer-simple

@@ -17,6 +17,8 @@ pub enum ResultDestination<'a> {
     Fifo(&'a Path),
     /// Write to hub socket with session ID.
     HubSocket { path: &'a Path, session_id: &'a str },
+    /// Write to stdout (attached container mode).
+    Stdout,
 }
 
 /// Collects streaming events and builds the final RunResult.
@@ -110,6 +112,12 @@ impl EventCollector {
             ResultDestination::HubSocket { path, session_id } => {
                 let session_result = run_result_to_session_result(&result, session_id);
                 write_result_to_socket(path, &session_result)
+            }
+            ResultDestination::Stdout => {
+                // Print JSON to stdout - captured by parent process in attached mode
+                let json = serde_json::to_string(&result)?;
+                println!("{}", json);
+                Ok(())
             }
         }
     }

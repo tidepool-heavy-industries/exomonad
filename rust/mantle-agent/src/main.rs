@@ -15,7 +15,7 @@ use tracing::error;
 use tracing_subscriber::EnvFilter;
 
 use mantle_shared::commands::HookEventType;
-use mantle_shared::{handle_hook, send_signal, wrap_claude, wrap_claude_with_hub};
+use mantle_shared::{handle_hook, send_signal, wrap_claude, wrap_claude_with_hub, wrap_claude_to_stdout};
 
 // ============================================================================
 // CLI Types
@@ -33,13 +33,17 @@ struct Cli {
 enum Commands {
     /// Wrap claude as subprocess, humanize output
     Wrap {
-        /// FIFO to write final JSON result to (mutually exclusive with --hub-socket)
-        #[arg(long, required_unless_present = "hub_socket", conflicts_with = "hub_socket")]
+        /// FIFO to write final JSON result to (legacy mode)
+        #[arg(long, conflicts_with_all = ["hub_socket", "stdout"])]
         result_fifo: Option<PathBuf>,
 
-        /// Hub socket to write final JSON result to (mutually exclusive with --result-fifo)
-        #[arg(long, required_unless_present = "result_fifo", conflicts_with = "result_fifo")]
+        /// Hub socket to write final JSON result to
+        #[arg(long, conflicts_with_all = ["result_fifo", "stdout"])]
         hub_socket: Option<PathBuf>,
+
+        /// Write final JSON result to stdout (attached container mode)
+        #[arg(long, conflicts_with_all = ["result_fifo", "hub_socket"])]
+        stdout: bool,
 
         /// Working directory for Claude Code
         #[arg(long)]
@@ -109,13 +113,23 @@ fn main() {
         Commands::Wrap {
             result_fifo,
             hub_socket,
+            stdout,
             cwd,
             session_tag,
             timeout,
             control_socket,
             claude_args,
         } => {
-            if let Some(hub_socket) = hub_socket {
+            if stdout {
+                // Stdout mode - for attached containers
+                wrap_claude_to_stdout(
+                    cwd.as_ref(),
+                    session_tag.as_deref(),
+                    timeout,
+                    control_socket.as_ref(),
+                    &claude_args,
+                )
+            } else if let Some(hub_socket) = hub_socket {
                 // Hub socket mode - requires session_tag
                 let session_id = session_tag.as_deref().unwrap_or_else(|| {
                     error!("--session-tag is required when using --hub-socket");
@@ -140,7 +154,7 @@ fn main() {
                     &claude_args,
                 )
             } else {
-                error!("Either --result-fifo or --hub-socket must be provided");
+                error!("One of --stdout, --result-fifo, or --hub-socket must be provided");
                 std::process::exit(1);
             }
         }

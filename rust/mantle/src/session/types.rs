@@ -225,7 +225,7 @@ pub struct SessionOutput {
     pub num_turns: i64,
 
     /// Interrupt signals received during the run
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub interrupts: Vec<InterruptSignal>,
 
     /// Wall-clock duration in seconds

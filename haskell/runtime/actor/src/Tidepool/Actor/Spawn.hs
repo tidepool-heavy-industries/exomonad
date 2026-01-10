@@ -18,6 +18,7 @@ import Control.Monad (forever)
 import Data.Aeson (Value)
 import qualified Data.Text as T
 import qualified Ki
+import System.IO (hFlush, stdout)
 
 import Tidepool.Actor.Mailbox (Mailbox, newMailboxIO, receive)
 import Tidepool.Actor.Types (Actor(..), ActorId)
@@ -64,11 +65,14 @@ spawnActorWithMailbox scope aid mailbox handler = do
 actorLoop :: ActorId -> Mailbox Value -> ActorHandler -> IO ()
 actorLoop actorId mailbox handler = forever $ do
   msg <- receive mailbox
+  putStrLn $ "[ACTOR] " <> T.unpack actorId <> " received message"
+  hFlush stdout
   catchSync (handler msg) (logException actorId)
   where
     logException :: ActorId -> SomeException -> IO ()
-    logException aid e =
-      putStrLn $ "Actor " <> T.unpack aid <> " caught exception: " <> show e
+    logException aid e = do
+      putStrLn $ "[ACTOR] " <> T.unpack aid <> " caught exception: " <> show e
+      hFlush stdout
 
 -- | Catch only synchronous exceptions; re-throw async exceptions.
 --

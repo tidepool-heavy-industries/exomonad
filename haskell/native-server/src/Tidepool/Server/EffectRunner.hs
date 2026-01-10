@@ -230,7 +230,6 @@ loadExecutorConfig = do
     , ecSessionConfig = SessionConfig
         { scMantlePath = maybe "mantle" id mantlePath
         , scRepoRoot = maybe "." id mantleRepoRoot
-        , scQuiet = True
         }
     , ecDevLogConfig = DevLogConfig
         { dcVerbosity = verbosity

@@ -88,6 +88,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.TypeLits (Symbol, KnownSymbol, symbolVal)
 import qualified Ki
+import System.IO (hFlush, stdout)
 
 import Tidepool.Graph.Goto (GotoChoice, To, gotoChoice, gotoExit)
 import Tidepool.Graph.Goto.Internal (GotoChoice(..), OneOf(..))
@@ -314,6 +315,8 @@ runGraphAsActors handlerBuilders entryPayload = do
         router target payload
           | target == "exit" = do
               -- Exit: put result in MVar
+              putStrLn $ "[GRAPH] Routing to: exit"
+              hFlush stdout
               case parseEither parseJSON payload of
                 Left err -> error $ "Failed to parse exit payload: " <> err
                 Right result -> putMVar exitChan result
@@ -324,6 +327,8 @@ runGraphAsActors handlerBuilders entryPayload = do
               case parseArriveMessage payload of
                 Left err -> error $ "Failed to parse arrive message: " <> err
                 Right (barrierName, sourceName, workerPayload) -> do
+                  putStrLn $ "[GRAPH] Routing arrive from " <> T.unpack sourceName <> " to barrier: " <> T.unpack barrierName
+                  hFlush stdout
                   actors <- readIORef actorsRef
                   case Map.lookup barrierName actors of
                     Nothing -> error $ "Unknown barrier target: " <> T.unpack barrierName
@@ -337,6 +342,8 @@ runGraphAsActors handlerBuilders entryPayload = do
 
           | otherwise = do
               -- Normal dispatch: look up actor and send
+              putStrLn $ "[GRAPH] Routing to: " <> T.unpack target
+              hFlush stdout
               actors <- readIORef actorsRef
               case Map.lookup target actors of
                 Nothing -> error $ "Unknown actor target: " <> T.unpack target
