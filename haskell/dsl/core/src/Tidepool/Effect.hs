@@ -8,10 +8,10 @@ module Tidepool.Effect
     module Tidepool.Effect.Types
     -- * DevLog
   , module Tidepool.Effect.DevLog
-    -- * ClaudeCode
-  , module Tidepool.Effect.ClaudeCode
+    -- * Session (ClaudeCode orchestration)
+  , module Tidepool.Effect.Session
   ) where
 
 import Tidepool.Effect.Types
 import Tidepool.Effect.DevLog
-import Tidepool.Effect.ClaudeCode
+import Tidepool.Effect.Session

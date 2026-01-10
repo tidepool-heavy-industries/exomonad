@@ -52,7 +52,7 @@ import ClaudeCodeTest.Templates (ExploreTpl, ActionTpl)
 --
 -- Notes:
 -- - Both LLM nodes use ClaudeCode annotation for subprocess execution
--- - 'Nothing for cwd means inherit working directory from runtime
+-- - Mantle manages worktrees dynamically (cwd no longer at type level)
 -- - Templates define prompts, Schema defines structured output
 data ClaudeCodeTestGraph mode = ClaudeCodeTestGraph
   { -- | Entry point - receives directory and objective
@@ -60,15 +60,14 @@ data ClaudeCodeTestGraph mode = ClaudeCodeTestGraph
 
     -- | Explore node - uses Claude Code to explore files in directory
     --
-    -- ClaudeCode 'Sonnet 'Nothing means:
-    -- - Use Sonnet model
-    -- - CWD not specified at type level (passed dynamically)
+    -- ClaudeCode 'Sonnet means use Sonnet model via mantle subprocess.
+    -- Worktree is managed dynamically by mantle, not at type level.
   , explore :: mode :- G.LLMNode
       :@ Types.Input ExploreInput
       :@ Template ExploreTpl
       :@ Schema Findings
       :@ UsesEffects '[Goto "route" Findings]
-      :@ ClaudeCode 'Sonnet 'Nothing
+      :@ ClaudeCode 'Sonnet
 
     -- | Route node - decides whether to take action or exit
     --
@@ -84,7 +83,7 @@ data ClaudeCodeTestGraph mode = ClaudeCodeTestGraph
       :@ Template ActionTpl
       :@ Schema ActionResult
       :@ UsesEffects '[Goto Exit ActionResult]
-      :@ ClaudeCode 'Sonnet 'Nothing
+      :@ ClaudeCode 'Sonnet
 
     -- | Exit point - returns the final action result
   , exit :: mode :- G.Exit ActionResult

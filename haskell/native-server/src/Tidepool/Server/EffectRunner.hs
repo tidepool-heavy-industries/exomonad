@@ -67,14 +67,6 @@ import Tidepool.LLM.Types
   , ApiKey(..)
   , BaseUrl(..)
   )
-import Tidepool.ClaudeCode.Effect
-  ( ClaudeCodeExec
-  , runClaudeCodeExecIO
-  )
-import Tidepool.ClaudeCode.Config
-  ( ClaudeCodeConfig(..)
-  , defaultClaudeCodeConfig
-  )
 import Tidepool.DevLog.Executor
   ( runDevLog
   , DevLogConfig(..)
@@ -82,6 +74,12 @@ import Tidepool.DevLog.Executor
   , defaultDevLogConfig
   )
 import Tidepool.Effect.DevLog (DevLog, Verbosity(..))
+import Tidepool.Effect.Session (Session)
+import Tidepool.Session.Executor
+  ( runSessionIO
+  , SessionConfig(..)
+  , defaultSessionConfig
+  )
 
 -- Effect imports
 import Tidepool.Effects.UI (UI)
@@ -106,8 +104,8 @@ data ExecutorConfig = ExecutorConfig
     -- ^ OTLP/Grafana Tempo configuration (traces)
   , ecServiceName :: Text
     -- ^ Service name for trace attribution
-  , ecClaudeCodeConfig :: ClaudeCodeConfig
-    -- ^ ClaudeCode (mantle) configuration
+  , ecSessionConfig :: SessionConfig
+    -- ^ Session (mantle session) configuration for dockerized Claude Code
   , ecDevLogConfig :: DevLogConfig
     -- ^ DevLog (session-scoped file logging) configuration
   }
@@ -126,7 +124,7 @@ defaultExecutorConfig = ExecutorConfig
   , ecLokiConfig = defaultLokiConfig
   , ecOTLPConfig = Nothing  -- Disabled by default
   , ecServiceName = "tidepool-native"
-  , ecClaudeCodeConfig = defaultClaudeCodeConfig
+  , ecSessionConfig = defaultSessionConfig "."  -- Repo root, will be overridden
   , ecDevLogConfig = defaultDevLogConfig
   }
 
@@ -145,9 +143,8 @@ defaultExecutorConfig = ExecutorConfig
 -- * @OTLP_USER@ - OTLP basic auth user (optional)
 -- * @OTLP_TOKEN@ - OTLP basic auth token (optional)
 -- * @SERVICE_NAME@ - Service name for traces (default: tidepool-native)
--- * @ZELLIJ_SESSION@ - Zellij session for ClaudeCode (default: tidepool)
--- * @ZELLIJ_CC_PATH@ - Path to mantle binary (default: mantle)
--- * @ZELLIJ_CC_TIMEOUT@ - ClaudeCode timeout in seconds (default: 300)
+-- * @MANTLE_PATH@ - Path to mantle binary (default: mantle)
+-- * @MANTLE_REPO_ROOT@ - Git repository root for session worktrees (default: .)
 -- * @DEVLOG_DIR@ - DevLog output directory (default: disabled)
 -- * @DEVLOG_VERBOSITY@ - Verbosity level: quiet|normal|verbose|trace (default: normal)
 -- * @DEVLOG_LATEST@ - Create latest.log symlink: true|false (default: true)
@@ -172,10 +169,9 @@ loadExecutorConfig = do
   otlpToken <- lookupEnv "OTLP_TOKEN"
   serviceName <- lookupEnv "SERVICE_NAME"
 
-  -- ClaudeCode config
-  zellijSession <- lookupEnv "ZELLIJ_SESSION"
-  zellijCcPath <- lookupEnv "ZELLIJ_CC_PATH"
-  zellijCcTimeout <- lookupEnv "ZELLIJ_CC_TIMEOUT"
+  -- Session config
+  mantlePath <- lookupEnv "MANTLE_PATH"
+  mantleRepoRoot <- lookupEnv "MANTLE_REPO_ROOT"
 
   -- DevLog config
   devLogDir <- lookupEnv "DEVLOG_DIR"
@@ -231,11 +227,10 @@ loadExecutorConfig = do
           }
         Nothing -> Nothing
     , ecServiceName = maybe "tidepool-native" T.pack serviceName
-    , ecClaudeCodeConfig = ClaudeCodeConfig
-        { ccZellijSession = maybe "tidepool" T.pack zellijSession
-        , ccDefaultTimeout = maybe 300 id (zellijCcTimeout >>= readMaybe)
-        , ccTempDir = "/tmp"
-        , ccZellijCcPath = maybe "mantle" id zellijCcPath
+    , ecSessionConfig = SessionConfig
+        { scMantlePath = maybe "mantle" id mantlePath
+        , scRepoRoot = maybe "." id mantleRepoRoot
+        , scQuiet = True
         }
     , ecDevLogConfig = DevLogConfig
         { dcVerbosity = verbosity
@@ -284,10 +279,10 @@ mkExecutorEnv config = do
 -- This composes the full effect stack:
 --
 -- @
--- Eff '[UI, Habitica, LLMComplete, ClaudeCodeExec, DevLog, Observability, IO] a
+-- Eff '[UI, Habitica, LLMComplete, Session, DevLog, Observability, IO] a
 --   → runObservabilityWithContext (interpret Observability)
 --   → runDevLog (interpret DevLog)
---   → runClaudeCodeExecIO (interpret ClaudeCodeExec)
+--   → runSessionIO (interpret Session)
 --   → runLLMComplete (interpret LLMComplete)
 --   → runHabitica (interpret Habitica)
 --   → runUI (interpret UI)
@@ -298,7 +293,7 @@ mkExecutorEnv config = do
 -- 1. UI (first to peel) - handles user interaction
 -- 2. Habitica - makes Habitica API calls
 -- 3. LLMComplete - makes LLM API calls
--- 4. ClaudeCodeExec - executes nodes via Claude Code subprocess
+-- 4. Session - orchestrates dockerized Claude Code sessions via mantle
 -- 5. DevLog - session-scoped dev logging
 -- 6. Observability (last to peel) - records events and spans
 --
@@ -308,7 +303,7 @@ mkExecutorEnv config = do
 -- Example:
 --
 -- @
--- myAgent :: Eff '[UI, Habitica, LLMComplete, ClaudeCodeExec, DevLog, Observability, IO] String
+-- myAgent :: Eff '[UI, Habitica, LLMComplete, Session, DevLog, Observability, IO] String
 -- myAgent = do
 --   publishEvent $ GraphTransition "entry" "greeting" "start"
 --   showText "Welcome!"
@@ -321,7 +316,7 @@ runEffects
   :: ExecutorEnv
   -> UIContext
   -> UICallback
-  -> Eff '[UI, Habitica, LLMComplete, ClaudeCodeExec, DevLog, Observability, IO] a
+  -> Eff '[UI, Habitica, LLMComplete, Session, DevLog, Observability, IO] a
   -> IO a
 runEffects env ctx callback action = do
   -- Create a fresh trace context for this request
@@ -331,7 +326,7 @@ runEffects env ctx callback action = do
   result <- runM
     . runObservabilityWithContext traceCtx (ecLokiConfig $ eeConfig env)
     . runDevLog (ecDevLogConfig $ eeConfig env)
-    . runClaudeCodeExecIO (ecClaudeCodeConfig $ eeConfig env)
+    . runSessionIO (ecSessionConfig $ eeConfig env)
     . runLLMComplete (eeLLMEnv env)
     . runHabitica (eeHabiticaEnv env)
     . runUI ctx callback

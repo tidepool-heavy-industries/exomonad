@@ -196,7 +196,7 @@ type DuplicateSchemaError t = TypeError
 -- @
 -- -- This will produce the error:
 -- type BadGraph = Graph '[...]
---   :@ ClaudeCode 'Sonnet 'Nothing
+--   :@ ClaudeCode 'Sonnet
 --   :& Backend CloudflareAI
 -- @
 -- | Error for ClaudeCode annotation with CloudflareAI backend.

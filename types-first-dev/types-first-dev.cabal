@@ -58,7 +58,7 @@ library
         parsec >= 3.1 && < 4,
         time >= 1.12 && < 2,
         tidepool-core,
-        tidepool-claude-code-executor,
+        tidepool-session-executor,
         tidepool-worktree-executor,
         tidepool-cabal-executor,
         async >= 2.2 && < 3
@@ -98,7 +98,7 @@ executable types-first-dev
         process >= 1.6 && < 2,
         types-first-dev,
         tidepool-core,
-        tidepool-claude-code-executor,
+        tidepool-session-executor,
         tidepool-worktree-executor,
         tidepool-cabal-executor
     ghc-options:

@@ -98,7 +98,8 @@ import Tidepool.Graph.Errors
 import Text.Ginger.TH (TypedTemplate)
 import Text.Parsec.Pos (SourcePos)
 
-import Tidepool.Graph.Types (Exit, Self, Arrive(..), ModelChoice(..), SingModelChoice(..), KnownMaybeCwd(..), HList(..))
+import Tidepool.Graph.Types (Exit, Self, Arrive(..), ModelChoice(..), SingModelChoice(..), HList(..))
+import Tidepool.Effect.Session (SessionId)
 
 -- Import from Internal (re-exports types, we hide constructors in this module's exports)
 import Tidepool.Graph.Goto.Internal (OneOf(..), GotoChoice(..), GotoAll(..), To, Payloads, PayloadOf)
@@ -493,7 +494,7 @@ data LLMHandler needs schema targets effs tpl where
 data ClaudeCodeResult schema = ClaudeCodeResult
   { ccrParsedOutput :: schema
     -- ^ The parsed structured output from Claude Code.
-  , ccrSessionId :: Maybe Text
+  , ccrSessionId :: SessionId
     -- ^ Session ID from Claude Code (for forking parallel sessions).
   }
   deriving stock (Show, Eq, Functor)
@@ -502,8 +503,8 @@ data ClaudeCodeResult schema = ClaudeCodeResult
 -- | Handler for ClaudeCode-annotated LLM nodes.
 --
 -- Like 'LLMHandler', but executed via Claude Code subprocess instead of API.
--- The model and cwd are compile-time validated through type parameters that
--- must match the node's ClaudeCode annotation.
+-- The model is compile-time validated through a type parameter that must match
+-- the node's ClaudeCode annotation.
 --
 -- = Usage
 --
@@ -512,26 +513,25 @@ data ClaudeCodeResult schema = ClaudeCodeResult
 --     :@ Input TaskInfo
 --     :@ Template WorkTpl
 --     :@ Schema WorkResult
---     :@ ClaudeCode 'Sonnet ('Just "/worktree")
+--     :@ ClaudeCode 'Sonnet
 --
--- -- Handler: model and cwd are derived from types, not passed as arguments
--- gWork = ClaudeCodeLLMHandler @'Sonnet @('Just "/worktree")
+-- -- Handler: model is derived from types, not passed as arguments
+-- gWork = ClaudeCodeLLMHandler @'Sonnet
 --   Nothing                              -- no system template
 --   (templateCompiled @WorkTpl)          -- user template
 --   (\\task -> pure WorkContext { ... })  -- context builder
 --   (\\ccResult -> pure $ gotoExit ccResult.ccrParsedOutput)  -- router receives ClaudeCodeResult
 -- @
 --
--- Note: The @model@ and @cwd@ type parameters MUST match the ClaudeCode
--- annotation. Mismatches result in compile-time type errors, preventing
--- runtime inconsistencies.
-type ClaudeCodeLLMHandler :: ModelChoice -> Maybe Symbol -> Type -> Type -> [Type] -> [Type -> Type] -> Type -> Type
-data ClaudeCodeLLMHandler model cwd needs schema targets effs tpl where
+-- Note: The @model@ type parameter MUST match the ClaudeCode annotation.
+-- Mismatches result in compile-time type errors, preventing runtime inconsistencies.
+type ClaudeCodeLLMHandler :: ModelChoice -> Type -> Type -> [Type] -> [Type -> Type] -> Type -> Type
+data ClaudeCodeLLMHandler model needs schema targets effs tpl where
   ClaudeCodeLLMHandler
-    :: forall model cwd tpl needs schema targets effs.
-       (SingModelChoice model, KnownMaybeCwd cwd)
+    :: forall model tpl needs schema targets effs.
+       SingModelChoice model
     => Maybe (TypedTemplate tpl SourcePos)                    -- ^ Optional system prompt template
     -> TypedTemplate tpl SourcePos                            -- ^ User prompt template (required)
     -> (needs -> Eff effs tpl)                                -- ^ Builds context for both templates
     -> (ClaudeCodeResult schema -> Eff effs (GotoChoice targets))  -- ^ Routes based on LLM output + session metadata
-    -> ClaudeCodeLLMHandler model cwd needs schema targets effs tpl
+    -> ClaudeCodeLLMHandler model needs schema targets effs tpl

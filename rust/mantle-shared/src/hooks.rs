@@ -70,17 +70,26 @@ impl HookConfig {
     /// Generate hook configuration for a Claude Code session.
     ///
     /// Creates or updates `.claude/settings.local.json` in the given working
-    /// directory with hooks that forward to `mantle hook <event>`.
+    /// directory with hooks that forward to `<binary> hook <event>`.
     ///
     /// # Arguments
     ///
     /// * `cwd` - Working directory for the Claude Code session
-    /// * `mantle_path` - Path to the mantle binary
+    /// * `binary_path` - Path to the binary that handles hooks (mantle or mantle-agent)
     ///
     /// # Returns
     ///
     /// A `HookConfig` guard that will clean up on drop.
-    pub fn generate(cwd: &Path, mantle_path: &Path) -> Result<Self> {
+    pub fn generate(cwd: &Path, binary_path: &Path) -> Result<Self> {
+        Self::generate_with_binary(cwd, binary_path)
+    }
+
+    /// Generate hook configuration using a specific binary path.
+    ///
+    /// This is the core implementation - `generate()` delegates to this.
+    /// Use this when you need to explicitly specify which binary handles hooks
+    /// (e.g., `mantle-agent` when running inside a container).
+    pub fn generate_with_binary(cwd: &Path, binary_path: &Path) -> Result<Self> {
         let claude_dir = cwd.join(".claude");
         let settings_path = claude_dir.join("settings.local.json");
 
@@ -103,7 +112,7 @@ impl HookConfig {
         let created_file = original_content.is_none();
 
         // Generate hook commands
-        let hooks = generate_hook_config(mantle_path);
+        let hooks = generate_hook_config(binary_path);
 
         // Merge our hooks with existing
         if let Some(existing_hooks) = settings.get("hooks") {

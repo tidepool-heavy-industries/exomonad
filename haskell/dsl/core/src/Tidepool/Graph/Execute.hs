@@ -66,7 +66,7 @@ import Text.Ginger.TH (TypedTemplate, runTypedTemplate)
 import Text.Parsec.Pos (SourcePos)
 
 import Tidepool.Effect (LLM)
-import Tidepool.Effect.ClaudeCode (ClaudeCodeExec, execClaudeCode)
+import Tidepool.Effect.Session (Session, SessionOutput(..), SessionId, startSession)
 import Tidepool.Effect.Types (TurnOutcome(..), TurnParseResult(..), TurnResult(..), runTurn)
 import Tidepool.Graph.Edges (GetInput, GetSpawnTargets, GetBarrierTarget, GetAwaits)
 import Tidepool.Graph.Generic (AsHandler, FieldsWithNamesOf, SpawnPayloads, SpawnPayloadsInner, AwaitsHList, GetNodeDef)
@@ -76,7 +76,7 @@ import qualified Tidepool.Graph.Generic.Core as G (Exit)
 import Tidepool.Graph.Goto (GotoChoice, To, LLMHandler(..), ClaudeCodeLLMHandler(..), ClaudeCodeResult(..))
 import Tidepool.Graph.Goto.Internal (GotoChoice(..), OneOf(..))
 import Tidepool.Graph.Template (GingerContext)
-import Tidepool.Graph.Types (Exit, Self, Arrive, SingModelChoice(..), KnownMaybeCwd(..), HList(..))
+import Tidepool.Graph.Types (Exit, Self, Arrive, SingModelChoice(..), HList(..))
 import Tidepool.Schema (schemaToValue)
 import Tidepool.StructuredOutput (StructuredOutput(..), formatDiagnostic)
 
@@ -260,32 +260,36 @@ executeLLMHandler mSystemTpl userTpl beforeFn afterFn input = do
 
 -- | Execute a ClaudeCodeLLMHandler, returning a GotoChoice.
 --
--- Similar to 'executeLLMHandler', but uses the ClaudeCodeExec effect to spawn
--- a Claude Code subprocess instead of calling the LLM API directly.
+-- Similar to 'executeLLMHandler', but uses the Session effect to spawn
+-- a dockerized Claude Code session via mantle.
 --
 -- This function:
 -- 1. Calls the before-handler to build template context
 -- 2. Renders the user template (system template appended to prompt)
--- 3. Calls the ClaudeCodeExec effect with the prompt and schema
--- 4. Parses the structured output from Claude Code
+-- 3. Starts a Session with the prompt and schema
+-- 4. Parses the structured output from the session result
 -- 5. Calls the after-handler to determine the next transition
 --
 -- = Type Parameters
 --
 -- * @model@ - The ModelChoice from ClaudeCode annotation (type-level)
--- * @cwd@ - The working directory from ClaudeCode annotation (type-level)
 -- * @needs@ - The input type from Input annotation
 -- * @schema@ - The LLM output schema type
 -- * @targets@ - The transition targets from UsesEffects
--- * @es@ - The effect stack (must include ClaudeCodeExec)
+-- * @es@ - The effect stack (must include Session)
 -- * @tpl@ - The template context type
+--
+-- = Session Lifecycle
+--
+-- Each invocation starts a fresh session with slug "graph-node". For self-loop
+-- scenarios requiring session continuity, the after-handler receives the
+-- session ID in 'ClaudeCodeResult' and can store it in Memory for later use.
 executeClaudeCodeHandler
-  :: forall model cwd needs schema targets es tpl.
-     ( Member ClaudeCodeExec es
+  :: forall model needs schema targets es tpl.
+     ( Member Session es
      , StructuredOutput schema
      , GingerContext tpl
      , SingModelChoice model
-     , KnownMaybeCwd cwd
      , ConvertTransitionHint targets
      )
   => Maybe (TypedTemplate tpl SourcePos)                    -- ^ Optional system prompt template
@@ -296,7 +300,6 @@ executeClaudeCodeHandler
   -> Eff es (GotoChoice targets)
 executeClaudeCodeHandler mSystemTpl userTpl beforeFn afterFn input = do
   let model = singModelChoice @model
-      cwd = knownMaybeCwd @cwd
   -- Build context from before-handler
   ctx <- beforeFn input
   -- Render templates
@@ -311,12 +314,16 @@ executeClaudeCodeHandler mSystemTpl userTpl beforeFn afterFn input = do
                    then userPrompt
                    else systemPrompt <> "\n\n" <> userPrompt
       schemaVal = Just $ schemaToValue (structuredSchema @schema)
-  -- Call ClaudeCodeExec effect (forkSession=False for normal execution)
-  (outputVal, sessionId) <- execClaudeCode model cwd fullPrompt schemaVal Nothing Nothing False
-  -- Parse the structured output and wrap with session metadata
-  case parseStructured outputVal of
-    Left diag -> error $ "ClaudeCode output parse error: " <> T.unpack (formatDiagnostic diag)
-    Right output -> afterFn (ClaudeCodeResult output sessionId)
+  -- Start a Session via mantle (fresh session each call)
+  result <- startSession "graph-node" fullPrompt model schemaVal
+  -- Extract and parse the structured output
+  case result.soStructuredOutput of
+    Nothing -> error $ "ClaudeCode session returned no structured output"
+      <> maybe "" (\e -> ": " <> T.unpack e) result.soError
+    Just outputVal ->
+      case parseStructured outputVal of
+        Left diag -> error $ "ClaudeCode output parse error: " <> T.unpack (formatDiagnostic diag)
+        Right output -> afterFn (ClaudeCodeResult output (result.soSessionId))
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -351,19 +358,18 @@ instance
 
 -- | ClaudeCode LLM node handler: execute via executeClaudeCodeHandler.
 --
--- Dispatches to Claude Code subprocess instead of LLM API.
--- Model and cwd are derived from type parameters, ensuring compile-time
+-- Dispatches to dockerized Claude Code session via mantle.
+-- Model is derived from type parameters, ensuring compile-time
 -- validation that the handler matches the ClaudeCode annotation.
 instance
-  ( Member ClaudeCodeExec es
+  ( Member Session es
   , StructuredOutput schema
   , GingerContext tpl
   , SingModelChoice model
-  , KnownMaybeCwd cwd
   , ConvertTransitionHint targets
-  ) => CallHandler (ClaudeCodeLLMHandler model cwd payload schema targets es tpl) payload es targets where
+  ) => CallHandler (ClaudeCodeLLMHandler model payload schema targets es tpl) payload es targets where
   callHandler (ClaudeCodeLLMHandler mSysTpl userTpl beforeFn afterFn) =
-    executeClaudeCodeHandler @model @cwd mSysTpl userTpl beforeFn afterFn
+    executeClaudeCodeHandler @model mSysTpl userTpl beforeFn afterFn
 
 
 -- ════════════════════════════════════════════════════════════════════════════

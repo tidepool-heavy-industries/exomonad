@@ -336,7 +336,7 @@ type family SameAnnotationType ann target where
   SameAnnotationType (UsesEffects _) (UsesEffects _) = 'True
   SameAnnotationType (Memory _) (Memory _) = 'True
   SameAnnotationType Vision Vision = 'True
-  SameAnnotationType (ClaudeCode _ _) (ClaudeCode _ _) = 'True
+  SameAnnotationType (ClaudeCode _) (ClaudeCode _) = 'True
   SameAnnotationType (Backend _) (Backend _) = 'True
   SameAnnotationType (Spawn _) (Spawn _) = 'True
   SameAnnotationType (Barrier _) (Barrier _) = 'True
@@ -383,27 +383,26 @@ type family GetBackend graph where
 
 -- | Extract ClaudeCode annotation from a node.
 --
--- Returns the model and cwd as a type-level tuple.
+-- Returns the model choice.
 --
 -- @
--- GetClaudeCode (LLMNode :@ Schema Result :@ ClaudeCode 'Sonnet ('Just "/path"))
---   = 'Just '( 'Sonnet, 'Just "/path")
+-- GetClaudeCode (LLMNode :@ Schema Result :@ ClaudeCode 'Sonnet) = 'Just 'Sonnet
 -- @
-type GetClaudeCode :: Type -> Maybe (ModelChoice, Maybe Symbol)
+type GetClaudeCode :: Type -> Maybe ModelChoice
 type family GetClaudeCode node where
-  GetClaudeCode (node :@ ClaudeCode m c) = 'Just '(m, c)
+  GetClaudeCode (node :@ ClaudeCode m) = 'Just m
   GetClaudeCode (node :@ _) = GetClaudeCode node
   GetClaudeCode _ = 'Nothing
 
 -- | Check if a node has the ClaudeCode annotation.
 --
 -- @
--- HasClaudeCode (LLMNode :@ ClaudeCode 'Haiku 'Nothing) = 'True
+-- HasClaudeCode (LLMNode :@ ClaudeCode 'Haiku) = 'True
 -- HasClaudeCode (LLMNode :@ Schema Result) = 'False
 -- @
 type HasClaudeCode :: Type -> Bool
 type family HasClaudeCode node where
-  HasClaudeCode (node :@ ClaudeCode _ _) = 'True
+  HasClaudeCode (node :@ ClaudeCode _) = 'True
   HasClaudeCode (node :@ _) = HasClaudeCode node
   HasClaudeCode _ = 'False
 

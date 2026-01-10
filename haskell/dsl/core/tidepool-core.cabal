@@ -17,7 +17,7 @@ library
         Tidepool.WASM
         Tidepool.Platform
         Tidepool.Effect
-        Tidepool.Effect.ClaudeCode
+        Tidepool.Effect.Session
         Tidepool.Effect.DevLog
         Tidepool.Effect.Metadata
         Tidepool.Effect.Types

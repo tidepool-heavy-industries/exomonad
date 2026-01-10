@@ -8,22 +8,20 @@
 -- It explores a test directory and takes follow-up action based on findings.
 --
 -- Usage:
---   ZELLIJ_SESSION=claude-code-test cabal run claude-code-test [directory]
+--   cabal run claude-code-test [directory]
 --
 -- Prerequisites:
---   1. zellij-cc binary in PATH
---   2. Running zellij session: zellij -s claude-code-test
+--   1. mantle binary in PATH
+--   2. Git repository with worktree support
 module Main (main) where
 
 import Control.Monad.Freer (runM)
-import Data.Text (Text)
-import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
-import System.Environment (getArgs, lookupEnv)
+import System.Environment (getArgs)
 import System.IO (hFlush, stdout)
+import System.Directory (getCurrentDirectory)
 
-import Tidepool.ClaudeCode.Config (mkClaudeCodeConfig, ClaudeCodeConfig(..))
-import Tidepool.ClaudeCode.Effect (runClaudeCodeExecIO)
+import Tidepool.Session.Executor (runSessionIO, defaultSessionConfig)
 import Tidepool.Graph.Execute (CallHandler(..), DispatchGoto(..))
 
 import ClaudeCodeTest.Graph (ClaudeCodeTestGraph(..))
@@ -39,14 +37,9 @@ main = do
         (d:_) -> d
         []    -> "./test-fixtures"
 
-  -- Get zellij session from environment or use default
-  mSession <- lookupEnv "ZELLIJ_SESSION"
-  let sessionName = maybe "claude-code-test" T.pack mSession
-
-  -- Build config
-  let config = (mkClaudeCodeConfig sessionName)
-        { ccDefaultTimeout = 600  -- 10 minutes for exploration tasks
-        }
+  -- Build session config (uses current directory as repo root)
+  repoRoot <- getCurrentDirectory
+  let config = defaultSessionConfig repoRoot
 
   -- Build input
   let input = ExploreInput
@@ -59,10 +52,10 @@ main = do
   putStrLn "ClaudeCode Test Graph"
   putStrLn "=============================================="
   putStrLn $ "Directory: " <> testDir
-  putStrLn $ "Zellij session: " <> T.unpack sessionName
+  putStrLn $ "Repo root: " <> repoRoot
   putStrLn ""
   putStrLn "Starting graph execution..."
-  putStrLn "(Watch the zellij pane for Claude Code activity)"
+  putStrLn "(Mantle manages sessions and worktrees)"
   putStrLn ""
   hFlush stdout
 
@@ -72,7 +65,7 @@ main = do
   -- 2. Call it with input using callHandler
   -- 3. Dispatch through the graph until exit
   result <- runM
-    . runClaudeCodeExecIO config
+    . runSessionIO config
     $ do
         -- Call the explore handler
         choice <- callHandler (explore testHandlers) input
