@@ -22,9 +22,8 @@
 //! ### Output
 //! - [`humanize`]: Human-readable output formatting for terminal display
 //!
-//! ### Commands & Wrapper
-//! - [`commands`]: CLI command implementations (signal, hook)
-//! - [`wrapper`]: Claude Code wrapper implementation
+//! ### Commands
+//! - [`commands`]: CLI command implementations (hook handling)
 //! - [`util`]: Shared utilities (shell quoting, path finding)
 
 // Core types
@@ -44,10 +43,9 @@ pub mod supervisor;
 // Output
 pub mod humanize;
 
-// Commands & wrapper
+// Commands
 pub mod commands;
 pub mod util;
-pub mod wrapper;
 
 // Re-export commonly used types at crate root
 pub use error::{MantleError, Result};
@@ -61,7 +59,6 @@ pub use supervisor::Supervisor;
 // Re-export hub types
 pub use hub::{HubClient, HubConfig, SessionInfo, SessionRegister, SessionResult, SessionState};
 
-// Re-export command and wrapper types
+// Re-export command types
 pub use commands::{handle_hook, send_signal, HookEventType};
 pub use util::{build_prompt, find_mantle_agent_binary, shell_quote};
-pub use wrapper::{wrap_claude, wrap_claude_with_hub, wrap_claude_to_stdout, EventCollector, ResultDestination};

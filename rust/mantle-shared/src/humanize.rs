@@ -86,3 +86,76 @@ pub fn print_interrupt(signal: &InterruptSignal) {
         signal.signal_type, signal.state
     );
 }
+
+/// Print a stream event to stderr in human-readable format.
+///
+/// Like [`print_event_humanized`] but outputs to stderr instead of stdout.
+/// Used when stdout needs to be reserved for structured output.
+pub fn eprint_event_humanized(event: &StreamEvent) {
+    match event {
+        StreamEvent::System(s) => {
+            let short_id = if s.session_id.len() >= 8 {
+                &s.session_id[..8]
+            } else {
+                &s.session_id
+            };
+            eprintln!("━━━ Session {} ━━━", short_id);
+            eprintln!("Model: {}", s.model);
+            eprintln!();
+        }
+        StreamEvent::Assistant(a) => {
+            for block in &a.message.content {
+                match block {
+                    ContentBlock::Text { text } => {
+                        eprintln!("{}", text);
+                    }
+                    ContentBlock::ToolUse { name, input, .. } => {
+                        eprintln!("\n┌─ {} ─────────────────", name);
+                        if let Some(obj) = input.as_object() {
+                            for (k, v) in obj.iter().take(3) {
+                                let v_str = v.to_string();
+                                let char_count = v_str.chars().count();
+                                let preview: String = v_str.chars().take(60).collect();
+                                if char_count > 60 {
+                                    eprintln!("│ {}: {}...", k, preview);
+                                } else {
+                                    eprintln!("│ {}: {}", k, preview);
+                                }
+                            }
+                            if obj.len() > 3 {
+                                eprintln!("│ ... ({} more fields)", obj.len() - 3);
+                            }
+                        }
+                        eprintln!("└─────────────────────────");
+                    }
+                    ContentBlock::ToolResult {
+                        content, is_error, ..
+                    } => {
+                        let status = if is_error.unwrap_or(false) {
+                            "✗"
+                        } else {
+                            "✓"
+                        };
+                        let char_count = content.chars().count();
+                        let preview: String = content.chars().take(100).collect();
+                        if char_count > 100 {
+                            eprintln!("  {} {}...", status, preview);
+                        } else {
+                            eprintln!("  {} {}", status, preview);
+                        }
+                    }
+                }
+            }
+        }
+        StreamEvent::User(_) => {
+            // Usually just tool results, already handled above
+        }
+        StreamEvent::Result(r) => {
+            eprintln!();
+            eprintln!("━━━ Complete ━━━");
+            eprintln!("Status: {}", if r.is_error { "error" } else { "success" });
+            eprintln!("Turns: {}", r.num_turns.unwrap_or(0));
+            eprintln!("Cost: ${:.4}", r.total_cost_usd.unwrap_or(0.0));
+        }
+    }
+}

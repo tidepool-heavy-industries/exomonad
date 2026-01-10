@@ -12,6 +12,7 @@
 
 pub mod docker;
 pub mod session;
+pub mod stream_parser;
 
 // Re-export everything from mantle-shared for backwards compatibility
 pub use mantle_shared::*;

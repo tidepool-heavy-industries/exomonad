@@ -28,6 +28,12 @@ RUN apt-get update && apt-get install -y \
     && npm install -g @anthropic-ai/claude-code \
     && rm -rf /var/lib/apt/lists/*
 
+# Create non-root user (Claude Code refuses --dangerously-skip-permissions as root)
+RUN useradd -m -s /bin/bash user
+
 COPY --from=builder /build/target/release/mantle-agent /usr/local/bin/
 
-ENTRYPOINT ["mantle-agent"]
+USER user
+WORKDIR /home/user
+
+# No entrypoint - mantle runs `claude` directly, mantle-agent is only for hooks

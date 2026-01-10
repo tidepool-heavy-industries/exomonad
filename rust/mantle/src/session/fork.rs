@@ -5,12 +5,12 @@
 
 use std::path::Path;
 use std::time::Instant;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 use super::state::StateManager;
 use super::types::{generate_branch_name, generate_session_id, SessionMetadata, SessionOutput};
 use super::worktree::WorktreeManager;
-use crate::docker::{run_attached, ContainerConfig};
+use crate::docker::{run_claude_direct, ContainerConfig};
 
 /// Error types for session fork operations.
 #[derive(Debug, thiserror::Error)]
@@ -319,7 +319,7 @@ fn execute_fork(
     })
 }
 
-/// Execute session fork in a Docker container (attached mode).
+/// Execute session fork directly in a Docker container.
 fn execute_docker_fork(
     session_id: &str,
     branch: &str,
@@ -330,17 +330,14 @@ fn execute_docker_fork(
     timeout_secs: u64,
     state_manager: &StateManager,
 ) -> Result<SessionOutput> {
-    use mantle_shared::RunResult;
-    use std::collections::HashMap;
+    info!(session_id = %session_id, "Starting Docker fork execution (direct mode)");
 
-    info!(session_id = %session_id, "Starting Docker fork execution (attached mode)");
-
-    // Build Claude args with --resume and --fork-session flags
+    // Build Claude args with --resume and --fork-session flags and stream-json
     // --fork-session makes it a read-only fork (doesn't modify parent's context)
     let claude_args = vec![
         "--dangerously-skip-permissions".to_string(),
         "--output-format".to_string(),
-        "json".to_string(),
+        "stream-json".to_string(),
         "--verbose".to_string(),
         "--model".to_string(),
         model.to_string(),
@@ -351,7 +348,7 @@ fn execute_docker_fork(
         prompt.to_string(),
     ];
 
-    // Create container configuration (attached mode)
+    // Create container configuration
     let container_config = ContainerConfig::new(
         session_id.to_string(),
         worktree_path.to_path_buf(),
@@ -364,51 +361,8 @@ fn execute_docker_fork(
         s.mark_running(None);
     })?;
 
-    // Run container in attached mode - blocks until completion
-    let json_output = match run_attached(&container_config) {
-        Ok(output) => output,
-        Err(crate::docker::DockerError::ExitCode(code)) => {
-            warn!(exit_code = %code, "Container exited with non-zero code");
-            return Ok(SessionOutput {
-                session_id: session_id.to_string(),
-                branch: branch.to_string(),
-                worktree: worktree_path.to_path_buf(),
-                exit_code: code as i32,
-                is_error: true,
-                result_text: None,
-                structured_output: None,
-                total_cost_usd: 0.0,
-                num_turns: 0,
-                interrupts: vec![],
-                duration_secs: 0.0,
-                error: Some(format!("Container exited with code {}", code)),
-                model_usage: HashMap::new(),
-                cc_session_id: None,
-            });
-        }
-        Err(e) => return Err(e.into()),
-    };
-
-    // Parse the result from stdout
-    let run_result: RunResult = if json_output.trim().is_empty() {
-        warn!("Container exited without writing result to stdout");
-        RunResult {
-            exit_code: 0,
-            is_error: true,
-            result: None,
-            structured_output: None,
-            session_id: String::new(),
-            session_tag: Some(session_id.to_string()),
-            total_cost_usd: 0.0,
-            num_turns: 0,
-            events: vec![],
-            permission_denials: vec![],
-            model_usage: HashMap::new(),
-            interrupts: vec![],
-        }
-    } else {
-        serde_json::from_str(&json_output)?
-    };
+    // Run Claude directly - stream-json output parsed on the fly
+    let run_result = run_claude_direct(&container_config)?;
 
     Ok(SessionOutput {
         session_id: session_id.to_string(),
