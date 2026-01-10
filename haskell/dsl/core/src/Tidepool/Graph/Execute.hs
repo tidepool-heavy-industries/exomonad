@@ -61,6 +61,7 @@ import Tidepool.Graph.Errors
   ( HR, Blank, WhatHappened, HowItWorks, Fixes
   , Indent, CodeLine, Bullet
   , Unsatisfiable, unsatisfiable
+  , SelfLoopDispatchError
   )
 import Text.Ginger.TH (TypedTemplate, runTypedTemplate)
 import Text.Parsec.Pos (SourcePos)
@@ -623,36 +624,8 @@ instance {-# OVERLAPPABLE #-}
 -- Uses 'Unsatisfiable' rather than 'TypeError' because using 'dispatchGoto'
 -- with a self-looping handler is API misuse that cannot be fixed by adding
 -- annotations - it requires using a different function entirely.
-instance Unsatisfiable
-  ( HR
-    ':$$: 'Text "  Self-loop requires special dispatch"
-    ':$$: HR
-    ':$$: Blank
-    ':$$: WhatHappened
-    ':$$: Indent "Your handler can 'gotoSelf', but you called 'dispatchGoto'."
-    ':$$: Indent "The standard dispatcher doesn't know which handler to re-invoke."
-    ':$$: Blank
-    ':$$: HowItWorks
-    ':$$: Indent "Normal dispatch:  GotoChoice -> find handler by name -> call it"
-    ':$$: Indent "Self dispatch:    GotoChoice -> ??? -> call... which handler?"
-    ':$$: Blank
-    ':$$: Indent "The graph record has fields like 'compute', 'route', etc."
-    ':$$: Indent "But there's no 'self' field! We need you to tell us what"
-    ':$$: Indent "'self' means for this particular dispatch."
-    ':$$: Blank
-    ':$$: Fixes
-    ':$$: Bullet "Use dispatchGotoWithSelf and pass the self-handler:"
-    ':$$: Blank
-    ':$$: CodeLine "-- Instead of:"
-    ':$$: CodeLine "choice <- loopHandler input"
-    ':$$: CodeLine "result <- dispatchGoto handlers choice        -- ERROR"
-    ':$$: Blank
-    ':$$: CodeLine "-- Use:"
-    ':$$: CodeLine "choice <- loopHandler input"
-    ':$$: CodeLine "result <- dispatchGotoWithSelf loopHandler handlers choice  -- OK"
-    ':$$: CodeLine "                               ^^^^^^^^^^^"
-    ':$$: CodeLine "                               \"when you see Self, call this\""
-  ) => DispatchGoto graph '[To Self payload] es exitType where
+instance Unsatisfiable SelfLoopDispatchError
+  => DispatchGoto graph '[To Self payload] es exitType where
   -- UNREACHABLE: The Unsatisfiable constraint means this code is never executed.
   -- If gotoSelf is used with dispatchGoto (instead of dispatchGotoWithSelf),
   -- compilation fails with the error directing to the correct API.
@@ -663,36 +636,8 @@ instance Unsatisfiable
 -- Uses 'Unsatisfiable' rather than 'TypeError' because using 'dispatchGoto'
 -- with a self-looping handler is API misuse that cannot be fixed by adding
 -- annotations - it requires using a different function entirely.
-instance {-# OVERLAPPABLE #-} Unsatisfiable
-  ( HR
-    ':$$: 'Text "  Self-loop requires special dispatch"
-    ':$$: HR
-    ':$$: Blank
-    ':$$: WhatHappened
-    ':$$: Indent "Your handler can 'gotoSelf', but you called 'dispatchGoto'."
-    ':$$: Indent "The standard dispatcher doesn't know which handler to re-invoke."
-    ':$$: Blank
-    ':$$: HowItWorks
-    ':$$: Indent "Normal dispatch:  GotoChoice -> find handler by name -> call it"
-    ':$$: Indent "Self dispatch:    GotoChoice -> ??? -> call... which handler?"
-    ':$$: Blank
-    ':$$: Indent "The graph record has fields like 'compute', 'route', etc."
-    ':$$: Indent "But there's no 'self' field! We need you to tell us what"
-    ':$$: Indent "'self' means for this particular dispatch."
-    ':$$: Blank
-    ':$$: Fixes
-    ':$$: Bullet "Use dispatchGotoWithSelf and pass the self-handler:"
-    ':$$: Blank
-    ':$$: CodeLine "-- Instead of:"
-    ':$$: CodeLine "choice <- loopHandler input"
-    ':$$: CodeLine "result <- dispatchGoto handlers choice        -- ERROR"
-    ':$$: Blank
-    ':$$: CodeLine "-- Use:"
-    ':$$: CodeLine "choice <- loopHandler input"
-    ':$$: CodeLine "result <- dispatchGotoWithSelf loopHandler handlers choice  -- OK"
-    ':$$: CodeLine "                               ^^^^^^^^^^^"
-    ':$$: CodeLine "                               \"when you see Self, call this\""
-  ) => DispatchGoto graph (To Self payload ': rest) es exitType where
+instance {-# OVERLAPPABLE #-} Unsatisfiable SelfLoopDispatchError
+  => DispatchGoto graph (To Self payload ': rest) es exitType where
   -- UNREACHABLE: The Unsatisfiable constraint means this code is never executed.
   -- If gotoSelf is used with dispatchGoto (instead of dispatchGotoWithSelf),
   -- compilation fails with the error directing to the correct API.
