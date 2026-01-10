@@ -17,11 +17,6 @@ library
         Tidepool.Anthropic.Http
         Tidepool.Anthropic.Client
         Tidepool.Storage
-        Tidepool.GUI.Core
-        Tidepool.GUI.Handler
-        Tidepool.GUI.Server
-        Tidepool.GUI.Theme
-        Tidepool.GUI.Widgets
         Tidepool.Effect.Runners
         -- CLI with LLM effects
         Tidepool.Graph.CLI.Runner
@@ -42,9 +37,6 @@ library
         -- SQLite dependencies (WASM-incompatible)
         sqlite-simple >= 0.4.19 && < 0.5,
         direct-sqlite >= 2.3 && < 3,
-        -- GUI dependencies (WASM-incompatible)
-        threepenny-gui >= 0.9 && < 1,
-        stm >= 2.5 && < 3,
         -- Other
         uuid >= 1.3 && < 2,
         time >= 1.12 && < 2,

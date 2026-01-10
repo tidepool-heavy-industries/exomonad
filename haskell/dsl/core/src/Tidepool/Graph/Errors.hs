@@ -49,6 +49,9 @@ module Tidepool.Graph.Errors
   , FormatTargetList
   , ExtractTargetNames
 
+    -- * Pre-defined Error Messages
+  , SelfLoopDispatchError
+
     -- * Type Error Infrastructure (from GHC.TypeError)
     -- | Re-exported from "GHC.TypeError" for use in validation modules.
     --
@@ -157,14 +160,56 @@ type family FormatTarget t where
   FormatTarget other =
     'Text "   • " ':<>: 'ShowType other
 
--- Placeholder for To type (will be imported from Goto.hs when used)
--- These are just for the type family definitions
+-- | Placeholder type for 'To' from Goto.hs
+--
+-- This is a duplicate definition that exists here for error message formatting.
+-- The canonical definition is in Tidepool.Graph.Goto. We cannot import it here
+-- due to module dependency ordering (Errors.hs is imported by Goto.hs).
 type To :: k -> Type -> Type
 data To target payload
 
+-- | Placeholder type for 'Exit' from Types.hs
+--
+-- Duplicate for error formatting. Canonical definition in Tidepool.Graph.Types.
 type Exit :: Type
 data Exit
 
+-- | Placeholder type for 'Self' from Goto.hs
+--
+-- Duplicate for error formatting. Canonical definition in Tidepool.Graph.Goto.
 type Self :: Type
 data Self
 
+-- | Error message for self-loop dispatch requiring DispatchGotoWithSelf
+--
+-- This error is shown when a handler uses 'gotoSelf' but the caller uses
+-- 'dispatchGoto' instead of 'dispatchGotoWithSelf'.
+type SelfLoopDispatchError =
+  HR
+  ':$$: 'Text "  Self-loop requires special dispatch"
+  ':$$: HR
+  ':$$: Blank
+  ':$$: WhatHappened
+  ':$$: Indent "Your handler can 'gotoSelf', but you called 'dispatchGoto'."
+  ':$$: Indent "The standard dispatcher doesn't know which handler to re-invoke."
+  ':$$: Blank
+  ':$$: HowItWorks
+  ':$$: Indent "Normal dispatch:  GotoChoice -> find handler by name -> call it"
+  ':$$: Indent "Self dispatch:    GotoChoice -> ??? -> call... which handler?"
+  ':$$: Blank
+  ':$$: Indent "The graph record has fields like 'compute', 'route', etc."
+  ':$$: Indent "But there's no 'self' field! We need you to tell us what"
+  ':$$: Indent "'self' means for this particular dispatch."
+  ':$$: Blank
+  ':$$: Fixes
+  ':$$: Bullet "Use dispatchGotoWithSelf and pass the self-handler:"
+  ':$$: Blank
+  ':$$: CodeLine "-- Instead of:"
+  ':$$: CodeLine "choice <- loopHandler input"
+  ':$$: CodeLine "result <- dispatchGoto handlers choice        -- ERROR"
+  ':$$: Blank
+  ':$$: CodeLine "-- Use:"
+  ':$$: CodeLine "choice <- loopHandler input"
+  ':$$: CodeLine "result <- dispatchGotoWithSelf loopHandler handlers choice  -- OK"
+  ':$$: CodeLine "                               ^^^^^^^^^^^"
+  ':$$: CodeLine "                               \"when you see Self, call this\""

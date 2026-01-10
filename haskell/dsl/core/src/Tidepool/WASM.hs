@@ -5,7 +5,6 @@ Description: Minimal re-exports for WASM builds
 This module provides a minimal surface area for WASM builds, excluding:
 - Documentation generators (Mermaid, Docs)
 - Example graphs (Graph.Example)
-- Unused effect implementations (GitHub, Obsidian, Calendar)
 - Dev-only types (Anthropic.Types, Question, Tool, Schema, Delta)
 
 Expected savings: ~500 KB in WASM binary size.

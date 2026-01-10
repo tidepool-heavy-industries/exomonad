@@ -30,8 +30,6 @@ module Tidepool.Effect.Runners
   , runChatHistoryWithDB
     -- * Chat History with Compression
   , runChatHistoryWithCompression
-    -- * Log with GUI Bridge
-  , runLogWithBridge
     -- * Combined Runner
   , runGame
   ) where
@@ -56,8 +54,6 @@ import Tidepool.Anthropic.Client
   , StopReason(..), ToolUse(..)
   )
 import Tidepool.Anthropic.Types (toolUseToResultId)
-import qualified Tidepool.GUI.Core as GUICore
-import Tidepool.GUI.Core (GUIBridge)
 import qualified Tidepool.Storage as Storage
 
 import Tidepool.Effect.Types
@@ -688,23 +684,6 @@ formatMessagesForCompression = T.intercalate "\n\n" . map formatMessage
 -- ══════════════════════════════════════════════════════════════
 -- LOG AND GAME RUNNERS
 -- ══════════════════════════════════════════════════════════════
-
--- | Run the Log effect, logging to GUI bridge debug panel
-runLogWithBridge
-  :: LastMember IO effs
-  => GUIBridge state
-  -> LogLevel
-  -> Eff (Log ': effs) a
-  -> Eff effs a
-runLogWithBridge bridge minLevel = interpret $ \case
-  LogMsg level msg _fields
-    | level >= minLevel -> sendM $ do
-        let guiLevel = case level of
-              Debug -> GUICore.Debug
-              Info  -> GUICore.Info
-              Warn  -> GUICore.Warn
-        GUICore.addDebugEntry bridge guiLevel msg Nothing
-    | otherwise -> pure ()
 
 -- | Run the full game effect stack
 runGame

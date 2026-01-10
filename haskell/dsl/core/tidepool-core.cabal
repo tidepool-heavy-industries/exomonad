@@ -44,6 +44,8 @@ library
     -- Development/tooling modules (excluded from WASM builds)
     if !os(wasi)
       exposed-modules:
+        -- Unified re-export module
+        Tidepool.Effects
         -- Native-only effects (require subprocesses)
         Tidepool.Effect.LSP
         Tidepool.Effect.GHCi
