@@ -60,6 +60,7 @@ import Tidepool.Graph.Types
   , Exit, Self
   )
 import Tidepool.Graph.Goto (Goto, To)
+import Tidepool.Graph.Internal.TypeLevel (If)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- EDGE TYPES
@@ -474,11 +475,7 @@ type family GetArriveType effs where
 -- TYPE-LEVEL UTILITIES
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Type-level If.
-type If :: Bool -> k -> k -> k
-type family If cond t f where
-  If 'True  t _ = t
-  If 'False _ f = f
+-- Note: If is imported from Tidepool.Graph.Internal.TypeLevel
 
 -- | Type-level Or.
 type Or :: Bool -> Bool -> Bool

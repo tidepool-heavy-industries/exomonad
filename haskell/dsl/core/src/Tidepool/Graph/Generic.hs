@@ -143,6 +143,12 @@ import Tidepool.Graph.Generic.Core
   , Entry
   , Exit
   )
+import Tidepool.Graph.Internal.TypeLevel
+  ( Append, OrMaybe
+  , FieldNames, FieldsWithNames
+  , type (==)
+  )
+  -- Note: If is defined locally (specialized to Constraint kind)
 
 -- | Effect type alias (freer-simple effects have kind Type -> Type).
 type Effect = Type -> Type
@@ -879,11 +885,7 @@ type family ValidateNotToMarkers effs where
 -- TYPE-LEVEL UTILITIES
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Append two type-level lists.
-type Append :: [k] -> [k] -> [k]
-type family Append xs ys where
-  Append '[] ys = ys
-  Append (x ': xs) ys = x ': Append xs ys
+-- Note: Append, If, OrMaybe imported from Tidepool.Graph.Internal.TypeLevel
 
 -- | Check if a Symbol is in a type-level list (returns Bool).
 type Elem :: Symbol -> [Symbol] -> Bool
@@ -944,7 +946,8 @@ type family ElemCWithOptions s ss allOptions where
   ElemCWithOptions s (s ': _) _ = ()
   ElemCWithOptions s (_ ': rest) allOptions = ElemCWithOptions s rest allOptions
 
--- | Type-level If (returns Constraint).
+-- Note: If is imported from Tidepool.Graph.Internal.TypeLevel (specialized to Constraint here)
+-- The Internal.TypeLevel version works for all kinds, but we alias it here for clarity
 type If :: Bool -> Constraint -> Constraint -> Constraint
 type family If cond t f where
   If 'True  t _ = t
@@ -954,28 +957,7 @@ type family If cond t f where
 -- FIELD NAME EXTRACTION (from Generic)
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Extract field names as type-level Symbols from a Generic representation.
---
--- This is the key insight: GHC.Generics' 'MetaSel' contains field names
--- as type-level @Maybe Symbol@. For records with named fields, this is
--- @'Just fieldName@.
---
--- @
--- data MyGraph mode = MyGraph
---   { entry    :: mode :- Entry Message
---   , classify :: mode :- LLM :@ ...
---   }
---
--- FieldNames (Rep (MyGraph AsGraph)) = '["entry", "classify"]
--- @
-type FieldNames :: (Type -> Type) -> [Symbol]
-type family FieldNames f where
-  FieldNames (M1 D _ f) = FieldNames f                              -- Datatype wrapper
-  FieldNames (M1 C _ f) = FieldNames f                              -- Constructor wrapper
-  FieldNames (M1 S ('MetaSel ('Just name) _ _ _) _) = '[name]       -- Named field!
-  FieldNames (M1 S ('MetaSel 'Nothing _ _ _) _) = '[]               -- Unnamed (positional)
-  FieldNames (l :*: r) = Append (FieldNames l) (FieldNames r)       -- Product
-  FieldNames (K1 _ _) = '[]                                          -- Leaf value (no name)
+-- Note: FieldNames and FieldsWithNames are imported from Tidepool.Graph.Internal.TypeLevel
 
 -- | Extract node definitions from each field.
 --
@@ -989,25 +971,6 @@ type family FieldDefs f where
   FieldDefs (M1 C _ f) = FieldDefs f
   FieldDefs (M1 S _ (K1 _ def)) = '[def]                             -- Field value = node def
   FieldDefs (l :*: r) = Append (FieldDefs l) (FieldDefs r)
-
--- | Pair field names with their node definitions.
---
--- For AsGraph mode, the field type IS the node definition.
---
--- @
--- FieldsWithNames (Rep (MyGraph AsGraph))
---   = '[ '("entry", Entry Message)
---      , '("classify", LLM :@ Input Message :@ Schema Intent)
---      ]
--- @
-type FieldsWithNames :: (Type -> Type) -> [(Symbol, Type)]
-type family FieldsWithNames f where
-  FieldsWithNames (M1 D _ f) = FieldsWithNames f
-  FieldsWithNames (M1 C _ f) = FieldsWithNames f
-  FieldsWithNames (M1 S ('MetaSel ('Just name) _ _ _) (K1 _ def)) = '[ '(name, def) ]
-  FieldsWithNames (M1 S ('MetaSel 'Nothing _ _ _) _) = '[]
-  FieldsWithNames (l :*: r) = Append (FieldsWithNames l) (FieldsWithNames r)
-  FieldsWithNames _ = '[]
 
 -- | Get field names from a graph type.
 --
@@ -1127,11 +1090,7 @@ type family GetExitType f where
   GetExitType (l :*: r) = OrMaybe (GetExitType l) (GetExitType r)
   GetExitType _ = 'Nothing
 
--- | Return first Just, or Nothing if both Nothing.
-type OrMaybe :: Maybe k -> Maybe k -> Maybe k
-type family OrMaybe a b where
-  OrMaybe ('Just x) _ = 'Just x
-  OrMaybe 'Nothing b = b
+-- Note: OrMaybe is imported from Tidepool.Graph.Internal.TypeLevel
 
 -- | Validate a graph record has exactly one Entry and one Exit field.
 --

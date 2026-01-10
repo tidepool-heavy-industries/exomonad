@@ -467,11 +467,7 @@ type family CheckNotMarkedOneOf (isMarked :: Bool) (t :: K.Type) :: Constraint w
      ':$$: 'Text "  3. Use an enum if choices are simple strings")
   CheckNotMarkedOneOf 'False _ = ()
 
--- | Type-level conditional.
-type If :: Bool -> Constraint -> Constraint -> Constraint
-type family If cond t f where
-  If 'True t _ = t
-  If 'False _ f = f
+-- Note: If removed (was unused). If needed, import from Internal.TypeLevel
 
 -- ══════════════════════════════════════════════════════════════
 -- TH MARKER DERIVATION

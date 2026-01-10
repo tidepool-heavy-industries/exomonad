@@ -54,30 +54,19 @@ import qualified Tidepool.Graph.Types as Types (Exit)
 import Tidepool.Graph.Edges (GetInput, GetSchema)
 import Tidepool.Graph.Goto (Goto)
 import Tidepool.Graph.Generic.Core (GraphMode(..), AsGraph, LLMNode, LogicNode, Entry, Exit)
+import Tidepool.Graph.Internal.TypeLevel
+  ( FieldNames, FieldsWithNames, Append, OrMaybe
+  , If, And, Not, type (==)
+  , ElemSymbol, ElemType, AllIn, AnyElemSymbol, FilterNotInSymbols
+  , AppendSymbols, AppendMaybeType, AppendQuads
+  )
 
 -- ════════════════════════════════════════════════════════════════════════════
--- FIELD EXTRACTION TYPE FAMILIES
+-- MODULE-SPECIFIC TYPE FAMILIES
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Extract field names from a Generic representation.
-type FieldNames :: (Type -> Type) -> [Symbol]
-type family FieldNames f where
-  FieldNames (M1 D _ f) = FieldNames f
-  FieldNames (M1 C _ f) = FieldNames f
-  FieldNames (M1 S ('MetaSel ('Just name) _ _ _) _) = '[name]
-  FieldNames (M1 S ('MetaSel 'Nothing _ _ _) _) = '[]
-  FieldNames (l :*: r) = Append (FieldNames l) (FieldNames r)
-  FieldNames (K1 _ _) = '[]
-
--- | Pair field names with their node definitions.
-type FieldsWithNames :: (Type -> Type) -> [(Symbol, Type)]
-type family FieldsWithNames f where
-  FieldsWithNames (M1 D _ f) = FieldsWithNames f
-  FieldsWithNames (M1 C _ f) = FieldsWithNames f
-  FieldsWithNames (M1 S ('MetaSel ('Just name) _ _ _) (K1 _ def)) = '[ '(name, def) ]
-  FieldsWithNames (M1 S ('MetaSel 'Nothing _ _ _) _) = '[]
-  FieldsWithNames (l :*: r) = Append (FieldsWithNames l) (FieldsWithNames r)
-  FieldsWithNames _ = '[]
+-- Note: Generic field extraction utilities (FieldNames, FieldsWithNames, Append, OrMaybe)
+-- are now imported from Tidepool.Graph.Internal.TypeLevel
 
 -- | Get field names from a graph type.
 type FieldNamesOf :: (Type -> Type) -> [Symbol]
@@ -96,18 +85,6 @@ type family GetEntryType f where
   GetEntryType (M1 S _ _) = 'Nothing
   GetEntryType (l :*: r) = OrMaybe (GetEntryType l) (GetEntryType r)
   GetEntryType _ = 'Nothing
-
--- | Append two type-level lists.
-type Append :: [k] -> [k] -> [k]
-type family Append xs ys where
-  Append '[] ys = ys
-  Append (x ': xs) ys = x ': Append xs ys
-
--- | Return first Just, or Nothing if both Nothing.
-type OrMaybe :: Maybe k -> Maybe k -> Maybe k
-type family OrMaybe a b where
-  OrMaybe ('Just x) _ = 'Just x
-  OrMaybe 'Nothing b = b
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- REACHABILITY VALIDATION
@@ -688,83 +665,9 @@ type family FormatMaybeType mt where
   FormatMaybeType 'Nothing = 'Text "  (no Input - accepts any type)"
   FormatMaybeType ('Just t) = 'Text "  Input " ':<>: 'ShowType t
 
--- | Type-level If.
-type If :: Bool -> k -> k -> k
-type family If cond t f where
-  If 'True  t _ = t
-  If 'False _ f = f
-
--- | Type-level And.
-type And :: Bool -> Bool -> Bool
-type family And a b where
-  And 'True 'True = 'True
-  And _ _ = 'False
-
--- | Type-level Not.
-type Not :: Bool -> Bool
-type family Not b where
-  Not 'True = 'False
-  Not 'False = 'True
-
--- | Symbol equality.
-type (==) :: Symbol -> Symbol -> Bool
-type family a == b where
-  a == a = 'True
-  _ == _ = 'False
-
--- | Symbol membership.
-type ElemSymbol :: Symbol -> [Symbol] -> Bool
-type family ElemSymbol x xs where
-  ElemSymbol _ '[] = 'False
-  ElemSymbol x (x ': _) = 'True
-  ElemSymbol x (_ ': rest) = ElemSymbol x rest
-
--- | Type membership.
-type ElemType :: Type -> [Type] -> Bool
-type family ElemType x xs where
-  ElemType _ '[] = 'False
-  ElemType x (x ': _) = 'True
-  ElemType x (_ ': rest) = ElemType x rest
-
--- | All types in first list are in second.
-type AllIn :: [Type] -> [Type] -> Bool
-type family AllIn xs ys where
-  AllIn '[] _ = 'True
-  AllIn (x ': rest) ys = And (ElemType x ys) (AllIn rest ys)
-
--- | Any symbol in first list is in second.
-type AnyElemSymbol :: [Symbol] -> [Symbol] -> Bool
-type family AnyElemSymbol xs ys where
-  AnyElemSymbol '[] _ = 'False
-  AnyElemSymbol (x ': rest) ys =
-    If (ElemSymbol x ys) 'True (AnyElemSymbol rest ys)
-
--- | Filter symbols not in list.
-type FilterNotInSymbols :: [Symbol] -> [Symbol] -> [Symbol]
-type family FilterNotInSymbols xs ys where
-  FilterNotInSymbols '[] _ = '[]
-  FilterNotInSymbols (x ': rest) ys =
-    If (ElemSymbol x ys)
-       (FilterNotInSymbols rest ys)
-       (x ': FilterNotInSymbols rest ys)
-
--- | Append symbol lists.
-type AppendSymbols :: [Symbol] -> [Symbol] -> [Symbol]
-type family AppendSymbols xs ys where
-  AppendSymbols '[] ys = ys
-  AppendSymbols (x ': rest) ys = x ': AppendSymbols rest ys
-
--- | Append Maybe type to list.
-type AppendMaybeType :: Maybe Type -> [Type] -> [Type]
-type family AppendMaybeType m xs where
-  AppendMaybeType 'Nothing xs = xs
-  AppendMaybeType ('Just x) xs = x ': xs
-
--- | Append 4-tuple lists (for dead goto tracking).
-type AppendQuads :: [(Symbol, Symbol, Type, Maybe Type)] -> [(Symbol, Symbol, Type, Maybe Type)] -> [(Symbol, Symbol, Type, Maybe Type)]
-type family AppendQuads xs ys where
-  AppendQuads '[] ys = ys
-  AppendQuads (x ': rest) ys = x ': AppendQuads rest ys
+-- Note: Type-level utilities (If, And, Not, ElemSymbol, ElemType, AllIn,
+-- AnyElemSymbol, FilterNotInSymbols, AppendSymbols, AppendMaybeType, AppendQuads)
+-- are now imported from Tidepool.Graph.Internal.TypeLevel
 
 -- | Length of pair list.
 type LengthPairs :: [(Symbol, Type)] -> Nat

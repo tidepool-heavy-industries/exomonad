@@ -105,6 +105,7 @@ import Tidepool.Graph.Template
   , templateContextInfo
   , templateAccessedFields
   )
+import Tidepool.Graph.Internal.TypeLevel (OrMaybe)
 
 -- | Effect type alias (freer-simple effects have kind Type -> Type).
 type Effect = Type -> Type
@@ -141,11 +142,7 @@ type family GetExitTypeRep f where
   GetExitTypeRep (l :*: r) = OrMaybe (GetExitTypeRep l) (GetExitTypeRep r)
   GetExitTypeRep _ = 'Nothing
 
--- | Return first Just, or Nothing if both Nothing.
-type OrMaybe :: Maybe k -> Maybe k -> Maybe k
-type family OrMaybe a b where
-  OrMaybe ('Just x) _ = 'Just x
-  OrMaybe 'Nothing b = b
+-- Note: OrMaybe is imported from Tidepool.Graph.Internal.TypeLevel
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- RUNTIME INFO TYPES

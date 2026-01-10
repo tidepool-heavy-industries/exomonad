@@ -58,6 +58,10 @@ import Tidepool.Graph.Types (type (:@), UsesEffects, Arrive)
 import Tidepool.Graph.Goto (To)
 import Tidepool.Graph.Generic.Core (AsGraph, ForkNode, BarrierNode)
 import Tidepool.Graph.Edges (GetSpawnTargets, GetBarrierTarget)
+import Tidepool.Graph.Internal.TypeLevel
+  ( FieldNames, FieldsWithNames, FieldNamesFromPairs
+  , If, ElemSymbol, Append
+  )
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- MAIN VALIDATION CONSTRAINT
@@ -342,35 +346,12 @@ type family GetUsesEffectsFixed def where
   GetUsesEffectsFixed (node :@ _) = GetUsesEffectsFixed node
   GetUsesEffectsFixed _ = 'Nothing
 
--- | Extract field names from a Generic representation.
-type FieldNames :: (Type -> Type) -> [Symbol]
-type family FieldNames f where
-  FieldNames (M1 D _ f) = FieldNames f
-  FieldNames (M1 C _ f) = FieldNames f
-  FieldNames (M1 S ('MetaSel ('Just name) _ _ _) _) = '[name]
-  FieldNames (M1 S ('MetaSel 'Nothing _ _ _) _) = '[]
-  FieldNames (l :*: r) = Append (FieldNames l) (FieldNames r)
-  FieldNames (K1 _ _) = '[]
-
--- | Pair field names with their node definitions.
-type FieldsWithNames :: (Type -> Type) -> [(Symbol, Type)]
-type family FieldsWithNames f where
-  FieldsWithNames (M1 D _ f) = FieldsWithNames f
-  FieldsWithNames (M1 C _ f) = FieldsWithNames f
-  FieldsWithNames (M1 S ('MetaSel ('Just name) _ _ _) (K1 _ def)) = '[ '(name, def) ]
-  FieldsWithNames (M1 S ('MetaSel 'Nothing _ _ _) _) = '[]
-  FieldsWithNames (l :*: r) = Append (FieldsWithNames l) (FieldsWithNames r)
-  FieldsWithNames _ = '[]
+-- Note: FieldNames, FieldsWithNames, FieldNamesFromPairs, If, ElemSymbol, Append
+-- are now imported from Tidepool.Graph.Internal.TypeLevel.
 
 -- | Get fields with names from a graph type.
 type FieldsWithNamesOf :: (Type -> Type) -> [(Symbol, Type)]
 type FieldsWithNamesOf graph = FieldsWithNames (Rep (graph AsGraph))
-
--- | Extract just field names from (Symbol, Type) pairs.
-type FieldNamesFromPairs :: [(Symbol, Type)] -> [Symbol]
-type family FieldNamesFromPairs pairs where
-  FieldNamesFromPairs '[] = '[]
-  FieldNamesFromPairs ('(name, _) ': rest) = name ': FieldNamesFromPairs rest
 
 -- | Lookup field definition by name.
 type LookupFieldDef :: [(Symbol, Type)] -> Symbol -> Type
@@ -378,22 +359,3 @@ type family LookupFieldDef fields name where
   LookupFieldDef '[] name = TypeError ('Text "Internal error: field not found: " ':<>: 'Text name)
   LookupFieldDef ('(name, def) ': _) name = def
   LookupFieldDef (_ ': rest) name = LookupFieldDef rest name
-
--- | Type-level If.
-type If :: Bool -> k -> k -> k
-type family If cond t f where
-  If 'True  t _ = t
-  If 'False _ f = f
-
--- | Symbol membership check.
-type ElemSymbol :: Symbol -> [Symbol] -> Bool
-type family ElemSymbol x xs where
-  ElemSymbol _ '[] = 'False
-  ElemSymbol x (x ': _) = 'True
-  ElemSymbol x (_ ': rest) = ElemSymbol x rest
-
--- | Append type-level lists.
-type Append :: [k] -> [k] -> [k]
-type family Append xs ys where
-  Append '[] ys = ys
-  Append (x ': xs) ys = x ': Append xs ys
