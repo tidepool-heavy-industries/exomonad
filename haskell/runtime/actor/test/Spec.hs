@@ -6,6 +6,7 @@ import qualified SpawnSpec
 import qualified RuntimeSpec
 import qualified IntegrationSpec
 import qualified GraphSpec
+import qualified SubgraphSpec
 
 main :: IO ()
 main = hspec $ do
@@ -14,3 +15,4 @@ main = hspec $ do
   describe "Runtime" RuntimeSpec.spec
   describe "Integration" IntegrationSpec.spec
   describe "Graph" GraphSpec.spec
+  describe "Subgraph" SubgraphSpec.spec

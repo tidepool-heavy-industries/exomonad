@@ -71,7 +71,7 @@ import Tidepool.Graph.Goto (Goto, To)
 import TypesFirstDev.Types.Hybrid
 
 import TypesFirstDev.Templates.Hybrid
-  ( HTypesTpl, HTypeAdversaryTpl, HTypesFixTpl
+  ( HTypesTpl, HPRReviewTpl, HTypesFixTpl
   , HTestsTpl, HImplTpl
   , HConflictResolveTpl
   , HFixTpl, HMutationAdversaryTpl
@@ -122,13 +122,13 @@ data TypesFirstGraphHybrid mode = TypesFirstGraphHybrid
     -- Fast LogicNode - template rendering + build check.
   , hSkeleton :: mode :- G.LogicNode
       :@ Types.Input TypesResult
-      :@ UsesEffects '[Goto "hTypeAdversary" SkeletonState]
+      :@ UsesEffects '[Goto "hPRReview" SkeletonState]
 
-    -- | TYPE ADVERSARY: Red team for type system.
-    -- Tries to construct invalid states the type allows.
-  , hTypeAdversary :: mode :- G.LLMNode
+    -- | PR REVIEW: Review type design before merge.
+    -- Checks for representable invalid states and API issues.
+  , hPRReview :: mode :- G.LLMNode
       :@ Types.Input SkeletonState
-      :@ Template HTypeAdversaryTpl
+      :@ Template HPRReviewTpl
       :@ Schema TypeAdversaryOutput
       :@ UsesEffects '[Goto "hGate" TypeAdversaryResult]
 

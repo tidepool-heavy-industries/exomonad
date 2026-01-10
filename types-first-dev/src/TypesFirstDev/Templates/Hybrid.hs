@@ -7,7 +7,7 @@
 module TypesFirstDev.Templates.Hybrid
   ( -- * Template Types
     HTypesTpl
-  , HTypeAdversaryTpl
+  , HPRReviewTpl
   , HTypesFixTpl
   , HConflictResolveTpl
     -- WS4 templates
@@ -19,7 +19,7 @@ module TypesFirstDev.Templates.Hybrid
 
     -- * Compiled Templates
   , hTypesCompiled
-  , hTypeAdversaryCompiled
+  , hPRReviewCompiled
   , hTypesFixCompiled
   , hConflictResolveCompiled
     -- WS4
@@ -36,7 +36,7 @@ import Tidepool.Graph.Template (TemplateDef(..), TypedTemplate, typedTemplateFil
 
 import TypesFirstDev.Context.Hybrid
   ( TypesTemplateCtx(..)
-  , TypeAdversaryTemplateCtx(..)
+  , PRReviewTemplateCtx(..)
   , TypesFixTemplateCtx(..)
   , ConflictResolveTemplateCtx(..)
     -- WS4
@@ -72,25 +72,25 @@ instance TemplateDef HTypesTpl where
 
 
 -- ════════════════════════════════════════════════════════════════════════════
--- TYPE ADVERSARY TEMPLATE
+-- PR REVIEW TEMPLATE
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Compile the type adversary template at build time.
-hTypeAdversaryCompiled :: TypedTemplate TypeAdversaryTemplateCtx SourcePos
-hTypeAdversaryCompiled = $(typedTemplateFile ''TypeAdversaryTemplateCtx "templates/hybrid/type-adversary.jinja")
+-- | Compile the PR review template at build time.
+hPRReviewCompiled :: TypedTemplate PRReviewTemplateCtx SourcePos
+hPRReviewCompiled = $(typedTemplateFile ''PRReviewTemplateCtx "templates/hybrid/pr-review.jinja")
 
--- | Template type marker for the type adversary node.
-data HTypeAdversaryTpl
+-- | Template type marker for the PR review node.
+data HPRReviewTpl
 
-instance TemplateDef HTypeAdversaryTpl where
-  type TemplateContext HTypeAdversaryTpl = TypeAdversaryTemplateCtx
-  type TemplateConstraint HTypeAdversaryTpl es = ()
+instance TemplateDef HPRReviewTpl where
+  type TemplateContext HPRReviewTpl = PRReviewTemplateCtx
+  type TemplateConstraint HPRReviewTpl es = ()
 
-  templateName = "hybrid-type-adversary"
-  templateDescription = "RED TEAM: Find holes in type system design"
-  templateCompiled = hTypeAdversaryCompiled
+  templateName = "hybrid-pr-review"
+  templateDescription = "Review type design before merge"
+  templateCompiled = hPRReviewCompiled
 
-  buildContext = error "HTypeAdversaryTpl.buildContext should not be called for ClaudeCode handlers"
+  buildContext = error "HPRReviewTpl.buildContext should not be called for ClaudeCode handlers"
 
 
 -- ════════════════════════════════════════════════════════════════════════════

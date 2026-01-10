@@ -319,12 +319,24 @@ pub fn run_claude_direct(config: &ContainerConfig) -> Result<RunResult> {
         }
     }
 
-    // Debug log structured output presence
-    if result.structured_output.is_some() {
-        let size = serde_json::to_string(&result.structured_output).unwrap_or_default().len();
-        logger.log("MANTLE", &format!("Structured output received ({} bytes)", size));
+    // Log structured output for debugging
+    if let Some(ref output) = result.structured_output {
+        if let Ok(json) = serde_json::to_string_pretty(output) {
+            logger.log("STRUCTURED_OUTPUT", &json);
+        }
     } else {
-        logger.log("WARNING", &format!("No structured output in result: {:?}", result));
+        logger.log("WARNING", "No structured output in result");
+    }
+
+    // Log result_text for debugging
+    if let Some(ref text) = result.result {
+        // Truncate if very long, but log enough to be useful
+        let truncated = if text.len() > 2000 {
+            format!("{}... [truncated, {} total chars]", &text[..2000], text.len())
+        } else {
+            text.clone()
+        };
+        logger.log("RESULT_TEXT", &truncated);
     }
 
     Ok(result)

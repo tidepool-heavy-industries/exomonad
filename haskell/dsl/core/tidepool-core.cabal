@@ -18,6 +18,7 @@ library
         Tidepool.Platform
         Tidepool.Effect
         Tidepool.Effect.Session
+        Tidepool.Effect.Subgraph
         Tidepool.Effect.DevLog
         Tidepool.Effect.Metadata
         Tidepool.Effect.Types
@@ -95,7 +96,8 @@ library
         scientific >= 0.3 && < 1,
         time >= 1.12 && < 2,
         directory >= 1.3 && < 2,
-        filepath >= 1.4 && < 2
+        filepath >= 1.4 && < 2,
+        uuid >= 1.3 && < 2
     hs-source-dirs:   src
     -- Platform-specific source directories for NativeOnly constraint
     if os(wasi)

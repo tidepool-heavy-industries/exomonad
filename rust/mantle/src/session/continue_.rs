@@ -169,10 +169,15 @@ pub fn continue_session(repo_root: &Path, config: &ContinueConfig) -> Result<Ses
             );
         })?;
 
-        return Ok(SessionOutput {
+        let mut output = SessionOutput {
             duration_secs: duration,
             ..result
-        });
+        };
+
+        // Sanitize output to remove control characters before returning for JSON serialization
+        output.sanitize();
+
+        return Ok(output);
     }
 
     // Execute with --resume flag (local mode)
@@ -199,10 +204,15 @@ pub fn continue_session(repo_root: &Path, config: &ContinueConfig) -> Result<Ses
         );
     })?;
 
-    Ok(SessionOutput {
+    let mut output = SessionOutput {
         duration_secs: duration,
         ..result
-    })
+    };
+
+    // Sanitize output to remove control characters before returning for JSON serialization
+    output.sanitize();
+
+    Ok(output)
 }
 
 fn execute_continue(

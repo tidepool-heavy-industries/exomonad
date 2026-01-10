@@ -52,10 +52,13 @@ module Tidepool.Session.Executor
 import Control.Exception (try, SomeException)
 import Control.Monad.Freer (Eff, LastMember, interpret, sendM)
 import Data.Aeson (Value, eitherDecodeStrict, encode)
-import Data.ByteString.Char8 qualified as BS
+import Data.ByteString.Char8 qualified as BSC
 import Data.ByteString.Lazy qualified as LBS
+import Data.Char (ord)
 import Data.Text (Text)
 import Data.Text qualified as T
+import Data.Text.Encoding qualified as TE
+import Data.Text.Encoding.Error (lenientDecode)
 import Data.Time.Clock (getCurrentTime, diffUTCTime)
 import System.Exit (ExitCode(..))
 import System.IO (hFlush, stdout)
@@ -198,7 +201,7 @@ sessionInfoIO config sid = do
       case exitCode of
         ExitFailure _ -> pure Nothing  -- Session not found
         ExitSuccess ->
-          case eitherDecodeStrict (BS.pack stdoutStr) of
+          case eitherDecodeStrict (BSC.pack stdoutStr) of
             Left _ -> pure Nothing
             Right metadata -> pure (Just metadata)
 
@@ -237,10 +240,17 @@ runMantleSession config args = do
             ExitFailure c -> c
       putStrLn $ "[SESSION] Completed (exit: " <> show exitCodeInt <> ", " <> show (round duration :: Int) <> "s)"
       hFlush stdout
-      case eitherDecodeStrict (BS.pack stdoutStr) of
+      -- Sanitize: 1) lenient UTF-8 decode, 2) escape control chars in JSON strings
+      let rawBytes = BSC.pack stdoutStr
+          safeText = TE.decodeUtf8With lenientDecode rawBytes
+          sanitizedStdout = escapeControlChars (T.unpack safeText)
+      case eitherDecodeStrict (BSC.pack sanitizedStdout) of
         Right output -> pure output
         Left parseErr -> do
           putStrLn $ "[SESSION] Failed to parse output: " <> parseErr
+          putStrLn $ "[SESSION] Raw stdout length: " <> show (length stdoutStr)
+          putStrLn $ "[SESSION] First 500 chars: " <> take 500 stdoutStr
+          putStrLn $ "[SESSION] Last 500 chars: " <> reverse (take 500 (reverse stdoutStr))
           hFlush stdout
           -- Report parse failure (stderr was inherited, so check terminal output)
           pure $ errorOutput $ case exitCode of
@@ -263,7 +273,57 @@ modelToArg = \case
 schemaArg :: Maybe Value -> [String]
 schemaArg Nothing = []
 schemaArg (Just schema) =
-  ["--json-schema", BS.unpack $ LBS.toStrict $ encode schema]
+  ["--json-schema", BSC.unpack $ LBS.toStrict $ encode schema]
+
+
+-- | Escape control characters in JSON string values.
+--
+-- JSON strings should have control characters escaped, but sometimes they
+-- slip through. This function finds unescaped control characters inside
+-- string literals and escapes them properly.
+--
+-- We detect string context by tracking quotes, handling escaped quotes.
+escapeControlChars :: String -> String
+escapeControlChars = go False False
+  where
+    -- inString: are we inside a JSON string?
+    -- escaped: was the previous char a backslash?
+    go _ _ [] = []
+    go inString escaped (c:cs)
+      -- Handle escape sequences
+      | escaped = c : go inString False cs
+      -- Backslash starts escape
+      | c == '\\' = c : go inString True cs
+      -- Quote toggles string context
+      | c == '"' = c : go (not inString) False cs
+      -- Control char inside string: escape it
+      | inString && isControlChar c = escapeChar c <> go inString False cs
+      -- Everything else passes through
+      | otherwise = c : go inString False cs
+
+    -- Check if character is a control character that needs escaping
+    -- (ASCII 0-31, excluding valid JSON escapes that are already single chars)
+    isControlChar c = ord c < 32
+
+    -- Escape a control character to its JSON representation
+    escapeChar c = case c of
+      '\n' -> "\\n"
+      '\r' -> "\\r"
+      '\t' -> "\\t"
+      '\b' -> "\\b"
+      '\f' -> "\\f"
+      _    -> "\\u" <> pad4 (showHex (ord c) "")
+
+    -- Pad hex to 4 digits
+    pad4 s = replicate (4 - length s) '0' <> s
+
+    showHex n acc
+      | n < 16    = hexDigit n : acc
+      | otherwise = showHex (n `div` 16) (hexDigit (n `mod` 16) : acc)
+
+    hexDigit n
+      | n < 10    = toEnum (fromEnum '0' + n)
+      | otherwise = toEnum (fromEnum 'a' + n - 10)
 
 
 -- | Create an error SessionOutput.

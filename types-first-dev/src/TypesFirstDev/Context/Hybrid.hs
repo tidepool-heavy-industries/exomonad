@@ -87,7 +87,7 @@ instance ToGVal GingerM TypesAgentOutput where
     ]
 
 -- ════════════════════════════════════════════════════════════════════════════
--- TYPE ADVERSARY TYPES
+-- PR REVIEW TYPES
 -- ════════════════════════════════════════════════════════════════════════════
 
 instance ToGVal GingerM HoleType where
@@ -113,6 +113,19 @@ instance ToGVal GingerM TypeHole where
     , ("severity", toGVal th.severity)
     , ("suggestedFix", toGVal th.suggestedFix)
     ]
+
+instance ToGVal GingerM Strength where
+  toGVal s = dict
+    [ ("aspect", toGVal (sAspect s))
+    , ("observation", toGVal (sObservation s))
+    , ("why", toGVal (sWhy s))
+    ]
+
+instance ToGVal GingerM ReviewVerdict where
+  toGVal = \case
+    Approve        -> toGVal ("Approve" :: Text)
+    RequestChanges -> toGVal ("RequestChanges" :: Text)
+    Comment        -> toGVal ("Comment" :: Text)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- ECHO CHANNELS & HARDENING
@@ -183,7 +196,7 @@ instance ToGVal GingerM MutationTemplateCtx where
     , ("scopeLevel", toGVal (mtcScopeLevel ctx))
     ]
 
-instance ToGVal GingerM TypeAdversaryTemplateCtx where
+instance ToGVal GingerM PRReviewTemplateCtx where
   toGVal ctx = dict
     [ ("types", toGVal ctx.types)
     , ("scopeLevel", toGVal ctx.scopeLevel)

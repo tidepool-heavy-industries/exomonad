@@ -125,10 +125,15 @@ pub fn start_session(repo_root: &Path, config: &StartConfig) -> Result<SessionOu
         );
     })?;
 
-    Ok(SessionOutput {
+    let mut output = SessionOutput {
         duration_secs: duration,
         ..result
-    })
+    };
+
+    // Sanitize output to remove control characters before returning for JSON serialization
+    output.sanitize();
+
+    Ok(output)
 }
 
 /// Execute Claude Code directly in a Docker container.

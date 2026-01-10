@@ -13,7 +13,7 @@ import qualified Data.Text as T
 
 import Control.Monad.Freer (Eff)
 
-import Tidepool.Effect.Session (Session)
+import Tidepool.Effect.Session (Session, SessionId, SessionOperation(..))
 import Tidepool.Graph.Generic (AsHandler)
 import Tidepool.Graph.Goto (GotoChoice, To, ClaudeCodeLLMHandler(..), ClaudeCodeResult(..), gotoChoice, gotoExit)
 import Tidepool.Graph.Template (templateCompiled)
@@ -64,19 +64,22 @@ testHandlers = ClaudeCodeTestGraph
 -- | Build context for the explore template.
 buildExploreContext
   :: ExploreInput
-  -> Eff '[Session, IO] ExploreContext
-buildExploreContext input = pure ExploreContext
-  { directory = T.pack input.eiDirectory
-  , objective = input.eiObjective
-  }
+  -> Eff '[Session, IO] (ExploreContext, SessionOperation)
+buildExploreContext input = pure
+  ( ExploreContext
+      { directory = T.pack input.eiDirectory
+      , objective = input.eiObjective
+      }
+  , StartFresh "claude-code-test/explore"
+  )
 
 -- | Route after exploration.
 --
 -- Always continues to the route node with findings.
 routeAfterExplore
-  :: ClaudeCodeResult Findings
+  :: (ClaudeCodeResult Findings, SessionId)
   -> Eff '[Session, IO] (GotoChoice '[To "route" Findings])
-routeAfterExplore result = pure $ gotoChoice @"route" result.ccrParsedOutput
+routeAfterExplore (result, _sessionId) = pure $ gotoChoice @"route" result.ccrParsedOutput
 
 
 -- ============================================================================
@@ -109,21 +112,24 @@ routeHandler findings
 -- | Build context for the action template.
 buildActionContext
   :: ActionInput
-  -> Eff '[Session, IO] ActionContext
-buildActionContext input = pure ActionContext
-  { summary = input.aiFindings.fSummary
-  , fileCount = input.aiFindings.fFileCount
-  , files = input.aiFindings.fFiles
-  , recommendation = input.aiFindings.fRecommendation
-  , action = input.aiAction
-  }
+  -> Eff '[Session, IO] (ActionContext, SessionOperation)
+buildActionContext input = pure
+  ( ActionContext
+      { summary = input.aiFindings.fSummary
+      , fileCount = input.aiFindings.fFileCount
+      , files = input.aiFindings.fFiles
+      , recommendation = input.aiFindings.fRecommendation
+      , action = input.aiAction
+      }
+  , StartFresh "claude-code-test/action"
+  )
 
 -- | Route after action.
 --
 -- Always exits with the action result.
 routeAfterAction
-  :: ClaudeCodeResult ActionResult
+  :: (ClaudeCodeResult ActionResult, SessionId)
   -> Eff '[Session, IO] (GotoChoice '[To Exit ActionResult])
-routeAfterAction result = pure $ gotoExit result.ccrParsedOutput
+routeAfterAction (result, _sessionId) = pure $ gotoExit result.ccrParsedOutput
 
 

@@ -38,6 +38,8 @@ module TypesFirstDev.Types.Hybrid
   , TypeHole(..)
   , HoleType(..)
   , Severity(..)
+  , Strength(..)
+  , ReviewVerdict(..)
   , TypeAdversaryOutput(..)
 
     -- * Tests Agent Output (Schema)
@@ -105,7 +107,7 @@ module TypesFirstDev.Types.Hybrid
   , TestsTemplateCtx(..)
   , ImplTemplateCtx(..)
   , MutationTemplateCtx(..)
-  , TypeAdversaryTemplateCtx(..)
+  , PRReviewTemplateCtx(..)
   , TypesFixTemplateCtx(..)
   , ConflictResolveTemplateCtx(..)
   , FixTemplateCtx(..)
@@ -342,14 +344,31 @@ data Severity = Critical | Major | Minor | Informational
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON, StructuredOutput)
 
--- | Type adversary output. No verdict field - derived from holes.
--- VALUE-NEUTRAL: Instead of asking "are you confident?", we ask
--- "what areas did you check?" and "what did you skip?" - actionable lists.
+-- | Strength found in the design - what's done right.
+-- Balanced rubric: LLM always has productive output even if nothing's wrong.
+data Strength = Strength
+  { sAspect      :: Text     -- "abstraction", "API design", "type safety"
+  , sObservation :: Text     -- What's good about it
+  , sWhy         :: Text     -- Why this matters for users
+  }
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
+
+-- | Review verdict - explicit routing decision.
+-- Handler uses this directly instead of deriving from hole severity.
+data ReviewVerdict = Approve | RequestChanges | Comment
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
+
+-- | Type adversary output. Reframed as PR review with balanced rubric.
+-- LLM reports strengths AND issues; handler uses verdict for routing.
 data TypeAdversaryOutput = TypeAdversaryOutput
-  { tadHoles          :: [TypeHole]
-  , areasExamined     :: [Text]    -- VALUE-NEUTRAL: What was actually checked
-  , uncheckedAreas    :: [Text]    -- VALUE-NEUTRAL: What was skipped (actionable!)
-  , analysisApproach  :: Text      -- High-level strategy (prose ok here)
+  { tadStrengths      :: [Strength]   -- What's done right (balanced output)
+  , tadHoles          :: [TypeHole]   -- Issues that need fixing
+  , areasExamined     :: [Text]       -- What was actually checked
+  , uncheckedAreas    :: [Text]       -- What was skipped (actionable!)
+  , analysisApproach  :: Text         -- High-level strategy
+  , verdict           :: ReviewVerdict -- Explicit routing: approve/request_changes/comment
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON, StructuredOutput)
@@ -865,9 +884,9 @@ data MutationTemplateCtx = MutationTemplateCtx
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON, StructuredOutput)
 
--- | Context for TypeAdversaryTpl.
+-- | Context for PRReviewTpl (formerly TypeAdversaryTpl).
 -- NOTE: Field names match template variables for TH validation.
-data TypeAdversaryTemplateCtx = TypeAdversaryTemplateCtx
+data PRReviewTemplateCtx = PRReviewTemplateCtx
   { types      :: TypesAgentOutput
   , scopeLevel :: ScopeLevel
   }

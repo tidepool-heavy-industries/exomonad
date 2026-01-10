@@ -189,10 +189,15 @@ pub fn fork_session(repo_root: &Path, config: &ForkConfig) -> Result<SessionOutp
             );
         })?;
 
-        return Ok(SessionOutput {
+        let mut output = SessionOutput {
             duration_secs: duration,
             ..result
-        });
+        };
+
+        // Sanitize output to remove control characters before returning for JSON serialization
+        output.sanitize();
+
+        return Ok(output);
     }
 
     // Execute with --fork-session flag (local mode)
@@ -219,10 +224,15 @@ pub fn fork_session(repo_root: &Path, config: &ForkConfig) -> Result<SessionOutp
         );
     })?;
 
-    Ok(SessionOutput {
+    let mut output = SessionOutput {
         duration_secs: duration,
         ..result
-    })
+    };
+
+    // Sanitize output to remove control characters before returning for JSON serialization
+    output.sanitize();
+
+    Ok(output)
 }
 
 fn execute_fork(

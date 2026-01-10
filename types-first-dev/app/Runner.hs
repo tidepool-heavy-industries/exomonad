@@ -1,73 +1,26 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE TypeFamilies #-}
 
--- | Actor runtime runner for the hybrid TDD graph.
+-- | Actor runtime runner for the V2 tree-based TDD graph.
 --
--- This module wires up all 20 nodes of the TypesFirstGraphHybrid to the
--- actor runtime system, enabling full parallel execution.
---
--- = Architecture
+-- V2 is radically simpler: just 4 nodes.
 --
 -- @
--- ┌────────────────────────────────────────────────────────────────┐
--- │                         Main                                    │
--- │  1. Parse CLI args (target repo, config)                       │
--- │  2. Build StackSpec configuration                               │
--- │  3. Build effect interpreter: Eff HybridEffects a -> IO a      │
--- │  4. Build handler map: Map Text HandlerBuilder                 │
--- │  5. runGraphAsActors handlers (toJSON stackSpec)               │
--- └────────────────────────────────────────────────────────────────┘
---                              │
---                              v
--- ┌────────────────────────────────────────────────────────────────┐
--- │                    Actor System (ki threads)                    │
--- │                                                                 │
--- │  [entry] ─► [hTypes] ─► [hSkeleton] ─► [hTypeAdversary]        │
--- │                                              │                  │
--- │              ┌───────────────────────────────┘                  │
--- │              v                                                  │
--- │         [hGate] ──holes──► [hTypesFix] ───┐                    │
--- │              │                            │                     │
--- │              └──clean──► [hFork] ◄────────┘                    │
--- │                            │                                    │
--- │              ┌─────────────┴─────────────┐                     │
--- │              v                           v                      │
--- │         [hTests]                     [hImpl]     (parallel)    │
--- │              │                           │                      │
--- │              └─── Arrive ───► [hJoin] ◄──┘                     │
--- │                                  │                              │
--- │         [hVerifyTDD] ◄───────────┘                             │
--- │              │                                                  │
--- │    trivial   │   pass                                          │
--- │       │      │                                                  │
--- │       v      v                                                  │
--- │  [hTestsReject]  [hMerge] ──conflict──► [hConflictResolve]     │
--- │       │              │                        │                 │
--- │       └──► hFork     └──clean──► [hValidate] ◄┘                │
--- │                            │                                    │
--- │                   fail     │    pass                           │
--- │                     │      │                                    │
--- │                     v      v                                    │
--- │                  [hFix]  [hPostValidate] ─► [hMutationAdversary]│
--- │                     │                              │            │
--- │                     └──► hValidate     [hWitness] ◄┘            │
--- │                                            │                    │
--- │                                            v                    │
--- │                                         [exit]                  │
--- └────────────────────────────────────────────────────────────────┘
+-- Entry(Spec) → hScaffold → hImplement → Exit(V2Result)
 -- @
+--
+-- The tree structure emerges from SpawnSelf calls in hImplement,
+-- not from graph topology. Same graph handles both decomposition
+-- and leaf cases.
 module Main (main) where
 
 import Control.Monad.Freer (Eff, runM)
 import Control.Monad.Freer.Error (runError)
 import Control.Monad.Freer.Reader (runReader)
 import Data.Aeson (ToJSON(..), FromJSON(..))
-import qualified Data.Aeson as Aeson
--- IORef not needed - using pure memory interpretation
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
-import qualified Data.Text.IO as TIO
 import System.Directory (getCurrentDirectory)
 import System.Environment (getArgs)
 import System.IO (hFlush, stdout)
@@ -75,60 +28,34 @@ import System.IO (hFlush, stdout)
 import Tidepool.Actor.Graph
   ( runGraphAsActors
   , HandlerBuilder
-  , NodeHandler(..)
   , wrapEffHandler
   , pureHandler
   , ExtractChoice
   , GotoChoice
   , gotoChoice
   )
-import Tidepool.Actor.Fork (forkHandler)
-import Tidepool.Actor.Barrier (barrierHandler)
-import Tidepool.Actor.Merge (ExpectedSources, FromPayloads, ExtractMergeResults)
+import Tidepool.Actor.Subgraph (SubgraphState, withRecursiveGraph, runSubgraph)
 import Tidepool.Graph.Execute (callHandler, CallHandler)
 import Tidepool.Graph.Goto (To, ClaudeCodeLLMHandler)
-import Tidepool.Graph.Types (HList(..), Exit, Arrive, ModelChoice(..), From)
+import Tidepool.Graph.Types ()
 import Tidepool.Graph.Memory (evalMemory)
 import Tidepool.Session.Executor (runSessionIO, defaultSessionConfig, SessionConfig(..))
 import Tidepool.Worktree.Executor (runWorktreeIO, defaultWorktreeConfig, WorktreeConfig(..))
 
 import TypesFirstDev.Effect.Build (runBuildIO)
-import TypesFirstDev.Handlers.Hybrid.Effects
-  ( HybridEffects
-  , SessionContext(..)
-  , WorkflowError(..)
-  , initialSessionContext
+import TypesFirstDev.Handlers.V2.Effects
+  ( V2Effects
+  , V2Context(..)
+  , V2Error(..)
+  , initialV2Context
   )
-import TypesFirstDev.Types.Hybrid
-import TypesFirstDev.Handlers.Hybrid.Genesis
-  ( hTypesHandler
-  , hSkeletonHandler
-  , hTypeAdversaryHandler
-  , hGateHandler
-  , hTypesFixHandler
+import TypesFirstDev.Types.V2
+  ( Spec(..)
+  , V2Result(..)
   )
-import TypesFirstDev.Handlers.Hybrid.Parallel
-  ( hForkHandler
-  , hTestsHandler
-  , hImplHandler
-  )
-import TypesFirstDev.Handlers.Hybrid.Merge
-  ( hJoinHandler
-  , hVerifyTDDHandler
-  , hTestsRejectHandler
-  , hMergeHandler
-  , hConflictResolveHandler
-  )
-import TypesFirstDev.Handlers.Hybrid.Validation
-  ( hValidateHandler
-  , hFixHandler
-  , hPostValidateHandler
-  )
-import TypesFirstDev.Handlers.Hybrid.Adversary
-  ( hMutationAdversaryHandler
-  )
-import TypesFirstDev.Handlers.Hybrid.Witness
-  ( hWitnessHandler
+import TypesFirstDev.Handlers.V2.Genesis
+  ( hScaffoldingHandler
+  , hImplementHandler
   )
 
 
@@ -136,11 +63,10 @@ import TypesFirstDev.Handlers.Hybrid.Witness
 -- CONFIGURATION
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Build a StackSpec for a test target.
-buildStackSpec :: FilePath -> StackSpec
-buildStackSpec targetDir = StackSpec
-  { specModuleName = "Data.Stack"
-  , specDescription = "A purely functional stack data structure with O(1) push/pop"
+-- | Build a test Spec for development.
+buildTestSpec :: FilePath -> Spec
+buildTestSpec targetDir = Spec
+  { specDescription = "A purely functional stack data structure with O(1) push/pop"
   , specAcceptanceCriteria =
       [ "Push adds element to top"
       , "Pop removes and returns top element"
@@ -148,9 +74,10 @@ buildStackSpec targetDir = StackSpec
       , "IsEmpty checks for empty stack"
       , "Size returns number of elements"
       ]
-  , specImplPath = targetDir <> "/src/Data/Stack.hs"
+  , specTargetPath = targetDir <> "/src/Data/Stack.hs"
   , specTestPath = targetDir <> "/test/Data/StackSpec.hs"
-  , specStrictness = defaultStrictness
+  , specParentBranch = Nothing  -- Root node
+  , specDepth = 0               -- Root depth
   }
 
 
@@ -158,50 +85,53 @@ buildStackSpec targetDir = StackSpec
 -- EFFECT INTERPRETER
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Run the HybridEffects stack to IO.
+-- | Run the V2Effects stack to IO.
 --
 -- Effect stack (top to bottom):
---   Error WorkflowError
---   Memory SessionContext
---   Reader StackSpec
+--   Error V2Error
+--   Memory V2Context
+--   Subgraph Spec V2Result  (recursive spawning!)
+--   Reader Spec
 --   Build
 --   Session
 --   Worktree
 --   IO
 --
--- NOTE: Memory is interpreted purely with evalMemory. This means state is
--- NOT persisted between handler invocations. For full state persistence,
--- we'd need to serialize/deserialize SessionContext between calls or use
--- the actor runtime's IORef-based Memory.
-runHybridEffects
-  :: StackSpec
+-- Note: SubgraphState is passed in because it needs to be created via
+-- 'withRecursiveGraph' at the top level to enable deferred wiring.
+runV2Effects
+  :: Spec
   -> WorktreeConfig
   -> SessionConfig
-  -> SessionContext  -- ^ Initial memory state
-  -> Eff HybridEffects a
-  -> IO (Either WorkflowError a)
-runHybridEffects spec wtConfig sessConfig initialMem =
-    runM
-  . runWorktreeIO wtConfig
-  . runSessionIO sessConfig
-  . runBuildIO
-  . runReader spec
-  . evalMemory initialMem
-  . runError @WorkflowError
+  -> V2Context
+  -> SubgraphState Spec V2Result  -- ^ Subgraph state (created externally for wiring)
+  -> Eff V2Effects a
+  -> IO (Either V2Error a)
+runV2Effects spec wtConfig sessConfig initialMem subgraphState eff =
+  runM
+    . runWorktreeIO wtConfig
+    . runSessionIO sessConfig
+    . runBuildIO
+    . runReader spec
+    . runSubgraph subgraphState
+    . evalMemory initialMem
+    . runError @V2Error
+    $ eff
 
 
--- | Unwrapping version that crashes on WorkflowError (for handlers).
-runHybridEffectsUnsafe
-  :: StackSpec
+-- | Unwrapping version that crashes on V2Error (for handlers).
+runV2EffectsUnsafe
+  :: Spec
   -> WorktreeConfig
   -> SessionConfig
-  -> SessionContext  -- ^ Initial memory state
-  -> Eff HybridEffects a
+  -> V2Context
+  -> SubgraphState Spec V2Result
+  -> Eff V2Effects a
   -> IO a
-runHybridEffectsUnsafe spec wtConfig sessConfig initialMem eff = do
-  result <- runHybridEffects spec wtConfig sessConfig initialMem eff
+runV2EffectsUnsafe spec wtConfig sessConfig initialMem subgraphState eff = do
+  result <- runV2Effects spec wtConfig sessConfig initialMem subgraphState eff
   case result of
-    Left err -> error $ "WorkflowError: " <> show err
+    Left err -> error $ "V2Error: " <> show err
     Right a -> pure a
 
 
@@ -210,96 +140,50 @@ runHybridEffectsUnsafe spec wtConfig sessConfig initialMem eff = do
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Wrap a ClaudeCodeLLMHandler as a HandlerBuilder.
---
--- Uses CallHandler typeclass to invoke executeClaudeCodeHandler.
 wrapClaudeCodeHandler
   :: forall model payload schema targets tpl.
      ( FromJSON payload
      , ExtractChoice targets
-     , CallHandler (ClaudeCodeLLMHandler model payload schema targets HybridEffects tpl) payload HybridEffects targets
+     , CallHandler (ClaudeCodeLLMHandler model payload schema targets V2Effects tpl) payload V2Effects targets
      )
-  => (forall a. Eff HybridEffects a -> IO a)
-  -> ClaudeCodeLLMHandler model payload schema targets HybridEffects tpl
+  => (forall a. Eff V2Effects a -> IO a)
+  -> ClaudeCodeLLMHandler model payload schema targets V2Effects tpl
   -> HandlerBuilder
 wrapClaudeCodeHandler interpret handler =
   pure $ wrapEffHandler interpret (callHandler handler)
-
-
--- | Wrap a logic handler as a HandlerBuilder.
-wrapLogicHandler
-  :: forall payload targets.
-     ( FromJSON payload
-     , ExtractChoice targets
-     )
-  => (forall a. Eff HybridEffects a -> IO a)
-  -> (payload -> Eff HybridEffects (GotoChoice targets))
-  -> HandlerBuilder
-wrapLogicHandler interpret handler =
-  pure $ wrapEffHandler interpret handler
 
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- HANDLER MAP
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Build the complete handler map for all 20 nodes.
---
--- Each node is wrapped appropriately:
--- - ClaudeCodeLLMHandler nodes use wrapClaudeCodeHandler
--- - Logic nodes use wrapLogicHandler
--- - ForkNode uses forkHandler
--- - BarrierNode uses barrierHandler
+-- | Build the handler map for V2's 4 nodes.
 buildHandlerMap
-  :: (forall a. Eff HybridEffects a -> IO a)
+  :: (forall a. Eff V2Effects a -> IO a)
   -> IO (Map.Map Text HandlerBuilder)
 buildHandlerMap interpret = do
-  -- BarrierNode needs IO to allocate state
-  -- Uses From markers to specify expected source names and payload types
-  joinNodeHandler <- barrierHandler
-    @'[From "hTests" TestsResult, From "hImpl" ImplResult]
-    interpret
-    hJoinHandler
-
   pure $ Map.fromList
-    -- Entry point: passes through to hTypes
+    -- Entry: receives Spec, routes to hScaffold
     [ ("entry", entryHandler)
 
-    -- Phase 1: Type Design (WS1)
-    , ("hTypes", wrapClaudeCodeHandler interpret hTypesHandler)
-    , ("hSkeleton", wrapLogicHandler interpret hSkeletonHandler)
-    , ("hTypeAdversary", wrapClaudeCodeHandler interpret hTypeAdversaryHandler)
-    , ("hGate", wrapLogicHandler interpret hGateHandler)
-    , ("hTypesFix", wrapClaudeCodeHandler interpret hTypesFixHandler)
+    -- Scaffold: TDD scaffolding (tests + stubs + rubric)
+    , ("hScaffold", wrapClaudeCodeHandler interpret hScaffoldingHandler)
 
-    -- Phase 2: Parallel Blind Execution (WS2)
-    , ("hFork", pure $ forkHandler
-        @'[To "hTests" TestsTemplateCtx, To "hImpl" ImplTemplateCtx]
-        interpret
-        hForkHandler)
-    , ("hTests", wrapClaudeCodeHandler interpret hTestsHandler)
-    , ("hImpl", wrapClaudeCodeHandler interpret hImplHandler)
-
-    -- Phase 3: TDD Verification (WS3)
-    , ("hJoin", pure joinNodeHandler)
-    , ("hVerifyTDD", wrapLogicHandler interpret hVerifyTDDHandler)
-    , ("hTestsReject", wrapLogicHandler interpret hTestsRejectHandler)
-    , ("hMerge", wrapLogicHandler interpret hMergeHandler)
-    , ("hConflictResolve", wrapClaudeCodeHandler interpret hConflictResolveHandler)
-
-    -- Phase 4: Validation Loop (WS4)
-    , ("hValidate", wrapLogicHandler interpret hValidateHandler)
-    , ("hFix", wrapClaudeCodeHandler interpret hFixHandler)
-    , ("hPostValidate", wrapLogicHandler interpret hPostValidateHandler)
-    , ("hMutationAdversary", wrapClaudeCodeHandler interpret hMutationAdversaryHandler)
-    , ("hWitness", wrapLogicHandler interpret hWitnessHandler)
+    -- Implement: spawn children if needed, then implement
+    -- NOTE: hImplementHandler has Subgraph constraint, need special handling
+    , ("hImplement", wrapImplementHandler interpret)
     ]
   where
-    -- Entry handler: receives StackSpec, routes to hTypes
     entryHandler :: HandlerBuilder
     entryHandler = pureHandler entryFn
       where
-        entryFn :: StackSpec -> GotoChoice '[To "hTypes" StackSpec]
-        entryFn spec = gotoChoice @"hTypes" spec
+        entryFn :: Spec -> GotoChoice '[To "hScaffold" Spec]
+        entryFn spec = gotoChoice @"hScaffold" spec
+
+    -- hImplement needs special handling for Subgraph effect
+    -- For now, wrap with the V2Effects interpreter which includes Subgraph
+    wrapImplementHandler :: (forall a. Eff V2Effects a -> IO a) -> HandlerBuilder
+    wrapImplementHandler interp = pure $ wrapEffHandler interp hImplementHandler
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -318,7 +202,7 @@ main = do
 
   -- Print banner
   putStrLn "══════════════════════════════════════════════════════════════════"
-  putStrLn "  types-first-dev: Actor Runtime Execution"
+  putStrLn "  types-first-dev V2: Tree-based TDD with Subgraph Effect"
   putStrLn "══════════════════════════════════════════════════════════════════"
   putStrLn ""
   putStrLn $ "Target directory: " <> targetDir
@@ -327,39 +211,66 @@ main = do
   hFlush stdout
 
   -- Build configuration
-  let stackSpec = buildStackSpec targetDir
+  let spec = buildTestSpec targetDir
       worktreeConfig = defaultWorktreeConfig cwd
       sessionConfig = (defaultSessionConfig cwd)
         { scMantlePath = cwd <> "/../rust/target/release/mantle"
         }
 
   putStrLn "Configuration:"
-  putStrLn $ "  Module: " <> T.unpack stackSpec.specModuleName
-  putStrLn $ "  Impl path: " <> stackSpec.specImplPath
-  putStrLn $ "  Test path: " <> stackSpec.specTestPath
+  putStrLn $ "  Description: " <> T.unpack spec.specDescription
+  putStrLn $ "  Target path: " <> spec.specTargetPath
+  putStrLn $ "  Test path: " <> spec.specTestPath
+  putStrLn $ "  Depth: " <> show spec.specDepth
   putStrLn ""
 
   -- Initial memory state
-  let initialMem = initialSessionContext "types-first-dev-runner"
+  let initialMem = initialV2Context "v2-runner" 0 "main"
 
-  -- Build effect interpreter
-  let interpret :: forall a. Eff HybridEffects a -> IO a
-      interpret = runHybridEffectsUnsafe stackSpec worktreeConfig sessionConfig initialMem
+  -- ════════════════════════════════════════════════════════════════════════════
+  -- RECURSIVE GRAPH EXECUTION
+  -- ════════════════════════════════════════════════════════════════════════════
+  --
+  -- Use withRecursiveGraph to handle the chicken-and-egg dependency:
+  -- 1. SubgraphState needs the graph runner
+  -- 2. Graph runner needs handlers
+  -- 3. Handlers need the interpreter
+  -- 4. Interpreter needs SubgraphState
+  --
+  -- withRecursiveGraph breaks this cycle via deferred binding (IORef internally).
+  -- The wire function is called AFTER handlers are built but BEFORE graph runs.
 
-  -- Build handler map
-  putStrLn "Building handler map for 20 nodes..."
-  handlers <- buildHandlerMap interpret
-  putStrLn $ "  Handlers: " <> show (Map.keys handlers)
-  putStrLn ""
-  hFlush stdout
+  result <- withRecursiveGraph @Spec @V2Result $ \subgraphState wireRecursion -> do
 
-  -- Run the graph!
-  putStrLn "Starting graph execution..."
-  putStrLn "══════════════════════════════════════════════════════════════════"
-  putStrLn ""
-  hFlush stdout
+    -- Build effect interpreter using the subgraph state
+    let interpret :: forall a. Eff V2Effects a -> IO a
+        interpret = runV2EffectsUnsafe spec worktreeConfig sessionConfig initialMem subgraphState
 
-  result <- runGraphAsActors @HybridResult handlers (toJSON stackSpec)
+    -- Build handler map
+    putStrLn "Building handler map for V2 (4 nodes)..."
+    handlers <- buildHandlerMap interpret
+    putStrLn $ "  Handlers: " <> show (Map.keys handlers)
+    putStrLn ""
+    hFlush stdout
+
+    -- ════════════════════════════════════════════════════════════════════════
+    -- WIRE THE RECURSION
+    -- ════════════════════════════════════════════════════════════════════════
+    --
+    -- This is the key step! When a handler calls spawnSelf with a child Spec,
+    -- the interpreter needs to run the full graph for that child. We wire
+    -- that capability here, now that handlers exist.
+    --
+    -- After this call, spawned children will recursively run the full graph.
+    wireRecursion $ \childSpec -> runGraphAsActors @V2Result handlers (toJSON childSpec)
+
+    -- Run the graph!
+    putStrLn "Starting V2 graph execution..."
+    putStrLn "══════════════════════════════════════════════════════════════════"
+    putStrLn ""
+    hFlush stdout
+
+    runGraphAsActors @V2Result handlers (toJSON spec)
 
   -- Print result
   putStrLn ""
@@ -369,13 +280,13 @@ main = do
   printResult result
 
 
--- | Pretty print the final result.
-printResult :: HybridResult -> IO ()
+-- | Pretty print the V2 result.
+printResult :: V2Result -> IO ()
 printResult result = do
-  putStrLn $ "Success: " <> show result.hrSuccess
-  putStrLn ""
-  putStrLn "Spec functions:"
-  mapM_ (\f -> putStrLn $ "  - " <> T.unpack f.name) result.hrSpec
-  putStrLn ""
-  putStrLn $ "Total cost: $" <> show result.hrTotalCost
-  putStrLn $ "Witness observations: " <> show (length result.hrWitness.wrObservations)
+  putStrLn $ "Success: " <> show result.vrSuccess
+  putStrLn $ "Description: " <> T.unpack result.vrDescription
+  putStrLn $ "Branch: " <> T.unpack result.vrBranch
+  putStrLn $ "Commit: " <> T.unpack result.vrCommitHash
+  case result.vrSubsystemName of
+    Nothing -> putStrLn "Root node (not a subsystem)"
+    Just name -> putStrLn $ "Subsystem: " <> T.unpack name

@@ -21,10 +21,15 @@ library
     exposed-modules:
         TypesFirstDev.Types
         TypesFirstDev.Types.Hybrid
+        TypesFirstDev.Types.V2
         TypesFirstDev.Schema.Hybrid
         TypesFirstDev.Context.Hybrid
         TypesFirstDev.Templates.Hybrid
+        TypesFirstDev.Templates.V2
         TypesFirstDev.Graph.Hybrid
+        TypesFirstDev.Graph.V2
+        TypesFirstDev.Handlers.V2.Effects
+        TypesFirstDev.Handlers.V2.Genesis
         TypesFirstDev.Effect.Build
         TypesFirstDev.Handlers.Hybrid.Effects
         TypesFirstDev.Handlers.Hybrid.Stubs

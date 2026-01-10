@@ -164,7 +164,8 @@ pub struct RunResult {
     /// Per-model usage breakdown.
     pub model_usage: HashMap<String, ModelUsage>,
     /// Interrupt signals received during execution.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    /// Always serialize (Haskell expects the field to be present).
+    #[serde(default)]
     pub interrupts: Vec<InterruptSignal>,
 }
 

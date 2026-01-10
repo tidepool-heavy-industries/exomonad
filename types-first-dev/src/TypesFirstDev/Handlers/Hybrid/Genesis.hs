@@ -6,8 +6,8 @@
 -- * hEntry (entry point)
 -- * hTypes (LLM: design types)
 -- * hSkeleton (Logic: generate skeleton files)
--- * hTypeAdversary (LLM: find type holes)
--- * hGate (Logic: route based on holes)
+-- * hPRReview (LLM: review type design)
+-- * hGate (Logic: route based on review verdict)
 -- * hTypesFix (LLM: fix type holes)
 module TypesFirstDev.Handlers.Hybrid.Genesis
   ( -- * Effect Stack (re-exported from Effects)
@@ -18,7 +18,7 @@ module TypesFirstDev.Handlers.Hybrid.Genesis
     -- * Handlers
   , hTypesHandler
   , hSkeletonHandler
-  , hTypeAdversaryHandler
+  , hPRReviewHandler
   , hGateHandler
   , hTypesFixHandler
 
@@ -55,7 +55,7 @@ import TypesFirstDev.Handlers.Hybrid.Effects
 import TypesFirstDev.Types.Hybrid
 import TypesFirstDev.Templates.Hybrid
   ( hTypesCompiled
-  , hTypeAdversaryCompiled
+  , hPRReviewCompiled
   , hTypesFixCompiled
   )
 import TypesFirstDev.Graph.Hybrid (TypesFirstGraphHybrid(..))
@@ -137,10 +137,10 @@ hTypesHandler = ClaudeCodeLLMHandler @'Haiku
 -- This handler:
 -- 1. Gets the current project path
 -- 2. Validates the skeleton compiles (belt and suspenders)
--- 3. Routes to type adversary with skeleton state
+-- 3. Routes to PR review with skeleton state
 hSkeletonHandler
   :: TypesResult
-  -> Eff HybridEffects (GotoChoice '[To "hTypeAdversary" SkeletonState])
+  -> Eff HybridEffects (GotoChoice '[To "hPRReview" SkeletonState])
 hSkeletonHandler typesResult = do
   spec <- ask @StackSpec
 
@@ -167,51 +167,52 @@ hSkeletonHandler typesResult = do
         , ssProjectPath = projectPath
         }
 
-  pure $ gotoChoice @"hTypeAdversary" skeletonState
+  pure $ gotoChoice @"hPRReview" skeletonState
 
 
 -- ════════════════════════════════════════════════════════════════════════════
--- TYPE ADVERSARY HANDLER (LLM Node)
+-- PR REVIEW HANDLER (LLM Node)
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Handler for hTypeAdversary node.
--- Builds TypeAdversaryTemplateCtx, routes to gate.
+-- | Handler for hPRReview node.
+-- Builds PRReviewTemplateCtx, routes to gate.
 --
 -- Uses Memory stash pattern: before stashes SkeletonState, after retrieves it.
--- This supports the join point where hGate needs both skeleton + adversary output.
-hTypeAdversaryHandler
+-- This supports the join point where hGate needs both skeleton + review output.
+hPRReviewHandler
   :: ClaudeCodeLLMHandler
        'Haiku                                 -- model
        SkeletonState                          -- needs
-       TypeAdversaryOutput                    -- schema
+       TypeAdversaryOutput                    -- schema (kept for compatibility)
        '[To "hGate" TypeAdversaryResult]      -- targets
        HybridEffects                          -- effs
-       TypeAdversaryTemplateCtx               -- tpl
-hTypeAdversaryHandler = ClaudeCodeLLMHandler @'Haiku
+       PRReviewTemplateCtx                    -- tpl
+hPRReviewHandler = ClaudeCodeLLMHandler @'Haiku
   Nothing                  -- no system template
-  hTypeAdversaryCompiled   -- user template
-  buildAdversaryContext    -- before: builds context AND stashes skeleton
-  routeAfterAdversary      -- after: retrieves skeleton from stash
+  hPRReviewCompiled        -- user template
+  buildReviewContext       -- before: builds context AND stashes skeleton
+  routeAfterReview         -- after: retrieves skeleton from stash
   where
-    buildAdversaryContext :: SkeletonState -> Eff HybridEffects (TypeAdversaryTemplateCtx, SessionOperation)
-    buildAdversaryContext skelState = do
+    buildReviewContext :: SkeletonState -> Eff HybridEffects (PRReviewTemplateCtx, SessionOperation)
+    buildReviewContext skelState = do
       -- Stash skeleton state in Memory for after-handler to retrieve
       updateMem (\ctx -> ctx { scSkeletonStash = Just skelState })
-      let ctx = TypeAdversaryTemplateCtx
+      let ctx = PRReviewTemplateCtx
             { types = skelState.ssTypesResult.trOutput
             , scopeLevel = Leaf  -- Single module scope for now
             }
-      pure (ctx, StartFresh "genesis/adversary")
+      pure (ctx, StartFresh "genesis/pr-review")
 
-    routeAfterAdversary :: (ClaudeCodeResult TypeAdversaryOutput, SessionId) -> Eff HybridEffects (GotoChoice '[To "hGate" TypeAdversaryResult])
-    routeAfterAdversary (ccResult, _sid) = do
+    routeAfterReview :: (ClaudeCodeResult TypeAdversaryOutput, SessionId) -> Eff HybridEffects (GotoChoice '[To "hGate" TypeAdversaryResult])
+    routeAfterReview (ccResult, _sid) = do
       -- Retrieve stashed skeleton state
       ctx <- getMem @SessionContext
       case ctx.scSkeletonStash of
         Nothing -> error "BUG: SkeletonState not stashed before LLM call"
         Just skelState -> do
           let output = ccResult.ccrParsedOutput
-              verdict = deriveTypeSystemVerdict output.tadHoles
+              -- Use explicit verdict from LLM (PR reviewer decides routing)
+              verdict = reviewVerdictToTypeSystemVerdict output.verdict
               result = TypeAdversaryResult
                 { tarOutput = output
                 , tarVerdict = verdict
@@ -219,16 +220,12 @@ hTypeAdversaryHandler = ClaudeCodeLLMHandler @'Haiku
                 }
           pure $ gotoChoice @"hGate" result
 
--- | Derive verdict from hole list.
-deriveTypeSystemVerdict :: [TypeHole] -> TypeSystemVerdict
-deriveTypeSystemVerdict holes
-  | any isCritical holes = TypeSystemHasHoles
-  | any isMajor holes    = TypeSystemHasHoles
-  | null holes           = TypeSystemSound
-  | otherwise            = TypeSystemMinorHoles
-  where
-    isCritical h = h.severity == Critical
-    isMajor h = h.severity == Major
+-- | Map LLM's ReviewVerdict to internal TypeSystemVerdict for routing.
+-- The LLM (as PR reviewer) decides; we just translate to internal routing type.
+reviewVerdictToTypeSystemVerdict :: ReviewVerdict -> TypeSystemVerdict
+reviewVerdictToTypeSystemVerdict Approve = TypeSystemSound
+reviewVerdictToTypeSystemVerdict Comment = TypeSystemMinorHoles  -- proceed with notes
+reviewVerdictToTypeSystemVerdict RequestChanges = TypeSystemHasHoles  -- needs fix
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -334,7 +331,7 @@ hybridGenesisHandlers = TypesFirstGraphHybrid
   { hEntry          = Proxy @StackSpec
   , hTypes          = undefined
   , hSkeleton       = undefined
-  , hTypeAdversary  = undefined
+  , hPRReview       = undefined
   , hGate           = undefined
   , hTypesFix       = undefined
   -- Phase 3: Parallel Blind Execution

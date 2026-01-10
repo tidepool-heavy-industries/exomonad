@@ -12,6 +12,38 @@ use std::path::PathBuf;
 
 use mantle_shared::events::{InterruptSignal, ModelUsage};
 
+/// Strip control characters from a string for clean JSON output.
+///
+/// Removes control chars (0x00-0x08, 0x0B, 0x0C, 0x0E-0x1F, 0x7F) except:
+/// - Tab (0x09) - valid whitespace
+/// - Newline (0x0A) - valid whitespace
+/// - Carriage return (0x0D) - handled by serde_json
+fn sanitize_string(s: &str) -> String {
+    s.chars()
+        .filter(|c| !matches!(c, '\x00'..='\x08' | '\x0b' | '\x0c' | '\x0e'..='\x1f' | '\x7f'))
+        .collect()
+}
+
+/// Recursively sanitize all string values in a JSON Value.
+fn sanitize_json_value(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::String(s) => {
+            *s = sanitize_string(s);
+        }
+        serde_json::Value::Array(arr) => {
+            for item in arr {
+                sanitize_json_value(item);
+            }
+        }
+        serde_json::Value::Object(obj) => {
+            for (_, v) in obj.iter_mut() {
+                sanitize_json_value(v);
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Session lifecycle state.
 ///
 /// Tracks where a session is in its lifecycle. Used for filtering
@@ -294,6 +326,26 @@ impl SessionOutput {
             error: Some(error_msg),
             model_usage: HashMap::new(),
             cc_session_id: None,
+        }
+    }
+
+    /// Sanitize string fields to remove control characters that would break JSON parsing.
+    ///
+    /// This should be called before serializing to JSON for Haskell consumption.
+    pub fn sanitize(&mut self) {
+        // Sanitize result_text
+        if let Some(ref mut text) = self.result_text {
+            *text = sanitize_string(text);
+        }
+
+        // Sanitize error message
+        if let Some(ref mut err) = self.error {
+            *err = sanitize_string(err);
+        }
+
+        // Recursively sanitize structured_output
+        if let Some(ref mut output) = self.structured_output {
+            sanitize_json_value(output);
         }
     }
 }
