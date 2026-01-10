@@ -36,6 +36,7 @@ library
         Tidepool.Graph.Reify
         Tidepool.Graph.Export
         Tidepool.Graph.Memory
+        Tidepool.Graph.Internal.TypeLevel
         -- Types needed by WASM (no native dependencies)
         Tidepool.Anthropic.Types
         Tidepool.Tool.Wire
