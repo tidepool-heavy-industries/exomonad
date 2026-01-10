@@ -44,8 +44,7 @@ packages:
     haskell/vendor/ginger
 
 -- Disabled packages:
--- template            -- unused template skeleton
--- tidepool-telegram-hs -- types only, not used by tidepool-wasm
+-- (none currently)
 
 -- Use GHC 9.6+ for best GHC2021 support
 -- with-compiler: ghc-9.6

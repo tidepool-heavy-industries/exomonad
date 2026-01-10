@@ -24,9 +24,9 @@ spec = do
       length failures `shouldBe` 1
       case failures of
         [f] -> do
-          tfPropertyName f `shouldBe` "prop_pushPop"
-          tfMessage f `shouldSatisfy` T.isInfixOf "Failed!"
-          tfCounterexample f `shouldBe` Just "[1,2,3]\n0"
+          f.tfPropertyName `shouldBe` "prop_pushPop"
+          f.tfMessage `shouldSatisfy` T.isInfixOf "Failed!"
+          f.tfCounterexample `shouldBe` Just "[1,2,3]\n0"
         _ -> expectationFailure "Expected exactly one failure"
 
     it "parses multiple QuickCheck failures" $ do
@@ -47,7 +47,7 @@ spec = do
             ]
       let failures = parseQuickCheckOutput output
       case failures of
-        [f] -> tfSeed f `shouldBe` Just 42
+        [f] -> f.tfSeed `shouldBe` Just 42
         _ -> expectationFailure "Expected exactly one failure"
 
   describe "parseHSpecOutput" $ do

@@ -155,10 +155,9 @@ All Haskell packages now live under `haskell/`. See `haskell/CLAUDE.md` for full
 | Package | Purpose |
 |---------|---------|
 | `haskell/effects/habitica` | Habitica effect types (standalone) |
+| `haskell/effects/telegram` | Telegram effect types (disabled) |
 | `haskell/protocol/wire-types` | Native protocol types |
 | `haskell/protocol/generated-ts` | TypeScript type generation |
-| `tidepool-telegram-hs` | Telegram bot (Haskell - disabled) |
-| `tidepool-telegram-ts` | Telegram bot (TypeScript) |
 
 ### Tools (`haskell/tools/`)
 | Package | Purpose |
@@ -167,11 +166,16 @@ All Haskell packages now live under `haskell/`. See `haskell/CLAUDE.md` for full
 | `haskell/tools/sleeptime` | Log analysis for agent evolution |
 | `tools/micro-gastown` | Experimental tooling (non-Haskell) |
 
+### TypeScript Packages (`typescript/`)
+| Package | Purpose |
+|---------|---------|
+| `typescript/telegram-bot` | Telegram bot implementation |
+| `typescript/native-gui` | Solid.js frontend for native server |
+
 ### Deployment
 | Directory | Purpose |
 |-----------|---------|
 | `deploy/` | Cloudflare Worker Durable Object harness |
-| `template/` | Project template for new consuming repos |
 
 ## Where Things Go
 
@@ -181,6 +185,7 @@ All Haskell packages now live under `haskell/`. See `haskell/CLAUDE.md` for full
 | New integration | `haskell/dsl/core/src/Tidepool/Effects/` (plural) |
 | New graph annotation | `haskell/dsl/core/src/Tidepool/Graph/Types.hs` |
 | New interpreter | `haskell/effects/<name>-executor/` |
+| TypeScript frontend/bot | `typescript/<name>/` |
 | Agents | Separate repo (anemone, urchin, etc.) |
 
 ### Naming Conventions

@@ -250,12 +250,12 @@ extractCounterexample lines' =
 -- Looks for patterns like "prop_name: FAIL" or "Testing prop_name..."
 extractPropertyName :: Text -> Text -> Text
 extractPropertyName chunk fullOutput =
-  -- First try to find prop_name in the chunk itself
-  case findPropInChunk chunk of
+  -- First look backwards in full output for context (more reliable)
+  case findPropBeforeChunk chunk fullOutput of
     Just name -> name
     Nothing ->
-      -- Look backwards in full output for context
-      case findPropBeforeChunk chunk fullOutput of
+      -- Fall back to finding prop_name in the chunk itself
+      case findPropInChunk chunk of
         Just name -> name
         Nothing -> "unknown_property"
   where
@@ -265,7 +265,7 @@ extractPropertyName chunk fullOutput =
            ((m:_):_) -> Just (T.pack m)
            _ -> Nothing
 
-    findPropBeforeChunk c full =
+    findPropBeforeChunk _c full =
       -- Find where chunk appears in full output, look before it
       let (before, _) = T.breakOn "*** Failed!" full
           -- Get last prop_ mention before the failure
