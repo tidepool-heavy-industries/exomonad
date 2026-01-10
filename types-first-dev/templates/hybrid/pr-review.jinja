@@ -1,0 +1,121 @@
+# Code Review: {{ types.typeName }}
+
+You're reviewing this type design before merge. Help your colleague ship good code.
+
+## Context
+
+This is a **type stub commit** - function bodies are `undefined` placeholders.
+Your job is to review the TYPE DESIGN, not the implementation.
+
+{% if scopeLevel == 'Leaf' %}
+## Scope: Single Module
+
+Focus on internal consistency within this module.
+{% elif scopeLevel == 'Coordination' %}
+## Scope: Module Composition
+
+Focus on how these modules compose - interface mismatches, constraint conflicts.
+{% elif scopeLevel == 'System' %}
+## Scope: System Requirements
+
+Does the full interface satisfy original requirements?
+{% endif %}
+
+## The Type Design
+
+```haskell
+-- Type: {{ types.typeName }}
+-- {{ types.typeDescription }}
+
+{% for fn in types.functions %}
+{{ fn.name }} :: {{ fn.signature }}
+-- {{ fn.brief }}
+{% endfor %}
+```
+
+## Claimed Properties
+
+{% for fn in types.functions %}
+### {{ fn.name }}
+{% for prop in fn.properties %}
+- {{ prop }}
+{% endfor %}
+{% endfor %}
+
+## What to Review
+
+1. **Representable Invalid States**
+   Can the type represent values that violate its documented invariants?
+   Example: A NonEmpty type that can be empty, or a sorted list that allows unsorted values.
+
+2. **API Completeness**
+   Are all documented functions actually exported? Can users do what the docs claim?
+
+3. **Abstraction Boundaries**
+   Are internal constructors hidden when they should be? Are the right things public?
+
+4. **Type Signature Accuracy**
+   Do signatures match their documentation? Are constraints sufficient?
+
+## What NOT to Review
+
+- **Implementation** - Everything is `undefined`. That's expected at this stage.
+- **Style preferences** - Unless they create real confusion.
+- **Performance** - Unless the types make efficiency impossible.
+- **Theoretical attacks** - If the abstraction works in practice, it's fine.
+
+## Issue Classification
+
+If you find issues, classify them:
+
+- `RepresentableInvalid`: Type allows constructing values that violate documented invariants
+- `LeakyAbstraction`: Internal representation exposed when documentation claims it's hidden
+- `PartialFunction`: Signature claims totality but the type allows undefined cases
+- `TypeConfusion`: Same type used for semantically different purposes
+
+## Severity Definitions
+
+- `Critical`: This will cause bugs in production. Blocks merge.
+- `Major`: Significant design flaw. Should fix before merge.
+- `Minor`: Improvement worth making. Can merge and fix later.
+- `Informational`: Observation for consideration. No action required.
+
+## Output: Balanced Rubric
+
+Your review has TWO parts - fill both:
+
+### Strengths (what's done right)
+
+For each strength (tadStrengths):
+- `sAspect`: What area this covers (e.g., "abstraction", "API design", "type safety")
+- `sObservation`: What's good about it
+- `sWhy`: Why this matters for users
+
+### Issues (what needs fixing)
+
+For each issue (tadHoles):
+- `holeType`: Classification from above
+- `description`: What's wrong (be specific and factual)
+- `invariantBroken`: Which documented invariant is violated
+- `exploitSketch`: Concrete example demonstrating the issue
+- `severity`: From definitions above
+- `suggestedFix`: How to address it
+
+### Meta (report honestly)
+
+- `areasExamined`: What you actually checked
+- `uncheckedAreas`: What you skipped
+- `analysisApproach`: Brief summary of your review method
+- `verdict`: "Approve" | "RequestChanges" | "Comment"
+
+## Verdict Guidance
+
+- **Approve**: Design is sound. No Critical or Major issues. Ready to proceed.
+- **RequestChanges**: Has Critical or Major issues that must be fixed first.
+- **Comment**: Only Minor/Informational feedback. Can proceed but consider the notes.
+
+## Important
+
+- **Always find strengths** - Every design has good aspects. Acknowledge them.
+- **Only report real issues** - If nothing blocks merge, the issues list can be empty.
+- **Implementation is `undefined`** - That's expected! Don't flag it as a problem.
