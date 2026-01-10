@@ -20,6 +20,7 @@ import Control.Monad.Freer.Reader (ask)
 import Data.Text (Text)
 import qualified Data.Text as T
 
+import Tidepool.Effect.Session (SessionId, SessionOperation(..))
 import Tidepool.Graph.Goto
   ( GotoChoice
   , To
@@ -112,17 +113,17 @@ hTestsHandler = ClaudeCodeLLMHandler @'Sonnet
   buildTestsContext  -- before: passthrough (input IS the context)
   routeAfterTests    -- after: wrap result and arrive at barrier
   where
-    -- Input is already the template context, so just pass through
-    buildTestsContext :: TestsTemplateCtx -> Eff HybridEffects TestsTemplateCtx
-    buildTestsContext = pure
+    -- Input is already the template context, so just pass through with session op
+    buildTestsContext :: TestsTemplateCtx -> Eff HybridEffects (TestsTemplateCtx, SessionOperation)
+    buildTestsContext ctx = pure (ctx, StartFresh "parallel/tests")
 
-    routeAfterTests :: ClaudeCodeResult TestsAgentOutput -> Eff HybridEffects (GotoChoice '[To (Arrive "hJoin") TestsResult])
-    routeAfterTests ccResult = do
+    routeAfterTests :: (ClaudeCodeResult TestsAgentOutput, SessionId) -> Eff HybridEffects (GotoChoice '[To (Arrive "hJoin") TestsResult])
+    routeAfterTests (ccResult, sid) = do
       let result = TestsResult
             { testsOutput = ccResult.ccrParsedOutput
             , testsWorktree = ""  -- Set by orchestration layer
             , testsCommitHash = ""  -- Set by orchestration layer
-            , testsSessionId = T.pack (show ccResult.ccrSessionId)  -- Extract SessionId value
+            , testsSessionId = T.pack (show sid)
             , testsCost = 0.0  -- TODO: Extract from ClaudeCode metrics
             , testsFailureProof = []  -- Populated by external verification in hVerifyTDD
             }
@@ -150,16 +151,16 @@ hImplHandler = ClaudeCodeLLMHandler @'Sonnet
   buildImplContext  -- before: passthrough
   routeAfterImpl    -- after: wrap result and arrive at barrier
   where
-    buildImplContext :: ImplTemplateCtx -> Eff HybridEffects ImplTemplateCtx
-    buildImplContext = pure
+    buildImplContext :: ImplTemplateCtx -> Eff HybridEffects (ImplTemplateCtx, SessionOperation)
+    buildImplContext ctx = pure (ctx, StartFresh "parallel/impl")
 
-    routeAfterImpl :: ClaudeCodeResult ImplAgentOutput -> Eff HybridEffects (GotoChoice '[To (Arrive "hJoin") ImplResult])
-    routeAfterImpl ccResult = do
+    routeAfterImpl :: (ClaudeCodeResult ImplAgentOutput, SessionId) -> Eff HybridEffects (GotoChoice '[To (Arrive "hJoin") ImplResult])
+    routeAfterImpl (ccResult, sid) = do
       let result = ImplResult
             { implOutput = ccResult.ccrParsedOutput
             , implWorktree = ""  -- Set by orchestration layer
             , implCommitHash = ""  -- Set by orchestration layer
-            , implSessionId = T.pack (show ccResult.ccrSessionId)  -- Extract SessionId value
+            , implSessionId = T.pack (show sid)
             , implCost = 0.0  -- TODO: Extract from ClaudeCode metrics
             }
       pure $ gotoArrive @"hJoin" result

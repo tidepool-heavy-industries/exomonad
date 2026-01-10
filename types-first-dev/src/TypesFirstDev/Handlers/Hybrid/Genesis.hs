@@ -36,6 +36,7 @@ import System.Directory (getCurrentDirectory)
 import TypesFirstDev.Effect.Build (buildAll, BuildResult(..))
 
 import Tidepool.Graph.Generic (AsHandler)
+import Tidepool.Effect.Session (SessionId, SessionOperation(..))
 import Tidepool.Graph.Goto
   ( GotoChoice
   , To
@@ -105,19 +106,21 @@ hTypesHandler = ClaudeCodeLLMHandler @'Haiku
   buildTypesContext    -- before: builds context
   routeAfterTypes      -- after: routes to skeleton
   where
-    buildTypesContext :: StackSpec -> Eff HybridEffects TypesTemplateCtx
-    buildTypesContext spec = pure TypesTemplateCtx
-      { moduleName = spec.specModuleName
-      , description = spec.specDescription
-      , acceptanceCriteria = spec.specAcceptanceCriteria
-      , implPath = spec.specImplPath
-      }
+    buildTypesContext :: StackSpec -> Eff HybridEffects (TypesTemplateCtx, SessionOperation)
+    buildTypesContext spec = do
+      let ctx = TypesTemplateCtx
+            { moduleName = spec.specModuleName
+            , description = spec.specDescription
+            , acceptanceCriteria = spec.specAcceptanceCriteria
+            , implPath = spec.specImplPath
+            }
+      pure (ctx, StartFresh "genesis/types")
 
-    routeAfterTypes :: ClaudeCodeResult TypesAgentOutput -> Eff HybridEffects (GotoChoice '[To "hSkeleton" TypesResult])
-    routeAfterTypes ccResult = do
+    routeAfterTypes :: (ClaudeCodeResult TypesAgentOutput, SessionId) -> Eff HybridEffects (GotoChoice '[To "hSkeleton" TypesResult])
+    routeAfterTypes (ccResult, sid) = do
       let result = TypesResult
             { trOutput = ccResult.ccrParsedOutput
-            , trSessionId = T.pack (show ccResult.ccrSessionId)
+            , trSessionId = T.pack (show sid)
             , trCost = 0.0  -- TODO: Extract from ClaudeCode metrics
             }
       pure $ gotoChoice @"hSkeleton" result
@@ -190,17 +193,18 @@ hTypeAdversaryHandler = ClaudeCodeLLMHandler @'Haiku
   buildAdversaryContext    -- before: builds context AND stashes skeleton
   routeAfterAdversary      -- after: retrieves skeleton from stash
   where
-    buildAdversaryContext :: SkeletonState -> Eff HybridEffects TypeAdversaryTemplateCtx
+    buildAdversaryContext :: SkeletonState -> Eff HybridEffects (TypeAdversaryTemplateCtx, SessionOperation)
     buildAdversaryContext skelState = do
       -- Stash skeleton state in Memory for after-handler to retrieve
       updateMem (\ctx -> ctx { scSkeletonStash = Just skelState })
-      pure TypeAdversaryTemplateCtx
-        { types = skelState.ssTypesResult.trOutput
-        , scopeLevel = Leaf  -- Single module scope for now
-        }
+      let ctx = TypeAdversaryTemplateCtx
+            { types = skelState.ssTypesResult.trOutput
+            , scopeLevel = Leaf  -- Single module scope for now
+            }
+      pure (ctx, StartFresh "genesis/adversary")
 
-    routeAfterAdversary :: ClaudeCodeResult TypeAdversaryOutput -> Eff HybridEffects (GotoChoice '[To "hGate" TypeAdversaryResult])
-    routeAfterAdversary ccResult = do
+    routeAfterAdversary :: (ClaudeCodeResult TypeAdversaryOutput, SessionId) -> Eff HybridEffects (GotoChoice '[To "hGate" TypeAdversaryResult])
+    routeAfterAdversary (ccResult, _sid) = do
       -- Retrieve stashed skeleton state
       ctx <- getMem @SessionContext
       case ctx.scSkeletonStash of
@@ -292,19 +296,21 @@ hTypesFixHandler = ClaudeCodeLLMHandler @'Haiku
   buildFixContext    -- before: builds context
   routeAfterFix      -- after: routes to skeleton
   where
-    buildFixContext :: TypeHolesFound -> Eff HybridEffects TypesFixTemplateCtx
-    buildFixContext holesFound = pure TypesFixTemplateCtx
-      { originalTypes = holesFound.thfOriginalTypes
-      , holes = holesFound.thfHoles
-      , attempt = holesFound.thfAttempt
-      , priorFixes = holesFound.thfPriorFixes
-      }
+    buildFixContext :: TypeHolesFound -> Eff HybridEffects (TypesFixTemplateCtx, SessionOperation)
+    buildFixContext holesFound = do
+      let ctx = TypesFixTemplateCtx
+            { originalTypes = holesFound.thfOriginalTypes
+            , holes = holesFound.thfHoles
+            , attempt = holesFound.thfAttempt
+            , priorFixes = holesFound.thfPriorFixes
+            }
+      pure (ctx, StartFresh "genesis/fix")
 
-    routeAfterFix :: ClaudeCodeResult TypesAgentOutput -> Eff HybridEffects (GotoChoice '[To "hSkeleton" TypesResult])
-    routeAfterFix ccResult = do
+    routeAfterFix :: (ClaudeCodeResult TypesAgentOutput, SessionId) -> Eff HybridEffects (GotoChoice '[To "hSkeleton" TypesResult])
+    routeAfterFix (ccResult, sid) = do
       let result = TypesResult
             { trOutput = ccResult.ccrParsedOutput
-            , trSessionId = T.pack (show ccResult.ccrSessionId)
+            , trSessionId = T.pack (show sid)
             , trCost = 0.0
             }
       pure $ gotoChoice @"hSkeleton" result

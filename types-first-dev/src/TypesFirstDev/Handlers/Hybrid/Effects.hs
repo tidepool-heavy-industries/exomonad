@@ -15,16 +15,26 @@ module TypesFirstDev.Handlers.Hybrid.Effects
   , WorkflowError(..)
   ) where
 
+import Control.Monad.Freer (Eff, Member)
 import Control.Monad.Freer.Error (Error)
 import Control.Monad.Freer.Reader (Reader)
 import Data.Text (Text)
+import qualified Data.Text as T
+import GHC.Generics (Generic)
 
-import Tidepool.Effect.Session (Session)
+import Tidepool.Effect.Session (Session, SessionId, SessionOperation(..))
 import Tidepool.Effects.Worktree (Worktree)
-import Tidepool.Graph.Memory (Memory)
+import Tidepool.Graph.Memory (Memory, getMem, updateMem)
 
 import TypesFirstDev.Effect.Build (Build)
 import TypesFirstDev.Types.Hybrid
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- SESSION MANAGEMENT
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- SessionOperation is imported from Tidepool.Effect.Session
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -58,6 +68,8 @@ type HybridEffects =
 data SessionContext = SessionContext
   { scSessionId            :: Text
   , scTotalCost            :: Double
+
+  -- Stash slots for handler joins
   , scSkeletonStash        :: Maybe SkeletonState    -- For hTypeAdversary → hGate join
   , scGatedStash           :: Maybe GatedState       -- For hFork → hVerifyTDD → hTestsReject
   , scConflictStash        :: Maybe ConflictState    -- For hConflictResolve LLM join
@@ -73,6 +85,8 @@ initialSessionContext :: Text -> SessionContext
 initialSessionContext sessionId = SessionContext
   { scSessionId = sessionId
   , scTotalCost = 0.0
+
+  -- Stash slots
   , scSkeletonStash = Nothing
   , scGatedStash = Nothing
   , scConflictStash = Nothing
@@ -82,6 +96,10 @@ initialSessionContext sessionId = SessionContext
   , scMutationCtxStash = Nothing
   }
 
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- WORKFLOW ERRORS
+-- ════════════════════════════════════════════════════════════════════════════
 
 -- | Workflow errors.
 data WorkflowError

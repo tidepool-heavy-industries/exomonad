@@ -19,6 +19,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 
 import Tidepool.Effects.Worktree (Worktree)
+import Tidepool.Effect.Session (SessionId, SessionOperation(..))
 import Tidepool.Graph.Goto
   ( GotoChoice
   , To
@@ -61,7 +62,7 @@ hMutationAdversaryHandler = ClaudeCodeLLMHandler @'Haiku
   buildMutationContext         -- before: passthrough with stash
   routeAfterMutation           -- after: build witness report
   where
-    buildMutationContext :: MutationTemplateCtx -> Eff HybridEffects MutationTemplateCtx
+    buildMutationContext :: MutationTemplateCtx -> Eff HybridEffects (MutationTemplateCtx, SessionOperation)
     buildMutationContext mutationCtx = do
       sendM $ putStrLn $ "[MUTATION-ADVERSARY] Red teaming test suite at scope: " <> show (mtcScopeLevel mutationCtx)
 
@@ -69,10 +70,10 @@ hMutationAdversaryHandler = ClaudeCodeLLMHandler @'Haiku
       updateMem (\ctx -> ctx { scMutationCtxStash = Just mutationCtx })
 
       -- Passthrough: input IS the template context
-      pure mutationCtx
+      pure (mutationCtx, StartFresh "validation/adversary")
 
-    routeAfterMutation :: ClaudeCodeResult MutationAdversaryOutput -> Eff HybridEffects (GotoChoice '[To "hWitness" WitnessReport])
-    routeAfterMutation ccResult = do
+    routeAfterMutation :: (ClaudeCodeResult MutationAdversaryOutput, SessionId) -> Eff HybridEffects (GotoChoice '[To "hWitness" WitnessReport])
+    routeAfterMutation (ccResult, _sid) = do
       let mutationOutput = ccResult.ccrParsedOutput
 
       -- Derive verdict from output (handler logic, NOT asked of LLM)

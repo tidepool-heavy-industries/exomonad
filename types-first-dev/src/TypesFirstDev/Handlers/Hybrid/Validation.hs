@@ -28,6 +28,7 @@ import Data.Maybe (mapMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 
+import Tidepool.Effect.Session (SessionId, SessionOperation(..))
 import Tidepool.Graph.Goto
   ( GotoChoice
   , To
@@ -167,7 +168,7 @@ hFixHandler = ClaudeCodeLLMHandler @'Haiku
   buildFixContext -- before: checks exit conditions, builds context
   routeAfterFix   -- after: updates understanding, routes back
   where
-    buildFixContext :: ValidationFailure -> Eff HybridEffects FixTemplateCtx
+    buildFixContext :: ValidationFailure -> Eff HybridEffects (FixTemplateCtx, SessionOperation)
     buildFixContext validationFailure = do
       spec <- ask @StackSpec
       let mergedState = vfMergedState validationFailure
@@ -188,15 +189,16 @@ hFixHandler = ClaudeCodeLLMHandler @'Haiku
       -- Stash ValidationFailure for after-handler to retrieve
       updateMem (\ctx -> ctx { scValidationFailureStash = Just validationFailure })
 
-      pure FixTemplateCtx
-        { failures = vfFailures validationFailure
-        , understanding = understanding
-        , fixFunctions = getFunctionsFromMergedState mergedState
-        , worktreePath = msMergeWorktree mergedState
-        }
+      let templateCtx = FixTemplateCtx
+            { failures = vfFailures validationFailure
+            , understanding = understanding
+            , fixFunctions = getFunctionsFromMergedState mergedState
+            , worktreePath = msMergeWorktree mergedState
+            }
+      pure (templateCtx, StartFresh "validation/fix")
 
-    routeAfterFix :: ClaudeCodeResult FixAgentOutput -> Eff HybridEffects (GotoChoice '[To "hValidate" MergedState])
-    routeAfterFix ccResult = do
+    routeAfterFix :: (ClaudeCodeResult FixAgentOutput, SessionId) -> Eff HybridEffects (GotoChoice '[To "hValidate" MergedState])
+    routeAfterFix (ccResult, _sid) = do
       -- Retrieve stashed ValidationFailure
       ctx <- getMem @SessionContext
       case ctx.scValidationFailureStash of

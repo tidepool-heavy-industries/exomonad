@@ -67,7 +67,7 @@ import Text.Ginger.TH (TypedTemplate, runTypedTemplate)
 import Text.Parsec.Pos (SourcePos)
 
 import Tidepool.Effect (LLM)
-import Tidepool.Effect.Session (Session, SessionOutput(..), SessionId, startSession)
+import Tidepool.Effect.Session (Session, SessionOutput(..), SessionId, SessionOperation(..), startSession, continueSession, forkSession)
 import Tidepool.Effect.Types (TurnOutcome(..), TurnParseResult(..), TurnResult(..), runTurn)
 import Tidepool.Graph.Edges (GetInput, GetSpawnTargets, GetBarrierTarget, GetAwaits)
 import Tidepool.Graph.Generic (AsHandler, FieldsWithNamesOf, SpawnPayloads, SpawnPayloadsInner, AwaitsHList, GetNodeDef)
@@ -83,6 +83,7 @@ import Tidepool.StructuredOutput (StructuredOutput(..), formatDiagnostic)
 
 -- | Effect type alias (freer-simple effects have kind Type -> Type).
 type Effect = Type -> Type
+
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TYPE-LEVEL UTILITIES (local definitions)
@@ -265,11 +266,11 @@ executeLLMHandler mSystemTpl userTpl beforeFn afterFn input = do
 -- a dockerized Claude Code session via mantle.
 --
 -- This function:
--- 1. Calls the before-handler to build template context
+-- 1. Calls the before-handler to build template context AND session strategy
 -- 2. Renders the user template (system template appended to prompt)
--- 3. Starts a Session with the prompt and schema
+-- 3. Executes the appropriate Session operation (start/continue/fork)
 -- 4. Parses the structured output from the session result
--- 5. Calls the after-handler to determine the next transition
+-- 5. Calls the after-handler with output AND session ID for routing
 --
 -- = Type Parameters
 --
@@ -280,11 +281,16 @@ executeLLMHandler mSystemTpl userTpl beforeFn afterFn input = do
 -- * @es@ - The effect stack (must include Session)
 -- * @tpl@ - The template context type
 --
--- = Session Lifecycle
+-- = Session Management
 --
--- Each invocation starts a fresh session with slug "graph-node". For self-loop
--- scenarios requiring session continuity, the after-handler receives the
--- session ID in 'ClaudeCodeResult' and can store it in Memory for later use.
+-- The before handler returns a 'SessionOperation' alongside the template context:
+--
+-- * 'StartFresh slug' - Create a new session with the given slug
+-- * 'ContinueFrom sid' - Resume an existing session (preserves conversation history)
+-- * 'ForkFrom parentSid childSlug' - Create a read-only fork from parent session
+--
+-- The after handler receives both the parsed output and the session ID that was
+-- used/created, enabling downstream handlers to register sessions for later reuse.
 executeClaudeCodeHandler
   :: forall model needs schema targets es tpl.
      ( Member Session es
@@ -295,14 +301,16 @@ executeClaudeCodeHandler
      )
   => Maybe (TypedTemplate tpl SourcePos)                    -- ^ Optional system prompt template
   -> TypedTemplate tpl SourcePos                            -- ^ User prompt template (required)
-  -> (needs -> Eff es tpl)                                  -- ^ Before handler: builds context
-  -> (ClaudeCodeResult schema -> Eff es (GotoChoice targets))  -- ^ After handler: routes based on output + session metadata
+  -> (needs -> Eff es (tpl, SessionOperation))              -- ^ Before handler: builds context AND session strategy
+  -> ((ClaudeCodeResult schema, SessionId) -> Eff es (GotoChoice targets))  -- ^ After handler: routes with output AND session ID
   -> needs                                                  -- ^ Input from Input annotation
   -> Eff es (GotoChoice targets)
 executeClaudeCodeHandler mSystemTpl userTpl beforeFn afterFn input = do
   let model = singModelChoice @model
-  -- Build context from before-handler
-  ctx <- beforeFn input
+
+  -- Build context and get session operation from before-handler
+  (ctx, sessionOp) <- beforeFn input
+
   -- Render templates
   let systemPrompt :: Text
       systemPrompt = maybe "" (runTypedTemplate ctx) mSystemTpl
@@ -315,8 +323,18 @@ executeClaudeCodeHandler mSystemTpl userTpl beforeFn afterFn input = do
                    then userPrompt
                    else systemPrompt <> "\n\n" <> userPrompt
       schemaVal = Just $ schemaToValue (structuredSchema @schema)
-  -- Start a Session via mantle (fresh session each call)
-  result <- startSession "graph-node" fullPrompt model schemaVal
+
+  -- Dispatch to appropriate Session operation
+  result <- case sessionOp of
+    StartFresh slug ->
+      startSession slug fullPrompt model schemaVal
+
+    ContinueFrom sid ->
+      continueSession sid fullPrompt schemaVal
+
+    ForkFrom parentSid childSlug ->
+      forkSession parentSid childSlug fullPrompt schemaVal
+
   -- Extract and parse the structured output
   case result.soStructuredOutput of
     Nothing -> error $ "ClaudeCode session returned no structured output"
@@ -324,7 +342,7 @@ executeClaudeCodeHandler mSystemTpl userTpl beforeFn afterFn input = do
     Just outputVal ->
       case parseStructured outputVal of
         Left diag -> error $ "ClaudeCode output parse error: " <> T.unpack (formatDiagnostic diag)
-        Right output -> afterFn (ClaudeCodeResult output (result.soSessionId))
+        Right output -> afterFn (ClaudeCodeResult output result.soSessionId, result.soSessionId)
 
 
 -- ════════════════════════════════════════════════════════════════════════════

@@ -30,6 +30,7 @@ import Tidepool.Effects.Worktree (createWorktree, WorktreeSpec(..), WorktreePath
 
 import TypesFirstDev.Effect.Build (testWithDetails, buildAll)
 import qualified TypesFirstDev.Effect.Build as Build
+import Tidepool.Effect.Session (SessionId, SessionOperation(..))
 import Tidepool.Graph.Goto
   ( GotoChoice
   , To
@@ -310,19 +311,20 @@ hConflictResolveHandler = ClaudeCodeLLMHandler @'Haiku
   buildConflictResolveContext  -- before: builds context
   routeAfterConflictResolve    -- after: routes to validate
   where
-    buildConflictResolveContext :: ConflictState -> Eff HybridEffects ConflictResolveTemplateCtx
+    buildConflictResolveContext :: ConflictState -> Eff HybridEffects (ConflictResolveTemplateCtx, SessionOperation)
     buildConflictResolveContext conflictState = do
       -- Stash conflict state for after-handler
       updateMem (\ctx -> ctx { scConflictStash = Just conflictState })
-      pure ConflictResolveTemplateCtx
-        { conflictedFiles = conflictState.csConflictedFiles
-        , testsContext = conflictState.csTestsContext
-        , implContext = conflictState.csImplContext
-        , mergeWorktree = conflictState.csMergeWorktree
-        }
+      let templateCtx = ConflictResolveTemplateCtx
+            { conflictedFiles = conflictState.csConflictedFiles
+            , testsContext = conflictState.csTestsContext
+            , implContext = conflictState.csImplContext
+            , mergeWorktree = conflictState.csMergeWorktree
+            }
+      pure (templateCtx, StartFresh "merge/conflict")
 
-    routeAfterConflictResolve :: ClaudeCodeResult ConflictResolveOutput -> Eff HybridEffects (GotoChoice '[To "hValidate" MergedState])
-    routeAfterConflictResolve ccResult = do
+    routeAfterConflictResolve :: (ClaudeCodeResult ConflictResolveOutput, SessionId) -> Eff HybridEffects (GotoChoice '[To "hValidate" MergedState])
+    routeAfterConflictResolve (ccResult, _sid) = do
       -- Retrieve stashed conflict state
       ctx <- getMem @SessionContext
       case ctx.scConflictStash of
