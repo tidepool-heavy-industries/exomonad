@@ -10,54 +10,9 @@
 
 ## Your Deliverables
 
-1. **Write to disk** (via ClaudeCode):
+1. **Write to disk**:
    - Data type definition in `{{ implPath }}`
    - Function signatures (with `undefined` stubs)
    - Ensure `cabal build` passes
 
-2. **Return structured output** describing what you wrote (JSON format)
-
-## Output Schema (SIMPLIFIED)
-
-Return JSON with these fields:
-- `typeName`: The main type name (e.g., "Stack", "UrlShortener")
-- `typeDescription`: What this type represents (prose)
-- `functions`: Array of function specs (see below)
-- `designNotes`: Your design rationale (free-form text)
-- `blocker`: If you couldn't complete, explain why (or null)
-
-Each function in `functions` array:
-- `name`: Function name (e.g., "push", "shorten")
-- `signature`: Type signature (e.g., "a -> Stack a -> Stack a")
-- `brief`: One-line description
-- `behavior`: Detailed behavior description
-- `examples`: Array of example descriptions (strings)
-- `properties`: Array of property descriptions (strings)
-
-## Example Output
-
-```json
-{
-  "typeName": "Stack",
-  "typeDescription": "A LIFO stack data structure",
-  "functions": [
-    {
-      "name": "push",
-      "signature": "a -> Stack a -> Stack a",
-      "brief": "Add element to top",
-      "behavior": "Adds an element to the top of the stack",
-      "examples": ["push 1 empty returns stack with 1", "push 2 (push 1 empty) has 2 on top"],
-      "properties": ["pop after push returns the pushed element", "push increases size by 1"]
-    }
-  ],
-  "designNotes": "Used a simple recursive ADT for clarity",
-  "blocker": null
-}
-```
-
-## Your Task
-
-1. Design and write the type definitions for {{ moduleName }}
-2. Write function stubs with `undefined` implementations
-3. Make sure `cabal build` passes
-4. Return the JSON output describing what you wrote
+2. **Return structured output** (schema provided via --json-schema)

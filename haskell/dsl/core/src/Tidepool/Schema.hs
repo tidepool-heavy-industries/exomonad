@@ -194,9 +194,14 @@ deriveJSONSchema :: Name -> Q Exp
 deriveJSONSchema typeName = do
   info <- reify typeName
   case info of
+    -- Single-constructor record
     TyConI (DataD _ _ _ _ [RecC conName fields] _) -> deriveFromFields conName fields
+    -- Newtype with record syntax
     TyConI (NewtypeD _ _ _ _ (RecC conName fields) _) -> deriveFromFields conName fields
-    _ -> fail $ "deriveJSONSchema: " ++ show typeName ++ " must be a record type"
+    -- Enum: all nullary constructors
+    TyConI (DataD _ _ _ _ cons _) | all isNullaryCon cons -> deriveEnum cons
+    -- Unsupported
+    _ -> fail $ "deriveJSONSchema: " ++ show typeName ++ " must be a record type or enum (all nullary constructors)"
   where
     deriveFromFields conName fields = do
       -- Derive schemas for each field, requiring Haddock docs
@@ -211,6 +216,13 @@ deriveJSONSchema typeName = do
                           | (fn, typ) <- fieldInfo
                           , not (isMaybeType typ) ]
       [| objectSchema (map (\(n, s) -> (T.pack n, s)) $propsExpr) (map T.pack $reqExpr) |]
+
+    deriveEnum cons = do
+      let names = [nameBase n | NormalC n [] <- cons]
+      [| enumSchema $(listE [litE (stringL n) | n <- names]) |]
+
+    isNullaryCon (NormalC _ []) = True
+    isNullaryCon _ = False
 
     isMaybeType (AppT (ConT name) _) = nameBase name == "Maybe"
     isMaybeType _ = False

@@ -269,15 +269,23 @@ data PropertyType
 -- NOTE: Uses regular lists for LLM schema simplicity.
 -- Handler can validate non-empty if needed.
 data FunctionSpec = FunctionSpec
-  { name        :: Text                       -- "push"
-  , signature   :: Text                       -- "a -> Stack a -> Stack a"
-  , brief       :: Text                       -- One-line for code comments
-  , behavior    :: Text                       -- Detailed prose for agents
-  , examples    :: [Text]                     -- Example descriptions (simplified)
-  , properties  :: [Text]                     -- Property descriptions (simplified)
+  { name        :: Text
+    -- ^ Function name (e.g., "push", "pop", "isEmpty")
+  , signature   :: Text
+    -- ^ Haskell type signature (e.g., "a -> Stack a -> Stack a")
+  , brief       :: Text
+    -- ^ One-line description for code comments
+  , behavior    :: Text
+    -- ^ Detailed behavioral description for agents
+  , examples    :: [Text]
+    -- ^ Example descriptions showing usage (e.g., "push 1 empty gives Stack [1]")
+  , properties  :: [Text]
+    -- ^ Property descriptions to test (e.g., "pop (push x s) == (x, s)")
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
+  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass StructuredOutput
+  -- HasJSONSchema in Schema/Hybrid.hs adds descriptions (TH staging: getDoc needs compiled module)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TYPES AGENT OUTPUT (Schema)
@@ -288,14 +296,21 @@ data FunctionSpec = FunctionSpec
 --
 -- SIMPLIFIED SCHEMA: Flat structure for reliable LLM JSON generation.
 data TypesAgentOutput = TypesAgentOutput
-  { typeName        :: Text             -- "Stack"
-  , typeDescription :: Text             -- Prose: what this type represents
-  , functions       :: [FunctionSpec]   -- Specs for each function
-  , designNotes     :: Text             -- Free-form design rationale
-  , blocker         :: Maybe Text       -- If blocked, explain
+  { typeName        :: Text
+    -- ^ The main type name (e.g., "Stack", "Queue", "Tree")
+  , typeDescription :: Text
+    -- ^ What this type represents in prose (e.g., "A LIFO stack data structure")
+  , functions       :: [FunctionSpec]
+    -- ^ Specifications for each function in the module's API
+  , designNotes     :: Text
+    -- ^ Free-form design rationale explaining key decisions
+  , blocker         :: Maybe Text
+    -- ^ If blocked on something external, explain what and why (null if not blocked)
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
+  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass StructuredOutput
+  -- HasJSONSchema in Schema/Hybrid.hs adds descriptions (TH staging: getDoc needs compiled module)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TYPE ADVERSARY OUTPUT (Schema)
@@ -370,12 +385,17 @@ data CoverageReport = CoverageReport
 
 -- | Tests agent output. SIMPLIFIED for reliable LLM JSON generation.
 data TestsAgentOutput = TestsAgentOutput
-  { propertiesWritten :: [Text]       -- List of property names written
-  , commitMessage     :: Text         -- Git commit message
-  , blocker           :: Maybe Text   -- If blocked, explain
+  { propertiesWritten :: [Text]
+    -- ^ List of QuickCheck property names written (e.g., ["prop_pushPop", "prop_isEmpty"])
+  , commitMessage     :: Text
+    -- ^ Git commit message summarizing the test additions
+  , blocker           :: Maybe Text
+    -- ^ If blocked on something external, explain what (null if not blocked)
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
+  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass StructuredOutput
+  -- HasJSONSchema in Schema/Hybrid.hs adds descriptions (TH staging: getDoc needs compiled module)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- IMPL AGENT OUTPUT (Schema)
@@ -383,13 +403,19 @@ data TestsAgentOutput = TestsAgentOutput
 
 -- | Impl agent output. SIMPLIFIED for reliable LLM JSON generation.
 data ImplAgentOutput = ImplAgentOutput
-  { functionsImplemented :: [Text]       -- List of function names implemented
-  , designNotes          :: Text         -- How you approached the implementation
-  , commitMessage        :: Text         -- Git commit message
-  , blocker              :: Maybe Text   -- If blocked, explain
+  { functionsImplemented :: [Text]
+    -- ^ List of function names implemented (e.g., ["push", "pop", "isEmpty"])
+  , designNotes          :: Text
+    -- ^ How you approached the implementation (key decisions, algorithms used)
+  , commitMessage        :: Text
+    -- ^ Git commit message summarizing the implementation
+  , blocker              :: Maybe Text
+    -- ^ If blocked on something external, explain what (null if not blocked)
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
+  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass StructuredOutput
+  -- HasJSONSchema in Schema/Hybrid.hs adds descriptions (TH staging: getDoc needs compiled module)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- FIX AGENT OUTPUT (Schema)
@@ -398,14 +424,21 @@ data ImplAgentOutput = ImplAgentOutput
 -- | Description of a fix applied.
 -- VALUE-NEUTRAL: faRelatedFailures lets handler correlate fixes to failures.
 data FixApplied = FixApplied
-  { faFunction        :: Text           -- "push"
-  , faWhatChanged     :: Text           -- "Fixed off-by-one in size tracking"
-  , faWhyFailed       :: Text           -- "Wasn't handling empty stack edge case"
+  { faFunction        :: Text
+    -- ^ Name of the function that was fixed (e.g., "push")
+  , faWhatChanged     :: Text
+    -- ^ What was changed (e.g., "Fixed off-by-one in size tracking")
+  , faWhyFailed       :: Text
+    -- ^ Why it was failing (e.g., "Wasn't handling empty stack edge case")
   , faFixType         :: FixType
-  , faRelatedFailures :: [Text]         -- VALUE-NEUTRAL: Which failures this addresses
+    -- ^ Classification of the fix type
+  , faRelatedFailures :: [Text]
+    -- ^ Which test failures this fix addresses (property names)
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
+  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass StructuredOutput
+  -- HasJSONSchema in Schema/Hybrid.hs adds descriptions (TH staging: getDoc needs compiled module)
 
 data FixType
   = EdgeCaseFix         -- Missing edge case handling
@@ -415,17 +448,24 @@ data FixType
   | InitializationFix   -- Wrong initial value
   | OtherFix Text
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
+  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass StructuredOutput
+  -- HasJSONSchema in Schema/Hybrid.hs adds descriptions (TH staging: getDoc needs compiled module)
 
 -- | Fix agent output.
 -- VALUE-NEUTRAL: Removed fixBuildPassed (handler verifies mechanically).
 data FixAgentOutput = FixAgentOutput
   { fixChanges   :: [FixApplied]
+    -- ^ List of fixes applied to address test failures
   , fixCommitMsg :: Text
+    -- ^ Git commit message summarizing the fixes
   , fixBlocker   :: Maybe Text
+    -- ^ If unable to fix, explain what's blocking (null if fixes applied)
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
+  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass StructuredOutput
+  -- HasJSONSchema in Schema/Hybrid.hs adds descriptions (TH staging: getDoc needs compiled module)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- MUTATION ADVERSARY OUTPUT (Schema)

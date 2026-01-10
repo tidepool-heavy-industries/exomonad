@@ -21,6 +21,7 @@ library
     exposed-modules:
         TypesFirstDev.Types
         TypesFirstDev.Types.Hybrid
+        TypesFirstDev.Schema.Hybrid
         TypesFirstDev.Context.Hybrid
         TypesFirstDev.Templates.Hybrid
         TypesFirstDev.Graph.Hybrid
