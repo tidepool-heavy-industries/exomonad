@@ -52,6 +52,7 @@ module Tidepool.Effect.Session
   , SessionOutput(..)
   , SessionMetadata(..)
   , InterruptSignal(..)
+  , SessionOperation(..)
 
     -- * Smart Constructors
   , startSession
@@ -90,6 +91,32 @@ import Tidepool.Graph.Types (ModelChoice)
 newtype SessionId = SessionId { unSessionId :: Text }
   deriving stock (Eq, Ord, Show)
   deriving newtype (FromJSON, ToJSON)
+
+
+-- | Session operation strategy for ClaudeCode handlers.
+--
+-- Defines how the next ClaudeCode session should be spawned:
+--
+-- * 'StartFresh' - Create a new session with given slug
+-- * 'ContinueFrom' - Resume an existing session (preserves conversation history)
+-- * 'ForkFrom' - Create a read-only fork from parent session
+--
+-- Before handlers return this alongside template context to communicate
+-- session strategy to executeClaudeCodeHandler:
+--
+-- @
+-- beforeHandler input = do
+--   ctx <- buildContext input
+--   sessionOp <- case mParentSession of
+--     Just parentSid -> pure $ ForkFrom parentSid "child-slug"
+--     Nothing -> pure $ StartFresh "fresh-slug"
+--   pure (ctx, sessionOp)
+-- @
+data SessionOperation
+  = StartFresh Text                    -- ^ Fresh session with slug
+  | ContinueFrom SessionId             -- ^ Continue existing session
+  | ForkFrom SessionId Text            -- ^ Fork from parent with child slug
+  deriving (Show, Eq)
 
 
 -- | Result from a session turn (parsed from mantle JSON stdout).

@@ -1,5 +1,6 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE DefaultSignatures #-}
+{-# LANGUAGE UndecidableSuperClasses #-}
 
 -- | The StructuredOutput typeclass for LLM structured output.
 --
@@ -39,7 +40,7 @@ import Data.Kind (Type)
 import Data.Text (Text)
 import GHC.Generics (Generic, Rep, from, to)
 
-import Tidepool.Schema (JSONSchema)
+import Tidepool.Schema (JSONSchema, ValidStructuredOutput)
 import Tidepool.StructuredOutput.Error (ParseDiagnostic)
 import Tidepool.StructuredOutput.Prefix (stripFieldPrefix)
 

@@ -102,7 +102,7 @@ library
       hs-source-dirs: src-platform-wasm
     else
       hs-source-dirs: src-platform-native
-    default-language: GHC2021
+    default-language: GHC2024
     default-extensions:
         DataKinds
         DeriveAnyClass
@@ -167,7 +167,7 @@ test-suite graph-validation-tests
         freer-simple >= 1.2 && < 2,
         tidepool-core
     hs-source-dirs:   test
-    default-language: GHC2021
+    default-language: GHC2024
     default-extensions:
         DeriveAnyClass
         DeriveGeneric

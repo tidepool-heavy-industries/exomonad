@@ -33,7 +33,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics
 
-import Tidepool.Schema (JSONSchema(..), SchemaType(..), emptySchema, objectSchema)
+import Tidepool.Schema (JSONSchema(..), SchemaType(..), emptySchema, objectSchema, IsMarkedOneOf)
 import Tidepool.StructuredOutput.Class (GStructuredOutput(..), StructuredOutput(..), StructuredOptions(..), SumEncoding(..))
 import Tidepool.StructuredOutput.Error (ParseDiagnostic(..), expectedObject, missingField, typeMismatch)
 import Tidepool.StructuredOutput.Prefix (detectPrefix, makeStripPrefix)
@@ -292,16 +292,51 @@ conName' :: forall c f p. Constructor c => M1 C c f p -> String
 conName' _ = conName (undefined :: M1 C c f p)
 
 
+-- ════════════════════════════════════════════════════════════════════════════
+-- NULLARY SUM TYPE DETECTION AND ENUM GENERATION
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Check if all variants have empty contents (nullary constructors).
+--
+-- For example, @data Priority = Low | Medium | High@ has all nullary constructors.
+allNullary :: [(String, JSONSchema)] -> Bool
+allNullary = all (\(_, schema) -> isEmptyObject schema)
+
+-- | Check if a schema represents an empty object {}.
+--
+-- An empty object has type TObject with no properties and no required fields.
+isEmptyObject :: JSONSchema -> Bool
+isEmptyObject (JSONSchema { schemaType = typ, schemaProperties = props, schemaRequired = req }) =
+  typ == TObject &&
+  null props &&
+  null req
+
+-- | Generate a string enum schema.
+--
+-- For nullary sum types like @data Priority = Low | Medium | High@,
+-- generates @{"type": "string", "enum": ["Low", "Medium", "High"]}@
+-- instead of wasteful oneOf with tag+contents encoding.
+stringEnumSchema :: [String] -> JSONSchema
+stringEnumSchema constructors =
+  (emptySchema TString) { schemaEnum = Just (map T.pack constructors) }
+
+
 -- | GStructuredOutput instance for sum types (multiple constructors).
 --
 -- This uses TaggedObject encoding: {"tag": "Constructor", "contents": {...}}
+--
+-- Special case: If ALL constructors are nullary (no data), generates a
+-- string enum instead of oneOf for efficiency and Anthropic compatibility.
 instance GStructuredSum (l :+: r) => GStructuredOutput (l :+: r) where
   gStructuredSchema opts =
     let variants = gSumVariants @(l :+: r) opts
     in case opts.soSumEncoding of
          TaggedObject tagField contentsField ->
-           let variantSchemas = map (makeVariantSchema tagField contentsField) variants
-           in (emptySchema TObject) { schemaOneOf = Just variantSchemas }
+           -- Check if ALL variants are nullary (empty contents)
+           if allNullary variants
+           then stringEnumSchema (map fst variants)
+           else let variantSchemas = map (makeVariantSchema tagField contentsField) variants
+                in (emptySchema TObject) { schemaOneOf = Just variantSchemas }
          ObjectWithSingleField ->
            error "StructuredOutput: ObjectWithSingleField sum encoding not yet supported"
          TwoElemArray ->
@@ -318,9 +353,13 @@ instance GStructuredSum (l :+: r) => GStructuredOutput (l :+: r) where
 
   gEncodeStructured opts x =
     let (constructorName, contents) = gSumEncode opts x
+        variants = gSumVariants @(l :+: r) opts
     in case opts.soSumEncoding of
          TaggedObject tagField contentsField ->
-           Object $ KeyMap.fromList
+           -- If ALL variants are nullary, encode as plain string
+           if allNullary variants
+           then String $ T.pack constructorName
+           else Object $ KeyMap.fromList
              [ (Key.fromString tagField, String $ T.pack constructorName)
              , (Key.fromString contentsField, contents)
              ]
@@ -329,20 +368,36 @@ instance GStructuredSum (l :+: r) => GStructuredOutput (l :+: r) where
          TwoElemArray ->
            error "StructuredOutput: TwoElemArray sum encoding not yet supported"
 
-  gParseStructured opts path (Object obj) =
-    case opts.soSumEncoding of
+  gParseStructured opts path v@(Object obj) =
+    let variants = gSumVariants @(l :+: r) opts
+    in case opts.soSumEncoding of
       TaggedObject tagField contentsField ->
-        let tagKey = Key.fromString tagField
-            contentsKey = Key.fromString contentsField
-        in case (KeyMap.lookup tagKey obj, KeyMap.lookup contentsKey obj) of
-             (Just (String tag), Just contents) ->
-               case gSumParse @(l :+: r) opts path (T.unpack tag) contents of
-                 Just result -> result
-                 Nothing -> Left $ typeMismatch path "one of known constructors" (String tag)
-             (Just _, _) -> Left $ typeMismatch path "string tag" (Object obj)
-             (Nothing, _) -> Left $ missingField (path ++ [T.pack tagField])
+        -- If ALL variants are nullary, we expect string, not object
+        if allNullary variants
+        then Left $ typeMismatch path "string (for nullary enum)" v
+        else
+          let tagKey = Key.fromString tagField
+              contentsKey = Key.fromString contentsField
+          in case (KeyMap.lookup tagKey obj, KeyMap.lookup contentsKey obj) of
+               (Just (String tag), Just contents) ->
+                 case gSumParse @(l :+: r) opts path (T.unpack tag) contents of
+                   Just result -> result
+                   Nothing -> Left $ typeMismatch path "one of known constructors" (String tag)
+               (Just _, _) -> Left $ typeMismatch path "string tag" (Object obj)
+               (Nothing, _) -> Left $ missingField (path ++ [T.pack tagField])
       ObjectWithSingleField ->
         error "StructuredOutput: ObjectWithSingleField sum encoding not yet supported"
       TwoElemArray ->
         error "StructuredOutput: TwoElemArray sum encoding not yet supported"
+  gParseStructured opts path v@(String str) =
+    let variants = gSumVariants @(l :+: r) opts
+    in case opts.soSumEncoding of
+      TaggedObject _ _ ->
+        -- If ALL variants are nullary, parse as string enum
+        if allNullary variants
+        then case gSumParse @(l :+: r) opts path (T.unpack str) (Object KeyMap.empty) of
+               Just result -> result
+               Nothing -> Left $ typeMismatch path "one of known enum values" v
+        else Left $ expectedObject path v
+      _ -> Left $ expectedObject path v
   gParseStructured _ path v = Left $ expectedObject path v

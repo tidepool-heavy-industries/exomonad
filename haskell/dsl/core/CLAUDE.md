@@ -463,6 +463,108 @@ gClassify :: mode :- G.LLMNode
 
 > **Source**: `tidepool-core/src/Tidepool/Schema.hs`
 
+### Anthropic Structured Output Compatibility
+
+Anthropic's structured outputs **do not support oneOf** schemas. The type system enforces this at compile time to prevent runtime failures:
+
+```haskell
+-- ❌ This will NOT compile
+data Choice = OptionA Text | OptionB Int
+  deriving (Generic, StructuredOutput)
+
+-- Error: Schema error for structured output type: Choice
+-- Anthropic's structured output does not support 'oneOf' schemas.
+```
+
+**Why?** Anthropic uses constrained decoding - the schema compiles to a grammar that restricts token generation. This makes oneOf fundamentally incompatible with their approach.
+
+#### Nullary Sum Types (Enums) - Automatic!
+
+For nullary sum types (enums with no data), Tidepool **automatically generates efficient string enums**:
+
+```haskell
+-- ✅ Just derive - automatically optimized!
+data Priority = Low | Medium | High
+  deriving (Generic, StructuredOutput)
+
+-- Generated schema: {"type": "string", "enum": ["Low", "Medium", "High"]}
+-- Encoding: "Low", "Medium", "High" (plain strings, not {"tag": "Low", "contents": {}})
+```
+
+**Before this fix:** Nullary enums generated wasteful tag+contents schemas (3-4x larger).
+**After this fix:** Automatic detection and string enum generation.
+
+#### Sum Types with Data - NOT Allowed
+
+Sum types with data in any variant cannot be used in structured output:
+
+```haskell
+-- ❌ Won't compile - has data
+data Result = Success Text | Failure Error
+  deriving (Generic, StructuredOutput)
+```
+
+**Fix options** (shown in error message):
+1. **Use tagged record:**
+   ```haskell
+   data Result = Result { tag :: ResultTag, details :: Text }
+   data ResultTag = Success | Failure
+   ```
+
+2. **Use separate Maybe fields:**
+   ```haskell
+   data Result = Result
+     { success :: Maybe Text
+     , failure :: Maybe Error
+     }
+   ```
+
+3. **Use an enum if appropriate:**
+   ```haskell
+   data ResultTag = Success | Failure  -- No data
+     deriving (Generic, StructuredOutput)
+   ```
+
+#### Maybe is Allowed (Special Case)
+
+Even though `Maybe` is technically a sum type (`Nothing | Just a`), it has a well-defined JSON encoding (`null | value`) that Anthropic supports:
+
+```haskell
+-- ✅ Maybe is explicitly allowed
+data Output = Output { priority :: Maybe Priority }
+  deriving (Generic, StructuredOutput)
+```
+
+#### Error Message
+
+When you try to use a sum type with data in structured output, you get:
+
+```
+═══════════════════════════════════════════════════════════════════
+  Schema error for structured output type: Choice
+═══════════════════════════════════════════════════════════════════
+
+Anthropic's structured output does not support 'oneOf' schemas.
+This type uses a sum type or union that generates oneOf.
+
+Fix options:
+  1. Use a tagged record: data MyChoice = MyChoice { tag :: Tag, ... }
+  2. Use separate fields: data Output = Output { optionA :: Maybe A, optionB :: Maybe B }
+  3. Use an enum if choices are simple strings
+```
+
+#### Benefits
+
+- ✅ **Compile-time errors** instead of cryptic runtime failures
+- ✅ **Efficient schemas** for enums: `{"enum": ["Low", "High"]}` instead of oneOf
+- ✅ **Guaranteed Anthropic compatibility**
+- ✅ **Self-documenting code**: Type errors explain constraints
+
+> **References:**
+> - [Anthropic Structured Outputs Docs](https://docs.anthropic.com/en/docs/build-with-claude/tool-use#structured-outputs)
+> - [GitHub #4886: oneOf not supported](https://github.com/anthropics/claude-code/issues/4886)
+> - **Source**: `tidepool-core/src/Tidepool/Schema.hs`, `tidepool-core/src/Tidepool/StructuredOutput/Generic.hs`
+
 ## Mermaid.hs - Diagram Generation
 
 Generate Mermaid diagrams from graph types:

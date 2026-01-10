@@ -118,9 +118,11 @@ enum SessionCommands {
 
 fn main() {
     // Initialize tracing with env filter (RUST_LOG)
+    // IMPORTANT: Output to stderr to avoid corrupting JSON on stdout
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())
         .with_target(false)
+        .with_writer(std::io::stderr)
         .init();
 
     let cli = Cli::parse();

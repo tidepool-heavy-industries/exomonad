@@ -51,6 +51,8 @@ import Data.Maybe (catMaybes)
 import Data.Aeson (Value(..), object, (.=))
 import Data.Kind (Constraint)
 import qualified Data.Kind as K
+import Data.Type.Bool (type (&&))
+import GHC.Generics (Generic, Rep, (:+:), (:*:), M1, D, C, S, K1, R, U1, V1)
 import GHC.TypeLits (TypeError, ErrorMessage(..))
 import Language.Haskell.TH
 
@@ -385,6 +387,72 @@ class UsesOneOf a
 -- 'HasUsesOneOf' type family interprets as 'False via 'IfStuck'.
 type family IsMarkedOneOf (a :: K.Type) :: Bool
 
+-- | Check if a type's Generic representation is a sum type (multiple constructors).
+--
+-- This family inspects the Generic representation via 'Rep' to determine if a concrete
+-- type is a sum type. For example:
+--
+-- @
+-- data Choice = OptionA Text | OptionB Int  -- Sum type
+-- HasSumRep Choice = IsSumRep (Rep Choice) = 'True
+--
+-- data Record = Record { field :: Text }    -- Single constructor
+-- HasSumRep Record = IsSumRep (Rep Record) = 'False
+-- @
+type family HasSumRep (t :: K.Type) :: Bool where
+  -- Special case: Maybe is allowed (has standard JSON encoding: null | value)
+  HasSumRep (Maybe a) = 'False
+  -- Default: check Generic representation
+  HasSumRep t = IsSumRep (Rep t)
+
+-- | Inspect Generic representation for sum types.
+--
+-- This closed type family pattern matches on the Generic representation structure
+-- to detect the presence of ':+:' (sum type constructor).
+type family IsSumRep (rep :: K.Type -> K.Type) :: Bool where
+  -- Sum type detected! (:+:) is GHC.Generics' sum type constructor
+  IsSumRep (l :+: r) = 'True
+
+  -- Unwrap metadata layers
+  IsSumRep (M1 D meta f) = IsSumRep f  -- Datatype wrapper
+  IsSumRep (M1 C meta f) = 'False      -- Single constructor (not a sum)
+  IsSumRep (M1 S meta f) = IsSumRep f  -- Selector wrapper
+
+  -- Product types (records with multiple fields)
+  IsSumRep (l :*: r) = 'False
+
+  -- Base cases
+  IsSumRep (K1 i c) = 'False   -- Field type
+  IsSumRep U1 = 'False          -- Empty constructor (no fields)
+  IsSumRep V1 = 'False          -- Void (no constructors)
+
+-- | Check if a sum type is nullary (all constructors have no fields).
+--
+-- Nullary sum types are enums like @data Priority = Low | Medium | High@.
+-- These are special-cased to generate string enums instead of oneOf schemas.
+type family IsNullarySum (t :: K.Type) :: Bool where
+  IsNullarySum t = IsNullarySumRep (Rep t)
+
+-- | Inspect Generic representation to determine if all constructors are nullary.
+--
+-- A constructor is nullary if it has no fields (represented by U1 in Generic rep).
+type family IsNullarySumRep (rep :: K.Type -> K.Type) :: Bool where
+  -- Check both sides of sum - both must be nullary
+  IsNullarySumRep (l :+: r) = IsNullarySumRep l && IsNullarySumRep r
+
+  -- Unwrap metadata
+  IsNullarySumRep (M1 i meta f) = IsNullarySumRep f
+
+  -- Constructor with no fields = nullary (this is what we want)
+  IsNullarySumRep U1 = 'True
+
+  -- Constructor with fields = not nullary
+  IsNullarySumRep (l :*: r) = 'False  -- Product (has fields)
+  IsNullarySumRep (K1 i c) = 'False   -- Field type (has data)
+
+  -- Fallback
+  IsNullarySumRep _ = 'False
+
 -- | Marker class for types whose JSON schema uses enum.
 --
 -- Automatically derived by 'deriveHasJSONSchema' when the type is an enum
@@ -447,25 +515,70 @@ type ValidStructuredOutput t = ValidInContext 'StructuredOutputCtx t
 
 -- | Implementation of structured output validation.
 --
--- Checks that the type doesn't use oneOf (sum types).
--- Uses CheckNotMarkedOneOf to avoid evaluating TypeError when the marker is unknown.
+-- This validates that types used in Anthropic structured outputs do not contain
+-- sum types with data (which generate oneOf schemas). The validation:
+--
+-- 1. Checks if the type itself is a non-nullary sum (direct sum type with data)
+-- 2. Recursively validates all field types (catches nested sum types)
+--
+-- Nullary enums (e.g., @data Priority = Low | High@) are allowed and generate
+-- string enums. Maybe is explicitly allowed (special-cased below).
 type family ValidStructuredOutputImpl (t :: K.Type) :: Constraint where
-  ValidStructuredOutputImpl t = CheckNotMarkedOneOf (IsMarkedOneOf t) t
+  -- Check both: the type itself is not a non-nullary sum, AND all fields are valid
+  ValidStructuredOutputImpl t =
+    ( CheckNotNonNullarySum (HasSumRep t) (IsNullarySum t) t
+    , CheckFieldsValid (Rep t)
+    )
 
--- | Check that a type is not marked as oneOf.
--- Only pattern matches on 'True to emit error; 'False and stuck types pass through.
-type family CheckNotMarkedOneOf (isMarked :: Bool) (t :: K.Type) :: Constraint where
-  CheckNotMarkedOneOf 'True t = TypeError
-    ('Text "Schema error for structured output type: " ':<>: 'ShowType t
-     ':$$: 'Text ""
-     ':$$: 'Text "Anthropic's structured output does not support 'oneOf' schemas."
-     ':$$: 'Text "This type uses a sum type or union that generates oneOf."
-     ':$$: 'Text ""
-     ':$$: 'Text "Fix options:"
-     ':$$: 'Text "  1. Use a tagged record: data MyChoice = MyChoice { tag :: Tag, ... }"
-     ':$$: 'Text "  2. Use separate fields: data Output = Output { optionA :: Maybe A, optionB :: Maybe B }"
-     ':$$: 'Text "  3. Use an enum if choices are simple strings")
-  CheckNotMarkedOneOf 'False _ = ()
+-- | Reject sum types with data (allow nullary enums).
+--
+-- This type family implements the core validation logic:
+-- - Non-sum types → OK
+-- - Nullary sum types (enums) → OK (generate string enums)
+-- - Sum types with data → ERROR (would generate oneOf)
+type family CheckNotNonNullarySum (hasSum :: Bool) (isNullary :: Bool) (t :: K.Type) :: Constraint where
+  -- Not a sum type → OK
+  CheckNotNonNullarySum 'False _ _ = ()
+
+  -- Sum type but nullary (enum) → OK (generates string enum)
+  CheckNotNonNullarySum 'True 'True _ = ()
+
+  -- Sum type with data → ERROR!
+  CheckNotNonNullarySum 'True 'False t = TypeError
+    ( 'Text "═══════════════════════════════════════════════════════════"
+      ':$$: 'Text "  Schema error for structured output type: " ':<>: 'ShowType t
+      ':$$: 'Text "═══════════════════════════════════════════════════════"
+      ':$$: 'Text ""
+      ':$$: 'Text "Anthropic's structured output does not support 'oneOf' schemas."
+      ':$$: 'Text "This type uses a sum type with data, which generates oneOf."
+      ':$$: 'Text ""
+      ':$$: 'Text "Fix options:"
+      ':$$: 'Text "  1. Use a tagged record: data MyChoice = MyChoice { tag :: Tag, ... }"
+      ':$$: 'Text "  2. Use separate fields: data Output = Output { optionA :: Maybe A, ... }"
+      ':$$: 'Text "  3. Convert to enum: remove data from all variants"
+      ':$$: 'Text ""
+      ':$$: 'Text "Note: Nullary enums (no data) are OK and auto-generate string enums."
+    )
+
+-- | Recursively validate field types.
+--
+-- This type family walks the Generic representation of a type and validates
+-- all field types by calling ValidStructuredOutputImpl recursively. This ensures
+-- that nested sum types are caught.
+type family CheckFieldsValid (rep :: K.Type -> K.Type) :: Constraint where
+  -- Product (record fields) - check both sides
+  CheckFieldsValid (l :*: r) = (CheckFieldsValid l, CheckFieldsValid r)
+
+  -- Field with type t - validate it recursively
+  CheckFieldsValid (K1 R t) = ValidStructuredOutputImpl t
+
+  -- Unwrap metadata
+  CheckFieldsValid (M1 i meta f) = CheckFieldsValid f
+
+  -- Base cases (no validation needed)
+  CheckFieldsValid U1 = ()
+  CheckFieldsValid V1 = ()
+  CheckFieldsValid (l :+: r) = ()  -- Sum types checked at top level
 
 -- | Type-level conditional.
 type If :: Bool -> Constraint -> Constraint -> Constraint

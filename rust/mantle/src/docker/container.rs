@@ -4,10 +4,9 @@
 //! Stream-json output is parsed on the host side.
 
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use tracing::{debug, info, warn};
 
 use crate::stream_parser::StreamParser;
 use mantle_shared::events::RunResult;
@@ -27,6 +26,53 @@ pub enum DockerError {
 }
 
 pub type Result<T> = std::result::Result<T, DockerError>;
+
+/// Per-session logger that writes timestamped logs to `.mantle/logs/{session_id}.log`.
+///
+/// Captures all mantle operations, Claude Code stderr, and stream-json events in chronological order.
+struct SessionLogger {
+    file: BufWriter<std::fs::File>,
+}
+
+impl SessionLogger {
+    /// Create a new session logger.
+    ///
+    /// Creates `.mantle/logs/` directory if it doesn't exist.
+    fn new(session_id: &str) -> Result<Self> {
+        let log_dir = PathBuf::from(".mantle/logs");
+        std::fs::create_dir_all(&log_dir)
+            .map_err(|e| DockerError::OutputRead(format!("Failed to create log directory: {}", e)))?;
+
+        let log_path = log_dir.join(format!("{}.log", session_id));
+
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)
+            .map_err(|e| DockerError::OutputRead(format!("Failed to open log file: {}", e)))?;
+
+        Ok(Self {
+            file: BufWriter::new(file),
+        })
+    }
+
+    /// Log a message with timestamp and tag.
+    ///
+    /// Format: `[2026-01-10 15:23:41.123] [TAG] message`
+    ///
+    /// Writes to both the log file and stderr for real-time visibility.
+    fn log(&mut self, tag: &str, message: &str) {
+        let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
+        let line = format!("[{}] [{}] {}\n", timestamp, tag, message);
+
+        // Write to file
+        let _ = self.file.write_all(line.as_bytes());
+        let _ = self.file.flush();
+
+        // Also write to stderr for real-time visibility
+        eprint!("{}", line);
+    }
+}
 
 /// Configuration for a container instance.
 #[derive(Debug, Clone)]
@@ -113,12 +159,11 @@ impl ContainerConfig {
 pub fn run_claude_direct(config: &ContainerConfig) -> Result<RunResult> {
     let container_name = config.container_name();
 
-    info!(
-        container_name = %container_name,
-        image = %config.image,
-        session_id = %config.session_id,
-        "Starting container"
-    );
+    // Create session logger for file-based logging
+    let mut logger = SessionLogger::new(&config.session_id)?;
+    logger.log("MANTLE", &format!("Starting container {}", container_name));
+    logger.log("MANTLE", &format!("Image: {}", config.image));
+    logger.log("MANTLE", &format!("Worktree: {}", config.worktree_path.display()));
 
     let mut cmd = Command::new("docker");
     cmd.arg("run")
@@ -161,39 +206,82 @@ pub fn run_claude_direct(config: &ContainerConfig) -> Result<RunResult> {
     cmd.arg("claude");
     cmd.args(&config.claude_args);
 
-    debug!(command = ?cmd, "Spawning docker run");
+    logger.log("MANTLE", &format!("Docker command: {:?}", cmd));
 
-    // Pipe stdout to parse stream-json, inherit stderr for Docker messages
+    // Pipe both stdout (for stream-json) and stderr (for logging)
     cmd.stdout(Stdio::piped());
-    cmd.stderr(Stdio::inherit());
+    cmd.stderr(Stdio::piped());
 
     let mut child = cmd.spawn().map_err(DockerError::Spawn)?;
     let stdout = child
         .stdout
         .take()
         .ok_or_else(|| DockerError::OutputRead("Failed to capture stdout".to_string()))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| DockerError::OutputRead("Failed to capture stderr".to_string()))?;
 
-    // Parse stream-json output
+    // Spawn thread to capture Claude's stderr to log file
+    let session_id = config.session_id.clone();
+    std::thread::spawn(move || {
+        let mut stderr_logger = SessionLogger::new(&session_id).ok()?;
+        let reader = BufReader::new(stderr);
+        for line in reader.lines().flatten() {
+            stderr_logger.log("CLAUDE", &line);
+        }
+        Some(())
+    });
+
+    // Parse stream-json output with detailed logging
     let mut parser = StreamParser::new();
     let reader = BufReader::new(stdout);
+    let mut turn_count = 0;
+    let mut tool_use_count = 0;
 
     for line_result in reader.lines() {
         match line_result {
             Ok(line) => {
                 if let Some(event) = parser.process_line(&line) {
+                    // Log raw event
+                    if let Ok(json) = serde_json::to_string(&event) {
+                        logger.log("EVENT", &json);
+                    }
+
+                    // Track turn count from assistant events
+                    if let mantle_shared::events::StreamEvent::Assistant(ref a) = event {
+                        for block in &a.message.content {
+                            if let mantle_shared::events::ContentBlock::ToolUse { name, .. } = block {
+                                tool_use_count += 1;
+                                logger.log("MANTLE", &format!("Turn {} - Tool: {}", turn_count, name));
+                            }
+                        }
+                        turn_count += 1;
+
+                        // Log turn milestones
+                        if turn_count % 10 == 0 {
+                            logger.log("MANTLE", &format!("Turn {} milestone ({} tools used)", turn_count, tool_use_count));
+                        }
+                        if turn_count >= 100 {
+                            logger.log("MANTLE", &format!("⚠️  EXCESSIVE TURNS: {} (possible infinite loop)", turn_count));
+                        }
+                    }
+
                     // Print humanized output to stderr for visibility
                     eprint_event_humanized(&event);
                 } else if !line.is_empty() {
-                    // Failed to parse as JSON - print raw line to stderr
-                    eprintln!("{}", line);
+                    // Failed to parse as JSON - log raw line
+                    logger.log("UNKNOWN", &line);
                 }
             }
             Err(e) => {
-                warn!(error = %e, "Error reading stream-json line");
+                logger.log("ERROR", &format!("Error reading stream-json line: {}", e));
                 break;
             }
         }
     }
+
+    logger.log("MANTLE", &format!("Stream parsing complete: {} turns, {} tools", turn_count, tool_use_count));
 
     // Wait for container to exit
     let status = child.wait().map_err(|e| {
@@ -202,27 +290,41 @@ pub fn run_claude_direct(config: &ContainerConfig) -> Result<RunResult> {
 
     let exit_code = status.code().unwrap_or(-1);
 
-    info!(
-        container_name = %container_name,
-        exit_code = %exit_code,
-        "Container exited"
-    );
+    logger.log("MANTLE", &format!(
+        "Container exited: exit_code={}, turns={}, tools={}",
+        exit_code, turn_count, tool_use_count
+    ));
 
     // Check for missing result event (known Claude bug #1920)
     let has_result = parser.has_result();
     if !has_result {
-        warn!("No result event received from Claude (possible bug #1920)");
+        logger.log("WARNING", "No result event received from Claude (possible bug #1920)");
     }
 
     // Build result from parsed events
     let result = parser.build_result(exit_code, Some(config.session_id.clone()));
 
+    // Save event stream to debug file if turn count is suspiciously high
+    if turn_count > 50 || exit_code != 0 {
+        let debug_path = format!(".mantle/debug/{}.events.json", config.session_id);
+        if let Some(parent) = std::path::Path::new(&debug_path).parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Ok(json) = serde_json::to_string_pretty(&result.events) {
+            if let Err(e) = std::fs::write(&debug_path, json) {
+                logger.log("WARNING", &format!("Failed to write debug events to {}: {}", debug_path, e));
+            } else {
+                logger.log("MANTLE", &format!("Saved debug event stream: {} ({} events)", debug_path, result.events.len()));
+            }
+        }
+    }
+
     // Debug log structured output presence
     if result.structured_output.is_some() {
-        info!("Structured output received ({} bytes)",
-              serde_json::to_string(&result.structured_output).unwrap_or_default().len());
+        let size = serde_json::to_string(&result.structured_output).unwrap_or_default().len();
+        logger.log("MANTLE", &format!("Structured output received ({} bytes)", size));
     } else {
-        warn!("No structured output in result. Full result: {:?}", result);
+        logger.log("WARNING", &format!("No structured output in result: {:?}", result));
     }
 
     Ok(result)

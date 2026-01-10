@@ -330,7 +330,7 @@ main = do
   let stackSpec = buildStackSpec targetDir
       worktreeConfig = defaultWorktreeConfig cwd
       sessionConfig = (defaultSessionConfig cwd)
-        { scMantlePath = cwd <> "/rust/target/release/mantle"
+        { scMantlePath = cwd <> "/../rust/target/release/mantle"
         }
 
   putStrLn "Configuration:"

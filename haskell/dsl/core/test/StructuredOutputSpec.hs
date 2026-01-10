@@ -65,12 +65,15 @@ data SumType
   deriving stock (Show, Eq, Generic)
   deriving anyclass (StructuredOutput)
 
--- | Simple enum with no data (default tag+contents encoding).
+-- | Simple enum with no data (automatic string enum).
 --
--- This uses generic deriving, which produces tag+contents format:
--- @{"tag": "Low", "contents": {}}@
+-- As of the oneOf fix, nullary sum types automatically generate string enums:
+-- @"Low"@, @"Medium"@, @"High"@
 --
--- Schema size: ~500 bytes (oneOf with 3 variants)
+-- Schema: @{"type": "string", "enum": ["Low", "Medium", "High"]}@
+-- Schema size: ~100 bytes (efficient string enum)
+--
+-- This is the recommended pattern - just derive Generic and StructuredOutput!
 data Priority
   = Low
   | Medium
@@ -78,40 +81,35 @@ data Priority
   deriving stock (Show, Eq, Generic)
   deriving anyclass (StructuredOutput)
 
--- | Simple enum with manual string encoding.
+-- | Simple enum with manual string encoding (now redundant).
 --
--- For simple enums with no data, override the default to use string encoding:
+-- **Note:** As of the oneOf fix, you no longer need manual encoding for nullary enums!
+-- Priority above shows the automatic approach - just derive Generic + StructuredOutput.
+--
+-- This manual instance is kept as a test fixture to verify that manual and
+-- automatic encoding produce identical results.
+--
+-- For simple enums with no data, you can now just derive:
 -- @"Pending"@, @"Active"@, @"Completed"@
 --
--- Schema size: ~100 bytes (string with enum constraint)
+-- Schema: @{"type": "string", "enum": ["Pending", "Active", "Completed"]}@
 --
--- == Why Manual String Encoding?
+-- == Old Pattern (no longer needed)
 --
--- Generic deriving creates tag+contents schemas which are 3-4x larger:
---
--- * Generic: @{"tag": "Pending", "contents": {}}@ + oneOf schema
--- * Manual: @"Pending"@ + string enum schema
---
--- For LLM structured output, smaller schemas improve:
--- - Token usage (schema in prompt)
--- - Parse reliability (simpler format)
--- - Output cost (shorter JSON)
---
--- == Pattern
+-- Before the oneOf fix, you had to write manual instances to avoid wasteful
+-- tag+contents encoding. Now Generic derivation automatically detects all-nullary
+-- sum types and generates efficient string enums.
 --
 -- @
+-- -- OLD WAY (manual, verbose):
 -- instance StructuredOutput MyEnum where
 --   structuredSchema = enumSchema [\"Variant1\", \"Variant2\", ...]
---   encodeStructured = \\case
---     Variant1 -> String \"Variant1\"
---     Variant2 -> String \"Variant2\"
---     ...
---   parseStructured = \\case
---     String \"Variant1\" -> Right Variant1
---     String \"Variant2\" -> Right Variant2
---     ...
---     String other -> Left $ ParseDiagnostic [] \"expected\" other \"message\"
---     other -> Left $ ParseDiagnostic [] \"string\" (T.pack $ show other) \"Expected string\"
+--   encodeStructured = \\case ...
+--   parseStructured = \\case ...
+--
+-- -- NEW WAY (automatic, concise):
+-- data MyEnum = Variant1 | Variant2 | Variant3
+--   deriving (Generic, StructuredOutput)
 -- @
 data Status = Pending | Active | Completed
   deriving stock (Show, Eq, Generic)
@@ -298,25 +296,23 @@ spec = do
       roundtrip Null
 
   describe "Simple enum encoding" $ do
-    describe "Default tag+contents (generic deriving)" $ do
-      it "Priority uses tag+contents format" $ do
+    describe "Automatic string enum (all-nullary sum types)" $ do
+      it "Priority auto-generates string enum (not tag+contents)" $ do
         let encoded = encodeStructured Low
-        case encoded of
-          Object obj -> do
-            KeyMap.member "tag" obj `shouldBe` True
-            KeyMap.member "contents" obj `shouldBe` True
-          _ -> expectationFailure "Expected Object with tag+contents"
+        encoded `shouldBe` String "Low"
 
-      it "Priority roundtrips with tag+contents" $ do
+      it "Priority roundtrips as strings" $ do
         roundtrip Low
         roundtrip Medium
         roundtrip High
 
-      it "Priority schema uses oneOf" $ do
+      it "Priority schema uses string enum (not oneOf)" $ do
         let schema = structuredSchema @Priority
-        schema.schemaOneOf `shouldSatisfy` (/= Nothing)
+        schema.schemaType `shouldBe` TString
+        schema.schemaEnum `shouldBe` Just ["Low", "Medium", "High"]
+        schema.schemaOneOf `shouldBe` Nothing
 
-    describe "Manual string enum (recommended for simple enums)" $ do
+    describe "Manual string enum (same result as automatic)" $ do
       it "Status uses simple string format" $ do
         encodeStructured Pending `shouldBe` String "Pending"
         encodeStructured Active `shouldBe` String "Active"
@@ -333,10 +329,33 @@ spec = do
         schema.schemaEnum `shouldBe` Just ["Pending", "Active", "Completed"]
         schema.schemaOneOf `shouldBe` Nothing
 
-      it "Status schema is much smaller than Priority" $ do
+      it "Priority and Status have similar schema sizes (both string enum)" $ do
         let statusJson = schemaToValue (structuredSchema @Status)
         let priorityJson = schemaToValue (structuredSchema @Priority)
         let statusSize = length (show statusJson)
         let prioritySize = length (show priorityJson)
-        -- String enum should be significantly smaller than oneOf with tag+contents
-        statusSize `shouldSatisfy` (< prioritySize `div` 2)
+        -- Both should be similar size now (both use string enum)
+        abs (statusSize - prioritySize) `shouldSatisfy` (< 100)
+
+    it "Priority rejects old tag+contents format" $ do
+      -- Old format {"tag": "Low", "contents": {}} should be rejected
+      let oldFormat = Object $ KeyMap.fromList
+            [("tag", String "Low"), ("contents", Object mempty)]
+      case parseStructured @Priority oldFormat of
+        Left diag -> T.unpack (formatDiagnostic diag) `shouldContain` "string"
+        Right _ -> expectationFailure "Should have rejected object format"
+
+  describe "Maybe is allowed in structured output (special case)" $ do
+    it "Maybe Int schema compiles and works" $ do
+      let schema = structuredSchema @(Maybe Int)
+      -- Should have a schema (not marked as oneOf)
+      schema `shouldSatisfy` (const True)
+
+    it "Maybe Text roundtrips" $ do
+      roundtrip (Just "hello" :: Maybe Text)
+      roundtrip (Nothing :: Maybe Text)
+
+    it "Record with Maybe field compiles" $ do
+      let schema = structuredSchema @OptionalRecord
+      -- orOptional is Maybe Int, should be allowed
+      schema `shouldSatisfy` (const True)

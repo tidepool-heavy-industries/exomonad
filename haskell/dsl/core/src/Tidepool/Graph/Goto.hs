@@ -99,7 +99,7 @@ import Text.Ginger.TH (TypedTemplate)
 import Text.Parsec.Pos (SourcePos)
 
 import Tidepool.Graph.Types (Exit, Self, Arrive(..), ModelChoice(..), SingModelChoice(..), HList(..))
-import Tidepool.Effect.Session (SessionId)
+import Tidepool.Effect.Session (SessionId, SessionOperation(..))
 
 -- Import from Internal (re-exports types, we hide constructors in this module's exports)
 import Tidepool.Graph.Goto.Internal (OneOf(..), GotoChoice(..), GotoAll(..), To, Payloads, PayloadOf)
@@ -513,6 +513,15 @@ data ClaudeCodeResult schema = ClaudeCodeResult
 -- The model is compile-time validated through a type parameter that must match
 -- the node's ClaudeCode annotation.
 --
+-- = Session Management
+--
+-- The before handler returns both template context AND a session strategy:
+-- - 'StartFresh slug' - Create new session
+-- - 'ContinueFrom sid' - Resume existing session
+-- - 'ForkFrom parent slug' - Read-only fork from parent
+--
+-- The after handler receives both the parsed output AND the session ID used/created.
+--
 -- = Usage
 --
 -- @
@@ -526,8 +535,12 @@ data ClaudeCodeResult schema = ClaudeCodeResult
 -- gWork = ClaudeCodeLLMHandler @'Sonnet
 --   Nothing                              -- no system template
 --   (templateCompiled @WorkTpl)          -- user template
---   (\\task -> pure WorkContext { ... })  -- context builder
---   (\\ccResult -> pure $ gotoExit ccResult.ccrParsedOutput)  -- router receives ClaudeCodeResult
+--   (\\task -> do                         -- context builder + session strategy
+--      let ctx = WorkContext { ... }
+--      pure (ctx, StartFresh \"work-session\"))
+--   (\\(ccResult, sid) -> do              -- router receives output + session ID
+--      registerSession sid
+--      pure $ gotoExit ccResult.ccrParsedOutput)
 -- @
 --
 -- Note: The @model@ type parameter MUST match the ClaudeCode annotation.
@@ -539,6 +552,6 @@ data ClaudeCodeLLMHandler model needs schema targets effs tpl where
        SingModelChoice model
     => Maybe (TypedTemplate tpl SourcePos)                    -- ^ Optional system prompt template
     -> TypedTemplate tpl SourcePos                            -- ^ User prompt template (required)
-    -> (needs -> Eff effs tpl)                                -- ^ Builds context for both templates
-    -> (ClaudeCodeResult schema -> Eff effs (GotoChoice targets))  -- ^ Routes based on LLM output + session metadata
+    -> (needs -> Eff effs (tpl, SessionOperation))            -- ^ Builds context AND session strategy
+    -> ((ClaudeCodeResult schema, SessionId) -> Eff effs (GotoChoice targets))  -- ^ Routes with output AND session ID
     -> ClaudeCodeLLMHandler model needs schema targets effs tpl
