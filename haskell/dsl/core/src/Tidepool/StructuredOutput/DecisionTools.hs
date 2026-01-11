@@ -53,7 +53,7 @@ module Tidepool.StructuredOutput.DecisionTools
 import Data.Aeson (FromJSON(..), ToJSON(..), Value(..), object, (.=), (.:))
 import Data.Aeson qualified as Aeson
 import Data.Bifunctor (first)
-import Data.Char (toLower)
+import Data.Char (isUpper, toLower)
 import Data.Kind (Type)
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -253,7 +253,7 @@ camelToSnake = go True
   where
     go _ [] = []
     go isFirst (c:cs)
-      | c >= 'A' && c <= 'Z' =
+      | isUpper c =
           let lower = toLower c
           in if isFirst
              then lower : go False cs

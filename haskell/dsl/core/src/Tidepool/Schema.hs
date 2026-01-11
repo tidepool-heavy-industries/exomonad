@@ -41,6 +41,10 @@ module Tidepool.Schema
 
     -- * Conversion
   , schemaToValue
+
+    -- * Type-Level Sum Detection (for ClaudeCodeSchema)
+  , HasSumRep
+  , IsNullarySum
   ) where
 
 import Data.Text (Text)

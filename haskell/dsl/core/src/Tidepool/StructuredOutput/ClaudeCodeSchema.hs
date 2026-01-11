@@ -123,7 +123,7 @@ class StructuredOutput a => ClaudeCodeSchema a where
   --
   -- Default: Returns error (tool calls not expected)
   ccParseToolCall :: DT.ToolCall -> Either String a
-  ccParseToolCall tc = Left $ "Unexpected tool call: " <> show (DT.tcName tc)
+  ccParseToolCall tc = Left $ "Unexpected tool call: " <> show tc.tcName
     <> " (this type does not use decision tools)"
 
   -- | Parse from structured output JSON.
