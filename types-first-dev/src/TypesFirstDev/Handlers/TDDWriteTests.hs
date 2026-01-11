@@ -16,8 +16,7 @@ import qualified Data.Text as T
 
 import Control.Monad.Freer (Eff, Member)
 import Tidepool.Effect.Session (Session, SessionOperation(..), SessionId)
-import Tidepool.Graph.Goto (To, GotoChoice, gotoChoice, gotoExit, gotoArrive)
-import Tidepool.Graph.Types (Arrive)
+import Tidepool.Graph.Goto (To, GotoChoice, gotoChoice)
 import Tidepool.Graph.Memory (Memory, getMem, updateMem)
 
 import TypesFirstDev.Context (TDDWriteTestsTemplateCtx(..))
@@ -47,10 +46,13 @@ tddWriteTestsBefore input = do
   pure (ctx, StartFresh "v3/tdd-write-tests")
 
 -- | After handler: route based on exit type.
+--
+-- Linear flow: TDDWriteTests → ImplBarrier (via Goto, not Arrive).
+-- ImplBarrier is now a LogicNode, not a BarrierNode.
 tddWriteTestsAfter
   :: (Member Session es, Member (Memory TDDMem) es)
   => (TDDWriteTestsExit, SessionId)
-  -> Eff es (GotoChoice '[To (Arrive "v3ImplBarrier") TestsReadyPayload, To "v3Scaffold" ScaffoldInput])
+  -> Eff es (GotoChoice '[To "v3ImplBarrier" TestsReadyPayload, To "v3Scaffold" ScaffoldInput])
 tddWriteTestsAfter (exit, sid) = do
   updateMem @TDDMem $ \m -> m { tmConversationId = T.pack (show sid) }
   case exit of
@@ -60,7 +62,7 @@ tddWriteTestsAfter (exit, sid) = do
             , trpTestFiles = files
             , trpPendingCriteria = criteria
             }
-      pure $ gotoArrive @"v3ImplBarrier" payload
+      pure $ gotoChoice @"v3ImplBarrier" payload
 
     TDDInvalidScaffold _missing _location ->
       -- Route back to Scaffold for clarification

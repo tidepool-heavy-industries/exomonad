@@ -2,16 +2,16 @@
 
 -- | V3 TDD Runner
 --
--- Orchestrates the complete V3 TDD protocol:
--- 1. Loads YAML specification
--- 2. Initializes effect state (memory, worktree)
--- 3. Spawns root graph with deferred child spawning
--- 4. Returns merged work result
+-- Executes the V3 TDD graph using direct handler chaining.
+-- This bypasses the generic dispatch mechanism that requires HasField
+-- (which GHC can't derive for records with type-family-computed fields).
+--
+-- Flow: Scaffold → TDDWriteTests → ImplBarrier → Impl → ... → MergeComplete
 module Main (main) where
 
-import Control.Concurrent.STM (newTVarIO)
 import Control.Monad (unless)
-import Data.Text (Text, pack)
+import Control.Concurrent.STM (newTVarIO)
+import Data.Text (Text)
 import Data.Yaml (decodeFileThrow)
 import System.Environment (getArgs)
 import System.Directory (getCurrentDirectory, doesFileExist)
@@ -19,20 +19,16 @@ import System.IO (hFlush, stdout)
 import System.Exit (exitFailure)
 import Text.Printf (printf)
 
-import Control.Monad.Freer (Eff)
-
 import Tidepool.Actor.Subgraph (withRecursiveGraph)
-import Tidepool.Graph.Execute (runGraph)
 
-import TypesFirstDev.Handlers.Scaffold (ScaffoldInput(..))
-import TypesFirstDev.Types.Core (Spec)
+import TypesFirstDev.Types.Core (Spec(..))
+import TypesFirstDev.Types.Nodes (ScaffoldInput(..))
 import TypesFirstDev.Types.Payloads (MergeComplete(..))
-import TypesFirstDev.Types.Shared (ImpactLevel(..))
-import TypesFirstDev.Types.Memory (TDDMem(..), ImplMem(..), emptyTDDMem, emptyImplMem)
-import TypesFirstDev.V3.Interpreters (runV3Effects, WorktreeConfig(..), V3Effects)
-import TypesFirstDev.HandlersAssembled (v3Handlers)
+import TypesFirstDev.Types.Memory (emptyTDDMem, emptyImplMem)
+import TypesFirstDev.V3.Interpreters (runV3Effects, WorktreeConfig(..))
+import TypesFirstDev.Executor (runV3)
 
--- | Application-level result type (more detailed than V3Result)
+-- | Application-level result type
 data RunnerResult = RunnerSuccess MergeComplete | RunnerFailure Text
 
 -- | Print banner
@@ -60,52 +56,38 @@ printResult result = do
       putStrLn "✗ TDD Failed"
       printf "  Reason: %s\n" (show reason)
 
--- | Run a full V3 TDD graph from a Spec.
---
--- This is the main orchestration function. It:
--- 1. Creates a recursive subgraph with deferred binding
--- 2. Initializes memory (TVars)
--- 3. Wires the graph runner (CRITICAL: before running)
--- 4. Executes root graph
--- 5. Returns final result
-runV3Graph :: Spec -> WorktreeConfig -> IO RunnerResult
-runV3Graph spec wtConfig =
-  -- Step 1: Create deferred subgraph state
+-- | Run the V3 graph with full effect interpreter chain.
+runV3Graph :: Spec -> WorktreeConfig -> IO MergeComplete
+runV3Graph spec wtConfig = do
+  -- Initialize memory TVars
+  tddMem <- newTVarIO (emptyTDDMem "root")
+  implMem <- newTVarIO (emptyImplMem "root")
+
+  -- Set up Subgraph with recursive wiring
   withRecursiveGraph @Spec @MergeComplete $ \subgraphState wire -> do
-    -- Step 2: Initialize shared memory
-    tddMem <- newTVarIO $ emptyTDDMem "root-conversation"
-    implMem <- newTVarIO $ emptyImplMem "root-conversation"
+    -- Wire the recursive graph runner
+    wire $ \childSpec -> do
+      -- Recursive child execution
+      let childInput = ScaffoldInput { siSpec = childSpec, siParentContext = Nothing }
+      runV3Effects subgraphState tddMem implMem wtConfig (runV3 childInput)
 
-    -- Step 3: Create effect interpreter (captures subgraphState, memory, config)
-    let interpret :: forall a. Eff V3Effects a -> IO a
-        interpret = runV3Effects subgraphState tddMem implMem wtConfig
+    -- Build root input
+    let rootInput = ScaffoldInput { siSpec = spec, siParentContext = Nothing }
 
-    -- Step 4: WIRE THE RECURSION (MUST happen before running!)
-    -- This is the critical deferred binding that enables child graphs to spawn
-    --
-    -- NOTE: runGraph requires HasField instances for the handler record fields.
-    -- GHC can't derive HasField for records with type family-computed field types.
-    -- Phase 15 TODO: Either add manual HasField instances or use explicit dispatch.
-    wire $ \_childSpec -> pure $ error "Phase 15: Implement child graph runner"
-
-    -- Step 5: Run root graph
-    -- Phase 15 TODO: Wire runGraph execution once HasField issue is resolved
-    pure $ RunnerFailure "Phase 15: Implement root graph execution"
+    -- Execute the graph
+    runV3Effects subgraphState tddMem implMem wtConfig (runV3 rootInput)
 
 -- | Main entry point
 main :: IO ()
 main = do
-  -- Print banner
   putStr printBanner
   hFlush stdout
 
-  -- Parse CLI arguments
   args <- getArgs
   cwd <- getCurrentDirectory
 
   case args of
     [specFile] -> do
-      -- Check if file exists
       exists <- doesFileExist specFile
       unless exists $ do
         putStrLn $ "Error: Spec file not found: " <> specFile
@@ -113,26 +95,23 @@ main = do
 
       putStrLn $ "Loading spec: " <> specFile
 
-      -- Load YAML spec
-      spec <- decodeFileThrow specFile
+      -- Load and validate YAML spec
+      spec <- decodeFileThrow specFile :: IO Spec
 
-      -- Configure execution
+      putStrLn $ "  Description: " <> show (take 50 $ show spec) <> "..."
+      putStrLn ""
+      putStrLn "Executing V3 TDD graph..."
+      putStrLn ""
+
+      -- Set up worktree config
       let wtConfig = WorktreeConfig
             { wtcBaseDir = cwd
             , wtcParentBranch = "main"
             }
 
-      putStrLn ""
-      putStrLn "Starting V3 TDD cycle..."
-      putStrLn ""
-      hFlush stdout
-
       -- Run the graph
-      result <- runV3Graph spec wtConfig
-
-      -- Print results
-      putStrLn ""
-      printResult result
+      mergeResult <- runV3Graph spec wtConfig
+      printResult (RunnerSuccess mergeResult)
 
     _ -> do
       putStrLn "Usage: types-first-dev-runner <spec.yaml>"

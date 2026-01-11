@@ -3,7 +3,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 
--- | Scaffold node - analyzes spec, optionally spawns children, routes to Fork.
+-- | Scaffold node - analyzes spec, optionally spawns children, routes to TDDWriteTests.
 module TypesFirstDev.Handlers.Scaffold
   ( -- * Types
     ScaffoldInput(..)
@@ -13,8 +13,6 @@ module TypesFirstDev.Handlers.Scaffold
   , scaffoldAfter
   ) where
 
-import Control.Monad (forM_)
-
 import Control.Monad.Freer (Eff, Member)
 import Tidepool.Effect.Session (Session, SessionOperation(..), SessionId)
 import Tidepool.Effect.Subgraph (Subgraph, spawnSelf)
@@ -23,7 +21,7 @@ import Tidepool.Graph.Types (Exit)
 
 import TypesFirstDev.Context (ScaffoldTemplateCtx(..))
 import TypesFirstDev.Types.Core (Spec)
-import TypesFirstDev.Types.Nodes (ScaffoldInput(..), ScaffoldExit(..))
+import TypesFirstDev.Types.Nodes (ScaffoldInput(..), ScaffoldExit(..), TDDWriteTestsInput(..))
 import TypesFirstDev.Types.Payloads (InitWorkPayload(..), MergeComplete)
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -45,27 +43,33 @@ scaffoldBefore input = do
   -- Start fresh conversation for scaffold analysis
   pure (ctx, StartFresh "v3/scaffold")
 
--- | After handler: spawn children if decomposed, route to Fork.
+-- | After handler: spawn children if decomposed, route to TDDWriteTests.
 --
--- Returns tuple of (context, SessionOperation) for ClaudeCodeLLMHandler.
+-- Linear flow: Scaffold → TDDWriteTests (no Fork node).
+-- Child spawning happens here via Subgraph effect.
 scaffoldAfter
   :: (Member Session es, Member (Subgraph Spec MergeComplete) es)
   => (ScaffoldExit, SessionId)
-  -> Eff es (GotoChoice '[To "v3Fork" InitWorkPayload, To Exit ScaffoldExit])
+  -> Eff es (GotoChoice '[To "v3TDDWriteTests" TDDWriteTestsInput, To Exit ScaffoldExit])
 scaffoldAfter (exit, _sid) = case exit of
   ScaffoldInitWork { seCommit, seInterface, seContract, seTestPlan } -> do
-    -- TODO: Spawn child graphs if decomposed
-    -- For now, just route to Fork - child spawning will be implemented
-    -- in Phase 8 when we have the full runner context
+    -- TODO: Spawn child graphs if decomposed via spawnSelf
+    -- Children run asynchronously; ImplBarrier collects results
 
-    -- Route to Fork with InitWorkPayload
-    let payload = InitWorkPayload
+    -- Build InitWorkPayload for TDDWriteTests
+    let scaffold = InitWorkPayload
           { iwpScaffoldCommit = seCommit
           , iwpInterfaceFile = seInterface
           , iwpContractSuite = seContract
           , iwpTestPlan = seTestPlan
           }
-    pure $ gotoChoice @"v3Fork" payload
+
+    -- Route to TDDWriteTests with full input
+    let input = TDDWriteTestsInput
+          { twiSpec = error "TODO: Get spec from context"
+          , twiScaffold = scaffold
+          }
+    pure $ gotoChoice @"v3TDDWriteTests" input
 
   ScaffoldClarificationNeeded {} ->
     pure $ gotoExit exit

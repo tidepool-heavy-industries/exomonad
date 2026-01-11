@@ -4,8 +4,11 @@
 
 -- | Assembled handler record for V3 TDD graph.
 --
--- This module wires all 8 node handlers into a complete TDDGraph record
+-- This module wires all 7 node handlers into a complete TDDGraph record
 -- for execution via the effect interpreter stack.
+--
+-- Linear flow: Scaffold → TDDWriteTests → ImplBarrier → Impl → ...
+-- Child spawning/collection via Subgraph effect (not Fork/Barrier nodes).
 --
 -- Architecture:
 -- * Handlers declare effect constraints (Member Effect es)
@@ -43,13 +46,11 @@ import TypesFirstDev.Handlers.ImplReviewMerge
   )
 import TypesFirstDev.Handlers.Rebaser
   ( RebaserInput, RebaserExit, rebaserBefore, rebaserAfter )
-import TypesFirstDev.Handlers.Fork (forkHandler)
 import TypesFirstDev.Handlers.ImplBarrier (implBarrierHandler)
-import TypesFirstDev.Types.Payloads (InitWorkPayload, TestsReadyPayload, MergeComplete)
 
 -- | Wired handler graph for V3 TDD protocol.
 --
--- All 8 node handlers are wired into this record with:
+-- All 7 node handlers are wired into this record with:
 -- * Correct effect constraints validated by GHC
 -- * Template compilation via TH
 -- * Decision tools for sum type exits (via ClaudeCodeSchema)
@@ -58,7 +59,7 @@ import TypesFirstDev.Types.Payloads (InitWorkPayload, TestsReadyPayload, MergeCo
 -- The effect interpreter chain provides:
 -- 1. Session effect - Claude Code conversation management
 -- 2. Memory (TDDMem, ImplMem) - Node state threading
--- 3. Subgraph - Child graph spawning
+-- 3. Subgraph - Child graph spawning (via effect, not Fork node)
 -- 4. IO - System operations
 v3Handlers :: TDDGraph (AsHandler V3Effects)
 v3Handlers = TDDGraph
@@ -76,13 +77,7 @@ v3Handlers = TDDGraph
       (\(ClaudeCodeResult output _, sid) -> scaffoldAfter (output, sid))
 
     -- ════════════════════════════════════════════════════════════════
-    -- PHASE 2: FORK NODE (pure handler for spawn payload distribution)
-    -- ════════════════════════════════════════════════════════════════
-
-  , v3Fork = forkHandler
-
-    -- ════════════════════════════════════════════════════════════════
-    -- PHASE 3: TDD WRITE TESTS
+    -- PHASE 2: TDD WRITE TESTS
     -- ════════════════════════════════════════════════════════════════
 
   , v3TDDWriteTests = ClaudeCodeLLMHandler @'Sonnet
@@ -92,13 +87,13 @@ v3Handlers = TDDGraph
       (\(ClaudeCodeResult output _, sid) -> tddWriteTestsAfter (output, sid))
 
     -- ════════════════════════════════════════════════════════════════
-    -- PHASE 4: IMPL BARRIER (Subgraph effect for child collection)
+    -- PHASE 3: IMPL BARRIER (Subgraph effect for child collection)
     -- ════════════════════════════════════════════════════════════════
 
   , v3ImplBarrier = implBarrierHandler
 
     -- ════════════════════════════════════════════════════════════════
-    -- PHASE 5: IMPL (with self-loop retry)
+    -- PHASE 4: IMPL (with self-loop retry)
     -- ════════════════════════════════════════════════════════════════
 
   , v3Impl = ClaudeCodeLLMHandler @'Sonnet
@@ -108,7 +103,7 @@ v3Handlers = TDDGraph
       (\(ClaudeCodeResult output _, sid) -> implAfter (output, sid))
 
     -- ════════════════════════════════════════════════════════════════
-    -- PHASE 6: TDD REVIEW IMPL (decision tools)
+    -- PHASE 5: TDD REVIEW IMPL (decision tools)
     -- ════════════════════════════════════════════════════════════════
 
   , v3TDDReviewImpl = ClaudeCodeLLMHandler @'Sonnet
@@ -118,7 +113,7 @@ v3Handlers = TDDGraph
       (\(ClaudeCodeResult output _, sid) -> tddReviewImplAfter (output, sid))
 
     -- ════════════════════════════════════════════════════════════════
-    -- PHASE 7: MERGER
+    -- PHASE 6: MERGER
     -- ════════════════════════════════════════════════════════════════
 
   , v3Merger = ClaudeCodeLLMHandler @'Sonnet
@@ -128,7 +123,7 @@ v3Handlers = TDDGraph
       (\(ClaudeCodeResult output _, sid) -> mergerAfter (output, sid))
 
     -- ════════════════════════════════════════════════════════════════
-    -- PHASE 8: REBASER
+    -- PHASE 7: REBASER
     -- ════════════════════════════════════════════════════════════════
 
   , v3Rebaser = ClaudeCodeLLMHandler @'Sonnet

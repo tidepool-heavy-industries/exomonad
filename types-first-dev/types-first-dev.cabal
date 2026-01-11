@@ -1,20 +1,19 @@
 cabal-version:      3.0
 name:               types-first-dev
 version:            0.1.0.0
-synopsis:           V3 TDD workflow graph with parallel spawn and tree coordination
+synopsis:           V3 TDD workflow graph with tree coordination via Subgraph effect
 description:
-    8-node TDD graph implementing types-first development:
+    7-node TDD graph implementing types-first development:
     .
-    1. Scaffold: Analyze spec, create interface + tests + plan
-    2. Fork: Spawn TDD WriteTests and ImplBarrier in parallel
-    3. TDDWriteTests: Write failing tests for all criteria
-    4. ImplBarrier: Wait for tests + children
-    5. Impl: Make tests pass (self-loop retry)
-    6. TDDReviewImpl: Review impl, route to Merger or MoreTests
-    7. Merger: File MR to parent
-    8. Rebaser: Adapt to sibling changes
+    1. Scaffold: Analyze spec, create interface + tests + plan, spawn children
+    2. TDDWriteTests: Write failing tests for all criteria
+    3. ImplBarrier: Collect child results via Subgraph.awaitAny
+    4. Impl: Make tests pass (self-loop retry)
+    5. TDDReviewImpl: Review impl, route to Merger or MoreTests
+    6. Merger: File MR to parent
+    7. Rebaser: Adapt to sibling changes
     .
-    Features: Subgraph for child spawning, Fork/Barrier for parallel TDD,
+    Features: Subgraph effect for child spawning (Scaffold) and collection (ImplBarrier),
     Memory effect for conversation context, Goto for control flow.
 license:            MIT
 author:             Inanna
@@ -36,13 +35,14 @@ library
         TypesFirstDev.Handlers
         -- Handler modules (one per node)
         TypesFirstDev.Handlers.Scaffold
-        TypesFirstDev.Handlers.Fork
         TypesFirstDev.Handlers.TDDWriteTests
         TypesFirstDev.Handlers.ImplBarrier
         TypesFirstDev.Handlers.ImplReviewMerge
         TypesFirstDev.Handlers.Rebaser
         -- Handler assembly (wires all handlers into graph)
         TypesFirstDev.HandlersAssembled
+        -- Executor (direct handler chaining)
+        TypesFirstDev.Executor
         -- V3 runtime
         TypesFirstDev.V3.Interpreters
         TypesFirstDev.Schema

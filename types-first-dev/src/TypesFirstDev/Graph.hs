@@ -2,11 +2,17 @@
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 
 -- | V3 Graph Definition
 --
--- 8-node TDD graph with parallel spawn, tree coordination, and typed DSL mapping.
+-- 7-node TDD graph with tree coordination via Subgraph effect.
 -- Based on types-first-dev/templates/v3/SPEC.md
+--
+-- NOTE: This module provides explicit HasField instances because GHC can't
+-- derive HasField for records with type family-computed field types (mode :- NodeDef).
+-- These are required for the DispatchGoto typeclass to look up handlers.
 --
 -- @
 -- Entry(Spec)
@@ -14,34 +20,26 @@
 -- ┌──────────┐
 -- │ Scaffold │──[Subgraph]──▶ Child Graphs (spawnSelf per childSpec)
 -- └──────────┘
---     ↓ InitWork
--- ┌──────────┐
--- │ ForkNode │ ─────────────────────────────────────────────────────┐
--- └──────────┘                                                      │
---     │                                                             │
---     ├──[Spawn]──▶ TDDWriteTests ──TestsReady──┐                  │
---     │                                          │                  │
---     └──[Spawn]──▶ ImplBarrier ◄────────────────┤                  │
---                       │                        │                  │
---                       │ Awaits: TestsReady     │                  │
---                       │       + [MergeComplete]◄──────────────────┘
---                       ▼                        (children via Subgraph)
---                  ┌────────┐
---                  │  Impl  │
---                  └────────┘
---                       │
---     ┌─────────────────┴─────────────────┐
---     │                                   │
---     ▼ TestsPassed                       ▼ RequestRetry (self-loop)
--- ┌───────────────┐                  ┌────────┐
--- │ TDDReviewImpl │                  │  Impl  │ (max 5 attempts)
--- └───────────────┘                  └────────┘
+--     ↓ TDDWriteTestsInput
+-- ┌───────────────┐
+-- │ TDDWriteTests │
+-- └───────────────┘
+--     ↓ TestsReadyPayload
+-- ┌─────────────┐
+-- │ ImplBarrier │◄──[Subgraph.awaitAny]── Child MergeComplete results
+-- └─────────────┘
+--     ↓ ImplInput
+-- ┌────────┐
+-- │  Impl  │◄───────────────────────┐
+-- └────────┘                        │
+--     │                             │
+--     ├── TestsPassed ──▶ TDDReviewImpl
+--     │                        │
+--     │                        ├── Approved ──▶ Merger ──▶ Exit(MergeComplete)
+--     │                        │
+--     │                        └── MoreTests ──▶ TDDWriteTests
 --     │
---     ├── Approved ──▶ Merger ──MergeComplete──▶ Rebaser (siblings)
---     │                   │
---     │                   └──▶ Parent (broadcast)
---     │
---     └── MoreTests ──▶ TDDWriteTests (write additional tests)
+--     └── RequestRetry ─────────────┘ (max 5 attempts)
 -- @
 module TypesFirstDev.Graph
   ( TDDGraph(..)
@@ -58,16 +56,11 @@ import Tidepool.Graph.Types
   , Memory
   , ClaudeCode
   , ModelChoice(..)
-    -- Fork/Barrier annotations
-  , Spawn
-  , Barrier
-  , Awaits
-  , Arrive
   )
 import qualified Tidepool.Graph.Types as Types (Input)
 import Tidepool.Graph.Generic (GraphMode(..))
 import qualified Tidepool.Graph.Generic as G
-import Tidepool.Graph.Goto (Goto, To)
+import Tidepool.Graph.Goto (Goto)
 
 import TypesFirstDev.Types
 import TypesFirstDev.Templates
@@ -81,22 +74,21 @@ import TypesFirstDev.Templates
 
 -- | TDD workflow graph.
 --
--- 8 nodes organized into phases:
+-- 7 nodes organized into phases:
 --
--- * Phase 1: Scaffold (decomposes spec, spawns children)
--- * Phase 2: Fork (spawns TDDWriteTests + ImplBarrier in parallel)
--- * Phase 3: TDDWriteTests (writes failing tests)
--- * Phase 4: ImplBarrier (waits for tests + children)
--- * Phase 5: Impl (makes tests pass, self-loop retry)
--- * Phase 6: TDDReviewImpl (reviews impl, routes to Merger or MoreTests)
--- * Phase 7: Merger (files MR to parent)
--- * Phase 8: Rebaser (adapts to sibling changes)
+-- * Phase 1: Scaffold (decomposes spec, spawns children via Subgraph)
+-- * Phase 2: TDDWriteTests (writes failing tests)
+-- * Phase 3: ImplBarrier (collects child results via Subgraph.awaitAny)
+-- * Phase 4: Impl (makes tests pass, self-loop retry)
+-- * Phase 5: TDDReviewImpl (reviews impl, routes to Merger or MoreTests)
+-- * Phase 6: Merger (files MR to parent)
+-- * Phase 7: Rebaser (adapts to sibling changes)
 --
 -- Key features:
--- * Subgraph effect in Scaffold for child spawning
--- * ForkNode/BarrierNode for parallel TDD + Impl
+-- * Subgraph effect for child spawning (Scaffold) and collection (ImplBarrier)
 -- * Memory effect for threaded conversation context
 -- * Goto Self for Impl retry loop
+-- * Linear flow: Scaffold → TDDWriteTests → ImplBarrier → Impl → ...
 data TDDGraph mode = TDDGraph
   { --------------------------------------------------------------------------
     -- ENTRY
@@ -108,30 +100,19 @@ data TDDGraph mode = TDDGraph
     --------------------------------------------------------------------------
 
     -- | Scaffold: Analyze spec, create interface + contract suite + test plan.
-    -- Optionally spawns child graphs via Subgraph effect.
-    -- Routes to Fork with InitWorkPayload.
+    -- Spawns child graphs via Subgraph effect for decomposed specs.
+    -- Routes to TDDWriteTests with payload.
   , v3Scaffold :: mode :- G.LLMNode
       :@ Types.Input ScaffoldInput
       :@ Template ScaffoldTpl
       :@ Schema ScaffoldExit
-      :@ UsesEffects '[ Goto "v3Fork" InitWorkPayload
+      :@ UsesEffects '[ Goto "v3TDDWriteTests" TDDWriteTestsInput
                       , Goto Exit ScaffoldExit  -- ClarificationNeeded exits graph
                       ]
       :@ ClaudeCode 'Sonnet
 
     --------------------------------------------------------------------------
-    -- PHASE 2: FORK (parallel spawn)
-    --------------------------------------------------------------------------
-
-    -- | Fork: Spawn TDDWriteTests and ImplBarrier in parallel.
-    -- Both receive InitWorkPayload.
-  , v3Fork :: mode :- G.ForkNode
-      :@ Types.Input InitWorkPayload
-      :@ Spawn '[To "v3TDDWriteTests" TDDWriteTestsInput, To "v3ImplBarrier" InitWorkPayload]
-      :@ Barrier "v3ImplBarrier"
-
-    --------------------------------------------------------------------------
-    -- PHASE 3: TDD WRITE TESTS
+    -- PHASE 2: TDD WRITE TESTS
     --------------------------------------------------------------------------
 
     -- | TDDWriteTests: Write failing tests for all criteria.
@@ -142,24 +123,28 @@ data TDDGraph mode = TDDGraph
       :@ Template TDDWriteTestsTpl
       :@ Schema TDDWriteTestsExit
       :@ Memory TDDMem
-      :@ UsesEffects '[ Arrive "v3ImplBarrier" TestsReadyPayload
+      :@ UsesEffects '[ Goto "v3ImplBarrier" TestsReadyPayload
                       , Goto "v3Scaffold" ScaffoldInput  -- InvalidScaffold
                       ]
       :@ ClaudeCode 'Sonnet
 
     --------------------------------------------------------------------------
-    -- PHASE 4: IMPL BARRIER (wait for tests + children)
+    -- PHASE 3: IMPL BARRIER (collect children via Subgraph)
     --------------------------------------------------------------------------
 
-    -- | ImplBarrier: Wait for TDDWriteTests + all children's MergeComplete.
-    -- Uses Subgraph.awaitAny to collect remaining children.
-    -- Routes to Impl once all dependencies satisfied.
-  , v3ImplBarrier :: mode :- G.BarrierNode
-      :@ Awaits '[TestsReadyPayload]  -- TDD result; children via Subgraph effect
+    -- | ImplBarrier: Collect child MergeComplete results via Subgraph.awaitAny.
+    -- Receives TestsReadyPayload from TDDWriteTests.
+    -- Routes to Impl once all children collected.
+    --
+    -- This is a LogicNode (not BarrierNode) because:
+    -- - Child collection uses Subgraph effect (in V3Effects), not Fork/Barrier
+    -- - Simpler handler type: TestsReadyPayload -> Eff es (GotoChoice '[...])
+  , v3ImplBarrier :: mode :- G.LogicNode
+      :@ Types.Input TestsReadyPayload
       :@ UsesEffects '[Goto "v3Impl" ImplInput]
 
     --------------------------------------------------------------------------
-    -- PHASE 5: IMPL (make tests pass)
+    -- PHASE 4: IMPL (make tests pass)
     --------------------------------------------------------------------------
 
     -- | Impl: Make all failing tests pass.
@@ -178,7 +163,7 @@ data TDDGraph mode = TDDGraph
       :@ ClaudeCode 'Sonnet
 
     --------------------------------------------------------------------------
-    -- PHASE 6: TDD REVIEW IMPL
+    -- PHASE 5: TDD REVIEW IMPL
     --------------------------------------------------------------------------
 
     -- | TDDReviewImpl: Review Impl's work.
@@ -196,7 +181,7 @@ data TDDGraph mode = TDDGraph
       :@ ClaudeCode 'Sonnet
 
     --------------------------------------------------------------------------
-    -- PHASE 7: MERGER
+    -- PHASE 6: MERGER
     --------------------------------------------------------------------------
 
     -- | Merger: File MR to parent after TDD approval.
@@ -211,7 +196,7 @@ data TDDGraph mode = TDDGraph
       :@ ClaudeCode 'Sonnet
 
     --------------------------------------------------------------------------
-    -- PHASE 8: REBASER
+    -- PHASE 7: REBASER
     --------------------------------------------------------------------------
 
     -- | Rebaser: Adapt to sibling changes.

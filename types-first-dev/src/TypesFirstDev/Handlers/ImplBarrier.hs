@@ -1,16 +1,18 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 
--- | ImplBarrier node - async merge loop waiting for tests + children.
+-- | ImplBarrier node - collect child results via Subgraph effect.
 --
--- Phase 14: Full implementation with Subgraph effect for child collection.
+-- Now a LogicNode (not BarrierNode) with linear flow:
+-- Scaffold → TDDWriteTests → ImplBarrier → Impl
+--
+-- Child collection happens asynchronously via Subgraph.awaitAny.
 module TypesFirstDev.Handlers.ImplBarrier
   ( implBarrierHandler
   ) where
 
 import Control.Monad.Freer (Eff, Member)
 import Tidepool.Graph.Goto (To, GotoChoice, gotoChoice)
-import Tidepool.Graph.Types (HList(..))
 import Tidepool.Effect.Subgraph (Subgraph, awaitAny, getPending)
 
 import TypesFirstDev.Types.Core (Spec)
@@ -29,15 +31,13 @@ import TypesFirstDev.Types.Payloads (TestsReadyPayload(..), MergeComplete)
 -- 3. Merges with TestsReadyPayload
 -- 4. Routes to Impl with consolidated ImplInput
 --
--- Phase 14: Full implementation using Subgraph effect for concurrent child execution.
---
--- Handler type: HList '[TestsReadyPayload] -> Eff es (GotoChoice '[To "v3Impl" ImplInput])
--- (BarrierNode handlers receive awaited results as HList)
+-- Handler type: TestsReadyPayload -> Eff es (GotoChoice '[To "v3Impl" ImplInput])
+-- (LogicNode - takes input directly, no HList)
 implBarrierHandler
   :: (Member (Subgraph Spec MergeComplete) es)
-  => HList '[TestsReadyPayload]
+  => TestsReadyPayload
   -> Eff es (GotoChoice '[To "v3Impl" ImplInput])
-implBarrierHandler (testsPayload ::: HNil) = do
+implBarrierHandler testsPayload = do
   -- Collect all pending children via awaitAny
   childResults <- collectAllChildren []
 
