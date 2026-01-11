@@ -56,6 +56,8 @@ import Tidepool.Graph.Types
   , UsesEffects
   , Exit
   , Memory
+  , ClaudeCode
+  , ModelChoice(..)
     -- Fork/Barrier annotations
   , Spawn
   , Barrier
@@ -115,6 +117,7 @@ data TDDGraph mode = TDDGraph
       :@ UsesEffects '[ Goto "v3Fork" InitWorkPayload
                       , Goto Exit ScaffoldExit  -- ClarificationNeeded exits graph
                       ]
+      :@ ClaudeCode 'Sonnet
 
     --------------------------------------------------------------------------
     -- PHASE 2: FORK (parallel spawn)
@@ -142,6 +145,7 @@ data TDDGraph mode = TDDGraph
       :@ UsesEffects '[ Arrive "v3ImplBarrier" TestsReadyPayload
                       , Goto "v3Scaffold" ScaffoldInput  -- InvalidScaffold
                       ]
+      :@ ClaudeCode 'Sonnet
 
     --------------------------------------------------------------------------
     -- PHASE 4: IMPL BARRIER (wait for tests + children)
@@ -171,6 +175,7 @@ data TDDGraph mode = TDDGraph
                       , Goto "v3Scaffold" ScaffoldInput            -- BlockedDependency, SpecAmbiguity
                       , Goto Exit ImplExit                         -- Stuck
                       ]
+      :@ ClaudeCode 'Sonnet
 
     --------------------------------------------------------------------------
     -- PHASE 6: TDD REVIEW IMPL
@@ -188,6 +193,7 @@ data TDDGraph mode = TDDGraph
                       , Goto "v3TDDWriteTests" TDDWriteTestsInput  -- MoreTests
                       , Goto Exit TDDReviewImplExit   -- Reject
                       ]
+      :@ ClaudeCode 'Sonnet
 
     --------------------------------------------------------------------------
     -- PHASE 7: MERGER
@@ -202,6 +208,7 @@ data TDDGraph mode = TDDGraph
       :@ UsesEffects '[ Goto Exit MergeComplete        -- MergeComplete (success)
                       , Goto "v3Impl" ImplInput        -- MergeRejected
                       ]
+      :@ ClaudeCode 'Sonnet
 
     --------------------------------------------------------------------------
     -- PHASE 8: REBASER
@@ -217,6 +224,7 @@ data TDDGraph mode = TDDGraph
       :@ UsesEffects '[ Goto "v3TDDWriteTests" TDDWriteTestsInput  -- Clean/Adapted
                       , Goto "v3Scaffold" ScaffoldInput            -- Conflict
                       ]
+      :@ ClaudeCode 'Sonnet
 
     --------------------------------------------------------------------------
     -- EXIT

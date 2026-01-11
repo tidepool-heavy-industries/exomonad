@@ -2,15 +2,55 @@
 
 All Haskell packages live here, organized by architectural pattern.
 
+## When to Read Which CLAUDE.md
+
+| I want to... | Read this |
+|--------------|-----------|
+| Understand graph DSL, handlers, annotations | `dsl/core/CLAUDE.md` |
+| Add or modify an effect interpreter | `effects/CLAUDE.md` → `effects/{name}-executor/CLAUDE.md` |
+| Understand graph execution model | `runtime/CLAUDE.md` → `runtime/actor/CLAUDE.md` |
+| Work on the WebSocket server | `native-server/CLAUDE.md` |
+| Understand wire protocols | `protocol/CLAUDE.md` |
+| Work on dev tools (GHCi oracle, sleeptime) | `tools/CLAUDE.md` → `tools/{name}/CLAUDE.md` |
+
+**Navigation pattern**: Start at `haskell/CLAUDE.md`, drill into topic-specific docs.
+
+## Documentation Tree
+
+```
+haskell/CLAUDE.md  ← YOU ARE HERE (router)
+├── dsl/CLAUDE.md
+│   └── core/CLAUDE.md  ← Graph DSL reference (detailed)
+├── effects/CLAUDE.md  ← Effect interpreter pattern
+│   ├── llm-executor/CLAUDE.md
+│   ├── session-executor/CLAUDE.md  ← ClaudeCode subprocess
+│   ├── ghci-executor/CLAUDE.md
+│   ├── habitica/CLAUDE.md
+│   └── ...
+├── runtime/CLAUDE.md
+│   ├── actor/CLAUDE.md  ← Actor model (detailed)
+│   └── wasm/CLAUDE.md
+├── protocol/CLAUDE.md
+│   ├── wire-types/CLAUDE.md
+│   └── generated-ts/CLAUDE.md
+├── native-server/CLAUDE.md
+├── platform/CLAUDE.md
+└── tools/CLAUDE.md
+    ├── ghci-oracle/CLAUDE.md
+    └── sleeptime/CLAUDE.md
+```
+
 ## Structure
 
-- `dsl/` - **Domain-Specific Language** for agent graphs → see dsl/CLAUDE.md
-- `effects/` - **Effect system** with interpreter pattern → see effects/CLAUDE.md
-- `runtime/` - **Execution backends** (actor model, parallel, WASM)
-- `native-server/` - **Facade pattern** - WebSocket server orchestrating interpreters
-- `protocol/` - **Wire protocol** - Serialization formats (native, WASM)
-- `tools/` - Standalone utilities (ghci-oracle, sleeptime)
-- `vendor/` - Vendored dependencies (freer-simple, ginger)
+| Directory | Purpose | When to read |
+|-----------|---------|--------------|
+| `dsl/` | Graph DSL, effects, templates, schemas | Defining graphs, handlers, templates |
+| `effects/` | Effect interpreters (HTTP, subprocess, etc.) | Adding/modifying external integrations |
+| `runtime/` | Execution backends (actor, WASM) | Understanding concurrent execution |
+| `native-server/` | WebSocket server facade | Server lifecycle, effect composition |
+| `protocol/` | Wire formats (native, WASM) | Client-server communication |
+| `tools/` | Standalone utilities | GHCi integration, log analysis |
+| `vendor/` | Vendored dependencies | Rarely (freer-simple, ginger internals) |
 
 ## Design Patterns
 

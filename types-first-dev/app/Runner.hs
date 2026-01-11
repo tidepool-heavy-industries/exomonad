@@ -25,15 +25,12 @@ import Tidepool.Actor.Subgraph (withRecursiveGraph)
 import Tidepool.Graph.Execute (runGraph)
 
 import TypesFirstDev.Handlers.Scaffold (ScaffoldInput(..))
-import TypesFirstDev.Handlers.ImplReviewMerge (ImplInput(..))
 import TypesFirstDev.Types.Core (Spec)
 import TypesFirstDev.Types.Payloads (MergeComplete(..))
 import TypesFirstDev.Types.Shared (ImpactLevel(..))
 import TypesFirstDev.Types.Memory (TDDMem(..), ImplMem(..), emptyTDDMem, emptyImplMem)
 import TypesFirstDev.V3.Interpreters (runV3Effects, WorktreeConfig(..), V3Effects)
-import TypesFirstDev.Graph (TDDGraph(..))
-import Tidepool.Graph.Generic (AsHandler)
-import qualified TypesFirstDev.V3.Interpreters as V3 (V3Result(..))
+import TypesFirstDev.HandlersAssembled (v3Handlers)
 
 -- | Application-level result type (more detailed than V3Result)
 data RunnerResult = RunnerSuccess MergeComplete | RunnerFailure Text
@@ -74,7 +71,7 @@ printResult result = do
 runV3Graph :: Spec -> WorktreeConfig -> IO RunnerResult
 runV3Graph spec wtConfig =
   -- Step 1: Create deferred subgraph state
-  withRecursiveGraph @Spec @V3.V3Result $ \subgraphState wire -> do
+  withRecursiveGraph @Spec @MergeComplete $ \subgraphState wire -> do
     -- Step 2: Initialize shared memory
     tddMem <- newTVarIO $ emptyTDDMem "root-conversation"
     implMem <- newTVarIO $ emptyImplMem "root-conversation"
@@ -86,23 +83,19 @@ runV3Graph spec wtConfig =
     -- Step 4: WIRE THE RECURSION (MUST happen before running!)
     -- This is the critical deferred binding that enables child graphs to spawn
     --
-    -- TODO: Complete handler record assembly (Phase 6 expanded)
-    -- The wire function should run child graphs via runGraph with v3Handlers,
-    -- but v3Handlers needs all handler implementations first.
+    -- The wire function runs child graphs via runGraph with v3Handlers
     wire $ \childSpec -> do
-      -- TODO: Execute child graph with v3Handlers
-      -- let childInput = ScaffoldInput
-      --       { siSpec = childSpec
-      --       , siParentContext = Nothing
-      --       }
-      -- interpret (runGraph v3Handlers childInput)
-      pure V3.V3Success
+      let childInput = ScaffoldInput
+            { siSpec = childSpec
+            , siParentContext = Nothing
+            }
+      result <- interpret ((runGraph v3Handlers childInput) :: Eff V3Effects MergeComplete)
+      pure result
 
-    -- Step 5: Run root graph
-    -- TODO: Execute root graph with v3Handlers (requires handler assembly)
-    -- let rootInput = ScaffoldInput spec Nothing
-    -- _ <- interpret (runGraph v3Handlers rootInput)
-    pure $ RunnerSuccess (MergeComplete "" "" Trivial [])
+    -- Step 5: Run root graph with v3Handlers
+    let rootInput = ScaffoldInput spec Nothing
+    result <- interpret ((runGraph v3Handlers rootInput) :: Eff V3Effects MergeComplete)
+    pure $ RunnerSuccess result
 
 -- | Main entry point
 main :: IO ()

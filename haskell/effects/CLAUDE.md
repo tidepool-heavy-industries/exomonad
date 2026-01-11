@@ -4,6 +4,27 @@ Effect types define operations (in `dsl/core`); interpreters provide implementat
 
 This follows the **interpreter design pattern**: abstract syntax (effect types) separated from semantic actions (interpreters).
 
+## When to Read Which CLAUDE.md
+
+| I want to... | Read this |
+|--------------|-----------|
+| Understand Claude Code subprocess execution | `session-executor/CLAUDE.md` |
+| Understand LLM API calls | `llm-executor/CLAUDE.md` |
+| Query Haskell types from an agent | `ghci-executor/CLAUDE.md` |
+| Understand the interpreter pattern | This file (you're here) |
+
+## Documentation Tree
+
+```
+effects/CLAUDE.md  ← YOU ARE HERE (router)
+├── session-executor/CLAUDE.md  ← Claude Code subprocess (key for V3)
+├── llm-executor/CLAUDE.md      ← Anthropic/OpenAI API
+├── ghci-executor/CLAUDE.md     ← GHCi oracle client
+├── habitica/CLAUDE.md          ← Habitica API types
+├── worktree-executor/CLAUDE.md ← Git worktree management
+└── ...
+```
+
 ## Structure
 
 ```
@@ -18,9 +39,10 @@ Most effect types live in `dsl/core/src/Tidepool/Effect/Types.hs` or `Effects/*.
 
 | Effect | Types | Interpreter | Implementation |
 |--------|-------|-------------|----------------|
+| Session | dsl/core | session-executor | Subprocess (mantle session) |
 | LLM | dsl/core | llm-executor | HTTP (Anthropic/OpenAI) |
 | BD | dsl/core | bd-executor | Subprocess (urchin CLI) |
-| ClaudeCode | dsl/core | claude-code-executor | Subprocess (mantle) |
+| ClaudeCode | dsl/core | claude-code-executor | Subprocess (mantle) - **deprecated, use Session** |
 | Habitica | effects/habitica | habitica-executor | HTTP API |
 | UI | dsl/core | ui-executor | WebSocket bridge |
 | Observability | dsl/core | observability-executor | OTLP/Loki push |

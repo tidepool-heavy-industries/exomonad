@@ -17,7 +17,8 @@ module TypesFirstDev.HandlersAssembled
   ) where
 
 import Tidepool.Graph.Generic (AsHandler)
-import Tidepool.Graph.Goto (ClaudeCodeLLMHandler(..))
+import Tidepool.Graph.Goto (ClaudeCodeLLMHandler(..), ClaudeCodeResult(..))
+import Tidepool.Graph.Types (Exit, Self, ModelChoice(..))
 import Tidepool.Effect.Session (SessionId)
 
 import TypesFirstDev.Graph (TDDGraph(..))
@@ -42,6 +43,7 @@ import TypesFirstDev.Handlers.ImplReviewMerge
   )
 import TypesFirstDev.Handlers.Rebaser
   ( RebaserInput, RebaserExit, rebaserBefore, rebaserAfter )
+import TypesFirstDev.Types.Payloads (InitWorkPayload, TestsReadyPayload, MergeComplete)
 
 -- | Wired handler graph for V3 TDD protocol.
 --
@@ -65,49 +67,73 @@ v3Handlers = TDDGraph
     -- PHASE 1: SCAFFOLD
     -- ════════════════════════════════════════════════════════════════
 
-  , v3Scaffold = undefined  -- TODO: wire with proper handler type
+  , v3Scaffold = ClaudeCodeLLMHandler @'Sonnet
+      Nothing
+      scaffoldCompiled
+      scaffoldBefore
+      (\(ClaudeCodeResult output _, sid) -> scaffoldAfter (output, sid))
 
     -- ════════════════════════════════════════════════════════════════
     -- PHASE 2: FORK NODE (pure logic, no handler)
     -- ════════════════════════════════════════════════════════════════
 
-  , v3Fork = undefined  -- ForkNode has no handler (pure routing)
+  , v3Fork = undefined  -- ForkNode has no handler (graph engine handles it)
 
     -- ════════════════════════════════════════════════════════════════
     -- PHASE 3: TDD WRITE TESTS
     -- ════════════════════════════════════════════════════════════════
 
-  , v3TDDWriteTests = undefined  -- TODO: wire with proper handler type
+  , v3TDDWriteTests = ClaudeCodeLLMHandler @'Sonnet
+      Nothing
+      tddWriteTestsCompiled
+      tddWriteTestsBefore
+      (\(ClaudeCodeResult output _, sid) -> tddWriteTestsAfter (output, sid))
 
     -- ════════════════════════════════════════════════════════════════
     -- PHASE 4: IMPL BARRIER (pure logic, no handler)
     -- ════════════════════════════════════════════════════════════════
 
-  , v3ImplBarrier = undefined  -- BarrierNode has no handler (pure routing)
+  , v3ImplBarrier = undefined  -- BarrierNode has no handler (graph engine handles it)
 
     -- ════════════════════════════════════════════════════════════════
     -- PHASE 5: IMPL (with self-loop retry)
     -- ════════════════════════════════════════════════════════════════
 
-  , v3Impl = undefined  -- TODO: wire with proper handler type
+  , v3Impl = ClaudeCodeLLMHandler @'Sonnet
+      Nothing
+      implCompiled
+      implBefore
+      (\(ClaudeCodeResult output _, sid) -> implAfter (output, sid))
 
     -- ════════════════════════════════════════════════════════════════
     -- PHASE 6: TDD REVIEW IMPL (decision tools)
     -- ════════════════════════════════════════════════════════════════
 
-  , v3TDDReviewImpl = undefined  -- TODO: wire with proper handler type
+  , v3TDDReviewImpl = ClaudeCodeLLMHandler @'Sonnet
+      Nothing
+      tddReviewImplCompiled
+      tddReviewImplBefore
+      (\(ClaudeCodeResult output _, sid) -> tddReviewImplAfter (output, sid))
 
     -- ════════════════════════════════════════════════════════════════
     -- PHASE 7: MERGER
     -- ════════════════════════════════════════════════════════════════
 
-  , v3Merger = undefined  -- TODO: wire with proper handler type
+  , v3Merger = ClaudeCodeLLMHandler @'Sonnet
+      Nothing
+      mergerCompiled
+      mergerBefore
+      (\(ClaudeCodeResult output _, sid) -> mergerAfter (output, sid))
 
     -- ════════════════════════════════════════════════════════════════
     -- PHASE 8: REBASER
     -- ════════════════════════════════════════════════════════════════
 
-  , v3Rebaser = undefined  -- TODO: wire with proper handler type
+  , v3Rebaser = ClaudeCodeLLMHandler @'Sonnet
+      Nothing
+      rebaserCompiled
+      rebaserBefore
+      (\(ClaudeCodeResult output _, sid) -> rebaserAfter (output, sid))
 
     -- ════════════════════════════════════════════════════════════════
     -- EXIT
