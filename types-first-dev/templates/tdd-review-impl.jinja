@@ -24,7 +24,8 @@ Iterations: {{ implResult.iterations }}
 - [ ] `cabal build` passes
 - [ ] `cabal test` passes
 - [ ] No `undefined` outside stubs
-- [ ] Interface unchanged from scaffold
+- [ ] Interface unchanged from scaffold: `{{ scaffold.interfaceFile }}`
+- [ ] Contract tests pass: `{{ scaffold.contractSuite }}`
 
 ### Phase 2: Semantic Review
 - Does impl actually satisfy the criterion?

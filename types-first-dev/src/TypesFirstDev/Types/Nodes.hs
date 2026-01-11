@@ -36,10 +36,12 @@ import Tidepool.StructuredOutput (StructuredOutput)
 import Tidepool.StructuredOutput.ClaudeCodeSchema (ClaudeCodeSchema(..))
 import Tidepool.StructuredOutput.DecisionTools (ToDecisionTools(..))
 
+import Tidepool.Effect.Session (SessionId)
 import TypesFirstDev.Types.Core (Spec, ParentContext)
 import TypesFirstDev.Types.Shared
   ( PlannedTest, Critique, NodeInfo, CoverageReport
   , ChildSpec, InterfaceFile, ImpactLevel, ChangeEntry
+  , ClarificationRequest
   )
 import TypesFirstDev.Types.Payloads
   ( InitWorkPayload, TestsReadyPayload, ImplResult
@@ -52,9 +54,22 @@ import TypesFirstDev.Types.Payloads
 
 -- | Scaffold node input.
 -- Prefix: si
+--
+-- Depth tracking for hylomorphism:
+--   * siCurrentDepth: 0 for root, incremented for each child level
+--   * siMaxDepth: prevents infinite recursion
+--   * siParentSessionId: enables Claude Code session forking
+--
+-- Clarification context:
+--   * siClarificationNeeded: When back-routing from downstream nodes (Impl, Rebaser),
+--     carries diagnostic info about what failed and what needs addressing.
 data ScaffoldInput = ScaffoldInput
-  { siSpec          :: Spec                  -- ^ Work specification
-  , siParentContext :: Maybe ParentContext   -- ^ Context from parent if child
+  { siSpec                 :: Spec                         -- ^ Work specification
+  , siParentContext        :: Maybe ParentContext          -- ^ Context from parent if child
+  , siCurrentDepth         :: Int                          -- ^ 0 for root, +1 for each child level
+  , siMaxDepth             :: Int                          -- ^ Maximum recursion depth
+  , siParentSessionId      :: Maybe SessionId              -- ^ Parent's session ID for ForkFrom
+  , siClarificationNeeded  :: Maybe ClarificationRequest   -- ^ Why we're back here (if back-routing)
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON, StructuredOutput)

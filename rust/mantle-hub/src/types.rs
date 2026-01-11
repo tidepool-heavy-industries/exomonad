@@ -5,6 +5,6 @@
 
 pub use mantle_shared::hub::{
     GraphData, GraphEdge, GraphNode, HubEvent, NodeCreateResponse, NodeEvent, NodeInfo,
-    NodeRegister, NodeResult, NodeState, SessionCreateResponse, SessionInfo, SessionRegister,
-    SessionState, SessionWithNodes,
+    NodeRegister, NodeResult, NodeState, SessionCreateEmptyRequest, SessionCreateEmptyResponse,
+    SessionCreateResponse, SessionInfo, SessionRegister, SessionState, SessionWithNodes,
 };

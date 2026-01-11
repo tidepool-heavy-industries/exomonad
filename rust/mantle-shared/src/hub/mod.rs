@@ -18,6 +18,7 @@ pub use config::HubConfig;
 pub use socket_client::{run_result_to_node_result, write_result_to_socket};
 pub use types::{
     GraphData, GraphEdge, GraphNode, HubEvent, ModelUsage, NodeCreateResponse, NodeEvent,
-    NodeInfo, NodeRegister, NodeResult, NodeState, SessionCreateResponse, SessionInfo,
-    SessionRegister, SessionState, SessionWithNodes,
+    NodeInfo, NodeRegister, NodeResult, NodeState, SessionCreateEmptyRequest,
+    SessionCreateEmptyResponse, SessionCreateResponse, SessionInfo, SessionRegister,
+    SessionState, SessionWithNodes,
 };

@@ -293,6 +293,33 @@ cabal test all             # Run tests
 3. **OneOf sum type** - Fully typed dispatch without Dynamic
 4. **IO-blind agents** - All IO in runners, enables WASM + deterministic testing
 
+### Code Smells: Data Flow Dead-Ends
+
+**The `_` prefix is a huge signal.** When you see `_someField` in a pattern match, it means data is being captured but ignored. This is almost always a data flow dead-end that needs fixing.
+
+```haskell
+-- BAD: Data captured but ignored
+ImplRequestRetry diagnosis _strategyFrom _strategyTo _failingTests -> do
+  let retryInput = originalInput { iiAttemptCount = count + 1 }
+  pure $ gotoChoice @"v3Impl" retryInput
+
+-- GOOD: Data flows to next node
+ImplRequestRetry diagnosis strategyFrom strategyTo failingTests -> do
+  let critiques = buildCritiquesFrom diagnosis strategyFrom strategyTo failingTests
+  let retryInput = originalInput
+        { iiAttemptCount = count + 1
+        , iiCritiqueList = Just critiques  -- Data flows forward
+        }
+  pure $ gotoChoice @"v3Impl" retryInput
+```
+
+**When reviewing handlers, grep for `_` prefixes in pattern matches.** Each one is a potential bug where:
+- Exit types capture useful info that never reaches the next node
+- Template context is built but never rendered
+- Memory fields are written but never read
+
+The fix is usually: thread the data forward (via input fields, memory, or context) so downstream nodes/templates can use it.
+
 ## Observability
 
 OpenTelemetry traces to Grafana Tempo:

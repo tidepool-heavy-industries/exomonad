@@ -7,6 +7,7 @@
 -- Prefix convention: lowercase acronym of type name (e.g., Spec -> s)
 module TypesFirstDev.Types.Core
   ( Spec(..)
+  , defaultSpec
   , Constraints(..)
   , Criterion(..)
   , ParentContext(..)
@@ -57,3 +58,14 @@ data ParentContext = ParentContext
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON, StructuredOutput)
+
+-- | Default spec for testing and placeholder values.
+defaultSpec :: Spec
+defaultSpec = Spec
+  { sId = "test-spec"
+  , sDescription = "Test specification"
+  , sAcceptanceCriteria = []
+  , sTargetPath = "src/Test"
+  , sTestPath = "test/Test"
+  , sComplexityConstraints = Nothing
+  }

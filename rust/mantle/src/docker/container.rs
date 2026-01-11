@@ -534,6 +534,7 @@ mod tests {
             worktree_path: PathBuf::from("/tmp"),
             hub_socket: None,
             auth_mount: AuthMount::BindMount(PathBuf::from("/tmp/.claude")),
+            cabal_store_volume: None,
             session_id: "test".to_string(),
             claude_args: vec![],
             timeout_secs: 0,

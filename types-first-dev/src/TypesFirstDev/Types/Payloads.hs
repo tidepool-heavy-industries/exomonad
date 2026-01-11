@@ -11,6 +11,7 @@ module TypesFirstDev.Types.Payloads
   , ImplResult(..)
   , TDDApproval(..)
   , MergeComplete(..)
+  , ChildFailure(..)
   , MergeEvent(..)
   , Adaptation(..)
   ) where
@@ -64,12 +65,30 @@ data TDDApproval = TDDApproval
   deriving anyclass (FromJSON, ToJSON, StructuredOutput)
 
 -- | Merger output, broadcast to parent and siblings.
+-- Sum type: child either succeeded or failed.
 -- Prefix: mc
-data MergeComplete = MergeComplete
-  { mcCommit      :: Text          -- ^ Merge commit hash
-  , mcAuthor      :: Text          -- ^ Who authored the changes
-  , mcImpactLevel :: ImpactLevel   -- ^ Impact level of changes
-  , mcChanges     :: [ChangeEntry] -- ^ List of changes made
+data MergeComplete
+  = MergeSuccess
+      { mcCommit      :: Text          -- ^ Merge commit hash
+      , mcAuthor      :: Text          -- ^ Who authored the changes
+      , mcImpactLevel :: ImpactLevel   -- ^ Impact level of changes
+      , mcChanges     :: [ChangeEntry] -- ^ List of changes made
+      }
+  | MergeFailed
+      { mcFailure     :: ChildFailure  -- ^ Failure details
+      }
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
+
+-- | Failure info from child execution.
+-- Captures partial work for parent decision-making.
+-- Prefix: cf
+data ChildFailure = ChildFailure
+  { cfReason        :: Text           -- ^ Why the child failed
+  , cfBranch        :: Text           -- ^ Git branch where work happened
+  , cfAttempts      :: Int            -- ^ Number of attempts before failure
+  , cfPartialCommit :: Maybe Text     -- ^ Last commit hash (if any work was done)
+  , cfFilesCreated  :: [FilePath]     -- ^ Files created before failure
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON, StructuredOutput)

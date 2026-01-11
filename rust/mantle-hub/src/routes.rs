@@ -34,7 +34,8 @@ use crate::error::Result;
 use crate::state::AppState;
 use crate::types::{
     GraphData, HubEvent, NodeCreateResponse, NodeEvent, NodeInfo, NodeRegister, NodeResult,
-    NodeState, SessionCreateResponse, SessionInfo, SessionRegister, SessionWithNodes,
+    NodeState, SessionCreateEmptyRequest, SessionCreateEmptyResponse, SessionCreateResponse,
+    SessionInfo, SessionRegister, SessionWithNodes,
 };
 
 /// Build the router with all routes.
@@ -59,6 +60,7 @@ pub fn router(state: AppState, static_dir: &std::path::Path) -> Router {
         )
         // API routes - Sessions
         .route("/api/sessions", get(list_sessions).post(create_session))
+        .route("/api/sessions/empty", post(create_empty_session))
         .route(
             "/api/sessions/{sid}",
             get(get_session).delete(delete_session),
@@ -156,6 +158,25 @@ async fn delete_session(
     Ok(axum::http::StatusCode::NO_CONTENT)
 }
 
+/// Create an empty session (no root node).
+///
+/// Used for graph execution tracking: Haskell creates a session first,
+/// then spawns nodes that register into this session.
+async fn create_empty_session(
+    State(state): State<AppState>,
+    Json(req): Json<SessionCreateEmptyRequest>,
+) -> Result<Json<SessionCreateEmptyResponse>> {
+    let session_id = db::create_empty_session(&state.pool, &req.name).await?;
+    let session = db::get_session(&state.pool, &session_id).await?;
+
+    // Broadcast event
+    state.broadcast(HubEvent::SessionCreated {
+        session: session.clone(),
+    });
+
+    Ok(Json(SessionCreateEmptyResponse { session }))
+}
+
 /// Get graph data for a session.
 async fn get_graph(
     State(state): State<AppState>,
@@ -169,7 +190,10 @@ async fn get_graph(
 // Node Endpoints
 // ============================================================================
 
-/// Add a child node to a session.
+/// Add a node to a session.
+///
+/// For graph execution tracking, this creates a node in an existing session.
+/// parent_node_id and metadata are optional.
 async fn create_node(
     State(state): State<AppState>,
     Path(sid): Path<String>,
@@ -178,11 +202,12 @@ async fn create_node(
     let node_id = db::create_node(
         &state.pool,
         &sid,
-        &req.parent_node_id,
+        req.parent_node_id.as_deref(),
         &req.branch,
         &req.worktree.display().to_string(),
         &req.prompt,
         &req.model,
+        req.metadata.as_ref(),
     )
     .await?;
 

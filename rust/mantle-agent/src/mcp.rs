@@ -190,10 +190,13 @@ pub struct McpServer {
 }
 
 impl McpServer {
-    /// Create a new MCP server.
-    ///
-    /// Reads tool definitions from `MANTLE_DECISION_TOOLS` environment variable.
-    pub fn new(socket_path: Option<PathBuf>) -> Self {
+    /// Create a new MCP server with explicit tools.
+    pub fn new(socket_path: Option<PathBuf>, tools: Vec<ToolDefinition>) -> Self {
+        Self { tools, socket_path }
+    }
+
+    /// Create a new MCP server, reading tools from `MANTLE_DECISION_TOOLS` env var.
+    pub fn new_from_env(socket_path: Option<PathBuf>) -> Self {
         let tools = match std::env::var("MANTLE_DECISION_TOOLS") {
             Ok(json) => match serde_json::from_str(&json) {
                 Ok(tools) => {
@@ -211,7 +214,7 @@ impl McpServer {
             }
         };
 
-        Self { tools, socket_path }
+        Self::new(socket_path, tools)
     }
 
     /// Run the MCP server on stdio.
@@ -395,7 +398,7 @@ impl McpServer {
 ///
 /// This is the main entry point called from the CLI.
 pub fn run_mcp_server(socket_path: Option<PathBuf>) -> Result<(), Box<dyn std::error::Error>> {
-    let mut server = McpServer::new(socket_path);
+    let mut server = McpServer::new_from_env(socket_path);
     server.run()?;
     Ok(())
 }
@@ -490,7 +493,7 @@ mod tests {
 
     #[test]
     fn test_server_handles_initialize() {
-        let server = McpServer::new(None);
+        let server = McpServer::new(None, vec![]);
         let response = server.handle_initialize(json!("init-1"));
         assert!(response.result.is_some());
         assert!(response.error.is_none());
@@ -498,7 +501,7 @@ mod tests {
 
     #[test]
     fn test_server_handles_tools_list_empty() {
-        let server = McpServer::new(None);
+        let server = McpServer::new(None, vec![]);
         let response = server.handle_tools_list(json!("list-1"));
         assert!(response.result.is_some());
         let result = response.result.unwrap();
@@ -507,7 +510,7 @@ mod tests {
 
     #[test]
     fn test_server_handles_unknown_method() {
-        let mut server = McpServer::new(None);
+        let mut server = McpServer::new(None, vec![]);
         let request = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),
             id: json!("1"),
@@ -527,7 +530,7 @@ mod tests {
             r#"[{"name":"decision::test","description":"Test tool","inputSchema":{"type":"object"}}]"#,
         );
 
-        let server = McpServer::new(None);
+        let server = McpServer::new_from_env(None);
         assert_eq!(server.tools.len(), 1);
         assert_eq!(server.tools[0].name, "decision::test");
 

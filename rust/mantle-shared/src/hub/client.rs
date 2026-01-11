@@ -5,8 +5,9 @@ use std::time::Duration;
 
 use super::config::HubConfig;
 use super::types::{
-    GraphData, NodeCreateResponse, NodeInfo, NodeRegister, NodeResult, SessionCreateResponse,
-    SessionInfo, SessionRegister, SessionWithNodes,
+    GraphData, NodeCreateResponse, NodeInfo, NodeRegister, NodeResult,
+    SessionCreateEmptyRequest, SessionCreateEmptyResponse, SessionCreateResponse, SessionInfo,
+    SessionRegister, SessionWithNodes,
 };
 use crate::error::{MantleError, Result};
 use crate::events::StreamEvent;
@@ -84,6 +85,40 @@ impl HubClient {
             .json()
             .await
             .map_err(|e| MantleError::Hub(format!("Failed to parse session response: {}", e)))
+    }
+
+    /// Create an empty session (no root node).
+    ///
+    /// Used for graph execution tracking where Haskell creates the session first,
+    /// then mantle registers nodes into it.
+    ///
+    /// Returns the session info with the generated session_id.
+    pub async fn create_empty_session(&self, name: &str) -> Result<SessionCreateEmptyResponse> {
+        let url = format!("{}/api/sessions/empty", self.base_url);
+        let req = SessionCreateEmptyRequest {
+            name: name.to_string(),
+        };
+        let response = self
+            .client
+            .post(&url)
+            .json(&req)
+            .send()
+            .await
+            .map_err(|e| MantleError::Hub(format!("Failed to create empty session: {}", e)))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(MantleError::Hub(format!(
+                "Hub returned error {}: {}",
+                status, body
+            )));
+        }
+
+        response
+            .json()
+            .await
+            .map_err(|e| MantleError::Hub(format!("Failed to parse empty session response: {}", e)))
     }
 
     /// Get a session with all its nodes by ID.

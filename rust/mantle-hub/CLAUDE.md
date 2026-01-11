@@ -72,12 +72,13 @@ A node is a single Claude Code execution within a session:
 pub struct NodeInfo {
     pub id: String,
     pub session_id: String,
-    pub parent_node_id: Option<String>,  // For forked sessions
+    pub parent_node_id: Option<String>,  // For forked sessions / tree structure
     pub branch: String,
     pub worktree: String,
     pub prompt: String,
     pub model: String,
     pub state: NodeState,        // pending, running, completed, failed
+    pub metadata: Option<Value>, // Graph execution tracking metadata
     pub result: Option<NodeResultInfo>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -107,10 +108,25 @@ pub struct NodeResultInfo {
 | Method | Path | Purpose |
 |--------|------|---------|
 | `POST` | `/api/sessions` | Create session + root node |
+| `POST` | `/api/sessions/empty` | Create empty session (no root node) |
 | `GET` | `/api/sessions` | List all sessions |
 | `GET` | `/api/sessions/{sid}` | Get session with all nodes |
 | `DELETE` | `/api/sessions/{sid}` | Delete session and all nodes |
 | `GET` | `/api/sessions/{sid}/graph` | Graph visualization data |
+
+**Create empty session request (for graph execution tracking):**
+```json
+{
+  "name": "run-1"
+}
+```
+
+**Create empty session response:**
+```json
+{
+  "session": { "id": "uuid-...", "name": "run-1", "state": "pending", ... }
+}
+```
 
 **Create session request:**
 ```json
@@ -139,6 +155,30 @@ pub struct NodeResultInfo {
 | `GET` | `/api/sessions/{sid}/nodes/{nid}/events` | Get node's event stream |
 | `POST` | `/api/sessions/{sid}/nodes/{nid}/events` | Append event to node |
 | `POST` | `/api/sessions/{sid}/nodes/{nid}/result` | Submit node completion |
+
+**Create node request (with optional metadata for graph tracking):**
+```json
+{
+  "branch": "run-1/n2/n0/hTypeAdversary-a3f2c1",
+  "worktree": "/path/to/.mantle/worktrees/run-1-n2-n0-hTypeAdversary-a3f2c1",
+  "prompt": "Review types",
+  "model": "sonnet",
+  "parent_node_id": "uuid-of-parent-node",
+  "metadata": {
+    "execution_id": "run-1",
+    "node_path": "n2.n0",
+    "node_type": "hTypeAdversary",
+    "depth": 2
+  }
+}
+```
+
+**Create node response:**
+```json
+{
+  "node": { "id": "uuid-...", "session_id": "...", "state": "pending", "metadata": {...}, ... }
+}
+```
 
 **Submit result request:**
 ```json
@@ -200,6 +240,7 @@ CREATE TABLE nodes (
     prompt TEXT NOT NULL,
     model TEXT NOT NULL,
     state TEXT NOT NULL DEFAULT 'pending',
+    metadata TEXT,  -- JSON: {execution_id, node_path, node_type, depth}
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
@@ -249,6 +290,15 @@ CREATE INDEX idx_events_node ON events(node_id);
 | `state.rs` | Application state (pool + broadcast) |
 | `error.rs` | Error types |
 | `types.rs` | Re-exports from mantle-shared |
+
+## Logging & Debugging
+
+JSON parsing failures for node metadata are logged as warnings (not silently dropped):
+- `structured_output` - Warns if JSON in result can't be parsed
+- `model_usage` - Warns if model usage JSON can't be parsed
+- `metadata` - Warns if node metadata JSON can't be parsed
+
+Set `RUST_LOG=mantle_hub=debug` for detailed request/response logging.
 
 ## Configuration
 

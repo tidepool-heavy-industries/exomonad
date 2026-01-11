@@ -68,6 +68,7 @@ async fn run_migrations(pool: &SqlitePool) -> Result<()> {
             prompt TEXT NOT NULL,
             model TEXT NOT NULL,
             state TEXT NOT NULL DEFAULT 'pending',
+            metadata TEXT,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
@@ -77,6 +78,21 @@ async fn run_migrations(pool: &SqlitePool) -> Result<()> {
     )
     .execute(pool)
     .await?;
+
+    // Migration: add metadata column if not exists (for existing databases)
+    // SQLite doesn't support IF NOT EXISTS for columns, so we check first
+    let has_metadata: Option<(String,)> = sqlx::query_as(
+        "SELECT name FROM pragma_table_info('nodes') WHERE name = 'metadata'",
+    )
+    .fetch_optional(pool)
+    .await?;
+
+    if has_metadata.is_none() {
+        sqlx::query("ALTER TABLE nodes ADD COLUMN metadata TEXT")
+            .execute(pool)
+            .await
+            .ok(); // Ignore error if column exists
+    }
 
     // Results table (node completion data)
     sqlx::query(
@@ -132,6 +148,13 @@ async fn run_migrations(pool: &SqlitePool) -> Result<()> {
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_events_node ON events(node_id)")
         .execute(pool)
         .await?;
+
+    // Index for querying nodes by execution_id in metadata
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_nodes_metadata_execution ON nodes(json_extract(metadata, '$.execution_id'))",
+    )
+    .execute(pool)
+    .await?;
 
     Ok(())
 }
@@ -190,6 +213,32 @@ pub async fn create_session(
     .await?;
 
     Ok((session_id, node_id))
+}
+
+/// Create an empty session without a root node.
+///
+/// Used for graph execution tracking where Haskell creates the session first,
+/// then spawns nodes that register into this session.
+///
+/// Returns the session_id.
+pub async fn create_empty_session(pool: &SqlitePool, name: &str) -> Result<String> {
+    let session_id = uuid::Uuid::new_v4().to_string();
+    let now = chrono::Utc::now().to_rfc3339();
+
+    sqlx::query(
+        r#"
+        INSERT INTO sessions (id, name, created_at, updated_at)
+        VALUES (?, ?, ?, ?)
+        "#,
+    )
+    .bind(&session_id)
+    .bind(name)
+    .bind(&now)
+    .bind(&now)
+    .execute(pool)
+    .await?;
+
+    Ok(session_id)
 }
 
 /// Get session by ID.
@@ -260,35 +309,43 @@ pub async fn delete_session(pool: &SqlitePool, id: &str) -> Result<()> {
 // Node Operations
 // ============================================================================
 
-/// Add a child node to a session.
+/// Add a node to a session.
+///
+/// # Arguments
+/// * `parent_node_id` - Optional parent for tree structure. If None, this is a root node.
+/// * `metadata` - Optional JSON metadata (execution_id, node_path, node_type, depth).
 pub async fn create_node(
     pool: &SqlitePool,
     session_id: &str,
-    parent_node_id: &str,
+    parent_node_id: Option<&str>,
     branch: &str,
     worktree: &str,
     prompt: &str,
     model: &str,
+    metadata: Option<&serde_json::Value>,
 ) -> Result<String> {
     // Verify session exists
     let _ = get_session(pool, session_id).await?;
 
-    // Verify parent node exists and belongs to this session
-    let parent = get_node(pool, parent_node_id).await?;
-    if parent.session_id != session_id {
-        return Err(HubError::BadRequest(format!(
-            "Parent node {} does not belong to session {}",
-            parent_node_id, session_id
-        )));
+    // Verify parent node exists and belongs to this session (if provided)
+    if let Some(parent_id) = parent_node_id {
+        let parent = get_node(pool, parent_id).await?;
+        if parent.session_id != session_id {
+            return Err(HubError::BadRequest(format!(
+                "Parent node {} does not belong to session {}",
+                parent_id, session_id
+            )));
+        }
     }
 
     let node_id = uuid::Uuid::new_v4().to_string();
     let now = chrono::Utc::now().to_rfc3339();
+    let metadata_json = metadata.map(|m| serde_json::to_string(m).unwrap_or_default());
 
     sqlx::query(
         r#"
-        INSERT INTO nodes (id, session_id, parent_node_id, branch, worktree, prompt, model, state, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'running', ?, ?)
+        INSERT INTO nodes (id, session_id, parent_node_id, branch, worktree, prompt, model, state, metadata, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'running', ?, ?, ?)
         "#,
     )
     .bind(&node_id)
@@ -298,6 +355,7 @@ pub async fn create_node(
     .bind(worktree)
     .bind(prompt)
     .bind(model)
+    .bind(&metadata_json)
     .bind(&now)
     .bind(&now)
     .execute(pool)
@@ -317,7 +375,7 @@ pub async fn create_node(
 pub async fn get_node(pool: &SqlitePool, id: &str) -> Result<NodeInfo> {
     let row = sqlx::query_as::<_, NodeRow>(
         r#"
-        SELECT n.id, n.session_id, n.parent_node_id, n.branch, n.worktree, n.prompt, n.model, n.state, n.created_at, n.updated_at,
+        SELECT n.id, n.session_id, n.parent_node_id, n.branch, n.worktree, n.prompt, n.model, n.state, n.metadata, n.created_at, n.updated_at,
                r.exit_code, r.is_error, r.result_text, r.structured_output, r.total_cost_usd, r.num_turns, r.cc_session_id, r.duration_secs, r.model_usage
         FROM nodes n
         LEFT JOIN results r ON n.id = r.node_id
@@ -336,7 +394,7 @@ pub async fn get_node(pool: &SqlitePool, id: &str) -> Result<NodeInfo> {
 pub async fn list_nodes_for_session(pool: &SqlitePool, session_id: &str) -> Result<Vec<NodeInfo>> {
     let rows = sqlx::query_as::<_, NodeRow>(
         r#"
-        SELECT n.id, n.session_id, n.parent_node_id, n.branch, n.worktree, n.prompt, n.model, n.state, n.created_at, n.updated_at,
+        SELECT n.id, n.session_id, n.parent_node_id, n.branch, n.worktree, n.prompt, n.model, n.state, n.metadata, n.created_at, n.updated_at,
                r.exit_code, r.is_error, r.result_text, r.structured_output, r.total_cost_usd, r.num_turns, r.cc_session_id, r.duration_secs, r.model_usage
         FROM nodes n
         LEFT JOIN results r ON n.id = r.node_id
@@ -345,6 +403,28 @@ pub async fn list_nodes_for_session(pool: &SqlitePool, session_id: &str) -> Resu
         "#,
     )
     .bind(session_id)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows.into_iter().map(|r| r.into_node_info()).collect())
+}
+
+/// Get all nodes for an execution by execution_id in metadata.
+pub async fn get_nodes_by_execution(
+    pool: &SqlitePool,
+    execution_id: &str,
+) -> Result<Vec<NodeInfo>> {
+    let rows = sqlx::query_as::<_, NodeRow>(
+        r#"
+        SELECT n.id, n.session_id, n.parent_node_id, n.branch, n.worktree, n.prompt, n.model, n.state, n.metadata, n.created_at, n.updated_at,
+               r.exit_code, r.is_error, r.result_text, r.structured_output, r.total_cost_usd, r.num_turns, r.cc_session_id, r.duration_secs, r.model_usage
+        FROM nodes n
+        LEFT JOIN results r ON n.id = r.node_id
+        WHERE json_extract(n.metadata, '$.execution_id') = ?
+        ORDER BY n.created_at ASC
+        "#,
+    )
+    .bind(execution_id)
     .fetch_all(pool)
     .await?;
 
@@ -565,6 +645,7 @@ struct NodeRow {
     prompt: String,
     model: String,
     state: String,
+    metadata: Option<String>,
     created_at: String,
     updated_at: String,
     // Result fields (nullable from LEFT JOIN)
@@ -589,21 +670,46 @@ impl NodeRow {
                 exit_code,
                 is_error: is_error != 0,
                 result_text: self.result_text,
-                structured_output: self
-                    .structured_output
-                    .and_then(|s| serde_json::from_str(&s).ok()),
+                structured_output: self.structured_output.and_then(|s| {
+                    serde_json::from_str(&s).map_err(|e| {
+                        tracing::warn!(
+                            node_id = %self.id,
+                            error = %e,
+                            "Failed to parse structured_output JSON"
+                        );
+                        e
+                    }).ok()
+                }),
                 total_cost_usd: self.total_cost_usd.unwrap_or(0.0),
                 num_turns: self.num_turns.unwrap_or(0),
                 cc_session_id,
                 duration_secs: self.duration_secs.unwrap_or(0.0),
-                model_usage: self
-                    .model_usage
-                    .and_then(|s| serde_json::from_str(&s).ok())
-                    .unwrap_or_default(),
+                model_usage: self.model_usage.and_then(|s| {
+                    serde_json::from_str(&s).map_err(|e| {
+                        tracing::warn!(
+                            node_id = %self.id,
+                            error = %e,
+                            "Failed to parse model_usage JSON"
+                        );
+                        e
+                    }).ok()
+                }).unwrap_or_default(),
             })
         } else {
             None
         };
+
+        // Parse metadata JSON if present
+        let metadata = self.metadata.and_then(|s| {
+            serde_json::from_str(&s).map_err(|e| {
+                tracing::warn!(
+                    node_id = %self.id,
+                    error = %e,
+                    "Failed to parse node metadata JSON"
+                );
+                e
+            }).ok()
+        });
 
         NodeInfo {
             id: self.id,
@@ -614,6 +720,7 @@ impl NodeRow {
             prompt: self.prompt,
             model: self.model,
             state: self.state.parse().unwrap_or(NodeState::Pending),
+            metadata,
             created_at: self.created_at,
             updated_at: self.updated_at,
             result,

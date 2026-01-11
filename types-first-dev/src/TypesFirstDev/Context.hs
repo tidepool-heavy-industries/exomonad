@@ -52,8 +52,9 @@ type GingerM = Run SourcePos (Writer Text) Text
 
 -- | Context for scaffold template.
 data ScaffoldTemplateCtx = ScaffoldTemplateCtx
-  { spec          :: Spec
-  , parentContext :: Maybe ParentContext
+  { spec                 :: Spec
+  , parentContext        :: Maybe ParentContext
+  , clarificationNeeded  :: Maybe ClarificationRequest  -- ^ Why we're back (if back-routing)
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (ToJSON)
@@ -62,6 +63,7 @@ instance ToGVal GingerM ScaffoldTemplateCtx where
   toGVal ctx = dict
     [ ("spec", toGVal ctx.spec)
     , ("parentContext", toGVal ctx.parentContext)
+    , ("clarificationNeeded", toGVal ctx.clarificationNeeded)
     ]
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -73,6 +75,7 @@ data TDDWriteTestsTemplateCtx = TDDWriteTestsTemplateCtx
   { spec            :: Spec
   , scaffold        :: InitWorkPayload
   , coveredCriteria :: [Text]  -- From TDDMem
+  , reviewCritiques :: [Text]  -- From TDDMem (critiques from previous TDDReviewImpl)
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (ToJSON)
@@ -82,6 +85,7 @@ instance ToGVal GingerM TDDWriteTestsTemplateCtx where
     [ ("spec", toGVal ctx.spec)
     , ("scaffold", toGVal ctx.scaffold)
     , ("coveredCriteria", list (toGVal <$> ctx.coveredCriteria))
+    , ("reviewCritiques", list (toGVal <$> ctx.reviewCritiques))
     ]
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -247,11 +251,25 @@ instance ToGVal GingerM Critique where
     ]
 
 instance ToGVal GingerM MergeComplete where
-  toGVal m = dict
-    [ ("commit", toGVal m.mcCommit)
-    , ("author", toGVal m.mcAuthor)
-    , ("impactLevel", toGVal (T.pack (show m.mcImpactLevel)))
-    , ("changes", list (toGVal <$> m.mcChanges))
+  toGVal (MergeSuccess commit author impact changes) = dict
+    [ ("success", toGVal True)
+    , ("commit", toGVal commit)
+    , ("author", toGVal author)
+    , ("impactLevel", toGVal (T.pack (show impact)))
+    , ("changes", list (toGVal <$> changes))
+    ]
+  toGVal (MergeFailed failure) = dict
+    [ ("success", toGVal False)
+    , ("failure", toGVal failure)
+    ]
+
+instance ToGVal GingerM ChildFailure where
+  toGVal f = dict
+    [ ("reason", toGVal f.cfReason)
+    , ("branch", toGVal f.cfBranch)
+    , ("attempts", toGVal f.cfAttempts)
+    , ("partialCommit", maybe (toGVal ("" :: Text)) toGVal f.cfPartialCommit)
+    , ("filesCreated", list (toGVal <$> f.cfFilesCreated))
     ]
 
 instance ToGVal GingerM ChangeEntry where
@@ -284,4 +302,14 @@ instance ToGVal GingerM MergeEvent where
     [ ("author", toGVal e.meAuthor)
     , ("impactLevel", toGVal (T.pack (show e.meImpactLevel)))
     , ("changes", list (toGVal <$> e.meChanges))
+    ]
+
+instance ToGVal GingerM ClarificationType where
+  toGVal ct = toGVal (T.pack (show ct))
+
+instance ToGVal GingerM ClarificationRequest where
+  toGVal r = dict
+    [ ("type", toGVal r.crType)
+    , ("details", toGVal r.crDetails)
+    , ("question", toGVal r.crQuestion)
     ]

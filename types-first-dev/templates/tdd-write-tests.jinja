@@ -20,6 +20,16 @@ You are the **Test Author**. Write failing tests that drive implementation.
 - {{ id }} ✓
 {% endfor %}
 
+{% if reviewCritiques %}
+## Review Feedback
+
+Previous implementation had issues. Write tests to catch these problems:
+
+{% for critique in reviewCritiques %}
+- {{ critique }}
+{% endfor %}
+{% endif %}
+
 ---
 
 ## Your Task

@@ -28,6 +28,7 @@ data TDDMem = TDDMem
   { tmConversationId  :: Text    -- ^ Resume from parent's context
   , tmCoveredCriteria :: [Text]  -- ^ CriterionIds with passing tests
   , tmPendingTests    :: [Text]  -- ^ Tests written but not yet passed
+  , tmReviewCritiques :: [Text]  -- ^ Critiques from TDDReviewImpl (for MoreTests route)
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON, StructuredOutput)
@@ -38,6 +39,7 @@ emptyTDDMem convId = TDDMem
   { tmConversationId = convId
   , tmCoveredCriteria = []
   , tmPendingTests = []
+  , tmReviewCritiques = []
   }
 
 -- | Impl node memory.

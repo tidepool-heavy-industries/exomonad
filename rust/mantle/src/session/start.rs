@@ -17,8 +17,8 @@ use super::worktree::WorktreeManager;
 use crate::docker::{run_claude_direct, ContainerConfig};
 
 use mantle_shared::hub::{
-    HubClient, HubConfig, ModelUsage as HubModelUsage, NodeResult as HubNodeResult,
-    SessionRegister, SyncEventStream,
+    HubClient, HubConfig, ModelUsage as HubModelUsage, NodeCreateResponse, NodeRegister,
+    NodeResult as HubNodeResult, SessionRegister, SyncEventStream,
 };
 
 /// Error types for session start operations.
@@ -44,6 +44,9 @@ pub enum StartError {
 
     #[error("Hub error: {0}")]
     Hub(#[from] mantle_shared::error::MantleError),
+
+    #[error("Validation error: {0}")]
+    Validation(String),
 }
 
 pub type Result<T> = std::result::Result<T, StartError>;
@@ -65,19 +68,164 @@ pub struct StartConfig {
     pub json_schema: Option<String>,
     /// Optional JSON array of MCP decision tools for sum type outputs
     pub decision_tools: Option<String>,
+
+    // === Graph Execution Tracking ===
+
+    /// Hub session ID (for registering nodes in existing hub session)
+    /// When provided, registers this node into an existing hub session
+    /// instead of creating a new one.
+    pub hub_session_id: Option<String>,
+    /// Execution ID (e.g., "run-1") - human-readable run identifier
+    pub execution_id: Option<String>,
+    /// Node path in graph (e.g., "n0" for root, "n2.n0" for nested)
+    pub node_path: Option<String>,
+    /// Node type/handler name (e.g., "hTypes", "hImpl")
+    pub node_type: Option<String>,
+    /// Parent hub node ID (for tree structure in hub)
+    pub parent_hub_node_id: Option<String>,
+}
+
+/// Calculate depth from node path.
+///
+/// Depth is the number of non-empty path segments.
+/// - `""` → 0 (root, no path)
+/// - `"n0"` → 1
+/// - `"n2.n0"` → 2
+/// - `"n2.n0."` → 2 (trailing dots ignored)
+fn calculate_depth(node_path: &str) -> usize {
+    if node_path.is_empty() {
+        0
+    } else {
+        node_path.split('.').filter(|s| !s.is_empty()).count()
+    }
+}
+
+/// Build node metadata for graph execution tracking.
+///
+/// Creates a JSON object with execution_id, node_path, node_type, and depth.
+fn build_node_metadata(config: &StartConfig) -> Option<serde_json::Value> {
+    if config.execution_id.is_none() && config.node_path.is_none() && config.node_type.is_none() {
+        return None;
+    }
+
+    let depth = config
+        .node_path
+        .as_ref()
+        .map(|p| calculate_depth(p))
+        .unwrap_or(0);
+
+    Some(serde_json::json!({
+        "execution_id": config.execution_id,
+        "node_path": config.node_path,
+        "node_type": config.node_type,
+        "depth": depth,
+    }))
+}
+
+/// Build hierarchical branch name for graph execution tracking.
+///
+/// Format: `{execution_id}/{node_path_with_slashes}/{node_type}-{6hex}`
+/// Examples:
+/// - Root node: `run-1/hTypes-a3f2c1`
+/// - Nested node: `run-1/n2/n0/hTypeAdversary-b4e5d2`
+fn construct_hierarchical_branch(config: &StartConfig) -> String {
+    let uuid_suffix = &uuid::Uuid::new_v4().to_string()[..6];
+
+    // Use execution_id or fall back to slug
+    let execution_id = config
+        .execution_id
+        .as_deref()
+        .unwrap_or(&config.slug);
+
+    // Use node_type or fall back to "node"
+    let node_type = config.node_type.as_deref().unwrap_or("node");
+
+    match &config.node_path {
+        Some(path) => {
+            let path_with_slashes = path.replace('.', "/");
+            format!("{}/{}/{}-{}", execution_id, path_with_slashes, node_type, uuid_suffix)
+        }
+        None => {
+            // Root node - no path prefix
+            format!("{}/{}-{}", execution_id, node_type, uuid_suffix)
+        }
+    }
+}
+
+/// Validate graph tracking arguments.
+///
+/// When `hub_session_id` is provided (graph tracking mode), validates:
+/// - `execution_id` is required
+/// - No path separators (`/` or `\`) in identifiers
+/// - `node_path` only contains alphanumeric chars and dots
+fn validate_graph_tracking_args(config: &StartConfig) -> Result<()> {
+    // Only validate if in graph tracking mode
+    if config.hub_session_id.is_none() {
+        return Ok(());
+    }
+
+    // execution_id is required for graph tracking
+    let execution_id = config.execution_id.as_deref().ok_or_else(|| {
+        StartError::Validation(
+            "--execution-id is required when --hub-session-id is provided".into(),
+        )
+    })?;
+
+    // Validate no path separators in execution_id
+    if execution_id.contains('/') || execution_id.contains('\\') {
+        return Err(StartError::Validation(
+            "execution_id cannot contain path separators (/ or \\)".into(),
+        ));
+    }
+
+    // Validate node_type if provided
+    if let Some(ref node_type) = config.node_type {
+        if node_type.is_empty() {
+            return Err(StartError::Validation("node_type cannot be empty".into()));
+        }
+        if node_type.contains('/') || node_type.contains('\\') {
+            return Err(StartError::Validation(
+                "node_type cannot contain path separators (/ or \\)".into(),
+            ));
+        }
+    }
+
+    // Validate node_path if provided (alphanumeric and dots only)
+    if let Some(ref node_path) = config.node_path {
+        if !node_path.chars().all(|c| c.is_alphanumeric() || c == '.') {
+            return Err(StartError::Validation(
+                "node_path can only contain alphanumeric characters and dots".into(),
+            ));
+        }
+    }
+
+    Ok(())
 }
 
 /// Start a new session.
 ///
-/// This function:
+/// This function supports two flows:
+///
+/// **Legacy Flow** (when `hub_session_id` is not provided):
 /// 1. Checks hub is reachable (fails if not)
 /// 2. Generates unique session ID and branch name
 /// 3. Creates git worktree for isolation
 /// 4. Records session in state file
-/// 5. Registers session with mantle-hub
+/// 5. Registers session with mantle-hub (creates session + root node)
 /// 6. Connects WebSocket for live event streaming
 /// 7. Executes Claude Code via Docker (streaming events to hub)
 /// 8. Submits final result to mantle-hub
+///
+/// **Graph Execution Tracking Flow** (when `hub_session_id` is provided):
+/// 1. Checks hub is reachable (fails if not)
+/// 2. Generates unique session ID
+/// 3. Builds hierarchical branch name from execution_id/node_path/node_type
+/// 4. Creates git worktree for isolation
+/// 5. Records session in state file
+/// 6. Registers node in existing hub session (with metadata)
+/// 7. Connects WebSocket for live event streaming
+/// 8. Executes Claude Code via Docker (streaming events to hub)
+/// 9. Submits final result to mantle-hub
 ///
 /// # Arguments
 /// * `repo_root` - Path to the git repository root
@@ -86,6 +234,9 @@ pub struct StartConfig {
 /// # Returns
 /// Session output with results
 pub fn start_session(repo_root: &Path, config: &StartConfig) -> Result<SessionOutput> {
+    // Validate graph tracking args before anything else
+    validate_graph_tracking_args(config)?;
+
     let start_time = Instant::now();
 
     // Load hub config
@@ -101,13 +252,22 @@ pub fn start_session(repo_root: &Path, config: &StartConfig) -> Result<SessionOu
 
     // Generate unique identifiers
     let session_id = generate_session_id();
-    let branch = generate_branch_name(&config.slug);
+
+    // Determine branch name based on flow
+    let branch = if config.hub_session_id.is_some() {
+        // Graph execution tracking: use hierarchical branch
+        construct_hierarchical_branch(config)
+    } else {
+        // Legacy flow: use slug-based branch
+        generate_branch_name(&config.slug)
+    };
 
     info!(
         session_id = %session_id,
         slug = %config.slug,
         branch = %branch,
         model = %config.model,
+        hub_session_id = ?config.hub_session_id,
         "Starting new session"
     );
 
@@ -131,10 +291,22 @@ pub fn start_session(repo_root: &Path, config: &StartConfig) -> Result<SessionOu
     // Save session to state file
     state_manager.insert_session(session)?;
 
-    // 2. Register session with hub (creates session + root node)
-    let (hub_session_id, hub_node_id) =
-        register_with_hub(&hub_config, &branch, &worktree_path, config)?;
-    info!(hub_session_id = %hub_session_id, hub_node_id = %hub_node_id, "Registered session with hub");
+    // 2. Register with hub - either new session or node in existing session
+    let (hub_session_id, hub_node_id) = if let Some(ref existing_hub_session_id) = config.hub_session_id {
+        // Graph execution tracking: register node in existing session
+        let node_response = register_node_in_existing_session(
+            &hub_config,
+            existing_hub_session_id,
+            &branch,
+            &worktree_path,
+            config,
+        )?;
+        (existing_hub_session_id.clone(), node_response.node.id)
+    } else {
+        // Legacy flow: create new session with root node
+        register_with_hub(&hub_config, &branch, &worktree_path, config)?
+    };
+    info!(hub_session_id = %hub_session_id, hub_node_id = %hub_node_id, "Registered with hub");
 
     // 3. Connect WebSocket for event streaming
     let event_stream =
@@ -218,6 +390,68 @@ fn register_with_hub(
 
         let resp = client.create_session(&req).await?;
         Ok((resp.session.id, resp.root_node.id))
+    })
+}
+
+/// Register a node in an existing hub session.
+///
+/// Used for graph execution tracking where the hub session is created by
+/// the orchestrator (Haskell) and nodes are registered into it.
+///
+/// Returns the NodeCreateResponse containing the new node info.
+fn register_node_in_existing_session(
+    hub_config: &HubConfig,
+    hub_session_id: &str,
+    branch: &str,
+    worktree_path: &Path,
+    config: &StartConfig,
+) -> Result<NodeCreateResponse> {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| StartError::Execution(format!("Failed to create runtime: {}", e)))?;
+
+    rt.block_on(async {
+        let client = HubClient::from_config(hub_config)?;
+
+        // Build metadata for graph execution tracking
+        let metadata = build_node_metadata(config);
+
+        let req = NodeRegister {
+            branch: branch.to_string(),
+            worktree: worktree_path.to_path_buf(),
+            prompt: config.prompt.clone(),
+            model: config.model.clone(),
+            parent_node_id: config.parent_hub_node_id.clone(),
+            metadata,
+        };
+
+        debug!(
+            hub_session_id = %hub_session_id,
+            parent_hub_node_id = ?config.parent_hub_node_id,
+            metadata = ?req.metadata,
+            "Registering node in existing hub session"
+        );
+
+        client.create_node(hub_session_id, &req).await.map_err(|e| {
+            // Provide better error message for common failure cases
+            let err_str = e.to_string();
+            if err_str.contains("parent") || err_str.contains("FOREIGN KEY") {
+                StartError::Validation(format!(
+                    "Invalid parent_hub_node_id '{}': parent node does not exist in session '{}'",
+                    config.parent_hub_node_id.as_deref().unwrap_or("none"),
+                    hub_session_id
+                ))
+            } else if err_str.contains("404") || err_str.contains("not found") {
+                StartError::Validation(format!(
+                    "Hub session '{}' not found. Ensure the orchestrator created the session first.",
+                    hub_session_id
+                ))
+            } else {
+                // Propagate other hub errors as-is
+                StartError::Hub(e)
+            }
+        })
     })
 }
 
@@ -466,6 +700,11 @@ mod tests {
             base_branch: None,
             json_schema: None,
             decision_tools: None,
+            hub_session_id: None,
+            execution_id: None,
+            node_path: None,
+            node_type: None,
+            parent_hub_node_id: None,
         };
 
         let (session_id, branch, worktree_path) = prepare_session(temp_dir.path(), &config).unwrap();
@@ -499,6 +738,11 @@ mod tests {
             base_branch: None,
             json_schema: None,
             decision_tools: None,
+            hub_session_id: None,
+            execution_id: None,
+            node_path: None,
+            node_type: None,
+            parent_hub_node_id: None,
         };
 
         let (_, branch, worktree_path) = prepare_session(temp_dir.path(), &config).unwrap();
@@ -523,6 +767,11 @@ mod tests {
             base_branch: None,
             json_schema: None,
             decision_tools: None,
+            hub_session_id: None,
+            execution_id: None,
+            node_path: None,
+            node_type: None,
+            parent_hub_node_id: None,
         };
 
         let (session_id, _, _) = prepare_session(temp_dir.path(), &config).unwrap();
@@ -546,6 +795,11 @@ mod tests {
             base_branch: None,
             json_schema: None,
             decision_tools: None,
+            hub_session_id: None,
+            execution_id: None,
+            node_path: None,
+            node_type: None,
+            parent_hub_node_id: None,
         };
 
         let (id1, branch1, _) = prepare_session(temp_dir.path(), &config1).unwrap();
@@ -559,6 +813,11 @@ mod tests {
             base_branch: None,
             json_schema: None,
             decision_tools: None,
+            hub_session_id: None,
+            execution_id: None,
+            node_path: None,
+            node_type: None,
+            parent_hub_node_id: None,
         };
 
         let (id2, branch2, _) = prepare_session(temp_dir.path(), &config2).unwrap();
@@ -615,6 +874,11 @@ mod tests {
             base_branch: Some("develop".to_string()),
             json_schema: None,
             decision_tools: None,
+            hub_session_id: None,
+            execution_id: None,
+            node_path: None,
+            node_type: None,
+            parent_hub_node_id: None,
         };
 
         let (_, _, worktree_path) = prepare_session(temp_dir.path(), &config).unwrap();
@@ -633,6 +897,11 @@ mod tests {
             base_branch: None,
             json_schema: None,
             decision_tools: None,
+            hub_session_id: None,
+            execution_id: None,
+            node_path: None,
+            node_type: None,
+            parent_hub_node_id: None,
         };
 
         // Verify zero timeout means no timeout
@@ -656,5 +925,170 @@ mod tests {
         assert_eq!(output.error, Some("Something went wrong".to_string()));
         assert_eq!(output.session_id, "test-session-123");
         assert_eq!(output.duration_secs, 1.5);
+    }
+
+    // =========================================================================
+    // Depth Calculation Tests
+    // =========================================================================
+
+    #[test]
+    fn test_calculate_depth_empty_path() {
+        assert_eq!(calculate_depth(""), 0);
+    }
+
+    #[test]
+    fn test_calculate_depth_single_segment() {
+        assert_eq!(calculate_depth("n0"), 1);
+        assert_eq!(calculate_depth("hTypes"), 1);
+    }
+
+    #[test]
+    fn test_calculate_depth_multiple_segments() {
+        assert_eq!(calculate_depth("n2.n0"), 2);
+        assert_eq!(calculate_depth("n1.n2.n3"), 3);
+    }
+
+    #[test]
+    fn test_calculate_depth_trailing_dot() {
+        // Trailing dots should be ignored
+        assert_eq!(calculate_depth("n2.n0."), 2);
+        assert_eq!(calculate_depth("n0."), 1);
+    }
+
+    #[test]
+    fn test_calculate_depth_leading_dot() {
+        // Leading dots should be ignored
+        assert_eq!(calculate_depth(".n0"), 1);
+        assert_eq!(calculate_depth(".n2.n0"), 2);
+    }
+
+    #[test]
+    fn test_calculate_depth_consecutive_dots() {
+        // Multiple consecutive dots should count as empty segments (ignored)
+        assert_eq!(calculate_depth("n0..n1"), 2);
+        assert_eq!(calculate_depth("..."), 0);
+    }
+
+    // =========================================================================
+    // Validation Tests
+    // =========================================================================
+
+    fn make_config_for_validation() -> StartConfig {
+        StartConfig {
+            slug: "test".to_string(),
+            prompt: "test".to_string(),
+            model: "sonnet".to_string(),
+            timeout_secs: 0,
+            base_branch: None,
+            json_schema: None,
+            decision_tools: None,
+            hub_session_id: None,
+            execution_id: None,
+            node_path: None,
+            node_type: None,
+            parent_hub_node_id: None,
+        }
+    }
+
+    #[test]
+    fn test_validation_passes_without_graph_tracking() {
+        // When hub_session_id is None, validation passes even with missing fields
+        let config = make_config_for_validation();
+        assert!(validate_graph_tracking_args(&config).is_ok());
+    }
+
+    #[test]
+    fn test_validation_requires_execution_id() {
+        let mut config = make_config_for_validation();
+        config.hub_session_id = Some("session-123".to_string());
+        // Missing execution_id should fail
+        let result = validate_graph_tracking_args(&config);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("--execution-id is required"));
+    }
+
+    #[test]
+    fn test_validation_rejects_execution_id_with_slash() {
+        let mut config = make_config_for_validation();
+        config.hub_session_id = Some("session-123".to_string());
+        config.execution_id = Some("run/1".to_string()); // has forward slash
+        let result = validate_graph_tracking_args(&config);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("path separators"));
+    }
+
+    #[test]
+    fn test_validation_rejects_execution_id_with_backslash() {
+        let mut config = make_config_for_validation();
+        config.hub_session_id = Some("session-123".to_string());
+        config.execution_id = Some("run\\1".to_string()); // has backslash
+        let result = validate_graph_tracking_args(&config);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("path separators"));
+    }
+
+    #[test]
+    fn test_validation_rejects_empty_node_type() {
+        let mut config = make_config_for_validation();
+        config.hub_session_id = Some("session-123".to_string());
+        config.execution_id = Some("run-1".to_string());
+        config.node_type = Some("".to_string()); // empty
+        let result = validate_graph_tracking_args(&config);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("node_type cannot be empty"));
+    }
+
+    #[test]
+    fn test_validation_rejects_node_type_with_slash() {
+        let mut config = make_config_for_validation();
+        config.hub_session_id = Some("session-123".to_string());
+        config.execution_id = Some("run-1".to_string());
+        config.node_type = Some("h/Types".to_string()); // has slash
+        let result = validate_graph_tracking_args(&config);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("node_type"));
+    }
+
+    #[test]
+    fn test_validation_rejects_node_path_with_special_chars() {
+        let mut config = make_config_for_validation();
+        config.hub_session_id = Some("session-123".to_string());
+        config.execution_id = Some("run-1".to_string());
+        config.node_path = Some("n0-n1".to_string()); // hyphen not allowed
+        let result = validate_graph_tracking_args(&config);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("node_path"));
+    }
+
+    #[test]
+    fn test_validation_accepts_valid_graph_tracking_args() {
+        let mut config = make_config_for_validation();
+        config.hub_session_id = Some("session-123".to_string());
+        config.execution_id = Some("run-1".to_string());
+        config.node_path = Some("n2.n0".to_string());
+        config.node_type = Some("hTypes".to_string());
+        assert!(validate_graph_tracking_args(&config).is_ok());
+    }
+
+    #[test]
+    fn test_validation_accepts_empty_node_path() {
+        // Empty node_path is valid (represents root)
+        let mut config = make_config_for_validation();
+        config.hub_session_id = Some("session-123".to_string());
+        config.execution_id = Some("run-1".to_string());
+        config.node_path = Some("".to_string());
+        assert!(validate_graph_tracking_args(&config).is_ok());
     }
 }

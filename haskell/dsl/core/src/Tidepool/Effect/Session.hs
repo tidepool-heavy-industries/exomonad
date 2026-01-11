@@ -80,6 +80,8 @@ import Data.Time (UTCTime)
 import GHC.Generics (Generic)
 
 import Tidepool.Graph.Types (ModelChoice)
+import Tidepool.Schema (HasJSONSchema(..), emptySchema, SchemaType(TString))
+import Tidepool.StructuredOutput (StructuredOutput)
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -90,8 +92,12 @@ import Tidepool.Graph.Types (ModelChoice)
 --
 -- Sessions persist across container lifecycles via shared ~/.claude/ volume.
 newtype SessionId = SessionId { unSessionId :: Text }
-  deriving stock (Eq, Ord, Show)
+  deriving stock (Eq, Ord, Show, Generic)
   deriving newtype (FromJSON, ToJSON)
+  deriving anyclass (StructuredOutput)
+
+instance HasJSONSchema SessionId where
+  jsonSchema = emptySchema TString
 
 
 -- | Session operation strategy for ClaudeCode handlers.

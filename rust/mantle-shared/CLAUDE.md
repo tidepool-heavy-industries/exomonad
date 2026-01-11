@@ -149,14 +149,61 @@ impl HubClient {
 
     // Session management
     pub async fn create_session(&self, session: &SessionRegister) -> Result<SessionCreateResponse>;
-    pub async fn get_session(&self, session_id: &str) -> Result<SessionInfo>;
+    pub async fn create_empty_session(&self, name: &str) -> Result<SessionCreateEmptyResponse>;
+    pub async fn get_session(&self, session_id: &str) -> Result<SessionWithNodes>;
+    pub async fn list_sessions(&self) -> Result<Vec<SessionInfo>>;
+    pub async fn delete_session(&self, session_id: &str) -> Result<()>;
 
     // Node management
-    pub async fn register_node(&self, session_id: &str, node: &NodeRegister) -> Result<NodeInfo>;
-    pub async fn submit_result(&self, session_id: &str, node_id: &str, result: &NodeResult) -> Result<()>;
+    pub async fn create_node(&self, session_id: &str, req: &NodeRegister) -> Result<NodeCreateResponse>;
+    pub async fn get_node(&self, session_id: &str, node_id: &str) -> Result<NodeInfo>;
+    pub async fn submit_node_result(&self, session_id: &str, node_id: &str, result: &NodeResult) -> Result<()>;
 
-    // WebSocket streaming
-    pub async fn connect_ws(&self) -> Result<WebSocketStream>;
+    // Graph data
+    pub async fn get_graph(&self, session_id: &str) -> Result<GraphData>;
+}
+```
+
+### Hub Types (Graph Execution Tracking)
+```rust
+// Create empty session (for orchestrator to create session first)
+pub struct SessionCreateEmptyRequest {
+    pub name: String,
+}
+
+pub struct SessionCreateEmptyResponse {
+    pub session: SessionInfo,
+}
+
+// Register node with optional metadata
+pub struct NodeRegister {
+    pub branch: String,
+    pub worktree: PathBuf,
+    pub prompt: String,
+    pub model: String,
+    pub parent_node_id: Option<String>,  // For tree structure
+    pub metadata: Option<Value>,          // Graph execution tracking
+}
+
+pub struct NodeCreateResponse {
+    pub node: NodeInfo,
+}
+
+// Node metadata for graph tracking
+// Stored as JSON: {"execution_id": "run-1", "node_path": "n2.n0", "node_type": "hTypes", "depth": 2}
+pub struct NodeInfo {
+    pub id: String,
+    pub session_id: String,
+    pub parent_node_id: Option<String>,
+    pub branch: String,
+    pub worktree: PathBuf,
+    pub prompt: String,
+    pub model: String,
+    pub state: String,  // pending, running, completed, failed
+    pub metadata: Option<Value>,
+    pub result: Option<NodeResultInfo>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
 }
 ```
 

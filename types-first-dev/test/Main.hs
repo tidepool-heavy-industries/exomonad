@@ -14,15 +14,36 @@ import Control.Monad.Freer (Eff)
 import Test.Hspec
 import qualified Data.Text as T
 
-import qualified TypesFirstDev.Types.Core as TDD (Spec)
+import qualified TypesFirstDev.Types.Core as TDD (Spec(..), defaultSpec)
+import TypesFirstDev.Types.Nodes (ScaffoldInput(..))
 import TypesFirstDev.Types.Memory (emptyTDDMem, emptyImplMem, AttemptRecord)
 import TypesFirstDev.Types.Payloads (MergeComplete)
 import TypesFirstDev.V3.Interpreters
   ( V3Effects
+  , ExecutionContext(..)
   , runV3Effects
   , WorktreeConfig(..)
   )
 import Tidepool.Actor.Subgraph (withRecursiveGraph)
+
+-- | Test ScaffoldInput for effect stack composition tests
+testScaffoldInput :: ScaffoldInput
+testScaffoldInput = ScaffoldInput
+  { siSpec = TDD.defaultSpec
+  , siParentContext = Nothing
+  , siCurrentDepth = 0
+  , siMaxDepth = 3
+  , siParentSessionId = Nothing
+  , siClarificationNeeded = Nothing
+  }
+
+-- | Test ExecutionContext for effect stack composition tests
+testExecutionContext :: ExecutionContext
+testExecutionContext = ExecutionContext
+  { ecSpec = TDD.defaultSpec
+  , ecScaffold = Nothing
+  , ecNodeInfo = Nothing
+  }
 
 main :: IO ()
 main = hspec $ do
@@ -31,7 +52,7 @@ main = hspec $ do
     describe "Effect Interpreter Composition" $ do
       it "initializes effect stack without errors" $ do
         -- Test that the effect interpreter can be created and invoked
-        withRecursiveGraph @TDD.Spec @MergeComplete $ \subgraphState wire -> do
+        withRecursiveGraph @ScaffoldInput @MergeComplete $ \subgraphState wire -> do
           -- Initialize memory
           tddMem <- newTVarIO $ emptyTDDMem "test-session"
           implMem <- newTVarIO $ emptyImplMem "test-session"
@@ -42,7 +63,7 @@ main = hspec $ do
                 , wtcParentBranch = "main"
                 }
           let _runner :: forall a. Eff V3Effects a -> IO a
-              _runner = runV3Effects subgraphState tddMem implMem wtConfig
+              _runner = runV3Effects subgraphState tddMem implMem testScaffoldInput testExecutionContext wtConfig
 
           -- Wire the recursion
           wire $ \_ -> pure $ error "TODO: Implement child graph execution for tests"
@@ -74,7 +95,7 @@ main = hspec $ do
     describe "Deferred Subgraph Binding" $ do
       it "sets up recursive graph execution" $ do
         -- Test that withRecursiveGraph creates proper deferred state
-        withRecursiveGraph @TDD.Spec @MergeComplete $ \_subgraphState wire -> do
+        withRecursiveGraph @ScaffoldInput @MergeComplete $ \_subgraphState wire -> do
           -- Wire function sets up the deferred binding
           wire $ \_ -> pure $ error "TODO: Return MergeComplete from child graphs"
           -- If this doesn't error, the binding setup succeeded
@@ -98,7 +119,7 @@ main = hspec $ do
     it "preserves session context across node transitions" $ do
       -- Verify that session IDs are properly threaded through Memory effects
       -- Type-safe verification: effect stack composes with Memory constraints
-      withRecursiveGraph @TDD.Spec @MergeComplete $ \subgraphState wire -> do
+      withRecursiveGraph @ScaffoldInput @MergeComplete $ \subgraphState wire -> do
         tddMem <- newTVarIO $ emptyTDDMem "conv-123"
         implMem <- newTVarIO $ emptyImplMem "conv-456"
         let wtConfig = WorktreeConfig
@@ -106,7 +127,7 @@ main = hspec $ do
               , wtcParentBranch = "main"
               }
         let _runner :: forall a. Eff V3Effects a -> IO a
-            _runner = runV3Effects subgraphState tddMem implMem wtConfig
+            _runner = runV3Effects subgraphState tddMem implMem testScaffoldInput testExecutionContext wtConfig
         wire $ \_ -> pure $ error "TODO: Child execution"
         -- If we reach here, Memory effects thread correctly through interpreter chain
         pure ()

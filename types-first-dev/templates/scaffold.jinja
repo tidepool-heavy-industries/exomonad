@@ -2,6 +2,19 @@
 
 You are the **Planner**. Analyze the spec and set up the work structure.
 
+{% if clarificationNeeded %}
+## ⚠️ Clarification Required
+
+A downstream node encountered an issue and back-routed here.
+
+**Type:** {{ clarificationNeeded.type }}
+**Details:** {{ clarificationNeeded.details }}
+
+**Question:** {{ clarificationNeeded.question }}
+
+Please address this issue in your scaffold output.
+{% endif %}
+
 ## Spec
 
 **ID:** `{{ spec.id }}`

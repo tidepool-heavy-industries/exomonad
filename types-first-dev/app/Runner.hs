@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 -- | V3 TDD Runner
@@ -12,6 +13,7 @@ module Main (main) where
 import Control.Monad (unless)
 import Control.Concurrent.STM (newTVarIO)
 import Data.Text (Text)
+import qualified Data.Text as T
 import Data.Yaml (decodeFileThrow)
 import System.Environment (getArgs)
 import System.Directory (getCurrentDirectory, doesFileExist)
@@ -23,9 +25,10 @@ import Tidepool.Actor.Subgraph (withRecursiveGraph)
 
 import TypesFirstDev.Types.Core (Spec(..))
 import TypesFirstDev.Types.Nodes (ScaffoldInput(..))
-import TypesFirstDev.Types.Payloads (MergeComplete(..))
+import TypesFirstDev.Types.Payloads (MergeComplete(..), ChildFailure(..))
+import TypesFirstDev.Types.Shared (NodeInfo(..))
 import TypesFirstDev.Types.Memory (emptyTDDMem, emptyImplMem)
-import TypesFirstDev.V3.Interpreters (runV3Effects, WorktreeConfig(..))
+import TypesFirstDev.V3.Interpreters (runV3Effects, WorktreeConfig(..), ExecutionContext(..))
 import TypesFirstDev.Executor (runV3)
 
 -- | Application-level result type
@@ -46,12 +49,20 @@ printResult result = do
   putStrLn "  Result"
   putStrLn "════════════════════════════════════════════════════════════════"
   case result of
-    RunnerSuccess (MergeComplete commit author impact changes) -> do
+    RunnerSuccess (MergeSuccess commit author impact changes) -> do
       putStrLn "✓ TDD Cycle Complete"
       printf "  Commit: %s\n" commit
       printf "  Author: %s\n" author
       printf "  Impact: %s\n" (show impact)
       printf "  Changes: %d entries\n" (length changes)
+    RunnerSuccess (MergeFailed failure) -> do
+      putStrLn "✗ Child Failed"
+      printf "  Reason: %s\n" (T.unpack failure.cfReason)
+      printf "  Branch: %s\n" (T.unpack failure.cfBranch)
+      printf "  Attempts: %d\n" (failure.cfAttempts :: Int)
+      case failure.cfPartialCommit of
+        Just partialCommit -> printf "  Partial commit: %s\n" (T.unpack partialCommit)
+        Nothing -> pure ()
     RunnerFailure reason -> do
       putStrLn "✗ TDD Failed"
       printf "  Reason: %s\n" (show reason)
@@ -64,18 +75,43 @@ runV3Graph spec wtConfig = do
   implMem <- newTVarIO (emptyImplMem "root")
 
   -- Set up Subgraph with recursive wiring
-  withRecursiveGraph @Spec @MergeComplete $ \subgraphState wire -> do
-    -- Wire the recursive graph runner
-    wire $ \childSpec -> do
-      -- Recursive child execution
-      let childInput = ScaffoldInput { siSpec = childSpec, siParentContext = Nothing }
-      runV3Effects subgraphState tddMem implMem wtConfig (runV3 childInput)
+  -- Subgraph type is ScaffoldInput (not Spec) because children need full context
+  -- (depth, parent session, parent context) for proper recursive execution.
+  withRecursiveGraph @ScaffoldInput @MergeComplete $ \subgraphState wire -> do
+    -- Wire the recursive graph runner - children are spawned with full ScaffoldInput
+    wire $ \childInput -> do
+      let childSpec = childInput.siSpec
+      let childExecCtx = ExecutionContext
+            { ecSpec = childSpec
+            , ecScaffold = Nothing  -- Graph starts at Scaffold; output populated after node runs
+            , ecNodeInfo = Just NodeInfo
+                { niId = childSpec.sId
+                , niBranch = "tdd/" <> childSpec.sId
+                }
+            }
+      runV3Effects subgraphState tddMem implMem childInput childExecCtx wtConfig (runV3 childInput)
 
     -- Build root input
-    let rootInput = ScaffoldInput { siSpec = spec, siParentContext = Nothing }
+    let rootInput = ScaffoldInput
+          { siSpec = spec
+          , siParentContext = Nothing
+          , siCurrentDepth = 0
+          , siMaxDepth = 3
+          , siParentSessionId = Nothing
+          , siClarificationNeeded = Nothing  -- Fresh start, no prior failure
+          }
 
-    -- Execute the graph
-    runV3Effects subgraphState tddMem implMem wtConfig (runV3 rootInput)
+    -- Build root execution context
+    let rootExecCtx = ExecutionContext
+          { ecSpec = spec
+          , ecScaffold = Nothing  -- Graph starts at Scaffold; output populated after node runs
+          , ecNodeInfo = Just NodeInfo
+              { niId = spec.sId
+              , niBranch = "tdd/" <> spec.sId
+              }
+          }
+
+    runV3Effects subgraphState tddMem implMem rootInput rootExecCtx wtConfig (runV3 rootInput)
 
 -- | Main entry point
 main :: IO ()

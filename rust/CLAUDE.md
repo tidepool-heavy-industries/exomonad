@@ -125,10 +125,65 @@ ControlResponse::Error { message }
 ### Hub REST API
 ```
 POST /api/sessions           Create session + root node
+POST /api/sessions/empty     Create empty session (no root node)
 GET  /api/sessions           List all sessions
 GET  /api/sessions/{id}      Get session with nodes
+DELETE /api/sessions/{id}    Delete session
+POST /api/sessions/{sid}/nodes    Add node to existing session
+GET  /api/sessions/{sid}/graph    Get graph visualization data
 WS   /ws                     Subscribe to updates
 WS   /ws/push/{sid}/{nid}    Push events for a node
+```
+
+## Graph Execution Tracking
+
+For orchestrating recursive graph/subgraph executions (concurrent swarm), mantle supports tracking all nodes within a single hub session:
+
+### Flow
+1. **Orchestrator creates empty hub session** (via direct HTTP to hub):
+   ```bash
+   curl -X POST http://localhost:7433/api/sessions/empty \
+     -d '{"name":"run-1"}'
+   # Returns: {"session":{"id":"uuid-123",...}}
+   ```
+
+2. **Orchestrator spawns mantle for each node** with tracking args:
+   ```bash
+   mantle session start \
+     --hub-session-id "uuid-123" \
+     --execution-id "run-1" \
+     --node-path "n0" \
+     --node-type "hTypes" \
+     --prompt "Generate types" \
+     --model sonnet
+   ```
+
+3. **For nested nodes** (subgraphs), include parent reference:
+   ```bash
+   mantle session start \
+     --hub-session-id "uuid-123" \
+     --execution-id "run-1" \
+     --node-path "n2.n0" \
+     --node-type "hTypeAdversary" \
+     --parent-hub-node-id "parent-node-uuid" \
+     --prompt "Review types" \
+     --model sonnet
+   ```
+
+### Branch Naming
+Hierarchical branches: `{execution_id}/{node_path}/{node_type}-{6hex}`
+- Root: `run-1/hTypes-a3f2c1`
+- Nested: `run-1/n2/n0/hTypeAdversary-b4e5d2`
+
+### Node Metadata
+Stored in hub for querying:
+```json
+{
+  "execution_id": "run-1",
+  "node_path": "n2.n0",
+  "node_type": "hTypeAdversary",
+  "depth": 2
+}
 ```
 
 ## Haskell Integration

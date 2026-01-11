@@ -11,18 +11,20 @@ module TypesFirstDev.Handlers.TDDWriteTests
   , tddWriteTestsAfter
   ) where
 
-import Data.Text (Text)
 import qualified Data.Text as T
 
 import Control.Monad.Freer (Eff, Member)
 import Tidepool.Effect.Session (Session, SessionOperation(..), SessionId)
+import Tidepool.Effect.GraphContext (GraphContext, getEntry)
 import Tidepool.Graph.Goto (To, GotoChoice, gotoChoice)
 import Tidepool.Graph.Memory (Memory, getMem, updateMem)
 
 import TypesFirstDev.Context (TDDWriteTestsTemplateCtx(..))
+import TypesFirstDev.Types.Core (Criterion(..), Spec(..))
 import TypesFirstDev.Types.Nodes (TDDWriteTestsInput(..), TDDWriteTestsExit(..), ScaffoldInput(..))
-import TypesFirstDev.Types.Payloads (InitWorkPayload, TestsReadyPayload(..))
+import TypesFirstDev.Types.Payloads (TestsReadyPayload(..))
 import TypesFirstDev.Types.Memory (TDDMem(..))
+import TypesFirstDev.Types.Shared (ClarificationRequest(..), ClarificationType(..))
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- HANDLERS
@@ -42,6 +44,7 @@ tddWriteTestsBefore input = do
         { spec = input.twiSpec
         , scaffold = input.twiScaffold
         , coveredCriteria = mem.tmCoveredCriteria
+        , reviewCritiques = mem.tmReviewCritiques
         }
   pure (ctx, StartFresh "v3/tdd-write-tests")
 
@@ -50,21 +53,37 @@ tddWriteTestsBefore input = do
 -- Linear flow: TDDWriteTests → ImplBarrier (via Goto, not Arrive).
 -- ImplBarrier is now a LogicNode, not a BarrierNode.
 tddWriteTestsAfter
-  :: (Member Session es, Member (Memory TDDMem) es)
+  :: ( Member Session es
+     , Member (Memory TDDMem) es
+     , Member (GraphContext ScaffoldInput) es
+     )
   => (TDDWriteTestsExit, SessionId)
   -> Eff es (GotoChoice '[To "v3ImplBarrier" TestsReadyPayload, To "v3Scaffold" ScaffoldInput])
 tddWriteTestsAfter (exit, sid) = do
   updateMem @TDDMem $ \m -> m { tmConversationId = T.pack (show sid) }
   case exit of
-    TDDTestsReady commit files criteria -> do
+    TDDTestsReady commit files pendingCriteria -> do
+      -- Update covered criteria = all criteria - pending criteria
+      entry <- getEntry @ScaffoldInput
+      let allCriteria :: [Criterion]
+          allCriteria = entry.siSpec.sAcceptanceCriteria
+      let allCriteriaIds = map (\c -> c.cId) allCriteria
+      let coveredIds = filter (`notElem` pendingCriteria) allCriteriaIds
+      updateMem @TDDMem $ \m -> m { tmCoveredCriteria = coveredIds }
       let payload = TestsReadyPayload
             { trpCommit = commit
             , trpTestFiles = files
-            , trpPendingCriteria = criteria
+            , trpPendingCriteria = pendingCriteria
             }
       pure $ gotoChoice @"v3ImplBarrier" payload
 
-    TDDInvalidScaffold _missing _location ->
-      -- Route back to Scaffold for clarification
-      -- ScaffoldInput requires original spec from Scaffold - needs executor context
-      pure $ gotoChoice @"v3Scaffold" (error "TODO: Retrieve original ScaffoldInput from TDDMem for clarification" :: ScaffoldInput)
+    TDDInvalidScaffold missingType expectedLocation -> do
+      -- Route back to Scaffold with clarification about what's missing
+      entry <- getEntry @ScaffoldInput
+      let clarification = ClarificationRequest
+            { crType = InvalidScaffold
+            , crDetails = "Missing " <> missingType <> " at " <> T.pack expectedLocation
+            , crQuestion = "Please provide the " <> missingType <> " in the scaffold output."
+            }
+      let updatedEntry = entry { siClarificationNeeded = Just clarification }
+      pure $ gotoChoice @"v3Scaffold" updatedEntry

@@ -15,6 +15,8 @@ module TypesFirstDev.Types.Shared
   , CoverageReport(..)
   , ChildSpec(..)
   , InterfaceFile(..)
+  , ClarificationRequest(..)
+  , ClarificationType(..)
   ) where
 
 import Data.Aeson (FromJSON, ToJSON)
@@ -108,6 +110,26 @@ data ChildSpec = ChildSpec
 data InterfaceFile = InterfaceFile
   { ifPath    :: FilePath  -- ^ Path to interface file
   , ifExports :: [Text]    -- ^ Exported symbols
+  }
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
+
+-- | Why Scaffold is being re-invoked.
+-- Carries diagnostic context from failed downstream nodes.
+data ClarificationType
+  = SpecAmbiguity       -- ^ Spec has contradictory or unclear requirements
+  | BlockedDependency   -- ^ Missing symbol/module that should exist
+  | MergeConflict       -- ^ Unresolvable conflict with sibling changes
+  | InvalidScaffold     -- ^ Scaffold output missing required elements
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
+
+-- | Request for scaffold clarification.
+-- Prefix: cr
+data ClarificationRequest = ClarificationRequest
+  { crType     :: ClarificationType  -- ^ Category of issue
+  , crDetails  :: Text               -- ^ What specifically went wrong
+  , crQuestion :: Text               -- ^ What the LLM should address
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON, StructuredOutput)

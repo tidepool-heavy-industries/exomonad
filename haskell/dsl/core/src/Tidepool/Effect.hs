@@ -10,8 +10,14 @@ module Tidepool.Effect
   , module Tidepool.Effect.DevLog
     -- * Session (ClaudeCode orchestration)
   , module Tidepool.Effect.Session
+    -- * Graph Context (entry + node input)
+  , module Tidepool.Effect.GraphContext
+    -- * Subgraph (recursive graph spawning)
+  , module Tidepool.Effect.Subgraph
   ) where
 
 import Tidepool.Effect.Types
 import Tidepool.Effect.DevLog
 import Tidepool.Effect.Session
+import Tidepool.Effect.GraphContext
+import Tidepool.Effect.Subgraph

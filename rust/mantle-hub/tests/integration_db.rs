@@ -2,15 +2,20 @@
 //!
 //! These tests verify database behavior including node relationships,
 //! graph data generation, and edge cases.
+//!
+//! Tests are marked #[serial] because they spawn TestHub instances that
+//! can interfere with each other when run in parallel.
 
 mod helpers;
 
 use helpers::{
     create_child_node, create_session, make_test_node_result, submit_via_socket, TestHub,
 };
+use serial_test::serial;
 use std::collections::HashMap;
 
 #[tokio::test]
+#[serial]
 async fn test_graph_with_forks() {
     let hub = TestHub::spawn().await;
     let client = hub.http_client();
@@ -68,6 +73,7 @@ async fn test_graph_with_forks() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_graph_node_states() {
     let hub = TestHub::spawn().await;
     let client = hub.http_client();
@@ -138,6 +144,7 @@ async fn test_graph_node_states() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_delete_session_with_nodes() {
     let hub = TestHub::spawn().await;
     let client = hub.http_client();
@@ -191,6 +198,7 @@ async fn test_delete_session_with_nodes() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_session_timestamps() {
     let hub = TestHub::spawn().await;
     let client = hub.http_client();
@@ -240,6 +248,7 @@ async fn test_session_timestamps() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_multiple_sessions_unique_ids() {
     // Test that each session generates unique IDs
     let hub = TestHub::spawn().await;
@@ -266,6 +275,7 @@ async fn test_multiple_sessions_unique_ids() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_graph_includes_cost_and_duration() {
     let hub = TestHub::spawn().await;
     let client = hub.http_client();
@@ -308,6 +318,7 @@ async fn test_graph_includes_cost_and_duration() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_deep_node_chain() {
     let hub = TestHub::spawn().await;
     let client = hub.http_client();

@@ -135,13 +135,16 @@ data TDDGraph mode = TDDGraph
     -- | ImplBarrier: Collect child MergeComplete results via Subgraph.awaitAny.
     -- Receives TestsReadyPayload from TDDWriteTests.
     -- Routes to Impl once all children collected.
+    -- On fatal error (e.g., no scaffold context), exits with MergeFailed.
     --
     -- This is a LogicNode (not BarrierNode) because:
     -- - Child collection uses Subgraph effect (in V3Effects), not Fork/Barrier
     -- - Simpler handler type: TestsReadyPayload -> Eff es (GotoChoice '[...])
   , v3ImplBarrier :: mode :- G.LogicNode
       :@ Types.Input TestsReadyPayload
-      :@ UsesEffects '[Goto "v3Impl" ImplInput]
+      :@ UsesEffects '[ Goto "v3Impl" ImplInput
+                      , Goto Exit MergeComplete     -- Fatal errors exit with MergeFailed
+                      ]
 
     --------------------------------------------------------------------------
     -- PHASE 4: IMPL (make tests pass)
@@ -202,12 +205,14 @@ data TDDGraph mode = TDDGraph
     -- | Rebaser: Adapt to sibling changes.
     -- Triggered by sibling MergeComplete broadcast (outside graph).
     -- Routes back to TDDWriteTests after adaptation.
+    -- On fatal error (missing context), exits with RebaserConflict.
   , v3Rebaser :: mode :- G.LLMNode
       :@ Types.Input RebaserInput
       :@ Template RebaserTpl
       :@ Schema RebaserExit
       :@ UsesEffects '[ Goto "v3TDDWriteTests" TDDWriteTestsInput  -- Clean/Adapted
                       , Goto "v3Scaffold" ScaffoldInput            -- Conflict
+                      , Goto Exit RebaserExit                      -- Fatal errors
                       ]
       :@ ClaudeCode 'Sonnet
 

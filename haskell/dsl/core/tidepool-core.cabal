@@ -17,6 +17,7 @@ library
         Tidepool.WASM
         Tidepool.Platform
         Tidepool.Effect
+        Tidepool.Effect.GraphContext
         Tidepool.Effect.Session
         Tidepool.Effect.Subgraph
         Tidepool.Effect.DevLog

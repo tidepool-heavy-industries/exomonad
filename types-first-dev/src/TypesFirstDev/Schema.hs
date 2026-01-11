@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell #-}
 
 -- | JSON Schema instances for types.
@@ -8,7 +9,7 @@ module TypesFirstDev.Schema
     module TypesFirstDev.Types
   ) where
 
-import Tidepool.Schema (deriveHasJSONSchema, HasJSONSchema(..), enumSchema)
+import Tidepool.Schema (deriveHasJSONSchema, HasJSONSchema(..), enumSchema, objectSchema, oneOfSchema, emptySchema, SchemaType(..))
 
 import TypesFirstDev.Types
 
@@ -34,12 +35,38 @@ $(deriveHasJSONSchema ''CoverageReport)
 $(deriveHasJSONSchema ''ChildSpec)
 $(deriveHasJSONSchema ''InterfaceFile)
 
+-- ClarificationType is an enum
+instance HasJSONSchema ClarificationType where
+  jsonSchema = enumSchema ["SpecAmbiguity", "BlockedDependency", "MergeConflict", "InvalidScaffold"]
+
+$(deriveHasJSONSchema ''ClarificationRequest)
+
 -- Payload types
 $(deriveHasJSONSchema ''InitWorkPayload)
 $(deriveHasJSONSchema ''TestsReadyPayload)
 $(deriveHasJSONSchema ''ImplResult)
 $(deriveHasJSONSchema ''TDDApproval)
-$(deriveHasJSONSchema ''MergeComplete)
+$(deriveHasJSONSchema ''ChildFailure)
+
+-- MergeComplete is a sum type: MergeSuccess | MergeFailed
+-- Manual instance (must be before types that reference it)
+instance HasJSONSchema MergeComplete where
+  jsonSchema = oneOfSchema
+    [ objectSchema
+        [ ("tag", emptySchema TString)
+        , ("commit", emptySchema TString)
+        , ("author", emptySchema TString)
+        , ("impactLevel", emptySchema TString)
+        , ("changes", emptySchema TArray)
+        ]
+        ["tag", "commit", "author", "impactLevel", "changes"]
+    , objectSchema
+        [ ("tag", emptySchema TString)
+        , ("failure", jsonSchema @ChildFailure)
+        ]
+        ["tag", "failure"]
+    ]
+
 $(deriveHasJSONSchema ''MergeEvent)
 $(deriveHasJSONSchema ''Adaptation)
 

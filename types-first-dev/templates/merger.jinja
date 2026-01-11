@@ -29,8 +29,10 @@ git commit -m "feat({{ childNode.id }}): implement"
 
 ### 2. Verification
 
+Contract suite: `{{ contractSuite }}`
+
 - [ ] `cabal build` passes
-- [ ] Contract suite passes: `cabal test --match="Contract"`
+- [ ] Contract suite passes: `cabal test --test-option=--match="Contract"`
 - [ ] Integration tests pass: `cabal test`
 
 ---

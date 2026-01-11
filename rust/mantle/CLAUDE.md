@@ -5,8 +5,17 @@ Host-side CLI for spawning and managing Claude Code sessions. Creates isolated g
 ## Usage
 
 ```bash
-# Start a new session
+# Start a new session (legacy flow - creates new hub session)
 mantle session start --slug implement/auth --prompt "Add user authentication"
+
+# Start with graph execution tracking (registers in existing hub session)
+mantle session start \
+  --hub-session-id "uuid-from-hub" \
+  --execution-id "run-1" \
+  --node-path "n0" \
+  --node-type "hTypes" \
+  --prompt "Generate types" \
+  --model sonnet
 
 # Continue an existing session
 mantle session continue <session-id> --prompt "Now add tests"
@@ -147,6 +156,13 @@ pub struct StartConfig {
     pub base_branch: Option<String>,
     pub json_schema: Option<String>,
     pub decision_tools: Option<String>,
+
+    // Graph Execution Tracking (optional)
+    pub hub_session_id: Option<String>,      // Register in existing hub session
+    pub execution_id: Option<String>,        // e.g., "run-1"
+    pub node_path: Option<String>,           // e.g., "n0" or "n2.n0"
+    pub node_type: Option<String>,           // e.g., "hTypes", "hImpl"
+    pub parent_hub_node_id: Option<String>,  // Parent node for tree structure
 }
 
 pub struct ContinueConfig {
@@ -236,6 +252,62 @@ Haskell's `tidepool-claude-code-executor` spawns mantle as a subprocess:
 4. **Hooks**: Control socket for real-time tool allow/deny decisions
 
 The output JSON is designed to match Haskell's `deriving-aeson` expectations (snake_case fields).
+
+## Graph Execution Tracking
+
+For recursive graph executions (concurrent swarm), mantle supports two flows:
+
+### Legacy Flow (default)
+When `--hub-session-id` is NOT provided:
+1. Creates new hub session with root node
+2. Uses slug-based branch name: `{slug}-{6hex}`
+
+### Graph Tracking Flow
+When `--hub-session-id` IS provided:
+1. Registers node in existing hub session (created by orchestrator)
+2. Uses hierarchical branch name: `{execution_id}/{node_path}/{node_type}-{6hex}`
+3. Stores metadata for querying: `{execution_id, node_path, node_type, depth}`
+
+**CLI Arguments:**
+| Argument | Purpose |
+|----------|---------|
+| `--hub-session-id` | UUID of existing hub session to register into |
+| `--execution-id` | Human-readable run identifier (e.g., "run-1") |
+| `--node-path` | Graph path (e.g., "n0", "n2.n0") |
+| `--node-type` | Handler type (e.g., "hTypes", "hImpl") |
+| `--parent-hub-node-id` | Parent node UUID for tree structure |
+
+**Example (nested node):**
+```bash
+mantle session start \
+  --hub-session-id "abc-123" \
+  --execution-id "run-1" \
+  --node-path "n2.n0" \
+  --node-type "hTypeAdversary" \
+  --parent-hub-node-id "parent-node-uuid" \
+  --prompt "Review types" \
+  --model sonnet
+```
+
+Result: Branch `run-1/n2/n0/hTypeAdversary-a3f2c1`, metadata `{depth: 2}`.
+
+**Validation Rules:**
+When `--hub-session-id` is provided (graph tracking mode):
+- `--execution-id` is **required**
+- `execution_id` and `node_type` cannot contain path separators (`/` or `\`)
+- `node_type` cannot be empty
+- `node_path` can only contain alphanumeric characters and dots (e.g., `n0`, `n2.n0`)
+
+**Depth Calculation:**
+- Empty path `""` → depth 0 (root node)
+- Single segment `"n0"` → depth 1
+- Multiple segments `"n2.n0"` → depth 2
+- Trailing/leading dots are ignored
+
+**Error Handling:**
+- Invalid `--parent-hub-node-id` returns clear validation error
+- Hub session not found returns helpful message
+- All validation errors use `StartError::Validation` for consistent handling
 
 ## Sanitization
 

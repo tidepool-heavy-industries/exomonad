@@ -103,15 +103,36 @@ pub struct SessionRegister {
     pub model: String,
 }
 
-/// Add a child node to an existing session.
+/// Create an empty session (for graph execution tracking).
+///
+/// Haskell calls this to create a session before spawning any nodes.
+/// Returns session_id that gets passed to all mantle calls.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionCreateEmptyRequest {
+    /// Human-readable name for the execution
+    pub name: String,
+}
+
+/// Response from creating an empty session.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionCreateEmptyResponse {
+    pub session: SessionInfo,
+}
+
+/// Add a node to an existing session.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodeRegister {
     pub branch: String,
     pub worktree: PathBuf,
     pub prompt: String,
     pub model: String,
-    /// Parent node ID (must exist in this session)
-    pub parent_node_id: String,
+    /// Parent node ID (optional for root nodes in empty sessions)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_node_id: Option<String>,
+    /// Optional JSON metadata for graph execution tracking
+    /// Contains: execution_id, node_path, node_type, depth
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<serde_json::Value>,
 }
 
 /// Session info (the tree).
@@ -149,6 +170,9 @@ pub struct NodeInfo {
     pub prompt: String,
     pub model: String,
     pub state: NodeState,
+    /// Optional metadata for graph execution tracking
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<serde_json::Value>,
     pub created_at: String,
     pub updated_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]

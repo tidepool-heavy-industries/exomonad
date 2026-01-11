@@ -65,6 +65,30 @@ enum SessionCommands {
         /// JSON array of MCP decision tools for sum type outputs
         #[arg(long)]
         decision_tools: Option<String>,
+
+        // === Graph Execution Tracking ===
+
+        /// Hub session ID (for registering nodes in existing hub session)
+        /// When provided, registers this node into an existing hub session
+        /// instead of creating a new one
+        #[arg(long)]
+        hub_session_id: Option<String>,
+
+        /// Execution ID (e.g., "run-1") - human-readable run identifier
+        #[arg(long)]
+        execution_id: Option<String>,
+
+        /// Node path in graph (e.g., "n0" for root, "n2.n0" for nested)
+        #[arg(long)]
+        node_path: Option<String>,
+
+        /// Node type/handler name (e.g., "hTypes", "hImpl")
+        #[arg(long)]
+        node_type: Option<String>,
+
+        /// Parent hub node ID (for tree structure in hub)
+        #[arg(long)]
+        parent_hub_node_id: Option<String>,
     },
 
     /// Continue an existing session with a new prompt
@@ -159,7 +183,8 @@ fn handle_session_command(cmd: SessionCommands) -> std::result::Result<(), Box<d
     let state_manager = StateManager::new(&repo_root)?;
 
     match cmd {
-        SessionCommands::Start { slug, prompt, model, timeout, json_schema, decision_tools } => {
+        SessionCommands::Start { slug, prompt, model, timeout, json_schema, decision_tools,
+                               hub_session_id, execution_id, node_path, node_type, parent_hub_node_id } => {
             let config = StartConfig {
                 slug,
                 prompt,
@@ -168,6 +193,11 @@ fn handle_session_command(cmd: SessionCommands) -> std::result::Result<(), Box<d
                 base_branch: None,
                 json_schema,
                 decision_tools,
+                hub_session_id,
+                execution_id,
+                node_path,
+                node_type,
+                parent_hub_node_id,
             };
 
             match start_session(&repo_root, &config) {
