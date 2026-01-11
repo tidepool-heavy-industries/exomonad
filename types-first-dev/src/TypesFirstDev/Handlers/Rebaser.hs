@@ -88,10 +88,12 @@ instance ClaudeCodeSchema RebaserExit where
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Before handler: build context.
+--
+-- Session management is handled internally by the Session effect.
 rebaserBefore
   :: (Member Session es)
   => RebaserInput
-  -> Eff es (RebaserTemplateCtx, SessionOperation)
+  -> Eff es RebaserTemplateCtx
 rebaserBefore input = do
   let ctx = RebaserTemplateCtx
         { node = input.riNode
@@ -99,7 +101,7 @@ rebaserBefore input = do
         , newParentHead = input.riNewParentHead
         , mergeEvent = input.riMergeEvent
         }
-  pure (ctx, StartFresh "v3/rebaser")
+  pure ctx
 
 -- | After handler: route based on rebase result.
 rebaserAfter

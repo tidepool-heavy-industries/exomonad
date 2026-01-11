@@ -224,10 +224,12 @@ data MergeRejectedReason
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Impl before handler: build context, manage private memory.
+--
+-- Session management is handled internally by the Session effect.
 implBefore
   :: (Member Session es, Member (Memory ImplMem) es)
   => ImplInput
-  -> Eff es (ImplTemplateCtx, SessionOperation)
+  -> Eff es ImplTemplateCtx
 implBefore input = do
   _ <- getMem @ImplMem
   let ctx = ImplTemplateCtx
@@ -238,8 +240,7 @@ implBefore input = do
         , attemptCount = input.iiAttemptCount
         , critiqueList = input.iiCritiqueList
         }
-  let sessionOp = StartFresh "v3/impl"
-  pure (ctx, sessionOp)
+  pure ctx
 
 -- | Impl after handler: self-loop on retry, route to review or exit.
 -- Max 5 retry attempts.
@@ -277,10 +278,12 @@ implAfter input (exit, _sid) = do
       pure $ gotoExit (ImplStuck diagnosis recommendation attempts)
 
 -- | TDD ReviewImpl before handler: build context, manage shared memory.
+--
+-- Session management is handled internally by the Session effect.
 tddReviewImplBefore
   :: (Member Session es, Member (Memory TDDMem) es)
   => TDDReviewImplInput
-  -> Eff es (TDDReviewImplTemplateCtx, SessionOperation)
+  -> Eff es TDDReviewImplTemplateCtx
 tddReviewImplBefore input = do
   _ <- getMem @TDDMem
   let ctx = TDDReviewImplTemplateCtx
@@ -289,8 +292,7 @@ tddReviewImplBefore input = do
         , implResult = input.triImplResult
         , diff = input.triDiff
         }
-  let sessionOp = StartFresh "v3/tdd-review-impl"
-  pure (ctx, sessionOp)
+  pure ctx
 
 -- | TDD ReviewImpl after handler: route based on decision tools.
 tddReviewImplAfter
@@ -310,10 +312,12 @@ tddReviewImplAfter (exit, _sid) = do
       pure $ gotoExit exit
 
 -- | Merger before handler: build context.
+--
+-- Session management is handled internally by the Session effect.
 mergerBefore
   :: (Member Session es)
   => MergerInput
-  -> Eff es (MergerTemplateCtx, SessionOperation)
+  -> Eff es MergerTemplateCtx
 mergerBefore input = do
   let ctx = MergerTemplateCtx
         { parentNode = input.miParentNode
@@ -321,7 +325,7 @@ mergerBefore input = do
         , tddApproval = input.miTddApproval
         , contractSuite = input.miContractSuite
         }
-  pure (ctx, StartFresh "v3/merger")
+  pure ctx
 
 -- | Merger after handler: file MR or reject.
 mergerAfter

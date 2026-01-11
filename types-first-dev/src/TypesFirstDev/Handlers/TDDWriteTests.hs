@@ -73,10 +73,12 @@ instance ClaudeCodeSchema TDDWriteTestsExit where
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Before handler: build context, manage shared memory.
+--
+-- Session management is handled internally by the Session effect.
 tddWriteTestsBefore
   :: (Member Session es, Member (Memory TDDMem) es)
   => TDDWriteTestsInput
-  -> Eff es (TDDWriteTestsTemplateCtx, SessionOperation)
+  -> Eff es TDDWriteTestsTemplateCtx
 tddWriteTestsBefore input = do
   mem <- getMem @TDDMem
   let ctx = TDDWriteTestsTemplateCtx
@@ -84,10 +86,7 @@ tddWriteTestsBefore input = do
         , scaffold = input.twiScaffold
         , coveredCriteria = mem.tmCoveredCriteria
         }
-  -- TDDMem.tmConversationId is Text, not Maybe SessionId
-  -- Use StartFresh for now - session continuation will be handled in Phase 8
-  let sessionOp = StartFresh "v3/tdd-write-tests"
-  pure (ctx, sessionOp)
+  pure ctx
 
 -- | After handler: route based on exit type.
 tddWriteTestsAfter

@@ -82,16 +82,19 @@ instance ClaudeCodeSchema ScaffoldExit where
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Before handler: build template context.
+--
+-- Session management is handled internally by the Session effect.
 scaffoldBefore
   :: (Member Session es, Member (Subgraph Spec MergeComplete) es)
   => ScaffoldInput
-  -> Eff es (ScaffoldTemplateCtx, SessionOperation)
+  -> Eff es ScaffoldTemplateCtx
 scaffoldBefore input = do
   let ctx = ScaffoldTemplateCtx
         { spec = input.siSpec
         , parentContext = input.siParentContext
         }
-  pure (ctx, StartFresh "v3/scaffold")
+  -- Session effect will manage conversation context internally
+  pure ctx
 
 -- | After handler: spawn children if decomposed, route to Fork.
 scaffoldAfter

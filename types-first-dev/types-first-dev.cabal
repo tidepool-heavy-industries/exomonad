@@ -40,6 +40,8 @@ library
         TypesFirstDev.Handlers.ImplBarrier
         TypesFirstDev.Handlers.ImplReviewMerge
         TypesFirstDev.Handlers.Rebaser
+        -- Handler assembly (wires all handlers into graph)
+        TypesFirstDev.HandlersAssembled
         -- V3 runtime
         TypesFirstDev.V3.Interpreters
         TypesFirstDev.Schema
