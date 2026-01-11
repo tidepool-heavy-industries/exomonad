@@ -99,6 +99,42 @@ MergeComplete:
   author: Text
   impactLevel: ImpactLevel
   changes: [ChangeEntry]
+
+# Broadcast payload (subset of MergeComplete for sibling notification)
+MergeEvent:
+  author: Text
+  impactLevel: ImpactLevel
+  changes: [ChangeEntry]
+
+# Scaffold output, input to TDD and Impl
+InitWorkPayload:
+  scaffoldCommit: Text
+  interfaceFile: FilePath
+  contractSuite: FilePath
+  testPlan: [PlannedTest]
+
+# TDD WriteTests output, input to Impl
+TestsReadyPayload:
+  testsCommit: Text
+  testFiles: [FilePath]
+  pendingCriteria: [Text]
+
+# Impl output, input to TDD ReviewImpl
+ImplResult:
+  commitHash: Text
+  iterations: Int
+  passedTests: [Text]
+
+# TDD Approved output, input to Merger
+TDDApproval:
+  signOff: Text
+  coverageReport: CoverageReport
+
+# Rebaser adaptation record
+Adaptation:
+  symbol: Text
+  change: Text
+  reason: Text
 ```
 
 ---
@@ -229,12 +265,18 @@ Or `ClarificationNeeded` if spec is ambiguous.
 
 TDD node writes tests AND reviews impl. Spawned in parallel with Impl, shares parent's conversation context.
 
+**Dual-phase invocation:** TDD is invoked TWICE per work item:
+1. **First spawn:** WriteTests mode (writes failing tests, emits TestsReady)
+2. **Second spawn:** ReviewImpl mode (after Impl emits TestsPassed)
+
+Same node definition, different mode in input. Orchestrator manages phase transitions.
+
 ### Input Type
 
 ```yaml
 TDDInput:
   spec: Spec
-  scaffold: InitWorkPayload
+  scaffold: InitWorkPayload  # see Shared Types
   mode: TDDMode
 
 TDDMode:
@@ -242,20 +284,9 @@ TDDMode:
     - WriteTests:
         # Initial mode - write failing tests
     - ReviewImpl:
-        # After Impl claims TestPassed
-        implResult: ImplResult
+        # After Impl claims TestsPassed
+        implResult: ImplResult  # see Shared Types
         diff: Text
-
-InitWorkPayload:
-  scaffoldCommit: Text
-  interfaceFile: FilePath
-  contractSuite: FilePath
-  testPlan: [PlannedTest]
-
-ImplResult:
-  testName: Text
-  commitHash: Text
-  iterations: Int
 ```
 
 ### Memory (node-private, threaded context)
@@ -315,7 +346,7 @@ You are the **Test Author**. Write failing tests that drive implementation.
 
 ## Already Covered
 
-{% for id in memory.coveredCriteria %}
+{% for id in coveredCriteria %}
 - {{ id }} ✓
 {% endfor %}
 
@@ -323,13 +354,16 @@ You are the **Test Author**. Write failing tests that drive implementation.
 
 ## Your Task
 
-Write failing tests for ALL uncovered criteria. Commit them.
+Write failing tests for ALL uncovered criteria in one batch. Commit them together.
+
+**Note:** TDD writes all tests upfront (batch model), not one test at a time (ping-pong model).
 
 ### Requirements
 
 1. Test public API only
 2. One criterion per test
 3. Tests MUST fail on skeleton (red)
+4. Commit all tests together, then emit TestsReady
 
 ---
 
@@ -343,9 +377,13 @@ You are the **Reviewer**. Impl claims tests pass. Verify and decide.
 
 ## Impl Result
 
-Test: `{{ mode.ReviewImpl.implResult.testName }}`
 Commit: `{{ mode.ReviewImpl.implResult.commitHash }}`
 Iterations: {{ mode.ReviewImpl.implResult.iterations }}
+
+**Tests passed:**
+{% for testName in mode.ReviewImpl.implResult.passedTests %}
+- `{{ testName }}`
+{% endfor %}
 
 ## Diff
 
@@ -392,16 +430,11 @@ Shares parent's conversation context.
 ```yaml
 ImplInput:
   spec: Spec
-  scaffold: InitWorkPayload
-  testsReady: TestsReadyPayload      # from TDD node
+  scaffold: InitWorkPayload          # see Shared Types
+  testsReady: TestsReadyPayload      # see Shared Types; from TDD node
   childMerges: Maybe [MergeComplete] # see Shared Types; if children exist
   attemptCount: Int                  # orchestrator-tracked
   critiqueList: Maybe [Critique]     # from TDD's MoreTests
-
-TestsReadyPayload:
-  testsCommit: Text
-  testFiles: [FilePath]
-  pendingCriteria: [Text]
 ```
 
 ### Memory (node-private, threaded context)
@@ -517,12 +550,8 @@ Files MR to parent after TDD approves.
 MergerInput:
   parentNode: NodeInfo
   childNode: NodeInfo
-  tddApproval: TDDApproval
+  tddApproval: TDDApproval  # see Shared Types
   contractSuite: FilePath
-
-TDDApproval:
-  signOff: Text
-  coverageReport: CoverageReport  # see Shared Types
 ```
 
 ### Output Type (oneOf)
@@ -555,7 +584,7 @@ Child: `{{ childNode.nodeId }}` on `{{ childNode.branch }}`
 
 **Coverage:**
 {% for item in tddApproval.coverageReport.criteriaWithTests %}
-- {{ item.0 }}: `{{ item.1 }}` ✓
+- {{ item[0] }}: `{{ item[1] }}` ✓
 {% endfor %}
 
 ---
@@ -594,12 +623,7 @@ RebaserInput:
   node: NodeInfo
   parentBranch: Text
   newParentHead: Text
-  mergeEvent: MergeEvent
-
-MergeEvent:
-  author: Text
-  impactLevel: ImpactLevel
-  changes: [ChangeEntry]
+  mergeEvent: MergeEvent  # see Shared Types
 ```
 
 ### Output Type (oneOf)
@@ -611,17 +635,12 @@ RebaserExit:
         newBase: Text
     - RebaseAdapted:
         newBase: Text
-        adaptations: [Adaptation]
+        adaptations: [Adaptation]  # see Shared Types
     - RebaseConflict:
         conflictFile: FilePath
         ourChange: Text
         theirChange: Text
         whyUnresolvable: Text
-
-Adaptation:
-  symbol: Text
-  change: Text
-  reason: Text
 ```
 
 ### Template
@@ -723,7 +742,7 @@ Scaffold ──InitWork──▶ Orchestrator spawns in parallel:
 | TDD | TestsReady | Impl | Tests committed, impl can start |
 | TDD | InvalidScaffold | Scaffold | Types missing |
 | TDD | Approved | Merger | All good, file MR |
-| TDD | MoreTests | Impl | Write more tests, loop |
+| TDD | MoreTests | TDD (WriteTests) | Write additional tests, loop |
 | TDD | Reject | Exit | Fundamental problems, escalate |
 | Impl | TestsPassed | TDD (ReviewImpl) | Claim tests pass, request review |
 | Impl | RequestRetry | Impl | Self-loop (max 5) |
@@ -744,11 +763,33 @@ Scaffold ──InitWork──▶ Orchestrator spawns in parallel:
 | Merger | TDD.Approved |
 | Rebaser | Sibling.MergeComplete broadcast |
 
+**Blocking behavior:** Impl session does NOT start until preconditions are met. Orchestrator holds Impl spawn until:
+- TDD emits TestsReady (tests committed to impl branch)
+- All children emit MergeComplete (if childSpecs present in InitWork)
+
+---
+
+## Retry Protocol
+
+Orchestrator handles retries, not nodes:
+
+- **Max 5 attempts** per node invocation (tracked by orchestrator via `attemptCount`)
+- If node emits `RequestRetry` at attempt 5 → orchestrator auto-converts to `Stuck`
+- **Timeout:** If no output after 60s, nudge with reminder to emit decision
+- Nodes see `attemptCount` in input but cannot lie about it
+
+**Nudge escalation:**
+1. Attempt 1-4: Normal retry with `RequestRetry` context
+2. Attempt 5: Final attempt, must succeed or emit `Stuck`
+3. Timeout: "REMINDER: Emit a decision to complete this phase"
+
 ---
 
 ## Parent-as-Judge Pattern
 
 **Key insight:** The parent node wrote the spec, so it has full context to judge children.
+
+**Where:** Parent's TDD node (ReviewImpl mode) acts as judge. When a child emits MergeComplete, the parent's TDD is invoked with the child's diff to verify `assignedCriteria` satisfaction.
 
 When a child completes (MergeComplete), the parent evaluates:
 - Does the merged code satisfy the criteria assigned to this child?
