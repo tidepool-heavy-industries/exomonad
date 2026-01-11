@@ -47,6 +47,9 @@ module Tidepool.Session.Executor
     -- * Configuration
   , SessionConfig(..)
   , defaultSessionConfig
+
+    -- * Direct IO (for testing)
+  , startSessionIO
   ) where
 
 import Control.Exception (try, SomeException)

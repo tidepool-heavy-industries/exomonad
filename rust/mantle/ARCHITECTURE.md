@@ -243,3 +243,18 @@ mantle run reads result, prints JSON to stdout
     v
 Tidepool receives structured result
 ```
+
+## Auth Configuration
+
+Dockerized Claude Code shares the host's OAuth credentials via volume mount:
+
+- Mantle auto-mounts `~/.claude:/home/user/.claude` into containers
+- Authenticate once on host: `claude` (normal CLI login)
+- All containers share that auth automatically
+
+For production with named volumes:
+```toml
+# ~/.config/mantle/config.toml
+[docker]
+auth_volume = "tidepool-claude-auth"  # Shared named volume
+```

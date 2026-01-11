@@ -53,11 +53,16 @@ test-suite session-executor-test
     main-is:          Main.hs
     other-modules:
         Tidepool.Session.JsonSpec
+        Tidepool.Session.DecisionToolsIntegrationSpec
     hs-source-dirs:   test
     default-language: GHC2021
     default-extensions:
+        DataKinds
+        DeriveGeneric
+        DerivingStrategies
         OverloadedStrings
         OverloadedRecordDot
+        TypeApplications
     build-depends:
         base >= 4.17 && < 5,
         tidepool-core,
