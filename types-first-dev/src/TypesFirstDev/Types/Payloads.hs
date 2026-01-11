@@ -3,9 +3,9 @@
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE FieldSelectors #-}
 
--- | Cross-node communication payload types for V3 protocol.
+-- | Cross-node communication payload types for TDD protocol.
 -- Prefix convention: lowercase acronym of type name
-module TypesFirstDev.V3.Types.Payloads
+module TypesFirstDev.Types.Payloads
   ( InitWorkPayload(..)
   , TestsReadyPayload(..)
   , ImplResult(..)
@@ -21,7 +21,7 @@ import GHC.Generics (Generic)
 
 import Tidepool.StructuredOutput (StructuredOutput)
 
-import TypesFirstDev.V3.Types.Shared (PlannedTest, ImpactLevel, ChangeEntry, CoverageReport)
+import TypesFirstDev.Types.Shared (PlannedTest, ImpactLevel, ChangeEntry, CoverageReport)
 
 -- | Scaffold output, input to TDD and Impl.
 -- Prefix: iwp

@@ -22,26 +22,23 @@ build-type:         Simple
 
 library
     exposed-modules:
-        -- Re-export modules
+        -- Types
         TypesFirstDev.Types
+        TypesFirstDev.Types.Core
+        TypesFirstDev.Types.Shared
+        TypesFirstDev.Types.Payloads
+        TypesFirstDev.Types.Memory
+        TypesFirstDev.Types.Nodes
+        -- Core modules
         TypesFirstDev.Context
         TypesFirstDev.Templates
         TypesFirstDev.Graph
         TypesFirstDev.Handlers
         TypesFirstDev.Schema
-        -- V3 implementation
-        TypesFirstDev.V3.Types
-        TypesFirstDev.V3.Types.Core
-        TypesFirstDev.V3.Types.Shared
-        TypesFirstDev.V3.Types.Payloads
-        TypesFirstDev.V3.Types.Memory
-        TypesFirstDev.V3.Types.Nodes
-        TypesFirstDev.V3.Context
-        TypesFirstDev.V3.Templates
-        TypesFirstDev.V3.Graph
-        TypesFirstDev.V3.Policy
-        TypesFirstDev.V3.Evaluation
-        TypesFirstDev.V3.Decomposition
+        -- Policy and evaluation
+        TypesFirstDev.Policy
+        TypesFirstDev.Evaluation
+        TypesFirstDev.Decomposition
         -- Effects
         TypesFirstDev.Effect.Build
     build-depends:

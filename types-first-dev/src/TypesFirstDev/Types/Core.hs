@@ -3,9 +3,9 @@
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE FieldSelectors #-}
 
--- | Core entry types for V3 protocol.
+-- | Core entry types for TDD protocol.
 -- Prefix convention: lowercase acronym of type name (e.g., Spec -> s)
-module TypesFirstDev.V3.Types.Core
+module TypesFirstDev.Types.Core
   ( Spec(..)
   , Constraints(..)
   , Criterion(..)

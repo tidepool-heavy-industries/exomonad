@@ -1,16 +1,16 @@
 {-# LANGUAGE TemplateHaskell #-}
 
--- | JSON Schema instances for V3 types.
+-- | JSON Schema instances for types.
 --
 -- Separate module due to TH staging requirements.
 module TypesFirstDev.Schema
-  ( -- * Re-exports from V3 Types
-    module TypesFirstDev.V3.Types
+  ( -- * Re-exports from Types
+    module TypesFirstDev.Types
   ) where
 
 import Tidepool.Schema (deriveHasJSONSchema, HasJSONSchema(..), enumSchema)
 
-import TypesFirstDev.V3.Types
+import TypesFirstDev.Types
 
 -- Core types
 $(deriveHasJSONSchema ''Criterion)

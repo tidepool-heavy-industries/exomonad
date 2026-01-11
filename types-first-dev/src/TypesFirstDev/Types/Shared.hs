@@ -3,9 +3,9 @@
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE FieldSelectors #-}
 
--- | Shared workflow types for V3 protocol.
+-- | Shared workflow types for TDD protocol.
 -- Prefix convention: lowercase acronym of type name
-module TypesFirstDev.V3.Types.Shared
+module TypesFirstDev.Types.Shared
   ( PlannedTest(..)
   , Critique(..)
   , ImpactLevel(..)
@@ -23,7 +23,7 @@ import GHC.Generics (Generic)
 
 import Tidepool.StructuredOutput (StructuredOutput)
 
-import TypesFirstDev.V3.Types.Core (Criterion)
+import TypesFirstDev.Types.Core (Criterion)
 
 -- | Planned test from scaffold's test plan.
 -- Prefix: pt

@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 
--- | Rubric-based controller logic for V3 TDD workflow.
+-- | Rubric-based controller logic for TDD workflow.
 --
 -- Design principle: LLM is sensor, code is controller.
 --
@@ -14,7 +14,7 @@
 --
 -- Key insight: Ask for useful information without hinting at consequences.
 -- LLM doesn't know how we interpret the rubrics, so it has no incentive to game.
-module TypesFirstDev.V3.Policy
+module TypesFirstDev.Policy
   ( -- * Mechanical Checks
     MechanicalChecks(..)
   , runMechanicalChecks
@@ -24,14 +24,14 @@ module TypesFirstDev.V3.Policy
   , UndefinedLocation(..)
 
     -- * V3 Assessment
-  , V3Assessment(..)
+  , TDDAssessment(..)
 
     -- * Derived Metrics
   , critiqueCount
   , coverageGapCount
   , totalCritiques
 
-    -- * Routing Decisions (V3 TDD)
+    -- * Routing Decisions (TDD)
   , TDDDecision(..)
   , ImplDecision(..)
   , RetryDecision(..)
@@ -50,8 +50,8 @@ import qualified Data.Text as T
 import System.Exit (ExitCode(..))
 import System.Process (readProcessWithExitCode)
 
-import TypesFirstDev.V3.Types.Shared (Critique(..), CoverageReport(..))
-import TypesFirstDev.V3.Types.Payloads (ImplResult(..))
+import TypesFirstDev.Types.Shared (Critique(..), CoverageReport(..))
+import TypesFirstDev.Types.Payloads (ImplResult(..))
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -170,7 +170,7 @@ findUndefined path = do
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | V3 assessment combining mechanical checks and TDD review rubrics.
-data V3Assessment = V3Assessment
+data TDDAssessment = TDDAssessment
   { v3Mechanical :: MechanicalChecks
     -- ^ Mechanical checks computed by handler
   , v3Critiques  :: [Critique]
@@ -188,15 +188,15 @@ data V3Assessment = V3Assessment
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Count of critiques (issue metric).
-critiqueCount :: V3Assessment -> Int
+critiqueCount :: TDDAssessment -> Int
 critiqueCount = length . v3Critiques
 
 -- | Count of criteria without tests (coverage gap metric).
-coverageGapCount :: V3Assessment -> Int
+coverageGapCount :: TDDAssessment -> Int
 coverageGapCount = length . crCriteriaMissing . v3Coverage
 
 -- | Total critique count across assessments.
-totalCritiques :: [V3Assessment] -> Int
+totalCritiques :: [TDDAssessment] -> Int
 totalCritiques = sum . map critiqueCount
 
 
@@ -222,8 +222,8 @@ data TDDDecision
 -- 2. Critiques (impl issues)
 -- 3. Coverage gaps (missing tests)
 -- 4. All clear → approve
-decideTDDReview :: V3Assessment -> TDDDecision
-decideTDDReview V3Assessment{..}
+decideTDDReview :: TDDAssessment -> TDDDecision
+decideTDDReview TDDAssessment{..}
   -- FIRST: Mechanical failures
   | not (mcBuildPassed v3Mechanical) = Reject [mechanicalCritique "Build failed"]
   | mcHasUndefined v3Mechanical = Reject [mechanicalCritique "Contains undefined stubs"]

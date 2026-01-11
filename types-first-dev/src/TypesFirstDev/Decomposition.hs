@@ -1,12 +1,12 @@
 {-# LANGUAGE OverloadedStrings #-}
 
--- | Decomposition oracle for V3 TDD workflow.
+-- | Decomposition oracle for TDD workflow.
 --
 -- Decides whether a spec should spawn child graphs.
 -- Pure policy logic - handler calls these to make routing decisions.
 --
 -- Design principle: LLM reports structure (facets found), code decides policy.
-module TypesFirstDev.V3.Decomposition
+module TypesFirstDev.Decomposition
   ( -- * Oracle
     shouldDecompose
 
@@ -21,8 +21,8 @@ module TypesFirstDev.V3.Decomposition
 
 import Data.Text (Text)
 
-import TypesFirstDev.V3.Types.Core (Spec(..), Criterion(..))
-import TypesFirstDev.V3.Types.Shared (ChildSpec(..))
+import TypesFirstDev.Types.Core (Spec(..), Criterion(..))
+import TypesFirstDev.Types.Shared (ChildSpec(..))
 
 
 -- | Should this spec spawn child graphs?

@@ -4,7 +4,7 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE RecordWildCards #-}
 
--- | Evaluation rubrics and narrative capture for V3 TDD runs.
+-- | Evaluation rubrics and narrative capture for TDD runs.
 --
 -- Provides structured evaluation of runs for sleeptime agent evolution.
 -- Combines automated checks with LLM-judged quality scores.
@@ -12,7 +12,7 @@
 -- Design: Two-pass evaluation
 -- 1. Automated pass (during run) - captures mechanical metrics
 -- 2. Quality pass (post-run) - LLM judge scores quality dimensions
-module TypesFirstDev.V3.Evaluation
+module TypesFirstDev.Evaluation
   ( -- * Run Evaluation
     RunEvaluation(..)
   , AutomatedScores(..)
@@ -36,15 +36,15 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
 
-import TypesFirstDev.V3.Types.Core (Spec(..), Criterion(..))
-import TypesFirstDev.V3.Policy (MechanicalChecks(..))
+import TypesFirstDev.Types.Core (Spec(..), Criterion(..))
+import TypesFirstDev.Policy (MechanicalChecks(..))
 
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- RUN EVALUATION
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Complete evaluation of a V3 TDD run.
+-- | Complete evaluation of a TDD run.
 --
 -- Prefix: re
 data RunEvaluation = RunEvaluation
@@ -112,7 +112,7 @@ data RubricScore = RubricScore
 -- NARRATIVE CAPTURE
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Structured narrative of a V3 TDD run.
+-- | Structured narrative of a TDD run.
 --
 -- Captures what happened at each phase for sleeptime analysis.
 --
@@ -196,7 +196,7 @@ emptyQualityScores = QualityScores
 -- | Render evaluation report as Markdown.
 renderEvaluationReport :: RunEvaluation -> Text
 renderEvaluationReport RunEvaluation{..} = T.unlines $
-  [ "# V3 TDD Run Evaluation"
+  [ "# TDD Run Evaluation"
   , ""
   , "**Run ID:** " <> reRunId
   , "**Description:** " <> reSpec.sDescription

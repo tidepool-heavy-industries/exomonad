@@ -3,9 +3,9 @@
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE FieldSelectors #-}
 
--- | Node-private memory types for V3 protocol.
+-- | Node-private memory types for TDD protocol.
 -- Prefix convention: lowercase acronym of type name
-module TypesFirstDev.V3.Types.Memory
+module TypesFirstDev.Types.Memory
   ( TDDMem(..)
   , emptyTDDMem
   , ImplMem(..)

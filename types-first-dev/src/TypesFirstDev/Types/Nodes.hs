@@ -3,9 +3,9 @@
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE FieldSelectors #-}
 
--- | Node input/output types for V3 protocol.
+-- | Node input/output types for TDD protocol.
 -- Prefix convention: lowercase acronym of type name
-module TypesFirstDev.V3.Types.Nodes
+module TypesFirstDev.Types.Nodes
   ( -- * Scaffold
     ScaffoldInput(..)
   , ScaffoldExit(..)
@@ -33,12 +33,12 @@ import GHC.Generics (Generic)
 
 import Tidepool.StructuredOutput (StructuredOutput)
 
-import TypesFirstDev.V3.Types.Core (Spec, ParentContext)
-import TypesFirstDev.V3.Types.Shared
+import TypesFirstDev.Types.Core (Spec, ParentContext)
+import TypesFirstDev.Types.Shared
   ( PlannedTest, Critique, NodeInfo, CoverageReport
   , ChildSpec, InterfaceFile, ImpactLevel, ChangeEntry
   )
-import TypesFirstDev.V3.Types.Payloads
+import TypesFirstDev.Types.Payloads
   ( InitWorkPayload, TestsReadyPayload, ImplResult
   , TDDApproval, MergeComplete, MergeEvent, Adaptation
   )
