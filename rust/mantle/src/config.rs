@@ -38,6 +38,11 @@ pub struct DockerConfig {
     /// Docker image to use for Claude Code containers.
     /// Defaults to "mantle-agent:latest" if not specified.
     pub image: Option<String>,
+
+    /// Named Docker volume for shared cabal package store.
+    /// When set, this volume is mounted to `/home/user/.cabal/store` in containers.
+    /// This allows all containers to share built Haskell packages, avoiding redundant builds.
+    pub cabal_store_volume: Option<String>,
 }
 
 /// Root configuration structure.
@@ -82,6 +87,9 @@ impl Config {
         }
         if let Some(ref img) = config.docker.image {
             tracing::info!("  docker.image = {:?}", img);
+        }
+        if let Some(ref vol) = config.docker.cabal_store_volume {
+            tracing::info!("  docker.cabal_store_volume = {:?}", vol);
         }
 
         Ok(config)

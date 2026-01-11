@@ -97,6 +97,8 @@ pub struct ContainerConfig {
     pub hub_socket: Option<PathBuf>,
     /// How to provide Claude auth credentials
     pub auth_mount: AuthMount,
+    /// Named Docker volume for shared cabal package store (optional)
+    pub cabal_store_volume: Option<String>,
     /// Session ID (used for container naming)
     pub session_id: String,
     /// Claude Code arguments
@@ -145,11 +147,15 @@ impl ContainerConfig {
             .image
             .unwrap_or_else(|| "mantle-agent:latest".to_string());
 
+        // Get cabal store volume from config
+        let cabal_store_volume = config.docker.cabal_store_volume;
+
         Ok(Self {
             image,
             worktree_path,
             hub_socket: None,
             auth_mount,
+            cabal_store_volume,
             session_id,
             claude_args,
             timeout_secs: 0,
@@ -233,6 +239,13 @@ where
             cmd.arg("-v")
                 .arg(format!("{}:/home/user/.claude", path.display()));
         }
+    }
+
+    // Mount cabal store volume if configured (shared package cache)
+    if let Some(ref cabal_vol) = config.cabal_store_volume {
+        logger.log("MANTLE", &format!("Using cabal store volume: {}", cabal_vol));
+        cmd.arg("-v")
+            .arg(format!("{}:/home/user/.cabal/store", cabal_vol));
     }
 
     // Working directory
@@ -415,6 +428,7 @@ mod tests {
             worktree_path: PathBuf::from("/tmp"),
             hub_socket: None,
             auth_mount: AuthMount::BindMount(PathBuf::from("/tmp/.claude")),
+            cabal_store_volume: None,
             session_id: "abc12345-6789".to_string(),
             claude_args: vec![],
             timeout_secs: 0,
@@ -431,6 +445,7 @@ mod tests {
             worktree_path: PathBuf::from("/tmp"),
             hub_socket: None,
             auth_mount: AuthMount::BindMount(PathBuf::from("/tmp/.claude")),
+            cabal_store_volume: None,
             session_id: "abc".to_string(),
             claude_args: vec![],
             timeout_secs: 0,
@@ -447,6 +462,7 @@ mod tests {
             worktree_path: PathBuf::from("/tmp"),
             hub_socket: None,
             auth_mount: AuthMount::Volume("test-vol".to_string()),
+            cabal_store_volume: None,
             session_id: "test".to_string(),
             claude_args: vec![],
             timeout_secs: 0,
