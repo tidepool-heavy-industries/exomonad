@@ -4,56 +4,51 @@ mod test_hub;
 
 pub use test_hub::{unique_id, TestHub};
 
-use mantle_shared::hub::types::{SessionInfo, SessionRegister, SessionResult};
+use mantle_shared::hub::types::{NodeResult, SessionCreateResponse, SessionRegister};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-/// Create a test SessionResult with minimal required fields.
-pub fn make_test_result(session_id: &str) -> SessionResult {
-    SessionResult {
-        session_id: session_id.to_string(),
+/// Create a test NodeResult with minimal required fields.
+pub fn make_test_node_result(node_id: &str) -> NodeResult {
+    NodeResult {
+        node_id: node_id.to_string(),
         exit_code: 0,
         is_error: false,
         result_text: Some("Test result".into()),
         structured_output: None,
         total_cost_usd: 0.01,
         num_turns: 1,
-        cc_session_id: format!("cc-{}", session_id),
+        cc_session_id: format!("cc-{}", node_id),
         duration_secs: 1.0,
         model_usage: HashMap::new(),
     }
 }
 
 /// Create a test SessionRegister with minimal required fields.
-///
-/// Since session IDs are now generated server-side, this helper just
-/// provides reasonable defaults for the other fields.
 pub fn make_test_register() -> SessionRegister {
     SessionRegister {
         branch: "test-branch".into(),
         worktree: PathBuf::from("/tmp"),
         prompt: "Test prompt".into(),
         model: "sonnet".into(),
-        parent_id: None,
     }
 }
 
-/// Create a test SessionRegister with a parent.
-pub fn make_test_register_with_parent(parent_id: &str) -> SessionRegister {
+/// Create a test SessionRegister with custom branch.
+pub fn make_test_register_with_branch(branch: &str) -> SessionRegister {
     SessionRegister {
-        branch: "test-child-branch".into(),
+        branch: branch.into(),
         worktree: PathBuf::from("/tmp"),
         prompt: "Test prompt".into(),
         model: "sonnet".into(),
-        parent_id: Some(parent_id.to_string()),
     }
 }
 
-/// Register a session via HTTP and return the SessionInfo with generated ID.
-pub async fn register_session(
+/// Register a session via HTTP and return the SessionCreateResponse.
+pub async fn create_session(
     client: &reqwest::Client,
     base_url: &str,
-) -> Result<SessionInfo, reqwest::Error> {
+) -> Result<SessionCreateResponse, reqwest::Error> {
     let req = make_test_register();
     client
         .post(format!("{}/api/sessions", base_url))
@@ -64,15 +59,22 @@ pub async fn register_session(
         .await
 }
 
-/// Register a session with parent via HTTP.
-pub async fn register_session_with_parent(
+/// Create a child node via HTTP.
+pub async fn create_child_node(
     client: &reqwest::Client,
     base_url: &str,
-    parent_id: &str,
-) -> Result<SessionInfo, reqwest::Error> {
-    let req = make_test_register_with_parent(parent_id);
+    session_id: &str,
+    parent_node_id: &str,
+) -> Result<serde_json::Value, reqwest::Error> {
+    let req = serde_json::json!({
+        "parent_node_id": parent_node_id,
+        "branch": "test-child-branch",
+        "worktree": "/tmp",
+        "prompt": "Child prompt",
+        "model": "sonnet"
+    });
     client
-        .post(format!("{}/api/sessions", base_url))
+        .post(format!("{}/api/sessions/{}/nodes", base_url, session_id))
         .json(&req)
         .send()
         .await?
@@ -83,7 +85,7 @@ pub async fn register_session_with_parent(
 /// Submit a result via the Unix socket.
 pub async fn submit_via_socket(
     socket_path: &std::path::Path,
-    result: &SessionResult,
+    result: &NodeResult,
 ) -> Result<(), mantle_shared::error::MantleError> {
     use mantle_shared::hub::socket_client::write_result_to_socket;
 

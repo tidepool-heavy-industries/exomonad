@@ -16,7 +16,7 @@ use bollard::query_parameters::{
 };
 use bollard::Docker;
 use futures_util::StreamExt;
-use helpers::{register_session, TestHub};
+use helpers::{create_session, TestHub};
 use std::env::temp_dir;
 use std::time::Duration;
 
@@ -91,7 +91,7 @@ async fn test_e2e_multistep_task_with_structured_output() {
     // file_b.txt contains the final answer
     std::fs::write(&file_b_path, "The answer is: 42").expect("Failed to write file_b.txt");
 
-    // 2. Register session via HTTP (ID generated server-side)
+    // 2. Create session via HTTP (returns session + root_node)
     let prompt = r#"Read the file at /workspace/file_a.txt. It contains a path to another file. Read that file too. Then output JSON with this exact format: {"file_a_content": "<contents of file_a>", "file_b_content": "<contents of the second file>"}"#;
 
     let req = mantle_shared::hub::types::SessionRegister {
@@ -99,7 +99,6 @@ async fn test_e2e_multistep_task_with_structured_output() {
         worktree: task_dir.clone(),
         prompt: prompt.to_string(),
         model: "sonnet".into(),
-        parent_id: None,
     };
 
     let resp = client
@@ -107,12 +106,13 @@ async fn test_e2e_multistep_task_with_structured_output() {
         .json(&req)
         .send()
         .await
-        .expect("Failed to register session");
+        .expect("Failed to create session");
 
-    assert_eq!(resp.status(), 200, "Session registration should succeed");
+    assert_eq!(resp.status(), 200, "Session creation should succeed");
 
-    let registered: serde_json::Value = resp.json().await.unwrap();
-    let session_id = registered["id"].as_str().unwrap().to_string();
+    let created: serde_json::Value = resp.json().await.unwrap();
+    let session_id = created["session"]["id"].as_str().unwrap().to_string();
+    let node_id = created["root_node"]["id"].as_str().unwrap().to_string();
 
     // 3. Create and start Docker container
     let container_name = format!("mantle-test-e2e-{}", session_id);
@@ -123,8 +123,8 @@ async fn test_e2e_multistep_task_with_structured_output() {
             "wrap".to_string(),
             "--hub-socket".to_string(),
             "/tmp/mantle.sock".to_string(),
-            "--session-tag".to_string(),
-            session_id.clone(),
+            "--node-id".to_string(),
+            node_id.clone(),
             "--cwd".to_string(),
             "/workspace".to_string(),
             "--".to_string(),
@@ -215,30 +215,32 @@ async fn test_e2e_multistep_task_with_structured_output() {
         Err(_) => panic!("Container timed out after 3 minutes"),
     }
 
-    // 6. Poll for result (should be available now)
+    // 6. Get node result (should be available now)
     let resp = client
-        .get(format!("{}/api/sessions/{}", hub.http_url, session_id))
+        .get(format!(
+            "{}/api/sessions/{}/nodes/{}",
+            hub.http_url, session_id, node_id
+        ))
         .send()
         .await
-        .expect("Failed to get session");
+        .expect("Failed to get node");
 
     assert_eq!(resp.status(), 200);
-    let session: serde_json::Value = resp.json().await.unwrap();
+    let node: serde_json::Value = resp.json().await.unwrap();
 
     assert_eq!(
-        session["state"], "completed",
-        "Session should be completed. Full session: {:?}",
-        session
+        node["state"], "completed",
+        "Node should be completed. Full node: {:?}",
+        node
     );
 
-    let result = &session["result"];
+    let result = &node["result"];
     assert!(result.is_object(), "Result should exist");
     assert_eq!(result["exit_code"], 0, "Claude should succeed");
     assert_eq!(result["is_error"], false, "Should not be error");
 
     // 7. Verify structured output (if present)
     if let Some(structured) = result["structured_output"].as_object() {
-        // The exact format may vary, but we should have both file contents
         eprintln!("Structured output: {:?}", structured);
     }
 
@@ -252,7 +254,17 @@ async fn test_e2e_multistep_task_with_structured_output() {
         "Should have at least 1 turn"
     );
 
-    // 9. Cleanup
+    // 9. Verify session state is also completed
+    let resp = client
+        .get(format!("{}/api/sessions/{}", hub.http_url, session_id))
+        .send()
+        .await
+        .unwrap();
+
+    let session: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(session["session"]["state"], "completed");
+
+    // 10. Cleanup
     let remove_options = RemoveContainerOptions {
         force: true,
         ..Default::default()
@@ -285,11 +297,10 @@ async fn test_e2e_simple_echo_task() {
     let hub = TestHub::spawn().await;
     let client = hub.http_client();
 
-    // Register session (ID generated server-side)
-    let session_info = register_session(&client, &hub.http_url)
-        .await
-        .unwrap();
-    let session_id = &session_info.id;
+    // Create session (returns session + root_node)
+    let created = create_session(&client, &hub.http_url).await.unwrap();
+    let session_id = &created.session.id;
+    let node_id = &created.root_node.id;
 
     // Create container
     let container_name = format!("mantle-test-echo-{}", session_id);
@@ -301,8 +312,8 @@ async fn test_e2e_simple_echo_task() {
             "wrap".to_string(),
             "--hub-socket".to_string(),
             "/tmp/mantle.sock".to_string(),
-            "--session-tag".to_string(),
-            session_id.clone(),
+            "--node-id".to_string(),
+            node_id.clone(),
             "--".to_string(),
             "-p".to_string(),
             prompt.to_string(),
@@ -348,15 +359,18 @@ async fn test_e2e_simple_echo_task() {
 
     assert!(wait_result.is_ok(), "Container should complete within 60s");
 
-    // Verify result
+    // Verify node result
     let resp = client
-        .get(format!("{}/api/sessions/{}", hub.http_url, session_id))
+        .get(format!(
+            "{}/api/sessions/{}/nodes/{}",
+            hub.http_url, session_id, node_id
+        ))
         .send()
         .await
         .unwrap();
 
-    let session: serde_json::Value = resp.json().await.unwrap();
-    assert_eq!(session["state"], "completed");
+    let node: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(node["state"], "completed");
 
     // Cleanup
     let remove_options = RemoveContainerOptions {
@@ -389,11 +403,10 @@ async fn test_e2e_container_timeout() {
     let hub = TestHub::spawn().await;
     let client = hub.http_client();
 
-    // Register session (ID generated server-side)
-    let session_info = register_session(&client, &hub.http_url)
-        .await
-        .unwrap();
-    let session_id = &session_info.id;
+    // Create session (returns session + root_node)
+    let created = create_session(&client, &hub.http_url).await.unwrap();
+    let session_id = &created.session.id;
+    let node_id = &created.root_node.id;
 
     // Create container with short timeout and task that would take longer
     let container_name = format!("mantle-test-timeout-{}", session_id);
@@ -404,8 +417,8 @@ async fn test_e2e_container_timeout() {
             "wrap".to_string(),
             "--hub-socket".to_string(),
             "/tmp/mantle.sock".to_string(),
-            "--session-tag".to_string(),
-            session_id.clone(),
+            "--node-id".to_string(),
+            node_id.clone(),
             "--timeout".to_string(),
             "5".to_string(), // 5 second timeout
             "--".to_string(),
@@ -451,18 +464,21 @@ async fn test_e2e_container_timeout() {
     let mut wait_stream = docker.wait_container(&container.id, Some(wait_options));
     let _wait_result = tokio::time::timeout(Duration::from_secs(30), wait_stream.next()).await;
 
-    // Session might be failed or have a timeout error
+    // Node might be failed or have a timeout error
     let resp = client
-        .get(format!("{}/api/sessions/{}", hub.http_url, session_id))
+        .get(format!(
+            "{}/api/sessions/{}/nodes/{}",
+            hub.http_url, session_id, node_id
+        ))
         .send()
         .await
         .unwrap();
 
-    let session: serde_json::Value = resp.json().await.unwrap();
+    let node: serde_json::Value = resp.json().await.unwrap();
 
     // Should either be failed or have an error result
-    let state = session["state"].as_str().unwrap_or("");
-    eprintln!("Timeout test session state: {}", state);
+    let state = node["state"].as_str().unwrap_or("");
+    eprintln!("Timeout test node state: {}", state);
 
     // Cleanup
     let remove_options = RemoveContainerOptions {

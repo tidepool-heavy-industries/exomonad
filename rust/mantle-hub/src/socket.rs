@@ -1,4 +1,6 @@
 //! Unix socket listener for container communication.
+//!
+//! Containers submit node results via this socket.
 
 use std::path::Path;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -7,7 +9,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::db;
 use crate::state::AppState;
-use crate::types::{HubEvent, SessionResult};
+use crate::types::{HubEvent, NodeResult};
 
 /// Listen for connections on Unix socket.
 pub async fn listen(socket_path: impl AsRef<Path>, state: AppState) -> std::io::Result<()> {
@@ -63,34 +65,34 @@ async fn handle_connection(
 
     debug!(line = %line.trim(), "Received message");
 
-    // Parse as SessionResult
-    match serde_json::from_str::<SessionResult>(line.trim()) {
+    // Parse as NodeResult
+    match serde_json::from_str::<NodeResult>(line.trim()) {
         Ok(result) => {
-            let session_id = result.session_id.clone();
+            let node_id = result.node_id.clone();
 
             // Store result in database
             match db::insert_result(&state.pool, &result).await {
                 Ok(()) => {
-                    info!(session_id = %session_id, "Result stored");
+                    info!(node_id = %node_id, "Result stored");
 
                     // Broadcast event
-                    state.broadcast(HubEvent::SessionCompleted {
-                        session_id: session_id.clone(),
+                    state.broadcast(HubEvent::NodeCompleted {
+                        node_id: node_id.clone(),
                         result,
                     });
 
                     // Send success response
-                    let response = serde_json::json!({ "status": "ok", "session_id": session_id });
+                    let response = serde_json::json!({ "status": "ok", "node_id": node_id });
                     writer
                         .write_all(format!("{}\n", response).as_bytes())
                         .await?;
                 }
                 Err(e) => {
-                    warn!(session_id = %session_id, error = %e, "Failed to store result");
+                    warn!(node_id = %node_id, error = %e, "Failed to store result");
 
                     // Broadcast failure
-                    state.broadcast(HubEvent::SessionFailed {
-                        session_id: session_id.clone(),
+                    state.broadcast(HubEvent::NodeFailed {
+                        node_id: node_id.clone(),
                         error: e.to_string(),
                     });
 

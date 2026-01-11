@@ -16,8 +16,8 @@ use super::types::{SessionOutput, SessionState};
 use crate::docker::{run_claude_direct, ContainerConfig};
 
 use mantle_shared::hub::{
-    HubClient, HubConfig, ModelUsage as HubModelUsage, SessionRegister,
-    SessionResult as HubSessionResult, SyncEventStream,
+    HubClient, HubConfig, ModelUsage as HubModelUsage, NodeResult as HubNodeResult,
+    SessionRegister, SyncEventStream,
 };
 
 /// Error types for session continue operations.
@@ -334,14 +334,15 @@ fn check_hub_reachable(hub_config: &HubConfig) -> Result<()> {
 }
 
 /// Register a session with the hub.
+///
+/// Creates a new session with its root node and returns (session_id, node_id).
 fn register_with_hub(
     hub_config: &HubConfig,
     branch: &str,
     worktree_path: &Path,
     model: &str,
     prompt: &str,
-    parent_id: Option<String>,
-) -> Result<String> {
+) -> Result<(String, String)> {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -355,18 +356,18 @@ fn register_with_hub(
             worktree: worktree_path.to_path_buf(),
             prompt: prompt.to_string(),
             model: model.to_string(),
-            parent_id,
         };
 
-        let info = client.register_session(&req).await?;
-        Ok(info.id)
+        let resp = client.create_session(&req).await?;
+        Ok((resp.session.id, resp.root_node.id))
     })
 }
 
-/// Submit a session result to the hub.
+/// Submit a node result to the hub.
 fn submit_result_to_hub(
     hub_config: &HubConfig,
     hub_session_id: &str,
+    hub_node_id: &str,
     output: &SessionOutput,
 ) -> Result<()> {
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -395,8 +396,8 @@ fn submit_result_to_hub(
             })
             .collect();
 
-        let result = HubSessionResult {
-            session_id: hub_session_id.to_string(),
+        let result = HubNodeResult {
+            node_id: hub_node_id.to_string(),
             exit_code: output.exit_code,
             is_error: output.is_error,
             result_text: output.result_text.clone(),
@@ -408,7 +409,9 @@ fn submit_result_to_hub(
             model_usage,
         };
 
-        client.submit_result(&result).await?;
+        client
+            .submit_node_result(hub_session_id, hub_node_id, &result)
+            .await?;
         Ok(())
     })
 }
@@ -433,19 +436,19 @@ fn execute_docker_continue(
     info!(session_id = %session_id, "Starting Docker continue execution with hub streaming");
 
     // 2. Register session with hub (as a continuation)
-    let hub_session_id = register_with_hub(
+    let (hub_session_id, hub_node_id) = register_with_hub(
         &hub_config,
         branch,
         worktree_path,
         model,
         &format!("[continue] {}", prompt),
-        None, // Could track parent_id for session lineage
     )?;
-    info!(hub_session_id = %hub_session_id, "Registered continuation with hub");
+    info!(hub_session_id = %hub_session_id, hub_node_id = %hub_node_id, "Registered continuation with hub");
 
     // 3. Connect WebSocket for event streaming
-    let event_stream = SyncEventStream::connect(&hub_config.http_url, &hub_session_id)?;
-    info!(hub_session_id = %hub_session_id, "Connected event stream to hub");
+    let event_stream =
+        SyncEventStream::connect(&hub_config.http_url, &hub_session_id, &hub_node_id)?;
+    info!(hub_session_id = %hub_session_id, hub_node_id = %hub_node_id, "Connected event stream to hub");
 
     // Build Claude args with --resume flag and stream-json
     let claude_args = vec![
@@ -507,8 +510,8 @@ fn execute_docker_continue(
     };
 
     // 5. Submit final result to hub
-    submit_result_to_hub(&hub_config, &hub_session_id, &output)?;
-    info!(hub_session_id = %hub_session_id, "Submitted continuation result to hub");
+    submit_result_to_hub(&hub_config, &hub_session_id, &hub_node_id, &output)?;
+    info!(hub_session_id = %hub_session_id, hub_node_id = %hub_node_id, "Submitted continuation result to hub");
 
     Ok(output)
 }

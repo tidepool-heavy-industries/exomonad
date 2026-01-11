@@ -13,6 +13,9 @@ pub enum HubError {
     #[error("Session not found: {0}")]
     SessionNotFound(String),
 
+    #[error("Node not found: {0}")]
+    NodeNotFound(String),
+
     #[error("Invalid request: {0}")]
     BadRequest(String),
 
@@ -26,6 +29,9 @@ impl IntoResponse for HubError {
             HubError::Database(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
             HubError::SessionNotFound(id) => {
                 (StatusCode::NOT_FOUND, format!("Session not found: {}", id))
+            }
+            HubError::NodeNotFound(id) => {
+                (StatusCode::NOT_FOUND, format!("Node not found: {}", id))
             }
             HubError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg.clone()),
             HubError::Internal(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.clone()),

@@ -1,1 +1,5 @@
 target/*
+
+# Frontend build artifacts
+mantle-hub/frontend/node_modules/
+mantle-hub/static/
