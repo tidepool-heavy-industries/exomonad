@@ -12,10 +12,10 @@ import type {
 } from "../types";
 import { visualizationBus } from "../event-bus";
 
-/** Default layout constraints */
+/** Default layout constraints (consumers typically override in their options) */
 const DEFAULT_CONSTRAINTS: LayoutConstraints = {
   viewportBounds: new DOMRect(0, 0, window.innerWidth, window.innerHeight),
-  maxVisibleDecorators: 20, // High limit - let user manage their own layout
+  maxVisibleDecorators: 5,
   minimizeThreshold: 100,
   collisionPadding: 10,
 };
@@ -37,19 +37,20 @@ export class LayoutManager {
   /** Decorators that user has manually interacted with - don't auto-minimize */
   private userExpandedDecorators: Set<string> = new Set();
 
+  /** Bound resize handler for cleanup */
+  private handleResize = (): void => {
+    this.constraints.viewportBounds = new DOMRect(
+      0,
+      0,
+      window.innerWidth,
+      window.innerHeight
+    );
+    this.scheduleLayout();
+  };
+
   constructor(constraints: Partial<LayoutConstraints> = {}) {
     this.constraints = { ...DEFAULT_CONSTRAINTS, ...constraints };
-
-    // Update viewport bounds on resize
-    window.addEventListener("resize", () => {
-      this.constraints.viewportBounds = new DOMRect(
-        0,
-        0,
-        window.innerWidth,
-        window.innerHeight
-      );
-      this.scheduleLayout();
-    });
+    window.addEventListener("resize", this.handleResize);
   }
 
   /**
@@ -335,9 +336,11 @@ export class LayoutManager {
   }
 
   /**
-   * Clean up all decorators.
+   * Clean up all decorators and listeners.
    */
   dispose(): void {
+    window.removeEventListener("resize", this.handleResize);
+
     for (const decorator of this.decorators.values()) {
       decorator.dispose();
     }

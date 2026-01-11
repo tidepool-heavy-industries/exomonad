@@ -193,7 +193,6 @@ class SessionGraph {
       return;
     }
 
-    console.log("[Viz] Setting up visualization controller");
     this.vizController = new VisualizationController({
       container: chatContainer,
       autoAttach: true,
@@ -203,7 +202,6 @@ class SessionGraph {
         collisionPadding: 15,
       },
     });
-    console.log("[Viz] Controller created:", this.vizController);
   }
 
   private async loadGraph(): Promise<void> {
@@ -251,7 +249,6 @@ class SessionGraph {
   }
 
   private addNode(nodeInfo: NodeInfo): void {
-    console.log("[Graph] addNode called:", nodeInfo.id, "state:", nodeInfo.state);
     const graphNode: SimNode = {
       id: nodeInfo.id,
       branch: nodeInfo.branch,
@@ -326,7 +323,6 @@ class SessionGraph {
   }
 
   private cacheEvent(nodeId: string, event: StreamEvent, timestamp: string): void {
-    console.log("[Graph] cacheEvent:", nodeId, event);
     if (!this.nodeEvents[nodeId]) {
       this.nodeEvents[nodeId] = [];
     }
@@ -340,7 +336,6 @@ class SessionGraph {
 
     // Forward to visualization layer for live chat windows
     if (this.vizController) {
-      console.log("[Graph] Forwarding to vizController");
       this.vizController.emitNodeEvent(nodeId, event, timestamp);
     }
 

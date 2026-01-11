@@ -43,7 +43,7 @@ export class ChatWindowDecorator extends BaseDecorator {
   private autoScrollThreshold: number;
   private userHasScrolled = false;
   private messagesContainer: HTMLElement | null = null;
-  private unsubscribe: (() => void) | null = null;
+  private unsubscribes: (() => void)[] = [];
   private headerElement: HTMLElement | null = null;
   private unreadBadge: HTMLElement | null = null;
   private isDragging = false;
@@ -155,20 +155,21 @@ export class ChatWindowDecorator extends BaseDecorator {
    * Subscribe to node events via the event bus.
    */
   private subscribeToEvents(): void {
-    console.log("[ChatWindow] Subscribing to events for node:", this.nodeId);
-    this.unsubscribe = visualizationBus.on("node:event", (data) => {
-      console.log("[ChatWindow] Received node:event for:", data.nodeId, "my node:", this.nodeId);
-      if (data.nodeId === this.nodeId) {
-        this.handleEvent(data.event, data.timestamp);
-      }
-    });
+    this.unsubscribes.push(
+      visualizationBus.on("node:event", (data) => {
+        if (data.nodeId === this.nodeId) {
+          this.handleEvent(data.event, data.timestamp);
+        }
+      })
+    );
 
-    // Also subscribe to state changes
-    visualizationBus.on("node:state-change", (data) => {
-      if (data.nodeId === this.nodeId) {
-        this.updateNodeState(data.newState);
-      }
-    });
+    this.unsubscribes.push(
+      visualizationBus.on("node:state-change", (data) => {
+        if (data.nodeId === this.nodeId) {
+          this.updateNodeState(data.newState);
+        }
+      })
+    );
   }
 
   /**
@@ -187,7 +188,6 @@ export class ChatWindowDecorator extends BaseDecorator {
       }
 
       const events: NodeEvent[] = await resp.json();
-      console.log(`[ChatWindow] Loaded ${events.length} historical events for ${this.nodeId}`);
 
       // Parse and render each event
       for (const nodeEvent of events) {
@@ -221,7 +221,6 @@ export class ChatWindowDecorator extends BaseDecorator {
    * Handle incoming stream event.
    */
   handleEvent(event: StreamEvent, timestamp: string): void {
-    console.log("[ChatWindow] handleEvent:", this.nodeId, event);
     const message = this.parseEvent(event, timestamp);
     if (!message) return;
 
@@ -383,9 +382,12 @@ export class ChatWindowDecorator extends BaseDecorator {
    * Escape HTML for safe rendering.
    */
   private escapeHtml(text: string): string {
-    const div = document.createElement("div");
-    div.textContent = text;
-    return div.innerHTML;
+    return text
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
   }
 
   /**
@@ -539,14 +541,16 @@ export class ChatWindowDecorator extends BaseDecorator {
    * Clean up resources.
    */
   dispose(): void {
-    // Clean up drag listeners
+    // Clean up drag listeners (even if stopDrag wasn't called)
     document.removeEventListener("mousemove", this.onDrag);
     document.removeEventListener("mouseup", this.stopDrag);
 
-    if (this.unsubscribe) {
-      this.unsubscribe();
-      this.unsubscribe = null;
+    // Clean up all event subscriptions
+    for (const unsub of this.unsubscribes) {
+      unsub();
     }
+    this.unsubscribes = [];
+
     this.messages = [];
     this.messagesContainer = null;
     this.headerElement = null;

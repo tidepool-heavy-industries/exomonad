@@ -102,7 +102,6 @@ export class HubWebSocket {
     // HubEvent variants - uses serde tag="type" with snake_case
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const event = msg as any;
-    console.log("[WS] Event received:", event.type, event);
 
     switch (event.type) {
       case "session_created":
@@ -112,7 +111,6 @@ export class HubWebSocket {
         this.callbacks.onSessionUpdated?.(event.session as SessionInfo);
         break;
       case "node_created":
-        console.log("[WS] NodeCreated:", event.node);
         this.callbacks.onNodeCreated?.(event.node as NodeInfo);
         break;
       case "node_updated":
@@ -125,7 +123,6 @@ export class HubWebSocket {
         this.callbacks.onNodeFailed?.(event.node_id as string, event.error as string);
         break;
       case "node_event":
-        console.log("[WS] NodeEvent:", event.node_id, event.event);
         this.callbacks.onNodeEvent?.(
           event.session_id as string,
           event.node_id as string,

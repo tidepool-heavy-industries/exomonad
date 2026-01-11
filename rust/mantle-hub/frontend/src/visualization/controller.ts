@@ -46,6 +46,8 @@ export class VisualizationController {
   private layoutManager: LayoutManager;
   private factories: Map<string, DecoratorFactory> = new Map();
   private nodeDecorators: Map<string, Set<string>> = new Map();
+  /** Maps decoratorId → factoryType for type checking */
+  private decoratorTypes: Map<string, string> = new Map();
   private autoAttach: boolean;
   private sessionId: string | null = null;
 
@@ -98,7 +100,6 @@ export class VisualizationController {
 
     // Handle node creation
     visualizationBus.on("node:created", (node) => {
-      console.log("[Viz] node:created event received:", node);
       if (this.autoAttach) {
         this.tryAttachDecorators(node);
       }
@@ -166,13 +167,10 @@ export class VisualizationController {
    * Try to attach decorators for a node.
    */
   private tryAttachDecorators(node: NodeSnapshot): void {
-    console.log("[Viz] tryAttachDecorators for node:", node.id, "state:", node.state);
     for (const factory of this.factories.values()) {
       const shouldAttach = factory.shouldAttach(node);
       const hasDecorator = this.hasDecoratorOfType(node.id, factory.type);
-      console.log("[Viz] Factory", factory.type, "shouldAttach:", shouldAttach, "hasDecorator:", hasDecorator);
       if (shouldAttach && !hasDecorator) {
-        console.log("[Viz] Attaching decorator for node:", node.id);
         // Build config with sessionId and initialState
         const config: DecoratorConfig = {
           sessionId: node.sessionId ?? this.sessionId ?? undefined,
@@ -195,11 +193,12 @@ export class VisualizationController {
     // Register with layout manager
     this.layoutManager.register(decorator);
 
-    // Track decorator
+    // Track decorator by node and by type
     if (!this.nodeDecorators.has(nodeId)) {
       this.nodeDecorators.set(nodeId, new Set());
     }
     this.nodeDecorators.get(nodeId)!.add(decorator.id);
+    this.decoratorTypes.set(decorator.id, factory.type);
 
     // Emit event
     visualizationBus.emit("decorator:attached", {
@@ -211,11 +210,16 @@ export class VisualizationController {
   /**
    * Check if node has a decorator of a specific type.
    */
-  private hasDecoratorOfType(nodeId: string, _factoryType: string): boolean {
-    const decorators = this.layoutManager.getDecoratorsForNode(nodeId);
-    // Factory type is embedded in decorator ID: "decorator-nodeId-..."
-    // This is a simplification - in production we'd track types properly
-    return decorators.length > 0;
+  private hasDecoratorOfType(nodeId: string, factoryType: string): boolean {
+    const decoratorIds = this.nodeDecorators.get(nodeId);
+    if (!decoratorIds) return false;
+
+    for (const id of decoratorIds) {
+      if (this.decoratorTypes.get(id) === factoryType) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /**
@@ -267,6 +271,7 @@ export class VisualizationController {
     if (nodeDecorators) {
       nodeDecorators.delete(decorator.id);
     }
+    this.decoratorTypes.delete(decorator.id);
 
     // Detach from DOM
     decorator.detach();
@@ -317,7 +322,6 @@ export class VisualizationController {
    * Called when WebSocket receives a stream event.
    */
   emitNodeEvent(nodeId: string, event: StreamEvent, timestamp: string): void {
-    console.log("[Viz] emitNodeEvent:", nodeId, event);
     visualizationBus.emit("node:event", { nodeId, event, timestamp });
   }
 
@@ -340,7 +344,6 @@ export class VisualizationController {
    * Call this after fetching graph data.
    */
   attachToExistingNodes(nodes: NodeSnapshot[]): void {
-    console.log("[Viz] attachToExistingNodes:", nodes.length, "nodes");
     for (const node of nodes) {
       // Ensure sessionId is set
       if (!node.sessionId && this.sessionId) {
@@ -357,5 +360,6 @@ export class VisualizationController {
     this.layoutManager.dispose();
     this.factories.clear();
     this.nodeDecorators.clear();
+    this.decoratorTypes.clear();
   }
 }
