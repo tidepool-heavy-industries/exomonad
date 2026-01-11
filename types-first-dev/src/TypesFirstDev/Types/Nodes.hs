@@ -2,6 +2,7 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE FieldSelectors #-}
+{-# LANGUAGE TypeApplications #-}
 
 -- | Node input/output types for TDD protocol.
 -- Prefix convention: lowercase acronym of type name
@@ -32,6 +33,8 @@ import Data.Text (Text)
 import GHC.Generics (Generic)
 
 import Tidepool.StructuredOutput (StructuredOutput)
+import Tidepool.StructuredOutput.ClaudeCodeSchema (ClaudeCodeSchema(..))
+import Tidepool.StructuredOutput.DecisionTools (ToDecisionTools(..))
 
 import TypesFirstDev.Types.Core (Spec, ParentContext)
 import TypesFirstDev.Types.Shared
@@ -73,7 +76,11 @@ data ScaffoldExit
       , seSpecSentence       :: Text
       }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput, ToDecisionTools)
+
+instance ClaudeCodeSchema ScaffoldExit where
+  ccDecisionTools = Just (toDecisionTools @ScaffoldExit)
+  ccParseToolCall = parseToolCall @ScaffoldExit
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TDD WRITETESTS
@@ -101,7 +108,11 @@ data TDDWriteTestsExit
       , tweExpectedLocation :: FilePath
       }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput, ToDecisionTools)
+
+instance ClaudeCodeSchema TDDWriteTestsExit where
+  ccDecisionTools = Just (toDecisionTools @TDDWriteTestsExit)
+  ccParseToolCall = parseToolCall @TDDWriteTestsExit
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TDD REVIEWIMPL
@@ -134,7 +145,11 @@ data TDDReviewImplExit
       , treMissingCriteria :: [Text]
       }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput, ToDecisionTools)
+
+instance ClaudeCodeSchema TDDReviewImplExit where
+  ccDecisionTools = Just (toDecisionTools @TDDReviewImplExit)
+  ccParseToolCall = parseToolCall @TDDReviewImplExit
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- IMPL
@@ -182,7 +197,11 @@ data ImplExit
       , ieStuckAttempts       :: Int
       }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput, ToDecisionTools)
+
+instance ClaudeCodeSchema ImplExit where
+  ccDecisionTools = Just (toDecisionTools @ImplExit)
+  ccParseToolCall = parseToolCall @ImplExit
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- MERGER
@@ -214,7 +233,11 @@ data MergerExit
       , mexFailingTests :: [Text]
       }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput, ToDecisionTools)
+
+instance ClaudeCodeSchema MergerExit where
+  ccDecisionTools = Just (toDecisionTools @MergerExit)
+  ccParseToolCall = parseToolCall @MergerExit
 
 -- | Reason for merge rejection.
 data MergeRejectedReason
@@ -256,4 +279,8 @@ data RebaserExit
       , reWhyUnresolvable :: Text
       }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput, ToDecisionTools)
+
+instance ClaudeCodeSchema RebaserExit where
+  ccDecisionTools = Just (toDecisionTools @RebaserExit)
+  ccParseToolCall = parseToolCall @RebaserExit

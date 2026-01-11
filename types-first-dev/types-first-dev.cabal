@@ -34,6 +34,14 @@ library
         TypesFirstDev.Templates
         TypesFirstDev.Graph
         TypesFirstDev.Handlers
+        -- Handler modules (one per node)
+        TypesFirstDev.Handlers.Scaffold
+        TypesFirstDev.Handlers.TDDWriteTests
+        TypesFirstDev.Handlers.ImplBarrier
+        TypesFirstDev.Handlers.Impl
+        TypesFirstDev.Handlers.TDDReviewImpl
+        TypesFirstDev.Handlers.Merger
+        TypesFirstDev.Handlers.Rebaser
         TypesFirstDev.Schema
         -- Policy and evaluation
         TypesFirstDev.Policy
