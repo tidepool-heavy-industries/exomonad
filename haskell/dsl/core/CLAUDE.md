@@ -132,6 +132,52 @@ gRoute :: mode :- G.LogicNode
     :@ UsesEffects '[Goto "gProcess" Data, Goto Exit Response]
 ```
 
+### ForkNode and BarrierNode (Parallel Fan-Out)
+
+For parallel execution, use the Fork/Barrier pattern:
+
+```haskell
+data ParallelGraph mode = ParallelGraph
+  { entry   :: mode :- G.Entry Task
+  , fork    :: mode :- G.ForkNode
+      :@ Input Task
+      :@ Spawn '[To "worker1" Task, To "worker2" Task]
+      :@ Barrier "join"
+  , worker1 :: mode :- G.LLMNode
+      :@ Input Task
+      :@ Template W1Tpl
+      :@ Schema Result1
+  , worker2 :: mode :- G.LLMNode
+      :@ Input Task
+      :@ Template W2Tpl
+      :@ Schema Result2
+  , join    :: mode :- G.BarrierNode
+      :@ Awaits '[Result1, Result2]
+      :@ UsesEffects '[Goto Exit (Result1, Result2)]
+  , exit    :: mode :- G.Exit (Result1, Result2)
+  }
+```
+
+**Annotations:**
+- `Spawn '[To "worker1" A, To "worker2" B]` - Define parallel spawn targets
+- `Barrier "joinNodeName"` - Name of barrier that collects results
+- `Awaits '[Result1, Result2]` - Expected result types at barrier
+- `Arrive "barrierName"` - (On workers) Deposit result at named barrier
+
+**How it works:**
+1. ForkNode receives input, routes copies to all workers
+2. Workers run independently (can be on different machines)
+3. Each worker implicitly calls `Arrive` when done
+4. BarrierNode blocks until all workers arrive
+5. Results collected and passed to barrier handler
+
+**Compile-time validation:**
+- Spawn targets must reference existing fields
+- Awaits types must match worker output types
+- Workers must reach their Barrier
+
+> **Source**: `Graph/Types.hs` (annotations), `Graph/Validate/ForkBarrier.hs` (validation), `runtime/actor/src/Tidepool/Actor/Fork.hs` (execution)
+
 ## Annotations
 
 Annotations are attached with `:@` (left-associative):
@@ -197,6 +243,35 @@ Both have the same 4 fields (`llmSystem`, `llmUser`, `llmBefore`, `llmAfter`), b
 
 > **Source**: `tidepool-core/src/Tidepool/Graph/Types.hs` (ClaudeCode, ModelChoice),
 > `tidepool-core/src/Tidepool/Graph/Execute.hs:264-302` (executeClaudeCodeHandler)
+
+### Graph-Level Annotations (`:&`)
+
+Attach metadata to the entire graph using `:&` (right-associative):
+
+```haskell
+type MyGraphWithMeta = MyGraph
+  :& Global SessionState           -- Shared state across all nodes
+  :& Groups '[ '("llm", '["classify", "process"])
+             , '("routing", '["route", "dispatch"])
+             ]                     -- Mermaid subgraph organization
+  :& Requires '[LLM, State SessionState, Log]  -- Effect documentation
+  :& Backend 'NativeAnthropic      -- LLM provider selection
+```
+
+**Available graph annotations:**
+
+| Annotation | Purpose |
+|------------|---------|
+| `Global StateType` | Shared state accessible from all nodes via Memory effect |
+| `Groups '[("name", ["field1", ...])]` | Organize nodes in Mermaid diagram subgraphs |
+| `Requires '[Effect1, Effect2]` | Document required effects (for runners) |
+| `Backend NativeAnthropic \| CloudflareAI` | Select LLM provider |
+
+**Global vs Node Memory:**
+- `Global S` - All nodes share one `S` instance
+- `Memory S` (on node) - Each node has its own `S` instance
+
+> **Source**: `Graph/Types.hs`
 
 ## Goto and GotoChoice
 
@@ -359,6 +434,46 @@ modifyMem :: forall s es. Member (Memory s) es => (s -> (a, s)) -> Eff es a
 **Persistence:** Memory state is serialized between graph steps. For WASM execution, it's included in the `StepOutput`'s `GraphState`. For native execution, it's held in the runner's state.
 
 > **Source**: `tidepool-core/src/Tidepool/Graph/Memory.hs`
+
+## Subgraph Effect (Tree Recursion)
+
+Spawn child instances of the same graph for recursive tree execution:
+
+```haskell
+import Tidepool.Effect.Subgraph
+
+-- In a handler that can spawn children
+decomposeHandler :: Spec -> Eff (Subgraph Spec Result ': es) (GotoChoice targets)
+decomposeHandler spec = do
+  let childSpecs = partition spec  -- Break into smaller specs
+
+  -- Spawn children (run in parallel)
+  handles <- traverse spawnSelf childSpecs
+
+  -- Wait for all children to complete
+  results <- collectAll handles
+
+  pure $ gotoExit (combine results)
+
+collectAll :: [ChildHandle] -> Eff (Subgraph Spec Result ': es) [Result]
+collectAll handles = go handles []
+  where
+    go [] acc = pure (reverse acc)
+    go pending acc = do
+      (childId, result) <- awaitAny  -- Blocks until any child completes
+      go (filter (\h -> handleId h /= childId) pending) (result : acc)
+```
+
+**Operations:**
+- `spawnSelf :: input -> Eff (Subgraph input output ': es) ChildHandle`
+- `awaitAny :: Eff (Subgraph input output ': es) (ChildId, output)`
+- `getPending :: Eff (Subgraph input output ': es) [ChildHandle]`
+
+**Runtime:** Uses `async` for concurrent execution with `TQueue` for completion notifications.
+
+**Use case:** V3 TDD protocol where Scaffold spawns child graphs for decomposed specs.
+
+> **Source**: `Effect/Subgraph.hs` (types), `runtime/actor/src/Tidepool/Actor/Subgraph.hs` (interpreter)
 
 ## Template.hs - Typed Prompt Templates
 
