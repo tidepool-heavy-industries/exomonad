@@ -38,9 +38,7 @@ library
         TypesFirstDev.Handlers.Scaffold
         TypesFirstDev.Handlers.TDDWriteTests
         TypesFirstDev.Handlers.ImplBarrier
-        TypesFirstDev.Handlers.Impl
-        TypesFirstDev.Handlers.TDDReviewImpl
-        TypesFirstDev.Handlers.Merger
+        TypesFirstDev.Handlers.ImplReviewMerge
         TypesFirstDev.Handlers.Rebaser
         -- V3 runtime
         TypesFirstDev.V3.Interpreters

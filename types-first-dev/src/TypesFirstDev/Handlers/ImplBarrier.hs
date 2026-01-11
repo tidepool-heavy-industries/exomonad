@@ -5,13 +5,17 @@ module TypesFirstDev.Handlers.ImplBarrier
   ( implBarrierHandler
   ) where
 
-import Tidepool.Effect.Freer (Eff, Member)
-import Tidepool.Effect.Subgraph (Subgraph, getPending, awaitAny)
+import Control.Monad.Freer (Eff)
 import Tidepool.Graph.Goto (To, GotoChoice, gotoChoice)
 
-import TypesFirstDev.Types.Core (Spec)
-import TypesFirstDev.Types.Payloads (InitWorkPayload, TestsReadyPayload, MergeComplete)
-import TypesFirstDev.Handlers.Impl (ImplInput(..))
+import TypesFirstDev.Types.Payloads (TestsReadyPayload)
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- FORWARD REFERENCE (to avoid circular imports)
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Placeholder for ImplInput (from Impl handler)
+data ImplInput_FwdRef
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- HANDLER
@@ -19,37 +23,12 @@ import TypesFirstDev.Handlers.Impl (ImplInput(..))
 
 -- | ImplBarrier handler: async merge loop.
 -- Awaits tests + children, merges children, routes to Impl when all complete.
+--
+-- NOTE: Phase 7 stub. Full async implementation deferred to Phase 8.
 implBarrierHandler
-  :: (Member (Subgraph Spec) es)
-  => TestsReadyPayload
-  -> Eff es (GotoChoice '[To "v3Impl" ImplInput])
-implBarrierHandler testsPayload = do
-  -- Collect all pending children via awaitAny loop
-  children <- collectChildren []
-
-  -- Construct ImplInput with merged children
-  let implInput = ImplInput
-        { iiSpec = error "TODO: get spec from context"
-        , iiScaffold = error "TODO: get scaffold from context"
-        , iiTestsReady = testsPayload
-        , iiChildMerges = if null children then Nothing else Just children
-        , iiAttemptCount = 1
-        , iiCritiqueList = Nothing
-        }
-
-  pure $ gotoChoice @"v3Impl" implInput
-
--- | Collect all child MergeComplete results via awaitAny.
-collectChildren
-  :: (Member (Subgraph Spec) es)
-  => [MergeComplete]
-  -> Eff es [MergeComplete]
-collectChildren acc = do
-  pending <- getPending
-  case pending of
-    [] -> pure (reverse acc)
-    _  -> do
-      -- Await next child completion
-      (_childId, childResult) <- awaitAny
-      -- Merge and recurse
-      collectChildren (childResult : acc)
+  :: TestsReadyPayload
+  -> Eff es (GotoChoice '[To "v3Impl" ImplInput_FwdRef])
+implBarrierHandler _testsPayload = do
+  -- TODO: Implement async merge loop in Phase 8
+  -- For now, return error to indicate this is a stub
+  pure $ gotoChoice @"v3Impl" (error "TODO: ImplBarrier async merge loop (Phase 8)" :: ImplInput_FwdRef)

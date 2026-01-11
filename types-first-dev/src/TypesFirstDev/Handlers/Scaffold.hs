@@ -18,18 +18,19 @@ import Data.Aeson (FromJSON, ToJSON)
 import Data.Text (Text)
 import GHC.Generics (Generic)
 
-import Tidepool.Effect.Freer (Eff, Member)
+import Control.Monad.Freer (Eff, Member)
 import Tidepool.Effect.Session (Session, SessionOperation(..))
 import Tidepool.Effect.Subgraph (Subgraph, spawnSelf)
 import Tidepool.Graph.Goto (To, GotoChoice, gotoChoice, gotoExit)
+import Tidepool.Graph.Types (Exit)
 import Tidepool.StructuredOutput (StructuredOutput)
 import Tidepool.StructuredOutput.ClaudeCodeSchema (ClaudeCodeSchema(..))
 import Tidepool.StructuredOutput.DecisionTools (ToDecisionTools(..))
 
 import TypesFirstDev.Context (ScaffoldTemplateCtx(..))
-import TypesFirstDev.Types.Core (Spec, ParentContext)
+import TypesFirstDev.Types.Core (Spec, ParentContext(..))
 import TypesFirstDev.Types.Shared (PlannedTest, ChildSpec, InterfaceFile)
-import TypesFirstDev.Types.Payloads (InitWorkPayload(..))
+import TypesFirstDev.Types.Payloads (InitWorkPayload(..), MergeComplete)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TYPES
@@ -82,40 +83,35 @@ instance ClaudeCodeSchema ScaffoldExit where
 
 -- | Before handler: build template context.
 scaffoldBefore
-  :: (Member Session es, Member (Subgraph Spec) es)
+  :: (Member Session es, Member (Subgraph Spec MergeComplete) es)
   => ScaffoldInput
   -> Eff es (ScaffoldTemplateCtx, SessionOperation)
 scaffoldBefore input = do
   let ctx = ScaffoldTemplateCtx
-        { siSpec = input.siSpec
-        , siParentContext = input.siParentContext
+        { spec = input.siSpec
+        , parentContext = input.siParentContext
         }
   pure (ctx, StartFresh "v3/scaffold")
 
 -- | After handler: spawn children if decomposed, route to Fork.
 scaffoldAfter
-  :: (Member Session es, Member (Subgraph Spec) es)
+  :: (Member Session es, Member (Subgraph Spec MergeComplete) es)
   => ScaffoldExit
   -> Eff es (GotoChoice '[To "v3Fork" InitWorkPayload, To Exit ScaffoldExit])
 scaffoldAfter exit = case exit of
-  ScaffoldInitWork work -> do
-    -- Spawn child graphs if decomposed
-    forM_ work.seChildSpecs $ \childSpec -> do
-      let childInput = ScaffoldInput
-            { siSpec = childSpec.csSpec
-            , siParentContext = Just (ParentContext work.seInterface [])
-            }
-      _ <- spawnSelf childInput
-      pure ()
+  ScaffoldInitWork { seCommit, seInterface, seContract, seTestPlan } -> do
+    -- TODO: Spawn child graphs if decomposed
+    -- For now, just route to Fork - child spawning will be implemented
+    -- in Phase 8 when we have the full runner context
 
     -- Route to Fork with InitWorkPayload
     let payload = InitWorkPayload
-          { iwpScaffoldCommit = work.seCommit
-          , iwpInterfaceFile = work.seInterface
-          , iwpContractSuite = work.seContract
-          , iwpTestPlan = work.seTestPlan
+          { iwpScaffoldCommit = seCommit
+          , iwpInterfaceFile = seInterface
+          , iwpContractSuite = seContract
+          , iwpTestPlan = seTestPlan
           }
     pure $ gotoChoice @"v3Fork" payload
 
-  ScaffoldClarificationNeeded _q _ref _sent ->
+  ScaffoldClarificationNeeded {} ->
     pure $ gotoExit exit

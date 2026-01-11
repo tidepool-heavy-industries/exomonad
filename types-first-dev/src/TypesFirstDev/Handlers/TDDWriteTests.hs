@@ -13,10 +13,11 @@ module TypesFirstDev.Handlers.TDDWriteTests
 
 import Data.Aeson (FromJSON, ToJSON)
 import Data.Text (Text)
+import qualified Data.Text as T
 import GHC.Generics (Generic)
 
-import Tidepool.Effect.Freer (Eff, Member)
-import Tidepool.Effect.Session (Session, SessionOperation(..))
+import Control.Monad.Freer (Eff, Member)
+import Tidepool.Effect.Session (Session, SessionOperation(..), SessionId)
 import Tidepool.Graph.Goto (To, GotoChoice, gotoChoice, gotoExit)
 import Tidepool.Graph.Memory (Memory, getMem, updateMem)
 import Tidepool.StructuredOutput (StructuredOutput)
@@ -28,6 +29,7 @@ import TypesFirstDev.Types.Core (Spec)
 import TypesFirstDev.Types.Shared (PlannedTest)
 import TypesFirstDev.Types.Payloads (InitWorkPayload, TestsReadyPayload(..))
 import TypesFirstDev.Types.Memory (TDDMem(..))
+import TypesFirstDev.Handlers.Scaffold (ScaffoldInput)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TYPES
@@ -78,12 +80,13 @@ tddWriteTestsBefore
 tddWriteTestsBefore input = do
   mem <- getMem @TDDMem
   let ctx = TDDWriteTestsTemplateCtx
-        { twiSpec = input.twiSpec
-        , twiScaffold = input.twiScaffold
+        { spec = input.twiSpec
+        , scaffold = input.twiScaffold
+        , coveredCriteria = mem.tmCoveredCriteria
         }
-  let sessionOp = case mem.tddConversationId of
-        Just sid -> ContinueFrom sid
-        Nothing -> StartFresh "v3/tdd-write-tests"
+  -- TDDMem.tmConversationId is Text, not Maybe SessionId
+  -- Use StartFresh for now - session continuation will be handled in Phase 8
+  let sessionOp = StartFresh "v3/tdd-write-tests"
   pure (ctx, sessionOp)
 
 -- | After handler: route based on exit type.
@@ -92,7 +95,7 @@ tddWriteTestsAfter
   => (TDDWriteTestsExit, SessionId)
   -> Eff es (GotoChoice '[To "v3Impl" TestsReadyPayload, To "v3Scaffold" ScaffoldInput])
 tddWriteTestsAfter (exit, sid) = do
-  updateMem @TDDMem $ \m -> m { tddConversationId = Just sid }
+  updateMem @TDDMem $ \m -> m { tmConversationId = T.pack (show sid) }
   case exit of
     TDDTestsReady commit files criteria -> do
       let payload = TestsReadyPayload
