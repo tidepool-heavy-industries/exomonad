@@ -4,5 +4,7 @@
 //! Stream-json output is parsed on the host side.
 
 pub mod container;
+pub mod control_listener;
 
 pub use container::{run_claude_direct, ContainerConfig, DockerError};
+pub use control_listener::{ControlListener, ToolCallCollector};

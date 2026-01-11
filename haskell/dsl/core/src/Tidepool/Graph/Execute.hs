@@ -356,14 +356,21 @@ executeClaudeCodeHandler mSystemTpl userTpl beforeFn afterFn input = do
   -- Execute session and parse result with nag logic for sum types
   executeWithNag @schema fullPrompt schemaVal mToolsJson sessionOp model afterFn 0
   where
-    -- Maximum nag retries when Claude doesn't call a decision tool
+    -- Maximum nag retries when Claude doesn't call a decision tool or parse fails
     maxNagRetries :: Int
-    maxNagRetries = 3
+    maxNagRetries = 5
 
     -- Nag prompt when Claude doesn't call a decision tool
-    nagPrompt :: Text
-    nagPrompt = "You must call one of the decision:: tools to indicate your choice. " <>
-                "Please review the available tools and call the appropriate one."
+    decisionToolNagPrompt :: Text
+    decisionToolNagPrompt = "You must call one of the decision:: tools to indicate your choice. " <>
+                            "Please review the available tools and call the appropriate one."
+
+    -- Nag prompt for parse failures
+    parseErrorNagPrompt :: Text -> Text
+    parseErrorNagPrompt diagText =
+      "Your output didn't match the expected JSON schema. Error:\n" <>
+      diagText <> "\n\n" <>
+      "Please try again with valid JSON matching the schema."
 
     -- Execute session, parsing output and handling nag retries
     executeWithNag
@@ -407,7 +414,7 @@ executeClaudeCodeHandler mSystemTpl userTpl beforeFn afterFn input = do
                         <> show maxNagRetries <> " retries"
               else do
                 -- Continue the same session with nag prompt
-                executeWithNag @s nagPrompt schema tools
+                executeWithNag @s decisionToolNagPrompt schema tools
                   (ContinueFrom result.soSessionId) model_ afterFn_ (retryCount + 1)
 
         Nothing ->
@@ -417,8 +424,18 @@ executeClaudeCodeHandler mSystemTpl userTpl beforeFn afterFn input = do
               <> maybe "" (\e -> ": " <> T.unpack e) result.soError
             Just outputVal ->
               case ccParseStructured @s outputVal of
-                Left diag -> error $ "ClaudeCode output parse error: " <> T.unpack (formatDiagnostic diag)
                 Right output -> afterFn_ (ClaudeCodeResult output result.soSessionId, result.soSessionId)
+                Left diag ->
+                  -- Parse failed - nag and retry
+                  if retryCount >= maxNagRetries
+                  then error $ "ClaudeCode output parse error after "
+                            <> show maxNagRetries <> " retries: "
+                            <> T.unpack (formatDiagnostic diag)
+                  else do
+                    -- Continue the same session with parse error nag prompt
+                    let nagText = parseErrorNagPrompt (formatDiagnostic diag)
+                    executeWithNag @s nagText schema tools
+                      (ContinueFrom result.soSessionId) model_ afterFn_ (retryCount + 1)
 
     -- Convert Session.ToolCall to DecisionTools.ToolCall format
     convertToolCall :: ToolCall -> DT.ToolCall
