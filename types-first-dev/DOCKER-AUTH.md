@@ -2,7 +2,24 @@
 
 This document describes how to set up shared Claude Code authentication for the Docker-based execution environment.
 
-## Overview
+## Platform-Specific Behavior
+
+### Linux/WSL (Recommended)
+
+On Linux and WSL, mantle automatically bind-mounts the host's `~/.claude` directory into containers. **No setup required** if you've already authenticated with `claude login` on the host.
+
+```bash
+# Just authenticate on host (if not already done)
+claude login
+
+# That's it! mantle will mount ~/.claude:/home/user/.claude automatically
+```
+
+### macOS
+
+On macOS, Claude stores OAuth tokens in the system keychain rather than in `~/.claude`, so bind-mounting the directory doesn't work. You need a Docker volume with credentials.
+
+## Overview (macOS Only)
 
 Instead of passing OAuth tokens via environment variables (fragile), we use a shared Docker volume that contains Claude's authentication credentials. You authenticate once in a persistent container, and all worker containers inherit that authentication.
 

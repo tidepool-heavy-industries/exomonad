@@ -1279,11 +1279,13 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "mantle-shared",
+ "serde",
  "serde_json",
  "shell-escape",
  "strum",
  "tracing",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]

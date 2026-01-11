@@ -17,6 +17,7 @@ import qualified CallHandlerSpec
 import qualified DispatchGotoSpec
 import qualified ConvertTransitionHintSpec
 import qualified ToolTransitionIntegrationSpec
+import qualified DecisionToolsSpec
 
 main :: IO ()
 main = hspec $ do
@@ -61,3 +62,6 @@ main = hspec $ do
 
   describe "Tool Transition Integration" $ do
     ToolTransitionIntegrationSpec.spec
+
+  describe "DecisionTools" $ do
+    DecisionToolsSpec.spec

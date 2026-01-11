@@ -74,6 +74,15 @@ module Tidepool.StructuredOutput
     -- * Field Label Utilities
   , stripFieldPrefix
   , defaultFieldLabel
+
+    -- * ClaudeCode Schema Handling
+  , ClaudeCodeSchema(..)
+  , IsSumWithData
+
+    -- * Decision Tools
+  , ToDecisionTools(..)
+  , DecisionTool(..)
+  , ToolCall(..)
   ) where
 
 -- Import instances to bring them into scope
@@ -94,6 +103,15 @@ import Tidepool.StructuredOutput.Error
 import Tidepool.StructuredOutput.Prefix
   ( stripFieldPrefix
   , defaultFieldLabel
+  )
+import Tidepool.StructuredOutput.ClaudeCodeSchema
+  ( ClaudeCodeSchema(..)
+  , IsSumWithData
+  )
+import Tidepool.StructuredOutput.DecisionTools
+  ( ToDecisionTools(..)
+  , DecisionTool(..)
+  , ToolCall(..)
   )
 
 -- Note: Generic.hs instances are imported above to bring them into scope.

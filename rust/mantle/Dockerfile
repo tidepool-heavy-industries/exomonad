@@ -44,6 +44,10 @@ RUN mkdir -p /home/user/.claude && chown -R user:user /home/user/.claude
 
 COPY --from=builder /build/target/release/mantle-agent /usr/local/bin/
 
+# Copy entrypoint script that registers MCP server if decision tools are provided
+COPY mantle/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
 # Install ghcup, GHC, and cabal as user
 USER user
 WORKDIR /home/user
@@ -59,4 +63,5 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org | sh
 # Add ghcup to PATH
 ENV PATH="/home/user/.ghcup/bin:${PATH}"
 
-# No entrypoint - mantle runs `claude` directly, mantle-agent is only for hooks
+# Use entrypoint that registers MCP server if MANTLE_DECISION_TOOLS is set
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

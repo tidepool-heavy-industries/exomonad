@@ -52,6 +52,8 @@ library
         Tidepool.Effect.GHCi
         -- Native-only tooling
         Tidepool.Schema
+        Tidepool.StructuredOutput.ClaudeCodeSchema
+        Tidepool.StructuredOutput.DecisionTools
         Tidepool.StructuredOutput.Error
         Tidepool.StructuredOutput.Generic
         Tidepool.StructuredOutput.Instances
@@ -156,6 +158,7 @@ test-suite graph-validation-tests
         DispatchGotoSpec
         ConvertTransitionHintSpec
         ToolTransitionIntegrationSpec
+        DecisionToolsSpec
         Test.Tidepool.MockLLM
     build-depends:
         base >= 4.17 && < 5,
@@ -166,6 +169,7 @@ test-suite graph-validation-tests
         containers >= 0.6 && < 1,
         optparse-applicative >= 0.18 && < 1,
         text >= 2.0 && < 3,
+        vector >= 0.13 && < 1,
         freer-simple >= 1.2 && < 2,
         tidepool-core
     hs-source-dirs:   test

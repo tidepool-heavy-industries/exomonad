@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 use crate::config::Config;
+use crate::docker::control_listener::ControlListener;
 use crate::stream_parser::StreamParser;
 use mantle_shared::events::RunResult;
 use mantle_shared::humanize::eprint_event_humanized;
@@ -187,6 +188,14 @@ impl ContainerConfig {
         self
     }
 
+    /// Set decision tool definitions (JSON array).
+    ///
+    /// These tools are served by `mantle-agent mcp` to Claude Code for
+    /// sum type structured outputs. See Phase 4 of the decision tools plan.
+    pub fn with_decision_tools(self, tools_json: &str) -> Self {
+        self.with_env("MANTLE_DECISION_TOOLS", tools_json)
+    }
+
     /// Generate container name from session ID.
     pub fn container_name(&self) -> String {
         format!("mantle-{}", &self.session_id[..8.min(self.session_id.len())])
@@ -215,6 +224,22 @@ where
     logger.log("MANTLE", &format!("Starting container {}", container_name));
     logger.log("MANTLE", &format!("Image: {}", config.image));
     logger.log("MANTLE", &format!("Worktree: {}", config.worktree_path.display()));
+
+    // Create control socket listener if decision tools are configured
+    let has_decision_tools = config.env_vars.contains_key("MANTLE_DECISION_TOOLS");
+    let (control_socket_path, tool_call_collector) = if has_decision_tools {
+        let socket_path = PathBuf::from(format!("/tmp/mantle-{}.sock", config.session_id));
+        logger.log("MANTLE", &format!("Creating control socket: {}", socket_path.display()));
+
+        let listener = ControlListener::bind(&socket_path).map_err(|e| {
+            DockerError::OutputRead(format!("Failed to create control socket: {}", e))
+        })?;
+        let collector = listener.spawn();
+
+        (Some(socket_path), Some(collector))
+    } else {
+        (None, None)
+    };
 
     let mut cmd = Command::new("docker");
     cmd.arg("run")
@@ -264,8 +289,13 @@ where
         cmd.arg("-e").arg(format!("{}={}", k, v));
     }
 
-    // Mount hook socket if configured
-    if let Some(hub_socket) = &config.hub_socket {
+    // Mount control socket for decision tools (takes precedence)
+    // or hub socket for hook events
+    if let Some(ref socket_path) = control_socket_path {
+        cmd.arg("-v")
+            .arg(format!("{}:/mantle.sock", socket_path.display()));
+        cmd.arg("-e").arg("MANTLE_HOOK_SOCKET=/mantle.sock");
+    } else if let Some(hub_socket) = &config.hub_socket {
         cmd.arg("-v")
             .arg(format!("{}:/mantle.sock", hub_socket.display()));
         cmd.arg("-e").arg("MANTLE_HOOK_SOCKET=/mantle.sock");
@@ -376,8 +406,27 @@ where
         logger.log("WARNING", "No result event received from Claude (possible bug #1920)");
     }
 
+    // Collect tool calls from control socket listener
+    let tool_calls = if let Some(collector) = tool_call_collector {
+        let calls = collector.collect();
+        if !calls.is_empty() {
+            logger.log("MANTLE", &format!("Collected {} decision tool calls", calls.len()));
+            for call in &calls {
+                logger.log("TOOL_CALL", &format!("{}: {}", call.name, call.input));
+            }
+        }
+        calls
+    } else {
+        vec![]
+    };
+
+    // Cleanup control socket file
+    if let Some(ref socket_path) = control_socket_path {
+        let _ = std::fs::remove_file(socket_path);
+    }
+
     // Build result from parsed events
-    let result = parser.build_result(exit_code, Some(config.session_id.clone()));
+    let result = parser.build_result(exit_code, Some(config.session_id.clone()), tool_calls);
 
     // Save event stream to debug file if turn count is suspiciously high
     if turn_count > 50 || exit_code != 0 {
@@ -475,5 +524,26 @@ mod tests {
         assert_eq!(config.image, "custom-image");
         assert_eq!(config.timeout_secs, 300);
         assert_eq!(config.env_vars.get("MY_VAR"), Some(&"my_value".to_string()));
+    }
+
+    #[test]
+    fn test_with_decision_tools() {
+        let tools_json = r#"[{"name":"decision::approve","description":"Approve"}]"#;
+        let config = ContainerConfig {
+            image: "test".to_string(),
+            worktree_path: PathBuf::from("/tmp"),
+            hub_socket: None,
+            auth_mount: AuthMount::BindMount(PathBuf::from("/tmp/.claude")),
+            session_id: "test".to_string(),
+            claude_args: vec![],
+            timeout_secs: 0,
+            env_vars: HashMap::new(),
+        }
+        .with_decision_tools(tools_json);
+
+        assert_eq!(
+            config.env_vars.get("MANTLE_DECISION_TOOLS"),
+            Some(&tools_json.to_string())
+        );
     }
 }

@@ -53,6 +53,7 @@ module Tidepool.Effect.Session
   , SessionMetadata(..)
   , InterruptSignal(..)
   , SessionOperation(..)
+  , ToolCall(..)
 
     -- * Smart Constructors
   , startSession
@@ -138,6 +139,7 @@ data SessionOutput = SessionOutput
   , soInterrupts       :: [InterruptSignal] -- ^ Fork requests, escalations, etc.
   , soDurationSecs     :: Double         -- ^ Wall-clock duration in seconds
   , soError            :: Maybe Text     -- ^ Error if failed before Claude ran
+  , soToolCalls        :: Maybe [ToolCall] -- ^ Decision tool calls from Claude Code
   } deriving stock (Show, Eq, Generic)
 
 instance ToJSON SessionOutput where
@@ -207,6 +209,30 @@ interruptSignalOptions = defaultOptions
   }
 
 
+-- | A tool call from Claude Code (for decision tools).
+--
+-- When Claude calls @decision::approve { approvedBy: "alice", notes: "LGTM" }@,
+-- mantle captures this and returns it in @SessionOutput.soToolCalls@.
+--
+-- Field naming: @tc@ prefix stripped, camelCase → snake_case for JSON.
+data ToolCall = ToolCall
+  { tcName  :: !Text   -- ^ Full tool name (e.g., "decision::approve")
+  , tcInput :: !Value  -- ^ Tool input (the branch's field values)
+  } deriving stock (Show, Eq, Generic)
+
+instance ToJSON ToolCall where
+  toJSON = genericToJSON toolCallOptions
+
+instance FromJSON ToolCall where
+  parseJSON = genericParseJSON toolCallOptions
+
+toolCallOptions :: Options
+toolCallOptions = defaultOptions
+  { fieldLabelModifier = camelToSnake . dropPrefix "tc"
+  , omitNothingFields = True
+  }
+
+
 -- ════════════════════════════════════════════════════════════════════════════
 -- JSON HELPERS
 -- ════════════════════════════════════════════════════════════════════════════
@@ -244,9 +270,9 @@ camelToSnake = go True
 --
 -- Each operation spawns a @mantle session@ process:
 --
--- * @StartSession@ → @mantle session start --slug X --prompt Y --model Z [--json-schema S]@
--- * @ContinueSession@ → @mantle session continue <id> --prompt Y [--json-schema S]@
--- * @ForkSession@ → @mantle session fork <id> --child-slug X --child-prompt Y [--json-schema S]@
+-- * @StartSession@ → @mantle session start --slug X --prompt Y --model Z [--json-schema S] [--decision-tools T]@
+-- * @ContinueSession@ → @mantle session continue <id> --prompt Y [--json-schema S] [--decision-tools T]@
+-- * @ForkSession@ → @mantle session fork <id> --child-slug X --child-prompt Y [--json-schema S] [--decision-tools T]@
 -- * @SessionInfo@ → @mantle session info <id>@
 --
 -- Mantle handles container lifecycle and worktree management. Haskell only
@@ -257,6 +283,9 @@ camelToSnake = go True
 -- When a JSON schema is provided, Claude Code enforces structured output and
 -- the result appears in @soStructuredOutput@. Without a schema, only
 -- @soResultText@ is populated.
+--
+-- When decision tools are provided, Claude Code is expected to call one of them
+-- to indicate its decision. The tool call appears in @soToolCalls@.
 data Session r where
   -- | Start a new session (first turn).
   --
@@ -267,6 +296,7 @@ data Session r where
     -> Text           -- ^ Initial prompt
     -> ModelChoice    -- ^ Model: Haiku, Sonnet, Opus
     -> Maybe Value    -- ^ JSON schema for structured output (optional)
+    -> Maybe Value    -- ^ Decision tools JSON array (optional)
     -> Session SessionOutput
 
   -- | Continue an existing session (subsequent turns).
@@ -276,6 +306,7 @@ data Session r where
     :: SessionId      -- ^ Session to continue
     -> Text           -- ^ Prompt for this turn
     -> Maybe Value    -- ^ JSON schema for structured output (optional)
+    -> Maybe Value    -- ^ Decision tools JSON array (optional)
     -> Session SessionOutput
 
   -- | Fork a session (child inherits parent's conversation history).
@@ -287,6 +318,7 @@ data Session r where
     -> Text           -- ^ Child slug (e.g., "subtask/handle-edge-case")
     -> Text           -- ^ Child prompt
     -> Maybe Value    -- ^ JSON schema for structured output (optional)
+    -> Maybe Value    -- ^ Decision tools JSON array (optional)
     -> Session SessionOutput  -- Returns child's first turn result
 
   -- | Query session metadata from @.mantle/sessions.json@.
@@ -299,7 +331,7 @@ data Session r where
 -- SMART CONSTRUCTORS
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Start a new session with optional structured output.
+-- | Start a new session with optional structured output and decision tools.
 --
 -- The slug is typically LLM-generated from the preceding node's structured
 -- output. It can include a phase prefix (e.g., "implement/user-auth").
@@ -307,11 +339,15 @@ data Session r where
 --
 -- @
 -- -- Without schema (prose output only):
--- result <- startSession "implement/user-auth" "Implement OAuth login" Sonnet Nothing
+-- result <- startSession "implement/user-auth" "Implement OAuth login" Sonnet Nothing Nothing
 --
 -- -- With schema (structured JSON output):
--- result <- startSession "classify/intent" "Classify: ..." Haiku (Just schema)
+-- result <- startSession "classify/intent" "Classify: ..." Haiku (Just schema) Nothing
 -- let output = soStructuredOutput result  -- Just Value when schema provided
+--
+-- -- With decision tools (for sum type outputs):
+-- result <- startSession "review" "Review this PR" Sonnet Nothing (Just toolsJson)
+-- let toolCalls = soToolCalls result  -- Just [ToolCall] when tools provided
 -- @
 startSession
   :: Member Session effs
@@ -319,29 +355,34 @@ startSession
   -> Text           -- ^ Initial prompt
   -> ModelChoice    -- ^ Model to use
   -> Maybe Value    -- ^ JSON schema for structured output (optional)
+  -> Maybe Value    -- ^ Decision tools JSON array (optional)
   -> Eff effs SessionOutput
-startSession slug prompt model schema = send $ StartSession slug prompt model schema
+startSession slug prompt model schema tools =
+  send $ StartSession slug prompt model schema tools
 
--- | Continue an existing session with optional structured output.
+-- | Continue an existing session with optional structured output and decision tools.
 --
 -- @
--- result <- continueSession sid "Now add error handling" Nothing
+-- result <- continueSession sid "Now add error handling" Nothing Nothing
 -- @
 continueSession
   :: Member Session effs
   => SessionId      -- ^ Session to continue
   -> Text           -- ^ Prompt for this turn
   -> Maybe Value    -- ^ JSON schema for structured output (optional)
+  -> Maybe Value    -- ^ Decision tools JSON array (optional)
   -> Eff effs SessionOutput
-continueSession sid prompt schema = send $ ContinueSession sid prompt schema
+continueSession sid prompt schema tools =
+  send $ ContinueSession sid prompt schema tools
 
--- | Fork a session (child inherits parent's history) with optional structured output.
+-- | Fork a session (child inherits parent's history) with optional structured output
+-- and decision tools.
 --
 -- Parent session is unchanged. Child gets a new session ID.
 -- The child slug can include a phase prefix (e.g., "subtask/edge-case").
 --
 -- @
--- childResult <- forkSession parentSid "subtask/auth-tests" "Write tests for auth" Nothing
+-- childResult <- forkSession parentSid "subtask/auth-tests" "Write tests for auth" Nothing Nothing
 -- let childSid = soSessionId childResult
 -- -- Child branch: subtask/auth-tests-7b2c4e
 -- @
@@ -351,9 +392,10 @@ forkSession
   -> Text           -- ^ Child slug (e.g., "subtask/auth-tests")
   -> Text           -- ^ Child prompt
   -> Maybe Value    -- ^ JSON schema for structured output (optional)
+  -> Maybe Value    -- ^ Decision tools JSON array (optional)
   -> Eff effs SessionOutput
-forkSession parent childSlug childPrompt schema =
-  send $ ForkSession parent childSlug childPrompt schema
+forkSession parent childSlug childPrompt schema tools =
+  send $ ForkSession parent childSlug childPrompt schema tools
 
 -- | Query session metadata.
 --
@@ -403,9 +445,9 @@ detectForkRequest result =
 --
 -- @
 -- let mockHandler = \\case
---       StartSession slug _ _ _ -> pure mockOutput { soBranch = slug <> \"-abc123\" }
---       ContinueSession _ _ _ -> pure mockOutput
---       ForkSession _ childSlug _ _ -> pure mockOutput { soBranch = childSlug <> \"-def456\" }
+--       StartSession slug _ _ _ _ -> pure mockOutput { soBranch = slug <> \"-abc123\" }
+--       ContinueSession _ _ _ _ -> pure mockOutput
+--       ForkSession _ childSlug _ _ _ -> pure mockOutput { soBranch = childSlug <> \"-def456\" }
 --       SessionInfo _ -> pure Nothing
 --
 -- result <- runM $ runSession mockHandler myProgram
@@ -415,7 +457,7 @@ runSession
   -> Eff (Session ': effs) a
   -> Eff effs a
 runSession handler = interpret $ \case
-  op@(StartSession _ _ _ _) -> handler op
-  op@(ContinueSession _ _ _) -> handler op
-  op@(ForkSession _ _ _ _) -> handler op
+  op@(StartSession _ _ _ _ _) -> handler op
+  op@(ContinueSession _ _ _ _) -> handler op
+  op@(ForkSession _ _ _ _ _) -> handler op
   op@(SessionInfo _) -> handler op

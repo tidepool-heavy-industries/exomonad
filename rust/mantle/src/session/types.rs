@@ -274,6 +274,11 @@ pub struct SessionOutput {
     /// Claude Code session ID (for resume/fork)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cc_session_id: Option<String>,
+
+    /// Decision tool calls from Claude Code.
+    /// Populated when Claude calls a `decision::*` tool.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<mantle_shared::events::ToolCall>>,
 }
 
 impl SessionOutput {
@@ -300,6 +305,7 @@ impl SessionOutput {
             error: None,
             model_usage: result.model_usage.clone(),
             cc_session_id: Some(result.session_id.clone()),
+            tool_calls: result.tool_calls.clone(),
         }
     }
 
@@ -326,6 +332,7 @@ impl SessionOutput {
             error: Some(error_msg),
             model_usage: HashMap::new(),
             cc_session_id: None,
+            tool_calls: None,
         }
     }
 

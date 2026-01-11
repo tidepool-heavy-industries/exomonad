@@ -26,6 +26,18 @@ pub struct InterruptSignal {
     pub reason: Option<String>,
 }
 
+/// A decision tool call from Claude Code.
+///
+/// When Claude calls a decision tool (e.g., `decision::approve`), we capture
+/// the tool name and input for parsing back to Haskell sum types.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ToolCall {
+    /// Full tool name (e.g., "decision::approve").
+    pub name: String,
+    /// Tool input (the branch's field values).
+    pub input: serde_json::Value,
+}
+
 // ============================================================================
 // Stream Event Types (for parsing Claude Code's stream-json output)
 // ============================================================================
@@ -167,6 +179,10 @@ pub struct RunResult {
     /// Always serialize (Haskell expects the field to be present).
     #[serde(default)]
     pub interrupts: Vec<InterruptSignal>,
+    /// Decision tool calls from Claude Code.
+    /// Populated when Claude calls a `decision::*` tool.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<ToolCall>>,
 }
 
 impl RunResult {
@@ -177,6 +193,7 @@ impl RunResult {
         exit_code: i32,
         session_tag: Option<String>,
         interrupts: Vec<InterruptSignal>,
+        tool_calls: Option<Vec<ToolCall>>,
     ) -> Self {
         // Extract session_id from init event
         let session_id = events
@@ -216,6 +233,7 @@ impl RunResult {
             permission_denials: result_event.permission_denials.clone(),
             model_usage: result_event.model_usage.clone(),
             interrupts,
+            tool_calls,
         }
     }
 }
@@ -340,6 +358,7 @@ mod tests {
             permission_denials: vec![],
             model_usage: HashMap::new(),
             interrupts: vec![],
+            tool_calls: None,
         };
 
         let json = serde_json::to_string(&result).unwrap();
@@ -369,6 +388,7 @@ mod tests {
             permission_denials: vec![],
             model_usage: HashMap::new(),
             interrupts: vec![],
+            tool_calls: None,
         };
 
         let json = serde_json::to_string(&result).unwrap();
@@ -401,6 +421,7 @@ mod tests {
                 state: Some("need_more_types".to_string()),
                 reason: Some("Missing Foo type".to_string()),
             }],
+            tool_calls: None,
         };
 
         let json = serde_json::to_string(&result).unwrap();
