@@ -58,7 +58,6 @@ import Data.Char (ord)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
-import Data.Text.Encoding.Error (lenientDecode)
 import Data.Time.Clock (getCurrentTime, diffUTCTime)
 import System.Exit (ExitCode(..))
 import System.IO (hFlush, stdout)
@@ -201,7 +200,8 @@ sessionInfoIO config sid = do
       case exitCode of
         ExitFailure _ -> pure Nothing  -- Session not found
         ExitSuccess ->
-          case eitherDecodeStrict (BSC.pack stdoutStr) of
+          -- Use proper UTF-8 encoding (BSC.pack truncates chars > 255!)
+          case eitherDecodeStrict (TE.encodeUtf8 $ T.pack stdoutStr) of
             Left _ -> pure Nothing
             Right metadata -> pure (Just metadata)
 
@@ -240,11 +240,13 @@ runMantleSession config args = do
             ExitFailure c -> c
       putStrLn $ "[SESSION] Completed (exit: " <> show exitCodeInt <> ", " <> show (round duration :: Int) <> "s)"
       hFlush stdout
-      -- Sanitize: 1) lenient UTF-8 decode, 2) escape control chars in JSON strings
-      let rawBytes = BSC.pack stdoutStr
-          safeText = TE.decodeUtf8With lenientDecode rawBytes
-          sanitizedStdout = escapeControlChars (T.unpack safeText)
-      case eitherDecodeStrict (BSC.pack sanitizedStdout) of
+      -- Sanitize control chars in JSON strings.
+      -- IMPORTANT: Use T.pack (not BSC.pack!) - BSC.pack truncates chars > 255,
+      -- destroying valid Unicode. T.pack + TE.encodeUtf8 preserves Unicode properly.
+      let inputText = T.pack stdoutStr
+          sanitizedText = T.pack $ escapeControlChars (T.unpack inputText)
+          jsonBytes = TE.encodeUtf8 sanitizedText
+      case eitherDecodeStrict jsonBytes of
         Right output -> pure output
         Left parseErr -> do
           putStrLn $ "[SESSION] Failed to parse output: " <> parseErr

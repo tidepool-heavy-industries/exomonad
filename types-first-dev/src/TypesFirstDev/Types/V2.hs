@@ -39,7 +39,7 @@ module TypesFirstDev.Types.V2
   ) where
 
 import Control.Monad.Writer (Writer)
-import Data.Aeson (FromJSON, ToJSON)
+import Data.Aeson (FromJSON(..), ToJSON(..), (.:), (.:?), (.!=), withObject, object, (.=))
 import Data.Text (Text)
 import GHC.Generics (Generic)
 import Text.Ginger.GVal (ToGVal)
@@ -69,7 +69,40 @@ data Spec = Spec
   , specDepth              :: Int          -- ^ Recursion depth (0 for root)
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
+  deriving anyclass (StructuredOutput)
+
+-- | Custom FromJSON for user-friendly YAML field names.
+--
+-- YAML format:
+-- @
+-- description: "An effect-based URL shortener..."
+-- acceptance_criteria:
+--   - "UrlService effect GADT..."
+--   - "Persistence effect..."
+-- target_path: src/UrlShortener
+-- test_path: test/UrlShortener
+-- parent_branch: main          # optional
+-- depth: 0                     # optional, defaults to 0
+-- @
+instance FromJSON Spec where
+  parseJSON = withObject "Spec" $ \o -> Spec
+    <$> o .: "description"
+    <*> o .: "acceptance_criteria"
+    <*> o .: "target_path"
+    <*> o .: "test_path"
+    <*> o .:? "parent_branch"
+    <*> o .:? "depth" .!= 0
+
+-- | Custom ToJSON to match FromJSON (snake_case field names).
+instance ToJSON Spec where
+  toJSON spec = object
+    [ "description"         .= spec.specDescription
+    , "acceptance_criteria" .= spec.specAcceptanceCriteria
+    , "target_path"         .= spec.specTargetPath
+    , "test_path"           .= spec.specTestPath
+    , "parent_branch"       .= spec.specParentBranch
+    , "depth"               .= spec.specDepth
+    ]
 
 
 -- | Context passed to scaffolding template.

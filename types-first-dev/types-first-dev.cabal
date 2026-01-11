@@ -68,7 +68,8 @@ library
         tidepool-session-executor,
         tidepool-worktree-executor,
         tidepool-cabal-executor,
-        async >= 2.2 && < 3
+        async >= 2.2 && < 3,
+        yaml >= 0.11 && < 1
     hs-source-dirs:   src
     default-language: GHC2021
     default-extensions:
@@ -142,7 +143,8 @@ executable types-first-dev-runner
         tidepool-core,
         tidepool-actor,
         tidepool-session-executor,
-        tidepool-worktree-executor
+        tidepool-worktree-executor,
+        yaml >= 0.11 && < 1
     ghc-options:
         -threaded
         -rtsopts

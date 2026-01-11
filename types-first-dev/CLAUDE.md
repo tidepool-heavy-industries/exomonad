@@ -2,6 +2,45 @@
 
 TDD workflow orchestrator using Claude Code agents.
 
+## Running
+
+```bash
+# From types-first-dev directory
+./run-actor-graph.sh                              # default spec
+./run-actor-graph.sh path/to/spec.yaml            # custom spec
+./run-actor-graph.sh path/to/spec.yaml ./target   # custom spec + target dir
+```
+
+## Spec Files
+
+Specs live in `specs/` as YAML. The V2 machinery is domain-blind—all domain knowledge lives in spec files.
+
+```yaml
+# specs/url-shortener.yaml
+description: |
+  An effect-based URL shortener service with Servant API.
+  Uses algebraic effects (freer-simple) to separate concerns.
+
+target_path: src/UrlShortener
+test_path: test/UrlShortener
+
+acceptance_criteria:
+  - |
+    UrlService effect GADT with operations:
+    - Shorten :: LongUrl -> UrlService ShortUrl
+    - Lookup :: ShortCode -> UrlService (Maybe LongUrl)
+  - Persistence effect GADT with Store, Fetch, ListAll operations
+  # ...more criteria
+```
+
+**Fields:**
+- `description` — What we're building (multiline markdown OK)
+- `acceptance_criteria` — Must-have features (list of strings, multiline OK)
+- `target_path` — Where to write code
+- `test_path` — Where to write tests
+- `parent_branch` — (optional) Parent git branch for children
+- `depth` — (optional) Recursion depth, defaults to 0
+
 ## Rubric Design Principle
 
 **LLM is sensor, code is controller.**

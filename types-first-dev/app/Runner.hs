@@ -18,6 +18,7 @@ import Control.Monad.Freer (Eff, runM)
 import Control.Monad.Freer.Error (runError)
 import Control.Monad.Freer.Reader (runReader)
 import Data.Aeson (ToJSON(..), FromJSON(..))
+import Data.Yaml (decodeFileThrow)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -63,22 +64,12 @@ import TypesFirstDev.Handlers.V2.Genesis
 -- CONFIGURATION
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Build a test Spec for development.
-buildTestSpec :: FilePath -> Spec
-buildTestSpec targetDir = Spec
-  { specDescription = "A purely functional stack data structure with O(1) push/pop"
-  , specAcceptanceCriteria =
-      [ "Push adds element to top"
-      , "Pop removes and returns top element"
-      , "Peek returns top without removing"
-      , "IsEmpty checks for empty stack"
-      , "Size returns number of elements"
-      ]
-  , specTargetPath = targetDir <> "/src/Data/Stack.hs"
-  , specTestPath = targetDir <> "/test/Data/StackSpec.hs"
-  , specParentBranch = Nothing  -- Root node
-  , specDepth = 0               -- Root depth
-  }
+-- | Load a Spec from a YAML file.
+--
+-- The spec file contains domain knowledge; the V2 graph machinery is domain-blind.
+-- This separation keeps the machinery reusable across different problem domains.
+loadSpec :: FilePath -> IO Spec
+loadSpec = decodeFileThrow
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -196,25 +187,36 @@ main = do
   args <- getArgs
   cwd <- getCurrentDirectory
 
-  let targetDir = case args of
-        (d:_) -> d
-        []    -> cwd <> "/test-repo"
+  -- First arg is spec file, second is optional target dir override
+  let (specFile, targetDir) = case args of
+        (s:d:_) -> (s, Just d)
+        (s:_)   -> (s, Nothing)
+        []      -> error "Usage: types-first-dev-runner <spec.yaml> [target-dir]"
 
   -- Print banner
   putStrLn "══════════════════════════════════════════════════════════════════"
   putStrLn "  types-first-dev V2: Tree-based TDD with Subgraph Effect"
   putStrLn "══════════════════════════════════════════════════════════════════"
   putStrLn ""
-  putStrLn $ "Target directory: " <> targetDir
+  putStrLn $ "Spec file: " <> specFile
   putStrLn $ "Working directory: " <> cwd
   putStrLn ""
   hFlush stdout
 
-  -- Build configuration
-  let spec = buildTestSpec targetDir
+  -- Load spec from YAML file
+  baseSpec <- loadSpec specFile
+
+  -- Override target paths if target dir provided
+  let spec = case targetDir of
+        Just dir -> baseSpec
+          { specTargetPath = dir <> "/" <> specTargetPath baseSpec
+          , specTestPath = dir <> "/" <> specTestPath baseSpec
+          }
+        Nothing -> baseSpec
+
       worktreeConfig = defaultWorktreeConfig cwd
       sessionConfig = (defaultSessionConfig cwd)
-        { scMantlePath = cwd <> "/../rust/target/release/mantle"
+        { scMantlePath = cwd <> "/rust/target/release/mantle"
         }
 
   putStrLn "Configuration:"
