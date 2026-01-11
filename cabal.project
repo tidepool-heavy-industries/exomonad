@@ -38,7 +38,7 @@ packages:
     -- Test/example packages
     claude-code-test
     types-first-dev
-    types-first-dev/test-repo
+    -- types-first-dev/test-repo  -- disabled: directory doesn't exist
 
     -- Vendored dependencies
     haskell/vendor/freer-simple

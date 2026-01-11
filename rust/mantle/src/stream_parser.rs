@@ -111,6 +111,7 @@ impl StreamParser {
             exit_code,
             session_tag,
             vec![], // No interrupts in the new architecture
+            None,   // tool_calls - populated by MCP server in Phase 4
         )
     }
 

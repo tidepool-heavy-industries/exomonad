@@ -103,23 +103,23 @@ defaultSessionConfig repoRoot = SessionConfig
 --
 -- Each effect operation spawns one @mantle session@ process:
 --
--- * @StartSession@ → @mantle session start --slug X --prompt Y --model Z@
--- * @ContinueSession@ → @mantle session continue <id> --prompt Y@
--- * @ForkSession@ → @mantle session fork <id> --child-slug X --child-prompt Y@
+-- * @StartSession@ → @mantle session start --slug X --prompt Y --model Z [--decision-tools T]@
+-- * @ContinueSession@ → @mantle session continue <id> --prompt Y [--decision-tools T]@
+-- * @ForkSession@ → @mantle session fork <id> --child-slug X --child-prompt Y [--decision-tools T]@
 -- * @SessionInfo@ → @mantle session info <id>@
 --
 -- The process runs a single turn (container lifecycle), then exits with JSON
 -- on stdout. This function parses that JSON into Haskell types.
 runSessionIO :: LastMember IO effs => SessionConfig -> Eff (Session ': effs) a -> Eff effs a
 runSessionIO config = interpret $ \case
-  StartSession slug prompt model schema ->
-    sendM $ startSessionIO config slug prompt model schema
+  StartSession slug prompt model schema tools ->
+    sendM $ startSessionIO config slug prompt model schema tools
 
-  ContinueSession sid prompt schema ->
-    sendM $ continueSessionIO config sid prompt schema
+  ContinueSession sid prompt schema tools ->
+    sendM $ continueSessionIO config sid prompt schema tools
 
-  ForkSession parent childSlug childPrompt schema ->
-    sendM $ forkSessionIO config parent childSlug childPrompt schema
+  ForkSession parent childSlug childPrompt schema tools ->
+    sendM $ forkSessionIO config parent childSlug childPrompt schema tools
 
   SessionInfo sid ->
     sendM $ sessionInfoIO config sid
@@ -131,50 +131,50 @@ runSessionIO config = interpret $ \case
 
 -- | Start a new session.
 --
--- Spawns: @mantle session start --slug <slug> --prompt <prompt> --model <model> [--json-schema <schema>]@
+-- Spawns: @mantle session start --slug <slug> --prompt <prompt> --model <model> [--json-schema <schema>] [--decision-tools <tools>]@
 --
 -- The slug can include a phase prefix (e.g., "implement/user-auth").
 -- Mantle appends a hex suffix for uniqueness and creates the branch.
-startSessionIO :: SessionConfig -> Text -> Text -> ModelChoice -> Maybe Value -> IO SessionOutput
-startSessionIO config slug prompt model schema = do
+startSessionIO :: SessionConfig -> Text -> Text -> ModelChoice -> Maybe Value -> Maybe Value -> IO SessionOutput
+startSessionIO config slug prompt model schema tools = do
   let args =
         [ "session", "start"
         , "--slug", T.unpack slug
         , "--prompt", T.unpack prompt
         , "--model", modelToArg model
-        ] <> schemaArg schema
+        ] <> schemaArg schema <> toolsArg tools
 
   runMantleSession config args
 
 
 -- | Continue an existing session.
 --
--- Spawns: @mantle session continue <session-id> --prompt <prompt> [--json-schema <schema>]@
-continueSessionIO :: SessionConfig -> SessionId -> Text -> Maybe Value -> IO SessionOutput
-continueSessionIO config sid prompt schema = do
+-- Spawns: @mantle session continue <session-id> --prompt <prompt> [--json-schema <schema>] [--decision-tools <tools>]@
+continueSessionIO :: SessionConfig -> SessionId -> Text -> Maybe Value -> Maybe Value -> IO SessionOutput
+continueSessionIO config sid prompt schema tools = do
   let args =
         [ "session", "continue"
         , T.unpack sid.unSessionId
         , "--prompt", T.unpack prompt
-        ] <> schemaArg schema
+        ] <> schemaArg schema <> toolsArg tools
 
   runMantleSession config args
 
 
 -- | Fork a session (child inherits parent's history).
 --
--- Spawns: @mantle session fork <parent-id> --child-slug <slug> --child-prompt <prompt> [--json-schema <schema>]@
+-- Spawns: @mantle session fork <parent-id> --child-slug <slug> --child-prompt <prompt> [--json-schema <schema>] [--decision-tools <tools>]@
 --
 -- The child slug can include a phase prefix (e.g., "subtask/handle-edge-case").
 -- Mantle appends a hex suffix for uniqueness and creates the child branch.
-forkSessionIO :: SessionConfig -> SessionId -> Text -> Text -> Maybe Value -> IO SessionOutput
-forkSessionIO config parent childSlug childPrompt schema = do
+forkSessionIO :: SessionConfig -> SessionId -> Text -> Text -> Maybe Value -> Maybe Value -> IO SessionOutput
+forkSessionIO config parent childSlug childPrompt schema tools = do
   let args =
         [ "session", "fork"
         , T.unpack parent.unSessionId
         , "--child-slug", T.unpack childSlug
         , "--child-prompt", T.unpack childPrompt
-        ] <> schemaArg schema
+        ] <> schemaArg schema <> toolsArg tools
 
   runMantleSession config args
 
@@ -278,6 +278,16 @@ schemaArg (Just schema) =
   ["--json-schema", BSC.unpack $ LBS.toStrict $ encode schema]
 
 
+-- | Decision tools argument if provided.
+--
+-- Encodes the Value (expected to be a JSON array of tool definitions)
+-- to compact JSON and passes via @--decision-tools@.
+toolsArg :: Maybe Value -> [String]
+toolsArg Nothing = []
+toolsArg (Just tools) =
+  ["--decision-tools", BSC.unpack $ LBS.toStrict $ encode tools]
+
+
 -- | Escape control characters in JSON string values.
 --
 -- JSON strings should have control characters escaped, but sometimes they
@@ -345,4 +355,5 @@ errorOutput errMsg = SessionOutput
   , soInterrupts = []
   , soDurationSecs = 0
   , soError = Just errMsg
+  , soToolCalls = Nothing
   }

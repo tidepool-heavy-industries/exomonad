@@ -61,6 +61,10 @@ enum SessionCommands {
         /// JSON schema for structured output (passed to Claude Code --json-schema)
         #[arg(long)]
         json_schema: Option<String>,
+
+        /// JSON array of MCP decision tools for sum type outputs
+        #[arg(long)]
+        decision_tools: Option<String>,
     },
 
     /// Continue an existing session with a new prompt
@@ -71,6 +75,10 @@ enum SessionCommands {
         /// New prompt text
         #[arg(long)]
         prompt: String,
+
+        /// JSON array of MCP decision tools for sum type outputs
+        #[arg(long)]
+        decision_tools: Option<String>,
     },
 
     /// Fork a session (create child session from parent's context)
@@ -85,6 +93,10 @@ enum SessionCommands {
         /// Prompt for the child session
         #[arg(long)]
         child_prompt: String,
+
+        /// JSON array of MCP decision tools for sum type outputs
+        #[arg(long)]
+        decision_tools: Option<String>,
     },
 
     /// Show detailed information about a session
@@ -147,7 +159,7 @@ fn handle_session_command(cmd: SessionCommands) -> std::result::Result<(), Box<d
     let state_manager = StateManager::new(&repo_root)?;
 
     match cmd {
-        SessionCommands::Start { slug, prompt, model, timeout, json_schema } => {
+        SessionCommands::Start { slug, prompt, model, timeout, json_schema, decision_tools } => {
             let config = StartConfig {
                 slug,
                 prompt,
@@ -155,6 +167,7 @@ fn handle_session_command(cmd: SessionCommands) -> std::result::Result<(), Box<d
                 timeout_secs: timeout,
                 base_branch: None,
                 json_schema,
+                decision_tools,
             };
 
             match start_session(&repo_root, &config) {
@@ -172,12 +185,13 @@ fn handle_session_command(cmd: SessionCommands) -> std::result::Result<(), Box<d
             }
         }
 
-        SessionCommands::Continue { session_id, prompt } => {
+        SessionCommands::Continue { session_id, prompt, decision_tools } => {
             let config = ContinueConfig {
                 session_id,
                 prompt,
                 timeout_secs: 300, // Default timeout
                 docker: false,
+                decision_tools,
             };
 
             match continue_session(&repo_root, &config) {
@@ -195,13 +209,14 @@ fn handle_session_command(cmd: SessionCommands) -> std::result::Result<(), Box<d
             }
         }
 
-        SessionCommands::Fork { parent_id, child_slug, child_prompt } => {
+        SessionCommands::Fork { parent_id, child_slug, child_prompt, decision_tools } => {
             let config = ForkConfig {
                 parent_id,
                 child_slug,
                 child_prompt,
                 timeout_secs: 300, // Default timeout
                 docker: false,
+                decision_tools,
             };
 
             match fork_session(&repo_root, &config) {
@@ -400,6 +415,7 @@ mod tests {
             permission_denials: vec![],
             model_usage: HashMap::new(),
             interrupts: vec![],
+            tool_calls: None,
         };
 
         let json = serde_json::to_string(&result).unwrap();
@@ -429,6 +445,7 @@ mod tests {
             permission_denials: vec![],
             model_usage: HashMap::new(),
             interrupts: vec![],
+            tool_calls: None,
         };
 
         let json = serde_json::to_string(&result).unwrap();
@@ -461,6 +478,7 @@ mod tests {
                 state: Some("need_more_types".to_string()),
                 reason: Some("Missing Foo type".to_string()),
             }],
+            tool_calls: None,
         };
 
         let json = serde_json::to_string(&result).unwrap();

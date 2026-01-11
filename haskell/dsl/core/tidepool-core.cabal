@@ -52,6 +52,8 @@ library
         Tidepool.Effect.GHCi
         -- Native-only tooling
         Tidepool.Schema
+        Tidepool.StructuredOutput.ClaudeCodeSchema
+        Tidepool.StructuredOutput.DecisionTools
         Tidepool.StructuredOutput.Error
         Tidepool.StructuredOutput.Generic
         Tidepool.StructuredOutput.Instances

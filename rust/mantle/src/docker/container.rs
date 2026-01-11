@@ -181,6 +181,14 @@ impl ContainerConfig {
         self
     }
 
+    /// Set decision tool definitions (JSON array).
+    ///
+    /// These tools are served by `mantle-agent mcp` to Claude Code for
+    /// sum type structured outputs. See Phase 4 of the decision tools plan.
+    pub fn with_decision_tools(self, tools_json: &str) -> Self {
+        self.with_env("MANTLE_DECISION_TOOLS", tools_json)
+    }
+
     /// Generate container name from session ID.
     pub fn container_name(&self) -> String {
         format!("mantle-{}", &self.session_id[..8.min(self.session_id.len())])
@@ -459,5 +467,26 @@ mod tests {
         assert_eq!(config.image, "custom-image");
         assert_eq!(config.timeout_secs, 300);
         assert_eq!(config.env_vars.get("MY_VAR"), Some(&"my_value".to_string()));
+    }
+
+    #[test]
+    fn test_with_decision_tools() {
+        let tools_json = r#"[{"name":"decision::approve","description":"Approve"}]"#;
+        let config = ContainerConfig {
+            image: "test".to_string(),
+            worktree_path: PathBuf::from("/tmp"),
+            hub_socket: None,
+            auth_mount: AuthMount::BindMount(PathBuf::from("/tmp/.claude")),
+            session_id: "test".to_string(),
+            claude_args: vec![],
+            timeout_secs: 0,
+            env_vars: HashMap::new(),
+        }
+        .with_decision_tools(tools_json);
+
+        assert_eq!(
+            config.env_vars.get("MANTLE_DECISION_TOOLS"),
+            Some(&tools_json.to_string())
+        );
     }
 }

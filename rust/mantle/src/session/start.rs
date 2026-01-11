@@ -63,6 +63,8 @@ pub struct StartConfig {
     pub base_branch: Option<String>,
     /// Optional JSON schema for structured output
     pub json_schema: Option<String>,
+    /// Optional JSON array of MCP decision tools for sum type outputs
+    pub decision_tools: Option<String>,
 }
 
 /// Start a new session.
@@ -302,12 +304,19 @@ fn execute_docker_with_streaming(
     }
 
     // Create container configuration
-    let container_config = ContainerConfig::new(
+    let mut container_config = ContainerConfig::new(
         session_id.to_string(),
         worktree_path.to_path_buf(),
         claude_args,
     )?
     .with_timeout(config.timeout_secs);
+
+    // Pass decision tools to container via environment variable
+    // mantle-agent mcp server will serve these as MCP tools to Claude Code
+    if let Some(ref tools_json) = config.decision_tools {
+        debug!(tools = %tools_json, "Passing decision tools to container");
+        container_config = container_config.with_decision_tools(tools_json);
+    }
 
     // Mark session as running
     state_manager.update_session(session_id, |s| {
@@ -347,6 +356,7 @@ fn execute_docker_with_streaming(
         error: None,
         model_usage: run_result.model_usage,
         cc_session_id: Some(run_result.session_id),
+        tool_calls: run_result.tool_calls,
     })
 }
 
@@ -450,6 +460,7 @@ mod tests {
             timeout_secs: 0,
             base_branch: None,
             json_schema: None,
+            decision_tools: None,
         };
 
         let (session_id, branch, worktree_path) = prepare_session(temp_dir.path(), &config).unwrap();
@@ -482,6 +493,7 @@ mod tests {
             timeout_secs: 300,
             base_branch: None,
             json_schema: None,
+            decision_tools: None,
         };
 
         let (_, branch, worktree_path) = prepare_session(temp_dir.path(), &config).unwrap();
@@ -505,6 +517,7 @@ mod tests {
             timeout_secs: 0,
             base_branch: None,
             json_schema: None,
+            decision_tools: None,
         };
 
         let (session_id, _, _) = prepare_session(temp_dir.path(), &config).unwrap();
@@ -527,6 +540,7 @@ mod tests {
             timeout_secs: 0,
             base_branch: None,
             json_schema: None,
+            decision_tools: None,
         };
 
         let (id1, branch1, _) = prepare_session(temp_dir.path(), &config1).unwrap();
@@ -539,6 +553,7 @@ mod tests {
             timeout_secs: 0,
             base_branch: None,
             json_schema: None,
+            decision_tools: None,
         };
 
         let (id2, branch2, _) = prepare_session(temp_dir.path(), &config2).unwrap();
@@ -594,6 +609,7 @@ mod tests {
             timeout_secs: 0,
             base_branch: Some("develop".to_string()),
             json_schema: None,
+            decision_tools: None,
         };
 
         let (_, _, worktree_path) = prepare_session(temp_dir.path(), &config).unwrap();
@@ -611,6 +627,7 @@ mod tests {
             timeout_secs: 0,
             base_branch: None,
             json_schema: None,
+            decision_tools: None,
         };
 
         // Verify zero timeout means no timeout

@@ -75,6 +75,8 @@ pub struct ForkConfig {
     pub timeout_secs: u64,
     /// Use Docker container
     pub docker: bool,
+    /// Optional JSON array of MCP decision tools for sum type outputs
+    pub decision_tools: Option<String>,
 }
 
 /// Fork a session to create a child with inherited context.
@@ -186,6 +188,7 @@ pub fn fork_session(repo_root: &Path, config: &ForkConfig) -> Result<SessionOutp
             &config.child_prompt,
             config.timeout_secs,
             &state_manager,
+            config.decision_tools.as_deref(),
         )?;
 
         let duration = start_time.elapsed().as_secs_f64();
@@ -337,6 +340,7 @@ fn execute_fork(
         error: None,
         model_usage: run_result.model_usage,
         cc_session_id: Some(run_result.session_id),
+        tool_calls: run_result.tool_calls,
     })
 }
 
@@ -444,6 +448,7 @@ fn execute_docker_fork(
     prompt: &str,
     timeout_secs: u64,
     state_manager: &StateManager,
+    decision_tools: Option<&str>,
 ) -> Result<SessionOutput> {
     // Load hub config
     let hub_config = HubConfig::load();
@@ -487,12 +492,18 @@ fn execute_docker_fork(
     ];
 
     // Create container configuration
-    let container_config = ContainerConfig::new(
+    let mut container_config = ContainerConfig::new(
         session_id.to_string(),
         worktree_path.to_path_buf(),
         claude_args,
     )?
     .with_timeout(timeout_secs);
+
+    // Pass decision tools to container via environment variable
+    if let Some(tools_json) = decision_tools {
+        debug!(tools = %tools_json, "Passing decision tools to container");
+        container_config = container_config.with_decision_tools(tools_json);
+    }
 
     // Mark session as running
     state_manager.update_session(session_id, |s| {
@@ -529,6 +540,7 @@ fn execute_docker_fork(
         error: None,
         model_usage: run_result.model_usage,
         cc_session_id: Some(run_result.session_id),
+        tool_calls: run_result.tool_calls,
     };
 
     // 5. Submit final result to hub
@@ -611,6 +623,7 @@ mod tests {
             child_prompt: "Test prompt".to_string(),
             timeout_secs: 0,
             docker: false,
+            decision_tools: None,
         };
 
         let result = fork_session(temp_dir.path(), &config);

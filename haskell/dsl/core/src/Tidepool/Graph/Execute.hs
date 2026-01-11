@@ -48,7 +48,7 @@ module Tidepool.Graph.Execute
   , SpawnWorkers(..)
   ) where
 
-import Data.Aeson (Value)
+import Data.Aeson (Value, toJSON)
 import Data.Kind (Constraint, Type)
 import Data.Proxy (Proxy(..))
 import Data.Text (Text)
@@ -77,9 +77,11 @@ import qualified Tidepool.Graph.Generic.Core as G (Exit)
 import Tidepool.Graph.Goto (GotoChoice, To, LLMHandler(..), ClaudeCodeLLMHandler(..), ClaudeCodeResult(..))
 import Tidepool.Graph.Goto.Internal (GotoChoice(..), OneOf(..))
 import Tidepool.Graph.Template (GingerContext)
-import Tidepool.Graph.Types (Exit, Self, Arrive, SingModelChoice(..), HList(..))
+import Tidepool.Graph.Types (Exit, Self, Arrive, SingModelChoice(..), HList(..), ModelChoice)
 import Tidepool.Schema (schemaToValue)
-import Tidepool.StructuredOutput (StructuredOutput(..), formatDiagnostic)
+import Tidepool.StructuredOutput (StructuredOutput(..), formatDiagnostic, ClaudeCodeSchema(..), DecisionTool)
+import qualified Tidepool.StructuredOutput.DecisionTools as DT
+import Tidepool.Effect.Session (ToolCall(..))
 
 -- | Effect type alias (freer-simple effects have kind Type -> Type).
 type Effect = Type -> Type
@@ -268,9 +270,11 @@ executeLLMHandler mSystemTpl userTpl beforeFn afterFn input = do
 -- This function:
 -- 1. Calls the before-handler to build template context AND session strategy
 -- 2. Renders the user template (system template appended to prompt)
--- 3. Executes the appropriate Session operation (start/continue/fork)
--- 4. Parses the structured output from the session result
--- 5. Calls the after-handler with output AND session ID for routing
+-- 3. Detects if schema is a sum type → generates decision tools
+-- 4. Executes the appropriate Session operation (start/continue/fork)
+-- 5. Parses output from tool calls (sum types) or structured output (others)
+-- 6. Implements nag logic if sum type but no tool call (max 3 retries)
+-- 7. Calls the after-handler with output AND session ID for routing
 --
 -- = Type Parameters
 --
@@ -291,10 +295,21 @@ executeLLMHandler mSystemTpl userTpl beforeFn afterFn input = do
 --
 -- The after handler receives both the parsed output and the session ID that was
 -- used/created, enabling downstream handlers to register sessions for later reuse.
+--
+-- = Sum Type Handling (Decision Tools)
+--
+-- For sum types with data (detected via 'ClaudeCodeSchema'), this function:
+--
+-- 1. Generates MCP decision tools where each tool = one constructor
+-- 2. Passes tools to the session; Claude Code calls one to "select" a branch
+-- 3. Parses the tool call back to the Haskell sum type
+-- 4. If Claude doesn't call a tool, nags with a retry prompt (max 3 retries)
+--
+-- This works around Anthropic's lack of oneOf support in structured output.
 executeClaudeCodeHandler
   :: forall model needs schema targets es tpl.
      ( Member Session es
-     , StructuredOutput schema
+     , ClaudeCodeSchema schema
      , GingerContext tpl
      , SingModelChoice model
      , ConvertTransitionHint targets
@@ -322,27 +337,95 @@ executeClaudeCodeHandler mSystemTpl userTpl beforeFn afterFn input = do
       fullPrompt = if systemPrompt == ""
                    then userPrompt
                    else systemPrompt <> "\n\n" <> userPrompt
-      schemaVal = Just $ schemaToValue (structuredSchema @schema)
 
-  -- Dispatch to appropriate Session operation
-  result <- case sessionOp of
-    StartFresh slug ->
-      startSession slug fullPrompt model schemaVal
+  -- Get decision tools if schema is a sum type with data
+  let mDecisionTools :: Maybe [DecisionTool]
+      mDecisionTools = ccDecisionTools @schema
 
-    ContinueFrom sid ->
-      continueSession sid fullPrompt schemaVal
+      -- Convert to JSON Value for session API
+      mToolsJson :: Maybe Value
+      mToolsJson = toJSON <$> mDecisionTools
 
-    ForkFrom parentSid childSlug ->
-      forkSession parentSid childSlug fullPrompt schemaVal
+      -- Schema is only used when NOT using decision tools
+      -- (Sum types use tools instead of structured output schema)
+      schemaVal :: Maybe Value
+      schemaVal = case mDecisionTools of
+        Just _ -> Nothing  -- Don't pass schema when using decision tools
+        Nothing -> Just $ schemaToValue (structuredSchema @schema)
 
-  -- Extract and parse the structured output
-  case result.soStructuredOutput of
-    Nothing -> error $ "ClaudeCode session returned no structured output"
-      <> maybe "" (\e -> ": " <> T.unpack e) result.soError
-    Just outputVal ->
-      case parseStructured outputVal of
-        Left diag -> error $ "ClaudeCode output parse error: " <> T.unpack (formatDiagnostic diag)
-        Right output -> afterFn (ClaudeCodeResult output result.soSessionId, result.soSessionId)
+  -- Execute session and parse result with nag logic for sum types
+  executeWithNag @schema fullPrompt schemaVal mToolsJson sessionOp model afterFn 0
+  where
+    -- Maximum nag retries when Claude doesn't call a decision tool
+    maxNagRetries :: Int
+    maxNagRetries = 3
+
+    -- Nag prompt when Claude doesn't call a decision tool
+    nagPrompt :: Text
+    nagPrompt = "You must call one of the decision:: tools to indicate your choice. " <>
+                "Please review the available tools and call the appropriate one."
+
+    -- Execute session, parsing output and handling nag retries
+    executeWithNag
+      :: forall s.
+         ( ClaudeCodeSchema s )
+      => Text              -- ^ Prompt
+      -> Maybe Value       -- ^ JSON schema (Nothing for sum types)
+      -> Maybe Value       -- ^ Decision tools JSON (Just for sum types)
+      -> SessionOperation  -- ^ Session operation
+      -> ModelChoice       -- ^ Model to use
+      -> ((ClaudeCodeResult s, SessionId) -> Eff es (GotoChoice targets))
+      -> Int               -- ^ Current retry count
+      -> Eff es (GotoChoice targets)
+    executeWithNag prompt schema tools sessionOp_ model_ afterFn_ retryCount = do
+      -- Dispatch to appropriate Session operation
+      result <- case sessionOp_ of
+        StartFresh slug ->
+          startSession slug prompt model_ schema tools
+
+        ContinueFrom sid ->
+          continueSession sid prompt schema tools
+
+        ForkFrom parentSid childSlug ->
+          forkSession parentSid childSlug prompt schema tools
+
+      -- Parse result based on whether we're using decision tools
+      case tools of
+        Just _ -> do
+          -- Sum type: parse from tool calls
+          case result.soToolCalls of
+            Just (tc:_) ->
+              -- Got a tool call, parse it
+              case ccParseToolCall @s (convertToolCall tc) of
+                Right output -> afterFn_ (ClaudeCodeResult output result.soSessionId, result.soSessionId)
+                Left err -> error $ "ClaudeCode decision tool parse error: " <> err
+
+            _ ->
+              -- No tool call - nag and retry
+              if retryCount >= maxNagRetries
+              then error $ "ClaudeCode: Claude failed to call a decision tool after "
+                        <> show maxNagRetries <> " retries"
+              else do
+                -- Continue the same session with nag prompt
+                executeWithNag @s nagPrompt schema tools
+                  (ContinueFrom result.soSessionId) model_ afterFn_ (retryCount + 1)
+
+        Nothing ->
+          -- Regular type: parse from structured output
+          case result.soStructuredOutput of
+            Nothing -> error $ "ClaudeCode session returned no structured output"
+              <> maybe "" (\e -> ": " <> T.unpack e) result.soError
+            Just outputVal ->
+              case ccParseStructured @s outputVal of
+                Left diag -> error $ "ClaudeCode output parse error: " <> T.unpack (formatDiagnostic diag)
+                Right output -> afterFn_ (ClaudeCodeResult output result.soSessionId, result.soSessionId)
+
+    -- Convert Session.ToolCall to DecisionTools.ToolCall format
+    convertToolCall :: ToolCall -> DT.ToolCall
+    convertToolCall tc = DT.ToolCall
+      { DT.tcName = tc.tcName
+      , DT.tcInput = tc.tcInput
+      }
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -380,9 +463,12 @@ instance
 -- Dispatches to dockerized Claude Code session via mantle.
 -- Model is derived from type parameters, ensuring compile-time
 -- validation that the handler matches the ClaudeCode annotation.
+--
+-- For sum types with data, generates MCP decision tools and parses
+-- tool calls. For other types, uses standard structured output.
 instance
   ( Member Session es
-  , StructuredOutput schema
+  , ClaudeCodeSchema schema
   , GingerContext tpl
   , SingModelChoice model
   , ConvertTransitionHint targets
