@@ -493,6 +493,7 @@ pub async fn get_graph_data(pool: &SqlitePool, session_id: &str) -> Result<Graph
             branch: n.branch.clone(),
             state: n.state,
             prompt: n.prompt.clone(),
+            parent_id: n.parent_node_id.clone(),
             result_text: n.result.as_ref().and_then(|r| r.result_text.clone()),
             structured_output: n.result.as_ref().and_then(|r| r.structured_output.clone()),
             total_cost_usd: n.result.as_ref().map(|r| r.total_cost_usd),

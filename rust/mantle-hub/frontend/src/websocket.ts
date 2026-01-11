@@ -6,7 +6,6 @@ import type {
   NodeResult,
   StreamEvent,
   WebSocketMessage,
-  HubEvent,
 } from "./types";
 
 export interface HubWebSocketCallbacks {
@@ -100,28 +99,40 @@ export class HubWebSocket {
       return;
     }
 
-    // HubEvent variants
-    const event = msg as HubEvent;
+    // HubEvent variants - uses serde tag="type" with snake_case
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const event = msg as any;
+    console.log("[WS] Event received:", event.type, event);
 
-    if ("SessionCreated" in event) {
-      this.callbacks.onSessionCreated?.(event.SessionCreated.session);
-    } else if ("SessionUpdated" in event) {
-      this.callbacks.onSessionUpdated?.(event.SessionUpdated.session);
-    } else if ("NodeCreated" in event) {
-      this.callbacks.onNodeCreated?.(event.NodeCreated.node);
-    } else if ("NodeUpdated" in event) {
-      this.callbacks.onNodeUpdated?.(event.NodeUpdated.node);
-    } else if ("NodeCompleted" in event) {
-      this.callbacks.onNodeCompleted?.(event.NodeCompleted.node_id, event.NodeCompleted.result);
-    } else if ("NodeFailed" in event) {
-      this.callbacks.onNodeFailed?.(event.NodeFailed.node_id, event.NodeFailed.error);
-    } else if ("NodeEvent" in event) {
-      this.callbacks.onNodeEvent?.(
-        event.NodeEvent.session_id,
-        event.NodeEvent.node_id,
-        event.NodeEvent.event,
-        event.NodeEvent.timestamp
-      );
+    switch (event.type) {
+      case "session_created":
+        this.callbacks.onSessionCreated?.(event.session as SessionInfo);
+        break;
+      case "session_updated":
+        this.callbacks.onSessionUpdated?.(event.session as SessionInfo);
+        break;
+      case "node_created":
+        console.log("[WS] NodeCreated:", event.node);
+        this.callbacks.onNodeCreated?.(event.node as NodeInfo);
+        break;
+      case "node_updated":
+        this.callbacks.onNodeUpdated?.(event.node as NodeInfo);
+        break;
+      case "node_completed":
+        this.callbacks.onNodeCompleted?.(event.node_id as string, event.result as NodeResult);
+        break;
+      case "node_failed":
+        this.callbacks.onNodeFailed?.(event.node_id as string, event.error as string);
+        break;
+      case "node_event":
+        console.log("[WS] NodeEvent:", event.node_id, event.event);
+        this.callbacks.onNodeEvent?.(
+          event.session_id as string,
+          event.node_id as string,
+          event.event as StreamEvent,
+          event.timestamp as string
+        );
+        break;
     }
   }
 }
