@@ -273,7 +273,7 @@ executeLLMHandler mSystemTpl userTpl beforeFn afterFn input = do
 -- 3. Detects if schema is a sum type → generates decision tools
 -- 4. Executes the appropriate Session operation (start/continue/fork)
 -- 5. Parses output from tool calls (sum types) or structured output (others)
--- 6. Implements nag logic if sum type but no tool call (max 3 retries)
+-- 6. Implements nag logic if sum type but no tool call (max 5 retries)
 -- 7. Calls the after-handler with output AND session ID for routing
 --
 -- = Type Parameters
@@ -401,11 +401,15 @@ executeClaudeCodeHandler mSystemTpl userTpl beforeFn afterFn input = do
         Just _ -> do
           -- Sum type: parse from tool calls
           case result.soToolCalls of
-            Just (tc:_) ->
-              -- Got a tool call, parse it
+            Just [tc] ->
+              -- Got exactly one tool call, parse it
               case ccParseToolCall @s (convertToolCall tc) of
                 Right output -> afterFn_ (ClaudeCodeResult output result.soSessionId, result.soSessionId)
                 Left err -> error $ "ClaudeCode decision tool parse error: " <> err
+
+            Just (_:_:_) ->
+              -- Multiple decision tools called - ambiguous
+              error "ClaudeCode: multiple decision tools called in one turn; exactly one is required"
 
             _ ->
               -- No tool call - nag and retry

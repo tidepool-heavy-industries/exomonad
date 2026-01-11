@@ -42,6 +42,7 @@ module Tidepool.StructuredOutput.ClaudeCodeSchema
 
 import Data.Aeson (Value)
 import Data.Kind (Type)
+import Data.Text qualified as T
 
 import Tidepool.Schema (HasSumRep, IsNullarySum)
 import Tidepool.StructuredOutput.Class (StructuredOutput(..))
@@ -123,7 +124,7 @@ class StructuredOutput a => ClaudeCodeSchema a where
   --
   -- Default: Returns error (tool calls not expected)
   ccParseToolCall :: DT.ToolCall -> Either String a
-  ccParseToolCall tc = Left $ "Unexpected tool call: " <> show tc.tcName
+  ccParseToolCall tc = Left $ "Unexpected tool call: " <> T.unpack tc.tcName
     <> " (this type does not use decision tools)"
 
   -- | Parse from structured output JSON.
