@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Session - Mantle Hub</title>
+  </head>
+  <body>
+    <div class="container session-view">
+      <header>
+        <div class="header-left">
+          <a href="/" class="back-link">&larr; Sessions</a>
+          <h1 id="session-name">Loading...</h1>
+        </div>
+        <div id="status" class="status disconnected">Connecting...</div>
+      </header>
+
+      <main class="graph-page">
+        <div id="graph-container">
+          <svg id="graph"></svg>
+        </div>
+
+        <aside id="sidebar" class="sidebar">
+          <div class="sidebar-header">
+            <div class="tabs" id="sidebar-tabs">
+              <button class="tab active" data-tab="overview">Overview</button>
+              <button class="tab" data-tab="events">Events</button>
+              <button class="tab" data-tab="spec">Spec</button>
+              <button class="tab" data-tab="children">Children</button>
+            </div>
+            <button id="close-sidebar" class="close-btn">&times;</button>
+          </div>
+          <div id="sidebar-content" class="sidebar-content">
+            <p class="placeholder">Select a node to view details</p>
+          </div>
+        </aside>
+      </main>
+    </div>
+
+    <script type="module" src="/src/graph.ts"></script>
+  </body>
+</html>

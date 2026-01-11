@@ -1,21 +1,21 @@
 //! Unix socket client for sending results to mantle-hub from containers.
 //!
 //! Containers have the hub socket mounted at /tmp/mantle.sock. This module
-//! provides a simple way to write a SessionResult to that socket.
+//! provides a simple way to write a NodeResult to that socket.
 
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::time::Duration;
 
-use super::types::SessionResult;
+use super::types::NodeResult;
 use crate::error::{MantleError, Result};
 
-/// Write a session result to the hub socket.
+/// Write a node result to the hub socket.
 ///
 /// Connects to the hub socket, sends the result as JSON, and waits for
 /// an acknowledgment response. Returns an error if the hub reports failure.
-pub fn write_result_to_socket(socket_path: &Path, result: &SessionResult) -> Result<()> {
+pub fn write_result_to_socket(socket_path: &Path, result: &NodeResult) -> Result<()> {
     // Connect to the socket
     let stream = UnixStream::connect(socket_path).map_err(|e| {
         MantleError::Hub(format!(
@@ -66,13 +66,13 @@ pub fn write_result_to_socket(socket_path: &Path, result: &SessionResult) -> Res
     Ok(())
 }
 
-/// Convert a RunResult to SessionResult for hub submission.
-pub fn run_result_to_session_result(
+/// Convert a RunResult to NodeResult for hub submission.
+pub fn run_result_to_node_result(
     run_result: &crate::events::RunResult,
-    session_id: &str,
-) -> SessionResult {
-    SessionResult {
-        session_id: session_id.to_string(),
+    node_id: &str,
+) -> NodeResult {
+    NodeResult {
+        node_id: node_id.to_string(),
         exit_code: run_result.exit_code,
         is_error: run_result.is_error,
         result_text: run_result.result.clone(),

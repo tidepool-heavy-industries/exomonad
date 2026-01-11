@@ -57,7 +57,10 @@ pub use socket::ControlSocket;
 pub use supervisor::Supervisor;
 
 // Re-export hub types
-pub use hub::{HubClient, HubConfig, SessionInfo, SessionRegister, SessionResult, SessionState};
+pub use hub::{
+    HubClient, HubConfig, NodeInfo, NodeRegister, NodeResult, NodeState, SessionCreateResponse,
+    SessionInfo, SessionRegister, SessionState,
+};
 
 // Re-export command types
 pub use commands::{handle_hook, send_signal, HookEventType};

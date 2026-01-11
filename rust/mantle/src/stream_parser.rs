@@ -75,7 +75,11 @@ impl StreamParser {
         match serde_json::from_str::<StreamEvent>(&sanitized) {
             Ok(event) => {
                 if let StreamEvent::Result(ref r) = event {
-                    self.result_event = Some(r.clone());
+                    // Take the FIRST result event, ignore subsequent ones.
+                    // Claude Code sometimes sends success followed by spurious error_during_execution.
+                    if self.result_event.is_none() {
+                        self.result_event = Some(r.clone());
+                    }
                 }
                 self.events.push(event.clone());
                 Some(event)

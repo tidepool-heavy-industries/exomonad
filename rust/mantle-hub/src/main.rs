@@ -1,10 +1,15 @@
 //! mantle-hub: Session visualization hub for mantle.
 //!
 //! Long-running daemon that:
-//! - Accepts session registrations and results via HTTP/Unix socket
-//! - Persists session data to SQLite
-//! - Serves a D3.js graph visualization frontend
+//! - Accepts session/node registrations and results via HTTP/Unix socket
+//! - Persists session and node data to SQLite
+//! - Serves a multi-page web UI for session browsing
 //! - Broadcasts live updates via WebSocket
+//!
+//! ## Entity Model
+//!
+//! - **Session**: An orchestration run (tree of nodes)
+//! - **Node**: An individual Claude Code execution
 //!
 //! ## Usage
 //!
@@ -15,14 +20,11 @@
 //! # List all sessions
 //! mantle-hub list
 //!
-//! # Register a test session (ID generated automatically, printed to stdout)
-//! mantle-hub register --branch feature/test --prompt "Test"
-//!
-//! # Submit a result (requires knowing the session ID)
-//! mantle-hub submit --session-id <generated-id> --exit-code 0
+//! # Create a new session (creates session + root node)
+//! mantle-hub create --branch feature/test --prompt "Test"
 //!
 //! # Get session details
-//! mantle-hub get test-123
+//! mantle-hub get <session-id>
 //! ```
 
 mod db;
@@ -39,7 +41,7 @@ use tracing::info;
 use tracing_subscriber::EnvFilter;
 
 use crate::state::AppState;
-use crate::types::SessionResult;
+use crate::types::NodeResult;
 
 // ============================================================================
 // CLI
@@ -81,8 +83,8 @@ enum Commands {
         format: String,
     },
 
-    /// Register a new session (ID generated automatically)
-    Register {
+    /// Create a new session with its root node
+    Create {
         /// Branch name
         #[arg(long)]
         branch: String,
@@ -98,17 +100,13 @@ enum Commands {
         /// Model name
         #[arg(long, default_value = "sonnet")]
         model: String,
-
-        /// Parent session ID
-        #[arg(long)]
-        parent_id: Option<String>,
     },
 
-    /// Submit a result for a session
+    /// Submit a result for a node
     Submit {
-        /// Session ID
+        /// Node ID
         #[arg(long)]
-        session_id: String,
+        node_id: String,
 
         /// Exit code
         #[arg(long, default_value = "0")]
@@ -174,24 +172,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         socket: PathBuf::from("/tmp/mantle.sock"),
         static_dir: None,
     }) {
-        Commands::Serve { port, socket, static_dir } => {
-            run_server(db_path, port, socket, static_dir).await
-        }
-        Commands::List { format } => {
-            run_list(db_path, &format).await
-        }
-        Commands::Register { branch, worktree, prompt, model, parent_id } => {
-            run_register(db_path, branch, worktree, prompt, model, parent_id).await
-        }
-        Commands::Submit { session_id, exit_code, error, result_text, cost } => {
-            run_submit(db_path, session_id, exit_code, error, result_text, cost).await
-        }
-        Commands::Get { session_id, format } => {
-            run_get(db_path, &session_id, &format).await
-        }
-        Commands::Delete { session_id } => {
-            run_delete(db_path, &session_id).await
-        }
+        Commands::Serve {
+            port,
+            socket,
+            static_dir,
+        } => run_server(db_path, port, socket, static_dir).await,
+        Commands::List { format } => run_list(db_path, &format).await,
+        Commands::Create {
+            branch,
+            worktree,
+            prompt,
+            model,
+        } => run_create(db_path, branch, worktree, prompt, model).await,
+        Commands::Submit {
+            node_id,
+            exit_code,
+            error,
+            result_text,
+            cost,
+        } => run_submit(db_path, node_id, exit_code, error, result_text, cost).await,
+        Commands::Get { session_id, format } => run_get(db_path, &session_id, &format).await,
+        Commands::Delete { session_id } => run_delete(db_path, &session_id).await,
     }
 }
 
@@ -253,44 +254,49 @@ async fn run_list(db_path: PathBuf, format: &str) -> Result<(), Box<dyn std::err
             return Ok(());
         }
 
-        println!("{:<36}  {:<20}  {:<10}  {:<10}", "ID", "BRANCH", "STATE", "COST");
-        println!("{}", "-".repeat(80));
+        println!(
+            "{:<36}  {:<20}  {:<10}  {:<6}",
+            "ID", "NAME", "STATE", "NODES"
+        );
+        println!("{}", "-".repeat(76));
         for s in sessions {
-            let cost = s.result.as_ref().map(|r| format!("${:.4}", r.total_cost_usd)).unwrap_or_else(|| "-".to_string());
-            let branch: String = s.branch.chars().take(20).collect();
-            println!("{:<36}  {:<20}  {:<10}  {:<10}", s.id, branch, s.state, cost);
+            let name: String = s.name.chars().take(20).collect();
+            println!(
+                "{:<36}  {:<20}  {:<10}  {:<6}",
+                s.id, name, s.state, s.node_count
+            );
         }
     }
 
     Ok(())
 }
 
-async fn run_register(
+async fn run_create(
     db_path: PathBuf,
     branch: String,
     worktree: PathBuf,
     prompt: String,
     model: String,
-    parent_id: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let state = AppState::new(&db_path).await?;
 
-    let session_id = db::insert_session(
+    let (session_id, node_id) = db::create_session(
         &state.pool,
         &branch,
         &worktree.display().to_string(),
         &prompt,
         &model,
-        parent_id.as_deref(),
-    ).await?;
+    )
+    .await?;
 
-    println!("{}", session_id);
+    println!("session_id={}", session_id);
+    println!("node_id={}", node_id);
     Ok(())
 }
 
 async fn run_submit(
     db_path: PathBuf,
-    session_id: String,
+    node_id: String,
     exit_code: i32,
     is_error: bool,
     result_text: Option<String>,
@@ -298,8 +304,8 @@ async fn run_submit(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let state = AppState::new(&db_path).await?;
 
-    let result = SessionResult {
-        session_id: session_id.clone(),
+    let result = NodeResult {
+        node_id: node_id.clone(),
         exit_code,
         is_error,
         result_text,
@@ -313,29 +319,48 @@ async fn run_submit(
 
     db::insert_result(&state.pool, &result).await?;
 
-    println!("Submitted result for session: {}", session_id);
+    println!("Submitted result for node: {}", node_id);
     Ok(())
 }
 
-async fn run_get(db_path: PathBuf, session_id: &str, format: &str) -> Result<(), Box<dyn std::error::Error>> {
+async fn run_get(
+    db_path: PathBuf,
+    session_id: &str,
+    format: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
     let state = AppState::new(&db_path).await?;
-    let session = db::get_session(&state.pool, session_id).await?;
+    let session_with_nodes = db::get_session_with_nodes(&state.pool, session_id).await?;
 
     if format == "json" {
-        println!("{}", serde_json::to_string_pretty(&session)?);
+        println!("{}", serde_json::to_string_pretty(&session_with_nodes)?);
     } else {
+        let session = &session_with_nodes.session;
         println!("Session: {}", session.id);
-        println!("  Branch:    {}", session.branch);
+        println!("  Name:      {}", session.name);
         println!("  State:     {}", session.state);
-        println!("  Model:     {}", session.model);
+        println!("  Nodes:     {}", session.node_count);
         println!("  Created:   {}", session.created_at);
-        println!("  Prompt:    {}", session.prompt.chars().take(60).collect::<String>());
-        if let Some(ref result) = session.result {
-            println!("  Exit Code: {}", result.exit_code);
-            println!("  Cost:      ${:.4}", result.total_cost_usd);
-            println!("  Duration:  {:.1}s", result.duration_secs);
-            if let Some(ref text) = result.result_text {
-                println!("  Result:    {}", text.chars().take(60).collect::<String>());
+        println!();
+
+        if !session_with_nodes.nodes.is_empty() {
+            println!("Nodes:");
+            for node in &session_with_nodes.nodes {
+                let parent = node
+                    .parent_node_id
+                    .as_ref()
+                    .map(|p| format!(" (parent: {})", &p[..8]))
+                    .unwrap_or_else(|| " (root)".to_string());
+                println!("  {} - {}{}", &node.id[..8], node.state, parent);
+                println!("    Branch:  {}", node.branch);
+                println!(
+                    "    Prompt:  {}",
+                    node.prompt.chars().take(50).collect::<String>()
+                );
+                if let Some(ref result) = node.result {
+                    println!("    Cost:    ${:.4}", result.total_cost_usd);
+                    println!("    Duration: {:.1}s", result.duration_secs);
+                }
+                println!();
             }
         }
     }
@@ -343,7 +368,10 @@ async fn run_get(db_path: PathBuf, session_id: &str, format: &str) -> Result<(),
     Ok(())
 }
 
-async fn run_delete(db_path: PathBuf, session_id: &str) -> Result<(), Box<dyn std::error::Error>> {
+async fn run_delete(
+    db_path: PathBuf,
+    session_id: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
     let state = AppState::new(&db_path).await?;
     db::delete_session(&state.pool, session_id).await?;
     println!("Deleted session: {}", session_id);
