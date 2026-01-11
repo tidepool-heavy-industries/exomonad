@@ -303,7 +303,7 @@ executeLLMHandler mSystemTpl userTpl beforeFn afterFn input = do
 -- 1. Generates MCP decision tools where each tool = one constructor
 -- 2. Passes tools to the session; Claude Code calls one to "select" a branch
 -- 3. Parses the tool call back to the Haskell sum type
--- 4. If Claude doesn't call a tool, nags with a retry prompt (max 3 retries)
+-- 4. If Claude doesn't call a tool, nags with a retry prompt (max 5 retries)
 --
 -- This works around Anthropic's lack of oneOf support in structured output.
 executeClaudeCodeHandler
