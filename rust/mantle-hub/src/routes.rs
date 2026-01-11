@@ -39,15 +39,23 @@ use crate::types::{
 
 /// Build the router with all routes.
 pub fn router(state: AppState, static_dir: &std::path::Path) -> Router {
-    // Capture static_dir for session page handler
+    // Capture static_dir for page handlers
+    let index_html_path = static_dir.join("index.html");
     let session_html_path = static_dir.join("session.html");
 
     Router::new()
         // Page routes
         .route("/", get(|| async { Redirect::permanent("/sessions") }))
         .route(
+            "/sessions",
+            get({
+                let path = index_html_path.clone();
+                move || serve_html_page(path.clone())
+            }),
+        )
+        .route(
             "/sessions/{sid}",
-            get(move || serve_session_page(session_html_path.clone())),
+            get(move || serve_html_page(session_html_path.clone())),
         )
         // API routes - Sessions
         .route("/api/sessions", get(list_sessions).post(create_session))
@@ -59,7 +67,7 @@ pub fn router(state: AppState, static_dir: &std::path::Path) -> Router {
         // API routes - Nodes
         .route("/api/sessions/{sid}/nodes", post(create_node))
         .route("/api/sessions/{sid}/nodes/{nid}", get(get_node))
-        .route("/api/sessions/{sid}/nodes/{nid}/events", get(get_node_events))
+        .route("/api/sessions/{sid}/nodes/{nid}/events", get(get_node_events).post(post_node_event))
         .route(
             "/api/sessions/{sid}/nodes/{nid}/result",
             post(submit_result),
@@ -77,8 +85,8 @@ pub fn router(state: AppState, static_dir: &std::path::Path) -> Router {
 // Page Handlers
 // ============================================================================
 
-/// Serve the session detail page (session.html).
-async fn serve_session_page(path: std::path::PathBuf) -> Response {
+/// Serve an HTML page from the static directory.
+async fn serve_html_page(path: std::path::PathBuf) -> Response {
     match tokio::fs::read(&path).await {
         Ok(contents) => Response::builder()
             .status(200)
@@ -87,7 +95,7 @@ async fn serve_session_page(path: std::path::PathBuf) -> Response {
             .unwrap(),
         Err(_) => Response::builder()
             .status(404)
-            .body(axum::body::Body::from("Session page not found"))
+            .body(axum::body::Body::from("Page not found"))
             .unwrap(),
     }
 }
@@ -225,6 +233,36 @@ async fn get_node_events(
 
     let events = db::get_node_events(&state.pool, &nid).await?;
     Ok(Json(events))
+}
+
+/// Post an event for a node (for testing - broadcasts to WebSocket).
+async fn post_node_event(
+    State(state): State<AppState>,
+    Path((sid, nid)): Path<(String, String)>,
+    Json(event): Json<mantle_shared::events::StreamEvent>,
+) -> Result<impl IntoResponse> {
+    // Verify node exists and belongs to session
+    let node = db::get_node(&state.pool, &nid).await?;
+    if node.session_id != sid {
+        return Err(crate::error::HubError::BadRequest(format!(
+            "Node {} does not belong to session {}",
+            nid, sid
+        )));
+    }
+
+    // Persist event
+    db::insert_event(&state.pool, &nid, &event).await?;
+
+    // Broadcast to WebSocket subscribers
+    let timestamp = chrono::Utc::now().to_rfc3339();
+    state.broadcast(HubEvent::NodeEvent {
+        session_id: sid,
+        node_id: nid,
+        event,
+        timestamp,
+    });
+
+    Ok(axum::http::StatusCode::CREATED)
 }
 
 /// Submit node result.

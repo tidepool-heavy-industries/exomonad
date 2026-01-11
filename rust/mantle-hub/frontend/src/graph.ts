@@ -11,7 +11,10 @@ import type {
   NodeState,
 } from "./types";
 import { HubWebSocket } from "./websocket";
+import { VisualizationController } from "./visualization";
+import type { NodePosition } from "./visualization";
 import "./style.css";
+import "./styles/chat-window.css";
 
 const stateColors: Record<NodeState, string> = {
   pending: "#facc15",
@@ -60,6 +63,7 @@ class SessionGraph {
   private height = 600;
 
   private ws!: HubWebSocket;
+  private vizController!: VisualizationController;
 
   constructor() {
     // Extract session ID from URL: /sessions/{sessionId}
@@ -106,6 +110,7 @@ class SessionGraph {
 
     this.setupSVG();
     this.setupEventHandlers();
+    this.setupVisualization();
     this.loadGraph();
     this.ws.connect();
 
@@ -181,6 +186,24 @@ class SessionGraph {
     });
   }
 
+  private setupVisualization(): void {
+    const chatContainer = document.getElementById("chat-windows");
+    if (!chatContainer) {
+      console.warn("Chat windows container not found");
+      return;
+    }
+
+    this.vizController = new VisualizationController({
+      container: chatContainer,
+      autoAttach: true,
+      sessionId: this.sessionId,
+      layoutConstraints: {
+        maxVisibleDecorators: 5,
+        collisionPadding: 15,
+      },
+    });
+  }
+
   private async loadGraph(): Promise<void> {
     try {
       const resp = await fetch(`/api/sessions/${this.sessionId}/graph`);
@@ -198,6 +221,17 @@ class SessionGraph {
 
       this.render();
       this.handleHash();
+
+      // Attach decorators to existing nodes (for historical chat windows)
+      if (this.vizController) {
+        const nodeSnapshots = this.nodes.map((n) => ({
+          id: n.id,
+          state: n.state,
+          branch: n.branch,
+          sessionId: this.sessionId,
+        }));
+        this.vizController.attachToExistingNodes(nodeSnapshots);
+      }
     } catch (e) {
       console.error("Failed to load graph:", e);
       this.sessionNameEl.textContent = "Error loading session";
@@ -236,17 +270,35 @@ class SessionGraph {
       });
     }
 
+    // Notify visualization layer of new node
+    if (this.vizController) {
+      this.vizController.emitNodeCreated({
+        id: nodeInfo.id,
+        state: nodeInfo.state,
+        branch: nodeInfo.branch,
+        sessionId: this.sessionId,
+      });
+    }
+
     this.render();
   }
 
   private updateNodeResult(nodeId: string, result: NodeResult): void {
     const node = this.nodes.find((n) => n.id === nodeId);
     if (node) {
-      node.state = result.is_error ? "failed" : "completed";
+      const oldState = node.state;
+      const newState = result.is_error ? "failed" : "completed";
+      node.state = newState;
       node.result_text = result.result_text;
       node.structured_output = result.structured_output;
       node.total_cost_usd = result.total_cost_usd;
       node.duration_secs = result.duration_secs;
+
+      // Notify visualization layer of state change
+      if (this.vizController && oldState !== newState) {
+        this.vizController.emitNodeStateChange(nodeId, oldState, newState);
+      }
+
       this.render();
 
       if (this.selectedNode?.id === nodeId) {
@@ -258,7 +310,14 @@ class SessionGraph {
   private updateNodeState(nodeId: string, state: NodeState): void {
     const node = this.nodes.find((n) => n.id === nodeId);
     if (node) {
+      const oldState = node.state;
       node.state = state;
+
+      // Notify visualization layer of state change
+      if (this.vizController && oldState !== state) {
+        this.vizController.emitNodeStateChange(nodeId, oldState, state);
+      }
+
       this.render();
     }
   }
@@ -274,6 +333,11 @@ class SessionGraph {
       event,
       timestamp,
     });
+
+    // Forward to visualization layer for live chat windows
+    if (this.vizController) {
+      this.vizController.emitNodeEvent(nodeId, event, timestamp);
+    }
 
     if (this.selectedNode?.id === nodeId && this.currentTab === "events") {
       this.showNodeDetails(this.selectedNode);
@@ -343,6 +407,19 @@ class SessionGraph {
         .attr("y2", (d) => (d.target as SimNode).y ?? 0);
 
       this.nodeElements.attr("transform", (d) => `translate(${d.x ?? 0},${d.y ?? 0})`);
+
+      // Emit positions to visualization layer
+      if (this.vizController) {
+        const positions: NodePosition[] = this.nodes
+          .filter((n) => n.x !== undefined && n.y !== undefined)
+          .map((n) => ({
+            nodeId: n.id,
+            x: n.x!,
+            y: n.y!,
+            state: n.state,
+          }));
+        this.vizController.updatePositions(positions);
+      }
     });
   }
 
@@ -501,7 +578,29 @@ class SessionGraph {
 
     let content = "";
     if (typeof eventData === "object" && eventData !== null) {
-      if ("AssistantMessage" in eventData) {
+      // Handle actual StreamEvent format from backend: { type: "assistant", message: { content: [...] } }
+      if ("type" in eventData && eventData.type === "assistant" && "message" in eventData) {
+        const msg = eventData.message as { content: Array<{ type: string; text?: string; name?: string; input?: unknown }> };
+        if (msg.content && Array.isArray(msg.content)) {
+          content = msg.content.map((block) => {
+            if (block.type === "text" && block.text) {
+              return `<pre class="event-content">${this.escapeHtml(block.text)}</pre>`;
+            } else if (block.type === "tool_use" && block.name) {
+              return `
+                <details class="tool-use">
+                  <summary>${this.escapeHtml(block.name)}</summary>
+                  <pre>${this.escapeHtml(JSON.stringify(block.input || {}, null, 2))}</pre>
+                </details>
+              `;
+            } else if (block.type === "tool_result") {
+              const resultBlock = block as { content?: string };
+              return `<pre class="event-content tool-result">${this.escapeHtml(resultBlock.content || "")}</pre>`;
+            }
+            return `<pre class="event-content">${this.escapeHtml(JSON.stringify(block, null, 2))}</pre>`;
+          }).join("");
+        }
+      // Legacy format support
+      } else if ("AssistantMessage" in eventData) {
         const msg = eventData.AssistantMessage as { content: string };
         content = `<pre class="event-content">${this.escapeHtml(msg.content || "")}</pre>`;
       } else if ("ToolUse" in eventData) {

@@ -251,6 +251,8 @@ pub struct GraphNode {
     pub state: NodeState,
     pub prompt: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub result_text: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub structured_output: Option<serde_json::Value>,
