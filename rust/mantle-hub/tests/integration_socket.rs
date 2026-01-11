@@ -1,13 +1,11 @@
 //! Unix socket integration tests for mantle-hub.
 //!
 //! These tests verify the Unix socket communication path that containers use
-//! to submit results to the hub.
+//! to submit node results to the hub.
 
 mod helpers;
 
-use helpers::{
-    make_test_result, register_session, submit_via_socket, unique_id, TestHub,
-};
+use helpers::{create_session, make_test_node_result, submit_via_socket, unique_id, TestHub};
 use std::collections::HashMap;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
@@ -17,28 +15,30 @@ async fn test_socket_submit_result() {
     let hub = TestHub::spawn().await;
     let client = hub.http_client();
 
-    // Register session first (returns SessionInfo with generated ID)
-    let session_info = register_session(&client, &hub.http_url)
-        .await
-        .unwrap();
-    let session_id = &session_info.id;
+    // Create session first (returns SessionCreateResponse with session + root_node)
+    let created = create_session(&client, &hub.http_url).await.unwrap();
+    let session_id = &created.session.id;
+    let node_id = &created.root_node.id;
 
     // Submit result via socket
-    let result = make_test_result(session_id);
+    let result = make_test_node_result(node_id);
     submit_via_socket(hub.socket_path(), &result)
         .await
         .expect("Socket submission should succeed");
 
-    // Verify session state changed via HTTP
+    // Verify node state changed via HTTP
     let resp = client
-        .get(format!("{}/api/sessions/{}", hub.http_url, session_id))
+        .get(format!(
+            "{}/api/sessions/{}/nodes/{}",
+            hub.http_url, session_id, node_id
+        ))
         .send()
         .await
         .unwrap();
 
-    let session: serde_json::Value = resp.json().await.unwrap();
-    assert_eq!(session["state"], "completed");
-    assert!(session["result"].is_object());
+    let node: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(node["state"], "completed");
+    assert!(node["result"].is_object());
 }
 
 #[tokio::test]
@@ -46,18 +46,16 @@ async fn test_socket_raw_protocol() {
     let hub = TestHub::spawn().await;
     let client = hub.http_client();
 
-    // Register session first
-    let session_info = register_session(&client, &hub.http_url)
-        .await
-        .unwrap();
-    let session_id = &session_info.id;
+    // Create session first
+    let created = create_session(&client, &hub.http_url).await.unwrap();
+    let node_id = &created.root_node.id;
 
     // Connect to socket directly
     let stream = UnixStream::connect(hub.socket_path()).await.unwrap();
     let (reader, mut writer) = stream.into_split();
 
-    // Send SessionResult as JSON
-    let result = make_test_result(session_id);
+    // Send NodeResult as JSON
+    let result = make_test_node_result(node_id);
     let json = serde_json::to_string(&result).unwrap();
     writer
         .write_all(format!("{}\n", json).as_bytes())
@@ -71,65 +69,58 @@ async fn test_socket_raw_protocol() {
 
     let resp: serde_json::Value = serde_json::from_str(&response).unwrap();
     assert_eq!(resp["status"], "ok");
-    assert_eq!(resp["session_id"], session_id.as_str());
+    assert_eq!(resp["node_id"], node_id.as_str());
 }
 
 #[tokio::test]
-async fn test_socket_result_before_registration() {
-    // Test: result can be submitted even before session registration
-    // With server-side ID generation, this is less likely to happen in practice,
-    // but we still handle it gracefully (the result is stored, and when
-    // queried after registration, the session will show the result)
+async fn test_socket_result_for_nonexistent_node() {
+    // Test: submitting a result for a non-existent node should fail
+    // due to foreign key constraint
     let hub = TestHub::spawn().await;
-    let client = hub.http_client();
 
-    // Use a made-up session ID that doesn't exist yet
-    let fake_session_id = format!("orphan-{}", unique_id());
+    // Use a made-up node ID that doesn't exist
+    let fake_node_id = format!("orphan-{}", unique_id());
 
-    // 1. Submit result FIRST (no session exists yet)
-    let result = make_test_result(&fake_session_id);
-    submit_via_socket(hub.socket_path(), &result)
-        .await
-        .expect("Socket submission should succeed even without session");
+    // Submit result for non-existent node - should fail
+    let result = make_test_node_result(&fake_node_id);
+    let res = submit_via_socket(hub.socket_path(), &result).await;
 
-    // 2. Session doesn't exist in sessions table
-    let resp = client
-        .get(format!("{}/api/sessions/{}", hub.http_url, fake_session_id))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(
-        resp.status(),
-        404,
-        "Session should not exist (only orphan result in results table)"
+    // With FK constraints, this should fail
+    assert!(
+        res.is_err(),
+        "Socket submission should fail for non-existent node"
     );
-
-    // Note: Unlike before, we can't easily "register" a session with the same ID
-    // since IDs are now generated server-side. The orphan result will remain
-    // in the results table until cleaned up. This is an edge case that shouldn't
-    // happen in normal operation with server-side ID generation.
 }
 
 #[tokio::test]
 async fn test_socket_concurrent_submissions() {
     let hub = TestHub::spawn().await;
+    let client = hub.http_client();
+
+    // First, create 10 sessions with nodes
+    let mut node_ids = Vec::new();
+    for _ in 0..10 {
+        let created = create_session(&client, &hub.http_url).await.unwrap();
+        node_ids.push(created.root_node.id.clone());
+    }
 
     // Spawn 10 concurrent socket connections
-    // Each submits a result for a made-up session ID
-    let handles: Vec<_> = (0..10)
-        .map(|i| {
+    // Each submits a result for one of the created nodes
+    let handles: Vec<_> = node_ids
+        .into_iter()
+        .enumerate()
+        .map(|(i, node_id)| {
             let socket_path = hub.socket_path().to_path_buf();
             tokio::spawn(async move {
-                let session_id = format!("concurrent-{}-{}", i, unique_id());
-                let result = make_test_result(&session_id);
-                submit_via_socket(&socket_path, &result).await
+                let result = make_test_node_result(&node_id);
+                (i, submit_via_socket(&socket_path, &result).await)
             })
         })
         .collect();
 
-    // All should succeed (results are stored even without sessions)
-    for (i, handle) in handles.into_iter().enumerate() {
-        let result = handle.await.expect("Task should not panic");
+    // All should succeed
+    for handle in handles {
+        let (i, result) = handle.await.expect("Task should not panic");
         assert!(result.is_ok(), "Concurrent submission {} should succeed", i);
     }
 }
@@ -163,22 +154,21 @@ async fn test_socket_error_result() {
     let hub = TestHub::spawn().await;
     let client = hub.http_client();
 
-    // Register session first
-    let session_info = register_session(&client, &hub.http_url)
-        .await
-        .unwrap();
-    let session_id = &session_info.id;
+    // Create session first
+    let created = create_session(&client, &hub.http_url).await.unwrap();
+    let session_id = &created.session.id;
+    let node_id = &created.root_node.id;
 
     // Submit error result via socket
-    let result = mantle_shared::hub::types::SessionResult {
-        session_id: session_id.clone(),
+    let result = mantle_shared::hub::types::NodeResult {
+        node_id: node_id.clone(),
         exit_code: 1,
         is_error: true,
         result_text: Some("Task failed".into()),
         structured_output: None,
         total_cost_usd: 0.05,
         num_turns: 3,
-        cc_session_id: format!("cc-{}", session_id),
+        cc_session_id: format!("cc-{}", node_id),
         duration_secs: 10.0,
         model_usage: HashMap::new(),
     };
@@ -187,7 +177,22 @@ async fn test_socket_error_result() {
         .await
         .expect("Socket submission should succeed");
 
-    // Verify session state is failed
+    // Verify node state is failed
+    let resp = client
+        .get(format!(
+            "{}/api/sessions/{}/nodes/{}",
+            hub.http_url, session_id, node_id
+        ))
+        .send()
+        .await
+        .unwrap();
+
+    let node: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(node["state"], "failed", "Node should be marked failed");
+    assert_eq!(node["result"]["exit_code"], 1);
+    assert_eq!(node["result"]["is_error"], true);
+
+    // Verify session state is also failed (derived from nodes)
     let resp = client
         .get(format!("{}/api/sessions/{}", hub.http_url, session_id))
         .send()
@@ -195,9 +200,10 @@ async fn test_socket_error_result() {
         .unwrap();
 
     let session: serde_json::Value = resp.json().await.unwrap();
-    assert_eq!(session["state"], "failed", "Session should be marked failed");
-    assert_eq!(session["result"]["exit_code"], 1);
-    assert_eq!(session["result"]["is_error"], true);
+    assert_eq!(
+        session["session"]["state"], "failed",
+        "Session should be marked failed"
+    );
 }
 
 #[tokio::test]
@@ -205,11 +211,10 @@ async fn test_socket_with_structured_output() {
     let hub = TestHub::spawn().await;
     let client = hub.http_client();
 
-    // Register session first
-    let session_info = register_session(&client, &hub.http_url)
-        .await
-        .unwrap();
-    let session_id = &session_info.id;
+    // Create session first
+    let created = create_session(&client, &hub.http_url).await.unwrap();
+    let session_id = &created.session.id;
+    let node_id = &created.root_node.id;
 
     // Submit result with structured output
     let structured = serde_json::json!({
@@ -217,15 +222,15 @@ async fn test_socket_with_structured_output() {
         "file_b_content": "The answer is: 42"
     });
 
-    let result = mantle_shared::hub::types::SessionResult {
-        session_id: session_id.clone(),
+    let result = mantle_shared::hub::types::NodeResult {
+        node_id: node_id.clone(),
         exit_code: 0,
         is_error: false,
         result_text: Some("Task completed".into()),
         structured_output: Some(structured.clone()),
         total_cost_usd: 0.02,
         num_turns: 2,
-        cc_session_id: format!("cc-{}", session_id),
+        cc_session_id: format!("cc-{}", node_id),
         duration_secs: 5.0,
         model_usage: HashMap::new(),
     };
@@ -236,11 +241,14 @@ async fn test_socket_with_structured_output() {
 
     // Verify structured output is preserved
     let resp = client
-        .get(format!("{}/api/sessions/{}", hub.http_url, session_id))
+        .get(format!(
+            "{}/api/sessions/{}/nodes/{}",
+            hub.http_url, session_id, node_id
+        ))
         .send()
         .await
         .unwrap();
 
-    let session: serde_json::Value = resp.json().await.unwrap();
-    assert_eq!(session["result"]["structured_output"], structured);
+    let node: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(node["result"]["structured_output"], structured);
 }

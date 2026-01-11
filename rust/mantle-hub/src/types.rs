@@ -4,6 +4,7 @@
 //! between the hub server and clients.
 
 pub use mantle_shared::hub::{
-    GraphData, GraphEdge, GraphNode, HubEvent, SessionInfo, SessionRegister, SessionResult,
-    SessionState,
+    GraphData, GraphEdge, GraphNode, HubEvent, NodeCreateResponse, NodeEvent, NodeInfo,
+    NodeRegister, NodeResult, NodeState, SessionCreateResponse, SessionInfo, SessionRegister,
+    SessionState, SessionWithNodes,
 };

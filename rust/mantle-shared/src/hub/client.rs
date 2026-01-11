@@ -4,7 +4,10 @@ use reqwest::Client;
 use std::time::Duration;
 
 use super::config::HubConfig;
-use super::types::{GraphData, SessionInfo, SessionRegister, SessionResult};
+use super::types::{
+    GraphData, NodeCreateResponse, NodeInfo, NodeRegister, NodeResult, SessionCreateResponse,
+    SessionInfo, SessionRegister, SessionWithNodes,
+};
 use crate::error::{MantleError, Result};
 use crate::events::StreamEvent;
 
@@ -51,8 +54,14 @@ impl HubClient {
         Ok(())
     }
 
-    /// Register a new session with the hub.
-    pub async fn register_session(&self, req: &SessionRegister) -> Result<SessionInfo> {
+    // =========================================================================
+    // Session Operations
+    // =========================================================================
+
+    /// Create a new session with its root node.
+    ///
+    /// Returns both the session and the root node.
+    pub async fn create_session(&self, req: &SessionRegister) -> Result<SessionCreateResponse> {
         let url = format!("{}/api/sessions", self.base_url);
         let response = self
             .client
@@ -60,7 +69,7 @@ impl HubClient {
             .json(req)
             .send()
             .await
-            .map_err(|e| MantleError::Hub(format!("Failed to register session: {}", e)))?;
+            .map_err(|e| MantleError::Hub(format!("Failed to create session: {}", e)))?;
 
         if !response.status().is_success() {
             let status = response.status();
@@ -77,8 +86,8 @@ impl HubClient {
             .map_err(|e| MantleError::Hub(format!("Failed to parse session response: {}", e)))
     }
 
-    /// Get a session by ID.
-    pub async fn get_session(&self, session_id: &str) -> Result<SessionInfo> {
+    /// Get a session with all its nodes by ID.
+    pub async fn get_session(&self, session_id: &str) -> Result<SessionWithNodes> {
         let url = format!("{}/api/sessions/{}", self.base_url, session_id);
         let response = self
             .client
@@ -127,54 +136,6 @@ impl HubClient {
             .map_err(|e| MantleError::Hub(format!("Failed to parse sessions response: {}", e)))
     }
 
-    /// Submit a session result.
-    pub async fn submit_result(&self, result: &SessionResult) -> Result<()> {
-        let url = format!("{}/api/sessions/{}/result", self.base_url, result.session_id);
-        let response = self
-            .client
-            .post(&url)
-            .json(result)
-            .send()
-            .await
-            .map_err(|e| MantleError::Hub(format!("Failed to submit result: {}", e)))?;
-
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            return Err(MantleError::Hub(format!(
-                "Hub returned error {}: {}",
-                status, body
-            )));
-        }
-
-        Ok(())
-    }
-
-    /// Poll for a session result (blocking with timeout).
-    pub async fn poll_result(&self, session_id: &str) -> Result<SessionResult> {
-        let url = format!("{}/api/sessions/{}/result", self.base_url, session_id);
-        let response = self
-            .client
-            .get(&url)
-            .send()
-            .await
-            .map_err(|e| MantleError::Hub(format!("Failed to poll result: {}", e)))?;
-
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            return Err(MantleError::Hub(format!(
-                "Hub returned error {}: {}",
-                status, body
-            )));
-        }
-
-        response
-            .json()
-            .await
-            .map_err(|e| MantleError::Hub(format!("Failed to parse result response: {}", e)))
-    }
-
     /// Delete a session.
     pub async fn delete_session(&self, session_id: &str) -> Result<()> {
         let url = format!("{}/api/sessions/{}", self.base_url, session_id);
@@ -197,9 +158,9 @@ impl HubClient {
         Ok(())
     }
 
-    /// Get graph data for visualization.
-    pub async fn get_graph(&self) -> Result<GraphData> {
-        let url = format!("{}/api/graph", self.base_url);
+    /// Get graph data for a session.
+    pub async fn get_graph(&self, session_id: &str) -> Result<GraphData> {
+        let url = format!("{}/api/sessions/{}/graph", self.base_url, session_id);
         let response = self
             .client
             .get(&url)
@@ -221,6 +182,99 @@ impl HubClient {
             .await
             .map_err(|e| MantleError::Hub(format!("Failed to parse graph response: {}", e)))
     }
+
+    // =========================================================================
+    // Node Operations
+    // =========================================================================
+
+    /// Add a child node to a session.
+    pub async fn create_node(
+        &self,
+        session_id: &str,
+        req: &NodeRegister,
+    ) -> Result<NodeCreateResponse> {
+        let url = format!("{}/api/sessions/{}/nodes", self.base_url, session_id);
+        let response = self
+            .client
+            .post(&url)
+            .json(req)
+            .send()
+            .await
+            .map_err(|e| MantleError::Hub(format!("Failed to create node: {}", e)))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(MantleError::Hub(format!(
+                "Hub returned error {}: {}",
+                status, body
+            )));
+        }
+
+        response
+            .json()
+            .await
+            .map_err(|e| MantleError::Hub(format!("Failed to parse node response: {}", e)))
+    }
+
+    /// Get a node by ID.
+    pub async fn get_node(&self, session_id: &str, node_id: &str) -> Result<NodeInfo> {
+        let url = format!(
+            "{}/api/sessions/{}/nodes/{}",
+            self.base_url, session_id, node_id
+        );
+        let response = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| MantleError::Hub(format!("Failed to get node: {}", e)))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(MantleError::Hub(format!(
+                "Hub returned error {}: {}",
+                status, body
+            )));
+        }
+
+        response
+            .json()
+            .await
+            .map_err(|e| MantleError::Hub(format!("Failed to parse node response: {}", e)))
+    }
+
+    /// Submit a node result.
+    pub async fn submit_node_result(
+        &self,
+        session_id: &str,
+        node_id: &str,
+        result: &NodeResult,
+    ) -> Result<()> {
+        let url = format!(
+            "{}/api/sessions/{}/nodes/{}/result",
+            self.base_url, session_id, node_id
+        );
+        let response = self
+            .client
+            .post(&url)
+            .json(result)
+            .send()
+            .await
+            .map_err(|e| MantleError::Hub(format!("Failed to submit result: {}", e)))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(MantleError::Hub(format!(
+                "Hub returned error {}: {}",
+                status, body
+            )));
+        }
+
+        Ok(())
+    }
 }
 
 // ============================================================================
@@ -237,15 +291,19 @@ use tungstenite::{connect, stream::MaybeTlsStream as SyncMaybeTlsStream, WebSock
 pub struct SyncEventStream {
     ws: WebSocket<SyncMaybeTlsStream<StdTcpStream>>,
     session_id: String,
+    node_id: String,
 }
 
 impl SyncEventStream {
     /// Connect to hub WebSocket for event streaming (blocking).
-    pub fn connect(base_url: &str, session_id: &str) -> Result<Self> {
+    ///
+    /// The WebSocket path now includes both session_id and node_id:
+    /// `/ws/push/{session_id}/{node_id}`
+    pub fn connect(base_url: &str, session_id: &str, node_id: &str) -> Result<Self> {
         let ws_url = base_url
             .replace("http://", "ws://")
             .replace("https://", "wss://");
-        let url = format!("{}/ws/push/{}", ws_url, session_id);
+        let url = format!("{}/ws/push/{}/{}", ws_url, session_id, node_id);
 
         let (ws, _response) = connect(&url)
             .map_err(|e| MantleError::Hub(format!("WebSocket connect failed to {}: {}", url, e)))?;
@@ -253,6 +311,7 @@ impl SyncEventStream {
         Ok(Self {
             ws,
             session_id: session_id.to_string(),
+            node_id: node_id.to_string(),
         })
     }
 
@@ -265,8 +324,8 @@ impl SyncEventStream {
             .send(tungstenite::Message::Text(json.into()))
             .map_err(|e| {
                 MantleError::Hub(format!(
-                    "Failed to send event for session {}: {}",
-                    self.session_id, e
+                    "Failed to send event for node {}: {}",
+                    self.node_id, e
                 ))
             })?;
 
@@ -290,5 +349,10 @@ impl SyncEventStream {
     /// Get the session ID this stream is connected for.
     pub fn session_id(&self) -> &str {
         &self.session_id
+    }
+
+    /// Get the node ID this stream is connected for.
+    pub fn node_id(&self) -> &str {
+        &self.node_id
     }
 }

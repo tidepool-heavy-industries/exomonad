@@ -1,33 +1,95 @@
 //! HTTP API routes.
+//!
+//! URL structure:
+//! - GET  /                              → redirect to /sessions
+//! - GET  /sessions                      → sessions list page (HTML)
+//! - GET  /sessions/{sid}                → session tree page (HTML)
+//!
+//! API:
+//! - POST /api/sessions                  → create session + root node
+//! - GET  /api/sessions                  → list sessions
+//! - GET  /api/sessions/{sid}            → session with all nodes
+//! - DELETE /api/sessions/{sid}          → delete session
+//! - POST /api/sessions/{sid}/nodes      → add child node
+//! - GET  /api/sessions/{sid}/nodes/{nid} → node detail
+//! - GET  /api/sessions/{sid}/nodes/{nid}/events → node events
+//! - POST /api/sessions/{sid}/nodes/{nid}/result → submit node result
+//! - GET  /api/sessions/{sid}/graph      → graph data for visualization
+//!
+//! WebSocket:
+//! - WS /ws                              → frontend subscribes for updates
+//! - WS /ws/push/{sid}/{nid}             → mantle pushes events for a node
 
 use axum::{
     extract::{Path, State, WebSocketUpgrade},
-    response::IntoResponse,
+    http::header,
+    response::{IntoResponse, Redirect, Response},
     routing::{get, post},
     Json, Router,
 };
 use tower_http::services::ServeDir;
 
 use crate::db;
-use crate::error::{HubError, Result};
+use crate::error::Result;
 use crate::state::AppState;
-use crate::types::{HubEvent, SessionInfo, SessionRegister, SessionResult};
+use crate::types::{
+    GraphData, HubEvent, NodeCreateResponse, NodeEvent, NodeInfo, NodeRegister, NodeResult,
+    NodeState, SessionCreateResponse, SessionInfo, SessionRegister, SessionWithNodes,
+};
 
 /// Build the router with all routes.
 pub fn router(state: AppState, static_dir: &std::path::Path) -> Router {
+    // Capture static_dir for session page handler
+    let session_html_path = static_dir.join("session.html");
+
     Router::new()
-        // API routes
-        .route("/api/sessions", get(list_sessions).post(register_session))
-        .route("/api/sessions/{id}", get(get_session).delete(delete_session))
-        .route("/api/sessions/{id}/result", post(submit_result).get(poll_result))
-        .route("/api/graph", get(get_graph))
+        // Page routes
+        .route("/", get(|| async { Redirect::permanent("/sessions") }))
+        .route(
+            "/sessions/{sid}",
+            get(move || serve_session_page(session_html_path.clone())),
+        )
+        // API routes - Sessions
+        .route("/api/sessions", get(list_sessions).post(create_session))
+        .route(
+            "/api/sessions/{sid}",
+            get(get_session).delete(delete_session),
+        )
+        .route("/api/sessions/{sid}/graph", get(get_graph))
+        // API routes - Nodes
+        .route("/api/sessions/{sid}/nodes", post(create_node))
+        .route("/api/sessions/{sid}/nodes/{nid}", get(get_node))
+        .route("/api/sessions/{sid}/nodes/{nid}/events", get(get_node_events))
+        .route(
+            "/api/sessions/{sid}/nodes/{nid}/result",
+            post(submit_result),
+        )
         // WebSocket for live updates (frontend subscribes)
         .route("/ws", get(websocket_handler))
-        // WebSocket for event push (mantle pushes session events)
-        .route("/ws/push/{session_id}", get(push_websocket_handler))
+        // WebSocket for event push (mantle pushes node events)
+        .route("/ws/push/{sid}/{nid}", get(push_websocket_handler))
         // Static files (frontend) - use fallback_service for root-level serving
         .fallback_service(ServeDir::new(static_dir))
         .with_state(state)
+}
+
+// ============================================================================
+// Page Handlers
+// ============================================================================
+
+/// Serve the session detail page (session.html).
+async fn serve_session_page(path: std::path::PathBuf) -> Response {
+    match tokio::fs::read(&path).await {
+        Ok(contents) => Response::builder()
+            .status(200)
+            .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
+            .body(axum::body::Body::from(contents))
+            .unwrap(),
+        Err(_) => Response::builder()
+            .status(404)
+            .body(axum::body::Body::from("Session page not found"))
+            .unwrap(),
+    }
 }
 
 // ============================================================================
@@ -40,96 +102,158 @@ async fn list_sessions(State(state): State<AppState>) -> Result<Json<Vec<Session
     Ok(Json(sessions))
 }
 
-/// Register a new session.
-///
-/// Session ID is generated server-side and returned in the response.
-async fn register_session(
+/// Create a new session with its root node.
+async fn create_session(
     State(state): State<AppState>,
     Json(req): Json<SessionRegister>,
-) -> Result<Json<SessionInfo>> {
-    let session_id = db::insert_session(
+) -> Result<Json<SessionCreateResponse>> {
+    let (session_id, node_id) = db::create_session(
         &state.pool,
         &req.branch,
         &req.worktree.display().to_string(),
         &req.prompt,
         &req.model,
-        req.parent_id.as_deref(),
     )
     .await?;
 
     let session = db::get_session(&state.pool, &session_id).await?;
+    let root_node = db::get_node(&state.pool, &node_id).await?;
 
-    // Broadcast event
-    state.broadcast(HubEvent::SessionStarted {
+    // Broadcast events
+    state.broadcast(HubEvent::SessionCreated {
         session: session.clone(),
     });
+    state.broadcast(HubEvent::NodeCreated {
+        node: root_node.clone(),
+    });
 
-    Ok(Json(session))
+    Ok(Json(SessionCreateResponse { session, root_node }))
 }
 
-/// Get session by ID.
+/// Get session with all its nodes.
 async fn get_session(
     State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> Result<Json<SessionInfo>> {
-    let session = db::get_session(&state.pool, &id).await?;
+    Path(sid): Path<String>,
+) -> Result<Json<SessionWithNodes>> {
+    let session = db::get_session_with_nodes(&state.pool, &sid).await?;
     Ok(Json(session))
 }
 
 /// Delete session.
 async fn delete_session(
     State(state): State<AppState>,
-    Path(id): Path<String>,
+    Path(sid): Path<String>,
 ) -> Result<impl IntoResponse> {
-    db::delete_session(&state.pool, &id).await?;
+    db::delete_session(&state.pool, &sid).await?;
     Ok(axum::http::StatusCode::NO_CONTENT)
 }
 
-/// Submit session result (typically from container via socket, but also accessible via HTTP).
-async fn submit_result(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-    Json(mut result): Json<SessionResult>,
-) -> Result<impl IntoResponse> {
-    // Ensure session_id matches path
-    result.session_id = id.clone();
-
-    db::insert_result(&state.pool, &result).await?;
-
-    // Broadcast event
-    state.broadcast(HubEvent::SessionCompleted {
-        session_id: id,
-        result,
-    });
-
-    Ok(axum::http::StatusCode::OK)
-}
-
-/// Poll for session result (blocking with timeout).
-async fn poll_result(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> Result<Json<SessionResult>> {
-    // Simple implementation: check if result exists
-    // TODO: Add long-polling with timeout
-    let session = db::get_session(&state.pool, &id).await?;
-
-    session
-        .result
-        .ok_or_else(|| HubError::BadRequest(format!("Session {} has no result yet", id)))
-        .map(Json)
-}
-
-/// Get graph data for visualization.
+/// Get graph data for a session.
 async fn get_graph(
     State(state): State<AppState>,
-) -> Result<Json<crate::types::GraphData>> {
-    let graph = db::get_graph_data(&state.pool).await?;
+    Path(sid): Path<String>,
+) -> Result<Json<GraphData>> {
+    let graph = db::get_graph_data(&state.pool, &sid).await?;
     Ok(Json(graph))
 }
 
 // ============================================================================
-// WebSocket
+// Node Endpoints
+// ============================================================================
+
+/// Add a child node to a session.
+async fn create_node(
+    State(state): State<AppState>,
+    Path(sid): Path<String>,
+    Json(req): Json<NodeRegister>,
+) -> Result<Json<NodeCreateResponse>> {
+    let node_id = db::create_node(
+        &state.pool,
+        &sid,
+        &req.parent_node_id,
+        &req.branch,
+        &req.worktree.display().to_string(),
+        &req.prompt,
+        &req.model,
+    )
+    .await?;
+
+    let node = db::get_node(&state.pool, &node_id).await?;
+
+    // Broadcast event
+    state.broadcast(HubEvent::NodeCreated { node: node.clone() });
+
+    // Also update session (node count changed)
+    if let Ok(session) = db::get_session(&state.pool, &sid).await {
+        state.broadcast(HubEvent::SessionUpdated { session });
+    }
+
+    Ok(Json(NodeCreateResponse { node }))
+}
+
+/// Get node by ID.
+async fn get_node(
+    State(state): State<AppState>,
+    Path((sid, nid)): Path<(String, String)>,
+) -> Result<Json<NodeInfo>> {
+    let node = db::get_node(&state.pool, &nid).await?;
+
+    // Verify node belongs to session
+    if node.session_id != sid {
+        return Err(crate::error::HubError::BadRequest(format!(
+            "Node {} does not belong to session {}",
+            nid, sid
+        )));
+    }
+
+    Ok(Json(node))
+}
+
+/// Get events for a node.
+async fn get_node_events(
+    State(state): State<AppState>,
+    Path((sid, nid)): Path<(String, String)>,
+) -> Result<Json<Vec<NodeEvent>>> {
+    // First verify the node exists and belongs to this session
+    let node = db::get_node(&state.pool, &nid).await?;
+    if node.session_id != sid {
+        return Err(crate::error::HubError::BadRequest(format!(
+            "Node {} does not belong to session {}",
+            nid, sid
+        )));
+    }
+
+    let events = db::get_node_events(&state.pool, &nid).await?;
+    Ok(Json(events))
+}
+
+/// Submit node result.
+async fn submit_result(
+    State(state): State<AppState>,
+    Path((sid, nid)): Path<(String, String)>,
+    Json(mut result): Json<NodeResult>,
+) -> Result<impl IntoResponse> {
+    // Ensure node_id matches path
+    result.node_id = nid.clone();
+
+    db::insert_result(&state.pool, &result).await?;
+
+    // Broadcast event
+    state.broadcast(HubEvent::NodeCompleted {
+        node_id: nid.clone(),
+        result,
+    });
+
+    // Update session state
+    if let Ok(session) = db::get_session(&state.pool, &sid).await {
+        state.broadcast(HubEvent::SessionUpdated { session });
+    }
+
+    Ok(axum::http::StatusCode::OK)
+}
+
+// ============================================================================
+// WebSocket - Frontend Subscription
 // ============================================================================
 
 /// WebSocket handler for live updates.
@@ -140,21 +264,22 @@ async fn websocket_handler(
     ws.on_upgrade(|socket| handle_websocket(socket, state))
 }
 
-async fn handle_websocket(
-    mut socket: axum::extract::ws::WebSocket,
-    state: AppState,
-) {
+async fn handle_websocket(mut socket: axum::extract::ws::WebSocket, state: AppState) {
     use axum::extract::ws::Message;
 
     let mut rx = state.subscribe();
 
-    // Send initial graph data
-    if let Ok(graph) = db::get_graph_data(&state.pool).await {
+    // Send initial sessions list
+    if let Ok(sessions) = db::list_sessions(&state.pool).await {
         let msg = serde_json::json!({
             "type": "init",
-            "graph": graph
+            "sessions": sessions
         });
-        if socket.send(Message::Text(msg.to_string().into())).await.is_err() {
+        if socket
+            .send(Message::Text(msg.to_string().into()))
+            .await
+            .is_err()
+        {
             return;
         }
     }
@@ -173,34 +298,40 @@ async fn handle_websocket(
 }
 
 // ============================================================================
-// Push WebSocket (for mantle to stream events)
+// WebSocket - Mantle Event Push
 // ============================================================================
 
-/// WebSocket handler for mantle to push session events.
+/// WebSocket handler for mantle to push node events.
 ///
 /// mantle connects to this endpoint and sends StreamEvent objects.
-/// Hub wraps them in HubEvent::SessionEvent and broadcasts to all subscribers.
+/// Hub persists them and broadcasts to all subscribers.
 async fn push_websocket_handler(
     State(state): State<AppState>,
-    Path(session_id): Path<String>,
+    Path((sid, nid)): Path<(String, String)>,
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| handle_push_websocket(socket, state, session_id))
+    ws.on_upgrade(move |socket| handle_push_websocket(socket, state, sid, nid))
 }
 
 async fn handle_push_websocket(
     mut socket: axum::extract::ws::WebSocket,
     state: AppState,
     session_id: String,
+    node_id: String,
 ) {
     use axum::extract::ws::Message;
     use mantle_shared::events::StreamEvent;
 
-    tracing::info!(session_id = %session_id, "Push WebSocket connected");
+    tracing::info!(session_id = %session_id, node_id = %node_id, "Push WebSocket connected");
 
-    // Update session state to Running
-    if let Err(e) = db::update_session_state(&state.pool, &session_id, crate::types::SessionState::Running).await {
-        tracing::warn!(session_id = %session_id, error = %e, "Failed to update session state");
+    // Update node state to Running
+    if let Err(e) = db::update_node_state(&state.pool, &node_id, NodeState::Running).await {
+        tracing::warn!(node_id = %node_id, error = %e, "Failed to update node state");
+    }
+
+    // Also update session
+    if let Ok(session) = db::get_session(&state.pool, &session_id).await {
+        state.broadcast(HubEvent::SessionUpdated { session });
     }
 
     // Receive events from mantle and broadcast to subscribers
@@ -209,16 +340,26 @@ async fn handle_push_websocket(
             Ok(Message::Text(text)) => {
                 match serde_json::from_str::<StreamEvent>(&text) {
                     Ok(event) => {
+                        // Persist event to database
+                        if let Err(e) = db::insert_event(&state.pool, &node_id, &event).await {
+                            tracing::warn!(
+                                node_id = %node_id,
+                                error = %e,
+                                "Failed to persist stream event"
+                            );
+                        }
+
                         let timestamp = chrono::Utc::now().to_rfc3339();
-                        state.broadcast(HubEvent::SessionEvent {
+                        state.broadcast(HubEvent::NodeEvent {
                             session_id: session_id.clone(),
+                            node_id: node_id.clone(),
                             event,
                             timestamp,
                         });
                     }
                     Err(e) => {
                         tracing::warn!(
-                            session_id = %session_id,
+                            node_id = %node_id,
                             error = %e,
                             "Failed to parse stream event"
                         );
@@ -226,16 +367,16 @@ async fn handle_push_websocket(
                 }
             }
             Ok(Message::Close(_)) => {
-                tracing::info!(session_id = %session_id, "Push WebSocket closed");
+                tracing::info!(node_id = %node_id, "Push WebSocket closed");
                 break;
             }
             Err(e) => {
-                tracing::warn!(session_id = %session_id, error = %e, "WebSocket error");
+                tracing::warn!(node_id = %node_id, error = %e, "WebSocket error");
                 break;
             }
             _ => {} // Ignore ping/pong/binary
         }
     }
 
-    tracing::info!(session_id = %session_id, "Push WebSocket disconnected");
+    tracing::info!(node_id = %node_id, "Push WebSocket disconnected");
 }
