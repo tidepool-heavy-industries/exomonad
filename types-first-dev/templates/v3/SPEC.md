@@ -1,51 +1,65 @@
 # V3 Protocol Specification
 
-5-node TDD graph with parallel spawn and tree coordination.
+7-node TDD graph with parallel spawn, tree coordination, and typed DSL mapping.
 
-**Nodes:** Scaffold → TDD, Impl (parallel) → Merger → Rebaser
+**Nodes:** Scaffold → Fork → (TDDWriteTests, ImplBarrier) → Impl → TDDReviewImpl → Merger → Rebaser
 
 ```
 Entry(Spec)
     │
     ▼
 ┌──────────┐
-│ Scaffold │
+│ Scaffold │──[Subgraph]──▶ Child Graphs (spawnSelf per childSpec)
 └──────────┘
     │
-    ├──[parallel]── SpawnChildren ──▶ Child Graphs (isolated worktrees)
-    │                                      │
-    │                                      ▼
-    │                                Child MRs merge into impl branch
+    ▼ InitWork
+┌──────────┐
+│ ForkNode │ ─────────────────────────────────────────────────────┐
+└──────────┘                                                      │
+    │                                                             │
+    ├──[Spawn]──▶ TDDWriteTests ──TestsReady──┐                  │
+    │                                          │                  │
+    └──[Spawn]──▶ ImplBarrier ◄────────────────┤                  │
+                      │                        │                  │
+                      │ Awaits: TestsReady     │                  │
+                      │       + [MergeComplete]◄──────────────────┘
+                      ▼                        (children via Subgraph)
+                 ┌────────┐
+                 │  Impl  │
+                 └────────┘
+                      │
+    ┌─────────────────┴─────────────────┐
+    │                                   │
+    ▼ TestsPassed                       ▼ RequestRetry (self-loop)
+┌───────────────┐                  ┌────────┐
+│ TDDReviewImpl │                  │  Impl  │ (max 5 attempts)
+└───────────────┘                  └────────┘
     │
-    ├──[parallel]── TDD (writes tests, reviews impl)
-    │                    │
-    │                    ▼
-    │               Tests merge into impl branch
+    ├── Approved ──▶ Merger ──MergeComplete──▶ Rebaser (siblings)
+    │                   │
+    │                   └──▶ Parent (broadcast)
     │
-    └──[waits]───── Impl (waits for children + tests, then implements)
-                         │
-    ┌────────────────────┘
-    │
-    ▼
-┌────────────────────────────────────────────────────┐
-│                    TDD LOOP                         │
-│                                                     │
-│  Impl ──TestsPassed──▶ TDD ──Approved──▶ Merger    │
-│    ▲                    │                           │
-│    └──MoreTests─────────┘                           │
-│                                                     │
-└────────────────────────────────────────────────────┘
-                                │
-                                ▼
-                           ┌────────┐  MergeComplete   ┌──────────┐
-                           │ Merger │─────────────────▶│ Rebaser  │
-                           └────────┘                  └──────────┘
-                                │                           │
-                                ▼                           ▼
-                           (MR to parent)           (siblings adapt)
+    └── MoreTests ──▶ TDDWriteTests (write additional tests)
 ```
 
-**Key insight:** TDD and Impl nodes share parent's conversation history as starting context (threaded). Different templates, same backing thread.
+**Key insight:** TDDWriteTests, TDDReviewImpl, and Impl share parent's conversation history as starting context (threaded via Memory effect). Different templates, same backing conversationId.
+
+---
+
+## DSL Mapping
+
+This spec maps to the Tidepool Graph DSL. See `haskell/dsl/core/CLAUDE.md` for DSL reference.
+
+| Protocol Concept | DSL Construct |
+|------------------|---------------|
+| Parallel spawn (TDD + Impl) | `ForkNode` with `Spawn` annotation |
+| Wait for dependencies | `BarrierNode` with `Awaits` annotation |
+| Child graph spawning | `Subgraph` effect (`spawnSelf`, `awaitAny`) |
+| Node-private state | `Memory` annotation |
+| Shared conversation | `Global` annotation on graph |
+| Typed transitions | `Goto` / `GotoChoice` |
+| Self-loop retry | `Goto Self` with `dispatchGotoWithSelf` |
+| Sum type outputs | `oneOf` schema (validated at compile time) |
 
 ---
 
@@ -141,6 +155,10 @@ Adaptation:
 
 ## Node 1: Scaffold
 
+**DSL:** `LLMNode :@ Input ScaffoldInput :@ Schema ScaffoldExit :@ Template ScaffoldTpl`
+
+**Effects:** `[LLM, Subgraph Spec MergeComplete, Git, Emit]`
+
 ### Input Type
 
 ```yaml
@@ -184,7 +202,20 @@ InterfaceFile:
   exports: [Text]
 ```
 
-**Key change:** No separate `SpawnTree` vs `InitLeaf`. Always `InitWork`, optionally with children. Orchestrator spawns (children + TDD + Impl) in parallel.
+**Key change:** No separate `SpawnTree` vs `InitLeaf`. Always `InitWork`, optionally with children.
+
+**Child spawning (Subgraph effect):** If `childSpecs` is present, handler spawns children:
+
+```haskell
+scaffoldAfter :: ScaffoldExit -> Eff (Subgraph Spec MergeComplete ': es) (GotoChoice targets)
+scaffoldAfter (InitWork payload) = do
+  -- Spawn children if present (run in parallel, await later at ImplBarrier)
+  forM_ (payload.childSpecs) $ \childSpec ->
+    spawnSelf (Spec { id = childSpec.id, ... })
+
+  -- Transition to ForkNode which spawns TDD + ImplBarrier in parallel
+  pure $ gotoChoice @"fork" payload
+```
 
 ### Template
 
@@ -261,32 +292,36 @@ Or `ClarificationNeeded` if spec is ambiguous.
 
 ---
 
-## Node 2: TDD
+## Node 2: Fork
 
-TDD node writes tests AND reviews impl. Spawned in parallel with Impl, shares parent's conversation context.
+**DSL:** `ForkNode :@ Input InitWorkPayload :@ Spawn '[To "tddWriteTests" InitWorkPayload, To "implBarrier" InitWorkPayload] :@ Barrier "implBarrier"`
 
-**Dual-phase invocation:** TDD is invoked TWICE per work item:
-1. **First spawn:** WriteTests mode (writes failing tests, emits TestsReady)
-2. **Second spawn:** ReviewImpl mode (after Impl emits TestsPassed)
+**Effects:** None (pure routing)
 
-Same node definition, different mode in input. Orchestrator manages phase transitions.
+Spawns TDDWriteTests and ImplBarrier in parallel after Scaffold completes.
+
+```haskell
+-- ForkNode handler builds HList of payloads for workers
+forkHandler :: InitWorkPayload -> Eff es (HList '[InitWorkPayload, InitWorkPayload])
+forkHandler payload = pure $ payload ::: payload ::: HNil
+```
+
+---
+
+## Node 3: TDDWriteTests
+
+**DSL:** `LLMNode :@ Input TDDWriteTestsInput :@ Schema TDDWriteTestsExit :@ Template TDDWriteTestsTpl :@ Memory TDDMem`
+
+**Effects:** `[LLM, Memory TDDMem, Git, Emit]`
+
+Writes failing tests for all criteria. Spawned in parallel with ImplBarrier via ForkNode.
 
 ### Input Type
 
 ```yaml
-TDDInput:
+TDDWriteTestsInput:
   spec: Spec
-  scaffold: InitWorkPayload  # see Shared Types
-  mode: TDDMode
-
-TDDMode:
-  oneOf:
-    - WriteTests:
-        # Initial mode - write failing tests
-    - ReviewImpl:
-        # After Impl claims TestsPassed
-        implResult: ImplResult  # see Shared Types
-        diff: Text
+  scaffold: InitWorkPayload
 ```
 
 ### Memory (node-private, threaded context)
@@ -301,35 +336,22 @@ TDDMem:
 ### Output Type (oneOf)
 
 ```yaml
-TDDExit:
+TDDWriteTestsExit:
   oneOf:
-    # WriteTests mode outputs
     - TestsReady:
         testsCommit: Text
         testFiles: [FilePath]
-        pendingCriteria: [Text]  # criteria with tests now waiting
+        pendingCriteria: [Text]
     - InvalidScaffold:
         missingType: Text
         expectedLocation: FilePath
-
-    # ReviewImpl mode outputs
-    - Approved:
-        signOff: Text
-        coverageReport: CoverageReport
-    - MoreTests:
-        critiques: [Critique]
-        additionalTests: [PlannedTest]  # new tests to write
-    - Reject:
-        reason: Text
-        missingCriteria: [Text]
 ```
 
 ### Template
 
 ```jinja
-# TDD: {{ spec.description }}
+# TDD WriteTests: {{ spec.description }}
 
-{% if mode.WriteTests %}
 You are the **Test Author**. Write failing tests that drive implementation.
 
 ## Spec
@@ -369,26 +391,104 @@ Write failing tests for ALL uncovered criteria in one batch. Commit them togethe
 
 ## Output
 
-- **TestsReady**: Tests committed, waiting for Impl
+- **TestsReady**: Tests committed → arrives at ImplBarrier
 - **InvalidScaffold**: Types missing → routes back to Scaffold
+```
 
-{% elif mode.ReviewImpl %}
+---
+
+## Node 4: ImplBarrier
+
+**DSL:** `BarrierNode :@ Awaits '[TestsReadyPayload, HList [MergeComplete]] :@ UsesEffects '[Goto "impl" ImplInput]`
+
+**Effects:** `[Subgraph Spec MergeComplete]` (to call `awaitAny` for children)
+
+Blocks until TDDWriteTests emits TestsReady AND all children emit MergeComplete.
+
+### Barrier Logic
+
+```haskell
+implBarrierHandler
+  :: (TestsReadyPayload, HList [MergeComplete])  -- Results from TDD + children
+  -> Eff (Subgraph Spec MergeComplete ': es) (GotoChoice '[To "impl" ImplInput])
+implBarrierHandler (testsReady, childMerges) = do
+  -- Collect any remaining children (spawned by Scaffold)
+  allChildMerges <- collectRemainingChildren childMerges
+
+  pure $ gotoChoice @"impl" ImplInput
+    { testsReady = testsReady
+    , childMerges = if null allChildMerges then Nothing else Just allChildMerges
+    , attemptCount = 1
+    , critiqueList = Nothing
+    }
+
+collectRemainingChildren :: [MergeComplete] -> Eff (Subgraph s MergeComplete ': es) [MergeComplete]
+collectRemainingChildren acc = do
+  pending <- getPending
+  if null pending
+    then pure acc
+    else do
+      (_, result) <- awaitAny
+      collectRemainingChildren (result : acc)
+```
+
+---
+
+## Node 5: TDDReviewImpl
+
+**DSL:** `LLMNode :@ Input TDDReviewImplInput :@ Schema TDDReviewImplExit :@ Template TDDReviewImplTpl :@ Memory TDDMem`
+
+**Effects:** `[LLM, Memory TDDMem, Git, Emit]`
+
+Reviews Impl's work after it claims tests pass. Shares Memory with TDDWriteTests.
+
+### Input Type
+
+```yaml
+TDDReviewImplInput:
+  spec: Spec
+  scaffold: InitWorkPayload
+  implResult: ImplResult
+  diff: Text
+```
+
+### Output Type (oneOf)
+
+```yaml
+TDDReviewImplExit:
+  oneOf:
+    - Approved:
+        signOff: Text
+        coverageReport: CoverageReport
+    - MoreTests:
+        critiques: [Critique]
+        additionalTests: [PlannedTest]
+    - Reject:
+        reason: Text
+        missingCriteria: [Text]
+```
+
+### Template
+
+```jinja
+# TDD ReviewImpl: {{ spec.description }}
+
 You are the **Reviewer**. Impl claims tests pass. Verify and decide.
 
 ## Impl Result
 
-Commit: `{{ mode.ReviewImpl.implResult.commitHash }}`
-Iterations: {{ mode.ReviewImpl.implResult.iterations }}
+Commit: `{{ implResult.commitHash }}`
+Iterations: {{ implResult.iterations }}
 
 **Tests passed:**
-{% for testName in mode.ReviewImpl.implResult.passedTests %}
+{% for testName in implResult.passedTests %}
 - `{{ testName }}`
 {% endfor %}
 
 ## Diff
 
 ```diff
-{{ mode.ReviewImpl.diff }}
+{{ diff }}
 ```
 
 ## Review Protocol
@@ -409,21 +509,19 @@ Iterations: {{ mode.ReviewImpl.implResult.iterations }}
 ## Output
 
 - **Approved**: All good → routes to Merger
-- **MoreTests**: Need additional coverage → write more tests, loop
+- **MoreTests**: Need additional coverage → routes to TDDWriteTests
 - **Reject**: Fundamental problems → escalate
-
-{% endif %}
 ```
 
 ---
 
-## Node 3: Impl
+## Node 6: Impl
 
-Impl node makes tests pass. Spawned in parallel with TDD, waits for:
-1. Child MRs to merge (if any children)
-2. TDD's TestsReady
+**DSL:** `LLMNode :@ Input ImplInput :@ Schema ImplExit :@ Template ImplTpl :@ Memory ImplMem :@ UsesEffects '[Goto Self ImplInput, Goto "tddReviewImpl" TDDReviewImplInput, Goto "scaffold" ScaffoldInput, Goto Exit StuckResult]`
 
-Shares parent's conversation context.
+**Effects:** `[LLM, Memory ImplMem, Git, Emit]`
+
+Impl node makes tests pass. Receives input from ImplBarrier after dependencies are met.
 
 ### Input Type
 
@@ -531,7 +629,7 @@ Use these subsystems - don't reimplement.
 
 ## Output
 
-- **TestsPassed**: All green → routes to TDD for review
+- **TestsPassed**: All green → routes to TDDReviewImpl for review
 - **RequestRetry**: Some failing, have strategy → self-loop (max 5)
 - **BlockedDependency**: Need missing code → routes to Scaffold
 - **SpecAmbiguity**: Unclear requirement → routes to Scaffold
@@ -540,9 +638,13 @@ Use these subsystems - don't reimplement.
 
 ---
 
-## Node 4: Merger
+## Node 7: Merger
 
-Files MR to parent after TDD approves.
+**DSL:** `LLMNode :@ Input MergerInput :@ Schema MergerExit :@ Template MergerTpl`
+
+**Effects:** `[LLM, Git, Emit]`
+
+Files MR to parent after TDDReviewImpl approves.
 
 ### Input Type
 
@@ -614,7 +716,13 @@ git commit -m "feat({{ childNode.nodeId }}): implement"
 
 ---
 
-## Node 5: Rebaser
+## Node 8: Rebaser
+
+**DSL:** `LLMNode :@ Input RebaserInput :@ Schema RebaserExit :@ Template RebaserTpl`
+
+**Effects:** `[LLM, Git, Emit]`
+
+Triggered by sibling MergeComplete broadcast. Adapts to sibling changes.
 
 ### Input Type
 
@@ -669,7 +777,7 @@ New Parent HEAD: `{{ newParentHead }}`
 
 ## Rebase Protocol
 
-### 1. Pause TDD Loop
+### 1. Pause Impl/TDD Loop
 
 No commits during rebase.
 
@@ -715,8 +823,8 @@ cabal test
 
 ## Output
 
-- **RebaseClean**: Trivial rebase → resume TDD loop
-- **RebaseAdapted**: Breaking changes absorbed → resume TDD loop
+- **RebaseClean**: Trivial rebase → resume at TDDWriteTests
+- **RebaseAdapted**: Breaking changes absorbed → resume at TDDWriteTests
 - **RebaseConflict**: Cannot resolve → escalate to Scaffold
 ```
 
@@ -724,48 +832,62 @@ cabal test
 
 ## Edge Summary
 
-### Parallel Spawn (from Scaffold.InitWork)
+### Graph Flow
 
 ```
-Scaffold ──InitWork──▶ Orchestrator spawns in parallel:
-                        ├── Children (if childSpecs present)
-                        ├── TDD (WriteTests mode)
-                        └── Impl (waits for TDD + children)
+Scaffold ──InitWork──▶ Fork ──Spawn──▶ TDDWriteTests ──TestsReady──┐
+    │                    │                                          │
+    │ (Subgraph)         └──Spawn──▶ ImplBarrier ◄──────────────────┤
+    │                                     │                         │
+    ▼                                     │ (Awaits + awaitAny)     │
+  Children ──MergeComplete────────────────┘                         │
+                                          ▼                         │
+                                       Impl ──TestsPassed──▶ TDDReviewImpl
+                                         │                         │
+                                         │ (Goto Self)             │
+                                         └─────────────────────────┤
+                                                                   │
+                                         ├── Approved ──▶ Merger ──┼──▶ Rebaser
+                                         │                         │    (siblings)
+                                         └── MoreTests ──▶ TDDWriteTests
 ```
 
 ### Node Edges
 
-| From | Exit | To | Action |
-|------|------|----|--------|
-| Scaffold | InitWork | TDD, Impl, Children | Parallel spawn |
-| Scaffold | ClarificationNeeded | Exit | Escalate to parent |
-| TDD | TestsReady | Impl | Tests committed, impl can start |
-| TDD | InvalidScaffold | Scaffold | Types missing |
-| TDD | Approved | Merger | All good, file MR |
-| TDD | MoreTests | TDD (WriteTests) | Write additional tests, loop |
-| TDD | Reject | Exit | Fundamental problems, escalate |
-| Impl | TestsPassed | TDD (ReviewImpl) | Claim tests pass, request review |
-| Impl | RequestRetry | Impl | Self-loop (max 5) |
-| Impl | BlockedDependency | Scaffold | Need missing code |
-| Impl | SpecAmbiguity | Scaffold | Unclear requirement |
-| Impl | Stuck | Exit | Human escalation |
-| Merger | MergeComplete | Parent + Rebaser | Broadcast to parent and siblings |
-| Merger | MergeRejected | Impl | Contract/build failure |
-| Rebaser | RebaseClean | TDD | Resume with updated base |
-| Rebaser | RebaseAdapted | TDD | Verify tests, resume |
-| Rebaser | RebaseConflict | Scaffold | Cannot resolve |
+| From | Exit | To | DSL Construct |
+|------|------|----|---------------|
+| Scaffold | InitWork | Fork | `Goto "fork"` |
+| Scaffold | ClarificationNeeded | Exit | `Goto Exit` |
+| Fork | (spawns) | TDDWriteTests, ImplBarrier | `Spawn '[To "tddWriteTests", To "implBarrier"]` |
+| TDDWriteTests | TestsReady | ImplBarrier | `Arrive "implBarrier"` (implicit) |
+| TDDWriteTests | InvalidScaffold | Scaffold | `Goto "scaffold"` |
+| ImplBarrier | (unblocks) | Impl | `Goto "impl"` (after Awaits satisfied) |
+| Impl | TestsPassed | TDDReviewImpl | `Goto "tddReviewImpl"` |
+| Impl | RequestRetry | Impl | `Goto Self` (max 5 via attemptCount) |
+| Impl | BlockedDependency | Scaffold | `Goto "scaffold"` |
+| Impl | SpecAmbiguity | Scaffold | `Goto "scaffold"` |
+| Impl | Stuck | Exit | `Goto Exit` |
+| TDDReviewImpl | Approved | Merger | `Goto "merger"` |
+| TDDReviewImpl | MoreTests | TDDWriteTests | `Goto "tddWriteTests"` |
+| TDDReviewImpl | Reject | Exit | `Goto Exit` |
+| Merger | MergeComplete | Parent + Rebaser | Broadcast (Subgraph parent, sibling event) |
+| Merger | MergeRejected | Impl | `Goto "impl"` |
+| Rebaser | RebaseClean | TDDWriteTests | `Goto "tddWriteTests"` |
+| Rebaser | RebaseAdapted | TDDWriteTests | `Goto "tddWriteTests"` |
+| Rebaser | RebaseConflict | Scaffold | `Goto "scaffold"` |
 
-### Wait Dependencies
+### Wait Dependencies (DSL Constructs)
 
-| Node | Waits For |
-|------|-----------|
-| Impl | TDD.TestsReady + all Children.MergeComplete |
-| Merger | TDD.Approved |
-| Rebaser | Sibling.MergeComplete broadcast |
+| Node | Waits For | DSL Construct |
+|------|-----------|---------------|
+| ImplBarrier | TDDWriteTests.TestsReady | `BarrierNode :@ Awaits '[TestsReadyPayload, ...]` |
+| ImplBarrier | Children.MergeComplete | `Subgraph` effect (`awaitAny`) |
+| Merger | TDDReviewImpl.Approved | Data flow (Merger input requires TDDApproval) |
+| Rebaser | Sibling.MergeComplete | Event subscription (outside graph) |
 
-**Blocking behavior:** Impl session does NOT start until preconditions are met. Orchestrator holds Impl spawn until:
-- TDD emits TestsReady (tests committed to impl branch)
-- All children emit MergeComplete (if childSpecs present in InitWork)
+**Blocking behavior:** ImplBarrier (a `BarrierNode`) blocks until:
+1. TDDWriteTests emits TestsReady (via `Awaits`)
+2. All children emit MergeComplete (via `Subgraph.awaitAny`)
 
 ---
 
@@ -789,13 +911,13 @@ Orchestrator handles retries, not nodes:
 
 **Key insight:** The parent node wrote the spec, so it has full context to judge children.
 
-**Where:** Parent's TDD node (ReviewImpl mode) acts as judge. When a child emits MergeComplete, the parent's TDD is invoked with the child's diff to verify `assignedCriteria` satisfaction.
+**Where:** Parent's TDDReviewImpl node acts as judge. When a child emits MergeComplete, the parent's TDDReviewImpl is invoked with the child's diff to verify `assignedCriteria` satisfaction.
 
 When a child completes (MergeComplete), the parent evaluates:
 - Does the merged code satisfy the criteria assigned to this child?
 - Does it integrate correctly with sibling outputs?
 
-No separate Judge node needed. The parent's TDD/Merge flow naturally includes semantic evaluation because it authored the acceptance criteria.
+No separate Judge node needed. The parent's TDDReviewImpl/Merger flow naturally includes semantic evaluation because it authored the acceptance criteria.
 
 ### When Parent Judges
 
@@ -803,14 +925,14 @@ No separate Judge node needed. The parent's TDD/Merge flow naturally includes se
 |-------|---------------|
 | Child MergeComplete | Verify child satisfies `assignedCriteria` from `ParentContext` |
 | All children complete | Run contract suite, verify integration |
-| Contract failure | Route failing child back to its TDD |
+| Contract failure | Route failing child back to its TDDWriteTests |
 
 ### Why This Works
 
 - Parent has spec context (wrote the criteria)
 - Parent has interface context (defined boundaries)
 - Parent has sibling context (sees all children's work)
-- No fresh-context overhead (reuses parent's conversation)
+- Threaded Memory effect (shares conversationId)
 
 ---
 
@@ -837,14 +959,35 @@ payload_ref: "sha256:abcd1234..."  # content-addressable
 
 ## Design Decisions
 
-1. **Threaded context** via Memory effect - both TDD and Impl resume from parent's conversation history
-2. **Orchestrator-tracked** retry budget (LLM can't lie about attemptCount)
-3. **Explicit Merger/Rebaser** nodes (not hidden in orchestrator)
-4. **oneOf schemas** for sum type outputs (relaxed from Anthropic restriction)
-5. **Parent-as-judge** - parent node evaluates children (wrote the spec, has context)
-6. **Envelope pattern** for fast routing with lazy payload loading
+1. **Threaded context** via Memory effect - TDDWriteTests, TDDReviewImpl, and Impl share parent's conversationId
+2. **Explicit parallel spawn** via ForkNode/BarrierNode - no hidden orchestrator magic
+3. **Tree recursion** via Subgraph effect - children spawned with `spawnSelf`, awaited with `awaitAny`
+4. **Two TDD nodes** (not modal) - TDDWriteTests and TDDReviewImpl are separate graph nodes
+5. **Self-loop retry** via `Goto Self` with `dispatchGotoWithSelf` - max 5 attempts tracked in input
+6. **oneOf schemas** for sum type outputs - compile-time validated
+7. **Parent-as-judge** - parent's TDDReviewImpl evaluates children (wrote the spec, has context)
+8. **Envelope pattern** for fast routing with lazy payload loading
+
+### DSL Implementation Checklist
+
+```haskell
+data V3Graph mode = V3Graph
+  { entry       :: mode :- Entry ScaffoldInput
+  , scaffold    :: mode :- LLMNode :@ Input ScaffoldInput :@ Schema ScaffoldExit :@ ...
+  , fork        :: mode :- ForkNode :@ Input InitWorkPayload :@ Spawn '[...] :@ Barrier "implBarrier"
+  , tddWriteTests :: mode :- LLMNode :@ Input TDDWriteTestsInput :@ Schema TDDWriteTestsExit :@ Memory TDDMem
+  , implBarrier :: mode :- BarrierNode :@ Awaits '[TestsReadyPayload, ...] :@ UsesEffects '[Goto "impl" ImplInput]
+  , impl        :: mode :- LLMNode :@ Input ImplInput :@ Schema ImplExit :@ Memory ImplMem :@ UsesEffects '[Goto Self ...]
+  , tddReviewImpl :: mode :- LLMNode :@ Input TDDReviewImplInput :@ Schema TDDReviewImplExit :@ Memory TDDMem
+  , merger      :: mode :- LLMNode :@ Input MergerInput :@ Schema MergerExit
+  , rebaser     :: mode :- LLMNode :@ Input RebaserInput :@ Schema RebaserExit
+  , exit        :: mode :- Exit MergeComplete
+  }
+  deriving Generic
+```
 
 ### Deferred (MVP cuts)
 
 - **Priority mailbox** - FIFO for now, add priority ordering at scale
 - **Separate Judge node** - Parent-as-judge sufficient for MVP
+- **Sibling event subscription** - Rebaser triggering mechanism (outside core graph)
