@@ -42,6 +42,8 @@ library
         TypesFirstDev.Handlers.TDDReviewImpl
         TypesFirstDev.Handlers.Merger
         TypesFirstDev.Handlers.Rebaser
+        -- V3 runtime
+        TypesFirstDev.V3.Interpreters
         TypesFirstDev.Schema
         -- Policy and evaluation
         TypesFirstDev.Policy
@@ -68,6 +70,7 @@ library
         tidepool-worktree-executor,
         tidepool-cabal-executor,
         async >= 2.2 && < 3,
+        stm >= 2.5 && < 3,
         yaml >= 0.11 && < 1
     hs-source-dirs:   src
     default-language: GHC2021

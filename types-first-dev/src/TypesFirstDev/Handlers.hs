@@ -1,12 +1,14 @@
--- | Handlers for the types-first development workflow.
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE OverloadedRecordDot #-}
+
+-- | Handler stubs for V3 TDD protocol.
 --
--- Handlers are not yet implemented. This module provides stubs.
--- See Policy for routing decision logic.
+-- Handlers use effect constraints (Member Effect es) to declare only
+-- the effects they need. GHC validates at invocation time.
 module TypesFirstDev.Handlers
-  ( -- * Handler Stubs
-    maxRetryAttempts
+  ( maxRetryAttempts
   ) where
 
--- | Maximum retry attempts for Impl node.
+-- | Maximum retry attempts for Impl node before giving up.
 maxRetryAttempts :: Int
 maxRetryAttempts = 5
