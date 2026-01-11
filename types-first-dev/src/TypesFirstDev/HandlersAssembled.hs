@@ -43,6 +43,8 @@ import TypesFirstDev.Handlers.ImplReviewMerge
   )
 import TypesFirstDev.Handlers.Rebaser
   ( RebaserInput, RebaserExit, rebaserBefore, rebaserAfter )
+import TypesFirstDev.Handlers.Fork (forkHandler)
+import TypesFirstDev.Handlers.ImplBarrier (implBarrierHandler)
 import TypesFirstDev.Types.Payloads (InitWorkPayload, TestsReadyPayload, MergeComplete)
 
 -- | Wired handler graph for V3 TDD protocol.
@@ -74,10 +76,10 @@ v3Handlers = TDDGraph
       (\(ClaudeCodeResult output _, sid) -> scaffoldAfter (output, sid))
 
     -- ════════════════════════════════════════════════════════════════
-    -- PHASE 2: FORK NODE (pure logic, no handler)
+    -- PHASE 2: FORK NODE (pure handler for spawn payload distribution)
     -- ════════════════════════════════════════════════════════════════
 
-  , v3Fork = undefined  -- ForkNode has no handler (graph engine handles it)
+  , v3Fork = forkHandler
 
     -- ════════════════════════════════════════════════════════════════
     -- PHASE 3: TDD WRITE TESTS
@@ -90,10 +92,10 @@ v3Handlers = TDDGraph
       (\(ClaudeCodeResult output _, sid) -> tddWriteTestsAfter (output, sid))
 
     -- ════════════════════════════════════════════════════════════════
-    -- PHASE 4: IMPL BARRIER (pure logic, no handler)
+    -- PHASE 4: IMPL BARRIER (Subgraph effect for child collection)
     -- ════════════════════════════════════════════════════════════════
 
-  , v3ImplBarrier = undefined  -- BarrierNode has no handler (graph engine handles it)
+  , v3ImplBarrier = implBarrierHandler
 
     -- ════════════════════════════════════════════════════════════════
     -- PHASE 5: IMPL (with self-loop retry)

@@ -36,6 +36,7 @@ library
         TypesFirstDev.Handlers
         -- Handler modules (one per node)
         TypesFirstDev.Handlers.Scaffold
+        TypesFirstDev.Handlers.Fork
         TypesFirstDev.Handlers.TDDWriteTests
         TypesFirstDev.Handlers.ImplBarrier
         TypesFirstDev.Handlers.ImplReviewMerge

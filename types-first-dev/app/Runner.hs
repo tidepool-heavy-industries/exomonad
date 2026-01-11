@@ -83,19 +83,14 @@ runV3Graph spec wtConfig =
     -- Step 4: WIRE THE RECURSION (MUST happen before running!)
     -- This is the critical deferred binding that enables child graphs to spawn
     --
-    -- The wire function runs child graphs via runGraph with v3Handlers
-    wire $ \childSpec -> do
-      let childInput = ScaffoldInput
-            { siSpec = childSpec
-            , siParentContext = Nothing
-            }
-      result <- interpret ((runGraph v3Handlers childInput) :: Eff V3Effects MergeComplete)
-      pure result
+    -- NOTE: runGraph requires HasField instances for the handler record fields.
+    -- GHC can't derive HasField for records with type family-computed field types.
+    -- Phase 15 TODO: Either add manual HasField instances or use explicit dispatch.
+    wire $ \_childSpec -> pure $ error "Phase 15: Implement child graph runner"
 
-    -- Step 5: Run root graph with v3Handlers
-    let rootInput = ScaffoldInput spec Nothing
-    result <- interpret ((runGraph v3Handlers rootInput) :: Eff V3Effects MergeComplete)
-    pure $ RunnerSuccess result
+    -- Step 5: Run root graph
+    -- Phase 15 TODO: Wire runGraph execution once HasField issue is resolved
+    pure $ RunnerFailure "Phase 15: Implement root graph execution"
 
 -- | Main entry point
 main :: IO ()

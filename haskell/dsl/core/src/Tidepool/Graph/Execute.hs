@@ -30,6 +30,7 @@ module Tidepool.Graph.Execute
     -- * Graph Execution
   , runGraph
   , runGraphFrom
+  , runGraphWith
     -- * Entry Handler Discovery
   , FindEntryHandler
     -- * Handler Invocation

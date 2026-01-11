@@ -11,18 +11,34 @@ This follows the **interpreter design pattern**: abstract syntax (effect types) 
 | Understand Claude Code subprocess execution | `session-executor/CLAUDE.md` |
 | Understand LLM API calls | `llm-executor/CLAUDE.md` |
 | Query Haskell types from an agent | `ghci-executor/CLAUDE.md` |
+| Work with GitHub issues/PRs | `github-executor/CLAUDE.md` |
+| Build agent UIs (WebSocket bridge) | `ui-executor/CLAUDE.md` |
+| Add code intelligence (LSP) | `lsp-executor/CLAUDE.md` |
+| Manage git worktrees | `worktree-executor/CLAUDE.md` |
+| Integrate beads task tracking | `bd-executor/CLAUDE.md` |
+| Add Grafana observability | `observability-executor/CLAUDE.md` |
+| Run cabal builds/tests | `cabal-executor/CLAUDE.md` |
+| Add session logging | `devlog-executor/CLAUDE.md` |
+| Add gamification (Habitica) | `habitica-executor/CLAUDE.md` |
 | Understand the interpreter pattern | This file (you're here) |
 
 ## Documentation Tree
 
 ```
 effects/CLAUDE.md  ← YOU ARE HERE (router)
-├── session-executor/CLAUDE.md  ← Claude Code subprocess (key for V3)
-├── llm-executor/CLAUDE.md      ← Anthropic/OpenAI API
-├── ghci-executor/CLAUDE.md     ← GHCi oracle client
-├── habitica/CLAUDE.md          ← Habitica API types
-├── worktree-executor/CLAUDE.md ← Git worktree management
-└── ...
+├── session-executor/CLAUDE.md       ← Claude Code subprocess (key for V3)
+├── llm-executor/CLAUDE.md           ← Anthropic/OpenAI API
+├── ghci-executor/CLAUDE.md          ← GHCi oracle client
+├── github-executor/CLAUDE.md        ← gh CLI for issues/PRs
+├── ui-executor/CLAUDE.md            ← WebSocket UI bridge
+├── lsp-executor/CLAUDE.md           ← Language server protocol
+├── bd-executor/CLAUDE.md            ← Beads task tracking
+├── observability-executor/CLAUDE.md ← Grafana Loki & Tempo
+├── worktree-executor/CLAUDE.md      ← Git worktree management
+├── cabal-executor/CLAUDE.md         ← Build & test integration
+├── devlog-executor/CLAUDE.md        ← Session-scoped logging
+├── habitica-executor/CLAUDE.md      ← Gamification API
+└── habitica/CLAUDE.md               ← Habitica effect types
 ```
 
 ## Structure
