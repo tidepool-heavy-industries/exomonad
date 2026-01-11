@@ -1,13 +1,28 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE OverloadedStrings #-}
 -- | Generate Schema from Haskell types via Template Haskell reification.
+--
+-- This module automatically detects and strips common prefixes from record
+-- field names. For example, given:
+--
+-- @
+-- data Spec = Spec
+--   { specId :: Text
+--   , specDescription :: Text
+--   }
+-- @
+--
+-- The generated schema will have field names @id@ and @description@ (not
+-- @specId@ and @specDescription@), matching what templates typically expect.
 module Text.Ginger.TH.Schema
   ( generateSchema
   , SchemaRegistry
   ) where
 
 import Control.Monad (forM)
+import Data.Char (isLower, isUpper, toLower)
 import Data.IORef (IORef, newIORef, readIORef, modifyIORef')
+import Data.List (foldl')
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Set (Set)
@@ -120,12 +135,21 @@ checkNoTypeVars' tvs = Just $
 -- For unsupported constructor types, returns OpaqueSchema instead of failing.
 -- This allows types with non-record constructors to exist in the type tree
 -- as long as templates don't actually access through them.
+--
+-- Automatically detects and strips common prefixes from field names.
+-- For example, @specId@, @specDescription@ become @id@, @description@.
 schemaFromCon :: IORef (Set Name) -> IORef (Map Name Schema) -> Con -> Q Schema
 schemaFromCon visited memo con = case con of
   RecC _ fields -> do
+    -- Collect all field names and detect common prefix
+    let rawNames = map (\(fieldName, _, _) -> nameBase fieldName) fields
+        commonPfx = detectPrefix rawNames
+        stripPrefix = makeStripPrefix commonPfx
+    -- Generate schema with stripped field names
     fieldSchemas <- forM fields $ \(fieldName, _, fieldType) -> do
       schema <- schemaFromType visited memo fieldType
-      return (Text.pack $ nameBase fieldName, schema)
+      let strippedName = stripPrefix (nameBase fieldName)
+      return (Text.pack strippedName, schema)
     return $ RecordSchema fieldSchemas
 
   NormalC name _ ->
@@ -147,12 +171,20 @@ schemaFromCon visited memo con = case con of
 -- Returns (constructorName, fields) where fields may be empty for non-record constructors.
 -- This allows sum types with mixed constructor styles to be used in templates,
 -- as long as only record constructors' fields are accessed.
+--
+-- Automatically detects and strips common prefixes from field names.
 constructorWithFields :: IORef (Set Name) -> IORef (Map Name Schema) -> Con -> Q (Text, [(Text, Schema)])
 constructorWithFields visited memo con = case con of
   RecC name fields -> do
+    -- Collect all field names and detect common prefix
+    let rawNames = map (\(fieldName, _, _) -> nameBase fieldName) fields
+        commonPfx = detectPrefix rawNames
+        stripPrefix = makeStripPrefix commonPfx
+    -- Generate schema with stripped field names
     fieldSchemas <- forM fields $ \(fieldName, _, fieldType) -> do
       schema <- schemaFromType visited memo fieldType
-      return (Text.pack $ nameBase fieldName, schema)
+      let strippedName = stripPrefix (nameBase fieldName)
+      return (Text.pack strippedName, schema)
     return (Text.pack $ nameBase name, fieldSchemas)
 
   NormalC name _ ->
@@ -180,9 +212,15 @@ constructorWithFields visited memo con = case con of
     let name = case names of
           (n:_) -> n
           [] -> error "RecGadtC with no names"
+    -- Collect all field names and detect common prefix
+    let rawNames = map (\(fieldName, _, _) -> nameBase fieldName) fields
+        commonPfx = detectPrefix rawNames
+        stripPrefix = makeStripPrefix commonPfx
+    -- Generate schema with stripped field names
     fieldSchemas <- forM fields $ \(fieldName, _, fieldType) -> do
       schema <- schemaFromType visited memo fieldType
-      return (Text.pack $ nameBase fieldName, schema)
+      let strippedName = stripPrefix (nameBase fieldName)
+      return (Text.pack strippedName, schema)
     return (Text.pack $ nameBase name, fieldSchemas)
 
 -- | Generate schema from a Type.
@@ -260,3 +298,54 @@ scalarTypeNames =
   , "Char"
   , "ByteString"
   ]
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- PREFIX STRIPPING (for template-friendly field names)
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Detect the common lowercase prefix from a list of field names.
+-- Convention: type FooBar has fields prefixed with "fb" (lowercase acronym).
+--
+-- @
+-- detectPrefix ["sId", "sDescription"] = "s"
+-- detectPrefix ["irCommitHash", "irIterations"] = "ir"
+-- detectPrefix ["name", "age"] = ""  (no common lowercase prefix)
+-- @
+detectPrefix :: [String] -> String
+detectPrefix [] = ""
+detectPrefix (x:xs) =
+  let prefix = takeWhile isLower x
+  in if all (prefix `isPrefixOf`) xs
+     then prefix
+     else ""
+  where
+    isPrefixOf [] _ = True
+    isPrefixOf _ [] = False
+    isPrefixOf (a:as) (b:bs) = a == b && isPrefixOf as bs
+
+-- | Create a field modifier that strips a specific prefix.
+--
+-- @
+-- makeStripPrefix "spec" "specId" = "id"
+-- makeStripPrefix "spec" "specDescription" = "description"
+-- makeStripPrefix "spec" "other" = "other"  (no match, unchanged)
+-- @
+makeStripPrefix :: String -> (String -> String)
+makeStripPrefix "" = lcFirst
+makeStripPrefix prefix = \fieldName ->
+  case stripPrefixExact prefix fieldName of
+    Just (c:cs) -> toLower c : cs
+    Just []     -> fieldName  -- prefix was the whole name, keep as-is
+    Nothing     -> fieldName  -- didn't match, keep as-is
+  where
+    stripPrefixExact :: String -> String -> Maybe String
+    stripPrefixExact [] ys = Just ys
+    stripPrefixExact _ [] = Nothing
+    stripPrefixExact (x:xs) (y:ys)
+      | x == y    = stripPrefixExact xs ys
+      | otherwise = Nothing
+
+-- | Lowercase the first character of a string.
+lcFirst :: String -> String
+lcFirst [] = []
+lcFirst (c:cs) = toLower c : cs

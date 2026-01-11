@@ -1,55 +1,46 @@
 cabal-version:      3.0
 name:               types-first-dev
 version:            0.1.0.0
-synopsis:           Types-first Haskell development workflow graph
+synopsis:           V3 TDD workflow graph with parallel spawn and tree coordination
 description:
-    Multi-stage graph implementing a types-first development workflow:
+    8-node TDD graph implementing types-first development:
     .
-    1. Types agent writes type signatures
-    2. Fork to parallel agents in separate worktrees
-    3. Tests agent writes QuickCheck properties
-    4. Impl agent writes implementation
-    5. Merge and run test loop
+    1. Scaffold: Analyze spec, create interface + tests + plan
+    2. Fork: Spawn TDD WriteTests and ImplBarrier in parallel
+    3. TDDWriteTests: Write failing tests for all criteria
+    4. ImplBarrier: Wait for tests + children
+    5. Impl: Make tests pass (self-loop retry)
+    6. TDDReviewImpl: Review impl, route to Merger or MoreTests
+    7. Merger: File MR to parent
+    8. Rebaser: Adapt to sibling changes
     .
-    This validates the full graph execution pipeline with parallel agents,
-    git worktrees, and deterministic test loops.
+    Features: Subgraph for child spawning, Fork/Barrier for parallel TDD,
+    Memory effect for conversation context, Goto for control flow.
 license:            MIT
 author:             Inanna
 build-type:         Simple
 
 library
     exposed-modules:
+        -- Types
         TypesFirstDev.Types
-        TypesFirstDev.Types.Hybrid
-        TypesFirstDev.Types.V2
-        TypesFirstDev.Schema.Hybrid
-        TypesFirstDev.Context.Hybrid
-        TypesFirstDev.Templates.Hybrid
-        TypesFirstDev.Templates.V2
-        TypesFirstDev.Graph.Hybrid
-        TypesFirstDev.Graph.V2
-        TypesFirstDev.Handlers.V2.Effects
-        TypesFirstDev.Handlers.V2.Genesis
-        TypesFirstDev.Effect.Build
-        TypesFirstDev.Handlers.Hybrid.Effects
-        TypesFirstDev.Handlers.Hybrid.Stubs
-        TypesFirstDev.Handlers.Hybrid.Genesis
-        TypesFirstDev.Handlers.Hybrid.Merge
-        TypesFirstDev.Handlers.Hybrid.Parallel
-        TypesFirstDev.Handlers.Hybrid.Validation
-        TypesFirstDev.Handlers.Hybrid.Adversary
-        TypesFirstDev.Handlers.Hybrid.Witness
-        TypesFirstDev.Schema
+        TypesFirstDev.Types.Core
+        TypesFirstDev.Types.Shared
+        TypesFirstDev.Types.Payloads
+        TypesFirstDev.Types.Memory
+        TypesFirstDev.Types.Nodes
+        -- Core modules
         TypesFirstDev.Context
         TypesFirstDev.Templates
         TypesFirstDev.Graph
         TypesFirstDev.Handlers
-        TypesFirstDev.MechanicalChecks
-        TypesFirstDev.RubricPolicy
-        TypesFirstDev.Stats
-        TypesFirstDev.DevRuns
-        TypesFirstDev.Baseline
+        TypesFirstDev.Schema
+        -- Policy and evaluation
+        TypesFirstDev.Policy
         TypesFirstDev.Evaluation
+        TypesFirstDev.Decomposition
+        -- Effects
+        TypesFirstDev.Effect.Build
     build-depends:
         base >= 4.17 && < 5,
         freer-simple >= 1.2 && < 2,
@@ -114,8 +105,7 @@ executable types-first-dev
         -rtsopts
         -with-rtsopts=-N
 
--- | Actor runtime runner for the full 20-node hybrid TDD graph.
--- This is the primary executable for running types-first-dev.
+-- | Actor runtime runner for the V3 TDD graph.
 executable types-first-dev-runner
     main-is:          Runner.hs
     hs-source-dirs:   app

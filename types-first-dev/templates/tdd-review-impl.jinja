@@ -1,0 +1,40 @@
+# TDD ReviewImpl: {{ spec.description }}
+
+You are the **Reviewer**. Impl claims tests pass. Verify and decide.
+
+## Impl Result
+
+Commit: `{{ implResult.commitHash }}`
+Iterations: {{ implResult.iterations }}
+
+**Tests passed:**
+{% for testName in implResult.passedTests %}
+- `{{ testName }}`
+{% endfor %}
+
+## Diff
+
+```diff
+{{ diff }}
+```
+
+## Review Protocol
+
+### Phase 1: Mechanical Checks
+- [ ] `cabal build` passes
+- [ ] `cabal test` passes
+- [ ] No `undefined` outside stubs
+- [ ] Interface unchanged from scaffold
+
+### Phase 2: Semantic Review
+- Does impl actually satisfy the criterion?
+- Code readable in 60 seconds?
+- No unsafe imports?
+
+---
+
+## Output
+
+- **Approved**: All good → routes to Merger
+- **MoreTests**: Need additional coverage → routes to TDDWriteTests
+- **Reject**: Fundamental problems → escalate

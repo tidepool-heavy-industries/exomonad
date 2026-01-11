@@ -1,28 +1,50 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE TypeFamilies #-}
 
--- | Graph definition for the types-first development workflow.
+-- | V3 Graph Definition
 --
--- Parallel execution graph:
+-- 8-node TDD graph with parallel spawn, tree coordination, and typed DSL mapping.
+-- Based on types-first-dev/templates/v3/SPEC.md
+--
 -- @
--- Entry(StackSpec)
+-- Entry(Spec)
 --     ↓
--- types (ClaudeCode 'Sonnet) - writes type signatures
---     ↓
--- skeleton (LogicNode) - generates impl/test skeleton files
---     ↓
--- fork (LogicNode) - creates worktrees, spawns parallel agents
---     ├── tests-worktree: tests agent → TestDefinitions
---     └── impl-worktree: impl agent → ImplementationCode
---     ↓
--- merge (LogicNode) - collects results, cleans up worktrees
---     ↓
--- Exit(ParallelResults)
+-- ┌──────────┐
+-- │ Scaffold │──[Subgraph]──▶ Child Graphs (spawnSelf per childSpec)
+-- └──────────┘
+--     ↓ InitWork
+-- ┌──────────┐
+-- │ ForkNode │ ─────────────────────────────────────────────────────┐
+-- └──────────┘                                                      │
+--     │                                                             │
+--     ├──[Spawn]──▶ TDDWriteTests ──TestsReady──┐                  │
+--     │                                          │                  │
+--     └──[Spawn]──▶ ImplBarrier ◄────────────────┤                  │
+--                       │                        │                  │
+--                       │ Awaits: TestsReady     │                  │
+--                       │       + [MergeComplete]◄──────────────────┘
+--                       ▼                        (children via Subgraph)
+--                  ┌────────┐
+--                  │  Impl  │
+--                  └────────┘
+--                       │
+--     ┌─────────────────┴─────────────────┐
+--     │                                   │
+--     ▼ TestsPassed                       ▼ RequestRetry (self-loop)
+-- ┌───────────────┐                  ┌────────┐
+-- │ TDDReviewImpl │                  │  Impl  │ (max 5 attempts)
+-- └───────────────┘                  └────────┘
+--     │
+--     ├── Approved ──▶ Merger ──MergeComplete──▶ Rebaser (siblings)
+--     │                   │
+--     │                   └──▶ Parent (broadcast)
+--     │
+--     └── MoreTests ──▶ TDDWriteTests (write additional tests)
 -- @
 module TypesFirstDev.Graph
-  ( TypesFirstGraph(..)
-    -- * TDD Graph (Sequential)
-  , TypesFirstGraphTDD(..)
+  ( TDDGraph(..)
   ) where
 
 import GHC.Generics (Generic)
@@ -33,186 +55,172 @@ import Tidepool.Graph.Types
   , Template
   , UsesEffects
   , Exit
-  , ModelChoice(..)
+  , Memory
+    -- Fork/Barrier annotations
+  , Spawn
+  , Barrier
+  , Awaits
+  , Arrive
   )
 import qualified Tidepool.Graph.Types as Types (Input)
 import Tidepool.Graph.Generic (GraphMode(..))
 import qualified Tidepool.Graph.Generic as G
-import Tidepool.Graph.Goto (Goto)
+import Tidepool.Graph.Goto (Goto, To)
 
 import TypesFirstDev.Types
-  ( StackSpec, TypeDefinitions, ForkInput, SkeletonGenerated, ParallelResults
-  -- TDD types
-  , SkeletonState, TestsWritten, TestsVerified, ImplWritten
-  , ValidationFailure, FixResult, TDDResult, TestsResult, ImplResult
+import TypesFirstDev.Templates
+  ( ScaffoldTpl
+  , TDDWriteTestsTpl
+  , TDDReviewImplTpl
+  , ImplTpl
+  , MergerTpl
+  , RebaserTpl
   )
-import TypesFirstDev.Templates (TypesTpl, TestsTpl, ImplTpl, FixTpl)
 
-
--- | Types-first development workflow graph (parallel version).
+-- | TDD workflow graph.
 --
--- Nodes:
--- 1. types: Claude Code writes type signatures
--- 2. skeleton: Generate impl/test skeleton files
--- 3. fork: Creates worktrees and spawns parallel agents
--- 4. merge: Collects results and cleans up
-data TypesFirstGraph mode = TypesFirstGraph
-  { -- | Entry point - receives Stack specification
-    entry :: mode :- G.Entry StackSpec
-
-    -- | Types node - uses Claude Code to write type signatures
-    --
-    -- Output: TypeDefinitions (data type + signatures + test priorities)
-    -- Routes to skeleton node for file generation
-  , types :: mode :- G.LLMNode
-      :@ Types.Input StackSpec
-      :@ Template TypesTpl
-      :@ Schema TypeDefinitions
-      :@ UsesEffects '[Goto "skeleton" ForkInput]
-
-    -- | Skeleton node - generates impl/test skeleton files
-    --
-    -- Input: ForkInput (session ID + type definitions)
-    -- Output: SkeletonGenerated (paths to generated files)
-    -- Renders templates, writes files, verifies compilation
-  , skeleton :: mode :- G.LogicNode
-      :@ Types.Input ForkInput
-      :@ UsesEffects '[Goto "fork" SkeletonGenerated]
-
-    -- | Fork node - creates worktrees and spawns parallel agents
-    --
-    -- Input: SkeletonGenerated (paths + type definitions)
-    -- Output: ParallelResults (worktree paths + agent outputs)
-  , fork :: mode :- G.LogicNode
-      :@ Types.Input SkeletonGenerated
-      :@ UsesEffects '[Goto "merge" ParallelResults]
-
-    -- | Merge node - collects results and cleans up worktrees
-    --
-    -- Input: ParallelResults from fork
-    -- Output: ParallelResults to exit (unchanged, just cleanup)
-  , merge :: mode :- G.LogicNode
-      :@ Types.Input ParallelResults
-      :@ UsesEffects '[Goto Exit ParallelResults]
-
-    -- | Exit point - returns parallel results
-  , exit :: mode :- G.Exit ParallelResults
-  }
-  deriving Generic
-
-
--- ════════════════════════════════════════════════════════════════════════════
--- TDD GRAPH (Sequential - tests first, validation loop)
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Sequential TDD graph - tests written before implementation.
+-- 8 nodes organized into phases:
 --
--- This graph implements true TDD:
--- 1. Write type signatures (types node)
--- 2. Generate skeleton files (skeleton node)
--- 3. Write tests (tests node) - LLM writes QuickCheck properties
--- 4. Verify tests fail (verifyTestsFail node) - proves tests are meaningful
--- 5. Implement functions (impl node) - LLM implements to make tests pass
--- 6. Validate tests pass (validate node) - runs cabal test
--- 7. If tests fail, fix implementation (fix node) and loop back to validate
+-- * Phase 1: Scaffold (decomposes spec, spawns children)
+-- * Phase 2: Fork (spawns TDDWriteTests + ImplBarrier in parallel)
+-- * Phase 3: TDDWriteTests (writes failing tests)
+-- * Phase 4: ImplBarrier (waits for tests + children)
+-- * Phase 5: Impl (makes tests pass, self-loop retry)
+-- * Phase 6: TDDReviewImpl (reviews impl, routes to Merger or MoreTests)
+-- * Phase 7: Merger (files MR to parent)
+-- * Phase 8: Rebaser (adapts to sibling changes)
 --
--- @
--- Entry(StackSpec)
---     ↓
--- types (ClaudeCode) → TypeDefinitions
---     ↓
--- skeleton (LogicNode) → SkeletonState
---     ↓
--- tests (ClaudeCode) → TestsWritten
---     ↓
--- verifyTestsFail (LogicNode) → TestsVerified
---     ↓
--- impl (ClaudeCode) → ImplWritten
---     ↓
--- ┌─────────────────────────────────┐
--- │     VALIDATION LOOP             │
--- │                                 │
--- │ validate (LogicNode)            │
--- │     ↓ [pass]    ↓ [fail]       │
--- │   Exit      fix (ClaudeCode)   │
--- │              ↓                 │
--- │            validate (loop)     │
--- └─────────────────────────────────┘
---     ↓
--- Exit(TDDResult)
--- @
-data TypesFirstGraphTDD mode = TypesFirstGraphTDD
-  { -- | Entry point - receives Stack specification
-    tddEntry :: mode :- G.Entry StackSpec
+-- Key features:
+-- * Subgraph effect in Scaffold for child spawning
+-- * ForkNode/BarrierNode for parallel TDD + Impl
+-- * Memory effect for threaded conversation context
+-- * Goto Self for Impl retry loop
+data TDDGraph mode = TDDGraph
+  { --------------------------------------------------------------------------
+    -- ENTRY
+    --------------------------------------------------------------------------
+    v3Entry :: mode :- G.Entry ScaffoldInput
 
-    -- | Phase 1: Design types
-    --
-    -- Uses Claude Code to design the data type and function signatures.
-    -- Output: TypeDefinitions with data type, signatures, and test priorities.
-  , tddTypes :: mode :- G.LLMNode
-      :@ Types.Input StackSpec
-      :@ Template TypesTpl
-      :@ Schema TypeDefinitions
-      :@ UsesEffects '[Goto "tddSkeleton" TypeDefinitions]
+    --------------------------------------------------------------------------
+    -- PHASE 1: SCAFFOLD
+    --------------------------------------------------------------------------
 
-    -- | Phase 2: Generate skeleton files
-    --
-    -- Generates impl skeleton with undefined stubs and test skeleton.
-    -- Validates that the skeleton compiles.
-  , tddSkeleton :: mode :- G.LogicNode
-      :@ Types.Input TypeDefinitions
-      :@ UsesEffects '[Goto "tddTests" SkeletonState]
+    -- | Scaffold: Analyze spec, create interface + contract suite + test plan.
+    -- Optionally spawns child graphs via Subgraph effect.
+    -- Routes to Fork with InitWorkPayload.
+  , v3Scaffold :: mode :- G.LLMNode
+      :@ Types.Input ScaffoldInput
+      :@ Template ScaffoldTpl
+      :@ Schema ScaffoldExit
+      :@ UsesEffects '[ Goto "v3Fork" InitWorkPayload
+                      , Goto Exit ScaffoldExit  -- ClarificationNeeded exits graph
+                      ]
 
-    -- | Phase 3: Write tests (TDD step 1)
-    --
-    -- Uses Claude Code to write QuickCheck property tests.
-    -- Tests should be written against the skeleton (will fail until impl).
-  , tddTests :: mode :- G.LLMNode
-      :@ Types.Input SkeletonState
-      :@ Template TestsTpl
-      :@ Schema TestsResult
-      :@ UsesEffects '[Goto "tddVerifyTestsFail" TestsWritten]
+    --------------------------------------------------------------------------
+    -- PHASE 2: FORK (parallel spawn)
+    --------------------------------------------------------------------------
 
-    -- | Phase 4: Verify tests fail (TDD step 2)
-    --
-    -- Runs `cabal test` and verifies that tests FAIL.
-    -- This proves the tests are meaningful (not trivially passing).
-    -- If tests pass, the tests are likely wrong.
-  , tddVerifyTestsFail :: mode :- G.LogicNode
-      :@ Types.Input TestsWritten
-      :@ UsesEffects '[Goto "tddImpl" TestsVerified]
+    -- | Fork: Spawn TDDWriteTests and ImplBarrier in parallel.
+    -- Both receive InitWorkPayload.
+  , v3Fork :: mode :- G.ForkNode
+      :@ Types.Input InitWorkPayload
+      :@ Spawn '[To "v3TDDWriteTests" TDDWriteTestsInput, To "v3ImplBarrier" InitWorkPayload]
+      :@ Barrier "v3ImplBarrier"
 
-    -- | Phase 5: Implement functions (TDD step 3)
-    --
-    -- Uses Claude Code to implement functions to make tests pass.
-    -- Replaces undefined stubs with working implementations.
-  , tddImpl :: mode :- G.LLMNode
-      :@ Types.Input TestsVerified
+    --------------------------------------------------------------------------
+    -- PHASE 3: TDD WRITE TESTS
+    --------------------------------------------------------------------------
+
+    -- | TDDWriteTests: Write failing tests for all criteria.
+    -- Batch model - writes all tests upfront, commits once.
+    -- Shares Memory with TDDReviewImpl for conversation context.
+  , v3TDDWriteTests :: mode :- G.LLMNode
+      :@ Types.Input TDDWriteTestsInput
+      :@ Template TDDWriteTestsTpl
+      :@ Schema TDDWriteTestsExit
+      :@ Memory TDDMem
+      :@ UsesEffects '[ Arrive "v3ImplBarrier" TestsReadyPayload
+                      , Goto "v3Scaffold" ScaffoldInput  -- InvalidScaffold
+                      ]
+
+    --------------------------------------------------------------------------
+    -- PHASE 4: IMPL BARRIER (wait for tests + children)
+    --------------------------------------------------------------------------
+
+    -- | ImplBarrier: Wait for TDDWriteTests + all children's MergeComplete.
+    -- Uses Subgraph.awaitAny to collect remaining children.
+    -- Routes to Impl once all dependencies satisfied.
+  , v3ImplBarrier :: mode :- G.BarrierNode
+      :@ Awaits '[TestsReadyPayload]  -- TDD result; children via Subgraph effect
+      :@ UsesEffects '[Goto "v3Impl" ImplInput]
+
+    --------------------------------------------------------------------------
+    -- PHASE 5: IMPL (make tests pass)
+    --------------------------------------------------------------------------
+
+    -- | Impl: Make all failing tests pass.
+    -- Self-loop retry via Goto Self (max 5 attempts).
+    -- Shares Memory with ImplBarrier for conversation context.
+  , v3Impl :: mode :- G.LLMNode
+      :@ Types.Input ImplInput
       :@ Template ImplTpl
-      :@ Schema ImplResult
-      :@ UsesEffects '[Goto "tddValidate" ImplWritten]
+      :@ Schema ImplExit
+      :@ Memory ImplMem
+      :@ UsesEffects '[ Goto "v3TDDReviewImpl" TDDReviewImplInput  -- TestsPassed
+                      , Goto "v3Impl" ImplInput                    -- RequestRetry
+                      , Goto "v3Scaffold" ScaffoldInput            -- BlockedDependency, SpecAmbiguity
+                      , Goto Exit ImplExit                         -- Stuck
+                      ]
 
-    -- | Phase 6: Validate tests pass
-    --
-    -- Runs `cabal test` to verify implementation passes all tests.
-    -- On success: exit with TDDResult.
-    -- On failure: route to fix node for iteration.
-  , tddValidate :: mode :- G.LogicNode
-      :@ Types.Input ImplWritten
-      :@ UsesEffects '[Goto "tddFix" ValidationFailure, Goto Exit TDDResult]
+    --------------------------------------------------------------------------
+    -- PHASE 6: TDD REVIEW IMPL
+    --------------------------------------------------------------------------
 
-    -- | Phase 7: Fix loop
-    --
-    -- If tests fail, uses Claude Code to analyze failures and fix impl.
-    -- Routes back to validate for re-testing.
-    -- Maximum 5 attempts before hard failure.
-  , tddFix :: mode :- G.LLMNode
-      :@ Types.Input ValidationFailure
-      :@ Template FixTpl
-      :@ Schema FixResult
-      :@ UsesEffects '[Goto "tddValidate" ImplWritten]
+    -- | TDDReviewImpl: Review Impl's work.
+    -- Approves → Merger, MoreTests → TDDWriteTests, Reject → Exit.
+    -- Shares Memory with TDDWriteTests for conversation context.
+  , v3TDDReviewImpl :: mode :- G.LLMNode
+      :@ Types.Input TDDReviewImplInput
+      :@ Template TDDReviewImplTpl
+      :@ Schema TDDReviewImplExit
+      :@ Memory TDDMem
+      :@ UsesEffects '[ Goto "v3Merger" MergerInput    -- Approved
+                      , Goto "v3TDDWriteTests" TDDWriteTestsInput  -- MoreTests
+                      , Goto Exit TDDReviewImplExit   -- Reject
+                      ]
 
-    -- | Exit point - returns TDD result
-  , tddExit :: mode :- G.Exit TDDResult
+    --------------------------------------------------------------------------
+    -- PHASE 7: MERGER
+    --------------------------------------------------------------------------
+
+    -- | Merger: File MR to parent after TDD approval.
+    -- On success, broadcasts MergeComplete to parent and siblings.
+  , v3Merger :: mode :- G.LLMNode
+      :@ Types.Input MergerInput
+      :@ Template MergerTpl
+      :@ Schema MergerExit
+      :@ UsesEffects '[ Goto Exit MergeComplete        -- MergeComplete (success)
+                      , Goto "v3Impl" ImplInput        -- MergeRejected
+                      ]
+
+    --------------------------------------------------------------------------
+    -- PHASE 8: REBASER
+    --------------------------------------------------------------------------
+
+    -- | Rebaser: Adapt to sibling changes.
+    -- Triggered by sibling MergeComplete broadcast (outside graph).
+    -- Routes back to TDDWriteTests after adaptation.
+  , v3Rebaser :: mode :- G.LLMNode
+      :@ Types.Input RebaserInput
+      :@ Template RebaserTpl
+      :@ Schema RebaserExit
+      :@ UsesEffects '[ Goto "v3TDDWriteTests" TDDWriteTestsInput  -- Clean/Adapted
+                      , Goto "v3Scaffold" ScaffoldInput            -- Conflict
+                      ]
+
+    --------------------------------------------------------------------------
+    -- EXIT
+    --------------------------------------------------------------------------
+  , v3Exit :: mode :- G.Exit MergeComplete
   }
   deriving Generic

@@ -1,282 +1,287 @@
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE NoFieldSelectors #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedRecordDot #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
 
--- | Template context types for the types-first workflow.
+-- | Template context types for TDD graph nodes.
 --
--- This module is separate from Templates.hs so that TH splices can reference
--- these types (TH staging requires types to be in previously compiled modules).
+-- These types are what Jinja templates receive for rendering.
+-- Must be in separate module from Templates.hs for TH staging.
 --
--- Context types map to Jinja template variables.
+-- NOTE: Context field names match template variables.
+-- The ToGVal instances map prefixed type fields to unprefixed template access.
+-- e.g., sDescription -> description, irCommitHash -> commitHash
 module TypesFirstDev.Context
-  ( TypesContext(..)
-  , TestsContext(..)
-  , ImplContext(..)
-  , SkeletonContext(..)
-    -- * v3 Stubs Workflow
-  , StubsContext(..)
-  , TestsContextV3(..)
-    -- * TDD Fix Context
-  , FixContext(..)
+  ( -- * Scaffold Context
+    ScaffoldTemplateCtx(..)
+
+    -- * TDD WriteTests Context
+  , TDDWriteTestsTemplateCtx(..)
+
+    -- * TDD ReviewImpl Context
+  , TDDReviewImplTemplateCtx(..)
+
+    -- * Impl Context
+  , ImplTemplateCtx(..)
+
+    -- * Merger Context
+  , MergerTemplateCtx(..)
+
+    -- * Rebaser Context
+  , RebaserTemplateCtx(..)
   ) where
 
 import Control.Monad.Writer (Writer)
+import Data.Aeson (ToJSON)
 import Data.Text (Text)
+import qualified Data.Text as T
 import GHC.Generics (Generic)
 import Text.Ginger.GVal (ToGVal(..), dict, list)
 import Text.Ginger.Run.Type (Run)
 import Text.Parsec.Pos (SourcePos)
 
-import Tidepool.Effects.Cabal (TestFailure(..))
-import TypesFirstDev.Types (FunctionSig(..), TestPriority(..), FunctionSemantics(..), FunctionExample(..))
+import TypesFirstDev.Types
 
+-- | Type alias for the ginger monad
+type GingerM = Run SourcePos (Writer Text) Text
 
 -- ════════════════════════════════════════════════════════════════════════════
--- TYPES TEMPLATE CONTEXT
+-- SCAFFOLD CONTEXT
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Context for the types template.
---
--- Template variables:
---   {{ moduleName }} - e.g., "Data.Stack"
---   {{ description }} - natural language description
---   {{ acceptanceCriteria }} - list of acceptance criteria strings
-data TypesContext = TypesContext
-  { moduleName :: Text
-    -- ^ Module name for the data structure.
-  , description :: Text
-    -- ^ Natural language description.
-  , acceptanceCriteria :: [Text]
-    -- ^ High-level acceptance criteria to inform test priorities.
+-- | Context for scaffold template.
+data ScaffoldTemplateCtx = ScaffoldTemplateCtx
+  { spec          :: Spec
+  , parentContext :: Maybe ParentContext
   }
-  deriving (Show, Eq, Generic)
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (ToJSON)
 
-instance ToGVal (Run SourcePos (Writer Text) Text) TypesContext where
+instance ToGVal GingerM ScaffoldTemplateCtx where
   toGVal ctx = dict
-    [ ("moduleName", toGVal ctx.moduleName)
-    , ("description", toGVal ctx.description)
-    , ("acceptanceCriteria", list $ map toGVal ctx.acceptanceCriteria)
+    [ ("spec", toGVal ctx.spec)
+    , ("parentContext", toGVal ctx.parentContext)
     ]
 
-
 -- ════════════════════════════════════════════════════════════════════════════
--- TESTS TEMPLATE CONTEXT
+-- TDD WRITETESTS CONTEXT
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Context for the tests template.
---
--- Template variables:
---   {{ moduleName }} - module name
---   {{ dataType }} - data type definition
---   {{ signatures }} - list of FunctionSig objects with .name, .signature, .description
---   {{ testPriorities }} - list of TestPriority objects with .name, .description
-data TestsContext = TestsContext
-  { moduleName :: Text
-  , dataType :: Text
-  , signatures :: [FunctionSig]
-  , testPriorities :: [TestPriority]
+-- | Context for TDD write tests template.
+data TDDWriteTestsTemplateCtx = TDDWriteTestsTemplateCtx
+  { spec            :: Spec
+  , scaffold        :: InitWorkPayload
+  , coveredCriteria :: [Text]  -- From TDDMem
   }
-  deriving (Show, Eq, Generic)
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (ToJSON)
 
--- | ToGVal for FunctionSig - exposes name, signature, description to templates
-instance ToGVal (Run SourcePos (Writer Text) Text) FunctionSig where
-  toGVal sig = dict
-    [ ("name", toGVal sig.fsName)
-    , ("signature", toGVal sig.fsSignature)
-    , ("description", toGVal sig.fsDescription)
-    ]
-
-instance ToGVal (Run SourcePos (Writer Text) Text) TestsContext where
-  toGVal TestsContext{..} = dict
-    [ ("moduleName", toGVal moduleName)
-    , ("dataType", toGVal dataType)
-    , ("signatures", list $ map toGVal signatures)
-    , ("testPriorities", list $ map toGVal testPriorities)
-    ]
-
-
--- ════════════════════════════════════════════════════════════════════════════
--- IMPL TEMPLATE CONTEXT
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Context for the impl template.
---
--- Template variables:
---   {{ moduleName }} - module name
---   {{ dataType }} - data type definition
---   {{ signatures }} - list of FunctionSig objects with .name, .signature, .description
-data ImplContext = ImplContext
-  { moduleName :: Text
-  , dataType :: Text
-  , signatures :: [FunctionSig]
-  }
-  deriving (Show, Eq, Generic)
-
-instance ToGVal (Run SourcePos (Writer Text) Text) ImplContext where
-  toGVal ImplContext{..} = dict
-    [ ("moduleName", toGVal moduleName)
-    , ("dataType", toGVal dataType)
-    , ("signatures", list $ map toGVal signatures)
-    ]
-
-
--- ════════════════════════════════════════════════════════════════════════════
--- SKELETON TEMPLATE CONTEXT (v2)
--- ════════════════════════════════════════════════════════════════════════════
-
--- | ToGVal for TestPriority - maps tpName → name, tpDescription → description
-instance ToGVal (Run SourcePos (Writer Text) Text) TestPriority where
-  toGVal tp = dict
-    [ ("name", toGVal tp.tpName)
-    , ("description", toGVal tp.tpDescription)
-    ]
-
--- | Context for skeleton templates (impl-skeleton, test-skeleton).
---
--- Template variables:
---   {{ moduleName }} - e.g., "Data.Stack"
---   {{ typeName }} - e.g., "Stack"
---   {{ dataType }} - full type definition
---   {{ signatures }} - list of FunctionSig with .name, .signature, .description
---   {{ testPriorities }} - list of TestPriority with .name, .description
---   {{ imports }} - list of additional import statements
-data SkeletonContext = SkeletonContext
-  { moduleName :: Text
-  , typeName :: Text
-    -- ^ Type constructor name extracted from dataType (e.g., "Stack")
-  , dataType :: Text
-  , signatures :: [FunctionSig]
-  , testPriorities :: [TestPriority]
-  , imports :: [Text]
-    -- ^ Additional imports requested by the types agent
-  }
-  deriving (Show, Eq, Generic)
-
-instance ToGVal (Run SourcePos (Writer Text) Text) SkeletonContext where
-  toGVal SkeletonContext{..} = dict
-    [ ("moduleName", toGVal moduleName)
-    , ("typeName", toGVal typeName)
-    , ("dataType", toGVal dataType)
-    , ("signatures", list $ map toGVal signatures)
-    , ("testPriorities", list $ map toGVal testPriorities)
-    , ("imports", list $ map toGVal imports)
-    ]
-
-
--- ════════════════════════════════════════════════════════════════════════════
--- v3 STUBS WORKFLOW CONTEXTS
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Context for the stubs template (v3 workflow).
---
--- The stubs agent writes actual .hs files and returns semantic descriptions.
---
--- Template variables:
---   {{ moduleName }} - e.g., "UrlShortener"
---   {{ modulePath }} - e.g., "UrlShortener" (for file path: src/{{ modulePath }}.hs)
---   {{ description }} - natural language description
---   {{ acceptanceCriteria }} - list of acceptance criteria strings
-data StubsContext = StubsContext
-  { moduleName :: Text
-    -- ^ Module name for the data structure.
-  , modulePath :: Text
-    -- ^ Module path (moduleName with dots replaced by slashes)
-  , description :: Text
-    -- ^ Natural language description.
-  , acceptanceCriteria :: [Text]
-    -- ^ High-level acceptance criteria to inform test priorities.
-  }
-  deriving (Show, Eq, Generic)
-
-instance ToGVal (Run SourcePos (Writer Text) Text) StubsContext where
+instance ToGVal GingerM TDDWriteTestsTemplateCtx where
   toGVal ctx = dict
-    [ ("moduleName", toGVal ctx.moduleName)
-    , ("modulePath", toGVal ctx.modulePath)
-    , ("description", toGVal ctx.description)
-    , ("acceptanceCriteria", list $ map toGVal ctx.acceptanceCriteria)
+    [ ("spec", toGVal ctx.spec)
+    , ("scaffold", toGVal ctx.scaffold)
+    , ("coveredCriteria", list (toGVal <$> ctx.coveredCriteria))
     ]
-
-
--- | Context for the tests template (v3 workflow).
---
--- Driven by semantic descriptions from the stubs agent.
---
--- Template variables:
---   {{ moduleName }} - module name
---   {{ dataType }} - data type definitions (for reference)
---   {{ semantics }} - list of FunctionSemantics with .name, .signature, .behavior, .examples
-data TestsContextV3 = TestsContextV3
-  { moduleName :: Text
-  , dataType :: Text
-  , semantics :: [FunctionSemantics]
-  }
-  deriving (Show, Eq, Generic)
-
--- | ToGVal for FunctionExample - exposes input, expected to templates
-instance ToGVal (Run SourcePos (Writer Text) Text) FunctionExample where
-  toGVal ex = dict
-    [ ("input", toGVal ex.feInput)
-    , ("expected", toGVal ex.feExpected)
-    ]
-
--- | ToGVal for FunctionSemantics - exposes name, signature, behavior, examples to templates
-instance ToGVal (Run SourcePos (Writer Text) Text) FunctionSemantics where
-  toGVal sem = dict
-    [ ("name", toGVal sem.fsmName)
-    , ("signature", toGVal sem.fsmSignature)
-    , ("behavior", toGVal sem.fsmBehavior)
-    , ("examples", list $ map toGVal sem.fsmExamples)
-    ]
-
-instance ToGVal (Run SourcePos (Writer Text) Text) TestsContextV3 where
-  toGVal TestsContextV3{..} = dict
-    [ ("moduleName", toGVal moduleName)
-    , ("dataType", toGVal dataType)
-    , ("semantics", list $ map toGVal semantics)
-    ]
-
 
 -- ════════════════════════════════════════════════════════════════════════════
--- TDD FIX CONTEXT
+-- TDD REVIEWIMPL CONTEXT
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Context for the fix template (TDD validation loop).
---
--- When tests fail after implementation, this context provides
--- structured failure information for the fix agent.
---
--- Template variables:
---   {{ moduleName }} - module name
---   {{ implPath }} - path to implementation file
---   {{ failures }} - list of TestFailure objects with .tfPropertyName, .tfMessage, etc.
---   {{ attempt }} - current fix attempt number
-data FixContext = FixContext
-  { moduleName :: Text
-    -- ^ Module name for the implementation.
-  , implPath :: Text
-    -- ^ Path to implementation file (for LLM to read/edit).
-  , failures :: [TestFailure]
-    -- ^ Structured test failures.
-  , attempt :: Int
-    -- ^ Current fix attempt number (for retry context).
+-- | Context for TDD review impl template.
+data TDDReviewImplTemplateCtx = TDDReviewImplTemplateCtx
+  { spec       :: Spec
+  , scaffold   :: InitWorkPayload
+  , implResult :: ImplResult
+  , diff       :: Text
   }
-  deriving (Show, Eq, Generic)
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (ToJSON)
 
--- | ToGVal for TestFailure - exposes failure details to templates
-instance ToGVal (Run SourcePos (Writer Text) Text) TestFailure where
-  toGVal tf = dict
-    [ ("tfPropertyName", toGVal tf.tfPropertyName)
-    , ("tfMessage", toGVal tf.tfMessage)
-    , ("tfCounterexample", maybe (toGVal ("" :: Text)) toGVal tf.tfCounterexample)
-    , ("tfSeed", maybe (toGVal (0 :: Int)) toGVal tf.tfSeed)
-    , ("tfLocation", maybe (toGVal ("" :: Text)) toGVal tf.tfLocation)
+instance ToGVal GingerM TDDReviewImplTemplateCtx where
+  toGVal ctx = dict
+    [ ("spec", toGVal ctx.spec)
+    , ("scaffold", toGVal ctx.scaffold)
+    , ("implResult", toGVal ctx.implResult)
+    , ("diff", toGVal ctx.diff)
     ]
 
-instance ToGVal (Run SourcePos (Writer Text) Text) FixContext where
-  toGVal FixContext{..} = dict
-    [ ("moduleName", toGVal moduleName)
-    , ("implPath", toGVal implPath)
-    , ("failures", list $ map toGVal failures)
-    , ("attempt", toGVal attempt)
+-- ════════════════════════════════════════════════════════════════════════════
+-- IMPL CONTEXT
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Context for impl template.
+data ImplTemplateCtx = ImplTemplateCtx
+  { spec         :: Spec
+  , scaffold     :: InitWorkPayload
+  , testsReady   :: TestsReadyPayload
+  , childMerges  :: Maybe [MergeComplete]
+  , attemptCount :: Int
+  , critiqueList :: Maybe [Critique]
+  }
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (ToJSON)
+
+instance ToGVal GingerM ImplTemplateCtx where
+  toGVal ctx = dict
+    [ ("spec", toGVal ctx.spec)
+    , ("scaffold", toGVal ctx.scaffold)
+    , ("testsReady", toGVal ctx.testsReady)
+    , ("childMerges", toGVal ctx.childMerges)
+    , ("attemptCount", toGVal ctx.attemptCount)
+    , ("critiqueList", toGVal ctx.critiqueList)
+    ]
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- MERGER CONTEXT
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Context for merger template.
+data MergerTemplateCtx = MergerTemplateCtx
+  { parentNode    :: NodeInfo
+  , childNode     :: NodeInfo
+  , tddApproval   :: TDDApproval
+  , contractSuite :: FilePath
+  }
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (ToJSON)
+
+instance ToGVal GingerM MergerTemplateCtx where
+  toGVal ctx = dict
+    [ ("parentNode", toGVal ctx.parentNode)
+    , ("childNode", toGVal ctx.childNode)
+    , ("tddApproval", toGVal ctx.tddApproval)
+    , ("contractSuite", toGVal ctx.contractSuite)
+    ]
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- REBASER CONTEXT
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Context for rebaser template.
+data RebaserTemplateCtx = RebaserTemplateCtx
+  { node          :: NodeInfo
+  , parentBranch  :: Text
+  , newParentHead :: Text
+  , mergeEvent    :: MergeEvent
+  }
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (ToJSON)
+
+instance ToGVal GingerM RebaserTemplateCtx where
+  toGVal ctx = dict
+    [ ("node", toGVal ctx.node)
+    , ("parentBranch", toGVal ctx.parentBranch)
+    , ("newParentHead", toGVal ctx.newParentHead)
+    , ("mergeEvent", toGVal ctx.mergeEvent)
+    ]
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- ToGVal instances for domain types
+-- Maps prefixed field names (sId) to template access (id)
+-- ════════════════════════════════════════════════════════════════════════════
+
+instance ToGVal GingerM Spec where
+  toGVal s = dict
+    [ ("id", toGVal s.sId)
+    , ("description", toGVal s.sDescription)
+    , ("acceptanceCriteria", list (toGVal <$> s.sAcceptanceCriteria))
+    , ("targetPath", toGVal s.sTargetPath)
+    , ("testPath", toGVal s.sTestPath)
+    , ("complexityConstraints", toGVal s.sComplexityConstraints)
+    ]
+
+instance ToGVal GingerM Constraints where
+  toGVal c = dict
+    [ ("time", toGVal c.cnTime)
+    , ("space", toGVal c.cnSpace)
+    ]
+
+instance ToGVal GingerM Criterion where
+  toGVal c = dict
+    [ ("id", toGVal c.cId)
+    , ("text", toGVal c.cText)
+    ]
+
+instance ToGVal GingerM ParentContext where
+  toGVal p = dict
+    [ ("interface", toGVal p.pcInterface)
+    , ("assignedCriteria", toGVal p.pcAssignedCriteria)
+    ]
+
+instance ToGVal GingerM InitWorkPayload where
+  toGVal p = dict
+    [ ("scaffoldCommit", toGVal p.iwpScaffoldCommit)
+    , ("interfaceFile", toGVal p.iwpInterfaceFile)
+    , ("contractSuite", toGVal p.iwpContractSuite)
+    , ("testPlan", list (toGVal <$> p.iwpTestPlan))
+    ]
+
+instance ToGVal GingerM PlannedTest where
+  toGVal t = dict
+    [ ("criterionId", toGVal t.ptCriterionId)
+    , ("name", toGVal t.ptName)
+    , ("approach", toGVal t.ptApproach)
+    ]
+
+instance ToGVal GingerM TestsReadyPayload where
+  toGVal p = dict
+    [ ("commit", toGVal p.trpCommit)
+    , ("testFiles", list (toGVal <$> p.trpTestFiles))
+    , ("pendingCriteria", list (toGVal <$> p.trpPendingCriteria))
+    ]
+
+instance ToGVal GingerM ImplResult where
+  toGVal r = dict
+    [ ("commitHash", toGVal r.irCommitHash)
+    , ("iterations", toGVal r.irIterations)
+    , ("passedTests", list (toGVal <$> r.irPassedTests))
+    ]
+
+instance ToGVal GingerM Critique where
+  toGVal c = dict
+    [ ("file", toGVal c.cqFile)
+    , ("line", toGVal c.cqLine)
+    , ("issue", toGVal c.cqIssue)
+    , ("requiredFix", toGVal c.cqRequiredFix)
+    ]
+
+instance ToGVal GingerM MergeComplete where
+  toGVal m = dict
+    [ ("commit", toGVal m.mcCommit)
+    , ("author", toGVal m.mcAuthor)
+    , ("impactLevel", toGVal (T.pack (show m.mcImpactLevel)))
+    , ("changes", list (toGVal <$> m.mcChanges))
+    ]
+
+instance ToGVal GingerM ChangeEntry where
+  toGVal c = dict
+    [ ("symbol", toGVal c.ceSymbol)
+    , ("type", toGVal (T.pack (show c.ceType)))
+    , ("reason", toGVal c.ceReason)
+    ]
+
+instance ToGVal GingerM NodeInfo where
+  toGVal n = dict
+    [ ("id", toGVal n.niId)
+    , ("branch", toGVal n.niBranch)
+    ]
+
+instance ToGVal GingerM TDDApproval where
+  toGVal a = dict
+    [ ("signOff", toGVal a.taSignOff)
+    , ("coverageReport", toGVal a.taCoverageReport)
+    ]
+
+instance ToGVal GingerM CoverageReport where
+  toGVal r = dict
+    [ ("criteriaWithTests", list (toGVal <$> r.crCriteriaWithTests))
+    , ("criteriaMissing", list (toGVal <$> r.crCriteriaMissing))
+    ]
+
+instance ToGVal GingerM MergeEvent where
+  toGVal e = dict
+    [ ("author", toGVal e.meAuthor)
+    , ("impactLevel", toGVal (T.pack (show e.meImpactLevel)))
+    , ("changes", list (toGVal <$> e.meChanges))
     ]

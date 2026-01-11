@@ -1,24 +1,29 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE RecordWildCards #-}
 
--- | Evaluation rubrics and narrative capture for baseline comparison.
+-- | Evaluation rubrics and narrative capture for TDD runs.
 --
--- Provides structured evaluation of generated code across multiple dimensions,
--- combining automated checks with LLM-judged quality scores.
+-- Provides structured evaluation of runs for sleeptime agent evolution.
+-- Combines automated checks with LLM-judged quality scores.
+--
+-- Design: Two-pass evaluation
+-- 1. Automated pass (during run) - captures mechanical metrics
+-- 2. Quality pass (post-run) - LLM judge scores quality dimensions
 module TypesFirstDev.Evaluation
-  ( -- * Rubric Types
+  ( -- * Run Evaluation
     RunEvaluation(..)
   , AutomatedScores(..)
   , QualityScores(..)
   , RubricScore(..)
 
-    -- * Narrative
+    -- * Narrative Capture
   , RunNarrative(..)
-  , PhaseNarrative(..)
-  , AgentNarrative(..)
+  , NodeNarrative(..)
 
-    -- * Evaluation
+    -- * Evaluation Helpers
   , evaluateAutomated
   , emptyQualityScores
 
@@ -31,164 +36,155 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
 
-import TypesFirstDev.Types (StackSpec(..), ParallelResults(..), TestFunctionRubric(..))
-import TypesFirstDev.MechanicalChecks (MechanicalChecks(..))
+import TypesFirstDev.Types.Core (Spec(..), Criterion(..))
+import TypesFirstDev.Policy (MechanicalChecks(..))
 
 
 -- ════════════════════════════════════════════════════════════════════════════
--- RUBRIC TYPES
+-- RUN EVALUATION
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Complete evaluation of a single run.
+-- | Complete evaluation of a TDD run.
+--
+-- Prefix: re
 data RunEvaluation = RunEvaluation
-  { reRunId :: Text
-    -- ^ Unique run identifier
-  , reSpec :: StackSpec
-    -- ^ Input specification
-  , reAutomated :: AutomatedScores
-    -- ^ Automatically computed scores
-  , reQuality :: QualityScores
-    -- ^ LLM-judged quality scores (may be empty initially)
-  , reNarrative :: RunNarrative
-    -- ^ Structured narrative of what happened
+  { reRunId     :: Text           -- ^ Unique run identifier
+  , reSpec      :: Spec           -- ^ Input specification
+  , reAutomated :: AutomatedScores -- ^ Automatically computed scores
+  , reQuality   :: QualityScores  -- ^ LLM-judged quality (filled post-run)
+  , reNarrative :: RunNarrative   -- ^ Structured narrative of what happened
   }
-  deriving (Generic, ToJSON, FromJSON, Show)
+  deriving stock (Show, Generic)
+  deriving anyclass (ToJSON, FromJSON)
 
 
--- | Automated scores - computed directly from run results.
+-- | Automated scores computed directly from run metrics.
+--
+-- Prefix: as
 data AutomatedScores = AutomatedScores
-  { asCompiles :: Bool
-    -- ^ Did the final code compile?
-  , asTestsPass :: Bool
-    -- ^ Did tests pass post-merge?
-  , asEndpointCount :: Int
-    -- ^ Number of endpoints detected (target: 3 for url-shortener)
-  , asTypesRetries :: Int
-    -- ^ Retries needed in types phase
-  , asImplRetries :: Int
-    -- ^ Retries needed in impl phase
-  , asTestsRetries :: Int
-    -- ^ Retries needed in tests phase
-  , asTotalTokens :: Int
-    -- ^ Total tokens consumed across all agents
-  , asDurationSeconds :: Double
-    -- ^ Wall clock time for entire run
+  { asCompiles        :: Bool    -- ^ Did final code compile?
+  , asTestsPass       :: Bool    -- ^ Did tests pass?
+  , asHasUndefined    :: Bool    -- ^ Any undefined stubs remaining?
+  , asCriteriaCount   :: Int     -- ^ Number of acceptance criteria
+  , asCriteriaCovered :: Int     -- ^ Criteria with passing tests
+  , asScaffoldRetries :: Int     -- ^ Retries in scaffold phase
+  , asTddRetries      :: Int     -- ^ Retries in TDD phase (test writing)
+  , asImplRetries     :: Int     -- ^ Retries in impl phase
+  , asReviewRetries   :: Int     -- ^ Retries in TDD review phase
+  , asTotalTokens     :: Int     -- ^ Total tokens consumed
+  , asDurationSeconds :: Double  -- ^ Wall clock time
+  , asChildCount      :: Int     -- ^ Number of child graphs spawned
   }
-  deriving (Generic, ToJSON, FromJSON, Show, Eq)
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (ToJSON, FromJSON)
 
 
 -- | LLM-judged quality scores.
 --
--- Each dimension is scored 1-5 with a written rationale.
--- These are filled in by a separate evaluation pass (human or LLM judge).
+-- Each dimension scored 1-5 with written rationale.
+-- Filled by separate evaluation pass (human or LLM judge).
+--
+-- Prefix: qs
 data QualityScores = QualityScores
-  { qsSpecFidelity :: Maybe RubricScore
-    -- ^ Does code match the spec description and acceptance criteria?
-  , qsTypeDesign :: Maybe RubricScore
-    -- ^ Quality of data types (newtypes, records, sum types)
-  , qsTestQuality :: Maybe RubricScore
-    -- ^ Coverage of acceptance criteria, property-based testing
-  , qsImplQuality :: Maybe RubricScore
-    -- ^ Clean implementation, no stubs, handles edge cases
-  , qsCoherence :: Maybe RubricScore
-    -- ^ Do types/tests/impl work together as unified design?
-  , qsIdiomaticity :: Maybe RubricScore
-    -- ^ Haskell best practices (applicative, proper errors, etc.)
+  { qsSpecFidelity    :: Maybe RubricScore  -- ^ Does code match spec?
+  , qsInterfaceDesign :: Maybe RubricScore  -- ^ Quality of interface (types, exports)
+  , qsTestQuality     :: Maybe RubricScore  -- ^ Coverage, property-based testing
+  , qsImplQuality     :: Maybe RubricScore  -- ^ Clean impl, handles edge cases
+  , qsDecomposition   :: Maybe RubricScore  -- ^ Appropriate use of children
+  , qsIdiomaticity    :: Maybe RubricScore  -- ^ Haskell best practices
   }
-  deriving (Generic, ToJSON, FromJSON, Show, Eq)
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (ToJSON, FromJSON)
 
 
 -- | A single rubric score with rationale.
-data RubricScore = RubricScore
-  { rsScore :: Int
-    -- ^ 1-5 scale (1=poor, 3=adequate, 5=excellent)
-  , rsRationale :: Text
-    -- ^ Explanation for the score
-  }
-  deriving (Generic, ToJSON, FromJSON, Show, Eq)
-
-
--- ════════════════════════════════════════════════════════════════════════════
--- NARRATIVE TYPES
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Structured narrative capturing key decisions and outcomes.
-data RunNarrative = RunNarrative
-  { rnTypesPhase :: PhaseNarrative
-    -- ^ What happened in types phase
-  , rnImplAgent :: AgentNarrative
-    -- ^ What the impl agent did
-  , rnTestsAgent :: AgentNarrative
-    -- ^ What the tests agent did
-  , rnMergeOutcome :: Text
-    -- ^ Summary of merge phase
-  , rnOverallSummary :: Text
-    -- ^ One-paragraph summary of the run
-  }
-  deriving (Generic, ToJSON, FromJSON, Show)
-
-
--- | Narrative for a workflow phase.
-data PhaseNarrative = PhaseNarrative
-  { pnDescription :: Text
-    -- ^ What this phase did
-  , pnKeyDecisions :: [Text]
-    -- ^ Notable decisions made
-  , pnArtifacts :: [Text]
-    -- ^ What was produced (types, files, etc.)
-  }
-  deriving (Generic, ToJSON, FromJSON, Show)
-
-
--- | Narrative for an individual agent's work.
-data AgentNarrative = AgentNarrative
-  { anStrategy :: Text
-    -- ^ High-level approach taken
-  , anKeyDecisions :: [Text]
-    -- ^ Notable implementation choices
-  , anChallenges :: [Text]
-    -- ^ Problems encountered (retries, errors)
-  , anOutcome :: Text
-    -- ^ Final result summary
-  }
-  deriving (Generic, ToJSON, FromJSON, Show)
-
-
--- ════════════════════════════════════════════════════════════════════════════
--- EVALUATION
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Compute automated scores from mechanical checks.
 --
--- With the two-stream architecture:
--- - Build/test pass status comes from MechanicalChecks (handler computes)
--- - Semantic rubrics are NOT used here (they inform routing, not scoring)
+-- Prefix: rs
+data RubricScore = RubricScore
+  { rsScore     :: Int   -- ^ 1-5 scale (1=poor, 3=adequate, 5=excellent)
+  , rsRationale :: Text  -- ^ Explanation for the score
+  }
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (ToJSON, FromJSON)
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- NARRATIVE CAPTURE
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Structured narrative of a TDD run.
+--
+-- Captures what happened at each phase for sleeptime analysis.
+--
+-- Prefix: rn
+data RunNarrative = RunNarrative
+  { rnScaffold       :: NodeNarrative  -- ^ Scaffold phase
+  , rnTddWriteTests  :: NodeNarrative  -- ^ TDD test writing
+  , rnImpl           :: NodeNarrative  -- ^ Implementation phase
+  , rnTddReview      :: NodeNarrative  -- ^ TDD review phase
+  , rnMerger         :: NodeNarrative  -- ^ Merge phase
+  , rnChildSummaries :: [Text]         -- ^ Brief summaries of child runs
+  , rnOverallSummary :: Text           -- ^ One-paragraph run summary
+  }
+  deriving stock (Show, Generic)
+  deriving anyclass (ToJSON, FromJSON)
+
+
+-- | Narrative for a single node execution.
+--
+-- Prefix: nn
+data NodeNarrative = NodeNarrative
+  { nnNodeName     :: Text    -- ^ Which node (e.g., "v3Impl")
+  , nnDescription  :: Text    -- ^ What this execution did
+  , nnKeyDecisions :: [Text]  -- ^ Notable decisions made
+  , nnChallenges   :: [Text]  -- ^ Problems encountered
+  , nnArtifacts    :: [Text]  -- ^ What was produced (files, commits)
+  , nnOutcome      :: Text    -- ^ Final result summary
+  }
+  deriving stock (Show, Generic)
+  deriving anyclass (ToJSON, FromJSON)
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- EVALUATION HELPERS
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Compute automated scores from mechanical checks and run metrics.
 evaluateAutomated
-  :: Double          -- ^ Duration in seconds
-  -> Int             -- ^ Total tokens
-  -> Int             -- ^ Endpoint count (from code analysis)
+  :: Double           -- ^ Duration in seconds
+  -> Int              -- ^ Total tokens
+  -> Int              -- ^ Criteria count
+  -> Int              -- ^ Criteria covered
+  -> Int              -- ^ Child count
+  -> (Int, Int, Int, Int)  -- ^ (scaffold, tdd, impl, review) retries
   -> MechanicalChecks
   -> AutomatedScores
-evaluateAutomated duration tokens endpoints mech = AutomatedScores
-  { asCompiles = mcBuildPassed mech && not (mcHasUndefined mech)
-  , asTestsPass = mcTestsPassed mech
-  , asEndpointCount = endpoints
-  , asTypesRetries = 0  -- TODO: capture from workflow
-  , asImplRetries = 0   -- TODO: capture from workflow
-  , asTestsRetries = 0  -- TODO: capture from workflow
-  , asTotalTokens = tokens
-  , asDurationSeconds = duration
-  }
+evaluateAutomated duration tokens criteriaCount criteriaCovered childCount
+    (scaffoldRetries, tddRetries, implRetries, reviewRetries) mech =
+  AutomatedScores
+    { asCompiles = mcBuildPassed mech
+    , asTestsPass = mcTestsPassed mech
+    , asHasUndefined = mcHasUndefined mech
+    , asCriteriaCount = criteriaCount
+    , asCriteriaCovered = criteriaCovered
+    , asScaffoldRetries = scaffoldRetries
+    , asTddRetries = tddRetries
+    , asImplRetries = implRetries
+    , asReviewRetries = reviewRetries
+    , asTotalTokens = tokens
+    , asDurationSeconds = duration
+    , asChildCount = childCount
+    }
 
 
--- | Empty quality scores (to be filled by evaluation pass).
+-- | Empty quality scores (filled by post-run evaluation).
 emptyQualityScores :: QualityScores
 emptyQualityScores = QualityScores
   { qsSpecFidelity = Nothing
-  , qsTypeDesign = Nothing
+  , qsInterfaceDesign = Nothing
   , qsTestQuality = Nothing
   , qsImplQuality = Nothing
-  , qsCoherence = Nothing
+  , qsDecomposition = Nothing
   , qsIdiomaticity = Nothing
   }
 
@@ -197,25 +193,20 @@ emptyQualityScores = QualityScores
 -- REPORTING
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Render a complete evaluation report as Markdown.
+-- | Render evaluation report as Markdown.
 renderEvaluationReport :: RunEvaluation -> Text
 renderEvaluationReport RunEvaluation{..} = T.unlines $
-  [ "# Baseline Evaluation Report"
+  [ "# TDD Run Evaluation"
   , ""
   , "**Run ID:** " <> reRunId
-  , ""
-  , "**Module:** " <> reSpec.ssModuleName
+  , "**Description:** " <> reSpec.sDescription
   , ""
   , "---"
   , ""
-  , "## Specification"
-  , ""
-  , reSpec.ssDescription
-  , ""
-  , "### Acceptance Criteria"
+  , "## Acceptance Criteria"
   , ""
   ] ++
-  map ("- " <>) reSpec.ssAcceptanceCriteria ++
+  zipWith renderCriterion [1..] (map (.cText) reSpec.sAcceptanceCriteria) ++
   [ ""
   , "---"
   , ""
@@ -225,53 +216,29 @@ renderEvaluationReport RunEvaluation{..} = T.unlines $
   , "|--------|-------|"
   , "| Compiles | " <> showBool reAutomated.asCompiles <> " |"
   , "| Tests Pass | " <> showBool reAutomated.asTestsPass <> " |"
-  , "| Endpoints | " <> T.pack (show reAutomated.asEndpointCount) <> "/3 |"
+  , "| Has Undefined | " <> showBool reAutomated.asHasUndefined <> " |"
+  , "| Criteria | " <> T.pack (show reAutomated.asCriteriaCovered)
+      <> "/" <> T.pack (show reAutomated.asCriteriaCount) <> " |"
+  , "| Children | " <> T.pack (show reAutomated.asChildCount) <> " |"
   , "| Duration | " <> formatDuration reAutomated.asDurationSeconds <> " |"
   , "| Tokens | " <> T.pack (show reAutomated.asTotalTokens) <> " |"
-  , "| Retries (types/impl/tests) | "
-      <> T.pack (show reAutomated.asTypesRetries) <> "/"
+  , "| Retries (scaffold/tdd/impl/review) | "
+      <> T.pack (show reAutomated.asScaffoldRetries) <> "/"
+      <> T.pack (show reAutomated.asTddRetries) <> "/"
       <> T.pack (show reAutomated.asImplRetries) <> "/"
-      <> T.pack (show reAutomated.asTestsRetries) <> " |"
+      <> T.pack (show reAutomated.asReviewRetries) <> " |"
   , ""
   , "---"
   , ""
-  , "## Narrative"
-  , ""
-  , "### Types Phase"
-  , ""
-  , reNarrative.rnTypesPhase.pnDescription
-  , ""
-  , "**Key decisions:**"
+  , "## Phase Narratives"
   , ""
   ] ++
-  map ("- " <>) reNarrative.rnTypesPhase.pnKeyDecisions ++
+  renderNodeNarrative "Scaffold" reNarrative.rnScaffold ++
+  renderNodeNarrative "TDD WriteTests" reNarrative.rnTddWriteTests ++
+  renderNodeNarrative "Implementation" reNarrative.rnImpl ++
+  renderNodeNarrative "TDD Review" reNarrative.rnTddReview ++
+  renderNodeNarrative "Merger" reNarrative.rnMerger ++
   [ ""
-  , "### Implementation Agent"
-  , ""
-  , "**Strategy:** " <> reNarrative.rnImplAgent.anStrategy
-  , ""
-  , "**Key decisions:**"
-  , ""
-  ] ++
-  map ("- " <>) reNarrative.rnImplAgent.anKeyDecisions ++
-  [ ""
-  , "**Outcome:** " <> reNarrative.rnImplAgent.anOutcome
-  , ""
-  , "### Tests Agent"
-  , ""
-  , "**Strategy:** " <> reNarrative.rnTestsAgent.anStrategy
-  , ""
-  , "**Key decisions:**"
-  , ""
-  ] ++
-  map ("- " <>) reNarrative.rnTestsAgent.anKeyDecisions ++
-  [ ""
-  , "**Outcome:** " <> reNarrative.rnTestsAgent.anOutcome
-  , ""
-  , "### Merge Outcome"
-  , ""
-  , reNarrative.rnMergeOutcome
-  , ""
   , "---"
   , ""
   , "## Quality Scores"
@@ -285,18 +252,34 @@ renderEvaluationReport RunEvaluation{..} = T.unlines $
   , ""
   , reNarrative.rnOverallSummary
   ]
+  where
+    renderCriterion :: Int -> Text -> Text
+    renderCriterion n t = T.pack (show n) <> ". " <> t
 
 
--- | Render quality scores table.
+renderNodeNarrative :: Text -> NodeNarrative -> [Text]
+renderNodeNarrative phase NodeNarrative{..} =
+  [ "### " <> phase
+  , ""
+  , nnDescription
+  , ""
+  ] ++
+  (if null nnKeyDecisions then [] else
+    ["**Key decisions:**", ""] ++ map ("- " <>) nnKeyDecisions ++ [""]) ++
+  (if null nnChallenges then [] else
+    ["**Challenges:**", ""] ++ map ("- " <>) nnChallenges ++ [""]) ++
+  ["**Outcome:** " <> nnOutcome, ""]
+
+
 renderQualityScores :: QualityScores -> [Text]
 renderQualityScores QualityScores{..} =
   [ "| Dimension | Score | Rationale |"
   , "|-----------|-------|-----------|"
   , renderScoreRow "Spec Fidelity" qsSpecFidelity
-  , renderScoreRow "Type Design" qsTypeDesign
+  , renderScoreRow "Interface Design" qsInterfaceDesign
   , renderScoreRow "Test Quality" qsTestQuality
   , renderScoreRow "Impl Quality" qsImplQuality
-  , renderScoreRow "Coherence" qsCoherence
+  , renderScoreRow "Decomposition" qsDecomposition
   , renderScoreRow "Idiomaticity" qsIdiomaticity
   ]
 
