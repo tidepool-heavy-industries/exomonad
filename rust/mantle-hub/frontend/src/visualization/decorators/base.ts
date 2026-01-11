@@ -40,11 +40,26 @@ export abstract class BaseDecorator implements NodeDecorator {
   protected visualState: DecoratorVisualState = "expanded";
   protected currentPosition: NodePosition | null = null;
 
+  /** Whether user has pinned this decorator (won't auto-minimize) */
+  private _isPinned = false;
+
   constructor(nodeId: string, priority = 0, anchor?: Partial<AnchorOffset>) {
     this.id = `decorator-${nodeId}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     this.nodeId = nodeId;
     this.priority = priority;
     this.anchor = { ...DEFAULT_ANCHOR, ...anchor };
+  }
+
+  get isPinned(): boolean {
+    return this._isPinned;
+  }
+
+  pin(): void {
+    this._isPinned = true;
+  }
+
+  unpin(): void {
+    this._isPinned = false;
   }
 
   /**

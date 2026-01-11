@@ -102,8 +102,7 @@ export class ChatWindowDecorator extends BaseDecorator {
     wrapper.addEventListener("click", () => {
       if (this.visualState === "minimized") {
         this.setVisualState("expanded");
-        // Emit user-expanded event so layout manager won't auto-minimize
-        visualizationBus.emit("decorator:user-expanded", { decoratorId: this.id });
+        this.pin(); // User explicitly expanded - don't auto-minimize
       }
     });
 

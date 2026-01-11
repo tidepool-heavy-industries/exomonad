@@ -109,11 +109,6 @@ export class VisualizationController {
     visualizationBus.on("node:removed", (data) => {
       this.detachAllDecorators(data.nodeId);
     });
-
-    // Handle user manually expanding a decorator - mark it so it won't be auto-minimized
-    visualizationBus.on("decorator:user-expanded", (data) => {
-      this.layoutManager.markUserExpanded(data.decoratorId);
-    });
   }
 
   /**

@@ -48,6 +48,8 @@ export interface NodeDecorator {
   readonly nodeId: string;
   /** Render priority - higher renders on top */
   readonly priority: number;
+  /** Whether user has pinned this decorator (won't auto-minimize) */
+  readonly isPinned: boolean;
 
   // Lifecycle
   attach(container: HTMLElement): void;
@@ -60,6 +62,10 @@ export interface NodeDecorator {
   // State management
   getVisualState(): DecoratorVisualState;
   setVisualState(state: DecoratorVisualState): void;
+
+  // Pinning (user intent to keep expanded)
+  pin(): void;
+  unpin(): void;
 
   // Bounds for collision detection
   getBounds(): DOMRect | null;
@@ -142,9 +148,6 @@ export interface VisualizationEvents {
 
   /** Layout detected crowded area - nodes that should minimize */
   "layout:crowded": { nodeIds: string[] };
-
-  /** User manually expanded a decorator - don't auto-minimize */
-  "decorator:user-expanded": { decoratorId: string };
 }
 
 /** Event handler function type */

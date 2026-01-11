@@ -34,8 +34,6 @@ export class LayoutManager {
   private nodeToDecorators: Map<string, Set<string>> = new Map();
   private constraints: LayoutConstraints;
   private layoutScheduled = false;
-  /** Decorators that user has manually interacted with - don't auto-minimize */
-  private userExpandedDecorators: Set<string> = new Set();
 
   /** Bound resize handler for cleanup */
   private handleResize = (): void => {
@@ -164,14 +162,14 @@ export class LayoutManager {
 
   /**
    * Hide decorators that are fully outside the viewport.
-   * Skips user-expanded decorators.
+   * Skips pinned decorators.
    */
   private cullOffscreen(expanded: NodeDecorator[]): void {
     const vp = this.constraints.viewportBounds;
 
     for (const decorator of expanded) {
-      // Don't auto-minimize user-expanded decorators
-      if (this.userExpandedDecorators.has(decorator.id)) continue;
+      // Don't auto-minimize pinned decorators
+      if (decorator.isPinned) continue;
 
       const bounds = decorator.getBounds();
       if (!bounds) continue;
@@ -192,13 +190,11 @@ export class LayoutManager {
 
   /**
    * Enforce maximum number of visible expanded decorators.
-   * Skips user-expanded decorators.
+   * Skips pinned decorators.
    */
   private enforceMaxVisible(expanded: NodeDecorator[]): void {
-    // Filter out user-expanded decorators - they get to stay expanded
-    const autoExpanded = expanded.filter(
-      (d) => !this.userExpandedDecorators.has(d.id)
-    );
+    // Filter out pinned decorators - they get to stay expanded
+    const autoExpanded = expanded.filter((d) => !d.isPinned);
 
     // If we have more auto-expanded than allowed, minimize the lowest priority ones
     if (autoExpanded.length > this.constraints.maxVisibleDecorators) {
@@ -217,7 +213,7 @@ export class LayoutManager {
 
   /**
    * Detect and resolve collisions between expanded decorators.
-   * Only auto-minimizes non-user-expanded decorators.
+   * Only auto-minimizes non-pinned decorators.
    */
   private resolveCollisions(expanded: NodeDecorator[]): void {
     const padding = this.constraints.collisionPadding;
@@ -235,21 +231,18 @@ export class LayoutManager {
         if (!boundsB) continue;
 
         if (this.rectsOverlap(boundsA, boundsB, padding)) {
-          // Skip if both are user-expanded - user manages their own layout
-          const aUserExpanded = this.userExpandedDecorators.has(a.id);
-          const bUserExpanded = this.userExpandedDecorators.has(b.id);
-
-          if (aUserExpanded && bUserExpanded) {
-            continue; // Both user-expanded, don't auto-minimize either
+          // Skip if both are pinned - user manages their own layout
+          if (a.isPinned && b.isPinned) {
+            continue; // Both pinned, don't auto-minimize either
           }
 
-          // Prefer minimizing non-user-expanded decorators
-          if (aUserExpanded) {
+          // Prefer minimizing non-pinned decorators
+          if (a.isPinned) {
             colliding.add(b.id);
-          } else if (bUserExpanded) {
+          } else if (b.isPinned) {
             colliding.add(a.id);
           } else {
-            // Neither user-expanded: lower priority gets minimized
+            // Neither pinned: lower priority gets minimized
             if (a.priority < b.priority) {
               colliding.add(a.id);
             } else {
@@ -260,11 +253,10 @@ export class LayoutManager {
       }
     }
 
-    // Minimize colliding decorators (only non-user-expanded ones)
+    // Minimize colliding decorators (only non-pinned ones)
     for (const id of colliding) {
-      if (this.userExpandedDecorators.has(id)) continue;
       const decorator = this.decorators.get(id);
-      if (decorator) {
+      if (decorator && !decorator.isPinned) {
         decorator.setVisualState("minimized");
       }
     }
@@ -284,31 +276,17 @@ export class LayoutManager {
 
   /**
    * Force expand a specific decorator (user action).
-   * Marks as user-expanded so it won't be auto-minimized.
+   * Pins it so it won't be auto-minimized.
    */
   expandDecorator(decoratorId: string): void {
     const decorator = this.decorators.get(decoratorId);
     if (!decorator) return;
 
-    // Mark as user-expanded - won't be auto-minimized
-    this.userExpandedDecorators.add(decoratorId);
+    // Pin so it won't be auto-minimized
+    decorator.pin();
 
     // Expand the requested decorator
     decorator.setVisualState("expanded");
-  }
-
-  /**
-   * Mark a decorator as user-interacted (won't be auto-minimized).
-   */
-  markUserExpanded(decoratorId: string): void {
-    this.userExpandedDecorators.add(decoratorId);
-  }
-
-  /**
-   * Clear user-expanded status for a decorator.
-   */
-  clearUserExpanded(decoratorId: string): void {
-    this.userExpandedDecorators.delete(decoratorId);
   }
 
   /**
