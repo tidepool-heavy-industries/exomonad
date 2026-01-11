@@ -716,6 +716,157 @@ All four fields are required:
 - `llmBefore`: Builds template context from input
 - `llmAfter`: Routes based on LLM output
 
+## ClaudeCode Handler (Subprocess Execution)
+
+When an LLM node has the `ClaudeCode` annotation, the handler type changes to `ClaudeCodeLLMHandler`:
+
+```haskell
+gWork :: mode :- G.LLMNode
+    :@ Input TaskInfo
+    :@ Template WorkTpl
+    :@ Schema WorkResult
+    :@ ClaudeCode 'Sonnet ('Just "/path/to/worktree")
+
+-- At handler definition, use ClaudeCodeLLMHandler with same 4 fields:
+work = ClaudeCodeLLMHandler @'Sonnet
+  { llmSystem = Nothing
+  , llmUser   = templateCompiled @WorkTpl
+  , llmBefore = \input -> do                      -- NOTE: Returns TUPLE!
+      st <- getMem @SessionState
+      pure (WorkContext { ... }, StartFresh "work-session")  -- (context, SessionOp)
+  , llmAfter  = \(result, sessionId) -> do        -- NOTE: Receives TUPLE!
+      -- result :: ClaudeCodeResult WorkResult
+      -- sessionId :: SessionId
+      -- Can reuse session for continuation via ContinueFrom sessionId
+      updateMem @SessionState $ \s -> s { lastSessionId = Just sessionId }
+      pure $ gotoExit result.ccrParsedOutput
+  }
+```
+
+### Key Differences from LLMHandler
+
+| Aspect | LLMHandler | ClaudeCodeLLMHandler |
+|--------|------------|----------------------|
+| **Before return type** | `Eff es tpl` | `Eff es (tpl, SessionOperation)` |
+| **After input type** | `schema` | `(ClaudeCodeResult schema, SessionId)` |
+| **Session management** | N/A (implicit in LLM effect) | **Explicit** via SessionOperation enum |
+| **Execution** | Anthropic API call | Claude Code subprocess via mantle |
+| **Type parameters** | 5 (needs, schema, targets, effs, tpl) | 6 (model, needs, schema, targets, effs, tpl) |
+
+### Before Function: SessionOperation
+
+The `llmBefore` function must return a tuple `(context, SessionOperation)`:
+
+```haskell
+data SessionOperation
+  = StartFresh slug           -- Create new conversation with slug identifier
+  | ContinueFrom sessionId    -- Reuse existing session (for state continuation)
+  | ForkFrom parentId childSlug  -- Create child session (for parallel work)
+```
+
+**Why it matters:**
+- **StartFresh**: Each node gets its own conversation history by default
+- **ContinueFrom**: Threads conversation state across multiple nodes (e.g., TDD ↔ Review cycles)
+- **ForkFrom**: Spawn parallel sessions from shared parent (e.g., child decompositions)
+
+**Example: Session Continuation in TDD Loop**
+
+```haskell
+-- TDDWriteTests before: start fresh conversation
+tddWriteTestsBefore input = do
+  pure (TDDWriteTestsContext { ... }, StartFresh "tdd-write-tests")
+
+-- TDDWriteTests after: store SessionId in Memory
+tddWriteTestsAfter (result, sid) = do
+  updateMem @TDDMem $ \m -> m { conversationId = Just sid }  -- STORE IT
+  pure $ gotoChoice @"v3Impl" ...
+
+-- Impl before: continue conversation from stored SessionId
+implBefore input = do
+  mem <- getMem @TDDMem
+  case mem.conversationId of
+    Just sid -> pure (ImplContext { ... }, ContinueFrom sid)    -- REUSE IT
+    Nothing  -> pure (ImplContext { ... }, StartFresh "impl")
+```
+
+### After Function: ClaudeCodeResult
+
+The `llmAfter` function receives `(ClaudeCodeResult schema, SessionId)`:
+
+```haskell
+data ClaudeCodeResult schema = ClaudeCodeResult
+  { ccrParsedOutput :: schema       -- The parsed structured output
+  , ccrSessionId :: SessionId       -- Session ID (same as tuple second element)
+  }
+```
+
+**Why the duplicate?** `ccrSessionId` is available both ways:
+- As second element of tuple: `(\(result, sessionId) -> ...)`
+- Inside result: `(result.ccrSessionId)`
+
+Use whichever is clearer in context.
+
+### Type Parameters: Model Selection
+
+The `ClaudeCodeLLMHandler` type has 6 parameters, including `model`:
+
+```haskell
+ClaudeCodeLLMHandler
+  :: forall model tpl needs schema targets effs.
+     SingModelChoice model  -- Model constraint
+  => Maybe (TypedTemplate tpl SourcePos)    -- system prompt
+  -> TypedTemplate tpl SourcePos             -- user prompt
+  -> (needs -> Eff effs (tpl, SessionOperation))  -- before
+  -> ((ClaudeCodeResult schema, SessionId) -> Eff effs (GotoChoice targets))  -- after
+  -> ClaudeCodeLLMHandler model needs schema targets effs tpl
+```
+
+**Model selection** happens at annotation time:
+
+```haskell
+:@ ClaudeCode 'Haiku     -- Small, fast model
+:@ ClaudeCode 'Sonnet    -- Balanced (recommended)
+:@ ClaudeCode 'Opus      -- Large, powerful (research-grade)
+```
+
+GHC enforces the selected model as a type parameter throughout the handler's lifetime.
+
+### Real-World Example: types-first-dev V3 Protocol
+
+The types-first-dev project uses `ClaudeCodeLLMHandler` for TDD workflow nodes:
+
+```haskell
+-- Scaffold: DecomposeSpec → Criteria
+scaffoldHandler = ClaudeCodeLLMHandler @'Sonnet
+  Nothing
+  (templateCompiled @ScaffoldTpl)
+  scaffoldBefore    -- TaskInfo → (ScaffoldContext, SessionOp)
+  scaffoldAfter     -- (ClaudeCodeResult ScaffoldExit, SessionId) → GotoChoice
+
+-- Impl: Make tests pass (with retry loop)
+implHandler = ClaudeCodeLLMHandler @'Sonnet
+  Nothing
+  (templateCompiled @ImplTpl)
+  implBefore        -- ImplInput → (ImplContext, ContinueFrom sessionId)
+  implAfter         -- Retry logic + route to TDDReviewImpl
+
+-- TDDReviewImpl: Review implementation (decision tools)
+reviewHandler = ClaudeCodeLLMHandler @'Sonnet
+  (Just systemTpl)
+  (templateCompiled @TDDReviewImplTpl)
+  tddReviewBefore   -- Build context
+  tddReviewAfter    -- Route to Merger or MoreTests
+```
+
+Key design:
+- All use `'Sonnet` model (fast enough for iteration)
+- Before functions return `(context, SessionOperation)` tuples
+- After functions handle session IDs for conversation continuation
+- Session reuse enables TDD ↔ Review ↔ Impl ping-pongs
+
+> **Source**: `tidepool-core/src/Tidepool/Graph/Goto.hs:496-557` (types),
+> `tidepool-core/src/Tidepool/Graph/Execute.hs:264-442` (execution)
+
 ## Validation
 
 The `ValidGraphRecord` constraint bundles all compile-time validation checks. When validation fails, you get clear error messages explaining what's wrong and how to fix it.

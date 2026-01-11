@@ -89,11 +89,11 @@ instance ClaudeCodeSchema RebaserExit where
 
 -- | Before handler: build context.
 --
--- Session management is handled internally by the Session effect.
+-- Returns tuple of (context, SessionOperation) for ClaudeCodeLLMHandler.
 rebaserBefore
   :: (Member Session es)
   => RebaserInput
-  -> Eff es RebaserTemplateCtx
+  -> Eff es (RebaserTemplateCtx, SessionOperation)
 rebaserBefore input = do
   let ctx = RebaserTemplateCtx
         { node = input.riNode
@@ -101,7 +101,7 @@ rebaserBefore input = do
         , newParentHead = input.riNewParentHead
         , mergeEvent = input.riMergeEvent
         }
-  pure ctx
+  pure (ctx, StartFresh "v3/rebaser")
 
 -- | After handler: route based on rebase result.
 rebaserAfter

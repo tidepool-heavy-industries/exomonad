@@ -18,6 +18,7 @@ import Data.Text (Text)
 import GHC.Generics (Generic)
 
 import Tidepool.StructuredOutput (StructuredOutput)
+import Tidepool.Effect.Session (SessionId)
 
 -- | TDD node memory (shared between TDDWriteTests and TDDReviewImpl).
 -- Prefix: tm
@@ -40,17 +41,19 @@ emptyTDDMem convId = TDDMem
 -- | Impl node memory.
 -- Prefix: im
 data ImplMem = ImplMem
-  { imConversationId :: Text             -- ^ Resume from parent's context
-  , imPassedTests    :: [Text]           -- ^ Tests that now pass
-  , imAttemptHistory :: [AttemptRecord]  -- ^ History of attempts
+  { imConversationId :: Text                  -- ^ Resume from parent's context
+  , imSessionId      :: Maybe SessionId       -- ^ Current session ID (for retry continuation)
+  , imPassedTests    :: [Text]                -- ^ Tests that now pass
+  , imAttemptHistory :: [AttemptRecord]       -- ^ History of attempts
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
+  deriving anyclass (FromJSON, ToJSON)
 
 -- | Empty Impl memory for initialization.
 emptyImplMem :: Text -> ImplMem
 emptyImplMem convId = ImplMem
   { imConversationId = convId
+  , imSessionId = Nothing
   , imPassedTests = []
   , imAttemptHistory = []
   }

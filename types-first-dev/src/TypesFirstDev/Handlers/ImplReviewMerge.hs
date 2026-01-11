@@ -39,7 +39,7 @@ import Control.Monad.Freer (Eff, Member)
 import Tidepool.Effect.Session (Session, SessionOperation(..), SessionId)
 import Tidepool.Graph.Goto (To, GotoChoice, gotoChoice, gotoExit, gotoSelf)
 import Tidepool.Graph.Types (Exit, Self)
-import Tidepool.Graph.Memory (Memory, getMem)
+import Tidepool.Graph.Memory (Memory, getMem, updateMem)
 import Tidepool.StructuredOutput (StructuredOutput)
 import Tidepool.StructuredOutput.ClaudeCodeSchema (ClaudeCodeSchema(..))
 import Tidepool.StructuredOutput.DecisionTools (ToDecisionTools(..))
@@ -225,13 +225,14 @@ data MergeRejectedReason
 
 -- | Impl before handler: build context, manage private memory.
 --
--- Session management is handled internally by the Session effect.
+-- Returns tuple of (context, SessionOperation) for ClaudeCodeLLMHandler.
+-- For self-loop retries, stores and reuses session ID from attempt to attempt.
 implBefore
   :: (Member Session es, Member (Memory ImplMem) es)
   => ImplInput
-  -> Eff es ImplTemplateCtx
+  -> Eff es (ImplTemplateCtx, SessionOperation)
 implBefore input = do
-  _ <- getMem @ImplMem
+  mem <- getMem @ImplMem
   let ctx = ImplTemplateCtx
         { spec = input.iiSpec
         , scaffold = input.iiScaffold
@@ -240,7 +241,11 @@ implBefore input = do
         , attemptCount = input.iiAttemptCount
         , critiqueList = input.iiCritiqueList
         }
-  pure ctx
+  -- For retry loops, continue same session to preserve context
+  let sessionOp = case mem.imSessionId of
+        Just sid -> ContinueFrom sid
+        Nothing -> StartFresh "v3/impl"
+  pure (ctx, sessionOp)
 
 -- | Impl after handler: self-loop on retry, route to review or exit.
 -- Max 5 retry attempts.
@@ -249,8 +254,9 @@ implAfter
   => ImplInput
   -> (ImplExit, SessionId)
   -> Eff es (GotoChoice '[To Self ImplInput, To "v3TDDReviewImpl" TDDReviewImplInput, To Exit ImplExit])
-implAfter input (exit, _sid) = do
-  -- TODO: Store SessionId in ImplMem for session continuation in Phase 8
+implAfter input (exit, sid) = do
+  -- Store SessionId in memory for session continuation on retry
+  updateMem @ImplMem $ \m -> m { imSessionId = Just sid }
   case exit of
     ImplTestsPassed commit iterations tests -> do
       let reviewInput = TDDReviewImplInput
@@ -279,11 +285,11 @@ implAfter input (exit, _sid) = do
 
 -- | TDD ReviewImpl before handler: build context, manage shared memory.
 --
--- Session management is handled internally by the Session effect.
+-- Returns tuple of (context, SessionOperation) for ClaudeCodeLLMHandler.
 tddReviewImplBefore
   :: (Member Session es, Member (Memory TDDMem) es)
   => TDDReviewImplInput
-  -> Eff es TDDReviewImplTemplateCtx
+  -> Eff es (TDDReviewImplTemplateCtx, SessionOperation)
 tddReviewImplBefore input = do
   _ <- getMem @TDDMem
   let ctx = TDDReviewImplTemplateCtx
@@ -292,7 +298,7 @@ tddReviewImplBefore input = do
         , implResult = input.triImplResult
         , diff = input.triDiff
         }
-  pure ctx
+  pure (ctx, StartFresh "v3/tdd-review-impl")
 
 -- | TDD ReviewImpl after handler: route based on decision tools.
 tddReviewImplAfter
@@ -313,11 +319,11 @@ tddReviewImplAfter (exit, _sid) = do
 
 -- | Merger before handler: build context.
 --
--- Session management is handled internally by the Session effect.
+-- Returns tuple of (context, SessionOperation) for ClaudeCodeLLMHandler.
 mergerBefore
   :: (Member Session es)
   => MergerInput
-  -> Eff es MergerTemplateCtx
+  -> Eff es (MergerTemplateCtx, SessionOperation)
 mergerBefore input = do
   let ctx = MergerTemplateCtx
         { parentNode = input.miParentNode
@@ -325,7 +331,7 @@ mergerBefore input = do
         , tddApproval = input.miTddApproval
         , contractSuite = input.miContractSuite
         }
-  pure ctx
+  pure (ctx, StartFresh "v3/merger")
 
 -- | Merger after handler: file MR or reject.
 mergerAfter

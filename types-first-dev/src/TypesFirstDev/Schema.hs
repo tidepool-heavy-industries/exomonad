@@ -46,7 +46,8 @@ $(deriveHasJSONSchema ''Adaptation)
 -- Memory types
 $(deriveHasJSONSchema ''AttemptRecord)
 $(deriveHasJSONSchema ''TDDMem)
-$(deriveHasJSONSchema ''ImplMem)
+-- ImplMem contains SessionId which has no HasJSONSchema instance
+-- It's node-private memory, so not part of public schema
 
 -- Node input types
 $(deriveHasJSONSchema ''ScaffoldInput)
