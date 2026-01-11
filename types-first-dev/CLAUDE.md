@@ -2,6 +2,17 @@
 
 TDD workflow orchestrator using Claude Code agents in Docker containers.
 
+## When to Read Which Docs
+
+| I want to... | Read this |
+|--------------|-----------|
+| Run the TDD workflow | Quick Start (below) |
+| Understand handler signatures | "Types and Architecture" section |
+| Debug Docker auth issues | `DOCKER-AUTH.md` |
+| Understand graph DSL | `../haskell/dsl/core/CLAUDE.md` |
+| Understand session continuation | `../haskell/effects/session-executor/CLAUDE.md` |
+| See implementation notes | `IMPLEMENTATION-NOTES.md` (if exists) |
+
 ## Quick Start
 
 ### Linux/WSL (Recommended)
@@ -285,6 +296,178 @@ Every rubric field should be:
 - **Semantic** - Can't be mechanically derived (otherwise handler should compute it)
 - **Neutral** - No value ordering to optimize for
 - **Actionable** - Non-empty list tells us exactly what to do next
+
+---
+
+## Types and Architecture (V3 Protocol)
+
+### Session Management: SessionId and SessionOperation
+
+**SessionId**: Opaque identifier for Claude Code session continuation:
+
+```haskell
+newtype SessionId = SessionId { unSessionId :: Text }
+```
+
+Sessions persist via shared Docker volume (`~/.claude/`). Each session maintains conversation history and file system state.
+
+**SessionOperation**: Determines session strategy in before-handlers:
+
+```haskell
+data SessionOperation
+  = StartFresh slug
+      -- ^ Create new session identified by slug (e.g., "v3/impl")
+      -- Used for initial node entry or when no prior context needed
+  | ContinueFrom sessionId
+      -- ^ Reuse existing session (preserves conversation history)
+      -- Used for retry loops where we want to thread context
+  | ForkFrom parentId childSlug
+      -- ^ Create child session inheriting parent's state
+      -- Used for parallel sub-tasks
+```
+
+**Pattern: Session Continuation in TDD Loop**
+
+Handlers use Memory effect to thread SessionIds across node transitions:
+
+```haskell
+-- TDDWriteTests after-handler: store session ID
+tddWriteTestsAfter (exit, sid) = do
+  updateMem @TDDMem $ \m -> m { conversationId = Just sid }  -- Store it
+  case exit of
+    TDDTestsReady ... -> pure $ gotoChoice @"v3Impl" ...
+
+-- Impl before-handler: reuse stored session (thread context across retries)
+implBefore input = do
+  mem <- getMem @ImplMem
+  let sessionOp = case mem.imSessionId of
+        Just sid -> ContinueFrom sid    -- REUSE for continuation
+        Nothing -> StartFresh "v3/impl" -- Fresh on first attempt
+  pure (implContext, sessionOp)
+
+-- Impl after-handler: store for next retry
+implAfter input (exit, sid) = do
+  updateMem @ImplMem $ \m -> m { imSessionId = Just sid }  -- Store for retry
+  case exit of
+    ImplTestsPassed ... -> pure $ gotoChoice @"v3TDDReviewImpl" ...
+    ImplRequestRetry ... | input.iiAttemptCount < 5 ->
+      let retryInput = input { iiAttemptCount = input.iiAttemptCount + 1 }
+      pure $ gotoSelf retryInput  -- Self-loop reuses stored session
+```
+
+### Tree Decomposition Types
+
+**NodeInfo**: Identifies a node in the execution tree:
+
+```haskell
+data NodeInfo = NodeInfo
+  { niId :: Text          -- Unique identifier
+  , niBranch :: Text      -- Git branch for this node's work
+  }
+```
+
+Used by parent to refer to children, and by Merger to verify contract compliance across child implementations.
+
+**ChildSpec**: Specification for child sub-task:
+
+```haskell
+data ChildSpec = ChildSpec
+  { csId :: Text
+  , csDescription :: Text
+  , csAcceptanceCriteria :: [Text]
+  , csTargetPath :: FilePath        -- Where child should write code
+  , csTestPath :: FilePath          -- Where child should write tests
+  }
+```
+
+**ParentContext**: Context passed DOWN from parent to child:
+
+```haskell
+data ParentContext = ParentContext
+  { pcInterface :: InterfaceFile    -- Parent's exported interface
+  , pcAssignedCriteria :: [Text]    -- Which criteria the child owns
+  }
+```
+
+**Pattern: Scaffold → Fork → Child Graphs**
+
+1. **Scaffold** analyzes spec, creates ChildSpecs via decomposition
+2. **Fork** node spawns children in parallel with ParentContext
+3. Each **child** runs full TDDGraph recursively:
+   - Impl writes code to csTargetPath
+   - TDDReviewImpl approves implementation
+   - Merger packages result with ParentContext info
+4. **ImplBarrier** collects all MergeComplete results
+5. **Root** returns aggregated MergeComplete
+
+### Payloads: Cross-Node Communication
+
+**InitWorkPayload**: Scaffold output → TDDWriteTests input:
+
+```haskell
+data InitWorkPayload = InitWorkPayload
+  { iwpInterface :: InterfaceFile   -- What types to export
+  , iwpContractSuite :: FilePath    -- Where property tests live
+  }
+```
+
+**TestsReadyPayload**: TDDWriteTests output → Impl input:
+
+```haskell
+data TestsReadyPayload = TestsReadyPayload
+  { trpCommit :: Text              -- Git commit hash after tests written
+  , trpTestFiles :: [FilePath]     -- Which test files were created
+  , trpPendingCriteria :: [Text]   -- Criteria not yet tested
+  }
+```
+
+**ImplResult**: Impl output intermediate:
+
+```haskell
+data ImplResult = ImplResult
+  { irCommit :: Text
+  , irIterations :: Int
+  , irPassedTests :: [Text]
+  }
+```
+
+**MergeComplete**: Final result from Merger:
+
+```haskell
+data MergeComplete = MergeComplete
+  { mcCommit :: Text                -- Merge commit hash
+  , mcAuthor :: Text                -- Merge commit author
+  , mcImpactLevel :: ImpactLevel    -- Severity (Trivial/Additive/Breaking)
+  , mcChanges :: [ChangeEntry]      -- Summary of changes
+  }
+```
+
+### Memory Structure: Shared vs Private
+
+**ImplMem** (Impl node-private):
+
+```haskell
+data ImplMem = ImplMem
+  { imConversationId :: Text        -- For logging
+  , imSessionId :: Maybe SessionId  -- For retry continuation
+  , imPassedTests :: [Text]
+  , imAttemptHistory :: [AttemptRecord]
+  }
+```
+
+Stored at node level, survives across self-loop retries. Enables ContinueFrom strategy.
+
+**TDDMem** (Shared between TDDWriteTests ↔ TDDReviewImpl):
+
+```haskell
+data TDDMem = TDDMem
+  { tmConversationId :: Text
+  , tmCoveredCriteria :: [Text]     -- Tracks test coverage
+  , tmPendingTests :: [Text]        -- Tests written but not passing
+  }
+```
+
+Both nodes see same memory instance. Enables coordinated workflow.
 
 ---
 

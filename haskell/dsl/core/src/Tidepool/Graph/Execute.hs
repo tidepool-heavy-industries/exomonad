@@ -30,6 +30,7 @@ module Tidepool.Graph.Execute
     -- * Graph Execution
   , runGraph
   , runGraphFrom
+  , runGraphWith
     -- * Entry Handler Discovery
   , FindEntryHandler
     -- * Handler Invocation
@@ -193,6 +194,33 @@ runGraph
   -> entryType
   -> Eff es exitType
 runGraph = runGraphFrom @entryHandlerName
+
+
+-- | Run a graph with an explicitly provided entry handler.
+--
+-- This avoids the 'HasField' constraint that 'runGraph' and 'runGraphFrom'
+-- require. Use this when GHC can't derive HasField for your graph record
+-- (common when field types involve type families).
+--
+-- @
+-- -- Instead of:
+-- result <- runGraph handlers input  -- Requires HasField
+--
+-- -- Use:
+-- result <- runGraphWith handlers.v3Scaffold handlers input  -- No HasField needed
+-- @
+runGraphWith
+  :: forall graph entryType targets exitType es handler.
+     ( CallHandler handler entryType es targets
+     , DispatchGoto graph targets es exitType
+     )
+  => handler              -- ^ Entry handler (e.g., @handlers.v3Scaffold@)
+  -> graph (AsHandler es) -- ^ Full handler record (for dispatch to other nodes)
+  -> entryType            -- ^ Input to the entry handler
+  -> Eff es exitType
+runGraphWith entryHandler graph input = do
+  choice <- callHandler entryHandler input
+  dispatchGoto graph choice
 
 
 -- ════════════════════════════════════════════════════════════════════════════

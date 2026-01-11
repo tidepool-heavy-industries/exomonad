@@ -9,6 +9,49 @@ This doc serves two audiences:
 1. **Using Tidepool** - Building agents in consuming repos (anemone, urchin)
 2. **Developing Tidepool** - Working on the framework itself
 
+## Documentation Tree
+
+Navigate to the right docs for your task:
+
+```
+CLAUDE.md  ← YOU ARE HERE (project overview)
+├── haskell/CLAUDE.md  ← Haskell package organization
+│   ├── dsl/core/CLAUDE.md      ← Graph DSL reference (START HERE for handlers)
+│   ├── effects/CLAUDE.md       ← Effect interpreters
+│   │   ├── session-executor/   ← Claude Code subprocess (key for V3)
+│   │   ├── llm-executor/       ← Anthropic/OpenAI API
+│   │   └── ...
+│   ├── runtime/CLAUDE.md       ← Execution backends
+│   │   └── actor/CLAUDE.md     ← Actor model details
+│   ├── protocol/CLAUDE.md      ← Wire formats
+│   └── tools/CLAUDE.md         ← Dev tools (ghci-oracle, sleeptime)
+├── rust/CLAUDE.md             ← Mantle: Claude Code session orchestration
+│   ├── mantle/CLAUDE.md        ← Host-side session CLI
+│   ├── mantle-agent/CLAUDE.md  ← Container-side hook handler + MCP
+│   ├── mantle-hub/CLAUDE.md    ← Session visualization daemon
+│   └── mantle-shared/CLAUDE.md ← Shared types and protocols
+├── types-first-dev/CLAUDE.md   ← V3 TDD protocol project
+├── deploy/CLAUDE.md            ← Cloudflare deployment
+└── typescript/
+    ├── native-gui/CLAUDE.md    ← Solid.js frontend
+    └── telegram-bot/CLAUDE.md  ← Telegram integration
+```
+
+## When to Read Which CLAUDE.md
+
+| I want to... | Read this |
+|--------------|-----------|
+| Define a graph, handlers, annotations | `haskell/dsl/core/CLAUDE.md` |
+| Understand ClaudeCode execution | `haskell/effects/session-executor/CLAUDE.md` |
+| Add or modify an effect interpreter | `haskell/effects/CLAUDE.md` |
+| Understand actor execution model | `haskell/runtime/actor/CLAUDE.md` |
+| Work on types-first-dev V3 protocol | `types-first-dev/CLAUDE.md` |
+| Deploy to Cloudflare Workers | `deploy/CLAUDE.md` |
+| Work on the native server | `haskell/native-server/CLAUDE.md` |
+| Work on mantle session orchestration | `rust/CLAUDE.md` |
+| Handle Claude Code hooks or MCP | `rust/mantle-agent/CLAUDE.md` |
+| Track sessions in the hub | `rust/mantle-hub/CLAUDE.md` |
+
 ---
 
 # Part 1: Using Tidepool

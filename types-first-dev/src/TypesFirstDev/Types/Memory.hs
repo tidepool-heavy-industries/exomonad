@@ -20,6 +20,8 @@ import GHC.Generics (Generic)
 import Tidepool.StructuredOutput (StructuredOutput)
 import Tidepool.Effect.Session (SessionId)
 
+import TypesFirstDev.Types.Nodes (ImplInput)
+
 -- | TDD node memory (shared between TDDWriteTests and TDDReviewImpl).
 -- Prefix: tm
 data TDDMem = TDDMem
@@ -45,6 +47,7 @@ data ImplMem = ImplMem
   , imSessionId      :: Maybe SessionId       -- ^ Current session ID (for retry continuation)
   , imPassedTests    :: [Text]                -- ^ Tests that now pass
   , imAttemptHistory :: [AttemptRecord]       -- ^ History of attempts
+  , imImplInput      :: Maybe ImplInput       -- ^ Stored input for routing in after handler
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)
@@ -56,6 +59,7 @@ emptyImplMem convId = ImplMem
   , imSessionId = Nothing
   , imPassedTests = []
   , imAttemptHistory = []
+  , imImplInput = Nothing
   }
 
 -- | Record of a single impl attempt.

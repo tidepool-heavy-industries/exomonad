@@ -11,62 +11,18 @@ module TypesFirstDev.Handlers.TDDWriteTests
   , tddWriteTestsAfter
   ) where
 
-import Data.Aeson (FromJSON, ToJSON)
 import Data.Text (Text)
 import qualified Data.Text as T
-import GHC.Generics (Generic)
 
 import Control.Monad.Freer (Eff, Member)
 import Tidepool.Effect.Session (Session, SessionOperation(..), SessionId)
-import Tidepool.Graph.Goto (To, GotoChoice, gotoChoice, gotoExit)
+import Tidepool.Graph.Goto (To, GotoChoice, gotoChoice)
 import Tidepool.Graph.Memory (Memory, getMem, updateMem)
-import Tidepool.StructuredOutput (StructuredOutput)
-import Tidepool.StructuredOutput.ClaudeCodeSchema (ClaudeCodeSchema(..))
-import Tidepool.StructuredOutput.DecisionTools (ToDecisionTools(..))
 
 import TypesFirstDev.Context (TDDWriteTestsTemplateCtx(..))
-import TypesFirstDev.Types.Core (Spec)
-import TypesFirstDev.Types.Shared (PlannedTest)
+import TypesFirstDev.Types.Nodes (TDDWriteTestsInput(..), TDDWriteTestsExit(..), ScaffoldInput(..))
 import TypesFirstDev.Types.Payloads (InitWorkPayload, TestsReadyPayload(..))
 import TypesFirstDev.Types.Memory (TDDMem(..))
-import TypesFirstDev.Handlers.Scaffold (ScaffoldInput)
-
--- ════════════════════════════════════════════════════════════════════════════
--- TYPES
--- ════════════════════════════════════════════════════════════════════════════
-
--- | TDD WriteTests node input.
-data TDDWriteTestsInput = TDDWriteTestsInput
-  { twiSpec :: Spec
-    -- ^ Work specification
-  , twiScaffold :: InitWorkPayload
-    -- ^ Scaffold output (interface + contract suite)
-  }
-  deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
-
--- | TDD WriteTests node output (oneOf).
-data TDDWriteTestsExit
-  = TDDTestsReady
-      { tweTestsCommit :: Text
-        -- ^ Commit hash after tests are written
-      , tweTestFiles :: [FilePath]
-        -- ^ Test files created
-      , twePendingCriteria :: [Text]
-        -- ^ Criteria not yet covered
-      }
-  | TDDInvalidScaffold
-      { tweMissingType :: Text
-        -- ^ Type that scaffold should have defined but didn't
-      , tweExpectedLocation :: FilePath
-        -- ^ Where we expected to find the type
-      }
-  deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON, StructuredOutput, ToDecisionTools)
-
-instance ClaudeCodeSchema TDDWriteTestsExit where
-  ccDecisionTools = Just (toDecisionTools @TDDWriteTestsExit)
-  ccParseToolCall = parseToolCall @TDDWriteTestsExit
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- HANDLERS
@@ -90,10 +46,13 @@ tddWriteTestsBefore input = do
   pure (ctx, StartFresh "v3/tdd-write-tests")
 
 -- | After handler: route based on exit type.
+--
+-- Linear flow: TDDWriteTests → ImplBarrier (via Goto, not Arrive).
+-- ImplBarrier is now a LogicNode, not a BarrierNode.
 tddWriteTestsAfter
   :: (Member Session es, Member (Memory TDDMem) es)
   => (TDDWriteTestsExit, SessionId)
-  -> Eff es (GotoChoice '[To "v3Impl" TestsReadyPayload, To "v3Scaffold" ScaffoldInput])
+  -> Eff es (GotoChoice '[To "v3ImplBarrier" TestsReadyPayload, To "v3Scaffold" ScaffoldInput])
 tddWriteTestsAfter (exit, sid) = do
   updateMem @TDDMem $ \m -> m { tmConversationId = T.pack (show sid) }
   case exit of
@@ -103,7 +62,7 @@ tddWriteTestsAfter (exit, sid) = do
             , trpTestFiles = files
             , trpPendingCriteria = criteria
             }
-      pure $ gotoChoice @"v3Impl" payload
+      pure $ gotoChoice @"v3ImplBarrier" payload
 
     TDDInvalidScaffold _missing _location ->
       -- Route back to Scaffold for clarification

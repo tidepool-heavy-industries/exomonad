@@ -4,8 +4,11 @@
 
 -- | Assembled handler record for V3 TDD graph.
 --
--- This module wires all 8 node handlers into a complete TDDGraph record
+-- This module wires all 7 node handlers into a complete TDDGraph record
 -- for execution via the effect interpreter stack.
+--
+-- Linear flow: Scaffold → TDDWriteTests → ImplBarrier → Impl → ...
+-- Child spawning/collection via Subgraph effect (not Fork/Barrier nodes).
 --
 -- Architecture:
 -- * Handlers declare effect constraints (Member Effect es)
@@ -17,7 +20,8 @@ module TypesFirstDev.HandlersAssembled
   ) where
 
 import Tidepool.Graph.Generic (AsHandler)
-import Tidepool.Graph.Goto (ClaudeCodeLLMHandler(..))
+import Tidepool.Graph.Goto (ClaudeCodeLLMHandler(..), ClaudeCodeResult(..))
+import Tidepool.Graph.Types (Exit, Self, ModelChoice(..))
 import Tidepool.Effect.Session (SessionId)
 
 import TypesFirstDev.Graph (TDDGraph(..))
@@ -42,10 +46,11 @@ import TypesFirstDev.Handlers.ImplReviewMerge
   )
 import TypesFirstDev.Handlers.Rebaser
   ( RebaserInput, RebaserExit, rebaserBefore, rebaserAfter )
+import TypesFirstDev.Handlers.ImplBarrier (implBarrierHandler)
 
 -- | Wired handler graph for V3 TDD protocol.
 --
--- All 8 node handlers are wired into this record with:
+-- All 7 node handlers are wired into this record with:
 -- * Correct effect constraints validated by GHC
 -- * Template compilation via TH
 -- * Decision tools for sum type exits (via ClaudeCodeSchema)
@@ -54,7 +59,7 @@ import TypesFirstDev.Handlers.Rebaser
 -- The effect interpreter chain provides:
 -- 1. Session effect - Claude Code conversation management
 -- 2. Memory (TDDMem, ImplMem) - Node state threading
--- 3. Subgraph - Child graph spawning
+-- 3. Subgraph - Child graph spawning (via effect, not Fork node)
 -- 4. IO - System operations
 v3Handlers :: TDDGraph (AsHandler V3Effects)
 v3Handlers = TDDGraph
@@ -65,49 +70,67 @@ v3Handlers = TDDGraph
     -- PHASE 1: SCAFFOLD
     -- ════════════════════════════════════════════════════════════════
 
-  , v3Scaffold = undefined  -- TODO: wire with proper handler type
+  , v3Scaffold = ClaudeCodeLLMHandler @'Sonnet
+      Nothing
+      scaffoldCompiled
+      scaffoldBefore
+      (\(ClaudeCodeResult output _, sid) -> scaffoldAfter (output, sid))
 
     -- ════════════════════════════════════════════════════════════════
-    -- PHASE 2: FORK NODE (pure logic, no handler)
+    -- PHASE 2: TDD WRITE TESTS
     -- ════════════════════════════════════════════════════════════════
 
-  , v3Fork = undefined  -- ForkNode has no handler (pure routing)
+  , v3TDDWriteTests = ClaudeCodeLLMHandler @'Sonnet
+      Nothing
+      tddWriteTestsCompiled
+      tddWriteTestsBefore
+      (\(ClaudeCodeResult output _, sid) -> tddWriteTestsAfter (output, sid))
 
     -- ════════════════════════════════════════════════════════════════
-    -- PHASE 3: TDD WRITE TESTS
+    -- PHASE 3: IMPL BARRIER (Subgraph effect for child collection)
     -- ════════════════════════════════════════════════════════════════
 
-  , v3TDDWriteTests = undefined  -- TODO: wire with proper handler type
+  , v3ImplBarrier = implBarrierHandler
 
     -- ════════════════════════════════════════════════════════════════
-    -- PHASE 4: IMPL BARRIER (pure logic, no handler)
+    -- PHASE 4: IMPL (with self-loop retry)
     -- ════════════════════════════════════════════════════════════════
 
-  , v3ImplBarrier = undefined  -- BarrierNode has no handler (pure routing)
+  , v3Impl = ClaudeCodeLLMHandler @'Sonnet
+      Nothing
+      implCompiled
+      implBefore
+      (\(ClaudeCodeResult output _, sid) -> implAfter (output, sid))
 
     -- ════════════════════════════════════════════════════════════════
-    -- PHASE 5: IMPL (with self-loop retry)
+    -- PHASE 5: TDD REVIEW IMPL (decision tools)
     -- ════════════════════════════════════════════════════════════════
 
-  , v3Impl = undefined  -- TODO: wire with proper handler type
+  , v3TDDReviewImpl = ClaudeCodeLLMHandler @'Sonnet
+      Nothing
+      tddReviewImplCompiled
+      tddReviewImplBefore
+      (\(ClaudeCodeResult output _, sid) -> tddReviewImplAfter (output, sid))
 
     -- ════════════════════════════════════════════════════════════════
-    -- PHASE 6: TDD REVIEW IMPL (decision tools)
+    -- PHASE 6: MERGER
     -- ════════════════════════════════════════════════════════════════
 
-  , v3TDDReviewImpl = undefined  -- TODO: wire with proper handler type
+  , v3Merger = ClaudeCodeLLMHandler @'Sonnet
+      Nothing
+      mergerCompiled
+      mergerBefore
+      (\(ClaudeCodeResult output _, sid) -> mergerAfter (output, sid))
 
     -- ════════════════════════════════════════════════════════════════
-    -- PHASE 7: MERGER
+    -- PHASE 7: REBASER
     -- ════════════════════════════════════════════════════════════════
 
-  , v3Merger = undefined  -- TODO: wire with proper handler type
-
-    -- ════════════════════════════════════════════════════════════════
-    -- PHASE 8: REBASER
-    -- ════════════════════════════════════════════════════════════════
-
-  , v3Rebaser = undefined  -- TODO: wire with proper handler type
+  , v3Rebaser = ClaudeCodeLLMHandler @'Sonnet
+      Nothing
+      rebaserCompiled
+      rebaserBefore
+      (\(ClaudeCodeResult output _, sid) -> rebaserAfter (output, sid))
 
     -- ════════════════════════════════════════════════════════════════
     -- EXIT

@@ -11,77 +11,14 @@ module TypesFirstDev.Handlers.Rebaser
   , rebaserAfter
   ) where
 
-import Data.Aeson (FromJSON, ToJSON)
 import Data.Text (Text)
-import GHC.Generics (Generic)
 
 import Control.Monad.Freer (Eff, Member)
-import Tidepool.Effect.Session (Session, SessionOperation(..))
+import Tidepool.Effect.Session (Session, SessionOperation(..), SessionId)
 import Tidepool.Graph.Goto (To, GotoChoice, gotoChoice)
-import Tidepool.StructuredOutput (StructuredOutput)
-import Tidepool.StructuredOutput.ClaudeCodeSchema (ClaudeCodeSchema(..))
-import Tidepool.StructuredOutput.DecisionTools (ToDecisionTools(..))
 
 import TypesFirstDev.Context (RebaserTemplateCtx(..))
-import TypesFirstDev.Types.Shared (NodeInfo)
-import TypesFirstDev.Types.Payloads (MergeEvent, Adaptation)
-
--- ════════════════════════════════════════════════════════════════════════════
--- FORWARD REFERENCES (to avoid circular imports)
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Placeholder for TDDWriteTestsInput (from TDDWriteTests handler)
-data TDDWriteTestsInput_FwdRef
-
--- | Placeholder for ScaffoldInput (from Scaffold handler)
-data ScaffoldInput_FwdRef
-
--- ════════════════════════════════════════════════════════════════════════════
--- TYPES
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Rebaser node input.
-data RebaserInput = RebaserInput
-  { riNode :: NodeInfo
-    -- ^ Node being rebased
-  , riParentBranch :: Text
-    -- ^ Parent branch name
-  , riNewParentHead :: Text
-    -- ^ New parent HEAD commit hash
-  , riMergeEvent :: MergeEvent
-    -- ^ Merge event from sibling that triggered rebase
-  }
-  deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
-
--- | Rebaser node output (oneOf).
-data RebaserExit
-  = RebaserClean
-      { reNewBase :: Text
-        -- ^ New base commit hash after clean rebase
-      }
-  | RebaserAdapted
-      { reAdaptedBase :: Text
-        -- ^ Adapted base commit hash
-      , reAdaptations :: [Adaptation]
-        -- ^ Adaptations made to handle conflicts
-      }
-  | RebaserConflict
-      { reConflictFile :: FilePath
-        -- ^ File with unresolvable conflict
-      , reOurChange :: Text
-        -- ^ Our version of conflicting code
-      , reTheirChange :: Text
-        -- ^ Their version of conflicting code
-      , reWhyUnresolvable :: Text
-        -- ^ Explanation of why conflict cannot be auto-resolved
-      }
-  deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON, StructuredOutput, ToDecisionTools)
-
-instance ClaudeCodeSchema RebaserExit where
-  ccDecisionTools = Just (toDecisionTools @RebaserExit)
-  ccParseToolCall = parseToolCall @RebaserExit
+import TypesFirstDev.Types.Nodes (RebaserInput(..), RebaserExit(..), TDDWriteTestsInput(..), ScaffoldInput(..))
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- HANDLERS
@@ -106,15 +43,15 @@ rebaserBefore input = do
 -- | After handler: route based on rebase result.
 rebaserAfter
   :: (Member Session es)
-  => RebaserExit
-  -> Eff es (GotoChoice '[To "v3TDDWriteTests" TDDWriteTestsInput_FwdRef, To "v3Scaffold" ScaffoldInput_FwdRef])
-rebaserAfter exit = case exit of
+  => (RebaserExit, SessionId)
+  -> Eff es (GotoChoice '[To "v3TDDWriteTests" TDDWriteTestsInput, To "v3Scaffold" ScaffoldInput])
+rebaserAfter (exit, _sid) = case exit of
   RebaserClean _newBase ->
-    pure $ gotoChoice @"v3TDDWriteTests" (error "TODO: Get TDDWriteTestsInput from memory with updated parent branch" :: TDDWriteTestsInput_FwdRef)
+    pure $ gotoChoice @"v3TDDWriteTests" (error "TODO: Get TDDWriteTestsInput from memory with updated parent branch" :: TDDWriteTestsInput)
 
   RebaserAdapted _newBase _adaptations ->
-    pure $ gotoChoice @"v3TDDWriteTests" (error "TODO: Get TDDWriteTestsInput with adaptations from memory" :: TDDWriteTestsInput_FwdRef)
+    pure $ gotoChoice @"v3TDDWriteTests" (error "TODO: Get TDDWriteTestsInput with adaptations from memory" :: TDDWriteTestsInput)
 
   RebaserConflict _file _ours _theirs _why ->
     -- Escalate unresolvable conflict back to Scaffold for human review
-    pure $ gotoChoice @"v3Scaffold" (error "TODO: Get ScaffoldInput from memory for conflict escalation" :: ScaffoldInput_FwdRef)
+    pure $ gotoChoice @"v3Scaffold" (error "TODO: Get ScaffoldInput from memory for conflict escalation" :: ScaffoldInput)

@@ -36,6 +36,7 @@ import Tidepool.Effect.Session (Session)
 -- Placeholder imports - these will be updated once types are finalized
 import TypesFirstDev.Types.Memory (TDDMem, ImplMem)
 import TypesFirstDev.Types.Core (Spec)
+import TypesFirstDev.Types.Payloads (MergeComplete)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TYPES
@@ -66,7 +67,7 @@ type V3Effects =
   '[ Session
    , Memory TDDMem
    , Memory ImplMem
-   , Subgraph Spec V3Result
+   , Subgraph Spec MergeComplete
    , IO
    ]
 
@@ -86,7 +87,7 @@ type V3Effects =
 -- The SubgraphState is created by withRecursiveGraph in the runner.
 -- The wire function sets up the deferred graph runner before execution.
 runV3Effects
-  :: SubgraphState Spec V3Result
+  :: SubgraphState Spec MergeComplete
   -> TVar TDDMem
   -> TVar ImplMem
   -> WorktreeConfig  -- Provides base directory for session config

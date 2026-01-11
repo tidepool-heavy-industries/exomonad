@@ -743,6 +743,102 @@ work = ClaudeCodeLLMHandler @'Sonnet
   }
 ```
 
+### Execution Pipeline: runGraph
+
+The `runGraph` executor in `tidepool-core/src/Tidepool/Graph/Execute.hs` orchestrates the full ClaudeCode execution flow:
+
+```haskell
+-- Full type signature (simplified)
+runGraph :: (ValidGraphRecord graph, DispatchGoto graph targets es exitType)
+         => graph (AsHandler es)
+         -> input
+         -> Eff es exitType
+
+-- For ClaudeCode nodes specifically:
+executeClaudeCodeHandler
+  :: ClaudeCodeLLMHandler model needs schema targets effs tpl
+  -> needs
+  -> Eff (Session ': effs) (GotoChoice targets)
+```
+
+**Execution steps** (for each ClaudeCode node):
+
+1. **Before phase**: Call `llmBefore input`
+   - Returns `(templateContext, SessionOperation)`
+   - SessionOperation determines session strategy:
+     - `StartFresh slug` → Create new Claude Code session
+     - `ContinueFrom sessionId` → Reuse existing session (preserves context)
+     - `ForkFrom parentId childSlug` → Create child session from parent
+
+2. **Template rendering**: Render `llmSystem` and `llmUser` templates using `templateContext`
+
+3. **Session dispatch**: Via Session effect interpreter
+   - Calls `startSession` (fresh) or `continueSession` (existing)
+   - Session runs `claude -p` via mantle with rendered prompt
+   - Claude Code executes in containerized environment with file access
+
+4. **Structured output parsing**:
+   - Claude Code outputs JSON matching schema
+   - Parsed via `FromJSON` instance into `schema` type
+   - If parsing fails, automatic retry (max 5 retries)
+   - Errors include original LLM response for debugging
+
+5. **After phase**: Call `llmAfter (result, sessionId)`
+   - Result wrapped in `ClaudeCodeResult schema`
+   - SessionId available for storage in Memory
+   - Routes via `gotoChoice` based on parsed output
+
+**Error recovery**: If LLM response violates schema, nag loop retries:
+- Sends back error message + original schema
+- Claude Code retries response (transparent to handler)
+- Max 5 retries before surfacing error to handler
+
+> **Source**: `tidepool-core/src/Tidepool/Graph/Execute.hs:264-442`
+
+### Decision Tools: Structured Output via Tool Calls
+
+ClaudeCode handlers use `ToDecisionTools` typeclass to generate MCP tools from output schemas:
+
+```haskell
+-- Handlers define output as sum types
+data WorkExit
+  = WorkComplete { result :: Text, effort :: Int }
+  | WorkBlocked { blocker :: Text, suggestion :: Text }
+  deriving (Generic, ToDecisionTools)
+
+-- ToDecisionTools auto-generates MCP tools:
+-- Tool 1: "work_complete" { "result": string, "effort": integer }
+-- Tool 2: "work_blocked" { "blocker": string, "suggestion": string }
+
+-- Claude Code picks one tool → tool_result → parseToolCall reconstructs WorkExit
+instance ToDecisionTools WorkExit where
+  toDecisionTools = ... -- Generic derivation
+  parseToolCall toolName args = ... -- Reconstruct from tool name + args
+
+-- Parsing happens automatically in after-phase
+llmAfter (result :: ClaudeCodeResult WorkExit, sessionId) = do
+  -- result.ccrParsedOutput :: WorkExit  -- Already reconstructed!
+  case result.ccrParsedOutput of
+    WorkComplete r e -> pure $ gotoExit (success r e)
+    WorkBlocked b s  -> pure $ gotoExit (failure b s)
+```
+
+**How it works**:
+1. **Schema generation**: Sum type variants → MCP tool definitions
+   - Variant names converted to snake_case (auto prefix stripping): `WorkComplete` → `work_complete`
+   - Fields become required tool parameters
+   - Field names auto-converted to snake_case: `effort` → `effort`
+
+2. **Tool invocation**: Claude Code calls one tool with parameters
+
+3. **Reconstruction**: `parseToolCall` matches tool name and reconstructs value
+   - Exact type safety via Haskell pattern matching
+   - No `Dynamic`, no string-based dispatch
+
+**Advantage over raw JSON**: Tools are self-documenting, Claude understands them as discrete choices rather than free-form JSON.
+
+> **Source**: `tidepool-core/src/Tidepool/StructuredOutput/DecisionTools.hs`
+
 ### Key Differences from LLMHandler
 
 | Aspect | LLMHandler | ClaudeCodeLLMHandler |
