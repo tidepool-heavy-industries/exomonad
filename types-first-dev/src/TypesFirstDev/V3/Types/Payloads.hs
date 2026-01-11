@@ -1,6 +1,7 @@
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE FieldSelectors #-}
 
 -- | Cross-node communication payload types for V3 protocol.
 -- Prefix convention: lowercase acronym of type name
@@ -25,10 +26,10 @@ import TypesFirstDev.V3.Types.Shared (PlannedTest, ImpactLevel, ChangeEntry, Cov
 -- | Scaffold output, input to TDD and Impl.
 -- Prefix: iwp
 data InitWorkPayload = InitWorkPayload
-  { iwpScaffoldCommit :: Text
-  , iwpInterfaceFile  :: FilePath
-  , iwpContractSuite  :: FilePath
-  , iwpTestPlan       :: [PlannedTest]
+  { iwpScaffoldCommit :: Text           -- ^ Commit hash with scaffold
+  , iwpInterfaceFile  :: FilePath       -- ^ Path to interface file
+  , iwpContractSuite  :: FilePath       -- ^ Path to contract test suite
+  , iwpTestPlan       :: [PlannedTest]  -- ^ Planned tests from scaffold
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON, StructuredOutput)
@@ -36,9 +37,9 @@ data InitWorkPayload = InitWorkPayload
 -- | TDD WriteTests output, input to ImplBarrier.
 -- Prefix: trp
 data TestsReadyPayload = TestsReadyPayload
-  { trpCommit          :: Text
-  , trpTestFiles       :: [FilePath]
-  , trpPendingCriteria :: [Text]  -- ^ Criteria with tests now waiting
+  { trpCommit          :: Text      -- ^ Commit hash with tests
+  , trpTestFiles       :: [FilePath]  -- ^ Test file paths
+  , trpPendingCriteria :: [Text]    -- ^ Criteria with tests now waiting
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON, StructuredOutput)
@@ -46,9 +47,9 @@ data TestsReadyPayload = TestsReadyPayload
 -- | Impl output, input to TDD ReviewImpl.
 -- Prefix: ir
 data ImplResult = ImplResult
-  { irCommitHash  :: Text
-  , irIterations  :: Int
-  , irPassedTests :: [Text]
+  { irCommitHash  :: Text    -- ^ Commit hash with implementation
+  , irIterations  :: Int     -- ^ Number of iterations taken
+  , irPassedTests :: [Text]  -- ^ Test names that passed
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON, StructuredOutput)
@@ -56,8 +57,8 @@ data ImplResult = ImplResult
 -- | TDD Approved output, input to Merger.
 -- Prefix: ta
 data TDDApproval = TDDApproval
-  { taSignOff        :: Text
-  , taCoverageReport :: CoverageReport
+  { taSignOff        :: Text            -- ^ TDD sign-off message
+  , taCoverageReport :: CoverageReport  -- ^ Criteria coverage report
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON, StructuredOutput)
@@ -65,10 +66,10 @@ data TDDApproval = TDDApproval
 -- | Merger output, broadcast to parent and siblings.
 -- Prefix: mc
 data MergeComplete = MergeComplete
-  { mcCommit      :: Text
-  , mcAuthor      :: Text
-  , mcImpactLevel :: ImpactLevel
-  , mcChanges     :: [ChangeEntry]
+  { mcCommit      :: Text          -- ^ Merge commit hash
+  , mcAuthor      :: Text          -- ^ Who authored the changes
+  , mcImpactLevel :: ImpactLevel   -- ^ Impact level of changes
+  , mcChanges     :: [ChangeEntry] -- ^ List of changes made
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON, StructuredOutput)
@@ -76,9 +77,9 @@ data MergeComplete = MergeComplete
 -- | Broadcast payload for sibling notification (subset of MergeComplete).
 -- Prefix: me
 data MergeEvent = MergeEvent
-  { meAuthor      :: Text
-  , meImpactLevel :: ImpactLevel
-  , meChanges     :: [ChangeEntry]
+  { meAuthor      :: Text          -- ^ Who authored the changes
+  , meImpactLevel :: ImpactLevel   -- ^ Impact level of changes
+  , meChanges     :: [ChangeEntry] -- ^ List of changes made
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON, StructuredOutput)
@@ -86,9 +87,9 @@ data MergeEvent = MergeEvent
 -- | Rebaser adaptation record.
 -- Prefix: ad
 data Adaptation = Adaptation
-  { adSymbol :: Text
-  , adChange :: Text
-  , adReason :: Text
+  { adSymbol :: Text  -- ^ Symbol that was adapted
+  , adChange :: Text  -- ^ What change was made
+  , adReason :: Text  -- ^ Why the adaptation was needed
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON, StructuredOutput)

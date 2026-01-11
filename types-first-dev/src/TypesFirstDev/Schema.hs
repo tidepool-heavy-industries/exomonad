@@ -1,58 +1,60 @@
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell #-}
 
--- | JSON Schema instances for types-first-dev types.
+-- | JSON Schema instances for V3 types.
 --
 -- Separate module due to TH staging requirements.
 module TypesFirstDev.Schema
-  ( -- * Re-exports from Types
-    module TypesFirstDev.Types
+  ( -- * Re-exports from V3 Types
+    module TypesFirstDev.V3.Types
   ) where
 
 import Tidepool.Schema (deriveHasJSONSchema, HasJSONSchema(..), enumSchema)
 
-import TypesFirstDev.Types
+import TypesFirstDev.V3.Types
 
+-- Core types
+$(deriveHasJSONSchema ''Criterion)
+$(deriveHasJSONSchema ''Constraints)
+$(deriveHasJSONSchema ''ParentContext)
+$(deriveHasJSONSchema ''Spec)
 
--- | Manual HasJSONSchema for ProjectType (string enum).
--- Uses enumSchema helper for string enums.
-instance HasJSONSchema ProjectType where
-  jsonSchema = enumSchema ["PureLibrary", "ServantServer", "CLIApp"]
+-- Enum types need manual instances (must come before types that use them)
+instance HasJSONSchema ImpactLevel where
+  jsonSchema = enumSchema ["Trivial", "Additive", "Breaking"]
 
--- | Manual HasJSONSchema for ResumeStrategy (string enum).
--- ResumeStrategy comes from tidepool-claude-code-executor.
-instance HasJSONSchema ResumeStrategy where
-  jsonSchema = enumSchema ["NoResume", "AlwaysResume", "SmartResume"]
+instance HasJSONSchema ChangeType where
+  jsonSchema = enumSchema ["SignatureChange", "NewExport", "RemovedExport", "BehaviorChange"]
 
+-- Shared types
+$(deriveHasJSONSchema ''PlannedTest)
+$(deriveHasJSONSchema ''Critique)
+$(deriveHasJSONSchema ''ChangeEntry)
+$(deriveHasJSONSchema ''NodeInfo)
+$(deriveHasJSONSchema ''CoverageReport)
+$(deriveHasJSONSchema ''ChildSpec)
+$(deriveHasJSONSchema ''InterfaceFile)
 
--- Derive HasJSONSchema instances for record types used in graph execution.
--- Note: Sum types like TestResult can't use deriveHasJSONSchema.
--- Order matters due to TH staging: types must be derived before types that reference them.
-
--- Basic types
-$(deriveHasJSONSchema ''FunctionSig)
-$(deriveHasJSONSchema ''TestPriority)
-
--- Per-function rubric types (LLM sensor output - semantic only)
--- BoundaryNote must come before FunctionRubric which uses it
-$(deriveHasJSONSchema ''BoundaryNote)
-$(deriveHasJSONSchema ''FunctionRubric)
-$(deriveHasJSONSchema ''TestFunctionRubric)
-$(deriveHasJSONSchema ''Blocker)
-
--- v3 semantic description types
-$(deriveHasJSONSchema ''FunctionExample)
-$(deriveHasJSONSchema ''FunctionSemantics)
-$(deriveHasJSONSchema ''StubsOutput)
-
--- Agent result types (use rubric types)
-$(deriveHasJSONSchema ''TestsResult)
+-- Payload types
+$(deriveHasJSONSchema ''InitWorkPayload)
+$(deriveHasJSONSchema ''TestsReadyPayload)
 $(deriveHasJSONSchema ''ImplResult)
-$(deriveHasJSONSchema ''FixResult)
+$(deriveHasJSONSchema ''TDDApproval)
+$(deriveHasJSONSchema ''MergeComplete)
+$(deriveHasJSONSchema ''MergeEvent)
+$(deriveHasJSONSchema ''Adaptation)
 
--- Entry and internal types
-$(deriveHasJSONSchema ''StackSpec)
-$(deriveHasJSONSchema ''TypeDefinitions)
-$(deriveHasJSONSchema ''ForkInput)
--- ParallelResults not derived - it's internal and contains WorktreePath
--- which has no HasJSONSchema instance
+-- Memory types
+$(deriveHasJSONSchema ''AttemptRecord)
+$(deriveHasJSONSchema ''TDDMem)
+$(deriveHasJSONSchema ''ImplMem)
+
+-- Node input types
+$(deriveHasJSONSchema ''ScaffoldInput)
+$(deriveHasJSONSchema ''TDDWriteTestsInput)
+$(deriveHasJSONSchema ''TDDReviewImplInput)
+$(deriveHasJSONSchema ''ImplInput)
+$(deriveHasJSONSchema ''MergerInput)
+$(deriveHasJSONSchema ''RebaserInput)
+
+-- Node exit types (sum types need manual handling or simpler approach)
+-- For now, we derive the exit types that are records

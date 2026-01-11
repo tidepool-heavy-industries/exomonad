@@ -1,6 +1,7 @@
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE FieldSelectors #-}
 
 -- | Core entry types for V3 protocol.
 -- Prefix convention: lowercase acronym of type name (e.g., Spec -> s)
@@ -31,19 +32,19 @@ data Spec = Spec
   deriving anyclass (FromJSON, ToJSON, StructuredOutput)
 
 -- | Complexity constraints for implementation.
--- Prefix: c
+-- Prefix: cn (constraints)
 data Constraints = Constraints
-  { cTime  :: Maybe Text  -- ^ e.g. "O(n log n)"
-  , cSpace :: Maybe Text  -- ^ e.g. "O(1)"
+  { cnTime  :: Maybe Text  -- ^ e.g. "O(n log n)"
+  , cnSpace :: Maybe Text  -- ^ e.g. "O(1)"
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON, StructuredOutput)
 
 -- | Single acceptance criterion.
--- Prefix: crit
+-- Prefix: c
 data Criterion = Criterion
-  { critId   :: Text  -- ^ Unique ID within spec
-  , critText :: Text  -- ^ Human-readable requirement
+  { cId   :: Text  -- ^ Unique ID within spec
+  , cText :: Text  -- ^ Human-readable requirement
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON, StructuredOutput)

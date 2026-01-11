@@ -1,6 +1,7 @@
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE FieldSelectors #-}
 
 -- | Node-private memory types for V3 protocol.
 -- Prefix convention: lowercase acronym of type name

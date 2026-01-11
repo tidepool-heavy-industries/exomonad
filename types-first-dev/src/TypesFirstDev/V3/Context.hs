@@ -193,14 +193,14 @@ instance ToGVal GingerM Spec where
 
 instance ToGVal GingerM Constraints where
   toGVal c = dict
-    [ ("time", toGVal c.cTime)
-    , ("space", toGVal c.cSpace)
+    [ ("time", toGVal c.cnTime)
+    , ("space", toGVal c.cnSpace)
     ]
 
 instance ToGVal GingerM Criterion where
   toGVal c = dict
-    [ ("id", toGVal c.critId)
-    , ("text", toGVal c.critText)
+    [ ("id", toGVal c.cId)
+    , ("text", toGVal c.cText)
     ]
 
 instance ToGVal GingerM ParentContext where

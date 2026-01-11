@@ -1,6 +1,7 @@
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE FieldSelectors #-}
 
 -- | Node input/output types for V3 protocol.
 -- Prefix convention: lowercase acronym of type name
@@ -49,8 +50,8 @@ import TypesFirstDev.V3.Types.Payloads
 -- | Scaffold node input.
 -- Prefix: si
 data ScaffoldInput = ScaffoldInput
-  { siSpec          :: Spec
-  , siParentContext :: Maybe ParentContext
+  { siSpec          :: Spec                  -- ^ Work specification
+  , siParentContext :: Maybe ParentContext   -- ^ Context from parent if child
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON, StructuredOutput)
@@ -81,8 +82,8 @@ data ScaffoldExit
 -- | TDDWriteTests node input.
 -- Prefix: twi
 data TDDWriteTestsInput = TDDWriteTestsInput
-  { twiSpec     :: Spec
-  , twiScaffold :: InitWorkPayload
+  { twiSpec     :: Spec             -- ^ Work specification
+  , twiScaffold :: InitWorkPayload  -- ^ Scaffold output
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON, StructuredOutput)
@@ -109,10 +110,10 @@ data TDDWriteTestsExit
 -- | TDDReviewImpl node input.
 -- Prefix: tri
 data TDDReviewImplInput = TDDReviewImplInput
-  { triSpec       :: Spec
-  , triScaffold   :: InitWorkPayload
-  , triImplResult :: ImplResult
-  , triDiff       :: Text
+  { triSpec       :: Spec             -- ^ Work specification
+  , triScaffold   :: InitWorkPayload  -- ^ Scaffold output
+  , triImplResult :: ImplResult       -- ^ Implementation result to review
+  , triDiff       :: Text             -- ^ Diff of implementation changes
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON, StructuredOutput)
@@ -142,12 +143,12 @@ data TDDReviewImplExit
 -- | Impl node input.
 -- Prefix: ii
 data ImplInput = ImplInput
-  { iiSpec         :: Spec
-  , iiScaffold     :: InitWorkPayload
-  , iiTestsReady   :: TestsReadyPayload
-  , iiChildMerges  :: Maybe [MergeComplete]
-  , iiAttemptCount :: Int
-  , iiCritiqueList :: Maybe [Critique]
+  { iiSpec         :: Spec                   -- ^ Work specification
+  , iiScaffold     :: InitWorkPayload        -- ^ Scaffold output
+  , iiTestsReady   :: TestsReadyPayload      -- ^ TDD test readiness payload
+  , iiChildMerges  :: Maybe [MergeComplete]  -- ^ Child merge results if any
+  , iiAttemptCount :: Int                    -- ^ Current attempt number
+  , iiCritiqueList :: Maybe [Critique]       -- ^ TDD critiques to address
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON, StructuredOutput)
@@ -190,10 +191,10 @@ data ImplExit
 -- | Merger node input.
 -- Prefix: mi
 data MergerInput = MergerInput
-  { miParentNode    :: NodeInfo
-  , miChildNode     :: NodeInfo
-  , miTddApproval   :: TDDApproval
-  , miContractSuite :: FilePath
+  { miParentNode    :: NodeInfo     -- ^ Parent node info
+  , miChildNode     :: NodeInfo     -- ^ Child node to merge
+  , miTddApproval   :: TDDApproval  -- ^ TDD approval from child
+  , miContractSuite :: FilePath     -- ^ Contract suite path
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON, StructuredOutput)
@@ -230,10 +231,10 @@ data MergeRejectedReason
 -- | Rebaser node input.
 -- Prefix: ri
 data RebaserInput = RebaserInput
-  { riNode          :: NodeInfo
-  , riParentBranch  :: Text
-  , riNewParentHead :: Text
-  , riMergeEvent    :: MergeEvent
+  { riNode          :: NodeInfo   -- ^ Node being rebased
+  , riParentBranch  :: Text       -- ^ Parent branch name
+  , riNewParentHead :: Text       -- ^ New parent HEAD commit
+  , riMergeEvent    :: MergeEvent -- ^ Merge event triggering rebase
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON, StructuredOutput)

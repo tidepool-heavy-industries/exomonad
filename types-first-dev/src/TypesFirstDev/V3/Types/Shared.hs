@@ -1,6 +1,7 @@
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE FieldSelectors #-}
 
 -- | Shared workflow types for V3 protocol.
 -- Prefix convention: lowercase acronym of type name
@@ -37,10 +38,10 @@ data PlannedTest = PlannedTest
 -- | TDD critique of implementation.
 -- Prefix: cq
 data Critique = Critique
-  { cqFile        :: FilePath
-  , cqLine        :: Int
-  , cqIssue       :: Text
-  , cqRequiredFix :: Text
+  { cqFile        :: FilePath  -- ^ Path to file with issue
+  , cqLine        :: Int       -- ^ Line number
+  , cqIssue       :: Text      -- ^ Description of the issue
+  , cqRequiredFix :: Text      -- ^ What fix is required
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON, StructuredOutput)
@@ -56,9 +57,9 @@ data ImpactLevel
 -- | Entry in changelog for a merge.
 -- Prefix: ce
 data ChangeEntry = ChangeEntry
-  { ceSymbol :: Text
-  , ceType   :: ChangeType
-  , ceReason :: Text
+  { ceSymbol :: Text        -- ^ Symbol that changed
+  , ceType   :: ChangeType  -- ^ Kind of change
+  , ceReason :: Text        -- ^ Why this change was made
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON, StructuredOutput)
@@ -75,8 +76,8 @@ data ChangeType
 -- | Node identification for routing.
 -- Prefix: ni
 data NodeInfo = NodeInfo
-  { niId     :: Text
-  , niBranch :: Text
+  { niId     :: Text  -- ^ Node identifier
+  , niBranch :: Text  -- ^ Git branch for this node
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON, StructuredOutput)
@@ -84,8 +85,8 @@ data NodeInfo = NodeInfo
 -- | Coverage report from TDD review.
 -- Prefix: cr
 data CoverageReport = CoverageReport
-  { crCriteriaWithTests :: [(Text, Text)]  -- ^ (criterionId, testName)
-  , crCriteriaMissing   :: [Text]          -- ^ criterionIds without tests
+  { crCriteriaWithTests :: [(Text, Text)]  -- ^ Pairs of (criterionId, testName)
+  , crCriteriaMissing   :: [Text]          -- ^ Criterion IDs without tests
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON, StructuredOutput)
@@ -93,11 +94,11 @@ data CoverageReport = CoverageReport
 -- | Child specification for tree decomposition.
 -- Prefix: cs
 data ChildSpec = ChildSpec
-  { csId                 :: Text
-  , csDescription        :: Text
-  , csAcceptanceCriteria :: [Criterion]
-  , csTargetPath         :: FilePath
-  , csTestPath           :: FilePath
+  { csId                 :: Text        -- ^ Child identifier
+  , csDescription        :: Text        -- ^ What the child implements
+  , csAcceptanceCriteria :: [Criterion] -- ^ Criteria assigned to child
+  , csTargetPath         :: FilePath    -- ^ Target path for child
+  , csTestPath           :: FilePath    -- ^ Test path for child
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON, StructuredOutput)
@@ -105,8 +106,8 @@ data ChildSpec = ChildSpec
 -- | Interface file definition.
 -- Prefix: if
 data InterfaceFile = InterfaceFile
-  { ifPath    :: FilePath
-  , ifExports :: [Text]
+  { ifPath    :: FilePath  -- ^ Path to interface file
+  , ifExports :: [Text]    -- ^ Exported symbols
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON, StructuredOutput)
