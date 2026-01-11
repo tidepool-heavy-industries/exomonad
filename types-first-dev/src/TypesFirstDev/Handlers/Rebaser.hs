@@ -110,10 +110,11 @@ rebaserAfter
   -> Eff es (GotoChoice '[To "v3TDDWriteTests" TDDWriteTestsInput_FwdRef, To "v3Scaffold" ScaffoldInput_FwdRef])
 rebaserAfter exit = case exit of
   RebaserClean _newBase ->
-    pure $ gotoChoice @"v3TDDWriteTests" (error "TODO: construct TDDWriteTestsInput with new parent state" :: TDDWriteTestsInput_FwdRef)
+    pure $ gotoChoice @"v3TDDWriteTests" (error "TODO: Get TDDWriteTestsInput from memory with updated parent branch" :: TDDWriteTestsInput_FwdRef)
 
   RebaserAdapted _newBase _adaptations ->
-    pure $ gotoChoice @"v3TDDWriteTests" (error "TODO: construct TDDWriteTestsInput with adaptations applied" :: TDDWriteTestsInput_FwdRef)
+    pure $ gotoChoice @"v3TDDWriteTests" (error "TODO: Get TDDWriteTestsInput with adaptations from memory" :: TDDWriteTestsInput_FwdRef)
 
   RebaserConflict _file _ours _theirs _why ->
-    pure $ gotoChoice @"v3Scaffold" (error "TODO: construct ScaffoldInput for conflict escalation" :: ScaffoldInput_FwdRef)
+    -- Escalate unresolvable conflict back to Scaffold for human review
+    pure $ gotoChoice @"v3Scaffold" (error "TODO: Get ScaffoldInput from memory for conflict escalation" :: ScaffoldInput_FwdRef)

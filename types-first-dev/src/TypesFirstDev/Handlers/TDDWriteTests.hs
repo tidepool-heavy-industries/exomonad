@@ -107,4 +107,5 @@ tddWriteTestsAfter (exit, sid) = do
 
     TDDInvalidScaffold _missing _location ->
       -- Route back to Scaffold for clarification
-      error "TODO: construct ScaffoldInput for clarification"
+      -- ScaffoldInput requires original spec from Scaffold - needs executor context
+      pure $ gotoChoice @"v3Scaffold" (error "TODO: Retrieve original ScaffoldInput from TDDMem for clarification" :: ScaffoldInput)

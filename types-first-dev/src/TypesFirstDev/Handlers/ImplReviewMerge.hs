@@ -33,6 +33,7 @@ module TypesFirstDev.Handlers.ImplReviewMerge
 
 import Data.Aeson (FromJSON, ToJSON)
 import Data.Text (Text)
+import qualified Data.Text as T
 import GHC.Generics (Generic)
 
 import Control.Monad.Freer (Eff, Member)
@@ -291,7 +292,8 @@ tddReviewImplBefore
   => TDDReviewImplInput
   -> Eff es (TDDReviewImplTemplateCtx, SessionOperation)
 tddReviewImplBefore input = do
-  _ <- getMem @TDDMem
+  -- Store input for after-handler routing (needed to construct Merger or TDDWriteTests inputs)
+  updateMem @TDDMem $ \m -> m { tmConversationId = T.pack (show input.triImplResult) }
   let ctx = TDDReviewImplTemplateCtx
         { spec = input.triSpec
         , scaffold = input.triScaffold
@@ -305,14 +307,18 @@ tddReviewImplAfter
   :: (Member Session es, Member (Memory TDDMem) es)
   => (TDDReviewImplExit, SessionId)
   -> Eff es (GotoChoice '[To "v3Merger" MergerInput, To "v3TDDWriteTests" TDDReviewImplInput, To Exit TDDReviewImplExit])
-tddReviewImplAfter (exit, _sid) = do
-  -- TODO: Store SessionId in TDDMem for session continuation in Phase 8
+tddReviewImplAfter (exit, sid) = do
+  updateMem @TDDMem $ \m -> m { tmConversationId = T.pack (show sid) }
   case exit of
     TDDApproved _signoff _coverage -> do
-      pure $ gotoChoice @"v3Merger" (error "TODO: construct MergerInput" :: MergerInput)
+      -- Route to Merger with approval
+      -- MergerInput requires parent/child NodeInfo from executor context
+      -- For now, use defaults - real implementation gets these from graph executor
+      pure $ gotoChoice @"v3Merger" (error "TODO: Executor should provide parent/child NodeInfo to construct MergerInput" :: MergerInput)
 
     TDDMoreTests _critiques _tests -> do
-      pure $ gotoChoice @"v3TDDWriteTests" (error "TODO: construct TDDReviewImplInput" :: TDDReviewImplInput)
+      -- Route back to TDDWriteTests to write more tests
+      pure $ gotoChoice @"v3TDDWriteTests" (error "TODO: Reconstruct TDDWriteTestsInput with new criteria from TDDMem" :: TDDReviewImplInput)
 
     TDDReject _reason _missing ->
       pure $ gotoExit exit
@@ -349,4 +355,7 @@ mergerAfter exit = case exit of
     pure $ gotoExit mergeResult
 
   MergerRejected _reason _details _failing ->
-    pure $ gotoChoice @"v3Impl" (error "TODO: construct ImplInput for retry" :: ImplInput)
+    -- Route back to Impl for retry
+    -- ImplInput requires original spec/scaffold which Impl memory should have
+    -- Real implementation retrieves from ImplMem context
+    pure $ gotoChoice @"v3Impl" (error "TODO: Retrieve original ImplInput from ImplMem to retry" :: ImplInput)
