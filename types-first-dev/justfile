@@ -1,0 +1,72 @@
+# types-first-dev justfile
+# Run `just` to see available recipes
+
+set shell := ["bash", "-uc"]
+
+# Default: show available recipes
+default:
+    @just --list
+
+# ─────────────────────────────────────────────────────────────
+# Mantle Stack
+# ─────────────────────────────────────────────────────────────
+
+# Rebuild entire mantle stack (Docker image + host binary)
+rebuild-mantle:
+    @echo "Building Docker image..."
+    cd ../rust && docker build -t tidepool/claude-code:latest -f mantle/Dockerfile .
+    @echo ""
+    @echo "Building host mantle binary..."
+    cd ../rust && cargo build --release -p mantle
+    @echo ""
+    @echo "✓ Mantle stack rebuilt"
+
+# Rebuild just the Docker image (faster, no Rust compile)
+rebuild-image:
+    cd ../rust && docker build -t tidepool/claude-code:latest -f mantle/Dockerfile .
+    @echo "✓ Docker image rebuilt"
+
+# Rebuild just the host mantle binary
+rebuild-mantle-bin:
+    cd ../rust && cargo build --release -p mantle
+    @echo "✓ Mantle binary rebuilt"
+
+# ─────────────────────────────────────────────────────────────
+# Docker Auth
+# ─────────────────────────────────────────────────────────────
+
+# Start auth-shell container for claude login
+auth-up:
+    docker-compose up -d
+
+# Stop auth-shell container
+auth-down:
+    docker-compose down
+
+# Run claude login in auth-shell
+auth-login:
+    docker-compose exec auth-shell claude login
+
+# ─────────────────────────────────────────────────────────────
+# Running
+# ─────────────────────────────────────────────────────────────
+
+# Run with default spec
+run:
+    ./run-actor-graph.sh specs/url-shortener.yaml
+
+# Run with custom spec
+run-spec spec:
+    ./run-actor-graph.sh {{spec}}
+
+# ─────────────────────────────────────────────────────────────
+# Building
+# ─────────────────────────────────────────────────────────────
+
+# Build types-first-dev
+build:
+    cabal build types-first-dev
+
+# Build runner executable
+build-runner:
+    cabal build types-first-dev-runner
