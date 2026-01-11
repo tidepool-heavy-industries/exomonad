@@ -10,6 +10,7 @@
 //!
 //! Core types and utilities are re-exported from `mantle-shared`.
 
+pub mod config;
 pub mod docker;
 pub mod session;
 pub mod stream_parser;

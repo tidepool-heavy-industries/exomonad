@@ -2,6 +2,22 @@
 
 TDD workflow orchestrator using Claude Code agents.
 
+## Quick Start
+
+```bash
+# 1. Setup Docker auth (one-time)
+docker-compose up -d
+docker-compose exec auth-shell claude login
+
+# 2. Configure mantle
+cp mantle-config.example.toml ~/.config/mantle/config.toml
+
+# 3. Run
+./run-actor-graph.sh specs/url-shortener.yaml
+```
+
+See [DOCKER-AUTH.md](DOCKER-AUTH.md) for detailed setup instructions.
+
 ## Running
 
 ```bash

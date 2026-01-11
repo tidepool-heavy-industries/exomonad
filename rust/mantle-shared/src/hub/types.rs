@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use crate::events::StreamEvent;
+
 /// Session state enum.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -12,6 +14,7 @@ pub enum SessionState {
     Running,
     Completed,
     Failed,
+    Cancelled,
 }
 
 impl std::fmt::Display for SessionState {
@@ -21,6 +24,7 @@ impl std::fmt::Display for SessionState {
             SessionState::Running => write!(f, "running"),
             SessionState::Completed => write!(f, "completed"),
             SessionState::Failed => write!(f, "failed"),
+            SessionState::Cancelled => write!(f, "cancelled"),
         }
     }
 }
@@ -34,6 +38,7 @@ impl std::str::FromStr for SessionState {
             "running" => Ok(SessionState::Running),
             "completed" => Ok(SessionState::Completed),
             "failed" => Ok(SessionState::Failed),
+            "cancelled" => Ok(SessionState::Cancelled),
             _ => Err(format!("Unknown session state: {}", s)),
         }
     }
@@ -106,10 +111,20 @@ pub struct SessionInfo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum HubEvent {
+    /// Session registered and pending
     SessionStarted { session: SessionInfo },
+    /// Session metadata updated
     SessionUpdated { session: SessionInfo },
+    /// Session completed with result
     SessionCompleted { session_id: String, result: SessionResult },
+    /// Session failed with error
     SessionFailed { session_id: String, error: String },
+    /// Real-time stream event from running session
+    SessionEvent {
+        session_id: String,
+        event: StreamEvent,
+        timestamp: String,
+    },
 }
 
 /// Graph data for frontend visualization.

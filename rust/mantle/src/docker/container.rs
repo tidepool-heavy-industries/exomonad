@@ -8,6 +8,7 @@ use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
+use crate::config::Config;
 use crate::stream_parser::StreamParser;
 use mantle_shared::events::RunResult;
 use mantle_shared::humanize::eprint_event_humanized;
@@ -74,6 +75,17 @@ impl SessionLogger {
     }
 }
 
+/// How to provide Claude authentication credentials to the container.
+#[derive(Debug, Clone)]
+pub enum AuthMount {
+    /// Mount a Docker named volume (e.g., "tidepool-claude-auth").
+    /// Use this when auth was done in a shared container via `claude login`.
+    Volume(String),
+    /// Bind mount a host directory (e.g., "/Users/foo/.claude").
+    /// Use this for local development with host auth.
+    BindMount(PathBuf),
+}
+
 /// Configuration for a container instance.
 #[derive(Debug, Clone)]
 pub struct ContainerConfig {
@@ -83,8 +95,8 @@ pub struct ContainerConfig {
     pub worktree_path: PathBuf,
     /// Path to hook socket (optional, for hook event forwarding)
     pub hub_socket: Option<PathBuf>,
-    /// Path to Claude config directory (~/.claude)
-    pub claude_home: PathBuf,
+    /// How to provide Claude auth credentials
+    pub auth_mount: AuthMount,
     /// Session ID (used for container naming)
     pub session_id: String,
     /// Claude Code arguments
@@ -97,22 +109,47 @@ pub struct ContainerConfig {
 
 impl ContainerConfig {
     /// Create a new container config.
+    ///
+    /// Loads mantle config from `~/.config/mantle/config.toml` to determine:
+    /// - Auth mount (named volume vs host bind mount)
+    /// - Docker image
+    ///
+    /// Falls back to host's `~/.claude` if no auth_volume configured.
     pub fn new(
         session_id: String,
         worktree_path: PathBuf,
         claude_args: Vec<String>,
     ) -> Result<Self> {
-        // Find Claude home directory
-        let claude_home = dirs::home_dir()
-            .map(|h| h.join(".claude"))
-            .filter(|p| p.exists())
-            .ok_or_else(|| DockerError::ClaudeHomeNotFound(PathBuf::from("~/.claude")))?;
+        // Load config (returns defaults if file doesn't exist)
+        let config = Config::load().map_err(|e| {
+            DockerError::OutputRead(format!("Failed to load config: {}", e))
+        })?;
+
+        // Determine auth mount from config
+        let auth_mount = if let Some(volume) = config.docker.auth_volume {
+            tracing::info!("Using auth volume from config: {}", volume);
+            AuthMount::Volume(volume)
+        } else {
+            // Fall back to host's ~/.claude
+            let claude_home = dirs::home_dir()
+                .map(|h| h.join(".claude"))
+                .filter(|p| p.exists())
+                .ok_or_else(|| DockerError::ClaudeHomeNotFound(PathBuf::from("~/.claude")))?;
+            tracing::info!("Using host auth bind mount: {:?}", claude_home);
+            AuthMount::BindMount(claude_home)
+        };
+
+        // Use image from config or default
+        let image = config
+            .docker
+            .image
+            .unwrap_or_else(|| "mantle-agent:latest".to_string());
 
         Ok(Self {
-            image: "mantle-agent:latest".to_string(),
+            image,
             worktree_path,
             hub_socket: None,
-            claude_home,
+            auth_mount,
             session_id,
             claude_args,
             timeout_secs: 0,
@@ -156,7 +193,15 @@ impl ContainerConfig {
 /// Parses the stream and returns a [`RunResult`] directly.
 ///
 /// Container dies when this process dies - no orphans possible.
-pub fn run_claude_direct(config: &ContainerConfig) -> Result<RunResult> {
+///
+/// # Arguments
+/// * `config` - Container configuration
+/// * `event_sink` - Optional callback invoked for each parsed `StreamEvent`.
+///   Used for forwarding events to hub for real-time supervision.
+pub fn run_claude_direct<F>(config: &ContainerConfig, mut event_sink: Option<F>) -> Result<RunResult>
+where
+    F: FnMut(&mantle_shared::events::StreamEvent),
+{
     let container_name = config.container_name();
 
     // Create session logger for file-based logging
@@ -173,13 +218,25 @@ pub fn run_claude_direct(config: &ContainerConfig) -> Result<RunResult> {
         .arg(&container_name)
         // Mount worktree (read-write)
         .arg("-v")
-        .arg(format!("{}:/workspace", config.worktree_path.display()))
-        // Mount claude config to container user's home (image runs as 'user')
-        .arg("-v")
-        .arg(format!("{}:/home/user/.claude", config.claude_home.display()))
-        // Working directory
-        .arg("-w")
-        .arg("/workspace");
+        .arg(format!("{}:/workspace", config.worktree_path.display()));
+
+    // Mount claude auth credentials
+    // Either a named Docker volume (shared auth) or host bind mount (local dev)
+    match &config.auth_mount {
+        AuthMount::Volume(vol_name) => {
+            logger.log("MANTLE", &format!("Using auth volume: {}", vol_name));
+            cmd.arg("-v")
+                .arg(format!("{}:/home/user/.claude", vol_name));
+        }
+        AuthMount::BindMount(path) => {
+            logger.log("MANTLE", &format!("Using auth bind mount: {:?}", path));
+            cmd.arg("-v")
+                .arg(format!("{}:/home/user/.claude", path.display()));
+        }
+    }
+
+    // Working directory
+    cmd.arg("-w").arg("/workspace");
 
     // Pass through auth env vars (API key or OAuth token from `claude setup-token`)
     if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
@@ -269,6 +326,11 @@ pub fn run_claude_direct(config: &ContainerConfig) -> Result<RunResult> {
 
                     // Print humanized output to stderr for visibility
                     eprint_event_humanized(&event);
+
+                    // Forward event to sink (for hub streaming)
+                    if let Some(ref mut sink) = event_sink {
+                        sink(&event);
+                    }
                 } else if !line.is_empty() {
                     // Failed to parse as JSON - log raw line
                     logger.log("UNKNOWN", &line);
@@ -352,7 +414,7 @@ mod tests {
             image: "test".to_string(),
             worktree_path: PathBuf::from("/tmp"),
             hub_socket: None,
-            claude_home: PathBuf::from("/tmp/.claude"),
+            auth_mount: AuthMount::BindMount(PathBuf::from("/tmp/.claude")),
             session_id: "abc12345-6789".to_string(),
             claude_args: vec![],
             timeout_secs: 0,
@@ -368,7 +430,7 @@ mod tests {
             image: "test".to_string(),
             worktree_path: PathBuf::from("/tmp"),
             hub_socket: None,
-            claude_home: PathBuf::from("/tmp/.claude"),
+            auth_mount: AuthMount::BindMount(PathBuf::from("/tmp/.claude")),
             session_id: "abc".to_string(),
             claude_args: vec![],
             timeout_secs: 0,
@@ -384,7 +446,7 @@ mod tests {
             image: "original".to_string(),
             worktree_path: PathBuf::from("/tmp"),
             hub_socket: None,
-            claude_home: PathBuf::from("/tmp/.claude"),
+            auth_mount: AuthMount::Volume("test-vol".to_string()),
             session_id: "test".to_string(),
             claude_args: vec![],
             timeout_secs: 0,

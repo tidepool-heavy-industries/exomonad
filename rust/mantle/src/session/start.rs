@@ -5,15 +5,21 @@
 //! - Git worktree for isolation
 //! - Claude Code execution (local or Docker)
 //! - State persistence
+//! - Hub registration and live event streaming
 
 use std::path::Path;
 use std::time::Instant;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use super::state::StateManager;
 use super::types::{generate_branch_name, generate_session_id, SessionMetadata, SessionOutput};
 use super::worktree::WorktreeManager;
 use crate::docker::{run_claude_direct, ContainerConfig};
+
+use mantle_shared::hub::{
+    HubClient, HubConfig, ModelUsage as HubModelUsage, SessionRegister,
+    SessionResult as HubSessionResult, SyncEventStream,
+};
 
 /// Error types for session start operations.
 #[derive(Debug, thiserror::Error)]
@@ -35,6 +41,9 @@ pub enum StartError {
 
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
+
+    #[error("Hub error: {0}")]
+    Hub(#[from] mantle_shared::error::MantleError),
 }
 
 pub type Result<T> = std::result::Result<T, StartError>;
@@ -59,10 +68,14 @@ pub struct StartConfig {
 /// Start a new session.
 ///
 /// This function:
-/// 1. Generates unique session ID and branch name
-/// 2. Creates git worktree for isolation
-/// 3. Records session in state file
-/// 4. Executes Claude Code (or returns metadata for Docker execution)
+/// 1. Checks hub is reachable (fails if not)
+/// 2. Generates unique session ID and branch name
+/// 3. Creates git worktree for isolation
+/// 4. Records session in state file
+/// 5. Registers session with mantle-hub
+/// 6. Connects WebSocket for live event streaming
+/// 7. Executes Claude Code via Docker (streaming events to hub)
+/// 8. Submits final result to mantle-hub
 ///
 /// # Arguments
 /// * `repo_root` - Path to the git repository root
@@ -72,6 +85,12 @@ pub struct StartConfig {
 /// Session output with results
 pub fn start_session(repo_root: &Path, config: &StartConfig) -> Result<SessionOutput> {
     let start_time = Instant::now();
+
+    // Load hub config
+    let hub_config = HubConfig::load();
+
+    // 1. Health check hub - FAIL if unreachable
+    check_hub_reachable(&hub_config)?;
 
     // Initialize managers
     let state_manager = StateManager::new(repo_root)?;
@@ -110,8 +129,23 @@ pub fn start_session(repo_root: &Path, config: &StartConfig) -> Result<SessionOu
     // Save session to state file
     state_manager.insert_session(session)?;
 
-    // Execute Claude Code via Docker
-    let result = execute_docker(&session_id, &branch, &worktree_path, config, &state_manager)?;
+    // 2. Register session with hub
+    let hub_session_id = register_with_hub(&hub_config, &branch, &worktree_path, config, None)?;
+    info!(hub_session_id = %hub_session_id, "Registered session with hub");
+
+    // 3. Connect WebSocket for event streaming
+    let event_stream = SyncEventStream::connect(&hub_config.http_url, &hub_session_id)?;
+    info!(hub_session_id = %hub_session_id, "Connected event stream to hub");
+
+    // 4. Execute Claude Code via Docker with event streaming
+    let result = execute_docker_with_streaming(
+        &session_id,
+        &branch,
+        &worktree_path,
+        config,
+        &state_manager,
+        event_stream,
+    )?;
 
     let duration = start_time.elapsed().as_secs_f64();
 
@@ -133,21 +167,121 @@ pub fn start_session(repo_root: &Path, config: &StartConfig) -> Result<SessionOu
     // Sanitize output to remove control characters before returning for JSON serialization
     output.sanitize();
 
+    // 5. Submit final result to hub
+    submit_result_to_hub(&hub_config, &hub_session_id, &output)?;
+    info!(hub_session_id = %hub_session_id, "Submitted result to hub");
+
     Ok(output)
 }
 
-/// Execute Claude Code directly in a Docker container.
+/// Check if hub is reachable.
+fn check_hub_reachable(hub_config: &HubConfig) -> Result<()> {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| StartError::Execution(format!("Failed to create runtime: {}", e)))?;
+
+    rt.block_on(async {
+        let client = HubClient::from_config(hub_config)?;
+        client.health_check().await?;
+        Ok(())
+    })
+}
+
+/// Register a session with the hub.
+fn register_with_hub(
+    hub_config: &HubConfig,
+    branch: &str,
+    worktree_path: &Path,
+    config: &StartConfig,
+    parent_id: Option<String>,
+) -> Result<String> {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| StartError::Execution(format!("Failed to create runtime: {}", e)))?;
+
+    rt.block_on(async {
+        let client = HubClient::from_config(hub_config)?;
+
+        let req = SessionRegister {
+            branch: branch.to_string(),
+            worktree: worktree_path.to_path_buf(),
+            prompt: config.prompt.clone(),
+            model: config.model.clone(),
+            parent_id,
+        };
+
+        let info = client.register_session(&req).await?;
+        Ok(info.id)
+    })
+}
+
+/// Submit a session result to the hub.
+fn submit_result_to_hub(
+    hub_config: &HubConfig,
+    hub_session_id: &str,
+    output: &SessionOutput,
+) -> Result<()> {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| StartError::Execution(format!("Failed to create runtime: {}", e)))?;
+
+    rt.block_on(async {
+        let client = HubClient::from_config(hub_config)?;
+
+        // Convert model_usage from events::ModelUsage to hub::ModelUsage
+        let model_usage = output
+            .model_usage
+            .iter()
+            .map(|(k, v)| {
+                (
+                    k.clone(),
+                    HubModelUsage {
+                        input_tokens: v.input_tokens,
+                        output_tokens: v.output_tokens,
+                        cache_read_input_tokens: v.cache_read_input_tokens,
+                        cache_creation_input_tokens: v.cache_creation_input_tokens,
+                        cost_usd: v.cost_usd,
+                    },
+                )
+            })
+            .collect();
+
+        let result = HubSessionResult {
+            session_id: hub_session_id.to_string(),
+            exit_code: output.exit_code,
+            is_error: output.is_error,
+            result_text: output.result_text.clone(),
+            structured_output: output.structured_output.clone(),
+            total_cost_usd: output.total_cost_usd,
+            num_turns: output.num_turns,
+            cc_session_id: output.cc_session_id.clone().unwrap_or_default(),
+            duration_secs: output.duration_secs,
+            model_usage,
+        };
+
+        client.submit_result(&result).await?;
+        Ok(())
+    })
+}
+
+/// Execute Claude Code in Docker with live event streaming to hub.
 ///
-/// Uses TTY for stream-json support. Container runs in foreground - dies when
-/// this process dies. Streaming output visible in terminal.
-fn execute_docker(
+/// Uses TTY for stream-json support. Events are streamed to hub via WebSocket
+/// for real-time supervision.
+fn execute_docker_with_streaming(
     session_id: &str,
     branch: &str,
     worktree_path: &Path,
     config: &StartConfig,
     state_manager: &StateManager,
+    event_stream: SyncEventStream,
 ) -> Result<SessionOutput> {
-    info!(session_id = %session_id, "Starting Docker execution (direct mode)");
+    use std::cell::RefCell;
+
+    info!(session_id = %session_id, "Starting Docker execution with hub streaming");
 
     // Build Claude args - stream-json for real-time visibility
     let mut claude_args = vec![
@@ -180,8 +314,22 @@ fn execute_docker(
         s.mark_running(None);
     })?;
 
-    // Run Claude directly - stream-json output parsed on the fly
-    let run_result = run_claude_direct(&container_config)?;
+    // Wrap event_stream in RefCell for interior mutability in the closure
+    // This allows the closure to capture by shared reference while still mutating
+    let event_stream = RefCell::new(event_stream);
+
+    // Run Claude with event sink that forwards to hub
+    let run_result = run_claude_direct(&container_config, Some(|event: &_| {
+        // Forward each event to hub via WebSocket
+        if let Err(e) = event_stream.borrow_mut().send_event(event) {
+            warn!("Failed to forward event to hub: {}", e);
+        }
+    }))?;
+
+    // Close the WebSocket gracefully
+    if let Err(e) = event_stream.into_inner().close() {
+        warn!("Failed to close event stream: {}", e);
+    }
 
     // Convert RunResult to SessionOutput
     Ok(SessionOutput {

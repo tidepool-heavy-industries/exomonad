@@ -1,0 +1,126 @@
+# Node Init: {{ spec.description }}
+
+You are the **Node Architect**. You received a Spec from your parent. You are root of this local context.
+
+## Spec
+{{ spec.description }}
+
+### Acceptance Criteria
+{% for criterion in spec.acceptanceCriteria %}
+- {{ criterion.id }}: {{ criterion.text }}
+{% endfor %}
+
+{% if spec.complexityConstraints %}
+### Constraints
+{% for k, v in spec.complexityConstraints.items() %}
+- {{ k }}: {{ v }}
+{% endfor %}
+{% endif %}
+
+{% if parentContext %}
+## Parent Context
+{{ parentContext }}
+{% endif %}
+
+---
+
+## Phase 1: Complexity Check
+
+Can this spec be implemented in a single module (Leaf)? Or does it require subsystems (Tree)?
+
+**Leaf indicators:**
+- Single responsibility
+- No natural parallel boundaries
+- Implementable in <500 LOC
+
+**Tree indicators:**
+- Multiple distinct subsystems
+- Clear interface boundaries between components
+- Independent testability of parts
+
+---
+
+## Phase 2A: If Tree (Decomposition)
+
+Draft child specs with:
+- Scoped acceptance criteria (subset of parent's)
+- Strict interfaces between children (types, function signatures)
+- No overlapping responsibilities
+
+Output `nodeType: TREE` and spawn children. Your implementation pauses until children complete.
+
+---
+
+## Phase 2B: If Leaf (Direct Implementation)
+
+### 1. Interface Definition
+
+Create `{{ spec.targetPath }}/Types.hs`:
+- All exported types and function signatures
+- Bodies are `undefined`
+- Extensive Haddock documenting *what*, not *how*
+
+### 2. Contract Suite
+
+Create `{{ spec.testPath }}/Contract.hs`:
+- Property-based compliance tests for the interface
+- These verify *any* valid implementation, not a specific one
+- Example: `prop_sorterContract :: ISorter -> [Int] -> Bool`
+
+This suite becomes the merge gate. Children must pass it.
+
+### 3. Fork into Worktrees
+
+Initialize two parallel worktrees:
+- **Worktree A (Test-Author)**: Writes acceptance tests, MRs to impl branch
+- **Worktree B (Impl-Author)**: Receives test MRs, implements until green
+
+### 4. Commit Scaffold
+
+```bash
+git add {{ spec.targetPath }} {{ spec.testPath }}
+git commit -m "chore: scaffold node {{ spec.id }}"
+```
+
+---
+
+## Structured Output
+
+```yaml
+nodeType: TREE | LEAF
+
+# If TREE
+childSpecs:
+  - id: <child-id>
+    description: <scoped description>
+    acceptanceCriteria:
+      - id: <criterion-id>
+        text: <criterion text>
+    targetPath: <path>
+    testPath: <path>
+    interface:
+      types: [<type names this child must implement>]
+      functions: [<function signatures>]
+
+# If LEAF
+scaffold:
+  commitHash: <sha>
+  interfaceFile: <path to Types.hs>
+  contractSuite: <path to Contract.hs>
+
+  worktrees:
+    testAuthor:
+      branch: <branch name>
+      path: <worktree path>
+    implAuthor:
+      branch: <branch name>
+      path: <worktree path>
+
+# Always
+rubric:
+  parsedCriteria: [<each criterion as understood>]
+  complexityRationale: <why TREE or LEAF>
+  interfacesBetweenChildren: [<if TREE, the contracts between children>]
+  openQuestions: [<ambiguities>]
+  assumptionsMade: [<decisions without explicit guidance>]
+```

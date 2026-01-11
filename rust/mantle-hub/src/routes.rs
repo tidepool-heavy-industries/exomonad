@@ -21,8 +21,10 @@ pub fn router(state: AppState, static_dir: &std::path::Path) -> Router {
         .route("/api/sessions/{id}", get(get_session).delete(delete_session))
         .route("/api/sessions/{id}/result", post(submit_result).get(poll_result))
         .route("/api/graph", get(get_graph))
-        // WebSocket for live updates
+        // WebSocket for live updates (frontend subscribes)
         .route("/ws", get(websocket_handler))
+        // WebSocket for event push (mantle pushes session events)
+        .route("/ws/push/{session_id}", get(push_websocket_handler))
         // Static files (frontend) - use fallback_service for root-level serving
         .fallback_service(ServeDir::new(static_dir))
         .with_state(state)
@@ -168,4 +170,72 @@ async fn handle_websocket(
             break;
         }
     }
+}
+
+// ============================================================================
+// Push WebSocket (for mantle to stream events)
+// ============================================================================
+
+/// WebSocket handler for mantle to push session events.
+///
+/// mantle connects to this endpoint and sends StreamEvent objects.
+/// Hub wraps them in HubEvent::SessionEvent and broadcasts to all subscribers.
+async fn push_websocket_handler(
+    State(state): State<AppState>,
+    Path(session_id): Path<String>,
+    ws: WebSocketUpgrade,
+) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| handle_push_websocket(socket, state, session_id))
+}
+
+async fn handle_push_websocket(
+    mut socket: axum::extract::ws::WebSocket,
+    state: AppState,
+    session_id: String,
+) {
+    use axum::extract::ws::Message;
+    use mantle_shared::events::StreamEvent;
+
+    tracing::info!(session_id = %session_id, "Push WebSocket connected");
+
+    // Update session state to Running
+    if let Err(e) = db::update_session_state(&state.pool, &session_id, crate::types::SessionState::Running).await {
+        tracing::warn!(session_id = %session_id, error = %e, "Failed to update session state");
+    }
+
+    // Receive events from mantle and broadcast to subscribers
+    while let Some(msg) = socket.recv().await {
+        match msg {
+            Ok(Message::Text(text)) => {
+                match serde_json::from_str::<StreamEvent>(&text) {
+                    Ok(event) => {
+                        let timestamp = chrono::Utc::now().to_rfc3339();
+                        state.broadcast(HubEvent::SessionEvent {
+                            session_id: session_id.clone(),
+                            event,
+                            timestamp,
+                        });
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            session_id = %session_id,
+                            error = %e,
+                            "Failed to parse stream event"
+                        );
+                    }
+                }
+            }
+            Ok(Message::Close(_)) => {
+                tracing::info!(session_id = %session_id, "Push WebSocket closed");
+                break;
+            }
+            Err(e) => {
+                tracing::warn!(session_id = %session_id, error = %e, "WebSocket error");
+                break;
+            }
+            _ => {} // Ignore ping/pong/binary
+        }
+    }
+
+    tracing::info!(session_id = %session_id, "Push WebSocket disconnected");
 }

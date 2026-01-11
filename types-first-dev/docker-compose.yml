@@ -1,0 +1,38 @@
+# Docker-compose for types-first-dev authentication
+#
+# This provides a persistent container for Claude Code authentication.
+# Once authenticated, the credentials are stored in a shared volume that
+# mantle mounts into worker containers.
+#
+# Usage:
+#   docker-compose up -d                      # Start auth-shell, create volume
+#   docker-compose exec auth-shell claude login  # Authenticate (interactive)
+#   # Now run your Haskell orchestrator normally - workers inherit auth
+#
+# To check auth status:
+#   docker-compose exec auth-shell claude --version
+#
+# To re-authenticate:
+#   docker-compose exec auth-shell claude login
+
+services:
+  # Persistent container for interactive authentication
+  auth-shell:
+    build:
+      context: ../rust
+      dockerfile: mantle/Dockerfile
+    image: tidepool/claude-code:latest
+    container_name: tidepool-auth-shell
+    stdin_open: true
+    tty: true
+    volumes:
+      - claude-auth:/home/user/.claude
+    # Keep running so volume persists and we can exec into it
+    command: ["tail", "-f", "/dev/null"]
+    restart: unless-stopped
+
+volumes:
+  # Shared authentication credentials
+  # Mantle mounts this into worker containers via config
+  claude-auth:
+    name: tidepool-claude-auth

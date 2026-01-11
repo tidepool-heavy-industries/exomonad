@@ -350,8 +350,8 @@ mod tests {
         assert_eq!(decoded.session_tag, Some("test-worktree".to_string()));
         assert_eq!(decoded.num_turns, 5);
 
-        // Empty interrupts should be omitted from JSON
-        assert!(!json.contains("interrupts"));
+        // interrupts is always serialized (Haskell expects the field to be present)
+        assert!(json.contains("interrupts"));
     }
 
     #[test]

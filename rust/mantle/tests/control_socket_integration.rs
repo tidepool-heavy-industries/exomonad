@@ -132,6 +132,7 @@ impl Drop for TestServer {
 }
 
 #[test]
+#[ignore = "requires Haskell control-socket-test-server"]
 fn test_hook_allow() {
     let server = TestServer::spawn();
 
@@ -170,6 +171,7 @@ fn test_hook_allow() {
 }
 
 #[test]
+#[ignore = "requires Haskell control-socket-test-server"]
 fn test_hook_deny() {
     let server = TestServer::spawn();
 
@@ -211,6 +213,7 @@ fn test_hook_deny() {
 }
 
 #[test]
+#[ignore = "requires Haskell control-socket-test-server"]
 fn test_hook_stop_blocked() {
     let server = TestServer::spawn();
 
@@ -247,6 +250,7 @@ fn test_hook_stop_blocked() {
 }
 
 #[test]
+#[ignore = "requires Haskell control-socket-test-server"]
 fn test_multiple_connections() {
     let server = TestServer::spawn();
 

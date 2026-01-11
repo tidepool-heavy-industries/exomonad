@@ -6,6 +6,7 @@ use std::time::Duration;
 use super::config::HubConfig;
 use super::types::{GraphData, SessionInfo, SessionRegister, SessionResult};
 use crate::error::{MantleError, Result};
+use crate::events::StreamEvent;
 
 /// Client for communicating with mantle-hub.
 #[derive(Debug, Clone)]
@@ -219,5 +220,75 @@ impl HubClient {
             .json()
             .await
             .map_err(|e| MantleError::Hub(format!("Failed to parse graph response: {}", e)))
+    }
+}
+
+// ============================================================================
+// Sync Event Stream (for use in sync code like run_claude_direct)
+// ============================================================================
+
+use std::net::TcpStream as StdTcpStream;
+use tungstenite::{connect, stream::MaybeTlsStream as SyncMaybeTlsStream, WebSocket};
+
+/// Synchronous WebSocket stream for sending events to hub.
+///
+/// Unlike `EventStream`, this uses blocking I/O and can be used
+/// in synchronous code like `run_claude_direct`.
+pub struct SyncEventStream {
+    ws: WebSocket<SyncMaybeTlsStream<StdTcpStream>>,
+    session_id: String,
+}
+
+impl SyncEventStream {
+    /// Connect to hub WebSocket for event streaming (blocking).
+    pub fn connect(base_url: &str, session_id: &str) -> Result<Self> {
+        let ws_url = base_url
+            .replace("http://", "ws://")
+            .replace("https://", "wss://");
+        let url = format!("{}/ws/push/{}", ws_url, session_id);
+
+        let (ws, _response) = connect(&url)
+            .map_err(|e| MantleError::Hub(format!("WebSocket connect failed to {}: {}", url, e)))?;
+
+        Ok(Self {
+            ws,
+            session_id: session_id.to_string(),
+        })
+    }
+
+    /// Send a stream event to the hub (blocking).
+    pub fn send_event(&mut self, event: &StreamEvent) -> Result<()> {
+        let json = serde_json::to_string(event)
+            .map_err(|e| MantleError::Hub(format!("Failed to serialize event: {}", e)))?;
+
+        self.ws
+            .send(tungstenite::Message::Text(json.into()))
+            .map_err(|e| {
+                MantleError::Hub(format!(
+                    "Failed to send event for session {}: {}",
+                    self.session_id, e
+                ))
+            })?;
+
+        Ok(())
+    }
+
+    /// Close the WebSocket connection.
+    pub fn close(mut self) -> Result<()> {
+        self.ws.close(None).map_err(|e| {
+            MantleError::Hub(format!("Failed to close WebSocket: {}", e))
+        })?;
+        // Flush any remaining messages
+        while let Ok(msg) = self.ws.read() {
+            if msg.is_close() {
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    /// Get the session ID this stream is connected for.
+    pub fn session_id(&self) -> &str {
+        &self.session_id
     }
 }

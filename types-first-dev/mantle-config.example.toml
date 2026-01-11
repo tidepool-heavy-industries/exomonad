@@ -1,0 +1,12 @@
+# Example mantle configuration
+# Copy to ~/.config/mantle/config.toml
+
+[docker]
+# Named Docker volume containing Claude auth credentials.
+# This volume is populated by running `claude login` in the auth-shell container.
+# See DOCKER-AUTH.md for setup instructions.
+auth_volume = "tidepool-claude-auth"
+
+# Docker image to use for Claude Code containers.
+# Build with: docker build -t tidepool/claude-code:latest -f mantle/Dockerfile rust/
+image = "tidepool/claude-code:latest"

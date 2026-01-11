@@ -5,7 +5,7 @@
 
 Your subsystem stubs have been implemented by child tasks.
 Their MRs have been merged into your branch.
-Now implement the orchestration layer that ties them together.
+Now write the code layer that combines them.
 
 ### What Children Implemented
 {% for child in icChildResults %}
@@ -67,6 +67,6 @@ Return:
 
 ## Critical
 
-- Do NOT skip the test loop. Run `cabal test` and iterate.
+- Create a commit
+- CI _will_ run all tests, so they need to all pass.
 - If you cannot make tests pass after 5 iterations, return with `ioTestsPassing: false`.
-- The commit should only be created if tests pass.
