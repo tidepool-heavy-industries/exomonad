@@ -23,8 +23,9 @@ TARGET_DIR="${2:-}"
 # Run from git root (for cabal.project)
 cd "$GIT_ROOT"
 
+# Suppress cabal build output (only show errors)
 if [ -n "$TARGET_DIR" ]; then
-    cabal run types-first-dev:exe:types-first-dev-runner -- "$SPEC_FILE" "$TARGET_DIR"
+    cabal run -v0 types-first-dev:exe:types-first-dev-runner -- "$SPEC_FILE" "$TARGET_DIR"
 else
-    cabal run types-first-dev:exe:types-first-dev-runner -- "$SPEC_FILE"
+    cabal run -v0 types-first-dev:exe:types-first-dev-runner -- "$SPEC_FILE"
 fi
