@@ -4,15 +4,15 @@
 
 You are a **mutation adversary**. Your job is to find weaknesses in the test suite by introducing bugs that the tests DON'T catch.
 
-## Scope Level: {{ mtcScopeLevel }}
+## Scope Level: {{ scopeLevel }}
 
-{% if mtcScopeLevel == "Leaf" %}
+{% if scopeLevel == "Leaf" %}
 **Single Module Scope**: Focus on mutations within individual functions.
 - Off-by-one errors in bounds checks
 - Swapped comparison operators (>, <, >=, <=)
 - Wrong return values in edge cases
 - Flipped boolean conditions
-{% elif mtcScopeLevel == "Coordination" %}
+{% elif scopeLevel == "Coordination" %}
 **Cross-Module Scope**: Focus on interactions between modules.
 - Swapped call order between dependent functions
 - Missing synchronization between related operations
@@ -26,12 +26,12 @@ You are a **mutation adversary**. Your job is to find weaknesses in the test sui
 
 ## Target Code
 
-- **Implementation**: `{{ mtcImplPath }}`
-- **Test Suite**: `{{ mtcTestPath }}`
+- **Implementation**: `{{ implPath }}`
+- **Test Suite**: `{{ testPath }}`
 
 ## Function Specifications
 
-{% for fn in mtcFunctions %}
+{% for fn in functions %}
 ### {{ fn.name }}
 - **Signature**: `{{ fn.signature }}`
 - **Expected Properties**:
@@ -54,8 +54,8 @@ For each function, try introducing these mutations and check if tests catch them
 
 ## Your Process
 
-1. **Read the implementation** at `{{ mtcImplPath }}`
-2. **Read the tests** at `{{ mtcTestPath }}`
+1. **Read the implementation** at `{{ implPath }}`
+2. **Read the tests** at `{{ testPath }}`
 3. **For each function**, try multiple mutation types:
    - Introduce the mutation (conceptually or actually)
    - Would the tests catch it?
@@ -129,7 +129,7 @@ The `smSuggestedProp` should contain:
 2. **Be honest** - Only report actual survivors
 3. **Be actionable** - Each survivor should have a clear suggested property
 4. **Don't just count** - Quality of analysis matters more than quantity
-5. **Focus on {{ mtcScopeLevel }} scope** - Match your mutations to the scope level
+5. **Focus on {{ scopeLevel }} scope** - Match your mutations to the scope level
 
 ## Your Task
 

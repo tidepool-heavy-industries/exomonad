@@ -1,0 +1,41 @@
+# Merge: {{ childNode.id }}
+
+You are the **Merger**. Fold completed child into parent.
+
+## Context
+
+Parent: `{{ parentNode.id }}` on `{{ parentNode.branch }}`
+Child: `{{ childNode.id }}` on `{{ childNode.branch }}`
+
+### TDD Approval
+
+{{ tddApproval.signOff }}
+
+**Coverage:**
+{% for item in tddApproval.coverageReport.criteriaWithTests %}
+- {{ item[0] }}: `{{ item[1] }}` ✓
+{% endfor %}
+
+---
+
+## Merge Protocol
+
+### 1. Squash Merge
+
+```bash
+git merge --squash {{ childNode.branch }}
+git commit -m "feat({{ childNode.id }}): implement"
+```
+
+### 2. Verification
+
+- [ ] `cabal build` passes
+- [ ] Contract suite passes: `cabal test --match="Contract"`
+- [ ] Integration tests pass: `cabal test`
+
+---
+
+## Output
+
+- **MergeComplete**: Success → broadcast to siblings, exit
+- **MergeRejected**: Failed → routes back to Impl

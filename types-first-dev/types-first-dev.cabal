@@ -28,6 +28,15 @@ library
         TypesFirstDev.Templates.V2
         TypesFirstDev.Graph.Hybrid
         TypesFirstDev.Graph.V2
+        TypesFirstDev.V3.Types
+        TypesFirstDev.V3.Types.Core
+        TypesFirstDev.V3.Types.Shared
+        TypesFirstDev.V3.Types.Payloads
+        TypesFirstDev.V3.Types.Memory
+        TypesFirstDev.V3.Types.Nodes
+        TypesFirstDev.V3.Context
+        TypesFirstDev.V3.Templates
+        TypesFirstDev.V3.Graph
         TypesFirstDev.Handlers.V2.Effects
         TypesFirstDev.Handlers.V2.Genesis
         TypesFirstDev.Effect.Build

@@ -1,15 +1,15 @@
-# Task: TDD Scaffold for {{ scSpec.specDescription }}
+# Task: TDD Scaffold for {{ spec.description }}
 
 ## Acceptance Criteria
-{% for criterion in scSpec.specAcceptanceCriteria %}
+{% for criterion in spec.acceptanceCriteria %}
 - {{ criterion }}
 {% endfor %}
 
-{% if scParentContext %}
+{% if parentContext %}
 ## Parent Context
 
 This is a subsystem task. Parent's plan:
-{{ scParentContext }}
+{{ parentContext }}
 {% endif %}
 
 ## Your Deliverables
@@ -22,7 +22,7 @@ This is TDD scaffolding. You will:
 
 ### Step 1: Write Tests
 
-Create `{{ scSpec.specTestPath }}` with QuickCheck properties:
+Create `{{ spec.testPath }}` with QuickCheck properties:
 - One property per acceptance criterion
 - Tests should FAIL on undefined stubs (proves they call real code)
 - Include `Arbitrary` instances for your types
@@ -30,7 +30,7 @@ Create `{{ scSpec.specTestPath }}` with QuickCheck properties:
 
 ### Step 2: Write Stubs
 
-Create/update `{{ scSpec.specTargetPath }}` with:
+Create/update `{{ spec.targetPath }}` with:
 - Module declaration and exports
 - Data type definitions
 - Function signatures with `undefined` implementations
@@ -47,8 +47,8 @@ As you scaffold, note natural boundaries:
 ### Step 4: Commit
 
 ```bash
-git add {{ scSpec.specTargetPath }} {{ scSpec.specTestPath }}
-git commit -m "scaffold: {{ scSpec.specDescription }}"
+git add {{ spec.targetPath }} {{ spec.testPath }}
+git commit -m "scaffold: {{ spec.description }}"
 ```
 
 ## Structured Output

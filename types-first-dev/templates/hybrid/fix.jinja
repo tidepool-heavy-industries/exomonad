@@ -27,28 +27,28 @@ No structured failures available. Check test output directly.
 What we've learned from previous fix attempts:
 
 ### Patterns Seen
-{% if understanding.usFailuresSeen %}
-{% for pattern in understanding.usFailuresSeen %}
-- **{{ pattern.fpSignature }}** ({{ pattern.fpCategory }}, seen {{ pattern.fpOccurrences }}x)
-  - Affects: {{ pattern.fpAffectedFns | join(", ") }}
+{% if understanding.failuresSeen %}
+{% for pattern in understanding.failuresSeen %}
+- **{{ pattern.signature }}** ({{ pattern.category }}, seen {{ pattern.occurrences }}x)
+  - Affects: {{ pattern.affectedFns | join(", ") }}
 {% endfor %}
 {% else %}
 No patterns identified yet (first attempt).
 {% endif %}
 
 ### Fixes Already Tried
-{% if understanding.usFixesApplied %}
-{% for fix in understanding.usFixesApplied %}
-- **{{ fix.faFunction }}**: {{ fix.faWhatChanged }} ({{ fix.faFixType }})
-  - Why it failed before: {{ fix.faWhyFailed }}
+{% if understanding.fixesApplied %}
+{% for fix in understanding.fixesApplied %}
+- **{{ fix.function }}**: {{ fix.whatChanged }} ({{ fix.fixType }})
+  - Why it failed before: {{ fix.whyFailed }}
 {% endfor %}
 {% else %}
 No fixes applied yet (first attempt).
 {% endif %}
 
 ### Learnings
-{% if understanding.usLearnings %}
-{% for learning in understanding.usLearnings %}
+{% if understanding.learnings %}
+{% for learning in understanding.learnings %}
 - {{ learning }}
 {% endfor %}
 {% else %}
@@ -56,7 +56,7 @@ No learnings recorded yet.
 {% endif %}
 
 ### Convergence Status
-{% if understanding.usConverging %}
+{% if understanding.converging %}
 Progress is being made toward passing tests.
 {% else %}
 **WARNING**: Fixes are not converging.
@@ -95,11 +95,11 @@ You must return JSON matching `FixAgentOutput`:
 - `fixBlocker`: If blocked, explain (otherwise null)
 
 For each fix in `fixChanges`, provide:
-- `faFunction`: Function name that was fixed
-- `faWhatChanged`: Specific change made
-- `faWhyFailed`: Root cause analysis - why was it failing?
-- `faFixType`: One of: EdgeCaseFix, LogicFix, TypeFix, BoundaryFix, InitializationFix, or OtherFix
-- `faRelatedFailures`: List of property names this fix should address
+- `function`: Function name that was fixed
+- `whatChanged`: Specific change made
+- `whyFailed`: Root cause analysis - why was it failing?
+- `fixType`: One of: EdgeCaseFix, LogicFix, TypeFix, BoundaryFix, InitializationFix, or OtherFix
+- `relatedFailures`: List of property names this fix should address
 
 **Note**: Build verification is done by the handler. Focus on making correct fixes.
 
@@ -109,11 +109,11 @@ For each fix in `fixChanges`, provide:
 {
   "fixChanges": [
     {
-      "faFunction": "push",
-      "faWhatChanged": "Fixed off-by-one in size tracking",
-      "faWhyFailed": "Size was incremented before adding element",
-      "faFixType": "BoundaryFix",
-      "faRelatedFailures": ["prop_pushSize", "prop_pushPopInverse"]
+      "function": "push",
+      "whatChanged": "Fixed off-by-one in size tracking",
+      "whyFailed": "Size was incremented before adding element",
+      "fixType": "BoundaryFix",
+      "relatedFailures": ["prop_pushSize", "prop_pushPopInverse"]
     }
   ],
   "fixCommitMsg": "fix(stack): correct size tracking in push operation",
@@ -125,7 +125,7 @@ For each fix in `fixChanges`, provide:
 
 1. **Tests are correct** - If a test fails, your impl is wrong
 2. **Don't repeat failed fixes** - Check "Fixes Already Tried" above
-3. **Track root causes** - Your `faWhyFailed` helps future attempts
+3. **Track root causes** - Your `whyFailed` helps future attempts
 4. **Be specific** - Generic fixes don't help diagnose issues
 5. **If truly stuck** - Set `fixBlocker` with a clear explanation
 

@@ -1,0 +1,72 @@
+# Rebase: Sibling Merged
+
+You are the **Rebaser**. A sibling just merged. Adapt or break.
+
+## Context
+
+Your Node: `{{ node.id }}`
+Your Branch: `{{ node.branch }}`
+New Parent HEAD: `{{ newParentHead }}`
+
+## MergeEvent
+
+**Author:** {{ mergeEvent.author }}
+**Impact:** {{ mergeEvent.impactLevel }}
+
+{% for c in mergeEvent.changes %}
+- {{ c.symbol }} ({{ c.type }}): {{ c.reason }}
+{% endfor %}
+
+---
+
+## Rebase Protocol
+
+### 1. Pause Impl/TDD Loop
+
+No commits during rebase.
+
+### 2. Rebase
+
+```bash
+git fetch origin {{ parentBranch }}
+git rebase origin/{{ parentBranch }}
+```
+
+### 3. Conflict Resolution
+
+**Invariant:** Sibling is Canon. You are Draft.
+**Restriction:** Rebaser may only make MECHANICAL changes.
+
+{% if mergeEvent.impactLevel == "Trivial" %}
+Auto-resolve expected. No semantic changes.
+{% elif mergeEvent.impactLevel == "Additive" %}
+Sibling added new exports. You may use them.
+{% else %}
+**BREAKING** — Sibling changed APIs you may depend on.
+
+**Allowed (mechanical):**
+- Import updates
+- Symbol renames
+- Signature adjustments (same logic)
+
+**Forbidden (semantic):**
+- Changing function bodies
+- Altering control flow
+- Rewriting logic
+
+If breaking change requires logic updates → emit `RebaseConflict` and let Impl (with full TDD context) handle it.
+{% endif %}
+
+### 4. Verify
+
+```bash
+cabal test
+```
+
+---
+
+## Output
+
+- **RebaseClean**: Trivial rebase → resume at TDDWriteTests
+- **RebaseAdapted**: Breaking changes absorbed → resume at TDDWriteTests
+- **RebaseConflict**: Cannot resolve → escalate to Scaffold

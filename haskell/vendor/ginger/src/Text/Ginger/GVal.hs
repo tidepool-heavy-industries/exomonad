@@ -8,6 +8,8 @@
 {-#LANGUAGE TypeOperators #-}
 {-#LANGUAGE DefaultSignatures #-}
 {-#LANGUAGE UndecidableInstances #-}
+{-#LANGUAGE AllowAmbiguousTypes #-}
+{-#LANGUAGE TypeApplications #-}
 
 -- | GVal is a generic unitype value, representing the kind of values that
 -- Ginger can understand.
@@ -63,6 +65,7 @@ import Data.Maybe ( fromMaybe, catMaybes, isJust, mapMaybe )
 import Data.Text (Text)
 import Data.String (IsString, fromString)
 import qualified Data.Text as Text
+import Data.Char (isLower, toLower)
 import qualified Data.Text.Lazy as LText
 import qualified Data.List as List
 import Safe (readMay, atMay)
@@ -442,9 +445,14 @@ instance (GToGValInner m f, Selector s) => GToGValInner m (M1 S s f) where
   gToGValInner idx (M1 x) = gToGValInner idx x
 
 -- | Product type (multiple fields) - create a record
-instance (GToGValProduct m f, GToGValProduct m g) => GToGValInner m (f :*: g) where
+-- Automatically detects and strips common prefixes from field names.
+instance forall m f g. (GToGValProduct m f, GToGValProduct m g, GFieldNames f, GFieldNames g) => GToGValInner m (f :*: g) where
   gToGValInner _ prod =
-    let pairs = gCollectFields 0 prod
+    -- Collect raw field names, detect common prefix, then collect with stripping
+    let rawNames = gRawFieldNames prod
+        commonPfx = gDetectPrefix rawNames
+        stripPrefix = gMakeStripPrefix commonPfx
+        pairs = gCollectFieldsWithPrefix @m stripPrefix 0 prod
     in mkRecordGVal pairs
 
 -- | Create a GVal from record fields
@@ -458,23 +466,81 @@ mkRecordGVal pairs =
     , asDictItems = Just pairs
     }
 
+-- | Class for extracting field names from generic representations.
+-- Separate from GToGValProduct because it doesn't depend on m.
+class GFieldNames f where
+  gRawFieldNames :: f p -> [Prelude.String]
+
+instance (GFieldNames f, GFieldNames g) => GFieldNames (f :*: g) where
+  gRawFieldNames (x :*: y) = gRawFieldNames x ++ gRawFieldNames y
+
+instance Selector s => GFieldNames (M1 S s f) where
+  gRawFieldNames m = [selName m]
+
 -- | Helper class for collecting fields from product types
 class GToGValProduct m f where
+  -- | Collect fields with a prefix-stripping function
+  gCollectFieldsWithPrefix :: (Prelude.String -> Prelude.String) -> Int -> f p -> [Pair m]
+  -- | Legacy: collect fields without prefix stripping
   gCollectFields :: Int -> f p -> [Pair m]
+  gCollectFields = gCollectFieldsWithPrefix id
 
-instance (GToGValProduct m f, GToGValProduct m g) => GToGValProduct m (f :*: g) where
-  gCollectFields idx (x :*: y) =
-    let leftFields = gCollectFields idx x
+instance forall m f g. (GToGValProduct m f, GToGValProduct m g, GFieldNames f, GFieldNames g) => GToGValProduct m (f :*: g) where
+  gCollectFieldsWithPrefix stripPrefix idx (x :*: y) =
+    let leftFields = gCollectFieldsWithPrefix @m stripPrefix idx x
         leftCount = Prelude.length leftFields
-    in leftFields ++ gCollectFields (idx + leftCount) y
+    in leftFields ++ gCollectFieldsWithPrefix @m stripPrefix (idx + leftCount) y
 
 instance (GToGValInner m f, Selector s) => GToGValProduct m (M1 S s f) where
-  gCollectFields idx m@(M1 x) =
-    let fieldName = Text.pack $ selName m
-        name = if Text.null fieldName
+  gCollectFieldsWithPrefix stripPrefix idx m@(M1 x) =
+    let rawName = selName m
+        name = if Prelude.null rawName
                then Text.pack $ "_" ++ show idx  -- Positional: _0, _1, etc.
-               else fieldName                     -- Named: actual field name
+               else Text.pack $ stripPrefix rawName  -- Named with prefix stripping
     in [(name, gToGValInner idx x)]
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- Prefix Detection Helpers (for Generic ToGVal)
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Detect the common lowercase prefix from field names.
+-- Convention: type FooBar has fields prefixed with "fb" (lowercase acronym).
+--
+-- gDetectPrefix ["sId", "sDescription"] = "s"
+-- gDetectPrefix ["irCommitHash", "irIterations"] = "ir"
+-- gDetectPrefix ["name", "age"] = ""  (no common lowercase prefix)
+gDetectPrefix :: [Prelude.String] -> Prelude.String
+gDetectPrefix [] = ""
+gDetectPrefix (x:xs) =
+  let prefix = List.takeWhile isLower x
+  in if Prelude.all (gIsPrefixOf prefix) xs
+     then prefix
+     else ""
+  where
+    gIsPrefixOf [] _ = Prelude.True
+    gIsPrefixOf _ [] = Prelude.False
+    gIsPrefixOf (a:as) (b:bs) = a == b && gIsPrefixOf as bs
+
+-- | Create a prefix-stripping function.
+gMakeStripPrefix :: Prelude.String -> (Prelude.String -> Prelude.String)
+gMakeStripPrefix "" = gLcFirst
+gMakeStripPrefix prefix = \fieldName ->
+  case gStripPrefixExact prefix fieldName of
+    Just (c:cs) -> toLower c : cs
+    Just []     -> fieldName
+    Nothing     -> fieldName
+
+gStripPrefixExact :: Prelude.String -> Prelude.String -> Maybe Prelude.String
+gStripPrefixExact [] ys = Just ys
+gStripPrefixExact _ [] = Nothing
+gStripPrefixExact (x:xs) (y:ys)
+  | x == y    = gStripPrefixExact xs ys
+  | otherwise = Nothing
+
+-- | Lowercase first character.
+gLcFirst :: Prelude.String -> Prelude.String
+gLcFirst [] = []
+gLcFirst (c:cs) = toLower c : cs
 
 -- * Marshalling from Haskell to 'GVal'
 --

@@ -1,6 +1,6 @@
-# Task: Implement {{ icSpec.specDescription }}
+# Task: Implement {{ spec.description }}
 
-{% if icIsGlueLayer %}
+{% if isGlueLayer %}
 ## Mode: Glue Layer Implementation
 
 Your subsystem stubs have been implemented by child tasks.
@@ -8,8 +8,8 @@ Their MRs have been merged into your branch.
 Now write the code layer that combines them.
 
 ### What Children Implemented
-{% for child in icChildResults %}
-- **{{ child.crSubsystemName }}**: merged from `{{ child.crBranch }}`
+{% for child in childResults %}
+- **{{ child.subsystemName }}**: merged from `{{ child.branch }}`
 {% endfor %}
 
 {% else %}
@@ -20,23 +20,23 @@ No subsystems were identified. Implement all stubs directly.
 
 ## Scaffolding Summary
 
-Plan: {{ icScaffoldingResult.srOutput.soPlan }}
+Plan: {{ scaffoldingResult.output.plan }}
 
 Tests written:
-{% for test in icScaffoldingResult.srOutput.soTestsWritten %}
+{% for test in scaffoldingResult.output.testsWritten %}
 - {{ test }}
 {% endfor %}
 
 Stubs created:
-{% for stub in icScaffoldingResult.srOutput.soStubsCreated %}
+{% for stub in scaffoldingResult.output.stubsCreated %}
 - {{ stub }}
 {% endfor %}
 
 ## Your Task
 
-1. **Implement the stubs** in `{{ icSpec.specTargetPath }}`
+1. **Implement the stubs** in `{{ spec.targetPath }}`
    - Replace `undefined` with actual implementations
-   {% if icIsGlueLayer %}
+   {% if isGlueLayer %}
    - Use the now-real subsystem modules
    - Focus on orchestration and integration
    {% else %}
@@ -52,8 +52,8 @@ Stubs created:
 
 3. **Commit your implementation**
    ```bash
-   git add {{ icSpec.specTargetPath }}
-   git commit -m "impl: {{ icSpec.specDescription }}"
+   git add {{ spec.targetPath }}
+   git commit -m "impl: {{ spec.description }}"
    ```
 
 ## Structured Output
