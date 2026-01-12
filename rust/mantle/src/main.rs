@@ -5,16 +5,20 @@
 //!
 //! ## Commands
 //!
-//! - `session` - Manage sessions (start, continue, fork, list, info, cleanup)
+//! - `session` - Manage sessions (start, continue, fork)
+//!
+//! ## Stateless Design
+//!
+//! Mantle is stateless - all session data (cc_session_id, worktree, branch, model)
+//! is passed as CLI arguments. The hub tracks session metadata for observability.
 
 use clap::{Parser, Subcommand};
 use tracing::error;
 use tracing_subscriber::EnvFilter;
 
 use mantle::session::{
-    cleanup_sessions, continue_session, fork_session, list_sessions, session_info, start_session,
-    CleanupConfig, ContinueConfig, ForkConfig, ListConfig, SessionState, StartConfig, StateManager,
-    WorktreeManager,
+    continue_session, fork_session, start_session,
+    ContinueConfig, ForkConfig, StartConfig,
 };
 
 // ============================================================================
@@ -55,7 +59,7 @@ enum SessionCommands {
         model: String,
 
         /// Timeout in seconds (0 = no timeout)
-        #[arg(long, default_value = "300")]
+        #[arg(long, default_value = "0")]
         timeout: u64,
 
         /// JSON schema for structured output (passed to Claude Code --json-schema)
@@ -93,12 +97,29 @@ enum SessionCommands {
 
     /// Continue an existing session with a new prompt
     Continue {
-        /// Session ID to continue
-        session_id: String,
+        /// Claude Code session ID (for --resume)
+        #[arg(long)]
+        cc_session_id: String,
+
+        /// Worktree path where code lives
+        #[arg(long)]
+        worktree: String,
+
+        /// Git branch name
+        #[arg(long)]
+        branch: String,
+
+        /// Model to use (haiku, sonnet, opus)
+        #[arg(long)]
+        model: String,
 
         /// New prompt text
         #[arg(long)]
         prompt: String,
+
+        /// Timeout in seconds (0 = no timeout)
+        #[arg(long, default_value = "0")]
+        timeout: u64,
 
         /// Path to file containing JSON array of MCP decision tools for sum type outputs
         #[arg(long)]
@@ -107,8 +128,21 @@ enum SessionCommands {
 
     /// Fork a session (create child session from parent's context)
     Fork {
-        /// Parent session ID to fork from
-        parent_id: String,
+        /// Parent's Claude Code session ID (for --fork-session)
+        #[arg(long)]
+        parent_cc_session_id: String,
+
+        /// Parent's worktree path
+        #[arg(long)]
+        parent_worktree: String,
+
+        /// Parent's git branch
+        #[arg(long)]
+        parent_branch: String,
+
+        /// Model to use (haiku, sonnet, opus)
+        #[arg(long)]
+        model: String,
 
         /// Slug for the child session
         #[arg(long)]
@@ -118,33 +152,13 @@ enum SessionCommands {
         #[arg(long)]
         child_prompt: String,
 
+        /// Timeout in seconds (0 = no timeout)
+        #[arg(long, default_value = "0")]
+        timeout: u64,
+
         /// Path to file containing JSON array of MCP decision tools for sum type outputs
         #[arg(long)]
         decision_tools_file: Option<String>,
-    },
-
-    /// Show detailed information about a session
-    Info {
-        /// Session ID
-        session_id: String,
-    },
-
-    /// List all sessions
-    List {
-        /// Filter by state
-        #[arg(long, value_enum)]
-        state: Option<SessionState>,
-    },
-
-    /// Clean up old sessions
-    Cleanup {
-        /// Only clean up completed sessions
-        #[arg(long)]
-        completed: bool,
-
-        /// Show what would be cleaned up without doing it
-        #[arg(long)]
-        dry_run: bool,
     },
 }
 
@@ -180,7 +194,6 @@ fn main() {
 fn handle_session_command(cmd: SessionCommands) -> std::result::Result<(), Box<dyn std::error::Error>> {
     // Get repository root (current directory for now)
     let repo_root = std::env::current_dir()?;
-    let state_manager = StateManager::new(&repo_root)?;
 
     match cmd {
         SessionCommands::Start { slug, prompt, model, timeout, json_schema, decision_tools_file,
@@ -215,11 +228,14 @@ fn handle_session_command(cmd: SessionCommands) -> std::result::Result<(), Box<d
             }
         }
 
-        SessionCommands::Continue { session_id, prompt, decision_tools_file } => {
+        SessionCommands::Continue { cc_session_id, worktree, branch, model, prompt, timeout, decision_tools_file } => {
             let config = ContinueConfig {
-                session_id,
+                cc_session_id,
+                worktree: worktree.into(),
+                branch,
+                model,
                 prompt,
-                timeout_secs: 300, // Default timeout
+                timeout_secs: timeout,
                 decision_tools_file,
             };
 
@@ -238,12 +254,15 @@ fn handle_session_command(cmd: SessionCommands) -> std::result::Result<(), Box<d
             }
         }
 
-        SessionCommands::Fork { parent_id, child_slug, child_prompt, decision_tools_file } => {
+        SessionCommands::Fork { parent_cc_session_id, parent_worktree, parent_branch, model, child_slug, child_prompt, timeout, decision_tools_file } => {
             let config = ForkConfig {
-                parent_id,
+                parent_cc_session_id,
+                parent_worktree: parent_worktree.into(),
+                parent_branch,
+                model,
                 child_slug,
                 child_prompt,
-                timeout_secs: 300, // Default timeout
+                timeout_secs: timeout,
                 decision_tools_file,
             };
 
@@ -257,63 +276,6 @@ fn handle_session_command(cmd: SessionCommands) -> std::result::Result<(), Box<d
                 }
                 Err(e) => {
                     eprintln!("Error forking session: {}", e);
-                    std::process::exit(1);
-                }
-            }
-        }
-
-        SessionCommands::Info { session_id } => {
-            match session_info(&state_manager, &session_id) {
-                Ok(info) => {
-                    // Output JSON for Haskell consumption
-                    println!("{}", serde_json::to_string(&info)?);
-                    Ok(())
-                }
-                Err(e) => {
-                    eprintln!("Error: {}", e);
-                    std::process::exit(1);
-                }
-            }
-        }
-
-        SessionCommands::List { state } => {
-            let config = ListConfig {
-                state,
-                parent_id: None,
-                limit: None,
-            };
-
-            match list_sessions(&state_manager, &config) {
-                Ok(output) => {
-                    // Output JSON for Haskell consumption
-                    println!("{}", serde_json::to_string(&output)?);
-                    Ok(())
-                }
-                Err(e) => {
-                    eprintln!("Error: {}", e);
-                    std::process::exit(1);
-                }
-            }
-        }
-
-        SessionCommands::Cleanup { completed, dry_run } => {
-            let worktree_manager = WorktreeManager::new(&repo_root, &state_manager.worktrees_dir())?;
-            let config = CleanupConfig {
-                completed_only: completed,
-                failed_only: false,
-                all_terminal: !completed, // If not just completed, clean all terminal states
-                dry_run,
-                session_ids: vec![],
-            };
-
-            match cleanup_sessions(&state_manager, &worktree_manager, &config) {
-                Ok(output) => {
-                    // Output JSON for Haskell consumption
-                    println!("{}", serde_json::to_string(&output)?);
-                    Ok(())
-                }
-                Err(e) => {
-                    eprintln!("Error: {}", e);
                     std::process::exit(1);
                 }
             }

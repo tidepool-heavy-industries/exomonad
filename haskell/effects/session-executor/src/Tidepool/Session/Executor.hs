@@ -25,8 +25,8 @@
 -- * @--resume <session-id>@ for continuation
 -- * @--fork-session@ for read-only forks
 --
--- Mantle manages worktrees at @.mantle/worktrees/<branch>/@ and tracks state
--- in @.mantle/sessions.json@. Haskell is stateless.
+-- Mantle manages worktrees at @.mantle/worktrees/<branch>/@.
+-- Mantle is stateless - all session data passed as CLI arguments.
 --
 -- = Usage
 --
@@ -35,10 +35,9 @@
 -- import Tidepool.Effect.Session
 --
 -- main = runM $ runSessionIO config $ do
---   result <- startSession "implement/feat-x" "Implement feature X" Sonnet
---   case detectForkRequest result of
---     Just (childSlug, prompt) -> forkSession (soSessionId result) childSlug prompt
---     Nothing -> continueSession (soSessionId result) "Continue"
+--   result <- startSession "implement/feat-x" "Implement feature X" Sonnet Nothing Nothing
+--   -- Continue requires all session data
+--   continueSession (soSessionId result) (soWorktree result) (soBranch result) Sonnet "Continue" Nothing Nothing
 -- @
 module Tidepool.Session.Executor
   ( -- * Executor
@@ -53,6 +52,8 @@ module Tidepool.Session.Executor
   ) where
 
 import Control.Exception (try, SomeException)
+import Control.Monad (unless)
+import System.Directory (doesDirectoryExist)
 import Control.Monad.Freer (Eff, LastMember, interpret, sendM)
 import Data.Aeson (Value, eitherDecodeStrict, encode)
 import Data.ByteString.Char8 qualified as BSC
@@ -64,7 +65,7 @@ import Data.Text.Encoding qualified as TE
 import Data.Time.Clock (getCurrentTime, diffUTCTime)
 import System.Exit (ExitCode(..))
 import System.IO (hFlush, stdout)
-import System.Process (readProcessWithExitCode, readCreateProcessWithExitCode, proc, CreateProcess(..), StdStream(..))
+import System.Process (readCreateProcessWithExitCode, proc, CreateProcess(..))
 import System.Random (randomRIO)
 import Numeric (showHex)
 
@@ -72,7 +73,6 @@ import Tidepool.Effect.Session
   ( Session(..)
   , SessionId(..)
   , SessionOutput(..)
-  , SessionMetadata(..)
   )
 import Tidepool.Graph.Types (ModelChoice(..))
 
@@ -109,25 +109,23 @@ defaultSessionConfig repoRoot = SessionConfig
 -- Each effect operation spawns one @mantle session@ process:
 --
 -- * @StartSession@ → @mantle session start --slug X --prompt Y --model Z [--decision-tools T]@
--- * @ContinueSession@ → @mantle session continue <id> --prompt Y [--decision-tools T]@
--- * @ForkSession@ → @mantle session fork <id> --child-slug X --child-prompt Y [--decision-tools T]@
--- * @SessionInfo@ → @mantle session info <id>@
+-- * @ContinueSession@ → @mantle session continue --cc-session-id X --worktree Y --branch Z --model M --prompt P [--decision-tools T]@
+-- * @ForkSession@ → @mantle session fork --parent-cc-session-id X --parent-worktree Y --parent-branch Z --model M --child-slug S --child-prompt P [--decision-tools T]@
 --
 -- The process runs a single turn (container lifecycle), then exits with JSON
 -- on stdout. This function parses that JSON into Haskell types.
+--
+-- Mantle is stateless - all session data is passed as CLI arguments.
 runSessionIO :: LastMember IO effs => SessionConfig -> Eff (Session ': effs) a -> Eff effs a
 runSessionIO config = interpret $ \case
   StartSession slug prompt model schema tools ->
     sendM $ startSessionIO config slug prompt model schema tools
 
-  ContinueSession sid prompt schema tools ->
-    sendM $ continueSessionIO config sid prompt schema tools
+  ContinueSession ccSid worktree branch model prompt schema tools ->
+    sendM $ continueSessionIO config ccSid worktree branch model prompt schema tools
 
-  ForkSession parent childSlug childPrompt schema tools ->
-    sendM $ forkSessionIO config parent childSlug childPrompt schema tools
-
-  SessionInfo sid ->
-    sendM $ sessionInfoIO config sid
+  ForkSession parentCcSid parentWorktree parentBranch model childSlug childPrompt schema tools ->
+    sendM $ forkSessionIO config parentCcSid parentWorktree parentBranch model childSlug childPrompt schema tools
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -154,12 +152,17 @@ startSessionIO config slug prompt model schema tools = do
 
 -- | Continue an existing session.
 --
--- Spawns: @mantle session continue <session-id> --prompt <prompt> [--json-schema <schema>] [--decision-tools <tools>]@
-continueSessionIO :: SessionConfig -> SessionId -> Text -> Maybe Value -> Maybe Value -> IO SessionOutput
-continueSessionIO config sid prompt schema tools = do
+-- Spawns: @mantle session continue --cc-session-id <id> --worktree <path> --branch <name> --model <model> --prompt <prompt> [--json-schema <schema>] [--decision-tools <tools>]@
+--
+-- All session data passed as args (mantle is stateless).
+continueSessionIO :: SessionConfig -> SessionId -> FilePath -> Text -> ModelChoice -> Text -> Maybe Value -> Maybe Value -> IO SessionOutput
+continueSessionIO config ccSid worktree branch model prompt schema tools = do
   let args =
         [ "session", "continue"
-        , T.unpack sid.unSessionId
+        , "--cc-session-id", T.unpack ccSid.unSessionId
+        , "--worktree", worktree
+        , "--branch", T.unpack branch
+        , "--model", modelToArg model
         , "--prompt", T.unpack prompt
         ] <> schemaArg schema
 
@@ -168,47 +171,22 @@ continueSessionIO config sid prompt schema tools = do
 
 -- | Fork a session (child inherits parent's history).
 --
--- Spawns: @mantle session fork <parent-id> --child-slug <slug> --child-prompt <prompt> [--json-schema <schema>] [--decision-tools <tools>]@
+-- Spawns: @mantle session fork --parent-cc-session-id <id> --parent-worktree <path> --parent-branch <name> --model <model> --child-slug <slug> --child-prompt <prompt> [--json-schema <schema>] [--decision-tools <tools>]@
 --
--- The child slug can include a phase prefix (e.g., "subtask/handle-edge-case").
--- Mantle appends a hex suffix for uniqueness and creates the child branch.
-forkSessionIO :: SessionConfig -> SessionId -> Text -> Text -> Maybe Value -> Maybe Value -> IO SessionOutput
-forkSessionIO config parent childSlug childPrompt schema tools = do
+-- All parent session data passed as args (mantle is stateless).
+forkSessionIO :: SessionConfig -> SessionId -> FilePath -> Text -> ModelChoice -> Text -> Text -> Maybe Value -> Maybe Value -> IO SessionOutput
+forkSessionIO config parentCcSid parentWorktree parentBranch model childSlug childPrompt schema tools = do
   let args =
         [ "session", "fork"
-        , T.unpack parent.unSessionId
+        , "--parent-cc-session-id", T.unpack parentCcSid.unSessionId
+        , "--parent-worktree", parentWorktree
+        , "--parent-branch", T.unpack parentBranch
+        , "--model", modelToArg model
         , "--child-slug", T.unpack childSlug
         , "--child-prompt", T.unpack childPrompt
         ] <> schemaArg schema
 
   runMantleSession config args tools
-
-
--- | Query session metadata.
---
--- Spawns: @mantle session info <session-id>@
-sessionInfoIO :: SessionConfig -> SessionId -> IO (Maybe SessionMetadata)
-sessionInfoIO config sid = do
-  let args =
-        [ "session", "info"
-        , T.unpack sid.unSessionId
-        ]
-
-  result <- try @SomeException $ readProcessWithExitCode
-    config.scMantlePath
-    args
-    ""
-
-  case result of
-    Left _ -> pure Nothing
-    Right (exitCode, stdoutStr, _) ->
-      case exitCode of
-        ExitFailure _ -> pure Nothing  -- Session not found
-        ExitSuccess ->
-          -- Use proper UTF-8 encoding (BSC.pack truncates chars > 255!)
-          case eitherDecodeStrict (TE.encodeUtf8 $ T.pack stdoutStr) of
-            Left _ -> pure Nothing
-            Right metadata -> pure (Just metadata)
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -240,12 +218,18 @@ runMantleSession config args mtools = do
   let finalArgs = args <> toolsArgs
 
   -- Log command before execution
-  putStrLn $ "[SESSION] Running: " <> config.scMantlePath <> " " <> unwords finalArgs
+  putStrLn $ "[SESSION] Running: " <> config.scMantlePath <> " " <> unwords (take 3 finalArgs)  -- Just show command type
+  putStrLn $ "[SESSION] Working directory: " <> config.scRepoRoot
+  -- Verify working directory exists
+  cwdExists <- doesDirectoryExist config.scRepoRoot
+  unless cwdExists $
+    putStrLn $ "[SESSION] WARNING: Working directory does not exist!"
   hFlush stdout
 
   startTime <- getCurrentTime
+  -- Capture stderr for debugging (previously inherited, now captured)
   result <- try @SomeException $ readCreateProcessWithExitCode
-    (proc config.scMantlePath finalArgs) { std_err = Inherit }
+    (proc config.scMantlePath finalArgs) { cwd = Just config.scRepoRoot }
     ""
   endTime <- getCurrentTime
   let duration = realToFrac (diffUTCTime endTime startTime) :: Double
@@ -255,11 +239,14 @@ runMantleSession config args mtools = do
       putStrLn $ "[SESSION] Failed to spawn mantle: " <> show e
       hFlush stdout
       pure $ errorOutput $ "Failed to spawn mantle: " <> T.pack (show e)
-    Right (exitCode, stdoutStr, _stderrStr) -> do
+    Right (exitCode, stdoutStr, stderrStr) -> do
       let exitCodeInt = case exitCode of
             ExitSuccess -> 0
             ExitFailure c -> c
       putStrLn $ "[SESSION] Completed (exit: " <> show exitCodeInt <> ", " <> show (round duration :: Int) <> "s)"
+      -- Print stderr if non-empty (for debugging)
+      unless (null stderrStr) $ do
+        putStrLn $ "[SESSION] Stderr: " <> take 2000 stderrStr
       hFlush stdout
       -- Sanitize control chars in JSON strings.
       -- IMPORTANT: Use T.pack (not BSC.pack!) - BSC.pack truncates chars > 255,
@@ -356,6 +343,7 @@ escapeControlChars = go False False
 errorOutput :: Text -> SessionOutput
 errorOutput errMsg = SessionOutput
   { soSessionId = SessionId ""
+  , soCcSessionId = Nothing
   , soBranch = ""
   , soWorktree = ""
   , soExitCode = -1

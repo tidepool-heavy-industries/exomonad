@@ -49,6 +49,7 @@ module Tidepool.Effect.Session
 
     -- * Types
   , SessionId(..)
+  , SessionInfo(..)
   , SessionOutput(..)
   , SessionMetadata(..)
   , InterruptSignal(..)
@@ -59,7 +60,6 @@ module Tidepool.Effect.Session
   , startSession
   , continueSession
   , forkSession
-  , sessionInfo
 
     -- * Fork Detection
   , detectForkRequest
@@ -100,6 +100,30 @@ instance HasJSONSchema SessionId where
   jsonSchema = emptySchema TString
 
 
+-- | Bundled session info for continuation/forking.
+--
+-- Handlers store this in Memory to enable stateless continuation.
+-- All fields come from 'SessionOutput' after a session completes.
+--
+-- @
+-- -- Store after session completes:
+-- updateMem @HandlerMem $ \\m -> m { sessionInfo = Just $
+--   SessionInfo result.ccrSessionId result.ccrWorktree result.ccrBranch }
+--
+-- -- Use for continuation:
+-- case mem.sessionInfo of
+--   Just info -> ContinueFrom info.siSessionId info.siWorktree info.siBranch
+--   Nothing -> StartFresh "slug"
+-- @
+data SessionInfo = SessionInfo
+  { siSessionId :: SessionId  -- ^ CC session ID for --resume flag
+  , siWorktree  :: FilePath   -- ^ Worktree path for mantle
+  , siBranch    :: Text       -- ^ Git branch name
+  }
+  deriving stock (Eq, Show, Generic)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
+
+
 -- | Session operation strategy for ClaudeCode handlers.
 --
 -- Defines how the next ClaudeCode session should be spawned:
@@ -108,21 +132,29 @@ instance HasJSONSchema SessionId where
 -- * 'ContinueFrom' - Resume an existing session (preserves conversation history)
 -- * 'ForkFrom' - Create a read-only fork from parent session
 --
+-- Mantle is stateless, so continue/fork operations must include all session data.
+-- This data comes from the previous 'SessionOutput' stored in handler Memory.
+--
 -- Before handlers return this alongside template context to communicate
 -- session strategy to executeClaudeCodeHandler:
 --
 -- @
 -- beforeHandler input = do
 --   ctx <- buildContext input
---   sessionOp <- case mParentSession of
---     Just parentSid -> pure $ ForkFrom parentSid "child-slug"
---     Nothing -> pure $ StartFresh "fresh-slug"
+--   mem <- getMem @HandlerMem
+--   sessionOp <- case (mem.parentInfo, mem.lastSession) of
+--     (Just pinfo, _) -> pure $ ForkFrom pinfo.ccSid pinfo.worktree pinfo.branch "child-slug"
+--     (_, Just sinfo) -> pure $ ContinueFrom sinfo.ccSid sinfo.worktree sinfo.branch
+--     (Nothing, Nothing) -> pure $ StartFresh "fresh-slug"
 --   pure (ctx, sessionOp)
 -- @
 data SessionOperation
-  = StartFresh Text                    -- ^ Fresh session with slug
-  | ContinueFrom SessionId             -- ^ Continue existing session
-  | ForkFrom SessionId Text            -- ^ Fork from parent with child slug
+  = StartFresh Text
+      -- ^ Fresh session with slug
+  | ContinueFrom SessionId FilePath Text
+      -- ^ Continue: (cc_session_id, worktree, branch)
+  | ForkFrom SessionId FilePath Text Text
+      -- ^ Fork: (parent_cc_session_id, parent_worktree, parent_branch, child_slug)
   deriving (Show, Eq)
 
 
@@ -133,7 +165,8 @@ data SessionOperation
 -- Field naming: @so@ prefix stripped, camelCase → snake_case for JSON.
 -- @soSessionId@ → @session_id@
 data SessionOutput = SessionOutput
-  { soSessionId        :: SessionId      -- ^ Claude Code session ID
+  { soSessionId        :: SessionId      -- ^ Mantle session ID (UUID)
+  , soCcSessionId      :: Maybe Text     -- ^ Claude Code session ID (for --resume/--fork-session)
   , soBranch           :: Text           -- ^ Git branch name
   , soWorktree         :: FilePath       -- ^ Absolute path to worktree
   , soExitCode         :: Int            -- ^ Container exit code
@@ -308,9 +341,12 @@ data Session r where
 
   -- | Continue an existing session (subsequent turns).
   --
-  -- Reuses the session's existing worktree.
+  -- All session data passed as args (mantle is stateless).
   ContinueSession
-    :: SessionId      -- ^ Session to continue
+    :: SessionId      -- ^ Claude Code session ID (for --resume)
+    -> FilePath       -- ^ Worktree path
+    -> Text           -- ^ Branch name
+    -> ModelChoice    -- ^ Model to use
     -> Text           -- ^ Prompt for this turn
     -> Maybe Value    -- ^ JSON schema for structured output (optional)
     -> Maybe Value    -- ^ Decision tools JSON array (optional)
@@ -319,19 +355,17 @@ data Session r where
   -- | Fork a session (child inherits parent's conversation history).
   --
   -- Uses @--resume <parent> --fork-session@ so parent is unchanged.
-  -- Mantle creates child branch @<child-slug>-<hex>@ and worktree.
+  -- All parent session data passed as args (mantle is stateless).
   ForkSession
-    :: SessionId      -- ^ Parent session to fork from
+    :: SessionId      -- ^ Parent's Claude Code session ID (for --fork-session)
+    -> FilePath       -- ^ Parent's worktree path
+    -> Text           -- ^ Parent's branch name
+    -> ModelChoice    -- ^ Model to use
     -> Text           -- ^ Child slug (e.g., "subtask/handle-edge-case")
     -> Text           -- ^ Child prompt
     -> Maybe Value    -- ^ JSON schema for structured output (optional)
     -> Maybe Value    -- ^ Decision tools JSON array (optional)
     -> Session SessionOutput  -- Returns child's first turn result
-
-  -- | Query session metadata from @.mantle/sessions.json@.
-  SessionInfo
-    :: SessionId
-    -> Session (Maybe SessionMetadata)
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -369,54 +403,48 @@ startSession slug prompt model schema tools =
 
 -- | Continue an existing session with optional structured output and decision tools.
 --
+-- All session data must be passed (mantle is stateless).
+--
 -- @
--- result <- continueSession sid "Now add error handling" Nothing Nothing
+-- result <- continueSession ccSid worktree branch Sonnet "Now add error handling" Nothing Nothing
 -- @
 continueSession
   :: Member Session effs
-  => SessionId      -- ^ Session to continue
+  => SessionId      -- ^ Claude Code session ID (for --resume)
+  -> FilePath       -- ^ Worktree path
+  -> Text           -- ^ Branch name
+  -> ModelChoice    -- ^ Model to use
   -> Text           -- ^ Prompt for this turn
   -> Maybe Value    -- ^ JSON schema for structured output (optional)
   -> Maybe Value    -- ^ Decision tools JSON array (optional)
   -> Eff effs SessionOutput
-continueSession sid prompt schema tools =
-  send $ ContinueSession sid prompt schema tools
+continueSession ccSid worktree branch model prompt schema tools =
+  send $ ContinueSession ccSid worktree branch model prompt schema tools
 
 -- | Fork a session (child inherits parent's history) with optional structured output
 -- and decision tools.
 --
 -- Parent session is unchanged. Child gets a new session ID.
--- The child slug can include a phase prefix (e.g., "subtask/edge-case").
+-- All parent session data must be passed (mantle is stateless).
 --
 -- @
--- childResult <- forkSession parentSid "subtask/auth-tests" "Write tests for auth" Nothing Nothing
+-- childResult <- forkSession parentCcSid parentWorktree parentBranch Sonnet "subtask/auth-tests" "Write tests for auth" Nothing Nothing
 -- let childSid = soSessionId childResult
 -- -- Child branch: subtask/auth-tests-7b2c4e
 -- @
 forkSession
   :: Member Session effs
-  => SessionId      -- ^ Parent session
+  => SessionId      -- ^ Parent's Claude Code session ID (for --fork-session)
+  -> FilePath       -- ^ Parent's worktree path
+  -> Text           -- ^ Parent's branch name
+  -> ModelChoice    -- ^ Model to use
   -> Text           -- ^ Child slug (e.g., "subtask/auth-tests")
   -> Text           -- ^ Child prompt
   -> Maybe Value    -- ^ JSON schema for structured output (optional)
   -> Maybe Value    -- ^ Decision tools JSON array (optional)
   -> Eff effs SessionOutput
-forkSession parent childSlug childPrompt schema tools =
-  send $ ForkSession parent childSlug childPrompt schema tools
-
--- | Query session metadata.
---
--- @
--- mInfo <- sessionInfo sid
--- case mInfo of
---   Just info -> putStrLn $ "Status: " <> smStatus info
---   Nothing -> putStrLn "Session not found"
--- @
-sessionInfo
-  :: Member Session effs
-  => SessionId
-  -> Eff effs (Maybe SessionMetadata)
-sessionInfo sid = send $ SessionInfo sid
+forkSession parentCcSid parentWorktree parentBranch model childSlug childPrompt schema tools =
+  send $ ForkSession parentCcSid parentWorktree parentBranch model childSlug childPrompt schema tools
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -453,9 +481,8 @@ detectForkRequest result =
 -- @
 -- let mockHandler = \\case
 --       StartSession slug _ _ _ _ -> pure mockOutput { soBranch = slug <> \"-abc123\" }
---       ContinueSession _ _ _ _ -> pure mockOutput
---       ForkSession _ childSlug _ _ _ -> pure mockOutput { soBranch = childSlug <> \"-def456\" }
---       SessionInfo _ -> pure Nothing
+--       ContinueSession _ _ _ _ _ _ _ -> pure mockOutput
+--       ForkSession _ _ _ _ childSlug _ _ _ -> pure mockOutput { soBranch = childSlug <> \"-def456\" }
 --
 -- result <- runM $ runSession mockHandler myProgram
 -- @
@@ -465,6 +492,5 @@ runSession
   -> Eff effs a
 runSession handler = interpret $ \case
   op@(StartSession _ _ _ _ _) -> handler op
-  op@(ContinueSession _ _ _ _) -> handler op
-  op@(ForkSession _ _ _ _ _) -> handler op
-  op@(SessionInfo _) -> handler op
+  op@(ContinueSession _ _ _ _ _ _ _) -> handler op
+  op@(ForkSession _ _ _ _ _ _ _ _) -> handler op

@@ -70,7 +70,7 @@ import Text.Ginger.TH (TypedTemplate, runTypedTemplate)
 import Text.Parsec.Pos (SourcePos)
 
 import Tidepool.Effect (LLM)
-import Tidepool.Effect.Session (Session, SessionOutput(..), SessionId(..), SessionOperation(..), startSession, continueSession, forkSession)
+import Tidepool.Effect.Session (Session, SessionOutput(..), SessionId(..), SessionOperation(..), startSession, continueSession, forkSession, ToolCall(..))
 import Tidepool.Effect.Types (TurnOutcome(..), TurnParseResult(..), TurnResult(..), runTurn)
 import Tidepool.Graph.Edges (GetInput, GetSpawnTargets, GetBarrierTarget, GetAwaits)
 import Tidepool.Graph.Generic (AsHandler, FieldsWithNamesOf, SpawnPayloads, SpawnPayloadsInner, AwaitsHList, GetNodeDef)
@@ -84,7 +84,6 @@ import Tidepool.Graph.Types (Exit, Self, Arrive, SingModelChoice(..), HList(..),
 import Tidepool.Schema (schemaToValue)
 import Tidepool.StructuredOutput (StructuredOutput(..), formatDiagnostic, ClaudeCodeSchema(..), DecisionTool)
 import qualified Tidepool.StructuredOutput.DecisionTools as DT
-import Tidepool.Effect.Session (ToolCall(..))
 
 -- | Effect type alias (freer-simple effects have kind Type -> Type).
 type Effect = Type -> Type
@@ -421,14 +420,14 @@ executeClaudeCodeHandler mSystemTpl userTpl beforeFn afterFn input = do
         StartFresh slug ->
           startSession slug prompt model_ schema tools
 
-        ContinueFrom sid ->
+        ContinueFrom sid worktree branch ->
           -- Guard against empty session ID (indicates prior mantle failure)
           if T.null sid.unSessionId
           then error "ClaudeCode: Cannot continue session - no valid session ID (prior mantle failure)"
-          else continueSession sid prompt schema tools
+          else continueSession sid worktree branch model_ prompt schema tools
 
-        ForkFrom parentSid childSlug ->
-          forkSession parentSid childSlug prompt schema tools
+        ForkFrom parentSid parentWorktree parentBranch childSlug ->
+          forkSession parentSid parentWorktree parentBranch model_ childSlug prompt schema tools
 
       -- Check for mantle/process-level failure BEFORE parsing output
       -- This distinguishes "mantle crashed" from "Claude didn't call tool"
@@ -439,14 +438,16 @@ executeClaudeCodeHandler mSystemTpl userTpl beforeFn afterFn input = do
           <> " [exit code: " <> show result.soExitCode <> "]"
           <> stderrInfo
 
-      -- Also fail if session ID is empty (indicates mantle never started properly)
-      when (T.null result.soSessionId.unSessionId) $ do
-        let errDetails = fromMaybe "no details" result.soError
-            stderrInfo = maybe "" (\s -> "\n\nStderr:\n" <> T.unpack s) result.soStderrOutput
-        error $ "ClaudeCode session failed to start - no session ID returned. "
-          <> "Error: " <> T.unpack errDetails
-          <> " [exit code: " <> show result.soExitCode <> "]"
-          <> stderrInfo
+      -- Extract cc_session_id (required for resume/fork) - fail early if missing
+      ccSessionId <- case result.soCcSessionId of
+        Just sid -> pure (SessionId sid)
+        Nothing -> do
+          let errDetails = fromMaybe "no cc_session_id in output" result.soError
+              stderrInfo = maybe "" (\s -> "\n\nStderr:\n" <> T.unpack s) result.soStderrOutput
+          error $ "ClaudeCode session failed to return cc_session_id (required for resume/fork). "
+            <> "Error: " <> T.unpack errDetails
+            <> " [exit code: " <> show result.soExitCode <> "]"
+            <> stderrInfo
 
       -- Parse result based on whether we're using decision tools
       case tools of
@@ -456,7 +457,7 @@ executeClaudeCodeHandler mSystemTpl userTpl beforeFn afterFn input = do
             Just [tc] ->
               -- Got exactly one tool call, parse it
               case ccParseToolCall @s (convertToolCall tc) of
-                Right output -> afterFn_ (ClaudeCodeResult output result.soSessionId, result.soSessionId)
+                Right output -> afterFn_ (ClaudeCodeResult output ccSessionId result.soWorktree result.soBranch, ccSessionId)
                 Left err -> error $ "ClaudeCode decision tool parse error: " <> err
 
             Just (_:_:_) ->
@@ -472,7 +473,7 @@ executeClaudeCodeHandler mSystemTpl userTpl beforeFn afterFn input = do
               else do
                 -- Continue the same session with nag prompt
                 executeWithNag @s decisionToolNagPrompt schema tools
-                  (ContinueFrom result.soSessionId) model_ afterFn_ (retryCount + 1)
+                  (ContinueFrom ccSessionId result.soWorktree result.soBranch) model_ afterFn_ (retryCount + 1)
 
         Nothing ->
           -- Regular type: parse from structured output
@@ -481,7 +482,7 @@ executeClaudeCodeHandler mSystemTpl userTpl beforeFn afterFn input = do
               <> maybe "" (\e -> ": " <> T.unpack e) result.soError
             Just outputVal ->
               case ccParseStructured @s outputVal of
-                Right output -> afterFn_ (ClaudeCodeResult output result.soSessionId, result.soSessionId)
+                Right output -> afterFn_ (ClaudeCodeResult output ccSessionId result.soWorktree result.soBranch, ccSessionId)
                 Left diag ->
                   -- Parse failed - nag and retry
                   if retryCount >= maxNagRetries
@@ -492,7 +493,7 @@ executeClaudeCodeHandler mSystemTpl userTpl beforeFn afterFn input = do
                     -- Continue the same session with parse error nag prompt
                     let nagText = parseErrorNagPrompt (formatDiagnostic diag)
                     executeWithNag @s nagText schema tools
-                      (ContinueFrom result.soSessionId) model_ afterFn_ (retryCount + 1)
+                      (ContinueFrom ccSessionId result.soWorktree result.soBranch) model_ afterFn_ (retryCount + 1)
 
     -- Convert Session.ToolCall to DecisionTools.ToolCall format
     convertToolCall :: ToolCall -> DT.ToolCall

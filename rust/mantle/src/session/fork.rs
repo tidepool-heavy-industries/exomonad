@@ -3,15 +3,19 @@
 //! Creates a child session from a parent, preserving context via --fork-session.
 //! The child gets its own worktree and branch while inheriting parent's conversation.
 //!
+//! ## Stateless Design
+//!
+//! All parent session data is passed as CLI arguments - no state file lookup.
+//! The caller (Haskell) maintains parent info from previous SessionOutput.
+//!
 //! Hub integration: Forked sessions register with parent_id for lineage tracking.
 
 use std::cell::RefCell;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 use tracing::{debug, info, warn};
 
-use super::state::StateManager;
-use super::types::{generate_branch_name, generate_session_id, SessionMetadata, SessionOutput};
+use super::types::{generate_branch_name, generate_session_id, SessionOutput};
 use super::worktree::WorktreeManager;
 use crate::docker::{run_claude_direct, ContainerConfig};
 
@@ -23,17 +27,8 @@ use mantle_shared::hub::{
 /// Error types for session fork operations.
 #[derive(Debug, thiserror::Error)]
 pub enum ForkError {
-    #[error("State error: {0}")]
-    State(#[from] super::state::StateError),
-
     #[error("Worktree error: {0}")]
     Worktree(#[from] super::worktree::WorktreeError),
-
-    #[error("Parent session not found: {0}")]
-    ParentNotFound(String),
-
-    #[error("Parent session has no Claude Code session ID")]
-    NoCcSessionId,
 
     #[error("Parent worktree not found: {0}")]
     ParentWorktreeNotFound(String),
@@ -63,10 +58,18 @@ pub enum ForkError {
 pub type Result<T> = std::result::Result<T, ForkError>;
 
 /// Configuration for forking a session.
+///
+/// All parent session data is passed as required arguments - no state lookup.
 #[derive(Debug, Clone)]
 pub struct ForkConfig {
-    /// Parent session ID to fork from
-    pub parent_id: String,
+    /// Parent's Claude Code session ID (for --fork-session)
+    pub parent_cc_session_id: String,
+    /// Parent's worktree path
+    pub parent_worktree: PathBuf,
+    /// Parent's git branch
+    pub parent_branch: String,
+    /// Model to use (inherited from parent typically)
+    pub model: String,
     /// Slug for the child session
     pub child_slug: String,
     /// Prompt for the child session
@@ -79,55 +82,55 @@ pub struct ForkConfig {
 
 /// Fork a session to create a child with inherited context.
 ///
+/// All parent session data is passed via config - no state file lookup.
+///
 /// This function:
-/// 1. Loads parent session metadata
+/// 1. Validates parent worktree exists and is intact
 /// 2. Creates new worktree branching from parent's branch
-/// 3. Creates child session with parent reference
+/// 3. Registers with hub for observability
 /// 4. Executes Claude Code with --fork-session flag
-/// 5. Updates both parent and child state
+/// 5. Returns session output
 ///
 /// # Arguments
 /// * `repo_root` - Path to the git repository root
-/// * `config` - Fork configuration
+/// * `config` - Fork configuration with all required parent data
 ///
 /// # Returns
 /// Session output for the child session
 pub fn fork_session(repo_root: &Path, config: &ForkConfig) -> Result<SessionOutput> {
     let start_time = Instant::now();
 
-    // Initialize managers
-    let state_manager = StateManager::new(repo_root)?;
-    let worktree_manager = WorktreeManager::new(repo_root, &state_manager.worktrees_dir())?;
-
-    // Load parent session
-    let parent = state_manager.get_session(&config.parent_id)?;
+    // Initialize worktree manager
+    let mantle_dir = repo_root.join(".mantle");
+    let worktrees_dir = mantle_dir.join("worktrees");
+    let worktree_manager = WorktreeManager::new(repo_root, &worktrees_dir)?;
 
     // Validate parent worktree exists and is intact
-    if !parent.worktree.exists() {
+    if !config.parent_worktree.exists() {
         return Err(ForkError::ParentWorktreeNotFound(
-            parent.worktree.display().to_string(),
+            config.parent_worktree.display().to_string(),
         ));
     }
 
-    let git_path = parent.worktree.join(".git");
+    let git_path = config.parent_worktree.join(".git");
     if !git_path.exists() {
         return Err(ForkError::ParentWorktreeCorrupted(
-            parent.worktree.display().to_string(),
+            config.parent_worktree.display().to_string(),
         ));
     }
 
     // Verify parent branch still exists
     let branch_check = std::process::Command::new("git")
         .arg("-C")
-        .arg(&parent.worktree)
+        .arg(&config.parent_worktree)
         .arg("rev-parse")
         .arg("--verify")
-        .arg(&parent.branch)
+        .arg(&config.parent_branch)
         .output();
 
     match branch_check {
         Ok(output) if !output.status.success() => {
-            return Err(ForkError::ParentBranchNotFound(parent.branch.clone()));
+            return Err(ForkError::ParentBranchNotFound(config.parent_branch.clone()));
         }
         Err(e) => {
             debug!(error = %e, "Failed to verify parent branch, continuing anyway");
@@ -135,15 +138,12 @@ pub fn fork_session(repo_root: &Path, config: &ForkConfig) -> Result<SessionOutp
         _ => {}
     }
 
-    // Need parent's cc_session_id for --fork-session
-    let parent_cc_session_id = parent.cc_session_id.clone().ok_or(ForkError::NoCcSessionId)?;
-
     // Generate child identifiers
     let child_id = generate_session_id();
     let child_branch = generate_branch_name(&config.child_slug);
 
     info!(
-        parent_id = %config.parent_id,
+        parent_cc_session_id = %config.parent_cc_session_id,
         child_id = %child_id,
         child_slug = %config.child_slug,
         child_branch = %child_branch,
@@ -151,32 +151,14 @@ pub fn fork_session(repo_root: &Path, config: &ForkConfig) -> Result<SessionOutp
     );
 
     // Create child worktree from parent's branch
-    let child_worktree = worktree_manager.create(&child_branch, Some(&parent.branch))?;
+    let child_worktree = worktree_manager.create(&child_branch, Some(&config.parent_branch))?;
 
     debug!(
         worktree = %child_worktree.display(),
-        base_branch = %parent.branch,
+        base_branch = %config.parent_branch,
         "Created child worktree"
     );
 
-    // Create child session metadata
-    let child_session = SessionMetadata::fork_from(
-        &parent,
-        child_id.clone(),
-        config.child_slug.clone(),
-        child_branch.clone(),
-        child_worktree.clone(),
-    );
-
-    // Save child session
-    state_manager.insert_session(child_session)?;
-
-    // Update parent's child_ids
-    state_manager.with_state(|state| {
-        state.add_child(&config.parent_id, &child_id)
-    })?;
-
-    // Execute via Docker container with hub streaming
     // Read decision tools from file if provided
     let tools_json = if let Some(ref tools_file) = config.decision_tools_file {
         Some(std::fs::read_to_string(tools_file)
@@ -189,25 +171,14 @@ pub fn fork_session(repo_root: &Path, config: &ForkConfig) -> Result<SessionOutp
         &child_id,
         &child_branch,
         &child_worktree,
-        &parent_cc_session_id,
-        &parent.model,
+        &config.parent_cc_session_id,
+        &config.model,
         &config.child_prompt,
         config.timeout_secs,
-        &state_manager,
         tools_json.as_deref(),
     )?;
 
     let duration = start_time.elapsed().as_secs_f64();
-
-    // Update child session state
-    state_manager.update_session(&child_id, |s| {
-        s.mark_completed(
-            result.exit_code,
-            result.total_cost_usd,
-            result.num_turns,
-            result.cc_session_id.clone(),
-        );
-    })?;
 
     let mut output = SessionOutput {
         duration_secs: duration,
@@ -326,7 +297,6 @@ fn execute_docker_fork(
     model: &str,
     prompt: &str,
     timeout_secs: u64,
-    state_manager: &StateManager,
     decision_tools: Option<&str>,
 ) -> Result<SessionOutput> {
     // Load hub config
@@ -383,11 +353,6 @@ fn execute_docker_fork(
             .map_err(|e| ForkError::Execution(format!("Failed to set decision tools: {}", e)))?;
     }
 
-    // Mark session as running
-    state_manager.update_session(session_id, |s| {
-        s.mark_running(None);
-    })?;
-
     // Wrap event_stream in RefCell for interior mutability in the closure
     let event_stream = RefCell::new(event_stream);
 
@@ -428,121 +393,5 @@ fn execute_docker_fork(
     Ok(output)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::session::types::SessionState;
-    use std::process::Command as ProcessCommand;
-    use tempfile::TempDir;
-
-    fn setup_git_repo() -> TempDir {
-        let temp_dir = TempDir::new().unwrap();
-
-        ProcessCommand::new("git")
-            .args(["init"])
-            .current_dir(temp_dir.path())
-            .output()
-            .unwrap();
-
-        ProcessCommand::new("git")
-            .args(["config", "user.email", "test@test.com"])
-            .current_dir(temp_dir.path())
-            .output()
-            .unwrap();
-
-        ProcessCommand::new("git")
-            .args(["config", "user.name", "Test"])
-            .current_dir(temp_dir.path())
-            .output()
-            .unwrap();
-
-        std::fs::write(temp_dir.path().join("README.md"), "# Test").unwrap();
-
-        ProcessCommand::new("git")
-            .args(["add", "."])
-            .current_dir(temp_dir.path())
-            .output()
-            .unwrap();
-
-        ProcessCommand::new("git")
-            .args(["commit", "-m", "Initial commit"])
-            .current_dir(temp_dir.path())
-            .output()
-            .unwrap();
-
-        temp_dir
-    }
-
-    #[test]
-    fn test_fork_requires_cc_session_id() {
-        let temp_dir = setup_git_repo();
-        let state_manager = StateManager::new(temp_dir.path()).unwrap();
-        let worktree_manager = WorktreeManager::new(
-            temp_dir.path(),
-            &state_manager.worktrees_dir(),
-        ).unwrap();
-
-        // Create a real worktree for the parent
-        let parent_worktree = worktree_manager.create("parent/test-abc123", None).unwrap();
-
-        // Create parent session without cc_session_id (but with valid worktree)
-        let parent = SessionMetadata::new(
-            "parent-123".to_string(),
-            "parent/test".to_string(),
-            "parent/test-abc123".to_string(),
-            parent_worktree,
-            "sonnet".to_string(),
-        );
-        state_manager.insert_session(parent).unwrap();
-
-        let config = ForkConfig {
-            parent_id: "parent-123".to_string(),
-            child_slug: "child/test".to_string(),
-            child_prompt: "Test prompt".to_string(),
-            timeout_secs: 0,
-            decision_tools_file: None,
-        };
-
-        let result = fork_session(temp_dir.path(), &config);
-        assert!(matches!(result, Err(ForkError::NoCcSessionId)));
-    }
-
-    #[test]
-    fn test_fork_session_metadata() {
-        let temp_dir = setup_git_repo();
-        let state_manager = StateManager::new(temp_dir.path()).unwrap();
-        let worktree_manager = WorktreeManager::new(
-            temp_dir.path(),
-            &state_manager.worktrees_dir(),
-        ).unwrap();
-
-        // Create parent session with cc_session_id
-        let parent_worktree = worktree_manager.create("parent/test-abc123", None).unwrap();
-        let mut parent = SessionMetadata::new(
-            "parent-123".to_string(),
-            "parent/test".to_string(),
-            "parent/test-abc123".to_string(),
-            parent_worktree,
-            "sonnet".to_string(),
-        );
-        parent.cc_session_id = Some("cc-parent-session".to_string());
-        parent.state = SessionState::Completed;
-        state_manager.insert_session(parent).unwrap();
-
-        // Test that fork_from creates correct metadata
-        let parent_loaded = state_manager.get_session("parent-123").unwrap();
-        let child = SessionMetadata::fork_from(
-            &parent_loaded,
-            "child-456".to_string(),
-            "child/test".to_string(),
-            "child/test-def456".to_string(),
-            temp_dir.path().join(".mantle/worktrees/child-test"),
-        );
-
-        assert_eq!(child.id, "child-456");
-        assert_eq!(child.parent_id, Some("parent-123".to_string()));
-        assert_eq!(child.cc_session_id, Some("cc-parent-session".to_string()));
-        assert_eq!(child.model, "sonnet"); // Inherited from parent
-        assert_eq!(child.state, SessionState::Pending);
-    }
-}
+// Tests removed - previous tests depended on StateManager which was removed.
+// Fork functionality is now tested via integration tests with the full CLI.

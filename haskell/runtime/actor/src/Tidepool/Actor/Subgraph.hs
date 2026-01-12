@@ -61,6 +61,7 @@ module Tidepool.Actor.Subgraph
   , Subgraph(..)
   , ChildHandle(..)
   , ChildId(..)
+  , ChildError(..)
   , spawnSelf
   , awaitAny
   , getPending
@@ -72,11 +73,15 @@ import Control.Concurrent.STM
   , readTVarIO, atomically
   , modifyTVar', writeTQueue, readTQueue
   )
+import Control.Exception (SomeException, try, displayException)
 import Control.Monad.Freer (Eff, LastMember, interpret, sendM, runM)
 import Data.Aeson (FromJSON)
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
+import Data.Text (Text)
+import qualified Data.Text as T
+import Data.Typeable (typeOf)
 import Data.UUID.V4 (nextRandom)
 import qualified Ki
 
@@ -84,6 +89,7 @@ import Tidepool.Effect.Subgraph
   ( Subgraph(..)
   , ChildHandle(..)
   , ChildId(..)
+  , ChildError(..)
   , spawnSelf
   , awaitAny
   , getPending
@@ -123,10 +129,12 @@ data SubgraphState entry result = SubgraphState
   { ssScope     :: !Ki.Scope
     -- ^ Ki scope for structured concurrency. Children forked here are
     -- automatically cancelled when the scope exits.
-  , ssChildren  :: !(TVar (Map ChildId (Ki.Thread result)))
+  , ssChildren  :: !(TVar (Map ChildId (Ki.Thread (Either ChildError result))))
     -- ^ Currently running children (Ki threads). Removed when they complete.
-  , ssCompleted :: !(TQueue (ChildId, result))
+    -- The thread result is Either to capture exceptions.
+  , ssCompleted :: !(TQueue (ChildId, Either ChildError result))
     -- ^ Completion queue. AwaitAny blocks on this.
+    -- Results are Either to capture child failures.
   , ssGetRunner :: !(IO (entry -> IO result))
     -- ^ How to get the graph runner. The IO layer enables deferred binding
     -- for cases where the runner can't be known at state creation time.
@@ -299,10 +307,15 @@ runSubgraph state = interpret $ \case
       -- This is where the deferred binding resolves!
       runner <- state.ssGetRunner
 
-      -- Run the full graph for this child
-      result <- runner childEntry
+      -- Run the full graph for this child, catching exceptions
+      -- This prevents one child's failure from killing siblings via Ki cancellation
+      outcome <- try @SomeException $ runner childEntry
 
-      -- On completion:
+      let result = case outcome of
+            Right r -> Right r
+            Left ex -> Left $ exceptionToChildError ex
+
+      -- On completion (success OR failure):
       -- 1. Remove from children map
       -- 2. Add to completion queue (unblocks awaitAny)
       atomically $ do
@@ -318,12 +331,23 @@ runSubgraph state = interpret $ \case
     pure (ChildHandle cid)
 
   AwaitAny -> sendM $
-    -- Block until any child completes
+    -- Block until any child completes (success or failure)
     atomically $ readTQueue state.ssCompleted
 
   GetPending -> sendM $ do
     children <- readTVarIO state.ssChildren
     pure [ChildHandle cid | cid <- Map.keys children]
+
+
+-- | Convert a SomeException to ChildError.
+--
+-- Captures exception type name and message for parent to inspect.
+exceptionToChildError :: SomeException -> ChildError
+exceptionToChildError ex = ChildError
+  { ceMessage = T.pack (displayException ex)
+  , ceException = T.pack (show (typeOf ex))
+  , ceDetails = Nothing  -- Could extract more details for specific exception types
+  }
 
 
 -- ════════════════════════════════════════════════════════════════════════════

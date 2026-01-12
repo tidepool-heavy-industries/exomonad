@@ -3,16 +3,20 @@
 //! Resumes an existing session with a new prompt while preserving
 //! Claude Code's conversation context via --resume.
 //!
+//! ## Stateless Design
+//!
+//! All session data is passed as CLI arguments - no local state file.
+//! The caller (Haskell) maintains session info from previous SessionOutput.
+//!
 //! Hub integration: Each continuation registers as a new hub session
 //! for independent observability.
 
 use std::cell::RefCell;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 use tracing::{debug, info, warn};
 
-use super::state::StateManager;
-use super::types::{SessionOutput, SessionState};
+use super::types::SessionOutput;
 use crate::docker::{run_claude_direct, ContainerConfig};
 
 use mantle_shared::hub::{
@@ -23,18 +27,6 @@ use mantle_shared::hub::{
 /// Error types for session continue operations.
 #[derive(Debug, thiserror::Error)]
 pub enum ContinueError {
-    #[error("State error: {0}")]
-    State(#[from] super::state::StateError),
-
-    #[error("Session not found: {0}")]
-    NotFound(String),
-
-    #[error("Session is in state '{0}', cannot continue")]
-    InvalidState(SessionState),
-
-    #[error("Session has no Claude Code session ID (never ran successfully)")]
-    NoCcSessionId,
-
     #[error("Worktree not found: {0}")]
     WorktreeNotFound(String),
 
@@ -63,10 +55,18 @@ pub enum ContinueError {
 pub type Result<T> = std::result::Result<T, ContinueError>;
 
 /// Configuration for continuing a session.
+///
+/// All session data is passed as required arguments - no state lookup.
 #[derive(Debug, Clone)]
 pub struct ContinueConfig {
-    /// Session ID to continue
-    pub session_id: String,
+    /// Claude Code session ID (for --resume)
+    pub cc_session_id: String,
+    /// Worktree path where code lives
+    pub worktree: PathBuf,
+    /// Git branch name
+    pub branch: String,
+    /// Model to use (haiku, sonnet, opus)
+    pub model: String,
     /// New prompt for the continuation
     pub prompt: String,
     /// Timeout in seconds (0 = no timeout)
@@ -77,71 +77,50 @@ pub struct ContinueConfig {
 
 /// Continue an existing session with a new prompt.
 ///
+/// All session data is passed via config - no state file lookup.
+///
 /// This function:
-/// 1. Loads existing session metadata
-/// 2. Validates session is in a continuable state
+/// 1. Validates worktree exists and is intact
+/// 2. Registers with hub for observability
 /// 3. Resumes Claude Code with --resume flag
-/// 4. Updates session state on completion
+/// 4. Returns session output
 ///
 /// # Arguments
-/// * `repo_root` - Path to the git repository root
-/// * `config` - Continue configuration
+/// * `_repo_root` - Path to the git repository root (unused, for API consistency)
+/// * `config` - Continue configuration with all required session data
 ///
 /// # Returns
 /// Session output with results
-pub fn continue_session(repo_root: &Path, config: &ContinueConfig) -> Result<SessionOutput> {
+pub fn continue_session(_repo_root: &Path, config: &ContinueConfig) -> Result<SessionOutput> {
     let start_time = Instant::now();
 
-    // Load session metadata
-    let state_manager = StateManager::new(repo_root)?;
-    let session = state_manager.get_session(&config.session_id)?;
-
-    // Validate session can be continued
-    match session.state {
-        SessionState::Completed | SessionState::Failed => {
-            // These states are fine to continue from
-        }
-        SessionState::Pending => {
-            return Err(ContinueError::InvalidState(SessionState::Pending));
-        }
-        SessionState::Running => {
-            return Err(ContinueError::InvalidState(SessionState::Running));
-        }
-        SessionState::Cancelled => {
-            // Allow continuing cancelled sessions
-        }
-    }
-
-    // Need cc_session_id for --resume
-    let cc_session_id = session.cc_session_id.clone().ok_or(ContinueError::NoCcSessionId)?;
-
     // Validate worktree exists and is intact
-    if !session.worktree.exists() {
+    if !config.worktree.exists() {
         return Err(ContinueError::WorktreeNotFound(
-            session.worktree.display().to_string(),
+            config.worktree.display().to_string(),
         ));
     }
 
     // Check worktree has .git (file or directory)
-    let git_path = session.worktree.join(".git");
+    let git_path = config.worktree.join(".git");
     if !git_path.exists() {
         return Err(ContinueError::WorktreeCorrupted(
-            session.worktree.display().to_string(),
+            config.worktree.display().to_string(),
         ));
     }
 
     // Verify branch still exists in git
     let branch_check = std::process::Command::new("git")
         .arg("-C")
-        .arg(&session.worktree)
+        .arg(&config.worktree)
         .arg("rev-parse")
         .arg("--verify")
-        .arg(&session.branch)
+        .arg(&config.branch)
         .output();
 
     match branch_check {
         Ok(output) if !output.status.success() => {
-            return Err(ContinueError::BranchNotFound(session.branch.clone()));
+            return Err(ContinueError::BranchNotFound(config.branch.clone()));
         }
         Err(e) => {
             debug!(error = %e, "Failed to verify branch, continuing anyway");
@@ -151,9 +130,9 @@ pub fn continue_session(repo_root: &Path, config: &ContinueConfig) -> Result<Ses
     }
 
     info!(
-        session_id = %config.session_id,
-        cc_session_id = %cc_session_id,
-        branch = %session.branch,
+        cc_session_id = %config.cc_session_id,
+        branch = %config.branch,
+        worktree = %config.worktree.display(),
         "Continuing session"
     );
 
@@ -167,28 +146,16 @@ pub fn continue_session(repo_root: &Path, config: &ContinueConfig) -> Result<Ses
 
     // Execute via Docker container with hub streaming
     let result = execute_docker_continue(
-        &config.session_id,
-        &session.branch,
-        &session.worktree,
-        &cc_session_id,
-        &session.model,
+        &config.branch,
+        &config.worktree,
+        &config.cc_session_id,
+        &config.model,
         &config.prompt,
         config.timeout_secs,
-        &state_manager,
         tools_json.as_deref(),
     )?;
 
     let duration = start_time.elapsed().as_secs_f64();
-
-    // Update session state
-    state_manager.update_session(&config.session_id, |s| {
-        s.mark_completed(
-            result.exit_code,
-            result.total_cost_usd,
-            result.num_turns,
-            result.cc_session_id.clone(),
-        );
-    })?;
 
     let mut output = SessionOutput {
         duration_secs: duration,
@@ -300,14 +267,12 @@ fn submit_result_to_hub(
 
 /// Execute session continue directly in a Docker container with hub streaming.
 fn execute_docker_continue(
-    session_id: &str,
     branch: &str,
     worktree_path: &Path,
     cc_session_id: &str,
     model: &str,
     prompt: &str,
     timeout_secs: u64,
-    state_manager: &StateManager,
     decision_tools: Option<&str>,
 ) -> Result<SessionOutput> {
     // Load hub config
@@ -316,7 +281,7 @@ fn execute_docker_continue(
     // 1. Health check hub - FAIL if unreachable
     check_hub_reachable(&hub_config)?;
 
-    info!(session_id = %session_id, "Starting Docker continue execution with hub streaming");
+    info!(cc_session_id = %cc_session_id, "Starting Docker continue execution with hub streaming");
 
     // 2. Register session with hub (as a continuation)
     let (hub_session_id, hub_node_id) = register_with_hub(
@@ -347,9 +312,9 @@ fn execute_docker_continue(
         prompt.to_string(),
     ];
 
-    // Create container configuration
+    // Create container configuration using cc_session_id as container name
     let mut container_config = ContainerConfig::new(
-        session_id.to_string(),
+        cc_session_id.to_string(),
         worktree_path.to_path_buf(),
         claude_args,
     )?
@@ -361,11 +326,6 @@ fn execute_docker_continue(
         container_config = container_config.with_decision_tools(tools_json)
             .map_err(|e| ContinueError::Execution(format!("Failed to set decision tools: {}", e)))?;
     }
-
-    // Mark session as running
-    state_manager.update_session(session_id, |s| {
-        s.mark_running(None);
-    })?;
 
     // Wrap event_stream in RefCell for interior mutability in the closure
     let event_stream = RefCell::new(event_stream);
@@ -383,7 +343,7 @@ fn execute_docker_continue(
     }
 
     let output = SessionOutput {
-        session_id: session_id.to_string(),
+        session_id: cc_session_id.to_string(), // Use cc_session_id as session_id
         branch: branch.to_string(),
         worktree: worktree_path.to_path_buf(),
         exit_code: run_result.exit_code,

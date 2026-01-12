@@ -46,6 +46,11 @@ RUN mkdir -p /home/user/.claude && chown -R user:user /home/user/.claude
 USER user
 WORKDIR /home/user
 
+# Configure git identity for commits inside container
+RUN git config --global user.email "claude@tidepool.labs" && \
+    git config --global user.name "Claude (Tidepool)" && \
+    git config --global init.defaultBranch main
+
 ENV BOOTSTRAP_HASKELL_NONINTERACTIVE=1
 ENV BOOTSTRAP_HASKELL_GHC_VERSION=latest
 ENV BOOTSTRAP_HASKELL_CABAL_VERSION=latest

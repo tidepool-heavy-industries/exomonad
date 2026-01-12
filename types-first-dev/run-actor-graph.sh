@@ -49,7 +49,7 @@ export RUST_LOG="${RUST_LOG:-info}"
 SPEC_FILE="${1:-$GIT_ROOT/types-first-dev/specs/url-shortener.yaml}"
 
 # Optional target directory override (via $2)
-TARGET_DIR="${2:-}"
+TARGET_DIR="/Users/inannamalick/dev/template-repo/url-shortener"
 
 # Run from git root (for cabal.project)
 cd "$GIT_ROOT"
@@ -58,5 +58,5 @@ cd "$GIT_ROOT"
 if [ -n "$TARGET_DIR" ]; then
     cabal run -v0 types-first-dev:exe:types-first-dev-runner -- "$SPEC_FILE" "$TARGET_DIR"
 else
-    cabal run -v0 types-first-dev:exe:types-first-dev-runner -- "$SPEC_FILE"
+    cabal run -v0 types-first-dev:exe:types-first-dev-runner -- "$SPEC_FILE" "$TARGET_DIR"
 fi

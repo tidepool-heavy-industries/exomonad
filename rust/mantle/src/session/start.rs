@@ -11,8 +11,7 @@ use std::path::Path;
 use std::time::Instant;
 use tracing::{debug, info, warn};
 
-use super::state::StateManager;
-use super::types::{generate_branch_name, generate_session_id, SessionMetadata, SessionOutput};
+use super::types::{generate_branch_name, generate_session_id, SessionOutput};
 use super::worktree::WorktreeManager;
 use crate::docker::{run_claude_direct, ContainerConfig};
 
@@ -24,9 +23,6 @@ use mantle_shared::hub::{
 /// Error types for session start operations.
 #[derive(Debug, thiserror::Error)]
 pub enum StartError {
-    #[error("State error: {0}")]
-    State(#[from] super::state::StateError),
-
     #[error("Worktree error: {0}")]
     Worktree(#[from] super::worktree::WorktreeError),
 
@@ -221,11 +217,10 @@ fn validate_graph_tracking_args(config: &StartConfig) -> Result<()> {
 /// 2. Generates unique session ID
 /// 3. Builds hierarchical branch name from execution_id/node_path/node_type
 /// 4. Creates git worktree for isolation
-/// 5. Records session in state file
-/// 6. Registers node in existing hub session (with metadata)
-/// 7. Connects WebSocket for live event streaming
-/// 8. Executes Claude Code via Docker (streaming events to hub)
-/// 9. Submits final result to mantle-hub
+/// 5. Registers node in existing hub session (with metadata)
+/// 6. Connects WebSocket for live event streaming
+/// 7. Executes Claude Code via Docker (streaming events to hub)
+/// 8. Submits final result to mantle-hub
 ///
 /// # Arguments
 /// * `repo_root` - Path to the git repository root
@@ -245,10 +240,10 @@ pub fn start_session(repo_root: &Path, config: &StartConfig) -> Result<SessionOu
     // 1. Health check hub - FAIL if unreachable
     check_hub_reachable(&hub_config)?;
 
-    // Initialize managers
-    let state_manager = StateManager::new(repo_root)?;
-    let worktree_manager =
-        WorktreeManager::new(repo_root, &state_manager.worktrees_dir())?;
+    // Initialize worktree manager
+    let mantle_dir = repo_root.join(".mantle");
+    let worktrees_dir = mantle_dir.join("worktrees");
+    let worktree_manager = WorktreeManager::new(repo_root, &worktrees_dir)?;
 
     // Generate unique identifiers
     let session_id = generate_session_id();
@@ -279,18 +274,6 @@ pub fn start_session(repo_root: &Path, config: &StartConfig) -> Result<SessionOu
         "Created worktree"
     );
 
-    // Create session metadata
-    let session = SessionMetadata::new(
-        session_id.clone(),
-        config.slug.clone(),
-        branch.clone(),
-        worktree_path.clone(),
-        config.model.clone(),
-    );
-
-    // Save session to state file
-    state_manager.insert_session(session)?;
-
     // 2. Register with hub - either new session or node in existing session
     let (hub_session_id, hub_node_id) = if let Some(ref existing_hub_session_id) = config.hub_session_id {
         // Graph execution tracking: register node in existing session
@@ -319,21 +302,10 @@ pub fn start_session(repo_root: &Path, config: &StartConfig) -> Result<SessionOu
         &branch,
         &worktree_path,
         config,
-        &state_manager,
         event_stream,
     )?;
 
     let duration = start_time.elapsed().as_secs_f64();
-
-    // Update session state based on result
-    state_manager.update_session(&session_id, |s| {
-        s.mark_completed(
-            result.exit_code,
-            result.total_cost_usd,
-            result.num_turns,
-            result.cc_session_id.clone(),
-        );
-    })?;
 
     let mut output = SessionOutput {
         duration_secs: duration,
@@ -517,7 +489,6 @@ fn execute_docker_with_streaming(
     branch: &str,
     worktree_path: &Path,
     config: &StartConfig,
-    state_manager: &StateManager,
     event_stream: SyncEventStream,
 ) -> Result<SessionOutput> {
     use std::cell::RefCell;
@@ -559,11 +530,6 @@ fn execute_docker_with_streaming(
         container_config = container_config.with_decision_tools(&tools_json)
             .map_err(|e| StartError::Execution(format!("Failed to set decision tools: {}", e)))?;
     }
-
-    // Mark session as running
-    state_manager.update_session(session_id, |s| {
-        s.mark_running(None);
-    })?;
 
     // Wrap event_stream in RefCell for interior mutability in the closure
     // This allows the closure to capture by shared reference while still mutating
@@ -624,7 +590,7 @@ fn execute_docker_with_streaming(
     })
 }
 
-/// Prepare session for execution (creates worktree and metadata, doesn't execute).
+/// Prepare session for execution (creates worktree, doesn't execute).
 ///
 /// Use this when you need to set up a session but execute it separately
 /// (e.g., via Docker).
@@ -635,10 +601,10 @@ pub fn prepare_session(
     repo_root: &Path,
     config: &StartConfig,
 ) -> Result<(String, String, std::path::PathBuf)> {
-    // Initialize managers
-    let state_manager = StateManager::new(repo_root)?;
-    let worktree_manager =
-        WorktreeManager::new(repo_root, &state_manager.worktrees_dir())?;
+    // Initialize worktree manager
+    let mantle_dir = repo_root.join(".mantle");
+    let worktrees_dir = mantle_dir.join("worktrees");
+    let worktree_manager = WorktreeManager::new(repo_root, &worktrees_dir)?;
 
     // Generate unique identifiers
     let session_id = generate_session_id();
@@ -653,18 +619,6 @@ pub fn prepare_session(
 
     // Create worktree
     let worktree_path = worktree_manager.create(&branch, config.base_branch.as_deref())?;
-
-    // Create session metadata
-    let session = SessionMetadata::new(
-        session_id.clone(),
-        config.slug.clone(),
-        branch.clone(),
-        worktree_path.clone(),
-        config.model.clone(),
-    );
-
-    // Save session to state file
-    state_manager.insert_session(session)?;
 
     Ok((session_id, branch, worktree_path))
 }
@@ -743,12 +697,6 @@ mod tests {
 
         // Verify worktree was created
         assert!(worktree_path.exists());
-
-        // Verify session was recorded
-        let state_manager = StateManager::new(temp_dir.path()).unwrap();
-        let session = state_manager.get_session(&session_id).unwrap();
-        assert_eq!(session.slug, "test/prepare");
-        assert_eq!(session.model, "sonnet");
     }
 
     #[test]
@@ -781,33 +729,6 @@ mod tests {
     }
 
     #[test]
-    fn test_prepare_session_creates_pending_state() {
-        let temp_dir = setup_git_repo();
-
-        let config = StartConfig {
-            slug: "test/pending".to_string(),
-            prompt: "Test prompt".to_string(),
-            model: "sonnet".to_string(),
-            timeout_secs: 0,
-            base_branch: None,
-            json_schema: None,
-            decision_tools_file: None,
-            hub_session_id: None,
-            execution_id: None,
-            node_path: None,
-            node_type: None,
-            parent_hub_node_id: None,
-        };
-
-        let (session_id, _, _) = prepare_session(temp_dir.path(), &config).unwrap();
-
-        // Session should start in Pending state
-        let state_manager = StateManager::new(temp_dir.path()).unwrap();
-        let session = state_manager.get_session(&session_id).unwrap();
-        assert!(matches!(session.state, super::super::types::SessionState::Pending));
-    }
-
-    #[test]
     fn test_prepare_multiple_sessions() {
         let temp_dir = setup_git_repo();
 
@@ -827,7 +748,7 @@ mod tests {
             parent_hub_node_id: None,
         };
 
-        let (id1, branch1, _) = prepare_session(temp_dir.path(), &config1).unwrap();
+        let (_, branch1, worktree1) = prepare_session(temp_dir.path(), &config1).unwrap();
 
         // Create second session
         let config2 = StartConfig {
@@ -845,17 +766,16 @@ mod tests {
             parent_hub_node_id: None,
         };
 
-        let (id2, branch2, _) = prepare_session(temp_dir.path(), &config2).unwrap();
-
-        // Verify both sessions exist
-        let state_manager = StateManager::new(temp_dir.path()).unwrap();
-        assert!(state_manager.get_session(&id1).is_ok());
-        assert!(state_manager.get_session(&id2).is_ok());
+        let (_, branch2, worktree2) = prepare_session(temp_dir.path(), &config2).unwrap();
 
         // Verify unique branches
         assert_ne!(branch1, branch2);
         assert!(branch1.starts_with("feature/auth-"));
         assert!(branch2.starts_with("feature/api-"));
+
+        // Verify both worktrees exist
+        assert!(worktree1.exists());
+        assert!(worktree2.exists());
     }
 
     #[test]

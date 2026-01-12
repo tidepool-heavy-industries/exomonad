@@ -187,7 +187,7 @@ class GDecisionTools (f :: Type -> Type) where
 
 -- | Pass through datatype metadata.
 instance GDecisionTools f => GDecisionTools (M1 D d f) where
-  gToDecisionTools opts = gToDecisionTools @f opts
+  gToDecisionTools = gToDecisionTools @f
   gParseToolCall opts tc = M1 <$> gParseToolCall @f opts tc
 
 

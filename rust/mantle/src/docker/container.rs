@@ -292,6 +292,23 @@ where
         .arg("-v")
         .arg(format!("{}:/workspace", config.worktree_path.display()));
 
+    // Mount main repo's .git directory at same host path so worktree gitdir resolves
+    // Worktree is at: repo/.mantle/worktrees/slug-xxx
+    // Main .git is at: repo/.git
+    if let Some(mantle_dir) = config.worktree_path.parent() {  // .mantle/worktrees
+        if let Some(mantle_parent) = mantle_dir.parent() {     // .mantle
+            if let Some(repo_root) = mantle_parent.parent() {  // repo
+                let git_dir = repo_root.join(".git");
+                if git_dir.exists() {
+                    logger.log("MANTLE", &format!("Mounting .git for worktree support: {}", git_dir.display()));
+                    // Mount read-write: worktrees need to write to .git/worktrees/<name>/index.lock
+                    cmd.arg("-v")
+                        .arg(format!("{}:{}", git_dir.display(), git_dir.display()));
+                }
+            }
+        }
+    }
+
     // Mount claude auth credentials
     // Either a named Docker volume (shared auth) or host bind mount (local dev)
     match &config.auth_mount {

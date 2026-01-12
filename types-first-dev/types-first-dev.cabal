@@ -1,20 +1,17 @@
 cabal-version:      3.0
 name:               types-first-dev
 version:            0.1.0.0
-synopsis:           V3 TDD workflow graph with tree coordination via Subgraph effect
+synopsis:           Single-node Work graph with recursive tree decomposition
 description:
-    7-node TDD graph implementing types-first development:
+    Single recursive Work node that handles everything:
     .
-    1. Scaffold: Analyze spec, create interface + tests + plan, spawn children
-    2. TDDWriteTests: Write failing tests for all criteria
-    3. ImplBarrier: Collect child results via Subgraph.awaitAny
-    4. Impl: Make tests pass (self-loop retry)
-    5. TDDReviewImpl: Review impl, route to Merger or MoreTests
-    6. Merger: File MR to parent
-    7. Rebaser: Adapt to sibling changes
+    * Continue: self-loop for local work
+    * Spawn: spawn children via Subgraph effect
+    * AwaitNext: block on child completion
+    * Complete: exit with commit hash
     .
-    Features: Subgraph effect for child spawning (Scaffold) and collection (ImplBarrier),
-    Memory effect for conversation context, Goto for control flow.
+    Features: Subgraph effect for parallel child spawning and collection,
+    Memory effect for session continuation, stateless mantle integration.
 license:            MIT
 author:             Inanna
 build-type:         Simple
@@ -25,32 +22,15 @@ library
         TypesFirstDev.Types
         TypesFirstDev.Types.Core
         TypesFirstDev.Types.JsonOpts
-        TypesFirstDev.Types.Shared
-        TypesFirstDev.Types.Payloads
-        TypesFirstDev.Types.Memory
-        TypesFirstDev.Types.Nodes
-        -- Core modules
-        TypesFirstDev.Context
-        TypesFirstDev.Templates
-        TypesFirstDev.Graph
-        TypesFirstDev.Handlers
-        -- Handler modules (one per node)
-        TypesFirstDev.Handlers.Scaffold
-        TypesFirstDev.Handlers.TDDWriteTests
-        TypesFirstDev.Handlers.ImplBarrier
-        TypesFirstDev.Handlers.ImplReviewMerge
-        TypesFirstDev.Handlers.Rebaser
-        -- Handler assembly (wires all handlers into graph)
-        TypesFirstDev.HandlersAssembled
-        -- Executor (direct handler chaining)
-        TypesFirstDev.Executor
-        -- V3 runtime
-        TypesFirstDev.V3.Interpreters
-        TypesFirstDev.Schema
-        -- Policy and evaluation
-        TypesFirstDev.Policy
-        TypesFirstDev.Evaluation
-        TypesFirstDev.Decomposition
+        TypesFirstDev.Types.Work
+        -- Work graph (single recursive node)
+        TypesFirstDev.WorkGraph
+        TypesFirstDev.WorkContext
+        TypesFirstDev.WorkHandlers
+        TypesFirstDev.WorkExecutor
+        TypesFirstDev.WorkTemplates
+        TypesFirstDev.WorkInterpreters
+        TypesFirstDev.WorkHandlersAssembled
         -- Effects
         TypesFirstDev.Effect.Build
     build-depends:

@@ -2,6 +2,7 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE PolyKinds #-}
+{-# LANGUAGE DeriveAnyClass #-}
 
 -- | Subgraph effect for spawning recursive graph instances.
 --
@@ -10,6 +11,7 @@
 --
 -- * Generic over entry and result types
 -- * Minimal operations: SpawnSelf, AwaitAny, GetPending
+-- * Error handling: AwaitAny returns Either ChildError result
 -- * Rebase coordination happens via git, not messaging
 --
 -- Example usage:
@@ -22,13 +24,15 @@
 --   results <- collectLoop handles
 --   pure (gotoChoice @Exit results)
 --
--- collectLoop :: [ChildHandle] -> Eff (Subgraph Spec V2Result ': effs) V2Result
+-- collectLoop :: [ChildHandle] -> Eff (Subgraph Spec V2Result ': effs) [V2Result]
 -- collectLoop handles = go handles []
 --   where
---     go [] acc = finalize acc
+--     go [] acc = pure (reverse acc)
 --     go pending acc = do
---       (cid, result) <- awaitAny
---       go (removeByCid cid pending) (result : acc)
+--       (cid, outcome) <- awaitAny
+--       case outcome of
+--         Right result -> go (removeByCid cid pending) (result : acc)
+--         Left err -> handleChildError cid err  -- Or propagate
 -- @
 module Tidepool.Effect.Subgraph
   ( -- * Effect Type
@@ -42,10 +46,14 @@ module Tidepool.Effect.Subgraph
     -- * Handle Types
   , ChildHandle(..)
   , ChildId(..)
+
+    -- * Error Types
+  , ChildError(..)
   ) where
 
 import Control.Monad.Freer (Eff, Member, send)
 import Data.Aeson (FromJSON, ToJSON)
+import Data.Text (Text)
 import Data.UUID (UUID)
 import GHC.Generics (Generic)
 
@@ -67,9 +75,10 @@ data Subgraph entry result r where
   -- Returns a handle to track the spawned child.
   SpawnSelf :: entry -> Subgraph entry result ChildHandle
 
-  -- | Block until any child completes.
-  -- Returns the child's ID and result.
-  AwaitAny :: Subgraph entry result (ChildId, result)
+  -- | Block until any child completes (success or failure).
+  -- Returns the child's ID and either an error or the result.
+  -- Errors are captured from exceptions thrown during child execution.
+  AwaitAny :: Subgraph entry result (ChildId, Either ChildError result)
 
   -- | Get handles to children that haven't completed yet.
   GetPending :: Subgraph entry result [ChildHandle]
@@ -97,22 +106,25 @@ spawnSelf
   -> Eff effs ChildHandle
 spawnSelf entry = send (SpawnSelf entry :: Subgraph entry result ChildHandle)
 
--- | Block until any spawned child completes.
+-- | Block until any spawned child completes (success or failure).
 --
--- Returns the child's ID (for correlation) and its result.
+-- Returns the child's ID (for correlation) and either an error or result.
 -- If multiple children complete simultaneously, returns one
 -- arbitrarily (implementation-dependent).
 --
 -- Usage requires type application to specify the entry type:
 --
 -- @
--- (cid, result) <- awaitAny \@Spec \@V2Result
+-- (cid, outcome) <- awaitAny \@Spec \@V2Result
+-- case outcome of
+--   Right result -> processResult result
+--   Left err -> handleError err
 -- @
 awaitAny
   :: forall entry result effs.
      Member (Subgraph entry result) effs
-  => Eff effs (ChildId, result)
-awaitAny = send (AwaitAny :: Subgraph entry result (ChildId, result))
+  => Eff effs (ChildId, Either ChildError result)
+awaitAny = send (AwaitAny :: Subgraph entry result (ChildId, Either ChildError result))
 
 -- | Get handles to all children that haven't completed yet.
 --
@@ -149,4 +161,21 @@ newtype ChildHandle = ChildHandle { chId :: ChildId }
 -- Used to correlate results in AwaitAny with specific children.
 newtype ChildId = ChildId { unChildId :: UUID }
   deriving stock (Show, Eq, Ord, Generic)
+  deriving anyclass (FromJSON, ToJSON)
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- ERROR TYPES
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Error from a child graph execution.
+--
+-- Captures exception information when a child fails so the parent
+-- can decide how to handle it (retry, abort, continue with partial results).
+data ChildError = ChildError
+  { ceMessage   :: Text      -- ^ Human-readable error message
+  , ceException :: Text      -- ^ Exception type name
+  , ceDetails   :: Maybe Text -- ^ Additional details (stderr, exit code, etc.)
+  }
+  deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)

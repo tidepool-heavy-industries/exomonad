@@ -496,13 +496,20 @@ data LLMHandler needs schema targets effs tpl where
 -- | Result from ClaudeCode execution with metadata.
 --
 -- Wraps the parsed structured output along with session metadata.
--- Use 'ccrParsedOutput' to get the schema output, 'ccrSessionId' for
--- session forking in parallel execution.
+-- Use 'ccrParsedOutput' to get the schema output, session fields for
+-- continuation/fork in parallel execution.
+--
+-- All session info is provided because mantle is stateless - continuation
+-- and fork operations need full session data passed as arguments.
 data ClaudeCodeResult schema = ClaudeCodeResult
   { ccrParsedOutput :: schema
     -- ^ The parsed structured output from Claude Code.
   , ccrSessionId :: SessionId
-    -- ^ Session ID from Claude Code (for forking parallel sessions).
+    -- ^ Claude Code session ID (for --resume/--fork-session).
+  , ccrWorktree :: FilePath
+    -- ^ Worktree path (for stateless continuation/fork).
+  , ccrBranch :: Text
+    -- ^ Branch name (for stateless continuation/fork).
   }
   deriving stock (Show, Eq, Functor)
 
