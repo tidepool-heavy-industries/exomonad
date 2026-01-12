@@ -387,8 +387,9 @@ executeClaudeCodeHandler mSystemTpl userTpl beforeFn afterFn input = do
   executeWithNag @schema fullPrompt schemaVal mToolsJson sessionOp model afterFn 0
   where
     -- Maximum nag retries when Claude doesn't call a decision tool or parse fails
+    -- NOTE: Set to 1 for debugging while decision tool termination is being fixed
     maxNagRetries :: Int
-    maxNagRetries = 5
+    maxNagRetries = 1
 
     -- Nag prompt when Claude doesn't call a decision tool
     decisionToolNagPrompt :: Text

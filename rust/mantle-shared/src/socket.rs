@@ -1,53 +1,50 @@
-//! Unix socket client for control envelope communication.
+//! TCP socket client for control envelope communication.
 //!
-//! Provides a synchronous socket client for sending hook events and MCP tool
-//! calls to the Haskell control server and receiving responses.
+//! Provides a synchronous TCP client for sending hook events and MCP tool
+//! calls to the host control server and receiving responses.
 //!
 //! ## Design Decision: Synchronous
 //!
-//! This module uses synchronous I/O (std::os::unix::net) rather than async.
+//! This module uses synchronous I/O (std::net) rather than async.
 //! This is a deliberate choice because:
 //!
 //! 1. Hook commands block anyway - Claude Code waits for hook completion
 //! 2. Simpler code without async runtime overhead
 //! 3. Each hook invocation is a separate process with one request/response
 //!
-//! **Future consideration**: Switch to async (tokio) if it reduces complexity,
-//! particularly for the MCP server which may handle concurrent requests.
-//!
 //! ## Protocol
 //!
-//! - Transport: Unix domain socket (stream)
+//! - Transport: TCP (host.docker.internal:<port> from container)
 //! - Framing: Newline-delimited JSON (NDJSON)
 //! - Flow: Connect -> Write message + newline -> Read response + newline -> Close
 
 use crate::error::{MantleError, Result};
 use crate::protocol::{ControlMessage, ControlResponse};
 use std::io::{BufRead, BufReader, Write};
-use std::os::unix::net::UnixStream;
-use std::path::Path;
+use std::net::TcpStream;
 use std::time::Duration;
 use tracing::{debug, trace};
 
 /// Default timeout for socket operations (30 seconds).
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Unix socket client for control envelope communication.
+/// TCP socket client for control envelope communication.
 pub struct ControlSocket {
-    stream: UnixStream,
+    stream: TcpStream,
 }
 
 impl ControlSocket {
-    /// Connect to the control socket at the given path.
+    /// Connect to the control server at the given host and port.
     ///
     /// # Errors
     ///
-    /// Returns an error if the socket doesn't exist or connection fails.
-    pub fn connect(path: &Path) -> Result<Self> {
-        debug!(path = %path.display(), "Connecting to control socket");
+    /// Returns an error if the connection fails.
+    pub fn connect(host: &str, port: u16) -> Result<Self> {
+        let addr = format!("{}:{}", host, port);
+        debug!(addr = %addr, "Connecting to control server");
 
-        let stream = UnixStream::connect(path).map_err(|e| MantleError::SocketConnect {
-            path: path.to_path_buf(),
+        let stream = TcpStream::connect(&addr).map_err(|e| MantleError::TcpConnect {
+            addr: addr.clone(),
             source: e,
         })?;
 
@@ -59,7 +56,7 @@ impl ControlSocket {
             .set_write_timeout(Some(DEFAULT_TIMEOUT))
             .map_err(|e| MantleError::SocketConfig { source: e })?;
 
-        debug!("Connected to control socket");
+        debug!("Connected to control server");
         Ok(Self { stream })
     }
 
@@ -109,29 +106,28 @@ impl ControlSocket {
     }
 }
 
-/// Check if the control socket environment variable is set.
+/// Get control server connection info from environment.
 ///
-/// Returns the socket path if `TIDEPOOL_CONTROL_SOCKET` is set and non-empty.
-pub fn control_socket_path() -> Option<String> {
-    std::env::var("TIDEPOOL_CONTROL_SOCKET")
-        .ok()
-        .filter(|s| !s.is_empty())
+/// Returns (host, port) if both `MANTLE_CONTROL_HOST` and `MANTLE_CONTROL_PORT` are set.
+pub fn control_server_addr() -> Option<(String, u16)> {
+    let host = std::env::var("MANTLE_CONTROL_HOST").ok()?;
+    let port_str = std::env::var("MANTLE_CONTROL_PORT").ok()?;
+    let port = port_str.parse().ok()?;
+    Some((host, port))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::os::unix::net::UnixListener;
+    use std::net::TcpListener;
     use std::thread;
 
     #[test]
     fn test_socket_roundtrip() {
-        // Create a temp socket
-        let dir = tempfile::tempdir().unwrap();
-        let socket_path = dir.path().join("test.sock");
-
         // Start a simple echo server
-        let listener = UnixListener::bind(&socket_path).unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+
         let server_handle = thread::spawn(move || {
             let (stream, _) = listener.accept().unwrap();
             let mut reader = BufReader::new(&stream);
@@ -152,7 +148,7 @@ mod tests {
         });
 
         // Connect and send
-        let mut client = ControlSocket::connect(&socket_path).unwrap();
+        let mut client = ControlSocket::connect("127.0.0.1", port).unwrap();
 
         use crate::protocol::HookInput;
         let message = ControlMessage::HookEvent {

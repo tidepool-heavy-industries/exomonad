@@ -32,12 +32,12 @@
 //! - `MANTLE_HOOK_SOCKET`: Path to control socket for tool call forwarding
 
 use mantle_shared::protocol::{ControlMessage, ControlResponse, McpError};
+use mantle_shared::socket::control_server_addr;
 use mantle_shared::ControlSocket;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::io::{self, BufRead, Write};
-use std::path::PathBuf;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
 // ============================================================================
 // JSON-RPC 2.0 Types
@@ -186,35 +186,57 @@ struct ToolResultContent {
 /// MCP server state.
 pub struct McpServer {
     tools: Vec<ToolDefinition>,
-    socket_path: Option<PathBuf>,
+    /// Control server address (host, port) for forwarding tool calls.
+    control_addr: Option<(String, u16)>,
 }
 
 impl McpServer {
     /// Create a new MCP server with explicit tools.
-    pub fn new(socket_path: Option<PathBuf>, tools: Vec<ToolDefinition>) -> Self {
-        Self { tools, socket_path }
+    pub fn new(control_addr: Option<(String, u16)>, tools: Vec<ToolDefinition>) -> Self {
+        Self { tools, control_addr }
     }
 
-    /// Create a new MCP server, reading tools from `MANTLE_DECISION_TOOLS` env var.
-    pub fn new_from_env(socket_path: Option<PathBuf>) -> Self {
-        let tools = match std::env::var("MANTLE_DECISION_TOOLS") {
-            Ok(json) => match serde_json::from_str(&json) {
-                Ok(tools) => {
-                    info!(count = ?Vec::<ToolDefinition>::len(&tools), "Loaded decision tools");
-                    tools
+    /// Create a new MCP server, reading tools from `MANTLE_DECISION_TOOLS_FILE` env var
+    /// and control address from `MANTLE_CONTROL_HOST`/`MANTLE_CONTROL_PORT` env vars.
+    ///
+    /// The file path approach avoids shell escaping issues with passing JSON
+    /// through environment variables and command-line arguments.
+    pub fn new_from_env() -> Self {
+        let tools = match std::env::var("MANTLE_DECISION_TOOLS_FILE") {
+            Ok(file_path) => {
+                info!(file = %file_path, "Loading decision tools from file");
+                match std::fs::read_to_string(&file_path) {
+                    Ok(json) => match serde_json::from_str(&json) {
+                        Ok(tools) => {
+                            info!(count = ?Vec::<ToolDefinition>::len(&tools), "Loaded decision tools");
+                            tools
+                        }
+                        Err(e) => {
+                            error!(error = %e, file = %file_path, "Failed to parse decision tools JSON");
+                            Vec::new()
+                        }
+                    },
+                    Err(e) => {
+                        error!(error = %e, file = %file_path, "Failed to read decision tools file");
+                        Vec::new()
+                    }
                 }
-                Err(e) => {
-                    warn!(error = %e, "Failed to parse MANTLE_DECISION_TOOLS, serving no tools");
-                    Vec::new()
-                }
-            },
+            }
             Err(_) => {
-                debug!("MANTLE_DECISION_TOOLS not set, serving no tools");
+                debug!("MANTLE_DECISION_TOOLS_FILE not set, serving no tools");
                 Vec::new()
             }
         };
 
-        Self::new(socket_path, tools)
+        // Read control server address from env vars
+        let control_addr = control_server_addr();
+        if let Some((ref host, port)) = control_addr {
+            info!(host = %host, port = port, "Control server configured");
+        } else {
+            debug!("MANTLE_CONTROL_HOST/PORT not set, tool calls will fail");
+        }
+
+        Self::new(control_addr, tools)
     }
 
     /// Run the MCP server on stdio.
@@ -223,7 +245,11 @@ impl McpServer {
         let mut stdout = io::stdout();
         let reader = stdin.lock();
 
-        info!("MCP server starting on stdio");
+        info!(
+            control_addr = ?self.control_addr,
+            tool_count = self.tools.len(),
+            "MCP server starting on stdio"
+        );
 
         for line in reader.lines() {
             let line = line?;
@@ -329,38 +355,68 @@ impl McpServer {
             );
         }
 
-        // Forward to control socket if available
-        if let Some(ref socket_path) = self.socket_path {
-            match self.forward_tool_call(socket_path, &call_params) {
-                Ok(Some(err)) => {
-                    // MCP error from control socket
-                    JsonRpcResponse::error(id, err.code, err.message)
-                }
-                Ok(None) => {
-                    // Success
-                    self.tool_success_response(id, &call_params.name)
-                }
-                Err(e) => {
-                    // Socket error - still return success to Claude but log warning
-                    warn!(error = %e, "Failed to forward tool call to control socket");
-                    self.tool_success_response(id, &call_params.name)
-                }
+        // Forward to control server - REQUIRED for decision tools
+        let (host, port) = match &self.control_addr {
+            Some(addr) => addr,
+            None => {
+                error!("No control server configured - cannot forward decision tool call");
+                return JsonRpcResponse::error(
+                    id,
+                    -32603,
+                    "Internal error: control server not configured".to_string(),
+                );
             }
-        } else {
-            // No socket configured - just acknowledge the tool call
-            debug!("No control socket configured, acknowledging tool call locally");
-            self.tool_success_response(id, &call_params.name)
+        };
+
+        info!(host = %host, port = port, tool = %call_params.name, "Forwarding tool call to control server");
+
+        match self.forward_tool_call(host, *port, &call_params) {
+            Ok(Err(err)) => {
+                // MCP error from control socket
+                JsonRpcResponse::error(id, err.code, err.message)
+            }
+            Ok(Ok(result_value)) => {
+                // Use the host's response directly
+                let result = ToolCallResult {
+                    content: vec![ToolResultContent {
+                        content_type: "text".to_string(),
+                        text: result_value
+                            .get("content")
+                            .and_then(|c| c.get(0))
+                            .and_then(|c| c.get("text"))
+                            .and_then(|t| t.as_str())
+                            .unwrap_or("Decision recorded")
+                            .to_string(),
+                    }],
+                    is_error: None,
+                };
+                JsonRpcResponse::success(id, serde_json::to_value(result).unwrap())
+            }
+            Err(e) => {
+                // Socket error is a HARD FAILURE - do not silently succeed
+                error!(error = %e, "Failed to forward tool call to control socket");
+                JsonRpcResponse::error(
+                    id,
+                    -32603,
+                    format!("Control socket error: {}", e),
+                )
+            }
         }
     }
 
-    /// Forward a tool call to the control socket.
+    /// Forward a tool call to the control server via TCP.
+    ///
+    /// Returns the host's result (if successful) or an MCP error.
+    /// The result Value contains the host's response text which may include
+    /// termination instructions for decision tools.
     fn forward_tool_call(
         &self,
-        socket_path: &PathBuf,
+        host: &str,
+        port: u16,
         params: &ToolCallParams,
-    ) -> Result<Option<McpError>, String> {
-        let mut socket = ControlSocket::connect(socket_path)
-            .map_err(|e| format!("Socket connect failed: {}", e))?;
+    ) -> Result<Result<Value, McpError>, String> {
+        let mut socket = ControlSocket::connect(host, port)
+            .map_err(|e| format!("TCP connect failed: {}", e))?;
 
         let message = ControlMessage::McpToolCall {
             id: uuid::Uuid::new_v4().to_string(),
@@ -373,7 +429,22 @@ impl McpServer {
             .map_err(|e| format!("Socket send failed: {}", e))?;
 
         match response {
-            ControlResponse::McpToolResponse { error, .. } => Ok(error),
+            ControlResponse::McpToolResponse { result, error, .. } => {
+                if let Some(err) = error {
+                    Ok(Err(err))
+                } else {
+                    // Use the host's result or create a default response
+                    let result_value = result.unwrap_or_else(|| {
+                        serde_json::json!({
+                            "content": [{
+                                "type": "text",
+                                "text": format!("Decision recorded: {}", params.name.replace("decision::", ""))
+                            }]
+                        })
+                    });
+                    Ok(Ok(result_value))
+                }
+            }
             ControlResponse::HookResponse { .. } => {
                 Err("Unexpected HookResponse for MCP call".to_string())
             }
@@ -397,8 +468,16 @@ impl McpServer {
 /// Run the MCP server.
 ///
 /// This is the main entry point called from the CLI.
-pub fn run_mcp_server(socket_path: Option<PathBuf>) -> Result<(), Box<dyn std::error::Error>> {
-    let mut server = McpServer::new_from_env(socket_path);
+/// Reads configuration from environment variables:
+/// - MANTLE_DECISION_TOOLS_FILE: Path to JSON file with tool definitions
+/// - MANTLE_CONTROL_HOST: Host to connect to for forwarding tool calls
+/// - MANTLE_CONTROL_PORT: Port to connect to for forwarding tool calls
+///
+/// Starts immediately without blocking health checks - connection errors
+/// surface when tools are actually called. This ensures Claude can see
+/// the available tools even during MCP server initialization.
+pub fn run_mcp_server() -> Result<(), Box<dyn std::error::Error>> {
+    let mut server = McpServer::new_from_env();
     server.run()?;
     Ok(())
 }

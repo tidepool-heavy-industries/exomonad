@@ -1,18 +1,36 @@
 #!/bin/bash
 # Entrypoint script for mantle Docker container.
 #
-# Registers the decision MCP server with Claude Code if MANTLE_DECISION_TOOLS
-# environment variable is set, then executes the provided command.
+# Registers the decision MCP server with Claude Code if MANTLE_DECISION_TOOLS_FILE
+# is set (points to a mounted JSON file), then executes the provided command.
 
 set -e
 
-# Register decision MCP server if tools are provided
-if [ -n "$MANTLE_DECISION_TOOLS" ]; then
+# Register decision MCP server if tools file is provided
+if [ -n "$MANTLE_DECISION_TOOLS_FILE" ]; then
     echo "[entrypoint] Registering decision MCP server with Claude Code..." >&2
-    if ! mcp_output=$(claude mcp add --scope local decision /usr/local/bin/mantle-agent mcp 2>&1); then
-        echo "[entrypoint] Warning: Failed to register MCP server: $mcp_output" >&2
-        echo "[entrypoint] Continuing anyway..." >&2
-    fi
+    echo "[entrypoint] Tools file: $MANTLE_DECISION_TOOLS_FILE" >&2
+    echo "[entrypoint] Control server: $MANTLE_CONTROL_HOST:$MANTLE_CONTROL_PORT" >&2
+
+    # Write MCP config directly to ~/.claude.json
+    # (claude mcp add writes here but the file isn't persisted in our volume setup)
+    cat > /home/user/.claude.json << EOF
+{
+  "mcpServers": {
+    "decision": {
+      "type": "stdio",
+      "command": "/usr/local/bin/mantle-agent",
+      "args": ["mcp"],
+      "env": {
+        "MANTLE_CONTROL_HOST": "$MANTLE_CONTROL_HOST",
+        "MANTLE_CONTROL_PORT": "$MANTLE_CONTROL_PORT",
+        "MANTLE_DECISION_TOOLS_FILE": "$MANTLE_DECISION_TOOLS_FILE"
+      }
+    }
+  }
+}
+EOF
+    echo "[entrypoint] MCP server configured in /home/user/.claude.json" >&2
 fi
 
 # Execute the actual command

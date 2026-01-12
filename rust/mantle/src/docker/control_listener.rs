@@ -1,12 +1,12 @@
-//! Control socket listener for container↔host communication.
+//! Control listener for container↔host communication via TCP.
 //!
-//! Provides a synchronous socket server that handles MCP tool calls from
+//! Provides a synchronous TCP server that handles MCP tool calls from
 //! `mantle-agent mcp` running inside Docker containers. Tool calls are
 //! accumulated and returned when the container exits.
 //!
 //! ## Protocol
 //!
-//! - Transport: Unix domain socket (stream)
+//! - Transport: TCP (127.0.0.1:0, OS-assigned port)
 //! - Framing: Newline-delimited JSON (NDJSON)
 //! - Flow: Accept -> Read message + newline -> Process -> Write response + newline
 //!
@@ -16,28 +16,36 @@
 //! messages synchronously. Tool calls are accumulated in a shared `Vec<ToolCall>`
 //! protected by a mutex. When the container exits, the caller retrieves the
 //! accumulated tool calls.
+//!
+//! ## Decision Tool Termination
+//!
+//! When a `decision::` prefixed tool is called, the listener:
+//! 1. Records the tool call as usual
+//! 2. Sends the tool call on a decision channel (notifies main thread)
+//! 3. Returns a strong "end session now" response to Claude
+//!
+//! The main thread uses this signal to set a 30-second deadline for graceful
+//! termination. If Claude doesn't exit within the deadline, the container is killed.
 
 use mantle_shared::events::ToolCall;
 use mantle_shared::protocol::{ControlMessage, ControlResponse};
 use serde_json::json;
-use std::fs;
 use std::io::{BufRead, BufReader, ErrorKind, Write};
-use std::os::unix::fs::PermissionsExt;
-use std::os::unix::net::{UnixListener, UnixStream};
-use std::path::{Path, PathBuf};
+use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 use tracing::{debug, error, info, trace, warn};
 
-/// Control socket listener for MCP tool calls.
+/// TCP control listener for MCP tool calls.
 ///
-/// Listens on a Unix socket and handles `McpToolCall` messages from
+/// Listens on a TCP port and handles `McpToolCall` messages from
 /// `mantle-agent mcp` running inside containers.
 pub struct ControlListener {
-    socket_path: PathBuf,
-    listener: Option<UnixListener>,
+    port: u16,
+    listener: Option<TcpListener>,
 }
 
 /// Handle to accumulated tool calls.
@@ -48,44 +56,48 @@ pub struct ToolCallCollector {
     tool_calls: Arc<Mutex<Vec<ToolCall>>>,
     handle: JoinHandle<()>,
     shutdown: Arc<AtomicBool>,
-    socket_path: PathBuf,
 }
 
 impl ControlListener {
-    /// Create a new listener bound to the given socket path.
+    /// Create a new listener bound to an OS-assigned port on localhost.
     ///
-    /// Removes any stale socket file before binding.
-    /// Sets permissions to 0o666 so containers can connect.
-    pub fn bind(socket_path: &Path) -> std::io::Result<Self> {
-        // Remove stale socket if it exists
-        if socket_path.exists() {
-            debug!(path = %socket_path.display(), "Removing stale socket file");
-            fs::remove_file(socket_path)?;
-        }
+    /// The port can be retrieved via `port()` after binding.
+    pub fn bind() -> std::io::Result<Self> {
+        // Bind to localhost with port 0 (OS assigns available port)
+        let listener = TcpListener::bind("127.0.0.1:0")?;
+        let port = listener.local_addr()?.port();
 
-        // Bind the listener
-        let listener = UnixListener::bind(socket_path)?;
-
-        // Set permissions so container can connect (containers run as different user)
-        fs::set_permissions(socket_path, fs::Permissions::from_mode(0o666))?;
-
-        info!(path = %socket_path.display(), "Control socket listener bound");
+        info!(port = port, "Control listener bound to TCP port");
 
         Ok(Self {
-            socket_path: socket_path.to_path_buf(),
+            port,
             listener: Some(listener),
         })
+    }
+
+    /// Get the port this listener is bound to.
+    pub fn port(&self) -> u16 {
+        self.port
     }
 
     /// Spawn the listener thread and return a handle to collect tool calls.
     ///
     /// The listener runs until shutdown is signaled via the collector.
-    pub fn spawn(mut self) -> ToolCallCollector {
+    ///
+    /// Returns a tuple of:
+    /// - `ToolCallCollector`: Handle to accumulated tool calls
+    /// - `Receiver<ToolCall>`: Channel that fires when a `decision::` tool is called
+    ///
+    /// The receiver is used by the main thread to detect decision tool calls
+    /// and set a termination deadline.
+    pub fn spawn(mut self) -> (ToolCallCollector, Receiver<ToolCall>) {
         let tool_calls = Arc::new(Mutex::new(Vec::new()));
         let tool_calls_clone = Arc::clone(&tool_calls);
         let shutdown = Arc::new(AtomicBool::new(false));
         let shutdown_clone = Arc::clone(&shutdown);
-        let socket_path = self.socket_path.clone();
+
+        // Channel for notifying main thread when decision tool is called
+        let (decision_tx, decision_rx) = mpsc::channel();
 
         // Take the listener out of self (allows move into thread while self gets dropped)
         let listener = self.listener.take().expect("Listener already taken");
@@ -96,27 +108,33 @@ impl ControlListener {
             .expect("Failed to set non-blocking mode");
 
         let handle = thread::spawn(move || {
-            Self::run_listener(listener, tool_calls_clone, shutdown_clone);
+            Self::run_listener(listener, tool_calls_clone, shutdown_clone, decision_tx);
         });
 
-        ToolCallCollector { tool_calls, handle, shutdown, socket_path }
+        let collector = ToolCallCollector {
+            tool_calls,
+            handle,
+            shutdown,
+        };
+        (collector, decision_rx)
     }
 
     /// Run the listener loop.
     ///
     /// Polls for connections in non-blocking mode, checking the shutdown flag periodically.
     fn run_listener(
-        listener: UnixListener,
+        listener: TcpListener,
         tool_calls: Arc<Mutex<Vec<ToolCall>>>,
         shutdown: Arc<AtomicBool>,
+        decision_tx: Sender<ToolCall>,
     ) {
         debug!("Control listener thread started");
 
         while !shutdown.load(Ordering::Relaxed) {
             match listener.accept() {
-                Ok((stream, _)) => {
-                    debug!("Accepted connection on control socket");
-                    Self::handle_connection(stream, &tool_calls);
+                Ok((stream, addr)) => {
+                    debug!(addr = %addr, "Accepted TCP connection");
+                    Self::handle_connection(stream, &tool_calls, &decision_tx);
                 }
                 Err(e) if e.kind() == ErrorKind::WouldBlock => {
                     // No pending connection, sleep briefly and check shutdown flag
@@ -136,7 +154,11 @@ impl ControlListener {
     }
 
     /// Handle a single connection.
-    fn handle_connection(stream: UnixStream, tool_calls: &Arc<Mutex<Vec<ToolCall>>>) {
+    fn handle_connection(
+        stream: TcpStream,
+        tool_calls: &Arc<Mutex<Vec<ToolCall>>>,
+        decision_tx: &Sender<ToolCall>,
+    ) {
         let mut reader = BufReader::new(&stream);
         let mut line = String::new();
 
@@ -168,7 +190,7 @@ impl ControlListener {
         };
 
         // Handle message
-        let response = Self::handle_message(message, tool_calls);
+        let response = Self::handle_message(message, tool_calls, decision_tx);
 
         // Send response
         Self::send_response(&stream, &response);
@@ -178,6 +200,7 @@ impl ControlListener {
     fn handle_message(
         message: ControlMessage,
         tool_calls: &Arc<Mutex<Vec<ToolCall>>>,
+        decision_tx: &Sender<ToolCall>,
     ) -> ControlResponse {
         match message {
             ControlMessage::McpToolCall {
@@ -185,21 +208,48 @@ impl ControlListener {
                 tool_name,
                 arguments,
             } => {
-                info!(tool = %tool_name, "Recording MCP tool call");
+                let is_decision_tool = tool_name.starts_with("decision::");
+                let tool_name_short = tool_name.replace("decision::", "");
+
+                if is_decision_tool {
+                    info!(tool = %tool_name, "Decision tool called - notifying main thread");
+                } else {
+                    info!(tool = %tool_name, "Recording MCP tool call");
+                }
 
                 // Record the tool call
-                tool_calls.lock().unwrap().push(ToolCall {
+                let tool_call = ToolCall {
                     name: tool_name.clone(),
                     input: arguments,
-                });
+                };
+                tool_calls.lock().unwrap().push(tool_call.clone());
 
-                // Respond with success
+                // For decision tools, notify main thread to set termination deadline
+                if is_decision_tool {
+                    if let Err(e) = decision_tx.send(tool_call) {
+                        // Channel closed - main thread already exiting, that's fine
+                        debug!(error = %e, "Decision channel send failed (receiver dropped)");
+                    }
+                }
+
+                // Response text differs for decision vs non-decision tools
+                let response_text = if is_decision_tool {
+                    format!(
+                        "Decision recorded: {}. This decision triggers a graph state transition. \
+                         You MUST end this session NOW. Do not perform any more actions, \
+                         do not call any more tools, do not write any more files. Simply stop.",
+                        tool_name_short
+                    )
+                } else {
+                    format!("Tool call recorded: {}", tool_name_short)
+                };
+
                 ControlResponse::McpToolResponse {
                     id,
                     result: Some(json!({
                         "content": [{
                             "type": "text",
-                            "text": format!("Decision recorded: {}", tool_name.replace("decision::", ""))
+                            "text": response_text
                         }]
                     })),
                     error: None,
@@ -213,7 +263,7 @@ impl ControlListener {
     }
 
     /// Send a response to the client.
-    fn send_response(stream: &UnixStream, response: &ControlResponse) {
+    fn send_response(stream: &TcpStream, response: &ControlResponse) {
         let json = match serde_json::to_string(response) {
             Ok(j) => j,
             Err(e) => {
@@ -228,11 +278,6 @@ impl ControlListener {
         if let Err(e) = writeln!(stream, "{}", json) {
             error!(error = %e, "Failed to write response");
         }
-    }
-
-    /// Get the socket path.
-    pub fn socket_path(&self) -> &Path {
-        &self.socket_path
     }
 }
 
@@ -268,12 +313,6 @@ impl ToolCallCollector {
             }
         }
 
-        // Clean up socket file
-        if self.socket_path.exists() {
-            debug!(path = %self.socket_path.display(), "Cleaning up socket file");
-            let _ = fs::remove_file(&self.socket_path);
-        }
-
         // Get the accumulated tool calls
         match Arc::try_unwrap(self.tool_calls) {
             Ok(mutex) => mutex.into_inner().unwrap(),
@@ -296,29 +335,12 @@ impl ToolCallCollector {
     }
 }
 
-impl Drop for ControlListener {
-    fn drop(&mut self) {
-        // Only clean up socket if listener wasn't spawned (i.e., still present)
-        // If spawn() was called, the socket is owned by the listener thread
-        if self.listener.is_some() && self.socket_path.exists() {
-            debug!(path = %self.socket_path.display(), "Cleaning up socket file");
-            let _ = fs::remove_file(&self.socket_path);
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use mantle_shared::protocol::ControlMessage;
     use std::io::{BufRead, BufReader, Write};
-    use std::os::unix::net::UnixStream;
-
-    fn create_temp_socket() -> (PathBuf, tempfile::TempDir) {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("test.sock");
-        (path, dir)
-    }
+    use std::net::TcpStream;
 
     /// Wait for listener to be ready (polling)
     fn wait_for_listener() {
@@ -327,16 +349,15 @@ mod tests {
 
     #[test]
     fn test_listener_binds_and_accepts() {
-        let (socket_path, _dir) = create_temp_socket();
-
-        let listener = ControlListener::bind(&socket_path).unwrap();
-        let collector = listener.spawn();
+        let listener = ControlListener::bind().unwrap();
+        let port = listener.port();
+        let (collector, decision_rx) = listener.spawn();
         wait_for_listener();
 
         // Connect as client
-        let mut client = UnixStream::connect(&socket_path).unwrap();
+        let mut client = TcpStream::connect(format!("127.0.0.1:{}", port)).unwrap();
 
-        // Send an MCP tool call
+        // Send an MCP tool call (decision tool)
         let message = ControlMessage::McpToolCall {
             id: "test-1".to_string(),
             tool_name: "decision::approve".to_string(),
@@ -359,6 +380,10 @@ mod tests {
             _ => panic!("Expected McpToolResponse"),
         }
 
+        // Decision channel should have received the tool call
+        let decision_tool = decision_rx.try_recv().unwrap();
+        assert_eq!(decision_tool.name, "decision::approve");
+
         // Collect tool calls
         let tool_calls = collector.collect();
         assert_eq!(tool_calls.len(), 1);
@@ -367,15 +392,14 @@ mod tests {
 
     #[test]
     fn test_multiple_tool_calls() {
-        let (socket_path, _dir) = create_temp_socket();
-
-        let listener = ControlListener::bind(&socket_path).unwrap();
-        let collector = listener.spawn();
+        let listener = ControlListener::bind().unwrap();
+        let port = listener.port();
+        let (collector, _decision_rx) = listener.spawn();
         wait_for_listener();
 
         // Send multiple tool calls from separate connections
         for i in 0..3 {
-            let mut client = UnixStream::connect(&socket_path).unwrap();
+            let mut client = TcpStream::connect(format!("127.0.0.1:{}", port)).unwrap();
             let message = ControlMessage::McpToolCall {
                 id: format!("test-{}", i),
                 tool_name: format!("decision::option_{}", i),
@@ -398,13 +422,12 @@ mod tests {
 
     #[test]
     fn test_hook_event_returns_error() {
-        let (socket_path, _dir) = create_temp_socket();
-
-        let listener = ControlListener::bind(&socket_path).unwrap();
-        let _collector = listener.spawn();
+        let listener = ControlListener::bind().unwrap();
+        let port = listener.port();
+        let (_collector, _decision_rx) = listener.spawn();
         wait_for_listener();
 
-        let mut client = UnixStream::connect(&socket_path).unwrap();
+        let mut client = TcpStream::connect(format!("127.0.0.1:{}", port)).unwrap();
 
         use mantle_shared::protocol::HookInput;
         let message = ControlMessage::HookEvent {
@@ -441,18 +464,5 @@ mod tests {
             }
             _ => panic!("Expected HookResponse"),
         }
-    }
-
-    #[test]
-    fn test_socket_cleanup_on_drop() {
-        let (socket_path, _dir) = create_temp_socket();
-
-        {
-            let _listener = ControlListener::bind(&socket_path).unwrap();
-            assert!(socket_path.exists());
-        }
-
-        // Socket should be cleaned up after drop
-        assert!(!socket_path.exists());
     }
 }

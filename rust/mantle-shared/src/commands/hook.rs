@@ -8,10 +8,9 @@ use crate::error::{MantleError, Result};
 use crate::protocol::{
     ControlMessage, ControlResponse, HookInput, HookOutput, HookSpecificOutput, PermissionDecision,
 };
-use crate::socket::{control_socket_path, ControlSocket};
+use crate::socket::{control_server_addr, ControlSocket};
 use clap::ValueEnum;
 use std::io::Read;
-use std::path::PathBuf;
 use tracing::{debug, error, warn};
 
 /// Hook event types supported by Claude Code.
@@ -46,30 +45,24 @@ pub enum HookEventType {
 ///
 /// This function:
 /// 1. Reads the hook payload JSON from stdin (provided by Claude Code)
-/// 2. Connects to the control socket
+/// 2. Connects to the control server via TCP
 /// 3. Sends the hook event and waits for response
 /// 4. Outputs the response JSON to stdout
 /// 5. Returns the exit code (0=allow, 2=deny/error)
 ///
-/// If no control socket is available, we "fail open" - allow the hook
+/// If no control server is available, we "fail open" - allow the hook
 /// to proceed without orchestration. This ensures Claude Code still works
 /// when not running under Tidepool control.
 ///
 /// # Arguments
 ///
 /// * `event_type` - The type of hook event being handled
-/// * `socket_path` - Optional path to the control socket (falls back to env var)
 ///
 /// # Returns
 ///
 /// Returns `Ok(())` on success. The function may call `std::process::exit()`
 /// with a non-zero code if the hook should be denied.
-pub fn handle_hook(event_type: HookEventType, socket_path: Option<&PathBuf>) -> Result<()> {
-    // Determine socket path (arg > env var)
-    let socket_path = socket_path
-        .map(|p| p.to_path_buf())
-        .or_else(|| control_socket_path().map(PathBuf::from));
-
+pub fn handle_hook(event_type: HookEventType) -> Result<()> {
     // Read hook payload from stdin
     let mut stdin_content = String::new();
     std::io::stdin()
@@ -95,9 +88,9 @@ pub fn handle_hook(event_type: HookEventType, socket_path: Option<&PathBuf>) -> 
         );
     }
 
-    // If no socket available, fail open (allow everything)
-    let Some(socket_path) = socket_path else {
-        debug!("No control socket, failing open (allowing hook)");
+    // Get control server address from env vars
+    let Some((host, port)) = control_server_addr() else {
+        debug!("No control server configured, failing open (allowing hook)");
         let output = default_allow_response(event_type);
         println!(
             "{}",
@@ -106,11 +99,11 @@ pub fn handle_hook(event_type: HookEventType, socket_path: Option<&PathBuf>) -> 
         return Ok(());
     };
 
-    // Connect to control socket
-    let mut socket = match ControlSocket::connect(&socket_path) {
+    // Connect to control server via TCP
+    let mut socket = match ControlSocket::connect(&host, port) {
         Ok(s) => s,
         Err(e) => {
-            warn!(error = %e, "Failed to connect to control socket, failing open");
+            warn!(error = %e, "Failed to connect to control server, failing open");
             let output = default_allow_response(event_type);
             println!(
                 "{}",

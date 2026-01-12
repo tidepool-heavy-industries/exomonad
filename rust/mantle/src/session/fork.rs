@@ -376,10 +376,11 @@ fn execute_docker_fork(
     )?
     .with_timeout(timeout_secs);
 
-    // Pass decision tools to container via environment variable
+    // Pass decision tools to container via file (avoids shell escaping issues)
     if let Some(tools_json) = decision_tools {
-        debug!(tools = %tools_json, "Passing decision tools to container");
-        container_config = container_config.with_decision_tools(tools_json);
+        debug!("Passing decision tools to container via file");
+        container_config = container_config.with_decision_tools(tools_json)
+            .map_err(|e| ForkError::Execution(format!("Failed to set decision tools: {}", e)))?;
     }
 
     // Mark session as running
@@ -499,7 +500,7 @@ mod tests {
             child_slug: "child/test".to_string(),
             child_prompt: "Test prompt".to_string(),
             timeout_secs: 0,
-            decision_tools: None,
+            decision_tools_file: None,
         };
 
         let result = fork_session(temp_dir.path(), &config);

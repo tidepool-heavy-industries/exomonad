@@ -556,7 +556,8 @@ fn execute_docker_with_streaming(
         let tools_json = std::fs::read_to_string(tools_file)
             .map_err(|e| StartError::Execution(format!("Failed to read decision tools file {}: {}", tools_file, e)))?;
         debug!(file = %tools_file, "Passing decision tools from file to container");
-        container_config = container_config.with_decision_tools(&tools_json);
+        container_config = container_config.with_decision_tools(&tools_json)
+            .map_err(|e| StartError::Execution(format!("Failed to set decision tools: {}", e)))?;
     }
 
     // Mark session as running
@@ -723,7 +724,7 @@ mod tests {
             timeout_secs: 0,
             base_branch: None,
             json_schema: None,
-            decision_tools: None,
+            decision_tools_file: None,
             hub_session_id: None,
             execution_id: None,
             node_path: None,
@@ -761,7 +762,7 @@ mod tests {
             timeout_secs: 300,
             base_branch: None,
             json_schema: None,
-            decision_tools: None,
+            decision_tools_file: None,
             hub_session_id: None,
             execution_id: None,
             node_path: None,
@@ -790,7 +791,7 @@ mod tests {
             timeout_secs: 0,
             base_branch: None,
             json_schema: None,
-            decision_tools: None,
+            decision_tools_file: None,
             hub_session_id: None,
             execution_id: None,
             node_path: None,
@@ -818,7 +819,7 @@ mod tests {
             timeout_secs: 0,
             base_branch: None,
             json_schema: None,
-            decision_tools: None,
+            decision_tools_file: None,
             hub_session_id: None,
             execution_id: None,
             node_path: None,
@@ -836,7 +837,7 @@ mod tests {
             timeout_secs: 0,
             base_branch: None,
             json_schema: None,
-            decision_tools: None,
+            decision_tools_file: None,
             hub_session_id: None,
             execution_id: None,
             node_path: None,
@@ -897,7 +898,7 @@ mod tests {
             timeout_secs: 0,
             base_branch: Some("develop".to_string()),
             json_schema: None,
-            decision_tools: None,
+            decision_tools_file: None,
             hub_session_id: None,
             execution_id: None,
             node_path: None,
@@ -920,7 +921,7 @@ mod tests {
             timeout_secs: 0,
             base_branch: None,
             json_schema: None,
-            decision_tools: None,
+            decision_tools_file: None,
             hub_session_id: None,
             execution_id: None,
             node_path: None,
@@ -1005,7 +1006,7 @@ mod tests {
             timeout_secs: 0,
             base_branch: None,
             json_schema: None,
-            decision_tools: None,
+            decision_tools_file: None,
             hub_session_id: None,
             execution_id: None,
             node_path: None,

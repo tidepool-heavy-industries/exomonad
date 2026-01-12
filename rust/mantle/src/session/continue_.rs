@@ -355,10 +355,11 @@ fn execute_docker_continue(
     )?
     .with_timeout(timeout_secs);
 
-    // Pass decision tools to container via environment variable
+    // Pass decision tools to container via file (avoids shell escaping issues)
     if let Some(tools_json) = decision_tools {
-        debug!(tools = %tools_json, "Passing decision tools to container");
-        container_config = container_config.with_decision_tools(tools_json);
+        debug!("Passing decision tools to container via file");
+        container_config = container_config.with_decision_tools(tools_json)
+            .map_err(|e| ContinueError::Execution(format!("Failed to set decision tools: {}", e)))?;
     }
 
     // Mark session as running

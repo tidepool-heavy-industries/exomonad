@@ -7,6 +7,8 @@ use std::collections::HashMap;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use std::sync::mpsc::TryRecvError;
+use std::time::{Duration, Instant};
 
 use crate::config::Config;
 use crate::docker::control_listener::ControlListener;
@@ -28,6 +30,32 @@ pub enum DockerError {
 }
 
 pub type Result<T> = std::result::Result<T, DockerError>;
+
+/// Kill a running Docker container by name.
+///
+/// Sends SIGKILL to the container, which terminates it immediately.
+/// Returns Ok(()) if the kill command succeeded, or the container was already dead.
+fn docker_kill(container_name: &str) -> std::io::Result<()> {
+    let output = Command::new("docker")
+        .args(["kill", container_name])
+        .output()?;
+
+    if output.status.success() {
+        Ok(())
+    } else {
+        // Check if it's just "container not found" (already dead)
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if stderr.contains("No such container") || stderr.contains("is not running") {
+            // Container already gone, that's fine
+            Ok(())
+        } else {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("docker kill failed: {}", stderr.trim()),
+            ))
+        }
+    }
+}
 
 /// Per-session logger that writes timestamped logs to `.mantle/logs/{session_id}.log`.
 ///
@@ -108,6 +136,8 @@ pub struct ContainerConfig {
     pub timeout_secs: u64,
     /// Environment variables
     pub env_vars: HashMap<String, String>,
+    /// Path to decision tools JSON file on host (mounted into container)
+    pub decision_tools_file: Option<PathBuf>,
 }
 
 impl ContainerConfig {
@@ -161,6 +191,7 @@ impl ContainerConfig {
             claude_args,
             timeout_secs: 0,
             env_vars: HashMap::new(),
+            decision_tools_file: None,
         })
     }
 
@@ -190,10 +221,20 @@ impl ContainerConfig {
 
     /// Set decision tool definitions (JSON array).
     ///
+    /// Writes the tools JSON to a temp file on the host, which is then
+    /// mounted into the container. This avoids shell escaping issues with
+    /// passing JSON through environment variables.
+    ///
     /// These tools are served by `mantle-agent mcp` to Claude Code for
-    /// sum type structured outputs. See Phase 4 of the decision tools plan.
-    pub fn with_decision_tools(self, tools_json: &str) -> Self {
-        self.with_env("MANTLE_DECISION_TOOLS", tools_json)
+    /// sum type structured outputs.
+    pub fn with_decision_tools(mut self, tools_json: &str) -> Result<Self> {
+        // Write tools JSON to a temp file
+        let tools_file = PathBuf::from(format!("/tmp/mantle-tools-{}.json", &self.session_id[..8]));
+        std::fs::write(&tools_file, tools_json).map_err(|e| {
+            DockerError::OutputRead(format!("Failed to write decision tools file: {}", e))
+        })?;
+        self.decision_tools_file = Some(tools_file);
+        Ok(self)
     }
 
     /// Generate container name from session ID.
@@ -225,20 +266,20 @@ where
     logger.log("MANTLE", &format!("Image: {}", config.image));
     logger.log("MANTLE", &format!("Worktree: {}", config.worktree_path.display()));
 
-    // Create control socket listener if decision tools are configured
-    let has_decision_tools = config.env_vars.contains_key("MANTLE_DECISION_TOOLS");
-    let (control_socket_path, tool_call_collector) = if has_decision_tools {
-        let socket_path = PathBuf::from(format!("/tmp/mantle-{}.sock", config.session_id));
-        logger.log("MANTLE", &format!("Creating control socket: {}", socket_path.display()));
-
-        let listener = ControlListener::bind(&socket_path).map_err(|e| {
-            DockerError::OutputRead(format!("Failed to create control socket: {}", e))
+    // Create TCP control listener if decision tools are configured
+    let has_decision_tools = config.decision_tools_file.is_some();
+    let (control_port, tool_call_collector, decision_rx) = if has_decision_tools {
+        let listener = ControlListener::bind().map_err(|e| {
+            DockerError::OutputRead(format!("Failed to create control listener: {}", e))
         })?;
-        let collector = listener.spawn();
+        let port = listener.port();
+        logger.log("MANTLE", &format!("Control listener bound to port {}", port));
 
-        (Some(socket_path), Some(collector))
+        let (collector, rx) = listener.spawn();
+
+        (Some(port), Some(collector), Some(rx))
     } else {
-        (None, None)
+        (None, None, None)
     };
 
     let mut cmd = Command::new("docker");
@@ -286,16 +327,22 @@ where
         cmd.arg("-e").arg(format!("{}={}", k, v));
     }
 
-    // Mount control socket for decision tools (takes precedence)
-    // or hub socket for hook events
-    if let Some(ref socket_path) = control_socket_path {
+    // Configure TCP control connection for decision tools
+    // Container connects back to host via host.docker.internal
+    if let Some(port) = control_port {
+        // Add host.docker.internal mapping (required on Linux, built-in on macOS)
+        cmd.arg("--add-host=host.docker.internal:host-gateway");
+        cmd.arg("-e").arg("MANTLE_CONTROL_HOST=host.docker.internal");
+        cmd.arg("-e").arg(format!("MANTLE_CONTROL_PORT={}", port));
+    }
+
+    // Mount decision tools file if configured
+    // This avoids passing JSON through env vars which causes shell escaping issues
+    if let Some(ref tools_file) = config.decision_tools_file {
+        logger.log("MANTLE", &format!("Mounting decision tools file: {}", tools_file.display()));
         cmd.arg("-v")
-            .arg(format!("{}:/mantle.sock", socket_path.display()));
-        cmd.arg("-e").arg("MANTLE_HOOK_SOCKET=/mantle.sock");
-    } else if let Some(hub_socket) = &config.hub_socket {
-        cmd.arg("-v")
-            .arg(format!("{}:/mantle.sock", hub_socket.display()));
-        cmd.arg("-e").arg("MANTLE_HOOK_SOCKET=/mantle.sock");
+            .arg(format!("{}:/decision-tools.json:ro", tools_file.display()));
+        cmd.arg("-e").arg("MANTLE_DECISION_TOOLS_FILE=/decision-tools.json");
     }
 
     // Image and command
@@ -398,12 +445,102 @@ where
 
     logger.log("MANTLE", &format!("Stream parsing complete: {} turns, {} tools", turn_count, tool_use_count));
 
-    // Wait for container to exit
-    let status = child.wait().map_err(|e| {
-        DockerError::OutputRead(format!("Failed to wait for container: {}", e))
-    })?;
+    // Wait for container to exit with decision deadline tracking
+    // If a decision:: tool is called, we set a 30s deadline for graceful exit
+    // After deadline, we kill the container (not an error - tool calls are captured)
+    const DECISION_TIMEOUT_SECS: u64 = 30;
+    const POLL_INTERVAL_MS: u64 = 50;
+    const LOG_INTERVAL_SECS: u64 = 10;
 
-    let exit_code = status.code().unwrap_or(-1);
+    let mut deadline: Option<Instant> = None;
+    let mut last_log_remaining: Option<u64> = None;
+    let mut killed_by_deadline = false;
+
+    let exit_code = loop {
+        // Check if child has exited
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                // Child exited naturally
+                if deadline.is_some() {
+                    let elapsed = deadline.map(|d| Instant::now().duration_since(d.checked_sub(Duration::from_secs(DECISION_TIMEOUT_SECS)).unwrap_or(d)));
+                    logger.log("DECISION", &format!("Claude exited naturally (took {:?})", elapsed.unwrap_or_default()));
+                }
+                break status.code().unwrap_or(-1);
+            }
+            Ok(None) => {
+                // Still running, continue polling
+            }
+            Err(e) => {
+                logger.log("ERROR", &format!("Failed to wait for container: {}", e));
+                break -1;
+            }
+        }
+
+        // Check for decision tool notification (only if we have a receiver)
+        if let Some(ref rx) = decision_rx {
+            match rx.try_recv() {
+                Ok(tool_call) => {
+                    if deadline.is_none() {
+                        logger.log("DECISION", &format!(
+                            "Tool received: {}, starting {}s deadline",
+                            tool_call.name, DECISION_TIMEOUT_SECS
+                        ));
+                        deadline = Some(Instant::now() + Duration::from_secs(DECISION_TIMEOUT_SECS));
+                        last_log_remaining = Some(DECISION_TIMEOUT_SECS);
+                    }
+                    // Subsequent decision tools don't reset the deadline
+                }
+                Err(TryRecvError::Empty) => {
+                    // No decision yet, continue
+                }
+                Err(TryRecvError::Disconnected) => {
+                    // Channel closed (listener thread exited), continue waiting
+                }
+            }
+        }
+
+        // Check deadline and log countdown
+        if let Some(dl) = deadline {
+            let now = Instant::now();
+            if now >= dl {
+                // Deadline exceeded - kill the container
+                logger.log("DECISION", "Deadline reached, killing container");
+                if let Err(e) = docker_kill(&container_name) {
+                    logger.log("ERROR", &format!("Failed to kill container: {}", e));
+                } else {
+                    logger.log("DECISION", "Container killed successfully");
+                }
+                killed_by_deadline = true;
+
+                // Wait for container to actually exit after kill
+                match child.wait() {
+                    Ok(status) => break status.code().unwrap_or(-1),
+                    Err(e) => {
+                        logger.log("ERROR", &format!("Failed to wait after kill: {}", e));
+                        break -1;
+                    }
+                }
+            }
+
+            // Log countdown every 10 seconds
+            let remaining_secs = (dl - now).as_secs();
+            let log_bucket = (remaining_secs / LOG_INTERVAL_SECS) * LOG_INTERVAL_SECS;
+            if let Some(last) = last_log_remaining {
+                if log_bucket < last && remaining_secs > 0 {
+                    logger.log("DECISION", &format!("Waiting for exit... {}s remaining", remaining_secs));
+                    last_log_remaining = Some(log_bucket);
+                }
+            }
+        }
+
+        // Sleep before next poll
+        std::thread::sleep(Duration::from_millis(POLL_INTERVAL_MS));
+    };
+
+    // Log if killed by deadline (this is not an error, just unusual)
+    if killed_by_deadline {
+        logger.log("DECISION", "Session terminated by deadline (tool calls captured)");
+    }
 
     logger.log("MANTLE", &format!(
         "Container exited: exit_code={}, turns={}, tools={}",
@@ -429,11 +566,6 @@ where
     } else {
         vec![]
     };
-
-    // Cleanup control socket file
-    if let Some(ref socket_path) = control_socket_path {
-        let _ = std::fs::remove_file(socket_path);
-    }
 
     // Collect stderr from background thread (with timeout to avoid blocking forever)
     // Only include stderr in result when there's an error (to avoid bloating successful results)
@@ -507,6 +639,7 @@ mod tests {
             claude_args: vec![],
             timeout_secs: 0,
             env_vars: HashMap::new(),
+            decision_tools_file: None,
         };
 
         assert_eq!(config.container_name(), "mantle-abc12345");
@@ -524,6 +657,7 @@ mod tests {
             claude_args: vec![],
             timeout_secs: 0,
             env_vars: HashMap::new(),
+            decision_tools_file: None,
         };
 
         assert_eq!(config.container_name(), "mantle-abc");
@@ -541,6 +675,7 @@ mod tests {
             claude_args: vec![],
             timeout_secs: 0,
             env_vars: HashMap::new(),
+            decision_tools_file: None,
         }
         .with_image("custom-image")
         .with_timeout(300)
@@ -560,16 +695,25 @@ mod tests {
             hub_socket: None,
             auth_mount: AuthMount::BindMount(PathBuf::from("/tmp/.claude")),
             cabal_store_volume: None,
-            session_id: "test".to_string(),
+            session_id: "testabcd".to_string(),
             claude_args: vec![],
             timeout_secs: 0,
             env_vars: HashMap::new(),
+            decision_tools_file: None,
         }
-        .with_decision_tools(tools_json);
+        .with_decision_tools(tools_json)
+        .expect("with_decision_tools should succeed");
 
-        assert_eq!(
-            config.env_vars.get("MANTLE_DECISION_TOOLS"),
-            Some(&tools_json.to_string())
-        );
+        // Should have written to a file
+        assert!(config.decision_tools_file.is_some());
+        let file_path = config.decision_tools_file.as_ref().unwrap();
+        assert!(file_path.exists());
+
+        // File should contain the tools JSON
+        let contents = std::fs::read_to_string(file_path).unwrap();
+        assert_eq!(contents, tools_json);
+
+        // Cleanup
+        let _ = std::fs::remove_file(file_path);
     }
 }

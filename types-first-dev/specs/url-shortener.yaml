@@ -1,113 +1,30 @@
-# Effect-Based URL Shortener
+# Simple URL Shortener
 #
-# A comprehensive example demonstrating recursive decomposition.
-# The effect-based architecture maps well to subsystem boundaries.
+# Minimal spec for testing the decision tool flow.
 
 id: url-shortener
 
 description: |
-  An effect-based URL shortener service with Servant API.
-
-  Uses algebraic effects (freer-simple) to separate concerns:
-  - **UrlService** orchestrates the other effects (business logic)
-  - **Persistence** handles storage abstraction (repository pattern)
-  - **Analytics** tracks click events (stateful tracking)
-  - **Encoder** generates short codes (pure encoding strategy)
-
-  Each effect has its own GADT definition and interpreter(s).
-  This architecture enables:
-  - Clear subsystem boundaries (each effect = potential child)
-  - Testable components (swap interpreters for testing)
-  - Composable business logic (UrlService uses other effects)
+  A simple URL shortener with Servant API and TVar-based storage.
 
 target_path: src/UrlShortener
 test_path: test/UrlShortener
 
 acceptance_criteria:
-  # ─────────────────────────────────────────────────────────────────────────────
-  # Effect Definitions (types-first: define the interface before implementation)
-  # ─────────────────────────────────────────────────────────────────────────────
+  - |
+    Domain types:
+    - ShortCode newtype (6-character string)
+    - LongUrl newtype (Text)
+    - UrlMapping record (ShortCode, LongUrl, created timestamp)
 
   - |
-    UrlService effect GADT with operations:
-    - Shorten :: LongUrl -> UrlService ShortUrl
-    - Lookup :: ShortCode -> UrlService (Maybe LongUrl)
+    Storage module with TVar-based state:
+    - createStore :: IO (TVar (Map ShortCode UrlMapping))
+    - storeUrl :: TVar ... -> LongUrl -> IO ShortCode
+    - lookupUrl :: TVar ... -> ShortCode -> IO (Maybe LongUrl)
 
   - |
-    Persistence effect GADT with operations:
-    - Store :: UrlMapping -> Persistence ()
-    - Fetch :: ShortCode -> Persistence (Maybe UrlMapping)
-    - ListAll :: Persistence [UrlMapping]
-
-  - |
-    Analytics effect GADT with operations:
-    - RecordClick :: ShortCode -> ClickInfo -> Analytics ()
-    - GetStats :: ShortCode -> Analytics ClickStats
-
-  - |
-    Encoder effect GADT with operation:
-    - Encode :: LongUrl -> Encoder ShortCode
-
-  # ─────────────────────────────────────────────────────────────────────────────
-  # Domain Types (newtypes for type safety)
-  # ─────────────────────────────────────────────────────────────────────────────
-
-  - |
-    Domain types with newtype wrappers:
-    - ShortCode (6-character base62 string)
-    - LongUrl (validated URL)
-    - UrlMapping (ShortCode -> LongUrl with metadata)
-    - ClickInfo (timestamp, referrer, user-agent)
-    - ClickStats (count, recent clicks, top referrers)
-
-  # ─────────────────────────────────────────────────────────────────────────────
-  # Interpreters (implementations of each effect)
-  # ─────────────────────────────────────────────────────────────────────────────
-
-  - |
-    InMemory Persistence interpreter:
-    - Uses TVar (Map ShortCode UrlMapping)
-    - Thread-safe concurrent access
-    - Suitable for testing and development
-
-  - |
-    InMemory Analytics interpreter:
-    - Uses TVar (Map ShortCode [ClickEvent])
-    - Aggregation logic for GetStats
-    - Computes count, recent N clicks, top referrers
-
-  - |
-    Base62 Encoder interpreter:
-    - Hash URL -> take 6 chars -> base62 encode
-    - Collision detection (check Persistence, retry with salt)
-    - Pure except for collision retry loop
-
-  - |
-    UrlService interpreter:
-    - Composes Persistence and Encoder effects
-    - Shorten: encode, check collision, store, return
-    - Lookup: fetch from persistence
-
-  # ─────────────────────────────────────────────────────────────────────────────
-  # API Layer (Servant HTTP interface)
-  # ─────────────────────────────────────────────────────────────────────────────
-
-  - |
-    Servant API type definition:
-    - POST /api/shorten (ReqBody LongUrl :> Post ShortUrl)
-    - GET /:code (Capture "code" ShortCode :> Redirect)
-    - GET /api/stats/:code (Capture "code" ShortCode :> Get ClickStats)
-    - GET /health (Get NoContent for healthcheck)
-
-  - |
-    Handler implementations:
-    - Natural transformation: Eff '[UrlService, Analytics, ...] ~> Handler
-    - shortenHandler: call Shorten effect
-    - redirectHandler: call Lookup + RecordClick, return 302
-    - statsHandler: call GetStats effect
-
-  - |
-    Server assembly:
-    - WAI Application from Servant handlers
-    - Effect interpreter composition
-    - Main entry point with configuration
+    Servant API:
+    - POST /shorten (body: LongUrl, returns: ShortCode)
+    - GET /:code (returns: 302 redirect to LongUrl)
+    - GET /health (returns: 200 OK)

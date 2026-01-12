@@ -79,10 +79,10 @@ pub enum MantleError {
     Io(#[source] io::Error),
 
     // ---- Socket errors (for control envelope) ----
-    /// Failed to connect to control socket.
-    #[error("failed to connect to control socket at {path}: {source}")]
-    SocketConnect {
-        path: PathBuf,
+    /// Failed to connect to control server via TCP.
+    #[error("failed to connect to control server at {addr}: {source}")]
+    TcpConnect {
+        addr: String,
         #[source]
         source: io::Error,
     },

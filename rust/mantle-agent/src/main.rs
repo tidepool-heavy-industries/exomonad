@@ -9,7 +9,6 @@
 //! - `mcp` - Run as MCP stdio server for decision tools
 
 use clap::{Parser, Subcommand};
-use std::path::PathBuf;
 use tracing::error;
 use tracing_subscriber::EnvFilter;
 
@@ -33,26 +32,20 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Handle a Claude Code hook event (called by generated hook scripts)
+    ///
+    /// Connects to control server via MANTLE_CONTROL_HOST/PORT env vars.
     Hook {
         /// The hook event type to handle
         #[arg(value_enum)]
         event: HookEventType,
-
-        /// Control socket path (defaults to MANTLE_HOOK_SOCKET env var)
-        #[arg(long, env = "MANTLE_HOOK_SOCKET")]
-        socket: Option<PathBuf>,
     },
 
     /// Run as MCP stdio server for decision tools
     ///
-    /// Reads tool definitions from MANTLE_DECISION_TOOLS env var and serves
+    /// Reads tool definitions from MANTLE_DECISION_TOOLS_FILE env var and serves
     /// them via JSON-RPC 2.0 over stdio. Tool calls are forwarded to the
-    /// control socket for recording.
-    Mcp {
-        /// Control socket path for reporting tool calls to mantle
-        #[arg(long, env = "MANTLE_HOOK_SOCKET")]
-        socket: Option<PathBuf>,
-    },
+    /// control server via TCP (MANTLE_CONTROL_HOST/PORT).
+    Mcp,
 }
 
 // ============================================================================
@@ -69,8 +62,8 @@ fn main() {
     let cli = Cli::parse();
 
     let result = match cli.command {
-        Commands::Hook { event, socket } => handle_hook(event, socket.as_ref()),
-        Commands::Mcp { socket } => mcp::run_mcp_server(socket)
+        Commands::Hook { event } => handle_hook(event),
+        Commands::Mcp => mcp::run_mcp_server()
             .map_err(|e| mantle_shared::MantleError::McpServer(e.to_string())),
     };
 
