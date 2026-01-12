@@ -29,6 +29,9 @@ instance HasJSONSchema ChangeType where
 -- Shared types
 $(deriveHasJSONSchema ''PlannedTest)
 $(deriveHasJSONSchema ''Critique)
+$(deriveHasJSONSchema ''MergeRejectionFeedback)
+$(deriveHasJSONSchema ''ChildFailureFeedback)
+$(deriveHasJSONSchema ''CodeReviewFeedback)
 $(deriveHasJSONSchema ''ChangeEntry)
 $(deriveHasJSONSchema ''NodeInfo)
 $(deriveHasJSONSchema ''CoverageReport)
@@ -80,6 +83,7 @@ $(deriveHasJSONSchema ''TDDMem)
 $(deriveHasJSONSchema ''ScaffoldInput)
 $(deriveHasJSONSchema ''TDDWriteTestsInput)
 $(deriveHasJSONSchema ''TDDReviewImplInput)
+$(deriveHasJSONSchema ''RetryFeedback)  -- Must come before ImplInput
 $(deriveHasJSONSchema ''ImplInput)
 $(deriveHasJSONSchema ''MergerInput)
 $(deriveHasJSONSchema ''RebaserInput)

@@ -57,6 +57,8 @@ rebaserAfter
   => (RebaserExit, SessionId)
   -> Eff es (GotoChoice '[To "v3TDDWriteTests" TDDWriteTestsInput, To "v3Scaffold" ScaffoldInput, To Exit RebaserExit])
 rebaserAfter (exit, _sid) = do
+  -- Note: SessionId not stored here because Rebaser has no self-retry loop.
+  -- On success, routes to TDDWriteTests (new node); on conflict, exits.
   ctx <- ask @ExecutionContext
   case exit of
     RebaserClean _newBase -> do

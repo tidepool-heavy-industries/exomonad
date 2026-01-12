@@ -66,8 +66,8 @@ pub struct StartConfig {
     pub base_branch: Option<String>,
     /// Optional JSON schema for structured output
     pub json_schema: Option<String>,
-    /// Optional JSON array of MCP decision tools for sum type outputs
-    pub decision_tools: Option<String>,
+    /// Optional path to file containing JSON array of MCP decision tools for sum type outputs
+    pub decision_tools_file: Option<String>,
 
     // === Graph Execution Tracking ===
 
@@ -552,9 +552,11 @@ fn execute_docker_with_streaming(
 
     // Pass decision tools to container via environment variable
     // mantle-agent mcp server will serve these as MCP tools to Claude Code
-    if let Some(ref tools_json) = config.decision_tools {
-        debug!(tools = %tools_json, "Passing decision tools to container");
-        container_config = container_config.with_decision_tools(tools_json);
+    if let Some(ref tools_file) = config.decision_tools_file {
+        let tools_json = std::fs::read_to_string(tools_file)
+            .map_err(|e| StartError::Execution(format!("Failed to read decision tools file {}: {}", tools_file, e)))?;
+        debug!(file = %tools_file, "Passing decision tools from file to container");
+        container_config = container_config.with_decision_tools(&tools_json);
     }
 
     // Mark session as running
@@ -580,6 +582,28 @@ fn execute_docker_with_streaming(
     }
 
     // Convert RunResult to SessionOutput
+    // When there's an error, populate the error field with diagnostic info
+    let error = if run_result.is_error || run_result.exit_code != 0 {
+        // Combine result text (which has our formatted error message) with stderr
+        let mut error_parts = Vec::new();
+        if let Some(ref result) = run_result.result {
+            error_parts.push(result.clone());
+        }
+        // Include raw stderr if not already in result (for extra context)
+        if let Some(ref stderr) = run_result.stderr_output {
+            if !error_parts.iter().any(|p| p.contains("Stderr")) {
+                error_parts.push(format!("Stderr: {}", stderr));
+            }
+        }
+        if error_parts.is_empty() {
+            Some(format!("Claude Code failed with exit code {}", run_result.exit_code))
+        } else {
+            Some(error_parts.join("\n\n"))
+        }
+    } else {
+        None
+    };
+
     Ok(SessionOutput {
         session_id: session_id.to_string(),
         branch: branch.to_string(),
@@ -592,7 +616,7 @@ fn execute_docker_with_streaming(
         num_turns: run_result.num_turns,
         interrupts: run_result.interrupts,
         duration_secs: 0.0, // Will be filled in by caller
-        error: None,
+        error,
         model_usage: run_result.model_usage,
         cc_session_id: Some(run_result.session_id),
         tool_calls: run_result.tool_calls,

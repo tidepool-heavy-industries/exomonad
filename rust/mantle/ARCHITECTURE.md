@@ -1,6 +1,6 @@
 # Mantle Architecture
 
-Mantle is Tidepool's harness for spawning and controlling multiple Claude Code sessions concurrently. It provides process supervision, IPC, and hook interception for the Haskell orchestration layer.
+Mantle is Tidepool's harness for spawning and controlling Claude Code sessions via Docker containers. It provides process supervision, hook interception, and real-time streaming to mantle-hub for visualization.
 
 ## Overview
 
@@ -10,197 +10,181 @@ Mantle is Tidepool's harness for spawning and controlling multiple Claude Code s
                                           | spawns
                                           v
                               +------------------------+
-                              |     mantle run         |
+                              |   mantle session start |
                               |    (orchestrator)      |
                               +------------------------+
                                           |
-                                          | creates FIFO, spawns Zellij pane
+                                          | docker run
                                           v
                               +------------------------+
-                              |     Zellij Pane        |
-                              +------------------------+
-                                          |
-                                          | runs
-                                          v
-                              +------------------------+
-                              |     mantle wrap        |
-                              |     (supervisor)       |
-                              +------------------------+
-                                          |
-                                          | spawns & supervises
-                                          v
-                              +------------------------+
-                              |     Claude Code        |
-                              |    (subprocess)        |
+                              |   Docker Container     |
+                              |   +-----------------+  |
+                              |   |   Claude Code   |  |
+                              |   +-----------------+  |
+                              |   |  mantle-agent   |  |
+                              |   +-----------------+  |
                               +------------------------+
                                      |          |
-                        hooks call   |          | in-band signals
+                        hooks via    |          | stream events
+                        unix socket  |          | via WebSocket
                                      v          v
                               +-----------+  +-----------+
-                              |mantle hook|  |mantle     |
-                              |(subcommand)|  |signal     |
+                              |  control  |  | mantle-hub|
+                              |  socket   |  | (daemon)  |
                               +-----------+  +-----------+
 ```
 
 ## Architecture Layers
 
-### 1. `mantle run` - Orchestrator
+### 1. `mantle session start` - Orchestrator
 
 The entry point called by Tidepool's Haskell code. Responsibilities:
 
-- Creates a result FIFO for receiving the final `RunResult`
-- Builds the `wrap` command with all necessary arguments
-- Spawns a new Zellij pane running `mantle wrap`
-- Blocks reading from the result FIFO until session completes
-- Returns structured JSON to Tidepool
+- Creates git worktree for session isolation
+- Registers session with mantle-hub (or existing hub session for graph tracking)
+- Spawns Docker container running Claude Code
+- Streams events to hub via WebSocket in real-time
+- Parses Claude Code's `--stream-json` output
+- Returns structured JSON to Tidepool on stdout
 
-### 2. `mantle wrap` - Supervisor
+### 2. Docker Container
 
-Runs inside the Zellij pane, managing the Claude Code subprocess. Responsibilities:
+Contains Claude Code and mantle-agent. Benefits:
 
-- Installs signal handlers (SIGINT/SIGTERM forwarding)
-- Creates a signal FIFO for interrupt communication
-- Generates hook configuration (`.claude/settings.local.json`)
-- Spawns Claude Code with appropriate arguments
-- Parses streaming JSON output for TUI display
-- Enforces timeout (kills child if exceeded)
-- Collects events and writes final `RunResult` to result FIFO
+- **Isolation**: Each session runs in its own container
+- **Reproducibility**: Consistent environment across runs
+- **Security**: Claude Code can't escape the container
+- **Auth sharing**: OAuth credentials mounted from host
 
-### 3. `mantle signal` - In-Band Signaling
+### 3. `mantle-agent` - Container-Side Handler
 
-Called by Claude Code (via Bash tool) to send signals to the supervisor:
+Runs inside the container, handling hooks and MCP tools:
 
-```bash
-mantle signal transition --state need_review --reason "Blocked on type"
-```
+- **Hook handler**: Receives Claude Code hooks, forwards to orchestrator via control socket
+- **MCP server**: Exposes decision tools (approve/reject/etc.) to Claude
 
-Writes JSON to the signal FIFO, which `wrap` polls and includes in the final result.
+### 4. `mantle-hub` - Visualization Daemon
 
-### 4. `mantle hook` - Hook Interception
+Background service for session tracking and visualization:
 
-Called by generated hook scripts when Claude Code triggers a hook event:
-
-```
-Claude Code hook trigger
-    -> .claude/settings.local.json defines command
-    -> mantle hook pre-tool-use
-    -> reads hook payload from stdin
-    -> forwards to control socket (Haskell)
-    -> outputs response to stdout
-    -> exit code determines allow (0) or deny (2)
-```
-
-## Why Zellij?
-
-Zellij provides several benefits for concurrent Claude sessions:
-
-1. **Isolated panes**: Each Claude session gets its own TUI with scroll history
-2. **Session lifecycle**: Clean startup/shutdown semantics
-3. **Visibility**: Human operators can observe all running sessions
-4. **Multiplexing**: Multiple sessions share a single terminal
+- SQLite persistence for session/node state
+- REST API for querying sessions
+- WebSocket for live event streaming
+- HTML UI for visualizing session graphs
 
 ## IPC Mechanisms
 
-Mantle uses two distinct IPC channels with different purposes:
+Mantle uses two distinct IPC channels:
 
-### Signal FIFO (Unidirectional: Claude -> Wrap)
+### Control Socket (Bidirectional: Container <-> Host)
 
-**Path**: `/tmp/mantle-<pid>.signal`
+**Path**: Unix socket mounted into container
 
-**Purpose**: In-band signals for state transitions and escalations. Claude Code calls `mantle signal` which writes JSON to this FIFO.
-
-**Flow**:
-```
-Claude Code (Bash tool)
-    -> mantle signal transition --state X
-    -> writes to FIFO
-    -> wrap's reader thread receives
-    -> included in RunResult.interrupts
-```
-
-**Message format** (`InterruptSignal`):
-```json
-{
-  "signal_type": "transition",
-  "state": "need_more_types",
-  "reason": "Missing Foo type definition"
-}
-```
-
-### Control Socket (Bidirectional: Hook <-> Haskell)
-
-**Path**: Provided via `--control-socket` / `TIDEPOOL_CONTROL_SOCKET`
-
-**Purpose**: Hook interception where Haskell can inspect, modify, or reject tool calls before they execute.
+**Purpose**: Hook interception where Haskell can inspect, modify, or reject tool calls.
 
 **Flow**:
 ```
-Claude Code hook
-    -> mantle hook pre-tool-use
+Claude Code hook trigger
+    -> mantle-agent hook <event>
     -> connect to Unix socket
-    -> send HookInput
-    -> receive HookOutput
-    -> output to stdout, exit with code
+    -> send ControlMessage::HookEvent
+    -> receive ControlResponse::HookResponse
+    -> exit code determines allow (0) or deny (2)
 ```
 
 **Protocol**: Newline-delimited JSON (NDJSON) over Unix domain socket.
 
-**Design choice**: Synchronous I/O because hooks block Claude Code anyway.
+### Hub WebSocket (Unidirectional: Host -> Hub)
+
+**URL**: `ws://localhost:7433/ws/push/{session_id}/{node_id}`
+
+**Purpose**: Real-time streaming of Claude Code events for visualization.
+
+**Flow**:
+```
+Claude Code stdout (--stream-json)
+    -> mantle parses events
+    -> forwards to hub via WebSocket
+    -> hub stores and broadcasts to viewers
+```
 
 ## Key Abstractions
 
-### `Supervisor` (supervisor.rs)
+### `ContainerConfig` (docker/container.rs)
 
-Process lifecycle management with:
-- Spawn with environment setup
-- Timeout enforcement (actually kills child)
-- Signal forwarding (SIGINT/SIGTERM)
-- Cleanup on drop (no orphan processes)
+Docker container configuration:
+- Image selection and volume mounts
+- Environment variable setup
+- Timeout enforcement
+- Control socket path generation
 
-**Limitation**: Global signal state means only one Supervisor per process.
+### `ControlListener` (docker/control_listener.rs)
 
-### `HookConfig` (hooks.rs)
+Synchronous socket server for MCP tool calls:
+- Runs in background thread
+- Accumulates tool calls during execution
+- Returns collected decisions when container exits
 
-RAII guard for hook configuration:
-- Generates `.claude/settings.local.json` with hooks pointing to `mantle hook <event>`
-- Merges with existing settings (preserves user hooks)
-- Cleans up on drop (restores original or deletes)
+### `HubClient` (mantle-shared/hub/client.rs)
 
-### `ResultFifo` / `SignalFifo` (fifo.rs)
+HTTP + WebSocket client for hub communication:
+- Session and node registration
+- Result submission
+- Event streaming
 
-RAII wrappers for named pipes:
-- `ResultFifo`: Write-once result communication (wrap -> run)
-- `SignalFifo`: Streaming interrupt signals with background reader thread
+### `SyncEventStream` (mantle-shared/hub/client.rs)
 
-### `ControlSocket` (socket.rs)
+Synchronous WebSocket for event streaming:
+- Blocking sends (simple integration with sync code)
+- Success/failure counters for summary logging
+- Graceful close with cleanup
 
-Unix socket client for hook communication:
-- Synchronous connect/send/receive
-- Newline-delimited JSON framing
-- 30-second default timeout
+## Session Lifecycle
 
-## Session Tag
+### Start Session
 
-The `--session-tag` parameter is a correlation ID that:
-- Passes through from Tidepool to `run` to `wrap` to `RunResult`
-- Identifies which orchestrator context (e.g., git worktree) a session belongs to
-- Enables Tidepool to route results back to the correct graph node
+1. Generate session ID and branch name
+2. Create git worktree from base branch
+3. Register with hub (get session_id, node_id)
+4. Connect WebSocket for event streaming
+5. Spawn Docker container with Claude Code
+6. Parse stream-json output, forward events to hub
+7. Wait for container exit
+8. Submit final result to hub
+9. Return SessionOutput on stdout
+
+### Continue Session
+
+1. Load existing session metadata
+2. Validate session state (completed/failed/cancelled)
+3. Get cc_session_id for `--resume` flag
+4. Register continuation as new hub session
+5. Execute with same flow as start
+
+### Fork Session
+
+1. Load parent session
+2. Create child worktree from parent branch
+3. Use `--resume --fork-session` flags
+4. Execute with same flow as start
 
 ## Module Structure
 
 ```
-src/
-  main.rs        CLI entry point, subcommand dispatch
-  lib.rs         Public API exports
-  supervisor.rs  Process supervision
-  hooks.rs       Hook configuration generation
-  fifo.rs        Named pipe abstractions
-  socket.rs      Unix socket client
-  protocol.rs    Control envelope message types
-  events.rs      Claude Code stream event parsing
-  humanize.rs    Human-readable output formatting
-  error.rs       Error types
-  tui/           Ratatui TUI implementation
+mantle/src/
+  main.rs           CLI entry point, subcommand dispatch
+  config.rs         Load ~/.config/mantle/config.toml
+  stream_parser.rs  Parse Claude Code --stream-json output
+  session/
+    start.rs        start_session() - main entry point
+    continue_.rs    continue_session() - resume existing
+    fork.rs         fork_session() - branch from parent
+    state.rs        File-locked session store
+    types.rs        SessionMetadata, SessionOutput
+    worktree.rs     Git worktree management
+  docker/
+    container.rs    Docker run with TTY, event streaming
+    control_listener.rs  Socket server for MCP tool calls
 ```
 
 ## Data Flow Summary
@@ -208,37 +192,28 @@ src/
 ```
 Tidepool (Haskell)
     |
-    | mantle run --session X --prompt "..."
+    | mantle session start --slug "..." --prompt "..."
     v
-mantle run
+mantle session start
     |
-    | creates /tmp/mantle-<pid>.fifo
-    | spawns zellij pane
+    | creates worktree
+    | registers with hub
+    | connects WebSocket
+    | docker run
     v
-zellij -> mantle wrap --result-fifo ... -- claude args
+Docker Container
     |
-    | creates signal fifo
-    | generates hooks config
-    | spawns claude subprocess
-    v
-Claude Code
-    |
-    +---> stdout (stream-json) ---> wrap parses events
-    |
-    +---> hook triggers ---> mantle hook ---> control socket ---> Haskell
+    +---> Claude Code stdout ---> mantle parses ---> hub WebSocket
+    |                                                    |
+    +---> hook triggers ---> mantle-agent ---> control socket ---> Host
     |                                                               |
     |                            <--- allow/deny/modify <-----------+
     |
-    +---> mantle signal ---> signal fifo ---> wrap collects interrupts
+    v
+container exits
     |
     v
-claude exits
-    |
-    v
-wrap writes RunResult to result fifo
-    |
-    v
-mantle run reads result, prints JSON to stdout
+mantle submits result to hub, prints JSON to stdout
     |
     v
 Tidepool receives structured result
@@ -257,4 +232,5 @@ For production with named volumes:
 # ~/.config/mantle/config.toml
 [docker]
 auth_volume = "tidepool-claude-auth"  # Shared named volume
+image = "mantle-agent:latest"
 ```

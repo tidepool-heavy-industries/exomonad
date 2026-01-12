@@ -16,8 +16,8 @@ rebuild-mantle:
     @echo "Building Docker image..."
     cd ../rust && docker build -t tidepool/claude-code:latest -f mantle/Dockerfile .
     @echo ""
-    @echo "Building host mantle binary..."
-    cd ../rust && cargo build --release -p mantle
+    @echo "Installing host mantle binary to PATH..."
+    cd ../rust && cargo install --force --path mantle
     @echo ""
     @echo "✓ Mantle stack rebuilt"
 
@@ -28,16 +28,36 @@ rebuild-image:
 
 # Rebuild just the host mantle binary
 rebuild-mantle-bin:
-    cd ../rust && cargo build --release -p mantle
-    @echo "✓ Mantle binary rebuilt"
+    cd ../rust && cargo install --force --path mantle
+    @echo "✓ Mantle binary installed to PATH"
 
 # ─────────────────────────────────────────────────────────────
-# Docker Auth
+# Docker Services (auth + hub)
+# ─────────────────────────────────────────────────────────────
+
+# Start all services (auth-shell + hub)
+services-up:
+    docker-compose up -d --build
+
+# Stop all services
+services-down:
+    docker-compose down
+
+# View hub logs
+hub-logs:
+    docker-compose logs -f hub
+
+# Rebuild and restart hub only
+hub-restart:
+    docker-compose up -d --build hub
+
+# ─────────────────────────────────────────────────────────────
+# Docker Auth (legacy aliases)
 # ─────────────────────────────────────────────────────────────
 
 # Start auth-shell container for claude login
 auth-up:
-    docker-compose up -d
+    docker-compose up -d auth-shell
 
 # Stop auth-shell container
 auth-down:
@@ -53,7 +73,7 @@ auth-login:
 
 # Run with default spec
 run:
-    ./run-actor-graph.sh specs/url-shortener.yaml
+    ./run-actor-graph.sh types-first-dev/specs/url-shortener.yaml
 
 # Run with custom spec
 run-spec spec:

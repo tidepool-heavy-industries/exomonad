@@ -3,7 +3,7 @@
 //! These tests verify the Unix socket communication path that containers use
 //! to submit node results to the hub.
 //!
-//! Tests are marked #[serial] because they spawn TestHub instances that
+//! Tests are marked #[serial(hub)] because they spawn TestHub instances that
 //! can interfere with each other when run in parallel.
 
 mod helpers;
@@ -15,7 +15,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 
 #[tokio::test]
-#[serial]
+#[serial(hub)]
 async fn test_socket_submit_result() {
     let hub = TestHub::spawn().await;
     let client = hub.http_client();
@@ -47,7 +47,7 @@ async fn test_socket_submit_result() {
 }
 
 #[tokio::test]
-#[serial]
+#[serial(hub)]
 async fn test_socket_raw_protocol() {
     let hub = TestHub::spawn().await;
     let client = hub.http_client();
@@ -79,7 +79,7 @@ async fn test_socket_raw_protocol() {
 }
 
 #[tokio::test]
-#[serial]
+#[serial(hub)]
 async fn test_socket_result_for_nonexistent_node() {
     // Test: submitting a result for a non-existent node should fail
     // due to foreign key constraint
@@ -100,7 +100,7 @@ async fn test_socket_result_for_nonexistent_node() {
 }
 
 #[tokio::test]
-#[serial]
+#[serial(hub)]
 async fn test_socket_concurrent_submissions() {
     let hub = TestHub::spawn().await;
     let client = hub.http_client();
@@ -134,7 +134,7 @@ async fn test_socket_concurrent_submissions() {
 }
 
 #[tokio::test]
-#[serial]
+#[serial(hub)]
 async fn test_socket_malformed_json() {
     let hub = TestHub::spawn().await;
 
@@ -159,7 +159,7 @@ async fn test_socket_malformed_json() {
 }
 
 #[tokio::test]
-#[serial]
+#[serial(hub)]
 async fn test_socket_error_result() {
     let hub = TestHub::spawn().await;
     let client = hub.http_client();
@@ -217,7 +217,7 @@ async fn test_socket_error_result() {
 }
 
 #[tokio::test]
-#[serial]
+#[serial(hub)]
 async fn test_socket_with_structured_output() {
     let hub = TestHub::spawn().await;
     let client = hub.http_client();

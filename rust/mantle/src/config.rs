@@ -61,11 +61,16 @@ impl Config {
     pub fn load() -> Result<Self, ConfigError> {
         let config_path = Self::default_path();
 
+        eprintln!("[DEBUG] Config path: {:?}", config_path);
+        eprintln!("[DEBUG] Config exists: {}", config_path.exists());
+
         if !config_path.exists() {
+            eprintln!("[DEBUG] No config file, using defaults");
             tracing::debug!("No config file at {:?}, using defaults", config_path);
             return Ok(Self::default());
         }
 
+        eprintln!("[DEBUG] Loading config from {:?}", config_path);
         Self::load_from(&config_path)
     }
 

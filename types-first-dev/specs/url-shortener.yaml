@@ -3,6 +3,8 @@
 # A comprehensive example demonstrating recursive decomposition.
 # The effect-based architecture maps well to subsystem boundaries.
 
+id: url-shortener
+
 description: |
   An effect-based URL shortener service with Servant API.
 

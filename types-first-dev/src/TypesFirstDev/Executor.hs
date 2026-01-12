@@ -28,6 +28,8 @@ module TypesFirstDev.Executor
   ( runV3
   ) where
 
+import Data.Text (Text)
+
 import Control.Monad.Freer (Eff)
 import Tidepool.Graph.Execute (CallHandler(..))
 import Tidepool.Graph.Goto.Internal (GotoChoice(..), OneOf(..))
@@ -38,13 +40,14 @@ import TypesFirstDev.V3.Interpreters (V3Effects)
 
 import TypesFirstDev.Types.Nodes
   ( ScaffoldInput
+  , ScaffoldExit(..)
   , TDDWriteTestsInput
   , ImplInput
   , TDDReviewImplInput
   , MergerInput
   , RebaserInput
   )
-import TypesFirstDev.Types.Payloads (MergeComplete, TestsReadyPayload)
+import TypesFirstDev.Types.Payloads (MergeComplete(..), TestsReadyPayload, ChildFailure(..))
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- MAIN ENTRY POINT
@@ -70,9 +73,22 @@ runScaffoldNode input = do
   -- GotoChoice '[To "v3TDDWriteTests" TDDWriteTestsInput, To Exit ScaffoldExit]
   case choice of
     GotoChoice (Here tddInput) -> runTDDWriteTestsNode tddInput
-    GotoChoice (There (Here _scaffoldExit)) ->
-      -- ClarificationNeeded exits the graph
-      error "Scaffold exited with ClarificationNeeded - not yet supported"
+    GotoChoice (There (Here scaffoldExit)) ->
+      -- ClarificationNeeded: Scaffold hit ambiguity in spec and is asking for clarification.
+      -- Rather than error, escalate by returning failure with diagnostic info.
+      -- Future enhancement: implement back-routing to ask user for clarification.
+      pure $ MergeFailed ChildFailure
+        { cfReason = "Scaffold requires clarification: " <> getClarificationMessage scaffoldExit
+        , cfBranch = "scaffold"
+        , cfAttempts = 1
+        , cfPartialCommit = Nothing
+        , cfFilesCreated = []
+        }
+
+-- | Extract clarification question from ScaffoldExit for error reporting.
+getClarificationMessage :: ScaffoldExit -> Text
+getClarificationMessage (ScaffoldClarificationNeeded question _ _) = question
+getClarificationMessage (ScaffoldInitWork{}) = "Expected clarification, got ScaffoldInitWork"
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- PHASE 2: TDD WRITE TESTS

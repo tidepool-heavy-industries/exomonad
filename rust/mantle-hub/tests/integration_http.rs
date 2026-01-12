@@ -5,7 +5,7 @@
 //!
 //! They spawn a real hub server but don't require Docker or Claude.
 //!
-//! Tests are marked #[serial] because they spawn TestHub instances that
+//! Tests are marked #[serial(hub)] because they spawn TestHub instances that
 //! can interfere with each other when run in parallel.
 
 mod helpers;
@@ -20,7 +20,7 @@ use serial_test::serial;
 // ============================================================================
 
 #[tokio::test]
-#[serial]
+#[serial(hub)]
 async fn test_create_session() {
     let hub = TestHub::spawn().await;
     let client = hub.http_client();
@@ -61,7 +61,7 @@ async fn test_create_session() {
 }
 
 #[tokio::test]
-#[serial]
+#[serial(hub)]
 async fn test_list_sessions_empty() {
     let hub = TestHub::spawn().await;
     let client = hub.http_client();
@@ -79,7 +79,7 @@ async fn test_list_sessions_empty() {
 }
 
 #[tokio::test]
-#[serial]
+#[serial(hub)]
 async fn test_list_sessions_with_data() {
     let hub = TestHub::spawn().await;
     let client = hub.http_client();
@@ -108,7 +108,7 @@ async fn test_list_sessions_with_data() {
 }
 
 #[tokio::test]
-#[serial]
+#[serial(hub)]
 async fn test_get_session_with_nodes() {
     let hub = TestHub::spawn().await;
     let client = hub.http_client();
@@ -139,7 +139,7 @@ async fn test_get_session_with_nodes() {
 }
 
 #[tokio::test]
-#[serial]
+#[serial(hub)]
 async fn test_get_session_not_found() {
     let hub = TestHub::spawn().await;
     let client = hub.http_client();
@@ -154,7 +154,7 @@ async fn test_get_session_not_found() {
 }
 
 #[tokio::test]
-#[serial]
+#[serial(hub)]
 async fn test_delete_session() {
     let hub = TestHub::spawn().await;
     let client = hub.http_client();
@@ -187,7 +187,7 @@ async fn test_delete_session() {
 // ============================================================================
 
 #[tokio::test]
-#[serial]
+#[serial(hub)]
 async fn test_create_child_node() {
     let hub = TestHub::spawn().await;
     let client = hub.http_client();
@@ -222,7 +222,7 @@ async fn test_create_child_node() {
 }
 
 #[tokio::test]
-#[serial]
+#[serial(hub)]
 async fn test_get_node() {
     let hub = TestHub::spawn().await;
     let client = hub.http_client();
@@ -250,7 +250,7 @@ async fn test_get_node() {
 }
 
 #[tokio::test]
-#[serial]
+#[serial(hub)]
 async fn test_get_node_wrong_session() {
     let hub = TestHub::spawn().await;
     let client = hub.http_client();
@@ -277,7 +277,7 @@ async fn test_get_node_wrong_session() {
 }
 
 #[tokio::test]
-#[serial]
+#[serial(hub)]
 async fn test_submit_node_result() {
     let hub = TestHub::spawn().await;
     let client = hub.http_client();
@@ -328,7 +328,7 @@ async fn test_submit_node_result() {
 }
 
 #[tokio::test]
-#[serial]
+#[serial(hub)]
 async fn test_get_node_events_empty() {
     let hub = TestHub::spawn().await;
     let client = hub.http_client();
@@ -359,7 +359,7 @@ async fn test_get_node_events_empty() {
 // ============================================================================
 
 #[tokio::test]
-#[serial]
+#[serial(hub)]
 async fn test_graph_data_single_node() {
     let hub = TestHub::spawn().await;
     let client = hub.http_client();
@@ -387,7 +387,7 @@ async fn test_graph_data_single_node() {
 }
 
 #[tokio::test]
-#[serial]
+#[serial(hub)]
 async fn test_graph_data_with_children() {
     let hub = TestHub::spawn().await;
     let client = hub.http_client();
@@ -430,7 +430,7 @@ async fn test_graph_data_with_children() {
 }
 
 #[tokio::test]
-#[serial]
+#[serial(hub)]
 async fn test_graph_not_found() {
     let hub = TestHub::spawn().await;
     let client = hub.http_client();
@@ -449,7 +449,7 @@ async fn test_graph_not_found() {
 // ============================================================================
 
 #[tokio::test]
-#[serial]
+#[serial(hub)]
 async fn test_session_state_running() {
     let hub = TestHub::spawn().await;
     let client = hub.http_client();
@@ -462,7 +462,7 @@ async fn test_session_state_running() {
 }
 
 #[tokio::test]
-#[serial]
+#[serial(hub)]
 async fn test_session_state_completed() {
     let hub = TestHub::spawn().await;
     let client = hub.http_client();
@@ -495,7 +495,7 @@ async fn test_session_state_completed() {
 }
 
 #[tokio::test]
-#[serial]
+#[serial(hub)]
 async fn test_session_state_failed() {
     let hub = TestHub::spawn().await;
     let client = hub.http_client();

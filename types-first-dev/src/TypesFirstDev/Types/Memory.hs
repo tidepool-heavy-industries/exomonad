@@ -52,7 +52,7 @@ data ImplMem = ImplMem
   , imImplInput      :: Maybe ImplInput       -- ^ Stored input for routing in after handler
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
 
 -- | Empty Impl memory for initialization.
 emptyImplMem :: Text -> ImplMem

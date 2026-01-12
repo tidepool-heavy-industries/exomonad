@@ -71,10 +71,8 @@ pub struct ContinueConfig {
     pub prompt: String,
     /// Timeout in seconds (0 = no timeout)
     pub timeout_secs: u64,
-    /// Use Docker container
-    pub docker: bool,
-    /// Optional JSON array of MCP decision tools for sum type outputs
-    pub decision_tools: Option<String>,
+    /// Optional path to file containing JSON array of MCP decision tools for sum type outputs
+    pub decision_tools_file: Option<String>,
 }
 
 /// Continue an existing session with a new prompt.
@@ -159,44 +157,16 @@ pub fn continue_session(repo_root: &Path, config: &ContinueConfig) -> Result<Ses
         "Continuing session"
     );
 
-    if config.docker {
-        let result = execute_docker_continue(
-            &config.session_id,
-            &session.branch,
-            &session.worktree,
-            &cc_session_id,
-            &session.model,
-            &config.prompt,
-            config.timeout_secs,
-            &state_manager,
-            config.decision_tools.as_deref(),
-        )?;
+    // Read decision tools from file if provided
+    let tools_json = if let Some(ref tools_file) = config.decision_tools_file {
+        Some(std::fs::read_to_string(tools_file)
+            .map_err(|e| ContinueError::Execution(format!("Failed to read decision tools file {}: {}", tools_file, e)))?)
+    } else {
+        None
+    };
 
-        let duration = start_time.elapsed().as_secs_f64();
-
-        // Update session state
-        state_manager.update_session(&config.session_id, |s| {
-            s.mark_completed(
-                result.exit_code,
-                result.total_cost_usd,
-                result.num_turns,
-                result.cc_session_id.clone(),
-            );
-        })?;
-
-        let mut output = SessionOutput {
-            duration_secs: duration,
-            ..result
-        };
-
-        // Sanitize output to remove control characters before returning for JSON serialization
-        output.sanitize();
-
-        return Ok(output);
-    }
-
-    // Execute with --resume flag (local mode)
-    let result = execute_continue(
+    // Execute via Docker container with hub streaming
+    let result = execute_docker_continue(
         &config.session_id,
         &session.branch,
         &session.worktree,
@@ -205,6 +175,7 @@ pub fn continue_session(repo_root: &Path, config: &ContinueConfig) -> Result<Ses
         &config.prompt,
         config.timeout_secs,
         &state_manager,
+        tools_json.as_deref(),
     )?;
 
     let duration = start_time.elapsed().as_secs_f64();
@@ -228,99 +199,6 @@ pub fn continue_session(repo_root: &Path, config: &ContinueConfig) -> Result<Ses
     output.sanitize();
 
     Ok(output)
-}
-
-fn execute_continue(
-    session_id: &str,
-    branch: &str,
-    worktree_path: &Path,
-    cc_session_id: &str,
-    model: &str,
-    prompt: &str,
-    timeout_secs: u64,
-    state_manager: &StateManager,
-) -> Result<SessionOutput> {
-    use std::process::{Command, Stdio};
-    use mantle_shared::{RunResult, ResultFifo};
-
-    // Mark session as running
-    state_manager.update_session(session_id, |s| {
-        s.mark_running(None);
-    })?;
-
-    // Create FIFO for result communication
-    let result_fifo = ResultFifo::new()
-        .map_err(|e| ContinueError::Execution(format!("Failed to create result FIFO: {}", e)))?;
-
-    // Build claude args with --resume
-    let claude_args = vec![
-        "--dangerously-skip-permissions".to_string(),
-        "--output-format".to_string(),
-        "json".to_string(),
-        "--verbose".to_string(),
-        "--model".to_string(),
-        model.to_string(),
-        "--resume".to_string(),
-        cc_session_id.to_string(),
-        "-p".to_string(),
-        prompt.to_string(),
-    ];
-
-    // Build mantle-agent command
-    let mut cmd = Command::new("mantle-agent");
-    cmd.arg("wrap")
-        .arg("--result-fifo")
-        .arg(result_fifo.path())
-        .arg("--cwd")
-        .arg(worktree_path)
-        .arg("--session-tag")
-        .arg(session_id);
-
-    if timeout_secs > 0 {
-        cmd.arg("--timeout").arg(timeout_secs.to_string());
-    }
-
-    cmd.arg("--");
-    for arg in &claude_args {
-        cmd.arg(arg);
-    }
-
-    cmd.stdout(Stdio::null())
-        .stderr(Stdio::null());
-
-    debug!(cmd = ?cmd, "Spawning mantle-agent for continue");
-
-    let _child = cmd.spawn()
-        .map_err(|e| ContinueError::Execution(format!("Failed to spawn mantle-agent: {}", e)))?;
-
-    // Read result from FIFO
-    let timeout = if timeout_secs > 0 {
-        std::time::Duration::from_secs(timeout_secs)
-    } else {
-        std::time::Duration::ZERO
-    };
-
-    let run_result: RunResult = result_fifo
-        .read_with_timeout(timeout)
-        .map_err(|e| ContinueError::Execution(format!("Failed to read result: {}", e)))?;
-
-    Ok(SessionOutput {
-        session_id: session_id.to_string(),
-        branch: branch.to_string(),
-        worktree: worktree_path.to_path_buf(),
-        exit_code: run_result.exit_code,
-        is_error: run_result.is_error,
-        result_text: run_result.result,
-        structured_output: run_result.structured_output,
-        total_cost_usd: run_result.total_cost_usd,
-        num_turns: run_result.num_turns,
-        interrupts: run_result.interrupts,
-        duration_secs: 0.0,
-        error: None,
-        model_usage: run_result.model_usage,
-        cc_session_id: Some(run_result.session_id),
-        tool_calls: run_result.tool_calls,
-    })
 }
 
 /// Check if hub is reachable.

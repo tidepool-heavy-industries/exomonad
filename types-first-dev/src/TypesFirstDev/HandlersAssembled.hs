@@ -19,6 +19,7 @@ module TypesFirstDev.HandlersAssembled
   ( v3Handlers
   ) where
 
+import Data.Proxy (Proxy(..))
 import Tidepool.Graph.Generic (AsHandler)
 import Tidepool.Graph.Goto (ClaudeCodeLLMHandler(..), ClaudeCodeResult(..))
 import Tidepool.Graph.Types (Exit, Self, ModelChoice(..))
@@ -63,11 +64,11 @@ import TypesFirstDev.Handlers.ImplBarrier (implBarrierHandler)
 -- 4. IO - System operations
 v3Handlers :: TDDGraph (AsHandler V3Effects)
 v3Handlers = TDDGraph
-  { -- Entry node (placeholder - no handler needed)
-    v3Entry = undefined
+  { -- Entry node marker (Proxy indicates entry point type)
+    v3Entry = Proxy
 
     -- ════════════════════════════════════════════════════════════════
-    -- PHASE 1: SCAFFOLD
+    -- SCAFFOLD
     -- ════════════════════════════════════════════════════════════════
 
   , v3Scaffold = ClaudeCodeLLMHandler @'Sonnet
@@ -77,7 +78,7 @@ v3Handlers = TDDGraph
       (\(ClaudeCodeResult output _, sid) -> scaffoldAfter (output, sid))
 
     -- ════════════════════════════════════════════════════════════════
-    -- PHASE 2: TDD WRITE TESTS
+    -- TDD WRITE TESTS
     -- ════════════════════════════════════════════════════════════════
 
   , v3TDDWriteTests = ClaudeCodeLLMHandler @'Sonnet
@@ -87,13 +88,13 @@ v3Handlers = TDDGraph
       (\(ClaudeCodeResult output _, sid) -> tddWriteTestsAfter (output, sid))
 
     -- ════════════════════════════════════════════════════════════════
-    -- PHASE 3: IMPL BARRIER (Subgraph effect for child collection)
+    -- IMPL BARRIER (Subgraph effect for child collection)
     -- ════════════════════════════════════════════════════════════════
 
   , v3ImplBarrier = implBarrierHandler
 
     -- ════════════════════════════════════════════════════════════════
-    -- PHASE 4: IMPL (with self-loop retry)
+    -- IMPL (with self-loop retry)
     -- ════════════════════════════════════════════════════════════════
 
   , v3Impl = ClaudeCodeLLMHandler @'Sonnet
@@ -103,7 +104,7 @@ v3Handlers = TDDGraph
       (\(ClaudeCodeResult output _, sid) -> implAfter (output, sid))
 
     -- ════════════════════════════════════════════════════════════════
-    -- PHASE 5: TDD REVIEW IMPL (decision tools)
+    -- TDD REVIEW IMPL (decision tools)
     -- ════════════════════════════════════════════════════════════════
 
   , v3TDDReviewImpl = ClaudeCodeLLMHandler @'Sonnet
@@ -113,7 +114,7 @@ v3Handlers = TDDGraph
       (\(ClaudeCodeResult output _, sid) -> tddReviewImplAfter (output, sid))
 
     -- ════════════════════════════════════════════════════════════════
-    -- PHASE 6: MERGER
+    -- MERGER
     -- ════════════════════════════════════════════════════════════════
 
   , v3Merger = ClaudeCodeLLMHandler @'Sonnet
@@ -123,7 +124,7 @@ v3Handlers = TDDGraph
       (\(ClaudeCodeResult output _, sid) -> mergerAfter (output, sid))
 
     -- ════════════════════════════════════════════════════════════════
-    -- PHASE 7: REBASER
+    -- REBASER
     -- ════════════════════════════════════════════════════════════════
 
   , v3Rebaser = ClaudeCodeLLMHandler @'Sonnet
@@ -136,5 +137,5 @@ v3Handlers = TDDGraph
     -- EXIT
     -- ════════════════════════════════════════════════════════════════
 
-  , v3Exit = undefined  -- Exit node (no handler)
+  , v3Exit = Proxy  -- Exit node marker (Proxy indicates exit type)
   }

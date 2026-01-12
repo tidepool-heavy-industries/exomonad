@@ -114,11 +114,13 @@ impl StreamParser {
     /// * `exit_code` - Container exit code
     /// * `session_tag` - Optional session tag for correlation
     /// * `tool_calls` - Tool calls captured from control socket (decision tools)
+    /// * `stderr_output` - Captured stderr for error diagnosis
     pub fn build_result(
         self,
         exit_code: i32,
         session_tag: Option<String>,
         tool_calls: Vec<mantle_shared::events::ToolCall>,
+        stderr_output: Option<String>,
     ) -> RunResult {
         let tool_calls_opt = if tool_calls.is_empty() {
             None
@@ -133,6 +135,7 @@ impl StreamParser {
             session_tag,
             vec![], // No interrupts in the new architecture
             tool_calls_opt,
+            stderr_output,
         )
     }
 
@@ -196,7 +199,7 @@ mod tests {
         parser.process_line(SAMPLE_INIT);
         parser.process_line(SAMPLE_RESULT);
 
-        let result = parser.build_result(0, Some("test-tag".to_string()), vec![]);
+        let result = parser.build_result(0, Some("test-tag".to_string()), vec![], None);
 
         assert_eq!(result.exit_code, 0);
         assert!(!result.is_error);

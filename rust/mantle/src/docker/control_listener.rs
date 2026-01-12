@@ -21,12 +21,14 @@ use mantle_shared::events::ToolCall;
 use mantle_shared::protocol::{ControlMessage, ControlResponse};
 use serde_json::json;
 use std::fs;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, ErrorKind, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
+use std::time::Duration;
 use tracing::{debug, error, info, trace, warn};
 
 /// Control socket listener for MCP tool calls.
@@ -44,8 +46,9 @@ pub struct ControlListener {
 /// the accumulated tool calls after the container exits.
 pub struct ToolCallCollector {
     tool_calls: Arc<Mutex<Vec<ToolCall>>>,
-    #[allow(dead_code)]
     handle: JoinHandle<()>,
+    shutdown: Arc<AtomicBool>,
+    socket_path: PathBuf,
 }
 
 impl ControlListener {
@@ -76,46 +79,55 @@ impl ControlListener {
 
     /// Spawn the listener thread and return a handle to collect tool calls.
     ///
-    /// The listener runs until the socket is closed (when the parent drops
-    /// the listener or the process exits).
+    /// The listener runs until shutdown is signaled via the collector.
     pub fn spawn(mut self) -> ToolCallCollector {
         let tool_calls = Arc::new(Mutex::new(Vec::new()));
         let tool_calls_clone = Arc::clone(&tool_calls);
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let shutdown_clone = Arc::clone(&shutdown);
+        let socket_path = self.socket_path.clone();
 
         // Take the listener out of self (allows move into thread while self gets dropped)
         let listener = self.listener.take().expect("Listener already taken");
 
-        // Set blocking mode - accept() will error when socket is closed
+        // Set non-blocking mode so we can poll for shutdown
         listener
-            .set_nonblocking(false)
-            .expect("Failed to set blocking mode");
+            .set_nonblocking(true)
+            .expect("Failed to set non-blocking mode");
 
         let handle = thread::spawn(move || {
-            Self::run_listener(listener, tool_calls_clone);
+            Self::run_listener(listener, tool_calls_clone, shutdown_clone);
         });
 
-        ToolCallCollector { tool_calls, handle }
+        ToolCallCollector { tool_calls, handle, shutdown, socket_path }
     }
 
     /// Run the listener loop.
-    fn run_listener(listener: UnixListener, tool_calls: Arc<Mutex<Vec<ToolCall>>>) {
+    ///
+    /// Polls for connections in non-blocking mode, checking the shutdown flag periodically.
+    fn run_listener(
+        listener: UnixListener,
+        tool_calls: Arc<Mutex<Vec<ToolCall>>>,
+        shutdown: Arc<AtomicBool>,
+    ) {
         debug!("Control listener thread started");
 
-        for stream_result in listener.incoming() {
-            match stream_result {
-                Ok(stream) => {
+        while !shutdown.load(Ordering::Relaxed) {
+            match listener.accept() {
+                Ok((stream, _)) => {
                     debug!("Accepted connection on control socket");
                     Self::handle_connection(stream, &tool_calls);
                 }
+                Err(e) if e.kind() == ErrorKind::WouldBlock => {
+                    // No pending connection, sleep briefly and check shutdown flag
+                    thread::sleep(Duration::from_millis(10));
+                }
                 Err(e) => {
-                    // Check if this is just the socket being closed
-                    if e.kind() == std::io::ErrorKind::Other
-                        || e.kind() == std::io::ErrorKind::InvalidInput
-                    {
-                        debug!("Listener socket closed, shutting down");
-                        break;
+                    // Real error - log and exit
+                    if e.kind() != ErrorKind::Other && e.kind() != ErrorKind::InvalidInput {
+                        error!(error = %e, "Error accepting connection");
                     }
-                    error!(error = %e, "Error accepting connection");
+                    break;
                 }
             }
         }
@@ -227,15 +239,47 @@ impl ControlListener {
 impl ToolCallCollector {
     /// Collect the accumulated tool calls.
     ///
-    /// This consumes the collector. If the listener thread is still running,
-    /// it will continue to run but any new tool calls won't be accessible.
+    /// This consumes the collector and joins the listener thread.
+    /// If the thread panicked, logs a warning and returns whatever
+    /// tool calls were accumulated before the panic.
     pub fn collect(self) -> Vec<ToolCall> {
-        // Try to get exclusive access. If the thread is still holding it,
-        // we'll get whatever was accumulated so far.
+        // Signal the listener thread to shut down
+        debug!("Signaling listener shutdown");
+        self.shutdown.store(true, Ordering::Relaxed);
+
+        // Join the listener thread and check for panics
+        match self.handle.join() {
+            Ok(()) => {
+                debug!("Control listener thread joined successfully");
+            }
+            Err(panic_info) => {
+                // Thread panicked - log the error
+                let panic_msg = if let Some(s) = panic_info.downcast_ref::<&str>() {
+                    s.to_string()
+                } else if let Some(s) = panic_info.downcast_ref::<String>() {
+                    s.clone()
+                } else {
+                    "unknown panic".to_string()
+                };
+                error!(
+                    panic = %panic_msg,
+                    "Control listener thread panicked! Some tool calls may have been lost."
+                );
+            }
+        }
+
+        // Clean up socket file
+        if self.socket_path.exists() {
+            debug!(path = %self.socket_path.display(), "Cleaning up socket file");
+            let _ = fs::remove_file(&self.socket_path);
+        }
+
+        // Get the accumulated tool calls
         match Arc::try_unwrap(self.tool_calls) {
             Ok(mutex) => mutex.into_inner().unwrap(),
             Err(arc) => {
-                // Thread still has a reference, clone the contents
+                // Shouldn't happen after join(), but handle gracefully
+                warn!("Unexpected: Arc still has references after thread join");
                 arc.lock().unwrap().clone()
             }
         }
@@ -244,6 +288,11 @@ impl ToolCallCollector {
     /// Get a snapshot of current tool calls without consuming.
     pub fn snapshot(&self) -> Vec<ToolCall> {
         self.tool_calls.lock().unwrap().clone()
+    }
+
+    /// Check if the listener thread is still running.
+    pub fn is_running(&self) -> bool {
+        !self.handle.is_finished()
     }
 }
 
@@ -271,12 +320,18 @@ mod tests {
         (path, dir)
     }
 
+    /// Wait for listener to be ready (polling)
+    fn wait_for_listener() {
+        thread::sleep(Duration::from_millis(50));
+    }
+
     #[test]
     fn test_listener_binds_and_accepts() {
         let (socket_path, _dir) = create_temp_socket();
 
         let listener = ControlListener::bind(&socket_path).unwrap();
         let collector = listener.spawn();
+        wait_for_listener();
 
         // Connect as client
         let mut client = UnixStream::connect(&socket_path).unwrap();
@@ -316,6 +371,7 @@ mod tests {
 
         let listener = ControlListener::bind(&socket_path).unwrap();
         let collector = listener.spawn();
+        wait_for_listener();
 
         // Send multiple tool calls from separate connections
         for i in 0..3 {
@@ -331,6 +387,9 @@ mod tests {
             let mut reader = BufReader::new(&client);
             let mut response = String::new();
             reader.read_line(&mut response).unwrap();
+
+            // Small delay between connections to avoid race
+            thread::sleep(Duration::from_millis(20));
         }
 
         let tool_calls = collector.collect();
@@ -343,6 +402,7 @@ mod tests {
 
         let listener = ControlListener::bind(&socket_path).unwrap();
         let _collector = listener.spawn();
+        wait_for_listener();
 
         let mut client = UnixStream::connect(&socket_path).unwrap();
 

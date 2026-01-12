@@ -146,6 +146,7 @@ data SessionOutput = SessionOutput
   , soDurationSecs     :: Double         -- ^ Wall-clock duration in seconds
   , soError            :: Maybe Text     -- ^ Error if failed before Claude ran
   , soToolCalls        :: Maybe [ToolCall] -- ^ Decision tool calls from Claude Code
+  , soStderrOutput     :: Maybe Text     -- ^ Captured stderr on error (for auth/setup diagnosis)
   } deriving stock (Show, Eq, Generic)
 
 instance ToJSON SessionOutput where

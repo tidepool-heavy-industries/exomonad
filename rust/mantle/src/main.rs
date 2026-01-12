@@ -62,9 +62,9 @@ enum SessionCommands {
         #[arg(long)]
         json_schema: Option<String>,
 
-        /// JSON array of MCP decision tools for sum type outputs
+        /// Path to file containing JSON array of MCP decision tools for sum type outputs
         #[arg(long)]
-        decision_tools: Option<String>,
+        decision_tools_file: Option<String>,
 
         // === Graph Execution Tracking ===
 
@@ -100,9 +100,9 @@ enum SessionCommands {
         #[arg(long)]
         prompt: String,
 
-        /// JSON array of MCP decision tools for sum type outputs
+        /// Path to file containing JSON array of MCP decision tools for sum type outputs
         #[arg(long)]
-        decision_tools: Option<String>,
+        decision_tools_file: Option<String>,
     },
 
     /// Fork a session (create child session from parent's context)
@@ -118,9 +118,9 @@ enum SessionCommands {
         #[arg(long)]
         child_prompt: String,
 
-        /// JSON array of MCP decision tools for sum type outputs
+        /// Path to file containing JSON array of MCP decision tools for sum type outputs
         #[arg(long)]
-        decision_tools: Option<String>,
+        decision_tools_file: Option<String>,
     },
 
     /// Show detailed information about a session
@@ -183,7 +183,7 @@ fn handle_session_command(cmd: SessionCommands) -> std::result::Result<(), Box<d
     let state_manager = StateManager::new(&repo_root)?;
 
     match cmd {
-        SessionCommands::Start { slug, prompt, model, timeout, json_schema, decision_tools,
+        SessionCommands::Start { slug, prompt, model, timeout, json_schema, decision_tools_file,
                                hub_session_id, execution_id, node_path, node_type, parent_hub_node_id } => {
             let config = StartConfig {
                 slug,
@@ -192,7 +192,7 @@ fn handle_session_command(cmd: SessionCommands) -> std::result::Result<(), Box<d
                 timeout_secs: timeout,
                 base_branch: None,
                 json_schema,
-                decision_tools,
+                decision_tools_file,
                 hub_session_id,
                 execution_id,
                 node_path,
@@ -215,13 +215,12 @@ fn handle_session_command(cmd: SessionCommands) -> std::result::Result<(), Box<d
             }
         }
 
-        SessionCommands::Continue { session_id, prompt, decision_tools } => {
+        SessionCommands::Continue { session_id, prompt, decision_tools_file } => {
             let config = ContinueConfig {
                 session_id,
                 prompt,
                 timeout_secs: 300, // Default timeout
-                docker: false,
-                decision_tools,
+                decision_tools_file,
             };
 
             match continue_session(&repo_root, &config) {
@@ -239,14 +238,13 @@ fn handle_session_command(cmd: SessionCommands) -> std::result::Result<(), Box<d
             }
         }
 
-        SessionCommands::Fork { parent_id, child_slug, child_prompt, decision_tools } => {
+        SessionCommands::Fork { parent_id, child_slug, child_prompt, decision_tools_file } => {
             let config = ForkConfig {
                 parent_id,
                 child_slug,
                 child_prompt,
                 timeout_secs: 300, // Default timeout
-                docker: false,
-                decision_tools,
+                decision_tools_file,
             };
 
             match fork_session(&repo_root, &config) {
@@ -446,6 +444,7 @@ mod tests {
             model_usage: HashMap::new(),
             interrupts: vec![],
             tool_calls: None,
+            stderr_output: None,
         };
 
         let json = serde_json::to_string(&result).unwrap();
@@ -476,6 +475,7 @@ mod tests {
             model_usage: HashMap::new(),
             interrupts: vec![],
             tool_calls: None,
+            stderr_output: None,
         };
 
         let json = serde_json::to_string(&result).unwrap();
@@ -509,6 +509,7 @@ mod tests {
                 reason: Some("Missing Foo type".to_string()),
             }],
             tool_calls: None,
+            stderr_output: None,
         };
 
         let json = serde_json::to_string(&result).unwrap();

@@ -49,8 +49,10 @@ module Tidepool.Graph.Execute
   , SpawnWorkers(..)
   ) where
 
+import Control.Monad (when)
 import Data.Aeson (Value, toJSON)
 import Data.Kind (Constraint, Type)
+import Data.Maybe (fromMaybe)
 import Data.Proxy (Proxy(..))
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -68,7 +70,7 @@ import Text.Ginger.TH (TypedTemplate, runTypedTemplate)
 import Text.Parsec.Pos (SourcePos)
 
 import Tidepool.Effect (LLM)
-import Tidepool.Effect.Session (Session, SessionOutput(..), SessionId, SessionOperation(..), startSession, continueSession, forkSession)
+import Tidepool.Effect.Session (Session, SessionOutput(..), SessionId(..), SessionOperation(..), startSession, continueSession, forkSession)
 import Tidepool.Effect.Types (TurnOutcome(..), TurnParseResult(..), TurnResult(..), runTurn)
 import Tidepool.Graph.Edges (GetInput, GetSpawnTargets, GetBarrierTarget, GetAwaits)
 import Tidepool.Graph.Generic (AsHandler, FieldsWithNamesOf, SpawnPayloads, SpawnPayloadsInner, AwaitsHList, GetNodeDef)
@@ -419,10 +421,31 @@ executeClaudeCodeHandler mSystemTpl userTpl beforeFn afterFn input = do
           startSession slug prompt model_ schema tools
 
         ContinueFrom sid ->
-          continueSession sid prompt schema tools
+          -- Guard against empty session ID (indicates prior mantle failure)
+          if T.null sid.unSessionId
+          then error "ClaudeCode: Cannot continue session - no valid session ID (prior mantle failure)"
+          else continueSession sid prompt schema tools
 
         ForkFrom parentSid childSlug ->
           forkSession parentSid childSlug prompt schema tools
+
+      -- Check for mantle/process-level failure BEFORE parsing output
+      -- This distinguishes "mantle crashed" from "Claude didn't call tool"
+      when result.soIsError $ do
+        let errDetails = fromMaybe "unknown error" result.soError
+            stderrInfo = maybe "" (\s -> "\n\nStderr:\n" <> T.unpack s) result.soStderrOutput
+        error $ "ClaudeCode session failed (mantle/process error): " <> T.unpack errDetails
+          <> " [exit code: " <> show result.soExitCode <> "]"
+          <> stderrInfo
+
+      -- Also fail if session ID is empty (indicates mantle never started properly)
+      when (T.null result.soSessionId.unSessionId) $ do
+        let errDetails = fromMaybe "no details" result.soError
+            stderrInfo = maybe "" (\s -> "\n\nStderr:\n" <> T.unpack s) result.soStderrOutput
+        error $ "ClaudeCode session failed to start - no session ID returned. "
+          <> "Error: " <> T.unpack errDetails
+          <> " [exit code: " <> show result.soExitCode <> "]"
+          <> stderrInfo
 
       -- Parse result based on whether we're using decision tools
       case tools of
@@ -442,8 +465,9 @@ executeClaudeCodeHandler mSystemTpl userTpl beforeFn afterFn input = do
             _ ->
               -- No tool call - nag and retry
               if retryCount >= maxNagRetries
-              then error $ "ClaudeCode: Claude failed to call a decision tool after "
-                        <> show maxNagRetries <> " retries"
+              then error $ "ClaudeCode: Claude completed but failed to call a decision tool after "
+                        <> show maxNagRetries <> " retries. "
+                        <> "Session output: " <> maybe "(no text)" T.unpack result.soResultText
               else do
                 -- Continue the same session with nag prompt
                 executeWithNag @s decisionToolNagPrompt schema tools

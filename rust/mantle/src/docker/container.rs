@@ -255,14 +255,17 @@ where
     // Either a named Docker volume (shared auth) or host bind mount (local dev)
     match &config.auth_mount {
         AuthMount::Volume(vol_name) => {
+            let mount_arg = format!("{}:/home/user/.claude", vol_name);
             logger.log("MANTLE", &format!("Using auth volume: {}", vol_name));
-            cmd.arg("-v")
-                .arg(format!("{}:/home/user/.claude", vol_name));
+            logger.log("MANTLE", &format!("Auth mount arg: {}", mount_arg));
+            cmd.arg("-v").arg(&mount_arg);
         }
         AuthMount::BindMount(path) => {
+            let mount_arg = format!("{}:/home/user/.claude", path.display());
             logger.log("MANTLE", &format!("Using auth bind mount: {:?}", path));
-            cmd.arg("-v")
-                .arg(format!("{}:/home/user/.claude", path.display()));
+            logger.log("MANTLE", &format!("Auth mount arg: {}", mount_arg));
+            logger.log("MANTLE", &format!("Auth path exists: {}", path.exists()));
+            cmd.arg("-v").arg(&mount_arg);
         }
     }
 
@@ -276,13 +279,7 @@ where
     // Working directory
     cmd.arg("-w").arg("/workspace");
 
-    // Pass through auth env vars (API key or OAuth token from `claude setup-token`)
-    if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
-        cmd.arg("-e").arg(format!("ANTHROPIC_API_KEY={}", key));
-    }
-    if let Ok(token) = std::env::var("CLAUDE_CODE_OAUTH_TOKEN") {
-        cmd.arg("-e").arg(format!("CLAUDE_CODE_OAUTH_TOKEN={}", token));
-    }
+    // Claude Code auth is handled via mounted volume (~/.claude)
 
     // Add custom env vars
     for (k, v) in &config.env_vars {
@@ -307,12 +304,20 @@ where
     cmd.args(&config.claude_args);
 
     logger.log("MANTLE", &format!("Docker command: {:?}", cmd));
+    logger.log("MANTLE", &format!("Config - image: {}", config.image));
+    logger.log("MANTLE", &format!("Config - session_id: {}", config.session_id));
+    logger.log("MANTLE", &format!("Config - worktree_path: {}", config.worktree_path.display()));
 
     // Pipe both stdout (for stream-json) and stderr (for logging)
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
 
-    let mut child = cmd.spawn().map_err(DockerError::Spawn)?;
+    logger.log("MANTLE", "Spawning Docker container...");
+    let mut child = cmd.spawn().map_err(|e| {
+        logger.log("MANTLE", &format!("Failed to spawn container: {}", e));
+        DockerError::Spawn(e)
+    })?;
+    logger.log("MANTLE", "Container spawned successfully");
     let stdout = child
         .stdout
         .take()
@@ -322,14 +327,19 @@ where
         .take()
         .ok_or_else(|| DockerError::OutputRead("Failed to capture stderr".to_string()))?;
 
-    // Spawn thread to capture Claude's stderr to log file
-    let session_id = config.session_id.clone();
+    // Spawn thread to capture Claude's stderr to log file AND collect for error reporting
+    let session_id_for_stderr = config.session_id.clone();
+    let (stderr_tx, stderr_rx) = std::sync::mpsc::channel::<String>();
     std::thread::spawn(move || {
-        let mut stderr_logger = SessionLogger::new(&session_id).ok()?;
+        let mut stderr_logger = SessionLogger::new(&session_id_for_stderr).ok()?;
         let reader = BufReader::new(stderr);
+        let mut collected_lines = Vec::new();
         for line in reader.lines().flatten() {
             stderr_logger.log("CLAUDE", &line);
+            collected_lines.push(line);
         }
+        // Send collected stderr back to main thread
+        let _ = stderr_tx.send(collected_lines.join("\n"));
         Some(())
     });
 
@@ -425,8 +435,23 @@ where
         let _ = std::fs::remove_file(socket_path);
     }
 
+    // Collect stderr from background thread (with timeout to avoid blocking forever)
+    // Only include stderr in result when there's an error (to avoid bloating successful results)
+    let stderr_output = if exit_code != 0 || !parser.has_result() {
+        // Wait briefly for stderr thread to finish (it should be done by now since process exited)
+        stderr_rx.recv_timeout(std::time::Duration::from_secs(2)).ok()
+            .filter(|s| !s.is_empty())
+    } else {
+        None
+    };
+
+    if let Some(ref stderr) = stderr_output {
+        let line_count = stderr.lines().count();
+        logger.log("STDERR", &format!("Captured {} lines of stderr for error diagnosis", line_count));
+    }
+
     // Build result from parsed events
-    let result = parser.build_result(exit_code, Some(config.session_id.clone()), tool_calls);
+    let result = parser.build_result(exit_code, Some(config.session_id.clone()), tool_calls, stderr_output);
 
     // Save event stream to debug file if turn count is suspiciously high
     if turn_count > 50 || exit_code != 0 {

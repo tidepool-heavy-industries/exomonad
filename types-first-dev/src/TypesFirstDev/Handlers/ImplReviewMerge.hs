@@ -37,7 +37,7 @@ import qualified Data.Text as T
 
 import Control.Monad.Freer (Eff, Member)
 import Control.Monad.Freer.Reader (Reader, ask)
-import Tidepool.Effect.Session (Session, SessionOperation(..), SessionId)
+import Tidepool.Effect.Session (Session, SessionOperation(..), SessionId(..))
 import Tidepool.Effect.GraphContext (GraphContext, getEntry)
 import Tidepool.Graph.Goto (To, GotoChoice, gotoChoice, gotoExit)
 import Tidepool.Graph.Types (Exit)
@@ -46,6 +46,7 @@ import Tidepool.Graph.Memory (Memory, getMem, updateMem)
 import TypesFirstDev.Context (ImplTemplateCtx(..), TDDReviewImplTemplateCtx(..), MergerTemplateCtx(..))
 import TypesFirstDev.Types.Nodes
   ( ImplInput(..), ImplExit(..)
+  , RetryFeedback(..)
   , TDDWriteTestsInput(..)
   , TDDReviewImplInput(..), TDDReviewImplExit(..)
   , MergerInput(..), MergerExit(..), MergeRejectedReason(..)
@@ -53,7 +54,7 @@ import TypesFirstDev.Types.Nodes
   )
 import TypesFirstDev.Types.Payloads (ImplResult(..), MergeComplete(..), TDDApproval(..), ChildFailure(..))
 import TypesFirstDev.Types.Memory (ImplMem(..), TDDMem(..))
-import TypesFirstDev.Types.Shared (NodeInfo(..), ClarificationRequest(..), ClarificationType(..), Critique(..))
+import TypesFirstDev.Types.Shared (NodeInfo(..), ClarificationRequest(..), ClarificationType(..), Critique(..), MergeRejectionFeedback(..))
 import TypesFirstDev.V3.Interpreters (ExecutionContext(..))
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -80,7 +81,9 @@ implBefore input = do
         , testsReady = input.iiTestsReady
         , childMerges = input.iiChildMerges
         , attemptCount = input.iiAttemptCount
-        , critiqueList = input.iiCritiqueList
+        , mergeRejections = input.iiMergeRejections
+        , childFailures = input.iiChildFailures
+        , codeReviews = input.iiCodeReviews
         }
   -- For retry loops, continue same session to preserve context
   let sessionOp = case mem.imSessionId of
@@ -105,18 +108,25 @@ implAfter (exit, sid) = do
 
   case mem.imImplInput of
     Nothing ->
-      -- No stored input - can only exit with current exit data
+      -- No stored input - cannot route properly, convert all exits to ImplStuck
+      -- This is a defensive error case indicating memory initialization failure
       case exit of
         ImplStuck diagnosis recommendation attempts ->
           pure $ gotoExit (ImplStuck diagnosis recommendation attempts)
-        ImplTestsPassed _ _ _ ->
-          pure $ gotoExit (ImplStuck "Internal error: tests passed but no input context" "Check memory initialization" 0)
-        ImplRequestRetry diagnosis _ _ _ ->
-          pure $ gotoExit (ImplStuck diagnosis "Cannot retry: no input context stored" 0)
+        ImplTestsPassed commit iterations passedTests ->
+          -- Tests passed but we can't route to TDDReviewImpl without original input
+          let diagnosis = "Internal error: tests passed (commit: " <> commit <> ", "
+                       <> T.pack (show iterations) <> " iterations, "
+                       <> T.pack (show (length passedTests)) <> " tests) but no input context"
+          in pure $ gotoExit (ImplStuck diagnosis "Check memory initialization - imImplInput was not stored in before-handler" 0)
+        ImplRequestRetry diagnosis strategyFrom strategyTo failingTests ->
+          let fullDiagnosis = diagnosis <> " (strategy: " <> strategyFrom <> " → " <> strategyTo
+                           <> ", " <> T.pack (show (length failingTests)) <> " failing tests)"
+          in pure $ gotoExit (ImplStuck fullDiagnosis "Cannot retry: no input context stored" 0)
         ImplBlockedDependency missing path ->
           pure $ gotoExit (ImplStuck ("Blocked on dependency: " <> missing <> " at " <> T.pack path) "Cannot escalate: no input context" 0)
-        ImplSpecAmbiguity spec _ question ->
-          pure $ gotoExit (ImplStuck ("Spec ambiguity in: " <> spec <> " - " <> question) "Cannot escalate: no input context" 0)
+        ImplSpecAmbiguity spec contradictionTrace question ->
+          pure $ gotoExit (ImplStuck ("Spec ambiguity in: " <> spec <> " - " <> question <> " [trace: " <> contradictionTrace <> "]") "Cannot escalate: no input context" 0)
 
     Just originalInput ->
       case exit of
@@ -125,7 +135,6 @@ implAfter (exit, sid) = do
                 { triSpec = originalInput.iiSpec
                 , triScaffold = originalInput.iiScaffold
                 , triImplResult = ImplResult commit iterations tests
-                , triDiff = ""
                 }
           pure $ gotoChoice @"v3TDDReviewImpl" reviewInput
 
@@ -133,23 +142,18 @@ implAfter (exit, sid) = do
           | originalInput.iiAttemptCount >= 5 ->
               pure $ gotoExit (ImplStuck diagnosis ("Max retries exceeded. Strategy: " <> strategyFrom <> " → " <> strategyTo) 5)
           | otherwise -> do
-              -- Build critiques from retry info so template shows useful feedback
-              let strategyCritique = Critique
-                    { cqFile = "strategy"
-                    , cqLine = originalInput.iiAttemptCount
-                    , cqIssue = diagnosis <> " (was: " <> strategyFrom <> ")"
-                    , cqRequiredFix = strategyTo
+              -- Build retry feedback for next attempt
+              let nextAttempt = originalInput.iiAttemptCount + 1
+              let feedback = RetryFeedback
+                    { rfAttemptNumber = nextAttempt
+                    , rfStrategyFailed = strategyFrom
+                    , rfStrategyNext = strategyTo
+                    , rfDiagnosis = diagnosis
+                    , rfFailingTests = failingTests
                     }
-              let testCritiques = map (\testName -> Critique
-                    { cqFile = "test"
-                    , cqLine = 0
-                    , cqIssue = "Test failed: " <> testName
-                    , cqRequiredFix = "Apply strategy: " <> strategyTo
-                    }) failingTests
-              let allCritiques = strategyCritique : testCritiques
               let retryInput = originalInput
-                    { iiAttemptCount = originalInput.iiAttemptCount + 1
-                    , iiCritiqueList = Just allCritiques
+                    { iiAttemptCount = nextAttempt
+                    , iiRetryFeedback = Just feedback
                     }
               pure $ gotoChoice @"v3Impl" retryInput
 
@@ -186,13 +190,12 @@ tddReviewImplBefore
   => TDDReviewImplInput
   -> Eff es (TDDReviewImplTemplateCtx, SessionOperation)
 tddReviewImplBefore input = do
-  -- Store input for after-handler routing (needed to construct Merger or TDDWriteTests inputs)
-  updateMem @TDDMem $ \m -> m { tmConversationId = T.pack (show input.triImplResult) }
+  -- Note: after-handler uses ExecutionContext for routing, not Memory
+  -- TDDMem.tmConversationId is for session tracking, updated in after-handler
   let ctx = TDDReviewImplTemplateCtx
         { spec = input.triSpec
         , scaffold = input.triScaffold
         , implResult = input.triImplResult
-        , diff = input.triDiff
         }
   pure (ctx, StartFresh "v3/tdd-review-impl")
 
@@ -209,27 +212,32 @@ tddReviewImplAfter
   => (TDDReviewImplExit, SessionId)
   -> Eff es (GotoChoice '[To "v3Merger" MergerInput, To "v3TDDWriteTests" TDDWriteTestsInput, To Exit TDDReviewImplExit])
 tddReviewImplAfter (exit, sid) = do
-  updateMem @TDDMem $ \m -> m { tmConversationId = T.pack (show sid) }
+  updateMem @TDDMem $ \m -> m { tmConversationId = sid.unSessionId }
   ctx <- ask @ExecutionContext
   case exit of
     TDDApproved signoff coverage -> do
       -- Route to Merger with approval
       -- NodeInfo from ExecutionContext (set by executor when creating context)
-      let nodeInfo = case ctx.ecNodeInfo of
-            Just ni -> ni
-            Nothing -> NodeInfo { niId = "root", niBranch = "main" }  -- Default for root
-      -- Construct TDDApproval from exit data
-      let tddApproval = TDDApproval
-            { taSignOff = signoff
-            , taCoverageReport = coverage
-            }
-      let mergerInput = MergerInput
-            { miParentNode = nodeInfo
-            , miChildNode = nodeInfo  -- Same for non-recursive case
-            , miTddApproval = tddApproval
-            , miContractSuite = ""     -- Will be set from scaffold when available
-            }
-      pure $ gotoChoice @"v3Merger" mergerInput
+      case ctx.ecNodeInfo of
+        Nothing ->
+          -- No NodeInfo means executor didn't properly initialize context
+          -- This is a configuration error - exit with rejection rather than use
+          -- a potentially incorrect default
+          pure $ gotoExit (TDDReject "Internal error: no NodeInfo in execution context" ["Node context initialization"])
+
+        Just nodeInfo -> do
+          -- Construct TDDApproval from exit data
+          let tddApproval = TDDApproval
+                { taSignOff = signoff
+                , taCoverageReport = coverage
+                }
+          let mergerInput = MergerInput
+                { miParentNode = nodeInfo
+                , miChildNode = nodeInfo  -- Same for non-recursive case
+                , miTddApproval = tddApproval
+                , miContractSuite = ""     -- TODO: set from scaffold when available
+                }
+          pure $ gotoChoice @"v3Merger" mergerInput
 
     TDDMoreTests critiques additionalTests -> do
       -- Route back to TDDWriteTests to write more tests
@@ -272,53 +280,53 @@ mergerBefore input = do
 
 -- | Merger after handler: file MR or reject.
 mergerAfter
-  :: (Member Session es, Member (Memory ImplMem) es)
+  :: (Member Session es, Member (Memory ImplMem) es, Member (Reader ExecutionContext) es)
   => (MergerExit, SessionId)
   -> Eff es (GotoChoice '[To Exit MergeComplete, To "v3Impl" ImplInput])
-mergerAfter (exit, _sid) = case exit of
-  MergerComplete commit author impact changes -> do
-    let mergeResult = MergeSuccess
-          { mcCommit = commit
-          , mcAuthor = author
-          , mcImpactLevel = impact
-          , mcChanges = changes
-          }
-    pure $ gotoExit mergeResult
+mergerAfter (exit, _sid) = do
+  -- Note: SessionId not stored here. On success, exits (no further routing).
+  -- On rejection, routes back to Impl (which stores its own SessionId for continuation).
+  ctx <- ask @ExecutionContext
+  case exit of
+    MergerComplete commit author impact changes -> do
+      let mergeResult = MergeSuccess
+            { mcCommit = commit
+            , mcAuthor = author
+            , mcImpactLevel = impact
+            , mcChanges = changes
+            }
+      pure $ gotoExit mergeResult
 
-  MergerRejected reason details failingTests -> do
-    -- Route back to Impl for retry - retrieve stored ImplInput from memory
-    mem <- getMem @ImplMem
-    case mem.imImplInput of
-      Just originalInput -> do
-        -- Build critiques from merge rejection so Impl can see what went wrong
-        let reasonCritique = Critique
-              { cqFile = "merge"
-              , cqLine = originalInput.iiAttemptCount
-              , cqIssue = "Merge rejected (" <> reasonToText reason <> "): " <> details
-              , cqRequiredFix = "Fix the " <> reasonToText reason <> " before merge can proceed"
-              }
-        let testCritiques = map (\testName -> Critique
-              { cqFile = "merge-test"
-              , cqLine = 0
-              , cqIssue = "Merge test failed: " <> testName
-              , cqRequiredFix = "Ensure " <> testName <> " passes after implementation"
-              }) failingTests
-        let allCritiques = reasonCritique : testCritiques
-        let retryInput = originalInput
-              { iiAttemptCount = originalInput.iiAttemptCount + 1
-              , iiCritiqueList = Just allCritiques
-              }
-        pure $ gotoChoice @"v3Impl" retryInput
-      Nothing ->
-        -- Can't retry without input - exit with failure
-        let failure = ChildFailure
-              { cfReason = "Merger rejected: " <> details <> " (reason: " <> reasonToText reason <> ")"
-              , cfBranch = "unknown"  -- We don't have branch info here
-              , cfAttempts = 0
-              , cfPartialCommit = Nothing
-              , cfFilesCreated = []
-              }
-        in pure $ gotoExit (MergeFailed failure)
+    MergerRejected reason details failingTests -> do
+      -- Route back to Impl for retry - retrieve stored ImplInput from memory
+      mem <- getMem @ImplMem
+      case mem.imImplInput of
+        Just originalInput -> do
+          -- Create merge rejection feedback from rejection info
+          let mergeRejectionFeedback = MergeRejectionFeedback
+                { mrfReason = reasonToText reason
+                , mrfDetails = details
+                , mrfAttemptNumber = originalInput.iiAttemptCount + 1
+                , mrfFailingTests = failingTests
+                }
+          let retryInput = originalInput
+                { iiAttemptCount = originalInput.iiAttemptCount + 1
+                , iiMergeRejections = Just [mergeRejectionFeedback]
+                , iiCodeReviews = Nothing
+                , iiChildFailures = Nothing
+                }
+          pure $ gotoChoice @"v3Impl" retryInput
+        Nothing ->
+          -- Can't retry without input - exit with failure
+          let branch = maybe "unknown" (\(ni :: NodeInfo) -> ni.niBranch) ctx.ecNodeInfo
+              failure = ChildFailure
+                    { cfReason = "Merger rejected: " <> details <> " (reason: " <> reasonToText reason <> ")"
+                    , cfBranch = branch
+                    , cfAttempts = 0
+                    , cfPartialCommit = Nothing
+                    , cfFilesCreated = []
+                    }
+          in pure $ gotoExit (MergeFailed failure)
   where
     reasonToText :: MergeRejectedReason -> Text
     reasonToText ContractViolation = "contract violation"

@@ -31,12 +31,10 @@ module TypesFirstDev.Policy
   , coverageGapCount
   , totalCritiques
 
-    -- * Routing Decisions (TDD)
-  , TDDDecision(..)
+    -- * Routing Decisions (Impl)
   , ImplDecision(..)
   , RetryDecision(..)
   , RetryContext(..)
-  , decideTDDReview
   , decideImplRetry
 
     -- * Progress Tracking
@@ -47,11 +45,11 @@ module TypesFirstDev.Policy
 import Data.List (intersect)
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.Read as TR
 import System.Exit (ExitCode(..))
 import System.Process (readProcessWithExitCode)
 
 import TypesFirstDev.Types.Shared (Critique(..), CoverageReport(..))
-import TypesFirstDev.Types.Payloads (ImplResult(..))
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -114,10 +112,43 @@ checkTests projectPath = do
     ["test", "--project-dir=" <> projectPath, "--test-show-details=always"]
     ""
   let output = T.pack stdout <> "\n" <> T.pack stderr
-      -- TODO: Parse test count and failed names from output
-      testCount = 0
-      failedNames = []
+      (testCount, failedNames) = parseTestOutput output
   pure (exitCode == ExitSuccess, output, testCount, failedNames)
+
+-- | Parse cabal test output to extract test count and failed test names.
+--
+-- Looks for:
+-- - "X of Y test suites (A of B test cases) passed." → extracts B (total test cases)
+-- - Lines containing ": FAIL" → extracts test names
+parseTestOutput :: Text -> (Int, [Text])
+parseTestOutput output =
+  let outputLines = T.lines output
+      -- Parse test count from summary line: "X of Y test suites (A of B test cases) passed."
+      testCount = case filter (T.isInfixOf "test cases) passed") outputLines of
+        (summaryLine:_) -> parseTestCount summaryLine
+        [] -> 0
+      -- Find failed test names from lines like "    testName: FAIL"
+      failedNames = concatMap extractFailedTest outputLines
+  in (testCount, failedNames)
+  where
+    -- Extract total test count from "... (A of B test cases) passed."
+    parseTestCount :: Text -> Int
+    parseTestCount line =
+      case T.breakOn "of " (snd $ T.breakOn "(" line) of
+        (_, rest) ->
+          case T.words (T.drop 3 rest) of  -- Skip "of "
+            (numText:_) -> either (const 0) fst (TR.decimal numText)
+            _ -> 0
+
+    -- Extract test name if line indicates failure
+    extractFailedTest :: Text -> [Text]
+    extractFailedTest line
+      | ": FAIL" `T.isInfixOf` line =
+          -- Line format: "    testName: FAIL" or "    testName: FAIL (reason)"
+          let trimmed = T.strip line
+              testName = T.strip $ fst $ T.breakOn ":" trimmed
+          in if T.null testName then [] else [testName]
+      | otherwise = []
 
 
 -- | A location where undefined/stub was found.
@@ -201,52 +232,6 @@ totalCritiques = sum . map critiqueCount
 
 
 -- ════════════════════════════════════════════════════════════════════════════
--- TDD REVIEW DECISIONS
--- ════════════════════════════════════════════════════════════════════════════
-
--- | TDD review decision after evaluating impl.
-data TDDDecision
-  = Approved
-    -- ^ All criteria satisfied, approve for merge
-  | MoreTests [Text]
-    -- ^ Need more tests for these criteria
-  | Reject [Critique]
-    -- ^ Impl has issues, send back to fix
-  deriving (Show, Eq)
-
-
--- | Decide TDD review outcome based on assessment.
---
--- Priority:
--- 1. Mechanical failures (hard stops)
--- 2. Critiques (impl issues)
--- 3. Coverage gaps (missing tests)
--- 4. All clear → approve
-decideTDDReview :: TDDAssessment -> TDDDecision
-decideTDDReview TDDAssessment{..}
-  -- FIRST: Mechanical failures
-  | not (mcBuildPassed v3Mechanical) = Reject [mechanicalCritique "Build failed"]
-  | mcHasUndefined v3Mechanical = Reject [mechanicalCritique "Contains undefined stubs"]
-  | not (mcTestsPassed v3Mechanical) = Reject [mechanicalCritique "Tests failing"]
-
-  -- THEN: Semantic critiques
-  | not (null v3Critiques) = Reject v3Critiques
-
-  -- THEN: Coverage gaps → need more tests
-  | not (null (crCriteriaMissing v3Coverage)) = MoreTests (crCriteriaMissing v3Coverage)
-
-  -- All clear
-  | otherwise = Approved
-  where
-    mechanicalCritique msg = Critique
-      { cqFile = ""
-      , cqLine = 0
-      , cqIssue = msg
-      , cqRequiredFix = "Fix mechanical failure"
-      }
-
-
--- ════════════════════════════════════════════════════════════════════════════
 -- IMPL RETRY DECISIONS
 -- ════════════════════════════════════════════════════════════════════════════
 
@@ -281,14 +266,16 @@ data RetryContext = RetryContext
 -- | Decide whether Impl should retry or escalate.
 --
 -- Uses trajectory analysis (are we making progress?).
+-- Caller passes previous fixes from Memory for accumulation.
 decideImplRetry
   :: Int          -- ^ Current attempt number
   -> Int          -- ^ Max attempts allowed
   -> [Text]       -- ^ Previously failing tests
   -> [Text]       -- ^ Currently failing tests
+  -> [Text]       -- ^ Previous fix attempts (from Memory, passed by caller)
   -> Maybe Text   -- ^ Blocker if any
   -> ImplDecision
-decideImplRetry attempt maxAttempts prevFailed currFailed mBlocker
+decideImplRetry attempt maxAttempts prevFailed currFailed prevFixes mBlocker
   -- Blocker → ask for help
   | Just blocker <- mBlocker = RequestHelp blocker
 
@@ -300,7 +287,7 @@ decideImplRetry attempt maxAttempts prevFailed currFailed mBlocker
       RetryImpl RetryContext
         { rcFailedTests = currFailed
         , rcAttemptNumber = attempt + 1
-        , rcPreviousFixes = []  -- TODO: accumulate from Memory
+        , rcPreviousFixes = prevFixes
         }
 
   -- No progress but under limit → one more try
@@ -308,7 +295,7 @@ decideImplRetry attempt maxAttempts prevFailed currFailed mBlocker
       RetryImpl RetryContext
         { rcFailedTests = currFailed
         , rcAttemptNumber = attempt + 1
-        , rcPreviousFixes = []
+        , rcPreviousFixes = prevFixes
         }
 
 

@@ -97,7 +97,6 @@ data TDDReviewImplTemplateCtx = TDDReviewImplTemplateCtx
   { spec       :: Spec
   , scaffold   :: InitWorkPayload
   , implResult :: ImplResult
-  , diff       :: Text
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (ToJSON)
@@ -107,7 +106,6 @@ instance ToGVal GingerM TDDReviewImplTemplateCtx where
     [ ("spec", toGVal ctx.spec)
     , ("scaffold", toGVal ctx.scaffold)
     , ("implResult", toGVal ctx.implResult)
-    , ("diff", toGVal ctx.diff)
     ]
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -116,12 +114,14 @@ instance ToGVal GingerM TDDReviewImplTemplateCtx where
 
 -- | Context for impl template.
 data ImplTemplateCtx = ImplTemplateCtx
-  { spec         :: Spec
-  , scaffold     :: InitWorkPayload
-  , testsReady   :: TestsReadyPayload
-  , childMerges  :: Maybe [MergeComplete]
-  , attemptCount :: Int
-  , critiqueList :: Maybe [Critique]
+  { spec               :: Spec
+  , scaffold           :: InitWorkPayload
+  , testsReady         :: TestsReadyPayload
+  , childMerges        :: Maybe [MergeComplete]
+  , attemptCount       :: Int
+  , mergeRejections    :: Maybe [MergeRejectionFeedback]
+  , childFailures      :: Maybe [ChildFailureFeedback]
+  , codeReviews        :: Maybe [CodeReviewFeedback]
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (ToJSON)
@@ -133,7 +133,9 @@ instance ToGVal GingerM ImplTemplateCtx where
     , ("testsReady", toGVal ctx.testsReady)
     , ("childMerges", toGVal ctx.childMerges)
     , ("attemptCount", toGVal ctx.attemptCount)
-    , ("critiqueList", toGVal ctx.critiqueList)
+    , ("mergeRejections", toGVal ctx.mergeRejections)
+    , ("childFailures", toGVal ctx.childFailures)
+    , ("codeReviews", toGVal ctx.codeReviews)
     ]
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -248,6 +250,30 @@ instance ToGVal GingerM Critique where
     , ("line", toGVal c.cqLine)
     , ("issue", toGVal c.cqIssue)
     , ("requiredFix", toGVal c.cqRequiredFix)
+    ]
+
+instance ToGVal GingerM MergeRejectionFeedback where
+  toGVal f = dict
+    [ ("reason", toGVal f.mrfReason)
+    , ("details", toGVal f.mrfDetails)
+    , ("attemptNumber", toGVal f.mrfAttemptNumber)
+    , ("failingTests", list (toGVal <$> f.mrfFailingTests))
+    ]
+
+instance ToGVal GingerM ChildFailureFeedback where
+  toGVal f = dict
+    [ ("childId", toGVal f.cffChildId)
+    , ("reason", toGVal f.cffReason)
+    , ("attempts", toGVal f.cffAttempts)
+    , ("partialCommit", maybe (toGVal ("" :: Text)) toGVal f.cffPartialCommit)
+    ]
+
+instance ToGVal GingerM CodeReviewFeedback where
+  toGVal f = dict
+    [ ("file", toGVal f.crfFile)
+    , ("line", toGVal f.crfLine)
+    , ("issue", toGVal f.crfIssue)
+    , ("requiredFix", toGVal f.crfRequiredFix)
     ]
 
 instance ToGVal GingerM MergeComplete where

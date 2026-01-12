@@ -6,7 +6,7 @@
 
 -- | Scaffold node - analyzes spec, optionally spawns children, routes to TDDWriteTests.
 --
--- Child spawning (Phase 7):
+-- Recursive decomposition:
 -- - If exit has childSpecs and depth < maxDepth, spawns children via spawnSelf
 -- - Children run asynchronously; ImplBarrier collects results via awaitAny
 -- - Each child gets: incremented depth, parent SessionId for ForkFrom
@@ -42,7 +42,7 @@ import TypesFirstDev.Types.Shared (ChildSpec(..))
 --
 -- Returns tuple of (context, SessionOperation) for ClaudeCodeLLMHandler.
 --
--- Session strategy (Phase 8):
+-- Session strategy:
 -- - Root nodes (no parent): StartFresh "v3/scaffold"
 -- - Child nodes (with parent session): ForkFrom parentSessionId childSlug
 --   This inherits parent's Claude Code context for continuity.
@@ -68,7 +68,7 @@ scaffoldBefore input = do
 
 -- | After handler: spawn children if decomposed, route to TDDWriteTests.
 --
--- Child spawning (Phase 7):
+-- Recursive decomposition logic:
 -- 1. Check if scaffold produced childSpecs
 -- 2. If childSpecs exist and depth < maxDepth, spawn children via spawnSelf
 -- 3. Children run asynchronously (ImplBarrier collects via awaitAny)
@@ -88,7 +88,7 @@ scaffoldAfter (exit, sid) = case exit of
     let currentDepth = entry.siCurrentDepth
     let maxDepth = entry.siMaxDepth
 
-    -- Phase 7: Spawn children if decomposed and depth allows
+    -- Spawn children if decomposed and depth allows
     case seChildSpecs of
       Just childSpecs | currentDepth < maxDepth -> do
         -- Spawn each child as a new graph instance with full context

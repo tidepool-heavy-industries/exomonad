@@ -8,6 +8,9 @@
 module TypesFirstDev.Types.Shared
   ( PlannedTest(..)
   , Critique(..)
+  , MergeRejectionFeedback(..)
+  , ChildFailureFeedback(..)
+  , CodeReviewFeedback(..)
   , ImpactLevel(..)
   , ChangeEntry(..)
   , ChangeType(..)
@@ -44,6 +47,42 @@ data Critique = Critique
   , cqLine        :: Int       -- ^ Line number
   , cqIssue       :: Text      -- ^ Description of the issue
   , cqRequiredFix :: Text      -- ^ What fix is required
+  }
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
+
+-- | Feedback from merge rejection - records why merge failed and what tests failed.
+-- Passed to Impl on retry to provide context for next attempt.
+-- Prefix: mrf
+data MergeRejectionFeedback = MergeRejectionFeedback
+  { mrfReason        :: Text    -- ^ Reason for rejection (contract, build, integration)
+  , mrfDetails       :: Text    -- ^ Detailed explanation of what went wrong
+  , mrfAttemptNumber :: Int     -- ^ Which attempt this occurred on
+  , mrfFailingTests  :: [Text]  -- ^ Tests that failed in merge
+  }
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
+
+-- | Feedback from child implementation failure - records why child couldn't complete.
+-- Passed to parent Impl when a child task fails.
+-- Prefix: cff
+data ChildFailureFeedback = ChildFailureFeedback
+  { cffChildId       :: Text         -- ^ Child node identifier
+  , cffReason        :: Text         -- ^ Why the child failed
+  , cffAttempts      :: Int          -- ^ How many attempts were made
+  , cffPartialCommit :: Maybe Text   -- ^ Last successful commit if any
+  }
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
+
+-- | Code review feedback from TDD reviewer - semantic issues with implementation.
+-- Describes specific code locations that need attention.
+-- Prefix: crf
+data CodeReviewFeedback = CodeReviewFeedback
+  { crfFile        :: FilePath  -- ^ Path to file with issue
+  , crfLine        :: Int       -- ^ Line number where issue occurs
+  , crfIssue       :: Text      -- ^ Description of the review comment
+  , crfRequiredFix :: Text      -- ^ What needs to be fixed
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON, StructuredOutput)

@@ -24,6 +24,7 @@ library
         -- Types
         TypesFirstDev.Types
         TypesFirstDev.Types.Core
+        TypesFirstDev.Types.JsonOpts
         TypesFirstDev.Types.Shared
         TypesFirstDev.Types.Payloads
         TypesFirstDev.Types.Memory

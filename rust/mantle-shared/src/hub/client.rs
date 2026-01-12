@@ -327,6 +327,10 @@ pub struct SyncEventStream {
     ws: WebSocket<SyncMaybeTlsStream<StdTcpStream>>,
     session_id: String,
     node_id: String,
+    /// Number of events successfully sent.
+    events_sent: u64,
+    /// Number of events that failed to send.
+    events_failed: u64,
 }
 
 impl SyncEventStream {
@@ -347,28 +351,67 @@ impl SyncEventStream {
             ws,
             session_id: session_id.to_string(),
             node_id: node_id.to_string(),
+            events_sent: 0,
+            events_failed: 0,
         })
     }
 
     /// Send a stream event to the hub (blocking).
+    ///
+    /// Tracks success/failure counts for summary logging on close.
     pub fn send_event(&mut self, event: &StreamEvent) -> Result<()> {
         let json = serde_json::to_string(event)
             .map_err(|e| MantleError::Hub(format!("Failed to serialize event: {}", e)))?;
 
-        self.ws
+        match self
+            .ws
             .send(tungstenite::Message::Text(json.into()))
-            .map_err(|e| {
-                MantleError::Hub(format!(
+        {
+            Ok(()) => {
+                self.events_sent += 1;
+                Ok(())
+            }
+            Err(e) => {
+                self.events_failed += 1;
+                Err(MantleError::Hub(format!(
                     "Failed to send event for node {}: {}",
                     self.node_id, e
-                ))
-            })?;
-
-        Ok(())
+                )))
+            }
+        }
     }
 
     /// Close the WebSocket connection.
+    ///
+    /// Logs a summary of events sent/failed. Warns if >10% of events failed.
     pub fn close(mut self) -> Result<()> {
+        let total = self.events_sent + self.events_failed;
+        let failure_rate = if total > 0 {
+            (self.events_failed as f64 / total as f64) * 100.0
+        } else {
+            0.0
+        };
+
+        if self.events_failed > 0 && failure_rate > 10.0 {
+            tracing::warn!(
+                events_sent = self.events_sent,
+                events_failed = self.events_failed,
+                failure_rate = format!("{:.1}%", failure_rate),
+                "Hub event streaming had significant failures - some visibility may be lost"
+            );
+        } else if self.events_failed > 0 {
+            tracing::info!(
+                events_sent = self.events_sent,
+                events_failed = self.events_failed,
+                "Hub event streaming summary (some events failed)"
+            );
+        } else {
+            tracing::debug!(
+                events_sent = self.events_sent,
+                "Hub event streaming completed successfully"
+            );
+        }
+
         self.ws.close(None).map_err(|e| {
             MantleError::Hub(format!("Failed to close WebSocket: {}", e))
         })?;

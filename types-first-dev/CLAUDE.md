@@ -38,7 +38,9 @@ docker-compose up -d
 docker-compose exec auth-shell claude login
 
 # 2. Configure mantle to use auth volume
-cp mantle-config.example.toml ~/.config/mantle/config.toml
+# NOTE: On macOS, config goes to ~/Library/Application Support (NOT ~/.config)
+mkdir -p ~/Library/Application\ Support/mantle
+cp mantle-config.example.toml ~/Library/Application\ Support/mantle/config.toml
 
 # 3. Build the mantle stack (REQUIRED before first run)
 just rebuild-mantle
@@ -48,6 +50,8 @@ just rebuild-mantle
 ```
 
 On macOS, OAuth tokens are stored in the system keychain rather than `~/.claude`, so a Docker volume is required. See [DOCKER-AUTH.md](DOCKER-AUTH.md) for detailed setup instructions.
+
+**Important:** The mantle config file must be in `~/Library/Application Support/mantle/config.toml` on macOS (the standard XDG config directory `~/.config/` is Linux-specific).
 
 ---
 

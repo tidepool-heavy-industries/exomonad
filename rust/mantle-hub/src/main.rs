@@ -233,7 +233,8 @@ async fn run_server(
         }
     });
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], port));
+    // Bind to 0.0.0.0 to allow connections from outside container
+    let addr = SocketAddr::from(([0, 0, 0, 0], port));
     info!(addr = %addr, socket = %socket.display(), "Starting mantle-hub");
 
     let listener = tokio::net::TcpListener::bind(addr).await?;

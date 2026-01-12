@@ -27,13 +27,39 @@ Use these subsystems - don't reimplement.
 
 ## Attempt {{ attemptCount }} of 5
 
-{% if critiqueList %}
-### TDD Feedback
+{% if mergeRejections or childFailures or codeReviews %}
+### Feedback from Previous Attempts
 
-{% for c in critiqueList %}
-- **{{ c.file }}:{{ c.line }}** — {{ c.issue }}
-  Fix: {{ c.requiredFix }}
+{% if mergeRejections %}
+#### Merge Rejections
+
+{% for mr in mergeRejections %}
+- **Attempt {{ mr.attemptNumber }}**: {{ mr.reason }} - {{ mr.details }}
+  {% if mr.failingTests %}
+  Failed tests: {{ mr.failingTests | join(", ") }}
+  {% endif %}
 {% endfor %}
+{% endif %}
+
+{% if childFailures %}
+#### Child Task Failures
+
+{% for cf in childFailures %}
+- **{{ cf.childId }}** ({{ cf.attempts }} attempts): {{ cf.reason }}
+  {% if cf.partialCommit %}
+  Last commit: {{ cf.partialCommit }}
+  {% endif %}
+{% endfor %}
+{% endif %}
+
+{% if codeReviews %}
+#### Code Review Feedback
+
+{% for cr in codeReviews %}
+- **{{ cr.file }}:{{ cr.line }}** — {{ cr.issue }}
+  Fix: {{ cr.requiredFix }}
+{% endfor %}
+{% endif %}
 {% endif %}
 
 ---

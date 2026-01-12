@@ -17,6 +17,7 @@ module TypesFirstDev.Types.Nodes
   , TDDReviewImplInput(..)
   , TDDReviewImplExit(..)
     -- * Impl
+  , RetryFeedback(..)
   , ImplInput(..)
   , ImplExit(..)
     -- * Merger
@@ -42,6 +43,7 @@ import TypesFirstDev.Types.Shared
   ( PlannedTest, Critique, NodeInfo, CoverageReport
   , ChildSpec, InterfaceFile, ImpactLevel, ChangeEntry
   , ClarificationRequest
+  , MergeRejectionFeedback, ChildFailureFeedback, CodeReviewFeedback
   )
 import TypesFirstDev.Types.Payloads
   ( InitWorkPayload, TestsReadyPayload, ImplResult
@@ -139,7 +141,6 @@ data TDDReviewImplInput = TDDReviewImplInput
   { triSpec       :: Spec             -- ^ Work specification
   , triScaffold   :: InitWorkPayload  -- ^ Scaffold output
   , triImplResult :: ImplResult       -- ^ Implementation result to review
-  , triDiff       :: Text             -- ^ Diff of implementation changes
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON, StructuredOutput)
@@ -170,15 +171,31 @@ instance ClaudeCodeSchema TDDReviewImplExit where
 -- IMPL
 -- ════════════════════════════════════════════════════════════════════════════
 
+-- | Retry feedback context - passed when retrying after a failed strategy.
+-- Distinct from file-based code critiques: this is metadata about the retry attempt itself.
+-- Prefix: rf
+data RetryFeedback = RetryFeedback
+  { rfAttemptNumber :: Int        -- ^ What attempt number we're on (1-indexed from user perspective)
+  , rfStrategyFailed :: Text      -- ^ Strategy that was tried and didn't work
+  , rfStrategyNext :: Text        -- ^ Strategy to try instead
+  , rfDiagnosis :: Text           -- ^ Why the LLM thinks it failed
+  , rfFailingTests :: [Text]      -- ^ Which tests are still failing
+  }
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
+
 -- | Impl node input.
 -- Prefix: ii
 data ImplInput = ImplInput
-  { iiSpec         :: Spec                   -- ^ Work specification
-  , iiScaffold     :: InitWorkPayload        -- ^ Scaffold output
-  , iiTestsReady   :: TestsReadyPayload      -- ^ TDD test readiness payload
-  , iiChildMerges  :: Maybe [MergeComplete]  -- ^ Child merge results if any
-  , iiAttemptCount :: Int                    -- ^ Current attempt number
-  , iiCritiqueList :: Maybe [Critique]       -- ^ TDD critiques to address
+  { iiSpec                :: Spec                          -- ^ Work specification
+  , iiScaffold            :: InitWorkPayload               -- ^ Scaffold output
+  , iiTestsReady          :: TestsReadyPayload             -- ^ TDD test readiness payload
+  , iiChildMerges         :: Maybe [MergeComplete]         -- ^ Child merge results if any
+  , iiAttemptCount        :: Int                           -- ^ Current attempt number
+  , iiRetryFeedback       :: Maybe RetryFeedback           -- ^ Retry context (when retrying after failed strategy)
+  , iiMergeRejections     :: Maybe [MergeRejectionFeedback]  -- ^ Feedback from merge rejections
+  , iiChildFailures       :: Maybe [ChildFailureFeedback]    -- ^ Feedback from child task failures
+  , iiCodeReviews         :: Maybe [CodeReviewFeedback]      -- ^ Semantic code review feedback
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON, StructuredOutput)

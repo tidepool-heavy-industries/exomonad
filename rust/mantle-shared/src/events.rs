@@ -39,6 +39,116 @@ pub struct ToolCall {
 }
 
 // ============================================================================
+// Exit Code Semantics
+// ============================================================================
+
+/// Documents the semantics of process exit codes.
+///
+/// This enum is for documentation purposes - it defines the contract between
+/// mantle and Haskell for interpreting exit codes. The Haskell orchestrator
+/// should use these semantics to decide on retry behavior and error reporting.
+///
+/// # Exit Code Categories
+///
+/// - **0**: Success - task completed normally
+/// - **1**: General error from Claude Code (check stderr/result for details)
+/// - **2**: Auth/setup failure - human intervention required, don't retry
+/// - **124**: Timeout (from `timeout` command) - may retry with longer timeout
+/// - **125**: Docker error (container failed to start)
+/// - **126**: Command not executable - missing dependencies or permissions
+/// - **127**: Command not found - claude binary missing from container
+/// - **137**: SIGKILL (128 + 9) - OOM killer or external termination
+/// - **143**: SIGTERM (128 + 15) - graceful termination requested
+///
+/// # Retry Guidance
+///
+/// | Exit Code | Retry? | Reason |
+/// |-----------|--------|--------|
+/// | 0 | N/A | Success |
+/// | 1 | Maybe | Depends on error content |
+/// | 2 | No | Auth/setup needs human fix |
+/// | 124 | Maybe | Timeout - try longer timeout |
+/// | 125 | No | Docker misconfigured |
+/// | 126 | No | Missing dependencies |
+/// | 127 | No | Binary missing |
+/// | 137 | Maybe | OOM - try with less context |
+/// | 143 | No | Intentionally terminated |
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(i32)]
+pub enum ExitReason {
+    /// Task completed successfully.
+    Success = 0,
+    /// General error from Claude Code.
+    GeneralError = 1,
+    /// Authentication or setup failure (e.g., expired token, invalid API key).
+    /// Human intervention required - do not retry automatically.
+    AuthSetupFailed = 2,
+    /// Timeout from `timeout` command wrapper.
+    /// May retry with increased timeout.
+    Timeout = 124,
+    /// Docker container failed to run (e.g., image not found, daemon error).
+    DockerError = 125,
+    /// Command found but not executable (permission denied, missing deps).
+    CommandNotExecutable = 126,
+    /// Command not found (claude binary missing from PATH).
+    CommandNotFound = 127,
+    /// Process killed by SIGKILL (likely OOM killer or hard timeout).
+    /// May retry with reduced context size.
+    Killed = 137,
+    /// Process terminated by SIGTERM (graceful shutdown requested).
+    Terminated = 143,
+}
+
+impl ExitReason {
+    /// Interpret an exit code into a reason, if known.
+    pub fn from_code(code: i32) -> Option<Self> {
+        match code {
+            0 => Some(Self::Success),
+            1 => Some(Self::GeneralError),
+            2 => Some(Self::AuthSetupFailed),
+            124 => Some(Self::Timeout),
+            125 => Some(Self::DockerError),
+            126 => Some(Self::CommandNotExecutable),
+            127 => Some(Self::CommandNotFound),
+            137 => Some(Self::Killed),
+            143 => Some(Self::Terminated),
+            _ => None,
+        }
+    }
+
+    /// Whether this exit reason suggests retrying might help.
+    pub fn is_retriable(&self) -> bool {
+        matches!(self, Self::Timeout | Self::Killed)
+    }
+
+    /// Whether this exit reason requires human intervention.
+    pub fn needs_human(&self) -> bool {
+        matches!(
+            self,
+            Self::AuthSetupFailed
+                | Self::DockerError
+                | Self::CommandNotExecutable
+                | Self::CommandNotFound
+        )
+    }
+
+    /// Human-readable description of the exit reason.
+    pub fn description(&self) -> &'static str {
+        match self {
+            Self::Success => "Task completed successfully",
+            Self::GeneralError => "Claude Code exited with error",
+            Self::AuthSetupFailed => "Authentication or setup failure (check credentials)",
+            Self::Timeout => "Process timed out",
+            Self::DockerError => "Docker container failed to start",
+            Self::CommandNotExecutable => "Command not executable (missing dependencies)",
+            Self::CommandNotFound => "Claude binary not found",
+            Self::Killed => "Process killed (OOM or external termination)",
+            Self::Terminated => "Process terminated (SIGTERM)",
+        }
+    }
+}
+
+// ============================================================================
 // Stream Event Types (for parsing Claude Code's stream-json output)
 // ============================================================================
 
@@ -183,10 +293,17 @@ pub struct RunResult {
     /// Populated when Claude calls a `decision::*` tool.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_calls: Option<Vec<ToolCall>>,
+    /// Stderr output from Claude Code process.
+    /// Captured when process exits with error for debugging auth/setup failures.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stderr_output: Option<String>,
 }
 
 impl RunResult {
     /// Build a RunResult from collected events and process exit status.
+    ///
+    /// When `stderr_output` is provided and there's no result event, it will be
+    /// included in the error message to help diagnose auth/setup failures.
     pub fn from_events(
         events: Vec<StreamEvent>,
         result_event: Option<ResultEvent>,
@@ -194,6 +311,7 @@ impl RunResult {
         session_tag: Option<String>,
         interrupts: Vec<InterruptSignal>,
         tool_calls: Option<Vec<ToolCall>>,
+        stderr_output: Option<String>,
     ) -> Self {
         // Extract session_id from init event
         let session_id = events
@@ -208,10 +326,19 @@ impl RunResult {
             .or_else(|| result_event.as_ref().and_then(|r| r.session_id.clone()))
             .unwrap_or_else(|| "unknown".to_string());
 
+        // Build error message for failures
+        let (is_error, result) = if let Some(ref re) = result_event {
+            (re.is_error, re.result.clone())
+        } else {
+            // No result event - this is an error. Build informative message.
+            let error_msg = Self::build_failure_message(exit_code, stderr_output.as_deref());
+            (true, Some(error_msg))
+        };
+
         let result_event = result_event.unwrap_or_else(|| ResultEvent {
             subtype: "error".to_string(),
             is_error: true,
-            result: Some("No result event received".to_string()),
+            result: None, // We use our own error message
             session_id: Some(session_id.clone()),
             total_cost_usd: None,
             num_turns: None,
@@ -222,8 +349,8 @@ impl RunResult {
 
         RunResult {
             exit_code,
-            is_error: result_event.is_error,
-            result: result_event.result.clone(),
+            is_error,
+            result,
             structured_output: result_event.structured_output.clone(),
             session_id,
             session_tag,
@@ -234,7 +361,35 @@ impl RunResult {
             model_usage: result_event.model_usage.clone(),
             interrupts,
             tool_calls,
+            stderr_output,
         }
+    }
+
+    /// Build an informative failure message from exit code and stderr.
+    fn build_failure_message(exit_code: i32, stderr: Option<&str>) -> String {
+        let exit_hint = ExitReason::from_code(exit_code)
+            .map(|r| r.description())
+            .unwrap_or("Claude Code exited with unexpected error");
+
+        // Extract last N lines of stderr for the error message
+        let stderr_excerpt = stderr
+            .map(|s| {
+                let lines: Vec<&str> = s.lines().collect();
+                let last_lines: Vec<&str> = lines.iter().rev().take(10).rev().copied().collect();
+                if last_lines.is_empty() {
+                    String::new()
+                } else {
+                    format!("\n\nStderr (last {} lines):\n{}", last_lines.len(), last_lines.join("\n"))
+                }
+            })
+            .unwrap_or_default();
+
+        format!(
+            "{} (exit code {}){}",
+            exit_hint,
+            exit_code,
+            stderr_excerpt
+        )
     }
 }
 
@@ -359,6 +514,7 @@ mod tests {
             model_usage: HashMap::new(),
             interrupts: vec![],
             tool_calls: None,
+            stderr_output: None,
         };
 
         let json = serde_json::to_string(&result).unwrap();
@@ -389,6 +545,7 @@ mod tests {
             model_usage: HashMap::new(),
             interrupts: vec![],
             tool_calls: None,
+            stderr_output: None,
         };
 
         let json = serde_json::to_string(&result).unwrap();
@@ -422,6 +579,7 @@ mod tests {
                 reason: Some("Missing Foo type".to_string()),
             }],
             tool_calls: None,
+            stderr_output: None,
         };
 
         let json = serde_json::to_string(&result).unwrap();
@@ -443,5 +601,70 @@ mod tests {
         assert!(json.contains("\"reason\":\"Need human review\""));
         // state should be omitted when None
         assert!(!json.contains("\"state\""));
+    }
+
+    #[test]
+    fn test_build_failure_message_exit_code_2() {
+        let msg = RunResult::build_failure_message(2, None);
+        assert!(msg.contains("exit code 2"));
+        assert!(msg.contains("Authentication or setup failure"));
+    }
+
+    #[test]
+    fn test_build_failure_message_with_stderr() {
+        let stderr = "Error: Invalid API key\nPlease run 'claude auth login'";
+        let msg = RunResult::build_failure_message(2, Some(stderr));
+        assert!(msg.contains("exit code 2"));
+        assert!(msg.contains("Invalid API key"));
+        assert!(msg.contains("Stderr"));
+    }
+
+    #[test]
+    fn test_from_events_no_result_includes_stderr() {
+        let events = vec![];
+        let stderr = "Auth failed: token expired".to_string();
+        let result = RunResult::from_events(
+            events,
+            None, // No result event - simulates crash
+            2,    // Exit code 2 = auth failure
+            None,
+            vec![],
+            None,
+            Some(stderr),
+        );
+
+        assert!(result.is_error);
+        assert_eq!(result.exit_code, 2);
+        assert!(result.result.as_ref().unwrap().contains("Authentication or setup failure"));
+        assert!(result.result.as_ref().unwrap().contains("token expired"));
+        assert_eq!(result.stderr_output, Some("Auth failed: token expired".to_string()));
+    }
+
+    #[test]
+    fn test_from_events_with_result_event_doesnt_override() {
+        // When there IS a result event, we should use its is_error and result
+        let result_event = ResultEvent {
+            subtype: "success".to_string(),
+            is_error: false,
+            result: Some("Task completed".to_string()),
+            session_id: Some("abc".to_string()),
+            total_cost_usd: Some(0.1),
+            num_turns: Some(5),
+            structured_output: None,
+            permission_denials: vec![],
+            model_usage: HashMap::new(),
+        };
+        let result = RunResult::from_events(
+            vec![],
+            Some(result_event),
+            0,
+            None,
+            vec![],
+            None,
+            None,
+        );
+
+        assert!(!result.is_error);
+        assert_eq!(result.result, Some("Task completed".to_string()));
     }
 }

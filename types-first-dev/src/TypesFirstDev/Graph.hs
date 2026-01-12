@@ -74,15 +74,15 @@ import TypesFirstDev.Templates
 
 -- | TDD workflow graph.
 --
--- 7 nodes organized into phases:
+-- 7 nodes in the recursive TDD cycle:
 --
--- * Phase 1: Scaffold (decomposes spec, spawns children via Subgraph)
--- * Phase 2: TDDWriteTests (writes failing tests)
--- * Phase 3: ImplBarrier (collects child results via Subgraph.awaitAny)
--- * Phase 4: Impl (makes tests pass, self-loop retry)
--- * Phase 5: TDDReviewImpl (reviews impl, routes to Merger or MoreTests)
--- * Phase 6: Merger (files MR to parent)
--- * Phase 7: Rebaser (adapts to sibling changes)
+-- * Scaffold: Analyzes spec, decomposes into children if needed (spawns via Subgraph)
+-- * TDDWriteTests: Generates failing tests from acceptance criteria
+-- * ImplBarrier: Collects child graph results (blocks on Subgraph.awaitAny)
+-- * Impl: Makes tests pass via iterative coding (self-loop retry up to N attempts)
+-- * TDDReviewImpl: Reviews implementation quality, routes to Merger or back to tests
+-- * Merger: Packages work into MR for parent integration
+-- * Rebaser: Adapts to sibling changes when parallel children complete
 --
 -- Key features:
 -- * Subgraph effect for child spawning (Scaffold) and collection (ImplBarrier)

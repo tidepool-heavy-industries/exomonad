@@ -309,6 +309,36 @@ When `--hub-session-id` is provided (graph tracking mode):
 - Hub session not found returns helpful message
 - All validation errors use `StartError::Validation` for consistent handling
 
+## Error Handling
+
+When Claude Code fails (auth issues, missing deps, crashes), mantle provides detailed error information:
+
+**Exit Code Interpretation:**
+| Exit Code | Meaning |
+|-----------|---------|
+| 0 | Success (no result event = possible Claude bug #1920) |
+| 1 | General error from Claude Code |
+| 2 | Auth/setup failure (e.g., token expired, invalid API key) |
+| 126 | Command not executable (missing deps or permissions) |
+| 127 | Command not found (claude binary missing) |
+| 137 | Process killed (OOM or timeout) |
+
+**Error Fields:**
+- `stderr_output`: Raw stderr captured when `exit_code != 0` (for debugging)
+- `error`: User-friendly error message combining exit code hint + stderr excerpt
+- `is_error`: Boolean flag for error state
+- `result`: May contain structured error info from Claude Code
+
+**Example Error Output:**
+```json
+{
+  "exit_code": 2,
+  "is_error": true,
+  "error": "Claude Code failed to start (likely auth or setup issue) (exit code 2)\n\nStderr (last 2 lines):\nError: Invalid API key\nPlease run 'claude auth login'",
+  "stderr_output": "Error: Invalid API key\nPlease run 'claude auth login'"
+}
+```
+
 ## Sanitization
 
 All string output is sanitized to remove control characters that would break JSON parsing on the Haskell side. This handles:

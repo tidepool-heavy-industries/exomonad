@@ -65,6 +65,8 @@ import Data.Time.Clock (getCurrentTime, diffUTCTime)
 import System.Exit (ExitCode(..))
 import System.IO (hFlush, stdout)
 import System.Process (readProcessWithExitCode, readCreateProcessWithExitCode, proc, CreateProcess(..), StdStream(..))
+import System.Random (randomRIO)
+import Numeric (showHex)
 
 import Tidepool.Effect.Session
   ( Session(..)
@@ -145,9 +147,9 @@ startSessionIO config slug prompt model schema tools = do
         , "--slug", T.unpack slug
         , "--prompt", T.unpack prompt
         , "--model", modelToArg model
-        ] <> schemaArg schema <> toolsArg tools
+        ] <> schemaArg schema
 
-  runMantleSession config args
+  runMantleSession config args tools
 
 
 -- | Continue an existing session.
@@ -159,9 +161,9 @@ continueSessionIO config sid prompt schema tools = do
         [ "session", "continue"
         , T.unpack sid.unSessionId
         , "--prompt", T.unpack prompt
-        ] <> schemaArg schema <> toolsArg tools
+        ] <> schemaArg schema
 
-  runMantleSession config args
+  runMantleSession config args tools
 
 
 -- | Fork a session (child inherits parent's history).
@@ -177,9 +179,9 @@ forkSessionIO config parent childSlug childPrompt schema tools = do
         , T.unpack parent.unSessionId
         , "--child-slug", T.unpack childSlug
         , "--child-prompt", T.unpack childPrompt
-        ] <> schemaArg schema <> toolsArg tools
+        ] <> schemaArg schema
 
-  runMantleSession config args
+  runMantleSession config args tools
 
 
 -- | Query session metadata.
@@ -218,16 +220,32 @@ sessionInfoIO config sid = do
 -- All session operations (start, continue, fork) return SessionOutput.
 -- On failure, returns a SessionOutput with error details.
 --
+-- Decision tools are passed via temporary file (--decision-tools-file).
+-- Temp files are cleaned up by the OS and should not be manually deleted.
+--
 -- Inherits stderr so stream-json output is visible in real-time.
-runMantleSession :: SessionConfig -> [String] -> IO SessionOutput
-runMantleSession config args = do
+runMantleSession :: SessionConfig -> [String] -> Maybe Value -> IO SessionOutput
+runMantleSession config args mtools = do
+  -- Generate temp file path and write tools if provided
+  toolsArgs <- case mtools of
+    Nothing -> pure []
+    Just tools -> do
+      rand <- randomRIO (0 :: Int, 0xFFFFFF)
+      let uuid = showHex rand ""
+          tempFile = "/tmp/mantle-tools-" <> uuid <> ".json"
+      let toolsJson = BSC.unpack $ LBS.toStrict $ encode tools
+      writeFile tempFile toolsJson
+      pure ["--decision-tools-file", tempFile]
+
+  let finalArgs = args <> toolsArgs
+
   -- Log command before execution
-  putStrLn $ "[SESSION] Running: " <> config.scMantlePath <> " " <> unwords args
+  putStrLn $ "[SESSION] Running: " <> config.scMantlePath <> " " <> unwords finalArgs
   hFlush stdout
 
   startTime <- getCurrentTime
   result <- try @SomeException $ readCreateProcessWithExitCode
-    (proc config.scMantlePath args) { std_err = Inherit }
+    (proc config.scMantlePath finalArgs) { std_err = Inherit }
     ""
   endTime <- getCurrentTime
   let duration = realToFrac (diffUTCTime endTime startTime) :: Double
@@ -281,15 +299,6 @@ schemaArg (Just schema) =
   ["--json-schema", BSC.unpack $ LBS.toStrict $ encode schema]
 
 
--- | Decision tools argument if provided.
---
--- Encodes the Value (expected to be a JSON array of tool definitions)
--- to compact JSON and passes via @--decision-tools@.
-toolsArg :: Maybe Value -> [String]
-toolsArg Nothing = []
-toolsArg (Just tools) =
-  ["--decision-tools", BSC.unpack $ LBS.toStrict $ encode tools]
-
 
 -- | Escape control characters in JSON string values.
 --
@@ -327,14 +336,14 @@ escapeControlChars = go False False
       '\t' -> "\\t"
       '\b' -> "\\b"
       '\f' -> "\\f"
-      _    -> "\\u" <> pad4 (showHex (ord c) "")
+      _    -> "\\u" <> pad4 (localShowHex (ord c) "")
 
     -- Pad hex to 4 digits
     pad4 s = replicate (4 - length s) '0' <> s
 
-    showHex n acc
+    localShowHex n acc
       | n < 16    = hexDigit n : acc
-      | otherwise = showHex (n `div` 16) (hexDigit (n `mod` 16) : acc)
+      | otherwise = localShowHex (n `div` 16) (hexDigit (n `mod` 16) : acc)
 
     hexDigit n
       | n < 10    = toEnum (fromEnum '0' + n)
@@ -359,4 +368,5 @@ errorOutput errMsg = SessionOutput
   , soDurationSecs = 0
   , soError = Just errMsg
   , soToolCalls = Nothing
+  , soStderrOutput = Nothing
   }

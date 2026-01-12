@@ -15,7 +15,7 @@
 --   runM . runSessionIO . runReader . runGraphContext . runMemoryIO . runMemoryIO . runSubgraph
 --
 -- Note: Build and Worktree operations are handled by system infrastructure
--- (mantle, git, cabal). Not exposed as effects in Phase 8.
+-- (mantle, git, cabal). Not exposed as effects to handlers.
 module TypesFirstDev.V3.Interpreters
   ( V3Effects
   , V3Result(..)
@@ -57,7 +57,7 @@ data WorktreeConfig = WorktreeConfig
     -- ^ Parent git branch (e.g., "main")
   } deriving (Show, Eq, Generic, FromJSON, ToJSON)
 
--- | V3 execution result (simplified for Phase 8)
+-- | V3 execution result.
 data V3Result = V3Success | V3Failure Text
   deriving (Show, Eq)
 
