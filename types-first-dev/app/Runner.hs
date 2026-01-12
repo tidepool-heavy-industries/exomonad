@@ -7,14 +7,18 @@
 -- Executes the single-node recursive Work graph.
 --
 -- Flow: Work → (Spawn/Continue/AwaitNext) → Work → ... → Complete
+--
+-- Produces RunTree output for post-run analysis.
 module Main (main) where
 
 import Control.Monad (unless)
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.IO as TIO
+import Data.Time (getCurrentTime)
 import Data.Yaml (decodeFileThrow)
 import System.Environment (getArgs)
-import System.Directory (getCurrentDirectory, doesFileExist)
+import System.Directory (getCurrentDirectory, doesFileExist, createDirectoryIfMissing)
 import System.IO (hFlush, stdout)
 import System.Exit (exitFailure)
 import Text.Printf (printf)
@@ -28,6 +32,9 @@ import TypesFirstDev.WorkInterpreters (runWorkEffects, WorkConfig(..))
 import TypesFirstDev.WorkExecutor (runWork)
 import TypesFirstDev.WorkHandlersAssembled (workHandlers)
 import TypesFirstDev.WorkGraph (WorkGraph(..))
+import TypesFirstDev.RunTree (RunTree(..))
+import TypesFirstDev.Effect.RunTreeLog (newNodeBuilder, freezeNode)
+import TypesFirstDev.RunTree.Render (renderRunTree, writeRunTree)
 
 -- | Application-level result type
 data RunnerResult = RunnerSuccess WorkResult | RunnerFailure Text
@@ -55,13 +62,21 @@ printResult result = do
       printf "  Reason: %s\n" (T.unpack reason)
 
 -- | Run the Work graph with effect interpreter chain.
-runWorkGraph :: Spec -> WorkConfig -> IO WorkResult
+--
+-- Returns both the WorkResult and the RunTree for post-run analysis.
+runWorkGraph :: Spec -> WorkConfig -> IO (WorkResult, RunTree)
 runWorkGraph spec config = do
-  -- Set up Subgraph with recursive wiring
-  withRecursiveGraph @WorkInput @WorkResult $ \subgraphState wire -> do
+  startTime <- getCurrentTime
+
+  -- Create root node builder for execution logging
+  rootBuilder <- newNodeBuilder spec.sDescription 0
+
+  result <- withRecursiveGraph @WorkInput @WorkResult $ \subgraphState wire -> do
     -- Wire the recursive graph runner - children spawn with WorkInput
+    -- Each child gets its own NodeBuilder
     wire $ \childInput -> do
-      runWorkEffects subgraphState childInput config $
+      childBuilder <- newNodeBuilder childInput.wiSpec.sDescription childInput.wiDepth
+      runWorkEffects subgraphState childBuilder childInput config $
         runWork
           (callHandler (wgWork workHandlers))
           childInput
@@ -74,11 +89,24 @@ runWorkGraph spec config = do
           , wiParentInfo = Nothing  -- Root has no parent
           }
 
-    -- Run root graph
-    runWorkEffects subgraphState rootInput config $
+    -- Run root graph with root builder
+    runWorkEffects subgraphState rootBuilder rootInput config $
       runWork
         (callHandler (wgWork workHandlers))
         rootInput
+
+  -- Freeze the execution tree
+  endTime <- getCurrentTime
+  rootNode <- freezeNode rootBuilder
+
+  let tree = RunTree
+        { rtSpec = spec
+        , rtStartTime = startTime
+        , rtEndTime = Just endTime
+        , rtRoot = rootNode
+        }
+
+  pure (result, tree)
 
 -- | Main entry point
 main :: IO ()
@@ -126,5 +154,18 @@ main = do
             }
 
       -- Run the graph
-      result <- runWorkGraph spec config
+      (result, tree) <- runWorkGraph spec config
       printResult (RunnerSuccess result)
+
+      -- Output the execution tree
+      putStrLn ""
+      putStrLn "════════════════════════════════════════════════════════════════"
+      putStrLn "  Execution Tree"
+      putStrLn "════════════════════════════════════════════════════════════════"
+      TIO.putStrLn (renderRunTree tree)
+
+      -- Write tree to output directory
+      let outputDir = targetDir <> "/.mantle/runs"
+      createDirectoryIfMissing True outputDir
+      writeRunTree outputDir tree
+      putStrLn $ "Run tree written to: " <> outputDir

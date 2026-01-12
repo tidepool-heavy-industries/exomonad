@@ -30,6 +30,8 @@ import Tidepool.Graph.Memory (Memory, evalMemory)
 
 import TypesFirstDev.Types.Work (WorkInput, WorkResult)
 import TypesFirstDev.WorkHandlers (WorkMem, emptyWorkMem)
+import TypesFirstDev.Effect.RunTreeLog (RunTreeLog, NodeBuilder, runRunTreeLog)
+import TypesFirstDev.Effect.GitQuery (GitQuery, runGitQuery)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TYPES
@@ -53,10 +55,13 @@ data WorkConfig = WorkConfig
 --
 -- Includes Memory effect for WorkMem to track state across self-loops.
 -- Children are spawned with WorkInput and return WorkResult.
+-- RunTreeLog captures execution events for post-run analysis.
 type WorkEffects =
   '[ Session
    , GraphContext WorkInput  -- Entry value for getEntry in handlers
    , Memory WorkMem          -- State across self-loops
+   , RunTreeLog              -- Execution event logging
+   , GitQuery                -- Git repository state queries
    , Subgraph WorkInput WorkResult
    , IO
    ]
@@ -71,17 +76,21 @@ type WorkEffects =
 -- 1. Session for Claude Code (innermost)
 -- 2. GraphContext for entry access
 -- 3. Memory for WorkMem state
--- 4. Subgraph for child spawning
--- 5. IO (outermost)
+-- 4. RunTreeLog for execution event capture
+-- 5. Subgraph for child spawning
+-- 6. IO (outermost)
 runWorkEffects
   :: SubgraphState WorkInput WorkResult
-  -> WorkInput  -- Entry value for GraphContext
+  -> NodeBuilder  -- Mutable tree builder for execution logging
+  -> WorkInput    -- Entry value for GraphContext
   -> WorkConfig
   -> Eff WorkEffects a
   -> IO a
-runWorkEffects subgraphState entryInput config action =
+runWorkEffects subgraphState nodeBuilder entryInput config action =
   runM
     . runSubgraph subgraphState
+    . runGitQuery
+    . runRunTreeLog nodeBuilder
     . evalMemory emptyWorkMem
     . runGraphContext entryInput
     . runSessionIO (defaultSessionConfig config.wcBaseDir)

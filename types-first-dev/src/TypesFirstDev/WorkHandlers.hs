@@ -36,6 +36,9 @@ import Tidepool.Graph.Types (Exit)
 import TypesFirstDev.WorkContext (WorkTemplateCtx(..), CompletedChildCtx(..), ChildOutcome(..), mkCompletedChild)
 import TypesFirstDev.Types.Work
 import TypesFirstDev.Types.Core (Spec(..))
+import TypesFirstDev.Effect.RunTreeLog (RunTreeLog, logDecision, logChildSpawned, logChildComplete, logNodeComplete, logSessionInfo, logSessionOp, logCommit)
+import TypesFirstDev.Effect.GitQuery (GitQuery, queryGitStatus, GitStatus(..))
+import TypesFirstDev.RunTree (SessionOpType(..), Commit(..))
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- MEMORY STATE
@@ -48,12 +51,14 @@ import TypesFirstDev.Types.Core (Spec(..))
 -- - Completed children
 -- - Last session info for continuation (includes worktree/branch for stateless mantle)
 -- - Child directives for correlation
+-- - Git state for commit tracking
 data WorkMem = WorkMem
   { wmSessionInfo     :: Maybe SessionInfo             -- ^ Last session info for continuation
   , wmPendingCount    :: Int                           -- ^ Number of children still running
   , wmCompleted       :: [CompletedChildCtx]           -- ^ All completed children
   , wmLastCompleted   :: Maybe CompletedChildCtx       -- ^ Most recently completed child
   , wmChildDirectives :: M.Map ChildId Text            -- ^ ChildId -> directive for lookup
+  , wmBeforeCommit    :: Maybe Text                    -- ^ HEAD hash before LLM call (for commit tracking)
   }
   deriving stock (Show, Eq)
 
@@ -65,6 +70,7 @@ emptyWorkMem = WorkMem
   , wmCompleted = []
   , wmLastCompleted = Nothing
   , wmChildDirectives = M.empty
+  , wmBeforeCommit = Nothing
   }
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -77,14 +83,21 @@ emptyWorkMem = WorkMem
 -- - Fresh: no completed children, no pending
 -- - After Spawn: pending > 0, no completed yet
 -- - After AwaitNext: lastCompleted populated, pending decremented
+--
+-- Also captures git HEAD before LLM call for commit tracking.
 workBefore
   :: ( Member Session es
      , Member (Memory WorkMem) es
+     , Member GitQuery es
      )
   => WorkInput
   -> Eff es (WorkTemplateCtx, SessionOperation)
 workBefore input = do
   mem <- getMem @WorkMem
+
+  -- Capture git state before LLM call for commit tracking
+  gitStatus <- queryGitStatus input.wiSpec.sTargetPath
+  updateMem @WorkMem $ \m -> m { wmBeforeCommit = Just gitStatus.gsHeadHash }
 
   let ctx = WorkTemplateCtx
         { spec = input.wiSpec
@@ -133,20 +146,51 @@ workBefore input = do
 -- - Complete: exit graph
 --
 -- Receives ClaudeCodeResult which includes worktree/branch for stateless continuation.
+-- Also detects and logs any git commits made during the LLM call.
 workAfter
   :: ( Member Session es
      , Member (Subgraph WorkInput WorkResult) es
      , Member (GraphContext WorkInput) es
      , Member (Memory WorkMem) es
+     , Member RunTreeLog es
+     , Member GitQuery es
      )
   => (ClaudeCodeResult WorkExit, SessionId)
   -> Eff es (GotoChoice '[To "wgWork" WorkInput, To Exit WorkResult])
 workAfter (result, _sid) = do
   entry <- getEntry @WorkInput
+  mem <- getMem @WorkMem
 
   -- Store session info (id, worktree, branch) for continuation
   let sessionInfo = SessionInfo result.ccrSessionId result.ccrWorktree result.ccrBranch
   updateMem @WorkMem $ \m -> m { wmSessionInfo = Just sessionInfo }
+
+  -- Check for commits made during LLM call
+  gitStatusAfter <- queryGitStatus entry.wiSpec.sTargetPath
+  case mem.wmBeforeCommit of
+    Just beforeHash | beforeHash /= gitStatusAfter.gsHeadHash -> do
+      -- New commit detected - log it
+      let commit = Commit
+            { cHash = gitStatusAfter.gsHeadHash
+            , cMessage = gitStatusAfter.gsHeadMessage
+            , cFiles = []  -- Could be populated via git diff-tree if needed
+            }
+      logCommit commit
+    _ -> pure ()
+
+  -- Clear before commit for next iteration
+  updateMem @WorkMem $ \m -> m { wmBeforeCommit = Nothing }
+
+  -- Determine and log session operation type
+  let sessionOp = case (entry.wiParentInfo, mem.wmSessionInfo) of
+        (Just _, _)       -> OpFork ("child-" <> T.take 8 entry.wiSpec.sId)
+        (_, Just _)       -> OpContinue
+        (Nothing, Nothing) -> OpFresh "work"
+  logSessionOp sessionOp
+
+  -- Log session info and decision for RunTree
+  logSessionInfo sessionInfo
+  logDecision result.ccrParsedOutput
 
   case result.ccrParsedOutput of
     Continue -> do
@@ -163,6 +207,8 @@ workAfter (result, _sid) = do
               , wiParentInfo = Just sessionInfo  -- Pass parent session info for fork-based inheritance
               }
         handle <- spawnSelf @WorkInput @WorkResult childInput
+        -- Log child spawn for RunTree
+        logChildSpawned handle.chId childSpec
         -- Store directive for lookup when child completes
         updateMem @WorkMem $ \m -> m
           { wmChildDirectives = M.insert handle.chId childSpec.csDirective m.wmChildDirectives
@@ -185,6 +231,8 @@ workAfter (result, _sid) = do
           pure $ gotoChoice @"wgWork" entry
 
     Complete { weCommitHash = commitHash } -> do
+      -- Log node completion for RunTree
+      logNodeComplete (ChildSuccess commitHash)
       -- Exit graph with result
       pure $ gotoExit (WorkResult commitHash)
 
@@ -195,6 +243,7 @@ workAfter (result, _sid) = do
 awaitAndLoop
   :: ( Member (Subgraph WorkInput WorkResult) es
      , Member (Memory WorkMem) es
+     , Member RunTreeLog es
      )
   => WorkInput
   -> Eff es (GotoChoice '[To "wgWork" WorkInput, To Exit WorkResult])
@@ -210,6 +259,9 @@ awaitAndLoop entry = do
   let childOutcome = case outcome of
         Right childResult -> ChildSuccess { coCommitHash = childResult.wrCommitHash }
         Left err -> ChildFailure { coErrorMessage = err.ceMessage, coErrorDetails = err.ceDetails }
+
+  -- Log child completion for RunTree (with directive for correlation)
+  logChildComplete childId directive childOutcome
 
   let completed = mkCompletedChild directive childOutcome
 

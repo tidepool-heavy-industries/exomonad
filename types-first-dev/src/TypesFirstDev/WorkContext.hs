@@ -20,7 +20,7 @@ module TypesFirstDev.WorkContext
   ) where
 
 import Control.Monad.Writer (Writer)
-import Data.Aeson (ToJSON)
+import Data.Aeson (FromJSON, ToJSON)
 import Data.Text (Text)
 import GHC.Generics (Generic)
 import Text.Ginger.GVal (ToGVal(..), dict, list)
@@ -42,7 +42,7 @@ data ChildOutcome
   = ChildSuccess { coCommitHash :: Text }
   | ChildFailure { coErrorMessage :: Text, coErrorDetails :: Maybe Text }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (ToJSON)
+  deriving anyclass (FromJSON, ToJSON)
 
 instance ToGVal GingerM ChildOutcome where
   -- All fields present in both cases (null for non-applicable) for typed template compatibility
