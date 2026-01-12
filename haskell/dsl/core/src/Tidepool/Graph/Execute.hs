@@ -50,6 +50,7 @@ module Tidepool.Graph.Execute
   ) where
 
 import Control.Monad (when)
+import Debug.Trace (trace)
 import Data.Aeson (Value, toJSON)
 import Data.Kind (Constraint, Type)
 import Data.Maybe (fromMaybe)
@@ -454,15 +455,13 @@ executeClaudeCodeHandler mSystemTpl userTpl beforeFn afterFn input = do
         Just _ -> do
           -- Sum type: parse from tool calls
           case result.soToolCalls of
-            Just [tc] ->
-              -- Got exactly one tool call, parse it
+            Just (tc:rest) ->
+              -- Got at least one tool call, take the first
+              -- (Claude sometimes calls multiple despite "STOP NOW"; ignore subsequent)
+              trace ("[DECISION] Taking first of " <> show (1 + length rest) <> " decision tool calls") $
               case ccParseToolCall @s (convertToolCall tc) of
                 Right output -> afterFn_ (ClaudeCodeResult output ccSessionId result.soWorktree result.soBranch, ccSessionId)
                 Left err -> error $ "ClaudeCode decision tool parse error: " <> err
-
-            Just (_:_:_) ->
-              -- Multiple decision tools called - ambiguous
-              error "ClaudeCode: multiple decision tools called in one turn; exactly one is required"
 
             _ ->
               -- No tool call - nag and retry
