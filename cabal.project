@@ -36,7 +36,6 @@ packages:
     haskell/tools/sleeptime
 
     -- Test/example packages
-    claude-code-test
     types-first-dev
     -- types-first-dev/test-repo  -- disabled: empty directory, no cabal file
 
