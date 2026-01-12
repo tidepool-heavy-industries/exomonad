@@ -37,40 +37,69 @@ type GingerM = Run SourcePos (Writer Text) Text
 -- Completed Child Info
 --------------------------------------------------------------------------------
 
--- | Outcome of a child execution - success with commit or failure with error.
+-- | Outcome of a child execution - success, failure, or plan revision needed.
 data ChildOutcome
   = ChildSuccess { coCommitHash :: Text }
   | ChildFailure { coErrorMessage :: Text, coErrorDetails :: Maybe Text }
+  | ChildPlanRevision
+      { cprIssue :: Text
+      , cprDiscovery :: Text
+      , cprProposedChange :: Text
+      }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)
 
 instance ToGVal GingerM ChildOutcome where
-  -- All fields present in both cases (null for non-applicable) for typed template compatibility
+  -- All fields present in all cases (null for non-applicable) for typed template compatibility
   toGVal (ChildSuccess hash) = dict
     [ ("success", toGVal True)
     , ("failed", toGVal False)
+    , ("needsPlanRevision", toGVal False)
     , ("commitHash", toGVal hash)
     , ("errorMessage", toGVal (Nothing :: Maybe Text))
     , ("errorDetails", toGVal (Nothing :: Maybe Text))
+    , ("revisionIssue", toGVal (Nothing :: Maybe Text))
+    , ("revisionDiscovery", toGVal (Nothing :: Maybe Text))
+    , ("revisionProposedChange", toGVal (Nothing :: Maybe Text))
     ]
   toGVal (ChildFailure msg details) = dict
     [ ("success", toGVal False)
     , ("failed", toGVal True)
+    , ("needsPlanRevision", toGVal False)
     , ("commitHash", toGVal (Nothing :: Maybe Text))
     , ("errorMessage", toGVal msg)
     , ("errorDetails", toGVal details)
+    , ("revisionIssue", toGVal (Nothing :: Maybe Text))
+    , ("revisionDiscovery", toGVal (Nothing :: Maybe Text))
+    , ("revisionProposedChange", toGVal (Nothing :: Maybe Text))
+    ]
+  toGVal (ChildPlanRevision issue discovery proposed) = dict
+    [ ("success", toGVal False)
+    , ("failed", toGVal False)
+    , ("needsPlanRevision", toGVal True)
+    , ("commitHash", toGVal (Nothing :: Maybe Text))
+    , ("errorMessage", toGVal (Nothing :: Maybe Text))
+    , ("errorDetails", toGVal (Nothing :: Maybe Text))
+    , ("revisionIssue", toGVal issue)
+    , ("revisionDiscovery", toGVal discovery)
+    , ("revisionProposedChange", toGVal proposed)
     ]
 
 -- | Information about a child that just completed.
 --
 -- Flattened record for typed template compatibility.
--- All fields present; use success/failed to know which are valid.
+-- All fields present; use success/failed/needsPlanRevision to know which are valid.
 data CompletedChildCtx = CompletedChildCtx
-  { cccDirective    :: Text        -- ^ The original directive given to this child
-  , cccSuccess      :: Bool        -- ^ True if child succeeded
-  , cccCommitHash   :: Maybe Text  -- ^ Present if success
-  , cccErrorMessage :: Maybe Text  -- ^ Present if failed
-  , cccErrorDetails :: Maybe Text  -- ^ Optional additional error info
+  { cccDirective :: Text        -- ^ The original directive given to this child
+  , cccSuccess :: Bool          -- ^ True if child succeeded
+  , cccFailed :: Bool           -- ^ True if child failed (unexpected error)
+  , cccNeedsPlanRevision :: Bool  -- ^ True if child needs plan revision
+  , cccCommitHash :: Maybe Text   -- ^ Present if success
+  , cccErrorMessage :: Maybe Text -- ^ Present if failed
+  , cccErrorDetails :: Maybe Text -- ^ Optional additional error info
+  , cccRevisionIssue :: Maybe Text        -- ^ Present if plan revision needed
+  , cccRevisionDiscovery :: Maybe Text    -- ^ Present if plan revision needed
+  , cccRevisionProposedChange :: Maybe Text -- ^ Present if plan revision needed
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (ToJSON)
@@ -81,26 +110,52 @@ mkCompletedChild directive outcome = case outcome of
   ChildSuccess hash -> CompletedChildCtx
     { cccDirective = directive
     , cccSuccess = True
+    , cccFailed = False
+    , cccNeedsPlanRevision = False
     , cccCommitHash = Just hash
     , cccErrorMessage = Nothing
     , cccErrorDetails = Nothing
+    , cccRevisionIssue = Nothing
+    , cccRevisionDiscovery = Nothing
+    , cccRevisionProposedChange = Nothing
     }
   ChildFailure msg details -> CompletedChildCtx
     { cccDirective = directive
     , cccSuccess = False
+    , cccFailed = True
+    , cccNeedsPlanRevision = False
     , cccCommitHash = Nothing
     , cccErrorMessage = Just msg
     , cccErrorDetails = details
+    , cccRevisionIssue = Nothing
+    , cccRevisionDiscovery = Nothing
+    , cccRevisionProposedChange = Nothing
+    }
+  ChildPlanRevision issue discovery proposed -> CompletedChildCtx
+    { cccDirective = directive
+    , cccSuccess = False
+    , cccFailed = False
+    , cccNeedsPlanRevision = True
+    , cccCommitHash = Nothing
+    , cccErrorMessage = Nothing
+    , cccErrorDetails = Nothing
+    , cccRevisionIssue = Just issue
+    , cccRevisionDiscovery = Just discovery
+    , cccRevisionProposedChange = Just proposed
     }
 
 instance ToGVal GingerM CompletedChildCtx where
   toGVal c = dict
     [ ("directive", toGVal c.cccDirective)
     , ("success", toGVal c.cccSuccess)
-    , ("failed", toGVal (not c.cccSuccess))
+    , ("failed", toGVal c.cccFailed)
+    , ("needsPlanRevision", toGVal c.cccNeedsPlanRevision)
     , ("commitHash", toGVal c.cccCommitHash)
     , ("errorMessage", toGVal c.cccErrorMessage)
     , ("errorDetails", toGVal c.cccErrorDetails)
+    , ("revisionIssue", toGVal c.cccRevisionIssue)
+    , ("revisionDiscovery", toGVal c.cccRevisionDiscovery)
+    , ("revisionProposedChange", toGVal c.cccRevisionProposedChange)
     ]
 
 --------------------------------------------------------------------------------

@@ -52,7 +52,7 @@ import Control.Monad.Freer (Eff, LastMember, Member, interpret, send, sendM)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
-import Data.Time (UTCTime, getCurrentTime)
+import Data.Time (getCurrentTime)
 
 import Tidepool.Effect.Session (SessionInfo(..), SessionId(..))
 import Tidepool.Effect.Subgraph (ChildId(..))

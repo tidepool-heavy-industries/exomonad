@@ -35,8 +35,8 @@ workHandlers = WorkGraph
     -- WORK
     -- ════════════════════════════════════════════════════════════════
 
-  , wgWork = ClaudeCodeLLMHandler @'Sonnet
-      Nothing  -- No worktree path
+  , wgWork = ClaudeCodeLLMHandler @'Haiku
+      Nothing  -- No system template (only user template)
       workCompiled
       workBefore
       workAfter

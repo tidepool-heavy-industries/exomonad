@@ -23,17 +23,19 @@ import System.IO (hFlush, stdout)
 import System.Exit (exitFailure)
 import Text.Printf (printf)
 
-import Tidepool.Actor.Subgraph (withRecursiveGraph)
+import Control.Concurrent.STM (atomically, modifyTVar')
+import qualified Data.Map.Strict as Map
+import Tidepool.Actor.Subgraph (withRecursiveGraph, ChildId(..))
 import Tidepool.Graph.Execute (callHandler)
 
 import TypesFirstDev.Types.Core (Spec(..))
-import TypesFirstDev.Types.Work (WorkInput(..), WorkResult(..))
+import TypesFirstDev.Types.Work (WorkInput(..), WorkResult(..), PlanRevisionDetails(..))
 import TypesFirstDev.WorkInterpreters (runWorkEffects, WorkConfig(..))
 import TypesFirstDev.WorkExecutor (runWork)
 import TypesFirstDev.WorkHandlersAssembled (workHandlers)
 import TypesFirstDev.WorkGraph (WorkGraph(..))
 import TypesFirstDev.RunTree (RunTree(..))
-import TypesFirstDev.Effect.RunTreeLog (newNodeBuilder, freezeNode)
+import TypesFirstDev.Effect.RunTreeLog (newNodeBuilder, freezeNode, NodeBuilder(..))
 import TypesFirstDev.RunTree.Render (renderRunTree, writeRunTree)
 
 -- | Application-level result type
@@ -54,9 +56,16 @@ printResult result = do
   putStrLn "  Result"
   putStrLn "════════════════════════════════════════════════════════════════"
   case result of
-    RunnerSuccess (WorkResult commitHash) -> do
-      putStrLn "✓ Work Complete"
-      printf "  Final commit: %s\n" (T.unpack commitHash)
+    RunnerSuccess (WorkResult { wrCommitHash = commitHash, wrPlanRevision = revision }) ->
+      case revision of
+        Nothing -> do
+          putStrLn "✓ Work Complete"
+          printf "  Final commit: %s\n" (T.unpack commitHash)
+        Just details -> do
+          putStrLn "⚠️  Plan Revision Needed"
+          printf "  Issue: %s\n" (T.unpack details.prdIssue)
+          printf "  Discovery: %s\n" (T.unpack details.prdDiscovery)
+          printf "  Proposed: %s\n" (T.unpack details.prdProposedChange)
     RunnerFailure reason -> do
       putStrLn "✗ Work Failed"
       printf "  Reason: %s\n" (T.unpack reason)
@@ -73,9 +82,11 @@ runWorkGraph spec config = do
 
   result <- withRecursiveGraph @WorkInput @WorkResult $ \subgraphState wire -> do
     -- Wire the recursive graph runner - children spawn with WorkInput
-    -- Each child gets its own NodeBuilder
-    wire $ \childInput -> do
+    -- Each child gets its own NodeBuilder, linked to parent's nbChildren
+    wire $ \childId childInput -> do
       childBuilder <- newNodeBuilder childInput.wiSpec.sDescription childInput.wiDepth
+      -- Register child builder in parent's nbChildren map for tree construction
+      atomically $ modifyTVar' rootBuilder.nbChildren (Map.insert childId childBuilder)
       runWorkEffects subgraphState childBuilder childInput config $
         runWork
           (callHandler (wgWork workHandlers))

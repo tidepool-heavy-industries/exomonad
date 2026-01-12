@@ -5,7 +5,7 @@
 id: url-shortener
 
 description: |
-  A simple URL shortener with Servant API and TVar-based storage.
+  A simple URL shortener with Servant API and TVar-based storage, built using Stack.
 
 target_path: src/UrlShortener
 test_path: test/UrlShortener

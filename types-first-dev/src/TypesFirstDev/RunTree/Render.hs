@@ -142,12 +142,17 @@ renderEventBody ev = case ev of
     "AWAIT"
   EvDecision (Complete h) ->
     "COMPLETE " <> h
+  EvDecision (PlanRevisionNeeded issue discovery proposed) ->
+    "PLAN_REVISION_NEEDED:\n" <>
+    "  Issue: " <> issue <> "\n" <>
+    "  Discovery: " <> discovery <> "\n" <>
+    "  Proposed: " <> proposed
   EvChildSpawned cid cs ->
-    "├─ spawn " <> showChildId cid <> ": " <> T.take 50 cs.csDirective
-  EvChildComplete cid directive outcome ->
-    "├─ done [" <> T.take 30 directive <> "]: " <> showOutcomeShort outcome
+    "├─ spawn " <> showChildId cid <> ": " <> cs.csDirective
+  EvChildComplete _cid directive outcome ->
+    "├─ done [" <> directive <> "]: " <> showOutcomeShort outcome
   EvCommit c ->
-    "COMMIT " <> c.cHash <> " " <> T.take 50 c.cMessage
+    "COMMIT " <> c.cHash <> " " <> c.cMessage
   EvMetrics cost turns ->
     "  ($" <> T.pack (printf "%.3f" cost) <> ", " <> T.pack (show turns) <> " turns)"
 
@@ -156,13 +161,22 @@ renderEventBody ev = case ev of
 renderOutcome :: Maybe ChildOutcome -> Text
 renderOutcome Nothing = "⏳ running"
 renderOutcome (Just (ChildSuccess hash)) = "✓ " <> hash
-renderOutcome (Just (ChildFailure msg _)) = "✗ " <> T.take 50 msg
+renderOutcome (Just (ChildFailure msg details)) =
+  "✗ " <> msg <> maybe "" (\d -> "\n  Details: " <> d) details
+renderOutcome (Just (ChildPlanRevision issue discovery proposed)) =
+  "⚠️  Plan Revision Needed:\n" <>
+  "  Issue: " <> issue <> "\n" <>
+  "  Discovery: " <> discovery <> "\n" <>
+  "  Proposed: " <> proposed
 
 
 -- | Short outcome for inline display.
 showOutcomeShort :: ChildOutcome -> Text
-showOutcomeShort (ChildSuccess hash) = "✓ " <> T.take 10 hash
-showOutcomeShort (ChildFailure msg _) = "✗ " <> T.take 30 msg
+showOutcomeShort (ChildSuccess hash) = "✓ " <> hash
+showOutcomeShort (ChildFailure msg details) =
+  "✗ " <> msg <> maybe "" (\d -> " (details: " <> d <> ")") details
+showOutcomeShort (ChildPlanRevision issue discovery proposed) =
+  "⚠️  " <> issue <> " | " <> discovery <> " | " <> proposed
 
 
 -- | Show a ChildId in short form.
@@ -283,6 +297,7 @@ countChildrenFromEvents node =
     getCompletion _ = Nothing
     isSuccess (ChildSuccess _) = True
     isSuccess (ChildFailure _ _) = False
+    isSuccess (ChildPlanRevision _ _ _) = False  -- Plan revision counts as not-success
 
 
 -- | Sum total cost from all nodes.

@@ -89,7 +89,7 @@ data WorkGraph mode = WorkGraph
       :@ UsesEffects '[ Goto "wgWork" WorkInput      -- Continue/Spawn/AwaitNext self-loop
                       , Goto Exit WorkResult         -- Complete exits graph
                       ]
-      :@ ClaudeCode 'Sonnet
+      :@ ClaudeCode 'Haiku
 
     --------------------------------------------------------------------------
     -- EXIT

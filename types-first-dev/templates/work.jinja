@@ -35,6 +35,32 @@ A subtask has finished:
 {% if completedChild.success %}
 **Status:** ✓ Success
 **Commit:** `{{ completedChild.commitHash }}`
+{% elif completedChild.needsPlanRevision %}
+**Status:** ⚠️ Plan Revision Needed
+
+Child hit a blocker that requires plan adjustment:
+
+**Issue:** {{ completedChild.revisionIssue }}
+
+**Discovery:** {{ completedChild.revisionDiscovery }}
+
+**Proposed Change:** {{ completedChild.revisionProposedChange }}
+
+### Your Options:
+
+**1. Adapt (Recommended)** - Can you revise the plan and spawn new child(ren) with updated approach?
+   - Analyze if the proposed change is reasonable
+   - Use **Spawn** with modified child specs that work around the blocker
+   - Document what changed in your reasoning before spawning
+
+**2. Escalate** - If you cannot resolve this at your level:
+   - Use **PlanRevisionNeeded** to escalate to parent/user
+   - ONLY escalate if the blocker fundamentally conflicts with YOUR acceptance criteria
+   - Include what you learned and why you can't adapt
+   - Add your own analysis of impact on parent goals
+
+**Key principle:** Try to adapt locally before escalating. You have more context than your parent about this specific subtask.
+
 {% else %}
 **Status:** ✗ Failed
 **Error:** {{ completedChild.errorMessage }}
@@ -46,16 +72,19 @@ A subtask has finished:
 {% if hasPendingChildren %}
 **Still pending:** {{ pendingCount }} children running
 
-Your options:
-1. **AwaitNext** - Wait for another child (recommended if more work incoming)
-2. **Continue** - Do integration work now (merge, rebase, test)
-3. **Complete** - If this was the last critical piece
-{% else %}
-**No more pending children.**
+**Next step:** Integrate this child's work, then await the next child:
+1. Merge child's commit using `git merge --no-ff <commit>` (preserves full history)
+2. Run integration tests if applicable
+3. Use **Continue** when done, which will automatically await the next child
 
-Your options:
-1. **Continue** - Do final integration (merge commits, run tests, clean up)
-2. **Complete** - If integration is done, exit with final commit hash
+{% else %}
+**All children complete.**
+
+**Next step:** Final integration:
+1. Merge any remaining child commits using `git merge --no-ff <commit>` (preserves full history)
+2. Run full test suite
+3. Use **Complete** with the final merge commit hash
+
 {% endif %}
 
 {% elif hasPendingChildren %}
@@ -80,9 +109,10 @@ All spawned children have finished:
 {% endif %}
 {% endfor %}
 
-Time to finalize:
-1. **Continue** - Merge all child commits, run integration tests
-2. **Complete** - If already integrated, exit with final commit hash
+**Next step:** Final integration:
+1. Merge all child commits using `git merge --no-ff <commit>` for each (preserves full history)
+2. Run full test suite
+3. Use **Complete** with the final merge commit hash
 
 {% else %}
 ## Fresh Start
@@ -159,6 +189,16 @@ Use for: scaffolding commits, integration work, intermediate steps.
 }
 ```
 Use when ALL work is done. Provide the final commit hash.
+
+### **PlanRevisionNeeded** (escalate blocker to parent)
+```json
+{
+  "issue": "What blocker prevents meeting acceptance criteria",
+  "discovery": "What was learned that invalidates the plan",
+  "proposedChange": "Concrete change needed to criteria or approach"
+}
+```
+**Only use if you cannot adapt.** The blocker must fundamentally conflict with YOUR acceptance criteria. Try **Spawn** with revised children first.
 
 ---
 

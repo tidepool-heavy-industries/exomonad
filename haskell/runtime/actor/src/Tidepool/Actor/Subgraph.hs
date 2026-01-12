@@ -54,9 +54,6 @@ module Tidepool.Actor.Subgraph
     -- * Interpreter
   , runSubgraph
 
-    -- * Handler Builders
-  , effHandlerWithSubgraph
-
     -- * Re-exports
   , Subgraph(..)
   , ChildHandle(..)
@@ -74,8 +71,7 @@ import Control.Concurrent.STM
   , modifyTVar', writeTQueue, readTQueue
   )
 import Control.Exception (SomeException, try, displayException)
-import Control.Monad.Freer (Eff, LastMember, interpret, sendM, runM)
-import Data.Aeson (FromJSON)
+import Control.Monad.Freer (Eff, LastMember, interpret, sendM)
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
@@ -95,12 +91,6 @@ import Tidepool.Effect.Subgraph
   , getPending
   )
 
-import Tidepool.Actor.Graph
-  ( HandlerBuilder
-  , ExtractChoice
-  , wrapEffHandler
-  , GotoChoice
-  )
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -135,9 +125,10 @@ data SubgraphState entry result = SubgraphState
   , ssCompleted :: !(TQueue (ChildId, Either ChildError result))
     -- ^ Completion queue. AwaitAny blocks on this.
     -- Results are Either to capture child failures.
-  , ssGetRunner :: !(IO (entry -> IO result))
+  , ssGetRunner :: !(IO (ChildId -> entry -> IO result))
     -- ^ How to get the graph runner. The IO layer enables deferred binding
     -- for cases where the runner can't be known at state creation time.
+    -- The runner receives the ChildId for linking child nodes to parent.
   }
 
 
@@ -152,8 +143,8 @@ data SubgraphState entry result = SubgraphState
 --   ...
 -- @
 newSubgraphState
-  :: Ki.Scope                 -- ^ Ki scope for structured concurrency
-  -> (entry -> IO result)     -- ^ The graph runner (known immediately)
+  :: Ki.Scope                         -- ^ Ki scope for structured concurrency
+  -> (ChildId -> entry -> IO result)  -- ^ The graph runner (receives ChildId for linking)
   -> IO (SubgraphState entry result)
 newSubgraphState scope runner = SubgraphState scope
   <$> newTVarIO Map.empty
@@ -198,11 +189,11 @@ newSubgraphState scope runner = SubgraphState scope
 newSubgraphStateDeferred
   :: forall entry result.
      Ki.Scope  -- ^ Ki scope for structured concurrency
-  -> IO (SubgraphState entry result, (entry -> IO result) -> IO ())
+  -> IO (SubgraphState entry result, (ChildId -> entry -> IO result) -> IO ())
 newSubgraphStateDeferred scope = do
   -- IORef holds the runner. Starts with error placeholder.
   -- INVARIANT: Must be written exactly once before any child spawns.
-  ref <- newIORef (\_ -> error "Subgraph recursion not wired - call wireRecursion before running graph")
+  ref <- newIORef (\_ _ -> error "Subgraph recursion not wired - call wireRecursion before running graph")
   state <- SubgraphState scope
     <$> newTVarIO Map.empty
     <*> newTQueueIO
@@ -226,7 +217,8 @@ newSubgraphStateDeferred scope = do
 --   handlers <- buildHandlerMap interpret
 --
 --   -- Wire the recursion (MUST happen before running!)
---   wire $ \\childSpec -> runGraphAsActors handlers (toJSON childSpec)
+--   -- Runner receives ChildId for linking child nodes to parent
+--   wire $ \\childId childSpec -> runGraphAsActors handlers (toJSON childSpec)
 --
 --   -- Now run - children will recursively spawn correctly
 --   runGraphAsActors handlers (toJSON rootSpec)
@@ -252,8 +244,9 @@ newSubgraphStateDeferred scope = do
 -- and ki automatically cancels any still-running children.
 withRecursiveGraph
   :: forall entry result a.
-     (SubgraphState entry result -> ((entry -> IO result) -> IO ()) -> IO a)
+     (SubgraphState entry result -> ((ChildId -> entry -> IO result) -> IO ()) -> IO a)
      -- ^ Callback receives (state, wireRecursion). Wire before running!
+     -- The runner receives ChildId for linking child execution trees.
   -> IO a
 withRecursiveGraph callback =
   -- Create ki scope for structured concurrency
@@ -309,7 +302,8 @@ runSubgraph state = interpret $ \case
 
       -- Run the full graph for this child, catching exceptions
       -- This prevents one child's failure from killing siblings via Ki cancellation
-      outcome <- try @SomeException $ runner childEntry
+      -- Pass the ChildId so the runner can link child nodes to parent
+      outcome <- try @SomeException $ runner cid childEntry
 
       let result = case outcome of
             Right r -> Right r
@@ -350,63 +344,3 @@ exceptionToChildError ex = ChildError
   }
 
 
--- ════════════════════════════════════════════════════════════════════════════
--- HANDLER BUILDERS
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Build a handler with Subgraph effect.
---
--- __Note:__ This function is for the older actor model pattern. Prefer
--- 'withRecursiveGraph' for modern V3 style graphs.
---
--- Each handler invocation creates a fresh ki scope. When the handler
--- returns, any still-running children are automatically cancelled.
---
--- @
--- -- Handler that can spawn children
--- decideHandler :: ScaffoldingResult
---               -> Eff '[Subgraph Spec V2Result, IO] (GotoChoice '[To Exit V2Result])
--- decideHandler result = do
---   handles <- traverse spawnSelf childSpecs
---   results <- collectLoop handles
---   pure $ gotoExit results
---
--- -- Build the handler with subgraph support
--- buildDecideHandler :: (Spec -> IO V2Result) -> HandlerBuilder
--- buildDecideHandler runGraph = effHandlerWithSubgraph runGraph decideHandler
--- @
-effHandlerWithSubgraph
-  :: forall entry result payload targets.
-     ( FromJSON payload
-     , ExtractChoice targets
-     )
-  => (entry -> IO result)  -- ^ Graph runner for children
-  -> (payload -> Eff '[Subgraph entry result, IO] (GotoChoice targets))
-  -> HandlerBuilder
-effHandlerWithSubgraph runGraph handler = do
-  -- Each invocation creates fresh scope for automatic child cancellation
-  pure $ wrapEffHandler (runSubgraphWithFreshScope runGraph) handler
-
-
--- | Run Subgraph effect with a fresh ki scope.
---
--- Creates a ki scope for this computation. When it exits (success or
--- exception), all children spawned within are automatically cancelled.
-runSubgraphWithFreshScope
-  :: (entry -> IO result)
-  -> Eff '[Subgraph entry result, IO] a
-  -> IO a
-runSubgraphWithFreshScope runGraph action =
-  Ki.scoped $ \scope -> do
-    state <- newSubgraphState scope runGraph
-    runM . runSubgraph state $ action
-
-
--- | Run Subgraph effect stack to IO.
---
--- __Low-level:__ Use 'runSubgraphWithFreshScope' for automatic scope management.
-runSubgraphToIO
-  :: SubgraphState entry result
-  -> Eff '[Subgraph entry result, IO] a
-  -> IO a
-runSubgraphToIO state = runM . runSubgraph state

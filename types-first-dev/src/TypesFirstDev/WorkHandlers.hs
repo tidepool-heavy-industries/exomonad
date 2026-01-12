@@ -96,8 +96,12 @@ workBefore input = do
   mem <- getMem @WorkMem
 
   -- Capture git state before LLM call for commit tracking
-  gitStatus <- queryGitStatus input.wiSpec.sTargetPath
-  updateMem @WorkMem $ \m -> m { wmBeforeCommit = Just gitStatus.gsHeadHash }
+  -- Only possible if we have session info (worktree path available)
+  case mem.wmSessionInfo of
+    Just sinfo -> do
+      gitStatus <- queryGitStatus sinfo.siWorktree
+      updateMem @WorkMem $ \m -> m { wmBeforeCommit = Just gitStatus.gsHeadHash }
+    Nothing -> pure ()  -- First call, no worktree yet
 
   let ctx = WorkTemplateCtx
         { spec = input.wiSpec
@@ -165,8 +169,8 @@ workAfter (result, _sid) = do
   let sessionInfo = SessionInfo result.ccrSessionId result.ccrWorktree result.ccrBranch
   updateMem @WorkMem $ \m -> m { wmSessionInfo = Just sessionInfo }
 
-  -- Check for commits made during LLM call
-  gitStatusAfter <- queryGitStatus entry.wiSpec.sTargetPath
+  -- Check for commits made during LLM call (use actual worktree path)
+  gitStatusAfter <- queryGitStatus result.ccrWorktree
   case mem.wmBeforeCommit of
     Just beforeHash | beforeHash /= gitStatusAfter.gsHeadHash -> do
       -- New commit detected - log it
@@ -233,8 +237,20 @@ workAfter (result, _sid) = do
     Complete { weCommitHash = commitHash } -> do
       -- Log node completion for RunTree
       logNodeComplete (ChildSuccess commitHash)
-      -- Exit graph with result
-      pure $ gotoExit (WorkResult commitHash)
+      -- Exit graph with result (normal completion, no plan revision)
+      pure $ gotoExit (WorkResult { wrCommitHash = commitHash, wrPlanRevision = Nothing })
+
+    PlanRevisionNeeded { prnIssue, prnDiscovery, prnProposedChange } -> do
+      -- Plan cannot be executed as written - exit with plan revision details
+      let details = PlanRevisionDetails prnIssue prnDiscovery prnProposedChange
+      let result = WorkResult
+            { wrCommitHash = ""  -- No commit when plan revision needed
+            , wrPlanRevision = Just details
+            }
+      -- Log as plan revision (not failure)
+      logNodeComplete (ChildPlanRevision prnIssue prnDiscovery prnProposedChange)
+      -- Exit with details - parent will handle or escalate
+      pure $ gotoExit result
 
 -- | Wait for a child to complete and self-loop with result injected.
 --
@@ -255,9 +271,16 @@ awaitAndLoop entry = do
   mem <- getMem @WorkMem
   let directive = M.findWithDefault "unknown" childId (mem.wmChildDirectives)
 
-  -- Build completed child context based on success/failure
+  -- Build completed child context based on success/failure/plan-revision
   let childOutcome = case outcome of
-        Right childResult -> ChildSuccess { coCommitHash = childResult.wrCommitHash }
+        Right childResult ->
+          case childResult.wrPlanRevision of
+            Just details -> ChildPlanRevision
+              { cprIssue = details.prdIssue
+              , cprDiscovery = details.prdDiscovery
+              , cprProposedChange = details.prdProposedChange
+              }
+            Nothing -> ChildSuccess { coCommitHash = childResult.wrCommitHash }
         Left err -> ChildFailure { coErrorMessage = err.ceMessage, coErrorDetails = err.ceDetails }
 
   -- Log child completion for RunTree (with directive for correlation)

@@ -18,6 +18,7 @@ module TypesFirstDev.Types.Work
   ( -- * Graph I/O
     WorkInput(..)
   , WorkResult(..)
+  , PlanRevisionDetails(..)
     -- * Node Exit Type
   , WorkExit(..)
     -- * Child Specification
@@ -57,12 +58,30 @@ data WorkInput = WorkInput
 -- Graph Exit
 --------------------------------------------------------------------------------
 
--- | Graph exit type - just the commit hash.
+-- | Graph exit type - commit hash plus optional plan revision.
 --
--- Everything else (commit message, files changed) can be looked up via git.
--- The effect layer mechanically collects this when the node completes.
-newtype WorkResult = WorkResult
-  { wrCommitHash :: Text  -- ^ The commit hash this work completed with
+-- Normal completion: wrCommitHash contains hash, wrPlanRevision is Nothing
+-- Plan revision: wrCommitHash is empty, wrPlanRevision contains details
+data WorkResult = WorkResult
+  { wrCommitHash :: Text  -- ^ The commit hash (empty if plan revision)
+  , wrPlanRevision :: Maybe PlanRevisionDetails  -- ^ Plan revision details (if needed)
+  }
+  deriving stock (Eq, Show, Generic)
+  deriving anyclass (FromJSON, ToJSON, StructuredOutput)
+
+-- | Details about why a plan revision is needed.
+--
+-- Carries structured information up the tree so parents can decide
+-- whether to adapt (spawn new children) or escalate (emit own PlanRevisionNeeded).
+data PlanRevisionDetails = PlanRevisionDetails
+  { prdIssue :: Text
+    -- ^ What blocker prevents meeting acceptance criteria
+
+  , prdDiscovery :: Text
+    -- ^ What was learned that invalidates the plan
+
+  , prdProposedChange :: Text
+    -- ^ Concrete change needed to criteria or approach
   }
   deriving stock (Eq, Show, Generic)
   deriving anyclass (FromJSON, ToJSON, StructuredOutput)
@@ -78,6 +97,7 @@ newtype WorkResult = WorkResult
 -- - Spawn: spawn children, then AwaitNext
 -- - AwaitNext: block until a child completes, inject result into template
 -- - Complete: exit graph with commit hash
+-- - PlanRevisionNeeded: acceptance criteria can't be met, plan needs update
 data WorkExit
   = Continue
     -- ^ Self-loop immediately. More work to do locally.
@@ -100,6 +120,32 @@ data WorkExit
     -- ^ The commit hash representing this unit of work.
     --   For leaves: the implementation commit.
     --   For parents: the merge commit integrating children.
+    }
+
+  | PlanRevisionNeeded
+    { prnIssue :: Text
+    -- ^ What blocker prevents meeting the acceptance criteria as written.
+    --   Examples:
+    --   - "servant-server >= 0.21 doesn't exist on Hackage"
+    --   - "Effect library doesn't support WASM compilation"
+    --   - "Two acceptance criteria directly conflict (stateless API + session management)"
+    --   - "Test framework requires GHC 9.6+ but spec requires 9.4 compatibility"
+
+    , prnDiscovery :: Text
+    -- ^ What was learned that invalidates assumptions in the plan.
+    --   Examples:
+    --   - "Latest servant-server is 0.20.3.0. WAI is alternative."
+    --   - "Polysemy has no WASM backend. Effectful or freer-simple work."
+    --   - "Stateless APIs can use signed cookies for limited session data"
+    --   - "Spec targets GHC 9.4 but test deps require 9.6+ (no backports)"
+
+    , prnProposedChange :: Text
+    -- ^ Concrete change needed to acceptance criteria or technical approach.
+    --   Examples:
+    --   - "Allow servant-server 0.20.x OR switch requirement to raw WAI"
+    --   - "Change effect library requirement to 'any effect system with WASM support'"
+    --   - "Split into two endpoints: stateless main API + optional session endpoint"
+    --   - "Bump minimum GHC to 9.6 OR find alternative test framework"
     }
   deriving stock (Eq, Show, Generic)
   deriving anyclass (FromJSON, ToJSON, StructuredOutput, ToDecisionTools)
