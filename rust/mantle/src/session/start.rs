@@ -501,6 +501,8 @@ fn execute_docker_with_streaming(
         "--output-format".to_string(),
         "stream-json".to_string(),
         "--verbose".to_string(),
+        "--max-turns".to_string(),
+        "30".to_string(),
         "--model".to_string(),
         config.model.clone(),
         "-p".to_string(),

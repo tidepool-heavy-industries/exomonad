@@ -14,7 +14,7 @@ default:
 # Rebuild entire mantle stack (Docker image + host binary)
 rebuild-mantle:
     @echo "Building Docker image..."
-    cd ../rust && docker build -t tidepool/claude-code:latest -f mantle/Dockerfile .
+    cd .. && docker build -t tidepool/claude-code:latest -f rust/mantle/Dockerfile .
     @echo ""
     @echo "Installing host mantle binary to PATH..."
     cd ../rust && cargo install --force --path mantle
@@ -23,7 +23,7 @@ rebuild-mantle:
 
 # Rebuild just the Docker image (faster, no Rust compile)
 rebuild-image:
-    cd ../rust && docker build -t tidepool/claude-code:latest -f mantle/Dockerfile .
+    cd .. && docker build -t tidepool/claude-code:latest -f rust/mantle/Dockerfile .
     @echo "✓ Docker image rebuilt"
 
 # Rebuild just the host mantle binary

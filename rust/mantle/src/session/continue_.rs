@@ -304,6 +304,8 @@ fn execute_docker_continue(
         "--output-format".to_string(),
         "stream-json".to_string(),
         "--verbose".to_string(),
+        "--max-turns".to_string(),
+        "30".to_string(),
         "--model".to_string(),
         model.to_string(),
         "--resume".to_string(),

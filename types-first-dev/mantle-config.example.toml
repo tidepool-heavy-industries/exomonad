@@ -7,6 +7,10 @@
 # See DOCKER-AUTH.md for setup instructions.
 auth_volume = "tidepool-claude-auth"
 
+# Named Docker volume for Stack build cache (snapshots, programs, indices).
+# Shared across worker containers but isolated from host (macOS vs Linux architecture).
+stack_cache_volume = "tidepool-stack-cache"
+
 # Docker image to use for Claude Code containers.
 # Build with: docker build -t tidepool/claude-code:latest -f mantle/Dockerfile rust/
 image = "tidepool/claude-code:latest"

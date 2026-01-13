@@ -43,6 +43,11 @@ pub struct DockerConfig {
     /// When set, this volume is mounted to `/home/user/.cabal/store` in containers.
     /// This allows all containers to share built Haskell packages, avoiding redundant builds.
     pub cabal_store_volume: Option<String>,
+
+    /// Named Docker volume for Stack build cache (snapshots, programs, indices).
+    /// When set, this volume is mounted to `/home/user/.stack` in containers.
+    /// Shared across workers but isolated from host (macOS vs Linux architecture).
+    pub stack_cache_volume: Option<String>,
 }
 
 /// Root configuration structure.
@@ -95,6 +100,9 @@ impl Config {
         }
         if let Some(ref vol) = config.docker.cabal_store_volume {
             tracing::info!("  docker.cabal_store_volume = {:?}", vol);
+        }
+        if let Some(ref vol) = config.docker.stack_cache_volume {
+            tracing::info!("  docker.stack_cache_volume = {:?}", vol);
         }
 
         Ok(config)

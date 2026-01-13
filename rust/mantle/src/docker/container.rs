@@ -128,6 +128,8 @@ pub struct ContainerConfig {
     pub auth_mount: AuthMount,
     /// Named Docker volume for shared cabal package store (optional)
     pub cabal_store_volume: Option<String>,
+    /// Named Docker volume for Stack build cache (optional)
+    pub stack_cache_volume: Option<String>,
     /// Session ID (used for container naming)
     pub session_id: String,
     /// Claude Code arguments
@@ -181,12 +183,16 @@ impl ContainerConfig {
         // Get cabal store volume from config
         let cabal_store_volume = config.docker.cabal_store_volume;
 
+        // Get stack cache volume from config
+        let stack_cache_volume = config.docker.stack_cache_volume;
+
         Ok(Self {
             image,
             worktree_path,
             hub_socket: None,
             auth_mount,
             cabal_store_volume,
+            stack_cache_volume,
             session_id,
             claude_args,
             timeout_secs: 0,
@@ -332,6 +338,13 @@ where
         logger.log("MANTLE", &format!("Using cabal store volume: {}", cabal_vol));
         cmd.arg("-v")
             .arg(format!("{}:/home/user/.cabal/store", cabal_vol));
+    }
+
+    // Mount stack cache volume if configured (shared snapshots/programs/indices)
+    if let Some(ref stack_vol) = config.stack_cache_volume {
+        logger.log("MANTLE", &format!("Using stack cache volume: {}", stack_vol));
+        cmd.arg("-v")
+            .arg(format!("{}:/home/user/.stack", stack_vol));
     }
 
     // Working directory
@@ -652,6 +665,7 @@ mod tests {
             hub_socket: None,
             auth_mount: AuthMount::BindMount(PathBuf::from("/tmp/.claude")),
             cabal_store_volume: None,
+            stack_cache_volume: None,
             session_id: "abc12345-6789".to_string(),
             claude_args: vec![],
             timeout_secs: 0,
@@ -670,6 +684,7 @@ mod tests {
             hub_socket: None,
             auth_mount: AuthMount::BindMount(PathBuf::from("/tmp/.claude")),
             cabal_store_volume: None,
+            stack_cache_volume: None,
             session_id: "abc".to_string(),
             claude_args: vec![],
             timeout_secs: 0,
@@ -688,6 +703,7 @@ mod tests {
             hub_socket: None,
             auth_mount: AuthMount::Volume("test-vol".to_string()),
             cabal_store_volume: None,
+            stack_cache_volume: None,
             session_id: "test".to_string(),
             claude_args: vec![],
             timeout_secs: 0,
@@ -712,6 +728,7 @@ mod tests {
             hub_socket: None,
             auth_mount: AuthMount::BindMount(PathBuf::from("/tmp/.claude")),
             cabal_store_volume: None,
+            stack_cache_volume: None,
             session_id: "testabcd".to_string(),
             claude_args: vec![],
             timeout_secs: 0,

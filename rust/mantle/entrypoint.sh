@@ -19,7 +19,7 @@ if [ -n "$MANTLE_DECISION_TOOLS_FILE" ]; then
   "mcpServers": {
     "decision": {
       "type": "stdio",
-      "command": "/usr/local/bin/mantle-agent",
+      "command": "/home/user/.local/bin/mantle-agent",
       "args": ["mcp"],
       "env": {
         "MANTLE_CONTROL_HOST": "$MANTLE_CONTROL_HOST",

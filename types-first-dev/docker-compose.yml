@@ -19,14 +19,15 @@ services:
   # Persistent container for interactive authentication
   auth-shell:
     build:
-      context: ../rust
-      dockerfile: mantle/Dockerfile
+      context: ..
+      dockerfile: rust/mantle/Dockerfile
     image: tidepool/claude-code:latest
     container_name: tidepool-auth-shell
     stdin_open: true
     tty: true
     volumes:
       - claude-auth:/home/user/.claude
+      - stack-cache:/home/user/.stack
     # Keep running so volume persists and we can exec into it
     command: ["tail", "-f", "/dev/null"]
     restart: unless-stopped
@@ -34,8 +35,8 @@ services:
   # Session visualization daemon
   hub:
     build:
-      context: ../rust
-      dockerfile: mantle-hub/Dockerfile
+      context: ..
+      dockerfile: rust/mantle-hub/Dockerfile
     image: tidepool/mantle-hub:latest
     container_name: tidepool-hub
     ports:
@@ -51,6 +52,11 @@ volumes:
   # Mantle mounts this into worker containers via config
   claude-auth:
     name: tidepool-claude-auth
+
+  # Stack build cache (snapshots, programs, indices)
+  # Shared across worker containers but isolated from host (macOS vs Linux)
+  stack-cache:
+    name: tidepool-stack-cache
 
   # Hub SQLite database persistence
   hub-data:

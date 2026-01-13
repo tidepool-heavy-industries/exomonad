@@ -1,16 +1,17 @@
 # mantle-hub Dockerfile
 # Session visualization daemon with SQLite persistence
+# Build from tidepool root: docker build -t tidepool/mantle-hub:latest -f rust/mantle-hub/Dockerfile .
 
 FROM rust:latest AS builder
 
 WORKDIR /app
 
 # Copy workspace files (all members required for workspace resolution)
-COPY Cargo.toml Cargo.lock ./
-COPY mantle ./mantle
-COPY mantle-agent ./mantle-agent
-COPY mantle-hub ./mantle-hub
-COPY mantle-shared ./mantle-shared
+COPY rust/Cargo.toml rust/Cargo.lock ./
+COPY rust/mantle ./mantle
+COPY rust/mantle-agent ./mantle-agent
+COPY rust/mantle-hub ./mantle-hub
+COPY rust/mantle-shared ./mantle-shared
 
 # Build release binary
 RUN cargo build --release -p mantle-hub
@@ -32,7 +33,7 @@ WORKDIR /home/hub
 COPY --from=builder /app/target/release/mantle-hub /usr/local/bin/mantle-hub
 
 # Copy static files
-COPY mantle-hub/static /usr/local/bin/static
+COPY rust/mantle-hub/static /usr/local/bin/static
 
 # Data directory for SQLite
 RUN mkdir -p /home/hub/.tidepool
