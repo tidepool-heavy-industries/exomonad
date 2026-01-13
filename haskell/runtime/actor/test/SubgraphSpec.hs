@@ -37,14 +37,14 @@ spec = do
   describe "newSubgraphState" $ do
     it "creates empty state" $ do
       Ki.scoped $ \scope -> do
-        state <- newSubgraphState @Int @Int scope (\_ -> pure)
+        state <- newSubgraphState @Int @Int scope Nothing simpleRunner
         pending <- runSubgraphAction state (getPending @Int @Int)
         pending `shouldBe` []
 
   describe "spawnSelf" $ do
     it "spawns a child and returns a handle" $ do
       Ki.scoped $ \scope -> do
-        state <- newSubgraphState scope simpleRunner
+        state <- newSubgraphState scope Nothing simpleRunner
         handle <- runSubgraphAction state (spawnSelf @Int @Int 42)
         -- Handle should have a valid child ID
         let ChildHandle cid = handle
@@ -52,7 +52,7 @@ spec = do
 
     it "child appears in getPending while running" $ do
       Ki.scoped $ \scope -> do
-        state <- newSubgraphState scope slowRunner
+        state <- newSubgraphState scope Nothing slowRunner
         _ <- runSubgraphAction state (spawnSelf @Int @Int 42)
         -- Check immediately while child is still running (100ms delay in slowRunner)
         pendingList <- runSubgraphAction state (getPending @Int @Int)
@@ -64,14 +64,14 @@ spec = do
   describe "awaitAny" $ do
     it "returns child result when complete" $ do
       Ki.scoped $ \scope -> do
-        state <- newSubgraphState scope simpleRunner
+        state <- newSubgraphState scope Nothing simpleRunner
         _ <- runSubgraphAction state (spawnSelf @Int @Int 42)
         (_, result) <- runSubgraphAction state (awaitAny @Int @Int)
         result `shouldBe` Right 43  -- simpleRunner adds 1
 
     it "collects multiple children" $ do
       Ki.scoped $ \scope -> do
-        state <- newSubgraphState scope simpleRunner
+        state <- newSubgraphState scope Nothing simpleRunner
 
         -- Spawn 3 children
         _ <- runSubgraphAction state (spawnSelf @Int @Int 1)
@@ -94,7 +94,7 @@ spec = do
   describe "collect loop pattern" $ do
     it "collects all children with loop" $ do
       Ki.scoped $ \scope -> do
-        state <- newSubgraphState scope simpleRunner
+        state <- newSubgraphState scope Nothing simpleRunner
 
         -- Spawn children
         handles <- runSubgraphAction state $ do
@@ -124,7 +124,7 @@ spec = do
               -- For this test, just simulate the pattern
               pure (order + n)
 
-        state <- newSubgraphState scope recursiveRunner
+        state <- newSubgraphState scope Nothing recursiveRunner
 
         -- Spawn with input 5
         _ <- runSubgraphAction state (spawnSelf @Int @Int 5)
@@ -144,7 +144,7 @@ spec = do
     it "works when wired before spawning" $ do
       Ki.scoped $ \scope -> do
         -- Create deferred state
-        (state, wire) <- newSubgraphStateDeferred @Int @Int scope
+        (state, wire) <- newSubgraphStateDeferred @Int @Int scope Nothing
 
         -- Wire the runner BEFORE spawning
         wire simpleRunner
@@ -156,7 +156,7 @@ spec = do
 
     it "works with multiple children after wiring" $ do
       Ki.scoped $ \scope -> do
-        (state, wire) <- newSubgraphStateDeferred @Int @Int scope
+        (state, wire) <- newSubgraphStateDeferred @Int @Int scope Nothing
         wire simpleRunner
 
         -- Spawn multiple children
@@ -178,7 +178,7 @@ spec = do
 
   describe "withRecursiveGraph" $ do
     it "provides state and wire function" $ do
-      result <- withRecursiveGraph @Int @Int $ \state wire -> do
+      result <- withRecursiveGraph @Int @Int Nothing $ \state wire -> do
         -- Wire the runner
         wire simpleRunner
 
@@ -195,7 +195,7 @@ spec = do
       -- 2. Build interpreter using state
       -- 3. Wire the recursion
       -- 4. Run
-      result <- withRecursiveGraph @Int @Int $ \state wire -> do
+      result <- withRecursiveGraph @Int @Int Nothing $ \state wire -> do
         -- In real code, this would be: buildHandlerMap (interpret state)
         -- For testing, we just wire directly (ignore ChildId)
         wire $ \_ n -> pure (n * 2)  -- Simulated "graph runner"

@@ -45,6 +45,8 @@ data WorkConfig = WorkConfig
     -- ^ Parent git branch (e.g., "main")
   , wcMaxDepth :: Int
     -- ^ Maximum recursion depth for children
+  , wcMaxConcurrency :: Int
+    -- ^ Maximum concurrent children per parent (per-parent limit)
   } deriving (Show, Eq, Generic, FromJSON, ToJSON)
 
 -- ════════════════════════════════════════════════════════════════════════════

@@ -48,8 +48,8 @@ export RUST_LOG="${RUST_LOG:-info}"
 # Default spec file (can override via $1)
 SPEC_FILE="${1:-$GIT_ROOT/types-first-dev/specs/url-shortener.yaml}"
 
-# Optional target directory override (via $2)
-TARGET_DIR="/Users/inannamalick/dev/template-repo/url-shortener"
+# Optional target directory override (via $2, defaults to git root)
+TARGET_DIR="${2:-$GIT_ROOT}"
 
 # Run from git root (for cabal.project)
 cd "$GIT_ROOT"

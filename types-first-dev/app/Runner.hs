@@ -80,7 +80,7 @@ runWorkGraph spec config = do
   -- Create root node builder for execution logging
   rootBuilder <- newNodeBuilder spec.sDescription 0
 
-  result <- withRecursiveGraph @WorkInput @WorkResult $ \subgraphState wire -> do
+  result <- withRecursiveGraph @WorkInput @WorkResult (Just config.wcMaxConcurrency) $ \subgraphState wire -> do
     -- Wire the recursive graph runner - children spawn with WorkInput
     -- Each child gets its own NodeBuilder, linked to parent's nbChildren
     wire $ \childId childInput -> do
@@ -161,7 +161,8 @@ main = do
       let config = WorkConfig
             { wcBaseDir = targetDir
             , wcParentBranch = "main"
-            , wcMaxDepth = 3
+            , wcMaxDepth = 3  -- Root(0) → Package(1) → Module(2) → Leaf(3)
+            , wcMaxConcurrency = 4  -- Max 4 children running per parent
             }
 
       -- Run the graph

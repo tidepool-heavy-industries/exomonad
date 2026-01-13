@@ -1,0 +1,62 @@
+id: cleanup-tidepool-imports
+
+description: |
+  Remove unused imports from Haskell codebase in the tidepool repository.
+
+  This is a CLEANUP task - only delete unused imports, do not add any new code or functionality.
+
+  The tidepool repo has ~30 Haskell packages under `haskell/`:
+  - Core DSL packages: haskell/dsl/core, haskell/runtime/actor
+  - Effect interpreters: haskell/effects/*-executor (llm-executor, bd-executor, session-executor, etc.)
+  - Tools: haskell/tools/ghci-oracle, haskell/tools/sleeptime
+  - Platform: haskell/platform, haskell/protocol/*
+
+  GHC warns about unused imports when building with `-Wall`. Use these warnings to identify
+  what to remove. After removing imports, verify the module still compiles.
+
+  This task naturally decomposes by:
+  1. Package (each haskell/*/* directory)
+  2. Module (each .hs file within a package)
+
+  Expect depth 2-3 decomposition:
+  - Root: analyze all packages
+  - Children: one per package (e.g., "Clean haskell/dsl/core")
+  - Grandchildren: one per module if package is large (e.g., "Clean Graph/Types.hs")
+
+  **Build Command** (you're already in the repo root):
+  ```bash
+  cabal build all --ghc-options="-Wall" 2>&1 | grep "redundant\|unused"
+  ```
+
+  **Common unused import patterns:**
+  - Redundant imports when module re-exports
+  - Unused qualified imports (e.g., `import qualified Data.Map as M` when M never used)
+  - Unused specific imports (e.g., `import Data.List (sort)` when sort not used)
+  - Wildcard imports that bring in unused symbols
+
+  **Workflow per module:**
+  1. Compile the package: `cabal build -p <package-name> --ghc-options="-Wall"`
+  2. Parse warnings for this module
+  3. Remove the flagged imports
+  4. Recompile to verify: `cabal build -p <package-name>`
+  5. If builds clean, proceed to next module
+  6. After all modules in package cleaned, commit once for the package
+
+  **At max depth:**
+  You must do the work directly - parse GHC warnings, edit files, verify compilation.
+  Do NOT spawn more children.
+
+  **Edge cases:**
+  - CPP imports (behind #ifdef): Check warnings carefully, GHC knows which branches compile
+  - Template Haskell: May need imports for TH even if not "used" in normal code
+  - If removing an import causes compile error, restore it (was a false positive or indirect usage)
+
+acceptance_criteria:
+  - All unused import warnings eliminated from cabal build output with -Wall
+  - Every modified module still compiles successfully after import removal
+  - No functional changes - only import statement deletions
+  - Each package commits after cleanup (commit per package, not per file)
+  - Commit messages follow format cleanup remove unused imports from package-name
+
+target_path: haskell
+test_path: haskell

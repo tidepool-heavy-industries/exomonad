@@ -22,7 +22,7 @@ module Text.Ginger.TH.Schema
 import Control.Monad (forM)
 import Data.Char (isLower, isUpper, toLower)
 import Data.IORef (IORef, newIORef, readIORef, modifyIORef')
-import Data.List (foldl')
+import Data.List (foldl', isPrefixOf)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Set (Set)
@@ -313,15 +313,10 @@ scalarTypeNames =
 -- @
 detectPrefix :: [String] -> String
 detectPrefix [] = ""
-detectPrefix (x:xs) =
-  let prefix = takeWhile isLower x
-  in if all (prefix `isPrefixOf`) xs
-     then prefix
-     else ""
+detectPrefix ss = takeWhile isLower $ foldl1 commonPrefix ss
   where
-    isPrefixOf [] _ = True
-    isPrefixOf _ [] = False
-    isPrefixOf (a:as) (b:bs) = a == b && isPrefixOf as bs
+    commonPrefix (a:as) (b:bs) | a == b = a : commonPrefix as bs
+    commonPrefix _ _ = []
 
 -- | Create a field modifier that strips a specific prefix.
 --

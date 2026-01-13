@@ -56,16 +56,20 @@ spec = do
     it "round-trips through JSON" $ do
       let output = SessionOutput
             { soSessionId = SessionId "test-id"
+            , soCcSessionId = Nothing
             , soBranch = "test-branch"
             , soWorktree = "/test/path"
             , soExitCode = 0
             , soIsError = False
             , soResultText = Just "Success!"
+            , soStructuredOutput = Nothing
             , soTotalCostUsd = 0.25
             , soNumTurns = 10
             , soInterrupts = []
             , soDurationSecs = 60.5
             , soError = Nothing
+            , soToolCalls = Nothing
+            , soStderrOutput = Nothing
             }
       let json = LBS.toStrict $ encode output
       case eitherDecodeStrict json of

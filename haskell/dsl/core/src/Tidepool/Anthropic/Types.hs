@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 -- | Core types for Anthropic Messages API
 -- These are pure data types that can be used in WASM builds
 module Tidepool.Anthropic.Types
@@ -34,6 +35,7 @@ import Data.Aeson.Types (Parser)
 import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
+import Data.String (IsString)
 
 -- ══════════════════════════════════════════════════════════════
 -- ID NEWTYPES (Type-Safe IDs)
@@ -43,7 +45,7 @@ import GHC.Generics (Generic)
 --
 -- Prevents accidental confusion between tool use IDs and other Text values.
 newtype ToolUseId = ToolUseId { unToolUseId :: Text }
-  deriving (Show, Eq, Generic)
+  deriving (Show, Eq, Generic, IsString)
 
 instance ToJSON ToolUseId where
   toJSON (ToolUseId t) = toJSON t
@@ -55,7 +57,7 @@ instance FromJSON ToolUseId where
 --
 -- Must match a corresponding 'ToolUseId' from a tool use request.
 newtype ToolResultId = ToolResultId { unToolResultId :: Text }
-  deriving (Show, Eq, Generic)
+  deriving (Show, Eq, Generic, IsString)
 
 instance ToJSON ToolResultId where
   toJSON (ToolResultId t) = toJSON t
