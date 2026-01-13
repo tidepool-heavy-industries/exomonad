@@ -456,15 +456,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "dirs"
-version = "6.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3e8aa94d75141228480295a7d0e7feb620b1a5ad9f12bc40be62411e38cce4e"
-dependencies = [
- "dirs-sys",
-]
-
-[[package]]
 name = "dirs-sys"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1256,7 +1247,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "clap",
- "dirs",
+ "directories",
  "fs2",
  "mantle-shared",
  "nix",
@@ -1329,7 +1320,7 @@ dependencies = [
  "shell-escape",
  "strum",
  "tempfile",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
  "tokio",
  "tokio-tungstenite 0.24.0",
  "toml",

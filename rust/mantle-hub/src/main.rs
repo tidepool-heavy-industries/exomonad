@@ -38,7 +38,6 @@ use clap::{Parser, Subcommand};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use tracing::info;
-use tracing_subscriber::EnvFilter;
 
 use crate::state::AppState;
 use crate::types::NodeResult;
@@ -149,12 +148,7 @@ enum Commands {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize tracing
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new("mantle_hub=info,tower_http=debug")),
-        )
-        .init();
+    mantle_shared::init_logging_with_default("mantle_hub=info,tower_http=debug");
 
     let cli = Cli::parse();
 

@@ -166,8 +166,8 @@ impl ContainerConfig {
             AuthMount::Volume(volume)
         } else {
             // Fall back to host's ~/.claude
-            let claude_home = dirs::home_dir()
-                .map(|h| h.join(".claude"))
+            let claude_home = directories::BaseDirs::new()
+                .map(|d| d.home_dir().join(".claude"))
                 .filter(|p| p.exists())
                 .ok_or_else(|| DockerError::ClaudeHomeNotFound(PathBuf::from("~/.claude")))?;
             tracing::info!("Using host auth bind mount: {:?}", claude_home);

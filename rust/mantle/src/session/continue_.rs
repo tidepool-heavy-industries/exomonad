@@ -91,7 +91,7 @@ pub struct ContinueConfig {
 ///
 /// # Returns
 /// Session output with results
-pub fn continue_session(_repo_root: &Path, config: &ContinueConfig) -> Result<SessionOutput> {
+pub async fn continue_session(_repo_root: &Path, config: &ContinueConfig) -> Result<SessionOutput> {
     let start_time = Instant::now();
 
     // Validate worktree exists and is intact
@@ -153,7 +153,7 @@ pub fn continue_session(_repo_root: &Path, config: &ContinueConfig) -> Result<Se
         &config.prompt,
         config.timeout_secs,
         tools_json.as_deref(),
-    )?;
+    ).await?;
 
     let duration = start_time.elapsed().as_secs_f64();
 
@@ -169,104 +169,83 @@ pub fn continue_session(_repo_root: &Path, config: &ContinueConfig) -> Result<Se
 }
 
 /// Check if hub is reachable.
-fn check_hub_reachable(hub_config: &HubConfig) -> Result<()> {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|e| ContinueError::Execution(format!("Failed to create runtime: {}", e)))?;
-
-    rt.block_on(async {
-        let client = HubClient::from_config(hub_config)?;
-        client.health_check().await?;
-        Ok(())
-    })
+async fn check_hub_reachable(hub_config: &HubConfig) -> Result<()> {
+    let client = HubClient::from_config(hub_config)?;
+    client.health_check().await?;
+    Ok(())
 }
 
 /// Register a session with the hub.
 ///
 /// Creates a new session with its root node and returns (session_id, node_id).
-fn register_with_hub(
+async fn register_with_hub(
     hub_config: &HubConfig,
     branch: &str,
     worktree_path: &Path,
     model: &str,
     prompt: &str,
 ) -> Result<(String, String)> {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|e| ContinueError::Execution(format!("Failed to create runtime: {}", e)))?;
+    let client = HubClient::from_config(hub_config)?;
 
-    rt.block_on(async {
-        let client = HubClient::from_config(hub_config)?;
+    let req = SessionRegister {
+        branch: branch.to_string(),
+        worktree: worktree_path.to_path_buf(),
+        prompt: prompt.to_string(),
+        model: model.to_string(),
+    };
 
-        let req = SessionRegister {
-            branch: branch.to_string(),
-            worktree: worktree_path.to_path_buf(),
-            prompt: prompt.to_string(),
-            model: model.to_string(),
-        };
-
-        let resp = client.create_session(&req).await?;
-        Ok((resp.session.id, resp.root_node.id))
-    })
+    let resp = client.create_session(&req).await?;
+    Ok((resp.session.id, resp.root_node.id))
 }
 
 /// Submit a node result to the hub.
-fn submit_result_to_hub(
+async fn submit_result_to_hub(
     hub_config: &HubConfig,
     hub_session_id: &str,
     hub_node_id: &str,
     output: &SessionOutput,
 ) -> Result<()> {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|e| ContinueError::Execution(format!("Failed to create runtime: {}", e)))?;
+    let client = HubClient::from_config(hub_config)?;
 
-    rt.block_on(async {
-        let client = HubClient::from_config(hub_config)?;
+    // Convert model_usage from events::ModelUsage to hub::ModelUsage
+    let model_usage = output
+        .model_usage
+        .iter()
+        .map(|(k, v)| {
+            (
+                k.clone(),
+                HubModelUsage {
+                    input_tokens: v.input_tokens,
+                    output_tokens: v.output_tokens,
+                    cache_read_input_tokens: v.cache_read_input_tokens,
+                    cache_creation_input_tokens: v.cache_creation_input_tokens,
+                    cost_usd: v.cost_usd,
+                },
+            )
+        })
+        .collect();
 
-        // Convert model_usage from events::ModelUsage to hub::ModelUsage
-        let model_usage = output
-            .model_usage
-            .iter()
-            .map(|(k, v)| {
-                (
-                    k.clone(),
-                    HubModelUsage {
-                        input_tokens: v.input_tokens,
-                        output_tokens: v.output_tokens,
-                        cache_read_input_tokens: v.cache_read_input_tokens,
-                        cache_creation_input_tokens: v.cache_creation_input_tokens,
-                        cost_usd: v.cost_usd,
-                    },
-                )
-            })
-            .collect();
+    let result = HubNodeResult {
+        node_id: hub_node_id.to_string(),
+        exit_code: output.exit_code,
+        is_error: output.is_error,
+        result_text: output.result_text.clone(),
+        structured_output: output.structured_output.clone(),
+        total_cost_usd: output.total_cost_usd,
+        num_turns: output.num_turns,
+        cc_session_id: output.cc_session_id.clone().unwrap_or_default(),
+        duration_secs: output.duration_secs,
+        model_usage,
+    };
 
-        let result = HubNodeResult {
-            node_id: hub_node_id.to_string(),
-            exit_code: output.exit_code,
-            is_error: output.is_error,
-            result_text: output.result_text.clone(),
-            structured_output: output.structured_output.clone(),
-            total_cost_usd: output.total_cost_usd,
-            num_turns: output.num_turns,
-            cc_session_id: output.cc_session_id.clone().unwrap_or_default(),
-            duration_secs: output.duration_secs,
-            model_usage,
-        };
-
-        client
-            .submit_node_result(hub_session_id, hub_node_id, &result)
-            .await?;
-        Ok(())
-    })
+    client
+        .submit_node_result(hub_session_id, hub_node_id, &result)
+        .await?;
+    Ok(())
 }
 
 /// Execute session continue directly in a Docker container with hub streaming.
-fn execute_docker_continue(
+async fn execute_docker_continue(
     branch: &str,
     worktree_path: &Path,
     cc_session_id: &str,
@@ -275,6 +254,99 @@ fn execute_docker_continue(
     timeout_secs: u64,
     decision_tools: Option<&str>,
 ) -> Result<SessionOutput> {
+    // Load hub config
+    let hub_config = HubConfig::load();
+
+    // 1. Health check hub - FAIL if unreachable
+    check_hub_reachable(&hub_config).await?;
+
+    info!(cc_session_id = %cc_session_id, "Starting Docker continue execution with hub streaming");
+
+    // 2. Register session with hub (as a continuation)
+    let (hub_session_id, hub_node_id) = register_with_hub(
+        &hub_config,
+        branch,
+        worktree_path,
+        model,
+        &format!("[continue] {}", prompt),
+    ).await?;
+    info!(hub_session_id = %hub_session_id, hub_node_id = %hub_node_id, "Registered continuation with hub");
+
+    // 3. Connect WebSocket for event streaming
+    let event_stream =
+        SyncEventStream::connect(&hub_config.http_url, &hub_session_id, &hub_node_id)?;
+    info!(hub_session_id = %hub_session_id, hub_node_id = %hub_node_id, "Connected event stream to hub");
+
+    // Build Claude args with --resume flag and stream-json
+    let claude_args = vec![
+        "--dangerously-skip-permissions".to_string(),
+        "--output-format".to_string(),
+        "stream-json".to_string(),
+        "--verbose".to_string(),
+        "--max-turns".to_string(),
+        "30".to_string(),
+        "--model".to_string(),
+        model.to_string(),
+        "--resume".to_string(),
+        cc_session_id.to_string(),
+        "-p".to_string(),
+        prompt.to_string(),
+    ];
+
+    // Create container configuration using cc_session_id as container name
+    let mut container_config = ContainerConfig::new(
+        cc_session_id.to_string(),
+        worktree_path.to_path_buf(),
+        claude_args,
+    )?
+    .with_timeout(timeout_secs);
+
+    // Pass decision tools to container via file (avoids shell escaping issues)
+    if let Some(tools_json) = decision_tools {
+        debug!("Passing decision tools to container via file");
+        container_config = container_config.with_decision_tools(tools_json)
+            .map_err(|e| ContinueError::Execution(format!("Failed to set decision tools: {}", e)))?;
+    }
+
+    // Wrap event_stream in RefCell for interior mutability in the closure
+    let event_stream = RefCell::new(event_stream);
+
+    // Run Claude with event sink that forwards to hub
+    let run_result = run_claude_direct(&container_config, Some(|event: &_| {
+        if let Err(e) = event_stream.borrow_mut().send_event(event) {
+            warn!("Failed to forward event to hub: {}", e);
+        }
+    }))?;
+
+    // Close the WebSocket gracefully
+    if let Err(e) = event_stream.into_inner().close() {
+        warn!("Failed to close event stream: {}", e);
+    }
+
+    let output = SessionOutput {
+        session_id: cc_session_id.to_string(), // Use cc_session_id as session_id
+        branch: branch.to_string(),
+        worktree: worktree_path.to_path_buf(),
+        exit_code: run_result.exit_code,
+        is_error: run_result.is_error,
+        result_text: run_result.result,
+        structured_output: run_result.structured_output,
+        total_cost_usd: run_result.total_cost_usd,
+        num_turns: run_result.num_turns,
+        interrupts: run_result.interrupts,
+        duration_secs: 0.0,
+        error: None,
+        model_usage: run_result.model_usage,
+        cc_session_id: Some(run_result.session_id),
+        tool_calls: run_result.tool_calls,
+    };
+
+    // 5. Submit final result to hub
+    submit_result_to_hub(&hub_config, &hub_session_id, &hub_node_id, &output).await?;
+    info!(hub_session_id = %hub_session_id, hub_node_id = %hub_node_id, "Submitted continuation result to hub");
+
+    Ok(output)
+}
     // Load hub config
     let hub_config = HubConfig::load();
 

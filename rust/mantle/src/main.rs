@@ -14,7 +14,6 @@
 
 use clap::{Parser, Subcommand};
 use tracing::error;
-use tracing_subscriber::EnvFilter;
 
 use mantle::session::{
     continue_session, fork_session, start_session,
@@ -166,24 +165,28 @@ enum SessionCommands {
 // Main
 // ============================================================================
 
-fn main() {
+#[tokio::main]
+async fn main() {
     // Initialize tracing with env filter (RUST_LOG)
     // IMPORTANT: Output to stderr to avoid corrupting JSON on stdout
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
-        .with_target(false)
-        .with_writer(std::io::stderr)
-        .init();
+    mantle::init_logging();
 
     let cli = Cli::parse();
 
     let result = match cli.command {
-        Commands::Session { command } => handle_session_command(command),
+        Commands::Session { command } => handle_session_command(command).await,
     };
 
-    if let Err(e) = result {
-        error!(error = %e, "Command failed");
-        std::process::exit(1);
+    match result {
+        Ok(exit_code) => {
+            if exit_code != 0 {
+                std::process::exit(exit_code);
+            }
+        }
+        Err(e) => {
+            error!(error = %e, "Command failed");
+            std::process::exit(1);
+        }
     }
 }
 
@@ -191,11 +194,11 @@ fn main() {
 // Session Commands
 // ============================================================================
 
-fn handle_session_command(cmd: SessionCommands) -> std::result::Result<(), Box<dyn std::error::Error>> {
+async fn handle_session_command(cmd: SessionCommands) -> std::result::Result<i32, Box<dyn std::error::Error>> {
     // Get repository root (current directory for now)
     let repo_root = std::env::current_dir()?;
 
-    match cmd {
+    let run_result = match cmd {
         SessionCommands::Start { slug, prompt, model, timeout, json_schema, decision_tools_file,
                                hub_session_id, execution_id, node_path, node_type, parent_hub_node_id } => {
             let config = StartConfig {
@@ -213,19 +216,7 @@ fn handle_session_command(cmd: SessionCommands) -> std::result::Result<(), Box<d
                 parent_hub_node_id,
             };
 
-            match start_session(&repo_root, &config) {
-                Ok(output) => {
-                    println!("{}", serde_json::to_string_pretty(&output)?);
-                    if output.exit_code != 0 {
-                        std::process::exit(output.exit_code);
-                    }
-                    Ok(())
-                }
-                Err(e) => {
-                    eprintln!("Error starting session: {}", e);
-                    std::process::exit(1);
-                }
-            }
+            start_session(&repo_root, &config).await?
         }
 
         SessionCommands::Continue { cc_session_id, worktree, branch, model, prompt, timeout, decision_tools_file } => {
@@ -239,19 +230,7 @@ fn handle_session_command(cmd: SessionCommands) -> std::result::Result<(), Box<d
                 decision_tools_file,
             };
 
-            match continue_session(&repo_root, &config) {
-                Ok(output) => {
-                    println!("{}", serde_json::to_string_pretty(&output)?);
-                    if output.exit_code != 0 {
-                        std::process::exit(output.exit_code);
-                    }
-                    Ok(())
-                }
-                Err(e) => {
-                    eprintln!("Error continuing session: {}", e);
-                    std::process::exit(1);
-                }
-            }
+            continue_session(&repo_root, &config).await?
         }
 
         SessionCommands::Fork { parent_cc_session_id, parent_worktree, parent_branch, model, child_slug, child_prompt, timeout, decision_tools_file } => {
@@ -266,21 +245,12 @@ fn handle_session_command(cmd: SessionCommands) -> std::result::Result<(), Box<d
                 decision_tools_file,
             };
 
-            match fork_session(&repo_root, &config) {
-                Ok(output) => {
-                    println!("{}", serde_json::to_string_pretty(&output)?);
-                    if output.exit_code != 0 {
-                        std::process::exit(output.exit_code);
-                    }
-                    Ok(())
-                }
-                Err(e) => {
-                    eprintln!("Error forking session: {}", e);
-                    std::process::exit(1);
-                }
-            }
+            fork_session(&repo_root, &config).await?
         }
-    }
+    };
+
+    println!("{}", serde_json::to_string_pretty(&run_result)?);
+    Ok(run_result.exit_code)
 }
 
 // ============================================================================

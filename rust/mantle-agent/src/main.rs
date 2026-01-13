@@ -10,7 +10,6 @@
 
 use clap::{Parser, Subcommand};
 use tracing::error;
-use tracing_subscriber::EnvFilter;
 
 use mantle_shared::commands::HookEventType;
 use mantle_shared::handle_hook;
@@ -54,10 +53,7 @@ enum Commands {
 
 fn main() {
     // Initialize tracing with env filter (RUST_LOG)
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
-        .with_target(false)
-        .init();
+    mantle_shared::init_logging();
 
     let cli = Cli::parse();
 

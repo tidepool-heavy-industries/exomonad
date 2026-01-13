@@ -228,7 +228,7 @@ fn validate_graph_tracking_args(config: &StartConfig) -> Result<()> {
 ///
 /// # Returns
 /// Session output with results
-pub fn start_session(repo_root: &Path, config: &StartConfig) -> Result<SessionOutput> {
+pub async fn start_session(repo_root: &Path, config: &StartConfig) -> Result<SessionOutput> {
     // Validate graph tracking args before anything else
     validate_graph_tracking_args(config)?;
 
@@ -238,7 +238,7 @@ pub fn start_session(repo_root: &Path, config: &StartConfig) -> Result<SessionOu
     let hub_config = HubConfig::load();
 
     // 1. Health check hub - FAIL if unreachable
-    check_hub_reachable(&hub_config)?;
+    check_hub_reachable(&hub_config).await?;
 
     // Initialize worktree manager
     let mantle_dir = repo_root.join(".mantle");
@@ -283,11 +283,11 @@ pub fn start_session(repo_root: &Path, config: &StartConfig) -> Result<SessionOu
             &branch,
             &worktree_path,
             config,
-        )?;
+        ).await?;
         (existing_hub_session_id.clone(), node_response.node.id)
     } else {
         // Legacy flow: create new session with root node
-        register_with_hub(&hub_config, &branch, &worktree_path, config)?
+        register_with_hub(&hub_config, &branch, &worktree_path, config).await?
     };
     info!(hub_session_id = %hub_session_id, hub_node_id = %hub_node_id, "Registered with hub");
 
@@ -316,53 +316,39 @@ pub fn start_session(repo_root: &Path, config: &StartConfig) -> Result<SessionOu
     output.sanitize();
 
     // 5. Submit final result to hub
-    submit_result_to_hub(&hub_config, &hub_session_id, &hub_node_id, &output)?;
+    submit_result_to_hub(&hub_config, &hub_session_id, &hub_node_id, &output).await?;
     info!(hub_session_id = %hub_session_id, hub_node_id = %hub_node_id, "Submitted result to hub");
 
     Ok(output)
 }
 
 /// Check if hub is reachable.
-fn check_hub_reachable(hub_config: &HubConfig) -> Result<()> {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|e| StartError::Execution(format!("Failed to create runtime: {}", e)))?;
-
-    rt.block_on(async {
-        let client = HubClient::from_config(hub_config)?;
-        client.health_check().await?;
-        Ok(())
-    })
+async fn check_hub_reachable(hub_config: &HubConfig) -> Result<()> {
+    let client = HubClient::from_config(hub_config)?;
+    client.health_check().await?;
+    Ok(())
 }
 
 /// Register a session with the hub.
 ///
 /// Creates a new session with its root node and returns (session_id, node_id).
-fn register_with_hub(
+async fn register_with_hub(
     hub_config: &HubConfig,
     branch: &str,
     worktree_path: &Path,
     config: &StartConfig,
 ) -> Result<(String, String)> {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|e| StartError::Execution(format!("Failed to create runtime: {}", e)))?;
+    let client = HubClient::from_config(hub_config)?;
 
-    rt.block_on(async {
-        let client = HubClient::from_config(hub_config)?;
+    let req = SessionRegister {
+        branch: branch.to_string(),
+        worktree: worktree_path.to_path_buf(),
+        prompt: config.prompt.clone(),
+        model: config.model.clone(),
+    };
 
-        let req = SessionRegister {
-            branch: branch.to_string(),
-            worktree: worktree_path.to_path_buf(),
-            prompt: config.prompt.clone(),
-            model: config.model.clone(),
-        };
-
-        let resp = client.create_session(&req).await?;
-        Ok((resp.session.id, resp.root_node.id))
-    })
+    let resp = client.create_session(&req).await?;
+    Ok((resp.session.id, resp.root_node.id))
 }
 
 /// Register a node in an existing hub session.
@@ -371,113 +357,99 @@ fn register_with_hub(
 /// the orchestrator (Haskell) and nodes are registered into it.
 ///
 /// Returns the NodeCreateResponse containing the new node info.
-fn register_node_in_existing_session(
+async fn register_node_in_existing_session(
     hub_config: &HubConfig,
     hub_session_id: &str,
     branch: &str,
     worktree_path: &Path,
     config: &StartConfig,
 ) -> Result<NodeCreateResponse> {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|e| StartError::Execution(format!("Failed to create runtime: {}", e)))?;
+    let client = HubClient::from_config(hub_config)?;
 
-    rt.block_on(async {
-        let client = HubClient::from_config(hub_config)?;
+    // Build metadata for graph execution tracking
+    let metadata = build_node_metadata(config);
 
-        // Build metadata for graph execution tracking
-        let metadata = build_node_metadata(config);
+    let req = NodeRegister {
+        branch: branch.to_string(),
+        worktree: worktree_path.to_path_buf(),
+        prompt: config.prompt.clone(),
+        model: config.model.clone(),
+        parent_node_id: config.parent_hub_node_id.clone(),
+        metadata,
+    };
 
-        let req = NodeRegister {
-            branch: branch.to_string(),
-            worktree: worktree_path.to_path_buf(),
-            prompt: config.prompt.clone(),
-            model: config.model.clone(),
-            parent_node_id: config.parent_hub_node_id.clone(),
-            metadata,
-        };
+    debug!(
+        hub_session_id = %hub_session_id,
+        parent_hub_node_id = ?config.parent_hub_node_id,
+        metadata = ?req.metadata,
+        "Registering node in existing hub session"
+    );
 
-        debug!(
-            hub_session_id = %hub_session_id,
-            parent_hub_node_id = ?config.parent_hub_node_id,
-            metadata = ?req.metadata,
-            "Registering node in existing hub session"
-        );
-
-        client.create_node(hub_session_id, &req).await.map_err(|e| {
-            // Provide better error message for common failure cases
-            let err_str = e.to_string();
-            if err_str.contains("parent") || err_str.contains("FOREIGN KEY") {
-                StartError::Validation(format!(
-                    "Invalid parent_hub_node_id '{}': parent node does not exist in session '{}'",
-                    config.parent_hub_node_id.as_deref().unwrap_or("none"),
-                    hub_session_id
-                ))
-            } else if err_str.contains("404") || err_str.contains("not found") {
-                StartError::Validation(format!(
-                    "Hub session '{}' not found. Ensure the orchestrator created the session first.",
-                    hub_session_id
-                ))
-            } else {
-                // Propagate other hub errors as-is
-                StartError::Hub(e)
-            }
-        })
+    client.create_node(hub_session_id, &req).await.map_err(|e| {
+        // Provide better error message for common failure cases
+        let err_str = e.to_string();
+        if err_str.contains("parent") || err_str.contains("FOREIGN KEY") {
+            StartError::Validation(format!(
+                "Invalid parent_hub_node_id '{}': parent node does not exist in session '{}'",
+                config.parent_hub_node_id.as_deref().unwrap_or("none"),
+                hub_session_id
+            ))
+        } else if err_str.contains("404") || err_str.contains("not found") {
+            StartError::Validation(format!(
+                "Hub session '{}' not found. Ensure the orchestrator created the session first.",
+                hub_session_id
+            ))
+        } else {
+            // Propagate other hub errors as-is
+            StartError::Hub(e)
+        }
     })
 }
 
 /// Submit a node result to the hub.
-fn submit_result_to_hub(
+async fn submit_result_to_hub(
     hub_config: &HubConfig,
     hub_session_id: &str,
     hub_node_id: &str,
     output: &SessionOutput,
 ) -> Result<()> {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|e| StartError::Execution(format!("Failed to create runtime: {}", e)))?;
+    let client = HubClient::from_config(hub_config)?;
 
-    rt.block_on(async {
-        let client = HubClient::from_config(hub_config)?;
+    // Convert model_usage from events::ModelUsage to hub::ModelUsage
+    let model_usage = output
+        .model_usage
+        .iter()
+        .map(|(k, v)| {
+            (
+                k.clone(),
+                HubModelUsage {
+                    input_tokens: v.input_tokens,
+                    output_tokens: v.output_tokens,
+                    cache_read_input_tokens: v.cache_read_input_tokens,
+                    cache_creation_input_tokens: v.cache_creation_input_tokens,
+                    cost_usd: v.cost_usd,
+                },
+            )
+        })
+        .collect();
 
-        // Convert model_usage from events::ModelUsage to hub::ModelUsage
-        let model_usage = output
-            .model_usage
-            .iter()
-            .map(|(k, v)| {
-                (
-                    k.clone(),
-                    HubModelUsage {
-                        input_tokens: v.input_tokens,
-                        output_tokens: v.output_tokens,
-                        cache_read_input_tokens: v.cache_read_input_tokens,
-                        cache_creation_input_tokens: v.cache_creation_input_tokens,
-                        cost_usd: v.cost_usd,
-                    },
-                )
-            })
-            .collect();
+    let result = HubNodeResult {
+        node_id: hub_node_id.to_string(),
+        exit_code: output.exit_code,
+        is_error: output.is_error,
+        result_text: output.result_text.clone(),
+        structured_output: output.structured_output.clone(),
+        total_cost_usd: output.total_cost_usd,
+        num_turns: output.num_turns,
+        cc_session_id: output.cc_session_id.clone().unwrap_or_default(),
+        duration_secs: output.duration_secs,
+        model_usage,
+    };
 
-        let result = HubNodeResult {
-            node_id: hub_node_id.to_string(),
-            exit_code: output.exit_code,
-            is_error: output.is_error,
-            result_text: output.result_text.clone(),
-            structured_output: output.structured_output.clone(),
-            total_cost_usd: output.total_cost_usd,
-            num_turns: output.num_turns,
-            cc_session_id: output.cc_session_id.clone().unwrap_or_default(),
-            duration_secs: output.duration_secs,
-            model_usage,
-        };
-
-        client
-            .submit_node_result(hub_session_id, hub_node_id, &result)
-            .await?;
-        Ok(())
-    })
+    client
+        .submit_node_result(hub_session_id, hub_node_id, &result)
+        .await?;
+    Ok(())
 }
 
 /// Execute Claude Code in Docker with live event streaming to hub.

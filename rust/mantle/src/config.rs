@@ -110,7 +110,8 @@ impl Config {
 
     /// Default config file path: `~/.config/mantle/config.toml`
     pub fn default_path() -> PathBuf {
-        dirs::config_dir()
+        directories::BaseDirs::new()
+            .map(|d| d.config_dir().to_path_buf())
             .unwrap_or_else(|| PathBuf::from("."))
             .join("mantle")
             .join("config.toml")

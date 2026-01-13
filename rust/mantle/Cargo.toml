@@ -21,7 +21,7 @@ chrono = { version = "0.4", features = ["serde"] }
 fs2 = "0.4"
 
 # Docker container management
-dirs = "6.0.0"
+directories = "6"
 
 # Configuration
 toml = "0.8"
