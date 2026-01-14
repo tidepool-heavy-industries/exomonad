@@ -418,7 +418,7 @@ gotoArrive payload = GotoChoice (injectTarget @(To (Arrive barrierName) payload)
 unwrapSingleChoice :: GotoChoice '[To name payload] -> payload
 unwrapSingleChoice (GotoChoice (Here p)) = p
 
--- Note: gotoChoiceToResult has been removed. The typed executor in Execute.hs
+-- Note: gotoChoiceToResult has been removed. The typed interpreter in Interpret.hs
 -- dispatches directly on OneOf without needing to convert to Dynamic-based GotoResult.
 
 -- ════════════════════════════════════════════════════════════════════════════

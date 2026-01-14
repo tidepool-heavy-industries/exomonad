@@ -21,8 +21,8 @@ import Tidepool.Graph.Goto
   , gotoChoice
   , gotoExit
   )
+import Tidepool.Graph.Interpret (CallHandler(..))
 import Tidepool.Graph.Goto.Internal (OneOf(..), GotoChoice(..))  -- For test assertions
-import Tidepool.Graph.Execute (CallHandler(..))
 import Tidepool.Graph.Types (Exit)
 
 -- | Simple target list.

@@ -26,7 +26,7 @@
 -- Each tool helper works with three types:
 --
 -- 1. **Input type** - Parsed from the 'WireToolCall' JSON (e.g., 'AskUserInput')
--- 2. **Output type** - Raw result from the executor (e.g., 'TelegramAskResult')
+-- 2. **Output type** - Raw result from the interpreter (e.g., 'TelegramAskResult')
 -- 3. **Result type** - Simplified return value (e.g., 'Text')
 --
 -- For example, @ask_user@ has:
@@ -39,9 +39,11 @@
 --
 -- To add a typed helper for a new tool:
 --
--- 1. Define the input type with 'FromJSON' to parse from 'WireToolCall'
--- 2. Implement an executor that yields the appropriate effect
--- 3. Use 'parseToolInput' or 'parseToolInputM' in your dispatcher:
+-- 1. Define the effect type in 'SerializableEffect'
+-- 2. Implement an interpreter that yields the appropriate effect
+-- 3. Define the output type and its 'FromJSON' instance
+-- 4. Add a smart constructor (e.g., 'askUser')
+-- 5. Add a handler here (e.g., 'executeAskUser')
 --
 -- @
 -- myToolHandler :: WireToolCall -> Eff effs (Either Text Result)

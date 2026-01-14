@@ -5,7 +5,7 @@
 -- | Effect metadata for routing decisions.
 --
 -- This module defines metadata for all effect types (Log, LLM, State, etc.).
--- It's used by executors to determine how to route and schedule effects.
+-- It's used by interpreters to determine how to route and schedule effects.
 --
 -- = Adding a New Effect
 --

@@ -25,7 +25,7 @@ module Tidepool.Anthropic.Client
   , ThinkingContent(..)
   , RedactedThinking(..)
 
-    -- * Operations (with IO tool executor)
+    -- * Operations (with IO tool interpreter)
   , runTurnRequest
   ) where
 
@@ -70,7 +70,7 @@ data TurnRequest = TurnRequest
   , systemPrompt :: Maybe Text               -- System message
   , outputSchema :: Maybe Value              -- JSON Schema for structured output
   , tools :: [Value]                         -- Tool definitions
-  , toolExecutor :: Text -> Value -> IO (Either Text Value)  -- Execute tool by name
+  , toolInterpreter :: Text -> Value -> IO (Either Text Value)  -- Interpret tool by name
   , thinkingBudget :: Maybe Int              -- Token budget for extended thinking
   }
 
@@ -157,7 +157,7 @@ callMessagesOnce config req = do
       }
 
 -- ══════════════════════════════════════════════════════════════
--- OPERATIONS (with IO tool executor)
+-- OPERATIONS (with IO tool interpreter)
 -- ══════════════════════════════════════════════════════════════
 
 -- | Run a complete turn with tool loop
@@ -291,7 +291,7 @@ runTurnRequest config turnReq = do
       pure (map fst results, map snd results)
       where
         executeSingle use = do
-          result <- turnReq.toolExecutor use.toolName use.toolInput
+          result <- turnReq.toolInterpreter use.toolName use.toolInput
           let (outputVal, resultText, isError) = case result of
                 Right v -> (v, encodeText v, False)
                 Left err -> (Null, err, True)

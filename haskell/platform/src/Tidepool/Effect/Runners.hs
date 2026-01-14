@@ -425,7 +425,7 @@ runLLM config = interpret $ \case
           , Client.systemPrompt = Just systemPrompt
           , Client.outputSchema = outputSchema
           , Client.tools = tools
-          , Client.toolExecutor = stubToolExecutor
+          , Client.toolInterpreter = stubToolInterpreter
           , Client.thinkingBudget = config.llmThinkingBudget
           }
 
@@ -452,8 +452,8 @@ runLLM config = interpret $ \case
           , trThinking = resp.thinking
           }
   where
-    stubToolExecutor :: Text -> Value -> IO (Either Text Value)
-    stubToolExecutor _name _input = pure $ Right (toJSON ())
+    stubToolInterpreter :: Text -> Value -> IO (Either Text Value)
+    stubToolInterpreter _name _input = pure $ Right (toJSON ())
 
     convertInvocation :: Client.ToolInvocation -> ToolInvocation
     convertInvocation inv = ToolInvocation

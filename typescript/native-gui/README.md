@@ -14,18 +14,18 @@ tidepool-native-gui/
 │   ├── src/components/
 │   ├── src/lib/socket.ts
 │   └── package.json
-├── ui-executor/              # Agent 4 - interpreter for UI effects
-│   ├── src/Tidepool/UI/Executor.hs
-│   └── tidepool-ui-executor.cabal
-├── habitica-executor/        # Agent 5 - native HTTP client
-│   ├── src/Tidepool/Habitica/Executor.hs
-│   └── tidepool-habitica-executor.cabal
-├── observability-executor/   # Agent 6 - Loki push
-│   ├── src/Tidepool/Observability/Executor.hs
-│   └── tidepool-observability-executor.cabal
-├── llm-executor/             # Agent 7 - Anthropic native client
-│   ├── src/Tidepool/LLM/Executor.hs
-│   └── tidepool-llm-executor.cabal
+├── ui-interpreter/              # Agent 4 - interpreter for UI effects
+│   ├── src/Tidepool/UI/Interpreter.hs
+│   └── tidepool-ui-interpreter.cabal
+├── habitica-interpreter/        # Agent 5 - native HTTP client
+│   ├── src/Tidepool/Habitica/Interpreter.hs
+│   └── tidepool-habitica-interpreter.cabal
+├── observability-interpreter/   # Agent 6 - Loki push
+│   ├── src/Tidepool/Observability/Interpreter.hs
+│   └── tidepool-observability-interpreter.cabal
+├── llm-interpreter/             # Agent 7 - Anthropic native client
+│   ├── src/Tidepool/LLM/Interpreter.hs
+│   └── tidepool-llm-interpreter.cabal
 └── server/                   # Agent 1 - ties it together
     ├── app/Main.hs
     ├── src/Tidepool/Server.hs
@@ -35,18 +35,18 @@ tidepool-native-gui/
 
 ## Key Principle
 
-Effect *types* live in `tidepool-core/src/Tidepool/Effects/`, shared by WASM and native. Effect *executors* are platform-specific and live here.
+Effect *types* live in `tidepool-core/src/Tidepool/Effects/`, shared by WASM and native. Effect *interpreters* are platform-specific and live here.
 
 ## Dependencies
 
 ```
-wire-types (Agent 3) ──────► ui-executor (Agent 4)
+wire-types (Agent 3) ──────► ui-interpreter (Agent 4)
                        ├───► server (Agent 1)
                        └───► solid-frontend (Agent 2)
 
-habitica-executor (Agent 5) ───► server
-observability-executor (Agent 6) ───► server
-llm-executor (Agent 7) ───► server
+habitica-interpreter (Agent 5) ───► server
+observability-interpreter (Agent 6) ───► server
+llm-interpreter (Agent 7) ───► server
 ```
 
 ## Effect Types (in tidepool-core)
@@ -78,7 +78,7 @@ Set `VITE_WS_URL` to override the WebSocket URL (default: `ws://localhost:8080`)
 - Agent 1 (server): Complete - WebSocket server with effect composition
 - Agent 2 (solid-frontend): Complete - SolidJS + Tailwind CSS frontend with WebSocket, chat rendering, text/photo input, button groups
 - Agent 3 (wire-types): Complete - UIState, UserAction, protocol types
-- Agent 4 (ui-executor): Complete - UI effect interpreter with wire bridging
-- Agent 5 (habitica-executor): Complete - Native Habitica HTTP client
-- Agent 6 (observability-executor): Complete - Loki push API client
-- Agent 7 (llm-executor): Complete - Anthropic/OpenAI native HTTP clients
+- Agent 4 (ui-interpreter): Complete - UI effect interpreter with wire bridging
+- Agent 5 (habitica-interpreter): Complete - Native Habitica HTTP client
+- Agent 6 (observability-interpreter): Complete - Loki push API client
+- Agent 7 (llm-interpreter): Complete - Anthropic/OpenAI native HTTP clients

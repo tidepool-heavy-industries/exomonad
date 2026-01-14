@@ -87,13 +87,13 @@ The runner handles template rendering, LLM API call, and structured output parsi
 │  (GraphInfo,      (diagram                                                   │
 │   NodeInfo)        generation)                                               │
 │                                                                              │
-│  Goto.hs ─────────► Execute.hs ──────► Memory.hs                            │
+│  Goto.hs ─────────► Interpret.hs ────► Memory.hs                            │
 │  (transition       (DispatchGoto       (persistent                           │
 │   effect,           typeclass,          state effect)                        │
 │   OneOf GADT)       typed dispatch)                                          │
 │                          │                                                   │
 │                          ▼                                                   │
-│                    Execute/Instrumented.hs                                   │
+│                    Interpret/Instrumented.hs                                 │
 │                    (traced dispatch with                                     │
 │                     OpenTelemetry spans)                                     │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -219,7 +219,7 @@ gWork :: mode :- G.LLMNode
 **How it works:**
 1. Handler's `before` function builds template context from input
 2. System and user templates are rendered and concatenated
-3. Prompt is passed to `claude -p` via the mantle executor
+3. Prompt is passed to `claude -p` via the mantle interpreter
 4. Claude Code spawns with file system access to `cwd`
 5. JSON output is parsed according to `Schema` type
 6. Handler's `after` function routes based on parsed output
@@ -242,7 +242,7 @@ Both have the same 4 fields (`llmSystem`, `llmUser`, `llmBefore`, `llmAfter`), b
 - Tasks needing Claude Code's built-in tools (file editing, bash execution)
 
 > **Source**: `tidepool-core/src/Tidepool/Graph/Types.hs` (ClaudeCode, ModelChoice),
-> `tidepool-core/src/Tidepool/Graph/Execute.hs:264-302` (executeClaudeCodeHandler)
+> `tidepool-core/src/Tidepool/Graph/Interpret.hs:264-302` (executeClaudeCodeHandler)
 
 ### Graph-Level Annotations (`:&`)
 
@@ -332,7 +332,7 @@ case oneOf of
 
 No Dynamic, no unsafeCoerce - fully typed dispatch.
 
-## Execute.hs - Typed Graph Dispatch
+## Interpret.hs - Typed Graph Dispatch
 
 The `DispatchGoto` typeclass dispatches handlers based on `GotoChoice`:
 
@@ -374,7 +374,7 @@ class DispatchGotoWithSelf graph selfPayload allTargets targets es exitType wher
 
 **Error guidance**: If you try to use `dispatchGoto` with a handler that returns `Goto Self`, you'll get a clear `TypeError` directing you to use `dispatchGotoWithSelf`.
 
-> **Source**: `tidepool-core/src/Tidepool/Graph/Execute.hs:599-677`
+> **Source**: `tidepool-core/src/Tidepool/Graph/Interpret.hs:599-677`
 
 ## Memory Effect
 
@@ -745,7 +745,7 @@ work = ClaudeCodeLLMHandler @'Sonnet
 
 ### Execution Pipeline: runGraph
 
-The `runGraph` executor in `tidepool-core/src/Tidepool/Graph/Execute.hs` orchestrates the full ClaudeCode execution flow:
+The `runGraph` interpreter in `tidepool-core/src/Tidepool/Graph/Interpret.hs` orchestrates the full ClaudeCode execution flow:
 
 ```haskell
 -- Full type signature (simplified)
@@ -793,7 +793,7 @@ executeClaudeCodeHandler
 - Claude Code retries response (transparent to handler)
 - Max 5 retries before surfacing error to handler
 
-> **Source**: `tidepool-core/src/Tidepool/Graph/Execute.hs:264-442`
+> **Source**: `tidepool-core/src/Tidepool/Graph/Interpret.hs:264-442`
 
 ### Decision Tools: Structured Output via Tool Calls
 
@@ -961,7 +961,7 @@ Key design:
 - Session reuse enables TDD ↔ Review ↔ Impl ping-pongs
 
 > **Source**: `tidepool-core/src/Tidepool/Graph/Goto.hs:496-557` (types),
-> `tidepool-core/src/Tidepool/Graph/Execute.hs:264-442` (execution)
+> `tidepool-core/src/Tidepool/Graph/Interpret.hs:264-442` (execution)
 
 ## Validation
 
@@ -1051,7 +1051,7 @@ HOW TO FIX
 - Invalid Goto targets (typos, missing nodes)
 - Using `To` instead of `Goto` in graph definitions
 
-**Dispatch Errors** (`Execute.hs`):
+**Dispatch Errors** (`Interpret.hs`):
 - Empty target list (handler has no exit points)
 - Self-loop with `dispatchGoto` (should use `dispatchGotoWithSelf`)
 
@@ -1093,7 +1093,7 @@ HOW TO FIX
 ```
 
 > **Source**: Error formatting helpers in `tidepool-core/src/Tidepool/Graph/Errors.hs`,
-> `TypeError` instances throughout `Generic.hs`, `Execute.hs`, `Goto.hs`
+> `TypeError` instances throughout `Generic.hs`, `Interpret.hs`, `Goto.hs`
 
 ## Effect vs Effects
 
@@ -1183,8 +1183,8 @@ All paths relative to `tidepool-core/src/Tidepool/Graph/`.
 | `Generic.hs` | `GraphMode`, `AsHandler`, `AsGraph`, `NodeHandler`, `ValidGraphRecord` | Mode system and handler type computation |
 | `Edges.hs` | `GetInput`, `GetSchema`, `GetUsesEffects`, `GotoEffectsToTargets`, `GotosToTos` | Type families for annotation extraction |
 | `Goto.hs` | `Goto`, `To`, `OneOf`, `GotoChoice`, `gotoChoice`, `gotoExit`, `gotoSelf`, `LLMHandler` | Transition types and smart constructors |
-| `Execute.hs` | `DispatchGoto`, `DispatchGotoWithSelf`, `runGraph`, `runGraphFrom`, `CallHandler` | Typed graph dispatch |
-| `Execute/Instrumented.hs` | Traced `DispatchGoto` instances | OpenTelemetry span emission |
+| `Interpret.hs` | `DispatchGoto`, `DispatchGotoWithSelf`, `runGraph`, `runGraphFrom`, `CallHandler` | Typed graph dispatch |
+| `Interpret/Instrumented.hs` | Traced `DispatchGoto` instances | OpenTelemetry span emission |
 | `Memory.hs` | `Memory`, `getMem`, `updateMem`, `modifyMem` | Node-private persistent state |
 | `Template.hs` | `TemplateDef`, `TemplateContext`, `templateCompiled`, `buildContext` | Typed Jinja templates |
 | `Tool.hs` | `ToolDef`, `toolName`, `toolSchema`, `toolExecute` | LLM-invocable tools |

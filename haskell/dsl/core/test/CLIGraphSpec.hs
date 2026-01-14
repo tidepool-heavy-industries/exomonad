@@ -34,7 +34,7 @@ import Tidepool.Graph.CLI
   , OutputFormat(..)
   , runGraphCLIPure
   )
-import Tidepool.Graph.Execute (runGraph)
+import Tidepool.Graph.Interpret (runGraph)
 import Tidepool.Graph.Generic (GraphMode(..), type (:-), AsHandler)
 import Tidepool.Graph.Generic.Core (Entry)
 import Tidepool.Graph.Goto (gotoExit, Goto)

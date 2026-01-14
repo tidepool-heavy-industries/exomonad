@@ -6,7 +6,7 @@
 --
 -- @
 -- import Tidepool.Effects.GitHub
--- import Tidepool.GitHub.Executor (runGitHubIO, defaultGitHubConfig)
+-- import Tidepool.GitHub.Interpreter (runGitHubIO, defaultGitHubConfig)
 --
 -- main = runM $ runGitHubIO defaultGitHubConfig $ do
 --   issues <- listIssues (Repo "owner/repo") defaultIssueFilter
@@ -17,7 +17,7 @@
 -- = Implementation
 --
 -- Read operations are implemented via the @gh@ CLI tool in
--- @tidepool-github-executor@. Write operations (CreateIssue) remain stubbed.
+-- @tidepool-github-interpreter@. Write operations (CreateIssue) remain stubbed.
 module Tidepool.Effects.GitHub
   ( -- * Effect
     GitHub(..)
@@ -341,7 +341,7 @@ checkAuth = send CheckAuth
 -- | Stub runner that logs calls and errors on write operations.
 --
 -- Read operations return empty results; use @runGitHubIO@ from
--- @tidepool-github-executor@ for real implementation.
+-- @tidepool-github-interpreter@ for real implementation.
 runGitHubStub :: Member Log effs => Eff (GitHub ': effs) a -> Eff effs a
 runGitHubStub = interpret $ \case
   CreateIssue (Repo repo) title _ _ -> do

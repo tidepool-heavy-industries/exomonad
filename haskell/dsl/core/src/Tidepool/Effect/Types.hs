@@ -218,7 +218,7 @@ data LLM r where
 -- | Outcome of running a turn
 --
 -- Internal representation (unparameterized) used by the LLM effect.
--- Transitions are carried as untyped values and typed by the executor.
+-- Transitions are carried as untyped values and typed by the interpreter.
 data TurnOutcome a
   = TurnCompleted a
   | TurnBroken Text
@@ -257,12 +257,12 @@ data ToolInvocation = ToolInvocation
 --
 -- Parameterized by @targets@ to allow tools to trigger graph transitions.
 -- Tools that don't transition can use an empty list: @ToolResult '[]@
--- Note: ToolTransition carries untyped target information; the executor will type-check
+-- Note: ToolTransition carries untyped target information; the interpreter will type-check
 -- and convert it to a GotoChoice when the target types are known.
 data ToolResult (targets :: [Type])
   = ToolSuccess Value
   | ToolBreak Text
-  | ToolTransition Text Value  -- target name + payload (untyped, will be type-checked at executor)
+  | ToolTransition Text Value  -- target name + payload (untyped, will be type-checked at interpreter)
 
 instance Show (ToolResult targets) where
   show (ToolSuccess val) = "ToolSuccess " <> show val
@@ -450,7 +450,7 @@ llmCallEitherWithTools systemPrompt userInput schema tools = do
   result <- runTurn @output systemPrompt userInput schema tools
   case result of
     TurnBroken reason -> pure $ Left $ "Turn broken: " <> reason
-    TurnTransitionHint target _payload -> pure $ Left $ "Unexpected transition to " <> target <> " (not in executor context)"
+    TurnTransitionHint target _payload -> pure $ Left $ "Unexpected transition to " <> target <> " (not in interpreter context)"
     TurnCompleted (TurnParsed tr) -> pure $ Right tr.trOutput
     TurnCompleted (TurnParseFailed {tpfError}) -> pure $ Left $ "Parse failed: " <> T.pack tpfError
 
@@ -500,7 +500,7 @@ llmCallStructuredWithTools systemPrompt userInput schema tools = do
   result <- runTurn @output systemPrompt userInput schema tools
   case result of
     TurnBroken reason -> pure $ Left $ LlmTurnBroken reason
-    TurnTransitionHint target _payload -> pure $ Left $ LlmTurnBroken $ "Unexpected transition to " <> target <> " (not in executor context)"
+    TurnTransitionHint target _payload -> pure $ Left $ LlmTurnBroken $ "Unexpected transition to " <> target <> " (not in interpreter context)"
     TurnCompleted (TurnParsed tr) -> pure $ Right tr.trOutput
     TurnCompleted (TurnParseFailed {tpfError}) -> pure $ Left $ LlmParseFailed (T.pack tpfError)
 

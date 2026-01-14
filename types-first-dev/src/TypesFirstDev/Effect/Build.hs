@@ -26,7 +26,7 @@ module TypesFirstDev.Effect.Build
   , TestResult(..)
   , TestFailure(..)
 
-    -- * Executor
+    -- * Interpreter
   , runBuildIO
   ) where
 

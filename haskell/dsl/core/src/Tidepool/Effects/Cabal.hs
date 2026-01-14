@@ -1,6 +1,6 @@
 -- | Cabal build/test effect for TDD workflows.
 --
--- Effect type only - executor lives in tidepool-native-gui/cabal-executor.
+-- Effect type only - interpreter lives in tidepool-native-gui/cabal-interpreter.
 -- Enables graphs to run build/test commands and receive structured feedback.
 --
 -- = Example Usage
@@ -135,7 +135,7 @@ data CabalResult
 -- | Cabal effect for build/test operations.
 --
 -- All operations take a project path and return 'CabalResult'.
--- The executor handles subprocess management and output parsing.
+-- The interpreter handles subprocess management and output parsing.
 data Cabal r where
   -- | Build the project.
   --

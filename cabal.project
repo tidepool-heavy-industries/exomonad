@@ -9,18 +9,18 @@ packages:
     haskell/platform
 
     -- Effect interpreters
-    haskell/effects/llm-executor
-    haskell/effects/bd-executor
-    haskell/effects/habitica-executor
-    haskell/effects/ui-executor
-    haskell/effects/observability-executor
-    haskell/effects/lsp-executor
-    haskell/effects/ghci-executor
-    haskell/effects/github-executor
-    haskell/effects/worktree-executor
-    haskell/effects/session-executor
-    haskell/effects/cabal-executor
-    haskell/effects/devlog-executor
+    haskell/effects/llm-interpreter
+    haskell/effects/bd-interpreter
+    haskell/effects/habitica-interpreter
+    haskell/effects/ui-interpreter
+    haskell/effects/observability-interpreter
+    haskell/effects/lsp-interpreter
+    haskell/effects/ghci-interpreter
+    haskell/effects/github-interpreter
+    haskell/effects/worktree-interpreter
+    haskell/effects/session-interpreter
+    haskell/effects/cabal-interpreter
+    haskell/effects/devlog-interpreter
 
     -- Effect types (standalone)
     haskell/effects/habitica
@@ -37,6 +37,7 @@ packages:
 
     -- Test/example packages
     types-first-dev
+    human-driven-dev
     -- types-first-dev/test-repo  -- disabled: empty directory, no cabal file
 
     -- Vendored dependencies

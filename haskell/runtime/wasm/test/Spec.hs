@@ -11,7 +11,7 @@ import qualified ProtocolPropertySpec
 import qualified RunnerSpec
 import qualified FfiSpec
 import qualified E2ESpec
-import qualified ExecutorSpec
+import qualified InterpreterSpec
 import qualified CodegenSyncSpec
 import qualified RoundtripSpec
 import qualified RegistrySpec
@@ -31,7 +31,7 @@ main = hspec $ do
     describe "Runner" RunnerSpec.spec
     describe "FFI" FfiSpec.spec
     describe "E2E" E2ESpec.spec
-    describe "Graph Executor E2E" ExecutorSpec.spec
+    describe "Graph Interpreter E2E" InterpreterSpec.spec
     describe "Codegen Sync" CodegenSyncSpec.spec
     describe "Roundtrip" RoundtripSpec.spec
     describe "Registry" RegistrySpec.spec

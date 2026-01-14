@@ -1,6 +1,6 @@
 -- | Native tidepool server - Servant + WebSocket + static files.
 --
--- Ties together all executors and exposes WebSocket endpoint.
+-- Ties together all interpreters and exposes WebSocket endpoint.
 -- Uses Servant's type-level API for REST endpoints and static file serving.
 --
 -- = Architecture
@@ -22,7 +22,7 @@
 -- main = runServer ServerConfig
 --   { scPort = 8080
 --   , scHost = "0.0.0.0"
---   , scExecutorConfig = defaultExecutorConfig
+--   , scInterpreterConfig = defaultInterpreterConfig
 --   , scMode = StaticFiles "dist"
 --   }
 -- @
@@ -33,9 +33,9 @@ module Tidepool.Server
   , ServerMode(..)
   , Agent
 
-    -- * Executor Configuration
-  , ExecutorConfig(..)
-  , defaultExecutorConfig
+    -- * Interpreter Configuration
+  , InterpreterConfig(..)
+  , defaultInterpreterConfig
 
     -- * Default Agent
   , simpleAgent
@@ -67,12 +67,12 @@ import WaiAppStatic.Types (ssIndices, unsafeToPiece)
 import System.Directory (doesDirectoryExist)
 
 import Tidepool.Wire.Types (UIState(..), UserAction(..))
-import Tidepool.UI.Executor (UIContext, newUIContext, UICallback)
+import Tidepool.UI.Interpreter (UIContext, newUIContext, UICallback)
 import Tidepool.Server.EffectRunner
-  ( ExecutorConfig(..)
-  , ExecutorEnv
-  , defaultExecutorConfig
-  , mkExecutorEnv
+  ( InterpreterConfig(..)
+  , InterpreterEnv
+  , defaultInterpreterConfig
+  , mkInterpreterEnv
   , runEffects
   )
 import Tidepool.Server.Session
@@ -121,8 +121,8 @@ data ServerConfig = ServerConfig
     -- ^ Port to listen on (default: 8080)
   , scHost :: Text
     -- ^ Host to bind to (default: "0.0.0.0")
-  , scExecutorConfig :: ExecutorConfig
-    -- ^ Executor configuration (LLM keys, Habitica creds, etc.)
+  , scInterpreterConfig :: InterpreterConfig
+    -- ^ Interpreter configuration (LLM keys, Habitica creds, etc.)
   , scMode :: ServerMode
     -- ^ Static file serving mode
   , scAgent :: Agent
@@ -153,7 +153,7 @@ runServer config = do
 
   -- Create shared state
   sessions <- newSessionMap
-  env <- mkExecutorEnv (scExecutorConfig config)
+  env <- mkInterpreterEnv (scInterpreterConfig config)
 
   case scMode config of
     StaticFiles dir -> do
@@ -257,7 +257,7 @@ devProxyHandler = Tagged $ \_req respond -> respond $ responseLBS
 -- | WebSocket application handler.
 --
 -- Accepts incoming connections and spawns a handler for each.
-wsApp :: SessionMap -> ExecutorEnv -> Agent -> WS.ServerApp
+wsApp :: SessionMap -> InterpreterEnv -> Agent -> WS.ServerApp
 wsApp sessions env agent pending = do
   conn <- WS.acceptRequest pending
   putStrLn "[WebSocket] Connection accepted"
@@ -279,7 +279,7 @@ wsApp sessions env agent pending = do
 --
 -- Creates a UI callback that bridges WebSocket to the effect system,
 -- then runs the agent with full effect composition.
-handleConnection :: ExecutorEnv -> Session -> WS.Connection -> Agent -> IO ()
+handleConnection :: InterpreterEnv -> Session -> WS.Connection -> Agent -> IO ()
 handleConnection env session conn agent = do
   -- Create UI context for this session
   ctx <- newUIContext "entry"

@@ -1,7 +1,7 @@
 {-# LANGUAGE UndecidableInstances #-}
 -- | LLM provider types with type-level provider switching.
 --
--- Effect type only - executors live in tidepool-llm-executor.
+-- Effect type only - interpreters live in tidepool-llm-interpreter.
 -- The type-level provider switch determines request/response schema.
 module Tidepool.Effects.LLMProvider
   ( -- * Provider Type

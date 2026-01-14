@@ -42,7 +42,7 @@ CLAUDE.md  ← YOU ARE HERE (project overview)
 | I want to... | Read this |
 |--------------|-----------|
 | Define a graph, handlers, annotations | `haskell/dsl/core/CLAUDE.md` |
-| Understand ClaudeCode execution | `haskell/effects/session-executor/CLAUDE.md` |
+| Understand ClaudeCode execution | `haskell/effects/session-interpreter/CLAUDE.md` |
 | Add or modify an effect interpreter | `haskell/effects/CLAUDE.md` |
 | Understand actor execution model | `haskell/runtime/actor/CLAUDE.md` |
 | Work on types-first-dev V3 protocol | `types-first-dev/CLAUDE.md` |
@@ -146,7 +146,13 @@ Context generation tooling for coding agents:
 
 The cron jobs live in the consuming repo (anemone, urchin), not in tidepool itself. Tidepool provides the infrastructure; consuming repos implement the evolution loop.
 
-## ClaudeCode Executor (WIP)
+## ClaudeCode Interpreter (WIP)
+
+Dockerized Claude Code orchestration via mantle.
+
+```haskell
+import Tidepool.LSP.Interpreter (withLSPSession, runLSP)
+```
 
 Spawn Claude Code as a graph node:
 ```haskell
@@ -181,18 +187,18 @@ All Haskell packages now live under `haskell/`. See `haskell/CLAUDE.md` for full
 | Package | Purpose |
 |---------|---------|
 | `haskell/native-server` | Servant + WebSocket server (facade) |
-| `haskell/effects/llm-executor` | Anthropic/OpenAI API calls |
-| `haskell/effects/bd-executor` | Beads integration + urchin CLI |
-| `haskell/effects/claude-code-executor` | Claude Code subprocess via mantle |
-| `haskell/effects/habitica-executor` | Habitica API |
-| `haskell/effects/ui-executor` | WebSocket ↔ UI bridging |
-| `haskell/effects/observability-executor` | OpenTelemetry traces to Grafana |
-| `haskell/effects/lsp-executor` | LSP via lsp-client |
-| `haskell/effects/ghci-executor` | GHCi Oracle thin client |
-| `haskell/effects/github-executor` | GitHub API integration |
-| `haskell/effects/worktree-executor` | Git worktree management |
-| `haskell/effects/cabal-executor` | Cabal build operations |
-| `haskell/effects/devlog-executor` | Devlog effect executor |
+| `haskell/effects/llm-interpreter` | Anthropic/OpenAI API calls |
+| `haskell/effects/bd-interpreter` | Beads integration + urchin CLI |
+| `haskell/effects/claude-code-interpreter` | Claude Code subprocess via mantle |
+| `haskell/effects/habitica-interpreter` | Habitica API |
+| `haskell/effects/ui-interpreter` | WebSocket ↔ UI bridging |
+| `haskell/effects/observability-interpreter` | OpenTelemetry traces to Grafana |
+| `haskell/effects/lsp-interpreter` | LSP via lsp-client |
+| `haskell/effects/ghci-interpreter` | GHCi Oracle thin client |
+| `haskell/effects/github-interpreter` | GitHub API integration |
+| `haskell/effects/worktree-interpreter` | Git worktree management |
+| `haskell/effects/cabal-interpreter` | Cabal build operations |
+| `haskell/effects/devlog-interpreter` | Devlog effect interpreter |
 
 ### Integrations (`haskell/effects/`, `haskell/protocol/`)
 | Package | Purpose |

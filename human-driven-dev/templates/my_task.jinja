@@ -1,0 +1,81 @@
+{# Template for MyTask node #}
+
+# Task
+
+{{ taskDescription }}
+
+{% if contextItems %}
+## Context
+
+{% for item in contextItems %}
+- {{ item }}
+{% endfor %}
+{% endif %}
+
+{% if hasRetries %}
+## Previous Attempts (Attempt {{ attemptNumber }})
+
+This is retry #{{ attemptNumber }}. Previous attempts:
+
+{% for attempt in previousAttempts %}
+{{ loop.index }}. {{ attempt }}
+{% endfor %}
+
+Learn from these attempts and try a different approach.
+{% endif %}
+
+{% if completedSubtasks %}
+## Completed Subtasks
+
+The following subtasks are already done:
+{% for subtask in completedSubtasks %}
+- {{ subtask }}
+{% endfor %}
+{% endif %}
+
+## Your Task
+
+Analyze the task and decide on one of the following actions:
+
+1. **Complete**: Task is done, provide summary and artifacts
+2. **Retry**: Need to try again with adjustments
+3. **Spawn**: Break into parallel subtasks
+4. **Failed**: Unrecoverable error, provide diagnostics
+
+## Output Format
+
+Respond with structured JSON matching one of these exit types:
+
+```json
+// Option 1: Task completed successfully
+{
+  "taskComplete": {
+    "result": "Summary of what was accomplished",
+    "details": ["artifact1.hs", "artifact2.hs"]
+  }
+}
+
+// Option 2: Need to retry
+{
+  "taskRetry": {
+    "reason": "Why the current approach didn't work",
+    "adjustments": ["What to change in next attempt"]
+  }
+}
+
+// Option 3: Spawn subtasks
+{
+  "taskSpawn": {
+    "subtasks": ["Subtask 1 description", "Subtask 2 description"],
+    "strategy": "How subtasks relate and will be merged"
+  }
+}
+
+// Option 4: Failed
+{
+  "taskFailed": {
+    "error": "What went wrong",
+    "diagnostics": ["Additional details", "for debugging"]
+  }
+}
+```

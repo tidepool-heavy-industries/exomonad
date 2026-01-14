@@ -33,7 +33,7 @@ Maintains a persistent GHCi REPL session, exposing it via TCP socket:
 cd tools/ghci-oracle
 cabal run ghci-oracle -- --port 9999 --project /path/to/project
 
-# Clients use tidepool-ghci-executor effect to query types
+# Clients use tidepool-ghci-interpreter effect to query types
 runGHCiIO conn $ queryType "fmap"  -- Returns "(a -> b) -> f a -> f b"
 ```
 
@@ -69,5 +69,5 @@ Keeping them separate avoids dependency conflicts and bloat in the main build.
 
 ## Related Documentation
 
-- [effects/ghci-executor/CLAUDE.md](../effects/ghci-executor/CLAUDE.md) - Client that connects to ghci-oracle
+- [effects/ghci-interpreter/CLAUDE.md](../effects/ghci-interpreter/CLAUDE.md) - Client that connects to ghci-oracle
 - [Root CLAUDE.md](../../CLAUDE.md) - Project overview with sleeptime context

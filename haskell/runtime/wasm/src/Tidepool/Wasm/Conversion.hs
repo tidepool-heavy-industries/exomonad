@@ -266,7 +266,7 @@ parseWireTurnResult val =
 -- | Convert a parameterized ToolResult to wire ToolResultOutcome.
 --
 -- Note: This loses type information at the boundary (parameterized → untyped).
--- Type safety is restored at the executor level via ConvertTransitionHint typeclass.
+-- Type safety is restored at the interpreter level via ConvertTransitionHint typeclass.
 toToolResultOutcome :: Effect.ToolResult targets -> ToolResultOutcome
 toToolResultOutcome = \case
   Effect.ToolSuccess val ->
@@ -280,7 +280,7 @@ toToolResultOutcome = \case
 -- | Convert a wire ToolResultOutcome back to untyped ToolResult.
 --
 -- Returns ToolResult with empty target list ('[]') since type information is lost at FFI boundary.
--- The executor's ConvertTransitionHint typeclass will convert to properly-typed GotoChoice.
+-- The interpreter's ConvertTransitionHint typeclass will convert to properly-typed GotoChoice.
 fromToolResultOutcome :: ToolResultOutcome -> Effect.ToolResult '[]
 fromToolResultOutcome = \case
   TROSuccess val ->

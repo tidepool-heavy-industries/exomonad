@@ -1,6 +1,6 @@
 -- | Observability effect for structured logging and tracing.
 --
--- Effect type only - executors live in tidepool-observability-executor.
+-- Effect type only - interpreters live in tidepool-observability-interpreter.
 --
 -- Supports two observability primitives:
 -- 1. Events (logs) - Published to Loki for queryability

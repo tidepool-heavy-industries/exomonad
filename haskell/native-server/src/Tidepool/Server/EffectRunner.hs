@@ -1,6 +1,6 @@
--- | Effect runner - composes all executors.
+-- | Effect runner - composes all interpreters.
 --
--- Wires up UI, Habitica, Observability, and LLM executors to run
+-- Wires up UI, Habitica, Observability, and LLM interpreters to run
 -- complete agent graphs.
 --
 -- = Usage
@@ -8,19 +8,19 @@
 -- @
 -- import Tidepool.Server.EffectRunner
 --
--- config <- loadExecutorConfig
--- env <- mkExecutorEnv config
+-- config <- loadInterpreterConfig
+-- env <- mkInterpreterEnv config
 -- result <- runEffects env ctx callback agentProgram
 -- @
 module Tidepool.Server.EffectRunner
   ( -- * Configuration
-    ExecutorConfig(..)
-  , defaultExecutorConfig
-  , loadExecutorConfig
+    InterpreterConfig(..)
+  , defaultInterpreterConfig
+  , loadInterpreterConfig
 
     -- * Environment
-  , ExecutorEnv(..)
-  , mkExecutorEnv
+  , InterpreterEnv(..)
+  , mkInterpreterEnv
 
     -- * Running Effects
   , runEffects
@@ -32,21 +32,21 @@ import qualified Data.Text as T
 import System.Environment (lookupEnv)
 import Text.Read (readMaybe)
 
--- Executor imports
-import Tidepool.UI.Executor
+-- Interpreter imports
+import Tidepool.UI.Interpreter
   ( UIContext
   , UICallback
   , newUIContext
   , runUI
   )
-import Tidepool.Habitica.Executor
+import Tidepool.Habitica.Interpreter
   ( HabiticaConfig(..)
   , HabiticaEnv
   , mkHabiticaEnv
   , runHabitica
   , defaultHabiticaConfig
   )
-import Tidepool.Observability.Executor
+import Tidepool.Observability.Interpreter
   ( LokiConfig(..)
   , OTLPConfig(..)
   , runObservabilityWithContext
@@ -55,7 +55,7 @@ import Tidepool.Observability.Executor
   , defaultLokiConfig
   , defaultOTLPConfig
   )
-import Tidepool.LLM.Executor
+import Tidepool.LLM.Interpreter
   ( LLMEnv
   , LLMConfig(..)
   , mkLLMEnv
@@ -67,7 +67,7 @@ import Tidepool.LLM.Types
   , ApiKey(..)
   , BaseUrl(..)
   )
-import Tidepool.DevLog.Executor
+import Tidepool.DevLog.Interpreter
   ( runDevLog
   , DevLogConfig(..)
   , DevLogOutput(..)
@@ -75,7 +75,7 @@ import Tidepool.DevLog.Executor
   )
 import Tidepool.Effect.DevLog (DevLog, Verbosity(..))
 import Tidepool.Effect.Session (Session)
-import Tidepool.Session.Executor
+import Tidepool.Session.Interpreter
   ( runSessionIO
   , SessionConfig(..)
   , defaultSessionConfig
@@ -92,8 +92,8 @@ import Tidepool.Effects.LLMProvider (LLMComplete)
 -- CONFIGURATION
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Configuration for all executors.
-data ExecutorConfig = ExecutorConfig
+-- | Configuration for all interpreters.
+data InterpreterConfig = InterpreterConfig
   { ecLLMConfig :: LLMConfig
     -- ^ LLM provider configuration
   , ecHabiticaConfig :: HabiticaConfig
@@ -113,9 +113,9 @@ data ExecutorConfig = ExecutorConfig
 
 -- | Default configuration with empty credentials.
 --
--- Use 'loadExecutorConfig' to load from environment variables.
-defaultExecutorConfig :: ExecutorConfig
-defaultExecutorConfig = ExecutorConfig
+-- Use 'loadInterpreterConfig' to load from environment variables.
+defaultInterpreterConfig :: InterpreterConfig
+defaultInterpreterConfig = InterpreterConfig
   { ecLLMConfig = LLMConfig
       { lcAnthropicSecrets = Nothing
       , lcOpenAISecrets = Nothing
@@ -148,8 +148,8 @@ defaultExecutorConfig = ExecutorConfig
 -- * @DEVLOG_DIR@ - DevLog output directory (default: disabled)
 -- * @DEVLOG_VERBOSITY@ - Verbosity level: quiet|normal|verbose|trace (default: normal)
 -- * @DEVLOG_LATEST@ - Create latest.log symlink: true|false (default: true)
-loadExecutorConfig :: IO ExecutorConfig
-loadExecutorConfig = do
+loadInterpreterConfig :: IO InterpreterConfig
+loadInterpreterConfig = do
   -- LLM secrets
   anthropicKey <- lookupEnv "ANTHROPIC_API_KEY"
   openaiKey <- lookupEnv "OPENAI_API_KEY"
@@ -192,7 +192,7 @@ loadExecutorConfig = do
         Just "false" -> False
         _            -> True
 
-  pure ExecutorConfig
+  pure InterpreterConfig
     { ecLLMConfig = LLMConfig
         { lcAnthropicSecrets = case anthropicKey of
             Just k -> Just AnthropicSecrets
@@ -246,8 +246,8 @@ loadExecutorConfig = do
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Runtime environment with initialized resources.
-data ExecutorEnv = ExecutorEnv
-  { eeConfig :: ExecutorConfig
+data InterpreterEnv = InterpreterEnv
+  { eeConfig :: InterpreterConfig
     -- ^ Original configuration
   , eeLLMEnv :: LLMEnv
     -- ^ Initialized LLM client (with HTTP manager)
@@ -255,14 +255,14 @@ data ExecutorEnv = ExecutorEnv
     -- ^ Initialized Habitica client (with HTTP manager)
   }
 
--- | Create a new executor environment.
+-- | Create a new interpreter environment.
 --
--- Initializes HTTP managers and other resources needed by executors.
-mkExecutorEnv :: ExecutorConfig -> IO ExecutorEnv
-mkExecutorEnv config = do
+-- Initializes HTTP managers and other resources needed by interpreters.
+mkInterpreterEnv :: InterpreterConfig -> IO InterpreterEnv
+mkInterpreterEnv config = do
   llmEnv <- mkLLMEnv (ecLLMConfig config)
   habiticaEnv <- mkHabiticaEnv (ecHabiticaConfig config)
-  pure ExecutorEnv
+  pure InterpreterEnv
     { eeConfig = config
     , eeLLMEnv = llmEnv
     , eeHabiticaEnv = habiticaEnv
@@ -312,7 +312,7 @@ mkExecutorEnv config = do
 -- result <- runEffects env ctx callback myAgent
 -- @
 runEffects
-  :: ExecutorEnv
+  :: InterpreterEnv
   -> UIContext
   -> UICallback
   -> Eff '[UI, Habitica, LLMComplete, Session, DevLog, Observability, IO] a

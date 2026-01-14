@@ -99,7 +99,7 @@ instance ToJSON DevLogEvent
 -- | Graph transition info.
 --
 -- Logged automatically by instrumented dispatch.
--- Timestamps are added by the executor, not the caller.
+-- Timestamps are added by the interpreter, not the caller.
 data GraphTransitionInfo = GraphTransitionInfo
   { gtiFromNode :: Text
   , gtiToNode   :: Text
@@ -126,7 +126,7 @@ instance ToJSON StateSnapshotInfo
 --
 -- At VNormal: metadata only (model, tokens, tools).
 -- At VVerbose: includes full prompts.
--- Timestamps are added by the executor, not the caller.
+-- Timestamps are added by the interpreter, not the caller.
 data LLMRequestInfo = LLMRequestInfo
   { lriNodeName     :: Text
   , lriModel        :: Text
@@ -141,7 +141,7 @@ data LLMRequestInfo = LLMRequestInfo
 instance ToJSON LLMRequestInfo
 
 -- | LLM response info.
--- Timestamps are added by the executor, not the caller.
+-- Timestamps are added by the interpreter, not the caller.
 data LLMResponseInfo = LLMResponseInfo
   { lroNodeName         :: Text
   , lroCompletionTokens :: Int

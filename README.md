@@ -77,7 +77,7 @@ just native  # Starts at localhost:8080
 
 ```
 tidepool-core/           # Core library (Graph DSL, effects, templates)
-tidepool-native-gui/     # Native execution layer (server + effect executors)
+tidepool-native-gui/     # Native execution layer (server + effect interpreters)
 tidepool-wasm/           # WASM compilation target
 deploy/                  # Cloudflare Worker harness
 tools/                   # Agent evolution tooling (sleeptime)

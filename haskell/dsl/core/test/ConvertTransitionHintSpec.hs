@@ -16,7 +16,7 @@ import Data.Aeson (toJSON, object, (.=), Value)
 import Data.Text (Text)
 import qualified Data.Text as T
 
-import Tidepool.Graph.Execute (ConvertTransitionHint(..))
+import Tidepool.Graph.Interpret (ConvertTransitionHint(..))
 import Tidepool.Graph.Goto (To, GotoChoice)
 import Tidepool.Graph.Goto.Internal (GotoChoice(..), OneOf(..))
 import Tidepool.Graph.Types (Exit, Self)

@@ -7,7 +7,7 @@ All Haskell packages live here, organized by architectural pattern.
 | I want to... | Read this |
 |--------------|-----------|
 | Understand graph DSL, handlers, annotations | `dsl/core/CLAUDE.md` |
-| Add or modify an effect interpreter | `effects/CLAUDE.md` → `effects/{name}-executor/CLAUDE.md` |
+| Add or modify an effect interpreter | `effects/CLAUDE.md` → `effects/{name}-interpreter/CLAUDE.md` |
 | Understand graph execution model | `runtime/CLAUDE.md` → `runtime/actor/CLAUDE.md` |
 | Work on the WebSocket server | `native-server/CLAUDE.md` |
 | Understand wire protocols | `protocol/CLAUDE.md` |
@@ -22,9 +22,9 @@ haskell/CLAUDE.md  ← YOU ARE HERE (router)
 ├── dsl/CLAUDE.md
 │   └── core/CLAUDE.md  ← Graph DSL reference (detailed)
 ├── effects/CLAUDE.md  ← Effect interpreter pattern
-│   ├── llm-executor/CLAUDE.md
-│   ├── session-executor/CLAUDE.md  ← ClaudeCode subprocess
-│   ├── ghci-executor/CLAUDE.md
+│   ├── llm-interpreter/CLAUDE.md
+│   ├── session-interpreter/CLAUDE.md  ← ClaudeCode subprocess
+│   ├── ghci-interpreter/CLAUDE.md
 │   ├── habitica/CLAUDE.md
 │   └── ...
 ├── runtime/CLAUDE.md
@@ -71,6 +71,6 @@ Pre-commit:    `just pre-commit`
 ## Adding New Effects
 
 1. Define effect type in `dsl/core/src/Tidepool/Effect/Types.hs` (or Effects/*.hs)
-2. Create interpreter package at `effects/{name}-executor/`
+2. Create interpreter package at `effects/{name}-interpreter/`
 3. Add to `cabal.project`
 4. Wire into `native-server/` (see native-server/CLAUDE.md)

@@ -15,7 +15,7 @@
 **Benefits of CLI approach**:
 - No native dependencies
 - Works in WASM (via effect yield to TypeScript)
-- Matches BD executor pattern
+- Matches BD interpreter pattern
 - Easy to test with mock outputs
 
 ## Command Output Formats
@@ -254,9 +254,9 @@ data CommitDetails = CommitDetails
   }
 ```
 
-## Executor Implementation
+## Interpreter Implementation
 
-Follow the BD executor pattern:
+Follow the BD interpreter pattern:
 
 ```haskell
 -- | Run Git effects using git CLI.
@@ -267,7 +267,7 @@ runGitIO config = interpret $ \case
   GetBlame path start end -> sendM $ gitBlame config path start end
   GetCommit ref -> sendM $ gitShow config ref
 
--- | Configuration for Git executor.
+-- | Configuration for Git interpreter.
 data GitConfig = GitConfig
   { gcRepoPath :: Maybe FilePath  -- If Nothing, use cwd
   , gcQuiet :: Bool               -- Suppress stderr
@@ -302,7 +302,7 @@ gitCmd args = do
     ExitFailure _ -> Left (T.pack stderr)
 ```
 
-This matches the BD executor pattern and is sufficient for chiton-spawn context construction.
+This matches the BD interpreter pattern and is sufficient for chiton-spawn context construction.
 
 ## References
 

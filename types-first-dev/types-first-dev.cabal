@@ -27,7 +27,7 @@ library
         TypesFirstDev.WorkGraph
         TypesFirstDev.WorkContext
         TypesFirstDev.WorkHandlers
-        TypesFirstDev.WorkExecutor
+        TypesFirstDev.WorkInterpreter
         TypesFirstDev.WorkTemplates
         TypesFirstDev.WorkInterpreters
         TypesFirstDev.WorkHandlersAssembled
@@ -55,9 +55,9 @@ library
         uuid >= 1.3 && < 2,
         tidepool-core,
         tidepool-actor,
-        tidepool-session-executor,
-        tidepool-worktree-executor,
-        tidepool-cabal-executor,
+        tidepool-session-interpreter,
+        tidepool-worktree-interpreter,
+        tidepool-cabal-interpreter,
         async >= 2.2 && < 3,
         stm >= 2.5 && < 3,
         yaml >= 0.11 && < 1
@@ -97,9 +97,9 @@ executable types-first-dev
         process >= 1.6 && < 2,
         types-first-dev,
         tidepool-core,
-        tidepool-session-executor,
-        tidepool-worktree-executor,
-        tidepool-cabal-executor
+        tidepool-session-interpreter,
+        tidepool-worktree-interpreter,
+        tidepool-cabal-interpreter
     ghc-options:
         -threaded
         -rtsopts
@@ -135,8 +135,8 @@ executable types-first-dev-runner
         types-first-dev,
         tidepool-core,
         tidepool-actor,
-        tidepool-session-executor,
-        tidepool-worktree-executor,
+        tidepool-session-interpreter,
+        tidepool-worktree-interpreter,
         yaml >= 0.11 && < 1
     ghc-options:
         -threaded

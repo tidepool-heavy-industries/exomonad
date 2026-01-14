@@ -1,6 +1,6 @@
 -- | Worktree effect for managing git worktrees.
 --
--- Effect type only - executor lives in tidepool-native-gui/worktree-executor.
+-- Effect type only - interpreter lives in tidepool-native-gui/worktree-interpreter.
 -- Enables graphs to create isolated working directories for parallel agents.
 --
 -- = Example Usage
@@ -86,7 +86,7 @@ instance StructuredOutput WorktreePath where
 data WorktreeSpec = WorktreeSpec
   { wsBaseName :: Text
     -- ^ Base name for the worktree (e.g., "types-first-tests").
-    -- A unique suffix will be added by the executor.
+    -- A unique suffix will be added by the interpreter.
   , wsFromBranch :: Maybe Text
     -- ^ Branch to create worktree from. Nothing = current HEAD.
   }
@@ -267,7 +267,7 @@ listWorktrees = send ListWorktrees
 -- the worktree to persist beyond the action.
 --
 -- Note: If the action throws an exception at the IO level, cleanup may not
--- occur. For full IO-level safety, the executor also uses IO bracket.
+-- occur. For full IO-level safety, the interpreter also uses IO bracket.
 withWorktree
   :: Member Worktree effs
   => WorktreeSpec

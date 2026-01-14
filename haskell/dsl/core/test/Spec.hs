@@ -5,7 +5,7 @@ import Test.Hspec
 import qualified CLISpec
 import qualified CLIGraphSpec
 import qualified GraphValidationSpec
-import qualified LLMNodeExecuteSpec
+import qualified LLMNodeInterpretSpec
 import qualified MemorySerializationSpec
 import qualified MermaidSpec
 import qualified StructuredOutputSpec
@@ -31,7 +31,7 @@ main = hspec $ do
     GraphValidationSpec.spec
 
   describe "LLM Node Execution" $ do
-    LLMNodeExecuteSpec.spec
+    LLMNodeInterpretSpec.spec
 
   describe "Memory Serialization" $ do
     MemorySerializationSpec.spec

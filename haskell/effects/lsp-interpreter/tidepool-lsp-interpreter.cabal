@@ -1,0 +1,55 @@
+cabal-version:      3.0
+name:               tidepool-lsp-interpreter
+version:            0.1.0.0
+synopsis:           LSP effect interpreter using lsp-client
+license:            MIT
+author:             Inanna
+build-type:         Simple
+
+common warnings
+    ghc-options: -Wall -Wincomplete-patterns -Wredundant-constraints -Wunused-packages
+
+library
+    import:           warnings
+    exposed-modules:
+        Tidepool.LSP.Interpreter
+    build-depends:
+        base >= 4.17 && < 5,
+        freer-simple >= 1.2 && < 2,
+        text >= 2.0 && < 3,
+        containers >= 0.6 && < 1,
+        process >= 1.6 && < 2,
+        lsp-client >= 0.4 && < 0.5,
+        lsp-types >= 2.3 && < 3,
+        tidepool-core
+    hs-source-dirs:   src
+    default-language: GHC2021
+    default-extensions:
+        DataKinds
+        DeriveAnyClass
+        DeriveGeneric
+        DerivingStrategies
+        DuplicateRecordFields
+        GADTs
+        LambdaCase
+        NoFieldSelectors
+        OverloadedRecordDot
+        OverloadedStrings
+        TypeApplications
+        TypeOperators
+
+executable lsp-smoke-test
+    main-is:          SmokeTest.hs
+    hs-source-dirs:   test
+    build-depends:
+        base >= 4.17 && < 5,
+        text >= 2.0 && < 3,
+        process >= 1.6 && < 2,
+        lsp-client >= 0.4 && < 0.5,
+        lsp-types >= 2.3 && < 3,
+        tidepool-lsp-interpreter
+    default-language: GHC2021
+    default-extensions:
+        DuplicateRecordFields
+        OverloadedStrings
+        OverloadedRecordDot

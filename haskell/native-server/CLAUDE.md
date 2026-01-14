@@ -23,18 +23,18 @@ Servant + WebSocket server for running tidepool agents natively (without WASM/CF
 
 The server composes these effect interpreters via `runEffects`:
 
-| Effect | Executor | Purpose |
+| Effect | Interpreter | Purpose |
 |--------|----------|---------|
-| UI | ui-executor | WebSocket ↔ UIState/UserAction bridging |
-| Habitica | habitica-executor | Habitica API calls (optional) |
-| LLMComplete | llm-executor | Anthropic/OpenAI API calls |
-| Session | session-executor | Dockerized Claude Code sessions via mantle |
-| Observability | observability-executor | Loki logs + OTLP traces |
+| UI | ui-interpreter | WebSocket ↔ UIState/UserAction bridging |
+| Habitica | habitica-interpreter | Habitica API calls (optional) |
+| LLMComplete | llm-interpreter | Anthropic/OpenAI API calls |
+| Session | session-interpreter | Dockerized Claude Code sessions via mantle |
+| Observability | observability-interpreter | Loki logs + OTLP traces |
 
 Composition order (EffectRunner.hs):
 
 ```haskell
-runEffects :: ExecutorEnv -> UIContext -> UICallback
+runEffects :: InterpreterEnv -> UIContext -> UICallback
            -> Eff '[UI, Habitica, LLMComplete, Session, Observability, IO] a
            -> IO a
 runEffects env ctx callback action = do

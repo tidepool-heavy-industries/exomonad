@@ -215,7 +215,7 @@ Two options for Haskell side:
 #### Option A: Extend ClaudeCodeConfig
 
 ```haskell
--- tidepool-native-gui/claude-code-executor/src/Tidepool/ClaudeCode/Config.hs
+-- tidepool-native-gui/claude-code-interpreter/src/Tidepool/ClaudeCode/Config.hs
 
 data ExecutionMode
   = DirectMode          -- Current: shell out to mantle run
@@ -258,7 +258,7 @@ data Container r where
   -- Terminate
   TerminateContainer :: ContainerId -> Container ()
 
--- Executor in tidepool-native-gui/container-executor/
+-- Interpreter in tidepool-native-gui/container-interpreter/
 runContainer :: Container a -> IO a
 runContainer = \case
   SpawnContainer branch prompt ->
@@ -328,7 +328,7 @@ typeDrivenDev task = do
 
 ### Phase 3: Haskell Integration
 - [ ] Create `Container` effect type in tidepool-core
-- [ ] Create `container-executor` package
+- [ ] Create `container-interpreter` package
 - [ ] Wire into native server EffectRunner
 - [ ] Integration tests
 

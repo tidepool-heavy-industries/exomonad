@@ -681,7 +681,7 @@ type family NodeHandlerDispatch nodeDef origNode es mInput mTpl mSchema mEffs wh
   -- ══════════════════════════════════════════════════════════════════════════
   --
   -- ForkNode handlers receive input and return spawn payloads as an HList.
-  -- The executor spawns parallel paths for each target.
+  -- The interpreter spawns parallel paths for each target.
   --
   -- Handler: @input -> Eff es (SpawnPayloads targets)@
   --

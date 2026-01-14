@@ -3,12 +3,12 @@ module Main where
 
 import System.Environment (lookupEnv)
 import Tidepool.Server (runServer, ServerConfig(..), ServerMode(..), simpleAgent)
-import Tidepool.Server.EffectRunner (loadExecutorConfig)
+import Tidepool.Server.EffectRunner (loadInterpreterConfig)
 
 main :: IO ()
 main = do
-  -- Load executor configuration from environment variables
-  executorConfig <- loadExecutorConfig
+  -- Load interpreter configuration from environment variables
+  interpreterConfig <- loadInterpreterConfig
 
   -- Check for environment variable to set mode
   modeEnv <- lookupEnv "TIDEPOOL_MODE"
@@ -21,7 +21,7 @@ main = do
   runServer ServerConfig
     { scPort = 8080
     , scHost = "0.0.0.0"
-    , scExecutorConfig = executorConfig
+    , scInterpreterConfig = interpreterConfig
     , scMode = mode
     , scAgent = simpleAgent
     , scGraphInfo = Nothing  -- SimpleAgent is a plain agent, no graph to visualize

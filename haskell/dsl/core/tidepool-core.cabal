@@ -30,7 +30,7 @@ library
         Tidepool.Graph.Goto
         Tidepool.Graph.Goto.Internal
         Tidepool.Graph.Errors
-        Tidepool.Graph.Execute
+        Tidepool.Graph.Interpret
         Tidepool.Graph.Edges
         Tidepool.Graph.Validate
         Tidepool.Graph.Validate.RecordStructure
@@ -76,7 +76,7 @@ library
         Tidepool.Graph.Example
         Tidepool.Graph.Example.Context
         Tidepool.Graph.Docs
-        Tidepool.Graph.Execute.Instrumented
+        Tidepool.Graph.Interpret.Instrumented
         Tidepool.Question
         Tidepool.Template.DependencyTree
       build-depends:

@@ -1,0 +1,38 @@
+cabal-version:      3.0
+name:               tidepool-ui-interpreter
+version:            0.1.0.0
+synopsis:           UI effect interpreter - bridges UI effects to wire types
+license:            MIT
+author:             Inanna
+build-type:         Simple
+
+common warnings
+    ghc-options: -Wall -Wincomplete-patterns -Wredundant-constraints -Wunused-packages
+
+library
+    import:           warnings
+    exposed-modules:
+        Tidepool.UI.Interpreter
+    build-depends:
+        base >= 4.17 && < 5,
+        base64-bytestring >= 1.2 && < 2,
+        bytestring >= 0.11 && < 1,
+        containers >= 0.6 && < 1,
+        freer-simple >= 1.2 && < 2,
+        text >= 2.0 && < 3,
+        time >= 1.12 && < 2,
+        tidepool-core,
+        tidepool-wire-types
+    hs-source-dirs:   src
+    default-language: GHC2021
+    default-extensions:
+        DataKinds
+        DeriveAnyClass
+        DeriveGeneric
+        DerivingStrategies
+        DuplicateRecordFields
+        GADTs
+        LambdaCase
+        OverloadedRecordDot
+        OverloadedStrings
+        TypeFamilies

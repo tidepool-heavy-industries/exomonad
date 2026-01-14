@@ -13,7 +13,7 @@ GHCi dependencies (process management, GHC internals) are heavy. Keeping this as
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│ Client (tidepool-ghci-executor)                                 │
+│ Client (tidepool-ghci-interpreter)                                 │
 │   runGHCiIO conn $ queryType "fmap"                            │
 └─────────────────────────────────────────────────────────────────┘
                               │
@@ -118,4 +118,4 @@ Note: This package has its own `cabal.project` and is NOT part of the main tidep
 ## Related
 
 - [tidepool-core/src/Tidepool/Effect/GHCi.hs](../../tidepool-core/src/Tidepool/Effect/GHCi.hs) - Effect type and wire protocol types
-- [tidepool-native-gui/ghci-executor/](../../tidepool-native-gui/ghci-executor/) - Thin client that connects to this server
+- [tidepool-native-gui/ghci-interpreter/](../../tidepool-native-gui/ghci-interpreter/) - Thin client that connects to this server

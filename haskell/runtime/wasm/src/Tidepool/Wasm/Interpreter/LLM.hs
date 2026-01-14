@@ -56,7 +56,7 @@ import Tidepool.Wasm.Conversion
 
 -- | Default node name used when no context is provided.
 --
--- In production, this should be passed from the graph executor context.
+-- In production, this should be passed from the graph interpreter context.
 defaultNodeName :: Text
 defaultNodeName = "graph-node"
 
@@ -78,7 +78,7 @@ defaultNodeName = "graph-node"
 -- = Node Name
 --
 -- Currently uses 'defaultNodeName' as a placeholder. In production, this should
--- be passed from the graph executor context.
+-- be passed from the graph interpreter context.
 runLLMAsYield
   :: Member (Yield SerializableEffect EffectResult) effs
   => Eff (LLM ': effs) a

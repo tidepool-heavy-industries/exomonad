@@ -262,7 +262,7 @@ data BeadType
   deriving (Generic, FromJSON, ToJSON)
 ```
 
-### Executor Strategy
+### Interpreter Strategy
 
 Shell out to `bd` with `--json` flag, parse response:
 

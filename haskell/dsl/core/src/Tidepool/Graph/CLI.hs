@@ -96,7 +96,7 @@ import Language.Haskell.TH hiding (Type)
 import Language.Haskell.TH qualified as TH
 import Options.Applicative
 
-import Tidepool.Graph.Execute (runGraph, FindEntryHandler, CallHandler, DispatchGoto)
+import Tidepool.Graph.Interpret (runGraph, FindEntryHandler, CallHandler, DispatchGoto)
 import Tidepool.Graph.Generic (AsHandler, FieldsWithNamesOf)
 import Tidepool.Graph.Generic.Core (AsGraph, Entry, Exit)
 
@@ -475,16 +475,16 @@ runGraphCLIWith
   :: (Show output, ToJSON output)
   => Text                       -- ^ Description for --help
   -> Parser input               -- ^ Input parser (use deriveCLIParser)
-  -> (input -> IO output)       -- ^ Graph executor
+  -> (input -> IO output)       -- ^ Graph interpreter
   -> IO ()
-runGraphCLIWith desc inputParser executor = do
+runGraphCLIWith desc inputParser interpreter = do
   let combinedParser = (,) <$> inputParser <*> outputFormatParser
       parserInfo' = info (combinedParser <**> helper)
         ( fullDesc
         <> progDesc (T.unpack desc)
         )
   (input, fmt) <- execParser parserInfo'
-  result <- executor input
+  result <- interpreter input
   TIO.putStrLn (formatOutput fmt result)
 
 -- | Run a logic-only graph (no LLM/IO effects) as CLI.

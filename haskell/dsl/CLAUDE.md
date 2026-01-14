@@ -10,7 +10,7 @@ Core graph DSL implementation. Defines graph types, validation, templates, schem
 
 - `Graph/Types.hs` - DSL syntax (:@, Input, Schema, Goto)
 - `Graph/Generic.hs` - Mode system, handler computation
-- `Graph/Execute.hs` - Dispatch and execution
+- `Graph/Interpret.hs` - Dispatch and interpretation
 - `Effect/Types.hs` - Core effect types (LLM, State, Log, Emit, etc.)
 - `Effects/*.hs` - Integration effects (BD, GitHub, Habitica, etc.)
 - `Schema.hs` - JSON schema generation

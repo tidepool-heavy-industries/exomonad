@@ -34,7 +34,7 @@ import Tidepool.Graph.Types
   ( Input, UsesEffects, type (:@) )
 import qualified Tidepool.Graph.Types as Types (Exit)
 import qualified Tidepool.Graph.Generic as G
-import Tidepool.Graph.Execute (DispatchGoto(..))
+import Tidepool.Graph.Interpret (DispatchGoto(..))
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TEST GRAPH: Simple tool transition

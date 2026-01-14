@@ -18,7 +18,7 @@
 --  +-------------------+
 --           |
 --   +-------v-------+
---   | lsp-executor  | <- Native interpreter (via lsp-client)
+--   | lsp-interpreter  | <- Native interpreter (via lsp-client)
 --   | (lsp-client)  |
 --   +---------------+
 -- @
@@ -296,7 +296,7 @@ data CompletionItem = CompletionItem
 --
 -- This effect is IO-blind - interpreters handle the actual communication:
 --
--- * Native: Use 'Tidepool.LSP.Executor.runLSP' with lsp-client
+-- * Native: Use 'Tidepool.LSP.Interpreter.runLSP' with lsp-client
 -- * WASM: Not available – 'NativeOnly' constraint prevents use in WASM builds
 data LSP r where
   -- | Get diagnostics (errors, warnings) for a document.
@@ -375,7 +375,7 @@ completion doc pos = send (Completion doc pos)
 -- | Stub runner that logs operations and returns empty/error results.
 --
 -- This is a placeholder for testing and development. For real LSP
--- functionality, use 'Tidepool.LSP.Executor.runLSP' from lsp-executor.
+-- functionality, use 'Tidepool.LSP.Interpreter.runLSP' from lsp-interpreter.
 runLSPStub :: Member Log effs => Eff (LSP ': effs) a -> Eff effs a
 runLSPStub = interpret $ \case
   Diagnostics doc -> do

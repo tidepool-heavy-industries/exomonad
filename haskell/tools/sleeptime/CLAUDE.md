@@ -97,6 +97,6 @@ See `tools/micro-gastown/` for automation.
 
 ## Related Documentation
 
-- [effects/observability-executor/](../../effects/observability-executor/) - Produces the logs we query
+- [effects/observability-interpreter/](../../effects/observability-interpreter/) - Produces the logs we query
 - [tools/CLAUDE.md](../CLAUDE.md) - Tools overview
 - `README.md` in this directory - Full usage reference

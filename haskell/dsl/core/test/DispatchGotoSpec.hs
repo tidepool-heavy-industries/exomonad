@@ -30,7 +30,7 @@ import Tidepool.Graph.Goto
   , Goto
   )
 import Tidepool.Graph.Goto.Internal (GotoChoice(..))  -- For test assertions
-import Tidepool.Graph.Execute (DispatchGoto(..))
+import Tidepool.Graph.Interpret (DispatchGoto(..))
 import Tidepool.Graph.Generic (GraphMode(..), type (:-), AsHandler)
 import Tidepool.Graph.Generic.Core (Entry)
 import Tidepool.Graph.Types (Input, UsesEffects, type (:@))

@@ -42,7 +42,7 @@
 --     Nothing -> pure (extractResult result)
 -- @
 --
--- The interpreter (in tidepool-session-executor) spawns `mantle session` processes.
+-- The interpreter (in tidepool-session-interpreter) spawns `mantle session` processes.
 module Tidepool.Effect.Session
   ( -- * Effect
     Session(..)
@@ -476,7 +476,7 @@ detectForkRequest result =
 -- | Run Session effect with a pure handler.
 --
 -- Used for testing or alternative implementations.
--- For IO-based execution, see @runSessionIO@ in tidepool-session-executor.
+-- For IO-based execution, see @runSessionIO@ in tidepool-session-interpreter.
 --
 -- @
 -- let mockHandler = \\case

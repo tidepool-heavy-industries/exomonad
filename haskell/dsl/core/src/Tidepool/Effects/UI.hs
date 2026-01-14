@@ -1,6 +1,6 @@
 -- | UI effect for user interface interactions.
 --
--- Effect type only - executors live in tidepool-ui-executor.
+-- Effect type only - interpreters live in tidepool-ui-interpreter.
 -- This effect bridges graph execution to UI state via wire types.
 --
 -- == Core Primitives
@@ -87,7 +87,7 @@ defaultChoiceMeta = ChoiceMeta Nothing [] Available
 
 -- | UI effect for displaying content and requesting user input.
 --
--- The executor translates these to wire types (UIState/UserAction).
+-- The interpreter translates these to wire types (UIState/UserAction).
 data UI r where
   -- | Display text to the user (appended to chat log).
   ShowText :: Text -> UI ()

@@ -1,6 +1,6 @@
 -- | BD (Beads) effect for issue/task tracking.
 --
--- Effect type only - executors live in tidepool-bd-executor.
+-- Effect type only - interpreters live in tidepool-bd-interpreter.
 -- Enables graphs to read and write bead info, dependencies, and labels.
 --
 -- = Example Usage

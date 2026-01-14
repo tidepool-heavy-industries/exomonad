@@ -18,7 +18,7 @@
 --  +---------------------+
 --            |
 --    +-------v--------+
---    | ghci-executor  | <- Native interpreter (socket client)
+--    | ghci-interpreter  | <- Native interpreter (socket client)
 --    +----------------+
 --            |
 --       socket/IPC
@@ -197,7 +197,7 @@ data GHCiResponse
 --
 -- This effect is IO-blind - interpreters handle the actual communication:
 --
--- * Native: Use 'Tidepool.GHCi.Executor.runGHCiIO' to connect to oracle
+-- * Native: Use 'Tidepool.GHCi.Interpreter.runGHCiIO' to connect to oracle
 -- * WASM: Not available - 'NativeOnly' constraint prevents use in WASM builds
 data GHCi r where
   -- | Query the type of an expression.
@@ -301,7 +301,7 @@ reloadModules = send ReloadModules
 -- | Stub runner that logs operations and returns mock results.
 --
 -- This is a placeholder for testing and development. For real GHCi
--- functionality, use 'Tidepool.GHCi.Executor.runGHCiIO' from ghci-executor.
+-- functionality, use 'Tidepool.GHCi.Interpreter.runGHCiIO' from ghci-interpreter.
 runGHCiStub :: Member Log effs => Eff (GHCi ': effs) a -> Eff effs a
 runGHCiStub = interpret $ \case
   QueryType expr -> do

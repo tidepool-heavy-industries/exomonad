@@ -22,7 +22,7 @@ import Data.Text (Text)
 import GHC.Generics (Generic)
 import Data.Aeson (FromJSON, ToJSON)
 
-import Tidepool.Session.Executor (defaultSessionConfig, runSessionIO)
+import Tidepool.Session.Interpreter (defaultSessionConfig, runSessionIO)
 import Tidepool.Actor.Subgraph (SubgraphState, Subgraph, runSubgraph)
 import Tidepool.Effect.Session (Session)
 import Tidepool.Effect.GraphContext (GraphContext, runGraphContext)

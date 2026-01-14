@@ -7,14 +7,14 @@
 --
 -- = When to use this module
 --
--- * 'Execute.hs' - for implementing 'DispatchGoto' typeclass
+-- * 'Interpret.hs' - for implementing 'DispatchGoto' typeclass
 -- * Test code - for assertions on specific positions
 -- * Debugging - when you need to inspect the raw structure
 --
 -- = When NOT to use this module
 --
 -- * Application handlers - use 'gotoChoice', 'gotoExit', 'gotoSelf' instead
--- * Graph execution - use 'DispatchGoto' typeclass from 'Execute.hs'
+-- * Graph execution - use 'DispatchGoto' typeclass from 'Interpret.hs'
 --
 -- If you find yourself importing this module in application code, you're
 -- probably fighting the type system. Ask: "Why do I need to pattern match?"
