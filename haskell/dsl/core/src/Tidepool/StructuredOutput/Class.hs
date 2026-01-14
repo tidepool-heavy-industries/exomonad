@@ -1,30 +1,21 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE DefaultSignatures #-}
 {-# LANGUAGE UndecidableSuperClasses #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE StandaloneKindSignatures #-}
+{-# LANGUAGE TypeFamilies #-}
 
--- | The StructuredOutput typeclass for LLM structured output.
+-- | Core types and typeclass for LLM structured output.
 --
--- Provides a unified interface for:
--- - JSON Schema generation (for LLM constraints)
--- - JSON encoding (for serialization)
--- - JSON parsing (with detailed diagnostics)
---
--- All three are derived from a single Generic traversal, so application
--- types need only @deriving Generic@.
---
--- @
--- data TypeDefinitions = TypeDefinitions
---   { tdTypeName :: Text
---   , tdDataType :: Text
---   }
---   deriving stock (Generic)
---
--- instance StructuredOutput TypeDefinitions
--- -- That's it! Schema, encode, and parse are all derived.
--- @
+-- This module contains the fundamental definitions for JSON Schema
+-- generation and the 'StructuredOutput' typeclass.
 module Tidepool.StructuredOutput.Class
   ( -- * The Typeclass
     StructuredOutput(..)
+
+    -- * JSON Schema Types
+  , JSONSchema(..)
+  , SchemaType(..)
 
     -- * Generic Machinery
   , GStructuredOutput(..)
@@ -33,75 +24,229 @@ module Tidepool.StructuredOutput.Class
   , StructuredOptions(..)
   , SumEncoding(..)
   , defaultOptions
+
+    -- * Error Types
+  , ParseDiagnostic(..)
+  , formatDiagnostic
+
+    -- * Validation
+  , ValidStructuredOutput
+  , ValidInContext
+  , SchemaContext(..)
+  , HasSumRep
+  , IsNullarySum
+
+    -- * Wrappers
+  , StringEnum(..)
+  , TidepoolDefault(..)
   ) where
 
 import Data.Aeson (Value)
-import Data.Kind (Type)
+import Data.Kind (Type, Constraint)
 import Data.Text (Text)
-import GHC.Generics (Generic, Rep, from, to)
+import qualified Data.Text as T
+import GHC.Generics (Generic, Rep, from, to, (:+:), (:*:), M1, D, C, S, K1, R, U1, V1)
+import GHC.TypeLits (TypeError, ErrorMessage(..))
+import Data.Type.Bool (type (&&))
+import Data.List.NonEmpty (NonEmpty)
+import Data.Set (Set)
+import Data.Map.Strict (Map)
 
-import Tidepool.Schema (JSONSchema, ValidStructuredOutput)
-import Tidepool.StructuredOutput.Error (ParseDiagnostic)
-import Tidepool.StructuredOutput.Prefix (stripFieldPrefix)
 
+-- ════════════════════════════════════════════════════════════════════════════
+-- JSON SCHEMA TYPES
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | A JSON Schema representation.
+data JSONSchema = JSONSchema
+  { schemaType :: SchemaType
+  , schemaDescription :: Maybe Text
+  , schemaProperties :: Map Text JSONSchema
+  , schemaRequired :: [Text]
+  , schemaItems :: Maybe JSONSchema
+  , schemaMinItems :: Maybe Int
+  , schemaEnum :: Maybe [Text]
+  , schemaOneOf :: Maybe [JSONSchema]
+  }
+  deriving (Show, Eq)
+
+-- | JSON Schema primitive types.
+data SchemaType
+  = TString
+  | TNumber
+  | TInteger
+  | TBoolean
+  | TObject
+  | TArray
+  | TNull
+  deriving (Show, Eq)
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- ERROR TYPES
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Detailed parse diagnostic with field path.
+data ParseDiagnostic = ParseDiagnostic
+  { pdPath :: [Text]
+  , pdExpected :: Text
+  , pdActual :: Text
+  , pdMessage :: Text
+  }
+  deriving (Show, Eq)
+
+-- | Format diagnostic for display.
+formatDiagnostic :: ParseDiagnostic -> Text
+formatDiagnostic pd = T.unlines
+  [ "Parse error at: " <> formatPath pd.pdPath
+  , "Expected: " <> pd.pdExpected
+  , "Got: " <> pd.pdActual
+  , pd.pdMessage
+  ]
+  where
+    formatPath [] = "(root)"
+    formatPath ps = T.intercalate "." ps
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- WRAPPERS
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Wrapper for enum types that should serialize as plain string enums in JSON Schema.
+newtype StringEnum a = StringEnum { unStringEnum :: a }
+  deriving (Show, Eq, Generic)
+
+-- | Newtype wrapper for 'DerivingVia' to provide standard Tidepool instances.
+newtype TidepoolDefault a = TidepoolDefault { unTidepoolDefault :: a }
+  deriving stock (Show, Eq, Generic)
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- VALIDATION
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Context in which a schema is being used.
+data SchemaContext
+  = ToolInputCtx
+  | ToolOutputCtx
+  | StructuredOutputCtx
+
+-- | Validate that a type's schema is valid in the given context.
+type ValidInContext :: SchemaContext -> Type -> Constraint
+type family ValidInContext ctx t where
+  ValidInContext 'ToolInputCtx t = ()
+  ValidInContext 'ToolOutputCtx t = ()
+  ValidInContext 'StructuredOutputCtx t = ValidStructuredOutputImpl t
+
+-- | Constraint alias for structured output validation.
+type ValidStructuredOutput :: Type -> Constraint
+type ValidStructuredOutput t = ValidInContext 'StructuredOutputCtx t
+
+-- | Implementation of structured output validation.
+type family ValidStructuredOutputImpl (t :: Type) :: Constraint where
+  -- Blessed types (skip validation)
+  ValidStructuredOutputImpl Text = ()
+  ValidStructuredOutputImpl String = ()
+  ValidStructuredOutputImpl Int = ()
+  ValidStructuredOutputImpl Integer = ()
+  ValidStructuredOutputImpl Double = ()
+  ValidStructuredOutputImpl Bool = ()
+  ValidStructuredOutputImpl Value = ()
+  ValidStructuredOutputImpl () = ()
+  -- Standard containers
+  ValidStructuredOutputImpl [a] = ()
+  ValidStructuredOutputImpl (Maybe a) = ()
+  ValidStructuredOutputImpl (NonEmpty a) = ()
+  ValidStructuredOutputImpl (Set a) = ()
+  ValidStructuredOutputImpl (StringEnum a) = ()
+  ValidStructuredOutputImpl (TidepoolDefault a) = ValidStructuredOutputImpl a
+  -- Tuples
+  ValidStructuredOutputImpl (a, b) = ()
+  ValidStructuredOutputImpl (a, b, c) = ()
+
+  -- Default: Validate structure
+  ValidStructuredOutputImpl t =
+    ( CheckNotNonNullarySum (HasSumRep t) (IsNullarySum t) t
+    , CheckFieldsValid (Rep t)
+    )
+
+-- | Reject sum types with data.
+type family CheckNotNonNullarySum (hasSum :: Bool) (isNullary :: Bool) (t :: Type) :: Constraint where
+  CheckNotNonNullarySum 'False _ _ = ()
+  CheckNotNonNullarySum 'True 'True _ = ()
+  CheckNotNonNullarySum 'True 'False t = TypeError
+    ( 'Text "═══════════════════════════════════════════════════════════"
+      ':$$: 'Text "  Schema error for structured output type: " ':<>: 'ShowType t
+      ':$$: 'Text "═══════════════════════════════════════════════════════"
+      ':$$: 'Text ""
+      ':$$: 'Text "Anthropic's structured output does not support 'oneOf' schemas."
+      ':$$: 'Text "This type uses a sum type with data, which generates oneOf."
+      ':$$: 'Text ""
+      ':$$: 'Text "Fix options:"
+      ':$$: 'Text "  1. Use a tagged record: data MyChoice = MyChoice { tag :: Tag, ... }"
+      ':$$: 'Text "  2. Use separate fields: data Output = Output { optionA :: Maybe A, ... }"
+      ':$$: 'Text "  3. Convert to enum: remove data from all variants"
+      ':$$: 'Text ""
+      ':$$: 'Text "Note: Nullary enums (no data) are OK and auto-generate string enums."
+    )
+
+-- | Recursively validate field types.
+type family CheckFieldsValid (rep :: Type -> Type) :: Constraint where
+  CheckFieldsValid (l :*: r) = (CheckFieldsValid l, CheckFieldsValid r)
+  CheckFieldsValid (K1 R t) = ValidStructuredOutputImpl t
+  CheckFieldsValid (M1 i meta f) = CheckFieldsValid f
+  CheckFieldsValid U1 = ()
+  CheckFieldsValid V1 = ()
+  CheckFieldsValid (l :+: r) = ()
+
+-- | Check if a type is a sum type.
+type family HasSumRep (t :: Type) :: Bool where
+  HasSumRep (Maybe a) = 'False
+  HasSumRep t = IsSumRep (Rep t)
+
+type family IsSumRep (rep :: Type -> Type) :: Bool where
+  IsSumRep (l :+: r) = 'True
+  IsSumRep (M1 D meta f) = IsSumRep f
+  IsSumRep (M1 C meta f) = 'False
+  IsSumRep (M1 S meta f) = IsSumRep f
+  IsSumRep (l :*: r) = 'False
+  IsSumRep (K1 i c) = 'False
+  IsSumRep U1 = 'False
+  IsSumRep V1 = 'False
+
+-- | Check if a sum type is nullary (enum).
+type family IsNullarySum (t :: Type) :: Bool where
+  IsNullarySum t = IsNullarySumRep (Rep t)
+
+type family IsNullarySumRep (rep :: Type -> Type) :: Bool where
+  IsNullarySumRep (l :+: r) = IsNullarySumRep l && IsNullarySumRep r
+  IsNullarySumRep (M1 i meta f) = IsNullarySumRep f
+  IsNullarySumRep U1 = 'True
+  IsNullarySumRep (l :*: r) = 'False
+  IsNullarySumRep (K1 i c) = 'False
+  IsNullarySumRep _ = 'False
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- THE TYPECLASS
+-- ════════════════════════════════════════════════════════════════════════════
 
 -- | Evidence that a type can be used as LLM structured output.
---
--- Provides schema generation, encoding, and parsing from a single
--- Generic representation. Types need only derive Generic.
---
--- == Minimal Instance
---
--- For types with @Generic@ instances, you can use an empty instance:
---
--- @
--- data MyType = MyType { mtField :: Text }
---   deriving stock (Generic)
---
--- instance StructuredOutput MyType
--- @
---
--- All methods have default implementations via 'GStructuredOutput'.
---
--- == JSON Field Names
---
--- By default, field names have their common lowercase prefix stripped:
---
--- @
--- data Example = Example { exName :: Text, exAge :: Int }
--- -- JSON keys: "name", "age" (prefix "ex" stripped)
--- @
---
--- == Custom Options
---
--- Override 'structuredOptions' to customize behavior:
---
--- @
--- instance StructuredOutput MyType where
---   structuredOptions = defaultOptions { soOmitNothingFields = False }
--- @
 class StructuredOutput a where
   -- | JSON Schema for this type.
-  --
-  -- Used to constrain LLM structured output.
   structuredSchema :: JSONSchema
 
   -- | Encode a value to JSON.
   encodeStructured :: a -> Value
 
   -- | Parse a JSON value with detailed diagnostics.
-  --
-  -- Returns 'Left' with path information on failure.
   parseStructured :: Value -> Either ParseDiagnostic a
 
   -- | Options controlling encoding/decoding behavior.
-  --
-  -- Override to customize field naming, sum type encoding, etc.
   structuredOptions :: StructuredOptions
   structuredOptions = defaultOptions
 
   -- Default implementations via Generic
-  -- These are filled in by Generic.hs which imports this module
   default structuredSchema
     :: (Generic a, GStructuredOutput (Rep a))
     => JSONSchema
@@ -119,9 +264,6 @@ class StructuredOutput a where
 
 
 -- | Generic class for structured output derivation.
---
--- This is the workhorse that walks the Generic representation.
--- Instances are defined in "Tidepool.StructuredOutput.Generic".
 class GStructuredOutput (f :: Type -> Type) where
   gStructuredSchema :: StructuredOptions -> JSONSchema
   gEncodeStructured :: StructuredOptions -> f p -> Value
@@ -136,37 +278,22 @@ class GStructuredOutput (f :: Type -> Type) where
 data StructuredOptions = StructuredOptions
   { soFieldLabelModifier :: String -> String
     -- ^ Transform record field names to JSON keys.
-    -- Default: 'stripFieldPrefix' (removes common lowercase prefix).
   , soConstructorTagModifier :: String -> String
     -- ^ Transform constructor names for sum type tags.
-    -- Default: 'id' (no change).
   , soOmitNothingFields :: Bool
     -- ^ Omit fields with 'Nothing' values from output.
-    -- Default: 'True'.
   , soSumEncoding :: SumEncoding
     -- ^ How to encode sum types.
-    -- Default: @'TaggedObject' "tag" "contents"@.
   }
 
 -- | How to encode sum types in JSON.
 data SumEncoding
   = TaggedObject String String
-    -- ^ @TaggedObject tagField contentsField@
-    -- Encodes as @{"tag": "Constructor", "contents": ...}@
   | ObjectWithSingleField
-    -- ^ Encodes as @{"Constructor": ...}@
   | TwoElemArray
-    -- ^ Encodes as @["Constructor", ...]@
   deriving (Show, Eq)
 
 -- | Default options.
---
--- - Field labels: Identity (no modification) - field names match Haskell exactly
--- - Constructor tags: No modification
--- - Omit Nothing: True
--- - Sum encoding: Tagged object with "tag" and "contents"
---
--- Use 'stripFieldPrefix' in a custom instance if all fields share a common prefix.
 defaultOptions :: StructuredOptions
 defaultOptions = StructuredOptions
   { soFieldLabelModifier = id

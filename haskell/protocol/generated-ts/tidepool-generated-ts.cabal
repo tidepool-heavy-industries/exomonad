@@ -29,7 +29,7 @@ library
         -- Dependencies from tidepool ecosystem (no tidepool-wasm to avoid circular dep)
         tidepool-core
     hs-source-dirs:   src
-    default-language: GHC2021
+    default-language: GHC2024
     default-extensions:
         DataKinds
         DeriveGeneric

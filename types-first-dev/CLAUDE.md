@@ -10,7 +10,7 @@ TDD workflow orchestrator using Claude Code agents in Docker containers.
 | Understand handler signatures | "Types and Architecture" section |
 | Debug Docker auth issues | `DOCKER-AUTH.md` |
 | Understand graph DSL | `../haskell/dsl/core/CLAUDE.md` |
-| Understand session continuation | `../haskell/effects/session-executor/CLAUDE.md` |
+| Understand session continuation | `../haskell/effects/session-interpreter/CLAUDE.md` |
 | See implementation notes | `IMPLEMENTATION-NOTES.md` (if exists) |
 
 ## Quick Start

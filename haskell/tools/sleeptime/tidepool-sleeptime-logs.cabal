@@ -32,7 +32,7 @@ library
         scientific >= 0.3 && < 1,
         tidepool-core
     hs-source-dirs:   src
-    default-language: GHC2021
+    default-language: GHC2024
     default-extensions:
         DeriveAnyClass
         DeriveGeneric
@@ -49,5 +49,5 @@ executable sleeptime-logs
         base >= 4.17 && < 5,
         tidepool-sleeptime-logs
     hs-source-dirs:   app
-    default-language: GHC2021
+    default-language: GHC2024
     ghc-options:      -threaded -rtsopts -with-rtsopts=-N

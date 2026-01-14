@@ -36,19 +36,8 @@ data HabiticaOp a where
 ## Usage
 
 This package defines types only. Execution happens in:
-- `tidepool-native-gui/habitica-executor/` - Native HTTP execution
-- `deploy/src/handlers/habitica.ts` - Cloudflare Worker execution
-
-```haskell
-import Tidepool.Habitica (HabiticaOp(..), TaskType(..))
-
--- Define what to do (types-only)
-op :: HabiticaOp [HabiticaTask]
-op = GetTasks Dailys
-```
-
-## Related Documentation
-
-- [tidepool-native-gui/CLAUDE.md](../tidepool-native-gui/CLAUDE.md) - Native executors including habitica-executor
+- `tidepool-native-gui/habitica-interpreter/` - Native HTTP execution
+...
+- [tidepool-native-gui/CLAUDE.md](../tidepool-native-gui/CLAUDE.md) - Native interpreters including habitica-interpreter
 - [deploy/CLAUDE.md](../deploy/CLAUDE.md) - Cloudflare Worker Habitica handler
 - [tidepool-core/CLAUDE.md](../tidepool-core/CLAUDE.md) - Habitica effect in `Effects/Habitica.hs`

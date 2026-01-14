@@ -5,7 +5,7 @@ synopsis:      URL shortening service
 build-type:    Simple
 
 common common-opts
-    default-language: GHC2021
+    default-language: GHC2024
     default-extensions:
         DataKinds
         DeriveAnyClass

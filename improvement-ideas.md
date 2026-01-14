@@ -510,10 +510,10 @@ data Validator a = Validator
 
 ## Implementation Priorities
 
-**Phase 1: Low-hanging fruit**
-- Memory as StateT (MonadMemory class)
-- deriving via TidepoolDefault
-- Schema validation in StructuredOutput instance
+**Phase 1: Low-hanging fruit (COMPLETED)**
+- Memory ergonomics (`putMem`, `modifyMem` helpers)
+- `deriving via TidepoolDefault` (consolidates ToJSON, FromJSON, HasJSONSchema, StructuredOutput)
+- Schema validation at usage site (`llmCall`, `runTurn`) - catches unsupported sum types at compile time.
 
 **Phase 2: Ergonomics**
 - Pattern matching `on` combinator

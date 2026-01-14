@@ -22,7 +22,7 @@ library
         regex-tdfa >= 1.3 && < 2,
         tidepool-core
     hs-source-dirs:   src
-    default-language: GHC2021
+    default-language: GHC2024
     default-extensions:
         DataKinds
         DeriveAnyClass
@@ -52,7 +52,7 @@ test-suite cabal-interpreter-test
     build-tool-depends:
         hspec-discover:hspec-discover >= 2.10 && < 3
     hs-source-dirs:   test
-    default-language: GHC2021
+    default-language: GHC2024
     default-extensions:
         OverloadedRecordDot
         OverloadedStrings

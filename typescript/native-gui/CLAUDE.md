@@ -92,5 +92,5 @@ just native  # Starts server at localhost:8080
 
 - [server/CLAUDE.md](server/CLAUDE.md) - Native server details
 - [tidepool-core/CLAUDE.md](../tidepool-core/CLAUDE.md) - Effect type definitions
-- [deploy/CLAUDE.md](../deploy/CLAUDE.md) - Cloudflare Worker executors (alternative runtime)
+- [deploy/CLAUDE.md](../deploy/CLAUDE.md) - Cloudflare Worker interpreters (alternative runtime)
 - [Root CLAUDE.md](../CLAUDE.md) - Project overview

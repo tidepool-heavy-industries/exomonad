@@ -548,7 +548,7 @@ describe("handleLlmCall", () => {
     /**
      * Note: Tool transitions (ToolTransition ToolResultOutcome) are handled in WASM.
      * This test verifies that the LlmCall handler correctly returns "needs_tools"
-     * when the LLM decides to invoke a tool, allowing the graph executor to handle
+     * when the LLM decides to invoke a tool, allowing the graph interpreter to handle
      * tool results and potential transitions.
      */
 
@@ -603,8 +603,8 @@ describe("handleLlmCall", () => {
 
     it("completes LLM turn when tool succeeds without further tools", async () => {
       // When tool execution succeeds and returns ToolSuccess,
-      // the graph executor processes the result and may route to next node.
-      // LlmCall just returns the tool call to executor.
+      // the graph interpreter processes the result and may route to next node.
+      // LlmCall just returns the tool call to interpreter.
       const effect: LlmCallEffect = {
         ...baseEffect,
         eff_tools: [
@@ -633,7 +633,7 @@ describe("handleLlmCall", () => {
       expect(result.type).toBe("success");
       if (result.type === "success" && result.value) {
         const llmResult = result.value as { type: "needs_tools" | "done" };
-        // Should indicate tool use - executor handles tool results and transitions
+        // Should indicate tool use - interpreter handles tool results and transitions
         expect(llmResult.type).toBe("needs_tools");
       }
     });

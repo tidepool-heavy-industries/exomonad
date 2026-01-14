@@ -394,10 +394,10 @@ Based on existing codebase structure:
 ```
 haskell/dsl/core/src/Tidepool/Effect/Session.hs    -- Effect type (replaces ClaudeCode.hs)
 
-haskell/effects/session-executor/
-├── tidepool-session-executor.cabal
+haskell/effects/session-interpreter/
+├── tidepool-session-interpreter.cabal
 └── src/Tidepool/Session/
-    ├── Executor.hs         -- Spawns mantle processes
+    ├── Interpreter.hs      -- Spawns mantle processes
     ├── Types.hs            -- SessionOutput, InterruptSignal, SessionMetadata
     ├── Config.hs           -- SessionConfig
     └── Orchestration.hs    -- Fork detection, parallel helpers
@@ -409,14 +409,14 @@ haskell/effects/session-executor/
 haskell/dsl/core/src/Tidepool/Graph/Execute.hs     -- Update executeClaudeCodeHandler
 haskell/dsl/core/src/Tidepool/Graph/Goto.hs        -- Update ClaudeCodeLLMHandler
 haskell/native-server/src/Tidepool/Server/EffectRunner.hs  -- Replace ClaudeCodeExec with Session
-cabal.project                                       -- Add session-executor package
+cabal.project                                       -- Add session-interpreter package
 ```
 
 ### Files to Remove (After Migration)
 
 ```
 haskell/dsl/core/src/Tidepool/Effect/ClaudeCode.hs -- Replaced by Session.hs
-haskell/effects/claude-code-executor/              -- Entire package replaced
+haskell/effects/claude-code-interpreter/              -- Entire package replaced
 ```
 
 ---
@@ -444,11 +444,11 @@ data Session r where
   ForkSession     :: SessionId -> Text -> Text -> Session SessionOutput
 ```
 
-### 2. Executor Package: `claude-code-executor` → `session-executor`
+### 2. Interpreter Package: `claude-code-interpreter` → `session-interpreter`
 
 | Old File | Status | Notes |
 |----------|--------|-------|
-| `Executor.hs` | **REPLACE** | Calls `mantle run` → new calls `mantle session start/continue/fork` |
+| `Interpreter.hs` | **REPLACE** | Calls `mantle run` → new calls `mantle session start/continue/fork` |
 | `Session.hs` | **REMOVE** | STM session tracking → now in mantle's `.mantle/sessions.json` |
 | `SessionState.hs` | **REMOVE** | Same |
 | `ControlSocket.hs` | **EVALUATE** | May reuse for hook events from container |
@@ -519,7 +519,7 @@ runEffects :: ... -> Eff '[UI, Habitica, LLMComplete, Session, DevLog, Observabi
 ### Phase 1: Add Session Effect (Non-Breaking)
 
 - [ ] Create `Effect/Session.hs` with new effect type
-- [ ] Create `session-executor` package
+- [ ] Create `session-interpreter` package
 - [ ] Add to `cabal.project`
 - [ ] Both `ClaudeCodeExec` and `Session` available in effect stack
 
@@ -533,13 +533,13 @@ runEffects :: ... -> Eff '[UI, Habitica, LLMComplete, Session, DevLog, Observabi
 ### Phase 3: Update Effect Runner
 
 - [ ] Replace `ClaudeCodeExec` with `Session` in `runEffects` type signature
-- [ ] Update `ExecutorConfig` with `SessionConfig`
+- [ ] Update `InterpreterConfig` with `SessionConfig`
 - [ ] Update environment variable loading
 
 ### Phase 4: Remove Deprecated Code
 
 - [ ] Delete `Effect/ClaudeCode.hs`
-- [ ] Delete `claude-code-executor` package
+- [ ] Delete `claude-code-interpreter` package
 - [ ] Remove from `cabal.project`
 - [ ] Update CLAUDE.md documentation
 
@@ -553,9 +553,9 @@ runEffects :: ... -> Eff '[UI, Habitica, LLMComplete, Session, DevLog, Observabi
 
 ### Phase 1: Add Session Effect
 - [ ] Create `haskell/dsl/core/src/Tidepool/Effect/Session.hs`
-- [ ] Create `haskell/effects/session-executor/` package structure
+- [ ] Create `haskell/effects/session-interpreter/` package structure
 - [ ] Implement `SessionConfig` and `runSessionIO` interpreter
-- [ ] Add `tidepool-session-executor` to `cabal.project`
+- [ ] Add `tidepool-session-interpreter` to `cabal.project`
 - [ ] Unit tests for JSON parsing (SessionOutput, SessionMetadata, InterruptSignal)
 
 ### Phase 2: Migrate Graph Dispatch
@@ -566,13 +566,13 @@ runEffects :: ... -> Eff '[UI, Habitica, LLMComplete, Session, DevLog, Observabi
 
 ### Phase 3: Update Effect Runner
 - [ ] Add `Session` to `runEffects` effect stack
-- [ ] Add `ecSessionConfig` to `ExecutorConfig`
+- [ ] Add `ecSessionConfig` to `InterpreterConfig`
 - [ ] Add env vars: `MANTLE_PATH`, `MANTLE_REPO_ROOT`
 - [ ] Update native server CLAUDE.md
 
 ### Phase 4: Remove Deprecated Code
 - [ ] Delete `haskell/dsl/core/src/Tidepool/Effect/ClaudeCode.hs`
-- [ ] Delete `haskell/effects/claude-code-executor/` package
+- [ ] Delete `haskell/effects/claude-code-interpreter/` package
 - [ ] Remove `ClaudeCodeExec` from `EffectRunner.hs`
 - [ ] Update `haskell/effects/CLAUDE.md` effect listing
 - [ ] Update consuming repos (anemone)
@@ -596,7 +596,7 @@ runEffects :: ... -> Eff '[UI, Habitica, LLMComplete, Session, DevLog, Observabi
 ## Notes
 
 - **Haskell is the orchestrator**: Detects forks, manages parallel sessions, notifies parents
-- **Mantle is the executor**: One process per turn, spawns container, returns result, exits
+- **Mantle is the interpreter**: One process per turn, spawns container, returns result, exits
 - **No async in interpreter**: Just `readProcessWithExitCode`, blocks until mantle exits
 - **State lives in mantle**: `.mantle/sessions.json` persists across processes
 - **Haskell is stateless**: All state queries go through `mantle session info`

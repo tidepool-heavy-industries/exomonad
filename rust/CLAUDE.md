@@ -7,7 +7,7 @@ Rust workspace for spawning, managing, and visualizing Claude Code sessions. Use
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                          Haskell Orchestrator                                │
-│                    (tidepool-claude-code-executor)                           │
+│                    (tidepool-session-interpreter)                            │
 └─────────────────────────────┬───────────────────────────────────────────────┘
                               │ spawns subprocess
                               ▼
@@ -190,12 +190,12 @@ Stored in hub for querying:
 
 The Rust components integrate with Tidepool's Haskell side via:
 
-1. **Subprocess spawning**: Haskell's `tidepool-claude-code-executor` spawns `mantle` as a child process
+1. **Subprocess spawning**: Haskell's `tidepool-session-interpreter` spawns `mantle` as a child process
 2. **Stdout capture**: Session results returned as JSON on stdout
 3. **Control socket**: Real-time hook decisions over Unix socket during execution
 4. **Decision tools**: MCP protocol for typed sum-type outputs (approve/reject/etc.)
 
-See `haskell/effects/claude-code-executor/` for the Haskell side.
+See `haskell/effects/session-interpreter/` for the Haskell side.
 
 ## Data Storage
 

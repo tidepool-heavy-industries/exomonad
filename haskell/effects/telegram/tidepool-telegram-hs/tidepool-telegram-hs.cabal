@@ -23,7 +23,7 @@ library
         aeson >= 2.1 && < 3,
         tidepool-core >= 0.1 && < 0.2
     hs-source-dirs:   src
-    default-language: GHC2021
+    default-language: GHC2024
     default-extensions:
         DataKinds
         DeriveAnyClass

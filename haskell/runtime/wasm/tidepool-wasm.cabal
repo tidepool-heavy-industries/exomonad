@@ -83,7 +83,7 @@ library
             -optl-Wl,--export=roundtripGraphInfoWire
 
     hs-source-dirs:   src
-    default-language: GHC2021
+    default-language: GHC2024
     default-extensions:
         DataKinds
         DeriveAnyClass
@@ -134,7 +134,7 @@ test-suite tidepool-wasm-tests
         tidepool-core,
         tidepool-generated-ts
     hs-source-dirs:   test
-    default-language: GHC2021
+    default-language: GHC2024
     default-extensions:
         OverloadedStrings
         OverloadedRecordDot
@@ -149,7 +149,7 @@ executable tidepool-reactor
         base >= 4.17 && < 5,
         tidepool-wasm
     hs-source-dirs:   reactor
-    default-language: GHC2021
+    default-language: GHC2024
     if os(wasi)
         build-depends:
             ghc-experimental
@@ -191,7 +191,7 @@ executable generate-ts-package
         tidepool-generated-ts,
         tidepool-wasm
     hs-source-dirs:   codegen
-    default-language: GHC2021
+    default-language: GHC2024
     default-extensions:
         OverloadedStrings
 
@@ -209,6 +209,6 @@ executable generate-golden-samples
         text >= 2.0 && < 3,
         tidepool-wasm
     hs-source-dirs:   golden
-    default-language: GHC2021
+    default-language: GHC2024
     default-extensions:
         OverloadedStrings

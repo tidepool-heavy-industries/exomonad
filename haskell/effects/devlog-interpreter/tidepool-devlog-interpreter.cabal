@@ -27,7 +27,7 @@ library
         unix >= 2.7 && < 3,
         tidepool-core
     hs-source-dirs:   src
-    default-language: GHC2021
+    default-language: GHC2024
     default-extensions:
         DataKinds
         DeriveAnyClass

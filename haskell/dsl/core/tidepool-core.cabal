@@ -148,7 +148,7 @@ test-suite graph-validation-tests
         CLIGraphSpec
         CLIGraphTypes
         GraphValidationSpec
-        LLMNodeExecuteSpec
+        LLMNodeInterpretSpec
         MemorySerializationSpec
         MermaidSpec
         StructuredOutputSpec

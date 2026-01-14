@@ -62,7 +62,7 @@ library
         stm >= 2.5 && < 3,
         yaml >= 0.11 && < 1
     hs-source-dirs:   src
-    default-language: GHC2021
+    default-language: GHC2024
     default-extensions:
         DataKinds
         DeriveAnyClass
@@ -84,7 +84,7 @@ library
 executable types-first-dev
     main-is:          Main.hs
     hs-source-dirs:   app
-    default-language: GHC2021
+    default-language: GHC2024
     default-extensions:
         DataKinds
         OverloadedStrings
@@ -110,7 +110,7 @@ executable types-first-dev
 executable types-first-dev-runner
     main-is:          Runner.hs
     hs-source-dirs:   app
-    default-language: GHC2021
+    default-language: GHC2024
     default-extensions:
         DataKinds
         DeriveAnyClass
@@ -149,7 +149,7 @@ test-suite types-first-dev-test
     type:             exitcode-stdio-1.0
     main-is:          Main.hs
     hs-source-dirs:   test
-    default-language: GHC2021
+    default-language: GHC2024
     default-extensions:
         OverloadedStrings
         OverloadedRecordDot

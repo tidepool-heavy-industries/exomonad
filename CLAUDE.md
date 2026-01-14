@@ -18,8 +18,8 @@ CLAUDE.md  ← YOU ARE HERE (project overview)
 ├── haskell/CLAUDE.md  ← Haskell package organization
 │   ├── dsl/core/CLAUDE.md      ← Graph DSL reference (START HERE for handlers)
 │   ├── effects/CLAUDE.md       ← Effect interpreters
-│   │   ├── session-executor/   ← Claude Code subprocess (key for V3)
-│   │   ├── llm-executor/       ← Anthropic/OpenAI API
+│   │   ├── session-interpreter/ ← Claude Code subprocess (key for V3)
+│   │   ├── llm-interpreter/     ← Anthropic/OpenAI API
 │   │   └── ...
 │   ├── runtime/CLAUDE.md       ← Execution backends
 │   │   └── actor/CLAUDE.md     ← Actor model details
@@ -164,7 +164,7 @@ Spawn Claude Code as a graph node:
 
 This renders a template, spawns `claude -p` via mantle, and parses JSON output. Enables Tidepool graphs that orchestrate Claude Code sessions.
 
-**Status**: WIP in `tidepool-claude-code-executor`
+**Status**: WIP in `tidepool-claude-code-interpreter`
 
 ---
 
@@ -189,7 +189,7 @@ All Haskell packages now live under `haskell/`. See `haskell/CLAUDE.md` for full
 | `haskell/native-server` | Servant + WebSocket server (facade) |
 | `haskell/effects/llm-interpreter` | Anthropic/OpenAI API calls |
 | `haskell/effects/bd-interpreter` | Beads integration + urchin CLI |
-| `haskell/effects/claude-code-interpreter` | Claude Code subprocess via mantle |
+| `haskell/effects/session-interpreter` | Claude Code subprocess via mantle |
 | `haskell/effects/habitica-interpreter` | Habitica API |
 | `haskell/effects/ui-interpreter` | WebSocket ↔ UI bridging |
 | `haskell/effects/observability-interpreter` | OpenTelemetry traces to Grafana |
@@ -233,7 +233,7 @@ All Haskell packages now live under `haskell/`. See `haskell/CLAUDE.md` for full
 | New effect type | `haskell/dsl/core/src/Tidepool/Effect/Types.hs` |
 | New integration | `haskell/dsl/core/src/Tidepool/Effects/` (plural) |
 | New graph annotation | `haskell/dsl/core/src/Tidepool/Graph/Types.hs` |
-| New interpreter | `haskell/effects/<name>-executor/` |
+| New interpreter | `haskell/effects/<name>-interpreter/` |
 | TypeScript frontend/bot | `typescript/<name>/` |
 | Agents | Separate repo (anemone, urchin, etc.) |
 
@@ -341,11 +341,11 @@ Use `Execute.Instrumented` for automatic span emission on graph dispatch.
 
 ## LSP Integration
 
-The `tidepool-lsp-executor` provides LSP for code intelligence:
+The `tidepool-lsp-interpreter` provides LSP for code intelligence:
 
 ```haskell
 import Tidepool.Effects.LSP
-import Tidepool.LSP.Executor (withLSPSession, runLSP)
+import Tidepool.LSP.Interpreter (withLSPSession, runLSP)
 
 withLSPSession "/path/to/project" $ \session -> do
   info <- runLSP session $ hover doc pos

@@ -185,30 +185,7 @@ gt lsp references file.hs:10:5
 gt lsp diagnostics file.hs
 ```
 
-This would use the Tidepool LSP executor to spawn HLS and query it.
-
-## Troubleshooting
-
-### "No LSP server available for file type: .hs"
-
-1. Check `ENABLE_LSP_TOOL` is set: `echo $ENABLE_LSP_TOOL`
-2. Restart Claude Code after setting the variable
-3. Install HLS plugin if not already installed
-
-### HLS not starting
-
-1. Check HLS is installed: `which haskell-language-server-wrapper`
-2. Check project detection: ensure `cabal.project` exists
-3. Try building the project first: `cabal build all`
-
-### Slow LSP responses
-
-HLS needs to index the project on first run. This can take several minutes
-for large projects. Subsequent queries are fast.
-
-## References
-
-- [Claude Code LSP Documentation](https://docs.anthropic.com/claude-code/lsp)
-- [HLS Plugin for Claude Code](https://github.com/m4dc4p/claude-hls)
-- [Tidepool LSP Effect](../tidepool-native-gui/lsp-executor/src/Tidepool/LSP/)
+This would use the Tidepool LSP interpreter to spawn HLS and query it.
+...
+- [Tidepool LSP Effect](../tidepool-native-gui/lsp-interpreter/src/Tidepool/LSP/)
 - [Gas Town Architecture](https://github.com/steveyegge/gastown)

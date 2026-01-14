@@ -122,7 +122,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import Data.Aeson (Value(..), FromJSON, ToJSON, encode)
-import Tidepool.StructuredOutput (StructuredOutput(..), formatDiagnostic)
+import Tidepool.StructuredOutput (StructuredOutput(..), formatDiagnostic, ValidStructuredOutput)
 import qualified Data.ByteString.Lazy as LBS
 import GHC.Generics (Generic)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef, modifyIORef)
@@ -382,7 +382,7 @@ withImages text images = TextBlock text : map ImageBlock images
 
 runTurn
   :: forall output effs.
-     (Member LLM effs, StructuredOutput output)
+     (Member LLM effs, StructuredOutput output, ValidStructuredOutput output)
   => Text -> Text -> Value -> [Value]
   -> Eff effs (TurnOutcome (TurnParseResult output))
 runTurn systemPrompt userAction =
@@ -390,7 +390,7 @@ runTurn systemPrompt userAction =
 
 runTurnContent
   :: forall output effs.
-     (Member LLM effs, StructuredOutput output)
+     (Member LLM effs, StructuredOutput output, ValidStructuredOutput output)
   => Text -> [ContentBlock] -> Value -> [Value]
   -> Eff effs (TurnOutcome (TurnParseResult output))
 runTurnContent systemPrompt userContent schema tools = do
@@ -415,7 +415,7 @@ runTurnContent systemPrompt userContent schema tools = do
 -- 'llmCallEither' (returns Either with Text errors) or 'llmCallStructured'
 -- (returns Either with structured LlmError type).
 llmCall
-  :: forall output effs. (Member LLM effs, StructuredOutput output)
+  :: forall output effs. (Member LLM effs, StructuredOutput output, ValidStructuredOutput output)
   => Text -> Text -> Value -> Eff effs output
 llmCall systemPrompt userInput schema = do
   result <- llmCallEither @output systemPrompt userInput schema
@@ -429,7 +429,7 @@ llmCall systemPrompt userInput schema = do
 -- Errors are represented as plain Text. Use 'llmCallStructured' for structured
 -- error types (rate limits, timeouts, etc.).
 llmCallEither
-  :: forall output effs. (Member LLM effs, StructuredOutput output)
+  :: forall output effs. (Member LLM effs, StructuredOutput output, ValidStructuredOutput output)
   => Text -> Text -> Value -> Eff effs (Either Text output)
 llmCallEither systemPrompt userInput schema = do
   result <- runTurn @output systemPrompt userInput schema []
@@ -444,7 +444,7 @@ llmCallEither systemPrompt userInput schema = do
 -- Like 'llmCallEither' but supports tool definitions and invocations.
 -- Returns @Left (error message)@ on failure or @Right output@ on success.
 llmCallEitherWithTools
-  :: forall output effs. (Member LLM effs, StructuredOutput output)
+  :: forall output effs. (Member LLM effs, StructuredOutput output, ValidStructuredOutput output)
   => Text -> Text -> Value -> [Value] -> Eff effs (Either Text output)
 llmCallEitherWithTools systemPrompt userInput schema tools = do
   result <- runTurn @output systemPrompt userInput schema tools
@@ -479,7 +479,7 @@ data LlmError
 -- This allows better error handling with pattern matching on specific error cases
 -- (rate limits, timeouts, etc.).
 llmCallStructured
-  :: forall output effs. (Member LLM effs, StructuredOutput output)
+  :: forall output effs. (Member LLM effs, StructuredOutput output, ValidStructuredOutput output)
   => Text -> Text -> Value -> Eff effs (Either LlmError output)
 llmCallStructured systemPrompt userInput schema = do
   result <- runTurn @output systemPrompt userInput schema []
@@ -494,7 +494,7 @@ llmCallStructured systemPrompt userInput schema = do
 -- Like 'llmCallEitherWithTools' but returns structured 'LlmError' type instead of Text.
 -- This allows better error handling with pattern matching on specific error cases.
 llmCallStructuredWithTools
-  :: forall output effs. (Member LLM effs, StructuredOutput output)
+  :: forall output effs. (Member LLM effs, StructuredOutput output, ValidStructuredOutput output)
   => Text -> Text -> Value -> [Value] -> Eff effs (Either LlmError output)
 llmCallStructuredWithTools systemPrompt userInput schema tools = do
   result <- runTurn @output systemPrompt userInput schema tools

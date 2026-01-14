@@ -70,7 +70,7 @@ fn find_test_server() -> PathBuf {
                         .starts_with("ghc-")
                 {
                     let exe = path.join(
-                        "tidepool-claude-code-executor-0.1.0.0/x/control-socket-test-server/build/control-socket-test-server/control-socket-test-server",
+                        "tidepool-session-interpreter-0.1.0.0/x/control-socket-test-server/build/control-socket-test-server/control-socket-test-server",
                     );
                     if exe.exists() {
                         return exe;

@@ -111,7 +111,7 @@ testWithDetails dir = send (TestWithDetails dir)
 
 
 -- ════════════════════════════════════════════════════════════════════════════
--- EXECUTOR (IO)
+-- INTERPRETER (IO)
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Run Build effect in IO using cabal.

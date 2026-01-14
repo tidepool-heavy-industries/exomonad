@@ -29,7 +29,7 @@ library
         random >= 1.2 && < 2,
         tidepool-core
     hs-source-dirs:   src
-    default-language: GHC2021
+    default-language: GHC2024
     default-extensions:
         DataKinds
         DeriveGeneric
@@ -48,7 +48,7 @@ test-suite worktree-interpreter-test
         Tidepool.Worktree.ParseSpec
         Tidepool.Worktree.InterpreterSpec
     hs-source-dirs:   test
-    default-language: GHC2021
+    default-language: GHC2024
     default-extensions:
         OverloadedStrings
         OverloadedRecordDot

@@ -83,7 +83,7 @@ import Tidepool.Graph.Goto.Internal (GotoChoice(..), OneOf(..))
 import Tidepool.Graph.Template (GingerContext)
 import Tidepool.Graph.Types (Exit, Self, Arrive, SingModelChoice(..), HList(..), ModelChoice)
 import Tidepool.Schema (schemaToValue)
-import Tidepool.StructuredOutput (StructuredOutput(..), formatDiagnostic, ClaudeCodeSchema(..), DecisionTool)
+import Tidepool.StructuredOutput (StructuredOutput(..), ValidStructuredOutput, ClaudeCodeSchema(..), DecisionTool, formatDiagnostic)
 import qualified Tidepool.StructuredOutput.DecisionTools as DT
 
 -- | Effect type alias (freer-simple effects have kind Type -> Type).
@@ -260,14 +260,15 @@ executeLLMHandler
   :: forall needs schema targets es tpl.
      ( Member LLM es
      , StructuredOutput schema
+     , ValidStructuredOutput schema
      , GingerContext tpl
      , ConvertTransitionHint targets
      )
-  => Maybe (TypedTemplate tpl SourcePos)      -- ^ Optional system prompt template
-  -> TypedTemplate tpl SourcePos              -- ^ User prompt template (required)
-  -> (needs -> Eff es tpl)                    -- ^ Before handler: builds context
-  -> (schema -> Eff es (GotoChoice targets))  -- ^ After handler: routes based on output
-  -> needs                                    -- ^ Input from Needs
+  => Maybe (TypedTemplate tpl SourcePos)  -- ^ Optional system prompt template
+  -> TypedTemplate tpl SourcePos         -- ^ User prompt template
+  -> (needs -> Eff es tpl)               -- ^ Before function: build template context
+  -> (schema -> Eff es (GotoChoice targets)) -- ^ After function: handle LLM output
+  -> needs
   -> Eff es (GotoChoice targets)
 executeLLMHandler mSystemTpl userTpl beforeFn afterFn input = do
   -- Build context from before-handler
@@ -526,6 +527,7 @@ instance CallHandler (payload -> Eff es (GotoChoice targets)) payload es targets
 instance
   ( Member LLM es
   , StructuredOutput schema
+  , ValidStructuredOutput schema
   , GingerContext tpl
   , ConvertTransitionHint targets
   ) => CallHandler (LLMHandler payload schema targets es tpl) payload es targets where

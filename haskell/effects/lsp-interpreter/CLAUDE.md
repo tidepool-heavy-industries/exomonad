@@ -104,5 +104,5 @@ case result of
 ## Related Documentation
 
 - [effects/CLAUDE.md](../CLAUDE.md) - Effect interpreter pattern
-- [effects/ghci-executor/CLAUDE.md](../ghci-executor/CLAUDE.md) - Alternative for type queries
+- [effects/ghci-interpreter/CLAUDE.md](../ghci-interpreter/CLAUDE.md) - Alternative for type queries
 - [tools/CLAUDE.md](../../tools/CLAUDE.md) - GHCi oracle (persistent GHCi)

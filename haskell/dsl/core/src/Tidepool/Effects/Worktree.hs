@@ -29,9 +29,46 @@
 --
 -- All operations return @Either WorktreeError a@ for explicit error handling.
 -- Use 'withWorktree' for bracket-style resource safety (automatic cleanup).
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE UndecidableInstances #-}
+
+-- | Worktree effect for managing git worktrees.
+--
+-- Effect type only - interpreter lives in tidepool-native-gui/worktree-interpreter.
+-- Enables graphs to create isolated working directories for parallel agents.
+--
+-- = Example Usage
+--
+-- @
+-- import Tidepool.Effects.Worktree
+--
+-- forkHandler :: Member Worktree effs => Eff effs (Either WorktreeError ())
+-- forkHandler = do
+--   result <- withWorktree (WorktreeSpec "tests" Nothing) $ \wtTests ->
+--     withWorktree (WorktreeSpec "impl" Nothing) $ \wtImpl -> do
+--       -- ... run parallel agents in each worktree ...
+--       pure ()
+--   pure result
+-- @
+--
+-- = Design Notes
+--
+-- Worktrees provide isolation for parallel agent execution:
+-- - Each worktree has its own working directory
+-- - Changes in one worktree don't affect others
+-- - Claude Code can be spawned with --cwd pointing to a worktree
+-- - After work completes, files can be cherry-picked back to main
+--
+-- = Error Handling
+--
+-- All operations return @Either WorktreeError a@ for explicit error handling.
+-- Use 'withWorktree' for bracket-style resource safety (automatic cleanup).
 module Tidepool.Effects.Worktree
   ( -- * Effect
     Worktree(..)
+
   , createWorktree
   , deleteWorktree
   , mergeWorktree
@@ -54,7 +91,7 @@ import Data.String (IsString)
 import Data.Text (Text)
 import GHC.Generics (Generic)
 
-import Tidepool.StructuredOutput (StructuredOutput(..))
+import Tidepool.StructuredOutput (StructuredOutput)
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -74,13 +111,7 @@ import Tidepool.StructuredOutput (StructuredOutput(..))
 -- @
 newtype WorktreePath = WorktreePath { unWorktreePath :: FilePath }
   deriving stock (Eq, Ord, Show)
-  deriving newtype (IsString, ToJSON, FromJSON)
-
--- | StructuredOutput for WorktreePath delegates to String.
-instance StructuredOutput WorktreePath where
-  structuredSchema = structuredSchema @String
-  encodeStructured (WorktreePath p) = encodeStructured p
-  parseStructured v = WorktreePath <$> parseStructured v
+  deriving newtype (IsString, ToJSON, FromJSON, StructuredOutput)
 
 -- | Specification for creating a worktree.
 data WorktreeSpec = WorktreeSpec

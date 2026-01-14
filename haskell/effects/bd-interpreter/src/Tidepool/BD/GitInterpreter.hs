@@ -35,7 +35,7 @@ import Tidepool.Effects.Git (Git(..), WorktreeInfo(..))
 
 
 -- ════════════════════════════════════════════════════════════════════════════
--- EXECUTOR
+-- INTERPRETER
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Run Git effects with a pure handler.

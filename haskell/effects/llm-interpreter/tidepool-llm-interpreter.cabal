@@ -10,7 +10,7 @@ build-type:         Simple
 
 common defaults
     ghc-options: -Wall -Wincomplete-patterns -Wredundant-constraints -Wunused-packages
-    default-language: GHC2021
+    default-language: GHC2024
     default-extensions:
         DataKinds
         DeriveAnyClass

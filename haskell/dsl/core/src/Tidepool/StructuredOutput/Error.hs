@@ -28,51 +28,8 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Scientific (floatingOrInteger)
 
-
--- | Detailed parse diagnostic with field path.
---
--- Provides actionable error messages for LLM output parsing failures.
---
--- @
--- ParseDiagnostic
---   { pdPath = ["signatures", "0", "name"]
---   , pdExpected = "string"
---   , pdActual = "number: 42"
---   , pdMessage = "Expected string but got number"
---   }
--- @
-data ParseDiagnostic = ParseDiagnostic
-  { pdPath :: [Text]
-    -- ^ Field path from root to error location.
-    -- e.g., ["root", "nested", "field"] or ["items", "0", "name"]
-  , pdExpected :: Text
-    -- ^ What type/value was expected.
-  , pdActual :: Text
-    -- ^ What was actually received (summarized).
-  , pdMessage :: Text
-    -- ^ Human-readable error message.
-  }
-  deriving (Show, Eq)
-
-
--- | Format diagnostic for display.
---
--- @
--- Parse error at: signatures.0.name
--- Expected: string
--- Got: number: 42
--- Expected string but got number
--- @
-formatDiagnostic :: ParseDiagnostic -> Text
-formatDiagnostic pd = T.unlines
-  [ "Parse error at: " <> formatPath pd.pdPath
-  , "Expected: " <> pd.pdExpected
-  , "Got: " <> pd.pdActual
-  , pd.pdMessage
-  ]
-  where
-    formatPath [] = "(root)"
-    formatPath ps = T.intercalate "." ps
+-- Core types imported from Class.hs to avoid circularity
+import Tidepool.StructuredOutput.Class (ParseDiagnostic(..), formatDiagnostic)
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -127,7 +84,8 @@ expectedBool path v = ParseDiagnostic
 -- | Error for a missing required field.
 missingField :: [Text] -> ParseDiagnostic
 missingField path = ParseDiagnostic
-  { pdPath = path
+  {
+    pdPath = path
   , pdExpected = "required field"
   , pdActual = "missing"
   , pdMessage = "Required field '" <> fieldName <> "' is missing"
@@ -140,7 +98,8 @@ missingField path = ParseDiagnostic
 -- | Generic type mismatch error.
 typeMismatch :: [Text] -> Text -> Value -> ParseDiagnostic
 typeMismatch path expected v = ParseDiagnostic
-  { pdPath = path
+  {
+    pdPath = path
   , pdExpected = expected
   , pdActual = describeValue v
   , pdMessage = "Type mismatch: expected " <> expected <> " but got " <> describeValue v
@@ -149,7 +108,8 @@ typeMismatch path expected v = ParseDiagnostic
 -- | Custom error with user-provided message.
 customError :: [Text] -> Text -> ParseDiagnostic
 customError path msg = ParseDiagnostic
-  { pdPath = path
+  {
+    pdPath = path
   , pdExpected = ""
   , pdActual = ""
   , pdMessage = msg

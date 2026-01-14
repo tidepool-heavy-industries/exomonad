@@ -72,7 +72,7 @@ library
         http-client >= 0.7 && < 1,
         http-types >= 0.12 && < 1
     hs-source-dirs: src
-    default-language: GHC2021
+    default-language: GHC2024
     default-extensions:
         DataKinds
         DeriveGeneric
@@ -101,7 +101,7 @@ test-suite url-shortener-test
         http-client >= 0.7 && < 1,
         http-types >= 0.12 && < 1
     hs-source-dirs: test
-    default-language: GHC2021
+    default-language: GHC2024
     default-extensions:
         OverloadedStrings
     ghc-options: -threaded -rtsopts -with-rtsopts=-N

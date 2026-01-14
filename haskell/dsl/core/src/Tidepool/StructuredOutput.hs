@@ -70,6 +70,7 @@ module Tidepool.StructuredOutput
 
     -- * String Enum Wrapper
   , StringEnum(..)
+  , TidepoolDefault(..)
 
     -- * Field Label Utilities
   , stripFieldPrefix
@@ -79,6 +80,11 @@ module Tidepool.StructuredOutput
   , ClaudeCodeSchema(..)
   , IsSumWithData
 
+    -- * Validation
+  , ValidStructuredOutput
+  , ValidInContext(..)
+  , SchemaContext(..)
+
     -- * Decision Tools
   , ToDecisionTools(..)
   , DecisionTool(..)
@@ -87,7 +93,7 @@ module Tidepool.StructuredOutput
 
 -- Import instances to bring them into scope
 import Tidepool.StructuredOutput.Generic ()  -- GStructuredOutput instances for M1, :*:, etc.
-import Tidepool.StructuredOutput.Instances (StringEnum(..))  -- Base type instances + StringEnum
+import Tidepool.StructuredOutput.Instances ()  -- Base type instances
 
 -- Re-export from submodules
 import Tidepool.StructuredOutput.Class
@@ -95,6 +101,11 @@ import Tidepool.StructuredOutput.Class
   , StructuredOptions(..)
   , SumEncoding(..)
   , defaultOptions
+  , ValidStructuredOutput
+  , ValidInContext(..)
+  , SchemaContext(..)
+  , StringEnum(..)
+  , TidepoolDefault(..)
   )
 import Tidepool.StructuredOutput.Error
   ( ParseDiagnostic(..)

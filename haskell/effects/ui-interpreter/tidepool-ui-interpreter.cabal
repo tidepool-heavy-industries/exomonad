@@ -24,7 +24,7 @@ library
         tidepool-core,
         tidepool-wire-types
     hs-source-dirs:   src
-    default-language: GHC2021
+    default-language: GHC2024
     default-extensions:
         DataKinds
         DeriveAnyClass

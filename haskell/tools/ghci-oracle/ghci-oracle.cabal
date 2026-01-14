@@ -35,7 +35,7 @@ executable ghci-oracle
         stm >= 2.5 && < 3,
         optparse-applicative >= 0.17 && < 1
     hs-source-dirs:   src, app
-    default-language: GHC2021
+    default-language: GHC2024
     default-extensions:
         DeriveAnyClass
         DeriveGeneric

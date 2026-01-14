@@ -13,7 +13,7 @@
 --
 -- Architecture:
 -- 1. Tool returns ToolTransition with target name + payload
--- 2. Graph executor's ConvertTransitionHint converts to typed GotoChoice
+-- 2. Graph interpreter's ConvertTransitionHint converts to typed GotoChoice
 -- 3. Dispatch continues to target node, skipping handler's afterHandler
 --
 module ToolTransitionIntegrationSpec (spec) where

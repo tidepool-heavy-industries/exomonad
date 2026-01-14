@@ -67,6 +67,7 @@ module Tidepool.Graph.Memory
     Memory(..)
   , getMem
   , updateMem
+  , putMem
 
     -- * Lens Helpers
   , modifyMem
@@ -148,6 +149,14 @@ getMem = send GetMem
 -- @
 updateMem :: forall s effs. Member (Memory s) effs => (s -> s) -> Eff effs ()
 updateMem f = send (UpdateMem f)
+
+-- | Set the memory value (overwriting current state).
+--
+-- @
+-- putMem \@MyState newState
+-- @
+putMem :: forall s effs. Member (Memory s) effs => s -> Eff effs ()
+putMem s = updateMem @s (const s)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- LENS HELPERS

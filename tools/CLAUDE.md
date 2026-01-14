@@ -19,7 +19,7 @@ cabal run ghci-oracle -- --port 9999 --project /path/to/project
 - `GHCi.Oracle.Protocol` - Length-prefixed JSON wire protocol
 - `GHCi.Oracle.Types` - Wire protocol types
 
-**Purpose:** Enable fast, repeated GHCi queries without spawning new processes. Used by `tidepool-ghci-executor` to interpret the `GHCi` effect.
+**Purpose:** Enable fast, repeated GHCi queries without spawning new processes. Used by `tidepool-ghci-interpreter` to interpret the `GHCi` effect.
 
 See [ghci-oracle/CLAUDE.md](ghci-oracle/CLAUDE.md) for full documentation.
 
@@ -49,5 +49,5 @@ Experimental micro-service tooling.
 
 ## Related Documentation
 
-- [tidepool-native-gui/CLAUDE.md](../tidepool-native-gui/CLAUDE.md) - observability-executor used with sleeptime-logs
+- [tidepool-native-gui/CLAUDE.md](../tidepool-native-gui/CLAUDE.md) - observability-interpreter used with sleeptime-logs
 - [Root CLAUDE.md](../CLAUDE.md) - Sleeptime concept overview

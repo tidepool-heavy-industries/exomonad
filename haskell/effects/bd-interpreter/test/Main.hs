@@ -256,7 +256,7 @@ beadInfoTests = describe "BeadInfo" $ do
 
 
 -- ════════════════════════════════════════════════════════════════════════════
--- EXECUTOR TESTS
+-- INTERPRETER TESTS
 -- ════════════════════════════════════════════════════════════════════════════
 
 interpreterTests :: Spec

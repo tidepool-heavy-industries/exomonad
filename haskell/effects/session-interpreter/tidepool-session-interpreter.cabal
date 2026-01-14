@@ -38,7 +38,7 @@ library
         directory >= 1.3 && < 2,
         tidepool-core
     hs-source-dirs:   src
-    default-language: GHC2021
+    default-language: GHC2024
     default-extensions:
         DataKinds
         DeriveGeneric
@@ -57,7 +57,7 @@ test-suite session-interpreter-test
         Tidepool.Session.JsonSpec
         Tidepool.Session.DecisionToolsIntegrationSpec
     hs-source-dirs:   test
-    default-language: GHC2021
+    default-language: GHC2024
     default-extensions:
         DataKinds
         DeriveGeneric

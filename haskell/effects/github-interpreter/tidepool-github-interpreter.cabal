@@ -28,7 +28,7 @@ library
         time >= 1.12 && < 2,
         tidepool-core
     hs-source-dirs:   src
-    default-language: GHC2021
+    default-language: GHC2024
     default-extensions:
         DataKinds
         DeriveAnyClass
@@ -45,7 +45,7 @@ test-suite github-interpreter-test
     type:             exitcode-stdio-1.0
     main-is:          Main.hs
     hs-source-dirs:   test
-    default-language: GHC2021
+    default-language: GHC2024
     default-extensions:
         OverloadedStrings
         OverloadedRecordDot

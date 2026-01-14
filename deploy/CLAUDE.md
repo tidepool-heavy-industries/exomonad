@@ -9,7 +9,7 @@ A Cloudflare Worker that:
 2. Loads a WASM module compiled from Haskell (tidepool-wasm)
 3. Executes the graph via WebSocket, interpreting effects
 
-The key insight: **TypeScript is a graph-aware effect executor**. Haskell owns the graph structure and execution logic; TypeScript handles IO (LLM calls, HTTP, logging).
+The key insight: **TypeScript is a graph-aware effect interpreter**. Haskell owns the graph structure and execution logic; TypeScript handles IO (LLM calls, HTTP, logging).
 
 ## Current Status
 

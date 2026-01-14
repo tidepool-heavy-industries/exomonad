@@ -7,7 +7,7 @@ description: |
 
   The tidepool repo has ~30 Haskell packages under `haskell/`:
   - Core DSL packages: haskell/dsl/core, haskell/runtime/actor
-  - Effect interpreters: haskell/effects/*-executor (llm-executor, bd-executor, session-executor, etc.)
+  - Effect interpreters: haskell/effects/*-interpreter (llm-interpreter, bd-interpreter, session-interpreter, etc.)
   - Tools: haskell/tools/ghci-oracle, haskell/tools/sleeptime
   - Platform: haskell/platform, haskell/protocol/*
 

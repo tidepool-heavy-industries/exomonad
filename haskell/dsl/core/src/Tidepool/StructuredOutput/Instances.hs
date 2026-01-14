@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE UndecidableInstances #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
 
 -- | Base type instances for 'StructuredOutput'.
@@ -11,9 +12,10 @@
 -- Also provides 'StringEnum' for LLM-compatible enum schemas.
 module Tidepool.StructuredOutput.Instances
   ( StringEnum(..)
+  , TidepoolDefault(..)
   ) where
 
-import Data.Aeson (Value(..))
+import Data.Aeson (Value(..), ToJSON(..), FromJSON(..))
 import Data.Bifunctor (first)
 import Data.List.NonEmpty (NonEmpty(..))
 import qualified Data.List.NonEmpty as NonEmpty
@@ -23,11 +25,20 @@ import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Vector as V
+import GHC.Generics (Generic, Rep, from, to)
 
-import Tidepool.Schema (JSONSchema(..), SchemaType(..), emptySchema, arraySchema, enumSchema)
-import Tidepool.StructuredOutput.Class (StructuredOutput(..))
+import Tidepool.Schema (JSONSchema(..), SchemaType(..), emptySchema, arraySchema, enumSchema, HasJSONSchema(..), TidepoolDefault(..), StringEnum(..))
+import Tidepool.StructuredOutput.Class
+  ( StructuredOutput(..)
+  , GStructuredOutput(..)
+  , gStructuredSchema
+  , gEncodeStructured
+  , gParseStructured
+  , defaultOptions
+  )
 import Tidepool.StructuredOutput.Error
   ( ParseDiagnostic(..)
+  , formatDiagnostic
   , expectedString
   , expectedNumber
   , expectedBool
@@ -177,55 +188,22 @@ instance StructuredOutput Value where
 
 
 -- ════════════════════════════════════════════════════════════════════════════
--- STRING ENUM WRAPPER
+-- TIDEPOOL DEFAULT WRAPPER
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Wrapper for enum types that should serialize as plain string enums in JSON Schema.
---
--- LLM tool calling expects string enums like @{"enum": ["controlled", "risky", "desperate"]}@,
--- but StructuredOutput's default sum type encoding uses TaggedObject.
---
--- Use this wrapper in record fields to get plain string enum schemas:
---
--- @
--- data WirePosition = WireControlled | WireRisky | WireDesperate
---   deriving (Show, Bounded, Enum)
---
--- data EngageInput = EngageInput
---   { position :: StringEnum WirePosition
---   , ...
---   }
---   deriving (Generic, StructuredOutput)
---
--- -- Schema for position field: {"type": "string", "enum": ["wirecontrolled", "wirerisky", "wiredesperate"]}
--- @
---
--- == Show Instance Transformation
---
--- The enum values are derived from @show@ and lowercased. If you need custom
--- string values (e.g., "controlled" instead of "wirecontrolled"), provide a
--- custom @Show@ instance or use @stringEnumWith@ for explicit values.
---
--- == JSON Parsing
---
--- Note: This wrapper only affects schema generation. For parsing, your inner
--- type should have its own @FromJSON@ instance (typically case-insensitive).
-newtype StringEnum a = StringEnum { unStringEnum :: a }
-  deriving (Show, Eq)
+instance (Generic a, GStructuredOutput (Rep a)) => StructuredOutput (TidepoolDefault a) where
+  -- Use default generic implementation
+  structuredSchema = gStructuredSchema @(Rep a) defaultOptions
+  encodeStructured (TidepoolDefault x) = gEncodeStructured defaultOptions (from x)
+  parseStructured v = TidepoolDefault . to <$> gParseStructured defaultOptions [] v
 
--- | StructuredOutput instance for StringEnum.
---
--- Generates a plain string enum schema from @Bounded + Enum + Show@.
-instance (Bounded a, Enum a, Show a) => StructuredOutput (StringEnum a) where
-  structuredSchema = enumSchema (map (T.toLower . T.pack . show) [minBound @a .. maxBound])
+instance (Generic a, GStructuredOutput (Rep a)) => ToJSON (TidepoolDefault a) where
+  toJSON = encodeStructured
 
-  encodeStructured (StringEnum x) = String (T.toLower . T.pack $ show x)
+instance (Generic a, GStructuredOutput (Rep a)) => FromJSON (TidepoolDefault a) where
+  parseJSON v = case parseStructured v of
+    Right x -> pure x
+    Left diag -> fail (T.unpack (formatDiagnostic diag))
 
-  parseStructured (String s) =
-    let vals = [minBound @a .. maxBound]
-        matches = filter (\v -> T.toLower (T.pack (show v)) == T.toLower s) vals
-    in case matches of
-      [v] -> Right (StringEnum v)
-      []  -> Left $ typeMismatch [] ("one of: " <> T.intercalate ", " (map (T.toLower . T.pack . show) vals)) (String s)
-      _   -> Left $ typeMismatch [] "unique enum value" (String s)
-  parseStructured v = Left $ expectedString [] v
+instance (Generic a, GStructuredOutput (Rep a)) => HasJSONSchema (TidepoolDefault a) where
+  jsonSchema = structuredSchema @(TidepoolDefault a)

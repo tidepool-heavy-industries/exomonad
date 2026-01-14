@@ -12,7 +12,7 @@ Handles the TypeScript side of the Telegram integration:
 - Webhook endpoints for Telegram Bot API
 - Message parsing and formatting
 - Button/inline keyboard handling
-- TypeScript effect executor for `EffTelegramAsk` and similar effects
+- TypeScript effect interpreter for `EffTelegramAsk` and similar effects
 
 ## Usage
 

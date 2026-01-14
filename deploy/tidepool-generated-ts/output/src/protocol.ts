@@ -1,7 +1,7 @@
 /**
  * Protocol types for WASM ↔ TypeScript communication.
  *
- * Design principle: TypeScript is a graph-aware effect executor.
+ * Design principle: TypeScript is a graph-aware effect interpreter.
  * - Haskell owns: graph structure, DAG ordering, Needs resolution, Goto/exitWith
  * - TypeScript owns: domain-specific effects (LLM, Habitica), persistence, logging, observability
  * - No general-purpose primitives (HTTP fetch) - only domain-specific effects

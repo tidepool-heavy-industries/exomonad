@@ -244,7 +244,7 @@ cargo test -p mantle
 
 ## Integration with Haskell
 
-Haskell's `tidepool-claude-code-executor` spawns mantle as a subprocess:
+Haskell's `tidepool-claude-code-interpreter` spawns mantle as a subprocess:
 
 1. **Spawn**: `mantle session start --slug ... --prompt ... --json-schema ...`
 2. **Stdout**: JSON `SessionOutput` captured by Haskell

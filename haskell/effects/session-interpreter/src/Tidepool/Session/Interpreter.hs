@@ -101,7 +101,7 @@ defaultSessionConfig repoRoot = SessionConfig
 
 
 -- ════════════════════════════════════════════════════════════════════════════
--- EXECUTOR
+-- INTERPRETER
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Run Session effects by spawning mantle processes.

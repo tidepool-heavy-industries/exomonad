@@ -4,6 +4,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE UndecidableSuperClasses #-}
 
 -- | Schema handling for ClaudeCode nodes.
 --
@@ -43,8 +44,7 @@ import Data.Aeson (Value)
 import Data.Kind (Type)
 import Data.Text qualified as T
 
-import Tidepool.Schema (HasSumRep, IsNullarySum)
-import Tidepool.StructuredOutput.Class (StructuredOutput(..))
+import Tidepool.StructuredOutput.Class (StructuredOutput(..), HasSumRep, IsNullarySum)
 import Tidepool.StructuredOutput.DecisionTools (DecisionTool)
 import qualified Tidepool.StructuredOutput.DecisionTools as DT
 import Tidepool.StructuredOutput.Error (ParseDiagnostic)

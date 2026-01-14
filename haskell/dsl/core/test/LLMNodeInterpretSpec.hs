@@ -11,7 +11,7 @@
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
 
--- | Tests for LLM node execution in the graph executor.
+-- | Tests for LLM node execution in the graph interpreter.
 --
 -- These tests verify that:
 -- 1. The CallHandler typeclass correctly invokes both Logic and LLM handlers
