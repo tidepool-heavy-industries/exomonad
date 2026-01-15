@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "semantic-scout": {
+      "type": "stdio",
+      "command": "/private/tmp/tpw1/dist-newstyle/build/aarch64-osx/ghc-9.12.2/tidepool-semantic-scout-0.1.0.0/x/semantic-scout/noopt/build/semantic-scout/semantic-scout",
+      "args": ["--mcp"],
+      "env": {}
+    }
+  }
+}

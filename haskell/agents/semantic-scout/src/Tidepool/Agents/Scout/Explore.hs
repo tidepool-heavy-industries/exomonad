@@ -1,4 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedRecordDot #-}
+{-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE FlexibleContexts #-}
 
 -- | Exploration loop for semantic code navigation.
 --
@@ -34,19 +37,24 @@
 --   * Heuristics to be tuned without retraining
 --   * Training data to be straightforward (context → rubric)
 module Tidepool.Agents.Scout.Explore
-  ( -- * Exploration
+  ( -- * Exploration (Pure with Scorer)
     explore
   , ExploreConfig(..)
   , defaultExploreConfig
 
-    -- * Scorer Abstraction
+    -- * Exploration (Effectful with LSP + Gemma)
+  , exploreEff
+
+    -- * Scorer Abstraction (for pure version)
   , Scorer
   , heuristicScorer
 
     -- * Exploration State
   , ExploreEnv(..)
+  , NodeToExplore(..)
   ) where
 
+import Control.Monad.Freer (Eff, Member)
 import Data.Maybe (fromMaybe)
 import Data.Sequence (Seq, ViewL(..))
 import qualified Data.Sequence as Seq
@@ -56,7 +64,14 @@ import Data.Text (Text)
 import qualified Data.Text as T
 
 import Tidepool.Agents.Scout.Types
+import Tidepool.Agents.Scout.Gemma (Gemma, rateNode)
 import Tidepool.Agents.Scout.Heuristics (scoreNode, shouldExpand)
+import Tidepool.Effect.LSP
+  ( LSP, workspaceSymbol, hover, references
+  , textDocument, position
+  , SymbolInformation(..), Location(..), Range(..), Position(..), HoverInfo(..)
+  )
+import Tidepool.Platform (NativeOnly)
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -372,3 +387,220 @@ mockChildren parent depth
       , NodeToExplore "Validate.hs:50" depth (Just parent)
       ]
   | otherwise = []
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- EFFECTFUL EXPLORATION (LSP + GEMMA)
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Run exploration using real LSP and Gemma effects.
+--
+-- This is the production entry point that uses:
+--   * LSP for code navigation (workspaceSymbol, hover, references)
+--   * Gemma for semantic scoring (via rateNode effect)
+--
+-- Requires native execution (NativeOnly constraint from LSP).
+exploreEff
+  :: (Member LSP effs, Member Gemma effs, NativeOnly)
+  => ExploreConfig
+  -> ScoutQuery
+  -> Eff effs ScoutResponse
+exploreEff config query = do
+  let queryCtx = QueryContext
+        { qcQuery = sqQuery query
+        , qcTags = sqTags query
+        }
+  let budget = fromMaybe (ecDefaultBudget config) (sqBudget query)
+
+  -- Find entry points via workspace symbol search
+  entryPoints <- findEntryPoints (sqQuery query)
+  let initialQueue = Seq.fromList
+        [ NodeToExplore loc 0 Nothing | loc <- entryPoints ]
+
+  let initialEnv = ExploreEnv
+        { eeVisited = Set.empty
+        , eeQueue = initialQueue
+        , eeResults = []
+        , eeBudget = budget
+        , eeDepth = 0
+        }
+
+  -- Run exploration loop with real LSP + Gemma
+  finalEnv <- exploreLoopEff config queryCtx initialEnv
+
+  -- Build response
+  let visited = reverse (eeResults finalEnv)
+  let pointers = map toPointer visited
+  let trainingExamples = map (toTrainingExample queryCtx) visited
+
+  pure ScoutResponse
+    { srSummary = buildSummaryEff query pointers
+    , srPointers = pointers
+    , srNodesVisited = length visited
+    , srTrainingExamples = trainingExamples
+    }
+
+
+-- | Find entry points using workspace symbol search.
+findEntryPoints
+  :: (Member LSP effs, NativeOnly)
+  => Text           -- ^ Search query
+  -> Eff effs [Text]
+findEntryPoints query = do
+  symbols <- workspaceSymbol query
+  pure $ map symbolToLocation (take 10 symbols)  -- Limit entry points
+  where
+    symbolToLocation :: SymbolInformation -> Text
+    symbolToLocation sym =
+      let loc = sym.siLocation
+          startLine = loc.locRange.rangeStart.posLine
+      in extractFileName loc.locUri <> ":" <> T.pack (show (startLine + 1))
+
+    extractFileName :: Text -> Text
+    extractFileName uri =
+      let noPrefix = T.replace "file://" "" uri
+      in case T.splitOn "/" noPrefix of
+           [] -> uri
+           parts -> last parts
+
+
+-- | The effectful exploration loop using LSP + Gemma.
+exploreLoopEff
+  :: (Member LSP effs, Member Gemma effs, NativeOnly)
+  => ExploreConfig
+  -> QueryContext
+  -> ExploreEnv
+  -> Eff effs ExploreEnv
+exploreLoopEff config queryCtx env
+  -- Budget exhausted
+  | eeBudget env <= 0 = pure env
+  -- Process next node
+  | otherwise = case Seq.viewl (eeQueue env) of
+      -- Queue empty
+      EmptyL -> pure env
+      -- Pop and process
+      node :< rest ->
+        -- Skip if already visited
+        if nteLocation node `Set.member` eeVisited env
+          then exploreLoopEff config queryCtx env { eeQueue = rest }
+          else do
+            -- Fetch context via LSP
+            nodeCtx <- fetchNodeContext node
+
+            -- Score with Gemma effect
+            rubric <- rateNode queryCtx nodeCtx
+
+            -- Record visit
+            let visitedNode = VisitedNode
+                  { vnContext = nodeCtx
+                  , vnRubric = rubric
+                  }
+
+            -- Decide whether to expand
+            let doExpand = shouldExpand
+                  rubric
+                  (qcTags queryCtx)
+                  (nteDepth node)
+                  (countSiblings node env)
+                  (eeBudget env - 1)
+                  && nteDepth node < ecMaxDepth config
+
+            -- Queue children if expanding (via LSP references)
+            children <- if doExpand
+              then findChildren (nteLocation node) (nteDepth node + 1)
+              else pure []
+
+            let newEnv = env
+                  { eeVisited = Set.insert (nteLocation node) (eeVisited env)
+                  , eeQueue = rest Seq.>< Seq.fromList children
+                  , eeResults = visitedNode : eeResults env
+                  , eeBudget = eeBudget env - 1
+                  }
+
+            exploreLoopEff config queryCtx newEnv
+
+
+-- | Fetch node context using LSP hover.
+fetchNodeContext
+  :: (Member LSP effs, NativeOnly)
+  => NodeToExplore
+  -> Eff effs NodeContext
+fetchNodeContext node = do
+  let (file, lineNum) = parseLocation node.nteLocation
+  let doc = textDocument file
+  let pos = position (lineNum - 1) 0  -- LSP is 0-indexed
+
+  -- Get hover info
+  hoverInfo <- hover doc pos
+  let hoverText = case hoverInfo of
+        Just h  -> h.hoverContents
+        Nothing -> "No hover info available"
+
+  pure NodeContext
+    { ncLocation = node.nteLocation
+    , ncHover = hoverText
+    , ncCodeSnippet = ""  -- TODO: Could use document range request
+    , ncDepth = node.nteDepth
+    , ncBreadth = 5  -- TODO: Calculate from queue
+    }
+
+
+-- | Find children (references) using LSP.
+findChildren
+  :: (Member LSP effs, NativeOnly)
+  => Text           -- ^ Parent location
+  -> Int            -- ^ Child depth
+  -> Eff effs [NodeToExplore]
+findChildren parent depth = do
+  let (file, lineNum) = parseLocation parent
+  let doc = textDocument file
+  let pos = position (lineNum - 1) 0
+
+  refs <- references doc pos
+  pure $ map (refToNode parent depth) (take 5 refs)  -- Limit children per node
+  where
+    refToNode :: Text -> Int -> Location -> NodeToExplore
+    refToNode p d loc = NodeToExplore
+      { nteLocation = locationToText loc
+      , nteDepth = d
+      , nteParent = Just p
+      }
+
+    locationToText :: Location -> Text
+    locationToText loc =
+      let startLine = loc.locRange.rangeStart.posLine
+      in extractFileName loc.locUri <> ":" <> T.pack (show (startLine + 1))
+
+    extractFileName :: Text -> Text
+    extractFileName uri =
+      let noPrefix = T.replace "file://" "" uri
+      in case T.splitOn "/" noPrefix of
+           [] -> uri
+           parts -> last parts
+
+
+-- | Parse "File.hs:42" into (file, line).
+parseLocation :: Text -> (Text, Int)
+parseLocation loc =
+  case T.splitOn ":" loc of
+    [file, lineStr] -> (file, readInt lineStr)
+    _ -> (loc, 1)
+  where
+    readInt t = case reads (T.unpack t) of
+      [(n, "")] -> n
+      _ -> 1
+
+
+-- | Build summary for effectful exploration.
+buildSummaryEff :: ScoutQuery -> [Pointer] -> Text
+buildSummaryEff query pointers = T.unlines
+  [ "## Exploration Summary"
+  , ""
+  , "Query: " <> sqQuery query
+  , ""
+  , "Interest tags: " <> T.intercalate ", " (map tagToText (sqTags query))
+  , ""
+  , "Found " <> T.pack (show (length pointers)) <> " relevant locations."
+  , ""
+  , "Explored using LSP + Gemma effects."
+  ]

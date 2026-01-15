@@ -153,6 +153,16 @@ runLSP session = interpret $ \case
       Right result -> fromCompletions result
       Left _err -> []
 
+  WorkspaceSymbol query -> sendM $ runSession session $ do
+    resp <- request L.SMethod_WorkspaceSymbol $ L.WorkspaceSymbolParams
+      { L._query = query
+      , L._workDoneToken = Nothing
+      , L._partialResultToken = Nothing
+      }
+    pure $ case resp._result of
+      Right result -> fromSymbolsResult result
+      Left _err -> []
+
 -- | Run a Session action within an LSPSession.
 -- runSessionWithHandles takes: (serverOutput, serverInput) i.e. (read, write)
 runSession :: LSPSession -> Session a -> IO a
@@ -352,4 +362,66 @@ fromCompletionItemKind k = case k of
   L.CompletionItemKind_Event -> CIKEvent
   L.CompletionItemKind_Operator -> CIKOperator
   L.CompletionItemKind_TypeParameter -> CIKTypeParameter
+
+-- Result type is [SymbolInformation] |? ([WorkspaceSymbol] |? Null)
+fromSymbolsResult :: [L.SymbolInformation] L.|? ([L.WorkspaceSymbol] L.|? L.Null) -> [SymbolInformation]
+fromSymbolsResult result = case result of
+  L.InL infos -> map fromSymbolInfo infos
+  L.InR wsOrNull -> case wsOrNull of
+    L.InL wsSymbols -> map fromWorkspaceSymbol wsSymbols
+    L.InR L.Null -> []
+
+fromSymbolInfo :: L.SymbolInformation -> SymbolInformation
+fromSymbolInfo si = SymbolInformation
+  { siName = si._name
+  , siKind = fromSymbolKind si._kind
+  , siLocation = fromLocation si._location
+  , siContainer = si._containerName
+  }
+
+fromWorkspaceSymbol :: L.WorkspaceSymbol -> SymbolInformation
+fromWorkspaceSymbol ws = SymbolInformation
+  { siName = ws._name
+  , siKind = fromSymbolKind ws._kind
+  , siLocation = extractLocationFromWS ws._location
+  , siContainer = ws._containerName
+  }
+
+-- WorkspaceSymbol location is Location |? LocationUriOnly
+extractLocationFromWS :: L.Location L.|? L.LocationUriOnly -> Location
+extractLocationFromWS loc = case loc of
+  L.InL l -> fromLocation l
+  L.InR (L.LocationUriOnly uri) -> Location
+    { locUri = let L.Uri u = uri in u
+    , locRange = Range (Position 0 0) (Position 0 0)  -- Default range for URI-only
+    }
+
+fromSymbolKind :: L.SymbolKind -> SymbolKind
+fromSymbolKind k = case k of
+  L.SymbolKind_File -> SKFile
+  L.SymbolKind_Module -> SKModule
+  L.SymbolKind_Namespace -> SKNamespace
+  L.SymbolKind_Package -> SKPackage
+  L.SymbolKind_Class -> SKClass
+  L.SymbolKind_Method -> SKMethod
+  L.SymbolKind_Property -> SKProperty
+  L.SymbolKind_Field -> SKField
+  L.SymbolKind_Constructor -> SKConstructor
+  L.SymbolKind_Enum -> SKEnum
+  L.SymbolKind_Interface -> SKInterface
+  L.SymbolKind_Function -> SKFunction
+  L.SymbolKind_Variable -> SKVariable
+  L.SymbolKind_Constant -> SKConstant
+  L.SymbolKind_String -> SKString
+  L.SymbolKind_Number -> SKNumber
+  L.SymbolKind_Boolean -> SKBoolean
+  L.SymbolKind_Array -> SKArray
+  L.SymbolKind_Object -> SKObject
+  L.SymbolKind_Key -> SKKey
+  L.SymbolKind_Null -> SKNull
+  L.SymbolKind_EnumMember -> SKEnumMember
+  L.SymbolKind_Struct -> SKStruct
+  L.SymbolKind_Event -> SKEvent
+  L.SymbolKind_Operator -> SKOperator
+  L.SymbolKind_TypeParameter -> SKTypeParameter
 

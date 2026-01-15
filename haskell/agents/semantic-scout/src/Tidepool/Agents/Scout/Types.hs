@@ -30,9 +30,17 @@ module Tidepool.Agents.Scout.Types
   , tagToText
   ) where
 
-import Data.Aeson (FromJSON, ToJSON)
+import Data.Aeson
+  ( FromJSON(..), ToJSON(..), Value(..)
+  , withObject, (.:), (.:?), (.!=), (.=), object, parseJSON
+  )
+import Data.Aeson.Types (Parser)
+import Data.Foldable (toList)
+import Data.Maybe (mapMaybe)
 import Data.Text (Text)
+import qualified Data.Text as T
 import GHC.Generics (Generic)
+import Text.Read (readMaybe)
 
 import Tidepool.Schema (HasJSONSchema(..), objectSchema, arraySchema, emptySchema, SchemaType(..))
 
@@ -49,6 +57,9 @@ import Tidepool.Training.Types
 
 
 -- | Input query for semantic code exploration.
+--
+-- Note: Tags are stored as [Tag] internally but parsed from comma-separated
+-- Text for MCP compatibility (mcp-server library limitation).
 data ScoutQuery = ScoutQuery
   { sqQuery :: Text
     -- ^ Natural language question about the codebase
@@ -57,7 +68,51 @@ data ScoutQuery = ScoutQuery
   , sqBudget :: Maybe Int
     -- ^ Maximum number of LSP calls to make (default: 20)
   } deriving stock (Show, Eq, Generic)
-    deriving anyclass (FromJSON, ToJSON)
+
+-- | Custom FromJSON that handles tags as comma-separated string
+-- (for MCP compatibility) or as a proper JSON array.
+instance FromJSON ScoutQuery where
+  parseJSON = withObject "ScoutQuery" $ \v -> ScoutQuery
+    <$> v .: "query"
+    <*> (parseTags =<< v .:? "tags" .!= "")
+    <*> (parseOptionalInt =<< v .:? "budget")
+    where
+      -- Parse tags from either comma-separated string or JSON array
+      parseTags :: Value -> Parser [Tag]
+      parseTags (String t)
+        | T.null t = pure []
+        | otherwise = pure $ mapMaybe parseTag (T.splitOn "," t)
+      parseTags (Array arr) = mapM parseJSON (toList arr)
+      parseTags _ = pure []
+
+      -- Parse optional int from either string or number
+      parseOptionalInt :: Maybe Value -> Parser (Maybe Int)
+      parseOptionalInt Nothing = pure Nothing
+      parseOptionalInt (Just (Number n)) = pure $ Just (round n)
+      parseOptionalInt (Just (String s)) = pure $ readMaybe (T.unpack s)
+      parseOptionalInt (Just _) = pure Nothing
+
+      -- Parse a single tag from text
+      parseTag :: Text -> Maybe Tag
+      parseTag t = case T.toLower (T.strip t) of
+        "exhaustive" -> Just Exhaustive
+        "patternmatch" -> Just PatternMatch
+        "typefamily" -> Just TypeFamily
+        "breaksonadd" -> Just BreaksOnAdd
+        "import" -> Just Import
+        "reexport" -> Just ReExport
+        "signature" -> Just Signature
+        "implementation" -> Just Implementation
+        "constructor" -> Just Constructor
+        "recursive" -> Just Recursive
+        _ -> Nothing
+
+instance ToJSON ScoutQuery where
+  toJSON sq = object
+    [ "query" .= sqQuery sq
+    , "tags" .= map tagToText (sqTags sq)
+    , "budget" .= sqBudget sq
+    ]
 
 -- | Default exploration budget.
 defaultBudget :: Int
@@ -135,10 +190,11 @@ initialExploreState sq = ExploreState
 
 -- Manual instance for ScoutQuery (required by MCP server).
 -- The schema defines the JSON input format for the scout tool.
+-- Field names match the Aeson encoding: query, tags, budget (no "sq" prefix)
 instance HasJSONSchema ScoutQuery where
   jsonSchema = objectSchema
-    [ ("sqQuery", emptySchema TString)
-    , ("sqTags", arraySchema (emptySchema TString))  -- Tags as strings
-    , ("sqBudget", emptySchema TInteger)
+    [ ("query", emptySchema TString)
+    , ("tags", arraySchema (emptySchema TString))  -- Tags as strings
+    , ("budget", emptySchema TInteger)
     ]
-    ["sqQuery"]  -- Only sqQuery is required; tags and budget have defaults
+    ["query"]  -- Only query is required; tags and budget have defaults

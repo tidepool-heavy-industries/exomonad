@@ -1,4 +1,7 @@
 packages:
+    -- Vendored packages (patched for our use)
+    haskell/vendor/mcp-server
+
     -- Core DSL
     haskell/dsl/core
 

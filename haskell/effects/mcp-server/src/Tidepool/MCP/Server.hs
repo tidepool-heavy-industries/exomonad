@@ -2,9 +2,10 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 
--- | MCP server harness using mcp-server library
+-- | MCP server harness using vendored mcp-server library
 --
 -- Exposes Tidepool LLMNode as MCP tools over stdio transport.
+-- Uses vendored mcp-server with protocol version patch for Claude Code compatibility.
 module Tidepool.MCP.Server
   ( -- * Running Servers
     runMcpServer
@@ -16,7 +17,11 @@ module Tidepool.MCP.Server
   , module Tidepool.MCP.Types
   ) where
 
-import Data.Aeson (FromJSON, ToJSON, Value, Result(..), fromJSON, toJSON)
+import Data.Aeson (FromJSON, ToJSON, Value, Result(..), fromJSON, toJSON, object, (.=))
+import Data.Aeson.Text (encodeToTextBuilder)
+import qualified Data.Aeson.Key as Key
+import qualified Data.Text.Lazy as TL
+import qualified Data.Text.Lazy.Builder as TLB
 import Data.List (find)
 import Data.Proxy (Proxy(..))
 import Data.Text (Text)
@@ -90,14 +95,16 @@ callTool :: McpConfig -> Text -> [(Text, Text)] -> IO (Either Error Content)
 callTool cfg name args = case findTool name cfg.mcTools of
   Nothing -> pure $ Left $ UnknownTool name
   Just (McpTool _ _ _ runner) -> do
-    -- Convert [(Text, Text)] to JSON Value for parsing
-    -- For simplicity, treat each arg as a text value
-    let argsObject = toJSON $ foldl (\acc (k, v) -> acc <> [(k, toJSON v)]) [] args
+    -- Convert [(Text, Text)] to JSON object
+    -- Note: mcp-server library flattens all values to Text, so complex types
+    -- need custom parsing in the tool's FromJSON instance.
+    let argsObject = object [Key.fromText k .= v | (k, v) <- args]
     case fromJSON argsObject of
       Error e -> pure $ Left $ InvalidParams $ T.pack e
       Success input -> do
         result <- runner input
-        pure $ Right $ ContentText $ T.pack (show $ toJSON result)
+        -- Return proper JSON encoding, not Haskell show representation
+        pure $ Right $ ContentText $ TL.toStrict $ TLB.toLazyText $ encodeToTextBuilder $ toJSON result
 
 -- | Find tool by name
 findTool :: Text -> [McpTool] -> Maybe McpTool

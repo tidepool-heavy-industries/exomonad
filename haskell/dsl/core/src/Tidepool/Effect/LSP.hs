@@ -68,6 +68,7 @@ module Tidepool.Effect.LSP
   , codeActions
   , rename
   , completion
+  , workspaceSymbol
 
     -- * Document Identifiers
   , TextDocumentIdentifier(..)
@@ -90,6 +91,8 @@ module Tidepool.Effect.LSP
   , TextEdit(..)
   , CompletionItem(..)
   , CompletionItemKind(..)
+  , SymbolInformation(..)
+  , SymbolKind(..)
 
     -- * Native-only utilities
   , runLSPStub
@@ -284,6 +287,47 @@ data CompletionItem = CompletionItem
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)
 
+-- | Symbol kinds returned by workspace/symbol.
+data SymbolKind
+  = SKFile
+  | SKModule
+  | SKNamespace
+  | SKPackage
+  | SKClass
+  | SKMethod
+  | SKProperty
+  | SKField
+  | SKConstructor
+  | SKEnum
+  | SKInterface
+  | SKFunction
+  | SKVariable
+  | SKConstant
+  | SKString
+  | SKNumber
+  | SKBoolean
+  | SKArray
+  | SKObject
+  | SKKey
+  | SKNull
+  | SKEnumMember
+  | SKStruct
+  | SKEvent
+  | SKOperator
+  | SKTypeParameter
+  deriving stock (Show, Eq, Ord, Enum, Bounded, Generic)
+  deriving anyclass (FromJSON, ToJSON)
+
+-- | Information about a symbol found in workspace search.
+data SymbolInformation = SymbolInformation
+  { siName     :: !Text              -- ^ Symbol name
+  , siKind     :: !SymbolKind        -- ^ Kind of symbol
+  , siLocation :: !Location          -- ^ Where the symbol is defined
+  , siContainer :: !(Maybe Text)     -- ^ Container name (e.g., module)
+  }
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (FromJSON, ToJSON)
+
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- EFFECT DEFINITION
@@ -319,6 +363,9 @@ data LSP r where
 
   -- | Get completion suggestions at a position.
   Completion :: TextDocumentIdentifier -> Position -> LSP [CompletionItem]
+
+  -- | Search for symbols in the workspace by name query.
+  WorkspaceSymbol :: Text -> LSP [SymbolInformation]
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -367,6 +414,12 @@ rename doc pos newName = send (Rename doc pos newName)
 completion :: (Member LSP effs, NativeOnly) => TextDocumentIdentifier -> Position -> Eff effs [CompletionItem]
 completion doc pos = send (Completion doc pos)
 
+-- | Search for symbols in the workspace.
+--
+-- Note: This operation requires native execution (not available in WASM).
+workspaceSymbol :: (Member LSP effs, NativeOnly) => Text -> Eff effs [SymbolInformation]
+workspaceSymbol query = send (WorkspaceSymbol query)
+
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- NATIVE-ONLY UTILITIES
@@ -404,6 +457,10 @@ runLSPStub = interpret $ \case
 
   Completion doc pos -> do
     logInfo $ "[LSP:stub] Completion at " <> doc.tdiUri <> " " <> showPos pos
+    pure []
+
+  WorkspaceSymbol query -> do
+    logInfo $ "[LSP:stub] WorkspaceSymbol query: " <> query
     pure []
   where
     showPos :: Position -> Text
