@@ -8,13 +8,15 @@ Developer tools that run as separate processes, not linked into main Tidepool bi
 |--------------|-----------|
 | Query Haskell types from an agent | `ghci-oracle/CLAUDE.md` |
 | Analyze agent logs for evolution | `sleeptime/CLAUDE.md` |
+| Generate training data for FunctionGemma | `training-generator/CLAUDE.md` |
 
 ## Documentation Tree
 
 ```
 tools/CLAUDE.md  ← YOU ARE HERE (router)
-├── ghci-oracle/CLAUDE.md  ← GHCi subprocess server (detailed)
-└── sleeptime/CLAUDE.md    ← Log analysis for agent evolution
+├── ghci-oracle/CLAUDE.md     ← GHCi subprocess server (detailed)
+├── sleeptime/CLAUDE.md       ← Log analysis for agent evolution
+└── training-generator/CLAUDE.md ← FunctionGemma training data types
 ```
 
 ## Structure
@@ -23,6 +25,7 @@ tools/CLAUDE.md  ← YOU ARE HERE (router)
 |---------|---------|---------|
 | `ghci-oracle/` | Persistent GHCi session server | Standalone binary (socket server) |
 | `sleeptime/` | Log analysis for agent improvement | Library + CLI |
+| `training-generator/` | Training data types for FunctionGemma | Library |
 
 ## ghci-oracle
 
@@ -58,6 +61,31 @@ sleeptime analyze --log-dir ./logs --output report.json
 **Note**: The actual cron jobs live in consuming repos (anemone, urchin), not here.
 
 See `sleeptime/CLAUDE.md` for analysis patterns.
+
+## training-generator
+
+Shared types for generating FunctionGemma training data:
+
+```haskell
+import Tidepool.TrainingGenerator.Types
+
+data TrainingExample = TrainingExample
+  { teQuery  :: QueryContext
+  , teNode   :: NodeContext
+  , teRubric :: Rubric
+  }
+```
+
+**Purpose**: Defines data structures for semantic code analysis training:
+- `Tag` - Categories of breaking changes (Exhaustive, PatternMatch, etc.)
+- `Rubric` - Structured scores (relevance, risk, confidence, reasoning)
+- `TrainingExample` - (query, node, rubric) triples for supervised learning
+
+**Used by**:
+- `semantic-scout` - Collects examples during exploration
+- Training pipeline - Converts to FunctionGemma format for fine-tuning
+
+See `training-generator/CLAUDE.md` for data model details.
 
 ## Why Not in Main Build?
 

@@ -60,6 +60,10 @@ main = withLSPSession "/path/to/project" $ \session -> do
 | `hover doc pos` | textDocument/hover | `Maybe HoverInfo` |
 | `references doc pos` | textDocument/references | `[Location]` |
 | `definition doc pos` | textDocument/definition | `[Location]` |
+| `workspaceSymbol query` | workspace/symbol | `[SymbolInformation]` |
+| `completion doc pos` | textDocument/completion | `[CompletionItem]` |
+| `codeActions doc pos` | textDocument/codeAction | `[CodeAction]` |
+| `rename doc pos newName` | textDocument/rename | `WorkspaceEdit` |
 | `diagnostics doc` | (notifications) | `[Diagnostic]` |
 
 ## Session Management
@@ -75,6 +79,59 @@ withLSPSession
 
 -- Session is automatically cleaned up on exit
 -- HLS process is terminated via RAII bracket
+```
+
+### Concurrent Request Handling
+
+The interpreter uses a **worker thread pattern** for concurrent LSP requests:
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│ withLSPSession                                                       │
+│   • Spawns HLS process (stdio pipes)                                │
+│   • Creates request channel (Chan LSPRequest)                        │
+│   • Launches worker thread (async)                                   │
+│   • Returns session handle                                           │
+└──────────────────────────────────────┬───────────────────────────────┘
+                                       │
+         ┌─────────────────────────────┼────────────────────────┐
+         ▼                             ▼                        ▼
+    runLSP call 1                runLSP call 2           runLSP call 3
+    (creates MVar)               (creates MVar)          (creates MVar)
+         │                             │                        │
+         └─────────────────────────────┼────────────────────────┘
+                                       │ Chan
+                                       ▼
+                          ┌──────────────────────────┐
+                          │ Worker Thread            │
+                          │  • Reads from Chan       │
+                          │  • Executes via Session  │
+                          │  • Writes to MVar        │
+                          └──────────────────────────┘
+                                       │
+                                       ▼
+                            haskell-language-server
+```
+
+**Why this pattern?**
+- **Thread safety**: Multiple Tidepool agents can query LSP concurrently
+- **Session reuse**: One HLS process serves many queries (semantic-scout)
+- **Blocking I/O**: LSP operations block, but don't block caller threads
+
+### Session Reuse (semantic-scout)
+
+semantic-scout performs ~20+ LSP calls per query. Session reuse is critical:
+
+```haskell
+-- BAD: Start/stop HLS for each query (5s startup × 20 = 100s overhead)
+main = do
+  query1 <- withLSPSession "." $ \s -> exploreEff query1
+  query2 <- withLSPSession "." $ \s -> exploreEff query2
+
+-- GOOD: One session for all queries (5s startup once)
+main = withLSPSession "." $ \session -> do
+  query1 <- exploreEff session query1
+  query2 <- exploreEff session query2
 ```
 
 ## Key Modules

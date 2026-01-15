@@ -17,14 +17,18 @@ Navigate to the right docs for your task:
 CLAUDE.md  ← YOU ARE HERE (project overview)
 ├── haskell/CLAUDE.md  ← Haskell package organization
 │   ├── dsl/core/CLAUDE.md      ← Graph DSL reference (START HERE for handlers)
+│   ├── agents/                 ← Production agents
+│   │   └── semantic-scout/CLAUDE.md ← Code exploration MCP tool
 │   ├── effects/CLAUDE.md       ← Effect interpreters
 │   │   ├── session-interpreter/ ← Claude Code subprocess (key for V3)
 │   │   ├── llm-interpreter/     ← Anthropic/OpenAI API
+│   │   ├── lsp-interpreter/     ← Language Server Protocol
+│   │   ├── mcp-server/          ← MCP tool server (expose agents to Claude)
 │   │   └── ...
 │   ├── runtime/CLAUDE.md       ← Execution backends
 │   │   └── actor/CLAUDE.md     ← Actor model details
 │   ├── protocol/CLAUDE.md      ← Wire formats
-│   └── tools/CLAUDE.md         ← Dev tools (ghci-oracle, sleeptime)
+│   └── tools/CLAUDE.md         ← Dev tools (ghci-oracle, sleeptime, training-generator)
 ├── rust/CLAUDE.md             ← Mantle: Claude Code session orchestration
 │   ├── mantle/CLAUDE.md        ← Host-side session CLI
 │   ├── mantle-agent/CLAUDE.md  ← Container-side hook handler + MCP
@@ -45,6 +49,10 @@ CLAUDE.md  ← YOU ARE HERE (project overview)
 | Understand ClaudeCode execution | `haskell/effects/session-interpreter/CLAUDE.md` |
 | Add or modify an effect interpreter | `haskell/effects/CLAUDE.md` |
 | Understand actor execution model | `haskell/runtime/actor/CLAUDE.md` |
+| Work on semantic-scout code exploration | `haskell/agents/semantic-scout/CLAUDE.md` |
+| Expose agents as MCP tools | `haskell/effects/mcp-server/CLAUDE.md` |
+| Work with LSP (Language Server Protocol) | `haskell/effects/lsp-interpreter/CLAUDE.md` |
+| Generate training data for FunctionGemma | `haskell/tools/training-generator/CLAUDE.md` |
 | Work on types-first-dev V3 protocol | `types-first-dev/CLAUDE.md` |
 | Deploy to Cloudflare Workers | `deploy/CLAUDE.md` |
 | Work on the native server | `haskell/native-server/CLAUDE.md` |
@@ -183,6 +191,11 @@ All Haskell packages now live under `haskell/`. See `haskell/CLAUDE.md` for full
 | `haskell/runtime/wasm` | WASM deployment scaffolding |
 | `haskell/platform` | Platform abstraction layer (deprecated) |
 
+### Agents (`haskell/agents/`)
+| Package | Purpose |
+|---------|---------|
+| `haskell/agents/semantic-scout` | Code exploration MCP tool using LSP |
+
 ### Effect Interpreters (`haskell/effects/`)
 | Package | Purpose |
 |---------|---------|
@@ -190,6 +203,7 @@ All Haskell packages now live under `haskell/`. See `haskell/CLAUDE.md` for full
 | `haskell/effects/llm-interpreter` | Anthropic/OpenAI API calls |
 | `haskell/effects/bd-interpreter` | Beads integration + urchin CLI |
 | `haskell/effects/session-interpreter` | Claude Code subprocess via mantle |
+| `haskell/effects/mcp-server` | MCP tool server (expose agents to Claude) |
 | `haskell/effects/habitica-interpreter` | Habitica API |
 | `haskell/effects/ui-interpreter` | WebSocket ↔ UI bridging |
 | `haskell/effects/observability-interpreter` | OpenTelemetry traces to Grafana |
@@ -213,6 +227,7 @@ All Haskell packages now live under `haskell/`. See `haskell/CLAUDE.md` for full
 |---------|---------|
 | `haskell/tools/ghci-oracle` | Persistent GHCi session server |
 | `haskell/tools/sleeptime` | Log analysis for agent evolution |
+| `haskell/tools/training-generator` | Training data types for FunctionGemma |
 | `tools/micro-gastown` | Experimental tooling (non-Haskell) |
 
 ### TypeScript Packages (`typescript/`)
@@ -234,8 +249,9 @@ All Haskell packages now live under `haskell/`. See `haskell/CLAUDE.md` for full
 | New integration | `haskell/dsl/core/src/Tidepool/Effects/` (plural) |
 | New graph annotation | `haskell/dsl/core/src/Tidepool/Graph/Types.hs` |
 | New interpreter | `haskell/effects/<name>-interpreter/` |
+| New MCP tool/agent | `haskell/agents/<name>/` |
 | TypeScript frontend/bot | `typescript/<name>/` |
-| Agents | Separate repo (anemone, urchin, etc.) |
+| Agents (consuming repos) | Separate repo (anemone, urchin, etc.) |
 
 ### Naming Conventions
 - **Effect** (singular) = core infrastructure (`Tidepool.Effect.*`)

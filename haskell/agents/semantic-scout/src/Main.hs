@@ -13,13 +13,18 @@
 --   * LSP provides the actual code navigation
 module Main (main) where
 
-import Data.Functor.Identity (runIdentity)
+import Control.Exception (try, SomeException)
+import Control.Monad.Freer (runM)
 import Data.Proxy (Proxy(..))
+import System.Directory (getCurrentDirectory)
 import System.Environment (getArgs)
+import System.IO (hFlush, stdout)
 
+import Tidepool.LSP.Interpreter (withLSPSession, runLSP, LSPSession)
 import Tidepool.MCP.Server (runMcpServer, makeMcpTool, McpConfig(..))
 import Tidepool.Agents.Scout.Types
-import Tidepool.Agents.Scout.Explore (explore, heuristicScorer, defaultExploreConfig)
+import Tidepool.Agents.Scout.Explore (exploreEff, defaultExploreConfig)
+import Tidepool.Agents.Scout.Gemma (runGemmaHeuristic)
 
 
 main :: IO ()
@@ -40,37 +45,42 @@ main = do
 -- | Run as MCP server.
 runScoutMCP :: IO ()
 runScoutMCP = do
-  let scoutTool = makeMcpTool
-        (Proxy @ScoutQuery)
-        "scout"
-        "Explore codebase to answer semantic questions about code. Returns structured findings and generates training data."
-        executeScout
+  cwd <- getCurrentDirectory
 
-  let config = McpConfig
-        { mcName = "semantic-scout"
-        , mcVersion = "0.1.0"
-        , mcTools = [scoutTool]
-        }
+  -- Initialize LSP session once for the entire MCP server lifetime
+  withLSPSession cwd $ \session -> do
+    let scoutTool = makeMcpTool
+          (Proxy @ScoutQuery)
+          "scout"
+          "Explore codebase to answer semantic questions about code."
+          (executeScout session)  -- Pass session via closure
 
-  runMcpServer config
+    let config = McpConfig
+          { mcName = "semantic-scout"
+          , mcVersion = "0.1.0"
+          , mcTools = [scoutTool]
+          }
+
+    runMcpServer config
 
 
 -- | Execute a scout query.
 --
--- This runs the exploration loop with heuristic scoring.
--- Future: swap in Gemma scorer for semantic understanding.
-executeScout :: ScoutQuery -> IO ScoutResponse
-executeScout query = do
-  -- For now, use pure heuristic scorer (no IO needed)
-  -- Future: use gemmaScorer which requires IO for model inference
-  let result = runIdentity $ explore heuristicScorer defaultExploreConfig query
-  pure result
+-- This runs the exploration loop with real LSP code intelligence.
+-- No fallback - will error if LSP fails so we can debug issues.
+executeScout :: LSPSession -> ScoutQuery -> IO ScoutResponse
+executeScout session query = do
+  runM $ runGemmaHeuristic $ runLSP session $ exploreEff defaultExploreConfig query
 
 
 -- | Demo mode: run exploration and print results.
 runExploreDemo :: IO ()
 runExploreDemo = do
-  putStrLn "Running exploration demo...\n"
+  putStrLn "Running exploration demo..."
+  hFlush stdout
+  cwd <- getCurrentDirectory
+  putStrLn $ "Working directory: " ++ cwd
+  hFlush stdout
 
   let query = ScoutQuery
         { sqQuery = "What breaks if I add a variant to LLMKind?"
@@ -78,15 +88,27 @@ runExploreDemo = do
         , sqBudget = Just 10
         }
 
-  response <- executeScout query
+  putStrLn "Initializing LSP session..."
+  hFlush stdout
 
-  putStrLn $ "Summary:\n" ++ show (srSummary response)
-  putStrLn $ "\nNodes visited: " ++ show (srNodesVisited response)
-  putStrLn $ "\nPointers found: " ++ show (length (srPointers response))
-  putStrLn $ "\nTraining examples: " ++ show (length (srTrainingExamples response))
+  -- Initialize LSP session for demo
+  result <- try $ withLSPSession cwd $ \session -> do
+    putStrLn "LSP session initialized, executing scout..."
+    hFlush stdout
+    executeScout session query
 
-  putStrLn "\n--- Pointers ---"
-  mapM_ printPointer (srPointers response)
+  case result of
+    Left (err :: SomeException) -> do
+      putStrLn $ "ERROR: " ++ show err
+      hFlush stdout
+    Right response -> do
+      putStrLn $ "Summary:\n" ++ show (srSummary response)
+      putStrLn $ "\nNodes visited: " ++ show (srNodesVisited response)
+      putStrLn $ "\nPointers found: " ++ show (length (srPointers response))
+      putStrLn $ "\nTraining examples: " ++ show (length (srTrainingExamples response))
+
+      putStrLn "\n--- Pointers ---"
+      mapM_ printPointer (srPointers response)
 
   where
     printPointer p = putStrLn $ unlines

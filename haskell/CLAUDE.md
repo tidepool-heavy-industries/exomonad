@@ -9,6 +9,10 @@ All Haskell packages live here, organized by architectural pattern.
 | Understand graph DSL, handlers, annotations | `dsl/core/CLAUDE.md` |
 | Add or modify an effect interpreter | `effects/CLAUDE.md` → `effects/{name}-interpreter/CLAUDE.md` |
 | Understand graph execution model | `runtime/CLAUDE.md` → `runtime/actor/CLAUDE.md` |
+| Work on semantic-scout code exploration | `agents/semantic-scout/CLAUDE.md` |
+| Expose agents as MCP tools | `effects/mcp-server/CLAUDE.md` |
+| Work with LSP integration | `effects/lsp-interpreter/CLAUDE.md` |
+| Generate training data for FunctionGemma | `tools/training-generator/CLAUDE.md` |
 | Work on the WebSocket server | `native-server/CLAUDE.md` |
 | Understand wire protocols | `protocol/CLAUDE.md` |
 | Work on dev tools (GHCi oracle, sleeptime) | `tools/CLAUDE.md` → `tools/{name}/CLAUDE.md` |
@@ -21,9 +25,13 @@ All Haskell packages live here, organized by architectural pattern.
 haskell/CLAUDE.md  ← YOU ARE HERE (router)
 ├── dsl/CLAUDE.md
 │   └── core/CLAUDE.md  ← Graph DSL reference (detailed)
+├── agents/
+│   └── semantic-scout/CLAUDE.md  ← Code exploration MCP tool
 ├── effects/CLAUDE.md  ← Effect interpreter pattern
 │   ├── llm-interpreter/CLAUDE.md
 │   ├── session-interpreter/CLAUDE.md  ← ClaudeCode subprocess
+│   ├── lsp-interpreter/CLAUDE.md  ← Language Server Protocol
+│   ├── mcp-server/CLAUDE.md  ← MCP tool server
 │   ├── ghci-interpreter/CLAUDE.md
 │   ├── habitica/CLAUDE.md
 │   └── ...
@@ -37,7 +45,8 @@ haskell/CLAUDE.md  ← YOU ARE HERE (router)
 ├── platform/CLAUDE.md
 └── tools/CLAUDE.md
     ├── ghci-oracle/CLAUDE.md
-    └── sleeptime/CLAUDE.md
+    ├── sleeptime/CLAUDE.md
+    └── training-generator/CLAUDE.md  ← FunctionGemma training data
 ```
 
 ## Structure
@@ -45,11 +54,12 @@ haskell/CLAUDE.md  ← YOU ARE HERE (router)
 | Directory | Purpose | When to read |
 |-----------|---------|--------------|
 | `dsl/` | Graph DSL, effects, templates, schemas | Defining graphs, handlers, templates |
+| `agents/` | Production agents (MCP tools, standalone) | Working on semantic-scout or new agents |
 | `effects/` | Effect interpreters (HTTP, subprocess, etc.) | Adding/modifying external integrations |
 | `runtime/` | Execution backends (actor, WASM) | Understanding concurrent execution |
 | `native-server/` | WebSocket server facade | Server lifecycle, effect composition |
 | `protocol/` | Wire formats (native, WASM) | Client-server communication |
-| `tools/` | Standalone utilities | GHCi integration, log analysis |
+| `tools/` | Standalone utilities | GHCi integration, log analysis, training data |
 | `vendor/` | Vendored dependencies | Rarely (freer-simple, ginger internals) |
 
 ## Design Patterns

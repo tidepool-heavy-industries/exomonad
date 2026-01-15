@@ -12,17 +12,24 @@ module Tidepool.LSP.Interpreter
   , runLSP
   ) where
 
-import Control.Exception (bracket)
+import Control.Concurrent (Chan, newChan, readChan, writeChan)
+import Control.Concurrent.Async (Async, async, wait)
+import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, takeMVar, tryPutMVar)
+import Control.Exception (bracket, SomeException, throwIO)
+import Control.Monad.Catch (catch)
+import Control.Monad (forever, void)
 import Control.Monad.Freer (Eff, LastMember, sendM, interpret)
+import Control.Monad.IO.Class (liftIO)
 import Data.Function ((&))
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Map.Strict as Map
-import System.IO (Handle)
+import System.IO (BufferMode(..), hSetBuffering, hPutStrLn, stderr)
 import System.Process (CreateProcess(..), StdStream(..), ProcessHandle, createProcess, proc, terminateProcess, cwd)
+import System.Timeout (timeout)
 
 import Language.LSP.Client (runSessionWithHandles)
-import Language.LSP.Client.Session (Session, initialize, request)
+import Language.LSP.Client.Session (Session, initialize, request, sendNotification, receiveNotification, openDoc)
 import qualified Language.LSP.Protocol.Types as L
 import qualified Language.LSP.Protocol.Message as L
 
@@ -33,11 +40,17 @@ import Tidepool.Effect.LSP
 -- SESSION MANAGEMENT
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | An active LSP session with a language server.
+-- | Request sent to the background LSP worker thread.
+data LSPRequest = forall a. LSPRequest
+  { lspReqAction :: Session a
+  , lspReqResult :: MVar (Either SomeException a)
+  }
+
+-- | An active LSP session with persistent worker thread.
 data LSPSession = LSPSession
-  { lspStdin   :: !Handle
-  , lspStdout  :: !Handle
-  , lspProcess :: !ProcessHandle
+  { lspRequestChan :: !(Chan LSPRequest)
+  , lspWorkerAsync :: !(Async ())
+  , lspProcess     :: !ProcessHandle
   }
 
 -- | Start an LSP session with HLS and run an action.
@@ -56,17 +69,112 @@ withLSPSession rootDir action =
     action session
   where
     acquire = do
+      -- Start HLS process (stderr inherits from parent for debugging)
       (Just stdin, Just stdout, _, ph) <- createProcess
         (proc "haskell-language-server-wrapper" ["--lsp"])
           { std_in = CreatePipe
           , std_out = CreatePipe
-          , std_err = CreatePipe
+          , std_err = Inherit  -- Let stderr pass through so we can see HLS errors
           , cwd = Just rootDir
           }
-      pure $ LSPSession stdin stdout ph
 
-    release session =
+      -- Set unbuffered IO for LSP communication
+      hSetBuffering stdin NoBuffering
+      hSetBuffering stdout NoBuffering
+
+      -- Create request channel and readiness signal
+      requestChan <- newChan
+      readyMVar <- newEmptyMVar
+
+      -- Spawn worker thread running persistent Session
+      worker <- async $ do
+        hPutStrLn stderr "[LSP Worker] Thread started, calling runSessionWithHandles..."
+        runSessionWithHandles stdout stdin $ do
+          -- Step 1: Send initialize request (handshake part 1)
+          liftIO $ hPutStrLn stderr "[LSP Worker] Sending initialize request..."
+          _ <- initialize Nothing
+          liftIO $ hPutStrLn stderr "[LSP Worker] Initialize complete"
+
+          -- Step 2: Register progress handler BEFORE sending initialized
+          -- (HLS may send progress immediately after initialized)
+          liftIO $ hPutStrLn stderr "[LSP Worker] Registering progress handler..."
+          receiveNotification L.SMethod_Progress $ \_msg -> do
+            hPutStrLn stderr "[LSP Worker] Got progress notification - signaling ready"
+            void $ tryPutMVar readyMVar ()
+
+          -- Step 3: Send initialized notification (handshake part 2)
+          -- This triggers HLS to start indexing
+          liftIO $ hPutStrLn stderr "[LSP Worker] Sending initialized notification..."
+          sendNotification L.SMethod_Initialized L.InitializedParams
+          liftIO $ hPutStrLn stderr "[LSP Worker] Handshake complete"
+
+          -- Step 4: Tell HLS about our workspace folder
+          -- (lsp-client sends rootUri=null by default, so we fix it here)
+          liftIO $ hPutStrLn stderr $ "[LSP Worker] Setting workspace folder: " ++ rootDir
+          let workspaceUri = L.Uri $ T.pack $ "file://" ++ rootDir
+          sendNotification L.SMethod_WorkspaceDidChangeWorkspaceFolders $ L.DidChangeWorkspaceFoldersParams
+            { L._event = L.WorkspaceFoldersChangeEvent
+                { L._added = [L.WorkspaceFolder { L._uri = workspaceUri, L._name = T.pack "tidepool" }]
+                , L._removed = []
+                }
+            }
+
+          -- Step 5: Open a Haskell file to trigger HLS project discovery
+          liftIO $ hPutStrLn stderr "[LSP Worker] Opening a Haskell file to trigger indexing..."
+          _doc <- openDoc (rootDir ++ "/haskell/dsl/core/src/Tidepool/Effect/Types.hs") "haskell"
+          liftIO $ hPutStrLn stderr "[LSP Worker] Document opened"
+
+          -- Step 6: Wait briefly for progress, then proceed
+          liftIO $ hPutStrLn stderr "[LSP Worker] Waiting up to 10s for HLS progress..."
+          liftIO $ do
+            maybeReady <- timeout (10 * 1000000) $ takeMVar readyMVar
+            case maybeReady of
+              Just () -> hPutStrLn stderr "[LSP Worker] Got progress notification!"
+              Nothing -> hPutStrLn stderr "[LSP Worker] No progress yet, proceeding anyway..."
+
+          liftIO $ hPutStrLn stderr "[LSP Worker] Ready to process requests"
+
+          -- Process requests in a loop
+          forever $ do
+            LSPRequest reqAction responseMVar <- liftIO $ readChan requestChan
+            liftIO $ hPutStrLn stderr "[LSP Worker] Processing request..."
+            -- Execute action and catch any exceptions
+            result <- (Right <$> reqAction) `catch` (\(e :: SomeException) -> pure (Left e))
+            liftIO $ putMVar responseMVar result
+            liftIO $ hPutStrLn stderr "[LSP Worker] Request completed"
+
+      pure $ LSPSession requestChan worker ph
+
+    release session = do
+      -- Terminate HLS first - this closes stdin/stdout pipes
+      -- Worker will see EOF and exit naturally from runSessionWithHandles
       terminateProcess session.lspProcess
+
+      -- Reap worker thread (will re-throw any exception from worker)
+      -- This wait will complete quickly after HLS terminates
+      wait session.lspWorkerAsync
+      pure ()
+
+
+-- | Execute a Session action via the background worker.
+--
+-- Sends the action to the worker thread, waits for response.
+-- Propagates any errors that occurred during execution.
+executeSession :: LSPSession -> Session a -> IO a
+executeSession session action = do
+  -- Create response MVar
+  responseMVar <- newEmptyMVar
+
+  -- Send request to worker
+  writeChan session.lspRequestChan $ LSPRequest action responseMVar
+
+  -- Wait for response
+  result <- takeMVar responseMVar
+
+  -- Propagate errors
+  case result of
+    Right value -> pure value
+    Left err -> throwIO err
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -81,7 +189,7 @@ runLSP session = interpret $ \case
     -- Would need to track them in session state
     pure []
 
-  Hover doc pos -> sendM $ runSession session $ do
+  Hover doc pos -> sendM $ executeSession session $ do
     resp <- request L.SMethod_TextDocumentHover $ L.HoverParams
       { L._textDocument = toTextDocumentId doc
       , L._position = toPosition pos
@@ -91,7 +199,7 @@ runLSP session = interpret $ \case
       Right result -> fromHover result
       Left _err -> Nothing
 
-  References doc pos -> sendM $ runSession session $ do
+  References doc pos -> sendM $ executeSession session $ do
     resp <- request L.SMethod_TextDocumentReferences $ L.ReferenceParams
       { L._textDocument = toTextDocumentId doc
       , L._position = toPosition pos
@@ -103,7 +211,7 @@ runLSP session = interpret $ \case
       Right result -> fromLocations result
       Left _err -> []
 
-  Definition doc pos -> sendM $ runSession session $ do
+  Definition doc pos -> sendM $ executeSession session $ do
     resp <- request L.SMethod_TextDocumentDefinition $ L.DefinitionParams
       { L._textDocument = toTextDocumentId doc
       , L._position = toPosition pos
@@ -114,7 +222,7 @@ runLSP session = interpret $ \case
       Right result -> fromDefinition result
       Left _err -> []
 
-  CodeActions doc rng -> sendM $ runSession session $ do
+  CodeActions doc rng -> sendM $ executeSession session $ do
     resp <- request L.SMethod_TextDocumentCodeAction $ L.CodeActionParams
       { L._textDocument = toTextDocumentId doc
       , L._range = toRange rng
@@ -130,7 +238,7 @@ runLSP session = interpret $ \case
       Right result -> fromCodeActions result
       Left _err -> []
 
-  Rename doc pos newName -> sendM $ runSession session $ do
+  Rename doc pos newName -> sendM $ executeSession session $ do
     resp <- request L.SMethod_TextDocumentRename $ L.RenameParams
       { L._textDocument = toTextDocumentId doc
       , L._position = toPosition pos
@@ -141,7 +249,7 @@ runLSP session = interpret $ \case
       Right result -> fromWorkspaceEdit result
       Left _err -> WorkspaceEdit Map.empty
 
-  Completion doc pos -> sendM $ runSession session $ do
+  Completion doc pos -> sendM $ executeSession session $ do
     resp <- request L.SMethod_TextDocumentCompletion $ L.CompletionParams
       { L._textDocument = toTextDocumentId doc
       , L._position = toPosition pos
@@ -153,7 +261,7 @@ runLSP session = interpret $ \case
       Right result -> fromCompletions result
       Left _err -> []
 
-  WorkspaceSymbol query -> sendM $ runSession session $ do
+  WorkspaceSymbol query -> sendM $ executeSession session $ do
     resp <- request L.SMethod_WorkspaceSymbol $ L.WorkspaceSymbolParams
       { L._query = query
       , L._workDoneToken = Nothing
@@ -162,14 +270,6 @@ runLSP session = interpret $ \case
     pure $ case resp._result of
       Right result -> fromSymbolsResult result
       Left _err -> []
-
--- | Run a Session action within an LSPSession.
--- runSessionWithHandles takes: (serverOutput, serverInput) i.e. (read, write)
-runSession :: LSPSession -> Session a -> IO a
-runSession session action =
-  runSessionWithHandles session.lspStdout session.lspStdin $ do
-    _ <- initialize Nothing
-    action
 
 
 -- ════════════════════════════════════════════════════════════════════════════

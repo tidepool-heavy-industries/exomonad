@@ -14,6 +14,7 @@ This follows the **interpreter design pattern**: abstract syntax (effect types) 
 | Work with GitHub issues/PRs | `github-interpreter/CLAUDE.md` |
 | Build agent UIs (WebSocket bridge) | `ui-interpreter/CLAUDE.md` |
 | Add code intelligence (LSP) | `lsp-interpreter/CLAUDE.md` |
+| Expose agents as MCP tools | `mcp-server/CLAUDE.md` |
 | Manage git worktrees | `worktree-interpreter/CLAUDE.md` |
 | Integrate beads task tracking | `bd-interpreter/CLAUDE.md` |
 | Add Grafana observability | `observability-interpreter/CLAUDE.md` |
@@ -28,10 +29,11 @@ This follows the **interpreter design pattern**: abstract syntax (effect types) 
 effects/CLAUDE.md  ← YOU ARE HERE (router)
 ├── session-interpreter/CLAUDE.md       ← Claude Code subprocess (key for V3)
 ├── llm-interpreter/CLAUDE.md           ← Anthropic/OpenAI API
+├── mcp-server/CLAUDE.md                ← MCP tool server (expose agents to Claude)
+├── lsp-interpreter/CLAUDE.md           ← Language server protocol
 ├── ghci-interpreter/CLAUDE.md          ← GHCi oracle client
 ├── github-interpreter/CLAUDE.md        ← gh CLI for issues/PRs
 ├── ui-interpreter/CLAUDE.md            ← WebSocket UI bridge
-├── lsp-interpreter/CLAUDE.md           ← Language server protocol
 ├── bd-interpreter/CLAUDE.md            ← Beads task tracking
 ├── observability-interpreter/CLAUDE.md ← Grafana Loki & Tempo
 ├── worktree-interpreter/CLAUDE.md      ← Git worktree management
@@ -57,12 +59,13 @@ Most effect types live in `dsl/core/src/Tidepool/Effect/Types.hs` or `Effects/*.
 |--------|-------|-------------|----------------|
 | Session | dsl/core | session-interpreter | Subprocess (mantle session) |
 | LLM | dsl/core | llm-interpreter | HTTP (Anthropic/OpenAI) |
+| MCP | n/a | mcp-server | JSON-RPC 2.0 stdio (tool server) |
+| LSP | dsl/core | lsp-interpreter | lsp-client library |
 | BD | dsl/core | bd-interpreter | Subprocess (urchin CLI) |
 | ClaudeCode | dsl/core | claude-code-interpreter | Subprocess (mantle) - **deprecated, use Session** |
 | Habitica | effects/habitica | habitica-interpreter | HTTP API |
 | UI | dsl/core | ui-interpreter | WebSocket bridge |
 | Observability | dsl/core | observability-interpreter | OTLP/Loki push |
-| LSP | dsl/core | lsp-interpreter | lsp-client library |
 | GHCi | dsl/core | ghci-interpreter | ghci-oracle client |
 | GitHub | dsl/core | github-interpreter | gh CLI subprocess |
 | Worktree | dsl/core | worktree-interpreter | Git subprocess |

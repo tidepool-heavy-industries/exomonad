@@ -54,7 +54,9 @@ module Tidepool.Agents.Scout.Explore
   , NodeToExplore(..)
   ) where
 
-import Control.Monad.Freer (Eff, Member)
+import Control.Monad.Freer (Eff, Member, LastMember, sendM)
+import qualified Control.Exception
+import Control.Exception (IOException)
 import Data.Maybe (fromMaybe)
 import Data.Sequence (Seq, ViewL(..))
 import qualified Data.Sequence as Seq
@@ -62,6 +64,7 @@ import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
+import System.IO (readFile)
 
 import Tidepool.Agents.Scout.Types
 import Tidepool.Agents.Scout.Gemma (Gemma, rateNode)
@@ -401,7 +404,7 @@ mockChildren parent depth
 --
 -- Requires native execution (NativeOnly constraint from LSP).
 exploreEff
-  :: (Member LSP effs, Member Gemma effs, NativeOnly)
+  :: (Member LSP effs, Member Gemma effs, LastMember IO effs, NativeOnly)
   => ExploreConfig
   -> ScoutQuery
   -> Eff effs ScoutResponse
@@ -466,7 +469,7 @@ findEntryPoints query = do
 
 -- | The effectful exploration loop using LSP + Gemma.
 exploreLoopEff
-  :: (Member LSP effs, Member Gemma effs, NativeOnly)
+  :: (Member LSP effs, Member Gemma effs, LastMember IO effs, NativeOnly)
   => ExploreConfig
   -> QueryContext
   -> ExploreEnv
@@ -522,7 +525,7 @@ exploreLoopEff config queryCtx env
 
 -- | Fetch node context using LSP hover.
 fetchNodeContext
-  :: (Member LSP effs, NativeOnly)
+  :: (Member LSP effs, LastMember IO effs, NativeOnly)
   => NodeToExplore
   -> Eff effs NodeContext
 fetchNodeContext node = do
@@ -536,10 +539,13 @@ fetchNodeContext node = do
         Just h  -> h.hoverContents
         Nothing -> "No hover info available"
 
+  -- Extract code snippet from file
+  snippet <- sendM $ extractCodeSnippet file lineNum
+
   pure NodeContext
     { ncLocation = node.nteLocation
     , ncHover = hoverText
-    , ncCodeSnippet = ""  -- TODO: Could use document range request
+    , ncCodeSnippet = snippet
     , ncDepth = node.nteDepth
     , ncBreadth = 5  -- TODO: Calculate from queue
     }
@@ -589,6 +595,25 @@ parseLocation loc =
     readInt t = case reads (T.unpack t) of
       [(n, "")] -> n
       _ -> 1
+
+
+-- | Extract code snippet around a line number.
+--
+-- Returns 3 lines before and 2 lines after the target line.
+-- Strips 'file://' prefix from URI and handles read errors gracefully.
+extractCodeSnippet :: Text -> Int -> IO Text
+extractCodeSnippet filePath lineNum = do
+  let cleanPath = T.unpack $ T.replace "file://" "" filePath
+  result <- Control.Exception.try @IOException $ readFile cleanPath
+  case result of
+    Left _err -> pure "(code snippet unavailable)"
+    Right contents -> do
+      let linesOfCode = T.lines (T.pack contents)
+      let totalLines = length linesOfCode
+      let start = max 0 (lineNum - 3)
+      let end = min (totalLines - 1) (lineNum + 2)
+      let snippet = take (end - start + 1) $ drop start linesOfCode
+      pure $ T.unlines snippet
 
 
 -- | Build summary for effectful exploration.
