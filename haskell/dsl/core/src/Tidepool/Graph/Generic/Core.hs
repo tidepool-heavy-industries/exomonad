@@ -9,8 +9,7 @@
 -- and RecordStructure.hs. Both modules import these shared types.
 module Tidepool.Graph.Generic.Core
   ( -- * Mode Class
-    GraphMode(..)
-  , (:-) -- Re-export the type family for convenience
+    GraphMode(..)  -- Exports :- operator via (..)
 
     -- * Modes
   , AsGraph

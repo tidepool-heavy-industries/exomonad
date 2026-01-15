@@ -326,7 +326,7 @@ class ReifyToolRecord (record :: Type -> Type) where
   reifyToolInputs :: Proxy record -> [TypeRep]
 
 -- Default instance: traverse Generic representation
-instance (Generic (record AsGraph), GReifyToolFields (Rep (record AsGraph)))
+instance GReifyToolFields (Rep (record AsGraph))
       => ReifyToolRecord record where
   reifyToolInputs _ = gReifyToolFields (Proxy @(Rep (record AsGraph)))
 
@@ -349,7 +349,7 @@ instance (GReifyToolFields l, GReifyToolFields r) => GReifyToolFields (l :*: r) 
   gReifyToolFields _ = gReifyToolFields (Proxy @l) ++ gReifyToolFields (Proxy @r)
 
 -- Named field with Tool annotation: extract input type
-instance (KnownSymbol name, Typeable input, Typeable result)
+instance Typeable input
       => GReifyToolFields (M1 S ('MetaSel ('Just name) su ss ds) (K1 i (Tool input result))) where
   gReifyToolFields _ = [typeRep (Proxy @input)]
 
