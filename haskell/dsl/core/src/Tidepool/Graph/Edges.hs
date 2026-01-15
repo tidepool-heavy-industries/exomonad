@@ -20,6 +20,12 @@ module Tidepool.Graph.Edges
   , GetTools
   , GetMemory
 
+    -- * Entry/Exit Extraction
+  , GetEntries
+  , GetExits
+  , HasEntries
+  , HasExits
+
     -- * Graph-Level Extraction
   , GetGlobal
   , GetBackend
@@ -188,6 +194,70 @@ type family GetMemory node where
   GetMemory _ = 'Nothing
 
 -- ════════════════════════════════════════════════════════════════════════════
+-- ENTRY/EXIT EXTRACTION
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Extract Entries record type from a node declaration.
+--
+-- Returns the record type that defines named entry points for this node.
+--
+-- @
+-- GetEntries (LLMNode :@ Entries WorkEntries :@ Template WorkTpl)
+--   = 'Just WorkEntries
+--
+-- GetEntries (LLMNode :@ Input TaskSpec :@ Schema Result)
+--   = 'Nothing  -- Old-style Input, no Entries
+-- @
+type GetEntries :: Type -> Maybe Type
+type family GetEntries node where
+  GetEntries (node :@ Entries record) = 'Just record
+  GetEntries (node :@ _) = GetEntries node
+  GetEntries _ = 'Nothing
+
+-- | Extract Exits record type from a node declaration.
+--
+-- Returns the record type that defines named exit points for this node.
+--
+-- @
+-- GetExits (LLMNode :@ Exits WorkExits :@ Template WorkTpl)
+--   = 'Just WorkExits
+--
+-- GetExits (LLMNode :@ Schema Result :@ Template WorkTpl)
+--   = 'Nothing  -- Old-style Schema, no Exits
+-- @
+type GetExits :: Type -> Maybe Type
+type family GetExits node where
+  GetExits (node :@ Exits record) = 'Just record
+  GetExits (node :@ _) = GetExits node
+  GetExits _ = 'Nothing
+
+-- | Check if a node has Entries annotation.
+--
+-- @
+-- HasEntries (LLMNode :@ Entries WorkEntries :@ Template WorkTpl)
+--   = 'True
+--
+-- HasEntries (LLMNode :@ Input TaskSpec :@ Schema Result)
+--   = 'False
+-- @
+type HasEntries :: Type -> Bool
+type family HasEntries node where
+  HasEntries node = IsJust (GetEntries node)
+
+-- | Check if a node has Exits annotation.
+--
+-- @
+-- HasExits (LLMNode :@ Exits WorkExits :@ Template WorkTpl)
+--   = 'True
+--
+-- HasExits (LLMNode :@ Schema Result :@ Template WorkTpl)
+--   = 'False
+-- @
+type HasExits :: Type -> Bool
+type family HasExits node where
+  HasExits node = IsJust (GetExits node)
+
+-- ════════════════════════════════════════════════════════════════════════════
 -- GOTO EXTRACTION
 -- ════════════════════════════════════════════════════════════════════════════
 
@@ -335,6 +405,8 @@ type family SameAnnotationType ann target where
   SameAnnotationType (Tools _) (Tools _) = 'True
   SameAnnotationType (UsesEffects _) (UsesEffects _) = 'True
   SameAnnotationType (Memory _) (Memory _) = 'True
+  SameAnnotationType (Entries _) (Entries _) = 'True
+  SameAnnotationType (Exits _) (Exits _) = 'True
   SameAnnotationType Vision Vision = 'True
   SameAnnotationType (ClaudeCode _) (ClaudeCode _) = 'True
   SameAnnotationType (Backend _) (Backend _) = 'True
