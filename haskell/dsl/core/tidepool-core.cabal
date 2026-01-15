@@ -162,6 +162,13 @@ test-suite graph-validation-tests
         ToolTransitionIntegrationSpec
         DecisionToolsSpec
         Test.Tidepool.MockLLM
+        -- Golden test files (compile-only validation)
+        BranchingLogicRecord
+        ConfigRecordGraph
+        FanInGraphRecord
+        MixedLLMLogicRecord
+        SelfLoopRecord
+        SimpleLinearRecord
     build-depends:
         base >= 4.17 && < 5,
         hspec >= 2.10 && < 3,
@@ -174,7 +181,7 @@ test-suite graph-validation-tests
         vector >= 0.13 && < 1,
         freer-simple >= 1.2 && < 2,
         tidepool-core
-    hs-source-dirs:   test
+    hs-source-dirs:   test, test/golden/valid
     default-language: GHC2024
     default-extensions:
         DeriveAnyClass

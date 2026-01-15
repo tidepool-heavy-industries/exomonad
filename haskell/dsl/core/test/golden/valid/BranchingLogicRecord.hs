@@ -10,7 +10,7 @@ module BranchingLogicRecord where
 
 import GHC.Generics (Generic)
 
-import Tidepool.Graph.Types (type (:@), Input, Schema, UsesEffects)
+import Tidepool.Graph.Types (type (:@), Input, Schema, UsesEffects, LLMKind(..))
 import Tidepool.Graph.Generic (GraphMode(..), Entry, Exit, LLMNode, LogicNode, ValidGraphRecord)
 import Tidepool.Graph.Goto (Goto)
 
@@ -21,10 +21,10 @@ data Response
 -- | Branching graph: Entry -> classify -> router -> (refund | faq) -> Exit
 data BranchingGraph mode = BranchingGraph
   { bgEntry    :: mode :- Entry Message
-  , bgClassify :: mode :- LLMNode :@ Input Message :@ Schema Intent
+  , bgClassify :: mode :- LLMNode 'API :@ Input Message :@ Schema Intent
   , bgRouter   :: mode :- LogicNode :@ Input Intent :@ UsesEffects '[Goto "bgRefund" Message, Goto "bgFaq" Message]
-  , bgRefund   :: mode :- LLMNode :@ Input Message :@ Schema Response
-  , bgFaq      :: mode :- LLMNode :@ Input Message :@ Schema Response
+  , bgRefund   :: mode :- LLMNode 'API :@ Input Message :@ Schema Response
+  , bgFaq      :: mode :- LLMNode 'API :@ Input Message :@ Schema Response
   , bgExit     :: mode :- Exit Response
   }
   deriving Generic

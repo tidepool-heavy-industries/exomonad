@@ -23,7 +23,7 @@ import GHC.Generics (Generic)
 
 import Tidepool.Prelude
 import qualified Tidepool.Graph.Generic as G
-import Tidepool.Graph.Generic.Core (NodeRef(..))
+import Tidepool.Graph.Generic.Core (NodeRef(..), type (:-))
 import Tidepool.Graph.Types
   ( type (:@), Entries, Tools, Exits, Routes, Route(..)
   , EntryPoint, Tool, ExitTool, ToolMetadata(..)
@@ -116,9 +116,9 @@ data WorkTools mode = WorkTools
 
 -- | Work node exits - LLM chooses via tool calls.
 data WorkExits mode = WorkExits
-  { complete :: mode :- ExitTool CompleteTaskPayload
+  { complete :: mode :- ExitTool CompleteTaskPayload '[WorkResult]
       :@ Routes '[ExitGraph]
-  , needRetry :: mode :- ExitTool RequestRetryPayload
+  , needRetry :: mode :- ExitTool RequestRetryPayload '[RetryInfo]
       :@ Routes '[ToEntry "gWork" "retry"]
   } deriving Generic
 

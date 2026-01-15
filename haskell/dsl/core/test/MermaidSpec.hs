@@ -17,7 +17,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
 
-import Tidepool.Graph.Types (type (:@), Input, Schema, UsesEffects)
+import Tidepool.Graph.Types (type (:@), Input, Schema, UsesEffects, LLMKind(..))
 import Tidepool.Graph.Generic (GraphMode(..), Entry, Exit, LLMNode, LogicNode)
 import Tidepool.Graph.Goto (Goto)
 import Tidepool.Graph.Mermaid (graphToMermaid)
@@ -65,7 +65,7 @@ instance HasJSONSchema TypeZ where
 -- | Simple graph for testing Mermaid output: Entry -> llmNode -> Exit
 data SimpleTestGraph mode = SimpleTestGraph
   { stgEntry   :: mode :- Entry InputA
-  , stgProcess :: mode :- LLMNode :@ Input InputA :@ Schema OutputB
+  , stgProcess :: mode :- LLMNode 'API :@ Input InputA :@ Schema OutputB
   , stgExit    :: mode :- Exit OutputB
   }
   deriving Generic
@@ -75,7 +75,7 @@ data SimpleTestGraph mode = SimpleTestGraph
 data BranchingTestGraph mode = BranchingTestGraph
   { btgEntry  :: mode :- Entry TypeX
   , btgRouter :: mode :- LogicNode :@ Input TypeX :@ UsesEffects '[Goto "btgLlm" TypeY]
-  , btgLlm    :: mode :- LLMNode :@ Input TypeY :@ Schema TypeZ
+  , btgLlm    :: mode :- LLMNode 'API :@ Input TypeY :@ Schema TypeZ
   , btgExit   :: mode :- Exit TypeZ
   }
   deriving Generic
