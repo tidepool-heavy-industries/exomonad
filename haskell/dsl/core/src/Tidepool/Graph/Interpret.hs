@@ -73,11 +73,11 @@ import Text.Parsec.Pos (SourcePos)
 import Tidepool.Effect (LLM)
 import Tidepool.Effect.Session (Session, SessionOutput(..), SessionId(..), SessionOperation(..), startSession, continueSession, forkSession, ToolCall(..))
 import Tidepool.Effect.Types (TurnOutcome(..), TurnParseResult(..), TurnResult(..), runTurn)
-import Tidepool.Graph.Edges (GetInput, GetSpawnTargets, GetBarrierTarget, GetAwaits, GetGraphEntry, GetGraphExit)
+import Tidepool.Graph.Edges (GetInput, GetSpawnTargets, GetBarrierTarget, GetAwaits)
 import Tidepool.Graph.Generic (AsHandler, FieldsWithNamesOf, SpawnPayloads, SpawnPayloadsInner, AwaitsHList, GetNodeDef)
 import Tidepool.Graph.Reify (IsForkNode)
 import Tidepool.Graph.Generic.Core (EntryNode, AsGraph, GraphNode)
-import qualified Tidepool.Graph.Generic.Core as G (Exit)
+import qualified Tidepool.Graph.Generic.Core as G (ExitNode)
 import Tidepool.Graph.Goto (GotoChoice, To, LLMHandler(..), ClaudeCodeLLMHandler(..), ClaudeCodeResult(..))
 import Tidepool.Graph.Goto.Internal (GotoChoice(..), OneOf(..))
 import Tidepool.Graph.Template (GingerContext)
@@ -123,8 +123,8 @@ type family FindEntryHandler entryType fields where
   FindEntryHandler _ '[] = 'Nothing
   FindEntryHandler entryType ('(name, EntryNode _) ': rest) =
     FindEntryHandler entryType rest  -- Skip EntryNode marker
-  FindEntryHandler entryType ('(name, G.Exit _) ': rest) =
-    FindEntryHandler entryType rest  -- Skip Exit marker
+  FindEntryHandler entryType ('(name, G.ExitNode _) ': rest) =
+    FindEntryHandler entryType rest  -- Skip ExitNode marker
   FindEntryHandler entryType ('(name, def) ': rest) =
     IfMaybe (MatchesInput entryType (GetInput def))
             ('Just name)

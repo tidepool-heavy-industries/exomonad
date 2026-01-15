@@ -30,8 +30,8 @@ module Tidepool.WASM
     -- ** Generic Graph Modes
   , GraphMode(..)  -- Includes (:-) type operator
   , AsGraph
-  , Entry
-  , Exit
+  , EntryNode
+  , ExitNode
   , LLMNode
   , LogicNode
 
@@ -52,8 +52,8 @@ import Tidepool.Graph.Generic
   ( GraphMode(..)
   , type (:-)
   , AsGraph
-  , Entry
-  , Exit
+  , EntryNode
+  , ExitNode
   , LLMNode
   , LogicNode
   )

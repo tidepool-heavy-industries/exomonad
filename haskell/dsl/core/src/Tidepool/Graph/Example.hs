@@ -35,7 +35,7 @@ import Text.Parsec.Pos (SourcePos)
 
 import Tidepool.Graph.Types (type (:@), Input, Schema, Template, UsesEffects, Exit, LLMKind(..))
 import Tidepool.Graph.Generic (GraphMode(..), AsHandler)
-import qualified Tidepool.Graph.Generic as G (EntryNode, Exit, LLMNode, LogicNode, ValidGraphRecord)
+import qualified Tidepool.Graph.Generic as G (EntryNode, ExitNode, LLMNode, LogicNode, ValidGraphRecord)
 import Tidepool.Graph.Goto (Goto, gotoChoice, gotoExit, LLMHandler(..))
 import Tidepool.Graph.Reify (ReifyRecordGraph(..), makeGraphInfo)
 import Tidepool.Graph.Tool (ToolDef(..))
@@ -252,7 +252,7 @@ data SupportGraph mode = SupportGraph
                     :@ UsesEffects '[Goto Exit Response]
   , sgFaq      :: mode :- G.LLMNode 'API :@ Input Message :@ Template FaqTpl :@ Schema Response
                     :@ UsesEffects '[Goto Exit Response]
-  , sgExit     :: mode :- G.Exit Response
+  , sgExit     :: mode :- G.ExitNode Response
   }
   deriving Generic
 
@@ -314,7 +314,7 @@ supportHandlers = SupportGraph
 --
 -- This uses the constraint to verify at compile time that:
 -- * SupportGraph has an EntryNode field (sgEntry :: mode :- G.EntryNode Message)
--- * SupportGraph has an Exit field (sgExit :: mode :- G.Exit Response)
+-- * SupportGraph has an Exit field (sgExit :: mode :- G.ExitNode Response)
 -- * All Goto targets reference valid field names
 --
 -- If any validation fails, you get a compile-time error.

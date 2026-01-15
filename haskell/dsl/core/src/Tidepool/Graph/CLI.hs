@@ -169,7 +169,7 @@ type ExtractExit :: (Type -> Type) -> Type
 type family ExtractExit f where
   ExtractExit (M1 G.D _ f) = ExtractExit f
   ExtractExit (M1 G.C _ f) = ExtractExit f
-  ExtractExit (M1 G.S _ (K1 _ (Exit a))) = a
+  ExtractExit (M1 G.S _ (K1 _ (ExitNode a))) = a
   ExtractExit (M1 G.S _ _) = ExitNotFound
   ExtractExit (l :*: r) = ChooseExit (ExtractExit l) (ExtractExit r)
   ExtractExit _ = ExitNotFound
