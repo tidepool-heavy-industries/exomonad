@@ -52,6 +52,11 @@ module Tidepool.Graph.Edges
     -- * Node Queries
   , HasAnnotation
   , FindAnnotation
+
+    -- * MCP Export Detection
+  , HasMCPExport
+  , GetToolMeta
+  , GetMCPEntries
   ) where
 
 import Data.Kind (Type)
@@ -60,11 +65,11 @@ import GHC.TypeLits (Symbol)
 import Tidepool.Graph.Types
   ( type (:@), type (:&)
   , Input, Schema, System, Template, Vision, Tools, UsesEffects, Memory
+  , MCPExport, ToolMeta
   , Spawn, Barrier, Awaits, Arrive
   , Global, Backend
   , ClaudeCode, ModelChoice
   , Exit, Self
-  , Route(..), Routes
   , Entries, Exits
   )
 import Tidepool.Graph.Goto (Goto, To)
@@ -553,6 +558,87 @@ type family GetArriveType effs where
   GetArriveType '[] = 'Nothing
   GetArriveType (Arrive _ result ': _) = 'Just result
   GetArriveType (_ ': rest) = GetArriveType rest
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- MCP EXPORT DETECTION
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Check if a node definition has MCPExport annotation.
+--
+-- MCPExport can appear at any position in the annotation chain:
+--
+-- @
+-- HasMCPExport (Entry SearchInput :@ MCPExport) = 'True
+-- HasMCPExport (Entry SearchInput :@ MCPExport :@ ToolMeta '("search", "desc")) = 'True
+-- HasMCPExport (Entry SearchInput :@ ToolMeta '("search", "desc") :@ MCPExport) = 'True
+-- HasMCPExport (Entry SearchInput) = 'False
+-- @
+--
+-- The type family recursively strips annotations to handle all orderings.
+type HasMCPExport :: Type -> Bool
+type family HasMCPExport node where
+  -- Direct match: MCPExport is the annotation
+  HasMCPExport (node :@ MCPExport) = 'True
+  -- MCPExport with one more annotation after it
+  HasMCPExport (node :@ MCPExport :@ _) = 'True
+  -- Recursively strip other annotations
+  HasMCPExport (node :@ _) = HasMCPExport node
+  -- Base case: no MCPExport found
+  HasMCPExport _ = 'False
+
+-- | Extract ToolMeta annotation if present.
+--
+-- Returns the type-level tuple (name, description) from the ToolMeta annotation.
+--
+-- @
+-- GetToolMeta (Entry X :@ MCPExport :@ ToolMeta '("name", "desc"))
+--   = 'Just '("name", "desc")
+--
+-- GetToolMeta (Entry X :@ ToolMeta '("name", "desc") :@ MCPExport)
+--   = 'Just '("name", "desc")
+--
+-- GetToolMeta (Entry X :@ MCPExport)
+--   = 'Nothing
+-- @
+type GetToolMeta :: Type -> Maybe (Symbol, Symbol)
+type family GetToolMeta node where
+  -- Direct match: ToolMeta is the annotation
+  GetToolMeta (node :@ ToolMeta meta) = 'Just meta
+  -- Recursively strip other annotations
+  GetToolMeta (node :@ _) = GetToolMeta node
+  -- Base case: no ToolMeta found
+  GetToolMeta _ = 'Nothing
+
+-- | Collect all MCP-exported Entry field names from a graph.
+--
+-- Returns a type-level list of (fieldName, inputType) tuples for Entry nodes
+-- that have MCPExport annotation. Used by ReifyMCPTools to generate tool
+-- definitions.
+--
+-- NOTE: Full implementation requires a typeclass-based approach due to GHC's
+-- limitation on pattern matching type family applications. The `:-` mode operator
+-- is a type family, and type families cannot pattern match on applications of
+-- other type families. This will be implemented as a ReifyMCPTools typeclass
+-- in Stream B (05-mcp-reify.md).
+--
+-- For now, this type family provides the signature that downstream code can
+-- reference. The actual collection happens at runtime via Generic reification.
+--
+-- @
+-- data MyGraph mode = MyGraph
+--   { gEntry  :: mode :- Entry Input
+--   , gSearch :: mode :- Entry SearchInput :@ MCPExport :@ ToolMeta '("search", "desc")
+--   , gCalc   :: mode :- Entry CalcInput :@ MCPExport
+--   , gExit   :: mode :- Exit Output
+--   }
+--
+-- -- Desired (implemented via typeclass in Stream B):
+-- GetMCPEntries MyGraph = '[ '("gSearch", SearchInput), '("gCalc", CalcInput) ]
+-- @
+type GetMCPEntries :: (Type -> Type) -> [(Symbol, Type)]
+type family GetMCPEntries graph where
+  GetMCPEntries g = '[]  -- Placeholder: actual implementation in Stream B via typeclass
+
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TYPE-LEVEL UTILITIES

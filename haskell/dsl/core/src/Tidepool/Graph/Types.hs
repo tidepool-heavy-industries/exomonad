@@ -19,6 +19,8 @@ module Tidepool.Graph.Types
   , Tools
   , UsesEffects
   , Memory
+  , MCPExport
+  , ToolMeta
   , EntryPoint
   , Tool
   , ExitTool
@@ -288,6 +290,28 @@ data UsesEffects effects
 -- @
 type Memory :: Type -> Type
 data Memory stateType
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- MCP EXPORT ANNOTATIONS (Temporary stubs until Stream B merges)
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Marker annotation indicating an Entry node should be exported as an MCP tool.
+-- When present on an Entry node, the reification system generates MCP tool
+-- definitions that external systems can invoke.
+--
+-- @
+-- gSearch :: mode :- Entry SearchInput :@ MCPExport :@ ToolMeta '("search", "Search database")
+-- @
+data MCPExport
+
+-- | Tool metadata annotation for MCP-exported Entry nodes.
+-- Carries type-level name and description as a Symbol tuple.
+--
+-- @
+-- ToolMeta '("tool_name", "Tool description text")
+-- @
+type ToolMeta :: (Symbol, Symbol) -> Type
+data ToolMeta nameAndDesc
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- ENTRY/EXIT RECORD ANNOTATIONS
