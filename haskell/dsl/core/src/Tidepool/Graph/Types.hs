@@ -19,8 +19,6 @@ module Tidepool.Graph.Types
   , Tools
   , UsesEffects
   , Memory
-  , MCPExport
-  , ToolMeta
   , EntryPoint
   , Tool
   , ExitTool
@@ -70,7 +68,7 @@ module Tidepool.Graph.Types
 
     -- * MCP Export Annotations
   , MCPExport
-  , ToolMeta
+  , ToolDef
 
     -- * Special Goto Targets
   , Exit
@@ -1089,23 +1087,27 @@ data FunctionGemma
 -- @
 -- data MyGraph mode = MyGraph
 --   { search :: mode :- EntryNode SearchInput :@ MCPExport
---       :@ ToolMeta '("search", "Search the codebase")
+--       :@ ToolDef '("search", "Search the codebase")
 --   }
 -- @
 --
--- Use with 'ToolMeta' to provide tool name and description.
+-- Use with 'ToolDef' to provide tool name and description.
 data MCPExport
 
--- | Provide name and description for an MCP-exported EntryNode.
+-- | Provide name and description for an MCP-exported node (EntryNode or LLMNode).
 --
 -- @
--- :@ ToolMeta '("tool_name", "Tool description for LLM")
+-- :@ ToolDef '("tool_name", "Tool description for LLM")
 -- @
 --
 -- The name should be snake_case. The description appears in the MCP
 -- tool listing and helps the LLM understand when to use the tool.
-type ToolMeta :: (Symbol, Symbol) -> Type
-data ToolMeta nameAndDesc
+--
+-- Can be used with:
+-- * EntryNode + MCPExport - exposes graph entry as MCP tool
+-- * LLMNode - exposes LLM node as MCP tool
+type ToolDef :: (Symbol, Symbol) -> Type
+data ToolDef nameAndDesc
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- SPECIAL GOTO TARGET

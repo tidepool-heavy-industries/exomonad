@@ -37,16 +37,16 @@ import GHC.Generics
 import GHC.TypeLits (Symbol, KnownSymbol, symbolVal)
 
 import Tidepool.Schema (HasJSONSchema(..), schemaToValue)
-import Tidepool.Graph.Types (type (:@), MCPExport, ToolMeta)
+import Tidepool.Graph.Types (type (:@), MCPExport, ToolDef)
 import Tidepool.Graph.Generic.Core (AsGraph, EntryNode, type (:-))
-import Tidepool.Graph.Edges (HasMCPExport, GetToolMeta)
+import Tidepool.Graph.Edges (HasMCPExport, GetToolDef)
 
 -- | An MCP tool definition extracted from a graph EntryNode.
 data MCPToolDef = MCPToolDef
   { mtdName :: Text
-    -- ^ Tool name (snake_case, from ToolMeta or field name)
+    -- ^ Tool name (snake_case, from ToolDef or field name)
   , mtdDescription :: Text
-    -- ^ Tool description (from ToolMeta)
+    -- ^ Tool description (from ToolDef)
   , mtdInputSchema :: Value
     -- ^ JSON Schema for tool parameters (from HasJSONSchema)
   , mtdEntryName :: Text
@@ -152,9 +152,9 @@ instance {-# OVERLAPPABLE #-} KnownSymbol name => ExtractToolMeta name node wher
   getToolName = T.pack (camelToSnake (symbolVal (Proxy @name)))
   getToolDescription = "No description provided"
 
--- With ToolMeta: use provided name/description
+-- With ToolDef: use provided name/description
 instance (KnownSymbol toolName, KnownSymbol toolDesc)
-      => ExtractToolMeta name (node :@ ToolMeta '(toolName, toolDesc)) where
+      => ExtractToolMeta name (node :@ ToolDef '(toolName, toolDesc)) where
   getToolName = T.pack (symbolVal (Proxy @toolName))
   getToolDescription = T.pack (symbolVal (Proxy @toolDesc))
 
