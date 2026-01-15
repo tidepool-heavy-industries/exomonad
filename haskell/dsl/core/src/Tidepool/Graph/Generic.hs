@@ -61,6 +61,7 @@ module Tidepool.Graph.Generic
     -- * Node Kind Wrappers (for record DSL)
   , LLMNode
   , LogicNode
+  , GraphNode
   , ForkNode
   , BarrierNode
 
@@ -126,7 +127,7 @@ import Control.Monad.Freer (Eff, Member)
 
 import Tidepool.Graph.Types (type (:@), Input, Schema, Template, Vision, Tools, Memory, System, UsesEffects, ClaudeCode, ModelChoice, Spawn, Barrier, Awaits, HList(..))
 import Tidepool.Graph.Template (TemplateContext)
-import Tidepool.Graph.Edges (GetUsesEffects, GetGotoTargets, GotoEffectsToTargets, HasClaudeCode, GetClaudeCode, GetSpawnTargets, GetBarrierTarget, GetAwaits)
+import Tidepool.Graph.Edges (GetUsesEffects, GetGotoTargets, GotoEffectsToTargets, HasClaudeCode, GetClaudeCode, GetSpawnTargets, GetBarrierTarget, GetAwaits, GetGraphEntry, GetGraphExit)
 import Tidepool.Graph.Goto (Goto, goto, GotoChoice, To, LLMHandler(..), ClaudeCodeLLMHandler(..))
 import Tidepool.Graph.Validate.RecordStructure
   ( AllFieldsReachable, AllLogicFieldsReachExit, NoDeadGotosRecord
@@ -138,6 +139,7 @@ import Tidepool.Graph.Generic.Core
   , AsGraph
   , LLMNode
   , LogicNode
+  , GraphNode
   , ForkNode
   , BarrierNode
   , Entry
@@ -205,6 +207,17 @@ type family NodeHandler nodeDef es where
   -- Entry/Exit produce Proxy (self-documenting markers)
   NodeHandler (Entry a) es = Proxy a
   NodeHandler (Exit a) es = Proxy a
+
+  -- GraphNode handler: runs child graph to completion.
+  --
+  -- The handler receives the graph's Entry type and returns its Exit type.
+  -- When bare (no Input annotation), default to Entry type as input.
+  NodeHandler (GraphNode subgraph) es =
+    NodeHandler (GraphNode subgraph :@ Input (GetGraphEntry subgraph)) es
+
+  -- GraphNode with Input annotation: function from input to Exit type.
+  NodeHandler (GraphNode subgraph :@ Input inputT) es =
+    inputT -> Eff es (GetGraphExit subgraph)
 
   -- Any annotated node: dispatch to the appropriate accumulator based on base kind
   -- We peel from outside, so start with the full node

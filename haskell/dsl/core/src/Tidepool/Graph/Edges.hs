@@ -34,6 +34,10 @@ module Tidepool.Graph.Edges
   , GetClaudeCode
   , HasClaudeCode
 
+    -- * Graph Entry/Exit Extraction
+  , GetGraphEntry
+  , GetGraphExit
+
     -- * Goto Extraction
   , GetGotoTargets
   , GotoEffectsToTargets
@@ -55,8 +59,10 @@ module Tidepool.Graph.Edges
   ) where
 
 import Data.Kind (Type)
-import GHC.TypeLits (Symbol)
+import GHC.Generics (Rep, M1, D, C, S, K1, (:*:), type Meta(..))
+import GHC.TypeLits (Symbol, TypeError, ErrorMessage(..))
 
+import Tidepool.Graph.Generic.Core (AsGraph, Entry, Exit, GraphMode(..))
 import Tidepool.Graph.Types
   ( type (:@), type (:&)
   , Input, Schema, System, Template, Vision, Tools, UsesEffects, Memory
@@ -489,6 +495,68 @@ type family HasClaudeCode node where
   HasClaudeCode (node :@ ClaudeCode _) = 'True
   HasClaudeCode (node :@ _) = HasClaudeCode node
   HasClaudeCode _ = 'False
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- GRAPH ENTRY/EXIT EXTRACTION
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Extract the Entry type from a graph definition.
+--
+-- Given a graph type constructor, returns the input type of its Entry node.
+--
+-- @
+-- GetGraphEntry SemanticScoutGraph = SemanticOrder
+-- @
+type GetGraphEntry :: (Type -> Type) -> Type
+type family GetGraphEntry graph where
+  GetGraphEntry g = FindEntryType (Rep (g AsGraph))
+
+-- | Extract the Exit type from a graph definition.
+--
+-- Given a graph type constructor, returns the output type of its Exit node.
+--
+-- @
+-- GetGraphExit SemanticScoutGraph = CompressedIntel
+-- @
+type GetGraphExit :: (Type -> Type) -> Type
+type family GetGraphExit graph where
+  GetGraphExit g = FindExitType (Rep (g AsGraph))
+
+-- | Walk Generic Rep to find Entry type.
+type FindEntryType :: (Type -> Type) -> Type
+type family FindEntryType rep where
+  -- Unwrap metadata layers
+  FindEntryType (M1 D _ inner) = FindEntryType inner
+  FindEntryType (M1 C _ inner) = FindEntryType inner
+  -- Found Entry node (with or without annotations)
+  FindEntryType (M1 S _ (K1 _ (_ :- Entry t))) = t
+  FindEntryType (M1 S _ (K1 _ (_ :- Entry t :@ _))) = t
+  FindEntryType (M1 S _ (K1 _ (_ :- Entry t :@ _ :@ _))) = t
+  -- Skip non-Entry fields
+  FindEntryType (M1 S _ _) = TypeError ('Text "No Entry node found")
+  -- Search product (Entry typically first, but check both)
+  FindEntryType (left :*: right) = FindEntryTypeInProduct (FindEntryType left) right
+
+-- | Helper for product search - if left found Entry, use it; else check right.
+type FindEntryTypeInProduct :: Type -> (Type -> Type) -> Type
+type family FindEntryTypeInProduct leftResult right where
+  FindEntryTypeInProduct (TypeError _) right = FindEntryType right
+  FindEntryTypeInProduct found _ = found
+
+-- | Walk Generic Rep to find Exit type.
+type FindExitType :: (Type -> Type) -> Type
+type family FindExitType rep where
+  FindExitType (M1 D _ inner) = FindExitType inner
+  FindExitType (M1 C _ inner) = FindExitType inner
+  FindExitType (M1 S _ (K1 _ (_ :- Exit t))) = t
+  FindExitType (M1 S _ (K1 _ (_ :- Exit t :@ _))) = t
+  FindExitType (M1 S _ _) = TypeError ('Text "No Exit node found")
+  FindExitType (left :*: right) = FindExitTypeInProduct (FindExitType left) right
+
+type FindExitTypeInProduct :: Type -> (Type -> Type) -> Type
+type family FindExitTypeInProduct leftResult right where
+  FindExitTypeInProduct (TypeError _) right = FindExitType right
+  FindExitTypeInProduct found _ = found
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- FORK/BARRIER EXTRACTION

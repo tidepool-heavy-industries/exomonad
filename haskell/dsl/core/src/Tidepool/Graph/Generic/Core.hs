@@ -17,6 +17,7 @@ module Tidepool.Graph.Generic.Core
     -- * Node Markers
   , LLMNode
   , LogicNode
+  , GraphNode
   , Entry
   , Exit
 
@@ -94,6 +95,23 @@ instance GraphMode AsGraph where
 -- LLMNode has kind 'LLMKind -> Type' (parameterized by LLMKind from Types.hs).
 type LLMNode :: LLMKind -> Type
 data LLMNode subtype
+
+-- | Graph node marker - embeds a subgraph as a node.
+--
+-- GraphNode allows graphs to contain graphs, enabling compositional
+-- agent design at any scale. The subgraph parameter is a graph type
+-- constructor (kind: Type -> Type).
+--
+-- @
+-- data ParentGraph mode = ParentGraph
+--   { scout :: mode :- GraphNode SemanticScoutGraph :@ Input Order
+--   }
+-- @
+--
+-- The Input annotation wires to the child graph's Entry type.
+-- Exit type is inferred via GetGraphExit.
+type GraphNode :: (Type -> Type) -> Type
+data GraphNode subgraph
 
 -- | Logic node marker.
 --

@@ -73,10 +73,10 @@ import Text.Parsec.Pos (SourcePos)
 import Tidepool.Effect (LLM)
 import Tidepool.Effect.Session (Session, SessionOutput(..), SessionId(..), SessionOperation(..), startSession, continueSession, forkSession, ToolCall(..))
 import Tidepool.Effect.Types (TurnOutcome(..), TurnParseResult(..), TurnResult(..), runTurn)
-import Tidepool.Graph.Edges (GetInput, GetSpawnTargets, GetBarrierTarget, GetAwaits)
+import Tidepool.Graph.Edges (GetInput, GetSpawnTargets, GetBarrierTarget, GetAwaits, GetGraphEntry, GetGraphExit)
 import Tidepool.Graph.Generic (AsHandler, FieldsWithNamesOf, SpawnPayloads, SpawnPayloadsInner, AwaitsHList, GetNodeDef)
 import Tidepool.Graph.Reify (IsForkNode)
-import Tidepool.Graph.Generic.Core (Entry, AsGraph)
+import Tidepool.Graph.Generic.Core (Entry, AsGraph, GraphNode)
 import qualified Tidepool.Graph.Generic.Core as G (Exit)
 import Tidepool.Graph.Goto (GotoChoice, To, LLMHandler(..), ClaudeCodeLLMHandler(..), ClaudeCodeResult(..))
 import Tidepool.Graph.Goto.Internal (GotoChoice(..), OneOf(..))
@@ -551,6 +551,39 @@ instance
   ) => CallHandler (ClaudeCodeLLMHandler model payload schema targets es tpl) payload es targets where
   callHandler (ClaudeCodeLLMHandler mSysTpl userTpl beforeFn afterFn) =
     executeClaudeCodeHandler @model mSysTpl userTpl beforeFn afterFn
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- GRAPHNODE EXECUTION
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Execute a GraphNode by running the child graph to completion.
+--
+-- The child graph's handlers must be provided. The input is passed to
+-- the child graph's Entry, and execution continues until Exit is reached.
+--
+-- This function is a thin wrapper around 'runGraph' that documents the
+-- GraphNode execution pattern. Use it in parent graph handlers when
+-- manually delegating to child graphs.
+--
+-- @
+-- -- In a parent graph handler:
+-- childResult <- executeGraphNode childHandlers input
+-- pure $ gotoChoice @"nextNode" childResult
+-- @
+executeGraphNode
+  :: forall childGraph es entryType targets exitType entryHandlerName handler.
+     ( Generic (childGraph AsGraph)
+     , FindEntryHandler entryType (FieldsWithNamesOf childGraph) ~ 'Just entryHandlerName
+     , KnownSymbol entryHandlerName
+     , HasField entryHandlerName (childGraph (AsHandler es)) handler
+     , CallHandler handler entryType es targets
+     , DispatchGoto childGraph targets es exitType
+     )
+  => childGraph (AsHandler es)  -- ^ Child graph handlers
+  -> entryType                   -- ^ Input to child graph's Entry
+  -> Eff es exitType             -- ^ Child graph's Exit value
+executeGraphNode = runGraph
 
 
 -- ════════════════════════════════════════════════════════════════════════════
