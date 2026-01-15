@@ -87,13 +87,8 @@ module Tidepool.Graph.Goto
   , GotoElemC
   ) where
 
-import Data.Aeson (ToJSON(..))
-import Data.Kind (Type, Constraint)
-import Data.Proxy (Proxy(..))
-import Data.Text (Text)
-import qualified Data.Text as T
-import Control.Monad.Freer (Eff, Member, send)
-import GHC.TypeLits (Symbol, KnownSymbol, TypeError, ErrorMessage(..))
+import Tidepool.Prelude
+import GHC.TypeLits (TypeError, ErrorMessage(..))
 import Tidepool.Graph.Errors
   ( HR, Blank, WhatHappened, HowItWorks, Fixes, Example
   , Indent, CodeLine, Bullet, FormatTargetList
