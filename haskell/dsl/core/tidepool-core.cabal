@@ -37,6 +37,7 @@ library
         Tidepool.Graph.Validate.RecordStructure
         Tidepool.Graph.Validate.ForkBarrier
         Tidepool.Graph.Reify
+        Tidepool.Graph.MCPReify
         Tidepool.Graph.Export
         Tidepool.Graph.Memory
         -- Types needed by WASM (no native dependencies)

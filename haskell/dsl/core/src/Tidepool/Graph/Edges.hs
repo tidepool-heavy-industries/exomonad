@@ -52,6 +52,10 @@ module Tidepool.Graph.Edges
     -- * Node Queries
   , HasAnnotation
   , FindAnnotation
+
+    -- * MCP Export Detection
+  , HasMCPExport
+  , GetToolMeta
   ) where
 
 import Data.Kind (Type)
@@ -66,6 +70,8 @@ import Tidepool.Graph.Types
   , Exit, Self
   , Route(..), Routes
   , Entries, Exits
+  , MCPExport
+  , ToolMeta
   )
 import Tidepool.Graph.Goto (Goto, To)
 
@@ -583,3 +589,37 @@ type family Elem x xs where
   Elem _ '[] = 'False
   Elem x (x ': _) = 'True
   Elem x (_ ': rest) = Elem x rest
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- MCP EXPORT DETECTION
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Check if a node definition has MCPExport annotation.
+--
+-- @
+-- HasMCPExport (Entry SearchInput :@ MCPExport) = 'True
+-- HasMCPExport (Entry SearchInput) = 'False
+-- @
+type HasMCPExport :: Type -> Bool
+type family HasMCPExport node where
+  HasMCPExport (node :@ MCPExport) = 'True
+  HasMCPExport (node :@ MCPExport :@ _) = 'True
+  HasMCPExport (node :@ _ :@ MCPExport) = 'True
+  HasMCPExport (node :@ _ :@ MCPExport :@ _) = 'True
+  HasMCPExport (node :@ _ :@ _ :@ MCPExport) = 'True
+  HasMCPExport (node :@ _) = HasMCPExport node
+  HasMCPExport _ = 'False
+
+-- | Extract ToolMeta annotation if present.
+--
+-- @
+-- GetToolMeta (Entry X :@ MCPExport :@ ToolMeta '("name", "desc"))
+--   = 'Just '("name", "desc")
+-- @
+type GetToolMeta :: Type -> Maybe (Symbol, Symbol)
+type family GetToolMeta node where
+  GetToolMeta (node :@ ToolMeta meta) = 'Just meta
+  GetToolMeta (node :@ _ :@ ToolMeta meta) = 'Just meta
+  GetToolMeta (node :@ _ :@ _ :@ ToolMeta meta) = 'Just meta
+  GetToolMeta (node :@ _) = GetToolMeta node
+  GetToolMeta _ = 'Nothing
