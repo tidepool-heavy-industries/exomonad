@@ -64,6 +64,8 @@ import Tidepool.Graph.Types
   , Global, Backend
   , ClaudeCode, ModelChoice
   , Exit, Self
+  , Route(..), Routes
+  , Entries, Exits
   )
 import Tidepool.Graph.Goto (Goto, To)
 
@@ -175,11 +177,17 @@ type family GetVision node where
   GetVision _ = 'False
 
 -- | Extract Tools from a node.
-type GetTools :: Type -> [Type]
+--
+-- NOTE: Tools changed from type-level list to record type in Phase 1.
+-- Old: Tools '[SearchTool, CalcTool]
+-- New: Tools MyToolsRecord (where MyToolsRecord :: Type -> Type)
+--
+-- Returns the tools record constructor (kind: Type -> Type).
+type GetTools :: Type -> Maybe (Type -> Type)
 type family GetTools node where
-  GetTools (node :@ Tools ts) = ts
+  GetTools (node :@ Tools record) = 'Just record
   GetTools (node :@ _) = GetTools node
-  GetTools _ = '[]
+  GetTools _ = 'Nothing
 
 -- | Extract the Memory type from a node declaration.
 --
@@ -208,7 +216,9 @@ type family GetMemory node where
 -- GetEntries (LLMNode :@ Input TaskSpec :@ Schema Result)
 --   = 'Nothing  -- Old-style Input, no Entries
 -- @
-type GetEntries :: Type -> Maybe Type
+--
+-- NOTE: Returns record constructor (kind: Type -> Type).
+type GetEntries :: Type -> Maybe (Type -> Type)
 type family GetEntries node where
   GetEntries (node :@ Entries record) = 'Just record
   GetEntries (node :@ _) = GetEntries node
@@ -225,7 +235,9 @@ type family GetEntries node where
 -- GetExits (LLMNode :@ Schema Result :@ Template WorkTpl)
 --   = 'Nothing  -- Old-style Schema, no Exits
 -- @
-type GetExits :: Type -> Maybe Type
+--
+-- NOTE: Returns record constructor (kind: Type -> Type).
+type GetExits :: Type -> Maybe (Type -> Type)
 type family GetExits node where
   GetExits (node :@ Exits record) = 'Just record
   GetExits (node :@ _) = GetExits node

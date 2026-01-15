@@ -165,7 +165,7 @@ type family CollectNodeFieldNames fields where
 type IsNodeDef :: Type -> Bool
 type family IsNodeDef def where
   IsNodeDef (node :@ _) = IsNodeDef node
-  IsNodeDef LLMNode = 'True
+  IsNodeDef (LLMNode _subtype) = 'True  -- LLMNode now has subtype parameter
   IsNodeDef LogicNode = 'True
   IsNodeDef _ = 'False
 

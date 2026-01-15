@@ -212,7 +212,7 @@ type family NodeHandler nodeDef es where
   NodeHandler (node :@ ann) es = NodeHandlerDispatch (node :@ ann) (node :@ ann) es 'Nothing 'Nothing 'Nothing 'Nothing
 
   -- Bare LLMNode/LogicNode without annotations - error
-  NodeHandler LLMNode es = TypeError
+  NodeHandler (LLMNode _subtype) es = TypeError
     ( HR
       ':$$: 'Text "  LLMNode requires annotations"
       ':$$: HR
@@ -497,7 +497,7 @@ type family NodeHandlerDispatch nodeDef origNode es mInput mTpl mSchema mEffs wh
   -- ══════════════════════════════════════════════════════════════════════════
 
   -- LLMNode with Template only - missing UsesEffects for routing
-  NodeHandlerDispatch LLMNode orig es mInput ('Just tpl) ('Just schema) 'Nothing = TypeError
+  NodeHandlerDispatch (LLMNode _subtype) orig es mInput ('Just tpl) ('Just schema) 'Nothing = TypeError
     ( HR
       ':$$: 'Text "  LLM node missing routing: has Template but no UsesEffects"
       ':$$: HR
@@ -524,11 +524,11 @@ type family NodeHandlerDispatch nodeDef origNode es mInput mTpl mSchema mEffs wh
   -- LLMNode with Template AND UsesEffects: the complete form
   -- Uses ChooseLLMHandler to dispatch between regular LLM and ClaudeCode execution.
   -- GetClaudeCode extracts the model from the annotation for compile-time validation.
-  NodeHandlerDispatch LLMNode orig es ('Just input) ('Just tpl) ('Just schema) ('Just (EffStack effs)) =
+  NodeHandlerDispatch (LLMNode _subtype) orig es ('Just input) ('Just tpl) ('Just schema) ('Just (EffStack effs)) =
     ChooseLLMHandler (GetClaudeCode orig) input schema (GotoEffectsToTargets effs) es (TemplateContext tpl)
 
   -- LLMNode with UsesEffects but no Template - missing context for prompts
-  NodeHandlerDispatch LLMNode orig es mInput 'Nothing ('Just schema) ('Just (EffStack effs)) = TypeError
+  NodeHandlerDispatch (LLMNode _subtype) orig es mInput 'Nothing ('Just schema) ('Just (EffStack effs)) = TypeError
     ( HR
       ':$$: 'Text "  LLM node missing Template: has UsesEffects but no context for prompts"
       ':$$: HR
@@ -553,7 +553,7 @@ type family NodeHandlerDispatch nodeDef origNode es mInput mTpl mSchema mEffs wh
     )
 
   -- LLMNode with Schema only (no Template or UsesEffects) - error
-  NodeHandlerDispatch LLMNode orig es _ 'Nothing ('Just schema) 'Nothing = TypeError
+  NodeHandlerDispatch (LLMNode _subtype) orig es _ 'Nothing ('Just schema) 'Nothing = TypeError
     ( HR
       ':$$: 'Text "  LLM node incomplete: has Schema but missing Template and UsesEffects"
       ':$$: HR
@@ -582,7 +582,7 @@ type family NodeHandlerDispatch nodeDef origNode es mInput mTpl mSchema mEffs wh
     )
 
   -- LLMNode missing both Template and Schema - error
-  NodeHandlerDispatch LLMNode orig es _ 'Nothing 'Nothing _ = TypeError
+  NodeHandlerDispatch (LLMNode _subtype) orig es _ 'Nothing 'Nothing _ = TypeError
     ( HR
       ':$$: 'Text "  LLM node missing required annotations"
       ':$$: HR
@@ -606,7 +606,7 @@ type family NodeHandlerDispatch nodeDef origNode es mInput mTpl mSchema mEffs wh
     )
 
   -- LLMNode missing Schema - error
-  NodeHandlerDispatch LLMNode orig es _ _ 'Nothing _ = TypeError
+  NodeHandlerDispatch (LLMNode _subtype) orig es _ _ 'Nothing _ = TypeError
     ( HR
       ':$$: 'Text "  LLM node missing Schema annotation"
       ':$$: HR

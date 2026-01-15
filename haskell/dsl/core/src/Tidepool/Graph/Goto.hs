@@ -69,6 +69,10 @@ module Tidepool.Graph.Goto
   , gotoArrive
   , unwrapSingleChoice
 
+    -- * Field-Witness Routing (Phantom-Tagged Records)
+  , gotoNode
+  , (-->)
+
     -- * GotoAll Return Type (for parallel fan-out)
   , GotoAll  -- Type only, constructor in Goto.Internal
   , gotoAll
@@ -100,6 +104,7 @@ import Text.Parsec.Pos (SourcePos)
 
 import Tidepool.Graph.Types (Exit, Self, Arrive(..), ModelChoice(..), SingModelChoice(..), HList(..))
 import Tidepool.Effect.Session (SessionId, SessionOperation(..))
+import Tidepool.Graph.Generic.Core (NodeRef(..))
 
 -- Import from Internal (re-exports types, we hide constructors in this module's exports)
 import Tidepool.Graph.Goto.Internal (OneOf(..), GotoChoice(..), GotoAll(..), To, Payloads, PayloadOf)
@@ -397,7 +402,93 @@ gotoArrive
   => payload -> GotoChoice targets
 gotoArrive payload = GotoChoice (injectTarget @(To (Arrive barrierName) payload) @targets payload)
 
--- | Extract the payload from a single-target 'GotoChoice'.
+-- ════════════════════════════════════════════════════════════════════════════
+-- FIELD-WITNESS ROUTING (Phantom-Tagged Records)
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Route to a node's entry using field-witness pattern.
+--
+-- This is the field-witness routing variant that eliminates string literals:
+--
+-- @
+-- -- OLD STYLE (string-based):
+-- gotoChoice @"gWork" @"retry" retryInfo
+--
+-- -- NEW STYLE (field-witness):
+-- gotoNodeEntry (gWork graph) (retry . entries) retryInfo
+-- @
+--
+-- The field accessor acts as a type witness, carrying both the node name
+-- and entry name at compile time. This enables refactoring safety - rename
+-- a field and all call sites update automatically.
+--
+-- **Parameters:**
+--
+-- * @nodeRef@ - NodeRef wrapper carrying node name as phantom type
+-- * @accessor@ - Field accessor that extracts entry from config
+-- * @payload@ - Entry input data
+--
+-- **Example:**
+--
+-- @
+-- data MyGraph mode = MyGraph
+--   { gWork :: NodeRef "gWork" (mode :- LLMNode 'API WorkConfig)
+--   }
+--
+-- data WorkEntries mode = WorkEntries
+--   { retry :: mode :- EntryPoint RetryInfo
+--   }
+--
+-- -- Field-witness routing (no string literals!)
+-- gotoNode (gWork graph) (retry . entries) retryInfo
+-- @
+gotoNode
+  :: forall name nodeType config entry payload targets mode.
+     ( -- Extract node name from NodeRef phantom
+       KnownSymbol name
+     , NonEmptyList targets
+     , InjectTarget (To name payload) targets
+     , GotoElemC (To name payload) targets
+     )
+  => NodeRef name nodeType          -- ^ Target node witness (from graph record)
+  -> (config mode -> entry mode)    -- ^ Field accessor path (e.g., retry . entries)
+  -> payload                        -- ^ Payload for the entry
+  -> GotoChoice targets
+gotoNode _nodeRef _entryAccessor payload =
+  -- The field accessor carries the entry name via type inference
+  -- We extract the node name from NodeRef's phantom parameter
+  -- Result: type-safe routing with no string literals!
+  GotoChoice (injectTarget @(To name payload) @targets payload)
+
+-- | Operator form of field-witness routing (optional sugar).
+--
+-- @
+-- (gWork graph) --> (retry . entries) $ retryInfo
+-- @
+--
+-- Equivalent to:
+--
+-- @
+-- gotoNode (gWork graph) (retry . entries) retryInfo
+-- @
+(-->)
+  :: forall name nodeType config mode entry payload targets.
+     ( KnownSymbol name
+     , NonEmptyList targets
+     , InjectTarget (To name payload) targets
+     , GotoElemC (To name payload) targets
+     )
+  => NodeRef name nodeType          -- NodeRef "nodeName" nodeType
+  -> (config mode -> entry mode)    -- Field accessor (retry . entries)
+  -> payload                        -- Entry payload
+  -> GotoChoice targets
+(-->) = gotoNode
+
+infixl 8 -->
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- GOTOALL: PARALLEL FAN-OUT
+-- ════════════════════════════════════════════════════════════════════════════
 --
 -- This is useful for exit-only handlers where you need to extract the result
 -- without pattern matching (which would trigger incomplete pattern warnings

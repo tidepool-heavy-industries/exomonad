@@ -590,7 +590,7 @@ type family GetBaseNode def where
 -- | Check if the base node is LLMNode.
 type IsLLMNode :: Type -> Bool
 type family IsLLMNode def where
-  IsLLMNode LLMNode = 'True
+  IsLLMNode (LLMNode _subtype) = 'True  -- LLMNode now has subtype parameter
   IsLLMNode (node :@ _) = IsLLMNode node
   IsLLMNode _ = 'False
 
@@ -685,7 +685,9 @@ instance ( ReifyMaybeType (GetInput def)
          , ReifyMemoryInfo (GetMemory def)
          , ReifyClaudeCodeInfo (GetClaudeCode def)
          , ReifyBool (GetVision def)
-         , ReifyTypeList (GetTools def)
+         -- Tools are now records (Type -> Type), not type-level lists [Type]
+         -- ReifyTypeList expects [Type], so we can't enumerate tools anymore.
+         -- niTools field is unused (backwards compat only), niToolInfos is V2.
          ) => ReifyAnnotatedNode def 'True 'False where
   reifyAnnotatedNode _ _ _ pName _ =
     let claudeCodeInfo = reifyClaudeCodeInfo (Proxy @(GetClaudeCode def))
@@ -700,7 +702,7 @@ instance ( ReifyMaybeType (GetInput def)
       , niGotoTargets = []  -- LLM nodes don't have Goto
       , niHasGotoExit = False
       , niHasVision = reifyBool (Proxy @(GetVision def))
-      , niTools = reifyTypeList (Proxy @(GetTools def))
+      , niTools = []  -- Tools are now records, not type-level lists
       , niToolInfos = []  -- Would require ToolDef instances
       , niSystem = reifyTemplateInfo (Proxy @(GetSystem def))
       , niTemplate = reifyTemplateInfo (Proxy @(GetTemplate def))

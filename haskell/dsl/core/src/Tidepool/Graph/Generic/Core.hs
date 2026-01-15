@@ -24,9 +24,15 @@ module Tidepool.Graph.Generic.Core
     -- * Parallel Execution Markers
   , ForkNode
   , BarrierNode
+
+    -- * Phantom Wrappers
+  , NodeRef(..)
+  , GetNodeName
   ) where
 
 import Data.Kind (Type)
+import GHC.TypeLits (Symbol)
+import Tidepool.Graph.Types (LLMKind)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- GRAPH MODE CLASS
@@ -69,18 +75,26 @@ instance GraphMode AsGraph where
 -- NODE MARKERS
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | LLM node marker.
+-- | LLM node marker with subtype parameter.
 --
--- In record syntax, use this instead of the 'LLM' kind from Types.hs:
+-- The subtype parameter determines execution model and tool format:
+--
+-- * 'API' - Direct Anthropic/Cloudflare API calls (JSON Schema via MCP)
+-- * 'CodingAgent' - Claude Code subprocess via mantle (JSON Schema via MCP)
+-- * 'Local' - FunctionGemma streaming (PEG grammar, streaming fold)
+--
+-- In record syntax with config records:
 --
 -- @
 -- data MyGraph mode = MyGraph
---   { classify :: mode :- LLMNode :@ Input Message :@ Schema Intent
+--   { gWork :: mode :- LLMNode 'API WorkConfig
+--   , gCode :: mode :- LLMNode 'CodingAgent CodeConfig
 --   }
 -- @
 --
--- LLMNode has kind 'Type' (unlike 'LLM' which has kind 'NodeKind').
-data LLMNode
+-- LLMNode has kind 'LLMKind -> Type' (parameterized by LLMKind from Types.hs).
+type LLMNode :: LLMKind -> Type
+data LLMNode subtype
 
 -- | Logic node marker.
 --
@@ -153,3 +167,37 @@ data ForkNode
 -- The 'Awaits' annotation lists the types expected from each spawned path.
 -- The handler receives the collected results as an HList.
 data BarrierNode
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- PHANTOM WRAPPERS (Field-Witness Routing)
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Phantom wrapper that carries node name as type-level Symbol.
+--
+-- Used for field-witness routing where field accessors act as type witnesses:
+--
+-- @
+-- data MyGraph mode = MyGraph
+--   { gWork :: NodeRef "gWork" (mode :- LLMNode 'API WorkConfig)
+--   , gExit :: NodeRef "gExit" (mode :- Exit Result)
+--   }
+--
+-- -- Field-witness routing (no string literals!)
+-- goto (gWork graph) (retry . entries) retryInfo
+-- @
+--
+-- The phantom parameter ensures the node name is known at compile time,
+-- enabling type-safe routing validation.
+type NodeRef :: Symbol -> Type -> Type
+newtype NodeRef name nodeType = NodeRef nodeType
+
+-- | Extract node name from NodeRef phantom parameter.
+--
+-- Used by routing type families to validate target names at compile time:
+--
+-- @
+-- GetNodeName (NodeRef "gWork" someType) = "gWork"
+-- @
+type GetNodeName :: Type -> Symbol
+type family GetNodeName ref where
+  GetNodeName (NodeRef name _) = name

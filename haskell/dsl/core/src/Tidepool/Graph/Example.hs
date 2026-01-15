@@ -33,7 +33,7 @@ import GHC.Generics (Generic)
 import Tidepool.Effect (State, get)
 import Text.Parsec.Pos (SourcePos)
 
-import Tidepool.Graph.Types (type (:@), Input, Schema, Template, UsesEffects, Exit)
+import Tidepool.Graph.Types (type (:@), Input, Schema, Template, UsesEffects, Exit, LLMKind(..))
 import Tidepool.Graph.Generic (GraphMode(..), AsHandler)
 import qualified Tidepool.Graph.Generic as G (Entry, Exit, LLMNode, LogicNode, ValidGraphRecord)
 import Tidepool.Graph.Goto (Goto, gotoChoice, gotoExit, LLMHandler(..))
@@ -244,13 +244,13 @@ instance TemplateDef FaqTpl where
 
 data SupportGraph mode = SupportGraph
   { sgEntry    :: mode :- G.Entry Message
-  , sgClassify :: mode :- G.LLMNode :@ Input Message :@ Template ClassifyTpl :@ Schema Intent
+  , sgClassify :: mode :- G.LLMNode 'API :@ Input Message :@ Template ClassifyTpl :@ Schema Intent
                     :@ UsesEffects '[Goto "sgRoute" Intent]
     -- Note: Goto targets must match actual field names for gotoField validation
   , sgRoute    :: mode :- G.LogicNode :@ Input Intent :@ UsesEffects '[Goto "sgRefund" Message, Goto "sgFaq" Message]
-  , sgRefund   :: mode :- G.LLMNode :@ Input Message :@ Template RefundTpl :@ Schema Response
+  , sgRefund   :: mode :- G.LLMNode 'API :@ Input Message :@ Template RefundTpl :@ Schema Response
                     :@ UsesEffects '[Goto Exit Response]
-  , sgFaq      :: mode :- G.LLMNode :@ Input Message :@ Template FaqTpl :@ Schema Response
+  , sgFaq      :: mode :- G.LLMNode 'API :@ Input Message :@ Template FaqTpl :@ Schema Response
                     :@ UsesEffects '[Goto Exit Response]
   , sgExit     :: mode :- G.Exit Response
   }

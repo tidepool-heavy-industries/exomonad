@@ -7,6 +7,7 @@
 module Tidepool.Graph.Types
   ( -- * Node Kind
     NodeKind(..)
+  , LLMKind(..)
 
     -- * Annotations
   , type (:@)
@@ -62,6 +63,9 @@ module Tidepool.Graph.Types
     -- * ClaudeCode Singletons (demote type-level to runtime)
   , SingModelChoice(..)
 
+    -- * FunctionGemma Annotation
+  , FunctionGemma
+
     -- * Special Goto Targets
   , Exit
   , Self
@@ -90,6 +94,20 @@ import GHC.TypeLits (Symbol)
 data NodeKind
   = LLM    -- ^ Node that invokes the LLM. Output flows implicitly via Schema.
   | Logic  -- ^ Node with effect stack. Transitions explicitly via Goto.
+
+-- | LLM subtypes determine execution model and tool format.
+--
+-- Different LLM backends have different capabilities:
+--
+-- * 'API' - Direct Anthropic/Cloudflare API calls (JSON Schema via MCP)
+-- * 'CodingAgent' - Claude Code subprocess via mantle (JSON Schema via MCP)
+-- * 'Local' - FunctionGemma streaming (PEG grammar, streaming fold)
+--
+-- Type families dispatch on this to determine tool format, exit semantics, etc.
+data LLMKind
+  = API         -- ^ Direct API invocation (Anthropic, Cloudflare)
+  | CodingAgent -- ^ Claude Code subprocess execution
+  | Local       -- ^ FunctionGemma local streaming model
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- ANNOTATIONS
@@ -1023,6 +1041,33 @@ class SingModelChoice (m :: ModelChoice) where
 instance SingModelChoice 'Haiku where singModelChoice = Haiku
 instance SingModelChoice 'Sonnet where singModelChoice = Sonnet
 instance SingModelChoice 'Opus where singModelChoice = Opus
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- FUNCTIONGEMMA ANNOTATION
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Marker for FunctionGemma local streaming execution (LLMKind 'Local).
+--
+-- Unlike API and ClaudeCode execution which make single request/response calls,
+-- FunctionGemma streams delimiter-separated messages where each message triggers
+-- the exit handler as a fold function.
+--
+-- Example usage:
+--
+-- @
+-- gWork :: mode :- LLMNode 'Local WorkConfig
+--     :@ FunctionGemma
+-- @
+--
+-- Exit handlers for Local nodes use ExitEffect instead of ExitTool:
+-- - No routing via GotoChoice (handlers return ())
+-- - Early exit via `exitWith` effect
+-- - Each streamed message invokes handler as fold step
+--
+-- Note: This is a documentation marker for future implementation.
+-- Runtime support is planned but not yet implemented.
+data FunctionGemma
 
 
 -- ════════════════════════════════════════════════════════════════════════════
