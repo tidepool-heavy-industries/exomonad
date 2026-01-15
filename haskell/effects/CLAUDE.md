@@ -8,7 +8,6 @@ This follows the **interpreter design pattern**: abstract syntax (effect types) 
 
 | I want to... | Read this |
 |--------------|-----------|
-| Understand Claude Code subprocess execution | `session-interpreter/CLAUDE.md` |
 | Understand LLM API calls | `llm-interpreter/CLAUDE.md` |
 | Query Haskell types from an agent | `ghci-interpreter/CLAUDE.md` |
 | Work with GitHub issues/PRs | `github-interpreter/CLAUDE.md` |
@@ -27,7 +26,6 @@ This follows the **interpreter design pattern**: abstract syntax (effect types) 
 
 ```
 effects/CLAUDE.md  ← YOU ARE HERE (router)
-├── session-interpreter/CLAUDE.md       ← Claude Code subprocess (key for V3)
 ├── llm-interpreter/CLAUDE.md           ← Anthropic/OpenAI API
 ├── mcp-server/CLAUDE.md                ← MCP tool server (expose agents to Claude)
 ├── lsp-interpreter/CLAUDE.md           ← Language server protocol
@@ -40,7 +38,7 @@ effects/CLAUDE.md  ← YOU ARE HERE (router)
 ├── cabal-interpreter/CLAUDE.md         ← Build & test integration
 ├── devlog-interpreter/CLAUDE.md        ← Session-scoped logging
 ├── habitica-interpreter/CLAUDE.md      ← Gamification API
-└── habitica/CLAUDE.md               ← Habitica effect types
+└── habitica/CLAUDE.md                  ← Habitica effect types
 ```
 
 ## Structure
@@ -48,7 +46,7 @@ effects/CLAUDE.md  ← YOU ARE HERE (router)
 ```
 effects/
   {name}-interpreter/          # Interpreter package (HTTP client, subprocess, etc.)
-  habitica/                 # Exception: standalone effect types package
+  habitica/                    # Exception: standalone effect types package
 ```
 
 Most effect types live in `dsl/core/src/Tidepool/Effect/Types.hs` or `Effects/*.hs`.
@@ -57,12 +55,10 @@ Most effect types live in `dsl/core/src/Tidepool/Effect/Types.hs` or `Effects/*.
 
 | Effect | Types | Interpreter | Implementation |
 |--------|-------|-------------|----------------|
-| Session | dsl/core | session-interpreter | Subprocess (mantle session) |
 | LLM | dsl/core | llm-interpreter | HTTP (Anthropic/OpenAI) |
 | MCP | n/a | mcp-server | JSON-RPC 2.0 stdio (tool server) |
 | LSP | dsl/core | lsp-interpreter | lsp-client library |
 | BD | dsl/core | bd-interpreter | Subprocess (urchin CLI) |
-| ClaudeCode | dsl/core | claude-code-interpreter | Subprocess (mantle) - **deprecated, use Session** |
 | Habitica | effects/habitica | habitica-interpreter | HTTP API |
 | UI | dsl/core | ui-interpreter | WebSocket bridge |
 | Observability | dsl/core | observability-interpreter | OTLP/Loki push |
@@ -88,7 +84,15 @@ Most effect types live in `dsl/core/src/Tidepool/Effect/Types.hs` or `Effects/*.
 ## Implementation Patterns
 
 - **HTTP clients**: llm, habitica, github, observability
-- **Subprocesses**: bd, claude-code, worktree, cabal
+- **Subprocesses**: bd, worktree, cabal
 - **Socket clients**: ghci, lsp
 - **WebSocket bridge**: ui
 - **File IO**: devlog
+
+## Claude Code Integration
+
+For Claude Code integration, see `rust/CLAUDE.md`. The Rust workspace provides:
+- **mantle-agent hook** - Forwards hooks to Haskell via TCP
+- **mantle-agent mcp** - MCP server that proxies to Haskell
+
+This replaces the removed `session-interpreter` which was used for headless orchestration.

@@ -74,12 +74,6 @@ import Tidepool.DevLog.Interpreter
   , defaultDevLogConfig
   )
 import Tidepool.Effect.DevLog (DevLog, Verbosity(..))
-import Tidepool.Effect.Session (Session)
-import Tidepool.Session.Interpreter
-  ( runSessionIO
-  , SessionConfig(..)
-  , defaultSessionConfig
-  )
 
 -- Effect imports
 import Tidepool.Effects.UI (UI)
@@ -104,8 +98,6 @@ data InterpreterConfig = InterpreterConfig
     -- ^ OTLP/Grafana Tempo configuration (traces)
   , ecServiceName :: Text
     -- ^ Service name for trace attribution
-  , ecSessionConfig :: SessionConfig
-    -- ^ Session (mantle session) configuration for dockerized Claude Code
   , ecDevLogConfig :: DevLogConfig
     -- ^ DevLog (session-scoped file logging) configuration
   }
@@ -124,7 +116,6 @@ defaultInterpreterConfig = InterpreterConfig
   , ecLokiConfig = defaultLokiConfig
   , ecOTLPConfig = Nothing  -- Disabled by default
   , ecServiceName = "tidepool-native"
-  , ecSessionConfig = defaultSessionConfig "."  -- Repo root, will be overridden
   , ecDevLogConfig = defaultDevLogConfig
   }
 
@@ -143,8 +134,6 @@ defaultInterpreterConfig = InterpreterConfig
 -- * @OTLP_USER@ - OTLP basic auth user (optional)
 -- * @OTLP_TOKEN@ - OTLP basic auth token (optional)
 -- * @SERVICE_NAME@ - Service name for traces (default: tidepool-native)
--- * @MANTLE_PATH@ - Path to mantle binary (default: mantle)
--- * @MANTLE_REPO_ROOT@ - Git repository root for session worktrees (default: .)
 -- * @DEVLOG_DIR@ - DevLog output directory (default: disabled)
 -- * @DEVLOG_VERBOSITY@ - Verbosity level: quiet|normal|verbose|trace (default: normal)
 -- * @DEVLOG_LATEST@ - Create latest.log symlink: true|false (default: true)
@@ -168,10 +157,6 @@ loadInterpreterConfig = do
   otlpUser <- lookupEnv "OTLP_USER"
   otlpToken <- lookupEnv "OTLP_TOKEN"
   serviceName <- lookupEnv "SERVICE_NAME"
-
-  -- Session config
-  mantlePath <- lookupEnv "MANTLE_PATH"
-  mantleRepoRoot <- lookupEnv "MANTLE_REPO_ROOT"
 
   -- DevLog config
   devLogDir <- lookupEnv "DEVLOG_DIR"
@@ -227,10 +212,6 @@ loadInterpreterConfig = do
           }
         Nothing -> Nothing
     , ecServiceName = maybe "tidepool-native" T.pack serviceName
-    , ecSessionConfig = SessionConfig
-        { scMantlePath = maybe "mantle" id mantlePath
-        , scRepoRoot = maybe "." id mantleRepoRoot
-        }
     , ecDevLogConfig = DevLogConfig
         { dcVerbosity = verbosity
         , dcOutput = devLogOutput
@@ -278,10 +259,9 @@ mkInterpreterEnv config = do
 -- This composes the full effect stack:
 --
 -- @
--- Eff '[UI, Habitica, LLMComplete, Session, DevLog, Observability, IO] a
+-- Eff '[UI, Habitica, LLMComplete, DevLog, Observability, IO] a
 --   → runObservabilityWithContext (interpret Observability)
 --   → runDevLog (interpret DevLog)
---   → runSessionIO (interpret Session)
 --   → runLLMComplete (interpret LLMComplete)
 --   → runHabitica (interpret Habitica)
 --   → runUI (interpret UI)
@@ -292,9 +272,8 @@ mkInterpreterEnv config = do
 -- 1. UI (first to peel) - handles user interaction
 -- 2. Habitica - makes Habitica API calls
 -- 3. LLMComplete - makes LLM API calls
--- 4. Session - orchestrates dockerized Claude Code sessions via mantle
--- 5. DevLog - session-scoped dev logging
--- 6. Observability (last to peel) - records events and spans
+-- 4. DevLog - session-scoped dev logging
+-- 5. Observability (last to peel) - records events and spans
 --
 -- Traces are automatically flushed to OTLP (Grafana Tempo) after execution
 -- if @OTLP_ENDPOINT@ is configured.
@@ -302,7 +281,7 @@ mkInterpreterEnv config = do
 -- Example:
 --
 -- @
--- myAgent :: Eff '[UI, Habitica, LLMComplete, Session, DevLog, Observability, IO] String
+-- myAgent :: Eff '[UI, Habitica, LLMComplete, DevLog, Observability, IO] String
 -- myAgent = do
 --   publishEvent $ GraphTransition "entry" "greeting" "start"
 --   showText "Welcome!"
@@ -315,7 +294,7 @@ runEffects
   :: InterpreterEnv
   -> UIContext
   -> UICallback
-  -> Eff '[UI, Habitica, LLMComplete, Session, DevLog, Observability, IO] a
+  -> Eff '[UI, Habitica, LLMComplete, DevLog, Observability, IO] a
   -> IO a
 runEffects env ctx callback action = do
   -- Create a fresh trace context for this request
@@ -325,7 +304,6 @@ runEffects env ctx callback action = do
   result <- runM
     . runObservabilityWithContext traceCtx (ecLokiConfig $ eeConfig env)
     . runDevLog (ecDevLogConfig $ eeConfig env)
-    . runSessionIO (ecSessionConfig $ eeConfig env)
     . runLLMComplete (eeLLMEnv env)
     . runHabitica (eeHabiticaEnv env)
     . runUI ctx callback

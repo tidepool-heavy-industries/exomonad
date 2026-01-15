@@ -12,8 +12,8 @@ Servant + WebSocket server for running tidepool agents natively (without WASM/CF
 │  │ REST API     │    │ WebSocket Handler                   ││
 │  │ /health      │    │                                     ││
 │  │ /sessions    │    │  Session ──► UICallback ──► Agent   ││
-│  └──────────────┘    │      ▲            │                 ││
-│                      │      │            ▼                 ││
+│  │ /graph/info  │    │      ▲            │                 ││
+│  └──────────────┘    │      │            ▼                 ││
 │                      │   TVars ◄── runEffects ──► IO       ││
 │                      └─────────────────────────────────────┘│
 └─────────────────────────────────────────────────────────────┘
@@ -28,20 +28,20 @@ The server composes these effect interpreters via `runEffects`:
 | UI | ui-interpreter | WebSocket ↔ UIState/UserAction bridging |
 | Habitica | habitica-interpreter | Habitica API calls (optional) |
 | LLMComplete | llm-interpreter | Anthropic/OpenAI API calls |
-| Session | session-interpreter | Dockerized Claude Code sessions via mantle |
+| DevLog | devlog-interpreter | Session-scoped file logging |
 | Observability | observability-interpreter | Loki logs + OTLP traces |
 
 Composition order (EffectRunner.hs):
 
 ```haskell
 runEffects :: InterpreterEnv -> UIContext -> UICallback
-           -> Eff '[UI, Habitica, LLMComplete, Session, Observability, IO] a
+           -> Eff '[UI, Habitica, LLMComplete, DevLog, Observability, IO] a
            -> IO a
 runEffects env ctx callback action = do
   traceCtx <- newTraceContext
   result <- runM
     . runObservabilityWithContext traceCtx (ecLokiConfig $ eeConfig env)
-    . runSessionIO (ecSessionConfig $ eeConfig env)
+    . runDevLog (ecDevLogConfig $ eeConfig env)
     . runLLMComplete (eeLLMEnv env)
     . runHabitica (eeHabiticaEnv env)
     . runUI ctx callback
@@ -57,7 +57,7 @@ Effects are peeled from the outside in:
 1. **UI** (first) - handles user interaction via WebSocket
 2. **Habitica** - makes Habitica API calls
 3. **LLMComplete** - makes LLM API calls
-4. **Session** - executes ClaudeCode nodes via dockerized mantle sessions
+4. **DevLog** - session-scoped dev logging
 5. **Observability** (last) - records events to Loki, spans to Tempo
 
 ## Running
@@ -83,6 +83,8 @@ TIDEPOOL_DIST=tidepool-native-gui/solid-frontend/dist cabal run tidepool-native
 | `OTLP_USER` | No | Grafana Cloud user ID for Tempo |
 | `OTLP_TOKEN` | No | Grafana Cloud API token for Tempo |
 | `SERVICE_NAME` | No | Service name for traces (default: tidepool-native) |
+| `DEVLOG_DIR` | No | DevLog output directory (default: disabled) |
+| `DEVLOG_VERBOSITY` | No | Verbosity: quiet, normal, verbose, trace |
 
 ## REST Endpoints
 
@@ -91,6 +93,7 @@ TIDEPOOL_DIST=tidepool-native-gui/solid-frontend/dist cabal run tidepool-native
 | `GET /health` | `{"status":"ok","version":"0.1.0"}` |
 | `GET /sessions` | List of active WebSocket sessions |
 | `GET /sessions/:id` | Session details by UUID |
+| `GET /graph/info` | Graph structure for visualization (if configured) |
 
 ## WebSocket Protocol
 
@@ -148,8 +151,6 @@ data Session = Session
 
 Sessions are automatically cleaned up on disconnect.
 
-**TODO**: Persist sessions to SQLite for durability across restarts.
-
 ## Files
 
 | File | Purpose |
@@ -159,3 +160,13 @@ Sessions are automatically cleaned up on disconnect.
 | `Session.hs` | STM-based session management |
 | `SimpleAgent.hs` | Demo agent using full effect stack |
 | `API.hs` | REST endpoint type definitions |
+
+## TODO: Claude Code++ Integration
+
+The server will need a TCP control socket endpoint to receive forwarded hooks and MCP calls from `mantle-agent`. This would enable:
+
+- Hook handling via Haskell effect stack
+- MCP tool calls routed to Tidepool agents
+- Unified state sharing between hooks and MCP
+
+See `rust/CLAUDE.md` for the mantle-agent side of this integration.
