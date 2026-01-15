@@ -66,6 +66,10 @@ module Tidepool.Graph.Types
     -- * FunctionGemma Annotation
   , FunctionGemma
 
+    -- * MCP Export Annotations
+  , MCPExport
+  , ToolMeta
+
     -- * Special Goto Targets
   , Exit
   , Self
@@ -87,6 +91,7 @@ import GHC.TypeLits (Symbol)
 --
 -- * 'LLM' nodes call the language model and produce output via 'Schema'
 -- * 'Logic' nodes run pure or effect-based code and transition via 'Goto'
+-- * 'Graph' nodes execute nested graphs
 --
 -- Note: The bare NodeKind types (LLM, Logic) are obsolete.
 -- For the record-based DSL (the only supported syntax), use LLMNode and LogicNode
@@ -94,6 +99,7 @@ import GHC.TypeLits (Symbol)
 data NodeKind
   = LLM    -- ^ Node that invokes the LLM. Output flows implicitly via Schema.
   | Logic  -- ^ Node with effect stack. Transitions explicitly via Goto.
+  | Graph  -- ^ Nested graph execution.
 
 -- | LLM subtypes determine execution model and tool format.
 --
@@ -1069,6 +1075,35 @@ instance SingModelChoice 'Opus where singModelChoice = Opus
 -- Runtime support is planned but not yet implemented.
 data FunctionGemma
 
+-- ════════════════════════════════════════════════════════════════════════════
+-- MCP EXPORT ANNOTATIONS
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Mark an Entry point for MCP server exposure.
+--
+-- When a graph Entry has MCPExport, it becomes an MCP tool that external
+-- clients can invoke. The input type becomes the tool's parameter schema.
+--
+-- @
+-- data MyGraph mode = MyGraph
+--   { search :: mode :- Entry SearchInput :@ MCPExport
+--       :@ ToolMeta '("search", "Search the codebase")
+--   }
+-- @
+--
+-- Use with 'ToolMeta' to provide tool name and description.
+data MCPExport
+
+-- | Provide name and description for an MCP-exported Entry.
+--
+-- @
+-- :@ ToolMeta '("tool_name", "Tool description for LLM")
+-- @
+--
+-- The name should be snake_case. The description appears in the MCP
+-- tool listing and helps the LLM understand when to use the tool.
+type ToolMeta :: (Symbol, Symbol) -> Type
+data ToolMeta nameAndDesc
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- SPECIAL GOTO TARGET
