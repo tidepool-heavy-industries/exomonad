@@ -1,0 +1,60 @@
+cabal-version: 3.0
+name:          tidepool-training-generator
+version:       0.1.0.0
+synopsis:      Generate FunctionGemma training data from synthetic examples
+description:
+  Generates JSONL training data in FunctionGemma Turn 1-5 format
+  for fine-tuning the semantic rating model. Uses QuickCheck-style
+  Arbitrary instances to generate synthetic code contexts and
+  heuristic scoring to produce ground-truth rubrics.
+
+license:       MIT
+author:        Tidepool Labs
+maintainer:    dev@tidepool.so
+category:      Development
+build-type:    Simple
+
+common warnings
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates
+               -Wincomplete-uni-patterns -Wmissing-export-lists
+               -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
+
+library
+  import:           warnings
+  exposed-modules:
+    Tidepool.Training.Types
+    Tidepool.Training.Arbitrary
+    Tidepool.Training.Heuristics
+    Tidepool.Training.Format
+  build-depends:
+    base >= 4.17 && < 5,
+    aeson >= 2.1 && < 3,
+    bytestring >= 0.11 && < 1,
+    text >= 2.0 && < 3,
+    QuickCheck >= 2.14 && < 3,
+    containers >= 0.6 && < 1
+  hs-source-dirs:   src
+  default-language: GHC2021
+  default-extensions:
+    DeriveAnyClass
+    DeriveGeneric
+    DerivingStrategies
+    OverloadedStrings
+    OverloadedRecordDot
+    RecordWildCards
+    LambdaCase
+    TypeApplications
+
+executable training-generator
+  import:           warnings
+  main-is:          Main.hs
+  build-depends:
+    base >= 4.17 && < 5,
+    tidepool-training-generator,
+    bytestring >= 0.11 && < 1,
+    QuickCheck >= 2.14 && < 3
+  hs-source-dirs:   src/Tidepool/Training
+  default-language: GHC2021
+  default-extensions:
+    OverloadedStrings
+    TypeApplications

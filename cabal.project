@@ -38,6 +38,7 @@ packages:
 
     -- Tools
     haskell/tools/sleeptime
+    haskell/tools/training-generator
 
     -- Test/example packages
     types-first-dev
