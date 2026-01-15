@@ -426,7 +426,7 @@ gotoArrive payload = GotoChoice (injectTarget @(To (Arrive barrierName) payload)
 --
 -- * @nodeRef@ - NodeRef wrapper carrying node name as phantom type
 -- * @accessor@ - Field accessor that extracts entry from config
--- * @payload@ - Entry input data
+-- * @payload@ - EntryNode input data
 --
 -- **Example:**
 --
@@ -480,7 +480,7 @@ gotoNode _nodeRef _entryAccessor payload =
      )
   => NodeRef name nodeType          -- NodeRef "nodeName" nodeType
   -> (config mode -> entry mode)    -- Field accessor (retry . entries)
-  -> payload                        -- Entry payload
+  -> payload                        -- EntryNode payload
   -> GotoChoice targets
 (-->) = gotoNode
 

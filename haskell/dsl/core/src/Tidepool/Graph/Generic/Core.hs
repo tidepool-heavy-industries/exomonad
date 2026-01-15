@@ -18,8 +18,8 @@ module Tidepool.Graph.Generic.Core
   , LLMNode
   , LogicNode
   , GraphNode
-  , Entry
-  , Exit
+  , EntryNode
+  , ExitNode
 
     -- * Parallel Execution Markers
   , ForkNode
@@ -44,9 +44,9 @@ import Tidepool.Graph.Types (LLMKind)
 --
 -- @
 -- data MyGraph mode = MyGraph
---   { entry    :: mode :- Entry Message
+--   { entry    :: mode :- EntryNode Message
 --   , classify :: mode :- LLMNode :@ Input Message :@ Schema Intent
---   , exit     :: mode :- Exit Response
+--   , exit     :: mode :- ExitNode Response
 --   }
 -- @
 --
@@ -108,7 +108,7 @@ data LLMNode subtype
 --   }
 -- @
 --
--- The Input annotation wires to the child graph's Entry type.
+-- The Input annotation wires to the child graph's EntryNode type.
 -- Exit type is inferred via GetGraphExit.
 type GraphNode :: (Type -> Type) -> Type
 data GraphNode subgraph
@@ -124,25 +124,25 @@ data GraphNode subgraph
 -- @
 data LogicNode
 
--- | Entry point marker (parameterized by input type).
+-- | EntryNode point marker (parameterized by input type).
 --
 -- @
 -- data MyGraph mode = MyGraph
---   { entry :: mode :- Entry Message
+--   { entry :: mode :- EntryNode Message
 --   }
 -- @
-type Entry :: Type -> Type
-data Entry inputType
+type EntryNode :: Type -> Type
+data EntryNode inputType
 
 -- | Exit point marker (parameterized by output type).
 --
 -- @
 -- data MyGraph mode = MyGraph
---   { exit :: mode :- Exit Response
+--   { exit :: mode :- ExitNode Response
 --   }
 -- @
-type Exit :: Type -> Type
-data Exit outputType
+type ExitNode :: Type -> Type
+data ExitNode outputType
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- PARALLEL EXECUTION MARKERS
@@ -196,7 +196,7 @@ data BarrierNode
 -- @
 -- data MyGraph mode = MyGraph
 --   { gWork :: NodeRef "gWork" (mode :- LLMNode 'API WorkConfig)
---   , gExit :: NodeRef "gExit" (mode :- Exit Result)
+--   , gExit :: NodeRef "gExit" (mode :- ExitNode Result)
 --   }
 --
 -- -- Field-witness routing (no string literals!)

@@ -57,7 +57,7 @@
 --
 -- @
 -- data MyGraph mode = MyGraph
---   { gEntry    :: mode :- G.Entry Message
+--   { gEntry    :: mode :- G.EntryNode Message
 --   , gClassify :: mode :- G.LLMNode
 --        :@ Input Message
 --        :@ Template ClassifyTpl

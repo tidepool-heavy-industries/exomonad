@@ -14,9 +14,9 @@
 --
 -- @
 -- data MyGraph mode = MyGraph
---   { entry    :: mode :- Entry Message
+--   { entry    :: mode :- EntryNode Message
 --   , classify :: mode :- LLM :@ Input Message :@ Schema Intent
---   , exit     :: mode :- Exit Response
+--   , exit     :: mode :- ExitNode Response
 --   }
 --   deriving Generic
 -- @
@@ -54,9 +54,9 @@ module Tidepool.Graph.Generic
     -- * Graph Product (Generic Traversal)
   , GraphProduct(..)
 
-    -- * Entry/Exit Types
-  , Entry
-  , Exit
+    -- * EntryNode/ExitNode Types
+  , EntryNode
+  , ExitNode
 
     -- * Node Kind Wrappers (for record DSL)
   , LLMNode
@@ -127,7 +127,7 @@ import Control.Monad.Freer (Eff, Member)
 
 import Tidepool.Graph.Types (type (:@), Input, Schema, Template, Vision, Tools, Memory, System, UsesEffects, ClaudeCode, ModelChoice, Spawn, Barrier, Awaits, HList(..))
 import Tidepool.Graph.Template (TemplateContext)
-import Tidepool.Graph.Edges (GetUsesEffects, GetGotoTargets, GotoEffectsToTargets, HasClaudeCode, GetClaudeCode, GetSpawnTargets, GetBarrierTarget, GetAwaits, GetGraphEntry, GetGraphExit)
+import Tidepool.Graph.Edges (GetUsesEffects, GetGotoTargets, GotoEffectsToTargets, HasClaudeCode, GetClaudeCode, GetSpawnTargets, GetBarrierTarget, GetAwaits)
 import Tidepool.Graph.Goto (Goto, goto, GotoChoice, To, LLMHandler(..), ClaudeCodeLLMHandler(..))
 import Tidepool.Graph.Validate.RecordStructure
   ( AllFieldsReachable, AllLogicFieldsReachExit, NoDeadGotosRecord
@@ -142,8 +142,8 @@ import Tidepool.Graph.Generic.Core
   , GraphNode
   , ForkNode
   , BarrierNode
-  , Entry
-  , Exit
+  , EntryNode
+  , ExitNode
   )
 
 -- | Effect type alias (freer-simple effects have kind Type -> Type).
@@ -172,7 +172,7 @@ type Effect = Type -> Type
 --
 -- * LLM nodes: @Input -> Eff es (TemplateContext tpl)@
 -- * Logic nodes: @Input -> Eff es (GotoChoice targets)@
--- * Entry\/Exit: @Proxy inputType@ / @Proxy outputType@
+-- * EntryNode\/Exit: @Proxy inputType@ / @Proxy outputType@
 type AsHandler :: [Effect] -> Type
 data AsHandler es
 
@@ -199,25 +199,21 @@ instance GraphMode (AsHandler es) where
 -- NodeHandler (Logic :@ Input Intent :@ UsesEffects '[Goto "respond", GotoExit]) es
 --   = Intent -> Eff es (GotoChoice targets)
 --
--- NodeHandler (Entry Message) es = Proxy Message
+-- NodeHandler (EntryNode Message) es = Proxy Message
 -- NodeHandler (Exit Response) es = Proxy Response
 -- @
 type NodeHandler :: Type -> [Effect] -> Type
 type family NodeHandler nodeDef es where
-  -- Entry/Exit produce Proxy (self-documenting markers)
-  NodeHandler (Entry a) es = Proxy a
-  NodeHandler (Exit a) es = Proxy a
+  -- EntryNode/Exit produce Proxy (self-documenting markers)
+  NodeHandler (EntryNode a) es = Proxy a
+  NodeHandler (ExitNode a) es = Proxy a
 
   -- GraphNode handler: runs child graph to completion.
   --
-  -- The handler receives the graph's Entry type and returns its Exit type.
-  -- When bare (no Input annotation), default to Entry type as input.
-  NodeHandler (GraphNode subgraph) es =
-    NodeHandler (GraphNode subgraph :@ Input (GetGraphEntry subgraph)) es
-
-  -- GraphNode with Input annotation: function from input to Exit type.
+  -- The handler receives the graph's EntryNode type and returns its Exit type.
+  -- GraphNode with Input annotation: function from input type to exit type.
   NodeHandler (GraphNode subgraph :@ Input inputT) es =
-    inputT -> Eff es (GetGraphExit subgraph)
+    inputT -> Eff es ()
 
   -- Any annotated node: dispatch to the appropriate accumulator based on base kind
   -- We peel from outside, so start with the full node
@@ -975,7 +971,7 @@ type family If cond t f where
 --
 -- @
 -- data MyGraph mode = MyGraph
---   { entry    :: mode :- Entry Message
+--   { entry    :: mode :- EntryNode Message
 --   , classify :: mode :- LLM :@ ...
 --   }
 --
@@ -1009,7 +1005,7 @@ type family FieldDefs f where
 --
 -- @
 -- FieldsWithNames (Rep (MyGraph AsGraph))
---   = '[ '("entry", Entry Message)
+--   = '[ '("entry", EntryNode Message)
 --      , '("classify", LLM :@ Input Message :@ Schema Intent)
 --      ]
 -- @
@@ -1068,14 +1064,14 @@ type family LookupField name fields where
 -- RECORD VALIDATION
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Check if the Generic representation contains an Entry field.
+-- | Check if the Generic representation contains an EntryNode field.
 --
--- Returns 'True if any field has type @Entry a@ for some @a@.
+-- Returns 'True if any field has type @EntryNode a@ for some @a@.
 type HasEntryField :: (Type -> Type) -> Bool
 type family HasEntryField f where
   HasEntryField (M1 D _ f) = HasEntryField f
   HasEntryField (M1 C _ f) = HasEntryField f
-  HasEntryField (M1 S _ (K1 _ (Entry _))) = 'True
+  HasEntryField (M1 S _ (K1 _ (EntryNode _))) = 'True
   HasEntryField (M1 S _ _) = 'False
   HasEntryField (l :*: r) = HasEntryField l || HasEntryField r
   HasEntryField _ = 'False
@@ -1085,7 +1081,7 @@ type HasExitField :: (Type -> Type) -> Bool
 type family HasExitField f where
   HasExitField (M1 D _ f) = HasExitField f
   HasExitField (M1 C _ f) = HasExitField f
-  HasExitField (M1 S _ (K1 _ (Exit _))) = 'True
+  HasExitField (M1 S _ (K1 _ (ExitNode _))) = 'True
   HasExitField (M1 S _ _) = 'False
   HasExitField (l :*: r) = HasExitField l || HasExitField r
   HasExitField _ = 'False
@@ -1096,14 +1092,14 @@ type family a || b where
   'True  || _ = 'True
   'False || b = b
 
--- | Count Entry fields in a Generic representation.
+-- | Count EntryNode fields in a Generic representation.
 --
--- Returns the number of fields with type @Entry a@ for some @a@.
+-- Returns the number of fields with type @EntryNode a@ for some @a@.
 type CountEntries :: (Type -> Type) -> Nat
 type family CountEntries f where
   CountEntries (M1 D _ f) = CountEntries f
   CountEntries (M1 C _ f) = CountEntries f
-  CountEntries (M1 S _ (K1 _ (Entry _))) = 1
+  CountEntries (M1 S _ (K1 _ (EntryNode _))) = 1
   CountEntries (M1 S _ _) = 0
   CountEntries (l :*: r) = CountEntries l + CountEntries r
   CountEntries _ = 0
@@ -1115,17 +1111,17 @@ type CountExits :: (Type -> Type) -> Nat
 type family CountExits f where
   CountExits (M1 D _ f) = CountExits f
   CountExits (M1 C _ f) = CountExits f
-  CountExits (M1 S _ (K1 _ (Exit _))) = 1
+  CountExits (M1 S _ (K1 _ (ExitNode _))) = 1
   CountExits (M1 S _ _) = 0
   CountExits (l :*: r) = CountExits l + CountExits r
   CountExits _ = 0
 
--- | Extract Entry type from a graph record.
+-- | Extract EntryNode type from a graph record.
 type GetEntryType :: (Type -> Type) -> Maybe Type
 type family GetEntryType f where
   GetEntryType (M1 D _ f) = GetEntryType f
   GetEntryType (M1 C _ f) = GetEntryType f
-  GetEntryType (M1 S _ (K1 _ (Entry a))) = 'Just a
+  GetEntryType (M1 S _ (K1 _ (EntryNode a))) = 'Just a
   GetEntryType (M1 S _ _) = 'Nothing
   GetEntryType (l :*: r) = OrMaybe (GetEntryType l) (GetEntryType r)
   GetEntryType _ = 'Nothing
@@ -1135,7 +1131,7 @@ type GetExitType :: (Type -> Type) -> Maybe Type
 type family GetExitType f where
   GetExitType (M1 D _ f) = GetExitType f
   GetExitType (M1 C _ f) = GetExitType f
-  GetExitType (M1 S _ (K1 _ (Exit a))) = 'Just a
+  GetExitType (M1 S _ (K1 _ (ExitNode a))) = 'Just a
   GetExitType (M1 S _ _) = 'Nothing
   GetExitType (l :*: r) = OrMaybe (GetExitType l) (GetExitType r)
   GetExitType _ = 'Nothing
@@ -1146,9 +1142,9 @@ type family OrMaybe a b where
   OrMaybe ('Just x) _ = 'Just x
   OrMaybe 'Nothing b = b
 
--- | Validate a graph record has exactly one Entry and one Exit field.
+-- | Validate a graph record has exactly one EntryNode and one Exit field.
 --
--- Produces type errors if Entry or Exit are missing, or if there are duplicates.
+-- Produces type errors if EntryNode or Exit are missing, or if there are duplicates.
 type ValidateEntryExit :: (Type -> Type) -> Constraint
 type family ValidateEntryExit graph where
   ValidateEntryExit graph =
@@ -1156,16 +1152,16 @@ type family ValidateEntryExit graph where
     , ValidateExitCount (CountExits (Rep (graph AsGraph)))
     )
 
--- | Validate Entry count is exactly 1.
+-- | Validate EntryNode count is exactly 1.
 type ValidateEntryCount :: Nat -> Constraint
 type family ValidateEntryCount n where
   ValidateEntryCount 0 = DelayedTypeError
     ( HR
-      ':$$: 'Text "  Missing Entry field"
+      ':$$: 'Text "  Missing EntryNode field"
       ':$$: HR
       ':$$: Blank
       ':$$: WhatHappened
-      ':$$: Indent "Your graph record has no Entry field."
+      ':$$: Indent "Your graph record has no EntryNode field."
       ':$$: Blank
       ':$$: HowItWorks
       ':$$: Indent "Every graph needs exactly one entry point that defines"
@@ -1173,23 +1169,23 @@ type family ValidateEntryCount n where
       ':$$: Blank
       ':$$: Fixes
       ':$$: Bullet "Add an entry field:"
-      ':$$: CodeLine "entry :: mode :- Entry YourInputType"
+      ':$$: CodeLine "entry :: mode :- EntryNode YourInputType"
     )
   ValidateEntryCount 1 = ()
   ValidateEntryCount _ = DelayedTypeError
     ( HR
-      ':$$: 'Text "  Multiple Entry fields"
+      ':$$: 'Text "  Multiple EntryNode fields"
       ':$$: HR
       ':$$: Blank
       ':$$: WhatHappened
-      ':$$: Indent "Your graph record has more than one Entry field."
+      ':$$: Indent "Your graph record has more than one EntryNode field."
       ':$$: Blank
       ':$$: HowItWorks
       ':$$: Indent "A graph can only have one entry point. Multiple entries"
       ':$$: Indent "would be ambiguous - which one starts the graph?"
       ':$$: Blank
       ':$$: Fixes
-      ':$$: Bullet "Remove duplicate Entry fields, keeping just one"
+      ':$$: Bullet "Remove duplicate EntryNode fields, keeping just one"
     )
 
 -- | Validate Exit count is exactly 1.
@@ -1209,7 +1205,7 @@ type family ValidateExitCount n where
       ':$$: Blank
       ':$$: Fixes
       ':$$: Bullet "Add an exit field:"
-      ':$$: CodeLine "exit :: mode :- Exit YourResultType"
+      ':$$: CodeLine "exit :: mode :- ExitNode YourResultType"
     )
   ValidateExitCount 1 = ()
   ValidateExitCount _ = DelayedTypeError
@@ -1375,10 +1371,10 @@ type family InvalidGotoTargetError target fieldNames where
 -- Validates:
 --
 -- * Has Generic instance (for field extraction)
--- * Has an Entry field
+-- * Has an EntryNode field
 -- * Has an Exit field
 -- * All Goto targets reference existing fields
--- * All nodes are reachable from Entry
+-- * All nodes are reachable from EntryNode
 -- * All Logic nodes have a path to Exit
 -- * All Goto targets can receive their payload type
 -- * All Logic nodes have at least one Goto effect
@@ -1419,7 +1415,7 @@ type MissingGenericError graph = TypeError
    ':$$: 'Text "Fix: Add Generic to the deriving clause:"
    ':$$: 'Text ""
    ':$$: 'Text "  data MyGraph mode = MyGraph"
-   ':$$: 'Text "    { entry :: mode :- Entry Input"
+   ':$$: 'Text "    { entry :: mode :- EntryNode Input"
    ':$$: 'Text "    , ..."
    ':$$: 'Text "    }"
    ':$$: 'Text "    deriving Generic  -- <- Add this"
@@ -1494,10 +1490,10 @@ type GenericGraph graph mode =
 -- @
 -- -- Define a graph
 -- data SupportGraph mode = SupportGraph
---   { sgEntry  :: mode :- Entry Message
+--   { sgEntry  :: mode :- EntryNode Message
 --   , sgRefund :: mode :- LLMNode :@ ...
 --   , sgFaq    :: mode :- LLMNode :@ ...
---   , sgExit   :: mode :- Exit Response
+--   , sgExit   :: mode :- ExitNode Response
 --   }
 --
 -- -- In a handler:

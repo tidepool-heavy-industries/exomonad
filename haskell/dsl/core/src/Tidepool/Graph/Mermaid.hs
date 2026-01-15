@@ -6,7 +6,7 @@
 --
 -- = Node Shapes
 --
--- * Entry/Exit: @((circle))@
+-- * EntryNode/Exit: @((circle))@
 -- * LLM nodes: @[[double brackets]]@
 -- * Logic nodes: @{{hexagon}}@
 --
@@ -100,12 +100,12 @@ toMermaid = toMermaidWithConfig defaultConfig
 --
 -- @
 -- data SupportGraph mode = SupportGraph
---   { sgEntry    :: mode :- Entry Message
+--   { sgEntry    :: mode :- EntryNode Message
 --   , sgClassify :: mode :- LLMNode :@ Input Message :@ Schema Intent
 --   , sgRoute    :: mode :- LogicNode :@ Input Intent :@ UsesEffects '[Goto "sgRefund" Message, Goto "sgFaq" Message]
 --   , sgRefund   :: mode :- LLMNode :@ Input Message :@ Schema Response
 --   , sgFaq      :: mode :- LLMNode :@ Input Message :@ Schema Response
---   , sgExit     :: mode :- Exit Response
+--   , sgExit     :: mode :- ExitNode Response
 --   }
 --   deriving Generic
 --
@@ -144,7 +144,7 @@ toMermaidWithConfig :: MermaidConfig -> GraphInfo -> Text
 toMermaidWithConfig config info = T.unlines $
   [ "flowchart " <> config.mcDirection
   , ""
-  , "    %% Entry and Exit"
+  , "    %% EntryNode and Exit"
   , "    entry((" <> config.mcEntryLabel <> "))"
   , "    exit__((" <> config.mcExitLabel <> "))"
   , ""
@@ -281,7 +281,7 @@ edgeDeclarations config info =
   ++ nodeEdges config info
   ++ exitEdges config info
 
--- | Generate edges from Entry to root nodes.
+-- | Generate edges from EntryNode to root nodes.
 --
 -- Root nodes are nodes with no incoming edges (Schema→Needs or Goto)
 -- from other nodes. These are the natural entry points of the graph.
@@ -427,7 +427,7 @@ stateTransitions config info =
   ++ nodeStateTransitions config info
   ++ exitStateTransitions config info
 
--- | Entry transitions.
+-- | EntryNode transitions.
 --
 -- Connects to root nodes (nodes with no incoming edges from other nodes).
 entryStateTransitions :: MermaidConfig -> GraphInfo -> [Text]
@@ -484,7 +484,7 @@ exitStateTransitions config info = case info.giExitType of
 
 -- | An execution path through the graph.
 --
--- Each step is a node name. The path starts implicitly from Entry
+-- Each step is a node name. The path starts implicitly from EntryNode
 -- and ends at Exit.
 newtype ExecutionPath = ExecutionPath { pathSteps :: [Text] }
   deriving (Show, Eq)
@@ -495,13 +495,13 @@ newtype ExecutionPath = ExecutionPath { pathSteps :: [Text] }
 --
 -- @
 -- sequenceDiagram
---     participant Entry
+--     participant EntryNode
 --     participant classify
 --     participant route
 --     participant refund
 --     participant Exit
 --
---     Entry->>classify: Message
+--     EntryNode->>classify: Message
 --     classify->>route: Intent
 --     route->>refund: Message
 --     refund->>Exit: Response
@@ -511,7 +511,7 @@ toSequenceDiagram config info path = T.unlines $
   [ "sequenceDiagram"
   , ""
   , "    %% Participants"
-  , "    participant Entry"
+  , "    participant EntryNode"
   ]
   ++ map renderParticipant path.pathSteps
   ++ [ "    participant Exit"
@@ -529,10 +529,10 @@ sequenceMessages :: MermaidConfig -> GraphInfo -> ExecutionPath -> [Text]
 sequenceMessages config info (ExecutionPath steps) =
   entryMessage ++ stepMessages ++ exitMessage
   where
-    -- Entry to first node
+    -- EntryNode to first node
     entryMessage = case (steps, info.giEntryType) of
       (first:_, Just entryType) ->
-        ["    Entry->>" <> escapeName first <> ": " <> typeLabel config entryType]
+        ["    EntryNode->>" <> escapeName first <> ": " <> typeLabel config entryType]
       _ -> []
 
     -- Messages between consecutive nodes

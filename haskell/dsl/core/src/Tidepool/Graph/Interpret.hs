@@ -31,7 +31,7 @@ module Tidepool.Graph.Interpret
   , runGraph
   , runGraphFrom
   , runGraphWith
-    -- * Entry Handler Discovery
+    -- * EntryNode Handler Discovery
   , FindEntryHandler
     -- * Handler Invocation
   , CallHandler(..)
@@ -76,7 +76,7 @@ import Tidepool.Effect.Types (TurnOutcome(..), TurnParseResult(..), TurnResult(.
 import Tidepool.Graph.Edges (GetInput, GetSpawnTargets, GetBarrierTarget, GetAwaits, GetGraphEntry, GetGraphExit)
 import Tidepool.Graph.Generic (AsHandler, FieldsWithNamesOf, SpawnPayloads, SpawnPayloadsInner, AwaitsHList, GetNodeDef)
 import Tidepool.Graph.Reify (IsForkNode)
-import Tidepool.Graph.Generic.Core (Entry, AsGraph, GraphNode)
+import Tidepool.Graph.Generic.Core (EntryNode, AsGraph, GraphNode)
 import qualified Tidepool.Graph.Generic.Core as G (Exit)
 import Tidepool.Graph.Goto (GotoChoice, To, LLMHandler(..), ClaudeCodeLLMHandler(..), ClaudeCodeResult(..))
 import Tidepool.Graph.Goto.Internal (GotoChoice(..), OneOf(..))
@@ -112,17 +112,17 @@ type family IfMaybe cond t f where
 --
 -- @
 -- -- For a graph with:
--- --   entry   :: mode :- Entry Int
+-- --   entry   :: mode :- EntryNode Int
 -- --   compute :: mode :- LogicNode :@ Input Int :@ UsesEffects '[...]
--- --   exit    :: mode :- Exit Int
+-- --   exit    :: mode :- ExitNode Int
 -- --
 -- FindEntryHandler Int fields = 'Just "compute"
 -- @
 type FindEntryHandler :: Type -> [(Symbol, Type)] -> Maybe Symbol
 type family FindEntryHandler entryType fields where
   FindEntryHandler _ '[] = 'Nothing
-  FindEntryHandler entryType ('(name, Entry _) ': rest) =
-    FindEntryHandler entryType rest  -- Skip Entry marker
+  FindEntryHandler entryType ('(name, EntryNode _) ': rest) =
+    FindEntryHandler entryType rest  -- Skip EntryNode marker
   FindEntryHandler entryType ('(name, G.Exit _) ': rest) =
     FindEntryHandler entryType rest  -- Skip Exit marker
   FindEntryHandler entryType ('(name, def) ': rest) =
@@ -166,7 +166,7 @@ runGraphFrom graph input = do
   dispatchGoto graph choice
 
 
--- | Run a graph from Entry to Exit.
+-- | Run a graph from EntryNode to Exit.
 --
 -- Automatically discovers the first handler that accepts the entry type
 -- (via the 'Input' annotation), calls it with the input, and dispatches
@@ -175,9 +175,9 @@ runGraphFrom graph input = do
 -- @
 -- -- Define graph
 -- data TestGraph mode = TestGraph
---   { entry   :: mode :- Entry Int
+--   { entry   :: mode :- EntryNode Int
 --   , compute :: mode :- LogicNode :@ Input Int :@ UsesEffects '[Goto Exit Int]
---   , exit    :: mode :- Exit Int
+--   , exit    :: mode :- ExitNode Int
 --   }
 --
 -- -- Run it
@@ -216,7 +216,7 @@ runGraphWith
      ( CallHandler handler entryType es targets
      , DispatchGoto graph targets es exitType
      )
-  => handler              -- ^ Entry handler (e.g., @handlers.v3Scaffold@)
+  => handler              -- ^ EntryNode handler (e.g., @handlers.v3Scaffold@)
   -> graph (AsHandler es) -- ^ Full handler record (for dispatch to other nodes)
   -> entryType            -- ^ Input to the entry handler
   -> Eff es exitType
@@ -560,7 +560,7 @@ instance
 -- | Execute a GraphNode by running the child graph to completion.
 --
 -- The child graph's handlers must be provided. The input is passed to
--- the child graph's Entry, and execution continues until Exit is reached.
+-- the child graph's EntryNode, and execution continues until Exit is reached.
 --
 -- This function is a thin wrapper around 'runGraph' that documents the
 -- GraphNode execution pattern. Use it in parent graph handlers when
@@ -581,7 +581,7 @@ executeGraphNode
      , DispatchGoto childGraph targets es exitType
      )
   => childGraph (AsHandler es)  -- ^ Child graph handlers
-  -> entryType                   -- ^ Input to child graph's Entry
+  -> entryType                   -- ^ Input to child graph's EntryNode
   -> Eff es exitType             -- ^ Child graph's Exit value
 executeGraphNode = runGraph
 

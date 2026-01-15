@@ -47,7 +47,7 @@ module Tidepool.Graph.Reify
   , ReifyNodeDef(..)
   , makeGraphInfo
 
-    -- * Entry/Exit Type Extraction
+    -- * EntryNode/Exit Type Extraction
   , GetEntryTypeFromGraph
   , GetExitTypeFromGraph
 
@@ -88,7 +88,7 @@ import qualified Data.Map.Strict as Map
 
 import Tidepool.Graph.Types (NodeKind(..), type (:@), ModelChoice(..), Tool)
 import Tidepool.Graph.Tool (ToolInfo(..))
-import Tidepool.Graph.Generic.Core (Entry, Exit, LLMNode, LogicNode, ForkNode, BarrierNode, AsGraph)
+import Tidepool.Graph.Generic.Core (EntryNode, ExitNode, LLMNode, LogicNode, ForkNode, BarrierNode, AsGraph)
 import Tidepool.Graph.Edges
   ( GetInput, GetSchema, GetTemplate, GetSystem
   , GetVision, GetTools, GetMemory, GetUsesEffects
@@ -109,19 +109,19 @@ import Tidepool.Graph.Template
 -- | Effect type alias (freer-simple effects have kind Type -> Type).
 type Effect = Type -> Type
 
--- | Helper type family to get Entry type from a graph.
+-- | Helper type family to get EntryNode type from a graph.
 --
 -- This is a simplified version that works directly on graph records.
 type GetEntryTypeFromGraph :: (Type -> Type) -> Maybe Type
 type family GetEntryTypeFromGraph graph where
   GetEntryTypeFromGraph graph = GetEntryTypeRep (Rep (graph AsGraph))
 
--- | Extract Entry type from Generic representation.
+-- | Extract EntryNode type from Generic representation.
 type GetEntryTypeRep :: (Type -> Type) -> Maybe Type
 type family GetEntryTypeRep f where
   GetEntryTypeRep (M1 D _ f) = GetEntryTypeRep f
   GetEntryTypeRep (M1 C _ f) = GetEntryTypeRep f
-  GetEntryTypeRep (M1 S _ (K1 _ (Entry a))) = 'Just a
+  GetEntryTypeRep (M1 S _ (K1 _ (EntryNode a))) = 'Just a
   GetEntryTypeRep (M1 S _ _) = 'Nothing
   GetEntryTypeRep (l :*: r) = OrMaybe (GetEntryTypeRep l) (GetEntryTypeRep r)
   GetEntryTypeRep _ = 'Nothing
@@ -136,7 +136,7 @@ type GetExitTypeRep :: (Type -> Type) -> Maybe Type
 type family GetExitTypeRep f where
   GetExitTypeRep (M1 D _ f) = GetExitTypeRep f
   GetExitTypeRep (M1 C _ f) = GetExitTypeRep f
-  GetExitTypeRep (M1 S _ (K1 _ (Exit a))) = 'Just a
+  GetExitTypeRep (M1 S _ (K1 _ (ExitNode a))) = 'Just a
   GetExitTypeRep (M1 S _ _) = 'Nothing
   GetExitTypeRep (l :*: r) = OrMaybe (GetExitTypeRep l) (GetExitTypeRep r)
   GetExitTypeRep _ = 'Nothing
@@ -153,7 +153,7 @@ type family OrMaybe a b where
 
 -- | Complete runtime representation of a graph.
 data GraphInfo = GraphInfo
-  { giEntryType :: Maybe TypeRep   -- ^ Type accepted at Entry
+  { giEntryType :: Maybe TypeRep   -- ^ Type accepted at EntryNode
   , giExitType :: Maybe TypeRep    -- ^ Type produced at Exit
   , giNodes :: [NodeInfo]          -- ^ All node declarations
   , giEdges :: [EdgeInfo]          -- ^ Derived edges
@@ -185,7 +185,7 @@ data NodeInfo = NodeInfo
 
 -- | Runtime representation of an edge.
 data EdgeInfo = EdgeInfo
-  { eiFrom :: Text               -- ^ Source node (or "Entry")
+  { eiFrom :: Text               -- ^ Source node (or "EntryNode")
   , eiTo :: Text                 -- ^ Target node (or "Exit")
   , eiPayload :: Maybe TypeRep   -- ^ Type carried on edge
   , eiKind :: RuntimeEdgeKind    -- ^ Edge classification
@@ -633,15 +633,15 @@ instance GReifyFields (K1 i c) where
 
 -- | Reify a single node definition to Maybe NodeInfo.
 --
--- Returns @[]@ for Entry/Exit (not real nodes), @[NodeInfo]@ for LLMNode/LogicNode.
+-- Returns @[]@ for EntryNode/Exit (not real nodes), @[NodeInfo]@ for LLMNode/LogicNode.
 class ReifyNodeDef (def :: Type) where
   reifyNodeDef :: KnownSymbol name => Proxy name -> Proxy def -> [NodeInfo]
 
--- Entry and Exit are not nodes
-instance ReifyNodeDef (Entry a) where
+-- EntryNode and Exit are not nodes
+instance ReifyNodeDef (EntryNode a) where
   reifyNodeDef _ _ = []
 
-instance ReifyNodeDef (Exit a) where
+instance ReifyNodeDef (ExitNode a) where
   reifyNodeDef _ _ = []
 
 -- | Get the base node type from a potentially annotated node definition.
@@ -812,19 +812,19 @@ instance ReifyAnnotatedNode def 'False 'False where
 -- | Derive implicit edges from nodes.
 --
 -- For each node, creates edges from:
--- 1. Entry → nodes that need the entry type
+-- 1. EntryNode → nodes that need the entry type
 -- 2. Nodes with Schema → nodes that need that schema type
 deriveImplicitEdges
-  :: Maybe TypeRep    -- ^ Entry type
+  :: Maybe TypeRep    -- ^ EntryNode type
   -> [NodeInfo]       -- ^ All nodes
   -> [EdgeInfo]
 deriveImplicitEdges mEntryType nodes = entryEdges ++ schemaEdges
   where
-    -- Edges from Entry to nodes that need the entry type
+    -- Edges from EntryNode to nodes that need the entry type
     entryEdges = case mEntryType of
       Nothing -> []
       Just entryTy ->
-        [ EdgeInfo "Entry" n.niName (Just entryTy) RuntimeImplicit
+        [ EdgeInfo "EntryNode" n.niName (Just entryTy) RuntimeImplicit
         | n <- nodes
         , n.niInput == Just entryTy
         ]

@@ -50,7 +50,7 @@
 --
 -- @
 -- data MyGraph mode = MyGraph
---   { gEntry  :: mode :- G.Entry Query
+--   { gEntry  :: mode :- G.EntryNode Query
 --   , gSearch :: mode :- G.LLMNode
 --        :@ Input Query
 --        :@ Schema Results

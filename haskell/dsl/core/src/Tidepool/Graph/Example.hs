@@ -35,7 +35,7 @@ import Text.Parsec.Pos (SourcePos)
 
 import Tidepool.Graph.Types (type (:@), Input, Schema, Template, UsesEffects, Exit, LLMKind(..))
 import Tidepool.Graph.Generic (GraphMode(..), AsHandler)
-import qualified Tidepool.Graph.Generic as G (Entry, Exit, LLMNode, LogicNode, ValidGraphRecord)
+import qualified Tidepool.Graph.Generic as G (EntryNode, Exit, LLMNode, LogicNode, ValidGraphRecord)
 import Tidepool.Graph.Goto (Goto, gotoChoice, gotoExit, LLMHandler(..))
 import Tidepool.Graph.Reify (ReifyRecordGraph(..), makeGraphInfo)
 import Tidepool.Graph.Tool (ToolDef(..))
@@ -194,9 +194,9 @@ instance TemplateDef ClassifyTpl where
 --
 -- @
 -- data MyGraph mode = MyGraph
---   { entry    :: mode :- Entry Message
+--   { entry    :: mode :- EntryNode Message
 --   , classify :: mode :- LLM :@ Input Message :@ Schema Intent
---   , exit     :: mode :- Exit Response
+--   , exit     :: mode :- ExitNode Response
 --   }
 --   deriving Generic
 -- @
@@ -243,7 +243,7 @@ instance TemplateDef FaqTpl where
   buildContext = pure SimpleContext { scContent = "faq" }
 
 data SupportGraph mode = SupportGraph
-  { sgEntry    :: mode :- G.Entry Message
+  { sgEntry    :: mode :- G.EntryNode Message
   , sgClassify :: mode :- G.LLMNode 'API :@ Input Message :@ Template ClassifyTpl :@ Schema Intent
                     :@ UsesEffects '[Goto "sgRoute" Intent]
     -- Note: Goto targets must match actual field names for gotoField validation
@@ -260,7 +260,7 @@ data SupportGraph mode = SupportGraph
 --
 -- In 'AsHandler es' mode, the NodeHandler type family computes:
 --
--- * Entry -> Proxy Message (marker, not a handler)
+-- * EntryNode -> Proxy Message (marker, not a handler)
 -- * LLM :@ Input A :@ Template T :@ Schema B :@ UsesEffects effs -> LLMHandler A B targets es (TemplateContext T)
 -- * Logic :@ Input A :@ UsesEffects effs -> A -> Eff es (GotoChoice targets)
 -- * Exit -> Proxy Response (marker, not a handler)
@@ -313,7 +313,7 @@ supportHandlers = SupportGraph
 -- | Test that ValidGraphRecord works on record-based graphs.
 --
 -- This uses the constraint to verify at compile time that:
--- * SupportGraph has an Entry field (sgEntry :: mode :- G.Entry Message)
+-- * SupportGraph has an EntryNode field (sgEntry :: mode :- G.EntryNode Message)
 -- * SupportGraph has an Exit field (sgExit :: mode :- G.Exit Response)
 -- * All Goto targets reference valid field names
 --
@@ -333,7 +333,7 @@ _validRecordGraph = ()
 -- @
 --
 -- Note: Due to polykind limitations, Goto targets are not extracted at runtime.
--- The diagram will show implicit edges (Entry/Schema → Input) but not
+-- The diagram will show implicit edges (EntryNode/Schema → Input) but not
 -- explicit Goto transitions.
 instance ReifyRecordGraph SupportGraph where
   reifyRecordGraph = makeGraphInfo

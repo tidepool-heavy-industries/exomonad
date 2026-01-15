@@ -48,7 +48,7 @@ import Tidepool.Schema (schemaToValue)
 
 -- | Export format for a complete graph.
 data GraphExport = GraphExport
-  { geEntryType :: Maybe Text      -- ^ Entry type name
+  { geEntryType :: Maybe Text      -- ^ EntryNode type name
   , geExitType :: Maybe Text       -- ^ Exit type name
   , geNodes :: Map Text NodeExport -- ^ Nodes by name
   , geEdges :: [EdgeExport]        -- ^ All edges

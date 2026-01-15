@@ -19,6 +19,8 @@ module Tidepool.Graph.Types
   , Tools
   , UsesEffects
   , Memory
+  , MCPExport
+  , ToolMeta
   , EntryPoint
   , Tool
   , ExitTool
@@ -299,7 +301,7 @@ data Memory stateType
 -- ENTRY/EXIT RECORD ANNOTATIONS
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Entry point marker for named entry fields in entry records.
+-- | EntryNode point marker for named entry fields in entry records.
 --
 -- Used in entry record definitions to declare the payload type for each entry.
 --
@@ -1079,14 +1081,14 @@ data FunctionGemma
 -- MCP EXPORT ANNOTATIONS
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Mark an Entry point for MCP server exposure.
+-- | Mark an EntryNode point for MCP server exposure.
 --
--- When a graph Entry has MCPExport, it becomes an MCP tool that external
+-- When a graph EntryNode has MCPExport, it becomes an MCP tool that external
 -- clients can invoke. The input type becomes the tool's parameter schema.
 --
 -- @
 -- data MyGraph mode = MyGraph
---   { search :: mode :- Entry SearchInput :@ MCPExport
+--   { search :: mode :- EntryNode SearchInput :@ MCPExport
 --       :@ ToolMeta '("search", "Search the codebase")
 --   }
 -- @
@@ -1094,7 +1096,7 @@ data FunctionGemma
 -- Use with 'ToolMeta' to provide tool name and description.
 data MCPExport
 
--- | Provide name and description for an MCP-exported Entry.
+-- | Provide name and description for an MCP-exported EntryNode.
 --
 -- @
 -- :@ ToolMeta '("tool_name", "Tool description for LLM")

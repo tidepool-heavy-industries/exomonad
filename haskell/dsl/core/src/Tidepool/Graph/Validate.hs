@@ -79,7 +79,7 @@ type family DeadGotoError srcName targetName payload where
 -- ERROR MESSAGES
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Error when a node's Need is not provided by any Schema or Entry.
+-- | Error when a node's Need is not provided by any Schema or EntryNode.
 --
 -- This version takes the list of provided types so it can show what IS available.
 type UnsatisfiedNeedError :: Symbol -> Type -> Constraint
@@ -89,11 +89,11 @@ type UnsatisfiedNeedError nodeName needType = TypeError
    ':$$: 'Text "Node '" ':<>: 'Text nodeName ':<>: 'Text "' needs type:"
    ':$$: 'Text "  " ':<>: 'ShowType needType
    ':$$: 'Text ""
-   ':$$: 'Text "But no node provides this type via Schema and Entry doesn't provide it."
+   ':$$: 'Text "But no node provides this type via Schema and EntryNode doesn't provide it."
    ':$$: 'Text ""
    ':$$: 'Text "Fix options:"
    ':$$: 'Text "  1. Add a node with 'Schema " ':<>: 'ShowType needType ':<>: 'Text "'"
-   ':$$: 'Text "  2. Change Entry to provide this type: mode :- G.Entry " ':<>: 'ShowType needType
+   ':$$: 'Text "  2. Change EntryNode to provide this type: mode :- G.EntryNode " ':<>: 'ShowType needType
    ':$$: 'Text "  3. Remove " ':<>: 'ShowType needType ':<>: 'Text " from this node's Needs"
   )
 
@@ -105,12 +105,12 @@ type UnsatisfiedNeedErrorWithContext nodeName needType available = TypeError
    ':$$: 'Text "Node '" ':<>: 'Text nodeName ':<>: 'Text "' needs type:"
    ':$$: 'Text "  " ':<>: 'ShowType needType
    ':$$: 'Text ""
-   ':$$: 'Text "Available types (from Entry and Schema outputs):"
+   ':$$: 'Text "Available types (from EntryNode and Schema outputs):"
    ':$$: FormatTypeList available
    ':$$: 'Text ""
    ':$$: 'Text "Fix options:"
    ':$$: 'Text "  1. Add a node with 'Schema " ':<>: 'ShowType needType ':<>: 'Text "'"
-   ':$$: 'Text "  2. Change Entry to provide this type"
+   ':$$: 'Text "  2. Change EntryNode to provide this type"
    ':$$: 'Text "  3. Remove " ':<>: 'ShowType needType ':<>: 'Text " from this node's Needs"
   )
 

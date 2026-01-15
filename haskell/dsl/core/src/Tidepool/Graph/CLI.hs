@@ -13,7 +13,7 @@
 --
 -- This module enables wrapping any tidepool graph as a CLI tool where:
 --
--- * Entry type → CLI arguments (derived from Haddock via TH)
+-- * EntryNode type → CLI arguments (derived from Haddock via TH)
 -- * Exit type → CLI output (JSON or text via @--format@ flag)
 --
 -- = Usage
@@ -56,7 +56,7 @@ module Tidepool.Graph.CLI
   ( -- * GraphCLI Typeclass
     GraphCLI(..)
 
-    -- * Type Families for Entry/Exit Extraction
+    -- * Type Families for EntryNode/Exit Extraction
   , GraphEntryType
   , GraphExitType
   , ValidEntry
@@ -98,7 +98,7 @@ import Options.Applicative
 
 import Tidepool.Graph.Interpret (runGraph, FindEntryHandler, CallHandler, DispatchGoto)
 import Tidepool.Graph.Generic (AsHandler, FieldsWithNamesOf)
-import Tidepool.Graph.Generic.Core (AsGraph, Entry, Exit)
+import Tidepool.Graph.Generic.Core (AsGraph, EntryNode, ExitNode)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- GRAPHCLI TYPECLASS
@@ -126,13 +126,13 @@ class GraphCLI graph where
 -- TYPE FAMILIES FOR ENTRY/EXIT EXTRACTION
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Extract Entry type from a graph record's Generic representation.
+-- | Extract EntryNode type from a graph record's Generic representation.
 --
 -- @
--- GraphEntryType MyGraph = Input  -- if entry :: mode :- Entry Input
+-- GraphEntryType MyGraph = Input  -- if entry :: mode :- EntryNode Input
 -- @
 --
--- Produces a helpful type error if no Entry is found.
+-- Produces a helpful type error if no EntryNode is found.
 type GraphEntryType :: (Type -> Type) -> Type
 type family GraphEntryType graph where
   GraphEntryType graph = ExtractEntry (Rep (graph AsGraph))
@@ -140,7 +140,7 @@ type family GraphEntryType graph where
 -- | Extract Exit type from a graph record's Generic representation.
 --
 -- @
--- GraphExitType MyGraph = Output  -- if exit :: mode :- Exit Output
+-- GraphExitType MyGraph = Output  -- if exit :: mode :- ExitNode Output
 -- @
 --
 -- Produces a helpful type error if no Exit is found.
@@ -148,15 +148,15 @@ type GraphExitType :: (Type -> Type) -> Type
 type family GraphExitType graph where
   GraphExitType graph = ExtractExit (Rep (graph AsGraph))
 
--- | Extract Entry type from Generic representation.
+-- | Extract EntryNode type from Generic representation.
 --
--- Traverses the representation looking for @Entry a@ field types.
+-- Traverses the representation looking for @EntryNode a@ field types.
 -- Returns 'EntryNotFound' sentinel if not found.
 type ExtractEntry :: (Type -> Type) -> Type
 type family ExtractEntry f where
   ExtractEntry (M1 G.D _ f) = ExtractEntry f
   ExtractEntry (M1 G.C _ f) = ExtractEntry f
-  ExtractEntry (M1 G.S _ (K1 _ (Entry a))) = a
+  ExtractEntry (M1 G.S _ (K1 _ (EntryNode a))) = a
   ExtractEntry (M1 G.S _ _) = EntryNotFound
   ExtractEntry (l :*: r) = ChooseEntry (ExtractEntry l) (ExtractEntry r)
   ExtractEntry _ = EntryNotFound
@@ -174,13 +174,13 @@ type family ExtractExit f where
   ExtractExit (l :*: r) = ChooseExit (ExtractExit l) (ExtractExit r)
   ExtractExit _ = ExitNotFound
 
--- | Sentinel for missing Entry - will produce a type error when used.
+-- | Sentinel for missing EntryNode - will produce a type error when used.
 data EntryNotFound
 
 -- | Sentinel for missing Exit - will produce a type error when used.
 data ExitNotFound
 
--- | Choose between Entry candidates (take first non-sentinel).
+-- | Choose between EntryNode candidates (take first non-sentinel).
 type ChooseEntry :: Type -> Type -> Type
 type family ChooseEntry l r where
   ChooseEntry EntryNotFound r = r
@@ -192,16 +192,16 @@ type family ChooseExit l r where
   ChooseExit ExitNotFound r = r
   ChooseExit l _ = l
 
--- | Constraint that validates Entry type was found.
+-- | Constraint that validates EntryNode type was found.
 -- Produces a helpful type error if 'EntryNotFound' sentinel is present.
 type ValidEntry :: Type -> Constraint
 type family ValidEntry t where
   ValidEntry EntryNotFound = TypeError
-    ('Text "GraphCLI: Could not find Entry in graph."
+    ('Text "GraphCLI: Could not find EntryNode in graph."
      ':$$: 'Text ""
-     ':$$: 'Text "Ensure your graph record has an Entry field:"
+     ':$$: 'Text "Ensure your graph record has an EntryNode field:"
      ':$$: 'Text "  data MyGraph mode = MyGraph"
-     ':$$: 'Text "    { entry :: mode :- Entry YourInputType"
+     ':$$: 'Text "    { entry :: mode :- EntryNode YourInputType"
      ':$$: 'Text "    , ..."
      ':$$: 'Text "    }")
   ValidEntry _ = ()
@@ -216,7 +216,7 @@ type family ValidExit t where
      ':$$: 'Text "Ensure your graph record has an Exit field:"
      ':$$: 'Text "  data MyGraph mode = MyGraph"
      ':$$: 'Text "    { ..."
-     ':$$: 'Text "    , exit :: mode :- Exit YourOutputType"
+     ':$$: 'Text "    , exit :: mode :- ExitNode YourOutputType"
      ':$$: 'Text "    }")
   ValidExit _ = ()
 
@@ -506,7 +506,7 @@ runGraphCLIWith desc inputParser interpreter = do
 --
 -- The graph must:
 --
--- * Have @Entry@ and @Exit@ fields (detected via @GraphEntryType@ and @GraphExitType@)
+-- * Have @EntryNode@ and @Exit@ fields (detected via @GraphEntryType@ and @GraphExitType@)
 -- * Have a handler that accepts the entry type via @Needs@ (found via @FindEntryHandler@)
 -- * Use empty effect stack @'[]@ (all handlers must be pure)
 -- * Exit type must have @Show@ and @ToJSON@ instances for output formatting

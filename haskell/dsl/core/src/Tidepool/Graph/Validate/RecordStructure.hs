@@ -6,15 +6,15 @@
 --
 -- @
 -- data MyGraph mode = MyGraph
---   { entry    :: mode :- Entry Message
+--   { entry    :: mode :- EntryNode Message
 --   , classify :: mode :- LLMNode :@ Input Message :@ Schema Intent
---   , exit     :: mode :- Exit Response
+--   , exit     :: mode :- ExitNode Response
 --   }
 -- @
 --
 -- = Validation Rules
 --
--- 1. __Reachability__: Every node must be reachable from Entry
+-- 1. __Reachability__: Every node must be reachable from EntryNode
 -- 2. __Exit Coverage__: Every Logic node must have a path to Exit
 -- 3. __No Dead Gotos__: Goto targets must be able to receive their payload
 --
@@ -53,7 +53,7 @@ import Tidepool.Graph.Types (type (:@), Input, Schema, UsesEffects, Self, Arrive
 import qualified Tidepool.Graph.Types as Types (Exit)
 import Tidepool.Graph.Edges (GetInput, GetSchema)
 import Tidepool.Graph.Goto (Goto)
-import Tidepool.Graph.Generic.Core (GraphMode(..), AsGraph, LLMNode, LogicNode, Entry, Exit)
+import Tidepool.Graph.Generic.Core (GraphMode(..), AsGraph, LLMNode, LogicNode, EntryNode, ExitNode)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- FIELD EXTRACTION TYPE FAMILIES
@@ -87,12 +87,12 @@ type FieldNamesOf graph = FieldNames (Rep (graph AsGraph))
 type FieldsWithNamesOf :: (Type -> Type) -> [(Symbol, Type)]
 type FieldsWithNamesOf graph = FieldsWithNames (Rep (graph AsGraph))
 
--- | Extract Entry type from a graph record.
+-- | Extract EntryNode type from a graph record.
 type GetEntryType :: (Type -> Type) -> Maybe Type
 type family GetEntryType f where
   GetEntryType (M1 D _ f) = GetEntryType f
   GetEntryType (M1 C _ f) = GetEntryType f
-  GetEntryType (M1 S _ (K1 _ (Entry a))) = 'Just a
+  GetEntryType (M1 S _ (K1 _ (EntryNode a))) = 'Just a
   GetEntryType (M1 S _ _) = 'Nothing
   GetEntryType (l :*: r) = OrMaybe (GetEntryType l) (GetEntryType r)
   GetEntryType _ = 'Nothing
@@ -113,11 +113,11 @@ type family OrMaybe a b where
 -- REACHABILITY VALIDATION
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Validates that all nodes in a graph record are reachable from Entry.
+-- | Validates that all nodes in a graph record are reachable from EntryNode.
 --
 -- A node is reachable if:
--- * Its Input type can be satisfied by the Entry type, OR
--- * Its Input type can be satisfied by Entry + Schema outputs of reachable nodes, OR
+-- * Its Input type can be satisfied by the EntryNode type, OR
+-- * Its Input type can be satisfied by EntryNode + Schema outputs of reachable nodes, OR
 -- * It is the target of a Goto from a reachable Logic node
 type AllFieldsReachable :: (Type -> Type) -> Constraint
 type family AllFieldsReachable graph where
@@ -127,7 +127,7 @@ type family AllFieldsReachable graph where
         (FieldsWithNamesOf graph)
         (GetRecordEntryType graph))
 
--- | Get Entry type from a graph record (unwrap Maybe).
+-- | Get EntryNode type from a graph record (unwrap Maybe).
 type GetRecordEntryType :: (Type -> Type) -> Type
 type family GetRecordEntryType graph where
   GetRecordEntryType graph = FromJust (GetEntryType (Rep (graph AsGraph)))
@@ -136,7 +136,7 @@ type family GetRecordEntryType graph where
 type FromJust :: Maybe k -> k
 type family FromJust m where
   FromJust ('Just x) = x
-  FromJust 'Nothing = TypeError ('Text "Internal error: Entry type not found")
+  FromJust 'Nothing = TypeError ('Text "Internal error: EntryNode type not found")
 
 -- | Check if unreachable list is empty.
 type CheckAllReachableFields :: [Symbol] -> Constraint
@@ -152,7 +152,7 @@ type family FindUnreachableFields fields entryType where
       (CollectNodeFieldNames fields)
       (ComputeReachableFields fields entryType (LengthPairs fields))
 
--- | Collect field names that are nodes (not Entry/Exit).
+-- | Collect field names that are nodes (not EntryNode/Exit).
 type CollectNodeFieldNames :: [(Symbol, Type)] -> [Symbol]
 type family CollectNodeFieldNames fields where
   CollectNodeFieldNames '[] = '[]
@@ -493,10 +493,10 @@ type family CheckGotoWithTarget srcName targetName payload targetInput available
 type UnreachableFieldError :: Symbol -> Constraint
 type UnreachableFieldError name = TypeError
   ('Text "Graph validation failed: unreachable node"
-   ':$$: 'Text "Field '" ':<>: 'Text name ':<>: 'Text "' cannot be reached from Entry."
+   ':$$: 'Text "Field '" ':<>: 'Text name ':<>: 'Text "' cannot be reached from EntryNode."
    ':$$: 'Text ""
    ':$$: 'Text "A node is reachable if:"
-   ':$$: 'Text "  - Its Input type matches the Entry type"
+   ':$$: 'Text "  - Its Input type matches the EntryNode type"
    ':$$: 'Text "  - Its Input type matches a Schema output from a reachable node"
    ':$$: 'Text "  - It is the target of a Goto from a reachable Logic node"
    ':$$: 'Text ""

@@ -9,7 +9,7 @@
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
 
--- | Runtime reification of MCP tools from graph Entry points.
+-- | Runtime reification of MCP tools from graph EntryNode points.
 --
 -- Graphs with MCPExport-annotated entries can be exposed as MCP servers.
 -- This module provides the machinery to extract tool definitions at runtime.
@@ -38,10 +38,10 @@ import GHC.TypeLits (Symbol, KnownSymbol, symbolVal)
 
 import Tidepool.Schema (HasJSONSchema(..), schemaToValue)
 import Tidepool.Graph.Types (type (:@), MCPExport, ToolMeta)
-import Tidepool.Graph.Generic.Core (AsGraph, Entry, type (:-))
+import Tidepool.Graph.Generic.Core (AsGraph, EntryNode, type (:-))
 import Tidepool.Graph.Edges (HasMCPExport, GetToolMeta)
 
--- | An MCP tool definition extracted from a graph Entry.
+-- | An MCP tool definition extracted from a graph EntryNode.
 data MCPToolDef = MCPToolDef
   { mtdName :: Text
     -- ^ Tool name (snake_case, from ToolMeta or field name)
@@ -131,17 +131,17 @@ instance ( KnownSymbol name
 -- HELPER TYPE FAMILIES AND CLASSES
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Extract the input type from an Entry node definition.
+-- | Extract the input type from an EntryNode node definition.
 class ExtractEntryInput (node :: Type) where
   type EntryInputType node :: Type
 
--- Base case: strip annotations to find Entry
+-- Base case: strip annotations to find EntryNode
 instance {-# OVERLAPPABLE #-} ExtractEntryInput inner => ExtractEntryInput (inner :@ ann) where
   type EntryInputType (inner :@ ann) = EntryInputType inner
 
--- Entry with input type (for AsGraph mode, this is Entry t directly)
-instance ExtractEntryInput (Entry t) where
-  type EntryInputType (Entry t) = t
+-- EntryNode with input type (for AsGraph mode, this is EntryNode t directly)
+instance ExtractEntryInput (EntryNode t) where
+  type EntryInputType (EntryNode t) = t
 
 class ExtractToolMeta (name :: Symbol) (node :: Type) where
   getToolName :: Text

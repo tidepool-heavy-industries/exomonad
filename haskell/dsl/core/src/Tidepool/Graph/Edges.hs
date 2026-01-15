@@ -20,7 +20,7 @@ module Tidepool.Graph.Edges
   , GetTools
   , GetMemory
 
-    -- * Entry/Exit Extraction
+    -- * EntryNode/Exit Extraction
   , GetEntries
   , GetExits
   , HasEntries
@@ -33,10 +33,6 @@ module Tidepool.Graph.Edges
     -- * ClaudeCode Extraction
   , GetClaudeCode
   , HasClaudeCode
-
-    -- * Graph Entry/Exit Extraction
-  , GetGraphEntry
-  , GetGraphExit
 
     -- * Goto Extraction
   , GetGotoTargets
@@ -60,25 +56,25 @@ module Tidepool.Graph.Edges
     -- * MCP Export Detection
   , HasMCPExport
   , GetToolMeta
+  , GetMCPEntries
   ) where
 
 import Data.Kind (Type)
 import GHC.Generics (Rep, M1, D, C, S, K1, (:*:), type Meta(..))
 import GHC.TypeLits (Symbol, TypeError, ErrorMessage(..))
 
-import Tidepool.Graph.Generic.Core (AsGraph, Entry, Exit, GraphMode(..))
+import Tidepool.Graph.Generic.Core (AsGraph, EntryNode, ExitNode, GraphMode(..))
 import Tidepool.Graph.Types
   ( type (:@), type (:&)
   , Input, Schema, System, Template, Vision, Tools, UsesEffects, Memory
+  , MCPExport, ToolMeta
   , Spawn, Barrier, Awaits, Arrive
   , Global, Backend
   , ClaudeCode, ModelChoice
-  , Exit, Self
-  , Route(..), Routes
+  , Self
   , Entries, Exits
-  , MCPExport
-  , ToolMeta
   )
+import qualified Tidepool.Graph.Types as Types
 import Tidepool.Graph.Goto (Goto, To)
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -288,7 +284,7 @@ type family HasExits node where
 -- | Extract all Goto targets from an effect list.
 --
 -- Returns a list of (target, payload) type pairs for named node targets.
--- 'Goto Exit' transitions are excluded (handled separately by 'HasGotoExit').
+-- 'Goto Types.Exit' transitions are excluded (handled separately by 'HasGotoExit').
 --
 -- = Pattern Matching Strategy
 --
@@ -296,10 +292,10 @@ type family HasExits node where
 --
 -- 1. @Goto (name :: Symbol) payload@ -- Named node targets
 --
---    - The @:: Symbol@ annotation disambiguates from @Goto Exit@
+--    - The @:: Symbol@ annotation disambiguates from @Goto Types.Exit@
 --    - Yields @'(name, payload)@ pair
 --
--- 2. @Goto Exit payload@ -- Exit transitions (skipped)
+-- 2. @Goto Types.Exit payload@ -- Exit transitions (skipped)
 --
 --    - Not included in named targets
 --    - See 'GetGotoExitPayload' for exit handling
@@ -311,7 +307,7 @@ type family HasExits node where
 -- = Example
 --
 -- @
--- GetGotoTargets '[State S, Goto \"foo\" A, Log, Goto \"bar\" B, Goto Exit R]
+-- GetGotoTargets '[State S, Goto \"foo\" A, Log, Goto \"bar\" B, Goto Types.Exit R]
 --   = '[ '(\"foo\", A), '(\"bar\", B) ]
 --   -- Exit is excluded, non-Goto effects are skipped
 -- @
@@ -326,7 +322,7 @@ type family GetGotoTargets effs where
   GetGotoTargets '[] = '[]
   GetGotoTargets (Goto (name :: Symbol) payload ': rest) =
     '(name, payload) ': GetGotoTargets rest
-  GetGotoTargets (Goto Exit payload ': rest) =
+  GetGotoTargets (Goto Types.Exit payload ': rest) =
     -- Exit is handled specially, not included in named targets
     GetGotoTargets rest
   GetGotoTargets (_ ': rest) = GetGotoTargets rest
@@ -334,16 +330,16 @@ type family GetGotoTargets effs where
 -- | Convert Goto effects to To markers for GotoChoice.
 --
 -- @
--- GotoEffectsToTargets '[State S, Goto "foo" A, Goto Exit B, Goto Self C, Arrive "hJoin" R]
---   = '[To "foo" A, To Exit B, To Self C, To (Arrive "hJoin") R]
+-- GotoEffectsToTargets '[State S, Goto "foo" A, Goto Types.Exit B, Goto Self C, Arrive "hJoin" R]
+--   = '[To "foo" A, To Types.Exit B, To Self C, To (Arrive "hJoin") R]
 -- @
 type GotoEffectsToTargets :: forall k. [k] -> [Type]
 type family GotoEffectsToTargets effs where
   GotoEffectsToTargets '[] = '[]
   GotoEffectsToTargets (Goto (name :: Symbol) payload ': rest) =
     To name payload ': GotoEffectsToTargets rest
-  GotoEffectsToTargets (Goto Exit payload ': rest) =
-    To Exit payload ': GotoEffectsToTargets rest
+  GotoEffectsToTargets (Goto Types.Exit payload ': rest) =
+    To Types.Exit payload ': GotoEffectsToTargets rest
   GotoEffectsToTargets (Goto Self payload ': rest) =
     To Self payload ': GotoEffectsToTargets rest
   GotoEffectsToTargets (Arrive barrierName result ': rest) =
@@ -355,7 +351,7 @@ type family GotoEffectsToTargets effs where
 -- When you have a type alias for your graph's UsesEffects:
 --
 -- @
--- type MyEffects = '[Goto "process" Data, Goto "fallback" Data, Goto Exit Result]
+-- type MyEffects = '[Goto "process" Data, Goto "fallback" Data, Goto Types.Exit Result]
 -- @
 --
 -- You can derive the handler return type without duplicating the list:
@@ -394,18 +390,18 @@ type family ExtractGotoPayload eff where
   ExtractGotoPayload (Goto _ payload) = 'Just payload
   ExtractGotoPayload _ = 'Nothing
 
--- | Check if effect list contains Goto Exit.
+-- | Check if effect list contains Goto Types.Exit.
 type HasGotoExit :: forall k. [k] -> Bool
 type family HasGotoExit effs where
   HasGotoExit '[] = 'False
-  HasGotoExit (Goto Exit _ ': _) = 'True
+  HasGotoExit (Goto Types.Exit _ ': _) = 'True
   HasGotoExit (_ ': rest) = HasGotoExit rest
 
 -- | Get the Exit payload type if present.
 type GetGotoExitPayload :: forall k. [k] -> Maybe Type
 type family GetGotoExitPayload effs where
   GetGotoExitPayload '[] = 'Nothing
-  GetGotoExitPayload (Goto Exit payload ': _) = 'Just payload
+  GetGotoExitPayload (Goto Types.Exit payload ': _) = 'Just payload
   GetGotoExitPayload (_ ': rest) = GetGotoExitPayload rest
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -503,68 +499,6 @@ type family HasClaudeCode node where
   HasClaudeCode _ = 'False
 
 -- ════════════════════════════════════════════════════════════════════════════
--- GRAPH ENTRY/EXIT EXTRACTION
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Extract the Entry type from a graph definition.
---
--- Given a graph type constructor, returns the input type of its Entry node.
---
--- @
--- GetGraphEntry SemanticScoutGraph = SemanticOrder
--- @
-type GetGraphEntry :: (Type -> Type) -> Type
-type family GetGraphEntry graph where
-  GetGraphEntry g = FindEntryType (Rep (g AsGraph))
-
--- | Extract the Exit type from a graph definition.
---
--- Given a graph type constructor, returns the output type of its Exit node.
---
--- @
--- GetGraphExit SemanticScoutGraph = CompressedIntel
--- @
-type GetGraphExit :: (Type -> Type) -> Type
-type family GetGraphExit graph where
-  GetGraphExit g = FindExitType (Rep (g AsGraph))
-
--- | Walk Generic Rep to find Entry type.
-type FindEntryType :: (Type -> Type) -> Type
-type family FindEntryType rep where
-  -- Unwrap metadata layers
-  FindEntryType (M1 D _ inner) = FindEntryType inner
-  FindEntryType (M1 C _ inner) = FindEntryType inner
-  -- Found Entry node (with or without annotations)
-  FindEntryType (M1 S _ (K1 _ (_ :- Entry t))) = t
-  FindEntryType (M1 S _ (K1 _ (_ :- Entry t :@ _))) = t
-  FindEntryType (M1 S _ (K1 _ (_ :- Entry t :@ _ :@ _))) = t
-  -- Skip non-Entry fields
-  FindEntryType (M1 S _ _) = TypeError ('Text "No Entry node found")
-  -- Search product (Entry typically first, but check both)
-  FindEntryType (left :*: right) = FindEntryTypeInProduct (FindEntryType left) right
-
--- | Helper for product search - if left found Entry, use it; else check right.
-type FindEntryTypeInProduct :: Type -> (Type -> Type) -> Type
-type family FindEntryTypeInProduct leftResult right where
-  FindEntryTypeInProduct (TypeError _) right = FindEntryType right
-  FindEntryTypeInProduct found _ = found
-
--- | Walk Generic Rep to find Exit type.
-type FindExitType :: (Type -> Type) -> Type
-type family FindExitType rep where
-  FindExitType (M1 D _ inner) = FindExitType inner
-  FindExitType (M1 C _ inner) = FindExitType inner
-  FindExitType (M1 S _ (K1 _ (_ :- Exit t))) = t
-  FindExitType (M1 S _ (K1 _ (_ :- Exit t :@ _))) = t
-  FindExitType (M1 S _ _) = TypeError ('Text "No Exit node found")
-  FindExitType (left :*: right) = FindExitTypeInProduct (FindExitType left) right
-
-type FindExitTypeInProduct :: Type -> (Type -> Type) -> Type
-type family FindExitTypeInProduct leftResult right where
-  FindExitTypeInProduct (TypeError _) right = FindExitType right
-  FindExitTypeInProduct found _ = found
-
--- ════════════════════════════════════════════════════════════════════════════
 -- FORK/BARRIER EXTRACTION
 -- ════════════════════════════════════════════════════════════════════════════
 
@@ -608,7 +542,7 @@ type family GetAwaits node where
 --
 -- @
 -- HasArrive '[Goto Self Task, Arrive "hJoin" Result] = 'True
--- HasArrive '[Goto Self Task, Goto Exit Result] = 'False
+-- HasArrive '[Goto Self Task, Goto Types.Exit Result] = 'False
 -- @
 type HasArrive :: forall k. [k] -> Bool
 type family HasArrive effs where
@@ -620,13 +554,94 @@ type family HasArrive effs where
 --
 -- @
 -- GetArriveType '[Goto Self Task, Arrive "hJoin" Result] = 'Just Result
--- GetArriveType '[Goto Self Task, Goto Exit Result] = 'Nothing
+-- GetArriveType '[Goto Self Task, Goto Types.Exit Result] = 'Nothing
 -- @
 type GetArriveType :: forall k. [k] -> Maybe Type
 type family GetArriveType effs where
   GetArriveType '[] = 'Nothing
   GetArriveType (Arrive _ result ': _) = 'Just result
   GetArriveType (_ ': rest) = GetArriveType rest
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- MCP EXPORT DETECTION
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Check if a node definition has MCPExport annotation.
+--
+-- MCPExport can appear at any position in the annotation chain:
+--
+-- @
+-- HasMCPExport (EntryNode SearchInput :@ MCPExport) = 'True
+-- HasMCPExport (EntryNode SearchInput :@ MCPExport :@ ToolMeta '("search", "desc")) = 'True
+-- HasMCPExport (EntryNode SearchInput :@ ToolMeta '("search", "desc") :@ MCPExport) = 'True
+-- HasMCPExport (EntryNode SearchInput) = 'False
+-- @
+--
+-- The type family recursively strips annotations to handle all orderings.
+type HasMCPExport :: Type -> Bool
+type family HasMCPExport node where
+  -- Direct match: MCPExport is the annotation
+  HasMCPExport (node :@ MCPExport) = 'True
+  -- MCPExport with one more annotation after it
+  HasMCPExport (node :@ MCPExport :@ _) = 'True
+  -- Recursively strip other annotations
+  HasMCPExport (node :@ _) = HasMCPExport node
+  -- Base case: no MCPExport found
+  HasMCPExport _ = 'False
+
+-- | Extract ToolMeta annotation if present.
+--
+-- Returns the type-level tuple (name, description) from the ToolMeta annotation.
+--
+-- @
+-- GetToolMeta (EntryNode X :@ MCPExport :@ ToolMeta '("name", "desc"))
+--   = 'Just '("name", "desc")
+--
+-- GetToolMeta (EntryNode X :@ ToolMeta '("name", "desc") :@ MCPExport)
+--   = 'Just '("name", "desc")
+--
+-- GetToolMeta (EntryNode X :@ MCPExport)
+--   = 'Nothing
+-- @
+type GetToolMeta :: Type -> Maybe (Symbol, Symbol)
+type family GetToolMeta node where
+  -- Direct match: ToolMeta is the annotation
+  GetToolMeta (node :@ ToolMeta meta) = 'Just meta
+  -- Recursively strip other annotations
+  GetToolMeta (node :@ _) = GetToolMeta node
+  -- Base case: no ToolMeta found
+  GetToolMeta _ = 'Nothing
+
+-- | Collect all MCP-exported EntryNode field names from a graph.
+--
+-- Returns a type-level list of (fieldName, inputType) tuples for EntryNode nodes
+-- that have MCPExport annotation. Used by ReifyMCPTools to generate tool
+-- definitions.
+--
+-- NOTE: Full implementation requires a typeclass-based approach due to GHC's
+-- limitation on pattern matching type family applications. The `:-` mode operator
+-- is a type family, and type families cannot pattern match on applications of
+-- other type families. This will be implemented as a ReifyMCPTools typeclass
+-- in Stream B (05-mcp-reify.md).
+--
+-- For now, this type family provides the signature that downstream code can
+-- reference. The actual collection happens at runtime via Generic reification.
+--
+-- @
+-- data MyGraph mode = MyGraph
+--   { gEntry  :: mode :- EntryNode Input
+--   , gSearch :: mode :- EntryNode SearchInput :@ MCPExport :@ ToolMeta '("search", "desc")
+--   , gCalc   :: mode :- EntryNode CalcInput :@ MCPExport
+--   , gExit   :: mode :- ExitNode Output
+--   }
+--
+-- -- Desired (implemented via typeclass in Stream B):
+-- GetMCPEntries MyGraph = '[ '("gSearch", SearchInput), '("gCalc", CalcInput) ]
+-- @
+type GetMCPEntries :: (Type -> Type) -> [(Symbol, Type)]
+type family GetMCPEntries graph where
+  GetMCPEntries g = '[]  -- Placeholder: actual implementation in Stream B via typeclass
+
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TYPE-LEVEL UTILITIES
@@ -658,36 +673,3 @@ type family Elem x xs where
   Elem x (x ': _) = 'True
   Elem x (_ ': rest) = Elem x rest
 
--- ════════════════════════════════════════════════════════════════════════════
--- MCP EXPORT DETECTION
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Check if a node definition has MCPExport annotation.
---
--- @
--- HasMCPExport (Entry SearchInput :@ MCPExport) = 'True
--- HasMCPExport (Entry SearchInput) = 'False
--- @
-type HasMCPExport :: Type -> Bool
-type family HasMCPExport node where
-  HasMCPExport (node :@ MCPExport) = 'True
-  HasMCPExport (node :@ MCPExport :@ _) = 'True
-  HasMCPExport (node :@ _ :@ MCPExport) = 'True
-  HasMCPExport (node :@ _ :@ MCPExport :@ _) = 'True
-  HasMCPExport (node :@ _ :@ _ :@ MCPExport) = 'True
-  HasMCPExport (node :@ _) = HasMCPExport node
-  HasMCPExport _ = 'False
-
--- | Extract ToolMeta annotation if present.
---
--- @
--- GetToolMeta (Entry X :@ MCPExport :@ ToolMeta '("name", "desc"))
---   = 'Just '("name", "desc")
--- @
-type GetToolMeta :: Type -> Maybe (Symbol, Symbol)
-type family GetToolMeta node where
-  GetToolMeta (node :@ ToolMeta meta) = 'Just meta
-  GetToolMeta (node :@ _ :@ ToolMeta meta) = 'Just meta
-  GetToolMeta (node :@ _ :@ _ :@ ToolMeta meta) = 'Just meta
-  GetToolMeta (node :@ _) = GetToolMeta node
-  GetToolMeta _ = 'Nothing
