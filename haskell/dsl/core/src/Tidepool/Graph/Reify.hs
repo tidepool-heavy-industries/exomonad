@@ -86,7 +86,7 @@ import GHC.Generics (Generic(..), K1(..), M1(..), (:*:)(..), Meta(..), S, D, C)
 import GHC.TypeLits (Symbol, KnownSymbol, symbolVal)
 import qualified Data.Map.Strict as Map
 
-import Tidepool.Graph.Types (NodeKind(..), type (:@), ModelChoice(..))
+import Tidepool.Graph.Types (NodeKind(..), type (:@), ModelChoice(..), Tool)
 import Tidepool.Graph.Tool (ToolInfo(..))
 import Tidepool.Graph.Generic.Core (Entry, Exit, LLMNode, LogicNode, ForkNode, BarrierNode, AsGraph)
 import Tidepool.Graph.Edges
@@ -305,6 +305,74 @@ instance ReifyTypeList '[] where
 
 instance (Typeable t, ReifyTypeList ts) => ReifyTypeList (t ': ts) where
   reifyTypeList _ = typeRep (Proxy @t) : reifyTypeList (Proxy @ts)
+
+-- | Reify tool record fields to runtime [TypeRep] of tool input types.
+--
+-- This typeclass traverses Generic representation of tool records
+-- (e.g., WorkTools mode) and extracts input types from Tool annotations.
+--
+-- Example:
+-- @
+-- data WorkTools mode = WorkTools
+--   { search :: mode :- Tool SearchQuery SearchResult
+--   , calc   :: mode :- Tool CalculatorInput CalculatorResult
+--   }
+--   deriving Generic
+--
+-- reifyToolRecord (Proxy @WorkTools) == [TypeRep @SearchQuery, TypeRep @CalculatorInput]
+-- @
+type ReifyToolRecord :: (Type -> Type) -> Constraint
+class ReifyToolRecord (record :: Type -> Type) where
+  reifyToolInputs :: Proxy record -> [TypeRep]
+
+-- Default instance: traverse Generic representation
+instance (Generic (record AsGraph), GReifyToolFields (Rep (record AsGraph)))
+      => ReifyToolRecord record where
+  reifyToolInputs _ = gReifyToolFields (Proxy @(Rep (record AsGraph)))
+
+-- | Generic traversal for tool record fields.
+--
+-- Mirrors GReifyFields pattern but extracts tool input types instead of nodes.
+class GReifyToolFields (f :: Type -> Type) where
+  gReifyToolFields :: Proxy f -> [TypeRep]
+
+-- Datatype metadata: pass through
+instance GReifyToolFields f => GReifyToolFields (M1 D meta f) where
+  gReifyToolFields _ = gReifyToolFields (Proxy @f)
+
+-- Constructor metadata: pass through
+instance GReifyToolFields f => GReifyToolFields (M1 C meta f) where
+  gReifyToolFields _ = gReifyToolFields (Proxy @f)
+
+-- Product: combine left and right
+instance (GReifyToolFields l, GReifyToolFields r) => GReifyToolFields (l :*: r) where
+  gReifyToolFields _ = gReifyToolFields (Proxy @l) ++ gReifyToolFields (Proxy @r)
+
+-- Named field with Tool annotation: extract input type
+instance (KnownSymbol name, Typeable input, Typeable result)
+      => GReifyToolFields (M1 S ('MetaSel ('Just name) su ss ds) (K1 i (Tool input result))) where
+  gReifyToolFields _ = [typeRep (Proxy @input)]
+
+-- Unnamed field or non-Tool field: skip
+instance GReifyToolFields (M1 S ('MetaSel 'Nothing su ss ds) f) where
+  gReifyToolFields _ = []
+
+instance GReifyToolFields (K1 i c) where
+  gReifyToolFields _ = []
+
+-- | Reify Maybe tool record to runtime [TypeRep].
+--
+-- Handles GetTools result which is Maybe (Type -> Type).
+-- If Just, traverses the record. If Nothing, returns empty list.
+type ReifyMaybeToolRecord :: Maybe (Type -> Type) -> Constraint
+class ReifyMaybeToolRecord (mrecord :: Maybe (Type -> Type)) where
+  reifyMaybeToolInputs :: Proxy mrecord -> [TypeRep]
+
+instance ReifyMaybeToolRecord 'Nothing where
+  reifyMaybeToolInputs _ = []
+
+instance ReifyToolRecord record => ReifyMaybeToolRecord ('Just record) where
+  reifyMaybeToolInputs _ = reifyToolInputs (Proxy @record)
 
 -- | Reify a type-level Maybe Type to runtime Maybe TypeRep.
 type ReifyMaybeType :: Maybe Type -> Constraint
@@ -685,9 +753,7 @@ instance ( ReifyMaybeType (GetInput def)
          , ReifyMemoryInfo (GetMemory def)
          , ReifyClaudeCodeInfo (GetClaudeCode def)
          , ReifyBool (GetVision def)
-         -- Tools are now records (Type -> Type), not type-level lists [Type]
-         -- ReifyTypeList expects [Type], so we can't enumerate tools anymore.
-         -- niTools field is unused (backwards compat only), niToolInfos is V2.
+         , ReifyMaybeToolRecord (GetTools def)
          ) => ReifyAnnotatedNode def 'True 'False where
   reifyAnnotatedNode _ _ _ pName _ =
     let claudeCodeInfo = reifyClaudeCodeInfo (Proxy @(GetClaudeCode def))
@@ -702,7 +768,7 @@ instance ( ReifyMaybeType (GetInput def)
       , niGotoTargets = []  -- LLM nodes don't have Goto
       , niHasGotoExit = False
       , niHasVision = reifyBool (Proxy @(GetVision def))
-      , niTools = []  -- Tools are now records, not type-level lists
+      , niTools = reifyMaybeToolInputs (Proxy @(GetTools def))
       , niToolInfos = []  -- Would require ToolDef instances
       , niSystem = reifyTemplateInfo (Proxy @(GetSystem def))
       , niTemplate = reifyTemplateInfo (Proxy @(GetTemplate def))
