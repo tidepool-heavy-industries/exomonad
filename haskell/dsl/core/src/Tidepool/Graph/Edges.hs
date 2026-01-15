@@ -55,8 +55,8 @@ module Tidepool.Graph.Edges
 
     -- * MCP Export Detection
   , HasMCPExport
-  , GetToolDef
-  , HasToolDef
+  , GetMCPToolDef
+  , HasMCPToolDef
   , GetMCPEntries
   ) where
 
@@ -68,7 +68,7 @@ import Tidepool.Graph.Generic.Core (AsGraph, EntryNode, ExitNode, GraphMode(..))
 import Tidepool.Graph.Types
   ( type (:@), type (:&)
   , Input, Schema, System, Template, Vision, Tools, UsesEffects, Memory
-  , MCPExport, ToolDef
+  , MCPExport, MCPToolDef
   , Spawn, Barrier, Awaits, Arrive
   , Global, Backend
   , ClaudeCode, ModelChoice
@@ -592,45 +592,45 @@ type family HasMCPExport node where
 
 -- | Extract ToolDef annotation if present.
 --
--- Returns the type-level tuple (name, description) from the ToolDef annotation.
+-- Returns the type-level tuple (name, description) from the MCPToolDef annotation.
 -- Works with both EntryNode and LLMNode.
 --
 -- @
--- GetToolDef (EntryNode X :@ MCPExport :@ ToolDef '("name", "desc"))
+-- GetMCPToolDef (EntryNode X :@ MCPExport :@ MCPToolDef '("name", "desc"))
 --   = 'Just '("name", "desc")
 --
--- GetToolDef (LLMNode :@ Input Query :@ ToolDef '("name", "desc"))
+-- GetMCPToolDef (LLMNode :@ Input Query :@ MCPToolDef '("name", "desc"))
 --   = 'Just '("name", "desc")
 --
--- GetToolDef (EntryNode X :@ MCPExport)
+-- GetMCPToolDef (EntryNode X :@ MCPExport)
 --   = 'Nothing
 -- @
-type GetToolDef :: Type -> Maybe (Symbol, Symbol)
-type family GetToolDef node where
-  -- Direct match: ToolDef is the annotation
-  GetToolDef (node :@ ToolDef meta) = 'Just meta
+type GetMCPToolDef :: Type -> Maybe (Symbol, Symbol)
+type family GetMCPToolDef node where
+  -- Direct match: MCPToolDef is the annotation
+  GetMCPToolDef (node :@ MCPToolDef meta) = 'Just meta
   -- Recursively strip other annotations
-  GetToolDef (node :@ _) = GetToolDef node
-  -- Base case: no ToolDef found
-  GetToolDef _ = 'Nothing
+  GetMCPToolDef (node :@ _) = GetMCPToolDef node
+  -- Base case: no MCPToolDef found
+  GetMCPToolDef _ = 'Nothing
 
--- | Check if node has ToolDef annotation.
+-- | Check if node has MCPToolDef annotation.
 --
--- Helper predicate that returns True if the node has a ToolDef annotation,
+-- Helper predicate that returns True if the node has a MCPToolDef annotation,
 -- False otherwise.
 --
 -- @
--- HasToolDef (LLMNode :@ Input Query :@ Schema Response :@ ToolDef '("scout", "desc"))
+-- HasMCPToolDef (LLMNode :@ Input Query :@ Schema Response :@ MCPToolDef '("scout", "desc"))
 --   = 'True
 --
--- HasToolDef (LLMNode :@ Input Query :@ Schema Response)
+-- HasMCPToolDef (LLMNode :@ Input Query :@ Schema Response)
 --   = 'False
 -- @
-type HasToolDef :: Type -> Bool
-type family HasToolDef node where
-  HasToolDef (node :@ ToolDef _) = 'True
-  HasToolDef (node :@ _) = HasToolDef node
-  HasToolDef _ = 'False
+type HasMCPToolDef :: Type -> Bool
+type family HasMCPToolDef node where
+  HasMCPToolDef (node :@ MCPToolDef _) = 'True
+  HasMCPToolDef (node :@ _) = HasMCPToolDef node
+  HasMCPToolDef _ = 'False
 
 -- | Collect all MCP-exported EntryNode field names from a graph.
 --

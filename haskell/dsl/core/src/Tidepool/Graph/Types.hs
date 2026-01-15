@@ -68,7 +68,7 @@ module Tidepool.Graph.Types
 
     -- * MCP Export Annotations
   , MCPExport
-  , ToolDef
+  , MCPToolDef
 
     -- * Special Goto Targets
   , Exit
@@ -1087,17 +1087,17 @@ data FunctionGemma
 -- @
 -- data MyGraph mode = MyGraph
 --   { search :: mode :- EntryNode SearchInput :@ MCPExport
---       :@ ToolDef '("search", "Search the codebase")
+--       :@ MCPToolDef '("search", "Search the codebase")
 --   }
 -- @
 --
--- Use with 'ToolDef' to provide tool name and description.
+-- Use with 'MCPToolDef' to provide tool name and description.
 data MCPExport
 
 -- | Provide name and description for an MCP-exported node (EntryNode or LLMNode).
 --
 -- @
--- :@ ToolDef '("tool_name", "Tool description for LLM")
+-- :@ MCPToolDef '("tool_name", "Tool description for LLM")
 -- @
 --
 -- The name should be snake_case. The description appears in the MCP
@@ -1106,8 +1106,8 @@ data MCPExport
 -- Can be used with:
 -- * EntryNode + MCPExport - exposes graph entry as MCP tool
 -- * LLMNode - exposes LLM node as MCP tool
-type ToolDef :: (Symbol, Symbol) -> Type
-data ToolDef nameAndDesc
+type MCPToolDef :: (Symbol, Symbol) -> Type
+data MCPToolDef nameAndDesc
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- SPECIAL GOTO TARGET

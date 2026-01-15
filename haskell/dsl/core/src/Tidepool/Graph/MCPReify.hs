@@ -16,11 +16,11 @@
 --
 -- @
 -- tools <- reifyMCPTools (Proxy \@SemanticScoutGraph)
--- -- [MCPToolDef "map_influence" "Find all types..." {...}, ...]
+-- -- [MCPToolInfo "map_influence" "Find all types..." {...}, ...]
 -- @
 module Tidepool.Graph.MCPReify
   ( -- * Tool Definition
-    MCPToolDef(..)
+    MCPToolInfo(..)
 
     -- * Reification
   , ReifyMCPTools(..)
@@ -37,16 +37,16 @@ import GHC.Generics
 import GHC.TypeLits (Symbol, KnownSymbol, symbolVal)
 
 import Tidepool.Schema (HasJSONSchema(..), schemaToValue)
-import Tidepool.Graph.Types (type (:@), MCPExport, ToolDef)
+import Tidepool.Graph.Types (type (:@), MCPExport, MCPToolDef)
 import Tidepool.Graph.Generic.Core (AsGraph, EntryNode, type (:-))
-import Tidepool.Graph.Edges (HasMCPExport, GetToolDef)
+import Tidepool.Graph.Edges (HasMCPExport, GetMCPToolDef)
 
 -- | An MCP tool definition extracted from a graph EntryNode.
-data MCPToolDef = MCPToolDef
+data MCPToolInfo = MCPToolInfo
   { mtdName :: Text
-    -- ^ Tool name (snake_case, from ToolDef or field name)
+    -- ^ Tool name (snake_case, from MCPToolDef or field name)
   , mtdDescription :: Text
-    -- ^ Tool description (from ToolDef)
+    -- ^ Tool description (from MCPToolDef)
   , mtdInputSchema :: Value
     -- ^ JSON Schema for tool parameters (from HasJSONSchema)
   , mtdEntryName :: Text
@@ -63,7 +63,7 @@ data MCPToolDef = MCPToolDef
 -- tools <- reifyMCPTools (Proxy \@MyGraph)
 -- @
 class ReifyMCPTools (graph :: Type -> Type) where
-  reifyMCPTools :: Proxy graph -> [MCPToolDef]
+  reifyMCPTools :: Proxy graph -> [MCPToolInfo]
 
 instance (Generic (graph AsGraph), GReifyMCPEntries (Rep (graph AsGraph)))
       => ReifyMCPTools graph where
@@ -73,9 +73,9 @@ instance (Generic (graph AsGraph), GReifyMCPEntries (Rep (graph AsGraph)))
 -- GENERIC TRAVERSAL
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Walk Generic Rep collecting MCPToolDefs.
+-- | Walk Generic Rep collecting MCPToolInfo.
 class GReifyMCPEntries (rep :: Type -> Type) where
-  gReifyMCPEntries :: Proxy rep -> [MCPToolDef]
+  gReifyMCPEntries :: Proxy rep -> [MCPToolInfo]
 
 -- Unwrap metadata
 instance GReifyMCPEntries inner => GReifyMCPEntries (M1 D meta inner) where
@@ -107,7 +107,7 @@ instance ( KnownSymbol name
 
 -- | Conditionally reify a field based on MCPExport presence.
 class ReifyMCPField (hasMCP :: Bool) (name :: Symbol) (fieldType :: Type) where
-  reifyMCPField :: Proxy fieldType -> [MCPToolDef]
+  reifyMCPField :: Proxy fieldType -> [MCPToolInfo]
 
 -- Not MCP-exported: skip
 instance ReifyMCPField 'False name fieldType where
@@ -120,7 +120,7 @@ instance ( KnownSymbol name
          , ExtractToolMeta name fieldType
          )
       => ReifyMCPField 'True name fieldType where
-  reifyMCPField _ = [MCPToolDef
+  reifyMCPField _ = [MCPToolInfo
     { mtdName = getToolName @name @fieldType
     , mtdDescription = getToolDescription @name @fieldType
     , mtdInputSchema = schemaToValue (jsonSchema @(EntryInputType fieldType))
@@ -152,9 +152,9 @@ instance {-# OVERLAPPABLE #-} KnownSymbol name => ExtractToolMeta name node wher
   getToolName = T.pack (camelToSnake (symbolVal (Proxy @name)))
   getToolDescription = "No description provided"
 
--- With ToolDef: use provided name/description
+-- With MCPToolDef: use provided name/description
 instance (KnownSymbol toolName, KnownSymbol toolDesc)
-      => ExtractToolMeta name (node :@ ToolDef '(toolName, toolDesc)) where
+      => ExtractToolMeta name (node :@ MCPToolDef '(toolName, toolDesc)) where
   getToolName = T.pack (symbolVal (Proxy @toolName))
   getToolDescription = T.pack (symbolVal (Proxy @toolDesc))
 

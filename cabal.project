@@ -23,6 +23,9 @@ packages:
     haskell/effects/devlog-interpreter
     haskell/effects/mcp-server
 
+    -- Agent examples
+    haskell/agents/semantic-scout
+
     -- Effect types (standalone)
     haskell/effects/habitica
 
