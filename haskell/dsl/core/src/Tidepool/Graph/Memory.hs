@@ -92,13 +92,12 @@ module Tidepool.Graph.Memory
   , evalMemoryScoped
   ) where
 
-import Data.Aeson (ToJSON(..), FromJSON(..), Value, object, (.=), (.:), withObject)
+import Tidepool.Prelude
+import Data.Aeson (withObject)
 import qualified Data.Aeson as Aeson
-import Data.Kind (Type)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
-import Data.Text (Text, pack)
-import Control.Monad.Freer (Eff, Member, send)
+import Data.Text (pack)
 import Control.Monad.Freer.Internal (handleRelayS)
 import Optics (A_Setter, Is, Optic', over)
 
