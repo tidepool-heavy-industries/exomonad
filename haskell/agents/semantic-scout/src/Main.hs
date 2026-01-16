@@ -16,15 +16,16 @@ module Main (main) where
 import Control.Exception (try, SomeException)
 import Control.Monad.Freer (runM)
 import Data.Proxy (Proxy(..))
+import qualified Data.Text as T
 import System.Directory (getCurrentDirectory)
-import System.Environment (getArgs)
+import System.Environment (getArgs, lookupEnv)
 import System.IO (hFlush, stdout)
 
 import Tidepool.LSP.Interpreter (withLSPSession, runLSP, LSPSession)
 import Tidepool.MCP.Server (runMcpServer, makeMcpTool, McpConfig(..))
 import Tidepool.Agents.Scout.Types
 import Tidepool.Agents.Scout.Explore (exploreEff, defaultExploreConfig)
-import Tidepool.Agents.Scout.Gemma (runGemmaHeuristic)
+import Tidepool.Agents.Scout.Gemma (runGemmaHeuristic, runGemmaHTTP)
 
 
 main :: IO ()
@@ -67,10 +68,18 @@ runScoutMCP = do
 -- | Execute a scout query.
 --
 -- This runs the exploration loop with real LSP code intelligence.
--- No fallback - will error if LSP fails so we can debug issues.
+-- Uses GEMMA_ENDPOINT if set, otherwise falls back to heuristics.
+-- No fallback on LSP errors - will error if LSP fails so we can debug issues.
 executeScout :: LSPSession -> ScoutQuery -> IO ScoutResponse
 executeScout session query = do
-  runM $ runGemmaHeuristic $ runLSP session $ exploreEff defaultExploreConfig query
+  maybeEndpoint <- lookupEnv "GEMMA_ENDPOINT"
+  case maybeEndpoint of
+    Just endpoint -> do
+      -- Use FunctionGemma via mistralrs-server
+      runM $ runGemmaHTTP (T.pack endpoint) $ runLSP session $ exploreEff defaultExploreConfig query
+    Nothing -> do
+      -- Fall back to heuristics
+      runM $ runGemmaHeuristic $ runLSP session $ exploreEff defaultExploreConfig query
 
 
 -- | Demo mode: run exploration and print results.
