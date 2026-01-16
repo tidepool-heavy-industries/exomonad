@@ -11,6 +11,7 @@ module Tidepool.Control.Scout.Heuristics
 
     -- * Expansion Decision
   , shouldExpand
+  , shouldExpandRubric  -- Legacy, for backwards compatibility
   ) where
 
 import Data.Text (Text)
@@ -80,13 +81,23 @@ edgeToNodeContext edge = NodeContext
 
 -- | Decide whether to expand (explore children of) a node.
 --
--- Pure function that considers:
---   - Rubric scores
---   - Query interest tags
---   - Exploration depth
---   - Remaining budget
-shouldExpand :: Rubric -> [Tag] -> Int -> Int -> Int -> Bool
-shouldExpand rubric queryTags depth _breadth budget
+-- Simple threshold check on composite score.
+-- The composite score is computed by Scoring.compositeScore, which combines:
+--   - FunctionGemma boolean outputs (semantic signals)
+--   - EdgeType bonus (structural signal from LSP)
+--   - Depth penalty
+--
+-- Haskell heuristics stay in control. FunctionGemma just provides inputs.
+shouldExpand :: Double -> Int -> Int -> Bool
+shouldExpand compositeScore depth budget =
+  budget > 0 && depth < 5 && compositeScore > 4.0
+
+-- | Legacy shouldExpand for backwards compatibility with Rubric-based code.
+--
+-- Converts Rubric to a simplified composite score and delegates.
+-- This is a transitional function - prefer using the simpler shouldExpand.
+shouldExpandRubric :: Rubric -> [Tag] -> Int -> Int -> Int -> Bool
+shouldExpandRubric rubric queryTags depth _breadth budget
   | budget <= 0 = False
   | otherwise = score > threshold
   where

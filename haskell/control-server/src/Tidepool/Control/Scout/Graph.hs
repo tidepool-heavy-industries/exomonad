@@ -47,6 +47,7 @@ module Tidepool.Control.Scout.Graph
 import Control.Monad.Freer (Eff)
 import Data.Aeson (FromJSON, ToJSON)
 import Data.Proxy (Proxy(..))
+import Data.Maybe (catMaybes)
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Text (Text)
@@ -60,11 +61,12 @@ import Tidepool.Graph.Goto (Goto, GotoChoice, To, gotoExit, gotoSelf)
 
 import Tidepool.Control.Scout.Types
   ( ScoutQuery(..), ScoutResponse(..), Pointer(..)
-  , QueryContext(..), Rubric(..)
+  , QueryContext(..), Rubric(..), Tag(..)
   , depthToBudget
   )
 import Tidepool.Control.Scout.EdgeTypes (EdgeContext(..))
 import Tidepool.Control.Scout.Scoring (Frontier, emptyFrontier, pushEdge, popEdge, ScoredEdge(..))
+import Tidepool.Training.Types (ScoreEdgeOutput(..))
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -222,21 +224,34 @@ exitWithResults query mem = do
 
 
 -- | Convert scored edge to pointer.
+--
+-- Uses the boolean outputs to derive risk/relevance values:
+--   - relevance: 5 if query_relevant, else 2
+--   - risk: 5 if breaking_boundary OR public_contract, else 2
 toPointer :: ScoredEdge -> Pointer
 toPointer se = Pointer
   { pLocation = ecLocation se.seEdge
   , pWhat = T.take 60 (ecHover se.seEdge)
-  , pRisk = rRisk se.seRubric
-  , pRelevance = rRelevance se.seRubric
-  , pTags = rTags se.seRubric
-  , pAction = suggestAction se.seRubric
+  , pRisk = if seoIsBreakingBoundary bools || seoIsPublicContract bools then 5 else 2
+  , pRelevance = if seoIsQueryRelevant bools then 5 else 2
+  , pTags = boolsToTags bools
+  , pAction = suggestActionFromBools bools
   }
+  where
+    bools = se.seBools
 
+-- | Convert boolean outputs to Tag list.
+boolsToTags :: ScoreEdgeOutput -> [Tag]
+boolsToTags bools = catMaybes
+  [ if seoIsBreakingBoundary bools then Just Exhaustive else Nothing
+  , if seoIsPublicContract bools then Just Implementation else Nothing
+  ]
 
--- | Suggest action based on rubric.
-suggestAction :: Rubric -> Maybe Text
-suggestAction rubric
-  | rRisk rubric >= 4 = Just "Review carefully before modifying"
+-- | Suggest action based on boolean outputs.
+suggestActionFromBools :: ScoreEdgeOutput -> Maybe Text
+suggestActionFromBools bools
+  | seoIsBreakingBoundary bools = Just "Review carefully - breaking boundary"
+  | seoIsPublicContract bools = Just "Part of public API - changes have external impact"
   | otherwise = Nothing
 
 

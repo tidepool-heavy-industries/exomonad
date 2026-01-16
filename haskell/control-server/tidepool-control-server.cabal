@@ -34,6 +34,10 @@ library
         Tidepool.Control.Scout.Heuristics
         Tidepool.Control.Scout.LSP
         Tidepool.Control.Scout.Templates
+        -- Teach (teaching document generation)
+        Tidepool.Control.Scout.Teach
+        Tidepool.Control.Scout.Teach.Types
+        Tidepool.Control.Scout.Teach.Gemma
     build-depends:
         base >= 4.17 && < 5,
         text >= 2.0 && < 3,

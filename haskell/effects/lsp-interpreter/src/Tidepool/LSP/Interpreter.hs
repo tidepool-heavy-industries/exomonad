@@ -192,8 +192,10 @@ runLSP session = interpret $ \case
     pure $ fromHoverResult result
 
   References doc pos -> sendM $ executeSession session $ do
-    let lspDoc = toTextDocumentId doc
-        lspPos = toPosition pos
+    let lspPos = toPosition pos
+        filePath = uriToFilePath doc.tdiUri
+    -- Open the document first - HLS requires this for references to work
+    lspDoc <- openDoc filePath "haskell"
     -- getReferences returns [Location]
     locs <- getReferences lspDoc lspPos True  -- includeDeclaration = True
     pure $ map fromLocation locs
@@ -252,6 +254,15 @@ runLSP session = interpret $ \case
 -- ════════════════════════════════════════════════════════════════════════════
 -- TYPE CONVERSIONS: Our types -> lsp-types
 -- ════════════════════════════════════════════════════════════════════════════
+
+-- | Convert a file:// URI to a file path for openDoc.
+--
+-- openDoc expects a FilePath (relative or absolute), not a URI.
+-- This strips the "file://" prefix if present.
+uriToFilePath :: Text -> FilePath
+uriToFilePath uri
+  | "file://" `T.isPrefixOf` uri = T.unpack $ T.drop 7 uri
+  | otherwise = T.unpack uri
 
 toTextDocumentId :: TextDocumentIdentifier -> L.TextDocumentIdentifier
 toTextDocumentId doc = L.TextDocumentIdentifier

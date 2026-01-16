@@ -287,36 +287,41 @@ genScoreEdgeOutput = do
 
 
 -- | Heuristic scorer for edges (to be replaced by trained model).
+--
+-- Produces semantic boolean answers that LSP can't provide:
+--   * is_query_relevant: Does this edge help answer the user's question?
+--   * is_breaking_boundary: Would changes at source require changes at target?
+--   * is_stable_anchor: Is this a stable reference point?
+--   * is_public_contract: Is this part of the public API?
 heuristicScoreEdge :: ScoreEdgeInput -> ScoreEdgeOutput
 heuristicScoreEdge input = ScoreEdgeOutput
-  { seoRelevance = computeEdgeRelevance input
-  , seoRisk = computeEdgeRisk input
-  , seoReasoning = generateReasoning input
-  , seoIsExhaustive = detectExhaustive input
-  , seoIsTypeFamily = detectTypeFamily input
-  , seoIsExported = detectExported input
+  { seoIsQueryRelevant    = detectQueryRelevant input
+  , seoIsBreakingBoundary = detectBreakingBoundary input
+  , seoIsStableAnchor     = detectStableAnchor input
+  , seoIsPublicContract   = detectPublicContract input
+  , seoReasoning          = generateReasoning input
   }
 
 
--- | Compute relevance based on query and edge type.
-computeEdgeRelevance :: ScoreEdgeInput -> Int
-computeEdgeRelevance input
+-- | Detect if this edge directly helps answer the user's query.
+--
+-- Semantic question: "Does this edge provide information relevant to what
+-- the user is asking about?"
+detectQueryRelevant :: ScoreEdgeInput -> Bool
+detectQueryRelevant input =
   -- Definition edges for "where is X defined" queries
-  | "defined" `T.isInfixOf` queryLower && input.seiEdgeType == Definition = 5
-  | "where is" `T.isInfixOf` queryLower && input.seiEdgeType == Definition = 5
+  ("defined" `T.isInfixOf` queryLower && input.seiEdgeType == Definition)
+  || ("where is" `T.isInfixOf` queryLower && input.seiEdgeType == Definition)
   -- Reference edges for "what uses X" queries
-  | "uses" `T.isInfixOf` queryLower && input.seiEdgeType == Reference = 5
-  | "depends" `T.isInfixOf` queryLower && input.seiEdgeType == Reference = 5
-  -- Breaking change queries
-  | "breaks" `T.isInfixOf` queryLower && hasPatternMatch = 5
-  | "add" `T.isInfixOf` queryLower && "variant" `T.isInfixOf` queryLower && hasPatternMatch = 5
+  || ("uses" `T.isInfixOf` queryLower && input.seiEdgeType == Reference)
+  || ("depends" `T.isInfixOf` queryLower && input.seiEdgeType == Reference)
+  -- Breaking change queries with pattern matches
+  || ("breaks" `T.isInfixOf` queryLower && hasPatternMatch)
+  || ("add" `T.isInfixOf` queryLower && "variant" `T.isInfixOf` queryLower && hasPatternMatch)
   -- Type family queries
-  | "type family" `T.isInfixOf` queryLower && hasTypeFamily = 5
-  -- Default based on edge type
-  | input.seiEdgeType == Definition = 4
-  | input.seiEdgeType == Reference = 3
-  | input.seiEdgeType == Instance = 4
-  | otherwise = 3
+  || ("type family" `T.isInfixOf` queryLower && hasTypeFamily)
+  -- Instance queries
+  || ("instance" `T.isInfixOf` queryLower && input.seiEdgeType == Instance)
   where
     queryLower = T.toLower input.seiQuery
     hoverLower = T.toLower input.seiTargetHover
@@ -324,22 +329,62 @@ computeEdgeRelevance input
     hasTypeFamily = "type family" `T.isInfixOf` hoverLower
 
 
--- | Compute risk based on target hover info.
-computeEdgeRisk :: ScoreEdgeInput -> Int
-computeEdgeRisk input
-  -- High risk: exhaustive pattern matches
-  | "case " `T.isInfixOf` hoverLower && T.count "->" hoverLower >= 2 = 5
-  -- High risk: type families
-  | "type family" `T.isInfixOf` hoverLower = 5
-  -- Medium-high risk: exported symbols
-  | "exported" `T.isInfixOf` hoverLower || isLikelyExported = 4
-  -- Medium risk: regular pattern match
-  | "case " `T.isInfixOf` hoverLower = 4
-  -- Medium risk: implementation
-  | "=" `T.isInfixOf` hoverLower && "::" `T.isInfixOf` hoverLower = 3
-  -- Low risk: imports
-  | "import " `T.isInfixOf` hoverLower = 1
-  | otherwise = 3
+-- | Detect if modifying source would likely require changes at target.
+--
+-- Semantic question: "Is there a coupling relationship where changes
+-- propagate from source to target?"
+detectBreakingBoundary :: ScoreEdgeInput -> Bool
+detectBreakingBoundary input =
+  -- Exhaustive pattern matches: adding variant breaks them
+  ("case " `T.isInfixOf` hoverLower && T.count "->" hoverLower >= 2)
+  -- Type families: adding instances may be required
+  || ("type family" `T.isInfixOf` hoverLower)
+  -- Typeclass instances: new variants may need instances
+  || (input.seiEdgeType == Instance)
+  -- Constructors in pattern matches
+  || ("case " `T.isInfixOf` hoverLower && hasConstructorPattern)
+  where
+    hoverLower = T.toLower input.seiTargetHover
+    snippetLower = T.toLower input.seiSourceHover
+    hasConstructorPattern = any (`T.isInfixOf` snippetLower)
+      ["variant", "constructor", "data "]
+
+
+-- | Detect if this is a stable reference point that rarely changes.
+--
+-- Semantic question: "Is this code stable, or is it likely to be
+-- frequently modified?"
+detectStableAnchor :: ScoreEdgeInput -> Bool
+detectStableAnchor input =
+  -- Not in test files (tests change frequently)
+  not (isTestFile input)
+  -- Not in generated code
+  && not ("generated" `T.isInfixOf` fileLower)
+  -- Not in experimental/WIP files
+  && not (any (`T.isInfixOf` fileLower) ["wip", "experimental", "tmp", "temp"])
+  -- Type definitions are relatively stable
+  && (isTypeDefinition || isWellEstablishedCode)
+  where
+    fileLower = T.toLower input.seiTargetFile
+    hoverLower = T.toLower input.seiTargetHover
+    isTypeDefinition = any (`T.isInfixOf` hoverLower)
+      ["data ", "newtype ", "type family", "class "]
+    isWellEstablishedCode = "Types.hs" `T.isInfixOf` input.seiTargetFile
+      || "Core" `T.isInfixOf` input.seiTargetFile
+
+
+-- | Detect if this is part of the module's public API surface.
+--
+-- Semantic question: "Would changing this affect external consumers
+-- of this module?"
+detectPublicContract :: ScoreEdgeInput -> Bool
+detectPublicContract input =
+  -- Explicitly marked as exported
+  ("exported" `T.isInfixOf` hoverLower)
+  -- In public-facing module files
+  || isLikelyExported
+  -- Not prefixed with underscore (internal convention)
+  || not (isInternalName input)
   where
     hoverLower = T.toLower input.seiTargetHover
     -- Heuristic: functions in "public" modules are likely exported
@@ -348,44 +393,43 @@ computeEdgeRisk input
 
 
 -- | Generate reasoning text based on detected patterns.
+--
+-- Brief justification for the boolean answers (1-2 sentences).
 generateReasoning :: ScoreEdgeInput -> Text
 generateReasoning input
-  | detectExhaustive input =
+  | detectBreakingBoundary input && hasPatternMatch =
       "Pattern match on " <> extractTypeName input.seiTargetHover <>
-      " - must add case for new variant"
-  | detectTypeFamily input =
-      "Type family instance - type-level computation may need update"
-  | input.seiEdgeType == Definition =
-      "Definition site for queried symbol"
-  | input.seiEdgeType == Reference =
-      "Reference to queried symbol"
-  | input.seiEdgeType == Instance =
-      "Implementation of interface"
+      " - adding variants requires updating this case expression."
+  | detectBreakingBoundary input && hasTypeFamily =
+      "Type family instance - adding new types may require new instances."
+  | detectQueryRelevant input && input.seiEdgeType == Definition =
+      "Definition site directly relevant to query."
+  | detectQueryRelevant input && input.seiEdgeType == Reference =
+      "Reference point relevant to understanding the query."
+  | detectPublicContract input =
+      "Part of public API - changes have external impact."
+  | detectStableAnchor input =
+      "Stable reference point in core module."
   | otherwise =
-      "Related code location"
+      "Related code location."
+  where
+    hoverLower = T.toLower input.seiTargetHover
+    hasPatternMatch = "case " `T.isInfixOf` hoverLower
+    hasTypeFamily = "type family" `T.isInfixOf` hoverLower
 
 
--- | Detect exhaustive pattern match.
-detectExhaustive :: ScoreEdgeInput -> Bool
-detectExhaustive input =
-  let hover = T.toLower input.seiTargetHover
-  in "case " `T.isInfixOf` hover && T.count "->" hover >= 3
+-- | Check if file is a test file (tests change frequently).
+isTestFile :: ScoreEdgeInput -> Bool
+isTestFile input =
+  let fileLower = T.toLower input.seiTargetFile
+  in any (`T.isInfixOf` fileLower) ["test", "spec", "_test.hs", "spec.hs"]
 
 
--- | Detect type family.
-detectTypeFamily :: ScoreEdgeInput -> Bool
-detectTypeFamily input =
-  "type family" `T.isInfixOf` T.toLower input.seiTargetHover
-
-
--- | Detect likely exported symbol.
-detectExported :: ScoreEdgeInput -> Bool
-detectExported input =
-  let file = T.toLower input.seiTargetFile
-      hover = T.toLower input.seiTargetHover
-  in "exported" `T.isInfixOf` hover
-     || any (`T.isInfixOf` file) ["types.hs", "api.hs", "public.hs"]
-     || not ("_" `T.isPrefixOf` extractFuncName hover)
+-- | Check if name follows internal naming convention (underscore prefix).
+isInternalName :: ScoreEdgeInput -> Bool
+isInternalName input =
+  let funcName = extractFuncName (T.toLower input.seiTargetHover)
+  in "_" `T.isPrefixOf` funcName
 
 
 -- | Extract type name from hover info.

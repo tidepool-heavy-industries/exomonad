@@ -54,6 +54,7 @@ module Tidepool.Control.Scout.Explore
   , NodeToExplore(..)
   ) where
 
+import Control.Monad (when)
 import Control.Monad.Freer (Eff, Member, LastMember, sendM)
 import qualified Control.Exception
 import Control.Exception (IOException)
@@ -66,9 +67,12 @@ import Data.Text (Text)
 import qualified Data.Text as T
 
 import Tidepool.Control.Scout.Types
-import Tidepool.Control.Scout.Gemma (Gemma, rateEdge)
+import Tidepool.Control.Scout.Gemma (Gemma, rateEdge, scoreEdgeOutputToRubric)
 import Tidepool.Control.Scout.EdgeTypes (mkEdgeContext)
-import Tidepool.Control.Scout.Heuristics (scoreNode, shouldExpand)
+import Tidepool.Control.Scout.Heuristics (scoreNode, shouldExpand, shouldExpandRubric)
+import Tidepool.Control.Scout.Scoring (compositeScore, defaultScoreConfig)
+import Tidepool.Training.Types (ScoreEdgeOutput(..))
+import Tidepool.Effect.Types (Log, logDebug)
 import Tidepool.Effect.LSP
   ( LSP, workspaceSymbol, hover, references
   , textDocument, position
@@ -257,8 +261,8 @@ exploreLoop scorer config queryCtx env
                   , vnRubric = rubric
                   }
 
-            -- Decide whether to expand
-            let doExpand = shouldExpand
+            -- Decide whether to expand (legacy path using Rubric)
+            let doExpand = shouldExpandRubric
                   rubric
                   (qcTags queryCtx)
                   (nteDepth node)
@@ -407,7 +411,7 @@ mockChildren parent depth
 --
 -- Requires native execution (NativeOnly constraint from LSP).
 exploreEff
-  :: (Member LSP effs, Member Gemma effs, LastMember IO effs, NativeOnly)
+  :: (Member LSP effs, Member Gemma effs, Member Log effs, LastMember IO effs, NativeOnly)
   => ExploreConfig
   -> ScoutQuery
   -> Eff effs ScoutResponse
@@ -420,6 +424,8 @@ exploreEff config query = do
 
   -- Find entry points via workspace symbol search for each symbol
   entryPoints <- concat <$> mapM findEntryPoints (sqSymbols query)
+  logDebug $ "[Scout] exploreEff: " <> T.pack (show (length entryPoints)) <> " entry points, budget=" <> T.pack (show budget)
+  mapM_ (\ep -> logDebug $ "[Scout]   entry: " <> ep) entryPoints
   let initialQueue = Seq.fromList
         [ NodeToExplore loc 0 Nothing | loc <- entryPoints ]
 
@@ -439,6 +445,8 @@ exploreEff config query = do
   let pointers = map toPointer visited
   let trainingExamples = map (toTrainingExample queryCtx) visited
 
+  logDebug $ "[Scout] DONE: visited=" <> T.pack (show (length visited)) <> " pointers=" <> T.pack (show (length pointers))
+
   pure ScoutResponse
     { srSummary = buildSummaryEff query pointers
     , srPointers = pointers
@@ -449,19 +457,44 @@ exploreEff config query = do
 
 -- | Find entry points using workspace symbol search.
 findEntryPoints
-  :: (Member LSP effs, NativeOnly)
+  :: (Member LSP effs, Member Log effs, LastMember IO effs, NativeOnly)
   => Text           -- ^ Search query
   -> Eff effs [Text]
 findEntryPoints query = do
   symbols <- workspaceSymbol query
-  pure $ map symbolToLocation (take 10 symbols)  -- Limit entry points
+  logDebug $ "[Scout] findEntryPoints query=" <> query <> " → " <> T.pack (show (length symbols)) <> " symbols"
+  result <- sendM $ mapM symbolToLocation (take 10 symbols)  -- Limit entry points
+  logDebug $ "[Scout]   → " <> T.pack (show result)
+  pure result
   where
-    symbolToLocation :: SymbolInformation -> Text
-    symbolToLocation sym =
+    -- Find actual identifier column by searching for symbol name in the line
+    symbolToLocation :: SymbolInformation -> IO Text
+    symbolToLocation sym = do
       let loc = sym.siLocation
-          startLine = loc.locRange.rangeStart.posLine
-      -- Store full path (without file:// prefix) for LSP queries
-      in stripFilePrefix loc.locUri <> ":" <> T.pack (show (startLine + 1))
+          startPos = loc.locRange.rangeStart
+          file = stripFilePrefix loc.locUri
+          lineNum = startPos.posLine + 1  -- 1-indexed
+          symName = sym.siName
+      -- Read line to find actual identifier position
+      col <- findIdentifierColumn file (fromIntegral lineNum) symName
+      pure $ file <> ":" <> T.pack (show lineNum) <> ":" <> T.pack (show col)
+
+    -- Find where identifier appears in the line (0-indexed column)
+    findIdentifierColumn :: Text -> Int -> Text -> IO Int
+    findIdentifierColumn filePath lineNum symName = do
+      result <- Control.Exception.try @IOException $ readFile (T.unpack filePath)
+      case result of
+        Left _ -> pure 0  -- Fallback to column 0
+        Right contents -> do
+          let linesOfCode = lines contents
+          if lineNum > 0 && lineNum <= length linesOfCode
+            then do
+              let line = T.pack (linesOfCode !! (lineNum - 1))
+              -- Find where the symbol name appears in the line
+              case T.breakOn symName line of
+                (before, match) | not (T.null match) -> pure $ T.length before
+                _ -> pure 0  -- Symbol not found, fallback
+            else pure 0
 
 -- | Strip file:// prefix from URI.
 stripFilePrefix :: Text -> Text
@@ -470,7 +503,7 @@ stripFilePrefix uri = fromMaybe uri $ T.stripPrefix "file://" uri
 
 -- | The effectful exploration loop using LSP + Gemma.
 exploreLoopEff
-  :: (Member LSP effs, Member Gemma effs, LastMember IO effs, NativeOnly)
+  :: (Member LSP effs, Member Gemma effs, Member Log effs, LastMember IO effs, NativeOnly)
   => ExploreConfig
   -> QueryContext
   -> ExploreEnv
@@ -483,7 +516,8 @@ exploreLoopEff config queryCtx env
       -- Queue empty
       EmptyL -> pure env
       -- Pop and process
-      node :< rest ->
+      node :< rest -> do
+        logDebug $ "[Scout] Processing: " <> nteLocation node <> " depth=" <> T.pack (show (nteDepth node)) <> " budget=" <> T.pack (show (eeBudget env))
         -- Skip if already visited
         if nteLocation node `Set.member` eeVisited env
           then exploreLoopEff config queryCtx env { eeQueue = rest }
@@ -500,7 +534,18 @@ exploreLoopEff config queryCtx env
                   (nteParent node)
 
             -- Score with Gemma effect (actually calls Ollama)
-            rubric <- rateEdge (qcQuery queryCtx) edgeCtx
+            scoreOutput <- rateEdge (qcQuery queryCtx) edgeCtx
+            logDebug $ "[Scout]   score: query_relevant=" <> T.pack (show (seoIsQueryRelevant scoreOutput))
+                    <> " breaking=" <> T.pack (show (seoIsBreakingBoundary scoreOutput))
+                    <> " stable=" <> T.pack (show (seoIsStableAnchor scoreOutput))
+                    <> " public=" <> T.pack (show (seoIsPublicContract scoreOutput))
+
+            -- Compute composite score from booleans + EdgeType
+            let score = compositeScore defaultScoreConfig scoreOutput edgeCtx
+            logDebug $ "[Scout]   compositeScore=" <> T.pack (show score)
+
+            -- Convert to Rubric for backwards compatibility (training examples, pointers)
+            let rubric = scoreEdgeOutputToRubric scoreOutput
 
             -- Record visit
             let visitedNode = VisitedNode
@@ -508,19 +553,17 @@ exploreLoopEff config queryCtx env
                   , vnRubric = rubric
                   }
 
-            -- Decide whether to expand
-            let doExpand = shouldExpand
-                  rubric
-                  (qcTags queryCtx)
-                  (nteDepth node)
-                  (countSiblings node env)
-                  (eeBudget env - 1)
+            -- Decide whether to expand using new composite score
+            let doExpand = shouldExpand score (nteDepth node) (eeBudget env - 1)
                   && nteDepth node < ecMaxDepth config
+            logDebug $ "[Scout]   shouldExpand=" <> T.pack (show doExpand) <> " (depth=" <> T.pack (show (nteDepth node)) <> " maxDepth=" <> T.pack (show (ecMaxDepth config)) <> ")"
 
             -- Queue children if expanding (via LSP references)
             children <- if doExpand
               then findChildren (nteLocation node) (nteDepth node + 1)
               else pure []
+            when doExpand $
+              logDebug $ "[Scout]   → queued " <> T.pack (show (length children)) <> " children"
 
             let newEnv = env
                   { eeVisited = Set.insert (nteLocation node) (eeVisited env)
@@ -538,9 +581,9 @@ fetchNodeContext
   => NodeToExplore
   -> Eff effs NodeContext
 fetchNodeContext node = do
-  let (file, lineNum) = parseLocation node.nteLocation
+  let (file, lineNum, col) = parseLocation node.nteLocation
   let doc = textDocument file
-  let pos = position (lineNum - 1) 0  -- LSP is 0-indexed
+  let pos = position (lineNum - 1) col  -- LSP is 0-indexed, col already 0-indexed
 
   -- Get hover info
   hoverInfo <- hover doc pos
@@ -562,16 +605,18 @@ fetchNodeContext node = do
 
 -- | Find children (references) using LSP.
 findChildren
-  :: (Member LSP effs, NativeOnly)
+  :: (Member LSP effs, Member Log effs, NativeOnly)
   => Text           -- ^ Parent location
   -> Int            -- ^ Child depth
   -> Eff effs [NodeToExplore]
 findChildren parent depth = do
-  let (file, lineNum) = parseLocation parent
+  let (file, lineNum, col) = parseLocation parent
   let doc = textDocument file
-  let pos = position (lineNum - 1) 0
+  let pos = position (lineNum - 1) col  -- LSP is 0-indexed, col already 0-indexed
 
+  logDebug $ "[Scout] findChildren: file=" <> file <> " line=" <> T.pack (show lineNum) <> " col=" <> T.pack (show col)
   refs <- references doc pos
+  logDebug $ "[Scout] findChildren: references returned " <> T.pack (show (length refs)) <> " results"
   pure $ map (refToNode parent depth) (take 5 refs)  -- Limit children per node
   where
     refToNode :: Text -> Int -> Location -> NodeToExplore
@@ -581,27 +626,36 @@ findChildren parent depth = do
       , nteParent = Just p
       }
 
-    -- Store full path (without file:// prefix) for LSP queries
+    -- Store full path with line:col for accurate LSP queries
     locationToText :: Location -> Text
     locationToText loc =
-      let startLine = loc.locRange.rangeStart.posLine
-      in stripFilePrefix loc.locUri <> ":" <> T.pack (show (startLine + 1))
+      let startPos = loc.locRange.rangeStart
+      in stripFilePrefix loc.locUri <> ":"
+         <> T.pack (show (startPos.posLine + 1)) <> ":"
+         <> T.pack (show startPos.posCharacter)
 
 
--- | Parse "/path/to/File.hs:42" into (file, line).
+-- | Parse "/path/to/File.hs:42:5" into (file, line, col).
 --
 -- Uses breakOnEnd to split on the last ":" to handle paths correctly.
-parseLocation :: Text -> (Text, Int)
+-- Format: file:line:col
+parseLocation :: Text -> (Text, Int, Int)
 parseLocation loc =
+  -- Parse "file:line:col" format (split from the end)
   case T.breakOnEnd ":" loc of
-    ("", _) -> (loc, 1)  -- No ":" found
-    (pathWithColon, lineStr) ->
-      let path = T.dropEnd 1 pathWithColon  -- Remove trailing ":"
-      in (path, readInt lineStr)
+    ("", _) -> (loc, 1, 0)  -- No ":" found
+    (rest, colStr) ->
+      case T.breakOnEnd ":" (T.dropEnd 1 rest) of
+        ("", _) -> (T.dropEnd 1 rest, readInt colStr, 0)  -- Only "file:line" (old format)
+        (pathWithColon, lineStr) ->
+          let path = T.dropEnd 1 pathWithColon  -- Remove trailing ":"
+              line = readInt lineStr
+              col = readInt colStr
+          in (path, line, col)
   where
     readInt t = case reads (T.unpack t) of
       [(n, "")] -> n
-      _ -> 1
+      _ -> 0
 
 
 -- | Extract code snippet around a line number.

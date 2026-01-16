@@ -1,6 +1,6 @@
 -- | MCP tool call handler.
 --
--- Exposes the semantic scout tool for code exploration via LSP + FunctionGemma.
+-- Exposes semantic code exploration and teaching tools via LSP + FunctionGemma.
 module Tidepool.Control.Handler.MCP
   ( handleMcpTool
   ) where
@@ -18,12 +18,16 @@ import Tidepool.Control.Protocol
 import Tidepool.Control.Scout.Types (ScoutQuery(..), ScoutResponse(..))
 import Tidepool.Control.Scout.Explore (exploreEff, defaultExploreConfig)
 import Tidepool.Control.Scout.Gemma (runGemmaHTTP)
+import Tidepool.Control.Scout.Teach (teach, defaultTeachConfig, TeachQuery(..), TeachingDoc(..))
+import Tidepool.Control.Scout.Teach.Gemma (runTeachGemmaHTTP)
+import Tidepool.Effect.Types (runLog, LogLevel(..))
 import Tidepool.LSP.Interpreter (LSPSession, runLSP)
 
 -- | Handle an MCP tool call.
 --
 -- Currently supports:
 --   - "scout": Semantic code exploration using LSP + FunctionGemma
+--   - "teach": Generate teaching documents in prerequisite order
 handleMcpTool :: LSPSession -> Text -> Text -> Value -> IO ControlResponse
 handleMcpTool lspSession reqId toolName args = do
   TIO.putStrLn $ "  tool=" <> toolName
@@ -31,11 +35,12 @@ handleMcpTool lspSession reqId toolName args = do
 
   case toolName of
     "scout" -> handleScoutTool lspSession reqId args
+    "teach" -> handleTeachTool lspSession reqId args
     _ -> do
       TIO.putStrLn $ "  (unknown tool)"
       hFlush stdout
       pure $ mcpToolError reqId $
-        "Tool not found: " <> toolName <> ". Available tools: scout"
+        "Tool not found: " <> toolName <> ". Available tools: scout, teach"
 
 
 -- | Handle the scout tool.
@@ -70,7 +75,7 @@ handleScoutTool lspSession reqId args = do
           hFlush stdout
 
           -- No try/catch - let HTTP and parsing errors propagate
-          resultOrErr <- try $ runM $ runGemmaHTTP (T.pack ep) $ runLSP lspSession $
+          resultOrErr <- try $ runM $ runLog Debug $ runGemmaHTTP (T.pack ep) $ runLSP lspSession $
             exploreEff defaultExploreConfig query
 
           case resultOrErr of
@@ -83,3 +88,49 @@ handleScoutTool lspSession reqId args = do
               TIO.putStrLn $ "  found " <> T.pack (show $ srNodesVisited result) <> " locations"
               hFlush stdout
               pure $ mcpToolSuccess reqId (toJSON result)
+
+
+-- | Handle the teach tool.
+--
+-- Generates teaching documents from LSP + Gemma that explain a topic
+-- in prerequisite order.
+handleTeachTool :: LSPSession -> Text -> Value -> IO ControlResponse
+handleTeachTool lspSession reqId args = do
+  case fromJSON args of
+    Error err -> do
+      TIO.putStrLn $ "  parse error: " <> T.pack err
+      hFlush stdout
+      pure $ mcpToolError reqId $ "Invalid teach arguments: " <> T.pack err
+
+    Success query -> do
+      TIO.putStrLn $ "  topic=" <> tqTopic query
+      TIO.putStrLn $ "  seeds=" <> T.intercalate ", " (tqSeeds query)
+      TIO.putStrLn $ "  budget=" <> T.pack (show $ tqBudget query)
+      hFlush stdout
+
+      -- Require GEMMA_ENDPOINT
+      maybeEndpoint <- lookupEnv "GEMMA_ENDPOINT"
+      case maybeEndpoint of
+        Nothing -> do
+          TIO.putStrLn "  error: GEMMA_ENDPOINT not set"
+          hFlush stdout
+          pure $ mcpToolError reqId "GEMMA_ENDPOINT environment variable not set"
+
+        Just ep -> do
+          TIO.putStrLn $ "  gemma=" <> T.pack ep
+          hFlush stdout
+
+          resultOrErr <- try $ runM $ runLog Debug $ runTeachGemmaHTTP (T.pack ep) $ runLSP lspSession $
+            teach defaultTeachConfig query
+
+          case resultOrErr of
+            Left (e :: SomeException) -> do
+              TIO.putStrLn $ "  error: " <> T.pack (show e)
+              hFlush stdout
+              pure $ mcpToolError reqId $ "Teach exploration failed: " <> T.pack (show e)
+
+            Right doc -> do
+              let totalUnits = length (tdPrereqs doc) + length (tdCore doc) + length (tdSupport doc)
+              TIO.putStrLn $ "  generated doc with " <> T.pack (show totalUnits) <> " teaching units"
+              hFlush stdout
+              pure $ mcpToolSuccess reqId (toJSON doc)

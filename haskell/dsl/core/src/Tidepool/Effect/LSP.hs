@@ -27,7 +27,6 @@
 --   - Effect definition (LSP GADT)
 --   - Smart constructors for LSP queries
 --   - Type definitions (Position, Diagnostic, etc.)
---   - Stub runner for testing (runLSPStub)
 --
 -- = Usage
 --
@@ -40,17 +39,6 @@
 --   case info of
 --     Just h -> pure (hoverContents h)
 --     Nothing -> pure "No hover info"
--- @
---
--- Stub runner for testing:
---
--- @
--- import Tidepool.Effect (runLog, LogLevel(..))
---
--- test :: IO ()
--- test = void $ runM $ runLog InfoLevel $ runLSPStub $ do
---   diags <- diagnostics (textDocument "src/Main.hs")
---   pure ()
 -- @
 --
 module Tidepool.Effect.LSP
@@ -93,20 +81,15 @@ module Tidepool.Effect.LSP
   , CompletionItemKind(..)
   , SymbolInformation(..)
   , SymbolKind(..)
-
-    -- * Native-only utilities
-  , runLSPStub
   ) where
 
-import Control.Monad.Freer (Eff, Member, interpret, send)
+import Control.Monad.Freer (Eff, Member, send)
 import Data.Aeson (FromJSON, ToJSON)
 import Data.Map.Strict (Map)
-import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
 
-import Tidepool.Effect (Log, logInfo)
 import Tidepool.Platform (NativeOnly)
 
 
@@ -419,55 +402,3 @@ completion doc pos = send (Completion doc pos)
 -- Note: This operation requires native execution (not available in WASM).
 workspaceSymbol :: (Member LSP effs, NativeOnly) => Text -> Eff effs [SymbolInformation]
 workspaceSymbol query = send (WorkspaceSymbol query)
-
-
--- ════════════════════════════════════════════════════════════════════════════
--- NATIVE-ONLY UTILITIES
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Stub runner that logs operations and returns empty/error results.
---
--- This is a placeholder for testing and development. For real LSP
--- functionality, use 'Tidepool.LSP.Interpreter.runLSP' from lsp-interpreter.
-runLSPStub :: Member Log effs => Eff (LSP ': effs) a -> Eff effs a
-runLSPStub = interpret $ \case
-  Diagnostics doc -> do
-    logInfo $ "[LSP:stub] Diagnostics called for: " <> doc.tdiUri
-    pure []  -- Return empty list instead of erroring
-
-  Hover doc pos -> do
-    logInfo $ "[LSP:stub] Hover at " <> doc.tdiUri <> " " <> showPos pos
-    pure Nothing
-
-  References doc pos -> do
-    logInfo $ "[LSP:stub] References at " <> doc.tdiUri <> " " <> showPos pos
-    pure []
-
-  Definition doc pos -> do
-    logInfo $ "[LSP:stub] Definition at " <> doc.tdiUri <> " " <> showPos pos
-    pure []
-
-  CodeActions doc rng -> do
-    logInfo $ "[LSP:stub] CodeActions at " <> doc.tdiUri <> " " <> showRange rng
-    pure []
-
-  Rename doc pos newName -> do
-    logInfo $ "[LSP:stub] Rename at " <> doc.tdiUri <> " " <> showPos pos <> " to " <> newName
-    pure (WorkspaceEdit Map.empty)
-
-  Completion doc pos -> do
-    logInfo $ "[LSP:stub] Completion at " <> doc.tdiUri <> " " <> showPos pos
-    pure []
-
-  WorkspaceSymbol query -> do
-    logInfo $ "[LSP:stub] WorkspaceSymbol query: " <> query
-    pure []
-  where
-    showPos :: Position -> Text
-    showPos p = "(" <> showT p.posLine <> ":" <> showT p.posCharacter <> ")"
-
-    showRange :: Range -> Text
-    showRange r = showPos r.rangeStart <> "-" <> showPos r.rangeEnd
-
-    showT :: Show a => a -> Text
-    showT = T.pack . show

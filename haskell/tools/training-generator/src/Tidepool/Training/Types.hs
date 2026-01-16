@@ -151,26 +151,28 @@ data ScoreEdgeInput = ScoreEdgeInput
     deriving anyclass (FromJSON, ToJSON)
 
 
--- | Edge scoring output (FLAT - individual bools instead of tag list).
+-- | Edge scoring output (semantic boolean questions).
 --
--- Designed for FunctionGemma 270M. Tags are flattened to boolean fields
--- to eliminate list-parsing errors and simplify the classification task.
+-- Designed for FunctionGemma 270M. Uses boolean fields that answer semantic
+-- questions LSP *can't* answer (LSP already provides EdgeType).
+--
+-- Key insight: FunctionGemma should answer semantic questions, not detect
+-- syntactic patterns (which LSP already knows). Booleans are easier to learn
+-- than nuanced 1-5 integer scores.
 --
 -- JSON field names use snake_case without prefix (Ollama format):
---   seoRelevance    -> "relevance"
---   seoIsExhaustive -> "is_exhaustive"
+--   seoIsQueryRelevant    -> "is_query_relevant"
+--   seoIsBreakingBoundary -> "is_breaking_boundary"
 data ScoreEdgeOutput = ScoreEdgeOutput
-  { seoRelevance    :: Int   -- ^ 1-5: How relevant to the query
-  , seoRisk         :: Int   -- ^ 1-5: How risky to modify this code
-  , seoReasoning    :: Text  -- ^ Natural language justification
-  -- Flattened tag flags (instead of [Tag] list)
-  , seoIsExhaustive :: Bool  -- ^ Pattern match exhaustiveness concern
-  , seoIsTypeFamily :: Bool  -- ^ Type-level computation involved
-  , seoIsExported   :: Bool  -- ^ Part of public API surface
+  { seoIsQueryRelevant    :: Bool  -- ^ Does this edge directly help answer the query?
+  , seoIsBreakingBoundary :: Bool  -- ^ Would modifying source likely require changes at target?
+  , seoIsStableAnchor     :: Bool  -- ^ Is this a stable reference point that rarely changes?
+  , seoIsPublicContract   :: Bool  -- ^ Is this part of the module's public API surface?
+  , seoReasoning          :: Text  -- ^ Brief justification (1-2 sentences)
   } deriving stock (Eq, Show, Generic)
 
 -- Custom JSON instances to map Ollama's snake_case to Haskell fields
--- seoRelevance -> "relevance", seoIsExhaustive -> "is_exhaustive"
+-- seoIsQueryRelevant -> "is_query_relevant", seoIsBreakingBoundary -> "is_breaking_boundary"
 instance FromJSON ScoreEdgeOutput where
   parseJSON = genericParseJSON scoreEdgeOptions
 

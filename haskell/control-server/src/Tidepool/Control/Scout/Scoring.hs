@@ -4,8 +4,12 @@
 
 -- | Scoring functions for semantic code exploration.
 --
--- Combines FunctionGemma rubrics with heuristics to produce
+-- Combines FunctionGemma boolean outputs with LSP EdgeType to produce
 -- composite scores for priority queue ordering.
+--
+-- Key insight: FunctionGemma answers semantic questions (4 booleans),
+-- while EdgeType comes from LSP (structural signal). Haskell combines
+-- them into a tunable composite score.
 module Tidepool.Control.Scout.Scoring
   ( -- * Composite Scoring
     compositeScore
@@ -33,31 +37,43 @@ import Data.Text (Text)
 import GHC.Generics (Generic)
 
 import Tidepool.Control.Scout.EdgeTypes (EdgeContext(..), EdgeType(..))
-import Tidepool.Training.Types (Rubric(..))
+import Tidepool.Training.Types (ScoreEdgeOutput(..))
 
 
 -- | Configuration for composite score calculation.
+--
+-- Weights for combining FunctionGemma booleans with LSP EdgeType.
+-- The formula is:
+--   score = queryRelevantBonus (if true)
+--         + breakingBoundaryBonus (if true)
+--         + publicContractBonus (if true)
+--         + stableAnchorBonus (if true, negative if false)
+--         + edgeTypeBonus
+--         - depth * depthPenalty
 data ScoreConfig = ScoreConfig
-  { scRelevanceWeight :: Double
-    -- ^ Weight for relevance score (default: 2.0)
-  , scRiskWeight      :: Double
-    -- ^ Weight for risk score (default: 1.5)
-  , scConfidenceBonus :: Double
-    -- ^ Bonus per confidence point (default: 0.5)
-  , scDepthPenalty    :: Double
+  { scQueryRelevantBonus    :: Double
+    -- ^ Bonus if edge is query-relevant (default: 3.0)
+  , scBreakingBoundaryBonus :: Double
+    -- ^ Bonus if edge crosses breaking boundary (default: 2.0)
+  , scPublicContractBonus   :: Double
+    -- ^ Bonus if edge is part of public API (default: 1.0)
+  , scStableAnchorBonus     :: Double
+    -- ^ Bonus if stable anchor, penalty if unstable (default: 0.5, -0.5)
+  , scDepthPenalty          :: Double
     -- ^ Penalty per depth level (default: 0.3)
-  , scEdgeTypeBonus   :: EdgeType -> Double
+  , scEdgeTypeBonus         :: EdgeType -> Double
     -- ^ Bonus by edge type (pattern matches get priority)
   } deriving (Generic)
 
 -- | Default scoring configuration.
 defaultScoreConfig :: ScoreConfig
 defaultScoreConfig = ScoreConfig
-  { scRelevanceWeight = 2.0
-  , scRiskWeight      = 1.5
-  , scConfidenceBonus = 0.5
-  , scDepthPenalty    = 0.3
-  , scEdgeTypeBonus   = defaultEdgeTypeBonus
+  { scQueryRelevantBonus    = 3.0
+  , scBreakingBoundaryBonus = 2.0
+  , scPublicContractBonus   = 1.0
+  , scStableAnchorBonus     = 0.5
+  , scDepthPenalty          = 0.3
+  , scEdgeTypeBonus         = defaultEdgeTypeBonus
   }
 
 -- | Default edge type bonus.
@@ -78,58 +94,72 @@ defaultEdgeTypeBonus = \case
   UnknownEdge      -> 0.0   -- No bonus
 
 
--- | Calculate composite score from rubric and edge context.
+-- | Calculate composite score from boolean outputs and edge context.
 --
 -- Higher scores = more relevant, explored first.
 --
 -- Formula:
---   score = relevance * 2.0
---         + risk * 1.5
---         + confidence * 0.5
+--   score = queryRelevantBonus (if true)
+--         + breakingBoundaryBonus (if true)
+--         + publicContractBonus (if true)
+--         + stableAnchorBonus (if true) or -stableAnchorBonus (if false)
 --         + edgeTypeBonus
---         - depth * 0.3
-compositeScore :: ScoreConfig -> Rubric -> EdgeContext -> Double
-compositeScore config rubric edge =
-  let relevance  = fromIntegral (rRelevance rubric)
-      risk       = fromIntegral (rRisk rubric)
-      confidence = fromIntegral (rConfidence rubric)
-      depth      = fromIntegral (ecDepth edge)
-      typeBonus  = scEdgeTypeBonus config (ecEdgeType edge)
-  in relevance * scRelevanceWeight config
-   + risk * scRiskWeight config
-   + confidence * scConfidenceBonus config
+--         - depth * depthPenalty
+--
+-- FunctionGemma provides semantic signals (4 booleans).
+-- LSP provides structural signals (EdgeType).
+-- Haskell combines them with tunable weights.
+compositeScore :: ScoreConfig -> ScoreEdgeOutput -> EdgeContext -> Double
+compositeScore config bools edge =
+  let depth = fromIntegral (ecDepth edge)
+      typeBonus = scEdgeTypeBonus config (ecEdgeType edge)
+  in -- FunctionGemma semantic signals
+     (if seoIsQueryRelevant bools then scQueryRelevantBonus config else 0.0)
+   + (if seoIsBreakingBoundary bools then scBreakingBoundaryBonus config else 0.0)
+   + (if seoIsPublicContract bools then scPublicContractBonus config else 0.0)
+   + (if seoIsStableAnchor bools then scStableAnchorBonus config else negate (scStableAnchorBonus config))
+   -- LSP structural signals
    + typeBonus
+   -- Depth penalty
    - depth * scDepthPenalty config
 
 -- | Simplified composite score with default config.
-compositeScoreDefault :: Rubric -> Int -> Double
-compositeScoreDefault rubric depth =
-  let relevance  = fromIntegral (rRelevance rubric)
-      risk       = fromIntegral (rRisk rubric)
-      confidence = fromIntegral (rConfidence rubric)
-  in relevance * 2.0
-   + risk * 1.5
-   + confidence * 0.5
-   - fromIntegral depth * 0.3
+compositeScoreDefault :: ScoreEdgeOutput -> Int -> Double
+compositeScoreDefault bools depth =
+  compositeScore defaultScoreConfig bools (dummyEdgeContext depth)
+  where
+    -- Create a minimal EdgeContext just for scoring (with UnknownEdge for no bonus)
+    dummyEdgeContext d = EdgeContext
+      { ecEdgeType = UnknownEdge
+      , ecLocation = ""
+      , ecHover = ""
+      , ecSnippet = ""
+      , ecDepth = d
+      , ecParent = Nothing
+      , ecTypeName = Nothing
+      , ecFunctionSig = Nothing
+      , ecPatterns = Nothing
+      , ecConstraints = Nothing
+      }
 
 
 -- | An edge with its computed score, ready for the priority queue.
 data ScoredEdge = ScoredEdge
-  { seEdge     :: EdgeContext
+  { seEdge   :: EdgeContext
     -- ^ The edge context
-  , seRubric   :: Rubric
-    -- ^ The rubric from FunctionGemma
-  , seScore    :: Double
+  , seBools  :: ScoreEdgeOutput
+    -- ^ The boolean outputs from FunctionGemma
+  , seScore  :: Double
     -- ^ Composite score (higher = more relevant)
   } deriving stock (Show, Eq, Generic)
     deriving anyclass (FromJSON, ToJSON)
 
--- | Create a scored edge from context and rubric.
-mkScoredEdge :: ScoreConfig -> EdgeContext -> Rubric -> ScoredEdge
-mkScoredEdge config edge rubric = ScoredEdge
-  { seEdge   = edge
-  , seRubric = rubric
-  , seScore  = compositeScore config rubric edge
+-- | Create a scored edge from context and boolean outputs.
+mkScoredEdge :: ScoreConfig -> EdgeContext -> ScoreEdgeOutput -> ScoredEdge
+mkScoredEdge config edge bools = ScoredEdge
+  { seEdge  = edge
+  , seBools = bools
+  , seScore = compositeScore config bools edge
   }
 
 

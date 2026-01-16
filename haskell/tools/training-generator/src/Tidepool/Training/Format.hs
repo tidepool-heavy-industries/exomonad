@@ -73,7 +73,7 @@ formatUserTurn input = T.concat
   ]
 
 
--- | Turn 2 (model): Function call with the scoring rubric.
+-- | Turn 2 (model): Function call with semantic boolean answers.
 --
 -- This is the output we're training the model to produce.
 -- Inference should stop at \<end_of_turn\> or \<end_function_call\>.
@@ -81,12 +81,11 @@ formatModelTurn :: ScoreEdgeOutput -> Text
 formatModelTurn output = T.concat
   [ "<start_of_turn>model\n"
   , "<start_function_call>call:score_edge{"
-  , "relevance:", T.pack (show output.seoRelevance), ","
-  , "risk:", T.pack (show output.seoRisk), ","
-  , "reasoning:", escapeText output.seoReasoning, ","
-  , "is_exhaustive:", boolToText output.seoIsExhaustive, ","
-  , "is_type_family:", boolToText output.seoIsTypeFamily, ","
-  , "is_exported:", boolToText output.seoIsExported
+  , "is_query_relevant:", boolToText output.seoIsQueryRelevant, ","
+  , "is_breaking_boundary:", boolToText output.seoIsBreakingBoundary, ","
+  , "is_stable_anchor:", boolToText output.seoIsStableAnchor, ","
+  , "is_public_contract:", boolToText output.seoIsPublicContract, ","
+  , "reasoning:", escapeText output.seoReasoning
   , "}<end_function_call>\n"
   , "<end_of_turn>"
   ]
