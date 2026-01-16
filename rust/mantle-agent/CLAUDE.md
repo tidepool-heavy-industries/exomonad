@@ -1,192 +1,159 @@
 # mantle-agent
 
-Container-side agent for Claude Code sessions. Runs inside Docker containers to handle Claude Code hooks and serve decision tools via MCP.
+Hook handler and MCP server for Claude Code++ sessions.
 
-## Usage
+## What This Does
 
-```bash
-# Handle a Claude Code hook event (called by generated hook scripts)
-mantle-agent hook <event_type>   # Reads JSON from stdin, outputs response to stdout
+Two subcommands that bridge Claude Code to the Tidepool control server:
 
-# Run as MCP stdio server for decision tools
-mantle-agent mcp
-```
+1. **`hook`** - Handle Claude Code hook events (stdin JSON → TCP → stdout JSON)
+2. **`mcp`** - MCP stdio server that forwards tool calls via TCP
 
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                          Docker Container                                    │
-│                                                                              │
-│  ┌──────────────────────────────────────────────────────────────────────┐   │
-│  │                       Claude Code                                     │   │
-│  │                                                                       │   │
-│  │  hooks/pre-tool-use.sh ────▶ mantle-agent hook pre-tool-use          │   │
-│  │  hooks/post-tool-use.sh ───▶ mantle-agent hook post-tool-use         │   │
-│  │  hooks/stop.sh ────────────▶ mantle-agent hook stop                  │   │
-│  │  ...                                                                  │   │
-│  │                                                                       │   │
-│  │  MCP server config ────────▶ mantle-agent mcp (stdio)                │   │
-│  └──────────────────────────────────────────────────────────────────────┘   │
-│                             │                                                │
-│                             │ Unix socket                                    │
-│                             ▼                                                │
-│  ┌────────────────────────────────────────────┐                             │
-│  │  /tmp/mantle.sock (control socket)         │                             │
-│  └────────────────────────────────────────────┘                             │
-│                             │                                                │
-└─────────────────────────────│────────────────────────────────────────────────┘
-                              │ Mounted socket
-                              ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                    Haskell Orchestrator (host)                               │
-│                    • Receives hook events                                    │
-│                    • Makes allow/deny decisions                              │
-│                    • Records decision tool calls                             │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+Both forward requests to a TCP control server and return responses.
 
 ## Subcommands
 
-### `hook <event_type>`
+### `mantle-agent hook <event_type>`
 
-Handles Claude Code hook events. Called by generated shell scripts in `.claude/settings.local.json`.
+Handles Claude Code hook events. Called by shell commands in `.claude/settings.local.json`.
 
-**Event types:**
+**Flow:**
+```
+Claude Code                    mantle-agent hook               Control Server
+    │                              │                               │
+    │  hook JSON (stdin)           │                               │
+    │─────────────────────────────▶│                               │
+    │                              │  TCP: ControlMessage::HookEvent
+    │                              │──────────────────────────────▶│
+    │                              │                               │
+    │                              │  TCP: ControlResponse::HookResponse
+    │                              │◀──────────────────────────────│
+    │  hook response (stdout)      │                               │
+    │◀─────────────────────────────│                               │
+```
+
+**Event types** (from `HookEventType` enum):
 | Event | Purpose |
 |-------|---------|
 | `pre-tool-use` | Before tool execution - can allow, deny, or modify |
 | `post-tool-use` | After tool execution - can inject context |
 | `notification` | Status updates from Claude |
 | `stop` | Claude wants to stop |
-| `subagent-stop` | Subagent stopping |
+| `subagent-stop` | Subagent (Task tool) stopping |
 | `pre-compact` | Before context compaction |
 | `session-start` | Session beginning |
 | `session-end` | Session ending |
-| `permission-request` | Permission needed for action |
+| `permission-request` | Permission dialog shown |
 | `user-prompt-submit` | User submitted a prompt |
-
-**Flow:**
-```
-Claude Code                    mantle-agent                     Haskell
-    │                              │                               │
-    │  hook JSON (stdin)           │                               │
-    │─────────────────────────────▶│                               │
-    │                              │  ControlMessage::HookEvent    │
-    │                              │──────────────────────────────▶│
-    │                              │                               │
-    │                              │  ControlResponse::HookResponse│
-    │                              │◀──────────────────────────────│
-    │  hook response (stdout)      │                               │
-    │◀─────────────────────────────│                               │
-```
 
 **Exit codes:**
 - `0` = allow/continue
 - `2` = deny/error (blocks Claude Code)
 
-### `mcp`
+**Fail-open behavior:** If `MANTLE_CONTROL_HOST`/`PORT` not set or connection fails, returns a default "allow" response. This ensures Claude Code works without the control server.
 
-Runs as MCP (Model Context Protocol) stdio server for decision tools.
+### `mantle-agent mcp`
 
-**What are decision tools?**
-
-Decision tools enable typed sum-type outputs from Claude. Instead of free-form text, Claude can call a structured tool like `decision::approve` or `decision::request_changes`.
-
-**Protocol:** JSON-RPC 2.0 over stdio
-
-**Supported methods:**
-| Method | Purpose |
-|--------|---------|
-| `initialize` | Protocol handshake |
-| `tools/list` | Return available decision tools |
-| `tools/call` | Execute a decision tool (forwarded to control socket) |
-
-**Tool definition format:**
-```json
-{
-  "name": "decision::approve",
-  "description": "Approve the proposed changes",
-  "inputSchema": {
-    "type": "object",
-    "properties": {
-      "notes": { "type": "string" }
-    }
-  }
-}
-```
+MCP (Model Context Protocol) stdio server for decision tools.
 
 **Flow:**
 ```
-Claude Code MCP client          mantle-agent mcp               Haskell
-    │                               │                              │
-    │ {"method":"initialize",...}   │                              │
-    │──────────────────────────────▶│                              │
-    │◀──────────────────────────────│ initialize response          │
-    │                               │                              │
-    │ {"method":"tools/list",...}   │                              │
-    │──────────────────────────────▶│                              │
-    │◀──────────────────────────────│ [decision::approve, ...]     │
-    │                               │                              │
-    │ {"method":"tools/call",       │                              │
-    │  "params":{"name":...}}       │                              │
-    │──────────────────────────────▶│                              │
-    │                               │  ControlMessage::McpToolCall │
-    │                               │─────────────────────────────▶│
-    │                               │◀─────────────────────────────│
-    │◀──────────────────────────────│ tool result                  │
+Claude Code                    mantle-agent mcp                Control Server
+    │                              │                               │
+    │  JSON-RPC request (stdio)    │                               │
+    │─────────────────────────────▶│                               │
+    │                              │  (tools/list: local response) │
+    │                              │                               │
+    │                              │  (tools/call: forward via TCP)│
+    │                              │──────────────────────────────▶│
+    │                              │◀──────────────────────────────│
+    │  JSON-RPC response (stdio)   │                               │
+    │◀─────────────────────────────│                               │
+```
+
+**Protocol:** JSON-RPC 2.0 over stdio (MCP spec)
+
+**Supported methods:**
+- `initialize` - Handshake, returns server capabilities
+- `initialized` - Notification acknowledgment
+- `tools/list` - Returns tool definitions (from `MANTLE_DECISION_TOOLS_FILE`)
+- `tools/call` - Executes tool by forwarding to control server
+
+**Tool definition format** (in `MANTLE_DECISION_TOOLS_FILE`):
+```json
+[
+  {
+    "name": "decision::approve",
+    "description": "Approve the request",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "notes": { "type": "string" }
+      }
+    }
+  }
+]
 ```
 
 ## Environment Variables
 
-| Variable | Purpose |
-|----------|---------|
-| `MANTLE_HOOK_SOCKET` | Path to control socket (default: from CLI `--socket`) |
-| `MANTLE_DECISION_TOOLS` | JSON array of decision tool definitions |
-| `RUST_LOG` | Tracing log level |
+| Variable | Required | Purpose |
+|----------|----------|---------|
+| `MANTLE_CONTROL_HOST` | For forwarding | TCP host for control server |
+| `MANTLE_CONTROL_PORT` | For forwarding | TCP port for control server |
+| `MANTLE_DECISION_TOOLS_FILE` | For `mcp` | Path to JSON file with tool definitions |
+| `RUST_LOG` | No | Tracing log level (e.g., `debug`, `mantle_agent=trace`) |
 
 ## Module Reference
 
 | File | Purpose |
 |------|---------|
-| `main.rs` | CLI entry point with `hook` and `mcp` subcommands |
-| `mcp.rs` | MCP stdio server implementation |
+| `main.rs` | CLI entry point, subcommand dispatch |
+| `mcp.rs` | MCP stdio server (JSON-RPC 2.0, tool routing, TCP forwarding) |
 
-## Protocol Details
+The `hook` subcommand uses `mantle_shared::handle_hook()` directly.
 
-### Control Message (→ Haskell)
+## Code Walkthrough
+
+### mcp.rs
+
+**Key types:**
 ```rust
-pub enum ControlMessage {
-    HookEvent { input: Box<HookInput> },
-    McpToolCall { id: String, tool_name: String, arguments: Value },
+// Tool definition (from MANTLE_DECISION_TOOLS_FILE)
+pub struct ToolDefinition {
+    pub name: String,
+    pub description: String,
+    pub input_schema: Value,  // JSON Schema
+}
+
+// Server state
+pub struct McpServer {
+    tools: Vec<ToolDefinition>,
+    control_addr: Option<(String, u16)>,  // TCP addr for forwarding
 }
 ```
 
-### Control Response (← Haskell)
+**Request handling:**
 ```rust
-pub enum ControlResponse {
-    HookResponse { output: HookOutput, exit_code: i32 },
-    McpToolResponse { id: String, result: Option<Value>, error: Option<McpError> },
+fn handle_request(&mut self, request: JsonRpcRequest) -> JsonRpcResponse {
+    match request.method.as_str() {
+        "initialize" => self.handle_initialize(request.id),
+        "tools/list" => self.handle_tools_list(request.id),
+        "tools/call" => self.handle_tools_call(request.id, request.params),
+        _ => JsonRpcResponse::method_not_found(request.id, &request.method),
+    }
 }
 ```
 
-### Hook Input (from Claude Code)
+**Tool call forwarding:**
 ```rust
-pub struct HookInput {
-    pub session_id: String,
-    pub hook_event_name: String,
-    pub tool_name: Option<String>,
-    pub tool_input: Option<Value>,
-    // ... additional hook-specific fields
-}
-```
-
-### Hook Output (to Claude Code)
-```rust
-pub struct HookOutput {
-    pub continue_: bool,
-    pub stop_reason: Option<String>,
-    pub hook_specific_output: Option<HookSpecificOutput>,
+fn handle_tools_call(&mut self, id: Value, params: Value) -> JsonRpcResponse {
+    // 1. Parse params to get tool name + arguments
+    // 2. Verify tool exists in self.tools
+    // 3. Connect to control server via TCP
+    // 4. Send ControlMessage::McpToolCall
+    // 5. Receive ControlResponse::McpToolResponse
+    // 6. Return as JSON-RPC response
 }
 ```
 
@@ -194,52 +161,42 @@ pub struct HookOutput {
 
 ```bash
 cargo test -p mantle-agent
+
+# Test MCP server manually:
+echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' | cargo run -p mantle-agent -- mcp
 ```
 
-Tests cover JSON-RPC parsing, tool definition handling, and response generation.
+## Claude Code Configuration
 
-## Integration Notes
-
-### Container Setup
-
-The container's entrypoint configures MCP if decision tools are provided:
-
-```bash
-# If MANTLE_DECISION_TOOLS is set, register MCP server
-if [ -n "$MANTLE_DECISION_TOOLS" ]; then
-  # Add to .claude/settings.local.json mcpServers section
-fi
-```
-
-### Hook Script Generation
-
-`mantle-shared/hooks.rs` generates `.claude/settings.local.json` with hook scripts:
+To use mantle-agent with Claude Code, add to `.claude/settings.local.json`:
 
 ```json
 {
-  "hooks": {
-    "PreToolUse": "mantle-agent hook pre-tool-use",
-    "PostToolUse": "mantle-agent hook post-tool-use",
-    ...
-  },
   "mcpServers": {
-    "mantle-decisions": {
+    "mantle-decision": {
       "command": "mantle-agent",
       "args": ["mcp"],
       "env": {
-        "MANTLE_HOOK_SOCKET": "/tmp/mantle.sock"
+        "MANTLE_DECISION_TOOLS_FILE": "/path/to/tools.json",
+        "MANTLE_CONTROL_HOST": "127.0.0.1",
+        "MANTLE_CONTROL_PORT": "7432"
       }
     }
+  },
+  "hooks": {
+    "PreToolUse": "mantle-agent hook pre-tool-use",
+    "PostToolUse": "mantle-agent hook post-tool-use"
   }
 }
 ```
 
-### Decision Tool Names
+## What's Missing (TODO)
 
-By convention, decision tools use `decision::` prefix:
-- `decision::approve`
-- `decision::reject`
-- `decision::request_changes`
-- Custom: `decision::<variant_name>`
+### Daemon Mode
+Currently, hooks/MCP forward directly to a control server that must exist elsewhere. Goal: Add `mantle-agent daemon` that:
+- Listens on TCP for hook/MCP requests
+- Always collects metrics to hub
+- Forwards to Haskell native-server for effect handling
 
-Haskell generates these from sum type constructors and parses the tool calls back.
+### Metrics Collection
+Goal: Every hook/tool call sends metrics to mantle-hub before/after handling.

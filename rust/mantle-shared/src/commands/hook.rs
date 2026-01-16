@@ -90,26 +90,17 @@ pub fn handle_hook(event_type: HookEventType) -> Result<()> {
 
     // Get control server address from env vars
     let Some((host, port)) = control_server_addr() else {
-        debug!("No control server configured, failing open (allowing hook)");
-        let output = default_allow_response(event_type);
-        println!(
-            "{}",
-            serde_json::to_string(&output).map_err(MantleError::JsonSerialize)?
-        );
-        return Ok(());
+        return handle_server_unavailable(event_type, "No control server configured");
     };
 
     // Connect to control server via TCP
     let mut socket = match ControlSocket::connect(&host, port) {
         Ok(s) => s,
         Err(e) => {
-            warn!(error = %e, "Failed to connect to control server, failing open");
-            let output = default_allow_response(event_type);
-            println!(
-                "{}",
-                serde_json::to_string(&output).map_err(MantleError::JsonSerialize)?
+            return handle_server_unavailable(
+                event_type,
+                &format!("Failed to connect to control server: {}", e),
             );
-            return Ok(());
         }
     };
 
@@ -141,6 +132,27 @@ pub fn handle_hook(event_type: HookEventType) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Handle control server unavailable - fail closed.
+///
+/// During development, we want to fail loudly when the control server is unavailable
+/// to catch configuration issues early. This prevents silent failures where hooks
+/// appear to work but aren't actually being processed.
+///
+/// TODO: Add configurable fail-open mode for production deployments where Claude Code
+/// should continue working even if the control server is down. This would require:
+/// - MANTLE_FAIL_MODE environment variable ("closed" vs "open")
+/// - Proper monitoring/alerting when falling back to fail-open
+/// - Graceful degradation logic (default_allow_response)
+fn handle_server_unavailable(_event_type: HookEventType, reason: &str) -> Result<()> {
+    // Always fail closed during development
+    error!(reason, "Control server unavailable (fail-closed)");
+    eprintln!("ERROR: {}", reason);
+    eprintln!("Control server required.");
+    eprintln!("Set MANTLE_CONTROL_HOST and MANTLE_CONTROL_PORT environment variables.");
+    eprintln!("Example: export MANTLE_CONTROL_HOST=127.0.0.1 MANTLE_CONTROL_PORT=7432");
+    std::process::exit(1);
 }
 
 /// Create a default "allow" response for when no control socket is available.

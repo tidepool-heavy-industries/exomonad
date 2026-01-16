@@ -21,7 +21,6 @@ packages:
     haskell/effects/ghci-interpreter
     haskell/effects/github-interpreter
     haskell/effects/worktree-interpreter
-    haskell/effects/session-interpreter
     haskell/effects/cabal-interpreter
     haskell/effects/devlog-interpreter
     haskell/effects/mcp-server
@@ -39,13 +38,16 @@ packages:
     -- Native server
     haskell/native-server
 
+    -- Control server (Claude Code++ TCP endpoint)
+    haskell/control-server
+
     -- Tools
     haskell/tools/sleeptime
     haskell/tools/training-generator
 
     -- Test/example packages
-    types-first-dev
-    human-driven-dev
+    -- types-first-dev  -- DISABLED: depends on removed session-interpreter (headless orchestration)
+    -- human-driven-dev  -- DISABLED: depends on removed session-interpreter (headless orchestration)
     -- types-first-dev/test-repo  -- disabled: empty directory, no cabal file
 
     -- Vendored dependencies

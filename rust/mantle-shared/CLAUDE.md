@@ -1,245 +1,90 @@
 # mantle-shared
 
-Shared library providing core types, protocols, and IPC utilities for the mantle workspace. Used by both `mantle` (host) and `mantle-agent` (container).
+Shared library for the mantle workspace. Provides protocol types, TCP socket client, and hook handling utilities.
 
 ## Module Overview
 
-| Module | Purpose |
-|--------|---------|
-| `error` | Typed error types (`MantleError`) with source attribution |
-| `events` | Stream event types for parsing Claude Code's `--stream-json` output |
-| `protocol` | Control envelope protocol (hook input/output, socket messages) |
-| `fifo` | Named pipe abstractions for IPC with RAII cleanup |
-| `socket` | Unix socket client for control envelope communication |
-| `hub` | Hub client for session registration and event streaming |
-| `hooks` | Hook configuration generator for Claude Code settings |
-| `supervisor` | Process lifecycle with timeout and signal forwarding |
-| `humanize` | Human-readable terminal output formatting |
-| `commands` | CLI command implementations (hook handling, signals) |
-| `util` | Shell quoting, binary path resolution |
+| Module | File | Purpose |
+|--------|------|---------|
+| `protocol` | `protocol.rs` | Control envelope types (HookInput, HookOutput, ControlMessage, ControlResponse) |
+| `socket` | `socket.rs` | TCP client for control server communication |
+| `commands` | `commands/` | CLI command implementations (hook handler, signal sender) |
+| `error` | `error.rs` | Typed error types (`MantleError`) |
+| `events` | `events.rs` | Stream event types for Claude Code `--stream-json` output |
+| `hooks` | `hooks.rs` | Hook configuration generator for Claude Code settings |
+| `logging` | `logging.rs` | Tracing/logging setup with env filter |
+| `util` | `util.rs` | Shell quoting, binary path resolution |
+| `fifo` | `fifo.rs` | Named pipe abstractions (legacy, for headless mode) |
+| `supervisor` | `supervisor.rs` | Process supervision (legacy, for headless mode) |
+| `humanize` | `humanize.rs` | Human-readable output formatting |
 
-## Core Types
+## Key Types
 
-### Error Handling
+### Control Protocol (`protocol.rs`)
+
+**HookInput** - What Claude Code sends to hook commands via stdin:
 ```rust
-pub type Result<T> = std::result::Result<T, MantleError>;
-
-pub enum MantleError {
-    Io(std::io::Error),
-    Json(serde_json::Error),
-    Fifo(String),
-    Socket(String),
-    Process(String),
-    Timeout,
-    Hub(String),
-    McpServer(String),
-}
-```
-
-### Stream Events (Claude Code Output)
-```rust
-// Parsed from Claude Code --stream-json output
-pub enum StreamEvent {
-    System(SystemEvent),      // Init event: session_id, model, tools
-    Assistant(AssistantEvent),// Claude's messages (text, tool_use)
-    User(UserEvent),          // User/tool responses
-    Result(ResultEvent),      // Final result: cost, turns, structured_output
-}
-
-pub enum ContentBlock {
-    Text { text: String },
-    ToolUse { name, id, input },
-    ToolResult { tool_use_id, content, is_error },
-}
-```
-
-### Run Result (mantle → Haskell)
-```rust
-pub struct RunResult {
-    pub exit_code: i32,
-    pub is_error: bool,
-    pub result: Option<String>,
-    pub structured_output: Option<Value>,  // --json-schema output
-    pub session_id: String,
-    pub session_tag: Option<String>,       // Worktree correlation
-    pub total_cost_usd: f64,
-    pub num_turns: i64,
-    pub events: Vec<StreamEvent>,
-    pub permission_denials: Vec<PermissionDenial>,
-    pub model_usage: HashMap<String, ModelUsage>,
-    pub interrupts: Vec<InterruptSignal>,  // Out-of-band signals
-    pub tool_calls: Option<Vec<ToolCall>>, // Decision tool calls
-}
-```
-
-### Control Protocol
-```rust
-// Hook event payload from Claude Code
 pub struct HookInput {
     pub session_id: String,
+    pub transcript_path: String,
+    pub cwd: String,
+    pub permission_mode: String,  // default, plan, acceptEdits, etc.
     pub hook_event_name: String,  // PreToolUse, PostToolUse, etc.
+
+    // Tool-related (PreToolUse, PostToolUse, PermissionRequest)
     pub tool_name: Option<String>,
     pub tool_input: Option<Value>,
-    // ... additional hook-specific fields
-}
+    pub tool_use_id: Option<String>,
+    pub tool_response: Option<Value>,  // PostToolUse only
 
-// Hook response to Claude Code
+    // Other hook-specific fields
+    pub prompt: Option<String>,           // UserPromptSubmit
+    pub message: Option<String>,          // Notification
+    pub stop_hook_active: Option<bool>,   // Stop, SubagentStop
+    // ... more fields
+}
+```
+
+**HookOutput** - What hook commands return to Claude Code via stdout:
+```rust
 pub struct HookOutput {
-    pub continue_: bool,           // false = stop processing
+    pub continue_: bool,  // false = stop processing
     pub stop_reason: Option<String>,
+    pub suppress_output: Option<bool>,
+    pub system_message: Option<String>,
     pub hook_specific_output: Option<HookSpecificOutput>,
 }
 
-// Socket messages (NDJSON)
+pub enum HookSpecificOutput {
+    PreToolUse {
+        permission_decision: String,  // "allow", "deny", "ask"
+        permission_decision_reason: Option<String>,
+        updated_input: Option<Value>,  // Modified tool input
+    },
+    PostToolUse {
+        additional_context: Option<String>,
+    },
+    // ... other variants
+}
+```
+
+**ControlMessage** - Sent over TCP to control server:
+```rust
 pub enum ControlMessage {
     HookEvent { input: Box<HookInput> },
-    McpToolCall { id, tool_name, arguments },
+    McpToolCall { id: String, tool_name: String, arguments: Value },
 }
+```
 
+**ControlResponse** - Received from control server:
+```rust
 pub enum ControlResponse {
     HookResponse { output: HookOutput, exit_code: i32 },
-    McpToolResponse { id, result, error },
+    McpToolResponse { id: String, result: Option<Value>, error: Option<McpError> },
 }
 ```
 
-## IPC Abstractions
-
-### Control Socket
-Synchronous Unix socket client for hook decisions:
-```rust
-pub struct ControlSocket { /* ... */ }
-
-impl ControlSocket {
-    // Connect to socket at path (or TIDEPOOL_CONTROL_SOCKET env)
-    pub fn connect(path: Option<&Path>) -> Result<Self>;
-
-    // Send message, receive response
-    pub fn send_and_receive(&mut self, msg: &ControlMessage) -> Result<ControlResponse>;
-}
-```
-
-### FIFOs (Named Pipes)
-RAII wrappers for inter-process communication:
-```rust
-pub struct ResultFifo { /* ... */ }
-pub struct SignalFifo { /* ... */ }
-
-impl ResultFifo {
-    pub fn create(path: &Path) -> Result<Self>;
-    pub fn write(&self, result: &RunResult) -> Result<()>;
-    pub fn read(&self) -> Result<Option<RunResult>>;
-}
-
-impl SignalFifo {
-    pub fn create(path: &Path) -> Result<Self>;
-    pub fn send(&self, signal: &InterruptSignal) -> Result<()>;
-    pub fn receive(&self) -> Result<Option<InterruptSignal>>;
-}
-```
-
-FIFOs automatically clean up on drop via `FifoGuard`.
-
-### Hub Client
-HTTP + WebSocket client for session coordination:
-```rust
-pub struct HubClient { /* ... */ }
-
-impl HubClient {
-    pub async fn new() -> Result<Self>;
-
-    // Session management
-    pub async fn create_session(&self, session: &SessionRegister) -> Result<SessionCreateResponse>;
-    pub async fn create_empty_session(&self, name: &str) -> Result<SessionCreateEmptyResponse>;
-    pub async fn get_session(&self, session_id: &str) -> Result<SessionWithNodes>;
-    pub async fn list_sessions(&self) -> Result<Vec<SessionInfo>>;
-    pub async fn delete_session(&self, session_id: &str) -> Result<()>;
-
-    // Node management
-    pub async fn create_node(&self, session_id: &str, req: &NodeRegister) -> Result<NodeCreateResponse>;
-    pub async fn get_node(&self, session_id: &str, node_id: &str) -> Result<NodeInfo>;
-    pub async fn submit_node_result(&self, session_id: &str, node_id: &str, result: &NodeResult) -> Result<()>;
-
-    // Graph data
-    pub async fn get_graph(&self, session_id: &str) -> Result<GraphData>;
-}
-```
-
-### Hub Types (Graph Execution Tracking)
-```rust
-// Create empty session (for orchestrator to create session first)
-pub struct SessionCreateEmptyRequest {
-    pub name: String,
-}
-
-pub struct SessionCreateEmptyResponse {
-    pub session: SessionInfo,
-}
-
-// Register node with optional metadata
-pub struct NodeRegister {
-    pub branch: String,
-    pub worktree: PathBuf,
-    pub prompt: String,
-    pub model: String,
-    pub parent_node_id: Option<String>,  // For tree structure
-    pub metadata: Option<Value>,          // Graph execution tracking
-}
-
-pub struct NodeCreateResponse {
-    pub node: NodeInfo,
-}
-
-// Node metadata for graph tracking
-// Stored as JSON: {"execution_id": "run-1", "node_path": "n2.n0", "node_type": "hTypes", "depth": 2}
-pub struct NodeInfo {
-    pub id: String,
-    pub session_id: String,
-    pub parent_node_id: Option<String>,
-    pub branch: String,
-    pub worktree: PathBuf,
-    pub prompt: String,
-    pub model: String,
-    pub state: String,  // pending, running, completed, failed
-    pub metadata: Option<Value>,
-    pub result: Option<NodeResultInfo>,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-}
-```
-
-## Hook System
-
-### Hook Event Types
-```rust
-pub enum HookEventType {
-    PreToolUse,       // Before tool execution (can deny/modify)
-    PostToolUse,      // After tool execution (can inject context)
-    Notification,     // Status updates from Claude
-    Stop,             // Claude wants to stop
-    SubagentStop,     // Subagent stopping
-    PreCompact,       // Before context compaction
-    SessionStart,     // Session beginning
-    SessionEnd,       // Session ending
-    PermissionRequest,// Permission needed for action
-    UserPromptSubmit, // User submitted a prompt
-}
-```
-
-### Hook Configuration Generator
-```rust
-pub struct HookConfig { /* ... */ }
-
-impl HookConfig {
-    // Generate settings.local.json for Claude Code
-    pub fn generate(
-        socket_path: &Path,
-        agent_binary: &Path,
-        enabled_hooks: &[HookEventType],
-    ) -> Value;
-}
-```
-
-### Hook Output Builders
+**Builder helpers:**
 ```rust
 impl HookOutput {
     pub fn pre_tool_use_allow(reason: Option<String>, modified_input: Option<Value>) -> Self;
@@ -249,68 +94,128 @@ impl HookOutput {
 }
 ```
 
-## Process Supervision
+### TCP Socket Client (`socket.rs`)
+
+Synchronous TCP client for NDJSON protocol:
 
 ```rust
-pub struct Supervisor { /* ... */ }
+pub struct ControlSocket {
+    stream: TcpStream,
+}
 
-impl Supervisor {
-    pub fn new(timeout: Option<Duration>) -> Self;
+impl ControlSocket {
+    /// Connect to control server. Timeout: 30s.
+    pub fn connect(host: &str, port: u16) -> Result<Self>;
 
-    // Run command with signal forwarding and timeout
-    pub fn run(&self, cmd: &mut Command) -> Result<(i32, String)>;
+    /// Send message, receive response (NDJSON: JSON + newline)
+    pub fn send(&mut self, message: &ControlMessage) -> Result<ControlResponse>;
+}
 
-    // Check if interrupted
-    pub fn was_interrupted(&self) -> bool;
+/// Get (host, port) from MANTLE_CONTROL_HOST/PORT env vars
+pub fn control_server_addr() -> Option<(String, u16)>;
+```
+
+**Why synchronous?** Hook commands block Claude Code anyway. Async adds complexity without benefit for this use case.
+
+### Hook Command (`commands/hook.rs`)
+
+The `handle_hook` function implements the full hook handling flow:
+
+```rust
+pub fn handle_hook(event_type: HookEventType) -> Result<()> {
+    // 1. Read hook JSON from stdin
+    // 2. Parse as HookInput
+    // 3. Get control server addr from env (or fail open)
+    // 4. Connect and send ControlMessage::HookEvent
+    // 5. Receive ControlResponse::HookResponse
+    // 6. Print HookOutput JSON to stdout
+    // 7. Exit with response's exit_code
+}
+
+/// Default "allow" response when no control server available
+pub fn default_allow_response(event_type: HookEventType) -> HookOutput;
+```
+
+**Fail-open behavior:** If `MANTLE_CONTROL_HOST`/`PORT` not set or connection fails, returns `default_allow_response()` instead of erroring. This ensures Claude Code works without the control server.
+
+### Hook Event Types (`commands/hook.rs`)
+
+```rust
+pub enum HookEventType {
+    PreToolUse,        // Before tool execution
+    PostToolUse,       // After tool completion
+    Notification,      // Status updates
+    Stop,              // Claude wants to stop
+    SubagentStop,      // Subagent stopping
+    PreCompact,        // Before context compaction
+    SessionStart,      // Session beginning
+    SessionEnd,        // Session ending
+    PermissionRequest, // Permission dialog
+    UserPromptSubmit,  // User submitted prompt
 }
 ```
 
-Features:
-- Global signal handlers (SIGINT, SIGTERM, SIGTSTP)
-- Timeout enforcement
-- Clean process termination on interrupt
+### Error Types (`error.rs`)
 
-## Utilities
-
-### Shell Quoting
 ```rust
-pub fn shell_quote(s: &str) -> String;  // Safe shell escaping
-pub fn build_prompt(parts: &[&str]) -> String;  // Join with newlines
+pub enum MantleError {
+    Io(std::io::Error),
+    JsonSerialize(serde_json::Error),
+    JsonParse { source: serde_json::Error },
+    TcpConnect { addr: String, source: std::io::Error },
+    SocketConfig { source: std::io::Error },
+    SocketWrite { source: std::io::Error },
+    SocketRead { source: std::io::Error },
+    McpServer(String),
+    // ... more variants
+}
 ```
 
-### Binary Resolution
+## Re-exports
+
+The crate root re-exports commonly used types:
+
 ```rust
-pub fn find_mantle_binary() -> Result<PathBuf>;       // Find mantle in PATH
-pub fn find_mantle_agent_binary() -> Result<PathBuf>; // Find mantle-agent
+pub use error::{MantleError, Result};
+pub use protocol::{ControlMessage, ControlResponse, HookInput, HookOutput};
+pub use socket::ControlSocket;
+pub use commands::{handle_hook, HookEventType};
+pub use logging::init_logging;
+```
+
+## Usage Example
+
+```rust
+use mantle_shared::{handle_hook, HookEventType};
+
+fn main() -> mantle_shared::Result<()> {
+    mantle_shared::init_logging();
+    handle_hook(HookEventType::PreToolUse)
+}
 ```
 
 ## Testing
 
-```rust
+```bash
 cargo test -p mantle-shared
 
-// Key test files:
-// - tests/fifo_integration.rs    FIFO creation/cleanup
-// - tests/socket_integration.rs  Control socket communication
-// - tests/supervisor_integration.rs  Process supervision
+# Key test in socket.rs: starts echo server, sends ControlMessage, verifies response
 ```
-
-## Dependencies
-
-| Crate | Purpose |
-|-------|---------|
-| serde/serde_json | Serialization |
-| thiserror | Typed errors |
-| nix | Unix syscalls (FIFOs, signals) |
-| tracing | Structured logging |
-| reqwest | HTTP client (hub) |
-| tokio-tungstenite | WebSocket client (hub) |
-| shell-escape | Shell quoting |
-| clap | CLI argument parsing |
 
 ## Design Notes
 
-- **Synchronous socket client**: Hook commands block Claude Code anyway; async adds complexity without benefit.
-- **RAII FIFO cleanup**: `FifoGuard` ensures cleanup even on panic/error paths.
-- **Boxed HookInput**: Reduces enum size for `ControlMessage` (HookInput is large).
-- **Always serialize interrupts**: Haskell expects the field present, even if empty.
+- **Synchronous socket:** Hooks block Claude Code; async unnecessary
+- **Fail-open:** Default allow when control server unavailable
+- **Boxed HookInput:** Reduces `ControlMessage` enum size (HookInput is large)
+- **NDJSON protocol:** JSON + newline, human-readable for debugging
+
+## Legacy Modules (from headless mode)
+
+These modules were used for Docker-based headless orchestration (now archived):
+
+- `fifo.rs` - Named pipes for result/signal IPC
+- `supervisor.rs` - Process lifecycle with timeout/signals
+- `events.rs` - Parsing Claude Code `--stream-json` output
+- `humanize.rs` - Terminal output formatting
+
+The headless code is preserved in git tag `headless-mantle-archive`.

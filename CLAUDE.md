@@ -20,7 +20,6 @@ CLAUDE.md  ← YOU ARE HERE (project overview)
 │   ├── agents/                 ← Production agents
 │   │   └── semantic-scout/CLAUDE.md ← Code exploration MCP tool
 │   ├── effects/CLAUDE.md       ← Effect interpreters
-│   │   ├── session-interpreter/ ← Claude Code subprocess (key for V3)
 │   │   ├── llm-interpreter/     ← Anthropic/OpenAI API
 │   │   ├── lsp-interpreter/     ← Language Server Protocol
 │   │   ├── mcp-server/          ← MCP tool server (expose agents to Claude)
@@ -29,11 +28,10 @@ CLAUDE.md  ← YOU ARE HERE (project overview)
 │   │   └── actor/CLAUDE.md     ← Actor model details
 │   ├── protocol/CLAUDE.md      ← Wire formats
 │   └── tools/CLAUDE.md         ← Dev tools (ghci-oracle, sleeptime, training-generator)
-├── rust/CLAUDE.md             ← Mantle: Claude Code session orchestration
-│   ├── mantle/CLAUDE.md        ← Host-side session CLI
-│   ├── mantle-agent/CLAUDE.md  ← Container-side hook handler + MCP
-│   ├── mantle-hub/CLAUDE.md    ← Session visualization daemon
-│   └── mantle-shared/CLAUDE.md ← Shared types and protocols
+├── rust/CLAUDE.md             ← Claude Code++ (hook handler + MCP forwarding)
+│   ├── mantle-agent/CLAUDE.md  ← Hook handler + MCP stdio server (IMPLEMENTED)
+│   ├── mantle-hub/CLAUDE.md    ← Metrics hub (LEGACY, needs repurposing)
+│   └── mantle-shared/CLAUDE.md ← Protocol types, TCP socket client
 ├── types-first-dev/CLAUDE.md   ← V3 TDD protocol project
 ├── deploy/CLAUDE.md            ← Cloudflare deployment
 └── typescript/
@@ -46,7 +44,6 @@ CLAUDE.md  ← YOU ARE HERE (project overview)
 | I want to... | Read this |
 |--------------|-----------|
 | Define a graph, handlers, annotations | `haskell/dsl/core/CLAUDE.md` |
-| Understand ClaudeCode execution | `haskell/effects/session-interpreter/CLAUDE.md` |
 | Add or modify an effect interpreter | `haskell/effects/CLAUDE.md` |
 | Understand actor execution model | `haskell/runtime/actor/CLAUDE.md` |
 | Work on semantic-scout code exploration | `haskell/agents/semantic-scout/CLAUDE.md` |
@@ -56,9 +53,9 @@ CLAUDE.md  ← YOU ARE HERE (project overview)
 | Work on types-first-dev V3 protocol | `types-first-dev/CLAUDE.md` |
 | Deploy to Cloudflare Workers | `deploy/CLAUDE.md` |
 | Work on the native server | `haskell/native-server/CLAUDE.md` |
-| Work on mantle session orchestration | `rust/CLAUDE.md` |
-| Handle Claude Code hooks or MCP | `rust/mantle-agent/CLAUDE.md` |
-| Track sessions in the hub | `rust/mantle-hub/CLAUDE.md` |
+| Work on Claude Code++ (hooks/MCP) | `rust/CLAUDE.md` |
+| Understand hook forwarding or MCP server | `rust/mantle-agent/CLAUDE.md` |
+| Understand control protocol types | `rust/mantle-shared/CLAUDE.md` |
 
 ---
 
@@ -154,25 +151,28 @@ Context generation tooling for coding agents:
 
 The cron jobs live in the consuming repo (anemone, urchin), not in tidepool itself. Tidepool provides the infrastructure; consuming repos implement the evolution loop.
 
-## ClaudeCode Interpreter (WIP)
+## Claude Code++ Integration
 
-Dockerized Claude Code orchestration via mantle.
+Human-driven Claude Code sessions augmented with Tidepool. **Not headless automation** - humans interact via TTY; we add superpowers.
 
-```haskell
-import Tidepool.LSP.Interpreter (withLSPSession, runLSP)
+See `rust/CLAUDE.md` for full details. Key components:
+
+- **mantle-agent hook** - Forwards Claude Code hooks to Haskell for effect handling
+- **mantle-agent mcp** - MCP server that proxies tool calls to Haskell agents
+
+Configuration in `.claude/settings.local.json`:
+```json
+{
+  "hooks": {
+    "PreToolUse": "mantle-agent hook pre-tool-use"
+  },
+  "mcpServers": {
+    "tidepool": { "command": "mantle-agent", "args": ["mcp"] }
+  }
+}
 ```
 
-Spawn Claude Code as a graph node:
-```haskell
-"work" := LLM
-    :@ Input TaskInfo
-    :@ Schema WorkResult
-    :@ ClaudeCode 'Sonnet ('Just "/path/to/worktree")
-```
-
-This renders a template, spawns `claude -p` via mantle, and parses JSON output. Enables Tidepool graphs that orchestrate Claude Code sessions.
-
-**Status**: WIP in `tidepool-claude-code-interpreter`
+**Status**: Hook forwarding and MCP server implemented. Daemon mode and metrics hub WIP.
 
 ---
 
@@ -202,7 +202,6 @@ All Haskell packages now live under `haskell/`. See `haskell/CLAUDE.md` for full
 | `haskell/native-server` | Servant + WebSocket server (facade) |
 | `haskell/effects/llm-interpreter` | Anthropic/OpenAI API calls |
 | `haskell/effects/bd-interpreter` | Beads integration + urchin CLI |
-| `haskell/effects/session-interpreter` | Claude Code subprocess via mantle |
 | `haskell/effects/mcp-server` | MCP tool server (expose agents to Claude) |
 | `haskell/effects/habitica-interpreter` | Habitica API |
 | `haskell/effects/ui-interpreter` | WebSocket ↔ UI bridging |

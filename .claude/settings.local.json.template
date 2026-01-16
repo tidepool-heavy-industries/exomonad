@@ -1,0 +1,16 @@
+{
+  "$schema": "https://anthropic.com/claude-code/settings-schema.json",
+  "hooks": {
+    "PreToolUse": ["mantle-agent", "hook", "pre-tool-use"],
+    "PostToolUse": ["mantle-agent", "hook", "post-tool-use"],
+    "Stop": ["mantle-agent", "hook", "stop"],
+    "SessionStart": ["mantle-agent", "hook", "session-start"],
+    "SessionEnd": ["mantle-agent", "hook", "session-end"]
+  },
+  "mcpServers": {
+    "tidepool": {
+      "command": "mantle-agent",
+      "args": ["mcp"]
+    }
+  }
+}

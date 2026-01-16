@@ -1,243 +1,196 @@
-# Mantle: Claude Code Session Orchestration
+# Claude Code++: Human-Augmented Sessions
 
-Rust workspace for spawning, managing, and visualizing Claude Code sessions. Used by Tidepool's Haskell orchestrator to control Claude Code as typed graph nodes.
+Rust workspace for augmenting human-driven Claude Code sessions with Tidepool integrations.
+
+**This is NOT a headless orchestration system.** Humans interact with Claude Code directly via TTY; this infrastructure adds superpowers.
+
+> **Archived:** The previous headless Docker orchestration is preserved in git tag `headless-mantle-archive`. To resurrect: `git show headless-mantle-archive:rust/mantle/`
+
+## Documentation Tree
+
+```
+rust/CLAUDE.md  ← YOU ARE HERE (router)
+├── mantle-agent/CLAUDE.md  ← Hook handler + MCP server (IMPLEMENTED)
+│   • hook subcommand: forwards CC hooks to TCP control server
+│   • mcp subcommand: JSON-RPC 2.0 stdio server, forwards tool calls
+│   • Fail-open: works without control server
+│
+├── mantle-hub/CLAUDE.md  ← Session hub (LEGACY, needs repurposing)
+│   • Currently: session/node tracking for headless mode
+│   • Planned: metrics collection, Grafana export
+│
+└── mantle-shared/CLAUDE.md  ← Shared types and utilities
+    • protocol.rs: HookInput, HookOutput, ControlMessage, ControlResponse
+    • socket.rs: TCP client (ControlSocket), NDJSON protocol
+    • commands/hook.rs: handle_hook() implementation
+    • Fail-open behavior, builder helpers
+```
 
 ## Architecture Overview
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                          Haskell Orchestrator                                │
-│                    (tidepool-session-interpreter)                            │
-└─────────────────────────────┬───────────────────────────────────────────────┘
-                              │ spawns subprocess
-                              ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                         mantle (host binary)                                 │
-│  • Session lifecycle (start/continue/fork/list/cleanup)                      │
-│  • Git worktree isolation per session                                        │
-│  • Docker container orchestration                                            │
-│  • Hook configuration generation                                             │
-└─────────────────────────────┬───────────────────────────────────────────────┘
-                              │ docker run
-                              ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                      Docker Container                                        │
-│  ┌────────────────────────────────────────────────────────────────────────┐ │
-│  │                      Claude Code                                        │ │
-│  │  • Runs prompts with --stream-json                                      │ │
-│  │  • Triggers hooks on tool use, decisions, etc.                          │ │
-│  └──────────────────────────┬─────────────────────────────────────────────┘ │
-│                             │ hook scripts call                              │
-│  ┌──────────────────────────▼─────────────────────────────────────────────┐ │
-│  │                    mantle-agent                                         │ │
-│  │  • Hook handler: forwards decisions to orchestrator                     │ │
-│  │  • MCP server: exposes decision tools to Claude                         │ │
-│  └─────────────────────────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────────────────────┘
-                              │
-                              │ HTTP/WebSocket
-                              ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                         mantle-hub                                           │
-│  • SQLite persistence for sessions/nodes/results                             │
-│  • REST API for session queries                                              │
-│  • WebSocket for live streaming                                              │
-│  • HTML visualization UI                                                     │
-└─────────────────────────────────────────────────────────────────────────────┘
+Human TTY ──▶ Claude Code (in nix shell)
+               │
+               ├─ MCP tools ──────▶ mantle-agent mcp ──▶ Control Server (TCP)
+               │                                              │
+               └─ Hooks ──────────▶ mantle-agent hook ────────┘
+                                          │
+                                          ▼
+                                   Haskell native-server
+                                   (effect stack + handlers)
 ```
+
+**Current state:**
+- `mantle-agent hook` - Forwards Claude Code hooks to TCP control socket ✓
+- `mantle-agent mcp` - MCP stdio server that forwards tool calls to TCP control socket ✓
+- `haskell/control-server` - Haskell TCP endpoint (passthrough hook handlers, stub MCP) ✓
+- `flake.nix` - Nix shell with zellij layout for Claude Code++ ✓
+- **Missing:** Daemon mode, metrics hub, real hook/MCP logic in Haskell
 
 ## Workspace Members
 
 | Crate | Type | Purpose |
 |-------|------|---------|
-| [mantle](mantle/CLAUDE.md) | Binary | Host-side CLI for session management |
-| [mantle-agent](mantle-agent/CLAUDE.md) | Binary | Container-side hook handler + MCP server |
-| [mantle-hub](mantle-hub/CLAUDE.md) | Binary | Session visualization daemon |
-| [mantle-shared](mantle-shared/CLAUDE.md) | Library | Shared types, protocols, IPC utilities |
+| [mantle-agent](mantle-agent/CLAUDE.md) | Binary | Hook handler + MCP server |
+| [mantle-hub](mantle-hub/CLAUDE.md) | Binary | Metrics/telemetry hub (WIP) |
+| [mantle-shared](mantle-shared/CLAUDE.md) | Library | Shared types, protocols, TCP socket client |
 
 ## Quick Reference
 
 ### Building
 ```bash
 cargo build --release           # Build all crates
-cargo build -p mantle          # Build just mantle
-cargo test                     # Run all tests
+cargo build -p mantle-agent     # Build just agent
+cargo test                      # Run all tests
 ```
 
-### Running
+### Current Subcommands
 ```bash
-# Start hub daemon (required for session tracking)
-mantle-hub serve
+# Handle Claude Code hook (reads JSON stdin, outputs JSON stdout)
+mantle-agent hook pre-tool-use
 
-# Start a new session
-mantle session start --slug fix/auth-bug --prompt "Fix the auth bug"
-
-# Continue existing session
-mantle session continue <session-id> --prompt "Now add tests"
-
-# Fork a session (create child from parent context)
-mantle session fork <parent-id> --child-slug refactor --child-prompt "Refactor"
-
-# List sessions
-mantle session list --state running
+# Run MCP stdio server for decision tools
+mantle-agent mcp
 ```
 
 ### Environment Variables
 | Variable | Used By | Purpose |
 |----------|---------|---------|
-| `MANTLE_HUB_URL` | mantle | Hub HTTP endpoint (default: http://localhost:7433) |
-| `TIDEPOOL_CONTROL_SOCKET` | mantle-agent | Unix socket for hook decisions |
-| `MANTLE_DECISION_TOOLS` | mantle-agent | JSON array of MCP decision tools |
-| `MANTLE_HOOK_SOCKET` | mantle-agent | Socket path for MCP tool call reporting |
-| `RUST_LOG` | all | Tracing log level (e.g., `debug`, `mantle=trace`) |
+| `MANTLE_CONTROL_HOST` | mantle-agent | TCP host for control socket (required) |
+| `MANTLE_CONTROL_PORT` | mantle-agent | TCP port for control socket (required) |
+| `MANTLE_DECISION_TOOLS_FILE` | mantle-agent mcp | Path to JSON file with MCP tool definitions |
+| `RUST_LOG` | all | Tracing log level |
 
-## Communication Protocols
+## What Works Today
 
-### Stdout JSON (mantle → Haskell)
-Sessions output structured JSON to stdout for Haskell consumption:
-```json
-{
-  "exit_code": 0,
-  "is_error": false,
-  "session_id": "sess-abc123",
-  "result": "Task completed successfully",
-  "structured_output": { ... },
-  "total_cost_usd": 0.15,
-  "num_turns": 5,
-  "interrupts": [],
-  "tool_calls": [...]
-}
+### 1. Hook Handler
+```bash
+mantle-agent hook pre-tool-use  # Reads JSON from stdin
+```
+- Called by `.claude/settings.local.json` hooks
+- Parses Claude Code's hook JSON from stdin
+- Forwards to control server via TCP (NDJSON protocol)
+- Returns response JSON to stdout
+- **Fail-closed:** Errors immediately if control server unavailable (catches config issues during dev)
+
+### 2. MCP Server
+```bash
+mantle-agent mcp
+```
+- JSON-RPC 2.0 over stdio (MCP protocol)
+- Reads tool definitions from `MANTLE_DECISION_TOOLS_FILE`
+- Forwards `tools/call` requests to control server via TCP
+- Returns tool results to Claude Code
+
+## Control Socket Protocol
+
+Both hooks and MCP use the same TCP protocol (NDJSON):
+
+```
+mantle-agent                    Control Server (Haskell)
+     │                                    │
+     │  ControlMessage (JSON + newline)   │
+     │───────────────────────────────────▶│
+     │                                    │
+     │  ControlResponse (JSON + newline)  │
+     │◀───────────────────────────────────│
 ```
 
-### Control Socket (mantle-agent ↔ Haskell)
-NDJSON over Unix domain socket:
-```rust
-// Agent sends
-ControlMessage::HookEvent { input: HookInput }
-ControlMessage::ToolCall { name, input }
+**ControlMessage variants:**
+- `HookEvent { input: HookInput }` - Claude Code hook event
+- `MCPToolCall { id, tool_name, arguments }` - MCP tool call
 
-// Orchestrator responds
-ControlResponse::HookResponse { exit_code, hook_specific_output }
-ControlResponse::Success { value }
-ControlResponse::Error { message }
+**ControlResponse variants:**
+- `HookResponse { output: HookOutput, exit_code }` - Hook decision
+- `MCPToolResponse { id, result, error }` - Tool result
+
+## What's Missing (TODO)
+
+### Daemon Mode
+Goal: Long-lived process that collects metrics + forwards to Haskell
+
+```bash
+# Planned:
+mantle-agent daemon start  # Listen on TCP, forward to Haskell
 ```
 
-### Hub REST API
-```
-POST /api/sessions           Create session + root node
-POST /api/sessions/empty     Create empty session (no root node)
-GET  /api/sessions           List all sessions
-GET  /api/sessions/{id}      Get session with nodes
-DELETE /api/sessions/{id}    Delete session
-POST /api/sessions/{sid}/nodes    Add node to existing session
-GET  /api/sessions/{sid}/graph    Get graph visualization data
-WS   /ws                     Subscribe to updates
-WS   /ws/push/{sid}/{nid}    Push events for a node
-```
+Status: Not implemented. Current architecture uses per-hook process spawning.
 
-## Graph Execution Tracking
+### Metrics Hub
+Goal: Store tool call traces, export to Grafana
 
-For orchestrating recursive graph/subgraph executions (concurrent swarm), mantle supports tracking all nodes within a single hub session:
+Status: mantle-hub needs repurposing from session tracking to metrics collection.
 
-### Flow
-1. **Orchestrator creates empty hub session** (via direct HTTP to hub):
-   ```bash
-   curl -X POST http://localhost:7433/api/sessions/empty \
-     -d '{"name":"run-1"}'
-   # Returns: {"session":{"id":"uuid-123",...}}
-   ```
+### Real Hook Logic in Haskell
+Goal: Wire control-server handlers to Tidepool effect stack
 
-2. **Orchestrator spawns mantle for each node** with tracking args:
-   ```bash
-   mantle session start \
-     --hub-session-id "uuid-123" \
-     --execution-id "run-1" \
-     --node-path "n0" \
-     --node-type "hTypes" \
-     --prompt "Generate types" \
-     --model sonnet
-   ```
+Status: Current implementation is passthrough (logs and allows all hooks).
 
-3. **For nested nodes** (subgraphs), include parent reference:
-   ```bash
-   mantle session start \
-     --hub-session-id "uuid-123" \
-     --execution-id "run-1" \
-     --node-path "n2.n0" \
-     --node-type "hTypeAdversary" \
-     --parent-hub-node-id "parent-node-uuid" \
-     --prompt "Review types" \
-     --model sonnet
-   ```
+### MCP Tool Implementation
+Goal: Expose Tidepool agents (e.g., semantic-scout) as MCP tools via control-server
 
-### Branch Naming
-Hierarchical branches: `{execution_id}/{node_path}/{node_type}-{6hex}`
-- Root: `run-1/hTypes-a3f2c1`
-- Nested: `run-1/n2/n0/hTypeAdversary-b4e5d2`
+Status: Current implementation returns "no tools available".
 
-### Node Metadata
-Stored in hub for querying:
-```json
-{
-  "execution_id": "run-1",
-  "node_path": "n2.n0",
-  "node_type": "hTypeAdversary",
-  "depth": 2
-}
-```
+### Fail-Open Mode for Production
+Goal: Add configurable fail-open mode so Claude Code works even if control server is down
 
-## Haskell Integration
+Status: Not implemented. Currently always fails closed (errors if server unavailable). For production deployments, need:
+- `MANTLE_FAIL_MODE` environment variable
+- Monitoring/alerting when falling back to fail-open
+- Graceful degradation logic
 
-The Rust components integrate with Tidepool's Haskell side via:
-
-1. **Subprocess spawning**: Haskell's `tidepool-session-interpreter` spawns `mantle` as a child process
-2. **Stdout capture**: Session results returned as JSON on stdout
-3. **Control socket**: Real-time hook decisions over Unix socket during execution
-4. **Decision tools**: MCP protocol for typed sum-type outputs (approve/reject/etc.)
-
-See `haskell/effects/session-interpreter/` for the Haskell side.
-
-## Data Storage
-
-| Location | Contents |
-|----------|----------|
-| `.mantle/sessions.json` | Session state (per-repo, file-locked) |
-| `.mantle/worktrees/` | Git worktrees for session isolation |
-| `~/.tidepool/hub.db` | SQLite database (mantle-hub) |
-| `~/.config/mantle/config.toml` | Docker and hub configuration |
-
-## Docker Container
-
-The `mantle/Dockerfile` builds the container image:
-- Base: `debian:bookworm-slim`
-- Claude Code via npm
-- Non-root user (required by Claude Code)
-- Mount points for auth credentials and sockets
-
-Build: `docker build -t mantle-agent:latest -f rust/mantle/Dockerfile .`
+See TODO comment in `rust/mantle-shared/src/commands/hook.rs`
 
 ## Testing
 
 ```bash
 cargo test                              # All tests
-cargo test -p mantle-hub                # Hub tests only
-cargo test -- --ignored                 # Include E2E tests (requires Docker)
+cargo test -p mantle-agent              # Agent tests only
+cargo test -p mantle-shared             # Shared library tests
 ```
-
-Integration tests in each crate's `tests/` directory cover:
-- Control socket communication
-- FIFO creation/cleanup
-- Process supervision
-- HTTP API endpoints
-- Database operations
 
 ## Design Decisions
 
 | Decision | Rationale |
 |----------|-----------|
-| Typed errors (thiserror) | Structured error handling over anyhow |
-| Synchronous hook socket | Hooks block anyway; simpler without async |
-| RAII FIFO cleanup | FifoGuard ensures cleanup on all paths |
-| Control char stripping | TTY output corrupts JSON; sanitize early |
-| File locking for state | Multiple sessions may run concurrently |
-| SQLite for hub | Simple, embedded, good enough for session data |
+| TCP (not Unix socket) | Works across Docker boundaries (legacy), simpler |
+| NDJSON protocol | Human-readable, easy to debug |
+| Fail-closed hooks | Errors immediately if server missing; catches config issues during development |
+| Sync TCP client | Hooks block anyway; async adds complexity |
+
+## Migration from Headless Mode
+
+The previous headless Docker orchestration is archived. Key differences:
+
+| Aspect | Old (headless) | New (Claude Code++) |
+|--------|----------------|---------------------|
+| Execution | Docker container | Nix shell (`nix develop .#claude-code-plus`) |
+| Control | Haskell subprocess | Human TTY |
+| Hub role | Session tracking | Metrics/telemetry (TODO) |
+| Focus | Automation | Augmentation |
+
+To resurrect old code:
+```bash
+git show headless-mantle-archive:rust/mantle/src/session/start.rs
+git checkout headless-mantle-archive -- rust/mantle/
+```

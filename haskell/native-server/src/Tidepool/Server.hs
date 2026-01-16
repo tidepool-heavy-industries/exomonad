@@ -98,7 +98,6 @@ import Tidepool.Effects.UI (UI)
 import Tidepool.Effects.Habitica (Habitica)
 import Tidepool.Effects.LLMProvider (LLMComplete)
 import Tidepool.Effects.Observability (Observability)
-import Tidepool.Effect.Session qualified as SessionEffect
 import Tidepool.Effect.DevLog (DevLog)
 
 
@@ -113,7 +112,7 @@ data ServerMode
   deriving (Show, Eq)
 
 -- | Agent type - a computation using UI, LLM, DevLog, and Observability effects.
-type Agent = Eff '[UI, Habitica, LLMComplete, SessionEffect.Session, DevLog, Observability, IO] ()
+type Agent = Eff '[UI, Habitica, LLMComplete, DevLog, Observability, IO] ()
 
 -- | Server configuration.
 data ServerConfig = ServerConfig

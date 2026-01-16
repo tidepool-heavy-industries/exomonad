@@ -14,6 +14,7 @@ All Haskell packages live here, organized by architectural pattern.
 | Work with LSP integration | `effects/lsp-interpreter/CLAUDE.md` |
 | Generate training data for FunctionGemma | `tools/training-generator/CLAUDE.md` |
 | Work on the WebSocket server | `native-server/CLAUDE.md` |
+| Work on Claude Code++ control server | `control-server/CLAUDE.md` |
 | Understand wire protocols | `protocol/CLAUDE.md` |
 | Work on dev tools (GHCi oracle, sleeptime) | `tools/CLAUDE.md` → `tools/{name}/CLAUDE.md` |
 
@@ -42,6 +43,7 @@ haskell/CLAUDE.md  ← YOU ARE HERE (router)
 │   ├── wire-types/CLAUDE.md
 │   └── generated-ts/CLAUDE.md
 ├── native-server/CLAUDE.md
+├── control-server/CLAUDE.md  ← Claude Code++ TCP endpoint
 ├── platform/CLAUDE.md
 └── tools/CLAUDE.md
     ├── ghci-oracle/CLAUDE.md
@@ -58,6 +60,7 @@ haskell/CLAUDE.md  ← YOU ARE HERE (router)
 | `effects/` | Effect interpreters (HTTP, subprocess, etc.) | Adding/modifying external integrations |
 | `runtime/` | Execution backends (actor, WASM) | Understanding concurrent execution |
 | `native-server/` | WebSocket server facade | Server lifecycle, effect composition |
+| `control-server/` | Claude Code++ TCP endpoint | Hook/MCP forwarding from mantle-agent |
 | `protocol/` | Wire formats (native, WASM) | Client-server communication |
 | `tools/` | Standalone utilities | GHCi integration, log analysis, training data |
 | `vendor/` | Vendored dependencies | Rarely (freer-simple, ginger internals) |
