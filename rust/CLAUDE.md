@@ -76,9 +76,8 @@ mantle-agent mcp
 ### Environment Variables
 | Variable | Used By | Purpose |
 |----------|---------|---------|
-| `MANTLE_CONTROL_HOST` | mantle-agent | TCP host for control socket (default: 127.0.0.1) |
-| `MANTLE_CONTROL_PORT` | mantle-agent | TCP port for control socket |
-| `MANTLE_FAIL_MODE` | mantle-agent hook | `closed` = error if server unavailable, `open` = allow (default: open) |
+| `MANTLE_CONTROL_HOST` | mantle-agent | TCP host for control socket (required) |
+| `MANTLE_CONTROL_PORT` | mantle-agent | TCP port for control socket (required) |
 | `MANTLE_DECISION_TOOLS_FILE` | mantle-agent mcp | Path to JSON file with MCP tool definitions |
 | `RUST_LOG` | all | Tracing log level |
 
@@ -92,7 +91,7 @@ mantle-agent hook pre-tool-use  # Reads JSON from stdin
 - Parses Claude Code's hook JSON from stdin
 - Forwards to control server via TCP (NDJSON protocol)
 - Returns response JSON to stdout
-- **Fail mode:** `MANTLE_FAIL_MODE=closed` (error if server missing) or `open` (allow if server missing, default)
+- **Fail-closed:** Errors immediately if control server unavailable (catches config issues during dev)
 
 ### 2. MCP Server
 ```bash
@@ -152,6 +151,16 @@ Goal: Expose Tidepool agents (e.g., semantic-scout) as MCP tools via control-ser
 
 Status: Current implementation returns "no tools available".
 
+### Fail-Open Mode for Production
+Goal: Add configurable fail-open mode so Claude Code works even if control server is down
+
+Status: Not implemented. Currently always fails closed (errors if server unavailable). For production deployments, need:
+- `MANTLE_FAIL_MODE` environment variable
+- Monitoring/alerting when falling back to fail-open
+- Graceful degradation logic
+
+See TODO comment in `rust/mantle-shared/src/commands/hook.rs`
+
 ## Testing
 
 ```bash
@@ -166,7 +175,7 @@ cargo test -p mantle-shared             # Shared library tests
 |----------|-----------|
 | TCP (not Unix socket) | Works across Docker boundaries (legacy), simpler |
 | NDJSON protocol | Human-readable, easy to debug |
-| Configurable fail mode | `closed` for dev (catch config issues), `open` for prod (graceful degradation) |
+| Fail-closed hooks | Errors immediately if server missing; catches config issues during development |
 | Sync TCP client | Hooks block anyway; async adds complexity |
 
 ## Migration from Headless Mode

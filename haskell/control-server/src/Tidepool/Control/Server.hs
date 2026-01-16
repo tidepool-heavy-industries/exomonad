@@ -75,24 +75,31 @@ handleConnection conn peer = do
   TIO.putStrLn $ "Connection from " <> T.pack (show peer)
   hFlush stdout
 
+  -- FIXME: Add socket timeout (30s) to match Rust client timeout.
+  -- Currently server can block indefinitely on slow clients.
+  -- Use System.Timeout.timeout (30 * 1000000) around the handler.
+
   -- Read until newline (NDJSON framing)
   msgBytes <- readUntilNewline conn
 
-  case eitherDecodeStrict msgBytes of
-    Left err -> do
-      TIO.putStrLn $ "Parse error: " <> T.pack err
-      -- Send error response
-      let response = hookError $ T.pack $ "JSON parse error: " <> err
-      sendResponse conn response
+  (do
+    case eitherDecodeStrict msgBytes of
+      Left err -> do
+        TIO.putStrLn $ "Parse error: " <> T.pack err
+        -- Send error response
+        let response = hookError $ T.pack $ "JSON parse error: " <> err
+        sendResponse conn response
 
-    Right msg -> do
-      logMessage msg
-      response <- handleMessage msg
-      logResponse response
-      sendResponse conn response
-
+      Right msg -> do
+        logMessage msg
+        response <- handleMessage msg
+        logResponse response
+        sendResponse conn response
+    )
   `catch` \(e :: SomeException) -> do
     TIO.putStrLn $ "Connection error: " <> T.pack (show e)
+    -- Send error response to client instead of leaving them hanging
+    sendResponse conn $ hookError $ "Internal server error: " <> T.pack (show e)
 
 -- | Read bytes from socket until newline.
 readUntilNewline :: Socket -> IO ByteString

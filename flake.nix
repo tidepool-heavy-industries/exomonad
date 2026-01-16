@@ -98,25 +98,43 @@
               echo "Claude Code++ Development Shell"
               echo "================================"
               echo ""
-              echo "Environment:"
-              echo "  MANTLE_CONTROL_HOST=127.0.0.1"
-              echo "  MANTLE_CONTROL_PORT=7432"
-              echo "  MANTLE_FAIL_MODE=closed"
-              echo ""
 
+              # Detect repo root (git root or current dir)
+              TIDEPOOL_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || echo "$PWD")
+              export TIDEPOOL_ROOT
+
+              # Set environment variables
               export MANTLE_CONTROL_HOST=127.0.0.1
               export MANTLE_CONTROL_PORT=7432
-              export MANTLE_FAIL_MODE=closed
+
+              echo "Environment:"
+              echo "  TIDEPOOL_ROOT=$TIDEPOOL_ROOT"
+              echo "  MANTLE_CONTROL_HOST=$MANTLE_CONTROL_HOST"
+              echo "  MANTLE_CONTROL_PORT=$MANTLE_CONTROL_PORT"
+              echo ""
+
+              # Build control server (always, uses cabal cache)
+              echo "Building Haskell control server..."
+              (cd "$TIDEPOOL_ROOT" && cabal build tidepool-control-server)
 
               # Build mantle-agent if needed
-              if [ ! -f rust/target/debug/mantle-agent ]; then
-                echo "Building mantle-agent..."
-                (cd rust && cargo build -p mantle-agent)
+              if [ ! -f "$TIDEPOOL_ROOT/rust/target/debug/mantle-agent" ]; then
+                echo "Building Rust mantle-agent..."
+                (cd "$TIDEPOOL_ROOT/rust" && cargo build -p mantle-agent)
               fi
 
               # Add mantle-agent to PATH
-              export PATH="$PWD/rust/target/debug:$PATH"
+              export PATH="$TIDEPOOL_ROOT/rust/target/debug:$PATH"
 
+              # Auto-copy Claude Code settings template if not exists
+              if [ ! -f "$TIDEPOOL_ROOT/.claude/settings.local.json" ]; then
+                echo "Copying Claude Code settings template..."
+                cp "$TIDEPOOL_ROOT/.claude/settings.local.json.template" \
+                   "$TIDEPOOL_ROOT/.claude/settings.local.json"
+                echo "  -> Created .claude/settings.local.json"
+              fi
+
+              echo ""
               echo "Starting zellij session 'tidepool'..."
               echo ""
 
@@ -126,7 +144,7 @@
                 zellij attach tidepool
               else
                 echo "Creating new session..."
-                zellij --layout .zellij/layout.kdl --session tidepool
+                zellij --layout "$TIDEPOOL_ROOT/.zellij/layout.kdl" --session tidepool
               fi
             '';
           };

@@ -134,39 +134,25 @@ pub fn handle_hook(event_type: HookEventType) -> Result<()> {
     Ok(())
 }
 
-/// Handle control server unavailable based on fail mode.
+/// Handle control server unavailable - fail closed.
 ///
-/// Checks `MANTLE_FAIL_MODE` environment variable:
-/// - "closed": Fail closed (error and exit 1)
-/// - "open": Fail open (allow hook to proceed)
-/// - not set: Fail open (default for backwards compatibility)
+/// During development, we want to fail loudly when the control server is unavailable
+/// to catch configuration issues early. This prevents silent failures where hooks
+/// appear to work but aren't actually being processed.
 ///
-/// Fail-closed mode is recommended during development to catch configuration
-/// issues. Fail-open mode is recommended for production so Claude Code works
-/// even without the control server.
-fn handle_server_unavailable(event_type: HookEventType, reason: &str) -> Result<()> {
-    let fail_mode = std::env::var("MANTLE_FAIL_MODE").unwrap_or_else(|_| "open".to_string());
-
-    match fail_mode.as_str() {
-        "closed" => {
-            // Fail closed: error and exit
-            error!(reason, "Control server unavailable (fail-closed mode)");
-            eprintln!("ERROR: {}", reason);
-            eprintln!("Control server required in fail-closed mode.");
-            eprintln!("Set MANTLE_CONTROL_HOST and MANTLE_CONTROL_PORT.");
-            std::process::exit(1);
-        }
-        _ => {
-            // Fail open: allow hook to proceed
-            debug!(reason, mode = %fail_mode, "Control server unavailable, failing open");
-            let output = default_allow_response(event_type);
-            println!(
-                "{}",
-                serde_json::to_string(&output).map_err(MantleError::JsonSerialize)?
-            );
-            Ok(())
-        }
-    }
+/// TODO: Add configurable fail-open mode for production deployments where Claude Code
+/// should continue working even if the control server is down. This would require:
+/// - MANTLE_FAIL_MODE environment variable ("closed" vs "open")
+/// - Proper monitoring/alerting when falling back to fail-open
+/// - Graceful degradation logic (default_allow_response)
+fn handle_server_unavailable(_event_type: HookEventType, reason: &str) -> Result<()> {
+    // Always fail closed during development
+    error!(reason, "Control server unavailable (fail-closed)");
+    eprintln!("ERROR: {}", reason);
+    eprintln!("Control server required.");
+    eprintln!("Set MANTLE_CONTROL_HOST and MANTLE_CONTROL_PORT environment variables.");
+    eprintln!("Example: export MANTLE_CONTROL_HOST=127.0.0.1 MANTLE_CONTROL_PORT=7432");
+    std::process::exit(1);
 }
 
 /// Create a default "allow" response for when no control socket is available.
