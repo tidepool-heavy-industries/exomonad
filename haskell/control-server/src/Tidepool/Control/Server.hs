@@ -79,10 +79,11 @@ handleConnection conn peer = do
   -- Currently server can block indefinitely on slow clients.
   -- Use System.Timeout.timeout (30 * 1000000) around the handler.
 
-  -- Read until newline (NDJSON framing)
-  msgBytes <- readUntilNewline conn
-
   (do
+    -- Read until newline (NDJSON framing)
+    -- Now covered by exception handler
+    msgBytes <- readUntilNewline conn
+
     case eitherDecodeStrict msgBytes of
       Left err -> do
         TIO.putStrLn $ "Parse error: " <> T.pack err
@@ -99,7 +100,7 @@ handleConnection conn peer = do
   `catch` \(e :: SomeException) -> do
     TIO.putStrLn $ "Connection error: " <> T.pack (show e)
     -- Send error response to client instead of leaving them hanging
-    sendResponse conn $ hookError $ "Internal server error: " <> T.pack (show e)
+    sendResponse conn $ hookError $ "Connection error: " <> T.pack (show e)
 
 -- | Read bytes from socket until newline.
 readUntilNewline :: Socket -> IO ByteString
