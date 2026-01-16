@@ -1,30 +1,22 @@
-# Semantic Scout - Code Exploration MCP Tool
+# Semantic Scout - Code Exploration Engine
 
-A Haskell agent that answers semantic questions about codebases using LSP (Language Server Protocol). The first production implementation of **a Tidepool LLMNode exposed as an MCP tool**.
+**IMPORTANT: This package has been merged into `haskell/control-server/`.**
 
-## When to Read This
+The semantic-scout agent is now exposed as the `scout` MCP tool via the control server. The code in this directory is a reference/archive.
 
-Read this if you're:
-- Understanding how semantic code exploration works
-- Working on the semantic-scout MCP integration
-- Implementing new MCP tools from Tidepool agents
-- Debugging LSP-based code analysis
-- Working with FunctionGemma scoring/training
+## Current Location
+
+See `haskell/control-server/CLAUDE.md` for the active implementation.
+
+The scout tool is implemented as:
+- **Handler**: `haskell/control-server/src/Tidepool/Control/Handler/MCP.hs`
+- **Exploration**: `haskell/control-server/src/Tidepool/Control/Scout/Explore.hs`
+- **Scoring**: `haskell/control-server/src/Tidepool/Control/Scout/Gemma.hs`
+- **Types**: `haskell/control-server/src/Tidepool/Control/Scout/Types.hs`
 
 ## What It Does
 
-Semantic Scout takes a natural language query about code and returns actionable pointers to relevant locations:
-
-```bash
-# As MCP tool (for Claude Code)
-semantic-scout --mcp
-
-# Demo mode with mock data
-semantic-scout --explore
-
-# Generate training examples for FunctionGemma
-semantic-scout --gen-training 100
-```
+Semantic Scout answers natural language questions about codebases using LSP (Language Server Protocol) and heuristic/ML-based scoring.
 
 **Example query:**
 ```
@@ -39,329 +31,102 @@ semantic-scout --gen-training 100
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│ Claude Code                                                          │
-│   "What breaks if I add a variant to LLMKind?"                      │
-└──────────────────────────────────────┬──────────────────────────────┘
-                                       │ MCP tools/call
-                                       ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│ semantic-scout --mcp (Main.hs)                                      │
-│   • MCP stdio server                                                │
-│   • Wraps exploreEff as MCP tool via makeMcpTool                    │
-└──────────────────────────────────────┬──────────────────────────────┘
-                                       │
-                ┌──────────────────────┼──────────────────────┐
-                ▼                      ▼                      ▼
-       ┌────────────────┐    ┌────────────────┐    ┌────────────────┐
-       │ LSP Effect     │    │ Gemma Effect   │    │ Heuristics     │
-       │ (Interpreter)  │    │ (Scorer)       │    │ (Decision)     │
-       └────────┬───────┘    └────────┬───────┘    └────────┬───────┘
-                │                     │                     │
-                ▼                     ▼                     ▼
-       HLS (workspace/symbol,  FunctionGemma 270M    shouldExpand
-            hover, references)  (or heuristics)      (prune/expand)
-                │                     │                     │
-                └──────────────┬──────┴─────────────────────┘
-                               ▼
-                    ┌──────────────────────┐
-                    │ Explore.exploreEff   │
-                    │ (BFS with budget)    │
-                    └──────────────────────┘
-                               │
-                               ▼
-                    ┌──────────────────────┐
-                    │ ScoutResponse        │
-                    │ • Summary            │
-                    │ • Pointers           │
-                    │ • Training examples  │
-                    └──────────────────────┘
+Claude Code (human TTY)
+    │
+    └─ MCP tool "scout" ──► mantle-agent mcp ──► control-server (Haskell)
+                                                       │
+                                                       ├─ LSP (HLS)
+                                                       ├─ Gemma scoring
+                                                       └─ BFS exploration
 ```
 
-## Key Modules
+## Key Components
 
-| Module | Purpose |
-|--------|---------|
-| `Main.hs` | MCP server entry point, wires LSP session into tool |
-| `Explore.hs` | BFS exploration loop (pure + effectful versions) |
-| `Types.hs` | ScoutQuery, ScoutResponse, Pointer data types |
-| `Gemma.hs` | Pluggable scorer effect + interpreters |
-| `Heuristics.hs` | Decision rules for expansion and scoring |
-| `LSP.hs` | LSP integration helpers (makeNodeContext, etc.) |
+| Component | Location | Purpose |
+|-----------|----------|---------|
+| **MCP Handler** | `control-server/Handler/MCP.hs` | Receives scout calls, runs exploration |
+| **Exploration Loop** | `control-server/Scout/Explore.hs` | BFS with LSP + Gemma scoring |
+| **LSP Integration** | `effects/lsp-interpreter/` | HLS communication via lsp-test |
+| **Scoring** | `control-server/Scout/Gemma.hs` | Pluggable scorer (heuristic/HTTP) |
+| **Training Data** | `tools/training-generator/` | Types + JSONL formatting |
 
-## Data Model
+## Data Flow
 
-### Input: ScoutQuery
-```haskell
-data ScoutQuery = ScoutQuery
-  { query  :: Text           -- Natural language question
-  , tags   :: [Tag]          -- What kind of changes break code
-  , budget :: Maybe Int      -- Max nodes to explore (default: 20)
-  }
-
-data Tag
-  = Exhaustive      -- Changes break exhaustive pattern matches
-  | PatternMatch    -- Changes break specific pattern matches
-  | TypeFamily      -- Changes affect type families
-  | Constraint      -- Changes affect typeclass constraints
-  | ...
-```
-
-### Output: ScoutResponse
-```haskell
-data ScoutResponse = ScoutResponse
-  { summary          :: Text
-  , pointers         :: [Pointer]
-  , nodesVisited     :: Int
-  , trainingExamples :: [TrainingExample]
-  }
-
-data Pointer = Pointer
-  { location  :: Text           -- "File.hs:45"
-  , what      :: Text           -- Hover snippet
-  , risk      :: Int            -- 1-5: Impact of breaking change
-  , relevance :: Int            -- 1-5: Relevance to query
-  , action    :: Text           -- Suggested next step
-  }
-```
-
-## Exploration Algorithm
-
-### Pure Version (explore)
-```haskell
-explore
-  :: Monad m
-  => Scorer m           -- Abstract scoring function
-  -> QueryContext       -- User query + tags
-  -> [NodeId]           -- Entry points
-  -> Budget             -- Node exploration limit
-  -> m [ScoredNode]     -- Results with scores
-```
-
-Uses abstract `Scorer` type for testing with mock data.
-
-### Effectful Version (exploreEff)
-```haskell
-exploreEff
-  :: (Member LSP effs, Member Gemma effs)
-  => ScoutQuery
-  -> Eff effs ScoutResponse
-```
-
-Implements the BFS loop with real effects:
-
-1. **Find entry points**: `workspaceSymbol` search based on query
-2. **Fetch context**: For each node, `hover` + file snippet
-3. **Score node**: `Gemma` effect rates relevance + risk
-4. **Decide expansion**: `shouldExpand` checks rubric + budget + depth
-5. **Queue children**: `references` for BFS expansion
-6. **Collect results**: Sort by relevance, return top pointers
-
-### Budget Management
-- **Node limit**: Max nodes to visit (default: 20)
-- **Depth limit**: Max BFS depth (default: 5)
-- **Breadth limit**: Max children per node (default: 10)
+1. **User query** → Claude Code MCP call
+2. **mantle-agent mcp** → TCP to control-server
+3. **control-server** → handleMcpTool "scout"
+4. **Exploration**:
+   - Find entry points via LSP workspace/symbol
+   - BFS expansion via LSP references
+   - Score each node with Gemma effect
+   - Collect high-risk/relevance pointers
+5. **Response** → ScoutResponse with pointers + training examples
 
 ## Scoring: Gemma Effect
 
-The `Gemma` effect decouples scoring from exploration logic:
+The `Gemma` effect decouples scoring from exploration:
 
 ```haskell
-data Gemma m a where
-  RateNode :: QueryContext -> NodeContext -> Gemma m Rubric
-
-data Rubric = Rubric
-  { relevance   :: Int  -- 1-5
-  , risk        :: Int  -- 1-5
-  , confidence  :: Int  -- 1-5
-  , reasoning   :: Text
-  }
+data Gemma a where
+  RateEdge :: Text -> EdgeContext -> Gemma Rubric
+  RateNode :: QueryContext -> NodeContext -> Gemma Rubric
 ```
 
 ### Interpreters
 
-| Interpreter | Purpose |
-|-------------|---------|
-| `runGemmaMock` | Hardcoded rubrics for testing |
-| `runGemmaHeuristic` | Pattern-based rules (current) |
-| Future: `runGemmaModel` | HTTP to FunctionGemma 270M |
+| Interpreter | Status | Purpose |
+|-------------|--------|---------|
+| `runGemmaHeuristic` | ✅ Active | Pattern-based rules (baseline) |
+| `runGemmaHTTP` | ✅ Implemented | Call mistralrs-server for FunctionGemma 270M |
+| `runGemmaMock` | ✅ Available | Hardcoded rubrics (testing) |
 
-**Why pluggable?** Allows testing without model dependency, enables gradual migration from heuristics to ML.
+The HTTP interpreter calls a local FunctionGemma model via `GEMMA_ENDPOINT` environment variable.
 
-## Heuristics
+## Training Data
 
-`Heuristics.hs` contains pattern-based scoring rules:
-
-### scoreNode
-Analyzes hover text + code snippet:
-```haskell
-scoreNode :: QueryContext -> NodeContext -> Rubric
-scoreNode query node
-  | "pattern" `isInfixOf` hover && Exhaustive `elem` tags query =
-      Rubric 5 5 4 "Exhaustive pattern match"
-  | "type family" `isInfixOf` hover && TypeFamily `elem` tags query =
-      Rubric 5 4 4 "Type family definition"
-  | "data" `isInfixOf` hover =
-      Rubric 3 2 5 "Data type definition"
-  | otherwise =
-      Rubric 1 1 3 "Generic code location"
-```
-
-### shouldExpand
-Decides whether to follow references:
-```haskell
-shouldExpand :: Rubric -> QueryContext -> Depth -> Breadth -> Bool
-shouldExpand rubric query depth breadth
-  | relevance rubric >= 4 = True   -- High relevance: always expand
-  | depth > 5 = False              -- Too deep: prune
-  | breadth > 10 = False           -- Too wide: prune
-  | otherwise = relevance rubric >= 3
-```
-
-## MCP Integration
-
-`Main.hs` exposes the agent as an MCP tool:
-
-```haskell
-main :: IO ()
-main = do
-  mode <- parseArgs
-  case mode of
-    MCP -> withLSPSession "." $ \session ->
-      runMcpServer $ McpConfig
-        { mcName = "semantic-scout"
-        , mcVersion = "0.1"
-        , mcTools =
-            [ makeMcpTool
-                (Proxy @ScoutQuery)
-                "scout"
-                "Answer semantic questions about code"
-                (executeScout session)
-            ]
-        }
-```
-
-### MCP Tool Definition
-```json
-{
-  "name": "scout",
-  "description": "Answer semantic questions about code",
-  "inputSchema": {
-    "type": "object",
-    "properties": {
-      "query": { "type": "string" },
-      "tags": { "type": "string", "description": "Comma-separated tags" },
-      "budget": { "type": "integer", "default": 20 }
-    },
-    "required": ["query"]
-  }
-}
-```
-
-**Note**: Tags serialized as comma-separated string for MCP compatibility (Aeson instance handles conversion).
-
-## Training Data Generation
-
-`--gen-training N` mode generates examples for fine-tuning FunctionGemma:
+Exploration generates training examples during each run:
 
 ```haskell
 data TrainingExample = TrainingExample
-  { teQuery     :: QueryContext
-  , teNode      :: NodeContext
-  , teRubric    :: Rubric
-  , teTimestamp :: UTCTime
+  { teQuery  :: QueryContext
+  , teNode   :: NodeContext
+  , teRubric :: Rubric
   }
 ```
 
-Flow:
-1. Run exploration with heuristic scorer
-2. Collect (query, node, rubric) triples
-3. Export as JSON for FunctionGemma fine-tuning
-4. Future: Replace heuristics with trained model
+These are included in `ScoutResponse.srTrainingExamples` and can be exported for fine-tuning.
 
-See `haskell/tools/training-generator/CLAUDE.md` for dataset format.
+See `haskell/tools/training-generator/CLAUDE.md` for JSONL format details.
 
-## LSP Integration
+## Running
 
-Uses `tidepool-lsp-interpreter` for code intelligence:
+The scout tool runs inside the control-server:
 
-```haskell
-import Tidepool.Effects.LSP
-import Tidepool.LSP.Interpreter (withLSPSession, runLSP)
-
-withLSPSession "/path/to/project" $ \session -> do
-  result <- runM $ runLSP session $ exploreEff query
-  pure result
-```
-
-**Session lifecycle:**
-- One session per MCP server instance (long-lived)
-- Amortizes HLS startup cost (~5s) across many queries
-- Thread-safe via Chan + worker pattern
-
-See `haskell/effects/lsp-interpreter/CLAUDE.md` for LSP details.
-
-## Running Modes
-
-### MCP Server (Production)
 ```bash
-semantic-scout --mcp
-# Reads JSON-RPC 2.0 from stdin, outputs to stdout
-# Used by Claude Code via mcpServers config
+# Start control server (includes scout MCP tool)
+cd /path/to/project
+cabal run tidepool-control-server
+
+# Claude Code calls it via:
+# Tool: scout
+# Arguments: { query: "...", symbols: [...], depth: "medium" }
 ```
-
-### Demo Mode (Development)
-```bash
-semantic-scout --explore
-# Uses mock data for entry points, node contexts, children
-# No HLS required
-```
-
-### Training Generation
-```bash
-semantic-scout --gen-training 100 > training.json
-# Explores codebase, outputs training examples
-# Requires HLS + project with working LSP setup
-```
-
-## Requirements
-
-- `haskell-language-server-wrapper` on PATH
-- Project with valid `hie.yaml` or cabal config
-- Initial HLS load may take 5-10 seconds
-
-## Dependencies
-
-| Package | Purpose |
-|---------|---------|
-| `tidepool-lsp-interpreter` | LSP effect interpreter |
-| `tidepool-mcp-server` | MCP tool wrapping |
-| `training-generator` | Training data types |
-| `freer-simple` | Effect system |
-| `aeson` | JSON serialization |
-
-## Design Decisions
-
-| Decision | Rationale |
-|----------|-----------|
-| Effect-based LSP | Testable without HLS, supports WASM future |
-| Pluggable scorer | Allows heuristics → ML migration without refactoring |
-| BFS with budget | Prevents runaway exploration, bounded latency |
-| Tags as strings | MCP doesn't support enum types well |
-| Long-lived session | Amortizes HLS startup across queries |
-| Training data collection | Enables supervised learning from heuristics |
 
 ## Related Documentation
 
-- [effects/lsp-interpreter/CLAUDE.md](../../effects/lsp-interpreter/CLAUDE.md) - LSP integration
-- [effects/mcp-server/CLAUDE.md](../../effects/mcp-server/CLAUDE.md) - MCP tool wrapping
-- [tools/training-generator/CLAUDE.md](../../tools/training-generator/CLAUDE.md) - Training data format
-- [Root CLAUDE.md](../../../CLAUDE.md) - Project overview
+- **[haskell/control-server/CLAUDE.md](../../control-server/CLAUDE.md)** - Main implementation (current)
+- **[haskell/effects/lsp-interpreter/CLAUDE.md](../../effects/lsp-interpreter/CLAUDE.md)** - LSP integration
+- **[haskell/tools/training-generator/CLAUDE.md](../../tools/training-generator/CLAUDE.md)** - Training data format
+- **[rust/mantle-agent/CLAUDE.md](../../../rust/mantle-agent/CLAUDE.md)** - MCP forwarding
+- **[Root CLAUDE.md](../../../CLAUDE.md)** - Project overview
 
-## Future Work
+## Migration Notes
 
-- Replace heuristics with trained FunctionGemma model
-- Add more LSP operations (definition, implementation)
-- Support multiple language servers (not just HLS)
-- Incremental exploration (resume from previous query)
-- Query history and caching
+**Why merged into control-server?**
+
+1. **Session sharing**: Both hook handling and scout need long-lived LSP sessions
+2. **Simplified deployment**: One binary instead of two
+3. **Shared types**: Scout types used by both MCP tools and hooks
+4. **Reduced IPC**: No need for separate MCP server process
+
+The standalone semantic-scout binary has been removed. All scout functionality is now part of `tidepool-control-server`.

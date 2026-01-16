@@ -1,53 +1,33 @@
-# tools/ - Development and Analysis Tools
+# tools/ - Root-Level Development Tools
 
-Standalone tools for development, analysis, and sleeptime workflows.
+Non-Haskell standalone tools for development and analysis.
+
+**Note**: For Haskell tools (ghci-oracle, sleeptime, training-generator), see `haskell/tools/CLAUDE.md`.
 
 ## Tools
-
-### ghci-oracle
-
-Persistent GHCi session server for type queries and expression evaluation. Runs as a standalone process to isolate heavy GHCi dependencies from the main tidepool build.
-
-```bash
-cd tools/ghci-oracle
-cabal run ghci-oracle -- --port 9999 --project /path/to/project
-```
-
-**Modules:**
-- `GHCi.Oracle.Server` - Socket server, request dispatch
-- `GHCi.Oracle.Session` - GHCi subprocess lifecycle management
-- `GHCi.Oracle.Protocol` - Length-prefixed JSON wire protocol
-- `GHCi.Oracle.Types` - Wire protocol types
-
-**Purpose:** Enable fast, repeated GHCi queries without spawning new processes. Used by `tidepool-ghci-interpreter` to interpret the `GHCi` effect.
-
-See [ghci-oracle/CLAUDE.md](ghci-oracle/CLAUDE.md) for full documentation.
-
-### sleeptime-logs
-
-CLI for querying Grafana/Loki logs during sleeptime evolution workflows.
-
-```bash
-cabal run sleeptime-logs -- <args>
-```
-
-**Modules:**
-- `SleeptimeLogs.CLI` - Command-line interface
-- `SleeptimeLogs.Loki` - Loki query API
-- `SleeptimeLogs.Config` - Configuration management
-- `SleeptimeLogs.Output` - Output formatting
-
-**Purpose:** Query structured logs to analyze graph transitions, LLM calls, and errors during sleeptime evolution.
 
 ### blast-radius.sh
 
 Shell script for quick blast radius analysis of code changes.
 
+```bash
+./tools/blast-radius.sh <file-pattern>
+```
+
+**Purpose:** Identifies potential impact zones when modifying code, helping understand what might break.
+
 ### micro-gastown
 
 Experimental micro-service tooling.
 
+```bash
+cd tools/micro-gastown
+# See micro-gastown README for usage
+```
+
+**Status:** Experimental - not currently integrated into main workflows.
+
 ## Related Documentation
 
-- [tidepool-native-gui/CLAUDE.md](../tidepool-native-gui/CLAUDE.md) - observability-interpreter used with sleeptime-logs
-- [Root CLAUDE.md](../CLAUDE.md) - Sleeptime concept overview
+- **[haskell/tools/CLAUDE.md](../haskell/tools/CLAUDE.md)** - Haskell standalone tools (ghci-oracle, sleeptime, training-generator)
+- **[Root CLAUDE.md](../CLAUDE.md)** - Project overview
