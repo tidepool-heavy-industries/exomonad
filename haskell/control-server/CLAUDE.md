@@ -1,128 +1,176 @@
 # Tidepool Control Server
 
-TCP server for Claude Code++ integration. Receives hook events and MCP tool calls from mantle-agent via NDJSON over TCP.
+Unix socket server for Claude Code++ integration. Receives hook events and MCP tool calls from mantle-agent via NDJSON over Unix socket. Provides semantic code exploration via the `scout` MCP tool.
 
 ## Architecture
 
 ```
-Claude Code (TTY) ──► mantle-agent (hook/mcp) ──► TCP :7432 ──► Control Server (Haskell)
-                                                                         │
-                                                                         ├─ Hook handlers
-                                                                         └─ MCP handlers
+Claude Code (human-driven)
+    │
+    └─ MCP ──► mantle-agent ──► Unix socket ──► Control Server (Haskell)
+                                 (.tidepool/control.sock)
+                                                   │
+                                                   ├─ MCP: "scout" tool
+                                                   │    ├─ LSP (code intelligence)
+                                                   │    └─ FunctionGemma (local model)
+                                                   │
+                                                   └─ Hook handlers (passthrough)
+```
+
+## .tidepool Directory Convention
+
+Project-local configuration in `.tidepool/` (gitignored):
+
+```
+<project-root>/
+├── .tidepool/              ← gitignored
+│   ├── control.sock        ← Unix socket for IPC
+│   └── config.json         ← Optional: project-specific config (future)
+├── .gitignore              ← Contains: .tidepool/
+└── ...
 ```
 
 ## What It Does
 
-- Listens on TCP (default `127.0.0.1:7432`)
+- Listens on Unix socket at `.tidepool/control.sock`
+- Maintains long-lived LSP session for code intelligence
 - Accepts NDJSON connections (JSON + newline framing)
 - Parses `ControlMessage` (HookEvent | McpToolCall)
 - Routes to appropriate handlers
 - Returns `ControlResponse` (HookResponse | McpToolResponse)
 
-## Protocol
+## MCP Tools
 
-Matches rust/mantle-shared/src/protocol.rs exactly. See that file for the full spec.
+### `scout` - Semantic Code Exploration
 
-**Request** (Client → Server):
+Explores code using LSP (hover, references, workspace symbols) and scores relevance with FunctionGemma heuristics.
+
+**Request**:
 ```json
-{"type":"HookEvent","input":{...}}\n
+{
+  "type": "MCPToolCall",
+  "id": "1",
+  "tool_name": "scout",
+  "arguments": {
+    "query": "What breaks if I add a new variant to LLMKind?",
+    "symbols": ["LLMKind"],
+    "depth": "medium"
+  }
+}
 ```
 
-**Response** (Server → Client):
+**Response**:
 ```json
-{"type":"HookResponse","output":{...},"exit_code":0}\n
+{
+  "type": "MCPToolResponse",
+  "id": "1",
+  "result": {
+    "summary": "## Exploration Summary\n\nQuery: What breaks...",
+    "pointers": [
+      {
+        "location": "Types.hs:45",
+        "what": "data LLMKind = Anthropic | OpenAI | Local",
+        "risk": 4,
+        "relevance": 5,
+        "tags": ["Exhaustive", "TypeFamily"],
+        "action": "Add case for new variant"
+      }
+    ],
+    "nodesVisited": 15,
+    "trainingExamples": [...]
+  }
+}
 ```
 
-## Current Behavior
+## Hook Handlers
 
-### Hook Handler (passthrough)
-
-All hooks are logged and allowed. No real logic yet.
+All hooks are currently logged and allowed (passthrough). No blocking logic yet.
 
 - PreToolUse → allow with `permissionDecision: "allow"`
 - PostToolUse → allow with no additional context
 - Other hooks → continue
 
-**TODO**: Wire to Tidepool effect stack for real hook logic.
-
-### MCP Handler (stub)
-
-All MCP tool calls return an error: "no tools available".
-
-**TODO**: Expose Tidepool agents as MCP tools (e.g., semantic-scout).
-
 ## Running
 
 ```bash
-# Via nix shell (recommended for Claude Code++)
-nix develop .#claude-code-plus
-
-# Or manually
-export MANTLE_CONTROL_HOST=127.0.0.1
-export MANTLE_CONTROL_PORT=7432
+# Start in project directory (creates .tidepool/control.sock)
+cd /path/to/your/project
 cabal run tidepool-control-server
+
+# Or set project directory via environment
+TIDEPOOL_PROJECT_DIR=/path/to/project cabal run tidepool-control-server
 ```
 
 Server logs to stdout:
 ```
-Control server starting on 127.0.0.1:7432
-Control server listening...
-Connection from V4(127.0.0.1:50123)
-[HOOK] PreToolUse tool=Read
-  session=abc123
-  cwd=/tmp/project
-[HOOK] -> continue=true decision=allow exit=0
+Created .tidepool directory at ./.tidepool
+Starting LSP session for project: .
+[LSP] Session started, HLS initialized
+LSP session initialized
+Control server listening on ./.tidepool/control.sock
+Connection received
+[MCP] tool=scout
+  query=What breaks if I add a new variant?
+  symbols=LLMKind
+  depth=Medium
+  found 15 locations
+[MCP] -> success
+```
+
+## Testing
+
+```bash
+# Check socket exists
+ls -la .tidepool/control.sock
+
+# Send test message via socat
+echo '{"type":"MCPToolCall","id":"1","tool_name":"scout","arguments":{"query":"What breaks?","symbols":["LLMKind"],"depth":"low"}}' | \
+  socat - UNIX-CONNECT:.tidepool/control.sock
 ```
 
 ## Environment Variables
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `MANTLE_CONTROL_HOST` | 127.0.0.1 | TCP bind address |
-| `MANTLE_CONTROL_PORT` | 7432 | TCP port |
+| `TIDEPOOL_PROJECT_DIR` | Current directory | Project root (where .tidepool/ lives) |
 
 ## Module Structure
 
 | File | Purpose |
 |------|---------|
 | `Protocol.hs` | ControlMessage/Response types (matches Rust) |
-| `Server.hs` | TCP listener, NDJSON framing, connection handling |
-| `Handler.hs` | Message routing |
+| `Server.hs` | Unix socket listener, LSP session, NDJSON framing |
+| `Handler.hs` | Message routing (threads LSP session) |
 | `Handler/Hook.hs` | Hook event handler (passthrough) |
-| `Handler/MCP.hs` | MCP tool handler (stub) |
+| `Handler/MCP.hs` | MCP tool handler (scout implementation) |
+| `Scout/*.hs` | Semantic exploration (merged from semantic-scout) |
 | `Main.hs` | Entry point |
+
+### Scout Modules
+
+| Module | Purpose |
+|--------|---------|
+| `Scout/Types.hs` | ScoutQuery, ScoutResponse, Pointer |
+| `Scout/EdgeTypes.hs` | EdgeType enum, EdgeContext |
+| `Scout/Scoring.hs` | Composite scoring, Frontier priority queue |
+| `Scout/Graph.hs` | Self-looping exploration graph |
+| `Scout/Explore.hs` | BFS exploration loop (pure + effectful) |
+| `Scout/Gemma.hs` | Gemma effect (heuristic fallback) |
+| `Scout/Heuristics.hs` | Node/edge scoring heuristics |
+| `Scout/LSP.hs` | LSP helpers (location formatting) |
+| `Scout/Templates.hs` | Jinja templates for FunctionGemma prompts |
 
 ## Integration with Claude Code
 
-1. mantle-agent hook commands read from Claude Code stdin
-2. Forward to control server via TCP (NDJSON)
-3. Control server returns response
-4. mantle-agent writes response to Claude Code stdout
-
-## Adding Real Hook Logic
-
-To wire hooks to the Tidepool effect stack:
-
-1. Add effect dependencies to `tidepool-control-server.cabal`
-2. Import effect runner from `tidepool-native-server` or create new one
-3. Replace passthrough logic in `Handler/Hook.hs` with effect dispatch
-4. Use shared state (STM TVars) for cross-call communication
-
-## Adding MCP Tools
-
-To expose Tidepool agents as MCP tools:
-
-1. Import agents (e.g., `tidepool-semantic-scout`)
-2. Define tool schemas in `Handler/MCP.hs`
-3. Parse tool arguments and dispatch to agent
-4. Return agent results as MCP responses
-
-See `haskell/effects/mcp-server/CLAUDE.md` for the existing MCP server pattern (exposes to Claude Code as MCP server over stdio, not TCP).
+1. Start control-server in project directory
+2. Configure mantle-agent to connect to `.tidepool/control.sock`
+3. In Claude Code: call `mcp__semantic-scout__scout` tool
+4. Control server runs exploration with LSP + Gemma
+5. Returns pointers and relevance scores
 
 ## Next Steps
 
-1. Wire hook handlers to effect stack
-2. Add semantic-scout as MCP tool
-3. Implement shared state (TVars) between hooks and MCP
+1. Wire real FunctionGemma model (currently using heuristics)
+2. Add more MCP tools (e.g., beads task tracking)
+3. Wire hook handlers to effect stack
 4. Add metrics collection to mantle-hub
-5. Implement daemon mode in mantle-agent (long-lived process)

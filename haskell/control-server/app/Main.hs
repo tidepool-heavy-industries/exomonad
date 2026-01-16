@@ -1,20 +1,18 @@
 module Main where
 
-import Data.Text (pack)
+import System.Directory (getCurrentDirectory)
 import System.Environment (lookupEnv)
-import Text.Read (readMaybe)
 
 import Tidepool.Control.Server
 
 main :: IO ()
 main = do
-  -- Read config from environment
-  hostEnv <- lookupEnv "MANTLE_CONTROL_HOST"
-  portEnv <- lookupEnv "MANTLE_CONTROL_PORT"
+  -- Read project directory from environment or use current directory
+  projectDirEnv <- lookupEnv "TIDEPOOL_PROJECT_DIR"
+  projectDir <- case projectDirEnv of
+    Just dir -> pure dir
+    Nothing -> getCurrentDirectory
 
-  let config = defaultConfig
-        { host = maybe (host defaultConfig) pack hostEnv
-        , port = maybe (port defaultConfig) id (portEnv >>= readMaybe)
-        }
+  let config = ServerConfig { projectDir = projectDir }
 
   runServer config

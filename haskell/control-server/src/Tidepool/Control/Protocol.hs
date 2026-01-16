@@ -23,6 +23,7 @@ module Tidepool.Control.Protocol
   , hookSuccess
   , hookError
   , mcpToolError
+  , mcpToolSuccess
   ) where
 
 import Data.Aeson
@@ -373,3 +374,7 @@ hookError msg = HookResponse (blockHook msg) 2
 -- | Create an MCP tool error response.
 mcpToolError :: Text -> Text -> ControlResponse
 mcpToolError reqId msg = McpToolResponse reqId Nothing (Just $ McpError (-32603) msg)
+
+-- | Create a successful MCP tool response.
+mcpToolSuccess :: Text -> Value -> ControlResponse
+mcpToolSuccess reqId result = McpToolResponse reqId (Just result) Nothing

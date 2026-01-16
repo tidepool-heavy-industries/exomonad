@@ -1,7 +1,9 @@
--- | TCP control server for Claude Code++ integration.
+-- | Unix socket control server for Claude Code++ integration.
 --
--- Listens on a TCP port and handles NDJSON messages from mantle-agent.
--- Each connection is one request-response pair.
+-- Listens on a Unix socket at .tidepool/control.sock and handles NDJSON
+-- messages from mantle-agent. Each connection is one request-response pair.
+--
+-- The server maintains a long-lived LSP session for code intelligence.
 module Tidepool.Control.Server
   ( ServerConfig(..)
   , defaultConfig
@@ -9,70 +11,96 @@ module Tidepool.Control.Server
   ) where
 
 import Control.Concurrent (forkIO)
-import Control.Exception (SomeException, catch, finally)
-import Control.Monad (forever, void)
+import Control.Exception (SomeException, catch, finally, bracket)
+import Control.Monad (forever, void, when)
 import Data.Aeson (eitherDecodeStrict, encode)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BS8
 import qualified Data.ByteString.Lazy as LBS
-import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import Network.Socket hiding (ControlMessage)
 import Network.Socket.ByteString (recv, sendAll)
+import System.Directory (createDirectoryIfMissing, doesFileExist, removeFile)
+import System.FilePath ((</>))
 import System.IO (hFlush, stdout)
 
 import Tidepool.Control.Handler (handleMessage)
 import Tidepool.Control.Protocol
+import Tidepool.LSP.Interpreter (LSPSession, withLSPSession)
 
 -- | Server configuration.
 data ServerConfig = ServerConfig
-  { host :: Text
-  , port :: Int
+  { projectDir :: FilePath
+    -- ^ Project root directory (where .tidepool/ lives)
   }
   deriving stock (Show, Eq)
 
--- | Default configuration: localhost:7432
+-- | Default configuration: current directory
 defaultConfig :: ServerConfig
 defaultConfig = ServerConfig
-  { host = "127.0.0.1"
-  , port = 7432
+  { projectDir = "."
   }
 
 -- | Run the control server. Blocks forever.
+--
+-- 1. Creates .tidepool/ directory if needed
+-- 2. Cleans up stale socket file
+-- 3. Starts LSP session for the project
+-- 4. Accepts connections on Unix socket
 runServer :: ServerConfig -> IO ()
 runServer config = do
-  TIO.putStrLn $ "Control server starting on " <> config.host <> ":" <> T.pack (show config.port)
+  let tidepoolDir = config.projectDir </> ".tidepool"
+  let socketPath = tidepoolDir </> "control.sock"
+
+  -- Setup .tidepool directory
+  createDirectoryIfMissing True tidepoolDir
+  TIO.putStrLn $ "Created .tidepool directory at " <> T.pack tidepoolDir
   hFlush stdout
 
-  let hints = defaultHints
-        { addrFlags = [AI_PASSIVE]
-        , addrSocketType = Stream
-        }
+  -- Clean up stale socket
+  staleExists <- doesFileExist socketPath
+  when staleExists $ do
+    TIO.putStrLn "Removing stale socket file..."
+    removeFile socketPath
 
-  addrs <- getAddrInfo (Just hints) (Just $ T.unpack config.host) (Just $ show config.port)
-  addr <- case addrs of
-    [] -> error "No address info returned"
-    (a:_) -> pure a
+  TIO.putStrLn $ "Starting LSP session for project: " <> T.pack config.projectDir
+  hFlush stdout
 
-  sock <- openSocket addr
-  setSocketOption sock ReuseAddr 1
-  withFdSocket sock setCloseOnExecIfNeeded
-  bind sock (addrAddress addr)
+  -- Start LSP session and run server
+  withLSPSession config.projectDir $ \lspSession -> do
+    TIO.putStrLn "LSP session initialized"
+    hFlush stdout
+
+    bracket (setupSocket socketPath) (closeSocket socketPath) $ \sock -> do
+      TIO.putStrLn $ "Control server listening on " <> T.pack socketPath
+      hFlush stdout
+
+      forever $ do
+        (conn, _peer) <- accept sock
+        void $ forkIO $ handleConnection lspSession conn `finally` close conn
+
+-- | Setup Unix domain socket.
+setupSocket :: FilePath -> IO Socket
+setupSocket socketPath = do
+  sock <- socket AF_UNIX Stream 0
+  bind sock (SockAddrUnix socketPath)
   listen sock 10
+  pure sock
 
-  TIO.putStrLn "Control server listening..."
-  hFlush stdout
-
-  forever $ do
-    (conn, peer) <- accept sock
-    void $ forkIO $ handleConnection conn peer `finally` close conn
+-- | Close socket and clean up socket file.
+closeSocket :: FilePath -> Socket -> IO ()
+closeSocket socketPath sock = do
+  close sock
+  -- Clean up socket file on shutdown
+  exists <- doesFileExist socketPath
+  when exists $ removeFile socketPath
 
 -- | Handle a single connection (one NDJSON request-response).
-handleConnection :: Socket -> SockAddr -> IO ()
-handleConnection conn peer = do
-  TIO.putStrLn $ "Connection from " <> T.pack (show peer)
+handleConnection :: LSPSession -> Socket -> IO ()
+handleConnection lspSession conn = do
+  TIO.putStrLn "Connection received"
   hFlush stdout
 
   -- FIXME: Add socket timeout (30s) to match Rust client timeout.
@@ -93,7 +121,7 @@ handleConnection conn peer = do
 
       Right msg -> do
         logMessage msg
-        response <- handleMessage msg
+        response <- handleMessage lspSession msg
         logResponse response
         sendResponse conn response
     )

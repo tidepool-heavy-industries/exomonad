@@ -26,7 +26,7 @@ packages:
     haskell/effects/mcp-server
 
     -- Agent examples
-    haskell/agents/semantic-scout
+    -- haskell/agents/semantic-scout  -- MERGED into control-server
 
     -- Effect types (standalone)
     haskell/effects/habitica
