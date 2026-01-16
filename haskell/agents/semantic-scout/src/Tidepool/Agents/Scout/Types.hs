@@ -4,18 +4,23 @@
 
 -- | Types for the semantic scout tool.
 --
+-- Design: FunctionGemma as coalgebra in an anamorphism.
+-- The model handles one step at a time: (Query, Edge) → Rubric
+-- The exploration loop handles the recursion.
+--
 -- Uses the shared Tag enum from training-generator for consistency
 -- between exploration and training data generation.
 module Tidepool.Agents.Scout.Types
   ( -- * Query Input
     ScoutQuery(..)
-  , defaultBudget
+  , Depth(..)
+  , depthToBudget
 
     -- * Response Output
   , ScoutResponse(..)
   , Pointer(..)
 
-    -- * Exploration State
+    -- * Exploration State (legacy, for compatibility)
   , ExploreState(..)
   , initialExploreState
   , VisitedNode(..)
@@ -36,11 +41,9 @@ import Data.Aeson
   )
 import Data.Aeson.Types (Parser)
 import Data.Foldable (toList)
-import Data.Maybe (mapMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
-import Text.Read (readMaybe)
 
 import Tidepool.Schema (HasJSONSchema(..), objectSchema, arraySchema, emptySchema, SchemaType(..))
 
@@ -56,67 +59,77 @@ import Tidepool.Training.Types
   )
 
 
+-- | Exploration depth controls budget.
+--
+-- Semantic levels that map to concrete node limits:
+--   * Low: Quick scan (~10 nodes)
+--   * Medium: Thorough exploration (~30 nodes)
+--   * High: Exhaustive search (~100 nodes)
+data Depth = Low | Medium | High
+  deriving stock (Show, Eq, Generic, Bounded, Enum)
+
+instance FromJSON Depth where
+  parseJSON = \case
+    String "low"    -> pure Low
+    String "medium" -> pure Medium
+    String "high"   -> pure High
+    String "Low"    -> pure Low
+    String "Medium" -> pure Medium
+    String "High"   -> pure High
+    _               -> pure Medium  -- Default to medium
+
+instance ToJSON Depth where
+  toJSON Low    = String "low"
+  toJSON Medium = String "medium"
+  toJSON High   = String "high"
+
+-- | Convert semantic depth to concrete budget.
+depthToBudget :: Depth -> Int
+depthToBudget Low    = 10
+depthToBudget Medium = 30
+depthToBudget High   = 100
+
+
 -- | Input query for semantic code exploration.
 --
--- Note: Tags are stored as [Tag] internally but parsed from comma-separated
--- Text for MCP compatibility (mcp-server library limitation).
+-- Caller provides:
+--   * query: Natural language question (for relevance scoring only)
+--   * symbols: Explicit entry point symbols (no NL parsing needed)
+--   * depth: How thoroughly to explore (Low/Medium/High)
+--
+-- FunctionGemma scores edges for relevance to the query.
+-- The exploration loop follows high-scoring edges.
 data ScoutQuery = ScoutQuery
   { sqQuery :: Text
-    -- ^ Natural language question about the codebase
-  , sqTags :: [Tag]
-    -- ^ Interest signals using the fixed Tag enum
-  , sqBudget :: Maybe Int
-    -- ^ Maximum number of LSP calls to make (default: 20)
+    -- ^ Natural language question (for relevance scoring, not symbol lookup)
+  , sqSymbols :: [Text]
+    -- ^ Entry point symbols (explicit, resolved via workspaceSymbol)
+  , sqDepth :: Depth
+    -- ^ Exploration depth: Low (~10), Medium (~30), High (~100)
   } deriving stock (Show, Eq, Generic)
 
--- | Custom FromJSON that handles tags as comma-separated string
--- (for MCP compatibility) or as a proper JSON array.
+-- | Parse ScoutQuery from JSON.
+-- Symbols can be array or comma-separated string for MCP compatibility.
 instance FromJSON ScoutQuery where
   parseJSON = withObject "ScoutQuery" $ \v -> ScoutQuery
     <$> v .: "query"
-    <*> (parseTags =<< v .:? "tags" .!= "")
-    <*> (parseOptionalInt =<< v .:? "budget")
+    <*> (parseSymbols =<< v .:? "symbols" .!= Array mempty)
+    <*> v .:? "depth" .!= Medium
     where
-      -- Parse tags from either comma-separated string or JSON array
-      parseTags :: Value -> Parser [Tag]
-      parseTags (String t)
+      -- Parse symbols from either comma-separated string or JSON array
+      parseSymbols :: Value -> Parser [Text]
+      parseSymbols (String t)
         | T.null t = pure []
-        | otherwise = pure $ mapMaybe parseTag (T.splitOn "," t)
-      parseTags (Array arr) = mapM parseJSON (toList arr)
-      parseTags _ = pure []
-
-      -- Parse optional int from either string or number
-      parseOptionalInt :: Maybe Value -> Parser (Maybe Int)
-      parseOptionalInt Nothing = pure Nothing
-      parseOptionalInt (Just (Number n)) = pure $ Just (round n)
-      parseOptionalInt (Just (String s)) = pure $ readMaybe (T.unpack s)
-      parseOptionalInt (Just _) = pure Nothing
-
-      -- Parse a single tag from text
-      parseTag :: Text -> Maybe Tag
-      parseTag t = case T.toLower (T.strip t) of
-        "exhaustive" -> Just Exhaustive
-        "patternmatch" -> Just PatternMatch
-        "typefamily" -> Just TypeFamily
-        "breaksonadd" -> Just BreaksOnAdd
-        "import" -> Just Import
-        "reexport" -> Just ReExport
-        "signature" -> Just Signature
-        "implementation" -> Just Implementation
-        "constructor" -> Just Constructor
-        "recursive" -> Just Recursive
-        _ -> Nothing
+        | otherwise = pure $ map T.strip (T.splitOn "," t)
+      parseSymbols (Array arr) = mapM parseJSON (toList arr)
+      parseSymbols _ = pure []
 
 instance ToJSON ScoutQuery where
   toJSON sq = object
     [ "query" .= sqQuery sq
-    , "tags" .= map tagToText (sqTags sq)
-    , "budget" .= sqBudget sq
+    , "symbols" .= sqSymbols sq
+    , "depth" .= sqDepth sq
     ]
-
--- | Default exploration budget.
-defaultBudget :: Int
-defaultBudget = 20
 
 -- | Response from semantic scout.
 data ScoutResponse = ScoutResponse
@@ -177,10 +190,10 @@ initialExploreState :: ScoutQuery -> ExploreState
 initialExploreState sq = ExploreState
   { esQuery = QueryContext
       { qcQuery = sqQuery sq
-      , qcTags = sqTags sq
+      , qcTags = []  -- Tags inferred from rubrics during exploration
       }
   , esVisited = []
-  , esBudget = maybe defaultBudget id (sqBudget sq)
+  , esBudget = depthToBudget (sqDepth sq)
   , esDepth = 0
   }
 
@@ -190,11 +203,11 @@ initialExploreState sq = ExploreState
 
 -- Manual instance for ScoutQuery (required by MCP server).
 -- The schema defines the JSON input format for the scout tool.
--- Field names match the Aeson encoding: query, tags, budget (no "sq" prefix)
+-- Field names match the Aeson encoding: query, symbols, depth (no "sq" prefix)
 instance HasJSONSchema ScoutQuery where
   jsonSchema = objectSchema
-    [ ("query", emptySchema TString)
-    , ("tags", arraySchema (emptySchema TString))  -- Tags as strings
-    , ("budget", emptySchema TInteger)
+    [ ("query", emptySchema TString)     -- NL question for relevance scoring
+    , ("symbols", arraySchema (emptySchema TString))  -- Entry point symbols
+    , ("depth", emptySchema TString)     -- "low" | "medium" | "high"
     ]
-    ["query"]  -- Only query is required; tags and budget have defaults
+    ["query", "symbols"]  -- Both required; depth defaults to medium

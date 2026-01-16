@@ -179,13 +179,15 @@ explore
 explore scorer config query = do
   let queryCtx = QueryContext
         { qcQuery = sqQuery query
-        , qcTags = sqTags query
+        , qcTags = []  -- Tags inferred from rubrics during exploration
         }
-  let budget = fromMaybe (ecDefaultBudget config) (sqBudget query)
+  let budget = depthToBudget (sqDepth query)
 
-  -- Initialize with mock entry points
-  -- TODO: Replace with actual LSP workspace symbol search
-  let entryPoints = mockEntryPoints (sqTags query)
+  -- Initialize with entry points from query symbols
+  -- If no symbols provided, use mock entry points
+  let entryPoints = if null (sqSymbols query)
+        then mockEntryPoints []
+        else sqSymbols query
   let initialQueue = Seq.fromList
         [ NodeToExplore loc 0 Nothing | loc <- entryPoints ]
 
@@ -324,7 +326,8 @@ buildSummary query pointers = T.unlines
   , ""
   , "Query: " <> sqQuery query
   , ""
-  , "Interest tags: " <> T.intercalate ", " (map tagToText (sqTags query))
+  , "Entry points: " <> T.intercalate ", " (sqSymbols query)
+  , "Depth: " <> T.pack (show $ sqDepth query)
   , ""
   , "Found " <> T.pack (show (length pointers)) <> " relevant locations."
   , ""
@@ -411,12 +414,12 @@ exploreEff
 exploreEff config query = do
   let queryCtx = QueryContext
         { qcQuery = sqQuery query
-        , qcTags = sqTags query
+        , qcTags = []  -- Tags inferred from rubrics during exploration
         }
-  let budget = fromMaybe (ecDefaultBudget config) (sqBudget query)
+  let budget = depthToBudget (sqDepth query)
 
-  -- Find entry points via workspace symbol search
-  entryPoints <- findEntryPoints (sqQuery query)
+  -- Find entry points via workspace symbol search for each symbol
+  entryPoints <- concat <$> mapM findEntryPoints (sqSymbols query)
   let initialQueue = Seq.fromList
         [ NodeToExplore loc 0 Nothing | loc <- entryPoints ]
 
@@ -623,7 +626,8 @@ buildSummaryEff query pointers = T.unlines
   , ""
   , "Query: " <> sqQuery query
   , ""
-  , "Interest tags: " <> T.intercalate ", " (map tagToText (sqTags query))
+  , "Entry points: " <> T.intercalate ", " (sqSymbols query)
+  , "Depth: " <> T.pack (show $ sqDepth query)
   , ""
   , "Found " <> T.pack (show (length pointers)) <> " relevant locations."
   , ""

@@ -3,13 +3,17 @@ name: tidepool-semantic-scout
 version: 0.1.0.0
 synopsis: Semantic code scout exposed as MCP tool
 description:
-  First working example of LLMNode as MCP tool - explores codebases using LSP.
-  Integrates with the training-generator for producing fine-tuning data.
+  Semantic code exploration using FunctionGemma as coalgebra.
+  The model handles one edge at a time; the exploration loop handles recursion.
+  Exposed as MCP tool for Claude Code integration.
 license: MIT
 author: Tidepool
 maintainer: noreply@tidepool.com
 category: Development
 build-type: Simple
+
+data-files:
+  templates/*.jinja
 
 common warnings
   ghc-options: -Wall -Wcompat -Wno-orphans
@@ -18,8 +22,12 @@ library
   import: warnings
   exposed-modules:
     Tidepool.Agents.Scout.Types
+    Tidepool.Agents.Scout.EdgeTypes
+    Tidepool.Agents.Scout.Scoring
+    Tidepool.Agents.Scout.Templates
     Tidepool.Agents.Scout.Explore
     Tidepool.Agents.Scout.Gemma
+    Tidepool.Agents.Scout.Graph
     Tidepool.Agents.Scout.Heuristics
     Tidepool.Agents.Scout.LSP
   hs-source-dirs: src
@@ -42,6 +50,7 @@ library
     , containers >= 0.6 && < 1
     , directory
     , freer-simple
+    , pqueue >= 1.4 && < 2
     , text >= 2.0 && < 3
     , tidepool-core
     , tidepool-lsp-interpreter
@@ -53,8 +62,12 @@ executable semantic-scout
   hs-source-dirs: src
   other-modules:
     Tidepool.Agents.Scout.Types
+    Tidepool.Agents.Scout.EdgeTypes
+    Tidepool.Agents.Scout.Scoring
+    Tidepool.Agents.Scout.Templates
     Tidepool.Agents.Scout.Explore
     Tidepool.Agents.Scout.Gemma
+    Tidepool.Agents.Scout.Graph
     Tidepool.Agents.Scout.Heuristics
     Tidepool.Agents.Scout.LSP
   default-language: GHC2021
@@ -77,6 +90,7 @@ executable semantic-scout
     , containers >= 0.6 && < 1
     , directory
     , freer-simple
+    , pqueue >= 1.4 && < 2
     , text >= 2.0 && < 3
     , tidepool-core
     , tidepool-lsp-interpreter

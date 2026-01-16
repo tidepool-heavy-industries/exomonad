@@ -3,10 +3,11 @@
 -- | Heuristic scoring for semantic exploration.
 --
 -- This module provides deterministic scoring based on code patterns.
--- Later, this will be replaced by FunctionGemma neural scoring.
+-- These heuristics form the baseline that FunctionGemma should improve upon.
 module Tidepool.Agents.Scout.Heuristics
   ( -- * Scoring
     scoreNode
+  , scoreEdge
 
     -- * Expansion Decision
   , shouldExpand
@@ -16,6 +17,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 
 import Tidepool.Agents.Scout.Types
+import Tidepool.Agents.Scout.EdgeTypes
 
 
 -- | Score a node context based on heuristic rules.
@@ -33,6 +35,46 @@ scoreNode query node = Rubric
   , rComplexity = computeComplexity node
   , rConfidence = 4  -- Heuristics are reasonably confident
   , rTags       = detectTags node
+  }
+
+
+-- | Score an edge context based on heuristic rules.
+--
+-- Takes advantage of edge type information for better scoring.
+-- This is the coalgebra baseline: (Query, Edge) → Rubric
+scoreEdge :: Text -> EdgeContext -> Rubric
+scoreEdge query edge =
+  let nodeCtx = edgeToNodeContext edge
+      queryCtx = QueryContext query []  -- No preset tags
+      baseRubric = scoreNode queryCtx nodeCtx
+
+      -- Edge type bonus
+      typeBonus = case ecEdgeType edge of
+        PatternMatchSite -> 2
+        TypeReference    -> 1
+        InstanceSite     -> 1
+        ConstructorRef   -> 1
+        DefinitionSite   -> 0
+        ValueReference   -> 0
+        UsageSite        -> 0
+        ImportEdge       -> -1
+        ExportEdge       -> -1
+        UnknownEdge      -> 0
+
+      -- Adjust relevance based on edge type
+      adjustedRelevance = min 5 $ max 1 $ rRelevance baseRubric + typeBonus
+
+  in baseRubric { rRelevance = adjustedRelevance }
+
+
+-- | Convert EdgeContext to NodeContext for scoring.
+edgeToNodeContext :: EdgeContext -> NodeContext
+edgeToNodeContext edge = NodeContext
+  { ncLocation    = ecLocation edge
+  , ncHover       = ecHover edge
+  , ncCodeSnippet = ecSnippet edge
+  , ncDepth       = ecDepth edge
+  , ncBreadth     = 5  -- Default breadth
   }
 
 

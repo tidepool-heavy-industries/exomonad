@@ -84,8 +84,8 @@ runExploreDemo = do
 
   let query = ScoutQuery
         { sqQuery = "What breaks if I add a variant to LLMKind?"
-        , sqTags = [PatternMatch, Exhaustive, BreaksOnAdd]
-        , sqBudget = Just 10
+        , sqSymbols = ["LLMKind"]  -- Entry point symbols
+        , sqDepth = Low            -- Quick scan (~10 nodes)
         }
 
   putStrLn "Initializing LSP session..."
