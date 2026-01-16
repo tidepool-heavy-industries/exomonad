@@ -11,12 +11,13 @@ import Data.Aeson (Value, fromJSON, toJSON, Result(..))
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
+import System.Environment (lookupEnv)
 import System.IO (hFlush, stdout)
 
 import Tidepool.Control.Protocol
 import Tidepool.Control.Scout.Types (ScoutQuery(..), ScoutResponse(..))
 import Tidepool.Control.Scout.Explore (exploreEff, defaultExploreConfig)
-import Tidepool.Control.Scout.Gemma (runGemmaHeuristic)
+import Tidepool.Control.Scout.Gemma (runGemmaHTTP)
 import Tidepool.LSP.Interpreter (LSPSession, runLSP)
 
 -- | Handle an MCP tool call.
@@ -56,19 +57,29 @@ handleScoutTool lspSession reqId args = do
       TIO.putStrLn $ "  depth=" <> T.pack (show $ sqDepth query)
       hFlush stdout
 
-      -- Run exploration with LSP + heuristic Gemma
-      -- Note: Uses heuristic scorer for now; real FunctionGemma coming later
-      -- Wrap in try to catch any LSP or exploration errors
-      resultOrErr <- try $ runM $ runGemmaHeuristic $ runLSP lspSession $
-        exploreEff defaultExploreConfig query
-
-      case resultOrErr of
-        Left (e :: SomeException) -> do
-          TIO.putStrLn $ "  error: " <> T.pack (show e)
+      -- Require GEMMA_ENDPOINT - no fallback, fail if not set or if inference fails
+      maybeEndpoint <- lookupEnv "GEMMA_ENDPOINT"
+      case maybeEndpoint of
+        Nothing -> do
+          TIO.putStrLn "  error: GEMMA_ENDPOINT not set"
           hFlush stdout
-          pure $ mcpToolError reqId $ "Scout exploration failed: " <> T.pack (show e)
+          pure $ mcpToolError reqId "GEMMA_ENDPOINT environment variable not set"
 
-        Right result -> do
-          TIO.putStrLn $ "  found " <> T.pack (show $ srNodesVisited result) <> " locations"
+        Just ep -> do
+          TIO.putStrLn $ "  gemma=" <> T.pack ep
           hFlush stdout
-          pure $ mcpToolSuccess reqId (toJSON result)
+
+          -- No try/catch - let HTTP and parsing errors propagate
+          resultOrErr <- try $ runM $ runGemmaHTTP (T.pack ep) $ runLSP lspSession $
+            exploreEff defaultExploreConfig query
+
+          case resultOrErr of
+            Left (e :: SomeException) -> do
+              TIO.putStrLn $ "  error: " <> T.pack (show e)
+              hFlush stdout
+              pure $ mcpToolError reqId $ "Scout exploration failed: " <> T.pack (show e)
+
+            Right result -> do
+              TIO.putStrLn $ "  found " <> T.pack (show $ srNodesVisited result) <> " locations"
+              hFlush stdout
+              pure $ mcpToolSuccess reqId (toJSON result)

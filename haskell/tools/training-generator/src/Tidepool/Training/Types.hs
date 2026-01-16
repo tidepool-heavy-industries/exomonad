@@ -32,7 +32,9 @@ module Tidepool.Training.Types
   , EdgeTrainingExample(..)
   ) where
 
-import Data.Aeson (FromJSON, ToJSON)
+import Data.Aeson (FromJSON(..), ToJSON(..), genericParseJSON, genericToJSON)
+import qualified Data.Aeson as Aeson
+import Data.Char (isUpper, toLower)
 import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
@@ -153,6 +155,10 @@ data ScoreEdgeInput = ScoreEdgeInput
 --
 -- Designed for FunctionGemma 270M. Tags are flattened to boolean fields
 -- to eliminate list-parsing errors and simplify the classification task.
+--
+-- JSON field names use snake_case without prefix (Ollama format):
+--   seoRelevance    -> "relevance"
+--   seoIsExhaustive -> "is_exhaustive"
 data ScoreEdgeOutput = ScoreEdgeOutput
   { seoRelevance    :: Int   -- ^ 1-5: How relevant to the query
   , seoRisk         :: Int   -- ^ 1-5: How risky to modify this code
@@ -162,7 +168,30 @@ data ScoreEdgeOutput = ScoreEdgeOutput
   , seoIsTypeFamily :: Bool  -- ^ Type-level computation involved
   , seoIsExported   :: Bool  -- ^ Part of public API surface
   } deriving stock (Eq, Show, Generic)
-    deriving anyclass (FromJSON, ToJSON)
+
+-- Custom JSON instances to map Ollama's snake_case to Haskell fields
+-- seoRelevance -> "relevance", seoIsExhaustive -> "is_exhaustive"
+instance FromJSON ScoreEdgeOutput where
+  parseJSON = genericParseJSON scoreEdgeOptions
+
+instance ToJSON ScoreEdgeOutput where
+  toJSON = genericToJSON scoreEdgeOptions
+
+-- | JSON options: strip "seo" prefix and convert to snake_case.
+scoreEdgeOptions :: Aeson.Options
+scoreEdgeOptions = Aeson.defaultOptions
+  { Aeson.fieldLabelModifier = camelToSnake . drop 3  -- drop "seo" prefix
+  }
+
+-- | Convert "Relevance" -> "relevance", "IsExhaustive" -> "is_exhaustive"
+camelToSnake :: String -> String
+camelToSnake [] = []
+camelToSnake (c:cs) = toLower c : go cs
+  where
+    go [] = []
+    go (x:xs)
+      | isUpper x = '_' : toLower x : go xs
+      | otherwise = x : go xs
 
 
 -- | Complete edge training example for FunctionGemma.

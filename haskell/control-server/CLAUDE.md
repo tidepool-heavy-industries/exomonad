@@ -154,19 +154,20 @@ Project-local configuration in `.tidepool/` (gitignored):
 5. Scout exploration
    ┌──────────────────────────────────────────────┐
    │ Parse ScoutQuery arguments                   │
-   │ Run: runM $ runGemmaHeuristic $              │
+   │ Require GEMMA_ENDPOINT env var (no fallback) │
+   │ Run: runM $ runGemmaHTTP endpoint $          │
    │      runLSP session $ exploreEff query       │
    │                                              │
    │ Exploration steps:                           │
    │  a) Find entry points (LSP workspace/symbol) │
    │  b) BFS loop:                                │
    │     - Fetch context (LSP hover + file read)  │
-   │     - Score node (Gemma effect)              │
+   │     - Score edge (Gemma effect via Ollama)   │
    │     - Decide expansion (heuristics)          │
    │     - Queue children (LSP references)        │
    │  c) Collect results                          │
    │     - Top pointers (sorted by score)         │
-   │     - Training examples (query+node+rubric)  │
+   │     - Training examples (query+edge+rubric)  │
    └─────────────────┬────────────────────────────┘
                      │ ScoutResponse
                      ▼
@@ -185,20 +186,17 @@ Project-local configuration in `.tidepool/` (gitignored):
                      ▼
 7. Scoring (within exploration)
    ┌──────────────────────────────────────────────┐
-   │ rateEdge query edge                          │
-   │   → runGemmaHeuristic interpreter:           │
-   │      scoreEdge query edge (Heuristics.hs)    │
-   │        - Pattern matching on hover info      │
-   │        - Keyword detection in query          │
-   │        - Risk/relevance heuristics           │
-   │   → Returns Rubric                           │
-   │                                              │
-   │ Alternative (with GEMMA_ENDPOINT):           │
+   │ rateEdge query edgeCtx                       │
    │   → runGemmaHTTP interpreter:                │
-   │      - Format prompt (2-turn minimal)        │
-   │      - POST to mistralrs-server              │
-   │      - Parse <start_function_call>           │
-   │   → Returns Rubric from model                │
+   │      - Format edge context as plain text     │
+   │      - POST to Ollama /api/chat with tools   │
+   │      - Parse tool_calls[0].function.arguments│
+   │   → Returns Rubric from FunctionGemma 270M   │
+   │                                              │
+   │ Development alternatives (not in production):│
+   │   runGemmaStub    - formats prompt, heuristic│
+   │   runGemmaHeuristic - pattern-based rules    │
+   │   runGemmaMock    - hardcoded rubric         │
    └─────────────────┬────────────────────────────┘
                      │ Rubric
                      ▼
@@ -343,18 +341,42 @@ main = do
 - Thread-safe via Chan + worker pattern (multiple concurrent queries)
 - Shared workspace index (HLS only indexes once)
 
+## Ollama Setup (Required)
+
+The scout tool requires Ollama running FunctionGemma 270M for semantic scoring.
+
+**Why Ollama?** mistralrs doesn't support Gemma 3 architecture (`Unknown GGUF architecture 'gemma3'`). Ollama has native FunctionGemma support with automatic tool translation.
+
+```bash
+# Install Ollama (macOS)
+brew install ollama
+
+# Pull FunctionGemma 270M model (~300MB)
+ollama pull functiongemma:270m
+
+# Start Ollama server (runs on port 11434 by default)
+ollama serve
+```
+
+**Verify Ollama is running:**
+```bash
+curl http://localhost:11434/api/tags
+# Should show: {"models":[{"name":"functiongemma:270m",...}]}
+```
+
+**API format:** Ollama auto-translates OpenAI-style `tools` array → FunctionGemma's `<start_function_declaration>` format. Response is in `message.tool_calls[0].function.arguments`.
+
 ## Running
 
 ```bash
 # Start in project directory (creates .tidepool/control.sock)
 cd /path/to/your/project
-cabal run tidepool-control-server
+
+# GEMMA_ENDPOINT is REQUIRED (no heuristic fallback)
+GEMMA_ENDPOINT=http://localhost:11434 cabal run tidepool-control-server
 
 # Or set project directory via environment
-TIDEPOOL_PROJECT_DIR=/path/to/project cabal run tidepool-control-server
-
-# With FunctionGemma model (optional)
-GEMMA_ENDPOINT=http://localhost:8080 cabal run tidepool-control-server
+TIDEPOOL_PROJECT_DIR=/path/to/project GEMMA_ENDPOINT=http://localhost:11434 cabal run tidepool-control-server
 ```
 
 **Server logs to stdout:**
@@ -369,6 +391,9 @@ Connection received
   query=What breaks if I add a new variant?
   symbols=LLMKind
   depth=Medium
+  gemma=http://localhost:11434
+[Gemma] HTTP call to http://localhost:11434 for: /path/to/Types.hs:42
+[Gemma] -> relevance=5, risk=4
   found 15 locations
 [MCP] -> success
 ```
@@ -393,9 +418,11 @@ echo '{"type":"MCPToolCall","id":"1","tool_name":"scout","arguments":{...}}' | \
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `TIDEPOOL_PROJECT_DIR` | Current directory | Project root (where .tidepool/ lives) |
-| `GEMMA_ENDPOINT` | None | FunctionGemma inference server (optional) |
+| `GEMMA_ENDPOINT` | **Required** | Ollama endpoint (e.g., `http://localhost:11434`) |
 | `MANTLE_CONTROL_HOST` | (set by mantle-agent) | TCP host (unused by server, only client) |
 | `MANTLE_CONTROL_PORT` | (set by mantle-agent) | TCP port (unused by server, only client) |
+
+**Note:** `GEMMA_ENDPOINT` must be set. The scout tool will fail with an error if not configured. No heuristic fallback.
 
 ## Integration with Claude Code
 

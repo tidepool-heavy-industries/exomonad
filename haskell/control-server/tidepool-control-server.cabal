@@ -48,7 +48,10 @@ library
         pqueue >= 1.4 && < 2,
         tidepool-core,
         tidepool-lsp-interpreter,
-        tidepool-training-generator
+        tidepool-training-generator,
+        -- HTTP for FunctionGemma
+        http-conduit,
+        vector
     hs-source-dirs:   src
     default-language: GHC2024
     default-extensions:

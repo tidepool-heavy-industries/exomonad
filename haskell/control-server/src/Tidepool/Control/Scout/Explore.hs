@@ -66,7 +66,8 @@ import Data.Text (Text)
 import qualified Data.Text as T
 
 import Tidepool.Control.Scout.Types
-import Tidepool.Control.Scout.Gemma (Gemma, rateNode)
+import Tidepool.Control.Scout.Gemma (Gemma, rateEdge)
+import Tidepool.Control.Scout.EdgeTypes (mkEdgeContext)
 import Tidepool.Control.Scout.Heuristics (scoreNode, shouldExpand)
 import Tidepool.Effect.LSP
   ( LSP, workspaceSymbol, hover, references
@@ -402,7 +403,7 @@ mockChildren parent depth
 --
 -- This is the production entry point that uses:
 --   * LSP for code navigation (workspaceSymbol, hover, references)
---   * Gemma for semantic scoring (via rateNode effect)
+--   * Gemma for semantic scoring (via rateEdge effect)
 --
 -- Requires native execution (NativeOnly constraint from LSP).
 exploreEff
@@ -490,8 +491,16 @@ exploreLoopEff config queryCtx env
             -- Fetch context via LSP
             nodeCtx <- fetchNodeContext node
 
-            -- Score with Gemma effect
-            rubric <- rateNode queryCtx nodeCtx
+            -- Build edge context for Gemma scoring
+            let edgeCtx = mkEdgeContext
+                  (ncLocation nodeCtx)
+                  (ncHover nodeCtx)
+                  (ncCodeSnippet nodeCtx)
+                  (ncDepth nodeCtx)
+                  (nteParent node)
+
+            -- Score with Gemma effect (actually calls Ollama)
+            rubric <- rateEdge (qcQuery queryCtx) edgeCtx
 
             -- Record visit
             let visitedNode = VisitedNode

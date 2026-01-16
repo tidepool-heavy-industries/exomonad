@@ -40,9 +40,10 @@ Schema is "baked" into model weights via fine-tuning - no schema turn needed.
                                        │ Model
                                        ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│ semantic-scout --mcp                                                │
-│   • Uses trained model instead of heuristics                        │
-│   • HTTP to FunctionGemma inference server                          │
+│ semantic-scout (via control-server)                                 │
+│   • HTTP to Ollama (port 11434) with OpenAI-style tools array       │
+│   • Ollama auto-translates → FunctionGemma token format             │
+│   • Response in message.tool_calls[0].function.arguments            │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -133,11 +134,15 @@ This bootstraps training data - the fine-tuned model learns to generalize.
 
 ## Shared Types
 
-The legacy types (`Tag`, `Rubric`, `QueryContext`, `NodeContext`, `TrainingExample`) are **still exported** and used by:
-- `semantic-scout` - Runtime exploration and scoring
-- `control-server` - Scout effect handling
+**Edge types** (used by control-server for scoring):
+- `ScoreEdgeInput` - Input to Ollama: query + source/target locations + hover info
+- `ScoreEdgeOutput` - Output from Ollama: relevance, risk, reasoning, boolean flags
+- `EdgeType` - Edge classification (Definition, Reference, Usage, Instance, TypeConstraint)
 
-These types support the node-level scoring used during exploration. The edge types are specifically for training the edge scorer.
+**Legacy types** (still exported for compatibility):
+- `Tag`, `Rubric`, `QueryContext`, `NodeContext`, `TrainingExample`
+
+**JSON field mapping:** `ScoreEdgeOutput` uses custom JSON instances to map Haskell camelCase (`seoRelevance`) to Ollama's snake_case (`relevance`).
 
 ## Related Documentation
 
