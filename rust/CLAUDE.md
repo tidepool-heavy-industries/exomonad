@@ -41,9 +41,11 @@ Human TTY ──▶ Claude Code (in nix shell)
 ```
 
 **Current state:**
-- `mantle-agent hook` - Forwards Claude Code hooks to TCP control socket
-- `mantle-agent mcp` - MCP stdio server that forwards tool calls to TCP control socket
-- **Missing:** Daemon mode, metrics hub, Haskell control server endpoint
+- `mantle-agent hook` - Forwards Claude Code hooks to TCP control socket ✓
+- `mantle-agent mcp` - MCP stdio server that forwards tool calls to TCP control socket ✓
+- `haskell/control-server` - Haskell TCP endpoint (passthrough hook handlers, stub MCP) ✓
+- `flake.nix` - Nix shell with zellij layout for Claude Code++ ✓
+- **Missing:** Daemon mode, metrics hub, real hook/MCP logic in Haskell
 
 ## Workspace Members
 
@@ -76,6 +78,7 @@ mantle-agent mcp
 |----------|---------|---------|
 | `MANTLE_CONTROL_HOST` | mantle-agent | TCP host for control socket (default: 127.0.0.1) |
 | `MANTLE_CONTROL_PORT` | mantle-agent | TCP port for control socket |
+| `MANTLE_FAIL_MODE` | mantle-agent hook | `closed` = error if server unavailable, `open` = allow (default: open) |
 | `MANTLE_DECISION_TOOLS_FILE` | mantle-agent mcp | Path to JSON file with MCP tool definitions |
 | `RUST_LOG` | all | Tracing log level |
 
@@ -89,7 +92,7 @@ mantle-agent hook pre-tool-use  # Reads JSON from stdin
 - Parses Claude Code's hook JSON from stdin
 - Forwards to control server via TCP (NDJSON protocol)
 - Returns response JSON to stdout
-- **Fails open:** If no control server, allows hook to proceed
+- **Fail mode:** `MANTLE_FAIL_MODE=closed` (error if server missing) or `open` (allow if server missing, default)
 
 ### 2. MCP Server
 ```bash
@@ -132,14 +135,22 @@ Goal: Long-lived process that collects metrics + forwards to Haskell
 mantle-agent daemon start  # Listen on TCP, forward to Haskell
 ```
 
+Status: Not implemented. Current architecture uses per-hook process spawning.
+
 ### Metrics Hub
 Goal: Store tool call traces, export to Grafana
 
-### Haskell Control Server
-Goal: TCP endpoint in native-server to receive forwarded hooks/MCP
+Status: mantle-hub needs repurposing from session tracking to metrics collection.
 
-### Nix Shell Integration
-Goal: flake.nix that sets up Claude Code++ environment
+### Real Hook Logic in Haskell
+Goal: Wire control-server handlers to Tidepool effect stack
+
+Status: Current implementation is passthrough (logs and allows all hooks).
+
+### MCP Tool Implementation
+Goal: Expose Tidepool agents (e.g., semantic-scout) as MCP tools via control-server
+
+Status: Current implementation returns "no tools available".
 
 ## Testing
 
@@ -155,7 +166,7 @@ cargo test -p mantle-shared             # Shared library tests
 |----------|-----------|
 | TCP (not Unix socket) | Works across Docker boundaries (legacy), simpler |
 | NDJSON protocol | Human-readable, easy to debug |
-| Fail-open hooks | Claude Code works without control server |
+| Configurable fail mode | `closed` for dev (catch config issues), `open` for prod (graceful degradation) |
 | Sync TCP client | Hooks block anyway; async adds complexity |
 
 ## Migration from Headless Mode
@@ -164,9 +175,9 @@ The previous headless Docker orchestration is archived. Key differences:
 
 | Aspect | Old (headless) | New (Claude Code++) |
 |--------|----------------|---------------------|
-| Execution | Docker container | Nix shell (planned) |
+| Execution | Docker container | Nix shell (`nix develop .#claude-code-plus`) |
 | Control | Haskell subprocess | Human TTY |
-| Hub role | Session tracking | Metrics/telemetry |
+| Hub role | Session tracking | Metrics/telemetry (TODO) |
 | Focus | Automation | Augmentation |
 
 To resurrect old code:

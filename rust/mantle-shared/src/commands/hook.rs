@@ -90,26 +90,17 @@ pub fn handle_hook(event_type: HookEventType) -> Result<()> {
 
     // Get control server address from env vars
     let Some((host, port)) = control_server_addr() else {
-        debug!("No control server configured, failing open (allowing hook)");
-        let output = default_allow_response(event_type);
-        println!(
-            "{}",
-            serde_json::to_string(&output).map_err(MantleError::JsonSerialize)?
-        );
-        return Ok(());
+        return handle_server_unavailable(event_type, "No control server configured");
     };
 
     // Connect to control server via TCP
     let mut socket = match ControlSocket::connect(&host, port) {
         Ok(s) => s,
         Err(e) => {
-            warn!(error = %e, "Failed to connect to control server, failing open");
-            let output = default_allow_response(event_type);
-            println!(
-                "{}",
-                serde_json::to_string(&output).map_err(MantleError::JsonSerialize)?
+            return handle_server_unavailable(
+                event_type,
+                &format!("Failed to connect to control server: {}", e),
             );
-            return Ok(());
         }
     };
 
@@ -141,6 +132,41 @@ pub fn handle_hook(event_type: HookEventType) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Handle control server unavailable based on fail mode.
+///
+/// Checks `MANTLE_FAIL_MODE` environment variable:
+/// - "closed": Fail closed (error and exit 1)
+/// - "open": Fail open (allow hook to proceed)
+/// - not set: Fail open (default for backwards compatibility)
+///
+/// Fail-closed mode is recommended during development to catch configuration
+/// issues. Fail-open mode is recommended for production so Claude Code works
+/// even without the control server.
+fn handle_server_unavailable(event_type: HookEventType, reason: &str) -> Result<()> {
+    let fail_mode = std::env::var("MANTLE_FAIL_MODE").unwrap_or_else(|_| "open".to_string());
+
+    match fail_mode.as_str() {
+        "closed" => {
+            // Fail closed: error and exit
+            error!(reason, "Control server unavailable (fail-closed mode)");
+            eprintln!("ERROR: {}", reason);
+            eprintln!("Control server required in fail-closed mode.");
+            eprintln!("Set MANTLE_CONTROL_HOST and MANTLE_CONTROL_PORT.");
+            std::process::exit(1);
+        }
+        _ => {
+            // Fail open: allow hook to proceed
+            debug!(reason, mode = %fail_mode, "Control server unavailable, failing open");
+            let output = default_allow_response(event_type);
+            println!(
+                "{}",
+                serde_json::to_string(&output).map_err(MantleError::JsonSerialize)?
+            );
+            Ok(())
+        }
+    }
 }
 
 /// Create a default "allow" response for when no control socket is available.

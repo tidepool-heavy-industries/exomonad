@@ -73,6 +73,64 @@
             '';
           };
 
+          # Claude Code++ (human-augmented sessions)
+          claude-code-plus = pkgs.mkShell {
+            packages = with pkgs; [
+              # Native Haskell toolchain
+              haskell.compiler.ghc912
+              cabal-install
+
+              # Rust toolchain for mantle-agent
+              cargo
+              rustc
+
+              # Zellij for split-pane layout
+              zellij
+
+              # Runtime deps
+              zlib
+
+              # Dev utilities
+              jq
+            ];
+
+            shellHook = ''
+              echo "Claude Code++ Development Shell"
+              echo "================================"
+              echo ""
+              echo "Environment:"
+              echo "  MANTLE_CONTROL_HOST=127.0.0.1"
+              echo "  MANTLE_CONTROL_PORT=7432"
+              echo "  MANTLE_FAIL_MODE=closed"
+              echo ""
+
+              export MANTLE_CONTROL_HOST=127.0.0.1
+              export MANTLE_CONTROL_PORT=7432
+              export MANTLE_FAIL_MODE=closed
+
+              # Build mantle-agent if needed
+              if [ ! -f rust/target/debug/mantle-agent ]; then
+                echo "Building mantle-agent..."
+                (cd rust && cargo build -p mantle-agent)
+              fi
+
+              # Add mantle-agent to PATH
+              export PATH="$PWD/rust/target/debug:$PATH"
+
+              echo "Starting zellij session 'tidepool'..."
+              echo ""
+
+              # Check if zellij session exists
+              if zellij list-sessions 2>/dev/null | grep -q "tidepool"; then
+                echo "Attaching to existing session..."
+                zellij attach tidepool
+              else
+                echo "Creating new session..."
+                zellij --layout .zellij/layout.kdl --session tidepool
+              fi
+            '';
+          };
+
           # WASM cross-compilation
           wasm = pkgs.mkShell {
             packages = [

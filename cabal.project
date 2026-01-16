@@ -38,6 +38,9 @@ packages:
     -- Native server
     haskell/native-server
 
+    -- Control server (Claude Code++ TCP endpoint)
+    haskell/control-server
+
     -- Tools
     haskell/tools/sleeptime
     haskell/tools/training-generator
