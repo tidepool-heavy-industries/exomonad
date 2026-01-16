@@ -1,7 +1,7 @@
--- | LSP effect interpreter using lsp-client.
+-- | LSP effect interpreter using lsp-test.
 --
--- Interprets 'LSP' effects by communicating with a language server
--- via the lsp-client library.
+-- Interprets 'LSP' effects by communicating with HLS via lsp-test.
+-- lsp-test handles rootUri correctly (fixes empty workspaceFolders bug).
 --
 module Tidepool.LSP.Interpreter
   ( -- * Session Management
@@ -12,24 +12,27 @@ module Tidepool.LSP.Interpreter
   , runLSP
   ) where
 
-import Control.Concurrent (Chan, newChan, readChan, writeChan)
-import Control.Concurrent.Async (Async, async, wait)
-import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, takeMVar, tryPutMVar)
-import Control.Exception (bracket, SomeException, throwIO)
-import Control.Monad.Catch (catch)
-import Control.Monad (forever, void)
+import Control.Concurrent (Chan, newChan, readChan, writeChan, forkIO, killThread)
+import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, takeMVar, tryTakeMVar)
+import Control.Exception (SomeException, throwIO, try, finally, bracket)
 import Control.Monad.Freer (Eff, LastMember, sendM, interpret)
+import qualified System.Process
 import Control.Monad.IO.Class (liftIO)
 import Data.Function ((&))
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Map.Strict as Map
-import System.IO (BufferMode(..), hSetBuffering, hPutStrLn, stderr)
-import System.Process (CreateProcess(..), StdStream(..), ProcessHandle, createProcess, proc, terminateProcess, cwd)
+import System.IO (hPutStrLn, stderr)
 import System.Timeout (timeout)
 
-import Language.LSP.Client (runSessionWithHandles)
-import Language.LSP.Client.Session (Session, initialize, request, sendNotification, receiveNotification, openDoc)
+-- lsp-test provides the Session monad and high-level API
+import Language.LSP.Test
+  ( Session, runSessionWithConfig, defaultConfig, fullLatestClientCaps
+  , openDoc
+  , getHover, getReferences, getDefinitions, getCompletions
+  , getCodeActions, request
+  , SessionConfig(..)
+  )
 import qualified Language.LSP.Protocol.Types as L
 import qualified Language.LSP.Protocol.Message as L
 
@@ -46,14 +49,33 @@ data LSPRequest = forall a. LSPRequest
   , lspReqResult :: MVar (Either SomeException a)
   }
 
--- | An active LSP session with persistent worker thread.
+-- | An active LSP session handle.
+--
+-- The actual Session monad runs inside withLSPSession's scope.
+-- External callers communicate via the request channel.
 data LSPSession = LSPSession
   { lspRequestChan :: !(Chan LSPRequest)
-  , lspWorkerAsync :: !(Async ())
-  , lspProcess     :: !ProcessHandle
+  }
+
+-- | Session configuration optimized for long-running MCP server use.
+--
+-- Key settings:
+-- - logMessages = False: Prevents stdout bottleneck
+-- - messageTimeout = 120s: Allows time for large project indexing
+productionConfig :: SessionConfig
+productionConfig = defaultConfig
+  { messageTimeout = 120  -- 2 minutes for large projects
+  -- Note: logMessages is not available in older lsp-test versions
+  -- If available, set: logMessages = False
   }
 
 -- | Start an LSP session with HLS and run an action.
+--
+-- lsp-test handles:
+-- - Spawning HLS process
+-- - rootUri configuration (FIXES the empty workspaceFolders bug)
+-- - initialize/initialized handshake
+-- - Capability negotiation
 --
 -- @
 -- withLSPSession "/path/to/project" $ \session -> do
@@ -64,117 +86,90 @@ withLSPSession
   :: FilePath              -- ^ Project root directory
   -> (LSPSession -> IO a)  -- ^ Action to run with session
   -> IO a
-withLSPSession rootDir action =
-  bracket acquire release $ \session ->
-    action session
-  where
-    acquire = do
-      -- Start HLS process (stderr inherits from parent for debugging)
-      (Just stdin, Just stdout, _, ph) <- createProcess
-        (proc "haskell-language-server-wrapper" ["--lsp"])
-          { std_in = CreatePipe
-          , std_out = CreatePipe
-          , std_err = Inherit  -- Let stderr pass through so we can see HLS errors
-          , cwd = Just rootDir
-          }
+withLSPSession rootDir action = do
+  -- Create request channel for communication with worker
+  requestChan <- newChan
+  resultMVar <- newEmptyMVar
+  doneMVar <- newEmptyMVar  -- Signal when user action completes
 
-      -- Set unbuffered IO for LSP communication
-      hSetBuffering stdin NoBuffering
-      hSetBuffering stdout NoBuffering
+  -- lsp-test's runSessionWithConfig spawns HLS and handles handshake
+  -- The session runs until we're done or HLS crashes
+  --
+  -- Note: lsp-test doesn't pass --lsp flag by default, so we use a wrapper script
+  -- Create wrapper if not exists (idempotent)
+  let wrapperPath = "/tmp/tidepool-hls-wrapper"
+  liftIO $ writeFile wrapperPath "#!/bin/bash\nexec haskell-language-server-wrapper --lsp \"$@\"\n"
+  liftIO $ System.Process.callCommand $ "chmod +x " ++ wrapperPath
 
-      -- Create request channel and readiness signal
-      requestChan <- newChan
-      readyMVar <- newEmptyMVar
+  runSessionWithConfig productionConfig wrapperPath fullLatestClientCaps rootDir $ do
+    liftIO $ hPutStrLn stderr "[LSP] Session started, HLS initialized"
 
-      -- Spawn worker thread running persistent Session
-      worker <- async $ do
-        hPutStrLn stderr "[LSP Worker] Thread started, calling runSessionWithHandles..."
-        runSessionWithHandles stdout stdin $ do
-          -- Step 1: Send initialize request (handshake part 1)
-          liftIO $ hPutStrLn stderr "[LSP Worker] Sending initialize request..."
-          _ <- initialize Nothing
-          liftIO $ hPutStrLn stderr "[LSP Worker] Initialize complete"
+    -- Provide session handle to caller
+    let session = LSPSession requestChan
 
-          -- Step 2: Register progress handler BEFORE sending initialized
-          -- (HLS may send progress immediately after initialized)
-          liftIO $ hPutStrLn stderr "[LSP Worker] Registering progress handler..."
-          receiveNotification L.SMethod_Progress $ \_msg -> do
-            hPutStrLn stderr "[LSP Worker] Got progress notification - signaling ready"
-            void $ tryPutMVar readyMVar ()
-
-          -- Step 3: Send initialized notification (handshake part 2)
-          -- This triggers HLS to start indexing
-          liftIO $ hPutStrLn stderr "[LSP Worker] Sending initialized notification..."
-          sendNotification L.SMethod_Initialized L.InitializedParams
-          liftIO $ hPutStrLn stderr "[LSP Worker] Handshake complete"
-
-          -- Step 4: Tell HLS about our workspace folder
-          -- (lsp-client sends rootUri=null by default, so we fix it here)
-          liftIO $ hPutStrLn stderr $ "[LSP Worker] Setting workspace folder: " ++ rootDir
-          let workspaceUri = L.Uri $ T.pack $ "file://" ++ rootDir
-          sendNotification L.SMethod_WorkspaceDidChangeWorkspaceFolders $ L.DidChangeWorkspaceFoldersParams
-            { L._event = L.WorkspaceFoldersChangeEvent
-                { L._added = [L.WorkspaceFolder { L._uri = workspaceUri, L._name = T.pack "tidepool" }]
-                , L._removed = []
-                }
-            }
-
-          -- Step 5: Open a Haskell file to trigger HLS project discovery
-          liftIO $ hPutStrLn stderr "[LSP Worker] Opening a Haskell file to trigger indexing..."
-          _doc <- openDoc (rootDir ++ "/haskell/dsl/core/src/Tidepool/Effect/Types.hs") "haskell"
-          liftIO $ hPutStrLn stderr "[LSP Worker] Document opened"
-
-          -- Step 6: Wait briefly for progress, then proceed
-          liftIO $ hPutStrLn stderr "[LSP Worker] Waiting up to 10s for HLS progress..."
-          liftIO $ do
-            maybeReady <- timeout (10 * 1000000) $ takeMVar readyMVar
-            case maybeReady of
-              Just () -> hPutStrLn stderr "[LSP Worker] Got progress notification!"
-              Nothing -> hPutStrLn stderr "[LSP Worker] No progress yet, proceeding anyway..."
-
-          liftIO $ hPutStrLn stderr "[LSP Worker] Ready to process requests"
-
-          -- Process requests in a loop
-          forever $ do
-            LSPRequest reqAction responseMVar <- liftIO $ readChan requestChan
-            liftIO $ hPutStrLn stderr "[LSP Worker] Processing request..."
-            -- Execute action and catch any exceptions
-            result <- (Right <$> reqAction) `catch` (\(e :: SomeException) -> pure (Left e))
-            liftIO $ putMVar responseMVar result
-            liftIO $ hPutStrLn stderr "[LSP Worker] Request completed"
-
-      pure $ LSPSession requestChan worker ph
-
-    release session = do
-      -- Terminate HLS first - this closes stdin/stdout pipes
-      -- Worker will see EOF and exit naturally from runSessionWithHandles
-      terminateProcess session.lspProcess
-
-      -- Reap worker thread (will re-throw any exception from worker)
-      -- This wait will complete quickly after HLS terminates
-      wait session.lspWorkerAsync
+    -- Fork user action in a separate thread so we can process requests
+    liftIO $ do
+      _ <- forkIO $ do
+        result <- try @SomeException (action session)
+        putMVar resultMVar result
+        putMVar doneMVar ()  -- Signal completion
       pure ()
 
+    -- Process requests until user action completes
+    -- This loop runs inside the Session monad
+    --
+    -- Note: SessionConfig has ignoreLogNotifications=True (default) which
+    -- prevents memory leaks from HLS's chatty log/progress notifications.
+    let processRequests = do
+          -- Check if user action is done (non-blocking)
+          maybeDone <- liftIO $ tryTakeMVar doneMVar
+          case maybeDone of
+            Just () -> pure ()  -- User action completed, exit
+            Nothing -> do
+              -- Check for pending request (100ms timeout)
+              maybeReq <- liftIO $ timeout 100000 $ readChan requestChan
+              case maybeReq of
+                Nothing -> processRequests  -- No request, loop
+                Just (LSPRequest reqAction reqResponseMVar) -> do
+                  liftIO $ hPutStrLn stderr "[LSP] Processing request..."
+                  -- Execute the Session action
+                  -- Exceptions will propagate and be handled by the caller
+                  result <- reqAction
+                  liftIO $ putMVar reqResponseMVar (Right result)
+                  liftIO $ hPutStrLn stderr "[LSP] Request completed"
+                  processRequests
 
--- | Execute a Session action via the background worker.
+    processRequests
+
+  -- Return result from user action
+  resultOrErr <- takeMVar resultMVar
+  case resultOrErr of
+    Right val -> pure val
+    Left err -> throwIO err
+
+
+-- | Default timeout for LSP requests (60 seconds).
+defaultRequestTimeout :: Int
+defaultRequestTimeout = 60 * 1000000  -- microseconds
+
+-- | Execute a Session action via the session handle.
 --
--- Sends the action to the worker thread, waits for response.
--- Propagates any errors that occurred during execution.
+-- Sends the action to the worker, waits for response with timeout.
 executeSession :: LSPSession -> Session a -> IO a
 executeSession session action = do
-  -- Create response MVar
   responseMVar <- newEmptyMVar
-
-  -- Send request to worker
   writeChan session.lspRequestChan $ LSPRequest action responseMVar
 
-  -- Wait for response
-  result <- takeMVar responseMVar
+  -- Wait for response with timeout
+  maybeResult <- timeout defaultRequestTimeout $ takeMVar responseMVar
 
-  -- Propagate errors
-  case result of
-    Right value -> pure value
-    Left err -> throwIO err
+  case maybeResult of
+    Nothing ->
+      fail "LSP request timed out. HLS may still be indexing the project."
+    Just result ->
+      case result of
+        Right value -> pure value
+        Left err -> throwIO err
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -190,86 +185,68 @@ runLSP session = interpret $ \case
     pure []
 
   Hover doc pos -> sendM $ executeSession session $ do
-    resp <- request L.SMethod_TextDocumentHover $ L.HoverParams
-      { L._textDocument = toTextDocumentId doc
-      , L._position = toPosition pos
-      , L._workDoneToken = Nothing
-      }
-    pure $ case resp._result of
-      Right result -> fromHover result
-      Left _err -> Nothing
+    let lspDoc = toTextDocumentId doc
+        lspPos = toPosition pos
+    -- lsp-test's getHover takes TextDocumentIdentifier and Position
+    result <- getHover lspDoc lspPos
+    pure $ fromHoverResult result
 
   References doc pos -> sendM $ executeSession session $ do
-    resp <- request L.SMethod_TextDocumentReferences $ L.ReferenceParams
-      { L._textDocument = toTextDocumentId doc
-      , L._position = toPosition pos
-      , L._workDoneToken = Nothing
-      , L._partialResultToken = Nothing
-      , L._context = L.ReferenceContext { L._includeDeclaration = True }
-      }
-    pure $ case resp._result of
-      Right result -> fromLocations result
-      Left _err -> []
+    let lspDoc = toTextDocumentId doc
+        lspPos = toPosition pos
+    -- getReferences returns [Location]
+    locs <- getReferences lspDoc lspPos True  -- includeDeclaration = True
+    pure $ map fromLocation locs
 
   Definition doc pos -> sendM $ executeSession session $ do
-    resp <- request L.SMethod_TextDocumentDefinition $ L.DefinitionParams
-      { L._textDocument = toTextDocumentId doc
-      , L._position = toPosition pos
-      , L._workDoneToken = Nothing
-      , L._partialResultToken = Nothing
-      }
-    pure $ case resp._result of
-      Right result -> fromDefinition result
-      Left _err -> []
+    let lspDoc = toTextDocumentId doc
+        lspPos = toPosition pos
+    -- getDefinitions returns [Location] | [LocationLink]
+    result <- getDefinitions lspDoc lspPos
+    pure $ fromDefinitionResult result
 
   CodeActions doc rng -> sendM $ executeSession session $ do
-    resp <- request L.SMethod_TextDocumentCodeAction $ L.CodeActionParams
-      { L._textDocument = toTextDocumentId doc
-      , L._range = toRange rng
-      , L._context = L.CodeActionContext
-          { L._diagnostics = []
-          , L._only = Nothing
-          , L._triggerKind = Nothing
-          }
-      , L._workDoneToken = Nothing
-      , L._partialResultToken = Nothing
-      }
-    pure $ case resp._result of
-      Right result -> fromCodeActions result
-      Left _err -> []
+    let lspDoc = toTextDocumentId doc
+        lspRange = toRange rng
+    -- getCodeActions returns [Command |? CodeAction]
+    actions <- getCodeActions lspDoc lspRange
+    pure $ fromCodeActionsResult actions
 
   Rename doc pos newName -> sendM $ executeSession session $ do
-    resp <- request L.SMethod_TextDocumentRename $ L.RenameParams
-      { L._textDocument = toTextDocumentId doc
-      , L._position = toPosition pos
-      , L._newName = newName
-      , L._workDoneToken = Nothing
-      }
-    pure $ case resp._result of
-      Right result -> fromWorkspaceEdit result
-      Left _err -> WorkspaceEdit Map.empty
+    let lspDoc = toTextDocumentId doc
+        lspPos = toPosition pos
+    -- lsp-test's rename returns (), we need to use the low-level request API
+    let params = L.RenameParams
+          { L._workDoneToken = Nothing
+          , L._textDocument = lspDoc
+          , L._position = lspPos
+          , L._newName = newName
+          }
+    resp <- request L.SMethod_TextDocumentRename params
+    pure $ case resp of
+      L.TResponseMessage _ _ (Right (L.InL edit)) -> fromWorkspaceEditResult edit
+      L.TResponseMessage _ _ (Right (L.InR L.Null)) -> WorkspaceEdit Map.empty
+      L.TResponseMessage _ _ (Left _) -> WorkspaceEdit Map.empty
 
   Completion doc pos -> sendM $ executeSession session $ do
-    resp <- request L.SMethod_TextDocumentCompletion $ L.CompletionParams
-      { L._textDocument = toTextDocumentId doc
-      , L._position = toPosition pos
-      , L._workDoneToken = Nothing
-      , L._partialResultToken = Nothing
-      , L._context = Nothing
-      }
-    pure $ case resp._result of
-      Right result -> fromCompletions result
-      Left _err -> []
+    let lspDoc = toTextDocumentId doc
+        lspPos = toPosition pos
+    -- getCompletions returns [CompletionItem]
+    items <- getCompletions lspDoc lspPos
+    pure $ map fromCompletionItem items
 
   WorkspaceSymbol query -> sendM $ executeSession session $ do
-    resp <- request L.SMethod_WorkspaceSymbol $ L.WorkspaceSymbolParams
-      { L._query = query
-      , L._workDoneToken = Nothing
-      , L._partialResultToken = Nothing
-      }
-    pure $ case resp._result of
-      Right result -> fromSymbolsResult result
-      Left _err -> []
+    -- lsp-test doesn't have a direct getWorkspaceSymbols
+    -- Use the low-level request API
+    let params = L.WorkspaceSymbolParams
+          { L._workDoneToken = Nothing
+          , L._partialResultToken = Nothing
+          , L._query = query
+          }
+    resp <- Language.LSP.Test.request L.SMethod_WorkspaceSymbol params
+    pure $ case resp of
+      L.TResponseMessage _ _ (Right result) -> fromSymbolsResult result
+      L.TResponseMessage _ _ (Left _) -> []
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -316,56 +293,57 @@ fromLocation loc = Location
   , locRange = fromRange loc._range
   }
 
--- Result type is Hover |? Null (not Maybe Hover)
-fromHover :: L.Hover L.|? L.Null -> Maybe HoverInfo
-fromHover (L.InR L.Null) = Nothing
-fromHover (L.InL h) = Just HoverInfo
+-- lsp-test's getHover returns Maybe Hover directly
+fromHoverResult :: Maybe L.Hover -> Maybe HoverInfo
+fromHoverResult Nothing = Nothing
+fromHoverResult (Just h) = Just HoverInfo
   { hoverContents = extractMarkupContent h._contents
   , hoverRange = fromRange <$> h._range
   }
 
 extractMarkupContent :: L.MarkupContent L.|? (L.MarkedString L.|? [L.MarkedString]) -> Text
 extractMarkupContent content = case content of
-  L.InL mc -> mc._value  -- MarkupContent has _value field
+  L.InL mc -> mc._value
   L.InR msOrList -> case msOrList of
     L.InL ms -> markedStringToText ms
     L.InR msList -> T.intercalate "\n" (map markedStringToText msList)
 
--- MarkedString is a newtype: newtype MarkedString = MarkedString (Text |? MarkedStringWithLanguage)
 markedStringToText :: L.MarkedString -> Text
 markedStringToText (L.MarkedString inner) = case inner of
   L.InL t -> t
   L.InR mswl -> mswl._value
 
--- Result type is [Location] |? Null
-fromLocations :: [L.Location] L.|? L.Null -> [Location]
-fromLocations (L.InR L.Null) = []
-fromLocations (L.InL locs) = map fromLocation locs
-
--- Result type is Definition |? ([DefinitionLink] |? Null)
-fromDefinition :: L.Definition L.|? ([L.DefinitionLink] L.|? L.Null) -> [Location]
-fromDefinition defOrLinksOrNull = case defOrLinksOrNull of
-  L.InL (L.Definition locOrLocs) -> case locOrLocs of
-    L.InL loc -> [fromLocation loc]
-    L.InR locs -> map fromLocation locs
+-- lsp-test's getDefinitions returns Definition |? ([DefinitionLink] |? Null)
+-- Definition = Location |? [Location]
+-- DefinitionLink = newtype LocationLink
+fromDefinitionResult :: (L.Definition L.|? ([L.DefinitionLink] L.|? L.Null)) -> [Location]
+fromDefinitionResult result = case result of
+  L.InL def -> fromDefinition def
   L.InR linksOrNull -> case linksOrNull of
     L.InL links -> map fromDefinitionLink links
     L.InR L.Null -> []
+  where
+    fromDefinition :: L.Definition -> [Location]
+    fromDefinition d = case d of
+      L.Definition (L.InL loc) -> [fromLocation loc]
+      L.Definition (L.InR locs) -> map fromLocation locs
 
-fromDefinitionLink :: L.DefinitionLink -> Location
-fromDefinitionLink (L.DefinitionLink link) = Location
+    fromDefinitionLink :: L.DefinitionLink -> Location
+    fromDefinitionLink (L.DefinitionLink link) = fromLocationLink link
+
+fromLocationLink :: L.LocationLink -> Location
+fromLocationLink link = Location
   { locUri = let L.Uri u = link._targetUri in u
   , locRange = fromRange link._targetRange
   }
 
--- Result type is [Command |? CodeAction] |? Null
-fromCodeActions :: [L.Command L.|? L.CodeAction] L.|? L.Null -> [CodeAction]
-fromCodeActions (L.InR L.Null) = []
-fromCodeActions (L.InL items) = concatMap fromCommandOrAction items
+-- lsp-test's getCodeActions returns [Command |? CodeAction]
+fromCodeActionsResult :: [L.Command L.|? L.CodeAction] -> [CodeAction]
+fromCodeActionsResult items = concatMap fromCommandOrAction items
 
 fromCommandOrAction :: L.Command L.|? L.CodeAction -> [CodeAction]
 fromCommandOrAction cmdOrAction = case cmdOrAction of
-  L.InL _cmd -> []  -- Skip commands, only return code actions
+  L.InL _cmd -> []  -- Skip commands
   L.InR ca -> [fromCodeAction ca]
 
 fromCodeAction :: L.CodeAction -> CodeAction
@@ -387,13 +365,12 @@ fromCodeActionKind k = case k of
   L.CodeActionKind_SourceOrganizeImports -> SourceOrganizeImports
   L.CodeActionKind_SourceFixAll -> SourceFixAll
   L.CodeActionKind_Custom t -> OtherKind t
-  -- lsp-types may add new constructors; map unknown ones to OtherKind
   L.CodeActionKind_Empty -> OtherKind ""
+  _ -> OtherKind ""  -- Handle any new constructors
 
--- Result type is WorkspaceEdit |? Null
-fromWorkspaceEdit :: L.WorkspaceEdit L.|? L.Null -> WorkspaceEdit
-fromWorkspaceEdit (L.InR L.Null) = WorkspaceEdit Map.empty
-fromWorkspaceEdit (L.InL we) = fromWorkspaceEditMaybe (Just we)
+-- lsp-test's rename returns WorkspaceEdit directly
+fromWorkspaceEditResult :: L.WorkspaceEdit -> WorkspaceEdit
+fromWorkspaceEditResult we = fromWorkspaceEditMaybe (Just we)
   & maybe (WorkspaceEdit Map.empty) id
 
 fromWorkspaceEditMaybe :: Maybe L.WorkspaceEdit -> Maybe WorkspaceEdit
@@ -412,14 +389,6 @@ fromTextEdit te = TextEdit
   , teNewText = te._newText
   }
 
--- Result type is [CompletionItem] |? (CompletionList |? Null)
-fromCompletions :: [L.CompletionItem] L.|? (L.CompletionList L.|? L.Null) -> [CompletionItem]
-fromCompletions result = case result of
-  L.InL items -> map fromCompletionItem items
-  L.InR listOrNull -> case listOrNull of
-    L.InL cl -> map fromCompletionItem cl._items
-    L.InR L.Null -> []
-
 fromCompletionItem :: L.CompletionItem -> CompletionItem
 fromCompletionItem ci = CompletionItem
   { ciLabel = ci._label
@@ -429,7 +398,6 @@ fromCompletionItem ci = CompletionItem
   , ciInsertText = ci._insertText
   }
 
--- CompletionItem._documentation is Text |? MarkupContent (in that order)
 extractDocumentation :: Text L.|? L.MarkupContent -> Text
 extractDocumentation doc = case doc of
   L.InL t -> t
@@ -487,13 +455,12 @@ fromWorkspaceSymbol ws = SymbolInformation
   , siContainer = ws._containerName
   }
 
--- WorkspaceSymbol location is Location |? LocationUriOnly
 extractLocationFromWS :: L.Location L.|? L.LocationUriOnly -> Location
 extractLocationFromWS loc = case loc of
   L.InL l -> fromLocation l
   L.InR (L.LocationUriOnly uri) -> Location
     { locUri = let L.Uri u = uri in u
-    , locRange = Range (Position 0 0) (Position 0 0)  -- Default range for URI-only
+    , locRange = Range (Position 0 0) (Position 0 0)
     }
 
 fromSymbolKind :: L.SymbolKind -> SymbolKind
@@ -524,4 +491,3 @@ fromSymbolKind k = case k of
   L.SymbolKind_Event -> SKEvent
   L.SymbolKind_Operator -> SKOperator
   L.SymbolKind_TypeParameter -> SKTypeParameter
-

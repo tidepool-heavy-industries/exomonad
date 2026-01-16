@@ -5,23 +5,24 @@
 --
 -- Run with: cabal run lsp-smoke-test
 --
--- This test runs all LSP requests inside a single session to avoid
--- the overhead of re-initializing HLS for each request.
+-- This test uses lsp-test which handles HLS spawning and LSP handshake.
 --
 module Main where
 
-import Control.Concurrent (threadDelay)
-import Control.Exception (bracket, try, SomeException)
+import Control.Exception (try, SomeException)
 import Control.Monad.IO.Class (liftIO)
 import Data.Text (Text)
 import qualified Data.Text as T
-import System.IO (Handle, BufferMode(..), hFlush, hSetBuffering, stdout)
-import System.Process (CreateProcess(..), StdStream(..), ProcessHandle, createProcess, proc, terminateProcess, cwd)
+import System.IO (hFlush, stdout)
 
-import Language.LSP.Client (runSessionWithHandles)
-import Language.LSP.Client.Session (Session, initialize, request, openDoc)
+import Language.LSP.Test
+  ( Session, runSessionWithConfig, fullLatestClientCaps
+  , openDoc, getHover, getDefinitions, request
+  , defaultConfig, SessionConfig(..)
+  )
 import qualified Language.LSP.Protocol.Types as L
 import qualified Language.LSP.Protocol.Message as L
+import System.Directory (setCurrentDirectory)
 
 -- | Flush stdout after each log
 log' :: String -> IO ()
@@ -31,72 +32,41 @@ log' s = putStrLn s >> hFlush stdout
 slog :: String -> Session ()
 slog = liftIO . log'
 
--- | Test project directory (must exist with Test.hs and lsp-test.cabal)
+-- | Test project directory (must exist with Test.hs)
 testProjectDir :: FilePath
 testProjectDir = "/tmp/lsp-test-project"
 
--- | HLS session with handles and process
-data HLSSession = HLSSession
-  { hlsStdin  :: Handle
-  , hlsStdout :: Handle
-  , hlsProcess :: ProcessHandle
+-- | Tidepool codebase directory for real LSP testing
+tidepoolDir :: FilePath
+tidepoolDir = "/private/tmp/tpw1"
+
+-- | Session config with extended timeout and debug logging
+testConfig :: SessionConfig
+testConfig = defaultConfig
+  { messageTimeout = 180  -- 3 minutes to allow HLS indexing
+  , logStdErr = True      -- Show HLS stderr output
+  , logMessages = True    -- Trace LSP messages
   }
 
 main :: IO ()
 main = do
-  log' "=== LSP Smoke Test (lsp-client) ==="
+  log' "=== LSP Smoke Test (lsp-test) ==="
   log' ""
+  log' $ "[1] Starting HLS in " ++ testProjectDir ++ " (timeout: 180s)..."
 
-  -- Start HLS with exception-safe cleanup
-  log' $ "[1] Starting HLS in " ++ testProjectDir ++ "..."
-  result <- bracket startHLS stopHLS runTests
+  -- Change to test project directory so HLS uses correct cwd for project discovery
+  -- (HLS uses cwd for hie.yaml lookup, not just rootUri)
+  setCurrentDirectory testProjectDir
 
-  case result of
-    Left (e :: SomeException) -> do
-      log' $ "FAILED: " ++ show e
-    Right () -> do
-      log' ""
-      log' "[5] Session closed cleanly"
-      log' "=== Test Complete ==="
-
--- | Start HLS process in test project directory
-startHLS :: IO HLSSession
-startHLS = do
-  (Just stdin', Just stdout', Just _stderr', ph) <- createProcess
-    (proc "haskell-language-server-wrapper" ["--lsp"])
-      { std_in = CreatePipe
-      , std_out = CreatePipe
-      , std_err = CreatePipe
-      , cwd = Just testProjectDir
-      }
-  hSetBuffering stdin' NoBuffering
-  hSetBuffering stdout' NoBuffering
-  log' "OK - HLS process started"
-  log' ""
-  pure $ HLSSession stdin' stdout' ph
-
--- | Terminate HLS process
-stopHLS :: HLSSession -> IO ()
-stopHLS = terminateProcess . hlsProcess
-
--- | Run all LSP tests in a single session
-runTests :: HLSSession -> IO (Either SomeException ())
-runTests hls = do
-  log' "[2] Running tests in single session..."
-  try $ runSessionWithHandles (hlsStdout hls) (hlsStdin hls) $ do
-    _ <- initialize Nothing
-    slog "OK - Session initialized"
+  -- Use wrapper script that includes --lsp flag
+  result <- try @SomeException $ runSessionWithConfig testConfig "/tmp/hls-lsp-wrapper" fullLatestClientCaps testProjectDir $ do
+    slog "OK - HLS initialized with correct rootUri"
     slog ""
 
     -- Open the document (REQUIRED before any requests)
-    slog "[2.5] Opening document..."
-    doc <- openDoc (testProjectDir ++ "/Test.hs") "haskell"
-    slog $ "OK - Opened: " ++ show doc._uri
-
-    -- Wait for HLS to process the file (it needs to typecheck)
-    slog "[2.6] Waiting 3s for HLS to typecheck..."
-    liftIO $ threadDelay 3000000  -- 3 seconds
-    slog "OK - Done waiting"
+    slog "[2] Opening document..."
+    doc <- openDoc "Test.hs" "haskell"
+    slog $ "OK - Opened: Test.hs"
     slog ""
 
     -- Test hover
@@ -109,6 +79,42 @@ runTests hls = do
 
     pure ()
 
+  case result of
+    Left e -> do
+      log' $ "FAILED: " ++ show e
+    Right () -> do
+      log' ""
+      log' "[5] Session closed cleanly"
+      log' "=== Simple Test Complete ==="
+
+  -- Now test against the real tidepool codebase
+  log' ""
+  log' "=== Real Codebase Test (workspaceSymbol) ==="
+  log' $ "[6] Starting HLS in " ++ tidepoolDir ++ "..."
+
+  setCurrentDirectory tidepoolDir
+
+  realResult <- try @SomeException $ runSessionWithConfig testConfig "/tmp/hls-lsp-wrapper" fullLatestClientCaps tidepoolDir $ do
+    slog "OK - HLS initialized on tidepool codebase"
+    slog ""
+
+    -- Test workspaceSymbol with a real symbol name
+    slog "[7] Testing workspace/symbol with 'withLSPSession'..."
+    testWorkspaceSymbol "withLSPSession"
+
+    slog "[8] Testing workspace/symbol with 'LLMKind'..."
+    testWorkspaceSymbol "LLMKind"
+
+    pure ()
+
+  case realResult of
+    Left e -> do
+      log' $ "FAILED: " ++ show e
+    Right () -> do
+      log' ""
+      log' "[9] Session closed cleanly"
+      log' "=== All Tests Complete ==="
+
 -- | Test hover on a known position
 testHoverDoc :: L.TextDocumentIdentifier -> Session ()
 testHoverDoc doc = do
@@ -117,20 +123,14 @@ testHoverDoc doc = do
   slog $ "  Doc: " ++ show doc._uri
   slog "  Position: line 5, char 0 (add function)"
 
-  resp <- request L.SMethod_TextDocumentHover $ L.HoverParams
-    { L._textDocument = doc
-    , L._position = pos
-    , L._workDoneToken = Nothing
-    }
+  result <- getHover doc pos
 
-  case resp._result of
-    Left err -> slog $ "  Error: " ++ show err
-    Right result -> case result of
-      L.InR L.Null -> slog "  Result: null (no hover info)"
-      L.InL hoverResult -> do
-        slog "  Result: Got hover info!"
-        let content = extractContent hoverResult._contents
-        slog $ "  Content: " ++ take 200 (T.unpack content) ++ "..."
+  case result of
+    Nothing -> slog "  Result: null (no hover info)"
+    Just hoverResult -> do
+      slog "  Result: Got hover info!"
+      let content = extractContent hoverResult._contents
+      slog $ "  Content: " ++ take 200 (T.unpack content) ++ "..."
 
 -- | Test go-to-definition
 testDefinitionDoc :: L.TextDocumentIdentifier -> Session ()
@@ -140,28 +140,21 @@ testDefinitionDoc doc = do
   slog $ "  Doc: " ++ show doc._uri
   slog "  Position: line 12, char 14 (theAnswer usage)"
 
-  resp <- request L.SMethod_TextDocumentDefinition $ L.DefinitionParams
-    { L._textDocument = doc
-    , L._position = pos
-    , L._workDoneToken = Nothing
-    , L._partialResultToken = Nothing
-    }
+  result <- getDefinitions doc pos
 
-  case resp._result of
-    Left err -> slog $ "  Error: " ++ show err
-    Right result -> case result of
-      L.InR nested -> case nested of
-        L.InR L.Null -> slog "  Result: null (no definition)"
-        L.InL links -> do
-          slog $ "  Result: Found " ++ show (length links) ++ " definition link(s)"
-          mapM_ printDefLink links
-      L.InL (L.Definition locOrLocs) -> case locOrLocs of
-        L.InL loc -> do
-          slog "  Result: Found 1 definition"
-          printLoc loc
-        L.InR locs -> do
-          slog $ "  Result: Found " ++ show (length locs) ++ " definition(s)"
-          mapM_ printLoc locs
+  case result of
+    L.InR nested -> case nested of
+      L.InR L.Null -> slog "  Result: null (no definition)"
+      L.InL links -> do
+        slog $ "  Result: Found " ++ show (length links) ++ " definition link(s)"
+        mapM_ printDefLink links
+    L.InL (L.Definition locOrLocs) -> case locOrLocs of
+      L.InL loc -> do
+        slog "  Result: Found 1 definition"
+        printLoc loc
+      L.InR locs -> do
+        slog $ "  Result: Found " ++ show (length locs) ++ " definition(s)"
+        mapM_ printLoc locs
 
 printLoc :: L.Location -> Session ()
 printLoc loc = do
@@ -184,3 +177,34 @@ markedToText :: L.MarkedString -> Text
 markedToText (L.MarkedString inner) = case inner of
   L.InL t -> t
   L.InR mswl -> mswl._value
+
+-- | Test workspace/symbol query
+testWorkspaceSymbol :: Text -> Session ()
+testWorkspaceSymbol query = do
+  slog $ "  Query: \"" ++ T.unpack query ++ "\""
+
+  let params = L.WorkspaceSymbolParams
+        { L._workDoneToken = Nothing
+        , L._partialResultToken = Nothing
+        , L._query = query
+        }
+
+  resp <- request L.SMethod_WorkspaceSymbol params
+
+  case resp of
+    L.TResponseMessage _ _ (Right result) -> do
+      let symbols = extractSymbols result
+      slog $ "  Result: Found " ++ show (length symbols) ++ " symbol(s)"
+      mapM_ printSymbol (take 5 symbols)
+    L.TResponseMessage _ _ (Left err) -> do
+      slog $ "  Error: " ++ show err
+
+extractSymbols :: [L.SymbolInformation] L.|? ([L.WorkspaceSymbol] L.|? L.Null) -> [Text]
+extractSymbols result = case result of
+  L.InL infos -> map (._name) infos
+  L.InR wsOrNull -> case wsOrNull of
+    L.InL wsSymbols -> map (._name) wsSymbols
+    L.InR L.Null -> []
+
+printSymbol :: Text -> Session ()
+printSymbol name = slog $ "    - " ++ T.unpack name

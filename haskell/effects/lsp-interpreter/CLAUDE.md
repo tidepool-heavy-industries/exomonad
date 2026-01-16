@@ -1,6 +1,6 @@
 # LSP Interpreter - Language Server Protocol Integration
 
-Interprets the `LSP` effect by communicating with language servers via lsp-client.
+Interprets the `LSP` effect by communicating with language servers via lsp-test.
 
 ## When to Read This
 
@@ -20,10 +20,10 @@ Read this if you're:
                                        │ LSP effect
                                        ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│ LSP Interpreter                                                         │
+│ LSP Interpreter                                                      │
 │   runLSP :: LSPSession → Eff (LSP ': effs) a → Eff effs a           │
 └──────────────────────────────────────┬──────────────────────────────┘
-                                       │ lsp-client
+                                       │ lsp-test
                                        ▼
 ┌─────────────────────────────────────────────────────────────────────┐
 │ haskell-language-server-wrapper                                      │
