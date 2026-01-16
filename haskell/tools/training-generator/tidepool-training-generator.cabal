@@ -3,10 +3,10 @@ name:          tidepool-training-generator
 version:       0.1.0.0
 synopsis:      Generate FunctionGemma training data from synthetic examples
 description:
-  Generates JSONL training data in FunctionGemma Turn 1-5 format
-  for fine-tuning the semantic rating model. Uses QuickCheck-style
-  Arbitrary instances to generate synthetic code contexts and
-  heuristic scoring to produce ground-truth rubrics.
+  Generates JSONL training data in 2-turn minimal format for fine-tuning
+  FunctionGemma 270M as a semantic edge scorer. Uses QuickCheck-style
+  Arbitrary instances to generate synthetic edge contexts and heuristic
+  scoring to produce ground-truth rubrics.
 
 license:       MIT
 author:        Tidepool Labs
@@ -24,7 +24,6 @@ library
   exposed-modules:
     Tidepool.Training.Types
     Tidepool.Training.Arbitrary
-    Tidepool.Training.Heuristics
     Tidepool.Training.Format
   build-depends:
     base >= 4.17 && < 5,

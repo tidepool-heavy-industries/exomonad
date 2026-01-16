@@ -16,7 +16,7 @@ Developer tools that run as separate processes, not linked into main Tidepool bi
 tools/CLAUDE.md  ← YOU ARE HERE (router)
 ├── ghci-oracle/CLAUDE.md     ← GHCi subprocess server (detailed)
 ├── sleeptime/CLAUDE.md       ← Log analysis for agent evolution
-└── training-generator/CLAUDE.md ← FunctionGemma training data types
+└── training-generator/CLAUDE.md ← FunctionGemma JSONL training data
 ```
 
 ## Structure
@@ -25,7 +25,7 @@ tools/CLAUDE.md  ← YOU ARE HERE (router)
 |---------|---------|---------|
 | `ghci-oracle/` | Persistent GHCi session server | Standalone binary (socket server) |
 | `sleeptime/` | Log analysis for agent improvement | Library + CLI |
-| `training-generator/` | Training data types for FunctionGemma | Library |
+| `training-generator/` | JSONL training data for FunctionGemma | Library + CLI |
 
 ## ghci-oracle
 
@@ -64,26 +64,22 @@ See `sleeptime/CLAUDE.md` for analysis patterns.
 
 ## training-generator
 
-Shared types for generating FunctionGemma training data:
+Generates JSONL training data for FunctionGemma 270M fine-tuning:
 
-```haskell
-import Tidepool.TrainingGenerator.Types
-
-data TrainingExample = TrainingExample
-  { teQuery  :: QueryContext
-  , teNode   :: NodeContext
-  , teRubric :: Rubric
-  }
+```bash
+# Generate 1000 training examples
+training-generator 1000 > training.jsonl
 ```
 
-**Purpose**: Defines data structures for semantic code analysis training:
-- `Tag` - Categories of breaking changes (Exhaustive, PatternMatch, etc.)
-- `Rubric` - Structured scores (relevance, risk, confidence, reasoning)
-- `TrainingExample` - (query, node, rubric) triples for supervised learning
+**Purpose**: Generates edge scoring training data in 2-turn minimal format:
+- `ScoreEdgeInput` - Edge context (query, source, target, hover info)
+- `ScoreEdgeOutput` - Scoring rubric (relevance, risk, boolean flags)
+- `EdgeTrainingExample` - Input/output pairs for supervised learning
 
-**Used by**:
-- `semantic-scout` - Collects examples during exploration
-- Training pipeline - Converts to FunctionGemma format for fine-tuning
+**Wire format**: 2-turn minimal (user context → model call). Schema baked into weights.
+
+**Also exports** legacy types used by semantic-scout:
+- `Tag`, `Rubric`, `QueryContext`, `NodeContext`, `TrainingExample`
 
 See `training-generator/CLAUDE.md` for data model details.
 

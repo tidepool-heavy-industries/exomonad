@@ -1,23 +1,27 @@
--- | FunctionGemma Turn 1-5 format for training data.
+-- | FunctionGemma 2-turn minimal format for training data.
 --
--- Formats training examples as JSONL with the specific control tokens
--- required by FunctionGemma:
+-- Formats training examples as JSONL with the minimal control tokens
+-- required by fine-tuned FunctionGemma 270M:
 --
--- - Turn 1 (developer): Tool declaration with \<start_function_declaration\>
--- - Turn 2 (user): Rating request with \<escape\> tokens
--- - Turn 3 (model): Expected output with \<start_function_call\>
+-- - Turn 1 (user): Edge context with \<escape\> tokens
+-- - Turn 2 (model): Function call with the rubric
+--
+-- No schema turn (baked into weights). No response/synthesis turns.
+-- Training format MUST match inference format exactly.
+--
+-- Uses Gemma turn structure: \<start_of_turn\>role\\n...\<end_of_turn\>
 module Tidepool.Training.Format
-  ( -- * Formatting
-    formatTrainingLine
-  , formatTurn1
-  , formatTurn2
-  , formatTurn3
+  ( -- * Edge Training (2-turn minimal)
+    formatEdgeTrainingLine
+  , formatEdgeTrainingText
+  , formatUserTurn
+  , formatModelTurn
 
-    -- * Constants
-  , triggerPhrase
+    -- * Helpers
+  , escapeText
   ) where
 
-import Data.Aeson (Value, encode, object, (.=))
+import Data.Aeson (encode, object, (.=))
 import Data.ByteString.Lazy (ByteString)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -25,82 +29,67 @@ import qualified Data.Text as T
 import Tidepool.Training.Types
 
 
--- | The exact trigger phrase required by FunctionGemma.
-triggerPhrase :: Text
-triggerPhrase = "You are a model that can do function calling with the following functions"
-
-
--- | Format a complete training example as a JSONL line.
-formatTrainingLine :: TrainingExample -> ByteString
-formatTrainingLine ex = encode $ object
-  [ "messages" .= messages ]
-  where
-    messages :: [Value]
-    messages =
-      [ object ["role" .= ("developer" :: Text), "content" .= formatTurn1]
-      , object ["role" .= ("user" :: Text), "content" .= formatTurn2 ex.teQuery ex.teNode]
-      , object ["role" .= ("model" :: Text), "content" .= formatTurn3 ex.teRubric]
-      ]
-
-
--- | Turn 1: Tool declaration (developer role).
+-- | Wrap text in \<escape\> tokens for FunctionGemma wire format.
 --
--- Must include the exact trigger phrase and control tokens.
-formatTurn1 :: Text
-formatTurn1 = T.unlines
-  [ triggerPhrase
-  , ""
-  , "<start_function_declaration>"
-  , "rate_node("
-  , "  context: string,"
-  , "  hover: string,"
-  , "  query: string,"
-  , "  query_tags: array<enum[" <> tagEnumList <> "]>"
-  , "): {"
-  , "  relevance: int,"
-  , "  risk: int,"
-  , "  complexity: int,"
-  , "  confidence: int,"
-  , "  tags: array<enum[" <> tagEnumList <> "]>"
-  , "}"
-  , "<end_function_declaration>"
-  ]
-  where
-    tagEnumList = T.intercalate "," (map tagToText allTags)
+-- CRITICAL: All string values in structured data must use this.
+-- Failure to escape will cause parsing failures during training.
+-- Haskell code contains brackets and commas that collide with JSON syntax.
+escapeText :: Text -> Text
+escapeText t = "<escape>" <> t <> "<escape>"
 
 
--- | Turn 2: User request (user role).
+-- | Format an edge training example as a JSONL line.
 --
--- Uses \<escape\> tokens to delimit string content.
-formatTurn2 :: QueryContext -> NodeContext -> Text
-formatTurn2 query node = T.unlines
-  [ "Rate this code location for the query:"
-  , "<escape>" <> query.qcQuery <> "<escape>"
-  , ""
-  , "Location: " <> node.ncLocation
-  , "Depth: " <> T.pack (show node.ncDepth)
-  , "Breadth: " <> T.pack (show node.ncBreadth)
-  , ""
-  , "Code:"
-  , "<escape>"
-  , node.ncCodeSnippet
-  , "<escape>"
-  , ""
-  , "Hover info:"
-  , "<escape>" <> node.ncHover <> "<escape>"
-  , ""
-  , "Query tags: [" <> T.intercalate ", " (map tagToText query.qcTags) <> "]"
+-- Uses the "text" format preferred by TRL/Unsloth for direct fine-tuning.
+-- Output: {"text": "<start_of_turn>user\n...<end_of_turn>\n<start_of_turn>model\n...<end_of_turn>"}
+formatEdgeTrainingLine :: EdgeTrainingExample -> ByteString
+formatEdgeTrainingLine ex = encode $ object
+  [ "text" .= formatEdgeTrainingText ex ]
+
+
+-- | Format the complete 2-turn conversation as raw text.
+formatEdgeTrainingText :: EdgeTrainingExample -> Text
+formatEdgeTrainingText ex = T.concat
+  [ formatUserTurn ex.eteInput
+  , "\n"
+  , formatModelTurn ex.eteOutput
   ]
 
 
--- | Turn 3: Expected model output (model role).
+-- | Turn 1 (user): Edge context to be scored.
 --
--- Uses FunctionGemma control tokens for function call.
-formatTurn3 :: Rubric -> Text
-formatTurn3 r = "<start_function_call>call:rate_node{"
-  <> "relevance:" <> T.pack (show r.rRelevance)
-  <> ",risk:" <> T.pack (show r.rRisk)
-  <> ",complexity:" <> T.pack (show r.rComplexity)
-  <> ",confidence:" <> T.pack (show r.rConfidence)
-  <> ",tags:[" <> T.intercalate "," (map tagToText r.rTags) <> "]"
-  <> "}<end_function_call>"
+-- All string values wrapped in \<escape\> tokens.
+formatUserTurn :: ScoreEdgeInput -> Text
+formatUserTurn input = T.concat
+  [ "<start_of_turn>user\n"
+  , "Score this edge:\n"
+  , "Query: ", escapeText input.seiQuery, "\n"
+  , "Source: ", escapeText (input.seiSourceFile <> ":" <> T.pack (show input.seiSourceLine)), "\n"
+  , "Source hover: ", escapeText input.seiSourceHover, "\n"
+  , "Target: ", escapeText (input.seiTargetFile <> ":" <> T.pack (show input.seiTargetLine)), "\n"
+  , "Target hover: ", escapeText input.seiTargetHover, "\n"
+  , "Edge type: ", escapeText (edgeTypeToText input.seiEdgeType), "\n"
+  , "<end_of_turn>"
+  ]
+
+
+-- | Turn 2 (model): Function call with the scoring rubric.
+--
+-- This is the output we're training the model to produce.
+-- Inference should stop at \<end_of_turn\> or \<end_function_call\>.
+formatModelTurn :: ScoreEdgeOutput -> Text
+formatModelTurn output = T.concat
+  [ "<start_of_turn>model\n"
+  , "<start_function_call>call:score_edge{"
+  , "relevance:", T.pack (show output.seoRelevance), ","
+  , "risk:", T.pack (show output.seoRisk), ","
+  , "reasoning:", escapeText output.seoReasoning, ","
+  , "is_exhaustive:", boolToText output.seoIsExhaustive, ","
+  , "is_type_family:", boolToText output.seoIsTypeFamily, ","
+  , "is_exported:", boolToText output.seoIsExported
+  , "}<end_function_call>\n"
+  , "<end_of_turn>"
+  ]
+  where
+    boolToText True = "true"
+    boolToText False = "false"
