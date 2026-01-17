@@ -1,52 +1,51 @@
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE TypeOperators #-}
 
--- | Gemma effect for teaching symbol classification.
+-- | Candidate selection for teaching symbol extraction.
 --
--- Uses FunctionGemma to classify symbols for teaching:
---   - Role: What role does this symbol play in understanding the topic?
---   - IsPrereq: Must understand this BEFORE the topic?
---   - Mentions: What other symbols are needed to explain this one?
+-- FunctionGemma 270M is a "traffic controller" - trained for entity extraction
+-- and classification, NOT generative reasoning. When asked to extract related
+-- symbols from a signature, it echoes the input.
+--
+-- Solution: Transform from generation to selection:
+-- - ❌ BEFORE (generation): "What symbols are related?" → echoes input
+-- - ✅ AFTER (selection): "Which of [A,B,C] are relevant?" → classifies
 --
 -- Architecture:
+-- @
+-- ┌─────────┐     ┌────────────────┐     ┌─────────┐     ┌────────────┐
+-- │  LSP    │────▶│  Deterministic │────▶│  Gemma  │────▶│ [Selected] │
+-- │  hover  │     │  Extraction    │     │ SELECT  │     └────────────┘
+-- └─────────┘     └────────────────┘     └─────────┘
+--                        │
+--                        ▼
+--                 Candidates: [ScoreConfig, EdgeContext, ...]
+-- @
 --
--- @
--- ┌─────────────────────────────────────────┐
--- │  Exploration Loop                        │
--- │    │                                     │
--- │    ▼                                     │
--- │  classifySymbol :: TeachQuery            │
--- │                 -> LSPSymbol             │
--- │                 -> TeachGemma TeachOutput│
--- │    │                                     │
--- └────┼─────────────────────────────────────┘
---      │
---      ▼
--- ┌─────────────────────────────────────────┐
--- │  Interpreter (pluggable)                 │
--- │                                         │
--- │  • runTeachGemmaHTTP - Ollama server    │
--- │  • runTeachGemmaMock - hardcoded output │
--- └─────────────────────────────────────────┘
--- @
+-- Key insight: Deterministic extraction gets candidates. Gemma only classifies.
 module Tidepool.Control.Scout.Teach.Gemma
   ( -- * Effect
     TeachGemma(..)
 
     -- * Smart Constructors
-  , classifySymbol
+  , selectRelevantSymbols
+
+    -- * Deterministic Candidate Extraction
+  , extractCandidates
 
     -- * Interpreters
   , runTeachGemmaHTTP
   , runTeachGemmaMock
 
-    -- * Tool Schema
-  , classifySymbolTool
+    -- * Token Parsing (internal, exported for testing)
+  , parseSymbolTokens
   ) where
 
 import Control.Exception (try, SomeException)
 import Control.Monad.Freer (Eff, Member, send, interpret, LastMember, sendM)
-import Data.Aeson (encode, object, (.=), Value, (.:))
+import Data.Aeson (encode, object, (.=), Value, (.:), toJSON)
+import Data.List (nub)
 import qualified Data.Aeson as Aeson
 import Data.Aeson.Types (parseMaybe)
 import Data.ByteString.Lazy (ByteString)
@@ -55,72 +54,154 @@ import qualified Data.Text as T
 import qualified Data.Vector as V
 import Network.HTTP.Simple
 
-import Tidepool.Control.Scout.Teach.Types
-  ( TeachOutput(..), SymbolRole(..), LSPSymbol(..), TeachQuery(..)
-  )
+import Tidepool.Control.Scout.Teach.Types (LSPSymbol(..))
 
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- EFFECT DEFINITION
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | TeachGemma effect for symbol classification.
+-- | TeachGemma effect for symbol selection.
 --
--- Given a topic query and a symbol with its LSP data, returns:
---   - Role: Is this core, implementation, interface, helper, or unrelated?
---   - IsPrereq: Must understand this before the topic?
---   - Mentions: What symbols does this one reference?
+-- Given a topic, symbol, and pre-extracted candidates, selects which
+-- candidates are relevant to understanding the topic.
+--
+-- Key insight: This is CLASSIFICATION, not generation. The model picks
+-- from a fixed set rather than generating new symbols.
 data TeachGemma a where
-  -- | Classify a symbol for teaching purposes.
-  ClassifySymbol :: TeachQuery -> LSPSymbol -> TeachGemma TeachOutput
+  -- | Select relevant symbols from pre-extracted candidates.
+  --
+  -- Input:
+  --   - topic: what we're trying to understand
+  --   - symbol: the symbol being analyzed (with LSP data)
+  --   - candidates: symbols extracted from signature (deterministic)
+  -- Output: subset of candidates relevant to the topic
+  SelectRelevantSymbols
+    :: Text        -- ^ Topic description
+    -> LSPSymbol   -- ^ Symbol being analyzed
+    -> [Text]      -- ^ Candidate symbols (pre-extracted)
+    -> TeachGemma [Text]  -- ^ Selected subset
 
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- SMART CONSTRUCTORS
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Classify a symbol using the TeachGemma model.
-classifySymbol
+-- | Select relevant symbols from pre-extracted candidates.
+--
+-- This is the main entry point. Caller should:
+-- 1. Extract candidates using 'extractCandidates'
+-- 2. Pass them here for selection
+selectRelevantSymbols
   :: Member TeachGemma effs
-  => TeachQuery -> LSPSymbol -> Eff effs TeachOutput
-classifySymbol query sym = send (ClassifySymbol query sym)
+  => Text        -- ^ Topic description
+  -> LSPSymbol   -- ^ Symbol to analyze
+  -> [Text]      -- ^ Candidate symbols (from extractCandidates)
+  -> Eff effs [Text]
+selectRelevantSymbols topic sym candidates =
+  send (SelectRelevantSymbols topic sym candidates)
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- DETERMINISTIC CANDIDATE EXTRACTION
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Extract candidate symbols from a Haskell type signature.
+--
+-- This is DETERMINISTIC - no LLM needed. Parses the signature and
+-- extracts uppercase identifiers, filtering common types.
+--
+-- Examples:
+-- @
+-- extractCandidates "compositeScore :: ScoreConfig -> ScoreEdgeOutput -> Double"
+--   == ["ScoreConfig", "ScoreEdgeOutput"]
+--
+-- extractCandidates "foo :: Int -> Text -> Maybe Bar"
+--   == ["Bar"]  -- Int, Text, Maybe filtered out
+-- @
+extractCandidates :: Text -> [Text]
+extractCandidates sig =
+  let -- Tokenize: split on whitespace and punctuation
+      tokens = concatMap (T.splitOn " ")
+             $ concatMap (T.splitOn "->")
+             $ concatMap (T.splitOn "=>")
+             $ T.splitOn "::" sig
+      -- Clean each token
+      cleaned = map cleanToken tokens
+      -- Keep uppercase identifiers (type names)
+      typeNames = filter isTypeName cleaned
+      -- Remove primitives and common wrappers
+      filtered = filter (not . isCommonType) typeNames
+  in nub filtered  -- deduplicate
+  where
+    cleanToken :: Text -> Text
+    cleanToken = T.filter (`notElem` ("()[]{},:=" :: String)) . T.strip
+
+    isTypeName :: Text -> Bool
+    isTypeName t = case T.uncons t of
+      Just (c, _) -> c >= 'A' && c <= 'Z' && T.length t > 1
+      Nothing -> False
+
+    isCommonType :: Text -> Bool
+    isCommonType t = t `elem`
+      [ "Int", "Integer", "Float", "Double", "Bool", "Char"
+      , "Text", "String", "ByteString"
+      , "Maybe", "Either", "IO", "ST", "STM"
+      , "Eff", "Member", "LastMember"
+      , "Map", "Set", "List", "Vector", "Array"
+      , "Monad", "Functor", "Applicative", "Monoid"
+      ]
 
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- HTTP INTERPRETER (Production)
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | HTTP interpreter that calls Ollama for symbol classification.
+-- | HTTP interpreter that calls Ollama for symbol selection.
 --
--- Uses Ollama's /api/chat endpoint with native tool support.
+-- Uses Ollama's /api/chat endpoint with enum-constrained tool schema.
+-- The enum constraint ensures the model can ONLY output valid candidates.
 runTeachGemmaHTTP
   :: LastMember IO effs
   => Text  -- ^ Ollama endpoint (e.g., "http://localhost:11434")
   -> Eff (TeachGemma ': effs) a
   -> Eff effs a
 runTeachGemmaHTTP endpoint = interpret $ \case
-  ClassifySymbol query sym -> do
-    sendM $ putStrLn $ "[TeachGemma] HTTP call to " <> T.unpack endpoint
-      <> " for: " <> T.unpack (lsName sym)
-    result <- sendM $ callOllamaTeach endpoint query sym
-    case result of
-      Right output -> do
-        sendM $ putStrLn $ "[TeachGemma] -> role=" <> show (toRole output)
-          <> ", prereq=" <> show (toIsPrereq output)
-          <> ", mentions=" <> show (length (toMentions output))
-        pure output
-      Left err -> error $ unlines
-        [ "TeachGemma HTTP error: " <> T.unpack err
-        , "  Endpoint: " <> T.unpack endpoint
-        , "  Symbol: " <> T.unpack (lsName sym)
-        ]
+  SelectRelevantSymbols topic sym candidates -> do
+    sendM $ putStrLn $ "[TeachGemma] Candidates: " <> T.unpack (T.intercalate ", " candidates)
+
+    -- If no candidates, nothing to select
+    if null candidates
+      then do
+        sendM $ putStrLn "[TeachGemma] No candidates to select from"
+        pure []
+      else do
+        sendM $ putStrLn $ "[TeachGemma] HTTP call to " <> T.unpack endpoint
+          <> " for: " <> T.unpack (lsName sym)
+        result <- sendM $ callOllamaSelect endpoint topic sym candidates
+        case result of
+          Right selected -> do
+            sendM $ putStrLn $ "[TeachGemma] Selected: " <> T.unpack (T.intercalate ", " selected)
+            -- Validate: only return candidates that were in the input
+            let valid = filter (`elem` candidates) selected
+            if null valid && not (null selected)
+              then do
+                sendM $ putStrLn "[TeachGemma] Selection invalid, using all candidates"
+                pure candidates  -- Fallback
+              else pure valid
+          Left err -> do
+            sendM $ putStrLn $ "[TeachGemma] ERROR: " <> T.unpack err
+            sendM $ putStrLn "[TeachGemma] Selection failed, using all candidates"
+            pure candidates  -- Fallback: return all candidates
 
 
--- | Call Ollama's /api/chat endpoint for symbol classification.
-callOllamaTeach :: Text -> TeachQuery -> LSPSymbol -> IO (Either Text TeachOutput)
-callOllamaTeach endpoint query sym = do
-  let userContent = formatSymbolForClassification query sym
-  putStrLn $ "[TeachGemma] Input prompt:\n" <> T.unpack userContent
+-- | Call Ollama's /api/chat endpoint for symbol selection.
+--
+-- Uses enum-constrained tool schema so model can ONLY pick from candidates.
+callOllamaSelect :: Text -> Text -> LSPSymbol -> [Text] -> IO (Either Text [Text])
+callOllamaSelect endpoint topic sym candidates = do
+  let userContent = formatSelectionPrompt topic sym candidates
+  putStrLn $ "[TeachGemma] Selection prompt:\n" <> T.unpack userContent
 
   result <- try $ do
     let reqBody = encode $ object
@@ -129,7 +210,7 @@ callOllamaTeach endpoint query sym = do
               [ "role" .= ("user" :: Text)
               , "content" .= userContent
               ]]
-          , "tools" .= [classifySymbolTool]
+          , "tools" .= [selectSymbolsTool candidates]
           , "stream" .= False
           ]
 
@@ -143,125 +224,100 @@ callOllamaTeach endpoint query sym = do
     response <- httpLBS request'
     let body = getResponseBody response
     putStrLn $ "[TeachGemma] Raw response: " <> take 1000 (show body)
-    pure $ parseTeachResponse body
+    pure $ parseSelectionResponse body
 
   case result of
     Left (e :: SomeException) -> pure $ Left $ T.pack $ show e
     Right parsed -> pure parsed
 
 
--- | Format symbol context for classification.
-formatSymbolForClassification :: TeachQuery -> LSPSymbol -> Text
-formatSymbolForClassification query sym = T.unlines
-  [ "You are helping someone understand: \"" <> tqTopic query <> "\""
+-- | Format the selection prompt with pre-extracted candidates.
+--
+-- Key difference from generation: model picks FROM a list, not generates.
+-- Uses few-shot examples to teach relevance filtering.
+formatSelectionPrompt :: Text -> LSPSymbol -> [Text] -> Text
+formatSelectionPrompt topic sym candidates = T.unlines
+  [ "Task: Select which symbols help understand \"" <> topic <> "\""
   , ""
   , "Symbol: " <> lsName sym
-  , "Kind: " <> T.pack (show (lsKind sym))
-  , "Signature:"
-  , "```haskell"
-  , lsSignature sym
-  , "```"
-  , case lsDocComment sym of
-      Just doc -> "Documentation: " <> doc
-      Nothing  -> "Documentation: (none)"
+  , "Signature: " <> lsSignature sym
+  , "Candidates: " <> T.intercalate ", " candidates
   , ""
-  , "Answer these questions:"
+  , "=== Example ==="
+  , "Topic: authentication"
+  , "Symbol: login"
+  , "Signature: login :: AuthConfig -> Credentials -> IO Session"
+  , "Candidates: AuthConfig, Credentials, Session"
+  , "Selected: AuthConfig, Credentials, Session"
+  , "(All three are core to understanding authentication)"
   , ""
-  , "1. ROLE: How does this symbol relate to understanding \"" <> tqTopic query <> "\"?"
-  , "   - 'core': This IS the main topic"
-  , "   - 'implementation': This is HOW the topic works internally"
-  , "   - 'interface': This is how the topic CONNECTS to other code"
-  , "   - 'helper': This is a utility used by the topic"
-  , "   - 'unrelated': This doesn't help understand the topic"
+  , "=== Example ==="
+  , "Topic: scoring"
+  , "Symbol: calculateScore"
+  , "Signature: calculateScore :: Config -> Input -> Logger -> Score"
+  , "Candidates: Config, Input, Logger, Score"
+  , "Selected: Config, Input, Score"
+  , "(Logger is for observability, not scoring logic - skip)"
   , ""
-  , "2. IS_PREREQUISITE: Must someone understand this symbol BEFORE they can understand the topic? (true/false)"
-  , "   - true: This is foundational - you need it first"
-  , "   - false: This can be learned after or alongside the topic"
-  , ""
-  , "3. MENTIONS: What other symbols are directly referenced by this symbol that would also need explanation?"
-  , "   List only the symbol NAMES (e.g., ['ScoreConfig', 'EdgeContext', 'Rubric'])"
-  , "   Look at the type signature and documentation for referenced types/functions."
-  , ""
-  , "Call classify_symbol with your answers."
+  , "=== Your Turn ==="
+  , "Select the candidates relevant to \"" <> topic <> "\"."
+  , "Return ONLY symbols from the candidate list."
   ]
 
 
--- | Tool schema for classify_symbol function.
-classifySymbolTool :: Value
-classifySymbolTool = object
+-- | Tool schema for select_symbols function with enum constraint.
+--
+-- The enum constraint is CRITICAL - it tells the model the ONLY valid
+-- outputs are from the candidate list. This prevents hallucination.
+selectSymbolsTool :: [Text] -> Value
+selectSymbolsTool candidates = object
   [ "type" .= ("function" :: Text)
   , "function" .= object
-      [ "name" .= ("classify_symbol" :: Text)
-      , "description" .= ("Classify a symbol for teaching purposes" :: Text)
+      [ "name" .= ("select_symbols" :: Text)
+      , "description" .= ("Select relevant symbols from candidates" :: Text)
       , "parameters" .= object
           [ "type" .= ("object" :: Text)
           , "properties" .= object
-              [ "role" .= object
-                  [ "type" .= ("string" :: Text)
-                  , "enum" .= (["core", "implementation", "interface", "helper", "unrelated"] :: [Text])
-                  , "description" .= ("How this symbol relates to the topic" :: Text)
-                  ]
-              , "is_prerequisite" .= object
-                  [ "type" .= ("boolean" :: Text)
-                  , "description" .= ("Must understand this before the topic?" :: Text)
-                  ]
-              , "mentions" .= object
+              [ "selected" .= object
                   [ "type" .= ("array" :: Text)
                   , "items" .= object
                       [ "type" .= ("string" :: Text)
+                      , "enum" .= toJSON candidates  -- Constrain to valid choices!
                       ]
-                  , "description" .= ("Other symbols needed to explain this one" :: Text)
+                  , "description" .= ("Selected symbol names from the candidate list" :: Text)
                   ]
               ]
-          , "required" .= (["role", "is_prerequisite", "mentions"] :: [Text])
+          , "required" .= (["selected"] :: [Text])
           ]
       ]
   ]
 
 
--- | Parse Ollama response and extract TeachOutput from tool_calls.
---
--- Strict parsing - fails if required fields are missing.
-parseTeachResponse :: ByteString -> Either Text TeachOutput
-parseTeachResponse body = do
+-- | Parse Ollama response for symbol selection (array format).
+parseSelectionResponse :: ByteString -> Either Text [Text]
+parseSelectionResponse body = do
   json <- case Aeson.decode body of
     Nothing -> Left "Failed to parse JSON response"
     Just v  -> Right (v :: Value)
 
-  -- Extract message.tool_calls[0].function.arguments
-  args <- extractToolCallArgs json
-
-  case args of
-    Aeson.Object obj -> do
-      role <- case parseMaybe (.: "role") obj of
-        Just (r :: Text) -> case T.toLower r of
-          "core"           -> Right CoreConcept
-          "implementation" -> Right Implementation
-          "interface"      -> Right Interface
-          "helper"         -> Right Helper
-          "unrelated"      -> Right Unrelated
-          other            -> Left $ "Unknown role: " <> other
-        Nothing -> Left "Missing 'role' field"
-
-      isPrereq <- case parseMaybe (.: "is_prerequisite") obj of
-        Just (b :: Bool) -> Right b
-        Nothing -> Left "Missing 'is_prerequisite' field"
-
-      mentions <- case parseMaybe (.: "mentions") obj of
-        Just (arr :: [Text]) -> Right arr
-        Nothing -> Left "Missing 'mentions' field"
-
-      Right TeachOutput
-        { toRole = role
-        , toIsPrereq = isPrereq
-        , toMentions = mentions
-        }
-    _ -> Left "Arguments is not a JSON object"
+  -- Extract message.tool_calls[0].function.arguments.selected (array)
+  extractSelectedFromToolCall json
 
 
--- | Extract tool call arguments from Ollama response.
-extractToolCallArgs :: Value -> Either Text Value
-extractToolCallArgs json = case json of
+-- | Extract selected symbols array from Ollama tool call response.
+--
+-- Response format:
+-- {
+--   "message": {
+--     "tool_calls": [{
+--       "function": {
+--         "arguments": { "selected": ["ScoreConfig", "EdgeContext"] }
+--       }
+--     }]
+--   }
+-- }
+extractSelectedFromToolCall :: Value -> Either Text [Text]
+extractSelectedFromToolCall json = case json of
   Aeson.Object obj ->
     case parseMaybe (.: "message") obj of
       Just (Aeson.Object msg) ->
@@ -272,49 +328,56 @@ extractToolCallArgs json = case json of
                 case parseMaybe (.: "function") call of
                   Just (Aeson.Object fn) ->
                     case parseMaybe (.: "arguments") fn of
-                      Just args -> Right args
+                      Just (Aeson.Object args) ->
+                        case parseMaybe (.: "selected") args of
+                          Just (Aeson.Array arr) ->
+                            -- Extract strings from array
+                            Right $ extractStrings (V.toList arr)
+                          _ -> Left "No 'selected' array in arguments"
                       _ -> Left "No arguments in function"
                   _ -> Left "No function in tool_call"
               _ -> Left "Invalid tool_call format"
           _ -> Left "No tool_calls in message"
       _ -> Left "No message in response"
   _ -> Left "Response is not an object"
+  where
+    extractStrings :: [Value] -> [Text]
+    extractStrings = concatMap $ \case
+      Aeson.String s -> [s]
+      _ -> []
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- TOKEN PARSING
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Parse symbol tokens from a space/comma separated string.
+--
+-- Handles various formats:
+--   "ScoreConfig Rubric EdgeContext"
+--   "ScoreConfig, Rubric, EdgeContext"
+--   "ScoreConfig,Rubric,EdgeContext"
+parseSymbolTokens :: Text -> [Text]
+parseSymbolTokens raw =
+  filter isValidSymbol
+  $ map T.strip
+  $ concatMap (T.splitOn ",")
+  $ T.words raw
+  where
+    -- Valid symbols start with uppercase letter
+    isValidSymbol t = case T.uncons t of
+      Just (c, _) -> c >= 'A' && c <= 'Z' && not (T.null t)
+      Nothing -> False
 
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- MOCK INTERPRETER (Testing)
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Mock interpreter that returns a reasonable default.
+-- | Mock interpreter for testing.
 --
--- Useful for testing the exploration loop without Gemma dependency.
+-- Simply returns all candidates (no filtering). Useful for testing the
+-- exploration loop without Gemma dependency.
 runTeachGemmaMock :: Eff (TeachGemma ': effs) a -> Eff effs a
 runTeachGemmaMock = interpret $ \case
-  ClassifySymbol _query sym -> pure TeachOutput
-    { toRole = Implementation  -- Assume most things are implementation details
-    , toIsPrereq = False       -- Conservative: not a prerequisite
-    , toMentions = extractMentionsFromSig (lsSignature sym)
-    }
-
--- | Extract likely mentions from a type signature.
---
--- Simple heuristic: uppercase words that look like type names.
-extractMentionsFromSig :: Text -> [Text]
-extractMentionsFromSig sig =
-  let words' = T.words sig
-      -- Filter to words that start with uppercase (likely type names)
-      typeNames = filter isTypeName words'
-      -- Clean up punctuation
-      cleaned = map (T.filter (`notElem` ("()[]{},:->=" :: String))) typeNames
-      -- Remove common types we don't need to explain
-      filtered = filter (not . isCommonType) cleaned
-  in take 5 $ filter (not . T.null) filtered
-  where
-    isTypeName t = case T.uncons t of
-      Just (c, _) -> c >= 'A' && c <= 'Z'
-      Nothing -> False
-
-    isCommonType t = t `elem`
-      [ "Int", "Text", "String", "Bool", "Double", "Float"
-      , "Maybe", "Either", "IO", "Eff", "Map", "Set", "List"
-      ]
+  SelectRelevantSymbols _topic _sym candidates -> pure candidates

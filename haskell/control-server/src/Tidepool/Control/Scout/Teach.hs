@@ -3,7 +3,7 @@
 -- | Teaching document generation via LSP + Gemma.
 --
 -- Given a topic and seed symbols, explores the codebase to generate
--- a teaching document that explains the topic in prerequisite order.
+-- a teaching document that explains the topic in BFS depth order.
 --
 -- Architecture:
 --
@@ -15,21 +15,24 @@
 -- │           Exploration Loop              │
 -- │                                         │
 -- │  1. Find seed symbols (workspace/symbol)│
--- │  2. For each symbol in frontier:        │
+-- │  2. BFS: for each (symbol, depth):      │
 -- │     a. Lookup LSP data (hover, location)│
--- │     b. Classify with Gemma              │
--- │     c. Add mentions to frontier         │
--- │  3. Topological sort by mentions        │
--- │  4. Group by role                       │
+-- │     b. Get related symbols (Gemma)      │
+-- │     c. Resolve tokens → add to frontier │
+-- │     d. Log failures, continue           │
+-- │  3. Group by BFS depth                  │
 -- │                                         │
 -- └─────────────────────────────────────────┘
 --     │
 --     ▼
--- TeachingDoc { prereqs, core, support }
+-- TeachingDoc { core, prereqs, support }
+--   • core: depth 0 (seed symbols)
+--   • prereqs: depth 1-2
+--   • support: depth 3+
 -- @
 --
--- Key insight: Gemma extracts edges (what symbols are needed to explain
--- this symbol). Haskell traverses the graph and sorts topologically.
+-- Key insight: Gemma extracts edges (related symbols). Haskell traverses
+-- the graph via BFS, and depth determines teaching order.
 module Tidepool.Control.Scout.Teach
   ( -- * Main Entry Point
     teach
@@ -44,7 +47,7 @@ module Tidepool.Control.Scout.Teach
 
 import Control.Monad (forM)
 import Control.Monad.Freer (Eff, Member, LastMember)
-import Data.List (sortOn)
+import Data.List (sortOn, partition)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (catMaybes, fromMaybe)
@@ -53,7 +56,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 
 import Tidepool.Control.Scout.Teach.Types
-import Tidepool.Control.Scout.Teach.Gemma (TeachGemma, classifySymbol)
+import Tidepool.Control.Scout.Teach.Gemma (TeachGemma, selectRelevantSymbols, extractCandidates)
 import Tidepool.Effect.Types (Log, logDebug)
 import Tidepool.Effect.LSP
   ( LSP, workspaceSymbol, hover
@@ -90,9 +93,8 @@ defaultTeachConfig = TeachConfig
 --
 -- This is the main entry point. It:
 --   1. Resolves seed symbols via LSP workspace/symbol
---   2. Explores the graph using BFS with Gemma classification
---   3. Topologically sorts by mentions
---   4. Groups into prereqs, core, and support sections
+--   2. Explores the graph using BFS with Gemma token extraction
+--   3. Groups by BFS depth (core/prereqs/support)
 teach
   :: ( Member LSP effs
      , Member TeachGemma effs
@@ -127,8 +129,8 @@ teach config query = do
       -- 4. Build teaching document
       let doc = buildTeachingDoc query (tsGraph finalState)
       logDebug $ "[Teach] Generated doc with "
-        <> T.pack (show (length (tdPrereqs doc))) <> " prereqs, "
         <> T.pack (show (length (tdCore doc))) <> " core, "
+        <> T.pack (show (length (tdPrereqs doc))) <> " prereqs, "
         <> T.pack (show (length (tdSupport doc))) <> " support"
 
       pure doc
@@ -164,15 +166,16 @@ resolveSeedSymbols seeds = do
 -- EXPLORATION LOOP
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | The core exploration loop.
+-- | The core exploration loop (BFS).
 --
 -- Processes symbols from frontier until budget exhausted or frontier empty.
 -- Each iteration:
---   1. Pop symbol from frontier
+--   1. Pop (symbol, depth) from frontier
 --   2. Skip if already visited
 --   3. Lookup LSP data (hover, location)
---   4. Classify with Gemma
---   5. Add mentions to frontier
+--   4. Get related symbols from Gemma
+--   5. Resolve tokens → add to frontier with depth+1
+--   6. Log failures and continue (graceful degradation)
 exploreLoop
   :: ( Member LSP effs
      , Member TeachGemma effs
@@ -190,13 +193,15 @@ exploreLoop config query state
       logDebug "[Teach] Budget exhausted"
       pure state
   -- Frontier empty
-  | Set.null (tsFrontier state) = do
+  | null (tsFrontier state) = do
       logDebug "[Teach] Frontier empty"
       pure state
   -- Process next symbol
   | otherwise = do
-      -- Pop from frontier (take minimum for deterministic order)
-      let (symKey, frontier') = Set.deleteFindMin (tsFrontier state)
+      -- Pop from frontier (FIFO for BFS)
+      let ((symKey, depth), frontier') = case tsFrontier state of
+            (x:xs) -> (x, xs)
+            []     -> error "impossible: checked null above"
 
       -- Skip if already visited
       if symKey `Set.member` tsVisited state
@@ -206,8 +211,8 @@ exploreLoop config query state
         else do
           let (file, name) = symKey
           logDebug $ "[Teach] Processing: " <> name
-            <> " in " <> T.pack file
-            <> " (budget=" <> T.pack (show (tsBudget state)) <> ")"
+            <> " (depth=" <> T.pack (show depth)
+            <> ", budget=" <> T.pack (show (tsBudget state)) <> ")"
 
           -- Lookup LSP data
           lspSymMaybe <- lookupSymbol symKey
@@ -222,67 +227,52 @@ exploreLoop config query state
               exploreLoop config query state'
 
             Just lspSym -> do
-              -- Check cache first
-              teachOutput <- case Map.lookup symKey (tsCache state) of
-                Just cached -> do
-                  logDebug "[Teach] Using cached classification"
-                  pure cached
-                Nothing -> do
-                  -- Classify with Gemma
-                  classifySymbol query lspSym
+              -- Add to graph with depth
+              let graph' = Map.insert symKey (depth, lspSym) (tsGraph state)
 
-              -- Filter unrelated symbols
-              if toRole teachOutput == Unrelated
-                then do
-                  logDebug $ "[Teach] Skipping unrelated: " <> name
-                  let state' = state
-                        { tsFrontier = frontier'
-                        , tsVisited = Set.insert symKey (tsVisited state)
-                        , tsCache = Map.insert symKey teachOutput (tsCache state)
-                        }
-                  exploreLoop config query state'
-                else do
-                  -- Add to graph
-                  let graph' = Map.insert symKey (teachOutput, lspSym) (tsGraph state)
+              -- Extract candidates deterministically from signature
+              let candidates = extractCandidates (lsSignature lspSym)
+              -- Select relevant symbols from candidates via Gemma
+              selectedTokens <- selectRelevantSymbols (tqTopic query) lspSym candidates
+              let tokensLimited = take (tcMaxMentionsPerSymbol config) selectedTokens
 
-                  -- Resolve mentions to SymbolKeys
-                  let mentionsLimited = take (tcMaxMentionsPerSymbol config) (toMentions teachOutput)
-                  mentionKeys <- resolveMentions file mentionsLimited
+              logDebug $ "[Teach] -> related tokens: " <> T.intercalate ", " tokensLimited
 
-                  -- Filter to unseen mentions
-                  let unseen = Set.difference
-                        (Set.fromList mentionKeys)
-                        (tsVisited state)
+              -- Resolve tokens to SymbolKeys (graceful: log failures)
+              resolvedKeys <- resolveTokens file tokensLimited
 
-                  logDebug $ "[Teach] -> role=" <> symbolRoleToText (toRole teachOutput)
-                    <> ", prereq=" <> T.pack (show (toIsPrereq teachOutput))
-                    <> ", mentions=" <> T.pack (show (length mentionKeys))
-                    <> " (" <> T.pack (show (Set.size unseen)) <> " new)"
+              -- Filter to unseen symbols
+              let unseen = filter (\k -> not (k `Set.member` tsVisited state)) resolvedKeys
+              let newFrontier = map (\k -> (k, depth + 1)) unseen
 
-                  let state' = state
-                        { tsGraph = graph'
-                        , tsFrontier = Set.union frontier' unseen
-                        , tsVisited = Set.insert symKey (tsVisited state)
-                        , tsBudget = tsBudget state - 1
-                        , tsCache = Map.insert symKey teachOutput (tsCache state)
-                        }
+              logDebug $ "[Teach] -> resolved " <> T.pack (show (length resolvedKeys))
+                <> " (" <> T.pack (show (length unseen)) <> " new)"
 
-                  exploreLoop config query state'
+              let state' = state
+                    { tsGraph = graph'
+                    , tsFrontier = frontier' ++ newFrontier  -- Append for BFS
+                    , tsVisited = Set.insert symKey (tsVisited state)
+                    , tsBudget = tsBudget state - 1
+                    }
+
+              exploreLoop config query state'
 
 
--- | Resolve mention names to SymbolKeys.
+-- | Resolve token names to SymbolKeys.
 --
--- Uses the current file as context for resolution.
-resolveMentions
-  :: (Member LSP effs, NativeOnly)
-  => FilePath   -- ^ Context file
-  -> [Text]     -- ^ Mention names
+-- Graceful degradation: logs failures and continues.
+resolveTokens
+  :: (Member LSP effs, Member Log effs, NativeOnly)
+  => FilePath   -- ^ Context file (unused, but kept for future heuristics)
+  -> [Text]     -- ^ Token names
   -> Eff effs [SymbolKey]
-resolveMentions _contextFile mentions = do
-  results <- forM mentions $ \mention -> do
-    symbols <- workspaceSymbol mention
+resolveTokens _contextFile tokens = do
+  results <- forM tokens $ \token -> do
+    symbols <- workspaceSymbol token
     case symbols of
-      [] -> pure Nothing
+      [] -> do
+        logDebug $ "[Teach] WARNING: Could not resolve token: " <> token
+        pure Nothing
       (sym:_) -> do
         let loc = sym.siLocation
             file = stripFilePrefix loc.locUri
@@ -368,53 +358,35 @@ parseHoverContent content =
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Build a teaching document from the exploration graph.
-buildTeachingDoc :: TeachQuery -> Map SymbolKey (TeachOutput, LSPSymbol) -> TeachingDoc
+--
+-- Groups by BFS depth:
+--   - Depth 0: Core (seed symbols)
+--   - Depth 1-2: Prerequisites
+--   - Depth 3+: Support
+buildTeachingDoc :: TeachQuery -> Map SymbolKey (Int, LSPSymbol) -> TeachingDoc
 buildTeachingDoc query graph =
-  let -- Convert to list and sort
-      items = Map.toList graph
-      units = map toUnit items
+  let -- Convert to list of TeachingUnits
+      units = map toUnit (Map.toList graph)
 
-      -- Check if a unit is a prerequisite based on whether other items reference it
-      isPrereqUnit u = tuRole u == CoreConcept ||
-        any (\(_, (t, _)) -> toIsPrereq t && lsName (tuSymbol u) `elem` toMentions t) items
+      -- Sort by depth, then name
+      sorted = sortOn (\u -> (tuDepth u, lsName (tuSymbol u))) units
 
-      -- Topological sort by mentions (prereqs first)
-      sorted = topoSort units
-
-      -- Group by role
-      (prereqs, rest1) = span isPrereqUnit sorted
-      (core, support) = partition' isCoreUnit rest1
+      -- Partition by depth
+      (core, rest) = partition (\u -> tuDepth u == 0) sorted
+      (prereqs, support) = partition (\u -> tuDepth u <= 2) rest
 
   in TeachingDoc
     { tdTitle = "Understanding: " <> tqTopic query
     , tdTopic = tqTopic query
-    , tdPrereqs = prereqs
     , tdCore = core
+    , tdPrereqs = prereqs
     , tdSupport = support
     }
   where
-    toUnit (_, (teach', lsp)) = TeachingUnit
+    toUnit (_, (depth, lsp)) = TeachingUnit
       { tuSymbol = lsp
-      , tuRole = toRole teach'
-      , tuMentions = toMentions teach'
+      , tuDepth = depth
       }
-
-    isCoreUnit u = tuRole u == CoreConcept || tuRole u == Implementation
-
-    partition' p xs = (filter p xs, filter (not . p) xs)
-
-
--- | Topological sort by mentions.
---
--- Symbols that are mentioned by others come first.
-topoSort :: [TeachingUnit] -> [TeachingUnit]
-topoSort units =
-  let -- Count how many times each symbol is mentioned
-      mentionCounts = foldr countMentions Map.empty units
-      -- Sort by mention count (descending) then name
-  in sortOn (\u -> (negate $ Map.findWithDefault 0 (lsName (tuSymbol u)) mentionCounts, lsName (tuSymbol u))) units
-  where
-    countMentions u acc = foldr (\m -> Map.insertWith (+) m (1 :: Int)) acc (tuMentions u)
 
 
 -- | Create an empty document when no seeds found.
@@ -422,8 +394,8 @@ emptyDoc :: TeachQuery -> TeachingDoc
 emptyDoc query = TeachingDoc
   { tdTitle = "Understanding: " <> tqTopic query
   , tdTopic = tqTopic query
-  , tdPrereqs = []
   , tdCore = []
+  , tdPrereqs = []
   , tdSupport = []
   }
 

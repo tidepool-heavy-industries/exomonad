@@ -72,20 +72,20 @@ def main():
                 core = result.get('tdCore', [])
                 support = result.get('tdSupport', [])
 
-                print(f"Prerequisites ({len(prereqs)} units):")
-                for unit in prereqs:
-                    sym = unit.get('tuSymbol', {})
-                    print(f"  - {sym.get('lsName', '?')}: {unit.get('tuRole', '?')}")
-
-                print(f"\nCore ({len(core)} units):")
+                print(f"Core ({len(core)} units) - depth 0:")
                 for unit in core:
                     sym = unit.get('tuSymbol', {})
-                    print(f"  - {sym.get('lsName', '?')}: {unit.get('tuRole', '?')}")
+                    print(f"  - {sym.get('lsName', '?')} (depth {unit.get('tuDepth', '?')})")
 
-                print(f"\nSupport ({len(support)} units):")
+                print(f"\nPrerequisites ({len(prereqs)} units) - depth 1-2:")
+                for unit in prereqs:
+                    sym = unit.get('tuSymbol', {})
+                    print(f"  - {sym.get('lsName', '?')} (depth {unit.get('tuDepth', '?')})")
+
+                print(f"\nSupport ({len(support)} units) - depth 3+:")
                 for unit in support:
                     sym = unit.get('tuSymbol', {})
-                    print(f"  - {sym.get('lsName', '?')}: {unit.get('tuRole', '?')}")
+                    print(f"  - {sym.get('lsName', '?')} (depth {unit.get('tuDepth', '?')})")
 
                 print()
                 print(f"Total: {len(prereqs) + len(core) + len(support)} teaching units")
