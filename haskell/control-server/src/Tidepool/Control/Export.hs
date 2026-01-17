@@ -1,7 +1,10 @@
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE OverloadedRecordDot #-}
 
 -- | Export training examples from LSP exploration.
+--
+-- Generates FunctionGemma training data in 3-turn token format with holes
+-- for human annotation. Uses LSP (workspace/symbol, hover) to extract
+-- type signatures and candidates.
 module Tidepool.Control.Export
   ( exportTrainingExamples
   , discoverSymbols
@@ -57,11 +60,7 @@ exportTrainingExamples session seeds = do
 
       let candidates = extractCandidates sig
 
-      hPutStrLn stderr $ "[Export] Symbol: " <> T.unpack symName
-      hPutStrLn stderr $ "[Export] Signature (first 200 chars): " <> take 200 (T.unpack sig)
-      hPutStrLn stderr $ "[Export] Candidates: " <> show candidates
-
-      -- Skip if no candidates
+      -- Skip if no candidates (e.g., simple types with no references)
       when (not $ null candidates) $ do
         let location = locationToText loc
         let jsonl = formatSelectSymbolsExample
@@ -82,26 +81,23 @@ exportTrainingExamples session seeds = do
 -- (just ":: Type") while functions have full signatures with type references.
 discoverSymbols :: LSPSession -> IO [Text]
 discoverSymbols session = do
-  hPutStrLn stderr "[Export] Querying for all symbols..."
   allSyms <- runM $ runLSP session $ workspaceSymbol ""
-  hPutStrLn stderr $ "[Export] Found " <> show (length allSyms) <> " total symbols"
 
   -- Filter to functions only (SKFunction, SKMethod, SKVariable)
-  -- These have type signatures with extractable candidates
   -- Data types (SKClass, SKStruct, SKEnum) just show ":: Type"
   let isFunctionLike (SymbolInformation _ kind _ _) = kind `elem` [SKFunction, SKMethod, SKVariable]
       functions = filter isFunctionLike allSyms
-  hPutStrLn stderr $ "[Export] Found " <> show (length functions) <> " functions/variables"
 
   -- Filter out derived instances ($fShow*, $fEq*, etc.)
   let isNotDerived (SymbolInformation name _ _ _) = not ("$f" `T.isPrefixOf` name)
       userDefined = filter isNotDerived functions
-  hPutStrLn stderr $ "[Export] Found " <> show (length userDefined) <> " user-defined functions"
 
   -- Take reasonable sample
   let filtered = take 50 userDefined
 
   -- Extract unique names
   let uniqueNames = nub $ map (\(SymbolInformation name _ _ _) -> name) filtered
-  hPutStrLn stderr $ "[Export] Returning " <> show (length uniqueNames) <> " unique names"
+
+  hPutStrLn stderr $ "Discovered " <> show (length uniqueNames) <> " functions from "
+    <> show (length allSyms) <> " workspace symbols"
   pure uniqueNames
