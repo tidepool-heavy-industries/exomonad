@@ -1,7 +1,12 @@
+{-# LANGUAGE RecordWildCards #-}
+
 module Tidepool.Training.Format
   ( formatSelectSymbolsExample
+  , formatSelectSymbolsExampleGrouped
   , formatDeveloperTurn
   , formatUserTurn
+  , formatUserTurnGrouped
+  , formatCandidateGroups
   , formatModelTurnWithHole
   , holeMarker
   ) where
@@ -10,6 +15,8 @@ import Data.Aeson (encode, object, (.=))
 import Data.ByteString.Lazy (ByteString)
 import Data.Text (Text)
 import qualified Data.Text as T
+
+import Tidepool.Training.Types (CandidateGroups(..))
 
 -- | Create a hole marker for human annotation.
 holeMarker :: Text -> Text
@@ -32,27 +39,29 @@ formatDeveloperTurn = T.unlines
   ]
 
 -- | Format user turn with LSP context.
+--
+-- Lean format optimized for token density:
+-- - No escape tags in user turn (plain text context)
+-- - Module + Package for disambiguation
+-- - First-sentence docs only
+-- - Signature pre-cleaned (no forall, no markdown)
 formatUserTurn
   :: Text         -- Symbol name
-  -> Text         -- Location (File:Line)
-  -> Text         -- Signature
-  -> Maybe Text   -- Code snippet (optional)
-  -> Maybe Text   -- Documentation (optional)
+  -> Text         -- Module name (e.g., "Tidepool.Effect.LSP")
+  -> Text         -- Package name (e.g., "tidepool-core")
+  -> Text         -- Signature (cleaned)
+  -> Maybe Text   -- Documentation (first sentence only)
   -> [Text]       -- Candidates
   -> Text
-formatUserTurn symName location signature maybeCode maybeDocs candidates = T.unlines $
+formatUserTurn symName moduleName packageName signature maybeDocs candidates = T.unlines $
   [ "<start_of_turn>user"
-  , "Topic: <escape>" <> holeMarker "topic" <> "<escape>"
-  , "Symbol: <escape>" <> symName <> "<escape>"
-  , "Location: <escape>" <> location <> "<escape>"
-  , "Signature: <escape>" <> signature <> "<escape>"
+  , "Topic: " <> holeMarker "topic"
+  , "Symbol: " <> symName
+  , "Module: " <> moduleName
+  , "Package: " <> packageName
+  , "Signature: " <> signature
   ]
-  <> (case maybeCode of
-       Just code -> ["Code: <escape>" <> code <> "<escape>"]
-       Nothing -> [])
-  <> (case maybeDocs of
-       Just docs -> ["Docs: <escape>" <> docs <> "<escape>"]
-       Nothing -> [])
+  <> maybe [] (\docs -> ["Docs: " <> docs]) maybeDocs
   <>
   [ "Candidates: " <> T.intercalate ", " candidates
   , "<end_of_turn>"
@@ -69,18 +78,74 @@ formatModelTurnWithHole = T.unlines
   ]
 
 -- | Format complete training example as JSONL line.
+--
+-- Lean format: Module + Package + cleaned signature + first-sentence docs.
 formatSelectSymbolsExample
   :: Text         -- Symbol name
-  -> Text         -- Location
-  -> Text         -- Signature
-  -> Maybe Text   -- Code snippet
-  -> Maybe Text   -- Documentation
+  -> Text         -- Module name
+  -> Text         -- Package name
+  -> Text         -- Signature (cleaned)
+  -> Maybe Text   -- Documentation (first sentence)
   -> [Text]       -- Candidates
   -> ByteString
-formatSelectSymbolsExample symName location signature maybeCode maybeDocs candidates =
+formatSelectSymbolsExample symName moduleName packageName signature maybeDocs candidates =
   let text = T.concat
         [ formatDeveloperTurn
-        , formatUserTurn symName location signature maybeCode maybeDocs candidates
+        , formatUserTurn symName moduleName packageName signature maybeDocs candidates
+        , formatModelTurnWithHole
+        ]
+  in encode $ object ["text" .= text]
+
+
+-- | Format candidate groups (Fields, Inputs, Output, References).
+formatCandidateGroups :: CandidateGroups -> Text
+formatCandidateGroups CandidateGroups{..} = T.unlines
+  [ "Candidates:"
+  , "  Fields: " <> formatList cgFields
+  , "  Inputs: " <> formatList cgInputs
+  , "  Output: " <> formatList cgOutput
+  , "  References: " <> case cgReferences of
+      Left note -> note
+      Right refs -> formatList refs
+  ]
+  where
+    formatList [] = "(none)"
+    formatList xs = T.intercalate ", " xs
+
+
+-- | Format user turn with grouped candidates (v2 format).
+formatUserTurnGrouped
+  :: Text            -- Symbol name
+  -> Text            -- Module name
+  -> Text            -- Package name
+  -> Text            -- Signature (cleaned)
+  -> CandidateGroups -- Grouped candidates
+  -> Text
+formatUserTurnGrouped symName moduleName packageName signature groups = T.unlines
+  [ "<start_of_turn>user"
+  , "Topic: " <> holeMarker "topic"
+  , "Symbol: " <> symName
+  , "Module: " <> moduleName
+  , "Package: " <> packageName
+  , "Signature: " <> signature
+  , ""
+  , T.strip $ formatCandidateGroups groups
+  , "<end_of_turn>"
+  ]
+
+
+-- | Format complete training example with grouped candidates (v2).
+formatSelectSymbolsExampleGrouped
+  :: Text            -- Symbol name
+  -> Text            -- Module name
+  -> Text            -- Package name
+  -> Text            -- Signature (cleaned)
+  -> CandidateGroups -- Grouped candidates
+  -> ByteString
+formatSelectSymbolsExampleGrouped symName moduleName packageName signature groups =
+  let text = T.concat
+        [ formatDeveloperTurn
+        , formatUserTurnGrouped symName moduleName packageName signature groups
         , formatModelTurnWithHole
         ]
   in encode $ object ["text" .= text]

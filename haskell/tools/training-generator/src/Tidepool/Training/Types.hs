@@ -24,6 +24,9 @@ module Tidepool.Training.Types
     -- * Select Symbols Example (for FunctionGemma symbol selection)
   , SelectSymbolsExample(..)
 
+    -- * Candidate Groups (LSP orchestration output)
+  , CandidateGroups(..)
+
     -- * Edge Types (LSP-derived relationship types)
   , EdgeType(..)
   , allEdgeTypes
@@ -110,6 +113,26 @@ data SelectSymbolsExample = SelectSymbolsExample
   , sseLocation   :: Text   -- ^ File location "File.hs:42"
   , sseSignature  :: Text   -- ^ Type signature from LSP hover
   , sseCandidates :: [Text] -- ^ Extracted type names
+  } deriving stock (Eq, Show, Generic)
+    deriving anyclass (FromJSON, ToJSON)
+
+
+-- | Grouped candidates by edge type for rich training data.
+--
+-- Extracted via LSP orchestration:
+-- - Fields: from documentSymbol (record fields, constructors)
+-- - Inputs: argument types from signature (dependencies)
+-- - Output: return type from signature (what this produces)
+-- - References: from findReferences (usage sites, capped)
+--
+-- The Input/Output split helps the navigator model answer directional queries:
+-- "How do I get a User?" → look at Output
+-- "What needs a Config?" → look at Inputs
+data CandidateGroups = CandidateGroups
+  { cgFields     :: [Text]            -- ^ Record fields from documentSymbol
+  , cgInputs     :: [Text]            -- ^ Argument types (dependencies)
+  , cgOutput     :: [Text]            -- ^ Return type (what this produces)
+  , cgReferences :: Either Text [Text] -- ^ Left = "[many refs]", Right = ref list
   } deriving stock (Eq, Show, Generic)
     deriving anyclass (FromJSON, ToJSON)
 

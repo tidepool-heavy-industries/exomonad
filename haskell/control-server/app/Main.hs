@@ -8,16 +8,18 @@ import Data.Text (Text)
 import qualified Data.Text as T
 
 import Tidepool.Control.Server
-import Tidepool.Control.Export (exportTrainingExamples, exportWithExpansion, discoverSymbols)
+import Tidepool.Control.Export (exportTrainingExamples, exportGroupedTrainingExamples, exportWithExpansion, discoverSymbols)
 import Tidepool.LSP.Interpreter (withLSPSession)
 
 main :: IO ()
 main = do
   args <- getArgs
   case args of
-    ["export-training"] -> runExportMode []
+    ["export-training"] -> runExportMode False []
+    ["export-training", "--grouped"] -> runExportMode True []
     ["export-training", "--expand", countStr] -> runExpandMode (read countStr)
-    ("export-training" : seeds) -> runExportMode (map T.pack seeds)
+    ("export-training" : "--grouped" : seeds) -> runExportMode True (map T.pack seeds)
+    ("export-training" : seeds) -> runExportMode False (map T.pack seeds)
     ["--help"] -> printUsage
     ["-h"] -> printUsage
     _ -> runServerMode
@@ -34,8 +36,8 @@ runServerMode = do
 
   runServer config
 
-runExportMode :: [Text] -> IO ()
-runExportMode seeds = do
+runExportMode :: Bool -> [Text] -> IO ()
+runExportMode useGrouped seeds = do
   projectDir <- getCurrentDirectory
   withLSPSession projectDir $ \session -> do
     -- HLS needs time to index the workspace before workspaceSymbol works
@@ -49,7 +51,11 @@ runExportMode seeds = do
       else pure seeds
 
     hPutStrLn stderr $ "Generating examples for " <> show (length actualSeeds) <> " symbols..."
-    exportTrainingExamples session actualSeeds
+    if useGrouped
+      then do
+        hPutStrLn stderr "Using grouped format (v2) with LSP orchestration..."
+        exportGroupedTrainingExamples session actualSeeds
+      else exportTrainingExamples session actualSeeds
 
 runExpandMode :: Int -> IO ()
 runExpandMode targetCount = do
@@ -68,14 +74,22 @@ printUsage = do
   putStrLn "Usage:"
   putStrLn "  tidepool-control-server                    Start control server"
   putStrLn "  tidepool-control-server export-training    Auto-discover and generate training data"
+  putStrLn "  tidepool-control-server export-training --grouped"
+  putStrLn "                                             Use v2 format with grouped candidates"
   putStrLn "  tidepool-control-server export-training --expand <count>"
   putStrLn "                                             Generate training data with BFS expansion"
   putStrLn "  tidepool-control-server export-training <symbols...>"
   putStrLn "                                             Generate training data for specific symbols"
   putStrLn "  tidepool-control-server --help             Show this help"
   putStrLn ""
+  putStrLn "Formats:"
+  putStrLn "  v1 (default): Flat candidate list"
+  putStrLn "  v2 (--grouped): Candidates grouped by edge type (Fields, Types, References)"
+  putStrLn "                  Uses LSP findReferences with hub symbol detection"
+  putStrLn ""
   putStrLn "Examples:"
   putStrLn "  tidepool-control-server"
   putStrLn "  tidepool-control-server export-training > training.jsonl"
+  putStrLn "  tidepool-control-server export-training --grouped > training-v2.jsonl"
   putStrLn "  tidepool-control-server export-training --expand 1000 > training.jsonl"
   putStrLn "  tidepool-control-server export-training ScoreConfig EdgeContext > training.jsonl"
