@@ -16,18 +16,27 @@ module Tidepool.Control.Export
   , exportGroupedTrainingExamples
   , exportWithExpansion
   , discoverSymbols
+  , findHaskellFiles
+  , readCodeAtRange
+  , sampleCodeBodies
+  , exportCodeSamples
   ) where
 
 import Control.Concurrent (threadDelay)
 import Control.Monad (forM_, when, forM)
 import Control.Monad.Freer (runM)
+import Data.Aeson (encode, object, (.=))
 import qualified Data.ByteString.Lazy.Char8 as BL
 import Data.IORef (IORef, newIORef, readIORef, writeIORef, modifyIORef')
 import Data.List (nub)
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.IO as TIO
+import System.Directory (listDirectory, doesFileExist, doesDirectoryExist)
+import System.FilePath ((</>), takeExtension)
 import System.IO (stdout, stderr, hFlush, hPutStrLn)
+import System.Random (randomRIO)
 
 import Tidepool.Control.Scout.Teach.Gemma (extractCandidates)
 import Tidepool.Effect.LSP
@@ -696,3 +705,170 @@ findTypeDefinitionFile session typeName = do
       pure $ Just $ case T.stripPrefix "file://" uri of
         Just f -> f
         Nothing -> uri
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- CODE SAMPLING (V3: Code-Native Training Format)
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Find all Haskell source files in a directory tree.
+--
+-- Recursively traverses directories, collecting *.hs files.
+-- Excludes build artifacts: dist-newstyle, .stack-work, vendor, .git
+findHaskellFiles :: FilePath -> IO [FilePath]
+findHaskellFiles root = do
+  isDir <- doesDirectoryExist root
+  if not isDir
+    then pure []
+    else do
+      entries <- listDirectory root
+      let filteredEntries = filter (not . isExcluded) entries
+      paths <- forM filteredEntries $ \entry -> do
+        let fullPath = root </> entry
+        isFile <- doesFileExist fullPath
+        isDirectory <- doesDirectoryExist fullPath
+        if isFile && takeExtension fullPath == ".hs"
+          then pure [fullPath]
+          else if isDirectory
+            then findHaskellFiles fullPath
+            else pure []
+      pure $ concat paths
+  where
+    isExcluded :: FilePath -> Bool
+    isExcluded name = name `elem`
+      [ "dist-newstyle", ".stack-work", "vendor", ".git"
+      , "dist", "build", ".cabal-sandbox"
+      ]
+
+-- | Read code from file at LSP Range, with context expansion.
+--
+-- For training data, we need full function bodies, not just signatures.
+-- Strategy: Read from startLine through either:
+--   1. Next top-level definition (column 0, non-whitespace, non-comment)
+--   2. endLine + 30 lines (whichever comes first)
+--
+-- LSP Positions are 0-indexed.
+readCodeAtRange :: FilePath -> Range -> IO Text
+readCodeAtRange file (Range (Position startLine _) (Position endLine _)) = do
+  contents <- TIO.readFile file
+  let allLines = T.lines contents
+      startIdx = fromIntegral startLine
+      endIdx = fromIntegral endLine
+
+      -- Read up to 30 lines past the LSP range, or until next top-level def
+      maxIdx = min (length allLines - 1) (endIdx + 30)
+      candidateLines = drop startIdx $ take (maxIdx + 1) allLines
+
+      -- Find next top-level definition (starts at column 0, not whitespace/comment)
+      isTopLevelDef line =
+        not (T.null line) &&
+        not (T.isPrefixOf " " line) &&
+        not (T.isPrefixOf "\t" line) &&
+        not (T.isPrefixOf "--" line)
+
+      -- Take lines until we hit next top-level def (excluding first line which is current def)
+      bodyLines = case candidateLines of
+        [] -> []
+        (firstLine:rest) ->
+          let continuation = takeWhile (not . isTopLevelDef) rest
+          in firstLine : continuation
+
+  pure $ T.unlines bodyLines
+
+-- | Sample random code bodies from entire codebase.
+--
+-- Strategy:
+-- 1. Use workspaceSymbol to discover all symbols efficiently (HLS has this indexed)
+-- 2. Filter to function-like symbols with valid locations
+-- 3. Randomly sample N symbols from collected set
+-- 4. Read code at each symbol's range
+--
+-- Returns: [(Text, Range, SymbolName, CodeBody)] where first Text is file path
+sampleCodeBodies
+  :: LSPSession
+  -> FilePath    -- ^ Project root (unused, kept for API compatibility)
+  -> Int         -- ^ Number to sample
+  -> IO [(Text, Range, Text, Text)]
+sampleCodeBodies session _projectRoot count = do
+  -- Use workspaceSymbol for fast discovery (much faster than documentSymbol on all files)
+  hPutStrLn stderr "[Sample] Discovering symbols via LSP workspaceSymbol..."
+  allSymNames <- discoverSymbols session
+
+  hPutStrLn stderr $ "[Sample] Found " <> show (length allSymNames) <> " symbols"
+
+  -- Get full location info for each symbol
+  hPutStrLn stderr "[Sample] Resolving symbol locations..."
+  symbolsWithLocations <- fmap concat $ forM allSymNames $ \symName -> do
+    syms <- runM $ runLSP session $ workspaceSymbol symName
+    -- Filter to exact matches with valid locations
+    let matching = [(file, range, name)
+                   | SymbolInformation name kind (Location uri range) _ <- syms
+                   , name == symName
+                   , kind `elem` [SKFunction, SKMethod, SKVariable, SKClass, SKStruct]
+                   , not (T.null uri)
+                   , let file = case T.stripPrefix "file://" uri of
+                           Just f -> f
+                           Nothing -> uri
+                   ]
+    pure matching
+
+  hPutStrLn stderr $ "[Sample] Resolved " <> show (length symbolsWithLocations) <> " symbol locations"
+
+  -- Randomly sample N symbols
+  let sampleCount = min count (length symbolsWithLocations)
+  hPutStrLn stderr $ "[Sample] Sampling " <> show sampleCount <> " random symbols..."
+  sampled <- randomSample sampleCount symbolsWithLocations
+
+  -- Read code at each range
+  hPutStrLn stderr "[Sample] Reading code bodies..."
+  forM sampled $ \(file, range, name) -> do
+    code <- readCodeAtRange (T.unpack file) range
+    pure (file, range, name, code)
+
+-- | Randomly sample N items from a list.
+randomSample :: Int -> [a] -> IO [a]
+randomSample n items
+  | n >= length items = pure items
+  | n <= 0 = pure []
+  | otherwise = go n items []
+  where
+    go 0 _ acc = pure acc
+    go _ [] acc = pure acc  -- Pool exhausted
+    go remaining pool acc = do
+      idx <- randomRIO (0, length pool - 1)
+      case splitAt idx pool of
+        (before, chosen:after) -> do
+          let newPool = before ++ after
+          go (remaining - 1) newPool (chosen : acc)
+        _ -> pure acc  -- Should never happen given bounds, but satisfies exhaustiveness
+
+-- | Export code-based training skeleton.
+--
+-- Generates JSONL with code bodies and placeholders for annotation:
+-- {"file": "...", "range": {...}, "name": "...", "code": "...",
+--  "criteria": "TODO: add criteria", "selected": []}
+exportCodeSamples :: LSPSession -> FilePath -> Int -> IO ()
+exportCodeSamples session projectRoot count = do
+  samples <- sampleCodeBodies session projectRoot count
+  hPutStrLn stderr $ "[Export] Generated " <> show (length samples) <> " samples"
+
+  forM_ samples $ \(file, Range (Position startLine startChar) (Position endLine endChar), name, code) -> do
+    let skeleton = object
+          [ "file" .= file
+          , "range" .= object
+              [ "start" .= object
+                  [ "line" .= startLine
+                  , "character" .= startChar
+                  ]
+              , "end" .= object
+                  [ "line" .= endLine
+                  , "character" .= endChar
+                  ]
+              ]
+          , "name" .= name
+          , "code" .= code
+          , "criteria" .= ("TODO: add criteria" :: Text)
+          , "selected" .= ([] :: [Text])
+          ]
+    BL.putStrLn $ encode skeleton
+    hFlush stdout

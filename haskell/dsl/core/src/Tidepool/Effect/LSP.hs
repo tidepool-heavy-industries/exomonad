@@ -57,6 +57,7 @@ module Tidepool.Effect.LSP
   , rename
   , completion
   , workspaceSymbol
+  , documentSymbol
 
     -- * Document Identifiers
   , TextDocumentIdentifier(..)
@@ -350,6 +351,9 @@ data LSP r where
   -- | Search for symbols in the workspace by name query.
   WorkspaceSymbol :: Text -> LSP [SymbolInformation]
 
+  -- | Get all symbols (functions, types, etc.) defined in a document.
+  DocumentSymbol :: TextDocumentIdentifier -> LSP [SymbolInformation]
+
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- SMART CONSTRUCTORS
@@ -402,3 +406,11 @@ completion doc pos = send (Completion doc pos)
 -- Note: This operation requires native execution (not available in WASM).
 workspaceSymbol :: (Member LSP effs, NativeOnly) => Text -> Eff effs [SymbolInformation]
 workspaceSymbol query = send (WorkspaceSymbol query)
+
+-- | Get all symbols defined in a document.
+--
+-- Returns all functions, types, classes, etc. defined in the file with their ranges.
+--
+-- Note: This operation requires native execution (not available in WASM).
+documentSymbol :: (Member LSP effs, NativeOnly) => TextDocumentIdentifier -> Eff effs [SymbolInformation]
+documentSymbol doc = send (DocumentSymbol doc)

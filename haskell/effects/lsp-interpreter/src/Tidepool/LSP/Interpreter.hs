@@ -250,6 +250,20 @@ runLSP session = interpret $ \case
       L.TResponseMessage _ _ (Right result) -> fromSymbolsResult result
       L.TResponseMessage _ _ (Left _) -> []
 
+  DocumentSymbol doc -> sendM $ executeSession session $ do
+    -- lsp-test doesn't have a direct getDocumentSymbols
+    -- Use the low-level request API
+    let lspDoc = toTextDocumentId doc
+        params = L.DocumentSymbolParams
+          { L._workDoneToken = Nothing
+          , L._partialResultToken = Nothing
+          , L._textDocument = lspDoc
+          }
+    resp <- Language.LSP.Test.request L.SMethod_TextDocumentDocumentSymbol params
+    pure $ case resp of
+      L.TResponseMessage _ _ (Right result) -> fromDocumentSymbolResult result
+      L.TResponseMessage _ _ (Left _) -> []
+
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TYPE CONVERSIONS: Our types -> lsp-types
@@ -502,3 +516,29 @@ fromSymbolKind k = case k of
   L.SymbolKind_Event -> SKEvent
   L.SymbolKind_Operator -> SKOperator
   L.SymbolKind_TypeParameter -> SKTypeParameter
+
+-- Result type is [SymbolInformation] |? ([DocumentSymbol] |? Null)
+fromDocumentSymbolResult :: [L.SymbolInformation] L.|? ([L.DocumentSymbol] L.|? L.Null) -> [SymbolInformation]
+fromDocumentSymbolResult result = case result of
+  L.InL infos -> map fromSymbolInfo infos
+  L.InR docSymbolsOrNull -> case docSymbolsOrNull of
+    L.InL docSymbols -> concatMap flattenDocumentSymbol docSymbols
+    L.InR L.Null -> []
+
+-- | Flatten hierarchical DocumentSymbol to SymbolInformation list.
+--
+-- DocumentSymbol has optional children (nested symbols). We flatten
+-- by including the parent and recursively flattening children.
+flattenDocumentSymbol :: L.DocumentSymbol -> [SymbolInformation]
+flattenDocumentSymbol ds =
+  let parent = SymbolInformation
+        { siName = ds._name
+        , siKind = fromSymbolKind ds._kind
+        , siLocation = Location
+            { locUri = ""  -- DocumentSymbol doesn't include URI
+            , locRange = fromRange ds._range
+            }
+        , siContainer = Nothing  -- Could extract from parent context if needed
+        }
+      children = maybe [] (concatMap flattenDocumentSymbol) ds._children
+  in parent : children

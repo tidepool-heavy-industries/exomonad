@@ -9,9 +9,14 @@ module Tidepool.Training.Format
   , formatCandidateGroups
   , formatModelTurnWithHole
   , holeMarker
+  -- V3: Code-Native Training Format
+  , formatCodeExample
+  , formatGemmaConversation
+  , formatTrainingFromSkeleton
   ) where
 
-import Data.Aeson (encode, object, (.=))
+import Data.Aeson (encode, object, (.=), Value(..), (.:))
+import Data.Aeson.Types (parseMaybe)
 import Data.ByteString.Lazy (ByteString)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -149,3 +154,87 @@ formatSelectSymbolsExampleGrouped symName moduleName packageName signature group
         , formatModelTurnWithHole
         ]
   in encode $ object ["text" .= text]
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- V3: CODE-NATIVE TRAINING FORMAT
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Format code-based training example (v3).
+--
+-- Feeds raw code to FunctionGemma with semantic criteria, not topics.
+-- Model extracts symbols itself from code structure.
+formatCodeExample :: Text -> Text -> [Text] -> Text
+formatCodeExample criteria code selectedSymbols =
+  let userTurn = T.unlines
+        [ "Criteria: " <> criteria
+        , ""
+        , "Code:"
+        , "```haskell"
+        , code
+        , "```"
+        , ""
+        , "Extract symbols:"
+        ]
+      modelTurn = if null selectedSymbols
+        then "<start_function_call>\ncall:select_symbols{selected:<escape><escape>}\n<end_function_call>"
+        else let symbols = T.intercalate "," selectedSymbols
+             in "<start_function_call>\ncall:select_symbols{selected:<escape>" <> symbols <> "<escape>}\n<end_function_call>"
+  in formatGemmaConversation userTurn modelTurn
+
+-- | Format full Gemma conversation (developer + user + model turns).
+--
+-- Standard FunctionGemma 3-turn format:
+-- 1. Developer turn: System prompt
+-- 2. User turn: Query + code context
+-- 3. Model turn: Function call with selected symbols
+formatGemmaConversation :: Text -> Text -> Text
+formatGemmaConversation userTurn modelTurn = T.unlines
+  [ "<start_of_turn>developer"
+  , "You are an expert code analysis assistant."
+  , "<end_of_turn>"
+  , "<start_of_turn>user"
+  , userTurn
+  , "<end_of_turn>"
+  , "<start_of_turn>model"
+  , modelTurn
+  , "<end_of_turn>"
+  ]
+
+-- | Convert annotated skeleton to training JSONL.
+--
+-- Expects JSON with fields:
+-- - "code": Text (Haskell code body)
+-- - "criteria": Text (semantic criteria, not TODO)
+-- - "selected": [Text] (symbol names, or [] for negative)
+--
+-- Returns: {"text": formatted_conversation}
+formatTrainingFromSkeleton :: Value -> Either Text Value
+formatTrainingFromSkeleton skeleton = case skeleton of
+  Object obj -> do
+    -- Extract fields from skeleton
+    code <- case parseMaybe (.: "code") obj of
+      Just c -> Right c
+      Nothing -> Left "Missing 'code' field in skeleton"
+
+    criteria <- case parseMaybe (.: "criteria") obj of
+      Just c -> Right c
+      Nothing -> Left "Missing 'criteria' field in skeleton"
+
+    -- Check for unannotated skeleton
+    when (criteria == "TODO: add criteria") $
+      Left "Skeleton not annotated (criteria still TODO)"
+
+    selected <- case parseMaybe (.: "selected") obj of
+      Just s -> Right s
+      Nothing -> Left "Missing 'selected' field in skeleton"
+
+    -- Format as training example
+    let formatted = formatCodeExample criteria code selected
+    Right $ object ["text" .= formatted]
+
+  _ -> Left "Skeleton must be a JSON object"
+  where
+    when :: Bool -> Either a () -> Either a ()
+    when True err = err
+    when False _ = Right ()
