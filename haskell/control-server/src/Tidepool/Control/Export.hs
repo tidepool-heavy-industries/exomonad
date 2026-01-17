@@ -17,6 +17,7 @@ module Tidepool.Control.Export
   , discoverSymbols
   ) where
 
+import Control.Concurrent (threadDelay)
 import Control.Monad (forM_, when, forM)
 import Control.Monad.Freer (runM)
 import qualified Data.ByteString.Lazy.Char8 as BL
@@ -108,6 +109,21 @@ discoverSymbols session = do
     <> show (length allSyms) <> " workspace symbols"
   pure uniqueNames
 
+-- | Key files to open to trigger HLS multi-package indexing.
+--
+-- Opening a file from each package triggers HLS to load that component.
+triggerFiles :: [Text]
+triggerFiles =
+  [ "haskell/dsl/core/src/Tidepool/Graph/Types.hs"
+  , "haskell/control-server/src/Tidepool/Control/Server.hs"
+  , "haskell/effects/llm-interpreter/src/Tidepool/LLM/Interpreter.hs"
+  , "haskell/effects/lsp-interpreter/src/Tidepool/LSP/Interpreter.hs"
+  , "haskell/runtime/actor/src/Tidepool/Actor/Types.hs"
+  , "haskell/native-server/src/Tidepool/Native/Server.hs"
+  , "haskell/effects/mcp-server/src/Tidepool/MCP/Server.hs"
+  , "haskell/tools/training-generator/src/Tidepool/Training/Types.hs"
+  ]
+
 -- | Export with automatic expansion by following type definitions.
 --
 -- BFS crawl: starts with local functions, follows candidate types to their
@@ -121,6 +137,18 @@ exportWithExpansion session targetCount = do
   countRef <- newIORef (0 :: Int)
   visitedFilesRef <- newIORef Set.empty
   pendingTypesRef <- newIORef Set.empty
+
+  -- Trigger HLS to index multiple packages by opening key files
+  hPutStrLn stderr "Opening key files to trigger multi-package indexing..."
+  forM_ triggerFiles $ \file -> do
+    hPutStrLn stderr $ "  Opening: " <> T.unpack file
+    -- Hover at line 1 forces HLS to load the file's component
+    _ <- runM $ runLSP session $ hover (textDocument ("file://" <> file)) (position 0 0)
+    pure ()
+
+  -- Give HLS time to index the newly loaded components
+  hPutStrLn stderr "Waiting for HLS to index new components (5 seconds)..."
+  threadDelay (5 * 1000000)
 
   -- Start with local workspace symbols
   initialSyms <- discoverSymbols session
