@@ -111,6 +111,8 @@ selectRelevantSymbols topic sym candidates =
 -- This is DETERMINISTIC - no LLM needed. Parses the signature and
 -- extracts uppercase identifiers, filtering common types.
 --
+-- Handles markdown-formatted hover content by extracting just the code block.
+--
 -- Examples:
 -- @
 -- extractCandidates "compositeScore :: ScoreConfig -> ScoreEdgeOutput -> Double"
@@ -121,11 +123,13 @@ selectRelevantSymbols topic sym candidates =
 -- @
 extractCandidates :: Text -> [Text]
 extractCandidates sig =
-  let -- Tokenize: split on whitespace and punctuation
+  let -- Strip markdown: extract just the code from ```haskell ... ```
+      codeOnly = extractCodeBlock sig
+      -- Tokenize: split on whitespace and punctuation
       tokens = concatMap (T.splitOn " ")
              $ concatMap (T.splitOn "->")
              $ concatMap (T.splitOn "=>")
-             $ T.splitOn "::" sig
+             $ T.splitOn "::" codeOnly
       -- Clean each token
       cleaned = map cleanToken tokens
       -- Keep uppercase identifiers (type names)
@@ -134,8 +138,20 @@ extractCandidates sig =
       filtered = filter (not . isCommonType) typeNames
   in nub filtered  -- deduplicate
   where
+    -- Extract code from markdown code blocks, or return raw if no blocks
+    extractCodeBlock :: Text -> Text
+    extractCodeBlock t =
+      let lines' = T.lines t
+          -- Find content between ``` markers
+          inCodeBlock = dropWhile (not . T.isPrefixOf "```") lines'
+          afterOpen = drop 1 inCodeBlock  -- Drop the ```haskell line
+          codeLines = takeWhile (not . T.isPrefixOf "```") afterOpen
+      in if null codeLines
+         then t  -- No code block found, use raw text
+         else T.unlines codeLines
+
     cleanToken :: Text -> Text
-    cleanToken = T.filter (`notElem` ("()[]{},:=" :: String)) . T.strip
+    cleanToken = T.filter (`notElem` ("()[]{},:=`*\n" :: String)) . T.strip
 
     isTypeName :: Text -> Bool
     isTypeName t = case T.uncons t of
