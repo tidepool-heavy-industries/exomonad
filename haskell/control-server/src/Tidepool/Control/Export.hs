@@ -92,11 +92,8 @@ discoverSymbols session = do
   let isNotDerived (SymbolInformation name _ _ _) = not ("$f" `T.isPrefixOf` name)
       userDefined = filter isNotDerived functions
 
-  -- Take reasonable sample
-  let filtered = take 50 userDefined
-
-  -- Extract unique names
-  let uniqueNames = nub $ map (\(SymbolInformation name _ _ _) -> name) filtered
+  -- Extract unique names (no limit - we want 800-1k examples)
+  let uniqueNames = nub $ map (\(SymbolInformation name _ _ _) -> name) userDefined
 
   hPutStrLn stderr $ "Discovered " <> show (length uniqueNames) <> " functions from "
     <> show (length allSyms) <> " workspace symbols"
