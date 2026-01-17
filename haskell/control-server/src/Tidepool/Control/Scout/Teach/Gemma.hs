@@ -221,7 +221,7 @@ callOllamaSelect endpoint topic sym candidates = do
 
   result <- try $ do
     let reqBody = encode $ object
-          [ "model" .= ("functiongemma:270m" :: Text)
+          [ "model" .= ("functiongemma-tidepool" :: Text)
           , "messages" .= [object
               [ "role" .= ("user" :: Text)
               , "content" .= userContent

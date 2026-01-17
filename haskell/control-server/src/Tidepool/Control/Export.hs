@@ -320,25 +320,6 @@ extractReferences session fileUri pos = do
             Nothing -> uri
       in file <> ":" <> T.pack (show (line + 1))  -- 1-indexed for display
 
--- | Get package name for a candidate type via recursive hover.
---
--- Looks up the type in workspace symbols, then hovers to get package info.
--- Returns "unknown" if type not found or no package in hover.
-getCandidatePackage :: LSPSession -> Text -> IO Text
-getCandidatePackage session typeName = do
-  symbols <- runM $ runLSP session $ workspaceSymbol typeName
-  case symbols of
-    [] -> pure "unknown"
-    (SymbolInformation _ _ loc _ : _) -> do
-      let Location uri rng = loc
-          file = case T.stripPrefix "file://" uri of
-            Just f -> f
-            Nothing -> uri
-          Range (Position line char) _ = rng
-      maybeHover <- runM $ runLSP session $ hover (textDocument file) (position line char)
-      pure $ case maybeHover of
-        Just (HoverInfo contents _) -> extractPackageName contents
-        Nothing -> "unknown"
 
 -- | Build CandidateGroups from LSP orchestration.
 --
