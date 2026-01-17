@@ -20,6 +20,7 @@ import Tidepool.Control.Scout.LSP (locationToText)
 import Tidepool.Effect.LSP
   ( workspaceSymbol, hover, textDocument, position
   , SymbolInformation(..), HoverInfo(..), Location(..), Range(..), Position(..)
+  , SymbolKind(..)
   )
 import Tidepool.LSP.Interpreter (LSPSession, runLSP)
 import Tidepool.Training.Format (formatSelectSymbolsExample)
@@ -76,21 +77,29 @@ exportTrainingExamples session seeds = do
         hFlush stdout
 
 -- | Discover interesting symbols in the workspace.
+--
+-- Filters to functions only, since data types have minimal hover info
+-- (just ":: Type") while functions have full signatures with type references.
 discoverSymbols :: LSPSession -> IO [Text]
 discoverSymbols session = do
-  -- Query for common type/function patterns
-  hPutStrLn stderr "[Export] Querying for 'Config'..."
-  configSyms <- runM $ runLSP session $ workspaceSymbol "Config"
-  hPutStrLn stderr $ "[Export] Found " <> show (length configSyms) <> " Config symbols"
-
-  hPutStrLn stderr "[Export] Querying for empty string (all symbols)..."
+  hPutStrLn stderr "[Export] Querying for all symbols..."
   allSyms <- runM $ runLSP session $ workspaceSymbol ""
   hPutStrLn stderr $ "[Export] Found " <> show (length allSyms) <> " total symbols"
 
-  -- If we got symbols, filter to interesting ones
-  let filtered = if length allSyms > 100
-        then take 20 allSyms  -- Just take first 20 if too many
-        else allSyms
+  -- Filter to functions only (SKFunction, SKMethod, SKVariable)
+  -- These have type signatures with extractable candidates
+  -- Data types (SKClass, SKStruct, SKEnum) just show ":: Type"
+  let isFunctionLike (SymbolInformation _ kind _ _) = kind `elem` [SKFunction, SKMethod, SKVariable]
+      functions = filter isFunctionLike allSyms
+  hPutStrLn stderr $ "[Export] Found " <> show (length functions) <> " functions/variables"
+
+  -- Filter out derived instances ($fShow*, $fEq*, etc.)
+  let isNotDerived (SymbolInformation name _ _ _) = not ("$f" `T.isPrefixOf` name)
+      userDefined = filter isNotDerived functions
+  hPutStrLn stderr $ "[Export] Found " <> show (length userDefined) <> " user-defined functions"
+
+  -- Take reasonable sample
+  let filtered = take 50 userDefined
 
   -- Extract unique names
   let uniqueNames = nub $ map (\(SymbolInformation name _ _ _) -> name) filtered
