@@ -46,15 +46,12 @@ library
         -- Scout dependencies
         containers >= 0.6 && < 1,
         freer-simple,
-        pqueue >= 1.4 && < 2,
         tidepool-core,
         tidepool-lsp-interpreter,
         tidepool-training-generator,
         -- HTTP for FunctionGemma
         http-conduit,
-        vector,
-        -- LSP types for Export module
-        lsp-types >= 2.0 && < 3
+        vector
     hs-source-dirs:   src
     default-language: GHC2024
     default-extensions:
