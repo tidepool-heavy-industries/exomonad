@@ -8,7 +8,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 
 import Tidepool.Control.Server
-import Tidepool.Control.Export (exportTrainingExamples, discoverSymbols)
+import Tidepool.Control.Export (exportTrainingExamples, exportWithExpansion, discoverSymbols)
 import Tidepool.LSP.Interpreter (withLSPSession)
 
 main :: IO ()
@@ -16,6 +16,7 @@ main = do
   args <- getArgs
   case args of
     ["export-training"] -> runExportMode []
+    ["export-training", "--expand", countStr] -> runExpandMode (read countStr)
     ("export-training" : seeds) -> runExportMode (map T.pack seeds)
     ["--help"] -> printUsage
     ["-h"] -> printUsage
@@ -50,6 +51,16 @@ runExportMode seeds = do
     hPutStrLn stderr $ "Generating examples for " <> show (length actualSeeds) <> " symbols..."
     exportTrainingExamples session actualSeeds
 
+runExpandMode :: Int -> IO ()
+runExpandMode targetCount = do
+  projectDir <- getCurrentDirectory
+  withLSPSession projectDir $ \session -> do
+    -- HLS needs time to index the workspace before workspaceSymbol works
+    hPutStrLn stderr "Waiting for HLS to index workspace (10 seconds)..."
+    threadDelay (10 * 1000000)  -- 10 seconds in microseconds
+
+    exportWithExpansion session targetCount
+
 printUsage :: IO ()
 printUsage = do
   putStrLn "tidepool-control-server - Claude Code++ control server"
@@ -57,10 +68,14 @@ printUsage = do
   putStrLn "Usage:"
   putStrLn "  tidepool-control-server                    Start control server"
   putStrLn "  tidepool-control-server export-training    Auto-discover and generate training data"
-  putStrLn "  tidepool-control-server export-training <symbols...>  Generate training data for specific symbols"
+  putStrLn "  tidepool-control-server export-training --expand <count>"
+  putStrLn "                                             Generate training data with BFS expansion"
+  putStrLn "  tidepool-control-server export-training <symbols...>"
+  putStrLn "                                             Generate training data for specific symbols"
   putStrLn "  tidepool-control-server --help             Show this help"
   putStrLn ""
   putStrLn "Examples:"
   putStrLn "  tidepool-control-server"
   putStrLn "  tidepool-control-server export-training > training.jsonl"
+  putStrLn "  tidepool-control-server export-training --expand 1000 > training.jsonl"
   putStrLn "  tidepool-control-server export-training ScoreConfig EdgeContext > training.jsonl"
