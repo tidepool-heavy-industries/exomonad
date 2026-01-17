@@ -27,10 +27,6 @@ library
         -- Scout (semantic code exploration)
         Tidepool.Control.Scout.Types
         Tidepool.Control.Scout.EdgeTypes
-        Tidepool.Control.Scout.Scoring
-        Tidepool.Control.Scout.Graph
-        Tidepool.Control.Scout.Explore
-        Tidepool.Control.Scout.Gemma
         Tidepool.Control.Scout.Heuristics
         Tidepool.Control.Scout.LSP
         Tidepool.Control.Scout.Templates

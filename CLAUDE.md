@@ -9,6 +9,17 @@ This doc serves two audiences:
 1. **Using Tidepool** - Building agents in consuming repos (anemone, urchin)
 2. **Developing Tidepool** - Working on the framework itself
 
+### HUMAN STYLE OVERRIDES
+
+ALWAYS update CLAUDE.md files when you make changes. Adding new documentation is critical, as is removing stale documentation.
+
+Comments should always focus on what is or will be. Never leave comments about why you deleted something, its in the git history which is enough.
+
+The repository should be kept clean of dead code, placeholders, and half-done heuristics.
+
+Always prefer failure to an undocumented heuristic or fallback.
+
+
 ## Documentation Tree
 
 Navigate to the right docs for your task:
@@ -409,6 +420,7 @@ cabal test all             # Run tests
 3. **OneOf sum type** - Fully typed dispatch without Dynamic
 4. **IO-blind agents** - All IO in runners, enables WASM + deterministic testing
 
+
 ### Code Smells: Data Flow Dead-Ends
 
 **The `_` prefix is a huge signal.** When you see `_someField` in a pattern match, it means data is being captured but ignored. This is almost always a data flow dead-end that needs fixing.
@@ -436,18 +448,6 @@ ImplRequestRetry diagnosis strategyFrom strategyTo failingTests -> do
 
 The fix is usually: thread the data forward (via input fields, memory, or context) so downstream nodes/templates can use it.
 
-## Observability
-
-OpenTelemetry traces to Grafana Tempo:
-
-```bash
-export OTLP_ENDPOINT="https://..."
-export OTLP_USER="<instance-id>"
-export OTLP_TOKEN="glc_..."
-just native  # Traces exported automatically
-```
-
-Use `Execute.Instrumented` for automatic span emission on graph dispatch.
 
 ## LSP Integration
 
