@@ -231,38 +231,12 @@ callOllamaSelect endpoint topic sym candidates = do
     Right parsed -> pure parsed
 
 
--- | Format the selection prompt with pre-extracted candidates.
+-- | Format the selection prompt.
 --
--- Key difference from generation: model picks FROM a list, not generates.
--- Uses few-shot examples to teach relevance filtering.
+-- TODO: Replace with proper FunctionGemma token format once training data is ready.
+-- For now, training data format in training-generator/Format.hs is the source of truth.
 formatSelectionPrompt :: Text -> LSPSymbol -> [Text] -> Text
-formatSelectionPrompt topic sym candidates = T.unlines
-  [ "Task: Select which symbols help understand \"" <> topic <> "\""
-  , ""
-  , "Symbol: " <> lsName sym
-  , "Signature: " <> lsSignature sym
-  , "Candidates: " <> T.intercalate ", " candidates
-  , ""
-  , "=== Example ==="
-  , "Topic: authentication"
-  , "Symbol: login"
-  , "Signature: login :: AuthConfig -> Credentials -> IO Session"
-  , "Candidates: AuthConfig, Credentials, Session"
-  , "Selected: AuthConfig, Credentials, Session"
-  , "(All three are core to understanding authentication)"
-  , ""
-  , "=== Example ==="
-  , "Topic: scoring"
-  , "Symbol: calculateScore"
-  , "Signature: calculateScore :: Config -> Input -> Logger -> Score"
-  , "Candidates: Config, Input, Logger, Score"
-  , "Selected: Config, Input, Score"
-  , "(Logger is for observability, not scoring logic - skip)"
-  , ""
-  , "=== Your Turn ==="
-  , "Select the candidates relevant to \"" <> topic <> "\"."
-  , "Return ONLY symbols from the candidate list."
-  ]
+formatSelectionPrompt = undefined
 
 
 -- | Tool schema for select_symbols function with enum constraint.

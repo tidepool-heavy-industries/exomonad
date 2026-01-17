@@ -24,6 +24,7 @@ library
         Tidepool.Control.Handler
         Tidepool.Control.Handler.Hook
         Tidepool.Control.Handler.MCP
+        Tidepool.Control.Export
         -- Scout (semantic code exploration)
         Tidepool.Control.Scout.Types
         Tidepool.Control.Scout.EdgeTypes
@@ -51,7 +52,9 @@ library
         tidepool-training-generator,
         -- HTTP for FunctionGemma
         http-conduit,
-        vector
+        vector,
+        -- LSP types for Export module
+        lsp-types >= 2.0 && < 3
     hs-source-dirs:   src
     default-language: GHC2024
     default-extensions:
@@ -71,7 +74,9 @@ executable tidepool-control-server
     build-depends:
         base >= 4.17 && < 5,
         tidepool-control-server,
-        directory
+        directory,
+        text >= 2.0 && < 3,
+        tidepool-lsp-interpreter
     hs-source-dirs:   app
     default-language: GHC2024
     ghc-options:      -threaded -rtsopts -with-rtsopts=-N

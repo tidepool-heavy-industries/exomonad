@@ -21,6 +21,9 @@ module Tidepool.Training.Types
     -- * Training Example
   , TrainingExample(..)
 
+    -- * Select Symbols Example (for FunctionGemma symbol selection)
+  , SelectSymbolsExample(..)
+
     -- * Edge Types (LSP-derived relationship types)
   , EdgeType(..)
   , allEdgeTypes
@@ -97,6 +100,16 @@ data TrainingExample = TrainingExample
   { teQuery  :: QueryContext  -- ^ The query being answered
   , teNode   :: NodeContext   -- ^ The code location being rated
   , teRubric :: Rubric        -- ^ Ground truth rating
+  } deriving stock (Eq, Show, Generic)
+    deriving anyclass (FromJSON, ToJSON)
+
+
+-- | Training example input for select_symbols tool (from LSP exploration).
+data SelectSymbolsExample = SelectSymbolsExample
+  { sseSymbolName :: Text   -- ^ Symbol name from LSP
+  , sseLocation   :: Text   -- ^ File location "File.hs:42"
+  , sseSignature  :: Text   -- ^ Type signature from LSP hover
+  , sseCandidates :: [Text] -- ^ Extracted type names
   } deriving stock (Eq, Show, Generic)
     deriving anyclass (FromJSON, ToJSON)
 
