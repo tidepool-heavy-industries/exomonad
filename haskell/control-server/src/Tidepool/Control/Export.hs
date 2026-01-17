@@ -85,13 +85,44 @@ exportTrainingExamples session seeds = do
         BL.putStrLn jsonl
         hFlush stdout
 
+-- | Common function prefixes to query for.
+--
+-- HLS limits workspaceSymbol results, so querying multiple patterns
+-- helps discover more functions.
+functionPrefixes :: [Text]
+functionPrefixes =
+  [ ""        -- All symbols
+  , "run"     -- runX interpreters
+  , "handle"  -- handlers
+  , "mk"      -- smart constructors
+  , "to"      -- conversion functions
+  , "from"    -- conversion functions
+  , "get"     -- getters
+  , "set"     -- setters
+  , "with"    -- bracketing functions
+  , "parse"   -- parsers
+  , "render"  -- renderers
+  , "format"  -- formatters
+  , "extract" -- extractors
+  , "build"   -- builders
+  , "create"  -- creators
+  , "process" -- processors
+  , "apply"   -- applicators
+  , "eval"    -- evaluators
+  , "exec"    -- executors
+  ]
+
 -- | Discover interesting symbols in the workspace.
 --
 -- Filters to functions only, since data types have minimal hover info
 -- (just ":: Type") while functions have full signatures with type references.
 discoverSymbols :: LSPSession -> IO [Text]
 discoverSymbols session = do
-  allSyms <- runM $ runLSP session $ workspaceSymbol ""
+  -- Query multiple patterns to overcome HLS result limits
+  allSymLists <- forM functionPrefixes $ \prefix -> do
+    runM $ runLSP session $ workspaceSymbol prefix
+
+  let allSyms = concat allSymLists
 
   -- Filter to functions only (SKFunction, SKMethod, SKVariable)
   -- Data types (SKClass, SKStruct, SKEnum) just show ":: Type"
@@ -106,7 +137,7 @@ discoverSymbols session = do
   let uniqueNames = nub $ map (\(SymbolInformation name _ _ _) -> name) userDefined
 
   hPutStrLn stderr $ "Discovered " <> show (length uniqueNames) <> " functions from "
-    <> show (length allSyms) <> " workspace symbols"
+    <> show (length allSyms) <> " total symbol results"
   pure uniqueNames
 
 -- | Key files to open to trigger HLS multi-package indexing.
