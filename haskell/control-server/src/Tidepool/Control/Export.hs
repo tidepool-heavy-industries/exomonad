@@ -20,6 +20,7 @@ module Tidepool.Control.Export
   , readCodeAtRange
   , sampleCodeBodies
   , exportCodeSamples
+  , exportMCPTools
   ) where
 
 import Control.Concurrent (threadDelay)
@@ -38,12 +39,20 @@ import System.FilePath ((</>), takeExtension)
 import System.IO (stdout, stderr, hFlush, hPutStrLn)
 import System.Random (randomRIO)
 
+import Data.Aeson (Value)
+import Data.Proxy (Proxy(..))
+
+import Tidepool.Control.Protocol (ToolDefinition(..))
+import Tidepool.Control.LSPTools
+  ( FindCallersGraph, ShowFieldsGraph, ShowConstructorsGraph )
+import Tidepool.Control.Scout.DocGen (TeachQuery(..))
 import Tidepool.Control.Scout.DocGen.Gemma (extractCandidates)
 import Tidepool.Effect.LSP
   ( workspaceSymbol, hover, textDocument, position, references
   , SymbolInformation(..), HoverInfo(..), Location(..), Range(..), Position(..)
   , SymbolKind(..)
   )
+import Tidepool.Graph.MCPReify (ReifyMCPTools(..), MCPToolInfo(..))
 import Tidepool.LSP.Interpreter (LSPSession, runLSP)
 import Tidepool.Training.Format (formatSelectSymbolsExample, formatSelectSymbolsExampleGrouped)
 import Tidepool.Training.Types (CandidateGroups(..))
@@ -907,3 +916,60 @@ exportCodeSamples session projectRoot count = do
           ]
     BL.putStrLn $ encode skeleton
     hFlush stdout
+-- ════════════════════════════════════════════════════════════════════════════
+-- MCP TOOL AUTO-DISCOVERY
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Export all MCP tools from graph DSL annotations.
+--
+-- Uses ReifyMCPTools to extract tool metadata from MCPExport annotations.
+-- Returns ToolDefinition format that matches Rust protocol types.
+exportMCPTools :: IO [ToolDefinition]
+exportMCPTools = do
+  -- Extract LSP tools from graph DSL (Tier 1)
+  let lspTools = concat
+        [ reifyMCPTools (Proxy @FindCallersGraph)
+        , reifyMCPTools (Proxy @ShowFieldsGraph)
+        , reifyMCPTools (Proxy @ShowConstructorsGraph)
+        ]
+
+  -- Add teach-graph manually (Tier 2, not yet graph-based)
+  let teachGraph = ToolDefinition
+        { tdName = "teach-graph"
+        , tdDescription = "Explore a codebase concept using intelligent symbol selection. Returns a teaching document with symbols ordered by prerequisites - learn foundational types before the code that uses them."
+        , tdInputSchema = teachGraphSchema
+        }
+
+  pure $ map reifyToToolDef lspTools ++ [teachGraph]
+
+-- | Convert MCPToolInfo -> ToolDefinition.
+reifyToToolDef :: MCPToolInfo -> ToolDefinition
+reifyToToolDef (MCPToolInfo name desc schema _entryName) = ToolDefinition
+  { tdName = name
+  , tdDescription = desc
+  , tdInputSchema = schema
+  }
+
+-- | JSON schema for teach-graph tool.
+--
+-- Manually specified until teach-graph is converted to graph DSL.
+teachGraphSchema :: Value
+teachGraphSchema = object
+  [ "type" .= ("object" :: Text)
+  , "properties" .= object
+      [ "topic" .= object
+          [ "type" .= ("string" :: Text)
+          , "description" .= ("What you want to understand (e.g., 'how the Memory effect works', 'template rendering')" :: Text)
+          ]
+      , "seeds" .= object
+          [ "type" .= ("array" :: Text)
+          , "items" .= object ["type" .= ("string" :: Text)]
+          , "description" .= ("Symbol names to start exploration from (e.g., ['getMem', 'putMem'])" :: Text)
+          ]
+      , "budget" .= object
+          [ "type" .= ("integer" :: Text)
+          , "description" .= ("How many symbols to explore (default: 20)" :: Text)
+          ]
+      ]
+  , "required" .= (["topic", "seeds"] :: [Text])
+  ]

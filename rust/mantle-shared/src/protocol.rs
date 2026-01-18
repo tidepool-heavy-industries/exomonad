@@ -228,9 +228,20 @@ pub enum PermissionDecision {
 // Control Socket Protocol
 // ============================================================================
 
+/// Tool definition for MCP discovery (must match Haskell ToolDefinition).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolDefinition {
+    #[serde(rename = "tdName")]
+    pub name: String,
+    #[serde(rename = "tdDescription")]
+    pub description: String,
+    #[serde(rename = "tdInputSchema")]
+    pub input_schema: Value,
+}
+
 /// Message sent over the control socket to Haskell.
 ///
-/// Wraps either a hook event or MCP tool call.
+/// Wraps either a hook event, MCP tool call, or tools list request.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum ControlMessage {
@@ -240,7 +251,7 @@ pub enum ControlMessage {
         input: Box<HookInput>,
     },
 
-    /// MCP tool call from Claude Code (future use).
+    /// MCP tool call from Claude Code.
     #[serde(rename = "MCPToolCall")]
     McpToolCall {
         /// JSON-RPC request ID.
@@ -250,6 +261,9 @@ pub enum ControlMessage {
         /// Tool arguments.
         arguments: Value,
     },
+
+    /// Request list of available MCP tools from control server.
+    ToolsListRequest,
 }
 
 /// Response from Haskell control socket.
@@ -274,6 +288,12 @@ pub enum ControlResponse {
         result: Option<Value>,
         /// Error details (null on success).
         error: Option<McpError>,
+    },
+
+    /// Response to tools list request.
+    ToolsListResponse {
+        /// Available MCP tools.
+        tools: Vec<ToolDefinition>,
     },
 }
 

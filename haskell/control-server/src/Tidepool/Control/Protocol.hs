@@ -8,6 +8,7 @@ module Tidepool.Control.Protocol
     ControlMessage(..)
   , ControlResponse(..)
   , McpError(..)
+  , ToolDefinition(..)
 
     -- * Hook Types
   , HookInput(..)
@@ -247,10 +248,20 @@ instance FromJSON PermissionDecision where
 -- Control Socket Protocol
 -- ============================================================================
 
+-- | Tool definition for MCP discovery (must match Rust ToolDefinition).
+data ToolDefinition = ToolDefinition
+  { tdName :: Text
+  , tdDescription :: Text
+  , tdInputSchema :: Value
+  }
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (ToJSON, FromJSON)
+
 -- | Message sent over TCP from mantle-agent. Tagged by "type".
 data ControlMessage
   = HookEvent { input :: HookInput }
   | McpToolCall { mcpId :: Text, toolName :: Text, arguments :: Value }
+  | ToolsListRequest
   deriving stock (Show, Eq, Generic)
 
 instance FromJSON ControlMessage where
@@ -262,6 +273,7 @@ instance FromJSON ControlMessage where
         <$> o .: "id"
         <*> o .: "tool_name"
         <*> o .: "arguments"
+      "ToolsListRequest" -> pure ToolsListRequest
       _ -> fail $ "Unknown message type: " <> show msgType
 
 instance ToJSON ControlMessage where
@@ -275,11 +287,15 @@ instance ToJSON ControlMessage where
     , "tool_name" .= tn
     , "arguments" .= args
     ]
+  toJSON ToolsListRequest = object
+    [ "type" .= ("ToolsListRequest" :: Text)
+    ]
 
 -- | Response sent over TCP to mantle-agent. Tagged by "type".
 data ControlResponse
   = HookResponse { output :: HookOutput, exitCode :: Int }
   | McpToolResponse { mcpId :: Text, result :: Maybe Value, mcpError :: Maybe McpError }
+  | ToolsListResponse { tools :: [ToolDefinition] }
   deriving stock (Show, Eq, Generic)
 
 instance ToJSON ControlResponse where
@@ -294,6 +310,10 @@ instance ToJSON ControlResponse where
     , "result" .= res
     , "error" .= err
     ]
+  toJSON (ToolsListResponse ts) = object
+    [ "type" .= ("ToolsListResponse" :: Text)
+    , "tools" .= ts
+    ]
 
 instance FromJSON ControlResponse where
   parseJSON = withObject "ControlResponse" $ \o -> do
@@ -304,6 +324,7 @@ instance FromJSON ControlResponse where
         <$> o .: "id"
         <*> o .:? "result"
         <*> o .:? "error"
+      "ToolsListResponse" -> ToolsListResponse <$> o .: "tools"
       _ -> fail $ "Unknown response type: " <> show msgType
 
 -- | MCP error response.

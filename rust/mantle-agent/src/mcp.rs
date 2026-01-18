@@ -1,8 +1,8 @@
 //! MCP stdio server for decision tools.
 //!
 //! Implements the Model Context Protocol (MCP) for serving decision tools
-//! to Claude Code. Tool definitions are read from the `MANTLE_DECISION_TOOLS`
-//! environment variable and served via JSON-RPC 2.0 over stdio.
+//! to Claude Code. Tool definitions are queried from the control server
+//! at startup and served via JSON-RPC 2.0 over stdio.
 //!
 //! ## Protocol Flow
 //!
@@ -28,10 +28,10 @@
 //!
 //! ## Environment Variables
 //!
-//! - `MANTLE_DECISION_TOOLS`: JSON array of tool definitions
-//! - `MANTLE_HOOK_SOCKET`: Path to control socket for tool call forwarding
+//! - `MANTLE_CONTROL_HOST`: Control server host (required)
+//! - `MANTLE_CONTROL_PORT`: Control server port (required)
 
-use mantle_shared::protocol::{ControlMessage, ControlResponse, McpError};
+use mantle_shared::protocol::{ControlMessage, ControlResponse, McpError, ToolDefinition as ProtocolToolDef};
 use mantle_shared::socket::control_server_addr;
 use mantle_shared::ControlSocket;
 use serde::{Deserialize, Serialize};
@@ -183,6 +183,53 @@ struct ToolResultContent {
 // MCP Server
 // ============================================================================
 
+/// Query control server for available MCP tools.
+///
+/// Returns an error if:
+/// - MANTLE_CONTROL_HOST/PORT not set
+/// - Connection to control server fails
+/// - Protocol error (invalid response)
+///
+/// This implements fail-fast behavior - if the control server is unreachable,
+/// mantle-agent exits with an error rather than serving an empty tool list.
+fn query_control_server_tools() -> Result<Vec<ToolDefinition>, String> {
+    // Get control server address (REQUIRED)
+    let (host, port) = control_server_addr()
+        .ok_or_else(|| {
+            "MANTLE_CONTROL_HOST/PORT not set - required for tool discovery".to_string()
+        })?;
+
+    info!(host = %host, port = port, "Querying control server for tool definitions");
+
+    // Connect to control server
+    let mut socket = ControlSocket::connect(&host, port)
+        .map_err(|e| format!("Failed to connect to control server at {}:{}: {}", host, port, e))?;
+
+    // Send ToolsListRequest
+    let message = ControlMessage::ToolsListRequest;
+    let response = socket.send(&message)
+        .map_err(|e| format!("Failed to query tools from control server: {}", e))?;
+
+    // Parse response
+    match response {
+        ControlResponse::ToolsListResponse { tools } => {
+            info!(count = tools.len(), "Discovered tools from control server");
+
+            // Convert protocol::ToolDefinition -> mcp::ToolDefinition
+            let mcp_tools = tools.into_iter().map(|proto_tool| {
+                ToolDefinition {
+                    name: proto_tool.name,
+                    description: proto_tool.description,
+                    input_schema: proto_tool.input_schema,
+                }
+            }).collect();
+
+            Ok(mcp_tools)
+        }
+        _ => Err(format!("Unexpected response type from control server (expected ToolsListResponse)")),
+    }
+}
+
 /// MCP server state.
 pub struct McpServer {
     tools: Vec<ToolDefinition>,
@@ -196,47 +243,25 @@ impl McpServer {
         Self { tools, control_addr }
     }
 
-    /// Create a new MCP server, reading tools from `MANTLE_DECISION_TOOLS_FILE` env var
-    /// and control address from `MANTLE_CONTROL_HOST`/`MANTLE_CONTROL_PORT` env vars.
+    /// Create a new MCP server by querying the control server for tools.
     ///
-    /// The file path approach avoids shell escaping issues with passing JSON
-    /// through environment variables and command-line arguments.
+    /// Queries the control server for all available MCP tools at startup.
+    /// This implements fail-fast behavior: if the control server is unreachable,
+    /// this function panics rather than serving an empty tool list.
+    ///
+    /// Control server address is read from `MANTLE_CONTROL_HOST`/`MANTLE_CONTROL_PORT`.
     pub fn new_from_env() -> Self {
-        let tools = match std::env::var("MANTLE_DECISION_TOOLS_FILE") {
-            Ok(file_path) => {
-                info!(file = %file_path, "Loading decision tools from file");
-                match std::fs::read_to_string(&file_path) {
-                    Ok(json) => match serde_json::from_str(&json) {
-                        Ok(tools) => {
-                            info!(count = ?Vec::<ToolDefinition>::len(&tools), "Loaded decision tools");
-                            tools
-                        }
-                        Err(e) => {
-                            error!(error = %e, file = %file_path, "Failed to parse decision tools JSON");
-                            Vec::new()
-                        }
-                    },
-                    Err(e) => {
-                        error!(error = %e, file = %file_path, "Failed to read decision tools file");
-                        Vec::new()
-                    }
-                }
-            }
-            Err(_) => {
-                debug!("MANTLE_DECISION_TOOLS_FILE not set, serving no tools");
-                Vec::new()
-            }
-        };
+        // Query control server for tools (REQUIRED - fail fast if unavailable)
+        let tools = query_control_server_tools()
+            .unwrap_or_else(|e| {
+                panic!("Failed to discover tools from control server: {}", e);
+            });
 
-        // Read control server address from env vars
-        let control_addr = control_server_addr();
-        if let Some((ref host, port)) = control_addr {
-            info!(host = %host, port = port, "Control server configured");
-        } else {
-            debug!("MANTLE_CONTROL_HOST/PORT not set, tool calls will fail");
-        }
+        // Get control server address (we know it exists since query succeeded)
+        let control_addr = control_server_addr()
+            .expect("Control server address should be available after successful query");
 
-        Self::new(control_addr, tools)
+        Self::new(Some(control_addr), tools)
     }
 
     /// Run the MCP server on stdio.
@@ -445,6 +470,9 @@ impl McpServer {
             ControlResponse::HookResponse { .. } => {
                 Err("Unexpected HookResponse for MCP call".to_string())
             }
+            ControlResponse::ToolsListResponse { .. } => {
+                Err("Unexpected ToolsListResponse for MCP tool call".to_string())
+            }
         }
     }
 
@@ -465,14 +493,14 @@ impl McpServer {
 /// Run the MCP server.
 ///
 /// This is the main entry point called from the CLI.
-/// Reads configuration from environment variables:
-/// - MANTLE_DECISION_TOOLS_FILE: Path to JSON file with tool definitions
-/// - MANTLE_CONTROL_HOST: Host to connect to for forwarding tool calls
-/// - MANTLE_CONTROL_PORT: Port to connect to for forwarding tool calls
 ///
-/// Starts immediately without blocking health checks - connection errors
-/// surface when tools are actually called. This ensures Claude can see
-/// the available tools even during MCP server initialization.
+/// Queries the control server for available MCP tools at startup using:
+/// - MANTLE_CONTROL_HOST: Control server host (required)
+/// - MANTLE_CONTROL_PORT: Control server port (required)
+///
+/// Implements fail-fast behavior: if the control server is unreachable during
+/// initialization, the server exits with an error. This ensures Claude Code sees
+/// an accurate tool list and catches configuration issues early.
 pub fn run_mcp_server() -> Result<(), Box<dyn std::error::Error>> {
     let mut server = McpServer::new_from_env();
     server.run()?;
@@ -596,21 +624,5 @@ mod tests {
         let response = server.handle_request(request);
         assert!(response.error.is_some());
         assert_eq!(response.error.unwrap().code, -32601);
-    }
-
-    #[test]
-    fn test_server_with_tools_from_env() {
-        // Set env var temporarily
-        std::env::set_var(
-            "MANTLE_DECISION_TOOLS",
-            r#"[{"name":"decision::test","description":"Test tool","inputSchema":{"type":"object"}}]"#,
-        );
-
-        let server = McpServer::new_from_env(None);
-        assert_eq!(server.tools.len(), 1);
-        assert_eq!(server.tools[0].name, "decision::test");
-
-        // Clean up
-        std::env::remove_var("MANTLE_DECISION_TOOLS");
     }
 }

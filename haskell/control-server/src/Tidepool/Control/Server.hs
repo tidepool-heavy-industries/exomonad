@@ -125,6 +125,9 @@ logMessage = \case
   McpToolCall _ name _ -> do
     TIO.putStrLn $ "[MCP] tool=" <> name
     hFlush stdout
+  ToolsListRequest -> do
+    TIO.putStrLn "[MCP] tools/list request"
+    hFlush stdout
 
 -- | Log outgoing response.
 logResponse :: ControlResponse -> IO ()
@@ -142,4 +145,7 @@ logResponse = \case
           (_, Just e) -> "error: " <> e.errorMessage
           _ -> "empty"
     TIO.putStrLn $ "[MCP] -> " <> status
+    hFlush stdout
+  ToolsListResponse tools -> do
+    TIO.putStrLn $ "[MCP] -> tools/list: " <> T.pack (show (length tools)) <> " tools"
     hFlush stdout

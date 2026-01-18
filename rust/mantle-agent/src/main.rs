@@ -41,7 +41,7 @@ enum Commands {
 
     /// Run as MCP stdio server for decision tools
     ///
-    /// Reads tool definitions from MANTLE_DECISION_TOOLS_FILE env var and serves
+    /// Queries the control server for tool definitions at startup and serves
     /// them via JSON-RPC 2.0 over stdio. Tool calls are forwarded to the
     /// control server via TCP (MANTLE_CONTROL_HOST/PORT).
     Mcp,

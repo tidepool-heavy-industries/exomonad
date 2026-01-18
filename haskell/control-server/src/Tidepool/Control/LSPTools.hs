@@ -74,7 +74,7 @@ import Tidepool.Graph.Generic (AsHandler, type (:-))
 import Tidepool.Graph.Generic.Core (EntryNode, ExitNode, LogicNode)
 import Tidepool.Graph.Goto (Goto, GotoChoice, To, gotoExit)
 import Tidepool.Graph.Types (type (:@), Input, UsesEffects, Exit, MCPExport, MCPToolDef)
-import Tidepool.Schema (HasJSONSchema(..))
+import Tidepool.Schema (HasJSONSchema(..), objectSchema, emptySchema, SchemaType(..), describeField)
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -88,7 +88,14 @@ data FindCallersArgs = FindCallersArgs
   , fcaMaxResults :: Maybe Int   -- ^ Max results (default: 50)
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (HasJSONSchema)
+
+instance HasJSONSchema FindCallersArgs where
+  jsonSchema = objectSchema
+    [ ("name", describeField "name" "Function name to find callers of" (emptySchema TString))
+    , ("context_lines", describeField "context_lines" "Lines of context around each call site" (emptySchema TInteger))
+    , ("max_results", describeField "max_results" "Maximum number of results to return" (emptySchema TInteger))
+    ]
+    ["name"]  -- Only name is required
 
 instance FromJSON FindCallersArgs where
   parseJSON = withObject "FindCallersArgs" $ \v ->
@@ -259,7 +266,12 @@ data ShowFieldsArgs = ShowFieldsArgs
   { sfaTypeName :: Text          -- ^ Record type name
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (HasJSONSchema)
+
+instance HasJSONSchema ShowFieldsArgs where
+  jsonSchema = objectSchema
+    [ ("type_name", describeField "type_name" "Record type name to inspect" (emptySchema TString))
+    ]
+    ["type_name"]
 
 instance FromJSON ShowFieldsArgs where
   parseJSON = withObject "ShowFieldsArgs" $ \v ->
@@ -386,7 +398,12 @@ data ShowConstructorsArgs = ShowConstructorsArgs
   { scaTypeName :: Text          -- ^ Type name
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (HasJSONSchema)
+
+instance HasJSONSchema ShowConstructorsArgs where
+  jsonSchema = objectSchema
+    [ ("type_name", describeField "type_name" "Sum type name to inspect" (emptySchema TString))
+    ]
+    ["type_name"]
 
 instance FromJSON ShowConstructorsArgs where
   parseJSON = withObject "ShowConstructorsArgs" $ \v ->

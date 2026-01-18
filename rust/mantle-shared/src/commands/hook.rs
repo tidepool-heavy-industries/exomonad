@@ -129,6 +129,11 @@ pub fn handle_hook(event_type: HookEventType) -> Result<()> {
             error!("Received MCP response for hook request");
             std::process::exit(1);
         }
+        ControlResponse::ToolsListResponse { .. } => {
+            // Unexpected response type
+            error!("Received ToolsListResponse for hook request");
+            std::process::exit(1);
+        }
     }
 
     Ok(())
