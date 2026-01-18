@@ -38,6 +38,9 @@ library
         Tidepool.Control.Scout.DocGen.Gemma
         Tidepool.Control.Scout.DocGen.Teacher
         Tidepool.Control.Scout.Tools
+        -- Graph-based DocGen (tidepool DSL)
+        Tidepool.Control.Scout.Graph
+        Tidepool.Control.Scout.Graph.Types
     build-depends:
         base >= 4.17 && < 5,
         text >= 2.0 && < 3,
