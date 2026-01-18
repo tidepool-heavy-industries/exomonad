@@ -18,6 +18,7 @@ module Tidepool.Effect.Types
   , Log(..)
   , LogLevel(..)
   , QuestionUI(..)
+  , TUI(..)
 
     -- * Node Metadata Effect (re-exports from Tidepool.Effect.NodeMeta)
   , NodeMeta(..)
@@ -103,6 +104,19 @@ module Tidepool.Effect.Types
   , runRequestInput
   , runQuestionUI
 
+    -- * TUI Effect Operations
+  , showUI
+  , updateUI
+  , closeUI
+
+    -- * TUI Types (protocol)
+  , UISpec(..)
+  , Layout(..)
+  , Element(..)
+  , Interaction(..)
+  , UIUpdate(..)
+  , ElementUpdate(..)
+
     -- * Content Types (re-exports from Anthropic.Types)
   , ContentBlock(..)
   , ImageSource(..)
@@ -153,6 +167,13 @@ import Tidepool.Question (Question(..), Answer(..), ItemDisposition(..), Choice(
 
 -- Goto types for tool transitions
 import Tidepool.Graph.Goto (GotoChoice, To)
+
+-- TUI effect and types
+import Tidepool.Effect.TUI
+  ( TUI(..), showUI, updateUI, closeUI
+  , UISpec(..), Layout(..), Element(..)
+  , Interaction(..), UIUpdate(..), ElementUpdate(..)
+  )
 
 -- ══════════════════════════════════════════════════════════════
 -- STATE EFFECT
