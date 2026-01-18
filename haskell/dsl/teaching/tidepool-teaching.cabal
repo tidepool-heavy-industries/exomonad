@@ -12,6 +12,7 @@ library
     Tidepool.Teaching.Types
     Tidepool.Teaching.Teacher
     Tidepool.Teaching.Anthropic
+    Tidepool.Teaching.Record
   hs-source-dirs: src
   build-depends:
       base >=4.14 && <5
@@ -22,6 +23,8 @@ library
     , bytestring >=0.10
     , tidepool-core
     , tidepool-llm-interpreter
+    , directory >=1.3
+    , filepath >=1.4
   default-language: Haskell2010
   default-extensions:
     DeriveGeneric
@@ -37,3 +40,30 @@ library
     -Wincomplete-uni-patterns
     -Wpartial-fields
     -Wredundant-constraints
+
+test-suite tidepool-teaching-test
+  type: exitcode-stdio-1.0
+  main-is: Spec.hs
+  hs-source-dirs: test
+  other-modules:
+    Tidepool.Teaching.RecordSpec
+  build-depends:
+      base >=4.14 && <5
+    , tidepool-teaching
+    , hspec >=2.7
+    , aeson >=2.0
+    , text >=1.2
+    , time >=1.9
+    , uuid >=1.3
+    , directory >=1.3
+    , filepath >=1.4
+    , temporary >=1.3
+    , hspec-discover >=2.7
+  default-language: Haskell2010
+  default-extensions:
+    OverloadedStrings
+  ghc-options:
+    -Wall
+    -threaded
+    -rtsopts
+    -with-rtsopts=-N
