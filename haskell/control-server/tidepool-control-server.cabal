@@ -20,6 +20,7 @@ library
     exposed-modules:
         -- Control server
         Tidepool.Control.Protocol
+        Tidepool.Control.Types
         Tidepool.Control.Server
         Tidepool.Control.Handler
         Tidepool.Control.Handler.Hook
@@ -55,6 +56,7 @@ library
         -- HTTP for FunctionGemma
         http-conduit,
         vector,
+        uuid,
         -- Code sampling
         random
     hs-source-dirs:   src

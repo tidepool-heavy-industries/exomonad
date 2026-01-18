@@ -5,9 +5,7 @@
 --
 -- The server maintains a long-lived LSP session for code intelligence.
 module Tidepool.Control.Server
-  ( ServerConfig(..)
-  , defaultConfig
-  , runServer
+  ( runServer
   ) where
 
 import Control.Concurrent (forkIO)
@@ -28,20 +26,8 @@ import System.IO (hFlush, stdout)
 
 import Tidepool.Control.Handler (handleMessage)
 import Tidepool.Control.Protocol
+import Tidepool.Control.Types (ServerConfig(..), TeachingConfig(..))
 import Tidepool.LSP.Interpreter (LSPSession, withLSPSession)
-
--- | Server configuration.
-data ServerConfig = ServerConfig
-  { projectDir :: FilePath
-    -- ^ Project root directory (where .tidepool/ lives)
-  }
-  deriving stock (Show, Eq)
-
--- | Default configuration: current directory
-defaultConfig :: ServerConfig
-defaultConfig = ServerConfig
-  { projectDir = "."
-  }
 
 -- | Run the control server. Blocks forever.
 --
@@ -79,7 +65,7 @@ runServer config = do
 
       forever $ do
         (conn, _peer) <- accept sock
-        void $ forkIO $ handleConnection lspSession conn `finally` close conn
+        void $ forkIO $ handleConnection lspSession (teachingConfig config) conn `finally` close conn
 
 -- | Setup Unix domain socket.
 setupSocket :: FilePath -> IO Socket
@@ -98,8 +84,8 @@ closeSocket socketPath sock = do
   when exists $ removeFile socketPath
 
 -- | Handle a single connection (one NDJSON request-response).
-handleConnection :: LSPSession -> Socket -> IO ()
-handleConnection lspSession conn = do
+handleConnection :: LSPSession -> Maybe TeachingConfig -> Socket -> IO ()
+handleConnection lspSession maybeTeachConfig conn = do
   TIO.putStrLn "Connection received"
   hFlush stdout
 
@@ -121,7 +107,7 @@ handleConnection lspSession conn = do
 
       Right msg -> do
         logMessage msg
-        response <- handleMessage lspSession msg
+        response <- handleMessage lspSession maybeTeachConfig msg
         logResponse response
         sendResponse conn response
     )

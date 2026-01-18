@@ -12,7 +12,8 @@ import qualified Data.Text.Encoding as T
 import Data.Aeson (eitherDecode, encode)
 import qualified Data.ByteString.Lazy as BL
 
-import Tidepool.Control.Server
+import Tidepool.Control.Server (runServer)
+import Tidepool.Control.Types (ServerConfig(..), TeachingConfig(..))
 import Tidepool.Control.Export (exportTrainingExamples, exportGroupedTrainingExamples, exportWithExpansion, discoverSymbols, exportCodeSamples)
 import Tidepool.LSP.Interpreter (withLSPSession)
 import Tidepool.Training.Format (formatTrainingFromSkeleton)
@@ -28,6 +29,8 @@ main = do
     ("export-training" : seeds) -> runExportMode False (map T.pack seeds)
     ["export-code-samples", "--count", countStr] -> runCodeSamplesMode (read countStr)
     ["format-training", skeletonFile] -> runFormatTrainingMode skeletonFile
+    ["teach-with-haiku", "--output-dir", outDir, "--anthropic-key", apiKey] ->
+      runTeachingMode outDir (T.pack apiKey)
     ["--help"] -> printUsage
     ["-h"] -> printUsage
     _ -> runServerMode
@@ -40,7 +43,30 @@ runServerMode = do
     Just dir -> pure dir
     Nothing -> getCurrentDirectory
 
-  let config = ServerConfig { projectDir = projectDir }
+  let config = ServerConfig { projectDir = projectDir, teachingConfig = Nothing }
+
+  runServer config
+
+runTeachingMode :: FilePath -> Text -> IO ()
+runTeachingMode outDir apiKey = do
+  -- Read project directory from environment or use current directory
+  projectDirEnv <- lookupEnv "TIDEPOOL_PROJECT_DIR"
+  projectDir <- case projectDirEnv of
+    Just dir -> pure dir
+    Nothing -> getCurrentDirectory
+
+  let teachCfg = TeachingConfig
+        { teachOutputDir = outDir
+        , teachAnthropicKey = apiKey
+        }
+  let config = ServerConfig
+        { projectDir = projectDir
+        , teachingConfig = Just teachCfg
+        }
+
+  hPutStrLn stderr $ "Starting control server in teaching mode"
+  hPutStrLn stderr $ "  Project: " <> projectDir
+  hPutStrLn stderr $ "  Output: " <> outDir
 
   runServer config
 
@@ -111,7 +137,9 @@ printUsage = do
   putStrLn "tidepool-control-server - Claude Code++ control server"
   putStrLn ""
   putStrLn "Usage:"
-  putStrLn "  tidepool-control-server                    Start control server"
+  putStrLn "  tidepool-control-server                    Start control server (production mode)"
+  putStrLn "  tidepool-control-server teach-with-haiku --output-dir <dir> --anthropic-key <key>"
+  putStrLn "                                             Start control server in teaching mode"
   putStrLn "  tidepool-control-server export-training    Auto-discover and generate training data"
   putStrLn "  tidepool-control-server export-training --grouped"
   putStrLn "                                             Use v2 format with grouped candidates"
