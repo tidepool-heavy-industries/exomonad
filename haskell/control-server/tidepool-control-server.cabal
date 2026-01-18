@@ -35,6 +35,8 @@ library
         Tidepool.Control.Scout.Teach
         Tidepool.Control.Scout.Teach.Types
         Tidepool.Control.Scout.Teach.Gemma
+        Tidepool.Control.Scout.Teach.Teacher
+        Tidepool.Control.Scout.Tools
     build-depends:
         base >= 4.17 && < 5,
         text >= 2.0 && < 3,
@@ -49,6 +51,7 @@ library
         tidepool-core,
         tidepool-lsp-interpreter,
         tidepool-training-generator,
+        tidepool-teaching,
         -- HTTP for FunctionGemma
         http-conduit,
         vector,
@@ -98,3 +101,21 @@ test-suite code-extraction-test
     default-language: GHC2024
     default-extensions:
         OverloadedStrings
+
+test-suite tools-test
+    import:           warnings
+    type:             exitcode-stdio-1.0
+    main-is:          ToolsSpec.hs
+    build-depends:
+        base >= 4.17 && < 5,
+        tidepool-control-server,
+        tidepool-core,
+        tidepool-teaching,
+        text >= 2.0 && < 3,
+        tasty,
+        tasty-hunit
+    hs-source-dirs:   test
+    default-language: GHC2024
+    default-extensions:
+        OverloadedStrings
+        TypeApplications
