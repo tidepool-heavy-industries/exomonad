@@ -4,7 +4,7 @@
 --
 -- Provides domain-specific guidance for training Haiku to select
 -- relevant symbols during semantic code exploration.
-module Tidepool.Control.Scout.Teach.Teacher
+module Tidepool.Control.Scout.DocGen.Teacher
   ( ScoutGemmaEffect(..)
   ) where
 

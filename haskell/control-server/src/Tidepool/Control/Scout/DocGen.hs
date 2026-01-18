@@ -33,7 +33,7 @@
 --
 -- Key insight: Gemma extracts edges (related symbols). Haskell traverses
 -- the graph via BFS, and depth determines scouting order.
-module Tidepool.Control.Scout.Teach
+module Tidepool.Control.Scout.DocGen
   ( -- * Main Entry Point
     scout
 
@@ -42,7 +42,7 @@ module Tidepool.Control.Scout.Teach
   , defaultTeachConfig
 
     -- * Re-exports
-  , module Tidepool.Control.Scout.Teach.Types
+  , module Tidepool.Control.Scout.DocGen.Types
   ) where
 
 import Control.Monad (forM)
@@ -55,8 +55,8 @@ import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
 
-import Tidepool.Control.Scout.Teach.Types
-import Tidepool.Control.Scout.Teach.Gemma (ScoutGemma, selectRelevantSymbols, extractCandidates)
+import Tidepool.Control.Scout.DocGen.Types
+import Tidepool.Control.Scout.DocGen.Gemma (ScoutGemma, selectRelevantSymbols, extractCandidates)
 import Tidepool.Effect.Types (Log, logDebug)
 import Tidepool.Effect.LSP
   ( LSP, workspaceSymbol, hover

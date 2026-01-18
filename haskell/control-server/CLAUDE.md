@@ -255,10 +255,10 @@ Project-local configuration in `.tidepool/` (gitignored):
 | `Scout/LSP.hs` | LSP integration helpers |
 | `Scout/EdgeTypes.hs` | Edge classification types |
 | `Scout/Templates.hs` | Jinja templates for FunctionGemma prompts |
-| `Scout/Teach.hs` | Teaching document generation |
-| `Scout/Teach/Types.hs` | LSPSymbol, TeachQuery, TeachState, TeachingDoc |
-| `Scout/Teach/Gemma.hs` | ScoutGemma effect + interpreters (HTTP/mock) for symbol selection |
-| `Scout/Teach/Teacher.hs` | FineTrainingTeacher instance for scout |
+| `Scout/DocGen.hs` | Teaching document generation |
+| `Scout/DocGen/Types.hs` | LSPSymbol, TeachQuery, TeachState, TeachingDoc |
+| `Scout/DocGen/Gemma.hs` | ScoutGemma effect + interpreters (HTTP/mock) for symbol selection |
+| `Scout/DocGen/Teacher.hs` | FineTrainingTeacher instance for scout |
 
 ## MCP Tools
 
@@ -477,6 +477,6 @@ echo '{"type":"MCPToolCall","id":"1","tool_name":"scout","arguments":{...}}' | \
 
 ## Completed
 
-- FunctionGemma HTTP interpreter (`Scout/Teach/Gemma.hs`)
+- FunctionGemma HTTP interpreter (`Scout/DocGen/Gemma.hs`)
 - Symbol selection via Ollama (`runScoutGemmaHTTP`)
 - LSP integration for hover/references/workspace symbols

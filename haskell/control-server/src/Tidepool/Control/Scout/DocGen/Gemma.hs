@@ -24,7 +24,7 @@
 -- @
 --
 -- Key insight: Deterministic extraction gets candidates. Gemma only classifies.
-module Tidepool.Control.Scout.Teach.Gemma
+module Tidepool.Control.Scout.DocGen.Gemma
   ( -- * Effect
     ScoutGemma(..)
 
@@ -37,9 +37,6 @@ module Tidepool.Control.Scout.Teach.Gemma
     -- * Interpreters
   , runScoutGemmaHTTP
   , runScoutGemmaMock
-
-    -- * Token Parsing (internal, exported for testing)
-  , parseSymbolTokens
   ) where
 
 import Control.Exception (try, SomeException)
@@ -54,7 +51,7 @@ import qualified Data.Text as T
 import qualified Data.Vector as V
 import Network.HTTP.Simple
 
-import Tidepool.Control.Scout.Teach.Types (LSPSymbol(..))
+import Tidepool.Control.Scout.DocGen.Types (LSPSymbol(..))
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -359,29 +356,6 @@ extractSelectedFromToolCall json = case json of
     extractStrings = concatMap $ \case
       Aeson.String s -> [s]
       _ -> []
-
-
--- ════════════════════════════════════════════════════════════════════════════
--- TOKEN PARSING
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Parse symbol tokens from a space/comma separated string.
---
--- Handles various formats:
---   "ScoreConfig Rubric EdgeContext"
---   "ScoreConfig, Rubric, EdgeContext"
---   "ScoreConfig,Rubric,EdgeContext"
-parseSymbolTokens :: Text -> [Text]
-parseSymbolTokens raw =
-  filter isValidSymbol
-  $ map T.strip
-  $ concatMap (T.splitOn ",")
-  $ T.words raw
-  where
-    -- Valid symbols start with uppercase letter
-    isValidSymbol t = case T.uncons t of
-      Just (c, _) -> c >= 'A' && c <= 'Z' && not (T.null t)
-      Nothing -> False
 
 
 -- ════════════════════════════════════════════════════════════════════════════

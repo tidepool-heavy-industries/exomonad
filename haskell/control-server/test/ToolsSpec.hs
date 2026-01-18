@@ -13,7 +13,7 @@ import Tidepool.Graph.Tool (ToolDef(..))
 import Tidepool.Tool.Convert (toAnthropicTool)
 import Tidepool.Teaching.Teacher (FineTrainingTeacher(..))
 import Tidepool.Control.Scout.Tools (SelectSymbolsTool(..))
-import Tidepool.Control.Scout.Teach.Teacher (ScoutGemmaEffect(..))
+import Tidepool.Control.Scout.DocGen.Teacher (ScoutGemmaEffect(..))
 
 main :: IO ()
 main = defaultMain tests

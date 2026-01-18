@@ -150,15 +150,23 @@ instance FromJSON OpenAIResponse where
     OpenAIResponse <$> v .: "choices" <*> v .: "usage"
 
 -- | Content block (Anthropic-style).
+--
+-- Supports text, tool use, and thinking blocks from extended thinking.
 data ContentBlock
   = TextContent Text
   | ToolUseContent Text Value  -- tool_name, input
+  | ThinkingContent Text       -- thinking text (extended thinking feature)
+  | RedactedThinkingContent    -- encrypted thinking block (no content exposed)
   deriving (Show, Eq, Generic)
 
 instance ToJSON ContentBlock where
   toJSON (TextContent t) = object ["type" .= ("text" :: Text), "text" .= t]
   toJSON (ToolUseContent name input_) = object
     ["type" .= ("tool_use" :: Text), "name" .= name, "input" .= input_]
+  toJSON (ThinkingContent t) = object
+    ["type" .= ("thinking" :: Text), "thinking" .= t]
+  toJSON RedactedThinkingContent = object
+    ["type" .= ("redacted_thinking" :: Text)]
 
 instance FromJSON ContentBlock where
   parseJSON = withObject "ContentBlock" $ \v -> do
@@ -166,6 +174,8 @@ instance FromJSON ContentBlock where
     case ty of
       "text" -> TextContent <$> v .: "text"
       "tool_use" -> ToolUseContent <$> v .: "name" <*> v .: "input"
+      "thinking" -> ThinkingContent <$> v .: "thinking"
+      "redacted_thinking" -> pure RedactedThinkingContent
       _ -> fail $ "Unknown content block type: " ++ show ty
 
 -- | OpenAI choice.

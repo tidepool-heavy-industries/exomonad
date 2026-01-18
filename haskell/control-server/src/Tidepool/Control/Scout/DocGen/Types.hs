@@ -26,7 +26,7 @@
 --          ▼
 --     BFS depth = teaching order (closer to seeds = more foundational)
 -- @
-module Tidepool.Control.Scout.Teach.Types
+module Tidepool.Control.Scout.DocGen.Types
   ( -- * LSP Symbol Data
     LSPSymbol(..)
 
@@ -41,9 +41,6 @@ module Tidepool.Control.Scout.Teach.Types
 
     -- * Query Input
   , TeachQuery(..)
-
-    -- * Errors
-  , TeachError(..)
   ) where
 
 import Data.Aeson
@@ -189,19 +186,3 @@ instance HasJSONSchema TeachQuery where
     ["topic", "seeds"]  -- topic and seeds required; budget defaults to 20
 
 
--- ════════════════════════════════════════════════════════════════════════════
--- ERRORS
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Errors that can occur during teaching exploration.
-data TeachError
-  = TeachGemmaParseError Text Text
-    -- ^ Gemma returned unparseable response: (raw response, parse error)
-  | TeachLSPError Text
-    -- ^ LSP lookup failed: (error message)
-  | TeachNoSymbolsFound Text
-    -- ^ No symbols found for seed: (seed name)
-  | TeachBudgetExhausted Int
-    -- ^ Budget exhausted before completion: (symbols explored)
-  deriving stock (Show, Eq, Generic)
-    deriving anyclass (FromJSON, ToJSON)

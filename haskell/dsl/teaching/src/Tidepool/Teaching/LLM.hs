@@ -342,8 +342,9 @@ callHaiku TeachingEnv{..} systemPrompt userText tools = do
 -- need extension.
 convertToOutcome :: AnthropicResponse -> TurnOutcome (TurnResult Value)
 convertToOutcome (AnthropicResponse contentBlocks _usage _stopReason) =
-  -- Extract text and tool use from content blocks (LP = LLMProvider ContentBlock)
+  -- Extract text, thinking, and tool use from content blocks (LP = LLMProvider ContentBlock)
   let textContent = T.intercalate "\n" [t | LP.TextContent t <- contentBlocks]
+      thinkingContent = T.intercalate "\n" [t | LP.ThinkingContent t <- contentBlocks]
       toolUses = [(name, input_) | LP.ToolUseContent name input_ <- contentBlocks]
   in case toolUses of
     [] ->
@@ -352,7 +353,7 @@ convertToOutcome (AnthropicResponse contentBlocks _usage _stopReason) =
         { trOutput = toJSON textContent  -- Parsed output
         , trToolsInvoked = []
         , trNarrative = textContent
-        , trThinking = ""
+        , trThinking = thinkingContent
         }
     [(toolName, toolArgs)] ->
       -- Single tool use - record as tool invocation
@@ -364,7 +365,7 @@ convertToOutcome (AnthropicResponse contentBlocks _usage _stopReason) =
             , tiOutput = Null  -- Not executed yet
             }]
         , trNarrative = textContent
-        , trThinking = ""
+        , trThinking = thinkingContent
         }
     multiTools ->
       -- Multiple tool uses - record all invocations
@@ -376,5 +377,5 @@ convertToOutcome (AnthropicResponse contentBlocks _usage _stopReason) =
             , tiOutput = Null  -- Not executed yet
             } | (name, args) <- multiTools]
         , trNarrative = textContent
-        , trThinking = ""
+        , trThinking = thinkingContent
         }

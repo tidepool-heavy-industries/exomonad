@@ -22,8 +22,8 @@ import GHC.Generics (Generic)
 import Tidepool.Graph.Tool (ToolDef(..))
 import Tidepool.Tool.Convert (ToAnthropicTool, ToCfTool)
 import Tidepool.Schema (HasJSONSchema(..))
-import Tidepool.Control.Scout.Teach.Gemma (ScoutGemma, selectRelevantSymbols)
-import Tidepool.Control.Scout.Teach.Types (LSPSymbol(..))
+import Tidepool.Control.Scout.DocGen.Gemma (ScoutGemma, selectRelevantSymbols)
+import Tidepool.Control.Scout.DocGen.Types (LSPSymbol(..))
 import Tidepool.Effect.LSP (SymbolKind(..), Location(..), Position(..), Range(..))
 
 -- | Tool marker for SelectRelevantSymbols operation

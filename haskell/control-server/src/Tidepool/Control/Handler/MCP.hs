@@ -15,8 +15,8 @@ import System.Environment (lookupEnv)
 import System.IO (hFlush, stdout)
 
 import Tidepool.Control.Protocol
-import Tidepool.Control.Scout.Teach (scout, defaultTeachConfig, TeachQuery(..), TeachingDoc(..))
-import Tidepool.Control.Scout.Teach.Gemma (runScoutGemmaHTTP)
+import Tidepool.Control.Scout.DocGen (scout, defaultTeachConfig, TeachQuery(..), TeachingDoc(..))
+import Tidepool.Control.Scout.DocGen.Gemma (runScoutGemmaHTTP)
 import Tidepool.Effect.Types (runLog, LogLevel(..))
 import Tidepool.LSP.Interpreter (LSPSession, runLSP)
 

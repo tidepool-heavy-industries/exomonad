@@ -2,9 +2,23 @@
 
 LLM-level teaching infrastructure for generating FunctionGemma training data via Haiku.
 
-## Status: Implemented, Not Wired
+## Status: Ready for Testing
 
-The teaching infrastructure is complete but **not yet wired into any server**. To use it, a server would need to:
+The teaching infrastructure is complete. Use the test harness to verify the pipeline:
+
+```bash
+# Run the test harness
+TEACHING_ENABLED=true \
+ANTHROPIC_API_KEY=sk-ant-... \
+TEACHING_OUTPUT_DIR=./test-training \
+cabal run teaching-harness
+
+# Verify output
+cat ./test-training/session-*/anthropic.jsonl | jq .
+cat ./test-training/session-*/anthropic.jsonl | jq '.ttResponse.content[] | select(.type=="thinking")'
+```
+
+For production use, a server would need to:
 1. Call `loadTeachingConfig` to check for env vars
 2. Use `runLLMWithTeaching` instead of production LLM interpreter when enabled
 
@@ -150,10 +164,9 @@ Teaching sessions write to:
 
 ## Known Limitations
 
-1. **Not wired to server** - No server currently calls `runLLMWithTeaching`
+1. **Not wired to server** - No server currently calls `runLLMWithTeaching` (use test harness instead)
 2. **gemma.jsonl not written** - Handle is opened but FunctionGemma conversion not implemented
-3. **Thinking content lost** - `ThinkingEnabled 1024` is set but `trThinking = ""` in output
-4. **Single-threaded** - Interpreter is not thread-safe
+3. **Single-threaded** - Interpreter is not thread-safe
 
 ## Dependencies
 

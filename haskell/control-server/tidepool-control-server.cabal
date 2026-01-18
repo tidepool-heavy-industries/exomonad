@@ -32,11 +32,11 @@ library
         Tidepool.Control.Scout.Heuristics
         Tidepool.Control.Scout.LSP
         Tidepool.Control.Scout.Templates
-        -- Teach (teaching document generation)
-        Tidepool.Control.Scout.Teach
-        Tidepool.Control.Scout.Teach.Types
-        Tidepool.Control.Scout.Teach.Gemma
-        Tidepool.Control.Scout.Teach.Teacher
+        -- DocGen (teaching document generation)
+        Tidepool.Control.Scout.DocGen
+        Tidepool.Control.Scout.DocGen.Types
+        Tidepool.Control.Scout.DocGen.Gemma
+        Tidepool.Control.Scout.DocGen.Teacher
         Tidepool.Control.Scout.Tools
     build-depends:
         base >= 4.17 && < 5,

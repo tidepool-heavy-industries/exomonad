@@ -38,7 +38,7 @@ import System.FilePath ((</>), takeExtension)
 import System.IO (stdout, stderr, hFlush, hPutStrLn)
 import System.Random (randomRIO)
 
-import Tidepool.Control.Scout.Teach.Gemma (extractCandidates)
+import Tidepool.Control.Scout.DocGen.Gemma (extractCandidates)
 import Tidepool.Effect.LSP
   ( workspaceSymbol, hover, textDocument, position, references
   , SymbolInformation(..), HoverInfo(..), Location(..), Range(..), Position(..)
