@@ -143,14 +143,15 @@ data DocGenGraph mode = DocGenGraph
       :@ Template SelectTpl
       :@ Schema SelectOutput
       :@ Memory ExploreState
-      :@ UsesEffects '[Goto "dgExpand" (SelectInput, SelectOutput)]
+      :@ UsesEffects '[Goto "dgExpand" SelectOutput]
     -- ^ LLM selects relevant candidates from the list
 
   , dgExpand :: mode :- LogicNode
-      :@ Input (SelectInput, SelectOutput)
+      :@ Input SelectOutput
       :@ Memory ExploreState
       :@ UsesEffects '[Goto "dgProcess" ProcessInput, Goto "dgFinalize" FinalizeInput]
     -- ^ Add selected symbols to frontier, advance to next or finalize
+    -- (Gets current symbol info from Memory)
 
   , dgFinalize :: mode :- LogicNode
       :@ Input FinalizeInput

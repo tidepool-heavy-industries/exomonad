@@ -44,6 +44,7 @@ library
         Tidepool.Control.Scout.Graph.Templates
         Tidepool.Control.Scout.Graph.Templates.Context
         Tidepool.Control.Scout.Graph.Handlers
+        Tidepool.Control.Scout.Graph.Runner
     build-depends:
         base >= 4.17 && < 5,
         text >= 2.0 && < 3,

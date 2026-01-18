@@ -45,6 +45,7 @@ import Data.Text (Text)
 import GHC.Generics (Generic)
 
 import Tidepool.Schema (HasJSONSchema(..), objectSchema, arraySchema, emptySchema, SchemaType(..))
+import Tidepool.StructuredOutput (StructuredOutput)
 import Tidepool.Control.Scout.DocGen.Types (SymbolKey, LSPSymbol)
 
 
@@ -106,7 +107,7 @@ data SelectOutput = SelectOutput
   , soReasoning :: Maybe Text
     -- ^ Optional: why these were selected (useful for training data)
   } deriving stock (Show, Eq, Generic)
-    deriving anyclass (FromJSON, ToJSON)
+    deriving anyclass (FromJSON, ToJSON, StructuredOutput)
 
 -- | JSON schema for LLM structured output.
 --

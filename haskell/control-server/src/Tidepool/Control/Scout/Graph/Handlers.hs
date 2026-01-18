@@ -37,7 +37,6 @@ import Tidepool.Effect.LSP
   ( LSP, workspaceSymbol, hover
   , textDocument, position
   , SymbolInformation(..), Location(..), Range(..), Position(..), HoverInfo(..)
-  , SymbolKind(..)
   )
 import Tidepool.Graph.Generic (AsHandler)
 import Tidepool.Graph.Goto (gotoChoice, gotoExit, LLMHandler(..), GotoChoice, To)
@@ -244,25 +243,12 @@ selectBefore input =
 -- | Route after LLM selection.
 --
 -- Passes the selected output to dgExpand.
+-- The expand handler gets symbol info from Memory.
 selectAfter
   :: SelectOutput
-  -> Eff es (GotoChoice '[To "dgExpand" (SelectInput, SelectOutput)])
+  -> Eff es (GotoChoice '[To "dgExpand" SelectOutput])
 selectAfter output = do
-  -- The framework passes both input and output to expand
-  -- We need to reconstruct the input here, but the real input comes from the runtime
-  -- This is a limitation - we'll use a placeholder
-  let placeholder = SelectInput
-        { siTopic = ""
-        , siSymbol = LSPSymbol
-            { lsName = ""
-            , lsKind = SKVariable  -- Placeholder kind
-            , lsLocation = error "SelectInput placeholder: lsLocation not initialized"
-            , lsSignature = ""
-            , lsDocComment = Nothing
-            }
-        , siCandidates = []
-        }
-  pure $ gotoChoice @"dgExpand" (placeholder, output)
+  pure $ gotoChoice @"dgExpand" output
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -274,15 +260,17 @@ selectAfter output = do
 -- Resolves selected symbol names to SymbolKeys via LSP, adds unseen ones
 -- to the frontier, and routes to either dgProcess (more work) or
 -- dgFinalize (done).
+--
+-- Gets the current symbol info from Memory (stored by processHandler).
 expandHandler
   :: ( Member (Memory ExploreState) es
      , Member LSP es
      , Member Log es
      , NativeOnly
      )
-  => (SelectInput, SelectOutput)
+  => SelectOutput
   -> Eff es (GotoChoice '[To "dgProcess" ProcessInput, To "dgFinalize" FinalizeInput])
-expandHandler (input, output) = do
+expandHandler output = do
   state <- getMem @ExploreState
 
   let selectedTokens = take 5 (soSelected output)  -- Limit to 5 per symbol
@@ -298,12 +286,11 @@ expandHandler (input, output) = do
   logDebug $ "[DocGen] Resolved " <> T.pack (show (length resolvedKeys))
     <> " (" <> T.pack (show (length unseen)) <> " new)"
 
-  -- Get current depth from the input symbol (we need to track this better)
-  -- For now, we'll look it up from the state
-  let symbolName = lsName (siSymbol input)
-      currentDepth = case [ d | (_, (d, sym)) <- Map.toList (esGraph state), lsName sym == symbolName ] of
-        (d:_) -> d
-        []    -> 0  -- fallback
+  -- Get current depth from the most recently added symbol in the graph
+  -- (processHandler added the current symbol before routing to select)
+  let currentDepth = case Map.toList (esGraph state) of
+        [] -> 0
+        entries -> maximum $ map (fst . snd) entries
       newFrontier = map (\k -> (k, currentDepth + 1)) unseen
 
   -- Update frontier
