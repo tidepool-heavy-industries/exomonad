@@ -36,6 +36,36 @@ Core data types:
   - `anthropic.jsonl` - Raw Anthropic responses
   - `gemma.jsonl` - Converted FunctionGemma training data
 
+### `Tidepool.Teaching.Anthropic`
+
+Re-exports the production Anthropic client with teaching-specific helpers:
+
+- **Re-exports**: `AnthropicTool`, `AnthropicConfig`, `AnthropicResponse`, `ContentBlock`
+- **Helper**: `extractTeachingTurn` - Parse response into (reasoning, toolName, toolArgs)
+
+Uses existing `tidepool-llm-interpreter` (already supports Haiku + tool use). Example:
+
+```haskell
+import Tidepool.Teaching.Anthropic
+import Tidepool.LLM.Interpreter (runLLMComplete, mkLLMEnv)
+import Tidepool.Effects.LLMProvider (complete, SAnthropic)
+
+-- Build config with teacher guidance
+let cfg = AnthropicConfig
+      { acModel = "claude-3-5-haiku-20241022"
+      , acMaxTokens = 1024
+      , acThinking = ThinkingDisabled
+      , acSystemPrompt = Just (baseSystemPrompt <> "\n\n" <> teacherGuidance @TeachGemma)
+      }
+
+-- Call Haiku with tools
+response <- runM $ runLLMComplete env $ complete SAnthropic cfg prompt (Just tools)
+
+-- Extract turn for conversion
+case extractTeachingTurn response of
+  Right (reasoning, toolName, args) -> ...
+```
+
 ### `Tidepool.Teaching.Teacher`
 
 Minimal typeclass for effect-specific guidance:
@@ -64,12 +94,12 @@ instance FineTrainingTeacher TeachGemma where
 
 Teaching infrastructure is consumed by other packages in phases:
 
-1. **Anthropic Client** (`Tidepool.Teaching.Anthropic`) - Call Haiku with tool use
-2. **Format Conversion** (`Tidepool.Teaching.Convert`) - Anthropic → FunctionGemma
-3. **Recording** (`Tidepool.Teaching.Record`) - Write dual-format output
-4. **Execution Wrapper** (`Tidepool.Teaching.Execute`) - Orchestrate 1-3
+1. **Anthropic Client** (`Tidepool.Teaching.Anthropic`) - Re-exports production client (Task 02 ✓)
+2. **Format Conversion** (`Tidepool.Teaching.Convert`) - Anthropic → FunctionGemma (Task 03)
+3. **Recording** (`Tidepool.Teaching.Record`) - Write dual-format output (Task 04)
+4. **Execution Wrapper** (`Tidepool.Teaching.Execute`) - Orchestrate 1-3 (Task 05)
 
-This package (foundation) provides only types and typeclass - no implementation.
+This package builds on the existing `tidepool-llm-interpreter` client.
 
 ## Integration Points
 
