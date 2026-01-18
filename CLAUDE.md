@@ -41,10 +41,11 @@ CLAUDE.md  ← YOU ARE HERE (project overview)
 │   │   └── actor/CLAUDE.md     ← Actor model details
 │   ├── protocol/CLAUDE.md      ← Wire formats
 │   └── tools/CLAUDE.md         ← Dev tools (ghci-oracle, sleeptime, training-generator)
-├── rust/CLAUDE.md             ← Claude Code++ (hook handler + MCP forwarding)
+├── rust/CLAUDE.md             ← Claude Code++ (hook handler + MCP forwarding + TUI)
 │   ├── mantle-agent/CLAUDE.md  ← Hook handler + MCP stdio server (IMPLEMENTED)
 │   ├── mantle-hub/CLAUDE.md    ← Metrics hub (LEGACY, needs repurposing)
-│   └── mantle-shared/CLAUDE.md ← Protocol types, TCP socket client
+│   ├── mantle-shared/CLAUDE.md ← Protocol types, TCP socket client
+│   └── tui-sidebar/CLAUDE.md   ← TUI sidebar: ratatui rendering for graph UIs (IMPLEMENTED)
 ├── types-first-dev/CLAUDE.md   ← V3 TDD protocol project
 ├── deploy/CLAUDE.md            ← Cloudflare deployment
 ├── anemone/CLAUDE.md           ← Debug/diagnostic Solid.js UI (in-repo, not ~/tidepool-labs)
@@ -72,6 +73,7 @@ CLAUDE.md  ← YOU ARE HERE (project overview)
 | Deploy to Cloudflare Workers | `deploy/CLAUDE.md` |
 | Work on the native server | `haskell/native-server/CLAUDE.md` |
 | Work on debug UI frontend | `anemone/CLAUDE.md` or `typescript/native-gui/CLAUDE.md` |
+| Work on TUI sidebar (terminal UI rendering) | `rust/tui-sidebar/CLAUDE.md` |
 | Understand control protocol types | `rust/mantle-shared/CLAUDE.md` |
 
 ---
@@ -175,26 +177,36 @@ Human-driven Claude Code sessions augmented with Tidepool. **Not headless automa
 ### Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│ User TTY (Zellij 2-pane)                                    │
-│  Pane 1: Claude Code  │  Pane 2: control-server (logs)      │
-└───────────┬─────────────────────────────────────────────────┘
-            │ Hooks/MCP
-            ▼
-┌─────────────────────────────────────────────────────────────┐
-│ mantle-agent (Rust)                                         │
-│  • hook subcommand: CC hooks → TCP                          │
-│  • mcp subcommand: JSON-RPC stdio → TCP                     │
-└───────────┬─────────────────────────────────────────────────┘
-            │ TCP (NDJSON)
-            ▼
-┌─────────────────────────────────────────────────────────────┐
-│ control-server (Haskell)                                    │
-│  • Unix socket: .tidepool/control.sock                      │
-│  • Long-lived LSP session (HLS)                             │
-│  • Hook Handler: Passthrough (log and allow)                │
-│  • MCP Handler: scout tool (semantic code exploration)      │
-└─────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────┐
+│ User TTY (Zellij 3-pane)                                       │
+│  Pane 1: Claude Code  │  Pane 2: control-server  │ Pane 3: TUI │
+└───────────┬──────────────────────────────────┬─────────────────┘
+            │ Hooks/MCP                        │
+            ▼                                  │
+┌─────────────────────────────────────────┐    │
+│ mantle-agent (Rust)                     │    │
+│  • hook: CC hooks → TCP (7432)          │    │
+│  • mcp: JSON-RPC stdio → TCP (7432)     │    │
+└───────────┬─────────────────────────────┘    │
+            │ TCP NDJSON (port 7432)           │
+            ▼                                  │
+┌─────────────────────────────────────────┐    │
+│ control-server (Haskell)                │    │
+│  • Long-lived LSP session (HLS)         │    │
+│  • Hook Handler: Passthrough            │    │
+│  • MCP Handler: 4 tools (auto-discovery)│    │
+│  • TUI Handler: UISpec ↔ Interaction    │◄───┤
+└─────────────────────────────────────────┘    │
+                                               │ TCP NDJSON (7433)
+┌──────────────────────────────────────────────┘
+│
+▼
+┌─────────────────────────────────────────┐
+│ tui-sidebar (Rust)                      │
+│  • Renders UISpec with ratatui          │
+│  • Captures keyboard (Tab, Enter)       │
+│  • Sends Interaction events             │
+└─────────────────────────────────────────┘
 ```
 
 ### Key Components
@@ -202,7 +214,8 @@ Human-driven Claude Code sessions augmented with Tidepool. **Not headless automa
 | Component | Location | Purpose |
 |-----------|----------|---------|
 | **mantle-agent** | `rust/mantle-agent/` | Hook/MCP forwarding to control server |
-| **control-server** | `haskell/control-server/` | Haskell TCP server with LSP + scout tool |
+| **control-server** | `haskell/control-server/` | Haskell TCP server with LSP + MCP tools (find_callers, show_fields, show_constructors, teach-graph) + TUI handler |
+| **tui-sidebar** | `rust/tui-sidebar/` | Rust TUI: renders UISpec, captures Interaction, TCP 7433 server |
 | **Protocol types** | `rust/mantle-shared/protocol.rs` + `haskell/control-server/Protocol.hs` | Bidirectional message types (must match exactly) |
 
 ### Data Flow
@@ -219,17 +232,20 @@ Human-driven Claude Code sessions augmented with Tidepool. **Not headless automa
 8. Claude Code proceeds or blocks
 ```
 
-**MCP Tool Flow (scout):**
+**MCP Tool Flow (4 available tools):**
 ```
-1. User: "What breaks if I add a variant to LLMKind?"
-2. Claude plans to call scout MCP tool
+Tools: find_callers, show_fields, show_constructors, teach-graph
+
+1. User asks question requiring code intelligence
+2. Claude plans to call MCP tool (e.g., teach-graph, find_callers)
 3. Claude Code spawns mantle-agent mcp (JSON-RPC stdio)
 4. mantle-agent forwards ControlMessage::McpToolCall via TCP
-5. control-server routes to handleScoutTool
-6. Exploration: LSP (workspace/symbol, hover, references) + Gemma scoring
-7. Returns ScoutResponse (pointers, summary, training examples)
-8. mantle-agent formats as JSON-RPC result to stdout
-9. Claude analyzes and responds to user
+5. control-server routes to appropriate handler
+   - Tier 1 (LSP-only): find_callers, show_fields, show_constructors
+   - Tier 2 (LLM-enhanced): teach-graph (LSP + Haiku selection)
+6. Returns tool result (JSON)
+7. mantle-agent formats as JSON-RPC result to stdout
+8. Claude analyzes and responds to user
 ```
 
 ### Configuration
@@ -255,21 +271,52 @@ In `.claude/settings.local.json`:
 
 ### Running
 
+**Option 1: Zellij Layout (Recommended)**
 ```bash
-# Pane 1: Start control server
-cd /path/to/project
-cabal run tidepool-control-server
+cd /path/to/tidepool
+zellij --layout .zellij/tidepool.kdl
+```
 
-# Pane 2: Start Claude Code (in same directory)
+This starts all 3 components with production-grade orchestration:
+- Pane 1: Claude Code (manual start in your project)
+- Pane 2: control-server (auto-starts with port polling)
+- Pane 3: tui-sidebar (waits for control-server, then auto-starts)
+
+**Orchestration features:**
+- Port polling synchronization eliminates race conditions
+- Dynamic pane renaming: `Booting...` → `ONLINE ✓` → `CRASHED ✗`
+- 30-second timeout with clear error messages
+- Self-healing crash recovery (pane drops to shell with logs preserved)
+- Visual state machine feedback
+- Centralized environment variables (GEMMA_ENDPOINT, RUST_LOG)
+- Single source of truth for working directory
+
+**Option 2: Manual (3 terminals - requires careful ordering)**
+```bash
+# Terminal 1: Start control server FIRST
+cd /path/to/project
+GEMMA_ENDPOINT=http://localhost:11434 cabal run tidepool-control-server
+
+# Wait for control-server to bind port 7432, THEN:
+# Terminal 2: Start tui-sidebar
+cd /path/to/tidepool
+RUST_LOG=info cargo run -p tui-sidebar --release
+
+# Terminal 3: Start Claude Code (in project directory)
+cd /path/to/project
 claude-code
 ```
+
+**Note:** Manual startup requires careful sequencing. Use the Zellij layout for reliable startup.
 
 ### Status
 
 - ✅ Hook forwarding (passthrough)
-- ✅ MCP server + scout tool
+- ✅ MCP server + 4 tools via auto-discovery (find_callers, show_fields, show_constructors, teach-graph)
 - ✅ LSP integration (HLS via lsp-test)
-- ✅ FunctionGemma scoring (heuristic + HTTP interpreters)
+- ✅ FunctionGemma scoring (HTTP interpreter via Ollama)
+- ✅ Automatic tool registration via MCPExport annotation + reifyMCPTools
+- ✅ Enhanced Zellij layout with port polling, dynamic pane renaming, and self-healing
 - 🔄 Training data generation (types ready, CLI pending)
 - ❌ Daemon mode (not implemented, uses per-call TCP)
 - ❌ Metrics hub (mantle-hub needs repurposing)

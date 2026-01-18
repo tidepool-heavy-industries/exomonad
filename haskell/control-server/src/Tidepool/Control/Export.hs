@@ -46,6 +46,7 @@ import Tidepool.Control.Protocol (ToolDefinition(..))
 import Tidepool.Control.LSPTools
   ( FindCallersGraph, ShowFieldsGraph, ShowConstructorsGraph )
 import Tidepool.Control.Scout.DocGen (TeachQuery(..))
+import Tidepool.Control.Scout.Graph (DocGenGraph)
 import Tidepool.Control.Scout.DocGen.Gemma (extractCandidates)
 import Tidepool.Effect.LSP
   ( workspaceSymbol, hover, textDocument, position, references
@@ -926,21 +927,15 @@ exportCodeSamples session projectRoot count = do
 -- Returns ToolDefinition format that matches Rust protocol types.
 exportMCPTools :: IO [ToolDefinition]
 exportMCPTools = do
-  -- Extract LSP tools from graph DSL (Tier 1)
-  let lspTools = concat
+  -- Extract all tools from graph DSL (automatic discovery)
+  let allTools = concat
         [ reifyMCPTools (Proxy @FindCallersGraph)
         , reifyMCPTools (Proxy @ShowFieldsGraph)
         , reifyMCPTools (Proxy @ShowConstructorsGraph)
+        , reifyMCPTools (Proxy @DocGenGraph)
         ]
 
-  -- Add teach-graph manually (Tier 2, not yet graph-based)
-  let teachGraph = ToolDefinition
-        { tdName = "teach-graph"
-        , tdDescription = "Explore a codebase concept using intelligent symbol selection. Returns a teaching document with symbols ordered by prerequisites - learn foundational types before the code that uses them."
-        , tdInputSchema = teachGraphSchema
-        }
-
-  pure $ map reifyToToolDef lspTools ++ [teachGraph]
+  pure $ map reifyToToolDef allTools
 
 -- | Convert MCPToolInfo -> ToolDefinition.
 reifyToToolDef :: MCPToolInfo -> ToolDefinition
@@ -949,27 +944,3 @@ reifyToToolDef (MCPToolInfo name desc schema _entryName) = ToolDefinition
   , tdDescription = desc
   , tdInputSchema = schema
   }
-
--- | JSON schema for teach-graph tool.
---
--- Manually specified until teach-graph is converted to graph DSL.
-teachGraphSchema :: Value
-teachGraphSchema = object
-  [ "type" .= ("object" :: Text)
-  , "properties" .= object
-      [ "topic" .= object
-          [ "type" .= ("string" :: Text)
-          , "description" .= ("What you want to understand (e.g., 'how the Memory effect works', 'template rendering')" :: Text)
-          ]
-      , "seeds" .= object
-          [ "type" .= ("array" :: Text)
-          , "items" .= object ["type" .= ("string" :: Text)]
-          , "description" .= ("Symbol names to start exploration from (e.g., ['getMem', 'putMem'])" :: Text)
-          ]
-      , "budget" .= object
-          [ "type" .= ("integer" :: Text)
-          , "description" .= ("How many symbols to explore (default: 20)" :: Text)
-          ]
-      ]
-  , "required" .= (["topic", "seeds"] :: [Text])
-  ]

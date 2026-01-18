@@ -28,5 +28,5 @@ echo "  Teaching enabled: ${TEACHING_ENABLED:-false}"
 echo "  Output dir: ${TEACHING_OUTPUT_DIR:-./training-data}"
 echo ""
 
-# Launch zellij with the augmented layout
-zellij --layout .zellij/layouts/augmented.kdl
+# Launch zellij with the production layout
+zellij --layout .zellij/tidepool.kdl

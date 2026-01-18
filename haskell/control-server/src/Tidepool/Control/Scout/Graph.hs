@@ -86,6 +86,8 @@ import Tidepool.Graph.Types
   , Memory
   , UsesEffects
   , LLMKind(..)
+  , MCPExport
+  , MCPToolDef
   )
 import Tidepool.Graph.Goto (Goto)
 import qualified Tidepool.Graph.Types as G
@@ -124,6 +126,8 @@ import Tidepool.Control.Scout.Graph.Templates (SelectTpl)
 -- The graph uses @Memory ExploreState@ to share BFS state across nodes.
 data DocGenGraph mode = DocGenGraph
   { dgEntry :: mode :- EntryNode TeachQuery
+      :@ MCPExport
+      :@ MCPToolDef '("teach-graph", "Explore a codebase concept using intelligent symbol selection. Returns a teaching document with symbols ordered by prerequisites - learn foundational types before the code that uses them.")
     -- ^ Graph entry point: receives the teaching query
 
   , dgInit :: mode :- LogicNode

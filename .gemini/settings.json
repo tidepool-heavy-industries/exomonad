@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "popup": {
+      "command": "/Users/inannamalick/dev/popup-mcp/target/release/popup",
+      "args": []
+    }
+  }
+}

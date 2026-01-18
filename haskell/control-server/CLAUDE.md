@@ -244,55 +244,124 @@ Project-local configuration in `.tidepool/` (gitignored):
 
 | Module | Purpose |
 |--------|---------|
-| `Server.hs` | Unix socket listener, LSP session management, NDJSON framing |
+| `Server.hs` | TCP listener (port 7432), LSP session management, NDJSON framing |
 | `Protocol.hs` | ControlMessage/Response types (matches Rust protocol.rs) |
-| `Handler.hs` | Message routing (threads LSP session through handlers) |
+| `Handler.hs` | Message routing (HookEvent, McpToolCall, ToolsListRequest) |
 | `Handler/Hook.hs` | Hook event handler (currently passthrough) |
-| `Handler/MCP.hs` | MCP tool handler (scout implementation) |
-| `Scout/Types.hs` | ScoutQuery, ScoutResponse, Pointer (re-exports TrainingExample from training-generator) |
-| `Scout/Tools.hs` | Scout MCP tool implementation (orchestrates exploration) |
-| `Scout/Heuristics.hs` | Pattern-based scoring rules and expansion decisions |
-| `Scout/LSP.hs` | LSP integration helpers |
-| `Scout/EdgeTypes.hs` | Edge classification types |
-| `Scout/Templates.hs` | Jinja templates for FunctionGemma prompts |
-| `Scout/DocGen.hs` | Teaching document generation |
-| `Scout/DocGen/Types.hs` | LSPSymbol, TeachQuery, TeachState, TeachingDoc |
-| `Scout/DocGen/Gemma.hs` | ScoutGemma effect + interpreters (HTTP/mock) for symbol selection |
-| `Scout/DocGen/Teacher.hs` | FineTrainingTeacher instance for scout |
+| `Handler/MCP.hs` | MCP tool router (routes tool calls by name to handlers) |
+| `Export.hs` | Automatic MCP tool discovery via `reifyMCPTools` |
+| **Tier 1 Tools** | |
+| `LSPTools.hs` | Find callers, show fields, show constructors (graph definitions + handlers) |
+| **Tier 2 Tools** | |
+| `Scout/Graph.hs` | DocGenGraph definition (teach-graph tool, Entry → Init → Process → Select → Expand → Finalize → Exit) |
+| `Scout/Graph/Types.hs` | Node input/output types (ProcessInput, SelectInput, etc.) |
+| `Scout/Graph/Handlers.hs` | DocGenGraph handlers (init, process, expand, finalize logic) |
+| `Scout/Graph/Runner.hs` | runDocGenGraph (executes graph with teaching/production modes) |
+| `Scout/Graph/Templates.hs` | SelectTpl (Jinja template for Haiku symbol selection) |
+| `Scout/DocGen.hs` | Legacy BFS loop (pre-graph-DSL implementation, still used for non-graph mode) |
+| `Scout/DocGen/Types.hs` | TeachQuery, TeachingDoc, LSPSymbol |
+| `Scout/DocGen/Gemma.hs` | ScoutGemma effect + interpreters (HTTP via Ollama) |
+| `Scout/DocGen/Teacher.hs` | FineTrainingTeacher instance for teaching mode |
 
 ## MCP Tools
 
-### `scout` - Semantic Code Exploration
+All tools are **automatically discovered** from Graph DSL annotations via `reifyMCPTools`. Each graph with `MCPExport` on its entry node becomes an MCP tool.
 
-Explores code using LSP (hover, references, workspace symbols) and scores relevance with FunctionGemma heuristics or trained model.
+### Tier 1: Deterministic LSP Tools
+
+Pure LSP queries with heuristic filtering. No LLM calls.
+
+#### `find_callers` - Find Actual Call Sites
+
+Finds where a function is actually called, filtering out imports, type signatures, and comments.
 
 **Request Schema:**
 ```json
 {
-  "query": "What breaks if I add a new variant to LLMKind?",
-  "symbols": ["LLMKind"],
-  "depth": "medium"
+  "name": "findCallersLogic",          // required
+  "context_lines": 2,                  // optional, default 1
+  "max_results": 50                    // optional, default 50
+}
+```
+
+**Implementation:** `LSPTools.hs:156-180` (FindCallersGraph)
+
+#### `show_fields` - Show Record Fields
+
+Shows fields of a Haskell record type with their types and strictness.
+
+**Request Schema:**
+```json
+{
+  "type_name": "MyRecord"              // required
+}
+```
+
+**Implementation:** `LSPTools.hs:320-331` (ShowFieldsGraph)
+
+#### `show_constructors` - Show Sum Type Constructors
+
+Shows constructors of a Haskell sum type or GADT.
+
+**Request Schema:**
+```json
+{
+  "type_name": "MyType"                // required
+}
+```
+
+**Implementation:** `LSPTools.hs:452-463` (ShowConstructorsGraph)
+
+### Tier 2: LLM-Enhanced Tools
+
+Tools that use LLM nodes for intelligent filtering/selection.
+
+#### `teach-graph` - Teaching Document Generation
+
+Explores codebase concepts via BFS, using Haiku to select relevant type dependencies. Returns a teaching document with symbols ordered by prerequisites.
+
+**Request Schema:**
+```json
+{
+  "topic": "How the Memory effect works",     // required
+  "seeds": ["getMem", "putMem"],              // required: starting symbols
+  "budget": 20                                // optional, default 20
 }
 ```
 
 **Response Schema:**
 ```json
 {
-  "summary": "## Exploration Summary\n\nQuery: What breaks...",
-  "pointers": [
-    {
-      "location": "Types.hs:45",
-      "what": "data LLMKind = Anthropic | OpenAI | Local",
-      "risk": 4,
-      "relevance": 5,
-      "tags": ["Exhaustive", "TypeFamily"],
-      "action": "Add case for new variant"
-    }
-  ],
-  "nodesVisited": 15,
-  "trainingExamples": [...]
+  "core": [...],       // depth 0 (seed symbols)
+  "prereqs": [...],    // depth 1-2 (dependencies)
+  "support": [...]     // depth 3+ (supporting types)
 }
 ```
+
+**Implementation:** `Scout/Graph.hs:125-165` (DocGenGraph)
+
+### Tool Registration
+
+**Automatic discovery:**
+```haskell
+-- Export.hs:927-943
+exportMCPTools :: IO [ToolDefinition]
+exportMCPTools = do
+  let allTools = concat
+        [ reifyMCPTools (Proxy @FindCallersGraph)
+        , reifyMCPTools (Proxy @ShowFieldsGraph)
+        , reifyMCPTools (Proxy @ShowConstructorsGraph)
+        , reifyMCPTools (Proxy @DocGenGraph)  -- teach-graph
+        ]
+  pure $ map reifyToToolDef allTools
+```
+
+**How it works:**
+1. `MCPExport` annotation marks entry node for discovery
+2. `MCPToolDef '("tool_name", "description")` provides metadata
+3. `reifyMCPTools` extracts schema from `HasJSONSchema` instance
+4. `exportMCPTools` called on control-server startup
+5. mantle-agent queries via `ToolsListRequest`, caches tools
 
 ## Hook Handlers
 
@@ -405,16 +474,15 @@ Connection received
 ## Testing
 
 ```bash
-# Check socket exists
-ls -la .tidepool/control.sock
+# Test tool discovery
+echo '{"type":"ToolsListRequest"}' | nc localhost 7432
+# Should return 4 tools: find_callers, show_fields, show_constructors, teach-graph
 
-# Send test message via socat (hook)
-echo '{"type":"HookEvent","input":{...}}' | \
-  socat - UNIX-CONNECT:.tidepool/control.sock
+# Test teach-graph tool
+echo '{"type":"MCPToolCall","id":"1","tool_name":"teach-graph","arguments":{"topic":"how Memory effect works","seeds":["getMem","putMem"],"budget":10}}' | nc localhost 7432
 
-# Send test message via socat (MCP)
-echo '{"type":"MCPToolCall","id":"1","tool_name":"scout","arguments":{...}}' | \
-  socat - UNIX-CONNECT:.tidepool/control.sock
+# Test find_callers tool
+echo '{"type":"MCPToolCall","id":"2","tool_name":"find_callers","arguments":{"name":"runLSP"}}' | nc localhost 7432
 ```
 
 ## Environment Variables
@@ -454,9 +522,10 @@ echo '{"type":"MCPToolCall","id":"1","tool_name":"scout","arguments":{...}}' | \
 
 1. **Start control-server** in project directory (pane 2)
 2. **Start Claude Code** in same directory (pane 1)
-3. **User asks question** → Claude calls scout tool
-4. **control-server explores** with LSP + Gemma
-5. **Returns pointers** → Claude synthesizes answer
+3. **Claude calls MCP tool** (teach-graph, find_callers, etc.)
+4. **mantle-agent forwards** via TCP to control-server
+5. **control-server executes** tool logic (LSP queries, graph execution)
+6. **Returns result** → Claude uses in response
 
 ## Related Documentation
 
@@ -470,13 +539,29 @@ echo '{"type":"MCPToolCall","id":"1","tool_name":"scout","arguments":{...}}' | \
 ## Next Steps
 
 1. Wire real hook logic (currently passthrough)
-2. Add more MCP tools (beads task tracking, etc.)
+2. Add more MCP tools via Graph DSL (beads task tracking, git operations, etc.)
 3. Add metrics collection to mantle-hub
-4. Wire LLM-level teaching mode (see `tidepool-teaching` package)
-5. Generate and use training data for FunctionGemma fine-tuning
+4. Test teach-graph end-to-end with Claude inside Claude Code
+5. Generate training data for FunctionGemma fine-tuning via teaching mode
 
 ## Completed
 
-- FunctionGemma HTTP interpreter (`Scout/DocGen/Gemma.hs`)
-- Symbol selection via Ollama (`runScoutGemmaHTTP`)
-- LSP integration for hover/references/workspace symbols
+✅ **MCP Tool Infrastructure**
+- Automatic tool discovery via `MCPExport` + `reifyMCPTools`
+- 4 tools: find_callers, show_fields, show_constructors, teach-graph
+- Type-safe schema generation from `HasJSONSchema` instances
+
+✅ **Tier 1 Tools (Logic-only)**
+- FindCallersGraph, ShowFieldsGraph, ShowConstructorsGraph
+- LSP integration (workspace/symbol, hover, references)
+- Heuristic filtering (imports, type sigs, comments)
+
+✅ **Tier 2 Tools (LLM-enhanced)**
+- DocGenGraph with MCPExport annotation
+- BFS exploration with Haiku symbol selection
+- Teaching document generation with depth-ordered symbols
+
+✅ **Infrastructure**
+- FunctionGemma HTTP interpreter via Ollama (`Scout/DocGen/Gemma.hs`)
+- Long-lived LSP session management
+- TCP protocol (NDJSON) between mantle-agent ↔ control-server

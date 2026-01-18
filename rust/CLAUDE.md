@@ -19,11 +19,17 @@ rust/CLAUDE.md  ← YOU ARE HERE (router)
 │   • Currently: session/node tracking for headless mode
 │   • Planned: metrics collection, Grafana export
 │
-└── mantle-shared/CLAUDE.md  ← Shared types and utilities
-    • protocol.rs: HookInput, HookOutput, ControlMessage, ControlResponse
-    • socket.rs: TCP client (ControlSocket), NDJSON protocol
-    • commands/hook.rs: handle_hook() implementation
-    • Fail-open behavior, builder helpers
+├── mantle-shared/CLAUDE.md  ← Shared types and utilities
+│   • protocol.rs: HookInput, HookOutput, ControlMessage, ControlResponse
+│   • socket.rs: TCP client (ControlSocket), NDJSON protocol
+│   • commands/hook.rs: handle_hook() implementation
+│   • Fail-open behavior, builder helpers
+│
+└── tui-sidebar/CLAUDE.md  ← TUI sidebar (IMPLEMENTED)
+    • TCP server (port 7433) for rendering interactive UIs
+    • Receives UISpec from Haskell tui-interpreter
+    • Renders with ratatui (Text, Button, Input, Progress)
+    • Sends Interaction events (ButtonClicked, InputSubmitted)
 ```
 
 ## Architecture Overview
@@ -54,6 +60,7 @@ Human TTY ──▶ Claude Code (in nix shell)
 | [mantle-agent](mantle-agent/CLAUDE.md) | Binary | Hook handler + MCP server |
 | [mantle-hub](mantle-hub/CLAUDE.md) | Binary | Metrics/telemetry hub (WIP) |
 | [mantle-shared](mantle-shared/CLAUDE.md) | Library | Shared types, protocols, TCP socket client |
+| [tui-sidebar](tui-sidebar/CLAUDE.md) | Binary + Lib | TUI sidebar: TCP server (7433) for interactive UIs |
 
 ## Quick Reference
 
