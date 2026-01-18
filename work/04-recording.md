@@ -1,7 +1,7 @@
 # Task 04: Recording Infrastructure
 
-**Status:** Pending
-**Assignee:** TBD
+**Status:** Complete (merged from feat/hti01)
+**Assignee:** Claude Sonnet 4.5
 **Dependencies:** 01-foundation
 **Blocks:** 05-execute-wrapper
 

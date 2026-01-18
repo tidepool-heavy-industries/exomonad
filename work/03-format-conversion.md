@@ -1,7 +1,7 @@
 # Task 03: Format Conversion
 
-**Status:** Pending
-**Assignee:** TBD
+**Status:** Complete (merged from feat/hti02)
+**Assignee:** Claude Sonnet 4.5
 **Dependencies:** 01-foundation
 **Blocks:** 05-execute-wrapper
 
