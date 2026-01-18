@@ -1,26 +1,27 @@
 -- | Shared types for control server.
 module Tidepool.Control.Types
   ( ServerConfig(..)
-  , TeachingConfig(..)
+  , TeachingSettings(..)
   , defaultConfig
   ) where
 
 import Data.Text (Text)
+import Tidepool.Teaching.Types (AnthropicApiKey)
 
 -- | Server configuration.
 data ServerConfig = ServerConfig
   { projectDir :: FilePath
     -- ^ Project root directory (where .tidepool/ lives)
-  , teachingConfig :: Maybe TeachingConfig
+  , teachingSettings :: Maybe TeachingSettings
     -- ^ Optional teaching mode configuration
   }
   deriving stock (Show, Eq)
 
--- | Teaching mode configuration.
-data TeachingConfig = TeachingConfig
-  { teachOutputDir :: FilePath
+-- | Teaching mode settings (CLI args only).
+data TeachingSettings = TeachingSettings
+  { tsOutputDir :: FilePath
     -- ^ Output directory for training data
-  , teachAnthropicKey :: Text
+  , tsAnthropicKey :: AnthropicApiKey
     -- ^ Anthropic API key
   }
   deriving stock (Show, Eq)
@@ -29,5 +30,5 @@ data TeachingConfig = TeachingConfig
 defaultConfig :: ServerConfig
 defaultConfig = ServerConfig
   { projectDir = "."
-  , teachingConfig = Nothing
+  , teachingSettings = Nothing
   }

@@ -13,7 +13,8 @@ import Data.Aeson (eitherDecode, encode)
 import qualified Data.ByteString.Lazy as BL
 
 import Tidepool.Control.Server (runServer)
-import Tidepool.Control.Types (ServerConfig(..), TeachingConfig(..))
+import Tidepool.Control.Types (ServerConfig(..), TeachingSettings(..))
+import Tidepool.Teaching.Types (AnthropicApiKey(..))
 import Tidepool.Control.Export (exportTrainingExamples, exportGroupedTrainingExamples, exportWithExpansion, discoverSymbols, exportCodeSamples)
 import Tidepool.LSP.Interpreter (withLSPSession)
 import Tidepool.Training.Format (formatTrainingFromSkeleton)
@@ -43,7 +44,7 @@ runServerMode = do
     Just dir -> pure dir
     Nothing -> getCurrentDirectory
 
-  let config = ServerConfig { projectDir = projectDir, teachingConfig = Nothing }
+  let config = ServerConfig { projectDir = projectDir, teachingSettings = Nothing }
 
   runServer config
 
@@ -55,16 +56,16 @@ runTeachingMode outDir apiKey = do
     Just dir -> pure dir
     Nothing -> getCurrentDirectory
 
-  let teachCfg = TeachingConfig
-        { teachOutputDir = outDir
-        , teachAnthropicKey = apiKey
+  let teachSettings = TeachingSettings
+        { tsOutputDir = outDir
+        , tsAnthropicKey = AnthropicApiKey apiKey
         }
   let config = ServerConfig
         { projectDir = projectDir
-        , teachingConfig = Just teachCfg
+        , teachingSettings = Just teachSettings
         }
 
-  hPutStrLn stderr $ "Starting control server in teaching mode"
+  hPutStrLn stderr "Starting control server in teaching mode"
   hPutStrLn stderr $ "  Project: " <> projectDir
   hPutStrLn stderr $ "  Output: " <> outDir
 

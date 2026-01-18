@@ -25,9 +25,9 @@ import Data.Time (getCurrentTime)
 import Tidepool.Graph.Tool (ToolDef(..))
 import Tidepool.Tool.Convert (toAnthropicTool, ToAnthropicTool)
 import Tidepool.Teaching.Types
-  ( TeachingConfig(..)
-  , RecordingHandles
+  ( RecordingHandles
   , TrainingExample(..)
+  , AnthropicApiKey(..)
   )
 import Tidepool.Teaching.Teacher (FineTrainingTeacher(..), baseSystemPrompt)
 import Tidepool.Teaching.Anthropic (extractTeachingTurn, AnthropicResponse)
@@ -55,16 +55,14 @@ data TeachingError
 -- | Execute tool with optional teaching mode
 --
 -- This is the main integration point for teaching infrastructure.
--- When teaching is enabled, it:
+-- It:
 -- 1. Builds user prompt from tool input
 -- 2. Gets teacher guidance for effect
--- 3. Calls Haiku with tools
+-- 3. Calls Haiku with tools (with extended thinking)
 -- 4. Extracts teaching turn (reasoning + tool use)
 -- 5. Converts to FunctionGemma format
 -- 6. Records both formats
 -- 7. Parses tool output and continues execution
---
--- When teaching is disabled, it just calls toolExecute directly.
 executeWithTeaching
   :: forall tool effect es.
      ( ToolDef tool
@@ -74,17 +72,12 @@ executeWithTeaching
      , FromJSON (ToolOutput tool)
      , LastMember IO (ToolEffects tool)
      )
-  => TeachingConfig
+  => AnthropicApiKey
   -> RecordingHandles
   -> tool
   -> ToolInput tool
   -> Eff (ToolEffects tool) (ToolOutput tool)
-executeWithTeaching config handles tool input
-  -- Production mode: skip teaching, execute normally
-  | not (tcEnabled config) = toolExecute tool input
-
-  -- Teaching mode: record Haiku execution
-  | otherwise = do
+executeWithTeaching apiKey handles tool input = do
       -- 1. Build user prompt from input
       let userPrompt = buildToolPrompt tool input
 
@@ -104,8 +97,8 @@ executeWithTeaching config handles tool input
       anthropicResp <- sendM $ do
         let llmConfig = LLMConfig
               { lcAnthropicSecrets = Just $ AnthropicSecrets
-                  { asApiKey = ApiKey (tcAnthropicKey config)
-                  , asBaseUrl = BaseUrl "https://api.anthropic.com"  -- Default Anthropic API URL
+                  { asApiKey = ApiKey (unAnthropicApiKey apiKey)
+                  , asBaseUrl = BaseUrl "https://api.anthropic.com"
                   }
               , lcOpenAISecrets = Nothing
               }
@@ -152,14 +145,12 @@ executeWithTeachingSafe
      , FromJSON (ToolOutput tool)
      , LastMember IO (ToolEffects tool)
      )
-  => TeachingConfig
+  => AnthropicApiKey
   -> RecordingHandles
   -> tool
   -> ToolInput tool
   -> Eff (ToolEffects tool) (Either TeachingError (ToolOutput tool))
-executeWithTeachingSafe config handles tool input
-  | not (tcEnabled config) = Right <$> toolExecute tool input
-  | otherwise = do
+executeWithTeachingSafe apiKey handles tool input = do
       let userPrompt = buildToolPrompt tool input
       let guidance = teacherGuidance @effect
       let systemPrompt = baseSystemPrompt <> "\n\n" <> guidance
@@ -175,8 +166,8 @@ executeWithTeachingSafe config handles tool input
       anthropicResp <- sendM $ do
         let llmConfig = LLMConfig
               { lcAnthropicSecrets = Just $ AnthropicSecrets
-                  { asApiKey = ApiKey (tcAnthropicKey config)
-                  , asBaseUrl = BaseUrl "https://api.anthropic.com"  -- Default Anthropic API URL
+                  { asApiKey = ApiKey (unAnthropicApiKey apiKey)
+                  , asBaseUrl = BaseUrl "https://api.anthropic.com"
                   }
               , lcOpenAISecrets = Nothing
               }

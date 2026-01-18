@@ -5,14 +5,14 @@
 
 module Tidepool.Teaching.Types
   ( TrainingExample(..)
-  , TeachingConfig(..)
   , RecordingHandles(..)
+  , AnthropicApiKey(..)
   ) where
 
 import Data.Aeson (FromJSON, ToJSON, Value)
+import Data.String (IsString)
 import Data.Text (Text)
 import Data.Time (UTCTime)
-import Data.UUID (UUID)
 import GHC.Generics (Generic)
 import System.IO (Handle)
 
@@ -37,20 +37,9 @@ data TrainingExample = TrainingExample
   } deriving stock (Show, Eq, Generic)
     deriving anyclass (FromJSON, ToJSON)
 
--- | Global teaching configuration
---
--- Threading this through the system enables all-or-nothing teaching mode:
--- when tcEnabled=True, all ToolDef executions go through Haiku and are recorded.
-data TeachingConfig = TeachingConfig
-  { tcEnabled :: Bool
-    -- ^ Master switch: True = teaching mode (Haiku), False = production (FunctionGemma)
-  , tcOutputDir :: FilePath
-    -- ^ Base directory for recording sessions (e.g., ".tidepool/training")
-  , tcSessionId :: UUID
-    -- ^ Unique identifier for this teaching session
-  , tcAnthropicKey :: Text
-    -- ^ Anthropic API key for Haiku calls
-  } deriving (Show, Eq)
+-- | Anthropic API key (type-safe wrapper)
+newtype AnthropicApiKey = AnthropicApiKey { unAnthropicApiKey :: Text }
+  deriving newtype (Show, Eq, IsString)
 
 -- | File handles for dual-output recording
 --

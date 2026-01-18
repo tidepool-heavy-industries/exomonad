@@ -37,6 +37,7 @@ library
         Tidepool.Control.Scout.Teach.Types
         Tidepool.Control.Scout.Teach.Gemma
         Tidepool.Control.Scout.Teach.Teacher
+        Tidepool.Control.Scout.Teach.Teaching
         Tidepool.Control.Scout.Tools
     build-depends:
         base >= 4.17 && < 5,
@@ -82,6 +83,7 @@ executable tidepool-control-server
         text >= 2.0 && < 3,
         tidepool-lsp-interpreter,
         tidepool-training-generator,
+        tidepool-teaching,
         aeson >= 2.1 && < 3,
         bytestring >= 0.11 && < 1
     hs-source-dirs:   app

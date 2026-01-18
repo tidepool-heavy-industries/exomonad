@@ -5,7 +5,6 @@ module Tidepool.Teaching.Record
   ( initRecording
   , recordExample
   , closeRecording
-  , writeMetadata
   ) where
 
 import Data.Aeson (encode, object, (.=))
@@ -71,21 +70,3 @@ closeRecording :: RecordingHandles -> IO ()
 closeRecording RecordingHandles{..} = do
   hClose rhRawHandle
   hClose rhGemmaHandle
-
--- | Write session metadata to metadata.json.
---
--- Metadata includes:
--- - Session ID
--- - Timestamp
--- - Output directory
--- - Version (for format compatibility tracking)
-writeMetadata :: FilePath -> TeachingConfig -> IO ()
-writeMetadata sessionDir TeachingConfig{..} = do
-  now <- getCurrentTime
-  let meta = object
-        [ "sessionId" .= UUID.toString tcSessionId
-        , "timestamp" .= now
-        , "outputDir" .= tcOutputDir
-        , "version" .= ("0.1.0" :: Text)
-        ]
-  BL.writeFile (sessionDir </> "metadata.json") (encode meta)

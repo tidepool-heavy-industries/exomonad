@@ -34,6 +34,7 @@ library
     DeriveGeneric
     DeriveAnyClass
     DerivingStrategies
+    GeneralizedNewtypeDeriving
     OverloadedStrings
     RecordWildCards
   ghc-options:

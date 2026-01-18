@@ -67,7 +67,7 @@ newtype SelectSymbolsOutput = SelectSymbolsOutput
 instance ToolDef SelectSymbolsTool where
   type ToolInput SelectSymbolsTool = SelectSymbolsInput
   type ToolOutput SelectSymbolsTool = SelectSymbolsOutput
-  type ToolEffects SelectSymbolsTool = '[TeachGemma]
+  type ToolEffects SelectSymbolsTool = '[IO]
 
   toolName _ = "select_symbols"
 
@@ -75,19 +75,10 @@ instance ToolDef SelectSymbolsTool where
                       \Returns a subset of candidate symbols that are semantically relevant \
                       \to the specified topic, based on the context symbol's signature."
 
-  toolExecute _ input = do
-    -- Reconstruct LSPSymbol from flattened input
-    let symbol = LSPSymbol
-          { lsName = symbolName input
-          , lsKind = parseSymbolKind (symbolKind input)  -- Parse from text
-          , lsLocation = parseLocation (symbolLocation input)  -- Parse from text
-          , lsSignature = symbolSignature input
-          , lsDocComment = symbolDocComment input
-          }
-
-    -- Bridge to effect
-    selected <- selectRelevantSymbols (topic input) symbol (candidates input)
-    pure SelectSymbolsOutput { selected }
+  toolExecute _ _ =
+    -- This tool is executed via executeWithTeaching (Haiku API), not via toolExecute.
+    -- The ToolDef instance exists only to provide schema/metadata for Haiku.
+    error "SelectSymbolsTool.toolExecute should never be called - use runTeachGemmaWithTeaching or runTeachGemmaHTTP"
 
 -- Auto-derive Anthropic and Cloudflare tool conversions
 instance ToAnthropicTool SelectSymbolsTool
