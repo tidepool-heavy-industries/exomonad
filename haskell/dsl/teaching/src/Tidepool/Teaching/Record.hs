@@ -4,10 +4,12 @@
 module Tidepool.Teaching.Record
   ( initRecording
   , recordExample
+  , recordTurn
   , closeRecording
+  , writeMetadata
   ) where
 
-import Data.Aeson (encode, object, (.=))
+import Data.Aeson (encode, object, (.=), toJSON)
 import qualified Data.ByteString.Lazy as BL
 import Data.Text (Text)
 import qualified Data.Text.IO as TIO
@@ -70,3 +72,35 @@ closeRecording :: RecordingHandles -> IO ()
 closeRecording RecordingHandles{..} = do
   hClose rhRawHandle
   hClose rhGemmaHandle
+
+
+-- | Record a teaching turn (LLM-level capture).
+--
+-- This is the new LLM-level recording that captures full turns with
+-- node context. Writes to anthropic.jsonl with node metadata.
+recordTurn :: RecordingHandles -> TeachingTurn -> IO ()
+recordTurn RecordingHandles{..} turn = do
+  -- Write turn as JSONL (includes node metadata)
+  BL.hPut rhRawHandle (encode turn)
+  hPutChar rhRawHandle '\n'
+  hFlush rhRawHandle
+
+
+-- | Write session metadata to metadata.json.
+--
+-- Should be called after session initialization to record:
+-- - Session ID
+-- - Configuration
+-- - Start timestamp
+-- - Version info
+writeMetadata :: FilePath -> TeachingConfig -> IO ()
+writeMetadata sessionDir TeachingConfig{..} = do
+  now <- getCurrentTime
+  let metadata = object
+        [ "sessionId" .= UUID.toString tcSessionId
+        , "outputDir" .= tcOutputDir
+        , "enabled" .= tcEnabled
+        , "startTime" .= now
+        , "version" .= ("0.1.0" :: Text)
+        ]
+  BL.writeFile (sessionDir </> "metadata.json") (encode metadata)

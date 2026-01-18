@@ -26,7 +26,7 @@ import System.IO (hFlush, stdout)
 
 import Tidepool.Control.Handler (handleMessage)
 import Tidepool.Control.Protocol
-import Tidepool.Control.Types (ServerConfig(..), TeachingSettings(..))
+import Tidepool.Control.Types (ServerConfig(..))
 import Tidepool.LSP.Interpreter (LSPSession, withLSPSession)
 
 -- | Run the control server. Blocks forever.
@@ -65,7 +65,7 @@ runServer config = do
 
       forever $ do
         (conn, _peer) <- accept sock
-        void $ forkIO $ handleConnection lspSession (teachingSettings config) conn `finally` close conn
+        void $ forkIO $ handleConnection lspSession conn `finally` close conn
 
 -- | Setup Unix domain socket.
 setupSocket :: FilePath -> IO Socket
@@ -84,8 +84,8 @@ closeSocket socketPath sock = do
   when exists $ removeFile socketPath
 
 -- | Handle a single connection (one NDJSON request-response).
-handleConnection :: LSPSession -> Maybe TeachingSettings -> Socket -> IO ()
-handleConnection lspSession maybeTeachSettings conn = do
+handleConnection :: LSPSession -> Socket -> IO ()
+handleConnection lspSession conn = do
   TIO.putStrLn "Connection received"
   hFlush stdout
 
@@ -107,7 +107,7 @@ handleConnection lspSession maybeTeachSettings conn = do
 
       Right msg -> do
         logMessage msg
-        response <- handleMessage lspSession maybeTeachSettings msg
+        response <- handleMessage lspSession msg
         logResponse response
         sendResponse conn response
     )

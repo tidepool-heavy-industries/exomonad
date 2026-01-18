@@ -11,15 +11,12 @@ import Data.Aeson (Value, fromJSON, toJSON, Result(..))
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
-import qualified Data.UUID.V4 as UUID
 import System.Environment (lookupEnv)
 import System.IO (hFlush, stdout)
 
 import Tidepool.Control.Protocol
-import Tidepool.Control.Types (TeachingSettings(..))
 import Tidepool.Control.Scout.Teach (scout, defaultTeachConfig, TeachQuery(..), TeachingDoc(..))
 import Tidepool.Control.Scout.Teach.Gemma (runScoutGemmaHTTP)
-import Tidepool.Control.Scout.Teach.Teaching (runScoutGemmaWithTeaching)
 import Tidepool.Effect.Types (runLog, LogLevel(..))
 import Tidepool.LSP.Interpreter (LSPSession, runLSP)
 
@@ -27,13 +24,13 @@ import Tidepool.LSP.Interpreter (LSPSession, runLSP)
 --
 -- Currently supports:
 --   - "teach": Generate teaching documents in prerequisite order
-handleMcpTool :: LSPSession -> Maybe TeachingSettings -> Text -> Text -> Value -> IO ControlResponse
-handleMcpTool lspSession maybeTeachSettings reqId toolName args = do
+handleMcpTool :: LSPSession -> Text -> Text -> Value -> IO ControlResponse
+handleMcpTool lspSession reqId toolName args = do
   TIO.putStrLn $ "  tool=" <> toolName
   hFlush stdout
 
   case toolName of
-    "teach" -> handleTeachTool lspSession maybeTeachSettings reqId args
+    "teach" -> handleTeachTool lspSession reqId args
     _ -> do
       TIO.putStrLn $ "  (unknown tool)"
       hFlush stdout
@@ -44,11 +41,9 @@ handleMcpTool lspSession maybeTeachSettings reqId toolName args = do
 -- | Handle the teach tool.
 --
 -- Generates teaching documents from LSP + Gemma that explain a topic
--- in prerequisite order.
---
--- When teaching mode is enabled, uses Haiku and records training data.
-handleTeachTool :: LSPSession -> Maybe TeachingSettings -> Text -> Value -> IO ControlResponse
-handleTeachTool lspSession maybeTeachSettings reqId args = do
+-- in prerequisite order. Uses Ollama/FunctionGemma for scoring.
+handleTeachTool :: LSPSession -> Text -> Value -> IO ControlResponse
+handleTeachTool lspSession reqId args = do
   case fromJSON args of
     Error err -> do
       TIO.putStrLn $ "  parse error: " <> T.pack err
@@ -73,28 +68,11 @@ handleTeachTool lspSession maybeTeachSettings reqId args = do
           TIO.putStrLn $ "  gemma=" <> T.pack ep
           hFlush stdout
 
-          -- Choose interpreter (SINGLE decision point)
-          resultOrErr <- case maybeTeachSettings of
-            Nothing -> do
-              -- Production mode: use Ollama/FunctionGemma
-              TIO.putStrLn "  mode=production (Ollama)"
-              hFlush stdout
-              try $ runM $ runLog Debug $
-                runScoutGemmaHTTP (T.pack ep) $
-                runLSP lspSession $
-                scout defaultTeachConfig query
-
-            Just settings -> do
-              -- Teaching mode: use Haiku and record training data
-              TIO.putStrLn "  mode=teaching (Haiku + recording)"
-              TIO.putStrLn $ "  output=" <> T.pack (tsOutputDir settings)
-              hFlush stdout
-              try $ runM $ runLog Debug $
-                runScoutGemmaWithTeaching
-                  (tsOutputDir settings)
-                  (tsAnthropicKey settings) $
-                runLSP lspSession $
-                scout defaultTeachConfig query
+          -- Production mode: use Ollama/FunctionGemma
+          resultOrErr <- try $ runM $ runLog Debug $
+            runScoutGemmaHTTP (T.pack ep) $
+            runLSP lspSession $
+            scout defaultTeachConfig query
 
           case resultOrErr of
             Left (e :: SomeException) -> do

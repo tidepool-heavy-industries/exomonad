@@ -44,7 +44,8 @@ library
         tidepool-habitica-interpreter,
         tidepool-observability-interpreter,
         tidepool-llm-interpreter,
-        tidepool-devlog-interpreter
+        tidepool-devlog-interpreter,
+        tidepool-teaching
     hs-source-dirs:   src
     default-language: GHC2024
     default-extensions:
