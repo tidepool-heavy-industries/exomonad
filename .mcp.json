@@ -1,10 +1,12 @@
 {
   "mcpServers": {
-    "semantic-scout": {
-      "type": "stdio",
-      "command": "/private/tmp/tpw1/dist-newstyle/build/aarch64-osx/ghc-9.12.2/tidepool-semantic-scout-0.1.0.0/x/semantic-scout/noopt/build/semantic-scout/semantic-scout",
-      "args": ["--mcp"],
-      "env": {}
+    "tidepool": {
+      "command": "/home/inanna/tidepool-heavy-industries/haiku-training-data-synthesis-woktree/rust/target/release/mantle-agent",
+      "args": ["mcp"],
+      "env": {
+        "MANTLE_CONTROL_HOST": "127.0.0.1",
+        "MANTLE_CONTROL_PORT": "7432"
+      }
     }
   }
 }

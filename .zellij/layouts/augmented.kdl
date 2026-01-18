@@ -1,0 +1,20 @@
+// Augmented Claude Code session layout
+// Left pane: control-server (Haskell)
+// Right pane: Claude Code
+
+layout {
+    pane split_direction="vertical" {
+        pane {
+            name "control-server"
+            command "bash"
+            args "-c" "source .env 2>/dev/null; echo '=== Starting control-server ==='; cabal run tidepool-control-server; read -p 'Press enter to close...'"
+            focus false
+        }
+        pane {
+            name "claude-code"
+            command "bash"
+            args "-c" "source .env 2>/dev/null; sleep 2; echo '=== Starting Claude Code ==='; claude"
+            focus true
+        }
+    }
+}

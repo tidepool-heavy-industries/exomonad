@@ -8,3 +8,4 @@ dist-newstyle/
 
 .mantle/*
 .tidepool/
+training-data/
