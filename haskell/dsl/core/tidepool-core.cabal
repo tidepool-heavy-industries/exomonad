@@ -25,6 +25,7 @@ library
         Tidepool.Effect.Metadata
         Tidepool.Effect.NodeMeta
         Tidepool.Effect.Types
+        Tidepool.Effect.TUI
         Tidepool.Graph
         Tidepool.Graph.Types
         Tidepool.Graph.Generic
