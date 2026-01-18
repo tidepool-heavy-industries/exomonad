@@ -1,7 +1,7 @@
 # Task 02: Anthropic Messages API Client
 
-**Status:** Pending
-**Assignee:** TBD
+**Status:** Complete (re-export wrapper)
+**Assignee:** Claude Sonnet 4.5
 **Dependencies:** 01-foundation
 **Blocks:** 05-execute-wrapper
 
