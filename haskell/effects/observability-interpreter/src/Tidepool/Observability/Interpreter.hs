@@ -398,7 +398,7 @@ interposeWithLLMTracing
   => Eff es a
   -> Eff es a
 interposeWithLLMTracing = interpose $ \case
-  op@(RunTurnOp systemPrompt userContent schema tools) -> do
+  op@(RunTurnOp _meta systemPrompt userContent schema tools) -> do
     -- Start span before LLM call
     _ <- startSpan "llm:turn" SpanClient
       [ AttrText "llm.system_prompt_length" (T.pack $ show $ T.length systemPrompt)

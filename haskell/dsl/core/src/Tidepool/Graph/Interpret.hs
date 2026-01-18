@@ -71,6 +71,7 @@ import Text.Ginger.TH (TypedTemplate, runTypedTemplate)
 import Text.Parsec.Pos (SourcePos)
 
 import Tidepool.Effect (LLM)
+import Tidepool.Effect.NodeMeta (NodeMeta, NodeMetadata(..), withNodeMeta, GraphMeta, GraphMetadata(..), getGraphMeta, withGraphMeta)
 import Tidepool.Effect.Session (Session, SessionOutput(..), SessionId(..), SessionOperation(..), startSession, continueSession, forkSession, ToolCall(..))
 import Tidepool.Effect.Types (TurnOutcome(..), TurnParseResult(..), TurnResult(..), runTurn)
 import Tidepool.Graph.Edges (GetInput, GetSpawnTargets, GetBarrierTarget, GetAwaits)
@@ -259,6 +260,7 @@ runGraphWith entryHandler graph input = do
 executeLLMHandler
   :: forall needs schema targets es tpl.
      ( Member LLM es
+     , Member NodeMeta es
      , StructuredOutput schema
      , ValidStructuredOutput schema
      , GingerContext tpl
@@ -526,6 +528,7 @@ instance CallHandler (payload -> Eff es (GotoChoice targets)) payload es targets
 -- | LLM node handler: execute via executeLLMHandler.
 instance
   ( Member LLM es
+  , Member NodeMeta es
   , StructuredOutput schema
   , ValidStructuredOutput schema
   , GingerContext tpl
@@ -878,15 +881,30 @@ class DispatchNamedNode graph name payload es exitType (isFork :: Bool) where
     -> Eff es exitType
 
 -- | Regular node dispatch: call handler and recurse on its targets.
+--
+-- Wraps handler invocation with 'withNodeMeta' to provide node context for
+-- teaching/observability. The node name is extracted from the type-level
+-- Symbol, and graph name is read from the 'GraphMeta' effect (set by 'runGraph').
 instance
   ( KnownSymbol name
+  , Member NodeMeta es
+  , Member GraphMeta es
   , HasField name (graph (AsHandler es)) handler
   , CallHandler handler payload es handlerTargets
   , DispatchGoto graph handlerTargets es exitType
   ) => DispatchNamedNode graph name payload es exitType 'False where
   dispatchNamedNode graph payload = do
+    -- Get graph name from GraphMeta effect
+    GraphMetadata graphName <- getGraphMeta
+    -- Build node metadata from type-level name and graph context
+    let nodeName = T.pack $ symbolVal (Proxy @name)
+        meta = NodeMetadata
+          { nmNodeName = nodeName
+          , nmGraphName = graphName
+          }
     let handler = getField @name graph
-    nextChoice <- callHandler handler payload
+    -- Wrap handler call with NodeMeta context (interpose, not interpret)
+    nextChoice <- withNodeMeta meta (callHandler handler payload)
     dispatchGoto graph nextChoice
 
 -- | ForkNode dispatch: spawn workers, collect results, route to barrier.
@@ -897,8 +915,13 @@ instance
 -- 3. Look up barrier handler (from Barrier annotation)
 -- 4. Call barrier handler with collected results
 -- 5. Continue dispatch from barrier's GotoChoice
+--
+-- Both fork and barrier handlers are wrapped with 'withNodeMeta' to provide
+-- node context for teaching/observability.
 instance
   ( KnownSymbol name
+  , Member NodeMeta es
+  , Member GraphMeta es
   , Generic (graph AsGraph)
   , HasField name (graph (AsHandler es)) (payload -> Eff es (SpawnPayloads spawnTargets))
   , GetSpawnTargets (GetNodeDef name graph) ~ spawnTargets
@@ -911,11 +934,27 @@ instance
   , DispatchGoto graph barrierTargets es exitType
   ) => DispatchNamedNode graph name payload es exitType 'True where
   dispatchNamedNode graph payload = do
+    -- Get graph name from GraphMeta effect
+    GraphMetadata graphName <- getGraphMeta
+    -- Build metadata for fork node
+    let forkNodeName = T.pack $ symbolVal (Proxy @name)
+        forkMeta = NodeMetadata
+          { nmNodeName = forkNodeName
+          , nmGraphName = graphName
+          }
     let forkHandler = getField @name graph
-    spawnPayloads <- forkHandler payload
+    -- Wrap fork handler with NodeMeta context (interpose, not interpret)
+    spawnPayloads <- withNodeMeta forkMeta (forkHandler payload)
     results <- spawnWorkers @graph @spawnTargets @resultTypes graph spawnPayloads
+    -- Build metadata for barrier node
+    let barrierNodeName = T.pack $ symbolVal (Proxy @barrierName)
+        barrierMeta = NodeMetadata
+          { nmNodeName = barrierNodeName
+          , nmGraphName = graphName
+          }
     let barrierHandler = getField @barrierName graph
-    barrierChoice <- callHandler barrierHandler results
+    -- Wrap barrier handler with NodeMeta context (interpose, not interpret)
+    barrierChoice <- withNodeMeta barrierMeta (callHandler barrierHandler results)
     dispatchGoto graph barrierChoice
 
 

@@ -208,7 +208,9 @@ runLLMCore
   -> Eff (LLM ': effs) a
   -> Eff effs a
 runLLMCore hooks config mChatOps dispatcher = interpret $ \case
-  RunTurnOp systemPrompt userContent schema tools -> do
+  RunTurnOp _meta systemPrompt userContent schema tools -> do
+    -- _meta: NodeMetadata is ignored in production interpreter
+    -- (used by teaching interpreter for training data recording)
     sendM hooks.onTurnStart
 
     priorHistory <- case mChatOps of
@@ -405,7 +407,8 @@ runLLMCore hooks config mChatOps dispatcher = interpret $ \case
 -- | Run the LLM effect by calling the Anthropic API
 runLLM :: (LastMember IO effs, Member ChatHistory effs, Member Log effs) => LLMConfig -> Eff (LLM ': effs) a -> Eff effs a
 runLLM config = interpret $ \case
-  RunTurnOp systemPrompt userContent schema tools -> do
+  RunTurnOp _meta systemPrompt userContent schema tools -> do
+    -- _meta: NodeMetadata is ignored in production interpreter
     priorHistory <- getHistory
 
     let userText = extractText userContent
@@ -546,6 +549,7 @@ runChatHistoryWithDB conn gameId mCursor action = do
 runChatHistoryWithCompression
   :: forall effs a.
      ( Member LLM effs  -- LLM effect for compression (caller provides interpreter)
+     , Member NodeMeta effs
      , Member RequestInput effs
      , Member Random effs
      , Member Log effs
@@ -582,6 +586,7 @@ runChatHistoryWithCompression config action = do
 compressHistory
   :: forall effs.
      ( Member LLM effs
+     , Member NodeMeta effs
      , Member RequestInput effs
      , Member Random effs
      , Member Log effs
@@ -619,6 +624,7 @@ compressHistory config history = do
 runCompressionLLM
   :: forall effs.
      ( Member LLM effs
+     , Member NodeMeta effs
      , Member Log effs
      , NotMember ChatHistory effs
      )

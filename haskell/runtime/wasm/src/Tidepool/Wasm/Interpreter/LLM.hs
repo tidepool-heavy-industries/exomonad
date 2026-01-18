@@ -1,4 +1,5 @@
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE TypeApplications #-}
 
 -- | LLM effect interpreter for WASM.
@@ -41,6 +42,7 @@ import Data.Text (Text)
 
 import Tidepool.Effect.Types
   ( LLM(..)
+  , NodeMetadata(..)
   , TurnOutcome(..)
   , TurnResult(..)
   )
@@ -87,13 +89,13 @@ runLLMAsYield = interpret handleLLM
   where
     handleLLM :: Member (Yield SerializableEffect EffectResult) effs
               => LLM x -> Eff effs x
-    handleLLM (RunTurnOp systemPrompt userContent outputSchema toolDefs) = do
+    handleLLM (RunTurnOp meta systemPrompt userContent outputSchema toolDefs) = do
       -- Convert native ContentBlocks to wire messages
       let wireMessages = contentBlocksToWireMessages systemPrompt userContent
 
-      -- Build the effect to yield
+      -- Build the effect to yield, using node name from metadata
       let effect = EffLlmCall
-            { effLlmNode = defaultNodeName
+            { effLlmNode = meta.nmNodeName
             , effLlmMessages = wireMessages
             , effLlmSchema = Just outputSchema
             , effLlmTools = toolDefs

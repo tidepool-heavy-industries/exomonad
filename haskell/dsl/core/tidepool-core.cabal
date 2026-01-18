@@ -23,6 +23,7 @@ library
         Tidepool.Effect.Subgraph
         Tidepool.Effect.DevLog
         Tidepool.Effect.Metadata
+        Tidepool.Effect.NodeMeta
         Tidepool.Effect.Types
         Tidepool.Graph
         Tidepool.Graph.Types

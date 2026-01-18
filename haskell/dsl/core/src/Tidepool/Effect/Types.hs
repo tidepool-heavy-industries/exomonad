@@ -19,6 +19,13 @@ module Tidepool.Effect.Types
   , LogLevel(..)
   , QuestionUI(..)
 
+    -- * Node Metadata Effect (re-exports from Tidepool.Effect.NodeMeta)
+  , NodeMeta(..)
+  , NodeMetadata(..)
+  , getNodeMeta
+  , runNodeMeta
+  , defaultNodeMeta
+
     -- * Effect Operations
   , get
   , gets
@@ -128,6 +135,9 @@ import GHC.Generics (Generic)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef, modifyIORef)
 import Data.Kind (Type)
 
+-- Node metadata for teaching infrastructure
+import Tidepool.Effect.NodeMeta (NodeMeta(..), NodeMetadata(..), getNodeMeta, runNodeMeta, defaultNodeMeta)
+
 -- Re-exports from Anthropic.Types (pure types)
 -- Note: We import ToolUse but not ToolResult from Anthropic.Types
 -- because Tidepool.Effect.Types defines its own ToolResult for tool dispatchers.
@@ -209,7 +219,8 @@ runTime = interpret $ \case
 -- | The LLM effect runs a complete turn with template and tools
 data LLM r where
   RunTurnOp
-    :: Text                          -- System prompt
+    :: NodeMetadata                  -- Node/graph context for teaching
+    -> Text                          -- System prompt
     -> [ContentBlock]                -- User content
     -> Value                         -- Output schema
     -> [Value]                       -- Tool definitions
@@ -382,7 +393,7 @@ withImages text images = TextBlock text : map ImageBlock images
 
 runTurn
   :: forall output effs.
-     (Member LLM effs, StructuredOutput output, ValidStructuredOutput output)
+     (Member LLM effs, Member NodeMeta effs, StructuredOutput output, ValidStructuredOutput output)
   => Text -> Text -> Value -> [Value]
   -> Eff effs (TurnOutcome (TurnParseResult output))
 runTurn systemPrompt userAction =
@@ -390,11 +401,12 @@ runTurn systemPrompt userAction =
 
 runTurnContent
   :: forall output effs.
-     (Member LLM effs, StructuredOutput output, ValidStructuredOutput output)
+     (Member LLM effs, Member NodeMeta effs, StructuredOutput output, ValidStructuredOutput output)
   => Text -> [ContentBlock] -> Value -> [Value]
   -> Eff effs (TurnOutcome (TurnParseResult output))
 runTurnContent systemPrompt userContent schema tools = do
-  rawResult <- send (RunTurnOp systemPrompt userContent schema tools)
+  meta <- getNodeMeta
+  rawResult <- send (RunTurnOp meta systemPrompt userContent schema tools)
   case rawResult of
     TurnBroken reason -> return (TurnBroken reason)
     TurnTransitionHint target payload -> return (TurnTransitionHint target payload)
@@ -415,7 +427,7 @@ runTurnContent systemPrompt userContent schema tools = do
 -- 'llmCallEither' (returns Either with Text errors) or 'llmCallStructured'
 -- (returns Either with structured LlmError type).
 llmCall
-  :: forall output effs. (Member LLM effs, StructuredOutput output, ValidStructuredOutput output)
+  :: forall output effs. (Member LLM effs, Member NodeMeta effs, StructuredOutput output, ValidStructuredOutput output)
   => Text -> Text -> Value -> Eff effs output
 llmCall systemPrompt userInput schema = do
   result <- llmCallEither @output systemPrompt userInput schema
@@ -429,7 +441,7 @@ llmCall systemPrompt userInput schema = do
 -- Errors are represented as plain Text. Use 'llmCallStructured' for structured
 -- error types (rate limits, timeouts, etc.).
 llmCallEither
-  :: forall output effs. (Member LLM effs, StructuredOutput output, ValidStructuredOutput output)
+  :: forall output effs. (Member LLM effs, Member NodeMeta effs, StructuredOutput output, ValidStructuredOutput output)
   => Text -> Text -> Value -> Eff effs (Either Text output)
 llmCallEither systemPrompt userInput schema = do
   result <- runTurn @output systemPrompt userInput schema []
@@ -444,7 +456,7 @@ llmCallEither systemPrompt userInput schema = do
 -- Like 'llmCallEither' but supports tool definitions and invocations.
 -- Returns @Left (error message)@ on failure or @Right output@ on success.
 llmCallEitherWithTools
-  :: forall output effs. (Member LLM effs, StructuredOutput output, ValidStructuredOutput output)
+  :: forall output effs. (Member LLM effs, Member NodeMeta effs, StructuredOutput output, ValidStructuredOutput output)
   => Text -> Text -> Value -> [Value] -> Eff effs (Either Text output)
 llmCallEitherWithTools systemPrompt userInput schema tools = do
   result <- runTurn @output systemPrompt userInput schema tools
@@ -479,7 +491,7 @@ data LlmError
 -- This allows better error handling with pattern matching on specific error cases
 -- (rate limits, timeouts, etc.).
 llmCallStructured
-  :: forall output effs. (Member LLM effs, StructuredOutput output, ValidStructuredOutput output)
+  :: forall output effs. (Member LLM effs, Member NodeMeta effs, StructuredOutput output, ValidStructuredOutput output)
   => Text -> Text -> Value -> Eff effs (Either LlmError output)
 llmCallStructured systemPrompt userInput schema = do
   result <- runTurn @output systemPrompt userInput schema []
@@ -494,7 +506,7 @@ llmCallStructured systemPrompt userInput schema = do
 -- Like 'llmCallEitherWithTools' but returns structured 'LlmError' type instead of Text.
 -- This allows better error handling with pattern matching on specific error cases.
 llmCallStructuredWithTools
-  :: forall output effs. (Member LLM effs, StructuredOutput output, ValidStructuredOutput output)
+  :: forall output effs. (Member LLM effs, Member NodeMeta effs, StructuredOutput output, ValidStructuredOutput output)
   => Text -> Text -> Value -> [Value] -> Eff effs (Either LlmError output)
 llmCallStructuredWithTools systemPrompt userInput schema tools = do
   result <- runTurn @output systemPrompt userInput schema tools

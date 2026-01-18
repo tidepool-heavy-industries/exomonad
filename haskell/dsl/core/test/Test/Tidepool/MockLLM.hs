@@ -83,7 +83,7 @@ data LLMRequest = LLMRequest
 -- @
 runMockLLM :: Value -> Eff (LLM ': effs) a -> Eff effs a
 runMockLLM fixedOutput = interpret $ \case
-  RunTurnOp _sys _content _schema _tools ->
+  RunTurnOp _meta _sys _content _schema _tools ->
     pure $ TurnCompleted TurnResult
       { trOutput = fixedOutput
       , trToolsInvoked = []
@@ -114,9 +114,9 @@ runMockLLMSequence outputs = handleRelayS outputs pure' handler
       -> LLM v
       -> ([Value] -> Arr effs v a)
       -> Eff effs a
-    handler [] (RunTurnOp _ _ _ _) _ =
+    handler [] (RunTurnOp _ _ _ _ _) _ =
       error "runMockLLMSequence: ran out of fixture outputs"
-    handler (o:os) (RunTurnOp _ _ _ _) k =
+    handler (o:os) (RunTurnOp _ _ _ _ _) k =
       k os $ TurnCompleted TurnResult
         { trOutput = o
         , trToolsInvoked = []
@@ -148,7 +148,7 @@ runMockLLMMatched
   -> Eff (LLM ': effs) a
   -> Eff effs a
 runMockLLMMatched matchers defaultOutput = interpret $ \case
-  RunTurnOp _sys _content schema _tools ->
+  RunTurnOp _meta _sys _content schema _tools ->
     pure $ TurnCompleted TurnResult
       { trOutput = findMatch schema matchers
       , trToolsInvoked = []
@@ -193,7 +193,7 @@ runMockLLMCapture fixedOutput =
       -> LLM v
       -> ([LLMRequest] -> Arr effs v ([LLMRequest], a))
       -> Eff effs ([LLMRequest], a)
-    handler reqs (RunTurnOp sysPmt content schema tools) k = do
+    handler reqs (RunTurnOp _meta sysPmt content schema tools) k = do
       let req = LLMRequest sysPmt content schema tools
       k (req : reqs) $ TurnCompleted TurnResult
         { trOutput = fixedOutput
