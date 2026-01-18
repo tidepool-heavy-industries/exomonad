@@ -4,6 +4,7 @@ packages:
 
     -- Core DSL
     haskell/dsl/core
+    haskell/dsl/teaching
 
     -- Runtime
     haskell/runtime/wasm
