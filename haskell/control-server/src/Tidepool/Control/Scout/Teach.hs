@@ -3,7 +3,7 @@
 -- | Teaching document generation via LSP + Gemma.
 --
 -- Given a topic and seed symbols, explores the codebase to generate
--- a teaching document that explains the topic in BFS depth order.
+-- a scouting document that explains the topic in BFS depth order.
 --
 -- Architecture:
 --
@@ -32,10 +32,10 @@
 -- @
 --
 -- Key insight: Gemma extracts edges (related symbols). Haskell traverses
--- the graph via BFS, and depth determines teaching order.
+-- the graph via BFS, and depth determines scouting order.
 module Tidepool.Control.Scout.Teach
   ( -- * Main Entry Point
-    teach
+    scout
 
     -- * Configuration
   , TeachConfig(..)
@@ -56,7 +56,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 
 import Tidepool.Control.Scout.Teach.Types
-import Tidepool.Control.Scout.Teach.Gemma (TeachGemma, selectRelevantSymbols, extractCandidates)
+import Tidepool.Control.Scout.Teach.Gemma (ScoutGemma, selectRelevantSymbols, extractCandidates)
 import Tidepool.Effect.Types (Log, logDebug)
 import Tidepool.Effect.LSP
   ( LSP, workspaceSymbol, hover
@@ -70,7 +70,7 @@ import Tidepool.Platform (NativeOnly)
 -- CONFIGURATION
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Configuration for teaching exploration.
+-- | Configuration for scouting exploration.
 data TeachConfig = TeachConfig
   { tcDefaultBudget :: Int
     -- ^ Default budget if not specified (default: 20)
@@ -89,15 +89,15 @@ defaultTeachConfig = TeachConfig
 -- MAIN ENTRY POINT
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Generate a teaching document from a query.
+-- | Generate a scouting document from a query.
 --
 -- This is the main entry point. It:
 --   1. Resolves seed symbols via LSP workspace/symbol
 --   2. Explores the graph using BFS with Gemma token extraction
 --   3. Groups by BFS depth (core/prereqs/support)
-teach
+scout
   :: ( Member LSP effs
-     , Member TeachGemma effs
+     , Member ScoutGemma effs
      , Member Log effs
      , LastMember IO effs
      , NativeOnly
@@ -105,7 +105,7 @@ teach
   => TeachConfig
   -> TeachQuery
   -> Eff effs TeachingDoc
-teach config query = do
+scout config query = do
   logDebug $ "[Teach] Starting exploration for topic: " <> tqTopic query
   logDebug $ "[Teach] Seeds: " <> T.intercalate ", " (tqSeeds query)
   logDebug $ "[Teach] Budget: " <> T.pack (show (tqBudget query))
@@ -126,7 +126,7 @@ teach config query = do
       finalState <- exploreLoop config query initialState
       logDebug $ "[Teach] Exploration complete: " <> T.pack (show (Map.size (tsGraph finalState))) <> " symbols"
 
-      -- 4. Build teaching document
+      -- 4. Build scouting document
       let doc = buildTeachingDoc query (tsGraph finalState)
       logDebug $ "[Teach] Generated doc with "
         <> T.pack (show (length (tdCore doc))) <> " core, "
@@ -178,7 +178,7 @@ resolveSeedSymbols seeds = do
 --   6. Log failures and continue (graceful degradation)
 exploreLoop
   :: ( Member LSP effs
-     , Member TeachGemma effs
+     , Member ScoutGemma effs
      , Member Log effs
      , LastMember IO effs
      , NativeOnly
@@ -357,7 +357,7 @@ parseHoverContent content =
 -- DOCUMENT BUILDING
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Build a teaching document from the exploration graph.
+-- | Build a scouting document from the exploration graph.
 --
 -- Groups by BFS depth:
 --   - Depth 0: Core (seed symbols)

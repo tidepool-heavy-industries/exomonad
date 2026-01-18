@@ -4,9 +4,9 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE OverloadedStrings #-}
 
--- | ToolDef wrapper for TeachGemma effect
+-- | ToolDef wrapper for ScoutGemma effect
 --
--- This bridges the TeachGemma effect to the ToolDef interface,
+-- This bridges the ScoutGemma effect to the ToolDef interface,
 -- enabling teaching mode via executeWithTeaching.
 module Tidepool.Control.Scout.Tools
   ( SelectSymbolsTool(..)
@@ -22,7 +22,7 @@ import GHC.Generics (Generic)
 import Tidepool.Graph.Tool (ToolDef(..))
 import Tidepool.Tool.Convert (ToAnthropicTool, ToCfTool)
 import Tidepool.Schema (HasJSONSchema(..))
-import Tidepool.Control.Scout.Teach.Gemma (TeachGemma, selectRelevantSymbols)
+import Tidepool.Control.Scout.Teach.Gemma (ScoutGemma, selectRelevantSymbols)
 import Tidepool.Control.Scout.Teach.Types (LSPSymbol(..))
 import Tidepool.Effect.LSP (SymbolKind(..), Location(..), Position(..), Range(..))
 
@@ -30,7 +30,7 @@ import Tidepool.Effect.LSP (SymbolKind(..), Location(..), Position(..), Range(..
 data SelectSymbolsTool = SelectSymbolsTool
   deriving (Show, Eq)
 
--- | Flattened input from TeachGemma effect arguments
+-- | Flattened input from ScoutGemma effect arguments
 --
 -- Combines:
 -- - topic: what we're trying to understand
@@ -63,7 +63,7 @@ newtype SelectSymbolsOutput = SelectSymbolsOutput
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON, HasJSONSchema)
 
--- | ToolDef instance bridges to TeachGemma effect
+-- | ToolDef instance bridges to ScoutGemma effect
 instance ToolDef SelectSymbolsTool where
   type ToolInput SelectSymbolsTool = SelectSymbolsInput
   type ToolOutput SelectSymbolsTool = SelectSymbolsOutput
@@ -78,7 +78,7 @@ instance ToolDef SelectSymbolsTool where
   toolExecute _ _ =
     -- This tool is executed via executeWithTeaching (Haiku API), not via toolExecute.
     -- The ToolDef instance exists only to provide schema/metadata for Haiku.
-    error "SelectSymbolsTool.toolExecute should never be called - use runTeachGemmaWithTeaching or runTeachGemmaHTTP"
+    error "SelectSymbolsTool.toolExecute should never be called - use runScoutGemmaWithTeaching or runScoutGemmaHTTP"
 
 -- Auto-derive Anthropic and Cloudflare tool conversions
 instance ToAnthropicTool SelectSymbolsTool

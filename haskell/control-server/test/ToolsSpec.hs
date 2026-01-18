@@ -13,7 +13,7 @@ import Tidepool.Graph.Tool (ToolDef(..))
 import Tidepool.Tool.Convert (toAnthropicTool)
 import Tidepool.Teaching.Teacher (FineTrainingTeacher(..))
 import Tidepool.Control.Scout.Tools (SelectSymbolsTool(..))
-import Tidepool.Control.Scout.Teach.Teacher (TeachGemmaEffect(..))
+import Tidepool.Control.Scout.Teach.Teacher (ScoutGemmaEffect(..))
 
 main :: IO ()
 main = defaultMain tests
@@ -24,7 +24,7 @@ tests = testGroup "Scout Tools Integration"
       [ testCase "has correct tool name" test_toolName
       , testCase "derives Anthropic tool schema" test_anthropicTool
       ]
-  , testGroup "TeachGemma FineTrainingTeacher"
+  , testGroup "ScoutGemma FineTrainingTeacher"
       [ testCase "provides teacher guidance" test_teacherGuidance
       , testCase "guidance contains strategy keywords" test_guidanceContent
       ]
@@ -46,7 +46,7 @@ test_anthropicTool = do
 -- | Test that FineTrainingTeacher instance provides guidance
 test_teacherGuidance :: Assertion
 test_teacherGuidance = do
-  let guidance = teacherGuidance @TeachGemmaEffect
+  let guidance = teacherGuidance @ScoutGemmaEffect
   assertBool "Teacher guidance should not be empty" (not $ T.null guidance)
   assertBool "Teacher guidance should contain strategy section"
     ("Symbol Selection Strategy" `T.isInfixOf` guidance)
@@ -54,7 +54,7 @@ test_teacherGuidance = do
 -- | Test that guidance contains expected keywords
 test_guidanceContent :: Assertion
 test_guidanceContent = do
-  let guidance = teacherGuidance @TeachGemmaEffect
+  let guidance = teacherGuidance @ScoutGemmaEffect
   assertBool "Guidance should mention brittleness"
     ("break" `T.isInfixOf` T.toLower guidance)
   assertBool "Guidance should mention primitives"

@@ -26,7 +26,7 @@
 -- Key insight: Deterministic extraction gets candidates. Gemma only classifies.
 module Tidepool.Control.Scout.Teach.Gemma
   ( -- * Effect
-    TeachGemma(..)
+    ScoutGemma(..)
 
     -- * Smart Constructors
   , selectRelevantSymbols
@@ -35,8 +35,8 @@ module Tidepool.Control.Scout.Teach.Gemma
   , extractCandidates
 
     -- * Interpreters
-  , runTeachGemmaHTTP
-  , runTeachGemmaMock
+  , runScoutGemmaHTTP
+  , runScoutGemmaMock
 
     -- * Token Parsing (internal, exported for testing)
   , parseSymbolTokens
@@ -61,14 +61,14 @@ import Tidepool.Control.Scout.Teach.Types (LSPSymbol(..))
 -- EFFECT DEFINITION
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | TeachGemma effect for symbol selection.
+-- | ScoutGemma effect for symbol selection.
 --
 -- Given a topic, symbol, and pre-extracted candidates, selects which
 -- candidates are relevant to understanding the topic.
 --
 -- Key insight: This is CLASSIFICATION, not generation. The model picks
 -- from a fixed set rather than generating new symbols.
-data TeachGemma a where
+data ScoutGemma a where
   -- | Select relevant symbols from pre-extracted candidates.
   --
   -- Input:
@@ -80,7 +80,7 @@ data TeachGemma a where
     :: Text        -- ^ Topic description
     -> LSPSymbol   -- ^ Symbol being analyzed
     -> [Text]      -- ^ Candidate symbols (pre-extracted)
-    -> TeachGemma [Text]  -- ^ Selected subset
+    -> ScoutGemma [Text]  -- ^ Selected subset
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -93,7 +93,7 @@ data TeachGemma a where
 -- 1. Extract candidates using 'extractCandidates'
 -- 2. Pass them here for selection
 selectRelevantSymbols
-  :: Member TeachGemma effs
+  :: Member ScoutGemma effs
   => Text        -- ^ Topic description
   -> LSPSymbol   -- ^ Symbol to analyze
   -> [Text]      -- ^ Candidate symbols (from extractCandidates)
@@ -177,37 +177,37 @@ extractCandidates sig =
 --
 -- Uses Ollama's /api/chat endpoint with enum-constrained tool schema.
 -- The enum constraint ensures the model can ONLY output valid candidates.
-runTeachGemmaHTTP
+runScoutGemmaHTTP
   :: LastMember IO effs
   => Text  -- ^ Ollama endpoint (e.g., "http://localhost:11434")
-  -> Eff (TeachGemma ': effs) a
+  -> Eff (ScoutGemma ': effs) a
   -> Eff effs a
-runTeachGemmaHTTP endpoint = interpret $ \case
+runScoutGemmaHTTP endpoint = interpret $ \case
   SelectRelevantSymbols topic sym candidates -> do
-    sendM $ putStrLn $ "[TeachGemma] Candidates: " <> T.unpack (T.intercalate ", " candidates)
+    sendM $ putStrLn $ "[ScoutGemma] Candidates: " <> T.unpack (T.intercalate ", " candidates)
 
     -- If no candidates, nothing to select
     if null candidates
       then do
-        sendM $ putStrLn "[TeachGemma] No candidates to select from"
+        sendM $ putStrLn "[ScoutGemma] No candidates to select from"
         pure []
       else do
-        sendM $ putStrLn $ "[TeachGemma] HTTP call to " <> T.unpack endpoint
+        sendM $ putStrLn $ "[ScoutGemma] HTTP call to " <> T.unpack endpoint
           <> " for: " <> T.unpack (lsName sym)
         result <- sendM $ callOllamaSelect endpoint topic sym candidates
         case result of
           Right selected -> do
-            sendM $ putStrLn $ "[TeachGemma] Selected: " <> T.unpack (T.intercalate ", " selected)
+            sendM $ putStrLn $ "[ScoutGemma] Selected: " <> T.unpack (T.intercalate ", " selected)
             -- Validate: only return candidates that were in the input
             let valid = filter (`elem` candidates) selected
             if null valid && not (null selected)
               then do
-                sendM $ putStrLn "[TeachGemma] Selection invalid, using all candidates"
+                sendM $ putStrLn "[ScoutGemma] Selection invalid, using all candidates"
                 pure candidates  -- Fallback
               else pure valid
           Left err -> do
-            sendM $ putStrLn $ "[TeachGemma] ERROR: " <> T.unpack err
-            sendM $ putStrLn "[TeachGemma] Selection failed, using all candidates"
+            sendM $ putStrLn $ "[ScoutGemma] ERROR: " <> T.unpack err
+            sendM $ putStrLn "[ScoutGemma] Selection failed, using all candidates"
             pure candidates  -- Fallback: return all candidates
 
 
@@ -217,7 +217,7 @@ runTeachGemmaHTTP endpoint = interpret $ \case
 callOllamaSelect :: Text -> Text -> LSPSymbol -> [Text] -> IO (Either Text [Text])
 callOllamaSelect endpoint topic sym candidates = do
   let userContent = formatSelectionPrompt topic sym candidates
-  putStrLn $ "[TeachGemma] Selection prompt:\n" <> T.unpack userContent
+  putStrLn $ "[ScoutGemma] Selection prompt:\n" <> T.unpack userContent
 
   result <- try $ do
     let reqBody = encode $ object
@@ -239,7 +239,7 @@ callOllamaSelect endpoint topic sym candidates = do
 
     response <- httpLBS request'
     let body = getResponseBody response
-    putStrLn $ "[TeachGemma] Raw response: " <> take 1000 (show body)
+    putStrLn $ "[ScoutGemma] Raw response: " <> take 1000 (show body)
     pure $ parseSelectionResponse body
 
   case result of
@@ -368,6 +368,6 @@ parseSymbolTokens raw =
 --
 -- Simply returns all candidates (no filtering). Useful for testing the
 -- exploration loop without Gemma dependency.
-runTeachGemmaMock :: Eff (TeachGemma ': effs) a -> Eff effs a
-runTeachGemmaMock = interpret $ \case
+runScoutGemmaMock :: Eff (ScoutGemma ': effs) a -> Eff effs a
+runScoutGemmaMock = interpret $ \case
   SelectRelevantSymbols _topic _sym candidates -> pure candidates

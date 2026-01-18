@@ -17,9 +17,9 @@ import System.IO (hFlush, stdout)
 
 import Tidepool.Control.Protocol
 import Tidepool.Control.Types (TeachingSettings(..))
-import Tidepool.Control.Scout.Teach (teach, defaultTeachConfig, TeachQuery(..), TeachingDoc(..))
-import Tidepool.Control.Scout.Teach.Gemma (runTeachGemmaHTTP)
-import Tidepool.Control.Scout.Teach.Teaching (runTeachGemmaWithTeaching)
+import Tidepool.Control.Scout.Teach (scout, defaultTeachConfig, TeachQuery(..), TeachingDoc(..))
+import Tidepool.Control.Scout.Teach.Gemma (runScoutGemmaHTTP)
+import Tidepool.Control.Scout.Teach.Teaching (runScoutGemmaWithTeaching)
 import Tidepool.Effect.Types (runLog, LogLevel(..))
 import Tidepool.LSP.Interpreter (LSPSession, runLSP)
 
@@ -80,9 +80,9 @@ handleTeachTool lspSession maybeTeachSettings reqId args = do
               TIO.putStrLn "  mode=production (Ollama)"
               hFlush stdout
               try $ runM $ runLog Debug $
-                runTeachGemmaHTTP (T.pack ep) $
+                runScoutGemmaHTTP (T.pack ep) $
                 runLSP lspSession $
-                teach defaultTeachConfig query
+                scout defaultTeachConfig query
 
             Just settings -> do
               -- Teaching mode: use Haiku and record training data
@@ -90,11 +90,11 @@ handleTeachTool lspSession maybeTeachSettings reqId args = do
               TIO.putStrLn $ "  output=" <> T.pack (tsOutputDir settings)
               hFlush stdout
               try $ runM $ runLog Debug $
-                runTeachGemmaWithTeaching
+                runScoutGemmaWithTeaching
                   (tsOutputDir settings)
                   (tsAnthropicKey settings) $
                 runLSP lspSession $
-                teach defaultTeachConfig query
+                scout defaultTeachConfig query
 
           case resultOrErr of
             Left (e :: SomeException) -> do

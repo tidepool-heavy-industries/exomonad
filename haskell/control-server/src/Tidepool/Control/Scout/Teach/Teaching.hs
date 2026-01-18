@@ -5,14 +5,14 @@
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE OverloadedStrings #-}
 
--- | Teaching interpreter for TeachGemma effect.
+-- | Teaching interpreter for ScoutGemma effect.
 --
 -- This interpreter calls Haiku (via Anthropic API) instead of local FunctionGemma,
 -- and records both the raw response and converted training data.
 --
 -- Resource ownership: Manages recording handles lifecycle using bracket pattern.
 module Tidepool.Control.Scout.Teach.Teaching
-  ( runTeachGemmaWithTeaching
+  ( runScoutGemmaWithTeaching
   ) where
 
 import Control.Monad.Freer (Eff, interpret, LastMember, sendM, runM)
@@ -20,8 +20,8 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.UUID.V4 as UUID
 
-import Tidepool.Control.Scout.Teach.Gemma (TeachGemma(..))
-import Tidepool.Control.Scout.Teach.Teacher (TeachGemmaEffect(..))
+import Tidepool.Control.Scout.Teach.Gemma (ScoutGemma(..))
+import Tidepool.Control.Scout.Teach.Teacher (ScoutGemmaEffect(..))
 import Tidepool.Control.Scout.Teach.Types (LSPSymbol(..))
 import Tidepool.Control.Scout.Tools
   ( SelectSymbolsTool(..)
@@ -34,7 +34,7 @@ import Tidepool.Teaching.Types (AnthropicApiKey)
 
 -- | Teaching interpreter: calls Haiku and records training data.
 --
--- This interpreter bridges the TeachGemma effect to Haiku API calls:
+-- This interpreter bridges the ScoutGemma effect to Haiku API calls:
 -- 1. Acquires recording handles (session initialization)
 -- 2. Interprets SelectRelevantSymbols operations by:
 --    - Flattening LSPSymbol into SelectSymbolsInput
@@ -48,13 +48,13 @@ import Tidepool.Teaching.Types (AnthropicApiKey)
 --   use:      interpret effect operations (call Haiku)
 --   cleanup:  closeRecording handles
 -- @
-runTeachGemmaWithTeaching
+runScoutGemmaWithTeaching
   :: forall effs a. LastMember IO effs
   => FilePath  -- ^ Output directory for training data
   -> AnthropicApiKey  -- ^ Anthropic API key
-  -> Eff (TeachGemma ': effs) a
+  -> Eff (ScoutGemma ': effs) a
   -> Eff effs a
-runTeachGemmaWithTeaching outputDir apiKey action = do
+runScoutGemmaWithTeaching outputDir apiKey action = do
   -- Resource acquisition
   sessionId <- sendM UUID.nextRandom
   handles <- sendM $ initRecording outputDir sessionId
@@ -62,7 +62,7 @@ runTeachGemmaWithTeaching outputDir apiKey action = do
   sendM $ putStrLn $ "[Teaching] Session " <> show sessionId <> " started"
   sendM $ putStrLn $ "[Teaching] Output directory: " <> outputDir
 
-  -- Interpret TeachGemma effect operations
+  -- Interpret ScoutGemma effect operations
   result <- interpret (\case
     SelectRelevantSymbols topic symbol candidates -> do
       sendM $ putStrLn $ "[Teaching] SelectRelevantSymbols for topic: " <> T.unpack topic
@@ -86,7 +86,7 @@ runTeachGemmaWithTeaching outputDir apiKey action = do
       -- - Converting to FunctionGemma format
       -- - Recording converted training data
       output <- sendM $ runM $
-        executeWithTeaching @SelectSymbolsTool @TeachGemmaEffect
+        executeWithTeaching @SelectSymbolsTool @ScoutGemmaEffect
           apiKey handles SelectSymbolsTool input
 
       sendM $ putStrLn $ "[Teaching] Haiku selected " <> show (length (selected output)) <> " symbols"

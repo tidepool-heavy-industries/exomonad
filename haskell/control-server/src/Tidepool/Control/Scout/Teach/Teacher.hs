@@ -5,7 +5,7 @@
 -- Provides domain-specific guidance for training Haiku to select
 -- relevant symbols during semantic code exploration.
 module Tidepool.Control.Scout.Teach.Teacher
-  ( TeachGemmaEffect(..)
+  ( ScoutGemmaEffect(..)
   ) where
 
 import Data.Text (Text)
@@ -17,13 +17,13 @@ import Tidepool.Teaching.Teacher (FineTrainingTeacher(..))
 --
 -- TeachGemma itself is a GADT with kind (* -> *), but FineTrainingTeacher
 -- needs a simple type. This unit type serves as the effect tag.
-data TeachGemmaEffect = TeachGemmaEffect
+data ScoutGemmaEffect = ScoutGemmaEffect
 
 -- | Teaching guidance for symbol selection
 --
 -- Instructs Haiku on how to select symbols that maximize understanding
 -- while minimizing noise. Emphasizes architectural impact and brittleness.
-instance FineTrainingTeacher TeachGemmaEffect where
+instance FineTrainingTeacher ScoutGemmaEffect where
   teacherGuidance = T.unlines
     [ "# Symbol Selection Strategy for Code Understanding"
     , ""
