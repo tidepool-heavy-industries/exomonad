@@ -29,6 +29,7 @@ CLAUDE.md  ← YOU ARE HERE (project overview)
 ├── haskell/CLAUDE.md  ← Haskell package organization
 │   ├── control-server/CLAUDE.md ⭐ Claude Code++ hub (hooks/MCP/scout)
 │   ├── dsl/core/CLAUDE.md      ← Graph DSL reference (START HERE for handlers)
+│   ├── dsl/teaching/CLAUDE.md  ← LLM-level teaching for FunctionGemma training
 │   ├── agents/                 ← Production agents
 │   │   └── semantic-scout/CLAUDE.md ← MERGED into control-server (redirect)
 │   ├── effects/CLAUDE.md       ← Effect interpreters
@@ -60,6 +61,7 @@ CLAUDE.md  ← YOU ARE HERE (project overview)
 | Work on Claude Code++ (hooks/MCP/scout) ⭐ | `haskell/control-server/CLAUDE.md` |
 | Understand hook/MCP forwarding (Rust side) | `rust/mantle-agent/CLAUDE.md` |
 | Define a graph, handlers, annotations | `haskell/dsl/core/CLAUDE.md` |
+| Work on LLM-level teaching infrastructure | `haskell/dsl/teaching/CLAUDE.md` |
 | Add or modify an effect interpreter | `haskell/effects/CLAUDE.md` |
 | Understand actor execution model | `haskell/runtime/actor/CLAUDE.md` |
 | Work on semantic-scout code exploration | `haskell/control-server/CLAUDE.md` (merged from agents/semantic-scout) |
@@ -292,6 +294,7 @@ All Haskell packages now live under `haskell/`. See `haskell/CLAUDE.md` for full
 | Package | Purpose |
 |---------|---------|
 | `haskell/dsl/core` | Graph DSL, effects, templates, validation |
+| `haskell/dsl/teaching` | LLM-level teaching infrastructure for FunctionGemma training |
 | `haskell/runtime/actor` | Actor runtime with graph-to-actor execution |
 | `haskell/runtime/parallel` | Parallel fan-out/fan-in execution with ki |
 | `haskell/runtime/wasm` | WASM deployment scaffolding |

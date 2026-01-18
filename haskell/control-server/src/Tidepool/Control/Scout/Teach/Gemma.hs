@@ -247,12 +247,36 @@ callOllamaSelect endpoint topic sym candidates = do
     Right parsed -> pure parsed
 
 
--- | Format the selection prompt.
+-- | Format the selection prompt for symbol selection.
 --
--- TODO: Replace with proper FunctionGemma token format once training data is ready.
--- For now, training data format in training-generator/Format.hs is the source of truth.
+-- Ollama translates this plain text + tools array into FunctionGemma's native
+-- token format (<start_of_turn>, <start_function_call>, etc.). We provide:
+-- - Topic: what we're trying to understand
+-- - Symbol context: name + signature from hover
+-- - Candidates: types extracted from signature (deterministic)
+--
+-- The model selects which candidates are relevant via the select_symbols tool.
 formatSelectionPrompt :: Text -> LSPSymbol -> [Text] -> Text
-formatSelectionPrompt = undefined
+formatSelectionPrompt topic sym candidates = T.unlines
+  [ "Topic: " <> topic
+  , "Symbol: " <> lsName sym
+  , "Signature: " <> cleanSignature (lsSignature sym)
+  , "Candidates: " <> T.intercalate ", " candidates
+  , ""
+  , "Select the candidates that help understand this symbol in context of the topic."
+  ]
+  where
+    -- Clean signature: extract code from markdown if present, strip formatting
+    cleanSignature :: Text -> Text
+    cleanSignature sig =
+      let lines' = T.lines sig
+          -- Find content between ``` markers if present
+          inCodeBlock = dropWhile (not . T.isPrefixOf "```") lines'
+          afterOpen = drop 1 inCodeBlock
+          codeLines = takeWhile (not . T.isPrefixOf "```") afterOpen
+      in if null codeLines
+         then T.strip sig  -- No code block, use raw
+         else T.strip $ T.unlines codeLines
 
 
 -- | Tool schema for select_symbols function with enum constraint.

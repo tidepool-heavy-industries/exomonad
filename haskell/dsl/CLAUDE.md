@@ -1,6 +1,13 @@
 # Tidepool DSL
 
-Core graph DSL implementation. Defines graph types, validation, templates, schemas.
+Core graph DSL implementation and teaching infrastructure.
+
+## Packages
+
+| Package | Purpose |
+|---------|---------|
+| `core/` | Graph DSL, effects, templates, schemas |
+| `teaching/` | LLM-level teaching infrastructure for FunctionGemma training |
 
 ## Package: core/
 
@@ -12,6 +19,7 @@ Core graph DSL implementation. Defines graph types, validation, templates, schem
 - `Graph/Generic.hs` - Mode system, handler computation
 - `Graph/Interpret.hs` - Dispatch and interpretation
 - `Effect/Types.hs` - Core effect types (LLM, State, Log, Emit, etc.)
+- `Effect/NodeMeta.hs` - Node/graph context for teaching (NodeMetadata, GraphMetadata)
 - `Effects/*.hs` - Integration effects (BD, GitHub, Habitica, etc.)
 - `Schema.hs` - JSON schema generation
 - `StructuredOutput/` - Structured LLM output parsing
@@ -25,6 +33,20 @@ Edit `Graph/Types.hs` and add to the annotation type families.
 Some effects are excluded from WASM builds (LSP, GHCi, ClaudeCode, DevLog).
 See tidepool-core.cabal `if !os(wasi)` blocks.
 
-## Dependencies
+## Package: teaching/
 
-None (foundation package)
+**tidepool-teaching** - LLM-level teaching for FunctionGemma training data
+
+See `teaching/CLAUDE.md` for details.
+
+### Status
+
+Implemented but **not wired into any server**. Provides:
+- `runLLMWithTeaching` - Intercepts LLM calls, records training data
+- `TeachingTurn` - Full LLM turn with node context
+- Dual-output recording (anthropic.jsonl + gemma.jsonl)
+
+### Dependencies
+
+- `tidepool-core` - Effect types, NodeMeta
+- `tidepool-llm-interpreter` - Anthropic API client

@@ -1,18 +1,22 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 
+-- | Recording infrastructure for teaching mode.
+--
+-- Handles file I/O for training data capture:
+-- - Session directory creation
+-- - JSONL recording of LLM turns
+-- - Session metadata
 module Tidepool.Teaching.Record
   ( initRecording
-  , recordExample
   , recordTurn
   , closeRecording
   , writeMetadata
   ) where
 
-import Data.Aeson (encode, object, (.=), toJSON)
+import Data.Aeson (encode, object, (.=))
 import qualified Data.ByteString.Lazy as BL
 import Data.Text (Text)
-import qualified Data.Text.IO as TIO
 import Data.Time (getCurrentTime)
 import Data.UUID (UUID)
 import qualified Data.UUID as UUID
@@ -22,15 +26,16 @@ import System.IO (IOMode(..), hClose, hFlush, hPutChar, openFile)
 
 import Tidepool.Teaching.Types
 
+
 -- | Initialize a recording session.
 --
 -- Creates a session directory with the structure:
 --   .tidepool/training/session-{uuid}/
---     ├── anthropic.jsonl
---     ├── gemma.jsonl
---     └── metadata.json
+--     ├── anthropic.jsonl  -- TeachingTurn records (node context + full LLM turns)
+--     ├── gemma.jsonl      -- Reserved for FunctionGemma format (not yet implemented)
+--     └── metadata.json    -- Session configuration and timestamp
 --
--- The JSONL files are opened in append mode with line buffering.
+-- Both JSONL files are opened in append mode.
 initRecording :: FilePath -> UUID -> IO RecordingHandles
 initRecording baseDir sessionId = do
   let sessionDir = baseDir </> ("session-" <> UUID.toString sessionId)
@@ -46,23 +51,20 @@ initRecording baseDir sessionId = do
     , rhSessionDir = sessionDir
     }
 
--- | Record a training example to both output files.
+
+-- | Record a teaching turn (LLM-level capture).
 --
--- Writes:
--- - Raw Anthropic response to anthropic.jsonl (one JSON object per line)
--- - Converted FunctionGemma format to gemma.jsonl (one JSONL line)
+-- Writes the full TeachingTurn to anthropic.jsonl as a single JSON line.
+-- Includes node metadata (node name, graph name) plus full request/response.
 --
--- Both files are flushed after each write for durability.
-recordExample :: RecordingHandles -> TrainingExample -> IO ()
-recordExample RecordingHandles{..} TrainingExample{..} = do
-  -- Write raw Anthropic response (no pretty printing)
-  BL.hPut rhRawHandle (encode teAnthropicRaw)
+-- Note: gemma.jsonl conversion is not yet implemented. The handle is opened
+-- but currently unused, reserved for future FunctionGemma format conversion.
+recordTurn :: RecordingHandles -> TeachingTurn -> IO ()
+recordTurn RecordingHandles{..} turn = do
+  BL.hPut rhRawHandle (encode turn)
   hPutChar rhRawHandle '\n'
   hFlush rhRawHandle
 
-  -- Write converted FunctionGemma JSONL
-  TIO.hPutStrLn rhGemmaHandle teFunctionGemmaFormatted
-  hFlush rhGemmaHandle
 
 -- | Close recording handles.
 --
@@ -72,18 +74,6 @@ closeRecording :: RecordingHandles -> IO ()
 closeRecording RecordingHandles{..} = do
   hClose rhRawHandle
   hClose rhGemmaHandle
-
-
--- | Record a teaching turn (LLM-level capture).
---
--- This is the new LLM-level recording that captures full turns with
--- node context. Writes to anthropic.jsonl with node metadata.
-recordTurn :: RecordingHandles -> TeachingTurn -> IO ()
-recordTurn RecordingHandles{..} turn = do
-  -- Write turn as JSONL (includes node metadata)
-  BL.hPut rhRawHandle (encode turn)
-  hPutChar rhRawHandle '\n'
-  hFlush rhRawHandle
 
 
 -- | Write session metadata to metadata.json.

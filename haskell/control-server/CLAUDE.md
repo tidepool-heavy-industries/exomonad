@@ -249,12 +249,16 @@ Project-local configuration in `.tidepool/` (gitignored):
 | `Handler.hs` | Message routing (threads LSP session through handlers) |
 | `Handler/Hook.hs` | Hook event handler (currently passthrough) |
 | `Handler/MCP.hs` | MCP tool handler (scout implementation) |
-| `Scout/Types.hs` | ScoutQuery, ScoutResponse, Pointer, TrainingExample |
-| `Scout/Explore.hs` | BFS exploration loop (pure + effectful versions) |
-| `Scout/Gemma.hs` | Scoring effect + interpreters (heuristic/HTTP/mock) |
+| `Scout/Types.hs` | ScoutQuery, ScoutResponse, Pointer (re-exports TrainingExample from training-generator) |
+| `Scout/Tools.hs` | Scout MCP tool implementation (orchestrates exploration) |
 | `Scout/Heuristics.hs` | Pattern-based scoring rules and expansion decisions |
 | `Scout/LSP.hs` | LSP integration helpers |
+| `Scout/EdgeTypes.hs` | Edge classification types |
 | `Scout/Templates.hs` | Jinja templates for FunctionGemma prompts |
+| `Scout/Teach.hs` | Teaching document generation |
+| `Scout/Teach/Types.hs` | LSPSymbol, TeachQuery, TeachState, TeachingDoc |
+| `Scout/Teach/Gemma.hs` | ScoutGemma effect + interpreters (HTTP/mock) for symbol selection |
+| `Scout/Teach/Teacher.hs` | FineTrainingTeacher instance for scout |
 
 ## MCP Tools
 
@@ -468,5 +472,11 @@ echo '{"type":"MCPToolCall","id":"1","tool_name":"scout","arguments":{...}}' | \
 1. Wire real hook logic (currently passthrough)
 2. Add more MCP tools (beads task tracking, etc.)
 3. Add metrics collection to mantle-hub
-4. Implement FunctionGemma HTTP interpreter (already done in Gemma.hs)
-5. Generate and use training data for fine-tuning
+4. Wire LLM-level teaching mode (see `tidepool-teaching` package)
+5. Generate and use training data for FunctionGemma fine-tuning
+
+## Completed
+
+- FunctionGemma HTTP interpreter (`Scout/Teach/Gemma.hs`)
+- Symbol selection via Ollama (`runScoutGemmaHTTP`)
+- LSP integration for hover/references/workspace symbols

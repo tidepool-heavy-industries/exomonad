@@ -33,32 +33,34 @@ spec = do
 
         closeRecording handles
 
-  describe "recordExample" $ do
-    it "writes to both files" $ do
+  describe "recordTurn" $ do
+    it "writes turn to anthropic.jsonl" $ do
       withSystemTempDirectory "test-recording" $ \tmpDir -> do
         let sessionId = testUUID
         handles <- initRecording tmpDir sessionId
 
         now <- getCurrentTime
-        let trainingEx = TrainingExample
-              { teAnthropicRaw = object ["test" .= ("value" :: String)]
-              , teFunctionGemmaFormatted = "gemma line"
-              , teTeacherGuidance = Just "guidance"
-              , teTimestamp = now
-              , teToolName = "test_tool"
+        let turn = TeachingTurn
+              { ttNodeName = "gClassify"
+              , ttGraphName = "SupportGraph"
+              , ttSystemPrompt = "You are a helpful assistant."
+              , ttUserContent = object ["message" .= ("hello" :: String)]
+              , ttOutputSchema = object ["type" .= ("string" :: String)]
+              , ttToolDefs = []
+              , ttResponse = object ["content" .= ("world" :: String)]
+              , ttTimestamp = now
               }
 
-        recordExample handles trainingEx
+        recordTurn handles turn
 
         closeRecording handles
 
-        -- Verify files contain data
+        -- Verify anthropic.jsonl contains the turn
         let sessionDir = tmpDir </> ("session-" <> UUID.toString sessionId)
         anthropicContent <- readFile (sessionDir </> "anthropic.jsonl")
-        anthropicContent `shouldContain` "\"test\""
-
-        gemmaContent <- readFile (sessionDir </> "gemma.jsonl")
-        gemmaContent `shouldContain` "gemma line"
+        anthropicContent `shouldContain` "gClassify"
+        anthropicContent `shouldContain` "SupportGraph"
+        anthropicContent `shouldContain` "helpful assistant"
 
   describe "writeMetadata" $ do
     it "writes metadata.json with session info" $ do

@@ -7,7 +7,7 @@
 -- | ToolDef wrapper for ScoutGemma effect
 --
 -- This bridges the ScoutGemma effect to the ToolDef interface,
--- enabling teaching mode via executeWithTeaching.
+-- providing schema/metadata for FunctionGemma prompts.
 module Tidepool.Control.Scout.Tools
   ( SelectSymbolsTool(..)
   , SelectSymbolsInput(..)
@@ -76,9 +76,9 @@ instance ToolDef SelectSymbolsTool where
                       \to the specified topic, based on the context symbol's signature."
 
   toolExecute _ _ =
-    -- This tool is executed via executeWithTeaching (Haiku API), not via toolExecute.
-    -- The ToolDef instance exists only to provide schema/metadata for Haiku.
-    error "SelectSymbolsTool.toolExecute should never be called - use runScoutGemmaWithTeaching or runScoutGemmaHTTP"
+    -- This tool is executed via ScoutGemma effect, not via toolExecute.
+    -- The ToolDef instance exists only to provide schema/metadata for FunctionGemma.
+    error "SelectSymbolsTool.toolExecute should never be called - use runScoutGemmaHTTP"
 
 -- Auto-derive Anthropic and Cloudflare tool conversions
 instance ToAnthropicTool SelectSymbolsTool

@@ -1,19 +1,35 @@
 # tidepool-teaching
 
-Generic teaching infrastructure for generating FunctionGemma training data via Haiku.
+LLM-level teaching infrastructure for generating FunctionGemma training data via Haiku.
+
+## Status: Implemented, Not Wired
+
+The teaching infrastructure is complete but **not yet wired into any server**. To use it, a server would need to:
+1. Call `loadTeachingConfig` to check for env vars
+2. Use `runLLMWithTeaching` instead of production LLM interpreter when enabled
 
 ## Architecture Overview
 
-This package implements **knowledge distillation** from Claude 3.5 Haiku (200B params) to FunctionGemma 270M. Instead of synthesizing training data, we run actual production workflows with Haiku as the execution backend, recording its reasoning and tool use.
+This package implements **knowledge distillation** from Claude 3.5 Haiku to FunctionGemma 270M. Teaching happens at the **LLM effect level** (not individual tools), capturing full multi-turn conversations with node context.
 
-See [ADR 001](../../../decisions/001-haiku-driven-functiongemma-teaching.md) for the full rationale.
-
-## Core Principles
-
-1. **Task-oriented, not roleplay** - Haiku executes real tasks, not simulations
-2. **One tool, two backends** - Production uses FunctionGemma (fast, local), teaching uses Haiku (smart, recorded)
-3. **Reasoning as first-class data** - Preserve Haiku's chain-of-thought in training examples
-4. **All-or-nothing teaching mode** - Global flag controls whether all tools use teaching mode
+```
+Graph Node (e.g., gClassify)
+    │
+    ▼ (runTurn called with NodeMeta context)
+RunTurnOp meta systemPrompt userContent schema tools
+    │
+    ▼ (runLLMWithTeaching intercepts)
+┌────────────────────────────────────────────┐
+│ Teaching Interpreter                        │
+│  1. Wrap system prompt with guidance        │
+│  2. Call Haiku via Anthropic API            │
+│  3. Record TeachingTurn (full context)      │
+│  4. Return TurnOutcome                      │
+└────────────────────────────────────────────┘
+    │
+    ▼
+anthropic.jsonl  (TeachingTurn records)
+```
 
 ## Module Overview
 
@@ -21,50 +37,47 @@ See [ADR 001](../../../decisions/001-haiku-driven-functiongemma-teaching.md) for
 
 Core data types:
 
-- **`TrainingExample`** - A training example pair:
-  - Raw Anthropic Messages API response (for offline iteration)
-  - Converted FunctionGemma JSONL line (ready for training)
-  - Teacher guidance + metadata
-
 - **`TeachingConfig`** - Global teaching session configuration:
-  - `tcEnabled :: Bool` - Master switch (True = Haiku, False = FunctionGemma)
-  - `tcOutputDir :: FilePath` - Where to write training data
-  - `tcSessionId :: UUID` - Unique session identifier
-  - `tcAnthropicKey :: Text` - Anthropic API key
+  ```haskell
+  data TeachingConfig = TeachingConfig
+    { tcEnabled :: Bool           -- Master switch
+    , tcOutputDir :: FilePath     -- Where to write training data
+    , tcSessionId :: UUID         -- Unique session identifier
+    , tcAnthropicKey :: Text      -- Anthropic API key for Haiku calls
+    }
+  ```
 
-- **`RecordingHandles`** - File handles for dual-output recording:
-  - `anthropic.jsonl` - Raw Anthropic responses
-  - `gemma.jsonl` - Converted FunctionGemma training data
+- **`TeachingEnv`** - Runtime environment for teaching sessions:
+  ```haskell
+  data TeachingEnv = TeachingEnv
+    { teConfig :: TeachingConfig  -- Session configuration
+    , teHandles :: RecordingHandles -- Open file handles
+    , teGuidance :: Text          -- Teacher guidance to prepend
+    }
+  ```
 
-### `Tidepool.Teaching.Anthropic`
+- **`TeachingTurn`** - A captured LLM turn for training data:
+  ```haskell
+  data TeachingTurn = TeachingTurn
+    { ttNodeName :: Text       -- e.g., "gClassify"
+    , ttGraphName :: Text      -- e.g., "SupportGraph"
+    , ttSystemPrompt :: Text   -- Original system prompt
+    , ttUserContent :: Value   -- User content blocks (JSON)
+    , ttOutputSchema :: Value  -- Structured output schema
+    , ttToolDefs :: [Value]    -- Tool definitions provided
+    , ttResponse :: Value      -- Full Haiku response (JSON)
+    , ttTimestamp :: UTCTime   -- When executed
+    }
+  ```
 
-Re-exports the production Anthropic client with teaching-specific helpers:
-
-- **Re-exports**: `AnthropicTool`, `AnthropicConfig`, `AnthropicResponse`, `ContentBlock`
-- **Helper**: `extractTeachingTurn` - Parse response into (reasoning, toolName, toolArgs)
-
-Uses existing `tidepool-llm-interpreter` (already supports Haiku + tool use). Example:
-
-```haskell
-import Tidepool.Teaching.Anthropic
-import Tidepool.LLM.Interpreter (runLLMComplete, mkLLMEnv)
-import Tidepool.Effects.LLMProvider (complete, SAnthropic)
-
--- Build config with teacher guidance
-let cfg = AnthropicConfig
-      { acModel = "claude-3-5-haiku-20241022"
-      , acMaxTokens = 1024
-      , acThinking = ThinkingDisabled
-      , acSystemPrompt = Just (baseSystemPrompt <> "\n\n" <> teacherGuidance @TeachGemma)
-      }
-
--- Call Haiku with tools
-response <- runM $ runLLMComplete env $ complete SAnthropic cfg prompt (Just tools)
-
--- Extract turn for conversion
-case extractTeachingTurn response of
-  Right (reasoning, toolName, args) -> ...
-```
+- **`RecordingHandles`** - Dual-output file handles:
+  ```haskell
+  data RecordingHandles = RecordingHandles
+    { rhRawHandle :: Handle    -- anthropic.jsonl
+    , rhGemmaHandle :: Handle  -- gemma.jsonl (reserved, not yet written)
+    , rhSessionDir :: FilePath -- Session directory path
+    }
+  ```
 
 ### `Tidepool.Teaching.Teacher`
 
@@ -73,86 +86,86 @@ Minimal typeclass for effect-specific guidance:
 ```haskell
 class FineTrainingTeacher effect where
   teacherGuidance :: Text
+
+-- Base prompt for all teaching sessions
+baseSystemPrompt :: Text
 ```
 
-Each effect that supports teaching must provide domain-specific guidance that helps Haiku understand the task. This is appended to `baseSystemPrompt` when calling Haiku.
+### `Tidepool.Teaching.Record`
 
-Example:
+File I/O for training data:
+
+- `initRecording` - Create session directory, open handles
+- `recordTurn` - Write TeachingTurn to anthropic.jsonl
+- `closeRecording` - Flush and close handles
+- `writeMetadata` - Write session metadata.json
+
+### `Tidepool.Teaching.LLM`
+
+Teaching LLM interpreter:
+
+- `runLLMWithTeaching` - Interpreter that intercepts `RunTurnOp`, calls Haiku, records turns
+- `withTeaching` - Bracket-style session management
+- `loadTeachingConfig` - Load config from environment variables
+- `initTeachingEnv` / `closeTeachingEnv` - Manual lifecycle management
+
+## Usage
+
+### Environment Variables
+
+```bash
+export TEACHING_ENABLED=true
+export ANTHROPIC_API_KEY=sk-ant-...
+export TEACHING_OUTPUT_DIR=.tidepool/training  # optional, default shown
+```
+
+### Programmatic Usage
+
 ```haskell
-instance FineTrainingTeacher TeachGemma where
-  teacherGuidance = T.unlines
-    [ "# Symbol Selection Strategy"
-    , ""
-    , "When selecting symbols for understanding a topic:"
-    , "- Prioritize symbols that break on changes (exhaustive matches, type families)"
-    , "- Include core dependencies that explain behavior"
-    , "- Avoid primitive types (Int, Text, Maybe, etc.)"
-    ]
+import Tidepool.Teaching.LLM
+
+main :: IO ()
+main = do
+  mConfig <- loadTeachingConfig
+  case mConfig of
+    Nothing -> runProductionMode  -- Normal execution
+    Just config -> do
+      let guidance = teacherGuidance @MyEffect
+      withTeaching config guidance $ \env -> do
+        -- Use runLLMWithTeaching instead of production interpreter
+        result <- runM $ runLLMWithTeaching env $ myGraph
+        pure result
 ```
 
-## Usage Pattern
-
-Teaching infrastructure is consumed by other packages in phases:
-
-1. **Anthropic Client** (`Tidepool.Teaching.Anthropic`) - Re-exports production client (Task 02 ✓)
-2. **Format Conversion** (`Tidepool.Teaching.Convert`) - Anthropic → FunctionGemma (Task 03)
-3. **Recording** (`Tidepool.Teaching.Record`) - Write dual-format output (Task 04)
-4. **Execution Wrapper** (`Tidepool.Teaching.Execute`) - Orchestrate 1-3 (Task 05)
-
-This package builds on the existing `tidepool-llm-interpreter` client.
-
-## Integration Points
-
-**Consumed by:**
-- `Tidepool.Teaching.Anthropic` - Uses `TeachingConfig` for API calls
-- `Tidepool.Teaching.Convert` - Produces `TrainingExample`
-- `Tidepool.Teaching.Record` - Uses `RecordingHandles` for I/O
-- `Tidepool.Teaching.Execute` - Uses `FineTrainingTeacher` constraint
-
-**Used in:**
-- `tidepool-control-server` - CLI integration (`teach-with-haiku` command)
-- Effect wrappers - Add `FineTrainingTeacher` instances
-
-## Directory Structure
+## Output Format
 
 Teaching sessions write to:
 ```
 .tidepool/training/
-├── session-abc123/
-│   ├── anthropic.jsonl   # Raw Haiku responses (one JSON per line)
-│   ├── gemma.jsonl       # Converted training data (one conversation per line)
-│   └── metadata.json     # Session info (timestamp, config)
-└── session-def456/
-    └── ...
+└── session-{uuid}/
+    ├── anthropic.jsonl   # TeachingTurn records (one JSON per line)
+    ├── gemma.jsonl       # Reserved for FunctionGemma format (not yet implemented)
+    └── metadata.json     # Session info (timestamp, config, version)
 ```
 
-## Design Rationale
+## Known Limitations
 
-### Why Dual Output?
+1. **Not wired to server** - No server currently calls `runLLMWithTeaching`
+2. **gemma.jsonl not written** - Handle is opened but FunctionGemma conversion not implemented
+3. **Thinking content lost** - `ThinkingEnabled 1024` is set but `trThinking = ""` in output
+4. **Single-threaded** - Interpreter is not thread-safe
 
-Recording both raw Anthropic responses AND converted FunctionGemma format enables:
-- **Offline iteration** - Tweak conversion logic without re-running expensive Haiku calls
-- **Quality validation** - Compare raw reasoning to converted format
-- **Debugging** - Trace issues to specific API responses
+## Dependencies
 
-### Why Global Teaching Mode?
+- `tidepool-core` - Effect types, NodeMeta
+- `tidepool-llm-interpreter` - Anthropic API client
 
-Instead of per-tool or per-query teaching mode, we use a global flag because:
-- **Consistency** - All tools in a session use the same backend
-- **Simplicity** - No complex routing or partial teaching
-- **Real workflows** - Captures complete multi-tool interactions
+## Integration Points
 
-### Why Minimal Typeclass?
+**Consumed by:**
+- Future server wiring (would replace production LLM interpreter)
 
-`FineTrainingTeacher` only requires `teacherGuidance` text because:
-- **Separation of concerns** - Guidance is effect-specific, execution is generic
-- **No boilerplate** - Tools auto-derive from existing `ToolDef` instances
-- **Flexibility** - Easy to add more methods later if needed
-
-## Next Steps
-
-After implementing this package, see:
-- `work/02-anthropic-client.md` - HTTP client for Haiku
-- `work/03-format-conversion.md` - Anthropic → FunctionGemma converter
-- `work/04-recording.md` - Dual-output file I/O
-- `work/05-execute-wrapper.md` - Integration orchestration
+**Depends on:**
+- `Tidepool.Effect.NodeMeta` - Provides node/graph context at dispatch time
+- `Tidepool.Effects.LLMProvider` - Anthropic API types
+- `Tidepool.LLM.Interpreter` - HTTP client for Haiku calls
