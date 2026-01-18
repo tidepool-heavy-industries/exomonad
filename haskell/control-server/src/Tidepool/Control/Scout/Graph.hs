@@ -107,8 +107,8 @@ import Tidepool.Control.Scout.Graph.Types
   , ExploreState(..)
   )
 
--- Forward reference: Template type defined in Graph/Templates.hs (Task 02)
-data SelectTpl
+-- Template for dgSelect LLM node
+import Tidepool.Control.Scout.Graph.Templates (SelectTpl)
 
 
 -- | DocGen exploration graph.

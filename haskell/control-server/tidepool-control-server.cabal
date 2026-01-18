@@ -41,6 +41,8 @@ library
         -- Graph-based DocGen (tidepool DSL)
         Tidepool.Control.Scout.Graph
         Tidepool.Control.Scout.Graph.Types
+        Tidepool.Control.Scout.Graph.Templates
+        Tidepool.Control.Scout.Graph.Templates.Context
     build-depends:
         base >= 4.17 && < 5,
         text >= 2.0 && < 3,
@@ -59,9 +61,12 @@ library
         -- HTTP for FunctionGemma
         http-conduit,
         vector,
-        uuid,
         -- Code sampling
-        random
+        random,
+        -- Template rendering (for Graph/Templates.hs)
+        mtl,
+        ginger,
+        parsec
     hs-source-dirs:   src
     default-language: GHC2024
     default-extensions:
