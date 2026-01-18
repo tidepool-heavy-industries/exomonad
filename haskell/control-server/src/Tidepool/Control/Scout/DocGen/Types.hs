@@ -44,7 +44,7 @@ module Tidepool.Control.Scout.DocGen.Types
   ) where
 
 import Data.Aeson
-  ( FromJSON(..), ToJSON(..), (.:), (.=)
+  ( FromJSON(..), ToJSON(..), (.:), (.:?), (.!=), (.=)
   , object, withObject
   )
 import Data.Map.Strict (Map)
@@ -167,7 +167,7 @@ instance FromJSON TeachQuery where
   parseJSON = withObject "TeachQuery" $ \v -> TeachQuery
     <$> v .: "topic"
     <*> v .: "seeds"
-    <*> (v .: "budget" >>= \b -> pure $ if b <= 0 then 20 else b)
+    <*> (v .:? "budget" .!= 20)
 
 instance ToJSON TeachQuery where
   toJSON q = object

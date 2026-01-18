@@ -323,7 +323,7 @@ callHaiku TeachingEnv{..} systemPrompt userText tools = do
         }
 
   let anthropicCfg = AnthropicConfig
-        { acModel = "claude-3-5-haiku-20241022"
+        { acModel = "claude-haiku-4-5-20251001"
         , acMaxTokens = 4096
         , acThinking = ThinkingEnabled 1024  -- Enable thinking for quality training data
         , acSystemPrompt = Just systemPrompt

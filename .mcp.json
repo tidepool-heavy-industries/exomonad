@@ -5,7 +5,8 @@
       "args": ["mcp"],
       "env": {
         "MANTLE_CONTROL_HOST": "127.0.0.1",
-        "MANTLE_CONTROL_PORT": "7432"
+        "MANTLE_CONTROL_PORT": "7432",
+        "MANTLE_DECISION_TOOLS_FILE": "/home/inanna/tidepool-heavy-industries/haiku-training-data-synthesis-woktree/.tidepool/mcp-tools.json"
       }
     }
   }

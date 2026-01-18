@@ -1,5 +1,5 @@
 // Augmented Claude Code session layout
-// Left pane: control-server (Haskell)
+// Left pane: control-server (Haskell) on TCP port 7432
 // Right pane: Claude Code
 
 layout {
@@ -7,13 +7,13 @@ layout {
         pane {
             name "control-server"
             command "bash"
-            args "-c" "source .env 2>/dev/null; echo '=== Starting control-server ==='; cabal run tidepool-control-server; read -p 'Press enter to close...'"
+            args "-c" "cd /home/inanna/tidepool-heavy-industries/haiku-training-data-synthesis-woktree && set -a && source .env 2>/dev/null && set +a; echo '=== Starting control-server on TCP port 7432 ==='; cabal run tidepool-control-server; read -p 'Press enter to close...'"
             focus false
         }
         pane {
             name "claude-code"
             command "bash"
-            args "-c" "source .env 2>/dev/null; sleep 2; echo '=== Starting Claude Code ==='; claude"
+            args "-c" "cd /home/inanna/tidepool-heavy-industries/haiku-training-data-synthesis-woktree && set -a && source .env 2>/dev/null && set +a; sleep 3; echo '=== Starting Claude Code ==='; claude --model sonnet"
             focus true
         }
     }
