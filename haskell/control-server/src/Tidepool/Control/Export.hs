@@ -743,9 +743,12 @@ findHaskellFiles root = do
 -- | Read code from file at LSP Range, with context expansion.
 --
 -- For training data, we need full function bodies, not just signatures.
--- Strategy: Read from startLine through either:
---   1. Next top-level definition (column 0, non-whitespace, non-comment)
---   2. endLine + 30 lines (whichever comes first)
+-- Strategy: Read from startLine until we hit a function boundary:
+--   1. Next top-level definition (column 0, alphanumeric start)
+--   2. Section divider (═══ or ---)
+--   3. Haddock comment for new definition (unindented "-- |")
+--   4. Two consecutive blank lines
+--   5. Maximum 30 lines (hard limit)
 --
 -- LSP Positions are 0-indexed.
 readCodeAtRange :: FilePath -> Range -> IO Text
@@ -755,23 +758,55 @@ readCodeAtRange file (Range (Position startLine _) (Position endLine _)) = do
       startIdx = fromIntegral startLine
       endIdx = fromIntegral endLine
 
-      -- Read up to 30 lines past the LSP range, or until next top-level def
+      -- Read up to 30 lines past the LSP range
       maxIdx = min (length allLines - 1) (endIdx + 30)
       candidateLines = drop startIdx $ take (maxIdx + 1) allLines
 
-      -- Find next top-level definition (starts at column 0, not whitespace/comment)
-      isTopLevelDef line =
-        not (T.null line) &&
-        not (T.isPrefixOf " " line) &&
-        not (T.isPrefixOf "\t" line) &&
-        not (T.isPrefixOf "--" line)
+      -- Detect HARD boundaries (always stop regardless of state)
+      isHardBoundary line =
+        -- Section divider (═══ or ---)
+        "═" `T.isInfixOf` line ||
+        (T.isPrefixOf "--" line && T.length line > 10 && T.all (\c -> c == '-' || c == ' ') (T.drop 2 line))
 
-      -- Take lines until we hit next top-level def (excluding first line which is current def)
+      -- Detect soft boundaries (type sig, haddock) - only after we've seen code
+      isSoftBoundary line =
+        -- Haddock for next definition (unindented "-- |")
+        T.isPrefixOf "-- |" line ||
+        -- Next type signature at column 0 (contains "::")
+        (not (T.null line) &&
+         not (T.isPrefixOf " " line) &&
+         not (T.isPrefixOf "\t" line) &&
+         "::" `T.isInfixOf` line)
+
+      -- Is this a "preamble" line (haddock or type signature)?
+      isPreamble line =
+        T.isPrefixOf "-- |" line ||
+        T.isPrefixOf "-- " line ||  -- continuation haddock
+        (not (T.null line) && not (T.isPrefixOf " " line) && "::" `T.isInfixOf` line)
+
+      -- Check for two consecutive blank lines
+      hasDoubleBlank [] = False
+      hasDoubleBlank [_] = False
+      hasDoubleBlank (a:b:_) = T.null (T.strip a) && T.null (T.strip b)
+
+      -- Take lines until boundary
+      -- seenCode tracks whether we've passed the preamble (haddock + type sig)
+      -- Soft boundaries (type sig, haddock) only count after we've seen actual code
+      takeUntilBoundary :: [Text] -> [Text] -> Bool -> [Text]
+      takeUntilBoundary [] _ _ = []
+      takeUntilBoundary (l:ls) prev seenCode
+        | hasDoubleBlank (prev ++ [l]) = []           -- Stop at double blank
+        | isHardBoundary l = []                        -- Always stop at hard boundary
+        | seenCode && isSoftBoundary l = []           -- Stop at soft boundary only after code
+        | otherwise =
+            let nowSeenCode = seenCode || (not (isPreamble l) && not (T.null (T.strip l)))
+            in l : takeUntilBoundary ls [l] nowSeenCode
+
       bodyLines = case candidateLines of
         [] -> []
         (firstLine:rest) ->
-          let continuation = takeWhile (not . isTopLevelDef) rest
-          in firstLine : continuation
+          let startSeenCode = not (isPreamble firstLine) && not (T.null (T.strip firstLine))
+          in firstLine : takeUntilBoundary rest [firstLine] startSeenCode
 
   pure $ T.unlines bodyLines
 
