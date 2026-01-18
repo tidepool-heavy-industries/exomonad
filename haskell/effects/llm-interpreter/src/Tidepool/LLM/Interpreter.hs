@@ -103,7 +103,7 @@ anthropicRequest env config userMsg maybeTools = do
     Just secrets -> do
       let baseUrl = parseBaseUrl (getBaseUrl secrets.asBaseUrl)
           clientEnv = mkClientEnv env.leManager baseUrl
-          req = buildAnthropicRequest config userMsg maybeTools
+          req = buildAnthropicRequest config userMsg maybeTools Nothing
 
       result <- runClientM (Anthropic.anthropicComplete (getApiKey secrets.asApiKey) req) clientEnv
       pure $ either (Left . clientErrorToLLMError) Right result
@@ -112,16 +112,28 @@ anthropicRequest env config userMsg maybeTools = do
 --
 -- Tools should be in Anthropic format (with @input_schema@, not @parameters@).
 -- Use 'AnthropicTool' or 'Tidepool.Tool.toolToJSON' which produce the correct format.
-buildAnthropicRequest :: AnthropicConfig -> Text -> Maybe [Value] -> Anthropic.AnthropicRequest
-buildAnthropicRequest config userMsg maybeTools = Anthropic.AnthropicRequest
+--
+-- Note: tool_choice 'any' and 'tool' are NOT compatible with extended thinking.
+-- If you pass a ToolChoice that forces tool use, thinking will be ignored.
+buildAnthropicRequest
+  :: AnthropicConfig
+  -> Text
+  -> Maybe [Value]
+  -> Maybe Anthropic.ToolChoice
+  -> Anthropic.AnthropicRequest
+buildAnthropicRequest config userMsg maybeTools maybeToolChoice = Anthropic.AnthropicRequest
   { Anthropic.arModel = config.acModel
   , Anthropic.arMaxTokens = config.acMaxTokens
   , Anthropic.arMessages = [Anthropic.AnthropicMessage "user" userMsg]
   , Anthropic.arSystem = config.acSystemPrompt
   , Anthropic.arTools = maybeTools
-  , Anthropic.arThinking = case config.acThinking of
-      ThinkingDisabled -> Nothing
-      ThinkingEnabled budget -> Just Anthropic.ThinkingConfig
+  , Anthropic.arToolChoice = maybeToolChoice
+  , Anthropic.arThinking = case (config.acThinking, maybeToolChoice) of
+      -- Disable thinking if we're forcing tool use (incompatible)
+      (_, Just Anthropic.ToolChoiceAny) -> Nothing
+      (_, Just (Anthropic.ToolChoiceTool _)) -> Nothing
+      (ThinkingDisabled, _) -> Nothing
+      (ThinkingEnabled budget, _) -> Just Anthropic.ThinkingConfig
         { Anthropic.tcType = "enabled"
         , Anthropic.tcBudgetTokens = budget
         }

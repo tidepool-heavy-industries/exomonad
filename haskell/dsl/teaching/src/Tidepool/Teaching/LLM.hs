@@ -78,12 +78,13 @@ module Tidepool.Teaching.LLM
   ) where
 
 import Control.Exception (bracket)
-import Control.Monad.Freer (Eff, LastMember, interpret, sendM, runM)
-import Data.Aeson (Value(..), toJSON)
+import Control.Monad.Freer (Eff, LastMember, interpret, sendM)
+import Data.Aeson (Value(..), toJSON, object, (.=))
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time (getCurrentTime)
 import Data.UUID.V4 (nextRandom)
+import Servant.Client (runClientM, mkClientEnv)
 import System.Environment (lookupEnv)
 
 import Tidepool.Effect.Types
@@ -98,12 +99,11 @@ import Tidepool.Effects.LLMProvider
   ( AnthropicConfig(..)
   , AnthropicResponse(..)
   , ThinkingBudget(..)
-  , complete
-  , SProvider(SAnthropic)
   )
 import qualified Tidepool.Effects.LLMProvider as LP
-import Tidepool.LLM.Interpreter (runLLMComplete, mkLLMEnv)
-import Tidepool.LLM.Types (LLMConfig(..), AnthropicSecrets(..), BaseUrl(..), ApiKey(..))
+import Tidepool.LLM.API.Anthropic (anthropicComplete, ToolChoice(..))
+import Tidepool.LLM.Interpreter (mkLLMEnv, buildAnthropicRequest, parseBaseUrl)
+import Tidepool.LLM.Types (LLMConfig(..), AnthropicSecrets(..), BaseUrl(..), ApiKey(..), LLMEnv(..))
 import Tidepool.Teaching.Types
   ( TeachingEnv(..)
   , TeachingConfig(..)
@@ -245,9 +245,9 @@ runLLMWithTeaching env = interpret $ \case
     -- 2. Build user content as text (for Haiku call)
     let userText = contentBlocksToText userContent
 
-    -- 3. Call Haiku
+    -- 3. Call Haiku with schema as forced respond tool
     sendM $ putStrLn "[Teaching] Calling Haiku..."
-    response <- sendM $ callHaiku env wrappedPrompt userText tools
+    response <- sendM $ callHaiku env wrappedPrompt userText schema
 
     -- 4. Record the turn
     now <- sendM getCurrentTime
@@ -306,13 +306,19 @@ contentBlocksToText blocks = T.intercalate "\n" $ concatMap extractText blocks
     extractText (JsonBlock v) = [T.pack $ show v]
 
 
--- | Call Haiku via Anthropic API.
+-- | Call Haiku via Anthropic API with forced structured output.
 --
--- Uses the existing LLM infrastructure to make the API call.
-callHaiku :: TeachingEnv -> Text -> Text -> [Value] -> IO AnthropicResponse
-callHaiku TeachingEnv{..} systemPrompt userText tools = do
+-- Creates a "respond" tool from the output schema and forces Haiku to call it.
+-- This guarantees structured JSON output matching the schema.
+--
+-- Note: Extended thinking is disabled when using forced tool_choice (API limitation).
+callHaiku :: TeachingEnv -> Text -> Text -> Value -> IO AnthropicResponse
+callHaiku TeachingEnv{..} systemPrompt userText schema = do
   -- Extract API key via pattern match (NoFieldSelectors)
   let TeachingConfig { tcAnthropicKey = apiKey } = teConfig
+
+  -- Create respond tool from schema
+  let respondTool = schemaToRespondTool schema
 
   let llmConfig = LLMConfig
         { lcAnthropicSecrets = Just $ AnthropicSecrets
@@ -325,14 +331,45 @@ callHaiku TeachingEnv{..} systemPrompt userText tools = do
   let anthropicCfg = AnthropicConfig
         { acModel = "claude-haiku-4-5-20251001"
         , acMaxTokens = 4096
-        , acThinking = ThinkingEnabled 1024  -- Enable thinking for quality training data
+        , acThinking = ThinkingDisabled  -- Must disable for forced tool_choice
         , acSystemPrompt = Just systemPrompt
         }
 
+  -- Build request with forced tool_choice
+  let req = buildAnthropicRequest
+        anthropicCfg
+        userText
+        (Just [respondTool])
+        (Just $ ToolChoiceTool "respond")
+
   -- Make the actual API call
   llmEnv <- mkLLMEnv llmConfig
-  runM $ runLLMComplete llmEnv $
-    complete SAnthropic anthropicCfg userText (if null tools then Nothing else Just tools)
+  let LLMEnv { leManager = manager } = llmEnv
+  let baseUrl = parseBaseUrl "https://api.anthropic.com"
+      clientEnv = mkClientEnv manager baseUrl
+
+  result <- runClientM (anthropicComplete apiKey req) clientEnv
+  case result of
+    Left err -> error $ "Haiku API error: " <> show err
+    Right resp -> pure resp
+
+
+-- | Convert an output schema to a "respond" tool definition.
+--
+-- Anthropic tool format:
+-- @
+-- {
+--   "name": "respond",
+--   "description": "Return your structured response matching the required schema",
+--   "input_schema": <the output schema>
+-- }
+-- @
+schemaToRespondTool :: Value -> Value
+schemaToRespondTool schema = object
+  [ "name" .= ("respond" :: Text)
+  , "description" .= ("Return your structured response matching the required schema. You MUST call this tool with your answer." :: Text)
+  , "input_schema" .= schema
+  ]
 
 
 -- | Convert Anthropic response to TurnOutcome.

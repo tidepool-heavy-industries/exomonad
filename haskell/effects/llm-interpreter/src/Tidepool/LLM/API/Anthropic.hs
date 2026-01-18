@@ -18,6 +18,7 @@ module Tidepool.LLM.API.Anthropic
     -- * Request Types
   , AnthropicRequest(..)
   , AnthropicMessage(..)
+  , ToolChoice(..)
   , ThinkingConfig(..)
 
     -- * Client Function
@@ -49,9 +50,30 @@ data AnthropicRequest = AnthropicRequest
   , arMessages    :: [AnthropicMessage]
   , arSystem      :: Maybe Text
   , arTools       :: Maybe [Value]
+  , arToolChoice  :: Maybe ToolChoice
   , arThinking    :: Maybe ThinkingConfig
   }
   deriving stock (Eq, Show, Generic)
+
+-- | Tool choice configuration for controlling tool use behavior.
+--
+-- Note: 'ToolChoiceAny' and 'ToolChoiceTool' are NOT compatible with
+-- extended thinking. If you need forced tool use, disable thinking.
+data ToolChoice
+  = ToolChoiceAuto              -- ^ Let model decide (default, compatible with thinking)
+  | ToolChoiceNone              -- ^ Prevent tool use (compatible with thinking)
+  | ToolChoiceAny               -- ^ Must use some tool (NOT compatible with thinking)
+  | ToolChoiceTool Text         -- ^ Must use specific tool by name (NOT compatible with thinking)
+  deriving stock (Eq, Show, Generic)
+
+instance ToJSON ToolChoice where
+  toJSON ToolChoiceAuto = object ["type" .= ("auto" :: Text)]
+  toJSON ToolChoiceNone = object ["type" .= ("none" :: Text)]
+  toJSON ToolChoiceAny = object ["type" .= ("any" :: Text)]
+  toJSON (ToolChoiceTool name) = object
+    [ "type" .= ("tool" :: Text)
+    , "name" .= name
+    ]
 
 instance ToJSON AnthropicRequest where
   toJSON req = object $ filter ((/= Null) . snd)
@@ -60,6 +82,7 @@ instance ToJSON AnthropicRequest where
     , "messages"   .= req.arMessages
     , "system"     .= req.arSystem
     , "tools"      .= req.arTools
+    , "tool_choice" .= req.arToolChoice
     , "thinking"   .= req.arThinking
     ]
 

@@ -376,17 +376,14 @@ impl McpServer {
                 JsonRpcResponse::error(id, err.code, err.message)
             }
             Ok(Ok(result_value)) => {
-                // Use the host's response directly
+                // Wrap the raw result JSON in MCP content format
+                // The Haskell side returns domain-specific JSON; we format it for MCP here
+                let text_content = serde_json::to_string_pretty(&result_value)
+                    .unwrap_or_else(|_| result_value.to_string());
                 let result = ToolCallResult {
                     content: vec![ToolResultContent {
                         content_type: "text".to_string(),
-                        text: result_value
-                            .get("content")
-                            .and_then(|c| c.get(0))
-                            .and_then(|c| c.get("text"))
-                            .and_then(|t| t.as_str())
-                            .unwrap_or("Decision recorded")
-                            .to_string(),
+                        text: text_content,
                     }],
                     is_error: None,
                 };

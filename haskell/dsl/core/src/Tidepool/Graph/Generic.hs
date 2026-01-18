@@ -125,7 +125,7 @@ import Tidepool.Graph.Errors
 import Tidepool.Graph.Validate (FormatSymbolList)
 import Control.Monad.Freer (Eff, Member)
 
-import Tidepool.Graph.Types (type (:@), Input, Schema, Template, Vision, Tools, Memory, System, UsesEffects, ClaudeCode, ModelChoice, Spawn, Barrier, Awaits, HList(..))
+import Tidepool.Graph.Types (type (:@), Input, Schema, Template, Vision, Tools, Memory, System, UsesEffects, ClaudeCode, ModelChoice, Spawn, Barrier, Awaits, HList(..), MCPExport, MCPToolDef)
 import Tidepool.Graph.Template (TemplateContext)
 import Tidepool.Graph.Edges (GetUsesEffects, GetGotoTargets, GotoEffectsToTargets, HasClaudeCode, GetClaudeCode, GetSpawnTargets, GetBarrierTarget, GetAwaits)
 import Tidepool.Graph.Goto (Goto, goto, GotoChoice, To, LLMHandler(..), ClaudeCodeLLMHandler(..))
@@ -463,6 +463,12 @@ type family NodeHandlerDispatch nodeDef origNode es mInput mTpl mSchema mEffs wh
   NodeHandlerDispatch (node :@ ClaudeCode _) orig es mInput mTpl mSchema mEffs =
     NodeHandlerDispatch node orig es mInput mTpl mSchema mEffs
 
+  -- Skip MCP annotations (used for tool discovery, not runtime dispatch)
+  NodeHandlerDispatch (node :@ MCPExport) orig es mInput mTpl mSchema mEffs =
+    NodeHandlerDispatch node orig es mInput mTpl mSchema mEffs
+  NodeHandlerDispatch (node :@ MCPToolDef _) orig es mInput mTpl mSchema mEffs =
+    NodeHandlerDispatch node orig es mInput mTpl mSchema mEffs
+
   -- Skip Fork/Barrier annotations (extracted directly in terminal cases)
   NodeHandlerDispatch (node :@ Spawn _) orig es mInput mTpl mSchema mEffs =
     NodeHandlerDispatch node orig es mInput mTpl mSchema mEffs
@@ -686,6 +692,22 @@ type family NodeHandlerDispatch nodeDef origNode es mInput mTpl mSchema mEffs wh
     )
 
   -- ══════════════════════════════════════════════════════════════════════════
+  -- ══════════════════════════════════════════════════════════════════════════
+  -- EntryNode and ExitNode Base Cases (with annotations stripped)
+  -- ══════════════════════════════════════════════════════════════════════════
+  --
+  -- When EntryNode/ExitNode have annotations like MCPExport, they go through
+  -- NodeHandlerDispatch. After stripping annotations, we reach bare Entry/Exit.
+  -- These are markers (Proxy) just like the non-annotated versions.
+  --
+  -- ══════════════════════════════════════════════════════════════════════════
+
+  -- EntryNode after stripping annotations: marker (Proxy)
+  NodeHandlerDispatch (EntryNode a) orig es _ _ _ _ = Proxy a
+
+  -- ExitNode after stripping annotations: marker (Proxy)
+  NodeHandlerDispatch (ExitNode a) orig es _ _ _ _ = Proxy a
+
   -- ForkNode Base Cases
   -- ══════════════════════════════════════════════════════════════════════════
   --
