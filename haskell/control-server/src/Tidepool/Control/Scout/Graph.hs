@@ -143,6 +143,7 @@ data DocGenGraph mode = DocGenGraph
       :@ Template SelectTpl
       :@ Schema SelectOutput
       :@ Memory ExploreState
+      :@ UsesEffects '[Goto "dgExpand" (SelectInput, SelectOutput)]
     -- ^ LLM selects relevant candidates from the list
 
   , dgExpand :: mode :- LogicNode
