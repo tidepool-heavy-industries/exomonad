@@ -23,6 +23,7 @@ packages:
     haskell/effects/github-interpreter
     haskell/effects/worktree-interpreter
     haskell/effects/cabal-interpreter
+    haskell/effects/justfile-interpreter
     haskell/effects/devlog-interpreter
     haskell/effects/tui-interpreter
     haskell/effects/mcp-server

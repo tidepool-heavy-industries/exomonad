@@ -15,6 +15,7 @@ This follows the **interpreter design pattern**: abstract syntax (effect types) 
 | Add code intelligence (LSP) | `lsp-interpreter/CLAUDE.md` |
 | Expose agents as MCP tools | `mcp-server/CLAUDE.md` |
 | Manage git worktrees | `worktree-interpreter/CLAUDE.md` |
+| Run just recipes | `justfile-interpreter/CLAUDE.md` |
 | Integrate beads task tracking | `bd-interpreter/CLAUDE.md` |
 | Add Grafana observability | `observability-interpreter/CLAUDE.md` |
 | Run cabal builds/tests | `cabal-interpreter/CLAUDE.md` |
@@ -35,6 +36,7 @@ effects/CLAUDE.md  ← YOU ARE HERE (router)
 ├── bd-interpreter/CLAUDE.md            ← Beads task tracking
 ├── observability-interpreter/CLAUDE.md ← Grafana Loki & Tempo
 ├── worktree-interpreter/CLAUDE.md      ← Git worktree management
+├── justfile-interpreter/CLAUDE.md      ← Justfile recipe execution
 ├── cabal-interpreter/CLAUDE.md         ← Build & test integration
 ├── devlog-interpreter/CLAUDE.md        ← Session-scoped logging
 ├── habitica-interpreter/CLAUDE.md      ← Gamification API
@@ -66,6 +68,7 @@ Most effect types live in `dsl/core/src/Tidepool/Effect/Types.hs` or `Effects/*.
 | GitHub | dsl/core | github-interpreter | gh CLI subprocess |
 | Worktree | dsl/core | worktree-interpreter | Git subprocess |
 | Cabal | dsl/core | cabal-interpreter | Cabal CLI subprocess |
+| Justfile | dsl/core | justfile-interpreter | just CLI subprocess |
 | DevLog | dsl/core | devlog-interpreter | File IO |
 
 ## Adding a New Effect Interpreter
