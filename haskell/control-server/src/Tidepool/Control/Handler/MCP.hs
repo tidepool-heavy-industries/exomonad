@@ -36,7 +36,8 @@ import Tidepool.Control.LSPTools
   , showConstructorsLogic, ShowConstructorsArgs(..), ShowConstructorsResult(..)
   )
 import Tidepool.Control.ExoTools
-  ( exoStatusLogic, ExoStatusArgs(..), ExoStatusResult(..)
+  ( exoStatusLogic, ExoStatusArgs(..)
+  , exoCompleteLogic, ExoCompleteArgs(..), ExoCompleteResult(..)
   )
 import Tidepool.BD.Interpreter (runBDIO, defaultBDConfig)
 import Tidepool.BD.GitInterpreter (runGitIO)
@@ -85,12 +86,13 @@ handleMcpTool logger lspSession maybeTuiHandle reqId toolName args = do
 
     -- Tier 3: External Orchestration tools (Exo)
     "exo_status" -> handleExoStatusTool logger lspSession reqId args
+    "exo_complete" -> handleExoCompleteTool logger lspSession reqId args
 
     _ -> do
       logError logger $ "  (unknown tool)"
       pure $ mcpToolError reqId $
         "Tool not found: " <> toolName <>
-        ". Available tools: find_callers, show_fields, show_constructors, teach-graph, exo_status"
+        ". Available tools: find_callers, show_fields, show_constructors, teach-graph, exo_status, exo_complete"
 
 -- | Handle the exo_status tool.
 --
@@ -119,6 +121,36 @@ handleExoStatusTool logger _lspSession reqId args = do
 
         Right result -> do
           logInfo logger $ "[MCP:" <> reqId <> "] Context retrieved successfully"
+          pure $ mcpToolSuccess reqId (toJSON result)
+
+
+-- | Handle the exo_complete tool.
+--
+-- Runs the ExoCompleteGraph logic to finalize work on a bead.
+handleExoCompleteTool :: Logger -> LSPSession -> Text -> Value -> IO ControlResponse
+handleExoCompleteTool logger _lspSession reqId args = do
+  case fromJSON args of
+    Error err -> do
+      logError logger $ "  parse error: " <> T.pack err
+      pure $ mcpToolError reqId $ "Invalid exo_complete arguments: " <> T.pack err
+
+    Success ecArgs -> do
+      logDebug logger $ "  bead_id=" <> T.pack (show ecArgs.ecaBeadId)
+
+      resultOrErr <- try $ runM
+        $ runLog Debug
+        $ runBDIO defaultBDConfig
+        $ runGitIO
+        $ runGitHubIO defaultGitHubConfig
+        $ fmap unwrapSingleChoice (exoCompleteLogic ecArgs)
+
+      case resultOrErr of
+        Left (e :: SomeException) -> do
+          logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId $ "exo_complete failed: " <> T.pack (displayException e)
+
+        Right result -> do
+          logInfo logger $ "[MCP:" <> reqId <> "] Bead " <> result.ecrBeadId <> " completed"
           pure $ mcpToolSuccess reqId (toJSON result)
 
 
