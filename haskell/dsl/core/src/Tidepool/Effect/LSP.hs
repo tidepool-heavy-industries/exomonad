@@ -86,12 +86,16 @@ module Tidepool.Effect.LSP
 
     -- * Indexing State
   , IndexingState(..)
+  , IndexingInfo(..)
+  , indexingDuration
+  , getIndexingInfo
   ) where
 
 import Control.Monad.Freer (Eff, Member, send)
 import Data.Aeson (FromJSON, ToJSON)
 import Data.Map.Strict (Map)
 import Data.Text (Text)
+import Data.Time (UTCTime, NominalDiffTime, diffUTCTime)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
 
@@ -332,6 +336,62 @@ data IndexingState
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)
 
+-- | Rich indexing information for observability.
+--
+-- Extends 'IndexingState' with diagnostic data useful for debugging
+-- and test runs:
+--
+-- * Progress count: Number of incomplete HLS indexing sessions
+-- * Progress tokens: Token IDs for identifying specific indexing operations
+-- * Session timing: When the LSP session started and when indexing completed
+--
+-- Example during indexing:
+--
+-- @
+-- IndexingInfo
+--   { iiState = Indexing
+--   , iiProgressCount = 3
+--   , iiProgressTokens = ["hls/indexing/1", "hls/typecheck/2"]
+--   , iiSessionStart = 2026-01-19 12:00:00 UTC
+--   , iiReadyAt = Nothing
+--   }
+-- @
+--
+-- Example after indexing complete:
+--
+-- @
+-- IndexingInfo
+--   { iiState = Ready
+--   , iiProgressCount = 0
+--   , iiProgressTokens = []
+--   , iiSessionStart = 2026-01-19 12:00:00 UTC
+--   , iiReadyAt = Just (2026-01-19 12:00:45 UTC)
+--   }
+--
+-- indexingDuration info = Just 45s
+-- @
+data IndexingInfo = IndexingInfo
+  { iiState          :: !IndexingState     -- ^ Binary state (Indexing | Ready)
+  , iiProgressCount  :: !Int               -- ^ Number of incomplete progress sessions
+  , iiProgressTokens :: ![Text]            -- ^ Progress token IDs for debugging
+  , iiSessionStart   :: !UTCTime           -- ^ When LSP session started
+  , iiReadyAt        :: !(Maybe UTCTime)   -- ^ When indexing completed (if Ready)
+  } deriving stock (Show, Eq, Generic)
+    deriving anyclass (FromJSON, ToJSON)
+
+-- | Compute the time HLS spent indexing.
+--
+-- Returns 'Nothing' if indexing hasn't completed yet.
+--
+-- @
+-- info <- getIndexingInfo
+-- case indexingDuration info of
+--   Just duration -> log $ "Indexing took: " <> show duration
+--   Nothing -> log "Still indexing..."
+-- @
+indexingDuration :: IndexingInfo -> Maybe NominalDiffTime
+indexingDuration info = diffUTCTime <$> info.iiReadyAt <*> pure info.iiSessionStart
+
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- EFFECT DEFINITION
@@ -379,6 +439,12 @@ data LSP r where
   -- Returns 'Indexing' if HLS is still indexing the workspace,
   -- 'Ready' when indexing is complete and queries should be accurate.
   GetIndexingState :: LSP IndexingState
+
+  -- | Get detailed HLS indexing information.
+  --
+  -- Returns 'IndexingInfo' with full diagnostic data:
+  -- progress count, token IDs, session timing, etc.
+  GetIndexingInfo :: LSP IndexingInfo
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -458,3 +524,23 @@ documentSymbol doc = send (DocumentSymbol doc)
 -- Note: This operation requires native execution (not available in WASM).
 getIndexingState :: (Member LSP effs, NativeOnly) => Eff effs IndexingState
 getIndexingState = send GetIndexingState
+
+-- | Get detailed HLS indexing information.
+--
+-- Returns 'IndexingInfo' with full diagnostic data including:
+--
+-- * Progress count and token IDs (for debugging HLS behavior)
+-- * Session start time and ready timestamp (for measuring indexing duration)
+--
+-- Use 'indexingDuration' to compute how long HLS spent indexing:
+--
+-- @
+-- info <- getIndexingInfo
+-- case indexingDuration info of
+--   Just duration -> log $ "HLS indexed in " <> show duration
+--   Nothing -> log $ "Still indexing, " <> show (iiProgressCount info) <> " tasks remaining"
+-- @
+--
+-- Note: This operation requires native execution (not available in WASM).
+getIndexingInfo :: (Member LSP effs, NativeOnly) => Eff effs IndexingInfo
+getIndexingInfo = send GetIndexingInfo

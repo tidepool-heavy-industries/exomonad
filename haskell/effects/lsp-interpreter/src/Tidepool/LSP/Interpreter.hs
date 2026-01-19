@@ -10,7 +10,9 @@ module Tidepool.LSP.Interpreter
 
     -- * Indexing State (re-exported from effect module)
   , IndexingState(..)
+  , IndexingInfo(..)
   , getSessionIndexingState
+  , getSessionIndexingInfo
 
     -- * Effect Interpreter
   , runLSP
@@ -47,7 +49,7 @@ import qualified Language.LSP.Protocol.Types as L
 import qualified Language.LSP.Protocol.Message as L
 
 import Tidepool.Effect.LSP
-  ( LSP(..), IndexingState(..)
+  ( LSP(..), IndexingState(..), IndexingInfo(..)
   , TextDocumentIdentifier(..), Position(..), Range(..), Location(..)
   , HoverInfo(..), CodeAction(..), CodeActionKind(..), WorkspaceEdit(..)
   , TextEdit(..), CompletionItem(..), CompletionItemKind(..)
@@ -70,16 +72,23 @@ data LSPRequest = forall a. LSPRequest
 -- The actual Session monad runs inside withLSPSession's scope.
 -- External callers communicate via the request channel.
 data LSPSession = LSPSession
-  { lspRequestChan :: !(Chan LSPRequest)
-  , lspIndexingState :: !(TVar IndexingState)  -- ^ Tracks HLS indexing progress
+  { lspRequestChan  :: !(Chan LSPRequest)
+  , lspIndexingInfo :: !(TVar IndexingInfo)  -- ^ Tracks HLS indexing progress with full details
   }
 
--- | Read the current indexing state from a session.
+-- | Read the current indexing state from a session (backward compatible).
 --
 -- Use this to check if HLS is still indexing before making queries,
 -- or to add warnings to results when indexing is incomplete.
 getSessionIndexingState :: LSPSession -> IO IndexingState
-getSessionIndexingState session = readTVarIO session.lspIndexingState
+getSessionIndexingState session = (.iiState) <$> readTVarIO session.lspIndexingInfo
+
+-- | Read full indexing information from a session.
+--
+-- Returns 'IndexingInfo' with diagnostic details:
+-- progress count, token IDs, session timing, etc.
+getSessionIndexingInfo :: LSPSession -> IO IndexingInfo
+getSessionIndexingInfo session = readTVarIO session.lspIndexingInfo
 
 -- | Session configuration optimized for long-running MCP server use.
 --
@@ -116,8 +125,18 @@ withLSPSession rootDir action = do
   resultMVar <- newEmptyMVar
   doneMVar <- newEmptyMVar  -- Signal when user action completes
 
-  -- Initialize indexing state as Indexing (HLS starts indexing on connect)
-  indexingState <- newTVarIO Indexing
+  -- Capture session start time for indexing duration tracking
+  sessionStart <- getCurrentTime
+
+  -- Initialize with full IndexingInfo (HLS starts indexing on connect)
+  let initialInfo = IndexingInfo
+        { iiState = Indexing
+        , iiProgressCount = 0
+        , iiProgressTokens = []
+        , iiSessionStart = sessionStart
+        , iiReadyAt = Nothing
+        }
+  indexingInfo <- newTVarIO initialInfo
 
   -- lsp-test's runSessionWithConfig spawns HLS and handles handshake
   -- The session runs until we're done or HLS crashes
@@ -132,7 +151,7 @@ withLSPSession rootDir action = do
     liftIO $ hPutStrLn stderr "[LSP] Session started, HLS initialized"
 
     -- Provide session handle to caller
-    let session = LSPSession requestChan indexingState
+    let session = LSPSession requestChan indexingInfo
 
     -- Fork user action in a separate thread so we can process requests
     liftIO $ do
@@ -149,6 +168,17 @@ withLSPSession rootDir action = do
     -- prevents memory leaks from HLS's chatty log/progress notifications.
     --
     -- Indexing state is polled every 2 seconds to track HLS progress.
+    --
+    -- Do an immediate first poll to capture initial indexing state
+    liftIO $ hPutStrLn stderr "[LSP] Performing initial indexing check..."
+    initialIncomplete <- getIncompleteProgressSessions
+    let initialCount = Set.size initialIncomplete
+    liftIO $ hPutStrLn stderr $ "[LSP] Initial state: "
+      <> show initialCount <> " incomplete progress sessions"
+    when (initialCount > 0) $ do
+      let tokens = map showProgressToken (Set.toList initialIncomplete)
+      liftIO $ hPutStrLn stderr $ "[LSP] Progress tokens: " <> show tokens
+
     startTime <- liftIO getCurrentTime
     let processRequests lastCheck = do
           -- Check indexing state every 2 seconds
@@ -157,13 +187,35 @@ withLSPSession rootDir action = do
             then do
               -- Poll HLS for incomplete progress sessions
               incomplete <- getIncompleteProgressSessions
+              let progressCount = Set.size incomplete
+              let progressTokens = map showProgressToken (Set.toList incomplete)
               let newState = if Set.null incomplete then Ready else Indexing
-              -- Update the TVar with new state
-              liftIO $ atomically $ writeTVar indexingState newState
+
+              -- Read current info to detect state transitions
+              currentInfo <- liftIO $ readTVarIO indexingInfo
+
+              -- Set readyAt only on Indexing→Ready transition
+              let readyAt = case (currentInfo.iiState, newState) of
+                    (Indexing, Ready) -> Just now
+                    _                 -> currentInfo.iiReadyAt
+
+              -- Build updated info
+              let newInfo = IndexingInfo
+                    { iiState = newState
+                    , iiProgressCount = progressCount
+                    , iiProgressTokens = progressTokens
+                    , iiSessionStart = sessionStart  -- preserved from outer scope
+                    , iiReadyAt = readyAt
+                    }
+
+              -- Update the TVar with full info
+              liftIO $ atomically $ writeTVar indexingInfo newInfo
+
               -- Log state transition (only on change)
-              currentState <- liftIO $ readTVarIO indexingState
-              when (currentState /= newState) $
-                liftIO $ hPutStrLn stderr $ "[LSP] Indexing state: " <> show newState
+              when (currentInfo.iiState /= newState) $
+                liftIO $ hPutStrLn stderr $ "[LSP] Indexing: " <> show newState
+                  <> " (count=" <> show progressCount <> ")"
+
               pure now
             else pure lastCheck
 
@@ -311,8 +363,12 @@ runLSP session = interpret $ \case
       L.TResponseMessage _ _ (Left _) -> []
 
   GetIndexingState ->
-    -- Read the indexing state from the session's TVar
+    -- Read the indexing state from the session's TVar (backward compatible)
     sendM $ getSessionIndexingState session
+
+  GetIndexingInfo ->
+    -- Read full indexing information from the session's TVar
+    sendM $ getSessionIndexingInfo session
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -592,3 +648,17 @@ flattenDocumentSymbol ds =
         }
       children = maybe [] (concatMap flattenDocumentSymbol) ds._children
   in parent : children
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- PROGRESS TOKEN CONVERSION
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Convert LSP ProgressToken to Text for debugging.
+--
+-- ProgressToken is Int32 |? Text in lsp-types. We stringify both variants
+-- to capture what HLS is reporting during indexing.
+showProgressToken :: L.ProgressToken -> Text
+showProgressToken (L.ProgressToken tok) = case tok of
+  L.InL n  -> T.pack (show n)  -- Int32 token
+  L.InR t  -> t                -- Text token

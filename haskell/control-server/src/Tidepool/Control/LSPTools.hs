@@ -752,8 +752,11 @@ parseADTConstructors def =
       afterEq = case T.breakOn "=" def of
         (_, rest) | not (T.null rest) -> T.drop 1 rest
         _ -> ""
+      -- Strip deriving clause (handles multiline: "deriving" followed by anything)
+      -- Pattern: strip everything from "deriving" keyword onwards
+      withoutDeriving = stripDerivingClause afterEq
       -- Split by | for multiple constructors
-      conStrs = map T.strip $ T.splitOn "|" afterEq
+      conStrs = map T.strip $ T.splitOn "|" withoutDeriving
   in mapMaybe parseADTCon conStrs
   where
     parseADTCon str =
@@ -788,6 +791,28 @@ parseADTConstructors def =
       filter isType $ T.words str
 
     isType t = isUpperCase t || "(" `T.isPrefixOf` t || "[" `T.isPrefixOf` t
+
+-- | Strip deriving clause from type definition.
+--
+-- Handles both single-line and multi-line deriving:
+--   data Foo = Bar deriving (Show)
+--   data Foo = Bar
+--     deriving (Show, Eq)
+--     deriving anyclass (ToJSON)
+stripDerivingClause :: Text -> Text
+stripDerivingClause txt =
+  -- Find first occurrence of "deriving" that's not inside a string/comment
+  -- Simple approach: find "deriving" at start of word
+  let lines' = T.lines txt
+      -- Keep lines until we hit a deriving line
+      nonDerivingLines = takeWhile (not . isDerivingLine) lines'
+  in T.unlines nonDerivingLines
+  where
+    isDerivingLine line =
+      let stripped = T.stripStart line
+      in "deriving " `T.isPrefixOf` stripped ||
+         "deriving(" `T.isPrefixOf` stripped ||
+         stripped == "deriving"
 
     isUpperCase t = case T.uncons t of
       Just (c, _) -> c >= 'A' && c <= 'Z'
