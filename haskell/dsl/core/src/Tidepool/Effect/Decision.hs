@@ -12,22 +12,19 @@ module Tidepool.Effect.Decision
   , DecisionTrace(..)
   ) where
 
-import Control.Monad.Freer (Eff, Member, LastMember, sendM)
-import Data.Aeson (ToJSON, FromJSON, encode)
-import qualified Data.ByteString.Lazy.Char8 as LBS
+import Control.Monad.Freer (Eff, Member)
+import Data.Aeson (ToJSON(..), FromJSON, toJSON)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Time (UTCTime, getCurrentTime)
-import GHC.Generics (Generic)
-import System.Directory (createDirectoryIfMissing)
-import System.FilePath (takeDirectory)
+import Tidepool.Effect.Decision.Types
 import Tidepool.Effect.TUI
+import Tidepool.Effect.Types (Time, Log, getCurrentTime, logInfoWith)
 
 -- | Request a decision from the user via the TUI.
 --
 -- This builds a UISpec from the context, waits for an interaction,
--- and logs the resulting decision to @.tidepool/decision_log.jsonl@.
-requestDecision :: (Member TUI r, LastMember IO r) => DecisionContext -> Eff r Decision
+-- and logs the resulting decision via the Log effect.
+requestDecision :: (Member TUI r, Member Time r, Member Log r) => DecisionContext -> Eff r Decision
 requestDecision ctx = do
   let ui = UISpec "decision-request" $ Vertical $
         [ EText "prompt" ctx.dcPrompt
@@ -50,54 +47,8 @@ requestDecision ctx = do
     _ -> requestDecision ctx
 
   -- Log decision trace
-  now <- sendM getCurrentTime
+  now <- getCurrentTime
   let trace = DecisionTrace ctx decision now
-  sendM $ logDecisionTrace trace
+  logInfoWith "Decision made" [("trace", toJSON trace)]
 
   pure decision
-
--- | Log a decision trace to the local JSONL log file.
-logDecisionTrace :: DecisionTrace -> IO ()
-logDecisionTrace trace = do
-  let path = ".tidepool/decision_log.jsonl"
-  createDirectoryIfMissing True (takeDirectory path)
-  LBS.appendFile path (encode trace <> "\n")
-
--- | High-level decision outcomes for agent flows.
---
--- Used by the decision effect/TUI wrapper to represent standard
--- choices available to users or supervisors during agent execution.
-data Decision
-  = SelectBead Text
-    -- ^ Select a specific bead ID to focus on.
-  | ProvideGuidance Text
-    -- ^ Provide textual guidance or instructions.
-  | Abort
-    -- ^ Abort the current operation or flow.
-  | Continue
-    -- ^ Continue with the current plan/flow.
-  deriving (Show, Eq, Generic, ToJSON, FromJSON)
-
--- | Context provided to a decision request.
---
--- This context is used to render the decision UI.
-data DecisionContext = DecisionContext
-  { dcPrompt :: Text
-    -- ^ Main prompt or question for the decision.
-  , dcReadyBeads :: [Text]
-    -- ^ List of bead IDs that are ready for selection.
-  }
-  deriving (Show, Eq, Generic, ToJSON, FromJSON)
-
--- | Audit trace for a decision.
---
--- Captures the context, the decision made, and the timestamp.
-data DecisionTrace = DecisionTrace
-  { dtContext   :: DecisionContext
-    -- ^ Context at the time of decision.
-  , dtDecision  :: Decision
-    -- ^ The actual decision made.
-  , dtTimestamp :: UTCTime
-    -- ^ When the decision occurred.
-  }
-  deriving (Show, Eq, Generic, ToJSON, FromJSON)

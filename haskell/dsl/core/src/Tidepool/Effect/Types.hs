@@ -185,7 +185,7 @@ import Tidepool.Effect.TUI
   )
 
 -- Decision types
-import Tidepool.Effect.Decision
+import Tidepool.Effect.Decision.Types
   ( Decision(..), DecisionContext(..), DecisionTrace(..)
   )
 
