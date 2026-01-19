@@ -79,6 +79,7 @@ module Tidepool.Graph.Types
   ) where
 
 import Data.Aeson (Value)
+import Data.Functor.Identity (Identity)
 import Data.Kind (Type)
 import Data.Text (Text)
 import GHC.TypeLits (Symbol)
@@ -1170,3 +1171,71 @@ data HList (ts :: [Type]) where
   (:::) :: t -> HList ts -> HList (t ': ts)
 
 infixr 5 :::
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- COMPOSITIONAL NODES (Simple Graph Constructors)
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Node wrapper for compositional graph construction.
+--
+-- Enables two styles of graph definition:
+--
+-- * **Simple nodes** - @Node Identity@ wraps a single logic handler
+-- * **Complex graphs** - @Node (Free NodeF)@ composes multiple nodes
+--
+-- @
+-- -- Simple tool (just logic, no Entry/Exit ceremony)
+-- findCallersTool :: Node Identity (AsHandler '[LSP, Log])
+-- findCallersTool = logic findCallersLogic
+--
+-- -- Complex graph (monadic composition)
+-- supportGraph :: Node (Free NodeF) (AsHandler '[State S, LLM, Log])
+-- supportGraph = do
+--   entry \@Message
+--   classify <- llmNode \@ClassifyTpl
+--   route <- logic routeLogic
+--   exit \@Response
+-- @
+--
+-- The functor parameter @f@ determines the composition style:
+--
+-- * @Identity@ - Single node, no composition
+-- * @Free NodeF@ - Monadic composition of multiple nodes
+type Node :: (Type -> Type) -> Type -> Type
+newtype Node f a = Node (f a)
+
+-- | Alias for simple single-node tools.
+type SimpleNode = Node Identity
+
+-- | Alias for complex multi-node graphs.
+--
+-- Note: Requires Control.Monad.Free from the 'free' package.
+-- type ComplexGraph = Node (Free NodeF)
+
+-- NOTE: This design is currently incomplete. The Node wrapper was intended
+-- to reduce Entry/Exit boilerplate, but it has a critical gap:
+--
+-- **Problem:** MCP tool export relies on MCPExport annotations on Entry fields
+-- of graph records. If we eliminate graph records, we lose the metadata (tool
+-- name, description) needed for MCP server integration.
+--
+-- **Options considered:**
+-- 1. Add metadata to smart constructors (complex type-level programming)
+-- 2. Separate metadata from execution (breaks unification)
+-- 3. Keep graph records, provide helper functions to reduce boilerplate
+--
+-- **Current recommendation:** Use graph records with a `simpleGraph` helper:
+--
+-- @
+-- -- Instead of:
+-- findCallersHandlers = FindCallersGraph
+--   { fcEntry = ()
+--   , fcRun = findCallersLogic
+--   , fcExit = ()
+--   }
+--
+-- -- Use (future):
+-- findCallersHandlers = simpleGraph findCallersLogic
+-- @
+--
+-- This achieves the goal (reduce boilerplate) without breaking MCP export.

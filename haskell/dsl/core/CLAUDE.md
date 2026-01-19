@@ -37,7 +37,7 @@ Handlers are defined as a record with the same shape, using `AsHandler` mode:
 ```haskell
 handlers :: SupportGraph (AsHandler '[State SessionState])
 handlers = SupportGraph
-  { sgEntry    = Proxy @Message           -- Entry marker
+  { sgEntry    = ()                       -- Entry marker (changed from Proxy in Phase 1)
   , sgClassify = \msg -> do               -- Builds ClassifyContext
       st <- get @SessionState
       pure ClassifyContext { topic = msg.content, ... }
@@ -47,8 +47,63 @@ handlers = SupportGraph
         FaqIntent    -> pure $ gotoChoice @"sgFaq" msg
   , sgRefund   = \msg -> pure RefundContext { ... }
   , sgFaq      = \msg -> pure FaqContext { ... }
-  , sgExit     = Proxy @Response          -- Exit marker
+  , sgExit     = ()                       -- Exit marker (changed from Proxy in Phase 1)
   }
+```
+
+### Simple Graph Pattern (Entry → Logic → Exit)
+
+For simple tools with just Entry → Logic → Exit structure, use the `simpleGraph` helper to eliminate Entry/Exit boilerplate:
+
+```haskell
+import Tidepool.Graph.Simple (SimpleGraphPattern(..))
+
+-- Graph definition (unchanged - needed for MCP export metadata)
+data FindCallersGraph mode = FindCallersGraph
+  { fcEntry :: mode :- EntryNode FindCallersArgs
+      :@ MCPExport
+      :@ MCPToolDef '("find_callers", "Find actual call sites...")
+  , fcRun :: mode :- LogicNode
+      :@ Input FindCallersArgs
+      :@ UsesEffects '[Goto Exit FindCallersResult]
+  , fcExit :: mode :- ExitNode FindCallersResult
+  }
+  deriving Generic
+
+-- Instance declaration (enables simpleGraph)
+instance SimpleGraphPattern FindCallersGraph FindCallersArgs FindCallersResult where
+  simpleGraph logic = FindCallersGraph
+    { fcEntry = ()
+    , fcRun = logic
+    , fcExit = ()
+    }
+
+-- Handler definition (1 line instead of 5)
+findCallersHandlers :: FindCallersGraph (AsHandler '[LSP, Log])
+findCallersHandlers = simpleGraph findCallersLogic
+
+-- Logic function (unchanged)
+findCallersLogic :: FindCallersArgs -> Eff es (GotoChoice '[To Exit FindCallersResult])
+findCallersLogic args = do
+  -- ... implementation ...
+  pure $ gotoExit result
+```
+
+**Benefits:**
+- Reduces handler boilerplate from 5 lines to 1 line
+- Keeps graph record (required for MCP export metadata and validation)
+- Type-safe: output type inferred from graph definition
+- Pattern established for future simple tools
+
+**When to use:**
+- Entry → Logic → Exit graphs (no LLM nodes)
+- Single logic handler
+- Tool needs MCP export
+
+**When NOT to use:**
+- Complex multi-node graphs (use full handler record)
+- Graphs with LLM nodes (need before/after functions)
+- Graphs with fork/barrier patterns
 ```
 
 ### Handler Type Computation
@@ -57,10 +112,12 @@ The `NodeHandler` type family computes handler types from node definitions:
 
 | Node Definition | Handler Type |
 |-----------------|--------------|
-| `G.Entry Message` | `Proxy Message` |
-| `G.Exit Response` | `Proxy Response` |
-| `G.LLMNode :@ Input A :@ Template T :@ Schema B` | `A -> Eff es (TemplateContext T)` |
-| `G.LogicNode :@ Input A :@ UsesEffects effs` | `A -> Eff es (GotoChoice targets)` |
+| `EntryNode Message` | `()` |
+| `ExitNode Response` | `()` |
+| `LLMNode :@ Input A :@ Template T :@ Schema B` | `A -> Eff es (TemplateContext T)` |
+| `LogicNode :@ Input A :@ UsesEffects effs` | `A -> Eff es (GotoChoice targets)` |
+
+**Entry/Exit handlers:** Changed from `Proxy @Type` to `()` in Phase 1 (commit f169bef). Entry/Exit nodes are never invoked at runtime - they're purely type-level markers for validation.
 
 **Key insight: LLM handlers return template context, not Schema output.**
 The runner handles template rendering, LLM API call, and structured output parsing.

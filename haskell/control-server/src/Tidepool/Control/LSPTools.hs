@@ -76,6 +76,7 @@ import Tidepool.Effect.Types (Log, logDebug)
 import Tidepool.Graph.Generic (AsHandler, type (:-))
 import Tidepool.Graph.Generic.Core (EntryNode, ExitNode, LogicNode)
 import Tidepool.Graph.Goto (Goto, GotoChoice, To, gotoExit)
+import Tidepool.Graph.Simple (SimpleGraphPattern(..))
 import Tidepool.Graph.Types (type (:@), Input, UsesEffects, Exit, MCPExport, MCPToolDef)
 import Tidepool.Schema (HasJSONSchema(..), objectSchema, emptySchema, SchemaType(..), describeField)
 
@@ -174,15 +175,19 @@ data FindCallersGraph mode = FindCallersGraph
   }
   deriving Generic
 
+-- | SimpleGraphPattern instance for find_callers.
+instance SimpleGraphPattern FindCallersGraph FindCallersArgs FindCallersResult where
+  simpleGraph logic = FindCallersGraph
+    { fcEntry = ()
+    , fcRun = logic
+    , fcExit = ()
+    }
+
 -- | Handlers for find_callers graph.
 findCallersHandlers
   :: (Member LSP es, Member Log es, LastMember IO es)
   => FindCallersGraph (AsHandler es)
-findCallersHandlers = FindCallersGraph
-  { fcEntry = ()
-  , fcRun = findCallersLogic
-  , fcExit = ()
-  }
+findCallersHandlers = simpleGraph findCallersLogic
 
 -- | Core logic for finding callers.
 findCallersLogic
@@ -369,15 +374,19 @@ data ShowFieldsGraph mode = ShowFieldsGraph
   }
   deriving Generic
 
+-- | SimpleGraphPattern instance for show_fields.
+instance SimpleGraphPattern ShowFieldsGraph ShowFieldsArgs ShowFieldsResult where
+  simpleGraph logic = ShowFieldsGraph
+    { sfEntry = ()
+    , sfRun = logic
+    , sfExit = ()
+    }
+
 -- | Handlers for show_fields graph.
 showFieldsHandlers
   :: (Member LSP es, Member Log es, LastMember IO es)
   => ShowFieldsGraph (AsHandler es)
-showFieldsHandlers = ShowFieldsGraph
-  { sfEntry = ()
-  , sfRun = showFieldsLogic
-  , sfExit = ()
-  }
+showFieldsHandlers = simpleGraph showFieldsLogic
 
 -- | Core logic for showing fields.
 showFieldsLogic
@@ -523,15 +532,19 @@ data ShowConstructorsGraph mode = ShowConstructorsGraph
   }
   deriving Generic
 
+-- | SimpleGraphPattern instance for show_constructors.
+instance SimpleGraphPattern ShowConstructorsGraph ShowConstructorsArgs ShowConstructorsResult where
+  simpleGraph logic = ShowConstructorsGraph
+    { scEntry = ()
+    , scRun = logic
+    , scExit = ()
+    }
+
 -- | Handlers for show_constructors graph.
 showConstructorsHandlers
   :: (Member LSP es, Member Log es, LastMember IO es)
   => ShowConstructorsGraph (AsHandler es)
-showConstructorsHandlers = ShowConstructorsGraph
-  { scEntry = ()
-  , scRun = showConstructorsLogic
-  , scExit = ()
-  }
+showConstructorsHandlers = simpleGraph showConstructorsLogic
 
 -- | Core logic for showing constructors.
 showConstructorsLogic
