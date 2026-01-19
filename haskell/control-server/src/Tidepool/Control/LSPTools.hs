@@ -817,10 +817,6 @@ stripDerivingClause txt =
          "deriving(" `T.isPrefixOf` stripped ||
          stripped == "deriving"
 
-    isUpperCase t = case T.uncons t of
-      Just (c, _) -> c >= 'A' && c <= 'Z'
-      Nothing -> False
-
 -- | Parse GADT constructors
 parseGADTConstructors :: Text -> [Constructor]
 parseGADTConstructors def =
@@ -833,11 +829,7 @@ parseGADTConstructors def =
       let stripped = T.stripStart line
       in "::" `T.isInfixOf` stripped &&
          not ("data " `T.isPrefixOf` stripped) &&
-         isUpperStart stripped
-
-    isUpperStart t = case T.uncons t of
-      Just (c, _) -> c >= 'A' && c <= 'Z'
-      Nothing -> False
+         isUpperCase stripped
 
     parseGADTCon line =
       case T.breakOn "::" line of
