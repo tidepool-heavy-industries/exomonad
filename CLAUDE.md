@@ -597,7 +597,7 @@ When ending a session:
 
 1. File issues for remaining work (`bd create`)
 2. Run quality gates (`just pre-commit`)
-3. Update issue status
+3. Update issue status (`bd close <id>`)
 4. Push: `git pull --rebase && bd sync && git push`
 5. Verify: `git status` shows "up to date"
 

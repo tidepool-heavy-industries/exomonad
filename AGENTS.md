@@ -364,7 +364,7 @@ bd create -t task "TODO: ..."
 just pre-commit
 
 # 3. Update status
-bd update <id> -s closed
+bd close <id> --reason "Merged: <PR URL>"
 
 # 4. Push
 bd sync
