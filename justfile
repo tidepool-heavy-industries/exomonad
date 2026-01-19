@@ -111,6 +111,20 @@ native:
 # NOTE: dm, dm-gui, tidy-gui disabled - see cabal.project for details
 
 # ─────────────────────────────────────────────────────────────
+# Gemini
+# ─────────────────────────────────────────────────────────────
+
+# Setup Gemini environment (builds MCP server + symlink)
+setup-gemini:
+    @echo "── Building tidepool-mcp-server ──"
+    cabal build tidepool-mcp-server
+    @echo ""
+    @echo "── Creating symlink at result/bin/mcp-server ──"
+    @mkdir -p result/bin
+    @ln -sf $$(cabal list-bin tidepool-mcp-server) result/bin/mcp-server
+    @echo "✓ Setup complete. Gemini configuration is ready."
+
+# ─────────────────────────────────────────────────────────────
 # Git hooks
 # ─────────────────────────────────────────────────────────────
 

@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "exomonad": {
+      "command": "./result/bin/mcp-server",
+      "args": [],
+      "cwd": "${GEMINI_PROJECT_DIR}",
+      "trust": true
+    }
+  }
+}
