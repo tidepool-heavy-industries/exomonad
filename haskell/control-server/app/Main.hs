@@ -1,10 +1,11 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 module Main where
 
 import Control.Concurrent (threadDelay, forkIO)
 import Control.Monad (forM_)
 import System.Directory (getCurrentDirectory)
 import System.Environment (getArgs, lookupEnv)
-import System.IO (hPutStrLn, stderr)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
@@ -14,6 +15,7 @@ import qualified Data.ByteString.Lazy as BL
 
 import Tidepool.Control.Server (runServer)
 import Tidepool.Control.Types (ServerConfig(..))
+import Tidepool.Control.Logging (Logger, withDualLogger, logInfo, logError)
 import Tidepool.Control.Export (exportTrainingExamples, exportGroupedTrainingExamples, exportWithExpansion, discoverSymbols, exportCodeSamples)
 import Tidepool.LSP.Interpreter (withLSPSession)
 import Tidepool.Training.Format (formatTrainingFromSkeleton)
@@ -28,106 +30,110 @@ import qualified Data.ByteString.Lazy.Char8 as BLC
 main :: IO ()
 main = do
   args <- getArgs
-  case args of
-    ["export-training"] -> runExportMode False []
-    ["export-training", "--grouped"] -> runExportMode True []
-    ["export-training", "--expand", countStr] -> runExpandMode (read countStr)
-    ("export-training" : "--grouped" : seeds) -> runExportMode True (map T.pack seeds)
-    ("export-training" : seeds) -> runExportMode False (map T.pack seeds)
-    ["export-code-samples", "--count", countStr] -> runCodeSamplesMode (read countStr)
-    ["format-training", skeletonFile] -> runFormatTrainingMode skeletonFile
-    ["--help"] -> printUsage
-    ["-h"] -> printUsage
-    _ -> runServerMode
+
+  -- Extract project directory early for dual logger initialization
+  projectDirEnv <- lookupEnv "TIDEPOOL_PROJECT_DIR"
+  projectDir <- case projectDirEnv of
+    Just dir -> pure dir
+    Nothing -> getCurrentDirectory
+
+  withDualLogger projectDir $ \logger -> do
+    logInfo logger $ "Session log: " <> T.pack projectDir <> "/.tidepool/logs/control-server-*.log"
+
+    case args of
+      ["export-training"] -> runExportMode logger False []
+      ["export-training", "--grouped"] -> runExportMode logger True []
+      ["export-training", "--expand", countStr] -> runExpandMode logger (read countStr)
+      ("export-training" : "--grouped" : seeds) -> runExportMode logger True (map T.pack seeds)
+      ("export-training" : seeds) -> runExportMode logger False (map T.pack seeds)
+      ["export-code-samples", "--count", countStr] -> runCodeSamplesMode logger (read countStr)
+      ["format-training", skeletonFile] -> runFormatTrainingMode logger skeletonFile
+      ["--help"] -> printUsage
+      ["-h"] -> printUsage
+      _ -> runServerMode logger projectDir
 
 -- HTTP health check server (port 7434)
-startHealthServer :: IO ()
-startHealthServer = do
+startHealthServer :: Logger -> IO ()
+startHealthServer logger = do
   let settings = setPort 7434 defaultSettings
-  hPutStrLn stderr "Health check server listening on port 7434"
+  logInfo logger "Health check server listening on port 7434"
   runSettings settings healthApp
   where
     healthApp :: Application
     healthApp _req respond = respond $
       responseLBS status200 [(hContentType, BS.pack "text/plain")] (BLC.pack "OK")
 
-runServerMode :: IO ()
-runServerMode = do
-  -- Read project directory from environment or use current directory
-  projectDirEnv <- lookupEnv "TIDEPOOL_PROJECT_DIR"
-  projectDir <- case projectDirEnv of
-    Just dir -> pure dir
-    Nothing -> getCurrentDirectory
-
+runServerMode :: Logger -> FilePath -> IO ()
+runServerMode logger projectDir = do
   let config = ServerConfig { projectDir = projectDir }
 
   -- Start health check server in background
-  _ <- forkIO startHealthServer
+  _ <- forkIO (startHealthServer logger)
 
   -- Start main control server
-  runServer config
+  runServer logger config
 
-runExportMode :: Bool -> [Text] -> IO ()
-runExportMode useGrouped seeds = do
+runExportMode :: Logger -> Bool -> [Text] -> IO ()
+runExportMode logger useGrouped seeds = do
   projectDir <- getCurrentDirectory
   withLSPSession projectDir $ \session -> do
     -- HLS needs time to index the workspace before workspaceSymbol works
-    hPutStrLn stderr "Waiting for HLS to index workspace (10 seconds)..."
+    logInfo logger "Waiting for HLS to index workspace (10 seconds)..."
     threadDelay (10 * 1000000)  -- 10 seconds in microseconds
 
     actualSeeds <- if null seeds
       then do
-        hPutStrLn stderr "Discovering symbols..."
-        discoverSymbols session
+        logInfo logger "Discovering symbols..."
+        discoverSymbols logger session
       else pure seeds
 
-    hPutStrLn stderr $ "Generating examples for " <> show (length actualSeeds) <> " symbols..."
+    logInfo logger $ "Generating examples for " <> T.pack (show (length actualSeeds)) <> " symbols..."
     if useGrouped
       then do
-        hPutStrLn stderr "Using grouped format (v2) with LSP orchestration..."
+        logInfo logger "Using grouped format (v2) with LSP orchestration..."
         exportGroupedTrainingExamples session actualSeeds
       else exportTrainingExamples session actualSeeds
 
-runExpandMode :: Int -> IO ()
-runExpandMode targetCount = do
+runExpandMode :: Logger -> Int -> IO ()
+runExpandMode logger targetCount = do
   projectDir <- getCurrentDirectory
   withLSPSession projectDir $ \session -> do
     -- HLS needs time to index the workspace before workspaceSymbol works
-    hPutStrLn stderr "Waiting for HLS to index workspace (10 seconds)..."
+    logInfo logger "Waiting for HLS to index workspace (10 seconds)..."
     threadDelay (10 * 1000000)  -- 10 seconds in microseconds
 
-    exportWithExpansion session targetCount
+    exportWithExpansion logger session targetCount
 
-runCodeSamplesMode :: Int -> IO ()
-runCodeSamplesMode count = do
+runCodeSamplesMode :: Logger -> Int -> IO ()
+runCodeSamplesMode logger count = do
   projectDir <- getCurrentDirectory
   withLSPSession projectDir $ \session -> do
     -- HLS needs time to index the workspace
-    hPutStrLn stderr "Waiting for HLS to index workspace (10 seconds)..."
+    logInfo logger "Waiting for HLS to index workspace (10 seconds)..."
     threadDelay (10 * 1000000)  -- 10 seconds in microseconds
 
-    hPutStrLn stderr $ "Generating " <> show count <> " code samples (v3 format)..."
-    exportCodeSamples session projectDir count
+    logInfo logger $ "Generating " <> T.pack (show count) <> " code samples (v3 format)..."
+    exportCodeSamples logger session projectDir count
 
-runFormatTrainingMode :: FilePath -> IO ()
-runFormatTrainingMode skeletonFile = do
-  hPutStrLn stderr $ "Reading skeleton file: " <> skeletonFile
+runFormatTrainingMode :: Logger -> FilePath -> IO ()
+runFormatTrainingMode logger skeletonFile = do
+  logInfo logger $ "Reading skeleton file: " <> T.pack skeletonFile
   content <- TIO.readFile skeletonFile
   let skeletonLines = T.lines content
 
-  hPutStrLn stderr $ "Processing " <> show (length skeletonLines) <> " skeleton entries..."
+  logInfo logger $ "Processing " <> T.pack (show (length skeletonLines)) <> " skeleton entries..."
 
   -- Process each line
   forM_ skeletonLines $ \line -> do
     case eitherDecode (BL.fromStrict $ T.encodeUtf8 line) of
-      Left err -> hPutStrLn stderr $ "ERROR parsing line: " <> err
+      Left err -> logError logger $ "ERROR parsing line: " <> T.pack err
       Right skeleton -> case formatTrainingFromSkeleton skeleton of
-        Left err -> hPutStrLn stderr $ "ERROR formatting: " <> T.unpack err
+        Left err -> logError logger $ "ERROR formatting: " <> err
         Right formatted -> do
           BL.putStr (encode formatted)
           putStrLn ""  -- Add newline for JSONL format
 
-  hPutStrLn stderr "Done"
+  logInfo logger "Done"
 
 printUsage :: IO ()
 printUsage = do

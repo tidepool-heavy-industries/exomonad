@@ -17,13 +17,13 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BS8
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.Text as T
-import qualified Data.Text.IO as TIO
+import qualified Data.Text.Encoding as T
 import Network.Socket hiding (ControlMessage)
 import Network.Socket.ByteString (recv, sendAll)
 import System.Environment (lookupEnv)
-import System.IO (hFlush, stdout)
 
 import Tidepool.Control.Handler (handleMessage)
+import Tidepool.Control.Logging (Logger, logInfo, logDebug, logError)
 import Tidepool.Control.Protocol
 import Tidepool.Control.Types (ServerConfig(..))
 import Tidepool.LSP.Interpreter (LSPSession, withLSPSession)
@@ -36,27 +36,24 @@ defaultTcpPort = 7432
 --
 -- 1. Starts LSP session for the project
 -- 2. Accepts TCP connections on port 7432 (or MANTLE_CONTROL_PORT)
-runServer :: ServerConfig -> IO ()
-runServer config = do
+runServer :: Logger -> ServerConfig -> IO ()
+runServer logger config = do
   -- Get TCP port from environment or use default
   tcpPortEnv <- lookupEnv "MANTLE_CONTROL_PORT"
   let tcpPort = maybe defaultTcpPort read tcpPortEnv
 
-  TIO.putStrLn $ "Starting LSP session for project: " <> T.pack config.projectDir
-  hFlush stdout
+  logInfo logger $ "Starting LSP session for project: " <> T.pack config.projectDir
 
   -- Start LSP session and run server
   withLSPSession config.projectDir $ \lspSession -> do
-    TIO.putStrLn "LSP session initialized"
-    hFlush stdout
+    logInfo logger "LSP session initialized"
 
     bracket (setupTcpSocket tcpPort) close $ \sock -> do
-      TIO.putStrLn $ "Control server listening on TCP port " <> T.pack (show tcpPort)
-      hFlush stdout
+      logInfo logger $ "Control server listening on TCP port " <> T.pack (show tcpPort)
 
       forever $ do
         (conn, _peer) <- accept sock
-        void $ forkIO $ handleConnection lspSession conn `finally` close conn
+        void $ forkIO $ handleConnection logger lspSession conn `finally` close conn
 
 -- | Setup TCP socket on given port.
 setupTcpSocket :: Int -> IO Socket
@@ -68,10 +65,9 @@ setupTcpSocket port = do
   pure sock
 
 -- | Handle a single connection (one NDJSON request-response).
-handleConnection :: LSPSession -> Socket -> IO ()
-handleConnection lspSession conn = do
-  TIO.putStrLn "Connection received"
-  hFlush stdout
+handleConnection :: Logger -> LSPSession -> Socket -> IO ()
+handleConnection logger lspSession conn = do
+  logDebug logger "Connection received"
 
   (do
     -- Read until newline (NDJSON framing)
@@ -79,19 +75,20 @@ handleConnection lspSession conn = do
 
     case eitherDecodeStrict msgBytes of
       Left err -> do
-        TIO.putStrLn $ "Parse error: " <> T.pack err
-        -- Send error response
+        logError logger $ "[Server] JSON parse error: " <> T.pack err
+        logDebug logger $ "[Server] Raw input (" <> T.pack (show (BS.length msgBytes)) <> " bytes): "
+          <> T.decodeUtf8 (BS.take 200 msgBytes)  -- First 200 bytes for debugging
         let response = hookError $ T.pack $ "JSON parse error: " <> err
         sendResponse conn response
 
       Right msg -> do
-        logMessage msg
-        response <- handleMessage lspSession msg
-        logResponse response
+        logMessage logger msg
+        response <- handleMessage logger lspSession msg
+        logResponse logger response
         sendResponse conn response
     )
   `catch` \(e :: SomeException) -> do
-    TIO.putStrLn $ "Connection error: " <> T.pack (show e)
+    logError logger $ "Connection error: " <> T.pack (show e)
     -- Send error response to client instead of leaving them hanging
     sendResponse conn $ hookError $ "Connection error: " <> T.pack (show e)
 
@@ -116,36 +113,30 @@ sendResponse conn response = do
   sendAll conn bytes
 
 -- | Log incoming message.
-logMessage :: ControlMessage -> IO ()
-logMessage = \case
-  HookEvent input -> do
-    TIO.putStrLn $ "[HOOK] " <> input.hookEventName
-      <> maybe "" (\t -> " tool=" <> t) input.toolName
-    hFlush stdout
-  McpToolCall _ name _ -> do
-    TIO.putStrLn $ "[MCP] tool=" <> name
-    hFlush stdout
-  ToolsListRequest -> do
-    TIO.putStrLn "[MCP] tools/list request"
-    hFlush stdout
+logMessage :: Logger -> ControlMessage -> IO ()
+logMessage logger = \case
+  HookEvent input ->
+    logDebug logger $ "[HOOK] " <> input.hookEventName
+      <> maybe "" (" tool=" <>) input.toolName
+  McpToolCall reqId name _args ->
+    logInfo logger $ "[MCP:" <> reqId <> "] tool=" <> name
+  ToolsListRequest ->
+    logDebug logger "[MCP] tools/list request"
 
 -- | Log outgoing response.
-logResponse :: ControlResponse -> IO ()
-logResponse = \case
+logResponse :: Logger -> ControlResponse -> IO ()
+logResponse logger = \case
   HookResponse output exitCode -> do
     let decision = case output.hookSpecificOutput of
           Just (PreToolUseOutput d _ _) -> " decision=" <> d
           _ -> ""
-    TIO.putStrLn $ "[HOOK] -> continue=" <> T.pack (show output.continue_)
+    logDebug logger $ "[HOOK] -> continue=" <> T.pack (show output.continue_)
       <> decision <> " exit=" <> T.pack (show exitCode)
-    hFlush stdout
   McpToolResponse _ result err -> do
     let status = case (result, err) of
           (Just _, _) -> "success"
           (_, Just e) -> "error: " <> e.errorMessage
           _ -> "empty"
-    TIO.putStrLn $ "[MCP] -> " <> status
-    hFlush stdout
-  ToolsListResponse tools -> do
-    TIO.putStrLn $ "[MCP] -> tools/list: " <> T.pack (show (length tools)) <> " tools"
-    hFlush stdout
+    logDebug logger $ "[MCP] -> " <> status
+  ToolsListResponse tools ->
+    logDebug logger $ "[MCP] -> tools/list: " <> T.pack (show (length tools)) <> " tools"

@@ -18,15 +18,14 @@ module Tidepool.Control.Handler.MCP
   ( handleMcpTool
   ) where
 
-import Control.Exception (SomeException, try)
+import Control.Exception (SomeException, displayException, try)
 import Control.Monad.Freer (runM)
 import Data.Aeson (Value, fromJSON, toJSON, Result(..))
 import Data.Text (Text)
 import qualified Data.Text as T
-import qualified Data.Text.IO as TIO
 import System.Environment (lookupEnv)
-import System.IO (hFlush, stdout)
 
+import Tidepool.Control.Logging (Logger, logInfo, logDebug, logError)
 import Tidepool.Control.Protocol
 import Tidepool.Control.Scout.DocGen (TeachQuery(..), TeachingDoc(..))
 import Tidepool.Control.Scout.DocGen.Teacher (ScoutGemmaEffect)
@@ -52,23 +51,21 @@ import Tidepool.Teaching.Teacher (teacherGuidance)
 --
 -- == Tier 2: LLM-Enhanced Tools (Graph DSL)
 --   - "teach-graph": Generate teaching documents via graph DSL + Haiku
-handleMcpTool :: LSPSession -> Text -> Text -> Value -> IO ControlResponse
-handleMcpTool lspSession reqId toolName args = do
-  TIO.putStrLn $ "  tool=" <> toolName
-  hFlush stdout
+handleMcpTool :: Logger -> LSPSession -> Text -> Text -> Value -> IO ControlResponse
+handleMcpTool logger lspSession reqId toolName args = do
+  logInfo logger $ "[MCP:" <> reqId <> "] Dispatching: " <> toolName
 
   case toolName of
     -- Tier 1: Deterministic LSP tools (graph-based)
-    "find_callers" -> handleFindCallersTool lspSession reqId args
-    "show_fields" -> handleShowFieldsTool lspSession reqId args
-    "show_constructors" -> handleShowConstructorsTool lspSession reqId args
+    "find_callers" -> handleFindCallersTool logger lspSession reqId args
+    "show_fields" -> handleShowFieldsTool logger lspSession reqId args
+    "show_constructors" -> handleShowConstructorsTool logger lspSession reqId args
 
     -- Tier 2: LLM-enhanced tools (graph-based)
-    "teach-graph" -> handleTeachGraphTool lspSession reqId args
+    "teach-graph" -> handleTeachGraphTool logger lspSession reqId args
 
     _ -> do
-      TIO.putStrLn $ "  (unknown tool)"
-      hFlush stdout
+      logError logger $ "  (unknown tool)"
       pure $ mcpToolError reqId $
         "Tool not found: " <> toolName <>
         ". Available tools: find_callers, show_fields, show_constructors, teach-graph"
@@ -78,44 +75,41 @@ handleMcpTool lspSession reqId toolName args = do
 --
 -- Uses the graph DSL implementation with Haiku for symbol selection.
 -- Supports training data capture via tidepool-teaching when TEACHING_ENABLED=true.
-handleTeachGraphTool :: LSPSession -> Text -> Value -> IO ControlResponse
-handleTeachGraphTool lspSession reqId args = do
+handleTeachGraphTool :: Logger -> LSPSession -> Text -> Value -> IO ControlResponse
+handleTeachGraphTool logger lspSession reqId args = do
   case fromJSON args of
     Error err -> do
-      TIO.putStrLn $ "  parse error: " <> T.pack err
-      hFlush stdout
+      logError logger $ "  parse error: " <> T.pack err
       pure $ mcpToolError reqId $ "Invalid teach-graph arguments: " <> T.pack err
 
     Success query -> do
-      TIO.putStrLn $ "  topic=" <> tqTopic query
-      TIO.putStrLn $ "  seeds=" <> T.intercalate ", " (tqSeeds query)
-      TIO.putStrLn $ "  budget=" <> T.pack (show $ tqBudget query)
-      hFlush stdout
+      logDebug logger $ "  topic=" <> tqTopic query
+      logDebug logger $ "  seeds=" <> T.intercalate ", " (tqSeeds query)
+      logDebug logger $ "  budget=" <> T.pack (show $ tqBudget query)
 
       -- Check for teaching mode
       maybeConfig <- loadTeachingConfig
       case maybeConfig of
         Just config -> do
-          TIO.putStrLn "  mode=teaching (recording to JSONL)"
-          hFlush stdout
-          runWithTeaching config lspSession reqId query
+          logInfo logger "  mode=teaching (recording to JSONL)"
+          runWithTeaching logger config lspSession reqId query
 
         Nothing -> do
-          TIO.putStrLn "  mode=production (no recording)"
-          hFlush stdout
-          runWithoutTeaching lspSession reqId query
+          logInfo logger "  mode=production (no recording)"
+          runWithoutTeaching logger lspSession reqId query
 
 
 -- | Run graph-based exploration with teaching enabled.
 --
 -- Records all LLM turns to anthropic.jsonl for training data.
 runWithTeaching
-  :: TeachingConfig
+  :: Logger
+  -> TeachingConfig
   -> LSPSession
   -> Text
   -> TeachQuery
   -> IO ControlResponse
-runWithTeaching config lspSession reqId query = do
+runWithTeaching logger config lspSession reqId query = do
   let guidance = teacherGuidance @ScoutGemmaEffect
   resultOrErr <- try $ withTeaching config guidance $ \env -> do
     runM
@@ -128,37 +122,31 @@ runWithTeaching config lspSession reqId query = do
 
   case resultOrErr of
     Left (e :: SomeException) -> do
-      TIO.putStrLn $ "  error: " <> T.pack (show e)
-      hFlush stdout
-      pure $ mcpToolError reqId $ "Teach-graph exploration failed: " <> T.pack (show e)
+      logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
+      pure $ mcpToolError reqId $ "Teach-graph exploration failed: " <> T.pack (displayException e)
 
     Right doc -> do
       let totalUnits = length (tdPrereqs doc) + length (tdCore doc) + length (tdSupport doc)
-      TIO.putStrLn $ "  generated doc with " <> T.pack (show totalUnits) <> " teaching units"
-      TIO.putStrLn "  training data recorded"
-      hFlush stdout
+      logInfo logger $ "[MCP:" <> reqId <> "] Generated doc with " <> T.pack (show totalUnits) <> " teaching units"
+      logInfo logger $ "[MCP:" <> reqId <> "] Training data recorded"
       pure $ mcpToolSuccess reqId (toJSON doc)
 
 
 -- | Run graph-based exploration without teaching.
 --
 -- Uses production LLM interpreter (requires ANTHROPIC_API_KEY).
-runWithoutTeaching :: LSPSession -> Text -> TeachQuery -> IO ControlResponse
-runWithoutTeaching _lspSession reqId _query = do
+runWithoutTeaching :: Logger -> LSPSession -> Text -> TeachQuery -> IO ControlResponse
+runWithoutTeaching logger _lspSession reqId _query = do
   -- Check for ANTHROPIC_API_KEY
   maybeKey <- lookupEnv "ANTHROPIC_API_KEY"
   case maybeKey of
     Nothing -> do
-      TIO.putStrLn "  error: ANTHROPIC_API_KEY not set"
-      hFlush stdout
+      logError logger "  error: ANTHROPIC_API_KEY not set"
       pure $ mcpToolError reqId
         "ANTHROPIC_API_KEY environment variable not set. Either set it or enable teaching mode."
 
     Just _key -> do
-      -- TODO: Use production LLM interpreter
-      -- For now, return an error explaining the limitation
-      TIO.putStrLn "  error: Production mode not yet implemented"
-      hFlush stdout
+      logError logger "  error: Production mode not yet implemented"
       pure $ mcpToolError reqId $
         "Production mode for teach-graph not yet implemented. " <>
         "Set TEACHING_ENABLED=true to use teaching mode instead."
@@ -172,17 +160,15 @@ runWithoutTeaching _lspSession reqId _query = do
 --
 -- Runs the FindCallersGraph logic to find actual call sites of a function,
 -- filtering out imports, type signatures, and comments.
-handleFindCallersTool :: LSPSession -> Text -> Value -> IO ControlResponse
-handleFindCallersTool lspSession reqId args = do
+handleFindCallersTool :: Logger -> LSPSession -> Text -> Value -> IO ControlResponse
+handleFindCallersTool logger lspSession reqId args = do
   case fromJSON args of
     Error err -> do
-      TIO.putStrLn $ "  parse error: " <> T.pack err
-      hFlush stdout
+      logError logger $ "  parse error: " <> T.pack err
       pure $ mcpToolError reqId $ "Invalid find_callers arguments: " <> T.pack err
 
     Success fcArgs -> do
-      TIO.putStrLn $ "  name=" <> fcaName fcArgs
-      hFlush stdout
+      logDebug logger $ "  name=" <> fcaName fcArgs
 
       resultOrErr <- try $ runM
         $ runLog Debug
@@ -191,31 +177,27 @@ handleFindCallersTool lspSession reqId args = do
 
       case resultOrErr of
         Left (e :: SomeException) -> do
-          TIO.putStrLn $ "  error: " <> T.pack (show e)
-          hFlush stdout
-          pure $ mcpToolError reqId $ "find_callers failed: " <> T.pack (show e)
+          logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId $ "find_callers failed: " <> T.pack (displayException e)
 
         Right result -> do
-          TIO.putStrLn $ "  found " <> T.pack (show $ length $ fcrCallSites result) <> " call sites"
-          TIO.putStrLn $ "  filtered " <> T.pack (show $ fcrFilteredCount result) <> " references"
-          hFlush stdout
+          logInfo logger $ "[MCP:" <> reqId <> "] Found " <> T.pack (show $ length $ fcrCallSites result) <> " call sites"
+          logDebug logger $ "[MCP:" <> reqId <> "] Filtered " <> T.pack (show $ fcrFilteredCount result) <> " references"
           pure $ mcpToolSuccess reqId (toJSON result)
 
 
 -- | Handle the show_fields tool.
 --
 -- Runs the ShowFieldsGraph logic to show fields of a Haskell record type.
-handleShowFieldsTool :: LSPSession -> Text -> Value -> IO ControlResponse
-handleShowFieldsTool lspSession reqId args = do
+handleShowFieldsTool :: Logger -> LSPSession -> Text -> Value -> IO ControlResponse
+handleShowFieldsTool logger lspSession reqId args = do
   case fromJSON args of
     Error err -> do
-      TIO.putStrLn $ "  parse error: " <> T.pack err
-      hFlush stdout
+      logError logger $ "  parse error: " <> T.pack err
       pure $ mcpToolError reqId $ "Invalid show_fields arguments: " <> T.pack err
 
     Success sfArgs -> do
-      TIO.putStrLn $ "  type_name=" <> sfaTypeName sfArgs
-      hFlush stdout
+      logDebug logger $ "  type_name=" <> sfaTypeName sfArgs
 
       resultOrErr <- try $ runM
         $ runLog Debug
@@ -224,30 +206,26 @@ handleShowFieldsTool lspSession reqId args = do
 
       case resultOrErr of
         Left (e :: SomeException) -> do
-          TIO.putStrLn $ "  error: " <> T.pack (show e)
-          hFlush stdout
-          pure $ mcpToolError reqId $ "show_fields failed: " <> T.pack (show e)
+          logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId $ "show_fields failed: " <> T.pack (displayException e)
 
         Right result -> do
-          TIO.putStrLn $ "  found " <> T.pack (show $ length $ sfrFields result) <> " fields"
-          hFlush stdout
+          logInfo logger $ "[MCP:" <> reqId <> "] Found " <> T.pack (show $ length $ sfrFields result) <> " fields"
           pure $ mcpToolSuccess reqId (toJSON result)
 
 
 -- | Handle the show_constructors tool.
 --
 -- Runs the ShowConstructorsGraph logic to show constructors of a Haskell sum type or GADT.
-handleShowConstructorsTool :: LSPSession -> Text -> Value -> IO ControlResponse
-handleShowConstructorsTool lspSession reqId args = do
+handleShowConstructorsTool :: Logger -> LSPSession -> Text -> Value -> IO ControlResponse
+handleShowConstructorsTool logger lspSession reqId args = do
   case fromJSON args of
     Error err -> do
-      TIO.putStrLn $ "  parse error: " <> T.pack err
-      hFlush stdout
+      logError logger $ "  parse error: " <> T.pack err
       pure $ mcpToolError reqId $ "Invalid show_constructors arguments: " <> T.pack err
 
     Success scArgs -> do
-      TIO.putStrLn $ "  type_name=" <> scaTypeName scArgs
-      hFlush stdout
+      logDebug logger $ "  type_name=" <> scaTypeName scArgs
 
       resultOrErr <- try $ runM
         $ runLog Debug
@@ -256,11 +234,9 @@ handleShowConstructorsTool lspSession reqId args = do
 
       case resultOrErr of
         Left (e :: SomeException) -> do
-          TIO.putStrLn $ "  error: " <> T.pack (show e)
-          hFlush stdout
-          pure $ mcpToolError reqId $ "show_constructors failed: " <> T.pack (show e)
+          logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId $ "show_constructors failed: " <> T.pack (displayException e)
 
         Right result -> do
-          TIO.putStrLn $ "  found " <> T.pack (show $ length $ scrConstructors result) <> " constructors"
-          hFlush stdout
+          logInfo logger $ "[MCP:" <> reqId <> "] Found " <> T.pack (show $ length $ scrConstructors result) <> " constructors"
           pure $ mcpToolSuccess reqId (toJSON result)

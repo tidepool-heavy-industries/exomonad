@@ -23,6 +23,7 @@ library
         Tidepool.Control.Types
         Tidepool.Control.Server
         Tidepool.Control.Handler
+        Tidepool.Control.Logging
         Tidepool.Control.Handler.Hook
         Tidepool.Control.Handler.MCP
         Tidepool.Control.LSPTools
@@ -54,6 +55,8 @@ library
         directory,
         filepath,
         network >= 3.1 && < 4,
+        fast-logger >= 3.0 && < 4,
+        time >= 1.9 && < 2,
         -- Scout dependencies
         containers >= 0.6 && < 1,
         freer-simple,

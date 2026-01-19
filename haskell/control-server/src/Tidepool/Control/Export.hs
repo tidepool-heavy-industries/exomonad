@@ -36,16 +36,16 @@ import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import System.Directory (listDirectory, doesFileExist, doesDirectoryExist)
 import System.FilePath ((</>), takeExtension)
-import System.IO (stdout, stderr, hFlush, hPutStrLn)
+import System.IO (stdout, hFlush)
 import System.Random (randomRIO)
 
-import Data.Aeson (Value)
 import Data.Proxy (Proxy(..))
+
+import Tidepool.Control.Logging (Logger, logInfo, logDebug)
 
 import Tidepool.Control.Protocol (ToolDefinition(..))
 import Tidepool.Control.LSPTools
   ( FindCallersGraph, ShowFieldsGraph, ShowConstructorsGraph )
-import Tidepool.Control.Scout.DocGen (TeachQuery(..))
 import Tidepool.Control.Scout.Graph (DocGenGraph)
 import Tidepool.Control.Scout.DocGen.Gemma (extractCandidates)
 import Tidepool.Effect.LSP
@@ -515,8 +515,8 @@ functionPrefixes =
 --
 -- Filters to functions only, since data types have minimal hover info
 -- (just ":: Type") while functions have full signatures with type references.
-discoverSymbols :: LSPSession -> IO [Text]
-discoverSymbols session = do
+discoverSymbols :: Logger -> LSPSession -> IO [Text]
+discoverSymbols logger session = do
   -- Query multiple patterns to overcome HLS result limits
   allSymLists <- forM functionPrefixes $ \prefix -> do
     runM $ runLSP session $ workspaceSymbol prefix
@@ -535,8 +535,8 @@ discoverSymbols session = do
   -- Extract unique names (no limit - we want 800-1k examples)
   let uniqueNames = nub $ map (\(SymbolInformation name _ _ _) -> name) userDefined
 
-  hPutStrLn stderr $ "Discovered " <> show (length uniqueNames) <> " functions from "
-    <> show (length allSyms) <> " total symbol results"
+  logInfo logger $ "Discovered " <> T.pack (show (length uniqueNames)) <> " functions from "
+    <> T.pack (show (length allSyms)) <> " total symbol results"
   pure uniqueNames
 
 -- | Key files to open to trigger HLS multi-package indexing.
@@ -559,38 +559,39 @@ triggerFiles =
 -- BFS crawl: starts with local functions, follows candidate types to their
 -- definitions in other packages, continues until target count reached.
 exportWithExpansion
-  :: LSPSession
+  :: Logger
+  -> LSPSession
   -> Int           -- ^ Target example count (e.g., 1000)
   -> IO ()
-exportWithExpansion session targetCount = do
+exportWithExpansion logger session targetCount = do
   -- Track state
   countRef <- newIORef (0 :: Int)
   visitedFilesRef <- newIORef Set.empty
   pendingTypesRef <- newIORef Set.empty
 
   -- Trigger HLS to index multiple packages by opening key files
-  hPutStrLn stderr "Opening key files to trigger multi-package indexing..."
+  logInfo logger "Opening key files to trigger multi-package indexing..."
   forM_ triggerFiles $ \file -> do
-    hPutStrLn stderr $ "  Opening: " <> T.unpack file
+    logDebug logger $ "  Opening: " <> file
     -- Hover at line 1 forces HLS to load the file's component
     _ <- runM $ runLSP session $ hover (textDocument ("file://" <> file)) (position 0 0)
     pure ()
 
   -- Give HLS time to index the newly loaded components
-  hPutStrLn stderr "Waiting for HLS to index new components (5 seconds)..."
+  logInfo logger "Waiting for HLS to index new components (5 seconds)..."
   threadDelay (5 * 1000000)
 
   -- Start with local workspace symbols
-  initialSyms <- discoverSymbols session
+  initialSyms <- discoverSymbols logger session
 
-  hPutStrLn stderr $ "Starting expansion with " <> show (length initialSyms) <> " seed symbols"
-  hPutStrLn stderr $ "Target: " <> show targetCount <> " examples"
+  logInfo logger $ "Starting expansion with " <> T.pack (show (length initialSyms)) <> " seed symbols"
+  logInfo logger $ "Target: " <> T.pack (show targetCount) <> " examples"
 
   -- Process initial symbols, collecting candidate types
   forM_ initialSyms $ \seedName -> do
     count <- readIORef countRef
     when (count < targetCount) $ do
-      newTypes <- processSymbol session seedName countRef visitedFilesRef targetCount
+      newTypes <- processSymbol logger session seedName countRef visitedFilesRef targetCount
       -- Add discovered types to pending queue
       forM_ newTypes $ \t -> modifyIORef' pendingTypesRef (Set.insert t)
 
@@ -603,7 +604,7 @@ exportWithExpansion session targetCount = do
           let (nextType, remaining) = Set.deleteFindMin pending
           writeIORef pendingTypesRef remaining
 
-          hPutStrLn stderr $ "[Expand] Following type: " <> T.unpack nextType
+          logDebug logger $ "[Expand] Following type: " <> nextType
 
           -- Find definition of this type
           maybeFile <- findTypeDefinitionFile session nextType
@@ -615,7 +616,7 @@ exportWithExpansion session targetCount = do
                 then expandLoop  -- Already visited
                 else do
                   modifyIORef' visitedFilesRef (Set.insert file)
-                  hPutStrLn stderr $ "[Expand] New file: " <> T.unpack file
+                  logDebug logger $ "[Expand] New file: " <> file
 
                   -- Find functions in this file via workspace symbol
                   -- Query for common function prefixes found in the file
@@ -625,13 +626,13 @@ exportWithExpansion session targetCount = do
                   let funcNames = [n | SymbolInformation n k _ _ <- funcs
                                      , k `elem` [SKFunction, SKMethod, SKVariable]
                                      , not ("$f" `T.isPrefixOf` n)]
-                  hPutStrLn stderr $ "[Expand] Found " <> show (length funcNames) <> " functions"
+                  logDebug logger $ "[Expand] Found " <> T.pack (show (length funcNames)) <> " functions"
 
                   -- Process each function
                   forM_ funcNames $ \funcName -> do
                     c <- readIORef countRef
                     when (c < targetCount) $ do
-                      newTypes <- processSymbol session funcName countRef visitedFilesRef targetCount
+                      newTypes <- processSymbol logger session funcName countRef visitedFilesRef targetCount
                       forM_ newTypes $ \t -> modifyIORef' pendingTypesRef (Set.insert t)
 
                   expandLoop
@@ -639,17 +640,18 @@ exportWithExpansion session targetCount = do
   expandLoop
 
   finalCount <- readIORef countRef
-  hPutStrLn stderr $ "Expansion complete: " <> show finalCount <> " examples generated"
+  logInfo logger $ "Expansion complete: " <> T.pack (show finalCount) <> " examples generated"
 
 -- | Process a single symbol: generate example and return candidate types.
 processSymbol
-  :: LSPSession
+  :: Logger
+  -> LSPSession
   -> Text           -- ^ Symbol name
   -> IORef Int      -- ^ Counter ref
   -> IORef (Set.Set Text)  -- ^ Visited files ref
   -> Int            -- ^ Target count
   -> IO [Text]      -- ^ Returns candidate types for expansion
-processSymbol session symName countRef visitedFilesRef targetCount = do
+processSymbol logger session symName countRef visitedFilesRef targetCount = do
   count <- readIORef countRef
   if count >= targetCount
     then pure []
@@ -697,7 +699,7 @@ processSymbol session symName countRef visitedFilesRef targetCount = do
               modifyIORef' countRef (+1)
               newCount <- readIORef countRef
               when (newCount `mod` 50 == 0) $
-                hPutStrLn stderr $ "[Progress] " <> show newCount <> " examples generated"
+                logInfo logger $ "[Progress] " <> T.pack (show newCount) <> " examples generated"
 
             -- Return candidates for expansion
             pure candidates
@@ -830,19 +832,20 @@ readCodeAtRange file (Range (Position startLine _) (Position endLine _)) = do
 --
 -- Returns: [(Text, Range, SymbolName, CodeBody)] where first Text is file path
 sampleCodeBodies
-  :: LSPSession
+  :: Logger
+  -> LSPSession
   -> FilePath    -- ^ Project root (unused, kept for API compatibility)
   -> Int         -- ^ Number to sample
   -> IO [(Text, Range, Text, Text)]
-sampleCodeBodies session _projectRoot count = do
+sampleCodeBodies logger session _projectRoot count = do
   -- Use workspaceSymbol for fast discovery (much faster than documentSymbol on all files)
-  hPutStrLn stderr "[Sample] Discovering symbols via LSP workspaceSymbol..."
-  allSymNames <- discoverSymbols session
+  logDebug logger "[Sample] Discovering symbols via LSP workspaceSymbol..."
+  allSymNames <- discoverSymbols logger session
 
-  hPutStrLn stderr $ "[Sample] Found " <> show (length allSymNames) <> " symbols"
+  logDebug logger $ "[Sample] Found " <> T.pack (show (length allSymNames)) <> " symbols"
 
   -- Get full location info for each symbol
-  hPutStrLn stderr "[Sample] Resolving symbol locations..."
+  logDebug logger "[Sample] Resolving symbol locations..."
   symbolsWithLocations <- fmap concat $ forM allSymNames $ \symName -> do
     syms <- runM $ runLSP session $ workspaceSymbol symName
     -- Filter to exact matches with valid locations
@@ -857,15 +860,15 @@ sampleCodeBodies session _projectRoot count = do
                    ]
     pure matching
 
-  hPutStrLn stderr $ "[Sample] Resolved " <> show (length symbolsWithLocations) <> " symbol locations"
+  logDebug logger $ "[Sample] Resolved " <> T.pack (show (length symbolsWithLocations)) <> " symbol locations"
 
   -- Randomly sample N symbols
   let sampleCount = min count (length symbolsWithLocations)
-  hPutStrLn stderr $ "[Sample] Sampling " <> show sampleCount <> " random symbols..."
+  logDebug logger $ "[Sample] Sampling " <> T.pack (show sampleCount) <> " random symbols..."
   sampled <- randomSample sampleCount symbolsWithLocations
 
   -- Read code at each range
-  hPutStrLn stderr "[Sample] Reading code bodies..."
+  logDebug logger "[Sample] Reading code bodies..."
   forM sampled $ \(file, range, name) -> do
     code <- readCodeAtRange (T.unpack file) range
     pure (file, range, name, code)
@@ -892,10 +895,10 @@ randomSample n items
 -- Generates JSONL with code bodies and placeholders for annotation:
 -- {"file": "...", "range": {...}, "name": "...", "code": "...",
 --  "criteria": "TODO: add criteria", "selected": []}
-exportCodeSamples :: LSPSession -> FilePath -> Int -> IO ()
-exportCodeSamples session projectRoot count = do
-  samples <- sampleCodeBodies session projectRoot count
-  hPutStrLn stderr $ "[Export] Generated " <> show (length samples) <> " samples"
+exportCodeSamples :: Logger -> LSPSession -> FilePath -> Int -> IO ()
+exportCodeSamples logger session projectRoot count = do
+  samples <- sampleCodeBodies logger session projectRoot count
+  logInfo logger $ "[Export] Generated " <> T.pack (show (length samples)) <> " samples"
 
   forM_ samples $ \(file, Range (Position startLine startChar) (Position endLine endChar), name, code) -> do
     let skeleton = object
@@ -925,16 +928,30 @@ exportCodeSamples session projectRoot count = do
 --
 -- Uses ReifyMCPTools to extract tool metadata from MCPExport annotations.
 -- Returns ToolDefinition format that matches Rust protocol types.
-exportMCPTools :: IO [ToolDefinition]
-exportMCPTools = do
-  -- Extract all tools from graph DSL (automatic discovery)
-  let allTools = concat
-        [ reifyMCPTools (Proxy @FindCallersGraph)
-        , reifyMCPTools (Proxy @ShowFieldsGraph)
-        , reifyMCPTools (Proxy @ShowConstructorsGraph)
-        , reifyMCPTools (Proxy @DocGenGraph)
-        ]
+exportMCPTools :: Logger -> IO [ToolDefinition]
+exportMCPTools logger = do
+  logInfo logger "[MCP Discovery] Starting tool discovery from graphs..."
 
+  -- Extract all tools from graph DSL (automatic discovery)
+  let fcTools = reifyMCPTools (Proxy @FindCallersGraph)
+  let sfTools = reifyMCPTools (Proxy @ShowFieldsGraph)
+  let scTools = reifyMCPTools (Proxy @ShowConstructorsGraph)
+  let dgTools = reifyMCPTools (Proxy @DocGenGraph)
+
+  -- Log discovered tools per graph for debugging
+  logDebug logger $ "[MCP Discovery] FindCallersGraph: " <> T.pack (show (length fcTools)) <> " tools"
+  logDebug logger $ "[MCP Discovery] ShowFieldsGraph: " <> T.pack (show (length sfTools)) <> " tools"
+  logDebug logger $ "[MCP Discovery] ShowConstructorsGraph: " <> T.pack (show (length scTools)) <> " tools"
+  logDebug logger $ "[MCP Discovery] DocGenGraph: " <> T.pack (show (length dgTools)) <> " tools"
+
+  let allTools = concat [fcTools, sfTools, scTools, dgTools]
+  logInfo logger $ "[MCP Discovery] Total: " <> T.pack (show (length allTools)) <> " tools discovered"
+
+  -- Log tool names with entry points for verification
+  forM_ allTools $ \(MCPToolInfo name _desc _schema entryName) ->
+    logDebug logger $ "[MCP Discovery]   " <> name <> " -> " <> entryName
+
+  logDebug logger "[MCP Discovery] Converting to ToolDefinition format..."
   pure $ map reifyToToolDef allTools
 
 -- | Convert MCPToolInfo -> ToolDefinition.

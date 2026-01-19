@@ -326,6 +326,109 @@ claude-code
 
 **Note:** Use `start-augmented.sh` for reliable startup. Manual methods require careful sequencing.
 
+### Orchestration Internals
+
+Understanding the runtime stack for debugging and extension.
+
+#### Port Allocation
+
+| Port | Service | Protocol | Purpose |
+|------|---------|----------|---------|
+| 7432 | control-server | TCP NDJSON | Main protocol (mantle-agent ↔ control-server) |
+| 7433 | tui-sidebar | TCP NDJSON | TUI interaction events |
+| 7434 | control-server | HTTP | Health endpoint (process-compose probes) |
+| 8080 | process-compose | HTTP | API (stale session detection) |
+
+#### Config Files
+
+| File | Format | Purpose |
+|------|--------|---------|
+| `process-compose.yaml` | YAML | Service definitions, health probes, dependencies |
+| `.zellij/tidepool.kdl` | KDL | 3-pane TUI layout |
+| `.zellij/config.kdl` | KDL | Zellij behavior (force_close, mouse) |
+| `scripts/tidepool-runner.sh` | Bash | Trap handlers for cleanup |
+| `.env` | Shell | Environment (ANTHROPIC_API_KEY required) |
+
+#### Lifecycle Scripts
+
+**`start-augmented.sh`** - Entry point:
+1. Validates `.env` contains `ANTHROPIC_API_KEY`
+2. Creates `.tidepool/{sockets,logs}` directories
+3. Checks process-compose installed
+4. Detects/cleans stale sessions (probes port 8080)
+5. Launches Zellij with layout
+
+**`scripts/tidepool-runner.sh`** - Cleanup wrapper:
+```bash
+trap cleanup EXIT SIGINT SIGTERM SIGHUP
+
+cleanup() {
+    # Primary: API shutdown (respects dependency order)
+    process-compose down --ordered-shutdown
+    # Fallback: SIGTERM if API unreachable
+    kill -TERM "$PC_PID"
+}
+```
+
+#### Critical: `on_force_close "quit"`
+
+In `.zellij/config.kdl`:
+```kdl
+on_force_close "quit"
+```
+
+**Why this matters:** Without this, Zellij detaches instead of exiting when closed. Detaching means:
+- Trap handlers in `tidepool-runner.sh` never fire
+- Services continue running in background (orphaned)
+- Next `start-augmented.sh` detects stale session
+
+With `"quit"`, Zellij actually exits → triggers EXIT trap → orderly shutdown.
+
+#### Shutdown Flow
+
+```
+Zellij quit (Ctrl+P → q)
+    ↓
+on_force_close "quit" (doesn't detach)
+    ↓
+tidepool-runner.sh EXIT trap fires
+    ↓
+process-compose down --ordered-shutdown
+    ├─ tui-sidebar stops (no dependents)
+    └─ control-server stops (tui-sidebar done)
+    ↓
+All services terminated
+```
+
+#### Health Probes
+
+**control-server** (HTTP):
+```yaml
+readiness_probe:
+  http_get:
+    host: 127.0.0.1
+    port: 7434
+    path: /
+  initial_delay_seconds: 2
+  period_seconds: 1
+  failure_threshold: 30
+```
+
+**tui-sidebar** (TCP port check):
+```yaml
+readiness_probe:
+  exec:
+    command: "nc -z localhost 7433"
+```
+
+#### Dependency DAG
+
+```
+tui-sidebar ──depends_on──→ control-server (condition: process_healthy)
+```
+
+tui-sidebar blocks until control-server's HTTP health probe succeeds.
+
 ### Status
 
 - ✅ Hook forwarding (passthrough)
