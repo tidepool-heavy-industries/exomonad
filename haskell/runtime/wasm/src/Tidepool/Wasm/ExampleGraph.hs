@@ -51,7 +51,7 @@ import GHC.Generics (Generic)
 
 import Tidepool.Graph.Types (type (:@), Input, UsesEffects, Exit, Self)
 import Tidepool.Graph.Generic (GraphMode(..), type (:-))
-import qualified Tidepool.Graph.Generic as G (Entry, Exit, LogicNode)
+import qualified Tidepool.Graph.Generic as G (EntryNode, ExitNode, LogicNode)
 import Tidepool.Graph.Goto (Goto, GotoChoice, To, gotoChoice, gotoExit)
 import Tidepool.Graph.Goto.Internal (GotoChoice(..), OneOf(..))  -- For dispatch
 
@@ -104,7 +104,7 @@ instance ToJSON Response where
 -- Updated to accept GraphInput (text or photo) from TypeScript/Telegram.
 -- The classify handler extracts text content and creates UserMessage for downstream handlers.
 data ExampleGraph mode = ExampleGraph
-  { entry           :: mode :- G.Entry GraphInput
+  { entry           :: mode :- G.EntryNode GraphInput
   , classify        :: mode :- G.LogicNode
                            :@ Input GraphInput
                            :@ UsesEffects '[Goto "handleGreeting" UserMessage
@@ -119,7 +119,7 @@ data ExampleGraph mode = ExampleGraph
   , handleStatement :: mode :- G.LogicNode
                            :@ Input UserMessage
                            :@ UsesEffects '[Goto Exit Response]
-  , exit            :: mode :- G.Exit Response
+  , exit            :: mode :- G.ExitNode Response
   }
   deriving Generic
 

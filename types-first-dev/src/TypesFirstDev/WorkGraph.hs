@@ -66,7 +66,7 @@ data WorkGraph mode = WorkGraph
   { --------------------------------------------------------------------------
     -- ENTRY
     --------------------------------------------------------------------------
-    wgEntry :: mode :- G.Entry WorkInput
+    wgEntry :: mode :- G.EntryNode WorkInput
 
     --------------------------------------------------------------------------
     -- WORK: The single node that does everything
@@ -94,6 +94,6 @@ data WorkGraph mode = WorkGraph
     --------------------------------------------------------------------------
     -- EXIT
     --------------------------------------------------------------------------
-  , wgExit :: mode :- G.Exit WorkResult
+  , wgExit :: mode :- G.ExitNode WorkResult
   }
   deriving Generic

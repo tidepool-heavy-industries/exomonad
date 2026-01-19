@@ -60,7 +60,7 @@ data MyTaskGraph mode = MyTaskGraph
   { --------------------------------------------------------------------------
     -- ENTRY
     --------------------------------------------------------------------------
-    mtgEntry :: mode :- G.Entry TopLevelInput
+    mtgEntry :: mode :- G.EntryNode TopLevelInput
 
     --------------------------------------------------------------------------
     -- MY TASK: Main work node
@@ -88,6 +88,6 @@ data MyTaskGraph mode = MyTaskGraph
     --------------------------------------------------------------------------
     -- EXIT
     --------------------------------------------------------------------------
-  , mtgExit :: mode :- G.Exit FinalResult
+  , mtgExit :: mode :- G.ExitNode FinalResult
   }
   deriving Generic

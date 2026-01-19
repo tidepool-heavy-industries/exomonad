@@ -77,11 +77,11 @@ newtype ChatId = ChatId Int
 -- * Exit via @Goto Exit ()@
 -- * Pattern matching on 'IncomingMessage'
 data EchoGraph mode = EchoGraph
-  { egEntry    :: mode :- G.Entry ChatId
+  { egEntry    :: mode :- G.EntryNode ChatId
   , egMainLoop :: mode :- G.LogicNode
                     :@ Input ChatId
                     :@ UsesEffects '[Goto "egMainLoop" ChatId, Goto Exit ()]
-  , egExit     :: mode :- G.Exit ()
+  , egExit     :: mode :- G.ExitNode ()
   }
   deriving Generic
 

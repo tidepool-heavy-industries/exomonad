@@ -32,7 +32,6 @@ import Tidepool.Graph.Goto
 import Tidepool.Graph.Goto.Internal (GotoChoice(..))  -- For test assertions
 import Tidepool.Graph.Interpret (DispatchGoto(..))
 import Tidepool.Graph.Generic (GraphMode(..), type (:-), AsHandler)
-import Tidepool.Graph.Generic.Core (Entry)
 import Tidepool.Graph.Types (Input, UsesEffects, type (:@))
 import qualified Tidepool.Graph.Types as Types (Exit)
 import qualified Tidepool.Graph.Generic as G
@@ -43,9 +42,9 @@ import qualified Tidepool.Graph.Generic as G
 
 -- | Simple graph: Entry(Int) → compute(+1) → Exit(Int)
 data SimpleGraph mode = SimpleGraph
-  { sgEntry   :: mode :- Entry Int
+  { sgEntry   :: mode :- G.EntryNode Int
   , sgCompute :: mode :- G.LogicNode :@ Input Int :@ UsesEffects '[Goto Types.Exit Int]
-  , sgExit    :: mode :- G.Exit Int
+  , sgExit    :: mode :- G.ExitNode Int
   }
   deriving Generic
 

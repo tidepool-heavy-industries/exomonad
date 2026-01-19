@@ -58,8 +58,8 @@
 module Tidepool.Wasm.Prelude
   ( -- * Graph Structure
     -- ** Node Types
-    Entry
-  , Exit
+    EntryNode
+  , ExitNode
   , LogicNode
     -- ** Mode Application
   , GraphMode(..)
@@ -137,8 +137,8 @@ import Tidepool.Graph.Generic
   ( GraphMode(..)
   , AsGraph
   , type (:-)
-  , Entry
-  , Exit
+  , EntryNode
+  , ExitNode
   , LogicNode
   )
 

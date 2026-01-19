@@ -61,9 +61,9 @@ instance HasJSONSchema TestOutput where
 
 -- | Simple logic graph: Entry → compute → Exit
 data LogicGraph mode = LogicGraph
-  { lgEntry   :: mode :- G.Entry Int
+  { lgEntry   :: mode :- G.EntryNode Int
   , lgCompute :: mode :- G.LogicNode :@ Input Int :@ UsesEffects '[Goto Exit Int]
-  , lgExit    :: mode :- G.Exit Int
+  , lgExit    :: mode :- G.ExitNode Int
   }
   deriving Generic
 

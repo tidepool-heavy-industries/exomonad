@@ -144,9 +144,9 @@ data WorkConfig mode = WorkConfig
 --
 -- This enables field-witness routing: gWork graph `gotoNode` (retry . entries)
 data WorkGraph mode = WorkGraph
-  { gEntry :: NodeRef "gEntry" (mode :- G.Entry TaskSpec)
+  { gEntry :: NodeRef "gEntry" (mode :- G.EntryNode TaskSpec)
   , gWork  :: NodeRef "gWork" (mode :- G.LLMNode 'API :@ Entries WorkEntries :@ Tools WorkTools :@ Exits WorkExits)
-  , gExit  :: NodeRef "gExit" (mode :- G.Exit WorkResult)
+  , gExit  :: NodeRef "gExit" (mode :- G.ExitNode WorkResult)
   } deriving Generic
 
 -- Note: We're using traditional annotations (Entries, Tools, Exits) for now.
