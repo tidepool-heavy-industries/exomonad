@@ -65,7 +65,8 @@ cat << WORKFLOW
 4. COMMIT with message: "[$BEAD_ID] <description>"
 5. PUSH and file PR:
    git push -u origin $BRANCH
-   gh pr create --title "[$BEAD_ID] <title>" --body "Closes $BEAD_ID"
+   gh pr create --repo tidepool-heavy-industries/tidepool --head $BRANCH \
+     --title "[$BEAD_ID] <title>" --body "Closes $BEAD_ID"
 
 WORKFLOW
 
