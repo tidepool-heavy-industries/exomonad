@@ -46,6 +46,7 @@ module Tidepool.BD.Interpreter
   , bdRemoveLabel
   , bdAddDep
   , bdRemoveDep
+  , bdSync
   ) where
 
 import Control.Exception (try, SomeException)
@@ -171,6 +172,7 @@ runBDIO config = interpret $ \case
   RemoveLabel beadId label -> sendM $ bdRemoveLabel config beadId label
   AddDep fromId toId depType -> sendM $ bdAddDep config fromId toId depType
   RemoveDep fromId toId -> sendM $ bdRemoveDep config fromId toId
+  Sync -> sendM $ bdSync config
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -444,6 +446,20 @@ bdRemoveDep config fromId toId = do
   result <- runBdCommand config args
   case result of
     Left err -> error $ "bd dep remove failed: " <> T.unpack err
+    Right _ -> pure ()
+
+
+-- | Synchronize beads with main.
+--
+-- Uses @bd sync --from-main@ command.
+bdSync :: BDConfig -> IO ()
+bdSync config = do
+  let args = ["sync", "--from-main"]
+            ++ maybe [] (\d -> ["--db", d]) config.bcBeadsDir
+
+  result <- runBdCommand config args
+  case result of
+    Left err -> error $ "bd sync failed: " <> T.unpack err
     Right _ -> pure ()
 
 

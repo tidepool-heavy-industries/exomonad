@@ -21,7 +21,8 @@ module Tidepool.Control.Export
   , sampleCodeBodies
   , exportCodeSamples
   , exportMCPTools
-  ) where
+  )
+where
 
 import Control.Concurrent (threadDelay)
 import Control.Monad (forM_, when, forM)
@@ -47,7 +48,7 @@ import Tidepool.Control.Protocol (ToolDefinition(..))
 import Tidepool.Control.LSPTools
   ( FindCallersGraph, ShowFieldsGraph, ShowConstructorsGraph )
 import Tidepool.Control.ExoTools
-  ( ExoStatusGraph, ExoCompleteGraph )
+  ( ExoStatusGraph, ExoCompleteGraph, ExoReconstituteGraph )
 import Tidepool.Control.Scout.Graph (DocGenGraph)
 import Tidepool.Control.Scout.DocGen.Gemma (extractCandidates)
 import Tidepool.Effect.LSP
@@ -173,10 +174,11 @@ extractFirstSentenceDoc hoverText =
     -- Reject if it still looks like code
     looksLikeCode t =
       "::" `T.isInfixOf` t
-      || "=>" `T.isInfixOf` t
+      || ">=" `T.isInfixOf` t
       || "->" `T.isInfixOf` t
-      || "forall" `T.isInfixOf` t
-      || T.all (\c -> c `elem` ("()[]{},:;'" :: String) || not (c == ' ')) t
+      || "forall" `T.isPrefixOf` t
+      || T.all (
+c -> nc `elem` ("()[]{},:;\'" :: String) || not (nc == ' ')) t
 
     -- Extract first sentence (up to period or newline)
     firstSentence t =
@@ -248,7 +250,7 @@ cleanSignature sig =
 parseSignatureTypes :: Text -> ([Text], [Text])
 parseSignatureTypes sig =
   let -- Strip constraints (everything before =>)
-      afterConstraints = case T.breakOn "=>" sig of
+      afterConstraints = case T.breakOn ">=" sig of
         (_, rest) | not (T.null rest) -> T.drop 2 rest  -- Skip "=>"
         _ -> sig
 
@@ -499,7 +501,7 @@ functionPrefixes =
   , "to"      -- conversion functions
   , "from"    -- conversion functions
   , "get"     -- getters
-  , "set"     -- setters
+  , "set"     -- getters
   , "with"    -- bracketing functions
   , "parse"   -- parsers
   , "render"  -- renderers
@@ -546,14 +548,14 @@ discoverSymbols logger session = do
 -- Opening a file from each package triggers HLS to load that component.
 triggerFiles :: [Text]
 triggerFiles =
-  [ "haskell/dsl/core/src/Tidepool/Graph/Types.hs"
-  , "haskell/control-server/src/Tidepool/Control/Server.hs"
-  , "haskell/effects/llm-interpreter/src/Tidepool/LLM/Interpreter.hs"
-  , "haskell/effects/lsp-interpreter/src/Tidepool/LSP/Interpreter.hs"
-  , "haskell/runtime/actor/src/Tidepool/Actor/Types.hs"
-  , "haskell/native-server/src/Tidepool/Native/Server.hs"
-  , "haskell/effects/mcp-server/src/Tidepool/MCP/Server.hs"
-  , "haskell/tools/training-generator/src/Tidepool/Training/Types.hs"
+  ["haskell/dsl/core/src/Tidepool/Graph/Types.hs"
+  ,"haskell/control-server/src/Tidepool/Control/Server.hs"
+  ,"haskell/effects/llm-interpreter/src/Tidepool/LLM/Interpreter.hs"
+  ,"haskell/effects/lsp-interpreter/src/Tidepool/LSP/Interpreter.hs"
+  ,"haskell/runtime/actor/src/Tidepool/Actor/Types.hs"
+  ,"haskell/native-server/src/Tidepool/Native/Server.hs"
+  ,"haskell/effects/mcp-server/src/Tidepool/MCP/Server.hs"
+  ,"haskell/tools/training-generator/src/Tidepool/Training/Types.hs"
   ]
 
 -- | Export with automatic expansion by following type definitions.
@@ -700,7 +702,7 @@ processSymbol logger session symName countRef visitedFilesRef targetCount = do
               hFlush stdout
               modifyIORef' countRef (+1)
               newCount <- readIORef countRef
-              when (newCount `mod` 50 == 0) $
+              when (newCount `mod` 50 == 0) $ 
                 logInfo logger $ "[Progress] " <> T.pack (show newCount) <> " examples generated"
 
             -- Return candidates for expansion
@@ -801,7 +803,7 @@ readCodeAtRange file (Range (Position startLine _) (Position endLine _)) = do
       -- Check for two consecutive blank lines
       hasDoubleBlank [] = False
       hasDoubleBlank [_] = False
-      hasDoubleBlank (a:b:_) = T.null (T.strip a) && T.null (T.strip b)
+      hasDoubleBlank (a:b:_)= T.null (T.strip a) && T.null (T.strip b)
 
       -- Take lines until boundary
       -- seenCode tracks whether we've passed the preamble (haddock + type sig)
@@ -944,6 +946,7 @@ exportMCPTools logger = do
   let dgTools = reifyMCPTools (Proxy @DocGenGraph)
   let esTools = reifyMCPTools (Proxy @ExoStatusGraph)
   let ecTools = reifyMCPTools (Proxy @ExoCompleteGraph)
+  let erTools = reifyMCPTools (Proxy @ExoReconstituteGraph)
 
   -- Log discovered tools per graph for debugging
   logDebug logger $ "[MCP Discovery] FindCallersGraph: " <> T.pack (show (length fcTools)) <> " tools"
@@ -952,8 +955,9 @@ exportMCPTools logger = do
   logDebug logger $ "[MCP Discovery] DocGenGraph: " <> T.pack (show (length dgTools)) <> " tools"
   logDebug logger $ "[MCP Discovery] ExoStatusGraph: " <> T.pack (show (length esTools)) <> " tools"
   logDebug logger $ "[MCP Discovery] ExoCompleteGraph: " <> T.pack (show (length ecTools)) <> " tools"
+  logDebug logger $ "[MCP Discovery] ExoReconstituteGraph: " <> T.pack (show (length erTools)) <> " tools"
 
-  let allTools = concat [fcTools, sfTools, scTools, dgTools, esTools, ecTools]
+  let allTools = concat [fcTools, sfTools, scTools, dgTools, esTools, ecTools, erTools]
   logInfo logger $ "[MCP Discovery] Total: " <> T.pack (show (length allTools)) <> " tools discovered"
 
   -- Log tool names with entry points for verification
@@ -966,7 +970,8 @@ exportMCPTools logger = do
 -- | Convert MCPToolInfo -> ToolDefinition.
 reifyToToolDef :: MCPToolInfo -> ToolDefinition
 reifyToToolDef (MCPToolInfo name desc schema _entryName) = ToolDefinition
-  { tdName = name
+  {
+  tdName = name
   , tdDescription = desc
   , tdInputSchema = schema
   }

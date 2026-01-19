@@ -36,8 +36,9 @@ import Tidepool.Control.LSPTools
   , showConstructorsLogic, ShowConstructorsArgs(..), ShowConstructorsResult(..)
   )
 import Tidepool.Control.ExoTools
-  ( exoStatusLogic, ExoStatusArgs(..)
+  ( exoStatusLogic, ExoStatusArgs(..), ExoStatusResult(..)
   , exoCompleteLogic, ExoCompleteArgs(..), ExoCompleteResult(..)
+  , exoReconstituteLogic, ExoReconstituteArgs(..), ExoReconstituteResult
   )
 import Tidepool.BD.Interpreter (runBDIO, defaultBDConfig)
 import Tidepool.BD.GitInterpreter (runGitIO)
@@ -87,12 +88,13 @@ handleMcpTool logger lspSession maybeTuiHandle reqId toolName args = do
     -- Tier 3: External Orchestration tools (Exo)
     "exo_status" -> handleExoStatusTool logger lspSession reqId args
     "exo_complete" -> handleExoCompleteTool logger lspSession reqId args
+    "exo_reconstitute" -> handleExoReconstituteTool logger lspSession reqId args
 
     _ -> do
       logError logger $ "  (unknown tool)"
       pure $ mcpToolError reqId $
         "Tool not found: " <> toolName <>
-        ". Available tools: find_callers, show_fields, show_constructors, teach-graph, exo_status, exo_complete"
+        ". Available tools: find_callers, show_fields, show_constructors, teach-graph, exo_status, exo_complete, exo_reconstitute"
 
 -- | Handle the exo_status tool.
 --
@@ -150,6 +152,36 @@ handleExoCompleteTool logger _lspSession reqId args = do
 
         Right result -> do
           logInfo logger $ "[MCP:" <> reqId <> "] Bead " <> result.ecrBeadId <> " completed"
+          pure $ mcpToolSuccess reqId (toJSON result)
+
+
+-- | Handle the exo_reconstitute tool.
+--
+-- Runs the ExoReconstituteGraph logic to sync beads and refresh context.
+handleExoReconstituteTool :: Logger -> LSPSession -> Text -> Value -> IO ControlResponse
+handleExoReconstituteTool logger _lspSession reqId args = do
+  case fromJSON args of
+    Error err -> do
+      logError logger $ "  parse error: " <> T.pack err
+      pure $ mcpToolError reqId $ "Invalid exo_reconstitute arguments: " <> T.pack err
+
+    Success erArgs -> do
+      logDebug logger $ "  bead_id=" <> T.pack (show erArgs.eraBeadId)
+
+      resultOrErr <- try $ runM
+        $ runLog Debug
+        $ runBDIO defaultBDConfig
+        $ runGitIO
+        $ runGitHubIO defaultGitHubConfig
+        $ fmap unwrapSingleChoice (exoReconstituteLogic erArgs)
+
+      case resultOrErr of
+        Left (e :: SomeException) -> do
+          logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId $ "exo_reconstitute failed: " <> T.pack (displayException e)
+
+        Right result -> do
+          logInfo logger $ "[MCP:" <> reqId <> "] Beads synced and context refreshed successfully"
           pure $ mcpToolSuccess reqId (toJSON result)
 
 

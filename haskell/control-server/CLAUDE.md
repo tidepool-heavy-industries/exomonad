@@ -342,6 +342,22 @@ Explores codebase concepts via BFS, using Haiku to select relevant type dependen
 
 **Implementation:** `Scout/Graph.hs:125-165` (DocGenGraph)
 
+### Tier 3: External Orchestration Tools (Exo)
+
+Integration with beads (BD) and git for development workflow automation.
+
+#### `exo_status` - Get Development Context
+
+Gets current bead details, git status, and PR info.
+
+**Implementation:** `ExoTools.hs:86-108` (ExoStatusGraph)
+
+#### `exo_reconstitute` - Sync Beads and Refresh Context
+
+Synchronizes beads from main and refreshes development context. Designed for use at session start or end.
+
+**Implementation:** `ExoTools.hs:177-208` (ExoReconstituteGraph)
+
 ### Tool Registration
 
 **Automatic discovery:**
