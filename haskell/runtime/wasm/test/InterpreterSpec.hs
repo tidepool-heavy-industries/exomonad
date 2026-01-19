@@ -33,7 +33,7 @@ import Test.Hspec
 
 import Tidepool.Graph.Types (type (:@), Input, UsesEffects, Exit, Self)
 import Tidepool.Graph.Generic (GraphMode(..), type (:-))
-import qualified Tidepool.Graph.Generic as G (Entry, Exit, LogicNode)
+import qualified Tidepool.Graph.Generic as G (EntryNode, ExitNode, LogicNode)
 import Tidepool.Graph.Goto (Goto, GotoChoice, To, OneOf, gotoChoice, gotoExit, gotoSelf)
 import Tidepool.Graph.Goto.Internal (GotoChoice(..), OneOf(..))  -- For test assertions
 
@@ -50,10 +50,10 @@ import Tidepool.Wasm.WireTypes (EffectResult(..))
 --
 -- Tests chaining of handlers through multiple nodes.
 data LinearGraph mode = LinearGraph
-  { lgEntry :: mode :- G.Entry Int
+  { lgEntry :: mode :- G.EntryNode Int
   , lgAdd1  :: mode :- G.LogicNode :@ Input Int :@ UsesEffects '[Goto "lgAdd2" Int]
   , lgAdd2  :: mode :- G.LogicNode :@ Input Int :@ UsesEffects '[Goto Exit Int]
-  , lgExit  :: mode :- G.Exit Int
+  , lgExit  :: mode :- G.ExitNode Int
   }
   deriving Generic
 
@@ -62,12 +62,12 @@ data LinearGraph mode = LinearGraph
 --
 -- Tests branching based on handler logic.
 data BranchGraph mode = BranchGraph
-  { bgEntry    :: mode :- G.Entry Int
+  { bgEntry    :: mode :- G.EntryNode Int
   , bgIsEven   :: mode :- G.LogicNode :@ Input Int
                :@ UsesEffects '[Goto "bgEvenPath" Int, Goto "bgOddPath" Int]
   , bgEvenPath :: mode :- G.LogicNode :@ Input Int :@ UsesEffects '[Goto Exit Text]
   , bgOddPath  :: mode :- G.LogicNode :@ Input Int :@ UsesEffects '[Goto Exit Text]
-  , bgExit     :: mode :- G.Exit Text
+  , bgExit     :: mode :- G.ExitNode Text
   }
   deriving Generic
 
@@ -76,13 +76,13 @@ data BranchGraph mode = BranchGraph
 --
 -- Tests convergent paths meeting at a merge node.
 data DiamondGraph mode = DiamondGraph
-  { dgEntry :: mode :- G.Entry Int
+  { dgEntry :: mode :- G.EntryNode Int
   , dgSplit :: mode :- G.LogicNode :@ Input Int
             :@ UsesEffects '[Goto "dgPathA" Int, Goto "dgPathB" Int]
   , dgPathA :: mode :- G.LogicNode :@ Input Int :@ UsesEffects '[Goto "dgMerge" Int]
   , dgPathB :: mode :- G.LogicNode :@ Input Int :@ UsesEffects '[Goto "dgMerge" Int]
   , dgMerge :: mode :- G.LogicNode :@ Input Int :@ UsesEffects '[Goto Exit Int]
-  , dgExit  :: mode :- G.Exit Int
+  , dgExit  :: mode :- G.ExitNode Int
   }
   deriving Generic
 
@@ -91,10 +91,10 @@ data DiamondGraph mode = DiamondGraph
 --
 -- Tests self-loops with bounded iteration.
 data LoopGraph mode = LoopGraph
-  { loopEntry     :: mode :- G.Entry Int
+  { loopEntry     :: mode :- G.EntryNode Int
   , loopDecrement :: mode :- G.LogicNode :@ Input Int
                   :@ UsesEffects '[Goto Self Int, Goto Exit Int]
-  , loopExit      :: mode :- G.Exit Int
+  , loopExit      :: mode :- G.ExitNode Int
   }
   deriving Generic
 

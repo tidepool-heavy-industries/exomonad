@@ -20,7 +20,7 @@ import GHC.Generics (Generic)
 
 import Tidepool.Graph.Types (type (:@), Input, UsesEffects, Exit)
 import Tidepool.Graph.Generic (GraphMode(..), type (:-), LogicNode, ValidGraphRecord)
-import qualified Tidepool.Graph.Generic as G (Entry, Exit)
+import qualified Tidepool.Graph.Generic as G (EntryNode, ExitNode)
 import Tidepool.Graph.Goto (To)  -- Imported to demonstrate incorrect usage in UsesEffects
 
 data InputData
@@ -35,10 +35,10 @@ type WrongEffects = '[To "handler" Output, To Exit Result]
 
 -- | Graph with wrong effect type - should produce a helpful error
 data BadGraph mode = BadGraph
-  { entry   :: mode :- G.Entry InputData
+  { entry   :: mode :- G.EntryNode InputData
   , router  :: mode :- LogicNode :@ Input InputData :@ UsesEffects WrongEffects
   , handler :: mode :- LogicNode :@ Input Output :@ UsesEffects '[To Exit Result]
-  , exit    :: mode :- G.Exit Result
+  , exit    :: mode :- G.ExitNode Result
   }
   deriving Generic
 

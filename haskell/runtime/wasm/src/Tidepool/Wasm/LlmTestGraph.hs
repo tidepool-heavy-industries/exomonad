@@ -25,7 +25,7 @@ import GHC.Generics (Generic)
 
 import Tidepool.Graph.Types (type (:@), Input, UsesEffects, Exit)
 import Tidepool.Graph.Generic (GraphMode(..), type (:-))
-import qualified Tidepool.Graph.Generic as G (Entry, Exit, LogicNode)
+import qualified Tidepool.Graph.Generic as G (EntryNode, ExitNode, LogicNode)
 import Tidepool.Graph.Goto (Goto, GotoChoice, To, gotoExit)
 
 import Tidepool.Wasm.Effect (WasmM, llmComplete)
@@ -39,9 +39,9 @@ import Tidepool.Wasm.Error (formatWasmError)
 --
 -- The echo node makes an LLM call (yielding to TypeScript) then exits with the response.
 data LlmTestGraph mode = LlmTestGraph
-  { entry :: mode :- G.Entry Text
+  { entry :: mode :- G.EntryNode Text
   , echo  :: mode :- G.LogicNode :@ Input Text :@ UsesEffects '[Goto Exit Text]
-  , exit  :: mode :- G.Exit Text
+  , exit  :: mode :- G.ExitNode Text
   }
   deriving Generic
 

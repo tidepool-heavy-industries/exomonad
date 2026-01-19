@@ -29,7 +29,6 @@ import Tidepool.Graph.Goto
   ( To, GotoChoice, gotoChoice, gotoExit, Goto )
 import Tidepool.Graph.Generic
   ( GraphMode(..), type (:-), AsHandler )
-import Tidepool.Graph.Generic.Core (Entry)
 import Tidepool.Graph.Types
   ( Input, UsesEffects, type (:@) )
 import Tidepool.Effect.NodeMeta (NodeMeta, GraphMeta, runNodeMeta, runGraphMeta, defaultNodeMeta, defaultGraphMeta)
@@ -50,14 +49,14 @@ data Result = Result { output :: String }
   deriving (Show, Eq, Generic)
 
 data ToolTransitionGraph mode = ToolTransitionGraph
-  { ttgEntry   :: mode :- Entry String
+  { ttgEntry   :: mode :- G.EntryNode String
   , ttgTool    :: mode :- G.LogicNode
        :@ Input String
        :@ UsesEffects '[Goto "ttgSuccess" Value, Goto Types.Exit Result]
   , ttgSuccess :: mode :- G.LogicNode
        :@ Input Value
        :@ UsesEffects '[Goto Types.Exit Result]
-  , ttgExit    :: mode :- G.Exit Result
+  , ttgExit    :: mode :- G.ExitNode Result
   }
   deriving Generic
 

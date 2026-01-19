@@ -22,11 +22,11 @@ data Response
 -- | Mixed graph: LLM classification followed by Logic routing to LLM handlers
 -- Uses Goto Exit to demonstrate exit transitions from Logic nodes
 data MixedGraph mode = MixedGraph
-  { mgEntry    :: mode :- G.Entry Query
+  { mgEntry    :: mode :- G.EntryNode Query
   , mgClassify :: mode :- G.LLMNode 'API :@ Input Query :@ Schema Intent
   , mgRouter   :: mode :- G.LogicNode :@ Input Intent :@ UsesEffects '[Goto "mgHandler" Query, Goto Exit Response]
   , mgHandler  :: mode :- G.LLMNode 'API :@ Input Query :@ Schema Response
-  , mgExit     :: mode :- G.Exit Response
+  , mgExit     :: mode :- G.ExitNode Response
   }
   deriving Generic
 

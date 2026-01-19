@@ -22,10 +22,10 @@ data Result
 
 -- | Graph with a self-loop: the 'loop' node can transition back to itself.
 data SelfLoopGraph mode = SelfLoopGraph
-  { entry :: mode :- G.Entry InputData
+  { entry :: mode :- G.EntryNode InputData
   , loop  :: mode :- G.LogicNode :@ Input InputData
             :@ UsesEffects '[Goto Self InputData, Goto Exit Result]
-  , exit  :: mode :- G.Exit Result
+  , exit  :: mode :- G.ExitNode Result
   }
   deriving Generic
 
