@@ -157,25 +157,22 @@ exoStatusLogic args = do
 -- | Arguments for exo_complete tool.
 data ExoCompleteArgs = ExoCompleteArgs
   { ecaBeadId :: Maybe Text  -- ^ Optional bead ID. If not provided, inferred from branch.
-  , ecaReason :: Maybe Text  -- ^ Optional reason for completion.
   }
   deriving stock (Show, Eq, Generic)
 
 instance HasJSONSchema ExoCompleteArgs where
   jsonSchema = objectSchema
     [ ("bead_id", describeField "bead_id" "Optional bead ID (e.g. tidepool-huj). If omitted, inferred from branch name." (emptySchema TString))
-    , ("reason", describeField "reason" "Optional reason for completion/closing." (emptySchema TString))
     ]
     []
 
 instance FromJSON ExoCompleteArgs where
   parseJSON = withObject "ExoCompleteArgs" $ \v ->
-    ExoCompleteArgs <$> v .:? "bead_id" <*> v .:? "reason"
+    ExoCompleteArgs <$> v .:? "bead_id"
 
 instance ToJSON ExoCompleteArgs where
   toJSON args = object
     [ "bead_id" .= ecaBeadId args
-    , "reason" .= ecaReason args
     ]
 
 -- | Result of exo_complete tool.

@@ -141,7 +141,6 @@ handleExoCompleteTool logger _lspSession reqId args = do
         $ runLog Debug
         $ runBDIO defaultBDConfig
         $ runGitIO
-        $ runGitHubIO defaultGitHubConfig
         $ fmap unwrapSingleChoice (exoCompleteLogic ecArgs)
 
       case resultOrErr of
