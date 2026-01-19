@@ -22,6 +22,7 @@ module Tidepool.Effects.GitHub
   ( -- * Effect
     GitHub(..)
   , createIssue
+  , createPR
   , getIssue
   , listIssues
   , getPullRequest
@@ -46,6 +47,8 @@ module Tidepool.Effects.GitHub
   , defaultPRFilter
   , Review(..)
   , ReviewState(..)
+  , PRCreateSpec(..)
+  , PRUrl(..)
 
     -- * Types - Legacy (kept for compatibility)
   , IssueUrl(..)
@@ -272,6 +275,20 @@ data PRFilter = PRFilter
 defaultPRFilter :: PRFilter
 defaultPRFilter = PRFilter Nothing Nothing Nothing
 
+-- | Spec for creating a PR.
+data PRCreateSpec = PRCreateSpec
+  { prcsRepo   :: Repo
+  , prcsBranch :: Text
+  , prcsTitle  :: Text
+  , prcsBody   :: Text
+  }
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+
+-- | Pull request URL.
+newtype PRUrl = PRUrl { unPRUrl :: Text }
+  deriving (Show, Eq, Generic)
+  deriving newtype (FromJSON, ToJSON)
+
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- LEGACY TYPES (kept for compatibility)
@@ -303,6 +320,8 @@ data GitHub r where
     -- ^ List issues with filter.
 
   -- Pull request operations
+  CreatePR          :: PRCreateSpec -> GitHub PRUrl
+    -- ^ Create a pull request.
   GetPullRequest    :: Repo -> Int -> Bool -> GitHub (Maybe PullRequest)
     -- ^ Get PR by number. Bool = include comments and reviews.
   ListPullRequests  :: Repo -> PRFilter -> GitHub [PullRequest]
@@ -317,6 +336,9 @@ data GitHub r where
 
 createIssue :: Member GitHub effs => Repo -> Text -> Text -> [Label] -> Eff effs IssueUrl
 createIssue repo title body labels = send (CreateIssue repo title body labels)
+
+createPR :: Member GitHub effs => PRCreateSpec -> Eff effs PRUrl
+createPR spec = send (CreatePR spec)
 
 getIssue :: Member GitHub effs => Repo -> Int -> Bool -> Eff effs (Maybe Issue)
 getIssue repo number includeComments = send (GetIssue repo number includeComments)
@@ -347,6 +369,10 @@ runGitHubStub = interpret $ \case
   CreateIssue (Repo repo) title _ _ -> do
     logInfo $ "[GitHub:stub] CreateIssue called: " <> repo <> " - " <> title
     error "GitHub.createIssue: not implemented"
+
+  CreatePR (PRCreateSpec (Repo repo) _ title _) -> do
+    logInfo $ "[GitHub:stub] CreatePR called: " <> repo <> " - " <> title
+    error "GitHub.createPR: not implemented"
 
   GetIssue (Repo repo) num _ -> do
     logInfo $ "[GitHub:stub] GetIssue called: " <> repo <> " #" <> showT num
