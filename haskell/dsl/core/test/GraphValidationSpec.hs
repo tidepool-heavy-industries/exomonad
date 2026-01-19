@@ -90,16 +90,16 @@ spec = do
 
     it "missing Entry field produces clear error" $ do
       "test/golden/MissingEntryRecord.hs" `shouldFailWith`
-        [ "Missing Entry field"
+        [ "Missing EntryNode field"
         , "WHAT HAPPENED:"
-        , "Your graph record has no Entry field."
+        , "Your graph record has no EntryNode field."
         ]
 
     it "missing Exit field produces clear error" $ do
       "test/golden/MissingExitRecord.hs" `shouldFailWith`
-        [ "Missing Exit field"
+        [ "Missing ExitNode field"
         , "WHAT HAPPENED:"
-        , "Your graph record has no Exit field."
+        , "Your graph record has no ExitNode field."
         ]
 
     it "invalid Goto target produces clear error" $ do

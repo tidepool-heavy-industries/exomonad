@@ -32,6 +32,7 @@ import Tidepool.Graph.Generic
 import Tidepool.Graph.Generic.Core (Entry)
 import Tidepool.Graph.Types
   ( Input, UsesEffects, type (:@) )
+import Tidepool.Effect.NodeMeta (NodeMeta, GraphMeta, runNodeMeta, runGraphMeta, defaultNodeMeta, defaultGraphMeta)
 import qualified Tidepool.Graph.Types as Types (Exit)
 import qualified Tidepool.Graph.Generic as G
 import Tidepool.Graph.Interpret (DispatchGoto(..))
@@ -61,16 +62,16 @@ data ToolTransitionGraph mode = ToolTransitionGraph
   deriving Generic
 
 -- Handler that simulates tool execution
-toolNodeHandler :: String -> Eff '[] (GotoChoice '[To "ttgSuccess" Value, To Types.Exit Result])
+toolNodeHandler :: String -> Eff '[NodeMeta, GraphMeta] (GotoChoice '[To "ttgSuccess" Value, To Types.Exit Result])
 toolNodeHandler input
   | input == "transition" = pure $ gotoChoice @"ttgSuccess" (toJSON ("transitioned" :: String))
   | input == "exit" = pure $ gotoExit (Result "exited directly")
   | otherwise = pure $ gotoExit (Result "default exit")
 
-successNodeHandler :: Value -> Eff '[] (GotoChoice '[To Types.Exit Result])
+successNodeHandler :: Value -> Eff '[NodeMeta, GraphMeta] (GotoChoice '[To Types.Exit Result])
 successNodeHandler payload = pure $ gotoExit (Result $ "success: " <> show payload)
 
-handlers :: ToolTransitionGraph (AsHandler '[])
+handlers :: ToolTransitionGraph (AsHandler '[NodeMeta, GraphMeta])
 handlers = ToolTransitionGraph
   { ttgEntry   = Proxy
   , ttgTool    = toolNodeHandler
@@ -89,14 +90,14 @@ spec = describe "Tool-initiated transitions" $ do
       -- Dispatch a transition choice directly to success node
       let choice :: GotoChoice '[To "ttgSuccess" Value, To Types.Exit Result]
           choice = gotoChoice @"ttgSuccess" (toJSON ("test_payload" :: String))
-      let result = run $ dispatchGoto handlers choice
+      let result = run . runGraphMeta defaultGraphMeta . runNodeMeta defaultNodeMeta $ dispatchGoto handlers choice
       result `shouldBe` Result "success: String \"test_payload\""
 
     it "preserves complex payloads through dispatch" $ do
       -- Dispatch with a more complex payload
       let choice :: GotoChoice '[To "ttgSuccess" Value, To Types.Exit Result]
           choice = gotoChoice @"ttgSuccess" (toJSON ("complex" :: String))
-      let result = run $ dispatchGoto handlers choice
+      let result = run . runGraphMeta defaultGraphMeta . runNodeMeta defaultNodeMeta $ dispatchGoto handlers choice
       result `shouldBe` Result "success: String \"complex\""
 
   describe "direct exit from tool node" $ do
@@ -104,12 +105,12 @@ spec = describe "Tool-initiated transitions" $ do
       -- Tool handler that exits directly
       let choice :: GotoChoice '[To "ttgSuccess" Value, To Types.Exit Result]
           choice = gotoExit (Result "exited directly")
-      let result = run $ dispatchGoto handlers choice
+      let result = run . runGraphMeta defaultGraphMeta . runNodeMeta defaultNodeMeta $ dispatchGoto handlers choice
       result `shouldBe` Result "exited directly"
 
     it "produces correct output format" $ do
       -- Verify output structure
       let choice :: GotoChoice '[To "ttgSuccess" Value, To Types.Exit Result]
           choice = gotoExit (Result "direct exit")
-      let result = run $ dispatchGoto handlers choice
+      let result = run . runGraphMeta defaultGraphMeta . runNodeMeta defaultNodeMeta $ dispatchGoto handlers choice
       output result `shouldBe` "direct exit"

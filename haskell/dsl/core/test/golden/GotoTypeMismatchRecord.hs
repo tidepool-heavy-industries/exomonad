@@ -18,7 +18,7 @@ module GotoTypeMismatchRecord where
 
 import GHC.Generics (Generic)
 
-import Tidepool.Graph.Types (type (:@), Input, Schema, UsesEffects)
+import Tidepool.Graph.Types (type (:@), Input, Schema, UsesEffects, LLMKind(..))
 import Tidepool.Graph.Generic (GraphMode(..), Entry, Exit, LLMNode, LogicNode, ValidGraphRecord)
 import Tidepool.Graph.Goto (Goto)
 
@@ -29,7 +29,7 @@ data Result
 data TypeMismatchGraph mode = TypeMismatchGraph
   { entry   :: mode :- Entry InputData
   , router  :: mode :- LogicNode :@ Input InputData :@ UsesEffects '[Goto "handler" String]  -- Sends String
-  , handler :: mode :- LLMNode :@ Input Int :@ Schema Result  -- Expects Int!
+  , handler :: mode :- LLMNode 'API :@ Input Int :@ Schema Result  -- Expects Int!
   , exit    :: mode :- Exit Result
   }
   deriving Generic

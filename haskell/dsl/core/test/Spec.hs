@@ -18,6 +18,7 @@ import qualified DispatchGotoSpec
 import qualified ConvertTransitionHintSpec
 import qualified ToolTransitionIntegrationSpec
 import qualified DecisionToolsSpec
+import qualified DecisionSpec
 
 main :: IO ()
 main = hspec $ do
@@ -65,3 +66,6 @@ main = hspec $ do
 
   describe "DecisionTools" $ do
     DecisionToolsSpec.spec
+
+  describe "Decision" $ do
+    DecisionSpec.spec

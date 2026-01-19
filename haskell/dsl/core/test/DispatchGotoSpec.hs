@@ -34,6 +34,7 @@ import Tidepool.Graph.Interpret (DispatchGoto(..))
 import Tidepool.Graph.Generic (GraphMode(..), type (:-), AsHandler)
 import Tidepool.Graph.Generic.Core (Entry)
 import Tidepool.Graph.Types (Input, UsesEffects, type (:@))
+import Tidepool.Effect.NodeMeta (NodeMeta, GraphMeta, runNodeMeta, runGraphMeta, defaultNodeMeta, defaultGraphMeta)
 import qualified Tidepool.Graph.Types as Types (Exit)
 import qualified Tidepool.Graph.Generic as G
 
@@ -49,7 +50,7 @@ data SimpleGraph mode = SimpleGraph
   }
   deriving Generic
 
-simpleHandlers :: SimpleGraph (AsHandler '[])
+simpleHandlers :: SimpleGraph (AsHandler '[NodeMeta, GraphMeta])
 simpleHandlers = SimpleGraph
   { sgEntry   = Proxy
   , sgCompute = \n -> pure $ gotoExit (n + 1 :: Int)
@@ -69,12 +70,12 @@ spec = do
 
     it "returns value directly when Exit is the only target" $ do
       let choice :: GotoChoice '[To Types.Exit Int] = gotoExit (42 :: Int)
-          result :: Int = run $ dispatchGoto simpleHandlers choice
+          result :: Int = run . runGraphMeta defaultGraphMeta . runNodeMeta defaultNodeMeta $ dispatchGoto simpleHandlers choice
       result `shouldBe` (42 :: Int)
 
     it "returns value for Exit target in multi-target list (same exitType)" $ do
       let choice :: GotoChoice '[To "sgCompute" Int, To Types.Exit Int] = gotoExit (99 :: Int)
-          result :: Int = run $ dispatchGoto simpleHandlers choice
+          result :: Int = run . runGraphMeta defaultGraphMeta . runNodeMeta defaultNodeMeta $ dispatchGoto simpleHandlers choice
       result `shouldBe` (99 :: Int)
 
   -- ════════════════════════════════════════════════════════════════════════════
@@ -84,14 +85,14 @@ spec = do
 
     it "dispatches to compute handler then exits" $ do
       let choice :: GotoChoice '[To "sgCompute" Int, To Types.Exit Int] = gotoChoice @"sgCompute" (5 :: Int)
-          result :: Int = run $ dispatchGoto simpleHandlers choice
+          result :: Int = run . runGraphMeta defaultGraphMeta . runNodeMeta defaultNodeMeta $ dispatchGoto simpleHandlers choice
       result `shouldBe` (6 :: Int)  -- compute adds 1
 
     it "dispatches multiple times with different inputs" $ do
       let choice0 :: GotoChoice '[To "sgCompute" Int, To Types.Exit Int] = gotoChoice @"sgCompute" (0 :: Int)
           choice10 :: GotoChoice '[To "sgCompute" Int, To Types.Exit Int] = gotoChoice @"sgCompute" (10 :: Int)
           choiceNeg :: GotoChoice '[To "sgCompute" Int, To Types.Exit Int] = gotoChoice @"sgCompute" ((-5) :: Int)
-          results :: [Int] = run $ sequence
+          results :: [Int] = run . runGraphMeta defaultGraphMeta . runNodeMeta defaultNodeMeta $ sequence
             [ dispatchGoto simpleHandlers choice0
             , dispatchGoto simpleHandlers choice10
             , dispatchGoto simpleHandlers choiceNeg
@@ -106,22 +107,22 @@ spec = do
     it "handles tuple exit payload" $ do
       let payload :: (Int, String) = (42 :: Int, "hi!" :: String)
           choice :: GotoChoice '[To Types.Exit (Int, String)] = gotoExit payload
-          result :: (Int, String) = run $ dispatchGoto simpleHandlers choice
+          result :: (Int, String) = run . runGraphMeta defaultGraphMeta . runNodeMeta defaultNodeMeta $ dispatchGoto simpleHandlers choice
       result `shouldBe` ((42 :: Int), ("hi!" :: String))
 
     it "handles unit exit payload" $ do
       let choice :: GotoChoice '[To Types.Exit ()] = gotoExit ()
-          result :: () = run $ dispatchGoto simpleHandlers choice
+          result :: () = run . runGraphMeta defaultGraphMeta . runNodeMeta defaultNodeMeta $ dispatchGoto simpleHandlers choice
       result `shouldBe` ()
 
     it "handles Bool exit payload" $ do
       let choice :: GotoChoice '[To Types.Exit Bool] = gotoExit True
-          result :: Bool = run $ dispatchGoto simpleHandlers choice
+          result :: Bool = run . runGraphMeta defaultGraphMeta . runNodeMeta defaultNodeMeta $ dispatchGoto simpleHandlers choice
       result `shouldBe` True
 
     it "handles String exit payload" $ do
       let choice :: GotoChoice '[To Types.Exit String] = gotoExit ("done" :: String)
-          result :: String = run $ dispatchGoto simpleHandlers choice
+          result :: String = run . runGraphMeta defaultGraphMeta . runNodeMeta defaultNodeMeta $ dispatchGoto simpleHandlers choice
       result `shouldBe` ("done" :: String)
 
   -- ════════════════════════════════════════════════════════════════════════════
