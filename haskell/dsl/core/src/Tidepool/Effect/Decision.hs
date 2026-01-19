@@ -6,49 +6,49 @@
 module Tidepool.Effect.Decision
   ( -- * Decision Type
     Decision(..)
+  , requestDecision
     -- * Context and Tracing
   , DecisionContext(..)
   , DecisionTrace(..)
   ) where
 
-import Data.Aeson (ToJSON, FromJSON)
+import Control.Monad.Freer (Eff, Member)
+import Data.Aeson (ToJSON(..), FromJSON, toJSON)
 import Data.Text (Text)
-import Data.Time (UTCTime)
-import GHC.Generics (Generic)
+import qualified Data.Text as T
+import Tidepool.Effect.Decision.Types
+import Tidepool.Effect.TUI
+import Tidepool.Effect.Types (Time, Log, getCurrentTime, logInfoWith)
 
--- | High-level decision outcomes for agent flows.
+-- | Request a decision from the user via the TUI.
 --
--- Used by the decision effect/TUI wrapper to represent standard
--- choices available to users or supervisors during agent execution.
-data Decision
-  = SelectBead Text
-    -- ^ Select a specific bead ID to focus on.
-  | ProvideGuidance Text
-    -- ^ Provide textual guidance or instructions.
-  | Abort
-    -- ^ Abort the current operation or flow.
-  | Continue
-    -- ^ Continue with the current plan/flow.
-  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+-- This builds a UISpec from the context, waits for an interaction,
+-- and logs the resulting decision via the Log effect.
+requestDecision :: (Member TUI r, Member Time r, Member Log r) => DecisionContext -> Eff r Decision
+requestDecision ctx = do
+  let ui = UISpec "decision-request" $ Vertical $
+        [ EText "prompt" ctx.dcPrompt
+        ] ++
+        [ EButton ("bead:" <> b) ("Select Bead: " <> b) | b <- ctx.dcReadyBeads ] ++
+        [ EButton "continue" "Continue"
+        , EButton "abort" "Abort"
+        , EInput "guidance" "Provide Guidance (Enter to submit)" ""
+        ]
 
--- | Context provided to a decision request.
---
--- This context is used to render the decision UI.
-data DecisionContext = DecisionContext
-  { dcPrompt :: Text
-    -- ^ Main prompt or question for the decision.
-  }
-  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+  interaction <- showUI ui
 
--- | Audit trace for a decision.
---
--- Captures the context, the decision made, and the timestamp.
-data DecisionTrace = DecisionTrace
-  { dtContext   :: DecisionContext
-    -- ^ Context at the time of decision.
-  , dtDecision  :: Decision
-    -- ^ The actual decision made.
-  , dtTimestamp :: UTCTime
-    -- ^ When the decision occurred.
-  }
-  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+  decision <- case interaction of
+    ButtonClicked _ bid
+      | "bead:" `T.isPrefixOf` bid -> pure $ SelectBead (T.drop 5 bid)
+      | bid == "continue" -> pure Continue
+      | bid == "abort" -> pure Abort
+      | otherwise -> requestDecision ctx
+    InputSubmitted _ "guidance" val -> pure $ ProvideGuidance val
+    _ -> requestDecision ctx
+
+  -- Log decision trace
+  now <- getCurrentTime
+  let trace = DecisionTrace ctx decision now
+  logInfoWith "Decision made" [("trace", toJSON trace)]
+
+  pure decision

@@ -21,7 +21,6 @@
 module CLIGraphSpec (spec) where
 
 import Control.Monad.Freer (run)
-import Data.Proxy (Proxy(..))
 import Data.Text qualified as T
 import GHC.Generics (Generic)
 import Options.Applicative
@@ -62,12 +61,12 @@ data CounterGraph mode = CounterGraph
 -- | Handlers for the counter graph (pure logic, no effects).
 counterHandlers :: CounterGraph (AsHandler '[])
 counterHandlers = CounterGraph
-  { cgEntry   = Proxy
+  { cgEntry   = ()
   , cgCompute = \input -> pure $ gotoExit CounterOutput
       { finalValue = input.startValue + (input.increment * input.times)
       , operationsPerformed = input.times
       }
-  , cgExit    = Proxy
+  , cgExit    = ()
   }
 
 -- | Execute the counter graph.
