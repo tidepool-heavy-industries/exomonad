@@ -19,7 +19,7 @@ module Tidepool.Control.Handler.MCP
   ) where
 
 import Control.Exception (SomeException, displayException, try)
-import Control.Monad.Freer (runM)
+import Control.Monad.Freer (Eff, LastMember, interpret, runM)
 import Data.Aeson (Value, fromJSON, toJSON, Result(..))
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -42,10 +42,21 @@ import Tidepool.BD.Interpreter (runBDIO, defaultBDConfig)
 import Tidepool.BD.GitInterpreter (runGitIO)
 import Tidepool.GitHub.Interpreter (runGitHubIO, defaultGitHubConfig)
 import Tidepool.Effect.NodeMeta (runNodeMeta, runGraphMeta, defaultNodeMeta, GraphMetadata(..))
+import Tidepool.Effect.TUI (TUI(..), Interaction(..))
 import Tidepool.Effect.Types (runLog, LogLevel(..), runReturn)
+import Tidepool.Graph.Goto (unwrapSingleChoice)
 import Tidepool.LSP.Interpreter (LSPSession, runLSP)
+import Tidepool.TUI.Interpreter (TUIHandle, runTUI)
 import Tidepool.Teaching.LLM (TeachingConfig, loadTeachingConfig, withTeaching, runLLMWithTeaching)
 import Tidepool.Teaching.Teacher (teacherGuidance)
+
+-- | Run TUI interpreter if handle is available, otherwise run mock.
+runTUIOrMock :: LastMember IO effs => Maybe TUIHandle -> Eff (TUI ': effs) a -> Eff effs a
+runTUIOrMock (Just h) = runTUI h
+runTUIOrMock Nothing = interpret $ \case
+  ShowUI _ -> pure $ ButtonClicked "mock" "cancel"
+  UpdateUI _ -> pure ()
+  CloseUI -> pure ()
 
 -- | Handle an MCP tool call.
 --
@@ -59,18 +70,18 @@ import Tidepool.Teaching.Teacher (teacherGuidance)
 --
 -- == Tier 3: External Orchestration Tools (Exo)
 --   - "exo_status": Get current bead context, git status, and PR info
-handleMcpTool :: Logger -> LSPSession -> Text -> Text -> Value -> IO ControlResponse
-handleMcpTool logger lspSession reqId toolName args = do
+handleMcpTool :: Logger -> LSPSession -> Maybe TUIHandle -> Text -> Text -> Value -> IO ControlResponse
+handleMcpTool logger lspSession maybeTuiHandle reqId toolName args = do
   logInfo logger $ "[MCP:" <> reqId <> "] Dispatching: " <> toolName
 
   case toolName of
     -- Tier 1: Deterministic LSP tools (graph-based)
-    "find_callers" -> handleFindCallersTool logger lspSession reqId args
-    "show_fields" -> handleShowFieldsTool logger lspSession reqId args
-    "show_constructors" -> handleShowConstructorsTool logger lspSession reqId args
+    "find_callers" -> handleFindCallersTool logger lspSession maybeTuiHandle reqId args
+    "show_fields" -> handleShowFieldsTool logger lspSession maybeTuiHandle reqId args
+    "show_constructors" -> handleShowConstructorsTool logger lspSession maybeTuiHandle reqId args
 
     -- Tier 2: LLM-enhanced tools (graph-based)
-    "teach-graph" -> handleTeachGraphTool logger lspSession reqId args
+    "teach-graph" -> handleTeachGraphTool logger lspSession maybeTuiHandle reqId args
 
     -- Tier 3: External Orchestration tools (Exo)
     "exo_status" -> handleExoStatusTool logger lspSession reqId args
@@ -115,8 +126,8 @@ handleExoStatusTool logger _lspSession reqId args = do
 --
 -- Uses the graph DSL implementation with Haiku for symbol selection.
 -- Supports training data capture via tidepool-teaching when TEACHING_ENABLED=true.
-handleTeachGraphTool :: Logger -> LSPSession -> Text -> Value -> IO ControlResponse
-handleTeachGraphTool logger lspSession reqId args = do
+handleTeachGraphTool :: Logger -> LSPSession -> Maybe TUIHandle -> Text -> Value -> IO ControlResponse
+handleTeachGraphTool logger lspSession maybeTuiHandle reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
@@ -132,11 +143,11 @@ handleTeachGraphTool logger lspSession reqId args = do
       case maybeConfig of
         Just config -> do
           logInfo logger "  mode=teaching (recording to JSONL)"
-          runWithTeaching logger config lspSession reqId query
+          runWithTeaching logger config lspSession maybeTuiHandle reqId query
 
         Nothing -> do
           logInfo logger "  mode=production (no recording)"
-          runWithoutTeaching logger lspSession reqId query
+          runWithoutTeaching logger lspSession maybeTuiHandle reqId query
 
 
 -- | Run graph-based exploration with teaching enabled.
@@ -146,14 +157,16 @@ runWithTeaching
   :: Logger
   -> TeachingConfig
   -> LSPSession
+  -> Maybe TUIHandle
   -> Text
   -> TeachQuery
   -> IO ControlResponse
-runWithTeaching logger config lspSession reqId query = do
+runWithTeaching logger config lspSession maybeTuiHandle reqId query = do
   let guidance = teacherGuidance @ScoutGemmaEffect
   resultOrErr <- try $ withTeaching config guidance $ \env -> do
     runM
       $ runLog Debug
+      $ runTUIOrMock maybeTuiHandle
       $ runLSP lspSession
       $ runGraphMeta (GraphMetadata "DocGenGraph")
       $ runNodeMeta defaultNodeMeta
@@ -175,8 +188,8 @@ runWithTeaching logger config lspSession reqId query = do
 -- | Run graph-based exploration without teaching.
 --
 -- Uses production LLM interpreter (requires ANTHROPIC_API_KEY).
-runWithoutTeaching :: Logger -> LSPSession -> Text -> TeachQuery -> IO ControlResponse
-runWithoutTeaching logger _lspSession reqId _query = do
+runWithoutTeaching :: Logger -> LSPSession -> Maybe TUIHandle -> Text -> TeachQuery -> IO ControlResponse
+runWithoutTeaching logger _lspSession _maybeTuiHandle reqId _query = do
   -- Check for ANTHROPIC_API_KEY
   maybeKey <- lookupEnv "ANTHROPIC_API_KEY"
   case maybeKey of
@@ -200,8 +213,8 @@ runWithoutTeaching logger _lspSession reqId _query = do
 --
 -- Runs the FindCallersGraph logic to find actual call sites of a function,
 -- filtering out imports, type signatures, and comments.
-handleFindCallersTool :: Logger -> LSPSession -> Text -> Value -> IO ControlResponse
-handleFindCallersTool logger lspSession reqId args = do
+handleFindCallersTool :: Logger -> LSPSession -> Maybe TUIHandle -> Text -> Value -> IO ControlResponse
+handleFindCallersTool logger lspSession maybeTuiHandle reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
@@ -212,6 +225,7 @@ handleFindCallersTool logger lspSession reqId args = do
 
       resultOrErr <- try $ runM
         $ runLog Debug
+        $ runTUIOrMock maybeTuiHandle
         $ runLSP lspSession
         $ runReturn (findCallersLogic fcArgs)
 
@@ -229,8 +243,8 @@ handleFindCallersTool logger lspSession reqId args = do
 -- | Handle the show_fields tool.
 --
 -- Runs the ShowFieldsGraph logic to show fields of a Haskell record type.
-handleShowFieldsTool :: Logger -> LSPSession -> Text -> Value -> IO ControlResponse
-handleShowFieldsTool logger lspSession reqId args = do
+handleShowFieldsTool :: Logger -> LSPSession -> Maybe TUIHandle -> Text -> Value -> IO ControlResponse
+handleShowFieldsTool logger lspSession maybeTuiHandle reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
@@ -241,6 +255,7 @@ handleShowFieldsTool logger lspSession reqId args = do
 
       resultOrErr <- try $ runM
         $ runLog Debug
+        $ runTUIOrMock maybeTuiHandle
         $ runLSP lspSession
         $ runReturn (showFieldsLogic sfArgs)
 
@@ -257,8 +272,8 @@ handleShowFieldsTool logger lspSession reqId args = do
 -- | Handle the show_constructors tool.
 --
 -- Runs the ShowConstructorsGraph logic to show constructors of a Haskell sum type or GADT.
-handleShowConstructorsTool :: Logger -> LSPSession -> Text -> Value -> IO ControlResponse
-handleShowConstructorsTool logger lspSession reqId args = do
+handleShowConstructorsTool :: Logger -> LSPSession -> Maybe TUIHandle -> Text -> Value -> IO ControlResponse
+handleShowConstructorsTool logger lspSession maybeTuiHandle reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
@@ -269,6 +284,7 @@ handleShowConstructorsTool logger lspSession reqId args = do
 
       resultOrErr <- try $ runM
         $ runLog Debug
+        $ runTUIOrMock maybeTuiHandle
         $ runLSP lspSession
         $ runReturn (showConstructorsLogic scArgs)
 

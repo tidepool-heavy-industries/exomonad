@@ -11,12 +11,13 @@ import Tidepool.Control.Export (exportMCPTools)
 import Tidepool.Control.Handler.Hook (handleHook)
 import Tidepool.Control.Handler.MCP (handleMcpTool)
 import Tidepool.LSP.Interpreter (LSPSession)
+import Tidepool.TUI.Interpreter (TUIHandle)
 
 -- | Route a control message to the appropriate handler.
-handleMessage :: Logger -> LSPSession -> ControlMessage -> IO ControlResponse
-handleMessage logger lspSession = \case
+handleMessage :: Logger -> LSPSession -> Maybe TUIHandle -> ControlMessage -> IO ControlResponse
+handleMessage logger lspSession maybeTuiHandle = \case
   HookEvent input -> handleHook input
-  McpToolCall reqId name args -> handleMcpTool logger lspSession reqId name args
+  McpToolCall reqId name args -> handleMcpTool logger lspSession maybeTuiHandle reqId name args
   ToolsListRequest -> handleToolsList logger
 
 -- | Handle tool discovery request.

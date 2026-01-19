@@ -62,6 +62,7 @@ library
         containers >= 0.6 && < 1,
         freer-simple,
         tidepool-core,
+        tidepool-tui-interpreter,
         tidepool-lsp-interpreter,
         tidepool-training-generator,
         tidepool-teaching,
