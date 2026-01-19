@@ -53,23 +53,40 @@ cargo run -p tui-sidebar --release
 # Listens on port 7433, waits for connection
 ```
 
-### With Zellij Layout (recommended)
+### Hybrid Tidepool (recommended)
 ```bash
 cd /Users/inannamalick/dev/tidepool
-zellij --layout .zellij/tidepool.kdl
+./start-augmented.sh
 ```
 
-This starts all 3 components with intelligent orchestration:
-- Pane 1: Claude Code (manual start in your project)
-- Pane 2: control-server (Haskell, auto-starts with port polling)
-- Pane 3: tui-sidebar (Rust, waits for control-server, then auto-starts)
+This launches the Hybrid Tidepool architecture:
+- **process-compose**: Orchestrates services with dependency management
+  - control-server: Starts first, exposes HTTP health check (port 7434)
+  - tui-sidebar: Starts after control-server is healthy
+  - mcp-server-bridge: socat Unix socket bridge for MCP visibility
+- **Zellij**: 3-pane layout for visualization
+  - Pane 1: Welcome screen with instructions → **start Claude Code manually in your project**
+  - Pane 2: process-compose TUI dashboard (live service status)
+  - Pane 3: control-server logs
 
-**Orchestration features:**
-- Port polling synchronization (tui-sidebar waits for control-server on port 7432)
-- Dynamic pane renaming shows service state (Booting → ONLINE ✓ → CRASHED ✗)
-- 30-second timeout with clear error messages
-- Self-healing crash recovery (pane drops to shell with logs preserved)
-- Visual feedback through pane name state machine
+After Zellij launches, in Pane 1:
+```bash
+cd /path/to/your/project  # Navigate to your project
+claude-code               # Start Claude Code
+```
+
+**Orchestration features (process-compose):**
+- HTTP health checks ensure control-server is ready before starting dependencies
+- Declarative dependency DAG (tui-sidebar waits for control-server health)
+- Automatic restart on failure with exponential backoff (2s initial, max 3 restarts)
+- Centralized logging to `.tidepool/logs/`
+- TCP port readiness probes for service validation
+
+**vs. Previous Zellij-only approach:**
+- Replaces bash logic in KDL (port polling, backgrounding, error handling)
+- Declarative YAML config instead of embedded bash scripts
+- process-compose dashboard provides real-time service status
+- Unified logging and monitoring for all services
 
 ### Environment Variables
 

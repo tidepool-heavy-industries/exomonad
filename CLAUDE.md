@@ -254,60 +254,77 @@ In `.claude/settings.local.json`:
 ```json
 {
   "hooks": {
-    "PreToolUse": "mantle-agent hook pre-tool-use"
-  },
-  "mcpServers": {
-    "tidepool": {
-      "command": "mantle-agent",
-      "args": ["mcp"],
-      "env": {
-        "MANTLE_CONTROL_HOST": "127.0.0.1",
-        "MANTLE_CONTROL_PORT": "7432"
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "mantle-agent hook pre-tool-use"
+          }
+        ]
       }
-    }
+    ]
   }
 }
 ```
 
+**Note:** MCP server configuration uses `.mcp.json` (plugin-based approach). Claude spawns `mantle-agent mcp` directly, which connects to control-server via TCP.
+
 ### Running
 
-**Option 1: Zellij Layout (Recommended)**
+**Hybrid Tidepool Architecture (process-compose + Zellij)**
+
+**Recommended: start-augmented.sh**
 ```bash
-cd /path/to/tidepool
-zellij --layout .zellij/tidepool.kdl
+./start-augmented.sh
 ```
 
-This starts all 3 components with production-grade orchestration:
-- Pane 1: Claude Code (manual start in your project)
-- Pane 2: control-server (auto-starts with port polling)
-- Pane 3: tui-sidebar (waits for control-server, then auto-starts)
+This launches the Hybrid Tidepool setup as a **TUI IDE** wrapping Claude Code:
+- **process-compose**: Orchestrates services (control-server, tui-sidebar)
+- **Zellij**: 3-pane TUI IDE layout
+  - Pane 1 (left): **Claude Code** (auto-launches, main interface)
+  - Pane 2 (top-right): process-compose dashboard (infrastructure monitoring)
+  - Pane 3 (bottom-right): control-server logs (backend telemetry)
 
-**Orchestration features:**
-- Port polling synchronization eliminates race conditions
-- Dynamic pane renaming: `Booting...` → `ONLINE ✓` → `CRASHED ✗`
-- 30-second timeout with clear error messages
-- Self-healing crash recovery (pane drops to shell with logs preserved)
-- Visual state machine feedback
-- Centralized environment variables (GEMMA_ENDPOINT, RUST_LOG)
-- Single source of truth for working directory
+Claude Code starts automatically in the tidepool directory. MCP tools connect to control-server via TCP (port 7432).
 
-**Option 2: Manual (3 terminals - requires careful ordering)**
+**Note:** If MCP shows "failed" on startup (control-server not yet ready), use `/mcp` → `Reconnect` once services are healthy.
+
+**Orchestration features (process-compose):**
+- HTTP health checks (control-server port 7434)
+- Dependency DAG: tui-sidebar waits for control-server health
+- Automatic restart on failure with exponential backoff
+- Centralized logging to `.tidepool/logs/`
+- Service readiness probes (HTTP, TCP port)
+
+**Manual process-compose (without Zellij):**
 ```bash
-# Terminal 1: Start control server FIRST
-cd /path/to/project
-GEMMA_ENDPOINT=http://localhost:11434 cabal run tidepool-control-server
+# Create runtime directories
+mkdir -p .tidepool/{sockets,logs}
 
-# Wait for control-server to bind port 7432, THEN:
-# Terminal 2: Start tui-sidebar
-cd /path/to/tidepool
-RUST_LOG=info cargo run -p tui-sidebar --release
+# Start all services
+~/.local/bin/process-compose up --tui
 
-# Terminal 3: Start Claude Code (in project directory)
+# In another terminal: Start Claude Code
 cd /path/to/project
 claude-code
 ```
 
-**Note:** Manual startup requires careful sequencing. Use the Zellij layout for reliable startup.
+**Manual startup (3 terminals - NOT recommended):**
+```bash
+# Terminal 1: Start control server
+GEMMA_ENDPOINT=http://localhost:11434 cabal run tidepool-control-server
+
+# Terminal 2: Wait for health check, then start tui-sidebar
+while ! curl -sf http://localhost:7434 > /dev/null; do sleep 0.5; done
+cargo run -p tui-sidebar --release
+
+# Terminal 3: Start Claude Code
+cd /path/to/project
+claude-code
+```
+
+**Note:** Use `start-augmented.sh` for reliable startup. Manual methods require careful sequencing.
 
 ### Status
 
@@ -316,11 +333,34 @@ claude-code
 - ✅ LSP integration (HLS via lsp-test)
 - ✅ FunctionGemma scoring (HTTP interpreter via Ollama)
 - ✅ Automatic tool registration via MCPExport annotation + reifyMCPTools
-- ✅ Enhanced Zellij layout with port polling, dynamic pane renaming, and self-healing
+- ✅ Hybrid orchestration (process-compose + Zellij)
+- ✅ HTTP health endpoint (port 7434) for robust readiness checks
+- ✅ Declarative service dependencies and restart policies
+- ✅ MCP direct execution via .mcp.json (mantle-agent spawned per-call by Claude)
 - 🔄 Training data generation (types ready, CLI pending)
 - ❌ Daemon mode (not implemented, uses per-call TCP)
 - ❌ Metrics hub (mantle-hub needs repurposing)
 - ❌ Real hook logic (currently allow-all passthrough)
+
+### Stopping
+
+Zellij session exit automatically triggers cleanup via trap handler.
+
+**Normal exit:**
+1. Press `Ctrl+P` → `q` to quit Zellij
+2. Trap handler calls `process-compose down --ordered-shutdown`
+3. All services stop gracefully in reverse dependency order
+4. Verify: `pgrep -f control-server` returns nothing
+
+**Emergency cleanup (if session crashes):**
+```bash
+~/.local/bin/process-compose down --ordered-shutdown
+# Verify all stopped
+pgrep -f "control-server|tui-sidebar|process-compose"
+```
+
+**Stale session prevention:**
+Running `./start-augmented.sh` automatically detects and cleans up any existing sessions before launching.
 
 ### See Also
 

@@ -1,6 +1,6 @@
 module Main where
 
-import Control.Concurrent (threadDelay)
+import Control.Concurrent (threadDelay, forkIO)
 import Control.Monad (forM_)
 import System.Directory (getCurrentDirectory)
 import System.Environment (getArgs, lookupEnv)
@@ -18,6 +18,13 @@ import Tidepool.Control.Export (exportTrainingExamples, exportGroupedTrainingExa
 import Tidepool.LSP.Interpreter (withLSPSession)
 import Tidepool.Training.Format (formatTrainingFromSkeleton)
 
+-- HTTP health check endpoint
+import Network.Wai (responseLBS, Application)
+import Network.Wai.Handler.Warp (setPort, defaultSettings, runSettings)
+import Network.HTTP.Types (status200, hContentType)
+import qualified Data.ByteString.Char8 as BS
+import qualified Data.ByteString.Lazy.Char8 as BLC
+
 main :: IO ()
 main = do
   args <- getArgs
@@ -33,6 +40,17 @@ main = do
     ["-h"] -> printUsage
     _ -> runServerMode
 
+-- HTTP health check server (port 7434)
+startHealthServer :: IO ()
+startHealthServer = do
+  let settings = setPort 7434 defaultSettings
+  hPutStrLn stderr "Health check server listening on port 7434"
+  runSettings settings healthApp
+  where
+    healthApp :: Application
+    healthApp _req respond = respond $
+      responseLBS status200 [(hContentType, BS.pack "text/plain")] (BLC.pack "OK")
+
 runServerMode :: IO ()
 runServerMode = do
   -- Read project directory from environment or use current directory
@@ -43,6 +61,10 @@ runServerMode = do
 
   let config = ServerConfig { projectDir = projectDir }
 
+  -- Start health check server in background
+  _ <- forkIO startHealthServer
+
+  -- Start main control server
   runServer config
 
 runExportMode :: Bool -> [Text] -> IO ()

@@ -1,0 +1,64 @@
+version: "0.5"
+
+# Global config
+log_location: .tidepool/logs/process-compose.log
+log_level: info
+
+# Process definitions
+processes:
+  # ----------------------------------------------------------------
+  # SERVICE: Control Server (Haskell)
+  # ----------------------------------------------------------------
+  control-server:
+    command: cabal run tidepool-control-server
+
+    environment:
+      - GEMMA_ENDPOINT=http://localhost:11434
+      - RUST_LOG=info
+      - TIDEPOOL_PROJECT_DIR=${PWD}
+
+    # HTTP health endpoint check
+    readiness_probe:
+      http_get:
+        host: 127.0.0.1
+        port: 7434
+        path: /
+      initial_delay_seconds: 2
+      period_seconds: 1
+      timeout_seconds: 30
+      failure_threshold: 30
+
+    # Restart on failure with backoff
+    availability:
+      restart: on_failure
+      backoff_seconds: 2
+      max_restarts: 3
+
+  # ----------------------------------------------------------------
+  # SERVICE: TUI Sidebar (Rust)
+  # ----------------------------------------------------------------
+  tui-sidebar:
+    command: cargo run -p tui-sidebar
+    working_dir: rust
+
+    # Wait for control-server to be healthy before starting
+    depends_on:
+      control-server:
+        condition: process_healthy
+
+    environment:
+      - RUST_LOG=info
+
+    # TCP port readiness check
+    readiness_probe:
+      exec:
+        command: "nc -z localhost 7433"
+      initial_delay_seconds: 1
+      period_seconds: 1
+      timeout_seconds: 30
+
+    availability:
+      restart: on_failure
+      backoff_seconds: 2
+      max_restarts: 3
+

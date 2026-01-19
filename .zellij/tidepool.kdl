@@ -1,22 +1,8 @@
 layout {
-    // ══════════════════════════════════════════════════════════════
-    // GLOBAL CONTEXT INHERITANCE
-    // ══════════════════════════════════════════════════════════════
-
-    // Define working directory once - all panes inherit
+    // Global context
     cwd "/Users/inannamalick/dev/tidepool"
 
-    // Static environment variables
-    env {
-        GEMMA_ENDPOINT "http://localhost:11434"
-        RUST_LOG "info"
-        CLICOLOR_FORCE "1"
-    }
-
-    // ══════════════════════════════════════════════════════════════
-    // STATUS BAR CONFIGURATION
-    // ══════════════════════════════════════════════════════════════
-
+    // Status bar template
     default_tab_template {
         pane size=1 borderless=true {
             plugin location="zellij:tab-bar"
@@ -27,37 +13,28 @@ layout {
         }
     }
 
-    // ══════════════════════════════════════════════════════════════
-    // ORCHESTRATION TAB
-    // ══════════════════════════════════════════════════════════════
-
+    // Main tab
     tab name="Tidepool" focus=true {
         pane split_direction="vertical" {
 
-            // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            // LEFT PANE: CLAUDE CODE (Primary)
-            // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-            pane name="Claude Code" size="50%" focus=true
+            // LEFT: Claude Code (auto-launch with debug mode)
+            pane name="Claude Code" size="50%" focus=true {
+                command "claude"
+                args "-d"
+            }
 
             pane split_direction="horizontal" {
 
-                // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-                // TOP-RIGHT: CONTROL SERVER (runs in foreground, logs visible)
-                // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-                pane name="control-server" size="50%" {
+                // TOP-RIGHT: Process Dashboard
+                pane name="Orchestrator" size="60%" {
                     command "bash"
-                    args "-c" "echo '=== Starting control-server on port 7432 ==='; echo 'Services: LSP, MCP, TUI Handler'; echo ''; cabal run tidepool-control-server || { echo ''; echo '!!! control-server exited !!!'; exec bash; }"
+                    args "-c" "./scripts/tidepool-runner.sh up --tui"
                 }
 
-                // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-                // BOTTOM-RIGHT: TUI SIDEBAR (waits for control-server, then runs in foreground)
-                // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-                pane name="tui-sidebar" size="50%" {
+                // BOTTOM-RIGHT: Dedicated Logs
+                pane name="Logs" {
                     command "bash"
-                    args "-c" "echo '=== Waiting for control-server (port 7432) ==='; RETRIES=0; while ! nc -z localhost 7432 2>/dev/null; do sleep 0.5; RETRIES=$((RETRIES+1)); if [ $RETRIES -ge 60 ]; then echo ''; echo '!!! TIMEOUT: control-server not ready after 30s !!!'; echo 'Check control-server pane for errors'; exec bash; fi; done; echo '=== control-server ready, starting tui-sidebar on port 7433 ==='; echo ''; cargo run -p tui-sidebar --release || { echo ''; echo '!!! tui-sidebar exited !!!'; exec bash; }"
+                    args "-c" "sleep 2 && ~/.local/bin/process-compose process logs control-server --follow"
                 }
             }
         }

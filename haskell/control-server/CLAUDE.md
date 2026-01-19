@@ -441,8 +441,21 @@ curl http://localhost:11434/api/tags
 
 ## Running
 
+### Hybrid Tidepool (Recommended)
 ```bash
-# Start in project directory (creates .tidepool/control.sock)
+cd /path/to/tidepool
+./start-augmented.sh
+```
+
+Launches control-server via process-compose with:
+- HTTP health endpoint on port 7434
+- Automatic dependency management (tui-sidebar waits for health)
+- Centralized logging to `.tidepool/logs/`
+- Automatic restart on failure
+
+### Standalone (Development)
+```bash
+# Start in project directory
 cd /path/to/your/project
 
 # GEMMA_ENDPOINT is REQUIRED (no heuristic fallback)
@@ -452,22 +465,33 @@ GEMMA_ENDPOINT=http://localhost:11434 cabal run tidepool-control-server
 TIDEPOOL_PROJECT_DIR=/path/to/project GEMMA_ENDPOINT=http://localhost:11434 cabal run tidepool-control-server
 ```
 
+### Health Check
+The server exposes an HTTP health endpoint for orchestration:
+```bash
+# Check if control-server is ready
+curl http://localhost:7434
+# Returns: OK
+
+# Used by process-compose for readiness probes
+# Dependencies (tui-sidebar, mcp-server-bridge) wait for this endpoint
+```
+
 **Server logs to stdout:**
 ```
+Health check server listening on port 7434
 Created .tidepool directory at ./.tidepool
 Starting LSP session for project: .
 [LSP] Session started, HLS initialized
 LSP session initialized
-Control server listening on ./.tidepool/control.sock
+Control server listening on TCP port 7432
 Connection received
-[MCP] tool=scout
-  query=What breaks if I add a new variant?
-  symbols=LLMKind
-  depth=Medium
+[MCP] tool=teach-graph
+  topic=how Memory effect works
+  seeds=getMem,putMem
   gemma=http://localhost:11434
-[Gemma] HTTP call to http://localhost:11434 for: /path/to/Types.hs:42
-[Gemma] -> relevance=5, risk=4
-  found 15 locations
+[Gemma] HTTP call to http://localhost:11434 for: /path/to/Memory.hs:42
+[Gemma] -> relevance=5, depth=2
+  found 8 symbols
 [MCP] -> success
 ```
 
