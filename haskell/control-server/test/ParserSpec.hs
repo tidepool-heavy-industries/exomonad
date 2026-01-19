@@ -30,6 +30,8 @@ tests = testGroup "Constructor Parser"
           let rawDef = "data Foo = Bar { x :: Int, y :: String } deriving (Show, Eq)"
               cons = parseADTConstructors rawDef
           map conName cons @?= ["Bar"]
-          conFields (head cons) @?= ["Int", "String"]
+          case cons of
+            [c] -> conFields c @?= ["Int", "String"]
+            _ -> assertFailure "Expected exactly one constructor"
       ]
   ]

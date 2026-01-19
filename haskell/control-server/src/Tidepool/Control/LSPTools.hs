@@ -817,8 +817,7 @@ stripDerivingClause txt =
       -- Then handle single-line by splitting at the "deriving" keyword
       -- We use breakOn " deriving " to avoid matching things like "FooDeriving"
   in case T.breakOn " deriving " multiLineStripped of
-       (before, _) -> case T.breakOn "\nderiving " before of
-                        (before', _) -> before'
+       (before, _) -> before
   where
     isDerivingLine line =
       let stripped = T.stripStart line
