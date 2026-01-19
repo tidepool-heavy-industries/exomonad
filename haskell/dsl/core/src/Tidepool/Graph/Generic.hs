@@ -57,6 +57,8 @@ module Tidepool.Graph.Generic
     -- * EntryNode/ExitNode Types
   , EntryNode
   , ExitNode
+  , Entry
+  , Exit
 
     -- * Node Kind Wrappers (for record DSL)
   , LLMNode
@@ -136,15 +138,19 @@ import Tidepool.Graph.Validate.RecordStructure
   )
 import Tidepool.Graph.Validate.ForkBarrier (ValidateForkBarrierPairs)
 import Tidepool.Graph.Generic.Core
-  ( GraphMode(..)
-  , AsGraph
+  ( AsGraph
+  , GraphMode(..)
   , LLMNode
   , LogicNode
   , GraphNode
-  , ForkNode
-  , BarrierNode
   , EntryNode
   , ExitNode
+  , Entry
+  , Exit
+  , ForkNode
+  , BarrierNode
+  , GetNodeName
+  , NodeRef(..)
   )
 
 -- | Effect type alias (freer-simple effects have kind Type -> Type).
@@ -1229,11 +1235,11 @@ type ValidateExitCount :: Nat -> Constraint
 type family ValidateExitCount n where
   ValidateExitCount 0 = DelayedTypeError
     ( HR
-      ':$$: 'Text "  Missing Exit field"
+      ':$$: 'Text "  Missing ExitNode field"
       ':$$: HR
       ':$$: Blank
       ':$$: WhatHappened
-      ':$$: Indent "Your graph record has no Exit field."
+      ':$$: Indent "Your graph record has no ExitNode field."
       ':$$: Blank
       ':$$: HowItWorks
       ':$$: Indent "Every graph needs exactly one exit point that defines"

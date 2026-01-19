@@ -25,6 +25,7 @@ library
         Tidepool.Effect.Metadata
         Tidepool.Effect.NodeMeta
         Tidepool.Effect.Types
+        Tidepool.Effect.Decision
         Tidepool.Effect.TUI
         Tidepool.Graph
         Tidepool.Graph.Types
@@ -164,6 +165,7 @@ test-suite graph-validation-tests
         ConvertTransitionHintSpec
         ToolTransitionIntegrationSpec
         DecisionToolsSpec
+        DecisionSpec
         Test.Tidepool.MockLLM
         -- Golden test files (compile-only validation)
         BranchingLogicRecord
@@ -183,6 +185,7 @@ test-suite graph-validation-tests
         text >= 2.0 && < 3,
         vector >= 0.13 && < 1,
         freer-simple >= 1.2 && < 2,
+        time,
         tidepool-core
     hs-source-dirs:   test, test/golden/valid
     default-language: GHC2024

@@ -114,6 +114,11 @@ module Tidepool.Effect.Types
   , updateUI
   , closeUI
 
+    -- * Decision Types
+  , Decision(..)
+  , DecisionContext(..)
+  , DecisionTrace(..)
+
     -- * TUI Types (protocol)
   , UISpec(..)
   , Layout(..)
@@ -176,8 +181,12 @@ import Tidepool.Graph.Goto (GotoChoice, To)
 -- TUI effect and types
 import Tidepool.Effect.TUI
   ( TUI(..), showUI, updateUI, closeUI
-  , UISpec(..), Layout(..), Element(..)
-  , Interaction(..), UIUpdate(..), ElementUpdate(..)
+    , UISpec(..), Layout(..), Element(..), Interaction(..), UIUpdate(..), ElementUpdate(..)
+  )
+
+-- Decision types
+import Tidepool.Effect.Decision
+  ( Decision(..), DecisionContext(..), DecisionTrace(..)
   )
 
 -- ══════════════════════════════════════════════════════════════

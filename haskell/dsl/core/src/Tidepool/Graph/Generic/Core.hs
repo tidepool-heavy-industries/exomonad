@@ -20,6 +20,8 @@ module Tidepool.Graph.Generic.Core
   , GraphNode
   , EntryNode
   , ExitNode
+  , Entry
+  , Exit
 
     -- * Parallel Execution Markers
   , ForkNode
@@ -143,6 +145,10 @@ data EntryNode inputType
 -- @
 type ExitNode :: Type -> Type
 data ExitNode outputType
+
+-- | Aliases for EntryNode and ExitNode (deprecated, used by tests).
+type Entry = EntryNode
+type Exit = ExitNode
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- PARALLEL EXECUTION MARKERS
