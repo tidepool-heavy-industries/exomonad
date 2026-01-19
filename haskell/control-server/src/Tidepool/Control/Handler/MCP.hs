@@ -35,6 +35,12 @@ import Tidepool.Control.LSPTools
   , showFieldsLogic, ShowFieldsArgs(..), ShowFieldsResult(..)
   , showConstructorsLogic, ShowConstructorsArgs(..), ShowConstructorsResult(..)
   )
+import Tidepool.Control.ExoTools
+  ( exoStatusLogic, ExoStatusArgs(..), ExoStatusResult(..)
+  )
+import Tidepool.BD.Interpreter (runBDIO, defaultBDConfig)
+import Tidepool.BD.GitInterpreter (runGitIO)
+import Tidepool.GitHub.Interpreter (runGitHubIO, defaultGitHubConfig)
 import Tidepool.Effect.NodeMeta (runNodeMeta, runGraphMeta, defaultNodeMeta, GraphMetadata(..))
 import Tidepool.Effect.Types (runLog, LogLevel(..))
 import Tidepool.Graph.Goto (unwrapSingleChoice)
@@ -51,6 +57,9 @@ import Tidepool.Teaching.Teacher (teacherGuidance)
 --
 -- == Tier 2: LLM-Enhanced Tools (Graph DSL)
 --   - "teach-graph": Generate teaching documents via graph DSL + Haiku
+--
+-- == Tier 3: External Orchestration Tools (Exo)
+--   - "exo_status": Get current bead context, git status, and PR info
 handleMcpTool :: Logger -> LSPSession -> Text -> Text -> Value -> IO ControlResponse
 handleMcpTool logger lspSession reqId toolName args = do
   logInfo logger $ "[MCP:" <> reqId <> "] Dispatching: " <> toolName
@@ -64,11 +73,43 @@ handleMcpTool logger lspSession reqId toolName args = do
     -- Tier 2: LLM-enhanced tools (graph-based)
     "teach-graph" -> handleTeachGraphTool logger lspSession reqId args
 
+    -- Tier 3: External Orchestration tools (Exo)
+    "exo_status" -> handleExoStatusTool logger lspSession reqId args
+
     _ -> do
       logError logger $ "  (unknown tool)"
       pure $ mcpToolError reqId $
         "Tool not found: " <> toolName <>
-        ". Available tools: find_callers, show_fields, show_constructors, teach-graph"
+        ". Available tools: find_callers, show_fields, show_constructors, teach-graph, exo_status"
+
+-- | Handle the exo_status tool.
+--
+-- Runs the ExoStatusGraph logic to get development context.
+handleExoStatusTool :: Logger -> LSPSession -> Text -> Value -> IO ControlResponse
+handleExoStatusTool logger _lspSession reqId args = do
+  case fromJSON args of
+    Error err -> do
+      logError logger $ "  parse error: " <> T.pack err
+      pure $ mcpToolError reqId $ "Invalid exo_status arguments: " <> T.pack err
+
+    Success esArgs -> do
+      logDebug logger $ "  bead_id=" <> T.pack (show esArgs.esaBeadId)
+
+      resultOrErr <- try $ runM
+        $ runLog Debug
+        $ runBDIO defaultBDConfig
+        $ runGitIO
+        $ runGitHubIO defaultGitHubConfig
+        $ fmap unwrapSingleChoice (exoStatusLogic esArgs)
+
+      case resultOrErr of
+        Left (e :: SomeException) -> do
+          logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId $ "exo_status failed: " <> T.pack (displayException e)
+
+        Right result -> do
+          logInfo logger $ "[MCP:" <> reqId <> "] Context retrieved successfully"
+          pure $ mcpToolSuccess reqId (toJSON result)
 
 
 -- | Handle the teach-graph tool (graph-based exploration).

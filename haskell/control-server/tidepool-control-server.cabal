@@ -27,6 +27,7 @@ library
         Tidepool.Control.Handler.Hook
         Tidepool.Control.Handler.MCP
         Tidepool.Control.LSPTools
+        Tidepool.Control.ExoTools
         Tidepool.Control.Export
         -- Scout (semantic code exploration)
         Tidepool.Control.Scout.Types
@@ -64,6 +65,8 @@ library
         tidepool-lsp-interpreter,
         tidepool-training-generator,
         tidepool-teaching,
+        tidepool-bd-interpreter,
+        tidepool-github-interpreter,
         -- HTTP for FunctionGemma
         http-conduit,
         vector,
