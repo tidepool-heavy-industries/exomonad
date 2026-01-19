@@ -9,7 +9,7 @@ module Tidepool.Control.Server
   ) where
 
 import Control.Concurrent (forkIO)
-import Control.Exception (SomeException, catch, finally, bracket)
+import Control.Exception (SomeException, catch, finally, bracket, try)
 import Control.Monad (forever, void)
 import Data.Aeson (eitherDecodeStrict, encode)
 import Data.ByteString (ByteString)
@@ -27,10 +27,15 @@ import Tidepool.Control.Logging (Logger, logInfo, logDebug, logError)
 import Tidepool.Control.Protocol
 import Tidepool.Control.Types (ServerConfig(..))
 import Tidepool.LSP.Interpreter (LSPSession, withLSPSession)
+import Tidepool.TUI.Interpreter (TUIHandle, connectTUI, newTUIHandle, closeTUIHandle)
 
 -- | Default TCP port for mantle-agent connections.
 defaultTcpPort :: Int
 defaultTcpPort = 7432
+
+-- | Default TCP port for TUI sidebar connections.
+defaultTuiPort :: Int
+defaultTuiPort = 7433
 
 -- | Run the control server. Blocks forever.
 --
@@ -42,18 +47,37 @@ runServer logger config = do
   tcpPortEnv <- lookupEnv "MANTLE_CONTROL_PORT"
   let tcpPort = maybe defaultTcpPort read tcpPortEnv
 
+  -- Get TUI port from environment or use default
+  tuiPortEnv <- lookupEnv "TIDEPOOL_TUI_PORT"
+  let tuiPort = maybe (show defaultTuiPort) id tuiPortEnv
+
   logInfo logger $ "Starting LSP session for project: " <> T.pack config.projectDir
 
   -- Start LSP session and run server
   withLSPSession config.projectDir $ \lspSession -> do
     logInfo logger "LSP session initialized"
 
-    bracket (setupTcpSocket tcpPort) close $ \sock -> do
+    -- Try to connect to TUI sidebar (optional)
+    maybeTuiHandle <- try (connectTUI "localhost" tuiPort) >>= \case
+      Left (e :: SomeException) -> do
+        logInfo logger $ "TUI sidebar not found on port " <> T.pack tuiPort
+          <> ", running without TUI support (" <> T.pack (show e) <> ")"
+        pure Nothing
+      Right tuiSock -> do
+        logInfo logger $ "Connected to TUI sidebar on port " <> T.pack tuiPort
+        Just <$> newTUIHandle "control-server" tuiSock
+
+    let cleanup = do
+          case maybeTuiHandle of
+            Just h -> closeTUIHandle h
+            Nothing -> pure ()
+
+    flip finally cleanup $ bracket (setupTcpSocket tcpPort) close $ \sock -> do
       logInfo logger $ "Control server listening on TCP port " <> T.pack (show tcpPort)
 
       forever $ do
         (conn, _peer) <- accept sock
-        void $ forkIO $ handleConnection logger lspSession conn `finally` close conn
+        void $ forkIO $ handleConnection logger lspSession maybeTuiHandle conn `finally` close conn
 
 -- | Setup TCP socket on given port.
 setupTcpSocket :: Int -> IO Socket
@@ -65,8 +89,8 @@ setupTcpSocket port = do
   pure sock
 
 -- | Handle a single connection (one NDJSON request-response).
-handleConnection :: Logger -> LSPSession -> Socket -> IO ()
-handleConnection logger lspSession conn = do
+handleConnection :: Logger -> LSPSession -> Maybe TUIHandle -> Socket -> IO ()
+handleConnection logger lspSession maybeTuiHandle conn = do
   logDebug logger "Connection received"
 
   (do
@@ -83,7 +107,7 @@ handleConnection logger lspSession conn = do
 
       Right msg -> do
         logMessage logger msg
-        response <- handleMessage logger lspSession msg
+        response <- handleMessage logger lspSession maybeTuiHandle msg
         logResponse logger response
         sendResponse conn response
     )
