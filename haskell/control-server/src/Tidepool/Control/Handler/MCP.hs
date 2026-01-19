@@ -82,7 +82,9 @@ handleMcpTool logger lspSession maybeTuiHandle reqId toolName args = do
     "show_constructors" -> handleShowConstructorsTool logger lspSession maybeTuiHandle reqId args
 
     -- Tier 2: LLM-enhanced tools (graph-based)
-    "teach-graph" -> handleTeachGraphTool logger lspSession maybeTuiHandle reqId args
+    -- DISABLED: teach-graph spawns recursive LLM calls, expensive during testing
+    -- Re-enable once Tier 1 tools are stable
+    -- "teach-graph" -> handleTeachGraphTool logger lspSession maybeTuiHandle reqId args
 
     -- Tier 3: External Orchestration tools (Exo)
     "exo_status" -> handleExoStatusTool logger lspSession reqId args
