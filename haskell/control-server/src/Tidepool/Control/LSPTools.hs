@@ -194,6 +194,7 @@ findCallersLogic args = do
   -- Check indexing state for warning
   indexingState <- getIndexingState
   let warning = case indexingState of
+        Startup -> Just "HLS is starting up..."
         Indexing -> Just "HLS is still indexing. Results may be incomplete."
         Ready -> Nothing
 
@@ -386,6 +387,7 @@ showFieldsLogic args = do
   -- Check indexing state for warning
   indexingState <- getIndexingState
   let warning = case indexingState of
+        Startup -> Just "HLS is starting up..."
         Indexing -> Just "HLS is still indexing. Results may be incomplete."
         Ready -> Nothing
 
@@ -539,6 +541,7 @@ showConstructorsLogic args = do
   -- Check indexing state for warning
   indexingState <- getIndexingState
   let warning = case indexingState of
+        Startup -> Just "HLS is starting up..."
         Indexing -> Just "HLS is still indexing. Results may be incomplete."
         Ready -> Nothing
 
@@ -854,3 +857,9 @@ readFileUtf8 :: FilePath -> IO Text
 readFileUtf8 path = do
   bs <- BS.readFile path
   pure $ TE.decodeUtf8With (\_ _ -> Just '?') bs
+
+-- | Check if text starts with uppercase char
+isUpperCase :: Text -> Bool
+isUpperCase t = case T.uncons t of
+  Just (c, _) -> c >= 'A' && c <= 'Z'
+  Nothing -> False

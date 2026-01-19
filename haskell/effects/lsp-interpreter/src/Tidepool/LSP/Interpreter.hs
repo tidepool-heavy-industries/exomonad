@@ -130,7 +130,7 @@ withLSPSession rootDir action = do
 
   -- Initialize with full IndexingInfo (HLS starts indexing on connect)
   let initialInfo = IndexingInfo
-        { iiState = Indexing
+        { iiState = Startup
         , iiProgressCount = 0
         , iiProgressTokens = []
         , iiSessionStart = sessionStart
@@ -185,18 +185,30 @@ withLSPSession rootDir action = do
           now <- liftIO getCurrentTime
           nextCheck <- if diffUTCTime now lastCheck > 2
             then do
+              -- Read current info to detect state transitions
+              currentInfo <- liftIO $ readTVarIO indexingInfo
+
               -- Poll HLS for incomplete progress sessions
               incomplete <- getIncompleteProgressSessions
               let progressCount = Set.size incomplete
               let progressTokens = map showProgressToken (Set.toList incomplete)
-              let newState = if Set.null incomplete then Ready else Indexing
+              
+              let hasProgress = progressCount > 0
+              let timeSinceStart = diffUTCTime now sessionStart
 
-              -- Read current info to detect state transitions
-              currentInfo <- liftIO $ readTVarIO indexingInfo
+              let newState = case (currentInfo.iiState, hasProgress) of
+                    (_, True) -> Indexing
+                    (Startup, False) -> 
+                      if timeSinceStart > 15 
+                        then Ready
+                        else Startup
+                    (Indexing, False) -> Ready
+                    (Ready, False) -> Ready
 
-              -- Set readyAt only on Indexing→Ready transition
+              -- Set readyAt only on Indexing→Ready or Startup→Ready transition
               let readyAt = case (currentInfo.iiState, newState) of
                     (Indexing, Ready) -> Just now
+                    (Startup, Ready)  -> Just now
                     _                 -> currentInfo.iiReadyAt
 
               -- Build updated info

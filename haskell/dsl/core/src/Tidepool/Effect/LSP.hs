@@ -331,7 +331,8 @@ data SymbolInformation = SymbolInformation
 -- incomplete results. This state is tracked by the session and can be
 -- queried by tools to add warnings to their output.
 data IndexingState
-  = Indexing    -- ^ HLS is still indexing the workspace
+  = Startup     -- ^ HLS has started but hasn't begun indexing (initial state)
+  | Indexing    -- ^ HLS is still indexing the workspace
   | Ready       -- ^ HLS indexing complete, queries should be accurate
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)
