@@ -179,9 +179,9 @@ findCallersHandlers
   :: (Member LSP es, Member Log es, LastMember IO es)
   => FindCallersGraph (AsHandler es)
 findCallersHandlers = FindCallersGraph
-  { fcEntry = Proxy @FindCallersArgs
+  { fcEntry = ()
   , fcRun = findCallersLogic
-  , fcExit = Proxy @FindCallersResult
+  , fcExit = ()
   }
 
 -- | Core logic for finding callers.
@@ -374,9 +374,9 @@ showFieldsHandlers
   :: (Member LSP es, Member Log es, LastMember IO es)
   => ShowFieldsGraph (AsHandler es)
 showFieldsHandlers = ShowFieldsGraph
-  { sfEntry = Proxy @ShowFieldsArgs
+  { sfEntry = ()
   , sfRun = showFieldsLogic
-  , sfExit = Proxy @ShowFieldsResult
+  , sfExit = ()
   }
 
 -- | Core logic for showing fields.
@@ -528,9 +528,9 @@ showConstructorsHandlers
   :: (Member LSP es, Member Log es, LastMember IO es)
   => ShowConstructorsGraph (AsHandler es)
 showConstructorsHandlers = ShowConstructorsGraph
-  { scEntry = Proxy @ShowConstructorsArgs
+  { scEntry = ()
   , scRun = showConstructorsLogic
-  , scExit = Proxy @ShowConstructorsResult
+  , scExit = ()
   }
 
 -- | Core logic for showing constructors.

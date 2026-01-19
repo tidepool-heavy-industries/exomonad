@@ -103,6 +103,7 @@ module Tidepool.Graph.Generic
   , HasExitField
   , CountEntries
   , CountExits
+  , CountLogicNodes
   , GetEntryType
   , GetExitType
   , ValidateEntryExit
@@ -199,14 +200,14 @@ instance GraphMode (AsHandler es) where
 -- NodeHandler (Logic :@ Input Intent :@ UsesEffects '[Goto "respond", GotoExit]) es
 --   = Intent -> Eff es (GotoChoice targets)
 --
--- NodeHandler (EntryNode Message) es = Proxy Message
--- NodeHandler (Exit Response) es = Proxy Response
+-- NodeHandler (EntryNode Message) es = ()
+-- NodeHandler (Exit Response) es = ()
 -- @
 type NodeHandler :: Type -> [Effect] -> Type
 type family NodeHandler nodeDef es where
-  -- EntryNode/Exit produce Proxy (self-documenting markers)
-  NodeHandler (EntryNode a) es = Proxy a
-  NodeHandler (ExitNode a) es = Proxy a
+  -- EntryNode/Exit produce () (no-op markers, never invoked at runtime)
+  NodeHandler (EntryNode a) es = ()
+  NodeHandler (ExitNode a) es = ()
 
   -- GraphNode handler: runs child graph to completion.
   --
@@ -698,15 +699,15 @@ type family NodeHandlerDispatch nodeDef origNode es mInput mTpl mSchema mEffs wh
   --
   -- When EntryNode/ExitNode have annotations like MCPExport, they go through
   -- NodeHandlerDispatch. After stripping annotations, we reach bare Entry/Exit.
-  -- These are markers (Proxy) just like the non-annotated versions.
+  -- These are no-op markers, never invoked at runtime.
   --
   -- ══════════════════════════════════════════════════════════════════════════
 
-  -- EntryNode after stripping annotations: marker (Proxy)
-  NodeHandlerDispatch (EntryNode a) orig es _ _ _ _ = Proxy a
+  -- EntryNode after stripping annotations: no-op marker
+  NodeHandlerDispatch (EntryNode a) orig es _ _ _ _ = ()
 
-  -- ExitNode after stripping annotations: marker (Proxy)
-  NodeHandlerDispatch (ExitNode a) orig es _ _ _ _ = Proxy a
+  -- ExitNode after stripping annotations: no-op marker
+  NodeHandlerDispatch (ExitNode a) orig es _ _ _ _ = ()
 
   -- ForkNode Base Cases
   -- ══════════════════════════════════════════════════════════════════════════
@@ -1137,6 +1138,19 @@ type family CountExits f where
   CountExits (M1 S _ _) = 0
   CountExits (l :*: r) = CountExits l + CountExits r
   CountExits _ = 0
+
+-- | Count LogicNode fields in a Generic representation.
+--
+-- Returns the number of fields with type @LogicNode :@ ...@ for some annotations.
+-- Used by simpleGraph smart constructor to verify exactly one logic node exists.
+type CountLogicNodes :: (Type -> Type) -> Nat
+type family CountLogicNodes f where
+  CountLogicNodes (M1 D _ f) = CountLogicNodes f
+  CountLogicNodes (M1 C _ f) = CountLogicNodes f
+  CountLogicNodes (M1 S _ (K1 _ (LogicNode :@ _))) = 1
+  CountLogicNodes (M1 S _ _) = 0
+  CountLogicNodes (l :*: r) = CountLogicNodes l + CountLogicNodes r
+  CountLogicNodes _ = 0
 
 -- | Extract EntryNode type from a graph record.
 type GetEntryType :: (Type -> Type) -> Maybe Type
