@@ -19,6 +19,8 @@ library
         text >= 2.0 && < 3,
         containers >= 0.6 && < 1,
         process >= 1.6 && < 2,
+        stm >= 2.5 && < 3,
+        time >= 1.12 && < 2,
         lsp-test >= 0.17 && < 1,
         lsp-types >= 2.3 && < 3,
         tidepool-core

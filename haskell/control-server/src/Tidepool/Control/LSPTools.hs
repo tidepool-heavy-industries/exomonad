@@ -140,6 +140,7 @@ data FindCallersResult = FindCallersResult
   , fcrCallSites :: [CallSite]
   , fcrFilteredCount :: Int      -- ^ How many references were filtered out
   , fcrTruncated :: Bool
+  , fcrWarning :: Maybe Text     -- ^ Warning if HLS is still indexing
   }
   deriving stock (Show, Eq, Generic)
 
@@ -151,6 +152,7 @@ instance ToJSON FindCallersResult where
     , "call_sites" .= fcrCallSites fcr
     , "filtered_count" .= fcrFilteredCount fcr
     , "truncated" .= fcrTruncated fcr
+    , "warning" .= fcrWarning fcr
     ]
 
 -- | Graph definition for find_callers tool.
@@ -189,6 +191,12 @@ findCallersLogic args = do
       ctxLines = fromMaybe 1 (fcaContextLines args)
       maxResults = fromMaybe 50 (fcaMaxResults args)
 
+  -- Check indexing state for warning
+  indexingState <- getIndexingState
+  let warning = case indexingState of
+        Indexing -> Just "HLS is still indexing. Results may be incomplete."
+        Ready -> Nothing
+
   logDebug $ "[find_callers] Finding callers of: " <> name
 
   -- Find the symbol's definition
@@ -208,6 +216,7 @@ findCallersLogic args = do
       , fcrCallSites = []
       , fcrFilteredCount = 0
       , fcrTruncated = False
+      , fcrWarning = warning
       }
 
     (sym:_) -> do
@@ -275,6 +284,7 @@ findCallersLogic args = do
         , fcrCallSites = selected
         , fcrFilteredCount = filteredCount
         , fcrTruncated = truncated
+        , fcrWarning = warning
         }
 
   pure $ gotoExit result
@@ -326,6 +336,7 @@ data ShowFieldsResult = ShowFieldsResult
   , sfrIsRecord :: Bool
   , sfrFields :: [RecordField]
   , sfrRawDefinition :: Text     -- ^ Raw definition text for reference
+  , sfrWarning :: Maybe Text     -- ^ Warning if HLS is still indexing
   }
   deriving stock (Show, Eq, Generic)
 
@@ -337,6 +348,7 @@ instance ToJSON ShowFieldsResult where
     , "is_record" .= sfrIsRecord sfr
     , "fields" .= sfrFields sfr
     , "raw_definition" .= sfrRawDefinition sfr
+    , "warning" .= sfrWarning sfr
     ]
 
 -- | Graph definition for show_fields tool.
@@ -371,6 +383,12 @@ showFieldsLogic
 showFieldsLogic args = do
   let typeName = sfaTypeName args
 
+  -- Check indexing state for warning
+  indexingState <- getIndexingState
+  let warning = case indexingState of
+        Indexing -> Just "HLS is still indexing. Results may be incomplete."
+        Ready -> Nothing
+
   logDebug $ "[show_fields] Looking up: " <> typeName
 
   -- Find the type
@@ -391,6 +409,7 @@ showFieldsLogic args = do
       , sfrIsRecord = False
       , sfrFields = []
       , sfrRawDefinition = ""
+      , sfrWarning = warning
       }
 
     (sym:_) -> do
@@ -418,6 +437,7 @@ showFieldsLogic args = do
         , sfrIsRecord = isRecord
         , sfrFields = fields
         , sfrRawDefinition = rawDef
+        , sfrWarning = warning
         }
 
   pure $ gotoExit result
@@ -469,6 +489,7 @@ data ShowConstructorsResult = ShowConstructorsResult
   , scrConstructors :: [Constructor]
   , scrIsGADT :: Bool
   , scrRawDefinition :: Text
+  , scrWarning :: Maybe Text     -- ^ Warning if HLS is still indexing
   }
   deriving stock (Show, Eq, Generic)
 
@@ -480,6 +501,7 @@ instance ToJSON ShowConstructorsResult where
     , "constructors" .= scrConstructors scr
     , "is_gadt" .= scrIsGADT scr
     , "raw_definition" .= scrRawDefinition scr
+    , "warning" .= scrWarning scr
     ]
 
 -- | Graph definition for show_constructors tool.
@@ -514,6 +536,12 @@ showConstructorsLogic
 showConstructorsLogic args = do
   let typeName = scaTypeName args
 
+  -- Check indexing state for warning
+  indexingState <- getIndexingState
+  let warning = case indexingState of
+        Indexing -> Just "HLS is still indexing. Results may be incomplete."
+        Ready -> Nothing
+
   logDebug $ "[show_constructors] Looking up: " <> typeName
 
   -- Find the type
@@ -534,6 +562,7 @@ showConstructorsLogic args = do
       , scrConstructors = []
       , scrIsGADT = False
       , scrRawDefinition = ""
+      , scrWarning = warning
       }
 
     (sym:_) -> do
@@ -563,6 +592,7 @@ showConstructorsLogic args = do
         , scrConstructors = constructors
         , scrIsGADT = isGADT
         , scrRawDefinition = rawDef
+        , scrWarning = warning
         }
 
   pure $ gotoExit result

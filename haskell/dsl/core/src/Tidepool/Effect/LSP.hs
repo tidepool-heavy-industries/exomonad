@@ -58,6 +58,7 @@ module Tidepool.Effect.LSP
   , completion
   , workspaceSymbol
   , documentSymbol
+  , getIndexingState
 
     -- * Document Identifiers
   , TextDocumentIdentifier(..)
@@ -82,6 +83,9 @@ module Tidepool.Effect.LSP
   , CompletionItemKind(..)
   , SymbolInformation(..)
   , SymbolKind(..)
+
+    -- * Indexing State
+  , IndexingState(..)
   ) where
 
 import Control.Monad.Freer (Eff, Member, send)
@@ -314,6 +318,22 @@ data SymbolInformation = SymbolInformation
 
 
 -- ════════════════════════════════════════════════════════════════════════════
+-- INDEXING STATE
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | HLS indexing state.
+--
+-- When HLS is still indexing the workspace, LSP queries may return
+-- incomplete results. This state is tracked by the session and can be
+-- queried by tools to add warnings to their output.
+data IndexingState
+  = Indexing    -- ^ HLS is still indexing the workspace
+  | Ready       -- ^ HLS indexing complete, queries should be accurate
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (FromJSON, ToJSON)
+
+
+-- ════════════════════════════════════════════════════════════════════════════
 -- EFFECT DEFINITION
 -- ════════════════════════════════════════════════════════════════════════════
 
@@ -353,6 +373,12 @@ data LSP r where
 
   -- | Get all symbols (functions, types, etc.) defined in a document.
   DocumentSymbol :: TextDocumentIdentifier -> LSP [SymbolInformation]
+
+  -- | Get the current HLS indexing state.
+  --
+  -- Returns 'Indexing' if HLS is still indexing the workspace,
+  -- 'Ready' when indexing is complete and queries should be accurate.
+  GetIndexingState :: LSP IndexingState
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -414,3 +440,21 @@ workspaceSymbol query = send (WorkspaceSymbol query)
 -- Note: This operation requires native execution (not available in WASM).
 documentSymbol :: (Member LSP effs, NativeOnly) => TextDocumentIdentifier -> Eff effs [SymbolInformation]
 documentSymbol doc = send (DocumentSymbol doc)
+
+-- | Get the current HLS indexing state.
+--
+-- Returns 'Indexing' if HLS is still indexing the workspace (results may be incomplete),
+-- or 'Ready' when indexing is complete and queries should be accurate.
+--
+-- Use this to add warnings to tool results when HLS is still indexing:
+--
+-- @
+-- state <- getIndexingState
+-- let warning = case state of
+--       Indexing -> Just "HLS is still indexing. Results may be incomplete."
+--       Ready -> Nothing
+-- @
+--
+-- Note: This operation requires native execution (not available in WASM).
+getIndexingState :: (Member LSP effs, NativeOnly) => Eff effs IndexingState
+getIndexingState = send GetIndexingState

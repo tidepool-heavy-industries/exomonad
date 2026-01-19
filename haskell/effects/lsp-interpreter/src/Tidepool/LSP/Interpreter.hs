@@ -8,13 +8,22 @@ module Tidepool.LSP.Interpreter
     LSPSession
   , withLSPSession
 
+    -- * Indexing State (re-exported from effect module)
+  , IndexingState(..)
+  , getSessionIndexingState
+
     -- * Effect Interpreter
   , runLSP
   ) where
 
 import Control.Concurrent (Chan, newChan, readChan, writeChan, forkIO, killThread)
 import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, takeMVar, tryTakeMVar)
+import Control.Concurrent.STM (TVar, newTVarIO, readTVarIO, atomically, writeTVar)
 import Control.Exception (SomeException, throwIO, try, finally, bracket)
+import Data.Set (Set)
+import qualified Data.Set as Set
+import Data.Time (UTCTime, getCurrentTime, diffUTCTime)
+import Control.Monad (when)
 import Control.Monad.Freer (Eff, LastMember, sendM, interpret)
 import qualified System.Process
 import Control.Monad.IO.Class (liftIO)
@@ -32,11 +41,18 @@ import Language.LSP.Test
   , getHover, getReferences, getDefinitions, getCompletions
   , getCodeActions, request
   , SessionConfig(..)
+  , getIncompleteProgressSessions
   )
 import qualified Language.LSP.Protocol.Types as L
 import qualified Language.LSP.Protocol.Message as L
 
 import Tidepool.Effect.LSP
+  ( LSP(..), IndexingState(..)
+  , TextDocumentIdentifier(..), Position(..), Range(..), Location(..)
+  , HoverInfo(..), CodeAction(..), CodeActionKind(..), WorkspaceEdit(..)
+  , TextEdit(..), CompletionItem(..), CompletionItemKind(..)
+  , SymbolInformation(..), SymbolKind(..)
+  )
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -55,7 +71,15 @@ data LSPRequest = forall a. LSPRequest
 -- External callers communicate via the request channel.
 data LSPSession = LSPSession
   { lspRequestChan :: !(Chan LSPRequest)
+  , lspIndexingState :: !(TVar IndexingState)  -- ^ Tracks HLS indexing progress
   }
+
+-- | Read the current indexing state from a session.
+--
+-- Use this to check if HLS is still indexing before making queries,
+-- or to add warnings to results when indexing is incomplete.
+getSessionIndexingState :: LSPSession -> IO IndexingState
+getSessionIndexingState session = readTVarIO session.lspIndexingState
 
 -- | Session configuration optimized for long-running MCP server use.
 --
@@ -92,6 +116,9 @@ withLSPSession rootDir action = do
   resultMVar <- newEmptyMVar
   doneMVar <- newEmptyMVar  -- Signal when user action completes
 
+  -- Initialize indexing state as Indexing (HLS starts indexing on connect)
+  indexingState <- newTVarIO Indexing
+
   -- lsp-test's runSessionWithConfig spawns HLS and handles handshake
   -- The session runs until we're done or HLS crashes
   --
@@ -105,7 +132,7 @@ withLSPSession rootDir action = do
     liftIO $ hPutStrLn stderr "[LSP] Session started, HLS initialized"
 
     -- Provide session handle to caller
-    let session = LSPSession requestChan
+    let session = LSPSession requestChan indexingState
 
     -- Fork user action in a separate thread so we can process requests
     liftIO $ do
@@ -120,7 +147,26 @@ withLSPSession rootDir action = do
     --
     -- Note: SessionConfig has ignoreLogNotifications=True (default) which
     -- prevents memory leaks from HLS's chatty log/progress notifications.
-    let processRequests = do
+    --
+    -- Indexing state is polled every 2 seconds to track HLS progress.
+    startTime <- liftIO getCurrentTime
+    let processRequests lastCheck = do
+          -- Check indexing state every 2 seconds
+          now <- liftIO getCurrentTime
+          nextCheck <- if diffUTCTime now lastCheck > 2
+            then do
+              -- Poll HLS for incomplete progress sessions
+              incomplete <- getIncompleteProgressSessions
+              let newState = if Set.null incomplete then Ready else Indexing
+              -- Update the TVar with new state
+              liftIO $ atomically $ writeTVar indexingState newState
+              -- Log state transition (only on change)
+              currentState <- liftIO $ readTVarIO indexingState
+              when (currentState /= newState) $
+                liftIO $ hPutStrLn stderr $ "[LSP] Indexing state: " <> show newState
+              pure now
+            else pure lastCheck
+
           -- Check if user action is done (non-blocking)
           maybeDone <- liftIO $ tryTakeMVar doneMVar
           case maybeDone of
@@ -129,7 +175,7 @@ withLSPSession rootDir action = do
               -- Check for pending request (100ms timeout)
               maybeReq <- liftIO $ timeout 100000 $ readChan requestChan
               case maybeReq of
-                Nothing -> processRequests  -- No request, loop
+                Nothing -> processRequests nextCheck  -- No request, loop
                 Just (LSPRequest reqAction reqResponseMVar) -> do
                   liftIO $ hPutStrLn stderr "[LSP] Processing request..."
                   -- Execute the Session action
@@ -137,9 +183,9 @@ withLSPSession rootDir action = do
                   result <- reqAction
                   liftIO $ putMVar reqResponseMVar (Right result)
                   liftIO $ hPutStrLn stderr "[LSP] Request completed"
-                  processRequests
+                  processRequests nextCheck
 
-    processRequests
+    processRequests startTime
 
   -- Return result from user action
   resultOrErr <- takeMVar resultMVar
@@ -263,6 +309,10 @@ runLSP session = interpret $ \case
     pure $ case resp of
       L.TResponseMessage _ _ (Right result) -> fromDocumentSymbolResult result
       L.TResponseMessage _ _ (Left _) -> []
+
+  GetIndexingState ->
+    -- Read the indexing state from the session's TVar
+    sendM $ getSessionIndexingState session
 
 
 -- ════════════════════════════════════════════════════════════════════════════
