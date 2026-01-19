@@ -23,6 +23,7 @@ module Tidepool.Effects
   , module Tidepool.Effects.Git
   , module Tidepool.Effects.GitHub
   , module Tidepool.Effects.Habitica
+  , module Tidepool.Effects.Justfile
   , module Tidepool.Effects.Observability
   , module Tidepool.Effects.Worktree
   , module Tidepool.Effect.Session
@@ -34,6 +35,7 @@ import Tidepool.Effects.Cabal
 import Tidepool.Effects.Git
 import Tidepool.Effects.GitHub
 import Tidepool.Effects.Habitica
+import Tidepool.Effects.Justfile
 import Tidepool.Effects.Observability
 import Tidepool.Effects.Worktree
 import Tidepool.Effect.Session
