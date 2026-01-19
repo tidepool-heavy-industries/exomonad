@@ -138,3 +138,18 @@ test-suite tools-test
     default-extensions:
         OverloadedStrings
         TypeApplications
+
+test-suite parser-test
+    import:           warnings
+    type:             exitcode-stdio-1.0
+    main-is:          ParserSpec.hs
+    build-depends:
+        base >= 4.17 && < 5,
+        tidepool-control-server,
+        text >= 2.0 && < 3,
+        tasty,
+        tasty-hunit
+    hs-source-dirs:   test
+    default-language: GHC2024
+    default-extensions:
+        OverloadedStrings

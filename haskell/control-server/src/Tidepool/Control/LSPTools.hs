@@ -55,6 +55,9 @@ module Tidepool.Control.LSPTools
   , ShowConstructorsArgs(..)
   , ShowConstructorsResult(..)
   , Constructor(..)
+  , parseADTConstructors
+  , parseGADTConstructors
+  , stripDerivingClause
   ) where
 
 import Control.Monad (forM)
@@ -795,6 +798,12 @@ parseADTConstructors def =
 
     isType t = isUpperCase t || "(" `T.isPrefixOf` t || "[" `T.isPrefixOf` t
 
+-- | Check if text starts with an upper case letter.
+isUpperCase :: Text -> Bool
+isUpperCase t = case T.uncons t of
+  Just (c, _) -> c >= 'A' && c <= 'Z'
+  Nothing -> False
+
 -- | Strip deriving clause from type definition.
 --
 -- Handles both single-line and multi-line deriving:
@@ -804,12 +813,14 @@ parseADTConstructors def =
 --     deriving anyclass (ToJSON)
 stripDerivingClause :: Text -> Text
 stripDerivingClause txt =
-  -- Find first occurrence of "deriving" that's not inside a string/comment
-  -- Simple approach: find "deriving" at start of word
+  -- First handle multi-line by dropping any lines that start with deriving
   let lines' = T.lines txt
-      -- Keep lines until we hit a deriving line
       nonDerivingLines = takeWhile (not . isDerivingLine) lines'
-  in T.unlines nonDerivingLines
+      multiLineStripped = T.unlines nonDerivingLines
+      -- Then handle single-line by splitting at the "deriving" keyword
+      -- We use breakOn " deriving " to avoid matching things like "FooDeriving"
+  in case T.breakOn " deriving " multiLineStripped of
+       (before, _) -> before
   where
     isDerivingLine line =
       let stripped = T.stripStart line
