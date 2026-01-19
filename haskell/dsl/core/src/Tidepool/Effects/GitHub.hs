@@ -278,7 +278,8 @@ defaultPRFilter = PRFilter Nothing Nothing Nothing
 -- | Spec for creating a PR.
 data PRCreateSpec = PRCreateSpec
   { prcsRepo   :: Repo
-  , prcsBranch :: Text
+  , prcsHead   :: Text -- ^ Source branch
+  , prcsBase   :: Text -- ^ Target branch (e.g. "main")
   , prcsTitle  :: Text
   , prcsBody   :: Text
   }
@@ -370,8 +371,8 @@ runGitHubStub = interpret $ \case
     logInfo $ "[GitHub:stub] CreateIssue called: " <> repo <> " - " <> title
     error "GitHub.createIssue: not implemented"
 
-  CreatePR (PRCreateSpec (Repo repo) _ title _) -> do
-    logInfo $ "[GitHub:stub] CreatePR called: " <> repo <> " - " <> title
+  CreatePR (PRCreateSpec (Repo repo) headBranch baseBranch title _) -> do
+    logInfo $ "[GitHub:stub] CreatePR called: " <> repo <> " (" <> headBranch <> " -> " <> baseBranch <> ") - " <> title
     error "GitHub.createPR: not implemented"
 
   GetIssue (Repo repo) num _ -> do
