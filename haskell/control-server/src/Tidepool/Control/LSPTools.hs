@@ -766,11 +766,11 @@ parseADTConstructors def =
       let words' = T.words str
       in case words' of
         [] -> Nothing
-        (name:_) | isUpperCase name ->
+        (name:rest) | isUpperCase name ->
           let isRecord = "{" `T.isInfixOf` str
               fields = if isRecord
                 then extractRecordFieldTypes str
-                else extractPositionalTypes (T.unwords $ tail words')
+                else extractPositionalTypes (T.unwords rest)
           in Just Constructor
             { conName = name
             , conFields = fields
