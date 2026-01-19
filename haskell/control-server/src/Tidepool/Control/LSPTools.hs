@@ -195,6 +195,11 @@ findCallersLogic args = do
   symbols <- workspaceSymbol name
   let exactMatches = filter (\s -> s.siName == name) symbols
 
+  -- Log workspaceSymbol results
+  logDebug $ "[find_callers] workspaceSymbol: query=" <> name
+          <> " total=" <> T.pack (show (length symbols))
+          <> " exact_matches=" <> T.pack (show (length exactMatches))
+
   result <- case exactMatches of
     [] -> pure FindCallersResult
       { fcrName = name
@@ -214,7 +219,11 @@ findCallersLogic args = do
       -- Get all references
       refs <- references (textDocument defFile) defPos
 
-      -- Filter each reference
+      -- Log findReferences results
+      logDebug $ "[find_callers] references: def=" <> defFile <> ":" <> T.pack (show defLine)
+              <> " total_refs=" <> T.pack (show (length refs))
+
+      -- Filter each reference with logging
       callSites <- fmap concat $ forM refs $ \ref -> do
         let file = stripFilePrefix ref.locUri
             line = ref.locRange.rangeStart.posLine + 1
@@ -222,14 +231,23 @@ findCallersLogic args = do
 
         -- Skip the definition itself
         if file == defFile && line == defLine
-          then pure []
+          then do
+            logDebug $ "[find_callers] ref: " <> file <> ":" <> T.pack (show line)
+                    <> " reason=" <> T.pack (show FRDefinition)
+            pure []
           else do
             -- Read context
             ctx <- sendM $ readContextLines (T.unpack file) (line - 1) ctxLines
             let matchLine = ctxMatch ctx
+                reason = classifyLine name matchLine
+
+            -- Log per-reference filtering decision
+            logDebug $ "[find_callers] ref: " <> file <> ":" <> T.pack (show line)
+                    <> " reason=" <> T.pack (show reason)
+                    <> " line=" <> T.take 80 matchLine
 
             -- Apply heuristic filters
-            if isCallSite name matchLine
+            if reason == FRCallSite
               then pure [CallSite
                 { csFile = file
                 , csLine = line
@@ -244,6 +262,11 @@ findCallersLogic args = do
           filteredCount = totalRefs - length callSites
           truncated = length callSites > maxResults
           selected = take maxResults callSites
+
+      -- Log filtering summary
+      logDebug $ "[find_callers] summary: total=" <> T.pack (show (length refs))
+              <> " call_sites=" <> T.pack (show (length callSites))
+              <> " filtered=" <> T.pack (show filteredCount)
 
       pure FindCallersResult
         { fcrName = name
@@ -355,6 +378,11 @@ showFieldsLogic args = do
   let typeSymbols = filter isTypeSymbol $
         filter (\s -> s.siName == typeName) symbols
 
+  -- Log workspaceSymbol results
+  logDebug $ "[show_fields] workspaceSymbol: query=" <> typeName
+          <> " total=" <> T.pack (show (length symbols))
+          <> " type_symbols=" <> T.pack (show (length typeSymbols))
+
   result <- case typeSymbols of
     [] -> pure ShowFieldsResult
       { sfrTypeName = typeName
@@ -376,6 +404,12 @@ showFieldsLogic args = do
       -- Parse record fields
       let fields = parseRecordFields rawDef
           isRecord = not (null fields)
+
+      -- Log result after parsing
+      logDebug $ "[show_fields] result: file=" <> file
+              <> " line=" <> T.pack (show line)
+              <> " is_record=" <> T.pack (show isRecord)
+              <> " fields=" <> T.pack (show (length fields))
 
       pure ShowFieldsResult
         { sfrTypeName = typeName
@@ -487,6 +521,11 @@ showConstructorsLogic args = do
   let typeSymbols = filter isTypeSymbol $
         filter (\s -> s.siName == typeName) symbols
 
+  -- Log workspaceSymbol results
+  logDebug $ "[show_constructors] workspaceSymbol: query=" <> typeName
+          <> " total=" <> T.pack (show (length symbols))
+          <> " type_symbols=" <> T.pack (show (length typeSymbols))
+
   result <- case typeSymbols of
     [] -> pure ShowConstructorsResult
       { scrTypeName = typeName
@@ -511,6 +550,12 @@ showConstructorsLogic args = do
             then parseGADTConstructors rawDef
             else parseADTConstructors rawDef
 
+      -- Log result after parsing
+      logDebug $ "[show_constructors] result: file=" <> file
+              <> " line=" <> T.pack (show line)
+              <> " is_gadt=" <> T.pack (show isGADT)
+              <> " constructors=" <> T.pack (show (length constructors))
+
       pure ShowConstructorsResult
         { scrTypeName = typeName
         , scrFile = Just file
@@ -527,6 +572,17 @@ showConstructorsLogic args = do
 -- HELPERS
 -- ════════════════════════════════════════════════════════════════════════════
 
+-- | Why a reference was filtered (or kept as a call site)
+data FilterReason
+  = FRDefinition      -- ^ The definition itself
+  | FRImport          -- ^ Import statement
+  | FRComment         -- ^ Comment line
+  | FRTypeSignature   -- ^ Type signature
+  | FRModuleHeader    -- ^ Module header
+  | FRExportList      -- ^ Export list
+  | FRCallSite        -- ^ Actual call site (kept)
+  deriving (Show, Eq)
+
 -- | Strip file:// prefix from URI
 stripFilePrefix :: Text -> Text
 stripFilePrefix uri
@@ -538,15 +594,16 @@ isTypeSymbol :: SymbolInformation -> Bool
 isTypeSymbol sym = sym.siKind `elem`
   [SKClass, SKStruct, SKEnum, SKInterface, SKTypeParameter]
 
--- | Check if a line is an actual call site (not import/type sig/comment)
-isCallSite :: Text -> Text -> Bool
-isCallSite _name line =
+-- | Classify a line - returns filter reason or FRCallSite if it's a real call
+classifyLine :: Text -> Text -> FilterReason
+classifyLine _name line =
   let stripped = T.stripStart line
-  in not (isImport stripped)
-  && not (isComment stripped)
-  && not (isTypeSignature stripped)
-  && not (isModuleHeader stripped)
-  && not (isExportList stripped)
+  in if isImport stripped then FRImport
+     else if isComment stripped then FRComment
+     else if isTypeSignature stripped then FRTypeSignature
+     else if isModuleHeader stripped then FRModuleHeader
+     else if isExportList stripped then FRExportList
+     else FRCallSite
 
 isImport :: Text -> Bool
 isImport line = "import " `T.isPrefixOf` line
