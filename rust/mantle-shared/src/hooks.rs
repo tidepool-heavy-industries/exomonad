@@ -1,12 +1,12 @@
 //! Hook configuration generation for Claude Code.
 //!
-//! Generates `settings.local.json` with hooks that forward to `mantle hook <event>`.
+//! Generates `settings.local.json` with hooks that forward to `mantle-agent hook <event>`.
 //! The configuration is per-session and cleaned up when the session ends.
 //!
 //! ## Hook Flow
 //!
 //! ```text
-//! Claude Code         settings.local.json       mantle hook
+//! Claude Code         settings.local.json       mantle-agent hook
 //! [hook trigger] ---> [hook command]       ---> [subcommand]
 //!                                               reads stdin, forwards to socket
 //! ```
@@ -18,7 +18,7 @@
 //! {
 //!   "hooks": {
 //!     "PreToolUse": [{"matcher": "*", "hooks": [
-//!       {"type": "command", "command": "/path/to/mantle hook pre-tool-use"}
+//!       {"type": "command", "command": "/path/to/mantle-agent hook pre-tool-use"}
 //!     ]}]
 //!   }
 //! }
@@ -259,7 +259,7 @@ fn is_tidepool_hook(entries: &Value) -> bool {
             if let Some(hooks_arr) = entry.get("hooks").and_then(|h| h.as_array()) {
                 for hook in hooks_arr {
                     if let Some(cmd) = hook.get("command").and_then(|c| c.as_str()) {
-                        if cmd.contains("mantle hook") {
+                        if cmd.contains("mantle-agent hook") {
                             return true;
                         }
                     }
@@ -270,36 +270,6 @@ fn is_tidepool_hook(entries: &Value) -> bool {
     false
 }
 
-/// Find the mantle binary path.
-///
-/// Looks for the binary in:
-/// 1. The current executable's directory
-/// 2. PATH
-/// 3. Falls back to "mantle" (relies on PATH at runtime)
-pub fn find_mantle_binary() -> PathBuf {
-    // Try current executable's directory
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            let candidate = dir.join("mantle");
-            if candidate.exists() {
-                return candidate;
-            }
-        }
-    }
-
-    // Try which/where
-    if let Ok(output) = std::process::Command::new("which").arg("mantle").output() {
-        if output.status.success() {
-            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !path.is_empty() {
-                return PathBuf::from(path);
-            }
-        }
-    }
-
-    // Fallback - will use PATH at runtime
-    PathBuf::from("mantle")
-}
 
 #[cfg(test)]
 mod tests {
@@ -308,7 +278,7 @@ mod tests {
 
     #[test]
     fn test_generate_hook_config() {
-        let path = PathBuf::from("/usr/bin/mantle");
+        let path = PathBuf::from("/usr/bin/mantle-agent");
         let config = generate_hook_config(&path);
 
         // Check PreToolUse has matcher
@@ -336,7 +306,7 @@ mod tests {
     fn test_hook_config_lifecycle() {
         let temp_dir = TempDir::new().unwrap();
         let cwd = temp_dir.path();
-        let mantle = PathBuf::from("/test/mantle");
+        let mantle = PathBuf::from("/test/mantle-agent");
 
         // Generate config
         let config = HookConfig::generate(cwd, &mantle).unwrap();
@@ -347,7 +317,7 @@ mod tests {
         // Verify content
         let content = fs::read_to_string(config.settings_path()).unwrap();
         assert!(content.contains("PreToolUse"));
-        assert!(content.contains("mantle hook pre-tool-use"));
+        assert!(content.contains("mantle-agent hook pre-tool-use"));
         assert!(content.contains(TIDEPOOL_MARKER));
 
         // Drop config (triggers cleanup)
@@ -380,7 +350,7 @@ mod tests {
         .unwrap();
 
         // Generate our config
-        let mantle = PathBuf::from("/test/mantle");
+        let mantle = PathBuf::from("/test/mantle-agent");
         let config = HookConfig::generate(cwd, &mantle).unwrap();
 
         // Verify merge
@@ -411,7 +381,7 @@ mod tests {
     fn test_is_tidepool_hook() {
         let our_hook = json!([{
             "matcher": "*",
-            "hooks": [{"type": "command", "command": "/bin/mantle hook pre-tool-use"}]
+            "hooks": [{"type": "command", "command": "/bin/mantle-agent hook pre-tool-use"}]
         }]);
         assert!(is_tidepool_hook(&our_hook));
 

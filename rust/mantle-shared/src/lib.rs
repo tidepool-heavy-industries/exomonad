@@ -52,7 +52,7 @@ pub mod util;
 pub use error::{MantleError, Result};
 pub use events::{ExitReason, InterruptSignal, RunResult, StreamEvent, ToolCall};
 pub use fifo::{ResultFifo, SignalFifo};
-pub use hooks::{find_mantle_binary, HookConfig};
+pub use hooks::HookConfig;
 pub use logging::{init_logging, init_logging_with_default};
 pub use protocol::{ControlMessage, ControlResponse, HookInput, HookOutput};
 pub use socket::ControlSocket;
