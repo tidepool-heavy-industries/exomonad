@@ -1,3 +1,6 @@
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TypeOperators #-}
 
 -- | Core types for the Tidepool Graph DSL.
 --
@@ -70,6 +73,11 @@ module Tidepool.Graph.Types
   , MCPExport
   , MCPToolDef
 
+    -- * Graph Entry Point Declaration (new DSL)
+  , GraphEntry(..)
+  , type (:~>)
+  , GraphEntries
+
     -- * Special Goto Targets
   , Exit
   , Self
@@ -79,7 +87,6 @@ module Tidepool.Graph.Types
   ) where
 
 import Data.Aeson (Value)
-import Data.Functor.Identity (Identity)
 import Data.Kind (Type)
 import Data.Text (Text)
 import GHC.TypeLits (Symbol)
@@ -1111,6 +1118,95 @@ type MCPToolDef :: (Symbol, Symbol) -> Type
 data MCPToolDef nameAndDesc
 
 -- ════════════════════════════════════════════════════════════════════════════
+-- GRAPH ENTRY POINT DECLARATION (Simplified DSL)
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Type-level entry point declaration for simplified graphs.
+--
+-- Maps external name → (node field name, input type, description).
+-- Used with the 'GraphEntries' type family to declare how external callers
+-- (e.g., MCP tools) can invoke nodes in a graph.
+--
+-- @
+-- -- A graph entry point named "find_callers" that calls the "run" node
+-- -- with FindCallersArgs input and has the given description:
+-- type instance GraphEntries FindCallers =
+--   '[ "find_callers" ':~> '("run", FindCallersArgs, "Find call sites of a function") ]
+-- @
+--
+-- This eliminates the need for EntryNode/ExitNode pseudo-nodes in simple
+-- graphs. The graph becomes just the computation nodes, and external
+-- entry points are declared separately.
+data GraphEntry
+  = Symbol :~> (Symbol, Type, Symbol)
+  -- ^ @externalName ':~>' '(nodeField, inputType, description)@
+
+-- | Operator for constructing 'GraphEntry' values at the type level.
+--
+-- @
+-- "tool_name" ':~>' '("nodeField", InputType, "Description")
+-- @
+--
+-- Note: The single-quote prefix (e.g., @':~>@) is required when using
+-- promoted data constructors at the type level.
+type (:~>) = '(:~>)
+infixr 5 :~>
+
+-- | Open type family for declaring external entry points into a graph.
+--
+-- Each graph can declare its own entry points via a type instance:
+--
+-- @
+-- -- Single entry point (most MCP tools)
+-- type instance GraphEntries FindCallers =
+--   '[ "find_callers" ':~> '("run", FindCallersArgs, "Find call sites") ]
+--
+-- -- Multiple entry points (same graph, different entry behaviors)
+-- type instance GraphEntries TeachGraph =
+--   '[ "teach"        ':~> '("classify", Query, "Learn about a concept")
+--    , "teach_direct" ':~> '("explore", Intent, "Explore with pre-classified intent")
+--    ]
+-- @
+--
+-- Entry points not in 'GraphEntries' are internal-only (reachable via
+-- Goto but not externally callable).
+--
+-- = MCP Tool Discovery
+--
+-- The 'GraphEntries' type family is used by MCP tool discovery to
+-- automatically expose graphs as MCP tools. Each entry becomes a tool
+-- with the specified name, description, and input schema derived from
+-- the input type's 'HasJSONSchema' instance.
+--
+-- = Migration from EntryNode/MCPExport
+--
+-- This replaces the pattern of:
+--
+-- @
+-- data MyGraph mode = MyGraph
+--   { entry :: mode :- EntryNode Args :@ MCPExport :@ MCPToolDef '("name", "desc")
+--   , run   :: mode :- LogicNode :@ ...
+--   , exit  :: mode :- ExitNode Result
+--   }
+-- @
+--
+-- With:
+--
+-- @
+-- newtype MyGraph mode = MyGraph
+--   { run :: mode :- LogicNode :@ Input Args :@ UsesEffects '[Return Result]
+--   }
+--
+-- type instance GraphEntries MyGraph =
+--   '[ "name" ':~> '("run", Args, "desc") ]
+-- @
+type family GraphEntries (graph :: Type -> Type) :: [GraphEntry]
+
+-- Note: No default instance provided. Graphs that want to export MCP tools
+-- must define their own instance. Graphs without an instance will fail at
+-- compile time when used with reifyGraphEntries.
+
+-- ════════════════════════════════════════════════════════════════════════════
 -- SPECIAL GOTO TARGET
 -- ════════════════════════════════════════════════════════════════════════════
 
@@ -1188,54 +1284,3 @@ infixr 5 :::
 -- findCallersTool :: Node Identity (AsHandler '[LSP, Log])
 -- findCallersTool = logic findCallersLogic
 --
--- -- Complex graph (monadic composition)
--- supportGraph :: Node (Free NodeF) (AsHandler '[State S, LLM, Log])
--- supportGraph = do
---   entry \@Message
---   classify <- llmNode \@ClassifyTpl
---   route <- logic routeLogic
---   exit \@Response
--- @
---
--- The functor parameter @f@ determines the composition style:
---
--- * @Identity@ - Single node, no composition
--- * @Free NodeF@ - Monadic composition of multiple nodes
-type Node :: (Type -> Type) -> Type -> Type
-newtype Node f a = Node (f a)
-
--- | Alias for simple single-node tools.
-type SimpleNode = Node Identity
-
--- | Alias for complex multi-node graphs.
---
--- Note: Requires Control.Monad.Free from the 'free' package.
--- type ComplexGraph = Node (Free NodeF)
-
--- NOTE: This design is currently incomplete. The Node wrapper was intended
--- to reduce Entry/Exit boilerplate, but it has a critical gap:
---
--- **Problem:** MCP tool export relies on MCPExport annotations on Entry fields
--- of graph records. If we eliminate graph records, we lose the metadata (tool
--- name, description) needed for MCP server integration.
---
--- **Options considered:**
--- 1. Add metadata to smart constructors (complex type-level programming)
--- 2. Separate metadata from execution (breaks unification)
--- 3. Keep graph records, provide helper functions to reduce boilerplate
---
--- **Current recommendation:** Use graph records with a `simpleGraph` helper:
---
--- @
--- -- Instead of:
--- findCallersHandlers = FindCallersGraph
---   { fcEntry = ()
---   , fcRun = findCallersLogic
---   , fcExit = ()
---   }
---
--- -- Use (future):
--- findCallersHandlers = simpleGraph findCallersLogic
--- @
---
--- This achieves the goal (reduce boilerplate) without breaking MCP export.

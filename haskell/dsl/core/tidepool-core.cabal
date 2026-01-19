@@ -28,8 +28,6 @@ library
         Tidepool.Effect.TUI
         Tidepool.Graph
         Tidepool.Graph.Types
-        Tidepool.Graph.NodeF
-        Tidepool.Graph.Simple
         Tidepool.Graph.Generic
         Tidepool.Graph.Generic.Core
         Tidepool.Graph.Goto

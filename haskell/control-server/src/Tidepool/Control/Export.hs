@@ -53,7 +53,7 @@ import Tidepool.Effect.LSP
   , SymbolInformation(..), HoverInfo(..), Location(..), Range(..), Position(..)
   , SymbolKind(..)
   )
-import Tidepool.Graph.MCPReify (ReifyMCPTools(..), MCPToolInfo(..))
+import Tidepool.Graph.MCPReify (ReifyMCPTools(..), ReifyGraphEntries(..), MCPToolInfo(..))
 import Tidepool.LSP.Interpreter (LSPSession, runLSP)
 import Tidepool.Training.Format (formatSelectSymbolsExample, formatSelectSymbolsExampleGrouped)
 import Tidepool.Training.Types (CandidateGroups(..))
@@ -926,16 +926,19 @@ exportCodeSamples logger session projectRoot count = do
 
 -- | Export all MCP tools from graph DSL annotations.
 --
--- Uses ReifyMCPTools to extract tool metadata from MCPExport annotations.
+-- Uses ReifyGraphEntries (new) for simplified graphs with GraphEntries,
+-- and ReifyMCPTools (legacy) for graphs with MCPExport annotations.
 -- Returns ToolDefinition format that matches Rust protocol types.
 exportMCPTools :: Logger -> IO [ToolDefinition]
 exportMCPTools logger = do
   logInfo logger "[MCP Discovery] Starting tool discovery from graphs..."
 
-  -- Extract all tools from graph DSL (automatic discovery)
-  let fcTools = reifyMCPTools (Proxy @FindCallersGraph)
-  let sfTools = reifyMCPTools (Proxy @ShowFieldsGraph)
-  let scTools = reifyMCPTools (Proxy @ShowConstructorsGraph)
+  -- Extract tools from simplified graphs via GraphEntries (new pattern)
+  let fcTools = reifyGraphEntries (Proxy @FindCallersGraph)
+  let sfTools = reifyGraphEntries (Proxy @ShowFieldsGraph)
+  let scTools = reifyGraphEntries (Proxy @ShowConstructorsGraph)
+
+  -- Extract tools from complex graphs via MCPExport (legacy pattern)
   let dgTools = reifyMCPTools (Proxy @DocGenGraph)
 
   -- Log discovered tools per graph for debugging

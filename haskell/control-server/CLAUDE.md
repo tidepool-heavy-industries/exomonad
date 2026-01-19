@@ -249,9 +249,9 @@ Project-local configuration in `.tidepool/` (gitignored):
 | `Handler.hs` | Message routing (HookEvent, McpToolCall, ToolsListRequest) |
 | `Handler/Hook.hs` | Hook event handler (currently passthrough) |
 | `Handler/MCP.hs` | MCP tool router (routes tool calls by name to handlers) |
-| `Export.hs` | Automatic MCP tool discovery via `reifyMCPTools` |
+| `Export.hs` | Automatic MCP tool discovery via `reifyGraphEntries`/`reifyMCPTools` |
 | **Tier 1 Tools** | |
-| `LSPTools.hs` | Find callers, show fields, show constructors (graph definitions + handlers) |
+| `LSPTools.hs` | Find callers, show fields, show constructors (simplified graphs with `Return` effect + `GraphEntries`) |
 | **Tier 2 Tools** | |
 | `Scout/Graph.hs` | DocGenGraph definition (teach-graph tool, Entry → Init → Process → Select → Expand → Finalize → Exit) |
 | `Scout/Graph/Types.hs` | Node input/output types (ProcessInput, SelectInput, etc.) |

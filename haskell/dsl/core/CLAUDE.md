@@ -51,60 +51,57 @@ handlers = SupportGraph
   }
 ```
 
-### Simple Graph Pattern (Entry → Logic → Exit)
+### Simple MCP Tools (GraphEntries + Return)
 
-For simple tools with just Entry → Logic → Exit structure, use the `simpleGraph` helper to eliminate Entry/Exit boilerplate:
+For simple tools, use the simplified pattern with `GraphEntries` type family and `Return` effect:
+1. **Graph type** - A newtype with a single LogicNode using `Return` effect
+2. **GraphEntries instance** - Declares the external MCP tool name and metadata
+3. **Logic function** - Uses `returnValue` to return the result
+
+No Entry/Exit nodes needed:
 
 ```haskell
-import Tidepool.Graph.Simple (SimpleGraphPattern(..))
-
--- Graph definition (unchanged - needed for MCP export metadata)
-data FindCallersGraph mode = FindCallersGraph
-  { fcEntry :: mode :- EntryNode FindCallersArgs
-      :@ MCPExport
-      :@ MCPToolDef '("find_callers", "Find actual call sites...")
-  , fcRun :: mode :- LogicNode
+-- Graph definition (single node, no Entry/Exit ceremony)
+newtype FindCallersGraph mode = FindCallersGraph
+  { fcRun :: mode :- LogicNode
       :@ Input FindCallersArgs
-      :@ UsesEffects '[Goto Exit FindCallersResult]
-  , fcExit :: mode :- ExitNode FindCallersResult
+      :@ UsesEffects '[Return FindCallersResult]
   }
   deriving Generic
 
--- Instance declaration (enables simpleGraph)
-instance SimpleGraphPattern FindCallersGraph FindCallersArgs FindCallersResult where
-  simpleGraph logic = FindCallersGraph
-    { fcEntry = ()
-    , fcRun = logic
-    , fcExit = ()
-    }
+-- Entry point declaration (tool name, node field, input type, description)
+type instance GraphEntries FindCallersGraph =
+  '[ "find_callers" ':~> '("fcRun", FindCallersArgs, "Find actual call sites...") ]
 
--- Handler definition (1 line instead of 5)
-findCallersHandlers :: FindCallersGraph (AsHandler '[LSP, Log])
-findCallersHandlers = simpleGraph findCallersLogic
-
--- Logic function (unchanged)
-findCallersLogic :: FindCallersArgs -> Eff es (GotoChoice '[To Exit FindCallersResult])
+-- Logic function (uses Return effect instead of Goto Exit)
+findCallersLogic
+  :: (Member LSP es, Member Log es, Member (Return FindCallersResult) es, LastMember IO es)
+  => FindCallersArgs
+  -> Eff es FindCallersResult
 findCallersLogic args = do
   -- ... implementation ...
-  pure $ gotoExit result
+  returnValue result  -- Returns the result directly
 ```
 
-**Benefits:**
-- Reduces handler boilerplate from 5 lines to 1 line
-- Keeps graph record (required for MCP export metadata and validation)
-- Type-safe: output type inferred from graph definition
-- Pattern established for future simple tools
+**How it works:**
+- `reifyGraphEntries (Proxy @FindCallersGraph)` extracts tool metadata from `GraphEntries` instance
+- MCP handler runs `runReturn (findCallersLogic args)` to extract the result
+- No Entry/Exit nodes needed - the `Return` effect terminates execution with a value
 
 **When to use:**
-- Entry → Logic → Exit graphs (no LLM nodes)
-- Single logic handler
+- Single-node tools (most MCP tools)
+- Any graph where Entry/Exit ceremony is overhead
 - Tool needs MCP export
 
 **When NOT to use:**
-- Complex multi-node graphs (use full handler record)
-- Graphs with LLM nodes (need before/after functions)
+- Complex multi-node graphs that need routing between nodes
+- Graphs with LLM nodes (need before/after functions and full handler record)
 - Graphs with fork/barrier patterns
-```
+
+### Legacy Pattern (Entry/Exit)
+
+For backwards compatibility, the old Entry/Exit pattern with `MCPExport` annotation still works.
+Use `reifyMCPTools` instead of `reifyGraphEntries` for graphs using this pattern.
 
 ### Handler Type Computation
 
@@ -112,12 +109,10 @@ The `NodeHandler` type family computes handler types from node definitions:
 
 | Node Definition | Handler Type |
 |-----------------|--------------|
-| `EntryNode Message` | `()` |
-| `ExitNode Response` | `()` |
-| `LLMNode :@ Input A :@ Template T :@ Schema B` | `A -> Eff es (TemplateContext T)` |
-| `LogicNode :@ Input A :@ UsesEffects effs` | `A -> Eff es (GotoChoice targets)` |
-
-**Entry/Exit handlers:** Changed from `Proxy @Type` to `()` in Phase 1 (commit f169bef). Entry/Exit nodes are never invoked at runtime - they're purely type-level markers for validation.
+| `G.Entry Message` | `Proxy Message` |
+| `G.Exit Response` | `Proxy Response` |
+| `G.LLMNode :@ Input A :@ Template T :@ Schema B` | `A -> Eff es (TemplateContext T)` |
+| `G.LogicNode :@ Input A :@ UsesEffects effs` | `A -> Eff es (GotoChoice targets)` |
 
 **Key insight: LLM handlers return template context, not Schema output.**
 The runner handles template rendering, LLM API call, and structured output parsing.
@@ -330,6 +325,49 @@ type MyGraphWithMeta = MyGraph
 
 > **Source**: `Graph/Types.hs`
 
+### GraphEntries Type Family (MCP Tool Declaration)
+
+The `GraphEntries` type family declares external entry points for a graph. This is how you expose graphs as MCP tools without Entry/Exit node ceremony.
+
+```haskell
+-- Data kind for entry point declarations
+data GraphEntry = Symbol :~> (Symbol, Type, Symbol)
+--                toolName    nodeField  inputType  description
+
+-- Open type family - each graph defines its own instance
+type family GraphEntries (graph :: Type -> Type) :: [GraphEntry]
+
+-- Example: Single entry point
+type instance GraphEntries FindCallersGraph =
+  '[ "find_callers" ':~> '("fcRun", FindCallersArgs, "Find call sites") ]
+
+-- Example: Multiple entry points into same graph
+type instance GraphEntries TeachGraph =
+  '[ "teach"        ':~> '("classify", Query, "Learn about a concept")
+   , "teach_direct" ':~> '("explore", Intent, "Explore with pre-classified intent")
+   ]
+```
+
+**Reification:**
+
+```haskell
+-- Extract tool definitions at runtime
+tools <- reifyGraphEntries (Proxy @FindCallersGraph)
+-- [MCPToolInfo { mtdName = "find_callers", mtdDescription = "...", ... }]
+```
+
+**Key types:**
+
+| Type | Purpose |
+|------|---------|
+| `GraphEntry` | Kind for entry point declarations |
+| `':~>` | Type-level operator mapping tool name to node info |
+| `GraphEntries graph` | Type family returning list of entry points |
+| `ReifyGraphEntries` | Typeclass for runtime reification |
+| `MCPToolInfo` | Runtime tool metadata (name, description, schema) |
+
+> **Source**: `Graph/Types.hs` (GraphEntry, GraphEntries), `Graph/MCPReify.hs` (reification)
+
 ## Goto and GotoChoice
 
 Logic nodes transition to other nodes via `Goto` effects. Handlers return `GotoChoice`:
@@ -432,6 +470,47 @@ class DispatchGotoWithSelf graph selfPayload allTargets targets es exitType wher
 **Error guidance**: If you try to use `dispatchGoto` with a handler that returns `Goto Self`, you'll get a clear `TypeError` directing you to use `dispatchGotoWithSelf`.
 
 > **Source**: `tidepool-core/src/Tidepool/Graph/Interpret.hs:599-677`
+
+## Return Effect
+
+The `Return` effect terminates graph execution with a value. It's the simplified alternative to `Goto Exit` for single-node graphs.
+
+### Usage
+
+```haskell
+-- In handler constraint
+findCallersLogic
+  :: (Member LSP es, Member Log es, Member (Return FindCallersResult) es, LastMember IO es)
+  => FindCallersArgs
+  -> Eff es FindCallersResult
+findCallersLogic args = do
+  result <- computeResult args
+  returnValue result  -- Terminates and returns the value
+```
+
+### API
+
+```haskell
+data Return (a :: Type) r where
+  ReturnValue :: a -> Return a a
+
+-- Terminate execution with a value
+returnValue :: Member (Return a) effs => a -> Eff effs a
+
+-- Run the Return effect, extracting the returned value
+runReturn :: forall a effs. Eff (Return a ': effs) a -> Eff effs a
+```
+
+### When to Use
+
+| Pattern | When |
+|---------|------|
+| `Return` effect | Single-node graphs, MCP tools, simple computations |
+| `Goto Exit` | Multi-node graphs with routing, complex state machines |
+
+**Key difference**: `Return` is an effect you use within a computation. `Goto Exit` is a transition target in a graph with Entry/Exit nodes.
+
+> **Source**: `tidepool-core/src/Tidepool/Effect/Types.hs`
 
 ## Memory Effect
 
@@ -1236,13 +1315,14 @@ All paths relative to `tidepool-core/src/Tidepool/Graph/`.
 
 | File | Key Exports | Purpose |
 |------|-------------|---------|
-| `Types.hs` | `(:@)`, `Input`, `Schema`, `Goto`, `Exit`, `Self`, `ClaudeCode`, `ModelChoice` | Core DSL syntax and annotations |
+| `Types.hs` | `(:@)`, `Input`, `Schema`, `Goto`, `Exit`, `Self`, `ClaudeCode`, `ModelChoice`, `GraphEntry`, `(:~>)`, `GraphEntries` | Core DSL syntax and annotations |
 | `Generic.hs` | `GraphMode`, `AsHandler`, `AsGraph`, `NodeHandler`, `ValidGraphRecord` | Mode system and handler type computation |
 | `Edges.hs` | `GetInput`, `GetSchema`, `GetUsesEffects`, `GotoEffectsToTargets`, `GotosToTos` | Type families for annotation extraction |
 | `Goto.hs` | `Goto`, `To`, `OneOf`, `GotoChoice`, `gotoChoice`, `gotoExit`, `gotoSelf`, `LLMHandler` | Transition types and smart constructors |
 | `Interpret.hs` | `DispatchGoto`, `DispatchGotoWithSelf`, `runGraph`, `runGraphFrom`, `CallHandler` | Typed graph dispatch |
 | `Interpret/Instrumented.hs` | Traced `DispatchGoto` instances | OpenTelemetry span emission |
 | `Memory.hs` | `Memory`, `getMem`, `updateMem`, `modifyMem` | Node-private persistent state |
+| `MCPReify.hs` | `MCPToolInfo`, `ReifyMCPTools`, `ReifyGraphEntries`, `reifyGraphEntries` | MCP tool reification from graph types |
 | `Template.hs` | `TemplateDef`, `TemplateContext`, `templateCompiled`, `buildContext` | Typed Jinja templates |
 | `Tool.hs` | `ToolDef`, `toolName`, `toolSchema`, `toolExecute` | LLM-invocable tools |
 | `Validate/Validate.hs` | Error message templates (`UnsatisfiedNeedError`, etc.) | Validation error formatting |
@@ -1255,7 +1335,7 @@ All paths relative to `tidepool-core/src/Tidepool/Graph/`.
 
 | Path | Key Exports | Purpose |
 |------|-------------|---------|
-| `Effect/Types.hs` | `State`, `LLM`, `Log`, `Emit`, `RequestInput`, `Time`, `Random` | Core effect definitions |
+| `Effect/Types.hs` | `State`, `LLM`, `Log`, `Emit`, `RequestInput`, `Time`, `Random`, `Return`, `returnValue`, `runReturn` | Core effect definitions |
 | `Effect/Session.hs` | `Session`, `SessionOutput`, `startSession`, `continueSession` | Dockerized Claude Code sessions via mantle |
 | `Schema.hs` | `HasJSONSchema`, `JSONSchema`, `schemaToValue` | JSON Schema for structured output |
 | `Effects/*.hs` | `BD`, `GitHub`, `Habitica`, `Telegram`, `Git`, etc. | Integration effects |
