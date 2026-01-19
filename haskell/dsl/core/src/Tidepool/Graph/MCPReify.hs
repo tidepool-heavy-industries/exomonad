@@ -22,9 +22,13 @@ module Tidepool.Graph.MCPReify
   ( -- * Tool Definition
     MCPToolInfo(..)
 
-    -- * Reification
+    -- * Reification (Legacy - MCPExport annotation)
   , ReifyMCPTools(..)
   , GReifyMCPEntries(..)
+
+    -- * Reification (New - GraphEntries type family)
+  , ReifyGraphEntries(..)
+  , ReifyEntryList(..)
   ) where
 
 import Data.Aeson (Value)
@@ -37,7 +41,7 @@ import GHC.Generics
 import GHC.TypeLits (Symbol, KnownSymbol, symbolVal)
 
 import Tidepool.Schema (HasJSONSchema(..), schemaToValue)
-import Tidepool.Graph.Types (type (:@), MCPExport, MCPToolDef)
+import Tidepool.Graph.Types (type (:@), MCPExport, MCPToolDef, GraphEntry(..), GraphEntries)
 import Tidepool.Graph.Generic.Core (AsGraph, EntryNode, type (:-))
 import Tidepool.Graph.Edges (HasMCPExport, GetMCPToolDef)
 
@@ -165,3 +169,57 @@ camelToSnake = concatMap go
     go c
       | isUpper c = ['_', toLower c]
       | otherwise = [c]
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- GRAPHENTRIES-BASED REIFICATION (New simplified DSL)
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Reify MCP tools from a graph's 'GraphEntries' type family instance.
+--
+-- This is the new, simplified approach for graphs that don't need
+-- Entry/Exit node ceremony. The graph declares its external entry points
+-- via a type instance:
+--
+-- @
+-- newtype FindCallers mode = FindCallers
+--   { run :: mode :- LogicNode :@ Input Args :@ UsesEffects '[Return Result]
+--   }
+--
+-- type instance GraphEntries FindCallers =
+--   '[ "find_callers" ':~> '("run", FindCallersArgs, "Find call sites") ]
+--
+-- -- At runtime:
+-- tools <- reifyGraphEntries (Proxy \@FindCallers)
+-- -- [MCPToolInfo { mtdName = "find_callers", ... }]
+-- @
+class ReifyGraphEntries (graph :: Type -> Type) where
+  reifyGraphEntries :: Proxy graph -> [MCPToolInfo]
+
+-- | Default instance that delegates to 'ReifyEntryList'.
+instance ReifyEntryList (GraphEntries graph) => ReifyGraphEntries graph where
+  reifyGraphEntries _ = reifyEntryList (Proxy @(GraphEntries graph))
+
+-- | Reify a type-level list of 'GraphEntry' values.
+class ReifyEntryList (entries :: [GraphEntry]) where
+  reifyEntryList :: Proxy entries -> [MCPToolInfo]
+
+-- | Base case: empty list.
+instance ReifyEntryList '[] where
+  reifyEntryList _ = []
+
+-- | Recursive case: reify head and append tail.
+instance ( KnownSymbol toolName
+         , KnownSymbol nodeField
+         , KnownSymbol description
+         , HasJSONSchema inputType
+         , ReifyEntryList rest
+         )
+      => ReifyEntryList ((toolName ':~> '(nodeField, inputType, description)) ': rest) where
+  reifyEntryList _ =
+    let tool = MCPToolInfo
+          { mtdName = T.pack (symbolVal (Proxy @toolName))
+          , mtdDescription = T.pack (symbolVal (Proxy @description))
+          , mtdInputSchema = schemaToValue (jsonSchema @inputType)
+          , mtdEntryName = T.pack (symbolVal (Proxy @nodeField))
+          }
+    in tool : reifyEntryList (Proxy @rest)

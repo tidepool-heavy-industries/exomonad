@@ -260,13 +260,13 @@ data SupportGraph mode = SupportGraph
 --
 -- In 'AsHandler es' mode, the NodeHandler type family computes:
 --
--- * EntryNode -> Proxy Message (marker, not a handler)
+-- * EntryNode -> () (marker, not a handler)
 -- * LLM :@ Input A :@ Template T :@ Schema B :@ UsesEffects effs -> LLMHandler A B targets es (TemplateContext T)
 -- * Logic :@ Input A :@ UsesEffects effs -> A -> Eff es (GotoChoice targets)
--- * Exit -> Proxy Response (marker, not a handler)
+-- * Exit -> () (marker, not a handler)
 supportHandlers :: SupportGraph (AsHandler '[State SessionState])
 supportHandlers = SupportGraph
-  { sgEntry    = Proxy @Message
+  { sgEntry    = ()
   , sgClassify = LLMHandler
       { llmSystem = Nothing
       , llmUser   = templateCompiled @ClassifyTpl
@@ -303,7 +303,7 @@ supportHandlers = SupportGraph
       , llmBefore = \_msg -> pure SimpleContext { scContent = "Here are some common questions..." }
       , llmAfter  = pure . gotoExit
       }
-  , sgExit     = Proxy @Response
+  , sgExit     = ()
   }
   where
     -- Helper to extract message content as Text

@@ -20,6 +20,11 @@ module Tidepool.Effect.Types
   , QuestionUI(..)
   , TUI(..)
 
+    -- * Return Effect (graph termination)
+  , Return(..)
+  , returnValue
+  , runReturn
+
     -- * Node Metadata Effect (re-exports from Tidepool.Effect.NodeMeta)
   , NodeMeta(..)
   , NodeMetadata(..)
@@ -754,4 +759,56 @@ runLog minLevel = interpret $ \case
               Just fs -> " | " <> T.intercalate ", " (map fst fs)
         sendM $ TIO.hPutStrLn stderr ("[" <> T.pack (show level) <> "] " <> msg <> fieldStr)
     | otherwise -> pure ()
+
+-- ══════════════════════════════════════════════════════════════
+-- RETURN EFFECT (graph termination)
+-- ══════════════════════════════════════════════════════════════
+
+-- | Return effect - terminates graph execution with a value.
+--
+-- Replaces the pattern of @Goto Exit result@ with a semantically clearer
+-- effect that explicitly terminates the current graph/node execution.
+--
+-- @
+-- -- Instead of:
+-- gRoute :: mode :- LogicNode :@ UsesEffects '[Goto Exit Response]
+-- routeHandler result = pure $ gotoExit result
+--
+-- -- Use:
+-- gRoute :: mode :- LogicNode :@ UsesEffects '[Return Response]
+-- routeHandler result = returnValue result
+-- @
+--
+-- The Return effect is particularly useful for single-node graphs (MCP tools)
+-- where Entry/Exit ceremony is overhead. With Return, the node simply
+-- returns its result directly.
+--
+-- Note: The effect result type is @a@ (not @()@), so computations using
+-- Return have the value type as their overall result type.
+data Return (a :: Type) r where
+  ReturnValue :: a -> Return a a
+
+-- | Terminate graph execution with a value.
+--
+-- This is the primary way to exit a graph when using the Return effect.
+-- The interpreter will capture this value as the graph's result.
+--
+-- Note: Returns the value directly, so the computation's result type
+-- must match the Return effect's type parameter.
+returnValue :: Member (Return a) effs => a -> Eff effs a
+returnValue = send . ReturnValue
+
+-- | Run the Return effect, extracting the returned value.
+--
+-- The computation must end with 'returnValue' to provide the result.
+--
+-- @
+-- result <- runReturn $ do
+--   value <- computeSomething
+--   returnValue value
+-- -- result :: a
+-- @
+runReturn :: forall a effs. Eff (Return a ': effs) a -> Eff effs a
+runReturn = interpret $ \case
+  ReturnValue a -> pure a
 

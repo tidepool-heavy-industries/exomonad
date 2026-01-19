@@ -72,7 +72,7 @@ docGenHandlers
      )
   => DocGenGraph (AsHandler es)
 docGenHandlers = DocGenGraph
-  { dgEntry = Proxy @TeachQuery
+  { dgEntry = ()
 
   , dgInit = initHandler
 
@@ -89,7 +89,7 @@ docGenHandlers = DocGenGraph
 
   , dgFinalize = finalizeHandler
 
-  , dgExit = Proxy @TeachingDoc
+  , dgExit = ()
   }
 
 

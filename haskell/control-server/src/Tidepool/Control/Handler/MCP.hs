@@ -36,8 +36,7 @@ import Tidepool.Control.LSPTools
   , showConstructorsLogic, ShowConstructorsArgs(..), ShowConstructorsResult(..)
   )
 import Tidepool.Effect.NodeMeta (runNodeMeta, runGraphMeta, defaultNodeMeta, GraphMetadata(..))
-import Tidepool.Effect.Types (runLog, LogLevel(..))
-import Tidepool.Graph.Goto (unwrapSingleChoice)
+import Tidepool.Effect.Types (runLog, LogLevel(..), runReturn)
 import Tidepool.LSP.Interpreter (LSPSession, runLSP)
 import Tidepool.Teaching.LLM (TeachingConfig, loadTeachingConfig, withTeaching, runLLMWithTeaching)
 import Tidepool.Teaching.Teacher (teacherGuidance)
@@ -173,7 +172,7 @@ handleFindCallersTool logger lspSession reqId args = do
       resultOrErr <- try $ runM
         $ runLog Debug
         $ runLSP lspSession
-        $ fmap unwrapSingleChoice (findCallersLogic fcArgs)
+        $ runReturn (findCallersLogic fcArgs)
 
       case resultOrErr of
         Left (e :: SomeException) -> do
@@ -202,7 +201,7 @@ handleShowFieldsTool logger lspSession reqId args = do
       resultOrErr <- try $ runM
         $ runLog Debug
         $ runLSP lspSession
-        $ fmap unwrapSingleChoice (showFieldsLogic sfArgs)
+        $ runReturn (showFieldsLogic sfArgs)
 
       case resultOrErr of
         Left (e :: SomeException) -> do
@@ -230,7 +229,7 @@ handleShowConstructorsTool logger lspSession reqId args = do
       resultOrErr <- try $ runM
         $ runLog Debug
         $ runLSP lspSession
-        $ fmap unwrapSingleChoice (showConstructorsLogic scArgs)
+        $ runReturn (showConstructorsLogic scArgs)
 
       case resultOrErr of
         Left (e :: SomeException) -> do

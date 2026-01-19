@@ -91,9 +91,9 @@ data EchoGraph mode = EchoGraph
 -- 'AsHandler' mode's effect stack.
 echoHandlers :: EchoGraph (AsHandler '[Telegram])
 echoHandlers = EchoGraph
-  { egEntry    = Proxy @ChatId
+  { egEntry    = ()
   , egMainLoop = mainLoopHandler
-  , egExit     = Proxy @()
+  , egExit     = ()
   }
 
 -- ════════════════════════════════════════════════════════════════════════════

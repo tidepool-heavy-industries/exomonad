@@ -44,7 +44,7 @@ import GHC.Generics (Generic)
 
 import Tidepool.Graph.Types (type (:@), Input, UsesEffects, Exit)
 import Tidepool.Graph.Generic (GraphMode(..), AsHandler)
-import qualified Tidepool.Graph.Generic as G (Entry, Exit, LogicNode, ValidGraphRecord)
+import qualified Tidepool.Graph.Generic as G (EntryNode, ExitNode, LogicNode, ValidGraphRecord)
 import Tidepool.Graph.Goto (Goto, gotoChoice, gotoExit)
 import Tidepool.Graph.Reify (ReifyRecordGraph(..), makeGraphInfo)
 
@@ -120,7 +120,7 @@ type RenderGotos = '[Goto Exit Text]
 -- 2. Gathers Git + BD context
 -- 3. Renders output as markdown
 data UrchinPrimeGraph mode = UrchinPrimeGraph
-  { upEntry  :: mode :- G.Entry ()
+  { upEntry  :: mode :- G.EntryNode ()
     -- ^ Entry point, no input needed
 
   , upDetect :: mode :- G.LogicNode :@ Input ()
@@ -135,7 +135,7 @@ data UrchinPrimeGraph mode = UrchinPrimeGraph
                :@ UsesEffects RenderGotos
     -- ^ Render context to markdown.
 
-  , upExit   :: mode :- G.Exit Text
+  , upExit   :: mode :- G.ExitNode Text
     -- ^ Exit with rendered markdown (or error message).
   }
   deriving Generic
@@ -153,7 +153,7 @@ type PrimeEffects = '[Git, BD]
 -- Uses Git and BD effects for context gathering.
 primeHandlers :: (Member Git effs, Member BD effs) => UrchinPrimeGraph (AsHandler effs)
 primeHandlers = UrchinPrimeGraph
-  { upEntry  = Proxy @()
+  { upEntry  = ()
 
   , upDetect = \() -> do
       mWorktree <- getWorktreeInfo
@@ -193,7 +193,7 @@ primeHandlers = UrchinPrimeGraph
   , upRender = \ctx -> do
       pure $ gotoExit (renderPrime ctx)
 
-  , upExit   = Proxy @Text
+  , upExit   = ()
   }
 
 

@@ -9,11 +9,12 @@
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 -- | Deterministic LSP orchestration tools (Tier 1) as Graph DSL nodes.
 --
--- Each tool is expressed as a mini-graph with MCPExport annotation,
--- dogfooding the graph DSL for simple query functions.
+-- Each tool is expressed as a simplified single-node graph using the
+-- GraphEntries type family for MCP tool discovery.
 --
 -- = Tier 1 Tools (Pure LSP + Basic Parsing)
 --
@@ -23,18 +24,16 @@
 --
 -- = Design Notes
 --
--- These tools are simple request/response functions, but we use the full
--- graph DSL to:
+-- These tools use the simplified graph DSL pattern:
 --
--- 1. Dogfood the DSL and identify ergonomic issues
--- 2. Get automatic MCP tool discovery via MCPExport
--- 3. Establish patterns for more complex Tier 2 tools
+-- 1. Single LogicNode with Return effect (no Entry/Exit ceremony)
+-- 2. GraphEntries type family for MCP tool discovery
+-- 3. Direct function execution via the logic handler
 --
 -- See @pain-points/@ for workflow documentation.
 module Tidepool.Control.LSPTools
   ( -- * Find Callers
     FindCallersGraph(..)
-  , findCallersHandlers
   , findCallersLogic
   , FindCallersArgs(..)
   , FindCallersResult(..)
@@ -42,7 +41,6 @@ module Tidepool.Control.LSPTools
 
     -- * Show Fields
   , ShowFieldsGraph(..)
-  , showFieldsHandlers
   , showFieldsLogic
   , ShowFieldsArgs(..)
   , ShowFieldsResult(..)
@@ -50,7 +48,6 @@ module Tidepool.Control.LSPTools
 
     -- * Show Constructors
   , ShowConstructorsGraph(..)
-  , showConstructorsHandlers
   , showConstructorsLogic
   , ShowConstructorsArgs(..)
   , ShowConstructorsResult(..)
@@ -64,7 +61,6 @@ import Control.Monad (forM)
 import Control.Monad.Freer (Eff, Member, LastMember, sendM)
 import Data.Aeson (FromJSON(..), ToJSON(..), (.:), (.:?), (.=), object, withObject)
 import Data.Maybe (fromMaybe, mapMaybe)
-import Data.Proxy (Proxy(..))
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.ByteString as BS
@@ -72,11 +68,10 @@ import qualified Data.Text.Encoding as TE
 import GHC.Generics (Generic)
 
 import Tidepool.Effect.LSP
-import Tidepool.Effect.Types (Log, logDebug)
-import Tidepool.Graph.Generic (AsHandler, type (:-))
-import Tidepool.Graph.Generic.Core (EntryNode, ExitNode, LogicNode)
-import Tidepool.Graph.Goto (Goto, GotoChoice, To, gotoExit)
-import Tidepool.Graph.Types (type (:@), Input, UsesEffects, Exit, MCPExport, MCPToolDef)
+import Tidepool.Effect.Types (Log, logDebug, Return, returnValue)
+import Tidepool.Graph.Generic (type (:-))
+import Tidepool.Graph.Generic.Core (LogicNode)
+import Tidepool.Graph.Types (type (:@), Input, UsesEffects, GraphEntries, GraphEntry(..))
 import Tidepool.Schema (HasJSONSchema(..), objectSchema, emptySchema, SchemaType(..), describeField)
 
 
@@ -160,35 +155,23 @@ instance ToJSON FindCallersResult where
 
 -- | Graph definition for find_callers tool.
 --
--- Entry → Logic → Exit pattern for simple query tools.
-data FindCallersGraph mode = FindCallersGraph
-  { fcEntry :: mode :- EntryNode FindCallersArgs
-      :@ MCPExport
-      :@ MCPToolDef '("find_callers", "Find actual call sites of a function, filtering out imports and type signatures")
-
-  , fcRun :: mode :- LogicNode
+-- Single LogicNode with Return effect - no Entry/Exit ceremony needed.
+newtype FindCallersGraph mode = FindCallersGraph
+  { fcRun :: mode :- LogicNode
       :@ Input FindCallersArgs
-      :@ UsesEffects '[Goto Exit FindCallersResult]
-
-  , fcExit :: mode :- ExitNode FindCallersResult
+      :@ UsesEffects '[Return FindCallersResult]
   }
   deriving Generic
 
--- | Handlers for find_callers graph.
-findCallersHandlers
-  :: (Member LSP es, Member Log es, LastMember IO es)
-  => FindCallersGraph (AsHandler es)
-findCallersHandlers = FindCallersGraph
-  { fcEntry = Proxy @FindCallersArgs
-  , fcRun = findCallersLogic
-  , fcExit = Proxy @FindCallersResult
-  }
+-- | MCP tool entry point declaration for find_callers.
+type instance GraphEntries FindCallersGraph =
+  '[ "find_callers" ':~> '("fcRun", FindCallersArgs, "Find actual call sites of a function, filtering out imports and type signatures") ]
 
 -- | Core logic for finding callers.
 findCallersLogic
-  :: (Member LSP es, Member Log es, LastMember IO es)
+  :: (Member LSP es, Member Log es, Member (Return FindCallersResult) es, LastMember IO es)
   => FindCallersArgs
-  -> Eff es (GotoChoice '[To Exit FindCallersResult])
+  -> Eff es FindCallersResult
 findCallersLogic args = do
   let name = fcaName args
       ctxLines = fromMaybe 1 (fcaContextLines args)
@@ -291,7 +274,7 @@ findCallersLogic args = do
         , fcrWarning = warning
         }
 
-  pure $ gotoExit result
+  returnValue result
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -356,34 +339,24 @@ instance ToJSON ShowFieldsResult where
     ]
 
 -- | Graph definition for show_fields tool.
-data ShowFieldsGraph mode = ShowFieldsGraph
-  { sfEntry :: mode :- EntryNode ShowFieldsArgs
-      :@ MCPExport
-      :@ MCPToolDef '("show_fields", "Show fields of a Haskell record type with their types")
-
-  , sfRun :: mode :- LogicNode
+--
+-- Single LogicNode with Return effect - no Entry/Exit ceremony needed.
+newtype ShowFieldsGraph mode = ShowFieldsGraph
+  { sfRun :: mode :- LogicNode
       :@ Input ShowFieldsArgs
-      :@ UsesEffects '[Goto Exit ShowFieldsResult]
-
-  , sfExit :: mode :- ExitNode ShowFieldsResult
+      :@ UsesEffects '[Return ShowFieldsResult]
   }
   deriving Generic
 
--- | Handlers for show_fields graph.
-showFieldsHandlers
-  :: (Member LSP es, Member Log es, LastMember IO es)
-  => ShowFieldsGraph (AsHandler es)
-showFieldsHandlers = ShowFieldsGraph
-  { sfEntry = Proxy @ShowFieldsArgs
-  , sfRun = showFieldsLogic
-  , sfExit = Proxy @ShowFieldsResult
-  }
+-- | MCP tool entry point declaration for show_fields.
+type instance GraphEntries ShowFieldsGraph =
+  '[ "show_fields" ':~> '("sfRun", ShowFieldsArgs, "Show fields of a Haskell record type with their types") ]
 
 -- | Core logic for showing fields.
 showFieldsLogic
-  :: (Member LSP es, Member Log es, LastMember IO es)
+  :: (Member LSP es, Member Log es, Member (Return ShowFieldsResult) es, LastMember IO es)
   => ShowFieldsArgs
-  -> Eff es (GotoChoice '[To Exit ShowFieldsResult])
+  -> Eff es ShowFieldsResult
 showFieldsLogic args = do
   let typeName = sfaTypeName args
 
@@ -445,7 +418,7 @@ showFieldsLogic args = do
         , sfrWarning = warning
         }
 
-  pure $ gotoExit result
+  returnValue result
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -510,34 +483,24 @@ instance ToJSON ShowConstructorsResult where
     ]
 
 -- | Graph definition for show_constructors tool.
-data ShowConstructorsGraph mode = ShowConstructorsGraph
-  { scEntry :: mode :- EntryNode ShowConstructorsArgs
-      :@ MCPExport
-      :@ MCPToolDef '("show_constructors", "Show constructors of a Haskell sum type or GADT")
-
-  , scRun :: mode :- LogicNode
+--
+-- Single LogicNode with Return effect - no Entry/Exit ceremony needed.
+newtype ShowConstructorsGraph mode = ShowConstructorsGraph
+  { scRun :: mode :- LogicNode
       :@ Input ShowConstructorsArgs
-      :@ UsesEffects '[Goto Exit ShowConstructorsResult]
-
-  , scExit :: mode :- ExitNode ShowConstructorsResult
+      :@ UsesEffects '[Return ShowConstructorsResult]
   }
   deriving Generic
 
--- | Handlers for show_constructors graph.
-showConstructorsHandlers
-  :: (Member LSP es, Member Log es, LastMember IO es)
-  => ShowConstructorsGraph (AsHandler es)
-showConstructorsHandlers = ShowConstructorsGraph
-  { scEntry = Proxy @ShowConstructorsArgs
-  , scRun = showConstructorsLogic
-  , scExit = Proxy @ShowConstructorsResult
-  }
+-- | MCP tool entry point declaration for show_constructors.
+type instance GraphEntries ShowConstructorsGraph =
+  '[ "show_constructors" ':~> '("scRun", ShowConstructorsArgs, "Show constructors of a Haskell sum type or GADT") ]
 
 -- | Core logic for showing constructors.
 showConstructorsLogic
-  :: (Member LSP es, Member Log es, LastMember IO es)
+  :: (Member LSP es, Member Log es, Member (Return ShowConstructorsResult) es, LastMember IO es)
   => ShowConstructorsArgs
-  -> Eff es (GotoChoice '[To Exit ShowConstructorsResult])
+  -> Eff es ShowConstructorsResult
 showConstructorsLogic args = do
   let typeName = scaTypeName args
 
@@ -601,7 +564,7 @@ showConstructorsLogic args = do
         , scrWarning = warning
         }
 
-  pure $ gotoExit result
+  returnValue result
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -860,9 +823,3 @@ readFileUtf8 :: FilePath -> IO Text
 readFileUtf8 path = do
   bs <- BS.readFile path
   pure $ TE.decodeUtf8With (\_ _ -> Just '?') bs
-
--- | Check if text starts with uppercase char
-isUpperCase :: Text -> Bool
-isUpperCase t = case T.uncons t of
-  Just (c, _) -> c >= 'A' && c <= 'Z'
-  Nothing -> False
