@@ -567,6 +567,19 @@ bd update ID -s in_progress # Update status
 bd show ID                 # View details
 ```
 
+### Templates and Validation
+Task creation uses templates located in `.bd/templates/`.
+- **task**: Requires `## Acceptance Criteria`
+- **bug**: Requires `## Steps to Reproduce` and `## Acceptance Criteria`
+- **feature**: Requires `## Acceptance Criteria`
+- **epic**: Requires `## Success Criteria`
+
+When creating a new issue, use the `--validate` flag to ensure required sections are present:
+```bash
+bd create -t task "Implement X" --description "$(cat .bd/templates/task.md)" --validate
+```
+Or ensure your description manually includes the required headers.
+
 ### Workflow
 1. Mark task `in_progress` when starting
 2. Reference bead ID in PR description
