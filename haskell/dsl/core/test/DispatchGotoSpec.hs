@@ -18,7 +18,6 @@
 module DispatchGotoSpec (spec) where
 
 import Control.Monad.Freer (run)
-import Data.Proxy (Proxy(..))
 import GHC.Generics (Generic)
 import Test.Hspec
 
@@ -51,9 +50,9 @@ data SimpleGraph mode = SimpleGraph
 
 simpleHandlers :: SimpleGraph (AsHandler '[NodeMeta, GraphMeta])
 simpleHandlers = SimpleGraph
-  { sgEntry   = Proxy
+  { sgEntry   = ()
   , sgCompute = \n -> pure $ gotoExit (n + 1 :: Int)
-  , sgExit    = Proxy
+  , sgExit    = ()
   }
 
 -- ════════════════════════════════════════════════════════════════════════════

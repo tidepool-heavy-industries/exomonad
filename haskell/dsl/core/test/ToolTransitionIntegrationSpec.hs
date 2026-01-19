@@ -21,7 +21,6 @@ module ToolTransitionIntegrationSpec (spec) where
 import Control.Monad.Freer (run, Eff, Member)
 import Data.Aeson (toJSON, Value)
 import qualified Data.Text as T
-import Data.Proxy (Proxy(..))
 import GHC.Generics (Generic)
 import Test.Hspec
 
@@ -72,10 +71,10 @@ successNodeHandler payload = pure $ gotoExit (Result $ "success: " <> show paylo
 
 handlers :: ToolTransitionGraph (AsHandler '[NodeMeta, GraphMeta])
 handlers = ToolTransitionGraph
-  { ttgEntry   = Proxy
+  { ttgEntry   = ()
   , ttgTool    = toolNodeHandler
   , ttgSuccess = successNodeHandler
-  , ttgExit    = Proxy
+  , ttgExit    = ()
   }
 
 -- ════════════════════════════════════════════════════════════════════════════
