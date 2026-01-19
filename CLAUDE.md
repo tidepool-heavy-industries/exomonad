@@ -560,6 +560,17 @@ All Haskell packages now live under `haskell/`. See `haskell/CLAUDE.md` for full
 
 Git-native task tracking via BD. Database at `.beads/` (gitignored, shared across worktrees).
 
+### Workflow
+
+1.  **Branching**: Use the `bd-{id}/{description}` naming convention for all task-related branches.
+2.  **Bootstrap**: Run `./scripts/bead-context` after checkout to load task details into the agent/IDE context.
+3.  **In Progress**: Mark task `in_progress` when starting work.
+4.  **Commits**: Use `[tidepool-{id}]` prefix in commit messages.
+5.  **Closing**: Mark `closed` after PR is merged.
+6.  **Sync**: All worktrees share the same database; use `bd sync` if needed.
+
+### Basic Commands
+
 ```bash
 bd list --all              # List tasks
 bd create -t task "..."    # Create task
@@ -580,19 +591,13 @@ bd create -t task "Implement X" --description "$(cat .bd/templates/task.md)" --v
 ```
 Or ensure your description manually includes the required headers.
 
-### Workflow
-1. Mark task `in_progress` when starting
-2. Reference bead ID in PR description
-3. Mark `closed` after merge
-4. All worktrees share the same db
-
 ### Landing the Plane
 
 When ending a session:
 
 1. File issues for remaining work (`bd create`)
 2. Run quality gates (`just pre-commit`)
-3. Update issue status
+3. Update issue status (`bd close <id>`)
 4. Push: `git pull --rebase && bd sync && git push`
 5. Verify: `git status` shows "up to date"
 

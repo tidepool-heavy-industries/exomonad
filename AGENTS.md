@@ -313,6 +313,34 @@ myTemplate = $(typedTemplateFile ''MyContext "templates/my_prompt.jinja")
 
 Git-native task tracking via **bd**. Database at `.beads/` (gitignored, shared across worktrees).
 
+### Agent Workflow (REQUIRED)
+
+When starting a new task (bead) as an agent, you MUST follow this workflow:
+
+1.  **Branch Naming**: Create a branch following the `bd-{id}/{description}` convention.
+    ```bash
+    git checkout -b bd-69u/agent-onboarding
+    ```
+2.  **Bootstrap Context**: Run the context script immediately after checking out the branch to get task details and acceptance criteria.
+    ```bash
+    ./scripts/bead-context
+    ```
+3.  **Development**: Implement changes incrementally. Use `bd update <id> -s in_progress` to signal you are working on it.
+4.  **Commit Format**: Use the bead ID in every commit message.
+    ```bash
+    git commit -m "[tidepool-69u] update AGENTS.md with onboarding workflow"
+    ```
+5.  **Pull Request**: File a PR using the GitHub CLI (`gh`).
+    ```bash
+    gh pr create --title "[tidepool-69u] <title>" --body "Closes tidepool-69u"
+    ```
+6.  **Cleanup**: After the PR is merged, close the bead.
+    ```bash
+    bd close tidepool-69u --reason "Merged: <PR URL>"
+    ```
+
+### Basic Commands
+
 ```bash
 bd list --all              # List tasks
 bd create -t task "..."    # Create task
@@ -321,7 +349,7 @@ bd show ID                 # View details
 bd sync                    # Sync with git notes
 ```
 
-**Workflow:**
+**Workflow Summary:**
 1. Mark task `in_progress` when starting
 2. Reference bead ID in PR descriptions
 3. Mark `closed` after merge
@@ -336,7 +364,7 @@ bd create -t task "TODO: ..."
 just pre-commit
 
 # 3. Update status
-bd update <id> -s closed
+bd close <id> --reason "Merged: <PR URL>"
 
 # 4. Push
 bd sync
