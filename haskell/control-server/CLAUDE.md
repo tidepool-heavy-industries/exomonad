@@ -265,7 +265,9 @@ Project-local configuration in `.tidepool/` (gitignored):
 
 ## MCP Tools
 
-All tools are **automatically discovered** from Graph DSL annotations via `reifyMCPTools`. Each graph with `MCPExport` on its entry node becomes an MCP tool.
+Tools are **automatically discovered** from graph definitions:
+- **Simplified graphs** (Tier 1): Use `GraphEntries` type family + `Return` effect, discovered via `reifyGraphEntries`
+- **Legacy graphs** (Tier 2): Use `MCPExport` annotation on entry node, discovered via `reifyMCPTools`
 
 ### Tier 1: Deterministic LSP Tools
 
@@ -344,24 +346,25 @@ Explores codebase concepts via BFS, using Haiku to select relevant type dependen
 
 **Automatic discovery:**
 ```haskell
--- Export.hs:927-943
+-- Export.hs
 exportMCPTools :: IO [ToolDefinition]
 exportMCPTools = do
-  let allTools = concat
-        [ reifyMCPTools (Proxy @FindCallersGraph)
-        , reifyMCPTools (Proxy @ShowFieldsGraph)
-        , reifyMCPTools (Proxy @ShowConstructorsGraph)
-        , reifyMCPTools (Proxy @DocGenGraph)  -- teach-graph
+  let simplifiedTools = concat
+        [ reifyGraphEntries (Proxy @FindCallersGraph)
+        , reifyGraphEntries (Proxy @ShowFieldsGraph)
+        , reifyGraphEntries (Proxy @ShowConstructorsGraph)
         ]
-  pure $ map reifyToToolDef allTools
+      legacyTools = concat
+        [ reifyMCPTools (Proxy @DocGenGraph)  -- teach-graph
+        ]
+  pure $ map reifyToToolDef (simplifiedTools ++ legacyTools)
 ```
 
 **How it works:**
-1. `MCPExport` annotation marks entry node for discovery
-2. `MCPToolDef '("tool_name", "description")` provides metadata
-3. `reifyMCPTools` extracts schema from `HasJSONSchema` instance
-4. `exportMCPTools` called on control-server startup
-5. mantle-agent queries via `ToolsListRequest`, caches tools
+1. **Simplified pattern**: `GraphEntries` type family declares entry points, `reifyGraphEntries` extracts metadata
+2. **Legacy pattern**: `MCPExport` annotation marks entry node, `reifyMCPTools` extracts metadata
+3. `exportMCPTools` called on control-server startup
+4. mantle-agent queries via `ToolsListRequest`, caches tools
 
 ## Hook Handlers
 
