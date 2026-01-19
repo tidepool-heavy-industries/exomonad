@@ -6,7 +6,7 @@
 //! ## Message Flow
 //!
 //! ```text
-//! Claude Code hooks       mantle hook <event>      Control Socket
+//! Claude Code hooks       mantle-agent hook <event>      Control Socket
 //!      (stdin JSON)  -->   (parse & forward)   -->   (Haskell server)
 //!                    <--   (response JSON)     <--
 //! ```
