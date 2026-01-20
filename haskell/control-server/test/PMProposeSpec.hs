@@ -5,13 +5,11 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE RecordWildCards #-}
 
 module Main where
 
 import Control.Monad.Freer (Eff, run, reinterpret)
-import Control.Monad.Freer.State (get, put, modify, runState)
-import Data.Text (Text)
+import Control.Monad.Freer.State (modify, runState)
 import qualified Data.Text as T
 import Test.Tasty
 import Test.Tasty.HUnit
@@ -19,7 +17,6 @@ import Test.Tasty.HUnit
 import Tidepool.Effects.BD (BD(..), CreateBeadInput(..), BeadType(..))
 import Tidepool.Control.PMTools (labelNeedsTLReview)
 import Tidepool.Control.PMPropose
-import Tidepool.Graph.Goto (Goto, GotoChoice(..))
 
 main :: IO ()
 main = defaultMain tests
@@ -77,7 +74,7 @@ test_createsBead = do
   -- We need to run the logic wrapped in the effect stack.
   -- pmProposeLogic returns a GotoChoice, we just ignore the return value for this test
   -- as we are inspecting the side effects (CreateBead call).
-  let (res, state) = runMockBD $ pmProposeLogic args
+  let (_, state) = runMockBD $ pmProposeLogic args
   
   case createdBeads state of
     [input] -> do

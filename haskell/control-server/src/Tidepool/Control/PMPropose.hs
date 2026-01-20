@@ -22,13 +22,13 @@ module Tidepool.Control.PMPropose
   where
 
 import Control.Monad.Freer (Eff, Member)
-import Data.Aeson (FromJSON(..), ToJSON(..), (.:), (.:?), (.=), (.!=), object, withObject)
+import Data.Aeson (FromJSON(..), ToJSON(..), (.:), (.:?), (.=), object, withObject)
 import Data.Maybe (catMaybes, fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
 
-import Tidepool.Effects.BD (BD, BeadStatus(..), BeadType(..), CreateBeadInput(..), defaultCreateInput, createBead, addLabel)
+import Tidepool.Effects.BD (BD, BeadType(..), CreateBeadInput(..), defaultCreateInput, createBead)
 import Tidepool.Control.PMTools (labelNeedsTLReview)
 import Tidepool.Graph.Generic (AsHandler, type (:-))
 import Tidepool.Graph.Generic.Core (EntryNode, ExitNode, LogicNode)
