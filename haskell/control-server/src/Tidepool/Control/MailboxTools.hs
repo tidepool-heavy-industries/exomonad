@@ -163,7 +163,11 @@ instance ToJSON MessageSummary where
 -- | Dummy args for check_inbox.
 data CheckInboxArgs = CheckInboxArgs {}
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass (ToJSON)
+
+-- | Accept empty object {} from MCP (Generic derives Array for empty records)
+instance FromJSON CheckInboxArgs where
+  parseJSON = withObject "CheckInboxArgs" $ \_ -> pure CheckInboxArgs
 
 instance HasJSONSchema CheckInboxArgs where
   jsonSchema = objectSchema [] []
