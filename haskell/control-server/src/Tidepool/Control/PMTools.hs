@@ -183,7 +183,7 @@ instance ToJSON PmApproveExpansionResult where
 data PmApproveExpansionGraph mode = PmApproveExpansionGraph
   { paeEntry :: mode :- EntryNode PmApproveExpansionArgs
       :@ MCPExport
-      :@ MCPToolDef ('("pm_approve_expansion", "Approve or reject a bead's expansion plan. Handles label transitions and feedback."))
+      :@ MCPToolDef '("pm_approve_expansion", "Approve or reject a bead's expansion plan. Handles label transitions and feedback.")
 
   , paeRun :: mode :- LogicNode
       :@ Input PmApproveExpansionArgs
