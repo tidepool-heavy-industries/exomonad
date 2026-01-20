@@ -53,6 +53,7 @@ runServerMode logger projectDir noTui = do
         { projectDir = projectDir
         , role = fmap T.pack roleEnv
         , noTui = noTui
+        , observabilityConfig = Nothing
         }
 
   -- Start main control server

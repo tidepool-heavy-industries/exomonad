@@ -18,11 +18,14 @@ module Tidepool.Control.Handler.MCP
   ( handleMcpTool
   ) where
 
-import Control.Exception (SomeException, displayException, try)
-import Control.Monad.Freer (Eff, LastMember, interpret, runM)
-import Data.Aeson (Value, fromJSON, toJSON, Result(..))
+import Control.Exception (SomeException, displayException, try, throwIO)
+import Control.Monad (when)
+import Control.Monad.Freer (Eff, LastMember, interpret, runM, sendM)
+import Data.Aeson (Value, fromJSON, toJSON, Result(..), encode)
+import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.ByteString.Lazy as LBS
 import Data.Maybe (fromMaybe)
 
 import Tidepool.Control.Logging (Logger, logInfo, logDebug, logError)
@@ -76,6 +79,9 @@ import Tidepool.LSP.Interpreter (LSPSession, runLSP)
 import Tidepool.TUI.Interpreter (TUIHandle, runTUI)
 -- import Tidepool.Teaching.LLM (TeachingConfig, loadTeachingConfig, withTeaching, runLLMWithTeaching)
 -- import Tidepool.Teaching.Teacher (teacherGuidance)
+import Tidepool.Effects.Observability (SpanKind(..), SpanAttribute(..), withSpan, addSpanAttribute)
+import Tidepool.Observability.Interpreter (runObservabilityWithContext)
+import Tidepool.Observability.Types (TraceContext, ObservabilityConfig(..), defaultLokiConfig)
 
 -- | Run TUI interpreter if handle is available, otherwise run mock.
 runTUIOrMock :: LastMember IO effs => Maybe TUIHandle -> Eff (TUI ': effs) a -> Eff effs a
@@ -84,6 +90,65 @@ runTUIOrMock Nothing = interpret $ \case
   ShowUI _ -> pure $ ButtonClicked "mock" "cancel"
   UpdateUI _ -> pure ()
   CloseUI -> pure ()
+
+-- | Wrap MCP tool call with tracing if enabled.
+withMcpTracing 
+  :: Logger 
+  -> ServerConfig 
+  -> TraceContext 
+  -> Text 
+  -> Text 
+  -> Value 
+  -> IO ControlResponse 
+  -> IO ControlResponse
+withMcpTracing logger config traceCtx reqId toolName args action = do
+  case config.observabilityConfig of
+    Nothing -> action
+    Just obsConfig -> do
+      -- We want to ensure action is ONLY called once.
+      -- We use an IORef to store the result so if the tracing wrapper itself 
+      -- (runM or withSpan) fails after action completes, we don't re-run action.
+      resRef <- newIORef Nothing
+      
+      let runActionOnce = do
+            mRes <- readIORef resRef
+            case mRes of
+              Just res -> pure res
+              Nothing -> do
+                res <- action
+                writeIORef resRef (Just res)
+                pure res
+
+      resultOrErr <- try $ runM 
+        $ runObservabilityWithContext traceCtx (fromMaybe defaultLokiConfig $ ocLoki obsConfig)
+        $ withSpan ("mcp:tool:" <> toolName) SpanServer 
+            [ AttrText "mcp.request_id" reqId
+            , AttrText "mcp.tool_name" toolName
+            , AttrInt "mcp.input_size" (fromIntegral $ LBS.length $ encode args)
+            ] $ do
+          -- Run the actual action (or get cached result)
+          res <- sendM runActionOnce
+          
+          -- Add response metadata
+          let resSize = case res of
+                McpToolResponse _ (Just val) _ -> LBS.length $ encode val
+                _ -> 0
+              isError = case res of
+                McpToolResponse _ _ (Just _) -> True
+                _ -> False
+
+          addSpanAttribute (AttrInt "mcp.output_size" (fromIntegral resSize))
+          when isError $ addSpanAttribute (AttrText "error" "true")
+          
+          pure res
+      
+      case resultOrErr of
+        Left (e :: SomeException) -> do
+          logError logger $ "[MCP:" <> reqId <> "] Tracing error: " <> T.pack (show e)
+          -- Rethrow as suggested to avoid masking and potential double-runs 
+          -- if this were higher up, though here runActionOnce + resRef protects us.
+          throwIO e
+        Right res -> pure res
 
 -- | Handle an MCP tool call.
 --
@@ -97,56 +162,57 @@ runTUIOrMock Nothing = interpret $ \case
 --
 -- == Tier 3: External Orchestration Tools (Exo)
 --   - "exo_status": Get current bead context, git status, and PR info
-handleMcpTool :: Logger -> ServerConfig -> LSPSession -> Maybe TUIHandle -> Text -> Text -> Value -> IO ControlResponse
-handleMcpTool logger config lspSession maybeTuiHandle reqId toolName args = do
-  logInfo logger $ "[MCP:" <> reqId <> "] Dispatching: " <> toolName
+handleMcpTool :: Logger -> ServerConfig -> LSPSession -> Maybe TUIHandle -> TraceContext -> Text -> Text -> Value -> IO ControlResponse
+handleMcpTool logger config lspSession maybeTuiHandle traceCtx reqId toolName args = 
+  withMcpTracing logger config traceCtx reqId toolName args $ do
+    logInfo logger $ "[MCP:" <> reqId <> "] Dispatching: " <> toolName
 
-  let currentRole = fromMaybe "unknown" config.role
+    let currentRole = fromMaybe "unknown" config.role
 
-  case toolName of
-    -- Tier 1: Deterministic LSP tools (graph-based)
-    "find_callers" -> handleFindCallersTool logger lspSession maybeTuiHandle reqId args
-    "find_callees" -> handleFindCalleesTool logger lspSession maybeTuiHandle reqId args
-    "show_fields" -> handleShowFieldsTool logger lspSession maybeTuiHandle reqId args
-    "show_constructors" -> handleShowConstructorsTool logger lspSession maybeTuiHandle reqId args
+    case toolName of
+      -- Tier 1: Deterministic LSP tools (graph-based)
+      "find_callers" -> handleFindCallersTool logger lspSession maybeTuiHandle reqId args
+      "find_callees" -> handleFindCalleesTool logger lspSession maybeTuiHandle reqId args
+      "show_fields" -> handleShowFieldsTool logger lspSession maybeTuiHandle reqId args
+      "show_constructors" -> handleShowConstructorsTool logger lspSession maybeTuiHandle reqId args
 
-    -- TUI-interactive tools
-    "confirm_action" -> handleConfirmActionTool logger lspSession maybeTuiHandle reqId args
-    "select_option" -> handleSelectOptionTool logger lspSession maybeTuiHandle reqId args
-    "request_guidance" -> handleRequestGuidanceTool logger lspSession maybeTuiHandle reqId args
-    "register_feedback" -> handleRegisterFeedbackTool logger reqId args
+      -- TUI-interactive tools
+      "confirm_action" -> handleConfirmActionTool logger lspSession maybeTuiHandle reqId args
+      "select_option" -> handleSelectOptionTool logger lspSession maybeTuiHandle reqId args
+      "request_guidance" -> handleRequestGuidanceTool logger lspSession maybeTuiHandle reqId args
+      "register_feedback" -> handleRegisterFeedbackTool logger reqId args
 
-    -- Tier 2: LLM-enhanced tools (graph-based)
-    -- DISABLED: teach-graph spawns recursive LLM calls, expensive during testing
-    -- Re-enable once Tier 1 tools are stable
-    -- "teach-graph" -> handleTeachGraphTool logger lspSession maybeTuiHandle reqId args
+      -- Tier 2: LLM-enhanced tools (graph-based)
+      -- DISABLED: teach-graph spawns recursive LLM calls, expensive during testing
+      -- Re-enable once Tier 1 tools are stable
+      -- "teach-graph" -> handleTeachGraphTool logger lspSession maybeTuiHandle reqId args
 
-    -- Tier 3: External Orchestration tools (Exo)
-    "exo_status" -> handleExoStatusTool logger lspSession reqId args
-    "exo_complete" -> handleExoCompleteTool logger lspSession reqId args
-    "exo_reconstitute" -> handleExoReconstituteTool logger lspSession reqId args
-    "pre_commit_check" -> handlePreCommitCheckTool logger reqId args
-    "spawn_agents" -> handleSpawnAgentsTool logger lspSession reqId args
-    "file_pr" -> handleFilePRTool logger lspSession reqId args
-    "bead_to_pr" -> handleBeadToPrTool logger reqId args
-    "pr_to_bead" -> handlePrToBeadTool logger reqId args
-    "pm_approve_expansion" -> handlePmApproveExpansionTool logger lspSession reqId args
-    "pm_prioritize" -> handlePmPrioritizeTool logger reqId args
-    "pm_status" -> handlePmStatusTool logger reqId args
-    "pm_propose" -> handlePMProposeTool logger reqId args
-    "pm_review_dag" -> handlePmReviewDagTool logger reqId args
+      -- Tier 3: External Orchestration tools (Exo)
+      "exo_status" -> handleExoStatusTool logger lspSession reqId args
+      "exo_complete" -> handleExoCompleteTool logger lspSession reqId args
+      "exo_reconstitute" -> handleExoReconstituteTool logger lspSession reqId args
+      "pre_commit_check" -> handlePreCommitCheckTool logger reqId args
+      "spawn_agents" -> handleSpawnAgentsTool logger lspSession reqId args
+      "file_pr" -> handleFilePRTool logger lspSession reqId args
+      "bead_to_pr" -> handleBeadToPrTool logger reqId args
+      "pr_to_bead" -> handlePrToBeadTool logger reqId args
+      "pm_approve_expansion" -> handlePmApproveExpansionTool logger lspSession reqId args
+      "pm_prioritize" -> handlePmPrioritizeTool logger reqId args
+      "pm_status" -> handlePmStatusTool logger reqId args
+      "pm_propose" -> handlePMProposeTool logger reqId args
+      "pm_review_dag" -> handlePmReviewDagTool logger reqId args
 
-    -- Mailbox tools
-    "send_message" -> handleSendMessageTool logger currentRole reqId args
-    "check_inbox" -> handleCheckInboxTool logger currentRole reqId args
-    "read_message" -> handleReadMessageTool logger reqId args
-    "mark_read" -> handleMarkReadTool logger reqId args
+      -- Mailbox tools
+      "send_message" -> handleSendMessageTool logger currentRole reqId args
+      "check_inbox" -> handleCheckInboxTool logger currentRole reqId args
+      "read_message" -> handleReadMessageTool logger reqId args
+      "mark_read" -> handleMarkReadTool logger reqId args
 
-    _ -> do
-      logError logger $ "  (unknown tool)"
-      pure $ mcpToolError reqId $
-        "Tool not found: " <> toolName <>
-        ". Available tools: find_callers, find_callees, show_fields, show_constructors, teach-graph, exo_status, exo_complete, exo_reconstitute, pre_commit_check, spawn_agents, file_pr, pm_approve_expansion, pm_prioritize, pm_propose"
+      _ -> do
+        logError logger $ "  (unknown tool)"
+        pure $ mcpToolError reqId $
+          "Tool not found: " <> toolName <>
+          ". Available tools: find_callers, find_callees, show_fields, show_constructors, teach-graph, exo_status, exo_complete, exo_reconstitute, pre_commit_check, spawn_agents, file_pr, pm_approve_expansion, pm_prioritize, pm_propose"
 
 -- | Handle the pm_prioritize tool.
 --

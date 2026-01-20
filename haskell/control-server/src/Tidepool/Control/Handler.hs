@@ -13,12 +13,13 @@ import Tidepool.Control.Handler.Hook (handleHook)
 import Tidepool.Control.Handler.MCP (handleMcpTool)
 import Tidepool.LSP.Interpreter (LSPSession)
 import Tidepool.TUI.Interpreter (TUIHandle)
+import Tidepool.Observability.Types (TraceContext)
 
 -- | Route a control message to the appropriate handler.
-handleMessage :: Logger -> ServerConfig -> LSPSession -> Maybe TUIHandle -> ControlMessage -> IO ControlResponse
-handleMessage logger config lspSession maybeTuiHandle = \case
+handleMessage :: Logger -> ServerConfig -> LSPSession -> Maybe TUIHandle -> TraceContext -> ControlMessage -> IO ControlResponse
+handleMessage logger config lspSession maybeTuiHandle traceCtx = \case
   HookEvent input r -> handleHook input r
-  McpToolCall reqId name args -> handleMcpTool logger config lspSession maybeTuiHandle reqId name args
+  McpToolCall reqId name args -> handleMcpTool logger config lspSession maybeTuiHandle traceCtx reqId name args
   ToolsListRequest -> handleToolsList logger
   Ping -> pure Pong
 
