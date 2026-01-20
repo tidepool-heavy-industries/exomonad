@@ -54,6 +54,21 @@ module Tidepool.Control.ExoTools
   , FilePRArgs(..)
   , FilePRResult(..)
 
+    -- * Bead to PR
+  , BeadToPrGraph(..)
+  , beadToPrHandlers
+  , beadToPrLogic
+  , BeadToPrArgs(..)
+  , BeadToPrResult(..)
+  , PRInfo(..)
+
+    -- * PR to Bead
+  , PrToBeadGraph(..)
+  , prToBeadHandlers
+  , prToBeadLogic
+  , PrToBeadArgs(..)
+  , PrToBeadResult(..)
+
     -- * Pr Review Status
   , PrReviewStatusGraph(..)
   , prReviewStatusHandlers
@@ -64,6 +79,7 @@ module Tidepool.Control.ExoTools
     -- * Helpers
   , parseBeadId
   , slugify
+  , extractBeadId
   ) where
 
 import Control.Applicative ((<|>))
@@ -73,9 +89,9 @@ import Data.Aeson (FromJSON(..), ToJSON(..), (.:), (.:?), (.=), object, withObje
 import Data.Char (isAlphaNum, isSpace)
 import Data.Either (partitionEithers)
 import Data.List (find)
+import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Map (Map)
 import qualified Data.Map as Map
-import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
@@ -83,7 +99,7 @@ import System.FilePath ((</>))
 
 import Tidepool.Effects.BD (BD, BeadInfo(..), BeadStatus(..), DependencyInfo(..), getBead, closeBead, sync)
 import Tidepool.Effects.Git (Git, WorktreeInfo(..), getWorktreeInfo, getDirtyFiles)
-import Tidepool.Effects.GitHub (GitHub, PullRequest(..), listPullRequests, PRFilter(..), Repo(..), PRCreateSpec(..), PRUrl(..), createPR, ReviewComment(..), getPullRequestReviews)
+import Tidepool.Effects.GitHub (GitHub, PullRequest(..), listPullRequests, getPullRequest, PRFilter(..), defaultPRFilter, Repo(..), PRCreateSpec(..), PRUrl(..), createPR, ReviewComment(..), getPullRequestReviews)
 import Tidepool.Effects.Justfile (Justfile, runRecipe, JustResult(..))
 import Tidepool.Effects.Worktree (Worktree, WorktreeSpec(..), WorktreePath(..), createWorktree)
 import Tidepool.Graph.Generic (AsHandler, type (:-))
@@ -650,7 +666,8 @@ getDevelopmentContext maybeBeadId = do
   mPR <- case mWt of
     Just wt -> do
       let repo = Repo "tidepool-heavy-industries/tidepool"
-      prs <- listPullRequests repo (PRFilter Nothing (Just "main") (Just 100))
+          filt = defaultPRFilter { pfBase = Just "main", pfLimit = Just 100 }
+      prs <- listPullRequests repo filt
       pure $ find (\pr -> pr.prHeadRefName == wt.wiBranch) prs
     Nothing -> pure Nothing
 
@@ -818,3 +835,177 @@ formatPRBody bead = T.unlines $
    else ["## Dependents", ""] ++ map formatDep bead.biDependents ++ [""])
   where
     formatDep dep = "  → " <> dep.diId <> ": " <> dep.diTitle
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- BEAD-TO-PR GRAPH
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Arguments for bead_to_pr tool.
+data BeadToPrArgs = BeadToPrArgs
+  { btpaBeadId :: Text
+  }
+  deriving stock (Show, Eq, Generic)
+
+instance HasJSONSchema BeadToPrArgs where
+  jsonSchema = objectSchema
+    [ ("bead_id", describeField "bead_id" "Bead ID (e.g. tidepool-huj)." (emptySchema TString))
+    ]
+    ["bead_id"]
+
+instance FromJSON BeadToPrArgs where
+  parseJSON = withObject "BeadToPrArgs" $ \v ->
+    BeadToPrArgs <$> v .: "bead_id"
+
+instance ToJSON BeadToPrArgs where
+  toJSON args = object ["bead_id" .= btpaBeadId args]
+
+-- | PR Info.
+data PRInfo = PRInfo
+  { priNumber :: Int
+  , priUrl    :: Text
+  , priStatus :: Text
+  , priTitle  :: Text
+  }
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (ToJSON, FromJSON)
+
+-- | Result of bead_to_pr tool.
+data BeadToPrResult = BeadToPrResult
+  { btprPR :: Maybe PRInfo
+  }
+  deriving stock (Show, Eq, Generic)
+
+instance ToJSON BeadToPrResult where
+  toJSON res = object ["pr" .= btprPR res]
+
+instance FromJSON BeadToPrResult where
+  parseJSON = withObject "BeadToPrResult" $ \v ->
+    BeadToPrResult <$> v .: "pr"
+
+-- | Graph definition for bead_to_pr tool.
+data BeadToPrGraph mode = BeadToPrGraph
+  { btpEntry :: mode :- EntryNode BeadToPrArgs
+      :@ MCPExport
+      :@ MCPToolDef '("bead_to_pr", "Find the pull request associated with a bead ID.")
+
+  , btpRun :: mode :- LogicNode
+      :@ Input BeadToPrArgs
+      :@ UsesEffects '[GitHub, Goto Exit BeadToPrResult]
+
+  , btpExit :: mode :- ExitNode BeadToPrResult
+  }
+  deriving Generic
+
+-- | Handlers for bead_to_pr graph.
+beadToPrHandlers
+  :: (Member GitHub es)
+  => BeadToPrGraph (AsHandler es)
+beadToPrHandlers = BeadToPrGraph
+  { btpEntry = ()
+  , btpRun = beadToPrLogic
+  , btpExit = ()
+  }
+
+-- | Core logic for bead_to_pr.
+beadToPrLogic
+  :: Member GitHub es
+  => BeadToPrArgs
+  -> Eff es (GotoChoice '[To Exit BeadToPrResult])
+beadToPrLogic args = do
+  let repo = Repo "tidepool-heavy-industries/tidepool"
+      searchStr = "[" <> args.btpaBeadId <> "]"
+      filt = defaultPRFilter { pfSearch = Just searchStr, pfLimit = Just 1 }
+  
+  prs <- listPullRequests repo filt
+  let mPR = listToMaybe prs
+      info = fmap (\pr -> PRInfo
+        { priNumber = pr.prNumber
+        , priUrl = pr.prUrl
+        , priStatus = T.pack (show pr.prState)
+        , priTitle = pr.prTitle
+        }) mPR
+
+  pure $ gotoExit $ BeadToPrResult info
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- PR-TO-BEAD GRAPH
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Arguments for pr_to_bead tool.
+data PrToBeadArgs = PrToBeadArgs
+  { ptbaPrNumber :: Int
+  }
+  deriving stock (Show, Eq, Generic)
+
+instance HasJSONSchema PrToBeadArgs where
+  jsonSchema = objectSchema
+    [ ("pr_number", describeField "pr_number" "Pull Request number." (emptySchema TInteger))
+    ]
+    ["pr_number"]
+
+instance FromJSON PrToBeadArgs where
+  parseJSON = withObject "PrToBeadArgs" $ \v ->
+    PrToBeadArgs <$> v .: "pr_number"
+
+instance ToJSON PrToBeadArgs where
+  toJSON args = object ["pr_number" .= ptbaPrNumber args]
+
+-- | Result of pr_to_bead tool.
+data PrToBeadResult = PrToBeadResult
+  { ptbrBeadId :: Maybe Text
+  }
+  deriving stock (Show, Eq, Generic)
+
+instance ToJSON PrToBeadResult where
+  toJSON res = object ["bead_id" .= ptbrBeadId res]
+
+instance FromJSON PrToBeadResult where
+  parseJSON = withObject "PrToBeadResult" $ \v ->
+    PrToBeadResult <$> v .: "bead_id"
+
+-- | Graph definition for pr_to_bead tool.
+data PrToBeadGraph mode = PrToBeadGraph
+  { ptbEntry :: mode :- EntryNode PrToBeadArgs
+      :@ MCPExport
+      :@ MCPToolDef '("pr_to_bead", "Extract the bead ID from a pull request title.")
+
+  , ptbRun :: mode :- LogicNode
+      :@ Input PrToBeadArgs
+      :@ UsesEffects '[GitHub, Goto Exit PrToBeadResult]
+
+  , ptbExit :: mode :- ExitNode PrToBeadResult
+  }
+  deriving Generic
+
+-- | Handlers for pr_to_bead graph.
+prToBeadHandlers
+  :: (Member GitHub es)
+  => PrToBeadGraph (AsHandler es)
+prToBeadHandlers = PrToBeadGraph
+  { ptbEntry = ()
+  , ptbRun = prToBeadLogic
+  , ptbExit = ()
+  }
+
+-- | Core logic for pr_to_bead.
+prToBeadLogic
+  :: Member GitHub es
+  => PrToBeadArgs
+  -> Eff es (GotoChoice '[To Exit PrToBeadResult])
+prToBeadLogic args = do
+  let repo = Repo "tidepool-heavy-industries/tidepool"
+  mPR <- getPullRequest repo args.ptbaPrNumber False
+  
+  let mBeadId = mPR >>= \pr -> extractBeadId pr.prTitle
+  pure $ gotoExit $ PrToBeadResult mBeadId
+
+-- | Extract bead ID from PR title.
+-- Pattern: [tidepool-XXX]
+extractBeadId :: Text -> Maybe Text
+extractBeadId title =
+  let (_, rest) = T.breakOn "[tidepool-" title
+  in if T.null rest
+     then Nothing
+     else
+       let (idPart, _) = T.break (== ']') (T.drop 1 rest)
+       in Just idPart

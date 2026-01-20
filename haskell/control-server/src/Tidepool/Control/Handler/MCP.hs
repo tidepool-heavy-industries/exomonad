@@ -48,6 +48,8 @@ import Tidepool.Control.ExoTools
   , preCommitCheckLogic, PreCommitCheckArgs(..), PreCommitCheckResult(..)
   , spawnAgentsLogic, SpawnAgentsArgs(..), SpawnAgentsResult(..)
   , filePRLogic, FilePRArgs(..), FilePRResult(..)
+  , beadToPrLogic, BeadToPrArgs(..), BeadToPrResult(..), PRInfo(..)
+  , prToBeadLogic, PrToBeadArgs(..), PrToBeadResult(..)
   )
 import Tidepool.Control.PMTools
   ( pmApproveExpansionLogic, PmApproveExpansionArgs(..), PmApproveExpansionResult(..)
@@ -116,6 +118,8 @@ handleMcpTool logger lspSession maybeTuiHandle reqId toolName args = do
     "pre_commit_check" -> handlePreCommitCheckTool logger reqId args
     "spawn_agents" -> handleSpawnAgentsTool logger lspSession reqId args
     "file_pr" -> handleFilePRTool logger lspSession reqId args
+    "bead_to_pr" -> handleBeadToPrTool logger reqId args
+    "pr_to_bead" -> handlePrToBeadTool logger reqId args
     "pm_approve_expansion" -> handlePmApproveExpansionTool logger lspSession reqId args
     "pm_prioritize" -> handlePmPrioritizeTool logger reqId args
     "pm_propose" -> handlePMProposeTool logger reqId args
@@ -652,4 +656,58 @@ handleRequestGuidanceTool logger _lspSession maybeTuiHandle reqId args = do
 
         Right result -> do
           logInfo logger $ "[MCP:" <> reqId <> "] Guidance received"
+          pure $ mcpToolSuccess reqId (toJSON result)
+
+-- | Handle the bead_to_pr tool.
+handleBeadToPrTool :: Logger -> Text -> Value -> IO ControlResponse
+handleBeadToPrTool logger reqId args = do
+  case fromJSON args of
+    Error err -> do
+      logError logger $ "  parse error: " <> T.pack err
+      pure $ mcpToolError reqId $ "Invalid bead_to_pr arguments: " <> T.pack err
+
+    Success btpArgs -> do
+      logDebug logger $ "  bead_id=" <> btpaBeadId btpArgs
+
+      resultOrErr <- try $ runM
+        $ runLog Debug
+        $ runGitHubIO defaultGitHubConfig
+        $ fmap unwrapSingleChoice (beadToPrLogic btpArgs)
+
+      case resultOrErr of
+        Left (e :: SomeException) -> do
+          logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId $ "bead_to_pr failed: " <> T.pack (displayException e)
+
+        Right result -> do
+          case btprPR result of
+            Just pr -> logInfo logger $ "[MCP:" <> reqId <> "] Found PR: " <> T.pack (show pr.priNumber)
+            Nothing -> logInfo logger $ "[MCP:" <> reqId <> "] No PR found for bead " <> btpaBeadId btpArgs
+          pure $ mcpToolSuccess reqId (toJSON result)
+
+-- | Handle the pr_to_bead tool.
+handlePrToBeadTool :: Logger -> Text -> Value -> IO ControlResponse
+handlePrToBeadTool logger reqId args = do
+  case fromJSON args of
+    Error err -> do
+      logError logger $ "  parse error: " <> T.pack err
+      pure $ mcpToolError reqId $ "Invalid pr_to_bead arguments: " <> T.pack err
+
+    Success ptbArgs -> do
+      logDebug logger $ "  pr_number=" <> T.pack (show $ ptbaPrNumber ptbArgs)
+
+      resultOrErr <- try $ runM
+        $ runLog Debug
+        $ runGitHubIO defaultGitHubConfig
+        $ fmap unwrapSingleChoice (prToBeadLogic ptbArgs)
+
+      case resultOrErr of
+        Left (e :: SomeException) -> do
+          logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId $ "pr_to_bead failed: " <> T.pack (displayException e)
+
+        Right result -> do
+          case ptbrBeadId result of
+            Just bid -> logInfo logger $ "[MCP:" <> reqId <> "] Found bead ID: " <> bid
+            Nothing -> logInfo logger $ "[MCP:" <> reqId <> "] No bead ID found in PR title"
           pure $ mcpToolSuccess reqId (toJSON result)

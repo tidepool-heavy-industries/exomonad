@@ -194,6 +194,7 @@ ghPrList config repo filt = do
             ++ stateArgs filt.pfState
             ++ baseArgs filt.pfBase
             ++ limitArgs filt.pfLimit
+            ++ searchArgs filt.pfSearch
 
   result <- runGhCommand config args
   case result of
@@ -218,6 +219,9 @@ ghPrList config repo filt = do
 
     limitArgs Nothing  = []
     limitArgs (Just n) = ["--limit", show n]
+
+    searchArgs Nothing  = []
+    searchArgs (Just s) = ["--search", T.unpack s]
 
 
 -- | View a single pull request using gh CLI.
