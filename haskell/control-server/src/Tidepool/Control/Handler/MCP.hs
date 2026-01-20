@@ -36,6 +36,11 @@ import Tidepool.Control.LSPTools
   , showFieldsLogic, ShowFieldsArgs(..), ShowFieldsResult(..)
   , showConstructorsLogic, ShowConstructorsArgs(..), ShowConstructorsResult(..)
   )
+import Tidepool.Control.TUITools
+  ( confirmActionLogic, ConfirmArgs(..), ConfirmResult(..)
+  , selectOptionLogic, SelectArgs(..), SelectResult(..)
+  , requestGuidanceLogic, GuidanceArgs(..)
+  )
 import Tidepool.Control.ExoTools
   ( exoStatusLogic, ExoStatusArgs(..)
   , exoCompleteLogic, ExoCompleteArgs(..), ExoCompleteResult(..)
@@ -93,6 +98,11 @@ handleMcpTool logger lspSession maybeTuiHandle reqId toolName args = do
     "find_callers" -> handleFindCallersTool logger lspSession maybeTuiHandle reqId args
     "show_fields" -> handleShowFieldsTool logger lspSession maybeTuiHandle reqId args
     "show_constructors" -> handleShowConstructorsTool logger lspSession maybeTuiHandle reqId args
+
+    -- TUI-interactive tools
+    "confirm_action" -> handleConfirmActionTool logger lspSession maybeTuiHandle reqId args
+    "select_option" -> handleSelectOptionTool logger lspSession maybeTuiHandle reqId args
+    "request_guidance" -> handleRequestGuidanceTool logger lspSession maybeTuiHandle reqId args
 
     -- Tier 2: LLM-enhanced tools (graph-based)
     -- DISABLED: teach-graph spawns recursive LLM calls, expensive during testing
@@ -479,6 +489,7 @@ handleShowConstructorsTool logger lspSession maybeTuiHandle reqId args = do
           logInfo logger $ "[MCP:" <> reqId <> "] Found " <> T.pack (show $ length $ scrConstructors result) <> " constructors"
           pure $ mcpToolSuccess reqId (toJSON result)
 
+
 -- | Handle the file_pr tool.
 --
 -- Runs the FilePRGraph logic to file a pull request with bead context.
@@ -563,4 +574,82 @@ handlePMProposeTool logger reqId args = do
 
         Right result -> do
           logInfo logger $ "[MCP:" <> reqId <> "] Proposed bead: " <> result.pprBeadId
+          pure $ mcpToolSuccess reqId (toJSON result)
+
+
+-- | Handle the confirm_action tool.
+handleConfirmActionTool :: Logger -> LSPSession -> Maybe TUIHandle -> Text -> Value -> IO ControlResponse
+handleConfirmActionTool logger _lspSession maybeTuiHandle reqId args = do
+  case fromJSON args of
+    Error err -> do
+      logError logger $ "  parse error: " <> T.pack err
+      pure $ mcpToolError reqId $ "Invalid confirm_action arguments: " <> T.pack err
+
+    Success caArgs -> do
+      logDebug logger $ "  action=" <> caAction caArgs
+
+      resultOrErr <- try $ runM
+        $ runLog Debug
+        $ runTUIOrMock maybeTuiHandle
+        $ runReturn (confirmActionLogic caArgs)
+
+      case resultOrErr of
+        Left (e :: SomeException) -> do
+          logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId $ "confirm_action failed: " <> T.pack (displayException e)
+
+        Right result -> do
+          logInfo logger $ "[MCP:" <> reqId <> "] Action confirmed=" <> T.pack (show $ crConfirmed result)
+          pure $ mcpToolSuccess reqId (toJSON result)
+
+
+-- | Handle the select_option tool.
+handleSelectOptionTool :: Logger -> LSPSession -> Maybe TUIHandle -> Text -> Value -> IO ControlResponse
+handleSelectOptionTool logger _lspSession maybeTuiHandle reqId args = do
+  case fromJSON args of
+    Error err -> do
+      logError logger $ "  parse error: " <> T.pack err
+      pure $ mcpToolError reqId $ "Invalid select_option arguments: " <> T.pack err
+
+    Success soArgs -> do
+      logDebug logger $ "  prompt=" <> saPrompt soArgs
+
+      resultOrErr <- try $ runM
+        $ runLog Debug
+        $ runTUIOrMock maybeTuiHandle
+        $ runReturn (selectOptionLogic soArgs)
+
+      case resultOrErr of
+        Left (e :: SomeException) -> do
+          logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId $ "select_option failed: " <> T.pack (displayException e)
+
+        Right result -> do
+          logInfo logger $ "[MCP:" <> reqId <> "] Option selected=" <> srSelected result
+          pure $ mcpToolSuccess reqId (toJSON result)
+
+
+-- | Handle the request_guidance tool.
+handleRequestGuidanceTool :: Logger -> LSPSession -> Maybe TUIHandle -> Text -> Value -> IO ControlResponse
+handleRequestGuidanceTool logger _lspSession maybeTuiHandle reqId args = do
+  case fromJSON args of
+    Error err -> do
+      logError logger $ "  parse error: " <> T.pack err
+      pure $ mcpToolError reqId $ "Invalid request_guidance arguments: " <> T.pack err
+
+    Success rgArgs -> do
+      logDebug logger $ "  context=" <> gaContext rgArgs
+
+      resultOrErr <- try $ runM
+        $ runLog Debug
+        $ runTUIOrMock maybeTuiHandle
+        $ runReturn (requestGuidanceLogic rgArgs)
+
+      case resultOrErr of
+        Left (e :: SomeException) -> do
+          logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId $ "request_guidance failed: " <> T.pack (displayException e)
+
+        Right result -> do
+          logInfo logger $ "[MCP:" <> reqId <> "] Guidance received"
           pure $ mcpToolSuccess reqId (toJSON result)
