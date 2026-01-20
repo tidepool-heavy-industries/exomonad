@@ -89,6 +89,13 @@ module Tidepool.Graph
   , Sonnet
   , Opus
 
+    -- * Gemini Annotation
+  , Gemini
+  , GeminiModel(..)
+  , Flash
+  , Pro
+  , Ultra
+
     -- * The Goto Effect
   , Goto(..)
   , goto
@@ -172,6 +179,7 @@ module Tidepool.Graph
   , G.AsHandler
     -- For G.Entry, G.Exit, use: import qualified Tidepool.Graph.Generic as G
   , G.LLMNode
+  , G.GeminiNode
   , G.LogicNode
   , G.ValidGraphRecord
   , G.NodeHandler
@@ -193,9 +201,16 @@ module Tidepool.Graph
   , GetBackend
   , GetClaudeCode
   , HasClaudeCode
+  , GetGeminiModel
+  , HasGeminiModel
 
     -- * Backend Compatibility Validation
   , ClaudeCodeCFBackendError
+
+    -- * LLM Handler Variants
+  , LLMHandler(..)
+  , ClaudeCodeLLMHandler(..)
+  , GeminiLLMHandler(..)
 
     -- * Tools
   , ToolDef(..)

@@ -13,6 +13,7 @@ module Tidepool.Graph.Export
   , TemplateExport(..)
   , MemoryExport(..)
   , ClaudeCodeExport(..)
+  , GeminiExport(..)
   , ToolExport(..)
 
     -- * Conversion
@@ -35,6 +36,7 @@ import Tidepool.Graph.Reify
   , TemplateInfo(..)
   , MemoryInfo(..)
   , ClaudeCodeInfo(..)
+  , GeminiInfo(..)
   , ToolInfo(..)
   , RuntimeNodeKind(..)
   , RuntimeEdgeKind(..)
@@ -73,6 +75,7 @@ data NodeExport = NodeExport
   , neTools :: [ToolExport]                -- ^ Available tools
   , neMemory :: Maybe MemoryExport         -- ^ Node-private state info
   , neClaudeCode :: Maybe ClaudeCodeExport -- ^ ClaudeCode annotation info
+  , neGemini :: Maybe GeminiExport         -- ^ Gemini annotation info
   , neTransitions :: [Text]                -- ^ Explicit Goto target names
   , neCanExit :: Bool                      -- ^ Has Goto Exit?
   , neHasVision :: Bool                    -- ^ Vision enabled?
@@ -173,6 +176,17 @@ instance ToJSON ClaudeCodeExport where
     [ "model" .= ce.ceModel
     ]
 
+-- | Export format for Gemini info.
+data GeminiExport = GeminiExport
+  { geModel :: Text        -- ^ Model: "Flash", "Pro", or "Ultra"
+  }
+  deriving (Show, Eq, Generic)
+
+instance ToJSON GeminiExport where
+  toJSON ge = object
+    [ "model" .= ge.geModel
+    ]
+
 -- | Export format for tool info.
 data ToolExport = ToolExport
   { txName :: Text            -- ^ Tool name
@@ -219,6 +233,7 @@ nodeToExport ni = NodeExport
   , neTools = map toolToExport ni.niToolInfos
   , neMemory = memoryToExport <$> ni.niMemory
   , neClaudeCode = claudeCodeToExport <$> ni.niClaudeCode
+  , neGemini = geminiToExport <$> ni.niGemini
   , neTransitions = map fst ni.niGotoTargets
   , neCanExit = ni.niHasGotoExit
   , neHasVision = ni.niHasVision
@@ -271,6 +286,12 @@ claudeCodeToExport cci = ClaudeCodeExport
   { ceModel = cci.cciModel
   }
 
+-- | Convert GeminiInfo to GeminiExport.
+geminiToExport :: GeminiInfo -> GeminiExport
+geminiToExport gi = GeminiExport
+  { geModel = gi.giModel
+  }
+
 -- ════════════════════════════════════════════════════════════════════════════
 -- HELPERS
 -- ════════════════════════════════════════════════════════════════════════════
@@ -279,6 +300,7 @@ claudeCodeToExport cci = ClaudeCodeExport
 kindToText :: RuntimeNodeKind -> Text
 kindToText RuntimeLLM = "LLM"
 kindToText RuntimeClaudeCode = "ClaudeCode"
+kindToText RuntimeGemini = "Gemini"
 kindToText RuntimeLogic = "Logic"
 kindToText RuntimeFork = "Fork"
 kindToText RuntimeBarrier = "Barrier"

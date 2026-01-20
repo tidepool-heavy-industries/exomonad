@@ -72,6 +72,7 @@ library
         tidepool-github-interpreter,
         tidepool-justfile-interpreter,
         tidepool-worktree-interpreter,
+        tidepool-gemini-interpreter,
         -- HTTP for FunctionGemma
         http-conduit,
         vector,

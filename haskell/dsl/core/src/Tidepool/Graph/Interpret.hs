@@ -38,6 +38,7 @@ module Tidepool.Graph.Interpret
     -- * LLM Handler Execution
   , executeLLMHandler
   , executeClaudeCodeHandler
+  , executeGeminiHandler
 
     -- * Self-Loop Dispatch
   , DispatchGotoWithSelf(..)
@@ -71,15 +72,16 @@ import Text.Ginger.TH (TypedTemplate, runTypedTemplate)
 import Text.Parsec.Pos (SourcePos)
 
 import Tidepool.Effect (LLM)
-import Tidepool.Effect.NodeMeta (NodeMeta, NodeMetadata(..), withNodeMeta, GraphMeta, GraphMetadata(..), getGraphMeta, withGraphMeta)
+import Tidepool.Effect.Gemini (GeminiOp, GeminiModel(..), SGeminiModel(..), SingGeminiModel(..), runGemini, GeminiResult(..))
+import Tidepool.Effect.NodeMeta (NodeMeta, NodeMetadata(..), withNodeMeta, GraphMeta, GraphMetadata(..), getGraphMeta)
 import Tidepool.Effect.Session (Session, SessionOutput(..), SessionId(..), SessionOperation(..), startSession, continueSession, forkSession, ToolCall(..))
 import Tidepool.Effect.Types (TurnOutcome(..), TurnParseResult(..), TurnResult(..), runTurn)
 import Tidepool.Graph.Edges (GetInput, GetSpawnTargets, GetBarrierTarget, GetAwaits)
 import Tidepool.Graph.Generic (AsHandler, FieldsWithNamesOf, SpawnPayloads, SpawnPayloadsInner, AwaitsHList, GetNodeDef)
 import Tidepool.Graph.Reify (IsForkNode)
-import Tidepool.Graph.Generic.Core (EntryNode, AsGraph, GraphNode)
+import Tidepool.Graph.Generic.Core (EntryNode, AsGraph)
 import qualified Tidepool.Graph.Generic.Core as G (ExitNode)
-import Tidepool.Graph.Goto (GotoChoice, To, LLMHandler(..), ClaudeCodeLLMHandler(..), ClaudeCodeResult(..))
+import Tidepool.Graph.Goto (GotoChoice, To, LLMHandler(..), ClaudeCodeLLMHandler(..), ClaudeCodeResult(..), GeminiLLMHandler(..))
 import Tidepool.Graph.Goto.Internal (GotoChoice(..), OneOf(..))
 import Tidepool.Graph.Template (GingerContext)
 import Tidepool.Graph.Types (Exit, Self, Arrive, SingModelChoice(..), HList(..), ModelChoice)
@@ -504,6 +506,48 @@ executeClaudeCodeHandler mSystemTpl userTpl beforeFn afterFn input = do
       , DT.tcInput = tc.tcInput
       }
 
+-- | Execute a GeminiLLMHandler, returning a GotoChoice.
+--
+-- Spawns Gemini CLI subprocess via the Gemini effect.
+executeGeminiHandler
+  :: forall model needs schema targets es tpl.
+     ( Member GeminiOp es
+     , Member NodeMeta es
+     , Member GraphMeta es
+     , StructuredOutput schema
+     , ValidStructuredOutput schema
+     , GingerContext tpl
+     , SingGeminiModel model
+     , ConvertTransitionHint targets
+     )
+  => Maybe (TypedTemplate tpl SourcePos)
+  -> TypedTemplate tpl SourcePos
+  -> (needs -> Eff es tpl)
+  -> (schema -> Eff es (GotoChoice targets))
+  -> needs
+  -> Eff es (GotoChoice targets)
+executeGeminiHandler mSystemTpl userTpl beforeFn afterFn input = do
+  -- Build context from before-handler
+  ctx <- beforeFn input
+  -- Render templates
+  let systemPrompt = maybe "" (runTypedTemplate ctx) mSystemTpl
+      userPrompt = runTypedTemplate ctx userTpl
+      fullPrompt = if systemPrompt == "" then userPrompt else systemPrompt <> "\n\n" <> userPrompt
+  
+  -- Demote model to term-level for the Gemini effect
+  let modelVal = case singGeminiModel @model of
+        SFlash -> Flash
+        SPro   -> Pro
+        SUltra -> Ultra
+
+  -- Run Gemini effect
+  GeminiResult{grOutput} <- runGemini modelVal fullPrompt
+  
+  -- Parse output
+  case parseStructured grOutput of
+    Right parsed -> afterFn parsed
+    Left diag -> error $ "Parse failed: Gemini parse error: " <> T.unpack (formatDiagnostic diag)
+
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- HANDLER INVOCATION TYPECLASS
@@ -555,6 +599,20 @@ instance
   callHandler (ClaudeCodeLLMHandler mSysTpl userTpl beforeFn afterFn) =
     executeClaudeCodeHandler @model mSysTpl userTpl beforeFn afterFn
 
+-- | Gemini LLM node handler: execute via executeGeminiHandler.
+instance
+  ( Member GeminiOp es
+  , Member NodeMeta es
+  , Member GraphMeta es
+  , StructuredOutput schema
+  , ValidStructuredOutput schema
+  , GingerContext tpl
+  , SingGeminiModel model
+  , ConvertTransitionHint targets
+  ) => CallHandler (GeminiLLMHandler model payload schema targets es tpl) payload es targets where
+  callHandler (GeminiLLMHandler mSysTpl userTpl beforeFn afterFn) =
+    executeGeminiHandler @model mSysTpl userTpl beforeFn afterFn
+
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- GRAPHNODE EXECUTION
@@ -574,19 +632,20 @@ instance
 -- childResult <- executeGraphNode childHandlers input
 -- pure $ gotoChoice @"nextNode" childResult
 -- @
-executeGraphNode
-  :: forall childGraph es entryType targets exitType entryHandlerName handler.
-     ( Generic (childGraph AsGraph)
-     , FindEntryHandler entryType (FieldsWithNamesOf childGraph) ~ 'Just entryHandlerName
-     , KnownSymbol entryHandlerName
-     , HasField entryHandlerName (childGraph (AsHandler es)) handler
-     , CallHandler handler entryType es targets
-     , DispatchGoto childGraph targets es exitType
-     )
-  => childGraph (AsHandler es)  -- ^ Child graph handlers
-  -> entryType                   -- ^ Input to child graph's EntryNode
-  -> Eff es exitType             -- ^ Child graph's Exit value
-executeGraphNode = runGraph
+-- @
+-- executeGraphNode
+--   :: forall childGraph es entryType targets exitType entryHandlerName handler.
+--      ( Generic (childGraph AsGraph)
+--      , FindEntryHandler entryType (FieldsWithNamesOf childGraph) ~ 'Just entryHandlerName
+--      , KnownSymbol entryHandlerName
+--      , HasField entryHandlerName (childGraph (AsHandler es)) handler
+--      , CallHandler handler entryType es targets
+--      , DispatchGoto childGraph targets es exitType
+--      )
+--   => childGraph (AsHandler es)  -- ^ Child graph handlers
+--   -> entryType                   -- ^ Input to child graph's EntryNode
+--   -> Eff es exitType             -- ^ Child graph's Exit value
+-- executeGraphNode = runGraph
 
 
 -- ════════════════════════════════════════════════════════════════════════════

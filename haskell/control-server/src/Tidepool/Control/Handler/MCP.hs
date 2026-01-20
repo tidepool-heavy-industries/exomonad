@@ -53,6 +53,7 @@ import Tidepool.BD.GitInterpreter (runGitIO)
 import Tidepool.GitHub.Interpreter (runGitHubIO, defaultGitHubConfig)
 import Tidepool.Justfile.Interpreter (runJustfileIO)
 import Tidepool.Worktree.Interpreter (runWorktreeIO, defaultWorktreeConfig)
+import Tidepool.Gemini.Interpreter (runGeminiIO)
 import Tidepool.Effect.NodeMeta (runNodeMeta, runGraphMeta, defaultNodeMeta, GraphMetadata(..))
 import Tidepool.Effect.TUI (TUI(..), Interaction(..))
 import Tidepool.Effect.Types (runLog, LogLevel(..), runReturn)
@@ -156,6 +157,7 @@ handlePreCommitCheckTool logger reqId args = do
 
       resultOrErr <- try $ runM
         $ runLog Debug
+        $ runGeminiIO
         $ runJustfileIO
         $ fmap unwrapSingleChoice (preCommitCheckLogic pccArgs)
 
@@ -188,6 +190,7 @@ handleSpawnAgentsTool logger _lspSession reqId args = do
       
       resultOrErr <- try $ runM
         $ runLog Debug
+        $ runGeminiIO
         $ runBDIO defaultBDConfig
         $ runGitIO
         $ runWorktreeIO (defaultWorktreeConfig repoRoot)
@@ -218,6 +221,7 @@ handleExoStatusTool logger _lspSession reqId args = do
 
       resultOrErr <- try $ runM
         $ runLog Debug
+        $ runGeminiIO
         $ runBDIO defaultBDConfig
         $ runGitIO
         $ runGitHubIO defaultGitHubConfig
@@ -248,6 +252,7 @@ handleExoCompleteTool logger _lspSession reqId args = do
 
       resultOrErr <- try $ runM
         $ runLog Debug
+        $ runGeminiIO
         $ runBDIO defaultBDConfig
         $ runGitIO
         $ fmap unwrapSingleChoice (exoCompleteLogic ecArgs)
@@ -277,6 +282,7 @@ handleExoReconstituteTool logger _lspSession reqId args = do
 
       resultOrErr <- try $ runM
         $ runLog Debug
+        $ runGeminiIO
         $ runBDIO defaultBDConfig
         $ runGitIO
         $ runGitHubIO defaultGitHubConfig
@@ -338,6 +344,7 @@ runWithTeaching logger config lspSession maybeTuiHandle reqId query = do
       $ runLog Debug
       $ runTUIOrMock maybeTuiHandle
       $ runLSP lspSession
+      $ runGeminiIO
       $ runGraphMeta (GraphMetadata "DocGenGraph")
       $ runNodeMeta defaultNodeMeta
       $ runLLMWithTeaching env
@@ -395,6 +402,7 @@ handleFindCallersTool logger lspSession maybeTuiHandle reqId args = do
 
       resultOrErr <- try $ runM
         $ runLog Debug
+        $ runGeminiIO
         $ runTUIOrMock maybeTuiHandle
         $ runLSP lspSession
         $ runReturn (findCallersLogic fcArgs)
@@ -425,6 +433,7 @@ handleShowFieldsTool logger lspSession maybeTuiHandle reqId args = do
 
       resultOrErr <- try $ runM
         $ runLog Debug
+        $ runGeminiIO
         $ runTUIOrMock maybeTuiHandle
         $ runLSP lspSession
         $ runReturn (showFieldsLogic sfArgs)
@@ -454,6 +463,7 @@ handleShowConstructorsTool logger lspSession maybeTuiHandle reqId args = do
 
       resultOrErr <- try $ runM
         $ runLog Debug
+        $ runGeminiIO
         $ runTUIOrMock maybeTuiHandle
         $ runLSP lspSession
         $ runReturn (showConstructorsLogic scArgs)

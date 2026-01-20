@@ -56,6 +56,13 @@ module Tidepool.Graph.Types
   , CloudflareAI
   , NativeAnthropic
 
+    -- * Gemini Annotation
+  , Gemini
+  , GeminiModel(..)
+  , Flash
+  , Pro
+  , Ultra
+
     -- * ClaudeCode Annotation
   , ClaudeCode
   , ModelChoice(..)
@@ -90,6 +97,17 @@ import Data.Aeson (Value)
 import Data.Kind (Type)
 import Data.Text (Text)
 import GHC.TypeLits (Symbol)
+
+import Tidepool.Effect.Gemini (GeminiModel(..))
+
+-- | Marks an LLM node as executed via Gemini CLI subprocess.
+type Gemini :: GeminiModel -> Type
+data Gemini model
+
+-- | Type-level aliases for Gemini models.
+type Flash = 'Flash
+type Pro = 'Pro
+type Ultra = 'Ultra
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- NODE KIND
