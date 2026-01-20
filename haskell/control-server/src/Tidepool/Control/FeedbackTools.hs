@@ -17,6 +17,7 @@ module Tidepool.Control.FeedbackTools
   , TokenCategoryEstimate(..)
   ) where
 
+import Control.Exception (try, SomeException, displayException)
 import Control.Monad.Freer (Eff, sendM, LastMember)
 import Data.Aeson (FromJSON(..), ToJSON(..), encode)
 import qualified Data.ByteString.Lazy as LBS
@@ -124,13 +125,21 @@ registerFeedbackLogic args = do
   let relativePath = ".tidepool" </> "feedback" </> T.unpack args.rfaBeadId <> ".json"
   
   -- Perform IO to write the file
-  result <- sendM $ do
+  result <- sendM $ try $ do
     createDirectoryIfMissing True (takeDirectory relativePath)
     LBS.writeFile relativePath (encode args)
     pure relativePath
 
-  pure $ gotoExit RegisterFeedbackResult 
-    { rfrSuccess = True 
-    , rfrPath = T.pack result
-    , rfrError = Nothing
-    }
+  case result of
+    Left (e :: SomeException) -> 
+      pure $ gotoExit RegisterFeedbackResult 
+        { rfrSuccess = False
+        , rfrPath = ""
+        , rfrError = Just $ T.pack $ displayException e
+        }
+    Right path ->
+      pure $ gotoExit RegisterFeedbackResult 
+        { rfrSuccess = True 
+        , rfrPath = T.pack path
+        , rfrError = Nothing
+        }

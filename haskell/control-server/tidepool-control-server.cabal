@@ -304,6 +304,9 @@ test-suite feedback-tools-test
         tidepool-core,
         text >= 2.0 && < 3,
         aeson,
+        freer-simple,
+        directory,
+        filepath,
         tasty,
         tasty-hunit
     hs-source-dirs:   test
