@@ -7,9 +7,12 @@ module Main where
 
 import Data.Aeson (toJSON, fromJSON, Result(..))
 import Data.Proxy (Proxy(..))
+import qualified Data.Map as Map
+import Data.Time.Clock (getCurrentTime)
 import Test.Tasty
 import Test.Tasty.HUnit
 import Tidepool.Control.ExoTools
+import Tidepool.Effects.GitHub (ReviewComment(..))
 import Tidepool.Graph.MCPReify (reifyMCPTools, MCPToolInfo(..))
 
 main :: IO ()
@@ -21,6 +24,8 @@ tests = testGroup "ExoTools"
   , testCase "pre_commit_check result serialization" test_serialization_pcc
   , testCase "file_pr is discoverable" test_discovery_fpr
   , testCase "file_pr result serialization" test_serialization_fpr
+  , testCase "pr_review_status is discoverable" test_pr_discovery
+  , testCase "pr_review_status result serialization" test_pr_serialization
   ]
 
 test_discovery_pcc :: Assertion
@@ -62,3 +67,20 @@ test_serialization_fpr = do
   case fromJSON @FilePRResult jsonError of
     Success res' -> assertEqual "Should roundtrip error" resError res'
     Error err -> assertFailure $ "Failed to parse error: " ++ err
+
+test_pr_discovery :: Assertion
+test_pr_discovery = do
+  let prTools = reifyMCPTools (Proxy @PrReviewStatusGraph)
+  assertEqual "Should find one tool" 1 (length prTools)
+  let tool = head prTools
+  assertEqual "Name should be pr_review_status" "pr_review_status" tool.mtdName
+
+test_pr_serialization :: Assertion
+test_pr_serialization = do
+  now <- getCurrentTime
+  let comment = ReviewComment "Copilot" "Looks good" (Just "Main.hs") (Just 10) "COMMENTED" now
+  let res = PrReviewStatusResult (Map.fromList [("Copilot", [comment])])
+  let json = toJSON res
+  case fromJSON @PrReviewStatusResult json of
+    Success res' -> assertEqual "Should roundtrip" res res'
+    Error err -> assertFailure $ "Failed to parse: " ++ err

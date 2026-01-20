@@ -36,6 +36,7 @@ module Tidepool.GitHub.Interpreter
   , ghPrList
   , ghPrView
   , ghPrCreate
+  , ghPrReviews
   , ghAuthCheck
   ) where
 
@@ -62,6 +63,7 @@ import Tidepool.Effects.GitHub
   , Repo(..)
   , PRCreateSpec(..)
   , PRUrl(..)
+  , ReviewComment(..)
   )
 
 
@@ -112,6 +114,9 @@ runGitHubIO config = interpret $ \case
 
   ListPullRequests (Repo repo) filt ->
     sendM $ ghPrList config repo filt
+
+  GetPullRequestReviews (Repo repo) num ->
+    sendM $ ghPrReviews config repo num
 
   -- Auth
   CheckAuth ->
@@ -258,6 +263,24 @@ ghPrCreate config spec = do
       error $ "Failed to create PR: " <> T.unpack err
     Right output ->
       pure $ PRUrl $ T.strip output
+
+-- | Get pull request review comments using gh CLI.
+ghPrReviews :: GitHubConfig -> Text -> Int -> IO [ReviewComment]
+ghPrReviews config repo num = do
+  -- Calls: gh api repos/{owner}/{repo}/pulls/{num}/comments
+  let args = ["api", "repos/" <> T.unpack repo <> "/pulls/" <> show num <> "/comments"]
+  
+  result <- runGhCommand config args
+  case result of
+    Left err -> do
+      logDebug config $ "ghPrReviews: gh command failed: " <> T.unpack err
+      pure []
+    Right output ->
+      case eitherDecode (LBS.fromStrict $ TE.encodeUtf8 output) of
+        Right comments -> pure comments
+        Left decodeErr -> do
+          logDebug config $ "ghPrReviews: JSON decode failed: " <> decodeErr
+          pure []
 
 
 -- ════════════════════════════════════════════════════════════════════════════

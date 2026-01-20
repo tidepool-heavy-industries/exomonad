@@ -27,6 +27,7 @@ module Tidepool.Effects.GitHub
   , listIssues
   , getPullRequest
   , listPullRequests
+  , getPullRequestReviews
   , checkAuth
 
     -- * Types - Core
@@ -49,6 +50,7 @@ module Tidepool.Effects.GitHub
   , ReviewState(..)
   , PRCreateSpec(..)
   , PRUrl(..)
+  , ReviewComment(..)
 
     -- * Types - Legacy (kept for compatibility)
   , IssueUrl(..)
@@ -58,6 +60,7 @@ module Tidepool.Effects.GitHub
   , runGitHubStub
   ) where
 
+import Control.Applicative ((<|>))
 import Data.Text (Text)
 import qualified Data.Text
 import Data.Time (UTCTime)
@@ -226,6 +229,37 @@ instance FromJSON Review where
       <*> v .: "body"
       <*> v .: "state"
 
+-- | Review comment (on code).
+data ReviewComment = ReviewComment
+  { rcAuthor    :: Text
+  , rcBody      :: Text
+  , rcPath      :: Maybe Text
+  , rcLine      :: Maybe Int
+  , rcState     :: Text
+  , rcCreatedAt :: UTCTime
+  }
+  deriving (Show, Eq, Generic, ToJSON)
+
+instance FromJSON ReviewComment where
+  parseJSON = withObject "ReviewComment" $ \v -> do
+    -- Handle both "user": { "login": "..." } (GitHub API) and "author": "..." (internal/tool result)
+    author <- (v .: "user" >>= (.: "login"))
+              <|> (v .: "author")
+              <|> (v .: "rcAuthor")
+
+    -- Handle both "created_at" (GitHub API) and "createdAt" or "rcCreatedAt"
+    createdAt <- v .: "created_at"
+                 <|> v .: "createdAt"
+                 <|> v .: "rcCreatedAt"
+
+    ReviewComment
+      <$> pure author
+      <*> (v .: "body" <|> v .: "rcBody")
+      <*> (v .: "path" <|> v .: "rcPath" <|> pure Nothing)
+      <*> (v .: "line" <|> v .: "rcLine" <|> pure Nothing)
+      <*> (v .: "state" <|> v .: "rcState" <|> pure "COMMENTED")
+      <*> pure createdAt
+
 -- | GitHub pull request.
 data PullRequest = PullRequest
   { prNumber      :: Int
@@ -327,6 +361,8 @@ data GitHub r where
     -- ^ Get PR by number. Bool = include comments and reviews.
   ListPullRequests  :: Repo -> PRFilter -> GitHub [PullRequest]
     -- ^ List PRs with filter.
+  GetPullRequestReviews :: Repo -> Int -> GitHub [ReviewComment]
+    -- ^ Get review comments for a PR.
 
   -- Auth
   CheckAuth :: GitHub Bool
@@ -352,6 +388,9 @@ getPullRequest repo number includeDetails = send (GetPullRequest repo number inc
 
 listPullRequests :: Member GitHub effs => Repo -> PRFilter -> Eff effs [PullRequest]
 listPullRequests repo filt = send (ListPullRequests repo filt)
+
+getPullRequestReviews :: Member GitHub effs => Repo -> Int -> Eff effs [ReviewComment]
+getPullRequestReviews repo number = send (GetPullRequestReviews repo number)
 
 checkAuth :: Member GitHub effs => Eff effs Bool
 checkAuth = send CheckAuth
@@ -389,6 +428,10 @@ runGitHubStub = interpret $ \case
 
   ListPullRequests (Repo repo) _ -> do
     logInfo $ "[GitHub:stub] ListPullRequests called: " <> repo
+    pure []
+
+  GetPullRequestReviews (Repo repo) num -> do
+    logInfo $ "[GitHub:stub] GetPullRequestReviews called: " <> repo <> " #" <> showT num
     pure []
 
   CheckAuth -> do
