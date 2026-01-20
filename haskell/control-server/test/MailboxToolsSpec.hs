@@ -130,6 +130,7 @@ defaultBead bid = BeadInfo
   , biCreatedAt = Nothing
   , biCreatedBy = Nothing
   , biUpdatedAt = Nothing
+  , biClosedAt = Nothing
   , biParent = Nothing
   , biLabels = []
   , biDependencies = []

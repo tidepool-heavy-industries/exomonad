@@ -60,10 +60,12 @@ import Tidepool.Control.PMTools
   ( pmApproveExpansionLogic, PmApproveExpansionArgs(..), PmApproveExpansionResult(..),
     pmPrioritizeLogic, PmPrioritizeArgs(..), PmPrioritizeResult(..), PrioritizeResultItem(..)
   )
+import Tidepool.Control.PMStatus
+  ( pmStatusLogic, PmStatusArgs(..) )
 import Tidepool.Control.PMPropose (pmProposeLogic, PMProposeArgs(..), PMProposeResult(..))
 import Tidepool.Control.MailboxTools
   ( sendMessageLogic, SendRequest(..)
-  , checkInboxLogic, CheckInboxArgs(..)
+  , checkInboxLogic
   , readMessageLogic, ReadMessageArgs(..)
   , markReadLogic, MarkReadArgs(..)
   )
@@ -136,6 +138,7 @@ handleMcpTool logger config lspSession maybeTuiHandle reqId toolName args = do
     "pr_to_bead" -> handlePrToBeadTool logger reqId args
     "pm_approve_expansion" -> handlePmApproveExpansionTool logger lspSession reqId args
     "pm_prioritize" -> handlePmPrioritizeTool logger reqId args
+    "pm_status" -> handlePmStatusTool logger reqId args
     "pm_propose" -> handlePMProposeTool logger reqId args
     "pm_review_dag" -> handlePmReviewDagTool logger reqId args
 
@@ -602,6 +605,35 @@ handlePmApproveExpansionTool logger _lspSession reqId args = do
 
         Right result -> do
           logInfo logger $ "[MCP:" <> reqId <> "] Decision processed: " <> result.paerNewStatus
+          pure $ mcpToolSuccess reqId (toJSON result)
+
+-- | Handle the pm_status tool.
+--
+-- Runs the PmStatusGraph logic to calculate sprint health metrics.
+handlePmStatusTool :: Logger -> Text -> Value -> IO ControlResponse
+handlePmStatusTool logger reqId args = do
+  case fromJSON args of
+    Error err -> do
+      logError logger $ "  parse error: " <> T.pack err
+      pure $ mcpToolError reqId $ "Invalid pm_status arguments: " <> T.pack err
+
+    Success psArgs -> do
+      logDebug logger $ "  period_days=" <> T.pack (show psArgs.psaPeriodDays)
+
+      resultOrErr <- try $ runM
+        $ runLog Debug
+        $ runTime
+        $ runBDIO defaultBDConfig
+        $ runGitHubIO defaultGitHubConfig
+        $ fmap unwrapSingleChoice (pmStatusLogic psArgs)
+
+      case resultOrErr of
+        Left (e :: SomeException) -> do
+          logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId $ "pm_status failed: " <> T.pack (displayException e)
+
+        Right result -> do
+          logInfo logger $ "[MCP:" <> reqId <> "] Status metrics calculated"
           pure $ mcpToolSuccess reqId (toJSON result)
 
 -- | Handle the pm_propose tool.

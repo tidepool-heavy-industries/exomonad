@@ -54,6 +54,7 @@ import Tidepool.Control.ExoTools
 import Tidepool.Control.PMTools
   ( PmApproveExpansionGraph, PmPrioritizeGraph )
 import Tidepool.Control.PMReviewDAG (PmReviewDagGraph)
+import Tidepool.Control.PMStatus (PmStatusGraph)
 import Tidepool.Control.PMPropose (PMProposeGraph)
 import Tidepool.Control.MailboxTools
   ( SendMessageGraph, CheckInboxGraph, ReadMessageGraph, MarkReadGraph )
@@ -954,8 +955,8 @@ exportMCPTools logger = do
   let saTools = reifyMCPTools (Proxy @SpawnAgentsGraph)
   let fpTools = reifyMCPTools (Proxy @FilePRGraph)
   let paeTools = reifyMCPTools (Proxy @PmApproveExpansionGraph)
-  let pmPriTools = reifyMCPTools (Proxy @PmPrioritizeGraph)
   let pmRevTools = reifyMCPTools (Proxy @PmReviewDagGraph)
+  let pmStatTools = reifyMCPTools (Proxy @PmStatusGraph)
   let pmProTools = reifyMCPTools (Proxy @PMProposeGraph)
   let prTools = reifyMCPTools (Proxy @PrReviewStatusGraph)
 
@@ -974,7 +975,7 @@ exportMCPTools logger = do
   logDebug logger $ "[MCP Discovery] ReadMessageGraph: " <> T.pack (show (length rmTools)) <> " tools"
   logDebug logger $ "[MCP Discovery] MarkReadGraph: " <> T.pack (show (length mrTools)) <> " tools"
 
-  let allTools = concat [fcTools, sfTools, scTools, caTools, soTools, rgTools, dgTools, esTools, ecTools, erTools, saTools, fpTools, paeTools, pmPriTools, pmRevTools, pmProTools, prTools, smTools, ciTools, rmTools, mrTools]
+  let allTools = concat [fcTools, sfTools, scTools, caTools, soTools, rgTools, dgTools, esTools, ecTools, erTools, saTools, fpTools, paeTools, pmPriTools, pmRevTools, pmStatTools, pmProTools, prTools, smTools, ciTools, rmTools, mrTools]
   logInfo logger $ "[MCP Discovery] Total: " <> T.pack (show (length allTools)) <> " tools discovered"
 
   -- Log tool names with entry points for verification

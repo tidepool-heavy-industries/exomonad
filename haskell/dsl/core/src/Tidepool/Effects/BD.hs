@@ -221,6 +221,7 @@ data BeadInfo = BeadInfo
   , biCreatedAt   :: Maybe UTCTime
   , biCreatedBy   :: Maybe Text
   , biUpdatedAt   :: Maybe UTCTime
+  , biClosedAt    :: Maybe UTCTime
   , biParent      :: Maybe Text
   , biLabels      :: [Text]
   , biDependencies :: [DependencyInfo]
@@ -240,6 +241,7 @@ instance ToJSON BeadInfo where
     , "created_at"   .= b.biCreatedAt
     , "created_by"   .= b.biCreatedBy
     , "updated_at"   .= b.biUpdatedAt
+    , "closed_at"    .= b.biClosedAt
     , "parent"       .= b.biParent
     , "labels"       .= b.biLabels
     , "dependencies" .= b.biDependencies
@@ -259,6 +261,7 @@ instance FromJSON BeadInfo where
       <*> v .:? "created_at"
       <*> v .:? "created_by"
       <*> v .:? "updated_at"
+      <*> v .:? "closed_at"
       <*> v .:? "parent"
       <*> v .:? "labels" .!= []
       <*> v .:? "dependencies" .!= []
