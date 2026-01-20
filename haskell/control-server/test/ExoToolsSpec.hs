@@ -24,6 +24,10 @@ tests = testGroup "ExoTools"
   , testCase "pre_commit_check result serialization" test_serialization_pcc
   , testCase "file_pr is discoverable" test_discovery_fpr
   , testCase "file_pr result serialization" test_serialization_fpr
+  , testCase "bead_to_pr is discoverable" test_discovery_btp
+  , testCase "bead_to_pr result serialization" test_serialization_btp
+  , testCase "pr_to_bead is discoverable" test_discovery_ptb
+  , testCase "pr_to_bead result serialization" test_serialization_ptb
   , testCase "pr_review_status is discoverable" test_pr_discovery
   , testCase "pr_review_status result serialization" test_pr_serialization
   ]
@@ -67,6 +71,37 @@ test_serialization_fpr = do
   case fromJSON @FilePRResult jsonError of
     Success res' -> assertEqual "Should roundtrip error" resError res'
     Error err -> assertFailure $ "Failed to parse error: " ++ err
+
+test_discovery_btp :: Assertion
+test_discovery_btp = do
+  let btpTools = reifyMCPTools (Proxy @BeadToPrGraph)
+  assertEqual "Should find one tool" 1 (length btpTools)
+  let tool = head btpTools
+  assertEqual "Name should be bead_to_pr" "bead_to_pr" tool.mtdName
+
+test_serialization_btp :: Assertion
+test_serialization_btp = do
+  let info = PRInfo 123 "http://pr.url" "OPEN" "Fix bug"
+  let res = BeadToPrResult (Just info)
+  let json = toJSON res
+  case fromJSON @BeadToPrResult json of
+    Success res' -> assertEqual "Should roundtrip" res res'
+    Error err -> assertFailure $ "Failed to parse: " ++ err
+
+test_discovery_ptb :: Assertion
+test_discovery_ptb = do
+  let ptbTools = reifyMCPTools (Proxy @PrToBeadGraph)
+  assertEqual "Should find one tool" 1 (length ptbTools)
+  let tool = head ptbTools
+  assertEqual "Name should be pr_to_bead" "pr_to_bead" tool.mtdName
+
+test_serialization_ptb :: Assertion
+test_serialization_ptb = do
+  let res = PrToBeadResult (Just "tidepool-123")
+  let json = toJSON res
+  case fromJSON @PrToBeadResult json of
+    Success res' -> assertEqual "Should roundtrip" res res'
+    Error err -> assertFailure $ "Failed to parse: " ++ err
 
 test_pr_discovery :: Assertion
 test_pr_discovery = do

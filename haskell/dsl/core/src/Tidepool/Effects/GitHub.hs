@@ -310,15 +310,16 @@ instance FromJSON PullRequest where
 
 -- | Filter for listing pull requests.
 data PRFilter = PRFilter
-  { pfState :: Maybe PRState
-  , pfBase  :: Maybe Text
-  , pfLimit :: Maybe Int
+  { pfState  :: Maybe PRState
+  , pfBase   :: Maybe Text
+  , pfLimit  :: Maybe Int
+  , pfSearch :: Maybe Text
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
 -- | Default PR filter (no filtering, no limit).
 defaultPRFilter :: PRFilter
-defaultPRFilter = PRFilter Nothing Nothing Nothing
+defaultPRFilter = PRFilter Nothing Nothing Nothing Nothing
 
 -- | Spec for creating a PR.
 data PRCreateSpec = PRCreateSpec
