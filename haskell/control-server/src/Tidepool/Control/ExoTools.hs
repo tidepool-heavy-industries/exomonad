@@ -54,7 +54,7 @@ module Tidepool.Control.ExoTools
 
 import Control.Applicative ((<|>))
 import Control.Monad (forM)
-import Control.Monad.Freer (Eff, Member, LastMember, sendM)
+import Control.Monad.Freer (Eff, Member)
 import Data.Aeson (FromJSON(..), ToJSON(..), (.:), (.:?), (.=), object, withObject)
 import Data.Char (isAlphaNum, isSpace)
 import Data.Either (partitionEithers)
@@ -63,7 +63,6 @@ import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
-import System.Directory (getHomeDirectory)
 import System.FilePath ((</>))
 
 import Tidepool.Effects.BD (BD, BeadInfo(..), BeadStatus(..), getBead, closeBead, sync)
@@ -517,7 +516,7 @@ data SpawnAgentsGraph mode = SpawnAgentsGraph
 
   , saRun :: mode :- LogicNode
       :@ Input SpawnAgentsArgs
-      :@ UsesEffects '[BD, Worktree, Goto Exit SpawnAgentsResult]
+      :@ UsesEffects '[BD, Git, Worktree, Goto Exit SpawnAgentsResult]
 
   , saExit :: mode :- ExitNode SpawnAgentsResult
   }
@@ -525,7 +524,7 @@ data SpawnAgentsGraph mode = SpawnAgentsGraph
 
 -- | Handlers for spawn_agents graph.
 spawnAgentsHandlers
-  :: (Member BD es, Member Worktree es, LastMember IO es)
+  :: (Member BD es, Member Git es, Member Worktree es)
   => SpawnAgentsGraph (AsHandler es)
 spawnAgentsHandlers = SpawnAgentsGraph
   { saEntry = ()
@@ -535,11 +534,13 @@ spawnAgentsHandlers = SpawnAgentsGraph
 
 -- | Core logic for spawn_agents.
 spawnAgentsLogic
-  :: (Member BD es, Member Worktree es, LastMember IO es)
+  :: (Member BD es, Member Git es, Member Worktree es)
   => SpawnAgentsArgs
   -> Eff es (GotoChoice '[To Exit SpawnAgentsResult])
 spawnAgentsLogic args = do
-  homeDir <- sendM getHomeDirectory
+  mWtInfo <- getWorktreeInfo
+  let repoRoot = maybe "." (\wi -> wi.wiRepoRoot) mWtInfo
+
   results <- forM args.saaBeadIds $ \shortId -> do
     -- Normalize bead ID (ensure it starts with tidepool-)
     let fullId = if "tidepool-" `T.isPrefixOf` shortId
@@ -555,7 +556,8 @@ spawnAgentsLogic args = do
           else do
             let slug = slugify bead.biTitle
                 branchName = "bd-" <> shortId <> "/" <> slug
-                targetPath = homeDir </> ".worktrees/tidepool/bd-" <> T.unpack shortId <> "-" <> T.unpack slug
+                -- Resolve absolute path based on repo root
+                targetPath = repoRoot </> ".worktrees" </> "tidepool" </> "bd-" <> T.unpack shortId <> "-" <> T.unpack slug
                 spec = WorktreeSpec
                   { wsBaseName = "bd-" <> shortId
                   , wsFromBranch = Just "origin/main"
