@@ -1,4 +1,4 @@
-SessionStart:clear hook success: # Beads Workflow Context
+# Beads Workflow Context
 
 > **Context Recovery**: Run `bd prime` after compaction, clear, or new session
 > Hooks auto-call this in Claude Code when .beads/ detected
@@ -122,8 +122,8 @@ bd dep add beads-yyy beads-xxx  # Tests depend on Feature (Feature blocks tests)
 4. **COMMIT** with message: `[{{ bead.id }}] <description>`
 5. **PUSH** and file PR:
    ```bash
-   git push -u origin {{ branch }}
-   gh pr create --repo tidepool-heavy-industries/tidepool --head {{ branch }} \
+   git push -u origin {{ branch | default("(unknown)") }}
+   gh pr create --repo tidepool-heavy-industries/tidepool --head {{ branch | default("(unknown)") }} \
      --title "[{{ bead.id }}] <title>" --body "Closes {{ bead.id }}"
    ```
 

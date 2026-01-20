@@ -85,9 +85,10 @@ instance ToGVal (Run SourcePos (Writer Text) Text) BeadContext where
     ]
 
 -- | ToGVal instance for dependency context.
+-- Keys must match Haskell field names for TH validation.
 instance ToGVal (Run SourcePos (Writer Text) Text) DepContext where
   toGVal dc = dict
-    [ "id" ~> dc.dep_id
-    , "title" ~> dc.dep_title
-    , "priority" ~> dc.dep_priority
+    [ "dep_id" ~> dc.dep_id
+    , "dep_title" ~> dc.dep_title
+    , "dep_priority" ~> dc.dep_priority
     ]
