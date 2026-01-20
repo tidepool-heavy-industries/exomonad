@@ -210,7 +210,7 @@ logMessage logger = \case
   ToolsListRequest ->
     logDebug logger "[MCP] tools/list request"
   Ping ->
-    logDebug logger "[PING]"
+    pure ()  -- Skip logging health check pings
 
 -- | Log outgoing response.
 logResponse :: Logger -> ControlResponse -> IO ()
@@ -230,4 +230,4 @@ logResponse logger = \case
   ToolsListResponse tools ->
     logDebug logger $ "[MCP] -> tools/list: " <> T.pack (show (length tools)) <> " tools"
   Pong ->
-    logDebug logger "[PONG]"
+    pure ()  -- Skip logging health check pongs
