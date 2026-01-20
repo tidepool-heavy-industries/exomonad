@@ -185,10 +185,11 @@ Human-driven Claude Code sessions augmented with Tidepool. **Not headless automa
             ▼                                  │
 ┌─────────────────────────────────────────┐    │
 │ mantle-agent (Rust)                     │    │
-│  • hook: CC hooks → TCP (7432)          │    │
-│  • mcp: JSON-RPC stdio → TCP (7432)     │    │
+│  • hook: CC hooks → Unix Socket         │    │
+│  • mcp: JSON-RPC stdio → Unix Socket    │    │
 └───────────┬─────────────────────────────┘    │
-            │ TCP NDJSON (port 7432)           │
+            │ Unix Socket NDJSON               │
+            │ .tidepool/sockets/control.sock   │
             ▼                                  │
 ┌─────────────────────────────────────────┐    │
 │ control-server (Haskell)                │    │
@@ -197,8 +198,8 @@ Human-driven Claude Code sessions augmented with Tidepool. **Not headless automa
 │  • MCP Handler: 4 tools (auto-discovery)│    │
 │  • TUI Handler: UISpec ↔ Interaction    │◄───┤
 └─────────────────────────────────────────┘    │
-                                               │ TCP NDJSON (7433)
-┌──────────────────────────────────────────────┘
+                                               │ Unix Socket NDJSON
+┌──────────────────────────────────────────────┘ .tidepool/sockets/tui.sock
 │
 ▼
 ┌─────────────────────────────────────────┐
@@ -214,8 +215,8 @@ Human-driven Claude Code sessions augmented with Tidepool. **Not headless automa
 | Component | Location | Purpose |
 |-----------|----------|---------|
 | **mantle-agent** | `rust/mantle-agent/` | Hook/MCP forwarding to control server |
-| **control-server** | `haskell/control-server/` | Haskell TCP server with LSP + MCP tools (find_callers, show_fields, show_constructors, teach-graph) + TUI handler |
-| **tui-sidebar** | `rust/tui-sidebar/` | Rust TUI: renders UISpec, captures Interaction, TCP 7433 server |
+| **control-server** | `haskell/control-server/` | Haskell server with LSP + MCP tools + TUI handler |
+| **tui-sidebar** | `rust/tui-sidebar/` | Rust TUI: renders UISpec, captures Interaction |
 | **Protocol types** | `rust/mantle-shared/protocol.rs` + `haskell/control-server/Protocol.hs` | Bidirectional message types (must match exactly) |
 
 ### Data Flow
@@ -225,7 +226,7 @@ Human-driven Claude Code sessions augmented with Tidepool. **Not headless automa
 1. Claude Code wants to call Write tool
 2. Generates hook JSON on stdin
 3. mantle-agent hook pre-tool-use reads stdin
-4. Forwards ControlMessage::HookEvent via TCP
+4. Forwards ControlMessage::HookEvent via Unix Socket
 5. control-server receives, routes to handleHook
 6. Returns HookResponse (allow/deny)
 7. mantle-agent prints to stdout
@@ -239,7 +240,7 @@ Tools: find_callers, show_fields, show_constructors, teach-graph
 1. User asks question requiring code intelligence
 2. Claude plans to call MCP tool (e.g., teach-graph, find_callers)
 3. Claude Code spawns mantle-agent mcp (JSON-RPC stdio)
-4. mantle-agent forwards ControlMessage::McpToolCall via TCP
+4. mantle-agent forwards ControlMessage::McpToolCall via Unix Socket
 5. control-server routes to appropriate handler
    - Tier 1 (LSP-only): find_callers, show_fields, show_constructors
    - Tier 2 (LLM-enhanced): teach-graph (LSP + Haiku selection)
@@ -268,7 +269,7 @@ In `.claude/settings.local.json`:
 }
 ```
 
-**Note:** MCP server configuration uses `.mcp.json` (plugin-based approach). Claude spawns `mantle-agent mcp` directly, which connects to control-server via TCP.
+**Note:** MCP server configuration uses `.mcp.json` (plugin-based approach). Claude spawns `mantle-agent mcp` directly, which connects to control-server via Unix socket.
 
 ### Running
 
@@ -286,16 +287,16 @@ This launches the Hybrid Tidepool setup as a **TUI IDE** wrapping Claude Code:
   - Pane 2 (top-right): process-compose dashboard (infrastructure monitoring)
   - Pane 3 (bottom-right): control-server logs (backend telemetry)
 
-Claude Code starts automatically in the tidepool directory. MCP tools connect to control-server via TCP (port 7432).
+Claude Code starts automatically in the tidepool directory. MCP tools connect to control-server via Unix socket.
 
 **Note:** If MCP shows "failed" on startup (control-server not yet ready), use `/mcp` → `Reconnect` once services are healthy.
 
 **Orchestration features (process-compose):**
-- HTTP health checks (control-server port 7434)
+- Socket-based health checks (nc -zU)
 - Dependency DAG: tui-sidebar waits for control-server health
 - Automatic restart on failure with exponential backoff
 - Centralized logging to `.tidepool/logs/`
-- Service readiness probes (HTTP, TCP port)
+- Service readiness probes
 
 **Manual process-compose (without Zellij):**
 ```bash
@@ -316,8 +317,8 @@ claude-code
 GEMMA_ENDPOINT=http://localhost:11434 cabal run tidepool-control-server
 
 # Terminal 2: Wait for health check, then start tui-sidebar
-while ! curl -sf http://localhost:7434 > /dev/null; do sleep 0.5; done
-cargo run -p tui-sidebar --release
+while ! nc -zU .tidepool/sockets/control.sock; do sleep 0.5; done
+cargo run -p tui-sidebar -- --socket .tidepool/sockets/tui.sock
 
 # Terminal 3: Start Claude Code
 cd /path/to/project
@@ -334,10 +335,11 @@ Understanding the runtime stack for debugging and extension.
 
 | Port | Service | Protocol | Purpose |
 |------|---------|----------|---------|
-| 7432 | control-server | TCP NDJSON | Main protocol (mantle-agent ↔ control-server) |
-| 7433 | tui-sidebar | TCP NDJSON | TUI interaction events |
-| 7434 | control-server | HTTP | Health endpoint (process-compose probes) |
 | 8080 | process-compose | HTTP | API (stale session detection) |
+
+**Sockets:**
+- `.tidepool/sockets/control.sock`: Main protocol
+- `.tidepool/sockets/tui.sock`: TUI sidebar
 
 #### Config Files
 
@@ -402,23 +404,21 @@ All services terminated
 
 #### Health Probes
 
-**control-server** (HTTP):
+**control-server** (Unix Socket):
 ```yaml
 readiness_probe:
-  http_get:
-    host: 127.0.0.1
-    port: 7434
-    path: /
+  exec:
+    command: "nc -zU .tidepool/sockets/control.sock"
   initial_delay_seconds: 2
   period_seconds: 1
   failure_threshold: 30
 ```
 
-**tui-sidebar** (TCP port check):
+**tui-sidebar** (Unix Socket):
 ```yaml
 readiness_probe:
   exec:
-    command: "nc -z localhost 7433"
+    command: "nc -zU .tidepool/sockets/tui.sock"
 ```
 
 #### Dependency DAG

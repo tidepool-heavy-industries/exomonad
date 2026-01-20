@@ -6,31 +6,36 @@ log_level: info
 
 # Process definitions
 processes:
-  # ----------------------------------------------------------------
-  # SERVICE: Control Server (Haskell)
-  # ----------------------------------------------------------------
+  # 1. Control Server (Haskell)
+  # Orchestrates tools, graph execution, and MCP
   control-server:
-    command: cabal run tidepool-control-server
-
-    environment:
-      - GEMMA_ENDPOINT=http://localhost:11434
-      - RUST_LOG=info
-      - TIDEPOOL_PROJECT_DIR=${PWD}
-
-    # HTTP health endpoint check
-    readiness_probe:
-      http_get:
-        host: 127.0.0.1
-        port: 7434
-        path: /
-      initial_delay_seconds: 2
-      period_seconds: 1
-      timeout_seconds: 30
-      failure_threshold: 30
-
-    # Restart on failure with backoff
+    command: "cabal run tidepool-control-server -- +RTS -N4"
     availability:
-      restart: on_failure
-      backoff_seconds: 2
-      max_restarts: 3
+      restart: "on_failure"
+    readiness_probe:
+      # Connect to Unix socket
+      exec:
+        command: "nc -zU .tidepool/sockets/control.sock"
+      initial_delay_seconds: 2
+      period_seconds: 2
+      timeout_seconds: 1
+      success_threshold: 1
+      failure_threshold: 10
+    environment:
+      - "TIDEPOOL_PROJECT_DIR=."
+      - "TIDEPOOL_CONTROL_SOCKET=.tidepool/sockets/control.sock"
+      - "TIDEPOOL_TUI_SOCKET=.tidepool/sockets/tui.sock"
+
+  # 2. TUI Sidebar (Rust)
+  # Renders interactive UIs for graph handlers
+  tui-sidebar:
+    command: "cargo run --bin tui-sidebar -- --socket .tidepool/sockets/tui.sock"
+    availability:
+      restart: "on_failure"
+    readiness_probe:
+      exec:
+        command: "nc -zU .tidepool/sockets/tui.sock"
+      initial_delay_seconds: 1
+      period_seconds: 1
+      timeout_seconds: 1
 

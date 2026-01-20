@@ -8,7 +8,7 @@ use crate::error::{MantleError, Result};
 use crate::protocol::{
     ControlMessage, ControlResponse, HookInput, HookOutput, HookSpecificOutput, PermissionDecision,
 };
-use crate::socket::{control_server_addr, ControlSocket};
+use crate::socket::{control_socket_path, ControlSocket};
 use clap::ValueEnum;
 use std::io::Read;
 use tracing::{debug, error, warn};
@@ -88,18 +88,16 @@ pub fn handle_hook(event_type: HookEventType) -> Result<()> {
         );
     }
 
-    // Get control server address from env vars
-    let Some((host, port)) = control_server_addr() else {
-        return handle_server_unavailable(event_type, "No control server configured");
-    };
+    // Get control server socket path
+    let path = control_socket_path();
 
-    // Connect to control server via TCP
-    let mut socket = match ControlSocket::connect(&host, port) {
+    // Connect to control server via Unix socket
+    let mut socket = match ControlSocket::connect(&path) {
         Ok(s) => s,
         Err(e) => {
             return handle_server_unavailable(
                 event_type,
-                &format!("Failed to connect to control server: {}", e),
+                &format!("Failed to connect to control server at {}: {}", path.display(), e),
             );
         }
     };
@@ -155,8 +153,7 @@ fn handle_server_unavailable(_event_type: HookEventType, reason: &str) -> Result
     error!(reason, "Control server unavailable (fail-closed)");
     eprintln!("ERROR: {}", reason);
     eprintln!("Control server required.");
-    eprintln!("Set MANTLE_CONTROL_HOST and MANTLE_CONTROL_PORT environment variables.");
-    eprintln!("Example: export MANTLE_CONTROL_HOST=127.0.0.1 MANTLE_CONTROL_PORT=7432");
+    eprintln!("Ensure control server is running and TIDEPOOL_CONTROL_SOCKET is correct.");
     std::process::exit(1);
 }
 

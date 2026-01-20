@@ -28,15 +28,15 @@
 //!
 //! ## Environment Variables
 //!
-//! - `MANTLE_CONTROL_HOST`: Control server host (required)
-//! - `MANTLE_CONTROL_PORT`: Control server port (required)
+//! - `TIDEPOOL_CONTROL_SOCKET`: Path to control server Unix socket (optional, defaults to .tidepool/sockets/control.sock)
 
 use mantle_shared::protocol::{ControlMessage, ControlResponse, McpError};
-use mantle_shared::socket::control_server_addr;
+use mantle_shared::socket::control_socket_path;
 use mantle_shared::ControlSocket;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::io::{self, BufRead, Write};
+use std::path::{Path, PathBuf};
 use tracing::{debug, error, info};
 
 // ============================================================================
@@ -190,17 +190,14 @@ struct ToolResultContent {
 /// This implements fail-fast behavior - if the control server is unreachable,
 /// mantle-agent exits with an error rather than serving an empty tool list.
 fn query_control_server_tools() -> Result<Vec<ToolDefinition>, String> {
-    // Get control server address (REQUIRED)
-    let (host, port) = control_server_addr()
-        .ok_or_else(|| {
-            "MANTLE_CONTROL_HOST/PORT not set - required for tool discovery".to_string()
-        })?;
+    // Get control server socket path
+    let path = control_socket_path();
 
-    info!(host = %host, port = port, "Querying control server for tool definitions");
+    info!(path = %path.display(), "Querying control server for tool definitions");
 
     // Connect to control server
-    let mut socket = ControlSocket::connect(&host, port)
-        .map_err(|e| format!("Failed to connect to control server at {}:{}: {}", host, port, e))?;
+    let mut socket = ControlSocket::connect(&path)
+        .map_err(|e| format!("Failed to connect to control server at {}: {}", path.display(), e))?;
 
     // Send ToolsListRequest
     let message = ControlMessage::ToolsListRequest;
@@ -230,14 +227,14 @@ fn query_control_server_tools() -> Result<Vec<ToolDefinition>, String> {
 /// MCP server state.
 pub struct McpServer {
     tools: Vec<ToolDefinition>,
-    /// Control server address (host, port) for forwarding tool calls.
-    control_addr: Option<(String, u16)>,
+    /// Control server socket path for forwarding tool calls.
+    control_path: Option<PathBuf>,
 }
 
 impl McpServer {
     /// Create a new MCP server with explicit tools.
-    pub fn new(control_addr: Option<(String, u16)>, tools: Vec<ToolDefinition>) -> Self {
-        Self { tools, control_addr }
+    pub fn new(control_path: Option<PathBuf>, tools: Vec<ToolDefinition>) -> Self {
+        Self { tools, control_path }
     }
 
     /// Create a new MCP server by querying the control server for tools.
@@ -246,7 +243,7 @@ impl McpServer {
     /// This implements fail-fast behavior: if the control server is unreachable,
     /// this function panics rather than serving an empty tool list.
     ///
-    /// Control server address is read from `MANTLE_CONTROL_HOST`/`MANTLE_CONTROL_PORT`.
+    /// Control server address is read from `TIDEPOOL_CONTROL_SOCKET` or default.
     pub fn new_from_env() -> Self {
         // Query control server for tools (REQUIRED - fail fast if unavailable)
         let tools = query_control_server_tools()
@@ -254,11 +251,10 @@ impl McpServer {
                 panic!("Failed to discover tools from control server: {}", e);
             });
 
-        // Get control server address (we know it exists since query succeeded)
-        let control_addr = control_server_addr()
-            .expect("Control server address should be available after successful query");
+        // Get control server socket path
+        let control_path = control_socket_path();
 
-        Self::new(Some(control_addr), tools)
+        Self::new(Some(control_path), tools)
     }
 
     /// Run the MCP server on stdio.
@@ -268,7 +264,7 @@ impl McpServer {
         let reader = stdin.lock();
 
         info!(
-            control_addr = ?self.control_addr,
+            control_path = ?self.control_path,
             tool_count = self.tools.len(),
             "MCP server starting on stdio"
         );
@@ -378,8 +374,8 @@ impl McpServer {
         }
 
         // Forward to control server - REQUIRED for decision tools
-        let (host, port) = match &self.control_addr {
-            Some(addr) => addr,
+        let path = match &self.control_path {
+            Some(p) => p,
             None => {
                 error!("No control server configured - cannot forward decision tool call");
                 return JsonRpcResponse::error(
@@ -390,9 +386,9 @@ impl McpServer {
             }
         };
 
-        info!(host = %host, port = port, tool = %call_params.name, "Forwarding tool call to control server");
+        info!(path = %path.display(), tool = %call_params.name, "Forwarding tool call to control server");
 
-        match self.forward_tool_call(host, *port, &call_params) {
+        match self.forward_tool_call(path, &call_params) {
             Ok(Err(err)) => {
                 // MCP error from control socket
                 JsonRpcResponse::error(id, err.code, err.message)
@@ -423,19 +419,18 @@ impl McpServer {
         }
     }
 
-    /// Forward a tool call to the control server via TCP.
+    /// Forward a tool call to the control server via Unix socket.
     ///
     /// Returns the host's result (if successful) or an MCP error.
     /// The result Value contains the host's response text which may include
     /// termination instructions for decision tools.
     fn forward_tool_call(
         &self,
-        host: &str,
-        port: u16,
+        path: &Path,
         params: &ToolCallParams,
     ) -> Result<Result<Value, McpError>, String> {
-        let mut socket = ControlSocket::connect(host, port)
-            .map_err(|e| format!("TCP connect failed: {}", e))?;
+        let mut socket = ControlSocket::connect(path)
+            .map_err(|e| format!("Unix socket connect failed: {}", e))?;
 
         let message = ControlMessage::McpToolCall {
             id: uuid::Uuid::new_v4().to_string(),
@@ -479,8 +474,7 @@ impl McpServer {
 /// This is the main entry point called from the CLI.
 ///
 /// Queries the control server for available MCP tools at startup using:
-/// - MANTLE_CONTROL_HOST: Control server host (required)
-/// - MANTLE_CONTROL_PORT: Control server port (required)
+/// - TIDEPOOL_CONTROL_SOCKET: Control server socket path (optional)
 ///
 /// Implements fail-fast behavior: if the control server is unreachable during
 /// initialization, the server exits with an error. This ensures Claude Code sees
