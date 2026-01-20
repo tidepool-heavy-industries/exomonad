@@ -13,6 +13,7 @@ use tracing::error;
 
 use mantle_shared::commands::HookEventType;
 use mantle_shared::handle_hook;
+use mantle_shared::protocol::Runtime;
 
 mod mcp;
 
@@ -37,6 +38,10 @@ enum Commands {
         /// The hook event type to handle
         #[arg(value_enum)]
         event: HookEventType,
+
+        /// The runtime environment (Claude or Gemini)
+        #[arg(long, default_value = "claude")]
+        runtime: Runtime,
     },
 
     /// Run as MCP stdio server for decision tools
@@ -58,7 +63,7 @@ fn main() {
     let cli = Cli::parse();
 
     let result = match cli.command {
-        Commands::Hook { event } => handle_hook(event),
+        Commands::Hook { event, runtime } => handle_hook(event, runtime),
         Commands::Mcp => mcp::run_mcp_server()
             .map_err(|e| mantle_shared::MantleError::McpServer(e.to_string())),
     };

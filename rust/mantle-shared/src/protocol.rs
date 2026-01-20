@@ -14,8 +14,29 @@
 //! Message formats match Claude Code's hook stdin/stdout schemas exactly
 //! to allow passthrough with minimal transformation.
 
+use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+
+// ============================================================================
+// Protocol Types
+// ============================================================================
+
+/// The runtime environment for the agent.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ValueEnum)]
+#[serde(rename_all = "lowercase")]
+pub enum Runtime {
+    /// Anthropic's Claude Code CLI.
+    Claude,
+    /// Google's Gemini CLI.
+    Gemini,
+}
+
+impl Default for Runtime {
+    fn default() -> Self {
+        Self::Claude
+    }
+}
 
 // ============================================================================
 // Hook Event Types (from Claude Code stdin)
@@ -249,6 +270,9 @@ pub enum ControlMessage {
     HookEvent {
         /// The raw hook input from CC stdin (boxed to reduce enum size).
         input: Box<HookInput>,
+        /// The runtime that emitted the hook.
+        #[serde(default)]
+        runtime: Runtime,
     },
 
     /// MCP tool call from Claude Code.
@@ -366,14 +390,18 @@ impl ControlResponse {
     }
 
     /// Create a blocking error response for a hook.
-    pub fn hook_error(message: String) -> Self {
+    pub fn hook_error(message: String, runtime: Runtime) -> Self {
+        let exit_code = match runtime {
+            Runtime::Claude => 1,
+            Runtime::Gemini => 2,
+        };
         Self::HookResponse {
             output: HookOutput {
                 continue_: false,
                 stop_reason: Some(message),
                 ..Default::default()
             },
-            exit_code: 2,
+            exit_code,
         }
     }
 }
@@ -434,14 +462,16 @@ mod tests {
                 source: None,
                 reason: None,
             }),
+            runtime: Runtime::Claude,
         };
 
         let json = serde_json::to_string(&msg).unwrap();
         let parsed: ControlMessage = serde_json::from_str(&json).unwrap();
 
         match parsed {
-            ControlMessage::HookEvent { input } => {
+            ControlMessage::HookEvent { input, runtime } => {
                 assert_eq!(input.session_id, "test");
+                assert_eq!(runtime, Runtime::Claude);
             }
             _ => panic!("Wrong variant"),
         }

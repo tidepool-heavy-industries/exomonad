@@ -9,6 +9,7 @@ module Tidepool.Control.Protocol
   , ControlResponse(..)
   , McpError(..)
   , ToolDefinition(..)
+  , Runtime(..)
 
     -- * Hook Types
   , HookInput(..)
@@ -248,6 +249,20 @@ instance FromJSON PermissionDecision where
 -- Control Socket Protocol
 -- ============================================================================
 
+-- | The runtime environment for the agent.
+data Runtime = Claude | Gemini
+  deriving stock (Show, Eq, Generic)
+
+instance FromJSON Runtime where
+  parseJSON = withText "Runtime" $ \case
+    "claude" -> pure Claude
+    "gemini" -> pure Gemini
+    r -> fail $ "Unknown runtime: " <> show r
+
+instance ToJSON Runtime where
+  toJSON Claude = String "claude"
+  toJSON Gemini = String "gemini"
+
 -- | Tool definition for MCP discovery (must match Rust ToolDefinition).
 data ToolDefinition = ToolDefinition
   { tdName :: Text
@@ -259,7 +274,7 @@ data ToolDefinition = ToolDefinition
 
 -- | Message sent over TCP from mantle-agent. Tagged by "type".
 data ControlMessage
-  = HookEvent { input :: HookInput }
+  = HookEvent { input :: HookInput, runtime :: Runtime }
   | McpToolCall { mcpId :: Text, toolName :: Text, arguments :: Value }
   | ToolsListRequest
   deriving stock (Show, Eq, Generic)
@@ -268,7 +283,9 @@ instance FromJSON ControlMessage where
   parseJSON = withObject "ControlMessage" $ \o -> do
     msgType <- o .: "type" :: Parser Text
     case msgType of
-      "HookEvent" -> HookEvent <$> o .: "input"
+      "HookEvent" -> HookEvent
+        <$> o .: "input"
+        <*> o .:? "runtime" .!= Claude
       "MCPToolCall" -> McpToolCall
         <$> o .: "id"
         <*> o .: "tool_name"
@@ -277,9 +294,10 @@ instance FromJSON ControlMessage where
       _ -> fail $ "Unknown message type: " <> show msgType
 
 instance ToJSON ControlMessage where
-  toJSON (HookEvent i) = object
+  toJSON (HookEvent i r) = object
     [ "type" .= ("HookEvent" :: Text)
     , "input" .= i
+    , "runtime" .= r
     ]
   toJSON (McpToolCall mid tn args) = object
     [ "type" .= ("MCPToolCall" :: Text)
@@ -388,9 +406,14 @@ blockHook reason = defaultOutput
 hookSuccess :: HookOutput -> ControlResponse
 hookSuccess o = HookResponse o 0
 
--- | Create an error hook response (exit code 2).
-hookError :: Text -> ControlResponse
-hookError msg = HookResponse (blockHook msg) 2
+-- | Create an error hook response (exit code runtime-aware).
+hookError :: Runtime -> Text -> ControlResponse
+hookError r msg = HookResponse (blockHook msg) (runtimeExitCode r)
+
+-- | Get exit code for blocking based on runtime.
+runtimeExitCode :: Runtime -> Int
+runtimeExitCode Claude = 1
+runtimeExitCode Gemini = 2
 
 -- | Create an MCP tool error response.
 mcpToolError :: Text -> Text -> ControlResponse
