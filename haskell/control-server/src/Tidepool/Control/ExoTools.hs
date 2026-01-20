@@ -293,13 +293,14 @@ exoCompleteLogic args = do
               , ecrMessage = "Warning: You have uncommitted changes. Please commit before completing: " <> T.pack (show dirtyFiles)
               }
             else do
-              -- 5. Close the bead
-              closeBead bid
+              -- Close the bead
+              closeBead bid Nothing
               pure $ gotoExit ExoCompleteResult
                 { ecrBeadId = bid
                 , ecrStatus = StatusClosed
                 , ecrMessage = "Bead " <> bid <> " has been closed. Don't forget to push and create a PR if you haven't already!"
                 }
+
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- EXO-RECONSTITUTE GRAPH

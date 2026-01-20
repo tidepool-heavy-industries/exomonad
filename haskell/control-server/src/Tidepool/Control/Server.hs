@@ -116,7 +116,7 @@ runServer logger config = do
         (conn, _peer) <- accept sock
         -- Snapshot current TUI handle for this connection atomically
         currentTuiHandle <- atomically $ readTVar tuiHandleVar
-        void $ forkIO $ handleConnection logger lspSession currentTuiHandle conn `finally` close conn
+        void $ forkIO $ handleConnection logger config lspSession currentTuiHandle conn `finally` close conn
 
 -- | Setup Unix socket at given path.
 setupUnixSocket :: FilePath -> IO Socket
@@ -148,8 +148,8 @@ cleanupSocketFile path =
 
 
 -- | Handle a single connection (one NDJSON request-response).
-handleConnection :: Logger -> LSPSession -> Maybe TUIHandle -> Socket -> IO ()
-handleConnection logger lspSession maybeTuiHandle conn = do
+handleConnection :: Logger -> ServerConfig -> LSPSession -> Maybe TUIHandle -> Socket -> IO ()
+handleConnection logger config lspSession maybeTuiHandle conn = do
   logDebug logger "Connection received"
 
   (do
@@ -168,7 +168,7 @@ handleConnection logger lspSession maybeTuiHandle conn = do
 
       Right msg -> do
         logMessage logger msg
-        response <- handleMessage logger lspSession maybeTuiHandle msg
+        response <- handleMessage logger config lspSession maybeTuiHandle msg
         logResponse logger response
         sendResponse conn response
     )

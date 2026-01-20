@@ -36,6 +36,7 @@ module Tidepool.BD.Interpreter
   , bdChildren
   , bdListByStatus
   , bdListByType
+  , bdList
 
     -- * Low-Level CLI Access (Write)
   , bdCreate
@@ -69,6 +70,7 @@ import Tidepool.Effects.BD
   , DependencyType(..)
   , CreateBeadInput(..)
   , UpdateBeadInput(..)
+  , ListBeadsInput(..)
   )
 
 
@@ -78,9 +80,11 @@ import Tidepool.Effects.BD
 
 -- | Configuration for BD interpreter.
 data BDConfig = BDConfig
-  { bcBeadsDir :: Maybe FilePath
+  {
+    bcBeadsDir :: Maybe FilePath
     -- ^ Optional beads directory. If Nothing, bd uses auto-discovery.
-  , bcQuiet :: Bool
+  ,
+    bcQuiet :: Bool
     -- ^ Suppress stderr warnings from bd CLI.
   }
   deriving (Show, Eq)
@@ -88,8 +92,10 @@ data BDConfig = BDConfig
 -- | Default configuration (auto-discovery, suppress warnings).
 defaultBDConfig :: BDConfig
 defaultBDConfig = BDConfig
-  { bcBeadsDir = Nothing
-  , bcQuiet = True
+  {
+    bcBeadsDir = Nothing
+  ,
+    bcQuiet = True
   }
 
 
@@ -118,9 +124,10 @@ runBD hGetBead hGetDeps hGetBlocking hGetLabels hListByStatus hListByType = inte
   ListByType t       -> hListByType t
   -- Note: GetChildren and write operations are handled by runBDIO, not runBD
   GetChildren _      -> error "runBD: GetChildren not supported, use runBDIO"
+  ListBeads _        -> error "runBD: ListBeads not supported, use runBDIO"
   CreateBead _       -> error "runBD: CreateBead not supported, use runBDIO"
   UpdateBead _ _     -> error "runBD: UpdateBead not supported, use runBDIO"
-  CloseBead _        -> error "runBD: CloseBead not supported, use runBDIO"
+  CloseBead _ _      -> error "runBD: CloseBead not supported, use runBDIO"
   ReopenBead _       -> error "runBD: ReopenBead not supported, use runBDIO"
   AddLabel _ _       -> error "runBD: AddLabel not supported, use runBDIO"
   RemoveLabel _ _    -> error "runBD: RemoveLabel not supported, use runBDIO"
@@ -162,11 +169,12 @@ runBDIO config = interpret $ \case
 
   ListByStatus status -> sendM $ bdListByStatus config status
   ListByType btype -> sendM $ bdListByType config btype
+  ListBeads input -> sendM $ bdList config input
 
   -- Write operations
   CreateBead input -> sendM $ bdCreate config input
   UpdateBead beadId input -> sendM $ bdUpdate config beadId input
-  CloseBead beadId -> sendM $ bdClose config beadId
+  CloseBead beadId reason -> sendM $ bdClose config beadId reason
   ReopenBead beadId -> sendM $ bdReopen config beadId
   AddLabel beadId label -> sendM $ bdAddLabel config beadId label
   RemoveLabel beadId label -> sendM $ bdRemoveLabel config beadId label
@@ -295,18 +303,31 @@ bdListByStatus config status = do
 -- Uses @bd list --type=TYPE --json@ command.
 bdListByType :: BDConfig -> BeadType -> IO [BeadInfo]
 bdListByType config btype = do
-  let typeStr = case btype of
-        TypeTask         -> "task"
-        TypeBug          -> "bug"
-        TypeFeature      -> "feature"
-        TypeEpic         -> "epic"
-        TypeMergeRequest -> "merge-request"
-        TypeMessage      -> "message"
-        TypeMolecule     -> "molecule"
-        TypeAgent        -> "agent"
-        TypeOther t      -> T.unpack t
+  let typeStr = beadTypeToArg btype
   let args = ["list", "--json", "--type=" ++ typeStr]
             ++ maybe [] (\d -> ["--db", d]) config.bcBeadsDir
+
+  result <- runBdCommand config args
+  case result of
+    Left _err -> pure []
+    Right output ->
+      case eitherDecode (LBS.fromStrict $ TE.encodeUtf8 output) of
+        Right beads -> pure beads
+        Left _ -> pure []
+
+
+-- | List beads with flexible filters.
+--
+-- Uses @bd list --json@ with various filter flags.
+bdList :: BDConfig -> ListBeadsInput -> IO [BeadInfo]
+bdList config input = do
+  let args = ["list", "--json"]
+            ++ maybe [] (\d -> ["--db", d]) config.bcBeadsDir
+            ++ maybe [] (\s -> ["--status", beadStatusToArg s]) input.lbiStatus
+            ++ maybe [] (\t -> ["--type", beadTypeToArg t]) input.lbiType
+            ++ concatMap (\l -> ["--label", T.unpack l]) input.lbiLabels
+            ++ maybe [] (\a -> ["--assignee", T.unpack a]) input.lbiAssignee
+            ++ maybe [] (\p -> ["--parent", T.unpack p]) input.lbiParent
 
   result <- runBdCommand config args
   case result of
@@ -368,10 +389,11 @@ bdUpdate config beadId input = do
 -- | Close a bead.
 --
 -- Uses @bd close@ command.
-bdClose :: BDConfig -> Text -> IO ()
-bdClose config beadId = do
+bdClose :: BDConfig -> Text -> Maybe Text -> IO ()
+bdClose config beadId maybeReason = do
   let args = ["close", T.unpack beadId]
             ++ maybe [] (\d -> ["--db", d]) config.bcBeadsDir
+            ++ maybe [] (\r -> ["--reason", T.unpack r]) maybeReason
 
   result <- runBdCommand config args
   case result of

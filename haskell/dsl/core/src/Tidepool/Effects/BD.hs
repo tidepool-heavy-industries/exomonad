@@ -39,6 +39,7 @@ module Tidepool.Effects.BD
   , getChildren
   , listByStatus
   , listByType
+  , listBeads
 
     -- * Write Operations
   , createBead
@@ -56,6 +57,8 @@ module Tidepool.Effects.BD
   , defaultCreateInput
   , UpdateBeadInput(..)
   , emptyUpdateInput
+  , ListBeadsInput(..)
+  , defaultListBeadsInput
 
     -- * Data Types
   , BeadInfo(..)
@@ -177,6 +180,7 @@ data DependencyInfo = DependencyInfo
   , diPriority    :: Int
   , diType        :: BeadType
   , diDepType     :: DependencyType
+  , diLabels      :: [Text]
   }
   deriving (Show, Eq, Generic)
 
@@ -188,6 +192,7 @@ instance ToJSON DependencyInfo where
     , "priority"        .= d.diPriority
     , "issue_type"      .= d.diType
     , "dependency_type" .= d.diDepType
+    , "labels"          .= d.diLabels
     ]
 
 instance FromJSON DependencyInfo where
@@ -199,6 +204,7 @@ instance FromJSON DependencyInfo where
       <*> v .: "priority"
       <*> v .: "issue_type"
       <*> v .: "dependency_type"
+      <*> v .:? "labels" .!= []
 
 
 -- | Full bead information.
@@ -216,6 +222,7 @@ data BeadInfo = BeadInfo
   , biCreatedBy   :: Maybe Text
   , biUpdatedAt   :: Maybe UTCTime
   , biParent      :: Maybe Text
+  , biLabels      :: [Text]
   , biDependencies :: [DependencyInfo]
   , biDependents   :: [DependencyInfo]
   }
@@ -234,6 +241,7 @@ instance ToJSON BeadInfo where
     , "created_by"   .= b.biCreatedBy
     , "updated_at"   .= b.biUpdatedAt
     , "parent"       .= b.biParent
+    , "labels"       .= b.biLabels
     , "dependencies" .= b.biDependencies
     , "dependents"   .= b.biDependents
     ]
@@ -252,6 +260,7 @@ instance FromJSON BeadInfo where
       <*> v .:? "created_by"
       <*> v .:? "updated_at"
       <*> v .:? "parent"
+      <*> v .:? "labels" .!= []
       <*> v .:? "dependencies" .!= []
       <*> v .:? "dependents" .!= []
 
@@ -310,6 +319,27 @@ emptyUpdateInput = UpdateBeadInput
   }
 
 
+-- | Input for listing beads with flexible filters.
+data ListBeadsInput = ListBeadsInput
+  { lbiStatus   :: Maybe BeadStatus
+  , lbiType     :: Maybe BeadType
+  , lbiLabels   :: [Text]
+  , lbiAssignee :: Maybe Text
+  , lbiParent   :: Maybe Text
+  }
+  deriving (Show, Eq, Generic)
+
+-- | Default list input (no filters).
+defaultListBeadsInput :: ListBeadsInput
+defaultListBeadsInput = ListBeadsInput
+  { lbiStatus   = Nothing
+  , lbiType     = Nothing
+  , lbiLabels   = []
+  , lbiAssignee = Nothing
+  , lbiParent   = Nothing
+  }
+
+
 -- ════════════════════════════════════════════════════════════════════════════
 -- EFFECT
 -- ════════════════════════════════════════════════════════════════════════════
@@ -340,6 +370,9 @@ data BD r where
   -- | List beads by type.
   ListByType :: BeadType -> BD [BeadInfo]
 
+  -- | List beads with flexible filters.
+  ListBeads :: ListBeadsInput -> BD [BeadInfo]
+
   -- Write operations
   -- | Create a new bead, returns the generated ID.
   CreateBead :: CreateBeadInput -> BD Text
@@ -348,7 +381,7 @@ data BD r where
   UpdateBead :: Text -> UpdateBeadInput -> BD ()
 
   -- | Close a bead (set status to closed).
-  CloseBead :: Text -> BD ()
+  CloseBead :: Text -> Maybe Text -> BD ()
 
   -- | Reopen a bead (set status to open).
   ReopenBead :: Text -> BD ()
@@ -401,6 +434,10 @@ listByStatus = send . ListByStatus
 listByType :: Member BD effs => BeadType -> Eff effs [BeadInfo]
 listByType = send . ListByType
 
+-- | List beads with flexible filters.
+listBeads :: Member BD effs => ListBeadsInput -> Eff effs [BeadInfo]
+listBeads = send . ListBeads
+
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- SMART CONSTRUCTORS - WRITE
@@ -435,8 +472,8 @@ updateBead :: Member BD effs => Text -> UpdateBeadInput -> Eff effs ()
 updateBead beadId input = send $ UpdateBead beadId input
 
 -- | Close a bead (set status to closed).
-closeBead :: Member BD effs => Text -> Eff effs ()
-closeBead = send . CloseBead
+closeBead :: Member BD effs => Text -> Maybe Text -> Eff effs ()
+closeBead beadId reason = send $ CloseBead beadId reason
 
 -- | Reopen a closed bead (set status to open).
 reopenBead :: Member BD effs => Text -> Eff effs ()
