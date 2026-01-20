@@ -176,3 +176,54 @@ main = hspec $ do
         Right author -> do
           author.authorLogin `shouldBe` "bot"
           author.authorName `shouldBe` Nothing
+
+  describe "ReviewComment JSON parsing" $ do
+    it "parses GitHub API format" $ do
+      let json = LBS.pack $ unlines
+            [ "{"
+            , "  \"user\": { \"login\": \"github-actions\" },"
+            , "  \"body\": \"Consider using type X instead of type Y\","
+            , "  \"path\": \"src/Main.hs\","
+            , "  \"line\": 42,"
+            , "  \"state\": \"COMMENTED\","
+            , "  \"created_at\": \"2024-01-15T10:30:00Z\""
+            , "}"
+            ]
+      case eitherDecode json :: Either String ReviewComment of
+        Left err -> expectationFailure $ "Failed to parse: " <> err
+        Right comment -> do
+          comment.rcAuthor `shouldBe` "github-actions"
+          comment.rcBody `shouldBe` "Consider using type X instead of type Y"
+          comment.rcPath `shouldBe` Just "src/Main.hs"
+          comment.rcLine `shouldBe` Just 42
+          comment.rcState `shouldBe` ReviewCommented
+
+    it "parses without optional fields" $ do
+      let json = LBS.pack $ unlines
+            [ "{"
+            , "  \"user\": { \"login\": \"copilot\" },"
+            , "  \"body\": \"Suggestion\","
+            , "  \"state\": \"CHANGES_REQUESTED\","
+            , "  \"created_at\": \"2024-01-15T11:00:00Z\""
+            , "}"
+            ]
+      case eitherDecode json :: Either String ReviewComment of
+        Left err -> expectationFailure $ "Failed to parse: " <> err
+        Right comment -> do
+          comment.rcAuthor `shouldBe` "copilot"
+          comment.rcPath `shouldBe` Nothing
+          comment.rcLine `shouldBe` Nothing
+          comment.rcState `shouldBe` ReviewChangesRequested
+
+    it "uses default state when missing" $ do
+      let json = LBS.pack $ unlines
+            [ "{"
+            , "  \"user\": { \"login\": \"reviewer\" },"
+            , "  \"body\": \"LGTM\","
+            , "  \"created_at\": \"2024-01-15T12:00:00Z\""
+            , "}"
+            ]
+      case eitherDecode json :: Either String ReviewComment of
+        Left err -> expectationFailure $ "Failed to parse: " <> err
+        Right comment -> do
+          comment.rcState `shouldBe` ReviewCommented  -- Default when missing

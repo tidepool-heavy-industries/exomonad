@@ -613,8 +613,8 @@ prReviewStatusLogic args = do
   let repo = Repo "tidepool-heavy-industries/tidepool"
   comments <- getPullRequestReviews repo args.prsaPrNumber
   
-  -- Group by author
-  let grouped = foldr (\c acc -> Map.insertWith (++) c.rcAuthor [c] acc) Map.empty comments
+  -- Group by author, preserving chronological order
+  let grouped = foldr (\c acc -> Map.insertWith (\new old -> old ++ new) c.rcAuthor [c] acc) Map.empty comments
   
   pure $ gotoExit PrReviewStatusResult
     { prsrComments = grouped

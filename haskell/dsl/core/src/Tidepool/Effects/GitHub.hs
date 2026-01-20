@@ -235,11 +235,22 @@ data ReviewComment = ReviewComment
   , rcBody      :: Text
   , rcPath      :: Maybe Text
   , rcLine      :: Maybe Int
-  , rcState     :: Text
+  , rcState     :: ReviewState
   , rcCreatedAt :: UTCTime
   }
   deriving (Show, Eq, Generic, ToJSON)
 
+-- | FromJSON instance supports both GitHub API format and internal round-tripping.
+--
+-- Primary formats (GitHub API):
+--   - "user": { "login": "..." } - Nested user object with login field
+--   - "created_at": "..." - ISO 8601 timestamp
+--   - "state": "COMMENTED" | "CHANGES_REQUESTED" | etc.
+--
+-- Fallback formats (for internal use / testing / tool results):
+--   - "author": "..." - Direct author string
+--   - "rcAuthor", "rcBody", "rcPath", "rcLine", "rcState", "rcCreatedAt" - Record field names
+--     These enable round-trip serialization via the derived ToJSON instance.
 instance FromJSON ReviewComment where
   parseJSON = withObject "ReviewComment" $ \v -> do
     -- Handle both "user": { "login": "..." } (GitHub API) and "author": "..." (internal/tool result)
@@ -257,7 +268,7 @@ instance FromJSON ReviewComment where
       <*> (v .: "body" <|> v .: "rcBody")
       <*> (v .: "path" <|> v .: "rcPath" <|> pure Nothing)
       <*> (v .: "line" <|> v .: "rcLine" <|> pure Nothing)
-      <*> (v .: "state" <|> v .: "rcState" <|> pure "COMMENTED")
+      <*> (v .: "state" <|> v .: "rcState" <|> pure ReviewCommented)
       <*> pure createdAt
 
 -- | GitHub pull request.

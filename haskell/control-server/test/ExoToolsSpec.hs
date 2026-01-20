@@ -12,7 +12,7 @@ import Data.Time.Clock (getCurrentTime)
 import Test.Tasty
 import Test.Tasty.HUnit
 import Tidepool.Control.ExoTools
-import Tidepool.Effects.GitHub (ReviewComment(..))
+import Tidepool.Effects.GitHub (ReviewComment(..), ReviewState(..))
 import Tidepool.Graph.MCPReify (reifyMCPTools, MCPToolInfo(..))
 
 main :: IO ()
@@ -78,7 +78,7 @@ test_pr_discovery = do
 test_pr_serialization :: Assertion
 test_pr_serialization = do
   now <- getCurrentTime
-  let comment = ReviewComment "Copilot" "Looks good" (Just "Main.hs") (Just 10) "COMMENTED" now
+  let comment = ReviewComment "Copilot" "Looks good" (Just "Main.hs") (Just 10) ReviewCommented now
   let res = PrReviewStatusResult (Map.fromList [("Copilot", [comment])])
   let json = toJSON res
   case fromJSON @PrReviewStatusResult json of
