@@ -34,31 +34,3 @@ processes:
       backoff_seconds: 2
       max_restarts: 3
 
-  # ----------------------------------------------------------------
-  # SERVICE: TUI Sidebar (Rust)
-  # ----------------------------------------------------------------
-  tui-sidebar:
-    command: cargo run -p tui-sidebar
-    working_dir: rust
-
-    # Wait for control-server to be healthy before starting
-    depends_on:
-      control-server:
-        condition: process_healthy
-
-    environment:
-      - RUST_LOG=info
-
-    # TCP port readiness check
-    readiness_probe:
-      exec:
-        command: "nc -z localhost 7433"
-      initial_delay_seconds: 1
-      period_seconds: 1
-      timeout_seconds: 30
-
-    availability:
-      restart: on_failure
-      backoff_seconds: 2
-      max_restarts: 3
-
