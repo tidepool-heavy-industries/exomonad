@@ -6,7 +6,7 @@ use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::mpsc;
 use tracing::{debug, error, warn};
 
-use crate::protocol::{Interaction, UISpec};
+use crate::protocol::{Interaction, TUIMessage, UISpec};
 
 /// Connect to control-server via Unix socket.
 ///
@@ -59,16 +59,31 @@ pub fn spawn_io_tasks(
                         continue;
                     }
 
-                    match serde_json::from_str::<UISpec>(trimmed) {
-                        Ok(spec) => {
-                            debug!(ui_id = %spec.id, "Received UISpec");
+                    match serde_json::from_str::<TUIMessage>(trimmed) {
+                        Ok(TUIMessage::PushUI { spec }) => {
+                            debug!(ui_id = %spec.id, "Received PushUI");
                             if msg_tx.send(spec).await.is_err() {
                                 debug!("Receiver dropped, stopping reader");
                                 break;
                             }
                         }
+                        Ok(TUIMessage::ReplaceUI { spec }) => {
+                            debug!(ui_id = %spec.id, "Received ReplaceUI");
+                            if msg_tx.send(spec).await.is_err() {
+                                debug!("Receiver dropped, stopping reader");
+                                break;
+                            }
+                        }
+                        Ok(TUIMessage::UpdateUI { update: _ }) => {
+                            debug!("Received UpdateUI (not implemented)");
+                            // Phase 2: handle dynamic updates
+                        }
+                        Ok(TUIMessage::PopUI) => {
+                            debug!("Received PopUI (not implemented)");
+                            // Phase 2: handle UI stack pop
+                        }
                         Err(e) => {
-                            warn!(error = %e, json = %trimmed, "Failed to parse UISpec");
+                            warn!(error = %e, json = %trimmed, "Failed to parse TUIMessage");
                             // Continue reading, don't stop on malformed JSON
                         }
                     }

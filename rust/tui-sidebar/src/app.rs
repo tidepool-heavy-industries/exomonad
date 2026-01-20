@@ -1,16 +1,16 @@
 use anyhow::{Context, Result};
 use crossterm::{
-    event::{self, Event, KeyCode},
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, MouseEventKind},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use ratatui::{backend::CrosstermBackend, Terminal};
+use ratatui::{backend::CrosstermBackend, layout::Rect, Terminal};
 use std::io;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tracing::{debug, info};
 
-use crate::input::handle_key_event;
+use crate::input::{handle_key_event, handle_mouse_click};
 use crate::protocol::{Interaction, UISpec};
 use crate::render::{render_idle, render_ui};
 use crate::ui_stack::UIStack;
@@ -50,10 +50,13 @@ pub async fn run(
     let mut focus_idx = 0;
 
     // Event loop
+    let mut terminal_area = terminal.get_frame().area();
+
     loop {
-        // Render current UI
+        // Render current UI and capture terminal area for mouse hit testing
         terminal
             .draw(|f| {
+                terminal_area = f.area();
                 if let Some(spec) = ui_stack.current() {
                     render_ui(f, spec, focus_idx);
                 } else {
@@ -70,9 +73,9 @@ pub async fn run(
                 focus_idx = 0;  // Reset focus for new UI
             }
 
-            // Poll keyboard (crossterm doesn't integrate with tokio)
+            // Poll input events (crossterm doesn't integrate with tokio)
             _ = tokio::time::sleep(Duration::from_millis(100)) => {
-                match poll_keyboard(&ui_stack, &mut focus_idx)? {
+                match poll_input(&ui_stack, &mut focus_idx, terminal_area)? {
                     EventOutcome::Interaction(interaction) => {
                         debug!(interaction = ?interaction, "Sending interaction");
 
@@ -104,11 +107,12 @@ pub async fn run(
     Ok(())
 }
 
-/// Setup terminal (raw mode, alternate screen).
+/// Setup terminal (raw mode, alternate screen, mouse capture).
 fn setup_terminal() -> Result<Terminal<CrosstermBackend<io::Stdout>>> {
     enable_raw_mode().context("Failed to enable raw mode")?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen).context("Failed to enter alternate screen")?;
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)
+        .context("Failed to enter alternate screen")?;
 
     let backend = CrosstermBackend::new(stdout);
     let terminal = Terminal::new(backend).context("Failed to create terminal")?;
@@ -116,21 +120,25 @@ fn setup_terminal() -> Result<Terminal<CrosstermBackend<io::Stdout>>> {
     Ok(terminal)
 }
 
-/// Cleanup terminal (leave alternate screen, disable raw mode).
+/// Cleanup terminal (leave alternate screen, disable raw mode, disable mouse).
 fn cleanup_terminal(mut terminal: Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
     disable_raw_mode().context("Failed to disable raw mode")?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)
+    execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)
         .context("Failed to leave alternate screen")?;
     terminal.show_cursor().context("Failed to show cursor")?;
 
     Ok(())
 }
 
-/// Poll keyboard and handle input.
+/// Poll input events (keyboard and mouse) and handle them.
 ///
-/// Returns Some(Interaction) if user completed an action (Enter on button/input).
-/// Returns None if no action or only navigation (Tab).
-fn poll_keyboard(ui_stack: &UIStack, focus_idx: &mut usize) -> Result<EventOutcome> {
+/// Returns Some(Interaction) if user completed an action (Enter on button/input, or mouse click).
+/// Returns None if no action or only navigation (Tab, arrow keys).
+fn poll_input(
+    ui_stack: &UIStack,
+    focus_idx: &mut usize,
+    terminal_area: Rect,
+) -> Result<EventOutcome> {
     // Check if event is available (non-blocking)
     if !event::poll(Duration::ZERO).context("Failed to poll events")? {
         return Ok(EventOutcome::Nothing);
@@ -154,6 +162,19 @@ fn poll_keyboard(ui_stack: &UIStack, focus_idx: &mut usize) -> Result<EventOutco
                 Some(i) => EventOutcome::Interaction(i),
                 None => EventOutcome::Nothing,
             })
+        }
+        Event::Mouse(mouse_event) => {
+            // Handle mouse click
+            if mouse_event.kind == MouseEventKind::Down(event::MouseButton::Left) {
+                if let Some((interaction, clicked_idx)) =
+                    handle_mouse_click(mouse_event.column, mouse_event.row, ui_stack, terminal_area)?
+                {
+                    // Update focus to clicked element
+                    *focus_idx = clicked_idx;
+                    return Ok(EventOutcome::Interaction(interaction));
+                }
+            }
+            Ok(EventOutcome::Nothing)
         }
         _ => Ok(EventOutcome::Nothing),
     }
