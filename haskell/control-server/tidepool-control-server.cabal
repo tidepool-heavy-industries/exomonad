@@ -48,6 +48,7 @@ library
         Tidepool.Control.ExoTools.PrToBead
         Tidepool.Control.ExoTools.PrReviewStatus
         Tidepool.Control.TUITools
+        Tidepool.Control.FeedbackTools
         Tidepool.Control.Export
         -- Scout (semantic code exploration)
         Tidepool.Control.Scout.Types

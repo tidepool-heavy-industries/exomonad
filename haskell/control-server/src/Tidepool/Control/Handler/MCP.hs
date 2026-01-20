@@ -43,6 +43,8 @@ import Tidepool.Control.TUITools
     selectOptionLogic, SelectArgs(..), SelectResult(..),
     requestGuidanceLogic, GuidanceArgs(..)
   )
+import Tidepool.Control.FeedbackTools
+  ( registerFeedbackLogic, RegisterFeedbackArgs(..), RegisterFeedbackResult(..) )
 import Tidepool.Control.ExoTools
   ( exoStatusLogic, ExoStatusArgs(..)
   , exoCompleteLogic, ExoCompleteArgs(..), ExoCompleteResult(..)
@@ -121,6 +123,7 @@ handleMcpTool logger config lspSession maybeTuiHandle reqId toolName args = do
     "confirm_action" -> handleConfirmActionTool logger lspSession maybeTuiHandle reqId args
     "select_option" -> handleSelectOptionTool logger lspSession maybeTuiHandle reqId args
     "request_guidance" -> handleRequestGuidanceTool logger lspSession maybeTuiHandle reqId args
+    "register_feedback" -> handleRegisterFeedbackTool logger reqId args
 
     -- Tier 2: LLM-enhanced tools (graph-based)
     -- DISABLED: teach-graph spawns recursive LLM calls, expensive during testing
@@ -715,6 +718,31 @@ handleConfirmActionTool logger _lspSession maybeTuiHandle reqId args = do
 
         Right result -> do
           logInfo logger $ "[MCP:" <> reqId <> "] Action confirmed=" <> T.pack (show $ crConfirmed result)
+          pure $ mcpToolSuccess reqId (toJSON result)
+
+
+-- | Handle the register_feedback tool.
+handleRegisterFeedbackTool :: Logger -> Text -> Value -> IO ControlResponse
+handleRegisterFeedbackTool logger reqId args = do
+  case fromJSON args of
+    Error err -> do
+      logError logger $ "  parse error: " <> T.pack err
+      pure $ mcpToolError reqId $ "Invalid register_feedback arguments: " <> T.pack err
+
+    Success rfArgs -> do
+      logDebug logger $ "  bead_id=" <> rfArgs.rfaBeadId
+
+      resultOrErr <- try $ runM
+        $ runLog Debug
+        $ fmap unwrapSingleChoice (registerFeedbackLogic rfArgs)
+
+      case resultOrErr of
+        Left (e :: SomeException) -> do
+          logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId $ "register_feedback failed: " <> T.pack (displayException e)
+
+        Right result -> do
+          logInfo logger $ "[MCP:" <> reqId <> "] Feedback registered for " <> rfArgs.rfaBeadId
           pure $ mcpToolSuccess reqId (toJSON result)
 
 
