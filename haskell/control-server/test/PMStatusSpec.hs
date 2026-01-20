@@ -73,10 +73,11 @@ parseTime s = case iso8601ParseM s of
 
 test_pmStatus :: Assertion
 test_pmStatus = do
-  let now = parseTime "2026-01-20T12:00:00Z"
-      day1 = addUTCTime (-nominalDay) now
-      day2 = addUTCTime (-2 * nominalDay) now
-      day8 = addUTCTime (-8 * nominalDay) now
+  let baseTime = parseTime "2020-01-01T12:00:00Z"
+      now      = addUTCTime (19 * nominalDay) baseTime
+      day1     = addUTCTime (-nominalDay) now
+      day2     = addUTCTime (-2 * nominalDay) now
+      day8     = addUTCTime (-8 * nominalDay) now
       
       bead1 = BeadInfo "b1" "T1" Nothing StatusClosed 2 TypeTask Nothing (Just day2) Nothing (Just day1) (Just day1) Nothing [] [] []
       bead2 = BeadInfo "b2" "T2" Nothing StatusInProgress 2 TypeTask Nothing (Just day1) Nothing (Just now) Nothing Nothing ["pm-tools"] [] []
@@ -88,7 +89,7 @@ test_pmStatus = do
       
       mockState = MockState now [bead1, bead2, bead3, bead4] [pr1]
       
-      args = PmStatusArgs 7 True Nothing
+      args = PmStatusArgs 7 True Nothing Nothing
       res = unwrapSingleChoice $ runMockAll mockState (pmStatusLogic args)
       
   -- Velocity: 1 bead closed in last 7 days (bead1). bead4 was 8 days ago.

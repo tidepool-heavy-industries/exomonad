@@ -47,6 +47,7 @@ data PmStatusArgs = PmStatusArgs
   { psaPeriodDays       :: Int
   , psaIncludeBreakdown :: Bool
   , psaLabelTrack       :: Maybe Text
+  , psaRepo             :: Maybe Text
   }
   deriving stock (Show, Eq, Generic)
 
@@ -55,6 +56,7 @@ instance HasJSONSchema PmStatusArgs where
     [ ("period_days", describeField "period_days" "Period in days for velocity and trend calculation (default 7)" (emptySchema TInteger))
     , ("include_breakdown", describeField "include_breakdown" "Whether to include label breakdown" (emptySchema TBoolean))
     , ("label_track", describeField "label_track" "Optional label to filter metrics (e.g. a specific track or epic label)" (emptySchema TString))
+    , ("repo", describeField "repo" "Optional GitHub repository name (owner/repo) to fetch PR metrics from" (emptySchema TString))
     ]
     []
 
@@ -64,12 +66,14 @@ instance FromJSON PmStatusArgs where
       <$> v .:? "period_days" .!= 7
       <*> v .:? "include_breakdown" .!= False
       <*> v .:? "label_track"
+      <*> v .:? "repo"
 
 instance ToJSON PmStatusArgs where
   toJSON args = object
     [ "period_days" .= psaPeriodDays args
     , "include_breakdown" .= psaIncludeBreakdown args
     , "label_track" .= psaLabelTrack args
+    , "repo" .= psaRepo args
     ]
 
 -- | Result of pm_status tool.
@@ -196,9 +200,9 @@ pmStatusLogic args = do
       needsPMApproval = count (\b -> labelNeedsPMApproval `elem` b.biLabels) allBeads
 
   -- 4. PR Lag
-  -- Note: We assume a single repo for now or all repos the tool has access to.
-  -- For Tidepool, it's usually tidepool-heavy-industries/tidepool
-  let repo = Repo "tidepool-heavy-industries/tidepool"
+  -- For Tidepool, it's usually tidepool-heavy-industries/tidepool, but allow override via args.
+  let defaultRepo = Repo "tidepool-heavy-industries/tidepool"
+      repo = maybe defaultRepo Repo args.psaRepo
   allPrs <- listPullRequests repo (defaultPRFilter { pfState = Just PRMerged })
   let prsInPeriod = filter (isPrMergedBetween periodStart now) allPrs
       prLags = mapMaybe calcPrLag prsInPeriod
@@ -254,10 +258,14 @@ calcMetrics [] _ = (0, 0)
 calcMetrics xs unit =
   let sorted = sort xs
       len = length sorted
-      medianIdx = len `div` 2
-      p90Idx = round (fromIntegral len * 0.9 :: Double) - 1
+      -- Use lower-middle element for median to avoid upper-middle bias
+      medianIdx = (len - 1) `div` 2
+      -- Compute a 0-based index for the 90th percentile and clamp into bounds
+      p90Pos = ceiling (0.9 * fromIntegral len :: Double)  -- 1-based position
+      rawP90Idx = p90Pos - 1                               -- convert to 0-based
+      p90Idx = max 0 (min (len - 1) rawP90Idx)
       m = sorted !! medianIdx
-      p = sorted !! max 0 p90Idx
+      p = sorted !! p90Idx
   in (m / unit, p / unit)
 
 aggregateLabels :: [BeadInfo] -> [(Text, Int)]

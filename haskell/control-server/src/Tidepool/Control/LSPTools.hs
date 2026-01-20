@@ -19,6 +19,7 @@
 -- = Tier 1 Tools (Pure LSP + Basic Parsing)
 --
 -- - **find_callers**: Find actual call sites (filter imports/type sigs)
+-- - **find_callees**: Find functions called by a given function
 -- - **show_fields**: Quick record field lookup
 -- - **show_constructors**: Show sum type constructors
 --
