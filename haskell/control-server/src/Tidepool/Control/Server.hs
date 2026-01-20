@@ -102,7 +102,9 @@ handleConnection logger lspSession maybeTuiHandle conn = do
         logError logger $ "[Server] JSON parse error: " <> T.pack err
         logDebug logger $ "[Server] Raw input (" <> T.pack (show (BS.length msgBytes)) <> " bytes): "
           <> T.decodeUtf8 (BS.take 200 msgBytes)  -- First 200 bytes for debugging
-        let response = hookError $ T.pack $ "JSON parse error: " <> err
+        -- Use Gemini exit code (2) for parse errors since we can't determine runtime
+        -- from malformed JSON. Exit code 2 should be treated as error by both runtimes.
+        let response = hookError Gemini $ T.pack $ "JSON parse error: " <> err
         sendResponse conn response
 
       Right msg -> do
@@ -114,7 +116,8 @@ handleConnection logger lspSession maybeTuiHandle conn = do
   `catch` \(e :: SomeException) -> do
     logError logger $ "Connection error: " <> T.pack (show e)
     -- Send error response to client instead of leaving them hanging
-    sendResponse conn $ hookError $ "Connection error: " <> T.pack (show e)
+    -- Use Gemini exit code (2) since we can't determine runtime from connection error
+    sendResponse conn $ hookError Gemini $ "Connection error: " <> T.pack (show e)
 
 -- | Read bytes from socket until newline.
 readUntilNewline :: Socket -> IO ByteString
@@ -139,8 +142,9 @@ sendResponse conn response = do
 -- | Log incoming message.
 logMessage :: Logger -> ControlMessage -> IO ()
 logMessage logger = \case
-  HookEvent input ->
+  HookEvent input r ->
     logDebug logger $ "[HOOK] " <> input.hookEventName
+      <> " runtime=" <> T.pack (show r)
       <> maybe "" (" tool=" <>) input.toolName
   McpToolCall reqId name _args ->
     logInfo logger $ "[MCP:" <> reqId <> "] tool=" <> name

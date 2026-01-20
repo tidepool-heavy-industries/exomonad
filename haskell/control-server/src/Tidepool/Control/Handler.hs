@@ -16,7 +16,7 @@ import Tidepool.TUI.Interpreter (TUIHandle)
 -- | Route a control message to the appropriate handler.
 handleMessage :: Logger -> LSPSession -> Maybe TUIHandle -> ControlMessage -> IO ControlResponse
 handleMessage logger lspSession maybeTuiHandle = \case
-  HookEvent input -> handleHook input
+  HookEvent input r -> handleHook input r
   McpToolCall reqId name args -> handleMcpTool logger lspSession maybeTuiHandle reqId name args
   ToolsListRequest -> handleToolsList logger
 
