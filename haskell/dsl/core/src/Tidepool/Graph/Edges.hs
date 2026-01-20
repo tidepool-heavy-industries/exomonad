@@ -34,6 +34,10 @@ module Tidepool.Graph.Edges
   , GetClaudeCode
   , HasClaudeCode
 
+    -- * Gemini Extraction
+  , GetGeminiModel
+  , HasGeminiModel
+
     -- * Goto Extraction
   , GetGotoTargets
   , GotoEffectsToTargets
@@ -72,6 +76,7 @@ import Tidepool.Graph.Types
   , Spawn, Barrier, Awaits, Arrive
   , Global, Backend
   , ClaudeCode, ModelChoice
+  , Gemini, GeminiModel
   , Self
   , Entries, Exits
   )
@@ -430,6 +435,7 @@ type family SameAnnotationType ann target where
   SameAnnotationType (Exits _) (Exits _) = 'True
   SameAnnotationType Vision Vision = 'True
   SameAnnotationType (ClaudeCode _) (ClaudeCode _) = 'True
+  SameAnnotationType (Gemini _) (Gemini _) = 'True
   SameAnnotationType (Backend _) (Backend _) = 'True
   SameAnnotationType (Spawn _) (Spawn _) = 'True
   SameAnnotationType (Barrier _) (Barrier _) = 'True
@@ -498,6 +504,26 @@ type family HasClaudeCode node where
   HasClaudeCode (node :@ ClaudeCode _) = 'True
   HasClaudeCode (node :@ _) = HasClaudeCode node
   HasClaudeCode _ = 'False
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- GEMINI EXTRACTION
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Extract Gemini annotation from a node.
+--
+-- Returns the model choice.
+type GetGeminiModel :: Type -> Maybe GeminiModel
+type family GetGeminiModel node where
+  GetGeminiModel (node :@ Gemini m) = 'Just m
+  GetGeminiModel (node :@ _) = GetGeminiModel node
+  GetGeminiModel _ = 'Nothing
+
+-- | Check if a node has the Gemini annotation.
+type HasGeminiModel :: Type -> Bool
+type family HasGeminiModel node where
+  HasGeminiModel (node :@ Gemini _) = 'True
+  HasGeminiModel (node :@ _) = HasGeminiModel node
+  HasGeminiModel _ = 'False
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- FORK/BARRIER EXTRACTION

@@ -62,6 +62,7 @@ module Tidepool.Graph.Generic
 
     -- * Node Kind Wrappers (for record DSL)
   , LLMNode
+  , GeminiNode
   , LogicNode
   , GraphNode
   , ForkNode
@@ -98,6 +99,7 @@ module Tidepool.Graph.Generic
     -- * Re-exports for LLM Handlers
   , LLMHandler(..)
   , ClaudeCodeLLMHandler(..)
+  , GeminiLLMHandler(..)
   , ChooseLLMHandler
 
     -- * Record Validation
@@ -128,10 +130,11 @@ import Tidepool.Graph.Errors
 import Tidepool.Graph.Validate (FormatSymbolList)
 import Control.Monad.Freer (Eff, Member)
 
-import Tidepool.Graph.Types (type (:@), Input, Schema, Template, Vision, Tools, Memory, System, UsesEffects, ClaudeCode, ModelChoice, Spawn, Barrier, Awaits, HList(..), MCPExport, MCPToolDef)
+import Tidepool.Graph.Types (type (:@), Input, Schema, Template, Vision, Tools, Memory, System, UsesEffects, ClaudeCode, ModelChoice, Gemini, GeminiModel, Spawn, Barrier, Awaits, HList(..), MCPExport, MCPToolDef)
+import Tidepool.Effect.Gemini (GeminiOp, SingGeminiModel(..))
 import Tidepool.Graph.Template (TemplateContext)
-import Tidepool.Graph.Edges (GetUsesEffects, GetGotoTargets, GotoEffectsToTargets, HasClaudeCode, GetClaudeCode, GetSpawnTargets, GetBarrierTarget, GetAwaits)
-import Tidepool.Graph.Goto (Goto, goto, GotoChoice, To, LLMHandler(..), ClaudeCodeLLMHandler(..))
+import Tidepool.Graph.Edges (GetUsesEffects, GetGotoTargets, GotoEffectsToTargets, HasClaudeCode, GetClaudeCode, HasGeminiModel, GetGeminiModel, GetSpawnTargets, GetBarrierTarget, GetAwaits)
+import Tidepool.Graph.Goto (Goto, goto, GotoChoice, To, LLMHandler(..), ClaudeCodeLLMHandler(..), GeminiLLMHandler(..))
 import Tidepool.Graph.Validate.RecordStructure
   ( AllFieldsReachable, AllLogicFieldsReachExit, NoDeadGotosRecord
   , AllLogicNodesHaveGoto, NoGotoSelfOnly
@@ -141,6 +144,7 @@ import Tidepool.Graph.Generic.Core
   ( AsGraph
   , GraphMode(..)
   , LLMNode
+  , GeminiNode
   , LogicNode
   , GraphNode
   , EntryNode
@@ -222,8 +226,6 @@ type family NodeHandler nodeDef es where
   NodeHandler (GraphNode subgraph :@ Input inputT) es =
     inputT -> Eff es ()
 
-  -- Any annotated node: dispatch to the appropriate accumulator based on base kind
-  -- We peel from outside, so start with the full node
   -- Accumulator: (nodeDef, origNode, es, mInput, mTpl, mSchema, mEffs)
   NodeHandler (node :@ ann) es = NodeHandlerDispatch (node :@ ann) (node :@ ann) es 'Nothing 'Nothing 'Nothing 'Nothing
 
@@ -395,6 +397,21 @@ type family ChooseLLMHandler mClaudeCode input schema targets effs tpl where
   ChooseLLMHandler 'Nothing input schema targets effs tpl =
     LLMHandler input schema targets effs tpl
 
+-- | Extract GeminiModel or fail with TypeError.
+type family OrErrorGemini mGemini orig where
+  OrErrorGemini ('Just model) _ = model
+  OrErrorGemini 'Nothing orig = TypeError
+    ( HR
+      ':$$: 'Text "  GeminiNode missing Gemini annotation"
+      ':$$: HR
+      ':$$: Blank
+      ':$$: WhatHappened
+      ':$$: Indent "Your GeminiNode has no Gemini annotation to specify the model."
+      ':$$: Blank
+      ':$$: Fixes
+      ':$$: Bullet "Add Gemini annotation: :@ Gemini 'Flash"
+    )
+
 type NodeHandlerDispatch :: Type -> Type -> [Effect] -> Maybe Type -> Maybe Type -> Maybe Type -> Maybe Type -> Type
 type family NodeHandlerDispatch nodeDef origNode es mInput mTpl mSchema mEffs where
   -- Peel Input annotation - record it
@@ -468,6 +485,8 @@ type family NodeHandlerDispatch nodeDef origNode es mInput mTpl mSchema mEffs wh
   NodeHandlerDispatch (node :@ System _) orig es mInput mTpl mSchema mEffs =
     NodeHandlerDispatch node orig es mInput mTpl mSchema mEffs
   NodeHandlerDispatch (node :@ ClaudeCode _) orig es mInput mTpl mSchema mEffs =
+    NodeHandlerDispatch node orig es mInput mTpl mSchema mEffs
+  NodeHandlerDispatch (node :@ Gemini _) orig es mInput mTpl mSchema mEffs =
     NodeHandlerDispatch node orig es mInput mTpl mSchema mEffs
 
   -- Skip MCP annotations (used for tool discovery, not runtime dispatch)
@@ -548,6 +567,10 @@ type family NodeHandlerDispatch nodeDef origNode es mInput mTpl mSchema mEffs wh
   -- GetClaudeCode extracts the model from the annotation for compile-time validation.
   NodeHandlerDispatch (LLMNode _subtype) orig es ('Just input) ('Just tpl) ('Just schema) ('Just (EffStack effs)) =
     ChooseLLMHandler (GetClaudeCode orig) input schema (GotoEffectsToTargets effs) es (TemplateContext tpl)
+
+  -- GeminiNode Base Cases: Template + Schema + UsesEffects
+  NodeHandlerDispatch GeminiNode orig es ('Just input) ('Just tpl) ('Just schema) ('Just (EffStack effs)) =
+    GeminiLLMHandler (OrErrorGemini (GetGeminiModel orig) orig) input schema (GotoEffectsToTargets effs) es (TemplateContext tpl)
 
   -- LLMNode with UsesEffects but no Template - missing context for prompts
   NodeHandlerDispatch (LLMNode _subtype) orig es mInput 'Nothing ('Just schema) ('Just (EffStack effs)) = TypeError

@@ -57,6 +57,7 @@ library
         -- Native-only effects (require subprocesses)
         Tidepool.Effect.LSP
         Tidepool.Effect.GHCi
+        Tidepool.Effect.Gemini
         -- Native-only tooling
         Tidepool.Schema
         Tidepool.StructuredOutput.ClaudeCodeSchema

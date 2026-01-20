@@ -16,6 +16,7 @@ module Tidepool.Graph.Generic.Core
 
     -- * Node Markers
   , LLMNode
+  , GeminiNode
   , LogicNode
   , GraphNode
   , EntryNode
@@ -97,6 +98,11 @@ instance GraphMode AsGraph where
 -- LLMNode has kind 'LLMKind -> Type' (parameterized by LLMKind from Types.hs).
 type LLMNode :: LLMKind -> Type
 data LLMNode subtype
+
+-- | Gemini node marker (parallel to LLMNode).
+--
+-- Executes via the Gemini CLI interpreter.
+data GeminiNode
 
 -- | Graph node marker - embeds a subgraph as a node.
 --

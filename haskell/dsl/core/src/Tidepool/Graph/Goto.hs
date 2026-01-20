@@ -81,6 +81,7 @@ module Tidepool.Graph.Goto
   , LLMHandler(..)
   , ClaudeCodeLLMHandler(..)
   , ClaudeCodeResult(..)
+  , GeminiLLMHandler(..)
 
     -- * Target Validation
   , GotoElem
@@ -98,6 +99,7 @@ import Text.Ginger.TH (TypedTemplate)
 import Text.Parsec.Pos (SourcePos)
 
 import Tidepool.Graph.Types (Exit, Self, Arrive(..), ModelChoice(..), SingModelChoice(..), HList(..))
+import Tidepool.Effect.Gemini (GeminiModel(..), SingGeminiModel(..))
 import Tidepool.Effect.Session (SessionId, SessionOperation(..))
 import Tidepool.Graph.Generic.Core (NodeRef(..))
 
@@ -648,3 +650,17 @@ data ClaudeCodeLLMHandler model needs schema targets effs tpl where
     -> (needs -> Eff effs (tpl, SessionOperation))            -- ^ Builds context AND session strategy
     -> ((ClaudeCodeResult schema, SessionId) -> Eff effs (GotoChoice targets))  -- ^ Routes with output AND session ID
     -> ClaudeCodeLLMHandler model needs schema targets effs tpl
+
+-- | Handler for Gemini-annotated nodes.
+--
+-- Executed via Gemini CLI subprocess.
+type GeminiLLMHandler :: GeminiModel -> Type -> Type -> [Type] -> [Type -> Type] -> Type -> Type
+data GeminiLLMHandler model needs schema targets effs tpl where
+  GeminiLLMHandler
+    :: forall model tpl needs schema targets effs.
+       SingGeminiModel model
+    => Maybe (TypedTemplate tpl SourcePos)
+    -> TypedTemplate tpl SourcePos
+    -> (needs -> Eff effs tpl)
+    -> (schema -> Eff effs (GotoChoice targets))
+    -> GeminiLLMHandler model needs schema targets effs tpl

@@ -37,6 +37,7 @@ module Tidepool.Graph.Reify
   , TemplateInfo(..)
   , MemoryInfo(..)
   , ClaudeCodeInfo(..)
+  , GeminiInfo(..)
 
     -- * Reification Typeclasses
   , ReifyGraph(..)
@@ -61,6 +62,7 @@ module Tidepool.Graph.Reify
   , ReifyTemplateInfo(..)
   , ReifyMemoryInfo(..)
   , ReifyClaudeCodeInfo(..)
+  , ReifyGeminiInfo(..)
 
     -- * Goto Target Extraction
   , GotoTargetsFromDef
@@ -86,14 +88,14 @@ import GHC.Generics (Generic(..), K1(..), M1(..), (:*:)(..), Meta(..), S, D, C)
 import GHC.TypeLits (Symbol, KnownSymbol, symbolVal)
 import qualified Data.Map.Strict as Map
 
-import Tidepool.Graph.Types (NodeKind(..), type (:@), ModelChoice(..), Tool)
+import Tidepool.Graph.Types (NodeKind(..), type (:@), ModelChoice(..), GeminiModel(..), Tool)
 import Tidepool.Graph.Tool (ToolInfo(..))
-import Tidepool.Graph.Generic.Core (EntryNode, ExitNode, LLMNode, LogicNode, ForkNode, BarrierNode, AsGraph)
+import Tidepool.Graph.Generic.Core (EntryNode, ExitNode, LLMNode, GeminiNode, LogicNode, ForkNode, BarrierNode, AsGraph)
 import Tidepool.Graph.Edges
   ( GetInput, GetSchema, GetTemplate, GetSystem
   , GetVision, GetTools, GetMemory, GetUsesEffects
   , GetGotoTargets, HasGotoExit
-  , GetClaudeCode
+  , GetClaudeCode, GetGeminiModel
   )
 import Tidepool.Schema (JSONSchema(..), HasJSONSchema(..), SchemaType(..))
 import Tidepool.Graph.Template
@@ -180,6 +182,7 @@ data NodeInfo = NodeInfo
   , niTemplate :: Maybe TemplateInfo    -- ^ User prompt template (rich info)
   , niMemory :: Maybe MemoryInfo        -- ^ Memory type (rich info)
   , niClaudeCode :: Maybe ClaudeCodeInfo -- ^ ClaudeCode annotation (rich info)
+  , niGemini :: Maybe GeminiInfo        -- ^ Gemini annotation (rich info)
   }
   deriving (Show, Eq)
 
@@ -196,6 +199,7 @@ data EdgeInfo = EdgeInfo
 data RuntimeNodeKind
   = RuntimeLLM         -- ^ Standard LLM API call
   | RuntimeClaudeCode  -- ^ Claude Code subprocess
+  | RuntimeGemini      -- ^ Gemini CLI subprocess
   | RuntimeLogic       -- ^ Pure routing logic
   | RuntimeFork        -- ^ Fork node - spawns parallel workers
   | RuntimeBarrier     -- ^ Barrier node - collects parallel results
@@ -247,6 +251,12 @@ data MemoryInfo = MemoryInfo
 -- | Rich ClaudeCode information for nodes executed via Claude Code subprocess.
 data ClaudeCodeInfo = ClaudeCodeInfo
   { cciModel :: Text                    -- ^ Model choice: "Haiku", "Sonnet", or "Opus"
+  }
+  deriving (Show, Eq)
+
+-- | Rich Gemini information for nodes executed via Gemini CLI subprocess.
+data GeminiInfo = GeminiInfo
+  { giModel :: Text                    -- ^ Model choice: "Flash", "Pro", or "Ultra"
   }
   deriving (Show, Eq)
 
@@ -499,6 +509,23 @@ instance ReifyClaudeCodeInfo ('Just 'Sonnet) where
 instance ReifyClaudeCodeInfo ('Just 'Opus) where
   reifyClaudeCodeInfo _ = Just ClaudeCodeInfo { cciModel = "Opus" }
 
+-- | Reify a type-level Maybe GeminiModel annotation to runtime Maybe GeminiInfo.
+type ReifyGeminiInfo :: Maybe GeminiModel -> Constraint
+class ReifyGeminiInfo (mgm :: Maybe GeminiModel) where
+  reifyGeminiInfo :: Proxy mgm -> Maybe GeminiInfo
+
+instance ReifyGeminiInfo 'Nothing where
+  reifyGeminiInfo _ = Nothing
+
+instance ReifyGeminiInfo ('Just 'Flash) where
+  reifyGeminiInfo _ = Just GeminiInfo { giModel = "Flash" }
+
+instance ReifyGeminiInfo ('Just 'Pro) where
+  reifyGeminiInfo _ = Just GeminiInfo { giModel = "Pro" }
+
+instance ReifyGeminiInfo ('Just 'Ultra) where
+  reifyGeminiInfo _ = Just GeminiInfo { giModel = "Ultra" }
+
 -- ════════════════════════════════════════════════════════════════════════════
 -- GOTO TARGET REIFICATION
 -- ════════════════════════════════════════════════════════════════════════════
@@ -669,6 +696,13 @@ type family IsLogicNode def where
   IsLogicNode (node :@ _) = IsLogicNode node
   IsLogicNode _ = 'False
 
+-- | Check if the base node is GeminiNode.
+type IsGeminiNode :: Type -> Bool
+type family IsGeminiNode def where
+  IsGeminiNode GeminiNode = 'True
+  IsGeminiNode (node :@ _) = IsGeminiNode node
+  IsGeminiNode _ = 'False
+
 -- | Check if the base node is ForkNode.
 type IsForkNode :: Type -> Bool
 type family IsForkNode def where
@@ -695,15 +729,9 @@ instance {-# OVERLAPPING #-}
     , niKind = RuntimeFork
     , niInput = reifyMaybeType (Proxy @(GetInput (ForkNode :@ ann)))
     , niSchema = Nothing
-    , niGotoTargets = []  -- ForkNode uses Spawn, not Goto
-    , niHasGotoExit = False
-    , niHasVision = False
-    , niTools = []
-    , niToolInfos = []
-    , niSystem = Nothing
-    , niTemplate = Nothing
     , niMemory = Nothing
     , niClaudeCode = Nothing
+    , niGemini = Nothing
     }]
 
 -- BarrierNode instance - collects parallel results
@@ -733,13 +761,13 @@ instance {-# OVERLAPPING #-}
 
 -- General instance for any annotated node: dispatch based on base type
 instance {-# OVERLAPPABLE #-}
-         ( ReifyAnnotatedNode (def :@ ann) (IsLLMNode (def :@ ann)) (IsLogicNode (def :@ ann))
+         ( ReifyAnnotatedNode (def :@ ann) (IsLLMNode (def :@ ann)) (IsGeminiNode (def :@ ann)) (IsLogicNode (def :@ ann))
          ) => ReifyNodeDef (def :@ ann) where
-  reifyNodeDef pName pDef = reifyAnnotatedNode pDef (Proxy @(IsLLMNode (def :@ ann))) (Proxy @(IsLogicNode (def :@ ann))) pName pDef
+  reifyNodeDef pName pDef = reifyAnnotatedNode pDef (Proxy @(IsLLMNode (def :@ ann))) (Proxy @(IsGeminiNode (def :@ ann))) (Proxy @(IsLogicNode (def :@ ann))) pName pDef
 
 -- | Helper class to dispatch based on node kind.
-class ReifyAnnotatedNode (def :: Type) (isLLM :: Bool) (isLogic :: Bool) where
-  reifyAnnotatedNode :: Proxy def -> Proxy isLLM -> Proxy isLogic
+class ReifyAnnotatedNode (def :: Type) (isLLM :: Bool) (isGemini :: Bool) (isLogic :: Bool) where
+  reifyAnnotatedNode :: Proxy def -> Proxy isLLM -> Proxy isGemini -> Proxy isLogic
                      -> (forall name. KnownSymbol name => Proxy name -> Proxy def -> [NodeInfo])
 
 -- LLMNode case
@@ -752,10 +780,11 @@ instance ( ReifyMaybeType (GetInput def)
          , ReifyTemplateInfo (GetSystem def)
          , ReifyMemoryInfo (GetMemory def)
          , ReifyClaudeCodeInfo (GetClaudeCode def)
+         , ReifyGeminiInfo (GetGeminiModel def)
          , ReifyBool (GetVision def)
          , ReifyMaybeToolRecord (GetTools def)
-         ) => ReifyAnnotatedNode def 'True 'False where
-  reifyAnnotatedNode _ _ _ pName _ =
+         ) => ReifyAnnotatedNode def 'True 'False 'False where
+  reifyAnnotatedNode _ _ _ _ pName _ =
     let claudeCodeInfo = reifyClaudeCodeInfo (Proxy @(GetClaudeCode def))
         nodeKind = case claudeCodeInfo of
           Just _  -> RuntimeClaudeCode
@@ -774,6 +803,38 @@ instance ( ReifyMaybeType (GetInput def)
       , niTemplate = reifyTemplateInfo (Proxy @(GetTemplate def))
       , niMemory = reifyMemoryInfo (Proxy @(GetMemory def))
       , niClaudeCode = claudeCodeInfo
+      , niGemini = Nothing
+      }]
+
+-- GeminiNode case
+instance ( ReifyMaybeType (GetInput def)
+         , ReifySchemaInfo (GetSchema def)
+         , ReifyTemplateInfo (GetTemplate def)
+         , ReifyTemplateInfo (GetSystem def)
+         , ReifyMemoryInfo (GetMemory def)
+         , ReifyGeminiInfo (GetGeminiModel def)
+         , ReifyBool (GetVision def)
+         , ReifyMaybeToolRecord (GetTools def)
+         ) => ReifyAnnotatedNode def 'False 'True 'False where
+  reifyAnnotatedNode _ _ _ _ pName _ =
+    let geminiInfo = reifyGeminiInfo (Proxy @(GetGeminiModel def))
+    in [NodeInfo
+      { niName = T.pack (symbolVal pName)
+      , niKind = RuntimeGemini
+      , niInput = reifyMaybeType (Proxy @(GetInput def))
+      , niSchema = reifySchemaInfo (Proxy @(GetSchema def))
+      , niGotoTargets = []  -- Gemini nodes don't have Goto (they use GeminiLLMHandler which has explicit targets though?)
+                            -- Wait, LLMHandler also has targets but niGotoTargets is empty for LLM nodes in this reification?
+                            -- Yes, LLM nodes use Schema for implicit data flow edges usually.
+      , niHasGotoExit = False
+      , niHasVision = reifyBool (Proxy @(GetVision def))
+      , niTools = reifyMaybeToolInputs (Proxy @(GetTools def))
+      , niToolInfos = []
+      , niSystem = reifyTemplateInfo (Proxy @(GetSystem def))
+      , niTemplate = reifyTemplateInfo (Proxy @(GetTemplate def))
+      , niMemory = reifyMemoryInfo (Proxy @(GetMemory def))
+      , niClaudeCode = Nothing
+      , niGemini = geminiInfo
       }]
 
 -- LogicNode case
@@ -784,8 +845,8 @@ instance ( ReifyMaybeType (GetInput def)
          , ReifyMemoryInfo (GetMemory def)
          , ReifyGotoTargets (GotoTargetsFromDef def)
          , ReifyBool (HasGotoExitInDef def)
-         ) => ReifyAnnotatedNode def 'False 'True where
-  reifyAnnotatedNode _ _ _ pName _ = [NodeInfo
+         ) => ReifyAnnotatedNode def 'False 'False 'True where
+  reifyAnnotatedNode _ _ _ _ pName _ = [NodeInfo
     { niName = T.pack (symbolVal pName)
     , niKind = RuntimeLogic
     , niInput = reifyMaybeType (Proxy @(GetInput def))
@@ -799,11 +860,12 @@ instance ( ReifyMaybeType (GetInput def)
     , niTemplate = Nothing
     , niMemory = reifyMemoryInfo (Proxy @(GetMemory def))
     , niClaudeCode = Nothing  -- Logic nodes don't use ClaudeCode
+    , niGemini = Nothing
     }]
 
 -- Neither LLM nor Logic - unknown node type, return empty
-instance ReifyAnnotatedNode def 'False 'False where
-  reifyAnnotatedNode _ _ _ _ _ = []
+instance ReifyAnnotatedNode def 'False 'False 'False where
+  reifyAnnotatedNode _ _ _ _ _ _ = []
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- EDGE DERIVATION
