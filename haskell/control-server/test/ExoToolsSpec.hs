@@ -7,6 +7,7 @@ module Main where
 
 import Data.Aeson (toJSON, fromJSON, Result(..))
 import Data.Proxy (Proxy(..))
+import Data.Text (Text)
 import qualified Data.Map as Map
 import Data.Time.Clock (getCurrentTime)
 import Test.Tasty
@@ -116,6 +117,11 @@ test_pr_serialization = do
   let comment = ReviewComment "Copilot" "Looks good" (Just "Main.hs") (Just 10) ReviewCommented now
   let res = PrReviewStatusResult (Map.fromList [("Copilot", [comment])])
   let json = toJSON res
+  -- Verify the structure is flat (Map) not wrapped
+  case fromJSON @(Map.Map Text [ReviewComment]) json of
+    Success _ -> pure ()
+    Error err -> assertFailure $ "JSON should be a direct map: " ++ err
+  
   case fromJSON @PrReviewStatusResult json of
     Success res' -> assertEqual "Should roundtrip" res res'
     Error err -> assertFailure $ "Failed to parse: " ++ err

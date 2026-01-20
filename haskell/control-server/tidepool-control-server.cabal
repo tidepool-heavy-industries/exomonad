@@ -31,6 +31,16 @@ library
         Tidepool.Control.PMPropose
         Tidepool.Control.MailboxTools
         Tidepool.Control.ExoTools
+        Tidepool.Control.ExoTools.Internal
+        Tidepool.Control.ExoTools.Status
+        Tidepool.Control.ExoTools.Complete
+        Tidepool.Control.ExoTools.Reconstitute
+        Tidepool.Control.ExoTools.PreCommitCheck
+        Tidepool.Control.ExoTools.SpawnAgents
+        Tidepool.Control.ExoTools.FilePR
+        Tidepool.Control.ExoTools.BeadToPr
+        Tidepool.Control.ExoTools.PrToBead
+        Tidepool.Control.ExoTools.PrReviewStatus
         Tidepool.Control.TUITools
         Tidepool.Control.Export
         -- Scout (semantic code exploration)
