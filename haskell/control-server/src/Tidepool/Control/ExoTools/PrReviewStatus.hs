@@ -56,13 +56,10 @@ data PrReviewStatusResult = PrReviewStatusResult
   deriving stock (Show, Eq, Generic)
 
 instance ToJSON PrReviewStatusResult where
-  toJSON res = object
-    [ "comments" .= prsrComments res
-    ]
+  toJSON res = toJSON (prsrComments res)
 
 instance FromJSON PrReviewStatusResult where
-  parseJSON = withObject "PrReviewStatusResult" $ \v ->
-    PrReviewStatusResult <$> v .: "comments"
+  parseJSON v = PrReviewStatusResult <$> parseJSON v
 
 -- | Graph definition for pr_review_status tool.
 data PrReviewStatusGraph mode = PrReviewStatusGraph

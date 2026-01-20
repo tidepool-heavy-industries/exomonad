@@ -145,5 +145,5 @@ exoCompleteLogic args = do
               pure $ gotoExit ExoCompleteResult
                 { ecrBeadId = bid
                 , ecrStatus = StatusClosed
-                , ecrMessage = "Successfully closed bead " <> bid
+                , ecrMessage = "Bead " <> bid <> " has been closed. Don't forget to push and create a PR if you haven't already!"
                 }
