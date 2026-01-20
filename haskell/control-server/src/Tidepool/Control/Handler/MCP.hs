@@ -24,25 +24,18 @@ import Data.Aeson (Value, fromJSON, toJSON, Result(..))
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Maybe (fromMaybe)
-import System.Environment (lookupEnv)
 
 import Tidepool.Control.Logging (Logger, logInfo, logDebug, logError)
 import Tidepool.Control.Protocol
 import Tidepool.Control.Types (ServerConfig(..))
-import Tidepool.Control.Scout.DocGen (TeachQuery(..), TeachingDoc(..))
-import Tidepool.Control.Scout.DocGen.Teacher (ScoutGemmaEffect)
-import Tidepool.Control.Scout.Graph.Runner (runDocGenGraph)
 import Tidepool.Control.LSPTools
-  ( findCallersLogic, FindCallersArgs(..), FindCallersResult(..)
-  , findCalleesLogic, FindCalleesArgs(..), FindCalleesResult(..)
-  , showFieldsLogic, ShowFieldsArgs(..), ShowFieldsResult(..)
-  , showConstructorsLogic, ShowConstructorsArgs(..), ShowConstructorsResult(..)
-  )
 import Tidepool.Control.TUITools
   ( confirmActionLogic, ConfirmArgs(..), ConfirmResult(..),
     selectOptionLogic, SelectArgs(..), SelectResult(..),
     requestGuidanceLogic, GuidanceArgs(..)
   )
+import Tidepool.Control.FeedbackTools
+  ( registerFeedbackLogic, RegisterFeedbackArgs(..) )
 import Tidepool.Control.ExoTools
   ( exoStatusLogic, ExoStatusArgs(..)
   , exoCompleteLogic, ExoCompleteArgs(..), ExoCompleteResult(..)
@@ -77,12 +70,12 @@ import Tidepool.Worktree.Interpreter (runWorktreeIO, defaultWorktreeConfig)
 import Tidepool.Gemini.Interpreter (runGeminiIO)
 import Tidepool.Effect.NodeMeta (runNodeMeta, runGraphMeta, defaultNodeMeta, GraphMetadata(..))
 import Tidepool.Effect.TUI (TUI(..), Interaction(..))
-import Tidepool.Effect.Types (runLog, LogLevel(Debug, Info, Warn), runReturn, runTime)
+import Tidepool.Effect.Types (runLog, LogLevel(Debug), runReturn, runTime)
 import Tidepool.Graph.Goto (unwrapSingleChoice)
 import Tidepool.LSP.Interpreter (LSPSession, runLSP)
 import Tidepool.TUI.Interpreter (TUIHandle, runTUI)
-import Tidepool.Teaching.LLM (TeachingConfig, loadTeachingConfig, withTeaching, runLLMWithTeaching)
-import Tidepool.Teaching.Teacher (teacherGuidance)
+-- import Tidepool.Teaching.LLM (TeachingConfig, loadTeachingConfig, withTeaching, runLLMWithTeaching)
+-- import Tidepool.Teaching.Teacher (teacherGuidance)
 
 -- | Run TUI interpreter if handle is available, otherwise run mock.
 runTUIOrMock :: LastMember IO effs => Maybe TUIHandle -> Eff (TUI ': effs) a -> Eff effs a
@@ -121,6 +114,7 @@ handleMcpTool logger config lspSession maybeTuiHandle reqId toolName args = do
     "confirm_action" -> handleConfirmActionTool logger lspSession maybeTuiHandle reqId args
     "select_option" -> handleSelectOptionTool logger lspSession maybeTuiHandle reqId args
     "request_guidance" -> handleRequestGuidanceTool logger lspSession maybeTuiHandle reqId args
+    "register_feedback" -> handleRegisterFeedbackTool logger reqId args
 
     -- Tier 2: LLM-enhanced tools (graph-based)
     -- DISABLED: teach-graph spawns recursive LLM calls, expensive during testing
@@ -338,6 +332,7 @@ handleExoReconstituteTool logger _lspSession reqId args = do
           pure $ mcpToolSuccess reqId (toJSON result)
 
 
+{-
 -- | Handle the teach-graph tool (graph-based exploration).
 --
 -- Uses the graph DSL implementation with Haiku for symbol selection.
@@ -420,6 +415,7 @@ runWithoutTeaching logger _lspSession _maybeTuiHandle reqId _query = do
       pure $ mcpToolError reqId $
         "Production mode for teach-graph not yet implemented. " <>
         "Set TEACHING_ENABLED=true to use teaching mode instead."
+-}
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -715,6 +711,31 @@ handleConfirmActionTool logger _lspSession maybeTuiHandle reqId args = do
 
         Right result -> do
           logInfo logger $ "[MCP:" <> reqId <> "] Action confirmed=" <> T.pack (show $ crConfirmed result)
+          pure $ mcpToolSuccess reqId (toJSON result)
+
+
+-- | Handle the register_feedback tool.
+handleRegisterFeedbackTool :: Logger -> Text -> Value -> IO ControlResponse
+handleRegisterFeedbackTool logger reqId args = do
+  case fromJSON args of
+    Error err -> do
+      logError logger $ "  parse error: " <> T.pack err
+      pure $ mcpToolError reqId $ "Invalid register_feedback arguments: " <> T.pack err
+
+    Success rfArgs -> do
+      logDebug logger $ "  bead_id=" <> rfArgs.rfaBeadId
+
+      resultOrErr <- try $ runM
+        $ runLog Debug
+        $ fmap unwrapSingleChoice (registerFeedbackLogic rfArgs)
+
+      case resultOrErr of
+        Left (e :: SomeException) -> do
+          logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId $ "register_feedback failed: " <> T.pack (displayException e)
+
+        Right result -> do
+          logInfo logger $ "[MCP:" <> reqId <> "] Feedback registered for " <> rfArgs.rfaBeadId
           pure $ mcpToolSuccess reqId (toJSON result)
 
 
