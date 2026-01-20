@@ -35,11 +35,12 @@ module Tidepool.GitHub.Interpreter
   , ghIssueView
   , ghPrList
   , ghPrView
+  , ghPrCreate
   , ghAuthCheck
   ) where
 
 import Control.Exception (try, SomeException)
-import Control.Monad (when, unless)
+import Control.Monad (unless)
 import Control.Monad.Freer (Eff, LastMember, interpret, sendM)
 import Data.Aeson (eitherDecode)
 import Data.ByteString.Lazy qualified as LBS
@@ -59,7 +60,8 @@ import Tidepool.Effects.GitHub
   , PRFilter(..)
   , PRState(..)
   , Repo(..)
-  , IssueUrl(..)
+  , PRCreateSpec(..)
+  , PRUrl(..)
   )
 
 
@@ -102,6 +104,9 @@ runGitHubIO config = interpret $ \case
     sendM $ ghIssueList config repo filt
 
   -- PR operations
+  CreatePR spec ->
+    sendM $ ghPrCreate config spec
+
   GetPullRequest (Repo repo) num includeDetails ->
     sendM $ ghPrView config repo num includeDetails
 
@@ -234,6 +239,27 @@ ghPrView config repo num includeDetails = do
               pure Nothing
 
 
+-- | Create a pull request using gh CLI.
+ghPrCreate :: GitHubConfig -> PRCreateSpec -> IO PRUrl
+ghPrCreate config spec = do
+  let baseArgs = if T.null spec.prcsBase then [] else ["--base", T.unpack spec.prcsBase]
+      args = [ "pr", "create"
+             , "--repo", T.unpack spec.prcsRepo.unRepo
+             , "--head", T.unpack spec.prcsHead
+             , "--title", T.unpack spec.prcsTitle
+             , "--body", T.unpack spec.prcsBody
+             ] ++ baseArgs
+
+  result <- runGhCommand config args
+  case result of
+    Left err -> do
+      logDebug config $ "ghPrCreate: gh command failed: " <> T.unpack err
+      -- For creation, we error out as we can't return a "Nothing" for PRUrl
+      error $ "Failed to create PR: " <> T.unpack err
+    Right output ->
+      pure $ PRUrl $ T.strip output
+
+
 -- ════════════════════════════════════════════════════════════════════════════
 -- CLI FUNCTIONS - AUTH
 -- ════════════════════════════════════════════════════════════════════════════
@@ -262,19 +288,19 @@ runGhCommand config args = do
     Left (e :: SomeException) ->
       pure $ Left $ "gh command failed: " <> T.pack (show e)
 
-    Right (exitCode, stdout, stderr) ->
+    Right (exitCode, stdout, stderrOutput) ->
       case exitCode of
         ExitSuccess -> pure $ Right $ T.pack stdout
         ExitFailure code
           -- gh returns non-zero for "not found" which is OK (return empty)
-          | "not found" `T.isInfixOf` T.toLower (T.pack stderr) ->
+          | "not found" `T.isInfixOf` T.toLower (T.pack stderrOutput) ->
               pure $ Right ""
           -- Auth errors get special messaging
-          | "authentication" `T.isInfixOf` T.toLower (T.pack stderr) ->
+          | "authentication" `T.isInfixOf` T.toLower (T.pack stderrOutput) ->
               pure $ Left $ "Not authenticated. Run: gh auth login"
           | otherwise ->
               pure $ Left $ "gh exited with code " <> T.pack (show code)
-                          <> if config.ghcQuiet then "" else ": " <> T.pack stderr
+                          <> if config.ghcQuiet then "" else ": " <> T.pack stderrOutput
 
 
 -- | Log debug message to stderr when not in quiet mode.

@@ -133,6 +133,33 @@ main = hspec $ do
           length pr.prReviews `shouldBe` 1
           (head pr.prReviews).reviewState `shouldBe` ReviewApproved
 
+  describe "PRCreateSpec JSON parsing" $ do
+    it "parses a full spec" $ do
+      let json = LBS.pack $ unlines
+            [ "{"
+            , "  \"prcsRepo\": \"owner/repo\","
+            , "  \"prcsHead\": \"feature\","
+            , "  \"prcsBase\": \"main\","
+            , "  \"prcsTitle\": \"Fix bug\","
+            , "  \"prcsBody\": \"Fixes the issue\""
+            , "}"
+            ]
+      case eitherDecode json :: Either String PRCreateSpec of
+        Left err -> expectationFailure $ "Failed to parse: " <> err
+        Right spec -> do
+          spec.prcsRepo `shouldBe` Repo "owner/repo"
+          spec.prcsHead `shouldBe` "feature"
+          spec.prcsBase `shouldBe` "main"
+          spec.prcsTitle `shouldBe` "Fix bug"
+          spec.prcsBody `shouldBe` "Fixes the issue"
+
+  describe "PRUrl JSON parsing" $ do
+    it "parses a PR URL" $ do
+      let json = "\"https://github.com/owner/repo/pull/1\""
+      case eitherDecode json :: Either String PRUrl of
+        Left err -> expectationFailure $ "Failed to parse: " <> err
+        Right (PRUrl url) -> url `shouldBe` "https://github.com/owner/repo/pull/1"
+
   describe "Author JSON parsing" $ do
     it "parses author with name" $ do
       let json = "{ \"login\": \"user\", \"name\": \"Full Name\" }"
