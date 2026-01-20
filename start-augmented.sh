@@ -41,7 +41,7 @@ fi
 # Check for existing process-compose session
 if curl -sf http://localhost:8080/hostname > /dev/null 2>&1; then
     echo "⚠️  Existing Tidepool session detected, shutting down..."
-    ~/.local/bin/process-compose down --ordered-shutdown
+    process-compose down --ordered-shutdown
     sleep 2
 fi
 
