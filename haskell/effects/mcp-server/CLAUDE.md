@@ -401,6 +401,89 @@ This is the opposite of `session-interpreter`, which **invokes** Claude Code. MC
 - [../CLAUDE.md](../CLAUDE.md) - Effect interpreter pattern
 - [Root CLAUDE.md](../../../CLAUDE.md) - Project overview
 
+## Built-in Tools
+
+### bd_dispatch - Optimal Worktree Assignment
+
+Intelligently assigns high-priority unblocked beads to new git worktrees for parallel development.
+
+**Tool Definition:** `Tidepool.MCP.Tools.BdDispatch`
+
+**Purpose:** Supports parallel agent workflows by identifying the N highest-priority beads that are ready to work (no blocking dependencies) and generating the shell commands to create worktrees for them.
+
+**Input Schema:**
+```haskell
+newtype BdDispatchInput = BdDispatchInput
+  { agents :: Maybe Int  -- Number of parallel worktrees to create (default: 1, minimum: 1)
+  }
+```
+
+**Output Schema:**
+```haskell
+data BdDispatchOutput = BdDispatchOutput
+  { commands :: [Text]  -- Shell commands: "git worktree add <path> -b <branch>"
+  , beads :: [Text]     -- Bead IDs assigned
+  }
+```
+
+**Usage from Claude Code:**
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "bd_dispatch",
+    "arguments": {
+      "agents": 3
+    }
+  }
+}
+```
+
+**Response Example:**
+```json
+{
+  "commands": [
+    "git worktree add /path/to/tidepool-abc -b tidepool-abc",
+    "git worktree add /path/to/tidepool-def -b tidepool-def",
+    "git worktree add /path/to/tidepool-ghi -b tidepool-ghi"
+  ],
+  "beads": ["tidepool-abc", "tidepool-def", "tidepool-ghi"]
+}
+```
+
+**Algorithm:**
+1. Validate inputs (must be in git repo, agents > 0)
+2. Query all open beads from BD via `bd list --status=open`
+3. Filter to unblocked beads (all dependencies are closed)
+4. Sort by priority descending (P0=0 first, P4=4 last)
+5. Take top N beads
+6. Generate `git worktree add` commands for each
+
+**Worktree Path Convention:**
+```
+<parent-of-current-repo>/<repo-name>-<bead-id>
+```
+
+Example: If current repo is `/Users/alice/projects/tidepool`, assigned bead `tidepool-abc` gets:
+```
+/Users/alice/projects/tidepool-abc
+```
+
+**Error Handling:**
+- **Not in git repo:** Fails with explicit error (no silent fallbacks)
+- **No open beads:** Returns empty lists
+- **Invalid agents:** Clamped to minimum of 1
+
+**Design Decisions:**
+- **Uses defaultBDConfig:** Tool runs in Claude Code context, not user shell. User's `.bd/config.toml` may not be visible to MCP process.
+- **Explicit failures:** Per repo guidelines, prefer failure over undocumented heuristics (no fallback to `.` for repo root).
+- **Priority sort order:** Uses `Down` wrapper to sort descending (P0 first).
+- **Path construction:** Uses `takeDirectory` instead of manual `".."` for clarity.
+
+**See Also:**
+- Beads workflow: [Root CLAUDE.md - Task Tracking](../../../CLAUDE.md#task-tracking-beads)
+- BD interpreter: [bd-interpreter/CLAUDE.md](../bd-interpreter/CLAUDE.md)
+
 ## Future Work
 
 - Auto-generate HasJSONSchema instances via Template Haskell
@@ -408,3 +491,4 @@ This is the opposite of `session-interpreter`, which **invokes** Claude Code. MC
 - Tool composition (one tool calling another)
 - Streaming responses (for long-running tools)
 - Progress reporting during execution
+- bd_dispatch: Read user's `.bd/config.toml` if available in environment

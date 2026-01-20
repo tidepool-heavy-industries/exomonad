@@ -2,7 +2,6 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE OverloadedRecordDot #-}
-{-# LANGUAGE TemplateHaskell #-}
 
 -- | MCP tool for optimal worktree assignment
 module Tidepool.MCP.Tools.BdDispatch
@@ -14,26 +13,27 @@ module Tidepool.MCP.Tools.BdDispatch
 import Data.Aeson (FromJSON(..), ToJSON(..))
 import Data.List (sortOn)
 import Data.Maybe (fromMaybe)
+import Data.Ord (Down(..))
 import Data.Proxy (Proxy(..))
 import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
-import System.FilePath ((</>))
+import System.FilePath ((</>), takeDirectory)
 
-import Tidepool.Schema (HasJSONSchema(..), TidepoolDefault(..))
+import Tidepool.Schema (TidepoolDefault(..))
 import Tidepool.StructuredOutput () -- Import for generic instances
 import Tidepool.StructuredOutput.Instances () -- Import for TidepoolDefault Aeson instances
 import Tidepool.MCP.Types (McpTool)
 import Tidepool.MCP.Server (makeMcpTool)
-import Tidepool.BD.Interpreter (BDConfig(..), defaultBDConfig, bdListByStatus)
+import Tidepool.BD.Interpreter (defaultBDConfig, bdListByStatus)
 import Tidepool.BD.GitInterpreter (runGitIO) -- Need for detectWorktree
 import Tidepool.Effects.Git (getWorktreeInfo, WorktreeInfo(..))
 import Tidepool.Effects.BD (BeadInfo(..), BeadStatus(..), DependencyInfo(..))
 import Control.Monad.Freer (runM)
 
 -- | Input for bd_dispatch tool
-data BdDispatchInput = BdDispatchInput
-  { -- | Number of parallel agents/worktrees to prepare (default: 1)
+newtype BdDispatchInput = BdDispatchInput
+  { -- | Number of parallel agents/worktrees to prepare (default: 1, minimum: 1)
     agents :: Maybe Int
   }
   deriving stock (Show, Generic)
@@ -58,33 +58,48 @@ bdDispatchTool = makeMcpTool
   (\(TidepoolDefault input) -> bdDispatchHandler input)
 
 -- | Handler for bd_dispatch
+--
+-- Workflow:
+-- 1. Validate inputs (must be in git repo, agents > 0)
+-- 2. Query all open beads from BD
+-- 3. Filter to unblocked beads (no open dependencies)
+-- 4. Sort by priority descending (P0 first, P4 last)
+-- 5. Generate git worktree add commands
+--
+-- Design decision: Uses defaultBDConfig instead of reading .bd/config.toml.
+-- Rationale: Tool is invoked from Claude Code context, not user shell context.
+-- User's BD config is in their environment, not necessarily visible to MCP process.
 bdDispatchHandler :: BdDispatchInput -> IO BdDispatchOutput
 bdDispatchHandler input = do
-  let n = fromMaybe 1 input.agents
-  
+  -- Validate: agents parameter must be positive
+  let n = max 1 (fromMaybe 1 input.agents)
+
   -- 1. Get repo root for worktree paths
+  -- Fail explicitly if not in a git repository (no silent fallbacks)
   mWorktree <- runM $ runGitIO getWorktreeInfo
-  let repoRoot = case mWorktree of
-        Just wt -> wt.wiRepoRoot
-        Nothing -> "." -- Fallback to current dir
+  (repoRoot, repoName) <- case mWorktree of
+    Just wt -> pure (wt.wiRepoRoot, wt.wiName)
+    Nothing -> fail "Not in a git repository - cannot determine worktree root"
 
   -- 2. Get unblocked open beads
-  -- We use bd CLI directly via the interpreter's low-level functions
+  -- Note: Uses bd CLI via interpreter (subprocess-based)
   allOpen <- bdListByStatus defaultBDConfig StatusOpen
   let ready = filter isUnblocked allOpen
-  let sortedReady = sortOn (.biPriority) ready
-  
-  -- 3. Take top N beads
+
+  -- 3. Sort by priority descending (P0=0 is highest, P4=4 is lowest)
+  -- Down wrapper reverses sort order
+  let sortedReady = sortOn (Down . (.biPriority)) ready
+
+  -- 4. Take top N beads
   let assigned = take n sortedReady
-  
-  -- 4. Generate commands
-  -- Format: git worktree add ../<repo>-<beadId> -b <beadId>
-  let repoName = case mWorktree of
-        Just wt -> wt.wiName
-        Nothing -> "tidepool"
-        
-  let mkCommand bead = 
-        let path = repoRoot </> ".." </> (T.unpack repoName <> "-" <> T.unpack bead.biId)
+
+  -- 5. Generate commands
+  -- Path: <parent-of-repo>/<repo>-<beadId>
+  -- Use takeDirectory instead of manual ".." to handle paths cleanly
+  let parentDir = takeDirectory repoRoot
+
+  let mkCommand bead =
+        let path = parentDir </> (T.unpack repoName <> "-" <> T.unpack bead.biId)
             branch = bead.biId
         in "git worktree add " <> T.pack path <> " -b " <> branch
 

@@ -1,4 +1,3 @@
-{-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE OverloadedRecordDot #-}
 
@@ -17,7 +16,7 @@ module Tidepool.MCP.Server
   , module Tidepool.MCP.Types
   ) where
 
-import Data.Aeson (FromJSON, ToJSON, Value(..), Result(..), fromJSON, toJSON, object, (.=))
+import Data.Aeson (FromJSON, ToJSON, Value(..), Result(..), fromJSON, toJSON, (.=))
 import qualified Data.Aeson.KeyMap as KM
 import Data.Aeson.Text (encodeToTextBuilder)
 import qualified Data.Aeson.Key as Key
@@ -26,9 +25,10 @@ import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.Builder as TLB
 import Data.List (find)
 import Data.Proxy (Proxy(..))
-import Data.Scientific (fromFloatDigits)
+import qualified Data.Scientific as Sci
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.Read as TR
 import MCP.Server (runMcpServerStdio)
 import MCP.Server.Types
   ( McpServerInfo(..)
@@ -131,15 +131,27 @@ callTool cfg name args = case findTool name cfg.mcTools of
         -- Return proper JSON encoding, not Haskell show representation
         pure $ Right $ ContentText $ TL.toStrict $ TLB.toLazyText $ encodeToTextBuilder $ toJSON result
   where
-    -- Simple heuristic to parse numbers from strings provided by mcp-server
-    parseArg v = case T.unpack v of
-      "true" -> Bool True
+    -- Parse arguments from mcp-server's Text format back to appropriate JSON types
+    -- MCP protocol flattens all parameters to Text; we need to recover type information
+    -- for tools that expect numeric/boolean parameters.
+    --
+    -- Supports:
+    -- - Booleans: "true", "false"
+    -- - Integers: "42", "-5"
+    -- - Decimals: "3.14", "-0.5"
+    -- - Scientific notation: "1.5e10", "2E-3" (MCP spec allows this)
+    --
+    -- Falls back to String for:
+    -- - Malformed numbers: "--5", "1.2.3", "abc"
+    -- - Empty strings
+    -- - Arbitrary text
+    parseArg :: Text -> Value
+    parseArg v = case v of
+      "true"  -> Bool True
       "false" -> Bool False
-      s | all (`elem` ("-0123456789." :: String)) s && not (null s) ->
-          case reads s of
-            [(n, "")] -> Number (fromFloatDigits (n :: Double))
-            _ -> String v
-      _ -> String v
+      _ -> case TR.signed TR.rational v of
+        Right (num, rest) | T.null rest -> Number (Sci.fromFloatDigits (num :: Double))
+        _ -> String v
 
 -- | Find tool by name
 findTool :: Text -> [McpTool] -> Maybe McpTool
