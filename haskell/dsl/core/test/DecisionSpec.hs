@@ -32,7 +32,7 @@ spec = do
   describe "DecisionTrace JSON roundtrip" $ do
     it "roundtrips full trace" $ do
       let t = DecisionTrace
-            { dtContext = DecisionContext "What next?" ["bead-1"]
+            { dtContext = DecisionContext "What next?" [BeadSummary "bead-1" "Test Bead" 1]
             , dtDecision = Continue
             , dtTimestamp = UTCTime (fromGregorian 2026 1 19) 0
             }

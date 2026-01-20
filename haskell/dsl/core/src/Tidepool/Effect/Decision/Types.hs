@@ -7,6 +7,7 @@ module Tidepool.Effect.Decision.Types
     Decision(..)
     -- * Context and Tracing
   , DecisionContext(..)
+  , BeadSummary(..)
   , DecisionTrace(..)
   ) where
 
@@ -30,14 +31,22 @@ data Decision
     -- ^ Continue with the current plan/flow.
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
+-- | Summary of a bead for decision context.
+data BeadSummary = BeadSummary
+  { bsId :: Text
+  , bsTitle :: Text
+  , bsPriority :: Int
+  }
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+
 -- | Context provided to a decision request.
 --
 -- This context is used to render the decision UI.
 data DecisionContext = DecisionContext
   { dcPrompt :: Text
     -- ^ Main prompt or question for the decision.
-  , dcReadyBeads :: [Text]
-    -- ^ List of bead IDs that are ready for selection.
+  , dcReadyBeads :: [BeadSummary]
+    -- ^ List of beads that are ready for selection.
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 

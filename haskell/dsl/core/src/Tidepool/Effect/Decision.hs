@@ -9,6 +9,7 @@ module Tidepool.Effect.Decision
   , requestDecision
     -- * Context and Tracing
   , DecisionContext(..)
+  , BeadSummary(..)
   , DecisionTrace(..)
   ) where
 
@@ -26,10 +27,19 @@ import Tidepool.Effect.Types (Time, Log, getCurrentTime, logInfoWith)
 -- and logs the resulting decision via the Log effect.
 requestDecision :: (Member TUI r, Member Time r, Member Log r) => DecisionContext -> Eff r Decision
 requestDecision ctx = do
+  let mkButton b =
+        let icon = case b.bsPriority of
+              0 -> "🔴"
+              1 -> "🟡"
+              2 -> "🔵"
+              _ -> "⚪"
+            label = icon <> " [" <> b.bsId <> "] " <> b.bsTitle
+        in EButton ("bead:" <> b.bsId) label
+
   let ui = UISpec "decision-request" $ Vertical $
         [ EText "prompt" ctx.dcPrompt
         ] ++
-        [ EButton ("bead:" <> b) ("Select Bead: " <> b) | b <- ctx.dcReadyBeads ] ++
+        map mkButton ctx.dcReadyBeads ++
         [ EButton "continue" "Continue"
         , EButton "abort" "Abort"
         , EInput "guidance" "Provide Guidance (Enter to submit)" ""
