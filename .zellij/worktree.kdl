@@ -1,0 +1,33 @@
+layout {
+    default_tab_template {
+        pane size=1 borderless=true {
+            plugin location="zellij:tab-bar"
+        }
+        children
+        pane size=1 borderless=true {
+            plugin location="zellij:status-bar"
+        }
+    }
+
+    tab name="subagent" {
+        pane split_direction="vertical" {
+            // LEFT: Main interaction pane (CLI)
+            pane size="60%" focus=true {
+                command "bash"
+                args "-c" "until nc -zU .tidepool/sockets/control.sock 2>/dev/null; do echo 'Waiting for control-server...'; sleep 0.5; done; echo 'Control server ready!'; exec $SUBAGENT_CMD"
+            }
+            
+            // RIGHT: Stacked infrastructure panes (collapsible)
+            pane split_direction="horizontal" stacked=true {
+                pane name="process-compose" {
+                    command "process-compose"
+                    args "up"
+                }
+                pane name="logs" {
+                    command "tail"
+                    args "-f" ".tidepool/logs/pc.log"
+                }
+            }
+        }
+    }
+}
