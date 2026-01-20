@@ -1,11 +1,10 @@
 {
   "mcpServers": {
     "tidepool": {
-      "command": "/Users/inannamalick/dev/tidepool/rust/target/debug/mantle-agent",
+      "command": "mantle-agent",
       "args": ["mcp"],
       "env": {
-        "MANTLE_CONTROL_HOST": "127.0.0.1",
-        "MANTLE_CONTROL_PORT": "7432",
+        "TIDEPOOL_CONTROL_SOCKET": ".tidepool/sockets/control.sock",
         "RUST_LOG": "info"
       }
     }
