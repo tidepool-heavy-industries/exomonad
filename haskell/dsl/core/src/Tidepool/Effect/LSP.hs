@@ -58,6 +58,8 @@ module Tidepool.Effect.LSP
   , completion
   , workspaceSymbol
   , documentSymbol
+  , prepareCallHierarchy
+  , outgoingCalls
   , getIndexingState
 
     -- * Document Identifiers
@@ -83,6 +85,8 @@ module Tidepool.Effect.LSP
   , CompletionItemKind(..)
   , SymbolInformation(..)
   , SymbolKind(..)
+  , CallHierarchyItem(..)
+  , CallHierarchyOutgoingCall(..)
 
     -- * Indexing State
   , IndexingState(..)
@@ -320,6 +324,25 @@ data SymbolInformation = SymbolInformation
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)
 
+-- | Represents a symbol in the call hierarchy.
+data CallHierarchyItem = CallHierarchyItem
+  { chiName           :: !Text
+  , chiKind           :: !SymbolKind
+  , chiUri            :: !Text
+  , chiRange          :: !Range
+  , chiSelectionRange :: !Range
+  }
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (FromJSON, ToJSON)
+
+-- | Represents an outgoing call from a function.
+data CallHierarchyOutgoingCall = CallHierarchyOutgoingCall
+  { chocTo         :: !CallHierarchyItem
+  , chocFromRanges :: ![Range]
+  }
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (FromJSON, ToJSON)
+
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- INDEXING STATE
@@ -435,6 +458,12 @@ data LSP r where
   -- | Get all symbols (functions, types, etc.) defined in a document.
   DocumentSymbol :: TextDocumentIdentifier -> LSP [SymbolInformation]
 
+  -- | Prepare call hierarchy at a position.
+  PrepareCallHierarchy :: TextDocumentIdentifier -> Position -> LSP [CallHierarchyItem]
+
+  -- | Get outgoing calls for a call hierarchy item.
+  OutgoingCalls :: CallHierarchyItem -> LSP [CallHierarchyOutgoingCall]
+
   -- | Get the current HLS indexing state.
   --
   -- Returns 'Indexing' if HLS is still indexing the workspace,
@@ -507,6 +536,18 @@ workspaceSymbol query = send (WorkspaceSymbol query)
 -- Note: This operation requires native execution (not available in WASM).
 documentSymbol :: (Member LSP effs, NativeOnly) => TextDocumentIdentifier -> Eff effs [SymbolInformation]
 documentSymbol doc = send (DocumentSymbol doc)
+
+-- | Prepare call hierarchy at a position.
+--
+-- Note: This operation requires native execution (not available in WASM).
+prepareCallHierarchy :: (Member LSP effs, NativeOnly) => TextDocumentIdentifier -> Position -> Eff effs [CallHierarchyItem]
+prepareCallHierarchy doc pos = send (PrepareCallHierarchy doc pos)
+
+-- | Get outgoing calls for a call hierarchy item.
+--
+-- Note: This operation requires native execution (not available in WASM).
+outgoingCalls :: (Member LSP effs, NativeOnly) => CallHierarchyItem -> Eff effs [CallHierarchyOutgoingCall]
+outgoingCalls item = send (OutgoingCalls item)
 
 -- | Get the current HLS indexing state.
 --
