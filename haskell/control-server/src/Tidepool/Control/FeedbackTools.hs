@@ -17,7 +17,7 @@ module Tidepool.Control.FeedbackTools
   , TokenCategoryEstimate(..)
   ) where
 
-import Control.Monad.Freer (Eff, Member, sendM, LastMember)
+import Control.Monad.Freer (Eff, sendM, LastMember)
 import Data.Aeson (FromJSON(..), ToJSON(..), encode)
 import qualified Data.ByteString.Lazy as LBS
 import Data.Text (Text)
@@ -88,6 +88,7 @@ data RegisterFeedbackResult = RegisterFeedbackResult
   }
   deriving stock (Show, Eq, Generic)
 
+instance FromJSON RegisterFeedbackResult
 instance ToJSON RegisterFeedbackResult
 
 -- ════════════════════════════════════════════════════════════════════════════
