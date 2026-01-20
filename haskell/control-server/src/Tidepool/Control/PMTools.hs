@@ -3,8 +3,11 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE OverloadedRecordDot #-}
 
 -- | Shared types and label constants for PM tools.
 --
@@ -21,16 +24,28 @@ module Tidepool.Control.PMTools
     -- * Helper Functions
   , getWorkflowState
   , setWorkflowState
+
+    -- * PM Approve Expansion Tool
+  , PmApproveExpansionGraph(..)
+  , pmApproveExpansionLogic
+  , PmApproveExpansionArgs(..)
+  , PmApproveExpansionResult(..)
   ) where
 
 import Control.Monad (forM_)
 import Control.Monad.Freer (Eff, Member)
-import Data.Aeson (FromJSON, ToJSON)
-import Data.Maybe (mapMaybe, listToMaybe)
+import Data.Aeson (FromJSON(..), ToJSON(..), object, (.=), (.:), (.:?), withObject)
+import Data.Maybe (mapMaybe, listToMaybe, fromMaybe)
 import Data.Text (Text)
+import qualified Data.Text as T
 import GHC.Generics (Generic)
 
-import Tidepool.Effects.BD (BD, getLabels, addLabel, removeLabel)
+import Tidepool.Effects.BD (BD, getLabels, addLabel, removeLabel, getBead, updateBead, BeadInfo(..), UpdateBeadInput(..), emptyUpdateInput)
+import Tidepool.Graph.Generic (type (:-))
+import Tidepool.Graph.Generic.Core (EntryNode, ExitNode, LogicNode)
+import Tidepool.Graph.Goto (Goto, GotoChoice, To, gotoExit)
+import Tidepool.Graph.Types (type (:@), Input, UsesEffects, Exit, MCPExport, MCPToolDef)
+import Tidepool.Schema (HasJSONSchema(..), objectSchema, describeField, emptySchema, SchemaType(..))
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- WORKFLOW STATE
@@ -102,3 +117,111 @@ setWorkflowState beadId newState = do
 
   -- Add new label
   addLabel beadId (stateToLabel newState)
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- PM-APPROVE-EXPANSION GRAPH
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Arguments for pm_approve_expansion tool.
+data PmApproveExpansionArgs = PmApproveExpansionArgs
+  { paeaBeadId :: Text
+  , paeaDecision :: Text  -- "approve" or "reject"
+  , paeaFeedback :: Maybe Text
+  }
+  deriving stock (Show, Eq, Generic)
+
+instance HasJSONSchema PmApproveExpansionArgs where
+  jsonSchema = objectSchema
+    [ ("bead_id", describeField "bead_id" "bead ID" (emptySchema TString))
+    , ("decision", describeField "decision" "Decision: 'approve' or 'reject'" (emptySchema TString))
+    , ("feedback", describeField "feedback" "Feedback (required for rejection, optional for approval)" (emptySchema TString))
+    ]
+    ["bead_id", "decision"]
+
+instance FromJSON PmApproveExpansionArgs where
+  parseJSON = withObject "PmApproveExpansionArgs" $ \v ->
+    PmApproveExpansionArgs
+      <$> v .: "bead_id"
+      <*> v .: "decision"
+      <*> v .:? "feedback"
+
+instance ToJSON PmApproveExpansionArgs where
+  toJSON args = object
+    [ "bead_id" .= paeaBeadId args
+    , "decision" .= paeaDecision args
+    , "feedback" .= paeaFeedback args
+    ]
+
+-- | Result of pm_approve_expansion tool.
+data PmApproveExpansionResult = PmApproveExpansionResult
+  { paerNewStatus :: Text
+  , paerMessage   :: Text
+  }
+  deriving stock (Show, Eq, Generic)
+
+instance ToJSON PmApproveExpansionResult where
+  toJSON res = object
+    [ "new_status" .= paerNewStatus res
+    , "message"    .= paerMessage res
+    ]
+
+-- | Graph definition for pm_approve_expansion tool.
+data PmApproveExpansionGraph mode = PmApproveExpansionGraph
+  { paeEntry :: mode :- EntryNode PmApproveExpansionArgs
+      :@ MCPExport
+      :@ MCPToolDef ('("pm_approve_expansion", "Approve or reject a bead's expansion plan. Handles label transitions and feedback."))
+
+  , paeRun :: mode :- LogicNode
+      :@ Input PmApproveExpansionArgs
+      :@ UsesEffects '[BD, Goto Exit PmApproveExpansionResult]
+
+  , paeExit :: mode :- ExitNode PmApproveExpansionResult
+  }
+  deriving Generic
+
+-- | Core logic for pm_approve_expansion.
+pmApproveExpansionLogic
+  :: Member BD es
+  => PmApproveExpansionArgs
+  -> Eff es (GotoChoice '[To Exit PmApproveExpansionResult])
+pmApproveExpansionLogic args = do
+  mBead <- getBead args.paeaBeadId
+  case mBead of
+    Nothing -> pure $ gotoExit PmApproveExpansionResult
+      { paerNewStatus = "error"
+      , paerMessage = "Bead not found: " <> args.paeaBeadId
+      }
+    Just bead -> do
+      case args.paeaDecision of
+        "approve" -> do
+          setWorkflowState args.paeaBeadId Ready
+          pure $ gotoExit PmApproveExpansionResult
+            { paerNewStatus = stateToLabel Ready
+            , paerMessage = "Bead approved. Moved to 'ready' state."
+            }
+        
+        "reject" -> do
+          setWorkflowState args.paeaBeadId NeedsTLReview
+          
+          -- Append feedback to description
+          case args.paeaFeedback of
+            Just feedback -> do
+              let oldDesc = fromMaybe "" bead.biDescription
+                  newDesc = if T.null oldDesc 
+                            then feedback 
+                            else oldDesc <> "\n\n**PM Feedback:**\n" <> feedback
+              updateBead args.paeaBeadId $ emptyUpdateInput { ubiDescription = Just newDesc }
+              pure $ gotoExit PmApproveExpansionResult
+                { paerNewStatus = stateToLabel NeedsTLReview
+                , paerMessage = "Bead rejected. Moved to 'needs-tl-review' and feedback appended."
+                }
+            Nothing -> 
+              pure $ gotoExit PmApproveExpansionResult
+                { paerNewStatus = stateToLabel NeedsTLReview
+                , paerMessage = "Bead rejected. Moved to 'needs-tl-review' (no feedback provided)."
+                }
+
+        _ -> pure $ gotoExit PmApproveExpansionResult
+          { paerNewStatus = "error"
+          , paerMessage = "Invalid decision: " <> args.paeaDecision <> ". Must be 'approve' or 'reject'."
+          }

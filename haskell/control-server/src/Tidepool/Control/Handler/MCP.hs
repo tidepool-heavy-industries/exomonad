@@ -44,6 +44,9 @@ import Tidepool.Control.ExoTools
   , spawnAgentsLogic, SpawnAgentsArgs(..), SpawnAgentsResult(..)
   , filePRLogic, FilePRArgs(..), FilePRResult(..)
   )
+import Tidepool.Control.PMTools
+  ( pmApproveExpansionLogic, PmApproveExpansionArgs(..), PmApproveExpansionResult(..)
+  )
 import Tidepool.BD.Interpreter (runBDIO, defaultBDConfig)
 import Tidepool.BD.GitInterpreter (runGitIO)
 import Tidepool.GitHub.Interpreter (runGitHubIO, defaultGitHubConfig)
@@ -100,6 +103,7 @@ handleMcpTool logger lspSession maybeTuiHandle reqId toolName args = do
     "pre_commit_check" -> handlePreCommitCheckTool logger reqId args
     "spawn_agents" -> handleSpawnAgentsTool logger lspSession reqId args
     "file_pr" -> handleFilePRTool logger lspSession reqId args
+    "pm_approve_expansion" -> handlePmApproveExpansionTool logger lspSession reqId args
 
     _ -> do
       logError logger $ "  (unknown tool)"
@@ -462,4 +466,32 @@ handleFilePRTool logger _lspSession reqId args = do
           case result.fprUrl of
             Just url -> logInfo logger $ "[MCP:" <> reqId <> "] PR created: " <> url
             Nothing -> logError logger $ "[MCP:" <> reqId <> "] FilePR failed: " <> fromMaybe "unknown error" result.fprError
+          pure $ mcpToolSuccess reqId (toJSON result)
+
+-- | Handle the pm_approve_expansion tool.
+--
+-- Runs the PmApproveExpansionGraph logic to approve or reject expansion plans.
+handlePmApproveExpansionTool :: Logger -> LSPSession -> Text -> Value -> IO ControlResponse
+handlePmApproveExpansionTool logger _lspSession reqId args = do
+  case fromJSON args of
+    Error err -> do
+      logError logger $ "  parse error: " <> T.pack err
+      pure $ mcpToolError reqId $ "Invalid pm_approve_expansion arguments: " <> T.pack err
+
+    Success paeArgs -> do
+      logDebug logger $ "  bead_id=" <> paeArgs.paeaBeadId
+      logDebug logger $ "  decision=" <> paeArgs.paeaDecision
+
+      resultOrErr <- try $ runM
+        $ runLog Debug
+        $ runBDIO defaultBDConfig
+        $ fmap unwrapSingleChoice (pmApproveExpansionLogic paeArgs)
+
+      case resultOrErr of
+        Left (e :: SomeException) -> do
+          logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId $ "pm_approve_expansion failed: " <> T.pack (displayException e)
+
+        Right result -> do
+          logInfo logger $ "[MCP:" <> reqId <> "] Decision processed: " <> result.paerNewStatus
           pure $ mcpToolSuccess reqId (toJSON result)
