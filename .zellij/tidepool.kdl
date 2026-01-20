@@ -28,10 +28,10 @@ layout {
                     args "-c" "./scripts/tidepool-runner.sh up --tui"
                 }
 
-                // MIDDLE-RIGHT: TUI Sidebar
+                // MIDDLE-RIGHT: TUI Sidebar (waits for control-server)
                 pane name="TUI" size="33%" {
                     command "bash"
-                    args "-c" "RUST_LOG=info rust/target/debug/tui-sidebar --socket .tidepool/sockets/tui.sock --health-socket .tidepool/sockets/tui-sidebar.sock"
+                    args "-c" "echo 'Waiting for control-server...'; until nc -zU .tidepool/sockets/tui.sock 2>/dev/null; do sleep 0.5; done; echo 'Control server ready!'; RUST_LOG=info rust/target/debug/tui-sidebar --socket .tidepool/sockets/tui.sock --health-socket .tidepool/sockets/tui-sidebar.sock"
                 }
 
                 // BOTTOM-RIGHT: Dedicated Logs

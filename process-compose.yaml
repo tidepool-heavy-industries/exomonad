@@ -27,20 +27,7 @@ processes:
       - "TIDEPOOL_CONTROL_SOCKET=.tidepool/sockets/control.sock"
       - "TIDEPOOL_TUI_SOCKET=.tidepool/sockets/tui.sock"
 
-  # 2. TUI Sidebar (Rust)
-  # Renders interactive UIs for graph handlers
-  tui-sidebar:
-    command: "rust/target/debug/tui-sidebar --socket .tidepool/sockets/tui.sock --health-socket .tidepool/sockets/tui-sidebar.sock"
-    availability:
-      restart: "on_failure"
-    depends_on:
-      control-server:
-        condition: process_healthy
-    readiness_probe:
-      exec:
-        command: "nc -zU .tidepool/sockets/tui-sidebar.sock"
-      initial_delay_seconds: 2
-      period_seconds: 5
-      failure_threshold: 5
-      timeout_seconds: 1
+  # NOTE: tui-sidebar is NOT managed by process-compose because it requires
+  # a TTY for terminal rendering (raw mode, alternate screen). It runs directly
+  # in a Zellij pane instead - see .zellij/tidepool.kdl "TUI" pane.
 
