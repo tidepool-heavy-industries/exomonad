@@ -34,7 +34,13 @@ main = hspec $ do
         fileExisted `shouldBe` True
 
         content <- LBS.readFile logFile
-        -- The log file has one JSON per line, so we need to decode the first line
-        let firstLine = head (LBS.split 10 content) -- 10 is '\n'
-        let decoded = decode firstLine :: Maybe DecisionTrace
-        decoded `shouldBe` Just trace
+        -- The log file has one JSON per line
+        case LBS.split 10 content of -- 10 is '\n'
+          (firstLine:_) -> do
+            let decoded = decode firstLine :: Maybe DecisionTrace
+            decoded `shouldBe` Just trace
+          [] -> fail "Log file was empty"
+
+        -- Cleanup after test
+        existsAfter <- doesFileExist logFile
+        when existsAfter $ removeFile logFile
