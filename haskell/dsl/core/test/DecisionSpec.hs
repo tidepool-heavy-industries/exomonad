@@ -24,6 +24,11 @@ spec = do
       let d = Continue
       decode (encode d) `shouldBe` Just d
 
+  describe "BeadSummary JSON roundtrip" $ do
+    it "roundtrips summary" $ do
+      let b = BeadSummary "bead-1" "Test Title" 1
+      decode (encode b) `shouldBe` Just b
+
   describe "DecisionContext JSON roundtrip" $ do
     it "roundtrips simple context" $ do
       let c = DecisionContext "What next?" []
