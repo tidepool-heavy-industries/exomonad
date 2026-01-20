@@ -52,8 +52,9 @@ enum Commands {
     /// them via JSON-RPC 2.0 over stdio. Tool calls are forwarded to the
     /// control server via Unix socket.
     Mcp {
-        /// Comma-separated allowlist of tool names (if omitted, all tools exposed)
-        #[arg(long, value_delimiter = ',')]
+        /// Comma-separated allowlist of tool names (if omitted, all tools exposed).
+        /// When specified, at least one tool name must be provided.
+        #[arg(long, value_delimiter = ',', num_args = 1..)]
         tools: Option<Vec<String>>,
     },
 

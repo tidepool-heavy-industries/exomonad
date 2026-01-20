@@ -62,7 +62,7 @@ mantle-agent mcp [--tools <TOOL1>,<TOOL2>,...]
 ```
 
 **Options:**
-- `--tools` - Comma-separated allowlist of tool names. If omitted, all tools from the control server are exposed.
+- `--tools` - Comma-separated allowlist of tool names. If omitted, all tools from the control server are exposed. When specified, at least one tool name must be provided.
 
 **Flow:**
 ```
@@ -72,7 +72,7 @@ Claude Code                    mantle-agent mcp                Control Server
     │─────────────────────────────▶│                               │
     │                              │  (tools/list: filtered)       │
     │                              │                               │
-    │                              │  (tools/call: forward via TCP)│
+    │                              │  (tools/call: forward via Unix socket)│
     │                              │──────────────────────────────▶│
     │                              │◀──────────────────────────────│
     │  JSON-RPC response (stdio)   │                               │
