@@ -11,7 +11,6 @@ import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import System.IO (hFlush, stdout)
 import Control.Exception (SomeException, try)
-import Control.Monad (when)
 import Control.Monad.Freer (runM)
 
 import Tidepool.Control.Protocol
@@ -27,28 +26,34 @@ import Tidepool.Graph.Goto (unwrapSingleChoice)
 -- Current behavior: passthrough (always allow).
 -- TODO: Wire to Tidepool effect stack for real logic.
 handleHook :: HookInput -> Runtime -> IO ControlResponse
-handleHook input _runtime = do
+handleHook input runtime = do
   TIO.putStrLn $ "  session=" <> input.sessionId
   TIO.putStrLn $ "  cwd=" <> input.cwd
   hFlush stdout
 
   -- On Stop, run reconstitute logic (sync beads)
-  when (input.hookEventName == "Stop") $ do
-    TIO.putStrLn "  [HOOK] Running post-stop reconstitute..."
-    hFlush stdout
-    result <- (try $ runM
-      $ runLog Debug
-      $ runBDIO defaultBDConfig
-      $ runGitIO
-      $ runGitHubIO defaultGitHubConfig
-      $ unwrapSingleChoice <$> exoReconstituteLogic (ExoReconstituteArgs Nothing)) :: IO (Either SomeException ExoReconstituteResult)
-    case result of
-      Left e -> do
-        TIO.putStrLn $ "  [HOOK] Reconstitute failed: " <> T.pack (show e)
-        hFlush stdout
-      Right _ -> pure ()
-
-  pure $ hookSuccess $ makeResponse input.hookEventName input
+  if input.hookEventName == "Stop"
+    then do
+      TIO.putStrLn "  [HOOK] Running post-stop reconstitute..."
+      hFlush stdout
+      result <- (try $ runM
+        $ runLog Debug
+        $ runBDIO defaultBDConfig
+        $ runGitIO
+        $ runGitHubIO defaultGitHubConfig
+        $ unwrapSingleChoice <$> exoReconstituteLogic (ExoReconstituteArgs Nothing)) :: IO (Either SomeException ExoReconstituteResult)
+      case result of
+        Left e -> do
+          let errMsg = "Reconstitute failed: " <> T.pack (show e)
+          TIO.putStrLn $ "  [HOOK] " <> errMsg
+          hFlush stdout
+          pure $ hookError runtime errMsg
+        Right _ -> do
+          TIO.putStrLn "  [HOOK] Reconstitute succeeded"
+          hFlush stdout
+          pure $ hookSuccess $ makeResponse input.hookEventName input
+    else
+      pure $ hookSuccess $ makeResponse input.hookEventName input
 
 -- | Create appropriate response based on hook type.
 makeResponse :: Text -> HookInput -> HookOutput
