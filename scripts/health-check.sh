@@ -3,8 +3,8 @@
 set -euo pipefail
 
 # Ensure we're checking from project root
-cd "$(dirname "$0")/.."
-export TIDEPOOL_PROJECT_DIR="$(pwd)"
+PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+export TIDEPOOL_PROJECT_DIR="$PROJECT_ROOT"
 
-# Run health check
-cargo run --bin mantle-agent --quiet -- health
+# Use prebuilt binary (much faster than cargo run)
+exec "$PROJECT_ROOT/rust/target/debug/mantle-agent" health

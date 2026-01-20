@@ -5,7 +5,7 @@ cleanup() {
     echo "🛑 Tidepool Runner: Shutting down services..."
 
     # Try graceful API shutdown first
-    if ~/.local/bin/process-compose down --ordered-shutdown 2>/dev/null; then
+    if process-compose down --ordered-shutdown 2>/dev/null; then
         echo "✓ Graceful shutdown via API"
     else
         # Fallback: Send SIGTERM if API unreachable
@@ -19,6 +19,6 @@ cleanup() {
 trap cleanup EXIT SIGINT SIGTERM SIGHUP
 
 echo "🚀 Starting Tidepool Orchestrator..."
-~/.local/bin/process-compose "$@" &
+process-compose "$@" &
 PC_PID=$!
 wait $PC_PID

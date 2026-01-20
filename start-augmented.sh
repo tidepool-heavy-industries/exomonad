@@ -19,8 +19,19 @@ fi
 # Create runtime directories
 mkdir -p .tidepool/{sockets,logs}
 
+# Build binaries if needed (fast if already built)
+echo "Checking binaries..."
+cabal build tidepool-control-server --enable-optimization=0 >/dev/null 2>&1 || {
+    echo "ERROR: Failed to build control-server"
+    exit 1
+}
+(cd rust && cargo build --bin mantle-agent --bin tui-sidebar) >/dev/null 2>&1 || {
+    echo "ERROR: Failed to build Rust binaries"
+    exit 1
+}
+
 # Check dependencies
-if ! command -v ~/.local/bin/process-compose &> /dev/null; then
+if ! command -v process-compose &> /dev/null; then
     echo "ERROR: process-compose not installed"
     echo "Install with: brew install process-compose"
     echo "Or download from: https://github.com/F1bonacc1/process-compose/releases"

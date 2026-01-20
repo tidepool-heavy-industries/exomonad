@@ -9,7 +9,7 @@ processes:
   # 1. Control Server (Haskell)
   # Orchestrates tools, graph execution, and MCP
   control-server:
-    command: "cabal run tidepool-control-server -- +RTS -N4"
+    command: "dist-newstyle/build/aarch64-osx/ghc-9.12.2/tidepool-control-server-0.1.0.0/x/tidepool-control-server/noopt/build/tidepool-control-server/tidepool-control-server +RTS -N4"
     availability:
       restart: "on_failure"
     readiness_probe:
@@ -29,7 +29,7 @@ processes:
   # 2. TUI Sidebar (Rust)
   # Renders interactive UIs for graph handlers
   tui-sidebar:
-    command: "cargo run --bin tui-sidebar -- --socket .tidepool/sockets/tui.sock --health-socket .tidepool/sockets/tui-sidebar.sock"
+    command: "rust/target/debug/tui-sidebar --socket .tidepool/sockets/tui.sock --health-socket .tidepool/sockets/tui-sidebar.sock"
     availability:
       restart: "on_failure"
     depends_on:
