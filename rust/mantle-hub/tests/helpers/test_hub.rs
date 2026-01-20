@@ -83,6 +83,7 @@ impl TestHub {
     }
 
     /// Get the socket path for this hub.
+    #[allow(dead_code)]
     pub fn socket_path(&self) -> &Path {
         &self.socket_path
     }

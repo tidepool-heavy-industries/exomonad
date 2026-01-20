@@ -2,6 +2,7 @@
 
 mod test_hub;
 
+#[allow(unused_imports)]
 pub use test_hub::{unique_id, TestHub};
 
 use mantle_shared::hub::types::{NodeResult, SessionCreateResponse, SessionRegister};
@@ -9,6 +10,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 /// Create a test NodeResult with minimal required fields.
+#[allow(dead_code)]
 pub fn make_test_node_result(node_id: &str) -> NodeResult {
     NodeResult {
         node_id: node_id.to_string(),
@@ -34,16 +36,6 @@ pub fn make_test_register() -> SessionRegister {
     }
 }
 
-/// Create a test SessionRegister with custom branch.
-pub fn make_test_register_with_branch(branch: &str) -> SessionRegister {
-    SessionRegister {
-        branch: branch.into(),
-        worktree: PathBuf::from("/tmp"),
-        prompt: "Test prompt".into(),
-        model: "sonnet".into(),
-    }
-}
-
 /// Register a session via HTTP and return the SessionCreateResponse.
 pub async fn create_session(
     client: &reqwest::Client,
@@ -60,6 +52,7 @@ pub async fn create_session(
 }
 
 /// Create a child node via HTTP.
+#[allow(dead_code)]
 pub async fn create_child_node(
     client: &reqwest::Client,
     base_url: &str,
@@ -83,6 +76,7 @@ pub async fn create_child_node(
 }
 
 /// Submit a result via the Unix socket.
+#[allow(dead_code)]
 pub async fn submit_via_socket(
     socket_path: &std::path::Path,
     result: &NodeResult,

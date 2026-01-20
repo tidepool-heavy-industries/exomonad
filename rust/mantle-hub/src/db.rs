@@ -409,28 +409,6 @@ pub async fn list_nodes_for_session(pool: &SqlitePool, session_id: &str) -> Resu
     Ok(rows.into_iter().map(|r| r.into_node_info()).collect())
 }
 
-/// Get all nodes for an execution by execution_id in metadata.
-pub async fn get_nodes_by_execution(
-    pool: &SqlitePool,
-    execution_id: &str,
-) -> Result<Vec<NodeInfo>> {
-    let rows = sqlx::query_as::<_, NodeRow>(
-        r#"
-        SELECT n.id, n.session_id, n.parent_node_id, n.branch, n.worktree, n.prompt, n.model, n.state, n.metadata, n.created_at, n.updated_at,
-               r.exit_code, r.is_error, r.result_text, r.structured_output, r.total_cost_usd, r.num_turns, r.cc_session_id, r.duration_secs, r.model_usage
-        FROM nodes n
-        LEFT JOIN results r ON n.id = r.node_id
-        WHERE json_extract(n.metadata, '$.execution_id') = ?
-        ORDER BY n.created_at ASC
-        "#,
-    )
-    .bind(execution_id)
-    .fetch_all(pool)
-    .await?;
-
-    Ok(rows.into_iter().map(|r| r.into_node_info()).collect())
-}
-
 /// Update node state.
 pub async fn update_node_state(pool: &SqlitePool, id: &str, state: NodeState) -> Result<()> {
     let now = chrono::Utc::now().to_rfc3339();

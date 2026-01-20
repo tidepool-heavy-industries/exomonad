@@ -16,6 +16,7 @@ struct StackEntry {
 }
 
 /// Runtime state for elements (updated via UpdateUI).
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 enum ElementState {
     Text(String),
@@ -84,7 +85,7 @@ impl UIStack {
     ///
     /// Returns None if element has no runtime state (use spec defaults).
     #[allow(dead_code)]
-    pub fn get_element_state(&self, element_id: &str) -> Option<&ElementState> {
+    fn get_element_state(&self, element_id: &str) -> Option<&ElementState> {
         self.stack.last()?.element_state.get(element_id)
     }
 }
