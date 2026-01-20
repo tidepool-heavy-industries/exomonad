@@ -160,11 +160,11 @@ spawnAgentsLogic args = do
       -- Partition results
       let (failed, succeeded) = partitionEithers results
           worktrees = [(sid, path) | (sid, path, _) <- succeeded]
-          tabs = [(sid, T.unpack tabId) | (sid, _, TabId tabId) <- succeeded]
+          tabs = [(sid, tabId) | (sid, _, TabId tabId) <- succeeded]
 
       pure $ gotoExit $ SpawnAgentsResult
         { sarWorktrees = worktrees
-        , sarTabs = [(sid, T.pack t) | (sid, t) <- tabs]
+        , sarTabs = tabs
         , sarFailed = failed
         }
 
@@ -215,9 +215,10 @@ processBead repoRoot shortId = do
                     Left errMsg -> pure $ Left (shortId, "Worktree created but context write failed: " <> errMsg)
                     Right () -> do
                       -- d. Launch Zellij tab
+                      -- Use absolute path for layout to avoid CWD resolution issues
                       let tabConfig = TabConfig
                             { tcName = shortId
-                            , tcLayout = ".zellij/worktree.kdl"
+                            , tcLayout = repoRoot </> ".zellij" </> "worktree.kdl"
                             , tcCwd = path
                             , tcEnv = [("SUBAGENT_CMD", "claude")]
                             }

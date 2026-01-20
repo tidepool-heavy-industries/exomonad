@@ -61,13 +61,6 @@ data FileSystemError
         -- ^ Description of what went wrong
       }
     -- ^ General IO error during file operation
-  | FSPermissionError
-      { fspePath :: FilePath
-        -- ^ Path that permission was denied for
-      , fspeOperation :: Text
-        -- ^ Operation attempted
-      }
-    -- ^ Permission denied for file operation
   deriving stock (Eq, Show, Generic)
 
 instance ToJSON FileSystemError
