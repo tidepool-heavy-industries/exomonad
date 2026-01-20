@@ -1,8 +1,8 @@
 use ratatui::{
-    layout::{Constraint, Direction, Layout as RatatuiLayout, Rect},
+    layout::{Alignment, Constraint, Direction, Layout as RatatuiLayout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Gauge, Paragraph},
+    widgets::{Block, Borders, Gauge, Padding, Paragraph},
     Frame,
 };
 
@@ -237,6 +237,60 @@ fn render_progress(frame: &mut Frame, label: &str, value: u32, max: u32, area: R
         .ratio(ratio);
 
     frame.render_widget(gauge, area);
+}
+
+/// Render idle state when no active interactions.
+pub fn render_idle(frame: &mut Frame) {
+    let area = frame.area();
+
+    let chunks = RatatuiLayout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3), // Title
+            Constraint::Length(2), // Status
+            Constraint::Min(0),    // Help text
+        ])
+        .split(area);
+
+    // Title
+    let title = Paragraph::new("Tidepool TUI Sidebar")
+        .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+        .alignment(Alignment::Center)
+        .block(Block::default().borders(Borders::BOTTOM));
+    frame.render_widget(title, chunks[0]);
+
+    // Status
+    let status = Paragraph::new("Waiting for tool interactions...")
+        .style(Style::default().fg(Color::Yellow))
+        .alignment(Alignment::Center);
+    frame.render_widget(status, chunks[1]);
+
+    // Help text
+    let help_text = vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            "About this sidebar:",
+            Style::default().add_modifier(Modifier::UNDERLINED),
+        )),
+        Line::from("This sidebar displays UIs for Tidepool tools."),
+        Line::from("When a tool needs input or shows progress,"),
+        Line::from("it will appear here automatically."),
+        Line::from(""),
+        Line::from(Span::styled(
+            "Controls:",
+            Style::default().add_modifier(Modifier::UNDERLINED),
+        )),
+        Line::from("Tab / Shift+Tab : Navigate focus"),
+        Line::from("Enter           : Submit / Click"),
+        Line::from("Ctrl+C          : Exit sidebar"),
+    ];
+
+    let help = Paragraph::new(help_text).block(
+        Block::default()
+            .borders(Borders::NONE)
+            .padding(Padding::new(2, 2, 1, 0)),
+    );
+    frame.render_widget(help, chunks[2]);
 }
 
 /// Render placeholder for unsupported elements.

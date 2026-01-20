@@ -12,7 +12,7 @@ use tracing::{debug, info};
 
 use crate::input::handle_key_event;
 use crate::protocol::{Interaction, UISpec};
-use crate::render::render_ui;
+use crate::render::{render_idle, render_ui};
 use crate::ui_stack::UIStack;
 
 enum EventOutcome {
@@ -52,11 +52,15 @@ pub async fn run(
     // Event loop
     loop {
         // Render current UI
-        if let Some(spec) = ui_stack.current() {
-            terminal
-                .draw(|f| render_ui(f, spec, focus_idx))
-                .context("Failed to render UI")?;
-        }
+        terminal
+            .draw(|f| {
+                if let Some(spec) = ui_stack.current() {
+                    render_ui(f, spec, focus_idx);
+                } else {
+                    render_idle(f);
+                }
+            })
+            .context("Failed to render UI")?;
 
         tokio::select! {
             // Handle UISpec from Haskell
@@ -81,12 +85,6 @@ pub async fn run(
                         // Pop UI after interaction (Phase 1: immediate close)
                         // Phase 2/3: More sophisticated lifecycle management
                         ui_stack.pop();
-
-                        if ui_stack.is_empty() {
-                            info!("UI stack empty, exiting");
-                            break;
-                        }
-
                         focus_idx = 0;  // Reset focus for previous UI
                     }
                     EventOutcome::Exit => {
