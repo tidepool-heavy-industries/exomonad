@@ -48,6 +48,7 @@ import Tidepool.Control.PMTools
   ( pmApproveExpansionLogic, PmApproveExpansionArgs(..), PmApproveExpansionResult(..)
   , pmPrioritizeLogic, PmPrioritizeArgs(..), PmPrioritizeResult(..), PrioritizeResultItem(..)
   )
+import Tidepool.Control.PMPropose (pmProposeLogic, PMProposeArgs(..), PMProposeResult(..))
 import Tidepool.BD.Interpreter (runBDIO, defaultBDConfig)
 import Tidepool.BD.GitInterpreter (runGitIO)
 import Tidepool.GitHub.Interpreter (runGitHubIO, defaultGitHubConfig)
@@ -107,12 +108,13 @@ handleMcpTool logger lspSession maybeTuiHandle reqId toolName args = do
     "file_pr" -> handleFilePRTool logger lspSession reqId args
     "pm_approve_expansion" -> handlePmApproveExpansionTool logger lspSession reqId args
     "pm_prioritize" -> handlePmPrioritizeTool logger reqId args
+    "pm_propose" -> handlePMProposeTool logger reqId args
 
     _ -> do
       logError logger $ "  (unknown tool)"
       pure $ mcpToolError reqId $
         "Tool not found: " <> toolName <>
-        ". Available tools: find_callers, show_fields, show_constructors, teach-graph, exo_status, exo_complete, exo_reconstitute, pre_commit_check, spawn_agents, file_pr, pm_approve_expansion, pm_prioritize"
+        ". Available tools: find_callers, show_fields, show_constructors, teach-graph, exo_status, exo_complete, exo_reconstitute, pre_commit_check, spawn_agents, file_pr, pm_approve_expansion, pm_prioritize, pm_propose"
 
 -- | Handle the pm_prioritize tool.
 --
@@ -534,4 +536,31 @@ handlePmApproveExpansionTool logger _lspSession reqId args = do
 
         Right result -> do
           logInfo logger $ "[MCP:" <> reqId <> "] Decision processed: " <> result.paerNewStatus
+          pure $ mcpToolSuccess reqId (toJSON result)
+
+-- | Handle the pm_propose tool.
+--
+-- Runs the PMProposeGraph logic to propose a new bead.
+handlePMProposeTool :: Logger -> Text -> Value -> IO ControlResponse
+handlePMProposeTool logger reqId args = do
+  case fromJSON args of
+    Error err -> do
+      logError logger $ "  parse error: " <> T.pack err
+      pure $ mcpToolError reqId $ "Invalid pm_propose arguments: " <> T.pack err
+
+    Success ppaArgs -> do
+      logDebug logger $ "  title=" <> ppaArgs.ppaTitle
+
+      resultOrErr <- try $ runM
+        $ runLog Debug
+        $ runBDIO defaultBDConfig
+        $ fmap unwrapSingleChoice (pmProposeLogic ppaArgs)
+
+      case resultOrErr of
+        Left (e :: SomeException) -> do
+          logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId $ "pm_propose failed: " <> T.pack (displayException e)
+
+        Right result -> do
+          logInfo logger $ "[MCP:" <> reqId <> "] Proposed bead: " <> result.pprBeadId
           pure $ mcpToolSuccess reqId (toJSON result)

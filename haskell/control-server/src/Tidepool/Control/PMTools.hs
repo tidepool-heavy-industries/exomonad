@@ -210,7 +210,7 @@ pmApproveExpansionLogic args = do
         "approve" -> do
           setWorkflowState args.paeaBeadId Ready
           pure $ gotoExit PmApproveExpansionResult
-            { paerNewStatus = stateToLabel Ready
+            { paerNewStatus = workflowStateToLabel Ready
             , paerMessage = "Bead approved. Moved to 'ready' state."
             }
         
@@ -226,12 +226,12 @@ pmApproveExpansionLogic args = do
                             else oldDesc <> "\n\n**PM Feedback:**\n" <> feedback
               updateBead args.paeaBeadId $ emptyUpdateInput { ubiDescription = Just newDesc }
               pure $ gotoExit PmApproveExpansionResult
-                { paerNewStatus = stateToLabel NeedsTLReview
+                { paerNewStatus = workflowStateToLabel NeedsTLReview
                 , paerMessage = "Bead rejected. Moved to 'needs-tl-review' and feedback appended."
                 }
             Nothing -> 
               pure $ gotoExit PmApproveExpansionResult
-                { paerNewStatus = stateToLabel NeedsTLReview
+                { paerNewStatus = workflowStateToLabel NeedsTLReview
                 , paerMessage = "Bead rejected. Moved to 'needs-tl-review' (no feedback provided)."
                 }
 
