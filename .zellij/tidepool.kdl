@@ -19,7 +19,7 @@ layout {
             // LEFT: Claude Code (waits for MCP backend)
             pane name="Claude Code" size="50%" focus=true {
                 command "bash"
-                args "-c" "echo '⏳ Waiting for MCP backend...'; until nc -zU .tidepool/sockets/control.sock 2>/dev/null; do sleep 0.5; done; echo '✓ MCP ready!'; exec claude -d --continue --dangerously-skip-permissions"
+                args "-c" "cd \"$(git rev-parse --show-toplevel)\" && echo '⏳ Waiting for MCP backend...'; until nc -zU .tidepool/sockets/control.sock 2>/dev/null; do sleep 0.5; done; echo '✓ MCP ready!'; exec claude -d --continue --dangerously-skip-permissions"
             }
 
             pane split_direction="horizontal" {
@@ -27,7 +27,7 @@ layout {
                 // TOP-RIGHT: TUI Sidebar (waits for tui.sock)
                 pane name="TUI Sidebar" size="50%" {
                     command "bash"
-                    args "-c" "echo '⏳ Waiting for TUI socket...'; until nc -zU .tidepool/sockets/tui.sock 2>/dev/null; do sleep 0.5; done; echo '✓ TUI socket ready!'; exec rust/target/debug/tui-sidebar --socket .tidepool/sockets/tui.sock --health-socket .tidepool/sockets/tui-sidebar.sock"
+                    args "-c" "cd \"$(git rev-parse --show-toplevel)\" && echo '⏳ Waiting for TUI socket...'; until nc -zU .tidepool/sockets/tui.sock 2>/dev/null; do sleep 0.5; done; echo '✓ TUI socket ready!'; exec rust/target/debug/tui-sidebar --socket .tidepool/sockets/tui.sock --health-socket .tidepool/sockets/tui-sidebar.sock"
                 }
 
                 // BOTTOM-RIGHT: Backend Status (process-compose dashboard)
