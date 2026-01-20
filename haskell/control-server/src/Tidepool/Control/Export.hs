@@ -26,6 +26,7 @@ module Tidepool.Control.Export
 import Control.Concurrent (threadDelay)
 import Control.Monad (forM_, when, forM)
 import Control.Monad.Freer (runM)
+import Data.Function ((&))
 import Data.Aeson (encode, object, (.=))
 import qualified Data.ByteString.Lazy.Char8 as BL
 import Data.IORef (IORef, newIORef, readIORef, writeIORef, modifyIORef')
@@ -53,6 +54,8 @@ import Tidepool.Control.ExoTools
 import Tidepool.Control.PMTools
   ( PmApproveExpansionGraph, PmPrioritizeGraph )
 import Tidepool.Control.PMPropose (PMProposeGraph)
+import Tidepool.Control.MailboxTools
+  ( SendMessageGraph, CheckInboxGraph, ReadMessageGraph, MarkReadGraph )
 import Tidepool.Control.Scout.Graph (DocGenGraph)
 import Tidepool.Control.Scout.DocGen.Gemma (extractCandidates)
 import Tidepool.Effect.LSP
@@ -311,11 +314,6 @@ isTrivialExample symName candidates =
   case candidates of 
     [single] -> single == symName
     _ -> False
-
--- | Helper for function application in pipes
-(&) :: a -> (a -> b) -> b
-(&) = flip ($)
-infixl 1 &
 
 -- | Reference cap - beyond this count, mark as hub symbol.
 referenceCap :: Int
@@ -959,25 +957,22 @@ exportMCPTools logger = do
   let pmProTools = reifyMCPTools (Proxy @PMProposeGraph)
   let prTools = reifyMCPTools (Proxy @PrReviewStatusGraph)
 
+  -- Mailbox tools
+  let smTools = reifyMCPTools (Proxy @SendMessageGraph)
+  let ciTools = reifyMCPTools (Proxy @CheckInboxGraph)
+  let rmTools = reifyMCPTools (Proxy @ReadMessageGraph)
+  let mrTools = reifyMCPTools (Proxy @MarkReadGraph)
+
   -- Log discovered tools per graph for debugging
   logDebug logger $ "[MCP Discovery] FindCallersGraph: " <> T.pack (show (length fcTools)) <> " tools"
-  logDebug logger $ "[MCP Discovery] ShowFieldsGraph: " <> T.pack (show (length sfTools)) <> " tools"
-  logDebug logger $ "[MCP Discovery] ShowConstructorsGraph: " <> T.pack (show (length scTools)) <> " tools"
-  logDebug logger $ "[MCP Discovery] ConfirmActionGraph: " <> T.pack (show (length caTools)) <> " tools"
-  logDebug logger $ "[MCP Discovery] SelectOptionGraph: " <> T.pack (show (length soTools)) <> " tools"
-  logDebug logger $ "[MCP Discovery] RequestGuidanceGraph: " <> T.pack (show (length rgTools)) <> " tools"
-  logDebug logger $ "[MCP Discovery] DocGenGraph: " <> T.pack (show (length dgTools)) <> " tools"
-  logDebug logger $ "[MCP Discovery] ExoStatusGraph: " <> T.pack (show (length esTools)) <> " tools"
-  logDebug logger $ "[MCP Discovery] ExoCompleteGraph: " <> T.pack (show (length ecTools)) <> " tools"
-  logDebug logger $ "[MCP Discovery] ExoReconstituteGraph: " <> T.pack (show (length erTools)) <> " tools"
-  logDebug logger $ "[MCP Discovery] SpawnAgentsGraph: " <> T.pack (show (length saTools)) <> " tools"
-  logDebug logger $ "[MCP Discovery] FilePRGraph: " <> T.pack (show (length fpTools)) <> " tools"
-  logDebug logger $ "[MCP Discovery] PmApproveExpansionGraph: " <> T.pack (show (length paeTools)) <> " tools"
-  logDebug logger $ "[MCP Discovery] PmPrioritizeGraph: " <> T.pack (show (length pmPriTools)) <> " tools"
-  logDebug logger $ "[MCP Discovery] PMProposeGraph: " <> T.pack (show (length pmProTools)) <> " tools"
+-- ...
   logDebug logger $ "[MCP Discovery] PrReviewStatusGraph: " <> T.pack (show (length prTools)) <> " tools"
+  logDebug logger $ "[MCP Discovery] SendMessageGraph: " <> T.pack (show (length smTools)) <> " tools"
+  logDebug logger $ "[MCP Discovery] CheckInboxGraph: " <> T.pack (show (length ciTools)) <> " tools"
+  logDebug logger $ "[MCP Discovery] ReadMessageGraph: " <> T.pack (show (length rmTools)) <> " tools"
+  logDebug logger $ "[MCP Discovery] MarkReadGraph: " <> T.pack (show (length mrTools)) <> " tools"
 
-  let allTools = concat [fcTools, sfTools, scTools, caTools, soTools, rgTools, dgTools, esTools, ecTools, erTools, saTools, fpTools, paeTools, pmPriTools, pmProTools, prTools]
+  let allTools = concat [fcTools, sfTools, scTools, caTools, soTools, rgTools, dgTools, esTools, ecTools, erTools, saTools, fpTools, paeTools, pmPriTools, pmProTools, prTools, smTools, ciTools, rmTools, mrTools]
   logInfo logger $ "[MCP Discovery] Total: " <> T.pack (show (length allTools)) <> " tools discovered"
 
   -- Log tool names with entry points for verification

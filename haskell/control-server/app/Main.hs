@@ -47,7 +47,11 @@ main = do
 
 runServerMode :: Logger -> FilePath -> IO ()
 runServerMode logger projectDir = do
-  let config = ServerConfig { projectDir = projectDir }
+  roleEnv <- lookupEnv "TIDEPOOL_ROLE"
+  let config = ServerConfig 
+        { projectDir = projectDir
+        , role = fmap T.pack roleEnv 
+        }
 
   -- Start main control server
   runServer logger config

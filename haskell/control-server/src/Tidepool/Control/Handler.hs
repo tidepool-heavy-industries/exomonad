@@ -7,6 +7,7 @@ import qualified Data.Text as T
 
 import Tidepool.Control.Logging (Logger, logInfo)
 import Tidepool.Control.Protocol
+import Tidepool.Control.Types (ServerConfig(..))
 import Tidepool.Control.Export (exportMCPTools)
 import Tidepool.Control.Handler.Hook (handleHook)
 import Tidepool.Control.Handler.MCP (handleMcpTool)
@@ -14,10 +15,10 @@ import Tidepool.LSP.Interpreter (LSPSession)
 import Tidepool.TUI.Interpreter (TUIHandle)
 
 -- | Route a control message to the appropriate handler.
-handleMessage :: Logger -> LSPSession -> Maybe TUIHandle -> ControlMessage -> IO ControlResponse
-handleMessage logger lspSession maybeTuiHandle = \case
+handleMessage :: Logger -> ServerConfig -> LSPSession -> Maybe TUIHandle -> ControlMessage -> IO ControlResponse
+handleMessage logger config lspSession maybeTuiHandle = \case
   HookEvent input r -> handleHook input r
-  McpToolCall reqId name args -> handleMcpTool logger lspSession maybeTuiHandle reqId name args
+  McpToolCall reqId name args -> handleMcpTool logger config lspSession maybeTuiHandle reqId name args
   ToolsListRequest -> handleToolsList logger
   Ping -> pure Pong
 
