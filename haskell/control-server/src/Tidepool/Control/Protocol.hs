@@ -4,7 +4,7 @@
 -- These types must serialize to JSON identically to the Rust types
 -- for the NDJSON protocol to work correctly.
 module Tidepool.Control.Protocol
-  ( -- * Control Messages (TCP envelope)
+  ( -- * Control Messages (envelope)
     ControlMessage(..)
   , ControlResponse(..)
   , McpError(..)
@@ -272,7 +272,7 @@ data ToolDefinition = ToolDefinition
   deriving stock (Show, Eq, Generic)
   deriving anyclass (ToJSON, FromJSON)
 
--- | Message sent over TCP from mantle-agent. Tagged by "type".
+-- | Message sent over Unix socket from mantle-agent. Tagged by "type".
 data ControlMessage
   = HookEvent { input :: HookInput, runtime :: Runtime }
   | McpToolCall { mcpId :: Text, toolName :: Text, arguments :: Value }
@@ -314,7 +314,7 @@ instance ToJSON ControlMessage where
     [ "type" .= ("Ping" :: Text)
     ]
 
--- | Response sent over TCP to mantle-agent. Tagged by "type".
+-- | Response sent over Unix socket to mantle-agent. Tagged by "type".
 data ControlResponse
   = HookResponse { output :: HookOutput, exitCode :: Int }
   | McpToolResponse { mcpId :: Text, result :: Maybe Value, mcpError :: Maybe McpError }
