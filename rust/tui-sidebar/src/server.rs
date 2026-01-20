@@ -142,15 +142,30 @@ pub async fn start_health_listener(path: &Path) -> Result<tokio::task::JoinHandl
     debug!(path = %path.display(), "TUI sidebar health listener started");
 
     let handle = tokio::spawn(async move {
+        // Track consecutive accept errors to avoid retrying indefinitely on a persistent failure.
+        const MAX_CONSECUTIVE_ERRORS: u32 = 10;
+        let mut consecutive_errors: u32 = 0;
+
         loop {
             match listener.accept().await {
                 Ok((_stream, _addr)) => {
+                    // Successful accept: reset error counter.
+                    consecutive_errors = 0;
                     // Just accept and drop, which is enough for nc -zU
                 }
                 Err(e) => {
-                    error!(error = %e, "Health listener accept error");
+                    consecutive_errors = consecutive_errors.saturating_add(1);
+                    error!(error = %e, consecutive_errors, "Health listener accept error");
                     // Wait before retrying to avoid tight loop on persistent errors
                     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+                    if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
+                        error!(
+                            consecutive_errors,
+                            "Health listener stopping after too many consecutive accept errors"
+                        );
+                        break;
+                    }
                 }
             }
         }

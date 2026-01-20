@@ -66,23 +66,37 @@ runServer logger config = do
     tuiListenerReady <- newEmptyMVar
 
     -- Fork TUI listener thread
-    void $ forkIO $ E.handle (\(e :: SomeException) -> logError logger $ "TUI listener error: " <> T.pack (show e)) $
+    let tuiErrorHandler (e :: SomeException) = logError logger $ "TUI listener error: " <> T.pack (show e)
+    void $ forkIO $ E.handle tuiErrorHandler $
       bracket (setupUnixSocket tuiSocket) (cleanupUnixSocket tuiSocket) $ \tuiListenSock -> do
         logInfo logger $ "TUI sidebar listener waiting on: " <> T.pack tuiSocket
         putMVar tuiListenerReady ()
-        forever $ do
-          (conn, _) <- accept tuiListenSock
-          logInfo logger "TUI sidebar connected"
-          handle <- newTUIHandle "control-server" conn
-          maybeOld <- atomically $ do
-            old <- readTVar tuiHandleVar
-            writeTVar tuiHandleVar (Just handle)
-            pure old
-          case maybeOld of
-            Just h -> do
-              logInfo logger "Closing previous TUI sidebar connection; in-flight requests using the old connection may see disconnection errors"
-              closeTUIHandle h
-            Nothing -> logDebug logger "No existing TUI sidebar connection to replace"
+        let listenerLoop = forever $ do
+              (conn, _) <- accept tuiListenSock
+              logInfo logger "TUI sidebar connected"
+              handle <- newTUIHandle "control-server" conn
+              maybeOld <- atomically $ do
+                old <- readTVar tuiHandleVar
+                writeTVar tuiHandleVar (Just handle)
+                pure old
+              case maybeOld of
+                Just h -> do
+                  -- We close the previous connection immediately as tui-sidebar is a singleton.
+                  -- New connections imply the previous session is invalid. 
+                  -- Concurrent requests using the old handle will receive disconnection errors.
+                  logInfo logger "Closing previous TUI sidebar connection; in-flight requests using the old connection may see disconnection errors"
+                  closeTUIHandle h
+                Nothing -> logDebug logger "No existing TUI sidebar connection to replace"
+              
+        listenerLoop `finally` do
+             -- Ensure TUI handle state is cleaned up if the listener terminates
+             maybeHandle <- atomically $ do
+               mh <- readTVar tuiHandleVar
+               writeTVar tuiHandleVar Nothing
+               pure mh
+             case maybeHandle of
+               Just h -> closeTUIHandle h
+               Nothing -> pure ()
 
     -- Ensure TUI listener is bound before accepting control connections
     takeMVar tuiListenerReady
