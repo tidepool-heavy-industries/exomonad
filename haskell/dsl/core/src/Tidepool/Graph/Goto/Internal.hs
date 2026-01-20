@@ -1,4 +1,3 @@
-
 -- | Internal module exposing OneOf and GotoChoice constructors.
 --
 -- __WARNING__: This module exposes constructors that should NOT be used
@@ -37,7 +36,9 @@ module Tidepool.Graph.Goto.Internal
   ) where
 
 import Data.Kind (Type)
-import Tidepool.Graph.Types (HList)
+import Tidepool.Graph.Types (HList(..))
+import Data.Aeson (ToJSON(..), Value(..))
+import qualified Data.Vector as V
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- ONEOF: TYPE-INDEXED SUM TYPE
@@ -60,6 +61,30 @@ data OneOf ts where
   Here  :: t -> OneOf (t ': ts)
   -- | The value is somewhere in the rest of the list
   There :: OneOf ts -> OneOf (t ': ts)
+
+instance {-# OVERLAPPING #-} ToJSON t => ToJSON (OneOf '[t]) where
+  toJSON (Here t) = toJSON t
+  toJSON (There _) = error "Impossible: There in single-element OneOf"
+
+instance {-# OVERLAPPABLE #-} (ToJSON t, ToJSON (OneOf ts)) => ToJSON (OneOf (t ': ts)) where
+  toJSON (Here t) = toJSON t
+  toJSON (There rest) = toJSON rest
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- HLIST TOJSON INSTANCES
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | ToJSON instance for HList - converts to JSON array
+instance ToJSON (HList '[]) where
+  toJSON HNil = toJSON ([] :: [Value])
+
+instance (ToJSON t, ToJSON (HList ts)) => ToJSON (HList (t ': ts)) where
+  toJSON (t ::: ts) = case (toJSON t, toJSON ts) of
+    (tVal, Array tsArray) -> Array (cons tVal tsArray)
+    _ -> error "Impossible: HList ToJSON should produce Array"
+    where
+      cons x arr = case V.toList arr of
+        xs -> V.fromList (x : xs)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TARGET MARKER
@@ -102,6 +127,9 @@ type family PayloadOf t where
 type GotoChoice :: [Type] -> Type
 newtype GotoChoice targets = GotoChoice { unGotoChoice :: OneOf (Payloads targets) }
 
+instance ToJSON (OneOf (Payloads targets)) => ToJSON (GotoChoice targets) where
+  toJSON (GotoChoice choice) = toJSON choice
+
 -- ════════════════════════════════════════════════════════════════════════════
 -- GOTOALL: PARALLEL FAN-OUT RETURN TYPE
 -- ════════════════════════════════════════════════════════════════════════════
@@ -124,3 +152,6 @@ newtype GotoChoice targets = GotoChoice { unGotoChoice :: OneOf (Payloads target
 -- to identify which fan-out batch their results belong to.
 type GotoAll :: [Type] -> Type
 newtype GotoAll targets = GotoAll { unGotoAll :: HList (Payloads targets) }
+
+instance ToJSON (HList (Payloads targets)) => ToJSON (GotoAll targets) where
+  toJSON (GotoAll list) = toJSON list

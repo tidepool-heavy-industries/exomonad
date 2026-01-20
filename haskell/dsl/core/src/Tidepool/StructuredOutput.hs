@@ -82,7 +82,7 @@ module Tidepool.StructuredOutput
 
     -- * Validation
   , ValidStructuredOutput
-  , ValidInContext(..)
+  , ValidInContext
   , SchemaContext(..)
 
     -- * Decision Tools
@@ -102,7 +102,7 @@ import Tidepool.StructuredOutput.Class
   , SumEncoding(..)
   , defaultOptions
   , ValidStructuredOutput
-  , ValidInContext(..)
+  , ValidInContext
   , SchemaContext(..)
   , StringEnum(..)
   , TidepoolDefault(..)

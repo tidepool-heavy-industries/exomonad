@@ -248,7 +248,7 @@ class StructuredOutput a where
 
   -- Default implementations via Generic
   default structuredSchema
-    :: (Generic a, GStructuredOutput (Rep a))
+    :: GStructuredOutput (Rep a)
     => JSONSchema
   structuredSchema = gStructuredSchema @(Rep a) (structuredOptions @a)
 

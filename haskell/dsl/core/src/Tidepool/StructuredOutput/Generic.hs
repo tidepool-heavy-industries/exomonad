@@ -33,7 +33,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics
 
-import Tidepool.Schema (JSONSchema(..), SchemaType(..), emptySchema, objectSchema, IsMarkedOneOf)
+import Tidepool.Schema (JSONSchema(..), SchemaType(..), emptySchema, objectSchema)
 import Tidepool.StructuredOutput.Class (GStructuredOutput(..), StructuredOutput(..), StructuredOptions(..), SumEncoding(..))
 import Tidepool.StructuredOutput.Error (ParseDiagnostic(..), expectedObject, missingField, typeMismatch)
 import Tidepool.StructuredOutput.Prefix (detectPrefix, makeStripPrefix)

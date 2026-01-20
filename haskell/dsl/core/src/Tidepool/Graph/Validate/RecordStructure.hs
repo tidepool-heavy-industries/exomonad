@@ -49,11 +49,11 @@ import Data.Kind (Type, Constraint)
 import GHC.TypeLits (Symbol, TypeError, ErrorMessage(..), Nat, type (-), type (+))
 import GHC.Generics (Generic(..), K1(..), M1(..), (:*:)(..), Meta(..), S, D, C, Rep)
 
-import Tidepool.Graph.Types (type (:@), Input, Schema, UsesEffects, Self, Arrive)
+import Tidepool.Graph.Types (type (:@), UsesEffects, Self, Arrive)
 import qualified Tidepool.Graph.Types as Types (Exit)
 import Tidepool.Graph.Edges (GetInput, GetSchema)
 import Tidepool.Graph.Goto (Goto)
-import Tidepool.Graph.Generic.Core (GraphMode(..), AsGraph, LLMNode, LogicNode, EntryNode, ExitNode)
+import Tidepool.Graph.Generic.Core (AsGraph, LLMNode, LogicNode, EntryNode)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- FIELD EXTRACTION TYPE FAMILIES
@@ -78,10 +78,6 @@ type family FieldsWithNames f where
   FieldsWithNames (M1 S ('MetaSel 'Nothing _ _ _) _) = '[]
   FieldsWithNames (l :*: r) = Append (FieldsWithNames l) (FieldsWithNames r)
   FieldsWithNames _ = '[]
-
--- | Get field names from a graph type.
-type FieldNamesOf :: (Type -> Type) -> [Symbol]
-type FieldNamesOf graph = FieldNames (Rep (graph AsGraph))
 
 -- | Get fields with names from a graph type.
 type FieldsWithNamesOf :: (Type -> Type) -> [(Symbol, Type)]

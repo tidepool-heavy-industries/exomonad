@@ -92,12 +92,13 @@ module Tidepool.Graph.Memory
   , evalMemoryScoped
   ) where
 
-import Tidepool.Prelude
-import Data.Aeson (withObject)
+import Control.Monad.Freer (Eff, Member, send)
+import Data.Kind (Type)
+import Data.Aeson (Value, ToJSON(..), FromJSON(..), withObject, object, (.=), (.:))
 import qualified Data.Aeson as Aeson
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
-import Data.Text (pack)
+import Data.Text (Text, pack)
 import Control.Monad.Freer.Internal (handleRelayS)
 import Optics (A_Setter, Is, Optic', over)
 
@@ -465,3 +466,4 @@ evalMemoryScoped
   -> Eff effs a
 evalMemoryScoped scopeName defaultVal store =
   fmap fst . runMemoryScoped scopeName defaultVal store
+ 

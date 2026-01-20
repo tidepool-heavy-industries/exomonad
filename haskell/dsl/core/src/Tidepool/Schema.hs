@@ -51,12 +51,9 @@ module Tidepool.Schema
 
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (catMaybes)
 import Data.Aeson (Value(..), object, (.=))
-import Data.Kind (Constraint)
-import GHC.Generics (Rep, (:+:), (:*:), M1, D, C, S, K1, R, U1, V1)
 import Language.Haskell.TH
 
 -- Import wrappers and validation from Class to avoid circularity issues
@@ -177,7 +174,7 @@ deriveJSONSchema typeName = do
 
 -- | Derive schema for a single field, requiring Haddock documentation.
 deriveFieldSchema :: Name -> Name -> Int -> VarBangType -> Q Exp
-deriveFieldSchema typeName _conName _fieldIdx (fieldName, _, fieldType) = do
+deriveFieldSchema _typeName _conName _fieldIdx (fieldName, _, fieldType) = do
   mDoc <- getDoc (DeclDoc fieldName)
   desc <- case mDoc of
     Just doc -> pure (T.pack doc)

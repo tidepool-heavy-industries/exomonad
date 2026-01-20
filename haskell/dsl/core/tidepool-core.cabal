@@ -98,6 +98,7 @@ library
         text >= 2.0 && < 3,
         containers >= 0.6 && < 1,
         vector >= 0.13 && < 1,
+        unordered-containers >= 0.2 && < 0.3,
         template-haskell >= 2.19 && < 3,
         mtl >= 2.3 && < 3,
         optics >= 0.4 && < 1,

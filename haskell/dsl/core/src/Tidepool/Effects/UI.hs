@@ -76,11 +76,6 @@ data ChoiceMeta = ChoiceMeta
   }
   deriving (Show, Eq, Generic)
 
--- | Default metadata (no description, no costs, enabled).
-defaultChoiceMeta :: ChoiceMeta
-defaultChoiceMeta = ChoiceMeta Nothing [] Available
-
-
 -- ════════════════════════════════════════════════════════════════════════════
 -- EFFECT
 -- ════════════════════════════════════════════════════════════════════════════

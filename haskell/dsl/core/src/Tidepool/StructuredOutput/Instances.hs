@@ -27,7 +27,7 @@ import qualified Data.Text as T
 import qualified Data.Vector as V
 import GHC.Generics (Generic, Rep, from, to)
 
-import Tidepool.Schema (JSONSchema(..), SchemaType(..), emptySchema, arraySchema, enumSchema, HasJSONSchema(..), TidepoolDefault(..), StringEnum(..))
+import Tidepool.Schema (JSONSchema(..), SchemaType(..), emptySchema, arraySchema, HasJSONSchema(..), TidepoolDefault(..), StringEnum(..))
 import Tidepool.StructuredOutput.Class
   ( StructuredOutput(..)
   , GStructuredOutput(..)
