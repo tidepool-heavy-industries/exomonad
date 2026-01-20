@@ -61,7 +61,7 @@ cd /Users/inannamalick/dev/tidepool
 
 This launches the Hybrid Tidepool architecture:
 - **process-compose**: Orchestrates services with dependency management
-  - control-server: Starts first, exposes HTTP health check (port 7434)
+  - control-server: Starts first, supports Unix socket health check
   - tui-sidebar: Starts after control-server is healthy, connects to it
   - mcp-server-bridge: socat Unix socket bridge for MCP visibility
 - **Zellij**: 3-pane layout for visualization
@@ -76,7 +76,7 @@ claude-code               # Start Claude Code
 ```
 
 **Orchestration features (process-compose):**
-- HTTP health checks ensure control-server is ready before starting dependencies
+- Unix socket health checks ensure control-server is ready before starting dependencies
 - Declarative dependency DAG (tui-sidebar waits for control-server health)
 - Automatic restart on failure with exponential backoff (2s initial, max 3 restarts)
 - Centralized logging to `.tidepool/logs/`

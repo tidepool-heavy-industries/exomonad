@@ -236,17 +236,18 @@ Human-driven Claude Code sessions augmented with Tidepool. **Not headless automa
 8. Claude Code proceeds or blocks
 ```
 
-**MCP Tool Flow (4 available tools):**
+**MCP Tool Flow (7 available tools):**
 ```
-Tools: find_callers, show_fields, show_constructors, teach-graph
+Tools: find_callers, show_fields, show_constructors, teach-graph, confirm_action, select_option, request_guidance
 
-1. User asks question requiring code intelligence
-2. Claude plans to call MCP tool (e.g., teach-graph, find_callers)
+1. User asks question requiring code intelligence or human decision
+2. Claude plans to call MCP tool (e.g., teach-graph, confirm_action)
 3. Claude Code spawns mantle-agent mcp (JSON-RPC stdio)
 4. mantle-agent forwards ControlMessage::McpToolCall via Unix Socket
 5. control-server routes to appropriate handler
    - Tier 1 (LSP-only): find_callers, show_fields, show_constructors
    - Tier 2 (LLM-enhanced): teach-graph (LSP + Haiku selection)
+   - Tier 4 (TUI-interactive): confirm_action, select_option, request_guidance
 6. Returns tool result (JSON)
 7. mantle-agent formats as JSON-RPC result to stdout
 8. Claude analyzes and responds to user
@@ -432,15 +433,49 @@ tui-sidebar ──depends_on──→ control-server (condition: process_healthy
 
 tui-sidebar blocks until control-server's HTTP health probe succeeds.
 
+#### Binary Dependencies
+
+The orchestration stack relies on pre-built binaries for Haskell and Rust components. `start-augmented.sh` attempts to build these if missing or stale, but manual builds may be required for troubleshooting.
+
+**Required Binaries & Paths:**
+- `tidepool-control-server`: `dist-newstyle/build/.../tidepool-control-server`
+- `mantle-agent`: `rust/target/debug/mantle-agent`
+- `tui-sidebar`: `rust/target/debug/tui-sidebar`
+
+**When are they built?**
+`start-augmented.sh` runs `cabal build tidepool-control-server` and `cargo build -p mantle-agent -p tui-sidebar` on startup.
+
+**Recovery:**
+If binaries are missing or the "command not found" error occurs within `process-compose`:
+1. Run `cabal build tidepool-control-server` manually.
+2. Run `cargo build -p mantle-agent -p tui-sidebar` manually.
+3. Restart `./start-augmented.sh`.
+
+#### process-compose Setup
+
+`process-compose` is the primary orchestrator for the Tidepool development environment.
+
+**Installation:**
+- **Nix (Recommended):** Included in `shell.nix` / `flake.nix`.
+- **Homebrew (macOS):** `brew install F1bonacc1/tap/process-compose`
+- **Manual:** Download from [GitHub Releases](https://github.com/F1bonacc1/process-compose/releases).
+
+**PATH Requirement:**
+Ensure `process-compose` is in your `PATH`. The scripts do not use hardcoded paths to the orchestrator to ensure compatibility across different installation methods.
+
+**Troubleshooting:**
+- **"command not found: process-compose"**: Verify installation and that `$(go env GOPATH)/bin` or your brew/nix bin directory is in your `PATH`.
+- **Port 8080 in use**: `process-compose` uses port 8080 for its API. `start-augmented.sh` will attempt to detect and kill stale sessions.
+
 ### Status
 
 - ✅ Hook forwarding (passthrough)
-- ✅ MCP server + 4 tools via auto-discovery (find_callers, show_fields, show_constructors, teach-graph)
+- ✅ MCP server + 7 tools via auto-discovery (find_callers, show_fields, show_constructors, teach-graph, confirm_action, select_option, request_guidance)
 - ✅ LSP integration (HLS via lsp-test)
 - ✅ FunctionGemma scoring (HTTP interpreter via Ollama)
 - ✅ Automatic tool registration via MCPExport annotation + reifyMCPTools
 - ✅ Hybrid orchestration (process-compose + Zellij)
-- ✅ HTTP health endpoint (port 7434) for robust readiness checks
+- ✅ Unix socket health checks for robust readiness checks
 - ✅ Declarative service dependencies and restart policies
 - ✅ MCP direct execution via .mcp.json (mantle-agent spawned per-call by Claude)
 - ✅ Unix socket communication for all local components

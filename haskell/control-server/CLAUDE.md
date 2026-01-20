@@ -358,6 +358,52 @@ Synchronizes beads from main and refreshes development context. Designed for use
 
 **Implementation:** `ExoTools.hs:184-205` (ExoReconstituteGraph)
 
+### Tier 4: TUI-Interactive Tools
+
+Tools that show interactive UI elements in the TUI sidebar and wait for user response.
+
+#### `confirm_action` - Show Confirmation Dialog
+
+Shows a confirmation dialog to the user for a potentially destructive or important action.
+
+**Request Schema:**
+```json
+{
+  "action": "Delete 15 files",          // required
+  "details": "This will permanently remove the files from disk." // required
+}
+```
+
+**Implementation:** `TUITools.hs:96-123` (ConfirmActionGraph)
+
+#### `select_option` - Select from List
+
+Asks the user to select from a list of predefined options, or provide a custom response.
+
+**Request Schema:**
+```json
+{
+  "prompt": "Select the next step",     // required
+  "options": [["1", "Fix bug"], ["2", "Add test"]] // required: [[id, label], ...]
+}
+```
+
+**Implementation:** `TUITools.hs:176-209` (SelectOptionGraph)
+
+#### `request_guidance` - Ask for Human Guidance
+
+Asks the user for free-form guidance or to select from suggestions when the agent is stuck.
+
+**Request Schema:**
+```json
+{
+  "context": "I am unsure how to implement the memory effect.", // required
+  "suggestions": ["Use a Map", "Use a State effect"]           // optional
+}
+```
+
+**Implementation:** `TUITools.hs:258-290` (RequestGuidanceGraph)
+
 ### Tool Registration
 
 **Automatic discovery:**
@@ -373,7 +419,12 @@ exportMCPTools = do
       legacyTools = concat
         [ reifyMCPTools (Proxy @DocGenGraph)  -- teach-graph
         ]
-  pure $ map reifyToToolDef (simplifiedTools ++ legacyTools)
+      tuiTools = concat
+        [ reifyGraphEntries (Proxy @ConfirmActionGraph)
+        , reifyGraphEntries (Proxy @SelectOptionGraph)
+        , reifyGraphEntries (Proxy @RequestGuidanceGraph)
+        ]
+  pure $ map reifyToToolDef (simplifiedTools ++ legacyTools ++ tuiTools)
 ```
 
 **How it works:**
@@ -468,7 +519,7 @@ cd /path/to/tidepool
 ```
 
 Launches control-server via process-compose with:
-- HTTP health endpoint on port 7434
+- Unix socket health check for robust readiness
 - Automatic dependency management (tui-sidebar waits for health)
 - Centralized logging to `.tidepool/logs/`
 - Automatic restart on failure
@@ -486,24 +537,22 @@ TIDEPOOL_PROJECT_DIR=/path/to/project GEMMA_ENDPOINT=http://localhost:11434 caba
 ```
 
 ### Health Check
-The server exposes an HTTP health endpoint for orchestration:
+The server supports a ping-pong protocol over Unix socket for health checks:
 ```bash
-# Check if control-server is ready
-curl http://localhost:7434
-# Returns: OK
-
-# Used by process-compose for readiness probes
-# Dependencies (tui-sidebar, mcp-server-bridge) wait for this endpoint
+# Check if control-server is ready using mantle-agent
+./scripts/health-check.sh
 ```
+
+**Used by process-compose:**
+The `control-server` readiness probe executes `mantle-agent health`, which sends a `Ping` message to `.tidepool/sockets/control.sock` and waits for a `Pong`.
 
 **Server logs to stdout:**
 ```
-Health check server listening on port 7434
 Created .tidepool directory at ./.tidepool
 Starting LSP session for project: .
 [LSP] Session started, HLS initialized
 LSP session initialized
-Control server listening on TCP port 7432
+Control server listening on Unix socket: .tidepool/sockets/control.sock
 Connection received
 [MCP] tool=teach-graph
   topic=how Memory effect works
