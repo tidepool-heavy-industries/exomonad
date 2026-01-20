@@ -465,6 +465,9 @@ impl McpServer {
             ControlResponse::ToolsListResponse { .. } => {
                 Err("Unexpected ToolsListResponse for MCP tool call".to_string())
             }
+            ControlResponse::Pong => {
+                Err("Unexpected Pong response for MCP tool call".to_string())
+            }
         }
     }
 }

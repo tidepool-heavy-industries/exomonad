@@ -288,6 +288,9 @@ pub enum ControlMessage {
 
     /// Request list of available MCP tools from control server.
     ToolsListRequest,
+
+    /// Health check ping.
+    Ping,
 }
 
 /// Response from Haskell control socket.
@@ -319,6 +322,9 @@ pub enum ControlResponse {
         /// Available MCP tools.
         tools: Vec<ToolDefinition>,
     },
+
+    /// Health check pong.
+    Pong,
 }
 
 /// MCP error response.

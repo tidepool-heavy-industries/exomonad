@@ -19,6 +19,7 @@ handleMessage logger lspSession maybeTuiHandle = \case
   HookEvent input r -> handleHook input r
   McpToolCall reqId name args -> handleMcpTool logger lspSession maybeTuiHandle reqId name args
   ToolsListRequest -> handleToolsList logger
+  Ping -> pure Pong
 
 -- | Handle tool discovery request.
 handleToolsList :: Logger -> IO ControlResponse

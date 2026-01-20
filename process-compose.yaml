@@ -13,12 +13,12 @@ processes:
     availability:
       restart: "on_failure"
     readiness_probe:
-      # Connect to Unix socket
+      # Connect to Unix socket via mantle-agent health command
       exec:
-        command: "nc -zU .tidepool/sockets/control.sock"
+        command: "cargo run --bin mantle-agent -- health"
       initial_delay_seconds: 2
       period_seconds: 2
-      timeout_seconds: 1
+      timeout_seconds: 2
       success_threshold: 1
       failure_threshold: 10
     environment:
