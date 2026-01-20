@@ -27,6 +27,7 @@ library
         Tidepool.Control.Handler.Hook
         Tidepool.Control.Handler.MCP
         Tidepool.Control.LSPTools
+        Tidepool.Control.PMTools
         Tidepool.Control.ExoTools
         Tidepool.Control.Export
         -- Scout (semantic code exploration)
@@ -155,6 +156,24 @@ test-suite exo-tools-test
         tidepool-core,
         text >= 2.0 && < 3,
         aeson,
+        tasty,
+        tasty-hunit
+    hs-source-dirs:   test
+    default-language: GHC2024
+    default-extensions:
+        OverloadedStrings
+        TypeApplications
+
+test-suite pm-tools-test
+    import:           warnings
+    type:             exitcode-stdio-1.0
+    main-is:          PMToolsSpec.hs
+    build-depends:
+        base >= 4.17 && < 5,
+        tidepool-control-server,
+        tidepool-core,
+        text >= 2.0 && < 3,
+        freer-simple,
         tasty,
         tasty-hunit
     hs-source-dirs:   test
