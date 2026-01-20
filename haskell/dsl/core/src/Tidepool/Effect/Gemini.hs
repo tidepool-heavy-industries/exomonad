@@ -4,6 +4,7 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# OPTIONS_GHC -Wno-redundant-constraints #-}
 
 -- | Gemini effect for running prompts via gemini CLI.
 module Tidepool.Effect.Gemini
@@ -22,6 +23,9 @@ import Control.Monad.Freer (Eff, Member, send)
 import Data.Aeson (FromJSON, ToJSON, Value)
 import Data.Text (Text)
 import GHC.Generics (Generic)
+
+import Tidepool.Effect.NodeMeta (NodeMeta, NodeMetadata, getNodeMeta)
+import Tidepool.Platform (NativeOnly)
 
 -- | Gemini models available in the CLI.
 data GeminiModel = Flash | Pro | Ultra
@@ -49,15 +53,11 @@ data GeminiResult = GeminiResult
   deriving (Show, Eq, Generic, ToJSON, FromJSON)
 
 -- | Gemini effect.
-
 data GeminiOp r where
-
-  RunGemini :: GeminiModel -> Text -> GeminiOp GeminiResult
-
-
+  RunGemini :: NodeMetadata -> GeminiModel -> Text -> GeminiOp GeminiResult
 
 -- | Run a Gemini prompt.
-
-runGemini :: Member GeminiOp effs => GeminiModel -> Text -> Eff effs GeminiResult
-
-runGemini model prompt = send (RunGemini model prompt)
+runGemini :: (Member GeminiOp effs, Member NodeMeta effs, NativeOnly) => GeminiModel -> Text -> Eff effs GeminiResult
+runGemini model prompt = do
+  meta <- getNodeMeta
+  send (RunGemini meta model prompt)

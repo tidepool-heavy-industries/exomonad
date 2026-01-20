@@ -513,6 +513,7 @@ executeGeminiHandler
   :: forall model needs schema targets es tpl.
      ( Member GeminiOp es
      , Member NodeMeta es
+     , Member GraphMeta es
      , StructuredOutput schema
      , ValidStructuredOutput schema
      , GingerContext tpl
@@ -526,7 +527,9 @@ executeGeminiHandler
   -> needs
   -> Eff es (GotoChoice targets)
 executeGeminiHandler mSystemTpl userTpl beforeFn afterFn input = do
+  -- Build context from before-handler
   ctx <- beforeFn input
+  -- Render templates
   let systemPrompt = maybe "" (runTypedTemplate ctx) mSystemTpl
       userPrompt = runTypedTemplate ctx userTpl
       fullPrompt = if systemPrompt == "" then userPrompt else systemPrompt <> "\n\n" <> userPrompt
@@ -543,7 +546,7 @@ executeGeminiHandler mSystemTpl userTpl beforeFn afterFn input = do
   -- Parse output
   case parseStructured grOutput of
     Right parsed -> afterFn parsed
-    Left diag -> error $ "Gemini parse error: " <> T.unpack (formatDiagnostic diag)
+    Left diag -> error $ "Parse failed: Gemini parse error: " <> T.unpack (formatDiagnostic diag)
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -600,6 +603,7 @@ instance
 instance
   ( Member GeminiOp es
   , Member NodeMeta es
+  , Member GraphMeta es
   , StructuredOutput schema
   , ValidStructuredOutput schema
   , GingerContext tpl
@@ -628,19 +632,20 @@ instance
 -- childResult <- executeGraphNode childHandlers input
 -- pure $ gotoChoice @"nextNode" childResult
 -- @
-executeGraphNode
-  :: forall childGraph es entryType targets exitType entryHandlerName handler.
-     ( Generic (childGraph AsGraph)
-     , FindEntryHandler entryType (FieldsWithNamesOf childGraph) ~ 'Just entryHandlerName
-     , KnownSymbol entryHandlerName
-     , HasField entryHandlerName (childGraph (AsHandler es)) handler
-     , CallHandler handler entryType es targets
-     , DispatchGoto childGraph targets es exitType
-     )
-  => childGraph (AsHandler es)  -- ^ Child graph handlers
-  -> entryType                   -- ^ Input to child graph's EntryNode
-  -> Eff es exitType             -- ^ Child graph's Exit value
-executeGraphNode = runGraph
+-- @
+-- executeGraphNode
+--   :: forall childGraph es entryType targets exitType entryHandlerName handler.
+--      ( Generic (childGraph AsGraph)
+--      , FindEntryHandler entryType (FieldsWithNamesOf childGraph) ~ 'Just entryHandlerName
+--      , KnownSymbol entryHandlerName
+--      , HasField entryHandlerName (childGraph (AsHandler es)) handler
+--      , CallHandler handler entryType es targets
+--      , DispatchGoto childGraph targets es exitType
+--      )
+--   => childGraph (AsHandler es)  -- ^ Child graph handlers
+--   -> entryType                   -- ^ Input to child graph's EntryNode
+--   -> Eff es exitType             -- ^ Child graph's Exit value
+-- executeGraphNode = runGraph
 
 
 -- ════════════════════════════════════════════════════════════════════════════

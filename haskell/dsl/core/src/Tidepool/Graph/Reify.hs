@@ -729,6 +729,13 @@ instance {-# OVERLAPPING #-}
     , niKind = RuntimeFork
     , niInput = reifyMaybeType (Proxy @(GetInput (ForkNode :@ ann)))
     , niSchema = Nothing
+    , niGotoTargets = []  -- ForkNode uses Spawn, not Goto
+    , niHasGotoExit = False
+    , niHasVision = False
+    , niTools = []
+    , niToolInfos = []
+    , niSystem = Nothing
+    , niTemplate = Nothing
     , niMemory = Nothing
     , niClaudeCode = Nothing
     , niGemini = Nothing
@@ -757,6 +764,7 @@ instance {-# OVERLAPPING #-}
     , niTemplate = Nothing
     , niMemory = Nothing
     , niClaudeCode = Nothing
+    , niGemini = Nothing
     }]
 
 -- General instance for any annotated node: dispatch based on base type
@@ -780,7 +788,6 @@ instance ( ReifyMaybeType (GetInput def)
          , ReifyTemplateInfo (GetSystem def)
          , ReifyMemoryInfo (GetMemory def)
          , ReifyClaudeCodeInfo (GetClaudeCode def)
-         , ReifyGeminiInfo (GetGeminiModel def)
          , ReifyBool (GetVision def)
          , ReifyMaybeToolRecord (GetTools def)
          ) => ReifyAnnotatedNode def 'True 'False 'False where
@@ -823,9 +830,7 @@ instance ( ReifyMaybeType (GetInput def)
       , niKind = RuntimeGemini
       , niInput = reifyMaybeType (Proxy @(GetInput def))
       , niSchema = reifySchemaInfo (Proxy @(GetSchema def))
-      , niGotoTargets = []  -- Gemini nodes don't have Goto (they use GeminiLLMHandler which has explicit targets though?)
-                            -- Wait, LLMHandler also has targets but niGotoTargets is empty for LLM nodes in this reification?
-                            -- Yes, LLM nodes use Schema for implicit data flow edges usually.
+      , niGotoTargets = []
       , niHasGotoExit = False
       , niHasVision = reifyBool (Proxy @(GetVision def))
       , niTools = reifyMaybeToolInputs (Proxy @(GetTools def))
@@ -937,3 +942,4 @@ deriveGotoExitEdges nodes =
   | node <- nodes
   , node.niHasGotoExit
   ]
+ 
