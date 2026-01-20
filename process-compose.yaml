@@ -22,8 +22,8 @@ processes:
       max_restarts: 5
     readiness_probe:
       exec:
-        # Source of truth: socket accepting connections
-        command: "nc -zU .tidepool/sockets/control.sock"
+        # Socket existence check (no connection attempt - avoids JSON parse errors)
+        command: "test -S .tidepool/sockets/control.sock"
       initial_delay_seconds: 2
       period_seconds: 3
       failure_threshold: 10

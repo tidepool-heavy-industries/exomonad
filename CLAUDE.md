@@ -296,7 +296,7 @@ Claude Code starts automatically in the tidepool directory. MCP tools connect to
 **Note:** If MCP shows "failed" on startup (control-server not yet ready), use `/mcp` → `Reconnect` once services are healthy.
 
 **Orchestration features (process-compose):**
-- Socket-based health checks (nc -zU)
+- Socket existence checks (test -S) for zero-overhead health probes
 - Dependency DAG: tui-sidebar waits for control-server health
 - Automatic restart on failure with exponential backoff
 - Centralized logging to `.tidepool/logs/`
@@ -321,7 +321,7 @@ claude-code
 GEMMA_ENDPOINT=http://localhost:11434 cabal run tidepool-control-server
 
 # Terminal 2: Wait for health check, then start tui-sidebar
-while ! nc -zU .tidepool/sockets/control.sock; do sleep 0.5; done
+while ! test -S .tidepool/sockets/control.sock; do sleep 0.5; done
 cargo run -p tui-sidebar -- --socket .tidepool/sockets/tui.sock
 
 # Terminal 3: Start Claude Code
@@ -412,17 +412,17 @@ All services terminated
 ```yaml
 readiness_probe:
   exec:
-    command: "nc -zU .tidepool/sockets/control.sock"
+    command: "test -S .tidepool/sockets/control.sock"
   initial_delay_seconds: 2
-  period_seconds: 1
-  failure_threshold: 30
+  period_seconds: 3
+  failure_threshold: 10
 ```
 
 **tui-sidebar** (Unix Socket):
 ```yaml
 readiness_probe:
   exec:
-    command: "nc -zU .tidepool/sockets/tui.sock"
+    command: "test -S .tidepool/sockets/tui.sock"
 ```
 
 #### Dependency DAG
