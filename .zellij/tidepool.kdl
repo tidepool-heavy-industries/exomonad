@@ -16,18 +16,18 @@ layout {
     tab name="Tidepool" focus=true {
         pane split_direction="vertical" {
 
-            // LEFT: Claude Code (waits for MCP backend)
+            // LEFT: Claude Code with supervisor loop (auto-restarts on crash)
             pane name="Claude Code" size="50%" focus=true {
                 command "bash"
-                args "-c" "cd \"$(git rev-parse --show-toplevel)\" && echo '⏳ Waiting for MCP backend...'; until nc -zU .tidepool/sockets/control.sock 2>/dev/null; do sleep 0.5; done; echo '✓ MCP ready!'; exec claude -d --continue --dangerously-skip-permissions"
+                args "-c" "cd \"$(git rev-parse --show-toplevel)\" && while true; do echo '⏳ Waiting for MCP...'; until test -S .tidepool/sockets/control.sock; do sleep 0.5; done; echo '✓ MCP ready!'; claude -d --continue --dangerously-skip-permissions; echo '⚠️ Claude exited. Restarting in 2s...'; sleep 2; done"
             }
 
             pane split_direction="horizontal" {
 
-                // TOP-RIGHT: TUI Sidebar (waits for tui.sock)
+                // TOP-RIGHT: TUI Sidebar with supervisor loop (auto-restarts on crash)
                 pane name="TUI Sidebar" size="50%" {
                     command "bash"
-                    args "-c" "cd \"$(git rev-parse --show-toplevel)\" && echo '⏳ Waiting for TUI socket...'; until nc -zU .tidepool/sockets/tui.sock 2>/dev/null; do sleep 0.5; done; echo '✓ TUI socket ready!'; exec rust/target/debug/tui-sidebar --socket .tidepool/sockets/tui.sock --health-socket .tidepool/sockets/tui-sidebar.sock"
+                    args "-c" "cd \"$(git rev-parse --show-toplevel)\" && while true; do echo '⏳ Waiting for server...'; until test -S .tidepool/sockets/control.sock; do sleep 0.5; done; echo '✓ Ready!'; rust/target/debug/tui-sidebar --socket .tidepool/sockets/tui.sock --health-socket .tidepool/sockets/tui-sidebar.sock; echo '⚠️ TUI exited. Restarting in 2s...'; sleep 2; done"
                 }
 
                 // BOTTOM-RIGHT: Backend Status (process-compose dashboard)
