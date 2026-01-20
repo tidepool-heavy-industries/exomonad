@@ -326,7 +326,7 @@ interpreterTests = describe "Interpreter CLI Integration" $ do
 
       let config = BDConfig { bcBeadsDir = Just tmpDir, bcQuiet = True }
       bdSync config
-      
+
       synced <- doesFileExist (tmpDir </> "synced")
       synced `shouldBe` True
 

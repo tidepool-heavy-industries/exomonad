@@ -21,8 +21,7 @@ module Tidepool.Control.Export
   , sampleCodeBodies
   , exportCodeSamples
   , exportMCPTools
-  )
-where
+  ) where
 
 import Control.Concurrent (threadDelay)
 import Control.Monad (forM_, when, forM)
@@ -69,31 +68,31 @@ import Tidepool.Training.Types (CandidateGroups(..))
 --
 -- Falls back to extracting from file path if hover doesn't have module info.
 extractModuleName :: Text -> Text -> Text
-extractModuleName hoverText filePath =
-  case extractFromDefinedIn hoverText of
+extractModuleName hoverText filePath = 
+  case extractFromDefinedIn hoverText of 
     Just m -> m
     Nothing -> extractFromFilePath filePath
   where
     -- Pattern: *Defined in 'Module.Name'*
-    extractFromDefinedIn t =
+    extractFromDefinedIn t = 
       let needle = "Defined in '"
-      in case T.breakOn needle t of
+      in case T.breakOn needle t of 
            (_, rest) | T.null rest -> Nothing
-           (_, rest) ->
+           (_, rest) -> 
              let afterNeedle = T.drop (T.length needle) rest
-             in case T.breakOn "'" afterNeedle of
+             in case T.breakOn "'" afterNeedle of 
                   (moduleName, _) | not (T.null moduleName) -> Just moduleName
                   _ -> Nothing
 
     -- Extract module from path like .../src/Tidepool/Effect/LSP.hs
-    extractFromFilePath p =
+    extractFromFilePath p = 
       let fileName = T.takeWhileEnd (/= '/') p
           baseName = T.dropEnd 3 fileName  -- Remove .hs
           -- Try to find src/ prefix for module path
           parts = T.splitOn "/" p
           afterSrc = dropWhile (/= "src") parts
-      in case afterSrc of
-           (_src : rest) ->
+      in case afterSrc of 
+           (_src : rest) -> 
              let modPath = T.intercalate "." $ map (T.dropEnd 3) $ filter (T.isSuffixOf ".hs") rest
              in if T.null modPath then baseName else T.replace "/" "." $ T.intercalate "/" (init rest) <> "." <> baseName
            _ -> baseName
@@ -103,27 +102,27 @@ extractModuleName hoverText filePath =
 -- Looks for pattern: *(package-name-version)*
 -- Returns just the package name without version.
 extractPackageName :: Text -> Text
-extractPackageName hoverText =
-  case extractFromParens hoverText of
+extractPackageName hoverText = 
+  case extractFromParens hoverText of 
     Just pkg -> pkg
     Nothing -> "unknown"
   where
-    extractFromParens t =
+    extractFromParens t = 
       -- Pattern: *(package-name-0.1.0.0)*
       let needle = "*("
-      in case T.breakOn needle t of
+      in case T.breakOn needle t of 
            (_, rest) | T.null rest -> Nothing
-           (_, rest) ->
+           (_, rest) -> 
              let afterNeedle = T.drop (T.length needle) rest
-             in case T.breakOn ")*" afterNeedle of
-                  (pkgVersion, _) | not (T.null pkgVersion) ->
+             in case T.breakOn ")*" afterNeedle of 
+                  (pkgVersion, _) | not (T.null pkgVersion) -> 
                     -- Strip version: "tidepool-core-0.1.0.0" -> "tidepool-core"
                     Just $ stripVersion pkgVersion
                   _ -> Nothing
 
     -- Strip version from package name
     -- "tidepool-core-0.1.0.0" -> "tidepool-core"
-    stripVersion pkg =
+    stripVersion pkg = 
       let parts = T.splitOn "-" pkg
           -- Version parts start with digits, package parts don't
           isVersionPart p = not (T.null p) && T.head p >= '0' && T.head p <= '9'
@@ -135,16 +134,16 @@ extractPackageName hoverText =
 -- Returns Nothing if no docs found. Only returns real Haddock docs,
 -- not signature fragments.
 extractFirstSentenceDoc :: Text -> Maybe Text
-extractFirstSentenceDoc hoverText =
+extractFirstSentenceDoc hoverText = 
   -- HLS hover format puts docs after the signature, typically after a blank line
   -- or following specific patterns. Be conservative - only extract if clearly docs.
   let allLines = T.lines hoverText
       -- Find docs section: lines after signature that look like prose
       docsSection = dropWhile isSignatureLine allLines
       docLines = filter isDocLine $ take 5 docsSection  -- Look at first 5 non-sig lines
-  in case docLines of
+  in case docLines of 
        [] -> Nothing
-       (firstDoc : _) ->
+       (firstDoc : _) -> 
          let sentence = T.strip $ firstSentence firstDoc
          -- Reject if it still looks like code
          in if T.null sentence || looksLikeCode sentence
@@ -152,19 +151,19 @@ extractFirstSentenceDoc hoverText =
             else Just sentence
   where
     -- A line is part of the signature/metadata
-    isSignatureLine line =
+    isSignatureLine line = 
       let stripped = T.strip line
-      in T.null stripped
-         || "```" `T.isPrefixOf` stripped
-         || "*Defined" `T.isPrefixOf` stripped
-         || "::" `T.isInfixOf` stripped
-         || "=>" `T.isInfixOf` stripped
-         || "forall" `T.isPrefixOf` stripped
-         || "->" `T.isInfixOf` stripped
+      in T.null stripped 
+         || "```" `T.isPrefixOf` stripped 
+         || "*Defined" `T.isPrefixOf` stripped 
+         || "::" `T.isInfixOf` stripped 
+         || "=>" `T.isInfixOf` stripped 
+         || "forall" `T.isPrefixOf` stripped 
+         || "->" `T.isInfixOf` stripped 
          || "(" `T.isPrefixOf` stripped && ")" `T.isSuffixOf` stripped
 
     -- A line looks like documentation prose
-    isDocLine line =
+    isDocLine line = 
       let stripped = T.strip line
       in not (T.null stripped)
          && not (isSignatureLine line)
@@ -173,17 +172,15 @@ extractFirstSentenceDoc hoverText =
 
     -- Reject if it still looks like code
     looksLikeCode t =
-      "::" `T.isInfixOf` t
-      || ">=" `T.isInfixOf` t
-      || "->" `T.isInfixOf` t
-      || "forall" `T.isPrefixOf` t
-      || T.all (
-c -> nc `elem` ("()[]{},:;\'" :: String) || not (nc == ' ')) t
-
+          "::" `T.isInfixOf` t
+          || ":=>" `T.isInfixOf` t
+          || "->" `T.isInfixOf` t
+          || "forall" `T.isPrefixOf` t
+          || T.all (\c -> c `elem` ("()[]{},:;\"'" :: String) || not (c == ' ')) t
     -- Extract first sentence (up to period or newline)
-    firstSentence t =
+    firstSentence t = 
       let (sentence, _) = T.breakOn ". " t
-      in if T.length sentence < T.length t
+      in if T.length sentence < T.length t 
          then sentence <> "."
          else T.takeWhile (/= '\n') t
 
@@ -198,43 +195,43 @@ c -> nc `elem` ("()[]{},:;\'" :: String) || not (nc == ' ')) t
 -- Preserves:
 --   - newtype/data keywords (important semantic signal)
 cleanSignature :: Text -> Text
-cleanSignature sig =
-  sig
+cleanSignature sig = 
+  sig 
     -- Remove markdown code fences
     & T.replace "```haskell\n" ""
     & T.replace "```haskell" ""
     & T.replace "\n```" ""
     & T.replace "```" ""
     -- Remove "Defined in/at" lines
-    & removeDefinedLines
+    & removeDefinedLines 
     -- Remove package version annotations
-    & removePackageVersions
+    & removePackageVersions 
     -- Clean up whitespace (preserving newtype/data)
-    & T.strip
+    & T.strip 
     & normalizeWhitespace
   where
     -- Remove lines starting with *Defined
-    removeDefinedLines t =
+    removeDefinedLines t = 
       T.unlines $ filter (not . isDefinedLine) $ T.lines t
-      where
-        isDefinedLine line =
-          "*Defined in" `T.isInfixOf` line ||
+      where 
+        isDefinedLine line = 
+          "*Defined in" `T.isInfixOf` line || 
           "*Defined at" `T.isInfixOf` line
 
     -- Remove *(package-version)* patterns
-    removePackageVersions t =
+    removePackageVersions t = 
       -- Simple heuristic: remove *(...)*
       let parts = T.splitOn "*(" t
-      in case parts of
+      in case parts of 
            [single] -> single
            (first : rest) -> first <> T.concat (map dropUntilClose rest)
            [] -> t
-      where
-        dropUntilClose s = case T.breakOn ")*" s of
+      where 
+        dropUntilClose s = case T.breakOn ")*" s of 
           (_, after) -> T.drop 2 after
 
     -- Collapse multiple spaces/newlines, preserving semantic keywords
-    normalizeWhitespace t =
+    normalizeWhitespace t = 
       T.unwords $ filter (not . T.null) $ T.words t
 
 -- | Parse signature to extract input types and output type.
@@ -248,9 +245,9 @@ cleanSignature sig =
 --   - Constraints: (Show a, Eq a) => a -> b
 --   - Effect signatures: Member Foo effs => ...
 parseSignatureTypes :: Text -> ([Text], [Text])
-parseSignatureTypes sig =
+parseSignatureTypes sig = 
   let -- Strip constraints (everything before =>)
-      afterConstraints = case T.breakOn ">=" sig of
+      afterConstraints = case T.breakOn "=>" sig of 
         (_, rest) | not (T.null rest) -> T.drop 2 rest  -- Skip "=>"
         _ -> sig
 
@@ -258,7 +255,7 @@ parseSignatureTypes sig =
       parts = splitByArrow $ T.strip afterConstraints
 
       -- Last part is the output, rest are inputs
-      (inputs, output) = case reverse parts of
+      (inputs, output) = case reverse parts of 
         [] -> ([], [])
         [single] -> ([], extractTypes single)  -- No arrows = just output
         (out : rest) -> (concatMap extractTypes (reverse rest), extractTypes out)
@@ -268,7 +265,7 @@ parseSignatureTypes sig =
     -- Split by "->" at top level (not inside parens)
     splitByArrow :: Text -> [Text]
     splitByArrow t = go 0 "" (T.unpack t)
-      where
+      where 
         go :: Int -> String -> String -> [Text]
         go _ acc [] = [T.strip $ T.pack $ reverse acc]
         go depth acc ('-':'>':rest)
@@ -281,7 +278,7 @@ parseSignatureTypes sig =
 
     -- Extract type names from a type expression
     extractTypes :: Text -> [Text]
-    extractTypes t =
+    extractTypes t = 
       let cleaned = T.strip t
           -- Handle monadic wrappers: IO a, Eff effs a, Maybe a
           unwrapped = unwrapMonad cleaned
@@ -289,24 +286,24 @@ parseSignatureTypes sig =
 
     -- Unwrap common monadic wrappers to get the inner type
     unwrapMonad :: Text -> Text
-    unwrapMonad t
+    unwrapMonad t 
       | "IO " `T.isPrefixOf` t = T.drop 3 t
       | "Eff " `T.isPrefixOf` t = dropEffWrapper t
       | otherwise = t
 
     -- Drop "Eff effs " prefix
-    dropEffWrapper t =
-      let afterEff = T.drop 4 t  -- Drop "Eff "
+    dropEffWrapper t = 
+      let afterEff = T.drop 4 t  -- Drop "Eff " 
           -- Find the end of the effs variable/type
           parts = T.words afterEff
-      in case parts of
+      in case parts of 
            (_effs : rest) -> T.unwords rest
            _ -> t
 
 -- | Check if example is trivial (single candidate = symbol name).
 isTrivialExample :: Text -> [Text] -> Bool
-isTrivialExample symName candidates =
-  case candidates of
+isTrivialExample symName candidates = 
+  case candidates of 
     [single] -> single == symName
     _ -> False
 
@@ -323,22 +320,22 @@ referenceCap = 20
 --
 -- If references > cap, returns Left "[many references - hub symbol]"
 -- Otherwise returns Right with list of location strings.
-extractReferences
-  :: LSPSession
+extractReferences 
+  :: LSPSession 
   -> Text               -- ^ File URI
   -> Position           -- ^ Symbol position
   -> IO (Either Text [Text])
-extractReferences session fileUri pos = do
+extractReferences session fileUri pos = do 
   let doc = textDocument fileUri
   refs <- runM $ runLSP session $ references doc pos
   let refCount = length refs
-  if refCount > referenceCap
+  if refCount > referenceCap 
     then pure $ Left $ "[many references (" <> T.pack (show refCount) <> ") - hub symbol]"
     else pure $ Right $ map locationToText refs
   where
     -- Format Location as "Module.hs:42" or similar
-    locationToText (Location uri (Range (Position line _) _)) =
-      let file = case T.stripPrefix "file://" uri of
+    locationToText (Location uri (Range (Position line _) _)) = 
+      let file = case T.stripPrefix "file://" uri of 
             Just f -> T.takeWhileEnd (/= '/') f  -- Just filename
             Nothing -> uri
       in file <> ":" <> T.pack (show (line + 1))  -- 1-indexed for display
@@ -349,13 +346,13 @@ extractReferences session fileUri pos = do
 -- - Fields: Empty (documentSymbol not available in our LSP effect)
 -- - Types: Extracted from signature via extractCandidates
 -- - References: Via findReferences with cap
-buildCandidateGroups
-  :: LSPSession
+buildCandidateGroups 
+  :: LSPSession 
   -> Text               -- ^ File URI
   -> Position           -- ^ Symbol position
   -> Text               -- ^ Raw signature/hover text
   -> IO CandidateGroups
-buildCandidateGroups session fileUri pos rawSig = do
+buildCandidateGroups session fileUri pos rawSig = do 
   -- Clean signature first, then parse to split inputs from output
   let cleaned = cleanSignature rawSig
       (inputs, output) = parseSignatureTypes cleaned
@@ -363,7 +360,7 @@ buildCandidateGroups session fileUri pos rawSig = do
   -- References with cap
   refs <- extractReferences session fileUri pos
 
-  pure CandidateGroups
+  pure CandidateGroups 
     { cgFields = []  -- documentSymbol not available
     , cgInputs = inputs
     , cgOutput = output
@@ -371,20 +368,20 @@ buildCandidateGroups session fileUri pos rawSig = do
     }
 
 -- | Export training examples for given seed symbols.
-exportTrainingExamples
-  :: LSPSession
+exportTrainingExamples 
+  :: LSPSession 
   -> [Text]      -- Seed symbol names
   -> IO ()
-exportTrainingExamples session seeds = do
-  forM_ seeds $ \seedName -> do
+exportTrainingExamples session seeds = do 
+  forM_ seeds $ \seedName -> do 
     -- 1. Find symbol via LSP
     symbols <- runM $ runLSP session $ workspaceSymbol seedName
 
     -- 2. For each result, fetch hover and extract candidates
-    forM_ symbols $ \symInfo -> do
+    forM_ symbols $ \symInfo -> do 
       let SymbolInformation symName _ loc _ = symInfo
           Location uri rng = loc
-          file = case T.stripPrefix "file://" uri of
+          file = case T.stripPrefix "file://" uri of 
             Just f -> f
             Nothing -> uri
           Range startPosRec _ = rng
@@ -394,8 +391,8 @@ exportTrainingExamples session seeds = do
       -- Get hover info
       maybeHover <- runM $ runLSP session $ hover (textDocument file) startPos
 
-      let rawSig = case maybeHover of
-            Just hoverInfo ->
+      let rawSig = case maybeHover of 
+            Just hoverInfo -> 
               let HoverInfo contents _ = hoverInfo
               in contents
             Nothing -> symName
@@ -410,13 +407,13 @@ exportTrainingExamples session seeds = do
       let candidates = extractCandidates rawSig
 
       -- Skip trivial examples (single candidate = symbol name)
-      when (not (null candidates) && not (isTrivialExample symName candidates)) $ do
-        let jsonl = formatSelectSymbolsExample
-                      symName
-                      moduleName
-                      packageName
-                      cleanedSig
-                      maybeDocs
+      when (not (null candidates) && not (isTrivialExample symName candidates)) $ do 
+        let jsonl = formatSelectSymbolsExample 
+                      symName 
+                      moduleName 
+                      packageName 
+                      cleanedSig 
+                      maybeDocs 
                       candidates
 
         -- Output JSONL line
@@ -432,20 +429,20 @@ exportTrainingExamples session seeds = do
 -- - Fields: empty (documentSymbol not in our LSP effect)
 --
 -- Output format includes grouped candidates for richer training signal.
-exportGroupedTrainingExamples
-  :: LSPSession
+exportGroupedTrainingExamples 
+  :: LSPSession 
   -> [Text]      -- ^ Seed symbol names
   -> IO ()
-exportGroupedTrainingExamples session seeds = do
-  forM_ seeds $ \seedName -> do
+exportGroupedTrainingExamples session seeds = do 
+  forM_ seeds $ \seedName -> do 
     -- 1. Find symbol via LSP
     symbols <- runM $ runLSP session $ workspaceSymbol seedName
 
     -- 2. For each result, fetch hover and build grouped candidates
-    forM_ symbols $ \symInfo -> do
+    forM_ symbols $ \symInfo -> do 
       let SymbolInformation symName _ loc _ = symInfo
           Location uri rng = loc
-          file = case T.stripPrefix "file://" uri of
+          file = case T.stripPrefix "file://" uri of 
             Just f -> f
             Nothing -> uri
           Range startPosRec _ = rng
@@ -455,8 +452,8 @@ exportGroupedTrainingExamples session seeds = do
       -- Get hover info
       maybeHover <- runM $ runLSP session $ hover (textDocument file) startPos
 
-      let rawSig = case maybeHover of
-            Just hoverInfo ->
+      let rawSig = case maybeHover of 
+            Just hoverInfo -> 
               let HoverInfo contents _ = hoverInfo
               in contents
             Nothing -> symName
@@ -472,16 +469,16 @@ exportGroupedTrainingExamples session seeds = do
       -- Skip if no types (references alone aren't useful for select_symbols)
       let hasInputs = not (null (cgInputs groups))
           hasOutput = not (null (cgOutput groups))
-          hasRefs = case cgReferences groups of
+          hasRefs = case cgReferences groups of 
             Left _ -> True  -- Hub symbols are interesting
             Right refs -> not (null refs)
 
-      when (hasInputs || hasOutput || hasRefs) $ do
-        let jsonl = formatSelectSymbolsExampleGrouped
-                      symName
-                      moduleName
-                      packageName
-                      cleanedSig
+      when (hasInputs || hasOutput || hasRefs) $ do 
+        let jsonl = formatSelectSymbolsExampleGrouped 
+                      symName 
+                      moduleName 
+                      packageName 
+                      cleanedSig 
                       groups
 
         -- Output JSONL line
@@ -493,15 +490,15 @@ exportGroupedTrainingExamples session seeds = do
 -- HLS limits workspaceSymbol results, so querying multiple patterns
 -- helps discover more functions.
 functionPrefixes :: [Text]
-functionPrefixes =
-  [ ""        -- All symbols
+functionPrefixes = 
+  [""        -- All symbols
   , "run"     -- runX interpreters
   , "handle"  -- handlers
   , "mk"      -- smart constructors
   , "to"      -- conversion functions
   , "from"    -- conversion functions
   , "get"     -- getters
-  , "set"     -- getters
+  , "set"     -- setters
   , "with"    -- bracketing functions
   , "parse"   -- parsers
   , "render"  -- renderers
@@ -520,9 +517,9 @@ functionPrefixes =
 -- Filters to functions only, since data types have minimal hover info
 -- (just ":: Type") while functions have full signatures with type references.
 discoverSymbols :: Logger -> LSPSession -> IO [Text]
-discoverSymbols logger session = do
+discoverSymbols logger session = do 
   -- Query multiple patterns to overcome HLS result limits
-  allSymLists <- forM functionPrefixes $ \prefix -> do
+  allSymLists <- forM functionPrefixes $ \prefix -> do 
     runM $ runLSP session $ workspaceSymbol prefix
 
   let allSyms = concat allSymLists
@@ -539,7 +536,7 @@ discoverSymbols logger session = do
   -- Extract unique names (no limit - we want 800-1k examples)
   let uniqueNames = nub $ map (\(SymbolInformation name _ _ _) -> name) userDefined
 
-  logInfo logger $ "Discovered " <> T.pack (show (length uniqueNames)) <> " functions from "
+  logInfo logger $ "Discovered " <> T.pack (show (length uniqueNames)) <> " functions from " 
     <> T.pack (show (length allSyms)) <> " total symbol results"
   pure uniqueNames
 
@@ -547,7 +544,7 @@ discoverSymbols logger session = do
 --
 -- Opening a file from each package triggers HLS to load that component.
 triggerFiles :: [Text]
-triggerFiles =
+triggerFiles = 
   ["haskell/dsl/core/src/Tidepool/Graph/Types.hs"
   ,"haskell/control-server/src/Tidepool/Control/Server.hs"
   ,"haskell/effects/llm-interpreter/src/Tidepool/LLM/Interpreter.hs"
@@ -562,12 +559,12 @@ triggerFiles =
 --
 -- BFS crawl: starts with local functions, follows candidate types to their
 -- definitions in other packages, continues until target count reached.
-exportWithExpansion
-  :: Logger
-  -> LSPSession
+exportWithExpansion 
+  :: Logger 
+  -> LSPSession 
   -> Int           -- ^ Target example count (e.g., 1000)
   -> IO ()
-exportWithExpansion logger session targetCount = do
+exportWithExpansion logger session targetCount = do 
   -- Track state
   countRef <- newIORef (0 :: Int)
   visitedFilesRef <- newIORef Set.empty
@@ -575,7 +572,7 @@ exportWithExpansion logger session targetCount = do
 
   -- Trigger HLS to index multiple packages by opening key files
   logInfo logger "Opening key files to trigger multi-package indexing..."
-  forM_ triggerFiles $ \file -> do
+  forM_ triggerFiles $ \file -> do 
     logDebug logger $ "  Opening: " <> file
     -- Hover at line 1 forces HLS to load the file's component
     _ <- runM $ runLSP session $ hover (textDocument ("file://" <> file)) (position 0 0)
@@ -592,18 +589,18 @@ exportWithExpansion logger session targetCount = do
   logInfo logger $ "Target: " <> T.pack (show targetCount) <> " examples"
 
   -- Process initial symbols, collecting candidate types
-  forM_ initialSyms $ \seedName -> do
+  forM_ initialSyms $ \seedName -> do 
     count <- readIORef countRef
-    when (count < targetCount) $ do
+    when (count < targetCount) $ do 
       newTypes <- processSymbol logger session seedName countRef visitedFilesRef targetCount
       -- Add discovered types to pending queue
       forM_ newTypes $ \t -> modifyIORef' pendingTypesRef (Set.insert t)
 
   -- BFS: follow pending types to their definitions
-  let expandLoop = do
+  let expandLoop = do 
         count <- readIORef countRef
         pending <- readIORef pendingTypesRef
-        when (count < targetCount && not (Set.null pending)) $ do
+        when (count < targetCount && not (Set.null pending)) $ do 
           -- Pop a type from pending
           let (nextType, remaining) = Set.deleteFindMin pending
           writeIORef pendingTypesRef remaining
@@ -612,13 +609,13 @@ exportWithExpansion logger session targetCount = do
 
           -- Find definition of this type
           maybeFile <- findTypeDefinitionFile session nextType
-          case maybeFile of
+          case maybeFile of 
             Nothing -> expandLoop  -- Type not found, continue
-            Just file -> do
+            Just file -> do 
               visited <- readIORef visitedFilesRef
-              if file `Set.member` visited
+              if file `Set.member` visited 
                 then expandLoop  -- Already visited
-                else do
+                else do 
                   modifyIORef' visitedFilesRef (Set.insert file)
                   logDebug logger $ "[Expand] New file: " <> file
 
@@ -633,9 +630,9 @@ exportWithExpansion logger session targetCount = do
                   logDebug logger $ "[Expand] Found " <> T.pack (show (length funcNames)) <> " functions"
 
                   -- Process each function
-                  forM_ funcNames $ \funcName -> do
+                  forM_ funcNames $ \funcName -> do 
                     c <- readIORef countRef
-                    when (c < targetCount) $ do
+                    when (c < targetCount) $ do 
                       newTypes <- processSymbol logger session funcName countRef visitedFilesRef targetCount
                       forM_ newTypes $ \t -> modifyIORef' pendingTypesRef (Set.insert t)
 
@@ -647,28 +644,28 @@ exportWithExpansion logger session targetCount = do
   logInfo logger $ "Expansion complete: " <> T.pack (show finalCount) <> " examples generated"
 
 -- | Process a single symbol: generate example and return candidate types.
-processSymbol
-  :: Logger
-  -> LSPSession
+processSymbol 
+  :: Logger 
+  -> LSPSession 
   -> Text           -- ^ Symbol name
   -> IORef Int      -- ^ Counter ref
   -> IORef (Set.Set Text)  -- ^ Visited files ref
   -> Int            -- ^ Target count
   -> IO [Text]      -- ^ Returns candidate types for expansion
-processSymbol logger session symName countRef visitedFilesRef targetCount = do
+processSymbol logger session symName countRef visitedFilesRef targetCount = do 
   count <- readIORef countRef
-  if count >= targetCount
+  if count >= targetCount 
     then pure []
-    else do
+    else do 
       symbols <- runM $ runLSP session $ workspaceSymbol symName
-      candidatesLists <- forM symbols $ \symInfo -> do
+      candidatesLists <- forM symbols $ \symInfo -> do 
         c <- readIORef countRef
-        if c >= targetCount
+        if c >= targetCount 
           then pure []
-          else do
+          else do 
             let SymbolInformation name _ loc _ = symInfo
                 Location uri rng = loc
-                file = case T.stripPrefix "file://" uri of
+                file = case T.stripPrefix "file://" uri of 
                   Just f -> f
                   Nothing -> uri
                 Range startPosRec _ = rng
@@ -680,8 +677,8 @@ processSymbol logger session symName countRef visitedFilesRef targetCount = do
 
             -- Get hover info
             maybeHover <- runM $ runLSP session $ hover (textDocument file) startPos
-            let rawSig = case maybeHover of
-                  Just hoverInfo ->
+            let rawSig = case maybeHover of 
+                  Just hoverInfo -> 
                     let HoverInfo contents _ = hoverInfo
                     in contents
                   Nothing -> name
@@ -696,7 +693,7 @@ processSymbol logger session symName countRef visitedFilesRef targetCount = do
             let candidates = extractCandidates rawSig
 
             -- Generate example if we have non-trivial candidates
-            when (not (null candidates) && not (isTrivialExample name candidates)) $ do
+            when (not (null candidates) && not (isTrivialExample name candidates)) $ do 
               let jsonl = formatSelectSymbolsExample name moduleName packageName cleanedSig maybeDocs candidates
               BL.putStrLn jsonl
               hFlush stdout
@@ -712,13 +709,13 @@ processSymbol logger session symName countRef visitedFilesRef targetCount = do
 
 -- | Find the file where a type is defined using go-to-definition.
 findTypeDefinitionFile :: LSPSession -> Text -> IO (Maybe Text)
-findTypeDefinitionFile session typeName = do
+findTypeDefinitionFile session typeName = do 
   -- Search for the type in workspace
   symbols <- runM $ runLSP session $ workspaceSymbol typeName
-  case symbols of
+  case symbols of 
     [] -> pure Nothing
-    (SymbolInformation _ _ (Location uri _) _ : _) ->
-      pure $ Just $ case T.stripPrefix "file://" uri of
+    (SymbolInformation _ _ (Location uri _) _ : _) -> 
+      pure $ Just $ case T.stripPrefix "file://" uri of 
         Just f -> f
         Nothing -> uri
 
@@ -732,26 +729,26 @@ findTypeDefinitionFile session typeName = do
 -- Recursively traverses directories, collecting *.hs files.
 -- Excludes build artifacts: dist-newstyle, .stack-work, vendor, .git
 findHaskellFiles :: FilePath -> IO [FilePath]
-findHaskellFiles root = do
+findHaskellFiles root = do 
   isDir <- doesDirectoryExist root
-  if not isDir
+  if not isDir 
     then pure []
-    else do
+    else do 
       entries <- listDirectory root
       let filteredEntries = filter (not . isExcluded) entries
-      paths <- forM filteredEntries $ \entry -> do
+      paths <- forM filteredEntries $ \entry -> do 
         let fullPath = root </> entry
         isFile <- doesFileExist fullPath
         isDirectory <- doesDirectoryExist fullPath
         if isFile && takeExtension fullPath == ".hs"
           then pure [fullPath]
-          else if isDirectory
+          else if isDirectory 
             then findHaskellFiles fullPath
             else pure []
       pure $ concat paths
-  where
+  where 
     isExcluded :: FilePath -> Bool
-    isExcluded name = name `elem`
+    isExcluded name = name `elem` 
       [ "dist-newstyle", ".stack-work", "vendor", ".git"
       , "dist", "build", ".cabal-sandbox"
       ]
@@ -768,7 +765,7 @@ findHaskellFiles root = do
 --
 -- LSP Positions are 0-indexed.
 readCodeAtRange :: FilePath -> Range -> IO Text
-readCodeAtRange file (Range (Position startLine _) (Position endLine _)) = do
+readCodeAtRange file (Range (Position startLine _) (Position endLine _)) = do 
   contents <- TIO.readFile file
   let allLines = T.lines contents
       startIdx = fromIntegral startLine
@@ -779,48 +776,48 @@ readCodeAtRange file (Range (Position startLine _) (Position endLine _)) = do
       candidateLines = drop startIdx $ take (maxIdx + 1) allLines
 
       -- Detect HARD boundaries (always stop regardless of state)
-      isHardBoundary line =
+      isHardBoundary line = 
         -- Section divider (═══ or ---)
-        "═" `T.isInfixOf` line ||
+        "═" `T.isInfixOf` line || 
         (T.isPrefixOf "--" line && T.length line > 10 && T.all (\c -> c == '-' || c == ' ') (T.drop 2 line))
 
       -- Detect soft boundaries (type sig, haddock) - only after we've seen code
-      isSoftBoundary line =
+      isSoftBoundary line = 
         -- Haddock for next definition (unindented "-- |")
-        T.isPrefixOf "-- |" line ||
+        T.isPrefixOf "-- |" line || 
         -- Next type signature at column 0 (contains "::")
-        (not (T.null line) &&
-         not (T.isPrefixOf " " line) &&
-         not (T.isPrefixOf "\t" line) &&
+        (not (T.null line) && 
+         not (T.isPrefixOf " " line) && 
+         not (T.isPrefixOf "\t" line) && 
          "::" `T.isInfixOf` line)
 
       -- Is this a "preamble" line (haddock or type signature)?
-      isPreamble line =
-        T.isPrefixOf "-- |" line ||
+      isPreamble line = 
+        T.isPrefixOf "-- |" line || 
         T.isPrefixOf "-- " line ||  -- continuation haddock
         (not (T.null line) && not (T.isPrefixOf " " line) && "::" `T.isInfixOf` line)
 
       -- Check for two consecutive blank lines
       hasDoubleBlank [] = False
       hasDoubleBlank [_] = False
-      hasDoubleBlank (a:b:_)= T.null (T.strip a) && T.null (T.strip b)
+      hasDoubleBlank (a:b:_) = T.null (T.strip a) && T.null (T.strip b)
 
       -- Take lines until boundary
       -- seenCode tracks whether we've passed the preamble (haddock + type sig)
       -- Soft boundaries (type sig, haddock) only count after we've seen actual code
       takeUntilBoundary :: [Text] -> [Text] -> Bool -> [Text]
       takeUntilBoundary [] _ _ = []
-      takeUntilBoundary (l:ls) prev seenCode
+      takeUntilBoundary (l:ls) prev seenCode 
         | hasDoubleBlank (prev ++ [l]) = []           -- Stop at double blank
         | isHardBoundary l = []                        -- Always stop at hard boundary
         | seenCode && isSoftBoundary l = []           -- Stop at soft boundary only after code
-        | otherwise =
+        | otherwise = 
             let nowSeenCode = seenCode || (not (isPreamble l) && not (T.null (T.strip l)))
             in l : takeUntilBoundary ls [l] nowSeenCode
 
-      bodyLines = case candidateLines of
+      bodyLines = case candidateLines of 
         [] -> []
-        (firstLine:rest) ->
+        (firstLine:rest) -> 
           let startSeenCode = not (isPreamble firstLine) && not (T.null (T.strip firstLine))
           in firstLine : takeUntilBoundary rest [firstLine] startSeenCode
 
@@ -835,13 +832,13 @@ readCodeAtRange file (Range (Position startLine _) (Position endLine _)) = do
 -- 4. Read code at each symbol's range
 --
 -- Returns: [(Text, Range, SymbolName, CodeBody)] where first Text is file path
-sampleCodeBodies
-  :: Logger
-  -> LSPSession
+sampleCodeBodies 
+  :: Logger 
+  -> LSPSession 
   -> FilePath    -- ^ Project root (unused, kept for API compatibility)
   -> Int         -- ^ Number to sample
   -> IO [(Text, Range, Text, Text)]
-sampleCodeBodies logger session _projectRoot count = do
+sampleCodeBodies logger session _projectRoot count = do 
   -- Use workspaceSymbol for fast discovery (much faster than documentSymbol on all files)
   logDebug logger "[Sample] Discovering symbols via LSP workspaceSymbol..."
   allSymNames <- discoverSymbols logger session
@@ -850,15 +847,15 @@ sampleCodeBodies logger session _projectRoot count = do
 
   -- Get full location info for each symbol
   logDebug logger "[Sample] Resolving symbol locations..."
-  symbolsWithLocations <- fmap concat $ forM allSymNames $ \symName -> do
+  symbolsWithLocations <- fmap concat $ forM allSymNames $ \symName -> do 
     syms <- runM $ runLSP session $ workspaceSymbol symName
     -- Filter to exact matches with valid locations
-    let matching = [(file, range, name)
+    let matching = [(file, range, name) 
                    | SymbolInformation name kind (Location uri range) _ <- syms
                    , name == symName
                    , kind `elem` [SKFunction, SKMethod, SKVariable, SKClass, SKStruct]
                    , not (T.null uri)
-                   , let file = case T.stripPrefix "file://" uri of
+                   , let file = case T.stripPrefix "file://" uri of 
                            Just f -> f
                            Nothing -> uri
                    ]
@@ -873,23 +870,23 @@ sampleCodeBodies logger session _projectRoot count = do
 
   -- Read code at each range
   logDebug logger "[Sample] Reading code bodies..."
-  forM sampled $ \(file, range, name) -> do
+  forM sampled $ \(file, range, name) -> do 
     code <- readCodeAtRange (T.unpack file) range
     pure (file, range, name, code)
 
 -- | Randomly sample N items from a list.
 randomSample :: Int -> [a] -> IO [a]
-randomSample n items
+randomSample n items 
   | n >= length items = pure items
   | n <= 0 = pure []
   | otherwise = go n items []
-  where
+  where 
     go 0 _ acc = pure acc
     go _ [] acc = pure acc  -- Pool exhausted
-    go remaining pool acc = do
+    go remaining pool acc = do 
       idx <- randomRIO (0, length pool - 1)
-      case splitAt idx pool of
-        (before, chosen:after) -> do
+      case splitAt idx pool of 
+        (before, chosen:after) -> do 
           let newPool = before ++ after
           go (remaining - 1) newPool (chosen : acc)
         _ -> pure acc  -- Should never happen given bounds, but satisfies exhaustiveness
@@ -900,25 +897,25 @@ randomSample n items
 -- {"file": "...", "range": {...}, "name": "...", "code": "...",
 --  "criteria": "TODO: add criteria", "selected": []}
 exportCodeSamples :: Logger -> LSPSession -> FilePath -> Int -> IO ()
-exportCodeSamples logger session projectRoot count = do
+exportCodeSamples logger session projectRoot count = do 
   samples <- sampleCodeBodies logger session projectRoot count
   logInfo logger $ "[Export] Generated " <> T.pack (show (length samples)) <> " samples"
 
-  forM_ samples $ \(file, Range (Position startLine startChar) (Position endLine endChar), name, code) -> do
-    let skeleton = object
-          [ "file" .= file
-          , "range" .= object
-              [ "start" .= object
-                  [ "line" .= startLine
-                  , "character" .= startChar
+  forM_ samples $ \(file, Range (Position startLine startChar) (Position endLine endChar), name, code) -> do 
+    let skeleton = object 
+          [ "file" .= file 
+          , "range" .= object 
+              [ "start" .= object 
+                  [ "line" .= startLine 
+                  , "character" .= startChar 
                   ]
-              , "end" .= object
-                  [ "line" .= endLine
-                  , "character" .= endChar
+              , "end" .= object 
+                  [ "line" .= endLine 
+                  , "character" .= endChar 
                   ]
               ]
-          , "name" .= name
-          , "code" .= code
+          , "name" .= name 
+          , "code" .= code 
           , "criteria" .= ("TODO: add criteria" :: Text)
           , "selected" .= ([] :: [Text])
           ]
@@ -934,7 +931,7 @@ exportCodeSamples logger session projectRoot count = do
 -- and ReifyMCPTools (legacy) for graphs with MCPExport annotations.
 -- Returns ToolDefinition format that matches Rust protocol types.
 exportMCPTools :: Logger -> IO [ToolDefinition]
-exportMCPTools logger = do
+exportMCPTools logger = do 
   logInfo logger "[MCP Discovery] Starting tool discovery from graphs..."
 
   -- Extract tools from simplified graphs via GraphEntries (new pattern)
@@ -961,7 +958,7 @@ exportMCPTools logger = do
   logInfo logger $ "[MCP Discovery] Total: " <> T.pack (show (length allTools)) <> " tools discovered"
 
   -- Log tool names with entry points for verification
-  forM_ allTools $ \(MCPToolInfo name _desc _schema entryName) ->
+  forM_ allTools $ \(MCPToolInfo name _desc _schema entryName) -> 
     logDebug logger $ "[MCP Discovery]   " <> name <> " -> " <> entryName
 
   logDebug logger "[MCP Discovery] Converting to ToolDefinition format..."
@@ -969,9 +966,8 @@ exportMCPTools logger = do
 
 -- | Convert MCPToolInfo -> ToolDefinition.
 reifyToToolDef :: MCPToolInfo -> ToolDefinition
-reifyToToolDef (MCPToolInfo name desc schema _entryName) = ToolDefinition
-  {
-  tdName = name
-  , tdDescription = desc
-  , tdInputSchema = schema
+reifyToToolDef (MCPToolInfo name desc schema _entryName) = ToolDefinition 
+  { tdName = name 
+  , tdDescription = desc 
+  , tdInputSchema = schema 
   }

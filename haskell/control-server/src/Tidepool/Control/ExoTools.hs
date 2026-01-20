@@ -124,38 +124,8 @@ exoStatusLogic
   => ExoStatusArgs
   -> Eff es (GotoChoice '[To Exit ExoStatusResult])
 exoStatusLogic args = do
-  -- 1. Get Worktree/Git info
-  mWt <- getWorktreeInfo
-  dirtyFiles <- getDirtyFiles
-
-  -- 2. Determine Bead ID
-  let branchBeadId = case mWt of
-        Just wt -> parseBeadId wt.wiBranch
-        Nothing -> Nothing
-      targetBeadId = esaBeadId args <|> branchBeadId
-
-  -- 3. Get Bead Info
-  mBead <- case targetBeadId of
-    Just bid -> getBead bid
-    Nothing -> pure Nothing
-
-  -- 4. Get PR Info
-  -- We look for a PR where the head branch matches the current branch
-  mPR <- case mWt of
-    Just wt -> do
-      -- Default to upstream repo
-      let repo = Repo "tidepool-heavy-industries/tidepool"
-      prs <- listPullRequests repo (PRFilter Nothing (Just "main") (Just 100))
-      -- Filter PRs by head branch
-      pure $ find (\pr -> pr.prHeadRefName == wt.wiBranch) prs
-    Nothing -> pure Nothing
-
-  pure $ gotoExit ExoStatusResult
-    { esrBead = mBead
-    , esrWorktree = mWt
-    , esrDirtyFiles = dirtyFiles
-    , esrPR = mPR
-    }
+  result <- getDevelopmentContext args.esaBeadId
+  pure $ gotoExit result
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- EXO-COMPLETE GRAPH
@@ -338,19 +308,36 @@ exoReconstituteLogic args = do
   -- 1. Run BD Sync (Primary difference from exo_status)
   sync
 
-  -- 2. Determine context (borrowed from exoStatusLogic)
+  -- 2. Determine context
+  result <- getDevelopmentContext args.eraBeadId
+  pure $ gotoExit result
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- HELPERS
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Helper to gather common development context.
+getDevelopmentContext
+  :: (Member BD es, Member Git es, Member GitHub es)
+  => Maybe Text
+  -> Eff es ExoStatusResult
+getDevelopmentContext maybeBeadId = do
+  -- 1. Get Worktree/Git info
   mWt <- getWorktreeInfo
   dirtyFiles <- getDirtyFiles
 
+  -- 2. Determine Bead ID
   let branchBeadId = case mWt of
         Just wt -> parseBeadId wt.wiBranch
         Nothing -> Nothing
-      targetBeadId = eraBeadId args <|> branchBeadId
+      targetBeadId = maybeBeadId <|> branchBeadId
 
+  -- 3. Get Bead Info
   mBead <- case targetBeadId of
     Just bid -> getBead bid
     Nothing -> pure Nothing
 
+  -- 4. Get PR Info
   mPR <- case mWt of
     Just wt -> do
       let repo = Repo "tidepool-heavy-industries/tidepool"
@@ -358,16 +345,12 @@ exoReconstituteLogic args = do
       pure $ find (\pr -> pr.prHeadRefName == wt.wiBranch) prs
     Nothing -> pure Nothing
 
-  pure $ gotoExit ExoStatusResult
+  pure ExoStatusResult
     { esrBead = mBead
     , esrWorktree = mWt
     , esrDirtyFiles = dirtyFiles
     , esrPR = mPR
     }
-
--- ════════════════════════════════════════════════════════════════════════════
--- HELPERS
--- ════════════════════════════════════════════════════════════════════════════
 
 -- | Parse bead ID from branch name (bd-{id}/* convention)
 parseBeadId :: Text -> Maybe Text
