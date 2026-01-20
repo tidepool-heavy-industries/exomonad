@@ -77,7 +77,7 @@ spec = describe "Worktree Interpreter" $ do
     it "creates a worktree directory that exists" $ withTempGitRepo $ \repoDir -> do
       let config = defaultWorktreeConfig repoDir
       result <- runM $ runWorktreeIO config $
-        createWorktree (WorktreeSpec "test-wt" Nothing)
+        createWorktree (WorktreeSpec "test-wt" Nothing Nothing Nothing)
 
       result `shouldSatisfy` isRight
       case result of
@@ -89,8 +89,8 @@ spec = describe "Worktree Interpreter" $ do
     it "creates worktrees with unique paths" $ withTempGitRepo $ \repoDir -> do
       let config = defaultWorktreeConfig repoDir
       (result1, result2) <- runM $ runWorktreeIO config $ do
-        r1 <- createWorktree (WorktreeSpec "same-name" Nothing)
-        r2 <- createWorktree (WorktreeSpec "same-name" Nothing)
+        r1 <- createWorktree (WorktreeSpec "same-name" Nothing Nothing Nothing)
+        r2 <- createWorktree (WorktreeSpec "same-name" Nothing Nothing Nothing)
         pure (r1, r2)
 
       result1 `shouldSatisfy` isRight
@@ -104,7 +104,7 @@ spec = describe "Worktree Interpreter" $ do
     it "returns error for invalid base branch" $ withTempGitRepo $ \repoDir -> do
       let config = defaultWorktreeConfig repoDir
       result <- runM $ runWorktreeIO config $
-        createWorktree (WorktreeSpec "test" (Just "nonexistent-branch"))
+        createWorktree (WorktreeSpec "test" (Just "nonexistent-branch") Nothing Nothing)
 
       result `shouldSatisfy` isLeft
       case result of
@@ -118,7 +118,7 @@ spec = describe "Worktree Interpreter" $ do
     it "removes an existing worktree" $ withTempGitRepo $ \repoDir -> do
       let config = defaultWorktreeConfig repoDir
       result <- runM $ runWorktreeIO config $ do
-        createResult <- createWorktree (WorktreeSpec "to-delete" Nothing)
+        createResult <- createWorktree (WorktreeSpec "to-delete" Nothing Nothing Nothing)
         case createResult of
           Left err -> pure $ Left err
           Right path -> do
@@ -145,7 +145,7 @@ spec = describe "Worktree Interpreter" $ do
     it "lists created worktrees" $ withTempGitRepo $ \repoDir -> do
       let config = defaultWorktreeConfig repoDir
       result <- runM $ runWorktreeIO config $ do
-        _ <- createWorktree (WorktreeSpec "list-test" Nothing)
+        _ <- createWorktree (WorktreeSpec "list-test" Nothing Nothing Nothing)
         listWorktrees
 
       result `shouldSatisfy` isRight
@@ -164,7 +164,7 @@ spec = describe "Worktree Interpreter" $ do
     it "cleans up worktree after action completes" $ withTempGitRepo $ \repoDir -> do
       let config = defaultWorktreeConfig repoDir
       (result, capturedPath) <- runM $ runWorktreeIO config $ do
-        res <- withWorktree (WorktreeSpec "bracket-test" Nothing) $ \path -> do
+        res <- withWorktree (WorktreeSpec "bracket-test" Nothing Nothing Nothing) $ \path -> do
           pure path
         case res of
           Right path -> pure (res, Just path)
@@ -180,7 +180,7 @@ spec = describe "Worktree Interpreter" $ do
     it "cleans up even if action returns error value" $ withTempGitRepo $ \repoDir -> do
       let config = defaultWorktreeConfig repoDir
       (_, capturedPath) <- runM $ runWorktreeIO config $ do
-        res <- withWorktree (WorktreeSpec "error-test" Nothing) $ \path -> do
+        res <- withWorktree (WorktreeSpec "error-test" Nothing Nothing Nothing) $ \path -> do
           -- Return an error-like value (but don't throw)
           pure (path, "simulated error" :: String)
         case res of
@@ -196,7 +196,7 @@ spec = describe "Worktree Interpreter" $ do
     it "returns creation error without running action" $ withTempGitRepo $ \repoDir -> do
       let config = defaultWorktreeConfig repoDir
       actionRan <- runM $ runWorktreeIO config $ do
-        res <- withWorktree (WorktreeSpec "fail" (Just "bad-branch")) $ \_ -> do
+        res <- withWorktree (WorktreeSpec "fail" (Just "bad-branch") Nothing Nothing) $ \_ -> do
           pure True  -- This should never run
         case res of
           Right ran -> pure ran
@@ -211,7 +211,7 @@ spec = describe "Worktree Interpreter" $ do
       let config = defaultWorktreeConfig repoDir
       result <- runM $ runWorktreeIO config $ do
         -- Create a worktree
-        createResult <- createWorktree (WorktreeSpec "merge-test" Nothing)
+        createResult <- createWorktree (WorktreeSpec "merge-test" Nothing Nothing Nothing)
         case createResult of
           Left err -> pure $ Left err
           Right wtPath@(WorktreePath wtDir) -> do
@@ -246,7 +246,7 @@ spec = describe "Worktree Interpreter" $ do
 
       result <- runM $ runWorktreeIO config $ do
         -- Create a worktree
-        createResult <- createWorktree (WorktreeSpec "cherry-test" Nothing)
+        createResult <- createWorktree (WorktreeSpec "cherry-test" Nothing Nothing Nothing)
         case createResult of
           Left err -> pure $ Left err
           Right wtPath@(WorktreePath wtDir) -> do
@@ -271,7 +271,7 @@ spec = describe "Worktree Interpreter" $ do
       createDirectoryIfMissing True destDir
 
       result <- runM $ runWorktreeIO config $ do
-        createResult <- createWorktree (WorktreeSpec "cherry-err" Nothing)
+        createResult <- createWorktree (WorktreeSpec "cherry-err" Nothing Nothing Nothing)
         case createResult of
           Left err -> pure $ Left err
           Right wtPath -> do
@@ -290,7 +290,7 @@ spec = describe "Worktree Interpreter" $ do
       createDirectoryIfMissing True destDir
 
       result <- runM $ runWorktreeIO config $ do
-        createResult <- createWorktree (WorktreeSpec "cherry-empty" Nothing)
+        createResult <- createWorktree (WorktreeSpec "cherry-empty" Nothing Nothing Nothing)
         case createResult of
           Left err -> pure $ Left err
           Right wtPath -> cherryPickFiles wtPath [] destDir

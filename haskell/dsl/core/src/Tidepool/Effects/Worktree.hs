@@ -31,7 +31,6 @@
 -- Use 'withWorktree' for bracket-style resource safety (automatic cleanup).
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE UndecidableInstances #-}
 
 -- | Worktree effect for managing git worktrees.
@@ -75,6 +74,9 @@ module Tidepool.Effects.Worktree
   , cherryPickFiles
   , listWorktrees
 
+    -- * Construction
+  , defaultWorktreeSpec
+
     -- * Bracket
   , withWorktree
 
@@ -117,11 +119,24 @@ newtype WorktreePath = WorktreePath { unWorktreePath :: FilePath }
 data WorktreeSpec = WorktreeSpec
   { wsBaseName :: Text
     -- ^ Base name for the worktree (e.g., "types-first-tests").
-    -- A unique suffix will be added by the interpreter.
+    -- A unique suffix will be added by the interpreter if wsBranchName is Nothing.
   , wsFromBranch :: Maybe Text
     -- ^ Branch to create worktree from. Nothing = current HEAD.
+  , wsBranchName :: Maybe Text
+    -- ^ Explicit branch name to use. If provided, no suffix is added.
+  , wsPath :: Maybe FilePath
+    -- ^ Explicit path for the worktree. If provided, wcWorktreeDir is ignored.
   }
   deriving stock (Show, Eq)
+
+-- | Default specification for a worktree.
+defaultWorktreeSpec :: Text -> WorktreeSpec
+defaultWorktreeSpec baseName = WorktreeSpec
+  { wsBaseName = baseName
+  , wsFromBranch = Nothing
+  , wsBranchName = Nothing
+  , wsPath = Nothing
+  }
 
 -- | Result of merging a worktree back to main.
 data MergeResult

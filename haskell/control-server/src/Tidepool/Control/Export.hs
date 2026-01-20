@@ -47,7 +47,7 @@ import Tidepool.Control.Protocol (ToolDefinition(..))
 import Tidepool.Control.LSPTools
   ( FindCallersGraph, ShowFieldsGraph, ShowConstructorsGraph )
 import Tidepool.Control.ExoTools
-  ( ExoStatusGraph, ExoCompleteGraph, ExoReconstituteGraph )
+  ( ExoStatusGraph, ExoCompleteGraph, ExoReconstituteGraph, SpawnAgentsGraph )
 import Tidepool.Control.Scout.Graph (DocGenGraph)
 import Tidepool.Control.Scout.DocGen.Gemma (extractCandidates)
 import Tidepool.Effect.LSP
@@ -944,6 +944,7 @@ exportMCPTools logger = do
   let esTools = reifyMCPTools (Proxy @ExoStatusGraph)
   let ecTools = reifyMCPTools (Proxy @ExoCompleteGraph)
   let erTools = reifyMCPTools (Proxy @ExoReconstituteGraph)
+  let saTools = reifyMCPTools (Proxy @SpawnAgentsGraph)
 
   -- Log discovered tools per graph for debugging
   logDebug logger $ "[MCP Discovery] FindCallersGraph: " <> T.pack (show (length fcTools)) <> " tools"
@@ -953,8 +954,9 @@ exportMCPTools logger = do
   logDebug logger $ "[MCP Discovery] ExoStatusGraph: " <> T.pack (show (length esTools)) <> " tools"
   logDebug logger $ "[MCP Discovery] ExoCompleteGraph: " <> T.pack (show (length ecTools)) <> " tools"
   logDebug logger $ "[MCP Discovery] ExoReconstituteGraph: " <> T.pack (show (length erTools)) <> " tools"
+  logDebug logger $ "[MCP Discovery] SpawnAgentsGraph: " <> T.pack (show (length saTools)) <> " tools"
 
-  let allTools = concat [fcTools, sfTools, scTools, dgTools, esTools, ecTools, erTools]
+  let allTools = concat [fcTools, sfTools, scTools, dgTools, esTools, ecTools, erTools, saTools]
   logInfo logger $ "[MCP Discovery] Total: " <> T.pack (show (length allTools)) <> " tools discovered"
 
   -- Log tool names with entry points for verification
