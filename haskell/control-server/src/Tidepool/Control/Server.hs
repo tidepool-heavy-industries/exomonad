@@ -1,3 +1,5 @@
+{-# LANGUAGE TypeApplications #-}
+
 -- | Unix socket control server for Claude Code++ integration.
 --
 -- Listens on Unix socket (default .tidepool/sockets/control.sock) and handles
@@ -172,9 +174,9 @@ handleConnection logger lspSession maybeTuiHandle conn = do
     )
   `catch` \(e :: SomeException) -> do
     logError logger $ "Connection error: " <> T.pack (show e)
-    -- Send error response to client instead of leaving them hanging
-    -- Use Gemini exit code (2) since we can't determine runtime from connection error
-    sendResponse conn $ hookError Gemini $ "Connection error: " <> T.pack (show e)
+    -- Try to send error response, but ignore failures (connection may be closed)
+    void $ E.try @SomeException $
+      sendResponse conn $ hookError Gemini $ "Connection error: " <> T.pack (show e)
 
 -- | Read bytes from socket until newline.
 readUntilNewline :: Socket -> IO ByteString

@@ -15,7 +15,7 @@ processes:
     readiness_probe:
       # Connect to Unix socket via mantle-agent health command
       exec:
-        command: "cargo run --bin mantle-agent -- health"
+        command: "./scripts/health-check.sh"
       initial_delay_seconds: 2
       period_seconds: 2
       timeout_seconds: 2
