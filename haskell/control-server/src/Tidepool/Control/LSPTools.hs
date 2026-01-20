@@ -39,6 +39,13 @@ module Tidepool.Control.LSPTools
   , FindCallersResult(..)
   , CallSite(..)
 
+    -- * Find Callees
+  , FindCalleesGraph(..)
+  , findCalleesLogic
+  , FindCalleesArgs(..)
+  , FindCalleesResult(..)
+  , CalleeInfo(..)
+
     -- * Show Fields
   , ShowFieldsGraph(..)
   , showFieldsLogic
@@ -275,6 +282,180 @@ findCallersLogic args = do
         }
 
   returnValue result
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- FIND-CALLEES GRAPH
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Arguments for find_callees tool.
+data FindCalleesArgs = FindCalleesArgs
+  { fceName :: Text              -- ^ Function name to find callees of
+  , fceMaxResults :: Maybe Int   -- ^ Max results (default: 50)
+  }
+  deriving stock (Show, Eq, Generic)
+
+instance HasJSONSchema FindCalleesArgs where
+  jsonSchema = objectSchema
+    [ ("name", describeField "name" "Function name to find callees of" (emptySchema TString))
+    , ("max_results", describeField "max_results" "Maximum number of results to return" (emptySchema TInteger))
+    ]
+    ["name"]
+
+instance FromJSON FindCalleesArgs where
+  parseJSON = withObject "FindCalleesArgs" $ \v ->
+    FindCalleesArgs
+      <$> v .: "name"
+      <*> v .:? "max_results"
+
+instance ToJSON FindCalleesArgs where
+  toJSON args = object
+    [ "name" .= fceName args
+    , "max_results" .= fceMaxResults args
+    ]
+
+-- | Information about a called function (callee).
+data CalleeInfo = CalleeInfo
+  { ciName :: Text
+  , ciFile :: Text
+  , ciLine :: Int
+  , ciCallSites :: [Position]    -- ^ Where in the source function it is called
+  }
+  deriving stock (Show, Eq, Generic)
+
+instance ToJSON CalleeInfo where
+  toJSON ci = object
+    [ "name" .= ciName ci
+    , "file" .= ciFile ci
+    , "line" .= ciLine ci
+    , "call_sites" .= ciCallSites ci
+    ]
+
+-- | Result of find_callees tool.
+data FindCalleesResult = FindCalleesResult
+  { fceResultName :: Text
+  , fceDefinitionFile :: Text
+  , fceDefinitionLine :: Int
+  , fceCallees :: [CalleeInfo]
+  , fceTruncated :: Bool
+  , fceWarning :: Maybe Text
+  }
+  deriving stock (Show, Eq, Generic)
+
+instance ToJSON FindCalleesResult where
+  toJSON fce = object
+    [ "name" .= fceResultName fce
+    , "definition_file" .= fceDefinitionFile fce
+    , "definition_line" .= fceDefinitionLine fce
+    , "callees" .= fceCallees fce
+    , "truncated" .= fceTruncated fce
+    , "warning" .= fceWarning fce
+    ]
+
+-- | Graph definition for find_callees tool.
+newtype FindCalleesGraph mode = FindCalleesGraph
+  { fceRun :: mode :- LogicNode
+      :@ Input FindCalleesArgs
+      :@ UsesEffects '[Return FindCalleesResult]
+  }
+  deriving Generic
+
+-- | MCP tool entry point declaration for find_callees.
+type instance GraphEntries FindCalleesGraph =
+  '[ "find_callees" ':~> '("fceRun", FindCalleesArgs, "Find functions called by a given function") ]
+
+-- | Core logic for finding callees.
+findCalleesLogic
+  :: (Member LSP es, Member Log es, Member (Return FindCalleesResult) es, LastMember IO es)
+  => FindCalleesArgs
+  -> Eff es FindCalleesResult
+findCalleesLogic args = do
+  let name = fceName args
+      maxResults = fromMaybe 50 (fceMaxResults args)
+
+  -- Check indexing state for warning
+  indexingState <- getIndexingState
+  let warning = case indexingState of
+        Startup -> Just "HLS is starting up..."
+        Indexing -> Just "HLS is still indexing. Results may be incomplete."
+        Ready -> Nothing
+
+  logDebug $ "[find_callees] Finding callees of: " <> name
+
+  -- Find the symbol's definition
+  symbols <- workspaceSymbol name
+  let exactMatches = filter (\s -> s.siName == name) symbols
+
+  -- Log workspaceSymbol results
+  logDebug $ "[find_callees] workspaceSymbol: query=" <> name
+          <> " total=" <> T.pack (show (length symbols))
+          <> " exact_matches=" <> T.pack (show (length exactMatches))
+
+  case exactMatches of
+    [] -> do
+      returnValue FindCalleesResult
+        { fceResultName = name
+        , fceDefinitionFile = ""
+        , fceDefinitionLine = 0
+        , fceCallees = []
+        , fceTruncated = False
+        , fceWarning = warning
+        }
+
+    (sym:_) -> do
+      let defLoc = sym.siLocation
+          defFile = stripFilePrefix defLoc.locUri
+          defLine = defLoc.locRange.rangeStart.posLine + 1
+          defPos = defLoc.locRange.rangeStart
+          docId = textDocument defFile
+
+      -- Prepare call hierarchy
+      hierarchyItems <- prepareCallHierarchy docId defPos
+
+      case hierarchyItems of
+        [] -> do
+          logDebug $ "[find_callees] No call hierarchy items found"
+          returnValue FindCalleesResult
+            { fceResultName = name
+            , fceDefinitionFile = defFile
+            , fceDefinitionLine = defLine
+            , fceCallees = []
+            , fceTruncated = False
+            , fceWarning = warning
+            }
+
+        (rootItem:_) -> do
+          -- Get outgoing calls
+          calls <- outgoingCalls rootItem
+          
+          logDebug $ "[find_callees] Found " <> T.pack (show (length calls)) <> " raw outgoing calls"
+
+          let allCallees = mapMaybe toCalleeInfo calls
+              truncated = length allCallees > maxResults
+              selected = take maxResults allCallees
+
+          returnValue FindCalleesResult
+            { fceResultName = name
+            , fceDefinitionFile = defFile
+            , fceDefinitionLine = defLine
+            , fceCallees = selected
+            , fceTruncated = truncated
+            , fceWarning = warning
+            }
+
+  where
+    toCalleeInfo :: CallHierarchyOutgoingCall -> Maybe CalleeInfo
+    toCalleeInfo call = 
+      let item = call.chocTo
+          ranges = call.chocFromRanges
+          file = stripFilePrefix item.chiUri
+          line = item.chiRange.rangeStart.posLine + 1
+      in Just CalleeInfo
+        { ciName = item.chiName
+        , ciFile = file
+        , ciLine = line
+        , ciCallSites = map (.rangeStart) ranges
+        }
 
 
 -- ════════════════════════════════════════════════════════════════════════════

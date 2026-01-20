@@ -54,6 +54,7 @@ import Tidepool.Effect.LSP
   , HoverInfo(..), CodeAction(..), CodeActionKind(..), WorkspaceEdit(..)
   , TextEdit(..), CompletionItem(..), CompletionItemKind(..)
   , SymbolInformation(..), SymbolKind(..)
+  , CallHierarchyItem(..), CallHierarchyOutgoingCall(..)
   )
 
 
@@ -374,6 +375,35 @@ runLSP session = interpret $ \case
       L.TResponseMessage _ _ (Right result) -> fromDocumentSymbolResult result
       L.TResponseMessage _ _ (Left _) -> []
 
+  PrepareCallHierarchy doc pos -> sendM $ executeSession session $ do
+    let lspDoc = toTextDocumentId doc
+        lspPos = toPosition pos
+        params = L.CallHierarchyPrepareParams
+          { L._workDoneToken = Nothing
+          , L._textDocument = lspDoc
+          , L._position = lspPos
+          }
+    resp <- Language.LSP.Test.request L.SMethod_TextDocumentPrepareCallHierarchy params
+    pure $ case resp of
+      L.TResponseMessage _ _ (Right result) -> case result of
+        L.InL items -> map fromCallHierarchyItem items
+        L.InR L.Null -> []
+      L.TResponseMessage _ _ (Left _) -> []
+
+  OutgoingCalls item -> sendM $ executeSession session $ do
+    let lspItem = toCallHierarchyItem item
+        params = L.CallHierarchyOutgoingCallsParams
+          { L._workDoneToken = Nothing
+          , L._partialResultToken = Nothing
+          , L._item = lspItem
+          }
+    resp <- Language.LSP.Test.request L.SMethod_CallHierarchyOutgoingCalls params
+    pure $ case resp of
+      L.TResponseMessage _ _ (Right result) -> case result of
+        L.InL items -> map fromCallHierarchyOutgoingCall items
+        L.InR L.Null -> []
+      L.TResponseMessage _ _ (Left _) -> []
+
   GetIndexingState ->
     -- Read the indexing state from the session's TVar (backward compatible)
     sendM $ getSessionIndexingState session
@@ -411,6 +441,47 @@ toRange :: Range -> L.Range
 toRange rng = L.Range
   { L._start = toPosition rng.rangeStart
   , L._end = toPosition rng.rangeEnd
+  }
+
+toSymbolKind :: SymbolKind -> L.SymbolKind
+toSymbolKind k = case k of
+  SKFile -> L.SymbolKind_File
+  SKModule -> L.SymbolKind_Module
+  SKNamespace -> L.SymbolKind_Namespace
+  SKPackage -> L.SymbolKind_Package
+  SKClass -> L.SymbolKind_Class
+  SKMethod -> L.SymbolKind_Method
+  SKProperty -> L.SymbolKind_Property
+  SKField -> L.SymbolKind_Field
+  SKConstructor -> L.SymbolKind_Constructor
+  SKEnum -> L.SymbolKind_Enum
+  SKInterface -> L.SymbolKind_Interface
+  SKFunction -> L.SymbolKind_Function
+  SKVariable -> L.SymbolKind_Variable
+  SKConstant -> L.SymbolKind_Constant
+  SKString -> L.SymbolKind_String
+  SKNumber -> L.SymbolKind_Number
+  SKBoolean -> L.SymbolKind_Boolean
+  SKArray -> L.SymbolKind_Array
+  SKObject -> L.SymbolKind_Object
+  SKKey -> L.SymbolKind_Key
+  SKNull -> L.SymbolKind_Null
+  SKEnumMember -> L.SymbolKind_EnumMember
+  SKStruct -> L.SymbolKind_Struct
+  SKEvent -> L.SymbolKind_Event
+  SKOperator -> L.SymbolKind_Operator
+  SKTypeParameter -> L.SymbolKind_TypeParameter
+
+toCallHierarchyItem :: CallHierarchyItem -> L.CallHierarchyItem
+toCallHierarchyItem chi = L.CallHierarchyItem
+  { L._name = chi.chiName
+  , L._kind = toSymbolKind chi.chiKind
+  , L._tags = Nothing
+  , L._detail = Nothing
+  , L._uri = L.Uri chi.chiUri
+  , L._range = toRange chi.chiRange
+  , L._selectionRange = toRange chi.chiSelectionRange
+  , L._data_ = Nothing
   }
 
 
@@ -660,6 +731,21 @@ flattenDocumentSymbol ds =
         }
       children = maybe [] (concatMap flattenDocumentSymbol) ds._children
   in parent : children
+
+fromCallHierarchyItem :: L.CallHierarchyItem -> CallHierarchyItem
+fromCallHierarchyItem chi = CallHierarchyItem
+  { chiName = chi._name
+  , chiKind = fromSymbolKind chi._kind
+  , chiUri = let L.Uri u = chi._uri in u
+  , chiRange = fromRange chi._range
+  , chiSelectionRange = fromRange chi._selectionRange
+  }
+
+fromCallHierarchyOutgoingCall :: L.CallHierarchyOutgoingCall -> CallHierarchyOutgoingCall
+fromCallHierarchyOutgoingCall choc = CallHierarchyOutgoingCall
+  { chocTo = fromCallHierarchyItem choc._to
+  , chocFromRanges = map fromRange choc._fromRanges
+  }
 
 
 -- ════════════════════════════════════════════════════════════════════════════

@@ -34,6 +34,7 @@ import Tidepool.Control.Scout.DocGen.Teacher (ScoutGemmaEffect)
 import Tidepool.Control.Scout.Graph.Runner (runDocGenGraph)
 import Tidepool.Control.LSPTools
   ( findCallersLogic, FindCallersArgs(..), FindCallersResult(..)
+  , findCalleesLogic, FindCalleesArgs(..), FindCalleesResult(..)
   , showFieldsLogic, ShowFieldsArgs(..), ShowFieldsResult(..)
   , showConstructorsLogic, ShowConstructorsArgs(..), ShowConstructorsResult(..)
   )
@@ -110,6 +111,7 @@ handleMcpTool logger config lspSession maybeTuiHandle reqId toolName args = do
   case toolName of
     -- Tier 1: Deterministic LSP tools (graph-based)
     "find_callers" -> handleFindCallersTool logger lspSession maybeTuiHandle reqId args
+    "find_callees" -> handleFindCalleesTool logger lspSession maybeTuiHandle reqId args
     "show_fields" -> handleShowFieldsTool logger lspSession maybeTuiHandle reqId args
     "show_constructors" -> handleShowConstructorsTool logger lspSession maybeTuiHandle reqId args
 
@@ -147,7 +149,7 @@ handleMcpTool logger config lspSession maybeTuiHandle reqId toolName args = do
       logError logger $ "  (unknown tool)"
       pure $ mcpToolError reqId $
         "Tool not found: " <> toolName <>
-        ". Available tools: find_callers, show_fields, show_constructors, teach-graph, exo_status, exo_complete, exo_reconstitute, pre_commit_check, spawn_agents, file_pr, pm_approve_expansion, pm_prioritize, pm_propose"
+        ". Available tools: find_callers, find_callees, show_fields, show_constructors, teach-graph, exo_status, exo_complete, exo_reconstitute, pre_commit_check, spawn_agents, file_pr, pm_approve_expansion, pm_prioritize, pm_propose"
 
 -- | Handle the pm_prioritize tool.
 --
@@ -450,6 +452,36 @@ handleFindCallersTool logger lspSession maybeTuiHandle reqId args = do
         Right result -> do
           logInfo logger $ "[MCP:" <> reqId <> "] Found " <> T.pack (show $ length $ fcrCallSites result) <> " call sites"
           logDebug logger $ "[MCP:" <> reqId <> "] Filtered " <> T.pack (show $ fcrFilteredCount result) <> " references"
+          pure $ mcpToolSuccess reqId (toJSON result)
+
+
+-- | Handle the find_callees tool.
+--
+-- Runs the FindCalleesGraph logic to find outgoing calls from a function.
+handleFindCalleesTool :: Logger -> LSPSession -> Maybe TUIHandle -> Text -> Value -> IO ControlResponse
+handleFindCalleesTool logger lspSession maybeTuiHandle reqId args = do
+  case fromJSON args of
+    Error err -> do
+      logError logger $ "  parse error: " <> T.pack err
+      pure $ mcpToolError reqId $ "Invalid find_callees arguments: " <> T.pack err
+
+    Success fceArgs -> do
+      logDebug logger $ "  name=" <> fceName fceArgs
+
+      resultOrErr <- try $ runM
+        $ runLog Debug
+        $ runGeminiIO
+        $ runTUIOrMock maybeTuiHandle
+        $ runLSP lspSession
+        $ runReturn (findCalleesLogic fceArgs)
+
+      case resultOrErr of
+        Left (e :: SomeException) -> do
+          logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId $ "find_callees failed: " <> T.pack (displayException e)
+
+        Right result -> do
+          logInfo logger $ "[MCP:" <> reqId <> "] Found " <> T.pack (show $ length $ fceCallees result) <> " callees"
           pure $ mcpToolSuccess reqId (toJSON result)
 
 
