@@ -171,6 +171,7 @@ mod tests {
                 source: None,
                 reason: None,
             }),
+            runtime: crate::protocol::Runtime::Claude,
         };
 
         let response = client.send(&message).unwrap();
