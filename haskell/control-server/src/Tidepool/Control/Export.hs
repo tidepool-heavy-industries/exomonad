@@ -47,7 +47,7 @@ import Tidepool.Control.Protocol (ToolDefinition(..))
 import Tidepool.Control.LSPTools
   ( FindCallersGraph, ShowFieldsGraph, ShowConstructorsGraph )
 import Tidepool.Control.ExoTools
-  ( ExoStatusGraph, ExoCompleteGraph, ExoReconstituteGraph, SpawnAgentsGraph, FilePRGraph )
+  ( ExoStatusGraph, ExoCompleteGraph, ExoReconstituteGraph, SpawnAgentsGraph, FilePRGraph, PrReviewStatusGraph )
 import Tidepool.Control.PMTools
   ( PmApproveExpansionGraph, PmPrioritizeGraph )
 import Tidepool.Control.PMPropose (PMProposeGraph)
@@ -952,6 +952,7 @@ exportMCPTools logger = do
   let paeTools = reifyMCPTools (Proxy @PmApproveExpansionGraph)
   let pmPriTools = reifyMCPTools (Proxy @PmPrioritizeGraph)
   let pmProTools = reifyMCPTools (Proxy @PMProposeGraph)
+  let prTools = reifyMCPTools (Proxy @PrReviewStatusGraph)
 
   -- Log discovered tools per graph for debugging
   logDebug logger $ "[MCP Discovery] FindCallersGraph: " <> T.pack (show (length fcTools)) <> " tools"
@@ -966,8 +967,9 @@ exportMCPTools logger = do
   logDebug logger $ "[MCP Discovery] PmApproveExpansionGraph: " <> T.pack (show (length paeTools)) <> " tools"
   logDebug logger $ "[MCP Discovery] PmPrioritizeGraph: " <> T.pack (show (length pmPriTools)) <> " tools"
   logDebug logger $ "[MCP Discovery] PMProposeGraph: " <> T.pack (show (length pmProTools)) <> " tools"
+  logDebug logger $ "[MCP Discovery] PrReviewStatusGraph: " <> T.pack (show (length prTools)) <> " tools"
 
-  let allTools = concat [fcTools, sfTools, scTools, dgTools, esTools, ecTools, erTools, saTools, fpTools, paeTools, pmPriTools, pmProTools]
+  let allTools = concat [fcTools, sfTools, scTools, dgTools, esTools, ecTools, erTools, saTools, fpTools, paeTools, pmPriTools, pmProTools, prTools]
   logInfo logger $ "[MCP Discovery] Total: " <> T.pack (show (length allTools)) <> " tools discovered"
 
   -- Log tool names with entry points for verification

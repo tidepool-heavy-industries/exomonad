@@ -54,6 +54,13 @@ module Tidepool.Control.ExoTools
   , FilePRArgs(..)
   , FilePRResult(..)
 
+    -- * Pr Review Status
+  , PrReviewStatusGraph(..)
+  , prReviewStatusHandlers
+  , prReviewStatusLogic
+  , PrReviewStatusArgs(..)
+  , PrReviewStatusResult(..)
+
     -- * Helpers
   , parseBeadId
   , slugify
@@ -66,6 +73,8 @@ import Data.Aeson (FromJSON(..), ToJSON(..), (.:), (.:?), (.=), object, withObje
 import Data.Char (isAlphaNum, isSpace)
 import Data.Either (partitionEithers)
 import Data.List (find)
+import Data.Map (Map)
+import qualified Data.Map as Map
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -74,7 +83,7 @@ import System.FilePath ((</>))
 
 import Tidepool.Effects.BD (BD, BeadInfo(..), BeadStatus(..), DependencyInfo(..), getBead, closeBead, sync)
 import Tidepool.Effects.Git (Git, WorktreeInfo(..), getWorktreeInfo, getDirtyFiles)
-import Tidepool.Effects.GitHub (GitHub, PullRequest(..), listPullRequests, PRFilter(..), Repo(..), PRCreateSpec(..), PRUrl(..), createPR)
+import Tidepool.Effects.GitHub (GitHub, PullRequest(..), listPullRequests, PRFilter(..), Repo(..), PRCreateSpec(..), PRUrl(..), createPR, ReviewComment(..), getPullRequestReviews)
 import Tidepool.Effects.Justfile (Justfile, runRecipe, JustResult(..))
 import Tidepool.Effects.Worktree (Worktree, WorktreeSpec(..), WorktreePath(..), createWorktree)
 import Tidepool.Graph.Generic (AsHandler, type (:-))
@@ -426,58 +435,6 @@ preCommitCheckLogic args = do
     }
 
 -- ════════════════════════════════════════════════════════════════════════════
--- HELPERS
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Helper to gather common development context.
-getDevelopmentContext
-  :: (Member BD es, Member Git es, Member GitHub es)
-  => Maybe Text
-  -> Eff es ExoStatusResult
-getDevelopmentContext maybeBeadId = do
-  -- 1. Get Worktree/Git info
-  mWt <- getWorktreeInfo
-  dirtyFiles <- getDirtyFiles
-
-  -- 2. Determine Bead ID
-  let branchBeadId = case mWt of
-        Just wt -> parseBeadId wt.wiBranch
-        Nothing -> Nothing
-      targetBeadId = maybeBeadId <|> branchBeadId
-
-  -- 3. Get Bead Info
-  mBead <- case targetBeadId of
-    Just bid -> getBead bid
-    Nothing -> pure Nothing
-
-  -- 4. Get PR Info
-  mPR <- case mWt of
-    Just wt -> do
-      let repo = Repo "tidepool-heavy-industries/tidepool"
-      prs <- listPullRequests repo (PRFilter Nothing (Just "main") (Just 100))
-      pure $ find (\pr -> pr.prHeadRefName == wt.wiBranch) prs
-    Nothing -> pure Nothing
-
-  pure ExoStatusResult
-    { esrBead = mBead
-    , esrWorktree = mWt
-    , esrDirtyFiles = dirtyFiles
-    , esrPR = mPR
-    }
-
--- | Parse bead ID from branch name (bd-{id}/* convention)
-parseBeadId :: Text -> Maybe Text
-parseBeadId branch =
-  if "bd-" `T.isPrefixOf` branch
-  then
-    let content = T.drop 3 branch
-        (beadId, rest) = T.break (== '/') content
-    in if T.null beadId || T.null (T.drop 1 rest) -- Must have / and something after
-       then Nothing
-       else Just $ "tidepool-" <> beadId
-  else Nothing
-
--- ════════════════════════════════════════════════════════════════════════════
 -- SPAWN-AGENTS GRAPH
 -- ════════════════════════════════════════════════════════════════════════════
 
@@ -587,6 +544,135 @@ spawnAgentsLogic args = do
     , sarFailed    = failed
     }
 
+-- ════════════════════════════════════════════════════════════════════════════
+-- PR-REVIEW-STATUS GRAPH
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Arguments for pr_review_status tool.
+data PrReviewStatusArgs = PrReviewStatusArgs
+  { prsaPrNumber :: Int
+  }
+  deriving stock (Show, Eq, Generic)
+
+instance HasJSONSchema PrReviewStatusArgs where
+  jsonSchema = objectSchema
+    [ ("pr_number", describeField "pr_number" "Pull Request number." (emptySchema TInteger))
+    ]
+    ["pr_number"]
+
+instance FromJSON PrReviewStatusArgs where
+  parseJSON = withObject "PrReviewStatusArgs" $ \v ->
+    PrReviewStatusArgs <$> v .: "pr_number"
+
+instance ToJSON PrReviewStatusArgs where
+  toJSON args = object ["pr_number" .= prsaPrNumber args]
+
+-- | Result of pr_review_status tool.
+-- Returns comments grouped by author.
+data PrReviewStatusResult = PrReviewStatusResult
+  { prsrComments :: Map Text [ReviewComment]
+  }
+  deriving stock (Show, Eq, Generic)
+
+instance ToJSON PrReviewStatusResult where
+  toJSON res = toJSON (prsrComments res)
+
+instance FromJSON PrReviewStatusResult where
+  parseJSON v = PrReviewStatusResult <$> parseJSON v
+
+-- | Graph definition for pr_review_status tool.
+data PrReviewStatusGraph mode = PrReviewStatusGraph
+  { prsEntry :: mode :- EntryNode PrReviewStatusArgs
+      :@ MCPExport
+      :@ MCPToolDef '("pr_review_status", "Get PR review comments grouped by author (especially Copilot).")
+
+  , prsRun :: mode :- LogicNode
+      :@ Input PrReviewStatusArgs
+      :@ UsesEffects '[GitHub, Goto Exit PrReviewStatusResult]
+
+  , prsExit :: mode :- ExitNode PrReviewStatusResult
+  }
+  deriving Generic
+
+-- | Handlers for pr_review_status graph.
+prReviewStatusHandlers
+  :: (Member GitHub es)
+  => PrReviewStatusGraph (AsHandler es)
+prReviewStatusHandlers = PrReviewStatusGraph
+  { prsEntry = ()
+  , prsRun = prReviewStatusLogic
+  , prsExit = ()
+  }
+
+-- | Core logic for pr_review_status.
+prReviewStatusLogic
+  :: (Member GitHub es)
+  => PrReviewStatusArgs
+  -> Eff es (GotoChoice '[To Exit PrReviewStatusResult])
+prReviewStatusLogic args = do
+  let repo = Repo "tidepool-heavy-industries/tidepool"
+  comments <- getPullRequestReviews repo args.prsaPrNumber
+  
+  -- Group by author, preserving chronological order
+  let grouped = foldr (\c acc -> Map.insertWith (\new old -> old ++ new) c.rcAuthor [c] acc) Map.empty comments
+  
+  pure $ gotoExit PrReviewStatusResult
+    { prsrComments = grouped
+    }
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- HELPERS
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Helper to gather common development context.
+getDevelopmentContext
+  :: (Member BD es, Member Git es, Member GitHub es)
+  => Maybe Text
+  -> Eff es ExoStatusResult
+getDevelopmentContext maybeBeadId = do
+  -- 1. Get Worktree/Git info
+  mWt <- getWorktreeInfo
+  dirtyFiles <- getDirtyFiles
+
+  -- 2. Determine Bead ID
+  let branchBeadId = case mWt of
+        Just wt -> parseBeadId wt.wiBranch
+        Nothing -> Nothing
+      targetBeadId = maybeBeadId <|> branchBeadId
+
+  -- 3. Get Bead Info
+  mBead <- case targetBeadId of
+    Just bid -> getBead bid
+    Nothing -> pure Nothing
+
+  -- 4. Get PR Info
+  mPR <- case mWt of
+    Just wt -> do
+      let repo = Repo "tidepool-heavy-industries/tidepool"
+      prs <- listPullRequests repo (PRFilter Nothing (Just "main") (Just 100))
+      pure $ find (\pr -> pr.prHeadRefName == wt.wiBranch) prs
+    Nothing -> pure Nothing
+
+  pure ExoStatusResult
+    { esrBead = mBead
+    , esrWorktree = mWt
+    , esrDirtyFiles = dirtyFiles
+    , esrPR = mPR
+    }
+
+-- | Parse bead ID from branch name (bd-{id}/* convention)
+parseBeadId :: Text -> Maybe Text
+parseBeadId branch =
+  if "bd-" `T.isPrefixOf` branch
+  then
+    let content = T.drop 3 branch
+        (beadId, rest) = T.break (== '/') content
+    in if T.null beadId || T.null (T.drop 1 rest) -- Must have / and something after
+       then Nothing
+       else Just $ "tidepool-" <> beadId
+  else Nothing
+
 -- | Slugify a title for use in branch/directory names.
 -- Returns "untitled" if the input produces no valid slug.
 slugify :: Text -> Text
@@ -676,7 +762,7 @@ filePRLogic
 filePRLogic args = do
   -- 1. Get Worktree/Git info
   mWt <- getWorktreeInfo
-  
+
   -- 2. Determine Bead ID
   let branchBeadId = case mWt of
         Just wt -> parseBeadId wt.wiBranch
@@ -684,13 +770,13 @@ filePRLogic args = do
       mTargetBeadId = args.fpaBeadId <|> branchBeadId
 
   case mTargetBeadId of
-    Nothing -> 
+    Nothing ->
       pure $ gotoExit $ FilePRResult Nothing (Just "Could not determine bead ID. Please provide bead_id argument.")
     Just bid -> do
       -- 3. Get Bead Info
       mBead <- getBead bid
       case mBead of
-        Nothing -> 
+        Nothing ->
           pure $ gotoExit $ FilePRResult Nothing (Just $ "Bead " <> bid <> " not found.")
         Just bead -> do
           -- 4. Prepare PR Spec
@@ -710,7 +796,7 @@ filePRLogic args = do
                 , prcsTitle = title
                 , prcsBody = body
                 }
-          
+
           -- 5. Create PR
           PRUrl url <- createPR spec
           pure $ gotoExit $ FilePRResult (Just url) Nothing

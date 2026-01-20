@@ -156,6 +156,8 @@ test-suite exo-tools-test
         tidepool-core,
         text >= 2.0 && < 3,
         aeson,
+        containers,
+        time,
         tasty,
         tasty-hunit
     hs-source-dirs:   test
