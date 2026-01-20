@@ -33,7 +33,7 @@ layout {
                 // BOTTOM-RIGHT: Backend Status (process-compose dashboard)
                 pane name="Backend" {
                     command "bash"
-                    args "-c" "mkdir -p .tidepool/sockets .tidepool/logs; exec process-compose up --no-server"
+                    args "-c" "cd \"$(git rev-parse --show-toplevel)\" && mkdir -p .tidepool/sockets .tidepool/logs && exec process-compose up --no-server"
                 }
             }
         }
