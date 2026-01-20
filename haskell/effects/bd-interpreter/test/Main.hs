@@ -13,7 +13,7 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
 import Data.Text.IO qualified as TIO
-import System.Directory (createDirectoryIfMissing, setPermissions, getPermissions, setOwnerExecutable)
+import System.Directory (createDirectoryIfMissing, setPermissions, getPermissions, setOwnerExecutable, doesFileExist)
 import System.Environment (setEnv, lookupEnv)
 import System.Exit (ExitCode(..))
 import System.FilePath ((</>))
@@ -311,6 +311,24 @@ interpreterTests = describe "Interpreter CLI Integration" $ do
       let config = BDConfig { bcBeadsDir = Just tmpDir, bcQuiet = True }
       result <- bdLabels config "test-123"
       result `shouldBe` []
+
+  it "bdSync calls bd sync --from-main" $ do
+    withMockBdEnv $ \tmpDir -> do
+      -- Mock script that verifies arguments and records call
+      let mockScript = unlines
+            [ "if [ \"$1\" = \"sync\" ] && [ \"$2\" = \"--from-main\" ]; then"
+            , "  touch \"$PC_TMP_DIR/synced\""
+            , "fi"
+            ]
+      -- We need a way to verify the call happened. Use a file in tmpDir.
+      setEnv "PC_TMP_DIR" tmpDir
+      writeMockBd tmpDir mockScript
+
+      let config = BDConfig { bcBeadsDir = Just tmpDir, bcQuiet = True }
+      bdSync config
+
+      synced <- doesFileExist (tmpDir </> "synced")
+      synced `shouldBe` True
 
   it "runBD pure interpreter works" $ do
     -- Test the pure handler path

@@ -7,10 +7,20 @@ module Tidepool.Control.Handler.Hook
   ) where
 
 import Data.Text (Text)
+import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import System.IO (hFlush, stdout)
+import Control.Exception (SomeException, try)
+import Control.Monad (when)
+import Control.Monad.Freer (runM)
 
 import Tidepool.Control.Protocol
+import Tidepool.Control.ExoTools (exoReconstituteLogic, ExoReconstituteArgs(..), ExoReconstituteResult)
+import Tidepool.BD.Interpreter (runBDIO, defaultBDConfig)
+import Tidepool.BD.GitInterpreter (runGitIO)
+import Tidepool.GitHub.Interpreter (runGitHubIO, defaultGitHubConfig)
+import Tidepool.Effect.Types (runLog, LogLevel(..))
+import Tidepool.Graph.Goto (unwrapSingleChoice)
 
 -- | Handle a hook event.
 --
@@ -21,6 +31,22 @@ handleHook input = do
   TIO.putStrLn $ "  session=" <> input.sessionId
   TIO.putStrLn $ "  cwd=" <> input.cwd
   hFlush stdout
+
+  -- On Stop, run reconstitute logic (sync beads)
+  when (input.hookEventName == "Stop") $ do
+    TIO.putStrLn "  [HOOK] Running post-stop reconstitute..."
+    hFlush stdout
+    result <- (try $ runM
+      $ runLog Debug
+      $ runBDIO defaultBDConfig
+      $ runGitIO
+      $ runGitHubIO defaultGitHubConfig
+      $ unwrapSingleChoice <$> exoReconstituteLogic (ExoReconstituteArgs Nothing)) :: IO (Either SomeException ExoReconstituteResult)
+    case result of
+      Left e -> do
+        TIO.putStrLn $ "  [HOOK] Reconstitute failed: " <> T.pack (show e)
+        hFlush stdout
+      Right _ -> pure ()
 
   pure $ hookSuccess $ makeResponse input.hookEventName input
 

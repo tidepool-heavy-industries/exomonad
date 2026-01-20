@@ -49,6 +49,7 @@ module Tidepool.Effects.BD
   , removeLabel
   , addDep
   , removeDep
+  , sync
 
     -- * Input Types
   , CreateBeadInput(..)
@@ -364,6 +365,9 @@ data BD r where
   -- | Remove a dependency between beads.
   RemoveDep :: Text -> Text -> BD ()
 
+  -- | Synchronize beads with the remote/main branch.
+  Sync :: BD ()
+
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- SMART CONSTRUCTORS - READ
@@ -455,3 +459,7 @@ addDep fromId toId depType = send $ AddDep fromId toId depType
 -- | Remove a dependency between beads.
 removeDep :: Member BD effs => Text -> Text -> Eff effs ()
 removeDep fromId toId = send $ RemoveDep fromId toId
+
+-- | Synchronize beads with main.
+sync :: Member BD effs => Eff effs ()
+sync = send Sync

@@ -342,6 +342,22 @@ Explores codebase concepts via BFS, using Haiku to select relevant type dependen
 
 **Implementation:** `Scout/Graph.hs:125-165` (DocGenGraph)
 
+### Tier 3: External Orchestration Tools (Exo)
+
+Integration with beads (BD) and git for development workflow automation.
+
+#### `exo_status` - Get Development Context
+
+Gets current bead details, git status, and PR info.
+
+**Implementation:** `ExoTools.hs:92-114` (ExoStatusGraph)
+
+#### `exo_reconstitute` - Sync Beads and Refresh Context
+
+Synchronizes beads from main and refreshes development context. Designed for use at session start or end.
+
+**Implementation:** `ExoTools.hs:184-205` (ExoReconstituteGraph)
+
 ### Tool Registration
 
 **Automatic discovery:**
@@ -368,14 +384,15 @@ exportMCPTools = do
 
 ## Hook Handlers
 
-All hooks are currently logged and allowed (passthrough). No blocking logic yet.
+Most hooks are passthrough (log and allow). The `Stop` hook runs reconstitute logic.
 
 **Current behavior:**
 - `PreToolUse` → allow with `permissionDecision: "allow"`
 - `PostToolUse` → allow with no additional context
+- `Stop` → runs `exo_reconstitute` (syncs beads from main)
 - Other hooks → continue with default response
 
-**Future:** Wire hooks to Tidepool effect stack for real decision logic.
+**Implementation:** `Handler/Hook.hs:35-49` (Stop hook → exo_reconstitute)
 
 ## Protocol Types
 
