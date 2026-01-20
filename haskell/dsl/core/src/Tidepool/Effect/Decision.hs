@@ -14,18 +14,18 @@ module Tidepool.Effect.Decision
   ) where
 
 import Control.Monad.Freer (Eff, Member)
-import Data.Aeson (ToJSON(..), FromJSON, toJSON)
-import Data.Text (Text)
+import Data.Aeson (ToJSON(..), toJSON)
 import qualified Data.Text as T
+import Data.Time (diffUTCTime)
 import Tidepool.Effect.Decision.Types
 import Tidepool.Effect.TUI
-import Tidepool.Effect.Types (Time, Log, getCurrentTime, logInfoWith)
+import Tidepool.Effect.Types (Time, Log, DecisionLog, getCurrentTime, logInfoWith, recordDecision)
 
 -- | Request a decision from the user via the TUI.
 --
 -- This builds a UISpec from the context, waits for an interaction,
--- and logs the resulting decision via the Log effect.
-requestDecision :: (Member TUI r, Member Time r, Member Log r) => DecisionContext -> Eff r Decision
+-- and logs the resulting decision via the Log and DecisionLog effects.
+requestDecision :: (Member TUI r, Member Time r, Member Log r, Member DecisionLog r) => DecisionContext -> Eff r Decision
 requestDecision ctx = do
   let mkButton b =
         let icon = case b.bsPriority of
@@ -45,7 +45,18 @@ requestDecision ctx = do
         , EInput "guidance" "Provide Guidance (Enter to submit)" ""
         ]
 
+  let options =
+        map (\b -> let icon = case b.bsPriority of
+                         0 -> "🔴"
+                         1 -> "🟡"
+                         2 -> "🔵"
+                         _ -> "⚪"
+                   in icon <> " [" <> b.bsId <> "] " <> b.bsTitle) ctx.dcReadyBeads ++
+        [ "Continue", "Abort", "Provide Guidance (Enter to submit)" ]
+
+  start <- getCurrentTime
   interaction <- showUI ui
+  end <- getCurrentTime
 
   decision <- case interaction of
     ButtonClicked _ bid
@@ -57,8 +68,16 @@ requestDecision ctx = do
     _ -> requestDecision ctx
 
   -- Log decision trace
-  now <- getCurrentTime
-  let trace = DecisionTrace ctx decision now
+  let latencyMs = round $ realToFrac (diffUTCTime end start) * 1000
+  let trace = DecisionTrace
+        { dtContext = ctx
+        , dtOptionsPresented = options
+        , dtDecision = decision
+        , dtLatencyMs = latencyMs
+        , dtTimestamp = end
+        }
+
   logInfoWith "Decision made" [("trace", toJSON trace)]
+  recordDecision trace
 
   pure decision
