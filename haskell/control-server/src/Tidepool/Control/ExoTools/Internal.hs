@@ -16,15 +16,58 @@ import Control.Applicative ((<|>))
 import Control.Monad.Freer (Eff, Member)
 import Data.Aeson (ToJSON(..), object, (.=))
 import Data.Char (isAlphaNum, isSpace)
-import Data.List (find)
+import Data.List (find, sortOn, take)
 import Data.Maybe (fromMaybe)
+import Data.Ord (Down(..))
 import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
 
-import Tidepool.Effects.BD (BD, BeadInfo(..), DependencyInfo(..), getBead)
+import Tidepool.Effects.BD
+  ( BD
+  , BeadInfo(..)
+  , BeadStatus(..)
+  , DependencyInfo(..)
+  , getBead
+  , listBeads
+  , defaultListBeadsInput
+  )
 import Tidepool.Effects.Git (Git, WorktreeInfo(..), getWorktreeInfo, getDirtyFiles)
 import Tidepool.Effects.GitHub (GitHub, PullRequest(..), listPullRequests, Repo(..), PRFilter(..), defaultPRFilter)
+
+-- | Brief bead info for summaries.
+data BeadBrief = BeadBrief
+  { bbId :: Text
+  , bbTitle :: Text
+  , bbPriority :: Int
+  }
+  deriving stock (Show, Eq, Generic)
+
+instance ToJSON BeadBrief where
+  toJSON b = object
+    [ "id" .= bbId b
+    , "title" .= bbTitle b
+    , "priority" .= bbPriority b
+    ]
+
+-- | Sprint summary info.
+data SprintSummary = SprintSummary
+  { ssTotalOpen :: Int
+  , ssReady :: [BeadBrief]
+  , ssBlocked :: Int
+  , ssInProgress :: Int
+  , ssRecentlyClosed :: [BeadBrief]
+  }
+  deriving stock (Show, Eq, Generic)
+
+instance ToJSON SprintSummary where
+  toJSON s = object
+    [ "total_open" .= ssTotalOpen s
+    , "ready" .= ssReady s
+    , "blocked" .= ssBlocked s
+    , "in_progress" .= ssInProgress s
+    , "recently_closed" .= ssRecentlyClosed s
+    ]
 
 -- | Result of exo_status tool.
 data ExoStatusResult = ExoStatusResult
@@ -32,6 +75,7 @@ data ExoStatusResult = ExoStatusResult
   , esrWorktree :: Maybe WorktreeInfo
   , esrDirtyFiles :: [FilePath]
   , esrPR :: Maybe PullRequest
+  , esrSprintSummary :: Maybe SprintSummary
   }
   deriving stock (Show, Eq, Generic)
 
@@ -41,6 +85,7 @@ instance ToJSON ExoStatusResult where
     , "worktree" .= esrWorktree res
     , "dirty_files" .= esrDirtyFiles res
     , "pr" .= esrPR res
+    , "sprint_summary" .= esrSprintSummary res
     ]
 
 getDevelopmentContext
@@ -72,11 +117,39 @@ getDevelopmentContext maybeBeadId = do
       pure $ find (\pr -> pr.prHeadRefName == wt.wiBranch) prs
     Nothing -> pure Nothing
 
+  -- 5. Get Sprint Summary if no bead context
+  mSprintSummary <- case mBead of
+    Just _ -> pure Nothing
+    Nothing -> do
+      allBeads <- listBeads defaultListBeadsInput
+      let openStatuses = [StatusOpen, StatusInProgress, StatusHooked, StatusBlocked]
+          isOpen b = b.biStatus `elem` openStatuses
+          isReady b = b.biStatus == StatusOpen && all (\d -> d.diStatus == StatusClosed) b.biDependencies
+          isClosed b = b.biStatus == StatusClosed
+          
+          toBeadBrief b = BeadBrief
+            { bbId = b.biId
+            , bbTitle = b.biTitle
+            , bbPriority = b.biPriority
+            }
+
+          readyBeads = sortOn (.biPriority) $ filter isReady allBeads
+          recentlyClosedBeads = sortOn (Down . (.biClosedAt)) $ filter isClosed allBeads
+
+      pure $ Just SprintSummary
+        { ssTotalOpen = length $ filter isOpen allBeads
+        , ssReady = map toBeadBrief $ take 5 readyBeads
+        , ssBlocked = length $ filter (\b -> b.biStatus == StatusBlocked) allBeads
+        , ssInProgress = length $ filter (\b -> b.biStatus == StatusInProgress) allBeads
+        , ssRecentlyClosed = map toBeadBrief $ take 3 recentlyClosedBeads
+        }
+
   pure ExoStatusResult
     { esrBead = mBead
     , esrWorktree = mWt
     , esrDirtyFiles = dirtyFiles
     , esrPR = mPR
+    , esrSprintSummary = mSprintSummary
     }
 
 -- | Parse bead ID from branch name (bd-{id}/* convention)
