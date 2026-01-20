@@ -11,6 +11,7 @@ build-type:         Simple
 
 data-files:
     templates/scout/*.jinja
+    templates/hook/*.jinja
 
 common warnings
     ghc-options: -Wall -Wincomplete-patterns -Wredundant-constraints -Wunused-packages
@@ -26,6 +27,9 @@ library
         Tidepool.Control.Logging
         Tidepool.Control.Handler.Hook
         Tidepool.Control.Handler.MCP
+        -- Hook implementations
+        Tidepool.Control.Hook.SessionStart
+        Tidepool.Control.Hook.SessionStart.Context
         Tidepool.Control.LSPTools
         Tidepool.Control.PMTools
         Tidepool.Control.PMPropose

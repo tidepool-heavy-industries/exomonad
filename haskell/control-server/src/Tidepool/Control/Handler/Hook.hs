@@ -1,7 +1,10 @@
 -- | Hook event handler.
 --
--- Initial implementation: passthrough (log and allow all).
--- This will be extended to run Tidepool effect logic.
+-- Handles hook events from Claude Code via mantle-agent.
+-- Most hooks are passthrough, but some execute effect logic:
+--
+-- * SessionStart: Injects bead context when on a bd-* branch
+-- * Stop: Runs reconstitute (syncs beads)
 module Tidepool.Control.Handler.Hook
   ( handleHook
   ) where
@@ -15,6 +18,7 @@ import Control.Monad.Freer (runM)
 
 import Tidepool.Control.Protocol
 import Tidepool.Control.ExoTools (exoReconstituteLogic, ExoReconstituteArgs(..), ExoReconstituteResult)
+import Tidepool.Control.Hook.SessionStart (sessionStartLogic)
 import Tidepool.BD.Interpreter (runBDIO, defaultBDConfig)
 import Tidepool.BD.GitInterpreter (runGitIO)
 import Tidepool.GitHub.Interpreter (runGitHubIO, defaultGitHubConfig)
@@ -23,36 +27,69 @@ import Tidepool.Graph.Goto (unwrapSingleChoice)
 
 -- | Handle a hook event.
 --
--- Current behavior: passthrough (always allow).
--- TODO: Wire to Tidepool effect stack for real logic.
+-- Executes hook-specific logic for SessionStart and Stop.
+-- Other hooks pass through with default responses.
 handleHook :: HookInput -> Runtime -> IO ControlResponse
 handleHook input runtime = do
   TIO.putStrLn $ "  session=" <> input.sessionId
   TIO.putStrLn $ "  cwd=" <> input.cwd
   hFlush stdout
 
-  -- On Stop, run reconstitute logic (sync beads)
-  if input.hookEventName == "Stop"
-    then do
-      TIO.putStrLn "  [HOOK] Running post-stop reconstitute..."
+  case input.hookEventName of
+    "SessionStart" -> handleSessionStart input
+    "Stop" -> handleStop input runtime
+    _ -> pure $ hookSuccess $ makeResponse input.hookEventName input
+
+-- | Handle SessionStart hook: inject bead context.
+handleSessionStart :: HookInput -> IO ControlResponse
+handleSessionStart input = do
+  TIO.putStrLn "  [HOOK] Running SessionStart context injection..."
+  hFlush stdout
+
+  result <- try $ runM
+    $ runLog Debug
+    $ runBDIO defaultBDConfig
+    $ runGitIO
+    $ sessionStartLogic input.cwd
+
+  case result of
+    Left (e :: SomeException) -> do
+      let errMsg = "SessionStart failed: " <> T.pack (show e)
+      TIO.putStrLn $ "  [HOOK] " <> errMsg
       hFlush stdout
-      result <- (try $ runM
-        $ runLog Debug
-        $ runBDIO defaultBDConfig
-        $ runGitIO
-        $ runGitHubIO defaultGitHubConfig
-        $ unwrapSingleChoice <$> exoReconstituteLogic (ExoReconstituteArgs Nothing)) :: IO (Either SomeException ExoReconstituteResult)
-      case result of
-        Left e -> do
-          let errMsg = "Reconstitute failed: " <> T.pack (show e)
-          TIO.putStrLn $ "  [HOOK] " <> errMsg
-          hFlush stdout
-          pure $ hookError runtime errMsg
-        Right _ -> do
-          TIO.putStrLn "  [HOOK] Reconstitute succeeded"
-          hFlush stdout
-          pure $ hookSuccess $ makeResponse input.hookEventName input
-    else
+      -- On error, still allow session to start, just without context
+      pure $ hookSuccess defaultOutput
+        { hookSpecificOutput = Just $ SessionStartOutput Nothing
+        }
+    Right mContext -> do
+      TIO.putStrLn "  [HOOK] SessionStart context injected"
+      hFlush stdout
+      pure $ hookSuccess defaultOutput
+        { hookSpecificOutput = Just $ SessionStartOutput mContext
+        }
+
+-- | Handle Stop hook: run reconstitute logic (sync beads).
+handleStop :: HookInput -> Runtime -> IO ControlResponse
+handleStop input runtime = do
+  TIO.putStrLn "  [HOOK] Running post-stop reconstitute..."
+  hFlush stdout
+
+  result <- (try $ runM
+    $ runLog Debug
+    $ runBDIO defaultBDConfig
+    $ runGitIO
+    $ runGitHubIO defaultGitHubConfig
+    $ unwrapSingleChoice <$> exoReconstituteLogic (ExoReconstituteArgs Nothing)) :: IO (Either SomeException ExoReconstituteResult)
+
+  case result of
+    Left e -> do
+      let errMsg = "Reconstitute failed: " <> T.pack (show e)
+      TIO.putStrLn $ "  [HOOK] " <> errMsg
+      hFlush stdout
+      pure $ hookError runtime errMsg
+    Right _ -> do
+      TIO.putStrLn "  [HOOK] Reconstitute succeeded"
+      hFlush stdout
       pure $ hookSuccess $ makeResponse input.hookEventName input
 
 -- | Create appropriate response based on hook type.
