@@ -1,0 +1,40 @@
+cabal-version:      3.0
+name:               tidepool-zellij-interpreter
+version:            0.1.0.0
+synopsis:           Zellij effect interpreter - terminal multiplexer operations
+description:
+    Implements Zellij effect by calling zellij CLI commands.
+    .
+    Enables graphs to create tabs and interact with Zellij sessions
+    for parallel agent orchestration.
+license:            MIT
+author:             Inanna
+build-type:         Simple
+
+common warnings
+    ghc-options: -Wall -Wincomplete-patterns -Wredundant-constraints -Wunused-packages
+
+library
+    import:           warnings
+    exposed-modules:
+        Tidepool.Zellij.Interpreter
+    build-depends:
+        base >= 4.17 && < 5,
+        freer-simple >= 1.2 && < 2,
+        text >= 2.0 && < 3,
+        filepath >= 1.4 && < 2,
+        directory >= 1.3 && < 2,
+        process >= 1.6 && < 2,
+        tidepool-core
+    hs-source-dirs:   src
+    default-language: GHC2024
+    default-extensions:
+        DataKinds
+        DeriveGeneric
+        DerivingStrategies
+        GADTs
+        LambdaCase
+        OverloadedStrings
+        OverloadedRecordDot
+        TypeFamilies
+        TypeOperators
