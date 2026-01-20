@@ -48,11 +48,6 @@ impl UIStack {
         self.stack.last().map(|entry| &entry.spec)
     }
 
-    /// Check if the stack is empty.
-    pub fn is_empty(&self) -> bool {
-        self.stack.is_empty()
-    }
-
     /// Update an element in the current UI.
     ///
     /// Stores the update in element_state. The renderer will apply these
