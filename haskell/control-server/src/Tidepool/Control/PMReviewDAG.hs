@@ -8,7 +8,6 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE OverloadedRecordDot #-}
-{-# LANGUAGE RecordWildCards #-}
 
 -- | Strategic planning tool for PMs to analyze the bead DAG.
 module Tidepool.Control.PMReviewDAG
@@ -21,7 +20,6 @@ module Tidepool.Control.PMReviewDAG
   , PriorityGap(..)
   ) where
 
-import Control.Monad (forM)
 import Control.Monad.Freer (Eff, Member)
 import Data.Aeson (FromJSON(..), ToJSON(..), withObject, (.:), (.:?), object, (.=))
 import Data.Text (Text)

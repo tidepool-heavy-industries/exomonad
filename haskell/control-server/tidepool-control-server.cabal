@@ -253,7 +253,6 @@ test-suite pm-review-dag-test
     default-extensions:
         OverloadedStrings
         TypeApplications
-        TypeApplications
 
 test-suite parser-test
     import:           warnings

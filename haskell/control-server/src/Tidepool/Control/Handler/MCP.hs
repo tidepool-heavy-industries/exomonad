@@ -53,7 +53,7 @@ import Tidepool.Control.ExoTools
   , prToBeadLogic, PrToBeadArgs(..), PrToBeadResult(..)
   )
 import Tidepool.Control.PMReviewDAG
-  ( pmReviewDagLogic, PmReviewDagArgs(..), PmReviewDagResult(..), pmReviewDagHandlers
+  ( pmReviewDagLogic, PmReviewDagArgs(..), PmReviewDagResult(..)
   )
 import Tidepool.Control.PMTools
   ( pmApproveExpansionLogic, PmApproveExpansionArgs(..), PmApproveExpansionResult(..),
