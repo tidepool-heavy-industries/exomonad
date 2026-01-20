@@ -228,12 +228,22 @@ pub struct McpServer {
     tools: Vec<ToolDefinition>,
     /// Control server socket path for forwarding tool calls.
     control_path: Option<PathBuf>,
+    /// Optional allowlist of tool names to expose (if None, all tools exposed).
+    tools_allowlist: Option<Vec<String>>,
 }
 
 impl McpServer {
-    /// Create a new MCP server with explicit tools.
-    pub fn new(control_path: Option<PathBuf>, tools: Vec<ToolDefinition>) -> Self {
-        Self { tools, control_path }
+    /// Create a new MCP server with explicit tools and optional allowlist.
+    pub fn new(
+        control_path: Option<PathBuf>,
+        tools: Vec<ToolDefinition>,
+        tools_allowlist: Option<Vec<String>>,
+    ) -> Self {
+        Self {
+            tools,
+            control_path,
+            tools_allowlist,
+        }
     }
 
     /// Create a new MCP server by querying the control server for tools.
@@ -243,7 +253,8 @@ impl McpServer {
     /// this function panics rather than serving an empty tool list.
     ///
     /// Control server address is read from `TIDEPOOL_CONTROL_SOCKET` or default.
-    pub fn new_from_env() -> Self {
+    /// If `tools_allowlist` is provided, only tools in the allowlist will be exposed.
+    pub fn new_from_env(tools_allowlist: Option<Vec<String>>) -> Self {
         // Query control server for tools (REQUIRED - fail fast if unavailable)
         let tools = query_control_server_tools()
             .unwrap_or_else(|e| {
@@ -253,7 +264,7 @@ impl McpServer {
         // Get control server socket path
         let control_path = control_socket_path();
 
-        Self::new(Some(control_path), tools)
+        Self::new(Some(control_path), tools, tools_allowlist)
     }
 
     /// Run the MCP server on stdio.
@@ -337,15 +348,32 @@ impl McpServer {
     }
 
     /// Handle tools/list request.
+    ///
+    /// Filters tools based on the allowlist if provided. If no allowlist is set,
+    /// returns all tools from the control server.
     fn handle_tools_list(&self, id: Value) -> JsonRpcResponse {
+        let filtered_tools = if let Some(ref allowlist) = self.tools_allowlist {
+            // Filter to only tools in the allowlist
+            self.tools
+                .iter()
+                .filter(|tool| allowlist.contains(&tool.name))
+                .cloned()
+                .collect()
+        } else {
+            // No allowlist - expose all tools
+            self.tools.clone()
+        };
+
         let result = ToolsListResult {
-            tools: self.tools.clone(),
+            tools: filtered_tools,
         };
 
         JsonRpcResponse::success(id, serde_json::to_value(result).unwrap())
     }
 
     /// Handle tools/call request.
+    ///
+    /// Rejects calls to tools not in the allowlist (if allowlist is set).
     fn handle_tools_call(&mut self, id: Value, params: Value) -> JsonRpcResponse {
         // Parse tool call params
         let call_params: ToolCallParams = match serde_json::from_value(params) {
@@ -362,6 +390,21 @@ impl McpServer {
             tool = %call_params.name,
             "Processing decision tool call"
         );
+
+        // Check allowlist first if present
+        if let Some(ref allowlist) = self.tools_allowlist {
+            if !allowlist.contains(&call_params.name) {
+                return JsonRpcResponse::error(
+                    id,
+                    -32602,
+                    format!(
+                        "Tool '{}' is not in the allowlist. Available tools: {}",
+                        call_params.name,
+                        allowlist.join(", ")
+                    ),
+                );
+            }
+        }
 
         // Verify tool exists
         if !self.tools.iter().any(|t| t.name == call_params.name) {
@@ -478,11 +521,14 @@ impl McpServer {
 /// Queries the control server for available MCP tools at startup using:
 /// - TIDEPOOL_CONTROL_SOCKET: Control server socket path (optional)
 ///
+/// If `tools_allowlist` is provided, only tools in the allowlist will be exposed
+/// to the MCP client. If `None`, all tools from the control server are exposed.
+///
 /// Implements fail-fast behavior: if the control server is unreachable during
 /// initialization, the server exits with an error. This ensures Claude Code sees
 /// an accurate tool list and catches configuration issues early.
-pub fn run_mcp_server() -> Result<(), Box<dyn std::error::Error>> {
-    let mut server = McpServer::new_from_env();
+pub fn run_mcp_server(tools_allowlist: Option<Vec<String>>) -> Result<(), Box<dyn std::error::Error>> {
+    let mut server = McpServer::new_from_env(tools_allowlist);
     server.run()?;
     Ok(())
 }
@@ -577,7 +623,7 @@ mod tests {
 
     #[test]
     fn test_server_handles_initialize() {
-        let server = McpServer::new(None, vec![]);
+        let server = McpServer::new(None, vec![], None);
         let response = server.handle_initialize(json!("init-1"));
         assert!(response.result.is_some());
         assert!(response.error.is_none());
@@ -585,7 +631,7 @@ mod tests {
 
     #[test]
     fn test_server_handles_tools_list_empty() {
-        let server = McpServer::new(None, vec![]);
+        let server = McpServer::new(None, vec![], None);
         let response = server.handle_tools_list(json!("list-1"));
         assert!(response.result.is_some());
         let result = response.result.unwrap();
@@ -594,7 +640,7 @@ mod tests {
 
     #[test]
     fn test_server_handles_unknown_method() {
-        let mut server = McpServer::new(None, vec![]);
+        let mut server = McpServer::new(None, vec![], None);
         let request = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),
             id: json!("1"),
@@ -604,5 +650,122 @@ mod tests {
         let response = server.handle_request(request);
         assert!(response.error.is_some());
         assert_eq!(response.error.unwrap().code, -32601);
+    }
+
+    #[test]
+    fn test_tools_list_filters_with_allowlist() {
+        let tools = vec![
+            ToolDefinition {
+                name: "tool_a".to_string(),
+                description: "Tool A".to_string(),
+                input_schema: json!({"type": "object"}),
+            },
+            ToolDefinition {
+                name: "tool_b".to_string(),
+                description: "Tool B".to_string(),
+                input_schema: json!({"type": "object"}),
+            },
+            ToolDefinition {
+                name: "tool_c".to_string(),
+                description: "Tool C".to_string(),
+                input_schema: json!({"type": "object"}),
+            },
+        ];
+        let allowlist = Some(vec!["tool_a".to_string(), "tool_c".to_string()]);
+        let server = McpServer::new(None, tools, allowlist);
+
+        let response = server.handle_tools_list(json!("list-1"));
+        assert!(response.result.is_some());
+
+        let result = response.result.unwrap();
+        let tools_array = result["tools"].as_array().unwrap();
+        assert_eq!(tools_array.len(), 2);
+
+        let tool_names: Vec<String> = tools_array
+            .iter()
+            .map(|t| t["name"].as_str().unwrap().to_string())
+            .collect();
+        assert!(tool_names.contains(&"tool_a".to_string()));
+        assert!(tool_names.contains(&"tool_c".to_string()));
+        assert!(!tool_names.contains(&"tool_b".to_string()));
+    }
+
+    #[test]
+    fn test_tools_list_no_filter_without_allowlist() {
+        let tools = vec![
+            ToolDefinition {
+                name: "tool_a".to_string(),
+                description: "Tool A".to_string(),
+                input_schema: json!({"type": "object"}),
+            },
+            ToolDefinition {
+                name: "tool_b".to_string(),
+                description: "Tool B".to_string(),
+                input_schema: json!({"type": "object"}),
+            },
+        ];
+        let server = McpServer::new(None, tools.clone(), None);
+
+        let response = server.handle_tools_list(json!("list-1"));
+        assert!(response.result.is_some());
+
+        let result = response.result.unwrap();
+        let tools_array = result["tools"].as_array().unwrap();
+        assert_eq!(tools_array.len(), 2);
+    }
+
+    #[test]
+    fn test_tool_call_rejects_non_allowlisted_tool() {
+        let tools = vec![
+            ToolDefinition {
+                name: "tool_a".to_string(),
+                description: "Tool A".to_string(),
+                input_schema: json!({"type": "object"}),
+            },
+            ToolDefinition {
+                name: "tool_b".to_string(),
+                description: "Tool B".to_string(),
+                input_schema: json!({"type": "object"}),
+            },
+        ];
+        let allowlist = Some(vec!["tool_a".to_string()]);
+        let mut server = McpServer::new(None, tools, allowlist);
+
+        let params = json!({
+            "name": "tool_b",
+            "arguments": {}
+        });
+        let response = server.handle_tools_call(json!("call-1"), params);
+
+        assert!(response.error.is_some());
+        let error = response.error.unwrap();
+        assert_eq!(error.code, -32602);
+        assert!(error.message.contains("not in the allowlist"));
+    }
+
+    #[test]
+    fn test_tool_call_allows_allowlisted_tool() {
+        let tools = vec![
+            ToolDefinition {
+                name: "tool_a".to_string(),
+                description: "Tool A".to_string(),
+                input_schema: json!({"type": "object"}),
+            },
+        ];
+        let allowlist = Some(vec!["tool_a".to_string()]);
+        let mut server = McpServer::new(None, tools, allowlist);
+
+        let params = json!({
+            "name": "tool_a",
+            "arguments": {}
+        });
+        let response = server.handle_tools_call(json!("call-1"), params);
+
+        // Should fail because no control server is configured, but NOT because of allowlist
+        // The error should be about control server, not allowlist
+        assert!(response.error.is_some());
+        let error = response.error.unwrap();
+        assert_eq!(error.code, -32603); // Internal error (no control server)
+        assert!(!error.message.contains("not in the allowlist"));
     }
 }

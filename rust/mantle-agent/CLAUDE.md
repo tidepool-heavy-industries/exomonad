@@ -56,13 +56,21 @@ Claude Code                    mantle-agent hook               Control Server
 
 MCP (Model Context Protocol) stdio server for decision tools.
 
+**Usage:**
+```bash
+mantle-agent mcp [--tools <TOOL1>,<TOOL2>,...]
+```
+
+**Options:**
+- `--tools` - Comma-separated allowlist of tool names. If omitted, all tools from the control server are exposed.
+
 **Flow:**
 ```
 Claude Code                    mantle-agent mcp                Control Server
     │                              │                               │
     │  JSON-RPC request (stdio)    │                               │
     │─────────────────────────────▶│                               │
-    │                              │  (tools/list: local response) │
+    │                              │  (tools/list: filtered)       │
     │                              │                               │
     │                              │  (tools/call: forward via TCP)│
     │                              │──────────────────────────────▶│
@@ -76,32 +84,22 @@ Claude Code                    mantle-agent mcp                Control Server
 **Supported methods:**
 - `initialize` - Handshake, returns server capabilities
 - `initialized` - Notification acknowledgment
-- `tools/list` - Returns tool definitions (from `MANTLE_DECISION_TOOLS_FILE`)
-- `tools/call` - Executes tool by forwarding to control server
+- `tools/list` - Returns tool definitions (filtered by `--tools` if provided)
+- `tools/call` - Executes tool by forwarding to control server (rejects non-allowlisted tools)
 
-**Tool definition format** (in `MANTLE_DECISION_TOOLS_FILE`):
-```json
-[
-  {
-    "name": "decision::approve",
-    "description": "Approve the request",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "notes": { "type": "string" }
-      }
-    }
-  }
-]
-```
+**Role-based filtering:**
+The `--tools` flag enables different roles (PM, TL) to connect to the same control server with different tool visibility:
+- PM sees: `pm_propose`, `pm_approve_expansion`, `pm_prioritize`, `pm_status`, `pm_review_dag`, `exo_status`
+- TL sees: `find_callers`, `show_type`, `spawn_agents`, `exo_*`, `file_pr`, etc.
+
+**Backwards compatibility:**
+If `--tools` is not specified, all tools from the control server are exposed (existing behavior).
 
 ## Environment Variables
 
 | Variable | Required | Purpose |
 |----------|----------|---------|
-| `MANTLE_CONTROL_HOST` | For forwarding | TCP host for control server |
-| `MANTLE_CONTROL_PORT` | For forwarding | TCP port for control server |
-| `MANTLE_DECISION_TOOLS_FILE` | For `mcp` | Path to JSON file with tool definitions |
+| `TIDEPOOL_CONTROL_SOCKET` | For forwarding | Unix socket path for control server (defaults to `.tidepool/sockets/control.sock`) |
 | `RUST_LOG` | No | Tracing log level (e.g., `debug`, `mantle_agent=trace`) |
 
 ## Module Reference
@@ -170,16 +168,15 @@ echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' | cargo run -p
 
 To use mantle-agent with Claude Code, add to `.claude/settings.local.json`:
 
+### Without tool filtering (all tools exposed):
 ```json
 {
   "mcpServers": {
-    "mantle-decision": {
+    "tidepool": {
       "command": "mantle-agent",
       "args": ["mcp"],
       "env": {
-        "MANTLE_DECISION_TOOLS_FILE": "/path/to/tools.json",
-        "MANTLE_CONTROL_HOST": "127.0.0.1",
-        "MANTLE_CONTROL_PORT": "7432"
+        "TIDEPOOL_CONTROL_SOCKET": "/path/to/.tidepool/sockets/control.sock"
       }
     }
   },
@@ -189,6 +186,26 @@ To use mantle-agent with Claude Code, add to `.claude/settings.local.json`:
   }
 }
 ```
+
+### With tool filtering (PM role example):
+```json
+{
+  "mcpServers": {
+    "tidepool-pm": {
+      "command": "/path/to/tidepool/rust/target/release/mantle-agent",
+      "args": [
+        "mcp",
+        "--tools", "pm_propose,pm_approve_expansion,pm_prioritize,pm_status,pm_review_dag,exo_status"
+      ],
+      "env": {
+        "TIDEPOOL_CONTROL_SOCKET": "/path/to/.tidepool/sockets/control.sock"
+      }
+    }
+  }
+}
+```
+
+This configuration ensures PM users only see PM-specific tools, while TL users can configure a different allowlist or omit `--tools` for full access.
 
 ## What's Missing (TODO)
 

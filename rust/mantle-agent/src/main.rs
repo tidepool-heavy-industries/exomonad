@@ -51,7 +51,11 @@ enum Commands {
     /// Queries the control server for tool definitions at startup and serves
     /// them via JSON-RPC 2.0 over stdio. Tool calls are forwarded to the
     /// control server via Unix socket.
-    Mcp,
+    Mcp {
+        /// Comma-separated allowlist of tool names (if omitted, all tools exposed)
+        #[arg(long, value_delimiter = ',')]
+        tools: Option<Vec<String>>,
+    },
 
     /// Check control server health via Ping/Pong on socket.
     Health,
@@ -69,7 +73,7 @@ fn main() {
 
     let result = match cli.command {
         Commands::Hook { event, runtime } => handle_hook(event, runtime),
-        Commands::Mcp => mcp::run_mcp_server()
+        Commands::Mcp { tools } => mcp::run_mcp_server(tools)
             .map_err(|e| mantle_shared::MantleError::McpServer(e.to_string())),
         Commands::Health => health::run_health_check(),
     };
