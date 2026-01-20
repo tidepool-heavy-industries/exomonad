@@ -52,13 +52,17 @@ data DecisionContext = DecisionContext
 
 -- | Audit trace for a decision.
 --
--- Captures the context, the decision made, and the timestamp.
+-- Captures the context, the options shown, the decision made, latency, and timestamp.
 data DecisionTrace = DecisionTrace
-  { dtContext   :: DecisionContext
+  { dtContext          :: DecisionContext
     -- ^ Context at the time of decision.
-  , dtDecision  :: Decision
+  , dtOptionsPresented :: [Text]
+    -- ^ The options shown to the user.
+  , dtDecision         :: Decision
     -- ^ The actual decision made.
-  , dtTimestamp :: UTCTime
+  , dtLatencyMs        :: Int
+    -- ^ How long it took the user to decide (in milliseconds).
+  , dtTimestamp        :: UTCTime
     -- ^ When the decision occurred.
   }
   deriving (Show, Eq, Generic, ToJSON, FromJSON)

@@ -38,7 +38,9 @@ spec = do
     it "roundtrips full trace" $ do
       let t = DecisionTrace
             { dtContext = DecisionContext "What next?" [BeadSummary "bead-1" "Test Bead" 1]
+            , dtOptionsPresented = ["🟡 [bead-1] Test Bead", "Continue", "Abort", "Provide Guidance (Enter to submit)"]
             , dtDecision = Continue
+            , dtLatencyMs = 1234
             , dtTimestamp = UTCTime (fromGregorian 2026 1 19) 0
             }
       decode (encode t) `shouldBe` Just t

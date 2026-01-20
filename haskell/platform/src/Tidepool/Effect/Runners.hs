@@ -30,6 +30,8 @@ module Tidepool.Effect.Runners
   , runChatHistoryWithDB
     -- * Chat History with Compression
   , runChatHistoryWithCompression
+    -- * Decision Logging
+  , runDecisionLog
     -- * Combined Runner
   , runGame
   ) where
@@ -47,6 +49,8 @@ import Data.IORef (newIORef, readIORef, writeIORef, modifyIORef)
 import Data.Maybe (mapMaybe)
 import Database.SQLite.Simple (Connection)
 import GHC.TypeLits (TypeError, ErrorMessage(..))
+import System.Directory (createDirectoryIfMissing)
+import System.IO (IOMode(AppendMode), hFlush, hPutChar, withFile)
 
 import qualified Tidepool.Anthropic.Client as Client
 import Tidepool.Anthropic.Client
@@ -69,6 +73,7 @@ type RunnerEffects s event =
    , Emit event
    , Random
    , Time
+   , DecisionLog
    , IO
    ]
 
@@ -691,6 +696,16 @@ formatMessagesForCompression = T.intercalate "\n\n" . map formatMessage
 -- LOG AND GAME RUNNERS
 -- ══════════════════════════════════════════════════════════════
 
+-- | Run the DecisionLog effect by appending to .tidepool/decision_log.jsonl
+runDecisionLog :: LastMember IO effs => Eff (DecisionLog ': effs) a -> Eff effs a
+runDecisionLog = interpret $ \case
+  RecordDecision trace -> sendM $ do
+    createDirectoryIfMissing True ".tidepool"
+    withFile ".tidepool/decision_log.jsonl" AppendMode $ \h -> do
+      LBS.hPut h (encode trace)
+      hPutChar h '\n'
+      hFlush h
+
 -- | Run the full game effect stack
 runGame
   :: s
@@ -702,6 +717,7 @@ runGame
   -> IO (a, s)
 runGame initialState llmConfig eventHandler inputHandler minLogLevel =
   runM
+    . runDecisionLog
     . runTime
     . runRandom
     . runEmit eventHandler

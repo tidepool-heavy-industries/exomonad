@@ -18,6 +18,7 @@ module Tidepool.Effect.Types
   , Log(..)
   , LogLevel(..)
   , QuestionUI(..)
+  , DecisionLog(..)
   , TUI(..)
 
     -- * Return Effect (graph termination)
@@ -108,6 +109,7 @@ module Tidepool.Effect.Types
   , runChatHistory
   , runRequestInput
   , runQuestionUI
+  , runDecisionLogPure
 
     -- * TUI Effect Operations
   , showUI
@@ -118,6 +120,7 @@ module Tidepool.Effect.Types
   , Decision(..)
   , DecisionContext(..)
   , DecisionTrace(..)
+  , recordDecision
 
     -- * TUI Types (protocol)
   , UISpec(..)
@@ -768,6 +771,22 @@ runLog minLevel = interpret $ \case
               Just fs -> " | " <> T.intercalate ", " (map fst fs)
         sendM $ TIO.hPutStrLn stderr ("[" <> T.pack (show level) <> "] " <> msg <> fieldStr)
     | otherwise -> pure ()
+
+-- ══════════════════════════════════════════════════════════════
+-- DECISION LOG EFFECT
+-- ══════════════════════════════════════════════════════════════
+
+data DecisionLog r where
+  RecordDecision :: DecisionTrace -> DecisionLog ()
+
+-- | Record a decision trace for training data.
+recordDecision :: Member DecisionLog effs => DecisionTrace -> Eff effs ()
+recordDecision trace = send (RecordDecision trace)
+
+-- | Pure runner for DecisionLog (drops logs).
+runDecisionLogPure :: Eff (DecisionLog ': effs) a -> Eff effs a
+runDecisionLogPure = interpret $ \case
+  RecordDecision _ -> pure ()
 
 -- ══════════════════════════════════════════════════════════════
 -- RETURN EFFECT (graph termination)
