@@ -76,7 +76,7 @@ instance ToGVal (Run SourcePos (Writer Text) Text) BeadContext where
     , "priority" ~> bc.priority
     , "status" ~> bc.status
     , "owner" ~> bc.owner
-    , "type" ~> bc.type_
+    , "type_" ~> bc.type_
     , "created" ~> bc.created
     , "updated" ~> bc.updated
     , "description" ~> bc.description
