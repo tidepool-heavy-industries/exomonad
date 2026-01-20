@@ -289,15 +289,15 @@ makeTemplateCompiled ctxName path = do
       bindingName = mkName $ lowerFirst baseName ++ "_compiled"
 
   -- Generate the type signature
-  sigD <- sigD bindingName
+  sig <- sigD bindingName
     [t| TypedTemplate $(conT ctxName) SourcePos |]
 
   -- Generate the binding
-  valD <- valD (varP bindingName)
+  val <- valD (varP bindingName)
     (normalB [| $(typedTemplateFile ctxName path) |])
     []
 
-  pure [sigD, valD]
+  pure [sig, val]
   where
     lowerFirst :: String -> String
     lowerFirst [] = []

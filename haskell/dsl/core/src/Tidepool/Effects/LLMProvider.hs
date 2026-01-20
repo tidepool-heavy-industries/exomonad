@@ -9,13 +9,13 @@ module Tidepool.Effects.LLMProvider
   , SProvider(..)
 
     -- * Provider-Specific Config
-  , LLMProviderConfig(..)
+  , LLMProviderConfig
   , AnthropicConfig(..)
   , OpenAIConfig(..)
   , ThinkingBudget(..)
 
     -- * Provider-Specific Response
-  , LLMProviderResponse(..)
+  , LLMProviderResponse
   , AnthropicResponse(..)
   , OpenAIResponse(..)
 

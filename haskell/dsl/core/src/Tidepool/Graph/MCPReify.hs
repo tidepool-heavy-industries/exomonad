@@ -41,9 +41,9 @@ import GHC.Generics
 import GHC.TypeLits (Symbol, KnownSymbol, symbolVal)
 
 import Tidepool.Schema (HasJSONSchema(..), schemaToValue)
-import Tidepool.Graph.Types (type (:@), MCPExport, MCPToolDef, GraphEntry(..), GraphEntries)
-import Tidepool.Graph.Generic.Core (AsGraph, EntryNode, type (:-))
-import Tidepool.Graph.Edges (HasMCPExport, GetMCPToolDef)
+import Tidepool.Graph.Types (type (:@), MCPToolDef, GraphEntry(..), GraphEntries)
+import Tidepool.Graph.Generic.Core (AsGraph, EntryNode)
+import Tidepool.Graph.Edges (HasMCPExport)
 
 -- | An MCP tool definition extracted from a graph EntryNode.
 data MCPToolInfo = MCPToolInfo
@@ -69,7 +69,7 @@ data MCPToolInfo = MCPToolInfo
 class ReifyMCPTools (graph :: Type -> Type) where
   reifyMCPTools :: Proxy graph -> [MCPToolInfo]
 
-instance (Generic (graph AsGraph), GReifyMCPEntries (Rep (graph AsGraph)))
+instance (GReifyMCPEntries (Rep (graph AsGraph)))
       => ReifyMCPTools graph where
   reifyMCPTools _ = gReifyMCPEntries (Proxy @(Rep (graph AsGraph)))
 
@@ -99,8 +99,7 @@ instance GReifyMCPEntries U1 where
   gReifyMCPEntries _ = []
 
 -- Field: check for MCPExport
-instance ( KnownSymbol name
-         , ReifyMCPField (HasMCPExport fieldType) name fieldType
+instance ( ReifyMCPField (HasMCPExport fieldType) name fieldType
          )
       => GReifyMCPEntries (M1 S ('MetaSel ('Just name) su ss ds) (K1 i fieldType)) where
   gReifyMCPEntries _ = reifyMCPField @(HasMCPExport fieldType) @name @fieldType Proxy
@@ -119,7 +118,6 @@ instance ReifyMCPField 'False name fieldType where
 
 -- MCP-exported: extract tool definition
 instance ( KnownSymbol name
-         , ExtractEntryInput fieldType
          , HasJSONSchema (EntryInputType fieldType)
          , ExtractToolMeta name fieldType
          )
@@ -140,7 +138,7 @@ class ExtractEntryInput (node :: Type) where
   type EntryInputType node :: Type
 
 -- Base case: strip annotations to find EntryNode
-instance {-# OVERLAPPABLE #-} ExtractEntryInput inner => ExtractEntryInput (inner :@ ann) where
+instance {-# OVERLAPPABLE #-} ExtractEntryInput (inner :@ ann) where
   type EntryInputType (inner :@ ann) = EntryInputType inner
 
 -- EntryNode with input type (for AsGraph mode, this is EntryNode t directly)

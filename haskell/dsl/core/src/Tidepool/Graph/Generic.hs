@@ -1,4 +1,6 @@
 {-# LANGUAGE ConstraintKinds #-}
+{-# OPTIONS_GHC -Wno-deprecations #-}
+{-# OPTIONS_GHC -Wno-unused-top-binds #-}
 
 -- | Servant-style record-as-graph pattern for the Tidepool Graph DSL.
 --
@@ -119,7 +121,6 @@ module Tidepool.Graph.Generic
   ) where
 
 import Data.Kind (Type, Constraint)
-import Data.Proxy (Proxy(..))
 import GHC.Generics (Generic(..), K1(..), M1(..), (:*:)(..), Meta(..), S, D, C)
 import GHC.TypeLits (Symbol, KnownSymbol, TypeError, ErrorMessage(..), Nat, type (+))
 import Tidepool.Graph.Errors
@@ -130,10 +131,10 @@ import Tidepool.Graph.Errors
 import Tidepool.Graph.Validate (FormatSymbolList)
 import Control.Monad.Freer (Eff, Member)
 
-import Tidepool.Graph.Types (type (:@), Input, Schema, Template, Vision, Tools, Memory, System, UsesEffects, ClaudeCode, ModelChoice, Gemini, GeminiModel, Spawn, Barrier, Awaits, HList(..), MCPExport, MCPToolDef)
+import Tidepool.Graph.Types (type (:@), Input, Schema, Template, Vision, Tools, Memory, System, UsesEffects, ClaudeCode, ModelChoice, Gemini, Spawn, Barrier, Awaits, HList(..), MCPExport, MCPToolDef)
 import Tidepool.Effect.Gemini (GeminiOp, SingGeminiModel(..))
 import Tidepool.Graph.Template (TemplateContext)
-import Tidepool.Graph.Edges (GetUsesEffects, GetGotoTargets, GotoEffectsToTargets, HasClaudeCode, GetClaudeCode, HasGeminiModel, GetGeminiModel, GetSpawnTargets, GetBarrierTarget, GetAwaits)
+import Tidepool.Graph.Edges (GetUsesEffects, GetGotoTargets, GotoEffectsToTargets, GetClaudeCode, GetGeminiModel, GetSpawnTargets, GetAwaits)
 import Tidepool.Graph.Goto (Goto, goto, GotoChoice, To, LLMHandler(..), ClaudeCodeLLMHandler(..), GeminiLLMHandler(..))
 import Tidepool.Graph.Validate.RecordStructure
   ( AllFieldsReachable, AllLogicFieldsReachExit, NoDeadGotosRecord

@@ -88,8 +88,11 @@ module Tidepool.Graph.Goto
   , GotoElemC
   ) where
 
-import Tidepool.Prelude
-import GHC.TypeLits (TypeError, ErrorMessage(..))
+import Control.Monad.Freer (Eff, Member, send)
+import Data.Kind (Type, Constraint)
+import Data.Text (Text)
+import GHC.TypeLits (Symbol, TypeError, ErrorMessage(..))
+
 import Tidepool.Graph.Errors
   ( HR, Blank, WhatHappened, HowItWorks, Fixes, Example
   , Indent, CodeLine, Bullet, FormatTargetList
@@ -254,25 +257,8 @@ arrive :: forall barrierName result effs. Member (Arrive barrierName result) eff
 arrive r = send (ArriveOp r :: Arrive barrierName result ())
 
 -- ════════════════════════════════════════════════════════════════════════════
--- JSON SERIALIZATION
+-- TARGET VALIDATION
 -- ════════════════════════════════════════════════════════════════════════════
-
--- | Serialize a OneOf by serializing whatever payload it contains.
---
--- This flattens the sum type - we just serialize the inner value.
--- The position information is lost, but for WASM FFI we only care about
--- the payload reaching the exit point.
-instance {-# OVERLAPPING #-} ToJSON t => ToJSON (OneOf '[t]) where
-  toJSON (Here x) = toJSON x
-
-instance {-# OVERLAPPABLE #-} (ToJSON t, ToJSON (OneOf ts)) => ToJSON (OneOf (t ': ts)) where
-  toJSON (Here x) = toJSON x
-  toJSON (There rest) = toJSON rest
-
--- | Serialize a GotoChoice by serializing its inner OneOf.
-instance ToJSON (OneOf (Payloads targets)) => ToJSON (GotoChoice targets) where
-  toJSON (GotoChoice oneOf) = toJSON oneOf
-
 
 -- | Check if a To marker is in the targets list (returns Bool).
 type GotoElem :: Type -> [Type] -> Bool
@@ -343,10 +329,7 @@ type family GotoElemC' g targets result where
 -- @
 gotoChoice
   :: forall (name :: Symbol) payload targets.
-     ( NonEmptyList targets
-     , InjectTarget (To name payload) targets
-     , GotoElemC (To name payload) targets
-     )
+     InjectTarget (To name payload) targets
   => payload -> GotoChoice targets
 gotoChoice payload = GotoChoice (injectTarget @(To name payload) @targets payload)
 
@@ -357,10 +340,7 @@ gotoChoice payload = GotoChoice (injectTarget @(To name payload) @targets payloa
 -- @
 gotoExit
   :: forall payload targets.
-     ( NonEmptyList targets
-     , InjectTarget (To Exit payload) targets
-     , GotoElemC (To Exit payload) targets
-     )
+     InjectTarget (To Exit payload) targets
   => payload -> GotoChoice targets
 gotoExit payload = GotoChoice (injectTarget @(To Exit payload) @targets payload)
 
@@ -371,10 +351,7 @@ gotoExit payload = GotoChoice (injectTarget @(To Exit payload) @targets payload)
 -- @
 gotoSelf
   :: forall payload targets.
-     ( NonEmptyList targets
-     , InjectTarget (To Self payload) targets
-     , GotoElemC (To Self payload) targets
-     )
+     InjectTarget (To Self payload) targets
   => payload -> GotoChoice targets
 gotoSelf payload = GotoChoice (injectTarget @(To Self payload) @targets payload)
 
@@ -392,10 +369,7 @@ gotoSelf payload = GotoChoice (injectTarget @(To Self payload) @targets payload)
 -- This enables type-safe routing even when multiple barriers exist in a graph.
 gotoArrive
   :: forall barrierName payload targets.
-     ( NonEmptyList targets
-     , InjectTarget (To (Arrive barrierName) payload) targets
-     , GotoElemC (To (Arrive barrierName) payload) targets
-     )
+     InjectTarget (To (Arrive barrierName) payload) targets
   => payload -> GotoChoice targets
 gotoArrive payload = GotoChoice (injectTarget @(To (Arrive barrierName) payload) @targets payload)
 
@@ -441,12 +415,7 @@ gotoArrive payload = GotoChoice (injectTarget @(To (Arrive barrierName) payload)
 -- @
 gotoNode
   :: forall name nodeType config entry payload targets mode.
-     ( -- Extract node name from NodeRef phantom
-       KnownSymbol name
-     , NonEmptyList targets
-     , InjectTarget (To name payload) targets
-     , GotoElemC (To name payload) targets
-     )
+     InjectTarget (To name payload) targets
   => NodeRef name nodeType          -- ^ Target node witness (from graph record)
   -> (config mode -> entry mode)    -- ^ Field accessor path (e.g., retry . entries)
   -> payload                        -- ^ Payload for the entry
@@ -470,11 +439,7 @@ gotoNode _nodeRef _entryAccessor payload =
 -- @
 (-->)
   :: forall name nodeType config mode entry payload targets.
-     ( KnownSymbol name
-     , NonEmptyList targets
-     , InjectTarget (To name payload) targets
-     , GotoElemC (To name payload) targets
-     )
+     InjectTarget (To name payload) targets
   => NodeRef name nodeType          -- NodeRef "nodeName" nodeType
   -> (config mode -> entry mode)    -- Field accessor (retry . entries)
   -> payload                        -- EntryNode payload

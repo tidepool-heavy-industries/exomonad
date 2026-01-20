@@ -1,6 +1,7 @@
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE StandaloneKindSignatures #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# OPTIONS_GHC -Wno-deprecations #-}
 
 -- | Annotation extraction for the Graph DSL.
 --
@@ -65,10 +66,7 @@ module Tidepool.Graph.Edges
   ) where
 
 import Data.Kind (Type)
-import GHC.Generics (Rep, M1, D, C, S, K1, (:*:), type Meta(..))
-import GHC.TypeLits (Symbol, TypeError, ErrorMessage(..))
-
-import Tidepool.Graph.Generic.Core (AsGraph, EntryNode, ExitNode, GraphMode(..))
+import GHC.TypeLits (Symbol)
 import Tidepool.Graph.Types
   ( type (:@), type (:&)
   , Input, Schema, System, Template, Vision, Tools, UsesEffects, Memory
