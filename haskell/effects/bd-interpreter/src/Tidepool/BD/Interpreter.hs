@@ -55,7 +55,6 @@ import Control.Monad (forM_)
 import Control.Monad.Freer (Eff, LastMember, interpret, sendM)
 import Data.Aeson (eitherDecode)
 import Data.ByteString.Lazy qualified as LBS
-import Data.Maybe (maybeToList)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE

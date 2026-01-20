@@ -29,7 +29,7 @@ module Tidepool.Control.MailboxTools
 
 import Control.Monad.Freer (Eff, Member)
 import Data.Aeson (FromJSON(..), ToJSON(..), object, (.=), (.:), (.:?), withObject)
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
@@ -50,7 +50,7 @@ import Tidepool.Effects.BD
   , closeBead
   , addDep
   )
-import Tidepool.Graph.Generic (AsHandler, type (:-))
+import Tidepool.Graph.Generic (type (:-))
 import Tidepool.Graph.Generic.Core (EntryNode, ExitNode, LogicNode)
 import Tidepool.Graph.Goto (Goto, GotoChoice, To, gotoExit)
 import Tidepool.Graph.Types (type (:@), Input, UsesEffects, Exit, MCPExport, MCPToolDef)
@@ -206,14 +206,10 @@ beadToSummary b = MessageSummary
 
 findLabelPrefix :: Text -> [Text] -> Text
 findLabelPrefix prefix labels =
-  fromMaybe "unknown" $ 
-    listToMaybe $ 
-      map (T.drop (T.length prefix)) $ 
+  fromMaybe "unknown" $
+    listToMaybe $
+      map (T.drop (T.length prefix)) $
         filter (T.isPrefixOf prefix) labels
-
-listToMaybe :: [a] -> Maybe a
-listToMaybe [] = Nothing
-listToMaybe (x:_) = Just x
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- READ MESSAGE

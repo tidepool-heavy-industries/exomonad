@@ -74,12 +74,15 @@ test_sendMessage = do
   
   state <- readIORef stateRef
   assertEqual "Should have created one bead" 1 (length $ createdBeads state)
-  let created = head $ createdBeads state
-  assertEqual "Title should match subject" "Hello" created.cbiTitle
-  assertBool "Should have mailbox label" ("mailbox" `elem` created.cbiLabels)
-  assertBool "Should have from:pm label" ("from:pm" `elem` created.cbiLabels)
-  assertBool "Should have to:tl label" ("to:tl" `elem` created.cbiLabels)
-  assertEqual "Assignee should be recipient" (Just "tl") created.cbiAssignee
+  case createdBeads state of
+    [created] -> do
+      assertEqual "Title should match subject" "Hello" created.cbiTitle
+      assertBool "Should have mailbox label" ("mailbox" `elem` created.cbiLabels)
+      assertBool "Should have from:pm label" ("from:pm" `elem` created.cbiLabels)
+      assertBool "Should have to:tl label" ("to:tl" `elem` created.cbiLabels)
+      assertBool "Should have msgtype:proposal label" ("msgtype:proposal" `elem` created.cbiLabels)
+      assertEqual "Assignee should be recipient" (Just "tl") created.cbiAssignee
+    _ -> assertFailure "Expected exactly one created bead"
 
 test_checkInbox :: Assertion
 test_checkInbox = do
@@ -90,12 +93,16 @@ test_checkInbox = do
   -- Check TL inbox
   results <- runMockBD stateRef [msg1, msg2] $ unwrapSingleChoice <$> checkInboxLogic "tl" (CheckInboxArgs)
   assertEqual "TL should see 1 message" 1 (length results)
-  assertEqual "TL should see msg-1" "msg-1" (head results).msId
+  case results of
+    (msg:_) -> assertEqual "TL should see msg-1" "msg-1" msg.msId
+    [] -> assertFailure "Expected TL to see at least one message"
   
   -- Check PM inbox
   results2 <- runMockBD stateRef [msg1, msg2] $ unwrapSingleChoice <$> checkInboxLogic "pm" (CheckInboxArgs)
   assertEqual "PM should see 1 message" 1 (length results2)
-  assertEqual "PM should see msg-2" "msg-2" (head results2).msId
+  case results2 of
+    (msg:_) -> assertEqual "PM should see msg-2" "msg-2" msg.msId
+    [] -> assertFailure "Expected PM to see at least one message"
 
 test_markRead :: Assertion
 test_markRead = do
@@ -104,9 +111,11 @@ test_markRead = do
   
   state <- readIORef stateRef
   assertEqual "Should have closed one bead" 1 (length $ closedBeads state)
-  let (bid, reason) = head $ closedBeads state
-  assertEqual "Should close correct ID" "msg-1" bid
-  assertEqual "Should have correct reason" (Just "acknowledged") reason
+  case closedBeads state of
+    [(bid, reason)] -> do
+      assertEqual "Should close correct ID" "msg-1" bid
+      assertEqual "Should have correct reason" (Just "acknowledged") reason
+    _ -> assertFailure "Expected exactly one closed bead"
 
 -- Helper to create dummy bead
 defaultBead :: Text -> BeadInfo
