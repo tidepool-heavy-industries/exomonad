@@ -1,0 +1,22 @@
+version: "0.5"
+log_location: .tidepool/logs
+
+processes:
+  control-server:
+    command: |
+      rm -f .tidepool/sockets/control.sock && \
+      cabal run tidepool-control-server -- --project-dir . --no-tui
+    working_dir: "."
+    readiness_probe:
+      exec:
+        command: "nc -zU .tidepool/sockets/control.sock"
+      initial_delay_seconds: 5
+      period_seconds: 2
+      failure_threshold: 15
+    availability:
+      restart: on_failure
+      max_restarts: 3
+    shutdown:
+      command: "rm -f .tidepool/sockets/control.sock"
+      timeout_seconds: 5
+

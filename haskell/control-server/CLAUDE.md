@@ -73,6 +73,15 @@ Project-local configuration in `.tidepool/` (gitignored):
 
 ## Complete Data Flow
 
+### Hybrid Tidepool Architecture
+
+The system uses `process-compose` to orchestrate multiple services. Subagents (parallel worktrees) run a minimal `control-server` in LSP-only mode.
+
+| Component | Flag/Template | Purpose |
+|-----------|---------------|---------|
+| **Control Server** | `--no-tui` | Disables the TUI sidebar listener (for subagents) |
+| **Subagent Template** | `.tidepool/templates/subagent-pc.yaml` | Static process-compose template for subagents |
+
 ### Hook Flow (PreToolUse Example)
 
 ```
