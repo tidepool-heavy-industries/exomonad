@@ -50,6 +50,7 @@ import Tidepool.Control.ExoTools
   ( ExoStatusGraph, ExoCompleteGraph, ExoReconstituteGraph, SpawnAgentsGraph, FilePRGraph )
 import Tidepool.Control.PMTools
   ( PmApproveExpansionGraph, PmPrioritizeGraph )
+import Tidepool.Control.PMPropose (PMProposeGraph)
 import Tidepool.Control.Scout.Graph (DocGenGraph)
 import Tidepool.Control.Scout.DocGen.Gemma (extractCandidates)
 import Tidepool.Effect.LSP
@@ -949,7 +950,8 @@ exportMCPTools logger = do
   let saTools = reifyMCPTools (Proxy @SpawnAgentsGraph)
   let fpTools = reifyMCPTools (Proxy @FilePRGraph)
   let paeTools = reifyMCPTools (Proxy @PmApproveExpansionGraph)
-  let ppTools = reifyMCPTools (Proxy @PmPrioritizeGraph)
+  let pmPriTools = reifyMCPTools (Proxy @PmPrioritizeGraph)
+  let pmProTools = reifyMCPTools (Proxy @PMProposeGraph)
 
   -- Log discovered tools per graph for debugging
   logDebug logger $ "[MCP Discovery] FindCallersGraph: " <> T.pack (show (length fcTools)) <> " tools"
@@ -962,9 +964,10 @@ exportMCPTools logger = do
   logDebug logger $ "[MCP Discovery] SpawnAgentsGraph: " <> T.pack (show (length saTools)) <> " tools"
   logDebug logger $ "[MCP Discovery] FilePRGraph: " <> T.pack (show (length fpTools)) <> " tools"
   logDebug logger $ "[MCP Discovery] PmApproveExpansionGraph: " <> T.pack (show (length paeTools)) <> " tools"
-  logDebug logger $ "[MCP Discovery] PmPrioritizeGraph: " <> T.pack (show (length ppTools)) <> " tools"
+  logDebug logger $ "[MCP Discovery] PmPrioritizeGraph: " <> T.pack (show (length pmPriTools)) <> " tools"
+  logDebug logger $ "[MCP Discovery] PMProposeGraph: " <> T.pack (show (length pmProTools)) <> " tools"
 
-  let allTools = concat [fcTools, sfTools, scTools, dgTools, esTools, ecTools, erTools, saTools, fpTools, paeTools, ppTools]
+  let allTools = concat [fcTools, sfTools, scTools, dgTools, esTools, ecTools, erTools, saTools, fpTools, paeTools, pmPriTools, pmProTools]
   logInfo logger $ "[MCP Discovery] Total: " <> T.pack (show (length allTools)) <> " tools discovered"
 
   -- Log tool names with entry points for verification
