@@ -37,10 +37,21 @@ async fn main() -> Result<()> {
         .finish();
     tracing::subscriber::set_global_default(subscriber)?;
 
-    info!("TUI sidebar starting on socket {:?}", args.socket);
+    // Resolve socket path
+    let socket_path = if args.socket.is_relative() {
+        if let Ok(project_dir) = std::env::var("TIDEPOOL_PROJECT_DIR") {
+            PathBuf::from(project_dir).join(&args.socket)
+        } else {
+            args.socket
+        }
+    } else {
+        args.socket
+    };
+
+    info!("TUI sidebar starting on socket {:?}", socket_path);
 
     // Wait for connection
-    let stream = server::wait_for_unix_connection(&args.socket).await?;
+    let stream = server::wait_for_unix_connection(&socket_path).await?;
 
     // Spawn I/O tasks
     let (msg_rx, int_tx) = server::spawn_io_tasks(stream);

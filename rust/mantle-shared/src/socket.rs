@@ -43,7 +43,10 @@ impl ControlSocket {
     pub fn connect(path: &Path) -> Result<Self> {
         debug!(path = %path.display(), "Connecting to control server");
 
-        let stream = UnixStream::connect(path).map_err(|e| MantleError::Io(e))?;
+        let stream = UnixStream::connect(path).map_err(|e| MantleError::UnixConnect {
+            path: path.to_path_buf(),
+            source: e,
+        })?;
 
         // Set default timeouts
         stream
@@ -105,13 +108,21 @@ impl ControlSocket {
 
 /// Get control server socket path from environment.
 ///
-/// Returns path from `TIDEPOOL_CONTROL_SOCKET` or default `.tidepool/sockets/control.sock`.
+/// Returns absolute path:
+/// 1. TIDEPOOL_CONTROL_SOCKET (if set)
+/// 2. $TIDEPOOL_PROJECT_DIR/.tidepool/sockets/control.sock
+/// 3. $PWD/.tidepool/sockets/control.sock
 pub fn control_socket_path() -> PathBuf {
     if let Ok(path) = std::env::var("TIDEPOOL_CONTROL_SOCKET") {
-        PathBuf::from(path)
-    } else {
-        PathBuf::from(".tidepool/sockets/control.sock")
+        return PathBuf::from(path);
     }
+
+    let base = std::env::var("TIDEPOOL_PROJECT_DIR")
+        .map(PathBuf::from)
+        .or_else(|_| std::env::current_dir())
+        .unwrap_or_else(|_| PathBuf::from("."));
+
+    base.join(".tidepool").join("sockets").join("control.sock")
 }
 
 #[cfg(test)]
@@ -151,76 +162,6 @@ mod tests {
 
         // Connect and send
         let mut client = ControlSocket::connect(&socket_path_inner).unwrap();
-
-        use crate::protocol::HookInput;
-        let message = ControlMessage::HookEvent {
-            input: Box::new(HookInput {
-                session_id: "test".to_string(),
-                transcript_path: String::new(),
-                cwd: String::new(),
-                permission_mode: "default".to_string(),
-                hook_event_name: "PreToolUse".to_string(),
-                tool_name: Some("Write".to_string()),
-                tool_input: None,
-                tool_use_id: None,
-                tool_response: None,
-                prompt: None,
-                message: None,
-                notification_type: None,
-                stop_hook_active: None,
-                trigger: None,
-                custom_instructions: None,
-                source: None,
-                reason: None,
-            }),
-        };
-
-        let response = client.send(&message).unwrap();
-
-        match response {
-            ControlResponse::HookResponse { exit_code, .. } => {
-                assert_eq!(exit_code, 0);
-            }
-            _ => panic!("Unexpected response type"),
-        }
-
-        server_handle.join().unwrap();
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::net::TcpListener;
-    use std::thread;
-
-    #[test]
-    fn test_socket_roundtrip() {
-        // Start a simple echo server
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
-
-        let server_handle = thread::spawn(move || {
-            let (stream, _) = listener.accept().unwrap();
-            let mut reader = BufReader::new(&stream);
-            let mut line = String::new();
-            reader.read_line(&mut line).unwrap();
-
-            // Parse the message and echo back a response
-            let _msg: ControlMessage = serde_json::from_str(&line).unwrap();
-
-            use crate::protocol::{ControlResponse, HookOutput};
-            let response =
-                ControlResponse::hook_success(HookOutput::pre_tool_use_allow(None, None));
-            let response_json = serde_json::to_string(&response).unwrap();
-
-            use std::io::Write;
-            let mut stream = stream;
-            writeln!(stream, "{}", response_json).unwrap();
-        });
-
-        // Connect and send
-        let mut client = ControlSocket::connect("127.0.0.1", port).unwrap();
 
         use crate::protocol::HookInput;
         let message = ControlMessage::HookEvent {

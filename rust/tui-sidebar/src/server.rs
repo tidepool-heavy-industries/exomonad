@@ -14,7 +14,8 @@ use crate::protocol::{Interaction, UISpec};
 pub async fn wait_for_unix_connection(path: &Path) -> Result<UnixStream> {
     // Ensure parent directory exists
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).context("Failed to create socket directory")?;
+        fs::create_dir_all(parent)
+            .context(format!("Failed to create socket directory {}", parent.display()))?;
     }
 
     // Remove existing socket file if it exists

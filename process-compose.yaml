@@ -32,6 +32,9 @@ processes:
     command: "cargo run --bin tui-sidebar -- --socket .tidepool/sockets/tui.sock"
     availability:
       restart: "on_failure"
+    depends_on:
+      control-server:
+        condition: process_healthy
     readiness_probe:
       exec:
         command: "nc -zU .tidepool/sockets/tui.sock"

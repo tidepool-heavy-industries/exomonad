@@ -74,7 +74,7 @@ runServer logger config = do
             Just h -> closeTUIHandle h
             Nothing -> pure ()
 
-    flip finally cleanup $ bracket (setupUnixSocket controlSocket) close $ \sock -> do
+    flip finally cleanup $ bracket (setupUnixSocket controlSocket) (cleanupUnixSocket controlSocket) $ \sock -> do
       logInfo logger $ "Control server listening on Unix socket: " <> T.pack controlSocket
 
       forever $ do
@@ -86,17 +86,28 @@ setupUnixSocket :: FilePath -> IO Socket
 setupUnixSocket path = do
   -- Ensure directory exists
   createDirectoryIfMissing True (takeDirectory path)
-  
+
   -- Remove existing socket file if it exists
-  catch (removeFile path) $ \e ->
-    if isDoesNotExistError e
-      then pure ()
-      else E.throwIO e
+  cleanupSocketFile path
 
   sock <- socket AF_UNIX Stream 0
   bind sock (SockAddrUnix path)
   listen sock 10
   pure sock
+
+-- | Cleanup Unix socket at given path.
+cleanupUnixSocket :: FilePath -> Socket -> IO ()
+cleanupUnixSocket path sock = do
+  close sock
+  cleanupSocketFile path
+
+-- | Cleanup just the socket file
+cleanupSocketFile :: FilePath -> IO ()
+cleanupSocketFile path = 
+  catch (removeFile path) $ \e ->
+    if isDoesNotExistError e
+      then pure ()
+      else E.throwIO e
 
 
 -- | Handle a single connection (one NDJSON request-response).
