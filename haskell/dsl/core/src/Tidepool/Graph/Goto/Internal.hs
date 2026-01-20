@@ -36,8 +36,9 @@ module Tidepool.Graph.Goto.Internal
   ) where
 
 import Data.Kind (Type)
-import Tidepool.Graph.Types (HList)
-import Data.Aeson (ToJSON(..))
+import Tidepool.Graph.Types (HList(..))
+import Data.Aeson (ToJSON(..), Value(..))
+import qualified Data.Vector as V
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- ONEOF: TYPE-INDEXED SUM TYPE
@@ -68,6 +69,22 @@ instance {-# OVERLAPPING #-} ToJSON t => ToJSON (OneOf '[t]) where
 instance {-# OVERLAPPABLE #-} (ToJSON t, ToJSON (OneOf ts)) => ToJSON (OneOf (t ': ts)) where
   toJSON (Here t) = toJSON t
   toJSON (There rest) = toJSON rest
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- HLIST TOJSON INSTANCES
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | ToJSON instance for HList - converts to JSON array
+instance ToJSON (HList '[]) where
+  toJSON HNil = toJSON ([] :: [Value])
+
+instance (ToJSON t, ToJSON (HList ts)) => ToJSON (HList (t ': ts)) where
+  toJSON (t ::: ts) = case (toJSON t, toJSON ts) of
+    (tVal, Array tsArray) -> Array (cons tVal tsArray)
+    _ -> error "Impossible: HList ToJSON should produce Array"
+    where
+      cons x arr = case V.toList arr of
+        xs -> V.fromList (x : xs)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- TARGET MARKER

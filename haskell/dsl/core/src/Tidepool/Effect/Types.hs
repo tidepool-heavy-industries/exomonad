@@ -440,19 +440,12 @@ runTurn systemPrompt userAction =
   runTurnContent systemPrompt [TextBlock userAction]
 
 runTurnContent
-
   :: forall output effs.
-
      (Member LLM effs, Member NodeMeta effs, StructuredOutput output)
-
   => Text
-
   -> [ContentBlock]
-
   -> Value
-
   -> [Value]
-
   -> Eff effs (TurnOutcome (TurnParseResult output))
 runTurnContent systemPrompt userContent schema tools = do
   meta <- getNodeMeta
