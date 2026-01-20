@@ -3,6 +3,7 @@ version: "0.5"
 # Global config
 log_location: .tidepool/logs/process-compose.log
 log_level: info
+ordered_shutdown: true  # Shutdown in reverse dependency order (tui-sidebar before control-server)
 
 # Process definitions
 processes:
@@ -38,7 +39,8 @@ processes:
     readiness_probe:
       exec:
         command: "nc -zU .tidepool/sockets/tui-sidebar.sock"
-      initial_delay_seconds: 1
-      period_seconds: 1
+      initial_delay_seconds: 2
+      period_seconds: 5
+      failure_threshold: 5
       timeout_seconds: 1
 
