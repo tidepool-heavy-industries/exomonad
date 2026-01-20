@@ -10,7 +10,8 @@ module Tidepool.Control.Server
 
 import Control.Concurrent (forkIO)
 import Control.Exception (SomeException, catch, finally, bracket, try)
-import Control.Monad (forever, void)
+import qualified Control.Exception as E
+import Control.Monad (forever, void, when)
 import Data.Aeson (eitherDecodeStrict, encode)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
@@ -20,36 +21,37 @@ import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import Network.Socket hiding (ControlMessage)
 import Network.Socket.ByteString (recv, sendAll)
+import System.Directory (createDirectoryIfMissing, removeFile)
 import System.Environment (lookupEnv)
+import System.FilePath (takeDirectory)
+import System.IO.Error (isDoesNotExistError)
 
 import Tidepool.Control.Handler (handleMessage)
 import Tidepool.Control.Logging (Logger, logInfo, logDebug, logError)
 import Tidepool.Control.Protocol
 import Tidepool.Control.Types (ServerConfig(..))
 import Tidepool.LSP.Interpreter (LSPSession, withLSPSession)
-import Tidepool.TUI.Interpreter (TUIHandle, connectTUI, newTUIHandle, closeTUIHandle)
+import Tidepool.TUI.Interpreter (TUIHandle, connectTUIUnix, newTUIHandle, closeTUIHandle)
 
--- | Default TCP port for mantle-agent connections.
-defaultTcpPort :: Int
-defaultTcpPort = 7432
+-- | Default Unix socket paths
+defaultControlSocket :: FilePath
+defaultControlSocket = ".tidepool/sockets/control.sock"
 
--- | Default TCP port for TUI sidebar connections.
-defaultTuiPort :: Int
-defaultTuiPort = 7433
+defaultTuiSocket :: FilePath
+defaultTuiSocket = ".tidepool/sockets/tui.sock"
 
 -- | Run the control server. Blocks forever.
 --
 -- 1. Starts LSP session for the project
--- 2. Accepts TCP connections on port 7432 (or MANTLE_CONTROL_PORT)
+-- 2. Accepts Unix socket connections on .tidepool/sockets/control.sock
 runServer :: Logger -> ServerConfig -> IO ()
 runServer logger config = do
-  -- Get TCP port from environment or use default
-  tcpPortEnv <- lookupEnv "MANTLE_CONTROL_PORT"
-  let tcpPort = maybe defaultTcpPort read tcpPortEnv
+  -- Get socket paths from environment or use default
+  controlSocketEnv <- lookupEnv "TIDEPOOL_CONTROL_SOCKET"
+  let controlSocket = maybe defaultControlSocket id controlSocketEnv
 
-  -- Get TUI port from environment or use default
-  tuiPortEnv <- lookupEnv "TIDEPOOL_TUI_PORT"
-  let tuiPort = maybe (show defaultTuiPort) id tuiPortEnv
+  tuiSocketEnv <- lookupEnv "TIDEPOOL_TUI_SOCKET"
+  let tuiSocket = maybe defaultTuiSocket id tuiSocketEnv
 
   logInfo logger $ "Starting LSP session for project: " <> T.pack config.projectDir
 
@@ -58,13 +60,13 @@ runServer logger config = do
     logInfo logger "LSP session initialized"
 
     -- Try to connect to TUI sidebar (optional)
-    maybeTuiHandle <- try (connectTUI "localhost" tuiPort) >>= \case
+    maybeTuiHandle <- try (connectTUIUnix tuiSocket) >>= \case
       Left (e :: SomeException) -> do
-        logInfo logger $ "TUI sidebar not found on port " <> T.pack tuiPort
+        logInfo logger $ "TUI sidebar not found at " <> T.pack tuiSocket
           <> ", running without TUI support (" <> T.pack (show e) <> ")"
         pure Nothing
       Right tuiSock -> do
-        logInfo logger $ "Connected to TUI sidebar on port " <> T.pack tuiPort
+        logInfo logger $ "Connected to TUI sidebar at " <> T.pack tuiSocket
         Just <$> newTUIHandle "control-server" tuiSock
 
     let cleanup = do
@@ -72,21 +74,41 @@ runServer logger config = do
             Just h -> closeTUIHandle h
             Nothing -> pure ()
 
-    flip finally cleanup $ bracket (setupTcpSocket tcpPort) close $ \sock -> do
-      logInfo logger $ "Control server listening on TCP port " <> T.pack (show tcpPort)
+    flip finally cleanup $ bracket (setupUnixSocket controlSocket) (cleanupUnixSocket controlSocket) $ \sock -> do
+      logInfo logger $ "Control server listening on Unix socket: " <> T.pack controlSocket
 
       forever $ do
         (conn, _peer) <- accept sock
         void $ forkIO $ handleConnection logger lspSession maybeTuiHandle conn `finally` close conn
 
--- | Setup TCP socket on given port.
-setupTcpSocket :: Int -> IO Socket
-setupTcpSocket port = do
-  sock <- socket AF_INET Stream 0
-  setSocketOption sock ReuseAddr 1
-  bind sock (SockAddrInet (fromIntegral port) 0)  -- 0 = INADDR_ANY
+-- | Setup Unix socket at given path.
+setupUnixSocket :: FilePath -> IO Socket
+setupUnixSocket path = do
+  -- Ensure directory exists
+  createDirectoryIfMissing True (takeDirectory path)
+
+  -- Remove existing socket file if it exists
+  cleanupSocketFile path
+
+  sock <- socket AF_UNIX Stream 0
+  bind sock (SockAddrUnix path)
   listen sock 10
   pure sock
+
+-- | Cleanup Unix socket at given path.
+cleanupUnixSocket :: FilePath -> Socket -> IO ()
+cleanupUnixSocket path sock = do
+  close sock
+  cleanupSocketFile path
+
+-- | Cleanup just the socket file
+cleanupSocketFile :: FilePath -> IO ()
+cleanupSocketFile path = 
+  catch (removeFile path) $ \e ->
+    if isDoesNotExistError e
+      then pure ()
+      else E.throwIO e
+
 
 -- | Handle a single connection (one NDJSON request-response).
 handleConnection :: Logger -> LSPSession -> Maybe TUIHandle -> Socket -> IO ()

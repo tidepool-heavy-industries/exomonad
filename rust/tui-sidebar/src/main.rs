@@ -7,19 +7,20 @@ mod ui_stack;
 
 use anyhow::Result;
 use clap::Parser;
+use std::path::PathBuf;
 use tracing::{info, Level};
 use tracing_subscriber::FmtSubscriber;
 
 /// TUI sidebar for Tidepool graph handlers.
 ///
-/// Listens on TCP port and renders interactive UIs based on UISpec messages
+/// Listens on Unix socket and renders interactive UIs based on UISpec messages
 /// from Haskell tui-interpreter.
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    /// TCP port to listen on
-    #[arg(short, long, default_value = "7433")]
-    port: u16,
+    /// Unix socket path to listen on
+    #[arg(short, long, default_value = ".tidepool/sockets/tui.sock")]
+    socket: PathBuf,
 
     /// Log level (trace, debug, info, warn, error)
     #[arg(short, long, default_value = "info")]
@@ -36,10 +37,21 @@ async fn main() -> Result<()> {
         .finish();
     tracing::subscriber::set_global_default(subscriber)?;
 
-    info!("TUI sidebar starting on port {}", args.port);
+    // Resolve socket path
+    let socket_path = if args.socket.is_relative() {
+        if let Ok(project_dir) = std::env::var("TIDEPOOL_PROJECT_DIR") {
+            PathBuf::from(project_dir).join(&args.socket)
+        } else {
+            args.socket
+        }
+    } else {
+        args.socket
+    };
+
+    info!("TUI sidebar starting on socket {:?}", socket_path);
 
     // Wait for connection
-    let stream = server::wait_for_connection(args.port).await?;
+    let stream = server::wait_for_unix_connection(&socket_path).await?;
 
     // Spawn I/O tasks
     let (msg_rx, int_tx) = server::spawn_io_tasks(stream);

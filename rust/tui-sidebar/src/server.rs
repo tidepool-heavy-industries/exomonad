@@ -1,26 +1,37 @@
 use anyhow::{Context, Result};
+use std::fs;
+use std::path::Path;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::mpsc;
 use tracing::{debug, error, warn};
 
 use crate::protocol::{Interaction, UISpec};
 
-/// Start TCP server and wait for connection.
+/// Start Unix server and wait for connection.
 ///
-/// Binds to port 7433 and blocks until a client connects (Haskell tui-interpreter).
-pub async fn wait_for_connection(port: u16) -> Result<TcpStream> {
-    let addr = format!("127.0.0.1:{}", port);
-    let listener = TcpListener::bind(&addr)
-        .await
-        .context(format!("Failed to bind to {}", addr))?;
+/// Binds to socket path and blocks until a client connects (Haskell tui-interpreter).
+pub async fn wait_for_unix_connection(path: &Path) -> Result<UnixStream> {
+    // Ensure parent directory exists
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .context(format!("Failed to create socket directory {}", parent.display()))?;
+    }
 
-    debug!(addr = %addr, "TUI sidebar listening");
+    // Remove existing socket file if it exists
+    if path.exists() {
+        fs::remove_file(path).context("Failed to remove existing socket file")?;
+    }
+
+    let listener = UnixListener::bind(path)
+        .context(format!("Failed to bind to {}", path.display()))?;
+
+    debug!(path = %path.display(), "TUI sidebar listening on Unix socket");
 
     // Accept first connection
-    let (stream, peer_addr) = listener.accept().await.context("Failed to accept connection")?;
+    let (stream, _peer_addr) = listener.accept().await.context("Failed to accept connection")?;
 
-    debug!(peer = %peer_addr, "Client connected");
+    debug!("Client connected via Unix socket");
 
     Ok(stream)
 }
@@ -32,10 +43,10 @@ pub async fn wait_for_connection(port: u16) -> Result<TcpStream> {
 /// - tx: Sender for Interaction events to Haskell
 ///
 /// The I/O tasks run in the background and handle NDJSON framing:
-/// - Reader: TCP → BufReader → read_line → parse JSON → send to rx
-/// - Writer: receive from tx → serialize JSON → writeln → TCP
+/// - Reader: UnixStream → BufReader → read_line → parse JSON → send to rx
+/// - Writer: receive from tx → serialize JSON → writeln → UnixStream
 pub fn spawn_io_tasks(
-    stream: TcpStream,
+    stream: UnixStream,
 ) -> (mpsc::Receiver<UISpec>, mpsc::Sender<Interaction>) {
     let (read_half, write_half) = stream.into_split();
 

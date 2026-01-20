@@ -27,7 +27,9 @@ module Tidepool.TUI.Interpreter
 
     -- * Connection Management
   , withTUIConnection
+  , withTUIUnixConnection
   , connectTUI
+  , connectTUIUnix
 
     -- * Interpreter
   , runTUI
@@ -127,7 +129,14 @@ connectTUI host port = do
   connect sock (addrAddress addr)
   pure sock
 
--- | Bracket-style connection management.
+-- | Connect to a TUI sidebar via Unix socket.
+connectTUIUnix :: FilePath -> IO Socket
+connectTUIUnix path = do
+  sock <- socket AF_UNIX Stream 0
+  connect sock (SockAddrUnix path)
+  pure sock
+
+-- | Bracket-style connection management for TCP.
 --
 -- Connects to TUI, creates handle, runs action, and cleans up.
 --
@@ -140,6 +149,15 @@ withTUIConnection host port action = bracket acquire release action
   where
     acquire = do
       sock <- connectTUI host port
+      newTUIHandle "default-session" sock
+    release = closeTUIHandle
+
+-- | Bracket-style connection management for Unix socket.
+withTUIUnixConnection :: FilePath -> (TUIHandle -> IO a) -> IO a
+withTUIUnixConnection path action = bracket acquire release action
+  where
+    acquire = do
+      sock <- connectTUIUnix path
       newTUIHandle "default-session" sock
     release = closeTUIHandle
 
