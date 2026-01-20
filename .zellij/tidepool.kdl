@@ -1,7 +1,4 @@
 layout {
-    // Global context
-    cwd "/Users/inannamalick/dev/tidepool"
-
     // Status bar template
     default_tab_template {
         pane size=1 borderless=true {
@@ -26,9 +23,15 @@ layout {
             pane split_direction="horizontal" {
 
                 // TOP-RIGHT: Process Dashboard
-                pane name="Orchestrator" size="60%" {
+                pane name="Orchestrator" size="33%" {
                     command "bash"
                     args "-c" "./scripts/tidepool-runner.sh up --tui"
+                }
+
+                // MIDDLE-RIGHT: TUI Sidebar
+                pane name="TUI" size="33%" {
+                    command "bash"
+                    args "-c" "while ! curl -s http://localhost:7434/ > /dev/null; do sleep 1; done && cd rust && cargo run -p tui-sidebar"
                 }
 
                 // BOTTOM-RIGHT: Dedicated Logs
