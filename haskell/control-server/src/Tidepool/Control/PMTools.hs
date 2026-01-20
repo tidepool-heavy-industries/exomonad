@@ -30,6 +30,7 @@ module Tidepool.Control.PMTools
   , pmPrioritizeLogic
   , pmPrioritizeHandlers
   , PmPrioritizeGraph
+  , appendRationale
   ) where
 
 import Control.Monad (forM, forM_)
@@ -192,25 +193,61 @@ pmPrioritizeHandlers = PmPrioritizeGraph
 
 -- | Logic for pm_prioritize tool.
 --
--- Batch updates bead priorities and appends rationale to their descriptions.
+-- Batch-updates bead priorities and appends a rationale audit trail to each
+-- bead's description in a \"Priority History\" markdown section.
+--
+-- Priority History format:
+--
+--   * If the bead description already contains the exact header line:
+--
+--       @## Priority History@
+--
+--     then a new history entry is appended after the existing text. Each
+--     entry is a markdown list item of the form:
+--
+--       @- Priority \<priority\>: \<rationale\>@
+--
+--     A newline is inserted before the new entry if the description does not
+--     already end with one.
+--
+--   * If the description is 'Nothing', empty, or whitespace-only, a new
+--     Priority History section is created consisting of:
+--
+--       @## Priority History@
+--       @- Priority \<priority\>: \<rationale\>@
+--
+--     with no extra blank lines before the header.
+--
+-- Per-item behavior and partial failures:
+--
+--   * All requested updates are attempted independently. The function does
+--     /not/ fail fast if some beads cannot be found.
+--   * For each requested bead ID, the result includes a 'PrioritizeResultItem'
+--     indicating whether that specific update succeeded.
+--   * If a bead does not exist, the corresponding item has 'priSuccess = False'
+--     and 'priError = Just \"Bead not found\"'; other beads in the batch are
+--     still processed normally.
 pmPrioritizeLogic
   :: Member BD effs
   => PmPrioritizeArgs
   -> Eff effs (GotoChoice '[To Exit PmPrioritizeResult])
 pmPrioritizeLogic args = do
   results <- forM args.ppaUpdates $ \item -> do
-    mBead <- getBead item.piBeadId
-    case mBead of
-      Nothing -> pure $ PrioritizeResultItem item.piBeadId False (Just "Bead not found")
-      Just bead -> do
-        let oldDesc = bead.biDescription
-            newDesc = appendRationale oldDesc item.piNewPriority item.piRationale
+    if item.piNewPriority < 0 || item.piNewPriority > 4
+    then pure $ PrioritizeResultItem item.piBeadId False (Just "Invalid priority: must be between 0 and 4")
+    else do
+      mBead <- getBead item.piBeadId
+      case mBead of
+        Nothing -> pure $ PrioritizeResultItem item.piBeadId False (Just "Bead not found")
+        Just bead -> do
+          let oldDesc = bead.biDescription
+              newDesc = appendRationale oldDesc item.piNewPriority item.piRationale
 
-        updateBead item.piBeadId emptyUpdateInput
-          { ubiPriority = Just item.piNewPriority
-          , ubiDescription = Just newDesc
-          }
-        pure $ PrioritizeResultItem item.piBeadId True Nothing
+          updateBead item.piBeadId emptyUpdateInput
+            { ubiPriority = Just item.piNewPriority
+            , ubiDescription = Just newDesc
+            }
+          pure $ PrioritizeResultItem item.piBeadId True Nothing
 
   pure $ gotoExit $ PmPrioritizeResult results
 

@@ -4,9 +4,11 @@ module Main where
 
 import Control.Applicative ((<|>))
 import Control.Monad.Freer (Eff, run, reinterpret)
-import Control.Monad.Freer.State (get, gets, modify, runState)
+import Control.Monad.Freer.State (gets, modify, runState)
+import Data.Aeson (toJSON, fromJSON, Result(..))
 import Data.List (find)
 import Data.Maybe (fromMaybe)
+import Data.Proxy (Proxy(..))
 import Data.Text (Text)
 import qualified Data.Text as T
 import Test.Tasty
@@ -14,6 +16,7 @@ import Test.Tasty.HUnit
 
 import Tidepool.Effects.BD (BD(..), BeadInfo(..), BeadStatus(..), BeadType(..), UpdateBeadInput(..))
 import Tidepool.Graph.Goto (unwrapSingleChoice)
+import Tidepool.Graph.MCPReify (reifyMCPTools, MCPToolInfo(..))
 import Tidepool.Control.PMTools
 
 main :: IO ()
@@ -29,6 +32,18 @@ tests = testGroup "PMTools"
   , testGroup "Prioritize"
       [ testCase "pmPrioritizeLogic updates priority and description" test_prioritize
       , testCase "pmPrioritizeLogic handles multiple beads" test_prioritizeMultiple
+      , testCase "pmPrioritizeLogic validates priority range" test_prioritizeValidation
+      ]
+  , testGroup "Rationale Appending"
+      [ testCase "appendRationale handles Nothing" test_appendNothing
+      , testCase "appendRationale handles empty string" test_appendEmpty
+      , testCase "appendRationale handles whitespace" test_appendWhitespace
+      , testCase "appendRationale appends to existing history" test_appendExisting
+      , testCase "appendRationale ensures newline before appending" test_appendNoNewline
+      ]
+  , testGroup "MCP Discovery & Serialization"
+      [ testCase "pm_prioritize is discoverable" test_discovery_pm
+      , testCase "pm_prioritize result serialization" test_serialization_pm
       ]
   ]
 
@@ -161,3 +176,60 @@ test_prioritizeMultiple = do
   assertEqual "b2 priority" (Just 3) ((\b -> b.biPriority) <$> b2Final)
   where
     findResult bid = find (\r -> r.priBeadId == bid)
+
+test_prioritizeValidation :: Assertion
+test_prioritizeValidation = do
+  let initialState = MockState [] []
+  let (resChoice, _) = runMockBD initialState $ do
+        pmPrioritizeLogic $ PmPrioritizeArgs
+          [ PrioritizeItem "b1" 5 "Too high"
+          , PrioritizeItem "b2" (-1) "Too low"
+          ]
+  let res = unwrapSingleChoice resChoice
+  assertEqual "Should have 2 results" 2 (length res.pprResults)
+  assertBool "b1 should fail" (not (head res.pprResults).priSuccess)
+  assertBool "b2 should fail" (not (res.pprResults !! 1).priSuccess)
+  assertEqual "Error message" (Just "Invalid priority: must be between 0 and 4") (head res.pprResults).priError
+
+test_appendNothing :: Assertion
+test_appendNothing = do
+  let res = appendRationale Nothing 3 "Reason"
+  assertEqual "Result" "## Priority History\n- Priority 3: Reason" res
+
+test_appendEmpty :: Assertion
+test_appendEmpty = do
+  let res = appendRationale (Just "") 3 "Reason"
+  assertEqual "Result" "## Priority History\n- Priority 3: Reason" res
+
+test_appendWhitespace :: Assertion
+test_appendWhitespace = do
+  let res = appendRationale (Just "  \n ") 3 "Reason"
+  assertEqual "Result" "## Priority History\n- Priority 3: Reason" res
+
+test_appendExisting :: Assertion
+test_appendExisting = do
+  let orig = "## Priority History\n- Priority 2: Old"
+  let res = appendRationale (Just orig) 3 "New"
+  assertEqual "Result" "## Priority History\n- Priority 2: Old\n- Priority 3: New" res
+
+test_appendNoNewline :: Assertion
+test_appendNoNewline = do
+  let orig = "Some desc\n## Priority History\n- Priority 2: Old"
+  let res = appendRationale (Just orig) 3 "New"
+  assertEqual "Result" "Some desc\n## Priority History\n- Priority 2: Old\n- Priority 3: New" res
+
+test_discovery_pm :: Assertion
+test_discovery_pm = do
+  let pmTools = reifyMCPTools (Proxy @PmPrioritizeGraph)
+  assertEqual "Should find one tool" 1 (length pmTools)
+  let tool = head pmTools
+  assertEqual "Name should be pm_prioritize" "pm_prioritize" tool.mtdName
+
+test_serialization_pm :: Assertion
+test_serialization_pm = do
+  let res = PmPrioritizeResult [PrioritizeResultItem "b1" True Nothing]
+  let json = toJSON res
+  case fromJSON @PmPrioritizeResult json of
+    Success res' -> assertEqual "Should roundtrip" res res'
+    Error err -> assertFailure $ "Failed to parse: " ++ err
+  
