@@ -72,7 +72,7 @@ runMockBD initial eff = run $ runState initial $ reinterpret (\case
   GetBlocking _ -> pure []
   GetChildren _ -> pure []
   CreateBead _ -> pure "new-bead"
-  CloseBead _ -> pure ()
+  CloseBead _ _ -> pure ()
   ReopenBead _ -> pure ()
   AddDep _ _ _ -> pure ()
   RemoveDep _ _ -> pure ()
@@ -125,7 +125,9 @@ test_prioritize = do
         , biCreatedAt = Nothing
         , biCreatedBy = Nothing
         , biUpdatedAt = Nothing
+        , biClosedAt = Nothing
         , biParent = Nothing
+        , biLabels = []
         , biDependencies = []
         , biDependents = []
         }
@@ -147,9 +149,10 @@ test_prioritize = do
 
 test_prioritizeMultiple :: Assertion
 test_prioritizeMultiple = do
-  let bead1 = BeadInfo "b1" "T1" (Just "D1") StatusOpen 2 TypeTask Nothing Nothing Nothing Nothing Nothing [] []
-  let bead2 = BeadInfo "b2" "T2" (Just "D2") StatusOpen 2 TypeTask Nothing Nothing Nothing Nothing Nothing [] []
+  let bead1 = BeadInfo "b1" "T1" (Just "D1") StatusOpen 2 TypeTask Nothing Nothing Nothing Nothing Nothing Nothing [] [] []
+  let bead2 = BeadInfo "b2" "T2" (Just "D2") StatusOpen 2 TypeTask Nothing Nothing Nothing Nothing Nothing Nothing [] [] []
   let initialState = MockState [] [("b1", bead1), ("b2", bead2)]
+
 
   let (resChoice, finalState) = runMockBD initialState $ do
         pmPrioritizeLogic $ PmPrioritizeArgs

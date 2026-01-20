@@ -189,7 +189,7 @@ ghIssueView config repo num includeComments = do
 -- | List pull requests using gh CLI.
 ghPrList :: GitHubConfig -> Text -> PRFilter -> IO [PullRequest]
 ghPrList config repo filt = do
-  let baseFields = "number,title,body,author,labels,state,url,headRefName,baseRefName"
+  let baseFields = "number,title,body,author,labels,state,url,headRefName,baseRefName,createdAt,mergedAt"
       args = ["pr", "list", "--repo", T.unpack repo, "--json", baseFields]
             ++ stateArgs filt.pfState
             ++ baseArgs filt.pfBase
@@ -227,7 +227,7 @@ ghPrList config repo filt = do
 -- | View a single pull request using gh CLI.
 ghPrView :: GitHubConfig -> Text -> Int -> Bool -> IO (Maybe PullRequest)
 ghPrView config repo num includeDetails = do
-  let baseFields = "number,title,body,author,labels,state,url,headRefName,baseRefName"
+  let baseFields = "number,title,body,author,labels,state,url,headRefName,baseRefName,createdAt,mergedAt"
       fields = if includeDetails
                then baseFields <> ",comments,reviews"
                else baseFields

@@ -53,7 +53,7 @@ runMockBD eff = run $ runState initialState $ reinterpret (\case
   GetBlocking _ -> pure []
   GetChildren _ -> pure []
   UpdateBead _ _ -> pure ()
-  CloseBead _ -> pure ()
+  CloseBead _ _ -> pure ()
   ReopenBead _ -> pure ()
   AddDep _ _ _ -> pure ()
   RemoveDep _ _ -> pure ()

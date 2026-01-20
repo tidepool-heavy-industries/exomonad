@@ -282,6 +282,8 @@ data PullRequest = PullRequest
   , prUrl         :: Text
   , prHeadRefName :: Text
   , prBaseRefName :: Text
+  , prCreatedAt   :: UTCTime
+  , prMergedAt    :: Maybe UTCTime
   , prComments    :: [Comment]
   , prReviews     :: [Review]
   }
@@ -301,6 +303,8 @@ instance FromJSON PullRequest where
       <*> v .: "url"
       <*> v .: "headRefName"
       <*> v .: "baseRefName"
+      <*> v .: "createdAt"
+      <*> v .:? "mergedAt"
       <*> (v .:? "comments" >>= \case
             Nothing -> pure []
             Just cs -> pure cs)
