@@ -68,6 +68,7 @@ library
         tidepool-teaching,
         tidepool-bd-interpreter,
         tidepool-github-interpreter,
+        tidepool-justfile-interpreter,
         -- HTTP for FunctionGemma
         http-conduit,
         vector,
@@ -135,6 +136,24 @@ test-suite tools-test
         tidepool-core,
         tidepool-teaching,
         text >= 2.0 && < 3,
+        tasty,
+        tasty-hunit
+    hs-source-dirs:   test
+    default-language: GHC2024
+    default-extensions:
+        OverloadedStrings
+        TypeApplications
+
+test-suite exo-tools-test
+    import:           warnings
+    type:             exitcode-stdio-1.0
+    main-is:          ExoToolsSpec.hs
+    build-depends:
+        base >= 4.17 && < 5,
+        tidepool-control-server,
+        tidepool-core,
+        text >= 2.0 && < 3,
+        aeson,
         tasty,
         tasty-hunit
     hs-source-dirs:   test

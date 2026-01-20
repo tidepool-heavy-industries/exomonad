@@ -39,10 +39,12 @@ import Tidepool.Control.ExoTools
   ( exoStatusLogic, ExoStatusArgs(..), ExoStatusResult(..)
   , exoCompleteLogic, ExoCompleteArgs(..), ExoCompleteResult(..)
   , exoReconstituteLogic, ExoReconstituteArgs(..), ExoReconstituteResult
+  , preCommitCheckLogic, PreCommitCheckArgs(..), PreCommitCheckResult(..)
   )
 import Tidepool.BD.Interpreter (runBDIO, defaultBDConfig)
 import Tidepool.BD.GitInterpreter (runGitIO)
 import Tidepool.GitHub.Interpreter (runGitHubIO, defaultGitHubConfig)
+import Tidepool.Justfile.Interpreter (runJustfileIO)
 import Tidepool.Effect.NodeMeta (runNodeMeta, runGraphMeta, defaultNodeMeta, GraphMetadata(..))
 import Tidepool.Effect.TUI (TUI(..), Interaction(..))
 import Tidepool.Effect.Types (runLog, LogLevel(..), runReturn)
@@ -91,12 +93,43 @@ handleMcpTool logger lspSession maybeTuiHandle reqId toolName args = do
     "exo_status" -> handleExoStatusTool logger lspSession reqId args
     "exo_complete" -> handleExoCompleteTool logger lspSession reqId args
     "exo_reconstitute" -> handleExoReconstituteTool logger lspSession reqId args
+    "pre_commit_check" -> handlePreCommitCheckTool logger reqId args
 
     _ -> do
       logError logger $ "  (unknown tool)"
       pure $ mcpToolError reqId $
         "Tool not found: " <> toolName <>
-        ". Available tools: find_callers, show_fields, show_constructors, teach-graph, exo_status, exo_complete, exo_reconstitute"
+        ". Available tools: find_callers, show_fields, show_constructors, teach-graph, exo_status, exo_complete, exo_reconstitute, pre_commit_check"
+
+-- | Handle the pre_commit_check tool.
+--
+-- Runs a 'just' recipe (defaulting to pre-commit-fast) and returns structured results.
+handlePreCommitCheckTool :: Logger -> Text -> Value -> IO ControlResponse
+handlePreCommitCheckTool logger reqId args = do
+  case fromJSON args of
+    Error err -> do
+      logError logger $ "  parse error: " <> T.pack err
+      pure $ mcpToolError reqId $ "Invalid pre_commit_check arguments: " <> T.pack err
+
+    Success pccArgs -> do
+      logDebug logger $ "  recipe=" <> T.pack (show pccArgs.pccaRecipe)
+
+      resultOrErr <- try $ runM
+        $ runLog Debug
+        $ runJustfileIO
+        $ fmap unwrapSingleChoice (preCommitCheckLogic pccArgs)
+
+      case resultOrErr of
+        Left (e :: SomeException) -> do
+          logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId $ "pre_commit_check failed: " <> T.pack (displayException e)
+
+        Right result -> do
+          if result.pccrSuccess
+            then logInfo logger $ "[MCP:" <> reqId <> "] Pre-commit check passed"
+            else logError logger $ "[MCP:" <> reqId <> "] Pre-commit check failed"
+          pure $ mcpToolSuccess reqId (toJSON result)
+
 
 -- | Handle the exo_status tool.
 --
