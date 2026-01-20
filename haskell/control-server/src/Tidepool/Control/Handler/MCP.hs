@@ -18,10 +18,11 @@ module Tidepool.Control.Handler.MCP
   ( handleMcpTool
   ) where
 
-import Control.Exception (SomeException, displayException, try)
+import Control.Exception (SomeException, displayException, try, throwIO)
 import Control.Monad (when)
 import Control.Monad.Freer (Eff, LastMember, interpret, runM, sendM)
 import Data.Aeson (Value, fromJSON, toJSON, Result(..), encode)
+import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.ByteString.Lazy as LBS
@@ -104,6 +105,20 @@ withMcpTracing logger config traceCtx reqId toolName args action = do
   case config.observabilityConfig of
     Nothing -> action
     Just obsConfig -> do
+      -- We want to ensure action is ONLY called once.
+      -- We use an IORef to store the result so if the tracing wrapper itself 
+      -- (runM or withSpan) fails after action completes, we don't re-run action.
+      resRef <- newIORef Nothing
+      
+      let runActionOnce = do
+            mRes <- readIORef resRef
+            case mRes of
+              Just res -> pure res
+              Nothing -> do
+                res <- action
+                writeIORef resRef (Just res)
+                pure res
+
       resultOrErr <- try $ runM 
         $ runObservabilityWithContext traceCtx (fromMaybe defaultLokiConfig $ ocLoki obsConfig)
         $ withSpan ("mcp:tool:" <> toolName) SpanServer 
@@ -111,8 +126,8 @@ withMcpTracing logger config traceCtx reqId toolName args action = do
             , AttrText "mcp.tool_name" toolName
             , AttrInt "mcp.input_size" (fromIntegral $ LBS.length $ encode args)
             ] $ do
-          -- Run the actual action
-          res <- sendM action
+          -- Run the actual action (or get cached result)
+          res <- sendM runActionOnce
           
           -- Add response metadata
           let resSize = case res of
@@ -130,7 +145,9 @@ withMcpTracing logger config traceCtx reqId toolName args action = do
       case resultOrErr of
         Left (e :: SomeException) -> do
           logError logger $ "[MCP:" <> reqId <> "] Tracing error: " <> T.pack (show e)
-          action 
+          -- Rethrow as suggested to avoid masking and potential double-runs 
+          -- if this were higher up, though here runActionOnce + resRef protects us.
+          throwIO e
         Right res -> pure res
 
 -- | Handle an MCP tool call.
