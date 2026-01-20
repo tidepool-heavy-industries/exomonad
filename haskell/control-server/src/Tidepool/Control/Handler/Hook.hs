@@ -26,8 +26,8 @@ import Tidepool.Graph.Goto (unwrapSingleChoice)
 --
 -- Current behavior: passthrough (always allow).
 -- TODO: Wire to Tidepool effect stack for real logic.
-handleHook :: HookInput -> IO ControlResponse
-handleHook input = do
+handleHook :: HookInput -> Runtime -> IO ControlResponse
+handleHook input _runtime = do
   TIO.putStrLn $ "  session=" <> input.sessionId
   TIO.putStrLn $ "  cwd=" <> input.cwd
   hFlush stdout
