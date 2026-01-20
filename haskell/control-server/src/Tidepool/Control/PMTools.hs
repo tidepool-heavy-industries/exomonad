@@ -16,10 +16,14 @@
 module Tidepool.Control.PMTools
   ( -- * Workflow State
     WorkflowState(..)
+  , workflowStateToLabel
+  , labelToWorkflowState
+  , allWorkflowLabels
+
+    -- * Constants
   , labelNeedsTLReview
   , labelNeedsPMApproval
   , labelReady
-  , allWorkflowLabels
 
     -- * Helper Functions
   , getWorkflowState
@@ -42,7 +46,7 @@ module Tidepool.Control.PMTools
   , appendRationale
   ) where
 
-import Control.Monad (forM, forM_)
+import Control.Monad (forM, forM_, when)
 import Control.Monad.Freer (Eff, Member)
 import Data.Aeson (FromJSON(..), ToJSON(..), object, (.=), (.:), (.:?), withObject)
 import Data.Maybe (mapMaybe, listToMaybe, fromMaybe)
@@ -90,18 +94,18 @@ allWorkflowLabels =
   ]
 
 -- | Map a label to a 'WorkflowState'.
-labelToState :: Text -> Maybe WorkflowState
-labelToState t
+labelToWorkflowState :: Text -> Maybe WorkflowState
+labelToWorkflowState t
   | t == labelNeedsTLReview = Just NeedsTLReview
   | t == labelNeedsPMApproval = Just NeedsPMApproval
   | t == labelReady = Just Ready
   | otherwise = Nothing
 
 -- | Map a 'WorkflowState' to its label.
-stateToLabel :: WorkflowState -> Text
-stateToLabel NeedsTLReview = labelNeedsTLReview
-stateToLabel NeedsPMApproval = labelNeedsPMApproval
-stateToLabel Ready = labelReady
+workflowStateToLabel :: WorkflowState -> Text
+workflowStateToLabel NeedsTLReview = labelNeedsTLReview
+workflowStateToLabel NeedsPMApproval = labelNeedsPMApproval
+workflowStateToLabel Ready = labelReady
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- HELPERS
@@ -113,20 +117,20 @@ stateToLabel Ready = labelReady
 getWorkflowState :: Member BD effs => Text -> Eff effs (Maybe WorkflowState)
 getWorkflowState beadId = do
   labels <- getLabels beadId
-  pure $ listToMaybe $ mapMaybe labelToState labels
+  pure $ listToMaybe $ mapMaybe labelToWorkflowState labels
 
 -- | Set the workflow state of a bead by updating its labels.
 --
 -- This removes any existing workflow labels before adding the new one.
 setWorkflowState :: Member BD effs => Text -> WorkflowState -> Eff effs ()
 setWorkflowState beadId newState = do
+  currentLabels <- getLabels beadId
   -- Remove existing workflow labels
-  labels <- getLabels beadId
-  let toRemove = filter (`elem` allWorkflowLabels) labels
-  forM_ toRemove $ removeLabel beadId
-
-  -- Add new label
-  addLabel beadId (stateToLabel newState)
+  forM_ currentLabels $ \l ->
+    when (l `elem` allWorkflowLabels) $
+      removeLabel beadId l
+  -- Add new workflow label
+  addLabel beadId (workflowStateToLabel newState)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- PM-APPROVE-EXPANSION GRAPH
