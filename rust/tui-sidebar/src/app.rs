@@ -15,6 +15,12 @@ use crate::protocol::{Interaction, UISpec};
 use crate::render::render_ui;
 use crate::ui_stack::UIStack;
 
+enum EventOutcome {
+    Interaction(Interaction),
+    Exit,
+    Nothing,
+}
+
 /// Main application event loop.
 ///
 /// Setup:
@@ -62,25 +68,32 @@ pub async fn run(
 
             // Poll keyboard (crossterm doesn't integrate with tokio)
             _ = tokio::time::sleep(Duration::from_millis(100)) => {
-                if let Some(interaction) = poll_keyboard(&ui_stack, &mut focus_idx)? {
-                    debug!(interaction = ?interaction, "Sending interaction");
+                match poll_keyboard(&ui_stack, &mut focus_idx)? {
+                    EventOutcome::Interaction(interaction) => {
+                        debug!(interaction = ?interaction, "Sending interaction");
 
-                    // Send interaction to Haskell
-                    if int_tx.send(interaction).await.is_err() {
-                        info!("Receiver dropped, exiting event loop");
+                        // Send interaction to Haskell
+                        if int_tx.send(interaction).await.is_err() {
+                            info!("Receiver dropped, exiting event loop");
+                            break;
+                        }
+
+                        // Pop UI after interaction (Phase 1: immediate close)
+                        // Phase 2/3: More sophisticated lifecycle management
+                        ui_stack.pop();
+
+                        if ui_stack.is_empty() {
+                            info!("UI stack empty, exiting");
+                            break;
+                        }
+
+                        focus_idx = 0;  // Reset focus for previous UI
+                    }
+                    EventOutcome::Exit => {
+                        info!("Exit requested via keyboard");
                         break;
                     }
-
-                    // Pop UI after interaction (Phase 1: immediate close)
-                    // Phase 2/3: More sophisticated lifecycle management
-                    ui_stack.pop();
-
-                    if ui_stack.is_empty() {
-                        info!("UI stack empty, exiting");
-                        break;
-                    }
-
-                    focus_idx = 0;  // Reset focus for previous UI
+                    EventOutcome::Nothing => {}
                 }
             }
         }
@@ -119,10 +132,10 @@ fn cleanup_terminal(mut terminal: Terminal<CrosstermBackend<io::Stdout>>) -> Res
 ///
 /// Returns Some(Interaction) if user completed an action (Enter on button/input).
 /// Returns None if no action or only navigation (Tab).
-fn poll_keyboard(ui_stack: &UIStack, focus_idx: &mut usize) -> Result<Option<Interaction>> {
+fn poll_keyboard(ui_stack: &UIStack, focus_idx: &mut usize) -> Result<EventOutcome> {
     // Check if event is available (non-blocking)
     if !event::poll(Duration::ZERO).context("Failed to poll events")? {
-        return Ok(None);
+        return Ok(EventOutcome::Nothing);
     }
 
     // Read the event
@@ -130,17 +143,20 @@ fn poll_keyboard(ui_stack: &UIStack, focus_idx: &mut usize) -> Result<Option<Int
 
     match evt {
         Event::Key(key_event) => {
-            // Ctrl+C: exit immediately
+            // Ctrl+C: request exit
             if key_event.code == KeyCode::Char('c')
                 && key_event.modifiers.contains(event::KeyModifiers::CONTROL)
             {
-                info!("Ctrl+C pressed, exiting");
-                std::process::exit(0);
+                info!("Ctrl+C pressed, requesting exit");
+                return Ok(EventOutcome::Exit);
             }
 
             // Handle key event (navigation, interaction)
-            handle_key_event(key_event, ui_stack, focus_idx)
+            Ok(match handle_key_event(key_event, ui_stack, focus_idx)? {
+                Some(i) => EventOutcome::Interaction(i),
+                None => EventOutcome::Nothing,
+            })
         }
-        _ => Ok(None),
+        _ => Ok(EventOutcome::Nothing),
     }
 }

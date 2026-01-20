@@ -98,15 +98,15 @@ claude-code               # Start Claude Code
 
 | Module | Lines | Purpose |
 |--------|-------|---------|
-| `protocol.rs` | 140 | UISpec, Layout, Element, Interaction types |
-| `server.rs` | 140 | Unix client, NDJSON framing, I/O tasks, health listener |
+| `protocol.rs` | 150 | UISpec, Layout, Element, Interaction types |
+| `server.rs` | 160 | Unix client, NDJSON framing, I/O tasks, health listener |
 | `ui_stack.rs` | 90 | Stack of active UIs (nested dialogs) |
-| `app.rs` | 130 | Main event loop (tokio::select!) |
-| `render.rs` | 240 | Recursive layout → ratatui widgets |
+| `app.rs` | 160 | Main event loop (tokio::select!) |
+| `render.rs` | 250 | Recursive layout → ratatui widgets |
 | `input.rs` | 120 | Keyboard → Interaction conversion |
-| `main.rs` | 60 | CLI entry, logging setup, health listener init |
+| `main.rs` | 110 | CLI entry, logging setup, health listener init, retry logic |
 
-**Total:** ~920 lines
+**Total:** ~1040 lines
 
 ## Phase 1 MVP (Implemented)
 

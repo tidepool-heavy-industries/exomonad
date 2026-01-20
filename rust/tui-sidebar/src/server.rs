@@ -124,7 +124,7 @@ pub fn spawn_io_tasks(
 ///
 /// Listens on the given path and accepts connections, immediately closing them.
 /// This allows 'nc -zU' to verify that the process is alive and listening.
-pub async fn start_health_listener(path: &Path) -> Result<()> {
+pub async fn start_health_listener(path: &Path) -> Result<tokio::task::JoinHandle<()>> {
     // Ensure parent directory exists
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
@@ -141,7 +141,7 @@ pub async fn start_health_listener(path: &Path) -> Result<()> {
 
     debug!(path = %path.display(), "TUI sidebar health listener started");
 
-    tokio::spawn(async move {
+    let handle = tokio::spawn(async move {
         loop {
             match listener.accept().await {
                 Ok((_stream, _addr)) => {
@@ -149,11 +149,12 @@ pub async fn start_health_listener(path: &Path) -> Result<()> {
                 }
                 Err(e) => {
                     error!(error = %e, "Health listener accept error");
-                    break;
+                    // Wait before retrying to avoid tight loop on persistent errors
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                 }
             }
         }
     });
 
-    Ok(())
+    Ok(handle)
 }

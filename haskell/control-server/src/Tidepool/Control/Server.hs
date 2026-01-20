@@ -9,6 +9,7 @@ module Tidepool.Control.Server
   ) where
 
 import Control.Concurrent (forkIO)
+import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
 import Control.Concurrent.STM (newTVarIO, readTVarIO, atomically, writeTVar, readTVar)
 import Control.Exception (SomeException, catch, finally, bracket)
 import qualified Control.Exception as E
@@ -62,11 +63,13 @@ runServer logger config = do
 
     -- TUI handle managed via TVar to support background connection from sidebar
     tuiHandleVar <- newTVarIO Nothing
+    tuiListenerReady <- newEmptyMVar
 
     -- Fork TUI listener thread
     void $ forkIO $ E.handle (\(e :: SomeException) -> logError logger $ "TUI listener error: " <> T.pack (show e)) $
       bracket (setupUnixSocket tuiSocket) (cleanupUnixSocket tuiSocket) $ \tuiListenSock -> do
         logInfo logger $ "TUI sidebar listener waiting on: " <> T.pack tuiSocket
+        putMVar tuiListenerReady ()
         forever $ do
           (conn, _) <- accept tuiListenSock
           logInfo logger "TUI sidebar connected"
@@ -76,8 +79,13 @@ runServer logger config = do
             writeTVar tuiHandleVar (Just handle)
             pure old
           case maybeOld of
-            Just h -> closeTUIHandle h
-            Nothing -> pure ()
+            Just h -> do
+              logInfo logger "Closing previous TUI sidebar connection; in-flight requests using the old connection may see disconnection errors"
+              closeTUIHandle h
+            Nothing -> logDebug logger "No existing TUI sidebar connection to replace"
+
+    -- Ensure TUI listener is bound before accepting control connections
+    takeMVar tuiListenerReady
 
     let cleanup = do
           maybeTuiHandle <- readTVarIO tuiHandleVar
@@ -90,8 +98,8 @@ runServer logger config = do
 
       forever $ do
         (conn, _peer) <- accept sock
-        -- Snapshot current TUI handle for this connection
-        currentTuiHandle <- readTVarIO tuiHandleVar
+        -- Snapshot current TUI handle for this connection atomically
+        currentTuiHandle <- atomically $ readTVar tuiHandleVar
         void $ forkIO $ handleConnection logger lspSession currentTuiHandle conn `finally` close conn
 
 -- | Setup Unix socket at given path.
