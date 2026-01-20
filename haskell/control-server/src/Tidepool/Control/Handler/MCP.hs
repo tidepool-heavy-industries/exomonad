@@ -23,6 +23,7 @@ import Control.Monad.Freer (Eff, LastMember, interpret, runM)
 import Data.Aeson (Value, fromJSON, toJSON, Result(..))
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Maybe (fromMaybe)
 import System.Environment (lookupEnv)
 
 import Tidepool.Control.Logging (Logger, logInfo, logDebug, logError)
@@ -458,5 +459,7 @@ handleFilePRTool logger _lspSession reqId args = do
           pure $ mcpToolError reqId $ "file_pr failed: " <> T.pack (displayException e)
 
         Right result -> do
-          logInfo logger $ "[MCP:" <> reqId <> "] PR created: " <> result.fprUrl
+          case result.fprUrl of
+            Just url -> logInfo logger $ "[MCP:" <> reqId <> "] PR created: " <> url
+            Nothing -> logError logger $ "[MCP:" <> reqId <> "] FilePR failed: " <> fromMaybe "unknown error" result.fprError
           pure $ mcpToolSuccess reqId (toJSON result)

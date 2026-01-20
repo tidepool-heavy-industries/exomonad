@@ -627,12 +627,22 @@ instance ToJSON FilePRArgs where
 
 -- | Result of file_pr tool.
 data FilePRResult = FilePRResult
-  { fprUrl :: Text
+  { fprUrl :: Maybe Text
+  , fprError :: Maybe Text
   }
   deriving stock (Show, Eq, Generic)
 
 instance ToJSON FilePRResult where
-  toJSON res = object ["url" .= fprUrl res]
+  toJSON res = object
+    [ "url" .= fprUrl res
+    , "error" .= fprError res
+    ]
+
+instance FromJSON FilePRResult where
+  parseJSON = withObject "FilePRResult" $ \v ->
+    FilePRResult
+      <$> v .:? "url"
+      <*> v .:? "error"
 
 -- | Graph definition for file_pr tool.
 data FilePRGraph mode = FilePRGraph
@@ -671,19 +681,26 @@ filePRLogic args = do
   let branchBeadId = case mWt of
         Just wt -> parseBeadId wt.wiBranch
         Nothing -> Nothing
-      mTargetBeadId = fpaBeadId args <|> branchBeadId
+      mTargetBeadId = args.fpaBeadId <|> branchBeadId
 
   case mTargetBeadId of
-    Nothing -> error "Could not determine bead ID. Please provide bead_id argument."
+    Nothing -> 
+      pure $ gotoExit $ FilePRResult Nothing (Just "Could not determine bead ID. Please provide bead_id argument.")
     Just bid -> do
       -- 3. Get Bead Info
       mBead <- getBead bid
       case mBead of
-        Nothing -> error $ "Bead " <> T.unpack bid <> " not found."
+        Nothing -> 
+          pure $ gotoExit $ FilePRResult Nothing (Just $ "Bead " <> bid <> " not found.")
         Just bead -> do
           -- 4. Prepare PR Spec
-          let headBranch = maybe "HEAD" (\wt -> wt.wiBranch) mWt
-              title = fromMaybe ("[" <> bid <> "] " <> bead.biTitle) args.fpaTitle
+          -- Derive branch name if worktree info unavailable
+          let derivedBranch = "bd-" <> bid <> "/" <> slugify bead.biTitle
+              headBranch = case mWt of
+                Just wt -> wt.wiBranch
+                Nothing -> derivedBranch
+
+          let title = fromMaybe ("[" <> bid <> "] " <> bead.biTitle) args.fpaTitle
               body = formatPRBody bead
               repo = Repo "tidepool-heavy-industries/tidepool"
               spec = PRCreateSpec
@@ -696,7 +713,7 @@ filePRLogic args = do
           
           -- 5. Create PR
           PRUrl url <- createPR spec
-          pure $ gotoExit $ FilePRResult url
+          pure $ gotoExit $ FilePRResult (Just url) Nothing
 
 -- | Format PR body from bead info.
 formatPRBody :: BeadInfo -> Text
