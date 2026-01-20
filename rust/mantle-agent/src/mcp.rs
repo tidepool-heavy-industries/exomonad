@@ -31,7 +31,7 @@
 //! - `MANTLE_CONTROL_HOST`: Control server host (required)
 //! - `MANTLE_CONTROL_PORT`: Control server port (required)
 
-use mantle_shared::protocol::{ControlMessage, ControlResponse, McpError, ToolDefinition as ProtocolToolDef};
+use mantle_shared::protocol::{ControlMessage, ControlResponse, McpError};
 use mantle_shared::socket::control_server_addr;
 use mantle_shared::ControlSocket;
 use serde::{Deserialize, Serialize};
@@ -46,6 +46,7 @@ use tracing::{debug, error, info};
 /// JSON-RPC 2.0 request.
 #[derive(Debug, Deserialize)]
 struct JsonRpcRequest {
+    #[allow(dead_code)]
     jsonrpc: String,
     id: Value,
     method: String,
@@ -102,10 +103,6 @@ impl JsonRpcResponse {
 
     fn invalid_params(id: Value, message: String) -> Self {
         Self::error(id, -32602, message)
-    }
-
-    fn internal_error(id: Value, message: String) -> Self {
-        Self::error(id, -32603, message)
     }
 }
 
@@ -474,19 +471,6 @@ impl McpServer {
                 Err("Unexpected ToolsListResponse for MCP tool call".to_string())
             }
         }
-    }
-
-    /// Create a success response for a tool call.
-    fn tool_success_response(&self, id: Value, tool_name: &str) -> JsonRpcResponse {
-        let result = ToolCallResult {
-            content: vec![ToolResultContent {
-                content_type: "text".to_string(),
-                text: format!("Decision recorded: {}", tool_name.replace("decision::", "")),
-            }],
-            is_error: None,
-        };
-
-        JsonRpcResponse::success(id, serde_json::to_value(result).unwrap())
     }
 }
 

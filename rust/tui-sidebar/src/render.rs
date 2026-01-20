@@ -247,30 +247,3 @@ fn render_placeholder(frame: &mut Frame, msg: &str, area: Rect) {
 
     frame.render_widget(paragraph, area);
 }
-
-/// Collect all focusable elements from layout.
-///
-/// Phase 1: Returns element IDs in render order.
-/// Used by input handler to cycle focus.
-pub fn collect_focusable_ids(layout: &Layout) -> Vec<String> {
-    match layout {
-        Layout::Vertical { elements } => collect_element_ids(elements),
-        Layout::Horizontal { elements } => collect_element_ids(elements),
-        Layout::Split { left, right, .. } => {
-            let mut ids = collect_focusable_ids(left);
-            ids.extend(collect_focusable_ids(right));
-            ids
-        }
-    }
-}
-
-fn collect_element_ids(elements: &[Element]) -> Vec<String> {
-    elements
-        .iter()
-        .filter_map(|e| match e {
-            Element::Button { id, .. } => Some(id.clone()),
-            Element::Input { id, .. } => Some(id.clone()),
-            _ => None,  // Text, Progress not focusable
-        })
-        .collect()
-}

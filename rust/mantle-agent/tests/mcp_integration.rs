@@ -71,6 +71,7 @@ impl JsonRpcRequest {
 /// JSON-RPC 2.0 response received from MCP server.
 #[derive(Debug, Deserialize)]
 struct JsonRpcResponse {
+    #[allow(dead_code)]
     jsonrpc: String,
     id: Value,
     #[serde(default)]
@@ -84,6 +85,7 @@ struct JsonRpcError {
     code: i32,
     message: String,
     #[serde(default)]
+    #[allow(dead_code)]
     data: Option<Value>,
 }
 
