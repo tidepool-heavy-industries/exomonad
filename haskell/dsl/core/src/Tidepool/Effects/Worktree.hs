@@ -31,7 +31,6 @@
 -- Use 'withWorktree' for bracket-style resource safety (automatic cleanup).
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE UndecidableInstances #-}
 
 -- | Worktree effect for managing git worktrees.
