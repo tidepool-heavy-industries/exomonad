@@ -43,14 +43,16 @@ main = do
       ["format-training", skeletonFile] -> runFormatTrainingMode logger skeletonFile
       ["--help"] -> printUsage
       ["-h"] -> printUsage
-      _ -> runServerMode logger projectDir
+      ["--no-tui"] -> runServerMode logger projectDir True
+      _ -> runServerMode logger projectDir False
 
-runServerMode :: Logger -> FilePath -> IO ()
-runServerMode logger projectDir = do
+runServerMode :: Logger -> FilePath -> Bool -> IO ()
+runServerMode logger projectDir noTui = do
   roleEnv <- lookupEnv "TIDEPOOL_ROLE"
   let config = ServerConfig 
         { projectDir = projectDir
-        , role = fmap T.pack roleEnv 
+        , role = fmap T.pack roleEnv
+        , noTui = noTui
         }
 
   -- Start main control server
@@ -124,6 +126,7 @@ printUsage = do
   putStrLn ""
   putStrLn "Usage:"
   putStrLn "  tidepool-control-server                    Start control server"
+  putStrLn "  tidepool-control-server --no-tui           Start control server without TUI sidebar listener"
   putStrLn "  tidepool-control-server export-training    Auto-discover and generate training data"
   putStrLn "  tidepool-control-server export-training --grouped"
   putStrLn "                                             Use v2 format with grouped candidates"

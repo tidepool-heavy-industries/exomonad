@@ -12,6 +12,8 @@ data ServerConfig = ServerConfig
     -- ^ Project root directory (where .tidepool/ lives)
   , role       :: Maybe Text
     -- ^ Current agent role (e.g., "pm", "tl")
+  , noTui      :: Bool
+    -- ^ Disable TUI sidebar listener (default: False)
   }
   deriving stock (Show, Eq)
 
@@ -20,4 +22,5 @@ defaultConfig :: ServerConfig
 defaultConfig = ServerConfig
   { projectDir = "."
   , role       = Nothing
+  , noTui      = False
   }
