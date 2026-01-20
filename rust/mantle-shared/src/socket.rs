@@ -7,20 +7,21 @@
 //!
 //! This module uses synchronous I/O (std::os::unix::net) rather than async.
 //! This is a deliberate choice because:
-//!
+//! 
 //! 1. Hook commands block anyway - Claude Code waits for hook completion
 //! 2. Simpler code without async runtime overhead
 //! 3. Each hook invocation is a separate process with one request/response
-//!
+//! 
 //! ## Protocol
 //!
-//! - Transport: Unix Socket (.tidepool/sockets/control.sock)
+//! - Transport: Unix Domain Socket
 //! - Framing: Newline-delimited JSON (NDJSON)
 //! - Flow: Connect -> Write message + newline -> Read response + newline -> Close
 
 use crate::error::{MantleError, Result};
 use crate::protocol::{ControlMessage, ControlResponse};
 use std::io::{BufRead, BufReader, Write};
+#[cfg(unix)]
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -31,7 +32,10 @@ const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Unix socket client for control envelope communication.
 pub struct ControlSocket {
+    #[cfg(unix)]
     stream: UnixStream,
+    #[cfg(not(unix))]
+    _phantom: std::marker::PhantomData<()>
 }
 
 impl ControlSocket {
@@ -39,70 +43,101 @@ impl ControlSocket {
     ///
     /// # Errors
     ///
-    /// Returns an error if the connection fails.
-    pub fn connect(path: &Path) -> Result<Self> {
+    /// Returns an error if the connection fails or if the platform is not supported.
+    pub fn connect<P: AsRef<Path>>(path: P) -> Result<Self> {
+        let path = path.as_ref();
         debug!(path = %path.display(), "Connecting to control server");
 
-        let stream = UnixStream::connect(path).map_err(|e| MantleError::UnixConnect {
-            path: path.to_path_buf(),
-            source: e,
-        })?;
+        #[cfg(unix)]
+        {
+            let stream = UnixStream::connect(path).map_err(|e| MantleError::UnixConnect {
+                path: path.to_path_buf(),
+                source: e,
+            })?;
 
-        // Set default timeouts
-        stream
-            .set_read_timeout(Some(DEFAULT_TIMEOUT))
-            .map_err(|e| MantleError::SocketConfig { source: e })?;
-        stream
-            .set_write_timeout(Some(DEFAULT_TIMEOUT))
-            .map_err(|e| MantleError::SocketConfig { source: e })?;
+            // Set default timeouts
+            stream
+                .set_read_timeout(Some(DEFAULT_TIMEOUT))
+                .map_err(|e| MantleError::SocketConfig { source: e })?;
+            stream
+                .set_write_timeout(Some(DEFAULT_TIMEOUT))
+                .map_err(|e| MantleError::SocketConfig { source: e })?;
 
-        debug!("Connected to control server");
-        Ok(Self { stream })
+            debug!("Connected to control server");
+            Ok(Self { stream })
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = path;
+            Err(MantleError::Io(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "Unix sockets are only supported on Unix systems",
+            )))
+        }
     }
 
     /// Set custom read/write timeout.
     pub fn set_timeout(&self, timeout: Duration) -> Result<()> {
-        self.stream
-            .set_read_timeout(Some(timeout))
-            .map_err(|e| MantleError::SocketConfig { source: e })?;
-        self.stream
-            .set_write_timeout(Some(timeout))
-            .map_err(|e| MantleError::SocketConfig { source: e })?;
-        Ok(())
+        #[cfg(unix)]
+        {
+            self.stream
+                .set_read_timeout(Some(timeout))
+                .map_err(|e| MantleError::SocketConfig { source: e })?;
+            self.stream
+                .set_write_timeout(Some(timeout))
+                .map_err(|e| MantleError::SocketConfig { source: e })?;
+            Ok(())
+        }
+        #[cfg(not(unix))] 
+        {
+            let _ = timeout;
+            Ok(())
+        }
     }
 
     /// Send a message and receive the response.
     ///
     /// Protocol: Write JSON + newline, read JSON + newline.
     pub fn send(&mut self, message: &ControlMessage) -> Result<ControlResponse> {
-        // Serialize and send
-        let json = serde_json::to_string(message).map_err(MantleError::JsonSerialize)?;
-        trace!(json = %json, "Sending message");
+        #[cfg(unix)]
+        {
+            // Serialize and send
+            let json = serde_json::to_string(message).map_err(MantleError::JsonSerialize)?;
+            trace!(json = %json, "Sending message");
 
-        self.stream
-            .write_all(json.as_bytes())
-            .map_err(|e| MantleError::SocketWrite { source: e })?;
-        self.stream
-            .write_all(b"\n")
-            .map_err(|e| MantleError::SocketWrite { source: e })?;
-        self.stream
-            .flush()
-            .map_err(|e| MantleError::SocketWrite { source: e })?;
+            self.stream
+                .write_all(json.as_bytes())
+                .map_err(|e| MantleError::SocketWrite { source: e })?;
+            self.stream
+                .write_all(b"\n")
+                .map_err(|e| MantleError::SocketWrite { source: e })?;
+            self.stream
+                .flush()
+                .map_err(|e| MantleError::SocketWrite { source: e })?;
 
-        // Read response
-        let mut reader = BufReader::new(&self.stream);
-        let mut response_line = String::new();
+            // Read response
+            let mut reader = BufReader::new(&self.stream);
+            let mut response_line = String::new();
 
-        reader
-            .read_line(&mut response_line)
-            .map_err(|e| MantleError::SocketRead { source: e })?;
+            reader
+                .read_line(&mut response_line)
+                .map_err(|e| MantleError::SocketRead { source: e })?;
 
-        trace!(response = %response_line.trim(), "Received response");
+            trace!(response = %response_line.trim(), "Received response");
 
-        let response: ControlResponse = serde_json::from_str(response_line.trim())
-            .map_err(|e| MantleError::JsonParse { source: e })?;
+            let response: ControlResponse = serde_json::from_str(response_line.trim())
+                .map_err(|e| MantleError::JsonParse { source: e })?;
 
-        Ok(response)
+            Ok(response)
+        }
+        #[cfg(not(unix))] 
+        {
+            let _ = message;
+            Err(MantleError::Io(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "Unix sockets are only supported on Unix systems",
+            )))
+        }
     }
 }
 
@@ -125,7 +160,7 @@ pub fn control_socket_path() -> PathBuf {
     base.join(".tidepool").join("sockets").join("control.sock")
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))] 
 mod tests {
     use super::*;
     use std::os::unix::net::UnixListener;
@@ -151,7 +186,7 @@ mod tests {
             let _msg: ControlMessage = serde_json::from_str(&line).unwrap();
 
             use crate::protocol::{ControlResponse, HookOutput};
-            let response =
+            let response = 
                 ControlResponse::hook_success(HookOutput::pre_tool_use_allow(None, None));
             let response_json = serde_json::to_string(&response).unwrap();
 

@@ -56,6 +56,7 @@ pub use hooks::HookConfig;
 pub use logging::{init_logging, init_logging_with_default};
 pub use protocol::{ControlMessage, ControlResponse, HookInput, HookOutput};
 pub use socket::ControlSocket;
+pub use socket::control_socket_path;
 pub use supervisor::Supervisor;
 
 // Re-export hub types

@@ -183,7 +183,6 @@ struct ToolResultContent {
 /// Query control server for available MCP tools.
 ///
 /// Returns an error if:
-/// - MANTLE_CONTROL_HOST/PORT not set
 /// - Connection to control server fails
 /// - Protocol error (invalid response)
 ///

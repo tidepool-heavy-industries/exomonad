@@ -46,7 +46,7 @@ pub enum HookEventType {
 ///
 /// This function:
 /// 1. Reads the hook payload JSON from stdin (provided by Claude Code)
-/// 2. Connects to the control server via TCP
+/// 2. Connects to the control server via Unix socket
 /// 3. Sends the hook event and waits for response
 /// 4. Outputs the response JSON to stdout
 /// 5. Returns the exit code (0=allow, 2=deny/error)
