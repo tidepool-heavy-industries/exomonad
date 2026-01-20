@@ -7,11 +7,11 @@
 //!
 //! This module uses synchronous I/O (std::os::unix::net) rather than async.
 //! This is a deliberate choice because:
-//!
+//! 
 //! 1. Hook commands block anyway - Claude Code waits for hook completion
 //! 2. Simpler code without async runtime overhead
 //! 3. Each hook invocation is a separate process with one request/response
-//!
+//! 
 //! ## Protocol
 //!
 //! - Transport: Unix Socket (.tidepool/sockets/control.sock)
@@ -151,7 +151,7 @@ mod tests {
             let _msg: ControlMessage = serde_json::from_str(&line).unwrap();
 
             use crate::protocol::{ControlResponse, HookOutput};
-            let response =
+            let response = 
                 ControlResponse::hook_success(HookOutput::pre_tool_use_allow(None, None));
             let response_json = serde_json::to_string(&response).unwrap();
 

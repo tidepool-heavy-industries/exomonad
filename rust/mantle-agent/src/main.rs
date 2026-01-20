@@ -7,6 +7,7 @@
 //!
 //! - `hook <event>` - Handle a Claude Code hook event
 //! - `mcp` - Run as MCP stdio server for decision tools
+//! - `health` - Check socket health
 
 use clap::{Parser, Subcommand};
 use tracing::error;
@@ -34,7 +35,7 @@ struct Cli {
 enum Commands {
     /// Handle a Claude Code hook event (called by generated hook scripts)
     ///
-    /// Connects to control server via MANTLE_CONTROL_HOST/PORT env vars.
+    /// Connects to control server via Unix socket (MANTLE_CONTROL_SOCKET).
     Hook {
         /// The hook event type to handle
         #[arg(value_enum)]
@@ -49,7 +50,7 @@ enum Commands {
     ///
     /// Queries the control server for tool definitions at startup and serves
     /// them via JSON-RPC 2.0 over stdio. Tool calls are forwarded to the
-    /// control server via TCP (MANTLE_CONTROL_HOST/PORT).
+    /// control server via Unix socket.
     Mcp,
 
     /// Check control server health via Ping/Pong on socket.
