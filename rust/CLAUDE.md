@@ -102,11 +102,15 @@ mantle-agent hook pre-tool-use  # Reads JSON from stdin
 
 ### 2. MCP Server
 ```bash
-mantle-agent mcp
+mantle-agent mcp [--tools <TOOL1>,<TOOL2>,...]
 ```
 - JSON-RPC 2.0 over stdio (MCP protocol)
-- Reads tool definitions from `MANTLE_DECISION_TOOLS_FILE`
-- Forwards `tools/call` requests to control server via TCP
+- Queries tool definitions from control server at startup
+- **Role-based filtering:** `--tools` flag restricts which tools are exposed
+  - PM role: `--tools pm_propose,pm_approve_expansion,pm_prioritize,pm_status,pm_review_dag,exo_status`
+  - TL role: Omit `--tools` for full tool access
+- Forwards `tools/call` requests to control server via Unix socket
+- Rejects calls to non-allowlisted tools with clear error message
 - Returns tool results to Claude Code
 
 ## Control Socket Protocol
