@@ -36,15 +36,17 @@ import Tidepool.Control.LSPTools
   , showConstructorsLogic, ShowConstructorsArgs(..), ShowConstructorsResult(..)
   )
 import Tidepool.Control.ExoTools
-  ( exoStatusLogic, ExoStatusArgs(..), ExoStatusResult(..)
+  ( exoStatusLogic, ExoStatusArgs(..), ExoStatusResult
   , exoCompleteLogic, ExoCompleteArgs(..), ExoCompleteResult(..)
   , exoReconstituteLogic, ExoReconstituteArgs(..), ExoReconstituteResult
   , preCommitCheckLogic, PreCommitCheckArgs(..), PreCommitCheckResult(..)
+  , spawnAgentsLogic, SpawnAgentsArgs(..), SpawnAgentsResult(..)
   )
 import Tidepool.BD.Interpreter (runBDIO, defaultBDConfig)
 import Tidepool.BD.GitInterpreter (runGitIO)
 import Tidepool.GitHub.Interpreter (runGitHubIO, defaultGitHubConfig)
 import Tidepool.Justfile.Interpreter (runJustfileIO)
+import Tidepool.Worktree.Interpreter (runWorktreeIO, defaultWorktreeConfig)
 import Tidepool.Effect.NodeMeta (runNodeMeta, runGraphMeta, defaultNodeMeta, GraphMetadata(..))
 import Tidepool.Effect.TUI (TUI(..), Interaction(..))
 import Tidepool.Effect.Types (runLog, LogLevel(..), runReturn)
@@ -94,12 +96,13 @@ handleMcpTool logger lspSession maybeTuiHandle reqId toolName args = do
     "exo_complete" -> handleExoCompleteTool logger lspSession reqId args
     "exo_reconstitute" -> handleExoReconstituteTool logger lspSession reqId args
     "pre_commit_check" -> handlePreCommitCheckTool logger reqId args
+    "spawn_agents" -> handleSpawnAgentsTool logger lspSession reqId args
 
     _ -> do
       logError logger $ "  (unknown tool)"
       pure $ mcpToolError reqId $
         "Tool not found: " <> toolName <>
-        ". Available tools: find_callers, show_fields, show_constructors, teach-graph, exo_status, exo_complete, exo_reconstitute, pre_commit_check"
+        ". Available tools: find_callers, show_fields, show_constructors, teach-graph, exo_status, exo_complete, exo_reconstitute, pre_commit_check, spawn_agents"
 
 -- | Handle the pre_commit_check tool.
 --
@@ -128,6 +131,38 @@ handlePreCommitCheckTool logger reqId args = do
           if result.pccrSuccess
             then logInfo logger $ "[MCP:" <> reqId <> "] Pre-commit check passed"
             else logError logger $ "[MCP:" <> reqId <> "] Pre-commit check failed"
+          pure $ mcpToolSuccess reqId (toJSON result)
+
+-- | Handle the spawn_agents tool.
+--
+-- Runs the SpawnAgentsGraph logic to create worktrees for parallel agents.
+handleSpawnAgentsTool :: Logger -> LSPSession -> Text -> Value -> IO ControlResponse
+handleSpawnAgentsTool logger _lspSession reqId args = do
+  case fromJSON args of
+    Error err -> do
+      logError logger $ "  parse error: " <> T.pack err
+      pure $ mcpToolError reqId $ "Invalid spawn_agents arguments: " <> T.pack err
+
+    Success saArgs -> do
+      logDebug logger $ "  bead_ids=" <> T.intercalate "," saArgs.saaBeadIds
+
+      -- Most interpreters use default configs which assume current dir is repo root.
+      let repoRoot = "." 
+      
+      resultOrErr <- try $ runM
+        $ runLog Debug
+        $ runBDIO defaultBDConfig
+        $ runGitIO
+        $ runWorktreeIO (defaultWorktreeConfig repoRoot)
+        $ fmap unwrapSingleChoice (spawnAgentsLogic saArgs)
+
+      case resultOrErr of
+        Left (e :: SomeException) -> do
+          logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId $ "spawn_agents failed: " <> T.pack (displayException e)
+
+        Right result -> do
+          logInfo logger $ "[MCP:" <> reqId <> "] Spawned " <> T.pack (show $ length $ sarWorktrees result) <> " worktrees"
           pure $ mcpToolSuccess reqId (toJSON result)
 
 

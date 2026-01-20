@@ -106,16 +106,24 @@ runWorktreeIO config = interpret $ \case
 createWorktreeIO :: WorktreeConfig -> WorktreeSpec -> IO (Either WorktreeError WorktreePath)
 createWorktreeIO config spec = do
   result <- try @SomeException $ do
-    -- Generate unique suffix
-    suffix <- randomHex 6
+    -- Generate branch name
+    branchName <- case spec.wsBranchName of
+      Just b -> pure $ T.unpack b
+      Nothing -> do
+        suffix <- randomHex 6
+        pure $ T.unpack spec.wsBaseName <> "-" <> suffix
 
-    let branchName = T.unpack spec.wsBaseName <> "-" <> suffix
-        wtDir = config.wcRepoRoot </> config.wcWorktreeDir
-        wtPath = wtDir </> branchName
+    -- Determine worktree path
+    let wtPath = case spec.wsPath of
+          Just p -> p
+          Nothing ->
+            let wtDir = config.wcRepoRoot </> config.wcWorktreeDir
+            in wtDir </> branchName
         baseBranch = maybe "HEAD" T.unpack spec.wsFromBranch
+        wtDirParent = takeDirectory wtPath
 
-    -- Ensure worktree directory exists
-    createDirectoryIfMissing True wtDir
+    -- Ensure parent directory for worktree exists
+    createDirectoryIfMissing True wtDirParent
 
     -- Create the worktree with a new branch
     (exitCode, _stdout, stderr) <- readProcessWithExitCode
