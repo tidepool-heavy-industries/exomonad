@@ -19,6 +19,7 @@
 -- = Tier 1 Tools (Pure LSP + Basic Parsing)
 --
 -- - **find_callers**: Find actual call sites (filter imports/type sigs)
+-- - **find_callees**: Find functions called by a given function
 -- - **show_fields**: Quick record field lookup
 -- - **show_constructors**: Show sum type constructors
 --
@@ -334,8 +335,8 @@ instance ToJSON CalleeInfo where
 -- | Result of find_callees tool.
 data FindCalleesResult = FindCalleesResult
   { fceResultName :: Text
-  , fceDefinitionFile :: Text
-  , fceDefinitionLine :: Int
+  , fceDefinitionFile :: Maybe Text
+  , fceDefinitionLine :: Maybe Int
   , fceCallees :: [CalleeInfo]
   , fceTruncated :: Bool
   , fceWarning :: Maybe Text
@@ -395,8 +396,8 @@ findCalleesLogic args = do
     [] -> do
       returnValue FindCalleesResult
         { fceResultName = name
-        , fceDefinitionFile = ""
-        , fceDefinitionLine = 0
+        , fceDefinitionFile = Nothing
+        , fceDefinitionLine = Nothing
         , fceCallees = []
         , fceTruncated = False
         , fceWarning = warning
@@ -417,8 +418,8 @@ findCalleesLogic args = do
           logDebug $ "[find_callees] No call hierarchy items found"
           returnValue FindCalleesResult
             { fceResultName = name
-            , fceDefinitionFile = defFile
-            , fceDefinitionLine = defLine
+            , fceDefinitionFile = Just defFile
+            , fceDefinitionLine = Just defLine
             , fceCallees = []
             , fceTruncated = False
             , fceWarning = warning
@@ -436,8 +437,8 @@ findCalleesLogic args = do
 
           returnValue FindCalleesResult
             { fceResultName = name
-            , fceDefinitionFile = defFile
-            , fceDefinitionLine = defLine
+            , fceDefinitionFile = Just defFile
+            , fceDefinitionLine = Just defLine
             , fceCallees = selected
             , fceTruncated = truncated
             , fceWarning = warning
