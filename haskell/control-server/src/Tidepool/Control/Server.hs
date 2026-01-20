@@ -15,7 +15,8 @@ import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
 import Control.Concurrent.STM (newTVarIO, readTVarIO, atomically, writeTVar, readTVar)
 import Control.Exception (SomeException, catch, finally, bracket)
 import qualified Control.Exception as E
-import Control.Monad (forever, void)
+import Control.Monad (forever, void, when)
+import Data.Maybe (isJust)
 import Data.Aeson (eitherDecodeStrict, encode)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
@@ -36,6 +37,8 @@ import Tidepool.Control.Protocol
 import Tidepool.Control.Types (ServerConfig(..))
 import Tidepool.LSP.Interpreter (LSPSession, withLSPSession)
 import Tidepool.TUI.Interpreter (TUIHandle, newTUIHandle, closeTUIHandle)
+import Tidepool.Observability.Types (TraceContext, newTraceContext, ObservabilityConfig(..), LokiConfig(..), OTLPConfig(..))
+import Tidepool.Observability.Interpreter (flushTraces)
 
 -- | Default Unix socket paths
 defaultControlSocket :: FilePath
@@ -43,6 +46,25 @@ defaultControlSocket = ".tidepool/sockets/control.sock"
 
 defaultTuiSocket :: FilePath
 defaultTuiSocket = ".tidepool/sockets/tui.sock"
+
+-- | Load observability configuration from environment variables.
+loadObservabilityConfig :: IO (Maybe ObservabilityConfig)
+loadObservabilityConfig = do
+  lokiUrl <- lookupEnv "LOKI_URL"
+  otlpEndpoint <- lookupEnv "OTLP_ENDPOINT"
+  
+  case (lokiUrl, otlpEndpoint) of
+    (Nothing, Nothing) -> pure Nothing
+    _ -> do
+      lokiUser <- lookupEnv "LOKI_USER"
+      lokiToken <- lookupEnv "LOKI_TOKEN"
+      otlpUser <- lookupEnv "OTLP_USER"
+      otlpToken <- lookupEnv "OTLP_TOKEN"
+      
+      let loki = fmap (\url -> LokiConfig (T.pack url) (fmap T.pack lokiUser) (fmap T.pack lokiToken) "tidepool-control-server") lokiUrl
+          otlp = fmap (\end -> OTLPConfig (T.pack end) (fmap T.pack otlpUser) (fmap T.pack otlpToken)) otlpEndpoint
+          
+      pure $ Just $ ObservabilityConfig loki otlp "tidepool-control-server"
 
 -- | Run the control server. Blocks forever.
 --
@@ -57,17 +79,26 @@ runServer logger config = do
   tuiSocketEnv <- lookupEnv "TIDEPOOL_TUI_SOCKET"
   let tuiSocket = maybe defaultTuiSocket id tuiSocketEnv
 
-  logInfo logger $ "Starting LSP session for project: " <> T.pack config.projectDir
+  -- Load observability config if not already provided
+  obsConfig <- case config.observabilityConfig of
+    Just c  -> pure (Just c)
+    Nothing -> loadObservabilityConfig
+  
+  let configWithObs = config { observabilityConfig = obsConfig }
+
+  logInfo logger $ "Starting LSP session for project: " <> T.pack configWithObs.projectDir
+  when (isJust obsConfig) $
+    logInfo logger "Observability enabled (Loki/OTLP)"
 
   -- Start LSP session and run server
-  withLSPSession config.projectDir $ \lspSession -> do
+  withLSPSession configWithObs.projectDir $ \lspSession -> do
     logInfo logger "LSP session initialized"
 
     -- TUI handle managed via TVar to support background connection from sidebar
     tuiHandleVar <- newTVarIO Nothing
     tuiListenerReady <- newEmptyMVar
 
-    if config.noTui
+    if configWithObs.noTui
       then do
         logInfo logger "TUI sidebar listener disabled (--no-tui)"
         putMVar tuiListenerReady ()
@@ -121,7 +152,11 @@ runServer logger config = do
         (conn, _peer) <- accept sock
         -- Snapshot current TUI handle for this connection atomically
         currentTuiHandle <- atomically $ readTVar tuiHandleVar
-        void $ forkIO $ handleConnection logger config lspSession currentTuiHandle conn `finally` close conn
+        
+        -- Create a fresh trace context for each connection/request
+        traceCtx <- newTraceContext
+        
+        void $ forkIO $ handleConnection logger configWithObs lspSession currentTuiHandle traceCtx conn `finally` close conn
 
 -- | Setup Unix socket at given path.
 setupUnixSocket :: FilePath -> IO Socket
@@ -153,8 +188,8 @@ cleanupSocketFile path =
 
 
 -- | Handle a single connection (one NDJSON request-response).
-handleConnection :: Logger -> ServerConfig -> LSPSession -> Maybe TUIHandle -> Socket -> IO ()
-handleConnection logger config lspSession maybeTuiHandle conn = do
+handleConnection :: Logger -> ServerConfig -> LSPSession -> Maybe TUIHandle -> TraceContext -> Socket -> IO ()
+handleConnection logger config lspSession maybeTuiHandle traceCtx conn = do
   logDebug logger "Connection received"
 
   (do
@@ -173,9 +208,15 @@ handleConnection logger config lspSession maybeTuiHandle conn = do
 
       Right msg -> do
         logMessage logger msg
-        response <- handleMessage logger config lspSession maybeTuiHandle msg
+        response <- handleMessage logger config lspSession maybeTuiHandle traceCtx msg
         logResponse logger response
         sendResponse conn response
+        
+        -- Flush traces after handling the message if OTLP is configured
+        case config.observabilityConfig of
+          Just obsConfig | Just otlp <- ocOTLP obsConfig -> 
+             flushTraces otlp obsConfig.ocServiceName traceCtx
+          _ -> pure ()
     )
   `catch` \(e :: SomeException) -> do
     logError logger $ "Connection error: " <> T.pack (show e)
