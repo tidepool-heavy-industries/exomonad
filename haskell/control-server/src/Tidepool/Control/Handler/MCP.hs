@@ -52,6 +52,9 @@ import Tidepool.Control.ExoTools
   , beadToPrLogic, BeadToPrArgs(..), BeadToPrResult(..), PRInfo(..)
   , prToBeadLogic, PrToBeadArgs(..), PrToBeadResult(..)
   )
+import Tidepool.Control.PMReviewDAG
+  ( pmReviewDagLogic, PmReviewDagArgs(..), PmReviewDagResult(..), pmReviewDagHandlers
+  )
 import Tidepool.Control.PMTools
   ( pmApproveExpansionLogic, PmApproveExpansionArgs(..), PmApproveExpansionResult(..),
     pmPrioritizeLogic, PmPrioritizeArgs(..), PmPrioritizeResult(..), PrioritizeResultItem(..)
@@ -71,7 +74,7 @@ import Tidepool.Worktree.Interpreter (runWorktreeIO, defaultWorktreeConfig)
 import Tidepool.Gemini.Interpreter (runGeminiIO)
 import Tidepool.Effect.NodeMeta (runNodeMeta, runGraphMeta, defaultNodeMeta, GraphMetadata(..))
 import Tidepool.Effect.TUI (TUI(..), Interaction(..))
-import Tidepool.Effect.Types (runLog, LogLevel(Debug, Info, Warn), runReturn)
+import Tidepool.Effect.Types (runLog, LogLevel(Debug, Info, Warn), runReturn, runTime)
 import Tidepool.Graph.Goto (unwrapSingleChoice)
 import Tidepool.LSP.Interpreter (LSPSession, runLSP)
 import Tidepool.TUI.Interpreter (TUIHandle, runTUI)
@@ -132,6 +135,7 @@ handleMcpTool logger config lspSession maybeTuiHandle reqId toolName args = do
     "pm_approve_expansion" -> handlePmApproveExpansionTool logger lspSession reqId args
     "pm_prioritize" -> handlePmPrioritizeTool logger reqId args
     "pm_propose" -> handlePMProposeTool logger reqId args
+    "pm_review_dag" -> handlePmReviewDagTool logger reqId args
 
     -- Mailbox tools
     "send_message" -> handleSendMessageTool logger currentRole reqId args
@@ -593,6 +597,34 @@ handlePMProposeTool logger reqId args = do
 
         Right result -> do
           logInfo logger $ "[MCP:" <> reqId <> "] Proposed bead: " <> result.pprBeadId
+          pure $ mcpToolSuccess reqId (toJSON result)
+
+-- | Handle the pm_review_dag tool.
+--
+-- Runs the PmReviewDagGraph logic to analyze the bead DAG.
+handlePmReviewDagTool :: Logger -> Text -> Value -> IO ControlResponse
+handlePmReviewDagTool logger reqId args = do
+  case fromJSON args of
+    Error err -> do
+      logError logger $ "  parse error: " <> T.pack err
+      pure $ mcpToolError reqId $ "Invalid pm_review_dag arguments: " <> T.pack err
+
+    Success prdArgs -> do
+      logDebug logger $ "  focus_track=" <> T.pack (show prdArgs.prdaFocusTrack)
+
+      resultOrErr <- try $ runM
+        $ runLog Debug
+        $ runTime
+        $ runBDIO defaultBDConfig
+        $ fmap unwrapSingleChoice (pmReviewDagLogic prdArgs)
+
+      case resultOrErr of
+        Left (e :: SomeException) -> do
+          logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId $ "pm_review_dag failed: " <> T.pack (displayException e)
+
+        Right result -> do
+          logInfo logger $ "[MCP:" <> reqId <> "] DAG analyzed: " <> T.pack (show $ length result.prdrReady) <> " ready beads"
           pure $ mcpToolSuccess reqId (toJSON result)
 
 

@@ -28,6 +28,7 @@ library
         Tidepool.Control.Handler.MCP
         Tidepool.Control.LSPTools
         Tidepool.Control.PMTools
+        Tidepool.Control.PMReviewDAG
         Tidepool.Control.PMPropose
         Tidepool.Control.MailboxTools
         Tidepool.Control.ExoTools
@@ -231,6 +232,27 @@ test-suite pm-propose-test
     default-language: GHC2024
     default-extensions:
         OverloadedStrings
+
+test-suite pm-review-dag-test
+    import:           warnings
+    type:             exitcode-stdio-1.0
+    main-is:          PMReviewDAGSpec.hs
+    build-depends:
+        base >= 4.17 && < 5,
+        tidepool-control-server,
+        tidepool-core,
+        text >= 2.0 && < 3,
+        aeson,
+        time,
+        containers,
+        freer-simple,
+        tasty,
+        tasty-hunit
+    hs-source-dirs:   test
+    default-language: GHC2024
+    default-extensions:
+        OverloadedStrings
+        TypeApplications
         TypeApplications
 
 test-suite parser-test
