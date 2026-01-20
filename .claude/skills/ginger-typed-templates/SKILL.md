@@ -117,12 +117,37 @@ Once narrowed, nested fields work normally:
 | Status | {{ status }} |
 ```
 
+## Critical: ToGVal Keys Must Match Field Names
+
+**The TH validates against Haskell record field names, NOT ToGVal dictionary keys.**
+
+```haskell
+-- Haskell field (type_ because 'type' is reserved)
+data BeadContext = BeadContext
+  { type_ :: Text
+  , ...
+  }
+
+-- ToGVal MUST use same name as field for TH validation
+instance ToGVal (...) BeadContext where
+  toGVal bc = dict
+    [ "type_" ~> bc.type_  -- ✓ Matches field name
+    -- NOT: "type" ~> bc.type_  -- ✗ TH will fail on {{ bead.type }}
+    ]
+
+-- Template uses the field name
+{{ bead.type_ }}  -- ✓ Matches both field and ToGVal key
+```
+
+**Why?** TH inspects the Haskell record structure at compile time. Runtime uses ToGVal. They must agree on names.
+
 ## Debugging Tips
 
 1. **Check narrowing context**: Validator errors show the access path and position
 2. **Add `is defined` incrementally**: Start with outermost Maybe, work inward
 3. **Lists don't need narrowing**: `[a]` fields are always defined (may be empty)
 4. **Ternary also narrows**: `{{ user.name if user is defined else "Anonymous" }}`
+5. **ToGVal keys must match field names**: Reserved word workarounds (like `type_`) propagate to templates
 
 ## Source Files
 
