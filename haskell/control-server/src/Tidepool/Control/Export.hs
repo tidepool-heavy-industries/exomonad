@@ -955,6 +955,7 @@ exportMCPTools logger = do
   let saTools = reifyMCPTools (Proxy @SpawnAgentsGraph)
   let fpTools = reifyMCPTools (Proxy @FilePRGraph)
   let paeTools = reifyMCPTools (Proxy @PmApproveExpansionGraph)
+  let pmPriTools = reifyMCPTools (Proxy @PmPrioritizeGraph)
   let pmRevTools = reifyMCPTools (Proxy @PmReviewDagGraph)
   let pmStatTools = reifyMCPTools (Proxy @PmStatusGraph)
   let pmProTools = reifyMCPTools (Proxy @PMProposeGraph)
