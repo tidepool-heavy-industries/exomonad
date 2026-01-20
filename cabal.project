@@ -28,6 +28,8 @@ packages:
     haskell/effects/gemini-interpreter
     haskell/effects/tui-interpreter
     haskell/effects/mcp-server
+    haskell/effects/filesystem-interpreter
+    haskell/effects/zellij-interpreter
 
     -- Effect types (standalone)
     haskell/effects/habitica

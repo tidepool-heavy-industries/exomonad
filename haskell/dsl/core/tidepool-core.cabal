@@ -80,6 +80,8 @@ library
         Tidepool.Effects.Worktree
         Tidepool.Effects.Cabal
         Tidepool.Effects.Justfile
+        Tidepool.Effects.FileSystem
+        Tidepool.Effects.Zellij
         Tidepool.Graph.Mermaid
         Tidepool.Graph.Example
         Tidepool.Graph.Example.Context

@@ -92,6 +92,8 @@ library
         tidepool-github-interpreter,
         tidepool-justfile-interpreter,
         tidepool-worktree-interpreter,
+        tidepool-filesystem-interpreter,
+        tidepool-zellij-interpreter,
         tidepool-gemini-interpreter,
         tidepool-observability-interpreter,
         -- HTTP for FunctionGemma

@@ -70,6 +70,8 @@ import Tidepool.BD.GitInterpreter (runGitIO)
 import Tidepool.GitHub.Interpreter (runGitHubIO, defaultGitHubConfig)
 import Tidepool.Justfile.Interpreter (runJustfileIO)
 import Tidepool.Worktree.Interpreter (runWorktreeIO, defaultWorktreeConfig)
+import Tidepool.FileSystem.Interpreter (runFileSystemIO)
+import Tidepool.Zellij.Interpreter (runZellijIO)
 import Tidepool.Gemini.Interpreter (runGeminiIO)
 import Tidepool.Effect.NodeMeta (runNodeMeta, runGraphMeta, defaultNodeMeta, GraphMetadata(..))
 import Tidepool.Effect.TUI (TUI(..), Interaction(..))
@@ -294,6 +296,8 @@ handleSpawnAgentsTool logger _lspSession reqId args = do
         $ runBDIO defaultBDConfig
         $ runGitIO
         $ runWorktreeIO (defaultWorktreeConfig repoRoot)
+        $ runFileSystemIO
+        $ runZellijIO
         $ fmap unwrapSingleChoice (spawnAgentsLogic saArgs)
 
       case resultOrErr of
