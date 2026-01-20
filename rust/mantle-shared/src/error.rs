@@ -117,6 +117,10 @@ pub enum MantleError {
     /// MCP server error.
     #[error("MCP server error: {0}")]
     McpServer(String),
+
+    /// Health check error.
+    #[error("health check error: {0}")]
+    HealthCheck(String),
 }
 
 /// Result type alias using MantleError.

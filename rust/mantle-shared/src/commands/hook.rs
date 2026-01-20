@@ -136,6 +136,11 @@ pub fn handle_hook(event_type: HookEventType, runtime: Runtime) -> Result<()> {
             error!("Received ToolsListResponse for hook request");
             std::process::exit(1);
         }
+        ControlResponse::Pong => {
+            // Unexpected response type
+            error!("Received Pong response for hook request");
+            std::process::exit(1);
+        }
     }
 
     Ok(())

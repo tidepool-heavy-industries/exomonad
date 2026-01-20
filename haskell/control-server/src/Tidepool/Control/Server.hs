@@ -172,6 +172,8 @@ logMessage logger = \case
     logInfo logger $ "[MCP:" <> reqId <> "] tool=" <> name
   ToolsListRequest ->
     logDebug logger "[MCP] tools/list request"
+  Ping ->
+    logDebug logger "[PING]"
 
 -- | Log outgoing response.
 logResponse :: Logger -> ControlResponse -> IO ()
@@ -190,3 +192,5 @@ logResponse logger = \case
     logDebug logger $ "[MCP] -> " <> status
   ToolsListResponse tools ->
     logDebug logger $ "[MCP] -> tools/list: " <> T.pack (show (length tools)) <> " tools"
+  Pong ->
+    logDebug logger "[PONG]"

@@ -15,6 +15,7 @@ use mantle_shared::commands::HookEventType;
 use mantle_shared::handle_hook;
 use mantle_shared::protocol::Runtime;
 
+mod health;
 mod mcp;
 
 // ============================================================================
@@ -50,6 +51,9 @@ enum Commands {
     /// them via JSON-RPC 2.0 over stdio. Tool calls are forwarded to the
     /// control server via TCP (MANTLE_CONTROL_HOST/PORT).
     Mcp,
+
+    /// Check control server health via Ping/Pong on socket.
+    Health,
 }
 
 // ============================================================================
@@ -66,6 +70,7 @@ fn main() {
         Commands::Hook { event, runtime } => handle_hook(event, runtime),
         Commands::Mcp => mcp::run_mcp_server()
             .map_err(|e| mantle_shared::MantleError::McpServer(e.to_string())),
+        Commands::Health => health::run_health_check(),
     };
 
     if let Err(e) = result {

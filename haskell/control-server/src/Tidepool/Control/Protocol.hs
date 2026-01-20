@@ -277,6 +277,7 @@ data ControlMessage
   = HookEvent { input :: HookInput, runtime :: Runtime }
   | McpToolCall { mcpId :: Text, toolName :: Text, arguments :: Value }
   | ToolsListRequest
+  | Ping
   deriving stock (Show, Eq, Generic)
 
 instance FromJSON ControlMessage where
@@ -291,6 +292,7 @@ instance FromJSON ControlMessage where
         <*> o .: "tool_name"
         <*> o .: "arguments"
       "ToolsListRequest" -> pure ToolsListRequest
+      "Ping" -> pure Ping
       _ -> fail $ "Unknown message type: " <> show msgType
 
 instance ToJSON ControlMessage where
@@ -308,12 +310,16 @@ instance ToJSON ControlMessage where
   toJSON ToolsListRequest = object
     [ "type" .= ("ToolsListRequest" :: Text)
     ]
+  toJSON Ping = object
+    [ "type" .= ("Ping" :: Text)
+    ]
 
 -- | Response sent over TCP to mantle-agent. Tagged by "type".
 data ControlResponse
   = HookResponse { output :: HookOutput, exitCode :: Int }
   | McpToolResponse { mcpId :: Text, result :: Maybe Value, mcpError :: Maybe McpError }
   | ToolsListResponse { tools :: [ToolDefinition] }
+  | Pong
   deriving stock (Show, Eq, Generic)
 
 instance ToJSON ControlResponse where
@@ -332,6 +338,9 @@ instance ToJSON ControlResponse where
     [ "type" .= ("ToolsListResponse" :: Text)
     , "tools" .= ts
     ]
+  toJSON Pong = object
+    [ "type" .= ("Pong" :: Text)
+    ]
 
 instance FromJSON ControlResponse where
   parseJSON = withObject "ControlResponse" $ \o -> do
@@ -343,6 +352,7 @@ instance FromJSON ControlResponse where
         <*> o .:? "result"
         <*> o .:? "error"
       "ToolsListResponse" -> ToolsListResponse <$> o .: "tools"
+      "Pong" -> pure Pong
       _ -> fail $ "Unknown response type: " <> show msgType
 
 -- | MCP error response.
