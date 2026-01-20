@@ -20,7 +20,7 @@ layout {
             // LEFT: Claude Code (auto-launch with debug mode)
             pane name="Claude Code" size="50%" focus=true {
                 command "claude"
-                args "-d"
+                args "-d" "--continue"
             }
 
             pane split_direction="horizontal" {
