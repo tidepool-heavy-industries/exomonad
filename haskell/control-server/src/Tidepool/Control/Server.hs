@@ -1,6 +1,6 @@
--- | TCP control server for Claude Code++ integration.
+-- | Unix socket control server for Claude Code++ integration.
 --
--- Listens on TCP port 7432 (configurable via MANTLE_CONTROL_PORT) and handles
+-- Listens on Unix socket (default .tidepool/sockets/control.sock) and handles
 -- NDJSON messages from mantle-agent. Each connection is one request-response pair.
 --
 -- The server maintains a long-lived LSP session for code intelligence.
@@ -9,9 +9,11 @@ module Tidepool.Control.Server
   ) where
 
 import Control.Concurrent (forkIO)
-import Control.Exception (SomeException, catch, finally, bracket, try)
+import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
+import Control.Concurrent.STM (newTVarIO, readTVarIO, atomically, writeTVar, readTVar)
+import Control.Exception (SomeException, catch, finally, bracket)
 import qualified Control.Exception as E
-import Control.Monad (forever, void, when)
+import Control.Monad (forever, void)
 import Data.Aeson (eitherDecodeStrict, encode)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
@@ -31,7 +33,7 @@ import Tidepool.Control.Logging (Logger, logInfo, logDebug, logError)
 import Tidepool.Control.Protocol
 import Tidepool.Control.Types (ServerConfig(..))
 import Tidepool.LSP.Interpreter (LSPSession, withLSPSession)
-import Tidepool.TUI.Interpreter (TUIHandle, connectTUIUnix, newTUIHandle, closeTUIHandle)
+import Tidepool.TUI.Interpreter (TUIHandle, newTUIHandle, closeTUIHandle)
 
 -- | Default Unix socket paths
 defaultControlSocket :: FilePath
@@ -59,17 +61,48 @@ runServer logger config = do
   withLSPSession config.projectDir $ \lspSession -> do
     logInfo logger "LSP session initialized"
 
-    -- Try to connect to TUI sidebar (optional)
-    maybeTuiHandle <- try (connectTUIUnix tuiSocket) >>= \case
-      Left (e :: SomeException) -> do
-        logInfo logger $ "TUI sidebar not found at " <> T.pack tuiSocket
-          <> ", running without TUI support (" <> T.pack (show e) <> ")"
-        pure Nothing
-      Right tuiSock -> do
-        logInfo logger $ "Connected to TUI sidebar at " <> T.pack tuiSocket
-        Just <$> newTUIHandle "control-server" tuiSock
+    -- TUI handle managed via TVar to support background connection from sidebar
+    tuiHandleVar <- newTVarIO Nothing
+    tuiListenerReady <- newEmptyMVar
+
+    -- Fork TUI listener thread
+    let tuiErrorHandler (e :: SomeException) = logError logger $ "TUI listener error: " <> T.pack (show e)
+    void $ forkIO $ E.handle tuiErrorHandler $
+      bracket (setupUnixSocket tuiSocket) (cleanupUnixSocket tuiSocket) $ \tuiListenSock -> do
+        logInfo logger $ "TUI sidebar listener waiting on: " <> T.pack tuiSocket
+        putMVar tuiListenerReady ()
+        let listenerLoop = forever $ do
+              (conn, _) <- accept tuiListenSock
+              logInfo logger "TUI sidebar connected"
+              handle <- newTUIHandle "control-server" conn
+              maybeOld <- atomically $ do
+                old <- readTVar tuiHandleVar
+                writeTVar tuiHandleVar (Just handle)
+                pure old
+              case maybeOld of
+                Just h -> do
+                  -- We close the previous connection immediately as tui-sidebar is a singleton.
+                  -- New connections imply the previous session is invalid. 
+                  -- Concurrent requests using the old handle will receive disconnection errors.
+                  logInfo logger "Closing previous TUI sidebar connection; in-flight requests using the old connection may see disconnection errors"
+                  closeTUIHandle h
+                Nothing -> logDebug logger "No existing TUI sidebar connection to replace"
+              
+        listenerLoop `finally` do
+             -- Ensure TUI handle state is cleaned up if the listener terminates
+             maybeHandle <- atomically $ do
+               mh <- readTVar tuiHandleVar
+               writeTVar tuiHandleVar Nothing
+               pure mh
+             case maybeHandle of
+               Just h -> closeTUIHandle h
+               Nothing -> pure ()
+
+    -- Ensure TUI listener is bound before accepting control connections
+    takeMVar tuiListenerReady
 
     let cleanup = do
+          maybeTuiHandle <- readTVarIO tuiHandleVar
           case maybeTuiHandle of
             Just h -> closeTUIHandle h
             Nothing -> pure ()
@@ -79,7 +112,9 @@ runServer logger config = do
 
       forever $ do
         (conn, _peer) <- accept sock
-        void $ forkIO $ handleConnection logger lspSession maybeTuiHandle conn `finally` close conn
+        -- Snapshot current TUI handle for this connection atomically
+        currentTuiHandle <- atomically $ readTVar tuiHandleVar
+        void $ forkIO $ handleConnection logger lspSession currentTuiHandle conn `finally` close conn
 
 -- | Setup Unix socket at given path.
 setupUnixSocket :: FilePath -> IO Socket

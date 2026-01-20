@@ -1,7 +1,7 @@
 cabal-version:      3.0
 name:               tidepool-control-server
 version:            0.1.0.0
-synopsis:           TCP control server for Claude Code++ hooks and MCP
+synopsis:           Unix socket control server for Claude Code++ hooks and MCP
 description:        Receives hook events and MCP tool calls from mantle-agent
                     via NDJSON over Unix socket. Routes to effect handlers.
                     Includes semantic-scout for code exploration via LSP.
@@ -57,6 +57,7 @@ library
         directory,
         filepath,
         network >= 3.1 && < 4,
+        stm >= 2.5 && < 3,
         fast-logger >= 3.0 && < 4,
         time >= 1.9 && < 2,
         -- Scout dependencies

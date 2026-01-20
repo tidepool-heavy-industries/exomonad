@@ -196,14 +196,17 @@ Human-driven Claude Code sessions augmented with Tidepool. **Not headless automa
 │  • Long-lived LSP session (HLS)         │    │
 │  • Hook Handler: Passthrough            │    │
 │  • MCP Handler: 4 tools (auto-discovery)│    │
-│  • TUI Handler: UISpec ↔ Interaction    │◄───┤
+│  • TUI Handler: Listens for Sidebar     │◄───┘
 └─────────────────────────────────────────┘    │
                                                │ Unix Socket NDJSON
-┌──────────────────────────────────────────────┘ .tidepool/sockets/tui.sock
+                                               │ .tidepool/sockets/tui.sock
+                                               │
+┌──────────────────────────────────────────────┘
 │
 ▼
 ┌─────────────────────────────────────────┐
 │ tui-sidebar (Rust)                      │
+│  • Connects to control-server           │
 │  • Renders UISpec with ratatui          │
 │  • Captures keyboard (Tab, Enter)       │
 │  • Sends Interaction events             │
@@ -338,8 +341,8 @@ Understanding the runtime stack for debugging and extension.
 | 8080 | process-compose | HTTP | API (stale session detection) |
 
 **Sockets:**
-- `.tidepool/sockets/control.sock`: Main protocol
-- `.tidepool/sockets/tui.sock`: TUI sidebar
+- `.tidepool/sockets/control.sock`: Main protocol (mantle-agent connects)
+- `.tidepool/sockets/tui.sock`: TUI sidebar (control-server listens, tui-sidebar connects)
 
 #### Config Files
 
@@ -440,8 +443,9 @@ tui-sidebar blocks until control-server's HTTP health probe succeeds.
 - ✅ HTTP health endpoint (port 7434) for robust readiness checks
 - ✅ Declarative service dependencies and restart policies
 - ✅ MCP direct execution via .mcp.json (mantle-agent spawned per-call by Claude)
+- ✅ Unix socket communication for all local components
 - 🔄 Training data generation (types ready, CLI pending)
-- ❌ Daemon mode (not implemented, uses per-call TCP)
+- ❌ Daemon mode (not implemented, uses per-call connection)
 - ❌ Metrics hub (mantle-hub needs repurposing)
 - ❌ Real hook logic (currently allow-all passthrough)
 

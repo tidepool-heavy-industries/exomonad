@@ -8,30 +8,17 @@ use tracing::{debug, error, warn};
 
 use crate::protocol::{Interaction, UISpec};
 
-/// Start Unix server and wait for connection.
+/// Connect to control-server via Unix socket.
 ///
-/// Binds to socket path and blocks until a client connects (Haskell tui-interpreter).
-pub async fn wait_for_unix_connection(path: &Path) -> Result<UnixStream> {
-    // Ensure parent directory exists
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .context(format!("Failed to create socket directory {}", parent.display()))?;
-    }
+/// Connects to the socket path and returns the stream.
+pub async fn connect_to_control_server(path: &Path) -> Result<UnixStream> {
+    debug!(path = %path.display(), "TUI sidebar connecting to control-server");
 
-    // Remove existing socket file if it exists
-    if path.exists() {
-        fs::remove_file(path).context("Failed to remove existing socket file")?;
-    }
+    let stream = UnixStream::connect(path)
+        .await
+        .context(format!("Failed to connect to {}", path.display()))?;
 
-    let listener = UnixListener::bind(path)
-        .context(format!("Failed to bind to {}", path.display()))?;
-
-    debug!(path = %path.display(), "TUI sidebar listening on Unix socket");
-
-    // Accept first connection
-    let (stream, _peer_addr) = listener.accept().await.context("Failed to accept connection")?;
-
-    debug!("Client connected via Unix socket");
+    debug!("Connected to control-server via Unix socket");
 
     Ok(stream)
 }
@@ -53,7 +40,7 @@ pub fn spawn_io_tasks(
     let (msg_tx, msg_rx) = mpsc::channel::<UISpec>(32);
     let (int_tx, mut int_rx) = mpsc::channel::<Interaction>(32);
 
-    // Reader task: TCP → UISpec
+    // Reader task: UnixStream → UISpec
     tokio::spawn(async move {
         let mut reader = BufReader::new(read_half);
         let mut line = String::new();
@@ -87,7 +74,7 @@ pub fn spawn_io_tasks(
                     }
                 }
                 Err(e) => {
-                    error!(error = %e, "Failed to read from TCP");
+                    error!(error = %e, "Failed to read from Unix stream");
                     break;
                 }
             }
@@ -96,7 +83,7 @@ pub fn spawn_io_tasks(
         debug!("Reader task exiting");
     });
 
-    // Writer task: Interaction → TCP
+    // Writer task: Interaction → UnixStream
     tokio::spawn(async move {
         let mut writer = write_half;
 
@@ -131,4 +118,58 @@ pub fn spawn_io_tasks(
     });
 
     (msg_rx, int_tx)
+}
+
+/// Start a simple Unix listener for health checks.
+///
+/// Listens on the given path and accepts connections, immediately closing them.
+/// This allows 'nc -zU' to verify that the process is alive and listening.
+pub async fn start_health_listener(path: &Path) -> Result<tokio::task::JoinHandle<()>> {
+    // Ensure parent directory exists
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .context(format!("Failed to create health socket directory {}", parent.display()))?;
+    }
+
+    // Remove existing socket file if it exists
+    if path.exists() {
+        fs::remove_file(path).context("Failed to remove existing health socket file")?;
+    }
+
+    let listener = UnixListener::bind(path)
+        .context(format!("Failed to bind health socket to {}", path.display()))?;
+
+    debug!(path = %path.display(), "TUI sidebar health listener started");
+
+    let handle = tokio::spawn(async move {
+        // Track consecutive accept errors to avoid retrying indefinitely on a persistent failure.
+        const MAX_CONSECUTIVE_ERRORS: u32 = 10;
+        let mut consecutive_errors: u32 = 0;
+
+        loop {
+            match listener.accept().await {
+                Ok((_stream, _addr)) => {
+                    // Successful accept: reset error counter.
+                    consecutive_errors = 0;
+                    // Just accept and drop, which is enough for nc -zU
+                }
+                Err(e) => {
+                    consecutive_errors = consecutive_errors.saturating_add(1);
+                    error!(error = %e, consecutive_errors, "Health listener accept error");
+                    // Wait before retrying to avoid tight loop on persistent errors
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+                    if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
+                        error!(
+                            consecutive_errors,
+                            "Health listener stopping after too many consecutive accept errors"
+                        );
+                        break;
+                    }
+                }
+            }
+        }
+    });
+
+    Ok(handle)
 }

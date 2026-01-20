@@ -1,8 +1,8 @@
 # TUI Sidebar
 
-TCP server (port 7433) that renders interactive terminal UIs for Tidepool graph handlers.
+Unix socket client that renders interactive terminal UIs for Tidepool graph handlers.
 
-**Purpose:** Provides a TUI effect implementation for Haskell agents. Receives UISpec messages, renders them using ratatui, captures keyboard input, and sends Interaction events back.
+**Purpose:** Provides a TUI effect implementation for Haskell agents. Connects to `control-server` via Unix socket, receives UISpec messages, renders them using ratatui, captures keyboard input, and sends Interaction events back.
 
 **Status:** Phase 1 MVP - Text, Button, Input, Progress rendering with Tab+Enter navigation.
 
@@ -13,8 +13,8 @@ Haskell Graph Handler                    Rust TUI Sidebar
         │                                       │
         │ showUI formSpec                       │
         ▼                                       │
-tidepool-tui-interpreter ─────UISpec───────▶ TCP Server (7433)
-   (TCP client)              (NDJSON)           │
+tidepool-tui-interpreter ─────UISpec───────▶ Unix Socket
+ (Part of control-server)    (NDJSON)           │
         │                                       ▼
         │                                  Event Loop
         │                                       │
@@ -29,11 +29,11 @@ tidepool-tui-interpreter ─────UISpec───────▶ TCP Serve
 
 ### Data Flow
 
-1. **Haskell → Rust:** UISpec via TCP NDJSON (lines 200-445 of TUI.hs)
-2. **Event Loop:** tokio::select! over TCP messages and keyboard polling
+1. **Haskell → Rust:** UISpec via Unix socket NDJSON (lines 200-445 of TUI.hs)
+2. **Event Loop:** tokio::select! over Unix stream messages and keyboard polling
 3. **Rendering:** UISpec → ratatui widgets (recursive layout)
 4. **Input:** Tab (cycle focus), Enter (trigger interaction)
-5. **Rust → Haskell:** Interaction via TCP NDJSON
+5. **Rust → Haskell:** Interaction via Unix socket NDJSON
 
 ### Protocol Reference
 
@@ -49,8 +49,8 @@ All types match `/Users/inannamalick/dev/tidepool/haskell/dsl/core/src/Tidepool/
 
 ### Standalone (testing)
 ```bash
-cargo run -p tui-sidebar --release
-# Listens on port 7433, waits for connection
+cargo run -p tui-sidebar --release -- --socket .tidepool/sockets/tui.sock
+# Connects to control-server, waits for commands
 ```
 
 ### Hybrid Tidepool (recommended)
@@ -62,7 +62,7 @@ cd /Users/inannamalick/dev/tidepool
 This launches the Hybrid Tidepool architecture:
 - **process-compose**: Orchestrates services with dependency management
   - control-server: Starts first, exposes HTTP health check (port 7434)
-  - tui-sidebar: Starts after control-server is healthy
+  - tui-sidebar: Starts after control-server is healthy, connects to it
   - mcp-server-bridge: socat Unix socket bridge for MCP visibility
 - **Zellij**: 3-pane layout for visualization
   - Pane 1: Welcome screen with instructions → **start Claude Code manually in your project**
@@ -80,7 +80,7 @@ claude-code               # Start Claude Code
 - Declarative dependency DAG (tui-sidebar waits for control-server health)
 - Automatic restart on failure with exponential backoff (2s initial, max 3 restarts)
 - Centralized logging to `.tidepool/logs/`
-- TCP port readiness probes for service validation
+- Unix socket readiness probes for service validation
 
 **vs. Previous Zellij-only approach:**
 - Replaces bash logic in KDL (port polling, backgrounding, error handling)
@@ -98,15 +98,15 @@ claude-code               # Start Claude Code
 
 | Module | Lines | Purpose |
 |--------|-------|---------|
-| `protocol.rs` | 140 | UISpec, Layout, Element, Interaction types |
-| `server.rs` | 120 | TCP listener, NDJSON framing, I/O tasks |
+| `protocol.rs` | 150 | UISpec, Layout, Element, Interaction types |
+| `server.rs` | 160 | Unix client, NDJSON framing, I/O tasks, health listener |
 | `ui_stack.rs` | 90 | Stack of active UIs (nested dialogs) |
-| `app.rs` | 130 | Main event loop (tokio::select!) |
-| `render.rs` | 240 | Recursive layout → ratatui widgets |
+| `app.rs` | 160 | Main event loop (tokio::select!) |
+| `render.rs` | 250 | Recursive layout → ratatui widgets |
 | `input.rs` | 120 | Keyboard → Interaction conversion |
-| `main.rs` | 50 | CLI entry, logging setup |
+| `main.rs` | 110 | CLI entry, logging setup, health listener init, retry logic |
 
-**Total:** ~890 lines
+**Total:** ~1040 lines
 
 ## Phase 1 MVP (Implemented)
 
@@ -165,13 +165,12 @@ claude-code               # Start Claude Code
 # Protocol roundtrip tests
 cargo test -p tui-sidebar
 
-# Manual TCP test (no Haskell)
+# Manual Unix Socket test (requires control-server)
 # Terminal 1:
-cargo run -p tui-sidebar
+cabal run tidepool-control-server
 
 # Terminal 2:
-echo '{"id":"test","layout":{"type":"Vertical","elements":[{"type":"Button","id":"b1","label":"OK"}]}}' | nc localhost 7433
-# Expected: Button appears, press Enter → ButtonClicked JSON printed
+cargo run -p tui-sidebar
 ```
 
 ## Integration with Haskell
@@ -202,21 +201,18 @@ showFormHandler input = do
 
 ### TUI Interpreter (Haskell Side)
 
-The `tidepool-tui-interpreter` package provides the TCP client:
+The `tidepool-control-server` package provides the Unix socket server:
 
 ```haskell
-import Tidepool.TUI.Interpreter
-
-withTUIConnection "localhost" "7433" $ \handle -> do
-  result <- runM $ runTUI handle $ runGraph handlers input
-  print result
+-- In Tidepool.Control.Server.hs
+-- Listens on .tidepool/sockets/tui.sock
+-- Accepts connections from tui-sidebar
 ```
 
 **Connection behavior:**
-- Blocks until tui-sidebar is running on port 7433
-- Sends UISpec as NDJSON
-- Waits for Interaction response
-- Closes connection after interaction
+- control-server starts and listens on `tui.sock`
+- tui-sidebar starts and connects to `tui.sock`
+- Bidirectional NDJSON over Unix socket
 
 ## Known Limitations (Phase 1)
 
@@ -232,9 +228,10 @@ withTUIConnection "localhost" "7433" $ \handle -> do
 
 | Decision | Rationale |
 |----------|-----------|
-| TCP (not Unix socket) | Consistent with mantle-agent pattern, cross-platform |
+| Unix Socket | Improved security and simpler local orchestration vs TCP |
+| Client-Server (Sidebar connects to Control) | Sidebar can be restarted independently; better alignment with service dependencies |
 | NDJSON framing | Human-readable, easy debugging, matches control-server protocol |
-| tokio async | Required for event loop (TCP + keyboard concurrently) |
+| tokio async | Required for event loop (Unix stream + keyboard concurrently) |
 | Polling keyboard | crossterm::event::read() blocks, incompatible with tokio::select! |
 | Immediate UI close | Phase 1 simplification; Phase 2 adds lifecycle management |
 | ratatui | Most popular Rust TUI library, well-maintained |
@@ -242,13 +239,13 @@ withTUIConnection "localhost" "7433" $ \handle -> do
 
 ## Troubleshooting
 
-### "Connection refused" when starting control-server
+### "Connection refused" when starting tui-sidebar
 
-**Problem:** tui-sidebar not running.
+**Problem:** control-server not running or not listening.
 
-**Fix:** Start tui-sidebar first: `cargo run -p tui-sidebar --release`
+**Fix:** Start control-server first: `cabal run tidepool-control-server`
 
-**Or:** Use Zellij layout to start all components: `zellij --layout .zellij/tidepool.kdl`
+**Or:** Use Zellij layout to start all components: `./start-augmented.sh`
 
 ### UI renders but keyboard doesn't work
 
