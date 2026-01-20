@@ -1,33 +1,35 @@
+# Tidepool Backend Orchestrator
+#
+# Manages headless services with health probes and auto-restart.
+# TTY-dependent processes (Claude Code, tui-sidebar) run in Zellij panes
+# and wait for this backend via socket polling.
+#
+# See .zellij/tidepool.kdl for the frontend layout.
+
 version: "0.5"
 
-# Global config
 log_location: .tidepool/logs/process-compose.log
-log_level: info
-ordered_shutdown: true  # Shutdown in reverse dependency order (tui-sidebar before control-server)
 
-# Process definitions
 processes:
-  # 1. Control Server (Haskell)
-  # Orchestrates tools, graph execution, and MCP
   control-server:
-    command: "dist-newstyle/build/aarch64-osx/ghc-9.12.2/tidepool-control-server-0.1.0.0/x/tidepool-control-server/noopt/build/tidepool-control-server/tidepool-control-server +RTS -N4"
+    # Pre-cleanup socket to prevent EADDRINUSE, then run server
+    command: |
+      rm -f .tidepool/sockets/control.sock .tidepool/sockets/tui.sock && \
+      dist-newstyle/build/aarch64-osx/ghc-9.12.2/tidepool-control-server-0.1.0.0/x/tidepool-control-server/noopt/build/tidepool-control-server/tidepool-control-server
+    is_daemon: true
     availability:
-      restart: "on_failure"
+      restart: on_failure
+      max_restarts: 5
     readiness_probe:
-      # Connect to Unix socket via mantle-agent health command
       exec:
-        command: "./scripts/health-check.sh"
+        # Source of truth: socket accepting connections
+        command: "nc -zU .tidepool/sockets/control.sock"
       initial_delay_seconds: 2
-      period_seconds: 2
-      timeout_seconds: 2
-      success_threshold: 1
+      period_seconds: 3
       failure_threshold: 10
+    shutdown:
+      command: "rm -f .tidepool/sockets/control.sock .tidepool/sockets/tui.sock"
     environment:
       - "TIDEPOOL_PROJECT_DIR=."
       - "TIDEPOOL_CONTROL_SOCKET=.tidepool/sockets/control.sock"
       - "TIDEPOOL_TUI_SOCKET=.tidepool/sockets/tui.sock"
-
-  # NOTE: tui-sidebar is NOT managed by process-compose because it requires
-  # a TTY for terminal rendering (raw mode, alternate screen). It runs directly
-  # in a Zellij pane instead - see .zellij/tidepool.kdl "TUI" pane.
-

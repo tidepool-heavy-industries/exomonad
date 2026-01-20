@@ -1,43 +1,39 @@
+// Tidepool Frontend Layout
+//
+// TTY-dependent panes that wait for backend (process-compose) to be ready.
+// Each pane spins on socket availability before launching its process.
+//
+// See process-compose.yaml for backend orchestration.
+
 layout {
-    // Status bar template
     default_tab_template {
-        pane size=1 borderless=true {
-            plugin location="zellij:tab-bar"
-        }
         children
         pane size=1 borderless=true {
-            plugin location="zellij:status-bar"
+            plugin location="zellij:compact-bar"
         }
     }
 
-    // Main tab
     tab name="Tidepool" focus=true {
         pane split_direction="vertical" {
 
-            // LEFT: Claude Code (auto-launch with debug mode)
+            // LEFT: Claude Code (waits for MCP backend)
             pane name="Claude Code" size="50%" focus=true {
-                command "claude"
-                args "-d" "--continue" "--dangerously-skip-permissions"
+                command "bash"
+                args "-c" "echo '⏳ Waiting for MCP backend...'; until nc -zU .tidepool/sockets/control.sock 2>/dev/null; do sleep 0.5; done; echo '✓ MCP ready!'; exec claude -d --continue --dangerously-skip-permissions"
             }
 
             pane split_direction="horizontal" {
 
-                // TOP-RIGHT: Process Dashboard
-                pane name="Orchestrator" size="33%" {
+                // TOP-RIGHT: TUI Sidebar (waits for tui.sock)
+                pane name="TUI Sidebar" size="50%" {
                     command "bash"
-                    args "-c" "./scripts/tidepool-runner.sh up --tui"
+                    args "-c" "echo '⏳ Waiting for TUI socket...'; until nc -zU .tidepool/sockets/tui.sock 2>/dev/null; do sleep 0.5; done; echo '✓ TUI socket ready!'; exec rust/target/debug/tui-sidebar --socket .tidepool/sockets/tui.sock --health-socket .tidepool/sockets/tui-sidebar.sock"
                 }
 
-                // MIDDLE-RIGHT: TUI Sidebar (waits for control-server)
-                pane name="TUI" size="33%" {
+                // BOTTOM-RIGHT: Backend Status (process-compose dashboard)
+                pane name="Backend" {
                     command "bash"
-                    args "-c" "echo 'Waiting for control-server...'; until nc -zU .tidepool/sockets/tui.sock 2>/dev/null; do sleep 0.5; done; echo 'Control server ready!'; RUST_LOG=info rust/target/debug/tui-sidebar --socket .tidepool/sockets/tui.sock --health-socket .tidepool/sockets/tui-sidebar.sock"
-                }
-
-                // BOTTOM-RIGHT: Dedicated Logs
-                pane name="Logs" {
-                    command "bash"
-                    args "-c" "sleep 2 && process-compose process logs control-server --follow"
+                    args "-c" "mkdir -p .tidepool/sockets .tidepool/logs; exec process-compose up --no-server"
                 }
             }
         }

@@ -19,6 +19,9 @@ fi
 # Create runtime directories
 mkdir -p .tidepool/{sockets,logs}
 
+# Clean up any stale sockets from previous runs
+rm -f .tidepool/sockets/*.sock
+
 # Build binaries if needed (fast if already built)
 echo "Checking binaries..."
 cabal build tidepool-control-server --enable-optimization=0 >/dev/null 2>&1 || {
@@ -34,24 +37,24 @@ cabal build tidepool-control-server --enable-optimization=0 >/dev/null 2>&1 || {
 if ! command -v process-compose &> /dev/null; then
     echo "ERROR: process-compose not installed"
     echo "Install with: brew install process-compose"
-    echo "Or download from: https://github.com/F1bonacc1/process-compose/releases"
     exit 1
 fi
 
-# Check for existing process-compose session
-if curl -sf http://localhost:8080/hostname > /dev/null 2>&1; then
-    echo "⚠️  Existing Tidepool session detected, shutting down..."
-    process-compose down --ordered-shutdown
-    sleep 2
+if ! command -v zellij &> /dev/null; then
+    echo "ERROR: zellij not installed"
+    echo "Install with: brew install zellij"
+    exit 1
 fi
 
-echo "Starting Hybrid Tidepool..."
-echo "  Teaching: ${TEACHING_ENABLED:-false}"
+echo "🌊 Starting Hybrid Tidepool..."
+echo ""
+echo "  Layout:"
+echo "    ├─ Claude Code (left)     - waits for MCP"
+echo "    ├─ TUI Sidebar (top-right) - waits for TUI socket"
+echo "    └─ Backend (bottom-right)  - process-compose dashboard"
+echo ""
 echo "  Logs: .tidepool/logs/"
 echo ""
-echo "Note: MCP server connects to control-server via TCP."
-echo "      If MCP shows 'failed' initially, use /mcp → Reconnect after services start."
-echo ""
 
-# Launch Zellij with the simplified layout
-zellij --layout .zellij/tidepool.kdl
+# Launch Zellij with the hybrid layout
+exec zellij --layout .zellij/tidepool.kdl
