@@ -46,6 +46,7 @@ import Tidepool.Control.ExoTools
   )
 import Tidepool.Control.PMTools
   ( pmApproveExpansionLogic, PmApproveExpansionArgs(..), PmApproveExpansionResult(..)
+  , pmPrioritizeLogic, PmPrioritizeArgs(..), PmPrioritizeResult(..), PrioritizeResultItem(..)
   )
 import Tidepool.BD.Interpreter (runBDIO, defaultBDConfig)
 import Tidepool.BD.GitInterpreter (runGitIO)
@@ -104,12 +105,41 @@ handleMcpTool logger lspSession maybeTuiHandle reqId toolName args = do
     "spawn_agents" -> handleSpawnAgentsTool logger lspSession reqId args
     "file_pr" -> handleFilePRTool logger lspSession reqId args
     "pm_approve_expansion" -> handlePmApproveExpansionTool logger lspSession reqId args
+    "pm_prioritize" -> handlePmPrioritizeTool logger reqId args
 
     _ -> do
       logError logger $ "  (unknown tool)"
       pure $ mcpToolError reqId $
         "Tool not found: " <> toolName <>
-        ". Available tools: find_callers, show_fields, show_constructors, teach-graph, exo_status, exo_complete, exo_reconstitute, pre_commit_check, spawn_agents, file_pr"
+        ". Available tools: find_callers, show_fields, show_constructors, teach-graph, exo_status, exo_complete, exo_reconstitute, pre_commit_check, spawn_agents, file_pr, pm_approve_expansion, pm_prioritize"
+
+-- | Handle the pm_prioritize tool.
+--
+-- Runs the pmPrioritizeLogic to batch update bead priorities with rationale.
+handlePmPrioritizeTool :: Logger -> Text -> Value -> IO ControlResponse
+handlePmPrioritizeTool logger reqId args = do
+  case fromJSON args of
+    Error err -> do
+      logError logger $ "  parse error: " <> T.pack err
+      pure $ mcpToolError reqId $ "Invalid pm_prioritize arguments: " <> T.pack err
+
+    Success ppArgs -> do
+      logDebug logger $ "  updates=" <> T.pack (show $ length $ ppaUpdates ppArgs)
+
+      resultOrErr <- try $ runM
+        $ runLog Debug
+        $ runBDIO defaultBDConfig
+        $ fmap unwrapSingleChoice (pmPrioritizeLogic ppArgs)
+
+      case resultOrErr of
+        Left (e :: SomeException) -> do
+          logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId $ "pm_prioritize failed: " <> T.pack (displayException e)
+
+        Right result -> do
+          let successes = filter priSuccess $ pprResults result
+          logInfo logger $ "[MCP:" <> reqId <> "] Successfully prioritized " <> T.pack (show $ length successes) <> " beads"
+          pure $ mcpToolSuccess reqId (toJSON result)
 
 -- | Handle the pre_commit_check tool.
 --
