@@ -46,6 +46,8 @@ import Tidepool.Control.Logging (Logger, logInfo, logDebug)
 import Tidepool.Control.Protocol (ToolDefinition(..))
 import Tidepool.Control.LSPTools
   ( FindCallersGraph, ShowFieldsGraph, ShowConstructorsGraph )
+import Tidepool.Control.TUITools
+  ( ConfirmActionGraph, SelectOptionGraph, RequestGuidanceGraph )
 import Tidepool.Control.ExoTools
   ( ExoStatusGraph, ExoCompleteGraph, ExoReconstituteGraph, SpawnAgentsGraph, FilePRGraph, PrReviewStatusGraph )
 import Tidepool.Control.PMTools
@@ -337,9 +339,9 @@ extractReferences session fileUri pos = do
     else pure $ Right $ map locationToText refs
   where
     -- Format Location as "Module.hs:42" or similar
-    locationToText (Location uri (Range (Position line _) _)) = 
-      let file = case T.stripPrefix "file://" uri of 
-            Just f -> T.takeWhileEnd (/= '/') f  -- Just filename
+    locationToText (Location uri (Range (Position line _) _)) =
+      let file = case T.stripPrefix "file://" uri of
+            Just f -> T.takeWhileEnd (/= '/') f
             Nothing -> uri
       in file <> ":" <> T.pack (show (line + 1))  -- 1-indexed for display
 
@@ -548,7 +550,7 @@ discoverSymbols logger session = do
 -- Opening a file from each package triggers HLS to load that component.
 triggerFiles :: [Text]
 triggerFiles =
-  [ "haskell/dsl/core/src/Tidepool/Graph/Types.hs"
+  ["haskell/dsl/core/src/Tidepool/Graph/Types.hs"
   , "haskell/control-server/src/Tidepool/Control/Server.hs"
   , "haskell/effects/llm-interpreter/src/Tidepool/LLM/Interpreter.hs"
   , "haskell/effects/lsp-interpreter/src/Tidepool/LSP/Interpreter.hs"
@@ -702,7 +704,7 @@ processSymbol logger session symName countRef visitedFilesRef targetCount = do
               hFlush stdout
               modifyIORef' countRef (+1)
               newCount <- readIORef countRef
-              when (newCount `mod` 50 == 0) $
+              when (newCount `mod` 50 == 0) $ 
                 logInfo logger $ "[Progress] " <> T.pack (show newCount) <> " examples generated"
 
             -- Return candidates for expansion
@@ -941,6 +943,9 @@ exportMCPTools logger = do
   let fcTools = reifyGraphEntries (Proxy @FindCallersGraph)
   let sfTools = reifyGraphEntries (Proxy @ShowFieldsGraph)
   let scTools = reifyGraphEntries (Proxy @ShowConstructorsGraph)
+  let caTools = reifyGraphEntries (Proxy @ConfirmActionGraph)
+  let soTools = reifyGraphEntries (Proxy @SelectOptionGraph)
+  let rgTools = reifyGraphEntries (Proxy @RequestGuidanceGraph)
 
   -- Extract tools from complex graphs via MCPExport (legacy pattern)
   let dgTools = reifyMCPTools (Proxy @DocGenGraph)
@@ -958,6 +963,9 @@ exportMCPTools logger = do
   logDebug logger $ "[MCP Discovery] FindCallersGraph: " <> T.pack (show (length fcTools)) <> " tools"
   logDebug logger $ "[MCP Discovery] ShowFieldsGraph: " <> T.pack (show (length sfTools)) <> " tools"
   logDebug logger $ "[MCP Discovery] ShowConstructorsGraph: " <> T.pack (show (length scTools)) <> " tools"
+  logDebug logger $ "[MCP Discovery] ConfirmActionGraph: " <> T.pack (show (length caTools)) <> " tools"
+  logDebug logger $ "[MCP Discovery] SelectOptionGraph: " <> T.pack (show (length soTools)) <> " tools"
+  logDebug logger $ "[MCP Discovery] RequestGuidanceGraph: " <> T.pack (show (length rgTools)) <> " tools"
   logDebug logger $ "[MCP Discovery] DocGenGraph: " <> T.pack (show (length dgTools)) <> " tools"
   logDebug logger $ "[MCP Discovery] ExoStatusGraph: " <> T.pack (show (length esTools)) <> " tools"
   logDebug logger $ "[MCP Discovery] ExoCompleteGraph: " <> T.pack (show (length ecTools)) <> " tools"
@@ -969,7 +977,7 @@ exportMCPTools logger = do
   logDebug logger $ "[MCP Discovery] PMProposeGraph: " <> T.pack (show (length pmProTools)) <> " tools"
   logDebug logger $ "[MCP Discovery] PrReviewStatusGraph: " <> T.pack (show (length prTools)) <> " tools"
 
-  let allTools = concat [fcTools, sfTools, scTools, dgTools, esTools, ecTools, erTools, saTools, fpTools, paeTools, pmPriTools, pmProTools, prTools]
+  let allTools = concat [fcTools, sfTools, scTools, caTools, soTools, rgTools, dgTools, esTools, ecTools, erTools, saTools, fpTools, paeTools, pmPriTools, pmProTools, prTools]
   logInfo logger $ "[MCP Discovery] Total: " <> T.pack (show (length allTools)) <> " tools discovered"
 
   -- Log tool names with entry points for verification

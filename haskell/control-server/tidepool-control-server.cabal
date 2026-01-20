@@ -30,6 +30,7 @@ library
         Tidepool.Control.PMTools
         Tidepool.Control.PMPropose
         Tidepool.Control.ExoTools
+        Tidepool.Control.TUITools
         Tidepool.Control.Export
         -- Scout (semantic code exploration)
         Tidepool.Control.Scout.Types
