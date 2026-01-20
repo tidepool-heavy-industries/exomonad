@@ -121,7 +121,7 @@ setup-gemini:
     @echo ""
     @echo "── Creating symlink at result/bin/mcp-server ──"
     @mkdir -p result/bin
-    @ln -sf $$(cabal list-bin tidepool-mcp-server) result/bin/mcp-server
+    @BINARY_PATH=$(cabal list-bin tidepool-mcp-server) && ln -sf "$$BINARY_PATH" result/bin/mcp-server
     @echo "✓ Setup complete. Gemini configuration is ready."
 
 # ─────────────────────────────────────────────────────────────

@@ -8,13 +8,16 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
 import Data.Aeson (FromJSON, ToJSON)
-import Tidepool.Schema (HasJSONSchema)
+import Tidepool.Schema (HasJSONSchema(..), TidepoolDefault(..))
+import Tidepool.StructuredOutput ()
+import Tidepool.StructuredOutput.Instances ()
 import Tidepool.MCP.Server
+import Tidepool.MCP.Tools.BdDispatch (bdDispatchTool)
 
 -- | Example input type
 newtype EchoInput = EchoInput { message :: Text }
   deriving stock (Show, Generic)
-  deriving anyclass (FromJSON, ToJSON, HasJSONSchema)
+  deriving anyclass (FromJSON, ToJSON)
 
 -- | Example output type
 newtype EchoOutput = EchoOutput { echoed :: Text }
@@ -28,15 +31,15 @@ echoHandler (EchoInput msg) = pure $ EchoOutput ("Echo: " <> msg)
 main :: IO ()
 main = do
   let tool = makeMcpTool
-        (Proxy @EchoInput)
+        (Proxy @(TidepoolDefault EchoInput))
         "echo"
         "Echo back the input message"
-        echoHandler
+        (\(TidepoolDefault input) -> echoHandler input)
 
   let config = McpConfig
-        { mcName = "example-server"
+        { mcName = "tidepool-mcp-server"
         , mcVersion = "0.1.0"
-        , mcTools = [tool]
+        , mcTools = [tool, bdDispatchTool]
         }
 
   runMcpServer config
