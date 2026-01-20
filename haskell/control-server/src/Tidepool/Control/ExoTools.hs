@@ -47,6 +47,13 @@ module Tidepool.Control.ExoTools
   , SpawnAgentsArgs(..)
   , SpawnAgentsResult(..)
 
+    -- * File PR
+  , FilePRGraph(..)
+  , filePRHandlers
+  , filePRLogic
+  , FilePRArgs(..)
+  , FilePRResult(..)
+
     -- * Helpers
   , parseBeadId
   , slugify
@@ -65,9 +72,9 @@ import qualified Data.Text as T
 import GHC.Generics (Generic)
 import System.FilePath ((</>))
 
-import Tidepool.Effects.BD (BD, BeadInfo(..), BeadStatus(..), getBead, closeBead, sync)
+import Tidepool.Effects.BD (BD, BeadInfo(..), BeadStatus(..), DependencyInfo(..), getBead, closeBead, sync)
 import Tidepool.Effects.Git (Git, WorktreeInfo(..), getWorktreeInfo, getDirtyFiles)
-import Tidepool.Effects.GitHub (GitHub, PullRequest(..), listPullRequests, PRFilter(..), Repo(..))
+import Tidepool.Effects.GitHub (GitHub, PullRequest(..), listPullRequests, PRFilter(..), Repo(..), PRCreateSpec(..), PRUrl(..), createPR)
 import Tidepool.Effects.Justfile (Justfile, runRecipe, JustResult(..))
 import Tidepool.Effects.Worktree (Worktree, WorktreeSpec(..), WorktreePath(..), createWorktree)
 import Tidepool.Graph.Generic (AsHandler, type (:-))
@@ -589,3 +596,122 @@ slugify title =
   in if null parts
      then "untitled"
      else T.intercalate "-" $ map T.toLower parts
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- FILE-PR GRAPH
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Arguments for file_pr tool.
+data FilePRArgs = FilePRArgs
+  { fpaBeadId :: Maybe Text  -- ^ Optional bead ID. If not provided, inferred from branch.
+  , fpaTitle  :: Maybe Text  -- ^ Optional PR title. If not provided, derived from bead.
+  }
+  deriving stock (Show, Eq, Generic)
+
+instance HasJSONSchema FilePRArgs where
+  jsonSchema = objectSchema
+    [ ("bead_id", describeField "bead_id" "Optional bead ID (e.g. tidepool-huj). If omitted, inferred from branch name." (emptySchema TString))
+    , ("title", describeField "title" "Optional PR title. If omitted, derived from bead title." (emptySchema TString))
+    ]
+    []
+
+instance FromJSON FilePRArgs where
+  parseJSON = withObject "FilePRArgs" $ \v ->
+    FilePRArgs <$> v .:? "bead_id" <*> v .:? "title"
+
+instance ToJSON FilePRArgs where
+  toJSON args = object
+    [ "bead_id" .= fpaBeadId args
+    , "title" .= fpaTitle args
+    ]
+
+-- | Result of file_pr tool.
+data FilePRResult = FilePRResult
+  { fprUrl :: Text
+  }
+  deriving stock (Show, Eq, Generic)
+
+instance ToJSON FilePRResult where
+  toJSON res = object ["url" .= fprUrl res]
+
+-- | Graph definition for file_pr tool.
+data FilePRGraph mode = FilePRGraph
+  { fpEntry :: mode :- EntryNode FilePRArgs
+      :@ MCPExport
+      :@ MCPToolDef '("file_pr", "File a pull request with full bead context in the body.")
+
+  , fpRun :: mode :- LogicNode
+      :@ Input FilePRArgs
+      :@ UsesEffects '[BD, Git, GitHub, Goto Exit FilePRResult]
+
+  , fpExit :: mode :- ExitNode FilePRResult
+  }
+  deriving Generic
+
+-- | Handlers for file_pr graph.
+filePRHandlers
+  :: (Member BD es, Member Git es, Member GitHub es)
+  => FilePRGraph (AsHandler es)
+filePRHandlers = FilePRGraph
+  { fpEntry = ()
+  , fpRun = filePRLogic
+  , fpExit = ()
+  }
+
+-- | Core logic for file_pr.
+filePRLogic
+  :: (Member BD es, Member Git es, Member GitHub es)
+  => FilePRArgs
+  -> Eff es (GotoChoice '[To Exit FilePRResult])
+filePRLogic args = do
+  -- 1. Get Worktree/Git info
+  mWt <- getWorktreeInfo
+  
+  -- 2. Determine Bead ID
+  let branchBeadId = case mWt of
+        Just wt -> parseBeadId wt.wiBranch
+        Nothing -> Nothing
+      mTargetBeadId = fpaBeadId args <|> branchBeadId
+
+  case mTargetBeadId of
+    Nothing -> error "Could not determine bead ID. Please provide bead_id argument."
+    Just bid -> do
+      -- 3. Get Bead Info
+      mBead <- getBead bid
+      case mBead of
+        Nothing -> error $ "Bead " <> T.unpack bid <> " not found."
+        Just bead -> do
+          -- 4. Prepare PR Spec
+          let headBranch = maybe "HEAD" (\wt -> wt.wiBranch) mWt
+              title = fromMaybe ("[" <> bid <> "] " <> bead.biTitle) args.fpaTitle
+              body = formatPRBody bead
+              repo = Repo "tidepool-heavy-industries/tidepool"
+              spec = PRCreateSpec
+                { prcsRepo = repo
+                , prcsHead = headBranch
+                , prcsBase = "main"
+                , prcsTitle = title
+                , prcsBody = body
+                }
+          
+          -- 5. Create PR
+          PRUrl url <- createPR spec
+          pure $ gotoExit $ FilePRResult url
+
+-- | Format PR body from bead info.
+formatPRBody :: BeadInfo -> Text
+formatPRBody bead = T.unlines $
+  [ "Closes " <> bead.biId
+  , ""
+  , "## Description"
+  , fromMaybe "(No description)" bead.biDescription
+  , ""
+  ] ++
+  (if null bead.biDependencies
+   then []
+   else ["## Dependencies", ""] ++ map formatDep bead.biDependencies ++ [""]) ++
+  (if null bead.biDependents
+   then []
+   else ["## Dependents", ""] ++ map formatDep bead.biDependents ++ [""])
+  where
+    formatDep dep = "  → " <> dep.diId <> ": " <> dep.diTitle

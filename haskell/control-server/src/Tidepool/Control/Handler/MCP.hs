@@ -36,11 +36,12 @@ import Tidepool.Control.LSPTools
   , showConstructorsLogic, ShowConstructorsArgs(..), ShowConstructorsResult(..)
   )
 import Tidepool.Control.ExoTools
-  ( exoStatusLogic, ExoStatusArgs(..), ExoStatusResult
+  ( exoStatusLogic, ExoStatusArgs(..)
   , exoCompleteLogic, ExoCompleteArgs(..), ExoCompleteResult(..)
-  , exoReconstituteLogic, ExoReconstituteArgs(..), ExoReconstituteResult
+  , exoReconstituteLogic, ExoReconstituteArgs(..)
   , preCommitCheckLogic, PreCommitCheckArgs(..), PreCommitCheckResult(..)
   , spawnAgentsLogic, SpawnAgentsArgs(..), SpawnAgentsResult(..)
+  , filePRLogic, FilePRArgs(..), FilePRResult(..)
   )
 import Tidepool.BD.Interpreter (runBDIO, defaultBDConfig)
 import Tidepool.BD.GitInterpreter (runGitIO)
@@ -97,12 +98,13 @@ handleMcpTool logger lspSession maybeTuiHandle reqId toolName args = do
     "exo_reconstitute" -> handleExoReconstituteTool logger lspSession reqId args
     "pre_commit_check" -> handlePreCommitCheckTool logger reqId args
     "spawn_agents" -> handleSpawnAgentsTool logger lspSession reqId args
+    "file_pr" -> handleFilePRTool logger lspSession reqId args
 
     _ -> do
       logError logger $ "  (unknown tool)"
       pure $ mcpToolError reqId $
         "Tool not found: " <> toolName <>
-        ". Available tools: find_callers, show_fields, show_constructors, teach-graph, exo_status, exo_complete, exo_reconstitute, pre_commit_check, spawn_agents"
+        ". Available tools: find_callers, show_fields, show_constructors, teach-graph, exo_status, exo_complete, exo_reconstitute, pre_commit_check, spawn_agents, file_pr"
 
 -- | Handle the pre_commit_check tool.
 --
@@ -428,4 +430,33 @@ handleShowConstructorsTool logger lspSession maybeTuiHandle reqId args = do
 
         Right result -> do
           logInfo logger $ "[MCP:" <> reqId <> "] Found " <> T.pack (show $ length $ scrConstructors result) <> " constructors"
+          pure $ mcpToolSuccess reqId (toJSON result)
+
+-- | Handle the file_pr tool.
+--
+-- Runs the FilePRGraph logic to file a pull request with bead context.
+handleFilePRTool :: Logger -> LSPSession -> Text -> Value -> IO ControlResponse
+handleFilePRTool logger _lspSession reqId args = do
+  case fromJSON args of
+    Error err -> do
+      logError logger $ "  parse error: " <> T.pack err
+      pure $ mcpToolError reqId $ "Invalid file_pr arguments: " <> T.pack err
+
+    Success fpArgs -> do
+      logDebug logger $ "  bead_id=" <> T.pack (show fpArgs.fpaBeadId)
+
+      resultOrErr <- try $ runM
+        $ runLog Debug
+        $ runBDIO defaultBDConfig
+        $ runGitIO
+        $ runGitHubIO defaultGitHubConfig
+        $ fmap unwrapSingleChoice (filePRLogic fpArgs)
+
+      case resultOrErr of
+        Left (e :: SomeException) -> do
+          logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId $ "file_pr failed: " <> T.pack (displayException e)
+
+        Right result -> do
+          logInfo logger $ "[MCP:" <> reqId <> "] PR created: " <> result.fprUrl
           pure $ mcpToolSuccess reqId (toJSON result)
