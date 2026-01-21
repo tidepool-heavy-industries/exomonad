@@ -1,61 +1,70 @@
 # TUI Sidebar
 
-Unix socket client that renders interactive terminal UIs for Tidepool graph handlers.
+Unix socket client that renders interactive terminal UIs for Tidepool graph handlers using popup-tui.
 
-**Purpose:** Provides a TUI effect implementation for Haskell agents. Connects to `control-server` via Unix socket, receives UISpec messages, renders them using ratatui, captures keyboard input, and sends Interaction events back.
+**Purpose:** Provides a TUI effect implementation for Haskell agents. Connects to `control-server` via Unix socket, receives PopupDefinition messages, renders them using tui-realm + ratatui, captures keyboard/mouse input, and sends PopupResult back.
 
-**Status:** Phase 1 MVP - Text, Button, Input, Progress rendering with Tab+Enter navigation.
+**Status:** Ported to popup-tui - Full form support with Slider, Checkbox, Textbox, Choice, Multiselect components.
 
 ## Architecture
 
 ```
 Haskell Graph Handler                    Rust TUI Sidebar
         │                                       │
-        │ showUI formSpec                       │
+        │ showUI popupDef                       │
         ▼                                       │
-tidepool-tui-interpreter ─────UISpec───────▶ Unix Socket
+tidepool-tui-interpreter ─PopupDefinition──▶ Unix Socket
  (Part of control-server)    (NDJSON)           │
         │                                       ▼
-        │                                  Event Loop
+        │                                  Blocking Event Loop
+        │                                 (tokio::spawn_blocking)
         │                                       │
         │                                  ┌────┴────┐
         │                                  │         │
-        │                               Render   Keyboard
-        │                                (ratatui) (crossterm)
+        │                               Render   Keyboard/Mouse
+        │                              (tui-realm) (crossterm)
         │                                       │
-        ◀────────────Interaction────────────────┘
-              (ButtonClicked, etc.)
+        ◀────────────PopupResult────────────────┘
+              (button + all form values)
 ```
 
 ### Data Flow
 
-1. **Haskell → Rust:** UISpec via Unix socket NDJSON (lines 200-445 of TUI.hs)
-2. **Event Loop:** tokio::select! over Unix stream messages and keyboard polling
-3. **Rendering:** UISpec → ratatui widgets (recursive layout)
-4. **Input:** Tab (cycle focus), Enter (trigger interaction)
-5. **Rust → Haskell:** Interaction via Unix socket NDJSON
+1. **Haskell → Rust:** PopupDefinition via Unix socket NDJSON
+   - Title + list of components (Text, Slider, Checkbox, Textbox, Choice, Multiselect, Group)
+   - Each component has ID, type, and optional visibility rules
+2. **Rust Processing:**
+   - Deserialize PopupDefinition
+   - Build tui-realm components from definition
+   - Run blocking event loop (crossterm::event::read())
+3. **Rendering:** PopupComponent renders all visible components with tui-realm MockComponent trait
+4. **Input:** Tab/Shift+Tab (navigate), Arrow keys (adjust/select), Enter (submit), Esc (cancel), Mouse (click to focus/activate)
+5. **Rust → Haskell:** PopupResult via Unix socket NDJSON
+   - button: "submit" or "decline"
+   - values: JSON object with all form values (only visible, interactive components)
 
 ### Protocol Reference
 
-All types match `/Users/inannamalick/dev/tidepool/haskell/dsl/core/src/Tidepool/Effect/TUI.hs` exactly.
+All types defined in `/Users/inannamalick/hangars/tidepool/repo/rust/tui-sidebar/src/protocol.rs`.
 
-**Critical constraints:**
-- `#[serde(tag = "type")]` for all enums (tagged union serialization)
-- Field names use snake_case in JSON (Rust convention)
-- Split ratio is u8 (0-100)
-- Progress uses `value` and `max` fields in JSON
+**Key differences from old protocol:**
+- **Request-response pattern:** One PopupDefinition → One PopupResult (not streaming interactions)
+- **Flat component list:** All components in a single array, not nested layouts
+- **Component-based:** Each component is self-contained with ID, type, label, and optional visibility rule
+- **Visibility rules:** Components can be hidden based on state of other components (checked, value comparisons)
+- **All values returned:** Result includes all visible interactive component values, not just triggered element
 
 ## Running
 
 ### Standalone (testing)
 ```bash
 cargo run -p tui-sidebar --release -- --socket .tidepool/sockets/tui.sock
-# Connects to control-server, waits for commands
+# Connects to control-server, waits for PopupDefinition commands
 ```
 
 ### Hybrid Tidepool (recommended)
 ```bash
-cd /Users/inannamalick/dev/tidepool
+cd /Users/inannamalick/hangars/tidepool/repo
 ./start-augmented.sh
 ```
 
@@ -63,30 +72,13 @@ This launches the Hybrid Tidepool architecture:
 - **process-compose**: Orchestrates services with dependency management
   - control-server: Starts first, supports Unix socket health check
   - tui-sidebar: Starts after control-server is healthy, connects to it
-  - mcp-server-bridge: socat Unix socket bridge for MCP visibility
 - **Zellij**: 3-pane layout for visualization
-  - Pane 1: Welcome screen with instructions → **start Claude Code manually in your project**
-  - Pane 2: process-compose TUI dashboard (live service status)
-  - Pane 3: control-server logs
 
-After Zellij launches, in Pane 1:
-```bash
-cd /path/to/your/project  # Navigate to your project
-claude-code               # Start Claude Code
-```
-
-**Orchestration features (process-compose):**
-- Unix socket health checks ensure control-server is ready before starting dependencies
-- Declarative dependency DAG (tui-sidebar waits for control-server health)
-- Automatic restart on failure with exponential backoff (2s initial, max 3 restarts)
+**Orchestration features:**
+- Unix socket health checks ensure control-server is ready
+- Declarative dependency DAG
+- Automatic restart on failure with exponential backoff
 - Centralized logging to `.tidepool/logs/`
-- Unix socket readiness probes for service validation
-
-**vs. Previous Zellij-only approach:**
-- Replaces bash logic in KDL (port polling, backgrounding, error handling)
-- Declarative YAML config instead of embedded bash scripts
-- process-compose dashboard provides real-time service status
-- Unified logging and monitoring for all services
 
 ### Environment Variables
 
@@ -98,66 +90,75 @@ claude-code               # Start Claude Code
 
 | Module | Lines | Purpose |
 |--------|-------|---------|
-| `protocol.rs` | 150 | UISpec, Layout, Element, Interaction types |
-| `server.rs` | 160 | Unix client, NDJSON framing, I/O tasks, health listener |
-| `ui_stack.rs` | 90 | Stack of active UIs (nested dialogs) |
-| `app.rs` | 160 | Main event loop (tokio::select!) |
-| `render.rs` | 250 | Recursive layout → ratatui widgets |
-| `input.rs` | 120 | Keyboard → Interaction conversion |
+| `protocol.rs` | 236 | PopupDefinition, Component, ComponentSpec, VisibilityRule, PopupState, ElementValue, PopupResult |
+| `server.rs` | 176 | Unix client, NDJSON framing, I/O tasks, health listener |
+| `app.rs` | 234 | Async wrapper + blocking popup event loop (tokio::spawn_blocking) |
+| `realm/mod.rs` | 468 | PopupComponent, visibility evaluation, focus management, mouse handling |
+| `realm/builder.rs` | 144 | Build tui-realm components from PopupDefinition |
+| `realm/components/` | ~1000 | 7 tui-realm MockComponent implementations (text, slider, checkbox, textbox, choice, multiselect) |
 | `main.rs` | 110 | CLI entry, logging setup, health listener init, retry logic |
 
-**Total:** ~1040 lines
+**Total:** ~2400 lines
 
-## Phase 1 MVP (Implemented)
+## Supported Components
 
-### Supported Elements
-- ✅ Text - Static text display
-- ✅ Button - Focusable, sends ButtonClicked
-- ✅ Input - Focusable, sends InputSubmitted (no editing yet)
-- ✅ Progress - Progress bar display
+### Interactive Components
+- ✅ **Slider** - Numeric input with min/max, arrow keys to adjust
+- ✅ **Checkbox** - Boolean toggle with space/enter
+- ✅ **Textbox** - Text input with typing, backspace, optional multiline
+- ✅ **Choice** - Single-select dropdown, arrow keys to cycle
+- ✅ **Multiselect** - Multiple selection list, space to toggle items
 
-### Supported Layouts
-- ✅ Vertical - Stack elements vertically
-- ✅ Horizontal - Stack elements horizontally
-- ✅ Split - Left/right with ratio
+### Display Components
+- ✅ **Text** - Static text display
+- ✅ **Group** - Section header (rendered as "--- Label ---")
 
 ### Keyboard Navigation
-- ✅ Tab - Cycle focus through focusable elements
-- ✅ Enter - Trigger interaction (ButtonClicked, InputSubmitted)
-- ✅ Ctrl+C - Exit immediately
+- ✅ **Tab** / **Shift+Tab** - Navigate between focusable components
+- ✅ **Enter** - Submit form (returns all values with button="submit")
+- ✅ **Esc** - Cancel form (returns all values with button="decline")
+- ✅ **Arrow keys** - Adjust slider, cycle choice, navigate multiselect
+- ✅ **Space** - Toggle checkbox, toggle multiselect item (if focused)
+- ✅ **Characters** - Type into textbox (if focused)
+- ✅ **Backspace** - Delete character in textbox
 
-### Rendering
-- ✅ Recursive layout rendering (handles nested Split)
-- ✅ Focus highlighting (green background for buttons, cyan for inputs)
-- ✅ ratatui widgets (Paragraph, Block, Gauge)
+### Mouse Support
+- ✅ **Click** - Focus component and trigger action (checkbox toggle, choice cycle, multiselect toggle)
 
-## Phase 2/3 (Planned)
+### Visibility Rules
+- ✅ **Checked(id)** - Show if checkbox is checked
+- ✅ **Equals({id: value})** - Show if choice equals value
+- ✅ **GreaterThan/LessThan** - Show if slider value meets condition
+- ✅ **CountEquals/CountGreaterThan** - Show if multiselect has N items selected
 
-### Additional Elements (Phase 2)
-- ❌ Table - Data table with row selection
-- ❌ Select - Dropdown with arrow key navigation
-- ❌ List - Simple list display
+## Rendering Architecture (tui-realm)
 
-### Additional Interactions (Phase 2)
-- ❌ TableRowSelected - User selected table row
-- ❌ SelectionChanged - Dropdown selection changed
+The popup-tui pattern uses **tui-realm** for component-based TUI rendering:
 
-### Dynamic Updates (Phase 2)
-- ❌ UpdateUI messages (modify elements without full re-render)
-- ❌ Progress bar updates
-- ❌ Text content updates
+### MockComponent Trait
+Each component implements `tuirealm::MockComponent`:
 
-### Input Editing (Phase 3)
-- ❌ Character accumulation (type into inputs)
-- ❌ Backspace support
-- ❌ Cursor position display
-- ❌ InputChanged events (keystroke)
+```rust
+pub trait MockComponent {
+    fn view(&mut self, frame: &mut Frame, area: Rect);
+    fn query(&self, attr: Attribute) -> Option<AttrValue>;
+    fn attr(&mut self, attr: Attribute, value: AttrValue);
+    fn state(&self) -> State;
+    fn perform(&mut self, cmd: Cmd) -> CmdResult;
+}
+```
 
-### Error Handling (Phase 3)
-- ❌ Malformed JSON recovery
-- ❌ Connection loss recovery
-- ❌ File logging (tracing appender)
-- ❌ Graceful Ctrl+C shutdown
+### Component Lifecycle
+1. **Build** - `builder.rs` creates MockComponent instances from ComponentSpec
+2. **Render** - `view()` draws component in allocated Rect
+3. **Command** - `perform(cmd)` handles keyboard/mouse commands (Move, Submit, Type, Cancel)
+4. **State sync** - `state()` returns current value, synced to PopupState after each command
+
+### Focus Management
+- PopupComponent tracks `focused_component` index
+- Focus visible in rendering (borders, colors)
+- Tab/Shift+Tab cycles through focusable components
+- Mouse click changes focus + triggers action
 
 ## Testing
 
@@ -184,19 +185,22 @@ import Tidepool.Effect.TUI
 
 showFormHandler :: Input -> Eff (TUI ': effs) (GotoChoice targets)
 showFormHandler input = do
-  interaction <- showUI $ UISpec
-    { uiId = "config-form"
-    , uiLayout = Vertical
-        [ EText "title" "Configure Options"
-        , EInput "name" "Name" ""
-        , EButton "submit" "Submit"
-        , EButton "cancel" "Cancel"
+  result <- showUI $ PopupDefinition
+    { pdTitle = "Configure Options"
+    , pdComponents =
+        [ Component "topic" (Text "Choose a topic to explore") Nothing
+        , Component "budget" (Slider "Budget" 10 100 50) Nothing
+        , Component "includeTests" (Checkbox "Include test files" False) Nothing
+        , Component "submit" (Textbox "Submit" Nothing Nothing) Nothing
         ]
     }
 
-  case interaction of
-    ButtonClicked _ "submit" -> pure $ gotoChoice @"process" config
-    ButtonClicked _ "cancel" -> pure $ gotoExit cancelled
+  case result.button of
+    "submit" -> do
+      let budget = lookupNumber "budget" result.values
+      let includeTests = lookupBool "includeTests" result.values
+      pure $ gotoChoice @"process" (Config budget includeTests)
+    _ -> pure $ gotoExit cancelled
 ```
 
 ### TUI Interpreter (Haskell Side)
@@ -214,28 +218,19 @@ The `tidepool-control-server` package provides the Unix socket server:
 - tui-sidebar starts and connects to `tui.sock`
 - Bidirectional NDJSON over Unix socket
 
-## Known Limitations (Phase 1)
-
-1. **No input editing** - Input fields display value but don't support typing (Phase 3)
-2. **Auto-pop after interaction** - UI automatically pops after sending Interaction; multi-step flows use repeated PushUI
-3. **No dynamic updates** - Can't update progress bars mid-render (Phase 2)
-4. **Fixed element sizing** - All elements get equal height (Phase 2: smart sizing)
-5. **No Table/Select/List** - These widgets not implemented (Phase 2)
-6. **Polling keyboard** - 100ms sleep (crossterm doesn't integrate with tokio)
-7. **No error recovery** - Malformed JSON logged but not handled gracefully (Phase 3)
-
 ## Design Decisions
 
 | Decision | Rationale |
 |----------|-----------|
-| Unix Socket | Improved security and simpler local orchestration vs TCP |
-| Client-Server (Sidebar connects to Control) | Sidebar can be restarted independently; better alignment with service dependencies |
-| NDJSON framing | Human-readable, easy debugging, matches control-server protocol |
-| tokio async | Required for event loop (Unix stream + keyboard concurrently) |
-| Polling keyboard | crossterm::event::read() blocks, incompatible with tokio::select! |
-| Immediate UI close | Phase 1 simplification; Phase 2 adds lifecycle management |
-| ratatui | Most popular Rust TUI library, well-maintained |
-| UI stack | Supports nested dialogs (Phase 2+), even though Phase 1 doesn't use it |
+| **popup-tui pattern** | Proven component model with visibility rules and mouse support |
+| **tui-realm** | Component abstraction (MockComponent trait) enables reusable widgets |
+| **Request-response** | Simpler than streaming interactions, fits form-based workflows |
+| **Blocking event loop** | popup-tui uses crossterm::event::read() which is blocking; wrapped in tokio::spawn_blocking |
+| **Flat component list** | Easier to reference components by ID, supports visibility rules |
+| **Visibility rules** | Enable dynamic forms (show/hide based on other inputs) |
+| **All values in result** | Haskell gets complete form state, not just triggered element |
+| **Unix Socket** | Improved security and simpler local orchestration vs TCP |
+| **NDJSON framing** | Human-readable, easy debugging |
 
 ## Troubleshooting
 
@@ -247,17 +242,17 @@ The `tidepool-control-server` package provides the Unix socket server:
 
 **Or:** Use Zellij layout to start all components: `./start-augmented.sh`
 
-### UI renders but keyboard doesn't work
+### Components not rendering
 
-**Problem:** Terminal not in raw mode or focus in wrong pane.
+**Problem:** Component visibility rule hiding it.
 
-**Fix:** Click on the tui-sidebar pane (Pane 3) to focus it.
+**Fix:** Check visibility rules - components may be hidden based on other component states.
 
-### Button press does nothing
+### Mouse clicks not working
 
-**Problem:** Button not focused.
+**Problem:** Clicking outside component area or on non-interactive component.
 
-**Fix:** Press Tab to cycle focus until button is highlighted (green background).
+**Fix:** Ensure clicking within component bounds. Text and Group are not interactive.
 
 ### Garbage on screen after exit
 
@@ -267,17 +262,17 @@ The `tidepool-control-server` package provides the Unix socket server:
 
 ## Future Enhancements
 
-1. **Daemon mode** - Long-lived process that accepts multiple connections
-2. **Session management** - Reuse connections, reduce latency
-3. **Smart layout sizing** - Calculate element heights based on content
-4. **Mouse support** - Click buttons directly (crossterm supports this)
-5. **Themes** - Customizable colors, styles
-6. **Logging to file** - Avoid polluting terminal output
-7. **Metrics** - Interaction latency, render times
+1. **Nested groups** - Hierarchical component organization
+2. **Validation rules** - Client-side validation before submit
+3. **Custom themes** - Configurable colors, styles
+4. **Logging to file** - Avoid polluting terminal output
+5. **Metrics** - Interaction latency, render times
 
 ## References
 
-- **Protocol source:** `/Users/inannamalick/dev/tidepool/haskell/dsl/core/src/Tidepool/Effect/TUI.hs`
-- **TUI interpreter:** `/Users/inannamalick/dev/tidepool/haskell/effects/tui-interpreter/`
+- **Protocol source:** `/Users/inannamalick/hangars/tidepool/repo/haskell/dsl/core/src/Tidepool/Effect/TUI.hs`
+- **TUI interpreter:** `/Users/inannamalick/hangars/tidepool/repo/haskell/effects/tui-interpreter/`
+- **popup-tui reference:** `~/dev/popup-tui` (source implementation)
+- **tuirealm docs:** https://docs.rs/tuirealm/
 - **ratatui docs:** https://docs.rs/ratatui/
 - **crossterm docs:** https://docs.rs/crossterm/

@@ -13,6 +13,9 @@ module Tidepool.Effect.Decision
 
 import Control.Monad.Freer (Eff, Member)
 import Data.Aeson (ToJSON(..), toJSON)
+import qualified Data.Aeson as A
+import qualified Data.Aeson.Key as Key
+import qualified Data.Aeson.KeyMap as KM
 import qualified Data.Text as T
 import Data.Time (diffUTCTime)
 import Tidepool.Effect.Decision.Types
@@ -25,48 +28,56 @@ import Tidepool.Effect.Types (Time, Log, DecisionLog, getCurrentTime, logInfoWit
 -- and logs the resulting decision via the Log and DecisionLog effects.
 requestDecision :: (Member TUI r, Member Time r, Member Log r, Member DecisionLog r) => DecisionContext -> Eff r Decision
 requestDecision ctx = do
-  let mkButton b =
+  let beadLabels = map (\b ->
         let icon = case b.bsPriority of
               0 -> "🔴"
               1 -> "🟡"
               2 -> "🔵"
               _ -> "⚪"
-            label = icon <> " [" <> b.bsId <> "] " <> b.bsTitle
-        in EButton ("bead:" <> b.bsId) label
+        in icon <> " [" <> b.bsId <> "] " <> b.bsTitle) ctx.dcReadyBeads
 
-  let ui = UISpec "decision-request" $ Vertical $
-        [ EText "prompt" ctx.dcPrompt
-        ] ++
-        map mkButton ctx.dcReadyBeads ++
-        [ EButton "continue" "Continue"
-        , EButton "abort" "Abort"
-        , EInput "guidance" "Provide Guidance (Enter to submit)" ""
-        ]
+  let ui = PopupDefinition
+        { pdTitle = "Decision Required"
+        , pdComponents =
+            [ mkText "prompt" ctx.dcPrompt Nothing
+            ] ++
+            (if null ctx.dcReadyBeads then []
+             else [ mkChoice "bead_selection" "Select a bead" beadLabels Nothing Nothing ]) ++
+            [ mkTextbox "guidance" "Or provide guidance" (Just "Enter custom guidance...") Nothing Nothing
+            ]
+        }
 
-  let options =
-        map (\b -> let icon = case b.bsPriority of
-                         0 -> "🔴"
-                         1 -> "🟡"
-                         2 -> "🔵"
-                         _ -> "⚪"
-                   in icon <> " [" <> b.bsId <> "] " <> b.bsTitle) ctx.dcReadyBeads ++
-        [ "Continue", "Abort", "Provide Guidance (Enter to submit)" ]
+  let options = beadLabels ++ [ "Continue", "Abort", "Provide Guidance" ]
 
   start <- getCurrentTime
-  interaction <- showUI ui
+  result <- showUI ui
   end <- getCurrentTime
 
-  decision <- case interaction of
-    ButtonClicked _ bid
-      | "bead:" `T.isPrefixOf` bid -> pure $ SelectBead (T.drop 5 bid)
-      | bid == "continue" -> pure Continue
-      | bid == "abort" -> pure Abort
-      | otherwise -> requestDecision ctx
-    InputSubmitted _ "guidance" val -> pure $ ProvideGuidance val
+  let lookupValue :: T.Text -> A.Value -> Maybe A.Value
+      lookupValue key (A.Object o) = KM.lookup (Key.fromText key) o
+      lookupValue _ _ = Nothing
+
+  decision <- case result.prButton of
+    "submit" -> do
+      -- Check if guidance was provided
+      case lookupValue "guidance" result.prValues of
+        Just (A.String val) | not (T.null val) -> pure $ ProvideGuidance val
+        _ -> do
+          -- Check if a bead was selected
+          case lookupValue "bead_selection" result.prValues of
+            Just (A.String selectedLabel) -> do
+              -- Extract bead ID from the label (format: "icon [ID] Title")
+              case T.splitOn "] " selectedLabel of
+                (prefix:_) -> case T.stripPrefix "[" (T.takeWhileEnd (/= '[') prefix) of
+                  Just beadId -> pure $ SelectBead beadId
+                  Nothing -> pure Continue
+                _ -> pure Continue
+            _ -> pure Continue
+    "decline" -> pure Abort
     _ -> requestDecision ctx
 
   -- Log decision trace
-  let latencyMs = round $ realToFrac (diffUTCTime end start) * 1000
+  let latencyMs = round $ realToFrac (diffUTCTime end start) * (1000 :: Double)
   let trace = DecisionTrace
         { dtContext = ctx
         , dtOptionsPresented = options

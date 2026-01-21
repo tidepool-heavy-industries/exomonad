@@ -6,7 +6,7 @@ use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::mpsc;
 use tracing::{debug, error, warn};
 
-use crate::protocol::{Interaction, TUIMessage, UISpec};
+use crate::protocol::{PopupDefinition, PopupResult};
 
 /// Connect to control-server via Unix socket.
 ///
@@ -23,24 +23,24 @@ pub async fn connect_to_control_server(path: &Path) -> Result<UnixStream> {
     Ok(stream)
 }
 
-/// Spawn I/O tasks for reading UISpec and writing Interaction.
+/// Spawn I/O tasks for reading PopupDefinition and writing PopupResult.
 ///
 /// Returns (rx, tx):
-/// - rx: Receiver for UISpec messages from Haskell
-/// - tx: Sender for Interaction events to Haskell
+/// - rx: Receiver for PopupDefinition messages from Haskell
+/// - tx: Sender for PopupResult responses to Haskell
 ///
 /// The I/O tasks run in the background and handle NDJSON framing:
 /// - Reader: UnixStream → BufReader → read_line → parse JSON → send to rx
 /// - Writer: receive from tx → serialize JSON → writeln → UnixStream
 pub fn spawn_io_tasks(
     stream: UnixStream,
-) -> (mpsc::Receiver<UISpec>, mpsc::Sender<Interaction>) {
+) -> (mpsc::Receiver<PopupDefinition>, mpsc::Sender<PopupResult>) {
     let (read_half, write_half) = stream.into_split();
 
-    let (msg_tx, msg_rx) = mpsc::channel::<UISpec>(32);
-    let (int_tx, mut int_rx) = mpsc::channel::<Interaction>(32);
+    let (msg_tx, msg_rx) = mpsc::channel::<PopupDefinition>(32);
+    let (res_tx, mut res_rx) = mpsc::channel::<PopupResult>(32);
 
-    // Reader task: UnixStream → UISpec
+    // Reader task: UnixStream → PopupDefinition
     tokio::spawn(async move {
         let mut reader = BufReader::new(read_half);
         let mut line = String::new();
@@ -59,27 +59,16 @@ pub fn spawn_io_tasks(
                         continue;
                     }
 
-                    match serde_json::from_str::<TUIMessage>(trimmed) {
-                        Ok(TUIMessage::PushUI { spec }) => {
-                            debug!(ui_id = %spec.id, "Received PushUI");
-                            if msg_tx.send(spec).await.is_err() {
+                    match serde_json::from_str::<PopupDefinition>(trimmed) {
+                        Ok(definition) => {
+                            debug!(title = %definition.title, "Received PopupDefinition");
+                            if msg_tx.send(definition).await.is_err() {
                                 debug!("Receiver dropped, stopping reader");
                                 break;
                             }
-                        }
-                        Ok(TUIMessage::ReplaceUI { spec }) => {
-                            debug!(ui_id = %spec.id, "Received ReplaceUI");
-                            if msg_tx.send(spec).await.is_err() {
-                                debug!("Receiver dropped, stopping reader");
-                                break;
-                            }
-                        }
-                        Ok(TUIMessage::UpdateUI { update: _ }) => {
-                            debug!("Received UpdateUI (not implemented)");
-                            // Phase 2: handle dynamic updates
                         }
                         Err(e) => {
-                            warn!(error = %e, json = %trimmed, "Failed to parse TUIMessage");
+                            warn!(error = %e, json = %trimmed, "Failed to parse PopupDefinition");
                             // Continue reading, don't stop on malformed JSON
                         }
                     }
@@ -94,14 +83,14 @@ pub fn spawn_io_tasks(
         debug!("Reader task exiting");
     });
 
-    // Writer task: Interaction → UnixStream
+    // Writer task: PopupResult → UnixStream
     tokio::spawn(async move {
         let mut writer = write_half;
 
-        while let Some(interaction) = int_rx.recv().await {
-            match serde_json::to_string(&interaction) {
+        while let Some(result) = res_rx.recv().await {
+            match serde_json::to_string(&result) {
                 Ok(json) => {
-                    debug!(interaction = ?interaction, "Sending interaction");
+                    debug!(button = %result.button, "Sending PopupResult");
 
                     if let Err(e) = writer.write_all(json.as_bytes()).await {
                         error!(error = %e, "Failed to write JSON");
@@ -119,7 +108,7 @@ pub fn spawn_io_tasks(
                     }
                 }
                 Err(e) => {
-                    error!(error = %e, "Failed to serialize interaction");
+                    error!(error = %e, "Failed to serialize PopupResult");
                     // Continue, don't stop on serialization errors
                 }
             }
@@ -128,7 +117,7 @@ pub fn spawn_io_tasks(
         debug!("Writer task exiting");
     });
 
-    (msg_rx, int_tx)
+    (msg_rx, res_tx)
 }
 
 /// Start a simple Unix listener for health checks.
