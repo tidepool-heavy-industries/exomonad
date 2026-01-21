@@ -11,3 +11,6 @@ dist-newstyle/
 .tidepool/
 training-data/
 result/
+
+# bv (beads viewer) local config and caches
+.bv/
