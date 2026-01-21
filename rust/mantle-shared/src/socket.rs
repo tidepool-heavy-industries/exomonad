@@ -143,21 +143,14 @@ impl ControlSocket {
 
 /// Get control server socket path from environment.
 ///
-/// Returns absolute path:
-/// 1. TIDEPOOL_CONTROL_SOCKET (if set)
-/// 2. $TIDEPOOL_PROJECT_DIR/.tidepool/sockets/control.sock
-/// 3. $PWD/.tidepool/sockets/control.sock
+/// # Panics
+///
+/// Panics if TIDEPOOL_CONTROL_SOCKET environment variable is not set.
 pub fn control_socket_path() -> PathBuf {
-    if let Ok(path) = std::env::var("TIDEPOOL_CONTROL_SOCKET") {
-        return PathBuf::from(path);
+    match std::env::var("TIDEPOOL_CONTROL_SOCKET") {
+        Ok(path) => PathBuf::from(path),
+        Err(_) => panic!("TIDEPOOL_CONTROL_SOCKET environment variable not set"),
     }
-
-    let base = std::env::var("TIDEPOOL_PROJECT_DIR")
-        .map(PathBuf::from)
-        .or_else(|_| std::env::current_dir())
-        .unwrap_or_else(|_| PathBuf::from("."));
-
-    base.join(".tidepool").join("sockets").join("control.sock")
 }
 
 #[cfg(all(test, unix))] 

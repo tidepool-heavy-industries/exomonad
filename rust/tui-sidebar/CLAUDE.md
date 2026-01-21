@@ -58,8 +58,11 @@ All types defined in `/Users/inannamalick/hangars/tidepool/repo/rust/tui-sidebar
 
 ### Standalone (testing)
 ```bash
-cargo run -p tui-sidebar --release -- --socket .tidepool/sockets/tui.sock
-# Connects to control-server, waits for PopupDefinition commands
+# Connect to control-server (uses $TIDEPOOL_TUI_SOCKET by default)
+cargo run -p tui-sidebar --release
+
+# Connect to specific socket
+cargo run -p tui-sidebar --release -- --socket /path/to/tui.sock
 ```
 
 ### Hybrid Tidepool (recommended)

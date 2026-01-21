@@ -99,7 +99,7 @@ If `--tools` is not specified, all tools from the control server are exposed (ex
 
 | Variable | Required | Purpose |
 |----------|----------|---------|
-| `TIDEPOOL_CONTROL_SOCKET` | For forwarding | Unix socket path for control server (defaults to `.tidepool/sockets/control.sock`) |
+| `TIDEPOOL_CONTROL_SOCKET` | For forwarding | Unix socket path for control server (REQUIRED) |
 | `RUST_LOG` | No | Tracing log level (e.g., `debug`, `mantle_agent=trace`) |
 
 ## Module Reference

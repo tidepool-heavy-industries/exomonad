@@ -16,6 +16,10 @@ if [ -z "$ANTHROPIC_API_KEY" ]; then
     exit 1
 fi
 
+# Canonical socket paths - Central source of truth
+export TIDEPOOL_CONTROL_SOCKET="${TIDEPOOL_CONTROL_SOCKET:-.tidepool/sockets/control.sock}"
+export TIDEPOOL_TUI_SOCKET="${TIDEPOOL_TUI_SOCKET:-.tidepool/sockets/tui.sock}"
+
 # Create runtime directories
 mkdir -p .tidepool/{sockets,logs}
 

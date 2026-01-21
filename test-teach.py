@@ -9,8 +9,16 @@ Usage:
 import socket
 import json
 import sys
+import os
 
 def main():
+    socket_path = os.environ.get('TIDEPOOL_CONTROL_SOCKET')
+    if not socket_path:
+        # Fallback for convenience if running locally without start-augmented.sh
+        # But notify user
+        print("WARNING: TIDEPOOL_CONTROL_SOCKET not set, defaulting to .tidepool/sockets/control.sock")
+        socket_path = '.tidepool/sockets/control.sock'
+
     if len(sys.argv) < 3:
         print("Usage: test-teach.py <topic> <seeds>")
         print("  topic: what to teach (e.g., 'the scoring system')")
@@ -32,7 +40,7 @@ def main():
         }
     }) + '\n'
 
-    print(f"Connecting to .tidepool/control.sock...")
+    print(f"Connecting to {socket_path}...")
     print(f"  topic: {topic}")
     print(f"  seeds: {seeds}")
     print(f"  budget: {budget}")
@@ -40,7 +48,7 @@ def main():
 
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     try:
-        sock.connect('.tidepool/control.sock')
+        sock.connect(socket_path)
         sock.sendall(msg.encode())
 
         # Read response
@@ -93,7 +101,7 @@ def main():
             print("No response received")
 
     except FileNotFoundError:
-        print("Error: .tidepool/control.sock not found")
+        print(f"Error: {socket_path} not found")
         print("Make sure tidepool-control-server is running in this directory")
         sys.exit(1)
     except ConnectionRefusedError:

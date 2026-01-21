@@ -2,8 +2,12 @@
 import socket
 import json
 import sys
+import os
 
-SOCKET_PATH = '/private/tmp/tpw1/.tidepool/control.sock'
+SOCKET_PATH = os.environ.get('TIDEPOOL_CONTROL_SOCKET')
+if not SOCKET_PATH:
+    print("ERROR: TIDEPOOL_CONTROL_SOCKET environment variable not set")
+    sys.exit(1)
 
 query = sys.argv[1] if len(sys.argv) > 1 else "What uses Goto?"
 symbols = sys.argv[2].split(',') if len(sys.argv) > 2 else ["Goto"]
