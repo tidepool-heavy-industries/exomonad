@@ -14,10 +14,9 @@ import os
 def main():
     socket_path = os.environ.get('TIDEPOOL_CONTROL_SOCKET')
     if not socket_path:
-        # Fallback for convenience if running locally without start-augmented.sh
-        # But notify user
-        print("WARNING: TIDEPOOL_CONTROL_SOCKET not set, defaulting to .tidepool/sockets/control.sock")
-        socket_path = '.tidepool/sockets/control.sock'
+        print("ERROR: TIDEPOOL_CONTROL_SOCKET environment variable not set")
+        print("Please set TIDEPOOL_CONTROL_SOCKET (e.g., by using start-augmented.sh) and try again.")
+        sys.exit(1)
 
     if len(sys.argv) < 3:
         print("Usage: test-teach.py <topic> <seeds>")

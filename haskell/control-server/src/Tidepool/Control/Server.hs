@@ -70,12 +70,12 @@ runServer logger config = do
   controlSocketEnv <- lookupEnv "TIDEPOOL_CONTROL_SOCKET"
   let controlSocket = case controlSocketEnv of
         Just s -> s
-        Nothing -> error "TIDEPOOL_CONTROL_SOCKET environment variable not set"
+        Nothing -> error "TIDEPOOL_CONTROL_SOCKET environment variable not set (should be set via start-augmented.sh or .env)"
 
   tuiSocketEnv <- lookupEnv "TIDEPOOL_TUI_SOCKET"
   let tuiSocket = case tuiSocketEnv of
         Just s -> s
-        Nothing -> error "TIDEPOOL_TUI_SOCKET environment variable not set"
+        Nothing -> error "TIDEPOOL_TUI_SOCKET environment variable not set (should be set via start-augmented.sh or .env)"
 
   -- Load observability config if not already provided
   obsConfig <- case config.observabilityConfig of

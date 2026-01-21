@@ -44,7 +44,7 @@ async fn main() -> Result<()> {
         Some(s) => s,
         None => {
             let env_val = std::env::var("TIDEPOOL_TUI_SOCKET")
-                .context("TIDEPOOL_TUI_SOCKET environment variable not set and --socket not provided")?;
+                .context("TIDEPOOL_TUI_SOCKET environment variable not set (should be set via start-augmented.sh or .env) and --socket not provided")?;
             PathBuf::from(env_val)
         }
     };

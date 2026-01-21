@@ -149,7 +149,7 @@ impl ControlSocket {
 pub fn control_socket_path() -> PathBuf {
     match std::env::var("TIDEPOOL_CONTROL_SOCKET") {
         Ok(path) => PathBuf::from(path),
-        Err(_) => panic!("TIDEPOOL_CONTROL_SOCKET environment variable not set"),
+        Err(_) => panic!("TIDEPOOL_CONTROL_SOCKET environment variable not set. This should be set via start-augmented.sh or .env"),
     }
 }
 
