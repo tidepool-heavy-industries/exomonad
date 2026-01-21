@@ -40,6 +40,8 @@ pub fn spawn_io_tasks(
     let (msg_tx, msg_rx) = mpsc::channel::<PopupDefinition>(32);
     let (res_tx, mut res_rx) = mpsc::channel::<PopupResult>(32);
 
+    let error_tx = res_tx.clone();
+
     // Reader task: UnixStream → PopupDefinition
     tokio::spawn(async move {
         let mut reader = BufReader::new(read_half);
@@ -69,7 +71,15 @@ pub fn spawn_io_tasks(
                         }
                         Err(e) => {
                             warn!(error = %e, json = %trimmed, "Failed to parse PopupDefinition");
-                            // Continue reading, don't stop on malformed JSON
+                            // Send error result
+                            let error_result = PopupResult {
+                                button: "error".to_string(),
+                                values: serde_json::json!({"error": e.to_string()})
+                            };
+                            if error_tx.send(error_result).await.is_err() {
+                                debug!("Writer closed, stopping reader");
+                                break;
+                            }
                         }
                     }
                 }
