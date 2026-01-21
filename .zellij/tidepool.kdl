@@ -19,7 +19,7 @@ layout {
             // LEFT: Claude Code with supervisor loop (auto-restarts on crash)
             pane name="Claude Code" size="50%" focus=true {
                 command "bash"
-                args "-c" "cd \"$(git rev-parse --show-toplevel)\" && while true; do echo '⏳ Waiting for MCP...'; until test -S .tidepool/sockets/control.sock; do sleep 0.5; done; echo '✓ MCP ready!'; claude -d --continue --dangerously-skip-permissions; echo '⚠️ Claude exited. Restarting in 2s...'; sleep 2; done"
+                args "-c" "cd \"$(git rev-parse --show-toplevel)\" && while true; do ./scripts/wait-for-socket.sh .tidepool/sockets/control.sock 60 ControlServer || exit 1; claude -d --continue --dangerously-skip-permissions; echo '⚠️ Claude exited. Restarting in 2s...'; sleep 2; done"
             }
 
             pane split_direction="horizontal" {
@@ -27,7 +27,7 @@ layout {
                 // TOP-RIGHT: TUI Sidebar with supervisor loop (auto-restarts on crash)
                 pane name="TUI Sidebar" size="50%" {
                     command "bash"
-                    args "-c" "cd \"$(git rev-parse --show-toplevel)\" && HANGAR_ROOT=$(pwd); while [ ! -f \"$HANGAR_ROOT/Hangar.toml\" ] && [ \"$HANGAR_ROOT\" != \"/\" ] && [ \"$HANGAR_ROOT\" != \"$HOME\" ]; do HANGAR_ROOT=$(dirname \"$HANGAR_ROOT\"); done; if [ ! -f \"$HANGAR_ROOT/Hangar.toml\" ]; then echo 'ERROR: Hangar.toml not found' >&2; exit 1; fi; BIN_DIR=\"$HANGAR_ROOT/runtime/bin\"; while true; do echo '⏳ Waiting for server...'; until test -S .tidepool/sockets/control.sock; do sleep 0.5; done; echo '✓ Ready!'; \"$BIN_DIR/tui-sidebar\" --socket .tidepool/sockets/tui.sock --health-socket .tidepool/sockets/tui-sidebar.sock; echo '⚠️ TUI exited. Restarting in 2s...'; sleep 2; done"
+                    args "-c" "cd \"$(git rev-parse --show-toplevel)\" && HANGAR_ROOT=$(pwd); while [ ! -f \"$HANGAR_ROOT/Hangar.toml\" ] && [ \"$HANGAR_ROOT\" != \"/\" ] && [ \"$HANGAR_ROOT\" != \"$HOME\" ]; do HANGAR_ROOT=$(dirname \"$HANGAR_ROOT\"); done; if [ ! -f \"$HANGAR_ROOT/Hangar.toml\" ]; then echo 'ERROR: Hangar.toml not found' >&2; exit 1; fi; BIN_DIR=\"$HANGAR_ROOT/runtime/bin\"; while true; do ./scripts/wait-for-socket.sh .tidepool/sockets/control.sock 60 ControlServer || exit 1; \"$BIN_DIR/tui-sidebar\" --socket .tidepool/sockets/tui.sock --health-socket .tidepool/sockets/tui-sidebar.sock; echo '⚠️ TUI exited. Restarting in 2s...'; sleep 2; done"
                 }
 
                 // BOTTOM-RIGHT: Backend Status (process-compose dashboard)

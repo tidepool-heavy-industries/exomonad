@@ -14,7 +14,7 @@ layout {
             // LEFT: Main interaction pane (CLI)
             pane size="60%" focus=true {
                 command "bash"
-                args "-c" "if [ -f .env.subagent ]; then source .env.subagent; fi; until test -S .tidepool/sockets/control.sock; do echo 'Waiting for control-server...'; sleep 0.5; done; echo 'Control server ready!'; exec ${SUBAGENT_CMD:-claude}"
+                args "-c" "if [ -f .env.subagent ]; then source .env.subagent; fi; ./scripts/wait-for-socket.sh .tidepool/sockets/control.sock 60 ControlServer || exit 1; exec ${SUBAGENT_CMD:-claude}"
             }
             
             // RIGHT: Stacked infrastructure panes (collapsible)
