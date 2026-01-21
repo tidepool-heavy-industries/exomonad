@@ -28,6 +28,9 @@ if [ -z "$HANGAR_ROOT" ]; then
     exit 1
 fi
 
+# Export HANGAR_ROOT so child processes (Zellij panes) can access it
+export HANGAR_ROOT
+
 # Add all Hangar binaries (including mantle-agent) to PATH for Claude and related tools
 export PATH="$HANGAR_ROOT/bin:$PATH"
 
