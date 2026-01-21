@@ -19,7 +19,7 @@ layout {
             // LEFT: Claude Code with supervisor loop (auto-restarts on crash)
             pane name="Claude Code" size="50%" focus=true {
                 command "bash"
-                args "-c" "cd \"$(git rev-parse --show-toplevel)\" && while true; do ./scripts/wait-for-socket.sh .tidepool/sockets/control.sock 60 MCP || exit 1; claude -d --continue --dangerously-skip-permissions; echo '⚠️ Claude exited. Restarting in 2s...'; sleep 2; done"
+                args "-c" "cd \"$(git rev-parse --show-toplevel)\" && while true; do ./scripts/wait-for-socket.sh .tidepool/sockets/control.sock 60 ControlServer || exit 1; claude -d --continue --dangerously-skip-permissions; echo '⚠️ Claude exited. Restarting in 2s...'; sleep 2; done"
             }
 
             pane split_direction="horizontal" {
