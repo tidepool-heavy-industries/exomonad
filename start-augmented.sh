@@ -22,17 +22,21 @@ mkdir -p .tidepool/{sockets,logs}
 # Clean up any stale sockets from previous runs
 rm -f .tidepool/sockets/*.sock
 
-# Check HANGAR_ROOT
-if [ -z "$HANGAR_ROOT" ]; then
-    echo "ERROR: HANGAR_ROOT not set in .env"
+# Discover Hangar by walking up from current directory
+HANGAR_ROOT=$(pwd)
+while [ ! -f "$HANGAR_ROOT/Hangar.toml" ] && [ "$HANGAR_ROOT" != "/" ] && [ "$HANGAR_ROOT" != "$HOME" ]; do
+    HANGAR_ROOT=$(dirname "$HANGAR_ROOT")
+done
+
+if [ ! -f "$HANGAR_ROOT/Hangar.toml" ]; then
+    echo "ERROR: Hangar.toml not found (searched up from $(pwd))"
     exit 1
 fi
 
-# Export HANGAR_ROOT so child processes (Zellij panes) can access it
-export HANGAR_ROOT
+echo "📦 Discovered Hangar at: $HANGAR_ROOT"
 
 # Add all Hangar binaries (including mantle-agent) to PATH for Claude and related tools
-export PATH="$HANGAR_ROOT/bin:$PATH"
+export PATH="$HANGAR_ROOT/runtime/bin:$PATH"
 
 # Check dependencies
 if ! command -v process-compose &> /dev/null; then
