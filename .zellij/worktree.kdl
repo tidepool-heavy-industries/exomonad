@@ -14,14 +14,14 @@ layout {
             // LEFT: Main interaction pane (CLI)
             pane size="60%" focus=true {
                 command "bash"
-                args "-c" "if [ -f .env.subagent ]; then source .env.subagent; fi; until nc -zU .tidepool/sockets/control.sock 2>/dev/null; do echo 'Waiting for control-server...'; sleep 0.5; done; echo 'Control server ready!'; exec ${SUBAGENT_CMD:-claude}"
+                args "-c" "if [ -f .env.subagent ]; then source .env.subagent; fi; until test -S .tidepool/sockets/control.sock; do echo 'Waiting for control-server...'; sleep 0.5; done; echo 'Control server ready!'; exec ${SUBAGENT_CMD:-claude}"
             }
             
             // RIGHT: Stacked infrastructure panes (collapsible)
             pane split_direction="horizontal" stacked=true {
                 pane name="process-compose" {
                     command "bash"
-                    args "-c" "mkdir -p .tidepool/logs .tidepool/sockets && exec process-compose up"
+                    args "-c" "mkdir -p .tidepool/logs .tidepool/sockets && export PC_NO_SERVER=true PC_USE_UDS=true PC_SOCKET_PATH=.tidepool/sockets/process-compose.sock && exec process-compose up"
                 }
                 pane name="logs" {
                     command "tail"

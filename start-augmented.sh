@@ -19,6 +19,17 @@ fi
 # Create runtime directories
 mkdir -p .tidepool/{sockets,logs}
 
+# Detect and clean up stale process-compose sessions via UDS
+# This eliminates port 8080 conflicts in parallel worktrees
+PC_SOCKET=".tidepool/sockets/process-compose.sock"
+if [ -S "$PC_SOCKET" ]; then
+    if process-compose process list -u "$PC_SOCKET" > /dev/null 2>&1; then
+        echo "⚠️  Found stale process-compose session. Shutting it down..."
+        process-compose down -u "$PC_SOCKET" || true
+        sleep 0.5
+    fi
+fi
+
 # Clean up any stale sockets from previous runs
 rm -f .tidepool/sockets/*.sock
 

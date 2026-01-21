@@ -339,11 +339,12 @@ Understanding the runtime stack for debugging and extension.
 
 | Port | Service | Protocol | Purpose |
 |------|---------|----------|---------|
-| 8080 | process-compose | HTTP | API (stale session detection) |
+| (none) | process-compose | UDS | API (stale session detection) |
 
 **Sockets:**
 - `.tidepool/sockets/control.sock`: Main protocol (mantle-agent connects)
 - `.tidepool/sockets/tui.sock`: TUI sidebar (control-server listens, tui-sidebar connects)
+- `.tidepool/sockets/process-compose.sock`: process-compose API (eliminates port 8080 conflicts)
 
 #### Config Files
 
@@ -361,7 +362,7 @@ Understanding the runtime stack for debugging and extension.
 1. Validates `.env` contains `ANTHROPIC_API_KEY`
 2. Creates `.tidepool/{sockets,logs}` directories
 3. Checks process-compose installed
-4. Detects/cleans stale sessions (probes port 8080)
+4. Detects/cleans stale sessions via Unix socket
 5. Launches Zellij with layout
 
 **`scripts/tidepool-runner.sh`** - Cleanup wrapper:
@@ -465,7 +466,7 @@ Ensure `process-compose` is in your `PATH`. The scripts do not use hardcoded pat
 
 **Troubleshooting:**
 - **"command not found: process-compose"**: Verify installation and that `$(go env GOPATH)/bin` or your brew/nix bin directory is in your `PATH`.
-- **Port 8080 in use**: `process-compose` uses port 8080 for its API. `start-augmented.sh` will attempt to detect and kill stale sessions.
+- **Stale session**: `process-compose` uses a Unix socket at `.tidepool/sockets/process-compose.sock` for its API, eliminating port 8080 conflicts. `start-augmented.sh` will attempt to detect and kill stale sessions via this socket.
 
 ### Status
 
