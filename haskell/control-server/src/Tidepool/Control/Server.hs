@@ -85,7 +85,7 @@ runServer logger config = do
   
   let configWithObs = config { observabilityConfig = obsConfig }
 
-  when (isJust obsConfig) $ 
+  when (isJust obsConfig) $
     logInfo logger "Observability enabled (Loki/OTLP)"
 
   -- Shared State
@@ -150,7 +150,8 @@ runServer logger config = do
       flip finally cleanupTui $ do
          logInfo logger $ "Starting LSP session for project: " <> T.pack configWithObs.projectDir
          
-         withLSPSession configWithObs.projectDir $ \lspSession -> do
+         withLSPSession configWithObs.projectDir 
+           (\lspSession -> do
              logInfo logger "LSP session initialized"
              
              -- Publish session
@@ -158,6 +159,16 @@ runServer logger config = do
              
              -- Wait forever (main thread blocks here, keeping LSP session alive)
              forever $ threadDelay 10000000
+           )
+           `E.catch` \(e :: SomeException) -> do
+               -- If LSP initialization fails, log the error and keep the server running
+               logError logger $
+                 "LSP session failed to start or crashed; continuing without LSP. Exception: "
+                 <> T.pack (show e)
+               -- Ensure no LSP session is published
+               atomically $ writeTVar lspSessionVar Nothing
+               -- Keep main thread alive so control/TUI sockets remain available
+               forever $ threadDelay 10000000
 
 -- | Setup Unix socket at given path.
 setupUnixSocket :: FilePath -> IO Socket
@@ -226,7 +237,7 @@ handleConnection logger config lspSessionVar maybeTuiHandle traceCtx conn = do
   `catch` \(e :: SomeException) -> do
     logError logger $ "Connection error: " <> T.pack (show e)
     -- Try to send error response, but ignore failures (connection may be closed)
-    void $ E.try @SomeException $ 
+    void $ E.try @SomeException $
       sendResponse conn $ hookError Gemini $ "Connection error: " <> T.pack (show e)
 
 -- | Read bytes from socket until newline.
