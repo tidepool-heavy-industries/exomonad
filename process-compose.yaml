@@ -1,18 +1,8 @@
-# Tidepool Backend Orchestrator
-#
-# Manages headless services with health probes and auto-restart.
-# TTY-dependent processes (Claude Code, tui-sidebar) run in Zellij panes
-# and wait for this backend via socket polling.
-#
-# See .zellij/tidepool.kdl for the frontend layout.
-
 version: "0.5"
-
-log_location: .tidepool/logs/process-compose.log
+log_location: .tidepool/logs/pc.log
 
 processes:
   control-server:
-    # Pre-cleanup socket to prevent EADDRINUSE, then run server
     command: |
       # Discover Hangar by walking up directories
       HANGAR_ROOT=$(pwd)
@@ -23,17 +13,13 @@ processes:
         echo "ERROR: Hangar.toml not found" >&2
         exit 1
       fi
-      echo "DEBUG: Hangar discovered at: $HANGAR_ROOT"
-      echo "DEBUG: Listing runtime/bin:"
-      ls -la "$HANGAR_ROOT/runtime/bin"
-      echo "DEBUG: Removing sockets"
-      rm -f .tidepool/sockets/control.sock .tidepool/sockets/tui.sock
-      echo "DEBUG: Executing: $HANGAR_ROOT/runtime/bin/tidepool-control-server"
-      exec "$HANGAR_ROOT/runtime/bin/tidepool-control-server"
+      BIN_DIR="$HANGAR_ROOT/runtime/bin"
+      rm -f .tidepool/sockets/control.sock .tidepool/sockets/tui.sock && \
+      "$BIN_DIR/tidepool-control-server" --no-tui
     working_dir: "."
-    availability:
-      restart: on_failure
-      max_restarts: 5
+    environment:
+      - "TIDEPOOL_CONTROL_SOCKET=.tidepool/sockets/control.sock"
+      - "TIDEPOOL_TUI_SOCKET=.tidepool/sockets/tui.sock"
     readiness_probe:
       exec:
         # Socket existence check (no connection attempt - avoids JSON parse errors)
@@ -41,9 +27,9 @@ processes:
       initial_delay_seconds: 2
       period_seconds: 3
       failure_threshold: 10
+    availability:
+      restart: on_failure
+      max_restarts: 5
     shutdown:
       command: "rm -f .tidepool/sockets/control.sock .tidepool/sockets/tui.sock"
-    environment:
-      - "TIDEPOOL_PROJECT_DIR=."
-      - "TIDEPOOL_CONTROL_SOCKET=.tidepool/sockets/control.sock"
-      - "TIDEPOOL_TUI_SOCKET=.tidepool/sockets/tui.sock"
+      timeout_seconds: 5

@@ -282,32 +282,33 @@ bootstrapTidepool
   -> FilePath  -- ^ Worktree path
   -> Eff es (Either Text ())
 bootstrapTidepool repoRoot worktreePath = do
-  -- Create .tidepool directories
-  let tidepoolDir = worktreePath </> ".tidepool"
-      socketsDir = tidepoolDir </> "sockets"
-      logsDir = tidepoolDir </> "logs"
+  -- Create .tidepool directory structure.
+  -- These MUST exist for process-compose log tailing and control sockets.
+  let socketsDir = worktreePath </> ".tidepool" </> "sockets"
+      logsDir = worktreePath </> ".tidepool" </> "logs"
 
-  dirRes1 <- createDirectory socketsDir
-  case dirRes1 of
-    Left err -> pure $ Left $ T.pack (show err)
+  -- Create directories (FileSystem.createDirectory creates parents automatically)
+  res1 <- createDirectory socketsDir
+  case res1 of
+    Left err -> pure $ Left $ "Failed to create .tidepool/sockets: " <> T.pack (show err)
     Right () -> do
-      dirRes2 <- createDirectory logsDir
-      case dirRes2 of
-        Left err -> pure $ Left $ T.pack (show err)
+      res2 <- createDirectory logsDir
+      case res2 of
+        Left err -> pure $ Left $ "Failed to create .tidepool/logs: " <> T.pack (show err)
         Right () -> do
           -- Copy subagent process-compose template
           let srcTemplate = repoRoot </> ".tidepool" </> "templates" </> "subagent-pc.yaml"
               dstConfig = worktreePath </> "process-compose.yaml"
           copyRes <- copyFile srcTemplate dstConfig
           case copyRes of
-            Left err -> pure $ Left $ T.pack (show err)
+            Left err -> pure $ Left $ "Failed to copy process-compose.yaml: " <> T.pack (show err)
             Right () -> do
               -- Symlink .env from repo root
               let srcEnv = repoRoot </> ".env"
                   dstEnv = worktreePath </> ".env"
               symlinkRes <- createSymlink srcEnv dstEnv
               case symlinkRes of
-                Left err -> pure $ Left $ T.pack (show err)
+                Left err -> pure $ Left $ "Failed to symlink .env: " <> T.pack (show err)
                 Right () -> pure $ Right ()
 
 
