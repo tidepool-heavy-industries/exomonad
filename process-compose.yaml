@@ -31,6 +31,7 @@ processes:
     shutdown:
       command: "rm -f .tidepool/sockets/control.sock .tidepool/sockets/tui.sock"
     environment:
+      - "HANGAR_ROOT=${HANGAR_ROOT}"
       - "TIDEPOOL_PROJECT_DIR=."
       - "TIDEPOOL_CONTROL_SOCKET=.tidepool/sockets/control.sock"
       - "TIDEPOOL_TUI_SOCKET=.tidepool/sockets/tui.sock"
