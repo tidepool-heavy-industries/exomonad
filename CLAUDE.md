@@ -349,10 +349,12 @@ Sockets are managed to ensure clean transitions between sessions and prevent sta
 |------|---------|----------|---------|
 | (none) | process-compose | UDS | API (stale session detection) |
 
-**Sockets:**
-- `.tidepool/sockets/control.sock`: Main protocol (mantle-agent connects)
-- `.tidepool/sockets/tui.sock`: TUI sidebar (control-server listens, tui-sidebar connects)
+**Sockets (Environment Driven):**
+- `$TIDEPOOL_CONTROL_SOCKET` (default: `.tidepool/sockets/control.sock`): Main protocol (mantle-agent connects)
+- `$TIDEPOOL_TUI_SOCKET` (default: `.tidepool/sockets/tui.sock`): TUI sidebar (control-server listens, tui-sidebar connects)
 - `.tidepool/sockets/process-compose.sock`: process-compose API (eliminates port 8080 conflicts)
+
+Canonical values are defined in `start-augmented.sh` and can be overridden in `.env`.
 
 #### Config Files
 
@@ -421,7 +423,7 @@ All services terminated
 ```yaml
 readiness_probe:
   exec:
-    command: "test -S .tidepool/sockets/control.sock"
+    command: "test -S $TIDEPOOL_CONTROL_SOCKET"
   initial_delay_seconds: 2
   period_seconds: 3
   failure_threshold: 10
@@ -431,7 +433,7 @@ readiness_probe:
 ```yaml
 readiness_probe:
   exec:
-    command: "test -S .tidepool/sockets/tui.sock"
+    command: "test -S $TIDEPOOL_TUI_SOCKET"
 ```
 
 #### Dependency DAG

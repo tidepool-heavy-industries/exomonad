@@ -14,16 +14,13 @@ processes:
         exit 1
       fi
       BIN_DIR="$HANGAR_ROOT/runtime/bin"
-      rm -f .tidepool/sockets/control.sock .tidepool/sockets/tui.sock && \
-      "$BIN_DIR/tidepool-control-server"
+      rm -f "$TIDEPOOL_CONTROL_SOCKET" "$TIDEPOOL_TUI_SOCKET" && \
+      "$BIN_DIR/tidepool-control-server" --no-tui
     working_dir: "."
-    environment:
-      - "TIDEPOOL_CONTROL_SOCKET=.tidepool/sockets/control.sock"
-      - "TIDEPOOL_TUI_SOCKET=.tidepool/sockets/tui.sock"
     readiness_probe:
       exec:
         # Socket existence check (no connection attempt - avoids JSON parse errors)
-        command: "test -S .tidepool/sockets/control.sock"
+        command: "test -S $TIDEPOOL_CONTROL_SOCKET"
       initial_delay_seconds: 2
       period_seconds: 3
       failure_threshold: 10
@@ -31,5 +28,5 @@ processes:
       restart: on_failure
       max_restarts: 5
     shutdown:
-      command: "rm -f .tidepool/sockets/control.sock .tidepool/sockets/tui.sock"
+      command: "rm -f $TIDEPOOL_CONTROL_SOCKET $TIDEPOOL_TUI_SOCKET"
       timeout_seconds: 5

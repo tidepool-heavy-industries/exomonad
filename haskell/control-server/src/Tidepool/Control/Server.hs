@@ -39,13 +39,6 @@ import Tidepool.TUI.Interpreter (TUIHandle, newTUIHandle, closeTUIHandle)
 import Tidepool.Observability.Types (TraceContext, newTraceContext, ObservabilityConfig(..), LokiConfig(..), OTLPConfig(..))
 import Tidepool.Observability.Interpreter (flushTraces)
 
--- | Default Unix socket paths
-defaultControlSocket :: FilePath
-defaultControlSocket = ".tidepool/sockets/control.sock"
-
-defaultTuiSocket :: FilePath
-defaultTuiSocket = ".tidepool/sockets/tui.sock"
-
 -- | Load observability configuration from environment variables.
 loadObservabilityConfig :: IO (Maybe ObservabilityConfig)
 loadObservabilityConfig = do
@@ -71,12 +64,18 @@ loadObservabilityConfig = do
 -- 2. Accepts Unix socket connections on .tidepool/sockets/control.sock
 runServer :: Logger -> ServerConfig -> IO ()
 runServer logger config = do
-  -- Get socket paths from environment or use default
+  -- Get socket paths from environment
+  -- We no longer provide hardcoded defaults here to ensure a single source of truth
+  -- via environment variables (e.g. set in start-augmented.sh or .env)
   controlSocketEnv <- lookupEnv "TIDEPOOL_CONTROL_SOCKET"
-  let controlSocket = maybe defaultControlSocket id controlSocketEnv
+  let controlSocket = case controlSocketEnv of
+        Just s -> s
+        Nothing -> error "TIDEPOOL_CONTROL_SOCKET environment variable not set (should be set via start-augmented.sh or .env)"
 
   tuiSocketEnv <- lookupEnv "TIDEPOOL_TUI_SOCKET"
-  let tuiSocket = maybe defaultTuiSocket id tuiSocketEnv
+  let tuiSocket = case tuiSocketEnv of
+        Just s -> s
+        Nothing -> error "TIDEPOOL_TUI_SOCKET environment variable not set (should be set via start-augmented.sh or .env)"
 
   -- Load observability config if not already provided
   obsConfig <- case config.observabilityConfig of

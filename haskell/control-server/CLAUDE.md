@@ -33,7 +33,7 @@ Read this if you're:
                                  ▼
 ┌────────────────────────────────────────────────────────────────────┐
 │ control-server (Haskell)                                           │
-│  • Unix socket: .tidepool/control.sock                             │
+│  • Unix socket: $TIDEPOOL_CONTROL_SOCKET                         │
 │  • Protocol: ControlMessage/ControlResponse                        │
 │  • Long-lived LSP session (HLS)                                    │
 │  • Routes:                                                         │
@@ -553,7 +553,13 @@ The server supports a ping-pong protocol over Unix socket for health checks:
 ```
 
 **Used by process-compose:**
-The `control-server` readiness probe executes `mantle-agent health`, which sends a `Ping` message to `.tidepool/sockets/control.sock` and waits for a `Pong`.
+The `control-server` readiness probe executes `mantle-agent health`, which sends a `Ping` message to `$TIDEPOOL_CONTROL_SOCKET` and waits for a `Pong`.
+
+```bash
+# Verify server is listening
+Control server listening on Unix socket: /path/to/control.sock
+```
+
 
 **Server logs to stdout:**
 ```

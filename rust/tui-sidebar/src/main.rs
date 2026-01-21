@@ -17,8 +17,8 @@ use tracing_subscriber::FmtSubscriber;
 #[command(author, version, about, long_about = None)]
 struct Args {
     /// Unix socket path to connect to
-    #[arg(short, long, default_value = ".tidepool/sockets/tui.sock")]
-    socket: PathBuf,
+    #[arg(short, long)]
+    socket: Option<PathBuf>,
 
     /// Unix socket path to listen on for health checks
     #[arg(short = 'H', long, default_value = ".tidepool/sockets/tui-sidebar.sock")]
@@ -39,15 +39,25 @@ async fn main() -> Result<()> {
         .finish();
     tracing::subscriber::set_global_default(subscriber)?;
 
-    // Resolve socket path
-    let socket_path = if args.socket.is_relative() {
+    // Resolve socket path: Priority 1: --socket arg, Priority 2: TIDEPOOL_TUI_SOCKET env
+    let socket_path = match args.socket {
+        Some(s) => s,
+        None => {
+            let env_val = std::env::var("TIDEPOOL_TUI_SOCKET")
+                .context("TIDEPOOL_TUI_SOCKET environment variable not set (should be set via start-augmented.sh or .env) and --socket not provided")?;
+            PathBuf::from(env_val)
+        }
+    };
+
+    // Resolve socket path relative to project dir if needed
+    let socket_path = if socket_path.is_relative() {
         if let Ok(project_dir) = std::env::var("TIDEPOOL_PROJECT_DIR") {
-            PathBuf::from(project_dir).join(&args.socket)
+            PathBuf::from(project_dir).join(&socket_path)
         } else {
-            args.socket
+            socket_path
         }
     } else {
-        args.socket
+        socket_path
     };
 
     info!("TUI sidebar connecting to socket {:?}", socket_path);
