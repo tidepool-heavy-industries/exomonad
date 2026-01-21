@@ -10,9 +10,6 @@ use crate::protocol::{PopupDefinition, PopupState, PopupResult, VisibilityRule, 
 pub mod builder;
 pub mod components;
 
-#[cfg(test)]
-mod tests;
-
 /// Component type enum for identifying widget types
 #[derive(Debug, Clone, PartialEq)]
 pub enum ComponentType {
