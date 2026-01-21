@@ -264,8 +264,8 @@ instance FromJSON ReviewComment where
                  <|> v .: "rcCreatedAt"
 
     ReviewComment
-      <$> pure author
-      <*> (v .: "body" <|> v .: "rcBody")
+      author
+      <$> (v .: "body" <|> v .: "rcBody")
       <*> (v .: "path" <|> v .: "rcPath" <|> pure Nothing)
       <*> (v .: "line" <|> v .: "rcLine" <|> pure Nothing)
       <*> (v .: "state" <|> v .: "rcState" <|> pure ReviewCommented)

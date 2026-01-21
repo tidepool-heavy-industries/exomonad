@@ -69,10 +69,9 @@ import Tidepool.Effects.Observability
   , startSpan, endSpan
   )
 import Tidepool.Graph.Interpret
-import Tidepool.Graph.Goto (GotoChoice(..), To)
+import Tidepool.Graph.Goto (GotoChoice, To)
 import Tidepool.Graph.Generic (AsHandler, FieldsWithNamesOf)
 import Tidepool.Graph.Generic.Core (AsGraph)
-import Tidepool.Graph.Goto (GotoChoice, To)
 import Tidepool.Graph.Goto.Internal (GotoChoice(..), OneOf(..))
 import Tidepool.Graph.Types (Exit)
 
