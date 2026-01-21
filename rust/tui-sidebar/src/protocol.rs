@@ -59,6 +59,9 @@ pub enum ComponentSpec {
 }
 
 /// Simple visibility rules - single conditions only
+///
+/// Note: Uses untagged serialization, so each variant must have a unique structure.
+/// Field names are deliberately different to avoid ambiguity during deserialization.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum VisibilityRule {
@@ -68,13 +71,13 @@ pub enum VisibilityRule {
     // Choice equals value
     Equals(HashMap<String, String>),  // {"choice_id": "Expected Value"}
 
-    // Slider/number comparisons
-    GreaterThan { id: String, value: f32 },
-    LessThan { id: String, value: f32 },
+    // Slider/number comparisons (different field names to disambiguate)
+    GreaterThan { id: String, min_value: f32 },  // value > min_value
+    LessThan { id: String, max_value: f32 },     // value < max_value
 
-    // Multiselect has N items selected
-    CountEquals { id: String, count: usize },
-    CountGreaterThan { id: String, count: usize },
+    // Multiselect has N items selected (different field names to disambiguate)
+    CountEquals { id: String, exact_count: usize },      // count == exact_count
+    CountGreaterThan { id: String, min_count: usize },   // count > min_count
 }
 
 // Helper function for default slider value

@@ -67,10 +67,12 @@ requestDecision ctx = do
           case lookupValue "bead_selection" result.prValues of
             Just (A.String selectedLabel) -> do
               -- Extract bead ID from the label (format: "icon [ID] Title")
-              case T.splitOn "] " selectedLabel of
-                (prefix:_) -> case T.stripPrefix "[" (T.takeWhileEnd (/= '[') prefix) of
-                  Just beadId -> pure $ SelectBead beadId
-                  Nothing -> pure Continue
+              -- More robust parsing: split on "[", then find "]" in the remainder
+              case T.breakOn "[" selectedLabel of
+                (_, remainder) | not (T.null remainder) ->
+                  case T.breakOn "]" (T.tail remainder) of
+                    (beadId, _) | not (T.null beadId) -> pure $ SelectBead beadId
+                    _ -> pure Continue
                 _ -> pure Continue
             _ -> pure Continue
     "decline" -> pure Abort

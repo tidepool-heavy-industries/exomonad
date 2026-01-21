@@ -4,16 +4,14 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use ratatui::{
-    backend::CrosstermBackend,
-    layout::Rect,
-    Terminal,
-};
 use std::io;
 use tokio::sync::mpsc;
 use tracing::{debug, info};
 use tuirealm::command::{Cmd, Direction};
-use tuirealm::{Frame, MockComponent};
+use tuirealm::ratatui::backend::CrosstermBackend;
+use tuirealm::ratatui::layout::Rect;
+use tuirealm::ratatui::Terminal;
+use tuirealm::MockComponent;
 
 use crate::protocol::{PopupDefinition, PopupResult};
 use crate::realm::PopupComponent;
@@ -188,7 +186,7 @@ fn handle_key(popup: &mut PopupComponent, key: KeyCode) -> Result<PopupAction> {
 
 /// Create centered rect (popup-tui pattern).
 fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
-    use ratatui::layout::{Constraint, Direction as RatatuiDirection, Layout};
+    use tuirealm::ratatui::layout::{Constraint, Direction as RatatuiDirection, Layout};
 
     let popup_layout = Layout::default()
         .direction(RatatuiDirection::Vertical)

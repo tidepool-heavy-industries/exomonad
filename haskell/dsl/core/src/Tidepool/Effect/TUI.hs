@@ -174,18 +174,21 @@ data ComponentSpec
   deriving (Show, Eq, Generic)
 
 -- | Visibility rules for conditional component display.
+--
+-- Note: Uses untagged serialization. Field names are deliberately different
+-- to avoid ambiguity during deserialization.
 data VisibilityRule
   = Checked Text
     -- ^ Show if checkbox with given ID is checked
   | Equals (KM.KeyMap Text)
     -- ^ Show if choice equals value ({"choiceId": "expectedValue"})
-  | GreaterThan { vrId :: Text, vrValue :: Double }
-    -- ^ Show if slider value > threshold
-  | LessThan { vrId :: Text, vrValue :: Double }
-    -- ^ Show if slider value < threshold
-  | CountEquals { vrId :: Text, vrCount :: Int }
+  | GreaterThan { vrId :: Text, vrMinValue :: Double }
+    -- ^ Show if slider value > min_value
+  | LessThan { vrId :: Text, vrMaxValue :: Double }
+    -- ^ Show if slider value < max_value
+  | CountEquals { vrId :: Text, vrExactCount :: Int }
     -- ^ Show if multiselect has exactly N items selected
-  | CountGreaterThan { vrId :: Text, vrCount :: Int }
+  | CountGreaterThan { vrId :: Text, vrMinCount :: Int }
     -- ^ Show if multiselect has > N items selected
   deriving (Show, Eq, Generic)
 
@@ -328,14 +331,15 @@ instance FromJSON Component where
     pure $ Component cid spec vis
 
 -- VisibilityRule uses untagged serialization (Rust's #[serde(untagged)])
+-- Field names are deliberately different to avoid ambiguity
 instance ToJSON VisibilityRule where
   toJSON = \case
     Checked cid -> A.String cid
     Equals conditions -> toJSON conditions
-    GreaterThan cid val -> object ["id" .= cid, "value" .= val]
-    LessThan cid val -> object ["id" .= cid, "value" .= val]
-    CountEquals cid count -> object ["id" .= cid, "count" .= count]
-    CountGreaterThan cid count -> object ["id" .= cid, "count" .= count]
+    GreaterThan cid val -> object ["id" .= cid, "min_value" .= val]
+    LessThan cid val -> object ["id" .= cid, "max_value" .= val]
+    CountEquals cid count -> object ["id" .= cid, "exact_count" .= count]
+    CountGreaterThan cid count -> object ["id" .= cid, "min_count" .= count]
 
 instance FromJSON VisibilityRule where
   parseJSON v = parseChecked v <|> parseEquals v <|> parseComparison v
@@ -353,26 +357,19 @@ instance FromJSON VisibilityRule where
       isString _ = False
 
       parseComparison = withObject "VisibilityRule" $ \o -> do
-        -- Disambiguate by checking which fields exist
-        hasValue <- (o .: "value" :: Parser (Maybe Double)) >>= \case
-          Just _ -> pure True
-          Nothing -> pure False
-        hasCount <- (o .: "count" :: Parser (Maybe Int)) >>= \case
-          Just _ -> pure True
-          Nothing -> pure False
+        -- Disambiguate by checking which fields exist (now uses unique field names)
+        cid <- o .: "id"
+        minValue <- o .:? "min_value"
+        maxValue <- o .:? "max_value"
+        exactCount <- o .:? "exact_count"
+        minCount <- o .:? "min_count"
 
-        case (hasValue, hasCount) of
-          (True, False) -> do
-            -- Could be GreaterThan or LessThan - use heuristic or accept both
-            cid <- o .: "id"
-            val <- o .: "value"
-            -- Default to GreaterThan (Rust matches by field order)
-            pure $ GreaterThan cid val
-          (False, True) -> do
-            cid <- o .: "id"
-            count <- o .: "count"
-            pure $ CountEquals cid count
-          _ -> fail "Invalid VisibilityRule"
+        case (minValue, maxValue, exactCount, minCount) of
+          (Just val, Nothing, Nothing, Nothing) -> pure $ GreaterThan cid val
+          (Nothing, Just val, Nothing, Nothing) -> pure $ LessThan cid val
+          (Nothing, Nothing, Just count, Nothing) -> pure $ CountEquals cid count
+          (Nothing, Nothing, Nothing, Just count) -> pure $ CountGreaterThan cid count
+          _ -> fail "Invalid VisibilityRule: ambiguous or missing fields"
 
 instance ToJSON PopupResult where
   toJSON (PopupResult button values) = object

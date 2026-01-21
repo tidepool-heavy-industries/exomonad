@@ -165,24 +165,24 @@ impl PopupComponent {
                     false
                 })
             }
-            VisibilityRule::GreaterThan { id, value } => {
+            VisibilityRule::GreaterThan { id, min_value } => {
                 self.state.get_number(id)
-                    .map(|n| n > *value)
+                    .map(|n| n > *min_value)
                     .unwrap_or(false)
             }
-            VisibilityRule::LessThan { id, value } => {
+            VisibilityRule::LessThan { id, max_value } => {
                 self.state.get_number(id)
-                    .map(|n| n < *value)
+                    .map(|n| n < *max_value)
                     .unwrap_or(false)
             }
-            VisibilityRule::CountEquals { id, count } => {
+            VisibilityRule::CountEquals { id, exact_count } => {
                 self.state.get_multichoice(id)
-                    .map(|selections| selections.iter().filter(|&&selected| selected).count() == *count)
+                    .map(|selections| selections.iter().filter(|&&selected| selected).count() == *exact_count)
                     .unwrap_or(false)
             }
-            VisibilityRule::CountGreaterThan { id, count } => {
+            VisibilityRule::CountGreaterThan { id, min_count } => {
                 self.state.get_multichoice(id)
-                    .map(|selections| selections.iter().filter(|&&selected| selected).count() > *count)
+                    .map(|selections| selections.iter().filter(|&&selected| selected).count() > *min_count)
                     .unwrap_or(false)
             }
         }
@@ -314,10 +314,8 @@ impl PopupComponent {
                         // Calculate which item in the list was clicked
                         if let Some(area) = self.component_areas.get(index) {
                             let relative_y = y.saturating_sub(area.y);
-                            // Each item is roughly 1 line tall, subtract 1 for header
+                            // If clicking within the list body (below the header), toggle current item
                             if relative_y > 0 {
-                                let _item_index = (relative_y - 1) as usize;
-                                // Move to the clicked item then toggle it
                                 wrapper.component.perform(Cmd::Submit);
                                 self.sync_state();
                             }

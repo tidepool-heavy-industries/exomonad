@@ -1,9 +1,7 @@
 mod app;
-mod input;
 mod protocol;
-mod render;
+mod realm;
 mod server;
-mod ui_stack;
 
 use anyhow::{Context, Result};
 use clap::Parser;
