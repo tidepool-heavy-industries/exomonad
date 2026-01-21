@@ -148,13 +148,13 @@ rebuild-runtime:
 
     echo ""
     echo "── Building Rust (mantle-agent, tui-sidebar) ──"
-    cargo build --release -p mantle-agent -p tui-sidebar
+    cd "$RUNTIME_SRC/rust" && cargo build --release -p mantle-agent -p tui-sidebar
 
     echo ""
     echo "── Installing to $RUNTIME_BIN ──"
     cp "$(cabal list-bin tidepool-control-server)" "$RUNTIME_BIN/"
-    cp rust/target/release/mantle-agent "$RUNTIME_BIN/"
-    cp rust/target/release/tui-sidebar "$RUNTIME_BIN/"
+    cp "$RUNTIME_SRC/rust/target/release/mantle-agent" "$RUNTIME_BIN/"
+    cp "$RUNTIME_SRC/rust/target/release/tui-sidebar" "$RUNTIME_BIN/"
 
     echo ""
     echo "✓ Runtime binaries rebuilt:"
@@ -180,13 +180,13 @@ rebuild-runtime-local:
 
     echo ""
     echo "── Building Rust (mantle-agent, tui-sidebar) ──"
-    cargo build --release -p mantle-agent -p tui-sidebar
+    cd "$RUNTIME_SRC/rust" && cargo build --release -p mantle-agent -p tui-sidebar
 
     echo ""
     echo "── Installing to $RUNTIME_BIN ──"
     cp "$(cabal list-bin tidepool-control-server)" "$RUNTIME_BIN/"
-    cp rust/target/release/mantle-agent "$RUNTIME_BIN/"
-    cp rust/target/release/tui-sidebar "$RUNTIME_BIN/"
+    cp "$RUNTIME_SRC/rust/target/release/mantle-agent" "$RUNTIME_BIN/"
+    cp "$RUNTIME_SRC/rust/target/release/tui-sidebar" "$RUNTIME_BIN/"
 
     echo ""
     echo "✓ Runtime binaries rebuilt:"
