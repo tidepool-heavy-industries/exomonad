@@ -5,8 +5,10 @@ use serde::{Deserialize, Serialize};
 // ══════════════════════════════════════════════════════════════
 
 /// Messages sent from Haskell tui-interpreter to Rust tui-sidebar.
-/// Not used in Phase 1 (only UISpec flows via ShowUI effect),
-/// but prepared for future PushUI/ReplaceUI/UpdateUI/PopUI support.
+///
+/// Note: There is no PopUI message. The Rust TUI sidebar pops its UI stack
+/// automatically after sending an Interaction. For multi-step UIs, Haskell
+/// just sends another PushUI - the previous UI was already popped.
 #[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
@@ -14,7 +16,6 @@ pub enum TUIMessage {
     PushUI { spec: UISpec },
     ReplaceUI { spec: UISpec },
     UpdateUI { update: UIUpdate },
-    PopUI,
 }
 
 // ══════════════════════════════════════════════════════════════

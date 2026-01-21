@@ -217,7 +217,7 @@ The `tidepool-control-server` package provides the Unix socket server:
 ## Known Limitations (Phase 1)
 
 1. **No input editing** - Input fields display value but don't support typing (Phase 3)
-2. **Immediate UI close** - UI pops after first interaction (no multi-step dialogs yet)
+2. **Auto-pop after interaction** - UI automatically pops after sending Interaction; multi-step flows use repeated PushUI
 3. **No dynamic updates** - Can't update progress bars mid-render (Phase 2)
 4. **Fixed element sizing** - All elements get equal height (Phase 2: smart sizing)
 5. **No Table/Select/List** - These widgets not implemented (Phase 2)
