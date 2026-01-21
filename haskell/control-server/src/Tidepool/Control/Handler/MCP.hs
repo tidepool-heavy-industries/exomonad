@@ -74,7 +74,7 @@ import Tidepool.FileSystem.Interpreter (runFileSystemIO)
 import Tidepool.Env.Interpreter (runEnvIO)
 import Tidepool.Zellij.Interpreter (runZellijIO)
 import Tidepool.Gemini.Interpreter (runGeminiIO)
-import Tidepool.Effect.TUI (TUI(..), Interaction(..))
+import Tidepool.Effect.TUI (TUI(..), PopupResult(..))
 import Tidepool.Effect.Types (runLog, LogLevel(Debug), runReturn, runTime)
 import Tidepool.Graph.Goto (unwrapSingleChoice)
 import Tidepool.LSP.Interpreter (LSPSession, runLSP)
@@ -89,9 +89,7 @@ import Tidepool.Observability.Types (TraceContext, ObservabilityConfig(..), defa
 runTUIOrMock :: LastMember IO effs => Maybe TUIHandle -> Eff (TUI ': effs) a -> Eff effs a
 runTUIOrMock (Just h) = runTUI h
 runTUIOrMock Nothing = interpret $ \case
-  ShowUI _ -> pure $ ButtonClicked "mock" "cancel"
-  UpdateUI _ -> pure ()
-  CloseUI -> pure ()
+  ShowUI _ -> pure $ PopupResult "decline" (toJSON (mempty :: [(String, String)]))
 
 -- | Wrap MCP tool call with tracing if enabled.
 withMcpTracing 

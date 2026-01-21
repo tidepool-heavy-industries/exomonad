@@ -3,6 +3,7 @@
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
@@ -10,8 +11,8 @@
 
 -- | TUI-interactive MCP tools for human decisions.
 --
--- These tools use the TUI effect to show interactive UI elements to the user
--- and wait for their response before returning to the LLM agent.
+-- These tools use the TUI effect to show interactive popups and wait for
+-- user response before returning to the LLM agent.
 module Tidepool.Control.TUITools
   ( -- * Confirm Action
     ConfirmActionGraph(..)
@@ -33,8 +34,11 @@ module Tidepool.Control.TUITools
   ) where
 
 import Control.Monad.Freer (Eff, Member)
-import Data.Aeson (FromJSON(..), ToJSON(..), (.:), (.:?), (.=), object, withObject, (.!=))
+import Data.Aeson (FromJSON(..), ToJSON(..), Value(..), (.:), (.:?), (.=), object, withObject, (.!=))
+import Data.Aeson.Key qualified as Key
+import Data.Aeson.KeyMap qualified as KM
 import Data.Text (Text)
+import Data.Text qualified as T
 import GHC.Generics (Generic)
 
 import Tidepool.Effect.TUI
@@ -43,6 +47,25 @@ import Tidepool.Graph.Generic (type (:-))
 import Tidepool.Graph.Generic.Core (LogicNode)
 import Tidepool.Graph.Types (type (:@), Input, UsesEffects, GraphEntries, GraphEntry(..))
 import Tidepool.Schema (HasJSONSchema(..), objectSchema, arraySchema, emptySchema, SchemaType(..), describeField)
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- JSON VALUE HELPERS
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Extract a text value from a JSON object by key, or empty string if missing.
+getText :: Text -> Value -> Text
+getText key = \case
+  Object obj -> case KM.lookup (Key.fromText key) obj of
+    Just (String t) -> t
+    _ -> ""
+  _ -> ""
+
+-- | Extract a non-empty text value from a JSON object.
+getTextMaybe :: Text -> Value -> Maybe Text
+getTextMaybe key val =
+  case getText key val of
+    "" -> Nothing
+    t -> Just t
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- CONFIRM-ACTION TOOL
@@ -73,7 +96,7 @@ instance ToJSON ConfirmArgs where
     ]
 
 -- | Result of confirm_action tool.
-data ConfirmResult = ConfirmResult
+newtype ConfirmResult = ConfirmResult
   { crConfirmed :: Bool
   }
   deriving stock (Show, Eq, Generic)
@@ -99,25 +122,16 @@ confirmActionLogic
   => ConfirmArgs
   -> Eff es ConfirmResult
 confirmActionLogic args = do
-  let uiSpec = UISpec
-        { uiId = "confirm-action"
-        , uiLayout = Vertical
-            [ EText "title" "Confirm Action"
-            , EText "action" $ "Action: " <> caAction args
-            , EText "details" $ caDetails args
-            , EButton "confirm" "Confirm"
-            , EButton "cancel" "Cancel"
+  let popup = PopupDefinition
+        { pdTitle = "Confirm Action"
+        , pdComponents =
+            [ Component "action" (Text $ "Action: " <> caAction args) Nothing
+            , Component "details" (Text $ caDetails args) Nothing
             ]
         }
-  
-  interaction <- showUI uiSpec
-  closeUI
-  
-  let confirmed = case interaction of
-        ButtonClicked _ "confirm" -> True
-        _ -> False
-  
-  returnValue $ ConfirmResult confirmed
+
+  PopupResult button _ <- showUI popup
+  returnValue $ ConfirmResult (button == "submit")
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- SELECT-OPTION TOOL
@@ -133,7 +147,7 @@ data SelectArgs = SelectArgs
 instance HasJSONSchema SelectArgs where
   jsonSchema = objectSchema
     [ ("prompt", describeField "prompt" "Instruction for the user" (emptySchema TString))
-    , ("options", describeField "options" "List of options as [id, label] pairs" 
+    , ("options", describeField "options" "List of options as [id, label] pairs"
         (arraySchema $ arraySchema $ emptySchema TString))
     ]
     ["prompt", "options"]
@@ -179,31 +193,26 @@ selectOptionLogic
   => SelectArgs
   -> Eff es SelectResult
 selectOptionLogic args = do
-  let optionButtons = map (\(oid, label) -> EButton oid label) (saOptions args)
-      uiSpec = UISpec
-        { uiId = "select-option"
-        , uiLayout = Vertical $
-            [ EText "prompt" (saPrompt args)
-            ] ++ optionButtons ++
-            [ EInput "custom" "Other / Custom Response" ""
-            , EButton "submit_custom" "Submit Custom"
+  let labels = map snd (saOptions args)
+      popup = PopupDefinition
+        { pdTitle = "Select Option"
+        , pdComponents =
+            [ Component "prompt" (Text $ saPrompt args) Nothing
+            , Component "choice" (Choice "Choose an option" labels (Just 0)) Nothing
+            , Component "custom" (Textbox "Other / Custom Response" Nothing Nothing) Nothing
             ]
         }
-  
-  interaction <- showUI uiSpec
-  closeUI
-  
-  let result = case interaction of
-        ButtonClicked _ "submit_custom" ->
-          SelectResult "custom" Nothing
-        ButtonClicked _ oid ->
-          SelectResult oid Nothing
-        InputSubmitted _ "custom" val ->
-          SelectResult "custom" (Just val)
-        _ ->
-          SelectResult "cancelled" Nothing
-  
-  returnValue result
+
+  PopupResult button values <- showUI popup
+
+  let choiceText = getText "choice" values
+      customText = getTextMaybe "custom" values
+      selected
+        | button == "decline" = "cancelled"
+        | Just _ <- customText = "custom"
+        | otherwise = choiceText
+
+  returnValue $ SelectResult selected customText
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- REQUEST-GUIDANCE TOOL
@@ -211,7 +220,7 @@ selectOptionLogic args = do
 
 -- | Arguments for request_guidance tool.
 data GuidanceArgs = GuidanceArgs
-  { gaContext :: Text     -- ^ What the agent is stuck on
+  { gaContext :: Text        -- ^ What the agent is stuck on
   , gaSuggestions :: [Text]  -- ^ Optional suggestions
   }
   deriving stock (Show, Eq, Generic)
@@ -219,7 +228,7 @@ data GuidanceArgs = GuidanceArgs
 instance HasJSONSchema GuidanceArgs where
   jsonSchema = objectSchema
     [ ("context", describeField "context" "Description of what the agent needs help with" (emptySchema TString))
-    , ("suggestions", describeField "suggestions" "Optional suggested directions for the user to choose from" 
+    , ("suggestions", describeField "suggestions" "Optional suggested directions for the user to choose from"
         (arraySchema $ emptySchema TString))
     ]
     ["context"]
@@ -235,7 +244,7 @@ instance ToJSON GuidanceArgs where
     ]
 
 -- | Result of request_guidance tool.
-data GuidanceResult = GuidanceResult
+newtype GuidanceResult = GuidanceResult
   { grGuidance :: Text
   }
   deriving stock (Show, Eq, Generic)
@@ -261,25 +270,24 @@ requestGuidanceLogic
   => GuidanceArgs
   -> Eff es GuidanceResult
 requestGuidanceLogic args = do
-  let suggestionButtons = map (\s -> EButton s s) (gaSuggestions args)
-      uiSpec = UISpec
-        { uiId = "request-guidance"
-        , uiLayout = Vertical $
-            [ EText "title" "Request Guidance"
-            , EText "context" (gaContext args)
-            ] ++ suggestionButtons ++
-            [ EInput "guidance" "Your Guidance" ""
-            , EButton "submit" "Submit"
-            ]
+  let suggestionComponent
+        | null (gaSuggestions args) = []
+        | otherwise = [Component "suggestions" (Choice "Suggestions" (gaSuggestions args) (Just 0)) Nothing]
+
+      popup = PopupDefinition
+        { pdTitle = "Request Guidance"
+        , pdComponents =
+            [ Component "context" (Text $ gaContext args) Nothing ]
+            <> suggestionComponent <>
+            [ Component "guidance" (Textbox "Your Guidance" Nothing Nothing) Nothing ]
         }
-  
-  interaction <- showUI uiSpec
-  closeUI
-  
-  let guidance = case interaction of
-        ButtonClicked _ "submit" -> "No guidance provided"
-        ButtonClicked _ oid -> oid
-        InputSubmitted _ "guidance" val -> val
-        _ -> "No guidance provided"
-  
+
+  PopupResult _ values <- showUI popup
+
+  let guidance = case getTextMaybe "guidance" values of
+        Just t -> t
+        Nothing -> case getTextMaybe "suggestions" values of
+          Just t -> t
+          Nothing -> "No guidance provided"
+
   returnValue $ GuidanceResult guidance
