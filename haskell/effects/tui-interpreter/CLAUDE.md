@@ -67,13 +67,13 @@ main = withSocketsDo $ do
 
 ### Message Format
 
-NDJSON (newline-delimited JSON) over TCP:
+NDJSON (newline-delimited JSON) over TCP/Unix socket:
 
 **Haskell → Rust (TUIMessage):**
 ```json
 {"type": "PushUI", "spec": {"id": "form-1", "layout": {...}}}
+{"type": "ReplaceUI", "spec": {"id": "form-1", "layout": {...}}}
 {"type": "UpdateUI", "update": {"ui_id": "form-1", "element_id": "progress", "update": {...}}}
-{"type": "PopUI"}
 ```
 
 **Rust → Haskell (Interaction):**
@@ -81,6 +81,9 @@ NDJSON (newline-delimited JSON) over TCP:
 {"type": "ButtonClicked", "ui_id": "form-1", "button_id": "submit"}
 {"type": "InputSubmitted", "ui_id": "form-1", "input_id": "name", "value": "Alice"}
 ```
+
+**Note:** There is no `PopUI` message. The Rust TUI sidebar automatically pops its UI stack
+after sending an Interaction. For multi-step UIs, just send another `PushUI`.
 
 ## API
 
@@ -107,10 +110,10 @@ runTUI :: LastMember IO effs => TUIHandle -> Eff (TUI ': effs) a -> Eff effs a
 ### TUIHandle
 
 Manages bidirectional communication:
-- **Socket**: TCP connection to Rust TUI
-- **Send channel**: Queue of outgoing messages (UISpec, UIUpdate, Close)
+- **Socket**: TCP/Unix socket connection to Rust TUI sidebar
+- **Send channel**: Queue of outgoing messages (PushUI, ReplaceUI, UpdateUI)
 - **Receive channel**: Queue of incoming Interaction events
-- **Active UI tracker**: Which UI is currently shown
+- **Active UI tracker**: Which UI is currently shown (local state)
 - **Session ID**: Identifier for this TUI session
 
 ### Background Threads
@@ -126,7 +129,7 @@ Both threads handle errors gracefully (connection loss, malformed JSON).
 
 - `showUI` - **Blocking**: sends UISpec, waits for Interaction
 - `updateUI` - **Non-blocking**: sends UIUpdate, returns immediately
-- `closeUI` - **Non-blocking**: sends close message, returns immediately
+- `closeUI` - **Non-blocking**: updates local state only (no wire message)
 
 ## Example: Progress Bar Updates
 

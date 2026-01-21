@@ -78,10 +78,6 @@ pub fn spawn_io_tasks(
                             debug!("Received UpdateUI (not implemented)");
                             // Phase 2: handle dynamic updates
                         }
-                        Ok(TUIMessage::PopUI) => {
-                            debug!("Received PopUI (not implemented)");
-                            // Phase 2: handle UI stack pop
-                        }
                         Err(e) => {
                             warn!(error = %e, json = %trimmed, "Failed to parse TUIMessage");
                             // Continue reading, don't stop on malformed JSON

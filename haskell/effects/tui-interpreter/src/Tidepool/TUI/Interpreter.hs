@@ -68,11 +68,14 @@ data TUIHandle = TUIHandle
   }
 
 -- | Messages sent from interpreter to TUI sidebar.
+--
+-- Note: There is no PopUI message. The Rust TUI sidebar pops its UI stack
+-- automatically after sending an Interaction. For multi-step UIs, just send
+-- another PushUI - the previous UI was already popped.
 data TUIMessage
   = PushUI UISpec       -- ^ Show a new UI
   | ReplaceUI UISpec    -- ^ Replace currently shown UI
   | UpdateUIMsg UIUpdate   -- ^ Update an element in current UI (renamed to avoid collision)
-  | PopUI               -- ^ Close current UI
   deriving (Show, Eq, Generic)
 
 instance ToJSON TUIMessage where
@@ -87,9 +90,6 @@ instance ToJSON TUIMessage where
   toJSON (UpdateUIMsg update) = object
     [ "type" .= ("UpdateUI" :: Text)
     , "update" .= update
-    ]
-  toJSON PopUI = object
-    [ "type" .= ("PopUI" :: Text)
     ]
 
 -- ══════════════════════════════════════════════════════════════
@@ -231,7 +231,7 @@ runTUI h = interpret $ \case
     atomically $ writeTChan h.tuiSendChan (UpdateUIMsg update)
 
   CloseUI -> sendM $ do
-    -- Send close message
-    atomically $ do
-      writeTChan h.tuiSendChan PopUI
-      writeTVar h.tuiActiveUI Nothing
+    -- Just update local state. The Rust TUI sidebar already popped its UI stack
+    -- when it sent the Interaction, so there's nothing to send over the wire.
+    -- For multi-step UIs, just call showUI again - no explicit close needed.
+    atomically $ writeTVar h.tuiActiveUI Nothing
