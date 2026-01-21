@@ -38,9 +38,9 @@ tests = testGroup "ExoTools"
 test_discovery_spawn :: Assertion
 test_discovery_spawn = do
   let spawnTools = reifyMCPTools (Proxy @SpawnAgentsGraph)
-  assertEqual "Should find one tool" 1 (length spawnTools)
-  let tool = head spawnTools
-  assertEqual "Name should be spawn_agents" "spawn_agents" tool.mtdName
+  case spawnTools of
+    [tool] -> assertEqual "Name should be spawn_agents" "spawn_agents" tool.mtdName
+    _ -> assertFailure $ "Expected exactly one tool, but found " ++ show (length spawnTools)
 
 test_serialization_spawn :: Assertion
 test_serialization_spawn = do
@@ -58,9 +58,9 @@ test_discovery_pcc :: Assertion
 test_discovery_pcc = do
   -- This checks that the MCPExport annotation is correctly handled
   let pccTools = reifyMCPTools (Proxy @PreCommitCheckGraph)
-  assertEqual "Should find one tool" 1 (length pccTools)
-  let tool = head pccTools
-  assertEqual "Name should be pre_commit_check" "pre_commit_check" tool.mtdName
+  case pccTools of
+    [tool] -> assertEqual "Name should be pre_commit_check" "pre_commit_check" tool.mtdName
+    _ -> assertFailure $ "Expected exactly one tool, but found " ++ show (length pccTools)
 
 test_serialization_pcc :: Assertion
 test_serialization_pcc = do
@@ -74,9 +74,9 @@ test_discovery_fpr :: Assertion
 test_discovery_fpr = do
   -- This checks that the MCPExport annotation is correctly handled for FilePRGraph
   let fprTools = reifyMCPTools (Proxy @FilePRGraph)
-  assertEqual "Should find one tool" 1 (length fprTools)
-  let tool = head fprTools
-  assertEqual "Name should be file_pr" "file_pr" tool.mtdName
+  case fprTools of
+    [tool] -> assertEqual "Name should be file_pr" "file_pr" tool.mtdName
+    _ -> assertFailure $ "Expected exactly one tool, but found " ++ show (length fprTools)
 
 test_serialization_fpr :: Assertion
 test_serialization_fpr = do
@@ -97,9 +97,9 @@ test_serialization_fpr = do
 test_discovery_btp :: Assertion
 test_discovery_btp = do
   let btpTools = reifyMCPTools (Proxy @BeadToPrGraph)
-  assertEqual "Should find one tool" 1 (length btpTools)
-  let tool = head btpTools
-  assertEqual "Name should be bead_to_pr" "bead_to_pr" tool.mtdName
+  case btpTools of
+    [tool] -> assertEqual "Name should be bead_to_pr" "bead_to_pr" tool.mtdName
+    _ -> assertFailure $ "Expected exactly one tool, but found " ++ show (length btpTools)
 
 test_serialization_btp :: Assertion
 test_serialization_btp = do
@@ -113,9 +113,9 @@ test_serialization_btp = do
 test_discovery_ptb :: Assertion
 test_discovery_ptb = do
   let ptbTools = reifyMCPTools (Proxy @PrToBeadGraph)
-  assertEqual "Should find one tool" 1 (length ptbTools)
-  let tool = head ptbTools
-  assertEqual "Name should be pr_to_bead" "pr_to_bead" tool.mtdName
+  case ptbTools of
+    [tool] -> assertEqual "Name should be pr_to_bead" "pr_to_bead" tool.mtdName
+    _ -> assertFailure $ "Expected exactly one tool, but found " ++ show (length ptbTools)
 
 test_serialization_ptb :: Assertion
 test_serialization_ptb = do
@@ -128,9 +128,9 @@ test_serialization_ptb = do
 test_pr_discovery :: Assertion
 test_pr_discovery = do
   let prTools = reifyMCPTools (Proxy @PrReviewStatusGraph)
-  assertEqual "Should find one tool" 1 (length prTools)
-  let tool = head prTools
-  assertEqual "Name should be pr_review_status" "pr_review_status" tool.mtdName
+  case prTools of
+    [tool] -> assertEqual "Name should be pr_review_status" "pr_review_status" tool.mtdName
+    _ -> assertFailure $ "Expected exactly one tool, but found " ++ show (length prTools)
 
 test_pr_serialization :: Assertion
 test_pr_serialization = do

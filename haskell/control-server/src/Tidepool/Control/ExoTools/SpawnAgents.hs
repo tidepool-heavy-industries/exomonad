@@ -23,7 +23,7 @@ import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
-import System.FilePath ((</>))
+import System.FilePath ((</>), takeDirectory)
 
 import Tidepool.Effects.BD (BD, BeadInfo(..), BeadStatus(..), DependencyInfo(..), getBead)
 import Tidepool.Effects.Env (Env, getEnv)
@@ -38,7 +38,6 @@ import Tidepool.Graph.Types (type (:@), Input, UsesEffects, Exit, MCPExport, MCP
 import Tidepool.Schema (HasJSONSchema(..), objectSchema, arraySchema, emptySchema, SchemaType(..), describeField)
 
 import Tidepool.Control.ExoTools.Internal (slugify)
-import System.FilePath (takeDirectory)
 
 -- | Find the hangar root by checking ENV or walking up from repo root.
 findHangarRoot
