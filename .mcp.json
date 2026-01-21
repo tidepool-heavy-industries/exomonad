@@ -1,12 +1,12 @@
 {
   "mcpServers": {
     "tidepool": {
-      "command": "$HANGAR_ROOT/runtime/bin/mantle-agent",
+      "command": "mantle-agent",
       "args": [
         "mcp"
       ],
       "env": {
-        "TIDEPOOL_CONTROL_SOCKET": "$HANGAR_ROOT/runtime/state/sockets/control.sock",
+        "TIDEPOOL_CONTROL_SOCKET": ".tidepool/sockets/control.sock",
         "RUST_LOG": "info"
       }
     }
