@@ -19,7 +19,9 @@ cleanup() {
 
 trap cleanup EXIT SIGINT SIGTERM SIGHUP
 
-export PC_NO_SERVER=true PC_USE_UDS=true PC_SOCKET_PATH=.tidepool/sockets/process-compose.sock
+# NOTE: PC_NO_SERVER must NOT be true, otherwise 'process-compose down' 
+# cannot connect to the server to initiate a graceful ordered shutdown.
+export PC_USE_UDS=true PC_SOCKET_PATH=.tidepool/sockets/process-compose.sock
 
 echo "🚀 Starting Tidepool Orchestrator..."
 process-compose "$@" &
