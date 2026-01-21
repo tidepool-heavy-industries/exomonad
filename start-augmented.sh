@@ -22,16 +22,14 @@ mkdir -p .tidepool/{sockets,logs}
 # Clean up any stale sockets from previous runs
 rm -f .tidepool/sockets/*.sock
 
-# Build binaries if needed (fast if already built)
-echo "Checking binaries..."
-cabal build tidepool-control-server --enable-optimization=0 >/dev/null 2>&1 || {
-    echo "ERROR: Failed to build control-server"
+# Check HANGAR_ROOT
+if [ -z "$HANGAR_ROOT" ]; then
+    echo "ERROR: HANGAR_ROOT not set in .env"
     exit 1
-}
-(cd rust && cargo build --bin mantle-agent --bin tui-sidebar) >/dev/null 2>&1 || {
-    echo "ERROR: Failed to build Rust binaries"
-    exit 1
-}
+fi
+
+# Add all Hangar binaries (including mantle-agent) to PATH for Claude and related tools
+export PATH="$HANGAR_ROOT/bin:$PATH"
 
 # Check dependencies
 if ! command -v process-compose &> /dev/null; then

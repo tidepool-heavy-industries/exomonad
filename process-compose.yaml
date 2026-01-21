@@ -14,8 +14,9 @@ processes:
   control-server:
     # Pre-cleanup socket to prevent EADDRINUSE, then run server
     command: |
+      if [ -z "${HANGAR_ROOT:-}" ]; then echo "HANGAR_ROOT is not set" >&2; exit 1; fi && \
       rm -f .tidepool/sockets/control.sock .tidepool/sockets/tui.sock && \
-      dist-newstyle/build/aarch64-osx/ghc-9.12.2/tidepool-control-server-0.1.0.0/x/tidepool-control-server/noopt/build/tidepool-control-server/tidepool-control-server
+      $HANGAR_ROOT/bin/exomonad
     working_dir: "."
     availability:
       restart: on_failure

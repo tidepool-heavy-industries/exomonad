@@ -4,8 +4,9 @@ log_location: .tidepool/logs
 processes:
   control-server:
     command: |
+      if [ -z "${HANGAR_ROOT:-}" ]; then echo "HANGAR_ROOT is not set" >&2; exit 1; fi && \
       rm -f .tidepool/sockets/control.sock && \
-      cabal run tidepool-control-server -- --no-tui
+      $HANGAR_ROOT/bin/exomonad --no-tui
     working_dir: "."
     environment:
       TIDEPOOL_CONTROL_SOCKET: .tidepool/sockets/control.sock
