@@ -1,41 +1,27 @@
-# Task: Update spawn_agents to use <hangar>/worktrees/ path
+# Task: Fix: .tidepool/logs directory not created for subagent worktrees
 
-**ID:** tidepool-kg6
+**ID:** tidepool-soj
 **Status:** open
 **Priority:** 2
-**Branch:** bd-kg6/update-spawnagents-to-use-hangarworktrees-path
+**Branch:** bd-soj/fix-tidepoollogs-directory-not-created-for-subagent-worktrees
 
 ## Description
 
-## Intent
-spawn_agents should create worktrees in the Hangar worktrees directory, not ~/dev/.worktrees/tidepool/.
+Ensure log directories are created during subagent worktree bootstrap
 
-## Current
-```
-~/dev/.worktrees/tidepool/bd-xxx-.../
-```
+## Context
+When spawn_agents creates worktrees, it doesn't create .tidepool/logs/ directory. process-compose tries to tail .tidepool/logs/pc.log and fails. This should be created as part of worktree bootstrap in spawn_agents or the process-compose template.
 
-## Target
-```
-<hangar>/worktrees/bd-xxx-.../
-```
-
-## Acceptance Criteria
-- [ ] spawn_agents reads hangar root from env/config
-- [ ] Worktrees created in <hangar>/worktrees/
-- [ ] Bootstrap scripts work from new location
-
-## Files
-- haskell/control-server/src/Tidepool/Control/ExoTools/SpawnAgents.hs
+## Scope Hint
+Small - bootstrap script update
 
 ## Dependencies
 
-- tidepool-b0p: Design: Hangar directory schema for multi-project tooling (closed)
-
+None
 
 ## Workflow
 
 1. Implement changes
-2. Commit: [tidepool-kg6] <description>
-3. Push: git push -u origin bd-kg6/update-spawnagents-to-use-hangarworktrees-path
-4. File PR: gh pr create --title "[tidepool-kg6] Update spawn_agents to use <hangar>/worktrees/ path"
+2. Commit: [tidepool-soj] <description>
+3. Push: git push -u origin bd-soj/fix-tidepoollogs-directory-not-created-for-subagent-worktrees
+4. File PR: gh pr create --title "[tidepool-soj] Fix: .tidepool/logs directory not created for subagent worktrees"

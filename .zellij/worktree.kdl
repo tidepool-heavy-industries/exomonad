@@ -20,12 +20,12 @@ layout {
             // RIGHT: Stacked infrastructure panes (collapsible)
             pane split_direction="horizontal" stacked=true {
                 pane name="process-compose" {
-                    command "process-compose"
-                    args "up"
+                    command "bash"
+                    args "-c" "mkdir -p .tidepool/logs .tidepool/sockets && exec process-compose up"
                 }
                 pane name="logs" {
                     command "tail"
-                    args "-f" ".tidepool/logs/pc.log"
+                    args "-F" ".tidepool/logs/pc.log"
                 }
             }
         }

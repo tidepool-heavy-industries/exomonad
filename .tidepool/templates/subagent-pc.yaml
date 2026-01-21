@@ -1,19 +1,34 @@
 version: "0.5"
-log_location: .tidepool/logs
+log_location: .tidepool/logs/pc.log
 
 processes:
   control-server:
     command: |
-      if [ -z "${HANGAR_ROOT:-}" ]; then echo "HANGAR_ROOT is not set" >&2; exit 1; fi && \
+      # Ensure directories exist (fallback)
+      mkdir -p .tidepool/logs .tidepool/sockets
+      
+      if [ -z "${HANGAR_ROOT:-}" ]; then 
+        # Discover Hangar by walking up directories
+        HANGAR_ROOT=$(pwd)
+        while [ ! -f "$HANGAR_ROOT/Hangar.toml" ] && [ "$HANGAR_ROOT" != "/" ] && [ "$HANGAR_ROOT" != "$HOME" ]; do
+          HANGAR_ROOT=$(dirname "$HANGAR_ROOT")
+        done
+      fi
+      
+      if [ ! -f "${HANGAR_ROOT}/Hangar.toml" ]; then
+        echo "ERROR: Hangar.toml not found" >&2
+        exit 1
+      fi
+      
       rm -f .tidepool/sockets/control.sock && \
-      $HANGAR_ROOT/bin/exomonad --no-tui
+      "${HANGAR_ROOT}/runtime/bin/tidepool-control-server" --no-tui
     working_dir: "."
     environment:
       TIDEPOOL_CONTROL_SOCKET: .tidepool/sockets/control.sock
       TIDEPOOL_TUI_SOCKET: .tidepool/sockets/tui.sock
     readiness_probe:
       exec:
-        command: "nc -zU .tidepool/sockets/control.sock"
+        command: "test -S .tidepool/sockets/control.sock"
       initial_delay_seconds: 5
       period_seconds: 2
       failure_threshold: 15
@@ -23,4 +38,3 @@ processes:
     shutdown:
       command: "rm -f .tidepool/sockets/control.sock"
       timeout_seconds: 5
-
