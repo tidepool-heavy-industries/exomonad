@@ -320,8 +320,8 @@ claude-code
 # Terminal 1: Start control server
 GEMMA_ENDPOINT=http://localhost:11434 cabal run tidepool-control-server
 
-# Terminal 2: Wait for health check, then start tui-sidebar
-./scripts/wait-for-socket.sh .tidepool/sockets/control.sock 60 ControlServer
+# Terminal 2: Wait for TUI socket, then start tui-sidebar
+./scripts/wait-for-socket.sh .tidepool/sockets/tui.sock 60 TUIServer
 cargo run -p tui-sidebar -- --socket .tidepool/sockets/tui.sock
 
 # Terminal 3: Start Claude Code
