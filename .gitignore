@@ -6,6 +6,7 @@ dist-newstyle/
 .env # keys and etc
 .env
 
+.beads/
 .mantle/*
 .tidepool/
 training-data/
