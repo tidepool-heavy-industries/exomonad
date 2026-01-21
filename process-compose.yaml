@@ -14,7 +14,8 @@ processes:
         exit 1
       fi
       BIN_DIR="$HANGAR_ROOT/runtime/bin"
-      "$BIN_DIR/tidepool-control-server" --no-tui
+      rm -f .tidepool/sockets/control.sock .tidepool/sockets/tui.sock && \
+      "$BIN_DIR/tidepool-control-server"
     working_dir: "."
     environment:
       - "TIDEPOOL_CONTROL_SOCKET=.tidepool/sockets/control.sock"
