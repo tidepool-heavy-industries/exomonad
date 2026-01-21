@@ -335,6 +335,14 @@ claude-code
 
 Understanding the runtime stack for debugging and extension.
 
+#### Socket Lifecycle
+
+Sockets are managed to ensure clean transitions between sessions and prevent stale connections:
+
+1. **Bootstrap (`start-augmented.sh`)**: Canonical cleanup occurs here. It detects stale `process-compose` sessions via UDS and shuts them down, then deletes all remaining `.sock` files in `.tidepool/sockets/`.
+2. **Runtime**: Services like `control-server` create their own sockets upon startup.
+3. **Shutdown (`process-compose.yaml`)**: The `shutdown` command for `control-server` removes its specific sockets. This is a best-effort cleanup for graceful shutdown; the bootstrap cleanup is the source of truth for clearing stale state.
+
 #### Port Allocation
 
 | Port | Service | Protocol | Purpose |
