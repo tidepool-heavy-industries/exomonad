@@ -1,5 +1,5 @@
 version: "0.5"
-log_location: .tidepool/logs/pc.log
+log_location: .tidepool/logs
 
 processes:
   control-server:
