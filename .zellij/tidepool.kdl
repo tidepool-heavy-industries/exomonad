@@ -31,9 +31,11 @@ layout {
                 }
 
                 // BOTTOM-RIGHT: Backend Status (process-compose dashboard)
+                // Uses tidepool-runner.sh wrapper to ensure trap handlers fire on Zellij exit,
+                // triggering 'process-compose down' for graceful service termination.
                 pane name="Backend" {
                     command "bash"
-                    args "-c" "cd \"$(git rev-parse --show-toplevel)\" && mkdir -p .tidepool/sockets .tidepool/logs && export PC_NO_SERVER=true PC_USE_UDS=true PC_SOCKET_PATH=.tidepool/sockets/process-compose.sock && exec process-compose up"
+                    args "-c" "cd \"$(git rev-parse --show-toplevel)\" && mkdir -p .tidepool/sockets .tidepool/logs && exec ./scripts/tidepool-runner.sh up"
                 }
             }
         }

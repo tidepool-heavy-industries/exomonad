@@ -211,37 +211,37 @@ mkComponent = Component
 
 -- | Static text component.
 mkText :: Text -> Text -> Maybe VisibilityRule -> Component
-mkText cid content vis = Component cid (Text content) vis
+mkText cid content = Component cid (Text content)
 
 -- | Slider component.
 mkSlider :: Text -> Text -> Double -> Double -> Double -> Maybe VisibilityRule -> Component
-mkSlider cid label minVal maxVal defVal vis =
-  Component cid (Slider label minVal maxVal defVal) vis
+mkSlider cid label minVal maxVal defVal =
+  Component cid (Slider label minVal maxVal defVal)
 
 -- | Checkbox component.
 mkCheckbox :: Text -> Text -> Bool -> Maybe VisibilityRule -> Component
-mkCheckbox cid label defVal vis =
-  Component cid (Checkbox label defVal) vis
+mkCheckbox cid label defVal =
+  Component cid (Checkbox label defVal)
 
 -- | Textbox component.
 mkTextbox :: Text -> Text -> Maybe Text -> Maybe Int -> Maybe VisibilityRule -> Component
-mkTextbox cid label placeholder rows vis =
-  Component cid (Textbox label placeholder rows) vis
+mkTextbox cid label placeholder rows =
+  Component cid (Textbox label placeholder rows)
 
 -- | Choice (dropdown) component.
 mkChoice :: Text -> Text -> [Text] -> Maybe Int -> Maybe VisibilityRule -> Component
-mkChoice cid label options defIdx vis =
-  Component cid (Choice label options defIdx) vis
+mkChoice cid label options defIdx =
+  Component cid (Choice label options defIdx)
 
 -- | Multiselect component.
 mkMultiselect :: Text -> Text -> [Text] -> Maybe VisibilityRule -> Component
-mkMultiselect cid label options vis =
-  Component cid (Multiselect label options) vis
+mkMultiselect cid label options =
+  Component cid (Multiselect label options)
 
 -- | Group (section header) component.
 mkGroup :: Text -> Text -> Maybe VisibilityRule -> Component
-mkGroup cid label vis =
-  Component cid (Group label) vis
+mkGroup cid label =
+  Component cid (Group label)
 
 -- ══════════════════════════════════════════════════════════════
 -- JSON INSTANCES (must match Rust types exactly)
