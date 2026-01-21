@@ -194,7 +194,7 @@ spawnAgentsLogic args = do
 
       -- 3. Process each bead
       results <- forM args.saaBeadIds $ \shortId -> do
-        processBead repoRoot wtBaseDir shortId
+        processBead mHangarRoot repoRoot wtBaseDir shortId
 
       -- Partition results
       let (failed, succeeded) = partitionEithers results
@@ -211,11 +211,12 @@ spawnAgentsLogic args = do
 -- | Process a single bead: create worktree, bootstrap .tidepool/, write context, launch tab.
 processBead
   :: (Member BD es, Member Worktree es, Member FileSystem es, Member Zellij es)
-  => FilePath                                          -- ^ Repo root (for symlinks/templates)
+  => Maybe FilePath                                    -- ^ Hangar root (for templates)
+  -> FilePath                                          -- ^ Repo root (for symlinks/templates)
   -> FilePath                                          -- ^ Worktree base directory
   -> Text                                              -- ^ Short bead ID
   -> Eff es (Either (Text, Text) (Text, FilePath, TabId))  -- ^ Left (id, error) or Right (id, path, tabId)
-processBead repoRoot wtBaseDir shortId = do
+processBead mHangarRoot repoRoot wtBaseDir shortId = do
   -- Normalize bead ID (ensure it starts with tidepool-)
   let fullId = if "tidepool-" `T.isPrefixOf` shortId
                then shortId
@@ -245,7 +246,7 @@ processBead repoRoot wtBaseDir shortId = do
             Left err -> pure $ Left (shortId, T.pack (show err))
             Right (WorktreePath path) -> do
               -- b. Bootstrap .tidepool/ directory structure
-              bootstrapRes <- bootstrapTidepool repoRoot path
+              bootstrapRes <- bootstrapTidepool mHangarRoot repoRoot path
               case bootstrapRes of
                 Left errMsg -> pure $ Left (shortId, "Worktree created but bootstrap failed: " <> errMsg)
                 Right () -> do
@@ -278,10 +279,11 @@ processBead repoRoot wtBaseDir shortId = do
 -- | Bootstrap .tidepool/ directory structure in a worktree.
 bootstrapTidepool
   :: (Member FileSystem es)
-  => FilePath  -- ^ Repo root (for symlink source)
-  -> FilePath  -- ^ Worktree path
+  => Maybe FilePath  -- ^ Hangar root (for templates)
+  -> FilePath        -- ^ Repo root (for symlink source)
+  -> FilePath        -- ^ Worktree path
   -> Eff es (Either Text ())
-bootstrapTidepool repoRoot worktreePath = do
+bootstrapTidepool mHangarRoot repoRoot worktreePath = do
   -- Create .tidepool directory structure.
   -- These MUST exist for process-compose log tailing and control sockets.
   let socketsDir = worktreePath </> ".tidepool" </> "sockets"
@@ -297,7 +299,9 @@ bootstrapTidepool repoRoot worktreePath = do
         Left err -> pure $ Left $ "Failed to create .tidepool/logs: " <> T.pack (show err)
         Right () -> do
           -- Copy subagent process-compose template
-          let srcTemplate = repoRoot </> ".tidepool" </> "templates" </> "subagent-pc.yaml"
+          let srcTemplate = case mHangarRoot of
+                Just hr -> hr </> "templates" </> "subagent-pc.yaml"
+                Nothing -> repoRoot </> ".tidepool" </> "templates" </> "subagent-pc.yaml"  -- fallback
               dstConfig = worktreePath </> "process-compose.yaml"
           copyRes <- copyFile srcTemplate dstConfig
           case copyRes of
