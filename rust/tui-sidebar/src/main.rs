@@ -48,59 +48,75 @@ async fn main() -> Result<()> {
             PathBuf::from(env_val)
         }
     };
-
-    // Resolve socket path relative to project dir if needed
-    let socket_path = if socket_path.is_relative() {
-        if let Ok(project_dir) = std::env::var("TIDEPOOL_PROJECT_DIR") {
-            PathBuf::from(project_dir).join(&socket_path)
-        } else {
-            socket_path
-        }
-    } else {
-        socket_path
-    };
+    let socket_path = resolve_socket_path(socket_path);
 
     info!("TUI sidebar connecting to socket {:?}", socket_path);
 
     // Resolve health socket path
-    let health_socket_path = if args.health_socket.is_relative() {
-        if let Ok(project_dir) = std::env::var("TIDEPOOL_PROJECT_DIR") {
-            PathBuf::from(project_dir).join(&args.health_socket)
-        } else {
-            args.health_socket
-        }
-    } else {
-        args.health_socket
-    };
+    let health_socket_path = resolve_socket_path(args.health_socket);
 
     // Start health listener
     let _health_handle = server::start_health_listener(&health_socket_path).await?;
 
-    // Connect to control-server with retry logic
-    let max_retries = 10;
-    
+    // Resolve control socket path if available for TUI-disabled detection
+    let control_socket_path = std::env::var("TIDEPOOL_CONTROL_SOCKET")
+        .ok()
+        .map(|s| resolve_socket_path(PathBuf::from(s)));
+
     loop {
+        // Connect to control-server with retry logic and exponential backoff
         let mut retry_count = 0;
+        let max_retries = 15;
+        const MIN_RETRIES_BEFORE_WARNING: i32 = 3; // Wait a few attempts before warning about mixed socket state
+        let mut retry_delay = std::time::Duration::from_secs(1);
+        
         let stream = loop {
             match server::connect_to_control_server(&socket_path).await {
                 Ok(s) => break s,
                 Err(e) => {
                     retry_count += 1;
+
+                    // Check if control server socket exists but TUI socket is missing.
+                    // If control.sock exists but tui.sock doesn't after a few retries,
+                    // it's likely that TUI was explicitly disabled.
+                    let control_socket_exists = control_socket_path.as_ref().map(|p| p.exists()).unwrap_or(false);
+
                     if retry_count >= max_retries {
-                         // Cleanup health socket before returning
+                        if control_socket_exists {
+                            eprintln!("\n❌ TUI DISABLED");
+                            eprintln!("Control socket exists at {:?}, but TUI socket {:?} was never created.", 
+                                control_socket_path.as_ref().expect("Guaranteed by control_socket_exists"), 
+                                socket_path
+                            );
+                            eprintln!("This usually means --no-tui was passed to control-server (or the server crashed leaving a stale socket).\n");
+                            // Exit with 0 to indicate "Giving up as intended"
+                            std::process::exit(0);
+                        }
+                        
+                        // Cleanup health socket before returning
                         if health_socket_path.exists() {
                             let _ = std::fs::remove_file(&health_socket_path);
                         }
+                        
                         return Err(e).context(format!(
                             "Failed to connect to control-server after {} attempts",
                             max_retries
                         ));
                     }
-                    info!(
-                        "Waiting for control-server at {:?} (attempt {}/{})",
-                        socket_path, retry_count, max_retries
-                    );
-                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+                    if control_socket_exists && retry_count >= MIN_RETRIES_BEFORE_WARNING {
+                        info!("Control socket exists but TUI socket {:?} is missing (attempt {}/{})", socket_path, retry_count, max_retries);
+                    } else {
+                        info!(
+                            "Waiting for control-server at {:?} (attempt {}/{}, next retry in {:?})",
+                            socket_path, retry_count, max_retries, retry_delay
+                        );
+                    }
+
+                    tokio::time::sleep(retry_delay).await;
+
+                    // Exponential backoff: 1s, 2s, 4s, 8s, 10s, 10s...
+                    retry_delay = std::cmp::min(retry_delay * 2, std::time::Duration::from_secs(10));
                 }
             }
         };
@@ -116,5 +132,18 @@ async fn main() -> Result<()> {
         
         // Wait before reconnecting
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
+}
+
+/// Helper to resolve socket path relative to project dir if needed
+fn resolve_socket_path(path: PathBuf) -> PathBuf {
+    if path.is_relative() {
+        if let Ok(project_dir) = std::env::var("TIDEPOOL_PROJECT_DIR") {
+            PathBuf::from(project_dir).join(&path)
+        } else {
+            path
+        }
+    } else {
+        path
     }
 }
