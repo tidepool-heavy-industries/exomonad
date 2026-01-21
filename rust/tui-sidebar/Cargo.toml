@@ -32,3 +32,6 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Error handling
 anyhow = "1"
+
+# Hangar config
+hangar-config = { path = "../hangar-config" }

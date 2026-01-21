@@ -14,9 +14,18 @@ processes:
   control-server:
     # Pre-cleanup socket to prevent EADDRINUSE, then run server
     command: |
-      if [ -z "${HANGAR_ROOT:-}" ]; then echo "HANGAR_ROOT is not set" >&2; exit 1; fi && \
+      # Discover Hangar by walking up directories
+      HANGAR_ROOT=$(pwd)
+      while [ ! -f "$HANGAR_ROOT/Hangar.toml" ] && [ "$HANGAR_ROOT" != "/" ] && [ "$HANGAR_ROOT" != "$HOME" ]; do
+        HANGAR_ROOT=$(dirname "$HANGAR_ROOT")
+      done
+      if [ ! -f "$HANGAR_ROOT/Hangar.toml" ]; then
+        echo "ERROR: Hangar.toml not found" >&2
+        exit 1
+      fi
+      BIN_DIR="$HANGAR_ROOT/runtime/bin"
       rm -f .tidepool/sockets/control.sock .tidepool/sockets/tui.sock && \
-      $HANGAR_ROOT/bin/exomonad
+      "$BIN_DIR/tidepool-control-server"
     working_dir: "."
     availability:
       restart: on_failure
@@ -31,7 +40,6 @@ processes:
     shutdown:
       command: "rm -f .tidepool/sockets/control.sock .tidepool/sockets/tui.sock"
     environment:
-      - "HANGAR_ROOT=${HANGAR_ROOT}"
       - "TIDEPOOL_PROJECT_DIR=."
       - "TIDEPOOL_CONTROL_SOCKET=.tidepool/sockets/control.sock"
       - "TIDEPOOL_TUI_SOCKET=.tidepool/sockets/tui.sock"
