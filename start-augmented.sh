@@ -30,8 +30,15 @@ if [ -S "$PC_SOCKET" ]; then
     fi
 fi
 
-# Clean up any stale sockets from previous runs
-rm -f .tidepool/sockets/*.sock
+# Clean up any other stale sockets from previous runs
+# We use a loop to avoid deleting the process-compose socket if it was just recreated/preserved
+shopt -s nullglob
+for sock in .tidepool/sockets/*.sock; do
+    if [ "$sock" != "$PC_SOCKET" ]; then
+        rm -f "$sock"
+    fi
+done
+shopt -u nullglob
 
 # Discover Hangar by walking up from current directory
 HANGAR_ROOT=$(pwd)
