@@ -10,9 +10,8 @@ module Tidepool.Control.Server
   ( runServer
   ) where
 
-import Control.Concurrent (forkIO)
-import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
-import Control.Concurrent.STM (newTVarIO, readTVarIO, atomically, writeTVar, readTVar)
+import Control.Concurrent (forkIO, threadDelay)
+import Control.Concurrent.STM (newTVarIO, readTVarIO, atomically, writeTVar, readTVar, TVar)
 import Control.Exception (SomeException, catch, finally, bracket)
 import qualified Control.Exception as E
 import Control.Monad (forever, void, when)
@@ -86,77 +85,90 @@ runServer logger config = do
   
   let configWithObs = config { observabilityConfig = obsConfig }
 
-  logInfo logger $ "Starting LSP session for project: " <> T.pack configWithObs.projectDir
   when (isJust obsConfig) $
     logInfo logger "Observability enabled (Loki/OTLP)"
 
-  -- Start LSP session and run server
-  withLSPSession configWithObs.projectDir $ \lspSession -> do
-    logInfo logger "LSP session initialized"
+  -- Shared State
+  tuiHandleVar <- newTVarIO Nothing
+  lspSessionVar <- newTVarIO Nothing
 
-    -- TUI handle managed via TVar to support background connection from sidebar
-    tuiHandleVar <- newTVarIO Nothing
-    tuiListenerReady <- newEmptyMVar
+  -- 1. Setup Control Socket & Listener (EARLY)
+  bracket (setupUnixSocket controlSocket) (cleanupUnixSocket controlSocket) $ \sock -> do
+    logInfo logger $ "Control server listening on Unix socket: " <> T.pack controlSocket
 
-    if configWithObs.noTui
-      then do
-        logInfo logger "TUI sidebar listener disabled (--no-tui)"
-        putMVar tuiListenerReady ()
-      else do
-        -- Fork TUI listener thread
-        let tuiErrorHandler (e :: SomeException) = logError logger $ "TUI listener error: " <> T.pack (show e)
-        void $ forkIO $ E.handle tuiErrorHandler $
-          bracket (setupUnixSocket tuiSocket) (cleanupUnixSocket tuiSocket) $ \tuiListenSock -> do
+    -- Fork connection acceptor loop
+    _ <- forkIO $ forever $ do
+      (conn, _peer) <- accept sock
+      -- Snapshot state
+      currentTuiHandle <- atomically $ readTVar tuiHandleVar
+      traceCtx <- newTraceContext
+      
+      -- Handle connection in its own thread
+      void $ forkIO $ handleConnection logger configWithObs lspSessionVar currentTuiHandle traceCtx conn `finally` close conn
+
+    -- 2. Setup TUI Listener (if enabled)
+    let withTui action = 
+          if configWithObs.noTui
+          then do
+            logInfo logger "TUI sidebar listener disabled (--no-tui)"
+            action
+          else bracket (setupUnixSocket tuiSocket) (cleanupUnixSocket tuiSocket) $ \tuiSock -> do
             logInfo logger $ "TUI sidebar listener waiting on: " <> T.pack tuiSocket
-            putMVar tuiListenerReady ()
-            let listenerLoop = forever $ do
-                  (conn, _) <- accept tuiListenSock
-                  logInfo logger "TUI sidebar connected"
-                  handle <- newTUIHandle "control-server" conn
-                  maybeOld <- atomically $ do
-                    old <- readTVar tuiHandleVar
-                    writeTVar tuiHandleVar (Just handle)
-                    pure old
-                  case maybeOld of
-                    Just h -> do
-                      -- We close the previous connection immediately as tui-sidebar is a singleton.
-                      -- New connections imply the previous session is invalid. 
-                      -- Concurrent requests using the old handle will receive disconnection errors.
-                      logInfo logger "Closing previous TUI sidebar connection; in-flight requests using the old connection may see disconnection errors"
-                      closeTUIHandle h
-                    Nothing -> logDebug logger "No existing TUI sidebar connection to replace"
-                  
-            listenerLoop `finally` do
-                 -- Ensure TUI handle state is cleaned up if the listener terminates
-                 maybeHandle <- atomically $ do
-                   mh <- readTVar tuiHandleVar
-                   writeTVar tuiHandleVar Nothing
-                   pure mh
-                 case maybeHandle of
-                   Just h -> closeTUIHandle h
-                   Nothing -> pure ()
+            
+            -- Fork TUI acceptor loop
+            _ <- forkIO $ forever $ do
+                 (conn, _) <- accept tuiSock
+                 logInfo logger "TUI sidebar connected"
+                 handle <- newTUIHandle "control-server" conn
+                 
+                 -- Update handle var
+                 maybeOld <- atomically $ do
+                   old <- readTVar tuiHandleVar
+                   writeTVar tuiHandleVar (Just handle)
+                   pure old
+                 
+                 -- Close old handle if exists
+                 case maybeOld of 
+                   Just h -> do
+                     logInfo logger "Closing previous TUI sidebar connection"
+                     closeTUIHandle h
+                   Nothing -> logDebug logger "No existing TUI sidebar connection"
+                 
+                 -- Note: we don't handle cleanup of handle here, it's done when runServer exits
+                 -- or when replaced.
+            action
 
-    -- Ensure TUI listener is bound before accepting control connections
-    takeMVar tuiListenerReady
+    -- 3. Run TUI setup and then LSP
+    withTui $ do
+      -- Cleanup TUI handle on exit
+      let cleanupTui = do
+            maybeH <- readTVarIO tuiHandleVar
+            case maybeH of 
+              Just h -> closeTUIHandle h
+              Nothing -> pure ()
 
-    let cleanup = do
-          maybeTuiHandle <- readTVarIO tuiHandleVar
-          case maybeTuiHandle of
-            Just h -> closeTUIHandle h
-            Nothing -> pure ()
-
-    flip finally cleanup $ bracket (setupUnixSocket controlSocket) (cleanupUnixSocket controlSocket) $ \sock -> do
-      logInfo logger $ "Control server listening on Unix socket: " <> T.pack controlSocket
-
-      forever $ do
-        (conn, _peer) <- accept sock
-        -- Snapshot current TUI handle for this connection atomically
-        currentTuiHandle <- atomically $ readTVar tuiHandleVar
-        
-        -- Create a fresh trace context for each connection/request
-        traceCtx <- newTraceContext
-        
-        void $ forkIO $ handleConnection logger configWithObs lspSession currentTuiHandle traceCtx conn `finally` close conn
+      flip finally cleanupTui $ do
+         logInfo logger $ "Starting LSP session for project: " <> T.pack configWithObs.projectDir
+         
+         withLSPSession configWithObs.projectDir 
+           (\lspSession -> do
+             logInfo logger "LSP session initialized"
+             
+             -- Publish session
+             atomically $ writeTVar lspSessionVar (Just lspSession)
+             
+             -- Wait forever (main thread blocks here, keeping LSP session alive)
+             forever $ threadDelay 10000000
+           )
+           `E.catch` \(e :: SomeException) -> do
+               -- If LSP initialization fails, log the error and keep the server running
+               logError logger $
+                 "LSP session failed to start or crashed; continuing without LSP. Exception: "
+                 <> T.pack (show e)
+               -- Ensure no LSP session is published
+               atomically $ writeTVar lspSessionVar Nothing
+               -- Keep main thread alive so control/TUI sockets remain available
+               forever $ threadDelay 10000000
 
 -- | Setup Unix socket at given path.
 setupUnixSocket :: FilePath -> IO Socket
@@ -188,8 +200,8 @@ cleanupSocketFile path =
 
 
 -- | Handle a single connection (one NDJSON request-response).
-handleConnection :: Logger -> ServerConfig -> LSPSession -> Maybe TUIHandle -> TraceContext -> Socket -> IO ()
-handleConnection logger config lspSession maybeTuiHandle traceCtx conn = do
+handleConnection :: Logger -> ServerConfig -> TVar (Maybe LSPSession) -> Maybe TUIHandle -> TraceContext -> Socket -> IO ()
+handleConnection logger config lspSessionVar maybeTuiHandle traceCtx conn = do
   logDebug logger "Connection received"
 
   (do
@@ -208,7 +220,11 @@ handleConnection logger config lspSession maybeTuiHandle traceCtx conn = do
 
       Right msg -> do
         logMessage logger msg
-        response <- handleMessage logger config lspSession maybeTuiHandle traceCtx msg
+        
+        -- Get current LSP session
+        maybeLsp <- atomically $ readTVar lspSessionVar
+        
+        response <- handleMessage logger config maybeLsp maybeTuiHandle traceCtx msg
         logResponse logger response
         sendResponse conn response
         
