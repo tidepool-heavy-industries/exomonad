@@ -1,110 +1,210 @@
 use anyhow::{Context, Result};
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, MouseEventKind},
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, MouseEvent, MouseEventKind},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use ratatui::{backend::CrosstermBackend, layout::Rect, Terminal};
 use std::io;
-use std::time::Duration;
 use tokio::sync::mpsc;
 use tracing::{debug, info};
+use tuirealm::command::{Cmd, Direction};
+use tuirealm::ratatui::backend::CrosstermBackend;
+use tuirealm::ratatui::layout::Rect;
+use tuirealm::ratatui::Terminal;
+use tuirealm::MockComponent;
 
-use crate::input::{handle_key_event, handle_mouse_click};
-use crate::protocol::{Interaction, UISpec};
-use crate::render::{render_idle, render_ui};
-use crate::ui_stack::UIStack;
-
-enum EventOutcome {
-    Interaction(Interaction),
-    Exit,
-    Nothing,
-}
+use crate::protocol::{PopupDefinition, PopupResult};
+use crate::realm::PopupComponent;
 
 /// Main application event loop.
 ///
-/// Setup:
-/// 1. Enter raw mode + alternate screen
-/// 2. Create terminal
-/// 3. Initialize UI stack and focus state
+/// This now uses the popup-tui pattern:
+/// 1. Receive PopupDefinition from Haskell via async channel
+/// 2. Spawn blocking task to run synchronous popup event loop
+/// 3. Send PopupResult back to Haskell via async channel
 ///
-/// Loop:
-/// 1. Render current UI
-/// 2. tokio::select! over:
-///    - UISpec messages from Haskell
-///    - Keyboard polling (crossterm limitation)
-/// 3. Update UI stack or send Interaction
-/// 4. Exit when stack is empty
-///
-/// Cleanup:
-/// 1. Restore terminal (leave alternate screen, disable raw mode)
+/// The popup event loop (run_popup) is blocking and uses crossterm::event::read()
+/// directly, so we wrap it in tokio::task::spawn_blocking.
 pub async fn run(
-    mut msg_rx: mpsc::Receiver<UISpec>,
-    int_tx: mpsc::Sender<Interaction>,
+    mut msg_rx: mpsc::Receiver<PopupDefinition>,
+    res_tx: mpsc::Sender<PopupResult>,
 ) -> Result<()> {
-    // Setup terminal
     info!("Starting TUI event loop");
-    let mut terminal = setup_terminal().context("Failed to setup terminal")?;
-
-    let mut ui_stack = UIStack::new();
-    let mut focus_idx = 0;
-
-    // Event loop
-    let mut terminal_area = terminal.get_frame().area();
 
     loop {
-        // Render current UI and capture terminal area for mouse hit testing
-        terminal
-            .draw(|f| {
-                terminal_area = f.area();
-                if let Some(spec) = ui_stack.current() {
-                    render_ui(f, spec, focus_idx);
-                } else {
-                    render_idle(f);
-                }
-            })
-            .context("Failed to render UI")?;
-
         tokio::select! {
-            // Handle UISpec from Haskell
-            Some(spec) = msg_rx.recv() => {
-                debug!(ui_id = %spec.id, "Received UISpec");
-                ui_stack.push(spec);
-                focus_idx = 0;  // Reset focus for new UI
+            // Receive PopupDefinition from Haskell
+            Some(definition) = msg_rx.recv() => {
+                debug!(title = %definition.title, "Received PopupDefinition");
+
+                // Run popup in blocking task (popup-tui is synchronous)
+                let result = tokio::task::spawn_blocking(move || {
+                    run_popup(definition)
+                })
+                .await
+                .context("Popup task panicked")??;
+
+                debug!(button = %result.button, "Popup completed");
+
+                // Send result back to Haskell
+                if res_tx.send(result).await.is_err() {
+                    info!("Receiver dropped, exiting event loop");
+                    break;
+                }
             }
 
-            // Poll input events (crossterm doesn't integrate with tokio)
-            _ = tokio::time::sleep(Duration::from_millis(100)) => {
-                match poll_input(&ui_stack, &mut focus_idx, terminal_area)? {
-                    EventOutcome::Interaction(interaction) => {
-                        debug!(interaction = ?interaction, "Sending interaction");
-
-                        // Send interaction to Haskell
-                        if int_tx.send(interaction).await.is_err() {
-                            info!("Receiver dropped, exiting event loop");
-                            break;
-                        }
-
-                        // Pop UI after interaction (Phase 1: immediate close)
-                        // Phase 2/3: More sophisticated lifecycle management
-                        ui_stack.pop();
-                        focus_idx = 0;  // Reset focus for previous UI
-                    }
-                    EventOutcome::Exit => {
-                        info!("Exit requested via keyboard");
-                        break;
-                    }
-                    EventOutcome::Nothing => {}
-                }
+            else => {
+                info!("Channel closed, exiting event loop");
+                break;
             }
         }
     }
 
+    info!("TUI event loop exited");
+    Ok(())
+}
+
+/// Run a single popup (blocking, synchronous).
+///
+/// This is the popup-tui event loop pattern:
+/// 1. Setup terminal (raw mode, alternate screen, mouse capture)
+/// 2. Create PopupComponent from definition
+/// 3. Event loop: render + handle keyboard/mouse
+/// 4. Return PopupResult when user submits or cancels
+/// 5. Cleanup terminal
+fn run_popup(definition: PopupDefinition) -> Result<PopupResult> {
+    // Setup terminal
+    let mut terminal = setup_terminal().context("Failed to setup terminal")?;
+
+    // Create popup component
+    let mut popup = PopupComponent::new(definition);
+    let mut popup_area: Option<Rect> = None;
+
+    // Event loop
+    let result = loop {
+        // Render popup
+        terminal
+            .draw(|f| {
+                let area = centered_rect(80, 80, f.area());
+                popup_area = Some(area);
+                popup.view(f, area);
+            })
+            .context("Failed to render popup")?;
+
+        // Read event (blocking)
+        match event::read().context("Failed to read event")? {
+            Event::Key(key) => {
+                if key.kind == KeyEventKind::Press {
+                    match handle_key(&mut popup, key.code)? {
+                        PopupAction::Submit => {
+                            break popup.submit();
+                        }
+                        PopupAction::Cancel => {
+                            break popup.cancel();
+                        }
+                        PopupAction::Continue => {}
+                    }
+                }
+            }
+            Event::Mouse(mouse) => {
+                if mouse.kind == MouseEventKind::Down(event::MouseButton::Left) {
+                    if let Some(area) = popup_area {
+                        if mouse.column >= area.x
+                            && mouse.column < area.x + area.width
+                            && mouse.row >= area.y
+                            && mouse.row < area.y + area.height
+                        {
+                            popup.handle_click(mouse.column, mouse.row);
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    };
+
     // Cleanup terminal
     cleanup_terminal(terminal).context("Failed to cleanup terminal")?;
-    info!("TUI event loop exited");
 
-    Ok(())
+    Ok(result)
+}
+
+/// Handle keyboard input for popup.
+enum PopupAction {
+    Submit,
+    Cancel,
+    Continue,
+}
+
+fn handle_key(popup: &mut PopupComponent, key: KeyCode) -> Result<PopupAction> {
+    match key {
+        KeyCode::Esc => Ok(PopupAction::Cancel),
+        KeyCode::Enter => Ok(PopupAction::Submit),
+        KeyCode::Tab => {
+            popup.perform(Cmd::Move(Direction::Down));
+            Ok(PopupAction::Continue)
+        }
+        KeyCode::BackTab => {
+            popup.perform(Cmd::Move(Direction::Up));
+            Ok(PopupAction::Continue)
+        }
+        KeyCode::Left => {
+            popup.perform(Cmd::Move(Direction::Left));
+            Ok(PopupAction::Continue)
+        }
+        KeyCode::Right => {
+            popup.perform(Cmd::Move(Direction::Right));
+            Ok(PopupAction::Continue)
+        }
+        KeyCode::Up => {
+            popup.perform(Cmd::Move(Direction::Up));
+            Ok(PopupAction::Continue)
+        }
+        KeyCode::Down => {
+            popup.perform(Cmd::Move(Direction::Down));
+            Ok(PopupAction::Continue)
+        }
+        KeyCode::Char(' ') => {
+            if popup.is_focused_textbox() {
+                popup.perform(Cmd::Type(' '));
+            } else {
+                popup.perform(Cmd::Submit);
+            }
+            Ok(PopupAction::Continue)
+        }
+        KeyCode::Char(c) => {
+            popup.perform(Cmd::Type(c));
+            Ok(PopupAction::Continue)
+        }
+        KeyCode::Backspace => {
+            popup.perform(Cmd::Cancel);
+            Ok(PopupAction::Continue)
+        }
+        _ => Ok(PopupAction::Continue),
+    }
+}
+
+/// Create centered rect (popup-tui pattern).
+fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
+    use tuirealm::ratatui::layout::{Constraint, Direction as RatatuiDirection, Layout};
+
+    let popup_layout = Layout::default()
+        .direction(RatatuiDirection::Vertical)
+        .constraints([
+            Constraint::Percentage((100 - percent_y) / 2),
+            Constraint::Percentage(percent_y),
+            Constraint::Percentage((100 - percent_y) / 2),
+        ])
+        .split(r);
+
+    Layout::default()
+        .direction(RatatuiDirection::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - percent_x) / 2),
+            Constraint::Percentage(percent_x),
+            Constraint::Percentage((100 - percent_x) / 2),
+        ])
+        .split(popup_layout[1])[1]
 }
 
 /// Setup terminal (raw mode, alternate screen, mouse capture).
@@ -128,54 +228,4 @@ fn cleanup_terminal(mut terminal: Terminal<CrosstermBackend<io::Stdout>>) -> Res
     terminal.show_cursor().context("Failed to show cursor")?;
 
     Ok(())
-}
-
-/// Poll input events (keyboard and mouse) and handle them.
-///
-/// Returns Some(Interaction) if user completed an action (Enter on button/input, or mouse click).
-/// Returns None if no action or only navigation (Tab, arrow keys).
-fn poll_input(
-    ui_stack: &UIStack,
-    focus_idx: &mut usize,
-    terminal_area: Rect,
-) -> Result<EventOutcome> {
-    // Check if event is available (non-blocking)
-    if !event::poll(Duration::ZERO).context("Failed to poll events")? {
-        return Ok(EventOutcome::Nothing);
-    }
-
-    // Read the event
-    let evt = event::read().context("Failed to read event")?;
-
-    match evt {
-        Event::Key(key_event) => {
-            // Ctrl+C: request exit
-            if key_event.code == KeyCode::Char('c')
-                && key_event.modifiers.contains(event::KeyModifiers::CONTROL)
-            {
-                info!("Ctrl+C pressed, requesting exit");
-                return Ok(EventOutcome::Exit);
-            }
-
-            // Handle key event (navigation, interaction)
-            Ok(match handle_key_event(key_event, ui_stack, focus_idx)? {
-                Some(i) => EventOutcome::Interaction(i),
-                None => EventOutcome::Nothing,
-            })
-        }
-        Event::Mouse(mouse_event) => {
-            // Handle mouse click
-            if mouse_event.kind == MouseEventKind::Down(event::MouseButton::Left) {
-                if let Some((interaction, clicked_idx)) =
-                    handle_mouse_click(mouse_event.column, mouse_event.row, ui_stack, terminal_area)?
-                {
-                    // Update focus to clicked element
-                    *focus_idx = clicked_idx;
-                    return Ok(EventOutcome::Interaction(interaction));
-                }
-            }
-            Ok(EventOutcome::Nothing)
-        }
-        _ => Ok(EventOutcome::Nothing),
-    }
 }

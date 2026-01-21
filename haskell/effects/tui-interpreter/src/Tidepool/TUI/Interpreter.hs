@@ -2,8 +2,8 @@
 -- | TUI effect interpreter - bidirectional communication with Rust TUI sidebar.
 --
 -- This interpreter connects to a TUI sidebar via Unix socket or TCP, sends
--- UISpec messages, and receives Interaction events. It's designed for use
--- within graph node handlers.
+-- PopupDefinition messages, and receives PopupResult responses. Uses the
+-- popup-tui pattern: one request → one response.
 --
 -- == Example Usage
 --
@@ -15,9 +15,10 @@
 -- main = withSocketsDo $ do
 --   withTUIConnection "localhost" 7433 $ \handle -> do
 --     runM $ runTUI handle $ do
---       interaction <- showUI $ UISpec {...}
---       case interaction of
---         ButtonClicked _ "submit" -> ...
+--       result <- showUI $ PopupDefinition {...}
+--       case result.prButton of
+--         "submit" -> ...
+--         _ -> ...
 -- @
 module Tidepool.TUI.Interpreter
   ( -- * TUI Handle
@@ -36,12 +37,12 @@ module Tidepool.TUI.Interpreter
   ) where
 
 import Control.Concurrent (forkIO)
-import Control.Concurrent.STM (TChan, TVar, atomically, newTChanIO, newTVarIO, readTChan, writeTChan, writeTVar)
+import Control.Concurrent.STM (TChan, atomically, newTChanIO, readTChan, writeTChan)
 import Control.Exception (bracket, SomeException)
 import qualified Control.Exception as E
 import Control.Monad (forever, void)
 import Control.Monad.Freer (Eff, LastMember, interpret, sendM)
-import Data.Aeson (encode, decode, ToJSON(..), object, (.=))
+import Data.Aeson (encode, decode)
 import Data.ByteString.Lazy (ByteString)
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.ByteString.Lazy.Char8 as LBS8
@@ -49,48 +50,22 @@ import Data.Text (Text)
 import Network.Socket
 import Network.Socket.ByteString.Lazy (recv, sendAll)
 import Tidepool.Effect.TUI
-import GHC.Generics (Generic)
 
 -- | Handle for bidirectional TUI communication.
 --
 -- Contains:
--- - TCP socket connection to Rust TUI sidebar
--- - Send channel for outgoing messages (UISpec, UIUpdate, Close)
--- - Receive channel for incoming Interaction events
--- - Active UI tracking (which UI is currently shown)
+-- - Socket connection to Rust TUI sidebar
+-- - Send channel for outgoing PopupDefinition messages
+-- - Receive channel for incoming PopupResult responses
 -- - Session identifier
+--
+-- Note: popup-tui uses simple request-response. No UI stack, no active UI tracking.
 data TUIHandle = TUIHandle
   { tuiSocket :: Socket
-  , tuiSendChan :: TChan TUIMessage
-  , tuiRecvChan :: TChan Interaction
-  , tuiActiveUI :: TVar (Maybe Text)
+  , tuiSendChan :: TChan PopupDefinition
+  , tuiRecvChan :: TChan PopupResult
   , tuiSessionId :: Text
   }
-
--- | Messages sent from interpreter to TUI sidebar.
---
--- Note: There is no PopUI message. The Rust TUI sidebar pops its UI stack
--- automatically after sending an Interaction. For multi-step UIs, just send
--- another PushUI - the previous UI was already popped.
-data TUIMessage
-  = PushUI UISpec       -- ^ Show a new UI
-  | ReplaceUI UISpec    -- ^ Replace currently shown UI
-  | UpdateUIMsg UIUpdate   -- ^ Update an element in current UI (renamed to avoid collision)
-  deriving (Show, Eq, Generic)
-
-instance ToJSON TUIMessage where
-  toJSON (PushUI spec) = object
-    [ "type" .= ("PushUI" :: Text)
-    , "spec" .= spec
-    ]
-  toJSON (ReplaceUI spec) = object
-    [ "type" .= ("ReplaceUI" :: Text)
-    , "spec" .= spec
-    ]
-  toJSON (UpdateUIMsg update) = object
-    [ "type" .= ("UpdateUI" :: Text)
-    , "update" .= update
-    ]
 
 -- ══════════════════════════════════════════════════════════════
 -- CONNECTION MANAGEMENT
@@ -104,7 +79,6 @@ newTUIHandle :: Text -> Socket -> IO TUIHandle
 newTUIHandle sessionId sock = do
   sendChan <- newTChanIO
   recvChan <- newTChanIO
-  activeUI <- newTVarIO Nothing
 
   -- Spawn sender thread
   void $ forkIO $ senderThread sock sendChan
@@ -112,7 +86,7 @@ newTUIHandle sessionId sock = do
   -- Spawn receiver thread
   void $ forkIO $ receiverThread sock recvChan
 
-  pure $ TUIHandle sock sendChan recvChan activeUI sessionId
+  pure $ TUIHandle sock sendChan recvChan sessionId
 
 -- | Close a TUI handle and clean up resources.
 closeTUIHandle :: TUIHandle -> IO ()
@@ -166,7 +140,7 @@ withTUIUnixConnection path action = bracket acquire release action
 -- ══════════════════════════════════════════════════════════════
 
 -- | Sender thread: reads from send channel, writes to socket.
-senderThread :: Socket -> TChan TUIMessage -> IO ()
+senderThread :: Socket -> TChan PopupDefinition -> IO ()
 senderThread sock sendChan = E.handle (\(_ :: SomeException) -> pure ()) $ forever $ do
   msg <- atomically $ readTChan sendChan
   let json = encode msg
@@ -174,11 +148,11 @@ senderThread sock sendChan = E.handle (\(_ :: SomeException) -> pure ()) $ forev
   sendAll sock line
 
 -- | Receiver thread: reads from socket, writes to receive channel.
-receiverThread :: Socket -> TChan Interaction -> IO ()
+receiverThread :: Socket -> TChan PopupResult -> IO ()
 receiverThread sock recvChan = E.handle (\(_ :: SomeException) -> pure ()) $ forever $ do
   line <- recvLine sock
   case decode line of
-    Just interaction -> atomically $ writeTChan recvChan interaction
+    Just result -> atomically $ writeTChan recvChan result
     Nothing -> pure ()  -- Ignore malformed messages
 
 -- | Read one NDJSON line from socket.
@@ -201,37 +175,25 @@ recvLine sock = go mempty
 
 -- | Interpret the TUI effect by communicating with a connected TUI sidebar.
 --
--- This interpreter:
--- - Sends UISpec messages when 'showUI' is called
--- - Waits for Interaction responses
--- - Sends UIUpdate messages when 'updateUI' is called (non-blocking)
--- - Sends close message when 'closeUI' is called
+-- Uses the popup-tui pattern: send PopupDefinition, receive PopupResult.
+-- This is a simple request-response model with no streaming interactions.
 --
 -- @
 -- result <- runM $ runTUI handle $ do
---   interaction <- showUI formSpec
---   case interaction of
---     ButtonClicked _ "submit" -> pure "submitted"
+--   popupResult <- showUI $ PopupDefinition
+--     { pdTitle = "Config"
+--     , pdComponents = [mkSlider "budget" "Budget" 10 100 50 Nothing]
+--     }
+--   case popupResult.prButton of
+--     "submit" -> pure "submitted"
 --     _ -> pure "cancelled"
 -- @
 runTUI :: LastMember IO effs
        => TUIHandle -> Eff (TUI ': effs) a -> Eff effs a
 runTUI h = interpret $ \case
-  ShowUI spec -> sendM $ do
-    -- Send UI spec to TUI sidebar
-    atomically $ do
-      writeTChan h.tuiSendChan (PushUI spec)
-      writeTVar h.tuiActiveUI (Just spec.uiId)
+  ShowUI definition -> sendM $ do
+    -- Send PopupDefinition to TUI sidebar
+    atomically $ writeTChan h.tuiSendChan definition
 
-    -- Wait for interaction response
+    -- Wait for PopupResult response (blocking)
     atomically $ readTChan h.tuiRecvChan
-
-  UpdateUI update -> sendM $ do
-    -- Send update message (non-blocking)
-    atomically $ writeTChan h.tuiSendChan (UpdateUIMsg update)
-
-  CloseUI -> sendM $ do
-    -- Just update local state. The Rust TUI sidebar already popped its UI stack
-    -- when it sent the Interaction, so there's nothing to send over the wire.
-    -- For multi-step UIs, just call showUI again - no explicit close needed.
-    atomically $ writeTVar h.tuiActiveUI Nothing

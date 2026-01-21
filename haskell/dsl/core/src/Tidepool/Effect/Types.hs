@@ -115,8 +115,6 @@ module Tidepool.Effect.Types
 
     -- * TUI Effect Operations
   , showUI
-  , updateUI
-  , closeUI
 
     -- * Decision Types
   , Decision(..)
@@ -124,13 +122,10 @@ module Tidepool.Effect.Types
   , DecisionTrace(..)
   , recordDecision
 
-    -- * TUI Types (protocol)
-  , UISpec(..)
-  , Layout(..)
-  , Element(..)
-  , Interaction(..)
-  , UIUpdate(..)
-  , ElementUpdate(..)
+    -- * TUI Types (popup-tui protocol)
+    -- Note: Import Tidepool.Effect.TUI directly for full component types
+  , PopupDefinition(..)
+  , PopupResult(..)
 
     -- * Content Types (re-exports from Anthropic.Types)
   , ContentBlock(..)
@@ -183,10 +178,11 @@ import Tidepool.Question (Question(..), Answer(..), ItemDisposition(..), Choice(
 -- Goto types for tool transitions
 import Tidepool.Graph.Goto (GotoChoice, To)
 
--- TUI effect and types
+-- TUI effect and types (popup-tui pattern)
 import Tidepool.Effect.TUI
-  ( TUI(..), showUI, updateUI, closeUI
-    , UISpec(..), Layout(..), Element(..), Interaction(..), UIUpdate(..), ElementUpdate(..)
+  ( TUI(..), showUI
+  , PopupDefinition(..), Component(..), ComponentSpec(..), VisibilityRule(..), PopupResult(..)
+  , mkComponent, mkText, mkSlider, mkCheckbox, mkTextbox, mkChoice, mkMultiselect, mkGroup
   )
 
 -- Decision types
