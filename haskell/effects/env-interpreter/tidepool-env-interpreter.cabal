@@ -1,0 +1,19 @@
+cabal-version:      3.0
+name:               tidepool-env-interpreter
+version:            0.1.0.0
+synopsis:           Env effect interpreter for Tidepool
+license:            MIT
+author:             Inanna Malick
+maintainer:         inanna@malick.com
+category:           Control
+build-type:         Simple
+
+library
+    exposed-modules:  Tidepool.Env.Interpreter
+    build-depends:    base >= 4.17 && < 5
+                    , freer-simple
+                    , text
+                    , tidepool-core
+    hs-source-dirs:   src
+    default-language: GHC2021
+    ghc-options:      -Wall -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints

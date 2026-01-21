@@ -90,6 +90,7 @@ library
         tidepool-teaching,
         tidepool-bd-interpreter,
         tidepool-github-interpreter,
+        tidepool-env-interpreter,
         tidepool-justfile-interpreter,
         tidepool-worktree-interpreter,
         tidepool-filesystem-interpreter,
@@ -193,6 +194,7 @@ test-suite exo-tools-test
     build-depends:
         base >= 4.17 && < 5,
         tidepool-control-server,
+        tidepool-env-interpreter,
         tidepool-core,
         text >= 2.0 && < 3,
         aeson,

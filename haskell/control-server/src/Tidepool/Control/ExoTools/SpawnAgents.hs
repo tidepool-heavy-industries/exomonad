@@ -26,9 +26,10 @@ import GHC.Generics (Generic)
 import System.FilePath ((</>))
 
 import Tidepool.Effects.BD (BD, BeadInfo(..), BeadStatus(..), DependencyInfo(..), getBead)
+import Tidepool.Effects.Env (Env, getEnv)
 import Tidepool.Effects.Git (Git, WorktreeInfo(..), getWorktreeInfo)
 import Tidepool.Effects.Worktree (Worktree, WorktreeSpec(..), WorktreePath(..), createWorktree)
-import Tidepool.Effects.FileSystem (FileSystem, createDirectory, writeFileText, copyFile, createSymlink)
+import Tidepool.Effects.FileSystem (FileSystem, createDirectory, writeFileText, copyFile, createSymlink, fileExists)
 import Tidepool.Effects.Zellij (Zellij, TabConfig(..), TabId(..), checkZellijEnv, newTab)
 import Tidepool.Graph.Generic (AsHandler, type (:-))
 import Tidepool.Graph.Generic.Core (EntryNode, ExitNode, LogicNode)
@@ -37,6 +38,33 @@ import Tidepool.Graph.Types (type (:@), Input, UsesEffects, Exit, MCPExport, MCP
 import Tidepool.Schema (HasJSONSchema(..), objectSchema, arraySchema, emptySchema, SchemaType(..), describeField)
 
 import Tidepool.Control.ExoTools.Internal (slugify)
+import System.FilePath (takeDirectory)
+
+-- | Find the hangar root by checking ENV or walking up from repo root.
+findHangarRoot
+  :: (Member Env es, Member FileSystem es, Member Git es)
+  => Eff es (Maybe FilePath)
+findHangarRoot = do
+  -- 1. Check HANGAR_ROOT environment variable
+  mEnv <- getEnv "HANGAR_ROOT"
+  case mEnv of
+    Just path -> pure $ Just (T.unpack path)
+    Nothing -> do
+      -- 2. Walk up from current repo root
+      mWtInfo <- getWorktreeInfo
+      case mWtInfo of
+        Nothing -> pure Nothing
+        Just wi -> walkUp wi.wiRepoRoot
+  where
+    walkUp path = do
+      res <- fileExists (path </> "Hangar.toml")
+      case res of
+        Right True -> pure $ Just path
+        _ ->
+          let parent = takeDirectory path
+          in if parent == path
+             then pure Nothing
+             else walkUp parent
 
 -- | Build markdown context for a bead.
 buildBeadContext :: BeadInfo -> Text -> Text
@@ -103,6 +131,13 @@ data SpawnAgentsResult = SpawnAgentsResult
   }
   deriving stock (Show, Eq, Generic)
 
+instance FromJSON SpawnAgentsResult where
+  parseJSON = withObject "SpawnAgentsResult" $ \v ->
+    SpawnAgentsResult
+      <$> v .: "worktrees"
+      <*> v .: "tabs"
+      <*> v .: "failed"
+
 instance ToJSON SpawnAgentsResult where
   toJSON res = object
     [ "worktrees" .= sarWorktrees res
@@ -118,7 +153,7 @@ data SpawnAgentsGraph mode = SpawnAgentsGraph
 
   , saRun :: mode :- LogicNode
       :@ Input SpawnAgentsArgs
-      :@ UsesEffects '[BD, Git, Worktree, FileSystem, Zellij, Goto Exit SpawnAgentsResult]
+      :@ UsesEffects '[BD, Git, Worktree, FileSystem, Zellij, Env, Goto Exit SpawnAgentsResult]
 
   , saExit :: mode :- ExitNode SpawnAgentsResult
   }
@@ -126,7 +161,7 @@ data SpawnAgentsGraph mode = SpawnAgentsGraph
 
 -- | Handlers for spawn_agents graph.
 spawnAgentsHandlers
-  :: (Member BD es, Member Git es, Member Worktree es, Member FileSystem es, Member Zellij es)
+  :: (Member BD es, Member Git es, Member Worktree es, Member FileSystem es, Member Zellij es, Member Env es)
   => SpawnAgentsGraph (AsHandler es)
 spawnAgentsHandlers = SpawnAgentsGraph
   { saEntry = ()
@@ -136,7 +171,7 @@ spawnAgentsHandlers = SpawnAgentsGraph
 
 -- | Core logic for spawn_agents.
 spawnAgentsLogic
-  :: (Member BD es, Member Git es, Member Worktree es, Member FileSystem es, Member Zellij es)
+  :: (Member BD es, Member Git es, Member Worktree es, Member FileSystem es, Member Zellij es, Member Env es)
   => SpawnAgentsArgs
   -> Eff es (GotoChoice '[To Exit SpawnAgentsResult])
 spawnAgentsLogic args = do
@@ -149,13 +184,18 @@ spawnAgentsLogic args = do
       , sarFailed = [("*", "Not running in Zellij session")]
       }
     Just _ -> do
-      -- Get repo root for path resolution
+      -- 2. Determine Hangar Root and Worktree Base Path
+      mHangarRoot <- findHangarRoot
       mWtInfo <- getWorktreeInfo
       let repoRoot = maybe "." (\wi -> wi.wiRepoRoot) mWtInfo
+          -- Target directory: <hangar>/worktrees/ or repo/.worktrees/tidepool/ as fallback
+          wtBaseDir = case mHangarRoot of
+            Just hr -> hr </> "worktrees"
+            Nothing -> repoRoot </> ".worktrees" </> "tidepool"
 
-      -- 2. Process each bead
+      -- 3. Process each bead
       results <- forM args.saaBeadIds $ \shortId -> do
-        processBead repoRoot shortId
+        processBead repoRoot wtBaseDir shortId
 
       -- Partition results
       let (failed, succeeded) = partitionEithers results
@@ -172,10 +212,11 @@ spawnAgentsLogic args = do
 -- | Process a single bead: create worktree, bootstrap .tidepool/, write context, launch tab.
 processBead
   :: (Member BD es, Member Worktree es, Member FileSystem es, Member Zellij es)
-  => FilePath                                          -- ^ Repo root
+  => FilePath                                          -- ^ Repo root (for symlinks/templates)
+  -> FilePath                                          -- ^ Worktree base directory
   -> Text                                              -- ^ Short bead ID
   -> Eff es (Either (Text, Text) (Text, FilePath, TabId))  -- ^ Left (id, error) or Right (id, path, tabId)
-processBead repoRoot shortId = do
+processBead repoRoot wtBaseDir shortId = do
   -- Normalize bead ID (ensure it starts with tidepool-)
   let fullId = if "tidepool-" `T.isPrefixOf` shortId
                then shortId
@@ -190,7 +231,8 @@ processBead repoRoot shortId = do
         else do
           let slug = slugify bead.biTitle
               branchName = "bd-" <> shortId <> "/" <> slug
-              targetPath = repoRoot </> ".worktrees" </> "tidepool" </> "bd-" <> T.unpack shortId <> "-" <> T.unpack slug
+              -- New location: <wtBaseDir>/bd-<id>-<slug>
+              targetPath = wtBaseDir </> "bd-" <> T.unpack shortId <> "-" <> T.unpack slug
               spec = WorktreeSpec
                 { wsBaseName = "bd-" <> shortId
                 , wsFromBranch = Just "origin/main"

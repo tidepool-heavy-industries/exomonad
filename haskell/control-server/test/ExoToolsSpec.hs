@@ -31,7 +31,28 @@ tests = testGroup "ExoTools"
   , testCase "pr_to_bead result serialization" test_serialization_ptb
   , testCase "pr_review_status is discoverable" test_pr_discovery
   , testCase "pr_review_status result serialization" test_pr_serialization
+  , testCase "spawn_agents is discoverable" test_discovery_spawn
+  , testCase "spawn_agents result serialization" test_serialization_spawn
   ]
+
+test_discovery_spawn :: Assertion
+test_discovery_spawn = do
+  let spawnTools = reifyMCPTools (Proxy @SpawnAgentsGraph)
+  assertEqual "Should find one tool" 1 (length spawnTools)
+  let tool = head spawnTools
+  assertEqual "Name should be spawn_agents" "spawn_agents" tool.mtdName
+
+test_serialization_spawn :: Assertion
+test_serialization_spawn = do
+  let res = SpawnAgentsResult
+        { sarWorktrees = [("wzi", "/path/to/wt")]
+        , sarTabs = [("wzi", "tab-123")]
+        , sarFailed = []
+        }
+  let json = toJSON res
+  case fromJSON @SpawnAgentsResult json of
+    Success res' -> assertEqual "Should roundtrip" res res'
+    Error err -> assertFailure $ "Failed to parse: " ++ err
 
 test_discovery_pcc :: Assertion
 test_discovery_pcc = do
