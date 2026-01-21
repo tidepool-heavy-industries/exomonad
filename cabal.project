@@ -15,6 +15,7 @@ packages:
     -- Effect interpreters
     haskell/effects/llm-interpreter
     haskell/effects/bd-interpreter
+    haskell/effects/env-interpreter
     haskell/effects/habitica-interpreter
     haskell/effects/ui-interpreter
     haskell/effects/observability-interpreter
