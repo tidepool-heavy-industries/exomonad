@@ -111,6 +111,88 @@ native:
 # NOTE: dm, dm-gui, tidy-gui disabled - see cabal.project for details
 
 # ─────────────────────────────────────────────────────────────
+# Hangar Runtime
+# ─────────────────────────────────────────────────────────────
+
+# Discover Hangar root from current directory
+_hangar-root:
+    #!/usr/bin/env bash
+    HANGAR_ROOT=$(pwd)
+    while [ ! -f "$HANGAR_ROOT/Hangar.toml" ] && [ "$HANGAR_ROOT" != "/" ] && [ "$HANGAR_ROOT" != "$HOME" ]; do
+        HANGAR_ROOT=$(dirname "$HANGAR_ROOT")
+    done
+    if [ ! -f "$HANGAR_ROOT/Hangar.toml" ]; then
+        echo "ERROR: Hangar.toml not found" >&2
+        exit 1
+    fi
+    echo "$HANGAR_ROOT"
+
+# Rebuild runtime binaries from stable tidepool source
+rebuild-runtime:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    # Find Hangar root
+    HANGAR_ROOT=$(just _hangar-root)
+    RUNTIME_SRC="$HANGAR_ROOT/runtime/tidepool"
+    RUNTIME_BIN="$HANGAR_ROOT/runtime/bin"
+
+    echo "── Hangar: $HANGAR_ROOT ──"
+    echo "── Pulling latest from origin/main ──"
+    cd "$RUNTIME_SRC"
+    git pull origin main
+
+    echo ""
+    echo "── Building Haskell (tidepool-control-server) ──"
+    cabal build tidepool-control-server
+
+    echo ""
+    echo "── Building Rust (mantle-agent, tui-sidebar) ──"
+    cargo build --release -p mantle-agent -p tui-sidebar
+
+    echo ""
+    echo "── Installing to $RUNTIME_BIN ──"
+    cp "$(cabal list-bin tidepool-control-server)" "$RUNTIME_BIN/"
+    cp rust/target/release/mantle-agent "$RUNTIME_BIN/"
+    cp rust/target/release/tui-sidebar "$RUNTIME_BIN/"
+
+    echo ""
+    echo "✓ Runtime binaries rebuilt:"
+    ls -lh "$RUNTIME_BIN"
+
+# Rebuild runtime without pulling (use current source)
+rebuild-runtime-local:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    # Find Hangar root
+    HANGAR_ROOT=$(just _hangar-root)
+    RUNTIME_SRC="$HANGAR_ROOT/runtime/tidepool"
+    RUNTIME_BIN="$HANGAR_ROOT/runtime/bin"
+
+    echo "── Hangar: $HANGAR_ROOT ──"
+    echo "── Building from current source (no pull) ──"
+    cd "$RUNTIME_SRC"
+
+    echo ""
+    echo "── Building Haskell (tidepool-control-server) ──"
+    cabal build tidepool-control-server
+
+    echo ""
+    echo "── Building Rust (mantle-agent, tui-sidebar) ──"
+    cargo build --release -p mantle-agent -p tui-sidebar
+
+    echo ""
+    echo "── Installing to $RUNTIME_BIN ──"
+    cp "$(cabal list-bin tidepool-control-server)" "$RUNTIME_BIN/"
+    cp rust/target/release/mantle-agent "$RUNTIME_BIN/"
+    cp rust/target/release/tui-sidebar "$RUNTIME_BIN/"
+
+    echo ""
+    echo "✓ Runtime binaries rebuilt:"
+    ls -lh "$RUNTIME_BIN"
+
+# ─────────────────────────────────────────────────────────────
 # Gemini
 # ─────────────────────────────────────────────────────────────
 
