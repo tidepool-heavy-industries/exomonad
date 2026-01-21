@@ -19,8 +19,26 @@ fi
 # Create runtime directories
 mkdir -p .tidepool/{sockets,logs}
 
-# Clean up any stale sockets from previous runs
-rm -f .tidepool/sockets/*.sock
+# Detect and clean up stale process-compose sessions via UDS
+# This eliminates port 8080 conflicts in parallel worktrees
+PC_SOCKET=".tidepool/sockets/process-compose.sock"
+if [ -S "$PC_SOCKET" ]; then
+    if process-compose process list -u "$PC_SOCKET" > /dev/null 2>&1; then
+        echo "⚠️  Found stale process-compose session. Shutting it down..."
+        process-compose down -u "$PC_SOCKET" || true
+        sleep 0.5
+    fi
+fi
+
+# Clean up any other stale sockets from previous runs
+# We use a loop to avoid deleting the process-compose socket if it was just recreated/preserved
+shopt -s nullglob
+for sock in .tidepool/sockets/*.sock; do
+    if [ "$sock" != "$PC_SOCKET" ]; then
+        rm -f "$sock"
+    fi
+done
+shopt -u nullglob
 
 # Discover Hangar by walking up from current directory
 HANGAR_ROOT=$(pwd)
