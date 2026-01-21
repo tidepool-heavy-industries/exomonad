@@ -321,7 +321,7 @@ claude-code
 GEMMA_ENDPOINT=http://localhost:11434 cabal run tidepool-control-server
 
 # Terminal 2: Wait for health check, then start tui-sidebar
-while ! test -S .tidepool/sockets/control.sock; do sleep 0.5; done
+./scripts/wait-for-socket.sh .tidepool/sockets/control.sock 60 ControlServer
 cargo run -p tui-sidebar -- --socket .tidepool/sockets/tui.sock
 
 # Terminal 3: Start Claude Code
