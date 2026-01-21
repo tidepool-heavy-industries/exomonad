@@ -255,18 +255,24 @@ processBead repoRoot wtBaseDir shortId = do
                   case contextRes of
                     Left errMsg -> pure $ Left (shortId, "Worktree created but context write failed: " <> errMsg)
                     Right () -> do
-                      -- d. Launch Zellij tab
-                      -- Use absolute path for layout to avoid CWD resolution issues
-                      let tabConfig = TabConfig
-                            { tcName = shortId
-                            , tcLayout = repoRoot </> ".zellij" </> "worktree.kdl"
-                            , tcCwd = path
-                            , tcEnv = [("SUBAGENT_CMD", "claude")]
-                            }
-                      tabRes <- newTab tabConfig
-                      case tabRes of
-                        Left err -> pure $ Left (shortId, "Worktree created but tab launch failed: " <> T.pack (show err))
-                        Right tabId -> pure $ Right (shortId, path, tabId)
+                      -- d. Write subagent environment
+                      let envVars = [("SUBAGENT_CMD", "claude")]
+                      envRes <- writeEnvFile path envVars
+                      case envRes of
+                        Left errMsg -> pure $ Left (shortId, "Worktree created but env write failed: " <> errMsg)
+                        Right () -> do
+                          -- e. Launch Zellij tab
+                          -- Use absolute path for layout to avoid CWD resolution issues
+                          let tabConfig = TabConfig
+                                { tcName = shortId
+                                , tcLayout = repoRoot </> ".zellij" </> "worktree.kdl"
+                                , tcCwd = path
+                                , tcEnv = envVars
+                                }
+                          tabRes <- newTab tabConfig
+                          case tabRes of
+                            Left err -> pure $ Left (shortId, "Worktree created but tab launch failed: " <> T.pack (show err))
+                            Right tabId -> pure $ Right (shortId, path, tabId)
 
 
 -- | Bootstrap .tidepool/ directory structure in a worktree.
@@ -323,3 +329,18 @@ writeBeadContext worktreePath context = do
       case writeRes of
         Left err -> pure $ Left $ T.pack (show err)
         Right () -> pure $ Right ()
+
+
+-- | Write environment variables to a file (e.g. .env.subagent).
+writeEnvFile
+  :: (Member FileSystem es)
+  => FilePath  -- ^ Worktree path
+  -> [(Text, Text)] -- ^ Env vars
+  -> Eff es (Either Text ())
+writeEnvFile worktreePath envVars = do
+  let envFile = worktreePath </> ".env.subagent"
+      content = T.unlines [ "export " <> k <> "=" <> v | (k, v) <- envVars ]
+  writeRes <- writeFileText envFile content
+  case writeRes of
+    Left err -> pure $ Left $ T.pack (show err)
+    Right () -> pure $ Right ()
