@@ -14,7 +14,7 @@ layout {
             // LEFT: Main interaction pane (CLI)
             pane size="60%" focus=true {
                 command "bash"
-                args "-c" "if [ -f .env.subagent ]; then source .env.subagent; fi; ./scripts/wait-for-socket.sh .tidepool/sockets/control.sock 60 ControlServer || exit 1; exec ${SUBAGENT_CMD:-claude}"
+                args "-c" "if [ -z \"${TIDEPOOL_CONTROL_SOCKET:-}\" ]; then echo 'ERROR: TIDEPOOL_CONTROL_SOCKET not set' >&2; exit 1; fi; if [ -f .env.subagent ]; then source .env.subagent; fi; ./scripts/wait-for-socket.sh .tidepool/sockets/control.sock 60 ControlServer || exit 1; exec ${SUBAGENT_CMD:-claude}"
             }
             
             // RIGHT: Stacked infrastructure panes (collapsible)
