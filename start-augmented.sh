@@ -28,7 +28,7 @@ if [ -z "$HANGAR_ROOT" ]; then
     exit 1
 fi
 
-# Add Hangar binaries to PATH (for mantle-agent usage by Claude)
+# Add all Hangar binaries (including mantle-agent) to PATH for Claude and related tools
 export PATH="$HANGAR_ROOT/bin:$PATH"
 
 # Check dependencies

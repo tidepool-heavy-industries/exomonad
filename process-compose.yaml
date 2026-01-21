@@ -14,6 +14,7 @@ processes:
   control-server:
     # Pre-cleanup socket to prevent EADDRINUSE, then run server
     command: |
+      if [ -z "${HANGAR_ROOT:-}" ]; then echo "HANGAR_ROOT is not set" >&2; exit 1; fi && \
       rm -f .tidepool/sockets/control.sock .tidepool/sockets/tui.sock && \
       $HANGAR_ROOT/bin/exomonad
     working_dir: "."
