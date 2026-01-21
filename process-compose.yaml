@@ -1,21 +1,12 @@
 version: "0.5"
-log_location: .tidepool/logs
+log_location: .tidepool/logs/process-compose.log
 
 processes:
   control-server:
+    # Binaries are on PATH from start-augmented.sh (single source of truth)
     command: |
-      # Discover Hangar by walking up directories
-      HANGAR_ROOT=$(pwd)
-      while [ ! -f "$HANGAR_ROOT/Hangar.toml" ] && [ "$HANGAR_ROOT" != "/" ] && [ "$HANGAR_ROOT" != "$HOME" ]; do
-        HANGAR_ROOT=$(dirname "$HANGAR_ROOT")
-      done
-      if [ ! -f "$HANGAR_ROOT/Hangar.toml" ]; then
-        echo "ERROR: Hangar.toml not found" >&2
-        exit 1
-      fi
-      BIN_DIR="$HANGAR_ROOT/runtime/bin"
       rm -f "$TIDEPOOL_CONTROL_SOCKET" "$TIDEPOOL_TUI_SOCKET" && \
-      "$BIN_DIR/tidepool-control-server" --no-tui
+      tidepool-control-server
     working_dir: "."
     readiness_probe:
       exec:
