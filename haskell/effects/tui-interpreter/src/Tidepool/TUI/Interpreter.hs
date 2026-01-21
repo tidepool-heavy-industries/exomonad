@@ -49,8 +49,13 @@ import qualified Data.ByteString.Lazy.Char8 as LBS8
 import Data.Text (Text)
 import Network.Socket
 import Network.Socket.ByteString.Lazy (recv, sendAll)
+import System.IO (hPutStrLn, stderr)
 import System.Timeout (timeout)
 import Tidepool.Effect.TUI
+
+-- | Timeout for TUI interactions (5 minutes).
+tuiTimeoutMicros :: Int
+tuiTimeoutMicros = 300_000_000
 
 -- | Handle for bidirectional TUI communication.
 --
@@ -197,10 +202,9 @@ runTUI h = interpret $ \case
     atomically $ writeTChan h.tuiSendChan definition
 
     -- Wait for PopupResult response (blocking) with timeout
-    -- Timeout: 300 seconds (300,000,000 microseconds)
-    result <- timeout 300_000_000 $ atomically $ readTChan h.tuiRecvChan
+    result <- timeout tuiTimeoutMicros $ atomically $ readTChan h.tuiRecvChan
     case result of
       Just r -> pure r
       Nothing -> do
-        putStrLn "Error: TUI timeout after 300s"
+        hPutStrLn stderr "Error: TUI timeout after 300s"
         pure $ PopupResult "timeout" (object [])
