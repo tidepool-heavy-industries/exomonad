@@ -23,9 +23,13 @@ processes:
         echo "ERROR: Hangar.toml not found" >&2
         exit 1
       fi
-      BIN_DIR="$HANGAR_ROOT/runtime/bin"
-      rm -f .tidepool/sockets/control.sock .tidepool/sockets/tui.sock && \
-      "$BIN_DIR/tidepool-control-server"
+      echo "DEBUG: Hangar discovered at: $HANGAR_ROOT"
+      echo "DEBUG: Listing runtime/bin:"
+      ls -la "$HANGAR_ROOT/runtime/bin"
+      echo "DEBUG: Removing sockets"
+      rm -f .tidepool/sockets/control.sock .tidepool/sockets/tui.sock
+      echo "DEBUG: Executing: $HANGAR_ROOT/runtime/bin/tidepool-control-server"
+      exec "$HANGAR_ROOT/runtime/bin/tidepool-control-server"
     working_dir: "."
     availability:
       restart: on_failure
