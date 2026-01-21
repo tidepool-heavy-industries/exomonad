@@ -257,7 +257,16 @@ processBead mHangarRoot repoRoot wtBaseDir shortId = do
                     Left errMsg -> pure $ Left (shortId, "Worktree created but context write failed: " <> errMsg)
                     Right () -> do
                       -- d. Write subagent environment
-                      let envVars = [("SUBAGENT_CMD", "claude")]
+                      -- Explicitly set sockets to relative paths to ensure isolation from root instance.
+                      -- Inject HANGAR_ROOT and TIDEPOOL_BIN_DIR to avoid fragile shell discovery.
+                      let hr = fromMaybe repoRoot mHangarRoot
+                          envVars = 
+                            [ ("SUBAGENT_CMD", "claude")
+                            , ("HANGAR_ROOT", T.pack hr)
+                            , ("TIDEPOOL_BIN_DIR", T.pack $ hr </> "runtime" </> "bin")
+                            , ("TIDEPOOL_CONTROL_SOCKET", ".tidepool/sockets/control.sock")
+                            , ("TIDEPOOL_TUI_SOCKET", ".tidepool/sockets/tui.sock")
+                            ]
                       envRes <- writeEnvFile path envVars
                       case envRes of
                         Left errMsg -> pure $ Left (shortId, "Worktree created but env write failed: " <> errMsg)

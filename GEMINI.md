@@ -59,3 +59,7 @@ The template (`subagent-pc.yaml`) is critical for bootstrapping the subagent env
 - **Log Location**: Must be set to `.tidepool/logs` (directory), not a specific file, to allow `process-compose` to manage log rotation and avoid "No such file" errors.
 - **Binary Discovery**: Uses an inline shell script to walk up and find `Hangar.toml`, then resolves binaries from `$HANGAR_ROOT/runtime/bin`. This ensures robustness against PATH variations in subagent shells.
 - **Sockets**: Explicitly manages `.tidepool/sockets/control.sock` and `.tidepool/sockets/tui.sock` via environment variables and cleanup scripts.
+
+### Subagent Hardening
+- **Environment Isolation**: `SpawnAgents.hs` explicitly sets `TIDEPOOL_CONTROL_SOCKET` and `TIDEPOOL_TUI_SOCKET` to relative paths in the subagent's `.env.subagent` file. This prevents accidental connection to the root control server (isolation breach) even if the parent environment uses absolute paths.
+- **Log Consistency**: Templates and Zellij layouts use an explicit log file path (`.tidepool/logs/process-compose.log`) to ensure `tail` commands reliably find the log stream.

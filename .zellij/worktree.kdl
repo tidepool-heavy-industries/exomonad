@@ -25,7 +25,7 @@ layout {
                 }
                 pane name="logs" {
                     command "tail"
-                    args "-F" ".tidepool/logs/pc.log"
+                    args "-F" ".tidepool/logs/process-compose.log"
                 }
             }
         }

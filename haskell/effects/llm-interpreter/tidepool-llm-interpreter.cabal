@@ -56,7 +56,6 @@ executable test-anthropic-integration
         tidepool-llm-interpreter,
         tidepool-core,
         freer-simple >= 1.2 && < 2,
-        aeson >= 2.1 && < 3,
         text >= 2.0 && < 3
     ghc-options: -threaded
 
