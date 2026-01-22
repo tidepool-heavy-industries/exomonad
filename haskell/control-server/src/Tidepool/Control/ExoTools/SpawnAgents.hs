@@ -295,7 +295,7 @@ processBead mHangarRoot repoRoot wtBaseDir backend shortId = do
                         Left err -> pure $ Left (shortId, T.pack (show err))
                         Right (WorktreePath path) -> do
                           -- b. Bootstrap .tidepool/ directory structure
-                          bootstrapRes <- bootstrapTidepool mHangarRoot repoRoot path
+                          bootstrapRes <- bootstrapTidepool mHangarRoot repoRoot path backend
                           case bootstrapRes of
                             Left errMsg -> pure $ Left (shortId, "Worktree created but bootstrap failed: " <> errMsg)
                             Right () -> do
@@ -345,8 +345,9 @@ bootstrapTidepool
   => Maybe FilePath  -- ^ Hangar root (for templates)
   -> FilePath        -- ^ Repo root (for symlink source)
   -> FilePath        -- ^ Worktree path
+  -> Text            -- ^ Backend ("claude" or "gemini")
   -> Eff es (Either Text ())
-bootstrapTidepool mHangarRoot repoRoot worktreePath = do
+bootstrapTidepool mHangarRoot repoRoot worktreePath backend = do
   -- Create .tidepool directory structure.
   -- These MUST exist for process-compose log tailing and control sockets.
   let socketsDir = worktreePath </> ".tidepool" </> "sockets"
@@ -384,7 +385,19 @@ bootstrapTidepool mHangarRoot repoRoot worktreePath = do
                   settingsRes <- writeClaudeLocalSettings hr worktreePath
                   case settingsRes of
                     Left err -> pure $ Left $ "Failed to write Claude settings: " <> err
-                    Right () -> pure $ Right ()
+                    Right () -> do
+                      -- Write Gemini config if backend is "gemini"
+                      geminiRes <- if backend == "gemini"
+                                     then writeGeminiConfig hr worktreePath
+                                     else pure $ Right ()
+                      case geminiRes of
+                        Left err -> pure $ Left $ "Failed to write Gemini config: " <> err
+                        Right () -> do
+                          -- Update .gitignore for both backends
+                          gitignoreRes <- appendBackendToGitignore worktreePath
+                          case gitignoreRes of
+                            Left err -> pure $ Left $ "Failed to update .gitignore: " <> err
+                            Right () -> pure $ Right ()
 
 
 -- | Write bead context to .claude/context/bead.md.
@@ -541,3 +554,47 @@ writeGeminiConfig _hangarRoot worktreePath = do
         ]
 
   writeBackendSettings geminiDir settingsFile settings ".gemini" "settings.json"
+
+-- | Append .claude/ and .gemini/ to .gitignore if not already present.
+-- Ensures both backend directories are gitignored for consistency.
+appendBackendToGitignore
+  :: (Member FileSystem es)
+  => FilePath  -- ^ Worktree path
+  -> Eff es (Either Text ())
+appendBackendToGitignore worktreePath = do
+  let gitignorePath = worktreePath </> ".gitignore"
+
+  -- Read existing .gitignore (or handle non-existent file)
+  readRes <- readFileText gitignorePath
+  case readRes of
+    Left _ -> do
+      -- .gitignore doesn't exist, create it with both entries
+      let content = T.unlines [".claude/", ".gemini/"]
+      writeRes <- writeFileText gitignorePath content
+      case writeRes of
+        Left err -> pure $ Left $ "Failed to create .gitignore: " <> T.pack (show err)
+        Right () -> pure $ Right ()
+
+    Right existingContent -> do
+      let lines' = T.lines existingContent
+          hasClaudeEntry = any (\line -> T.strip line == ".claude/") lines'
+          hasGeminiEntry = any (\line -> T.strip line == ".gemini/") lines'
+
+      -- Determine what needs to be added
+      let needsClaudeEntry = not hasClaudeEntry
+          needsGeminiEntry = not hasGeminiEntry
+
+      if not needsClaudeEntry && not needsGeminiEntry
+        then pure $ Right ()  -- Already has both entries
+        else do
+          -- Build list of entries to add
+          let entriesToAdd = catMaybes
+                [ if needsClaudeEntry then Just ".claude/" else Nothing
+                , if needsGeminiEntry then Just ".gemini/" else Nothing
+                ]
+          -- Append missing entries (preserve existing content)
+          let newContent = existingContent <> "\n" <> T.unlines entriesToAdd
+          writeRes <- writeFileText gitignorePath newContent
+          case writeRes of
+            Left err -> pure $ Left $ "Failed to update .gitignore: " <> T.pack (show err)
+            Right () -> pure $ Right ()

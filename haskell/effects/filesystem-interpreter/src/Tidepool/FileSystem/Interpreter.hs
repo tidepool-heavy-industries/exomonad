@@ -55,6 +55,7 @@ runFileSystemIO = interpret $ \case
   CreateSymlink target link -> sendM $ createSymlinkIO target link
   FileExists path -> sendM $ fileExistsIO path
   DirectoryExists path -> sendM $ directoryExistsIO path
+  ReadFileText path -> sendM $ readFileTextIO path
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -162,3 +163,15 @@ directoryExistsIO path = do
       , fseReason = T.pack (show e)
       }
     Right exists -> pure $ Right exists
+
+-- | Read text content from a file.
+readFileTextIO :: FilePath -> IO (Either FileSystemError Text)
+readFileTextIO path = do
+  result <- try @SomeException $ TIO.readFile path
+  case result of
+    Left e -> pure $ Left FSIOError
+      { fseOperation = "readFileText"
+      , fsePath = path
+      , fseReason = T.pack (show e)
+      }
+    Right content -> pure $ Right content

@@ -35,6 +35,7 @@ module Tidepool.Effects.FileSystem
   , createSymlink
   , fileExists
   , directoryExists
+  , readFileText
 
     -- * Error Types
   , FileSystemError(..)
@@ -112,6 +113,11 @@ data FileSystem r where
   DirectoryExists
     :: FilePath
     -> FileSystem (Either FileSystemError Bool)
+
+  -- | Read text content from a file.
+  ReadFileText
+    :: FilePath
+    -> FileSystem (Either FileSystemError Text)
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -193,3 +199,17 @@ directoryExists
   => FilePath
   -> Eff effs (Either FileSystemError Bool)
 directoryExists = send . DirectoryExists
+
+-- | Read text content from a file.
+--
+-- @
+-- result <- readFileText "/path/to/file.txt"
+-- case result of
+--   Right content -> -- use content
+--   Left err -> handleError err
+-- @
+readFileText
+  :: Member FileSystem effs
+  => FilePath
+  -> Eff effs (Either FileSystemError Text)
+readFileText = send . ReadFileText

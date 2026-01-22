@@ -787,7 +787,7 @@ echo '{"type":"MCPToolCall","id":"2","tool_name":"find_callers","arguments":{"na
 
 ### Gemini CLI Support
 
-The control server now includes support for Gemini CLI config generation via `writeGeminiConfig` (SpawnAgents.hs:458).
+The control server now includes support for Gemini CLI config generation via `writeGeminiConfig` (SpawnAgents.hs:476).
 
 **Key differences from Claude:**
 - Config location: `.gemini/settings.json` (NOT `.gemini/settings.local.json`)
@@ -796,10 +796,11 @@ The control server now includes support for Gemini CLI config generation via `wr
 - Path variable: `$GEMINI_PROJECT_DIR` (not `$CLAUDE_PROJECT_DIR`)
 - API key: `GEMINI_API_KEY` (not `ANTHROPIC_API_KEY`)
 - CLI command: Just `gemini` (no `--debug --verbose` flags)
+- MCP command: Uses full path `$GEMINI_PROJECT_DIR/../runtime/bin/mantle-agent` for consistency with hooks
 
-**Status:** Function implemented. Wiring into spawn_agents backend selection is tracked in tidepool-nn7.
+**Status:** Implemented and wired into spawn_agents backend selection (pass `backend: "gemini"` parameter).
 
-**Note:** `.gemini/` is gitignored to prevent polluting agent git states (handled by `appendGeminiToGitignore`).
+**Note:** `.gemini/` and `.claude/` are automatically added to worktree `.gitignore` during bootstrap. Both backends are gitignored for consistency.
 
 ### Workflow
 
