@@ -18,7 +18,7 @@ where
 
 import Control.Monad (forM)
 import Control.Monad.Freer (Eff, Member)
-import Data.Aeson (FromJSON(..), ToJSON(..), (.:), (.=), object, withObject)
+import Data.Aeson (FromJSON(..), ToJSON(..), (.:), (.:?), (.=), object, withObject)
 import Data.Either (partitionEithers)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
@@ -30,7 +30,7 @@ import Tidepool.Effects.BD (BD, BeadInfo(..), BeadStatus(..), DependencyInfo(..)
 import Tidepool.Effects.Env (Env, getEnv)
 import Tidepool.Effects.Git (Git, WorktreeInfo(..), getWorktreeInfo)
 import Tidepool.Effects.Worktree (Worktree, WorktreeSpec(..), WorktreePath(..), createWorktree)
-import Tidepool.Effects.FileSystem (FileSystem, createDirectory, writeFileText, copyFile, createSymlink, fileExists, directoryExists)
+import Tidepool.Effects.FileSystem (FileSystem, createDirectory, writeFileText, createSymlink, fileExists, directoryExists)
 import Tidepool.Effects.Zellij (Zellij, TabConfig(..), TabId(..), checkZellijEnv, newTab)
 import Tidepool.Graph.Generic (AsHandler, type (:-))
 import Tidepool.Graph.Generic.Core (EntryNode, ExitNode, LogicNode)
@@ -107,21 +107,28 @@ buildBeadContext bead branchName = T.unlines
 -- | Arguments for spawn_agents tool.
 data SpawnAgentsArgs = SpawnAgentsArgs
   { saaBeadIds :: [Text]  -- ^ List of short form bead IDs (e.g. "wzi", "1b2").
+  , saaWave    :: Maybe Text  -- ^ Optional wave identifier for process-compose namespace grouping.
   }
   deriving stock (Show, Eq, Generic)
 
 instance HasJSONSchema SpawnAgentsArgs where
   jsonSchema = objectSchema
     [ ("bead_ids", describeField "bead_ids" "List of short-form bead IDs to spawn worktrees for." (arraySchema (emptySchema TString)))
+    , ("wave", describeField "wave" "Optional wave identifier for grouping processes (e.g., 'wave-1')." (emptySchema TString))
     ]
     ["bead_ids"]
 
 instance FromJSON SpawnAgentsArgs where
   parseJSON = withObject "SpawnAgentsArgs" $ \v ->
-    SpawnAgentsArgs <$> v .: "bead_ids"
+    SpawnAgentsArgs
+      <$> v .: "bead_ids"
+      <*> v .:? "wave"
 
 instance ToJSON SpawnAgentsArgs where
-  toJSON args = object ["bead_ids" .= saaBeadIds args]
+  toJSON args = object
+    [ "bead_ids" .= saaBeadIds args
+    , "wave" .= saaWave args
+    ]
 
 -- | Result of spawn_agents tool.
 data SpawnAgentsResult = SpawnAgentsResult
@@ -195,7 +202,7 @@ spawnAgentsLogic args = do
 
       -- 3. Process each bead
       results <- forM args.saaBeadIds $ \shortId -> do
-        processBead mHangarRoot repoRoot wtBaseDir shortId
+        processBead mHangarRoot repoRoot wtBaseDir args.saaWave shortId
 
       -- Partition results
       let (failed, succeeded) = partitionEithers results
@@ -215,9 +222,10 @@ processBead
   => Maybe FilePath                                    -- ^ Hangar root (for templates)
   -> FilePath                                          -- ^ Repo root (for symlinks/templates)
   -> FilePath                                          -- ^ Worktree base directory
+  -> Maybe Text                                        -- ^ Optional wave identifier for namespace
   -> Text                                              -- ^ Short bead ID
   -> Eff es (Either (Text, Text) (Text, FilePath, TabId))  -- ^ Left (id, error) or Right (id, path, tabId)
-processBead mHangarRoot repoRoot wtBaseDir shortId = do
+processBead mHangarRoot repoRoot wtBaseDir mWave shortId = do
   -- Validate shortId (prevent path traversal)
   if T.any (\c -> c == '/' || c == '\\') shortId
     then pure $ Left (shortId, "Invalid bead ID: contains path separators")
@@ -273,7 +281,7 @@ processBead mHangarRoot repoRoot wtBaseDir shortId = do
                         Left err -> pure $ Left (shortId, T.pack (show err))
                         Right (WorktreePath path) -> do
                           -- b. Bootstrap .tidepool/ directory structure
-                          bootstrapRes <- bootstrapTidepool mHangarRoot repoRoot path
+                          bootstrapRes <- bootstrapTidepool mHangarRoot repoRoot path mWave
                           case bootstrapRes of
                             Left errMsg -> pure $ Left (shortId, "Worktree created but bootstrap failed: " <> errMsg)
                             Right () -> do
@@ -311,14 +319,57 @@ processBead mHangarRoot repoRoot wtBaseDir shortId = do
                                         Right tabId -> pure $ Right (shortId, path, tabId)
 
 
+-- | Generate process-compose.yaml content with optional namespace field.
+generateProcessComposeYaml :: Maybe Text -> Text
+generateProcessComposeYaml mWave =
+  let namespaceLines = case mWave of
+        Just wave -> ["    namespace: " <> wave]
+        Nothing -> []
+      processHeaderLines =
+        [ "version: \"0.5\""
+        , ""
+        , "processes:"
+        , "  control-server:"
+        ] ++ namespaceLines
+      processBodyLines =
+        [ "    command: |"
+        , "      # Binaries are resolved from TIDEPOOL_BIN_DIR (injected by spawner)"
+        , "      if [ -z \"$TIDEPOOL_BIN_DIR\" ]; then"
+        , "        echo \"ERROR: TIDEPOOL_BIN_DIR not set in environment\" >&2"
+        , "        exit 1"
+        , "      fi"
+        , "      rm -f .tidepool/sockets/control.sock .tidepool/sockets/tui.sock && \\"
+        , "      \"$TIDEPOOL_BIN_DIR/tidepool-control-server\" --no-tui"
+        , "    working_dir: \".\""
+        , "    environment:"
+        , "      - \"TIDEPOOL_BIN_DIR=${TIDEPOOL_BIN_DIR}\""
+        , "      - \"TIDEPOOL_CONTROL_SOCKET=.tidepool/sockets/control.sock\""
+        , "      - \"TIDEPOOL_TUI_SOCKET=.tidepool/sockets/tui.sock\""
+        , "    readiness_probe:"
+        , "      exec:"
+        , "        # Socket existence check (no connection attempt - avoids JSON parse errors)"
+        , "        command: \"test -S .tidepool/sockets/control.sock\""
+        , "      initial_delay_seconds: 2"
+        , "      period_seconds: 3"
+        , "      failure_threshold: 10"
+        , "    availability:"
+        , "      restart: on_failure"
+        , "      max_restarts: 5"
+        , "    shutdown:"
+        , "      command: \"rm -f .tidepool/sockets/control.sock .tidepool/sockets/tui.sock\""
+        , "      timeout_seconds: 5"
+        ]
+  in T.unlines (processHeaderLines ++ processBodyLines)
+
 -- | Bootstrap .tidepool/ directory structure in a worktree.
 bootstrapTidepool
   :: (Member FileSystem es)
   => Maybe FilePath  -- ^ Hangar root (for templates)
   -> FilePath        -- ^ Repo root (for symlink source)
   -> FilePath        -- ^ Worktree path
+  -> Maybe Text      -- ^ Optional wave identifier for namespace
   -> Eff es (Either Text ())
-bootstrapTidepool mHangarRoot repoRoot worktreePath = do
+bootstrapTidepool _mHangarRoot repoRoot worktreePath mWave = do
   -- Create .tidepool directory structure.
   -- These MUST exist for process-compose log tailing and control sockets.
   let socketsDir = worktreePath </> ".tidepool" </> "sockets"
@@ -333,14 +384,12 @@ bootstrapTidepool mHangarRoot repoRoot worktreePath = do
       case res2 of
         Left err -> pure $ Left $ "Failed to create .tidepool/logs: " <> T.pack (show err)
         Right () -> do
-          -- Copy subagent process-compose template
-          let srcTemplate = case mHangarRoot of
-                Just hr -> hr </> "templates" </> "subagent-pc.yaml"
-                Nothing -> repoRoot </> ".tidepool" </> "templates" </> "subagent-pc.yaml"  -- fallback
-              dstConfig = worktreePath </> "process-compose.yaml"
-          copyRes <- copyFile srcTemplate dstConfig
-          case copyRes of
-            Left err -> pure $ Left $ "Failed to copy process-compose.yaml: " <> T.pack (show err)
+          -- Generate process-compose.yaml with optional namespace
+          let dstConfig = worktreePath </> "process-compose.yaml"
+              processComposeContent = generateProcessComposeYaml mWave
+          writeRes <- writeFileText dstConfig processComposeContent
+          case writeRes of
+            Left err -> pure $ Left $ "Failed to write process-compose.yaml: " <> T.pack (show err)
             Right () -> do
               -- Symlink .env from repo root
               let srcEnv = repoRoot </> ".env"
