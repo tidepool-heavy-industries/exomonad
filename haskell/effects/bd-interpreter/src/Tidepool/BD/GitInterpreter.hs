@@ -44,13 +44,15 @@ runGit
   -> Eff effs [FilePath]            -- ^ Handler for GetDirtyFiles
   -> (Int -> Eff effs [Text])       -- ^ Handler for GetRecentCommits
   -> Eff effs Text                  -- ^ Handler for GetCurrentBranch
+  -> (Text -> Eff effs Int)         -- ^ Handler for GetCommitsAhead
   -> Eff (Git ': effs) a
   -> Eff effs a
-runGit hWorktree hDirty hCommits hBranch = interpret $ \case
+runGit hWorktree hDirty hCommits hBranch hAhead = interpret $ \case
   GetWorktreeInfo      -> hWorktree
   GetDirtyFiles        -> hDirty
   GetRecentCommits n   -> hCommits n
   GetCurrentBranch     -> hBranch
+  GetCommitsAhead ref  -> hAhead ref
 
 
 -- | Run Git effects using the git CLI.
@@ -60,6 +62,7 @@ runGitIO = interpret $ \case
   GetDirtyFiles      -> sendM getGitDirtyFiles
   GetRecentCommits n -> sendM $ getGitRecentCommits n
   GetCurrentBranch   -> sendM getGitCurrentBranch
+  GetCommitsAhead ref -> sendM $ getGitCommitsAhead ref
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -170,6 +173,22 @@ getGitCurrentBranch = do
     Left (_ :: SomeException) -> pure "HEAD"
     Right (ExitSuccess, stdout, _) -> pure $ T.strip $ T.pack stdout
     Right _ -> pure "HEAD"
+
+
+-- | Get number of commits ahead of a ref.
+--
+-- Uses: git rev-list --count <ref>..HEAD
+getGitCommitsAhead :: Text -> IO Int
+getGitCommitsAhead ref = do
+  let refStr = T.unpack ref <> "..HEAD"
+  result <- try $ readProcessWithExitCode "git" ["rev-list", "--count", refStr] ""
+  case result of
+    Left (_ :: SomeException) -> pure 0
+    Right (ExitSuccess, stdout, _) ->
+      case reads (T.unpack $ T.strip $ T.pack stdout) of
+        [(n, "")] -> pure n
+        _ -> pure 0
+    Right _ -> pure 0
 
 
 -- | Run a git command and return stdout on success.

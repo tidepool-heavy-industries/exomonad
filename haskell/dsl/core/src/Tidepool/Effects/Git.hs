@@ -21,6 +21,7 @@ module Tidepool.Effects.Git
   , getDirtyFiles
   , getRecentCommits
   , getCurrentBranch
+  , getCommitsAhead
 
     -- * Types
   , WorktreeInfo(..)
@@ -92,6 +93,9 @@ data Git r where
   -- | Get current branch name.
   GetCurrentBranch :: Git Text
 
+  -- | Get number of commits ahead of a ref (e.g., "origin/main").
+  GetCommitsAhead :: Text -> Git Int
+
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- SMART CONSTRUCTORS
@@ -112,3 +116,7 @@ getRecentCommits = send . GetRecentCommits
 -- | Get current branch name.
 getCurrentBranch :: Member Git effs => Eff effs Text
 getCurrentBranch = send GetCurrentBranch
+
+-- | Get number of commits ahead of a ref (e.g., "origin/main").
+getCommitsAhead :: Member Git effs => Text -> Eff effs Int
+getCommitsAhead = send . GetCommitsAhead
