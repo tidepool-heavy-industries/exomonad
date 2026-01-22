@@ -21,7 +21,7 @@ layout {
             pane split_direction="horizontal" stacked=true {
                 pane name="process-compose" {
                     command "bash"
-                    args "-c" "mkdir -p .tidepool/logs .tidepool/sockets && export PC_NO_SERVER=true PC_USE_UDS=true PC_SOCKET_PATH=.tidepool/sockets/process-compose.sock && exec process-compose up"
+                    args "-c" "mkdir -p .tidepool/logs .tidepool/sockets && export PC_NO_SERVER=true PC_USE_UDS=true PC_SOCKET_PATH=.tidepool/sockets/process-compose.sock && exec process-compose up -L .tidepool/logs/process-compose.log"
                 }
                 pane name="logs" {
                     command "tail"
