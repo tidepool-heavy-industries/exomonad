@@ -207,6 +207,85 @@ To use mantle-agent with Claude Code, add to `.claude/settings.local.json`:
 
 This configuration ensures PM users only see PM-specific tools, while TL users can configure a different allowlist or omit `--tools` for full access.
 
+## Troubleshooting
+
+### MCP Tool Visibility Issues
+
+**Problem:** MCP shows only a subset of tools (e.g., PM tools not visible)
+
+**Cause:** `--tools` flag is filtering the tool list. Verify your Claude Code configuration in `.claude/settings.local.json`.
+
+**Solution:**
+1. Check current `--tools` setting in MCP server configuration
+2. Compare against intended role (PM, TL, Developer)
+3. Update allowlist to include desired tools
+
+```bash
+# Verify tools are exported by control server
+echo '{"type":"ToolsListRequest"}' | nc -U /path/to/.tidepool/sockets/control.sock
+
+# Test mantle-agent --tools filtering directly
+mantle-agent mcp --tools pm_propose,pm_status --help
+```
+
+### Tool Call Rejected with Error
+
+**Problem:** Claude calls a tool, but mantle-agent returns "Tool not in allowlist"
+
+**Cause:** The tool name is not included in the `--tools` flag, or the tool doesn't exist.
+
+**Solution:**
+1. Verify tool name matches control server export (check logs)
+2. Add to `--tools` allowlist if tool should be visible
+3. If tool doesn't exist, check control server logs for `exportMCPTools` errors
+
+### Missing TIDEPOOL_CONTROL_SOCKET
+
+**Problem:** mantle-agent fails with "Connection refused" or "No such file"
+
+**Cause:** `TIDEPOOL_CONTROL_SOCKET` environment variable not set, or control server socket doesn't exist.
+
+**Solution:**
+```bash
+# Verify socket exists
+ls -la .tidepool/sockets/control.sock
+
+# Set in .claude/settings.local.json:
+{
+  "env": {
+    "TIDEPOOL_CONTROL_SOCKET": "/absolute/path/to/.tidepool/sockets/control.sock"
+  }
+}
+```
+
+### Tool List Changes Not Reflected
+
+**Problem:** Added new tool to control server, but mantle-agent still shows old list
+
+**Cause:** mantle-agent caches tool list at startup. Changes to control server require restart.
+
+**Solution:**
+1. Stop current Claude Code session (`Ctrl+P` → `q`)
+2. Restart: `./start-augmented.sh` or reconnect MCP in Claude Code
+3. Use `/mcp` → `Reconnect` in Claude Code to refresh tool cache
+
+### Schema Validation Errors
+
+**Problem:** Tool call fails with "Invalid arguments" or schema error
+
+**Cause:** Claude generated arguments that don't match tool's JSON schema
+
+**Solution:**
+1. Check tool schema in control server MCP tool discovery logs
+2. Report to control server maintainer if schema is incorrect
+3. In Claude: try rephrasing the request to match schema constraints
+
+## Related Documentation
+
+- **[ADR-003: MCP Tool Design Patterns](../../docs/architecture/ADR-003-MCP-Tool-Design-Patterns.md)** - Tool tier architecture, design rationale
+- **[haskell/control-server/CLAUDE.md](../../haskell/control-server/CLAUDE.md)** - Tool implementation details, tier descriptions
+- **[haskell/dsl/core/CLAUDE.md](../../haskell/dsl/core/CLAUDE.md)** - Graph DSL reference for tool developers
+
 ## What's Missing (TODO)
 
 ### Daemon Mode

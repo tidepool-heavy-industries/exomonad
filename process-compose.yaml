@@ -1,17 +1,24 @@
 version: "0.5"
-log_location: .tidepool/logs/process-compose.log
 
 processes:
   control-server:
-    # Binaries are on PATH from start-augmented.sh (single source of truth)
     command: |
-      rm -f "$TIDEPOOL_CONTROL_SOCKET" "$TIDEPOOL_TUI_SOCKET" && \
-      tidepool-control-server
+      # Binaries are resolved from TIDEPOOL_BIN_DIR (injected by spawner)
+      if [ -z "$TIDEPOOL_BIN_DIR" ]; then
+        echo "ERROR: TIDEPOOL_BIN_DIR not set in environment" >&2
+        exit 1
+      fi
+      rm -f .tidepool/sockets/control.sock .tidepool/sockets/tui.sock && \
+      "$TIDEPOOL_BIN_DIR/tidepool-control-server" --no-tui
     working_dir: "."
+    environment:
+      - "TIDEPOOL_BIN_DIR=${TIDEPOOL_BIN_DIR}"
+      - "TIDEPOOL_CONTROL_SOCKET=.tidepool/sockets/control.sock"
+      - "TIDEPOOL_TUI_SOCKET=.tidepool/sockets/tui.sock"
     readiness_probe:
       exec:
         # Socket existence check (no connection attempt - avoids JSON parse errors)
-        command: "test -S $TIDEPOOL_CONTROL_SOCKET"
+        command: "test -S .tidepool/sockets/control.sock"
       initial_delay_seconds: 2
       period_seconds: 3
       failure_threshold: 10
@@ -19,5 +26,5 @@ processes:
       restart: on_failure
       max_restarts: 5
     shutdown:
-      command: "rm -f $TIDEPOOL_CONTROL_SOCKET $TIDEPOOL_TUI_SOCKET"
+      command: "rm -f .tidepool/sockets/control.sock .tidepool/sockets/tui.sock"
       timeout_seconds: 5

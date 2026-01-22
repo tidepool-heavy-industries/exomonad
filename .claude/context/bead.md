@@ -1,31 +1,36 @@
-# Task: Fix: Use Unix Domain Sockets for subagent process-compose to eliminate port 8080 conflicts
+# Task: Documentation sweep: CLAUDE.md + ADR for MCP patterns
 
-**ID:** tidepool-l8p
+**ID:** tidepool-4fu
 **Status:** open
-**Priority:** 1
-**Branch:** bd-l8p/fix-use-unix-domain-sockets-for-subagent-processcompose-to-eliminate-port-8080-conflicts
+**Priority:** 2
+**Branch:** bd-4fu/documentation-sweep-claudemd-adr-for-mcp-patterns
 
 ## Description
 
-Disable HTTP API in worktree process-compose instances and use Unix Domain Sockets exclusively, eliminating TCP port 8080 conflicts when multiple process-compose instances run in parallel worktrees
+## Summary
 
-## Context
-When spawning multiple agents, each worktree's process-compose tries to bind to TCP port 8080 for its HTTP API, causing "address already in use" errors. The Hub & Spoke architecture supports Unix Domain Sockets natively via PC_NO_SERVER, PC_USE_UDS, and PC_SOCKET_PATH environment variables.
+Post-Wave-1 documentation update to capture new tools and patterns.
 
-**Solution:**
-1. Set PC_NO_SERVER=true and PC_USE_UDS=true in subagent process-compose environment
-2. Set PC_SOCKET_PATH=./.tidepool/sockets/process-compose.sock for predictable socket paths
-3. Update start-augmented.sh stale session detection to use `process-compose info -u <socket>` instead of `curl http://localhost:8080`
-4. Update any other health checks to verify socket existence with `test -S`
+## Scope
 
-**Benefits:**
-- Zero port conflicts
-- Lower latency (UDS vs TCP loopback)
-- Fully isolated per-worktree state
-- Aligns with existing control-server/tui-sidebar socket architecture
+1. **haskell/control-server/CLAUDE.md**
+   - Add pm_status, pm_review_dag to MCP Tools section
+   - Update tool count (was 7, now 9+)
+   - Document role-based filtering pattern
 
-## Scope Hint
-Medium - configuration + health check update
+2. **ADR: MCP Tool Design Patterns**
+   - Tier 1 (LSP-only) vs Tier 2 (LLM-enhanced) vs Tier 4 (TUI-interactive)
+   - GraphEntries vs MCPExport annotation patterns
+   - Schema-shaped cognition (ADR 002 reference)
+
+3. **rust/mantle-agent/CLAUDE.md**
+   - Document --tools flag usage for PM vs TL roles
+   - Add troubleshooting section for tool filtering
+
+## Acceptance Criteria
+- [ ] All new MCP tools documented in control-server CLAUDE.md
+- [ ] ADR written and linked from relevant docs
+- [ ] mantle-agent docs updated with role filtering examples
 
 ## Dependencies
 
@@ -34,6 +39,6 @@ None
 ## Workflow
 
 1. Implement changes
-2. Commit: [tidepool-l8p] <description>
-3. Push: git push -u origin bd-l8p/fix-use-unix-domain-sockets-for-subagent-processcompose-to-eliminate-port-8080-conflicts
-4. File PR: gh pr create --title "[tidepool-l8p] Fix: Use Unix Domain Sockets for subagent process-compose to eliminate port 8080 conflicts"
+2. Commit: [tidepool-4fu] <description>
+3. Push: git push -u origin bd-4fu/documentation-sweep-claudemd-adr-for-mcp-patterns
+4. File PR: Call the 'file_pr' tool (do NOT use gh cli manually)
