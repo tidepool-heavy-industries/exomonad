@@ -86,6 +86,9 @@ echo "📦 Discovered Hangar at: $HANGAR_ROOT"
 # Add all Hangar binaries (including mantle-agent) to PATH for Claude and related tools
 export PATH="$HANGAR_ROOT/runtime/bin:$PATH"
 
+# Export TIDEPOOL_BIN_DIR for SessionStart hooks in settings.json
+export TIDEPOOL_BIN_DIR="$HANGAR_ROOT/runtime/bin"
+
 # Check dependencies
 if ! command -v process-compose &> /dev/null; then
     echo "ERROR: process-compose not installed"
