@@ -9,6 +9,15 @@
             "command": "mantle-agent hook session-start"
           }
         ]
+      },
+      {
+        "matcher": "resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "mantle-agent hook session-start"
+          }
+        ]
       }
     ]
   }
