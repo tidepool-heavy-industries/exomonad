@@ -60,6 +60,7 @@ CLAUDE.md  ← YOU ARE HERE (project overview)
 | I want to... | Read this |
 |--------------|-----------|
 | Work on Claude Code++ (hooks/MCP/scout) ⭐ | `haskell/control-server/CLAUDE.md` |
+| Understand MCP tool architecture/tiers | `docs/architecture/ADR-003-MCP-Tool-Design-Patterns.md` |
 | Understand hook/MCP forwarding (Rust side) | `rust/mantle-agent/CLAUDE.md` |
 | Define a graph, handlers, annotations | `haskell/dsl/core/CLAUDE.md` |
 | Work on LLM-level teaching infrastructure | `haskell/dsl/teaching/CLAUDE.md` |

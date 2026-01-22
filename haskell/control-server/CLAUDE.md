@@ -1,6 +1,6 @@
 # Tidepool Control Server
 
-Unix socket server for Claude Code++ integration. Receives hook events and MCP tool calls from mantle-agent via NDJSON over Unix socket. Provides semantic code exploration via the `scout` MCP tool.
+Unix socket server for Claude Code++ integration. Receives hook events and MCP tool calls from mantle-agent via NDJSON over Unix socket. Provides 23+ MCP tools organized in tiers: LSP-only (Tier 1), LLM-enhanced (Tier 2), external orchestration (Tier 3), TUI-interactive (Tier 4), and mailbox communication (Tier 5).
 
 ## When to Read This
 
@@ -274,9 +274,14 @@ The system uses `process-compose` to orchestrate multiple services. Subagents (p
 
 ## MCP Tools
 
-Tools are **automatically discovered** from graph definitions:
-- **Simplified graphs** (Tier 1): Use `GraphEntries` type family + `Return` effect, discovered via `reifyGraphEntries`
-- **Legacy graphs** (Tier 2): Use `MCPExport` annotation on entry node, discovered via `reifyMCPTools`
+Tools are **automatically discovered** from graph definitions at startup via `exportMCPTools`:
+- **Tier 1 (LSP-only)**: Use `GraphEntries` type family + `Return` effect, discovered via `reifyGraphEntries`
+- **Tier 2 (LLM-enhanced)**: Use `MCPExport` annotation on entry node, discovered via `reifyMCPTools`
+- **Tier 3 (External orchestration)**: Beads (BD), git, subprocess operations
+- **Tier 4 (TUI-interactive)**: Dialog boxes, option selection, guidance requests
+- **Tier 5 (Mailbox)**: Agent-to-agent messaging
+
+**Role-based filtering:** See "Role-Based Tool Filtering" section below for `--tools` flag usage in mantle-agent.
 
 ### Tier 1: Deterministic LSP Tools
 
@@ -413,34 +418,142 @@ Asks the user for free-form guidance or to select from suggestions when the agen
 
 **Implementation:** `TUITools.hs:258-290` (RequestGuidanceGraph)
 
+### Tier 5: Project Management Tools
+
+Tools for sprint planning, issue triage, and team coordination via Beads (BD) and GitHub APIs.
+
+#### `pm_status` - Sprint Health Dashboard
+
+Provides PM observability: velocity, cycle time, PR lag, and current state distribution.
+
+**Request Schema:**
+```json
+{
+  "period_days": 7,                // optional, default 7
+  "include_breakdown": false,      // optional, include label breakdown
+  "label_track": "backend",        // optional, filter by track label
+  "repo": "owner/repo"             // optional, GitHub repo for PR metrics
+}
+```
+
+**Response Schema:**
+```json
+{
+  "velocity": 4.2,
+  "trend": 0.15,
+  "cycle_time": {
+    "median_days": 2.5,
+    "p90_days": 5.8
+  },
+  "current_state": {
+    "in_flight": 3,
+    "ready": 5,
+    "blocked": 2,
+    "needs_tl_review": 1,
+    "needs_pm_approval": 0
+  },
+  "pr_lag": {
+    "median_hours": 4.2,
+    "p90_hours": 12.0
+  },
+  "breakdown": [["backend", 5], ["frontend", 3]]  // if include_breakdown=true
+}
+```
+
+**Implementation:** `PMStatus.hs:169-223` (pmStatusLogic)
+
+#### `pm_review_dag` - DAG Analysis for Strategic Planning
+
+Analyzes the bead dependency graph to identify critical paths, priority gaps, and blocking cascades.
+
+**Request Schema:**
+```json
+{
+  "include_closed": false,           // optional, include closed beads
+  "aging_threshold_hours": 24,       // optional, default 24h
+  "focus_track": "backend"           // optional, focus on a track label
+}
+```
+
+**Response Schema:**
+```json
+{
+  "ready": ["tidepool-abc", "tidepool-def"],
+  "blocked": [
+    {
+      "bead_id": "tidepool-xyz",
+      "depth": 2,
+      "blockers": ["tidepool-123", "tidepool-456"]
+    }
+  ],
+  "critical_path": ["tidepool-end", "tidepool-mid", "tidepool-start"],
+  "priority_gaps": [
+    {
+      "blocked_id": "tidepool-low",
+      "blocked_priority": 4,
+      "blocker_id": "tidepool-high",
+      "blocker_priority": 0
+    }
+  ],
+  "aging": ["tidepool-stale"],
+  "needs_tl_review": ["tidepool-123"],
+  "needs_pm_approval": ["tidepool-456"]
+}
+```
+
+**Implementation:** `PMReviewDAG.hs:135-246` (pmReviewDagLogic)
+
 ### Tool Registration
 
-**Automatic discovery:**
+**Automatic discovery (23+ tools):**
 ```haskell
--- Export.hs
-exportMCPTools :: IO [ToolDefinition]
-exportMCPTools = do
-  let simplifiedTools = concat
-        [ reifyGraphEntries (Proxy @FindCallersGraph)
-        , reifyGraphEntries (Proxy @ShowFieldsGraph)
-        , reifyGraphEntries (Proxy @ShowConstructorsGraph)
-        ]
-      legacyTools = concat
-        [ reifyMCPTools (Proxy @DocGenGraph)  -- teach-graph
-        ]
-      tuiTools = concat
-        [ reifyGraphEntries (Proxy @ConfirmActionGraph)
-        , reifyGraphEntries (Proxy @SelectOptionGraph)
-        , reifyGraphEntries (Proxy @RequestGuidanceGraph)
-        ]
-  pure $ map reifyToToolDef (simplifiedTools ++ legacyTools ++ tuiTools)
+-- Export.hs:940-990
+exportMCPTools :: Logger -> IO [ToolDefinition]
+exportMCPTools logger = do
+  -- Tier 1: Simplified LSP graphs
+  let fcTools = reifyGraphEntries (Proxy @FindCallersGraph)
+      sfTools = reifyGraphEntries (Proxy @ShowFieldsGraph)
+      scTools = reifyGraphEntries (Proxy @ShowConstructorsGraph)
+
+  -- Tier 2: LLM-enhanced graphs
+  let dgTools = reifyMCPTools (Proxy @DocGenGraph)  -- teach-graph
+
+  -- Tier 3: External orchestration (Beads + Git)
+  let esTools = reifyMCPTools (Proxy @ExoStatusGraph)
+      ecTools = reifyMCPTools (Proxy @ExoCompleteGraph)
+      erTools = reifyMCPTools (Proxy @ExoReconstituteGraph)
+      saTools = reifyMCPTools (Proxy @SpawnAgentsGraph)
+      fpTools = reifyMCPTools (Proxy @FilePRGraph)
+      pmPriTools = reifyMCPTools (Proxy @PmPrioritizeGraph)
+      paeTools = reifyMCPTools (Proxy @PmApproveExpansionGraph)
+
+  -- Tier 4: TUI-interactive + PM dashboard tools
+  let caTools = reifyGraphEntries (Proxy @ConfirmActionGraph)
+      soTools = reifyGraphEntries (Proxy @SelectOptionGraph)
+      rgTools = reifyGraphEntries (Proxy @RequestGuidanceGraph)
+      pmStatTools = reifyMCPTools (Proxy @PmStatusGraph)
+      pmRevTools = reifyMCPTools (Proxy @PmReviewDagGraph)
+      pmProTools = reifyMCPTools (Proxy @PMProposeGraph)
+
+  -- Tier 5: Mailbox communication
+  let smTools = reifyMCPTools (Proxy @SendMessageGraph)
+      ciTools = reifyMCPTools (Proxy @CheckInboxGraph)
+      rmTools = reifyMCPTools (Proxy @ReadMessageGraph)
+      mrTools = reifyMCPTools (Proxy @MarkReadGraph)
+
+  let allTools = concat [fcTools, sfTools, scTools, caTools, soTools, rgTools,
+                         dgTools, esTools, ecTools, erTools, saTools, fpTools,
+                         paeTools, pmPriTools, pmStatTools, pmRevTools, pmProTools,
+                         smTools, ciTools, rmTools, mrTools]
+  pure $ map reifyToToolDef allTools
 ```
 
 **How it works:**
 1. **Simplified pattern**: `GraphEntries` type family declares entry points, `reifyGraphEntries` extracts metadata
 2. **Legacy pattern**: `MCPExport` annotation marks entry node, `reifyMCPTools` extracts metadata
 3. `exportMCPTools` called on control-server startup
-4. mantle-agent queries via `ToolsListRequest`, caches tools
+4. mantle-agent queries at connection, caches tools
+5. **Role-based filtering:** mantle-agent uses `--tools` flag to restrict which tools are exposed to Claude
 
 ## Hook Handlers
 
@@ -453,6 +566,50 @@ Most hooks are passthrough (log and allow). The `Stop` hook runs reconstitute lo
 - Other hooks → continue with default response
 
 **Implementation:** `Handler/Hook.hs:35-49` (Stop hook → exo_reconstitute)
+
+## Role-Based Tool Filtering
+
+The `--tools` flag in mantle-agent enables different roles (PM, TL, etc.) to connect to the same control server with different tool visibility.
+
+**How it works:**
+
+1. **Control server exposes all 23+ tools** by default via `exportMCPTools`
+2. **mantle-agent mcp --tools <TOOL1>,<TOOL2>,...** filters at the MCP protocol level
+3. **On `tools/list` request**: Returns only allowlisted tools
+4. **On `tools/call` request**: Rejects calls to non-allowlisted tools with clear error
+5. **Without `--tools` flag**: All tools are exposed (backwards compatible)
+
+**PM Role Example:**
+```bash
+mantle-agent mcp --tools pm_propose,pm_approve_expansion,pm_prioritize,pm_status,pm_review_dag,exo_status
+```
+
+PM users see:
+- `pm_propose` - Propose new beads
+- `pm_approve_expansion` - Approve/reject expansion plans
+- `pm_prioritize` - Batch prioritize beads
+- `pm_status` - Sprint health dashboard
+- `pm_review_dag` - DAG analysis for strategic planning
+- `exo_status` - Get development context
+
+**TL Role Example:**
+```bash
+mantle-agent mcp  # Omit --tools for full access, or specify TL-specific tools
+```
+
+TL users see: All tools (full access), or customize with:
+- `find_callers`, `show_fields`, `show_constructors` - LSP tools
+- `teach-graph` - Code exploration
+- `spawn_agents`, `exo_*`, `file_pr` - Development workflow
+
+**Developer Example (no filtering):**
+```bash
+mantle-agent mcp  # No --tools flag: access all 23+ tools
+```
+
+**Implementation:**
+- **Control server side**: `exportMCPTools` returns full tool list; `Handler/MCP.hs` routes calls by name
+- **mantle-agent side**: `mcp.rs:handle_tools_list()` filters based on `--tools` allowlist; `handle_tools_call()` rejects non-allowlisted tools
 
 ## Protocol Types
 
@@ -697,7 +854,8 @@ pure $ mcpToolErrorWithDetails reqId NotFound
 
 ## Related Documentation
 
-- **[rust/mantle-agent/CLAUDE.md](../../rust/mantle-agent/CLAUDE.md)** - Hook/MCP forwarding
+- **[ADR-003: MCP Tool Design Patterns](../../docs/architecture/ADR-003-MCP-Tool-Design-Patterns.md)** ⭐ - Tool tier architecture, role-based filtering design decisions
+- **[rust/mantle-agent/CLAUDE.md](../../rust/mantle-agent/CLAUDE.md)** - Hook/MCP forwarding, `--tools` flag usage
 - **[rust/mantle-shared/CLAUDE.md](../../rust/mantle-shared/CLAUDE.md)** - Protocol types (Rust side)
 - **[haskell/effects/lsp-interpreter/CLAUDE.md](../effects/lsp-interpreter/CLAUDE.md)** - LSP integration
 - **[haskell/tools/training-generator/CLAUDE.md](../tools/training-generator/CLAUDE.md)** - Training data format
@@ -715,9 +873,10 @@ pure $ mcpToolErrorWithDetails reqId NotFound
 ## Completed
 
 ✅ **MCP Tool Infrastructure**
-- Automatic tool discovery via `MCPExport` + `reifyMCPTools`
-- 4 tools: find_callers, show_fields, show_constructors, teach-graph
+- Automatic tool discovery via `MCPExport` + `reifyMCPTools` + `GraphEntries`
+- 23+ tools across 5 tiers: LSP, LLM-enhanced, external orchestration, TUI-interactive, mailbox
 - Type-safe schema generation from `HasJSONSchema` instances
+- Role-based filtering via mantle-agent `--tools` flag
 
 ✅ **Tier 1 Tools (Logic-only)**
 - FindCallersGraph, ShowFieldsGraph, ShowConstructorsGraph
