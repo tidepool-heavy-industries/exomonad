@@ -356,6 +356,13 @@ Understanding the runtime stack for debugging and extension.
   codesign -s - --force ../runtime/bin/tui-sidebar
   ```
 
+**Subagent "Log File Not Found"**
+- **Symptom**: Subagent Zellij tabs show a blank log pane or "No such file".
+- **Cause**: Mismatch between `process-compose` config (expecting directory) and `tail` (expecting file).
+- **Fix**:
+  1. Ensure `templates/subagent-pc.yaml` sets `log_location: .tidepool/logs` (directory).
+  2. Ensure `.zellij/worktree.kdl` passes `-L .tidepool/logs/process-compose.log` to force the filename.
+
 #### Socket Lifecycle
 
 Sockets are managed to ensure clean transitions between sessions and prevent stale connections:

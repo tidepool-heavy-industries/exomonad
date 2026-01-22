@@ -62,7 +62,9 @@ The template (`subagent-pc.yaml`) is critical for bootstrapping the subagent env
 
 ### Subagent Hardening
 - **Environment Isolation**: `SpawnAgents.hs` explicitly sets `TIDEPOOL_CONTROL_SOCKET` and `TIDEPOOL_TUI_SOCKET` to relative paths in the subagent's `.env.subagent` file. This prevents accidental connection to the root control server (isolation breach) even if the parent environment uses absolute paths.
-- **Log Consistency**: Templates and Zellij layouts use an explicit log file path (`.tidepool/logs/process-compose.log`) to ensure `tail` commands reliably find the log stream.
+- **Log Consistency**: The system uses a hybrid approach for robustness:
+    1. **Config (`subagent-pc.yaml`)**: Sets `log_location: .tidepool/logs` (directory). This satisfies `process-compose` requirements for rotation/existence checks.
+    2. **Runtime (`worktree.kdl`)**: Passes `-L .tidepool/logs/process-compose.log` (explicit file). This forces the output to a known location that the Zellij `tail` pane can reliably consume.
 
 ## Operational Considerations
 
