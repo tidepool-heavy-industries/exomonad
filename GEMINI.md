@@ -64,6 +64,28 @@ The template (`subagent-pc.yaml`) is critical for bootstrapping the subagent env
 - **Environment Isolation**: `SpawnAgents.hs` explicitly sets `TIDEPOOL_CONTROL_SOCKET` and `TIDEPOOL_TUI_SOCKET` to relative paths in the subagent's `.env.subagent` file. This prevents accidental connection to the root control server (isolation breach) even if the parent environment uses absolute paths.
 - **Log Consistency**: Templates and Zellij layouts use an explicit log file path (`.tidepool/logs/process-compose.log`) to ensure `tail` commands reliably find the log stream.
 
+## Operational Considerations
+
+### Log Rotation
+Subagents run `process-compose`, which aggregates logs from all services. Currently, these logs are written to `.tidepool/logs/process-compose.log` within the worktree.
+- **Risk**: Long-running agents (days/weeks) may produce large log files, potentially filling disk space.
+- **Mitigation**: The current system does **not** automatically rotate these logs. Users should manually clean up finished worktrees or monitor disk usage for long-running tasks.
+
+### Resource Limits
+Spawning multiple subagents creates a linear increase in resource consumption.
+- **Processes**: Each agent spawns a `tidepool-control-server` (~50MB) and potentially an LSP server (varies, ~500MB+ for HLS/RA).
+- **File Descriptors**: Each agent requires open sockets and file handles. Check `ulimit -n` if spawning >10 agents.
+- **Disk Space**: Each worktree mimics the repo structure. While git worktrees are efficient, the `.tidepool` artifacts and build outputs are unique per agent.
+
+## Hardening & Edge Cases
+
+The `spawn_agents` tool includes several safety checks to prevent common failures:
+1.  **Template Validation**: Fails fast if the `subagent-pc.yaml` template is missing.
+2.  **Binary Check**: Verifies `tidepool-control-server` exists in the runtime path before creating a worktree.
+3.  **Path Traversal**: Rejects bead IDs containing `/` or `..` to prevent arbitrary file system writes.
+4.  **Env Var Validation**: Ensures critical environment variables (like `HANGAR_ROOT`) are not empty before writing the subagent configuration.
+
+
 ## Architectural Pillars of Tidepool Idiomatic Haskell
 
 The Haskell codebase adheres to a set of core principles designed for maximum safety, testability, and type-level expressiveness:
