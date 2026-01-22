@@ -635,6 +635,66 @@ echo '{"type":"MCPToolCall","id":"2","tool_name":"find_callers","arguments":{"na
 5. **control-server executes** tool logic (LSP queries, graph execution)
 6. **Returns result** → Claude uses in response
 
+## Structured Error Responses
+
+All MCP tools return structured errors instead of plain text strings. This allows Claude to categorize failures and provide targeted guidance.
+
+### Error Codes
+
+| Code | Name | Meaning | Example |
+|------|------|---------|---------|
+| -32001 | NotFound | Resource does not exist | Bead not found, binary missing, symbol not found |
+| -32002 | InvalidInput | Arguments failed validation | Invalid bead ID, empty env vars, malformed JSON |
+| -32003 | ExternalFailure | Subprocess or I/O error | File system error, git command failure |
+| -32004 | StateError | Invalid operation state | Bead is blocked, worktree already exists |
+| -32005 | EnvironmentError | Missing configuration | Not in Zellij, missing API key |
+
+### Error Response Format
+
+```json
+{
+  "code": -32001,
+  "message": "Bead tidepool-xyz not found",
+  "details": {
+    "searched_in": ".beads/beads.jsonl",
+    "available_beads": ["tidepool-m1j", "tidepool-abc"]
+  },
+  "suggestion": "Use 'bd list' to see all available beads"
+}
+```
+
+**Fields:**
+- `code` (required): Numeric error code identifying error category
+- `message` (required): Human-readable explanation of what went wrong
+- `details` (optional): Structured data for debugging (varies by tool)
+- `suggestion` (optional): Actionable guidance to resolve the issue
+
+### Benefits
+
+- **Type Categorization**: Claude can distinguish between validation errors (user's fault), not-found errors (resource missing), and external failures (system issue)
+- **Consistency**: All 26+ MCP tools use the same error format
+- **Actionable**: Suggestions help Claude guide users toward solutions
+- **Debuggable**: Details field provides context for troubleshooting
+- **Backward Compatible**: Existing clients still work (errors serialize to JSON-RPC format)
+
+### Implementation
+
+Error responses are built using helper functions:
+- `mcpToolError reqId code message` - Basic error with code, message
+- `mcpToolErrorWithDetails reqId code message details suggestion` - Full error with all fields
+
+Example from spawn_agents tool:
+```haskell
+-- Validation error
+pure $ mcpToolError reqId InvalidInput $ "Invalid bead ID: contains path separators"
+
+-- Not found error with suggestion
+pure $ mcpToolErrorWithDetails reqId NotFound
+  "Bead not found"
+  (Just (object ["bead_id" .= beadId]))
+  (Just "Use 'bd list' to find available beads")
+```
+
 ## Related Documentation
 
 - **[rust/mantle-agent/CLAUDE.md](../../rust/mantle-agent/CLAUDE.md)** - Hook/MCP forwarding
@@ -673,3 +733,9 @@ echo '{"type":"MCPToolCall","id":"2","tool_name":"find_callers","arguments":{"na
 - FunctionGemma HTTP interpreter via Ollama (`Scout/DocGen/Gemma.hs`)
 - Long-lived LSP session management
 - TCP protocol (NDJSON) between mantle-agent ↔ control-server
+
+✅ **Error Handling**
+- Structured error responses with error codes (NotFound, InvalidInput, ExternalFailure, StateError, EnvironmentError)
+- All 26+ MCP tools return consistent error format
+- Optional details and suggestion fields for debugging and guidance
+- Full documentation in Protocol.hs with examples
