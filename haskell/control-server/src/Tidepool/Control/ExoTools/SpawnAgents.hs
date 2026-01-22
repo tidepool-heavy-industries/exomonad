@@ -519,6 +519,8 @@ writeGeminiConfig hangarRoot worktreePath = do
       -- Gemini CLI doesn't expand $GEMINI_PROJECT_DIR, so use absolute paths
       mantleAgent = hangarRoot </> "runtime" </> "bin" </> "mantle-agent"
       hookCmd = mantleAgent <> " hook session-start"
+      -- Absolute path to control socket (mantle-agent needs this)
+      controlSocket = worktreePath </> ".tidepool" </> "sockets" </> "control.sock"
 
       settings = object
         [ "hooksConfig" .= object
@@ -552,6 +554,9 @@ writeGeminiConfig hangarRoot worktreePath = do
           [ "tidepool" .= object
             [ "command" .= T.pack mantleAgent
             , "args" .= (["mcp"] :: [Text])
+            , "env" .= object
+              [ "TIDEPOOL_CONTROL_SOCKET" .= T.pack controlSocket
+              ]
             ]
           ]
         ]
