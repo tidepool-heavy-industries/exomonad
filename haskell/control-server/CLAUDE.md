@@ -785,6 +785,22 @@ echo '{"type":"MCPToolCall","id":"2","tool_name":"find_callers","arguments":{"na
 }
 ```
 
+### Gemini CLI Support
+
+The control server now includes support for Gemini CLI config generation via `writeGeminiConfig` (SpawnAgents.hs:458).
+
+**Key differences from Claude:**
+- Config location: `.gemini/settings.json` (NOT `.gemini/settings.local.json`)
+- Combines hooks AND MCP in single file (unlike Claude which uses separate `.mcp.json`)
+- Hooks require explicit enable: `"hooksConfig": {"enabled": true}`
+- Path variable: `$GEMINI_PROJECT_DIR` (not `$CLAUDE_PROJECT_DIR`)
+- API key: `GEMINI_API_KEY` (not `ANTHROPIC_API_KEY`)
+- CLI command: Just `gemini` (no `--debug --verbose` flags)
+
+**Status:** Function implemented. Wiring into spawn_agents backend selection is tracked in tidepool-nn7.
+
+**Note:** `.gemini/` is gitignored to prevent polluting agent git states (handled by `appendGeminiToGitignore`).
+
 ### Workflow
 
 1. **Start control-server** in project directory (pane 2)

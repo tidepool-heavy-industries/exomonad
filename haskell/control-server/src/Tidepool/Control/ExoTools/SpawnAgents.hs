@@ -18,11 +18,13 @@ where
 
 import Control.Monad (forM)
 import Control.Monad.Freer (Eff, Member)
-import Data.Aeson (FromJSON(..), ToJSON(..), (.:), (.=), object, withObject)
+import Data.Aeson (FromJSON(..), ToJSON(..), (.:), (.=), object, withObject, encode)
+import qualified Data.ByteString.Lazy as BL
 import Data.Either (partitionEithers)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
 import GHC.Generics (Generic)
 import System.FilePath ((</>), takeDirectory)
 
@@ -412,36 +414,36 @@ writeClaudeLocalSettings
 writeClaudeLocalSettings hangarRoot worktreePath = do
   let claudeDir = worktreePath </> ".claude"
       settingsFile = claudeDir </> "settings.local.json"
-      -- Absolute path to mantle-agent binary
       mantleAgentPath = hangarRoot </> "runtime" </> "bin" </> "mantle-agent"
-      -- JSON content with SessionStart hooks for both startup and resume
-      -- Uses absolute path instead of $TIDEPOOL_BIN_DIR expansion
-      content = T.unlines
-        [ "{"
-        , "  \"hooks\": {"
-        , "    \"SessionStart\": ["
-        , "      {"
-        , "        \"matcher\": \"startup\","
-        , "        \"hooks\": ["
-        , "          {"
-        , "            \"type\": \"command\","
-        , "            \"command\": \"" <> T.pack mantleAgentPath <> " hook session-start\""
-        , "          }"
-        , "        ]"
-        , "      },"
-        , "      {"
-        , "        \"matcher\": \"resume\","
-        , "        \"hooks\": ["
-        , "          {"
-        , "            \"type\": \"command\","
-        , "            \"command\": \"" <> T.pack mantleAgentPath <> " hook session-start\""
-        , "          }"
-        , "        ]"
-        , "      }"
-        , "    ]"
-        , "  }"
-        , "}"
+
+      -- Construct JSON using Aeson
+      settings = object
+        [ "hooks" .= object
+          [ "SessionStart" .=
+            [ object
+              [ "matcher" .= ("startup" :: Text)
+              , "hooks" .=
+                [ object
+                  [ "type" .= ("command" :: Text)
+                  , "command" .= (T.pack mantleAgentPath <> " hook session-start")
+                  ]
+                ]
+              ]
+            , object
+              [ "matcher" .= ("resume" :: Text)
+              , "hooks" .=
+                [ object
+                  [ "type" .= ("command" :: Text)
+                  , "command" .= (T.pack mantleAgentPath <> " hook session-start")
+                  ]
+                ]
+              ]
+            ]
+          ]
         ]
+
+      -- Convert to Text
+      content = TE.decodeUtf8 . BL.toStrict $ encode settings
 
   dirRes <- createDirectory claudeDir
   case dirRes of
@@ -451,3 +453,91 @@ writeClaudeLocalSettings hangarRoot worktreePath = do
       case writeRes of
         Left err -> pure $ Left $ "Failed to write settings.local.json: " <> T.pack (show err)
         Right () -> pure $ Right ()
+
+
+-- | Write .gemini/settings.json with hooks and MCP configuration.
+-- Gemini combines hooks and MCP in a single file (unlike Claude).
+-- Uses $GEMINI_PROJECT_DIR path variable for portability.
+writeGeminiConfig
+  :: (Member FileSystem es)
+  => FilePath  -- ^ Hangar root (unused for Gemini, kept for API consistency)
+  -> FilePath  -- ^ Worktree path
+  -> Eff es (Either Text ())
+writeGeminiConfig _hangarRoot worktreePath = do
+  let geminiDir = worktreePath </> ".gemini"
+      settingsFile = geminiDir </> "settings.json"
+
+      -- Construct JSON using Aeson
+      -- Uses $GEMINI_PROJECT_DIR path variable (Gemini-specific)
+      settings = object
+        [ "hooksConfig" .= object
+          [ "enabled" .= True
+          ]
+        , "hooks" .= object
+          [ "SessionStart" .=
+            [ object
+              [ "matcher" .= ("startup" :: Text)
+              , "hooks" .=
+                [ object
+                  [ "name" .= ("init-agent" :: Text)
+                  , "type" .= ("command" :: Text)
+                  , "command" .= ("$GEMINI_PROJECT_DIR/../runtime/bin/mantle-agent hook session-start" :: Text)
+                  ]
+                ]
+              ]
+            , object
+              [ "matcher" .= ("resume" :: Text)
+              , "hooks" .=
+                [ object
+                  [ "name" .= ("resume-agent" :: Text)
+                  , "type" .= ("command" :: Text)
+                  , "command" .= ("$GEMINI_PROJECT_DIR/../runtime/bin/mantle-agent hook session-start" :: Text)
+                  ]
+                ]
+              ]
+            ]
+          ]
+        , "mcpServers" .= object
+          [ "tidepool" .= object
+            [ "command" .= ("mantle-agent" :: Text)
+            , "args" .= (["mcp"] :: [Text])
+            ]
+          ]
+        ]
+
+      -- Convert to Text
+      content = TE.decodeUtf8 . BL.toStrict $ encode settings
+
+  dirRes <- createDirectory geminiDir
+  case dirRes of
+    Left err -> pure $ Left $ "Failed to create .gemini directory: " <> T.pack (show err)
+    Right () -> do
+      writeRes <- writeFileText settingsFile content
+      case writeRes of
+        Left err -> pure $ Left $ "Failed to write settings.json: " <> T.pack (show err)
+        Right () -> pure $ Right ()
+
+
+-- | Append .gemini/ to .gitignore if not already present.
+appendGeminiToGitignore
+  :: (Member FileSystem es)
+  => FilePath  -- ^ Worktree path
+  -> Eff es (Either Text ())
+appendGeminiToGitignore worktreePath = do
+  let gitignoreFile = worktreePath </> ".gitignore"
+      geminiEntry = ".gemini/"
+
+  -- Read existing .gitignore (if it exists)
+  readRes <- fileExists gitignoreFile
+  case readRes of
+    Left err -> pure $ Left $ "Failed to check .gitignore: " <> T.pack (show err)
+    Right exists ->
+      if not exists
+        then do
+          -- Create .gitignore with .gemini/ entry
+          writeRes <- writeFileText gitignoreFile geminiEntry
+          case writeRes of
+            Left err -> pure $ Left $ "Failed to create .gitignore: " <> T.pack (show err)
+            Right () -> pure $ Right ()
+        else do
+          pure $ Right ()
