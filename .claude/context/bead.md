@@ -1,31 +1,82 @@
-# Task: Fix: Use Unix Domain Sockets for subagent process-compose to eliminate port 8080 conflicts
+# Task: MCP tool: get_copilot_feedback - outstanding review items
 
-**ID:** tidepool-l8p
+**ID:** tidepool-ddn
 **Status:** open
 **Priority:** 1
-**Branch:** bd-l8p/fix-use-unix-domain-sockets-for-subagent-processcompose-to-eliminate-port-8080-conflicts
+**Branch:** bd-ddn/mcp-tool-getcopilotfeedback-outstanding-review-items
 
 ## Description
 
-Disable HTTP API in worktree process-compose instances and use Unix Domain Sockets exclusively, eliminating TCP port 8080 conflicts when multiple process-compose instances run in parallel worktrees
+## Vision: Consolidate PR Feedback into Single MCP Call
 
-## Context
-When spawning multiple agents, each worktree's process-compose tries to bind to TCP port 8080 for its HTTP API, causing "address already in use" errors. The Hub & Spoke architecture supports Unix Domain Sockets natively via PC_NO_SERVER, PC_USE_UDS, and PC_SOCKET_PATH environment variables.
+Agents currently make 3-4 bash invocations to piece together Copilot feedback:
+```bash
+gh pr view 286 --json reviews
+gh pr view 286 --json comments  
+gh api repos/owner/repo/pulls/286/comments
+gh api repos/owner/repo/pulls/286/reviews/123/comments
+```
 
-**Solution:**
-1. Set PC_NO_SERVER=true and PC_USE_UDS=true in subagent process-compose environment
-2. Set PC_SOCKET_PATH=./.tidepool/sockets/process-compose.sock for predictable socket paths
-3. Update start-augmented.sh stale session detection to use `process-compose info -u <socket>` instead of `curl http://localhost:8080`
-4. Update any other health checks to verify socket existence with `test -S`
+This is slow, token-expensive, and error-prone. One MCP call should return everything.
 
-**Benefits:**
-- Zero port conflicts
-- Lower latency (UDS vs TCP loopback)
-- Fully isolated per-worktree state
-- Aligns with existing control-server/tui-sidebar socket architecture
+## Target Response
 
-## Scope Hint
-Medium - configuration + health check update
+```json
+{
+  "pr_number": 286,
+  "copilot": {
+    "pending": [
+      {
+        "id": "IC_kwDOABC123",
+        "path": "src/Handler.hs",
+        "line": 42,
+        "body": "Consider using pattern matching here",
+        "category": "suggestion",
+        "in_reply_to": null
+      }
+    ],
+    "resolved": [...]
+  },
+  "humans": {
+    "pending": [...],
+    "resolved": [...]
+  },
+  "summary": {
+    "copilot_pending": 3,
+    "copilot_resolved": 2,
+    "human_pending": 0,
+    "human_resolved": 1
+  }
+}
+```
+
+## Key Features
+
+1. **Single call** - replaces 3-4 gh invocations
+2. **Grouped by author type** - Copilot vs humans
+3. **Pending vs resolved** - know what still needs addressing
+4. **Inline code comments** - not just PR-level reviews
+5. **Thread context** - in_reply_to for conversation threads
+
+## Implementation
+
+Extend existing `pr_review_status` or create new graph:
+- Use GitHub effect to fetch all comment types
+- Filter/group by author (copilot, github-actions[bot], humans)
+- Track resolved state via GitHub's resolved conversation API
+- Return structured, actionable format
+
+## Existing Code
+
+`pr_review_status` in PrReviewStatus.hs already fetches comments grouped by author. May be able to extend rather than replace.
+
+## Acceptance Criteria
+
+- [ ] Single MCP call returns all PR feedback
+- [ ] Distinguishes Copilot vs human comments
+- [ ] Tracks pending vs resolved state
+- [ ] Includes inline code comments (not just review-level)
+- [ ] Summary counts for quick triage
 
 ## Dependencies
 
@@ -34,6 +85,6 @@ None
 ## Workflow
 
 1. Implement changes
-2. Commit: [tidepool-l8p] <description>
-3. Push: git push -u origin bd-l8p/fix-use-unix-domain-sockets-for-subagent-processcompose-to-eliminate-port-8080-conflicts
-4. File PR: gh pr create --title "[tidepool-l8p] Fix: Use Unix Domain Sockets for subagent process-compose to eliminate port 8080 conflicts"
+2. Commit: [tidepool-ddn] <description>
+3. Push: git push -u origin bd-ddn/mcp-tool-getcopilotfeedback-outstanding-review-items
+4. File PR: Call the 'file_pr' tool (do NOT use gh cli manually)
