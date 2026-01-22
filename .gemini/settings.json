@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "startup": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "mantle-agent hook session-start --runtime=gemini"
+          }
+        ]
+      }
+    ]
+  }
+}
