@@ -624,7 +624,7 @@ handleFilePRTool logger _lspSession reqId args = do
       pure $ mcpToolError reqId InvalidInput $ "Invalid file_pr arguments: " <> T.pack err
 
     Success fpArgs -> do
-      logDebug logger $ "  bead_id=" <> T.pack (show fpArgs.fpaBeadId)
+      logDebug logger $ "  testing=" <> fpArgs.fpaTesting
 
       resultOrErr <- try $ runM
         $ runLog Debug

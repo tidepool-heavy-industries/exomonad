@@ -2,6 +2,7 @@
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE OverloadedRecordDot #-}
+{-# LANGUAGE TemplateHaskell #-}
 
 module Tidepool.Control.ExoTools.Internal
   ( ExoStatusResult(..)
@@ -16,12 +17,16 @@ import Control.Applicative ((<|>))
 import Control.Monad.Freer (Eff, Member)
 import Data.Aeson (ToJSON(..), object, (.=))
 import Data.Char (isAlphaNum, isSpace)
-import Data.List (find, sortOn, take)
-import Data.Maybe (fromMaybe)
+import Data.List (find, sortOn)
 import Data.Ord (Down(..))
 import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
+
+import Text.Parsec.Pos (SourcePos)
+
+import Tidepool.Control.ExoTools.FilePR.Context (PRBodyContext(..), PRDepContext(..))
+import Tidepool.Graph.Template (TypedTemplate, typedTemplateFile, runTypedTemplate)
 
 import Tidepool.Effects.BD
   ( BD
@@ -174,23 +179,26 @@ slugify title =
      then "untitled"
      else T.intercalate "-" $ map T.toLower parts
 
--- | Format PR body from bead info.
-formatPRBody :: BeadInfo -> Text
-formatPRBody bead = T.unlines $
-  [ "Closes " <> bead.biId
-  , ""
-  , "## Description"
-  , fromMaybe "(No description)" bead.biDescription
-  , ""
-  ] ++
-  (if null bead.biDependencies
-   then []
-   else ["## Dependencies", ""] ++ map formatDep bead.biDependencies ++ [""]) ++
-  (if null bead.biDependents
-   then []
-   else ["## Dependents", ""] ++ map formatDep bead.biDependents ++ [""])
+-- | Compiled PR body template.
+prBodyTemplate :: TypedTemplate PRBodyContext SourcePos
+prBodyTemplate = $(typedTemplateFile ''PRBodyContext "templates/hook/pr-body.jinja")
+
+-- | Format PR body from bead info with testing and compromises sections.
+formatPRBody :: BeadInfo -> Text -> Maybe Text -> Text
+formatPRBody bead testing compromises = runTypedTemplate ctx prBodyTemplate
   where
-    formatDep dep = "  → " <> dep.diId <> ": " <> dep.diTitle
+    ctx = PRBodyContext
+      { bead_id = bead.biId
+      , description = bead.biDescription
+      , testing = testing
+      , compromises = compromises
+      , dependencies = map toDep bead.biDependencies
+      , dependents = map toDep bead.biDependents
+      }
+    toDep dep = PRDepContext
+      { id = dep.diId
+      , title = dep.diTitle
+      }
 
 -- | Extract bead ID from PR title.
 -- Pattern: [tidepool-XXX]

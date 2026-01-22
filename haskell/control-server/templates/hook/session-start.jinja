@@ -1,87 +1,19 @@
-# 🚨 SESSION CLOSE PROTOCOL
-
-**CRITICAL**: Before saying "done" or "complete", run this checklist:
-
-```
-git status → git add → bd sync → git commit → bd sync → git push
-```
-
-Work is not done until pushed.
 {% if bead is defined %}
-=========================================================================
-                              ACTIVE BEAD
-=========================================================================
-
-**{{ bead.id }}**: {{ bead.title }}
-
-| Field       | Value              |
-|-------------|--------------------|
-| Status      | {{ bead.status }}  |
-| Priority    | P{{ bead.priority }} |
-| Type        | {{ bead.type_ }}   |
-{% if bead.owner %}| Owner       | {{ bead.owner }}   |{% endif %}
-| Created     | {{ bead.created }} |
-| Updated     | {{ bead.updated }} |
-
-## Description
+# {{ bead.id }}: {{ bead.title }}
 
 {{ bead.description }}
-
 {% if bead.depends_on %}
-## Blocked By (Dependencies)
 
+## Dependencies
 {% for dep in bead.depends_on %}
-- **{{ dep.dep_id }}**: {{ dep.dep_title }} (P{{ dep.dep_priority }})
+- {{ dep.dep_title }}
 {% endfor %}
 {% endif %}
 
-{% if bead.blocks %}
-## Blocks (Dependents)
-
-{% for blocked in bead.blocks %}
-- **{{ blocked.dep_id }}**: {{ blocked.dep_title }} (P{{ blocked.dep_priority }})
-{% endfor %}
-{% endif %}
-
-## Workflow
-
-1. **READ** the acceptance criteria carefully
-2. **EXPLORE** relevant code before making changes
-3. **IMPLEMENT** incrementally, testing as you go
-4. **COMMIT** with message: `[{{ bead.id }}] <description>`
-5. **PUSH** and file PR:
-   ```bash
-   git push -u origin {{ branch | default("(unknown)") }}
-   gh pr create --repo tidepool-heavy-industries/tidepool --head {{ branch | default("(unknown)") }} \
-     --title "[{{ bead.id }}] <title>" --body "Closes {{ bead.id }}"
-   ```
-
-## Done When
-
-- [ ] All acceptance criteria satisfied
-- [ ] Code compiles: `cabal build all`
-- [ ] Tests pass (if applicable)
-- [ ] Committed to branch
-- [ ] PR filed
-
-After PR is merged, close bead:
-```bash
-bd close {{ bead.id }} --reason "Merged: <PR URL>"
+## Exit
+```
+git add <files> && git commit -m "[{{ bead.id }}] <description>" && git push
 ```
 {% else %}
-=========================================================================
-                           NO ACTIVE BEAD
-=========================================================================
-
-You are not on a bd-* branch. To start working on a bead:
-
-```bash
-bd ready                    # Find available work
-bd show <id>                # Review details
-bd worktree create <id>     # Create worktree and switch
-```
-
-Current location:
-- Branch: {{ branch | default("(unknown)") }}
-- Directory: {{ cwd }}
+Branch: {{ branch | default("(unknown)") }}
 {% endif %}

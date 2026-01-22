@@ -13,6 +13,10 @@ data-files:
     templates/scout/*.jinja
     templates/hook/*.jinja
 
+extra-source-files:
+    templates/scout/*.jinja
+    templates/hook/*.jinja
+
 common warnings
     ghc-options: -Wall -Wincomplete-patterns -Wredundant-constraints -Wunused-packages
 
@@ -30,6 +34,8 @@ library
         -- Hook implementations
         Tidepool.Control.Hook.SessionStart
         Tidepool.Control.Hook.SessionStart.Context
+        Tidepool.Control.Hook.Stop
+        Tidepool.Control.Hook.Stop.Context
         Tidepool.Control.LSPTools
         Tidepool.Control.PMTools
         Tidepool.Control.PMReviewDAG
@@ -44,6 +50,7 @@ library
         Tidepool.Control.ExoTools.PreCommitCheck
         Tidepool.Control.ExoTools.SpawnAgents
         Tidepool.Control.ExoTools.FilePR
+        Tidepool.Control.ExoTools.FilePR.Context
         Tidepool.Control.ExoTools.BeadToPr
         Tidepool.Control.ExoTools.PrToBead
         Tidepool.Control.ExoTools.PrReviewStatus

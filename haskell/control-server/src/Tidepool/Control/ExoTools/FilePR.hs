@@ -15,10 +15,8 @@ module Tidepool.Control.ExoTools.FilePR
   , FilePRResult(..)
   ) where
 
-import Control.Applicative ((<|>))
 import Control.Monad.Freer (Eff, Member)
-import Data.Aeson (FromJSON(..), ToJSON(..), (.:?), (.=), object, withObject)
-import Data.Maybe (fromMaybe)
+import Data.Aeson (FromJSON(..), ToJSON(..), (.:), (.:?), (.=), object, withObject)
 import Data.Text (Text)
 import GHC.Generics (Generic)
 
@@ -34,27 +32,28 @@ import Tidepool.Schema (HasJSONSchema(..), objectSchema, emptySchema, SchemaType
 import Tidepool.Control.ExoTools.Internal (parseBeadId, slugify, formatPRBody)
 
 -- | Arguments for file_pr tool.
+-- Bead ID and title are inferred from the branch - agent provides context.
 data FilePRArgs = FilePRArgs
-  { fpaBeadId :: Maybe Text  -- ^ Optional bead ID. If not provided, inferred from branch.
-  , fpaTitle  :: Maybe Text  -- ^ Optional PR title. If not provided, derived from bead.
+  { fpaTesting     :: Text        -- ^ Required: How was this tested?
+  , fpaCompromises :: Maybe Text  -- ^ Optional: Tradeoffs or shortcuts taken
   }
   deriving stock (Show, Eq, Generic)
 
 instance HasJSONSchema FilePRArgs where
   jsonSchema = objectSchema
-    [ ("bead_id", describeField "bead_id" "Optional bead ID (e.g. tidepool-huj). If omitted, inferred from branch name." (emptySchema TString))
-    , ("title", describeField "title" "Optional PR title. If omitted, derived from bead title." (emptySchema TString))
+    [ ("testing", describeField "testing" "How was this tested? What scenarios were verified?" (emptySchema TString))
+    , ("compromises", describeField "compromises" "Any tradeoffs, shortcuts, or known limitations?" (emptySchema TString))
     ]
-    []
+    ["testing"]  -- testing is required
 
 instance FromJSON FilePRArgs where
   parseJSON = withObject "FilePRArgs" $ \v ->
-    FilePRArgs <$> v .:? "bead_id" <*> v .:? "title"
+    FilePRArgs <$> v .: "testing" <*> v .:? "compromises"
 
 instance ToJSON FilePRArgs where
   toJSON args = object
-    [ "bead_id" .= fpaBeadId args
-    , "title" .= fpaTitle args
+    [ "testing" .= fpaTesting args
+    , "compromises" .= fpaCompromises args
     ]
 
 -- | Result of file_pr tool.
@@ -101,6 +100,7 @@ filePRHandlers = FilePRGraph
   }
 
 -- | Core logic for file_pr.
+-- Bead ID and title inferred from branch. Agent provides testing/compromises.
 filePRLogic
   :: (Member BD es, Member Git es, Member GitHub es)
   => FilePRArgs
@@ -109,15 +109,14 @@ filePRLogic args = do
   -- 1. Get Worktree/Git info
   mWt <- getWorktreeInfo
 
-  -- 2. Determine Bead ID
-  let branchBeadId = case mWt of
+  -- 2. Determine Bead ID from branch
+  let mBeadId = case mWt of
         Just wt -> parseBeadId wt.wiBranch
         Nothing -> Nothing
-      mTargetBeadId = args.fpaBeadId <|> branchBeadId
 
-  case mTargetBeadId of
+  case mBeadId of
     Nothing ->
-      pure $ gotoExit $ FilePRResult Nothing (Just "Could not determine bead ID. Please provide bead_id argument.")
+      pure $ gotoExit $ FilePRResult Nothing (Just "Not on a bead branch. file_pr requires bd-{id}/* branch naming.")
     Just bid -> do
       -- 3. Get Bead Info
       mBead <- getBead bid
@@ -126,14 +125,12 @@ filePRLogic args = do
           pure $ gotoExit $ FilePRResult Nothing (Just $ "Bead " <> bid <> " not found.")
         Just bead -> do
           -- 4. Prepare PR Spec
-          -- Derive branch name if worktree info unavailable
-          let derivedBranch = "bd-" <> bid <> "/" <> slugify bead.biTitle
-              headBranch = case mWt of
+          let headBranch = case mWt of
                 Just wt -> wt.wiBranch
-                Nothing -> derivedBranch
+                Nothing -> "bd-" <> bid <> "/" <> slugify bead.biTitle
 
-          let title = fromMaybe ("[" <> bid <> "] " <> bead.biTitle) args.fpaTitle
-              body = formatPRBody bead
+          let title = "[" <> bid <> "] " <> bead.biTitle
+              body = formatPRBody bead args.fpaTesting args.fpaCompromises
               repo = Repo "tidepool-heavy-industries/tidepool"
               spec = PRCreateSpec
                 { prcsRepo = repo
