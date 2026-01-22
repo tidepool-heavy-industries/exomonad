@@ -18,11 +18,14 @@ where
 
 import Control.Monad (forM)
 import Control.Monad.Freer (Eff, Member)
-import Data.Aeson (FromJSON(..), ToJSON(..), (.:), (.:?), (.=), object, withObject)
+import Data.Aeson (FromJSON(..), ToJSON(..), (.:), (.:?), (.=), object, withObject, encode)
+import qualified Data.Aeson as Aeson
+import qualified Data.ByteString.Lazy as BL
 import Data.Either (partitionEithers)
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, catMaybes)
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
 import GHC.Generics (Generic)
 import System.FilePath ((</>), takeDirectory)
 
@@ -30,7 +33,7 @@ import Tidepool.Effects.BD (BD, BeadInfo(..), BeadStatus(..), DependencyInfo(..)
 import Tidepool.Effects.Env (Env, getEnv)
 import Tidepool.Effects.Git (Git, WorktreeInfo(..), getWorktreeInfo)
 import Tidepool.Effects.Worktree (Worktree, WorktreeSpec(..), WorktreePath(..), createWorktree)
-import Tidepool.Effects.FileSystem (FileSystem, createDirectory, writeFileText, copyFile, createSymlink, fileExists, directoryExists)
+import Tidepool.Effects.FileSystem (FileSystem, createDirectory, writeFileText, copyFile, createSymlink, fileExists, directoryExists, readFileText)
 import Tidepool.Effects.Zellij (Zellij, TabConfig(..), TabId(..), checkZellijEnv, newTab)
 import Tidepool.Graph.Generic (AsHandler, type (:-))
 import Tidepool.Graph.Generic.Core (EntryNode, ExitNode, LogicNode)
@@ -292,7 +295,7 @@ processBead mHangarRoot repoRoot wtBaseDir backend shortId = do
                         Left err -> pure $ Left (shortId, T.pack (show err))
                         Right (WorktreePath path) -> do
                           -- b. Bootstrap .tidepool/ directory structure
-                          bootstrapRes <- bootstrapTidepool mHangarRoot repoRoot path
+                          bootstrapRes <- bootstrapTidepool mHangarRoot repoRoot path backend
                           case bootstrapRes of
                             Left errMsg -> pure $ Left (shortId, "Worktree created but bootstrap failed: " <> errMsg)
                             Right () -> do
@@ -342,8 +345,9 @@ bootstrapTidepool
   => Maybe FilePath  -- ^ Hangar root (for templates)
   -> FilePath        -- ^ Repo root (for symlink source)
   -> FilePath        -- ^ Worktree path
+  -> Text            -- ^ Backend ("claude" or "gemini")
   -> Eff es (Either Text ())
-bootstrapTidepool mHangarRoot repoRoot worktreePath = do
+bootstrapTidepool mHangarRoot repoRoot worktreePath backend = do
   -- Create .tidepool directory structure.
   -- These MUST exist for process-compose log tailing and control sockets.
   let socketsDir = worktreePath </> ".tidepool" </> "sockets"
@@ -381,7 +385,19 @@ bootstrapTidepool mHangarRoot repoRoot worktreePath = do
                   settingsRes <- writeClaudeLocalSettings hr worktreePath
                   case settingsRes of
                     Left err -> pure $ Left $ "Failed to write Claude settings: " <> err
-                    Right () -> pure $ Right ()
+                    Right () -> do
+                      -- Write Gemini config if backend is "gemini"
+                      geminiRes <- if backend == "gemini"
+                                     then writeGeminiConfig hr worktreePath
+                                     else pure $ Right ()
+                      case geminiRes of
+                        Left err -> pure $ Left $ "Failed to write Gemini config: " <> err
+                        Right () -> do
+                          -- Update .gitignore for both backends
+                          gitignoreRes <- appendBackendToGitignore worktreePath
+                          case gitignoreRes of
+                            Left err -> pure $ Left $ "Failed to update .gitignore: " <> err
+                            Right () -> pure $ Right ()
 
 
 -- | Write bead context to .claude/context/bead.md.
@@ -425,6 +441,29 @@ writeEnvFile worktreePath envVars = do
         Right () -> pure $ Right ()
 
 
+-- | Common helper for writing backend settings files.
+-- Reduces duplication between Claude and Gemini config generation.
+writeBackendSettings
+  :: (Member FileSystem es)
+  => FilePath       -- ^ Directory to create (e.g., ".claude", ".gemini")
+  -> FilePath       -- ^ Settings file path
+  -> Aeson.Value    -- ^ JSON settings object
+  -> Text           -- ^ Directory name for error messages
+  -> Text           -- ^ File name for error messages
+  -> Eff es (Either Text ())
+writeBackendSettings configDir settingsFile settings dirName fileName = do
+  let content = TE.decodeUtf8 . BL.toStrict $ encode settings
+
+  dirRes <- createDirectory configDir
+  case dirRes of
+    Left err -> pure $ Left $ "Failed to create " <> dirName <> " directory: " <> T.pack (show err)
+    Right () -> do
+      writeRes <- writeFileText settingsFile content
+      case writeRes of
+        Left err -> pure $ Left $ "Failed to write " <> fileName <> ": " <> T.pack (show err)
+        Right () -> pure $ Right ()
+
+
 -- | Write .claude/settings.local.json with SessionStart hooks.
 -- This bypasses FSWatcher issues with project-scope settings in worktrees.
 -- Uses absolute path to mantle-agent (no environment variable dependency).
@@ -436,42 +475,126 @@ writeClaudeLocalSettings
 writeClaudeLocalSettings hangarRoot worktreePath = do
   let claudeDir = worktreePath </> ".claude"
       settingsFile = claudeDir </> "settings.local.json"
-      -- Absolute path to mantle-agent binary
       mantleAgentPath = hangarRoot </> "runtime" </> "bin" </> "mantle-agent"
-      -- JSON content with SessionStart hooks for both startup and resume
-      -- Uses absolute path instead of $TIDEPOOL_BIN_DIR expansion
-      content = T.unlines
-        [ "{"
-        , "  \"hooks\": {"
-        , "    \"SessionStart\": ["
-        , "      {"
-        , "        \"matcher\": \"startup\","
-        , "        \"hooks\": ["
-        , "          {"
-        , "            \"type\": \"command\","
-        , "            \"command\": \"" <> T.pack mantleAgentPath <> " hook session-start\""
-        , "          }"
-        , "        ]"
-        , "      },"
-        , "      {"
-        , "        \"matcher\": \"resume\","
-        , "        \"hooks\": ["
-        , "          {"
-        , "            \"type\": \"command\","
-        , "            \"command\": \"" <> T.pack mantleAgentPath <> " hook session-start\""
-        , "          }"
-        , "        ]"
-        , "      }"
-        , "    ]"
-        , "  }"
-        , "}"
+
+      settings = object
+        [ "hooks" .= object
+          [ "SessionStart" .=
+            [ object
+              [ "matcher" .= ("startup" :: Text)
+              , "hooks" .=
+                [ object
+                  [ "type" .= ("command" :: Text)
+                  , "command" .= (T.pack mantleAgentPath <> " hook session-start")
+                  ]
+                ]
+              ]
+            , object
+              [ "matcher" .= ("resume" :: Text)
+              , "hooks" .=
+                [ object
+                  [ "type" .= ("command" :: Text)
+                  , "command" .= (T.pack mantleAgentPath <> " hook session-start")
+                  ]
+                ]
+              ]
+            ]
+          ]
         ]
 
-  dirRes <- createDirectory claudeDir
-  case dirRes of
-    Left err -> pure $ Left $ "Failed to create .claude directory: " <> T.pack (show err)
-    Right () -> do
-      writeRes <- writeFileText settingsFile content
+  writeBackendSettings claudeDir settingsFile settings ".claude" "settings.local.json"
+
+
+-- | Write .gemini/settings.json with hooks and MCP configuration.
+-- Gemini combines hooks and MCP in a single file (unlike Claude).
+-- Uses $GEMINI_PROJECT_DIR path variable for portability.
+writeGeminiConfig
+  :: (Member FileSystem es)
+  => FilePath  -- ^ Hangar root (unused for Gemini, kept for API consistency)
+  -> FilePath  -- ^ Worktree path
+  -> Eff es (Either Text ())
+writeGeminiConfig _hangarRoot worktreePath = do
+  let geminiDir = worktreePath </> ".gemini"
+      settingsFile = geminiDir </> "settings.json"
+
+      settings = object
+        [ "hooksConfig" .= object
+          [ "enabled" .= True
+          ]
+        , "hooks" .= object
+          [ "SessionStart" .=
+            [ object
+              [ "matcher" .= ("startup" :: Text)
+              , "hooks" .=
+                [ object
+                  [ "name" .= ("init-agent" :: Text)
+                  , "type" .= ("command" :: Text)
+                  , "command" .= ("$GEMINI_PROJECT_DIR/../runtime/bin/mantle-agent hook session-start" :: Text)
+                  ]
+                ]
+              ]
+            , object
+              [ "matcher" .= ("resume" :: Text)
+              , "hooks" .=
+                [ object
+                  [ "name" .= ("resume-agent" :: Text)
+                  , "type" .= ("command" :: Text)
+                  , "command" .= ("$GEMINI_PROJECT_DIR/../runtime/bin/mantle-agent hook session-start" :: Text)
+                  ]
+                ]
+              ]
+            ]
+          ]
+        , "mcpServers" .= object
+          [ "tidepool" .= object
+            [ "command" .= ("$GEMINI_PROJECT_DIR/../runtime/bin/mantle-agent" :: Text)
+            , "args" .= (["mcp"] :: [Text])
+            ]
+          ]
+        ]
+
+  writeBackendSettings geminiDir settingsFile settings ".gemini" "settings.json"
+
+-- | Append .claude/ and .gemini/ to .gitignore if not already present.
+-- Ensures both backend directories are gitignored for consistency.
+appendBackendToGitignore
+  :: (Member FileSystem es)
+  => FilePath  -- ^ Worktree path
+  -> Eff es (Either Text ())
+appendBackendToGitignore worktreePath = do
+  let gitignorePath = worktreePath </> ".gitignore"
+
+  -- Read existing .gitignore (or handle non-existent file)
+  readRes <- readFileText gitignorePath
+  case readRes of
+    Left _ -> do
+      -- .gitignore doesn't exist, create it with both entries
+      let content = T.unlines [".claude/", ".gemini/"]
+      writeRes <- writeFileText gitignorePath content
       case writeRes of
-        Left err -> pure $ Left $ "Failed to write settings.local.json: " <> T.pack (show err)
+        Left err -> pure $ Left $ "Failed to create .gitignore: " <> T.pack (show err)
         Right () -> pure $ Right ()
+
+    Right existingContent -> do
+      let lines' = T.lines existingContent
+          hasClaudeEntry = any (\line -> T.strip line == ".claude/") lines'
+          hasGeminiEntry = any (\line -> T.strip line == ".gemini/") lines'
+
+      -- Determine what needs to be added
+      let needsClaudeEntry = not hasClaudeEntry
+          needsGeminiEntry = not hasGeminiEntry
+
+      if not needsClaudeEntry && not needsGeminiEntry
+        then pure $ Right ()  -- Already has both entries
+        else do
+          -- Build list of entries to add
+          let entriesToAdd = catMaybes
+                [ if needsClaudeEntry then Just ".claude/" else Nothing
+                , if needsGeminiEntry then Just ".gemini/" else Nothing
+                ]
+          -- Append missing entries (preserve existing content)
+          let newContent = existingContent <> "\n" <> T.unlines entriesToAdd
+          writeRes <- writeFileText gitignorePath newContent
+          case writeRes of
+            Left err -> pure $ Left $ "Failed to update .gitignore: " <> T.pack (show err)
+            Right () -> pure $ Right ()
