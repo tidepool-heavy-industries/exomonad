@@ -286,8 +286,9 @@ processBead mHangarRoot repoRoot wtBaseDir shortId = do
                                   -- d. Write subagent environment
                                   -- Explicitly set sockets to relative paths to ensure isolation from root instance.
                                   -- Inject HANGAR_ROOT and TIDEPOOL_BIN_DIR to avoid fragile shell discovery.
+                                  -- Launch Claude with --debug --verbose for hook execution visibility
                                   let envVars =
-                                        [ ("SUBAGENT_CMD", "claude")
+                                        [ ("SUBAGENT_CMD", "claude --debug --verbose")
                                         , ("HANGAR_ROOT", T.pack hr)
                                         , ("TIDEPOOL_BIN_DIR", T.pack $ hr </> "runtime" </> "bin")
                                         , ("TIDEPOOL_CONTROL_SOCKET", ".tidepool/sockets/control.sock")
