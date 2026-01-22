@@ -127,20 +127,20 @@ _hangar-root:
     fi
     echo "$HANGAR_ROOT"
 
-# Rebuild runtime binaries from stable tidepool source
+# Rebuild runtime binaries from current repo
 rebuild-runtime:
     #!/usr/bin/env bash
     set -euo pipefail
 
-    # Find Hangar root
+    # Find Hangar root for binary installation
     HANGAR_ROOT=$(just _hangar-root)
-    RUNTIME_SRC="$HANGAR_ROOT/runtime/tidepool"
     RUNTIME_BIN="$HANGAR_ROOT/runtime/bin"
 
+    # Build from current repo directory
+    REPO_ROOT=$(pwd)
+
     echo "── Hangar: $HANGAR_ROOT ──"
-    echo "── Pulling latest from origin/main ──"
-    cd "$RUNTIME_SRC"
-    git pull origin main
+    echo "── Building from current repo: $REPO_ROOT ──"
 
     echo ""
     echo "── Building Haskell (tidepool-control-server) ──"
@@ -148,49 +148,30 @@ rebuild-runtime:
 
     echo ""
     echo "── Building Rust (mantle-agent, tui-sidebar) ──"
-    cd "$RUNTIME_SRC/rust" && cargo build --release -p mantle-agent -p tui-sidebar
+    cd "$REPO_ROOT/rust" && cargo build --release -p mantle-agent -p tui-sidebar
 
     echo ""
     echo "── Installing to $RUNTIME_BIN ──"
+    cd "$REPO_ROOT"
     cp "$(cabal list-bin tidepool-control-server)" "$RUNTIME_BIN/"
-    cp "$RUNTIME_SRC/rust/target/release/mantle-agent" "$RUNTIME_BIN/"
-    cp "$RUNTIME_SRC/rust/target/release/tui-sidebar" "$RUNTIME_BIN/"
+    cp "$REPO_ROOT/rust/target/release/mantle-agent" "$RUNTIME_BIN/"
+    cp "$REPO_ROOT/rust/target/release/tui-sidebar" "$RUNTIME_BIN/"
 
     echo ""
-    echo "✓ Runtime binaries rebuilt:"
+    echo "── Code signing binaries (macOS) ──"
+    codesign -s - --force "$RUNTIME_BIN/tidepool-control-server" 2>/dev/null || true
+    codesign -s - --force "$RUNTIME_BIN/mantle-agent" 2>/dev/null || true
+    codesign -s - --force "$RUNTIME_BIN/tui-sidebar" 2>/dev/null || true
+
+    echo ""
+    echo "✓ Runtime binaries rebuilt from current repo:"
     ls -lh "$RUNTIME_BIN"
 
-# Rebuild runtime without pulling (use current source)
+# Rebuild runtime without signing (deprecated - use rebuild-runtime)
 rebuild-runtime-local:
-    #!/usr/bin/env bash
-    set -euo pipefail
-
-    # Find Hangar root
-    HANGAR_ROOT=$(just _hangar-root)
-    RUNTIME_SRC="$HANGAR_ROOT/runtime/tidepool"
-    RUNTIME_BIN="$HANGAR_ROOT/runtime/bin"
-
-    echo "── Hangar: $HANGAR_ROOT ──"
-    echo "── Building from current source (no pull) ──"
-    cd "$RUNTIME_SRC"
-
-    echo ""
-    echo "── Building Haskell (tidepool-control-server) ──"
-    cabal build tidepool-control-server
-
-    echo ""
-    echo "── Building Rust (mantle-agent, tui-sidebar) ──"
-    cd "$RUNTIME_SRC/rust" && cargo build --release -p mantle-agent -p tui-sidebar
-
-    echo ""
-    echo "── Installing to $RUNTIME_BIN ──"
-    cp "$(cabal list-bin tidepool-control-server)" "$RUNTIME_BIN/"
-    cp "$RUNTIME_SRC/rust/target/release/mantle-agent" "$RUNTIME_BIN/"
-    cp "$RUNTIME_SRC/rust/target/release/tui-sidebar" "$RUNTIME_BIN/"
-
-    echo ""
-    echo "✓ Runtime binaries rebuilt:"
-    ls -lh "$RUNTIME_BIN"
+    @echo "NOTE: rebuild-runtime-local is deprecated. Use 'just rebuild-runtime' instead."
+    @echo "      rebuild-runtime now builds from current repo by default."
+    @just rebuild-runtime
 
 # ─────────────────────────────────────────────────────────────
 # Gemini
