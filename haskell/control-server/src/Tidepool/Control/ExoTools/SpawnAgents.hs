@@ -19,6 +19,7 @@ where
 import Control.Monad (forM)
 import Control.Monad.Freer (Eff, Member)
 import Data.Aeson (FromJSON(..), ToJSON(..), (.:), (.:?), (.=), object, withObject, encode)
+import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Lazy as BL
 import Data.Either (partitionEithers)
 import Data.Maybe (fromMaybe, catMaybes)
