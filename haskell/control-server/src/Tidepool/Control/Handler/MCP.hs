@@ -210,7 +210,7 @@ handleMcpTool logger config lspSession maybeTuiHandle traceCtx reqId toolName ar
 
       _ -> do
         logError logger $ "  (unknown tool)"
-        pure $ mcpToolError reqId $
+        pure $ mcpToolError reqId InvalidInput $
           "Tool not found: " <> toolName <>
           ". Available tools: find_callers, find_callees, show_fields, show_constructors, teach-graph, exo_status, exo_complete, exo_reconstitute, pre_commit_check, spawn_agents, file_pr, pm_approve_expansion, pm_prioritize, pm_propose"
 
@@ -222,7 +222,7 @@ handlePmPrioritizeTool logger reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
-      pure $ mcpToolError reqId $ "Invalid pm_prioritize arguments: " <> T.pack err
+      pure $ mcpToolError reqId InvalidInput $ "Invalid pm_prioritize arguments: " <> T.pack err
 
     Success ppArgs -> do
       logDebug logger $ "  updates=" <> T.pack (show $ length $ ppaUpdates ppArgs)
@@ -235,7 +235,7 @@ handlePmPrioritizeTool logger reqId args = do
       case resultOrErr of
         Left (e :: SomeException) -> do
           logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
-          pure $ mcpToolError reqId $ "pm_prioritize failed: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId ExternalFailure $ "pm_prioritize failed: " <> T.pack (displayException e)
 
         Right result -> do
           let successes = filter priSuccess $ pprResults result
@@ -250,7 +250,7 @@ handlePreCommitCheckTool logger reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
-      pure $ mcpToolError reqId $ "Invalid pre_commit_check arguments: " <> T.pack err
+      pure $ mcpToolError reqId InvalidInput $ "Invalid pre_commit_check arguments: " <> T.pack err
 
     Success pccArgs -> do
       logDebug logger $ "  recipe=" <> T.pack (show pccArgs.pccaRecipe)
@@ -264,7 +264,7 @@ handlePreCommitCheckTool logger reqId args = do
       case resultOrErr of
         Left (e :: SomeException) -> do
           logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
-          pure $ mcpToolError reqId $ "pre_commit_check failed: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId ExternalFailure $ "pre_commit_check failed: " <> T.pack (displayException e)
 
         Right result -> do
           if result.pccrSuccess
@@ -280,7 +280,7 @@ handleSpawnAgentsTool logger _lspSession reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
-      pure $ mcpToolError reqId $ "Invalid spawn_agents arguments: " <> T.pack err
+      pure $ mcpToolError reqId InvalidInput $ "Invalid spawn_agents arguments: " <> T.pack err
 
     Success saArgs -> do
       logDebug logger $ "  bead_ids=" <> T.intercalate "," saArgs.saaBeadIds
@@ -302,7 +302,7 @@ handleSpawnAgentsTool logger _lspSession reqId args = do
       case resultOrErr of
         Left (e :: SomeException) -> do
           logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
-          pure $ mcpToolError reqId $ "spawn_agents failed: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId ExternalFailure $ "spawn_agents failed: " <> T.pack (displayException e)
 
         Right result -> do
           logInfo logger $ "[MCP:" <> reqId <> "] Spawned " <> T.pack (show $ length $ sarWorktrees result) <> " worktrees"
@@ -317,7 +317,7 @@ handleExoStatusTool logger _lspSession reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
-      pure $ mcpToolError reqId $ "Invalid exo_status arguments: " <> T.pack err
+      pure $ mcpToolError reqId InvalidInput $ "Invalid exo_status arguments: " <> T.pack err
 
     Success esArgs -> do
       logDebug logger $ "  bead_id=" <> T.pack (show esArgs.esaBeadId)
@@ -333,7 +333,7 @@ handleExoStatusTool logger _lspSession reqId args = do
       case resultOrErr of
         Left (e :: SomeException) -> do
           logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
-          pure $ mcpToolError reqId $ "exo_status failed: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId ExternalFailure $ "exo_status failed: " <> T.pack (displayException e)
 
         Right result -> do
           logInfo logger $ "[MCP:" <> reqId <> "] Context retrieved successfully"
@@ -348,7 +348,7 @@ handleExoCompleteTool logger _lspSession reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
-      pure $ mcpToolError reqId $ "Invalid exo_complete arguments: " <> T.pack err
+      pure $ mcpToolError reqId InvalidInput $ "Invalid exo_complete arguments: " <> T.pack err
 
     Success ecArgs -> do
       logDebug logger $ "  bead_id=" <> T.pack (show ecArgs.ecaBeadId)
@@ -363,7 +363,7 @@ handleExoCompleteTool logger _lspSession reqId args = do
       case resultOrErr of
         Left (e :: SomeException) -> do
           logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
-          pure $ mcpToolError reqId $ "exo_complete failed: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId ExternalFailure $ "exo_complete failed: " <> T.pack (displayException e)
 
         Right result -> do
           logInfo logger $ "[MCP:" <> reqId <> "] Bead " <> result.ecrBeadId <> " completed"
@@ -378,7 +378,7 @@ handleExoReconstituteTool logger _lspSession reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
-      pure $ mcpToolError reqId $ "Invalid exo_reconstitute arguments: " <> T.pack err
+      pure $ mcpToolError reqId InvalidInput $ "Invalid exo_reconstitute arguments: " <> T.pack err
 
     Success erArgs -> do
       logDebug logger $ "  bead_id=" <> T.pack (show erArgs.eraBeadId)
@@ -394,7 +394,7 @@ handleExoReconstituteTool logger _lspSession reqId args = do
       case resultOrErr of
         Left (e :: SomeException) -> do
           logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
-          pure $ mcpToolError reqId $ "exo_reconstitute failed: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId ExternalFailure $ "exo_reconstitute failed: " <> T.pack (displayException e)
 
         Right result -> do
           logInfo logger $ "[MCP:" <> reqId <> "] Beads synced and context refreshed successfully"
@@ -500,7 +500,7 @@ handleFindCallersTool logger lspSession maybeTuiHandle reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
-      pure $ mcpToolError reqId $ "Invalid find_callers arguments: " <> T.pack err
+      pure $ mcpToolError reqId InvalidInput $ "Invalid find_callers arguments: " <> T.pack err
 
     Success fcArgs -> do
       logDebug logger $ "  name=" <> fcaName fcArgs
@@ -515,7 +515,7 @@ handleFindCallersTool logger lspSession maybeTuiHandle reqId args = do
       case resultOrErr of
         Left (e :: SomeException) -> do
           logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
-          pure $ mcpToolError reqId $ "find_callers failed: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId ExternalFailure $ "find_callers failed: " <> T.pack (displayException e)
 
         Right result -> do
           logInfo logger $ "[MCP:" <> reqId <> "] Found " <> T.pack (show $ length $ fcrCallSites result) <> " call sites"
@@ -531,7 +531,7 @@ handleFindCalleesTool logger lspSession maybeTuiHandle reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
-      pure $ mcpToolError reqId $ "Invalid find_callees arguments: " <> T.pack err
+      pure $ mcpToolError reqId InvalidInput $ "Invalid find_callees arguments: " <> T.pack err
 
     Success fceArgs -> do
       logDebug logger $ "  name=" <> fceName fceArgs
@@ -546,7 +546,7 @@ handleFindCalleesTool logger lspSession maybeTuiHandle reqId args = do
       case resultOrErr of
         Left (e :: SomeException) -> do
           logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
-          pure $ mcpToolError reqId $ "find_callees failed: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId ExternalFailure $ "find_callees failed: " <> T.pack (displayException e)
 
         Right result -> do
           logInfo logger $ "[MCP:" <> reqId <> "] Found " <> T.pack (show $ length $ fceCallees result) <> " callees"
@@ -561,7 +561,7 @@ handleShowFieldsTool logger lspSession maybeTuiHandle reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
-      pure $ mcpToolError reqId $ "Invalid show_fields arguments: " <> T.pack err
+      pure $ mcpToolError reqId InvalidInput $ "Invalid show_fields arguments: " <> T.pack err
 
     Success sfArgs -> do
       logDebug logger $ "  type_name=" <> sfaTypeName sfArgs
@@ -576,7 +576,7 @@ handleShowFieldsTool logger lspSession maybeTuiHandle reqId args = do
       case resultOrErr of
         Left (e :: SomeException) -> do
           logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
-          pure $ mcpToolError reqId $ "show_fields failed: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId ExternalFailure $ "show_fields failed: " <> T.pack (displayException e)
 
         Right result -> do
           logInfo logger $ "[MCP:" <> reqId <> "] Found " <> T.pack (show $ length $ sfrFields result) <> " fields"
@@ -591,7 +591,7 @@ handleShowConstructorsTool logger lspSession maybeTuiHandle reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
-      pure $ mcpToolError reqId $ "Invalid show_constructors arguments: " <> T.pack err
+      pure $ mcpToolError reqId InvalidInput $ "Invalid show_constructors arguments: " <> T.pack err
 
     Success scArgs -> do
       logDebug logger $ "  type_name=" <> scaTypeName scArgs
@@ -606,7 +606,7 @@ handleShowConstructorsTool logger lspSession maybeTuiHandle reqId args = do
       case resultOrErr of
         Left (e :: SomeException) -> do
           logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
-          pure $ mcpToolError reqId $ "show_constructors failed: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId ExternalFailure $ "show_constructors failed: " <> T.pack (displayException e)
 
         Right result -> do
           logInfo logger $ "[MCP:" <> reqId <> "] Found " <> T.pack (show $ length $ scrConstructors result) <> " constructors"
@@ -621,7 +621,7 @@ handleFilePRTool logger _lspSession reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
-      pure $ mcpToolError reqId $ "Invalid file_pr arguments: " <> T.pack err
+      pure $ mcpToolError reqId InvalidInput $ "Invalid file_pr arguments: " <> T.pack err
 
     Success fpArgs -> do
       logDebug logger $ "  bead_id=" <> T.pack (show fpArgs.fpaBeadId)
@@ -636,7 +636,7 @@ handleFilePRTool logger _lspSession reqId args = do
       case resultOrErr of
         Left (e :: SomeException) -> do
           logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
-          pure $ mcpToolError reqId $ "file_pr failed: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId ExternalFailure $ "file_pr failed: " <> T.pack (displayException e)
 
         Right result -> do
           case result.fprUrl of
@@ -652,7 +652,7 @@ handlePmApproveExpansionTool logger _lspSession reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
-      pure $ mcpToolError reqId $ "Invalid pm_approve_expansion arguments: " <> T.pack err
+      pure $ mcpToolError reqId InvalidInput $ "Invalid pm_approve_expansion arguments: " <> T.pack err
 
     Success paeArgs -> do
       logDebug logger $ "  bead_id=" <> paeArgs.paeaBeadId
@@ -666,7 +666,7 @@ handlePmApproveExpansionTool logger _lspSession reqId args = do
       case resultOrErr of
         Left (e :: SomeException) -> do
           logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
-          pure $ mcpToolError reqId $ "pm_approve_expansion failed: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId ExternalFailure $ "pm_approve_expansion failed: " <> T.pack (displayException e)
 
         Right result -> do
           logInfo logger $ "[MCP:" <> reqId <> "] Decision processed: " <> result.paerNewStatus
@@ -680,7 +680,7 @@ handlePmStatusTool logger reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
-      pure $ mcpToolError reqId $ "Invalid pm_status arguments: " <> T.pack err
+      pure $ mcpToolError reqId InvalidInput $ "Invalid pm_status arguments: " <> T.pack err
 
     Success psArgs -> do
       logDebug logger $ "  period_days=" <> T.pack (show psArgs.psaPeriodDays)
@@ -695,7 +695,7 @@ handlePmStatusTool logger reqId args = do
       case resultOrErr of
         Left (e :: SomeException) -> do
           logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
-          pure $ mcpToolError reqId $ "pm_status failed: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId ExternalFailure $ "pm_status failed: " <> T.pack (displayException e)
 
         Right result -> do
           logInfo logger $ "[MCP:" <> reqId <> "] Status metrics calculated"
@@ -709,7 +709,7 @@ handlePMProposeTool logger reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
-      pure $ mcpToolError reqId $ "Invalid pm_propose arguments: " <> T.pack err
+      pure $ mcpToolError reqId InvalidInput $ "Invalid pm_propose arguments: " <> T.pack err
 
     Success ppaArgs -> do
       logDebug logger $ "  title=" <> ppaArgs.ppaTitle
@@ -722,7 +722,7 @@ handlePMProposeTool logger reqId args = do
       case resultOrErr of
         Left (e :: SomeException) -> do
           logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
-          pure $ mcpToolError reqId $ "pm_propose failed: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId ExternalFailure $ "pm_propose failed: " <> T.pack (displayException e)
 
         Right result -> do
           logInfo logger $ "[MCP:" <> reqId <> "] Proposed bead: " <> result.pprBeadId
@@ -736,7 +736,7 @@ handlePmReviewDagTool logger reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
-      pure $ mcpToolError reqId $ "Invalid pm_review_dag arguments: " <> T.pack err
+      pure $ mcpToolError reqId InvalidInput $ "Invalid pm_review_dag arguments: " <> T.pack err
 
     Success prdArgs -> do
       logDebug logger $ "  focus_track=" <> T.pack (show prdArgs.prdaFocusTrack)
@@ -750,7 +750,7 @@ handlePmReviewDagTool logger reqId args = do
       case resultOrErr of
         Left (e :: SomeException) -> do
           logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
-          pure $ mcpToolError reqId $ "pm_review_dag failed: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId ExternalFailure $ "pm_review_dag failed: " <> T.pack (displayException e)
 
         Right result -> do
           logInfo logger $ "[MCP:" <> reqId <> "] DAG analyzed: " <> T.pack (show $ length result.prdrReady) <> " ready beads"
@@ -763,7 +763,7 @@ handleConfirmActionTool logger _lspSession maybeTuiHandle reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
-      pure $ mcpToolError reqId $ "Invalid confirm_action arguments: " <> T.pack err
+      pure $ mcpToolError reqId InvalidInput $ "Invalid confirm_action arguments: " <> T.pack err
 
     Success caArgs -> do
       logDebug logger $ "  action=" <> caAction caArgs
@@ -776,7 +776,7 @@ handleConfirmActionTool logger _lspSession maybeTuiHandle reqId args = do
       case resultOrErr of
         Left (e :: SomeException) -> do
           logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
-          pure $ mcpToolError reqId $ "confirm_action failed: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId ExternalFailure $ "confirm_action failed: " <> T.pack (displayException e)
 
         Right result -> do
           logInfo logger $ "[MCP:" <> reqId <> "] Action confirmed=" <> T.pack (show $ crConfirmed result)
@@ -789,7 +789,7 @@ handleRegisterFeedbackTool logger reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
-      pure $ mcpToolError reqId $ "Invalid register_feedback arguments: " <> T.pack err
+      pure $ mcpToolError reqId InvalidInput $ "Invalid register_feedback arguments: " <> T.pack err
 
     Success rfArgs -> do
       logDebug logger $ "  bead_id=" <> rfArgs.rfaBeadId
@@ -801,7 +801,7 @@ handleRegisterFeedbackTool logger reqId args = do
       case resultOrErr of
         Left (e :: SomeException) -> do
           logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
-          pure $ mcpToolError reqId $ "register_feedback failed: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId ExternalFailure $ "register_feedback failed: " <> T.pack (displayException e)
 
         Right result -> do
           logInfo logger $ "[MCP:" <> reqId <> "] Feedback registered for " <> rfArgs.rfaBeadId
@@ -814,7 +814,7 @@ handleSelectOptionTool logger _lspSession maybeTuiHandle reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
-      pure $ mcpToolError reqId $ "Invalid select_option arguments: " <> T.pack err
+      pure $ mcpToolError reqId InvalidInput $ "Invalid select_option arguments: " <> T.pack err
 
     Success soArgs -> do
       logDebug logger $ "  prompt=" <> saPrompt soArgs
@@ -827,7 +827,7 @@ handleSelectOptionTool logger _lspSession maybeTuiHandle reqId args = do
       case resultOrErr of
         Left (e :: SomeException) -> do
           logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
-          pure $ mcpToolError reqId $ "select_option failed: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId ExternalFailure $ "select_option failed: " <> T.pack (displayException e)
 
         Right result -> do
           logInfo logger $ "[MCP:" <> reqId <> "] Option selected=" <> srSelected result
@@ -840,7 +840,7 @@ handleRequestGuidanceTool logger _lspSession maybeTuiHandle reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
-      pure $ mcpToolError reqId $ "Invalid request_guidance arguments: " <> T.pack err
+      pure $ mcpToolError reqId InvalidInput $ "Invalid request_guidance arguments: " <> T.pack err
 
     Success rgArgs -> do
       logDebug logger $ "  context=" <> gaContext rgArgs
@@ -853,7 +853,7 @@ handleRequestGuidanceTool logger _lspSession maybeTuiHandle reqId args = do
       case resultOrErr of
         Left (e :: SomeException) -> do
           logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
-          pure $ mcpToolError reqId $ "request_guidance failed: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId ExternalFailure $ "request_guidance failed: " <> T.pack (displayException e)
 
         Right result -> do
           logInfo logger $ "[MCP:" <> reqId <> "] Guidance received"
@@ -866,7 +866,7 @@ handleBeadToPrTool logger reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
-      pure $ mcpToolError reqId $ "Invalid bead_to_pr arguments: " <> T.pack err
+      pure $ mcpToolError reqId InvalidInput $ "Invalid bead_to_pr arguments: " <> T.pack err
 
     Success btpArgs -> do
       logDebug logger $ "  bead_id=" <> btpaBeadId btpArgs
@@ -879,7 +879,7 @@ handleBeadToPrTool logger reqId args = do
       case resultOrErr of
         Left (e :: SomeException) -> do
           logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
-          pure $ mcpToolError reqId $ "bead_to_pr failed: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId ExternalFailure $ "bead_to_pr failed: " <> T.pack (displayException e)
 
         Right result -> do
           case btprPR result of
@@ -893,7 +893,7 @@ handlePrToBeadTool logger reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
-      pure $ mcpToolError reqId $ "Invalid pr_to_bead arguments: " <> T.pack err
+      pure $ mcpToolError reqId InvalidInput $ "Invalid pr_to_bead arguments: " <> T.pack err
 
     Success ptbArgs -> do
       logDebug logger $ "  pr_number=" <> T.pack (show $ ptbaPrNumber ptbArgs)
@@ -906,7 +906,7 @@ handlePrToBeadTool logger reqId args = do
       case resultOrErr of
         Left (e :: SomeException) -> do
           logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
-          pure $ mcpToolError reqId $ "pr_to_bead failed: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId ExternalFailure $ "pr_to_bead failed: " <> T.pack (displayException e)
 
         Right result -> do
           case ptbrBeadId result of
@@ -925,7 +925,7 @@ handleSendMessageTool logger fromRole reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
-      pure $ mcpToolError reqId $ "Invalid send_message arguments: " <> T.pack err
+      pure $ mcpToolError reqId InvalidInput $ "Invalid send_message arguments: " <> T.pack err
 
     Success req -> do
       logDebug logger $ "  to=" <> req.to <> " subject=" <> req.subject
@@ -938,7 +938,7 @@ handleSendMessageTool logger fromRole reqId args = do
       case resultOrErr of
         Left (e :: SomeException) -> do
           logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
-          pure $ mcpToolError reqId $ "send_message failed: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId ExternalFailure $ "send_message failed: " <> T.pack (displayException e)
 
         Right msgId -> do
           logInfo logger $ "[MCP:" <> reqId <> "] Message sent: " <> msgId
@@ -951,7 +951,7 @@ handleCheckInboxTool logger myRole reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
-      pure $ mcpToolError reqId $ "Invalid check_inbox arguments: " <> T.pack err
+      pure $ mcpToolError reqId InvalidInput $ "Invalid check_inbox arguments: " <> T.pack err
 
     Success ciArgs -> do
       logDebug logger $ "  role=" <> myRole
@@ -964,7 +964,7 @@ handleCheckInboxTool logger myRole reqId args = do
       case resultOrErr of
         Left (e :: SomeException) -> do
           logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
-          pure $ mcpToolError reqId $ "check_inbox failed: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId ExternalFailure $ "check_inbox failed: " <> T.pack (displayException e)
 
         Right result -> do
           logInfo logger $ "[MCP:" <> reqId <> "] Found " <> T.pack (show $ length result) <> " messages"
@@ -977,7 +977,7 @@ handleReadMessageTool logger reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
-      pure $ mcpToolError reqId $ "Invalid read_message arguments: " <> T.pack err
+      pure $ mcpToolError reqId InvalidInput $ "Invalid read_message arguments: " <> T.pack err
 
     Success rmArgs -> do
       logDebug logger $ "  message_id=" <> rmArgs.rmaMessageId
@@ -990,7 +990,7 @@ handleReadMessageTool logger reqId args = do
       case resultOrErr of
         Left (e :: SomeException) -> do
           logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
-          pure $ mcpToolError reqId $ "read_message failed: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId ExternalFailure $ "read_message failed: " <> T.pack (displayException e)
 
         Right result -> do
           case result of
@@ -1005,7 +1005,7 @@ handleMarkReadTool logger reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
-      pure $ mcpToolError reqId $ "Invalid mark_read arguments: " <> T.pack err
+      pure $ mcpToolError reqId InvalidInput $ "Invalid mark_read arguments: " <> T.pack err
 
     Success mrArgs -> do
       logDebug logger $ "  message_id=" <> mrArgs.mraMessageId
@@ -1018,7 +1018,7 @@ handleMarkReadTool logger reqId args = do
       case resultOrErr of
         Left (e :: SomeException) -> do
           logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
-          pure $ mcpToolError reqId $ "mark_read failed: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId ExternalFailure $ "mark_read failed: " <> T.pack (displayException e)
 
         Right () -> do
           logInfo logger $ "[MCP:" <> reqId <> "] Message marked as read"
