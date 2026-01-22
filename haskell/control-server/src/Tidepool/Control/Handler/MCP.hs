@@ -210,7 +210,7 @@ handleMcpTool logger config lspSession maybeTuiHandle traceCtx reqId toolName ar
 
       _ -> do
         logError logger $ "  (unknown tool)"
-        pure $ mcpToolError reqId InvalidInput $
+        pure $ mcpToolError reqId NotFound $
           "Tool not found: " <> toolName <>
           ". Available tools: find_callers, find_callees, show_fields, show_constructors, teach-graph, exo_status, exo_complete, exo_reconstitute, pre_commit_check, spawn_agents, file_pr, pm_approve_expansion, pm_prioritize, pm_propose"
 

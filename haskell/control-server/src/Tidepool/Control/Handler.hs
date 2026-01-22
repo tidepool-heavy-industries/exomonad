@@ -23,7 +23,7 @@ handleMessage logger config maybeLspSession maybeTuiHandle traceCtx = \case
     Just lspSession -> handleMcpTool logger config lspSession maybeTuiHandle traceCtx reqId name args
     Nothing -> do
       logInfo logger $ "[MCP:" <> reqId <> "] Request received before LSP ready"
-      pure $ mcpToolError reqId InvalidInput "Server starting, LSP initializing... please retry in a few seconds."
+      pure $ mcpToolError reqId StateError "Server starting, LSP initializing... please retry in a few seconds."
   ToolsListRequest -> handleToolsList logger
   Ping -> pure Pong
 
