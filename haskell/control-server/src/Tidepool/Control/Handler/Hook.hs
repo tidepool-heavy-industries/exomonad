@@ -9,8 +9,6 @@ module Tidepool.Control.Handler.Hook
   ( handleHook
   ) where
 
-import Data.List (find)
-import Data.Maybe (fromMaybe, isJust)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
@@ -22,13 +20,12 @@ import Control.Monad.Freer (Eff, Member, runM)
 import Tidepool.Control.Protocol
 import Tidepool.Control.ExoTools (parseBeadId)
 import Tidepool.Control.Hook.SessionStart (sessionStartLogic)
+import Tidepool.Control.Hook.Stop (stopHookLogic, StopHookResult(..))
 import Tidepool.BD.Interpreter (runBDIO, defaultBDConfig)
 import Tidepool.BD.GitInterpreter (runGitIO)
 import Tidepool.GitHub.Interpreter (runGitHubIO, defaultGitHubConfig)
 import Tidepool.Effect.Types (runLog, LogLevel(..))
-import Tidepool.Effects.BD (BD, BeadInfo(..), getBead)
-import Tidepool.Effects.Git (Git, WorktreeInfo(..), getWorktreeInfo, getDirtyFiles)
-import Tidepool.Effects.GitHub (GitHub, PullRequest(..), listPullRequests, Repo(..), PRFilter(..), defaultPRFilter)
+import Tidepool.Effects.Git (Git, WorktreeInfo(..), getWorktreeInfo)
 import Tidepool.Effects.Zellij (Zellij, checkZellijEnv, goToTab, TabId(..))
 import Tidepool.Zellij.Interpreter (runZellijIO)
 
@@ -75,139 +72,72 @@ handleSessionStart input = do
         { hookSpecificOutput = Just $ SessionStartOutput mContext
         }
 
--- | Handle Stop hook: enforce PR filing with templated guidance + auto-focus.
+-- | Handle Stop hook: gather state, render template, provide actionable guidance.
+--
+-- Checks stop_hook_active to prevent infinite loops:
+-- - If True: Agent was already sent back by a previous Stop hook block.
+--   Allow the stop immediately to break the loop.
+-- - If False/Nothing: Fresh stop attempt, run normal validation logic.
 handleStop :: HookInput -> Runtime -> IO ControlResponse
-handleStop _input _runtime = do
-  TIO.putStrLn "  [HOOK] Running Stop hook with PR check..."
+handleStop input _runtime = do
+  TIO.putStrLn "  [HOOK] Running Stop hook with state detection..."
   hFlush stdout
 
-  -- Read repo from environment, default to tidepool
-  mRepoEnv <- lookupEnv "TIDEPOOL_GITHUB_REPO"
-  let repoName = maybe "tidepool-heavy-industries/tidepool" T.pack mRepoEnv
-
-  result <- try
-    $ runM
-    $ runLog Debug
-    $ runBDIO defaultBDConfig
-    $ runGitIO
-    $ runGitHubIO defaultGitHubConfig
-    $ stopLogic repoName
-
-  case result of
-    Left (e :: SomeException) -> do
-      let errMsg = "Stop hook failed: " <> T.pack (show e)
-      TIO.putStrLn $ "  [HOOK] " <> errMsg
+  -- Check stop_hook_active to prevent infinite loops
+  case input.stopHookActive of
+    Just True -> do
+      TIO.putStrLn "  [HOOK] stop_hook_active=true, allowing stop to prevent loop"
       hFlush stdout
-      -- On error, allow stop but show error message
-      pure $ hookSuccess defaultOutput
-        { systemMessage = Just errMsg
-        , hookSpecificOutput = Just StopOutput
-        }
-    Right response -> do
-      TIO.putStrLn "  [HOOK] Stop hook succeeded"
-      hFlush stdout
-
-      -- If stop is allowed, attempt to switch focus if in a subagent worktree
-      autoFocusOnSubagentStop
-
-      pure response
-
--- | Shell-escape a string for safe inclusion in bash commands.
--- Wraps the string in single quotes and escapes any single quotes within.
-shellEscape :: Text -> Text
-shellEscape t = "'" <> T.replace "'" "'\"'\"'" t <> "'"
-
--- | Get bead title from bead ID, returning empty string if not found.
-getBeadTitle :: Member BD es => Maybe Text -> Eff es Text
-getBeadTitle Nothing = pure ""
-getBeadTitle (Just beadId) = do
-  mBead <- getBead beadId
-  pure $ case mBead of
-    Just bead -> bead.biTitle
-    Nothing -> ""
-
--- | Core Stop hook logic with conditional branching.
-stopLogic :: (Member BD es, Member Git es, Member GitHub es) => Text -> Eff es ControlResponse
-stopLogic repoName = do
-  -- 1. Get worktree info and dirty files
-  mWorktree <- getWorktreeInfo
-  dirtyFiles <- getDirtyFiles
-
-  case mWorktree of
-    Nothing -> do
-      -- Not in a git repo, allow stop
+      -- Allow stop immediately - don't re-block or we'd loop forever
       pure $ hookSuccess defaultOutput
         { hookSpecificOutput = Just StopOutput
         }
 
-    Just wt -> do
-      let branch = wt.wiBranch
-          mBeadId = parseBeadId branch
-          hasUncommitted = not (null dirtyFiles)
-          isBeadBranch = isJust mBeadId
+    _ -> do
+      -- Fresh stop attempt: run normal validation logic
+      -- Read repo from environment, default to tidepool
+      mRepoEnv <- lookupEnv "TIDEPOOL_GITHUB_REPO"
+      let repoName = maybe "tidepool-heavy-industries/tidepool" T.pack mRepoEnv
 
-      if not isBeadBranch
-        then do
-          -- Not on a bead branch, allow stop (pass through)
+      result <- try
+        $ runM
+        $ runLog Debug
+        $ runGitIO
+        $ runGitHubIO defaultGitHubConfig
+        $ stopHookLogic repoName
+
+      case result of
+        Left (e :: SomeException) -> do
+          let errMsg = "Stop hook failed: " <> T.pack (show e)
+          TIO.putStrLn $ "  [HOOK] " <> errMsg
+          hFlush stdout
+          -- On error, allow stop but show error message
           pure $ hookSuccess defaultOutput
-            { hookSpecificOutput = Just StopOutput
+            { systemMessage = Just errMsg
+            , hookSpecificOutput = Just StopOutput
             }
-        else do
-          -- On a bead branch, check for PR
-          let repo = Repo repoName
-              filt = defaultPRFilter { pfBase = Just "main", pfLimit = Just 100 }
-          prs <- listPullRequests repo filt
-          let mPR = find (\pr -> pr.prHeadRefName == branch) prs
+        Right (StopHookResult shouldBlock message) -> do
+          TIO.putStrLn $ "  [HOOK] Stop hook completed, block=" <> T.pack (show shouldBlock)
+          hFlush stdout
 
-          case (mPR, hasUncommitted) of
-            (Just pr, _) -> do
-              -- PR filed, good to stop
-              let beadId = fromMaybe "" mBeadId
-                  msg = "✓ PR #" <> T.pack (show pr.prNumber) <> " filed for " <> beadId <> "."
-              pure $ hookSuccess defaultOutput
-                { systemMessage = Just msg
-                , hookSpecificOutput = Just StopOutput
-                }
+          -- Auto-focus if not blocking
+          if not shouldBlock
+            then autoFocusOnSubagentStop
+            else pure ()
 
-            (Nothing, True) -> do
-              -- Bead branch + uncommitted + no PR = needs work (block)
-              let beadId = fromMaybe "" mBeadId
-              beadTitle <- getBeadTitle mBeadId
-              let filesEscaped = T.intercalate " " (map (shellEscape . T.pack) dirtyFiles)
-                  msg = T.unlines
-                    [ "⚠️ Uncommitted changes on " <> branch <> ". File PR before stopping:"
-                    , ""
-                    , "```bash"
-                    , "git add " <> filesEscaped
-                    , "git commit -m " <> shellEscape ("[" <> beadId <> "] <description>")
-                    , "git push -u origin " <> shellEscape branch
-                    , "gh pr create --title " <> shellEscape ("[" <> beadId <> "] " <> beadTitle) <> " --body " <> shellEscape ("Closes " <> beadId)
-                    , "```"
-                    ]
-              pure $ HookResponse
-                { output = defaultOutput
-                    { continue_ = False  -- Block stop
-                    , stopReason = Just msg
-                    , hookSpecificOutput = Just StopOutput
-                    }
-                , exitCode = 1  -- Non-zero exit code to block
-                }
-
-            (Nothing, False) -> do
-              -- Bead branch + clean + no PR = suggest filing PR (allow)
-              let beadId = fromMaybe "" mBeadId
-              beadTitle <- getBeadTitle mBeadId
-              let msg = T.unlines
-                    [ "Work complete? Consider filing PR:"
-                    , ""
-                    , "```bash"
-                    , "gh pr create --title " <> shellEscape ("[" <> beadId <> "] " <> beadTitle)
-                    , "```"
-                    ]
-              pure $ hookSuccess defaultOutput
-                { systemMessage = Just msg
-                , hookSpecificOutput = Just StopOutput
-                }
+          if shouldBlock
+            then pure $ HookResponse
+              { output = defaultOutput
+                  { continue_ = False
+                  , stopReason = Just message
+                  , hookSpecificOutput = Just StopOutput
+                  }
+              , exitCode = 1
+              }
+            else pure $ hookSuccess defaultOutput
+              { systemMessage = Just message
+              , hookSpecificOutput = Just StopOutput
+              }
 
 -- | Auto-focus on subagent tab when Stop hook fires.
 --

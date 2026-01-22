@@ -1,0 +1,49 @@
+{% if dirty_files %}
+## Uncommitted Changes
+
+The following files have uncommitted changes:
+{% for f in dirty_files %}
+- `{{ f }}`
+{% endfor %}
+
+Commit these changes before stopping. Use structured commit metadata:
+```
+git add <files>
+git commit -m "[{{ bead_id | default(branch) }}] <type>: <description>"
+git push
+```
+{% endif %}
+
+{% if commits_ahead > 0 and not pr %}
+## Ready for PR
+
+You have {{ commits_ahead }} commit(s) on `{{ branch }}` not yet in a PR.
+
+Use the `file_pr` MCP tool to create a pull request:
+- **testing** (required): How did you verify this works?
+- **compromises** (optional): Any tradeoffs or known limitations?
+
+The tool will infer bead ID and title from your branch.
+{% endif %}
+
+{% if pr and pr.pending_comments > 0 %}
+## PR Has Feedback
+
+PR #{{ pr.number }} has **{{ pr.pending_comments }}** unaddressed review comment(s).
+
+Use `pr_review_status` MCP tool to see the feedback details, then address before stopping.
+{% endif %}
+
+{% if pr and pr.pending_comments == 0 and not dirty_files %}
+## PR Filed
+
+✓ PR #{{ pr.number }} is up to date with no pending feedback.
+{% endif %}
+
+{% if clean and not bead_id %}
+✓ Clean state. Not on a bead branch.
+{% endif %}
+
+{% if clean and bead_id and pr %}
+✓ {{ bead_id }}: All changes committed, PR #{{ pr.number }} filed.
+{% endif %}
