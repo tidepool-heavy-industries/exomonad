@@ -324,7 +324,7 @@ logResponse logger = \case
   McpToolResponse _ result err -> do
     let status = case (result, err) of
           (Just _, _) -> "success"
-          (_, Just e) -> "error: " <> e.errorMessage
+          (_, Just e) -> "error: " <> e.message
           _ -> "empty"
     logDebug logger $ "[MCP] -> " <> status
   ToolsListResponse tools ->

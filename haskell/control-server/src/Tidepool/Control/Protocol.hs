@@ -8,6 +8,7 @@ module Tidepool.Control.Protocol
     ControlMessage(..)
   , ControlResponse(..)
   , McpError(..)
+  , ErrorCode(..)
   , ToolDefinition(..)
   , Runtime(..)
 
@@ -26,6 +27,7 @@ module Tidepool.Control.Protocol
   , hookError
   , mcpToolError
   , mcpToolSuccess
+  , mcpToolErrorWithDetails
   ) where
 
 import Data.Aeson
@@ -355,23 +357,121 @@ instance FromJSON ControlResponse where
       "Pong" -> pure Pong
       _ -> fail $ "Unknown response type: " <> show msgType
 
--- | MCP error response.
+-- | MCP error codes for structured error responses.
+--
+-- Errors are categorized by failure mode to help Claude understand what went wrong:
+--
+-- === NotFound (-32001)
+-- Resource does not exist or could not be found.
+--
+-- Example: Bead not found, binary missing, symbol not found in codebase
+--
+-- === InvalidInput (-32002)
+-- Arguments failed validation. Caller should fix the input.
+--
+-- Example: Invalid bead ID (contains path separators), empty env vars, malformed JSON
+--
+-- === ExternalFailure (-32003)
+-- External subprocess or I/O operation failed.
+--
+-- Example: File system error, subprocess exit failure, git command failure
+--
+-- === StateError (-32004)
+-- Operation cannot proceed due to invalid state (not invalid input).
+--
+-- Example: Bead is blocked, worktree already exists, conflict in state
+--
+-- === EnvironmentError (-32005)
+-- Missing or invalid environment configuration.
+--
+-- Example: Not in Zellij session, missing API key, incomplete setup
+data ErrorCode
+  = NotFound              -- -32001: Resource not found
+  | InvalidInput          -- -32002: Bad arguments (validation failed)
+  | ExternalFailure       -- -32003: Subprocess or I/O error
+  | StateError            -- -32004: Invalid state (already exists, blocked)
+  | EnvironmentError      -- -32005: Missing environment (not in Zellij)
+  deriving stock (Show, Eq, Generic)
+
+-- | Get numeric code for ErrorCode.
+errorCodeValue :: ErrorCode -> Int
+errorCodeValue NotFound = -32001
+errorCodeValue InvalidInput = -32002
+errorCodeValue ExternalFailure = -32003
+errorCodeValue StateError = -32004
+errorCodeValue EnvironmentError = -32005
+
+-- | MCP error response with structured details.
+--
+-- All MCP tool errors use this format instead of plain text strings.
+--
+-- Examples:
+--
+-- 1. Validation error (InvalidInput):
+--    { "code": -32002
+--    , "message": "Invalid spawn_agents arguments: bead_id contains path separators"
+--    , "suggestion": "Use bead ID without slashes, e.g. 'm1j' instead of 'bd-m1j/'"
+--    }
+--
+-- 2. Not found error (NotFound):
+--    { "code": -32001
+--    , "message": "Bead tidepool-xyz not found"
+--    , "details": { "searched_in": ".beads/beads.jsonl" }
+--    , "suggestion": "Use 'bd list' to see available beads"
+--    }
+--
+-- 3. External failure (ExternalFailure):
+--    { "code": -32003
+--    , "message": "File system error: permission denied"
+--    , "details": { "path": ".tidepool/sockets", "errno": 13 }
+--    , "suggestion": "Check that .tidepool/ directory is writable"
+--    }
+--
+-- 4. State error (StateError):
+--    { "code": -32004
+--    , "message": "Worktree already exists"
+--    , "details": { "path": "worktrees/bd-m1j-..." }
+--    , "suggestion": "Delete existing worktree or use Zellij tabs instead"
+--    }
+--
+-- Note: Fields details and suggestion are optional.
+-- Claude uses the error code to categorize the error type,
+-- message for human-readable explanation,
+-- details for debugging/logging,
+-- suggestion for actionable guidance.
 data McpError = McpError
-  { code :: Int
-  , errorMessage :: Text
+  { code :: ErrorCode
+  , message :: Text              -- Human readable explanation
+  , details :: Maybe Value       -- Structured details for debugging (optional)
+  , suggestion :: Maybe Text     -- Actionable guidance to fix the issue (optional)
   }
   deriving stock (Show, Eq, Generic)
 
 instance ToJSON McpError where
-  toJSON e = object
-    [ "code" .= e.code
-    , "message" .= e.errorMessage
+  toJSON e = object $ filter notNull
+    [ "code" .= errorCodeValue e.code
+    , "message" .= e.message
+    , "details" .= e.details
+    , "suggestion" .= e.suggestion
     ]
+    where
+      notNull (_, Null) = False
+      notNull _ = True
 
 instance FromJSON McpError where
-  parseJSON = withObject "McpError" $ \o -> McpError
-    <$> o .: "code"
-    <*> o .: "message"
+  parseJSON = withObject "McpError" $ \o -> do
+    codeNum <- o .: "code" :: Parser Int
+    code <- case codeNum of
+      -32001 -> pure NotFound
+      -32002 -> pure InvalidInput
+      -32003 -> pure ExternalFailure
+      -32004 -> pure StateError
+      -32005 -> pure EnvironmentError
+      n -> fail $ "Unknown error code: " <> show n
+    McpError code
+      <$> o .: "message"
+      <*> o .:? "details"
+      <*> o .:? "suggestion"
 
 -- ============================================================================
 -- Builder helpers
@@ -425,9 +525,14 @@ runtimeExitCode :: Runtime -> Int
 runtimeExitCode Claude = 1
 runtimeExitCode Gemini = 2
 
--- | Create an MCP tool error response.
-mcpToolError :: Text -> Text -> ControlResponse
-mcpToolError reqId msg = McpToolResponse reqId Nothing (Just $ McpError (-32603) msg)
+-- | Create an MCP tool error response with minimal details.
+mcpToolError :: Text -> ErrorCode -> Text -> ControlResponse
+mcpToolError reqId code msg = McpToolResponse reqId Nothing (Just $ McpError code msg Nothing Nothing)
+
+-- | Create an MCP tool error response with full details.
+mcpToolErrorWithDetails :: Text -> ErrorCode -> Text -> Maybe Value -> Maybe Text -> ControlResponse
+mcpToolErrorWithDetails reqId code msg details suggestion =
+  McpToolResponse reqId Nothing (Just $ McpError code msg details suggestion)
 
 -- | Create a successful MCP tool response.
 mcpToolSuccess :: Text -> Value -> ControlResponse
