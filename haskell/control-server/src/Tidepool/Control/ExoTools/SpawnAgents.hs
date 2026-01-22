@@ -91,7 +91,7 @@ buildBeadContext bead branchName = T.unlines
   , "1. Implement changes"
   , "2. Commit: [" <> bead.biId <> "] <description>"
   , "3. Push: git push -u origin " <> branchName
-  , "4. File PR: gh pr create --title \"[" <> bead.biId <> "] " <> bead.biTitle <> "\""
+  , "4. File PR: Call the 'file_pr' tool (do NOT use gh cli manually)"
   ]
   where
     statusToText = \case
