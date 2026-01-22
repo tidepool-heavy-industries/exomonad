@@ -418,9 +418,9 @@ Asks the user for free-form guidance or to select from suggestions when the agen
 
 **Implementation:** `TUITools.hs:258-290` (RequestGuidanceGraph)
 
-### Tier 5: Project Management Tools
+### Tier 4 (continued): Project Management Dashboard Tools
 
-Tools for sprint planning, issue triage, and team coordination via Beads (BD) and GitHub APIs.
+Tools for sprint planning, issue triage, and team coordination via Beads (BD) and GitHub APIs. These are PM-specific tools that use `MCPExport` annotation pattern (unlike the TUI tools above which use `GraphEntries`).
 
 #### `pm_status` - Sprint Health Dashboard
 
@@ -535,16 +535,18 @@ exportMCPTools logger = do
       pmRevTools = reifyMCPTools (Proxy @PmReviewDagGraph)
       pmProTools = reifyMCPTools (Proxy @PMProposeGraph)
 
-  -- Tier 5: Mailbox communication
+  -- Tier 5: Mailbox communication + Feedback
   let smTools = reifyMCPTools (Proxy @SendMessageGraph)
       ciTools = reifyMCPTools (Proxy @CheckInboxGraph)
       rmTools = reifyMCPTools (Proxy @ReadMessageGraph)
       mrTools = reifyMCPTools (Proxy @MarkReadGraph)
+      rfTools = reifyMCPTools (Proxy @RegisterFeedbackGraph)
+      prTools = reifyMCPTools (Proxy @PrReviewStatusGraph)
 
   let allTools = concat [fcTools, sfTools, scTools, caTools, soTools, rgTools,
                          dgTools, esTools, ecTools, erTools, saTools, fpTools,
                          paeTools, pmPriTools, pmStatTools, pmRevTools, pmProTools,
-                         smTools, ciTools, rmTools, mrTools]
+                         smTools, ciTools, rmTools, mrTools, rfTools, prTools]
   pure $ map reifyToToolDef allTools
 ```
 

@@ -282,9 +282,9 @@ ls -la .tidepool/sockets/control.sock
 
 ## Related Documentation
 
-- **[ADR-003: MCP Tool Design Patterns](../docs/architecture/ADR-003-MCP-Tool-Design-Patterns.md)** - Tool tier architecture, design rationale
-- **[haskell/control-server/CLAUDE.md](../haskell/control-server/CLAUDE.md)** - Tool implementation details, tier descriptions
-- **[haskell/dsl/core/CLAUDE.md](../haskell/dsl/core/CLAUDE.md)** - Graph DSL reference for tool developers
+- **[ADR-003: MCP Tool Design Patterns](../../docs/architecture/ADR-003-MCP-Tool-Design-Patterns.md)** - Tool tier architecture, design rationale
+- **[haskell/control-server/CLAUDE.md](../../haskell/control-server/CLAUDE.md)** - Tool implementation details, tier descriptions
+- **[haskell/dsl/core/CLAUDE.md](../../haskell/dsl/core/CLAUDE.md)** - Graph DSL reference for tool developers
 
 ## What's Missing (TODO)
 

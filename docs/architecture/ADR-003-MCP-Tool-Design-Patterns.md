@@ -42,12 +42,18 @@ Organize tools into 5 tiers based on dependencies and interaction model:
 - **Tools:** `spawn_agents`, `exo_status`, `exo_complete`, `exo_reconstitute`, `file_pr`, `pm_prioritize`, `pm_approve_expansion`
 - **Rationale:** Workflow automation, cross-worktree coordination
 
-#### Tier 4: TUI-Interactive (User Decision)
-- **Dependencies:** Beads + TUI sidebar (interactive)
-- **Pattern:** `GraphEntries` type family + TUI effect
-- **Discovery:** `reifyGraphEntries` at startup
-- **Tools:** `confirm_action`, `select_option`, `request_guidance`, `pm_status`, `pm_review_dag`, `pm_propose`
-- **Rationale:** User provides input via sidebar (blocking call), tools render dialog boxes
+#### Tier 4: TUI-Interactive + PM Dashboard (User Decision)
+- **Dependencies:** Beads + TUI sidebar (interactive) + PM dashboard
+- **Pattern:**
+  - TUI tools (`confirm_action`, `select_option`, `request_guidance`): `GraphEntries` type family + TUI effect
+  - PM dashboard tools (`pm_status`, `pm_review_dag`, `pm_propose`): `MCPExport` annotation
+- **Discovery:**
+  - TUI tools: `reifyGraphEntries` at startup
+  - PM dashboard tools: `reifyMCPTools` at startup
+- **Tools:**
+  - TUI: `confirm_action`, `select_option`, `request_guidance`
+  - PM dashboard: `pm_status`, `pm_review_dag`, `pm_propose`
+- **Rationale:** User provides input via sidebar or dashboard (blocking call), tools render dialog boxes or status views
 
 #### Tier 5: Mailbox (Agent-to-Agent)
 - **Dependencies:** Beads + mailbox effects
