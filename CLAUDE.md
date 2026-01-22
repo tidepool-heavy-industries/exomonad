@@ -357,11 +357,13 @@ Understanding the runtime stack for debugging and extension.
   ```
 
 **Subagent "Log File Not Found"**
-- **Symptom**: Subagent Zellij tabs show a blank log pane or "No such file".
-- **Cause**: Mismatch between `process-compose` config (expecting directory) and `tail` (expecting file).
-- **Fix**:
-  1. Ensure `templates/subagent-pc.yaml` sets `log_location: .tidepool/logs` (directory).
-  2. Ensure `.zellij/worktree.kdl` passes `-L .tidepool/logs/process-compose.log` to force the filename.
+- **Symptom**: Subagent Zellij tabs show a blank log pane or "No such file" error.
+- **Cause**: Mismatch between Zellij layout expecting `pc.log` and process-compose writing `process-compose.log`.
+- **Fix**: The hangar-root `.zellij/worktree.kdl` must:
+  1. Create directories: `mkdir -p .tidepool/logs .tidepool/sockets`
+  2. Force log filename: `process-compose up -L .tidepool/logs/process-compose.log`
+  3. Use robust tail: `tail -F .tidepool/logs/process-compose.log` (capital F waits for file creation)
+- **Note**: Fixed in hangar root as of 2026-01-21. New spawned subagents should work correctly.
 
 #### Socket Lifecycle
 
