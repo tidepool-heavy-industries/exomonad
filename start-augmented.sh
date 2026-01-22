@@ -29,9 +29,35 @@ PC_SOCKET=".tidepool/sockets/process-compose.sock"
 if [ -S "$PC_SOCKET" ]; then
     if process-compose process list -u "$PC_SOCKET" > /dev/null 2>&1; then
         echo "⚠️  Found stale process-compose session. Shutting it down..."
-        process-compose down -u "$PC_SOCKET" || true
-        sleep 0.5
+        
+        # Try graceful shutdown with a timeout (bg + wait loop)
+        process-compose down -u "$PC_SOCKET" &
+        DOWN_PID=$!
+        
+        # Wait up to 5 seconds
+        for i in {1..10}; do
+            if ! kill -0 $DOWN_PID 2>/dev/null; then
+                break
+            fi
+            sleep 0.5
+        done
+        
+        # If down command is still running or socket exists, force cleanup
+        if kill -0 $DOWN_PID 2>/dev/null; then
+            echo "⚠️  Shutdown timed out. Forcing cleanup..."
+            kill -9 $DOWN_PID 2>/dev/null || true
+            
+            # Find and kill the server process holding the socket
+            if command -v lsof >/dev/null; then
+                SERVER_PID=$(lsof -t "$PC_SOCKET" 2>/dev/null)
+                if [ -n "$SERVER_PID" ]; then
+                    kill -9 $SERVER_PID 2>/dev/null || true
+                fi
+            fi
+        fi
     fi
+    # Ensure socket is gone so new instance can bind
+    rm -f "$PC_SOCKET"
 fi
 
 # Clean up any other stale sockets from previous runs
