@@ -348,7 +348,13 @@ bootstrapTidepool mHangarRoot repoRoot worktreePath = do
               symlinkRes <- createSymlink srcEnv dstEnv
               case symlinkRes of
                 Left err -> pure $ Left $ "Failed to symlink .env: " <> T.pack (show err)
-                Right () -> pure $ Right ()
+                Right () -> do
+                  -- Write Claude local settings with SessionStart hooks
+                  -- This bypasses FSWatcher issues with project-scope settings in worktrees
+                  settingsRes <- writeClaudeLocalSettings worktreePath
+                  case settingsRes of
+                    Left err -> pure $ Left $ "Failed to write Claude settings: " <> err
+                    Right () -> pure $ Right ()
 
 
 -- | Write bead context to .claude/context/bead.md.
@@ -388,4 +394,51 @@ writeEnvFile worktreePath envVars = do
       writeRes <- writeFileText envFile content
       case writeRes of
         Left err -> pure $ Left $ T.pack (show err)
+        Right () -> pure $ Right ()
+
+
+-- | Write .claude/settings.local.json with SessionStart hooks.
+-- This bypasses FSWatcher issues with project-scope settings in worktrees.
+writeClaudeLocalSettings
+  :: (Member FileSystem es)
+  => FilePath  -- ^ Worktree path
+  -> Eff es (Either Text ())
+writeClaudeLocalSettings worktreePath = do
+  let claudeDir = worktreePath </> ".claude"
+      settingsFile = claudeDir </> "settings.local.json"
+      -- JSON content with SessionStart hooks for both startup and resume
+      content = T.unlines
+        [ "{"
+        , "  \"hooks\": {"
+        , "    \"SessionStart\": ["
+        , "      {"
+        , "        \"matcher\": \"startup\","
+        , "        \"hooks\": ["
+        , "          {"
+        , "            \"type\": \"command\","
+        , "            \"command\": \"$TIDEPOOL_BIN_DIR/mantle-agent hook session-start\""
+        , "          }"
+        , "        ]"
+        , "      },"
+        , "      {"
+        , "        \"matcher\": \"resume\","
+        , "        \"hooks\": ["
+        , "          {"
+        , "            \"type\": \"command\","
+        , "            \"command\": \"$TIDEPOOL_BIN_DIR/mantle-agent hook session-start\""
+        , "          }"
+        , "        ]"
+        , "      }"
+        , "    ]"
+        , "  }"
+        , "}"
+        ]
+
+  dirRes <- createDirectory claudeDir
+  case dirRes of
+    Left err -> pure $ Left $ "Failed to create .claude directory: " <> T.pack (show err)
+    Right () -> do
+      writeRes <- writeFileText settingsFile content
+      case writeRes of
+        Left err -> pure $ Left $ "Failed to write settings.local.json: " <> T.pack (show err)
         Right () -> pure $ Right ()
