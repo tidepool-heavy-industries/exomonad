@@ -335,6 +335,27 @@ claude-code
 
 Understanding the runtime stack for debugging and extension.
 
+#### Troubleshooting
+
+**`start-augmented.sh` Hangs on Startup**
+- **Symptom**: The script hangs indefinitely at "Starting Hybrid Tidepool...".
+- **Cause**: A stale `process-compose` session (often headless) is holding the socket and refusing to terminate.
+- **Fix**: The script now includes robust cleanup logic (timeout + force kill). If it still hangs, manually run:
+  ```bash
+  pkill -9 process-compose
+  rm -f .tidepool/sockets/process-compose.sock
+  ```
+
+**`Killed: 9` on macOS (Apple Silicon)**
+- **Symptom**: `control-server` or `mantle-agent` exits immediately with `Killed: 9` (SIGKILL).
+- **Cause**: The binaries in `../runtime/bin` are unsigned or have invalid signatures. macOS arm64 requires all native executables to be signed.
+- **Fix**: Ad-hoc sign the binaries:
+  ```bash
+  codesign -s - --force ../runtime/bin/tidepool-control-server
+  codesign -s - --force ../runtime/bin/mantle-agent
+  codesign -s - --force ../runtime/bin/tui-sidebar
+  ```
+
 #### Socket Lifecycle
 
 Sockets are managed to ensure clean transitions between sessions and prevent stale connections:
