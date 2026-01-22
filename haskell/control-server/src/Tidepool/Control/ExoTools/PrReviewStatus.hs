@@ -17,9 +17,10 @@ module Tidepool.Control.ExoTools.PrReviewStatus
 
 import Control.Monad.Freer (Eff, Member)
 import Data.Aeson (FromJSON(..), ToJSON(..), (.:), (.=), object, withObject)
+import Data.List (partition)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Time (UTCTime(..), Day(..))
+import Data.Time (UTCTime(..), Day(ModifiedJulianDay))
 import GHC.Generics (Generic)
 
 import Tidepool.Effects.GitHub
@@ -157,8 +158,10 @@ prReviewStatusHandlers = PrReviewStatusGraph
 reviewToComment :: Review -> ReviewComment
 reviewToComment (Review author body state) =
   let Author login _ = author
-      -- Use epoch as placeholder timestamp since Review type doesn't include createdAt
-      -- This is fine for our purposes since we're not using timestamp for grouping
+      -- Intentionally normalize review timestamps to the Unix epoch.
+      -- This tool does not use timestamps for sorting or grouping, so a fixed value
+      -- is sufficient. If timestamps become semantically important, pass through
+      -- the real created-at time instead of this placeholder.
       createdAt = UTCTime (ModifiedJulianDay 0) 0
   in ReviewComment login body Nothing Nothing state createdAt
 
@@ -168,13 +171,12 @@ isCopilotAuthor author =
   author == "copilot" || author == "github-actions[bot]" || "copilot" `T.isInfixOf` T.toLower author
 
 -- | Check if a comment is resolved.
--- For now, we use a heuristic: comments with state other than Commented/Pending are considered resolved.
+-- NOTE: GitHub's "resolved conversation" status is not exposed via ReviewState.
+-- Without explicit resolution data, we conservatively treat all comments as unresolved.
+-- To properly track resolution, we would need to fetch conversation thread data from
+-- GitHub's GraphQL API or use the /pulls/{number}/comments endpoint with resolved info.
 isCommentResolved :: ReviewComment -> Bool
-isCommentResolved (ReviewComment _ _ _ _ state _) =
-  case state of
-    ReviewCommented -> False
-    ReviewPending -> False
-    _ -> True
+isCommentResolved _ = False
 
 -- | Extract author from comment.
 commentAuthor :: ReviewComment -> Text
@@ -183,14 +185,12 @@ commentAuthor (ReviewComment author _ _ _ _ _) = author
 -- | Partition comments by author type and resolution status.
 partitionComments :: [ReviewComment] -> (AuthorFeedback, AuthorFeedback)
 partitionComments comments =
-  let (copilotComments, humanComments) = partitionBy (isCopilotAuthor . commentAuthor) comments
-      (copilotPending, copilotResolved) = partitionBy (not . isCommentResolved) copilotComments
-      (humanPending, humanResolved) = partitionBy (not . isCommentResolved) humanComments
+  let (copilotComments, humanComments) = partition (isCopilotAuthor . commentAuthor) comments
+      (copilotPending, copilotResolved) = partition (not . isCommentResolved) copilotComments
+      (humanPending, humanResolved) = partition (not . isCommentResolved) humanComments
   in ( AuthorFeedback copilotPending copilotResolved
      , AuthorFeedback humanPending humanResolved
      )
-  where
-    partitionBy predicate xs = foldr (\x (ts, fs) -> if predicate x then (x:ts, fs) else (ts, x:fs)) ([], []) xs
 
 -- | Build summary counts from feedback.
 buildSummary :: AuthorFeedback -> AuthorFeedback -> FeedbackSummary
@@ -218,6 +218,7 @@ prReviewStatusLogic args = do
   maybePr <- getPullRequest repo args.prsaPrNumber True
   let prLevelReviews = case maybePr of
         Nothing -> []
+        -- FIXME: use lenses or something - positional pattern matching is fragile
         Just (PullRequest _ _ _ _ _ _ _ _ _ _ _ _ reviews) -> map reviewToComment reviews
 
   -- Combine all feedback
