@@ -18,7 +18,7 @@ where
 
 import Control.Monad (forM)
 import Control.Monad.Freer (Eff, Member)
-import Data.Aeson (FromJSON(..), ToJSON(..), (.:), (.=), object, withObject)
+import Data.Aeson (FromJSON(..), ToJSON(..), (.:), (.:?), (.=), object, withObject)
 import Data.Either (partitionEithers)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
@@ -107,21 +107,28 @@ buildBeadContext bead branchName = T.unlines
 -- | Arguments for spawn_agents tool.
 data SpawnAgentsArgs = SpawnAgentsArgs
   { saaBeadIds :: [Text]  -- ^ List of short form bead IDs (e.g. "wzi", "1b2").
+  , saaBackend :: Maybe Text  -- ^ Backend to use: "claude" or "gemini" (defaults to "claude").
   }
   deriving stock (Show, Eq, Generic)
 
 instance HasJSONSchema SpawnAgentsArgs where
   jsonSchema = objectSchema
     [ ("bead_ids", describeField "bead_ids" "List of short-form bead IDs to spawn worktrees for." (arraySchema (emptySchema TString)))
+    , ("backend", describeField "backend" "Backend to use: 'claude' or 'gemini' (defaults to 'claude')." (emptySchema TString))
     ]
     ["bead_ids"]
 
 instance FromJSON SpawnAgentsArgs where
   parseJSON = withObject "SpawnAgentsArgs" $ \v ->
-    SpawnAgentsArgs <$> v .: "bead_ids"
+    SpawnAgentsArgs
+      <$> v .: "bead_ids"
+      <*> v .:? "backend"
 
 instance ToJSON SpawnAgentsArgs where
-  toJSON args = object ["bead_ids" .= saaBeadIds args]
+  toJSON args = object
+    [ "bead_ids" .= saaBeadIds args
+    , "backend" .= saaBackend args
+    ]
 
 -- | Result of spawn_agents tool.
 data SpawnAgentsResult = SpawnAgentsResult
@@ -149,7 +156,7 @@ instance ToJSON SpawnAgentsResult where
 data SpawnAgentsGraph mode = SpawnAgentsGraph
   { saEntry :: mode :- EntryNode SpawnAgentsArgs
       :@ MCPExport
-      :@ MCPToolDef '("spawn_agents", "Create worktrees and branches for parallel agent dispatch.")
+      :@ MCPToolDef '("spawn_agents", "Create worktrees and branches for parallel agent dispatch. Accepts optional 'backend' parameter ('claude' or 'gemini', defaults to 'claude').")
 
   , saRun :: mode :- LogicNode
       :@ Input SpawnAgentsArgs
@@ -193,20 +200,31 @@ spawnAgentsLogic args = do
             Just hr -> hr </> "worktrees"
             Nothing -> repoRoot </> ".worktrees" </> "tidepool"
 
-      -- 3. Process each bead
-      results <- forM args.saaBeadIds $ \shortId -> do
-        processBead mHangarRoot repoRoot wtBaseDir shortId
+      -- 3. Validate and normalize backend parameter
+      let backendRaw = T.toLower $ fromMaybe "claude" args.saaBackend
+          validBackends = ["claude", "gemini"]
 
-      -- Partition results
-      let (failed, succeeded) = partitionEithers results
-          worktrees = [(sid, path) | (sid, path, _) <- succeeded]
-          tabs = [(sid, tabId) | (sid, _, TabId tabId) <- succeeded]
+      if backendRaw `notElem` validBackends
+        then pure $ gotoExit $ SpawnAgentsResult
+          { sarWorktrees = []
+          , sarTabs = []
+          , sarFailed = [("*", "Invalid backend '" <> backendRaw <> "'. Must be 'claude' or 'gemini'.")]
+          }
+        else do
+          -- 4. Process each bead
+          results <- forM args.saaBeadIds $ \shortId -> do
+            processBead mHangarRoot repoRoot wtBaseDir backendRaw shortId
 
-      pure $ gotoExit $ SpawnAgentsResult
-        { sarWorktrees = worktrees
-        , sarTabs = tabs
-        , sarFailed = failed
-        }
+          -- Partition results
+          let (failed, succeeded) = partitionEithers results
+              worktrees = [(sid, path) | (sid, path, _) <- succeeded]
+              tabs = [(sid, tabId) | (sid, _, TabId tabId) <- succeeded]
+
+          pure $ gotoExit $ SpawnAgentsResult
+            { sarWorktrees = worktrees
+            , sarTabs = tabs
+            , sarFailed = failed
+            }
 
 
 -- | Process a single bead: create worktree, bootstrap .tidepool/, write context, launch tab.
@@ -215,9 +233,10 @@ processBead
   => Maybe FilePath                                    -- ^ Hangar root (for templates)
   -> FilePath                                          -- ^ Repo root (for symlinks/templates)
   -> FilePath                                          -- ^ Worktree base directory
+  -> Text                                              -- ^ Backend ("claude" or "gemini")
   -> Text                                              -- ^ Short bead ID
   -> Eff es (Either (Text, Text) (Text, FilePath, TabId))  -- ^ Left (id, error) or Right (id, path, tabId)
-processBead mHangarRoot repoRoot wtBaseDir shortId = do
+processBead mHangarRoot repoRoot wtBaseDir backend shortId = do
   -- Validate shortId (prevent path traversal)
   if T.any (\c -> c == '/' || c == '\\') shortId
     then pure $ Left (shortId, "Invalid bead ID: contains path separators")
@@ -286,9 +305,14 @@ processBead mHangarRoot repoRoot wtBaseDir shortId = do
                                   -- d. Write subagent environment
                                   -- Explicitly set sockets to relative paths to ensure isolation from root instance.
                                   -- Inject HANGAR_ROOT and TIDEPOOL_BIN_DIR to avoid fragile shell discovery.
-                                  -- Launch Claude with --debug --verbose for hook execution visibility
-                                  let envVars =
-                                        [ ("SUBAGENT_CMD", "claude --debug --verbose")
+                                  -- Launch backend with appropriate flags for hook execution visibility
+                                  -- (backend is already validated and normalized to lowercase)
+                                  let backendCmd = case backend of
+                                        "gemini" -> "gemini --debug --verbose"
+                                        "claude" -> "claude --debug --verbose"
+                                        _        -> "claude --debug --verbose"  -- Unreachable: validation ensures only claude|gemini
+                                      envVars =
+                                        [ ("SUBAGENT_CMD", backendCmd)
                                         , ("HANGAR_ROOT", T.pack hr)
                                         , ("TIDEPOOL_BIN_DIR", T.pack $ hr </> "runtime" </> "bin")
                                         , ("TIDEPOOL_CONTROL_SOCKET", ".tidepool/sockets/control.sock")
