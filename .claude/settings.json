@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "mantle-agent hook session-start"
+            "command": "$TIDEPOOL_BIN_DIR/mantle-agent hook session-start"
           }
         ]
       },
@@ -15,7 +15,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "mantle-agent hook session-start"
+            "command": "$TIDEPOOL_BIN_DIR/mantle-agent hook session-start"
           }
         ]
       }
