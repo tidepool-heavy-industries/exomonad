@@ -1,0 +1,8 @@
+⚠️ Uncommitted changes on {{ branch }}. File PR before stopping:
+
+```bash
+git add {% for file in changed_files %}{{ file }} {% endfor %}
+git commit -m "[{{ bead_id }}] <description>"
+git push -u origin {{ branch }}
+gh pr create --title "[{{ bead_id }}] {{ bead_title }}" --body "Closes {{ bead_id }}"
+```
