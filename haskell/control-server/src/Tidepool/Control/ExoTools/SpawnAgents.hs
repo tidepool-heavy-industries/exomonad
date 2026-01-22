@@ -311,7 +311,7 @@ processBead mHangarRoot repoRoot wtBaseDir backend shortId = do
                                   -- Launch backend with appropriate flags for hook execution visibility
                                   -- (backend is already validated and normalized to lowercase)
                                   let backendCmd = case backend of
-                                        "gemini" -> "gemini --debug --verbose"
+                                        "gemini" -> "gemini --debug"  -- Gemini CLI has no --verbose flag
                                         "claude" -> "claude --debug --verbose"
                                         _        -> "claude --debug --verbose"  -- Unreachable: validation ensures only claude|gemini
                                       envVars =
@@ -507,15 +507,18 @@ writeClaudeLocalSettings hangarRoot worktreePath = do
 
 -- | Write .gemini/settings.json with hooks and MCP configuration.
 -- Gemini combines hooks and MCP in a single file (unlike Claude).
--- Uses $GEMINI_PROJECT_DIR path variable for portability.
+-- Uses absolute paths since Gemini CLI doesn't expand env vars in settings.json.
 writeGeminiConfig
   :: (Member FileSystem es)
-  => FilePath  -- ^ Hangar root (unused for Gemini, kept for API consistency)
+  => FilePath  -- ^ Hangar root (for absolute path to mantle-agent)
   -> FilePath  -- ^ Worktree path
   -> Eff es (Either Text ())
-writeGeminiConfig _hangarRoot worktreePath = do
+writeGeminiConfig hangarRoot worktreePath = do
   let geminiDir = worktreePath </> ".gemini"
       settingsFile = geminiDir </> "settings.json"
+      -- Gemini CLI doesn't expand $GEMINI_PROJECT_DIR, so use absolute paths
+      mantleAgent = hangarRoot </> "runtime" </> "bin" </> "mantle-agent"
+      hookCmd = mantleAgent <> " hook session-start"
 
       settings = object
         [ "hooksConfig" .= object
@@ -529,7 +532,7 @@ writeGeminiConfig _hangarRoot worktreePath = do
                 [ object
                   [ "name" .= ("init-agent" :: Text)
                   , "type" .= ("command" :: Text)
-                  , "command" .= ("$GEMINI_PROJECT_DIR/../runtime/bin/mantle-agent hook session-start" :: Text)
+                  , "command" .= T.pack hookCmd
                   ]
                 ]
               ]
@@ -539,7 +542,7 @@ writeGeminiConfig _hangarRoot worktreePath = do
                 [ object
                   [ "name" .= ("resume-agent" :: Text)
                   , "type" .= ("command" :: Text)
-                  , "command" .= ("$GEMINI_PROJECT_DIR/../runtime/bin/mantle-agent hook session-start" :: Text)
+                  , "command" .= T.pack hookCmd
                   ]
                 ]
               ]
@@ -547,7 +550,7 @@ writeGeminiConfig _hangarRoot worktreePath = do
           ]
         , "mcpServers" .= object
           [ "tidepool" .= object
-            [ "command" .= ("$GEMINI_PROJECT_DIR/../runtime/bin/mantle-agent" :: Text)
+            [ "command" .= T.pack mantleAgent
             , "args" .= (["mcp"] :: [Text])
             ]
           ]
