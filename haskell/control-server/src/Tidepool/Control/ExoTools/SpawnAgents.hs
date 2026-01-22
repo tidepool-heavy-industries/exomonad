@@ -428,6 +428,29 @@ writeEnvFile worktreePath envVars = do
         Right () -> pure $ Right ()
 
 
+-- | Common helper for writing backend settings files.
+-- Reduces duplication between Claude and Gemini config generation.
+writeBackendSettings
+  :: (Member FileSystem es)
+  => FilePath       -- ^ Directory to create (e.g., ".claude", ".gemini")
+  -> FilePath       -- ^ Settings file path
+  -> Aeson.Value    -- ^ JSON settings object
+  -> Text           -- ^ Directory name for error messages
+  -> Text           -- ^ File name for error messages
+  -> Eff es (Either Text ())
+writeBackendSettings configDir settingsFile settings dirName fileName = do
+  let content = TE.decodeUtf8 . BL.toStrict $ encode settings
+
+  dirRes <- createDirectory configDir
+  case dirRes of
+    Left err -> pure $ Left $ "Failed to create " <> dirName <> " directory: " <> T.pack (show err)
+    Right () -> do
+      writeRes <- writeFileText settingsFile content
+      case writeRes of
+        Left err -> pure $ Left $ "Failed to write " <> fileName <> ": " <> T.pack (show err)
+        Right () -> pure $ Right ()
+
+
 -- | Write .claude/settings.local.json with SessionStart hooks.
 -- This bypasses FSWatcher issues with project-scope settings in worktrees.
 -- Uses absolute path to mantle-agent (no environment variable dependency).
@@ -441,7 +464,6 @@ writeClaudeLocalSettings hangarRoot worktreePath = do
       settingsFile = claudeDir </> "settings.local.json"
       mantleAgentPath = hangarRoot </> "runtime" </> "bin" </> "mantle-agent"
 
-      -- Construct JSON using Aeson
       settings = object
         [ "hooks" .= object
           [ "SessionStart" .=
@@ -467,17 +489,7 @@ writeClaudeLocalSettings hangarRoot worktreePath = do
           ]
         ]
 
-      -- Convert to Text
-      content = TE.decodeUtf8 . BL.toStrict $ encode settings
-
-  dirRes <- createDirectory claudeDir
-  case dirRes of
-    Left err -> pure $ Left $ "Failed to create .claude directory: " <> T.pack (show err)
-    Right () -> do
-      writeRes <- writeFileText settingsFile content
-      case writeRes of
-        Left err -> pure $ Left $ "Failed to write settings.local.json: " <> T.pack (show err)
-        Right () -> pure $ Right ()
+  writeBackendSettings claudeDir settingsFile settings ".claude" "settings.local.json"
 
 
 -- | Write .gemini/settings.json with hooks and MCP configuration.
@@ -492,8 +504,6 @@ writeGeminiConfig _hangarRoot worktreePath = do
   let geminiDir = worktreePath </> ".gemini"
       settingsFile = geminiDir </> "settings.json"
 
-      -- Construct JSON using Aeson
-      -- Uses $GEMINI_PROJECT_DIR path variable (Gemini-specific)
       settings = object
         [ "hooksConfig" .= object
           [ "enabled" .= True
@@ -524,45 +534,10 @@ writeGeminiConfig _hangarRoot worktreePath = do
           ]
         , "mcpServers" .= object
           [ "tidepool" .= object
-            [ "command" .= ("mantle-agent" :: Text)
+            [ "command" .= ("$GEMINI_PROJECT_DIR/../runtime/bin/mantle-agent" :: Text)
             , "args" .= (["mcp"] :: [Text])
             ]
           ]
         ]
 
-      -- Convert to Text
-      content = TE.decodeUtf8 . BL.toStrict $ encode settings
-
-  dirRes <- createDirectory geminiDir
-  case dirRes of
-    Left err -> pure $ Left $ "Failed to create .gemini directory: " <> T.pack (show err)
-    Right () -> do
-      writeRes <- writeFileText settingsFile content
-      case writeRes of
-        Left err -> pure $ Left $ "Failed to write settings.json: " <> T.pack (show err)
-        Right () -> pure $ Right ()
-
-
--- | Append .gemini/ to .gitignore if not already present.
-appendGeminiToGitignore
-  :: (Member FileSystem es)
-  => FilePath  -- ^ Worktree path
-  -> Eff es (Either Text ())
-appendGeminiToGitignore worktreePath = do
-  let gitignoreFile = worktreePath </> ".gitignore"
-      geminiEntry = ".gemini/"
-
-  -- Read existing .gitignore (if it exists)
-  readRes <- fileExists gitignoreFile
-  case readRes of
-    Left err -> pure $ Left $ "Failed to check .gitignore: " <> T.pack (show err)
-    Right exists ->
-      if not exists
-        then do
-          -- Create .gitignore with .gemini/ entry
-          writeRes <- writeFileText gitignoreFile geminiEntry
-          case writeRes of
-            Left err -> pure $ Left $ "Failed to create .gitignore: " <> T.pack (show err)
-            Right () -> pure $ Right ()
-        else do
-          pure $ Right ()
+  writeBackendSettings geminiDir settingsFile settings ".gemini" "settings.json"
