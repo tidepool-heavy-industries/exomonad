@@ -54,6 +54,7 @@ runZellijIO :: LastMember IO effs => Eff (Zellij ': effs) a -> Eff effs a
 runZellijIO = interpret $ \case
   CheckZellijEnv -> sendM checkZellijEnvIO
   NewTab config -> sendM $ newTabIO config
+  GoToTab tabId -> sendM $ goToTabIO tabId
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -114,3 +115,27 @@ newTabIO config = do
               , zceExitCode = code
               , zceStderr = T.pack stderr
               }
+
+-- | Switch focus to a tab by name.
+--
+-- Uses: zellij action go-to-tab-name <name>
+goToTabIO :: TabId -> IO (Either ZellijError ())
+goToTabIO (TabId tabName) = do
+  result <- try @SomeException $ do
+    let args = ["action", "go-to-tab-name", T.unpack tabName]
+    readProcessWithExitCode "zellij" args ""
+
+  case result of
+    Left e -> pure $ Left ZellijCommandFailed
+      { zceCommand = "go-to-tab-name"
+      , zceExitCode = -1
+      , zceStderr = T.pack (show e)
+      }
+    Right (exitCode, _stdout, stderr) ->
+      case exitCode of
+        ExitSuccess -> pure $ Right ()
+        ExitFailure code -> pure $ Left ZellijCommandFailed
+          { zceCommand = "go-to-tab-name"
+          , zceExitCode = code
+          , zceStderr = T.pack stderr
+          }

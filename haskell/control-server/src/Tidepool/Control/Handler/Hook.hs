@@ -14,16 +14,20 @@ import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import System.IO (hFlush, stdout)
 import Control.Exception (SomeException, try)
-import Control.Monad.Freer (runM)
+import Control.Monad.Freer (Eff, Member, runM)
 
 import Tidepool.Control.Protocol
-import Tidepool.Control.ExoTools (exoReconstituteLogic, ExoReconstituteArgs(..), ExoReconstituteResult)
+import Tidepool.Control.ExoTools (exoReconstituteLogic, ExoReconstituteArgs(..), ExoReconstituteResult, parseBeadId)
 import Tidepool.Control.Hook.SessionStart (sessionStartLogic)
 import Tidepool.BD.Interpreter (runBDIO, defaultBDConfig)
 import Tidepool.BD.GitInterpreter (runGitIO)
 import Tidepool.GitHub.Interpreter (runGitHubIO, defaultGitHubConfig)
 import Tidepool.Effect.Types (runLog, LogLevel(..))
 import Tidepool.Graph.Goto (unwrapSingleChoice)
+import Tidepool.Effects.Git (Git, getWorktreeInfo, WorktreeInfo(..))
+import Tidepool.Effects.Zellij (Zellij, checkZellijEnv, goToTab, TabId(..))
+import Tidepool.Zellij.Interpreter (runZellijIO)
+import System.Environment (lookupEnv)
 
 -- | Handle a hook event.
 --
@@ -68,12 +72,13 @@ handleSessionStart input = do
         { hookSpecificOutput = Just $ SessionStartOutput mContext
         }
 
--- | Handle Stop hook: run reconstitute logic (sync beads).
+-- | Handle Stop hook: run reconstitute logic (sync beads) and auto-focus on subagent error.
 handleStop :: HookInput -> Runtime -> IO ControlResponse
 handleStop input runtime = do
   TIO.putStrLn "  [HOOK] Running post-stop reconstitute..."
   hFlush stdout
 
+  -- First, run reconstitute
   result <- (try $ runM
     $ runLog Debug
     $ runBDIO defaultBDConfig
@@ -90,7 +95,70 @@ handleStop input runtime = do
     Right _ -> do
       TIO.putStrLn "  [HOOK] Reconstitute succeeded"
       hFlush stdout
+
+      -- Then, attempt to switch focus if in a subagent worktree
+      autoFocusOnSubagentStop
+
       pure $ hookSuccess $ makeResponse input.hookEventName input
+
+-- | Auto-focus on subagent tab when Stop hook fires.
+--
+-- Only triggers if:
+-- 1. We're running in Zellij
+-- 2. We're in a subagent worktree (bd-* branch)
+-- 3. TIDEPOOL_AUTO_FOCUS_ON_ERROR is not set to "false"
+autoFocusOnSubagentStop :: IO ()
+autoFocusOnSubagentStop = do
+  -- Check if auto-focus is enabled (default: enabled)
+  mAutoFocus <- lookupEnv "TIDEPOOL_AUTO_FOCUS_ON_ERROR"
+  let autoFocusEnabled = mAutoFocus /= Just "false"
+
+  if not autoFocusEnabled
+    then do
+      TIO.putStrLn "  [HOOK] Auto-focus disabled via TIDEPOOL_AUTO_FOCUS_ON_ERROR"
+      hFlush stdout
+    else do
+      result <- try $ runM
+        $ runZellijIO
+        $ runGitIO
+        $ autoFocusLogic
+
+      case result of
+        Left (e :: SomeException) -> do
+          TIO.putStrLn $ "  [HOOK] Auto-focus failed: " <> T.pack (show e)
+          hFlush stdout
+        Right () -> do
+          TIO.putStrLn "  [HOOK] Auto-focus completed"
+          hFlush stdout
+
+-- | Auto-focus logic: check Zellij, parse bead ID, switch focus.
+autoFocusLogic :: (Member Zellij es, Member Git es) => Eff es ()
+autoFocusLogic = do
+  -- Check if we're in Zellij
+  mZellij <- checkZellijEnv
+  case mZellij of
+    Nothing -> pure ()  -- Not in Zellij, skip
+    Just _ -> do
+      -- Get worktree info to extract branch name
+      mWt <- getWorktreeInfo
+      case mWt of
+        Nothing -> pure ()  -- No worktree info, skip
+        Just wt -> do
+          -- Parse bead ID from branch name
+          let branchName = wt.wiBranch
+              maybeBeadId = parseBeadId branchName
+          case maybeBeadId of
+            Nothing -> pure ()  -- Not a bd-* branch, skip
+            Just beadId -> do
+              -- Switch focus to tab
+              -- Tab name is the short ID (e.g., "9uv")
+              -- parseBeadId returns "tidepool-9uv", so strip the prefix
+              let tabName = T.stripPrefix "tidepool-" beadId
+              case tabName of
+                Nothing -> pure ()  -- Unexpected format, skip
+                Just shortId -> do
+                  _ <- goToTab (TabId shortId)
+                  pure ()
 
 -- | Create appropriate response based on hook type.
 makeResponse :: Text -> HookInput -> HookOutput
