@@ -393,7 +393,8 @@ writeEnvFile worktreePath envVars = do
     then pure $ Left $ "Empty env vars: " <> T.pack (show invalid)
     else do
       let envFile = worktreePath </> ".env.subagent"
-          content = T.unlines [ "export " <> k <> "=" <> v | (k, v) <- envVars ]
+          -- Quote values to handle spaces (e.g., "claude --debug --verbose")
+          content = T.unlines [ "export " <> k <> "=\"" <> v <> "\"" | (k, v) <- envVars ]
       writeRes <- writeFileText envFile content
       case writeRes of
         Left err -> pure $ Left $ T.pack (show err)
