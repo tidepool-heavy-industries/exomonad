@@ -200,21 +200,31 @@ spawnAgentsLogic args = do
             Just hr -> hr </> "worktrees"
             Nothing -> repoRoot </> ".worktrees" </> "tidepool"
 
-      -- 3. Process each bead
-      let backend = fromMaybe "claude" args.saaBackend
-      results <- forM args.saaBeadIds $ \shortId -> do
-        processBead mHangarRoot repoRoot wtBaseDir backend shortId
+      -- 3. Validate and normalize backend parameter
+      let backendRaw = T.toLower $ fromMaybe "claude" args.saaBackend
+          validBackends = ["claude", "gemini"]
 
-      -- Partition results
-      let (failed, succeeded) = partitionEithers results
-          worktrees = [(sid, path) | (sid, path, _) <- succeeded]
-          tabs = [(sid, tabId) | (sid, _, TabId tabId) <- succeeded]
+      if backendRaw `notElem` validBackends
+        then pure $ gotoExit $ SpawnAgentsResult
+          { sarWorktrees = []
+          , sarTabs = []
+          , sarFailed = [("*", "Invalid backend '" <> backendRaw <> "'. Must be 'claude' or 'gemini'.")]
+          }
+        else do
+          -- 4. Process each bead
+          results <- forM args.saaBeadIds $ \shortId -> do
+            processBead mHangarRoot repoRoot wtBaseDir backendRaw shortId
 
-      pure $ gotoExit $ SpawnAgentsResult
-        { sarWorktrees = worktrees
-        , sarTabs = tabs
-        , sarFailed = failed
-        }
+          -- Partition results
+          let (failed, succeeded) = partitionEithers results
+              worktrees = [(sid, path) | (sid, path, _) <- succeeded]
+              tabs = [(sid, tabId) | (sid, _, TabId tabId) <- succeeded]
+
+          pure $ gotoExit $ SpawnAgentsResult
+            { sarWorktrees = worktrees
+            , sarTabs = tabs
+            , sarFailed = failed
+            }
 
 
 -- | Process a single bead: create worktree, bootstrap .tidepool/, write context, launch tab.
@@ -296,9 +306,11 @@ processBead mHangarRoot repoRoot wtBaseDir backend shortId = do
                                   -- Explicitly set sockets to relative paths to ensure isolation from root instance.
                                   -- Inject HANGAR_ROOT and TIDEPOOL_BIN_DIR to avoid fragile shell discovery.
                                   -- Launch backend with appropriate flags for hook execution visibility
+                                  -- (backend is already validated and normalized to lowercase)
                                   let backendCmd = case backend of
                                         "gemini" -> "gemini --debug --verbose"
-                                        _        -> "claude --debug --verbose"  -- Default to claude
+                                        "claude" -> "claude --debug --verbose"
+                                        _        -> "claude --debug --verbose"  -- Unreachable: validation ensures only claude|gemini
                                       envVars =
                                         [ ("SUBAGENT_CMD", backendCmd)
                                         , ("HANGAR_ROOT", T.pack hr)
