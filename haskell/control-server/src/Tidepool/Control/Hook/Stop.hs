@@ -79,10 +79,12 @@ stopHookLogic repoName = do
           hasPR = isJust mPR
           isBeadBranch = isJust mBeadId
 
-          -- Clean if: (not bead branch) OR (has PR and no dirty files)
-          isClean = not isBeadBranch || (hasPR && not hasDirty)
+          -- Clean if: (not bead branch) OR (has PR)
+          -- Having a PR means work is "done enough" even with local dirty files
+          isClean = not isBeadBranch || hasPR
 
           -- Block if: on bead branch AND has uncommitted changes AND no PR
+          -- If PR exists, we don't block even with dirty files
           shouldBlock = isBeadBranch && hasDirty && not hasPR
 
           prCtx = case mPR of

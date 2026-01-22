@@ -1,4 +1,5 @@
-{% if dirty_files %}
+{# Only show uncommitted changes warning when blocking (no PR filed yet) #}
+{% if dirty_files and not pr %}
 ## Uncommitted Changes
 
 The following files have uncommitted changes:
@@ -26,18 +27,15 @@ Use the `file_pr` MCP tool to create a pull request:
 The tool will infer bead ID and title from your branch.
 {% endif %}
 
-{% if pr and pr.pending_comments > 0 %}
-## PR Has Feedback
+{# TODO: Wire pr_review_status to fetch actual pending_comments count #}
 
-PR #{{ pr.number }} has **{{ pr.pending_comments }}** unaddressed review comment(s).
-
-Use `pr_review_status` MCP tool to see the feedback details, then address before stopping.
-{% endif %}
-
-{% if pr and pr.pending_comments == 0 and not dirty_files %}
+{% if pr %}
 ## PR Filed
-
-✓ PR #{{ pr.number }} is up to date with no pending feedback.
+{% if dirty_files %}
+✓ PR #{{ pr.number }} filed. You have local uncommitted changes (not blocking since PR exists).
+{% else %}
+✓ PR #{{ pr.number }} is up to date.
+{% endif %}
 {% endif %}
 
 {% if clean and not bead_id %}
