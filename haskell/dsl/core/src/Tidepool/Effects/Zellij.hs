@@ -38,6 +38,7 @@ module Tidepool.Effects.Zellij
     -- * Smart Constructors
   , checkZellijEnv
   , newTab
+  , goToTab
 
     -- * Configuration Types
   , TabConfig(..)
@@ -129,6 +130,12 @@ data Zellij r where
     :: TabConfig
     -> Zellij (Either ZellijError TabId)
 
+  -- | Switch focus to a tab by name.
+  -- Returns success or error if tab doesn't exist or command failed.
+  GoToTab
+    :: TabId
+    -> Zellij (Either ZellijError ())
+
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- SMART CONSTRUCTORS
@@ -171,3 +178,20 @@ newTab
   => TabConfig
   -> Eff effs (Either ZellijError TabId)
 newTab = send . NewTab
+
+-- | Switch focus to a tab by name.
+--
+-- The tab must already exist in the current Zellij session.
+-- Requires running inside Zellij (check with 'checkZellijEnv' first).
+--
+-- @
+-- result <- goToTab (TabId "5dj")
+-- case result of
+--   Right () -> -- focus switched successfully
+--   Left err -> handleError err
+-- @
+goToTab
+  :: Member Zellij effs
+  => TabId
+  -> Eff effs (Either ZellijError ())
+goToTab = send . GoToTab
