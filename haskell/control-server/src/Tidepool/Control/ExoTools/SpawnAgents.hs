@@ -351,7 +351,9 @@ bootstrapTidepool mHangarRoot repoRoot worktreePath = do
                 Right () -> do
                   -- Write Claude local settings with SessionStart hooks
                   -- This bypasses FSWatcher issues with project-scope settings in worktrees
-                  settingsRes <- writeClaudeLocalSettings worktreePath
+                  -- Use hangar root (or repo root fallback) to build absolute binary path
+                  let hr = fromMaybe repoRoot mHangarRoot
+                  settingsRes <- writeClaudeLocalSettings hr worktreePath
                   case settingsRes of
                     Left err -> pure $ Left $ "Failed to write Claude settings: " <> err
                     Right () -> pure $ Right ()
@@ -399,14 +401,19 @@ writeEnvFile worktreePath envVars = do
 
 -- | Write .claude/settings.local.json with SessionStart hooks.
 -- This bypasses FSWatcher issues with project-scope settings in worktrees.
+-- Uses absolute path to mantle-agent (no environment variable dependency).
 writeClaudeLocalSettings
   :: (Member FileSystem es)
-  => FilePath  -- ^ Worktree path
+  => FilePath  -- ^ Hangar root (for building absolute binary path)
+  -> FilePath  -- ^ Worktree path
   -> Eff es (Either Text ())
-writeClaudeLocalSettings worktreePath = do
+writeClaudeLocalSettings hangarRoot worktreePath = do
   let claudeDir = worktreePath </> ".claude"
       settingsFile = claudeDir </> "settings.local.json"
+      -- Absolute path to mantle-agent binary
+      mantleAgentPath = hangarRoot </> "runtime" </> "bin" </> "mantle-agent"
       -- JSON content with SessionStart hooks for both startup and resume
+      -- Uses absolute path instead of $TIDEPOOL_BIN_DIR expansion
       content = T.unlines
         [ "{"
         , "  \"hooks\": {"
@@ -416,7 +423,7 @@ writeClaudeLocalSettings worktreePath = do
         , "        \"hooks\": ["
         , "          {"
         , "            \"type\": \"command\","
-        , "            \"command\": \"$TIDEPOOL_BIN_DIR/mantle-agent hook session-start\""
+        , "            \"command\": \"" <> T.pack mantleAgentPath <> " hook session-start\""
         , "          }"
         , "        ]"
         , "      },"
@@ -425,7 +432,7 @@ writeClaudeLocalSettings worktreePath = do
         , "        \"hooks\": ["
         , "          {"
         , "            \"type\": \"command\","
-        , "            \"command\": \"$TIDEPOOL_BIN_DIR/mantle-agent hook session-start\""
+        , "            \"command\": \"" <> T.pack mantleAgentPath <> " hook session-start\""
         , "          }"
         , "        ]"
         , "      }"
