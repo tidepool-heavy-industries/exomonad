@@ -43,12 +43,16 @@ use tracing::{debug, error, info};
 // JSON-RPC 2.0 Types
 // ============================================================================
 
-/// JSON-RPC 2.0 request.
+/// JSON-RPC 2.0 request (or notification).
+///
+/// MCP notifications have no `id` field - they're fire-and-forget.
+/// Requests have an `id` and expect a response.
 #[derive(Debug, Deserialize)]
 struct JsonRpcRequest {
     #[allow(dead_code)]
     jsonrpc: String,
-    id: Value,
+    /// Request ID. None for notifications (no response expected).
+    id: Option<Value>,
     method: String,
     #[serde(default)]
     params: Value,
@@ -285,48 +289,67 @@ impl McpServer {
                 continue;
             }
 
-            debug!(request = %line, "Received JSON-RPC request");
+            debug!(request = %line, "Received JSON-RPC message");
 
             let response = match serde_json::from_str::<JsonRpcRequest>(&line) {
                 Ok(request) => self.handle_request(request),
                 Err(e) => {
-                    error!(error = %e, "Failed to parse JSON-RPC request");
-                    JsonRpcResponse::error(
+                    error!(error = %e, "Failed to parse JSON-RPC message");
+                    // Parse errors always get a response (with null id)
+                    Some(JsonRpcResponse::error(
                         Value::Null,
                         -32700,
                         format!("Parse error: {}", e),
-                    )
+                    ))
                 }
             };
 
-            let response_json = serde_json::to_string(&response)
-                .expect("Failed to serialize response");
-            debug!(response = %response_json, "Sending JSON-RPC response");
+            // Only send response for requests (not notifications)
+            if let Some(response) = response {
+                let response_json = serde_json::to_string(&response)
+                    .expect("Failed to serialize response");
+                debug!(response = %response_json, "Sending JSON-RPC response");
 
-            writeln!(stdout, "{}", response_json)?;
-            stdout.flush()?;
+                writeln!(stdout, "{}", response_json)?;
+                stdout.flush()?;
+            }
         }
 
         info!("MCP server shutting down");
         Ok(())
     }
 
-    /// Handle a JSON-RPC request.
-    fn handle_request(&mut self, request: JsonRpcRequest) -> JsonRpcResponse {
-        match request.method.as_str() {
-            "initialize" => self.handle_initialize(request.id),
+    /// Handle a JSON-RPC request or notification.
+    ///
+    /// Returns `None` for notifications (no response expected).
+    /// Returns `Some(response)` for requests.
+    fn handle_request(&mut self, request: JsonRpcRequest) -> Option<JsonRpcResponse> {
+        // Notifications have no id - they don't expect a response
+        let id = match request.id {
+            Some(id) => id,
+            None => {
+                // This is a notification - handle silently, no response
+                debug!(method = %request.method, "Received notification (no response)");
+                return None;
+            }
+        };
+
+        // This is a request - needs a response
+        let response = match request.method.as_str() {
+            "initialize" => self.handle_initialize(id),
             "initialized" => {
-                // Notification, no response needed but we return empty for protocol compliance
-                JsonRpcResponse::success(request.id, json!({}))
+                // This shouldn't happen (initialized is a notification), but handle gracefully
+                JsonRpcResponse::success(id, json!({}))
             }
-            "tools/list" => self.handle_tools_list(request.id),
-            "tools/call" => self.handle_tools_call(request.id, request.params),
+            "tools/list" => self.handle_tools_list(id),
+            "tools/call" => self.handle_tools_call(id, request.params),
             "notifications/cancelled" => {
-                // Cancellation notification, acknowledge
-                JsonRpcResponse::success(request.id, json!({}))
+                // This shouldn't happen (notifications have no id), but handle gracefully
+                JsonRpcResponse::success(id, json!({}))
             }
-            _ => JsonRpcResponse::method_not_found(request.id, &request.method),
-        }
+            _ => JsonRpcResponse::method_not_found(id, &request.method),
+        };
+        Some(response)
     }
 
     /// Handle initialize request.
