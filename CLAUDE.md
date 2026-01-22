@@ -255,6 +255,15 @@ Tools: find_callers, show_fields, show_constructors, teach-graph, confirm_action
 
 ### Configuration
 
+**Need help with Claude Code settings?** We have a Claude Code configuration specialist (preloaded with official documentation) available as an oracle. When you have questions about:
+- Hook configuration syntax (SessionStart, PreToolUse, etc.)
+- Settings file structure and scope (project vs local vs user)
+- MCP server setup
+- Environment variables and integration
+- Debugging hook execution
+
+Ask the specialist directly instead of guessing. They have authoritative knowledge about Claude Code internals, hook lifecycle, and best practices.
+
 In `.claude/settings.local.json`:
 ```json
 {
