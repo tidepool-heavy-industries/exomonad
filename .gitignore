@@ -5,6 +5,7 @@ dist-newstyle/
 *.dyn_o
 .env # keys and etc
 .env
+.env.subagent
 
 .beads/
 .mantle/*
