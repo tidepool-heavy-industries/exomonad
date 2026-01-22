@@ -13,7 +13,8 @@ module Tidepool.Control.ExoTools.SpawnAgents
   , spawnAgentsLogic
   , SpawnAgentsArgs(..)
   , SpawnAgentsResult(..)
-  ) where
+  )
+where
 
 import Control.Monad (forM)
 import Control.Monad.Freer (Eff, Member)
@@ -217,72 +218,88 @@ processBead
   -> Text                                              -- ^ Short bead ID
   -> Eff es (Either (Text, Text) (Text, FilePath, TabId))  -- ^ Left (id, error) or Right (id, path, tabId)
 processBead mHangarRoot repoRoot wtBaseDir shortId = do
-  -- Normalize bead ID (ensure it starts with tidepool-)
-  let fullId = if "tidepool-" `T.isPrefixOf` shortId
-               then shortId
-               else "tidepool-" <> shortId
+  -- Validate shortId (prevent path traversal)
+  if T.any (\c -> c == '/' || c == '\\') shortId
+    then pure $ Left (shortId, "Invalid bead ID: contains path separators")
+    else do
+      -- Normalize bead ID (ensure it starts with tidepool-)
+      let fullId = if "tidepool-" `T.isPrefixOf` shortId
+                   then shortId
+                   else "tidepool-" <> shortId
+          hr = fromMaybe repoRoot mHangarRoot
 
-  mBead <- getBead fullId
-  case mBead of
-    Nothing -> pure $ Left (shortId, "Bead not found: " <> fullId)
-    Just bead -> do
-      if bead.biStatus == StatusBlocked
-        then pure $ Left (shortId, "Bead is blocked: " <> fullId)
+      -- Early validation: Check for binary existence
+      let binPath = hr </> "runtime" </> "bin" </> "tidepool-control-server"
+      binExistsRes <- fileExists binPath
+      
+      -- Handle fileExists result (Left is error, Right is boolean existence)
+      let binExists = case binExistsRes of
+            Right True -> True
+            _ -> False
+
+      if not binExists
+        then pure $ Left (shortId, "Binary missing: " <> T.pack binPath)
         else do
-          let slug = slugify bead.biTitle
-              branchName = "bd-" <> shortId <> "/" <> slug
-              -- New location: <wtBaseDir>/bd-<id>-<slug>
-              targetPath = wtBaseDir </> "bd-" <> T.unpack shortId <> "-" <> T.unpack slug
-              spec = WorktreeSpec
-                { wsBaseName = "bd-" <> shortId
-                , wsFromBranch = Just "origin/main"
-                , wsBranchName = Just branchName
-                , wsPath = Just targetPath
-                }
+          mBead <- getBead fullId
+          case mBead of
+            Nothing -> pure $ Left (shortId, "Bead not found: " <> fullId)
+            Just bead -> do
+              if bead.biStatus == StatusBlocked
+                then pure $ Left (shortId, "Bead is blocked: " <> fullId)
+                else do
+                  let slug = slugify bead.biTitle
+                      branchName = "bd-" <> shortId <> "/" <> slug
+                      -- New location: <wtBaseDir>/bd-<id>-<slug>
+                      targetPath = wtBaseDir </> "bd-" <> T.unpack shortId <> "-" <> T.unpack slug
+                      spec = WorktreeSpec
+                        { wsBaseName = "bd-" <> shortId
+                        , wsFromBranch = Just "origin/main"
+                        , wsBranchName = Just branchName
+                        , wsPath = Just targetPath
+                        }
 
-          -- a. Create worktree
-          wtRes <- createWorktree spec
-          case wtRes of
-            Left err -> pure $ Left (shortId, T.pack (show err))
-            Right (WorktreePath path) -> do
-              -- b. Bootstrap .tidepool/ directory structure
-              bootstrapRes <- bootstrapTidepool mHangarRoot repoRoot path
-              case bootstrapRes of
-                Left errMsg -> pure $ Left (shortId, "Worktree created but bootstrap failed: " <> errMsg)
-                Right () -> do
-                  -- c. Write bead context
-                  let context = buildBeadContext bead branchName
-                  contextRes <- writeBeadContext path context
-                  case contextRes of
-                    Left errMsg -> pure $ Left (shortId, "Worktree created but context write failed: " <> errMsg)
-                    Right () -> do
-                      -- d. Write subagent environment
-                      -- Explicitly set sockets to relative paths to ensure isolation from root instance.
-                      -- Inject HANGAR_ROOT and TIDEPOOL_BIN_DIR to avoid fragile shell discovery.
-                      let hr = fromMaybe repoRoot mHangarRoot
-                          envVars = 
-                            [ ("SUBAGENT_CMD", "claude")
-                            , ("HANGAR_ROOT", T.pack hr)
-                            , ("TIDEPOOL_BIN_DIR", T.pack $ hr </> "runtime" </> "bin")
-                            , ("TIDEPOOL_CONTROL_SOCKET", ".tidepool/sockets/control.sock")
-                            , ("TIDEPOOL_TUI_SOCKET", ".tidepool/sockets/tui.sock")
-                            ]
-                      envRes <- writeEnvFile path envVars
-                      case envRes of
-                        Left errMsg -> pure $ Left (shortId, "Worktree created but env write failed: " <> errMsg)
+                  -- a. Create worktree
+                  wtRes <- createWorktree spec
+                  case wtRes of
+                    Left err -> pure $ Left (shortId, T.pack (show err))
+                    Right (WorktreePath path) -> do
+                      -- b. Bootstrap .tidepool/ directory structure
+                      bootstrapRes <- bootstrapTidepool mHangarRoot repoRoot path
+                      case bootstrapRes of
+                        Left errMsg -> pure $ Left (shortId, "Worktree created but bootstrap failed: " <> errMsg)
                         Right () -> do
-                          -- e. Launch Zellij tab
-                          -- Use absolute path for layout to avoid CWD resolution issues
-                          let tabConfig = TabConfig
-                                { tcName = shortId
-                                , tcLayout = repoRoot </> ".zellij" </> "worktree.kdl"
-                                , tcCwd = path
-                                , tcEnv = envVars
-                                }
-                          tabRes <- newTab tabConfig
-                          case tabRes of
-                            Left err -> pure $ Left (shortId, "Worktree created but tab launch failed: " <> T.pack (show err))
-                            Right tabId -> pure $ Right (shortId, path, tabId)
+                          -- c. Write bead context
+                          let context = buildBeadContext bead branchName
+                          contextRes <- writeBeadContext path context
+                          case contextRes of
+                            Left errMsg -> pure $ Left (shortId, "Worktree created but context write failed: " <> errMsg)
+                            Right () -> do
+                              -- d. Write subagent environment
+                              -- Explicitly set sockets to relative paths to ensure isolation from root instance.
+                              -- Inject HANGAR_ROOT and TIDEPOOL_BIN_DIR to avoid fragile shell discovery.
+                              let envVars =
+                                    [ ("SUBAGENT_CMD", "claude")
+                                    , ("HANGAR_ROOT", T.pack hr)
+                                    , ("TIDEPOOL_BIN_DIR", T.pack $ hr </> "runtime" </> "bin")
+                                    , ("TIDEPOOL_CONTROL_SOCKET", ".tidepool/sockets/control.sock")
+                                    , ("TIDEPOOL_TUI_SOCKET", ".tidepool/sockets/tui.sock")
+                                    ]
+                              envRes <- writeEnvFile path envVars
+                              case envRes of
+                                Left errMsg -> pure $ Left (shortId, "Worktree created but env write failed: " <> errMsg)
+                                Right () -> do
+                                  -- e. Launch Zellij tab
+                                  -- Use absolute path for layout to avoid CWD resolution issues
+                                  let tabConfig = TabConfig
+                                        { tcName = shortId
+                                        , tcLayout = repoRoot </> ".zellij" </> "worktree.kdl"
+                                        , tcCwd = path
+                                        , tcEnv = envVars
+                                        }
+                                  tabRes <- newTab tabConfig
+                                  case tabRes of
+                                    Left err -> pure $ Left (shortId, "Worktree created but tab launch failed: " <> T.pack (show err))
+                                    Right tabId -> pure $ Right (shortId, path, tabId)
 
 
 -- | Bootstrap .tidepool/ directory structure in a worktree.
@@ -352,9 +369,14 @@ writeEnvFile
   -> [(Text, Text)] -- ^ Env vars
   -> Eff es (Either Text ())
 writeEnvFile worktreePath envVars = do
-  let envFile = worktreePath </> ".env.subagent"
-      content = T.unlines [ "export " <> k <> "=" <> v | (k, v) <- envVars ]
-  writeRes <- writeFileText envFile content
-  case writeRes of
-    Left err -> pure $ Left $ T.pack (show err)
-    Right () -> pure $ Right ()
+  -- Validate all values are non-empty
+  let invalid = filter (T.null . snd) envVars
+  if not (null invalid)
+    then pure $ Left $ "Empty env vars: " <> T.pack (show invalid)
+    else do
+      let envFile = worktreePath </> ".env.subagent"
+          content = T.unlines [ "export " <> k <> "=" <> v | (k, v) <- envVars ]
+      writeRes <- writeFileText envFile content
+      case writeRes of
+        Left err -> pure $ Left $ T.pack (show err)
+        Right () -> pure $ Right ()

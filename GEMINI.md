@@ -63,3 +63,13 @@ The template (`subagent-pc.yaml`) is critical for bootstrapping the subagent env
 ### Subagent Hardening
 - **Environment Isolation**: `SpawnAgents.hs` explicitly sets `TIDEPOOL_CONTROL_SOCKET` and `TIDEPOOL_TUI_SOCKET` to relative paths in the subagent's `.env.subagent` file. This prevents accidental connection to the root control server (isolation breach) even if the parent environment uses absolute paths.
 - **Log Consistency**: Templates and Zellij layouts use an explicit log file path (`.tidepool/logs/process-compose.log`) to ensure `tail` commands reliably find the log stream.
+
+## Architectural Pillars of Tidepool Idiomatic Haskell
+
+The Haskell codebase adheres to a set of core principles designed for maximum safety, testability, and type-level expressiveness:
+
+1. **Extensible Effect Manifold**: Business logic resides strictly in the `Eff` monad (`freer-simple`), ensuring agents remain IO-blind. Interpreters mediate all world interactions (FS, Network, Time) at the application edge.
+2. **Servant-Patterned Graphs**: Graph DSLs use the `mode :- nodeDef` record pattern. This allows a single record structure to serve as a type-level specification (`AsGraph` mode) and a runtime handler map (`AsHandler` mode).
+3. **Inductive Type-Safe Dispatch**: Graph traversal is performed via recursive typeclass dispatch on `OneOf` sum types (via `GotoChoice`), providing fully typed state transitions without `Dynamic` or `unsafeCoerce`.
+4. **Proof-Carrying Structured I/O**: The `StructuredOutput` system unifies JSON Schema generation, encoding, and diagnostic parsing. Success types carry proof of validity, ensuring "Parse, Don't Validate" remains the standard.
+5. **Strict Compile-Time Guardrails**: Extensive use of `TypeError` and `Unsatisfiable` constraints to catch graph errors—such as unreachable nodes, dead ends, or invalid transition targets—during compilation.

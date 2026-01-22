@@ -14,7 +14,7 @@ import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.STM (newTVarIO, readTVarIO, atomically, writeTVar, readTVar, TVar)
 import Control.Exception (SomeException, catch, finally, bracket)
 import qualified Control.Exception as E
-import Control.Monad (forever, void, when)
+import Control.Monad (forever, void, when, unless)
 import Data.Maybe (isJust)
 import Data.Aeson (eitherDecodeStrict, encode)
 import Data.ByteString (ByteString)
@@ -25,9 +25,11 @@ import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import Network.Socket hiding (ControlMessage)
 import Network.Socket.ByteString (recv, sendAll)
-import System.Directory (createDirectoryIfMissing, removeFile)
+import System.Directory (createDirectoryIfMissing, removeFile, doesFileExist, getCurrentDirectory)
 import System.Environment (lookupEnv)
-import System.FilePath (takeDirectory)
+import System.Exit (exitFailure)
+import System.FilePath (takeDirectory, (</>))
+import System.IO (hPutStrLn, stderr)
 import System.IO.Error (isDoesNotExistError)
 
 import Tidepool.Control.Handler (handleMessage)
@@ -58,12 +60,49 @@ loadObservabilityConfig = do
           
       pure $ Just $ ObservabilityConfig loki otlp "tidepool-control-server"
 
+-- | Check if Hangar root exists and return it.
+findHangarRootIO :: IO (Maybe FilePath)
+findHangarRootIO = do
+  mEnv <- lookupEnv "HANGAR_ROOT"
+  case mEnv of
+    Just path -> pure $ Just path
+    Nothing -> do
+      -- Fallback: walk up from current directory
+      cwd <- getCurrentDirectory
+      walkUp cwd
+  where
+    walkUp path = do
+      exists <- doesFileExist (path </> "Hangar.toml")
+      if exists
+        then pure $ Just path
+        else do
+          let parent = takeDirectory path
+          if parent == path
+             then pure Nothing
+             else walkUp parent
+
+-- | Validate that the subagent template exists.
+validateTemplate :: IO ()
+validateTemplate = do
+  mHangar <- findHangarRootIO
+  let templatePath = case mHangar of
+        Just hr -> hr </> "templates" </> "subagent-pc.yaml"
+        Nothing -> ".tidepool/templates/subagent-pc.yaml" -- Fallback relative to CWD if running from repo root
+  
+  exists <- doesFileExist templatePath
+  unless exists $ do
+    hPutStrLn stderr $ "FATAL: Subagent template missing: " <> templatePath
+    exitFailure
+
 -- | Run the control server. Blocks forever.
 --
 -- 1. Starts LSP session for the project
 -- 2. Accepts Unix socket connections on .tidepool/sockets/control.sock
 runServer :: Logger -> ServerConfig -> IO ()
 runServer logger config = do
+  -- Fail fast if templates are missing
+  validateTemplate
+
   -- Get socket paths from environment
   -- We no longer provide hardcoded defaults here to ensure a single source of truth
   -- via environment variables (e.g. set in start-augmented.sh or .env)
