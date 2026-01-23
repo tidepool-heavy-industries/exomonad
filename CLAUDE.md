@@ -243,15 +243,13 @@ Tools: find_callers, show_fields, show_constructors, teach-graph, confirm_action
 
 1. User asks question requiring code intelligence or human decision
 2. Claude plans to call MCP tool (e.g., teach-graph, confirm_action)
-3. Claude Code spawns mantle-agent mcp (JSON-RPC stdio)
-4. mantle-agent forwards ControlMessage::McpToolCall via Unix Socket
-5. control-server routes to appropriate handler
+3. Claude Code sends HTTP request to control-server (http+unix://)
+4. control-server routes to appropriate handler
    - Tier 1 (LSP-only): find_callers, show_fields, show_constructors
    - Tier 2 (LLM-enhanced): teach-graph (LSP + Haiku selection)
    - Tier 4 (TUI-interactive): confirm_action, select_option, request_guidance
-6. Returns tool result (JSON)
-7. mantle-agent formats as JSON-RPC result to stdout
-8. Claude analyzes and responds to user
+5. Returns tool result (JSON) via HTTP response
+6. Claude analyzes and responds to user
 ```
 
 ### Configuration
@@ -283,7 +281,7 @@ In `.claude/settings.local.json`:
 }
 ```
 
-**Note:** MCP server configuration uses `.mcp.json` (plugin-based approach). Claude spawns `mantle-agent mcp` directly, which connects to control-server via Unix socket.
+**Note:** MCP server configuration uses `.mcp.json`. Claude Code connects directly to control-server via HTTP MCP transport (`http+unix://`), eliminating the need for the `mantle-agent mcp` proxy.
 
 ### Running
 
@@ -301,7 +299,7 @@ This launches the Hybrid Tidepool setup as a **TUI IDE** wrapping Claude Code:
   - Pane 2 (top-right): process-compose dashboard (infrastructure monitoring)
   - Pane 3 (bottom-right): control-server logs (backend telemetry)
 
-Claude Code starts automatically in the tidepool directory. MCP tools connect to control-server via Unix socket.
+Claude Code starts automatically in the tidepool directory. MCP tools connect directly to control-server via HTTP MCP transport.
 
 **Note:** If MCP shows "failed" on startup (control-server not yet ready), use `/mcp` → `Reconnect` once services are healthy.
 
