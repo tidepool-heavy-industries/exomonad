@@ -1,71 +1,124 @@
-# Multi-stage Dockerfile for Tidepool Orchestrator
+# Stage 0: Cabal File Harvester
+# This stage copies only the .cabal files to create a cache-friendly layer
+# for dependency building.
+FROM alpine:latest AS cabal-files
+WORKDIR /app
+COPY cabal.project .
+# Copy the entire haskell directory
+COPY haskell/ haskell/
+# Find and delete everything that is NOT a .cabal file
+# This is a robust way to keep the directory structure matching cabal.project
+# without copying source code.
+RUN find haskell -type f ! -name "*.cabal" -delete
 
-# Stage 1: Extract Docker CLI
-# We use the official Docker image to get a static docker binary
-FROM docker:cli AS docker-cli
+# Stage 1: Builder
+# Use GHC 9.6.6 for best GHC2021 support and compatibility
+# Force linux/amd64 to avoid cross-compilation issues on ARM hosts
+FROM --platform=linux/amd64 haskell:9.6.6-slim AS builder
 
-# Stage 2: Main Orchestrator Image
-FROM ubuntu:22.04
-
-# Avoid interactive prompts during package installation
-ENV DEBIAN_FRONTEND=noninteractive
-
-# Install system dependencies
-# tini: for zombie reaping and signal handling (PID 1)
-# curl, ca-certificates: for downloading assets and secure connections
-# bash: shell for scripts
-# git: for repository management within the orchestrator
+# Install system dependencies for build
+# zlib1g-dev, libffi-dev, libgmp-dev are required for Haskell compilation
 RUN apt-get update && apt-get install -y \
-    tini \
-    curl \
-    ca-certificates \
-    bash \
+    libgmp-dev \
+    libffi-dev \
+    zlib1g-dev \
+    pkg-config \
     git \
-    socat \
-    lsof \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Docker CLI from the first stage
-COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
+WORKDIR /build
+
+# Copy project definition and .cabal files from the harvester stage
+# This layer ONLY changes if dependencies change.
+COPY --from=cabal-files /app/cabal.project .
+COPY --from=cabal-files /app/haskell haskell/
+
+# Remove Nix-specific zlib configuration from cabal.project
+# The hardcoded /nix/store paths will fail in Debian.
+# We delete the 'package zlib' line and the following 2 lines.
+RUN sed -i '/package zlib/,+2d' cabal.project
+
+# Build dependencies (Cached Layer)
+# This will only re-run if cabal.project or a .cabal file changes.
+RUN --mount=type=cache,target=/root/.cabal/store \
+    --mount=type=cache,target=/build/dist-newstyle \
+    cabal update && \
+    cabal build --only-dependencies tidepool-control-server -j
+
+# Copy the rest of the source (Source Layer)
+# This layer changes frequently (whenever source code changes).
+COPY . .
+
+# Build the binary
+# We build with -O1 for a balance between build speed and runtime performance.
+RUN --mount=type=cache,target=/root/.cabal/store \
+    --mount=type=cache,target=/build/dist-newstyle \
+    cabal build tidepool-control-server -j --O1
+
+# Extract the binary using cabal list-bin
+RUN cp $(cabal list-bin tidepool-control-server) /usr/local/bin/tidepool-control-server
+
+# Stage 2: Runtime
+# Debian bookworm-slim provides a small, stable base for the runtime
+FROM --platform=linux/amd64 debian:bookworm-slim AS runtime
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y \
+    libgmp10 \
+    libffi8 \
+    zlib1g \
+    ca-certificates \
+    tini \
+    gosu \
+    git \
+    curl \
+    socat \
+    lsof \
+    procps \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Docker CLI
+RUN curl -fsSL https://get.docker.com | sh && rm -rf /var/lib/apt/lists/*
 
 # Install Zellij
 ARG ZELLIJ_VERSION=0.41.2
-RUN curl -L https://github.com/zellij-org/zellij/releases/download/v${ZELLIJ_VERSION}/zellij-x86_64-unknown-linux-musl.tar.gz | tar xz \
-    && mv zellij /usr/local/bin/zellij \
-    && chmod +x /usr/local/bin/zellij
+# Since we forced linux/amd64, we can hardcode the arch for Zellij too
+RUN curl -L "https://github.com/zellij-org/zellij/releases/download/v${ZELLIJ_VERSION}/zellij-x86_64-unknown-linux-musl.tar.gz" | tar xz && \
+    mv zellij /usr/local/bin/zellij && \
+    chmod +x /usr/local/bin/zellij
 
-# Copy pre-built Tidepool binaries
-# NOTE: These must be Linux x86_64 binaries placed in docker/orchestrator/bin/ before building.
-# We copy the directory first and then move contents to avoid COPY wildcard failures if empty.
-COPY bin/ /tmp/bin/
-RUN if [ "$(ls -A /tmp/bin)" ]; then cp /tmp/bin/* /usr/local/bin/ && chmod +x /usr/local/bin/*; fi
+# Copy the binary from builder
+COPY --from=builder /usr/local/bin/tidepool-control-server /usr/local/bin/tidepool-control-server
 
-# Copy Zellij configurations and layouts
-COPY config/orchestrator.kdl /root/.config/zellij/layouts/default.kdl
-COPY config/zellij.kdl /root/.config/zellij/config.kdl
+# Copy configurations and scripts
+COPY docker/orchestrator/config/orchestrator.kdl /etc/tidepool/zellij/layouts/default.kdl
+COPY docker/orchestrator/config/zellij.kdl /etc/tidepool/zellij/config.kdl
+COPY docker/orchestrator/scripts/orchestrator-entrypoint.sh /usr/local/bin/orchestrator-entrypoint.sh
+COPY scripts/docker-entrypoint-orchestrator.sh /usr/local/bin/docker-entrypoint-orchestrator.sh
 
-# Copy and set up the entrypoint script
-COPY scripts/orchestrator-entrypoint.sh /usr/local/bin/orchestrator-entrypoint.sh
-RUN chmod +x /usr/local/bin/orchestrator-entrypoint.sh
+# Ensure scripts are executable
+RUN chmod +x /usr/local/bin/orchestrator-entrypoint.sh /usr/local/bin/docker-entrypoint-orchestrator.sh
 
-# Environment variables for Tidepool components
+# Environment variables
 ENV TIDEPOOL_CONTROL_SOCKET=/sockets/control.sock
 ENV TIDEPOOL_TUI_SOCKET=/sockets/tui.sock
 ENV HANGAR_ROOT=/worktrees
 ENV TERM=xterm-256color
-ENV DOCKER_HOST=unix:///var/run/docker.sock
+ENV ZELLIJ_CONFIG_DIR=/etc/tidepool/zellij
 
-# Create necessary directories with appropriate permissions
+# Create necessary directories
 RUN mkdir -p /sockets /worktrees /var/log/tidepool && \
     chmod 777 /sockets /worktrees /var/log/tidepool
 
-# Expose port 7432 for external role-based MCP access
 EXPOSE 7432
 
 WORKDIR /worktrees
 
-# Use tini as the entrypoint for proper signal handling
-ENTRYPOINT ["/usr/bin/tini", "--"]
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/docker-entrypoint-orchestrator.sh"]
+CMD ["orchestrator"]
 
-# Launch the orchestrator entrypoint script
-CMD ["/usr/local/bin/orchestrator-entrypoint.sh"]
+# Stage 3: Dev Target
+FROM --platform=linux/amd64 builder AS dev
+RUN cabal install haskell-language-server -j
+CMD ["cabal", "repl", "tidepool-control-server"]

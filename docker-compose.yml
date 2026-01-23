@@ -1,0 +1,53 @@
+services:
+  orchestrator:
+    # Use linux/amd64 to ensure consistent binary execution, especially on Apple Silicon
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: docker/orchestrator/Dockerfile
+      target: runtime
+    container_name: tidepool-orchestrator
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - HANGAR_ROOT=/worktrees
+      - TIDEPOOL_CONTROL_SOCKET=/sockets/control.sock
+      - TIDEPOOL_TUI_SOCKET=/sockets/tui.sock
+    volumes:
+      - .:/worktrees
+      - tidepool-sockets:/sockets
+      # Mount the entire .claude directory as read-write to allow token refresh and history updates
+      # using ${HOME} for better cross-platform compatibility than ~
+      - ${HOME}/.claude:/mnt/host-auth:rw
+      - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+      - "7432:7432"
+    restart: unless-stopped
+    command: ["orchestrator"]
+
+  orchestrator-dev:
+    # Development profile with HLS
+    profiles: ["dev"]
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: docker/orchestrator/Dockerfile
+      target: dev
+    container_name: tidepool-orchestrator-dev
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - HANGAR_ROOT=/worktrees
+    volumes:
+      - .:/worktrees
+      - tidepool-sockets:/sockets
+      - ${HOME}/.claude:/mnt/host-auth:rw
+    command: ["cabal", "repl", "tidepool-control-server"]
+
+volumes:
+  tidepool-sockets:
+    name: tidepool-sockets
