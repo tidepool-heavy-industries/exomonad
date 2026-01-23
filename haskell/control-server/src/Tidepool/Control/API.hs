@@ -6,7 +6,7 @@ module Tidepool.Control.API
   ) where
 
 import Data.Text (Text)
-import Data.Aeson (Value, FromJSON(..), ToJSON(..), object, (.=), (.:))
+import Data.Aeson (Value, FromJSON(..), ToJSON(..), object, (.=), (.:), withObject)
 import GHC.Generics (Generic)
 import Servant.API
 import Tidepool.Control.Protocol

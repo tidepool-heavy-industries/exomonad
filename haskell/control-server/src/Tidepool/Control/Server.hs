@@ -16,9 +16,10 @@ import Control.Monad (forever, when)
 import Control.Monad.Except (throwError)
 import Control.Monad.IO.Class (liftIO)
 import Data.Function ((&))
-import Data.Maybe (isJust)
+import Data.Maybe (isJust, fromMaybe)
 import Data.Aeson (toJSON)
 import qualified Data.Text as T
+import Text.Read (readMaybe)
 import Network.Socket
 import Network.Wai.Handler.Warp
 import Servant
@@ -84,29 +85,21 @@ runServer logger config = do
   -- Shared State
   tuiHandleVar <- newTVarIO Nothing
 
+  tuiPortEnv <- lookupEnv "TIDEPOOL_TUI_PORT"
+  let tuiPort = fromMaybe 8081 (tuiPortEnv >>= readMaybe)
+
   -- 1. Setup TUI Listener (if enabled)
+  -- We support both Unix socket (legacy/local) and TCP (Docker/Host cross-boundary)
   _ <- forkIO $ when (not configWithObs.noTui) $ do
-    bracket (setupUnixSocket tuiSocket) (cleanupUnixSocket tuiSocket) $ \tuiSock -> do
-      logInfo logger $ "TUI sidebar listener waiting on: " <> T.pack tuiSocket
-      
-      -- Fork TUI acceptor loop
-      forever $ do
-           (conn, _) <- accept tuiSock
-           logInfo logger "TUI sidebar connected"
-           handle <- newTUIHandle "control-server" conn
-           
-           -- Update handle var
-           maybeOld <- atomically $ do
-             old <- readTVar tuiHandleVar
-             writeTVar tuiHandleVar (Just handle)
-             pure old
-           
-           -- Close old handle if exists
-           case maybeOld of 
-             Just h -> do
-               logInfo logger "Closing previous TUI sidebar connection"
-               closeTUIHandle h
-             Nothing -> logDebug logger "No existing TUI sidebar connection"
+    -- Unix TUI listener
+    _ <- forkIO $ bracket (setupUnixSocket tuiSocket) (cleanupUnixSocket tuiSocket) $ \tuiSock -> do
+      logInfo logger $ "TUI sidebar listener waiting on (Unix): " <> T.pack tuiSocket
+      forever $ acceptAndHandleTUI logger tuiSock tuiHandleVar
+
+    -- TCP TUI listener (for cross-boundary Docker -> Host)
+    bracket (setupTCPSocket tuiPort) (close) $ \tuiSock -> do
+      logInfo logger $ "TUI sidebar listener waiting on (TCP): " <> T.pack (show tuiPort)
+      forever $ acceptAndHandleTUI logger tuiSock tuiHandleVar
 
   -- 2. Run Servant Server on Unix Socket
   bracket (setupUnixSocket controlSocket) (cleanupUnixSocket controlSocket) $ \sock -> do
@@ -116,6 +109,37 @@ runServer logger config = do
           & setTimeout (5 * 60) -- 5 minutes timeout
     
     runSettingsSocket settings sock (app logger configWithObs tuiHandleVar)
+
+-- | Helper to accept and handle TUI connections
+acceptAndHandleTUI :: Logger -> Socket -> TVar (Maybe TUIHandle) -> IO ()
+acceptAndHandleTUI logger sock tuiHandleVar = do
+  (conn, _) <- accept sock
+  logInfo logger "TUI sidebar connected"
+  handle <- newTUIHandle "control-server" conn
+  
+  -- Update handle var
+  maybeOld <- atomically $ do
+    old <- readTVar tuiHandleVar
+    writeTVar tuiHandleVar (Just handle)
+    pure old
+  
+  -- Close old handle if exists
+  case maybeOld of 
+    Just h -> do
+      logInfo logger "Closing previous TUI sidebar connection"
+      closeTUIHandle h
+    Nothing -> logDebug logger "No existing TUI sidebar connection"
+
+-- | Setup TCP socket at given port.
+setupTCPSocket :: Int -> IO Socket
+setupTCPSocket port = do
+  let hints = defaultHints { addrFlags = [AI_PASSIVE], addrSocketType = Stream }
+  addr:_ <- getAddrInfo (Just hints) Nothing (Just $ show port)
+  sock <- socket (addrFamily addr) (addrSocketType addr) (addrProtocol addr)
+  setSocketOption sock ReuseAddr 1
+  bind sock (addrAddress addr)
+  listen sock 10
+  pure sock
 
 -- | Setup Unix socket at given path.
 setupUnixSocket :: FilePath -> IO Socket

@@ -16,9 +16,13 @@ use tracing_subscriber::FmtSubscriber;
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    /// Unix socket path to connect to
+    /// Unix socket path to connect to (legacy)
     #[arg(short, long)]
     socket: Option<PathBuf>,
+
+    /// TCP port to connect to (cross-boundary Docker/Host)
+    #[arg(short, long)]
+    port: Option<u16>,
 
     /// Unix socket path to listen on for health checks
     #[arg(
@@ -43,18 +47,35 @@ async fn main() -> Result<()> {
         .finish();
     tracing::subscriber::set_global_default(subscriber)?;
 
-    // Resolve socket path: Priority 1: --socket arg, Priority 2: TIDEPOOL_TUI_SOCKET env
-    let socket_path = match args.socket {
-        Some(s) => s,
-        None => {
-            let env_val = std::env::var("TIDEPOOL_TUI_SOCKET")
-                .context("TIDEPOOL_TUI_SOCKET environment variable not set (should be set via start-augmented.sh or .env) and --socket not provided")?;
-            PathBuf::from(env_val)
-        }
-    };
-    let socket_path = resolve_socket_path(socket_path);
+    // Connection Priority:
+    // 1. --port arg
+    // 2. TIDEPOOL_TUI_PORT env
+    // 3. --socket arg
+    // 4. TIDEPOOL_TUI_SOCKET env
 
-    info!("TUI sidebar connecting to socket {:?}", socket_path);
+    let tui_port = args.port.or_else(|| {
+        std::env::var("TIDEPOOL_TUI_PORT").ok().and_then(|s| s.parse().ok())
+    });
+
+    let socket_path = if tui_port.is_none() {
+        let path = match args.socket {
+            Some(s) => s,
+            None => {
+                let env_val = std::env::var("TIDEPOOL_TUI_SOCKET")
+                    .context("TIDEPOOL_TUI_SOCKET/TIDEPOOL_TUI_PORT environment variable not set and --socket/--port not provided")?;
+                PathBuf::from(env_val)
+            }
+        };
+        Some(resolve_socket_path(path))
+    } else {
+        None
+    };
+
+    if let Some(port) = tui_port {
+        info!("TUI sidebar connecting via TCP to localhost:{}", port);
+    } else if let Some(ref path) = socket_path {
+        info!("TUI sidebar connecting to socket {:?}", path);
+    }
 
     // Resolve health socket path
     let health_socket_path = resolve_socket_path(args.health_socket);
@@ -75,7 +96,13 @@ async fn main() -> Result<()> {
         let mut retry_delay = std::time::Duration::from_secs(1);
 
         let stream = loop {
-            match server::connect_to_control_server(&socket_path).await {
+            let conn_res = if let Some(port) = tui_port {
+                server::connect_to_control_server_tcp(port).await
+            } else {
+                server::connect_to_control_server_unix(socket_path.as_ref().unwrap()).await
+            };
+
+            match conn_res {
                 Ok(s) => break s,
                 Err(e) => {
                     retry_count += 1;
@@ -89,10 +116,14 @@ async fn main() -> Result<()> {
                     if retry_count >= max_retries {
                         if control_socket_exists {
                             eprintln!("\n❌ TUI DISABLED");
-                            eprintln!("Control socket exists at {:?}, but TUI socket {:?} was never created.", 
-                                control_socket_path.as_ref().expect("Guaranteed by control_socket_exists"), 
-                                socket_path
-                            );
+                            if let Some(path) = &socket_path {
+                                eprintln!("Control socket exists at {:?}, but TUI socket {:?} was never created.", 
+                                    control_socket_path.as_ref().expect("Guaranteed by control_socket_exists"), 
+                                    path
+                                );
+                            } else {
+                                eprintln!("Control socket exists, but TUI TCP connection failed.");
+                            }
                             eprintln!("This usually means --no-tui was passed to control-server (or the server crashed leaving a stale socket).\n");
                             // Exit with 0 to indicate "Giving up as intended"
                             std::process::exit(0);
@@ -110,15 +141,24 @@ async fn main() -> Result<()> {
                     }
 
                     if control_socket_exists && retry_count >= MIN_RETRIES_BEFORE_WARNING {
-                        info!(
-                            "Control socket exists but TUI socket {:?} is missing (attempt {}/{})",
-                            socket_path, retry_count, max_retries
-                        );
+                        if let Some(path) = &socket_path {
+                            info!(
+                                "Control socket exists but TUI socket {:?} is missing (attempt {}/{})",
+                                path, retry_count, max_retries
+                            );
+                        }
                     } else {
-                        info!(
-                            "Waiting for control-server at {:?} (attempt {}/{}, next retry in {:?})",
-                            socket_path, retry_count, max_retries, retry_delay
-                        );
+                        if let Some(path) = &socket_path {
+                            info!(
+                                "Waiting for control-server at {:?} (attempt {}/{}, next retry in {:?})",
+                                path, retry_count, max_retries, retry_delay
+                            );
+                        } else {
+                            info!(
+                                "Waiting for control-server at localhost:{} (attempt {}/{}, next retry in {:?})",
+                                tui_port.unwrap(), retry_count, max_retries, retry_delay
+                            );
+                        }
                     }
 
                     tokio::time::sleep(retry_delay).await;

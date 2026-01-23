@@ -1,18 +1,64 @@
 use anyhow::{Context, Result};
 use std::fs;
 use std::path::Path;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::{UnixListener, UnixStream};
+use std::pin::Pin;
+use std::task::{Context as TaskContext, Poll};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader, ReadBuf};
+use tokio::net::{TcpStream, UnixListener, UnixStream};
 use tokio::sync::mpsc;
 use tracing::{debug, error, warn};
 
 use crate::protocol::{PopupDefinition, PopupResult};
 
+/// Unified stream type for TUI communication (Unix or TCP).
+pub enum TuiStream {
+    Unix(UnixStream),
+    Tcp(TcpStream),
+}
+
+impl AsyncRead for TuiStream {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut TaskContext<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        match self.get_mut() {
+            TuiStream::Unix(s) => Pin::new(s).poll_read(cx, buf),
+            TuiStream::Tcp(s) => Pin::new(s).poll_read(cx, buf),
+        }
+    }
+}
+
+impl AsyncWrite for TuiStream {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut TaskContext<'_>,
+        buf: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        match self.get_mut() {
+            TuiStream::Unix(s) => Pin::new(s).poll_write(cx, buf),
+            TuiStream::Tcp(s) => Pin::new(s).poll_write(cx, buf),
+        }
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<std::io::Result<()>> {
+        match self.get_mut() {
+            TuiStream::Unix(s) => Pin::new(s).poll_flush(cx),
+            TuiStream::Tcp(s) => Pin::new(s).poll_flush(cx),
+        }
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<std::io::Result<()>> {
+        match self.get_mut() {
+            TuiStream::Unix(s) => Pin::new(s).poll_shutdown(cx),
+            TuiStream::Tcp(s) => Pin::new(s).poll_shutdown(cx),
+        }
+    }
+}
+
 /// Connect to control-server via Unix socket.
-///
-/// Connects to the socket path and returns the stream.
-pub async fn connect_to_control_server(path: &Path) -> Result<UnixStream> {
-    debug!(path = %path.display(), "TUI sidebar connecting to control-server");
+pub async fn connect_to_control_server_unix(path: &Path) -> Result<TuiStream> {
+    debug!(path = %path.display(), "TUI sidebar connecting to control-server via Unix socket");
 
     let stream = UnixStream::connect(path)
         .await
@@ -20,7 +66,23 @@ pub async fn connect_to_control_server(path: &Path) -> Result<UnixStream> {
 
     debug!("Connected to control-server via Unix socket");
 
-    Ok(stream)
+    Ok(TuiStream::Unix(stream))
+}
+
+/// Connect to control-server via TCP.
+pub async fn connect_to_control_server_tcp(port: u16) -> Result<TuiStream> {
+    let addr = format!("127.0.0.1:{}", port);
+    debug!(addr = %addr, "TUI sidebar connecting to control-server via TCP");
+
+    let stream = TcpStream::connect(&addr)
+        .await
+        .context(format!("Failed to connect to {}", addr))?;
+
+    stream.set_nodelay(true).ok();
+
+    debug!("Connected to control-server via TCP");
+
+    Ok(TuiStream::Tcp(stream))
 }
 
 /// Spawn I/O tasks for reading PopupDefinition and writing PopupResult.
@@ -28,19 +90,15 @@ pub async fn connect_to_control_server(path: &Path) -> Result<UnixStream> {
 /// Returns (rx, tx):
 /// - rx: Receiver for PopupDefinition messages from Haskell
 /// - tx: Sender for PopupResult responses to Haskell
-///
-/// The I/O tasks run in the background and handle NDJSON framing:
-/// - Reader: UnixStream → BufReader → read_line → parse JSON → send to rx
-/// - Writer: receive from tx → serialize JSON → writeln → UnixStream
 pub fn spawn_io_tasks(
-    stream: UnixStream,
+    stream: TuiStream,
 ) -> (mpsc::Receiver<PopupDefinition>, mpsc::Sender<PopupResult>) {
-    let (read_half, write_half) = stream.into_split();
+    let (read_half, mut write_half) = tokio::io::split(stream);
 
     let (msg_tx, msg_rx) = mpsc::channel::<PopupDefinition>(32);
     let (res_tx, mut res_rx) = mpsc::channel::<PopupResult>(32);
 
-    // Reader task: UnixStream → PopupDefinition
+    // Reader task: TuiStream → PopupDefinition
     tokio::spawn(async move {
         let mut reader = BufReader::new(read_half);
         let mut line = String::new();
@@ -69,12 +127,11 @@ pub fn spawn_io_tasks(
                         }
                         Err(e) => {
                             warn!(error = %e, json = %trimmed, "Failed to parse PopupDefinition");
-                            // Continue reading, don't stop on malformed JSON
                         }
                     }
                 }
                 Err(e) => {
-                    error!(error = %e, "Failed to read from Unix stream");
+                    error!(error = %e, "Failed to read from stream");
                     break;
                 }
             }
@@ -83,33 +140,30 @@ pub fn spawn_io_tasks(
         debug!("Reader task exiting");
     });
 
-    // Writer task: PopupResult → UnixStream
+    // Writer task: PopupResult → TuiStream
     tokio::spawn(async move {
-        let mut writer = write_half;
-
         while let Some(result) = res_rx.recv().await {
             match serde_json::to_string(&result) {
                 Ok(json) => {
                     debug!(button = %result.button, "Sending PopupResult");
 
-                    if let Err(e) = writer.write_all(json.as_bytes()).await {
+                    if let Err(e) = write_half.write_all(json.as_bytes()).await {
                         error!(error = %e, "Failed to write JSON");
                         break;
                     }
 
-                    if let Err(e) = writer.write_all(b"\n").await {
+                    if let Err(e) = write_half.write_all(b"\n").await {
                         error!(error = %e, "Failed to write newline");
                         break;
                     }
 
-                    if let Err(e) = writer.flush().await {
+                    if let Err(e) = write_half.flush().await {
                         error!(error = %e, "Failed to flush");
                         break;
                     }
                 }
                 Err(e) => {
                     error!(error = %e, "Failed to serialize PopupResult");
-                    // Continue, don't stop on serialization errors
                 }
             }
         }
@@ -121,9 +175,6 @@ pub fn spawn_io_tasks(
 }
 
 /// Start a simple Unix listener for health checks.
-///
-/// Listens on the given path and accepts connections, immediately closing them.
-/// This allows 'nc -zU' to verify that the process is alive and listening.
 pub async fn start_health_listener(path: &Path) -> Result<tokio::task::JoinHandle<()>> {
     // Ensure parent directory exists
     if let Some(parent) = path.parent() {
@@ -146,21 +197,17 @@ pub async fn start_health_listener(path: &Path) -> Result<tokio::task::JoinHandl
     debug!(path = %path.display(), "TUI sidebar health listener started");
 
     let handle = tokio::spawn(async move {
-        // Track consecutive accept errors to avoid retrying indefinitely on a persistent failure.
         const MAX_CONSECUTIVE_ERRORS: u32 = 10;
         let mut consecutive_errors: u32 = 0;
 
         loop {
             match listener.accept().await {
                 Ok((_stream, _addr)) => {
-                    // Successful accept: reset error counter.
                     consecutive_errors = 0;
-                    // Just accept and drop, which is enough for nc -zU
                 }
                 Err(e) => {
                     consecutive_errors = consecutive_errors.saturating_add(1);
                     error!(error = %e, consecutive_errors, "Health listener accept error");
-                    // Wait before retrying to avoid tight loop on persistent errors
                     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
                     if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
