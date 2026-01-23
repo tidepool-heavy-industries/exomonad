@@ -1,15 +1,22 @@
 # Dockerfile for Claude Code Agent
-FROM ubuntu:22.04
+
+# Stage 1: Rust Builder (Multi-stage)
+FROM --platform=linux/amd64 rust:1.80 AS rust-builder
+WORKDIR /build
+COPY rust/ ./rust/
+# Use cache mounts for cargo to speed up rebuilds
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/build/rust/target \
+    cd rust && cargo build --release -p mantle-agent && \
+    cp target/release/mantle-agent /mantle-agent
+
+# Stage 2: Main Agent Image
+FROM --platform=linux/amd64 ubuntu:22.04
 
 # Avoid prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Install core dependencies
-# tini: for proper signal handling as PID 1
-# git: for worktree management
-# curl, ca-certificates: for downloading toolchains
-# build-essential, libgmp-dev, etc: for Haskell/Rust compilation
-# sudo: to allow non-root user to install additional packages if needed
 RUN apt-get update && apt-get install -y \
     tini \
     git \
@@ -31,7 +38,7 @@ RUN apt-get update && apt-get install -y \
     socat \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Node.js 20.x (still needed for some tooling)
+# Install Node.js 20.x
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y nodejs
 
@@ -52,29 +59,27 @@ WORKDIR /home/agent
 RUN curl -fsSL https://claude.ai/install.sh | bash
 
 # Install GHCup (Haskell toolchain)
-# Installing GHC 9.6.4 and Cabal
 ENV GHCUP_INSTALL_SKIP_MSYS=1
 RUN curl --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org | BOOTSTRAP_HASKELL_NONINTERACTIVE=1 BOOTSTRAP_HASKELL_GHC_VERSION=9.6.4 BOOTSTRAP_HASKELL_CABAL_VERSION=3.10.2.1 BOOTSTRAP_HASKELL_INSTALL_STACK=1 BOOTSTRAP_HASKELL_INSTALL_HLS=1 sh
 
 # Install Rust toolchain (rustup)
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 
-# Set PATH for agent user to include Claude Code, GHCup and Rust
+# Set PATH for agent user
 ENV PATH="/home/agent/.local/bin:/home/agent/.ghcup/bin:/home/agent/.cargo/bin:${PATH}"
 
-# Back to root to copy system-level binaries and entrypoint
+# Back to root to copy mantle-agent
 USER root
 
-# Copy pre-built mantle-agent binary from host
-# (Assumes mantle-agent is in the build context at 'bin/mantle-agent')
-COPY bin/mantle-agent /usr/local/bin/mantle-agent
+# Copy pre-built mantle-agent binary from Rust builder stage
+COPY --from=rust-builder /mantle-agent /usr/local/bin/mantle-agent
 RUN chmod +x /usr/local/bin/mantle-agent
 
 # Set up entrypoint script
-COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY docker/claude-agent/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
-# Create workspace directory with correct permissions
+# Create workspace directory
 RUN mkdir -p /workspace && chown agent:agent /workspace
 
 # Default environment for mantle-agent communication

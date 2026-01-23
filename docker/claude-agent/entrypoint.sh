@@ -10,6 +10,21 @@ if [ -n "$GIT_ALTERNATES_OBJECT_DIR" ] && [ -d "/workspace/.git" ]; then
     echo "$GIT_ALTERNATES_OBJECT_DIR" > /workspace/.git/objects/info/alternates
 fi
 
+# 1.5 Handle Auth Isolation
+# If credentials are provided via mount, link them into the per-container config dir.
+# We only link credentials and settings to avoid sharing history/db.
+echo "🔐 Setting up auth isolation..."
+CONFIG_DIR="${CLAUDE_CONFIG_DIR:-/home/agent/.claude}"
+mkdir -p "$CONFIG_DIR"
+
+for f in ".credentials.json" "settings.json"; do
+    if [ -f "/mnt/secrets/$f" ]; then
+        ln -sf "/mnt/secrets/$f" "$CONFIG_DIR/$f"
+        echo "✓ Linked $f"
+    fi
+done
+echo "✓ Auth isolated in $CONFIG_DIR"
+
 # 2. Configure Claude Code hooks
 # We point hooks to mantle-agent which forwards them to the control-server
 mkdir -p /home/agent/.claude

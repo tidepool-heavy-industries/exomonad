@@ -16,12 +16,13 @@ services:
       - HANGAR_ROOT=/worktrees
       - TIDEPOOL_CONTROL_SOCKET=/sockets/control.sock
       - TIDEPOOL_TUI_SOCKET=/sockets/tui.sock
+      - CLAUDE_CONFIG_DIR=/home/user/.claude-orchestrator
     volumes:
       - .:/worktrees
       - tidepool-sockets:/sockets
-      # Mount the entire .claude directory as read-write to allow token refresh and history updates
-      # using ${HOME} for better cross-platform compatibility than ~
-      - ${HOME}/.claude:/mnt/host-auth:rw
+      # Granular auth mounts to prevent history corruption
+      - ${HOME}/.claude/.credentials.json:/mnt/secrets/.credentials.json:rw
+      - ${HOME}/.claude/settings.json:/mnt/secrets/settings.json:ro
       - /var/run/docker.sock:/var/run/docker.sock
     ports:
       - "7432:7432"
@@ -42,10 +43,13 @@ services:
       - PGID=${PGID:-1000}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - HANGAR_ROOT=/worktrees
+      - CLAUDE_CONFIG_DIR=/home/user/.claude-orchestrator
     volumes:
       - .:/worktrees
       - tidepool-sockets:/sockets
-      - ${HOME}/.claude:/mnt/host-auth:rw
+      # Granular auth mounts
+      - ${HOME}/.claude/.credentials.json:/mnt/secrets/.credentials.json:rw
+      - ${HOME}/.claude/settings.json:/mnt/secrets/settings.json:ro
     command: ["cabal", "repl", "tidepool-control-server"]
 
 volumes:

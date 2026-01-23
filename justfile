@@ -177,3 +177,51 @@ blast-radius base="main":
 # Tail logs with JSON format (for parsing)
 # logs-json:
 #     cd deploy && npx wrangler tail --format json
+
+# ─────────────────────────────────────────────────────────────
+# Docker Workflows
+# ─────────────────────────────────────────────────────────────
+
+# Build orchestrator image
+docker-build:
+    docker compose build
+
+# Build agent image
+docker-build-agent:
+    docker build -t tidepool/claude-agent:latest -f docker/claude-agent/Dockerfile .
+
+# Build all docker images
+docker-build-all: docker-build docker-build-agent
+
+# Start orchestrator in detached mode
+docker-up:
+    docker compose up -d
+
+# Start orchestrator-dev in detached mode
+docker-up-dev:
+    docker compose --profile dev up -d
+
+# Attach to orchestrator TUI (detach keys: ctrl-p,ctrl-q)
+docker-attach:
+    docker attach --detach-keys="ctrl-p,ctrl-q" tidepool-orchestrator
+
+# Spawn agent container with shared sockets and auth isolation
+docker-agent BRANCH:
+    #!/usr/bin/env bash
+    docker run -it --rm \
+      -v tidepool-sockets:/home/agent/.tidepool/sockets \
+      -v ~/.claude/.credentials.json:/mnt/secrets/.credentials.json:rw \
+      -e CLAUDE_CONFIG_DIR=/home/agent/.claude-agent-{{BRANCH}} \
+      tidepool/claude-agent:latest
+
+# Clean shutdown
+docker-down:
+    docker compose down
+
+# One-command workflow (build + up + attach)
+docker-run: docker-build docker-up docker-attach
+
+# One-command dev workflow (build + up-dev + attach to orchestrator-dev)
+docker-run-dev: docker-build docker-up-dev
+    docker attach --detach-keys="ctrl-p,ctrl-q" orchestrator-dev
+
