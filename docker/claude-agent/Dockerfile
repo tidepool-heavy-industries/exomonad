@@ -31,13 +31,9 @@ RUN apt-get update && apt-get install -y \
     socat \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Node.js 20.x
+# Install Node.js 20.x (still needed for some tooling)
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y nodejs
-
-# Install Claude Code CLI globally
-ARG CLAUDE_CODE_VERSION=0.29.0
-RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
 
 # Create non-root user 'agent' with UID 1000
 RUN useradd -m -s /bin/bash -u 1000 agent \
@@ -52,6 +48,9 @@ RUN mkdir -p /home/agent/.claude && \
 USER agent
 WORKDIR /home/agent
 
+# Install Claude Code CLI
+RUN curl -fsSL https://claude.ai/install.sh | bash
+
 # Install GHCup (Haskell toolchain)
 # Installing GHC 9.6.4 and Cabal
 ENV GHCUP_INSTALL_SKIP_MSYS=1
@@ -60,8 +59,8 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org | BOOTSTR
 # Install Rust toolchain (rustup)
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 
-# Set PATH for agent user to include GHCup and Rust
-ENV PATH="/home/agent/.ghcup/bin:/home/agent/.cargo/bin:${PATH}"
+# Set PATH for agent user to include Claude Code, GHCup and Rust
+ENV PATH="/home/agent/.local/bin:/home/agent/.ghcup/bin:/home/agent/.cargo/bin:${PATH}"
 
 # Back to root to copy system-level binaries and entrypoint
 USER root
