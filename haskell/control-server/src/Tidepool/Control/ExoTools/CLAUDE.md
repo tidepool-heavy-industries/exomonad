@@ -31,7 +31,7 @@ Create git worktrees for multiple beads and launch isolated agent sessions in Ze
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │ User (in Zellij session)                                        │
-│  Calls: spawn_agents(["4hj", "kg6", "hp4"])                     │
+│  Calls: spawn_agents({ bead_ids: ["4hj", "kg6", "hp4"] })       │
 └────────────────┬────────────────────────────────────────────────┘
                  │
                  ▼
