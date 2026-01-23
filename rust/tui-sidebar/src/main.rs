@@ -25,7 +25,7 @@ struct Args {
     port: Option<u16>,
 
     /// Unix socket path to listen on for health checks
-    #[arg( 
+    #[arg(
         short = 'H',
         long,
         default_value = ".tidepool/sockets/tui-sidebar.sock"
@@ -54,7 +54,9 @@ async fn main() -> Result<()> {
     // 4. TIDEPOOL_TUI_SOCKET env
 
     let tui_port = args.port.or_else(|| {
-        std::env::var("TIDEPOOL_TUI_PORT").ok().and_then(|s| s.parse().ok())
+        std::env::var("TIDEPOOL_TUI_PORT")
+            .ok()
+            .and_then(|s| s.parse().ok())
     });
 
     let socket_path = if tui_port.is_none() {
