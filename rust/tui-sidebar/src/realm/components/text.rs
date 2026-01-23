@@ -24,7 +24,7 @@ impl TextComponent {
 impl MockComponent for TextComponent {
     fn view(&mut self, frame: &mut Frame, area: Rect) {
         // Terminal theme colors
-        
+
         // Style based on content type - Solarized-inspired
         let style = if self.content.starts_with("---") && self.content.ends_with("---") {
             // Group headers
@@ -33,20 +33,19 @@ impl MockComponent for TextComponent {
                 .add_modifier(Modifier::UNDERLINED)
         } else if self.content.contains('?') {
             // Questions - subtle cyan
-            Style::default()
-                .fg(Color::Cyan)
+            Style::default().fg(Color::Cyan)
         } else if self.content.contains('!') {
             // Important text - yellow alert
-            Style::default()
-                .fg(Color::Yellow)
+            Style::default().fg(Color::Yellow)
         } else {
             // Regular text
             Style::default().fg(Color::White)
         };
-        
+
         // Transform group headers - clean and simple
         let display_text = if self.content.starts_with("---") && self.content.ends_with("---") {
-            let label = self.content
+            let label = self
+                .content
                 .trim_start_matches('-')
                 .trim_end_matches('-')
                 .trim();
@@ -54,27 +53,25 @@ impl MockComponent for TextComponent {
         } else {
             self.content.clone()
         };
-        
-        let paragraph = Paragraph::new(Line::from(vec![
-            Span::styled(display_text, style)
-        ]))
-        .alignment(tuirealm::ratatui::layout::Alignment::Left);
-        
+
+        let paragraph = Paragraph::new(Line::from(vec![Span::styled(display_text, style)]))
+            .alignment(tuirealm::ratatui::layout::Alignment::Left);
+
         frame.render_widget(paragraph, area);
     }
-    
+
     fn query(&self, attr: Attribute) -> Option<AttrValue> {
         self.props.get(attr)
     }
-    
+
     fn attr(&mut self, attr: Attribute, value: AttrValue) {
         self.props.set(attr, value);
     }
-    
+
     fn state(&self) -> State {
         State::One(StateValue::String(self.content.clone()))
     }
-    
+
     fn perform(&mut self, _cmd: Cmd) -> CmdResult {
         // Text components don't handle commands
         CmdResult::None

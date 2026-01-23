@@ -38,7 +38,6 @@ import Data.Aeson (FromJSON(..), ToJSON(..), Value(..), (.:), (.:?), (.=), objec
 import Data.Aeson.Key qualified as Key
 import Data.Aeson.KeyMap qualified as KM
 import Data.Text (Text)
-import Data.Text qualified as T
 import GHC.Generics (Generic)
 
 import Tidepool.Effect.TUI

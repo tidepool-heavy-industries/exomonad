@@ -54,7 +54,7 @@ Claude Code                    mantle-agent hook               Control Server
 
 ### `mantle-agent mcp`
 
-MCP (Model Context Protocol) stdio server for decision tools.
+MCP (Model Context Protocol) stdio server for MCP tools.
 
 **Usage:**
 ```bash

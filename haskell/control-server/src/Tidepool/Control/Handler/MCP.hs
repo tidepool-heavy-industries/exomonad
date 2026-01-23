@@ -31,7 +31,6 @@ import Data.Maybe (fromMaybe)
 import Tidepool.Control.Logging (Logger, logInfo, logDebug, logError)
 import Tidepool.Control.Protocol
 import Tidepool.Control.Types (ServerConfig(..))
-import Tidepool.Control.LSPTools
 import Tidepool.Control.TUITools
   ( confirmActionLogic, ConfirmArgs(..), ConfirmResult(..),
     selectOptionLogic, SelectArgs(..), SelectResult(..),
@@ -77,7 +76,6 @@ import Tidepool.Gemini.Interpreter (runGeminiIO)
 import Tidepool.Effect.TUI (TUI(..), PopupResult(..))
 import Tidepool.Effect.Types (runLog, LogLevel(Debug), runReturn, runTime)
 import Tidepool.Graph.Goto (unwrapSingleChoice)
-import Tidepool.LSP.Interpreter (LSPSession, runLSP)
 import Tidepool.TUI.Interpreter (TUIHandle, runTUI)
 -- import Tidepool.Teaching.LLM (TeachingConfig, loadTeachingConfig, withTeaching, runLLMWithTeaching)
 -- import Tidepool.Teaching.Teacher (teacherGuidance)
@@ -162,8 +160,8 @@ withMcpTracing logger config traceCtx reqId toolName args action = do
 --
 -- == Tier 3: External Orchestration Tools (Exo)
 --   - "exo_status": Get current bead context, git status, and PR info
-handleMcpTool :: Logger -> ServerConfig -> LSPSession -> Maybe TUIHandle -> TraceContext -> Text -> Text -> Value -> IO ControlResponse
-handleMcpTool logger config lspSession maybeTuiHandle traceCtx reqId toolName args = 
+handleMcpTool :: Logger -> ServerConfig -> Maybe TUIHandle -> TraceContext -> Text -> Text -> Value -> IO ControlResponse
+handleMcpTool logger config maybeTuiHandle traceCtx reqId toolName args = 
   withMcpTracing logger config traceCtx reqId toolName args $ do
     logInfo logger $ "[MCP:" <> reqId <> "] Dispatching: " <> toolName
 
@@ -171,32 +169,32 @@ handleMcpTool logger config lspSession maybeTuiHandle traceCtx reqId toolName ar
 
     case toolName of
       -- Tier 1: Deterministic LSP tools (graph-based)
-      "find_callers" -> handleFindCallersTool logger lspSession maybeTuiHandle reqId args
-      "find_callees" -> handleFindCalleesTool logger lspSession maybeTuiHandle reqId args
-      "show_fields" -> handleShowFieldsTool logger lspSession maybeTuiHandle reqId args
-      "show_constructors" -> handleShowConstructorsTool logger lspSession maybeTuiHandle reqId args
+      -- NOTE: LSP-backed tools (find_callers, find_callees, show_fields,
+      --       show_constructors) have been removed from this dispatcher.
+      --       If still exported elsewhere, they will now be reported via
+      --       the generic "unknown tool" handler below.
 
       -- TUI-interactive tools
-      "confirm_action" -> handleConfirmActionTool logger lspSession maybeTuiHandle reqId args
-      "select_option" -> handleSelectOptionTool logger lspSession maybeTuiHandle reqId args
-      "request_guidance" -> handleRequestGuidanceTool logger lspSession maybeTuiHandle reqId args
+      "confirm_action" -> handleConfirmActionTool logger maybeTuiHandle reqId args
+      "select_option" -> handleSelectOptionTool logger maybeTuiHandle reqId args
+      "request_guidance" -> handleRequestGuidanceTool logger maybeTuiHandle reqId args
       "register_feedback" -> handleRegisterFeedbackTool logger reqId args
 
       -- Tier 2: LLM-enhanced tools (graph-based)
       -- DISABLED: teach-graph spawns recursive LLM calls, expensive during testing
       -- Re-enable once Tier 1 tools are stable
-      -- "teach-graph" -> handleTeachGraphTool logger lspSession maybeTuiHandle reqId args
+      -- "teach-graph" -> handleTeachGraphTool logger maybeTuiHandle reqId args
 
       -- Tier 3: External Orchestration tools (Exo)
-      "exo_status" -> handleExoStatusTool logger lspSession reqId args
-      "exo_complete" -> handleExoCompleteTool logger lspSession reqId args
-      "exo_reconstitute" -> handleExoReconstituteTool logger lspSession reqId args
+      "exo_status" -> handleExoStatusTool logger reqId args
+      "exo_complete" -> handleExoCompleteTool logger reqId args
+      "exo_reconstitute" -> handleExoReconstituteTool logger reqId args
       "pre_commit_check" -> handlePreCommitCheckTool logger reqId args
-      "spawn_agents" -> handleSpawnAgentsTool logger lspSession reqId args
-      "file_pr" -> handleFilePRTool logger lspSession reqId args
+      "spawn_agents" -> handleSpawnAgentsTool logger reqId args
+      "file_pr" -> handleFilePRTool logger reqId args
       "bead_to_pr" -> handleBeadToPrTool logger reqId args
       "pr_to_bead" -> handlePrToBeadTool logger reqId args
-      "pm_approve_expansion" -> handlePmApproveExpansionTool logger lspSession reqId args
+      "pm_approve_expansion" -> handlePmApproveExpansionTool logger reqId args
       "pm_prioritize" -> handlePmPrioritizeTool logger reqId args
       "pm_status" -> handlePmStatusTool logger reqId args
       "pm_propose" -> handlePMProposeTool logger reqId args
@@ -212,7 +210,7 @@ handleMcpTool logger config lspSession maybeTuiHandle traceCtx reqId toolName ar
         logError logger $ "  (unknown tool)"
         pure $ mcpToolError reqId NotFound $
           "Tool not found: " <> toolName <>
-          ". Available tools: find_callers, find_callees, show_fields, show_constructors, teach-graph, exo_status, exo_complete, exo_reconstitute, pre_commit_check, spawn_agents, file_pr, pm_approve_expansion, pm_prioritize, pm_propose"
+          ". Available tools: exo_status, exo_complete, exo_reconstitute, pre_commit_check, spawn_agents, file_pr, pm_approve_expansion, pm_prioritize, pm_propose"
 
 -- | Handle the pm_prioritize tool.
 --
@@ -275,8 +273,8 @@ handlePreCommitCheckTool logger reqId args = do
 -- | Handle the spawn_agents tool.
 --
 -- Runs the SpawnAgentsGraph logic to create worktrees for parallel agents.
-handleSpawnAgentsTool :: Logger -> LSPSession -> Text -> Value -> IO ControlResponse
-handleSpawnAgentsTool logger _lspSession reqId args = do
+handleSpawnAgentsTool :: Logger -> Text -> Value -> IO ControlResponse
+handleSpawnAgentsTool logger reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
@@ -312,8 +310,8 @@ handleSpawnAgentsTool logger _lspSession reqId args = do
 -- | Handle the exo_status tool.
 --
 -- Runs the ExoStatusGraph logic to get development context.
-handleExoStatusTool :: Logger -> LSPSession -> Text -> Value -> IO ControlResponse
-handleExoStatusTool logger _lspSession reqId args = do
+handleExoStatusTool :: Logger -> Text -> Value -> IO ControlResponse
+handleExoStatusTool logger reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
@@ -343,8 +341,8 @@ handleExoStatusTool logger _lspSession reqId args = do
 -- | Handle the exo_complete tool.
 --
 -- Runs the ExoCompleteGraph logic to finalize work on a bead.
-handleExoCompleteTool :: Logger -> LSPSession -> Text -> Value -> IO ControlResponse
-handleExoCompleteTool logger _lspSession reqId args = do
+handleExoCompleteTool :: Logger -> Text -> Value -> IO ControlResponse
+handleExoCompleteTool logger reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
@@ -373,8 +371,8 @@ handleExoCompleteTool logger _lspSession reqId args = do
 -- | Handle the exo_reconstitute tool.
 --
 -- Runs the ExoReconstituteGraph logic to sync beads and refresh context.
-handleExoReconstituteTool :: Logger -> LSPSession -> Text -> Value -> IO ControlResponse
-handleExoReconstituteTool logger _lspSession reqId args = do
+handleExoReconstituteTool :: Logger -> Text -> Value -> IO ControlResponse
+handleExoReconstituteTool logger reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
@@ -488,136 +486,15 @@ runWithoutTeaching logger _lspSession _maybeTuiHandle reqId _query = do
 
 
 -- ════════════════════════════════════════════════════════════════════════════
--- TIER 1: DETERMINISTIC LSP TOOLS (Graph DSL)
+-- TIER 1: DETERMINISTIC LSP TOOLS (Graph DSL) - DISABLED
 -- ════════════════════════════════════════════════════════════════════════════
-
--- | Handle the find_callers tool.
---
--- Runs the FindCallersGraph logic to find actual call sites of a function,
--- filtering out imports, type signatures, and comments.
-handleFindCallersTool :: Logger -> LSPSession -> Maybe TUIHandle -> Text -> Value -> IO ControlResponse
-handleFindCallersTool logger lspSession maybeTuiHandle reqId args = do
-  case fromJSON args of
-    Error err -> do
-      logError logger $ "  parse error: " <> T.pack err
-      pure $ mcpToolError reqId InvalidInput $ "Invalid find_callers arguments: " <> T.pack err
-
-    Success fcArgs -> do
-      logDebug logger $ "  name=" <> fcaName fcArgs
-
-      resultOrErr <- try $ runM
-        $ runLog Debug
-        $ runGeminiIO
-        $ runTUIOrMock maybeTuiHandle
-        $ runLSP lspSession
-        $ runReturn (findCallersLogic fcArgs)
-
-      case resultOrErr of
-        Left (e :: SomeException) -> do
-          logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
-          pure $ mcpToolError reqId ExternalFailure $ "find_callers failed: " <> T.pack (displayException e)
-
-        Right result -> do
-          logInfo logger $ "[MCP:" <> reqId <> "] Found " <> T.pack (show $ length $ fcrCallSites result) <> " call sites"
-          logDebug logger $ "[MCP:" <> reqId <> "] Filtered " <> T.pack (show $ fcrFilteredCount result) <> " references"
-          pure $ mcpToolSuccess reqId (toJSON result)
-
-
--- | Handle the find_callees tool.
---
--- Runs the FindCalleesGraph logic to find outgoing calls from a function.
-handleFindCalleesTool :: Logger -> LSPSession -> Maybe TUIHandle -> Text -> Value -> IO ControlResponse
-handleFindCalleesTool logger lspSession maybeTuiHandle reqId args = do
-  case fromJSON args of
-    Error err -> do
-      logError logger $ "  parse error: " <> T.pack err
-      pure $ mcpToolError reqId InvalidInput $ "Invalid find_callees arguments: " <> T.pack err
-
-    Success fceArgs -> do
-      logDebug logger $ "  name=" <> fceName fceArgs
-
-      resultOrErr <- try $ runM
-        $ runLog Debug
-        $ runGeminiIO
-        $ runTUIOrMock maybeTuiHandle
-        $ runLSP lspSession
-        $ runReturn (findCalleesLogic fceArgs)
-
-      case resultOrErr of
-        Left (e :: SomeException) -> do
-          logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
-          pure $ mcpToolError reqId ExternalFailure $ "find_callees failed: " <> T.pack (displayException e)
-
-        Right result -> do
-          logInfo logger $ "[MCP:" <> reqId <> "] Found " <> T.pack (show $ length $ fceCallees result) <> " callees"
-          pure $ mcpToolSuccess reqId (toJSON result)
-
-
--- | Handle the show_fields tool.
---
--- Runs the ShowFieldsGraph logic to show fields of a Haskell record type.
-handleShowFieldsTool :: Logger -> LSPSession -> Maybe TUIHandle -> Text -> Value -> IO ControlResponse
-handleShowFieldsTool logger lspSession maybeTuiHandle reqId args = do
-  case fromJSON args of
-    Error err -> do
-      logError logger $ "  parse error: " <> T.pack err
-      pure $ mcpToolError reqId InvalidInput $ "Invalid show_fields arguments: " <> T.pack err
-
-    Success sfArgs -> do
-      logDebug logger $ "  type_name=" <> sfaTypeName sfArgs
-
-      resultOrErr <- try $ runM
-        $ runLog Debug
-        $ runGeminiIO
-        $ runTUIOrMock maybeTuiHandle
-        $ runLSP lspSession
-        $ runReturn (showFieldsLogic sfArgs)
-
-      case resultOrErr of
-        Left (e :: SomeException) -> do
-          logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
-          pure $ mcpToolError reqId ExternalFailure $ "show_fields failed: " <> T.pack (displayException e)
-
-        Right result -> do
-          logInfo logger $ "[MCP:" <> reqId <> "] Found " <> T.pack (show $ length $ sfrFields result) <> " fields"
-          pure $ mcpToolSuccess reqId (toJSON result)
-
-
--- | Handle the show_constructors tool.
---
--- Runs the ShowConstructorsGraph logic to show constructors of a Haskell sum type or GADT.
-handleShowConstructorsTool :: Logger -> LSPSession -> Maybe TUIHandle -> Text -> Value -> IO ControlResponse
-handleShowConstructorsTool logger lspSession maybeTuiHandle reqId args = do
-  case fromJSON args of
-    Error err -> do
-      logError logger $ "  parse error: " <> T.pack err
-      pure $ mcpToolError reqId InvalidInput $ "Invalid show_constructors arguments: " <> T.pack err
-
-    Success scArgs -> do
-      logDebug logger $ "  type_name=" <> scaTypeName scArgs
-
-      resultOrErr <- try $ runM
-        $ runLog Debug
-        $ runGeminiIO
-        $ runTUIOrMock maybeTuiHandle
-        $ runLSP lspSession
-        $ runReturn (showConstructorsLogic scArgs)
-
-      case resultOrErr of
-        Left (e :: SomeException) -> do
-          logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
-          pure $ mcpToolError reqId ExternalFailure $ "show_constructors failed: " <> T.pack (displayException e)
-
-        Right result -> do
-          logInfo logger $ "[MCP:" <> reqId <> "] Found " <> T.pack (show $ length $ scrConstructors result) <> " constructors"
-          pure $ mcpToolSuccess reqId (toJSON result)
 
 
 -- | Handle the file_pr tool.
 --
 -- Runs the FilePRGraph logic to file a pull request with bead context.
-handleFilePRTool :: Logger -> LSPSession -> Text -> Value -> IO ControlResponse
-handleFilePRTool logger _lspSession reqId args = do
+handleFilePRTool :: Logger -> Text -> Value -> IO ControlResponse
+handleFilePRTool logger reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
@@ -647,8 +524,8 @@ handleFilePRTool logger _lspSession reqId args = do
 -- | Handle the pm_approve_expansion tool.
 --
 -- Runs the PmApproveExpansionGraph logic to approve or reject expansion plans.
-handlePmApproveExpansionTool :: Logger -> LSPSession -> Text -> Value -> IO ControlResponse
-handlePmApproveExpansionTool logger _lspSession reqId args = do
+handlePmApproveExpansionTool :: Logger -> Text -> Value -> IO ControlResponse
+handlePmApproveExpansionTool logger reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
@@ -758,8 +635,8 @@ handlePmReviewDagTool logger reqId args = do
 
 
 -- | Handle the confirm_action tool.
-handleConfirmActionTool :: Logger -> LSPSession -> Maybe TUIHandle -> Text -> Value -> IO ControlResponse
-handleConfirmActionTool logger _lspSession maybeTuiHandle reqId args = do
+handleConfirmActionTool :: Logger -> Maybe TUIHandle -> Text -> Value -> IO ControlResponse
+handleConfirmActionTool logger maybeTuiHandle reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
@@ -809,8 +686,8 @@ handleRegisterFeedbackTool logger reqId args = do
 
 
 -- | Handle the select_option tool.
-handleSelectOptionTool :: Logger -> LSPSession -> Maybe TUIHandle -> Text -> Value -> IO ControlResponse
-handleSelectOptionTool logger _lspSession maybeTuiHandle reqId args = do
+handleSelectOptionTool :: Logger -> Maybe TUIHandle -> Text -> Value -> IO ControlResponse
+handleSelectOptionTool logger maybeTuiHandle reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
@@ -835,8 +712,8 @@ handleSelectOptionTool logger _lspSession maybeTuiHandle reqId args = do
 
 
 -- | Handle the request_guidance tool.
-handleRequestGuidanceTool :: Logger -> LSPSession -> Maybe TUIHandle -> Text -> Value -> IO ControlResponse
-handleRequestGuidanceTool logger _lspSession maybeTuiHandle reqId args = do
+handleRequestGuidanceTool :: Logger -> Maybe TUIHandle -> Text -> Value -> IO ControlResponse
+handleRequestGuidanceTool logger maybeTuiHandle reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err

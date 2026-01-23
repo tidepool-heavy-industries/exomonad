@@ -56,7 +56,7 @@ async fn check_docker() -> Result<Docker, String> {
 }
 
 #[tokio::test]
-#[ignore]
+#[ignore = "Requires Docker and ANTHROPIC_API_KEY"]
 async fn test_e2e_multistep_task_with_structured_output() {
     // Check prerequisites
     if let Err(msg) = check_prerequisites() {
@@ -278,7 +278,7 @@ async fn test_e2e_multistep_task_with_structured_output() {
 }
 
 #[tokio::test]
-#[ignore]
+#[ignore = "Requires Docker and ANTHROPIC_API_KEY"]
 async fn test_e2e_simple_echo_task() {
     // Simpler E2E test that just has Claude echo a value
     if let Err(msg) = check_prerequisites() {
@@ -384,7 +384,7 @@ async fn test_e2e_simple_echo_task() {
 }
 
 #[tokio::test]
-#[ignore]
+#[ignore = "Requires Docker and ANTHROPIC_API_KEY"]
 async fn test_e2e_container_timeout() {
     // Test that container timeout works correctly
     if let Err(msg) = check_prerequisites() {

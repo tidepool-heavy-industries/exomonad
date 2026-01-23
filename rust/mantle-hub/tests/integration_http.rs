@@ -40,11 +40,15 @@ async fn test_create_session() {
 
     // Verify response has session and root_node
     assert!(
-        body["session"]["id"].as_str().map(|s| !s.is_empty()).unwrap_or(false),
+        body["session"]["id"]
+            .as_str()
+            .is_some_and(|s| !s.is_empty()),
         "Session ID should be non-empty"
     );
     assert!(
-        body["root_node"]["id"].as_str().map(|s| !s.is_empty()).unwrap_or(false),
+        body["root_node"]["id"]
+            .as_str()
+            .is_some_and(|s| !s.is_empty()),
         "Root node ID should be non-empty"
     );
 
@@ -204,7 +208,10 @@ async fn test_create_child_node() {
             .unwrap();
 
     assert!(
-        child["node"]["id"].as_str().map(|s| !s.is_empty()).unwrap_or(false),
+        child["node"]["id"]
+            .as_str()
+            .map(|s| !s.is_empty())
+            .unwrap_or(false),
         "Child node ID should be non-empty"
     );
     assert_eq!(child["node"]["parent_node_id"], root_node_id.as_str());
@@ -370,7 +377,10 @@ async fn test_graph_data_single_node() {
     let node_id = &created.root_node.id;
 
     let resp = client
-        .get(format!("{}/api/sessions/{}/graph", hub.http_url, session_id))
+        .get(format!(
+            "{}/api/sessions/{}/graph",
+            hub.http_url, session_id
+        ))
         .send()
         .await
         .unwrap();
@@ -397,10 +407,9 @@ async fn test_graph_data_with_children() {
     let session_id = &created.session.id;
     let root_id = &created.root_node.id;
 
-    let child1: serde_json::Value =
-        create_child_node(&client, &hub.http_url, session_id, root_id)
-            .await
-            .unwrap();
+    let child1: serde_json::Value = create_child_node(&client, &hub.http_url, session_id, root_id)
+        .await
+        .unwrap();
     let child1_id = child1["node"]["id"].as_str().unwrap();
 
     let _child2: serde_json::Value =
@@ -410,7 +419,10 @@ async fn test_graph_data_with_children() {
 
     // Get graph
     let resp = client
-        .get(format!("{}/api/sessions/{}/graph", hub.http_url, session_id))
+        .get(format!(
+            "{}/api/sessions/{}/graph",
+            hub.http_url, session_id
+        ))
         .send()
         .await
         .unwrap();
@@ -422,10 +434,17 @@ async fn test_graph_data_with_children() {
     let edges = graph["edges"].as_array().unwrap();
 
     assert_eq!(nodes.len(), 3, "Should have 3 nodes");
-    assert_eq!(edges.len(), 2, "Should have 2 edges (parent -> child links)");
+    assert_eq!(
+        edges.len(),
+        2,
+        "Should have 2 edges (parent -> child links)"
+    );
 
     // Verify edge structure
-    let edge_targets: Vec<&str> = edges.iter().map(|e| e["target"].as_str().unwrap()).collect();
+    let edge_targets: Vec<&str> = edges
+        .iter()
+        .map(|e| e["target"].as_str().unwrap())
+        .collect();
     assert!(edge_targets.contains(&child1_id));
 }
 

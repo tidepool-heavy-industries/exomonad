@@ -23,8 +23,7 @@ pub fn init_logging() {
 pub fn init_logging_with_default(default_filter: &str) {
     tracing_subscriber::fmt()
         .with_env_filter(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new(default_filter)),
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_filter)),
         )
         .with_target(false)
         .with_writer(std::io::stderr)

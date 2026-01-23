@@ -5,9 +5,9 @@ use std::time::Duration;
 
 use super::config::HubConfig;
 use super::types::{
-    GraphData, NodeCreateResponse, NodeInfo, NodeRegister, NodeResult,
-    SessionCreateEmptyRequest, SessionCreateEmptyResponse, SessionCreateResponse, SessionInfo,
-    SessionRegister, SessionWithNodes,
+    GraphData, NodeCreateResponse, NodeInfo, NodeRegister, NodeResult, SessionCreateEmptyRequest,
+    SessionCreateEmptyResponse, SessionCreateResponse, SessionInfo, SessionRegister,
+    SessionWithNodes,
 };
 use crate::error::{MantleError, Result};
 use crate::events::StreamEvent;
@@ -47,11 +47,9 @@ impl HubClient {
     /// Check if the hub is reachable.
     pub async fn health_check(&self) -> Result<()> {
         let url = format!("{}/api/sessions", self.base_url);
-        self.client
-            .get(&url)
-            .send()
-            .await
-            .map_err(|e| MantleError::Hub(format!("Hub not reachable at {}: {}", self.base_url, e)))?;
+        self.client.get(&url).send().await.map_err(|e| {
+            MantleError::Hub(format!("Hub not reachable at {}: {}", self.base_url, e))
+        })?;
         Ok(())
     }
 
@@ -363,10 +361,7 @@ impl SyncEventStream {
         let json = serde_json::to_string(event)
             .map_err(|e| MantleError::Hub(format!("Failed to serialize event: {}", e)))?;
 
-        match self
-            .ws
-            .send(tungstenite::Message::Text(json.into()))
-        {
+        match self.ws.send(tungstenite::Message::Text(json)) {
             Ok(()) => {
                 self.events_sent += 1;
                 Ok(())
@@ -412,9 +407,9 @@ impl SyncEventStream {
             );
         }
 
-        self.ws.close(None).map_err(|e| {
-            MantleError::Hub(format!("Failed to close WebSocket: {}", e))
-        })?;
+        self.ws
+            .close(None)
+            .map_err(|e| MantleError::Hub(format!("Failed to close WebSocket: {}", e)))?;
         // Flush any remaining messages
         while let Ok(msg) = self.ws.read() {
             if msg.is_close() {

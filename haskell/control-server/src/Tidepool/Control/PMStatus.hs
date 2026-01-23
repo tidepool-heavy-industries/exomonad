@@ -22,7 +22,7 @@ module Tidepool.Control.PMStatus
 
 import Control.Monad.Freer (Eff, Member)
 import Data.Aeson (FromJSON(..), ToJSON(..), (.:?), (.=), (.!=), object, withObject)
-import Data.List (sort, span)
+import Data.List (sort)
 import Data.Maybe (mapMaybe)
 import Data.Text (Text)
 import Data.Time (UTCTime, diffUTCTime, addUTCTime, nominalDay)

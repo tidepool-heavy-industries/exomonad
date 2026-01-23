@@ -128,18 +128,18 @@ pub type Result<T> = std::result::Result<T, MantleError>;
 
 impl From<serde_json::Error> for MantleError {
     fn from(e: serde_json::Error) -> Self {
-        MantleError::JsonParse { source: e }
+        Self::JsonParse { source: e }
     }
 }
 
 impl From<nix::Error> for MantleError {
     fn from(e: nix::Error) -> Self {
-        MantleError::Poll(e)
+        Self::Poll(e)
     }
 }
 
 impl From<std::io::Error> for MantleError {
     fn from(e: std::io::Error) -> Self {
-        MantleError::Io(e)
+        Self::Io(e)
     }
 }

@@ -12,7 +12,7 @@ pub struct PopupDefinition {
 /// A single component with optional visibility conditions
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Component {
-    pub id: String,  // Required unique identifier
+    pub id: String, // Required unique identifier
     #[serde(flatten)]
     pub spec: ComponentSpec,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -23,7 +23,9 @@ pub struct Component {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum ComponentSpec {
-    Text { content: String },
+    Text {
+        content: String,
+    },
     Slider {
         label: String,
         min: f32,
@@ -66,18 +68,18 @@ pub enum ComponentSpec {
 #[serde(untagged)]
 pub enum VisibilityRule {
     // Simple: checkbox is checked
-    Checked(String),  // Just the checkbox ID
+    Checked(String), // Just the checkbox ID
 
     // Choice equals value
-    Equals(HashMap<String, String>),  // {"choice_id": "Expected Value"}
+    Equals(HashMap<String, String>), // {"choice_id": "Expected Value"}
 
     // Slider/number comparisons (different field names to disambiguate)
-    GreaterThan { id: String, min_value: f32 },  // value > min_value
-    LessThan { id: String, max_value: f32 },     // value < max_value
+    GreaterThan { id: String, min_value: f32 }, // value > min_value
+    LessThan { id: String, max_value: f32 },    // value < max_value
 
     // Multiselect has N items selected (different field names to disambiguate)
-    CountEquals { id: String, exact_count: usize },      // count == exact_count
-    CountGreaterThan { id: String, min_count: usize },   // count > min_count
+    CountEquals { id: String, exact_count: usize }, // count == exact_count
+    CountGreaterThan { id: String, min_count: usize }, // count > min_count
 }
 
 // Helper function for default slider value
@@ -98,7 +100,7 @@ pub enum ElementValue {
 /// Runtime state of all popup elements
 #[derive(Debug, Clone)]
 pub struct PopupState {
-    pub values: HashMap<String, ElementValue>,  // ID -> value
+    pub values: HashMap<String, ElementValue>, // ID -> value
     pub button_clicked: Option<String>,
 }
 
@@ -116,19 +118,28 @@ impl PopupState {
         for component in components {
             match &component.spec {
                 ComponentSpec::Slider { default, .. } => {
-                    self.values.insert(component.id.clone(), ElementValue::Number(*default));
+                    self.values
+                        .insert(component.id.clone(), ElementValue::Number(*default));
                 }
                 ComponentSpec::Checkbox { default, .. } => {
-                    self.values.insert(component.id.clone(), ElementValue::Boolean(*default));
+                    self.values
+                        .insert(component.id.clone(), ElementValue::Boolean(*default));
                 }
                 ComponentSpec::Textbox { .. } => {
-                    self.values.insert(component.id.clone(), ElementValue::Text(String::new()));
+                    self.values
+                        .insert(component.id.clone(), ElementValue::Text(String::new()));
                 }
                 ComponentSpec::Choice { default, .. } => {
-                    self.values.insert(component.id.clone(), ElementValue::Choice(default.unwrap_or(0)));
+                    self.values.insert(
+                        component.id.clone(),
+                        ElementValue::Choice(default.unwrap_or(0)),
+                    );
                 }
                 ComponentSpec::Multiselect { options, .. } => {
-                    self.values.insert(component.id.clone(), ElementValue::MultiChoice(vec![false; options.len()]));
+                    self.values.insert(
+                        component.id.clone(),
+                        ElementValue::MultiChoice(vec![false; options.len()]),
+                    );
                 }
                 _ => {}
             }
@@ -144,7 +155,8 @@ impl PopupState {
     }
 
     pub fn set_number(&mut self, id: &str, value: f32) {
-        self.values.insert(id.to_string(), ElementValue::Number(value));
+        self.values
+            .insert(id.to_string(), ElementValue::Number(value));
     }
 
     pub fn get_boolean(&self, id: &str) -> Option<bool> {
@@ -155,7 +167,8 @@ impl PopupState {
     }
 
     pub fn set_boolean(&mut self, id: &str, value: bool) {
-        self.values.insert(id.to_string(), ElementValue::Boolean(value));
+        self.values
+            .insert(id.to_string(), ElementValue::Boolean(value));
     }
 
     pub fn get_text(&self, id: &str) -> Option<&String> {
@@ -166,7 +179,8 @@ impl PopupState {
     }
 
     pub fn set_text(&mut self, id: &str, value: String) {
-        self.values.insert(id.to_string(), ElementValue::Text(value));
+        self.values
+            .insert(id.to_string(), ElementValue::Text(value));
     }
 
     pub fn get_choice(&self, id: &str) -> Option<usize> {
@@ -177,7 +191,8 @@ impl PopupState {
     }
 
     pub fn set_choice(&mut self, id: &str, value: usize) {
-        self.values.insert(id.to_string(), ElementValue::Choice(value));
+        self.values
+            .insert(id.to_string(), ElementValue::Choice(value));
     }
 
     pub fn get_multichoice(&self, id: &str) -> Option<&Vec<bool>> {
@@ -188,14 +203,15 @@ impl PopupState {
     }
 
     pub fn set_multichoice(&mut self, id: &str, value: Vec<bool>) {
-        self.values.insert(id.to_string(), ElementValue::MultiChoice(value));
+        self.values
+            .insert(id.to_string(), ElementValue::MultiChoice(value));
     }
 }
 
 /// JSON result containing all form values
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PopupResult {
-    pub button: String,  // "submit" or "decline"
+    pub button: String, // "submit" or "decline"
     pub values: Value,
 }
 
@@ -216,8 +232,12 @@ impl PopupResult {
                             json!(null)
                         }
                     }
-                    (ElementValue::MultiChoice(selections), ComponentSpec::Multiselect { options, .. }) => {
-                        let selected: Vec<&String> = options.iter()
+                    (
+                        ElementValue::MultiChoice(selections),
+                        ComponentSpec::Multiselect { options, .. },
+                    ) => {
+                        let selected: Vec<&String> = options
+                            .iter()
                             .enumerate()
                             .filter(|(i, _)| selections.get(*i).copied().unwrap_or(false))
                             .map(|(_, option)| option)
@@ -231,7 +251,10 @@ impl PopupResult {
         }
 
         Self {
-            button: state.button_clicked.clone().unwrap_or_else(|| "decline".to_string()),
+            button: state
+                .button_clicked
+                .clone()
+                .unwrap_or_else(|| "decline".to_string()),
             values: Value::Object(result_values),
         }
     }

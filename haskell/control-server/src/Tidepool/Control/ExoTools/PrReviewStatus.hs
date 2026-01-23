@@ -23,17 +23,7 @@ import qualified Data.Text as T
 import Data.Time (UTCTime(..), Day(ModifiedJulianDay))
 import GHC.Generics (Generic)
 
-import Tidepool.Effects.GitHub
-  ( GitHub
-  , Repo(..)
-  , PullRequest(..)
-  , ReviewComment(..)
-  , ReviewState(..)
-  , Review(..)
-  , Author(..)
-  , getPullRequestReviews
-  , getPullRequest
-  )
+import Tidepool.Effects.GitHub (GitHub, getPullRequest, getPullRequestReviews, PullRequest(..), Review(..), ReviewComment(..), Author(..), Repo(..))
 import Tidepool.Graph.Generic (AsHandler, type (:-))
 import Tidepool.Graph.Generic.Core (EntryNode, ExitNode, LogicNode)
 import Tidepool.Graph.Goto (Goto, GotoChoice, To, gotoExit)

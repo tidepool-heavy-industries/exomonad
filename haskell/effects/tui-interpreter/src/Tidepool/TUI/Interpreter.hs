@@ -22,7 +22,7 @@
 -- @
 module Tidepool.TUI.Interpreter
   ( -- * TUI Handle
-    TUIHandle
+    TUIHandle(..)
   , newTUIHandle
   , closeTUIHandle
 
@@ -70,7 +70,6 @@ data TUIHandle = TUIHandle
   { tuiSocket :: Socket
   , tuiSendChan :: TChan PopupDefinition
   , tuiRecvChan :: TChan PopupResult
-  , tuiSessionId :: Text
   }
 
 -- ══════════════════════════════════════════════════════════════
@@ -82,7 +81,7 @@ data TUIHandle = TUIHandle
 -- Spawns background threads for sending and receiving messages.
 -- The handle should be closed with 'closeTUIHandle' when done.
 newTUIHandle :: Text -> Socket -> IO TUIHandle
-newTUIHandle sessionId sock = do
+newTUIHandle _sessionId sock = do
   sendChan <- newTChanIO
   recvChan <- newTChanIO
 
@@ -92,7 +91,7 @@ newTUIHandle sessionId sock = do
   -- Spawn receiver thread
   void $ forkIO $ receiverThread sock recvChan
 
-  pure $ TUIHandle sock sendChan recvChan sessionId
+  pure $ TUIHandle sock sendChan recvChan
 
 -- | Close a TUI handle and clean up resources.
 closeTUIHandle :: TUIHandle -> IO ()

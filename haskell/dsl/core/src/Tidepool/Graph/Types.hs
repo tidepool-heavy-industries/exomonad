@@ -156,26 +156,9 @@ infixl 7 :@
 -- **DEPRECATED**: Use 'Entries' for new code. This annotation supports only
 -- single-input nodes. 'Entries' allows multiple named entry points per node.
 --
--- For fan-in patterns (multiple sources), use 'Either':
--- @Input (Either FromNodeA FromNodeB)@
---
--- For multiple simultaneous inputs, use tuples:
--- @Input (A, B)@
---
--- **Migration path:**
---
--- @
--- -- Old style (single entry):
--- gWork :: mode :- LLMNode :@ Input TaskSpec :@ Schema Result
---
--- -- New style (single named entry):
--- data WorkEntry mode = WorkEntry
---   { weProcess :: mode :- EntryPoint TaskSpec }
---   deriving Generic
---
--- gWork :: mode :- LLMNode :@ Entries WorkEntry :@ Schema Result
--- @
-{-# DEPRECATED Input "Use 'Entries' annotation for named entry points" #-}
+-- FIXME: Re-enable deprecation once LogicNode has a suitable 'Entries'-style alternative.
+-- Currently LogicNode requires Input for its single payload.
+-- {-# DEPRECATED Input "Use 'Entries' annotation for named entry points" #-}
 type Input :: Type -> Type
 data Input inputType
 

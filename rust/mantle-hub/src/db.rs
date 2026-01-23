@@ -12,8 +12,8 @@ use std::str::FromStr;
 
 use crate::error::{HubError, Result};
 use crate::types::{
-    GraphData, GraphEdge, GraphNode, NodeEvent, NodeInfo, NodeResult, NodeState, SessionInfo,
-    SessionState, SessionWithNodes,
+    GraphData, GraphEdge, GraphNode, NodeEvent, NodeInfo, NodeRegister, NodeResult, NodeState,
+    SessionInfo, SessionState, SessionWithNodes,
 };
 
 /// Initialize database pool and run migrations.
@@ -81,11 +81,10 @@ async fn run_migrations(pool: &SqlitePool) -> Result<()> {
 
     // Migration: add metadata column if not exists (for existing databases)
     // SQLite doesn't support IF NOT EXISTS for columns, so we check first
-    let has_metadata: Option<(String,)> = sqlx::query_as(
-        "SELECT name FROM pragma_table_info('nodes') WHERE name = 'metadata'",
-    )
-    .fetch_optional(pool)
-    .await?;
+    let has_metadata: Option<(String,)> =
+        sqlx::query_as("SELECT name FROM pragma_table_info('nodes') WHERE name = 'metadata'")
+            .fetch_optional(pool)
+            .await?;
 
     if has_metadata.is_none() {
         sqlx::query("ALTER TABLE nodes ADD COLUMN metadata TEXT")
@@ -313,22 +312,17 @@ pub async fn delete_session(pool: &SqlitePool, id: &str) -> Result<()> {
 ///
 /// # Arguments
 /// * `parent_node_id` - Optional parent for tree structure. If None, this is a root node.
-/// * `metadata` - Optional JSON metadata (execution_id, node_path, node_type, depth).
+/// * `req` - Node registration details.
 pub async fn create_node(
     pool: &SqlitePool,
     session_id: &str,
-    parent_node_id: Option<&str>,
-    branch: &str,
-    worktree: &str,
-    prompt: &str,
-    model: &str,
-    metadata: Option<&serde_json::Value>,
+    req: &NodeRegister,
 ) -> Result<String> {
     // Verify session exists
     let _ = get_session(pool, session_id).await?;
 
     // Verify parent node exists and belongs to this session (if provided)
-    if let Some(parent_id) = parent_node_id {
+    if let Some(parent_id) = &req.parent_node_id {
         let parent = get_node(pool, parent_id).await?;
         if parent.session_id != session_id {
             return Err(HubError::BadRequest(format!(
@@ -340,7 +334,10 @@ pub async fn create_node(
 
     let node_id = uuid::Uuid::new_v4().to_string();
     let now = chrono::Utc::now().to_rfc3339();
-    let metadata_json = metadata.map(|m| serde_json::to_string(m).unwrap_or_default());
+    let metadata_json = req
+        .metadata
+        .as_ref()
+        .map(|m| serde_json::to_string(m).unwrap_or_default());
 
     sqlx::query(
         r#"
@@ -350,11 +347,11 @@ pub async fn create_node(
     )
     .bind(&node_id)
     .bind(session_id)
-    .bind(parent_node_id)
-    .bind(branch)
-    .bind(worktree)
-    .bind(prompt)
-    .bind(model)
+    .bind(&req.parent_node_id)
+    .bind(&req.branch)
+    .bind(req.worktree.display().to_string())
+    .bind(&req.prompt)
+    .bind(&req.model)
     .bind(&metadata_json)
     .bind(&now)
     .bind(&now)
@@ -649,29 +646,36 @@ impl NodeRow {
                 is_error: is_error != 0,
                 result_text: self.result_text,
                 structured_output: self.structured_output.and_then(|s| {
-                    serde_json::from_str(&s).map_err(|e| {
-                        tracing::warn!(
-                            node_id = %self.id,
-                            error = %e,
-                            "Failed to parse structured_output JSON"
-                        );
-                        e
-                    }).ok()
+                    serde_json::from_str(&s)
+                        .map_err(|e| {
+                            tracing::warn!(
+                                node_id = %self.id,
+                                error = %e,
+                                "Failed to parse structured_output JSON"
+                            );
+                            e
+                        })
+                        .ok()
                 }),
                 total_cost_usd: self.total_cost_usd.unwrap_or(0.0),
                 num_turns: self.num_turns.unwrap_or(0),
                 cc_session_id,
                 duration_secs: self.duration_secs.unwrap_or(0.0),
-                model_usage: self.model_usage.and_then(|s| {
-                    serde_json::from_str(&s).map_err(|e| {
-                        tracing::warn!(
-                            node_id = %self.id,
-                            error = %e,
-                            "Failed to parse model_usage JSON"
-                        );
-                        e
-                    }).ok()
-                }).unwrap_or_default(),
+                model_usage: self
+                    .model_usage
+                    .and_then(|s| {
+                        serde_json::from_str(&s)
+                            .map_err(|e| {
+                                tracing::warn!(
+                                    node_id = %self.id,
+                                    error = %e,
+                                    "Failed to parse model_usage JSON"
+                                );
+                                e
+                            })
+                            .ok()
+                    })
+                    .unwrap_or_default(),
             })
         } else {
             None
@@ -679,14 +683,16 @@ impl NodeRow {
 
         // Parse metadata JSON if present
         let metadata = self.metadata.and_then(|s| {
-            serde_json::from_str(&s).map_err(|e| {
-                tracing::warn!(
-                    node_id = %self.id,
-                    error = %e,
-                    "Failed to parse node metadata JSON"
-                );
-                e
-            }).ok()
+            serde_json::from_str(&s)
+                .map_err(|e| {
+                    tracing::warn!(
+                        node_id = %self.id,
+                        error = %e,
+                        "Failed to parse node metadata JSON"
+                    );
+                    e
+                })
+                .ok()
         });
 
         NodeInfo {
@@ -717,10 +723,8 @@ struct EventRow {
 
 impl EventRow {
     fn try_into_node_event(self) -> Result<NodeEvent> {
-        let event: mantle_shared::events::StreamEvent =
-            serde_json::from_str(&self.event_data).map_err(|e| {
-                HubError::BadRequest(format!("Failed to parse event data: {}", e))
-            })?;
+        let event: mantle_shared::events::StreamEvent = serde_json::from_str(&self.event_data)
+            .map_err(|e| HubError::BadRequest(format!("Failed to parse event data: {}", e)))?;
 
         Ok(NodeEvent {
             id: self.id,

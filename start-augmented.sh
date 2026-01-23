@@ -83,6 +83,9 @@ fi
 
 echo "📦 Discovered Hangar at: $HANGAR_ROOT"
 
+# Export HANGAR_ROOT for control-server and subagents
+export HANGAR_ROOT
+
 # Add all Hangar binaries (including mantle-agent) to PATH for Claude and related tools
 export PATH="$HANGAR_ROOT/runtime/bin:$PATH"
 

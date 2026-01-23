@@ -1,156 +1,147 @@
 //! Unix socket client for control envelope communication.
 //!
-//! Provides a synchronous Unix socket client for sending hook events and MCP tool
-//! calls to the host control server and receiving responses.
+//! Provides a synchronous client for sending hook events and MCP tool calls
+//! to the host control server via HTTP over Unix Domain Socket.
 //!
-//! ## Design Decision: Synchronous
-//!
-//! This module uses synchronous I/O (std::os::unix::net) rather than async.
-//! This is a deliberate choice because:
-//! 
-//! 1. Hook commands block anyway - Claude Code waits for hook completion
-//! 2. Simpler code without async runtime overhead
-//! 3. Each hook invocation is a separate process with one request/response
-//! 
 //! ## Protocol
 //!
-//! - Transport: Unix Domain Socket
-//! - Framing: Newline-delimited JSON (NDJSON)
-//! - Flow: Connect -> Write message + newline -> Read response + newline -> Close
+//! - Transport: HTTP/1.1 over Unix Domain Socket
+//! - Implementation: Uses `curl` subprocess to avoid adding async dependencies (hyper/reqwest)
+//!   to the synchronous mantle-agent CLI.
+//!
+//!   NOTE: This implementation requires `curl` to be available in the system PATH.
+//!
+//! Endpoints:
+//! - POST /hook      (HookEvent)
+//! - POST /mcp/call  (McpToolCall)
+//! - GET  /mcp/tools (ToolsListRequest)
+//! - GET  /ping      (Ping)
 
 use crate::error::{MantleError, Result};
 use crate::protocol::{ControlMessage, ControlResponse};
-use std::io::{BufRead, BufReader, Write};
-#[cfg(unix)]
-use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::Duration;
-use tracing::{debug, trace};
-
-/// Default timeout for socket operations (30 seconds).
-const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
+use tracing::{debug, trace, error};
 
 /// Unix socket client for control envelope communication.
 pub struct ControlSocket {
-    #[cfg(unix)]
-    stream: UnixStream,
-    #[cfg(not(unix))]
-    _phantom: std::marker::PhantomData<()>
+    socket_path: PathBuf,
+    #[allow(dead_code)] // Used in future for custom timeouts
+    timeout: Duration,
 }
 
 impl ControlSocket {
     /// Connect to the control server at the given socket path.
     ///
-    /// # Errors
-    ///
-    /// Returns an error if the connection fails or if the platform is not supported.
+    /// For this implementation, "connect" just validates the path and stores it,
+    /// as `curl` will establish a fresh connection for each request.
     pub fn connect<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let path = path.as_ref();
-        debug!(path = %path.display(), "Connecting to control server");
-
-        #[cfg(unix)]
-        {
-            let stream = UnixStream::connect(path).map_err(|e| MantleError::UnixConnect {
-                path: path.to_path_buf(),
-                source: e,
-            })?;
-
-            // Set default timeouts
-            stream
-                .set_read_timeout(Some(DEFAULT_TIMEOUT))
-                .map_err(|e| MantleError::SocketConfig { source: e })?;
-            stream
-                .set_write_timeout(Some(DEFAULT_TIMEOUT))
-                .map_err(|e| MantleError::SocketConfig { source: e })?;
-
-            debug!("Connected to control server");
-            Ok(Self { stream })
+        let path = path.as_ref().to_path_buf();
+        debug!(path = %path.display(), "Initializing control socket client");
+        
+        // Simple validation that path exists (optional, curl would fail anyway)
+        if !path.exists() {
+             // Don't fail hard here if socket doesn't exist yet (race condition?), 
+             // but maybe we should. For now, just logging.
+             debug!("Socket path does not exist yet: {:?}", path);
         }
-        #[cfg(not(unix))]
-        {
-            let _ = path;
-            Err(MantleError::Io(std::io::Error::new(
-                std::io::ErrorKind::Unsupported,
-                "Unix sockets are only supported on Unix systems",
-            )))
-        }
+
+        Ok(Self {
+            socket_path: path,
+            timeout: Duration::from_secs(300), // 5 min default matching server
+        })
     }
 
-    /// Set custom read/write timeout.
-    pub fn set_timeout(&self, timeout: Duration) -> Result<()> {
-        #[cfg(unix)]
-        {
-            self.stream
-                .set_read_timeout(Some(timeout))
-                .map_err(|e| MantleError::SocketConfig { source: e })?;
-            self.stream
-                .set_write_timeout(Some(timeout))
-                .map_err(|e| MantleError::SocketConfig { source: e })?;
-            Ok(())
-        }
-        #[cfg(not(unix))] 
-        {
-            let _ = timeout;
-            Ok(())
-        }
+    /// Set custom timeout.
+    pub fn set_timeout(&mut self, timeout: Duration) -> Result<()> {
+        debug!(timeout = ?timeout, "Setting custom control socket timeout");
+        self.timeout = timeout;
+        Ok(())
     }
 
     /// Send a message and receive the response.
     ///
-    /// Protocol: Write JSON + newline, read JSON + newline.
+    /// Executes `curl --unix-socket ...` to perform the HTTP request.
     pub fn send(&mut self, message: &ControlMessage) -> Result<ControlResponse> {
-        #[cfg(unix)]
-        {
-            // Serialize and send
-            let json = serde_json::to_string(message).map_err(MantleError::JsonSerialize)?;
-            trace!(json = %json, "Sending message");
+        let (method, endpoint, body_json) = match message {
+            ControlMessage::HookEvent { input, runtime } => {
+                // API expects [HookInput, Runtime]
+                let body = serde_json::json!([input, runtime]);
+                ("POST", "/hook", Some(body))
+            },
+            ControlMessage::McpToolCall { id, tool_name, arguments } => {
+                // API expects {"id": ..., "tool_name": ..., "arguments": ...}
+                let body = serde_json::json!({
+                    "id": id,
+                    "tool_name": tool_name,
+                    "arguments": arguments
+                });
+                ("POST", "/mcp/call", Some(body))
+            },
+            ControlMessage::ToolsListRequest => {
+                ("GET", "/mcp/tools", None)
+            },
+            ControlMessage::Ping => {
+                ("GET", "/ping", None)
+            }
+        };
 
-            self.stream
-                .write_all(json.as_bytes())
-                .map_err(|e| MantleError::SocketWrite { source: e })?;
-            self.stream
-                .write_all(b"\n")
-                .map_err(|e| MantleError::SocketWrite { source: e })?;
-            self.stream
-                .flush()
-                .map_err(|e| MantleError::SocketWrite { source: e })?;
+        let url = format!("http://localhost{}", endpoint);
+        
+        let mut cmd = Command::new("curl");
+        cmd.arg("--unix-socket").arg(&self.socket_path)
+           .arg("-s") // Silent
+           .arg("-S") // Show error if fails
+           .arg("-X").arg(method)
+           .arg("--max-time").arg(self.timeout.as_secs().to_string())
+           .arg(&url);
 
-            // Read response
-            let mut reader = BufReader::new(&self.stream);
-            let mut response_line = String::new();
-
-            reader
-                .read_line(&mut response_line)
-                .map_err(|e| MantleError::SocketRead { source: e })?;
-
-            trace!(response = %response_line.trim(), "Received response");
-
-            let response: ControlResponse = serde_json::from_str(response_line.trim())
-                .map_err(|e| MantleError::JsonParse { source: e })?;
-
-            Ok(response)
+        if let Some(body) = body_json {
+            let body_str = serde_json::to_string(&body).map_err(MantleError::JsonSerialize)?;
+            trace!(url = %url, body_len = body_str.len(), "Sending HTTP request");
+            
+            cmd.arg("-H").arg("Content-Type: application/json")
+               .arg("-d").arg(body_str);
+        } else {
+            trace!(url = %url, "Sending HTTP request");
         }
-        #[cfg(not(unix))] 
-        {
-            let _ = message;
-            Err(MantleError::Io(std::io::Error::new(
-                std::io::ErrorKind::Unsupported,
-                "Unix sockets are only supported on Unix systems",
-            )))
+
+        let output = cmd.output().map_err(|e| MantleError::Io(e))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            error!(status = ?output.status, stderr = %stderr, "curl failed");
+            return Err(MantleError::Io(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("curl failed: {}", stderr)
+            )));
         }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        trace!(response_len = stdout.len(), "Received response");
+
+        let response: ControlResponse = serde_json::from_str(&stdout)
+            .map_err(|e| {
+                error!(body = %stdout, "Failed to parse response JSON");
+                MantleError::JsonParse { source: e }
+            })?;
+
+        Ok(response)
     }
 }
 
 /// Get control server socket path from environment.
-///
-/// # Panics
-///
-/// Panics if TIDEPOOL_CONTROL_SOCKET environment variable is not set.
-pub fn control_socket_path() -> PathBuf {
-    match std::env::var("TIDEPOOL_CONTROL_SOCKET") {
-        Ok(path) => PathBuf::from(path),
-        Err(_) => panic!("TIDEPOOL_CONTROL_SOCKET environment variable not set. This should be set via start-augmented.sh or .env"),
-    }
+pub fn control_socket_path() -> Result<PathBuf> {
+    std::env::var("TIDEPOOL_CONTROL_SOCKET")
+        .map(PathBuf::from)
+        .map_err(|_| MantleError::UnixConnect {
+            path: PathBuf::from("UNKNOWN"),
+            source: std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "TIDEPOOL_CONTROL_SOCKET environment variable not set. This should be set via start-augmented.sh or .env"
+            ),
+        })
 }
 
 #[cfg(all(test, unix))] 
@@ -162,30 +153,42 @@ mod tests {
 
     #[test]
     fn test_socket_roundtrip() {
+        // Ensure curl is installed
+        if Command::new("curl").arg("--version").output().is_err() {
+            println!("Skipping test: curl not found");
+            return;
+        }
+
         let dir = tempdir().unwrap();
         let socket_path = dir.path().join("control.sock");
         let socket_path_inner = socket_path.clone();
 
-        // Start a simple echo server
+        // Start a simple HTTP-over-Unix echo server
         let listener = UnixListener::bind(&socket_path).unwrap();
 
         let server_handle = thread::spawn(move || {
-            let (stream, _) = listener.accept().unwrap();
-            let mut reader = BufReader::new(&stream);
-            let mut line = String::new();
-            reader.read_line(&mut line).unwrap();
+            let (mut stream, _) = listener.accept().unwrap();
+            
+            // Read request (just consume it, don't parse strictly for this test)
+            use std::io::Read;
+            let mut buf = [0u8; 1024];
+            let _ = stream.read(&mut buf).unwrap();
 
-            // Parse the message and echo back a response
-            let _msg: ControlMessage = serde_json::from_str(&line).unwrap();
-
+            // Construct response
             use crate::protocol::{ControlResponse, HookOutput};
-            let response = 
+            let response_obj =
                 ControlResponse::hook_success(HookOutput::pre_tool_use_allow(None, None));
-            let response_json = serde_json::to_string(&response).unwrap();
+            let response_json = serde_json::to_string(&response_obj).unwrap();
+            
+            // Minimal HTTP response
+            let http_response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}\r\n",
+                response_json.len(),
+                response_json
+            );
 
             use std::io::Write;
-            let mut stream = stream;
-            writeln!(stream, "{}", response_json).unwrap();
+            stream.write_all(http_response.as_bytes()).unwrap();
         });
 
         // Connect and send

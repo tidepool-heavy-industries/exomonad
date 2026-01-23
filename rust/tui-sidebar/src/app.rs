@@ -1,6 +1,8 @@
 use anyhow::{Context, Result};
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, MouseEventKind},
+    event::{
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, MouseEventKind,
+    },
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -223,8 +225,12 @@ fn setup_terminal() -> Result<Terminal<CrosstermBackend<io::Stdout>>> {
 /// Cleanup terminal (leave alternate screen, disable raw mode, disable mouse).
 fn cleanup_terminal(mut terminal: Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
     disable_raw_mode().context("Failed to disable raw mode")?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)
-        .context("Failed to leave alternate screen")?;
+    execute!(
+        terminal.backend_mut(),
+        LeaveAlternateScreen,
+        DisableMouseCapture
+    )
+    .context("Failed to leave alternate screen")?;
     terminal.show_cursor().context("Failed to show cursor")?;
 
     Ok(())

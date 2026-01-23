@@ -9,9 +9,10 @@ processes:
         exit 1
       fi
       rm -f .tidepool/sockets/control.sock .tidepool/sockets/tui.sock && \
-      "$TIDEPOOL_BIN_DIR/tidepool-control-server" --no-tui
+      "$TIDEPOOL_BIN_DIR/tidepool-control-server"
     working_dir: "."
     environment:
+      - "HANGAR_ROOT=${HANGAR_ROOT}"
       - "TIDEPOOL_BIN_DIR=${TIDEPOOL_BIN_DIR}"
       - "TIDEPOOL_CONTROL_SOCKET=.tidepool/sockets/control.sock"
       - "TIDEPOOL_TUI_SOCKET=.tidepool/sockets/tui.sock"

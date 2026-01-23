@@ -270,7 +270,6 @@ fn is_tidepool_hook(entries: &Value) -> bool {
     false
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

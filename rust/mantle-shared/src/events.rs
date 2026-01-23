@@ -26,13 +26,13 @@ pub struct InterruptSignal {
     pub reason: Option<String>,
 }
 
-/// A decision tool call from Claude Code.
+/// A tool call from Claude Code.
 ///
-/// When Claude calls a decision tool (e.g., `decision::approve`), we capture
-/// the tool name and input for parsing back to Haskell sum types.
+/// When Claude calls a tool (e.g., `test_tool`), we capture
+/// the tool name and input for logging and visualization.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ToolCall {
-    /// Full tool name (e.g., "decision::approve").
+    /// Full tool name (e.g., "bash", "mcp::tool_name").
     pub name: String,
     /// Tool input (the branch's field values).
     pub input: serde_json::Value,
@@ -289,8 +289,8 @@ pub struct RunResult {
     /// Always serialize (Haskell expects the field to be present).
     #[serde(default)]
     pub interrupts: Vec<InterruptSignal>,
-    /// Decision tool calls from Claude Code.
-    /// Populated when Claude calls a `decision::*` tool.
+    /// MCP tool calls from Claude Code.
+    /// Populated when Claude calls an MCP tool.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_calls: Option<Vec<ToolCall>>,
     /// Stderr output from Claude Code process.
@@ -351,14 +351,14 @@ impl RunResult {
             exit_code,
             is_error,
             result,
-            structured_output: result_event.structured_output.clone(),
+            structured_output: result_event.structured_output,
             session_id,
             session_tag,
             total_cost_usd: result_event.total_cost_usd.unwrap_or(0.0),
             num_turns: result_event.num_turns.unwrap_or(0),
             events,
-            permission_denials: result_event.permission_denials.clone(),
-            model_usage: result_event.model_usage.clone(),
+            permission_denials: result_event.permission_denials,
+            model_usage: result_event.model_usage,
             interrupts,
             tool_calls,
             stderr_output,
@@ -379,17 +379,16 @@ impl RunResult {
                 if last_lines.is_empty() {
                     String::new()
                 } else {
-                    format!("\n\nStderr (last {} lines):\n{}", last_lines.len(), last_lines.join("\n"))
+                    format!(
+                        "\n\nStderr (last {} lines):\n{}",
+                        last_lines.len(),
+                        last_lines.join("\n")
+                    )
                 }
             })
             .unwrap_or_default();
 
-        format!(
-            "{} (exit code {}){}",
-            exit_hint,
-            exit_code,
-            stderr_excerpt
-        )
+        format!("{} (exit code {}){}", exit_hint, exit_code, stderr_excerpt)
     }
 }
 
@@ -635,9 +634,16 @@ mod tests {
 
         assert!(result.is_error);
         assert_eq!(result.exit_code, 2);
-        assert!(result.result.as_ref().unwrap().contains("Authentication or setup failure"));
+        assert!(result
+            .result
+            .as_ref()
+            .unwrap()
+            .contains("Authentication or setup failure"));
         assert!(result.result.as_ref().unwrap().contains("token expired"));
-        assert_eq!(result.stderr_output, Some("Auth failed: token expired".to_string()));
+        assert_eq!(
+            result.stderr_output,
+            Some("Auth failed: token expired".to_string())
+        );
     }
 
     #[test]
@@ -654,15 +660,8 @@ mod tests {
             permission_denials: vec![],
             model_usage: HashMap::new(),
         };
-        let result = RunResult::from_events(
-            vec![],
-            Some(result_event),
-            0,
-            None,
-            vec![],
-            None,
-            None,
-        );
+        let result =
+            RunResult::from_events(vec![], Some(result_event), 0, None, vec![], None, None);
 
         assert!(!result.is_error);
         assert_eq!(result.result, Some("Task completed".to_string()));

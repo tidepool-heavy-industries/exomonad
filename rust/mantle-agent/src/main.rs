@@ -1,12 +1,12 @@
 //! mantle-agent: Container-side agent for mantle sessions.
 //!
 //! This binary runs inside Docker containers and handles Claude Code hooks
-//! and serves as an MCP server for decision tools.
+//! and serves as an MCP server for generic MCP tools.
 //!
 //! ## Subcommands
 //!
 //! - `hook <event>` - Handle a Claude Code hook event
-//! - `mcp` - Run as MCP stdio server for decision tools
+//! - `mcp` - Run as MCP stdio server for MCP tools
 //! - `health` - Check socket health
 
 use clap::{Parser, Subcommand};
@@ -46,7 +46,7 @@ enum Commands {
         runtime: Runtime,
     },
 
-    /// Run as MCP stdio server for decision tools
+    /// Run as MCP stdio server for MCP tools
     ///
     /// Queries the control server for tool definitions at startup and serves
     /// them via JSON-RPC 2.0 over stdio. Tool calls are forwarded to the

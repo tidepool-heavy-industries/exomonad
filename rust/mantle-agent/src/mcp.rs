@@ -1,6 +1,6 @@
-//! MCP stdio server for decision tools.
+//! MCP stdio server for MCP tools.
 //!
-//! Implements the Model Context Protocol (MCP) for serving decision tools
+//! Implements the Model Context Protocol (MCP) for serving MCP tools
 //! to Claude Code. Tool definitions are queried from the control server
 //! at startup and served via JSON-RPC 2.0 over stdio.
 //!
@@ -194,17 +194,23 @@ struct ToolResultContent {
 /// mantle-agent exits with an error rather than serving an empty tool list.
 fn query_control_server_tools() -> Result<Vec<ToolDefinition>, String> {
     // Get control server socket path
-    let path = control_socket_path();
+    let path = control_socket_path().map_err(|e| e.to_string())?;
 
     info!(path = %path.display(), "Querying control server for tool definitions");
 
     // Connect to control server
-    let mut socket = ControlSocket::connect(&path)
-        .map_err(|e| format!("Failed to connect to control server at {}: {}", path.display(), e))?;
+    let mut socket = ControlSocket::connect(&path).map_err(|e| {
+        format!(
+            "Failed to connect to control server at {}: {}",
+            path.display(),
+            e
+        )
+    })?;
 
     // Send ToolsListRequest
     let message = ControlMessage::ToolsListRequest;
-    let response = socket.send(&message)
+    let response = socket
+        .send(&message)
         .map_err(|e| format!("Failed to query tools from control server: {}", e))?;
 
     // Parse response
@@ -213,17 +219,20 @@ fn query_control_server_tools() -> Result<Vec<ToolDefinition>, String> {
             info!(count = tools.len(), "Discovered tools from control server");
 
             // Convert protocol::ToolDefinition -> mcp::ToolDefinition
-            let mcp_tools = tools.into_iter().map(|proto_tool| {
-                ToolDefinition {
+            let mcp_tools = tools
+                .into_iter()
+                .map(|proto_tool| ToolDefinition {
                     name: proto_tool.name,
                     description: proto_tool.description,
                     input_schema: proto_tool.input_schema,
-                }
-            }).collect();
+                })
+                .collect();
 
             Ok(mcp_tools)
         }
-        _ => Err(format!("Unexpected response type from control server (expected ToolsListResponse)")),
+        _ => Err(
+            "Unexpected response type from control server (expected ToolsListResponse)".to_string(),
+        ),
     }
 }
 
@@ -260,15 +269,14 @@ impl McpServer {
     /// If `tools_allowlist` is provided, only tools in the allowlist will be exposed.
     pub fn new_from_env(tools_allowlist: Option<Vec<String>>) -> Self {
         // Query control server for tools (REQUIRED - fail fast if unavailable)
-        let tools = query_control_server_tools()
-            .unwrap_or_else(|e| {
-                panic!("Failed to discover tools from control server: {}", e);
-            });
+        let tools = query_control_server_tools().unwrap_or_else(|e| {
+            panic!("Failed to discover tools from control server: {}", e);
+        });
 
         // Get control server socket path
-        let control_path = control_socket_path();
+        let control_path = control_socket_path().ok();
 
-        Self::new(Some(control_path), tools, tools_allowlist)
+        Self::new(control_path, tools, tools_allowlist)
     }
 
     /// Run the MCP server on stdio.
@@ -306,8 +314,8 @@ impl McpServer {
 
             // Only send response for requests (not notifications)
             if let Some(response) = response {
-                let response_json = serde_json::to_string(&response)
-                    .expect("Failed to serialize response");
+                let response_json =
+                    serde_json::to_string(&response).expect("Failed to serialize response");
                 debug!(response = %response_json, "Sending JSON-RPC response");
 
                 writeln!(stdout, "{}", response_json)?;
@@ -325,31 +333,28 @@ impl McpServer {
     /// Returns `Some(response)` for requests.
     fn handle_request(&mut self, request: JsonRpcRequest) -> Option<JsonRpcResponse> {
         // Notifications have no id - they don't expect a response
-        let id = match request.id {
-            Some(id) => id,
-            None => {
-                // This is a notification - handle silently, no response
-                debug!(method = %request.method, "Received notification (no response)");
-                return None;
-            }
-        };
-
-        // This is a request - needs a response
-        let response = match request.method.as_str() {
-            "initialize" => self.handle_initialize(id),
-            "initialized" => {
-                // This shouldn't happen (initialized is a notification), but handle gracefully
-                JsonRpcResponse::success(id, json!({}))
-            }
-            "tools/list" => self.handle_tools_list(id),
-            "tools/call" => self.handle_tools_call(id, request.params),
-            "notifications/cancelled" => {
-                // This shouldn't happen (notifications have no id), but handle gracefully
-                JsonRpcResponse::success(id, json!({}))
-            }
-            _ => JsonRpcResponse::method_not_found(id, &request.method),
-        };
-        Some(response)
+        if let Some(id) = request.id {
+            // This is a request - needs a response
+            let response = match request.method.as_str() {
+                "initialize" => self.handle_initialize(id),
+                "initialized" => {
+                    // This shouldn't happen (initialized is a notification), but handle gracefully
+                    JsonRpcResponse::success(id, json!({}))
+                }
+                "tools/list" => self.handle_tools_list(id),
+                "tools/call" => self.handle_tools_call(id, request.params),
+                "notifications/cancelled" => {
+                    // This shouldn't happen (notifications have no id), but handle gracefully
+                    JsonRpcResponse::success(id, json!({}))
+                }
+                _ => JsonRpcResponse::method_not_found(id, &request.method),
+            };
+            Some(response)
+        } else {
+            // This is a notification - handle silently, no response
+            debug!(method = %request.method, "Received notification (no response)");
+            None
+        }
     }
 
     /// Handle initialize request.
@@ -411,7 +416,7 @@ impl McpServer {
 
         info!(
             tool = %call_params.name,
-            "Processing decision tool call"
+            "Processing MCP tool call"
         );
 
         // Check allowlist first if present
@@ -438,11 +443,11 @@ impl McpServer {
             );
         }
 
-        // Forward to control server - REQUIRED for decision tools
+        // Forward to control server - REQUIRED for MCP tools
         let path = match &self.control_path {
             Some(p) => p,
             None => {
-                error!("No control server configured - cannot forward decision tool call");
+                error!("No control server configured - cannot forward MCP tool call");
                 return JsonRpcResponse::error(
                     id,
                     -32603,
@@ -475,11 +480,7 @@ impl McpServer {
             Err(e) => {
                 // Socket error is a HARD FAILURE - do not silently succeed
                 error!(error = %e, "Failed to forward tool call to control socket");
-                JsonRpcResponse::error(
-                    id,
-                    -32603,
-                    format!("Control socket error: {}", e),
-                )
+                JsonRpcResponse::error(id, -32603, format!("Control socket error: {}", e))
             }
         }
     }
@@ -488,7 +489,7 @@ impl McpServer {
     ///
     /// Returns the host's result (if successful) or an MCP error.
     /// The result Value contains the host's response text which may include
-    /// termination instructions for decision tools.
+    /// termination instructions for MCP tools.
     fn forward_tool_call(
         &self,
         path: &Path,
@@ -509,9 +510,7 @@ impl McpServer {
 
         match response {
             ControlResponse::McpToolResponse { result, error, .. } => {
-                if let Some(err) = error {
-                    Ok(Err(err))
-                } else {
+                error.map_or_else(|| {
                     // Use the host's result or create a default response
                     let result_value = result.unwrap_or_else(|| {
                         serde_json::json!({
@@ -522,7 +521,7 @@ impl McpServer {
                         })
                     });
                     Ok(Ok(result_value))
-                }
+                }, |err| Ok(Err(err)))
             }
             ControlResponse::HookResponse { .. } => {
                 Err("Unexpected HookResponse for MCP call".to_string())
@@ -530,9 +529,7 @@ impl McpServer {
             ControlResponse::ToolsListResponse { .. } => {
                 Err("Unexpected ToolsListResponse for MCP tool call".to_string())
             }
-            ControlResponse::Pong => {
-                Err("Unexpected Pong response for MCP tool call".to_string())
-            }
+            ControlResponse::Pong => Err("Unexpected Pong response for MCP tool call".to_string()),
         }
     }
 }
@@ -550,7 +547,9 @@ impl McpServer {
 /// Implements fail-fast behavior: if the control server is unreachable during
 /// initialization, the server exits with an error. This ensures Claude Code sees
 /// an accurate tool list and catches configuration issues early.
-pub fn run_mcp_server(tools_allowlist: Option<Vec<String>>) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run_mcp_server(
+    tools_allowlist: Option<Vec<String>>,
+) -> Result<(), Box<dyn std::error::Error>> {
     let mut server = McpServer::new_from_env(tools_allowlist);
     server.run()?;
     Ok(())
@@ -569,7 +568,7 @@ mod tests {
         let json = r#"{"jsonrpc":"2.0","id":"1","method":"initialize","params":{}}"#;
         let request: JsonRpcRequest = serde_json::from_str(json).unwrap();
         assert_eq!(request.method, "initialize");
-        assert_eq!(request.id, json!("1"));
+        assert_eq!(request.id, Some(json!("1")));
     }
 
     #[test]
@@ -605,7 +604,9 @@ mod tests {
         let result = InitializeResult {
             protocol_version: "2024-11-05".to_string(),
             capabilities: ServerCapabilities {
-                tools: ToolsCapability { list_changed: false },
+                tools: ToolsCapability {
+                    list_changed: false,
+                },
             },
             server_info: ServerInfo {
                 name: "mantle-agent".to_string(),
@@ -666,11 +667,13 @@ mod tests {
         let mut server = McpServer::new(None, vec![], None);
         let request = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),
-            id: json!("1"),
+            id: Some(json!("1")),
             method: "unknown/method".to_string(),
             params: json!({}),
         };
         let response = server.handle_request(request);
+        assert!(response.is_some());
+        let response = response.unwrap();
         assert!(response.error.is_some());
         assert_eq!(response.error.unwrap().code, -32601);
     }
@@ -768,13 +771,11 @@ mod tests {
 
     #[test]
     fn test_tool_call_allows_allowlisted_tool() {
-        let tools = vec![
-            ToolDefinition {
-                name: "tool_a".to_string(),
-                description: "Tool A".to_string(),
-                input_schema: json!({"type": "object"}),
-            },
-        ];
+        let tools = vec![ToolDefinition {
+            name: "tool_a".to_string(),
+            description: "Tool A".to_string(),
+            input_schema: json!({"type": "object"}),
+        }];
         let allowlist = Some(vec!["tool_a".to_string()]);
         let mut server = McpServer::new(None, tools, allowlist);
 
