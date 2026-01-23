@@ -16,10 +16,10 @@ trap cleanup EXIT
 # Ensure log file exists so tail doesn't complain
 touch /var/log/tidepool/control-server.log
 
-# Ensure Zellij config directory exists
-mkdir -p ~/.config/zellij
+# Ensure Zellij config directory exists (if using home-based config)
+# mkdir -p ~/.config/zellij
 
 # Launch Zellij
 # --create ensures a new session is started if one doesn't exist
-# It will use the default layout at /root/.config/zellij/layouts/default.kdl
-zellij attach --create orchestrator
+# We explicitly point to the config and layout files in /etc/tidepool/zellij
+zellij --config /etc/tidepool/zellij/config.kdl --layout /etc/tidepool/zellij/layouts/default.kdl attach --create orchestrator
