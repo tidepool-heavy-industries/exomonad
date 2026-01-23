@@ -59,6 +59,9 @@ ENV DOCKER_HOST=unix:///var/run/docker.sock
 RUN mkdir -p /sockets /worktrees /var/log/tidepool && \
     chmod 777 /sockets /worktrees /var/log/tidepool
 
+# Expose port 7432 for external role-based MCP access
+EXPOSE 7432
+
 WORKDIR /worktrees
 
 # Use tini as the entrypoint for proper signal handling

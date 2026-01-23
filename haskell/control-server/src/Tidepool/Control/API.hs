@@ -44,3 +44,7 @@ type TidepoolControlAPI =
   :<|> "tui" :> "ws" :> WebSocket
        -- | Health check
   :<|> "ping" :> Get '[JSON] Text
+       -- | Role-based MCP tool list
+  :<|> "role" :> Capture "slug" Text :> "mcp" :> "tools" :> Header "Mcp-Session-Id" Text :> Get '[JSON] [ToolDefinition]
+       -- | Role-based MCP tool call
+  :<|> "role" :> Capture "slug" Text :> "mcp" :> "call" :> Header "Mcp-Session-Id" Text :> ReqBody '[JSON] McpToolCallRequest :> Post '[JSON] ControlResponse
