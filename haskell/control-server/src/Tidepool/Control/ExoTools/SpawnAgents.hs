@@ -34,7 +34,7 @@ import Tidepool.Effects.Env (Env, getEnv, getEnvironment)
 import Tidepool.Effects.Git (Git, WorktreeInfo(..), getWorktreeInfo)
 import Tidepool.Effects.Worktree (Worktree, WorktreeSpec(..), WorktreePath(..), createWorktree)
 
-import Tidepool.Effects.FileSystem (FileSystem, createDirectory, writeFileText, copyFile, fileExists, directoryExists, readFileText)
+import Tidepool.Effects.FileSystem (FileSystem, createDirectory, writeFileText, fileExists, directoryExists, readFileText)
 import Tidepool.Effects.Zellij (Zellij, TabConfig(..), TabId(..), checkZellijEnv, newTab)
 import Tidepool.Graph.Generic (AsHandler, type (:-))
 import Tidepool.Graph.Generic.Core (EntryNode, ExitNode, LogicNode)
