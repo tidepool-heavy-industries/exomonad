@@ -257,3 +257,120 @@ logs:
 # Tail logs with JSON format (for parsing)
 logs-json:
     cd deploy && npx wrangler tail --format json
+
+# ─────────────────────────────────────────────────────────────
+# Docker (Containerized Development)
+# ─────────────────────────────────────────────────────────────
+
+# Build Docker images for orchestrator and agent
+docker-build:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    HANGAR_ROOT=$(just _hangar-root)
+    RUNTIME_BIN="$HANGAR_ROOT/runtime/bin"
+
+    echo "── Copying binaries to build contexts ──"
+    mkdir -p docker/orchestrator/bin docker/claude-agent/bin
+    cp "$RUNTIME_BIN/tidepool-control-server" docker/orchestrator/bin/
+    cp "$RUNTIME_BIN/tui-sidebar" docker/orchestrator/bin/
+    cp "$RUNTIME_BIN/tui-popup" docker/orchestrator/bin/ 2>/dev/null || true
+    cp "$RUNTIME_BIN/mantle-agent" docker/claude-agent/bin/
+
+    echo ""
+    echo "── Building orchestrator image ──"
+    docker build -t tidepool-orchestrator:latest docker/orchestrator
+
+    echo ""
+    echo "── Building agent image ──"
+    docker build -t tidepool-claude-agent:latest docker/claude-agent
+
+    echo ""
+    echo "✓ Docker images built"
+    docker images | grep tidepool
+
+# Run dockerized orchestrator (interactive Zellij session)
+docker-run:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    echo "── Starting Tidepool Orchestrator ──"
+    echo "Detach: ctrl-e,e | Quit Zellij: ctrl-q"
+    echo ""
+
+    docker run -it --rm \
+        --name tidepool-orchestrator \
+        --detach-keys="ctrl-e,e" \
+        -v /var/run/docker.sock:/var/run/docker.sock \
+        -v "$(pwd)":/worktrees/repo \
+        -v ~/.claude.json:/root/.claude.json:ro \
+        -v tidepool-sockets:/sockets \
+        -v tidepool-git-cache:/git-cache \
+        -v tidepool-cargo-cache:/cargo-cache \
+        -v tidepool-cabal-cache:/cabal-cache \
+        -e TIDEPOOL_CONTROL_SOCKET=/sockets/control.sock \
+        -e ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}" \
+        tidepool-orchestrator:latest
+
+# Run dockerized orchestrator in background (detached)
+docker-run-detached:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    echo "── Starting Tidepool Orchestrator (detached) ──"
+
+    docker run -d \
+        --name tidepool-orchestrator \
+        -v /var/run/docker.sock:/var/run/docker.sock \
+        -v "$(pwd)":/worktrees/repo \
+        -v ~/.claude.json:/root/.claude.json:ro \
+        -v tidepool-sockets:/sockets \
+        -v tidepool-git-cache:/git-cache \
+        -v tidepool-cargo-cache:/cargo-cache \
+        -v tidepool-cabal-cache:/cabal-cache \
+        -e TIDEPOOL_CONTROL_SOCKET=/sockets/control.sock \
+        -e ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}" \
+        tidepool-orchestrator:latest
+
+    echo "✓ Orchestrator running in background"
+    echo "  Attach: docker attach --detach-keys='ctrl-e,e' tidepool-orchestrator"
+    echo "  Stop:   just docker-stop"
+
+# Attach to running orchestrator
+docker-attach:
+    docker attach --detach-keys="ctrl-e,e" tidepool-orchestrator
+
+# Stop dockerized orchestrator
+docker-stop:
+    docker stop tidepool-orchestrator 2>/dev/null || true
+    @echo "✓ Orchestrator stopped"
+
+# Run Docker integration tests
+docker-test:
+    ./docker/test/run-integration-tests.sh
+
+# Clean up Docker resources (images, volumes, containers)
+docker-clean:
+    #!/usr/bin/env bash
+    echo "── Stopping containers ──"
+    docker stop tidepool-orchestrator 2>/dev/null || true
+    docker rm tidepool-orchestrator 2>/dev/null || true
+
+    echo "── Removing test containers ──"
+    docker ps -aq --filter "label=tidepool.test.cleanup=true" | xargs -r docker rm -f
+    docker ps -aq --filter "label=tidepool.orchestrator" | xargs -r docker rm -f
+
+    echo "── Removing images ──"
+    docker rmi tidepool-orchestrator:latest 2>/dev/null || true
+    docker rmi tidepool-orchestrator:test 2>/dev/null || true
+    docker rmi tidepool-claude-agent:latest 2>/dev/null || true
+    docker rmi tidepool-claude-agent:test 2>/dev/null || true
+
+    echo ""
+    echo "✓ Docker resources cleaned"
+    echo "Note: Persistent volumes preserved. To remove: docker volume rm tidepool-sockets tidepool-git-cache tidepool-cargo-cache tidepool-cabal-cache"
+
+# Remove Docker volumes (cache data)
+docker-clean-volumes:
+    docker volume rm tidepool-sockets tidepool-git-cache tidepool-cargo-cache tidepool-cabal-cache 2>/dev/null || true
+    @echo "✓ Docker volumes removed"
