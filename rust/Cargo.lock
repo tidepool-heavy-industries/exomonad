@@ -3790,12 +3790,19 @@ name = "tui-popup"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64",
  "clap",
+ "futures-util",
+ "http",
+ "rand 0.8.5",
  "serde",
  "serde_json",
+ "tokio",
+ "tokio-tungstenite 0.24.0",
  "tracing",
  "tracing-subscriber",
  "tui-sidebar",
+ "uuid",
 ]
 
 [[package]]
@@ -4007,6 +4014,7 @@ dependencies = [
  "atomic",
  "getrandom 0.3.4",
  "js-sys",
+ "serde_core",
  "wasm-bindgen",
 ]
 

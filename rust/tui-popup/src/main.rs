@@ -1,3 +1,5 @@
+mod websocket;
+
 use anyhow::{Context, Result};
 use clap::Parser;
 use std::io::{self, Read};
@@ -6,21 +8,26 @@ use tui_sidebar::protocol::PopupDefinition;
 
 /// TUI popup binary for Zellij pane popups.
 ///
-/// Accepts PopupDefinition via CLI arg or stdin, renders it, captures user input,
-/// and outputs PopupResult JSON to stdout. Exits when the user submits or cancels.
+/// Connects to control-server via WebSocket, receives PopupDefinition,
+/// renders it, captures user input, and sends PopupResult back.
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    /// PopupDefinition JSON string
+    /// Control socket path (defaults to $TIDEPOOL_CONTROL_SOCKET or .tidepool/sockets/control.sock)
+    #[arg(long)]
+    socket: Option<String>,
+
+    /// LEGACY: PopupDefinition JSON string (for testing without WebSocket)
     #[arg(long)]
     spec: Option<String>,
 
-    /// Read PopupDefinition from stdin instead of --spec
+    /// LEGACY: Read PopupDefinition from stdin instead of --spec
     #[arg(long)]
     stdin: bool,
 }
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     // Setup minimal logging to stderr (avoid polluting stdout)
     tracing_subscriber::fmt()
         .with_writer(io::stderr)
@@ -29,28 +36,54 @@ fn main() -> Result<()> {
 
     let args = Args::parse();
 
-    // Get PopupDefinition from --spec or stdin
-    let json = if args.stdin {
-        let mut buffer = String::new();
-        io::stdin()
-            .read_to_string(&mut buffer)
-            .context("Failed to read from stdin")?;
-        buffer
-    } else if let Some(spec) = args.spec {
-        spec
+    // Get socket path once (used for both receive and send)
+    let socket_path = args.socket.clone()
+        .or_else(|| std::env::var("TIDEPOOL_CONTROL_SOCKET").ok())
+        .unwrap_or_else(|| ".tidepool/sockets/control.sock".to_string());
+
+    // Determine mode: WebSocket (default) or legacy CLI
+    let (request_id, definition) = if args.spec.is_some() || args.stdin {
+        // LEGACY MODE: Get PopupDefinition from --spec or stdin
+        let json = if args.stdin {
+            let mut buffer = String::new();
+            io::stdin()
+                .read_to_string(&mut buffer)
+                .context("Failed to read from stdin")?;
+            buffer
+        } else if let Some(spec) = args.spec {
+            spec
+        } else {
+            anyhow::bail!("Either --spec or --stdin must be provided");
+        };
+
+        let definition: PopupDefinition =
+            serde_json::from_str(&json).context("Failed to parse PopupDefinition JSON")?;
+
+        // Generate dummy request ID for legacy mode
+        (uuid::Uuid::nil(), definition)
     } else {
-        anyhow::bail!("Either --spec or --stdin must be provided");
+        // WEBSOCKET MODE: Connect to control-server
+        websocket::receive_popup_definition(&socket_path)
+            .await
+            .context("Failed to receive popup definition from WebSocket")?
     };
 
-    // Parse PopupDefinition
-    let definition: PopupDefinition =
-        serde_json::from_str(&json).context("Failed to parse PopupDefinition JSON")?;
+    // Run popup (blocking in separate task to avoid blocking Tokio runtime)
+    let result = tokio::task::spawn_blocking(move || run_popup(definition))
+        .await
+        .context("Popup task panicked")?
+        .context("Popup failed")?;
 
-    // Run popup (blocking)
-    let result = run_popup(definition).context("Popup failed")?;
-
-    // Output PopupResult to stdout
-    println!("{}", serde_json::to_string(&result)?);
+    // Send result back via WebSocket (or print to stdout in legacy mode)
+    if request_id.is_nil() {
+        // LEGACY: Output to stdout
+        println!("{}", serde_json::to_string(&result)?);
+    } else {
+        // WEBSOCKET: Send back to control-server
+        websocket::send_popup_result(&socket_path, request_id, result)
+            .await
+            .context("Failed to send popup result via WebSocket")?;
+    }
 
     Ok(())
 }
