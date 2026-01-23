@@ -1,0 +1,22 @@
+// Zellij configuration for Tidepool Orchestrator
+
+// Enable session serialization so the session can be resumed if the container restarts
+session_serialization true
+
+// Serialize pane viewport to preserve scrollback
+pane_viewport_serialization true
+
+// When the Zellij window is closed forcefully, quit the session
+on_force_close "quit"
+
+// Keybindings
+keybinds {
+    unbind "Ctrl q"
+    bind "Ctrl q" { Quit; }
+}
+
+// Theme
+theme "default"
+mouse_mode true
+copy_command "xclip -selection clipboard" // fallback
+copy_on_select true
