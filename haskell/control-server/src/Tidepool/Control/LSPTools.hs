@@ -367,9 +367,8 @@ type instance GraphEntries FindCalleesGraph =
 
 -- | Core logic for finding callees.
 findCalleesLogic
-  :: (Member LSP es, Member Log es, Member (Return FindCalleesResult) es, LastMember IO es)
-  => FindCalleesArgs
-  -> Eff es FindCalleesResult
+  :: (Member LSP es, Member Log es, Member (Return FindCalleesResult) es)
+  => FindCalleesArgs -> Eff es FindCalleesResult
 findCalleesLogic args = do
   let name = fceName args
       maxResults = fromMaybe 50 (fceMaxResults args)

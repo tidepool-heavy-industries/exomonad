@@ -21,12 +21,11 @@ module Tidepool.Control.PMReviewDAG
   ) where
 
 import Control.Monad.Freer (Eff, Member)
-import Data.Aeson (FromJSON(..), ToJSON(..), withObject, (.:), (.:?), object, (.=))
+import Data.Aeson (FromJSON(..), ToJSON(..), withObject, (.:?), object, (.=))
 import Data.Text (Text)
-import qualified Data.Text as T
 import GHC.Generics (Generic)
 import Data.Maybe (fromMaybe, mapMaybe)
-import Data.Time (UTCTime, diffUTCTime)
+import Data.Time (diffUTCTime)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.List (maximumBy, sortOn)

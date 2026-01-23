@@ -26,8 +26,7 @@ import Control.Monad (forM)
 import Control.Monad.Freer (Eff, Member)
 import Data.List (sortOn, partition)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (catMaybes, fromMaybe)
-import Data.Proxy (Proxy(..))
+import Data.Maybe (fromMaybe, catMaybes)
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
