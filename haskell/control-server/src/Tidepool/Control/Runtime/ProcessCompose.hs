@@ -18,6 +18,7 @@ import qualified Data.Text as T
 import GHC.Generics (Generic)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
+import System.FilePath (takeDirectory)
 
 -- | Top-level process-compose.yaml configuration.
 data ProcessComposeConfig = ProcessComposeConfig
@@ -60,6 +61,7 @@ data ReadinessProbe = ReadinessProbe
   } deriving (Show, Eq, Generic, ToJSON)
 
 -- | Executive part of a probe.
+-- | Executive part of a probe.
 data ProbeExec = ProbeExec
   { command :: Text
   } deriving (Show, Eq, Generic, ToJSON)
@@ -84,15 +86,13 @@ generateSubagentConfig binPath socketDir controlSocket tuiSocket = ProcessCompos
   }
   where
     controlServer = ProcessDef
-      { command = T.unlines
-          [ "# Create socket directory and clean up stale sockets"
-          , "mkdir -p \"" <> T.pack socketDir <> "\""
-          , "rm -f \"" <> T.pack controlSocket <> "\" \"" <> T.pack tuiSocket <> "\""
-          , "\"" <> T.pack binPath <> "\" --no-tui"
-          ]
+      { command = 
+          "mkdir -p \"" <> T.pack socketDir <> "\""
+          <> " && rm -f \"" <> T.pack controlSocket <> "\" \"" <> T.pack tuiSocket <> "\""
+          <> " && \"" <> T.pack binPath <> "\" --no-tui"
       , working_dir = Just "."
       , environment = Just
-          [ "TIDEPOOL_BIN_DIR=" -- Dummy to satisfy old template expectations if any
+          [ "TIDEPOOL_BIN_DIR=" <> T.pack (takeDirectory binPath)
           , "TIDEPOOL_SOCKET_DIR=" <> T.pack socketDir
           , "TIDEPOOL_CONTROL_SOCKET=" <> T.pack controlSocket
           , "TIDEPOOL_TUI_SOCKET=" <> T.pack tuiSocket

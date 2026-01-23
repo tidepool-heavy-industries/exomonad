@@ -54,9 +54,9 @@ impl ControlSocket {
     }
 
     /// Set custom timeout.
-    pub fn set_timeout(&self, _timeout: Duration) -> Result<()> {
-        // Implementation note: curl timeout flag could be used, but keeping simple for now.
-        // The server has a 5 min timeout.
+    pub fn set_timeout(&mut self, timeout: Duration) -> Result<()> {
+        debug!(timeout = ?timeout, "Setting custom control socket timeout");
+        self.timeout = timeout;
         Ok(())
     }
 

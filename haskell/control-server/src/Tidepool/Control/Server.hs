@@ -234,12 +234,12 @@ server logger config tuiHandleVar =
       case tuiHandle of
         Just (TUIHandle _ sendChan recvChan) -> do
           atomically $ writeTChan sendChan definition
-          -- Timeout handled by Warp/Servant (5 mins) but we can also use TUI timeout
-          res <- timeout (300 * 1000000) $ atomically $ readTChan recvChan
+          -- Timeout handled by Warp/Servant (5 mins); use a slightly shorter TUI timeout for graceful degradation
+          res <- timeout (290 * 1000000) $ atomically $ readTChan recvChan
           case res of
             Just r -> pure r
             Nothing -> do
-              logError logger "[TUI] timeout after 300s"
+              logError logger "[TUI] timeout after 290s"
               pure $ PopupResult "timeout" (toJSON (mempty :: [(String, String)]))
         Nothing -> do
           logError logger "[TUI] no sidebar connected"
