@@ -11,19 +11,15 @@ import Tidepool.Control.Types (ServerConfig(..))
 import Tidepool.Control.Export (exportMCPTools)
 import Tidepool.Control.Handler.Hook (handleHook)
 import Tidepool.Control.Handler.MCP (handleMcpTool)
-import Tidepool.LSP.Interpreter (LSPSession)
 import Tidepool.TUI.Interpreter (TUIHandle)
 import Tidepool.Observability.Types (TraceContext)
 
 -- | Route a control message to the appropriate handler.
-handleMessage :: Logger -> ServerConfig -> Maybe LSPSession -> Maybe TUIHandle -> TraceContext -> ControlMessage -> IO ControlResponse
-handleMessage logger config maybeLspSession maybeTuiHandle traceCtx = \case
+handleMessage :: Logger -> ServerConfig -> Maybe TUIHandle -> TraceContext -> ControlMessage -> IO ControlResponse
+handleMessage logger config maybeTuiHandle traceCtx = \case
   HookEvent input r -> handleHook input r
-  McpToolCall reqId name args -> case maybeLspSession of
-    Just lspSession -> handleMcpTool logger config lspSession maybeTuiHandle traceCtx reqId name args
-    Nothing -> do
-      logInfo logger $ "[MCP:" <> reqId <> "] Request received before LSP ready"
-      pure $ mcpToolError reqId StateError "Server starting, LSP initializing... please retry in a few seconds."
+  McpToolCall reqId name args -> 
+    handleMcpTool logger config maybeTuiHandle traceCtx reqId name args
   ToolsListRequest -> handleToolsList logger
   Ping -> pure Pong
 
