@@ -8,30 +8,26 @@ module Tidepool.Control.Server
   ( runServer
   ) where
 
-import Control.Concurrent (forkIO)
-import Control.Concurrent.STM (atomically, newTVarIO, readTVar, modifyTVar, newEmptyTMVarIO, putTMVar, orElse)
+import Control.Concurrent.STM (atomically)
 import Control.Exception (catch, bracket, finally)
 import qualified Control.Exception as E
 import Control.Monad (when, forever)
 import Control.Monad.IO.Class (liftIO)
-import Data.Aeson (decode, encode, object, (.=), FromJSON, ToJSON)
+import Data.Aeson (decode, object, (.=), FromJSON, ToJSON)
 import qualified Data.Aeson as Aeson
 import Data.Function ((&))
-import qualified Data.Map.Strict as Map
 import Data.Maybe (isJust)
 import qualified Data.Text as T
-import Data.Text (Text)
 import qualified Data.UUID as UUID
 import GHC.Generics (Generic)
 import Network.Socket
 import Network.Wai.Handler.Warp
-import Network.WebSockets (Connection, ConnectionException, receiveData, sendTextData, forkPingThread)
+import Network.WebSockets (Connection, receiveData, forkPingThread)
 import Servant
 import System.Directory (createDirectoryIfMissing, removeFile)
 import System.Environment (lookupEnv)
 import System.FilePath (takeDirectory)
 import System.IO.Error (isDoesNotExistError)
-import System.Timeout (timeout)
 
 import Tidepool.Control.API
 import Tidepool.Control.Handler (handleMessage)
@@ -142,7 +138,7 @@ server logger config tuiState =
       res <- liftIO $ do
         logDebug logger $ "[HOOK] " <> input.hookEventName <> " runtime=" <> T.pack (show runtime)
         traceCtx <- newTraceContext
-        res <- handleMessage logger config traceCtx (HookEvent input runtime)
+        res <- handleMessage logger config traceCtx tuiState (HookEvent input runtime)
 
         -- Flush traces after handling the message if OTLP is configured
         case config.observabilityConfig of
@@ -158,7 +154,7 @@ server logger config tuiState =
     handleMcpCall req = liftIO $ do
       logInfo logger $ "[MCP:" <> req.mcpId <> "] tool=" <> req.toolName
       traceCtx <- newTraceContext
-      res <- handleMessage logger config traceCtx
+      res <- handleMessage logger config traceCtx tuiState
         (McpToolCall req.mcpId req.toolName req.arguments)
 
       -- Flush traces

@@ -20,7 +20,7 @@ module Tidepool.Control.Handler.MCP
 
 import Control.Exception (SomeException, displayException, try, throwIO)
 import Control.Monad (when)
-import Control.Monad.Freer (Eff, LastMember, interpret, runM, sendM)
+import Control.Monad.Freer (Eff, LastMember, runM, sendM)
 import Data.Aeson (Value, fromJSON, toJSON, Result(..), encode)
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Text (Text)
@@ -73,22 +73,23 @@ import Tidepool.FileSystem.Interpreter (runFileSystemIO)
 import Tidepool.Env.Interpreter (runEnvIO)
 import Tidepool.Zellij.Interpreter (runZellijIO)
 import Tidepool.Gemini.Interpreter (runGeminiIO)
-import Tidepool.Effect.TUI (TUI(..), PopupResult(..))
+import Tidepool.Effect.TUI (TUI(..))
 import Tidepool.Effect.Types (runLog, LogLevel(Debug), runReturn, runTime)
 import Tidepool.Graph.Goto (unwrapSingleChoice)
-import Tidepool.TUI.ZellijInterpreter (runTUIZellij)
+import Tidepool.Control.TUIState (TUIState)
+import Tidepool.Control.TUIInterpreter (runTUIWebSocket)
 -- import Tidepool.Teaching.LLM (TeachingConfig, loadTeachingConfig, withTeaching, runLLMWithTeaching)
 -- import Tidepool.Teaching.Teacher (teacherGuidance)
 import Tidepool.Effects.Observability (SpanKind(..), SpanAttribute(..), withSpan, addSpanAttribute)
 import Tidepool.Observability.Interpreter (runObservabilityWithContext)
 import Tidepool.Observability.Types (TraceContext, ObservabilityConfig(..), defaultLokiConfig)
 
--- | Run TUI interpreter using Zellij floating panes.
+-- | Run TUI interpreter using WebSocket communication.
 --
--- This replaces the socket-based TUI interpreter with a Zellij pane-based approach.
--- When showUI is called, control-server spawns a floating Zellij pane with tui-popup.
-runTUIInterpreter :: LastMember IO effs => Eff (TUI ': effs) a -> Eff effs a
-runTUIInterpreter = runTUIZellij
+-- This uses the WebSocket-based approach: control-server spawns a Zellij pane,
+-- tui-popup connects via WebSocket, and communication happens bidirectionally.
+runTUIInterpreter :: LastMember IO effs => TUIState -> Eff (TUI ': effs) a -> Eff effs a
+runTUIInterpreter = runTUIWebSocket
 
 -- | Wrap MCP tool call with tracing if enabled.
 withMcpTracing 
@@ -161,8 +162,8 @@ withMcpTracing logger config traceCtx reqId toolName args action = do
 --
 -- == Tier 3: External Orchestration Tools (Exo)
 --   - "exo_status": Get current bead context, git status, and PR info
-handleMcpTool :: Logger -> ServerConfig -> TraceContext -> Text -> Text -> Value -> IO ControlResponse
-handleMcpTool logger config traceCtx reqId toolName args = 
+handleMcpTool :: Logger -> ServerConfig -> TraceContext -> TUIState -> Text -> Text -> Value -> IO ControlResponse
+handleMcpTool logger config traceCtx tuiState reqId toolName args = 
   withMcpTracing logger config traceCtx reqId toolName args $ do
     logInfo logger $ "[MCP:" <> reqId <> "] Dispatching: " <> toolName
 
@@ -176,9 +177,9 @@ handleMcpTool logger config traceCtx reqId toolName args =
       --       the generic "unknown tool" handler below.
 
       -- TUI-interactive tools
-      "confirm_action" -> handleConfirmActionTool logger reqId args
-      "select_option" -> handleSelectOptionTool logger reqId args
-      "request_guidance" -> handleRequestGuidanceTool logger reqId args
+      "confirm_action" -> handleConfirmActionTool logger tuiState reqId args
+      "select_option" -> handleSelectOptionTool logger tuiState reqId args
+      "request_guidance" -> handleRequestGuidanceTool logger tuiState reqId args
       "register_feedback" -> handleRegisterFeedbackTool logger reqId args
 
       -- Tier 2: LLM-enhanced tools (graph-based)
@@ -636,8 +637,8 @@ handlePmReviewDagTool logger reqId args = do
 
 
 -- | Handle the confirm_action tool.
-handleConfirmActionTool :: Logger -> Text -> Value -> IO ControlResponse
-handleConfirmActionTool logger reqId args = do
+handleConfirmActionTool :: Logger -> TUIState -> Text -> Value -> IO ControlResponse
+handleConfirmActionTool logger tuiState reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
@@ -648,7 +649,7 @@ handleConfirmActionTool logger reqId args = do
 
       resultOrErr <- try $ runM
         $ runLog Debug
-        $ runTUIInterpreter
+        $ runTUIInterpreter tuiState
         $ runReturn (confirmActionLogic caArgs)
 
       case resultOrErr of
@@ -687,8 +688,8 @@ handleRegisterFeedbackTool logger reqId args = do
 
 
 -- | Handle the select_option tool.
-handleSelectOptionTool :: Logger -> Text -> Value -> IO ControlResponse
-handleSelectOptionTool logger reqId args = do
+handleSelectOptionTool :: Logger -> TUIState -> Text -> Value -> IO ControlResponse
+handleSelectOptionTool logger tuiState reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
@@ -699,7 +700,7 @@ handleSelectOptionTool logger reqId args = do
 
       resultOrErr <- try $ runM
         $ runLog Debug
-        $ runTUIInterpreter
+        $ runTUIInterpreter tuiState
         $ runReturn (selectOptionLogic soArgs)
 
       case resultOrErr of
@@ -713,8 +714,8 @@ handleSelectOptionTool logger reqId args = do
 
 
 -- | Handle the request_guidance tool.
-handleRequestGuidanceTool :: Logger -> Text -> Value -> IO ControlResponse
-handleRequestGuidanceTool logger reqId args = do
+handleRequestGuidanceTool :: Logger -> TUIState -> Text -> Value -> IO ControlResponse
+handleRequestGuidanceTool logger tuiState reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
@@ -725,7 +726,7 @@ handleRequestGuidanceTool logger reqId args = do
 
       resultOrErr <- try $ runM
         $ runLog Debug
-        $ runTUIInterpreter
+        $ runTUIInterpreter tuiState
         $ runReturn (requestGuidanceLogic rgArgs)
 
       case resultOrErr of

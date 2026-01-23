@@ -8,17 +8,18 @@ import qualified Data.Text as T
 import Tidepool.Control.Logging (Logger, logInfo)
 import Tidepool.Control.Protocol
 import Tidepool.Control.Types (ServerConfig(..))
+import Tidepool.Control.TUIState (TUIState)
 import Tidepool.Control.Export (exportMCPTools)
 import Tidepool.Control.Handler.Hook (handleHook)
 import Tidepool.Control.Handler.MCP (handleMcpTool)
 import Tidepool.Observability.Types (TraceContext)
 
 -- | Route a control message to the appropriate handler.
-handleMessage :: Logger -> ServerConfig -> TraceContext -> ControlMessage -> IO ControlResponse
-handleMessage logger config traceCtx = \case
+handleMessage :: Logger -> ServerConfig -> TraceContext -> TUIState -> ControlMessage -> IO ControlResponse
+handleMessage logger config traceCtx tuiState = \case
   HookEvent input r -> handleHook input r
   McpToolCall reqId name args ->
-    handleMcpTool logger config traceCtx reqId name args
+    handleMcpTool logger config traceCtx tuiState reqId name args
   ToolsListRequest -> handleToolsList logger
   Ping -> pure Pong
 
