@@ -99,6 +99,21 @@ Subagents spawned by `spawn_agents` receive a **custom-generated environment and
 5. **Deployment:** Self-contained `.env` and `process-compose.yaml` files are written directly to the subagent worktree.
 6. **Execution:** `process-compose` simply loads the generated files, ensuring an isolated and correctly configured environment.
 
+### Subagent Environment Handling
+
+Subagents spawned by `spawn_agents` receive a **custom-generated `.env` file** instead of a symlink to the root `.env`.
+
+**Why:**
+- Symlinking caused variable shadowing where root `.env` values (like default socket paths) would override the subagent's isolated paths.
+- Tools like `process-compose` prioritize the `.env` file in the working directory over shell environment variables.
+
+**How it works (SpawnAgents.hs):**
+1. **Source of Truth:** The running Haskell process captures its full environment (`getEnvironment`).
+2. **Filtering:** Conflicting keys (`TIDEPOOL_CONTROL_SOCKET`, `TIDEPOOL_TUI_SOCKET`) are filtered out from the captured environment.
+3. **Merging:** Subagent-specific overrides (isolated socket paths, `HANGAR_ROOT`, `SUBAGENT_CMD`) are merged in.
+4. **Generation:** A new, self-contained `.env` file is written to the subagent worktree.
+5. **Execution:** `process-compose` simply loads this `.env` file, ensuring correct configuration without fragile shell chaining.
+
 ### Hook Flow (PreToolUse Example)
 
 ```
