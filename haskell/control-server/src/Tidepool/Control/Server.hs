@@ -8,17 +8,13 @@ module Tidepool.Control.Server
   ( runServer
   ) where
 
-import Control.Concurrent (forkIO)
-import Control.Concurrent.STM (newTVarIO, readTVarIO, atomically, writeTVar, readTVar, TVar, writeTChan, readTChan)
 import Control.Exception (catch, bracket)
 import qualified Control.Exception as E
-import Control.Monad (forever, void, when)
+import Control.Monad (when)
 import Control.Monad.IO.Class (liftIO)
 import Data.Function ((&))
-import Data.Maybe (isJust, fromMaybe)
-import Data.Aeson (toJSON)
+import Data.Maybe (isJust)
 import qualified Data.Text as T
-import Text.Read (readMaybe)
 import Network.Socket
 import Network.Wai.Handler.Warp
 import Servant
@@ -26,18 +22,15 @@ import System.Directory (createDirectoryIfMissing, removeFile)
 import System.Environment (lookupEnv)
 import System.FilePath (takeDirectory)
 import System.IO.Error (isDoesNotExistError)
-import System.Timeout (timeout)
 
 import Tidepool.Control.API
 import Tidepool.Control.Handler (handleMessage)
-import Tidepool.Control.Logging (Logger, logInfo, logDebug, logError)
+import Tidepool.Control.Logging (Logger, logInfo, logDebug)
 import Tidepool.Control.Protocol
 import Tidepool.Control.Types (ServerConfig(..))
-import Tidepool.TUI.Interpreter (TUIHandle(..), newTUIHandle, closeTUIHandle)
 import Tidepool.Observability.Types (newTraceContext, ObservabilityConfig(..), LokiConfig(..), OTLPConfig(..))
 import Tidepool.Observability.Interpreter (flushTraces)
 import Tidepool.Control.Export (exportMCPTools)
-import Tidepool.Effect.TUI (PopupResult(..))
 
 -- | Load observability configuration from environment variables.
 loadObservabilityConfig :: IO (Maybe ObservabilityConfig)
@@ -61,97 +54,33 @@ loadObservabilityConfig = do
 -- | Run the control server. Blocks forever.
 runServer :: Logger -> ServerConfig -> IO ()
 runServer logger config = do
-  -- Get socket paths from environment
-  -- We no longer provide hardcoded defaults here to ensure a single source of truth
-  -- via environment variables (e.g. set in start-augmented.sh or .env)
+  -- Get socket path from environment
   controlSocketEnv <- lookupEnv "TIDEPOOL_CONTROL_SOCKET"
   let controlSocket = case controlSocketEnv of
         Just s -> s
         Nothing -> error "TIDEPOOL_CONTROL_SOCKET environment variable not set (should be set via start-augmented.sh or .env)"
 
-  tuiSocketEnv <- lookupEnv "TIDEPOOL_TUI_SOCKET"
-  let tuiSocket = case tuiSocketEnv of
-        Just s -> s
-        Nothing -> error "TIDEPOOL_TUI_SOCKET environment variable not set (should be set via start-augmented.sh or .env)"
-
   -- Load observability config if not already provided
   obsConfig <- case config.observabilityConfig of
     Just c  -> pure (Just c)
     Nothing -> loadObservabilityConfig
-  
+
   let configWithObs = config { observabilityConfig = obsConfig }
 
-  when (isJust obsConfig) $ 
+  when (isJust obsConfig) $
     logInfo logger "Observability enabled (Loki/OTLP)"
 
-  -- Shared State
-  tuiHandleVar <- newTVarIO Nothing
-
-  tuiPortEnv <- lookupEnv "TIDEPOOL_TUI_PORT"
-  let tuiPort = fromMaybe 8081 (tuiPortEnv >>= readMaybe)
-
-  -- 1. Setup TUI Listener (if enabled)
-  -- We support both Unix socket (legacy/local) and TCP (Docker/Host cross-boundary)
-  _ <- forkIO $ when (not configWithObs.noTui) $ do
-    -- Unix TUI listener
-    _ <- forkIO $ bracket (setupUnixSocket tuiSocket) (cleanupUnixSocket tuiSocket) $ \tuiSock -> do
-      logInfo logger $ "TUI sidebar listener waiting on (Unix): " <> T.pack tuiSocket
-      forever $ acceptAndHandleTUI logger tuiSock tuiHandleVar
-
-    -- TCP TUI listener (for cross-boundary Docker -> Host)
-    bracket (setupTCPSocket tuiPort) (close) $ \tuiSock -> do
-      logInfo logger $ "TUI sidebar listener waiting on (TCP): " <> T.pack (show tuiPort)
-      forever $ acceptAndHandleTUI logger tuiSock tuiHandleVar
-
-  -- 2. Run Servant Server on Unix Socket
+  -- Run Servant Server on Unix Socket
   bracket
     (setupUnixSocket controlSocket)
-    (\sock -> do
-       -- Cleanup control socket and close any active TUI handle on shutdown
-       cleanupUnixSocket controlSocket sock
-       maybeTuiHandle <- readTVarIO tuiHandleVar
-       case maybeTuiHandle of 
-         Just h  -> closeTUIHandle h
-         Nothing -> pure ()
-    )
+    (cleanupUnixSocket controlSocket)
     $ \sock -> do
       logInfo logger $ "Control server listening on (HTTP over Unix): " <> T.pack controlSocket
-      
+
       let settings = defaultSettings
             & setTimeout (5 * 60) -- 5 minutes timeout
-      
+
       runSettingsSocket settings sock (app logger configWithObs)
-
--- | Helper to accept and handle TUI connections
-acceptAndHandleTUI :: Logger -> Socket -> TVar (Maybe TUIHandle) -> IO ()
-acceptAndHandleTUI logger sock tuiHandleVar = do
-  (conn, _) <- accept sock
-  logInfo logger "TUI sidebar connected"
-  handle <- newTUIHandle "control-server" conn
-  
-  -- Update handle var
-  maybeOld <- atomically $ do
-    old <- readTVar tuiHandleVar
-    writeTVar tuiHandleVar (Just handle)
-    pure old
-  
-  -- Close old handle if exists
-  case maybeOld of 
-    Just h -> do
-      logInfo logger "Closing previous TUI sidebar connection"
-      closeTUIHandle h
-    Nothing -> logDebug logger "No existing TUI sidebar connection"
-
--- | Setup TCP socket at given port.
-setupTCPSocket :: Int -> IO Socket
-setupTCPSocket port = do
-  let hints = defaultHints { addrFlags = [AI_PASSIVE], addrSocketType = Stream }
-  addr:_ <- getAddrInfo (Just hints) Nothing (Just $ show port)
-  sock <- socket (addrFamily addr) (addrSocketType addr) (addrProtocol addr)
-  setSocketOption sock ReuseAddr 1
-  bind sock (addrAddress addr)
-  listen sock 10
-  pure sock
 
 -- | Setup Unix socket at given path.
 setupUnixSocket :: FilePath -> IO Socket
@@ -187,11 +116,10 @@ app logger config = serve (Proxy @TidepoolControlAPI) (server logger config)
 
 -- | Servant server implementation
 server :: Logger -> ServerConfig -> Server TidepoolControlAPI
-server logger config = 
+server logger config =
        handleHook
   :<|> handleMcpCall
   :<|> handleMcpTools
-  :<|> handleTuiSpawn
   :<|> handlePing
   where
     handleHook (input, runtime) = do
@@ -199,14 +127,14 @@ server logger config =
         logDebug logger $ "[HOOK] " <> input.hookEventName <> " runtime=" <> T.pack (show runtime)
         traceCtx <- newTraceContext
         res <- handleMessage logger config traceCtx (HookEvent input runtime)
-        
+
         -- Flush traces after handling the message if OTLP is configured
         case config.observabilityConfig of
-          Just obsConfig | Just otlp <- ocOTLP obsConfig -> 
+          Just obsConfig | Just otlp <- ocOTLP obsConfig ->
              flushTraces otlp obsConfig.ocServiceName traceCtx
           _ -> pure ()
         pure res
-        
+
       case res of
         HookResponse out ec -> pure (out, ec)
         _ -> throwError $ err500 { errBody = "Unexpected response from handleHook" }
@@ -216,35 +144,18 @@ server logger config =
       traceCtx <- newTraceContext
       res <- handleMessage logger config traceCtx
         (McpToolCall req.mcpId req.toolName req.arguments)
-        
+
       -- Flush traces
       case config.observabilityConfig of
-        Just obsConfig | Just otlp <- ocOTLP obsConfig -> 
+        Just obsConfig | Just otlp <- ocOTLP obsConfig ->
            flushTraces otlp obsConfig.ocServiceName traceCtx
         _ -> pure ()
-        
+
       pure res
 
     handleMcpTools = liftIO $ do
       logDebug logger "[MCP] tools/list request"
       exportMCPTools logger
-
-    handleTuiSpawn definition = liftIO $ do
-      logInfo logger "[TUI] spawn request"
-      tuiHandle <- readTVarIO tuiHandleVar
-      case tuiHandle of
-        Just (TUIHandle _ sendChan recvChan) -> do
-          atomically $ writeTChan sendChan definition
-          -- Timeout handled by Warp/Servant (5 mins); use a slightly shorter TUI timeout for graceful degradation
-          res <- timeout (290 * 1000000) $ atomically $ readTChan recvChan
-          case res of
-            Just r -> pure r
-            Nothing -> do
-              logError logger "[TUI] timeout after 290s"
-              pure $ PopupResult "timeout" (toJSON (mempty :: [(String, String)]))
-        Nothing -> do
-          logError logger "[TUI] no sidebar connected"
-          pure $ PopupResult "decline" (toJSON (mempty :: [(String, String)]))
 
     handlePing :: Handler T.Text
     handlePing = pure "pong"
