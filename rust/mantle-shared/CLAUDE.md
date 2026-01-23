@@ -1,13 +1,13 @@
 # mantle-shared
 
-Shared library for the mantle workspace. Provides protocol types, TCP socket client, and hook handling utilities.
+Shared library for the mantle workspace. Provides protocol types, HTTP socket client, and hook handling utilities.
 
 ## Module Overview
 
 | Module | File | Purpose |
 |--------|------|---------|
 | `protocol` | `protocol.rs` | Control envelope types (HookInput, HookOutput, ControlMessage, ControlResponse) |
-| `socket` | `socket.rs` | TCP client for control server communication |
+| `socket` | `socket.rs` | HTTP client for control server communication (Unix socket via curl) |
 | `commands` | `commands/` | CLI command implementations (hook handler, signal sender) |
 | `error` | `error.rs` | Typed error types (`MantleError`) |
 | `events` | `events.rs` | Stream event types for Claude Code `--stream-json` output |
@@ -68,11 +68,13 @@ pub enum HookSpecificOutput {
 }
 ```
 
-**ControlMessage** - Sent over TCP to control server:
+**ControlMessage** - Sent to control server via HTTP:
 ```rust
 pub enum ControlMessage {
-    HookEvent { input: Box<HookInput> },
+    HookEvent { input: Box<HookInput>, runtime: Runtime },
     McpToolCall { id: String, tool_name: String, arguments: Value },
+    ToolsListRequest,
+    Ping,
 }
 ```
 
@@ -81,6 +83,8 @@ pub enum ControlMessage {
 pub enum ControlResponse {
     HookResponse { output: HookOutput, exit_code: i32 },
     McpToolResponse { id: String, result: Option<Value>, error: Option<McpError> },
+    ToolsListResponse { tools: Vec<ToolDefinition> },
+    Pong,
 }
 ```
 
@@ -94,28 +98,37 @@ impl HookOutput {
 }
 ```
 
-### TCP Socket Client (`socket.rs`)
+### HTTP Socket Client (`socket.rs`)
 
-Synchronous TCP client for NDJSON protocol:
+Synchronous HTTP client using `curl` subprocess for Unix Domain Socket communication:
 
 ```rust
 pub struct ControlSocket {
-    stream: TcpStream,
+    socket_path: PathBuf,
+    timeout: Duration,
 }
 
 impl ControlSocket {
-    /// Connect to control server. Timeout: 30s.
-    pub fn connect(host: &str, port: u16) -> Result<Self>;
+    /// Connect to control server. Validates socket path.
+    pub fn connect<P: AsRef<Path>>(path: P) -> Result<Self>;
 
-    /// Send message, receive response (NDJSON: JSON + newline)
+    /// Send message, receive response (HTTP over Unix socket)
     pub fn send(&mut self, message: &ControlMessage) -> Result<ControlResponse>;
 }
 
-/// Get (host, port) from MANTLE_CONTROL_HOST/PORT env vars
-pub fn control_server_addr() -> Option<(String, u16)>;
+/// Get socket path from TIDEPOOL_CONTROL_SOCKET env var
+pub fn control_socket_path() -> Result<PathBuf>;
 ```
 
-**Why synchronous?** Hook commands block Claude Code anyway. Async adds complexity without benefit for this use case.
+**Implementation:** Uses `curl --unix-socket` subprocess to perform HTTP requests over Unix Domain Socket. This avoids adding async dependencies to the synchronous mantle-agent CLI.
+
+**Endpoints:**
+- `POST /hook` - HookEvent
+- `POST /mcp/call` - McpToolCall
+- `GET /mcp/tools` - ToolsListRequest
+- `GET /ping` - Ping
+
+**Why curl subprocess?** Hook commands block Claude Code anyway. Using `curl` avoids pulling in async Rust HTTP libraries (hyper/reqwest) for a synchronous CLI tool.
 
 ### Hook Command (`commands/hook.rs`)
 
@@ -204,10 +217,10 @@ cargo test -p mantle-shared
 
 ## Design Notes
 
-- **Synchronous socket:** Hooks block Claude Code; async unnecessary
-- **Fail-open:** Default allow when control server unavailable
+- **HTTP over Unix socket:** Standard protocol, works with Claude Code's HTTP MCP transport
+- **curl subprocess:** Avoids async dependencies for synchronous CLI tool
+- **Fail-closed:** Errors immediately if server missing; catches config issues during development
 - **Boxed HookInput:** Reduces `ControlMessage` enum size (HookInput is large)
-- **NDJSON protocol:** JSON + newline, human-readable for debugging
 
 ## Legacy Modules (from headless mode)
 
