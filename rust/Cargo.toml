@@ -5,4 +5,5 @@ members = ["hangar-config",
     "mantle-hub",
     "mantle-shared",
     "tui-sidebar",
+    "tui-popup",
 ]
