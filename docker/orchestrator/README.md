@@ -13,8 +13,7 @@ The Orchestrator container provides a centralized environment for managing Tidep
 
 - Linux x86_64 binaries for Tidepool components:
     - `tidepool-control-server`
-    - `tui-sidebar`
-    - `tui-popup` (optional/in-progress)
+    - `tui-popup`
     - `mantle-agent` (recommended)
 
 Place these binaries in the `bin/` directory before building the image.

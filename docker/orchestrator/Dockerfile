@@ -34,9 +34,9 @@ RUN curl -L https://github.com/zellij-org/zellij/releases/download/v${ZELLIJ_VER
 
 # Copy pre-built Tidepool binaries
 # NOTE: These must be Linux x86_64 binaries placed in docker/orchestrator/bin/ before building.
-# We copy everything in bin/ to /usr/local/bin/ to allow for optional binaries like tui-popup
-COPY bin/* /usr/local/bin/
-RUN chmod +x /usr/local/bin/*
+# We copy the directory first and then move contents to avoid COPY wildcard failures if empty.
+COPY bin/ /tmp/bin/
+RUN if [ "$(ls -A /tmp/bin)" ]; then cp /tmp/bin/* /usr/local/bin/ && chmod +x /usr/local/bin/*; fi
 
 # Copy Zellij configurations and layouts
 COPY config/orchestrator.kdl /root/.config/zellij/layouts/default.kdl

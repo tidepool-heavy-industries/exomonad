@@ -18,5 +18,4 @@ keybinds {
 // Theme
 theme "default"
 mouse_mode true
-copy_command "xclip -selection clipboard" // fallback
 copy_on_select true

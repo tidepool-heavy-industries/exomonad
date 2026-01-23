@@ -11,7 +11,7 @@ layout {
             // Pane 1: Control Server
             pane name="Control Server" size="40%" {
                 command "bash"
-                args "-c" "tidepool-control-server 2>&1 | tee /var/log/tidepool/control-server.log"
+                args "-c" "tidepool-control-server --socket $TIDEPOOL_CONTROL_SOCKET 2>&1 | tee /var/log/tidepool/control-server.log"
             }
 
             pane split_direction="horizontal" {
