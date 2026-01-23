@@ -12,7 +12,7 @@
 //! - `test_mcp_initialize` - Protocol handshake
 //! - `test_mcp_initialized_notification` - Initialized notification handling
 //! - `test_mcp_tools_list_empty` - Empty tool list from mock server
-//! - `test_mcp_tools_list_with_decision_tools` - Tool definitions from mock server
+//! - `test_mcp_tools_list_with_tools` - Tool definitions from mock server
 //! - `test_mcp_tools_call_success` - Successful tool call forwarded to mock
 //! - `test_mcp_tools_call_unknown_tool` - Error for unknown tool (handled by agent)
 //! - `test_mcp_unknown_method` - Error for unknown JSON-RPC method

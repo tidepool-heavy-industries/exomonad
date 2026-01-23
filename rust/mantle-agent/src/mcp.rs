@@ -435,7 +435,7 @@ impl McpServer {
             );
         }
 
-        // Forward to control server - REQUIRED for decision tools
+        // Forward to control server - REQUIRED for MCP tools
         let path = match &self.control_path {
             Some(p) => p,
             None => {

@@ -76,7 +76,7 @@ cargo test                      # Run all tests
 # Handle Claude Code hook (reads JSON stdin, outputs JSON stdout)
 mantle-agent hook pre-tool-use
 
-# Run MCP stdio server for decision tools
+# Run MCP stdio server for MCP tools
 mantle-agent mcp
 ```
 
