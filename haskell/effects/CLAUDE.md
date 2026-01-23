@@ -13,7 +13,6 @@ This follows the **interpreter design pattern**: abstract syntax (effect types) 
 | Work with GitHub issues/PRs | `github-interpreter/CLAUDE.md` |
 | Build agent UIs (WebSocket bridge) | `ui-interpreter/CLAUDE.md` |
 | Add code intelligence (LSP) | `lsp-interpreter/CLAUDE.md` |
-| Expose agents as MCP tools | `mcp-server/CLAUDE.md` |
 | Manage git worktrees | `worktree-interpreter/CLAUDE.md` |
 | Run just recipes | `justfile-interpreter/CLAUDE.md` |
 | Integrate beads task tracking | `bd-interpreter/CLAUDE.md` |
@@ -28,7 +27,6 @@ This follows the **interpreter design pattern**: abstract syntax (effect types) 
 ```
 effects/CLAUDE.md  ← YOU ARE HERE (router)
 ├── llm-interpreter/CLAUDE.md           ← Anthropic/OpenAI API
-├── mcp-server/CLAUDE.md                ← MCP tool server (expose agents to Claude)
 ├── lsp-interpreter/CLAUDE.md           ← Language server protocol
 ├── ghci-interpreter/CLAUDE.md          ← GHCi oracle client
 ├── github-interpreter/CLAUDE.md        ← gh CLI for issues/PRs
@@ -40,6 +38,10 @@ effects/CLAUDE.md  ← YOU ARE HERE (router)
 ├── cabal-interpreter/CLAUDE.md         ← Build & test integration
 ├── devlog-interpreter/CLAUDE.md        ← Session-scoped logging
 ├── habitica-interpreter/CLAUDE.md      ← Gamification API
+├── env-interpreter/CLAUDE.md           ← Environment variable access
+├── filesystem-interpreter/CLAUDE.md    ← File system operations
+├── gemini-interpreter/CLAUDE.md        ← Gemini API integration
+├── zellij-interpreter/CLAUDE.md        ← Zellij terminal multiplexer
 └── habitica/CLAUDE.md                  ← Habitica effect types
 ```
 
@@ -58,7 +60,6 @@ Most effect types live in `dsl/core/src/Tidepool/Effect/Types.hs` or `Effects/*.
 | Effect | Types | Interpreter | Implementation |
 |--------|-------|-------------|----------------|
 | LLM | dsl/core | llm-interpreter | HTTP (Anthropic/OpenAI) |
-| MCP | n/a | mcp-server | JSON-RPC 2.0 stdio (tool server) |
 | LSP | dsl/core | lsp-interpreter | lsp-client library |
 | BD | dsl/core | bd-interpreter | Subprocess (urchin CLI) |
 | Habitica | effects/habitica | habitica-interpreter | HTTP API |
@@ -70,6 +71,10 @@ Most effect types live in `dsl/core/src/Tidepool/Effect/Types.hs` or `Effects/*.
 | Cabal | dsl/core | cabal-interpreter | Cabal CLI subprocess |
 | Justfile | dsl/core | justfile-interpreter | just CLI subprocess |
 | DevLog | dsl/core | devlog-interpreter | File IO |
+| Env | dsl/core | env-interpreter | Environment variables |
+| Filesystem | dsl/core | filesystem-interpreter | File system operations |
+| Gemini | dsl/core | gemini-interpreter | Gemini API |
+| Zellij | dsl/core | zellij-interpreter | Zellij multiplexer |
 
 ## Adding a New Effect Interpreter
 
@@ -95,7 +100,6 @@ Most effect types live in `dsl/core/src/Tidepool/Effect/Types.hs` or `Effects/*.
 ## Claude Code Integration
 
 For Claude Code integration, see `rust/CLAUDE.md`. The Rust workspace provides:
-- **mantle-agent hook** - Forwards hooks to Haskell via TCP
-- **mantle-agent mcp** - MCP server that proxies to Haskell
+- **mantle-agent hook** - Forwards hooks to Haskell via HTTP over Unix socket
 
-This replaces the removed `session-interpreter` which was used for headless orchestration.
+MCP tools are served directly by control-server via HTTP MCP transport. This replaces the removed `session-interpreter` which was used for headless orchestration.

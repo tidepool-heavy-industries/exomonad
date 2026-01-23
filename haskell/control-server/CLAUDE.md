@@ -1,6 +1,6 @@
 # Tidepool Control Server
 
-Unix socket server for Claude Code++ integration. Receives hook events and MCP tool calls from mantle-agent via NDJSON over Unix socket. Provides 23+ MCP tools organized in tiers: LSP-only (Tier 1), LLM-enhanced (Tier 2), external orchestration (Tier 3), TUI-interactive (Tier 4), and mailbox communication (Tier 5).
+Unix socket server for Claude Code++ integration. Receives hook events from mantle-agent and direct HTTP MCP requests from Claude Code via Unix socket. Provides 7 MCP tools organized in tiers: LSP-only (Tier 1), LLM-enhanced (Tier 2), external orchestration (Tier 3), TUI-interactive (Tier 4), and mailbox communication (Tier 5).
 
 ## When to Read This
 
@@ -25,11 +25,10 @@ Read this if you're:
                 ▼                                    │
 ┌────────────────────────────────────────────────────────────────────┐
 │ mantle-agent (Rust)                                                │
-│  • hook subcommand: forwards CC hooks → TCP                        │
-│  • mcp subcommand: JSON-RPC stdio server → TCP                     │
+│  • hook subcommand: forwards CC hooks → Unix Socket                │
 └────────────────────────────────┬───────────────────────────────────┘
-                                 │ TCP (NDJSON)
-                                 │ 127.0.0.1:7432
+                                 │ HTTP over Unix Socket
+                                 │ .tidepool/sockets/control.sock
                                  ▼
 ┌────────────────────────────────────────────────────────────────────┐
 │ control-server (Haskell)                                           │
@@ -112,20 +111,20 @@ Subagents spawned by `spawn_agents` receive a **custom-generated environment and
 2. mantle-agent hook pre-tool-use
    ┌──────────────────────────────────────────────┐
    │ Read HookInput from stdin                    │
-   │ Connect to control server (TCP)              │
-   │ Send ControlMessage::HookEvent               │
+   │ Connect to control server (Unix socket)      │
+   │ POST /hook (HTTP over Unix socket)           │
    └─────────────────┬────────────────────────────┘
-                     │ TCP NDJSON
+                     │ HTTP request
                      ▼
 3. control-server
    ┌──────────────────────────────────────────────┐
-   │ Accept connection on Unix socket             │
-   │ Parse ControlMessage                         │
+   │ Accept HTTP request on Unix socket           │
+   │ Parse hook request body                      │
    │ Route to handleHook                          │
    │   → Log and return allowPreToolUse           │
-   │ Send ControlResponse::HookResponse           │
+   │ Send HTTP response                           │
    └─────────────────┬────────────────────────────┘
-                     │ TCP response
+                     │ HTTP response
                      ▼
 4. mantle-agent returns
    ┌──────────────────────────────────────────────┐
@@ -155,21 +154,13 @@ Subagents spawned by `spawn_agents` receive a **custom-generated environment and
                      ▼
 2. Claude Code calls MCP
    ┌──────────────────────────────────────────────┐
-   │ Spawn: mantle-agent mcp                      │
-   │ Send JSON-RPC: tools/call                    │
+   │ HTTP MCP transport (http+unix://)            │
+   │ POST /mcp/call                               │
    │   { name: "scout", arguments: {...} }        │
    └─────────────────┬────────────────────────────┘
-                     │ stdin (JSON-RPC)
+                     │ HTTP over Unix socket
                      ▼
-3. mantle-agent mcp
-   ┌──────────────────────────────────────────────┐
-   │ Parse JSON-RPC request                       │
-   │ Connect to control server (TCP)              │
-   │ Send ControlMessage::McpToolCall             │
-   └─────────────────┬────────────────────────────┘
-                     │ TCP NDJSON
-                     ▼
-4. control-server routes
+3. control-server routes
    ┌──────────────────────────────────────────────┐
    │ Parse ControlMessage::McpToolCall            │
    │ Route to handleMcpTool                       │
@@ -177,7 +168,7 @@ Subagents spawned by `spawn_agents` receive a **custom-generated environment and
    └─────────────────┬────────────────────────────┘
                      │
                      ▼
-5. Scout exploration
+4. Scout exploration
    ┌──────────────────────────────────────────────┐
    │ Parse ScoutQuery arguments                   │
    │ Require GEMMA_ENDPOINT env var (no fallback) │

@@ -1,5 +1,7 @@
 # deploy/ - Cloudflare Worker Durable Object Harness
 
+**STATUS: FROZEN** - WASM/Cloudflare deployment is not currently maintained. The blessed development workflow is `./start-augmented.sh` for Claude Code++ integration.
+
 TypeScript harness for running Tidepool WASM graphs on Cloudflare's edge network.
 
 ## What This Is
@@ -227,9 +229,9 @@ The `executeEffect()` wrapper catches any uncaught exceptions and converts them 
 
 ## Related Documentation
 
-- [tidepool-core/CLAUDE.md](../tidepool-core/CLAUDE.md) - Graph DSL and effect definitions
-- [tidepool-wasm/CLAUDE.md](../tidepool-wasm/CLAUDE.md) - WASM compilation and FFI
-- [tidepool-generated-ts/CLAUDE.md](../tidepool-generated-ts/CLAUDE.md) - Generated TypeScript types
+- [haskell/dsl/core/CLAUDE.md](../haskell/dsl/core/CLAUDE.md) - Graph DSL and effect definitions
+- [haskell/runtime/wasm/CLAUDE.md](../haskell/runtime/wasm/CLAUDE.md) - WASM compilation and FFI
+- [haskell/protocol/generated-ts/CLAUDE.md](../haskell/protocol/generated-ts/CLAUDE.md) - Generated TypeScript types
 
 ## Running
 

@@ -7,108 +7,60 @@ set shell := ["bash", "-uc"]
 default:
     @just --list
 
-# ─────────────────────────────────────────────────────────────
-# Building
-# ─────────────────────────────────────────────────────────────
-
-# Build all packages
-build:
-    cabal build all
-
-# Build with warnings as errors
-build-strict:
-    cabal build all --ghc-options="-Werror"
-
-# Clean build artifacts
-clean:
-    cabal clean
-
-# ─────────────────────────────────────────────────────────────
-# Testing
-# ─────────────────────────────────────────────────────────────
-
-# Run all tests
-test:
-    cabal test all
-
-# Run graph validation tests only
-test-graph:
-    cabal test graph-validation-tests
-
+# FIXME: TypeScript/WASM not currently used - restore when needed
 # Verify protocol conformance between Haskell and TypeScript
 # Requires: node/npm installed in deploy/
-test-protocol-conformance:
-    @echo "── Generating JSON samples from Haskell ──"
-    cabal run generate-golden-samples
-    @echo ""
-    @echo "── Verifying TypeScript can parse samples ──"
-    cd deploy && npx tsx test/verify-protocol.ts
+# test-protocol-conformance:
+#     @echo "── Generating JSON samples from Haskell ──"
+#     cabal run generate-golden-samples
+#     @echo ""
+#     @echo "── Verifying TypeScript can parse samples ──"
+#     cd deploy && npx tsx test/verify-protocol.ts
 
 # ─────────────────────────────────────────────────────────────
 # Linting
 # ─────────────────────────────────────────────────────────────
 
 # Run hlint on Haskell sources (errors only, not suggestions)
-lint-hs:
+lint:
     @echo "── Running hlint ──"
     hlint haskell/dsl/core haskell/runtime/wasm --ignore-suggestions
-
-# Run ESLint on TypeScript sources
-lint-ts:
-    @echo "── Running pnpm lint ──"
-    cd deploy && pnpm lint
-
-# Run pnpm typecheck on TypeScript sources
-typecheck-ts:
-    @echo "── Running pnpm typecheck ──"
-    cd deploy && pnpm typecheck
-
-# Run TypeScript tests
-test-ts:
-    @echo "── Running pnpm test ──"
-    cd deploy && pnpm test
-
-# Run all lints
-lint: lint-hs lint-ts
 
 # ─────────────────────────────────────────────────────────────
 # Pre-commit checks
 # ─────────────────────────────────────────────────────────────
 
-# Fast pre-commit check (build + lint)
-pre-commit-fast: build lint
+# Fast pre-commit check (build Haskell + Rust)
+pre-commit-fast:
+    cabal build all
+    cd rust && cargo build
 
-# Full pre-commit check (build + lint + tests)
-pre-commit: build lint test test-ts
+# Full pre-commit check (build + test Haskell + Rust)
+pre-commit:
+    cabal build all
+    cabal test all
+    cd rust && cargo test
 
 # ─────────────────────────────────────────────────────────────
 # WASM Roundtrip Testing
 # ─────────────────────────────────────────────────────────────
 
+# FIXME: TypeScript/WASM not currently used - restore when needed
 # Build roundtrip WASM (requires: nix develop .#wasm)
-build-roundtrip-wasm:
-    @echo "── Building roundtrip WASM ──"
-    @echo "Note: This must be run inside 'nix develop .#wasm'"
-    wasm32-wasi-cabal build tidepool-reactor
-    @echo ""
-    @echo "── Copying WASM to deploy/ ──"
-    find dist-newstyle -name '*.wasm' -exec cp {} deploy/tidepool-roundtrip.wasm \;
-    @echo "✓ Built: deploy/tidepool-roundtrip.wasm"
+# build-roundtrip-wasm:
+#     @echo "── Building roundtrip WASM ──"
+#     @echo "Note: This must be run inside 'nix develop .#wasm'"
+#     wasm32-wasi-cabal build tidepool-reactor
+#     @echo ""
+#     @echo "── Copying WASM to deploy/ ──"
+#     find dist-newstyle -name '*.wasm' -exec cp {} deploy/tidepool-roundtrip.wasm \;
+#     @echo "✓ Built: deploy/tidepool-roundtrip.wasm"
 
+# FIXME: TypeScript/WASM not currently used - restore when needed
 # Run cross-boundary property tests (requires WASM built first)
-test-roundtrip:
-    @echo "── Running cross-boundary property tests ──"
-    cd deploy && pnpm test -- --grep "roundtrip"
-
-# ─────────────────────────────────────────────────────────────
-# Running
-# ─────────────────────────────────────────────────────────────
-
-# Run native server (REST + WebSocket + static files)
-native:
-    TIDEPOOL_DIST=tidepool-native-gui/solid-frontend/dist cabal run haskell/native-server:tidepool-native-server
-
-# NOTE: dm, dm-gui, tidy-gui disabled - see cabal.project for details
+# test-roundtrip:
+#     @echo "── Running cross-boundary property tests ──"
+#     cd deploy && pnpm test -- --grep "roundtrip"
 
 # ─────────────────────────────────────────────────────────────
 # Hangar Runtime
@@ -147,8 +99,8 @@ rebuild-runtime:
     cabal build tidepool-control-server
 
     echo ""
-    echo "── Building Rust (mantle-agent, tui-sidebar) ──"
-    cd "$REPO_ROOT/rust" && cargo build --release -p mantle-agent -p tui-sidebar
+    echo "── Building Rust (mantle-agent, tui-sidebar, tui-popup) ──"
+    cd "$REPO_ROOT/rust" && cargo build --release -p mantle-agent -p tui-sidebar -p tui-popup
 
     echo ""
     echo "── Installing to $RUNTIME_BIN ──"
@@ -156,87 +108,53 @@ rebuild-runtime:
     cp "$(cabal list-bin tidepool-control-server)" "$RUNTIME_BIN/"
     cp "$REPO_ROOT/rust/target/release/mantle-agent" "$RUNTIME_BIN/"
     cp "$REPO_ROOT/rust/target/release/tui-sidebar" "$RUNTIME_BIN/"
+    cp "$REPO_ROOT/rust/target/release/tui-popup" "$RUNTIME_BIN/"
 
     echo ""
     echo "── Code signing binaries (macOS) ──"
     codesign -s - --force "$RUNTIME_BIN/tidepool-control-server" 2>/dev/null || true
     codesign -s - --force "$RUNTIME_BIN/mantle-agent" 2>/dev/null || true
     codesign -s - --force "$RUNTIME_BIN/tui-sidebar" 2>/dev/null || true
+    codesign -s - --force "$RUNTIME_BIN/tui-popup" 2>/dev/null || true
 
     echo ""
     echo "✓ Runtime binaries rebuilt from current repo:"
     ls -lh "$RUNTIME_BIN"
 
-# Rebuild runtime without signing (deprecated - use rebuild-runtime)
-rebuild-runtime-local:
-    @echo "NOTE: rebuild-runtime-local is deprecated. Use 'just rebuild-runtime' instead."
-    @echo "      rebuild-runtime now builds from current repo by default."
-    @just rebuild-runtime
-
-# ─────────────────────────────────────────────────────────────
-# Gemini
-# ─────────────────────────────────────────────────────────────
-
-# Setup Gemini environment (builds MCP server + symlink)
-setup-gemini:
-    @echo "── Building tidepool-mcp-server ──"
-    cabal build tidepool-mcp-server
-    @echo ""
-    @echo "── Creating symlink at result/bin/mcp-server ──"
-    @mkdir -p result/bin
-    @BINARY_PATH=$(cabal list-bin tidepool-mcp-server) && ln -sf "$$BINARY_PATH" result/bin/mcp-server
-    @echo "✓ Setup complete. Gemini configuration is ready."
-
-# ─────────────────────────────────────────────────────────────
-# Git hooks
-# ─────────────────────────────────────────────────────────────
-
-# Install git hooks
-install-hooks:
-    @echo "Installing git hooks..."
-    @mkdir -p .git/hooks
-    @echo '#!/bin/bash' > .git/hooks/pre-commit
-    @echo 'export PATH="$HOME/.nix-profile/bin:$HOME/.local/bin:$HOME/.ghcup/bin:$PATH"' >> .git/hooks/pre-commit
-    @echo 'exec just pre-commit' >> .git/hooks/pre-commit
-    @chmod +x .git/hooks/pre-commit
-    @echo "✓ Installed pre-commit hook (runs 'just pre-commit' - build + lint + tests)"
-
-# Uninstall git hooks
-uninstall-hooks:
-    @rm -f .git/hooks/pre-commit
-    @echo "✓ Removed pre-commit hook"
-
 # ─────────────────────────────────────────────────────────────
 # WASM & Deployment
 # ─────────────────────────────────────────────────────────────
 
+# FIXME: TypeScript/WASM not currently used - restore when needed
 # Build WASM blob (requires nix develop .#wasm)
-build-wasm:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    echo "── Building tidepool-reactor with wasm32-wasi-ghc ──"
-    nix develop .#wasm --command bash -c ' \
-        wasm32-wasi-cabal build tidepool-reactor && \
-        echo "" && \
-        echo "── Optimizing WASM with wasm-opt -Oz ──" && \
-        WASM=$(find dist-newstyle/build/wasm32-wasi -name "tidepool-reactor.wasm" | head -1) && \
-        ls -lh "$WASM" && \
-        wasm-opt -Oz "$WASM" -o deploy/src/tidepool.wasm && \
-        echo "  ↓ optimized to:" && \
-        ls -lh deploy/src/tidepool.wasm \
-    '
-    echo "✓ WASM blob ready"
+# build-wasm:
+#     #!/usr/bin/env bash
+#     set -euo pipefail
+#     echo "── Building tidepool-reactor with wasm32-wasi-ghc ──"
+#     nix develop .#wasm --command bash -c ' \
+#         wasm32-wasi-cabal build tidepool-reactor && \
+#         echo "" && \
+#         echo "── Optimizing WASM with wasm-opt -Oz ──" && \
+#         WASM=$(find dist-newstyle/build/wasm32-wasi -name "tidepool-reactor.wasm" | head -1) && \
+#         ls -lh "$WASM" && \
+#         wasm-opt -Oz "$WASM" -o deploy/src/tidepool.wasm && \
+#         echo "  ↓ optimized to:" && \
+#         ls -lh deploy/src/tidepool.wasm \
+#     '
+#     echo "✓ WASM blob ready"
 
+# FIXME: TypeScript/WASM not currently used - restore when needed
 # Deploy to Cloudflare Workers
-deploy-worker:
-    @echo "── Deploying to Cloudflare Workers ──"
-    cd deploy && pnpm run deploy
-    @echo "✓ Deployed"
+# deploy-worker:
+#     @echo "── Deploying to Cloudflare Workers ──"
+#     cd deploy && pnpm run deploy
+#     @echo "✓ Deployed"
 
+# FIXME: TypeScript/WASM not currently used - restore when needed
 # Build WASM and deploy to Cloudflare (full pipeline)
-deploy: build-wasm deploy-worker
-    @echo ""
-    @echo "✓ Full deploy complete"
+# deploy: build-wasm deploy-worker
+#     @echo ""
+#     @echo "✓ Full deploy complete"
 
 # ─────────────────────────────────────────────────────────────
 # Analysis
@@ -250,129 +168,12 @@ blast-radius base="main":
 # Observability
 # ─────────────────────────────────────────────────────────────
 
+# FIXME: TypeScript/WASM not currently used - restore when needed
 # Tail Cloudflare Worker logs (pretty format)
-logs:
-    cd deploy && npx wrangler tail --format pretty
+# logs:
+#     cd deploy && npx wrangler tail --format pretty
 
+# FIXME: TypeScript/WASM not currently used - restore when needed
 # Tail logs with JSON format (for parsing)
-logs-json:
-    cd deploy && npx wrangler tail --format json
-
-# ─────────────────────────────────────────────────────────────
-# Docker (Containerized Development)
-# ─────────────────────────────────────────────────────────────
-
-# Build Docker images for orchestrator and agent
-docker-build:
-    #!/usr/bin/env bash
-    set -euo pipefail
-
-    HANGAR_ROOT=$(just _hangar-root)
-    RUNTIME_BIN="$HANGAR_ROOT/runtime/bin"
-
-    echo "── Copying binaries to build contexts ──"
-    mkdir -p docker/orchestrator/bin docker/claude-agent/bin
-    cp "$RUNTIME_BIN/tidepool-control-server" docker/orchestrator/bin/
-    cp "$RUNTIME_BIN/tui-sidebar" docker/orchestrator/bin/
-    cp "$RUNTIME_BIN/tui-popup" docker/orchestrator/bin/ 2>/dev/null || true
-    cp "$RUNTIME_BIN/mantle-agent" docker/claude-agent/bin/
-
-    echo ""
-    echo "── Building orchestrator image ──"
-    docker build -t tidepool-orchestrator:latest docker/orchestrator
-
-    echo ""
-    echo "── Building agent image ──"
-    docker build -t tidepool-claude-agent:latest docker/claude-agent
-
-    echo ""
-    echo "✓ Docker images built"
-    docker images | grep tidepool
-
-# Run dockerized orchestrator (interactive Zellij session)
-docker-run:
-    #!/usr/bin/env bash
-    set -euo pipefail
-
-    echo "── Starting Tidepool Orchestrator ──"
-    echo "Detach: ctrl-e,e | Quit Zellij: ctrl-q"
-    echo ""
-
-    docker run -it --rm \
-        --name tidepool-orchestrator \
-        --detach-keys=\"ctrl-e,e\" \
-        -p 7432:7432 \
-        -v /var/run/docker.sock:/var/run/docker.sock \
-        -v "$(pwd)":/worktrees/repo \
-        -v ~/.claude.json:/root/.claude.json:ro \
-        -v tidepool-sockets:/sockets \
-        -v tidepool-git-cache:/git-cache \
-        -v tidepool-cargo-cache:/cargo-cache \
-        -v tidepool-cabal-cache:/cabal-cache \
-        -e TIDEPOOL_CONTROL_SOCKET=/sockets/control.sock \
-        -e ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}" \
-        tidepool-orchestrator:latest
-
-# Run dockerized orchestrator in background (detached)
-docker-run-detached:
-    #!/usr/bin/env bash
-    set -euo pipefail
-
-    echo "── Starting Tidepool Orchestrator (detached) ──"
-
-    docker run -d \
-        --name tidepool-orchestrator \
-        -p 7432:7432 \
-        -v /var/run/docker.sock:/var/run/docker.sock \
-        -v "$(pwd)":/worktrees/repo \
-        -v ~/.claude.json:/root/.claude.json:ro \
-        -v tidepool-sockets:/sockets \
-        -v tidepool-git-cache:/git-cache \
-        -v tidepool-cargo-cache:/cargo-cache \
-        -v tidepool-cabal-cache:/cabal-cache \
-        -e TIDEPOOL_CONTROL_SOCKET=/sockets/control.sock \
-        -e ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}" \
-        tidepool-orchestrator:latest
-
-    echo "✓ Orchestrator running in background"
-    echo "  Attach: docker attach --detach-keys='ctrl-e,e' tidepool-orchestrator"
-    echo "  Stop:   just docker-stop"
-
-# Attach to running orchestrator
-docker-attach:
-    docker attach --detach-keys=\"ctrl-e,e\" tidepool-orchestrator
-
-# Stop dockerized orchestrator
-docker-stop:
-    docker stop tidepool-orchestrator 2>/dev/null || true
-    @echo "✓ Orchestrator stopped"
-
-# Run Docker integration tests
-docker-test:
-    ./docker/test/run-integration-tests.sh
-
-# Clean up Docker resources (images, volumes, containers)
-docker-clean:
-    #!/usr/bin/env bash
-    echo "── Stopping containers ──"
-    docker stop tidepool-orchestrator 2>/dev/null || true
-    docker rm tidepool-orchestrator 2>/dev/null || true
-
-    echo "── Removing test containers ──"
-    docker ps -aq --filter "label=tidepool.test.cleanup=true" | xargs -r docker rm -f
-    docker ps -aq --filter "label=tidepool.orchestrator" | xargs -r docker rm -f
-
-    echo "── Removing images ──"
-    docker rmi tidepool-orchestrator:latest 2>/dev/null || true
-    docker rmi tidepool-orchestrator:test 2>/dev/null || true
-    docker rmi tidepool-claude-agent:latest 2>/dev/null || true
-    docker rmi tidepool-claude-agent:test 2>/dev/null || true
-
-    echo ""
-    echo "✓ Docker resources cleaned"
-    echo "Note: Persistent volumes preserved. To remove: docker volume rm tidepool-sockets tidepool-git-cache tidepool-cargo-cache tidepool-cabal-cache"
-
-# Remove Docker volumes (cache data)
-docker-clean-volumes:
-    docker volume rm tidepool-sockets tidepool-git-cache tidepool-cargo-cache tidepool-cabal-cache 2>/dev/null || true
-    @echo "✓ Docker volumes removed"
+# logs-json:
+#     cd deploy && npx wrangler tail --format json

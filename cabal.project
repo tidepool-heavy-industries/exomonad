@@ -27,7 +27,6 @@ packages:
     haskell/effects/justfile-interpreter
     haskell/effects/devlog-interpreter
     haskell/effects/gemini-interpreter
-    haskell/effects/mcp-server
     haskell/effects/filesystem-interpreter
     haskell/effects/zellij-interpreter
 

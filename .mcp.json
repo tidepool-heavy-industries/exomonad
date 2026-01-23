@@ -1,13 +1,9 @@
 {
   "mcpServers": {
     "tidepool": {
-      "command": "mantle-agent",
-      "args": [
-        "mcp"
-      ],
-      "env": {
-        "TIDEPOOL_CONTROL_SOCKET": ".tidepool/sockets/control.sock",
-        "RUST_LOG": "info"
+      "transport": {
+        "type": "http",
+        "url": "http+unix://.tidepool/sockets/control.sock"
       }
     }
   }

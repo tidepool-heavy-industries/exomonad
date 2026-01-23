@@ -83,14 +83,11 @@ Set `VITE_WS_URL` to override the WebSocket URL (default: `ws://localhost:8080`)
 
 ## Running
 
-```bash
-# From repo root
-just native  # Starts server at localhost:8080
-```
+**Note:** The native server workflow is not the primary development path. See root CLAUDE.md for `./start-augmented.sh` (Claude Code++ integration).
 
 ## Related Documentation
 
 - [server/CLAUDE.md](server/CLAUDE.md) - Native server details
-- [tidepool-core/CLAUDE.md](../tidepool-core/CLAUDE.md) - Effect type definitions
+- [haskell/dsl/core/CLAUDE.md](../haskell/dsl/core/CLAUDE.md) - Effect type definitions
 - [deploy/CLAUDE.md](../deploy/CLAUDE.md) - Cloudflare Worker interpreters (alternative runtime)
 - [Root CLAUDE.md](../CLAUDE.md) - Project overview

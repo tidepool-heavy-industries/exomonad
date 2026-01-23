@@ -1,20 +1,20 @@
 # Gemini Code Intelligence
 
-This project uses `CLAUDE.md` files for documentation and context. 
+This project uses `CLAUDE.md` files for documentation and context.
 
 ## Setup
 
-Before using Gemini with this project, you must build the MCP server and link it to the location expected by `settings.json`.
+Gemini Code Assist uses the same MCP architecture as Claude Code:
 
-Run the following command:
+1. **Start the control server:**
+   ```bash
+   ./start-augmented.sh
+   ```
 
-```bash
-just setup-gemini
-```
+2. **Configure MCP in settings.json:**
+   The `settings.json` file uses HTTP MCP transport to connect directly to control-server via Unix socket.
 
-This will:
-1. Build the `tidepool-mcp-server` executable.
-2. Create a symlink at `./result/bin/mcp-server`.
+**Note:** Gemini uses the same tools as Claude Code (find_callers, teach-graph, spawn_agents, etc.) via the control-server HTTP MCP endpoints.
 
 ## Documentation
 

@@ -35,16 +35,15 @@ CLAUDE.md  ← YOU ARE HERE (project overview)
 │   ├── effects/CLAUDE.md       ← Effect interpreters
 │   │   ├── llm-interpreter/     ← Anthropic/OpenAI API
 │   │   ├── lsp-interpreter/     ← Language Server Protocol
-│   │   ├── mcp-server/          ← MCP tool server (expose agents to Claude)
 │   │   └── ...
 │   ├── runtime/CLAUDE.md       ← Execution backends
 │   │   └── actor/CLAUDE.md     ← Actor model details
 │   ├── protocol/CLAUDE.md      ← Wire formats
 │   └── tools/CLAUDE.md         ← Dev tools (ghci-oracle, sleeptime, training-generator)
 ├── rust/CLAUDE.md             ← Claude Code++ (hook handler + MCP forwarding + TUI)
-│   ├── mantle-agent/CLAUDE.md  ← Hook handler + MCP stdio server (IMPLEMENTED)
+│   ├── mantle-agent/CLAUDE.md  ← Hook handler (HTTP over Unix socket) (IMPLEMENTED)
 │   ├── mantle-hub/CLAUDE.md    ← Metrics hub (LEGACY, needs repurposing)
-│   ├── mantle-shared/CLAUDE.md ← Protocol types, TCP socket client
+│   ├── mantle-shared/CLAUDE.md ← Protocol types, Unix socket client
 │   └── tui-sidebar/CLAUDE.md   ← TUI sidebar: ratatui rendering for graph UIs (IMPLEMENTED)
 ├── types-first-dev/CLAUDE.md   ← V3 TDD protocol project
 ├── deploy/CLAUDE.md            ← Cloudflare deployment
@@ -67,7 +66,6 @@ CLAUDE.md  ← YOU ARE HERE (project overview)
 | Add or modify an effect interpreter | `haskell/effects/CLAUDE.md` |
 | Understand actor execution model | `haskell/runtime/actor/CLAUDE.md` |
 | Work on semantic-scout code exploration | `haskell/control-server/CLAUDE.md` (merged from agents/semantic-scout) |
-| Expose agents as MCP tools | `haskell/effects/mcp-server/CLAUDE.md` |
 | Work with LSP (Language Server Protocol) | `haskell/effects/lsp-interpreter/CLAUDE.md` |
 | Generate training data for FunctionGemma | `haskell/tools/training-generator/CLAUDE.md` |
 | Work on types-first-dev V3 protocol | `types-first-dev/CLAUDE.md` |
@@ -131,14 +129,7 @@ instance ToolDef MyTool where
 
 ## Running Agents
 
-### Native (Development)
-```bash
-just native  # Starts at localhost:8080
-```
-
-Uses the native server with full effect composition. Good for development with real Anthropic API.
-
-### WASM/Cloudflare (Production)
+### WASM/Cloudflare (Production - Frozen)
 Compile to WASM, deploy to Cloudflare Durable Objects. TypeScript harness interprets effects.
 
 ```bash
@@ -187,7 +178,6 @@ Human-driven Claude Code sessions augmented with Tidepool. **Not headless automa
 ┌─────────────────────────────────────────┐    │
 │ mantle-agent (Rust)                     │    │
 │  • hook: CC hooks → Unix Socket         │    │
-│  • mcp: JSON-RPC stdio → Unix Socket    │    │
 └───────────┬─────────────────────────────┘    │
             │ Unix Socket NDJSON               │
             │ .tidepool/sockets/control.sock   │
@@ -196,7 +186,7 @@ Human-driven Claude Code sessions augmented with Tidepool. **Not headless automa
 │ control-server (Haskell)                │    │
 │  • Long-lived LSP session (HLS)         │    │
 │  • Hook Handler: Passthrough            │    │
-│  • MCP Handler: 4 tools (auto-discovery)│    │
+│  • MCP Handler: 7 tools (auto-discovery)│    │
 │  • TUI Handler: Listens for Sidebar     │◄───┘
 └─────────────────────────────────────────┘    │
                                                │ Unix Socket NDJSON
@@ -218,7 +208,7 @@ Human-driven Claude Code sessions augmented with Tidepool. **Not headless automa
 
 | Component | Location | Purpose |
 |-----------|----------|---------|
-| **mantle-agent** | `rust/mantle-agent/` | Hook/MCP forwarding to control server |
+| **mantle-agent** | `rust/mantle-agent/` | Hook forwarding to control server (HTTP over Unix socket) |
 | **control-server** | `haskell/control-server/` | Haskell server with LSP + MCP tools + TUI handler |
 | **tui-sidebar** | `rust/tui-sidebar/` | Rust TUI: renders UISpec, captures Interaction |
 | **Protocol types** | `rust/mantle-shared/protocol.rs` + `haskell/control-server/Protocol.hs` | Bidirectional message types (must match exactly) |
@@ -589,7 +579,6 @@ All Haskell packages now live under `haskell/`. See `haskell/CLAUDE.md` for full
 | `haskell/native-server` | Servant + WebSocket server (facade) |
 | `haskell/effects/llm-interpreter` | Anthropic/OpenAI API calls |
 | `haskell/effects/bd-interpreter` | Beads integration + urchin CLI |
-| `haskell/effects/mcp-server` | MCP tool server (expose agents to Claude) |
 | `haskell/effects/habitica-interpreter` | Habitica API |
 | `haskell/effects/ui-interpreter` | WebSocket ↔ UI bridging |
 | `haskell/effects/observability-interpreter` | OpenTelemetry traces to Grafana |
@@ -693,7 +682,6 @@ When ending a session:
 
 ```bash
 cabal build all            # Build everything
-just native                # Run native server
 just pre-commit            # Run all checks
 cabal test all             # Run tests
 ```
@@ -852,8 +840,8 @@ Use bv instead of parsing beads.jsonl—it computes PageRank, critical paths, cy
 
 ## References
 
-- [tidepool-core/CLAUDE.md](tidepool-core/CLAUDE.md) - Graph DSL reference
-- [tidepool-native-gui/server/CLAUDE.md](tidepool-native-gui/server/CLAUDE.md) - Native server docs
+- [haskell/dsl/core/CLAUDE.md](haskell/dsl/core/CLAUDE.md) - Graph DSL reference
+- [haskell/native-server/CLAUDE.md](haskell/native-server/CLAUDE.md) - Native server docs
 - [deploy/CLAUDE.md](deploy/CLAUDE.md) - Cloudflare deployment
 - [freer-simple](https://hackage.haskell.org/package/freer-simple) - Effect system
 - [Anthropic tool use](https://docs.anthropic.com/en/docs/tool-use)

@@ -191,10 +191,10 @@ cargo test -p mantle-shared             # Shared library tests
 
 | Decision | Rationale |
 |----------|-----------|
-| TCP (not Unix socket) | Works across Docker boundaries (legacy), simpler |
-| NDJSON protocol | Human-readable, easy to debug |
+| Unix Domain Sockets | Local IPC only, no Docker boundary crossing needed in Claude Code++ mode |
+| HTTP over Unix Socket | Standard protocol, curl subprocess for simplicity |
 | Fail-closed hooks | Errors immediately if server missing; catches config issues during development |
-| Sync TCP client | Hooks block anyway; async adds complexity |
+| Sync HTTP client | Hooks block anyway; async adds complexity |
 
 ## Migration from Headless Mode
 

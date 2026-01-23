@@ -12,7 +12,6 @@ All Haskell packages live here, organized by architectural pattern.
 | Understand graph execution model | `runtime/CLAUDE.md` → `runtime/actor/CLAUDE.md` |
 | Work on Claude Code++ (hooks/MCP/scout) | `control-server/CLAUDE.md` ⭐ |
 | Work on semantic-scout code exploration | `control-server/CLAUDE.md` (merged from agents/semantic-scout) |
-| Expose agents as MCP tools | `effects/mcp-server/CLAUDE.md` |
 | Work with LSP integration | `effects/lsp-interpreter/CLAUDE.md` |
 | Generate training data for FunctionGemma | `tools/training-generator/CLAUDE.md` |
 | Work on the WebSocket server | `native-server/CLAUDE.md` |
@@ -34,7 +33,6 @@ haskell/CLAUDE.md  ← YOU ARE HERE (router)
 ├── effects/CLAUDE.md  ← Effect interpreter pattern
 │   ├── llm-interpreter/CLAUDE.md
 │   ├── lsp-interpreter/CLAUDE.md  ← Language Server Protocol (used by scout)
-│   ├── mcp-server/CLAUDE.md  ← MCP tool server (vendored library)
 │   ├── ghci-interpreter/CLAUDE.md
 │   ├── habitica/CLAUDE.md
 │   └── ...
