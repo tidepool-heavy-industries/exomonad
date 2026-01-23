@@ -120,7 +120,7 @@ runServer logger config = do
       let settings = defaultSettings
             & setTimeout (5 * 60) -- 5 minutes timeout
       
-      runSettingsSocket settings sock (app logger configWithObs tuiHandleVar)
+      runSettingsSocket settings sock (app logger configWithObs)
 
 -- | Helper to accept and handle TUI connections
 acceptAndHandleTUI :: Logger -> Socket -> TVar (Maybe TUIHandle) -> IO ()
@@ -182,12 +182,12 @@ cleanupSocketFile path =
       else E.throwIO e
 
 -- | Servant application
-app :: Logger -> ServerConfig -> TVar (Maybe TUIHandle) -> Application
-app logger config tuiHandleVar = serve (Proxy @TidepoolControlAPI) (server logger config tuiHandleVar)
+app :: Logger -> ServerConfig -> Application
+app logger config = serve (Proxy @TidepoolControlAPI) (server logger config)
 
 -- | Servant server implementation
-server :: Logger -> ServerConfig -> TVar (Maybe TUIHandle) -> Server TidepoolControlAPI
-server logger config tuiHandleVar = 
+server :: Logger -> ServerConfig -> Server TidepoolControlAPI
+server logger config = 
        handleHook
   :<|> handleMcpCall
   :<|> handleMcpTools
@@ -198,8 +198,7 @@ server logger config tuiHandleVar =
       res <- liftIO $ do
         logDebug logger $ "[HOOK] " <> input.hookEventName <> " runtime=" <> T.pack (show runtime)
         traceCtx <- newTraceContext
-        tuiHandle <- readTVarIO tuiHandleVar
-        res <- handleMessage logger config tuiHandle traceCtx (HookEvent input runtime)
+        res <- handleMessage logger config traceCtx (HookEvent input runtime)
         
         -- Flush traces after handling the message if OTLP is configured
         case config.observabilityConfig of
@@ -215,8 +214,7 @@ server logger config tuiHandleVar =
     handleMcpCall req = liftIO $ do
       logInfo logger $ "[MCP:" <> req.mcpId <> "] tool=" <> req.toolName
       traceCtx <- newTraceContext
-      tuiHandle <- readTVarIO tuiHandleVar
-      res <- handleMessage logger config tuiHandle traceCtx 
+      res <- handleMessage logger config traceCtx
         (McpToolCall req.mcpId req.toolName req.arguments)
         
       -- Flush traces

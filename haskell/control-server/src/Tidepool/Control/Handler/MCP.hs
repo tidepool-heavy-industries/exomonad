@@ -76,18 +76,19 @@ import Tidepool.Gemini.Interpreter (runGeminiIO)
 import Tidepool.Effect.TUI (TUI(..), PopupResult(..))
 import Tidepool.Effect.Types (runLog, LogLevel(Debug), runReturn, runTime)
 import Tidepool.Graph.Goto (unwrapSingleChoice)
-import Tidepool.TUI.Interpreter (TUIHandle, runTUI)
+import Tidepool.TUI.ZellijInterpreter (runTUIZellij)
 -- import Tidepool.Teaching.LLM (TeachingConfig, loadTeachingConfig, withTeaching, runLLMWithTeaching)
 -- import Tidepool.Teaching.Teacher (teacherGuidance)
 import Tidepool.Effects.Observability (SpanKind(..), SpanAttribute(..), withSpan, addSpanAttribute)
 import Tidepool.Observability.Interpreter (runObservabilityWithContext)
 import Tidepool.Observability.Types (TraceContext, ObservabilityConfig(..), defaultLokiConfig)
 
--- | Run TUI interpreter if handle is available, otherwise run mock.
-runTUIOrMock :: LastMember IO effs => Maybe TUIHandle -> Eff (TUI ': effs) a -> Eff effs a
-runTUIOrMock (Just h) = runTUI h
-runTUIOrMock Nothing = interpret $ \case
-  ShowUI _ -> pure $ PopupResult "decline" (toJSON (mempty :: [(String, String)]))
+-- | Run TUI interpreter using Zellij floating panes.
+--
+-- This replaces the socket-based TUI interpreter with a Zellij pane-based approach.
+-- When showUI is called, control-server spawns a floating Zellij pane with tui-popup.
+runTUIInterpreter :: LastMember IO effs => Eff (TUI ': effs) a -> Eff effs a
+runTUIInterpreter = runTUIZellij
 
 -- | Wrap MCP tool call with tracing if enabled.
 withMcpTracing 
@@ -160,8 +161,8 @@ withMcpTracing logger config traceCtx reqId toolName args action = do
 --
 -- == Tier 3: External Orchestration Tools (Exo)
 --   - "exo_status": Get current bead context, git status, and PR info
-handleMcpTool :: Logger -> ServerConfig -> Maybe TUIHandle -> TraceContext -> Text -> Text -> Value -> IO ControlResponse
-handleMcpTool logger config maybeTuiHandle traceCtx reqId toolName args = 
+handleMcpTool :: Logger -> ServerConfig -> TraceContext -> Text -> Text -> Value -> IO ControlResponse
+handleMcpTool logger config traceCtx reqId toolName args = 
   withMcpTracing logger config traceCtx reqId toolName args $ do
     logInfo logger $ "[MCP:" <> reqId <> "] Dispatching: " <> toolName
 
@@ -175,9 +176,9 @@ handleMcpTool logger config maybeTuiHandle traceCtx reqId toolName args =
       --       the generic "unknown tool" handler below.
 
       -- TUI-interactive tools
-      "confirm_action" -> handleConfirmActionTool logger maybeTuiHandle reqId args
-      "select_option" -> handleSelectOptionTool logger maybeTuiHandle reqId args
-      "request_guidance" -> handleRequestGuidanceTool logger maybeTuiHandle reqId args
+      "confirm_action" -> handleConfirmActionTool logger reqId args
+      "select_option" -> handleSelectOptionTool logger reqId args
+      "request_guidance" -> handleRequestGuidanceTool logger reqId args
       "register_feedback" -> handleRegisterFeedbackTool logger reqId args
 
       -- Tier 2: LLM-enhanced tools (graph-based)
@@ -635,8 +636,8 @@ handlePmReviewDagTool logger reqId args = do
 
 
 -- | Handle the confirm_action tool.
-handleConfirmActionTool :: Logger -> Maybe TUIHandle -> Text -> Value -> IO ControlResponse
-handleConfirmActionTool logger maybeTuiHandle reqId args = do
+handleConfirmActionTool :: Logger -> Text -> Value -> IO ControlResponse
+handleConfirmActionTool logger reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
@@ -647,7 +648,7 @@ handleConfirmActionTool logger maybeTuiHandle reqId args = do
 
       resultOrErr <- try $ runM
         $ runLog Debug
-        $ runTUIOrMock maybeTuiHandle
+        $ runTUIInterpreter
         $ runReturn (confirmActionLogic caArgs)
 
       case resultOrErr of
@@ -686,8 +687,8 @@ handleRegisterFeedbackTool logger reqId args = do
 
 
 -- | Handle the select_option tool.
-handleSelectOptionTool :: Logger -> Maybe TUIHandle -> Text -> Value -> IO ControlResponse
-handleSelectOptionTool logger maybeTuiHandle reqId args = do
+handleSelectOptionTool :: Logger -> Text -> Value -> IO ControlResponse
+handleSelectOptionTool logger reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
@@ -698,7 +699,7 @@ handleSelectOptionTool logger maybeTuiHandle reqId args = do
 
       resultOrErr <- try $ runM
         $ runLog Debug
-        $ runTUIOrMock maybeTuiHandle
+        $ runTUIInterpreter
         $ runReturn (selectOptionLogic soArgs)
 
       case resultOrErr of
@@ -712,8 +713,8 @@ handleSelectOptionTool logger maybeTuiHandle reqId args = do
 
 
 -- | Handle the request_guidance tool.
-handleRequestGuidanceTool :: Logger -> Maybe TUIHandle -> Text -> Value -> IO ControlResponse
-handleRequestGuidanceTool logger maybeTuiHandle reqId args = do
+handleRequestGuidanceTool :: Logger -> Text -> Value -> IO ControlResponse
+handleRequestGuidanceTool logger reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
@@ -724,7 +725,7 @@ handleRequestGuidanceTool logger maybeTuiHandle reqId args = do
 
       resultOrErr <- try $ runM
         $ runLog Debug
-        $ runTUIOrMock maybeTuiHandle
+        $ runTUIInterpreter
         $ runReturn (requestGuidanceLogic rgArgs)
 
       case resultOrErr of

@@ -101,6 +101,7 @@ library
         freer-simple,
         tidepool-core,
         tidepool-tui-interpreter,
+        tidepool-tui-zellij-interpreter,
         tidepool-training-generator,
         tidepool-teaching,
         tidepool-bd-interpreter,

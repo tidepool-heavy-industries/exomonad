@@ -28,6 +28,7 @@ packages:
     haskell/effects/devlog-interpreter
     haskell/effects/gemini-interpreter
     haskell/effects/tui-interpreter
+    haskell/effects/tui-zellij-interpreter
     haskell/effects/mcp-server
     haskell/effects/filesystem-interpreter
     haskell/effects/zellij-interpreter
