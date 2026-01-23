@@ -14,8 +14,6 @@ import Tidepool.Control.Logging (Logger, logInfo, logDebug)
 import Tidepool.Control.Protocol (ToolDefinition(..))
 
 -- Tool definitions from Graph DSL
-import Tidepool.Control.LSPTools
-  ( FindCallersGraph, ShowFieldsGraph, ShowConstructorsGraph )
 import Tidepool.Control.TUITools
   ( ConfirmActionGraph, SelectOptionGraph, RequestGuidanceGraph )
 import Tidepool.Control.FeedbackTools
@@ -29,7 +27,6 @@ import Tidepool.Control.PMStatus (PmStatusGraph)
 import Tidepool.Control.PMPropose (PMProposeGraph)
 import Tidepool.Control.MailboxTools
   ( SendMessageGraph, CheckInboxGraph, ReadMessageGraph, MarkReadGraph )
-import Tidepool.Control.Scout.Graph (DocGenGraph)
 
 import Tidepool.Graph.MCPReify (ReifyMCPTools(..), ReifyGraphEntries(..), MCPToolInfo(..))
 
@@ -43,16 +40,14 @@ exportMCPTools logger = do
   logInfo logger "[MCP Discovery] Starting tool discovery from graphs..."
 
   -- Extract tools from simplified graphs via GraphEntries (new pattern)
-  let fcTools = reifyGraphEntries (Proxy @FindCallersGraph)
-  let sfTools = reifyGraphEntries (Proxy @ShowFieldsGraph)
-  let scTools = reifyGraphEntries (Proxy @ShowConstructorsGraph)
+  -- Note: LSP tools (FindCallersGraph etc) removed as they require LSP session
   let caTools = reifyGraphEntries (Proxy @ConfirmActionGraph)
   let soTools = reifyGraphEntries (Proxy @SelectOptionGraph)
   let rgTools = reifyGraphEntries (Proxy @RequestGuidanceGraph)
   let rfTools = reifyMCPTools (Proxy @RegisterFeedbackGraph)
 
   -- Extract tools from complex graphs via MCPExport (legacy pattern)
-  let dgTools = reifyMCPTools (Proxy @DocGenGraph)
+  -- Note: DocGenGraph removed as it requires LSP
   let esTools = reifyMCPTools (Proxy @ExoStatusGraph)
   let ecTools = reifyMCPTools (Proxy @ExoCompleteGraph)
   let erTools = reifyMCPTools (Proxy @ExoReconstituteGraph)
@@ -72,14 +67,10 @@ exportMCPTools logger = do
   let mrTools = reifyMCPTools (Proxy @MarkReadGraph)
 
   -- Log discovered tools per graph for debugging
-  logDebug logger $ "[MCP Discovery] FindCallersGraph: " <> T.pack (show (length fcTools)) <> " tools"
-  logDebug logger $ "[MCP Discovery] ShowFieldsGraph: " <> T.pack (show (length sfTools)) <> " tools"
-  logDebug logger $ "[MCP Discovery] ShowConstructorsGraph: " <> T.pack (show (length scTools)) <> " tools"
   logDebug logger $ "[MCP Discovery] ConfirmActionGraph: " <> T.pack (show (length caTools)) <> " tools"
   logDebug logger $ "[MCP Discovery] SelectOptionGraph: " <> T.pack (show (length soTools)) <> " tools"
   logDebug logger $ "[MCP Discovery] RequestGuidanceGraph: " <> T.pack (show (length rgTools)) <> " tools"
   logDebug logger $ "[MCP Discovery] RegisterFeedbackGraph: " <> T.pack (show (length rfTools)) <> " tools"
-  logDebug logger $ "[MCP Discovery] DocGenGraph: " <> T.pack (show (length dgTools)) <> " tools"
   logDebug logger $ "[MCP Discovery] ExoStatusGraph: " <> T.pack (show (length esTools)) <> " tools"
   logDebug logger $ "[MCP Discovery] ExoCompleteGraph: " <> T.pack (show (length ecTools)) <> " tools"
   logDebug logger $ "[MCP Discovery] ExoReconstituteGraph: " <> T.pack (show (length erTools)) <> " tools"
@@ -96,7 +87,7 @@ exportMCPTools logger = do
   logDebug logger $ "[MCP Discovery] ReadMessageGraph: " <> T.pack (show (length rmTools)) <> " tools"
   logDebug logger $ "[MCP Discovery] MarkReadGraph: " <> T.pack (show (length mrTools)) <> " tools"
 
-  let allTools = concat [fcTools, sfTools, scTools, caTools, soTools, rgTools, rfTools, dgTools, esTools, ecTools, erTools, saTools, fpTools, paeTools, pmPriTools, pmRevTools, pmStatTools, pmProTools, prTools, smTools, ciTools, rmTools, mrTools]
+  let allTools = concat [caTools, soTools, rgTools, rfTools, esTools, ecTools, erTools, saTools, fpTools, paeTools, pmPriTools, pmRevTools, pmStatTools, pmProTools, prTools, smTools, ciTools, rmTools, mrTools]
   logInfo logger $ "[MCP Discovery] Total: " <> T.pack (show (length allTools)) <> " tools discovered"
 
   -- Log tool names with entry points for verification

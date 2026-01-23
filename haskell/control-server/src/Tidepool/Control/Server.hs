@@ -13,6 +13,7 @@ import Control.Concurrent.STM (newTVarIO, readTVarIO, atomically, writeTVar, rea
 import Control.Exception (catch, bracket)
 import qualified Control.Exception as E
 import Control.Monad (forever, when)
+import Control.Monad.Except (throwError)
 import Control.Monad.IO.Class (liftIO)
 import Data.Function ((&))
 import Data.Maybe (isJust)
@@ -157,21 +158,23 @@ server logger config tuiHandleVar =
   :<|> handleTuiSpawn
   :<|> handlePing
   where
-    handleHook (input, runtime) = liftIO $ do
-      logDebug logger $ "[HOOK] " <> input.hookEventName <> " runtime=" <> T.pack (show runtime)
-      traceCtx <- newTraceContext
-      tuiHandle <- readTVarIO tuiHandleVar
-      res <- handleMessage logger config tuiHandle traceCtx (HookEvent input runtime)
-      
-      -- Flush traces after handling the message if OTLP is configured
-      case config.observabilityConfig of
-        Just obsConfig | Just otlp <- ocOTLP obsConfig -> 
-           flushTraces otlp obsConfig.ocServiceName traceCtx
-        _ -> pure ()
+    handleHook (input, runtime) = do
+      res <- liftIO $ do
+        logDebug logger $ "[HOOK] " <> input.hookEventName <> " runtime=" <> T.pack (show runtime)
+        traceCtx <- newTraceContext
+        tuiHandle <- readTVarIO tuiHandleVar
+        res <- handleMessage logger config tuiHandle traceCtx (HookEvent input runtime)
+        
+        -- Flush traces after handling the message if OTLP is configured
+        case config.observabilityConfig of
+          Just obsConfig | Just otlp <- ocOTLP obsConfig -> 
+             flushTraces otlp obsConfig.ocServiceName traceCtx
+          _ -> pure ()
+        pure res
         
       case res of
         HookResponse out ec -> pure (out, ec)
-        _ -> error "Unexpected response from handleHook"
+        _ -> throwError $ err500 { errBody = "Unexpected response from handleHook" }
 
     handleMcpCall req = liftIO $ do
       logInfo logger $ "[MCP:" <> req.mcpId <> "] tool=" <> req.toolName

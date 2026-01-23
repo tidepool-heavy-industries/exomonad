@@ -6,7 +6,7 @@ module Tidepool.Control.API
   ) where
 
 import Data.Text (Text)
-import Data.Aeson (Value, FromJSON, ToJSON)
+import Data.Aeson (Value, FromJSON(..), ToJSON(..), object, (.=), (.:))
 import GHC.Generics (Generic)
 import Servant.API
 import Tidepool.Control.Protocol
@@ -19,7 +19,19 @@ data McpToolCallRequest = McpToolCallRequest
   , arguments :: Value
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+
+instance FromJSON McpToolCallRequest where
+  parseJSON = withObject "McpToolCallRequest" $ \o -> McpToolCallRequest
+    <$> o .: "id"
+    <*> o .: "tool_name"
+    <*> o .: "arguments"
+
+instance ToJSON McpToolCallRequest where
+  toJSON r = object
+    [ "id" .= r.mcpId
+    , "tool_name" .= r.toolName
+    , "arguments" .= r.arguments
+    ]
 
 type TidepoolControlAPI =
        -- | Hook event: (Input, Runtime) -> (Output, ExitCode)

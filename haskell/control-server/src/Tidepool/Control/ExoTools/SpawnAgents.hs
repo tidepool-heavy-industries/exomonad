@@ -399,9 +399,9 @@ bootstrapTidepool mHangarRoot repoRoot worktreePath backend socketDir controlSoc
                   -- Merge vars: subagent vars take precedence
                   mergedVars = filteredRootVars ++ subagentVars
                   
-                  -- Generate .env content
+                  -- Generate .env content (use show to quote and escape values safely)
                   dstEnv = worktreePath </> ".env"
-                  envContent = T.unlines [ k <> "=\"" <> v <> "\"" | (k, v) <- mergedVars ]
+                  envContent = T.unlines [ k <> "=" <> T.pack (show v) | (k, v) <- mergedVars ]
 
               writeRes <- writeFileText dstEnv envContent
               case writeRes of
