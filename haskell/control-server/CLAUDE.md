@@ -75,27 +75,29 @@ Project-local configuration in `.tidepool/` (gitignored):
 
 ### Hybrid Tidepool Architecture
 
-The system uses `process-compose` to orchestrate multiple services. Subagents (parallel worktrees) run a minimal `control-server` in LSP-only mode.
+The system uses `process-compose` to orchestrate multiple services. Subagents (parallel worktrees) run a minimal `control-server` in LSP-only mode. Configuration is generated programmatically to ensure type safety and consistency.
 
-| Component | Flag/Template | Purpose |
+| Component | Flag/Logic | Purpose |
 |-----------|---------------|---------|
 | **Control Server** | `--no-tui` | Disables the TUI sidebar listener (for subagents) |
-| **Subagent Template** | `.tidepool/templates/subagent-pc.yaml` | Static process-compose template for subagents |
+| **Subagent Config** | `Paths.hs` + `ProcessCompose.hs` | Programmatic type-safe generation of `process-compose.yaml` |
 
-### Subagent Environment Handling
+### Subagent Environment & Config Handling
 
-Subagents spawned by `spawn_agents` receive a **custom-generated `.env` file** instead of a symlink to the root `.env`.
+Subagents spawned by `spawn_agents` receive a **custom-generated environment and configuration** instead of relying on external templates or symlinks.
 
 **Why:**
-- Symlinking caused variable shadowing where root `.env` values (like default socket paths) would override the subagent's isolated paths.
-- Tools like `process-compose` prioritize the `.env` file in the working directory over shell environment variables.
+- Programmatic generation ensures the configuration is always valid and consistent with the current binary versions.
+- Programmatic path construction (Paths.hs) avoids "stringly-typed" errors and handles OS-specific path limits.
+- Merging environments (Haskell source of truth) prevents variable shadowing issues from root `.env` files.
 
 **How it works (SpawnAgents.hs):**
-1. **Source of Truth:** The running Haskell process captures its full environment (`getEnvironment`).
-2. **Filtering:** Conflicting keys (`TIDEPOOL_CONTROL_SOCKET`, `TIDEPOOL_TUI_SOCKET`) are filtered out from the captured environment.
-3. **Merging:** Subagent-specific overrides (isolated socket paths, `HANGAR_ROOT`, `SUBAGENT_CMD`) are merged in.
-4. **Generation:** A new, self-contained `.env` file is written to the subagent worktree.
-5. **Execution:** `process-compose` simply loads this `.env` file, ensuring correct configuration without fragile shell chaining.
+1. **Paths:** Canonical paths for sockets (`/tmp/tidepool-...`) and binaries are constructed via `Tidepool.Control.Runtime.Paths`.
+2. **Orchestration:** A `ProcessComposeConfig` Haskell value is constructed and serialized to YAML via `Tidepool.Control.Runtime.ProcessCompose`.
+3. **Source of Truth:** The running Haskell process captures its full environment (`getEnvironment`).
+4. **Filtering & Merging:** Conflicting keys (socket paths) are filtered from the captured environment, and subagent-specific overrides are merged in.
+5. **Deployment:** Self-contained `.env` and `process-compose.yaml` files are written directly to the subagent worktree.
+6. **Execution:** `process-compose` simply loads the generated files, ensuring an isolated and correctly configured environment.
 
 ### Hook Flow (PreToolUse Example)
 
