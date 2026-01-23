@@ -83,7 +83,7 @@ mantle-agent health
 ### Environment Variables
 | Variable | Used By | Purpose |
 |----------|---------|---------|
-| `TIDEPOOL_CONTROL_SOCKET` | mantle-agent | Unix socket path for control server (default: `.tidepool/sockets/control.sock`) |
+| `TIDEPOOL_CONTROL_SOCKET` | mantle-agent | Unix socket path for control server (required; e.g., `.tidepool/sockets/control.sock`) |
 | `RUST_LOG` | all | Tracing log level |
 
 ## What Works Today

@@ -109,7 +109,7 @@ pub struct ControlSocket {
 }
 
 impl ControlSocket {
-    /// Connect to control server. Validates socket path.
+    /// Connect to control server. Stores socket path (actual connection happens per-request via curl).
     pub fn connect<P: AsRef<Path>>(path: P) -> Result<Self>;
 
     /// Send message, receive response (HTTP over Unix socket)

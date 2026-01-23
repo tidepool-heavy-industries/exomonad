@@ -33,7 +33,7 @@ struct Cli {
 enum Commands {
     /// Handle a Claude Code hook event (called by generated hook scripts)
     ///
-    /// Connects to control server via Unix socket (MANTLE_CONTROL_SOCKET).
+    /// Connects to control server via HTTP over Unix socket (TIDEPOOL_CONTROL_SOCKET).
     Hook {
         /// The hook event type to handle
         #[arg(value_enum)]

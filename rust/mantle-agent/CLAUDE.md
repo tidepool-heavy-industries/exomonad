@@ -65,7 +65,7 @@ Sends a `GET /ping` request to the control server and verifies response. Useful 
 
 | Variable | Required | Purpose |
 |----------|----------|---------|
-| `TIDEPOOL_CONTROL_SOCKET` | Yes | Unix socket path for control server (default: `.tidepool/sockets/control.sock`) |
+| `TIDEPOOL_CONTROL_SOCKET` | Yes | Unix socket path for control server (e.g., `.tidepool/sockets/control.sock`) |
 | `RUST_LOG` | No | Tracing log level (e.g., `debug`, `mantle_agent=trace`) |
 
 ## Module Reference
