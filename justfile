@@ -177,3 +177,35 @@ blast-radius base="main":
 # Tail logs with JSON format (for parsing)
 # logs-json:
 #     cd deploy && npx wrangler tail --format json
+
+# ─────────────────────────────────────────────────────────────
+# Docker Workflows
+# ─────────────────────────────────────────────────────────────
+
+# Build orchestrator image
+docker-build:
+    docker compose build
+
+# Start orchestrator in detached mode
+docker-up:
+    docker compose up -d
+
+# Attach to orchestrator TUI (detach keys: ctrl-p,ctrl-q)
+docker-attach:
+    docker attach --detach-keys="ctrl-p,ctrl-q" orchestrator
+
+# Spawn agent container with shared sockets
+docker-agent BRANCH:
+    #!/usr/bin/env bash
+    docker run -it --rm \
+      -v control_sockets:/tmp/agent/sockets \
+      -v ~/.claude/.credentials.json:/mnt/secrets/.credentials.json:rw \
+      -e CLAUDE_CONFIG_DIR=/home/user/.claude-agent-{{BRANCH}} \
+      tidepool/claude-agent:latest
+
+# Clean shutdown
+docker-down:
+    docker compose down
+
+# One-command workflow (build + up + attach)
+docker-run: docker-build docker-up docker-attach
