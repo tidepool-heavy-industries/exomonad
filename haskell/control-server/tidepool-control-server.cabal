@@ -30,6 +30,8 @@ library
         Tidepool.Control.Server
         Tidepool.Control.Handler
         Tidepool.Control.Logging
+        Tidepool.Control.TUIState
+        Tidepool.Control.TUIInterpreter
         Tidepool.Control.Runtime.Paths
         Tidepool.Control.Runtime.ProcessCompose
         Tidepool.Control.Handler.Hook
@@ -86,6 +88,7 @@ library
         bytestring >= 0.11 && < 1,
         directory,
         filepath,
+        process,
         network >= 3.1 && < 4,
         stm >= 2.5 && < 3,
         fast-logger >= 3.0 && < 4,
@@ -93,9 +96,12 @@ library
         -- Servant / HTTP
         servant,
         servant-server,
+        servant-websockets,
+        websockets,
         warp,
         wai,
         wai-extra,
+        uuid,
         -- Scout dependencies
         containers >= 0.6 && < 1,
         freer-simple,

@@ -1,11 +1,11 @@
-{-# LANGUAGE DataKinds #}
-{-# LANGUAGE DeriveGeneric #}
-{-# LANGUAGE DerivingStrategies #}
-{-# LANGUAGE FlexibleContexts #}
-{-# LANGUAGE OverloadedRecordDot #}
-{-# LANGUAGE OverloadedStrings #}
-{-# LANGUAGE TypeFamilies #}
-{-# LANGUAGE TypeOperators #}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE OverloadedRecordDot #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TypeOperators #-}
 
 module Tidepool.Control.ExoTools.SpawnAgents
   ( SpawnAgentsGraph(..)

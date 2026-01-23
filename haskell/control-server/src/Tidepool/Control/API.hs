@@ -9,6 +9,7 @@ import Data.Text (Text)
 import Data.Aeson (Value, FromJSON(..), ToJSON(..), object, (.=), (.:), withObject)
 import GHC.Generics (Generic)
 import Servant.API
+import Servant.API.WebSocket (WebSocket)
 import Tidepool.Control.Protocol
 
 -- | Request for MCP tool call.
@@ -39,5 +40,7 @@ type TidepoolControlAPI =
   :<|> "mcp" :> "call" :> ReqBody '[JSON] McpToolCallRequest :> Post '[JSON] ControlResponse
        -- | MCP tool list
   :<|> "mcp" :> "tools" :> Get '[JSON] [ToolDefinition]
+       -- | TUI WebSocket: bidirectional popup communication
+  :<|> "tui" :> "ws" :> WebSocket
        -- | Health check
   :<|> "ping" :> Get '[JSON] Text
