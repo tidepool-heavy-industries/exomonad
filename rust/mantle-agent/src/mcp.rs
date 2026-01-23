@@ -1,6 +1,6 @@
-//! MCP stdio server for decision tools.
+//! MCP stdio server for MCP tools.
 //!
-//! Implements the Model Context Protocol (MCP) for serving decision tools
+//! Implements the Model Context Protocol (MCP) for serving MCP tools
 //! to Claude Code. Tool definitions are queried from the control server
 //! at startup and served via JSON-RPC 2.0 over stdio.
 //!
@@ -408,7 +408,7 @@ impl McpServer {
 
         info!(
             tool = %call_params.name,
-            "Processing decision tool call"
+            "Processing MCP tool call"
         );
 
         // Check allowlist first if present
@@ -439,7 +439,7 @@ impl McpServer {
         let path = match &self.control_path {
             Some(p) => p,
             None => {
-                error!("No control server configured - cannot forward decision tool call");
+                error!("No control server configured - cannot forward MCP tool call");
                 return JsonRpcResponse::error(
                     id,
                     -32603,
@@ -485,7 +485,7 @@ impl McpServer {
     ///
     /// Returns the host's result (if successful) or an MCP error.
     /// The result Value contains the host's response text which may include
-    /// termination instructions for decision tools.
+    /// termination instructions for MCP tools.
     fn forward_tool_call(
         &self,
         path: &Path,
