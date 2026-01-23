@@ -102,3 +102,4 @@ The Haskell codebase adheres to a set of core principles designed for maximum sa
 - Implemented TUI-interactive MCP tools (confirm_action, select_option, request_guidance) in haskell/control-server. Verified via mock TUI logic. Committed changes.
 - Fixed `start-augmented.sh` hanging on stale `process-compose` sessions by adding a timeout and robust force-kill cleanup logic.
 - Documented macOS arm64 requirement: binaries in `runtime/bin` (`tidepool-control-server`, `mantle-agent`, `tui-sidebar`) must be ad-hoc signed (`codesign -s -`) to avoid `Killed: 9` errors.
+- Refactored subagent spawning to generate isolated `.env` files using Haskell as the source of truth, resolving variable shadowing issues that caused startup hangs.
