@@ -28,6 +28,7 @@ RUN apt-get update && apt-get install -y \
     xz-utils \
     sudo \
     python3 \
+    socat \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Node.js 20.x

@@ -22,4 +22,4 @@ mkdir -p ~/.config/zellij
 # Launch Zellij
 # --create ensures a new session is started if one doesn't exist
 # It will use the default layout at /root/.config/zellij/layouts/default.kdl
-exec zellij attach --create orchestrator
+zellij attach --create orchestrator

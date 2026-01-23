@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  orchestrator:
+    build:
+      context: ../orchestrator
+    image: tidepool-orchestrator:test
+    container_name: test-orchestrator
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./sockets:/sockets
+      - ../../:/worktrees
+    environment:
+      - DOCKER_HOST=unix:///var/run/docker.sock
+    labels:
+      - "tidepool.test.role=orchestrator"
+
+  agent:
+    build:
+      context: ../claude-agent
+    image: tidepool-claude-agent:test
+    container_name: test-agent
+    volumes:
+      - ./sockets:/home/agent/.tidepool/sockets
+    environment:
+      - MANTLE_CONTROL_SOCKET=/home/agent/.tidepool/sockets/control.sock
+    labels:
+      - "tidepool.test.role=agent"
+    command: ["tail", "-f", "/dev/null"] # Keep it alive for testing
