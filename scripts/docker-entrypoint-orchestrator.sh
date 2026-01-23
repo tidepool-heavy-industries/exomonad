@@ -29,8 +29,9 @@ chown -R tidepool:tidepool "$CLAUDE_CONFIG_DIR"
 if [ -d "$HOST_AUTH_DIR" ]; then
     echo "Setting up auth isolation from $HOST_AUTH_DIR..."
     # Symlink config files if they exist
-    for f in "config.json" "session.json" "auth.json"; do
-        if [ -f "$HOST_AUTH_DIR/$f" ]; then
+    # Based on Claude Code structure: settings.json, history.jsonl, __store.db
+    for f in "settings.json" "history.jsonl" "__store.db"; do
+        if [ -e "$HOST_AUTH_DIR/$f" ]; then
             ln -sf "$HOST_AUTH_DIR/$f" "$CLAUDE_CONFIG_DIR/$f"
             echo "Linked $f"
         fi

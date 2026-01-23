@@ -15,15 +15,33 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /build
 
-# Copy all files (respecting .dockerignore)
+# Dependency Layer Caching
+# 1. Copy project definition
+COPY cabal.project .
+
+# 2. Copy all .cabal files to their correct paths
+# We copy the entire haskell directory structure to capture all .cabal files
+# This is a trade-off: it invalidates if *any* file in haskell/ changes, but 
+# it's the only reliable way to get all nested .cabal files without complex scripts.
+# To optimize, we could use a .dockerignore for this specific COPY if Docker supported per-COPY ignore,
+# but for now we rely on the fact that changes to source code will invalidate this, 
+# BUT the `cabal build --only-dependencies` with the *mount* will still be fast.
+COPY haskell/ haskell/
+
+# 3. Build dependencies
+RUN --mount=type=cache,target=/root/.cabal/store \
+    --mount=type=cache,target=/build/dist-newstyle \
+    cabal update && \
+    cabal build --only-dependencies tidepool-control-server -j
+
+# 4. Copy the rest of the source (this layer changes most often)
 COPY . .
 
-# Use BuildKit mounts for cabal store and dist-newstyle to speed up rebuilds.
+# 5. Build the binary
 # We build with -O1 for a balance between build speed and runtime performance.
 # tidepool-control-server is the main orchestrator binary.
 RUN --mount=type=cache,target=/root/.cabal/store \
     --mount=type=cache,target=/build/dist-newstyle \
-    cabal update && \
     cabal build tidepool-control-server -j --O1
 
 # Extract the binary using cabal list-bin
