@@ -10,10 +10,10 @@ Rust workspace for augmenting human-driven Claude Code sessions with Tidepool in
 
 ```
 rust/CLAUDE.md  ← YOU ARE HERE (router)
-├── mantle-agent/CLAUDE.md  ← Hook handler + MCP server (IMPLEMENTED)
-│   • hook subcommand: forwards CC hooks to TCP control server
-│   • mcp subcommand: JSON-RPC 2.0 stdio server, forwards tool calls
-│   • Fail-open: works without control server
+├── mantle-agent/CLAUDE.md  ← Hook handler (IMPLEMENTED)
+│   • hook subcommand: forwards CC hooks to HTTP control server (Unix socket)
+│   • health subcommand: check control server connectivity
+│   • Fail-closed: errors if control server unavailable (catches config issues)
 │
 ├── mantle-hub/CLAUDE.md  ← Session hub (LEGACY, needs repurposing)
 │   • Currently: session/node tracking for headless mode
@@ -37,30 +37,30 @@ rust/CLAUDE.md  ← YOU ARE HERE (router)
 ```
 Human TTY ──▶ Claude Code (in nix shell)
                │
-               ├─ MCP tools ──────▶ mantle-agent mcp ──▶ Control Server (TCP)
-               │                                              │
-               └─ Hooks ──────────▶ mantle-agent hook ────────┘
+               ├─ MCP tools ──────▶ HTTP MCP (http+unix://) ──▶ Control Server (HTTP)
+               │                                                    │
+               └─ Hooks ──────────▶ mantle-agent hook ──────────────┘
                                           │
                                           ▼
-                                   Haskell native-server
+                                   Haskell control-server
                                    (effect stack + handlers)
 ```
 
 **Current state:**
-- `mantle-agent hook` - Forwards Claude Code hooks to TCP control socket ✓
-- `mantle-agent mcp` - MCP stdio server that forwards tool calls to TCP control socket ✓
-- `haskell/control-server` - Haskell TCP endpoint (passthrough hook handlers, stub MCP) ✓
+- `mantle-agent hook` - Forwards Claude Code hooks to HTTP control server (Unix socket) ✓
+- `haskell/control-server` - Haskell HTTP server (passthrough hook handlers, MCP tools) ✓
 - `flake.nix` - Nix shell with zellij layout for Claude Code++ ✓
-- **Missing:** Daemon mode, metrics hub, real hook/MCP logic in Haskell
+- **MCP:** Claude Code now uses HTTP MCP transport directly (`http+unix://`) to talk to control-server ✓
+- **Missing:** Daemon mode, metrics hub, real hook logic in Haskell
 
 ## Workspace Members
 
 | Crate | Type | Purpose |
 |-------|------|---------|
-| [mantle-agent](mantle-agent/CLAUDE.md) | Binary | Hook handler + MCP server |
+| [mantle-agent](mantle-agent/CLAUDE.md) | Binary | Hook handler (HTTP over Unix socket) |
 | [mantle-hub](mantle-hub/CLAUDE.md) | Binary | Metrics/telemetry hub (WIP) |
-| [mantle-shared](mantle-shared/CLAUDE.md) | Library | Shared types, protocols, TCP socket client |
-| [tui-sidebar](tui-sidebar/CLAUDE.md) | Binary + Lib | TUI sidebar: TCP server (7433) for interactive UIs |
+| [mantle-shared](mantle-shared/CLAUDE.md) | Library | Shared types, protocols, HTTP socket client (curl-based) |
+| [tui-sidebar](tui-sidebar/CLAUDE.md) | Binary + Lib | TUI sidebar: Unix socket server for interactive UIs |
 
 ## Quick Reference
 
@@ -76,16 +76,14 @@ cargo test                      # Run all tests
 # Handle Claude Code hook (reads JSON stdin, outputs JSON stdout)
 mantle-agent hook pre-tool-use
 
-# Run MCP stdio server for MCP tools
-mantle-agent mcp
+# Check control server health
+mantle-agent health
 ```
 
 ### Environment Variables
 | Variable | Used By | Purpose |
 |----------|---------|---------|
-| `MANTLE_CONTROL_HOST` | mantle-agent | TCP host for control socket (required) |
-| `MANTLE_CONTROL_PORT` | mantle-agent | TCP port for control socket (required) |
-| `MANTLE_DECISION_TOOLS_FILE` | mantle-agent mcp | Path to JSON file with MCP tool definitions |
+| `TIDEPOOL_CONTROL_SOCKET` | mantle-agent | Unix socket path for control server (required; e.g., `.tidepool/sockets/control.sock`) |
 | `RUST_LOG` | all | Tracing log level |
 
 ## What Works Today
@@ -96,44 +94,53 @@ mantle-agent hook pre-tool-use  # Reads JSON from stdin
 ```
 - Called by `.claude/settings.local.json` hooks
 - Parses Claude Code's hook JSON from stdin
-- Forwards to control server via TCP (NDJSON protocol)
+- Forwards to control server via HTTP over Unix socket (using `curl` subprocess)
 - Returns response JSON to stdout
 - **Fail-closed:** Errors immediately if control server unavailable (catches config issues during dev)
 
-### 2. MCP Server
-```bash
-mantle-agent mcp [--tools <TOOL1>,<TOOL2>,...]
-```
-- JSON-RPC 2.0 over stdio (MCP protocol)
-- Queries tool definitions from control server at startup
-- **Role-based filtering:** `--tools` flag restricts which tools are exposed
-  - PM role: `--tools pm_propose,pm_approve_expansion,pm_prioritize,pm_status,pm_review_dag,exo_status`
-  - TL role: Omit `--tools` for full tool access
-- Forwards `tools/call` requests to control server via Unix socket
-- Rejects calls to non-allowlisted tools with clear error message
-- Returns tool results to Claude Code
+### 2. MCP Tools (Direct HTTP)
+Claude Code now connects directly to control-server's HTTP MCP endpoint:
+- Transport: `http+unix://.tidepool/sockets/control.sock`
+- Protocol: MCP over HTTP (no proxy needed)
+- Configuration: `.mcp.json` in project root
+- Tools: Discovered automatically from control-server's `/mcp/tools` endpoint
 
-## Control Socket Protocol
+**The `mantle-agent mcp` subcommand has been removed.** Claude Code's built-in HTTP MCP support eliminates the need for a stdio proxy.
 
-Both hooks and MCP use the same TCP protocol (NDJSON):
+## Control Server Protocol
+
+**Hooks** use HTTP over Unix Domain Socket:
 
 ```
-mantle-agent                    Control Server (Haskell)
+mantle-agent hook               Control Server (Haskell)
      │                                    │
-     │  ControlMessage (JSON + newline)   │
+     │  POST /hook                        │
+     │  Body: [HookInput, Runtime]        │
      │───────────────────────────────────▶│
      │                                    │
-     │  ControlResponse (JSON + newline)  │
+     │  200 OK                            │
+     │  Body: HookResponse                │
      │◀───────────────────────────────────│
 ```
 
-**ControlMessage variants:**
-- `HookEvent { input: HookInput }` - Claude Code hook event
-- `MCPToolCall { id, tool_name, arguments }` - MCP tool call
+**MCP tools** use HTTP MCP transport (direct from Claude Code):
 
-**ControlResponse variants:**
-- `HookResponse { output: HookOutput, exit_code }` - Hook decision
-- `MCPToolResponse { id, result, error }` - Tool result
+```
+Claude Code                     Control Server (Haskell)
+     │                                    │
+     │  GET /mcp/tools                    │
+     │───────────────────────────────────▶│
+     │  200 OK (tool definitions)         │
+     │◀───────────────────────────────────│
+     │                                    │
+     │  POST /mcp/call                    │
+     │  Body: {tool_name, arguments}      │
+     │───────────────────────────────────▶│
+     │  200 OK (result)                   │
+     │◀───────────────────────────────────│
+```
+
+**Implementation:** `mantle_shared::socket` uses `curl` subprocess for HTTP-over-Unix-socket requests.
 
 ## What's Missing (TODO)
 
@@ -142,10 +149,10 @@ Goal: Long-lived process that collects metrics + forwards to Haskell
 
 ```bash
 # Planned:
-mantle-agent daemon start  # Listen on TCP, forward to Haskell
+mantle-agent daemon start  # Connection pooling, metrics collection
 ```
 
-Status: Not implemented. Current architecture uses per-hook process spawning.
+Status: Not implemented. Current architecture uses per-hook process spawning with `curl` subprocess.
 
 ### Metrics Hub
 Goal: Store tool call traces, export to Grafana
@@ -158,9 +165,9 @@ Goal: Wire control-server handlers to Tidepool effect stack
 Status: Current implementation is passthrough (logs and allows all hooks).
 
 ### MCP Tool Implementation
-Goal: Expose Tidepool agents (e.g., semantic-scout) as MCP tools via control-server
+Goal: Expose more Tidepool agents as MCP tools via control-server
 
-Status: Current implementation returns "no tools available".
+Status: Basic tools implemented (find_callers, teach-graph, etc.). More agents coming.
 
 ### Fail-Open Mode for Production
 Goal: Add configurable fail-open mode so Claude Code works even if control server is down
