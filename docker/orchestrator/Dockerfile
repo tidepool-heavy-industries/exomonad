@@ -21,6 +21,8 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     bash \
     git \
+    socat \
+    lsof \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Docker CLI from the first stage
@@ -56,6 +58,8 @@ ENV DOCKER_HOST=unix:///var/run/docker.sock
 # Create necessary directories with appropriate permissions
 RUN mkdir -p /sockets /worktrees /var/log/tidepool && \
     chmod 777 /sockets /worktrees /var/log/tidepool
+
+WORKDIR /worktrees
 
 # Use tini as the entrypoint for proper signal handling
 ENTRYPOINT ["/usr/bin/tini", "--"]
