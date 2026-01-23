@@ -13,7 +13,6 @@ import Control.Concurrent.STM (newTVarIO, readTVarIO, atomically, writeTVar, rea
 import Control.Exception (catch, bracket)
 import qualified Control.Exception as E
 import Control.Monad (forever, when)
-import Control.Monad.Except (throwError)
 import Control.Monad.IO.Class (liftIO)
 import Data.Function ((&))
 import Data.Maybe (isJust, fromMaybe)
@@ -102,13 +101,23 @@ runServer logger config = do
       forever $ acceptAndHandleTUI logger tuiSock tuiHandleVar
 
   -- 2. Run Servant Server on Unix Socket
-  bracket (setupUnixSocket controlSocket) (cleanupUnixSocket controlSocket) $ \sock -> do
-    logInfo logger $ "Control server listening on (HTTP over Unix): " <> T.pack controlSocket
-    
-    let settings = defaultSettings
-          & setTimeout (5 * 60) -- 5 minutes timeout
-    
-    runSettingsSocket settings sock (app logger configWithObs tuiHandleVar)
+  bracket
+    (setupUnixSocket controlSocket)
+    (\sock -> do
+       -- Cleanup control socket and close any active TUI handle on shutdown
+       cleanupUnixSocket controlSocket sock
+       maybeTuiHandle <- readTVarIO tuiHandleVar
+       case maybeTuiHandle of
+         Just h  -> closeTUIHandle h
+         Nothing -> pure ()
+    )
+    $ \sock -> do
+      logInfo logger $ "Control server listening on (HTTP over Unix): " <> T.pack controlSocket
+      
+      let settings = defaultSettings
+            & setTimeout (5 * 60) -- 5 minutes timeout
+      
+      runSettingsSocket settings sock (app logger configWithObs tuiHandleVar)
 
 -- | Helper to accept and handle TUI connections
 acceptAndHandleTUI :: Logger -> Socket -> TVar (Maybe TUIHandle) -> IO ()
@@ -236,4 +245,5 @@ server logger config tuiHandleVar =
           logError logger "[TUI] no sidebar connected"
           pure $ PopupResult "decline" (toJSON (mempty :: [(String, String)]))
 
+    handlePing :: Handler T.Text
     handlePing = pure "pong"

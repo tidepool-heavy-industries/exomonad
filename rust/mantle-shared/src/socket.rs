@@ -9,6 +9,8 @@
 //! - Implementation: Uses `curl` subprocess to avoid adding async dependencies (hyper/reqwest)
 //!   to the synchronous mantle-agent CLI.
 //!
+//!   NOTE: This implementation requires `curl` to be available in the system PATH.
+//!
 //! Endpoints:
 //! - POST /hook      (HookEvent)
 //! - POST /mcp/call  (McpToolCall)

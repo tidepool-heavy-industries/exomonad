@@ -168,11 +168,11 @@ handleMcpTool logger config maybeTuiHandle traceCtx reqId toolName args =
     let currentRole = fromMaybe "unknown" config.role
 
     case toolName of
-      -- Tier 1: Deterministic LSP tools (graph-based) - DISABLED
-      "find_callers" -> pure $ mcpToolError reqId EnvironmentError "LSP not available (server migrated to HTTP)"
-      "find_callees" -> pure $ mcpToolError reqId EnvironmentError "LSP not available (server migrated to HTTP)"
-      "show_fields" -> pure $ mcpToolError reqId EnvironmentError "LSP not available (server migrated to HTTP)"
-      "show_constructors" -> pure $ mcpToolError reqId EnvironmentError "LSP not available (server migrated to HTTP)"
+      -- Tier 1: Deterministic LSP tools (graph-based)
+      -- NOTE: LSP-backed tools (find_callers, find_callees, show_fields,
+      --       show_constructors) have been removed from this dispatcher.
+      --       If still exported elsewhere, they will now be reported via
+      --       the generic "unknown tool" handler below.
 
       -- TUI-interactive tools
       "confirm_action" -> handleConfirmActionTool logger maybeTuiHandle reqId args
