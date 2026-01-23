@@ -379,17 +379,16 @@ impl RunResult {
                 if last_lines.is_empty() {
                     String::new()
                 } else {
-                    format!("\n\nStderr (last {} lines):\n{}", last_lines.len(), last_lines.join("\n"))
+                    format!(
+                        "\n\nStderr (last {} lines):\n{}",
+                        last_lines.len(),
+                        last_lines.join("\n")
+                    )
                 }
             })
             .unwrap_or_default();
 
-        format!(
-            "{} (exit code {}){}",
-            exit_hint,
-            exit_code,
-            stderr_excerpt
-        )
+        format!("{} (exit code {}){}", exit_hint, exit_code, stderr_excerpt)
     }
 }
 
@@ -635,9 +634,16 @@ mod tests {
 
         assert!(result.is_error);
         assert_eq!(result.exit_code, 2);
-        assert!(result.result.as_ref().unwrap().contains("Authentication or setup failure"));
+        assert!(result
+            .result
+            .as_ref()
+            .unwrap()
+            .contains("Authentication or setup failure"));
         assert!(result.result.as_ref().unwrap().contains("token expired"));
-        assert_eq!(result.stderr_output, Some("Auth failed: token expired".to_string()));
+        assert_eq!(
+            result.stderr_output,
+            Some("Auth failed: token expired".to_string())
+        );
     }
 
     #[test]
@@ -654,15 +660,8 @@ mod tests {
             permission_denials: vec![],
             model_usage: HashMap::new(),
         };
-        let result = RunResult::from_events(
-            vec![],
-            Some(result_event),
-            0,
-            None,
-            vec![],
-            None,
-            None,
-        );
+        let result =
+            RunResult::from_events(vec![], Some(result_event), 0, None, vec![], None, None);
 
         assert!(!result.is_error);
         assert_eq!(result.result, Some("Task completed".to_string()));

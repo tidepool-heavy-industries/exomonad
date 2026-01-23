@@ -363,10 +363,7 @@ async fn run_get(
     Ok(())
 }
 
-async fn run_delete(
-    db_path: PathBuf,
-    session_id: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
+async fn run_delete(db_path: PathBuf, session_id: &str) -> Result<(), Box<dyn std::error::Error>> {
     let state = AppState::new(&db_path).await?;
     db::delete_session(&state.pool, session_id).await?;
     println!("Deleted session: {}", session_id);

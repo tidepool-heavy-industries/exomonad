@@ -101,19 +101,17 @@ impl Hangar {
 
     /// Load Hangar from a specific Hangar.toml path
     fn load_from(hangar_toml_path: PathBuf) -> Result<Self, HangarError> {
-        let contents = std::fs::read_to_string(&hangar_toml_path).map_err(|e| {
-            HangarError::ReadError {
+        let contents =
+            std::fs::read_to_string(&hangar_toml_path).map_err(|e| HangarError::ReadError {
                 path: hangar_toml_path.clone(),
                 source: e,
-            }
-        })?;
+            })?;
 
-        let config: HangarConfig = toml::from_str(&contents).map_err(|e| {
-            HangarError::ParseError {
+        let config: HangarConfig =
+            toml::from_str(&contents).map_err(|e| HangarError::ParseError {
                 path: hangar_toml_path.clone(),
                 source: e,
-            }
-        })?;
+            })?;
 
         let root = hangar_toml_path
             .parent()

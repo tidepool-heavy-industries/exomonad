@@ -49,10 +49,7 @@ pub async fn listen(socket_path: impl AsRef<Path>, state: AppState) -> std::io::
 }
 
 /// Handle a single connection.
-async fn handle_connection(
-    stream: tokio::net::UnixStream,
-    state: AppState,
-) -> std::io::Result<()> {
+async fn handle_connection(stream: tokio::net::UnixStream, state: AppState) -> std::io::Result<()> {
     let (reader, mut writer) = stream.into_split();
     let mut reader = BufReader::new(reader);
     let mut line = String::new();

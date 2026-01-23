@@ -76,7 +76,8 @@ impl HubConfig {
 
     /// Get the path to the config file (~/.tidepool/config.toml).
     pub fn config_file_path() -> Option<PathBuf> {
-        directories::BaseDirs::new().map(|dirs| dirs.home_dir().join(".tidepool").join("config.toml"))
+        directories::BaseDirs::new()
+            .map(|dirs| dirs.home_dir().join(".tidepool").join("config.toml"))
     }
 
     /// Get the path to the tidepool data directory (~/.tidepool/).

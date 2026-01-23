@@ -30,9 +30,9 @@ use std::thread;
 use std::time::Duration;
 use tempfile::TempDir;
 
-// ============================================================================ 
+// ============================================================================
 // Test Helper Types
-// ============================================================================ 
+// ============================================================================
 
 /// JSON-RPC 2.0 request for sending to MCP server.
 #[derive(Debug, Serialize)]
@@ -81,9 +81,9 @@ struct JsonRpcError {
     data: Option<Value>,
 }
 
-// ============================================================================ 
+// ============================================================================
 // Mock Control Server
-// ============================================================================ 
+// ============================================================================
 
 struct MockControlServer {
     tools: Arc<Mutex<Vec<ToolDefinition>>>,
@@ -107,10 +107,10 @@ impl MockControlServer {
         // Spawn background listener
         let tools_clone = tools.clone();
         let socket_path_clone = socket_path.clone();
-        
+
         thread::spawn(move || {
-            let listener = UnixListener::bind(&socket_path_clone)
-                .expect("Failed to bind mock control socket");
+            let listener =
+                UnixListener::bind(&socket_path_clone).expect("Failed to bind mock control socket");
 
             for stream in listener.incoming() {
                 match stream {
@@ -184,9 +184,9 @@ fn handle_client(stream: std::os::unix::net::UnixStream, tools: Arc<Mutex<Vec<To
     }
 }
 
-// ============================================================================ 
+// ============================================================================
 // Test Server Wrapper
-// ============================================================================ 
+// ============================================================================
 
 /// Wrapper around mantle-agent mcp subprocess + mock control server.
 struct McpTestServer {
@@ -212,15 +212,18 @@ impl McpTestServer {
             }
 
             // Parse JSON into local struct
-            let tools: Vec<TestToolDefinition> = serde_json::from_str(json_str)
-                .expect("Failed to parse test tools JSON");
-            
+            let tools: Vec<TestToolDefinition> =
+                serde_json::from_str(json_str).expect("Failed to parse test tools JSON");
+
             // Convert to protocol::ToolDefinition (which uses tdName etc.)
-            let proto_tools: Vec<ToolDefinition> = tools.into_iter().map(|t| ToolDefinition {
-                name: t.name,
-                description: t.description,
-                input_schema: t.input_schema,
-            }).collect();
+            let proto_tools: Vec<ToolDefinition> = tools
+                .into_iter()
+                .map(|t| ToolDefinition {
+                    name: t.name,
+                    description: t.description,
+                    input_schema: t.input_schema,
+                })
+                .collect();
 
             mock_server.set_tools(proto_tools);
         }
@@ -300,9 +303,9 @@ fn find_mantle_agent() -> PathBuf {
     );
 }
 
-// ============================================================================ 
+// ============================================================================
 // Tests
-// ============================================================================ 
+// ============================================================================
 
 #[test]
 fn test_mcp_initialize() {
@@ -345,7 +348,10 @@ fn test_mcp_tools_list_empty() {
 
     let result = response.result.unwrap();
     let tools = result["tools"].as_array().expect("Expected tools array");
-    assert!(tools.is_empty(), "Expected empty tools list when no tools provided");
+    assert!(
+        tools.is_empty(),
+        "Expected empty tools list when no tools provided"
+    );
 }
 
 #[test]
@@ -373,10 +379,7 @@ fn test_mcp_tools_list_with_tools() {
     assert_eq!(tools.len(), 2, "Expected 2 tools");
 
     // Verify tool names
-    let tool_names: Vec<&str> = tools
-        .iter()
-        .map(|t| t["name"].as_str().unwrap())
-        .collect();
+    let tool_names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
     assert!(tool_names.contains(&"test_tool_a"));
     assert!(tool_names.contains(&"test_tool_b"));
 
@@ -409,13 +412,18 @@ fn test_mcp_tools_call_success() {
     assert!(response.result.is_some(), "Expected result");
 
     let result = response.result.unwrap();
-    let content = result["content"].as_array().expect("Expected content array");
+    let content = result["content"]
+        .as_array()
+        .expect("Expected content array");
     assert!(!content.is_empty(), "Expected at least one content item");
 
     let text_content = &content[0];
     assert_eq!(text_content["type"], "text");
     assert!(
-        text_content["text"].as_str().unwrap().contains("test_tool_a"),
+        text_content["text"]
+            .as_str()
+            .unwrap()
+            .contains("test_tool_a"),
         "Expected response to mention 'test_tool_a'"
     );
 }
@@ -456,7 +464,10 @@ fn test_mcp_unknown_method() {
     let request = JsonRpcRequest::new("bad-1", "unknown/method").with_params(json!({}));
     let response = server.send(&request);
 
-    assert!(response.error.is_some(), "Expected error for unknown method");
+    assert!(
+        response.error.is_some(),
+        "Expected error for unknown method"
+    );
     let error = response.error.unwrap();
     assert_eq!(error.code, -32601, "Expected method not found error code");
 }
@@ -474,7 +485,10 @@ fn test_mcp_initialized_notification() {
     let response = server.send(&request);
 
     // Should acknowledge without error
-    assert!(response.error.is_none(), "Expected no error for initialized");
+    assert!(
+        response.error.is_none(),
+        "Expected no error for initialized"
+    );
 }
 
 #[test]

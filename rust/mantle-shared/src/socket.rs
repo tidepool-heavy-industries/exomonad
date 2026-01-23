@@ -7,11 +7,11 @@
 //!
 //! This module uses synchronous I/O (std::os::unix::net) rather than async.
 //! This is a deliberate choice because:
-//! 
+//!
 //! 1. Hook commands block anyway - Claude Code waits for hook completion
 //! 2. Simpler code without async runtime overhead
 //! 3. Each hook invocation is a separate process with one request/response
-//! 
+//!
 //! ## Protocol
 //!
 //! - Transport: Unix Domain Socket
@@ -35,7 +35,7 @@ pub struct ControlSocket {
     #[cfg(unix)]
     stream: UnixStream,
     #[cfg(not(unix))]
-    _phantom: std::marker::PhantomData<()>
+    _phantom: std::marker::PhantomData<()>,
 }
 
 impl ControlSocket {
@@ -88,7 +88,7 @@ impl ControlSocket {
                 .map_err(|e| MantleError::SocketConfig { source: e })?;
             Ok(())
         }
-        #[cfg(not(unix))] 
+        #[cfg(not(unix))]
         {
             let _ = timeout;
             Ok(())
@@ -130,7 +130,7 @@ impl ControlSocket {
 
             Ok(response)
         }
-        #[cfg(not(unix))] 
+        #[cfg(not(unix))]
         {
             let _ = message;
             Err(MantleError::Io(std::io::Error::new(
@@ -154,7 +154,7 @@ pub fn control_socket_path() -> Result<PathBuf> {
         })
 }
 
-#[cfg(all(test, unix))] 
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use std::os::unix::net::UnixListener;
@@ -180,7 +180,7 @@ mod tests {
             let _msg: ControlMessage = serde_json::from_str(&line).unwrap();
 
             use crate::protocol::{ControlResponse, HookOutput};
-            let response = 
+            let response =
                 ControlResponse::hook_success(HookOutput::pre_tool_use_allow(None, None));
             let response_json = serde_json::to_string(&response).unwrap();
 

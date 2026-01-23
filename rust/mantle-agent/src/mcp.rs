@@ -199,12 +199,18 @@ fn query_control_server_tools() -> Result<Vec<ToolDefinition>, String> {
     info!(path = %path.display(), "Querying control server for tool definitions");
 
     // Connect to control server
-    let mut socket = ControlSocket::connect(&path)
-        .map_err(|e| format!("Failed to connect to control server at {}: {}", path.display(), e))?;
+    let mut socket = ControlSocket::connect(&path).map_err(|e| {
+        format!(
+            "Failed to connect to control server at {}: {}",
+            path.display(),
+            e
+        )
+    })?;
 
     // Send ToolsListRequest
     let message = ControlMessage::ToolsListRequest;
-    let response = socket.send(&message)
+    let response = socket
+        .send(&message)
         .map_err(|e| format!("Failed to query tools from control server: {}", e))?;
 
     // Parse response
@@ -213,17 +219,20 @@ fn query_control_server_tools() -> Result<Vec<ToolDefinition>, String> {
             info!(count = tools.len(), "Discovered tools from control server");
 
             // Convert protocol::ToolDefinition -> mcp::ToolDefinition
-            let mcp_tools = tools.into_iter().map(|proto_tool| {
-                ToolDefinition {
+            let mcp_tools = tools
+                .into_iter()
+                .map(|proto_tool| ToolDefinition {
                     name: proto_tool.name,
                     description: proto_tool.description,
                     input_schema: proto_tool.input_schema,
-                }
-            }).collect();
+                })
+                .collect();
 
             Ok(mcp_tools)
         }
-        _ => Err(format!("Unexpected response type from control server (expected ToolsListResponse)")),
+        _ => Err(
+            "Unexpected response type from control server (expected ToolsListResponse)".to_string(),
+        ),
     }
 }
 
@@ -260,10 +269,9 @@ impl McpServer {
     /// If `tools_allowlist` is provided, only tools in the allowlist will be exposed.
     pub fn new_from_env(tools_allowlist: Option<Vec<String>>) -> Self {
         // Query control server for tools (REQUIRED - fail fast if unavailable)
-        let tools = query_control_server_tools()
-            .unwrap_or_else(|e| {
-                panic!("Failed to discover tools from control server: {}", e);
-            });
+        let tools = query_control_server_tools().unwrap_or_else(|e| {
+            panic!("Failed to discover tools from control server: {}", e);
+        });
 
         // Get control server socket path
         let control_path = control_socket_path().ok();
@@ -306,8 +314,8 @@ impl McpServer {
 
             // Only send response for requests (not notifications)
             if let Some(response) = response {
-                let response_json = serde_json::to_string(&response)
-                    .expect("Failed to serialize response");
+                let response_json =
+                    serde_json::to_string(&response).expect("Failed to serialize response");
                 debug!(response = %response_json, "Sending JSON-RPC response");
 
                 writeln!(stdout, "{}", response_json)?;
@@ -472,11 +480,7 @@ impl McpServer {
             Err(e) => {
                 // Socket error is a HARD FAILURE - do not silently succeed
                 error!(error = %e, "Failed to forward tool call to control socket");
-                JsonRpcResponse::error(
-                    id,
-                    -32603,
-                    format!("Control socket error: {}", e),
-                )
+                JsonRpcResponse::error(id, -32603, format!("Control socket error: {}", e))
             }
         }
     }
@@ -525,9 +529,7 @@ impl McpServer {
             ControlResponse::ToolsListResponse { .. } => {
                 Err("Unexpected ToolsListResponse for MCP tool call".to_string())
             }
-            ControlResponse::Pong => {
-                Err("Unexpected Pong response for MCP tool call".to_string())
-            }
+            ControlResponse::Pong => Err("Unexpected Pong response for MCP tool call".to_string()),
         }
     }
 }
@@ -545,7 +547,9 @@ impl McpServer {
 /// Implements fail-fast behavior: if the control server is unreachable during
 /// initialization, the server exits with an error. This ensures Claude Code sees
 /// an accurate tool list and catches configuration issues early.
-pub fn run_mcp_server(tools_allowlist: Option<Vec<String>>) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run_mcp_server(
+    tools_allowlist: Option<Vec<String>>,
+) -> Result<(), Box<dyn std::error::Error>> {
     let mut server = McpServer::new_from_env(tools_allowlist);
     server.run()?;
     Ok(())
@@ -600,7 +604,9 @@ mod tests {
         let result = InitializeResult {
             protocol_version: "2024-11-05".to_string(),
             capabilities: ServerCapabilities {
-                tools: ToolsCapability { list_changed: false },
+                tools: ToolsCapability {
+                    list_changed: false,
+                },
             },
             server_info: ServerInfo {
                 name: "mantle-agent".to_string(),
@@ -765,13 +771,11 @@ mod tests {
 
     #[test]
     fn test_tool_call_allows_allowlisted_tool() {
-        let tools = vec![
-            ToolDefinition {
-                name: "tool_a".to_string(),
-                description: "Tool A".to_string(),
-                input_schema: json!({"type": "object"}),
-            },
-        ];
+        let tools = vec![ToolDefinition {
+            name: "tool_a".to_string(),
+            description: "Tool A".to_string(),
+            input_schema: json!({"type": "object"}),
+        }];
         let allowlist = Some(vec!["tool_a".to_string()]);
         let mut server = McpServer::new(None, tools, allowlist);
 

@@ -69,7 +69,10 @@ pub fn router(state: AppState, static_dir: &std::path::Path) -> Router {
         // API routes - Nodes
         .route("/api/sessions/{sid}/nodes", post(create_node))
         .route("/api/sessions/{sid}/nodes/{nid}", get(get_node))
-        .route("/api/sessions/{sid}/nodes/{nid}/events", get(get_node_events).post(post_node_event))
+        .route(
+            "/api/sessions/{sid}/nodes/{nid}/events",
+            get(get_node_events).post(post_node_event),
+        )
         .route(
             "/api/sessions/{sid}/nodes/{nid}/result",
             post(submit_result),
@@ -199,17 +202,7 @@ async fn create_node(
     Path(sid): Path<String>,
     Json(req): Json<NodeRegister>,
 ) -> Result<Json<NodeCreateResponse>> {
-    let node_id = db::create_node(
-        &state.pool,
-        &sid,
-        req.parent_node_id.as_deref(),
-        &req.branch,
-        &req.worktree.display().to_string(),
-        &req.prompt,
-        &req.model,
-        req.metadata.as_ref(),
-    )
-    .await?;
+    let node_id = db::create_node(&state.pool, &sid, &req).await?;
 
     let node = db::get_node(&state.pool, &node_id).await?;
 

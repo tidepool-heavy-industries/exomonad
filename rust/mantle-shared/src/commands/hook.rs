@@ -108,7 +108,11 @@ pub fn handle_hook(event_type: HookEventType, runtime: Runtime) -> Result<()> {
         Err(e) => {
             return handle_server_unavailable(
                 event_type,
-                &format!("Failed to connect to control server at {}: {}", path.display(), e),
+                &format!(
+                    "Failed to connect to control server at {}: {}",
+                    path.display(),
+                    e
+                ),
             );
         }
     };

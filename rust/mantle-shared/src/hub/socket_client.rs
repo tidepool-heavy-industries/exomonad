@@ -30,9 +30,9 @@ pub fn write_result_to_socket(socket_path: &Path, result: &NodeResult) -> Result
         .set_read_timeout(Some(Duration::from_secs(5)))
         .map_err(|e| MantleError::Hub(format!("Failed to set socket timeout: {}", e)))?;
 
-    let mut writer = stream.try_clone().map_err(|e| {
-        MantleError::Hub(format!("Failed to clone socket: {}", e))
-    })?;
+    let mut writer = stream
+        .try_clone()
+        .map_err(|e| MantleError::Hub(format!("Failed to clone socket: {}", e)))?;
 
     // Serialize and send the result
     let json = serde_json::to_string(result)

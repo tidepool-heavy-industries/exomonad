@@ -20,11 +20,9 @@ pub fn run_health_check() -> Result<()> {
             info!("Control server is healthy");
             Ok(())
         }
-        other => {
-            Err(mantle_shared::error::MantleError::HealthCheck(format!(
-                "Unexpected response to Ping: {:?}",
-                other
-            )))
-        }
+        other => Err(mantle_shared::error::MantleError::HealthCheck(format!(
+            "Unexpected response to Ping: {:?}",
+            other
+        ))),
     }
 }

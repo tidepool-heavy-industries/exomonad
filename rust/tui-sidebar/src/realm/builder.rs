@@ -1,13 +1,20 @@
-use crate::protocol::{PopupDefinition, PopupState, Component, ComponentSpec, VisibilityRule};
+use super::{ComponentType, ComponentWrapper};
+use crate::protocol::{Component, ComponentSpec, PopupDefinition, PopupState, VisibilityRule};
 use crate::realm::components::*;
-use super::{ComponentWrapper, ComponentType};
 
-use tuirealm::MockComponent;
 use std::collections::HashMap;
+use tuirealm::MockComponent;
 
 /// Build component tree from popup definition
 /// Returns (components, id_to_index_map, visibility_rules)
-pub fn build_components(definition: &PopupDefinition, state: &PopupState) -> (Vec<ComponentWrapper>, HashMap<String, usize>, Vec<Option<VisibilityRule>>) {
+pub fn build_components(
+    definition: &PopupDefinition,
+    state: &PopupState,
+) -> (
+    Vec<ComponentWrapper>,
+    HashMap<String, usize>,
+    Vec<Option<VisibilityRule>>,
+) {
     let mut components = Vec::new();
     let mut id_to_index = HashMap::new();
     let mut visibility_rules = Vec::new();
@@ -35,7 +42,12 @@ fn build_component(component: &Component, state: &PopupState) -> ComponentWrappe
             is_multiselect: false,
         },
 
-        ComponentSpec::Slider { label, min, max, default } => {
+        ComponentSpec::Slider {
+            label,
+            min,
+            max,
+            default,
+        } => {
             let value = state.get_number(&component.id).unwrap_or(*default);
             ComponentWrapper {
                 label: component.id.clone(),
@@ -45,7 +57,7 @@ fn build_component(component: &Component, state: &PopupState) -> ComponentWrappe
                 min_height: 2,
                 is_multiselect: false,
             }
-        },
+        }
 
         ComponentSpec::Checkbox { label, default } => {
             let checked = state.get_boolean(&component.id).unwrap_or(*default);
@@ -57,9 +69,13 @@ fn build_component(component: &Component, state: &PopupState) -> ComponentWrappe
                 min_height: 2,
                 is_multiselect: false,
             }
-        },
+        }
 
-        ComponentSpec::Textbox { label, placeholder, rows } => {
+        ComponentSpec::Textbox {
+            label,
+            placeholder,
+            rows,
+        } => {
             let text = state.get_text(&component.id).cloned().unwrap_or_default();
             let height = rows.unwrap_or(1) as u16 + 1; // +1 for label
             ComponentWrapper {
@@ -70,10 +86,16 @@ fn build_component(component: &Component, state: &PopupState) -> ComponentWrappe
                 min_height: height,
                 is_multiselect: false,
             }
-        },
+        }
 
-        ComponentSpec::Choice { label, options, default } => {
-            let selected = state.get_choice(&component.id).unwrap_or(default.unwrap_or(0));
+        ComponentSpec::Choice {
+            label,
+            options,
+            default,
+        } => {
+            let selected = state
+                .get_choice(&component.id)
+                .unwrap_or(default.unwrap_or(0));
             ComponentWrapper {
                 label: component.id.clone(),
                 component: create_choice_component(label, options, selected),
@@ -82,10 +104,11 @@ fn build_component(component: &Component, state: &PopupState) -> ComponentWrappe
                 min_height: 2,
                 is_multiselect: false,
             }
-        },
+        }
 
         ComponentSpec::Multiselect { label, options } => {
-            let selections = state.get_multichoice(&component.id)
+            let selections = state
+                .get_multichoice(&component.id)
                 .cloned()
                 .unwrap_or_else(|| vec![false; options.len()]);
             let height = (options.len() as u16 + 1).max(3); // +1 for label, minimum 3
@@ -97,17 +120,15 @@ fn build_component(component: &Component, state: &PopupState) -> ComponentWrappe
                 min_height: height,
                 is_multiselect: true,
             }
-        },
+        }
 
-        ComponentSpec::Group { label } => {
-            ComponentWrapper {
-                label: component.id.clone(),
-                component: create_group_label(label),
-                component_type: ComponentType::Group,
-                focusable: false,
-                min_height: 2,
-                is_multiselect: false,
-            }
+        ComponentSpec::Group { label } => ComponentWrapper {
+            label: component.id.clone(),
+            component: create_group_label(label),
+            component_type: ComponentType::Group,
+            focusable: false,
+            min_height: 2,
+            is_multiselect: false,
         },
     }
 }
@@ -125,16 +146,36 @@ fn create_checkbox_component(label: &str, checked: bool) -> Box<dyn MockComponen
     Box::new(checkbox::CheckboxComponent::new(label, checked))
 }
 
-fn create_textbox_component(label: &str, text: &str, placeholder: Option<&str>, rows: Option<u32>) -> Box<dyn MockComponent> {
-    Box::new(textbox::TextboxComponent::new(label, text, placeholder, rows))
+fn create_textbox_component(
+    label: &str,
+    text: &str,
+    placeholder: Option<&str>,
+    rows: Option<u32>,
+) -> Box<dyn MockComponent> {
+    Box::new(textbox::TextboxComponent::new(
+        label,
+        text,
+        placeholder,
+        rows,
+    ))
 }
 
-fn create_choice_component(label: &str, options: &[String], selected: usize) -> Box<dyn MockComponent> {
+fn create_choice_component(
+    label: &str,
+    options: &[String],
+    selected: usize,
+) -> Box<dyn MockComponent> {
     Box::new(choice::ChoiceComponent::new(label, options, selected))
 }
 
-fn create_multiselect_component(label: &str, options: &[String], selections: &[bool]) -> Box<dyn MockComponent> {
-    Box::new(multiselect::MultiselectComponent::new(label, options, selections))
+fn create_multiselect_component(
+    label: &str,
+    options: &[String],
+    selections: &[bool],
+) -> Box<dyn MockComponent> {
+    Box::new(multiselect::MultiselectComponent::new(
+        label, options, selections,
+    ))
 }
 
 fn create_group_label(label: &str) -> Box<dyn MockComponent> {

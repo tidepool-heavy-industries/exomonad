@@ -26,21 +26,22 @@ async fn test_graph_with_forks() {
     let root_id = &created.root_node.id;
 
     // Create two child nodes from the same parent (fork)
-    let child1: serde_json::Value =
-        create_child_node(&client, &hub.http_url, session_id, root_id)
-            .await
-            .unwrap();
+    let child1: serde_json::Value = create_child_node(&client, &hub.http_url, session_id, root_id)
+        .await
+        .unwrap();
     let child1_id = child1["node"]["id"].as_str().unwrap();
 
-    let child2: serde_json::Value =
-        create_child_node(&client, &hub.http_url, session_id, root_id)
-            .await
-            .unwrap();
+    let child2: serde_json::Value = create_child_node(&client, &hub.http_url, session_id, root_id)
+        .await
+        .unwrap();
     let child2_id = child2["node"]["id"].as_str().unwrap();
 
     // Get graph data
     let resp = client
-        .get(format!("{}/api/sessions/{}/graph", hub.http_url, session_id))
+        .get(format!(
+            "{}/api/sessions/{}/graph",
+            hub.http_url, session_id
+        ))
         .send()
         .await
         .unwrap();
@@ -61,13 +62,17 @@ async fn test_graph_with_forks() {
     // Verify edges point from parent to children
     for edge in edges {
         assert_eq!(
-            edge["source"], root_id.as_str(),
+            edge["source"],
+            root_id.as_str(),
             "All edges should have root as source"
         );
     }
 
     // Verify children are correct
-    let targets: Vec<&str> = edges.iter().map(|e| e["target"].as_str().unwrap()).collect();
+    let targets: Vec<&str> = edges
+        .iter()
+        .map(|e| e["target"].as_str().unwrap())
+        .collect();
     assert!(targets.contains(&child1_id));
     assert!(targets.contains(&child2_id));
 }
@@ -161,9 +166,7 @@ async fn test_delete_session_with_nodes() {
 
     // Submit result for root node
     let result = make_test_node_result(node_id);
-    submit_via_socket(hub.socket_path(), &result)
-        .await
-        .unwrap();
+    submit_via_socket(hub.socket_path(), &result).await.unwrap();
 
     // Delete session
     let resp = client
@@ -223,9 +226,7 @@ async fn test_session_timestamps() {
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
     let result = make_test_node_result(node_id);
-    submit_via_socket(hub.socket_path(), &result)
-        .await
-        .unwrap();
+    submit_via_socket(hub.socket_path(), &result).await.unwrap();
 
     // Get updated timestamps
     let resp = client
@@ -298,13 +299,14 @@ async fn test_graph_includes_cost_and_duration() {
         model_usage: HashMap::new(),
     };
 
-    submit_via_socket(hub.socket_path(), &result)
-        .await
-        .unwrap();
+    submit_via_socket(hub.socket_path(), &result).await.unwrap();
 
     // Get graph data
     let resp = client
-        .get(format!("{}/api/sessions/{}/graph", hub.http_url, session_id))
+        .get(format!(
+            "{}/api/sessions/{}/graph",
+            hub.http_url, session_id
+        ))
         .send()
         .await
         .unwrap();
@@ -339,7 +341,10 @@ async fn test_deep_node_chain() {
 
     // Get graph data
     let resp = client
-        .get(format!("{}/api/sessions/{}/graph", hub.http_url, session_id))
+        .get(format!(
+            "{}/api/sessions/{}/graph",
+            hub.http_url, session_id
+        ))
         .send()
         .await
         .unwrap();

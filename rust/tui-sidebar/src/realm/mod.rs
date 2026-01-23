@@ -1,11 +1,13 @@
+use std::collections::HashMap;
 use tuirealm::command::{Cmd, CmdResult, Direction};
 use tuirealm::props::{BorderType, Props};
 use tuirealm::ratatui::layout::{Constraint, Layout as RatatuiLayout, Rect};
 use tuirealm::ratatui::widgets::{Block, Clear};
 use tuirealm::{Frame, MockComponent, State, StateValue};
-use std::collections::HashMap;
 
-use crate::protocol::{PopupDefinition, PopupState, PopupResult, VisibilityRule, ComponentSpec, ElementValue};
+use crate::protocol::{
+    ComponentSpec, ElementValue, PopupDefinition, PopupResult, PopupState, VisibilityRule,
+};
 
 pub mod builder;
 pub mod components;
@@ -29,9 +31,9 @@ pub struct PopupComponent {
     focused_component: usize,
     components: Vec<ComponentWrapper>,
     props: Props,
-    component_areas: Vec<Rect>,  // Track render areas for mouse click detection
-    id_to_index: HashMap<String, usize>,  // Map component IDs to indices
-    visibility_rules: Vec<Option<VisibilityRule>>,  // Per-component visibility rules
+    component_areas: Vec<Rect>, // Track render areas for mouse click detection
+    id_to_index: HashMap<String, usize>, // Map component IDs to indices
+    visibility_rules: Vec<Option<VisibilityRule>>, // Per-component visibility rules
 }
 
 /// Wrapper for individual components with their metadata
@@ -47,7 +49,8 @@ pub struct ComponentWrapper {
 impl PopupComponent {
     pub fn new(definition: PopupDefinition) -> Self {
         let state = PopupState::new(&definition);
-        let (components, id_to_index, visibility_rules) = builder::build_components(&definition, &state);
+        let (components, id_to_index, visibility_rules) =
+            builder::build_components(&definition, &state);
         let component_areas = Vec::with_capacity(components.len());
 
         // Find first focusable and visible component
@@ -78,7 +81,10 @@ impl PopupComponent {
 
         for (index, component) in self.definition.components.iter().enumerate() {
             // Skip non-interactive components (Text and Group are display-only)
-            if matches!(component.spec, ComponentSpec::Text{..} | ComponentSpec::Group{..}) {
+            if matches!(
+                component.spec,
+                ComponentSpec::Text { .. } | ComponentSpec::Group { .. }
+            ) {
                 continue;
             }
 
@@ -100,8 +106,12 @@ impl PopupComponent {
                             serde_json::json!(null)
                         }
                     }
-                    (ElementValue::MultiChoice(selections), ComponentSpec::Multiselect { options, .. }) => {
-                        let selected: Vec<&String> = options.iter()
+                    (
+                        ElementValue::MultiChoice(selections),
+                        ComponentSpec::Multiselect { options, .. },
+                    ) => {
+                        let selected: Vec<&String> = options
+                            .iter()
                             .enumerate()
                             .filter(|(i, _)| selections.get(*i).copied().unwrap_or(false))
                             .map(|(_, option)| option)
@@ -115,20 +125,26 @@ impl PopupComponent {
         }
 
         PopupResult {
-            button: self.state.button_clicked.clone().unwrap_or_else(|| "decline".to_string()),
+            button: self
+                .state
+                .button_clicked
+                .clone()
+                .unwrap_or_else(|| "decline".to_string()),
             values: serde_json::Value::Object(result_values),
         }
     }
 
     /// Get the name of the currently focused component
     pub fn get_focused_component_name(&self) -> Option<String> {
-        self.components.get(self.focused_component)
+        self.components
+            .get(self.focused_component)
             .map(|wrapper| wrapper.label.clone())
     }
 
     /// Check if the currently focused component is a textbox
     pub fn is_focused_textbox(&self) -> bool {
-        self.components.get(self.focused_component)
+        self.components
+            .get(self.focused_component)
             .map(|wrapper| wrapper.component_type == ComponentType::Textbox)
             .unwrap_or(false)
     }
@@ -145,43 +161,47 @@ impl PopupComponent {
     /// Evaluate a visibility rule against current state
     fn evaluate_visibility_rule(&self, rule: &VisibilityRule) -> bool {
         match rule {
-            VisibilityRule::Checked(id) => {
-                self.state.get_boolean(id).unwrap_or(false)
-            }
-            VisibilityRule::Equals(conditions) => {
-                conditions.iter().all(|(id, expected_value)| {
-                    if let Some(choice_index) = self.state.get_choice(id) {
-                        if let Some(component) = self.definition.components.iter().find(|c| c.id == *id) {
-                            if let crate::protocol::ComponentSpec::Choice { options, .. } = &component.spec {
-                                return options.get(choice_index)
-                                    .map(|actual| actual == expected_value)
-                                    .unwrap_or(false);
-                            }
+            VisibilityRule::Checked(id) => self.state.get_boolean(id).unwrap_or(false),
+            VisibilityRule::Equals(conditions) => conditions.iter().all(|(id, expected_value)| {
+                if let Some(choice_index) = self.state.get_choice(id) {
+                    if let Some(component) = self.definition.components.iter().find(|c| c.id == *id)
+                    {
+                        if let crate::protocol::ComponentSpec::Choice { options, .. } =
+                            &component.spec
+                        {
+                            return options
+                                .get(choice_index)
+                                .map(|actual| actual == expected_value)
+                                .unwrap_or(false);
                         }
                     }
-                    false
+                }
+                false
+            }),
+            VisibilityRule::GreaterThan { id, min_value } => self
+                .state
+                .get_number(id)
+                .map(|n| n > *min_value)
+                .unwrap_or(false),
+            VisibilityRule::LessThan { id, max_value } => self
+                .state
+                .get_number(id)
+                .map(|n| n < *max_value)
+                .unwrap_or(false),
+            VisibilityRule::CountEquals { id, exact_count } => self
+                .state
+                .get_multichoice(id)
+                .map(|selections| {
+                    selections.iter().filter(|&&selected| selected).count() == *exact_count
                 })
-            }
-            VisibilityRule::GreaterThan { id, min_value } => {
-                self.state.get_number(id)
-                    .map(|n| n > *min_value)
-                    .unwrap_or(false)
-            }
-            VisibilityRule::LessThan { id, max_value } => {
-                self.state.get_number(id)
-                    .map(|n| n < *max_value)
-                    .unwrap_or(false)
-            }
-            VisibilityRule::CountEquals { id, exact_count } => {
-                self.state.get_multichoice(id)
-                    .map(|selections| selections.iter().filter(|&&selected| selected).count() == *exact_count)
-                    .unwrap_or(false)
-            }
-            VisibilityRule::CountGreaterThan { id, min_count } => {
-                self.state.get_multichoice(id)
-                    .map(|selections| selections.iter().filter(|&&selected| selected).count() > *min_count)
-                    .unwrap_or(false)
-            }
+                .unwrap_or(false),
+            VisibilityRule::CountGreaterThan { id, min_count } => self
+                .state
+                .get_multichoice(id)
+                .map(|selections| {
+                    selections.iter().filter(|&&selected| selected).count() > *min_count
+                })
+                .unwrap_or(false),
         }
     }
 
@@ -214,7 +234,9 @@ impl PopupComponent {
         let start = self.focused_component;
         loop {
             self.focused_component = (self.focused_component + 1) % self.components.len();
-            if self.components[self.focused_component].focusable && self.is_component_visible(self.focused_component) {
+            if self.components[self.focused_component].focusable
+                && self.is_component_visible(self.focused_component)
+            {
                 break;
             }
             if self.focused_component == start {
@@ -233,7 +255,9 @@ impl PopupComponent {
             } else {
                 self.focused_component - 1
             };
-            if self.components[self.focused_component].focusable && self.is_component_visible(self.focused_component) {
+            if self.components[self.focused_component].focusable
+                && self.is_component_visible(self.focused_component)
+            {
                 break;
             }
             if self.focused_component == start {
@@ -267,7 +291,8 @@ impl PopupComponent {
                 }
                 State::Vec(values) => {
                     // Multiselect component
-                    let selections: Vec<bool> = values.iter()
+                    let selections: Vec<bool> = values
+                        .iter()
                         .filter_map(|v| match v {
                             StateValue::Bool(b) => Some(*b),
                             _ => None,
@@ -330,9 +355,7 @@ impl PopupComponent {
     /// Find which component contains the given coordinates
     fn get_component_at_position(&self, x: u16, y: u16) -> Option<usize> {
         for (index, area) in self.component_areas.iter().enumerate() {
-            if x >= area.x && x < area.x + area.width
-                && y >= area.y && y < area.y + area.height
-            {
+            if x >= area.x && x < area.x + area.width && y >= area.y && y < area.y + area.height {
                 return Some(index);
             }
         }
@@ -387,14 +410,17 @@ impl MockComponent for PopupComponent {
                 for (chunk_index, component_index) in visible_indices.iter().enumerate() {
                     if chunk_index < chunks.len() {
                         // Set focus state on component
-                        let is_focused = *component_index == self.focused_component && self.components[*component_index].focusable;
+                        let is_focused = *component_index == self.focused_component
+                            && self.components[*component_index].focusable;
                         self.components[*component_index].component.attr(
                             tuirealm::props::Attribute::Focus,
-                            tuirealm::props::AttrValue::Flag(is_focused)
+                            tuirealm::props::AttrValue::Flag(is_focused),
                         );
 
                         // Render component
-                        self.components[*component_index].component.view(frame, chunks[chunk_index]);
+                        self.components[*component_index]
+                            .component
+                            .view(frame, chunks[chunk_index]);
                     }
                 }
             }
@@ -410,7 +436,10 @@ impl MockComponent for PopupComponent {
     }
 
     fn state(&self) -> State {
-        State::One(StateValue::String(format!("PopupComponent: {}", self.definition.title)))
+        State::One(StateValue::String(format!(
+            "PopupComponent: {}",
+            self.definition.title
+        )))
     }
 
     fn perform(&mut self, cmd: Cmd) -> CmdResult {

@@ -127,8 +127,10 @@ pub fn spawn_io_tasks(
 pub async fn start_health_listener(path: &Path) -> Result<tokio::task::JoinHandle<()>> {
     // Ensure parent directory exists
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .context(format!("Failed to create health socket directory {}", parent.display()))?;
+        fs::create_dir_all(parent).context(format!(
+            "Failed to create health socket directory {}",
+            parent.display()
+        ))?;
     }
 
     // Remove existing socket file if it exists
@@ -136,8 +138,10 @@ pub async fn start_health_listener(path: &Path) -> Result<tokio::task::JoinHandl
         fs::remove_file(path).context("Failed to remove existing health socket file")?;
     }
 
-    let listener = UnixListener::bind(path)
-        .context(format!("Failed to bind health socket to {}", path.display()))?;
+    let listener = UnixListener::bind(path).context(format!(
+        "Failed to bind health socket to {}",
+        path.display()
+    ))?;
 
     debug!(path = %path.display(), "TUI sidebar health listener started");
 

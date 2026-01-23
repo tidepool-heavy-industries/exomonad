@@ -6,7 +6,7 @@ mod server;
 use anyhow::{Context, Result};
 use clap::Parser;
 use std::path::PathBuf;
-use tracing::{info, error, Level};
+use tracing::{error, info, Level};
 use tracing_subscriber::FmtSubscriber;
 
 /// TUI sidebar for Tidepool graph handlers.
@@ -21,7 +21,11 @@ struct Args {
     socket: Option<PathBuf>,
 
     /// Unix socket path to listen on for health checks
-    #[arg(short = 'H', long, default_value = ".tidepool/sockets/tui-sidebar.sock")]
+    #[arg(
+        short = 'H',
+        long,
+        default_value = ".tidepool/sockets/tui-sidebar.sock"
+    )]
     health_socket: PathBuf,
 
     /// Log level (trace, debug, info, warn, error)
@@ -69,7 +73,7 @@ async fn main() -> Result<()> {
         let max_retries = 15;
         const MIN_RETRIES_BEFORE_WARNING: i32 = 3; // Wait a few attempts before warning about mixed socket state
         let mut retry_delay = std::time::Duration::from_secs(1);
-        
+
         let stream = loop {
             match server::connect_to_control_server(&socket_path).await {
                 Ok(s) => break s,
@@ -79,7 +83,8 @@ async fn main() -> Result<()> {
                     // Check if control server socket exists but TUI socket is missing.
                     // If control.sock exists but tui.sock doesn't after a few retries,
                     // it's likely that TUI was explicitly disabled.
-                    let control_socket_exists = control_socket_path.as_ref().is_some_and(|p| p.exists());
+                    let control_socket_exists =
+                        control_socket_path.as_ref().is_some_and(|p| p.exists());
 
                     if retry_count >= max_retries {
                         if control_socket_exists {
@@ -92,12 +97,12 @@ async fn main() -> Result<()> {
                             // Exit with 0 to indicate "Giving up as intended"
                             std::process::exit(0);
                         }
-                        
+
                         // Cleanup health socket before returning
                         if health_socket_path.exists() {
                             let _ = std::fs::remove_file(&health_socket_path);
                         }
-                        
+
                         return Err(e).context(format!(
                             "Failed to connect to control-server after {} attempts",
                             max_retries
@@ -105,7 +110,10 @@ async fn main() -> Result<()> {
                     }
 
                     if control_socket_exists && retry_count >= MIN_RETRIES_BEFORE_WARNING {
-                        info!("Control socket exists but TUI socket {:?} is missing (attempt {}/{})", socket_path, retry_count, max_retries);
+                        info!(
+                            "Control socket exists but TUI socket {:?} is missing (attempt {}/{})",
+                            socket_path, retry_count, max_retries
+                        );
                     } else {
                         info!(
                             "Waiting for control-server at {:?} (attempt {}/{}, next retry in {:?})",
@@ -116,7 +124,8 @@ async fn main() -> Result<()> {
                     tokio::time::sleep(retry_delay).await;
 
                     // Exponential backoff: 1s, 2s, 4s, 8s, 10s, 10s...
-                    retry_delay = std::cmp::min(retry_delay * 2, std::time::Duration::from_secs(10));
+                    retry_delay =
+                        std::cmp::min(retry_delay * 2, std::time::Duration::from_secs(10));
                 }
             }
         };
@@ -129,7 +138,7 @@ async fn main() -> Result<()> {
             Ok(_) => info!("Connection closed, reconnecting..."),
             Err(e) => error!(error = %e, "App error, reconnecting..."),
         }
-        
+
         // Wait before reconnecting
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     }

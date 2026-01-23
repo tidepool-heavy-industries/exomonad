@@ -2,8 +2,8 @@
 //!
 //! Provides terminal-friendly output for the wrap command's pane display.
 
-use std::io::{stderr, Write};
 use crate::events::{ContentBlock, InterruptSignal, StreamEvent};
+use std::io::{stderr, Write};
 
 /// Print a stream event in human-readable format.
 ///
