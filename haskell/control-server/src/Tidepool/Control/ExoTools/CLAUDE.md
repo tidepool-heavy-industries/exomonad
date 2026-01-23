@@ -17,7 +17,6 @@ Read this if you're:
 | `spawn_agents` | Create worktrees and launch parallel agents in Zellij tabs | Tier 3 |
 | `exo_status` | Get current bead context, git status, and PR info | Tier 3 |
 | `exo_complete` | Mark bead as complete and clean up worktree | Tier 3 |
-| `exo_reconstitute` | Sync beads from main and refresh context | Tier 3 |
 | `file_pr` | File GitHub PR with bead context | Tier 3 |
 
 ---

@@ -40,13 +40,8 @@ import Tidepool.Control.FeedbackTools
   ( registerFeedbackLogic, RegisterFeedbackArgs(..) )
 import Tidepool.Control.ExoTools
   ( exoStatusLogic, ExoStatusArgs(..)
-  , exoCompleteLogic, ExoCompleteArgs(..), ExoCompleteResult(..)
-  , exoReconstituteLogic, ExoReconstituteArgs(..)
-  , preCommitCheckLogic, PreCommitCheckArgs(..), PreCommitCheckResult(..)
   , spawnAgentsLogic, SpawnAgentsArgs(..), SpawnAgentsResult(..)
-  , filePRLogic, FilePRArgs(..), FilePRResult(..)
-  , beadToPrLogic, BeadToPrArgs(..), BeadToPrResult(..), PRInfo(..)
-  , prToBeadLogic, PrToBeadArgs(..), PrToBeadResult(..)
+  , filePRLogic, FilePRArgs(..), FilePRResult(..), PRInfo(..)
   )
 import Tidepool.Control.PMReviewDAG
   ( pmReviewDagLogic, PmReviewDagArgs(..), PmReviewDagResult(..)
@@ -188,14 +183,10 @@ handleMcpTool logger config traceCtx tuiState reqId toolName args =
       -- "teach-graph" -> handleTeachGraphTool logger maybeTuiHandle reqId args
 
       -- Tier 3: External Orchestration tools (Exo)
+      -- Note: exo_complete and pre_commit_check have been folded into the Stop hook
       "exo_status" -> handleExoStatusTool logger reqId args
-      "exo_complete" -> handleExoCompleteTool logger reqId args
-      "exo_reconstitute" -> handleExoReconstituteTool logger reqId args
-      "pre_commit_check" -> handlePreCommitCheckTool logger reqId args
       "spawn_agents" -> handleSpawnAgentsTool logger reqId args
       "file_pr" -> handleFilePRTool logger reqId args
-      "bead_to_pr" -> handleBeadToPrTool logger reqId args
-      "pr_to_bead" -> handlePrToBeadTool logger reqId args
       "pm_approve_expansion" -> handlePmApproveExpansionTool logger reqId args
       "pm_prioritize" -> handlePmPrioritizeTool logger reqId args
       "pm_status" -> handlePmStatusTool logger reqId args
@@ -212,7 +203,7 @@ handleMcpTool logger config traceCtx tuiState reqId toolName args =
         logError logger $ "  (unknown tool)"
         pure $ mcpToolError reqId NotFound $
           "Tool not found: " <> toolName <>
-          ". Available tools: exo_status, exo_complete, exo_reconstitute, pre_commit_check, spawn_agents, file_pr, pm_approve_expansion, pm_prioritize, pm_propose"
+          ". Available tools: exo_status, spawn_agents, file_pr, pm_approve_expansion, pm_prioritize, pm_propose"
 
 -- | Handle the pm_prioritize tool.
 --
@@ -240,36 +231,6 @@ handlePmPrioritizeTool logger reqId args = do
         Right result -> do
           let successes = filter priSuccess $ pprResults result
           logInfo logger $ "[MCP:" <> reqId <> "] Successfully prioritized " <> T.pack (show $ length successes) <> " beads"
-          pure $ mcpToolSuccess reqId (toJSON result)
-
--- | Handle the pre_commit_check tool.
---
--- Runs a 'just' recipe (defaulting to pre-commit-fast) and returns structured results.
-handlePreCommitCheckTool :: Logger -> Text -> Value -> IO ControlResponse
-handlePreCommitCheckTool logger reqId args = do
-  case fromJSON args of
-    Error err -> do
-      logError logger $ "  parse error: " <> T.pack err
-      pure $ mcpToolError reqId InvalidInput $ "Invalid pre_commit_check arguments: " <> T.pack err
-
-    Success pccArgs -> do
-      logDebug logger $ "  recipe=" <> T.pack (show pccArgs.pccaRecipe)
-
-      resultOrErr <- try $ runM
-        $ runLog Debug
-        $ runGeminiIO
-        $ runJustfileIO
-        $ fmap unwrapSingleChoice (preCommitCheckLogic pccArgs)
-
-      case resultOrErr of
-        Left (e :: SomeException) -> do
-          logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
-          pure $ mcpToolError reqId ExternalFailure $ "pre_commit_check failed: " <> T.pack (displayException e)
-
-        Right result -> do
-          if result.pccrSuccess
-            then logInfo logger $ "[MCP:" <> reqId <> "] Pre-commit check passed"
-            else logError logger $ "[MCP:" <> reqId <> "] Pre-commit check failed"
           pure $ mcpToolSuccess reqId (toJSON result)
 
 -- | Handle the spawn_agents tool.
@@ -337,67 +298,6 @@ handleExoStatusTool logger reqId args = do
 
         Right result -> do
           logInfo logger $ "[MCP:" <> reqId <> "] Context retrieved successfully"
-          pure $ mcpToolSuccess reqId (toJSON result)
-
-
--- | Handle the exo_complete tool.
---
--- Runs the ExoCompleteGraph logic to finalize work on a bead.
-handleExoCompleteTool :: Logger -> Text -> Value -> IO ControlResponse
-handleExoCompleteTool logger reqId args = do
-  case fromJSON args of
-    Error err -> do
-      logError logger $ "  parse error: " <> T.pack err
-      pure $ mcpToolError reqId InvalidInput $ "Invalid exo_complete arguments: " <> T.pack err
-
-    Success ecArgs -> do
-      logDebug logger $ "  bead_id=" <> T.pack (show ecArgs.ecaBeadId)
-
-      resultOrErr <- try $ runM
-        $ runLog Debug
-        $ runGeminiIO
-        $ runBDIO defaultBDConfig
-        $ runGitIO
-        $ fmap unwrapSingleChoice (exoCompleteLogic ecArgs)
-
-      case resultOrErr of
-        Left (e :: SomeException) -> do
-          logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
-          pure $ mcpToolError reqId ExternalFailure $ "exo_complete failed: " <> T.pack (displayException e)
-
-        Right result -> do
-          logInfo logger $ "[MCP:" <> reqId <> "] Bead " <> result.ecrBeadId <> " completed"
-          pure $ mcpToolSuccess reqId (toJSON result)
-
-
--- | Handle the exo_reconstitute tool.
---
--- Runs the ExoReconstituteGraph logic to sync beads and refresh context.
-handleExoReconstituteTool :: Logger -> Text -> Value -> IO ControlResponse
-handleExoReconstituteTool logger reqId args = do
-  case fromJSON args of
-    Error err -> do
-      logError logger $ "  parse error: " <> T.pack err
-      pure $ mcpToolError reqId InvalidInput $ "Invalid exo_reconstitute arguments: " <> T.pack err
-
-    Success erArgs -> do
-      logDebug logger $ "  bead_id=" <> T.pack (show erArgs.eraBeadId)
-
-      resultOrErr <- try $ runM
-        $ runLog Debug
-        $ runGeminiIO
-        $ runBDIO defaultBDConfig
-        $ runGitIO
-        $ runGitHubIO defaultGitHubConfig
-        $ fmap unwrapSingleChoice (exoReconstituteLogic erArgs)
-
-      case resultOrErr of
-        Left (e :: SomeException) -> do
-          logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
-          pure $ mcpToolError reqId ExternalFailure $ "exo_reconstitute failed: " <> T.pack (displayException e)
-
-        Right result -> do
-          logInfo logger $ "[MCP:" <> reqId <> "] Beads synced and context refreshed successfully"
           pure $ mcpToolSuccess reqId (toJSON result)
 
 
@@ -518,8 +418,11 @@ handleFilePRTool logger reqId args = do
           pure $ mcpToolError reqId ExternalFailure $ "file_pr failed: " <> T.pack (displayException e)
 
         Right result -> do
-          case result.fprUrl of
-            Just url -> logInfo logger $ "[MCP:" <> reqId <> "] PR created: " <> url
+          case result.fprPr of
+            Just pr ->
+              if result.fprCreated
+                then logInfo logger $ "[MCP:" <> reqId <> "] PR created: " <> pr.priUrl
+                else logInfo logger $ "[MCP:" <> reqId <> "] PR exists: " <> pr.priUrl
             Nothing -> logError logger $ "[MCP:" <> reqId <> "] FilePR failed: " <> fromMaybe "unknown error" result.fprError
           pure $ mcpToolSuccess reqId (toJSON result)
 
@@ -736,61 +639,6 @@ handleRequestGuidanceTool logger tuiState reqId args = do
 
         Right result -> do
           logInfo logger $ "[MCP:" <> reqId <> "] Guidance received"
-          pure $ mcpToolSuccess reqId (toJSON result)
-
-
--- | Handle the bead_to_pr tool.
-handleBeadToPrTool :: Logger -> Text -> Value -> IO ControlResponse
-handleBeadToPrTool logger reqId args = do
-  case fromJSON args of
-    Error err -> do
-      logError logger $ "  parse error: " <> T.pack err
-      pure $ mcpToolError reqId InvalidInput $ "Invalid bead_to_pr arguments: " <> T.pack err
-
-    Success btpArgs -> do
-      logDebug logger $ "  bead_id=" <> btpaBeadId btpArgs
-
-      resultOrErr <- try $ runM
-        $ runLog Debug
-        $ runGitHubIO defaultGitHubConfig
-        $ fmap unwrapSingleChoice (beadToPrLogic btpArgs)
-
-      case resultOrErr of
-        Left (e :: SomeException) -> do
-          logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
-          pure $ mcpToolError reqId ExternalFailure $ "bead_to_pr failed: " <> T.pack (displayException e)
-
-        Right result -> do
-          case btprPR result of
-            Just pr -> logInfo logger $ "[MCP:" <> reqId <> "] Found PR: " <> T.pack (show pr.priNumber)
-            Nothing -> logInfo logger $ "[MCP:" <> reqId <> "] No PR found for bead " <> btpaBeadId btpArgs
-          pure $ mcpToolSuccess reqId (toJSON result)
-
--- | Handle the pr_to_bead tool.
-handlePrToBeadTool :: Logger -> Text -> Value -> IO ControlResponse
-handlePrToBeadTool logger reqId args = do
-  case fromJSON args of
-    Error err -> do
-      logError logger $ "  parse error: " <> T.pack err
-      pure $ mcpToolError reqId InvalidInput $ "Invalid pr_to_bead arguments: " <> T.pack err
-
-    Success ptbArgs -> do
-      logDebug logger $ "  pr_number=" <> T.pack (show $ ptbaPrNumber ptbArgs)
-
-      resultOrErr <- try $ runM
-        $ runLog Debug
-        $ runGitHubIO defaultGitHubConfig
-        $ fmap unwrapSingleChoice (prToBeadLogic ptbArgs)
-
-      case resultOrErr of
-        Left (e :: SomeException) -> do
-          logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
-          pure $ mcpToolError reqId ExternalFailure $ "pr_to_bead failed: " <> T.pack (displayException e)
-
-        Right result -> do
-          case ptbrBeadId result of
-            Just bid -> logInfo logger $ "[MCP:" <> reqId <> "] Found bead ID: " <> bid
-            Nothing -> logInfo logger $ "[MCP:" <> reqId <> "] No bead ID found in PR title"
           pure $ mcpToolSuccess reqId (toJSON result)
 
 

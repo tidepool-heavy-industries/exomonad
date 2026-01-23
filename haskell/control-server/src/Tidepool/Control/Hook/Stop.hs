@@ -4,8 +4,12 @@
 
 -- | Stop hook logic with rich state detection and templated prompting.
 --
--- Gathers git state (dirty files, commits ahead, PR status) and renders
--- a Jinja template that provides actionable guidance to the agent.
+-- Gathers git state (dirty files, commits ahead, PR status), runs pre-commit
+-- checks, and optionally closes beads. Renders a Jinja template that provides
+-- actionable guidance to the agent.
+--
+-- This module integrates the logic from exo_complete and pre_commit_check tools
+-- directly into the Stop hook flow.
 module Tidepool.Control.Hook.Stop
   ( stopHookLogic
   , StopHookResult(..)
@@ -19,9 +23,11 @@ import qualified Data.Text as T
 import Text.Parsec.Pos (SourcePos)
 
 import Tidepool.Control.ExoTools (parseBeadId)
-import Tidepool.Control.Hook.Stop.Context (StopContext(..), StopPRContext(..))
+import Tidepool.Control.Hook.Stop.Context (StopContext(..), StopPRContext(..), StopPreCommitContext(..))
+import Tidepool.Effects.BD (BD, BeadInfo(..), BeadStatus(..), getBead, closeBead)
 import Tidepool.Effects.Git (Git, WorktreeInfo(..), getWorktreeInfo, getDirtyFiles, getCommitsAhead)
 import Tidepool.Effects.GitHub (GitHub, PullRequest(..), listPullRequests, Repo(..), PRFilter(..), defaultPRFilter)
+import Tidepool.Effects.Justfile (Justfile, runRecipe, JustResult(..))
 import Tidepool.Graph.Template (TypedTemplate, typedTemplateFile, runTypedTemplate)
 
 -- | Compiled Stop hook template.
@@ -38,12 +44,20 @@ data StopHookResult = StopHookResult
 
 -- | Core Stop hook logic.
 --
--- Detects git state and renders template with actionable guidance.
+-- Detects git state, runs pre-commit checks, closes beads, and renders
+-- template with actionable guidance.
+--
+-- Behavior:
+-- 1. Not on bead branch: Allow stop, no checks
+-- 2. On bead branch without PR: Block with "file PR" guidance
+-- 3. On bead branch with dirty files and no PR: Block with commit guidance
+-- 4. On bead branch with PR: Run pre-commit checks, close bead if passes, allow stop
 stopHookLogic
-  :: (Member Git es, Member GitHub es)
+  :: (Member Git es, Member GitHub es, Member BD es, Member Justfile es)
   => Text  -- ^ GitHub repo name (e.g., "owner/repo")
+  -> Bool  -- ^ Whether to run pre-commit checks (from TIDEPOOL_STOP_PRECOMMIT)
   -> Eff es StopHookResult
-stopHookLogic repoName = do
+stopHookLogic repoName runPreCommit = do
   -- 1. Gather git state
   mWorktree <- getWorktreeInfo
   dirtyFiles <- getDirtyFiles
@@ -58,6 +72,9 @@ stopHookLogic repoName = do
             , commits_ahead = 0
             , pr = Nothing
             , clean = True
+            , pre_commit = Nothing
+            , bead_closed = False
+            , bead_already_closed = False
             }
       pure $ StopHookResult False (runTypedTemplate ctx stopTemplate)
 
@@ -74,18 +91,10 @@ stopHookLogic repoName = do
       prs <- listPullRequests repo filt
       let mPR = find (\p -> p.prHeadRefName == branchName) prs
 
-      -- 4. Build context
+      -- 4. Build base context
       let hasDirty = not (null dirtyFiles)
           hasPR = isJust mPR
           isBeadBranch = isJust mBeadId
-
-          -- Clean if: (not bead branch) OR (has PR)
-          -- Having a PR means work is "done enough" even with local dirty files
-          isClean = not isBeadBranch || hasPR
-
-          -- Block if: on bead branch AND has uncommitted changes AND no PR
-          -- If PR exists, we don't block even with dirty files
-          shouldBlock = isBeadBranch && hasDirty && not hasPR
 
           prCtx = case mPR of
             Nothing -> Nothing
@@ -95,6 +104,52 @@ stopHookLogic repoName = do
               , pending_comments = 0  -- TODO: fetch from pr_review_status
               }
 
+      -- 5. Check bead status and run completion logic if appropriate
+      (preCommitCtx, beadWasClosed, beadWasAlreadyClosed) <- case mBeadId of
+        Nothing -> pure (Nothing, False, False)
+        Just bid -> do
+          -- Check bead status
+          mBead <- getBead bid
+          case mBead of
+            Nothing -> pure (Nothing, False, False)
+            Just bead | bead.biStatus == StatusClosed ->
+              -- Bead already closed
+              pure (Nothing, False, True)
+            Just _bead -> do
+              -- Bead is open - run pre-commit and potentially close
+              if hasPR && not hasDirty && runPreCommit
+                then do
+                  -- Run pre-commit checks
+                  res <- runRecipe "pre-commit-fast" []
+                  let checkSuccess = res.exitCode == 0
+                      checkOutput = if T.null res.stdout
+                                    then res.stderr
+                                    else res.stdout <> "\n" <> res.stderr
+                      pcCtx = Just StopPreCommitContext
+                        { success = checkSuccess
+                        , output = checkOutput
+                        }
+
+                  -- Close bead if checks pass
+                  if checkSuccess
+                    then do
+                      closeBead bid Nothing
+                      pure (pcCtx, True, False)
+                    else pure (pcCtx, False, False)
+                else pure (Nothing, False, False)
+
+      -- 6. Determine blocking and clean status
+      let -- Clean if: (not bead branch) OR (has PR) OR (bead was closed or already closed)
+          isClean = not isBeadBranch || hasPR || beadWasClosed || beadWasAlreadyClosed
+
+          -- Block if: on bead branch AND has uncommitted changes AND no PR
+          -- If PR exists, we don't block even with dirty files
+          -- Also block if pre-commit check failed
+          preCommitFailed = case preCommitCtx of
+            Just pc -> not (success pc)
+            Nothing -> False
+          shouldBlock = (isBeadBranch && hasDirty && not hasPR) || preCommitFailed
+
           ctx = StopContext
             { bead_id = mBeadId
             , branch = branchName
@@ -102,6 +157,9 @@ stopHookLogic repoName = do
             , commits_ahead = commitsAhead
             , pr = prCtx
             , clean = isClean
+            , pre_commit = preCommitCtx
+            , bead_closed = beadWasClosed
+            , bead_already_closed = beadWasAlreadyClosed
             }
 
       pure $ StopHookResult shouldBlock (runTypedTemplate ctx stopTemplate)

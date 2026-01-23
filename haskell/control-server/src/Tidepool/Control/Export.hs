@@ -19,7 +19,7 @@ import Tidepool.Control.TUITools
 import Tidepool.Control.FeedbackTools
   ( RegisterFeedbackGraph )
 import Tidepool.Control.ExoTools
-  ( ExoStatusGraph, ExoCompleteGraph, ExoReconstituteGraph, SpawnAgentsGraph, FilePRGraph, PrReviewStatusGraph )
+  ( ExoStatusGraph, SpawnAgentsGraph, FilePRGraph, PrReviewStatusGraph )
 import Tidepool.Control.PMTools
   ( PmApproveExpansionGraph, PmPrioritizeGraph )
 import Tidepool.Control.PMReviewDAG (PmReviewDagGraph)
@@ -48,9 +48,8 @@ exportMCPTools logger = do
 
   -- Extract tools from complex graphs via MCPExport (legacy pattern)
   -- Note: DocGenGraph removed as it requires LSP
+  -- Note: ExoCompleteGraph and PreCommitCheckGraph folded into Stop hook
   let esTools = reifyMCPTools (Proxy @ExoStatusGraph)
-  let ecTools = reifyMCPTools (Proxy @ExoCompleteGraph)
-  let erTools = reifyMCPTools (Proxy @ExoReconstituteGraph)
   let saTools = reifyMCPTools (Proxy @SpawnAgentsGraph)
   let fpTools = reifyMCPTools (Proxy @FilePRGraph)
   let paeTools = reifyMCPTools (Proxy @PmApproveExpansionGraph)
@@ -72,8 +71,6 @@ exportMCPTools logger = do
   logDebug logger $ "[MCP Discovery] RequestGuidanceGraph: " <> T.pack (show (length rgTools)) <> " tools"
   logDebug logger $ "[MCP Discovery] RegisterFeedbackGraph: " <> T.pack (show (length rfTools)) <> " tools"
   logDebug logger $ "[MCP Discovery] ExoStatusGraph: " <> T.pack (show (length esTools)) <> " tools"
-  logDebug logger $ "[MCP Discovery] ExoCompleteGraph: " <> T.pack (show (length ecTools)) <> " tools"
-  logDebug logger $ "[MCP Discovery] ExoReconstituteGraph: " <> T.pack (show (length erTools)) <> " tools"
   logDebug logger $ "[MCP Discovery] SpawnAgentsGraph: " <> T.pack (show (length saTools)) <> " tools"
   logDebug logger $ "[MCP Discovery] FilePRGraph: " <> T.pack (show (length fpTools)) <> " tools"
   logDebug logger $ "[MCP Discovery] PmApproveExpansionGraph: " <> T.pack (show (length paeTools)) <> " tools"
@@ -87,7 +84,7 @@ exportMCPTools logger = do
   logDebug logger $ "[MCP Discovery] ReadMessageGraph: " <> T.pack (show (length rmTools)) <> " tools"
   logDebug logger $ "[MCP Discovery] MarkReadGraph: " <> T.pack (show (length mrTools)) <> " tools"
 
-  let allTools = concat [caTools, soTools, rgTools, rfTools, esTools, ecTools, erTools, saTools, fpTools, paeTools, pmPriTools, pmRevTools, pmStatTools, pmProTools, prTools, smTools, ciTools, rmTools, mrTools]
+  let allTools = concat [caTools, soTools, rgTools, rfTools, esTools, saTools, fpTools, paeTools, pmPriTools, pmRevTools, pmStatTools, pmProTools, prTools, smTools, ciTools, rmTools, mrTools]
   logInfo logger $ "[MCP Discovery] Total: " <> T.pack (show (length allTools)) <> " tools discovered"
 
   -- Log tool names with entry points for verification

@@ -47,14 +47,22 @@ module Tidepool.Control.LSPTools
   , FindCalleesResult(..)
   , CalleeInfo(..)
 
-    -- * Show Fields
+    -- * Show Type (unified fields + constructors)
+  , ShowTypeGraph(..)
+  , showTypeLogic
+  , ShowTypeArgs(..)
+  , ShowTypeResult(..)
+  , TypeField(..)
+  , TypeConstructor(..)
+
+    -- * Legacy: Show Fields (deprecated, use show_type)
   , ShowFieldsGraph(..)
   , showFieldsLogic
   , ShowFieldsArgs(..)
   , ShowFieldsResult(..)
   , RecordField(..)
 
-    -- * Show Constructors
+    -- * Legacy: Show Constructors (deprecated, use show_type)
   , ShowConstructorsGraph(..)
   , showConstructorsLogic
   , ShowConstructorsArgs(..)
@@ -459,7 +467,194 @@ findCalleesLogic args = do
 
 
 -- ════════════════════════════════════════════════════════════════════════════
--- SHOW-FIELDS GRAPH
+-- SHOW-TYPE GRAPH (Unified fields + constructors)
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Arguments for show_type tool.
+data ShowTypeArgs = ShowTypeArgs
+  { staTypeName :: Text          -- ^ Type name to inspect
+  }
+  deriving stock (Show, Eq, Generic)
+
+instance HasJSONSchema ShowTypeArgs where
+  jsonSchema = objectSchema
+    [ ("type_name", describeField "type_name" "Type name to inspect (record, sum type, or GADT)" (emptySchema TString))
+    ]
+    ["type_name"]
+
+instance FromJSON ShowTypeArgs where
+  parseJSON = withObject "ShowTypeArgs" $ \v ->
+    ShowTypeArgs <$> v .: "type_name"
+
+instance ToJSON ShowTypeArgs where
+  toJSON args = object ["type_name" .= staTypeName args]
+
+-- | A field in a type (for records).
+data TypeField = TypeField
+  { tfName :: Text
+  , tfType :: Text
+  , tfStrict :: Bool             -- ^ Has ! strictness annotation
+  }
+  deriving stock (Show, Eq, Generic)
+
+instance ToJSON TypeField where
+  toJSON tf = object
+    [ "name" .= tfName tf
+    , "type" .= tfType tf
+    , "strict" .= tfStrict tf
+    ]
+
+-- | A constructor in a type.
+data TypeConstructor = TypeConstructor
+  { tcName :: Text
+  , tcFields :: [Text]           -- ^ Field types (positional or record)
+  , tcIsRecord :: Bool           -- ^ Uses record syntax
+  }
+  deriving stock (Show, Eq, Generic)
+
+instance ToJSON TypeConstructor where
+  toJSON tc = object
+    [ "name" .= tcName tc
+    , "fields" .= tcFields tc
+    , "is_record" .= tcIsRecord tc
+    ]
+
+-- | Result of show_type tool.
+data ShowTypeResult = ShowTypeResult
+  { strTypeName :: Text
+  , strFile :: Maybe Text
+  , strLine :: Maybe Int
+  , strTypeKind :: Text          -- ^ "record", "sum", "gadt", or "newtype"
+  , strFields :: [TypeField]     -- ^ Non-empty for records
+  , strConstructors :: [TypeConstructor]
+  , strRawDefinition :: Text
+  , strWarning :: Maybe Text     -- ^ Warning if HLS is still indexing
+  }
+  deriving stock (Show, Eq, Generic)
+
+instance ToJSON ShowTypeResult where
+  toJSON str = object
+    [ "type_name" .= strTypeName str
+    , "file" .= strFile str
+    , "line" .= strLine str
+    , "type_kind" .= strTypeKind str
+    , "fields" .= strFields str
+    , "constructors" .= strConstructors str
+    , "raw_definition" .= strRawDefinition str
+    , "warning" .= strWarning str
+    ]
+
+-- | Graph definition for show_type tool.
+newtype ShowTypeGraph mode = ShowTypeGraph
+  { stRun :: mode :- LogicNode
+      :@ Input ShowTypeArgs
+      :@ UsesEffects '[Return ShowTypeResult]
+  }
+  deriving Generic
+
+-- | MCP tool entry point declaration for show_type.
+type instance GraphEntries ShowTypeGraph =
+  '[ "show_type" ':~> '("stRun", ShowTypeArgs, "Inspect a Haskell type: shows fields (for records) and constructors (for sum types/GADTs)") ]
+
+-- | Core logic for showing type information.
+showTypeLogic
+  :: (Member LSP es, Member Log es, Member (Return ShowTypeResult) es, LastMember IO es)
+  => ShowTypeArgs
+  -> Eff es ShowTypeResult
+showTypeLogic args = do
+  let typeName = staTypeName args
+
+  -- Check indexing state for warning
+  indexingState <- getIndexingState
+  let warning = case indexingState of
+        Startup -> Just "HLS is starting up..."
+        Indexing -> Just "HLS is still indexing. Results may be incomplete."
+        Ready -> Nothing
+
+  logDebug $ "[show_type] Looking up: " <> typeName
+
+  -- Find the type
+  symbols <- workspaceSymbol typeName
+  let typeSymbols = filter isTypeSymbol $
+        filter (\s -> s.siName == typeName) symbols
+
+  logDebug $ "[show_type] workspaceSymbol: query=" <> typeName
+          <> " total=" <> T.pack (show (length symbols))
+          <> " type_symbols=" <> T.pack (show (length typeSymbols))
+
+  result <- case typeSymbols of
+    [] -> pure ShowTypeResult
+      { strTypeName = typeName
+      , strFile = Nothing
+      , strLine = Nothing
+      , strTypeKind = "unknown"
+      , strFields = []
+      , strConstructors = []
+      , strRawDefinition = ""
+      , strWarning = warning
+      }
+
+    (sym:_) -> do
+      let loc = sym.siLocation
+          file = stripFilePrefix loc.locUri
+          line = loc.locRange.rangeStart.posLine + 1
+
+      -- Read the type definition
+      rawDef <- sendM $ readTypeDefinition (T.unpack file) (line - 1)
+
+      -- Determine type kind and parse accordingly
+      let isNewtype = "newtype " `T.isInfixOf` rawDef
+          isGADT = "where" `T.isInfixOf` rawDef
+          -- Parse record fields
+          fields = map toTypeField $ parseRecordFields rawDef
+          -- Parse constructors
+          constructors = map toTypeConstructor $
+            if isGADT
+              then parseGADTConstructors rawDef
+              else parseADTConstructors rawDef
+          -- Determine type kind
+          typeKind
+            | isNewtype = "newtype"
+            | isGADT = "gadt"
+            | not (null fields) = "record"
+            | otherwise = "sum"
+
+      logDebug $ "[show_type] result: file=" <> file
+              <> " line=" <> T.pack (show line)
+              <> " type_kind=" <> typeKind
+              <> " fields=" <> T.pack (show (length fields))
+              <> " constructors=" <> T.pack (show (length constructors))
+
+      pure ShowTypeResult
+        { strTypeName = typeName
+        , strFile = Just file
+        , strLine = Just line
+        , strTypeKind = typeKind
+        , strFields = fields
+        , strConstructors = constructors
+        , strRawDefinition = rawDef
+        , strWarning = warning
+        }
+
+  returnValue result
+  where
+    toTypeField :: RecordField -> TypeField
+    toTypeField rf = TypeField
+      { tfName = rfName rf
+      , tfType = rfType rf
+      , tfStrict = rfStrict rf
+      }
+
+    toTypeConstructor :: Constructor -> TypeConstructor
+    toTypeConstructor con = TypeConstructor
+      { tcName = conName con
+      , tcFields = conFields con
+      , tcIsRecord = conIsRecord con
+      }
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- SHOW-FIELDS GRAPH (Legacy - use show_type instead)
 -- ════════════════════════════════════════════════════════════════════════════
 
 -- | Arguments for show_fields tool.

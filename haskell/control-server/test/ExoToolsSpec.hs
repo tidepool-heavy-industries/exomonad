@@ -7,8 +7,6 @@ module Main where
 
 import Data.Aeson (toJSON, fromJSON, Result(..))
 import Data.Proxy (Proxy(..))
-import Data.Text (Text)
-import qualified Data.Map as Map
 import Data.Time.Clock (getCurrentTime)
 import Test.Tasty
 import Test.Tasty.HUnit
@@ -21,14 +19,8 @@ main = defaultMain tests
 
 tests :: TestTree
 tests = testGroup "ExoTools"
-  [ testCase "pre_commit_check is discoverable" test_discovery_pcc
-  , testCase "pre_commit_check result serialization" test_serialization_pcc
-  , testCase "file_pr is discoverable" test_discovery_fpr
+  [ testCase "file_pr is discoverable" test_discovery_fpr
   , testCase "file_pr result serialization" test_serialization_fpr
-  , testCase "bead_to_pr is discoverable" test_discovery_btp
-  , testCase "bead_to_pr result serialization" test_serialization_btp
-  , testCase "pr_to_bead is discoverable" test_discovery_ptb
-  , testCase "pr_to_bead result serialization" test_serialization_ptb
   , testCase "pr_review_status is discoverable" test_pr_discovery
   , testCase "pr_review_status result serialization" test_pr_serialization
   , testCase "spawn_agents is discoverable" test_discovery_spawn
@@ -54,22 +46,6 @@ test_serialization_spawn = do
     Success res' -> assertEqual "Should roundtrip" res res'
     Error err -> assertFailure $ "Failed to parse: " ++ err
 
-test_discovery_pcc :: Assertion
-test_discovery_pcc = do
-  -- This checks that the MCPExport annotation is correctly handled
-  let pccTools = reifyMCPTools (Proxy @PreCommitCheckGraph)
-  case pccTools of
-    [tool] -> assertEqual "Name should be pre_commit_check" "pre_commit_check" tool.mtdName
-    _ -> assertFailure $ "Expected exactly one tool, but found " ++ show (length pccTools)
-
-test_serialization_pcc :: Assertion
-test_serialization_pcc = do
-  let res = PreCommitCheckResult True "all good" ""
-  let json = toJSON res
-  case fromJSON @PreCommitCheckResult json of
-    Success res' -> assertEqual "Should roundtrip" res res'
-    Error err -> assertFailure $ "Failed to parse: " ++ err
-
 test_discovery_fpr :: Assertion
 test_discovery_fpr = do
   -- This checks that the MCPExport annotation is correctly handled for FilePRGraph
@@ -80,50 +56,27 @@ test_discovery_fpr = do
 
 test_serialization_fpr :: Assertion
 test_serialization_fpr = do
-  -- Test success case
-  let resSuccess = FilePRResult (Just "http://pr.url") Nothing
-  let jsonSuccess = toJSON resSuccess
-  case fromJSON @FilePRResult jsonSuccess of
-    Success res' -> assertEqual "Should roundtrip success" resSuccess res'
-    Error err -> assertFailure $ "Failed to parse success: " ++ err
+  -- Test created success case
+  let info = PRInfo 42 "http://pr.url" "OPEN" "[tidepool-xyz] Fix bug"
+  let resCreated = FilePRResult (Just info) True Nothing
+  let jsonCreated = toJSON resCreated
+  case fromJSON @FilePRResult jsonCreated of
+    Success res' -> assertEqual "Should roundtrip created" resCreated res'
+    Error err -> assertFailure $ "Failed to parse created: " ++ err
+
+  -- Test existing PR case (idempotent)
+  let resExisting = FilePRResult (Just info) False Nothing
+  let jsonExisting = toJSON resExisting
+  case fromJSON @FilePRResult jsonExisting of
+    Success res' -> assertEqual "Should roundtrip existing" resExisting res'
+    Error err -> assertFailure $ "Failed to parse existing: " ++ err
 
   -- Test error case
-  let resError = FilePRResult Nothing (Just "error message")
+  let resError = FilePRResult Nothing False (Just "error message")
   let jsonError = toJSON resError
   case fromJSON @FilePRResult jsonError of
     Success res' -> assertEqual "Should roundtrip error" resError res'
     Error err -> assertFailure $ "Failed to parse error: " ++ err
-
-test_discovery_btp :: Assertion
-test_discovery_btp = do
-  let btpTools = reifyMCPTools (Proxy @BeadToPrGraph)
-  case btpTools of
-    [tool] -> assertEqual "Name should be bead_to_pr" "bead_to_pr" tool.mtdName
-    _ -> assertFailure $ "Expected exactly one tool, but found " ++ show (length btpTools)
-
-test_serialization_btp :: Assertion
-test_serialization_btp = do
-  let info = PRInfo 123 "http://pr.url" "OPEN" "Fix bug"
-  let res = BeadToPrResult (Just info)
-  let json = toJSON res
-  case fromJSON @BeadToPrResult json of
-    Success res' -> assertEqual "Should roundtrip" res res'
-    Error err -> assertFailure $ "Failed to parse: " ++ err
-
-test_discovery_ptb :: Assertion
-test_discovery_ptb = do
-  let ptbTools = reifyMCPTools (Proxy @PrToBeadGraph)
-  case ptbTools of
-    [tool] -> assertEqual "Name should be pr_to_bead" "pr_to_bead" tool.mtdName
-    _ -> assertFailure $ "Expected exactly one tool, but found " ++ show (length ptbTools)
-
-test_serialization_ptb :: Assertion
-test_serialization_ptb = do
-  let res = PrToBeadResult (Just "tidepool-123")
-  let json = toJSON res
-  case fromJSON @PrToBeadResult json of
-    Success res' -> assertEqual "Should roundtrip" res res'
-    Error err -> assertFailure $ "Failed to parse: " ++ err
 
 test_pr_discovery :: Assertion
 test_pr_discovery = do
@@ -135,14 +88,29 @@ test_pr_discovery = do
 test_pr_serialization :: Assertion
 test_pr_serialization = do
   now <- getCurrentTime
-  let comment = ReviewComment "Copilot" "Looks good" (Just "Main.hs") (Just 10) ReviewCommented now
-  let res = PrReviewStatusResult (Map.fromList [("Copilot", [comment])])
+  let copilotComment = ReviewComment "Copilot" "Looks good" (Just "Main.hs") (Just 10) ReviewCommented now
+  let humanComment = ReviewComment "reviewer" "LGTM" Nothing Nothing ReviewApproved now
+  let copilotFeedback = AuthorFeedback
+        { afPending = [copilotComment]
+        , afResolved = []
+        }
+  let humanFeedback = AuthorFeedback
+        { afPending = []
+        , afResolved = [humanComment]
+        }
+  let summary = FeedbackSummary
+        { fsCopilotPending = 1
+        , fsCopilotResolved = 0
+        , fsHumanPending = 0
+        , fsHumanResolved = 1
+        }
+  let res = PrReviewStatusResult
+        { prsrPrNumber = 123
+        , prsrCopilot = copilotFeedback
+        , prsrHumans = humanFeedback
+        , prsrSummary = summary
+        }
   let json = toJSON res
-  -- Verify the structure is flat (Map) not wrapped
-  case fromJSON @(Map.Map Text [ReviewComment]) json of
-    Success _ -> pure ()
-    Error err -> assertFailure $ "JSON should be a direct map: " ++ err
-  
   case fromJSON @PrReviewStatusResult json of
     Success res' -> assertEqual "Should roundtrip" res res'
     Error err -> assertFailure $ "Failed to parse: " ++ err

@@ -24,6 +24,7 @@ import Tidepool.Control.Hook.Stop (stopHookLogic, StopHookResult(..))
 import Tidepool.BD.Interpreter (runBDIO, defaultBDConfig)
 import Tidepool.BD.GitInterpreter (runGitIO)
 import Tidepool.GitHub.Interpreter (runGitHubIO, defaultGitHubConfig)
+import Tidepool.Justfile.Interpreter (runJustfileIO)
 import Tidepool.Effect.Types (runLog, LogLevel(..))
 import Tidepool.Effects.Git (Git, WorktreeInfo(..), getWorktreeInfo)
 import Tidepool.Effects.Zellij (Zellij, checkZellijEnv, goToTab, TabId(..))
@@ -99,12 +100,18 @@ handleStop input _runtime = do
       mRepoEnv <- lookupEnv "TIDEPOOL_GITHUB_REPO"
       let repoName = maybe "tidepool-heavy-industries/tidepool" T.pack mRepoEnv
 
+      -- Check if pre-commit checks should run (default: enabled)
+      mPreCommit <- lookupEnv "TIDEPOOL_STOP_PRECOMMIT"
+      let runPreCommit = mPreCommit /= Just "false"
+
       result <- try
         $ runM
         $ runLog Debug
+        $ runBDIO defaultBDConfig
         $ runGitIO
         $ runGitHubIO defaultGitHubConfig
-        $ stopHookLogic repoName
+        $ runJustfileIO
+        $ stopHookLogic repoName runPreCommit
 
       case result of
         Left (e :: SomeException) -> do

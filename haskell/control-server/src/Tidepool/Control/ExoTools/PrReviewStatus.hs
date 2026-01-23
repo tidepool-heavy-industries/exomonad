@@ -13,6 +13,8 @@ module Tidepool.Control.ExoTools.PrReviewStatus
   , prReviewStatusLogic
   , PrReviewStatusArgs(..)
   , PrReviewStatusResult(..)
+  , AuthorFeedback(..)
+  , FeedbackSummary(..)
   ) where
 
 import Control.Monad.Freer (Eff, Member)

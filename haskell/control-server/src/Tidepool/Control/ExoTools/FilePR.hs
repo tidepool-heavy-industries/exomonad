@@ -1,4 +1,5 @@
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE FlexibleContexts #-}
@@ -13,6 +14,7 @@ module Tidepool.Control.ExoTools.FilePR
   , filePRLogic
   , FilePRArgs(..)
   , FilePRResult(..)
+  , PRInfo(..)
   ) where
 
 import Control.Monad.Freer (Eff, Member)
@@ -22,7 +24,9 @@ import GHC.Generics (Generic)
 
 import Tidepool.Effects.BD (BD, BeadInfo(..), getBead)
 import Tidepool.Effects.Git (Git, WorktreeInfo(..), getWorktreeInfo)
-import Tidepool.Effects.GitHub (GitHub, Repo(..), PRCreateSpec(..), PRUrl(..), createPR)
+import Tidepool.Effects.GitHub (GitHub, Repo(..), PRCreateSpec(..), PRUrl(..), PullRequest(..), PRFilter(..), createPR, listPullRequests, defaultPRFilter)
+import qualified Data.Text as T
+import Data.Maybe (listToMaybe)
 import Tidepool.Graph.Generic (AsHandler, type (:-))
 import Tidepool.Graph.Generic.Core (EntryNode, ExitNode, LogicNode)
 import Tidepool.Graph.Goto (Goto, GotoChoice, To, gotoExit)
@@ -56,30 +60,44 @@ instance ToJSON FilePRArgs where
     , "compromises" .= fpaCompromises args
     ]
 
+-- | PR Info for file_pr result.
+data PRInfo = PRInfo
+  { priNumber :: Int
+  , priUrl    :: Text
+  , priStatus :: Text
+  , priTitle  :: Text
+  }
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (ToJSON, FromJSON)
+
 -- | Result of file_pr tool.
+-- Returns PR info for either an existing or newly created PR.
 data FilePRResult = FilePRResult
-  { fprUrl :: Maybe Text
-  , fprError :: Maybe Text
+  { fprPr :: Maybe PRInfo      -- ^ PR info (existing or newly created)
+  , fprCreated :: Bool         -- ^ True if we created a new PR, False if existing found
+  , fprError :: Maybe Text     -- ^ Error message if operation failed
   }
   deriving stock (Show, Eq, Generic)
 
 instance ToJSON FilePRResult where
   toJSON res = object
-    [ "url" .= fprUrl res
+    [ "pr" .= fprPr res
+    , "created" .= fprCreated res
     , "error" .= fprError res
     ]
 
 instance FromJSON FilePRResult where
   parseJSON = withObject "FilePRResult" $ \v ->
     FilePRResult
-      <$> v .:? "url"
+      <$> v .:? "pr"
+      <*> v .: "created"
       <*> v .:? "error"
 
 -- | Graph definition for file_pr tool.
 data FilePRGraph mode = FilePRGraph
   { fpEntry :: mode :- EntryNode FilePRArgs
       :@ MCPExport
-      :@ MCPToolDef '("file_pr", "File a pull request with full bead context in the body.")
+      :@ MCPToolDef '("file_pr", "File a pull request for current bead. Idempotent: returns existing PR if one exists.")
 
   , fpRun :: mode :- LogicNode
       :@ Input FilePRArgs
@@ -101,6 +119,7 @@ filePRHandlers = FilePRGraph
 
 -- | Core logic for file_pr.
 -- Bead ID and title inferred from branch. Agent provides testing/compromises.
+-- Idempotent: checks for existing PR first, returns it if found.
 filePRLogic
   :: (Member BD es, Member Git es, Member GitHub es)
   => FilePRArgs
@@ -116,30 +135,55 @@ filePRLogic args = do
 
   case mBeadId of
     Nothing ->
-      pure $ gotoExit $ FilePRResult Nothing (Just "Not on a bead branch. file_pr requires bd-{id}/* branch naming.")
+      pure $ gotoExit $ FilePRResult Nothing False (Just "Not on a bead branch. file_pr requires bd-{id}/* branch naming.")
     Just bid -> do
       -- 3. Get Bead Info
       mBead <- getBead bid
       case mBead of
         Nothing ->
-          pure $ gotoExit $ FilePRResult Nothing (Just $ "Bead " <> bid <> " not found.")
+          pure $ gotoExit $ FilePRResult Nothing False (Just $ "Bead " <> bid <> " not found.")
         Just bead -> do
-          -- 4. Prepare PR Spec
-          let headBranch = case mWt of
-                Just wt -> wt.wiBranch
-                Nothing -> "bd-" <> bid <> "/" <> slugify bead.biTitle
+          -- 4. Check if PR already exists (idempotent)
+          let repo = Repo "tidepool-heavy-industries/tidepool"
+              searchStr = "[" <> bid <> "]"
+              filt = defaultPRFilter { pfSearch = Just searchStr, pfLimit = Just 1 }
 
-          let title = "[" <> bid <> "] " <> bead.biTitle
-              body = formatPRBody bead args.fpaTesting args.fpaCompromises
-              repo = Repo "tidepool-heavy-industries/tidepool"
-              spec = PRCreateSpec
-                { prcsRepo = repo
-                , prcsHead = headBranch
-                , prcsBase = "main"
-                , prcsTitle = title
-                , prcsBody = body
-                }
+          existingPrs <- listPullRequests repo filt
+          case listToMaybe existingPrs of
+            Just pr -> do
+              -- PR already exists - return it (idempotent behavior)
+              let info = PRInfo
+                    { priNumber = pr.prNumber
+                    , priUrl = pr.prUrl
+                    , priStatus = T.pack (show pr.prState)
+                    , priTitle = pr.prTitle
+                    }
+              pure $ gotoExit $ FilePRResult (Just info) False Nothing
 
-          -- 5. Create PR
-          PRUrl url <- createPR spec
-          pure $ gotoExit $ FilePRResult (Just url) Nothing
+            Nothing -> do
+              -- 5. Prepare PR Spec
+              let headBranch = case mWt of
+                    Just wt -> wt.wiBranch
+                    Nothing -> "bd-" <> bid <> "/" <> slugify bead.biTitle
+
+              let title = "[" <> bid <> "] " <> bead.biTitle
+                  body = formatPRBody bead args.fpaTesting args.fpaCompromises
+                  spec = PRCreateSpec
+                    { prcsRepo = repo
+                    , prcsHead = headBranch
+                    , prcsBase = "main"
+                    , prcsTitle = title
+                    , prcsBody = body
+                    }
+
+              -- 6. Create PR
+              PRUrl url <- createPR spec
+              -- Note: We don't have the PR number from createPR, so we use 0
+              -- In practice, the URL is what matters
+              let info = PRInfo
+                    { priNumber = 0
+                    , priUrl = url
+                    , priStatus = "OPEN"
+                    , priTitle = title
+                    }
+              pure $ gotoExit $ FilePRResult (Just info) True Nothing

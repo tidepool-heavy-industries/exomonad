@@ -45,3 +45,29 @@ The tool will infer bead ID and title from your branch.
 {% if clean and bead_id and pr %}
 ✓ {{ bead_id }}: All changes committed, PR #{{ pr.number }} filed.
 {% endif %}
+
+{# Pre-commit check results #}
+{% if pre_commit %}
+## Pre-commit Checks
+
+{% if pre_commit.success %}
+✓ Pre-commit checks passed.
+{% else %}
+✗ Pre-commit checks failed:
+
+```
+{{ pre_commit.output }}
+```
+
+Fix the issues above before stopping.
+{% endif %}
+{% endif %}
+
+{# Bead closing status #}
+{% if bead_closed %}
+## Bead Completed
+
+✓ {{ bead_id }} has been closed automatically (PR filed, checks passed).
+{% elif bead_already_closed %}
+ℹ {{ bead_id }} was already closed.
+{% endif %}

@@ -319,22 +319,11 @@ Finds where a function is actually called, filtering out imports, type signature
 
 **Implementation:** `LSPTools.hs:156-180` (FindCallersGraph)
 
-#### `show_fields` - Show Record Fields
+#### `show_type` - Inspect Type (Fields + Constructors)
 
-Shows fields of a Haskell record type with their types and strictness.
+**Status:** Defined but not currently exported (requires LSP session)
 
-**Request Schema:**
-```json
-{
-  "type_name": "MyRecord"              // required
-}
-```
-
-**Implementation:** `LSPTools.hs:320-331` (ShowFieldsGraph)
-
-#### `show_constructors` - Show Sum Type Constructors
-
-Shows constructors of a Haskell sum type or GADT.
+Inspects a Haskell type, returning both record fields and constructors. This unified tool replaces the deprecated `show_fields` and `show_constructors` tools.
 
 **Request Schema:**
 ```json
@@ -343,7 +332,13 @@ Shows constructors of a Haskell sum type or GADT.
 }
 ```
 
-**Implementation:** `LSPTools.hs:452-463` (ShowConstructorsGraph)
+**Response includes:**
+- `type_kind`: "record", "sum", "gadt", or "newtype"
+- `fields`: Array of record fields (for record types)
+- `constructors`: Array of constructors (for sum types/GADTs)
+- `raw_definition`: The full type definition text
+
+**Implementation:** `LSPTools.hs:461-570` (ShowTypeGraph)
 
 ### Tier 2: LLM-Enhanced Tools
 
@@ -382,12 +377,6 @@ Integration with beads (BD) and git for development workflow automation.
 Gets current bead details, git status, and PR info.
 
 **Implementation:** `ExoTools.hs:92-114` (ExoStatusGraph)
-
-#### `exo_reconstitute` - Sync Beads and Refresh Context
-
-Synchronizes beads from main and refreshes development context. Designed for use at session start or end.
-
-**Implementation:** `ExoTools.hs:184-205` (ExoReconstituteGraph)
 
 ### Tier 4: TUI-Interactive Tools
 
@@ -538,7 +527,6 @@ exportMCPTools logger = do
   -- Tier 3: External orchestration (Beads + Git)
   let esTools = reifyMCPTools (Proxy @ExoStatusGraph)
       ecTools = reifyMCPTools (Proxy @ExoCompleteGraph)
-      erTools = reifyMCPTools (Proxy @ExoReconstituteGraph)
       saTools = reifyMCPTools (Proxy @SpawnAgentsGraph)
       fpTools = reifyMCPTools (Proxy @FilePRGraph)
       pmPriTools = reifyMCPTools (Proxy @PmPrioritizeGraph)
@@ -576,15 +564,15 @@ exportMCPTools logger = do
 
 ## Hook Handlers
 
-Most hooks are passthrough (log and allow). The `Stop` hook runs reconstitute logic.
+Most hooks are passthrough (log and allow).
 
 **Current behavior:**
 - `PreToolUse` → allow with `permissionDecision: "allow"`
 - `PostToolUse` → allow with no additional context
-- `Stop` → runs `exo_reconstitute` (syncs beads from main)
+- `Stop` → passthrough (allow)
 - Other hooks → continue with default response
 
-**Implementation:** `Handler/Hook.hs:35-49` (Stop hook → exo_reconstitute)
+**Implementation:** `Handler/Hook.hs:35-49`
 
 ## Role-Based Tool Filtering
 
@@ -617,7 +605,7 @@ mantle-agent mcp  # Omit --tools for full access, or specify TL-specific tools
 ```
 
 TL users see: All tools (full access), or customize with:
-- `find_callers`, `show_fields`, `show_constructors` - LSP tools
+- `find_callers`, `show_type` - LSP tools (when enabled)
 - `teach-graph` - Code exploration
 - `spawn_agents`, `exo_*`, `file_pr` - Development workflow
 
@@ -760,13 +748,10 @@ Connection received
 ```bash
 # Test tool discovery
 echo '{"type":"ToolsListRequest"}' | nc localhost 7432
-# Should return 4 tools: find_callers, show_fields, show_constructors, teach-graph
+# Returns available tools (LSP tools disabled by default)
 
-# Test teach-graph tool
-echo '{"type":"MCPToolCall","id":"1","tool_name":"teach-graph","arguments":{"topic":"how Memory effect works","seeds":["getMem","putMem"],"budget":10}}' | nc localhost 7432
-
-# Test find_callers tool
-echo '{"type":"MCPToolCall","id":"2","tool_name":"find_callers","arguments":{"name":"runLSP"}}' | nc localhost 7432
+# Test exo_status tool
+echo '{"type":"MCPToolCall","id":"1","tool_name":"exo_status","arguments":{}}' | nc localhost 7432
 ```
 
 ## Environment Variables
