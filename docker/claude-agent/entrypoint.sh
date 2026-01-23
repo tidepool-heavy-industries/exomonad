@@ -36,6 +36,10 @@ EOF
 # Claude Code uses MCP (Model Context Protocol) for tool extension.
 # We use the http+unix protocol to talk to the control socket.
 # The path must be URL-encoded (/ -> %2F).
+if [ -z "${MANTLE_CONTROL_SOCKET:-}" ]; then
+    echo "Error: MANTLE_CONTROL_SOCKET is not set or empty; cannot configure MCP control socket." >&2
+    exit 1
+fi
 SOCKET_PATH_ENCODED=$(echo "$MANTLE_CONTROL_SOCKET" | sed 's/\//%2F/g')
 cat > /home/agent/.mcp.json <<EOF
 {

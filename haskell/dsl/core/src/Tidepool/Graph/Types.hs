@@ -156,8 +156,16 @@ infixl 7 :@
 -- **DEPRECATED**: Use 'Entries' for new code. This annotation supports only
 -- single-input nodes. 'Entries' allows multiple named entry points per node.
 --
--- FIXME: Re-enable deprecation once LogicNode has a suitable 'Entries'-style alternative.
--- Currently LogicNode requires Input for its single payload.
+-- FIXME: Re-enable deprecation once LogicNode has a suitable 'Entries'-style
+-- alternative and all remaining LogicNode callers have been migrated to
+-- 'Entries' (or another multi-entry abstraction).
+--
+-- Tracking: TP-TRACK-Input-Entries-Migration
+--
+-- NOTE: The deprecation pragma below is intentionally disabled for now because
+-- LogicNode currently requires 'Input' for its single payload. Once the
+-- migration tracked above is complete, uncomment this pragma to restore the
+-- deprecation warning:
 -- {-# DEPRECATED Input "Use 'Entries' annotation for named entry points" #-}
 type Input :: Type -> Type
 data Input inputType
