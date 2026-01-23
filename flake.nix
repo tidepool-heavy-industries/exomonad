@@ -1,235 +1,172 @@
 {
-  description = "Tidepool - Type-safe LLM agent graphs with WASM deployment";
+  description = "Tidepool Hangar - Development environment for Tidepool LLM agent framework";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
-    ghc-wasm-meta.url = "gitlab:haskell-wasm/ghc-wasm-meta?host=gitlab.haskell.org";
     flake-utils.url = "github:numtide/flake-utils";
+    ghc-wasm-meta.url = "gitlab:haskell-wasm/ghc-wasm-meta?host=gitlab.haskell.org";
+    rust-overlay.url = "github:oxalica/rust-overlay";
+    rust-overlay.inputs.nixpkgs.follows = "nixpkgs";
   };
 
-  outputs = { self, nixpkgs, ghc-wasm-meta, flake-utils }:
+  outputs = { self, nixpkgs, flake-utils, ghc-wasm-meta, rust-overlay }:
     flake-utils.lib.eachDefaultSystem (system:
       let
-        pkgs = nixpkgs.legacyPackages.${system};
+        pkgs = import nixpkgs {
+          inherit system;
+          overlays = [ rust-overlay.overlays.default ];
+        };
         wasmPkgs = ghc-wasm-meta.packages.${system};
+
+        # Common packages shared across shells
+        commonPkgs = with pkgs; [
+          # Dev utilities
+          jq
+          just
+          curl
+          git
+        ];
+
+        # Haskell toolchain
+        haskellPkgs = ghcVersion: with pkgs; [
+          haskell.compiler.${ghcVersion}
+          cabal-install
+          haskell-language-server
+          zlib
+          zlib.dev
+          pkg-config
+        ];
+
+        # Rust toolchain (latest stable for edition 2024 support)
+        rustToolchain = pkgs.rust-bin.stable.latest.default.override {
+          extensions = [ "rust-src" "rust-analyzer" ];
+        };
+        rustPkgs = [ rustToolchain ];
+
+        # Node.js toolchain
+        nodePkgs = with pkgs; [
+          nodejs_20
+          pnpm
+        ];
+
+        # Orchestration tools
+        orchestrationPkgs = with pkgs; [
+          process-compose
+          zellij
+        ];
+
       in {
         devShells = {
-          # Native development with HLS
+          # Default: Full development environment
           default = pkgs.mkShell {
-            packages = with pkgs; [
-              # Native Haskell toolchain
-              haskell.compiler.ghc910
-              cabal-install
-              haskell-language-server
-
-              # Runtime deps for HTTP clients
-              zlib
-
-              # Node/TypeScript (wrangler installed via pnpm in deploy/)
-              nodejs_20
-              pnpm
-
-              # Dev utilities
-              jq
-              just
-              sqlite
-            ];
+            packages = commonPkgs
+              ++ haskellPkgs "ghc910"
+              ++ rustPkgs
+              ++ nodePkgs
+              ++ orchestrationPkgs
+              ++ [ pkgs.sqlite ];
 
             shellHook = ''
-              echo "Tidepool Development Shell"
-              echo "=========================="
+              export PKG_CONFIG_PATH="${pkgs.zlib.dev}/lib/pkgconfig:$PKG_CONFIG_PATH"
+              export NIX_GHC_LIBDIR="$(ghc --print-libdir)"
+              export HANGAR_ROOT="$PWD"
+              export TIDEPOOL_REPO="$PWD/repo"
+
+              echo "╔═══════════════════════════════════════════════════════════╗"
+              echo "║           Tidepool Hangar Development Shell               ║"
+              echo "╚═══════════════════════════════════════════════════════════╝"
               echo ""
-              echo "Native Haskell:"
-              echo "  cabal build all"
-              echo "  cabal test all"
+              echo "  GHC:      $(ghc --numeric-version)"
+              echo "  Cabal:    $(cabal --numeric-version)"
+              echo "  Cargo:    $(cargo --version | cut -d' ' -f2)"
+              echo "  Node.js:  $(node --version)"
+              echo "  pnpm:     $(pnpm --version)"
               echo ""
-              echo "TypeScript (deploy/):"
-              echo "  cd deploy && pnpm install && pnpm dev"
+              echo "Paths:"
+              echo "  HANGAR_ROOT:   $HANGAR_ROOT"
+              echo "  TIDEPOOL_REPO: $TIDEPOOL_REPO"
               echo ""
-              echo "For WASM builds: nix develop .#wasm"
+              echo "Commands:"
+              echo "  cd repo && cabal build all      Build Haskell packages"
+              echo "  cd repo && just native          Run native server"
+              echo "  cd repo && ./start-augmented.sh Start Claude Code++ session"
+              echo ""
+              echo "Other shells:"
+              echo "  nix develop .#worker            Cloudflare Worker dev"
+              echo "  nix develop .#wasm              WASM cross-compilation"
               echo ""
             '';
           };
 
-          # Worker development (TypeScript + wrangler)
+          # Worker: Cloudflare Worker development (TypeScript only)
           worker = pkgs.mkShell {
-            packages = with pkgs; [
-              nodejs_20
-              pnpm
-              jq
-            ];
+            packages = commonPkgs ++ nodePkgs;
 
             shellHook = ''
-              echo "Cloudflare Worker Development Shell"
-              echo "===================================="
+              echo "╔═══════════════════════════════════════════════════════════╗"
+              echo "║         Cloudflare Worker Development Shell               ║"
+              echo "╚═══════════════════════════════════════════════════════════╝"
+              echo ""
+              echo "  Node.js: $(node --version)"
+              echo "  pnpm:    $(pnpm --version)"
               echo ""
               echo "Setup:"
-              echo "  cd deploy && pnpm install"
+              echo "  cd repo/deploy && pnpm install"
               echo ""
               echo "Development:"
-              echo "  pnpm dev      # wrangler dev"
-              echo "  pnpm deploy   # wrangler deploy"
+              echo "  pnpm dev      # wrangler dev (local)"
+              echo "  pnpm deploy   # wrangler deploy (production)"
               echo ""
             '';
           };
 
-          # Claude Code++ (human-augmented sessions)
-          claude-code-plus = pkgs.mkShell {
-            packages = with pkgs; [
-              # Native Haskell toolchain
-              haskell.compiler.ghc912
-              cabal-install
-
-              # Rust toolchain for mantle-agent
-              cargo
-              rustc
-
-              # Zellij for split-pane layout
-              zellij
-
-              # Runtime deps
-              zlib
-
-              # Dev utilities
-              jq
-            ];
-
-            shellHook = ''
-              echo "Claude Code++ Development Shell"
-              echo "================================"
-              echo ""
-
-              # Detect repo root (git root or current dir)
-              TIDEPOOL_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || echo "$PWD")
-              export TIDEPOOL_ROOT
-
-              # Set environment variables
-              export MANTLE_CONTROL_HOST=127.0.0.1
-              export MANTLE_CONTROL_PORT=7432
-
-              echo "Environment:"
-              echo "  TIDEPOOL_ROOT=$TIDEPOOL_ROOT"
-              echo "  MANTLE_CONTROL_HOST=$MANTLE_CONTROL_HOST"
-              echo "  MANTLE_CONTROL_PORT=$MANTLE_CONTROL_PORT"
-              echo ""
-
-              # Build control server (always, uses cabal cache)
-              echo "Building Haskell control server..."
-              if ! (cd "$TIDEPOOL_ROOT" && cabal build tidepool-control-server); then
-                echo ""
-                echo "ERROR: Control server build failed."
-                echo "Fix the errors above and try again."
-                echo "Or run manually: cabal build tidepool-control-server"
-                return 1
-              fi
-
-              # Build mantle-agent if needed
-              if [ ! -f "$TIDEPOOL_ROOT/rust/target/debug/mantle-agent" ]; then
-                echo "Building Rust mantle-agent..."
-                if ! (cd "$TIDEPOOL_ROOT/rust" && cargo build -p mantle-agent); then
-                  echo ""
-                  echo "ERROR: mantle-agent build failed."
-                  echo "Fix the errors above and try again."
-                  echo "Or run manually: cargo build -p mantle-agent"
-                  return 1
-                fi
-              fi
-
-              # Add mantle-agent to PATH
-              export PATH="$TIDEPOOL_ROOT/rust/target/debug:$PATH"
-
-              # Auto-copy Claude Code settings template if not exists
-              if [ ! -f "$TIDEPOOL_ROOT/.claude/settings.local.json" ]; then
-                if [ ! -f "$TIDEPOOL_ROOT/.claude/settings.local.json.template" ]; then
-                  echo ""
-                  echo "WARNING: Claude Code template not found."
-                  echo "  Expected: .claude/settings.local.json.template"
-                  echo "  Hooks will not work until you create .claude/settings.local.json"
-                else
-                  echo "Copying Claude Code settings template..."
-                  mkdir -p "$TIDEPOOL_ROOT/.claude"
-                  if cp "$TIDEPOOL_ROOT/.claude/settings.local.json.template" \
-                        "$TIDEPOOL_ROOT/.claude/settings.local.json" 2>/dev/null; then
-                    echo "  -> Created .claude/settings.local.json"
-                  else
-                    echo ""
-                    echo "ERROR: Failed to copy template."
-                    echo "Check permissions on .claude/ directory."
-                    return 1
-                  fi
-                fi
-              fi
-
-              echo ""
-              echo "Starting zellij session 'tidepool'..."
-              echo ""
-
-              # Generate zellij layout with correct cwd (KDL doesn't expand env vars)
-              cat > /tmp/tidepool-layout-$$.kdl <<EOF
-layout {
-    pane split_direction="vertical" {
-        pane size="40%" {
-            name "control-server"
-            cwd "$TIDEPOOL_ROOT"
-            command "cabal"
-            args "run" "tidepool-control-server"
-            focus true
-        }
-        pane size="60%" {
-            name "claude"
-        }
-    }
-}
-EOF
-
-              # Check if zellij session exists
-              if zellij list-sessions 2>/dev/null | grep -q "tidepool"; then
-                echo "Attaching to existing session..."
-                zellij attach tidepool
-              else
-                echo "Creating new session..."
-                zellij --layout /tmp/tidepool-layout-$$.kdl --session tidepool
-              fi
-            '';
-          };
-
-          # WASM cross-compilation
+          # WASM: Cross-compilation to WebAssembly
           wasm = pkgs.mkShell {
             packages = [
-              # GHC 9.10 for stability (9.14 is default but newer)
-              wasmPkgs.all_9_10
-
-              # wizer NOT bundled in ghc-wasm-meta
+              wasmPkgs.all_9_10  # GHC 9.10 WASM toolchain
               pkgs.wizer
-
-              # Node for TH external interpreter + wrangler
-              pkgs.nodejs_20
-              pkgs.pnpm
-
-              # Dev utilities
-              pkgs.jq
-              pkgs.just
-            ];
+            ] ++ commonPkgs ++ nodePkgs;
 
             shellHook = ''
-              echo "WASM Cross-Compilation Shell"
-              echo "============================="
+              echo "╔═══════════════════════════════════════════════════════════╗"
+              echo "║            WASM Cross-Compilation Shell                   ║"
+              echo "╚═══════════════════════════════════════════════════════════╝"
               echo ""
               echo "Tools available:"
               echo "  wasm32-wasi-ghc --version"
               echo "  wasm32-wasi-cabal build tidepool-wasm"
-              echo "  wasm32-wasi-ghci  (yes, it works!)"
               echo ""
               echo "Build pipeline:"
+              echo "  cd repo"
               echo "  wasm32-wasi-cabal build tidepool-wasm"
               echo "  # Output: dist-newstyle/.../tidepool-wasm.wasm"
               echo ""
-              echo "NOTE: Using GHC 9.10 (not 9.14) for stability"
-              echo "NOTE: Cabal 3.14 bundled (3.16 has WASM TH regression)"
+              echo "NOTE: Using GHC 9.10 for stability (not 9.14)"
+              echo ""
+            '';
+          };
+
+          # Minimal: Just Haskell + HLS for quick edits
+          minimal = pkgs.mkShell {
+            packages = commonPkgs ++ haskellPkgs "ghc910";
+
+            shellHook = ''
+              export PKG_CONFIG_PATH="${pkgs.zlib.dev}/lib/pkgconfig:$PKG_CONFIG_PATH"
+              export NIX_GHC_LIBDIR="$(ghc --print-libdir)"
+
+              echo "Tidepool Minimal Shell (Haskell only)"
+              echo "  GHC: $(ghc --numeric-version)"
+              echo "  HLS: available"
               echo ""
             '';
           };
         };
+
+        # Allow `nix build` to produce a simple check
+        packages.default = pkgs.writeShellScriptBin "tidepool-env-check" ''
+          echo "Tidepool environment check"
+          echo "Run 'nix develop' to enter the development shell"
+        '';
       }
     );
 }
