@@ -1,0 +1,30 @@
+layout {
+    default_tab_template {
+        children
+        pane size=1 borderless=true {
+            plugin location="zellij:compact-bar"
+        }
+    }
+
+    tab name="Orchestrator" focus=true {
+        pane split_direction="vertical" {
+            // Pane 1: Control Server
+            pane name="Control Server" size="40%" {
+                command "bash"
+                args "-c" "tidepool-control-server --socket $TIDEPOOL_CONTROL_SOCKET 2>&1 | tee /var/log/tidepool/control-server.log"
+            }
+
+            pane split_direction="horizontal" {
+                // Pane 2: Shell
+                pane name="Shell" focus=true {
+                }
+
+                // Pane 3: Logs
+                pane name="Logs" {
+                    command "tail"
+                    args "-f" "/var/log/tidepool/control-server.log"
+                }
+            }
+        }
+    }
+}
