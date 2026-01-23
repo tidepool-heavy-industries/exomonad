@@ -96,7 +96,7 @@ runServer logger config = do
         logInfo logger $ "Listening on (Unix): " <> T.pack controlSocket
         runSettingsSocket settings sock (app logger configWithObs tuiState))
     (do
-        logInfo logger "Listening on (TCP): :7432"
+        logInfo logger "Listening on (TCP): 0.0.0.0:7432"
         runSettings (setPort 7432 settings) (app logger configWithObs tuiState))
 
 -- | Setup Unix socket at given path.
@@ -249,7 +249,7 @@ server logger config tuiState =
             else do
               let sessId = fromMaybe req.mcpId mSessionId
               liftIO $ logError logger $ "[MCP:" <> slug <> ":" <> sessId <> "] Forbidden tool: " <> req.toolName
-              pure $ mcpToolError sessId InvalidInput ("Tool not allowed for role " <> slug <> ": " <> req.toolName)
+              pure $ mcpToolError sessId PermissionDenied ("Tool not allowed for role " <> slug <> ": " <> req.toolName)
 
 -- | WebSocket response message from tui-popup.
 data PopupResponse = PopupResponse

@@ -391,6 +391,7 @@ data ErrorCode
   | ExternalFailure       -- -32003: Subprocess or I/O error
   | StateError            -- -32004: Invalid state (already exists, blocked)
   | EnvironmentError      -- -32005: Missing environment (not in Zellij)
+  | PermissionDenied      -- -32006: Role-based access denied
   deriving stock (Show, Eq, Generic)
 
 -- | Get numeric code for ErrorCode.
@@ -400,6 +401,7 @@ errorCodeValue InvalidInput = -32002
 errorCodeValue ExternalFailure = -32003
 errorCodeValue StateError = -32004
 errorCodeValue EnvironmentError = -32005
+errorCodeValue PermissionDenied = -32006
 
 -- | MCP error response with structured details.
 --
@@ -467,6 +469,7 @@ instance FromJSON McpError where
       -32003 -> pure ExternalFailure
       -32004 -> pure StateError
       -32005 -> pure EnvironmentError
+      -32006 -> pure PermissionDenied
       n -> fail $ "Unknown error code: " <> show n
     McpError code
       <$> o .: "message"
