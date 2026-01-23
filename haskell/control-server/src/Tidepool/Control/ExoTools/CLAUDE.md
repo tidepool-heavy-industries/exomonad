@@ -89,9 +89,13 @@ Create git worktrees for multiple beads and launch isolated agent sessions in Ze
 **Field Details:**
 
 - `bead_ids`: Array of short-form bead IDs (e.g., "wzi", "1b2")
-  - Automatically prefixed with "tidepool-" if missing
-  - Used for branch naming: `bd-<id>/<slug>`
-  - Used for worktree directory: `bd-<id>-<slug>`
+  - **Must be short-form only** (no `"tidepool-"` prefix)
+  - For beads/BD lookup, the ID is normalized: if missing, `"tidepool-"` is prefixed (e.g., `"4hj"` → `"tidepool-4hj"`)
+  - For git branch, worktree, and socket naming the **original provided value** is used:
+    - Branch name: `bd-<raw-id>/<slug>` (e.g., `bd-4hj/fix-bug`)
+    - Worktree directory: `bd-<raw-id>-<slug>` (e.g., `bd-4hj-fix-bug`)
+    - Socket directory: `/tmp/tidepool-<raw-id>/...` (e.g., `/tmp/tidepool-4hj/control.sock`)
+  - Passing a value that already includes `"tidepool-"` (e.g., `"tidepool-4hj"`) will result in names like `bd-tidepool-4hj/...` and `/tmp/tidepool-tidepool-4hj/...`; avoid this by always sending short-form IDs
 
 - `backend`: Backend CLI to use
   - `"claude"`: Launches `claude --debug --verbose`
@@ -518,15 +522,28 @@ spawn_agents({
 }
 ```
 
-## Error Codes
+## Error Handling and MCP Error Codes
 
-| Code | Name | Example |
-|------|------|---------|
-| -32001 | NotFound | Bead not found in `.beads/beads.jsonl` |
-| -32002 | InvalidInput | Invalid bead ID (contains path separators) |
-| -32003 | ExternalFailure | Git worktree creation failed |
-| -32004 | StateError | Bead is blocked, worktree already exists |
-| -32005 | EnvironmentError | Not in Zellij session, binary missing |
+`spawn_agents` has two layers of error reporting:
+
+- **MCP-level tool errors** (numeric error codes): used only when the tool itself fails
+  and cannot return a `SpawnAgentsResult` at all (e.g., JSON argument parsing fails,
+  or `handleSpawnAgentsTool` throws an exception). In this case the MCP server returns
+  a standard MCP error response with one of the codes below and **no** `worktrees` /
+  `tabs` / `failed` fields.
+- **Per-bead failures**: when the tool call succeeds overall, but some beads cannot be
+  processed, those issues are reported in the `failed` array of `SpawnAgentsResult`
+  (as shown in the example above). These **do not** use MCP error codes.
+
+### MCP-level error codes
+
+| Code   | Name              | Example (tool-level failure)                                   |
+|--------|-------------------|-----------------------------------------------------------------|
+| -32001 | NotFound          | Required resource missing (e.g., `.beads/beads.jsonl` file absent) |
+| -32002 | InvalidInput      | Request arguments failed validation or JSON could not be parsed |
+| -32003 | ExternalFailure   | Underlying `git`/`zellij` command crashed unexpectedly         |
+| -32004 | StateError        | Unexpected internal state in `handleSpawnAgentsTool`           |
+| -32005 | EnvironmentError  | Server environment misconfigured (e.g., `git` binary missing)  |
 
 ## Troubleshooting
 
@@ -682,11 +699,11 @@ handleSpawnAgentsTool logger reqId args = do
 
 ## Related Documentation
 
-- **[control-server/CLAUDE.md](../CLAUDE.md)** - MCP tool overview
+- **[control-server/CLAUDE.md](../../../CLAUDE.md)** - MCP tool overview
 - **[Runtime/ProcessCompose.hs](../Runtime/ProcessCompose.hs)** - Config generation
 - **[Runtime/Paths.hs](../Runtime/Paths.hs)** - Path utilities
-- **[../../effects/zellij-interpreter/CLAUDE.md](../../effects/zellij-interpreter/CLAUDE.md)** - Zellij effect
-- **[Root CLAUDE.md](../../../../CLAUDE.md)** - Hangar structure
+- **[effects/zellij-interpreter/CLAUDE.md](../../../../../effects/zellij-interpreter/CLAUDE.md)** - Zellij effect
+- **[Root CLAUDE.md](../../../../../../CLAUDE.md)** - Hangar structure
 
 ## Future Enhancements
 
