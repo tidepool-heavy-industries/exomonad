@@ -30,10 +30,11 @@ import GHC.Generics (Generic)
 import System.FilePath ((</>), takeDirectory)
 
 import Tidepool.Effects.BD (BD, BeadInfo(..), BeadStatus(..), DependencyInfo(..), getBead)
-import Tidepool.Effects.Env (Env, getEnv)
+import Tidepool.Effects.Env (Env, getEnv, getEnvironment)
 import Tidepool.Effects.Git (Git, WorktreeInfo(..), getWorktreeInfo)
 import Tidepool.Effects.Worktree (Worktree, WorktreeSpec(..), WorktreePath(..), createWorktree)
-import Tidepool.Effects.FileSystem (FileSystem, createDirectory, writeFileText, copyFile, createSymlink, fileExists, directoryExists, readFileText)
+
+import Tidepool.Effects.FileSystem (FileSystem, createDirectory, writeFileText, copyFile, fileExists, directoryExists, readFileText)
 import Tidepool.Effects.Zellij (Zellij, TabConfig(..), TabId(..), checkZellijEnv, newTab)
 import Tidepool.Graph.Generic (AsHandler, type (:-))
 import Tidepool.Graph.Generic.Core (EntryNode, ExitNode, LogicNode)
@@ -232,7 +233,7 @@ spawnAgentsLogic args = do
 
 -- | Process a single bead: create worktree, bootstrap .tidepool/, write context, launch tab.
 processBead
-  :: (Member BD es, Member Worktree es, Member FileSystem es, Member Zellij es)
+  :: (Member BD es, Member Worktree es, Member FileSystem es, Member Zellij es, Member Env es)
   => Maybe FilePath                                    -- ^ Hangar root (for templates)
   -> FilePath                                          -- ^ Repo root (for symlinks/templates)
   -> FilePath                                          -- ^ Worktree base directory
@@ -295,7 +296,31 @@ processBead mHangarRoot repoRoot wtBaseDir backend shortId = do
                         Left err -> pure $ Left (shortId, T.pack (show err))
                         Right (WorktreePath path) -> do
                           -- b. Bootstrap .tidepool/ directory structure
-                          bootstrapRes <- bootstrapTidepool mHangarRoot repoRoot path backend
+                          -- Compute socket paths here (before bootstrap) since we need them for:
+                          -- 1. Creating /tmp/tidepool-<shortId>/ directory
+                          -- 2. Passing to writeGeminiConfig for MCP config
+                          let socketDir = "/tmp/tidepool-" <> T.unpack shortId
+                              controlSocket = socketDir </> "control.sock"
+                              tuiSocket = socketDir </> "tui.sock"
+                              
+                              -- d. Write subagent environment
+                              -- Socket paths (socketDir, controlSocket) were computed above for bootstrap.
+                              -- Inject HANGAR_ROOT and TIDEPOOL_BIN_DIR to avoid fragile shell discovery.
+                              -- Launch backend with appropriate flags for hook execution visibility
+                              backendCmd = case backend of
+                                    "gemini" -> "gemini --debug"
+                                    "claude" -> "claude --debug --verbose"
+                                    _        -> "claude --debug --verbose"
+                              envVars =
+                                [ ("SUBAGENT_CMD", backendCmd)
+                                , ("HANGAR_ROOT", T.pack hr)
+                                , ("TIDEPOOL_BIN_DIR", T.pack $ hr </> "runtime" </> "bin")
+                                , ("TIDEPOOL_SOCKET_DIR", T.pack socketDir)
+                                , ("TIDEPOOL_CONTROL_SOCKET", T.pack controlSocket)
+                                , ("TIDEPOOL_TUI_SOCKET", T.pack tuiSocket)
+                                ]
+
+                          bootstrapRes <- bootstrapTidepool mHangarRoot repoRoot path backend socketDir controlSocket envVars
                           case bootstrapRes of
                             Left errMsg -> pure $ Left (shortId, "Worktree created but bootstrap failed: " <> errMsg)
                             Right () -> do
@@ -305,59 +330,42 @@ processBead mHangarRoot repoRoot wtBaseDir backend shortId = do
                               case contextRes of
                                 Left errMsg -> pure $ Left (shortId, "Worktree created but context write failed: " <> errMsg)
                                 Right () -> do
-                                  -- d. Write subagent environment
-                                  -- Explicitly set sockets to relative paths to ensure isolation from root instance.
-                                  -- Inject HANGAR_ROOT and TIDEPOOL_BIN_DIR to avoid fragile shell discovery.
-                                  -- Launch backend with appropriate flags for hook execution visibility
-                                  -- (backend is already validated and normalized to lowercase)
-                                  let backendCmd = case backend of
-                                        "gemini" -> "gemini --debug"  -- Gemini CLI has no --verbose flag
-                                        "claude" -> "claude --debug --verbose"
-                                        _        -> "claude --debug --verbose"  -- Unreachable: validation ensures only claude|gemini
-                                      envVars =
-                                        [ ("SUBAGENT_CMD", backendCmd)
-                                        , ("HANGAR_ROOT", T.pack hr)
-                                        , ("TIDEPOOL_BIN_DIR", T.pack $ hr </> "runtime" </> "bin")
-                                        , ("TIDEPOOL_CONTROL_SOCKET", ".tidepool/sockets/control.sock")
-                                        , ("TIDEPOOL_TUI_SOCKET", ".tidepool/sockets/tui.sock")
-                                        ]
-                                  envRes <- writeEnvFile path envVars
-                                  case envRes of
-                                    Left errMsg -> pure $ Left (shortId, "Worktree created but env write failed: " <> errMsg)
-                                    Right () -> do
-                                      -- e. Launch Zellij tab
-                                      -- Use absolute path for layout to avoid CWD resolution issues
-                                      let tabConfig = TabConfig
-                                            { tcName = shortId
-                                            , tcLayout = repoRoot </> ".zellij" </> "worktree.kdl"
-                                            , tcCwd = path
-                                            , tcEnv = envVars
-                                            }
-                                      tabRes <- newTab tabConfig
-                                      case tabRes of
-                                        Left err -> pure $ Left (shortId, "Worktree created but tab launch failed: " <> T.pack (show err))
-                                        Right tabId -> pure $ Right (shortId, path, tabId)
+                                  -- e. Launch Zellij tab
+                                  -- Use absolute path for layout to avoid CWD resolution issues
+                                  let tabConfig = TabConfig
+                                        { tcName = shortId
+                                        , tcLayout = repoRoot </> ".zellij" </> "worktree.kdl"
+                                        , tcCwd = path
+                                        , tcEnv = envVars
+                                        }
+                                  tabRes <- newTab tabConfig
+                                  case tabRes of
+                                    Left err -> pure $ Left (shortId, "Worktree created but tab launch failed: " <> T.pack (show err))
+                                    Right tabId -> pure $ Right (shortId, path, tabId)
 
 
 -- | Bootstrap .tidepool/ directory structure in a worktree.
 bootstrapTidepool
-  :: (Member FileSystem es)
+  :: (Member FileSystem es, Member Env es)
   => Maybe FilePath  -- ^ Hangar root (for templates)
   -> FilePath        -- ^ Repo root (for symlink source)
   -> FilePath        -- ^ Worktree path
   -> Text            -- ^ Backend ("claude" or "gemini")
+  -> FilePath        -- ^ Socket directory (e.g., /tmp/tidepool-<id>)
+  -> FilePath        -- ^ Control socket path (e.g., /tmp/tidepool-<id>/control.sock)
+  -> [(Text, Text)]  -- ^ Subagent environment variables
   -> Eff es (Either Text ())
-bootstrapTidepool mHangarRoot repoRoot worktreePath backend = do
-  -- Create .tidepool directory structure.
-  -- These MUST exist for process-compose log tailing and control sockets.
-  let socketsDir = worktreePath </> ".tidepool" </> "sockets"
-      logsDir = worktreePath </> ".tidepool" </> "logs"
-
-  -- Create directories (FileSystem.createDirectory creates parents automatically)
-  res1 <- createDirectory socketsDir
-  case res1 of
-    Left err -> pure $ Left $ "Failed to create .tidepool/sockets: " <> T.pack (show err)
+bootstrapTidepool mHangarRoot repoRoot worktreePath backend socketDir controlSocket subagentVars = do
+  -- Create socket directory in /tmp (avoids SUN_LEN path length limits).
+  -- Unix sockets have ~104 byte path limit on macOS; worktree paths can exceed this.
+  res0 <- createDirectory socketDir
+  case res0 of
+    Left err -> pure $ Left $ "Failed to create socket directory " <> T.pack socketDir <> ": " <> T.pack (show err)
     Right () -> do
+      -- Create .tidepool directory structure for logs (sockets are in /tmp now).
+      let logsDir = worktreePath </> ".tidepool" </> "logs"
+
+      -- Create directories (FileSystem.createDirectory creates parents automatically)
       res2 <- createDirectory logsDir
       case res2 of
         Left err -> pure $ Left $ "Failed to create .tidepool/logs: " <> T.pack (show err)
@@ -371,12 +379,25 @@ bootstrapTidepool mHangarRoot repoRoot worktreePath backend = do
           case copyRes of
             Left err -> pure $ Left $ "Failed to copy process-compose.yaml: " <> T.pack (show err)
             Right () -> do
-              -- Symlink .env from repo root
-              let srcEnv = repoRoot </> ".env"
+              -- Write custom .env file (merging root .env and subagent config)
+              -- This replaces the symlink approach which caused variable shadowing issues.
+              -- We snapshot the current environment (Haskell as source of truth) to ensure
+              -- all secrets and config are propagated, while overriding socket paths.
+              rootEnvVars <- getEnvironment
+              
+              -- Filter out conflicting keys from root env
+              let filteredRootVars = filter (\(k, _) -> k `notElem` ["TIDEPOOL_CONTROL_SOCKET", "TIDEPOOL_TUI_SOCKET"]) rootEnvVars
+                  
+                  -- Merge vars: subagent vars take precedence
+                  mergedVars = filteredRootVars ++ subagentVars
+                  
+                  -- Generate .env content
                   dstEnv = worktreePath </> ".env"
-              symlinkRes <- createSymlink srcEnv dstEnv
-              case symlinkRes of
-                Left err -> pure $ Left $ "Failed to symlink .env: " <> T.pack (show err)
+                  envContent = T.unlines [ k <> "=\"" <> v <> "\"" | (k, v) <- mergedVars ]
+
+              writeRes <- writeFileText dstEnv envContent
+              case writeRes of
+                Left err -> pure $ Left $ "Failed to write .env: " <> T.pack (show err)
                 Right () -> do
                   -- Write Claude local settings with SessionStart hooks
                   -- This bypasses FSWatcher issues with project-scope settings in worktrees
@@ -388,7 +409,7 @@ bootstrapTidepool mHangarRoot repoRoot worktreePath backend = do
                     Right () -> do
                       -- Write Gemini config if backend is "gemini"
                       geminiRes <- if backend == "gemini"
-                                     then writeGeminiConfig hr worktreePath
+                                     then writeGeminiConfig hr worktreePath controlSocket
                                      else pure $ Right ()
                       case geminiRes of
                         Left err -> pure $ Left $ "Failed to write Gemini config: " <> err
@@ -415,27 +436,6 @@ writeBeadContext worktreePath context = do
     Left err -> pure $ Left $ T.pack (show err)
     Right () -> do
       writeRes <- writeFileText contextFile context
-      case writeRes of
-        Left err -> pure $ Left $ T.pack (show err)
-        Right () -> pure $ Right ()
-
-
--- | Write environment variables to a file (e.g. .env.subagent).
-writeEnvFile
-  :: (Member FileSystem es)
-  => FilePath  -- ^ Worktree path
-  -> [(Text, Text)] -- ^ Env vars
-  -> Eff es (Either Text ())
-writeEnvFile worktreePath envVars = do
-  -- Validate all values are non-empty
-  let invalid = filter (T.null . snd) envVars
-  if not (null invalid)
-    then pure $ Left $ "Empty env vars: " <> T.pack (show invalid)
-    else do
-      let envFile = worktreePath </> ".env.subagent"
-          -- Quote values to handle spaces (e.g., "claude --debug --verbose")
-          content = T.unlines [ "export " <> k <> "=\"" <> v <> "\"" | (k, v) <- envVars ]
-      writeRes <- writeFileText envFile content
       case writeRes of
         Left err -> pure $ Left $ T.pack (show err)
         Right () -> pure $ Right ()
@@ -512,15 +512,15 @@ writeGeminiConfig
   :: (Member FileSystem es)
   => FilePath  -- ^ Hangar root (for absolute path to mantle-agent)
   -> FilePath  -- ^ Worktree path
+  -> FilePath  -- ^ Control socket path (short path in /tmp to avoid SUN_LEN limits)
   -> Eff es (Either Text ())
-writeGeminiConfig hangarRoot worktreePath = do
+writeGeminiConfig hangarRoot worktreePath controlSocket = do
   let geminiDir = worktreePath </> ".gemini"
       settingsFile = geminiDir </> "settings.json"
       -- Gemini CLI doesn't expand $GEMINI_PROJECT_DIR, so use absolute paths
       mantleAgent = hangarRoot </> "runtime" </> "bin" </> "mantle-agent"
       hookCmd = mantleAgent <> " hook session-start"
-      -- Absolute path to control socket (mantle-agent needs this)
-      controlSocket = worktreePath </> ".tidepool" </> "sockets" </> "control.sock"
+      -- controlSocket is passed in (short path in /tmp to avoid SUN_LEN limits)
 
       settings = object
         [ "hooksConfig" .= object
