@@ -1678,6 +1678,7 @@ dependencies = [
  "serde_json",
  "shell-escape",
  "strum 0.26.3",
+ "tempfile",
  "tracing",
  "tracing-subscriber",
  "uuid",

@@ -8,7 +8,7 @@ use tracing::info;
 /// Connects to the control socket, sends a Ping message, and waits for a Pong.
 /// Returns Ok(()) if successful, or an error if the check fails.
 pub fn run_health_check() -> Result<()> {
-    let path = control_socket_path();
+    let path = control_socket_path()?;
     info!(path = %path.display(), "Checking control server health");
 
     let mut socket = ControlSocket::connect(&path)?;

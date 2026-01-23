@@ -92,7 +92,15 @@ pub fn handle_hook(event_type: HookEventType, runtime: Runtime) -> Result<()> {
     }
 
     // Get control server socket path
-    let path = control_socket_path();
+    let path = match control_socket_path() {
+        Ok(p) => p,
+        Err(e) => {
+            return handle_server_unavailable(
+                event_type,
+                &format!("Control socket path not available: {}", e),
+            );
+        }
+    };
 
     // Connect to control server via Unix socket
     let mut socket = match ControlSocket::connect(&path) {

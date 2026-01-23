@@ -79,7 +79,7 @@ async fn main() -> Result<()> {
                     // Check if control server socket exists but TUI socket is missing.
                     // If control.sock exists but tui.sock doesn't after a few retries,
                     // it's likely that TUI was explicitly disabled.
-                    let control_socket_exists = control_socket_path.as_ref().map(|p| p.exists()).unwrap_or(false);
+                    let control_socket_exists = control_socket_path.as_ref().is_some_and(|p| p.exists());
 
                     if retry_count >= max_retries {
                         if control_socket_exists {

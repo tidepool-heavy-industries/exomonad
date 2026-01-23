@@ -18,7 +18,7 @@ pub fn print_event_humanized(event: &StreamEvent) {
             } else {
                 &s.session_id
             };
-            println!("━━━ Session {} ━━━", short_id);
+            println!("━━━ Session {short_id} ━━━");
             println!("Model: {}", s.model);
             println!();
         }
@@ -26,10 +26,10 @@ pub fn print_event_humanized(event: &StreamEvent) {
             for block in &a.message.content {
                 match block {
                     ContentBlock::Text { text } => {
-                        println!("{}", text);
+                        println!("{text}");
                     }
                     ContentBlock::ToolUse { name, input, .. } => {
-                        println!("\n┌─ {} ─────────────────", name);
+                        println!("\n┌─ {name} ─────────────────");
                         // Show key input params, truncated
                         if let Some(obj) = input.as_object() {
                             for (k, v) in obj.iter().take(3) {
@@ -37,13 +37,14 @@ pub fn print_event_humanized(event: &StreamEvent) {
                                 let char_count = v_str.chars().count();
                                 let preview: String = v_str.chars().take(60).collect();
                                 if char_count > 60 {
-                                    println!("│ {}: {}...", k, preview);
+                                    println!("│ {k}: {preview}...");
                                 } else {
-                                    println!("│ {}: {}", k, preview);
+                                    println!("│ {k}: {preview}");
                                 }
                             }
                             if obj.len() > 3 {
-                                println!("│ ... ({} more fields)", obj.len() - 3);
+                                let more = obj.len() - 3;
+                                println!("│ ... ({more} more fields)");
                             }
                         }
                         println!("└─────────────────────────");
@@ -59,9 +60,9 @@ pub fn print_event_humanized(event: &StreamEvent) {
                         let char_count = content.chars().count();
                         let preview: String = content.chars().take(100).collect();
                         if char_count > 100 {
-                            println!("  {} {}...", status, preview);
+                            println!("  {status} {preview}...");
                         } else {
-                            println!("  {} {}", status, preview);
+                            println!("  {status} {preview}");
                         }
                     }
                 }
@@ -73,19 +74,21 @@ pub fn print_event_humanized(event: &StreamEvent) {
         StreamEvent::Result(r) => {
             println!();
             println!("━━━ Complete ━━━");
-            println!("Status: {}", if r.is_error { "error" } else { "success" });
-            println!("Turns: {}", r.num_turns.unwrap_or(0));
-            println!("Cost: ${:.4}", r.total_cost_usd.unwrap_or(0.0));
+            let status = if r.is_error { "error" } else { "success" };
+            println!("Status: {status}");
+            let turns = r.num_turns.unwrap_or(0);
+            println!("Turns: {turns}");
+            let cost = r.total_cost_usd.unwrap_or(0.0);
+            println!("Cost: ${cost:.4}");
         }
     }
 }
 
 /// Print an interrupt signal notification.
 pub fn print_interrupt(signal: &InterruptSignal) {
-    println!(
-        "\n⚡ Interrupt: {} (state: {:?})",
-        signal.signal_type, signal.state
-    );
+    let sig_type = &signal.signal_type;
+    let sig_state = &signal.state;
+    println!("\n⚡ Interrupt: {sig_type} (state: {sig_state:?})");
 }
 
 /// Print a stream event to stderr in human-readable format.
@@ -100,7 +103,7 @@ pub fn eprint_event_humanized(event: &StreamEvent) {
             } else {
                 &s.session_id
             };
-            eprintln!("━━━ Session {} ━━━", short_id);
+            eprintln!("━━━ Session {short_id} ━━━");
             eprintln!("Model: {}", s.model);
             eprintln!();
         }
@@ -108,23 +111,24 @@ pub fn eprint_event_humanized(event: &StreamEvent) {
             for block in &a.message.content {
                 match block {
                     ContentBlock::Text { text } => {
-                        eprintln!("{}", text);
+                        eprintln!("{text}");
                     }
                     ContentBlock::ToolUse { name, input, .. } => {
-                        eprintln!("\n┌─ {} ─────────────────", name);
+                        eprintln!("\n┌─ {name} ─────────────────");
                         if let Some(obj) = input.as_object() {
                             for (k, v) in obj.iter().take(3) {
                                 let v_str = v.to_string();
                                 let char_count = v_str.chars().count();
                                 let preview: String = v_str.chars().take(60).collect();
                                 if char_count > 60 {
-                                    eprintln!("│ {}: {}...", k, preview);
+                                    eprintln!("│ {k}: {preview}...");
                                 } else {
-                                    eprintln!("│ {}: {}", k, preview);
+                                    eprintln!("│ {k}: {preview}");
                                 }
                             }
                             if obj.len() > 3 {
-                                eprintln!("│ ... ({} more fields)", obj.len() - 3);
+                                let more = obj.len() - 3;
+                                eprintln!("│ ... ({more} more fields)");
                             }
                         }
                         eprintln!("└─────────────────────────");
@@ -140,9 +144,9 @@ pub fn eprint_event_humanized(event: &StreamEvent) {
                         let char_count = content.chars().count();
                         let preview: String = content.chars().take(100).collect();
                         if char_count > 100 {
-                            eprintln!("  {} {}...", status, preview);
+                            eprintln!("  {status} {preview}...");
                         } else {
-                            eprintln!("  {} {}", status, preview);
+                            eprintln!("  {status} {preview}");
                         }
                     }
                 }
@@ -154,9 +158,12 @@ pub fn eprint_event_humanized(event: &StreamEvent) {
         StreamEvent::Result(r) => {
             eprintln!();
             eprintln!("━━━ Complete ━━━");
-            eprintln!("Status: {}", if r.is_error { "error" } else { "success" });
-            eprintln!("Turns: {}", r.num_turns.unwrap_or(0));
-            eprintln!("Cost: ${:.4}", r.total_cost_usd.unwrap_or(0.0));
+            let status = if r.is_error { "error" } else { "success" };
+            eprintln!("Status: {status}");
+            let turns = r.num_turns.unwrap_or(0);
+            eprintln!("Turns: {turns}");
+            let cost = r.total_cost_usd.unwrap_or(0.0);
+            eprintln!("Cost: ${cost:.4}");
         }
     }
     // Flush stderr to ensure output appears immediately

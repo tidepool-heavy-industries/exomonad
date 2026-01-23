@@ -35,13 +35,13 @@ pub struct PopupComponent {
 }
 
 /// Wrapper for individual components with their metadata
-pub(crate) struct ComponentWrapper {
-    pub(crate) label: String,
-    pub(crate) component: Box<dyn MockComponent>,
-    pub(crate) component_type: ComponentType,
-    pub(crate) focusable: bool,
-    pub(crate) min_height: u16,
-    pub(crate) is_multiselect: bool,
+pub struct ComponentWrapper {
+    pub label: String,
+    pub component: Box<dyn MockComponent>,
+    pub component_type: ComponentType,
+    pub focusable: bool,
+    pub min_height: u16,
+    pub is_multiselect: bool,
 }
 
 impl PopupComponent {

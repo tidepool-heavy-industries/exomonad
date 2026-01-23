@@ -40,11 +40,11 @@ async fn test_create_session() {
 
     // Verify response has session and root_node
     assert!(
-        body["session"]["id"].as_str().map(|s| !s.is_empty()).unwrap_or(false),
+        body["session"]["id"].as_str().is_some_and(|s| !s.is_empty()),
         "Session ID should be non-empty"
     );
     assert!(
-        body["root_node"]["id"].as_str().map(|s| !s.is_empty()).unwrap_or(false),
+        body["root_node"]["id"].as_str().is_some_and(|s| !s.is_empty()),
         "Root node ID should be non-empty"
     );
 

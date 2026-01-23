@@ -194,7 +194,7 @@ struct ToolResultContent {
 /// mantle-agent exits with an error rather than serving an empty tool list.
 fn query_control_server_tools() -> Result<Vec<ToolDefinition>, String> {
     // Get control server socket path
-    let path = control_socket_path();
+    let path = control_socket_path().map_err(|e| e.to_string())?;
 
     info!(path = %path.display(), "Querying control server for tool definitions");
 
@@ -266,9 +266,9 @@ impl McpServer {
             });
 
         // Get control server socket path
-        let control_path = control_socket_path();
+        let control_path = control_socket_path().ok();
 
-        Self::new(Some(control_path), tools, tools_allowlist)
+        Self::new(control_path, tools, tools_allowlist)
     }
 
     /// Run the MCP server on stdio.
@@ -325,31 +325,28 @@ impl McpServer {
     /// Returns `Some(response)` for requests.
     fn handle_request(&mut self, request: JsonRpcRequest) -> Option<JsonRpcResponse> {
         // Notifications have no id - they don't expect a response
-        let id = match request.id {
-            Some(id) => id,
-            None => {
-                // This is a notification - handle silently, no response
-                debug!(method = %request.method, "Received notification (no response)");
-                return None;
-            }
-        };
-
-        // This is a request - needs a response
-        let response = match request.method.as_str() {
-            "initialize" => self.handle_initialize(id),
-            "initialized" => {
-                // This shouldn't happen (initialized is a notification), but handle gracefully
-                JsonRpcResponse::success(id, json!({}))
-            }
-            "tools/list" => self.handle_tools_list(id),
-            "tools/call" => self.handle_tools_call(id, request.params),
-            "notifications/cancelled" => {
-                // This shouldn't happen (notifications have no id), but handle gracefully
-                JsonRpcResponse::success(id, json!({}))
-            }
-            _ => JsonRpcResponse::method_not_found(id, &request.method),
-        };
-        Some(response)
+        if let Some(id) = request.id {
+            // This is a request - needs a response
+            let response = match request.method.as_str() {
+                "initialize" => self.handle_initialize(id),
+                "initialized" => {
+                    // This shouldn't happen (initialized is a notification), but handle gracefully
+                    JsonRpcResponse::success(id, json!({}))
+                }
+                "tools/list" => self.handle_tools_list(id),
+                "tools/call" => self.handle_tools_call(id, request.params),
+                "notifications/cancelled" => {
+                    // This shouldn't happen (notifications have no id), but handle gracefully
+                    JsonRpcResponse::success(id, json!({}))
+                }
+                _ => JsonRpcResponse::method_not_found(id, &request.method),
+            };
+            Some(response)
+        } else {
+            // This is a notification - handle silently, no response
+            debug!(method = %request.method, "Received notification (no response)");
+            None
+        }
     }
 
     /// Handle initialize request.
@@ -509,9 +506,7 @@ impl McpServer {
 
         match response {
             ControlResponse::McpToolResponse { result, error, .. } => {
-                if let Some(err) = error {
-                    Ok(Err(err))
-                } else {
+                error.map_or_else(|| {
                     // Use the host's result or create a default response
                     let result_value = result.unwrap_or_else(|| {
                         serde_json::json!({
@@ -522,7 +517,7 @@ impl McpServer {
                         })
                     });
                     Ok(Ok(result_value))
-                }
+                }, |err| Ok(Err(err)))
             }
             ControlResponse::HookResponse { .. } => {
                 Err("Unexpected HookResponse for MCP call".to_string())
@@ -569,7 +564,7 @@ mod tests {
         let json = r#"{"jsonrpc":"2.0","id":"1","method":"initialize","params":{}}"#;
         let request: JsonRpcRequest = serde_json::from_str(json).unwrap();
         assert_eq!(request.method, "initialize");
-        assert_eq!(request.id, json!("1"));
+        assert_eq!(request.id, Some(json!("1")));
     }
 
     #[test]
@@ -666,11 +661,13 @@ mod tests {
         let mut server = McpServer::new(None, vec![], None);
         let request = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),
-            id: json!("1"),
+            id: Some(json!("1")),
             method: "unknown/method".to_string(),
             params: json!({}),
         };
         let response = server.handle_request(request);
+        assert!(response.is_some());
+        let response = response.unwrap();
         assert!(response.error.is_some());
         assert_eq!(response.error.unwrap().code, -32601);
     }

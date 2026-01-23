@@ -142,15 +142,16 @@ impl ControlSocket {
 }
 
 /// Get control server socket path from environment.
-///
-/// # Panics
-///
-/// Panics if TIDEPOOL_CONTROL_SOCKET environment variable is not set.
-pub fn control_socket_path() -> PathBuf {
-    match std::env::var("TIDEPOOL_CONTROL_SOCKET") {
-        Ok(path) => PathBuf::from(path),
-        Err(_) => panic!("TIDEPOOL_CONTROL_SOCKET environment variable not set. This should be set via start-augmented.sh or .env"),
-    }
+pub fn control_socket_path() -> Result<PathBuf> {
+    std::env::var("TIDEPOOL_CONTROL_SOCKET")
+        .map(PathBuf::from)
+        .map_err(|_| MantleError::UnixConnect {
+            path: PathBuf::from("UNKNOWN"),
+            source: std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "TIDEPOOL_CONTROL_SOCKET environment variable not set. This should be set via start-augmented.sh or .env"
+            ),
+        })
 }
 
 #[cfg(all(test, unix))] 
