@@ -197,6 +197,10 @@ docker-build-all: docker-build docker-build-agent
 docker-up:
     docker compose up -d
 
+# Start orchestrator-dev in detached mode
+docker-up-dev:
+    docker compose --profile dev up -d
+
 # Attach to orchestrator TUI (detach keys: ctrl-p,ctrl-q)
 docker-attach:
     docker attach --detach-keys="ctrl-p,ctrl-q" tidepool-orchestrator
@@ -216,4 +220,8 @@ docker-down:
 
 # One-command workflow (build + up + attach)
 docker-run: docker-build docker-up docker-attach
+
+# One-command dev workflow (build + up-dev + attach to orchestrator-dev)
+docker-run-dev: docker-build docker-up-dev
+    docker attach --detach-keys="ctrl-p,ctrl-q" orchestrator-dev
 

@@ -11,20 +11,19 @@ if [ -n "$GIT_ALTERNATES_OBJECT_DIR" ] && [ -d "/workspace/.git" ]; then
 fi
 
 # 1.5 Handle Auth Isolation
-# If credentials are provided via mount, link them into the per-container config dir
-if [ -f "/mnt/secrets/.credentials.json" ]; then
-    echo "🔐 Setting up auth isolation..."
-    # Ensure CLAUDE_CONFIG_DIR exists or use default
-    CONFIG_DIR="${CLAUDE_CONFIG_DIR:-/home/agent/.claude}"
-    mkdir -p "$CONFIG_DIR"
-    ln -sf /mnt/secrets/.credentials.json "$CONFIG_DIR/.credentials.json"
-    
-    # Also link settings if provided
-    if [ -f "/mnt/secrets/settings.json" ]; then
-        ln -sf /mnt/secrets/settings.json "$CONFIG_DIR/settings.json"
+# If credentials are provided via mount, link them into the per-container config dir.
+# We only link credentials and settings to avoid sharing history/db.
+echo "🔐 Setting up auth isolation..."
+CONFIG_DIR="${CLAUDE_CONFIG_DIR:-/home/agent/.claude}"
+mkdir -p "$CONFIG_DIR"
+
+for f in ".credentials.json" "settings.json"; do
+    if [ -f "/mnt/secrets/$f" ]; then
+        ln -sf "/mnt/secrets/$f" "$CONFIG_DIR/$f"
+        echo "✓ Linked $f"
     fi
-    echo "✓ Auth isolated in $CONFIG_DIR"
-fi
+done
+echo "✓ Auth isolated in $CONFIG_DIR"
 
 # 2. Configure Claude Code hooks
 # We point hooks to mantle-agent which forwards them to the control-server

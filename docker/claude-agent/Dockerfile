@@ -1,7 +1,7 @@
 # Dockerfile for Claude Code Agent
 
 # Stage 1: Rust Builder (Multi-stage)
-FROM rust:1.80 AS rust-builder
+FROM --platform=linux/amd64 rust:1.80 AS rust-builder
 WORKDIR /build
 COPY rust/ ./rust/
 # Use cache mounts for cargo to speed up rebuilds
@@ -11,7 +11,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cp target/release/mantle-agent /mantle-agent
 
 # Stage 2: Main Agent Image
-FROM ubuntu:22.04
+FROM --platform=linux/amd64 ubuntu:22.04
 
 # Avoid prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
