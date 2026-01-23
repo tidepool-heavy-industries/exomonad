@@ -1,25 +1,32 @@
 # TUI Popup Binary
 
-Standalone binary that renders interactive TUI popups and outputs results to stdout.
+Standalone binary that renders interactive TUI popups and communicates with control-server via WebSocket.
 
 ## Purpose
 
-Provides a fire-and-forget popup UI for Zellij pane-based interactions. When control-server needs user input, it spawns a Zellij floating pane running `tui-popup`, which renders the UI, captures input, and exits with the result.
+Provides a fire-and-forget popup UI for Zellij pane-based interactions. When control-server needs user input, it spawns a Zellij floating pane running `tui-popup`, which connects via WebSocket, receives the popup definition, renders the UI, captures input, and sends the result back on the same connection.
 
-## Architecture
+## Architecture (WebSocket Mode)
 
 ```
 control-server                    Zellij Floating Pane
      |                                  |
-     | spawn pane with tui-popup        |
+     | 1. Spawn pane: tui-popup         |
+     | 2. Register pending popup        |
      |------------------------------->  |
+     | 3. WebSocket /tui/ws             |
+     |<-------------------------------  | (connects)
+     | 4. Send PopupDefinition          |
+     |------------------------------->  |
+     | 5. Block on TMVar                | (user interacts)
      |                                  |
-     | wait for process exit            |
-     |                                  | (user interacts)
-     |                                  |
-     |                                  | write result to stdout
+     | 6. Receive PopupResult           |
      |<-------------------------------  |
-     | read result from temp file       |
+     | 7. TMVar unblocks, return        |
+
+CRITICAL: tui-popup maintains a single WebSocket connection throughout.
+The connection must stay open between receive and send, otherwise the
+server-side handler will clean up and the response will be lost.
 ```
 
 ## Usage

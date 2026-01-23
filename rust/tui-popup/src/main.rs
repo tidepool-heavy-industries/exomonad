@@ -42,7 +42,7 @@ async fn main() -> Result<()> {
         .unwrap_or_else(|| ".tidepool/sockets/control.sock".to_string());
 
     // Determine mode: WebSocket (default) or legacy CLI
-    let (request_id, definition) = if args.spec.is_some() || args.stdin {
+    if args.spec.is_some() || args.stdin {
         // LEGACY MODE: Get PopupDefinition from --spec or stdin
         let json = if args.stdin {
             let mut buffer = String::new();
@@ -59,28 +59,28 @@ async fn main() -> Result<()> {
         let definition: PopupDefinition =
             serde_json::from_str(&json).context("Failed to parse PopupDefinition JSON")?;
 
-        // Generate dummy request ID for legacy mode
-        (uuid::Uuid::nil(), definition)
-    } else {
-        // WEBSOCKET MODE: Connect to control-server
-        websocket::receive_popup_definition(&socket_path)
+        // Run popup (blocking)
+        let result = tokio::task::spawn_blocking(move || run_popup(definition))
             .await
-            .context("Failed to receive popup definition from WebSocket")?
-    };
+            .context("Popup task panicked")?
+            .context("Popup failed")?;
 
-    // Run popup (blocking in separate task to avoid blocking Tokio runtime)
-    let result = tokio::task::spawn_blocking(move || run_popup(definition))
-        .await
-        .context("Popup task panicked")?
-        .context("Popup failed")?;
-
-    // Send result back via WebSocket (or print to stdout in legacy mode)
-    if request_id.is_nil() {
-        // LEGACY: Output to stdout
+        // Output to stdout
         println!("{}", serde_json::to_string(&result)?);
     } else {
-        // WEBSOCKET: Send back to control-server
-        websocket::send_popup_result(&socket_path, request_id, result)
+        // WEBSOCKET MODE: Maintain single connection throughout
+        let (request_id, definition, mut ws_stream) = websocket::run_websocket_popup(&socket_path)
+            .await
+            .context("Failed to receive popup definition from WebSocket")?;
+
+        // Run popup (blocking in separate task to avoid blocking Tokio runtime)
+        let result = tokio::task::spawn_blocking(move || run_popup(definition))
+            .await
+            .context("Popup task panicked")?
+            .context("Popup failed")?;
+
+        // Send result back on the same WebSocket connection
+        websocket::send_popup_result(&mut ws_stream, request_id, result)
             .await
             .context("Failed to send popup result via WebSocket")?;
     }

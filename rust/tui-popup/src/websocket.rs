@@ -1,15 +1,25 @@
 //! WebSocket communication with control-server.
 //!
-//! Connects to control-server's /tui/ws endpoint over Unix socket,
-//! receives PopupDefinition, and sends back PopupResult.
+//! Maintains a single WebSocket connection for the entire popup lifecycle:
+//! 1. Connect to /tui/ws endpoint over Unix socket
+//! 2. Receive PopupDefinition with correlation ID
+//! 3. (Caller renders popup and gets user input)
+//! 4. Send PopupResult back on the same connection
+//! 5. Close connection
+//!
+//! CRITICAL: The connection must stay open between receive and send,
+//! otherwise the server-side handler will clean up and the response
+//! will be lost.
 
 use anyhow::{Context, Result};
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use tokio::net::UnixStream;
-use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::{tungstenite::Message, WebSocketStream};
 use tui_sidebar::protocol::{PopupDefinition, PopupResult};
 use uuid::Uuid;
+
+type WsStream = WebSocketStream<UnixStream>;
 
 /// WebSocket request from control-server containing PopupDefinition.
 #[derive(Debug, Deserialize)]
@@ -27,8 +37,16 @@ struct PopupResponse {
     result: PopupResult,
 }
 
-/// Connect to control-server WebSocket and receive PopupDefinition.
-pub async fn receive_popup_definition(socket_path: &str) -> Result<(Uuid, PopupDefinition)> {
+/// Run the complete WebSocket popup lifecycle.
+///
+/// This maintains a single WebSocket connection throughout:
+/// 1. Connect and receive PopupDefinition
+/// 2. Return stream to caller (who renders popup)
+/// 3. Caller sends result on the same stream
+/// 4. Caller closes stream
+pub async fn run_websocket_popup(
+    socket_path: &str,
+) -> Result<(Uuid, PopupDefinition, WsStream)> {
     // Connect to Unix socket
     let unix_stream = UnixStream::connect(socket_path)
         .await
@@ -58,7 +76,8 @@ pub async fn receive_popup_definition(socket_path: &str) -> Result<(Uuid, PopupD
                 .context("Failed to parse PopupRequest")?;
 
             if request.request_type == "request" {
-                return Ok((request.request_id, request.definition));
+                // Return stream for caller to use (keep connection alive!)
+                return Ok((request.request_id, request.definition, ws_stream));
             }
         }
     }
@@ -66,32 +85,12 @@ pub async fn receive_popup_definition(socket_path: &str) -> Result<(Uuid, PopupD
     anyhow::bail!("WebSocket closed before receiving PopupDefinition")
 }
 
-/// Send PopupResult back to control-server via WebSocket.
+/// Send PopupResult back to control-server on the same WebSocket connection.
 pub async fn send_popup_result(
-    socket_path: &str,
+    ws_stream: &mut WsStream,
     request_id: Uuid,
     result: PopupResult,
 ) -> Result<()> {
-    // Connect to Unix socket
-    let unix_stream = UnixStream::connect(socket_path)
-        .await
-        .context("Failed to connect to control socket")?;
-
-    // Upgrade to WebSocket
-    let request = http::Request::builder()
-        .uri("/tui/ws")
-        .header("Host", "localhost")
-        .header("Connection", "Upgrade")
-        .header("Upgrade", "websocket")
-        .header("Sec-WebSocket-Version", "13")
-        .header("Sec-WebSocket-Key", generate_key())
-        .body(())
-        .context("Failed to build WebSocket request")?;
-
-    let (mut ws_stream, _) = tokio_tungstenite::client_async(request, unix_stream)
-        .await
-        .context("WebSocket handshake failed")?;
-
     // Send PopupResponse
     let response = PopupResponse { request_id, result };
     let json = serde_json::to_string(&response)?;
