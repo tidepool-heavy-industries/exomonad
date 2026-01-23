@@ -8,6 +8,19 @@ module Tidepool.Control.Server
   ( runServer
   ) where
 
+import Tidepool.Control.API
+import Tidepool.Control.Handler (handleMessage)
+import Tidepool.Control.Logging (Logger, logInfo, logDebug, logError)
+import Tidepool.Control.Protocol
+import Tidepool.Control.RoleConfig
+import Tidepool.Control.TUIState
+import Tidepool.Control.Types (ServerConfig(..))
+import Tidepool.Effect.TUI (PopupResult(..))
+import Tidepool.Observability.Types (newTraceContext, ObservabilityConfig(..), LokiConfig(..), OTLPConfig(..))
+import Tidepool.Observability.Interpreter (flushTraces)
+import Tidepool.Control.Export (exportMCPTools)
+
+import Control.Concurrent.Async (race_)
 import Control.Concurrent.STM (atomically)
 import Control.Exception (catch, bracket, finally)
 import qualified Control.Exception as E
@@ -16,7 +29,7 @@ import Control.Monad.IO.Class (liftIO)
 import Data.Aeson (decode, object, (.=), FromJSON, ToJSON)
 import qualified Data.Aeson as Aeson
 import Data.Function ((&))
-import Data.Maybe (isJust)
+import Data.Maybe (isJust, fromMaybe)
 import qualified Data.Text as T
 import qualified Data.UUID as UUID
 import GHC.Generics (Generic)
@@ -28,17 +41,6 @@ import System.Directory (createDirectoryIfMissing, removeFile)
 import System.Environment (lookupEnv)
 import System.FilePath (takeDirectory)
 import System.IO.Error (isDoesNotExistError)
-
-import Tidepool.Control.API
-import Tidepool.Control.Handler (handleMessage)
-import Tidepool.Control.Logging (Logger, logInfo, logDebug, logError)
-import Tidepool.Control.Protocol
-import Tidepool.Control.TUIState
-import Tidepool.Control.Types (ServerConfig(..))
-import Tidepool.Effect.TUI (PopupResult(..))
-import Tidepool.Observability.Types (newTraceContext, ObservabilityConfig(..), LokiConfig(..), OTLPConfig(..))
-import Tidepool.Observability.Interpreter (flushTraces)
-import Tidepool.Control.Export (exportMCPTools)
 
 -- | Load observability configuration from environment variables.
 loadObservabilityConfig :: IO (Maybe ObservabilityConfig)
@@ -81,17 +83,21 @@ runServer logger config = do
   -- Create TUI state for WebSocket connections
   tuiState <- newTUIState
 
-  -- Run Servant Server on Unix Socket
-  bracket
-    (setupUnixSocket controlSocket)
-    (cleanupUnixSocket controlSocket)
-    $ \sock -> do
-      logInfo logger $ "Control server listening on (HTTP+WS over Unix): " <> T.pack controlSocket
+  let settings = defaultSettings
+        & setTimeout (5 * 60) -- 5 minutes timeout
 
-      let settings = defaultSettings
-            & setTimeout (5 * 60) -- 5 minutes timeout
-
-      runSettingsSocket settings sock (app logger configWithObs tuiState)
+  -- Run both listeners concurrently
+  logInfo logger "Control server starting dual listeners..."
+  race_
+    (bracket
+      (setupUnixSocket controlSocket)
+      (cleanupUnixSocket controlSocket)
+      $ \sock -> do
+        logInfo logger $ "Listening on (Unix): " <> T.pack controlSocket
+        runSettingsSocket settings sock (app logger configWithObs tuiState))
+    (do
+        logInfo logger "Listening on (TCP): 0.0.0.0:7432"
+        runSettings (setPort 7432 settings) (app logger configWithObs tuiState))
 
 -- | Setup Unix socket at given path.
 setupUnixSocket :: FilePath -> IO Socket
@@ -133,6 +139,8 @@ server logger config tuiState =
   :<|> handleMcpTools
   :<|> handleTuiWs
   :<|> handlePing
+  :<|> handleRoleMcpTools
+  :<|> handleRoleMcpCall
   where
     handleHook (input, runtime) = do
       res <- liftIO $ do
@@ -205,6 +213,43 @@ server logger config tuiState =
 
     handlePing :: Handler T.Text
     handlePing = pure "pong"
+
+    handleRoleMcpTools slug _mSessionId = do
+      case roleFromText slug of
+        Nothing -> throwError err404 { errBody = "Unknown role: " <> (Aeson.encode slug) }
+        Just role -> liftIO $ do
+          logDebug logger $ "[MCP:" <> slug <> "] tools/list request"
+          tools <- exportMCPTools logger
+          pure $ filter (\t -> isToolAllowed role t.tdName) tools
+
+    handleRoleMcpCall slug mSessionId req = do
+      case roleFromText slug of
+        Nothing -> throwError err404 { errBody = "Unknown role: " <> (Aeson.encode slug) }
+        Just role -> do
+          if isToolAllowed role req.toolName
+            then liftIO $ do
+              -- Use session ID from header if available, otherwise use request ID
+              let sessId = fromMaybe req.mcpId mSessionId
+              logInfo logger $ "[MCP:" <> slug <> ":" <> sessId <> "] tool=" <> req.toolName
+              traceCtx <- newTraceContext
+              
+              -- Update config with the role from the slug for handlers that need it
+              let configWithRole = config { role = Just slug }
+              
+              res <- handleMessage logger configWithRole traceCtx tuiState
+                (McpToolCall sessId req.toolName req.arguments)
+
+              -- Flush traces
+              case config.observabilityConfig of
+                Just obsConfig | Just otlp <- ocOTLP obsConfig ->
+                   flushTraces otlp obsConfig.ocServiceName traceCtx
+                _ -> pure ()
+
+              pure res
+            else do
+              let sessId = fromMaybe req.mcpId mSessionId
+              liftIO $ logError logger $ "[MCP:" <> slug <> ":" <> sessId <> "] Forbidden tool: " <> req.toolName
+              pure $ mcpToolError sessId PermissionDenied ("Tool not allowed for role " <> slug <> ": " <> req.toolName)
 
 -- | WebSocket response message from tui-popup.
 data PopupResponse = PopupResponse

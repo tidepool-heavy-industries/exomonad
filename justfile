@@ -300,7 +300,8 @@ docker-run:
 
     docker run -it --rm \
         --name tidepool-orchestrator \
-        --detach-keys="ctrl-e,e" \
+        --detach-keys=\"ctrl-e,e\" \
+        -p 7432:7432 \
         -v /var/run/docker.sock:/var/run/docker.sock \
         -v "$(pwd)":/worktrees/repo \
         -v ~/.claude.json:/root/.claude.json:ro \
@@ -321,6 +322,7 @@ docker-run-detached:
 
     docker run -d \
         --name tidepool-orchestrator \
+        -p 7432:7432 \
         -v /var/run/docker.sock:/var/run/docker.sock \
         -v "$(pwd)":/worktrees/repo \
         -v ~/.claude.json:/root/.claude.json:ro \
@@ -338,7 +340,7 @@ docker-run-detached:
 
 # Attach to running orchestrator
 docker-attach:
-    docker attach --detach-keys="ctrl-e,e" tidepool-orchestrator
+    docker attach --detach-keys=\"ctrl-e,e\" tidepool-orchestrator
 
 # Stop dockerized orchestrator
 docker-stop:

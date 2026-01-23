@@ -61,6 +61,7 @@ library
         Tidepool.Control.ExoTools.PrReviewStatus
         Tidepool.Control.TUITools
         Tidepool.Control.FeedbackTools
+        Tidepool.Control.RoleConfig
         Tidepool.Control.Export
         -- Scout (semantic code exploration)
         Tidepool.Control.Scout.Types
@@ -86,6 +87,7 @@ library
         text >= 2.0 && < 3,
         aeson >= 2.1 && < 3,
         bytestring >= 0.11 && < 1,
+        async,
         directory,
         filepath,
         process,
