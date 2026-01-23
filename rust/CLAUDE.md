@@ -94,7 +94,7 @@ mantle-agent hook pre-tool-use  # Reads JSON from stdin
 ```
 - Called by `.claude/settings.local.json` hooks
 - Parses Claude Code's hook JSON from stdin
-- Forwards to control server via TCP (NDJSON protocol)
+- Forwards to control server via HTTP over Unix socket (using `curl` subprocess)
 - Returns response JSON to stdout
 - **Fail-closed:** Errors immediately if control server unavailable (catches config issues during dev)
 

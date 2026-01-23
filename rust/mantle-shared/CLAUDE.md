@@ -135,21 +135,21 @@ pub fn control_socket_path() -> Result<PathBuf>;
 The `handle_hook` function implements the full hook handling flow:
 
 ```rust
-pub fn handle_hook(event_type: HookEventType) -> Result<()> {
+pub fn handle_hook(event_type: HookEventType, runtime: Runtime) -> Result<()> {
     // 1. Read hook JSON from stdin
     // 2. Parse as HookInput
-    // 3. Get control server addr from env (or fail open)
-    // 4. Connect and send ControlMessage::HookEvent
+    // 3. Get control server socket path from env
+    // 4. Connect and send ControlMessage::HookEvent via HTTP POST /hook
     // 5. Receive ControlResponse::HookResponse
     // 6. Print HookOutput JSON to stdout
     // 7. Exit with response's exit_code
 }
 
-/// Default "allow" response when no control server available
+/// Default "allow" response (for reference - not used in fail-closed mode)
 pub fn default_allow_response(event_type: HookEventType) -> HookOutput;
 ```
 
-**Fail-open behavior:** If `MANTLE_CONTROL_HOST`/`PORT` not set or connection fails, returns `default_allow_response()` instead of erroring. This ensures Claude Code works without the control server.
+**Fail-closed behavior:** If `TIDEPOOL_CONTROL_SOCKET` not set or connection fails, the hook command exits with an error. This ensures configuration issues are caught during development.
 
 ### Hook Event Types (`commands/hook.rs`)
 
@@ -175,7 +175,7 @@ pub enum MantleError {
     Io(std::io::Error),
     JsonSerialize(serde_json::Error),
     JsonParse { source: serde_json::Error },
-    TcpConnect { addr: String, source: std::io::Error },
+    UnixConnect { path: PathBuf, source: std::io::Error },
     SocketConfig { source: std::io::Error },
     SocketWrite { source: std::io::Error },
     SocketRead { source: std::io::Error },
@@ -200,10 +200,11 @@ pub use logging::init_logging;
 
 ```rust
 use mantle_shared::{handle_hook, HookEventType};
+use mantle_shared::protocol::Runtime;
 
 fn main() -> mantle_shared::Result<()> {
     mantle_shared::init_logging();
-    handle_hook(HookEventType::PreToolUse)
+    handle_hook(HookEventType::PreToolUse, Runtime::Claude)
 }
 ```
 
