@@ -1,11 +1,11 @@
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE DerivingStrategies #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE OverloadedRecordDot #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE DataKinds #}
+{-# LANGUAGE DeriveGeneric #}
+{-# LANGUAGE DerivingStrategies #}
+{-# LANGUAGE FlexibleContexts #}
+{-# LANGUAGE OverloadedRecordDot #}
+{-# LANGUAGE OverloadedStrings #}
+{-# LANGUAGE TypeFamilies #}
+{-# LANGUAGE TypeOperators #}
 
 module Tidepool.Control.ExoTools.SpawnAgents
   ( SpawnAgentsGraph(..)
@@ -34,7 +34,7 @@ import Tidepool.Effects.Env (Env, getEnv, getEnvironment)
 import Tidepool.Effects.Git (Git, WorktreeInfo(..), getWorktreeInfo)
 import Tidepool.Effects.Worktree (Worktree, WorktreeSpec(..), WorktreePath(..), createWorktree)
 
-import Tidepool.Effects.FileSystem (FileSystem, createDirectory, writeFileText, fileExists, directoryExists, readFileText)
+import Tidepool.Effects.FileSystem (FileSystem, createDirectory, writeFileText, copyFile, fileExists, directoryExists, readFileText)
 import Tidepool.Effects.Zellij (Zellij, TabConfig(..), TabId(..), checkZellijEnv, newTab)
 import Tidepool.Graph.Generic (AsHandler, type (:-))
 import Tidepool.Graph.Generic.Core (EntryNode, ExitNode, LogicNode)
@@ -315,8 +315,9 @@ processBead mHangarRoot repoRoot wtBaseDir backend shortId = do
                                     "gemini" -> "gemini --debug"
                                     "claude" -> "claude --debug --verbose"
                                     _        -> "claude --debug --verbose"
-                              envVars =
-                                [ ("SUBAGENT_CMD", backendCmd)
+                              envVars = 
+                                [
+                                  ("SUBAGENT_CMD", backendCmd)
                                 , ("HANGAR_ROOT", T.pack hr)
                                 , ("TIDEPOOL_BIN_DIR", T.pack binDir)
                                 , ("TIDEPOOL_SOCKET_DIR", T.pack socketDir)
@@ -358,7 +359,7 @@ bootstrapTidepool
   -> FilePath        -- ^ Socket directory (e.g., /tmp/tidepool-<id>)
   -> FilePath        -- ^ Control socket path (e.g., /tmp/tidepool-<id>/control.sock)
   -> [(Text, Text)]  -- ^ Subagent environment variables
-  -> Eff es (Either Text ())
+  -> Eff es (Either Text ()) 
 bootstrapTidepool mHangarRoot repoRoot worktreePath backend socketDir controlSocket subagentVars = do
   -- Create socket directory in /tmp (avoids SUN_LEN path length limits).
   -- Unix sockets have ~104 byte path limit on macOS; worktree paths can exceed this.
@@ -393,8 +394,10 @@ bootstrapTidepool mHangarRoot repoRoot worktreePath backend socketDir controlSoc
               -- all secrets and config are propagated, while overriding socket paths.
               rootEnvVars <- getEnvironment
               
-              -- Filter out conflicting keys from root env
-              let filteredRootVars = filter (\(k, _) -> k `notElem` ["TIDEPOOL_CONTROL_SOCKET", "TIDEPOOL_TUI_SOCKET"]) rootEnvVars
+              -- Filter out any keys from the root env that are explicitly set in subagentVars.
+              -- This ensures subagent-defined values always take precedence in the merged env.
+              let subagentKeys     = map fst subagentVars
+                  filteredRootVars = filter (\(k, _) -> k `notElem` subagentKeys) rootEnvVars
                   
                   -- Merge vars: subagent vars take precedence
                   mergedVars = filteredRootVars ++ subagentVars
@@ -434,7 +437,7 @@ writeBeadContext
   :: (Member FileSystem es)
   => FilePath  -- ^ Worktree path
   -> Text      -- ^ Context content
-  -> Eff es (Either Text ())
+  -> Eff es (Either Text ()) 
 writeBeadContext worktreePath context = do
   let contextDir = worktreePath </> ".claude" </> "context"
       contextFile = contextDir </> "bead.md"
@@ -458,7 +461,7 @@ writeBackendSettings
   -> Aeson.Value    -- ^ JSON settings object
   -> Text           -- ^ Directory name for error messages
   -> Text           -- ^ File name for error messages
-  -> Eff es (Either Text ())
+  -> Eff es (Either Text ()) 
 writeBackendSettings configDir settingsFile settings dirName fileName = do
   let content = TE.decodeUtf8 . BL.toStrict $ encode settings
 
@@ -479,7 +482,7 @@ writeClaudeLocalSettings
   :: (Member FileSystem es)
   => FilePath  -- ^ Hangar root (for building absolute binary path)
   -> FilePath  -- ^ Worktree path
-  -> Eff es (Either Text ())
+  -> Eff es (Either Text ()) 
 writeClaudeLocalSettings hangarRoot worktreePath = do
   let claudeDir = worktreePath </> ".claude"
       settingsFile = claudeDir </> "settings.local.json"
@@ -488,10 +491,10 @@ writeClaudeLocalSettings hangarRoot worktreePath = do
 
       settings = object
         [ "hooks" .= object
-          [ "SessionStart" .=
+          [ "SessionStart" .= 
             [ object
               [ "matcher" .= ("startup" :: Text)
-              , "hooks" .=
+              , "hooks" .= 
                 [ object
                   [ "type" .= ("command" :: Text)
                   , "command" .= (T.pack mantleAgentPath <> " hook session-start")
@@ -500,7 +503,7 @@ writeClaudeLocalSettings hangarRoot worktreePath = do
               ]
             , object
               [ "matcher" .= ("resume" :: Text)
-              , "hooks" .=
+              , "hooks" .= 
                 [ object
                   [ "type" .= ("command" :: Text)
                   , "command" .= (T.pack mantleAgentPath <> " hook session-start")
@@ -522,7 +525,7 @@ writeGeminiConfig
   => FilePath  -- ^ Hangar root (for absolute path to mantle-agent)
   -> FilePath  -- ^ Worktree path
   -> FilePath  -- ^ Control socket path (short path in /tmp to avoid SUN_LEN limits)
-  -> Eff es (Either Text ())
+  -> Eff es (Either Text ()) 
 writeGeminiConfig hangarRoot worktreePath controlSocket = do
   let geminiDir = worktreePath </> ".gemini"
       settingsFile = geminiDir </> "settings.json"
@@ -537,10 +540,10 @@ writeGeminiConfig hangarRoot worktreePath controlSocket = do
           [ "enabled" .= True
           ]
         , "hooks" .= object
-          [ "SessionStart" .=
+          [ "SessionStart" .= 
             [ object
               [ "matcher" .= ("startup" :: Text)
-              , "hooks" .=
+              , "hooks" .= 
                 [ object
                   [ "name" .= ("init-agent" :: Text)
                   , "type" .= ("command" :: Text)
@@ -550,7 +553,7 @@ writeGeminiConfig hangarRoot worktreePath controlSocket = do
               ]
             , object
               [ "matcher" .= ("resume" :: Text)
-              , "hooks" .=
+              , "hooks" .= 
                 [ object
                   [ "name" .= ("resume-agent" :: Text)
                   , "type" .= ("command" :: Text)
@@ -578,7 +581,7 @@ writeGeminiConfig hangarRoot worktreePath controlSocket = do
 appendBackendToGitignore
   :: (Member FileSystem es)
   => FilePath  -- ^ Worktree path
-  -> Eff es (Either Text ())
+  -> Eff es (Either Text ()) 
 appendBackendToGitignore worktreePath = do
   let gitignorePath = worktreePath </> ".gitignore"
 
