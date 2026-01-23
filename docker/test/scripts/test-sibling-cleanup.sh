@@ -27,8 +27,9 @@ docker run -d --name "${ORCHESTRATOR_ID}-agent2" \
     alpine tail -f /dev/null
 
 echo "Verifying agents are running..."
-if [ "$(docker ps -q --filter \"label=$AGENT_LABEL\" | wc -l)" -ne 2 ]; then
-    echo "Agents failed to start"
+RUNNING_AGENTS=$(docker ps -q --filter "label=$AGENT_LABEL" | wc -l)
+if [ "$RUNNING_AGENTS" -ne 2 ]; then
+    echo "Agents failed to start (expected 2, found $RUNNING_AGENTS)"
     exit 1
 fi
 

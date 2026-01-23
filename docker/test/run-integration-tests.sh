@@ -3,13 +3,18 @@ set -euo pipefail
 
 # Main Integration Test Runner for Tidepool Docker Stack
 
+# Ensure we are in the repo root
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+cd "$REPO_ROOT"
+
 # 1. Setup - Copy binaries to build contexts
-echo "Preparing build contexts..."
+echo "Preparing build contexts in $REPO_ROOT..."
 mkdir -p docker/orchestrator/bin
 mkdir -p docker/claude-agent/bin
 
 # Find hangar root
-HANGAR_ROOT=$(pwd)
+HANGAR_ROOT="$REPO_ROOT"
 while [ ! -f "$HANGAR_ROOT/Hangar.toml" ] && [ "$HANGAR_ROOT" != "/" ] && [ "$HANGAR_ROOT" != "$HOME" ]; do
     HANGAR_ROOT=$(dirname "$HANGAR_ROOT")
 done
