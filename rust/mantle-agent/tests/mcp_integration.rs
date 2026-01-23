@@ -1,14 +1,14 @@
 //! Integration tests for MCP stdio server in mantle-agent.
-//!
+//! 
 //! These tests spawn the `mantle-agent mcp` subprocess and verify
 //! correct JSON-RPC 2.0 protocol behavior over stdio.
-//!
+//! 
 //! The tests use a **Mock Control Server** (background thread) to simulate
 //! the Haskell backend. This allows testing the agent's interaction with
 //! both the MCP client (stdio) and the control server (Unix socket).
-//!
+//! 
 //! ## Test Coverage
-//!
+//! 
 //! - `test_mcp_initialize` - Protocol handshake
 //! - `test_mcp_initialized_notification` - Initialized notification handling
 //! - `test_mcp_tools_list_empty` - Empty tool list from mock server
@@ -30,9 +30,9 @@ use std::thread;
 use std::time::Duration;
 use tempfile::TempDir;
 
-// ============================================================================
+// ============================================================================ 
 // Test Helper Types
-// ============================================================================
+// ============================================================================ 
 
 /// JSON-RPC 2.0 request for sending to MCP server.
 #[derive(Debug, Serialize)]
@@ -81,9 +81,9 @@ struct JsonRpcError {
     data: Option<Value>,
 }
 
-// ============================================================================
+// ============================================================================ 
 // Mock Control Server
-// ============================================================================
+// ============================================================================ 
 
 struct MockControlServer {
     tools: Arc<Mutex<Vec<ToolDefinition>>>,
@@ -109,7 +109,7 @@ impl MockControlServer {
         let socket_path_clone = socket_path.clone();
 
         thread::spawn(move || {
-            let listener =
+            let listener = 
                 UnixListener::bind(&socket_path_clone).expect("Failed to bind mock control socket");
 
             for stream in listener.incoming() {
@@ -184,9 +184,9 @@ fn handle_client(stream: std::os::unix::net::UnixStream, tools: Arc<Mutex<Vec<To
     }
 }
 
-// ============================================================================
+// ============================================================================ 
 // Test Server Wrapper
-// ============================================================================
+// ============================================================================ 
 
 /// Wrapper around mantle-agent mcp subprocess + mock control server.
 struct McpTestServer {
@@ -212,7 +212,7 @@ impl McpTestServer {
             }
 
             // Parse JSON into local struct
-            let tools: Vec<TestToolDefinition> =
+            let tools: Vec<TestToolDefinition> = 
                 serde_json::from_str(json_str).expect("Failed to parse test tools JSON");
 
             // Convert to protocol::ToolDefinition (which uses tdName etc.)
@@ -297,15 +297,14 @@ fn find_mantle_agent() -> PathBuf {
     }
 
     panic!(
-        "mantle-agent not found. Run `cargo build -p mantle-agent` first.\n\
-         Searched in: {:?}",
+        "mantle-agent not found. Run `cargo build -p mantle-agent` first.\n\         Searched in: {:?}",
         rust_dir.join("target")
     );
 }
 
-// ============================================================================
+// ============================================================================ 
 // Tests
-// ============================================================================
+// ============================================================================ 
 
 #[test]
 fn test_mcp_initialize() {

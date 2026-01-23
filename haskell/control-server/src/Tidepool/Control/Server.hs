@@ -1,4 +1,4 @@
-{-# LANGUAGE DataKinds, OverloadedRecordDot, OverloadedStrings, TypeApplications #-}
+{-# LANGUAGE DataKinds, OverloadedRecordDot, OverloadedStrings, TypeApplications #}
 
 -- | Unix socket control server for Claude Code++ integration.
 --
@@ -12,7 +12,7 @@ import Control.Concurrent (forkIO)
 import Control.Concurrent.STM (newTVarIO, readTVarIO, atomically, writeTVar, readTVar, TVar, writeTChan, readTChan)
 import Control.Exception (catch, bracket)
 import qualified Control.Exception as E
-import Control.Monad (forever, when)
+import Control.Monad (forever, void, when)
 import Control.Monad.IO.Class (liftIO)
 import Data.Function ((&))
 import Data.Maybe (isJust, fromMaybe)
@@ -61,15 +61,18 @@ loadObservabilityConfig = do
 -- | Run the control server. Blocks forever.
 runServer :: Logger -> ServerConfig -> IO ()
 runServer logger config = do
+  -- Get socket paths from environment
+  -- We no longer provide hardcoded defaults here to ensure a single source of truth
+  -- via environment variables (e.g. set in start-augmented.sh or .env)
   controlSocketEnv <- lookupEnv "TIDEPOOL_CONTROL_SOCKET"
   let controlSocket = case controlSocketEnv of
         Just s -> s
-        Nothing -> error "TIDEPOOL_CONTROL_SOCKET environment variable not set"
+        Nothing -> error "TIDEPOOL_CONTROL_SOCKET environment variable not set (should be set via start-augmented.sh or .env)"
 
   tuiSocketEnv <- lookupEnv "TIDEPOOL_TUI_SOCKET"
   let tuiSocket = case tuiSocketEnv of
         Just s -> s
-        Nothing -> error "TIDEPOOL_TUI_SOCKET environment variable not set"
+        Nothing -> error "TIDEPOOL_TUI_SOCKET environment variable not set (should be set via start-augmented.sh or .env)"
 
   -- Load observability config if not already provided
   obsConfig <- case config.observabilityConfig of
@@ -107,7 +110,7 @@ runServer logger config = do
        -- Cleanup control socket and close any active TUI handle on shutdown
        cleanupUnixSocket controlSocket sock
        maybeTuiHandle <- readTVarIO tuiHandleVar
-       case maybeTuiHandle of
+       case maybeTuiHandle of 
          Just h  -> closeTUIHandle h
          Nothing -> pure ()
     )

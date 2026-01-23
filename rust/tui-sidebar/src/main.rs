@@ -54,7 +54,9 @@ async fn main() -> Result<()> {
     // 4. TIDEPOOL_TUI_SOCKET env
 
     let tui_port = args.port.or_else(|| {
-        std::env::var("TIDEPOOL_TUI_PORT").ok().and_then(|s| s.parse().ok())
+        std::env::var("TIDEPOOL_TUI_PORT")
+            .ok()
+            .and_then(|s| s.parse().ok())
     });
 
     let socket_path = if tui_port.is_none() {
@@ -110,8 +112,7 @@ async fn main() -> Result<()> {
                     // Check if control server socket exists but TUI socket is missing.
                     // If control.sock exists but tui.sock doesn't after a few retries,
                     // it's likely that TUI was explicitly disabled.
-                    let control_socket_exists =
-                        control_socket_path.as_ref().is_some_and(|p| p.exists());
+                    let control_socket_exists = control_socket_path.as_ref().is_some_and(|p| p.exists());
 
                     if retry_count >= max_retries {
                         if control_socket_exists {

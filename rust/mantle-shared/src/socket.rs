@@ -1,16 +1,16 @@
 //! Unix socket client for control envelope communication.
-//!
+//! 
 //! Provides a synchronous client for sending hook events and MCP tool calls
 //! to the host control server via HTTP over Unix Domain Socket.
-//!
+//! 
 //! ## Protocol
-//!
+//! 
 //! - Transport: HTTP/1.1 over Unix Domain Socket
 //! - Implementation: Uses `curl` subprocess to avoid adding async dependencies (hyper/reqwest)
 //!   to the synchronous mantle-agent CLI.
-//!
+//! 
 //!   NOTE: This implementation requires `curl` to be available in the system PATH.
-//!
+//! 
 //! Endpoints:
 //! - POST /hook      (HookEvent)
 //! - POST /mcp/call  (McpToolCall)
@@ -22,7 +22,7 @@ use crate::protocol::{ControlMessage, ControlResponse};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
-use tracing::{debug, trace, error};
+use tracing::{debug, error, trace};
 
 /// Unix socket client for control envelope communication.
 pub struct ControlSocket {
@@ -107,7 +107,7 @@ impl ControlSocket {
             trace!(url = %url, "Sending HTTP request");
         }
 
-        let output = cmd.output().map_err(|e| MantleError::Io(e))?;
+        let output = cmd.output().map_err(MantleError::Io)?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -144,7 +144,7 @@ pub fn control_socket_path() -> Result<PathBuf> {
         })
 }
 
-#[cfg(all(test, unix))] 
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use std::os::unix::net::UnixListener;

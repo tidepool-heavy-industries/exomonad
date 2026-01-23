@@ -1,11 +1,11 @@
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE DerivingStrategies #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE OverloadedRecordDot #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE DataKinds #}
+{-# LANGUAGE DeriveGeneric #}
+{-# LANGUAGE DerivingStrategies #}
+{-# LANGUAGE FlexibleContexts #}
+{-# LANGUAGE OverloadedRecordDot #}
+{-# LANGUAGE OverloadedStrings #}
+{-# LANGUAGE TypeFamilies #}
+{-# LANGUAGE TypeOperators #}
 
 module Tidepool.Control.ExoTools.SpawnAgents
   ( SpawnAgentsGraph(..)
@@ -34,7 +34,7 @@ import Tidepool.Effects.Env (Env, getEnv, getEnvironment)
 import Tidepool.Effects.Git (Git, WorktreeInfo(..), getWorktreeInfo)
 import Tidepool.Effects.Worktree (Worktree, WorktreeSpec(..), WorktreePath(..), createWorktree)
 
-import Tidepool.Effects.FileSystem (FileSystem, createDirectory, writeFileText, fileExists, directoryExists, readFileText)
+import Tidepool.Effects.FileSystem (FileSystem, createDirectory, writeFileText, copyFile, fileExists, directoryExists, readFileText)
 import Tidepool.Effects.Zellij (Zellij, TabConfig(..), TabId(..), checkZellijEnv, newTab)
 import Tidepool.Graph.Generic (AsHandler, type (:-))
 import Tidepool.Graph.Generic.Core (EntryNode, ExitNode, LogicNode)
@@ -76,7 +76,8 @@ findHangarRoot = do
 -- | Build markdown context for a bead.
 buildBeadContext :: BeadInfo -> Text -> Text
 buildBeadContext bead branchName = T.unlines
-  [ "# Task: " <> bead.biTitle
+  [
+    "# Task: " <> bead.biTitle
   , ""
   , "**ID:** " <> bead.biId
   , "**Status:** " <> statusToText bead.biStatus
@@ -120,7 +121,8 @@ data SpawnAgentsArgs = SpawnAgentsArgs
 
 instance HasJSONSchema SpawnAgentsArgs where
   jsonSchema = objectSchema
-    [ ("bead_ids", describeField "bead_ids" "List of short-form bead IDs to spawn worktrees for." (arraySchema (emptySchema TString)))
+    [
+      ("bead_ids", describeField "bead_ids" "List of short-form bead IDs to spawn worktrees for." (arraySchema (emptySchema TString)))
     , ("backend", describeField "backend" "Backend to use: 'claude' or 'gemini' (defaults to 'claude')." (emptySchema TString))
     ]
     ["bead_ids"]
@@ -133,13 +135,15 @@ instance FromJSON SpawnAgentsArgs where
 
 instance ToJSON SpawnAgentsArgs where
   toJSON args = object
-    [ "bead_ids" .= saaBeadIds args
+    [
+      "bead_ids" .= saaBeadIds args
     , "backend" .= saaBackend args
     ]
 
 -- | Result of spawn_agents tool.
 data SpawnAgentsResult = SpawnAgentsResult
-  { sarWorktrees :: [(Text, FilePath)]  -- ^ Successfully created worktrees: (shortId, path)
+  {
+    sarWorktrees :: [(Text, FilePath)]  -- ^ Successfully created worktrees: (shortId, path)
   , sarTabs      :: [(Text, Text)]      -- ^ Successfully launched tabs: (shortId, tabId)
   , sarFailed    :: [(Text, Text)]      -- ^ Failed operations: (shortId, reason)
   }
@@ -154,14 +158,16 @@ instance FromJSON SpawnAgentsResult where
 
 instance ToJSON SpawnAgentsResult where
   toJSON res = object
-    [ "worktrees" .= sarWorktrees res
+    [
+      "worktrees" .= sarWorktrees res
     , "tabs"      .= sarTabs res
     , "failed"    .= sarFailed res
     ]
 
 -- | Graph definition for spawn_agents tool.
 data SpawnAgentsGraph mode = SpawnAgentsGraph
-  { saEntry :: mode :- EntryNode SpawnAgentsArgs
+  {
+    saEntry :: mode :- EntryNode SpawnAgentsArgs
       :@ MCPExport
       :@ MCPToolDef '("spawn_agents", "Create worktrees and branches for parallel agent dispatch. Accepts optional 'backend' parameter ('claude' or 'gemini', defaults to 'claude').")
 
@@ -178,7 +184,8 @@ spawnAgentsHandlers
   :: (Member BD es, Member Git es, Member Worktree es, Member FileSystem es, Member Zellij es, Member Env es)
   => SpawnAgentsGraph (AsHandler es)
 spawnAgentsHandlers = SpawnAgentsGraph
-  { saEntry = ()
+  {
+    saEntry = ()
   , saRun = spawnAgentsLogic
   , saExit = ()
   }
@@ -193,7 +200,8 @@ spawnAgentsLogic args = do
   mZellijSession <- checkZellijEnv
   case mZellijSession of
     Nothing -> pure $ gotoExit $ SpawnAgentsResult
-      { sarWorktrees = []
+      {
+        sarWorktrees = []
       , sarTabs = []
       , sarFailed = [("*", "Not running in Zellij session")]
       }
@@ -213,7 +221,8 @@ spawnAgentsLogic args = do
 
       if backendRaw `notElem` validBackends
         then pure $ gotoExit $ SpawnAgentsResult
-          { sarWorktrees = []
+          {
+            sarWorktrees = []
           , sarTabs = []
           , sarFailed = [("*", "Invalid backend '" <> backendRaw <> "'. Must be 'claude' or 'gemini'.")]
           }
@@ -228,7 +237,8 @@ spawnAgentsLogic args = do
               tabs = [(sid, tabId) | (sid, _, TabId tabId) <- succeeded]
 
           pure $ gotoExit $ SpawnAgentsResult
-            { sarWorktrees = worktrees
+            {
+              sarWorktrees = worktrees
             , sarTabs = tabs
             , sarFailed = failed
             }
@@ -279,7 +289,8 @@ processBead mHangarRoot repoRoot wtBaseDir backend shortId = do
                       -- New location: <wtBaseDir>/bd-<id>-<slug>
                       targetPath = wtBaseDir </> "bd-" <> T.unpack shortId <> "-" <> T.unpack slug
                       spec = WorktreeSpec
-                        { wsBaseName = "bd-" <> shortId
+                        {
+                          wsBaseName = "bd-" <> shortId
                         , wsFromBranch = Just "origin/main"
                         , wsBranchName = Just branchName
                         , wsPath = Just targetPath
@@ -316,7 +327,8 @@ processBead mHangarRoot repoRoot wtBaseDir backend shortId = do
                                     "claude" -> "claude --debug --verbose"
                                     _        -> "claude --debug --verbose"
                               envVars =
-                                [ ("SUBAGENT_CMD", backendCmd)
+                                [
+                                  ("SUBAGENT_CMD", backendCmd)
                                 , ("HANGAR_ROOT", T.pack hr)
                                 , ("TIDEPOOL_BIN_DIR", T.pack binDir)
                                 , ("TIDEPOOL_SOCKET_DIR", T.pack socketDir)
@@ -337,7 +349,8 @@ processBead mHangarRoot repoRoot wtBaseDir backend shortId = do
                                   -- e. Launch Zellij tab
                                   -- Use absolute path for layout to avoid CWD resolution issues
                                   let tabConfig = TabConfig
-                                        { tcName = shortId
+                                        {
+                                          tcName = shortId
                                         , tcLayout = repoRoot </> ".zellij" </> "worktree.kdl"
                                         , tcCwd = path
                                         , tcEnv = envVars
@@ -358,7 +371,7 @@ bootstrapTidepool
   -> FilePath        -- ^ Socket directory (e.g., /tmp/tidepool-<id>)
   -> FilePath        -- ^ Control socket path (e.g., /tmp/tidepool-<id>/control.sock)
   -> [(Text, Text)]  -- ^ Subagent environment variables
-  -> Eff es (Either Text ())
+  -> Eff es (Either Text ()) 
 bootstrapTidepool mHangarRoot repoRoot worktreePath backend socketDir controlSocket subagentVars = do
   -- Create socket directory in /tmp (avoids SUN_LEN path length limits).
   -- Unix sockets have ~104 byte path limit on macOS; worktree paths can exceed this.
@@ -393,15 +406,18 @@ bootstrapTidepool mHangarRoot repoRoot worktreePath backend socketDir controlSoc
               -- all secrets and config are propagated, while overriding socket paths.
               rootEnvVars <- getEnvironment
               
-              -- Filter out conflicting keys from root env
-              let filteredRootVars = filter (\(k, _) -> k `notElem` ["TIDEPOOL_CONTROL_SOCKET", "TIDEPOOL_TUI_SOCKET"]) rootEnvVars
+              -- Filter out any keys from the root env that are explicitly set in subagentVars.
+              -- This ensures subagent-defined values always take precedence in the merged env.
+              let subagentKeys     = map fst subagentVars
+                  filteredRootVars = filter (\(k, _) -> k `notElem` subagentKeys) rootEnvVars
                   
                   -- Merge vars: subagent vars take precedence
                   mergedVars = filteredRootVars ++ subagentVars
                   
-                  -- Generate .env content (use show to quote and escape values safely)
+                  -- Generate .env content
                   dstEnv = worktreePath </> ".env"
-                  envContent = T.unlines [ k <> "=" <> T.pack (show v) | (k, v) <- mergedVars ]
+                  escapeEnvValue v = T.replace "\"" "\\\"" (T.replace "\\" "\\\\" v)
+                  envContent = T.unlines [ k <> "=\"" <> escapeEnvValue v <> "\"" | (k, v) <- mergedVars ]
 
               writeRes <- writeFileText dstEnv envContent
               case writeRes of
@@ -434,7 +450,7 @@ writeBeadContext
   :: (Member FileSystem es)
   => FilePath  -- ^ Worktree path
   -> Text      -- ^ Context content
-  -> Eff es (Either Text ())
+  -> Eff es (Either Text ()) 
 writeBeadContext worktreePath context = do
   let contextDir = worktreePath </> ".claude" </> "context"
       contextFile = contextDir </> "bead.md"
@@ -458,7 +474,7 @@ writeBackendSettings
   -> Aeson.Value    -- ^ JSON settings object
   -> Text           -- ^ Directory name for error messages
   -> Text           -- ^ File name for error messages
-  -> Eff es (Either Text ())
+  -> Eff es (Either Text ()) 
 writeBackendSettings configDir settingsFile settings dirName fileName = do
   let content = TE.decodeUtf8 . BL.toStrict $ encode settings
 
@@ -479,7 +495,7 @@ writeClaudeLocalSettings
   :: (Member FileSystem es)
   => FilePath  -- ^ Hangar root (for building absolute binary path)
   -> FilePath  -- ^ Worktree path
-  -> Eff es (Either Text ())
+  -> Eff es (Either Text ()) 
 writeClaudeLocalSettings hangarRoot worktreePath = do
   let claudeDir = worktreePath </> ".claude"
       settingsFile = claudeDir </> "settings.local.json"
@@ -487,27 +503,37 @@ writeClaudeLocalSettings hangarRoot worktreePath = do
       mantleAgentPath = Paths.mantleAgentBin binDir
 
       settings = object
-        [ "hooks" .= object
-          [ "SessionStart" .=
-            [ object
-              [ "matcher" .= ("startup" :: Text)
-              , "hooks" .=
-                [ object
-                  [ "type" .= ("command" :: Text)
-                  , "command" .= (T.pack mantleAgentPath <> " hook session-start")
+        [
+          "hooks" .= object
+          [
+            "SessionStart" .= 
+              [
+                object
+                  [
+                    "matcher" .= ("startup" :: Text)
+                  , "hooks" .= 
+                    [
+                      object
+                        [
+                          "type" .= ("command" :: Text)
+                        , "command" .= (T.pack mantleAgentPath <> " hook session-start")
+                        ]
+                    ]
                   ]
-                ]
-              ]
-            , object
-              [ "matcher" .= ("resume" :: Text)
-              , "hooks" .=
-                [ object
-                  [ "type" .= ("command" :: Text)
-                  , "command" .= (T.pack mantleAgentPath <> " hook session-start")
+                ,
+                object
+                  [
+                    "matcher" .= ("resume" :: Text)
+                  , "hooks" .= 
+                    [
+                      object
+                        [
+                          "type" .= ("command" :: Text)
+                        , "command" .= (T.pack mantleAgentPath <> " hook session-start")
+                        ]
+                    ]
                   ]
-                ]
               ]
-            ]
           ]
         ]
 
@@ -522,7 +548,7 @@ writeGeminiConfig
   => FilePath  -- ^ Hangar root (for absolute path to mantle-agent)
   -> FilePath  -- ^ Worktree path
   -> FilePath  -- ^ Control socket path (short path in /tmp to avoid SUN_LEN limits)
-  -> Eff es (Either Text ())
+  -> Eff es (Either Text ()) 
 writeGeminiConfig hangarRoot worktreePath controlSocket = do
   let geminiDir = worktreePath </> ".gemini"
       settingsFile = geminiDir </> "settings.json"
@@ -533,39 +559,53 @@ writeGeminiConfig hangarRoot worktreePath controlSocket = do
       -- controlSocket is passed in (short path in /tmp to avoid SUN_LEN limits)
 
       settings = object
-        [ "hooksConfig" .= object
-          [ "enabled" .= True
+        [
+          "hooksConfig" .= object
+          [
+            "enabled" .= True
           ]
         , "hooks" .= object
-          [ "SessionStart" .=
-            [ object
-              [ "matcher" .= ("startup" :: Text)
-              , "hooks" .=
-                [ object
-                  [ "name" .= ("init-agent" :: Text)
-                  , "type" .= ("command" :: Text)
-                  , "command" .= T.pack hookCmd
+          [
+            "SessionStart" .= 
+              [
+                object
+                  [
+                    "matcher" .= ("startup" :: Text)
+                  , "hooks" .= 
+                    [
+                      object
+                        [
+                          "name" .= ("init-agent" :: Text)
+                        , "type" .= ("command" :: Text)
+                        , "command" .= T.pack hookCmd
+                        ]
+                    ]
                   ]
-                ]
-              ]
-            , object
-              [ "matcher" .= ("resume" :: Text)
-              , "hooks" .=
-                [ object
-                  [ "name" .= ("resume-agent" :: Text)
-                  , "type" .= ("command" :: Text)
-                  , "command" .= T.pack hookCmd
+                ,
+                object
+                  [
+                    "matcher" .= ("resume" :: Text)
+                  , "hooks" .= 
+                    [
+                      object
+                        [
+                          "name" .= ("resume-agent" :: Text)
+                        , "type" .= ("command" :: Text)
+                        , "command" .= T.pack hookCmd
+                        ]
+                    ]
                   ]
-                ]
               ]
-            ]
           ]
         , "mcpServers" .= object
-          [ "tidepool" .= object
-            [ "command" .= T.pack mantleAgent
+          [
+            "tidepool" .= object
+            [
+              "command" .= T.pack mantleAgent
             , "args" .= (["mcp"] :: [Text])
             , "env" .= object
-              [ "TIDEPOOL_CONTROL_SOCKET" .= T.pack controlSocket
+              [
+                "TIDEPOOL_CONTROL_SOCKET" .= T.pack controlSocket
               ]
             ]
           ]
@@ -578,7 +618,7 @@ writeGeminiConfig hangarRoot worktreePath controlSocket = do
 appendBackendToGitignore
   :: (Member FileSystem es)
   => FilePath  -- ^ Worktree path
-  -> Eff es (Either Text ())
+  -> Eff es (Either Text ()) 
 appendBackendToGitignore worktreePath = do
   let gitignorePath = worktreePath </> ".gitignore"
 
@@ -607,7 +647,8 @@ appendBackendToGitignore worktreePath = do
         else do
           -- Build list of entries to add
           let entriesToAdd = catMaybes
-                [ if needsClaudeEntry then Just ".claude/" else Nothing
+                [
+                  if needsClaudeEntry then Just ".claude/" else Nothing
                 , if needsGeminiEntry then Just ".gemini/" else Nothing
                 ]
           -- Append missing entries (preserve existing content)
