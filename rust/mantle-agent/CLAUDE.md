@@ -10,9 +10,15 @@ Bridges Claude Code hooks to the Tidepool control server via HTTP over Unix Doma
 
 ## Subcommands
 
-### `mantle-agent hook <event_type>`
+### `mantle-agent hook <event_type> [--runtime=claude|gemini] [--role=dev|tl|pm]`
 
 Handles Claude Code hook events. Called by hook commands in `.claude/settings.local.json`.
+
+**Flags:**
+| Flag | Default | Purpose |
+|------|---------|---------|
+| `--runtime` | `claude` | Runtime environment (Claude or Gemini CLI) |
+| `--role` | `dev` | Agent role (dev, tl, pm) - enables role-specific hook logic |
 
 **Flow:**
 ```

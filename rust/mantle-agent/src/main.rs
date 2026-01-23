@@ -13,7 +13,7 @@ use tracing::error;
 
 use mantle_shared::commands::HookEventType;
 use mantle_shared::handle_hook;
-use mantle_shared::protocol::Runtime;
+use mantle_shared::protocol::{Role, Runtime};
 
 mod health;
 
@@ -42,6 +42,10 @@ enum Commands {
         /// The runtime environment (Claude or Gemini)
         #[arg(long, default_value = "claude")]
         runtime: Runtime,
+
+        /// The role of the agent (dev, tl, pm)
+        #[arg(long, default_value = "dev")]
+        role: Role,
     },
 
     /// Check control server health via Ping/Pong on socket.
@@ -59,7 +63,7 @@ fn main() {
     let cli = Cli::parse();
 
     let result = match cli.command {
-        Commands::Hook { event, runtime } => handle_hook(event, runtime),
+        Commands::Hook { event, runtime, role } => handle_hook(event, runtime, role),
         Commands::Health => health::run_health_check(),
     };
 

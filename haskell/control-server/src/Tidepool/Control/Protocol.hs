@@ -11,6 +11,7 @@ module Tidepool.Control.Protocol
   , ErrorCode(..)
   , ToolDefinition(..)
   , Runtime(..)
+  , Role(..)
 
     -- * Hook Types
   , HookInput(..)
@@ -265,6 +266,22 @@ instance ToJSON Runtime where
   toJSON Claude = String "claude"
   toJSON Gemini = String "gemini"
 
+-- | The role of the agent (determines hook behavior and context).
+data Role = Dev | Tl | Pm
+  deriving stock (Show, Eq, Generic)
+
+instance FromJSON Role where
+  parseJSON = withText "Role" $ \case
+    "dev" -> pure Dev
+    "tl" -> pure Tl
+    "pm" -> pure Pm
+    r -> fail $ "Unknown role: " <> show r
+
+instance ToJSON Role where
+  toJSON Dev = String "dev"
+  toJSON Tl = String "tl"
+  toJSON Pm = String "pm"
+
 -- | Tool definition for MCP discovery (must match Rust ToolDefinition).
 data ToolDefinition = ToolDefinition
   { tdName :: Text
@@ -276,7 +293,7 @@ data ToolDefinition = ToolDefinition
 
 -- | Message sent over Unix socket from mantle-agent. Tagged by "type".
 data ControlMessage
-  = HookEvent { input :: HookInput, runtime :: Runtime }
+  = HookEvent { input :: HookInput, runtime :: Runtime, role :: Role }
   | McpToolCall { mcpId :: Text, toolName :: Text, arguments :: Value }
   | ToolsListRequest
   | Ping
@@ -289,6 +306,7 @@ instance FromJSON ControlMessage where
       "HookEvent" -> HookEvent
         <$> o .: "input"
         <*> o .:? "runtime" .!= Claude
+        <*> o .:? "role" .!= Dev
       "MCPToolCall" -> McpToolCall
         <$> o .: "id"
         <*> o .: "tool_name"
@@ -298,10 +316,11 @@ instance FromJSON ControlMessage where
       _ -> fail $ "Unknown message type: " <> show msgType
 
 instance ToJSON ControlMessage where
-  toJSON (HookEvent i r) = object
+  toJSON (HookEvent i r rl) = object
     [ "type" .= ("HookEvent" :: Text)
     , "input" .= i
     , "runtime" .= r
+    , "role" .= rl
     ]
   toJSON (McpToolCall mid tn args) = object
     [ "type" .= ("MCPToolCall" :: Text)

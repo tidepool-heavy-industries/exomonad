@@ -7,7 +7,7 @@
 use crate::error::{MantleError, Result};
 use crate::protocol::{
     ControlMessage, ControlResponse, HookInput, HookOutput, HookSpecificOutput, PermissionDecision,
-    Runtime,
+    Role, Runtime,
 };
 use crate::socket::{control_socket_path, ControlSocket};
 use clap::ValueEnum;
@@ -59,12 +59,13 @@ pub enum HookEventType {
 ///
 /// * `event_type` - The type of hook event being handled
 /// * `runtime` - The runtime environment (Claude or Gemini)
+/// * `role` - The role of the agent (dev, tl, pm)
 ///
 /// # Returns
 ///
 /// Returns `Ok(())` on success. The function may call `std::process::exit()`
 /// with a non-zero code if the hook should be denied.
-pub fn handle_hook(event_type: HookEventType, runtime: Runtime) -> Result<()> {
+pub fn handle_hook(event_type: HookEventType, runtime: Runtime, role: Role) -> Result<()> {
     // Read hook payload from stdin
     let mut stdin_content = String::new();
     std::io::stdin()
@@ -74,6 +75,7 @@ pub fn handle_hook(event_type: HookEventType, runtime: Runtime) -> Result<()> {
     debug!(
         event = ?event_type,
         runtime = ?runtime,
+        role = ?role,
         payload_len = stdin_content.len(),
         "Received hook event"
     );
@@ -121,6 +123,7 @@ pub fn handle_hook(event_type: HookEventType, runtime: Runtime) -> Result<()> {
     let message = ControlMessage::HookEvent {
         input: Box::new(hook_input),
         runtime,
+        role,
     };
     let response = socket.send(&message)?;
 

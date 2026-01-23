@@ -301,7 +301,7 @@ let mergedVars = filteredRootVars ++ subagentVars
         "hooks": [
           {
             "type": "command",
-            "command": "<hangar>/runtime/bin/mantle-agent hook session-start"
+            "command": "<hangar>/runtime/bin/mantle-agent hook session-start --role=dev"
           }
         ]
       },
@@ -310,7 +310,7 @@ let mergedVars = filteredRootVars ++ subagentVars
         "hooks": [
           {
             "type": "command",
-            "command": "<hangar>/runtime/bin/mantle-agent hook session-start"
+            "command": "<hangar>/runtime/bin/mantle-agent hook session-start --role=dev"
           }
         ]
       }
@@ -333,7 +333,7 @@ let mergedVars = filteredRootVars ++ subagentVars
           {
             "name": "init-agent",
             "type": "command",
-            "command": "<hangar>/runtime/bin/mantle-agent hook session-start"
+            "command": "<hangar>/runtime/bin/mantle-agent hook session-start --role=dev"
           }
         ]
       },
@@ -343,7 +343,7 @@ let mergedVars = filteredRootVars ++ subagentVars
           {
             "name": "resume-agent",
             "type": "command",
-            "command": "<hangar>/runtime/bin/mantle-agent hook session-start"
+            "command": "<hangar>/runtime/bin/mantle-agent hook session-start --role=dev"
           }
         ]
       }

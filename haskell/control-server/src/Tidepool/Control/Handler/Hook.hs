@@ -17,7 +17,7 @@ import System.Environment (lookupEnv)
 import Control.Exception (SomeException, try)
 import Control.Monad.Freer (Eff, Member, runM)
 
-import Tidepool.Control.Protocol
+import Tidepool.Control.Protocol hiding (role)
 import Tidepool.Control.ExoTools (parseBeadId)
 import Tidepool.Control.Hook.SessionStart (sessionStartLogic)
 import Tidepool.Control.Hook.Stop (stopHookLogic, StopHookResult(..))
@@ -34,10 +34,11 @@ import Tidepool.Zellij.Interpreter (runZellijIO)
 --
 -- Executes hook-specific logic for SessionStart and Stop.
 -- Other hooks pass through with default responses.
-handleHook :: HookInput -> Runtime -> IO ControlResponse
-handleHook input runtime = do
+handleHook :: HookInput -> Runtime -> Role -> IO ControlResponse
+handleHook input runtime agentRole = do
   TIO.putStrLn $ "  session=" <> input.sessionId
   TIO.putStrLn $ "  cwd=" <> input.cwd
+  TIO.putStrLn $ "  role=" <> T.pack (show agentRole)
   hFlush stdout
 
   case input.hookEventName of

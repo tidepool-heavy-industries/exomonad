@@ -34,8 +34,8 @@ instance ToJSON McpToolCallRequest where
     ]
 
 type TidepoolControlAPI =
-       -- | Hook event: (Input, Runtime) -> (Output, ExitCode)
-       "hook" :> ReqBody '[JSON] (HookInput, Runtime) :> Post '[JSON] (HookOutput, Int)
+       -- | Hook event: (Input, Runtime, Role) -> (Output, ExitCode)
+       "hook" :> ReqBody '[JSON] (HookInput, Runtime, Role) :> Post '[JSON] (HookOutput, Int)
        -- | MCP tool call: Request -> Response
   :<|> "mcp" :> "call" :> ReqBody '[JSON] McpToolCallRequest :> Post '[JSON] ControlResponse
        -- | MCP tool list

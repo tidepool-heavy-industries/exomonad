@@ -38,6 +38,19 @@ impl Default for Runtime {
     }
 }
 
+/// The role of the agent (determines hook behavior and context).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ValueEnum, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum Role {
+    /// Developer/subagent role - focused on implementing tasks.
+    #[default]
+    Dev,
+    /// Tech Lead role - orchestration, oversight, planning.
+    Tl,
+    /// Product Manager role - triage, prioritization, health.
+    Pm,
+}
+
 // ============================================================================
 // Hook Event Types (from Claude Code stdin)
 // ============================================================================
@@ -273,6 +286,9 @@ pub enum ControlMessage {
         /// The runtime that emitted the hook.
         #[serde(default)]
         runtime: Runtime,
+        /// The role of the agent (dev, tl, pm).
+        #[serde(default)]
+        role: Role,
     },
 
     /// MCP tool call from Claude Code.
@@ -469,15 +485,17 @@ mod tests {
                 reason: None,
             }),
             runtime: Runtime::Claude,
+            role: Role::Dev,
         };
 
         let json = serde_json::to_string(&msg).unwrap();
         let parsed: ControlMessage = serde_json::from_str(&json).unwrap();
 
         match parsed {
-            ControlMessage::HookEvent { input, runtime } => {
+            ControlMessage::HookEvent { input, runtime, role } => {
                 assert_eq!(input.session_id, "test");
                 assert_eq!(runtime, Runtime::Claude);
+                assert_eq!(role, Role::Dev);
             }
             _ => panic!("Wrong variant"),
         }

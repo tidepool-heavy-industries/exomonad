@@ -11,7 +11,7 @@ module Tidepool.Control.Server
 import Tidepool.Control.API
 import Tidepool.Control.Handler (handleMessage)
 import Tidepool.Control.Logging (Logger, logInfo, logDebug, logError)
-import Tidepool.Control.Protocol
+import Tidepool.Control.Protocol hiding (role)
 import Tidepool.Control.RoleConfig
 import Tidepool.Control.TUIState
 import Tidepool.Control.Types (ServerConfig(..))
@@ -142,11 +142,11 @@ server logger config tuiState =
   :<|> handleRoleMcpTools
   :<|> handleRoleMcpCall
   where
-    handleHook (input, runtime) = do
+    handleHook (input, runtime, agentRole) = do
       res <- liftIO $ do
-        logDebug logger $ "[HOOK] " <> input.hookEventName <> " runtime=" <> T.pack (show runtime)
+        logDebug logger $ "[HOOK] " <> input.hookEventName <> " runtime=" <> T.pack (show runtime) <> " role=" <> T.pack (show agentRole)
         traceCtx <- newTraceContext
-        res <- handleMessage logger config traceCtx tuiState (HookEvent input runtime)
+        res <- handleMessage logger config traceCtx tuiState (HookEvent input runtime agentRole)
 
         -- Flush traces after handling the message if OTLP is configured
         case config.observabilityConfig of

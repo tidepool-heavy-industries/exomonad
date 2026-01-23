@@ -516,7 +516,7 @@ writeClaudeLocalSettings hangarRoot worktreePath = do
                       object
                         [
                           "type" .= ("command" :: Text)
-                        , "command" .= (T.pack mantleAgentPath <> " hook session-start")
+                        , "command" .= (T.pack mantleAgentPath <> " hook session-start --role=dev")
                         ]
                     ]
                   ]
@@ -524,12 +524,12 @@ writeClaudeLocalSettings hangarRoot worktreePath = do
                 object
                   [
                     "matcher" .= ("resume" :: Text)
-                  , "hooks" .= 
+                  , "hooks" .=
                     [
                       object
                         [
                           "type" .= ("command" :: Text)
-                        , "command" .= (T.pack mantleAgentPath <> " hook session-start")
+                        , "command" .= (T.pack mantleAgentPath <> " hook session-start --role=dev")
                         ]
                     ]
                   ]
@@ -555,7 +555,7 @@ writeGeminiConfig hangarRoot worktreePath controlSocket = do
       -- Gemini CLI doesn't expand $GEMINI_PROJECT_DIR, so use absolute paths
       binDir = Paths.runtimeBinDir hangarRoot
       mantleAgent = Paths.mantleAgentBin binDir
-      hookCmd = mantleAgent <> " hook session-start"
+      hookCmd = mantleAgent <> " hook session-start --role=dev"
       -- controlSocket is passed in (short path in /tmp to avoid SUN_LEN limits)
 
       settings = object
