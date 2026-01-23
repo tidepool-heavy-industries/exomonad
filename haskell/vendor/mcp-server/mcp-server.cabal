@@ -27,7 +27,7 @@ library
     MCP.Server.Types
   build-depends:
     aeson >=2.0 && <3.0,
-    base >=4.20.0 && <4.22,
+    base >=4.20.0 && <4.24,
     bytestring >=0.10 && <0.13,
     containers >=0.6 && <0.9,
     http-types >=0.12 && <1.0,

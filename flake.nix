@@ -60,7 +60,7 @@
           # Default: Full development environment
           default = pkgs.mkShell {
             packages = commonPkgs
-              ++ haskellPkgs "ghc910"
+              ++ haskellPkgs "ghc912"
               ++ rustPkgs
               ++ nodePkgs
               ++ orchestrationPkgs
@@ -141,14 +141,14 @@
               echo "  wasm32-wasi-cabal build tidepool-wasm"
               echo "  # Output: dist-newstyle/.../tidepool-wasm.wasm"
               echo ""
-              echo "NOTE: Using GHC 9.10 for stability (not 9.14)"
+              echo "NOTE: Using GHC 9.10 for WASM (9.12 not yet available in ghc-wasm-meta)"
               echo ""
             '';
           };
 
           # Minimal: Just Haskell + HLS for quick edits
           minimal = pkgs.mkShell {
-            packages = commonPkgs ++ haskellPkgs "ghc910";
+            packages = commonPkgs ++ haskellPkgs "ghc912";
 
             shellHook = ''
               export PKG_CONFIG_PATH="${pkgs.zlib.dev}/lib/pkgconfig:$PKG_CONFIG_PATH"
