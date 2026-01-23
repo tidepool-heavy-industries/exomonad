@@ -34,7 +34,7 @@ import Tidepool.Effects.Env (Env, getEnv, getEnvironment)
 import Tidepool.Effects.Git (Git, WorktreeInfo(..), getWorktreeInfo)
 import Tidepool.Effects.Worktree (Worktree, WorktreeSpec(..), WorktreePath(..), createWorktree)
 
-import Tidepool.Effects.FileSystem (FileSystem, createDirectory, writeFileText, copyFile, fileExists, directoryExists, readFileText)
+import Tidepool.Effects.FileSystem (FileSystem, createDirectory, writeFileText, fileExists, directoryExists, readFileText)
 import Tidepool.Effects.Zellij (Zellij, TabConfig(..), TabId(..), checkZellijEnv, newTab)
 import Tidepool.Graph.Generic (AsHandler, type (:-))
 import Tidepool.Graph.Generic.Core (EntryNode, ExitNode, LogicNode)
@@ -43,6 +43,9 @@ import Tidepool.Graph.Types (type (:@), Input, UsesEffects, Exit, MCPExport, MCP
 import Tidepool.Schema (HasJSONSchema(..), objectSchema, arraySchema, emptySchema, SchemaType(..), describeField)
 
 import Tidepool.Control.ExoTools.Internal (slugify)
+import Tidepool.Control.Runtime.Paths as Paths
+import Tidepool.Control.Runtime.ProcessCompose as PC
+import qualified Data.Yaml as Yaml
 
 -- | Find the hangar root by checking ENV or walking up from repo root.
 findHangarRoot
@@ -252,7 +255,8 @@ processBead mHangarRoot repoRoot wtBaseDir backend shortId = do
           hr = fromMaybe repoRoot mHangarRoot
 
       -- Early validation: Check for binary existence
-      let binPath = hr </> "runtime" </> "bin" </> "tidepool-control-server"
+      let binDir = Paths.runtimeBinDir hr
+          binPath = Paths.controlServerBin binDir
       binExistsRes <- fileExists binPath
       
       -- Handle fileExists result (Left is error, Right is boolean existence)
@@ -297,14 +301,14 @@ processBead mHangarRoot repoRoot wtBaseDir backend shortId = do
                         Right (WorktreePath path) -> do
                           -- b. Bootstrap .tidepool/ directory structure
                           -- Compute socket paths here (before bootstrap) since we need them for:
-                          -- 1. Creating /tmp/tidepool-<shortId>/ directory
+                          -- 1. Creating socket directory
                           -- 2. Passing to writeGeminiConfig for MCP config
-                          let socketDir = "/tmp/tidepool-" <> T.unpack shortId
-                              controlSocket = socketDir </> "control.sock"
-                              tuiSocket = socketDir </> "tui.sock"
+                          let socketDir = Paths.socketDirectoryFor shortId
+                              controlSocket = Paths.controlSocketPath socketDir
+                              tuiSocket = Paths.tuiSocketPath socketDir
                               
                               -- d. Write subagent environment
-                              -- Socket paths (socketDir, controlSocket) were computed above for bootstrap.
+                              -- Socket paths (socketDir, controlSocket) were computed above.
                               -- Inject HANGAR_ROOT and TIDEPOOL_BIN_DIR to avoid fragile shell discovery.
                               -- Launch backend with appropriate flags for hook execution visibility
                               backendCmd = case backend of
@@ -314,7 +318,7 @@ processBead mHangarRoot repoRoot wtBaseDir backend shortId = do
                               envVars =
                                 [ ("SUBAGENT_CMD", backendCmd)
                                 , ("HANGAR_ROOT", T.pack hr)
-                                , ("TIDEPOOL_BIN_DIR", T.pack $ hr </> "runtime" </> "bin")
+                                , ("TIDEPOOL_BIN_DIR", T.pack binDir)
                                 , ("TIDEPOOL_SOCKET_DIR", T.pack socketDir)
                                 , ("TIDEPOOL_CONTROL_SOCKET", T.pack controlSocket)
                                 , ("TIDEPOOL_TUI_SOCKET", T.pack tuiSocket)
@@ -370,14 +374,18 @@ bootstrapTidepool mHangarRoot repoRoot worktreePath backend socketDir controlSoc
       case res2 of
         Left err -> pure $ Left $ "Failed to create .tidepool/logs: " <> T.pack (show err)
         Right () -> do
-          -- Copy subagent process-compose template
-          let srcTemplate = case mHangarRoot of
-                Just hr -> hr </> "templates" </> "subagent-pc.yaml"
-                Nothing -> repoRoot </> ".tidepool" </> "templates" </> "subagent-pc.yaml"  -- fallback
+          -- Generate process-compose.yaml from Haskell types
+          -- This ensures type safety and removes dependency on external template files
+          let binDir = Paths.runtimeBinDir (fromMaybe repoRoot mHangarRoot)
+              binPath = Paths.controlServerBin binDir
+              tuiSocket = Paths.tuiSocketPath socketDir
+              pcConfig = PC.generateSubagentConfig binPath socketDir controlSocket tuiSocket
               dstConfig = worktreePath </> "process-compose.yaml"
-          copyRes <- copyFile srcTemplate dstConfig
-          case copyRes of
-            Left err -> pure $ Left $ "Failed to copy process-compose.yaml: " <> T.pack (show err)
+              pcYaml = TE.decodeUtf8 $ Yaml.encode pcConfig
+          
+          writePCRes <- writeFileText dstConfig pcYaml
+          case writePCRes of
+            Left err -> pure $ Left $ "Failed to write process-compose.yaml: " <> T.pack (show err)
             Right () -> do
               -- Write custom .env file (merging root .env and subagent config)
               -- This replaces the symlink approach which caused variable shadowing issues.
@@ -475,7 +483,8 @@ writeClaudeLocalSettings
 writeClaudeLocalSettings hangarRoot worktreePath = do
   let claudeDir = worktreePath </> ".claude"
       settingsFile = claudeDir </> "settings.local.json"
-      mantleAgentPath = hangarRoot </> "runtime" </> "bin" </> "mantle-agent"
+      binDir = Paths.runtimeBinDir hangarRoot
+      mantleAgentPath = Paths.mantleAgentBin binDir
 
       settings = object
         [ "hooks" .= object
@@ -518,7 +527,8 @@ writeGeminiConfig hangarRoot worktreePath controlSocket = do
   let geminiDir = worktreePath </> ".gemini"
       settingsFile = geminiDir </> "settings.json"
       -- Gemini CLI doesn't expand $GEMINI_PROJECT_DIR, so use absolute paths
-      mantleAgent = hangarRoot </> "runtime" </> "bin" </> "mantle-agent"
+      binDir = Paths.runtimeBinDir hangarRoot
+      mantleAgent = Paths.mantleAgentBin binDir
       hookCmd = mantleAgent <> " hook session-start"
       -- controlSocket is passed in (short path in /tmp to avoid SUN_LEN limits)
 

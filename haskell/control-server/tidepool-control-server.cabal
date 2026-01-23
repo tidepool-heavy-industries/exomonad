@@ -29,6 +29,8 @@ library
         Tidepool.Control.Server
         Tidepool.Control.Handler
         Tidepool.Control.Logging
+        Tidepool.Control.Runtime.Paths
+        Tidepool.Control.Runtime.ProcessCompose
         Tidepool.Control.Handler.Hook
         Tidepool.Control.Handler.MCP
         -- Hook implementations
@@ -112,7 +114,8 @@ library
         -- Template rendering (for Graph/Templates.hs)
         mtl,
         ginger,
-        parsec
+        parsec,
+        yaml
     hs-source-dirs:   src
     default-language: GHC2024
     default-extensions:
