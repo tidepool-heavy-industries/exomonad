@@ -259,3 +259,63 @@ impl PopupResult {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_component_serialization() {
+        let component = Component {
+            id: "my-slider".to_string(),
+            spec: ComponentSpec::Slider {
+                label: "Volume".to_string(),
+                min: 0.0,
+                max: 100.0,
+                default: 50.0,
+            },
+            visible_when: None,
+        };
+
+        let json = serde_json::to_string(&component).unwrap();
+        let expected = r#"{"id":"my-slider","type":"slider","label":"Volume","min":0.0,"max":100.0,"default":50.0}"#;
+        assert_eq!(json, expected);
+
+        let parsed: Component = serde_json::from_str(expected).unwrap();
+        assert_eq!(parsed, component);
+    }
+
+    #[test]
+    fn test_popup_state_initialization() {
+        let def = PopupDefinition {
+            title: "Test Popup".to_string(),
+            components: vec![
+                Component {
+                    id: "chk".to_string(),
+                    spec: ComponentSpec::Checkbox { label: "Check".to_string(), default: true },
+                    visible_when: None,
+                },
+                Component {
+                    id: "txt".to_string(),
+                    spec: ComponentSpec::Textbox { label: "Text".to_string(), placeholder: None, rows: None },
+                    visible_when: None,
+                },
+            ],
+        };
+
+        let state = PopupState::new(&def);
+        assert_eq!(state.get_boolean("chk"), Some(true));
+        assert_eq!(state.get_text("txt"), Some(&String::new()));
+    }
+
+    #[test]
+    fn test_visibility_rule_serialization() {
+        let rule = VisibilityRule::Checked("some-checkbox".to_string());
+        let json = serde_json::to_string(&rule).unwrap();
+        assert_eq!(json, "\"some-checkbox\"");
+
+        let rule_eq = VisibilityRule::Equals(HashMap::from([("choice".to_string(), "Value".to_string())]));
+        let json_eq = serde_json::to_string(&rule_eq).unwrap();
+        assert_eq!(json_eq, "{\"choice\":\"Value\"}");
+    }
+}
