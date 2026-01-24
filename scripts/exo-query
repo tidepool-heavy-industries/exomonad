@@ -1,0 +1,16 @@
+#!/bin/bash
+# Query OpenObserve traces, extract JSONL file paths for drill-down
+set -euo pipefail
+
+QUERY="$1"
+OPENOBSERVE_URL="${OPENOBSERVE_URL:-http://localhost:5080}"
+AUTH_HEADER="${OPENOBSERVE_AUTH_HEADER:-$(echo -n 'admin@tidepool.local:tidepool-dev' | base64)}"
+
+# Query traces
+RESULTS=$(curl -sf -H "Authorization: Basic ${AUTH_HEADER}" \
+  -H "Content-Type: application/json" \
+  -XPOST "${OPENOBSERVE_URL}/api/default/_search" \
+  -d "{\"query\": {\"sql\": \"SELECT DISTINCT attributes->>'session.id' as session_id, attributes->>'jsonl.file' as jsonl_file FROM traces WHERE ${QUERY}\"}}")
+
+# Output session IDs and file paths
+echo "$RESULTS" | jq -r '.hits[] | [.session_id, .jsonl_file] | @tsv'
