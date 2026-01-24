@@ -21,10 +21,14 @@ import Data.Maybe (fromMaybe)
 import qualified Data.Map.Strict as Map
 import System.IO (hFlush, stdout)
 import System.Environment (lookupEnv)
-import Control.Exception (SomeException, try)
+import Control.Exception (SomeException, try, throwIO)
+import Control.Monad (forM_)
 import Control.Monad.Freer (Eff, Member, runM)
 import Control.Monad.Freer.State (runState)
 import Data.Time.Clock (getCurrentTime)
+import OpenTelemetry.Trace
+import qualified OpenTelemetry.Context as Context
+import qualified OpenTelemetry.Context.ThreadLocal as Context
 
 import Tidepool.Control.Protocol hiding (role)
 import Tidepool.Control.Types (ServerConfig(..))
@@ -36,6 +40,7 @@ import Tidepool.Control.Effects.SshExec (runSshExec)
 import Tidepool.Control.Effects.Git (runGitViaSsh)
 import Tidepool.Control.Effects.Cabal (runCabalViaSsh)
 import Tidepool.Control.Effects.Justfile (runJustfileViaSsh)
+import Tidepool.Control.Interpreters.Traced (traceCabal, traceGit, traceBD)
 import Tidepool.BD.Interpreter (runBDIO, defaultBDConfig)
 import Tidepool.BD.GitInterpreter (runGitIO)
 import Tidepool.Cabal.Interpreter (runCabalIO, defaultCabalConfig)
@@ -57,18 +62,38 @@ import Tidepool.Control.StopHook.Templates (renderStopHookTemplate)
 --
 -- Executes hook-specific logic for SessionStart and Stop.
 -- Other hooks pass through with default responses.
-handleHook :: ServerConfig -> HookInput -> Runtime -> Role -> CircuitBreakerMap -> IO ControlResponse
-handleHook config input runtime agentRole cbMap = do
+handleHook :: Tracer -> ServerConfig -> HookInput -> Runtime -> Role -> CircuitBreakerMap -> IO ControlResponse
+handleHook tracer config input runtime agentRole cbMap = do
   TIO.putStrLn $ "  session=" <> input.sessionId
   TIO.putStrLn $ "  cwd=" <> input.cwd
   TIO.putStrLn $ "  role=" <> T.pack (show agentRole)
   hFlush stdout
 
-  case input.hookEventName of
-    "SessionStart" -> handleSessionStart agentRole input
-    "Stop" -> handleStop input runtime cbMap
-    "PreToolUse" -> handlePreToolUse config input
-    _ -> pure $ hookSuccess $ makeResponse input.hookEventName input
+  let spanName = "hook." <> input.hookEventName
+  
+  -- Manual span management
+  ctx <- Context.getContext
+  span <- createSpan tracer ctx spanName defaultSpanArguments
+  
+  result <- try $ do
+    addAttribute span "session.id" input.sessionId
+    addAttribute span "jsonl.file" input.transcriptPath
+    forM_ input.toolUseId $ \tid -> addAttribute span "tool_use_id" tid
+    forM_ input.toolName $ \tn -> addAttribute span "tool_name" tn
+    
+    case input.hookEventName of
+      "SessionStart" -> handleSessionStart tracer agentRole input
+      "Stop" -> handleStop tracer input runtime cbMap
+      "PreToolUse" -> handlePreToolUse config input
+      _ -> pure $ hookSuccess $ makeResponse input.hookEventName input
+
+  endSpan span Nothing
+  
+  case result of
+    Left (e :: SomeException) -> do
+      recordException span mempty Nothing e
+      throwIO e
+    Right r -> pure r
 
 -- | Handle PreToolUse hook using policy evaluation.
 handlePreToolUse :: ServerConfig -> HookInput -> IO ControlResponse
@@ -96,8 +121,8 @@ handlePreToolUse config input = do
         }
 
 -- | Handle SessionStart hook: inject bead context.
-handleSessionStart :: Role -> HookInput -> IO ControlResponse
-handleSessionStart role input = do
+handleSessionStart :: Tracer -> Role -> HookInput -> IO ControlResponse
+handleSessionStart tracer role input = do
   TIO.putStrLn "  [HOOK] Running SessionStart context injection..."
   hFlush stdout
 
@@ -108,9 +133,17 @@ handleSessionStart role input = do
   result <- try $ runM
     $ runLog Debug
     $ runBDIO defaultBDConfig
+    $ traceBD tracer
     $ case mContainer of
-         Just container -> runSshExec (T.pack sshProxyUrl) $ runGitViaSsh (T.pack container) "." $ sessionStartLogic role input.cwd
-         Nothing -> runGitIO $ sessionStartLogic role input.cwd
+         Just container -> 
+           runSshExec (T.pack sshProxyUrl) 
+           $ runGitViaSsh (T.pack container) "." 
+           $ traceGit tracer
+           $ sessionStartLogic role input.cwd
+         Nothing -> 
+           runGitIO 
+           $ traceGit tracer
+           $ sessionStartLogic role input.cwd
 
   case result of
     Left (e :: SomeException) -> do
@@ -131,13 +164,13 @@ handleSessionStart role input = do
 -- | Handle Stop hook: gather state, render template, provide actionable guidance.
 --
 -- Uses CircuitBreaker to prevent infinite loops and concurrent execution.
-handleStop :: HookInput -> Runtime -> CircuitBreakerMap -> IO ControlResponse
-handleStop input runtime cbMap = do
+handleStop :: Tracer -> HookInput -> Runtime -> CircuitBreakerMap -> IO ControlResponse
+handleStop tracer input runtime cbMap = do
   sessionId <- getOrCreateSession input
   TIO.putStrLn $ "  [HOOK] Running Stop hook with circuit breaker for session: " <> sessionId
   hFlush stdout
 
-  withCircuitBreaker cbMap sessionId (runStopHookLogic input) >>= \case
+  withCircuitBreaker cbMap sessionId (runStopHookLogic tracer input) >>= \case
     Left err -> do
       TIO.putStrLn $ "  [HOOK] Circuit breaker blocked Stop: " <> err
       hFlush stdout
@@ -194,8 +227,8 @@ getOrCreateSession input = pure input.sessionId
 
 -- | Logic to run inside circuit breaker lock.
 -- Replaces old runStopHookLogic with graph execution.
-runStopHookLogic :: HookInput -> IO (TemplateName, StopHookContext)
-runStopHookLogic input = do
+runStopHookLogic :: Tracer -> HookInput -> IO (TemplateName, StopHookContext)
+runStopHookLogic tracer input = do
   -- Check environment for container/SSH
   mContainer <- lookupEnv "TIDEPOOL_CONTAINER"
   sshProxyUrl <- fromMaybe "http://localhost:7433" <$> lookupEnv "SSH_PROXY_URL"
@@ -210,8 +243,8 @@ runStopHookLogic input = do
   
   -- We need to fetch git info first to populate AgentState
   agentState <- case mContainer of
-     Just container -> runM $ runSshExec (T.pack sshProxyUrl) $ runGitViaSsh (T.pack container) "." $ getAgentState input
-     Nothing -> runM $ runGitIO $ getAgentState input
+     Just container -> runM $ runSshExec (T.pack sshProxyUrl) $ runGitViaSsh (T.pack container) "." $ traceGit tracer $ getAgentState input
+     Nothing -> runM $ runGitIO $ traceGit tracer $ getAgentState input
 
   (result, _finalState) <- case mContainer of
         Just container ->
@@ -219,7 +252,9 @@ runStopHookLogic input = do
           $ runState initialWorkflow
           $ runSshExec (T.pack sshProxyUrl)
           $ runCabalViaSsh (T.pack container)
+          $ traceCabal tracer
           $ runGitViaSsh (T.pack container) "."
+          $ traceGit tracer
           $ runGraphMeta (GraphMetadata "StopHookGraph")
           $ runNodeMeta defaultNodeMeta
           $ runGraph stopHookHandlers agentState
@@ -227,7 +262,9 @@ runStopHookLogic input = do
           runM
           $ runState initialWorkflow
           $ runCabalIO defaultCabalConfig
+          $ traceCabal tracer
           $ runGitIO
+          $ traceGit tracer
           $ runGraphMeta (GraphMetadata "StopHookGraph")
           $ runNodeMeta defaultNodeMeta
           $ runGraph stopHookHandlers agentState

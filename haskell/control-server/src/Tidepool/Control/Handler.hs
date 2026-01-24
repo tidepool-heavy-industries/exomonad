@@ -5,6 +5,7 @@ module Tidepool.Control.Handler
 
 import qualified Data.Text as T
 
+import OpenTelemetry.Trace (Tracer)
 import Tidepool.Control.Logging (Logger, logInfo)
 import Tidepool.Control.Protocol
 import Tidepool.Control.Types (ServerConfig(..))
@@ -16,9 +17,9 @@ import Tidepool.Control.Handler.MCP (handleMcpTool)
 import Tidepool.Observability.Types (TraceContext)
 
 -- | Route a control message to the appropriate handler.
-handleMessage :: Logger -> ServerConfig -> TraceContext -> TUIState -> CircuitBreakerMap -> ControlMessage -> IO ControlResponse
-handleMessage logger config traceCtx tuiState cbMap = \case
-  HookEvent input r rl -> handleHook config input r rl cbMap
+handleMessage :: Logger -> ServerConfig -> Tracer -> TraceContext -> TUIState -> CircuitBreakerMap -> ControlMessage -> IO ControlResponse
+handleMessage logger config tracer traceCtx tuiState cbMap = \case
+  HookEvent input r rl -> handleHook tracer config input r rl cbMap
   McpToolCall reqId name args ->
     handleMcpTool logger config traceCtx tuiState reqId name args
   ToolsListRequest -> handleToolsList logger
