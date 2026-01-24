@@ -19,10 +19,20 @@ touch /var/log/tidepool/control-server.log
 # Ensure Zellij config directory exists (if using home-based config)
 # mkdir -p ~/.config/zellij
 
+# Generate self-signed SSL certificate for web server
+# Zellij requires SSL when binding to non-localhost addresses
+mkdir -p /tmp/zellij-ssl
+openssl req -x509 -newkey rsa:4096 -nodes \
+    -keyout /tmp/zellij-ssl/key.pem \
+    -out /tmp/zellij-ssl/cert.pem \
+    -days 365 -subj "/CN=tidepool-orchestrator" 2>/dev/null
+
 # Start Zellij web server in daemon mode
 # Web server runs on port 8080, bound to 0.0.0.0 for Docker access
-# Users can connect via browser at http://nixos:8080
-zellij web --daemonize --ip 0.0.0.0 --port 8080
+# Users can connect via browser at https://nixos:8080 (note: HTTPS with self-signed cert)
+zellij web --daemonize --ip 0.0.0.0 --port 8080 \
+    --cert /tmp/zellij-ssl/cert.pem \
+    --key /tmp/zellij-ssl/key.pem
 
 # Create a web login token (printed to logs for first-time access)
 echo "🌐 Creating web login token..."

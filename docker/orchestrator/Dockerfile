@@ -45,6 +45,7 @@ RUN apt-get update && apt-get install -y \
     libffi8 \
     zlib1g \
     ca-certificates \
+    openssl \
     tini \
     gosu \
     git \
