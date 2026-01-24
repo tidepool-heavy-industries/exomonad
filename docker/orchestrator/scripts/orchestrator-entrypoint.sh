@@ -27,16 +27,25 @@ openssl req -x509 -newkey rsa:4096 -nodes \
     -out /tmp/zellij-ssl/cert.pem \
     -days 365 -subj "/CN=tidepool-orchestrator" 2>/dev/null
 
-# Start Zellij web server in daemon mode
+# Fix permissions so Zellij can read the certificate files
+chmod 644 /tmp/zellij-ssl/cert.pem
+chmod 600 /tmp/zellij-ssl/key.pem
+
+# Start Zellij web server in background (using & instead of --daemonize to see errors)
 # Web server runs on port 8080, bound to 0.0.0.0 for Docker access
-# Users can connect via browser at https://nixos:8080 (note: HTTPS with self-signed cert)
-zellij web --daemonize --ip 0.0.0.0 --port 8080 \
+# Users can connect via browser at https://nixos:8080/orchestrator (note: HTTPS with self-signed cert)
+echo "🌐 Starting Zellij web server..."
+zellij web --ip 0.0.0.0 --port 8080 \
     --cert /tmp/zellij-ssl/cert.pem \
-    --key /tmp/zellij-ssl/key.pem
+    --key /tmp/zellij-ssl/key.pem &
+
+# Wait for web server to stabilize
+sleep 2
 
 # Create a web login token (printed to logs for first-time access)
 echo "🌐 Creating web login token..."
-zellij web --create-token orchestrator-web || true
+zellij web --create-token
+echo "📋 Copy the token above to log into https://nixos:8080/orchestrator"
 
 # Launch Zellij TUI session
 # attach --create will create the session if it doesn't exist, or attach if it does
