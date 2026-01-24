@@ -35,6 +35,7 @@ import Data.Aeson
 import Data.Aeson.Types (Parser)
 import Data.Text (Text)
 import GHC.Generics (Generic)
+import Tidepool.Control.RoleConfig (Role(..))
 
 -- ============================================================================
 -- Hook Input (from Claude Code via mantle-agent)
@@ -265,22 +266,6 @@ instance FromJSON Runtime where
 instance ToJSON Runtime where
   toJSON Claude = String "claude"
   toJSON Gemini = String "gemini"
-
--- | The role of the agent (determines hook behavior and context).
-data Role = Dev | TL | PM
-  deriving stock (Show, Eq, Generic, Enum, Bounded)
-
-instance FromJSON Role where
-  parseJSON = withText "Role" $ \case
-    "dev" -> pure Dev
-    "tl" -> pure TL
-    "pm" -> pure PM
-    r -> fail $ "Unknown role: " <> show r
-
-instance ToJSON Role where
-  toJSON Dev = String "dev"
-  toJSON TL = String "tl"
-  toJSON PM = String "pm"
 
 -- | Tool definition for MCP discovery (must match Rust ToolDefinition).
 data ToolDefinition = ToolDefinition

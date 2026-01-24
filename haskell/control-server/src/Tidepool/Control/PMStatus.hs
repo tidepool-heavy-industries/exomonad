@@ -31,11 +31,12 @@ import GHC.Generics (Generic)
 import Tidepool.Effects.BD (BD, listBeads, ListBeadsInput(..), defaultListBeadsInput, BeadStatus(..), BeadInfo(..))
 import Tidepool.Effects.GitHub (GitHub, listPullRequests, PRFilter(..), defaultPRFilter, PRState(..), PullRequest(..), Repo(..))
 import Tidepool.Effect.Types (Time, getCurrentTime)
+import Tidepool.Role (Role(..))
 import Tidepool.Control.PMTools (labelReady, labelNeedsTLReview, labelNeedsPMApproval)
 import Tidepool.Graph.Generic (AsHandler, type (:-))
 import Tidepool.Graph.Generic.Core (EntryNode, ExitNode, LogicNode)
 import Tidepool.Graph.Goto (Goto, GotoChoice, To, gotoExit)
-import Tidepool.Graph.Types (type (:@), Input, UsesEffects, Exit, MCPExport, MCPToolDef)
+import Tidepool.Graph.Types (type (:@), Input, UsesEffects, Exit, MCPExport, MCPToolDef, MCPRoleHint)
 import Tidepool.Schema (HasJSONSchema(..), objectSchema, emptySchema, SchemaType(..), describeField)
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -148,6 +149,7 @@ data PmStatusGraph mode = PmStatusGraph
   { psEntry :: mode :- EntryNode PmStatusArgs
       :@ MCPExport
       :@ MCPToolDef '("pm_status", "Sprint health dashboard for PM observability. Calculates velocity, cycle time, and state distribution.")
+      :@ MCPRoleHint 'PM
 
   , psRun :: mode :- LogicNode
       :@ Input PmStatusArgs

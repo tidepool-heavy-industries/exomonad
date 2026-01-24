@@ -40,8 +40,9 @@ import qualified Data.Text as T
 import GHC.Generics
 import GHC.TypeLits (Symbol, KnownSymbol, symbolVal)
 
+import Tidepool.Role (Role(..))
 import Tidepool.Schema (HasJSONSchema(..), schemaToValue)
-import Tidepool.Graph.Types (type (:@), MCPToolDef, GraphEntry(..), GraphEntries)
+import Tidepool.Graph.Types (type (:@), MCPToolDef, GraphEntry(..), GraphEntries, MCPRoleHint, MCPExport)
 import Tidepool.Graph.Generic.Core (AsGraph, EntryNode)
 import Tidepool.Graph.Edges (HasMCPExport)
 
@@ -55,6 +56,8 @@ data MCPToolInfo = MCPToolInfo
     -- ^ JSON Schema for tool parameters (from HasJSONSchema)
   , mtdEntryName :: Text
     -- ^ Original field name in graph record (for dispatch)
+  , mtdRoles :: [Role]
+    -- ^ Roles allowed to use this tool
   } deriving (Show, Eq)
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -120,6 +123,7 @@ instance ReifyMCPField 'False name fieldType where
 instance ( KnownSymbol name
          , HasJSONSchema (EntryInputType fieldType)
          , ExtractToolMeta name fieldType
+         , ExtractRoleMeta fieldType
          )
       => ReifyMCPField 'True name fieldType where
   reifyMCPField _ = [MCPToolInfo
@@ -127,6 +131,7 @@ instance ( KnownSymbol name
     , mtdDescription = getToolDescription @name @fieldType
     , mtdInputSchema = schemaToValue (jsonSchema @(EntryInputType fieldType))
     , mtdEntryName = T.pack (symbolVal (Proxy @name))
+    , mtdRoles = getToolRoles @fieldType
     }]
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -149,6 +154,37 @@ class ExtractToolMeta (name :: Symbol) (node :: Type) where
   getToolName :: Text
   getToolDescription :: Text
 
+class ExtractRoleMeta (node :: Type) where
+  getToolRoles :: [Role]
+
+instance {-# OVERLAPPABLE #-} ExtractRoleMeta node where
+  getToolRoles = []
+
+instance (ExtractRoleMeta node, ReifyRoleList '[r])
+      => ExtractRoleMeta (node :@ MCPRoleHint r) where
+  getToolRoles = reifyRoleList @'[r] ++ getToolRoles @node
+
+instance ExtractRoleMeta node => ExtractRoleMeta (node :@ MCPToolDef meta) where
+  getToolRoles = getToolRoles @node
+
+instance ExtractRoleMeta node => ExtractRoleMeta (node :@ MCPExport) where
+  getToolRoles = getToolRoles @node
+
+class ReifyRoleList (roles :: [Role]) where
+  reifyRoleList :: [Role]
+
+instance ReifyRoleList '[] where
+  reifyRoleList = []
+
+instance ReifyRoleList rest => ReifyRoleList ('Dev ': rest) where
+  reifyRoleList = Dev : reifyRoleList @rest
+
+instance ReifyRoleList rest => ReifyRoleList ('TL ': rest) where
+  reifyRoleList = TL : reifyRoleList @rest
+
+instance ReifyRoleList rest => ReifyRoleList ('PM ': rest) where
+  reifyRoleList = PM : reifyRoleList @rest
+
 -- Default: use field name as tool name
 instance {-# OVERLAPPABLE #-} KnownSymbol name => ExtractToolMeta name node where
   getToolName = T.pack (camelToSnake (symbolVal (Proxy @name)))
@@ -159,6 +195,16 @@ instance (KnownSymbol toolName, KnownSymbol toolDesc)
       => ExtractToolMeta name (node :@ MCPToolDef '(toolName, toolDesc)) where
   getToolName = T.pack (symbolVal (Proxy @toolName))
   getToolDescription = T.pack (symbolVal (Proxy @toolDesc))
+
+instance ExtractToolMeta name node
+      => ExtractToolMeta name (node :@ MCPRoleHint r) where
+  getToolName = getToolName @name @node
+  getToolDescription = getToolDescription @name @node
+
+instance ExtractToolMeta name node
+      => ExtractToolMeta name (node :@ MCPExport) where
+  getToolName = getToolName @name @node
+  getToolDescription = getToolDescription @name @node
 
 -- | Convert camelCase to snake_case.
 camelToSnake :: String -> String
@@ -209,15 +255,17 @@ instance ReifyEntryList '[] where
 instance ( KnownSymbol toolName
          , KnownSymbol nodeField
          , KnownSymbol description
+         , ReifyRoleList roles
          , HasJSONSchema inputType
          , ReifyEntryList rest
          )
-      => ReifyEntryList ((toolName ':~> '(nodeField, inputType, description)) ': rest) where
+      => ReifyEntryList ((toolName ':~> '(nodeField, inputType, description, roles)) ': rest) where
   reifyEntryList _ =
     let tool = MCPToolInfo
           { mtdName = T.pack (symbolVal (Proxy @toolName))
           , mtdDescription = T.pack (symbolVal (Proxy @description))
           , mtdInputSchema = schemaToValue (jsonSchema @inputType)
           , mtdEntryName = T.pack (symbolVal (Proxy @nodeField))
+          , mtdRoles = reifyRoleList @roles
           }
     in tool : reifyEntryList (Proxy @rest)

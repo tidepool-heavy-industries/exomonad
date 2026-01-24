@@ -57,6 +57,54 @@ Read this if you're:
                         └────────────┘
 ```
 
+## Role-Based Access Control
+
+The system enforces role-based access control (RBAC) for MCP tools to ensure agents only use tools appropriate for their responsibilities.
+
+### Roles
+
+| Role | Purpose | Key Tools |
+|------|---------|-----------|
+| **TL** | Team Lead: Orchestrates agents, spawns worktrees, monitors progress. | `spawn_agents`, `exo_status`, `exo_complete` |
+| **Dev** | Developer: Executes implementation tasks, files PRs, uses LSP tools. | `file_pr`, `find_callers`, `show_type`, TUI tools |
+| **PM** | Product Manager: Planning, prioritization, health monitoring. | `pm_*` tools, `exo_status` (read-only) |
+
+### Role Detection & Routing
+
+1. **Subagent Spawning**: `spawn_agents` configures new worktrees with `--role=dev` by default.
+2. **Session Start**: The `SessionStart` hook reports the role to the control server.
+3. **MCP Endpoint Routing**: Tools are served via role-prefixed HTTP endpoints:
+   - `/role/tl/mcp/tools` - TL tool list
+   - `/role/dev/mcp/tools` - Dev tool list
+   - `/role/pm/mcp/tools` - PM tool list
+
+### Configuration
+
+Subagents are automatically configured to use the appropriate role-based endpoint in their `.claude/settings.local.json` or `.gemini/settings.json`.
+
+```json
+{
+  "mcpServers": {
+    "tidepool": {
+      "url": "http+unix://${TIDEPOOL_CONTROL_SOCKET}/role/dev/mcp"
+    }
+  }
+}
+```
+
+### Tool Annotations
+
+Graphs can document their intended role using the `MCPRoleHint` annotation in the DSL:
+
+```haskell
+data SpawnAgentsGraph mode = SpawnAgentsGraph
+  { saEntry :: mode :- EntryNode SpawnAgentsArgs
+      :@ MCPExport
+      :@ MCPToolDef '("spawn_agents", "...")
+      :@ MCPRoleHint 'TL
+  ...
+```
+
 ## .tidepool Directory Convention
 
 Project-local configuration in `.tidepool/` (gitignored):

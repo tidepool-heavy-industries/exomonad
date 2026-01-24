@@ -44,6 +44,7 @@ library
         Tidepool.Graph.MCPReify
         Tidepool.Graph.Export
         Tidepool.Graph.Memory
+        Tidepool.Role
         -- Types needed by WASM (no native dependencies)
         Tidepool.Anthropic.Types
         Tidepool.Tool.Wire

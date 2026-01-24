@@ -36,10 +36,11 @@ import Tidepool.Effects.Worktree (Worktree, WorktreeSpec(..), WorktreePath(..), 
 
 import Tidepool.Effects.FileSystem (FileSystem, createDirectory, writeFileText, copyFile, fileExists, directoryExists, readFileText)
 import Tidepool.Effects.Zellij (Zellij, TabConfig(..), TabId(..), checkZellijEnv, newTab)
+import Tidepool.Role (Role(..))
 import Tidepool.Graph.Generic (AsHandler, type (:-))
 import Tidepool.Graph.Generic.Core (EntryNode, ExitNode, LogicNode)
 import Tidepool.Graph.Goto (Goto, GotoChoice, To, gotoExit)
-import Tidepool.Graph.Types (type (:@), Input, UsesEffects, Exit, MCPExport, MCPToolDef)
+import Tidepool.Graph.Types (type (:@), Input, UsesEffects, Exit, MCPExport, MCPToolDef, MCPRoleHint)
 import Tidepool.Schema (HasJSONSchema(..), objectSchema, arraySchema, emptySchema, SchemaType(..), describeField)
 
 import Tidepool.Control.ExoTools.Internal (slugify)
@@ -164,6 +165,7 @@ data SpawnAgentsGraph mode = SpawnAgentsGraph
     saEntry :: mode :- EntryNode SpawnAgentsArgs
       :@ MCPExport
       :@ MCPToolDef '("spawn_agents", "Create worktrees and branches for parallel agent dispatch. Accepts optional 'backend' parameter ('claude' or 'gemini', defaults to 'claude').")
+      :@ MCPRoleHint 'TL
 
   , saRun :: mode :- LogicNode
       :@ Input SpawnAgentsArgs

@@ -85,6 +85,7 @@ import GHC.Generics (Generic)
 
 import Tidepool.Effect.LSP
 import Tidepool.Effect.Types (Log, logDebug, Return, returnValue)
+import Tidepool.Role (Role(..))
 import Tidepool.Graph.Generic (type (:-))
 import Tidepool.Graph.Generic.Core (LogicNode)
 import Tidepool.Graph.Types (type (:@), Input, UsesEffects, GraphEntries, GraphEntry(..))
@@ -181,7 +182,7 @@ newtype FindCallersGraph mode = FindCallersGraph
 
 -- | MCP tool entry point declaration for find_callers.
 type instance GraphEntries FindCallersGraph =
-  '[ "find_callers" ':~> '("fcRun", FindCallersArgs, "Find actual call sites of a function, filtering out imports and type signatures") ]
+  '[ "find_callers" ':~> '("fcRun", FindCallersArgs, "Find actual call sites of a function, filtering out imports and type signatures", '[ 'Dev]) ]
 
 -- | Core logic for finding callers.
 findCallersLogic
@@ -371,7 +372,7 @@ newtype FindCalleesGraph mode = FindCalleesGraph
 
 -- | MCP tool entry point declaration for find_callees.
 type instance GraphEntries FindCalleesGraph =
-  '[ "find_callees" ':~> '("fceRun", FindCalleesArgs, "Find functions called by a given function") ]
+  '[ "find_callees" ':~> '("fceRun", FindCalleesArgs, "Find functions called by a given function", '[ 'Dev]) ]
 
 -- | Core logic for finding callees.
 findCalleesLogic
@@ -554,7 +555,7 @@ newtype ShowTypeGraph mode = ShowTypeGraph
 
 -- | MCP tool entry point declaration for show_type.
 type instance GraphEntries ShowTypeGraph =
-  '[ "show_type" ':~> '("stRun", ShowTypeArgs, "Inspect a Haskell type: shows fields (for records) and constructors (for sum types/GADTs)") ]
+  '[ "show_type" ':~> '("stRun", ShowTypeArgs, "Inspect a Haskell type: shows fields (for records) and constructors (for sum types/GADTs)", '[ 'Dev]) ]
 
 -- | Core logic for showing type information.
 showTypeLogic
@@ -726,7 +727,7 @@ newtype ShowFieldsGraph mode = ShowFieldsGraph
 
 -- | MCP tool entry point declaration for show_fields.
 type instance GraphEntries ShowFieldsGraph =
-  '[ "show_fields" ':~> '("sfRun", ShowFieldsArgs, "Show fields of a Haskell record type with their types") ]
+  '[ "show_fields" ':~> '("sfRun", ShowFieldsArgs, "Show fields of a Haskell record type with their types", '[ 'Dev]) ]
 
 -- | Core logic for showing fields.
 showFieldsLogic
@@ -870,7 +871,7 @@ newtype ShowConstructorsGraph mode = ShowConstructorsGraph
 
 -- | MCP tool entry point declaration for show_constructors.
 type instance GraphEntries ShowConstructorsGraph =
-  '[ "show_constructors" ':~> '("scRun", ShowConstructorsArgs, "Show constructors of a Haskell sum type or GADT") ]
+  '[ "show_constructors" ':~> '("scRun", ShowConstructorsArgs, "Show constructors of a Haskell sum type or GADT", '[ 'Dev]) ]
 
 -- | Core logic for showing constructors.
 showConstructorsLogic

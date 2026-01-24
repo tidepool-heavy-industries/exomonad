@@ -6,8 +6,9 @@ module Tidepool.Control.RoleConfig
   ) where
 
 import Data.Text (Text)
+import qualified Data.Text as T
 import qualified Data.Set as Set
-import Tidepool.Control.Protocol (Role(..))
+import Tidepool.Role (Role(..))
 
 roleFromText :: Text -> Maybe Role
 roleFromText "pm" = Just PM
@@ -16,17 +17,31 @@ roleFromText "dev" = Just Dev
 roleFromText _ = Nothing
 
 roleTools :: Role -> Maybe (Set.Set Text)
-roleTools Dev = Nothing -- All tools allowed
-roleTools PM = Just $ Set.fromList
-  [ "pm_status", "pm_review_dag", "pm_propose", "pm_approve_expansion", "pm_prioritize"
-  , "send_message", "check_inbox", "read_message", "mark_read"
-  , "exo_status"
-  ]
 roleTools TL = Just $ Set.fromList
-  [ "spawn_agents", "exo_status", "exo_complete", "file_pr"
-  , "find_callers", "show_fields", "show_constructors", "teach-graph"
+  -- Orchestration: spawn and monitor agents
+  [ "spawn_agents"
+  , "exo_status"      -- Check agent status
+  , "exo_complete"    -- Mark agent work complete
+  -- Messaging with agents
   , "send_message", "check_inbox", "read_message", "mark_read"
+  ]
+
+roleTools Dev = Just $ Set.fromList
+  -- Workflow execution
+  [ "file_pr"         -- File pull requests
+  -- Code intelligence (LSP-backed)
+  , "find_callers", "show_fields", "show_constructors", "teach-graph"
+  -- Interactive (TUI-backed)
   , "confirm_action", "select_option", "request_guidance"
+  ]
+
+roleTools PM = Just $ Set.fromList
+  -- Planning tools
+  [ "pm_status", "pm_review_dag", "pm_propose"
+  , "pm_approve_expansion", "pm_prioritize"
+  -- Messaging
+  , "send_message", "check_inbox", "read_message", "mark_read"
+  , "exo_status"  -- Can view but not spawn
   ]
 
 isToolAllowed :: Role -> Text -> Bool

@@ -27,10 +27,11 @@ import Tidepool.Effects.Git (Git, WorktreeInfo(..), getWorktreeInfo)
 import Tidepool.Effects.GitHub (GitHub, Repo(..), PRCreateSpec(..), PRUrl(..), PullRequest(..), PRFilter(..), createPR, listPullRequests, defaultPRFilter)
 import qualified Data.Text as T
 import Data.Maybe (listToMaybe)
+import Tidepool.Role (Role(..))
 import Tidepool.Graph.Generic (AsHandler, type (:-))
 import Tidepool.Graph.Generic.Core (EntryNode, ExitNode, LogicNode)
 import Tidepool.Graph.Goto (Goto, GotoChoice, To, gotoExit)
-import Tidepool.Graph.Types (type (:@), Input, UsesEffects, Exit, MCPExport, MCPToolDef)
+import Tidepool.Graph.Types (type (:@), Input, UsesEffects, Exit, MCPExport, MCPToolDef, MCPRoleHint)
 import Tidepool.Schema (HasJSONSchema(..), objectSchema, emptySchema, SchemaType(..), describeField)
 
 import Tidepool.Control.ExoTools.Internal (parseBeadId, slugify, formatPRBody)
@@ -98,6 +99,7 @@ data FilePRGraph mode = FilePRGraph
   { fpEntry :: mode :- EntryNode FilePRArgs
       :@ MCPExport
       :@ MCPToolDef '("file_pr", "File a pull request for current bead. Idempotent: returns existing PR if one exists.")
+      :@ MCPRoleHint 'Dev
 
   , fpRun :: mode :- LogicNode
       :@ Input FilePRArgs

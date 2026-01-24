@@ -55,10 +55,11 @@ import qualified Data.Text as T
 import GHC.Generics (Generic)
 
 import Tidepool.Effects.BD (BD, getLabels, addLabel, removeLabel, getBead, updateBead, BeadInfo(..), UpdateBeadInput(..), emptyUpdateInput)
+import Tidepool.Role (Role(..))
 import Tidepool.Graph.Generic (AsHandler, type (:-))
 import Tidepool.Graph.Generic.Core (EntryNode, ExitNode, LogicNode)
 import Tidepool.Graph.Goto (Goto, GotoChoice, To, gotoExit)
-import Tidepool.Graph.Types (type (:@), Input, UsesEffects, Exit, MCPExport, MCPToolDef)
+import Tidepool.Graph.Types (type (:@), Input, UsesEffects, Exit, MCPExport, MCPToolDef, MCPRoleHint)
 import Tidepool.Schema (HasJSONSchema(..), objectSchema, arraySchema, describeField, emptySchema, SchemaType(..))
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -184,6 +185,7 @@ data PmApproveExpansionGraph mode = PmApproveExpansionGraph
   { paeEntry :: mode :- EntryNode PmApproveExpansionArgs
       :@ MCPExport
       :@ MCPToolDef ('("pm_approve_expansion", "Approve or reject a bead's expansion plan. Handles label transitions and feedback."))
+      :@ MCPRoleHint 'PM
 
   , paeRun :: mode :- LogicNode
       :@ Input PmApproveExpansionArgs
@@ -295,6 +297,7 @@ data PmPrioritizeGraph mode = PmPrioritizeGraph
   { ppEntry :: mode :- EntryNode PmPrioritizeArgs
       :@ MCPExport
       :@ MCPToolDef '("pm_prioritize", "Batch update bead priorities with rationale audit trail.")
+      :@ MCPRoleHint 'PM
 
   , ppRun :: mode :- LogicNode
       :@ Input PmPrioritizeArgs
