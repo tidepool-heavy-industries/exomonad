@@ -63,6 +63,7 @@ RUN curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/ca
 # Install Zellij via cargo-binstall
 # v0.43.0+ required for web server support
 ARG ZELLIJ_VERSION=0.43.1
+ENV PATH="/root/.cargo/bin:${PATH}"
 RUN cargo-binstall --no-confirm --version ${ZELLIJ_VERSION} zellij
 
 # Copy the binary from builder
