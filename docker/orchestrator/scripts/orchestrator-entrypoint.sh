@@ -13,9 +13,9 @@ cleanup() {
 
 trap cleanup EXIT
 
-# Clean up old sockets and ensure correct permissions
-rm -f /sockets/control.sock /sockets/tui.sock
-chown -R user:user /sockets
+# Ensure /sockets has correct permissions (control-server creates the socket)
+# DO NOT delete control.sock - it's created by the control-server container
+chown -R user:user /sockets 2>/dev/null || true
 
 # Ensure log file exists so tail doesn't complain
 touch /var/log/tidepool/control-server.log
@@ -118,7 +118,9 @@ fi
 # Run Zellij web server in foreground (NO --daemonize)
 # Docker IS the daemon - foreground execution ensures proper lifecycle coupling
 # exec replaces shell with zellij for correct SIGTERM propagation
+# IMPORTANT: Must use explicit --config, ZELLIJ_CONFIG_DIR alone is not sufficient
 echo "🌐 Starting Zellij web server in foreground..."
-exec gosu user zellij web --ip 0.0.0.0 --port 8080 \
+exec gosu user zellij --config /etc/tidepool/zellij/config.kdl \
+    web --ip 0.0.0.0 --port 8080 \
     --cert /etc/ssl/zellij/cert.pem \
     --key /etc/ssl/zellij/key.pem

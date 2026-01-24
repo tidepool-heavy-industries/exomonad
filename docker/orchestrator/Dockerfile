@@ -187,7 +187,9 @@ RUN chmod +x /usr/local/bin/control-server-entrypoint.sh
 
 EXPOSE 7432
 
-WORKDIR /sockets
+# Set working directory to user's home (control-server creates .tidepool/ here)
+# Socket path comes from TIDEPOOL_CONTROL_SOCKET env var (absolute path to shared volume)
+WORKDIR /home/user
 
 # Run as root initially to fix permissions, entrypoint drops to user
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/control-server-entrypoint.sh"]

@@ -3,16 +3,7 @@
 // Default layout for new sessions (used by web interface)
 default_layout "default"
 
-// Web Server Configuration
-// These settings are used by 'zellij web' command
-web_server true
-web_server_ip "0.0.0.0"  // Bind to all interfaces for Docker access
-web_server_port 8080
-web_server_cert "/etc/ssl/zellij/cert.pem"
-web_server_key "/etc/ssl/zellij/key.pem"
-
-// Allow new sessions to be shared through web server
-web_sharing "on"
+// Web server config passed via CLI args to avoid duplication
 
 // Enable session serialization so the session can be resumed if the container restarts
 session_serialization true
