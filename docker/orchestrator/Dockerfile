@@ -112,13 +112,14 @@ COPY docker/orchestrator/config/exomonad.kdl /etc/tidepool/zellij/layouts/exomon
 COPY docker/orchestrator/config/zellij.kdl /etc/tidepool/zellij/config.kdl
 COPY docker/orchestrator/scripts/orchestrator-entrypoint.sh /usr/local/bin/orchestrator-entrypoint.sh
 COPY scripts/docker-entrypoint-orchestrator.sh /usr/local/bin/docker-entrypoint-orchestrator.sh
+COPY docker/orchestrator/scripts/start-claude.sh /usr/local/bin/start-claude.sh
 
 # Copy SSH private key for ssh-proxy (generated during pre-build)
 COPY docker/orchestrator/ssh-keys/orchestrator_key /etc/ssh-proxy/orchestrator_key
 RUN chmod 600 /etc/ssh-proxy/orchestrator_key
 
 # Ensure scripts are executable
-RUN chmod +x /usr/local/bin/orchestrator-entrypoint.sh /usr/local/bin/docker-entrypoint-orchestrator.sh
+RUN chmod +x /usr/local/bin/orchestrator-entrypoint.sh /usr/local/bin/docker-entrypoint-orchestrator.sh /usr/local/bin/start-claude.sh
 
 # Environment variables
 ENV TIDEPOOL_CONTROL_SOCKET=/sockets/control.sock
@@ -195,9 +196,8 @@ WORKDIR /home/user
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/control-server-entrypoint.sh"]
 
 # Stage 5: Orchestrator (Zellij + Claude Code, mounts control-server socket)
+# Attach via: docker exec -it tidepool-orchestrator zellij attach orchestrator
 FROM runtime AS orchestrator
-
-EXPOSE 8080
 
 WORKDIR /worktrees
 

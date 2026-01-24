@@ -26,7 +26,7 @@ services:
       - tidepool-internal
 
   orchestrator:
-    # Frontend: Zellij web UI + Claude Code CLI
+    # Frontend: Zellij + Claude Code CLI (attach via: docker exec -it --user user tidepool-orchestrator zellij attach orchestrator)
     platform: linux/amd64
     build:
       context: .
@@ -46,6 +46,7 @@ services:
       - TIDEPOOL_CONTROL_SOCKET=/sockets/control.sock
       - TIDEPOOL_TUI_SOCKET=/sockets/tui.sock
       - CLAUDE_CONFIG_DIR=/home/user/.claude-orchestrator
+      - RUST_BACKTRACE=full
       # Claude Code headless environment variables
       - IS_DEMO=true
       - CLAUDE_CODE_DISABLE_INSTALLATION_CHECKS=1
@@ -58,8 +59,6 @@ services:
       - ${HOME}/.claude/.credentials.json:/mnt/secrets/.credentials.json:rw
       - ${HOME}/.claude/settings.json:/mnt/secrets/settings.json:ro
       - /var/run/docker.sock:/var/run/docker.sock
-    ports:
-      - "8080:8080"  # Zellij web client
     restart: unless-stopped
     networks:
       - tidepool-internal
