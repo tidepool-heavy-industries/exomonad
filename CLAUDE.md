@@ -275,7 +275,39 @@ In `.claude/settings.local.json`:
 
 ### Running
 
-**Hybrid Tidepool Architecture (process-compose + Zellij)**
+**Docker Compose Orchestration (Recommended for Linux)**
+
+The Docker Compose setup provides a containerized environment with browser-based Zellij access:
+
+```bash
+# Start the orchestrator container
+docker compose up -d orchestrator
+
+# Generate a login token
+docker exec tidepool-orchestrator zellij web --create-token
+
+# Open browser to: https://localhost:8080/orchestrator
+# (or https://<hostname>:8080/orchestrator for remote servers)
+```
+
+**Features:**
+- ✅ Browser-based Zellij TUI (no terminal required)
+- ✅ 3-pane layout: control-server logs | interactive shell | tail logs
+- ✅ control-server with MCP tools via Unix socket (`/sockets/control.sock`)
+- ✅ Clean shutdown: `docker compose down` (no hangs)
+- ✅ Persistent sessions via session serialization
+
+**Remote access:**
+```bash
+# Control remote Docker via SSH
+export DOCKER_HOST=ssh://user@hostname
+docker compose up -d
+docker exec tidepool-orchestrator zellij web --create-token
+
+# Open: https://hostname:8080/orchestrator
+```
+
+**Hybrid Tidepool Architecture (process-compose + Zellij - Local Development)**
 
 **Recommended: start-augmented.sh**
 ```bash
