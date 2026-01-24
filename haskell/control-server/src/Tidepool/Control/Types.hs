@@ -7,6 +7,7 @@ module Tidepool.Control.Types
 import Data.Text (Text)
 
 import Tidepool.Observability.Types (ObservabilityConfig)
+import Tidepool.Control.Hook.Policy (HookPolicy, defaultPolicy)
 
 
 
@@ -30,6 +31,10 @@ data ServerConfig = ServerConfig
 
     -- ^ Optional observability configuration (Loki/OTLP)
 
+  , hookPolicy :: HookPolicy
+
+    -- ^ Hook evaluation policy
+
   }
 
   deriving stock (Show, Eq)
@@ -49,5 +54,7 @@ defaultConfig = ServerConfig
   , noTui      = False
 
   , observabilityConfig = Nothing
+
+  , hookPolicy = defaultPolicy
 
   }

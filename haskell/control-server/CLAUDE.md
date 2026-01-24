@@ -555,15 +555,31 @@ exportMCPTools logger = do
 
 ## Hook Handlers
 
-Most hooks are passthrough (log and allow).
+Hook events are processed by `Handler/Hook.hs`.
 
-**Current behavior:**
-- `PreToolUse` → allow with `permissionDecision: "allow"`
-- `PostToolUse` → allow with no additional context
-- `Stop` → passthrough (allow)
-- Other hooks → continue with default response
+**PreToolUse Policy:**
+- `PreToolUse` hooks are evaluated against a policy defined in `.tidepool/hook-policy.json`.
+- Policy supports `PolicyAllow`, `PolicyDeny`, and `PolicyAsk` decisions.
+- Rules are evaluated in order; the first match wins.
+- Supports literal tool name matches or `*` wildcard.
 
-**Implementation:** `Handler/Hook.hs:35-49`
+**Example Policy (.tidepool/hook-policy.json):**
+```json
+{
+  "rules": [
+    { "toolPattern": "Write", "decision": { "tag": "PolicyDeny", "contents": "Writing is disabled" } }
+  ],
+  "defaultDecision": { "tag": "PolicyAllow", "contents": ["Allowed by default", null] }
+}
+```
+
+**Other Hooks:**
+- `SessionStart` → Injects bead context into the conversation.
+- `Stop` → Enforces PR filing and pre-commit checks with templated guidance.
+- `PostToolUse` → allow with no additional context.
+- Other hooks → continue with default response.
+
+**Implementation:** `Handler/Hook.hs`, `Hook/Policy.hs`
 
 ## Role-Based Tool Filtering
 

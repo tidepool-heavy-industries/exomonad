@@ -12,12 +12,15 @@ module Tidepool.Control.Handler.Hook
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
+import Data.Maybe (fromMaybe)
 import System.IO (hFlush, stdout)
 import System.Environment (lookupEnv)
 import Control.Exception (SomeException, try)
 import Control.Monad.Freer (Eff, Member, runM)
 
 import Tidepool.Control.Protocol hiding (role)
+import Tidepool.Control.Types (ServerConfig(..))
+import Tidepool.Control.Hook.Policy (HookDecision(..), evaluatePolicy)
 import Tidepool.Control.ExoTools (parseBeadId)
 import Tidepool.Control.Hook.SessionStart (sessionStartLogic)
 import Tidepool.Control.Hook.Stop (stopHookLogic, StopHookResult(..))
@@ -34,8 +37,8 @@ import Tidepool.Zellij.Interpreter (runZellijIO)
 --
 -- Executes hook-specific logic for SessionStart and Stop.
 -- Other hooks pass through with default responses.
-handleHook :: HookInput -> Runtime -> Role -> IO ControlResponse
-handleHook input runtime agentRole = do
+handleHook :: ServerConfig -> HookInput -> Runtime -> Role -> IO ControlResponse
+handleHook config input runtime agentRole = do
   TIO.putStrLn $ "  session=" <> input.sessionId
   TIO.putStrLn $ "  cwd=" <> input.cwd
   TIO.putStrLn $ "  role=" <> T.pack (show agentRole)
@@ -44,7 +47,33 @@ handleHook input runtime agentRole = do
   case input.hookEventName of
     "SessionStart" -> handleSessionStart input
     "Stop" -> handleStop input runtime
+    "PreToolUse" -> handlePreToolUse config input
     _ -> pure $ hookSuccess $ makeResponse input.hookEventName input
+
+-- | Handle PreToolUse hook using policy evaluation.
+handlePreToolUse :: ServerConfig -> HookInput -> IO ControlResponse
+handlePreToolUse config input = do
+  let toolName = fromMaybe "unknown" input.toolName
+  TIO.putStrLn $ "  [HOOK] Evaluating PreToolUse policy for tool: " <> toolName
+  hFlush stdout
+
+  let decision = evaluatePolicy config.hookPolicy toolName
+  case decision of
+    PolicyAllow reason modifiedInput -> do
+      TIO.putStrLn $ "  [HOOK] Policy: ALLOW " <> fromMaybe "" reason
+      hFlush stdout
+      pure $ hookSuccess $ allowPreToolUse reason modifiedInput
+    PolicyDeny reason -> do
+      TIO.putStrLn $ "  [HOOK] Policy: DENY " <> reason
+      hFlush stdout
+      pure $ hookSuccess $ denyPreToolUse reason
+    PolicyAsk reason -> do
+      TIO.putStrLn $ "  [HOOK] Policy: ASK " <> fromMaybe "" reason
+      hFlush stdout
+      -- In Claude Code, "ask" in PreToolUse triggers its own permission prompt.
+      pure $ hookSuccess defaultOutput
+        { hookSpecificOutput = Just $ PreToolUseOutput "ask" reason Nothing
+        }
 
 -- | Handle SessionStart hook: inject bead context.
 handleSessionStart :: HookInput -> IO ControlResponse
@@ -209,7 +238,6 @@ autoFocusLogic = do
 -- | Create appropriate response based on hook type.
 makeResponse :: Text -> HookInput -> HookOutput
 makeResponse eventName input = case eventName of
-  "PreToolUse" -> allowPreToolUse (Just "Allowed by Tidepool") Nothing
   "PostToolUse" -> allowPostToolUse Nothing
   "PermissionRequest" -> defaultOutput
     { hookSpecificOutput = Just $ PermissionRequestOutput $ Allow Nothing

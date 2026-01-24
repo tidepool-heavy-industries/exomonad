@@ -13,6 +13,7 @@ import qualified Data.ByteString.Lazy as BL
 
 import Tidepool.Control.Server (runServer)
 import Tidepool.Control.Types (ServerConfig(..))
+import Tidepool.Control.Hook.Policy (loadHookPolicy)
 import Tidepool.Control.Logging (Logger, withDualLogger, logInfo, logError)
 import Tidepool.Training.Format (formatTrainingFromSkeleton)
 
@@ -39,11 +40,13 @@ main = do
 runServerMode :: Logger -> FilePath -> Bool -> IO ()
 runServerMode logger projectDir noTui = do
   roleEnv <- lookupEnv "TIDEPOOL_ROLE"
+  policy <- loadHookPolicy projectDir
   let config = ServerConfig 
         { projectDir = projectDir
         , role = fmap T.pack roleEnv
         , noTui = noTui
         , observabilityConfig = Nothing
+        , hookPolicy = policy
         }
 
   -- Start main control server
