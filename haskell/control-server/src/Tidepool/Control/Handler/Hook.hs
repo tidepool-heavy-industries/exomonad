@@ -1,3 +1,8 @@
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE FlexibleContexts #-}
+
 -- | Hook event handler.
 --
 -- Handles hook events from Claude Code via mantle-agent.
@@ -13,10 +18,12 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import Data.Maybe (fromMaybe)
+import qualified Data.Map.Strict as Map
 import System.IO (hFlush, stdout)
 import System.Environment (lookupEnv)
 import Control.Exception (SomeException, try)
 import Control.Monad.Freer (Eff, Member, runM)
+import Control.Monad.Freer.State (runState)
 import Data.Time.Clock (getCurrentTime)
 
 import Tidepool.Control.Protocol hiding (role)
@@ -25,18 +32,26 @@ import Tidepool.Control.Hook.Policy (HookDecision(..), evaluatePolicy)
 import Tidepool.Control.Hook.CircuitBreaker (CircuitBreakerMap, SessionId, withCircuitBreaker, incrementStage)
 import Tidepool.Control.ExoTools (parseBeadId)
 import Tidepool.Control.Hook.SessionStart (sessionStartLogic)
-import Tidepool.Control.Hook.Stop (stopHookLogic, StopHookResult(..))
 import Tidepool.Control.Effects.SshExec (runSshExec)
 import Tidepool.Control.Effects.Git (runGitViaSsh)
+import Tidepool.Control.Effects.Cabal (runCabalViaSsh)
 import Tidepool.Control.Effects.Justfile (runJustfileViaSsh)
 import Tidepool.BD.Interpreter (runBDIO, defaultBDConfig)
 import Tidepool.BD.GitInterpreter (runGitIO)
+import Tidepool.Cabal.Interpreter (runCabalIO, defaultCabalConfig)
 import Tidepool.GitHub.Interpreter (runGitHubIO, defaultGitHubConfig)
 import Tidepool.Justfile.Interpreter (runJustfileIO)
 import Tidepool.Effect.Types (runLog, LogLevel(..))
+import Tidepool.Effect.NodeMeta (runGraphMeta, runNodeMeta, defaultNodeMeta, GraphMetadata(..))
 import Tidepool.Effects.Git (Git, WorktreeInfo(..), getWorktreeInfo)
 import Tidepool.Effects.Zellij (Zellij, checkZellijEnv, goToTab, TabId(..))
 import Tidepool.Zellij.Interpreter (runZellijIO)
+import Tidepool.Graph.Interpret (runGraph)
+
+import Tidepool.Control.StopHook.Types
+import Tidepool.Control.StopHook.Graph
+import Tidepool.Control.StopHook.Handlers
+import Tidepool.Control.StopHook.Templates (renderStopHookTemplate)
 
 -- | Handle a hook event.
 --
@@ -134,90 +149,112 @@ handleStop input runtime cbMap = do
             , systemMessage = Just $ "Tidepool circuit breaker triggered: " <> err
             , hookSpecificOutput = Just StopOutput
             }
-        , exitCode = 1 -- runtimeExitCode runtime -- TODO: use runtime-aware exit code
+        , exitCode = 1
         }
-    Right result -> do
-      TIO.putStrLn $ "  [HOOK] Stop hook completed, block=" <> T.pack (show result.shrShouldBlock)
+    Right (templateName, context) -> do
+      TIO.putStrLn $ "  [HOOK] Stop hook completed, template=" <> templateName
       hFlush stdout
+
+      let rendered = renderStopHookTemplate templateName context
 
       -- Increment circuit breaker stage counter if blocking
       now <- getCurrentTime
-      case (result.shrShouldBlock, result.shrStage) of
-        (True, Just stage) -> incrementStage cbMap sessionId stage now
-        (True, Nothing) -> incrementStage cbMap sessionId "unknown" now
-        _ -> pure ()
+      let shouldBlock = templateName `elem` ["fix-build-errors", "max-loops", "build-stuck"]
+      let stageName = context.stage
+      
+      -- We always increment stage in the graph/workflow state, but CB map is external
+      -- For now, just logging or tracking simple stage
+      if shouldBlock
+        then incrementStage cbMap sessionId stageName now
+        else pure ()
 
       -- Auto-focus if not blocking
-      if not result.shrShouldBlock
+      if not shouldBlock
         then autoFocusOnSubagentStop
         else pure ()
 
-      if result.shrShouldBlock
+      if shouldBlock
         then pure $ HookResponse
           { output = defaultOutput
               { continue_ = False
-              , stopReason = Just result.shrMessage
+              , stopReason = Just $ "Workflow stage: " <> templateName
               , hookSpecificOutput = Just StopOutput
+              , systemMessage = Just rendered
               }
           , exitCode = 1
           }
         else pure $ hookSuccess defaultOutput
-          { systemMessage = Just result.shrMessage
+          { systemMessage = Just rendered
           , hookSpecificOutput = Just StopOutput
           }
 
 -- | Get or create session ID from hook input.
---
--- Currently returns the session ID provided by the agent.
--- Future work: logic to generate stable IDs if agent's ID is ephemeral.
 getOrCreateSession :: HookInput -> IO SessionId
 getOrCreateSession input = pure input.sessionId
 
 -- | Logic to run inside circuit breaker lock.
-runStopHookLogic :: HookInput -> IO StopHookResult
+-- Replaces old runStopHookLogic with graph execution.
+runStopHookLogic :: HookInput -> IO (TemplateName, StopHookContext)
 runStopHookLogic input = do
-  -- Read repo from environment, default to tidepool
-  mRepoEnv <- lookupEnv "TIDEPOOL_GITHUB_REPO"
-  let repoName = maybe "tidepool-heavy-industries/tidepool" T.pack mRepoEnv
-
-  -- Check if pre-commit checks should run (default: enabled)
-  mPreCommit <- lookupEnv "TIDEPOOL_STOP_PRECOMMIT"
-  let runPreCommit = mPreCommit /= Just "false"
-
-  -- Check if we should use SSH for execution (if TIDEPOOL_CONTAINER is set)
+  -- Check environment for container/SSH
   mContainer <- lookupEnv "TIDEPOOL_CONTAINER"
   sshProxyUrl <- fromMaybe "http://localhost:7433" <$> lookupEnv "SSH_PROXY_URL"
 
-  runM $ runLog Debug $ runBDIO defaultBDConfig $ runGitHubIO defaultGitHubConfig $
-    case mContainer of
-      Just container ->
-        runSshExec (T.pack sshProxyUrl) $
-        runGitViaSsh (T.pack container) "." $
-        runJustfileViaSsh (T.pack container) "." $
-        stopHookLogic repoName runPreCommit
-      Nothing ->
-        runGitIO $
-        runJustfileIO $
-        stopHookLogic repoName runPreCommit
+  -- Initialize minimal workflow state
+  let initialWorkflow = WorkflowState
+        { wsGlobalStops = 0 -- TODO: Fetch from CB map?
+        , wsStageRetries = Map.empty
+        , wsCurrentStage = StageBuild
+        , wsLastBuildResult = Nothing
+        }
+  
+  -- We need to fetch git info first to populate AgentState
+  agentState <- case mContainer of
+     Just container -> runM $ runSshExec (T.pack sshProxyUrl) $ runGitViaSsh (T.pack container) "." $ getAgentState input
+     Nothing -> runM $ runGitIO $ getAgentState input
+
+  (result, _finalState) <- case mContainer of
+        Just container ->
+          runM
+          $ runState initialWorkflow
+          $ runSshExec (T.pack sshProxyUrl)
+          $ runCabalViaSsh (T.pack container)
+          $ runGitViaSsh (T.pack container) "."
+          $ runGraphMeta (GraphMetadata "StopHookGraph")
+          $ runNodeMeta defaultNodeMeta
+          $ runGraph stopHookHandlers agentState
+        Nothing ->
+          runM
+          $ runState initialWorkflow
+          $ runCabalIO defaultCabalConfig
+          $ runGitIO
+          $ runGraphMeta (GraphMetadata "StopHookGraph")
+          $ runNodeMeta defaultNodeMeta
+          $ runGraph stopHookHandlers agentState
+
+  pure result
+
+getAgentState :: Member Git es => HookInput -> Eff es AgentState
+getAgentState input = do
+  mWt <- getWorktreeInfo
+  let branch = (.wiBranch) <$> mWt
+      beadId = branch >>= parseBeadId
+  pure $ AgentState
+    { asSessionId = input.sessionId
+    , asCwd = T.unpack input.cwd
+    , asBranch = branch
+    , asBeadId = beadId
+    }
 
 -- | Auto-focus on subagent tab when Stop hook fires.
---
--- Only triggers if:
--- 1. We're running in Zellij
--- 2. We're in a subagent worktree (bd-* branch)
--- 3. TIDEPOOL_AUTO_FOCUS_ON_ERROR is not set to "false"
 autoFocusOnSubagentStop :: IO ()
 autoFocusOnSubagentStop = do
-  -- Check if auto-focus is enabled (default: enabled)
   mAutoFocus <- lookupEnv "TIDEPOOL_AUTO_FOCUS_ON_ERROR"
   let autoFocusEnabled = mAutoFocus /= Just "false"
 
   if not autoFocusEnabled
-    then do
-      TIO.putStrLn "  [HOOK] Auto-focus disabled via TIDEPOOL_AUTO_FOCUS_ON_ERROR"
-      hFlush stdout
+    then pure ()
     else do
-      -- Check if we should use SSH for execution (if TIDEPOOL_CONTAINER is set)
       mContainer <- lookupEnv "TIDEPOOL_CONTAINER"
       sshProxyUrl <- fromMaybe "http://localhost:7433" <$> lookupEnv "SSH_PROXY_URL"
 
@@ -231,35 +268,27 @@ autoFocusOnSubagentStop = do
         Left (e :: SomeException) -> do
           TIO.putStrLn $ "  [HOOK] Auto-focus failed: " <> T.pack (show e)
           hFlush stdout
-        Right () -> do
-          TIO.putStrLn "  [HOOK] Auto-focus completed"
-          hFlush stdout
+        Right () -> pure ()
 
 -- | Auto-focus logic: check Zellij, parse bead ID, switch focus.
 autoFocusLogic :: (Member Zellij es, Member Git es) => Eff es ()
 autoFocusLogic = do
-  -- Check if we're in Zellij
   mZellij <- checkZellijEnv
   case mZellij of
-    Nothing -> pure ()  -- Not in Zellij, skip
+    Nothing -> pure ()
     Just _ -> do
-      -- Get worktree info to extract branch name
       mWt <- getWorktreeInfo
       case mWt of
-        Nothing -> pure ()  -- No worktree info, skip
+        Nothing -> pure ()
         Just wt -> do
-          -- Parse bead ID from branch name
           let branchName = wt.wiBranch
               maybeBeadId = parseBeadId branchName
           case maybeBeadId of
-            Nothing -> pure ()  -- Not a bd-* branch, skip
+            Nothing -> pure ()
             Just beadId -> do
-              -- Switch focus to tab
-              -- Tab name is the short ID (e.g., "9uv")
-              -- parseBeadId returns "tidepool-9uv", so strip the prefix
               let tabName = T.stripPrefix "tidepool-" beadId
               case tabName of
-                Nothing -> pure ()  -- Unexpected format, skip
+                Nothing -> pure ()
                 Just shortId -> do
                   _ <- goToTab (TabId shortId)
                   pure ()
@@ -293,7 +322,7 @@ makeResponse eventName input = case eventName of
   "PreCompact" -> defaultOutput
     { hookSpecificOutput = Just PreCompactOutput
     }
-  _ -> defaultOutput  -- Unknown hook type, just continue
+  _ -> defaultOutput
 
 -- | Default output (continue, no specific output)
 defaultOutput :: HookOutput
