@@ -20,6 +20,7 @@ import Tidepool.Effect.TUI (PopupResult(..))
 import Tidepool.Observability.Types (newTraceContext, ObservabilityConfig(..), LokiConfig(..), OTLPConfig(..))
 import Tidepool.Observability.Interpreter (flushTraces)
 import Tidepool.Control.Export (exportMCPTools)
+import OpenTelemetry.Trace (Tracer)
 
 import Control.Concurrent.Async (race_)
 import Control.Concurrent.STM (atomically)
@@ -63,8 +64,8 @@ loadObservabilityConfig = do
       pure $ Just $ ObservabilityConfig loki otlp "tidepool-control-server"
 
 -- | Run the control server. Blocks forever.
-runServer :: Logger -> ServerConfig -> IO ()
-runServer logger config = do
+runServer :: Logger -> ServerConfig -> Tracer -> IO ()
+runServer logger config tracer = do
   -- Get socket path from environment
   controlSocketEnv <- lookupEnv "TIDEPOOL_CONTROL_SOCKET"
   let controlSocket = case controlSocketEnv of
@@ -96,10 +97,10 @@ runServer logger config = do
       (cleanupUnixSocket controlSocket)
       $ \sock -> do
         logInfo logger $ "Listening on (Unix): " <> T.pack controlSocket
-        runSettingsSocket settings sock (app logger configWithObs tuiState cbMap))
+        runSettingsSocket settings sock (app logger configWithObs tracer tuiState cbMap))
     (do
         logInfo logger "Listening on (TCP): 0.0.0.0:7432"
-        runSettings (setPort 7432 settings) (app logger configWithObs tuiState cbMap))
+        runSettings (setPort 7432 settings) (app logger configWithObs tracer tuiState cbMap))
 
 -- | Setup Unix socket at given path.
 setupUnixSocket :: FilePath -> IO Socket
@@ -130,12 +131,12 @@ cleanupSocketFile path =
       else E.throwIO e
 
 -- | Servant application
-app :: Logger -> ServerConfig -> TUIState -> CircuitBreakerMap -> Application
-app logger config tuiState cbMap = serve (Proxy @TidepoolControlAPI) (server logger config tuiState cbMap)
+app :: Logger -> ServerConfig -> Tracer -> TUIState -> CircuitBreakerMap -> Application
+app logger config tracer tuiState cbMap = serve (Proxy @TidepoolControlAPI) (server logger config tracer tuiState cbMap)
 
 -- | Servant server implementation
-server :: Logger -> ServerConfig -> TUIState -> CircuitBreakerMap -> Server TidepoolControlAPI
-server logger config tuiState cbMap =
+server :: Logger -> ServerConfig -> Tracer -> TUIState -> CircuitBreakerMap -> Server TidepoolControlAPI
+server logger config tracer tuiState cbMap =
        handleHook
   :<|> handleMcpCall
   :<|> handleMcpTools
@@ -148,14 +149,11 @@ server logger config tuiState cbMap =
       res <- liftIO $ do
         logDebug logger $ "[HOOK] " <> input.hookEventName <> " runtime=" <> T.pack (show runtime) <> " role=" <> T.pack (show agentRole)
         traceCtx <- newTraceContext
-        res <- handleMessage logger config traceCtx tuiState cbMap (HookEvent input runtime agentRole)
-
-        -- Flush traces after handling the message if OTLP is configured
-        case config.observabilityConfig of
-          Just obsConfig | Just otlp <- ocOTLP obsConfig ->
-             flushTraces otlp obsConfig.ocServiceName traceCtx
-          _ -> pure ()
-        pure res
+        handleMessage logger config tracer traceCtx tuiState cbMap (HookEvent input runtime agentRole)
+        
+        -- Note: We do NOT flushTraces here because we use hs-opentelemetry (via Tracer) 
+        -- which handles export automatically via BatchSpanProcessor.
+        -- Legacy ObservabilityConfig is skipped for Hooks.
 
       case res of
         HookResponse out ec -> pure (out, ec)
@@ -164,10 +162,10 @@ server logger config tuiState cbMap =
     handleMcpCall req = liftIO $ do
       logInfo logger $ "[MCP:" <> req.mcpId <> "] tool=" <> req.toolName
       traceCtx <- newTraceContext
-      res <- handleMessage logger config traceCtx tuiState cbMap
+      res <- handleMessage logger config tracer traceCtx tuiState cbMap
         (McpToolCall req.mcpId req.toolName req.arguments)
 
-      -- Flush traces
+      -- Flush traces (legacy support for MCP tools)
       case config.observabilityConfig of
         Just obsConfig | Just otlp <- ocOTLP obsConfig ->
            flushTraces otlp obsConfig.ocServiceName traceCtx
@@ -238,10 +236,10 @@ server logger config tuiState cbMap =
               -- Update config with the role from the slug for handlers that need it
               let configWithRole = config { role = Just slug }
               
-              res <- handleMessage logger configWithRole traceCtx tuiState cbMap
+              res <- handleMessage logger configWithRole tracer traceCtx tuiState cbMap
                 (McpToolCall sessId req.toolName req.arguments)
 
-              -- Flush traces
+              -- Flush traces (legacy)
               case config.observabilityConfig of
                 Just obsConfig | Just otlp <- ocOTLP obsConfig ->
                    flushTraces otlp obsConfig.ocServiceName traceCtx

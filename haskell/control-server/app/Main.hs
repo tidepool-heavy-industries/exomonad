@@ -10,11 +10,14 @@ import qualified Data.Text.IO as TIO
 import qualified Data.Text.Encoding as T
 import Data.Aeson (eitherDecode, encode)
 import qualified Data.ByteString.Lazy as BL
+import Data.Maybe (fromMaybe)
 
 import Tidepool.Control.Server (runServer)
 import Tidepool.Control.Types (ServerConfig(..))
 import Tidepool.Control.Hook.Policy (loadHookPolicy)
 import Tidepool.Control.Logging (Logger, withDualLogger, logInfo, logError)
+import Tidepool.Control.Observability (withTracerProvider, getTracer, TracingConfig(..))
+import Tidepool.Control.RoleConfig (Role(..))
 import Tidepool.Training.Format (formatTrainingFromSkeleton)
 
 main :: IO ()
@@ -41,16 +44,32 @@ runServerMode :: Logger -> FilePath -> Bool -> IO ()
 runServerMode logger projectDir noTui = do
   roleEnv <- lookupEnv "TIDEPOOL_ROLE"
   policy <- loadHookPolicy projectDir
+
+  -- Observability config
+  otelEndpoint <- fromMaybe "localhost" <$> lookupEnv "OTEL_EXPORTER_OTLP_ENDPOINT"
+  email <- fromMaybe "admin@tidepool.local" <$> lookupEnv "OPENOBSERVE_EMAIL"
+  password <- fromMaybe "tidepool-dev" <$> lookupEnv "OPENOBSERVE_PASSWORD"
+  
+  let tracingCfg = TracingConfig
+        { tcEndpoint = otelEndpoint
+        , tcAuthEmail = T.pack email
+        , tcAuthPassword = T.pack password
+        , tcServiceName = "tidepool-control-server"
+        }
+
   let config = ServerConfig 
         { projectDir = projectDir
         , role = fmap T.pack roleEnv
+        , defaultRole = Dev
         , noTui = noTui
         , observabilityConfig = Nothing
         , hookPolicy = policy
         }
 
-  -- Start main control server
-  runServer logger config
+  -- Initialize tracing and run server
+  withTracerProvider tracingCfg $ \provider -> do
+    let tracer = getTracer provider "control-server"
+    runServer logger config tracer
 
 runFormatTrainingMode :: Logger -> FilePath -> IO ()
 runFormatTrainingMode logger skeletonFile = do
