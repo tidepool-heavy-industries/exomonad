@@ -59,6 +59,11 @@ library
         Tidepool.Control.FeedbackTools
         Tidepool.Control.RoleConfig
         Tidepool.Control.Export
+        -- Effects
+        Tidepool.Control.Effects.SshExec
+        Tidepool.Control.Effects.Cabal
+        Tidepool.Control.Effects.Git
+        Tidepool.Control.Effects.Justfile
         -- Scout (semantic code exploration)
         Tidepool.Control.Scout.Types
         Tidepool.Control.Scout.EdgeTypes
@@ -117,6 +122,8 @@ library
         tidepool-observability-interpreter,
         -- HTTP for FunctionGemma
         http-conduit,
+        http-client,
+        regex-tdfa,
         vector,
         -- Code sampling
         random,
@@ -347,6 +354,24 @@ test-suite feedback-tools-test
         freer-simple,
         directory,
         filepath,
+        tasty,
+        tasty-hunit
+    hs-source-dirs:   test
+    default-language: GHC2024
+    default-extensions:
+        OverloadedStrings
+        TypeApplications
+
+test-suite ssh-exec-test
+    import:           warnings
+    type:             exitcode-stdio-1.0
+    main-is:          SshExecSpec.hs
+    build-depends:
+        base >= 4.17 && < 5,
+        tidepool-control-server,
+        tidepool-core,
+        text >= 2.0 && < 3,
+        freer-simple,
         tasty,
         tasty-hunit
     hs-source-dirs:   test

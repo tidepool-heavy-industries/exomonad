@@ -331,6 +331,7 @@ processBead mHangarRoot repoRoot wtBaseDir backend shortId = do
                                   ("SUBAGENT_CMD", backendCmd)
                                 , ("HANGAR_ROOT", T.pack hr)
                                 , ("TIDEPOOL_BIN_DIR", T.pack binDir)
+                                , ("TIDEPOOL_CONTAINER", "agent-" <> shortId)
                                 , ("TIDEPOOL_SOCKET_DIR", T.pack socketDir)
                                 , ("TIDEPOOL_CONTROL_SOCKET", T.pack controlSocket)
                                 , ("TIDEPOOL_TUI_SOCKET", T.pack tuiSocket)

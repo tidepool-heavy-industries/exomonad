@@ -40,6 +40,7 @@ module Tidepool.Effects.Cabal
     -- * Result Types
   , CabalResult(..)
   , TestFailure(..)
+  , RawCompileError(..)
   ) where
 
 import Control.Monad.Freer (Eff, Member, send)
@@ -48,6 +49,25 @@ import Data.Text (Text)
 import GHC.Generics (Generic)
 
 import Tidepool.StructuredOutput (StructuredOutput)
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- COMPILE ERROR
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Structured compile error for LLM consumption.
+data RawCompileError = RawCompileError
+  { rceFile :: FilePath
+    -- ^ Source file with the error
+  , rceLine :: Int
+    -- ^ Line number
+  , rceMessage :: Text
+    -- ^ Error message
+  }
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (FromJSON, ToJSON)
+
+instance StructuredOutput RawCompileError
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -96,7 +116,7 @@ instance StructuredOutput TestFailure
 -- @
 -- case result of
 --   CabalSuccess -> proceed
---   CabalBuildFailure code stderr stdout -> handleBuildError stderr
+--   CabalBuildFailure code stderr stdout errors -> handleBuildError errors
 --   CabalTestFailure failures raw -> handleTestFailures failures
 --   CabalTestSuccess output -> handleSuccess output
 -- @
@@ -110,6 +130,8 @@ data CabalResult
         -- ^ Stderr output (usually contains errors)
       , cbfStdout :: Text
         -- ^ Stdout output
+      , cbfParsedErrors :: [RawCompileError]
+        -- ^ Structured compile errors parsed from output
       }
     -- ^ Build failed with compiler errors
   | CabalTestFailure
@@ -173,7 +195,7 @@ data Cabal r where
 -- result <- cabalBuild "/path/to/project"
 -- case result of
 --   CabalSuccess -> proceed
---   CabalBuildFailure _ stderr _ -> handleError stderr
+--   CabalBuildFailure _ stderr _ _ -> handleError stderr
 -- @
 cabalBuild
   :: Member Cabal effs
@@ -188,7 +210,7 @@ cabalBuild = send . CabalBuild
 -- case result of
 --   CabalTestSuccess output -> logSuccess output
 --   CabalTestFailure failures _ -> fixImplementation failures
---   CabalBuildFailure _ stderr _ -> fixCompilation stderr
+--   CabalBuildFailure _ stderr _ _ -> fixCompilation stderr
 -- @
 cabalTest
   :: Member Cabal effs

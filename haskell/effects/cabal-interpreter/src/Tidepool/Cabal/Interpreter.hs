@@ -118,6 +118,7 @@ runCabalBuild cfg path = do
       { cbfExitCode = code
       , cbfStderr = T.pack stderr
       , cbfStdout = T.pack stdout
+      , cbfParsedErrors = []
       }
 
 -- | Run cabal test in the given directory.
@@ -139,6 +140,7 @@ runCabalTest cfg path = do
           { cbfExitCode = code
           , cbfStderr = T.pack stderr
           , cbfStdout = T.pack stdout
+          , cbfParsedErrors = []
           }
         else CabalTestFailure
           { ctfParsedFailures = parseTestOutput output
@@ -156,6 +158,7 @@ runCabalClean _cfg path = do
       { cbfExitCode = code
       , cbfStderr = T.pack stderr
       , cbfStdout = T.pack stdout
+      , cbfParsedErrors = []
       }
 
 -- | Generate verbosity arguments for cabal.

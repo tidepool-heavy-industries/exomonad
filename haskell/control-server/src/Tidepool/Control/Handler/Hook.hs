@@ -24,6 +24,9 @@ import Tidepool.Control.Hook.Policy (HookDecision(..), evaluatePolicy)
 import Tidepool.Control.ExoTools (parseBeadId)
 import Tidepool.Control.Hook.SessionStart (sessionStartLogic)
 import Tidepool.Control.Hook.Stop (stopHookLogic, StopHookResult(..))
+import Tidepool.Control.Effects.SshExec (runSshExec)
+import Tidepool.Control.Effects.Git (runGitViaSsh)
+import Tidepool.Control.Effects.Justfile (runJustfileViaSsh)
 import Tidepool.BD.Interpreter (runBDIO, defaultBDConfig)
 import Tidepool.BD.GitInterpreter (runGitIO)
 import Tidepool.GitHub.Interpreter (runGitHubIO, defaultGitHubConfig)
@@ -81,11 +84,16 @@ handleSessionStart input = do
   TIO.putStrLn "  [HOOK] Running SessionStart context injection..."
   hFlush stdout
 
+  -- Check if we should use SSH for execution (if TIDEPOOL_CONTAINER is set)
+  mContainer <- lookupEnv "TIDEPOOL_CONTAINER"
+  sshProxyUrl <- fromMaybe "http://localhost:7433" <$> lookupEnv "SSH_PROXY_URL"
+
   result <- try $ runM
     $ runLog Debug
     $ runBDIO defaultBDConfig
-    $ runGitIO
-    $ sessionStartLogic input.cwd
+    $ case mContainer of
+         Just container -> runSshExec (T.pack sshProxyUrl) $ runGitViaSsh (T.pack container) "." $ sessionStartLogic input.cwd
+         Nothing -> runGitIO $ sessionStartLogic input.cwd
 
   case result of
     Left (e :: SomeException) -> do
@@ -134,14 +142,21 @@ handleStop input _runtime = do
       mPreCommit <- lookupEnv "TIDEPOOL_STOP_PRECOMMIT"
       let runPreCommit = mPreCommit /= Just "false"
 
-      result <- try
-        $ runM
-        $ runLog Debug
-        $ runBDIO defaultBDConfig
-        $ runGitIO
-        $ runGitHubIO defaultGitHubConfig
-        $ runJustfileIO
-        $ stopHookLogic repoName runPreCommit
+      -- Check if we should use SSH for execution (if TIDEPOOL_CONTAINER is set)
+      mContainer <- lookupEnv "TIDEPOOL_CONTAINER"
+      sshProxyUrl <- fromMaybe "http://localhost:7433" <$> lookupEnv "SSH_PROXY_URL"
+
+      result <- try $ runM $ runLog Debug $ runBDIO defaultBDConfig $ runGitHubIO defaultGitHubConfig $
+        case mContainer of
+          Just container ->
+            runSshExec (T.pack sshProxyUrl) $
+            runGitViaSsh (T.pack container) "." $
+            runJustfileViaSsh (T.pack container) "." $
+            stopHookLogic repoName runPreCommit
+          Nothing ->
+            runGitIO $
+            runJustfileIO $
+            stopHookLogic repoName runPreCommit
 
       case result of
         Left (e :: SomeException) -> do
@@ -193,10 +208,15 @@ autoFocusOnSubagentStop = do
       TIO.putStrLn "  [HOOK] Auto-focus disabled via TIDEPOOL_AUTO_FOCUS_ON_ERROR"
       hFlush stdout
     else do
+      -- Check if we should use SSH for execution (if TIDEPOOL_CONTAINER is set)
+      mContainer <- lookupEnv "TIDEPOOL_CONTAINER"
+      sshProxyUrl <- fromMaybe "http://localhost:7433" <$> lookupEnv "SSH_PROXY_URL"
+
       result <- try $ runM
         $ runZellijIO
-        $ runGitIO
-        $ autoFocusLogic
+        $ case mContainer of
+             Just container -> runSshExec (T.pack sshProxyUrl) $ runGitViaSsh (T.pack container) "." autoFocusLogic
+             Nothing -> runGitIO autoFocusLogic
 
       case result of
         Left (e :: SomeException) -> do
