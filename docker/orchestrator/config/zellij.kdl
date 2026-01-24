@@ -4,7 +4,7 @@
 default_layout "default"
 
 // Web Server Configuration
-// Zellij will auto-start the web server with these settings
+// These settings are used by 'zellij web' command
 web_server true
 web_server_ip "0.0.0.0"  // Bind to all interfaces for Docker access
 web_server_port 8080

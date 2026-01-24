@@ -104,15 +104,22 @@ echo "🌍 Then open: https://nixos:8080/orchestrator"
 # Ensure HOME and SHELL are set for user context
 export HOME=/home/user
 export SHELL=/bin/bash
+echo "[DEBUG] HOME=$HOME SHELL=$SHELL"
 
 # Cleanup old sockets to prevent "Address in use" or stale session errors
 rm -f /tmp/zellij-*.sock
+echo "[DEBUG] Cleaned old sockets"
+
+# Check if config exists
+if [ -f "$ZELLIJ_CONFIG_DIR/config.kdl" ]; then
+    echo "[DEBUG] Config found: $ZELLIJ_CONFIG_DIR/config.kdl"
+else
+    echo "[DEBUG] WARNING: Config NOT found at $ZELLIJ_CONFIG_DIR/config.kdl"
+fi
 
 # Start ONLY the web server (no session pre-creation needed)
 # The web server creates sessions on-demand when browser connects
-# This is the correct architecture for web-only access
-exec gosu user zellij web \
-  --ip 0.0.0.0 \
-  --port 8080 \
-  --cert /etc/ssl/zellij/cert.pem \
-  --key /etc/ssl/zellij/key.pem
+# Settings come from config.kdl (web_server_ip, web_server_port, etc.)
+echo "[DEBUG] About to exec zellij web..."
+echo "[DEBUG] Command: gosu user zellij web"
+exec gosu user zellij web
