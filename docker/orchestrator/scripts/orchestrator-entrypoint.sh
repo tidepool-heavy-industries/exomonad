@@ -20,7 +20,7 @@ touch /var/log/tidepool/control-server.log
 # mkdir -p ~/.config/zellij
 
 # Launch Zellij with web server
-# --server runs Zellij with web client access (no TTY required)
-# Users can connect via browser at http://localhost:8080
-# We explicitly point to the config and layout files in /etc/tidepool/zellij
-exec zellij --config /etc/tidepool/zellij/config.kdl --layout /etc/tidepool/zellij/layouts/default.kdl --server orchestrator
+# Web server configured in config.kdl (port 8080, bind 0.0.0.0)
+# Users can connect via browser at http://nixos:8080
+# --session creates/attaches to a named session
+exec zellij --config /etc/tidepool/zellij/config.kdl --layout /etc/tidepool/zellij/layouts/default.kdl --session orchestrator

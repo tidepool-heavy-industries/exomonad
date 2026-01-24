@@ -1,13 +1,19 @@
 // Zellij configuration for Tidepool Orchestrator
 
+// Web Server Configuration
+web_server true
+web_server_ip "0.0.0.0"  // Bind to all interfaces for Docker access
+web_server_port 8080
+
 // Enable session serialization so the session can be resumed if the container restarts
 session_serialization true
+serialization_interval 60
 
 // Serialize pane viewport to preserve scrollback
 pane_viewport_serialization true
 
-// When the Zellij window is closed forcefully, quit the session
-on_force_close "quit"
+// When the Zellij window is closed forcefully, detach (don't kill session)
+on_force_close "detach"
 
 // Keybindings
 keybinds {
