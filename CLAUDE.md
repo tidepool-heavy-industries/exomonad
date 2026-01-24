@@ -284,7 +284,7 @@ The Docker Compose setup provides a containerized environment with browser-based
 docker compose up -d orchestrator
 
 # Generate a login token
-docker exec tidepool-orchestrator zellij web --create-token
+docker exec tidepool-orchestrator gosu user zellij web --create-token
 
 # Open browser to: https://localhost:8080/orchestrator
 # (or https://<hostname>:8080/orchestrator for remote servers)
@@ -303,7 +303,7 @@ docker exec tidepool-orchestrator zellij web --create-token
 # Control remote Docker via SSH
 export DOCKER_HOST=ssh://user@hostname
 docker compose up -d
-docker exec tidepool-orchestrator zellij web --create-token
+docker exec tidepool-orchestrator gosu user zellij web --create-token
 
 # Open: https://hostname:8080/orchestrator
 ```
@@ -348,6 +348,7 @@ Expected: PreToolUse hook fires (visible in control-server logs, left pane)
 - **"Command not found: claude-code"**: Check build logs for Claude CLI installation errors.
 - **Authentication errors**: Verify `~/.claude/.credentials.json` exists on host and is mounted.
 - **Working directory wrong**: Claude Code should start in `/worktrees`. Check Zellij layout args.
+- **Container restart loop**: Fixed by using `zellij web --daemonize` with `tail -f /dev/null` to keep PID 1 alive. Requires both `tty: true` and `stdin_open: true` in docker-compose.yml.
 
 **Hybrid Tidepool Architecture (process-compose + Zellij - Local Development)**
 

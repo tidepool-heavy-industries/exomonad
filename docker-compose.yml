@@ -7,7 +7,8 @@ services:
       dockerfile: docker/orchestrator/Dockerfile
       target: runtime
     container_name: tidepool-orchestrator
-    tty: true  # Allocate pseudo-TTY to prevent Zellij ENOTTY crash
+    tty: true         # Allocate pseudo-TTY (-t)
+    stdin_open: true  # Keep stdin open (-i) - prevents Zellij from detecting EOF and exiting
     environment:
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}

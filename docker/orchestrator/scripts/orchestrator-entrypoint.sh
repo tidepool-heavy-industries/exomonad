@@ -104,22 +104,14 @@ echo "🌍 Then open: https://nixos:8080/orchestrator"
 # Ensure HOME and SHELL are set for user context
 export HOME=/home/user
 export SHELL=/bin/bash
-echo "[DEBUG] HOME=$HOME SHELL=$SHELL"
 
 # Cleanup old sockets to prevent "Address in use" or stale session errors
 rm -f /tmp/zellij-*.sock
-echo "[DEBUG] Cleaned old sockets"
 
-# Check if config exists
-if [ -f "$ZELLIJ_CONFIG_DIR/config.kdl" ]; then
-    echo "[DEBUG] Config found: $ZELLIJ_CONFIG_DIR/config.kdl"
-else
-    echo "[DEBUG] WARNING: Config NOT found at $ZELLIJ_CONFIG_DIR/config.kdl"
-fi
+# Start web server in daemon mode to decouple from PID 1 lifecycle
+# This prevents the container from exiting when the web server process completes initialization
+gosu user zellij web --daemonize
 
-# Start ONLY the web server (no session pre-creation needed)
-# The web server creates sessions on-demand when browser connects
-# Settings come from config.kdl (web_server_ip, web_server_port, etc.)
-echo "[DEBUG] About to exec zellij web..."
-echo "[DEBUG] Command: gosu user zellij web"
-exec gosu user zellij web
+# Keep PID 1 alive - container stays running while web server runs in background
+# This is the recommended pattern when using zellij web --daemonize
+exec tail -f /dev/null
