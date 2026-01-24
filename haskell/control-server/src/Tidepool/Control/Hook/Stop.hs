@@ -40,6 +40,8 @@ data StopHookResult = StopHookResult
     -- ^ True if stop should be blocked (uncommitted changes on bead branch)
   , shrMessage :: Text
     -- ^ Rendered template with guidance
+  , shrStage :: Maybe Text
+    -- ^ Optional stage name for circuit breaker tracking
   } deriving (Show, Eq)
 
 -- | Core Stop hook logic.
@@ -76,7 +78,7 @@ stopHookLogic repoName runPreCommit = do
             , bead_closed = False
             , bead_already_closed = False
             }
-      pure $ StopHookResult False (runTypedTemplate ctx stopTemplate)
+      pure $ StopHookResult False (runTypedTemplate ctx stopTemplate) Nothing
 
     Just wt -> do
       let branchName = wt.wiBranch
@@ -149,6 +151,10 @@ stopHookLogic repoName runPreCommit = do
             Just pc -> not (success pc)
             Nothing -> False
           shouldBlock = (isBeadBranch && hasDirty && not hasPR) || preCommitFailed
+          
+          stage = if not shouldBlock then Nothing
+                  else if preCommitFailed then Just "pre-commit-failed"
+                  else Just "uncommitted-changes"
 
           ctx = StopContext
             { bead_id = mBeadId
@@ -162,4 +168,4 @@ stopHookLogic repoName runPreCommit = do
             , bead_already_closed = beadWasAlreadyClosed
             }
 
-      pure $ StopHookResult shouldBlock (runTypedTemplate ctx stopTemplate)
+      pure $ StopHookResult shouldBlock (runTypedTemplate ctx stopTemplate) stage

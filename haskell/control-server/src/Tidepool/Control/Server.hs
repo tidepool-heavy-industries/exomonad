@@ -10,6 +10,7 @@ module Tidepool.Control.Server
 
 import Tidepool.Control.API
 import Tidepool.Control.Handler (handleMessage)
+import Tidepool.Control.Hook.CircuitBreaker (initCircuitBreaker, CircuitBreakerMap)
 import Tidepool.Control.Logging (Logger, logInfo, logDebug, logError)
 import Tidepool.Control.Protocol hiding (role)
 import Tidepool.Control.RoleConfig
@@ -82,6 +83,7 @@ runServer logger config = do
 
   -- Create TUI state for WebSocket connections
   tuiState <- newTUIState
+  cbMap <- initCircuitBreaker
 
   let settings = defaultSettings
         & setTimeout (5 * 60) -- 5 minutes timeout
@@ -94,10 +96,10 @@ runServer logger config = do
       (cleanupUnixSocket controlSocket)
       $ \sock -> do
         logInfo logger $ "Listening on (Unix): " <> T.pack controlSocket
-        runSettingsSocket settings sock (app logger configWithObs tuiState))
+        runSettingsSocket settings sock (app logger configWithObs tuiState cbMap))
     (do
         logInfo logger "Listening on (TCP): 0.0.0.0:7432"
-        runSettings (setPort 7432 settings) (app logger configWithObs tuiState))
+        runSettings (setPort 7432 settings) (app logger configWithObs tuiState cbMap))
 
 -- | Setup Unix socket at given path.
 setupUnixSocket :: FilePath -> IO Socket
@@ -128,12 +130,12 @@ cleanupSocketFile path =
       else E.throwIO e
 
 -- | Servant application
-app :: Logger -> ServerConfig -> TUIState -> Application
-app logger config tuiState = serve (Proxy @TidepoolControlAPI) (server logger config tuiState)
+app :: Logger -> ServerConfig -> TUIState -> CircuitBreakerMap -> Application
+app logger config tuiState cbMap = serve (Proxy @TidepoolControlAPI) (server logger config tuiState cbMap)
 
 -- | Servant server implementation
-server :: Logger -> ServerConfig -> TUIState -> Server TidepoolControlAPI
-server logger config tuiState =
+server :: Logger -> ServerConfig -> TUIState -> CircuitBreakerMap -> Server TidepoolControlAPI
+server logger config tuiState cbMap =
        handleHook
   :<|> handleMcpCall
   :<|> handleMcpTools
@@ -146,7 +148,7 @@ server logger config tuiState =
       res <- liftIO $ do
         logDebug logger $ "[HOOK] " <> input.hookEventName <> " runtime=" <> T.pack (show runtime) <> " role=" <> T.pack (show agentRole)
         traceCtx <- newTraceContext
-        res <- handleMessage logger config traceCtx tuiState (HookEvent input runtime agentRole)
+        res <- handleMessage logger config traceCtx tuiState cbMap (HookEvent input runtime agentRole)
 
         -- Flush traces after handling the message if OTLP is configured
         case config.observabilityConfig of
@@ -162,7 +164,7 @@ server logger config tuiState =
     handleMcpCall req = liftIO $ do
       logInfo logger $ "[MCP:" <> req.mcpId <> "] tool=" <> req.toolName
       traceCtx <- newTraceContext
-      res <- handleMessage logger config traceCtx tuiState
+      res <- handleMessage logger config traceCtx tuiState cbMap
         (McpToolCall req.mcpId req.toolName req.arguments)
 
       -- Flush traces
@@ -236,7 +238,7 @@ server logger config tuiState =
               -- Update config with the role from the slug for handlers that need it
               let configWithRole = config { role = Just slug }
               
-              res <- handleMessage logger configWithRole traceCtx tuiState
+              res <- handleMessage logger configWithRole traceCtx tuiState cbMap
                 (McpToolCall sessId req.toolName req.arguments)
 
               -- Flush traces

@@ -17,10 +17,12 @@ import System.IO (hFlush, stdout)
 import System.Environment (lookupEnv)
 import Control.Exception (SomeException, try)
 import Control.Monad.Freer (Eff, Member, runM)
+import Data.Time.Clock (getCurrentTime)
 
 import Tidepool.Control.Protocol hiding (role)
 import Tidepool.Control.Types (ServerConfig(..))
 import Tidepool.Control.Hook.Policy (HookDecision(..), evaluatePolicy)
+import Tidepool.Control.Hook.CircuitBreaker (CircuitBreakerMap, SessionId, withCircuitBreaker, incrementStage)
 import Tidepool.Control.ExoTools (parseBeadId)
 import Tidepool.Control.Hook.SessionStart (sessionStartLogic)
 import Tidepool.Control.Hook.Stop (stopHookLogic, StopHookResult(..))
@@ -40,8 +42,8 @@ import Tidepool.Zellij.Interpreter (runZellijIO)
 --
 -- Executes hook-specific logic for SessionStart and Stop.
 -- Other hooks pass through with default responses.
-handleHook :: ServerConfig -> HookInput -> Runtime -> Role -> IO ControlResponse
-handleHook config input runtime agentRole = do
+handleHook :: ServerConfig -> HookInput -> Runtime -> Role -> CircuitBreakerMap -> IO ControlResponse
+handleHook config input runtime agentRole cbMap = do
   TIO.putStrLn $ "  session=" <> input.sessionId
   TIO.putStrLn $ "  cwd=" <> input.cwd
   TIO.putStrLn $ "  role=" <> T.pack (show agentRole)
@@ -49,7 +51,7 @@ handleHook config input runtime agentRole = do
 
   case input.hookEventName of
     "SessionStart" -> handleSessionStart input
-    "Stop" -> handleStop input runtime
+    "Stop" -> handleStop input runtime cbMap
     "PreToolUse" -> handlePreToolUse config input
     _ -> pure $ hookSuccess $ makeResponse input.hookEventName input
 
@@ -113,83 +115,90 @@ handleSessionStart input = do
 
 -- | Handle Stop hook: gather state, render template, provide actionable guidance.
 --
--- Checks stop_hook_active to prevent infinite loops:
--- - If True: Agent was already sent back by a previous Stop hook block.
---   Allow the stop immediately to break the loop.
--- - If False/Nothing: Fresh stop attempt, run normal validation logic.
-handleStop :: HookInput -> Runtime -> IO ControlResponse
-handleStop input _runtime = do
-  TIO.putStrLn "  [HOOK] Running Stop hook with state detection..."
+-- Uses CircuitBreaker to prevent infinite loops and concurrent execution.
+handleStop :: HookInput -> Runtime -> CircuitBreakerMap -> IO ControlResponse
+handleStop input runtime cbMap = do
+  sessionId <- getOrCreateSession input
+  TIO.putStrLn $ "  [HOOK] Running Stop hook with circuit breaker for session: " <> sessionId
   hFlush stdout
 
-  -- Check stop_hook_active to prevent infinite loops
-  case input.stopHookActive of
-    Just True -> do
-      TIO.putStrLn "  [HOOK] stop_hook_active=true, allowing stop to prevent loop"
+  withCircuitBreaker cbMap sessionId (runStopHookLogic input) >>= \case
+    Left err -> do
+      TIO.putStrLn $ "  [HOOK] Circuit breaker blocked Stop: " <> err
       hFlush stdout
-      -- Allow stop immediately - don't re-block or we'd loop forever
-      pure $ hookSuccess defaultOutput
-        { hookSpecificOutput = Just StopOutput
-        }
-
-    _ -> do
-      -- Fresh stop attempt: run normal validation logic
-      -- Read repo from environment, default to tidepool
-      mRepoEnv <- lookupEnv "TIDEPOOL_GITHUB_REPO"
-      let repoName = maybe "tidepool-heavy-industries/tidepool" T.pack mRepoEnv
-
-      -- Check if pre-commit checks should run (default: enabled)
-      mPreCommit <- lookupEnv "TIDEPOOL_STOP_PRECOMMIT"
-      let runPreCommit = mPreCommit /= Just "false"
-
-      -- Check if we should use SSH for execution (if TIDEPOOL_CONTAINER is set)
-      mContainer <- lookupEnv "TIDEPOOL_CONTAINER"
-      sshProxyUrl <- fromMaybe "http://localhost:7433" <$> lookupEnv "SSH_PROXY_URL"
-
-      result <- try $ runM $ runLog Debug $ runBDIO defaultBDConfig $ runGitHubIO defaultGitHubConfig $
-        case mContainer of
-          Just container ->
-            runSshExec (T.pack sshProxyUrl) $
-            runGitViaSsh (T.pack container) "." $
-            runJustfileViaSsh (T.pack container) "." $
-            stopHookLogic repoName runPreCommit
-          Nothing ->
-            runGitIO $
-            runJustfileIO $
-            stopHookLogic repoName runPreCommit
-
-      case result of
-        Left (e :: SomeException) -> do
-          let errMsg = "Stop hook failed: " <> T.pack (show e)
-          TIO.putStrLn $ "  [HOOK] " <> errMsg
-          hFlush stdout
-          -- On error, allow stop but show error message
-          pure $ hookSuccess defaultOutput
-            { systemMessage = Just errMsg
+      -- Block with circuit breaker error
+      pure $ HookResponse
+        { output = defaultOutput
+            { continue_ = False
+            , stopReason = Just $ "Circuit breaker: " <> err
+            , systemMessage = Just $ "Tidepool circuit breaker triggered: " <> err
             , hookSpecificOutput = Just StopOutput
             }
-        Right (StopHookResult shouldBlock message) -> do
-          TIO.putStrLn $ "  [HOOK] Stop hook completed, block=" <> T.pack (show shouldBlock)
-          hFlush stdout
+        , exitCode = 1 -- runtimeExitCode runtime -- TODO: use runtime-aware exit code
+        }
+    Right result -> do
+      TIO.putStrLn $ "  [HOOK] Stop hook completed, block=" <> T.pack (show result.shrShouldBlock)
+      hFlush stdout
 
-          -- Auto-focus if not blocking
-          if not shouldBlock
-            then autoFocusOnSubagentStop
-            else pure ()
+      -- Increment circuit breaker stage counter if blocking
+      now <- getCurrentTime
+      case (result.shrShouldBlock, result.shrStage) of
+        (True, Just stage) -> incrementStage cbMap sessionId stage now
+        (True, Nothing) -> incrementStage cbMap sessionId "unknown" now
+        _ -> pure ()
 
-          if shouldBlock
-            then pure $ HookResponse
-              { output = defaultOutput
-                  { continue_ = False
-                  , stopReason = Just message
-                  , hookSpecificOutput = Just StopOutput
-                  }
-              , exitCode = 1
-              }
-            else pure $ hookSuccess defaultOutput
-              { systemMessage = Just message
+      -- Auto-focus if not blocking
+      if not result.shrShouldBlock
+        then autoFocusOnSubagentStop
+        else pure ()
+
+      if result.shrShouldBlock
+        then pure $ HookResponse
+          { output = defaultOutput
+              { continue_ = False
+              , stopReason = Just result.shrMessage
               , hookSpecificOutput = Just StopOutput
               }
+          , exitCode = 1
+          }
+        else pure $ hookSuccess defaultOutput
+          { systemMessage = Just result.shrMessage
+          , hookSpecificOutput = Just StopOutput
+          }
+
+-- | Get or create session ID from hook input.
+--
+-- Currently returns the session ID provided by the agent.
+-- Future work: logic to generate stable IDs if agent's ID is ephemeral.
+getOrCreateSession :: HookInput -> IO SessionId
+getOrCreateSession input = pure input.sessionId
+
+-- | Logic to run inside circuit breaker lock.
+runStopHookLogic :: HookInput -> IO StopHookResult
+runStopHookLogic input = do
+  -- Read repo from environment, default to tidepool
+  mRepoEnv <- lookupEnv "TIDEPOOL_GITHUB_REPO"
+  let repoName = maybe "tidepool-heavy-industries/tidepool" T.pack mRepoEnv
+
+  -- Check if pre-commit checks should run (default: enabled)
+  mPreCommit <- lookupEnv "TIDEPOOL_STOP_PRECOMMIT"
+  let runPreCommit = mPreCommit /= Just "false"
+
+  -- Check if we should use SSH for execution (if TIDEPOOL_CONTAINER is set)
+  mContainer <- lookupEnv "TIDEPOOL_CONTAINER"
+  sshProxyUrl <- fromMaybe "http://localhost:7433" <$> lookupEnv "SSH_PROXY_URL"
+
+  runM $ runLog Debug $ runBDIO defaultBDConfig $ runGitHubIO defaultGitHubConfig $
+    case mContainer of
+      Just container ->
+        runSshExec (T.pack sshProxyUrl) $
+        runGitViaSsh (T.pack container) "." $
+        runJustfileViaSsh (T.pack container) "." $
+        stopHookLogic repoName runPreCommit
+      Nothing ->
+        runGitIO $
+        runJustfileIO $
+        stopHookLogic repoName runPreCommit
 
 -- | Auto-focus on subagent tab when Stop hook fires.
 --

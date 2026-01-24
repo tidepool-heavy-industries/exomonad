@@ -594,11 +594,17 @@ Hook events are processed by `Handler/Hook.hs`.
 
 **Other Hooks:**
 - `SessionStart` → Injects bead context into the conversation.
-- `Stop` → Enforces PR filing and pre-commit checks with templated guidance.
-- `PostToolUse` → allow with no additional context.
+**Stop** → Enforces PR filing and pre-commit checks with templated guidance. Uses Circuit Breaker to prevent infinite loops.
 - Other hooks → continue with default response.
 
-**Implementation:** `Handler/Hook.hs`, `Hook/Policy.hs`
+**Circuit Breaker (Stop Hook):**
+- **Purpose**: Prevents infinite retry loops and concurrent execution of the Stop hook.
+- **Global Limit**: Max 15 stops per session (configurable via `CIRCUIT_BREAKER_GLOBAL_MAX`).
+- **Stage Limit**: Max 5 retries for a specific blocking stage (e.g., `pre-commit-failed`, `uncommitted-changes`). Configurable via `CIRCUIT_BREAKER_STAGE_MAX`.
+- **Staleness**: 5-minute timeout for "active" locks (configurable via `CIRCUIT_BREAKER_STALE_TIMEOUT`).
+- **Implementation**: `Handler/Hook.hs` uses `CircuitBreaker.hs` with a global `TVar` map of session states.
+
+**Implementation:** `Handler/Hook.hs`, `Hook/CircuitBreaker.hs`, `Hook/Policy.hs`
 
 ## Role-Based Tool Filtering
 
