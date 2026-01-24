@@ -29,3 +29,17 @@ processes:
     shutdown:
       command: "rm -f .tidepool/sockets/control.sock .tidepool/sockets/tui.sock"
       timeout_seconds: 5
+
+  ssh-proxy:
+    command: |
+      if [ -z "$TIDEPOOL_BIN_DIR" ]; then
+        echo "ERROR: TIDEPOOL_BIN_DIR not set in environment" >&2
+        exit 1
+      fi
+      "$TIDEPOOL_BIN_DIR/ssh-proxy"
+    working_dir: "."
+    environment:
+      - "SSH_PROXY_KEY_PATH=${SSH_PROXY_KEY_PATH:-/etc/ssh-proxy/orchestrator_key}"
+      - "SSH_PROXY_PORT=7433"
+    availability:
+      restart: on_failure

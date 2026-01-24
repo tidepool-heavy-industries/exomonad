@@ -6,4 +6,5 @@ members = ["hangar-config",
     "mantle-shared",
     "tui-sidebar",
     "tui-popup",
+    "ssh-proxy",
 ]

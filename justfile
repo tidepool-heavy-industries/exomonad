@@ -99,8 +99,8 @@ rebuild-runtime:
     cabal build tidepool-control-server
 
     echo ""
-    echo "── Building Rust (mantle-agent, tui-sidebar, tui-popup) ──"
-    cd "$REPO_ROOT/rust" && cargo build --release -p mantle-agent -p tui-sidebar -p tui-popup
+    echo "── Building Rust (mantle-agent, tui-sidebar, tui-popup, ssh-proxy) ──"
+    cd "$REPO_ROOT/rust" && cargo build --release -p mantle-agent -p tui-sidebar -p tui-popup -p ssh-proxy
 
     echo ""
     echo "── Installing to $RUNTIME_BIN ──"
@@ -109,6 +109,7 @@ rebuild-runtime:
     cp "$REPO_ROOT/rust/target/release/mantle-agent" "$RUNTIME_BIN/"
     cp "$REPO_ROOT/rust/target/release/tui-sidebar" "$RUNTIME_BIN/"
     cp "$REPO_ROOT/rust/target/release/tui-popup" "$RUNTIME_BIN/"
+    cp "$REPO_ROOT/rust/target/release/ssh-proxy" "$RUNTIME_BIN/"
 
     echo ""
     echo "── Code signing binaries (macOS) ──"
@@ -116,6 +117,7 @@ rebuild-runtime:
     codesign -s - --force "$RUNTIME_BIN/mantle-agent" 2>/dev/null || true
     codesign -s - --force "$RUNTIME_BIN/tui-sidebar" 2>/dev/null || true
     codesign -s - --force "$RUNTIME_BIN/tui-popup" 2>/dev/null || true
+    codesign -s - --force "$RUNTIME_BIN/ssh-proxy" 2>/dev/null || true
 
     echo ""
     echo "✓ Runtime binaries rebuilt from current repo:"
