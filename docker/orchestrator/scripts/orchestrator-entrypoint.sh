@@ -28,17 +28,14 @@ openssl req -x509 -newkey rsa:4096 -nodes \
     -out /etc/ssl/zellij/cert.pem \
     -days 365 -subj "/CN=tidepool-orchestrator" 2>/dev/null
 
-echo "🌐 Starting Zellij web server on 0.0.0.0:8080 (configured in config.kdl)"
+echo "🌐 Starting Zellij web server on 0.0.0.0:8080"
+echo "📋 Creating background session 'orchestrator' with web-sharing enabled"
 echo "📋 After startup, get login token with: docker exec tidepool-orchestrator zellij web --create-token"
 echo "🌍 Then open: https://nixos:8080/orchestrator"
 
-# Create the session in background with web-sharing enabled
-# This creates the session but doesn't attach to it
+# Create detached session with layout (web server will auto-start from config.kdl)
+# web_sharing "on" in config ensures the session allows web client access
 zellij --config /etc/tidepool/zellij/config.kdl --layout /etc/tidepool/zellij/layouts/default.kdl attach --create-background orchestrator
 
-# Wait for session to be created
-sleep 2
-
-# Launch Zellij web server in foreground
-# The session already exists with web-sharing=on, so web clients can attach
-exec zellij --config /etc/tidepool/zellij/config.kdl web
+# Keep container alive (web server runs in background)
+exec tail -f /dev/null
