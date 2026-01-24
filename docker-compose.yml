@@ -24,6 +24,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     ports:
       - "7432:7432"
+      - "8080:8080"  # Zellij web client
     restart: unless-stopped
     command: ["orchestrator"]
 

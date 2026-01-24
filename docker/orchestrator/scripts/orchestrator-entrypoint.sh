@@ -19,7 +19,8 @@ touch /var/log/tidepool/control-server.log
 # Ensure Zellij config directory exists (if using home-based config)
 # mkdir -p ~/.config/zellij
 
-# Launch Zellij
-# --create ensures a new session is started if one doesn't exist
+# Launch Zellij with web server
+# --server runs Zellij with web client access (no TTY required)
+# Users can connect via browser at http://localhost:8080
 # We explicitly point to the config and layout files in /etc/tidepool/zellij
-zellij --config /etc/tidepool/zellij/config.kdl --layout /etc/tidepool/zellij/layouts/default.kdl attach --create orchestrator
+exec zellij --config /etc/tidepool/zellij/config.kdl --layout /etc/tidepool/zellij/layouts/default.kdl --server orchestrator

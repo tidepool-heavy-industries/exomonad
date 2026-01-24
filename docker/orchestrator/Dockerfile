@@ -87,7 +87,7 @@ ENV ZELLIJ_CONFIG_DIR=/etc/tidepool/zellij
 RUN mkdir -p /sockets /worktrees /var/log/tidepool && \
     chmod 777 /sockets /worktrees /var/log/tidepool
 
-EXPOSE 7432
+EXPOSE 7432 8080
 
 WORKDIR /worktrees
 
