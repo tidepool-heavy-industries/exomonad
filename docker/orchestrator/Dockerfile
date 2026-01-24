@@ -14,7 +14,7 @@ RUN find haskell -type f ! -name "*.cabal" -delete
 # Stage 1: Builder
 # Use GHC 9.12.2 for latest stable with full HLS support
 # Force linux/amd64 to avoid cross-compilation issues on ARM hosts
-FROM --platform=linux/amd64 haskell:9.12.2-slim AS builder
+FROM --platform=linux/amd64 haskell:9.12.2-slim-bookworm AS builder
 
 # Install system dependencies for build
 # zlib1g-dev, libffi-dev, libgmp-dev are required for Haskell compilation
