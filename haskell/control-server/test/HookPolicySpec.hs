@@ -3,7 +3,8 @@ module Main (main) where
 
 import Test.Tasty
 import Test.Tasty.HUnit
-import Data.Aeson (object, (.=))
+import Data.Aeson (object, (.=), eitherDecode)
+import qualified Data.ByteString.Lazy.Char8 as BL
 import Tidepool.Control.Hook.Policy
 
 main :: IO ()
@@ -46,4 +47,29 @@ spec = testGroup "Hook Policy Tests"
             , defaultDecision = PolicyAllow Nothing Nothing
             }
       evaluatePolicy policy "Delete" @?= PolicyAllow (Just "Enforcing force") (Just modifiedInput)
+
+  , testCase "JSON deserialization matches CLAUDE.md format" $ do
+      let json = BL.unlines
+            [ "{"
+            , "  \"rules\": ["
+            , "    {"
+            , "      \"toolPattern\": \"Write\","
+            , "      \"decision\": {"
+            , "        \"tag\": \"PolicyDeny\","
+            , "        \"contents\": \"Writing is disabled\""
+            , "      }"
+            , "    }"
+            , "  ],"
+            , "  \"defaultDecision\": {"
+            , "    \"tag\": \"PolicyAllow\","
+            , "    \"contents\": [\"Allowed by default\", null]"
+            , "  }"
+            , "}"
+            ]
+      let expected = HookPolicy
+            { rules = [ HookRule "Write" (PolicyDeny "Writing is disabled") ]
+            , defaultDecision = PolicyAllow (Just "Allowed by default") Nothing
+            }
+      
+      eitherDecode json @?= Right expected
   ]

@@ -12,6 +12,8 @@ module Tidepool.Control.Hook.Policy
 import Data.Aeson (Value, FromJSON, ToJSON, eitherDecode)
 import qualified Data.ByteString.Lazy as BL
 import Data.Text (Text)
+import qualified Data.Text as T
+import qualified Data.Text.IO as TIO
 import GHC.Generics (Generic)
 import System.Directory (doesFileExist)
 import System.FilePath ((</>))
@@ -65,7 +67,7 @@ loadHookPolicy projectDir = do
       content <- BL.readFile policyPath
       case eitherDecode content of
         Left err -> do
-          putStrLn $ "Error loading hook policy: " <> err
+          TIO.putStrLn $ "Error loading hook policy: " <> T.pack err
           pure defaultPolicy
         Right policy -> pure policy
 

@@ -326,6 +326,7 @@ test-suite hook-policy-test
         tidepool-control-server,
         text >= 2.0 && < 3,
         aeson >= 2.1 && < 3,
+        bytestring >= 0.11 && < 1,
         tasty,
         tasty-hunit
     hs-source-dirs:   test
