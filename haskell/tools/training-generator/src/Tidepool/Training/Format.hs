@@ -9,6 +9,8 @@ module Tidepool.Training.Format
   , formatCandidateGroups
   , formatModelTurnWithHole
   , holeMarker
+  -- Edge Scoring format
+  , formatEdgeTrainingExample
   -- V3: Code-Native Training Format
   , formatCodeExample
   , formatGemmaConversation
@@ -21,11 +23,49 @@ import Data.ByteString.Lazy (ByteString)
 import Data.Text (Text)
 import qualified Data.Text as T
 
-import Tidepool.Training.Types (CandidateGroups(..))
+import Tidepool.Training.Types (CandidateGroups(..), ScoreEdgeInput(..), ScoreEdgeOutput(..), EdgeTrainingExample(..), edgeTypeToText)
 
 -- | Create a hole marker for human annotation.
 holeMarker :: Text -> Text
 holeMarker fieldName = "<!-- REPLACE: " <> fieldName <> " -->"
+
+-- | Escape a string for FunctionGemma 270M format.
+escape :: Text -> Text
+escape t = "<escape>" <> t <> "<escape>"
+
+-- | Format an edge training example as a JSONL conversation.
+formatEdgeTrainingExample :: EdgeTrainingExample -> ByteString
+formatEdgeTrainingExample EdgeTrainingExample{eteInput=ScoreEdgeInput{..}, eteOutput=ScoreEdgeOutput{..}} =
+  let
+    userTurn = T.unlines
+      [ "<start_of_turn>user"
+      , "Score this edge:"
+      , "Query: " <> escape seiQuery
+      , "Source: " <> escape (seiSourceFile <> ":" <> T.pack (show seiSourceLine))
+      , "Source hover: " <> escape seiSourceHover
+      , "Target: " <> escape (seiTargetFile <> ":" <> T.pack (show seiTargetLine))
+      , "Target hover: " <> escape seiTargetHover
+      , "Edge type: " <> escape (edgeTypeToText seiEdgeType)
+      , "<end_of_turn>"
+      ]
+    
+    modelTurn = T.concat
+      [ "<start_of_turn>model\n"
+      , "<start_function_call>"
+      , "call:score_edge{"
+      , "relevance:" <> T.pack (show seoRelevance) <> ","
+      , "risk:" <> T.pack (show seoRisk) <> ","
+      , "reasoning:" <> escape seoReasoning <> ","
+      , "is_exhaustive:" <> T.toLower (T.pack (show seoIsExhaustive)) <> ","
+      , "is_type_family:" <> T.toLower (T.pack (show seoIsTypeFamily)) <> ","
+      , "is_exported:" <> T.toLower (T.pack (show seoIsExported))
+      , "}"
+      , "<end_function_call>\n"
+      , "<end_of_turn>"
+      ]
+      
+    text = userTurn <> modelTurn
+  in encode $ object ["text" .= text]
 
 -- | Format developer turn (fixed for all examples).
 formatDeveloperTurn :: Text

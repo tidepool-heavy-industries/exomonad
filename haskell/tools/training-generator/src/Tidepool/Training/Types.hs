@@ -20,6 +20,11 @@ module Tidepool.Training.Types
 
     -- * Training Example
   , TrainingExample(..)
+  , EdgeTrainingExample(..)
+
+    -- * Score Edge (Flat Format for 270M model)
+  , ScoreEdgeInput(..)
+  , ScoreEdgeOutput(..)
 
     -- * Select Symbols Example (for FunctionGemma symbol selection)
   , SelectSymbolsExample(..)
@@ -103,6 +108,40 @@ data TrainingExample = TrainingExample
   { teQuery  :: QueryContext  -- ^ The query being answered
   , teNode   :: NodeContext   -- ^ The code location being rated
   , teRubric :: Rubric        -- ^ Ground truth rating
+  } deriving stock (Eq, Show, Generic)
+    deriving anyclass (FromJSON, ToJSON)
+
+
+-- | Input context for scoring an edge (flattened for 270M model).
+data ScoreEdgeInput = ScoreEdgeInput
+  { seiQuery       :: Text      -- ^ Natural language query
+  , seiSourceFile  :: Text      -- ^ Source location file
+  , seiSourceLine  :: Int       -- ^ Source location line
+  , seiSourceHover :: Text      -- ^ Hover info at source
+  , seiTargetFile  :: Text      -- ^ Target location file
+  , seiTargetLine  :: Int       -- ^ Target location line
+  , seiTargetHover :: Text      -- ^ Hover info at target
+  , seiEdgeType    :: EdgeType  -- ^ Relationship type
+  } deriving stock (Eq, Show, Generic)
+    deriving anyclass (FromJSON, ToJSON)
+
+
+-- | Output rubric for an edge (flattened for 270M model).
+data ScoreEdgeOutput = ScoreEdgeOutput
+  { seoRelevance    :: Int   -- ^ 1-5: How relevant to query
+  , seoRisk         :: Int   -- ^ 1-5: How risky to modify
+  , seoReasoning    :: Text  -- ^ Natural language justification
+  , seoIsExhaustive :: Bool  -- ^ Pattern match exhaustiveness
+  , seoIsTypeFamily :: Bool  -- ^ Type-level computation
+  , seoIsExported   :: Bool  -- ^ Public API surface
+  } deriving stock (Eq, Show, Generic)
+    deriving anyclass (FromJSON, ToJSON)
+
+
+-- | Complete training example for edge scoring.
+data EdgeTrainingExample = EdgeTrainingExample
+  { eteInput  :: ScoreEdgeInput
+  , eteOutput :: ScoreEdgeOutput
   } deriving stock (Eq, Show, Generic)
     deriving anyclass (FromJSON, ToJSON)
 
