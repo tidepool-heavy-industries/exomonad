@@ -8,7 +8,7 @@ pub struct PopupDefinition {
     pub components: Vec<Component>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Component {
     pub id: String,
     pub label: String,
@@ -16,7 +16,7 @@ pub struct Component {
     pub visible_when: Option<VisibilityRule>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "tag", content = "contents")]
 pub enum ComponentSpec {
     Text {
@@ -51,7 +51,7 @@ pub enum ComponentSpec {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "tag", content = "contents")]
 pub enum VisibilityRule {
     Checked(String),                   // Visible if checkbox with ID is checked
@@ -184,6 +184,7 @@ mod tests {
     fn test_component_serialization() {
         let component = Component {
             id: "my-slider".to_string(),
+            label: "Volume".to_string(),
             spec: ComponentSpec::Slider {
                 label: "Volume".to_string(),
                 min: 0.0,
@@ -208,11 +209,13 @@ mod tests {
             components: vec![
                 Component {
                     id: "chk".to_string(),
+                    label: "Check".to_string(),
                     spec: ComponentSpec::Checkbox { label: "Check".to_string(), default: true },
                     visible_when: None,
                 },
                 Component {
                     id: "txt".to_string(),
+                    label: "Text".to_string(),
                     spec: ComponentSpec::Textbox { label: "Text".to_string(), placeholder: None, rows: None },
                     visible_when: None,
                 },
@@ -221,7 +224,7 @@ mod tests {
 
         let state = PopupState::new(&def);
         assert_eq!(state.get_boolean("chk"), Some(true));
-        assert_eq!(state.get_text("txt"), Some(&String::new()));
+        assert_eq!(state.get_text("txt"), Some(""));
     }
 
     #[test]
