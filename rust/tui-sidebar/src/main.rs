@@ -1,6 +1,4 @@
 mod app;
-mod protocol;
-mod realm;
 mod server;
 
 use anyhow::{Context, Result};

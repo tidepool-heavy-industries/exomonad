@@ -31,23 +31,6 @@ impl MultiselectComponent {
         }
     }
 
-    pub fn get_selections(&self) -> &[bool] {
-        &self.selections
-    }
-
-    pub fn get_selected_indices(&self) -> Vec<usize> {
-        self.selections
-            .iter()
-            .enumerate()
-            .filter_map(|(i, &selected)| if selected { Some(i) } else { None })
-            .collect()
-    }
-
-    pub fn set_selections(&mut self, selections: &[bool]) {
-        self.selections = selections.to_vec();
-        self.selections.resize(self.options.len(), false);
-    }
-
     fn toggle_current(&mut self) -> CmdResult {
         if self.focused_option < self.selections.len() {
             self.selections[self.focused_option] = !self.selections[self.focused_option];
@@ -69,6 +52,24 @@ impl MultiselectComponent {
     fn prev_option(&mut self) -> CmdResult {
         if self.focused_option > 0 {
             self.focused_option -= 1;
+            CmdResult::Changed(self.state())
+        } else {
+            CmdResult::None
+        }
+    }
+
+    fn first_option(&mut self) -> CmdResult {
+        if self.focused_option != 0 {
+            self.focused_option = 0;
+            CmdResult::Changed(self.state())
+        } else {
+            CmdResult::None
+        }
+    }
+
+    fn last_option(&mut self) -> CmdResult {
+        if !self.options.is_empty() && self.focused_option != self.options.len() - 1 {
+            self.focused_option = self.options.len() - 1;
             CmdResult::Changed(self.state())
         } else {
             CmdResult::None
@@ -175,6 +176,8 @@ impl MockComponent for MultiselectComponent {
         match cmd {
             Cmd::Move(Direction::Down) => self.next_option(),
             Cmd::Move(Direction::Up) => self.prev_option(),
+            Cmd::GoTo(tuirealm::command::Position::Begin) => self.first_option(),
+            Cmd::GoTo(tuirealm::command::Position::End) => self.last_option(),
             Cmd::Submit => self.toggle_current(),
             _ => CmdResult::None,
         }

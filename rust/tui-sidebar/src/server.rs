@@ -8,7 +8,7 @@ use tokio::net::{TcpStream, UnixListener, UnixStream};
 use tokio::sync::mpsc;
 use tracing::{debug, error, warn};
 
-use crate::protocol::{PopupDefinition, PopupResult};
+use tui_sidebar::protocol::{PopupDefinition, PopupResult};
 
 /// Unified stream type for TUI communication (Unix or TCP).
 pub enum TuiStream {

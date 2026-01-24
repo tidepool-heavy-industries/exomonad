@@ -120,7 +120,8 @@ This launches the Hybrid Tidepool architecture:
 - ✅ **Tab** / **Shift+Tab** - Navigate between focusable components
 - ✅ **Enter** - Submit form (returns all values with button="submit")
 - ✅ **Esc** - Cancel form (returns all values with button="decline")
-- ✅ **Arrow keys** - Adjust slider, cycle choice, navigate multiselect
+- ✅ **Arrow keys** - Adjust slider, cycle choice, navigate multiselect, **move cursor in textbox**
+- ✅ **Home / End** - Move to start/end of content (slider, choice, multiselect, textbox)
 - ✅ **Space** - Toggle checkbox, toggle multiselect item (if focused)
 - ✅ **Characters** - Type into textbox (if focused)
 - ✅ **Backspace** - Delete character in textbox
