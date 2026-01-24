@@ -17,6 +17,7 @@ layout {
             pane split_direction="horizontal" {
                 // Pane 2: Shell
                 pane name="Shell" focus=true {
+                    command "bash"
                 }
 
                 // Pane 3: Logs
