@@ -267,14 +267,23 @@ instance ToJSON Runtime where
   toJSON Claude = String "claude"
   toJSON Gemini = String "gemini"
 
--- | Tool definition for MCP discovery (must match Rust ToolDefinition).
+-- | Tool definition for MCP discovery.
+-- Field names use MCP protocol standard: name, description, inputSchema
 data ToolDefinition = ToolDefinition
   { tdName :: Text
   , tdDescription :: Text
   , tdInputSchema :: Value
   }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (ToJSON, FromJSON)
+  deriving anyclass (FromJSON)
+
+-- | Custom ToJSON to use MCP-standard field names (without td prefix)
+instance ToJSON ToolDefinition where
+  toJSON t = object
+    [ "name" .= t.tdName
+    , "description" .= t.tdDescription
+    , "inputSchema" .= t.tdInputSchema
+    ]
 
 -- | Message sent over Unix socket from mantle-agent. Tagged by "type".
 data ControlMessage
