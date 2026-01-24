@@ -57,12 +57,13 @@ RUN apt-get update && apt-get install -y \
 # Install Docker CLI
 RUN curl -fsSL https://get.docker.com | sh && rm -rf /var/lib/apt/lists/*
 
-# Install Zellij
+# Install cargo-binstall for binary installation
+RUN curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
+
+# Install Zellij via cargo-binstall
 # v0.43.0+ required for web server support
 ARG ZELLIJ_VERSION=0.43.1
-RUN curl -L "https://github.com/zellij-org/zellij/releases/download/v${ZELLIJ_VERSION}/zellij-x86_64-unknown-linux-musl.tar.gz" | tar xz && \
-    mv zellij /usr/local/bin/zellij && \
-    chmod +x /usr/local/bin/zellij
+RUN cargo-binstall --no-confirm --version ${ZELLIJ_VERSION} zellij
 
 # Copy the binary from builder
 COPY --from=builder /usr/local/bin/tidepool-control-server /usr/local/bin/tidepool-control-server
