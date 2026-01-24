@@ -11,8 +11,6 @@ services:
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
       - HANGAR_ROOT=/worktrees
       - TIDEPOOL_CONTROL_SOCKET=/sockets/control.sock
       - TIDEPOOL_TUI_SOCKET=/sockets/tui.sock
