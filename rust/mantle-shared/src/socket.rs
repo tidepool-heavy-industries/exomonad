@@ -68,22 +68,30 @@ impl ControlSocket {
             ControlMessage::HookEvent { input, runtime, role } => {
                 // API expects [HookInput, Runtime, Role]
                 let body = serde_json::json!([input, runtime, role]);
-                ("POST", "/hook", Some(body))
+                ("POST", "/hook".to_string(), Some(body))
             },
-            ControlMessage::McpToolCall { id, tool_name, arguments } => {
+            ControlMessage::McpToolCall { id, tool_name, arguments, role } => {
                 // API expects {"id": ..., "tool_name": ..., "arguments": ...}
+                let endpoint = match role {
+                    Some(r) => format!("/role/{}/mcp/call", r),
+                    None => "/mcp/call".to_string(),
+                };
                 let body = serde_json::json!({
                     "id": id,
                     "tool_name": tool_name,
                     "arguments": arguments
                 });
-                ("POST", "/mcp/call", Some(body))
+                ("POST", endpoint, Some(body))
             },
-            ControlMessage::ToolsListRequest => {
-                ("GET", "/mcp/tools", None)
+            ControlMessage::ToolsListRequest { role } => {
+                let endpoint = match role {
+                    Some(r) => format!("/role/{}/mcp/tools", r),
+                    None => "/mcp/tools".to_string(),
+                };
+                ("GET", endpoint, None)
             },
             ControlMessage::Ping => {
-                ("GET", "/ping", None)
+                ("GET", "/ping".to_string(), None)
             }
         };
 

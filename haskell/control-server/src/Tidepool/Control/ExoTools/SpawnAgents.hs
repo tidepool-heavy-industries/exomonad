@@ -73,44 +73,38 @@ findHangarRoot = do
              then pure Nothing
              else walkUp parent
 
--- | Build markdown context for a bead.
+-- | Build minimal bead context (task description only).
+-- Workflow instructions are now in SessionStart template.
 buildBeadContext :: BeadInfo -> Text -> Text
 buildBeadContext bead branchName = T.unlines
   [
     "# Task: " <> bead.biTitle
   , ""
-  , "**ID:** " <> bead.biId
-  , "**Status:** " <> statusToText bead.biStatus
-  , "**Priority:** " <> T.pack (show bead.biPriority)
+  , "**Bead ID:** " <> bead.biId
   , "**Branch:** " <> branchName
+  , "**Priority:** P" <> T.pack (show bead.biPriority)
   , ""
   , "## Description"
   , ""
-  , fromMaybe "(no description)" bead.biDescription
-  , ""
-  , "## Dependencies"
+  , fromMaybe "(No description provided)" bead.biDescription
   , ""
   , if null bead.biDependencies
-      then "None"
-      else T.unlines $ map formatDep bead.biDependencies
-  , ""
-  , "## Workflow"
-  , ""
-  , "1. Implement changes"
-  , "2. Commit: [" <> bead.biId <> "] <description>"
-  , "3. Push: git push -u origin " <> branchName
-  , "4. File PR: Call the 'file_pr' tool (do NOT use gh cli manually)"
+      then ""
+      else T.unlines $
+        [ "## Dependencies"
+        , ""
+        ] ++ map formatDep bead.biDependencies
   ]
   where
+    formatDep (DependencyInfo { diId = depId, diTitle = depTitle, diStatus = depStatus }) =
+      "- **" <> depId <> "**: " <> depTitle <> " (" <> statusToText depStatus <> ")"
+
     statusToText = \case
       StatusOpen -> "open"
       StatusInProgress -> "in_progress"
-      StatusClosed -> "closed"
+      StatusClosed -> "completed"
       StatusHooked -> "hooked"
       StatusBlocked -> "blocked"
-
-    formatDep (DependencyInfo { diId = depId, diTitle = depTitle, diStatus = depStatus }) =
-      "- " <> depId <> ": " <> depTitle <> " (" <> statusToText depStatus <> ")"
 
 -- | Arguments for spawn_agents tool.
 data SpawnAgentsArgs = SpawnAgentsArgs
@@ -335,6 +329,7 @@ processBead mHangarRoot repoRoot wtBaseDir backend shortId = do
                                 , ("TIDEPOOL_SOCKET_DIR", T.pack socketDir)
                                 , ("TIDEPOOL_CONTROL_SOCKET", T.pack controlSocket)
                                 , ("TIDEPOOL_TUI_SOCKET", T.pack tuiSocket)
+                                , ("TIDEPOOL_ROLE", "dev")
                                 ]
 
                           bootstrapRes <- bootstrapTidepool mHangarRoot repoRoot path backend socketDir controlSocket envVars
@@ -432,18 +427,23 @@ bootstrapTidepool mHangarRoot repoRoot worktreePath backend socketDir controlSoc
                   case settingsRes of
                     Left err -> pure $ Left $ "Failed to write Claude settings: " <> err
                     Right () -> do
-                      -- Write Gemini config if backend is "gemini"
-                      geminiRes <- if backend == "gemini"
-                                     then writeGeminiConfig hr worktreePath controlSocket
-                                     else pure $ Right ()
-                      case geminiRes of
-                        Left err -> pure $ Left $ "Failed to write Gemini config: " <> err
+                      -- Write .mcp.json for Claude Code
+                      mcpRes <- writeClaudeMcpConfig controlSocket worktreePath "dev"
+                      case mcpRes of
+                        Left err -> pure $ Left $ "Failed to write MCP config: " <> err
                         Right () -> do
-                          -- Update .gitignore for both backends
-                          gitignoreRes <- appendBackendToGitignore worktreePath
-                          case gitignoreRes of
-                            Left err -> pure $ Left $ "Failed to update .gitignore: " <> err
-                            Right () -> pure $ Right ()
+                          -- Write Gemini config if backend is "gemini"
+                          geminiRes <- if backend == "gemini"
+                                         then writeGeminiConfig hr worktreePath controlSocket "dev"
+                                         else pure $ Right ()
+                          case geminiRes of
+                            Left err -> pure $ Left $ "Failed to write Gemini config: " <> err
+                            Right () -> do
+                              -- Update .gitignore for both backends
+                              gitignoreRes <- appendBackendToGitignore worktreePath
+                              case gitignoreRes of
+                                Left err -> pure $ Left $ "Failed to update .gitignore: " <> err
+                                Right () -> pure $ Right ()
 
 
 -- | Write bead context to .claude/context/bead.md.
@@ -541,6 +541,38 @@ writeClaudeLocalSettings hangarRoot worktreePath = do
   writeBackendSettings claudeDir settingsFile settings ".claude" "settings.local.json"
 
 
+-- | Write .mcp.json for Claude Code MCP configuration.
+-- Points to control-server via role-prefixed endpoint.
+writeClaudeMcpConfig
+  :: (Member FileSystem es)
+  => FilePath  -- ^ Control socket path
+  -> FilePath  -- ^ Worktree path
+  -> Text      -- ^ Role (dev, tl, pm)
+  -> Eff es (Either Text ())
+writeClaudeMcpConfig controlSocket worktreePath role = do
+  let mcpFile = worktreePath </> ".mcp.json"
+
+      -- Build the HTTP+Unix URL with role path
+      -- Format: http+unix://<socket_path>/role/<role>/mcp
+      socketUrl = "http+unix://" <> T.pack controlSocket <> "/role/" <> role <> "/mcp"
+
+      config = object
+        [ "mcpServers" .= object
+          [ "tidepool" .= object
+            [ "transport" .= ("http" :: Text)
+            , "url" .= socketUrl
+            ]
+          ]
+        ]
+
+      content = TE.decodeUtf8 . BL.toStrict $ encode config
+
+  writeRes <- writeFileText mcpFile content
+  case writeRes of
+    Left err -> pure $ Left $ "Failed to write .mcp.json: " <> T.pack (show err)
+    Right () -> pure $ Right ()
+
+
 -- | Write .gemini/settings.json with hooks and MCP configuration.
 -- Gemini combines hooks and MCP in a single file (unlike Claude).
 -- Uses absolute paths since Gemini CLI doesn't expand env vars in settings.json.
@@ -549,14 +581,15 @@ writeGeminiConfig
   => FilePath  -- ^ Hangar root (for absolute path to mantle-agent)
   -> FilePath  -- ^ Worktree path
   -> FilePath  -- ^ Control socket path (short path in /tmp to avoid SUN_LEN limits)
+  -> Text      -- ^ Role
   -> Eff es (Either Text ()) 
-writeGeminiConfig hangarRoot worktreePath controlSocket = do
+writeGeminiConfig hangarRoot worktreePath controlSocket role = do
   let geminiDir = worktreePath </> ".gemini"
       settingsFile = geminiDir </> "settings.json"
       -- Gemini CLI doesn't expand $GEMINI_PROJECT_DIR, so use absolute paths
       binDir = Paths.runtimeBinDir hangarRoot
       mantleAgent = Paths.mantleAgentBin binDir
-      hookCmd = mantleAgent <> " hook session-start --role=dev"
+      hookCmd = mantleAgent <> " hook session-start --role=" <> T.unpack role
       -- controlSocket is passed in (short path in /tmp to avoid SUN_LEN limits)
 
       settings = object
@@ -603,7 +636,7 @@ writeGeminiConfig hangarRoot worktreePath controlSocket = do
             "tidepool" .= object
             [
               "command" .= T.pack mantleAgent
-            , "args" .= (["mcp"] :: [Text])
+            , "args" .= (["mcp", "--role", role] :: [Text])
             , "env" .= object
               [
                 "TIDEPOOL_CONTROL_SOCKET" .= T.pack controlSocket
@@ -627,8 +660,8 @@ appendBackendToGitignore worktreePath = do
   readRes <- readFileText gitignorePath
   case readRes of
     Left _ -> do
-      -- .gitignore doesn't exist, create it with both entries
-      let content = T.unlines [".claude/", ".gemini/"]
+      -- .gitignore doesn't exist, create it with all entries
+      let content = T.unlines [".claude/", ".gemini/", ".mcp.json"]
       writeRes <- writeFileText gitignorePath content
       case writeRes of
         Left err -> pure $ Left $ "Failed to create .gitignore: " <> T.pack (show err)
@@ -638,19 +671,22 @@ appendBackendToGitignore worktreePath = do
       let lines' = T.lines existingContent
           hasClaudeEntry = any (\line -> T.strip line == ".claude/") lines'
           hasGeminiEntry = any (\line -> T.strip line == ".gemini/") lines'
+          hasMcpEntry = any (\line -> T.strip line == ".mcp.json") lines'
 
       -- Determine what needs to be added
       let needsClaudeEntry = not hasClaudeEntry
           needsGeminiEntry = not hasGeminiEntry
+          needsMcpEntry = not hasMcpEntry
 
-      if not needsClaudeEntry && not needsGeminiEntry
-        then pure $ Right ()  -- Already has both entries
+      if not needsClaudeEntry && not needsGeminiEntry && not needsMcpEntry
+        then pure $ Right ()  -- Already has all entries
         else do
           -- Build list of entries to add
           let entriesToAdd = catMaybes
                 [
                   if needsClaudeEntry then Just ".claude/" else Nothing
                 , if needsGeminiEntry then Just ".gemini/" else Nothing
+                , if needsMcpEntry then Just ".mcp.json" else Nothing
                 ]
           -- Append missing entries (preserve existing content)
           let newContent = existingContent <> "\n" <> T.unlines entriesToAdd
