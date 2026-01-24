@@ -24,16 +24,15 @@ COPY . .
 # We delete the 'package zlib' line and the following 2 lines.
 RUN sed -i '/package zlib/,+2d' cabal.project
 
-# Build binary and dependencies
+# Build binary and dependencies, then extract
 # BuildKit cache mounts provide fast rebuilds without complex layering.
 # We build with -O1 for a balance between build speed and runtime performance.
+# Extract binary in same RUN to access it while cache mount is active.
 RUN --mount=type=cache,target=/root/.cabal/store \
     --mount=type=cache,target=/build/dist-newstyle \
     cabal update && \
-    cabal build tidepool-control-server -j --ghc-options=-O1
-
-# Extract the binary using cabal list-bin
-RUN cp $(cabal list-bin tidepool-control-server) /usr/local/bin/tidepool-control-server
+    cabal build tidepool-control-server -j --ghc-options=-O1 && \
+    cp $(cabal list-bin tidepool-control-server) /usr/local/bin/tidepool-control-server
 
 # Stage 2: Runtime
 # Debian bookworm-slim provides a small, stable base for the runtime
