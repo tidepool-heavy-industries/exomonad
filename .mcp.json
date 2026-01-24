@@ -1,9 +1,10 @@
 {
   "mcpServers": {
     "tidepool": {
-      "transport": {
-        "type": "http",
-        "url": "http+unix://.tidepool/sockets/control.sock"
+      "command": "mantle-agent",
+      "args": ["mcp"],
+      "env": {
+        "TIDEPOOL_CONTROL_SOCKET": ".tidepool/sockets/control.sock"
       }
     }
   }
