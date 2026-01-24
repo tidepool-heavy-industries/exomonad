@@ -38,10 +38,11 @@ cat > /home/user/.claude.json <<'EOF'
 {"hasCompletedOnboarding": true}
 EOF
 
-# Generate MCP config with HTTP transport to control-server
+# Generate TL-specific MCP config in gitignored location
 # Uses TCP port 7432 (control-server listens on both Unix socket AND TCP)
 # Docker network allows orchestrator to reach control-server by container name
-cat > /worktrees/.mcp.json <<'EOF'
+mkdir -p /worktrees/.tidepool
+cat > /worktrees/.tidepool/mcp.json <<'EOF'
 {
   "mcpServers": {
     "tidepool": {
@@ -51,8 +52,12 @@ cat > /worktrees/.mcp.json <<'EOF'
   }
 }
 EOF
-chown user:user /worktrees/.mcp.json
-echo "✓ MCP config generated (/worktrees/.mcp.json)"
+chown -R user:user /worktrees/.tidepool
+
+# Symlink .mcp.json to the generated config (overrides repo's version)
+ln -sf .tidepool/mcp.json /worktrees/.mcp.json
+chown -h user:user /worktrees/.mcp.json
+echo "✓ MCP config generated (.tidepool/mcp.json → .mcp.json)"
 
 # Settings with hooks (inside persistent config dir)
 cat > "$CLAUDE_DIR/settings.json" <<'EOF'
