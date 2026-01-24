@@ -20,17 +20,20 @@ touch /var/log/tidepool/control-server.log
 chown user:user /var/log/tidepool/control-server.log
 
 # Generate Claude Code configuration
+# CLAUDE_CONFIG_DIR is a persistent volume (/home/user/.claude)
 echo "🔧 Configuring Claude Code for Docker environment..."
 
-CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-/home/user/.claude-orchestrator}"
+CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-/home/user/.claude}"
 mkdir -p "$CLAUDE_DIR"
 chown -R user:user "$CLAUDE_DIR"
 
+# Skip onboarding (user home, not config dir)
 cat > /home/user/.claude.json <<'EOF'
 {"hasCompletedOnboarding": true}
 EOF
 
-cat > /home/user/.mcp.json <<'EOF'
+# MCP config (inside persistent config dir)
+cat > "$CLAUDE_DIR/.mcp.json" <<'EOF'
 {
   "mcpServers": {
     "tidepool": {
@@ -43,6 +46,7 @@ cat > /home/user/.mcp.json <<'EOF'
 }
 EOF
 
+# Settings with hooks (inside persistent config dir)
 cat > "$CLAUDE_DIR/settings.json" <<'EOF'
 {
   "permissions": {
@@ -61,8 +65,8 @@ cat > "$CLAUDE_DIR/settings.json" <<'EOF'
 }
 EOF
 
-chown user:user /home/user/.claude.json /home/user/.mcp.json "$CLAUDE_DIR/settings.json"
-echo "✓ Claude Code configured"
+chown user:user /home/user/.claude.json "$CLAUDE_DIR/.mcp.json" "$CLAUDE_DIR/settings.json"
+echo "✓ Claude Code configured (persistent volume: $CLAUDE_DIR)"
 
 # Set environment for user context
 export HOME=/home/user

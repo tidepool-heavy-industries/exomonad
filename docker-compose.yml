@@ -41,23 +41,19 @@ services:
     environment:
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}
-      - CLAUDE_CODE_OAUTH_KEY=${CLAUDE_CODE_OAUTH_KEY}
       - HANGAR_ROOT=/worktrees
       - TIDEPOOL_CONTROL_SOCKET=/sockets/control.sock
       - TIDEPOOL_TUI_SOCKET=/sockets/tui.sock
-      - CLAUDE_CONFIG_DIR=/home/user/.claude-orchestrator
+      - CLAUDE_CONFIG_DIR=/home/user/.claude
       - RUST_BACKTRACE=full
-      # Claude Code headless environment variables
-      - IS_DEMO=true
+      # Claude Code environment
       - CLAUDE_CODE_DISABLE_INSTALLATION_CHECKS=1
       - DISABLE_AUTOUPDATER=1
       - DISABLE_TELEMETRY=1
     volumes:
       - .:/worktrees
       - tidepool-sockets:/sockets
-      # Granular auth mounts to prevent history corruption
-      - ${HOME}/.claude/.credentials.json:/mnt/secrets/.credentials.json:rw
-      - ${HOME}/.claude/settings.json:/mnt/secrets/settings.json:ro
+      - tidepool-claude-auth:/home/user/.claude
       - /var/run/docker.sock:/var/run/docker.sock
     restart: unless-stopped
     networks:
@@ -76,15 +72,12 @@ services:
     environment:
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}
-      - CLAUDE_CODE_OAUTH_KEY=${CLAUDE_CODE_OAUTH_KEY}
       - HANGAR_ROOT=/worktrees
-      - CLAUDE_CONFIG_DIR=/home/user/.claude-orchestrator
+      - CLAUDE_CONFIG_DIR=/home/user/.claude
     volumes:
       - .:/worktrees
       - tidepool-sockets:/sockets
-      # Granular auth mounts
-      - ${HOME}/.claude/.credentials.json:/mnt/secrets/.credentials.json:rw
-      - ${HOME}/.claude/settings.json:/mnt/secrets/settings.json:ro
+      - tidepool-claude-auth:/home/user/.claude
     command: ["cabal", "repl", "tidepool-control-server"]
 
   agent-1:
@@ -101,6 +94,8 @@ services:
 volumes:
   tidepool-sockets:
     name: tidepool-sockets
+  tidepool-claude-auth:
+    name: tidepool-claude-auth
 
 networks:
   tidepool-internal:
