@@ -108,7 +108,7 @@ RUN curl -fsSL https://claude.ai/install.sh | bash && \
 ENV PATH="/root/.local/bin:${PATH}"
 
 # Copy configurations and scripts
-COPY docker/orchestrator/config/orchestrator.kdl /etc/tidepool/zellij/layouts/default.kdl
+COPY docker/orchestrator/config/exomonad.kdl /etc/tidepool/zellij/layouts/exomonad.kdl
 COPY docker/orchestrator/config/zellij.kdl /etc/tidepool/zellij/config.kdl
 COPY docker/orchestrator/scripts/orchestrator-entrypoint.sh /usr/local/bin/orchestrator-entrypoint.sh
 COPY scripts/docker-entrypoint-orchestrator.sh /usr/local/bin/docker-entrypoint-orchestrator.sh

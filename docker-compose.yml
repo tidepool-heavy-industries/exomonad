@@ -8,6 +8,7 @@ services:
       target: control-server
     container_name: tidepool-control-server
     environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - TIDEPOOL_CONTROL_SOCKET=/sockets/control.sock
       - TIDEPOOL_TUI_SOCKET=/sockets/tui.sock
       - GEMMA_ENDPOINT=${GEMMA_ENDPOINT:-http://host.docker.internal:11434}
@@ -40,7 +41,7 @@ services:
     environment:
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - CLAUDE_CODE_OAUTH_KEY=${CLAUDE_CODE_OAUTH_KEY}
       - HANGAR_ROOT=/worktrees
       - TIDEPOOL_CONTROL_SOCKET=/sockets/control.sock
       - TIDEPOOL_TUI_SOCKET=/sockets/tui.sock
@@ -76,7 +77,7 @@ services:
     environment:
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - CLAUDE_CODE_OAUTH_KEY=${CLAUDE_CODE_OAUTH_KEY}
       - HANGAR_ROOT=/worktrees
       - CLAUDE_CONFIG_DIR=/home/user/.claude-orchestrator
     volumes:

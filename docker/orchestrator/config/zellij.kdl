@@ -1,7 +1,10 @@
 // Zellij configuration for Tidepool Orchestrator
 
+// Tell Zellij where to find custom layouts
+layout_dir "/etc/tidepool/zellij/layouts"
+
 // Default layout for new sessions (used by web interface)
-default_layout "default"
+default_layout "exomonad"
 
 // Web server config passed via CLI args to avoid duplication
 
