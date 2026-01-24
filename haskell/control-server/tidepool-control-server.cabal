@@ -382,20 +382,103 @@ test-suite ssh-exec-test
         TypeApplications
 
 test-suite circuit-breaker-test
+
     import:           warnings
+
     type:             exitcode-stdio-1.0
+
     main-is:          CircuitBreakerSpec.hs
+
     build-depends:
+
         base >= 4.17 && < 5,
+
         tidepool-control-server,
+
         text >= 2.0 && < 3,
+
         stm >= 2.5 && < 3,
+
         time >= 1.9 && < 2,
+
         containers,
+
         tasty,
+
         tasty-hunit
+
     hs-source-dirs:   test
+
     default-language: GHC2024
+
     default-extensions:
+
         OverloadedStrings
+
+        TypeApplications
+
+
+
+test-suite session-start-test
+
+
+
+    import:           warnings
+
+
+
+    type:             exitcode-stdio-1.0
+
+
+
+    main-is:          SessionStartSpec.hs
+
+
+
+    build-depends:
+
+
+
+        base >= 4.17 && < 5,
+
+
+
+        tidepool-control-server,
+
+
+
+        tidepool-core,
+
+
+
+        tidepool-bd-interpreter,
+
+
+
+        text >= 2.0 && < 3,
+
+
+
+        freer-simple,
+
+
+
+        tasty,
+
+
+
+        tasty-hunit
+
+
+
+
+
+    hs-source-dirs:   test
+
+    default-language: GHC2024
+
+    default-extensions:
+
+        OverloadedStrings
+
         TypeApplications

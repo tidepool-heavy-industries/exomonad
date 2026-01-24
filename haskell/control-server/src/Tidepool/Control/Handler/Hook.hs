@@ -50,7 +50,7 @@ handleHook config input runtime agentRole cbMap = do
   hFlush stdout
 
   case input.hookEventName of
-    "SessionStart" -> handleSessionStart input
+    "SessionStart" -> handleSessionStart agentRole input
     "Stop" -> handleStop input runtime cbMap
     "PreToolUse" -> handlePreToolUse config input
     _ -> pure $ hookSuccess $ makeResponse input.hookEventName input
@@ -81,8 +81,8 @@ handlePreToolUse config input = do
         }
 
 -- | Handle SessionStart hook: inject bead context.
-handleSessionStart :: HookInput -> IO ControlResponse
-handleSessionStart input = do
+handleSessionStart :: Role -> HookInput -> IO ControlResponse
+handleSessionStart role input = do
   TIO.putStrLn "  [HOOK] Running SessionStart context injection..."
   hFlush stdout
 
@@ -94,8 +94,8 @@ handleSessionStart input = do
     $ runLog Debug
     $ runBDIO defaultBDConfig
     $ case mContainer of
-         Just container -> runSshExec (T.pack sshProxyUrl) $ runGitViaSsh (T.pack container) "." $ sessionStartLogic input.cwd
-         Nothing -> runGitIO $ sessionStartLogic input.cwd
+         Just container -> runSshExec (T.pack sshProxyUrl) $ runGitViaSsh (T.pack container) "." $ sessionStartLogic role input.cwd
+         Nothing -> runGitIO $ sessionStartLogic role input.cwd
 
   case result of
     Left (e :: SomeException) -> do

@@ -1,0 +1,51 @@
+# Task: {{ bead.title }}
+
+**ID:** {{ bead.id }}
+**Branch:** {{ branch }}
+**Status:** {{ bead.status }}
+**Priority:** P{{ bead.priority }}
+
+## Description
+
+{{ bead.description | default("No description provided.") }}
+
+{% if bead.acceptance_criteria %}
+## Acceptance Criteria
+
+{{ bead.acceptance_criteria }}
+{% endif %}
+
+{% if bead.depends_on %}
+## Dependencies
+
+{% for dep in bead.depends_on %}
+- **{{ dep.dep_id }}**: {{ dep.dep_title }} (P{{ dep.dep_priority }})
+{% endfor %}
+{% endif %}
+
+## Workflow
+
+You are a **Dev agent** executing this task. Your workflow:
+
+1. **Implement** the changes described above
+2. **Test** your changes compile: `cabal build`
+3. **Commit** with message: `[{{ bead.id }}] <description>`
+4. **Push** to remote: `git push -u origin {{ branch }}`
+5. **File PR** using the `file_pr` MCP tool (NOT gh CLI)
+
+## Important Notes
+
+- Do NOT use `bd` commands - the orchestrator manages beads
+- Do NOT spawn other agents - you are a leaf worker
+- Focus on implementation quality and test coverage
+- If blocked, use `signal_blocker` tool to escalate
+
+## Session Close
+
+Before finishing, ensure:
+```
+git status          # Check changes
+git add <files>     # Stage changes
+git commit -m "[{{ bead.id }}] ..."
+git push
+```
