@@ -105,13 +105,20 @@ echo "🌍 Then open: https://nixos:8080/orchestrator"
 export HOME=/home/user
 export SHELL=/bin/bash
 
-# Cleanup old sockets to prevent "Address in use" or stale session errors
+# Cleanup old zellij temp sockets
 rm -f /tmp/zellij-*.sock
 
-# Start web server in daemon mode to decouple from PID 1 lifecycle
-# This prevents the container from exiting when the web server process completes initialization
-gosu user zellij web --daemonize
+# Verify control-server socket exists (should be ready due to health check)
+SOCKET_PATH="${TIDEPOOL_CONTROL_SOCKET:-/sockets/control.sock}"
+if [ ! -S "$SOCKET_PATH" ]; then
+    echo "⚠️  WARNING: control-server socket not found at $SOCKET_PATH"
+    echo "    This should not happen with depends_on health check"
+fi
 
-# Keep PID 1 alive - container stays running while web server runs in background
-# This is the recommended pattern when using zellij web --daemonize
-exec tail -f /dev/null
+# Run Zellij web server in foreground (NO --daemonize)
+# Docker IS the daemon - foreground execution ensures proper lifecycle coupling
+# exec replaces shell with zellij for correct SIGTERM propagation
+echo "🌐 Starting Zellij web server in foreground..."
+exec gosu user zellij web --ip 0.0.0.0 --port 8080 \
+    --cert /etc/ssl/zellij/cert.pem \
+    --key /etc/ssl/zellij/key.pem

@@ -139,7 +139,60 @@ RUN chmod 755 /root/.local/bin/claude && \
     cp /root/.local/bin/claude /usr/local/bin/claude && \
     chmod 755 /usr/local/bin/claude
 
-EXPOSE 7432 8080
+# Stage 4: Control Server (minimal, just Haskell binary + runtime deps)
+FROM debian:bookworm-slim AS control-server
+
+# Install minimal runtime dependencies for Haskell binary
+RUN apt-get update && apt-get install -y \
+    libgmp10 \
+    libffi8 \
+    zlib1g \
+    ca-certificates \
+    tini \
+    gosu \
+    socat \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy only the control-server binary
+COPY --from=builder /usr/local/bin/tidepool-control-server /usr/local/bin/tidepool-control-server
+
+# Environment variables
+ENV TIDEPOOL_CONTROL_SOCKET=/sockets/control.sock
+ENV TIDEPOOL_TUI_SOCKET=/sockets/tui.sock
+
+# Create non-root user matching orchestrator UID
+RUN useradd -m -u 1000 -s /bin/bash user
+
+# Create entrypoint script for permission fixing + stale socket cleanup
+RUN cat > /usr/local/bin/control-server-entrypoint.sh <<'EOF'
+#!/bin/bash
+set -euo pipefail
+
+# Fix volume ownership (Docker creates named volumes as root)
+chown 1000:1000 /sockets
+chmod 755 /sockets
+
+# Cleanup stale socket to prevent "Address already in use" errors
+rm -f /sockets/control.sock /sockets/tui.sock
+
+# Start server as user:1000
+# control-server uses TIDEPOOL_CONTROL_SOCKET env var for socket path
+exec gosu 1000:1000 tidepool-control-server
+EOF
+
+RUN chmod +x /usr/local/bin/control-server-entrypoint.sh
+
+EXPOSE 7432
+
+WORKDIR /sockets
+
+# Run as root initially to fix permissions, entrypoint drops to user
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/control-server-entrypoint.sh"]
+
+# Stage 5: Orchestrator (Zellij + Claude Code, mounts control-server socket)
+FROM runtime AS orchestrator
+
+EXPOSE 8080
 
 WORKDIR /worktrees
 

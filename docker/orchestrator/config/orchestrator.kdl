@@ -8,24 +8,24 @@ layout {
 
     tab name="Orchestrator" focus=true {
         pane split_direction="vertical" {
-            // Pane 1: Control Server
-            pane name="Control Server" size="40%" {
+            // Pane 1: Claude Code (running as non-root user)
+            // Force TERM=xterm-256color for proper TUI input handling
+            pane name="Claude Code" focus=true size="70%" {
                 command "bash"
-                args "-c" "export TERM=xterm-256color; tidepool-control-server --socket $TIDEPOOL_CONTROL_SOCKET 2>&1 | tee /var/log/tidepool/control-server.log"
+                args "-c" "export TERM=xterm-256color SHELL=/bin/bash; cd /worktrees && exec claude --dangerously-skip-permissions"
             }
 
             pane split_direction="horizontal" {
-                // Pane 2: Claude Code (running as non-root user)
-                // Force TERM=xterm-256color for proper TUI input handling
-                pane name="Claude Code" focus=true {
+                // Pane 2: control-server status (runs in separate container)
+                pane name="Backend Status" {
                     command "bash"
-                    args "-c" "export TERM=xterm-256color SHELL=/bin/bash; cd /worktrees && exec claude --dangerously-skip-permissions"
+                    args "-c" "echo '🔧 control-server running in separate container' && echo '📡 Socket: /sockets/control.sock' && echo '' && echo 'Check logs with: docker logs tidepool-control-server' && tail -f /dev/null"
                 }
 
-                // Pane 3: Logs
-                pane name="Logs" {
-                    command "tail"
-                    args "-f" "/var/log/tidepool/control-server.log"
+                // Pane 3: Orchestrator info
+                pane name="Info" {
+                    command "bash"
+                    args "-c" "echo '📋 Tidepool Orchestrator (Sidecar Architecture)' && echo '' && echo 'MCP Tools: 7 available via control-server' && echo 'Layout: 2-pane (Claude Code | Status)' && echo '' && tail -f /dev/null"
                 }
             }
         }

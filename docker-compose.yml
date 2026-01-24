@@ -1,12 +1,40 @@
 services:
-  orchestrator:
-    # Use linux/amd64 to ensure consistent binary execution, especially on Apple Silicon
+  control-server:
+    # Backend: Haskell MCP server + LSP integration
     platform: linux/amd64
     build:
       context: .
       dockerfile: docker/orchestrator/Dockerfile
-      target: runtime
+      target: control-server
+    container_name: tidepool-control-server
+    environment:
+      - TIDEPOOL_CONTROL_SOCKET=/sockets/control.sock
+      - TIDEPOOL_TUI_SOCKET=/sockets/tui.sock
+      - GEMMA_ENDPOINT=${GEMMA_ENDPOINT:-http://host.docker.internal:11434}
+    volumes:
+      - tidepool-sockets:/sockets
+    healthcheck:
+      # Use socat to verify actual connectivity, not just file existence
+      test: ["CMD-SHELL", "socat -u OPEN:/dev/null UNIX-CONNECT:/sockets/control.sock || exit 1"]
+      interval: 5s
+      timeout: 2s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+    networks:
+      - tidepool-internal
+
+  orchestrator:
+    # Frontend: Zellij web UI + Claude Code CLI
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: docker/orchestrator/Dockerfile
+      target: orchestrator
     container_name: tidepool-orchestrator
+    depends_on:
+      control-server:
+        condition: service_healthy
     tty: true         # Allocate pseudo-TTY (-t)
     stdin_open: true  # Keep stdin open (-i) - prevents Zellij from detecting EOF and exiting
     environment:
@@ -30,9 +58,10 @@ services:
       - ${HOME}/.claude/settings.json:/mnt/secrets/settings.json:ro
       - /var/run/docker.sock:/var/run/docker.sock
     ports:
-      - "7432:7432"
       - "8080:8080"  # Zellij web client
     restart: unless-stopped
+    networks:
+      - tidepool-internal
     command: ["orchestrator"]
 
   orchestrator-dev:
@@ -61,3 +90,8 @@ services:
 volumes:
   tidepool-sockets:
     name: tidepool-sockets
+
+networks:
+  tidepool-internal:
+    name: tidepool-internal
+    driver: bridge
