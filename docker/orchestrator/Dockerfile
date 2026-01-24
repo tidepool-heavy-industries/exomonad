@@ -1,17 +1,3 @@
-# Stage 0: Cabal File Harvester
-# This stage copies only the .cabal files to create a cache-friendly layer
-# for dependency building.
-FROM alpine:latest AS cabal-files
-WORKDIR /app
-COPY cabal.project .
-# Copy the entire haskell directory
-COPY haskell/ haskell/
-# Find and delete everything that is NOT a .cabal file
-# This is a robust way to keep the directory structure matching cabal.project
-# without copying source code.
-# IMPORTANT: Preserve haskell/vendor/* - these are vendored dependencies with source needed for building
-RUN find haskell -type f ! -name "*.cabal" ! -path "haskell/vendor/*" -delete
-
 # Stage 1: Builder
 # Use GHC 9.12.2 for latest stable with full HLS support
 # Force linux/amd64 to avoid cross-compilation issues on ARM hosts
@@ -30,31 +16,20 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /build
 
-# Copy project definition and .cabal files from the harvester stage
-# This layer ONLY changes if dependencies change.
-COPY --from=cabal-files /app/cabal.project .
-COPY --from=cabal-files /app/haskell haskell/
+# Copy everything (BuildKit cache mounts handle dependency caching)
+COPY . .
 
 # Remove Nix-specific zlib configuration from cabal.project
 # The hardcoded /nix/store paths will fail in Debian.
 # We delete the 'package zlib' line and the following 2 lines.
 RUN sed -i '/package zlib/,+2d' cabal.project
 
-# Build dependencies (Cached Layer)
-# This will only re-run if cabal.project or a .cabal file changes.
-RUN --mount=type=cache,target=/root/.cabal/store \
-    --mount=type=cache,target=/build/dist-newstyle \
-    cabal update && \
-    cabal build --only-dependencies tidepool-control-server -j
-
-# Copy the rest of the source (Source Layer)
-# This layer changes frequently (whenever source code changes).
-COPY . .
-
-# Build the binary
+# Build binary and dependencies
+# BuildKit cache mounts provide fast rebuilds without complex layering.
 # We build with -O1 for a balance between build speed and runtime performance.
 RUN --mount=type=cache,target=/root/.cabal/store \
     --mount=type=cache,target=/build/dist-newstyle \
+    cabal update && \
     cabal build tidepool-control-server -j --O1
 
 # Extract the binary using cabal list-bin
