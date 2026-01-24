@@ -69,6 +69,10 @@ isStale timeout cbs = do
   pure $ elapsed > timeout
 
 -- | Acquire lock, run action, release lock (with limits check)
+--
+-- The session ID is expected to be stable for a given agent session.
+-- If the session ID is missing or ephemeral, the caller is responsible
+-- for generating or persisting a stable ID before calling this function.
 withCircuitBreaker
   :: CircuitBreakerMap
   -> SessionId
@@ -138,9 +142,8 @@ runActionAndRelease stateVar sessionId action = do
     Right val -> pure $ Right val
 
 -- | Increment stage counter (used by graph handlers)
-incrementStage :: CircuitBreakerMap -> SessionId -> Text -> IO ()
-incrementStage stateVar sessionId stage = do
-  now <- getCurrentTime
+incrementStage :: CircuitBreakerMap -> SessionId -> Text -> UTCTime -> IO ()
+incrementStage stateVar sessionId stage now = do
   atomically $ modifyTVar' stateVar $ Map.adjust (\s -> s
     { cbGlobalStops = s.cbGlobalStops + 1
     , cbStageRetries = Map.insertWith (+) stage 1 s.cbStageRetries

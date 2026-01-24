@@ -38,7 +38,8 @@ spec = testGroup "Circuit Breaker Tests"
       -- Run 15 times (incrementing global stops manually to simulate retries)
       replicateM_ 15 $ do
         _ <- withCircuitBreaker cbMap "session1" (pure ())
-        incrementStage cbMap "session1" "test-stage"
+        now <- getCurrentTime
+        incrementStage cbMap "session1" "test-stage" now
 
       -- 16th time should fail
       res <- withCircuitBreaker cbMap "session1" (pure ())
@@ -51,7 +52,8 @@ spec = testGroup "Circuit Breaker Tests"
       -- Run 5 times for a specific stage
       replicateM_ 5 $ do
         _ <- withCircuitBreaker cbMap "session1" (pure ())
-        incrementStage cbMap "session1" "fail-stage"
+        now <- getCurrentTime
+        incrementStage cbMap "session1" "fail-stage" now
 
       -- 6th time should fail
       res <- withCircuitBreaker cbMap "session1" (pure ())
