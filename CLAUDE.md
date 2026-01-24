@@ -292,7 +292,8 @@ docker exec tidepool-orchestrator zellij web --create-token
 
 **Features:**
 - ✅ Browser-based Zellij TUI (no terminal required)
-- ✅ 3-pane layout: control-server logs | interactive shell | tail logs
+- ✅ 3-pane layout: control-server logs | Claude Code CLI | tail logs
+- ✅ Claude Code with MCP tools + hooks (full integration)
 - ✅ control-server with MCP tools via Unix socket (`/sockets/control.sock`)
 - ✅ Clean shutdown: `docker compose down` (no hangs)
 - ✅ Persistent sessions via session serialization
@@ -306,6 +307,47 @@ docker exec tidepool-orchestrator zellij web --create-token
 
 # Open: https://hostname:8080/orchestrator
 ```
+
+#### Browser-based Claude Code Session
+
+The orchestrator's middle pane runs Claude Code CLI with full MCP and hook integration:
+
+**What you get:**
+- Claude Code session accessible via web browser (no local terminal needed)
+- MCP tools from control-server (`find_callers`, `show_fields`, `show_constructors`, `teach-graph`, `confirm_action`, `select_option`, `request_guidance`)
+- PreToolUse hooks via mantle-agent (tool call interception)
+- Working directory: `/worktrees` (project root, bind-mounted from host)
+
+**Basic workflow:**
+1. Start orchestrator: `docker compose up -d orchestrator`
+2. Generate token: `docker exec tidepool-orchestrator zellij web --create-token`
+3. Open browser: `https://nixos:8080/orchestrator` (or `https://localhost:8080/orchestrator`)
+4. Middle pane shows Claude Code prompt
+
+**Testing MCP connection:**
+```
+Type in Claude Code pane: /mcp
+Expected: Shows "tidepool" server status
+If connected: /tools
+Expected: Lists 7 MCP tools
+```
+
+**Testing hooks:**
+```
+Ask Claude: "Read the CLAUDE.md file"
+Expected: PreToolUse hook fires (visible in control-server logs, left pane)
+```
+
+**Configuration (auto-generated at startup):**
+- `/root/.claude.json` - Skip onboarding
+- `/root/.mcp.json` - MCP server pointing to `/sockets/control.sock`
+- `/root/.claude/settings.json` - Hook configuration for mantle-agent
+
+**Troubleshooting:**
+- **MCP shows "failed" on startup**: control-server still initializing. Use `/mcp` → `Reconnect` after 10 seconds.
+- **"Command not found: claude-code"**: Check build logs for Claude CLI installation errors.
+- **Authentication errors**: Verify `~/.claude/.credentials.json` exists on host and is mounted.
+- **Working directory wrong**: Claude Code should start in `/worktrees`. Check Zellij layout args.
 
 **Hybrid Tidepool Architecture (process-compose + Zellij - Local Development)**
 

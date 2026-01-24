@@ -16,6 +16,11 @@ services:
       - TIDEPOOL_CONTROL_SOCKET=/sockets/control.sock
       - TIDEPOOL_TUI_SOCKET=/sockets/tui.sock
       - CLAUDE_CONFIG_DIR=/home/user/.claude-orchestrator
+      # Claude Code headless environment variables
+      - IS_DEMO=true
+      - CLAUDE_CODE_DISABLE_INSTALLATION_CHECKS=1
+      - DISABLE_AUTOUPDATER=1
+      - DISABLE_TELEMETRY=1
     volumes:
       - .:/worktrees
       - tidepool-sockets:/sockets

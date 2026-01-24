@@ -13,8 +13,73 @@ cleanup() {
 
 trap cleanup EXIT
 
+# Clean up old sockets and ensure correct permissions
+rm -f /sockets/control.sock /sockets/tui.sock
+chown -R user:user /sockets
+
 # Ensure log file exists so tail doesn't complain
 touch /var/log/tidepool/control-server.log
+chown user:user /var/log/tidepool/control-server.log
+
+# Generate Claude Code configuration for non-root user
+echo "🔧 Configuring Claude Code for Docker environment..."
+
+# Use CLAUDE_CONFIG_DIR from environment (defaults to /home/user/.claude-orchestrator)
+CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-/home/user/.claude-orchestrator}"
+
+# Ensure directory exists with correct ownership
+mkdir -p "$CLAUDE_DIR"
+chown -R user:user "$CLAUDE_DIR"
+
+# 1. Skip onboarding
+cat > /home/user/.claude.json <<'EOF'
+{"hasCompletedOnboarding": true}
+EOF
+
+# 2. MCP configuration with absolute socket path
+# /sockets/control.sock → URL-encoded: %2Fsockets%2Fcontrol.sock
+cat > /home/user/.mcp.json <<'EOF'
+{
+  "mcpServers": {
+    "tidepool": {
+      "transport": {
+        "type": "http",
+        "url": "http+unix://%2Fsockets%2Fcontrol.sock"
+      }
+    }
+  }
+}
+EOF
+
+# 3. Hook configuration in isolated config directory
+cat > "$CLAUDE_DIR/settings.json" <<'EOF'
+{
+  "permissions": {
+    "additionalDirectories": [
+      "/worktrees"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "mantle-agent hook pre-tool-use",
+            "timeout": 300
+          }
+        ]
+      }
+    ]
+  }
+}
+EOF
+
+# Set ownership for all Claude config files
+chown user:user /home/user/.claude.json /home/user/.mcp.json "$CLAUDE_DIR/settings.json"
+
+echo "✓ Claude Code configured"
 
 # Ensure Zellij config directory exists (if using home-based config)
 # mkdir -p ~/.config/zellij
@@ -28,14 +93,26 @@ openssl req -x509 -newkey rsa:4096 -nodes \
     -out /etc/ssl/zellij/cert.pem \
     -days 365 -subj "/CN=tidepool-orchestrator" 2>/dev/null
 
+# Make certificates readable by non-root user
+chmod 644 /etc/ssl/zellij/key.pem /etc/ssl/zellij/cert.pem
+
 echo "🌐 Starting Zellij web server on 0.0.0.0:8080"
-echo "📋 Creating background session 'orchestrator' with web-sharing enabled"
-echo "📋 After startup, get login token with: docker exec tidepool-orchestrator zellij web --create-token"
+echo "📋 Creating session 'orchestrator' in daemon mode (web-only access)"
+echo "📋 After startup, get login token with: docker exec tidepool-orchestrator gosu user zellij web --create-token"
 echo "🌍 Then open: https://nixos:8080/orchestrator"
 
-# Create detached session with layout (web server will auto-start from config.kdl)
-# web_sharing "on" in config ensures the session allows web client access
-zellij --config /etc/tidepool/zellij/config.kdl --layout /etc/tidepool/zellij/layouts/default.kdl attach --create-background orchestrator
+# Ensure HOME and SHELL are set for user context
+export HOME=/home/user
+export SHELL=/bin/bash
 
-# Keep container alive (web server runs in background)
+# Start Zellij with redirected stdin to avoid TTY conflicts
+# Use setsid to detach from controlling terminal
+setsid gosu user zellij --config /etc/tidepool/zellij/config.kdl \
+  --layout /etc/tidepool/zellij/layouts/default.kdl \
+  attach --create orchestrator </dev/null &
+
+# Wait for Zellij and web server to start
+sleep 3
+
+# Keep container alive
 exec tail -f /dev/null

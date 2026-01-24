@@ -34,7 +34,31 @@ RUN --mount=type=cache,target=/root/.cabal/store \
     cabal build tidepool-control-server -j --ghc-options=-O1 && \
     cp $(cabal list-bin tidepool-control-server) /usr/local/bin/tidepool-control-server
 
-# Stage 2: Runtime
+# Stage 2: Rust Builder
+# Build mantle-agent for hook handling
+# Using latest stable Rust for edition2024 support (required by hangar-config)
+FROM rust:slim-bookworm AS rust-builder
+
+WORKDIR /build
+
+# Install build dependencies
+# perl and perl-base needed for OpenSSL build configuration
+# build-essential provides gcc, make, and other build tools
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    libssl-dev \
+    perl \
+    perl-base \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy Rust workspace
+COPY rust/ ./rust/
+
+# Build mantle-agent with release optimizations
+RUN cd rust && cargo build --release -p mantle-agent
+
+# Stage 3: Runtime
 # Debian bookworm-slim provides a small, stable base for the runtime
 # Platform controlled by docker-compose.yml (linux/amd64 for deployment)
 FROM debian:bookworm-slim AS runtime
@@ -65,10 +89,23 @@ RUN curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/ca
 # v0.43.0+ required for web server support
 ARG ZELLIJ_VERSION=0.43.1
 ENV PATH="/root/.cargo/bin:${PATH}"
-RUN cargo-binstall --no-confirm --version ${ZELLIJ_VERSION} zellij
+RUN cargo-binstall --no-confirm --version ${ZELLIJ_VERSION} zellij && \
+    cp /root/.cargo/bin/zellij /usr/local/bin/zellij && \
+    chmod 755 /usr/local/bin/zellij
 
 # Copy the binary from builder
 COPY --from=builder /usr/local/bin/tidepool-control-server /usr/local/bin/tidepool-control-server
+
+# Copy mantle-agent from rust-builder
+COPY --from=rust-builder /build/rust/target/release/mantle-agent /usr/local/bin/mantle-agent
+
+# Install Claude Code CLI
+# The installer creates a binary named 'claude', not 'claude-code'
+RUN curl -fsSL https://claude.ai/install.sh | bash && \
+    mkdir -p /root/.claude
+
+# Add Claude Code to PATH
+ENV PATH="/root/.local/bin:${PATH}"
 
 # Copy configurations and scripts
 COPY docker/orchestrator/config/orchestrator.kdl /etc/tidepool/zellij/layouts/default.kdl
@@ -84,20 +121,32 @@ ENV TIDEPOOL_CONTROL_SOCKET=/sockets/control.sock
 ENV TIDEPOOL_TUI_SOCKET=/sockets/tui.sock
 ENV HANGAR_ROOT=/worktrees
 ENV TERM=xterm-256color
+ENV SHELL=/bin/bash
 ENV ZELLIJ_CONFIG_DIR=/etc/tidepool/zellij
 
-# Create necessary directories
-RUN mkdir -p /sockets /worktrees /var/log/tidepool && \
-    chmod 777 /sockets /worktrees /var/log/tidepool
+# Create non-root user for running Claude Code
+# UID 1000 is standard for first non-root user
+RUN useradd -m -u 1000 -s /bin/bash user
+
+# Create necessary directories with proper ownership
+RUN mkdir -p /sockets /worktrees /var/log/tidepool /home/user/.claude /home/user/.claude-orchestrator && \
+    chown -R user:user /sockets /worktrees /var/log/tidepool /home/user && \
+    chmod 775 /sockets /worktrees /var/log/tidepool
+
+# Ensure Claude binary is accessible to non-root user
+RUN chmod 755 /root/.local/bin/claude && \
+    cp /root/.local/bin/claude /usr/local/bin/claude && \
+    chmod 755 /usr/local/bin/claude
 
 EXPOSE 7432 8080
 
 WORKDIR /worktrees
 
+# Entrypoint runs as root initially for setup, then drops to user via gosu
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/docker-entrypoint-orchestrator.sh"]
 CMD ["orchestrator"]
 
-# Stage 3: Dev Target
+# Stage 4: Dev Target
 FROM --platform=linux/amd64 builder AS dev
 RUN cabal install haskell-language-server -j
 CMD ["cabal", "repl", "tidepool-control-server"]

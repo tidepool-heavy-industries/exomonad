@@ -10,9 +10,13 @@ set -euo pipefail
 echo "🔐 Setting up auth isolation..."
 mkdir -p "$CLAUDE_CONFIG_DIR"
 
+# Ensure the config directory is owned by the non-root user
+chown -R user:user "$CLAUDE_CONFIG_DIR"
+
 for f in ".credentials.json" "settings.json"; do
     if [ -f "/mnt/secrets/$f" ]; then
         ln -sf "/mnt/secrets/$f" "$CLAUDE_CONFIG_DIR/$f"
+        chown user:user "$CLAUDE_CONFIG_DIR/$f"
         echo "✓ Linked $f"
     fi
 done
