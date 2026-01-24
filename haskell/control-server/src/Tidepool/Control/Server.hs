@@ -30,6 +30,9 @@ import Control.Monad (when, forever)
 import Control.Monad.IO.Class (liftIO)
 import Data.Aeson (decode, object, (.=), FromJSON, ToJSON)
 import qualified Data.Aeson as Aeson
+import Data.Aeson.Types (parseMaybe)
+import qualified Data.Aeson.Text as AesonText
+import qualified Data.Text.Lazy as TL
 import Data.Function ((&))
 import Data.Maybe (isJust, fromMaybe)
 import qualified Data.Text as T
@@ -144,6 +147,7 @@ server logger config tracer tuiState cbMap =
   :<|> handlePing
   :<|> handleRoleMcpTools
   :<|> handleRoleMcpCall
+  :<|> handleRoleMcpJsonRpc
   where
     handleHook (input, runtime, agentRole) = do
       res <- liftIO $ do
@@ -250,6 +254,125 @@ server logger config tracer tuiState cbMap =
               let sessId = fromMaybe req.mcpId mSessionId
               liftIO $ logError logger $ "[MCP:" <> slug <> ":" <> sessId <> "] Forbidden tool: " <> req.toolName
               pure $ mcpToolError sessId PermissionDenied ("Tool not allowed for role " <> slug <> ": " <> req.toolName)
+
+    -- | Unified MCP JSON-RPC endpoint for Claude Code HTTP transport.
+    -- Dispatches based on method field: initialize, notifications/initialized, tools/list, tools/call, ping
+    handleRoleMcpJsonRpc :: T.Text -> Maybe T.Text -> McpJsonRpcRequest -> Handler McpJsonRpcResponse
+    handleRoleMcpJsonRpc slug mSessionId req = do
+      case roleFromText slug of
+        Nothing -> throwError err404 { errBody = "Unknown role: " <> Aeson.encode slug }
+        Just role -> do
+          let reqId = req.jrpcId
+          liftIO $ logDebug logger $ "[MCP-RPC:" <> slug <> "] method=" <> req.jrpcMethod
+
+          case req.jrpcMethod of
+            -- Initialize handshake
+            "initialize" -> do
+              liftIO $ logInfo logger $ "[MCP-RPC:" <> slug <> "] initialize"
+              pure $ McpJsonRpcResponse
+                { jrpcRespId = reqId
+                , jrpcResult = Just $ Aeson.toJSON McpInitializeResult
+                    { mirProtocolVersion = "2024-11-05"
+                    , mirCapabilities = McpServerCapabilities { mscTools = Just (object ["listChanged" .= False]) }
+                    , mirServerInfo = McpServerInfo { msiName = "tidepool-control-server", msiVersion = "1.0.0" }
+                    }
+                , jrpcError = Nothing
+                }
+
+            -- Notification: initialized (no response body needed, but we return empty for HTTP)
+            "notifications/initialized" -> do
+              liftIO $ logDebug logger $ "[MCP-RPC:" <> slug <> "] notifications/initialized"
+              -- For notifications, return minimal response (HTTP requires some response)
+              pure $ McpJsonRpcResponse { jrpcRespId = Nothing, jrpcResult = Nothing, jrpcError = Nothing }
+
+            -- Tools list
+            "tools/list" -> do
+              tools <- liftIO $ exportMCPTools logger
+              let filteredTools = filter (\t -> isToolAllowed role t.tdName) tools
+              pure $ McpJsonRpcResponse
+                { jrpcRespId = reqId
+                , jrpcResult = Just $ Aeson.toJSON McpToolsListResult { mtlrTools = filteredTools }
+                , jrpcError = Nothing
+                }
+
+            -- Tool call
+            "tools/call" -> do
+              case req.jrpcParams >>= parseMaybe Aeson.parseJSON of
+                Nothing -> pure $ McpJsonRpcResponse
+                  { jrpcRespId = reqId
+                  , jrpcResult = Nothing
+                  , jrpcError = Just McpJsonRpcError
+                      { jrpcErrCode = -32602
+                      , jrpcErrMessage = "Invalid params for tools/call"
+                      , jrpcErrData = Nothing
+                      }
+                  }
+                Just (params :: McpToolCallParams) -> do
+                  if isToolAllowed role params.mtcpName
+                    then do
+                      let sessId = fromMaybe "jsonrpc" mSessionId
+                      liftIO $ logInfo logger $ "[MCP-RPC:" <> slug <> ":" <> sessId <> "] tool=" <> params.mtcpName
+                      traceCtx <- liftIO newTraceContext
+                      let configWithRole = config { role = Just slug }
+                      res <- liftIO $ handleMessage logger configWithRole tracer traceCtx tuiState cbMap
+                        (McpToolCall sessId params.mtcpName params.mtcpArguments)
+
+                      -- Convert ControlResponse to MCP tool call result
+                      case res of
+                        McpToolResponse _ mResult mErr -> do
+                          let content = case mResult of
+                                Just val -> [McpContentItem "text" (Just $ TL.toStrict $ AesonText.encodeToLazyText val)]
+                                Nothing -> []
+                              isErr = case mErr of
+                                Just _ -> True
+                                Nothing -> False
+                          pure $ McpJsonRpcResponse
+                            { jrpcRespId = reqId
+                            , jrpcResult = Just $ Aeson.toJSON McpToolCallResult { mtcrContent = content, mtcrIsError = isErr }
+                            , jrpcError = Nothing
+                            }
+                        _ -> pure $ McpJsonRpcResponse
+                          { jrpcRespId = reqId
+                          , jrpcResult = Nothing
+                          , jrpcError = Just McpJsonRpcError
+                              { jrpcErrCode = -32603
+                              , jrpcErrMessage = "Internal error: unexpected response type"
+                              , jrpcErrData = Nothing
+                              }
+                          }
+                    else do
+                      liftIO $ logError logger $ "[MCP-RPC:" <> slug <> "] Forbidden tool: " <> params.mtcpName
+                      pure $ McpJsonRpcResponse
+                        { jrpcRespId = reqId
+                        , jrpcResult = Nothing
+                        , jrpcError = Just McpJsonRpcError
+                            { jrpcErrCode = -32001
+                            , jrpcErrMessage = "Tool not allowed for role " <> slug <> ": " <> params.mtcpName
+                            , jrpcErrData = Nothing
+                            }
+                        }
+
+            -- Ping
+            "ping" -> do
+              liftIO $ logDebug logger $ "[MCP-RPC:" <> slug <> "] ping"
+              pure $ McpJsonRpcResponse
+                { jrpcRespId = reqId
+                , jrpcResult = Just $ object []
+                , jrpcError = Nothing
+                }
+
+            -- Unknown method
+            _ -> do
+              liftIO $ logError logger $ "[MCP-RPC:" <> slug <> "] Unknown method: " <> req.jrpcMethod
+              pure $ McpJsonRpcResponse
+                { jrpcRespId = reqId
+                , jrpcResult = Nothing
+                , jrpcError = Just McpJsonRpcError
+                    { jrpcErrCode = -32601
+                    , jrpcErrMessage = "Method not found: " <> req.jrpcMethod
+                    , jrpcErrData = Nothing
+                    }
+                }
 
 -- | WebSocket response message from tui-popup.
 data PopupResponse = PopupResponse
