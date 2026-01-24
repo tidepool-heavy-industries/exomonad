@@ -233,7 +233,7 @@ Tools: find_callers, show_fields, show_constructors, teach-graph, confirm_action
 
 1. User asks question requiring code intelligence or human decision
 2. Claude plans to call MCP tool (e.g., teach-graph, confirm_action)
-3. Claude Code sends HTTP request to control-server (http+unix://)
+3. Claude Code sends HTTP request to control-server (TCP port 7432)
 4. control-server routes to appropriate handler
    - Tier 1 (LSP-only): find_callers, show_fields, show_constructors
    - Tier 2 (LLM-enhanced): teach-graph (LSP + Haiku selection)
@@ -271,7 +271,10 @@ In `.claude/settings.local.json`:
 }
 ```
 
-**Note:** MCP server configuration uses `.mcp.json`. Claude Code connects directly to control-server via HTTP MCP transport (`http+unix://`), eliminating the need for the `mantle-agent mcp` proxy.
+**Note:** MCP server configuration uses `.mcp.json`. Claude Code connects directly to control-server via HTTP (TCP port 7432):
+```json
+{"mcpServers": {"tidepool": {"type": "http", "url": "http://localhost:7432/role/tl/mcp"}}}
+```
 
 ### Running
 

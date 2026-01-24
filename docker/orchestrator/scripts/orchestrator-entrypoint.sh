@@ -38,8 +38,21 @@ cat > /home/user/.claude.json <<'EOF'
 {"hasCompletedOnboarding": true}
 EOF
 
-# MCP config comes from repo's .mcp.json (points to .tidepool/sockets/control.sock)
-# Symlinks above make that path work in Docker
+# Generate MCP config with HTTP transport to control-server
+# Uses TCP port 7432 (control-server listens on both Unix socket AND TCP)
+# Docker network allows orchestrator to reach control-server by container name
+cat > /worktrees/.mcp.json <<'EOF'
+{
+  "mcpServers": {
+    "tidepool": {
+      "type": "http",
+      "url": "http://tidepool-control-server:7432/role/tl/mcp"
+    }
+  }
+}
+EOF
+chown user:user /worktrees/.mcp.json
+echo "✓ MCP config generated (/worktrees/.mcp.json)"
 
 # Settings with hooks (inside persistent config dir)
 cat > "$CLAUDE_DIR/settings.json" <<'EOF'

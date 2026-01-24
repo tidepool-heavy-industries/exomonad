@@ -9,9 +9,7 @@
 //! - [`hook`]: Handle Claude Code hook events via control socket
 
 pub mod hook;
-pub mod mcp;
 pub mod signal;
 
 pub use hook::{default_allow_response, handle_hook, HookEventType};
-pub use mcp::handle_mcp;
 pub use signal::send_signal;

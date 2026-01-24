@@ -1,12 +1,19 @@
-//! mantle-agent: Container-side agent for mantle sessions.
+//! mantle-agent: Hook handler for Claude Code++ sessions.
 //!
-//! This binary runs inside Docker containers and handles Claude Code hooks
-//! via HTTP requests to the control server.
+//! This binary handles Claude Code hooks via HTTP requests to the control server.
 //!
 //! ## Subcommands
 //!
 //! - `hook <event>` - Handle a Claude Code hook event
 //! - `health` - Check socket health
+//!
+//! ## MCP Tools
+//!
+//! MCP tools are accessed directly via HTTP transport. Claude Code connects to
+//! the control-server's HTTP API (no proxy needed). Configure in .mcp.json:
+//! ```json
+//! {"mcpServers": {"tidepool": {"type": "http", "url": "http://localhost:7432/role/tl/mcp"}}}
+//! ```
 
 use clap::{Parser, Subcommand};
 use tracing::error;
@@ -23,7 +30,7 @@ mod health;
 
 #[derive(Parser)]
 #[command(name = "mantle-agent")]
-#[command(about = "Container-side agent for Claude Code hook handling")]
+#[command(about = "Hook handler for Claude Code++ sessions")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -48,15 +55,6 @@ enum Commands {
         role: Role,
     },
 
-    /// Start a stdio-based MCP server.
-    ///
-    /// Forwards JSON-RPC requests from stdin to the control server via Unix socket.
-    Mcp {
-        /// The role of the agent (dev, tl, pm). Determines available tools.
-        #[arg(long, default_value = "dev")]
-        role: Role,
-    },
-
     /// Check control server health via Ping/Pong on socket.
     Health,
 }
@@ -73,7 +71,6 @@ fn main() {
 
     let result = match cli.command {
         Commands::Hook { event, runtime, role } => handle_hook(event, runtime, role),
-        Commands::Mcp { role } => mantle_shared::handle_mcp(role),
         Commands::Health => health::run_health_check(),
     };
 

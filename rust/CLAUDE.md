@@ -37,7 +37,7 @@ rust/CLAUDE.md  ← YOU ARE HERE (router)
 ```
 Human TTY ──▶ Claude Code (in nix shell)
                │
-               ├─ MCP tools ──────▶ HTTP MCP (http+unix://) ──▶ Control Server (HTTP)
+               ├─ MCP tools ──────▶ HTTP (localhost:7432) ──▶ Control Server
                │                                                    │
                └─ Hooks ──────────▶ mantle-agent hook ──────────────┘
                                           │
@@ -50,7 +50,7 @@ Human TTY ──▶ Claude Code (in nix shell)
 - `mantle-agent hook` - Forwards Claude Code hooks to HTTP control server (Unix socket) ✓
 - `haskell/control-server` - Haskell HTTP server (passthrough hook handlers, MCP tools) ✓
 - `flake.nix` - Nix shell with zellij layout for Claude Code++ ✓
-- **MCP:** Claude Code now uses HTTP MCP transport directly (`http+unix://`) to talk to control-server ✓
+- **MCP:** Claude Code uses HTTP MCP transport to control-server (TCP port 7432) ✓
 - **Missing:** Daemon mode, metrics hub, real hook logic in Haskell
 
 ## Workspace Members
@@ -123,24 +123,26 @@ mantle-agent hook               Control Server (Haskell)
      │◀───────────────────────────────────│
 ```
 
-**MCP tools** use HTTP MCP transport (direct from Claude Code):
+**MCP tools** use HTTP transport (direct from Claude Code via TCP port 7432):
 
 ```
 Claude Code                     Control Server (Haskell)
      │                                    │
-     │  GET /mcp/tools                    │
+     │  GET /role/tl/mcp/tools            │
      │───────────────────────────────────▶│
      │  200 OK (tool definitions)         │
      │◀───────────────────────────────────│
      │                                    │
-     │  POST /mcp/call                    │
+     │  POST /role/tl/mcp/call            │
      │  Body: {tool_name, arguments}      │
      │───────────────────────────────────▶│
      │  200 OK (result)                   │
      │◀───────────────────────────────────│
 ```
 
-**Implementation:** `mantle_shared::socket` uses `curl` subprocess for HTTP-over-Unix-socket requests.
+**Implementation:**
+- Hooks: `mantle_shared::socket` uses `curl` subprocess for HTTP-over-Unix-socket requests
+- MCP: Claude Code connects directly to control-server TCP port 7432
 
 ## What's Missing (TODO)
 

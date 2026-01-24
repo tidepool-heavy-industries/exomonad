@@ -66,5 +66,5 @@ pub use hub::{
 };
 
 // Re-export command types
-pub use commands::{handle_hook, handle_mcp, send_signal, HookEventType};
+pub use commands::{handle_hook, send_signal, HookEventType};
 pub use util::{build_prompt, find_mantle_agent_binary, shell_quote};

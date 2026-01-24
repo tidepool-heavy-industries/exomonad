@@ -7,7 +7,7 @@ Shared library for the mantle workspace. Provides protocol types, HTTP socket cl
 | Module | File | Purpose |
 |--------|------|---------|
 | `protocol` | `protocol.rs` | Control envelope types (HookInput, HookOutput, ControlMessage, ControlResponse) |
-| `socket` | `socket.rs` | HTTP client for control server communication (Unix socket via curl) |
+| `socket` | `socket.rs` | HTTP client for hook communication (Unix socket via curl) |
 | `commands` | `commands/` | CLI command implementations (hook handler, signal sender) |
 | `error` | `error.rs` | Typed error types (`MantleError`) |
 | `events` | `events.rs` | Stream event types for Claude Code `--stream-json` output |
