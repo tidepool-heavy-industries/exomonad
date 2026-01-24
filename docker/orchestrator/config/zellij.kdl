@@ -11,6 +11,9 @@ web_server_port 8080
 web_server_cert "/etc/ssl/zellij/cert.pem"
 web_server_key "/etc/ssl/zellij/key.pem"
 
+// Allow new sessions to be shared through web server
+web_sharing "on"
+
 // Enable session serialization so the session can be resumed if the container restarts
 session_serialization true
 serialization_interval 60
