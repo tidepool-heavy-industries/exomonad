@@ -9,7 +9,8 @@ COPY haskell/ haskell/
 # Find and delete everything that is NOT a .cabal file
 # This is a robust way to keep the directory structure matching cabal.project
 # without copying source code.
-RUN find haskell -type f ! -name "*.cabal" -delete
+# IMPORTANT: Preserve haskell/vendor/* - these are vendored dependencies with source needed for building
+RUN find haskell -type f ! -name "*.cabal" ! -path "haskell/vendor/*" -delete
 
 # Stage 1: Builder
 # Use GHC 9.12.2 for latest stable with full HLS support
