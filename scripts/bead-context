@@ -23,7 +23,13 @@ fi
 # Parse bead ID from branch name
 # Convention: bd-{id}/{description}
 if [[ "$BRANCH" =~ ^bd-([^/]+)/ ]]; then
-  BEAD_ID="tidepool-${BASH_REMATCH[1]}"
+  EXTRACTED_ID="${BASH_REMATCH[1]}"
+  # Only prepend tidepool- if not already present
+  if [[ "$EXTRACTED_ID" =~ ^tidepool- ]]; then
+    BEAD_ID="$EXTRACTED_ID"
+  else
+    BEAD_ID="tidepool-$EXTRACTED_ID"
+  fi
 else
   echo "ERROR: Branch '$BRANCH' doesn't match bd-{id}/* convention" >&2
   echo "Expected format: bd-abc123/description" >&2
