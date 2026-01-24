@@ -15,3 +15,5 @@ result/
 
 # bv (beads viewer) local config and caches
 .bv/
+docker/orchestrator/ssh-keys/
+docker/claude-agent/orchestrator.pub

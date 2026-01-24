@@ -69,6 +69,9 @@ data StateDelta = StateDelta
 # Build all packages
 cabal build all
 
+# Run pre-build for Docker (generates SSH keys)
+./scripts/docker-prebuild.sh
+
 # Run native server with SimpleAgent example
 just native  # Starts at localhost:8080
 ```

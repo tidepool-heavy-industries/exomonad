@@ -184,12 +184,16 @@ blast-radius base="main":
 # Docker Workflows
 # ─────────────────────────────────────────────────────────────
 
+# Run pre-build steps (key generation, etc.)
+docker-prebuild:
+    ./scripts/docker-prebuild.sh
+
 # Build orchestrator image
-docker-build:
+docker-build: docker-prebuild
     docker compose build
 
 # Build agent image
-docker-build-agent:
+docker-build-agent: docker-prebuild
     docker build -t tidepool/claude-agent:latest -f docker/claude-agent/Dockerfile .
 
 # Build all docker images
@@ -219,6 +223,14 @@ docker-agent BRANCH:
 # Clean shutdown
 docker-down:
     docker compose down
+
+# Test SSH connectivity between orchestrator and agent
+test-ssh: docker-prebuild
+    docker compose up -d orchestrator agent-1
+    @echo "Waiting for sshd to start..."
+    @sleep 2
+    docker compose exec orchestrator ssh -i /etc/ssh-proxy/orchestrator_key -o StrictHostKeyChecking=no root@agent-1 'echo "SSH Connection Successful: $$(hostname)"'
+    docker compose stop agent-1
 
 # One-command workflow (build + up + attach)
 docker-run: docker-build docker-up docker-attach

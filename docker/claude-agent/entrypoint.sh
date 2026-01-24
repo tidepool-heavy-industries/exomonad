@@ -2,6 +2,10 @@
 # Claude Code Agent Entrypoint
 set -e
 
+# Start sshd (daemonized)
+echo "Starting SSH server..."
+/usr/sbin/sshd
+
 # 1. Link worktree to shared git alternates if provided
 # This saves disk space by sharing the object store with a host-side cache
 if [ -n "$GIT_ALTERNATES_OBJECT_DIR" ] && [ -d "/workspace/.git" ]; then
