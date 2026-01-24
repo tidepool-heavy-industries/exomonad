@@ -38,19 +38,8 @@ cat > /home/user/.claude.json <<'EOF'
 {"hasCompletedOnboarding": true}
 EOF
 
-# MCP config (inside persistent config dir)
-cat > "$CLAUDE_DIR/.mcp.json" <<'EOF'
-{
-  "mcpServers": {
-    "tidepool": {
-      "transport": {
-        "type": "http",
-        "url": "http+unix://%2Fsockets%2Fcontrol.sock"
-      }
-    }
-  }
-}
-EOF
+# MCP config comes from repo's .mcp.json (points to .tidepool/sockets/control.sock)
+# Symlinks above make that path work in Docker
 
 # Settings with hooks (inside persistent config dir)
 cat > "$CLAUDE_DIR/settings.json" <<'EOF'
@@ -71,7 +60,7 @@ cat > "$CLAUDE_DIR/settings.json" <<'EOF'
 }
 EOF
 
-chown user:user /home/user/.claude.json "$CLAUDE_DIR/.mcp.json" "$CLAUDE_DIR/settings.json"
+chown user:user /home/user/.claude.json "$CLAUDE_DIR/settings.json"
 echo "✓ Claude Code configured (persistent volume: $CLAUDE_DIR)"
 
 # Set environment for user context
