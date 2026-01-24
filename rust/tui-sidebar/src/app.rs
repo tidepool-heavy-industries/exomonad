@@ -15,8 +15,8 @@ use tuirealm::ratatui::layout::Rect;
 use tuirealm::ratatui::Terminal;
 use tuirealm::MockComponent;
 
-use crate::protocol::{PopupDefinition, PopupResult};
-use crate::realm::PopupComponent;
+use tui_sidebar::protocol::{PopupDefinition, PopupResult};
+use tui_sidebar::realm::PopupComponent;
 
 /// Main application event loop.
 ///
@@ -148,6 +148,14 @@ fn handle_key(popup: &mut PopupComponent, key: KeyCode) -> Result<PopupAction> {
         }
         KeyCode::BackTab => {
             popup.perform(Cmd::Move(Direction::Up));
+            Ok(PopupAction::Continue)
+        }
+        KeyCode::Home => {
+            popup.perform(Cmd::GoTo(tuirealm::command::Position::Begin));
+            Ok(PopupAction::Continue)
+        }
+        KeyCode::End => {
+            popup.perform(Cmd::GoTo(tuirealm::command::Position::End));
             Ok(PopupAction::Continue)
         }
         KeyCode::Left => {

@@ -76,7 +76,10 @@ fn build_component(component: &Component, state: &PopupState) -> ComponentWrappe
             placeholder,
             rows,
         } => {
-            let text = state.get_text(&component.id).cloned().unwrap_or_default();
+            let text = state
+                .get_text(&component.id)
+                .map(|s| s.to_string())
+                .unwrap_or_default();
             let height = rows.unwrap_or(1) as u16 + 1; // +1 for label
             ComponentWrapper {
                 label: component.id.clone(),
@@ -109,7 +112,7 @@ fn build_component(component: &Component, state: &PopupState) -> ComponentWrappe
         ComponentSpec::Multiselect { label, options } => {
             let selections = state
                 .get_multichoice(&component.id)
-                .cloned()
+                .map(|s| s.to_vec())
                 .unwrap_or_else(|| vec![false; options.len()]);
             let height = (options.len() as u16 + 1).max(3); // +1 for label, minimum 3
             ComponentWrapper {

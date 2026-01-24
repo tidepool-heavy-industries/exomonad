@@ -25,20 +25,6 @@ impl ChoiceComponent {
         }
     }
 
-    pub fn get_selected(&self) -> usize {
-        self.selected
-    }
-
-    pub fn get_selected_text(&self) -> Option<&str> {
-        self.options.get(self.selected).map(|s| s.as_str())
-    }
-
-    pub fn set_selected(&mut self, index: usize) {
-        if index < self.options.len() {
-            self.selected = index;
-        }
-    }
-
     fn next_option(&mut self) -> CmdResult {
         if self.selected + 1 < self.options.len() {
             self.selected += 1;
@@ -51,6 +37,24 @@ impl ChoiceComponent {
     fn prev_option(&mut self) -> CmdResult {
         if self.selected > 0 {
             self.selected -= 1;
+            CmdResult::Changed(self.state())
+        } else {
+            CmdResult::None
+        }
+    }
+
+    fn first_option(&mut self) -> CmdResult {
+        if self.selected != 0 {
+            self.selected = 0;
+            CmdResult::Changed(self.state())
+        } else {
+            CmdResult::None
+        }
+    }
+
+    fn last_option(&mut self) -> CmdResult {
+        if !self.options.is_empty() && self.selected != self.options.len() - 1 {
+            self.selected = self.options.len() - 1;
             CmdResult::Changed(self.state())
         } else {
             CmdResult::None
@@ -122,6 +126,8 @@ impl MockComponent for ChoiceComponent {
         match cmd {
             Cmd::Move(Direction::Right) => self.next_option(),
             Cmd::Move(Direction::Left) => self.prev_option(),
+            Cmd::GoTo(tuirealm::command::Position::Begin) => self.first_option(),
+            Cmd::GoTo(tuirealm::command::Position::End) => self.last_option(),
             _ => CmdResult::None,
         }
     }

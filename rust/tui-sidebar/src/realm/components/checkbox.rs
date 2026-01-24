@@ -23,14 +23,6 @@ impl CheckboxComponent {
         }
     }
 
-    pub fn is_checked(&self) -> bool {
-        self.checked
-    }
-
-    pub fn set_checked(&mut self, checked: bool) {
-        self.checked = checked;
-    }
-
     fn toggle(&mut self) -> CmdResult {
         self.checked = !self.checked;
         CmdResult::Changed(self.state())

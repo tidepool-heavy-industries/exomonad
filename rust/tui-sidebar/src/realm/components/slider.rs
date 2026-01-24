@@ -27,14 +27,6 @@ impl SliderComponent {
         }
     }
 
-    pub fn get_value(&self) -> f32 {
-        self.value
-    }
-
-    pub fn set_value(&mut self, value: f32) {
-        self.value = value.clamp(self.min, self.max);
-    }
-
     fn increment(&mut self) -> CmdResult {
         let step = (self.max - self.min) / 20.0; // 20 steps
         let new_value = (self.value + step).clamp(self.min, self.max);
@@ -51,6 +43,24 @@ impl SliderComponent {
         let new_value = (self.value - step).clamp(self.min, self.max);
         if new_value != self.value {
             self.value = new_value;
+            CmdResult::Changed(self.state())
+        } else {
+            CmdResult::None
+        }
+    }
+
+    fn go_to_min(&mut self) -> CmdResult {
+        if self.value != self.min {
+            self.value = self.min;
+            CmdResult::Changed(self.state())
+        } else {
+            CmdResult::None
+        }
+    }
+
+    fn go_to_max(&mut self) -> CmdResult {
+        if self.value != self.max {
+            self.value = self.max;
             CmdResult::Changed(self.state())
         } else {
             CmdResult::None
@@ -129,6 +139,8 @@ impl MockComponent for SliderComponent {
         match cmd {
             Cmd::Move(Direction::Right) => self.increment(),
             Cmd::Move(Direction::Left) => self.decrement(),
+            Cmd::GoTo(tuirealm::command::Position::Begin) => self.go_to_min(),
+            Cmd::GoTo(tuirealm::command::Position::End) => self.go_to_max(),
             _ => CmdResult::None,
         }
     }

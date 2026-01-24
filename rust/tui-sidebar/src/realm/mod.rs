@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use tuirealm::command::{Cmd, CmdResult, Direction};
 use tuirealm::props::{BorderType, Props};
 use tuirealm::ratatui::layout::{Constraint, Layout as RatatuiLayout, Rect};
@@ -32,7 +31,6 @@ pub struct PopupComponent {
     components: Vec<ComponentWrapper>,
     props: Props,
     component_areas: Vec<Rect>, // Track render areas for mouse click detection
-    id_to_index: HashMap<String, usize>, // Map component IDs to indices
     visibility_rules: Vec<Option<VisibilityRule>>, // Per-component visibility rules
 }
 
@@ -49,7 +47,7 @@ pub struct ComponentWrapper {
 impl PopupComponent {
     pub fn new(definition: PopupDefinition) -> Self {
         let state = PopupState::new(&definition);
-        let (components, id_to_index, visibility_rules) =
+        let (components, _id_to_index, visibility_rules) =
             builder::build_components(&definition, &state);
         let component_areas = Vec::with_capacity(components.len());
 
@@ -61,18 +59,12 @@ impl PopupComponent {
             components,
             props: Props::default(),
             component_areas,
-            id_to_index,
             visibility_rules,
         };
 
         // Set initial focus to first focusable visible component
         popup_component.focused_component = popup_component.find_first_focusable_visible();
         popup_component
-    }
-
-    /// Get the current form result (includes all components)
-    pub fn get_result(&self) -> PopupResult {
-        PopupResult::from_state_with_definition(&self.state, &self.definition)
     }
 
     /// Get the filtered form result (only visible, interactive components)
@@ -132,13 +124,6 @@ impl PopupComponent {
                 .unwrap_or_else(|| "decline".to_string()),
             values: serde_json::Value::Object(result_values),
         }
-    }
-
-    /// Get the name of the currently focused component
-    pub fn get_focused_component_name(&self) -> Option<String> {
-        self.components
-            .get(self.focused_component)
-            .map(|wrapper| wrapper.label.clone())
     }
 
     /// Check if the currently focused component is a textbox

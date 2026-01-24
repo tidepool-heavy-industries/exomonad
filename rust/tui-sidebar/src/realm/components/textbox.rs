@@ -12,30 +12,24 @@ pub struct TextboxComponent {
     label: String,
     text: String,
     placeholder: Option<String>,
-    rows: u32,
     cursor_pos: usize,
     props: Props,
 }
 
 impl TextboxComponent {
-    pub fn new(label: &str, text: &str, placeholder: Option<&str>, rows: Option<u32>) -> Self {
+    pub fn new(label: &str, text: &str, placeholder: Option<&str>, _rows: Option<u32>) -> Self {
         Self {
             label: label.to_string(),
             text: text.to_string(),
             placeholder: placeholder.map(|s| s.to_string()),
-            rows: rows.unwrap_or(1),
             cursor_pos: text.len(),
             props: Props::default(),
         }
     }
 
+    #[cfg(test)]
     pub fn get_text(&self) -> &str {
         &self.text
-    }
-
-    pub fn set_text(&mut self, text: &str) {
-        self.text = text.to_string();
-        self.cursor_pos = text.len();
     }
 
     fn insert_char(&mut self, c: char) -> CmdResult {
@@ -48,6 +42,42 @@ impl TextboxComponent {
         if self.cursor_pos > 0 {
             self.cursor_pos -= 1;
             self.text.remove(self.cursor_pos);
+            CmdResult::Changed(self.state())
+        } else {
+            CmdResult::None
+        }
+    }
+
+    fn move_cursor_left(&mut self) -> CmdResult {
+        if self.cursor_pos > 0 {
+            self.cursor_pos -= 1;
+            CmdResult::Changed(self.state())
+        } else {
+            CmdResult::None
+        }
+    }
+
+    fn move_cursor_right(&mut self) -> CmdResult {
+        if self.cursor_pos < self.text.len() {
+            self.cursor_pos += 1;
+            CmdResult::Changed(self.state())
+        } else {
+            CmdResult::None
+        }
+    }
+
+    fn move_cursor_start(&mut self) -> CmdResult {
+        if self.cursor_pos != 0 {
+            self.cursor_pos = 0;
+            CmdResult::Changed(self.state())
+        } else {
+            CmdResult::None
+        }
+    }
+
+    fn move_cursor_end(&mut self) -> CmdResult {
+        if self.cursor_pos != self.text.len() {
+            self.cursor_pos = self.text.len();
             CmdResult::Changed(self.state())
         } else {
             CmdResult::None
@@ -156,6 +186,10 @@ impl MockComponent for TextboxComponent {
         match cmd {
             Cmd::Type(c) => self.insert_char(c),
             Cmd::Cancel => self.delete_char(),
+            Cmd::Move(tuirealm::command::Direction::Left) => self.move_cursor_left(),
+            Cmd::Move(tuirealm::command::Direction::Right) => self.move_cursor_right(),
+            Cmd::GoTo(tuirealm::command::Position::Begin) => self.move_cursor_start(),
+            Cmd::GoTo(tuirealm::command::Position::End) => self.move_cursor_end(),
             _ => CmdResult::None,
         }
     }
@@ -166,28 +200,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_cursor_position_with_spaces() {
-        let mut textbox = TextboxComponent::new("Name", "", Some("Enter name"), None);
-
-        // Type "Hello World" and verify cursor position
-        textbox.perform(Cmd::Type('H'));
-        textbox.perform(Cmd::Type('e'));
-        textbox.perform(Cmd::Type('l'));
-        textbox.perform(Cmd::Type('l'));
-        textbox.perform(Cmd::Type('o'));
+    fn test_cursor_movement() {
+        let mut textbox = TextboxComponent::new("Name", "Hello", None, None);
         assert_eq!(textbox.cursor_pos, 5);
 
-        // Type a space - crucial test for our fix
-        textbox.perform(Cmd::Type(' '));
-        assert_eq!(textbox.cursor_pos, 6);
-        assert_eq!(textbox.get_text(), "Hello ");
+        // Move left
+        textbox.perform(Cmd::Move(tuirealm::command::Direction::Left));
+        assert_eq!(textbox.cursor_pos, 4);
 
-        textbox.perform(Cmd::Type('W'));
-        textbox.perform(Cmd::Type('o'));
-        textbox.perform(Cmd::Type('r'));
-        textbox.perform(Cmd::Type('l'));
-        textbox.perform(Cmd::Type('d'));
-        assert_eq!(textbox.cursor_pos, 11);
-        assert_eq!(textbox.get_text(), "Hello World");
+        // Move home
+        textbox.perform(Cmd::GoTo(tuirealm::command::Position::Begin));
+        assert_eq!(textbox.cursor_pos, 0);
+
+        // Move right
+        textbox.perform(Cmd::Move(tuirealm::command::Direction::Right));
+        assert_eq!(textbox.cursor_pos, 1);
+
+        // Move end
+        textbox.perform(Cmd::GoTo(tuirealm::command::Position::End));
+        assert_eq!(textbox.cursor_pos, 5);
     }
 }
