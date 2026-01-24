@@ -97,7 +97,7 @@ openssl req -x509 -newkey rsa:4096 -nodes \
 chmod 644 /etc/ssl/zellij/key.pem /etc/ssl/zellij/cert.pem
 
 echo "🌐 Starting Zellij web server on 0.0.0.0:8080"
-echo "📋 Creating session 'orchestrator' in daemon mode (headless server)"
+echo "📋 Web server will create 'orchestrator' session on first browser connection"
 echo "📋 After startup, get login token with: docker exec tidepool-orchestrator gosu user zellij web --create-token"
 echo "🌍 Then open: https://nixos:8080/orchestrator"
 
@@ -108,16 +108,11 @@ export SHELL=/bin/bash
 # Cleanup old sockets to prevent "Address in use" or stale session errors
 rm -f /tmp/zellij-*.sock
 
-# Start Zellij in daemon mode (headless server)
-# This spawns the server and web server WITHOUT a local TUI client
-# The --daemonize flag keeps the server running in background
-# No TTY required - web client is the only input source
-gosu user zellij \
-  --config /etc/tidepool/zellij/config.kdl \
-  --layout /etc/tidepool/zellij/layouts/default.kdl \
-  options \
-  --session-name orchestrator \
-  --daemonize true
-
-# Keep container alive (Zellij server runs in background)
-exec tail -f /dev/null
+# Start ONLY the web server (no session pre-creation needed)
+# The web server creates sessions on-demand when browser connects
+# This is the correct architecture for web-only access
+exec gosu user zellij web \
+  --ip 0.0.0.0 \
+  --port 8080 \
+  --cert /etc/ssl/zellij/cert.pem \
+  --key /etc/ssl/zellij/key.pem

@@ -77,6 +77,7 @@ RUN apt-get update && apt-get install -y \
     socat \
     lsof \
     procps \
+    screen \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Docker CLI
