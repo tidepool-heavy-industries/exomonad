@@ -1,8 +1,18 @@
 # Dockerfile for Claude Code Agent
 
 # Stage 1: Rust Builder (Multi-stage)
-FROM --platform=linux/amd64 rust:1.80 AS rust-builder
+FROM --platform=linux/amd64 rust:slim-bookworm AS rust-builder
 WORKDIR /build
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    libssl-dev \
+    perl \
+    perl-base \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY rust/ ./rust/
 # Use cache mounts for cargo to speed up rebuilds
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
@@ -36,11 +46,26 @@ RUN apt-get update && apt-get install -y \
     sudo \
     python3 \
     socat \
+    openssh-server \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Node.js 20.x
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y nodejs
+
+# Configure sshd
+RUN mkdir -p /var/run/sshd /root/.ssh
+RUN sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config && \
+    sed -i 's/#PubkeyAuthentication yes/PubkeyAuthentication yes/' /etc/ssh/sshd_config && \
+    sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
+
+# Copy orchestrator's public key (generated during pre-build)
+COPY docker/claude-agent/orchestrator.pub /root/.ssh/authorized_keys
+RUN chmod 600 /root/.ssh/authorized_keys && \
+    chmod 700 /root/.ssh
+
+# Expose SSH port (internal Docker network only)
+EXPOSE 22
 
 # Create non-root user 'agent' with UID 1000
 RUN useradd -m -s /bin/bash -u 1000 agent \

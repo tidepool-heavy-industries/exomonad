@@ -78,6 +78,7 @@ RUN apt-get update && apt-get install -y \
     lsof \
     procps \
     screen \
+    openssh-client \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Docker CLI
@@ -86,11 +87,9 @@ RUN curl -fsSL https://get.docker.com | sh && rm -rf /var/lib/apt/lists/*
 # Install cargo-binstall for binary installation
 RUN curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
 
-# Install Zellij via cargo-binstall
-# v0.43.0+ required for web server support
-ARG ZELLIJ_VERSION=0.43.1
+# Install Zellij via cargo-binstall (latest version, requires v0.43.0+ for web server)
 ENV PATH="/root/.cargo/bin:${PATH}"
-RUN cargo-binstall --no-confirm --version ${ZELLIJ_VERSION} zellij && \
+RUN cargo-binstall --no-confirm zellij && \
     cp /root/.cargo/bin/zellij /usr/local/bin/zellij && \
     chmod 755 /usr/local/bin/zellij
 
@@ -113,6 +112,10 @@ COPY docker/orchestrator/config/orchestrator.kdl /etc/tidepool/zellij/layouts/de
 COPY docker/orchestrator/config/zellij.kdl /etc/tidepool/zellij/config.kdl
 COPY docker/orchestrator/scripts/orchestrator-entrypoint.sh /usr/local/bin/orchestrator-entrypoint.sh
 COPY scripts/docker-entrypoint-orchestrator.sh /usr/local/bin/docker-entrypoint-orchestrator.sh
+
+# Copy SSH private key for ssh-proxy (generated during pre-build)
+COPY docker/orchestrator/ssh-keys/orchestrator_key /etc/ssh-proxy/orchestrator_key
+RUN chmod 600 /etc/ssh-proxy/orchestrator_key
 
 # Ensure scripts are executable
 RUN chmod +x /usr/local/bin/orchestrator-entrypoint.sh /usr/local/bin/docker-entrypoint-orchestrator.sh
