@@ -1,7 +1,7 @@
 # Stage 1: Builder
 # Use GHC 9.12.2 for latest stable with full HLS support
-# Force linux/amd64 to avoid cross-compilation issues on ARM hosts
-FROM --platform=linux/amd64 haskell:9.12.2-slim-bookworm AS builder
+# Platform controlled by docker-compose.yml (linux/amd64 for deployment)
+FROM haskell:9.12.2-slim-bookworm AS builder
 
 # Install system dependencies for build
 # zlib1g-dev, libffi-dev, libgmp-dev are required for Haskell compilation
@@ -36,7 +36,8 @@ RUN --mount=type=cache,target=/root/.cabal/store \
 
 # Stage 2: Runtime
 # Debian bookworm-slim provides a small, stable base for the runtime
-FROM --platform=linux/amd64 debian:bookworm-slim AS runtime
+# Platform controlled by docker-compose.yml (linux/amd64 for deployment)
+FROM debian:bookworm-slim AS runtime
 
 # Install runtime dependencies
 RUN apt-get update && apt-get install -y \
