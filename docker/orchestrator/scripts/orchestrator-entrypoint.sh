@@ -15,6 +15,12 @@ trap cleanup SIGTERM SIGINT EXIT
 # Ensure /sockets has correct permissions
 chown -R user:user /sockets 2>/dev/null || true
 
+# Create symlink so local dev .mcp.json paths work in Docker
+# Local dev: .tidepool/sockets/control.sock → Docker: /sockets/control.sock
+mkdir -p /worktrees/.tidepool/sockets
+ln -sf /sockets/control.sock /worktrees/.tidepool/sockets/control.sock 2>/dev/null || true
+ln -sf /sockets/tui.sock /worktrees/.tidepool/sockets/tui.sock 2>/dev/null || true
+
 # Ensure log file exists
 touch /var/log/tidepool/control-server.log
 chown user:user /var/log/tidepool/control-server.log
