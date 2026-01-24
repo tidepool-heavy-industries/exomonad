@@ -289,6 +289,13 @@ impl Drop for SignalFifo {
         // Signal thread to stop using Release ordering to ensure visibility
         self.should_stop.store(true, Ordering::Release);
 
+        // Unblock the reader thread by opening the FIFO for writing
+        // This satisfies the reader's blocking open() if it's waiting
+        let path = self.guard.path().to_path_buf();
+        // Use a non-blocking open or just a quick open/close
+        // We ignore errors because the file might be gone or already open
+        let _ = std::fs::OpenOptions::new().write(true).open(&path);
+
         // Join the thread (may block briefly if it's waiting on FIFO read)
         if let Some(thread) = self.thread.take() {
             // Give thread a moment to notice the stop flag
@@ -352,10 +359,13 @@ pub fn write_signal(fifo_path: &Path, signal: &InterruptSignal) -> Result<()> {
 pub fn write_result(fifo_path: &Path, result: &RunResult) -> Result<()> {
     let json = serde_json::to_string(result).map_err(MantleError::JsonSerialize)?;
 
-    let mut file = File::create(fifo_path).map_err(|e| MantleError::FifoOpen {
-        path: fifo_path.to_path_buf(),
-        source: e,
-    })?;
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .open(fifo_path)
+        .map_err(|e| MantleError::FifoOpen {
+            path: fifo_path.to_path_buf(),
+            source: e,
+        })?;
 
     file.write_all(json.as_bytes())
         .map_err(|e| MantleError::FifoWrite {
@@ -369,4 +379,89 @@ pub fn write_result(fifo_path: &Path, result: &RunResult) -> Result<()> {
         "Wrote result to FIFO"
     );
     Ok(())
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_fifo_guard_cleanup() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("test.fifo");
+        
+        {
+            let _guard = FifoGuard::new(path.clone()).unwrap();
+            assert!(path.exists());
+        }
+        
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn test_result_fifo_roundtrip() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("result.fifo");
+        let guard = FifoGuard::new(path.clone()).unwrap();
+        let result_fifo = ResultFifo { guard };
+
+        let expected = RunResult {
+            exit_code: 42,
+            is_error: false,
+            result: Some("done".to_string()),
+            structured_output: None,
+            session_id: "sess-123".to_string(),
+            session_tag: None,
+            total_cost_usd: 0.1,
+            num_turns: 5,
+            events: vec![],
+            permission_denials: vec![],
+            model_usage: std::collections::HashMap::new(),
+            interrupts: vec![],
+            tool_calls: None,
+            stderr_output: None,
+        };
+
+        let path_clone = path.clone();
+        let expected_clone = expected.clone();
+        
+        thread::spawn(move || {
+            // Give reader a moment to open
+            thread::sleep(Duration::from_millis(50));
+            write_result(&path_clone, &expected_clone).unwrap();
+        });
+
+        let received = result_fifo.read_with_timeout(Duration::from_secs(2)).unwrap();
+        assert_eq!(received.session_id, expected.session_id);
+        assert_eq!(received.exit_code, expected.exit_code);
+    }
+
+    #[test]
+    fn test_signal_fifo_roundtrip() {
+        let signal_fifo = SignalFifo::new().unwrap();
+        let path = signal_fifo.path().to_path_buf();
+
+        let signal = InterruptSignal {
+            signal_type: "transition".to_string(),
+            state: Some("next".to_string()),
+            reason: Some("Testing".to_string()),
+        };
+
+        write_signal(&path, &signal).unwrap();
+
+        // Wait for reader thread to pick it up
+        let mut received = None;
+        for _ in 0..20 {
+            if let Some(s) = signal_fifo.try_recv() {
+                received = Some(s);
+                break;
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
+
+        let received = received.expect("Did not receive signal in time");
+        assert_eq!(received.signal_type, signal.signal_type);
+        assert_eq!(received.state, signal.state);
+    }
 }

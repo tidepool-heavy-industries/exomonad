@@ -25,3 +25,21 @@ library
         DerivingStrategies
         LambdaCase
         OverloadedStrings
+
+test-suite tidepool-wire-types-test
+    import:           warnings
+    type:             exitcode-stdio-1.0
+    hs-source-dirs:   test
+    main-is:          Spec.hs
+    other-modules:
+        Tidepool.Wire.TypesSpec
+    build-depends:
+        base,
+        tidepool-wire-types,
+        hspec,
+        aeson,
+        text,
+        QuickCheck
+    default-language: GHC2024
+    default-extensions:
+        OverloadedStrings
