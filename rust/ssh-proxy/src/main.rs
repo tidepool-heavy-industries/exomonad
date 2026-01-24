@@ -3,7 +3,7 @@ use async_ssh2_tokio::{AuthMethod, Client, ServerCheckMethod};
 use axum::{
     extract::State,
     http::StatusCode,
-    routing::post,
+    routing::{get, post},
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
@@ -52,6 +52,7 @@ struct ErrorResponse {
 struct ConnectionPool {
     clients: HashMap<String, Arc<Client>>,
     key_path: String,
+    // TODO: Implement periodic pruning of idle connections (e.g., >30m unused)
 }
 
 impl ConnectionPool {
@@ -111,6 +112,7 @@ async fn main() -> Result<()> {
 
     let app = Router::new()
         .route("/exec", post(handle_exec))
+        .route("/health", get(|| async { "ok" }))
         .with_state(pool);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));

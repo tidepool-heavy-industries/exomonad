@@ -41,5 +41,12 @@ processes:
     environment:
       - "SSH_PROXY_KEY_PATH=${SSH_PROXY_KEY_PATH:-/etc/ssh-proxy/orchestrator_key}"
       - "SSH_PROXY_PORT=7433"
+    readiness_probe:
+      http_get:
+        host: "127.0.0.1"
+        port: 7433
+        path: "/health"
+      initial_delay_seconds: 1
+      period_seconds: 5
     availability:
       restart: on_failure
