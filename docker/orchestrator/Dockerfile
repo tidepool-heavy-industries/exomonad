@@ -58,8 +58,8 @@ RUN apt-get update && apt-get install -y \
 RUN curl -fsSL https://get.docker.com | sh && rm -rf /var/lib/apt/lists/*
 
 # Install Zellij
-ARG ZELLIJ_VERSION=0.41.2
-# Since we forced linux/amd64, we can hardcode the arch for Zellij too
+# v0.43.0+ required for web server support
+ARG ZELLIJ_VERSION=0.43.1
 RUN curl -L "https://github.com/zellij-org/zellij/releases/download/v${ZELLIJ_VERSION}/zellij-x86_64-unknown-linux-musl.tar.gz" | tar xz && \
     mv zellij /usr/local/bin/zellij && \
     chmod +x /usr/local/bin/zellij
