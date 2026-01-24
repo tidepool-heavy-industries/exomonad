@@ -12,6 +12,11 @@ services:
       - TIDEPOOL_CONTROL_SOCKET=/sockets/control.sock
       - TIDEPOOL_TUI_SOCKET=/sockets/tui.sock
       - GEMMA_ENDPOINT=${GEMMA_ENDPOINT:-http://host.docker.internal:11434}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://openobserve:5081
+      - OTEL_EXPORTER_OTLP_HEADERS=Authorization=Basic ${OPENOBSERVE_AUTH_HEADER}
+    depends_on:
+      openobserve:
+        condition: service_healthy
     volumes:
       - tidepool-sockets:/sockets
     healthcheck:
@@ -24,6 +29,31 @@ services:
     restart: unless-stopped
     networks:
       - tidepool-internal
+
+  openobserve:
+    image: public.ecr.aws/zinclabs/openobserve:latest
+    container_name: tidepool-openobserve
+    restart: unless-stopped
+    ports:
+      - "5080:5080"  # Web UI & HTTP API
+      - "5081:5081"  # OTLP gRPC ingestion
+    environment:
+      - ZO_DATA_DIR=/data
+      - ZO_ROOT_USER_EMAIL=${OPENOBSERVE_EMAIL:-admin@tidepool.local}
+      - ZO_ROOT_USER_PASSWORD=${OPENOBSERVE_PASSWORD:-tidepool-dev}
+      # Memory tuning for Docker (prevent OOM)
+      - ZO_MAX_FILE_SIZE_IN_MEMORY=128
+      - ZO_MEMORY_CACHE_MAX_SIZE=256
+      - ZO_FILE_MOVE_THREAD_NUM=1
+    volumes:
+      - tidepool-openobserve:/data
+    networks:
+      - tidepool-internal
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
   orchestrator:
     # Frontend: Zellij + Claude Code CLI (attach via: docker exec -it --user user tidepool-orchestrator zellij attach orchestrator)
@@ -107,6 +137,8 @@ volumes:
     name: tidepool-repo
   tidepool-ssh-keys:
     name: tidepool-ssh-keys
+  tidepool-openobserve:
+    name: tidepool-openobserve
 
 networks:
   tidepool-internal:
