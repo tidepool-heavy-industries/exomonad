@@ -18,9 +18,17 @@ node_modules
 out
 build
 target
+rust/target
+rust/.cargo
 /worktrees
 /runtime/bin
 /.tidepool
+/.beads
+/.zellij
+anemone/node_modules
+typescript/*/node_modules
+deploy/node_modules
+deploy/.wrangler
 **/*.log
 **/*.sock
 **/.DS_Store
