@@ -8,23 +8,29 @@
 -- TH splices that reference them.
 module Tidepool.Control.Hook.SessionStart.Context
   ( SessionStartContext(..)
+  , BeadsDashboardContext(..)
   , BeadContext(..)
   , DepContext(..)
   ) where
 
 import Control.Monad.Writer (Writer)
 import Data.Text (Text)
+import qualified Data.Text as T
 import GHC.Generics (Generic)
 import Text.Ginger.GVal (ToGVal(..), dict, (~>))
 import Text.Ginger.Run.Type (Run)
 import Text.Parsec.Pos (SourcePos)
+
+import Tidepool.Control.RoleConfig (Role)
 
 
 -- | Context for the session start prompt.
 --
 -- Contains all information needed to render the @session-start.jinja@ template.
 data SessionStartContext = SessionStartContext
-  { bead_id :: Maybe Text
+  { role :: Role
+    -- ^ Role of the agent (Dev, TL, PM)
+  , bead_id :: Maybe Text
     -- ^ Bead ID (e.g., "tidepool-51i") if on a bd-* branch
   , branch :: Maybe Text
     -- ^ Current branch name
@@ -32,6 +38,15 @@ data SessionStartContext = SessionStartContext
     -- ^ Current working directory
   , bead :: Maybe BeadContext
     -- ^ Full bead details if available
+  , dashboard :: Maybe BeadsDashboardContext
+    -- ^ Beads dashboard (for TL role)
+  } deriving stock (Show, Eq, Generic)
+
+-- | Beads dashboard context for TL role.
+data BeadsDashboardContext = BeadsDashboardContext
+  { ready :: [BeadContext]
+  , in_progress :: [BeadContext]
+  , blocked :: [BeadContext]
   } deriving stock (Show, Eq, Generic)
 
 -- | Bead context for template rendering.
@@ -46,6 +61,7 @@ data BeadContext = BeadContext
   , created :: Text
   , updated :: Text
   , description :: Text
+  , acceptance_criteria :: Maybe Text
   , depends_on :: [DepContext]
   , blocks :: [DepContext]
   } deriving stock (Show, Eq, Generic)
@@ -62,10 +78,20 @@ data DepContext = DepContext
 -- | ToGVal instance for template rendering.
 instance ToGVal (Run SourcePos (Writer Text) Text) SessionStartContext where
   toGVal ctx = dict
-    [ "bead_id" ~> bead_id ctx
+    [ "role" ~> (T.toLower . T.pack . show $ ctx.role)
+    , "bead_id" ~> bead_id ctx
     , "branch" ~> branch ctx
     , "cwd" ~> cwd ctx
     , "bead" ~> bead ctx
+    , "dashboard" ~> dashboard ctx
+    ]
+
+-- | ToGVal instance for beads dashboard context.
+instance ToGVal (Run SourcePos (Writer Text) Text) BeadsDashboardContext where
+  toGVal db = dict
+    [ "ready" ~> db.ready
+    , "in_progress" ~> db.in_progress
+    , "blocked" ~> db.blocked
     ]
 
 -- | ToGVal instance for bead context.
@@ -80,6 +106,7 @@ instance ToGVal (Run SourcePos (Writer Text) Text) BeadContext where
     , "created" ~> bc.created
     , "updated" ~> bc.updated
     , "description" ~> bc.description
+    , "acceptance_criteria" ~> bc.acceptance_criteria
     , "depends_on" ~> bc.depends_on
     , "blocks" ~> bc.blocks
     ]

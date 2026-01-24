@@ -7,9 +7,7 @@ module Tidepool.Control.RoleConfig
 
 import Data.Text (Text)
 import qualified Data.Set as Set
-
-data Role = PM | TL | Dev
-  deriving (Show, Eq, Enum, Bounded)
+import Tidepool.Control.Protocol (Role(..))
 
 roleFromText :: Text -> Maybe Role
 roleFromText "pm" = Just PM

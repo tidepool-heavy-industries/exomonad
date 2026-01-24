@@ -267,20 +267,20 @@ instance ToJSON Runtime where
   toJSON Gemini = String "gemini"
 
 -- | The role of the agent (determines hook behavior and context).
-data Role = Dev | Tl | Pm
-  deriving stock (Show, Eq, Generic)
+data Role = Dev | TL | PM
+  deriving stock (Show, Eq, Generic, Enum, Bounded)
 
 instance FromJSON Role where
   parseJSON = withText "Role" $ \case
     "dev" -> pure Dev
-    "tl" -> pure Tl
-    "pm" -> pure Pm
+    "tl" -> pure TL
+    "pm" -> pure PM
     r -> fail $ "Unknown role: " <> show r
 
 instance ToJSON Role where
   toJSON Dev = String "dev"
-  toJSON Tl = String "tl"
-  toJSON Pm = String "pm"
+  toJSON TL = String "tl"
+  toJSON PM = String "pm"
 
 -- | Tool definition for MCP discovery (must match Rust ToolDefinition).
 data ToolDefinition = ToolDefinition

@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "mantle-agent hook session-start --runtime=gemini"
+            "command": "mantle-agent hook session-start --runtime=gemini --role=tl"
           }
         ]
       }
