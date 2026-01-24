@@ -10,4 +10,7 @@ AUTH_HEADER="${OPENOBSERVE_AUTH_HEADER:-$(echo -n 'admin@tidepool.local:tidepool
 RESULTS=$(curl -sf -H "Authorization: Basic ${AUTH_HEADER}" \
   -H "Content-Type: application/json" \
   -XPOST "${OPENOBSERVE_URL}/api/default/_search" \
-  -d "{\"query\": {\"sql\": \"SELECT DISTINCT attributes->>'session.id' as session_id, attributes->>'jsonl.file' as jsonl_file FROM traces WHERE ${QUERY}\\
+  -d "{\"query\": {\"sql\": \"SELECT DISTINCT attributes->>'session.id' as session_id, attributes->>'jsonl.file' as jsonl_file FROM traces WHERE ${QUERY}\"}}")
+
+# Output session IDs and file paths
+echo "$RESULTS" | jq -r '.hits[] | [.session_id, .jsonl_file] | @tsv'
