@@ -88,7 +88,7 @@ exportMCPTools logger = do
   logInfo logger $ "[MCP Discovery] Total: " <> T.pack (show (length allTools)) <> " tools discovered"
 
   -- Log tool names with entry points for verification
-  forM_ allTools $ \(MCPToolInfo name _desc _schema entryName) -> 
+  forM_ allTools $ \(MCPToolInfo name _desc _schema entryName _roles) -> 
     logDebug logger $ "[MCP Discovery]   " <> name <> " -> " <> entryName
 
   logDebug logger "[MCP Discovery] Converting to ToolDefinition format..."
@@ -96,7 +96,7 @@ exportMCPTools logger = do
 
 -- | Convert MCPToolInfo -> ToolDefinition.
 reifyToToolDef :: MCPToolInfo -> ToolDefinition
-reifyToToolDef (MCPToolInfo name desc schema _entryName) = ToolDefinition 
+reifyToToolDef (MCPToolInfo name desc schema _entryName _roles) = ToolDefinition 
   { tdName = name 
   , tdDescription = desc 
   , tdInputSchema = schema 

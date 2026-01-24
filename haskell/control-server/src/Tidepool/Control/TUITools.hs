@@ -42,6 +42,7 @@ import GHC.Generics (Generic)
 
 import Tidepool.Effect.TUI
 import Tidepool.Effect.Types (Return, returnValue)
+import Tidepool.Role (Role(..))
 import Tidepool.Graph.Generic (type (:-))
 import Tidepool.Graph.Generic.Core (LogicNode)
 import Tidepool.Graph.Types (type (:@), Input, UsesEffects, GraphEntries, GraphEntry(..))
@@ -113,7 +114,7 @@ newtype ConfirmActionGraph mode = ConfirmActionGraph
 
 -- | MCP tool entry point declaration for confirm_action.
 type instance GraphEntries ConfirmActionGraph =
-  '[ "confirm_action" ':~> '("caRun", ConfirmArgs, "Show a confirmation dialog to the user for a potentially destructive or important action") ]
+  '[ "confirm_action" ':~> '("caRun", ConfirmArgs, "Show a confirmation dialog to the user for a potentially destructive or important action", '[ 'Dev, 'TL, 'PM]) ]
 
 -- | Core logic for confirm_action.
 confirmActionLogic
@@ -184,7 +185,7 @@ newtype SelectOptionGraph mode = SelectOptionGraph
 
 -- | MCP tool entry point declaration for select_option.
 type instance GraphEntries SelectOptionGraph =
-  '[ "select_option" ':~> '("soRun", SelectArgs, "Ask the user to select from a list of predefined options, or provide a custom response") ]
+  '[ "select_option" ':~> '("soRun", SelectArgs, "Ask the user to select from a list of predefined options, or provide a custom response", '[ 'Dev, 'TL, 'PM]) ]
 
 -- | Core logic for select_option.
 selectOptionLogic
@@ -261,7 +262,7 @@ newtype RequestGuidanceGraph mode = RequestGuidanceGraph
 
 -- | MCP tool entry point declaration for request_guidance.
 type instance GraphEntries RequestGuidanceGraph =
-  '[ "request_guidance" ':~> '("rgRun", GuidanceArgs, "Ask the user for free-form guidance or to select from suggestions when the agent is stuck") ]
+  '[ "request_guidance" ':~> '("rgRun", GuidanceArgs, "Ask the user for free-form guidance or to select from suggestions when the agent is stuck", '[ 'Dev, 'TL, 'PM]) ]
 
 -- | Core logic for request_guidance.
 requestGuidanceLogic

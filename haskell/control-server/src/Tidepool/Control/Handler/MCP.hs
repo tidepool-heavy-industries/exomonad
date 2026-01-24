@@ -27,9 +27,11 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.ByteString.Lazy as LBS
 import Data.Maybe (fromMaybe)
+import qualified Data.Set as Set
 
 import Tidepool.Control.Logging (Logger, logInfo, logDebug, logError)
 import Tidepool.Control.Protocol
+import Tidepool.Control.RoleConfig
 import Tidepool.Control.Types (ServerConfig(..))
 import Tidepool.Control.TUITools
   ( confirmActionLogic, ConfirmArgs(..), ConfirmResult(..),
@@ -160,50 +162,59 @@ withMcpTracing logger config traceCtx reqId toolName args action = do
 handleMcpTool :: Logger -> ServerConfig -> TraceContext -> TUIState -> Text -> Text -> Value -> IO ControlResponse
 handleMcpTool logger config traceCtx tuiState reqId toolName args = 
   withMcpTracing logger config traceCtx reqId toolName args $ do
-    logInfo logger $ "[MCP:" <> reqId <> "] Dispatching: " <> toolName
+    let effectiveRole = fromMaybe config.defaultRole (config.role >>= roleFromText)
+    
+    if not (isToolAllowed effectiveRole toolName)
+      then do
+        logError logger $ "[MCP:" <> reqId <> "] Tool '" <> toolName <> "' not available for role " <> T.pack (show effectiveRole)
+        pure $ mcpToolError reqId PermissionDenied $
+          "Tool '" <> toolName <> "' not available for role " <> T.pack (show effectiveRole) <>
+          ". Available tools: " <> T.intercalate ", " (Set.toList $ fromMaybe Set.empty $ roleTools effectiveRole)
+      else do
+        logInfo logger $ "[MCP:" <> reqId <> "] Dispatching: " <> toolName
 
-    let currentRole = fromMaybe "unknown" config.role
+        let currentRole = T.toLower $ T.pack $ show effectiveRole
 
-    case toolName of
-      -- Tier 1: Deterministic LSP tools (graph-based)
-      -- NOTE: LSP-backed tools (find_callers, find_callees, show_fields,
-      --       show_constructors) have been removed from this dispatcher.
-      --       If still exported elsewhere, they will now be reported via
-      --       the generic "unknown tool" handler below.
+        case toolName of
+          -- Tier 1: Deterministic LSP tools (graph-based)
+          -- NOTE: LSP-backed tools (find_callers, find_callees, show_fields,
+          --       show_constructors) have been removed from this dispatcher.
+          --       If still exported elsewhere, they will now be reported via
+          --       the generic "unknown tool" handler below.
 
-      -- TUI-interactive tools
-      "confirm_action" -> handleConfirmActionTool logger tuiState reqId args
-      "select_option" -> handleSelectOptionTool logger tuiState reqId args
-      "request_guidance" -> handleRequestGuidanceTool logger tuiState reqId args
-      "register_feedback" -> handleRegisterFeedbackTool logger reqId args
+          -- TUI-interactive tools
+          "confirm_action" -> handleConfirmActionTool logger tuiState reqId args
+          "select_option" -> handleSelectOptionTool logger tuiState reqId args
+          "request_guidance" -> handleRequestGuidanceTool logger tuiState reqId args
+          "register_feedback" -> handleRegisterFeedbackTool logger reqId args
 
-      -- Tier 2: LLM-enhanced tools (graph-based)
-      -- DISABLED: teach-graph spawns recursive LLM calls, expensive during testing
-      -- Re-enable once Tier 1 tools are stable
-      -- "teach-graph" -> handleTeachGraphTool logger maybeTuiHandle reqId args
+          -- Tier 2: LLM-enhanced tools (graph-based)
+          -- DISABLED: teach-graph spawns recursive LLM calls, expensive during testing
+          -- Re-enable once Tier 1 tools are stable
+          -- "teach-graph" -> handleTeachGraphTool logger maybeTuiHandle reqId args
 
-      -- Tier 3: External Orchestration tools (Exo)
-      -- Note: exo_complete and pre_commit_check have been folded into the Stop hook
-      "exo_status" -> handleExoStatusTool logger reqId args
-      "spawn_agents" -> handleSpawnAgentsTool logger reqId args
-      "file_pr" -> handleFilePRTool logger reqId args
-      "pm_approve_expansion" -> handlePmApproveExpansionTool logger reqId args
-      "pm_prioritize" -> handlePmPrioritizeTool logger reqId args
-      "pm_status" -> handlePmStatusTool logger reqId args
-      "pm_propose" -> handlePMProposeTool logger reqId args
-      "pm_review_dag" -> handlePmReviewDagTool logger reqId args
+          -- Tier 3: External Orchestration tools (Exo)
+          -- Note: exo_complete and pre_commit_check have been folded into the Stop hook
+          "exo_status" -> handleExoStatusTool logger reqId args
+          "spawn_agents" -> handleSpawnAgentsTool logger reqId args
+          "file_pr" -> handleFilePRTool logger reqId args
+          "pm_approve_expansion" -> handlePmApproveExpansionTool logger reqId args
+          "pm_prioritize" -> handlePmPrioritizeTool logger reqId args
+          "pm_status" -> handlePmStatusTool logger reqId args
+          "pm_propose" -> handlePMProposeTool logger reqId args
+          "pm_review_dag" -> handlePmReviewDagTool logger reqId args
 
-      -- Mailbox tools
-      "send_message" -> handleSendMessageTool logger currentRole reqId args
-      "check_inbox" -> handleCheckInboxTool logger currentRole reqId args
-      "read_message" -> handleReadMessageTool logger reqId args
-      "mark_read" -> handleMarkReadTool logger reqId args
+          -- Mailbox tools
+          "send_message" -> handleSendMessageTool logger currentRole reqId args
+          "check_inbox" -> handleCheckInboxTool logger currentRole reqId args
+          "read_message" -> handleReadMessageTool logger reqId args
+          "mark_read" -> handleMarkReadTool logger reqId args
 
-      _ -> do
-        logError logger $ "  (unknown tool)"
-        pure $ mcpToolError reqId NotFound $
-          "Tool not found: " <> toolName <>
-          ". Available tools: exo_status, spawn_agents, file_pr, pm_approve_expansion, pm_prioritize, pm_propose"
+          _ -> do
+            logError logger $ "  (unknown tool)"
+            pure $ mcpToolError reqId NotFound $
+              "Tool not found: " <> toolName <>
+              ". Available tools: exo_status, spawn_agents, file_pr, pm_approve_expansion, pm_prioritize, pm_propose"
 
 -- | Handle the pm_prioritize tool.
 --

@@ -1,7 +1,7 @@
 cabal-version:      3.0
 name:               tidepool-control-server
 version:            0.1.0.0
-synopsis:           Unix socket control server for Claude Code++ hooks and MCP
+synopsis:           Unix socket control server for Claude Code++ integration. Receives hook events from mantle-agent and direct HTTP MCP requests from Claude Code via Unix socket. Provides 7 MCP tools organized in tiers: LSP-only (Tier 1), LLM-enhanced (Tier 2), external orchestration (Tier 3), TUI-interactive (Tier 4), and mailbox communication (Tier 5).
 description:        Receives hook events and MCP tool calls from mantle-agent
                     via NDJSON over Unix socket. Routes to effect handlers.
                     Includes semantic-scout for code exploration via LSP.
@@ -404,103 +404,56 @@ test-suite ssh-exec-test
         TypeApplications
 
 test-suite circuit-breaker-test
-
     import:           warnings
-
     type:             exitcode-stdio-1.0
-
     main-is:          CircuitBreakerSpec.hs
-
     build-depends:
-
         base >= 4.17 && < 5,
-
         tidepool-control-server,
-
         text >= 2.0 && < 3,
-
         stm >= 2.5 && < 3,
-
         time >= 1.9 && < 2,
-
         containers,
-
         tasty,
-
         tasty-hunit
-
     hs-source-dirs:   test
-
     default-language: GHC2024
-
     default-extensions:
-
         OverloadedStrings
-
         TypeApplications
 
-
-
-test-suite session-start-test
-
-
-
+test-suite role-config-test
     import:           warnings
-
-
-
     type:             exitcode-stdio-1.0
-
-
-
-    main-is:          SessionStartSpec.hs
-
-
-
+    main-is:          RoleConfigSpec.hs
     build-depends:
-
-
-
         base >= 4.17 && < 5,
-
-
-
         tidepool-control-server,
-
-
-
         tidepool-core,
-
-
-
-        tidepool-bd-interpreter,
-
-
-
         text >= 2.0 && < 3,
-
-
-
-        freer-simple,
-
-
-
+        containers,
         tasty,
-
-
-
         tasty-hunit
-
-
-
-
-
     hs-source-dirs:   test
-
     default-language: GHC2024
-
     default-extensions:
-
         OverloadedStrings
 
+test-suite session-start-test
+    import:           warnings
+    type:             exitcode-stdio-1.0
+    main-is:          SessionStartSpec.hs
+    build-depends:
+        base >= 4.17 && < 5,
+        tidepool-control-server,
+        tidepool-core,
+        tidepool-bd-interpreter,
+        text >= 2.0 && < 3,
+        freer-simple,
+        tasty,
+        tasty-hunit
+    hs-source-dirs:   test
+    default-language: GHC2024
+    default-extensions:
+        OverloadedStrings
         TypeApplications

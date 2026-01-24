@@ -29,11 +29,12 @@ import qualified Data.Text as T
 import GHC.Generics (Generic)
 
 import Tidepool.Effects.BD (BD, BeadType(..), CreateBeadInput(..), defaultCreateInput, createBead)
+import Tidepool.Role (Role(..))
 import Tidepool.Control.PMTools (labelNeedsTLReview)
 import Tidepool.Graph.Generic (AsHandler, type (:-))
 import Tidepool.Graph.Generic.Core (EntryNode, ExitNode, LogicNode)
 import Tidepool.Graph.Goto (Goto, GotoChoice, To, gotoExit)
-import Tidepool.Graph.Types (type (:@), Input, UsesEffects, Exit, MCPExport, MCPToolDef)
+import Tidepool.Graph.Types (type (:@), Input, UsesEffects, Exit, MCPExport, MCPToolDef, MCPRoleHint)
 import Tidepool.Schema (HasJSONSchema(..), objectSchema, arraySchema, emptySchema, SchemaType(..), describeField)
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -100,6 +101,7 @@ data PMProposeGraph mode = PMProposeGraph
   { ppEntry :: mode :- EntryNode PMProposeArgs
       :@ MCPExport
       :@ MCPToolDef '("pm_propose", "Propose a new bead with intent-level details for TL review.")
+      :@ MCPRoleHint 'PM
 
   , ppRun :: mode :- LogicNode
       :@ Input PMProposeArgs

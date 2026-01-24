@@ -8,6 +8,7 @@ import Data.Text (Text)
 
 import Tidepool.Observability.Types (ObservabilityConfig)
 import Tidepool.Control.Hook.Policy (HookPolicy, defaultPolicy)
+import Tidepool.Control.RoleConfig (Role(..))
 
 
 
@@ -22,6 +23,10 @@ data ServerConfig = ServerConfig
   , role       :: Maybe Text
 
     -- ^ Current agent role (e.g., "pm", "tl")
+
+  , defaultRole :: Role
+
+    -- ^ Default role for non-role-prefixed endpoints
 
   , noTui      :: Bool
 
@@ -50,6 +55,8 @@ defaultConfig = ServerConfig
   { projectDir = "."
 
   , role       = Nothing
+
+  , defaultRole = Dev
 
   , noTui      = False
 

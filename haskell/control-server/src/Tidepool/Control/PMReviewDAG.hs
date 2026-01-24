@@ -33,10 +33,11 @@ import Data.Ord (comparing)
 
 import Tidepool.Effects.BD (BD, listBeads, defaultListBeadsInput, BeadInfo(..), BeadStatus(..), DependencyInfo(..), DependencyType(..))
 import Tidepool.Effect.Types (Time, getCurrentTime)
+import Tidepool.Role (Role(..))
 import Tidepool.Graph.Generic (AsHandler, type (:-))
 import Tidepool.Graph.Generic.Core (EntryNode, LogicNode, ExitNode)
 import Tidepool.Graph.Goto (Goto, GotoChoice, To, gotoExit)
-import Tidepool.Graph.Types (type (:@), Input, UsesEffects, Exit, MCPExport, MCPToolDef)
+import Tidepool.Graph.Types (type (:@), Input, UsesEffects, Exit, MCPExport, MCPToolDef, MCPRoleHint)
 import Tidepool.Schema (HasJSONSchema(..), objectSchema, describeField, emptySchema, SchemaType(..))
 
 -- | Arguments for pm_review_dag tool.
@@ -113,6 +114,7 @@ data PmReviewDagGraph mode = PmReviewDagGraph
   { prdEntry :: mode :- EntryNode PmReviewDagArgs
       :@ MCPExport
       :@ MCPToolDef ('("pm_review_dag", "Analyze the bead DAG for strategic planning, identifying critical paths and priority inversions."))
+      :@ MCPRoleHint 'PM
 
   , prdRun :: mode :- LogicNode
       :@ Input PmReviewDagArgs

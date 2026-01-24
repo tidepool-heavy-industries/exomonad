@@ -79,6 +79,7 @@ module Tidepool.Graph.Types
     -- * MCP Export Annotations
   , MCPExport
   , MCPToolDef
+  , MCPRoleHint
 
     -- * Graph Entry Point Declaration (new DSL)
   , GraphEntry(..)
@@ -98,6 +99,7 @@ import Data.Kind (Type)
 import Data.Text (Text)
 import GHC.TypeLits (Symbol)
 
+import Tidepool.Role (Role(..))
 import Tidepool.Effect.Gemini (GeminiModel(..))
 
 -- | Marks an LLM node as executed via Gemini CLI subprocess.
@@ -1126,6 +1128,17 @@ data MCPExport
 type MCPToolDef :: (Symbol, Symbol) -> Type
 data MCPToolDef nameAndDesc
 
+-- | Document which role is allowed to access an MCP tool.
+--
+-- @
+-- :@ MCPRoleHint 'TL
+-- @
+--
+-- This is used for documentation and potentially compile-time verification
+-- of role-based tool availability.
+type MCPRoleHint :: Role -> Type
+data MCPRoleHint r
+
 -- ════════════════════════════════════════════════════════════════════════════
 -- GRAPH ENTRY POINT DECLARATION (Simplified DSL)
 -- ════════════════════════════════════════════════════════════════════════════
@@ -1147,8 +1160,8 @@ data MCPToolDef nameAndDesc
 -- graphs. The graph becomes just the computation nodes, and external
 -- entry points are declared separately.
 data GraphEntry
-  = Symbol :~> (Symbol, Type, Symbol)
-  -- ^ @externalName ':~>' '(nodeField, inputType, description)@
+  = Symbol :~> (Symbol, Type, Symbol, [Role])
+  -- ^ @externalName ':~>' '(nodeField, inputType, description, roles)@
 
 -- | Operator for constructing 'GraphEntry' values at the type level.
 --
