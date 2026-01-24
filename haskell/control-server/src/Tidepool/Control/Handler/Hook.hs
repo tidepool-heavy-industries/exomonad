@@ -92,7 +92,7 @@ handleSessionStart input = do
     $ runLog Debug
     $ runBDIO defaultBDConfig
     $ case mContainer of
-         Just container -> runSshExec (T.pack sshProxyUrl) $ runGitViaSsh (T.pack container) $ sessionStartLogic input.cwd
+         Just container -> runSshExec (T.pack sshProxyUrl) $ runGitViaSsh (T.pack container) "." $ sessionStartLogic input.cwd
          Nothing -> runGitIO $ sessionStartLogic input.cwd
 
   case result of
@@ -150,8 +150,8 @@ handleStop input _runtime = do
         case mContainer of
           Just container ->
             runSshExec (T.pack sshProxyUrl) $
-            runGitViaSsh (T.pack container) $
-            runJustfileViaSsh (T.pack container) $
+            runGitViaSsh (T.pack container) "." $
+            runJustfileViaSsh (T.pack container) "." $
             stopHookLogic repoName runPreCommit
           Nothing ->
             runGitIO $
@@ -215,7 +215,7 @@ autoFocusOnSubagentStop = do
       result <- try $ runM
         $ runZellijIO
         $ case mContainer of
-             Just container -> runSshExec (T.pack sshProxyUrl) $ runGitViaSsh (T.pack container) autoFocusLogic
+             Just container -> runSshExec (T.pack sshProxyUrl) $ runGitViaSsh (T.pack container) "." autoFocusLogic
              Nothing -> runGitIO autoFocusLogic
 
       case result of

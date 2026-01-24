@@ -122,6 +122,7 @@ library
         tidepool-observability-interpreter,
         -- HTTP for FunctionGemma
         http-conduit,
+        http-client,
         regex-tdfa,
         vector,
         -- Code sampling

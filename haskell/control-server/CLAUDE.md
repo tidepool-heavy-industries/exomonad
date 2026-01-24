@@ -112,6 +112,11 @@ The control server supports executing commands inside agent containers via an `s
 
 Interpreters are automatically selected in `Handler/Hook.hs` based on the presence of `TIDEPOOL_CONTAINER`.
 
+### Limitations (MVP)
+
+- **Cabal Test Output:** Test failures are not yet parsed into structured `TestFailure` objects when running via SSH. Only raw output is returned.
+- **SSH Connectivity:** Requires a running `ssh-proxy` sidecar. Connection failures are caught and returned as errors, but retry logic is minimal.
+
 ### Hook Flow (PreToolUse Example)
 
 ```

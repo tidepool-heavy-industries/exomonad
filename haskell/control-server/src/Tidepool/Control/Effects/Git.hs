@@ -17,20 +17,21 @@ import Tidepool.Control.Effects.SshExec (SshExec, ExecRequest(..), ExecResult(..
 import Tidepool.Effects.Git (Git(..), WorktreeInfo(..))
 
 -- | Interpreter: uses SshExec to run git commands
-runGitViaSsh :: Member SshExec effs => Text -> Eff (Git ': effs) a -> Eff effs a
-runGitViaSsh container = interpret $ \case
+-- Takes a container name and a working directory (relative to container root).
+runGitViaSsh :: Member SshExec effs => Text -> FilePath -> Eff (Git ': effs) a -> Eff effs a
+runGitViaSsh container workDir = interpret $ \case
   GetWorktreeInfo -> do
     -- This is a bit complex to implement perfectly via SSH without more logic,
     -- but we can try to get the basic info.
-    mPath <- gitCommand container ["rev-parse", "--show-toplevel"]
+    mPath <- gitCommand container workDir ["rev-parse", "--show-toplevel"]
     case mPath of
       Nothing -> pure Nothing
       Just path -> do
-        mBranch <- gitCommand container ["branch", "--show-current"]
+        mBranch <- gitCommand container workDir ["branch", "--show-current"]
         let branch = maybe "HEAD" T.strip mBranch
         
         -- Simplified worktree detection
-        mGitDir <- gitCommand container ["rev-parse", "--git-dir"]
+        mGitDir <- gitCommand container workDir ["rev-parse", "--git-dir"]
         let inWorktree = maybe False ("worktrees" `T.isInfixOf`) mGitDir
         
         pure $ Just WorktreeInfo
@@ -46,7 +47,7 @@ runGitViaSsh container = interpret $ \case
       { erContainer = container
       , erCommand = "git"
       , erArgs = ["status", "--porcelain"]
-      , erWorkingDir = "."
+      , erWorkingDir = workDir
       , erEnv = []
       , erTimeout = 30
       }
@@ -59,7 +60,7 @@ runGitViaSsh container = interpret $ \case
       { erContainer = container
       , erCommand = "git"
       , erArgs = ["log", "--oneline", "-" <> T.pack (show n), "--format=%s"]
-      , erWorkingDir = "."
+      , erWorkingDir = workDir
       , erEnv = []
       , erTimeout = 30
       }
@@ -68,7 +69,7 @@ runGitViaSsh container = interpret $ \case
       else []
 
   GetCurrentBranch -> do
-    mBranch <- gitCommand container ["branch", "--show-current"]
+    mBranch <- gitCommand container workDir ["branch", "--show-current"]
     pure $ maybe "HEAD" T.strip mBranch
 
   GetCommitsAhead ref -> do
@@ -76,7 +77,7 @@ runGitViaSsh container = interpret $ \case
       { erContainer = container
       , erCommand = "git"
       , erArgs = ["rev-list", "--count", ref <> "..HEAD"]
-      , erWorkingDir = "."
+      , erWorkingDir = workDir
       , erEnv = []
       , erTimeout = 30
       }
@@ -87,13 +88,13 @@ runGitViaSsh container = interpret $ \case
       else 0
 
 -- | Helper to run a git command via SshExec
-gitCommand :: Member SshExec effs => Text -> [Text] -> Eff effs (Maybe Text)
-gitCommand container args = do
+gitCommand :: Member SshExec effs => Text -> FilePath -> [Text] -> Eff effs (Maybe Text)
+gitCommand container wd args = do
   result <- execCommand $ ExecRequest
     { erContainer = container
     , erCommand = "git"
     , erArgs = args
-    , erWorkingDir = "."
+    , erWorkingDir = wd
     , erEnv = []
     , erTimeout = 30
     }

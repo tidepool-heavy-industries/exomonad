@@ -14,11 +14,13 @@ module Tidepool.Control.Effects.SshExec
   , runSshExec
   ) where
 
+import Control.Exception (try)
 import Control.Monad.Freer (Eff, interpret, send, Member, LastMember, sendM)
 import Data.Aeson (FromJSON, ToJSON)
-import Data.Text (Text, unpack)
+import Data.Text (Text, unpack, pack)
 import GHC.Generics (Generic)
-import Network.HTTP.Simple (httpJSON, setRequestBodyJSON, setRequestMethod, parseRequest_, getResponseBody)
+import Network.HTTP.Client (HttpException, responseTimeoutMicro)
+import Network.HTTP.Simple (httpJSON, setRequestBodyJSON, setRequestMethod, parseRequest_, getResponseBody, setRequestResponseTimeout)
 
 -- | Low-level SSH command execution effect
 data SshExec a where
@@ -50,8 +52,17 @@ runSshExec :: LastMember IO effs => Text -> Eff (SshExec ': effs) a -> Eff effs 
 runSshExec sshProxyUrl = interpret $ \case
   ExecCommand req -> sendM $ do
     let url = unpack $ sshProxyUrl <> "/exec"
-    let request = setRequestMethod "POST"
+    let timeoutMicros = req.erTimeout * 1000000 + 5000000 -- Command timeout + 5s buffer
+    let request = setRequestResponseTimeout (responseTimeoutMicro timeoutMicros)
+                $ setRequestMethod "POST"
                 $ setRequestBodyJSON req
                 $ parseRequest_ url
-    response <- httpJSON request
-    pure $ getResponseBody response
+    
+    result <- try (httpJSON request)
+    case result of
+      Left (e :: HttpException) -> pure $ ExecResult
+        { exExitCode = -1
+        , exStdout = ""
+        , exStderr = "SSH Proxy connection failed: " <> pack (show e)
+        }
+      Right response -> pure $ getResponseBody response
