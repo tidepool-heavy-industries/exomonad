@@ -1,5 +1,8 @@
 // Zellij configuration for Tidepool Orchestrator
 
+// Default layout for new sessions (used by web interface)
+default_layout "default"
+
 // Web Server Configuration
 // Zellij will auto-start the web server with these settings
 web_server true
