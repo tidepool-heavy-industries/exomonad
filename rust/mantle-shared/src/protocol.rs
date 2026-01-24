@@ -23,8 +23,9 @@ use serde_json::Value;
 // ============================================================================
 
 /// The runtime environment for the agent.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ValueEnum)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ValueEnum, strum::Display)]
 #[serde(rename_all = "lowercase")]
+#[strum(serialize_all = "lowercase")]
 pub enum Runtime {
     /// Anthropic's Claude Code CLI.
     Claude,
@@ -39,8 +40,9 @@ impl Default for Runtime {
 }
 
 /// The role of the agent (determines hook behavior and context).
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ValueEnum, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ValueEnum, Default, strum::Display)]
 #[serde(rename_all = "lowercase")]
+#[strum(serialize_all = "lowercase")]
 pub enum Role {
     /// Developer/subagent role - focused on implementing tasks.
     #[default]
@@ -300,10 +302,17 @@ pub enum ControlMessage {
         tool_name: String,
         /// Tool arguments.
         arguments: Value,
+        /// Optional role for routing (not serialized).
+        #[serde(skip)]
+        role: Option<Role>,
     },
 
     /// Request list of available MCP tools from control server.
-    ToolsListRequest,
+    ToolsListRequest {
+        /// Optional role for routing (not serialized).
+        #[serde(skip)]
+        role: Option<Role>,
+    },
 
     /// Health check ping.
     Ping,
