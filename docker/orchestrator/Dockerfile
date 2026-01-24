@@ -30,7 +30,7 @@ RUN sed -i '/package zlib/,+2d' cabal.project
 RUN --mount=type=cache,target=/root/.cabal/store \
     --mount=type=cache,target=/build/dist-newstyle \
     cabal update && \
-    cabal build tidepool-control-server -j --O1
+    cabal build tidepool-control-server -j --ghc-options=-O1
 
 # Extract the binary using cabal list-bin
 RUN cp $(cabal list-bin tidepool-control-server) /usr/local/bin/tidepool-control-server
