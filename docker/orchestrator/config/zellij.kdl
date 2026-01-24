@@ -11,8 +11,10 @@ on_force_close "quit"
 
 // Keybindings
 keybinds {
-    unbind "Ctrl q"
-    bind "Ctrl q" { Quit; }
+    shared_except "locked" {
+        unbind "Ctrl q"
+        bind "Ctrl q" { Quit; }
+    }
 }
 
 // Theme
