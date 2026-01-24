@@ -34,6 +34,7 @@ library
         Tidepool.Control.TUIInterpreter
         Tidepool.Control.Runtime.Paths
         Tidepool.Control.Runtime.ProcessCompose
+        Tidepool.Control.Hook.Policy
         Tidepool.Control.Handler.Hook
         Tidepool.Control.Handler.MCP
         -- Hook implementations
@@ -309,6 +310,23 @@ test-suite parser-test
         base >= 4.17 && < 5,
         tidepool-control-server,
         text >= 2.0 && < 3,
+        tasty,
+        tasty-hunit
+    hs-source-dirs:   test
+    default-language: GHC2024
+    default-extensions:
+        OverloadedStrings
+
+test-suite hook-policy-test
+    import:           warnings
+    type:             exitcode-stdio-1.0
+    main-is:          HookPolicySpec.hs
+    build-depends:
+        base >= 4.17 && < 5,
+        tidepool-control-server,
+        text >= 2.0 && < 3,
+        aeson >= 2.1 && < 3,
+        bytestring >= 0.11 && < 1,
         tasty,
         tasty-hunit
     hs-source-dirs:   test

@@ -17,7 +17,7 @@ import Tidepool.Observability.Types (TraceContext)
 -- | Route a control message to the appropriate handler.
 handleMessage :: Logger -> ServerConfig -> TraceContext -> TUIState -> ControlMessage -> IO ControlResponse
 handleMessage logger config traceCtx tuiState = \case
-  HookEvent input r rl -> handleHook input r rl
+  HookEvent input r rl -> handleHook config input r rl
   McpToolCall reqId name args ->
     handleMcpTool logger config traceCtx tuiState reqId name args
   ToolsListRequest -> handleToolsList logger
