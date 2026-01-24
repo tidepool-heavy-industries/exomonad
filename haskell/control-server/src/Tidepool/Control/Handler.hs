@@ -9,15 +9,16 @@ import Tidepool.Control.Logging (Logger, logInfo)
 import Tidepool.Control.Protocol
 import Tidepool.Control.Types (ServerConfig(..))
 import Tidepool.Control.TUIState (TUIState)
+import Tidepool.Control.Hook.CircuitBreaker (CircuitBreakerMap)
 import Tidepool.Control.Export (exportMCPTools)
 import Tidepool.Control.Handler.Hook (handleHook)
 import Tidepool.Control.Handler.MCP (handleMcpTool)
 import Tidepool.Observability.Types (TraceContext)
 
 -- | Route a control message to the appropriate handler.
-handleMessage :: Logger -> ServerConfig -> TraceContext -> TUIState -> ControlMessage -> IO ControlResponse
-handleMessage logger config traceCtx tuiState = \case
-  HookEvent input r rl -> handleHook config input r rl
+handleMessage :: Logger -> ServerConfig -> TraceContext -> TUIState -> CircuitBreakerMap -> ControlMessage -> IO ControlResponse
+handleMessage logger config traceCtx tuiState cbMap = \case
+  HookEvent input r rl -> handleHook config input r rl cbMap
   McpToolCall reqId name args ->
     handleMcpTool logger config traceCtx tuiState reqId name args
   ToolsListRequest -> handleToolsList logger
