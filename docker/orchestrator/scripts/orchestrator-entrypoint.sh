@@ -97,7 +97,7 @@ openssl req -x509 -newkey rsa:4096 -nodes \
 chmod 644 /etc/ssl/zellij/key.pem /etc/ssl/zellij/cert.pem
 
 echo "🌐 Starting Zellij web server on 0.0.0.0:8080"
-echo "📋 Creating session 'orchestrator' in daemon mode (web-only access)"
+echo "📋 Creating session 'orchestrator' in daemon mode (headless server)"
 echo "📋 After startup, get login token with: docker exec tidepool-orchestrator gosu user zellij web --create-token"
 echo "🌍 Then open: https://nixos:8080/orchestrator"
 
@@ -105,14 +105,19 @@ echo "🌍 Then open: https://nixos:8080/orchestrator"
 export HOME=/home/user
 export SHELL=/bin/bash
 
-# Start Zellij with redirected stdin to avoid TTY conflicts
-# Use setsid to detach from controlling terminal
-setsid gosu user zellij --config /etc/tidepool/zellij/config.kdl \
+# Cleanup old sockets to prevent "Address in use" or stale session errors
+rm -f /tmp/zellij-*.sock
+
+# Start Zellij in daemon mode (headless server)
+# This spawns the server and web server WITHOUT a local TUI client
+# The --daemonize flag keeps the server running in background
+# No TTY required - web client is the only input source
+gosu user zellij \
+  --config /etc/tidepool/zellij/config.kdl \
   --layout /etc/tidepool/zellij/layouts/default.kdl \
-  attach --create orchestrator </dev/null &
+  options \
+  --session-name orchestrator \
+  --daemonize true
 
-# Wait for Zellij and web server to start
-sleep 3
-
-# Keep container alive
+# Keep container alive (Zellij server runs in background)
 exec tail -f /dev/null
