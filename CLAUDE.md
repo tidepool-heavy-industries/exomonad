@@ -317,12 +317,19 @@ The orchestrator's middle pane runs Claude Code CLI with full MCP and hook integ
 - MCP tools from control-server (`find_callers`, `show_fields`, `show_constructors`, `teach-graph`, `confirm_action`, `select_option`, `request_guidance`)
 - PreToolUse hooks via mantle-agent (tool call interception)
 - Working directory: `/worktrees` (project root, bind-mounted from host)
+- **SSH Access**: Agent containers accept SSH connections from the orchestrator for remote command execution.
+
+**Agent SSH Setup:**
+- **Pre-build Requirement**: Before building Docker images, run `./scripts/docker-prebuild.sh` (or `just docker-prebuild`) to generate the necessary SSH keypair.
+- **Security**: SSH is restricted to the internal Docker network. Root login is enabled via Ed25519 public key authentication only (no passwords).
+- **Testing**: Use `just test-ssh` to verify connectivity between the orchestrator and an agent container.
 
 **Basic workflow:**
-1. Start orchestrator: `docker compose up -d orchestrator`
-2. Generate token: `docker exec tidepool-orchestrator zellij web --create-token`
-3. Open browser: `https://nixos:8080/orchestrator` (or `https://localhost:8080/orchestrator`)
-4. Middle pane shows Claude Code prompt
+1. Run pre-build: `./scripts/docker-prebuild.sh`
+2. Start orchestrator: `docker compose up -d orchestrator`
+3. Generate token: `docker exec tidepool-orchestrator zellij web --create-token`
+4. Open browser: `https://nixos:8080/orchestrator` (or `https://localhost:8080/orchestrator`)
+5. Middle pane shows Claude Code prompt
 
 **Testing MCP connection:**
 ```

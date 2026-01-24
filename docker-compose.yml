@@ -87,6 +87,17 @@ services:
       - ${HOME}/.claude/settings.json:/mnt/secrets/settings.json:ro
     command: ["cabal", "repl", "tidepool-control-server"]
 
+  agent-1:
+    build:
+      context: .
+      dockerfile: docker/claude-agent/Dockerfile
+    hostname: agent-1
+    networks:
+      - tidepool-internal
+    depends_on:
+      - orchestrator
+    command: ["sleep", "infinity"]
+
 volumes:
   tidepool-sockets:
     name: tidepool-sockets
