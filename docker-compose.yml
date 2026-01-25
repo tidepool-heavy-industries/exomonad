@@ -7,6 +7,13 @@ services:
       dockerfile: docker/orchestrator/Dockerfile
       target: control-server
     container_name: tidepool-control-server
+    # Memory limits prevent OOM kills that cause garbled terminals
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 512M
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - TIDEPOOL_CONTROL_SOCKET=/sockets/control.sock
@@ -67,6 +74,14 @@ services:
       dockerfile: docker/orchestrator/Dockerfile
       target: orchestrator
     container_name: tidepool-orchestrator
+    # Memory limits prevent OOM kills during Zellij resize/scroll operations
+    # Zellij maintains scrollback buffers per pane (reduced to 2000 lines in config)
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 1G
     depends_on:
       control-server:
         condition: service_healthy

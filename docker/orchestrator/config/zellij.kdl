@@ -3,6 +3,10 @@
 // Tell Zellij where to find custom layouts
 layout_dir "/etc/tidepool/zellij/layouts"
 
+// Reduce scrollback buffer to prevent OOM (default is 10000 lines per pane)
+// With multiple panes, this can consume significant RAM during resize/scroll
+scroll_buffer_size 2000
+
 // Default layout for new sessions
 default_layout "exomonad"
 
