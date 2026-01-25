@@ -17,81 +17,23 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /build
 
 # ============================================================================
-# CACHE OPTIMIZATION: Copy dependency manifests BEFORE source code
-# This allows Docker to cache the dependency fetch layer separately
+# CACHE OPTIMIZATION: BuildKit cache mounts for Hackage dependencies
+# Note: --only-dependencies doesn't work with monorepos (all local packages
+# need source). Instead we rely on cache mounts to speed up rebuilds.
 # ============================================================================
 
-# 1. Copy cabal.project first (defines package layout)
+# Copy all Haskell source
 COPY cabal.project ./
-
-# 2. Remove Nix-specific zlib configuration BEFORE fetching deps
-# The hardcoded /nix/store paths will fail in Debian.
-RUN sed -i '/package zlib/,+2d' cabal.project
-
-# 3. Copy all .cabal files (dependency manifests only, not source)
-# These rarely change compared to source code
-
-# Vendored packages need FULL source (they're local packages, not Hackage deps)
-COPY haskell/vendor/ ./haskell/vendor/
-
-# Core DSL
-COPY haskell/dsl/core/tidepool-core.cabal haskell/dsl/core/
-COPY haskell/dsl/teaching/tidepool-teaching.cabal haskell/dsl/teaching/
-
-# Runtime
-COPY haskell/runtime/wasm/tidepool-wasm.cabal haskell/runtime/wasm/
-COPY haskell/runtime/actor/tidepool-actor.cabal haskell/runtime/actor/
-COPY haskell/platform/tidepool-platform.cabal haskell/platform/
-
-# Effect interpreters
-COPY haskell/effects/llm-interpreter/tidepool-llm-interpreter.cabal haskell/effects/llm-interpreter/
-COPY haskell/effects/bd-interpreter/tidepool-bd-interpreter.cabal haskell/effects/bd-interpreter/
-COPY haskell/effects/env-interpreter/tidepool-env-interpreter.cabal haskell/effects/env-interpreter/
-COPY haskell/effects/habitica-interpreter/tidepool-habitica-interpreter.cabal haskell/effects/habitica-interpreter/
-COPY haskell/effects/ui-interpreter/tidepool-ui-interpreter.cabal haskell/effects/ui-interpreter/
-COPY haskell/effects/observability-interpreter/tidepool-observability-interpreter.cabal haskell/effects/observability-interpreter/
-COPY haskell/effects/lsp-interpreter/tidepool-lsp-interpreter.cabal haskell/effects/lsp-interpreter/
-COPY haskell/effects/ghci-interpreter/tidepool-ghci-interpreter.cabal haskell/effects/ghci-interpreter/
-COPY haskell/effects/github-interpreter/tidepool-github-interpreter.cabal haskell/effects/github-interpreter/
-COPY haskell/effects/worktree-interpreter/tidepool-worktree-interpreter.cabal haskell/effects/worktree-interpreter/
-COPY haskell/effects/cabal-interpreter/tidepool-cabal-interpreter.cabal haskell/effects/cabal-interpreter/
-COPY haskell/effects/justfile-interpreter/tidepool-justfile-interpreter.cabal haskell/effects/justfile-interpreter/
-COPY haskell/effects/devlog-interpreter/tidepool-devlog-interpreter.cabal haskell/effects/devlog-interpreter/
-COPY haskell/effects/gemini-interpreter/tidepool-gemini-interpreter.cabal haskell/effects/gemini-interpreter/
-COPY haskell/effects/filesystem-interpreter/tidepool-filesystem-interpreter.cabal haskell/effects/filesystem-interpreter/
-COPY haskell/effects/zellij-interpreter/tidepool-zellij-interpreter.cabal haskell/effects/zellij-interpreter/
-
-# Effect types (standalone)
-COPY haskell/effects/habitica/tidepool-habitica.cabal haskell/effects/habitica/
-
-# Protocol
-COPY haskell/protocol/wire-types/tidepool-wire-types.cabal haskell/protocol/wire-types/
-COPY haskell/protocol/generated-ts/tidepool-generated-ts.cabal haskell/protocol/generated-ts/
-
-# Native server
-COPY haskell/native-server/tidepool-native-server.cabal haskell/native-server/
-
-# Control server (the target we're building)
-COPY haskell/control-server/tidepool-control-server.cabal haskell/control-server/
-
-# Tools
-COPY haskell/tools/sleeptime/tidepool-sleeptime-logs.cabal haskell/tools/sleeptime/
-COPY haskell/tools/training-generator/tidepool-training-generator.cabal haskell/tools/training-generator/
-
-# 4. Fetch dependencies only (cached unless .cabal files change)
-# This is the expensive step - separating it from source changes saves rebuild time
-RUN --mount=type=cache,target=/root/.cabal/store \
-    cabal update && \
-    cabal build --only-dependencies tidepool-control-server -j
-
-# 5. NOW copy all source code (changes here don't re-fetch deps)
 COPY haskell/ ./haskell/
 
-# 6. Build the binary
-# BuildKit cache mounts provide fast rebuilds for incremental changes.
-# We build with -O1 for a balance between build speed and runtime performance.
+# Remove Nix-specific zlib configuration (hardcoded /nix/store paths fail in Debian)
+RUN sed -i '/package zlib/,+2d' cabal.project
+
+# Build with BuildKit cache mounts for Hackage deps and build artifacts
+# -O1 balances build speed and runtime performance
 RUN --mount=type=cache,target=/root/.cabal/store \
     --mount=type=cache,target=/build/dist-newstyle \
+    cabal update && \
     cabal build tidepool-control-server -j --ghc-options=-O1 && \
     cp $(cabal list-bin tidepool-control-server) /usr/local/bin/tidepool-control-server
 
