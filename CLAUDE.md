@@ -286,9 +286,9 @@ The Docker Compose setup provides a containerized environment with Zellij TUI:
 # Start the orchestrator container
 docker compose up -d orchestrator
 
-# Attach to the Zellij session (detach: ctrl-p, ctrl-q)
+# Attach to the Zellij session (detach: Ctrl+o, d)
 just docker-attach
-# Or: docker attach --detach-keys="ctrl-p,ctrl-q" tidepool-orchestrator
+# Or: docker exec -it tidepool-orchestrator gosu user zellij attach orchestrator
 ```
 
 **Features:**
@@ -304,7 +304,7 @@ just docker-attach
 # Control remote Docker via SSH
 export DOCKER_HOST=ssh://user@hostname
 docker compose up -d
-docker attach --detach-keys="ctrl-p,ctrl-q" tidepool-orchestrator
+docker exec -it tidepool-orchestrator gosu user zellij attach orchestrator
 ```
 
 #### Docker Claude Code Session
@@ -325,8 +325,8 @@ The orchestrator's middle pane runs Claude Code CLI with full MCP and hook integ
 
 **Basic workflow:**
 1. Run pre-build: `./scripts/docker-prebuild.sh`
-2. Start orchestrator: `docker compose up -d orchestrator`
-3. Attach to Zellij: `just docker-attach`
+2. Start orchestrator: `docker compose up -d`
+3. Attach to Zellij: `just docker-attach` (detach with Ctrl+o, d)
 4. Middle pane shows Claude Code prompt
 
 **Testing MCP connection:**

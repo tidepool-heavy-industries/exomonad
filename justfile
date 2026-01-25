@@ -217,9 +217,9 @@ docker-up:
 docker-up-dev:
     docker compose --profile dev up -d
 
-# Attach to orchestrator TUI (detach keys: ctrl-p,ctrl-q)
+# Attach to orchestrator Zellij session
 docker-attach:
-    docker attach --detach-keys="ctrl-p,ctrl-q" tidepool-orchestrator
+    docker exec -it tidepool-orchestrator gosu user zellij attach orchestrator
 
 # Spawn agent container with shared sockets and auth isolation
 docker-agent BRANCH:
