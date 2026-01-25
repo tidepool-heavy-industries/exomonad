@@ -4,13 +4,16 @@ use std::io::{BufReader, BufRead};
 use regex::Regex;
 use crate::types::{CabalBuildResult, CabalTestResult, TestFailure, BuildError, BuildWarning};
 
-pub fn build(cwd: &str) -> Result<()> {
-    let output = Command::new("cabal")
-        .arg("build")
-        .arg("--ghc-options=-ferror-spans -fdiagnostics-color=never")
-        .current_dir(cwd)
-        .output()
-        .context("Failed to execute cabal build")?;
+pub fn build(cwd: &str, package: Option<String>) -> Result<()> {
+    let mut cmd = Command::new("cabal");
+    cmd.arg("build");
+    if let Some(pkg) = package {
+        cmd.arg(pkg);
+    }
+    cmd.arg("--ghc-options=-ferror-spans -fdiagnostics-color=never")
+        .current_dir(cwd);
+
+    let output = cmd.output().context("Failed to execute cabal build")?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -19,12 +22,14 @@ pub fn build(cwd: &str) -> Result<()> {
     let mut errors = Vec::new();
     let mut warnings = Vec::new();
 
-    // Regex to match error/warning headers
+    // Regex to match error/warning headers with named captures
     // Examples:
     // src/Foo.hs:42:5: error: [GHC-12345]
     // src/Foo.hs:42:5-10: error: [GHC-12345]
     // src/Bar.hs:10:1: warning: [-Wunused-imports]
-    let header_re = Regex::new(r"^\s*(\S+):(\d+):(\d+)(?:-\d+)?:\s+(error|warning):\s*(?:\[([^\]]+)\])?(.*)$").unwrap();
+    let header_re = Regex::new(
+        r"^\s*(?P<file>\S+):(?P<line>\d+):(?P<col>\d+)(?:-\d+)?:\s+(?P<level>error|warning):\s*(?:\[(?P<code>[^\]]+)\])?(?P<rest>.*)$"
+    ).unwrap();
 
     struct Pending {
         is_error: bool,
@@ -40,7 +45,11 @@ pub fn build(cwd: &str) -> Result<()> {
     let push_message = |p: Pending, errors: &mut Vec<BuildError>, warnings: &mut Vec<BuildWarning>| {
         let message = p.lines.join("\n").trim().to_string();
         if p.is_error {
-            let error_type = if message.contains("Couldn't match type") || message.contains("Expected type") || message.contains("No instance for") {
+            let error_type = if message.contains("Couldn't match type") || 
+                               message.contains("Expected type") || 
+                               message.contains("No instance for") ||
+                               message.contains("Ambiguous type variable") ||
+                               message.contains("Couldn't match expected type") {
                 "type-error".to_string()
             } else if message.contains("Not in scope") || message.contains("not in scope") {
                 "scope-error".to_string()
@@ -74,11 +83,11 @@ pub fn build(cwd: &str) -> Result<()> {
             }
 
             // Start new
-            let file = caps[1].to_string();
-            let line = caps[2].parse().unwrap_or(0);
-            let column = caps[3].parse().unwrap_or(0);
-            let type_str = &caps[4];
-            let rest = caps[6].to_string(); // Message start if any
+            let file = caps["file"].to_string();
+            let line = caps["line"].parse().unwrap_or(0);
+            let column = caps["col"].parse().unwrap_or(0);
+            let level = &caps["level"];
+            let rest = caps["rest"].to_string(); // Message start if any
 
             let mut lines = Vec::new();
             if !rest.trim().is_empty() {
@@ -86,7 +95,7 @@ pub fn build(cwd: &str) -> Result<()> {
             }
 
             current = Some(Pending {
-                is_error: type_str == "error",
+                is_error: level == "error",
                 file,
                 line,
                 column,
