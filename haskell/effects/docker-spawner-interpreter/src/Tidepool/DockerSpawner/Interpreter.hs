@@ -4,12 +4,15 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications #-}
 
 module Tidepool.DockerSpawner.Interpreter
   ( runDockerSpawner
   , DockerSpawnerConfig(..)
   ) where
 
+import Control.Exception (try, SomeException)
 import Control.Monad.Freer (Eff, interpret, LastMember, sendM)
 import Data.Aeson (encode, eitherDecode)
 import Network.HTTP.Client
@@ -33,14 +36,23 @@ runDockerSpawner config = interpret $ \case
   StopContainer cid -> sendM $ doStop config cid
   GetContainerStatus cid -> sendM $ doStatus config cid
 
+-- | Helper to wrap HTTP calls in try/catch and map to DockerError
+withHttpError :: IO (Either DockerError a) -> IO (Either DockerError a)
+withHttpError action = do
+  result <- try @SomeException action
+  case result of
+    Right val -> pure val
+    Left err -> pure $ Left $ DockerConnectionError (T.pack $ show err)
+
 doSpawn :: DockerSpawnerConfig -> SpawnConfig -> IO (Either DockerError ContainerId)
-doSpawn config cfg = do
+doSpawn config cfg = withHttpError $ do
   let url = dscBaseUrl config <> "/spawn"
   req <- parseRequest url
   let req' = req
         { method = "POST"
         , requestBody = RequestBodyLBS (encode cfg)
         , requestHeaders = [("Content-Type", "application/json")]
+        , responseTimeout = responseTimeoutMicro 5000000 -- 5 seconds
         }
   resp <- httpLbs req' (dscManager config)
   case statusCode (responseStatus resp) of
@@ -50,10 +62,13 @@ doSpawn config cfg = do
     code -> pure $ Left $ DockerApiError code "Spawn failed"
 
 doStop :: DockerSpawnerConfig -> ContainerId -> IO (Either DockerError ())
-doStop config (ContainerId cid) = do
+doStop config (ContainerId cid) = withHttpError $ do
   let url = dscBaseUrl config <> "/stop/" <> T.unpack cid
   req <- parseRequest url
-  let req' = req { method = "POST" }
+  let req' = req 
+        { method = "POST"
+        , responseTimeout = responseTimeoutMicro 5000000 -- 5 seconds
+        }
   resp <- httpLbs req' (dscManager config)
   case statusCode (responseStatus resp) of
     200 -> pure $ Right ()
@@ -61,10 +76,13 @@ doStop config (ContainerId cid) = do
     code -> pure $ Left $ DockerApiError code "Stop failed"
 
 doStatus :: DockerSpawnerConfig -> ContainerId -> IO (Either DockerError ContainerStatus)
-doStatus config (ContainerId cid) = do
+doStatus config (ContainerId cid) = withHttpError $ do
   let url = dscBaseUrl config <> "/status/" <> T.unpack cid
   req <- parseRequest url
-  resp <- httpLbs req (dscManager config)
+  let req' = req
+        { responseTimeout = responseTimeoutMicro 5000000 -- 5 seconds
+        }
+  resp <- httpLbs req' (dscManager config)
   case statusCode (responseStatus resp) of
     200 -> case eitherDecode (responseBody resp) of
       Right status -> pure $ Right status
