@@ -1,0 +1,248 @@
+# Workstream C: Haskell DockerSpawner Effect
+
+**Wave:** 1 (parallel with A, B)
+**Branch:** `docker-spawner-effect`
+**Blocked by:** Nothing
+**Blocks:** D (docker-spawner-integration)
+
+## Target Files (EXCLUSIVE)
+
+- `haskell/dsl/core/src/Tidepool/Effects/DockerSpawner.hs` (new)
+- `haskell/dsl/core/tidepool-graph-dsl.cabal` (add module export)
+- `haskell/effects/docker-spawner-interpreter/` (new package, all files)
+- `cabal.project` (add package)
+
+**DO NOT TOUCH** files outside this list to avoid rebase conflicts with parallel workstreams.
+
+## Scope
+
+Define the DockerSpawner effect type and HTTP interpreter that calls the docker-spawner Rust service.
+
+## Effect Definition
+
+`haskell/dsl/core/src/Tidepool/Effects/DockerSpawner.hs`:
+
+```haskell
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE TypeOperators #-}
+
+module Tidepool.Effects.DockerSpawner
+  ( DockerSpawner(..)
+  , ContainerId(..)
+  , ContainerStatus(..)
+  , SpawnConfig(..)
+  , DockerError(..)
+  , spawnContainer
+  , stopContainer
+  , getContainerStatus
+  ) where
+
+import Data.Text (Text)
+import Control.Monad.Freer (Member, Eff, send)
+
+newtype ContainerId = ContainerId { unContainerId :: Text }
+  deriving (Show, Eq)
+
+data ContainerStatus
+  = Running
+  | Stopped
+  | NotFound
+  deriving (Show, Eq)
+
+data SpawnConfig = SpawnConfig
+  { scBeadId :: Text
+  , scWorktreePath :: FilePath
+  , scBackend :: Text  -- "claude" | "gemini"
+  , scUid :: Maybe Int
+  , scGid :: Maybe Int
+  } deriving (Show, Eq)
+
+data DockerError
+  = DockerConnectionError Text
+  | DockerApiError Int Text
+  | ContainerNotFound ContainerId
+  deriving (Show, Eq)
+
+data DockerSpawner r where
+  SpawnContainer :: SpawnConfig -> DockerSpawner (Either DockerError ContainerId)
+  StopContainer :: ContainerId -> DockerSpawner (Either DockerError ())
+  GetContainerStatus :: ContainerId -> DockerSpawner (Either DockerError ContainerStatus)
+
+-- Smart constructors
+spawnContainer :: Member DockerSpawner es => SpawnConfig -> Eff es (Either DockerError ContainerId)
+spawnContainer = send . SpawnContainer
+
+stopContainer :: Member DockerSpawner es => ContainerId -> Eff es (Either DockerError ())
+stopContainer = send . StopContainer
+
+getContainerStatus :: Member DockerSpawner es => ContainerId -> Eff es (Either DockerError ContainerStatus)
+getContainerStatus = send . GetContainerStatus
+```
+
+## Interpreter Package
+
+Create `haskell/effects/docker-spawner-interpreter/`:
+
+### Package Structure
+
+```
+haskell/effects/docker-spawner-interpreter/
+├── tidepool-docker-spawner-interpreter.cabal
+└── src/
+    └── Tidepool/
+        └── DockerSpawner/
+            └── Interpreter.hs
+```
+
+### Cabal File
+
+```cabal
+cabal-version: 3.0
+name:          tidepool-docker-spawner-interpreter
+version:       0.1.0.0
+synopsis:      HTTP interpreter for DockerSpawner effect
+
+library
+  exposed-modules:
+    Tidepool.DockerSpawner.Interpreter
+  build-depends:
+    base >= 4.14 && < 5,
+    tidepool-graph-dsl,
+    aeson,
+    http-client,
+    http-types,
+    text,
+    freer-simple,
+    mtl
+  hs-source-dirs: src
+  default-language: Haskell2010
+  ghc-options: -Wall
+```
+
+### Interpreter Implementation
+
+```haskell
+module Tidepool.DockerSpawner.Interpreter
+  ( runDockerSpawner
+  , DockerSpawnerConfig(..)
+  ) where
+
+import Control.Monad.Freer (Eff, Member, interpret, type (~>))
+import Control.Monad.IO.Class (MonadIO, liftIO)
+import Data.Aeson (encode, eitherDecode)
+import Network.HTTP.Client
+import Network.HTTP.Types.Status (statusCode)
+import qualified Data.Text as T
+
+import Tidepool.Effects.DockerSpawner
+
+data DockerSpawnerConfig = DockerSpawnerConfig
+  { dscBaseUrl :: String  -- e.g., "http://localhost:7435"
+  , dscManager :: Manager
+  }
+
+runDockerSpawner
+  :: MonadIO m
+  => DockerSpawnerConfig
+  -> Eff (DockerSpawner ': es) a
+  -> Eff es a
+runDockerSpawner config = interpret $ \case
+  SpawnContainer cfg -> liftIO $ doSpawn config cfg
+  StopContainer cid -> liftIO $ doStop config cid
+  GetContainerStatus cid -> liftIO $ doStatus config cid
+
+doSpawn :: DockerSpawnerConfig -> SpawnConfig -> IO (Either DockerError ContainerId)
+doSpawn config cfg = do
+  let url = dscBaseUrl config <> "/spawn"
+  req <- parseRequest url
+  let req' = req
+        { method = "POST"
+        , requestBody = RequestBodyLBS (encode cfg)
+        , requestHeaders = [("Content-Type", "application/json")]
+        }
+  resp <- httpLbs req' (dscManager config)
+  case statusCode (responseStatus resp) of
+    200 -> case eitherDecode (responseBody resp) of
+      Right cid -> pure $ Right cid
+      Left err -> pure $ Left $ DockerApiError 200 (T.pack err)
+    code -> pure $ Left $ DockerApiError code "Spawn failed"
+
+doStop :: DockerSpawnerConfig -> ContainerId -> IO (Either DockerError ())
+doStop config (ContainerId cid) = do
+  let url = dscBaseUrl config <> "/stop/" <> T.unpack cid
+  req <- parseRequest url
+  let req' = req { method = "POST" }
+  resp <- httpLbs req' (dscManager config)
+  case statusCode (responseStatus resp) of
+    200 -> pure $ Right ()
+    404 -> pure $ Left $ ContainerNotFound (ContainerId cid)
+    code -> pure $ Left $ DockerApiError code "Stop failed"
+
+doStatus :: DockerSpawnerConfig -> ContainerId -> IO (Either DockerError ContainerStatus)
+doStatus config (ContainerId cid) = do
+  let url = dscBaseUrl config <> "/status/" <> T.unpack cid
+  req <- parseRequest url
+  resp <- httpLbs req (dscManager config)
+  case statusCode (responseStatus resp) of
+    200 -> case eitherDecode (responseBody resp) of
+      Right status -> pure $ Right status
+      Left err -> pure $ Left $ DockerApiError 200 (T.pack err)
+    404 -> pure $ Right NotFound
+    code -> pure $ Left $ DockerApiError code "Status check failed"
+```
+
+## cabal.project Update
+
+Add to `cabal.project`:
+
+```
+packages:
+  ...
+  haskell/effects/docker-spawner-interpreter
+```
+
+## tidepool-graph-dsl.cabal Update
+
+Add to exposed-modules:
+
+```
+  exposed-modules:
+    ...
+    Tidepool.Effects.DockerSpawner
+```
+
+## Acceptance Criteria
+
+- [ ] `Tidepool.Effects.DockerSpawner` module created with GADTs effect
+- [ ] Smart constructors exported (spawnContainer, stopContainer, getContainerStatus)
+- [ ] `tidepool-docker-spawner-interpreter` package created
+- [ ] HTTP interpreter calls docker-spawner service endpoints
+- [ ] JSON serialization for request/response types
+- [ ] Error handling for connection failures and API errors
+- [ ] Module exported from `tidepool-graph-dsl`
+- [ ] Package added to `cabal.project`
+- [ ] `cabal build tidepool-docker-spawner-interpreter` succeeds
+
+## Verification
+
+```bash
+# Build the effect types
+cabal build tidepool-graph-dsl
+
+# Build the interpreter
+cabal build tidepool-docker-spawner-interpreter
+
+# Check module exports
+cabal repl tidepool-graph-dsl
+> import Tidepool.Effects.DockerSpawner
+> :t spawnContainer
+```
+
+## When Done
+
+1. Run `cabal build tidepool-docker-spawner-interpreter`
+2. Verify module can be imported
+3. Commit with message: `Add DockerSpawner effect and HTTP interpreter`
+4. Push branch: `git push -u origin docker-spawner-effect`
+5. Create PR targeting `main`

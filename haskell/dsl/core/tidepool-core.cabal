@@ -83,6 +83,7 @@ library
         Tidepool.Effects.Cabal
         Tidepool.Effects.Effector
         Tidepool.Effects.Justfile
+        Tidepool.Effects.DockerSpawner
         Tidepool.Effects.FileSystem
         Tidepool.Effects.Zellij
         Tidepool.Graph.Mermaid
