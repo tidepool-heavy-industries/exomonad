@@ -35,6 +35,8 @@ enum CabalAction {
     Build {
         #[arg(long, default_value = ".")]
         cwd: String,
+        #[arg(long)]
+        package: Option<String>,
     },
     Test {
         #[arg(long, default_value = ".")]
@@ -85,7 +87,7 @@ fn main() -> Result<()> {
 
     match cli.command {
         Commands::Cabal { action } => match action {
-            CabalAction::Build { cwd } => cabal::build(&cwd),
+            CabalAction::Build { cwd, package } => cabal::build(&cwd, package),
             CabalAction::Test { cwd, package } => cabal::test(&cwd, package),
         },
         Commands::Git { action } => match action {
