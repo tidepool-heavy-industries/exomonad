@@ -15,11 +15,18 @@ module Tidepool.Control.Runtime.Paths
   , controlServerBin
   , mantleAgentBin
   , tuiSidebarBin
+    -- * Docker Spawner Paths
+  , dockerBinDir
+  , dockerWorktreesPath
+  , dockerSocketsPath
+  , dockerSpawnerUrl
   ) where
 
 import Data.Text (Text)
 import qualified Data.Text as T
 import System.FilePath ((</>))
+import System.Environment (lookupEnv)
+import Data.Maybe (fromMaybe)
 
 -- | Base directory for transient sockets. 
 -- Uses /tmp to avoid SUN_LEN path limits (~104 bytes) on macOS.
@@ -65,3 +72,19 @@ mantleAgentBin binDir = binDir </> "mantle-agent"
 -- | Path to the tui-sidebar binary.
 tuiSidebarBin :: FilePath -> FilePath
 tuiSidebarBin binDir = binDir </> "tui-sidebar"
+
+-- | Directory for binaries used by Docker Spawner.
+dockerBinDir :: IO FilePath
+dockerBinDir = fromMaybe "/usr/local/bin" <$> lookupEnv "TIDEPOOL_BIN_DIR"
+
+-- | Base path for worktrees managed by Docker Spawner.
+dockerWorktreesPath :: IO FilePath
+dockerWorktreesPath = fromMaybe "/worktrees" <$> lookupEnv "TIDEPOOL_WORKTREES_PATH"
+
+-- | Base path for sockets managed by Docker Spawner.
+dockerSocketsPath :: IO FilePath
+dockerSocketsPath = fromMaybe "/sockets" <$> lookupEnv "TIDEPOOL_SOCKETS_PATH"
+
+-- | URL for the Docker Spawner service.
+dockerSpawnerUrl :: IO String
+dockerSpawnerUrl = fromMaybe "http://docker-spawner:7435" <$> lookupEnv "DOCKER_SPAWNER_URL"

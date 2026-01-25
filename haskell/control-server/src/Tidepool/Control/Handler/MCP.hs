@@ -69,17 +69,20 @@ import Tidepool.Worktree.Interpreter (runWorktreeIO, defaultWorktreeConfig)
 import Tidepool.FileSystem.Interpreter (runFileSystemIO)
 import Tidepool.Env.Interpreter (runEnvIO)
 import Tidepool.Zellij.Interpreter (runZellijIO)
+import Tidepool.DockerSpawner.Interpreter (runDockerSpawner, DockerSpawnerConfig(..))
 import Tidepool.Gemini.Interpreter (runGeminiIO)
 import Tidepool.Effect.TUI (TUI(..))
 import Tidepool.Effect.Types (runLog, LogLevel(Debug), runReturn, runTime)
 import Tidepool.Graph.Goto (unwrapSingleChoice)
 import Tidepool.Control.TUIState (TUIState)
 import Tidepool.Control.TUIInterpreter (runTUIWebSocket)
+import Tidepool.Control.Runtime.Paths as Paths
 -- import Tidepool.Teaching.LLM (TeachingConfig, loadTeachingConfig, withTeaching, runLLMWithTeaching)
 -- import Tidepool.Teaching.Teacher (teacherGuidance)
 import Tidepool.Effects.Observability (SpanKind(..), SpanAttribute(..), withSpan, addSpanAttribute)
 import Tidepool.Observability.Interpreter (runObservabilityWithContext)
 import Tidepool.Observability.Types (TraceContext, ObservabilityConfig(..), defaultLokiConfig)
+import Network.HTTP.Client (newManager, defaultManagerSettings)
 
 -- | Run TUI interpreter using WebSocket communication.
 --
@@ -260,6 +263,11 @@ handleSpawnAgentsTool logger reqId args = do
       -- Most interpreters use default configs which assume current dir is repo root.
       let repoRoot = "." 
       
+      -- Create Docker Spawner config
+      manager <- newManager defaultManagerSettings
+      spawnerUrl <- Paths.dockerSpawnerUrl
+      let spawnerConfig = DockerSpawnerConfig spawnerUrl manager
+
       resultOrErr <- try $ runM
         $ runLog Debug
         $ runGeminiIO
@@ -269,6 +277,7 @@ handleSpawnAgentsTool logger reqId args = do
         $ runFileSystemIO
         $ runEnvIO
         $ runZellijIO
+        $ runDockerSpawner spawnerConfig
         $ fmap unwrapSingleChoice (spawnAgentsLogic saArgs)
 
       case resultOrErr of

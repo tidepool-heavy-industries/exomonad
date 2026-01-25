@@ -30,11 +30,12 @@ import GHC.Generics (Generic)
 import System.FilePath ((</>), takeDirectory)
 
 import Tidepool.Effects.BD (BD, BeadInfo(..), BeadStatus(..), DependencyInfo(..), getBead)
+import Tidepool.Effects.DockerSpawner (DockerSpawner, SpawnConfig(..), spawnContainer, ContainerId(..))
 import Tidepool.Effects.Env (Env, getEnv, getEnvironment)
 import Tidepool.Effects.Git (Git, WorktreeInfo(..), getWorktreeInfo)
 import Tidepool.Effects.Worktree (Worktree, WorktreeSpec(..), WorktreePath(..), createWorktree)
 
-import Tidepool.Effects.FileSystem (FileSystem, createDirectory, writeFileText, copyFile, fileExists, directoryExists, readFileText)
+import Tidepool.Effects.FileSystem (FileSystem, createDirectory, writeFileText, fileExists, directoryExists, readFileText)
 import Tidepool.Effects.Zellij (Zellij, TabConfig(..), TabId(..), checkZellijEnv, newTab)
 import Tidepool.Role (Role(..))
 import Tidepool.Graph.Generic (AsHandler, type (:-))
@@ -159,6 +160,16 @@ instance ToJSON SpawnAgentsResult where
     , "failed"    .= sarFailed res
     ]
 
+-- | Spawn mode for agents.
+data SpawnMode
+  = SpawnZellij  -- ^ Use local Zellij tabs (legacy)
+  | SpawnDocker  -- ^ Use Docker containers via DockerSpawner
+  deriving stock (Show, Eq)
+
+parseSpawnMode :: Maybe Text -> SpawnMode
+parseSpawnMode (Just "zellij") = SpawnZellij
+parseSpawnMode _               = SpawnDocker
+
 -- | Graph definition for spawn_agents tool.
 data SpawnAgentsGraph mode = SpawnAgentsGraph
   {
@@ -169,7 +180,7 @@ data SpawnAgentsGraph mode = SpawnAgentsGraph
 
   , saRun :: mode :- LogicNode
       :@ Input SpawnAgentsArgs
-      :@ UsesEffects '[BD, Git, Worktree, FileSystem, Zellij, Env, Goto Exit SpawnAgentsResult]
+      :@ UsesEffects '[BD, Git, Worktree, FileSystem, Zellij, Env, DockerSpawner, Goto Exit SpawnAgentsResult]
 
   , saExit :: mode :- ExitNode SpawnAgentsResult
   }
@@ -177,7 +188,7 @@ data SpawnAgentsGraph mode = SpawnAgentsGraph
 
 -- | Handlers for spawn_agents graph.
 spawnAgentsHandlers
-  :: (Member BD es, Member Git es, Member Worktree es, Member FileSystem es, Member Zellij es, Member Env es)
+  :: (Member BD es, Member Git es, Member Worktree es, Member FileSystem es, Member Zellij es, Member Env es, Member DockerSpawner es)
   => SpawnAgentsGraph (AsHandler es)
 spawnAgentsHandlers = SpawnAgentsGraph
   {
@@ -188,7 +199,7 @@ spawnAgentsHandlers = SpawnAgentsGraph
 
 -- | Core logic for spawn_agents.
 spawnAgentsLogic
-  :: (Member BD es, Member Git es, Member Worktree es, Member FileSystem es, Member Zellij es, Member Env es)
+  :: (Member BD es, Member Git es, Member Worktree es, Member FileSystem es, Member Zellij es, Member Env es, Member DockerSpawner es)
   => SpawnAgentsArgs
   -> Eff es (GotoChoice '[To Exit SpawnAgentsResult])
 spawnAgentsLogic args = do
@@ -203,13 +214,20 @@ spawnAgentsLogic args = do
       }
     Just _ -> do
       -- 2. Determine Hangar Root and Worktree Base Path
+      spawnModeEnv <- getEnv "SPAWN_MODE"
+      let spawnMode = parseSpawnMode spawnModeEnv
       mHangarRoot <- findHangarRoot
       mWtInfo <- getWorktreeInfo
       let repoRoot = maybe "." (\wi -> wi.wiRepoRoot) mWtInfo
-          -- Target directory: <hangar>/worktrees/ or repo/.worktrees/tidepool/ as fallback
-          wtBaseDir = case mHangarRoot of
-            Just hr -> hr </> "worktrees"
-            Nothing -> repoRoot </> ".worktrees" </> "tidepool"
+      
+      -- Target directory discovery
+      wtBaseDir <- case (spawnMode, mHangarRoot) of
+        (SpawnZellij, Just hr) -> pure $ hr </> "worktrees"
+        (SpawnZellij, Nothing) -> pure $ repoRoot </> ".worktrees" </> "tidepool"
+        _ -> do
+          -- Docker mode: prefer TIDEPOOL_WORKTREES_PATH
+          mWorktreesPath <- getEnv "TIDEPOOL_WORKTREES_PATH"
+          pure $ T.unpack $ fromMaybe "/worktrees" mWorktreesPath
 
       -- 3. Validate and normalize backend parameter
       let backendRaw = T.toLower $ fromMaybe "claude" args.saaBackend
@@ -225,7 +243,7 @@ spawnAgentsLogic args = do
         else do
           -- 4. Process each bead
           results <- forM args.saaBeadIds $ \shortId -> do
-            processBead mHangarRoot repoRoot wtBaseDir backendRaw shortId
+            processBead spawnMode mHangarRoot repoRoot wtBaseDir backendRaw shortId
 
           -- Partition results
           let (failed, succeeded) = partitionEithers results
@@ -242,14 +260,15 @@ spawnAgentsLogic args = do
 
 -- | Process a single bead: create worktree, bootstrap .tidepool/, write context, launch tab.
 processBead
-  :: (Member BD es, Member Worktree es, Member FileSystem es, Member Zellij es, Member Env es)
-  => Maybe FilePath                                    -- ^ Hangar root (for templates)
+  :: (Member BD es, Member Worktree es, Member FileSystem es, Member Zellij es, Member Env es, Member DockerSpawner es)
+  => SpawnMode                                         -- ^ Spawn mode (Zellij or Docker)
+  -> Maybe FilePath                                    -- ^ Hangar root (for templates)
   -> FilePath                                          -- ^ Repo root (for symlinks/templates)
   -> FilePath                                          -- ^ Worktree base directory
   -> Text                                              -- ^ Backend ("claude" or "gemini")
   -> Text                                              -- ^ Short bead ID
   -> Eff es (Either (Text, Text) (Text, FilePath, TabId))  -- ^ Left (id, error) or Right (id, path, tabId)
-processBead mHangarRoot repoRoot wtBaseDir backend shortId = do
+processBead spawnMode mHangarRoot repoRoot wtBaseDir backend shortId = do
   -- Validate shortId (prevent path traversal)
   if T.any (\c -> c == '/' || c == '\\') shortId
     then pure $ Left (shortId, "Invalid bead ID: contains path separators")
@@ -260,9 +279,15 @@ processBead mHangarRoot repoRoot wtBaseDir backend shortId = do
                    else "tidepool-" <> shortId
           hr = fromMaybe repoRoot mHangarRoot
 
+      -- Determine binary directory based on mode
+      mBinDirEnv <- getEnv "TIDEPOOL_BIN_DIR"
+      let binDir = case (spawnMode, mBinDirEnv) of
+            (SpawnZellij, _) -> Paths.runtimeBinDir hr
+            (_, Just bd)  -> T.unpack bd
+            _             -> "/usr/local/bin"
+
       -- Early validation: Check for binary existence
-      let binDir = Paths.runtimeBinDir hr
-          binPath = Paths.controlServerBin binDir
+      let binPath = Paths.controlServerBin binDir
       binExistsRes <- fileExists binPath
       
       -- Handle fileExists result (Left is error, Right is boolean existence)
@@ -310,7 +335,11 @@ processBead mHangarRoot repoRoot wtBaseDir backend shortId = do
                           -- Compute socket paths here (before bootstrap) since we need them for:
                           -- 1. Creating socket directory
                           -- 2. Passing to writeGeminiConfig for MCP config
-                          let socketDir = Paths.socketDirectoryFor shortId
+                          mSocketsPath <- getEnv "TIDEPOOL_SOCKETS_PATH"
+                          let socketDir = case (spawnMode, mSocketsPath) of
+                                (SpawnZellij, _) -> Paths.socketDirectoryFor shortId
+                                (_, Just sp)  -> T.unpack sp </> T.unpack shortId
+                                _             -> "/sockets" </> T.unpack shortId
                               controlSocket = Paths.controlSocketPath socketDir
                               tuiSocket = Paths.tuiSocketPath socketDir
                               
@@ -344,19 +373,51 @@ processBead mHangarRoot repoRoot wtBaseDir backend shortId = do
                               case contextRes of
                                 Left errMsg -> pure $ Left (shortId, "Worktree created but context write failed: " <> errMsg)
                                 Right () -> do
-                                  -- e. Launch Zellij tab
-                                  -- Use absolute path for layout to avoid CWD resolution issues
-                                  let tabConfig = TabConfig
-                                        {
-                                          tcName = shortId
-                                        , tcLayout = repoRoot </> ".zellij" </> "worktree.kdl"
-                                        , tcCwd = path
-                                        , tcEnv = envVars
-                                        }
-                                  tabRes <- newTab tabConfig
-                                  case tabRes of
-                                    Left err -> pure $ Left (shortId, "Worktree created but tab launch failed: " <> T.pack (show err))
-                                    Right tabId -> pure $ Right (shortId, path, tabId)
+                                  -- e. Launch agent (Zellij or Docker)
+                                  case spawnMode of
+                                    SpawnZellij -> do
+                                      -- Old path: Launch Zellij tab with layout that runs process-compose
+                                      let tabConfig = TabConfig
+                                            {
+                                              tcName = shortId
+                                            , tcLayout = repoRoot </> ".zellij" </> "worktree.kdl"
+                                            , tcCwd = path
+                                            , tcEnv = envVars
+                                            , tcCommand = Nothing
+                                            }
+                                      tabRes <- newTab tabConfig
+                                      case tabRes of
+                                        Left err -> pure $ Left (shortId, "Worktree created but tab launch failed: " <> T.pack (show err))
+                                        Right tabId -> pure $ Right (shortId, path, tabId)
+                                    
+                                    SpawnDocker -> do
+                                      -- New path: Spawn Docker container and attach via Zellij
+                                      let config = SpawnConfig
+                                            { scBeadId = shortId
+                                            , scWorktreePath = path
+                                            , scBackend = backend
+                                            , scUid = Nothing
+                                            , scGid = Nothing
+                                            }
+                                      containerResult <- spawnContainer config
+                                      
+                                      case containerResult of
+                                        Left err -> pure $ Left (shortId, "Worktree created but container spawn failed: " <> T.pack (show err))
+                                        Right containerId -> do
+                                          -- Create Zellij tab with docker attach
+                                          let attachCmd = "docker attach " <> containerId.unContainerId
+                                              tabConfig = TabConfig
+                                                { tcName = shortId
+                                                , tcLayout = ""
+                                                , tcCwd = path
+                                                , tcEnv = envVars
+                                                , tcCommand = Just attachCmd
+                                                }
+                                          
+                                          tabRes <- newTab tabConfig
+                                          case tabRes of
+                                            Left err -> pure $ Left (shortId, "Container spawned (" <> containerId.unContainerId <> ") but tab launch failed: " <> T.pack (show err))
+                                            Right tabId -> pure $ Right (shortId, path, tabId)
 
 
 -- | Bootstrap .tidepool/ directory structure in a worktree.

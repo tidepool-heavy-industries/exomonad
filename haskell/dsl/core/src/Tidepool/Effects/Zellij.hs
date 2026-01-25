@@ -76,6 +76,8 @@ data TabConfig = TabConfig
     -- ^ Working directory for the tab
   , tcEnv :: [(Text, Text)]
     -- ^ Environment variables to set (e.g., SUBAGENT_CMD)
+  , tcCommand :: Maybe Text
+    -- ^ Optional command to run in the new tab (mutually exclusive with tcLayout in some interpreters)
   }
   deriving stock (Show, Eq, Generic)
 

@@ -88,8 +88,11 @@ checkZellijEnvIO = do
 -- doesn't support direct environment variable passing.
 newTabIO :: TabConfig -> IO (Either ZellijError TabId)
 newTabIO config = do
-  -- Check if layout file exists
-  layoutExists <- doesFileExist config.tcLayout
+  -- Check if layout file exists (only if no command is provided)
+  layoutExists <- if null config.tcLayout
+                    then pure True
+                    else doesFileExist config.tcLayout
+
   if not layoutExists
     then pure $ Left ZellijLayoutNotFound { zlnfPath = config.tcLayout }
     else do
@@ -100,13 +103,19 @@ newTabIO config = do
         -- Build the command
         -- zellij action new-tab with layout and cwd
         -- The --name argument sets the tab name
-        let actionArgs =
+        let baseArgs =
               [ "action", "new-tab"
-              , "--layout", config.tcLayout
               , "--cwd", config.tcCwd
               , "--name", T.unpack config.tcName
               ]
-            args = sessionPrefix ++ actionArgs
+            layoutArgs = if null config.tcLayout
+                           then []
+                           else ["--layout", config.tcLayout]
+            cmdArgs = case config.tcCommand of
+                        Just cmd -> ["--", "bash", "-c", T.unpack cmd]
+                        Nothing -> []
+            
+            args = sessionPrefix ++ baseArgs ++ layoutArgs ++ cmdArgs
 
         -- If we have environment variables, we need to set them
         -- We do this by using env -S for the current process
