@@ -156,7 +156,17 @@ RUN apt-get update && apt-get install -y \
     tini \
     gosu \
     socat \
+    curl \
     && rm -rf /var/lib/apt/lists/*
+
+# Install cargo-binstall for binary installation
+RUN curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
+
+# Install Zellij for cross-container tab creation (connects to orchestrator's session)
+ENV PATH="/root/.cargo/bin:${PATH}"
+RUN cargo-binstall --no-confirm zellij && \
+    cp /root/.cargo/bin/zellij /usr/local/bin/zellij && \
+    chmod 755 /usr/local/bin/zellij
 
 # Copy only the control-server binary
 COPY --from=builder /usr/local/bin/tidepool-control-server /usr/local/bin/tidepool-control-server
@@ -164,6 +174,9 @@ COPY --from=builder /usr/local/bin/tidepool-control-server /usr/local/bin/tidepo
 # Environment variables
 ENV TIDEPOOL_CONTROL_SOCKET=/sockets/control.sock
 ENV TIDEPOOL_TUI_SOCKET=/sockets/tui.sock
+# Zellij cross-container access (shared socket volume with orchestrator)
+ENV XDG_RUNTIME_DIR=/run/user/1000
+ENV ZELLIJ_SESSION_NAME=orchestrator
 
 # Create non-root user matching orchestrator UID
 RUN useradd -m -u 1000 -s /bin/bash user
@@ -176,6 +189,12 @@ set -euo pipefail
 # Fix volume ownership (Docker creates named volumes as root)
 chown 1000:1000 /sockets
 chmod 755 /sockets
+
+# Ensure XDG_RUNTIME_DIR exists for Zellij socket access
+# This is a shared volume with orchestrator for cross-container Zellij commands
+mkdir -p /run/user/1000
+chown 1000:1000 /run/user/1000
+chmod 755 /run/user/1000
 
 # Cleanup stale socket to prevent "Address already in use" errors
 rm -f /sockets/control.sock /sockets/tui.sock

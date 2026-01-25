@@ -99,12 +99,15 @@ echo "✓ Claude Code configured"
 
 # --- 1.5 Runtime Cleanup ---
 # Remove stale Zellij state that might be root-owned from previous runs
-rm -rf /tmp/zellij-* /run/user/1000/zellij-* 2>/dev/null || true
+rm -rf /tmp/zellij-* 2>/dev/null || true
+# Don't remove Zellij sockets - they may be in use by cross-container connections
 
 # Ensure XDG_RUNTIME_DIR exists for user
+# Uses chmod 755 (not 700) to allow cross-container Zellij access from control-server
+# Both containers share this volume via tidepool-zellij named volume
 mkdir -p /run/user/1000
 chown user:user /run/user/1000
-chmod 700 /run/user/1000
+chmod 755 /run/user/1000
 
 # --- 1.6 Control Server Check ---
 SOCKET_PATH="${TIDEPOOL_CONTROL_SOCKET:-/sockets/control.sock}"

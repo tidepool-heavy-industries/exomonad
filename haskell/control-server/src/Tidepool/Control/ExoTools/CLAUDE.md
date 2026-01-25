@@ -553,9 +553,9 @@ spawn_agents({
 {"failed": [["*", "Not running in Zellij session"]]}
 ```
 
-**Cause:** The `spawn_agents` tool requires running inside Zellij.
+**Cause:** The `spawn_agents` tool requires Zellij access (either running inside a Zellij pane or cross-container access configured).
 
-**Fix:**
+**Fix (Local):**
 ```bash
 # Start Zellij first
 ./start-augmented.sh
@@ -565,6 +565,14 @@ zellij
 
 # Then call spawn_agents from Claude Code
 ```
+
+**Fix (Docker):**
+Ensure control-server container has:
+1. `ZELLIJ_SESSION_NAME=orchestrator` environment variable
+2. `XDG_RUNTIME_DIR=/run/user/1000` shared with orchestrator
+3. `zellij` binary installed (via cargo-binstall)
+
+See [zellij-interpreter/CLAUDE.md](../../../../../effects/zellij-interpreter/CLAUDE.md) for cross-container setup.
 
 ### "Binary missing: /path/to/tidepool-control-server"
 
@@ -703,6 +711,45 @@ handleSpawnAgentsTool logger reqId args = do
 - **[Runtime/Paths.hs](../Runtime/Paths.hs)** - Path utilities
 - **[effects/zellij-interpreter/CLAUDE.md](../../../../../effects/zellij-interpreter/CLAUDE.md)** - Zellij effect
 - **[Root CLAUDE.md](../../../../../../CLAUDE.md)** - Hangar structure
+
+## Docker Deployment
+
+In Docker, `spawn_agents` runs in the `control-server` container but creates Zellij tabs in the `orchestrator` container. This cross-container communication uses shared Zellij sockets.
+
+### Architecture (Docker)
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ orchestrator container                                       │
+│   • Runs Zellij session (session name: "orchestrator")       │
+│   • Socket at /run/user/1000/zellij/0.43.1/orchestrator      │
+└──────────────────────────────┬──────────────────────────────┘
+                               │ Shared volume: tidepool-zellij
+                               │ Mount: /run/user/1000
+                               ▼
+┌─────────────────────────────────────────────────────────────┐
+│ control-server container                                     │
+│   • spawn_agents handler                                     │
+│   • ZELLIJ_SESSION_NAME=orchestrator                        │
+│   • zellij --session orchestrator action new-tab ...         │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Key Configuration
+
+| Variable | Value | Purpose |
+|----------|-------|---------|
+| `XDG_RUNTIME_DIR` | `/run/user/1000` | Zellij socket directory |
+| `ZELLIJ_SESSION_NAME` | `orchestrator` | Target session for `--session` flag |
+| Volume | `tidepool-zellij:/run/user/1000` | Shared socket access |
+
+### Differences from Local Mode
+
+| Aspect | Local | Docker |
+|--------|-------|--------|
+| Zellij access | Inside pane (`ZELLIJ` set) | Cross-container (`ZELLIJ_SESSION_NAME`) |
+| CLI command | `zellij action new-tab ...` | `zellij --session orchestrator action new-tab ...` |
+| Socket path | `$XDG_RUNTIME_DIR/zellij/...` | Shared volume at `/run/user/1000` |
 
 ## Future Enhancements
 

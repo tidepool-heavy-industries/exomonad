@@ -298,6 +298,7 @@ docker exec tidepool-orchestrator gosu user zellij web --create-token
 - ✅ 3-pane layout: control-server logs | Claude Code CLI | tail logs
 - ✅ Claude Code with MCP tools + hooks (full integration)
 - ✅ control-server with MCP tools via Unix socket (`/sockets/control.sock`)
+- ✅ Cross-container Zellij tab creation (spawn_agents creates tabs in orchestrator)
 - ✅ Clean shutdown: `docker compose down` (no hangs)
 - ✅ Persistent sessions via session serialization
 
@@ -466,6 +467,10 @@ Sockets are managed to ensure clean transitions between sessions and prevent sta
 - `$TIDEPOOL_CONTROL_SOCKET` (default: `.tidepool/sockets/control.sock`): Main protocol (mantle-agent connects)
 - `$TIDEPOOL_TUI_SOCKET` (default: `.tidepool/sockets/tui.sock`): TUI sidebar (control-server listens, tui-sidebar connects)
 - `.tidepool/sockets/process-compose.sock`: process-compose API (eliminates port 8080 conflicts)
+
+**Docker Volumes (Cross-Container):**
+- `tidepool-sockets`: Shared volume for control.sock and tui.sock
+- `tidepool-zellij`: Shared XDG_RUNTIME_DIR (`/run/user/1000`) for cross-container Zellij access. Enables control-server to create Zellij tabs in orchestrator's session via `zellij --session orchestrator action new-tab`.
 
 Canonical values are defined in `start-augmented.sh` and can be overridden in `.env`.
 

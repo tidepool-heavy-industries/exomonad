@@ -20,7 +20,9 @@
 --
 -- = Requirements
 --
--- Requires running inside a Zellij session (ZELLIJ environment variable set).
+-- Requires one of:
+-- - Running inside a Zellij session (ZELLIJ environment variable set)
+-- - Cross-container access with ZELLIJ_SESSION_NAME set and shared XDG_RUNTIME_DIR
 module Tidepool.Zellij.Interpreter
   ( -- * Interpreter
     runZellijIO
@@ -61,15 +63,26 @@ runZellijIO = interpret $ \case
 -- IMPLEMENTATION
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Check if running inside a Zellij session.
+-- | Check if Zellij access is available.
+--
+-- Returns session info if either:
+-- - Running inside a Zellij session (ZELLIJ env var set)
+-- - Cross-container access configured (ZELLIJ_SESSION_NAME set)
 checkZellijEnvIO :: IO (Maybe Text)
 checkZellijEnvIO = do
-  result <- lookupEnv "ZELLIJ"
-  pure $ T.pack <$> result
+  -- First check if we're inside a Zellij pane
+  zellijEnv <- lookupEnv "ZELLIJ"
+  case zellijEnv of
+    Just z -> pure $ Just (T.pack z)
+    Nothing -> do
+      -- Check for cross-container access via session name
+      sessionName <- lookupEnv "ZELLIJ_SESSION_NAME"
+      pure $ T.pack <$> sessionName
 
 -- | Create a new Zellij tab.
 --
 -- Uses: zellij action new-tab --layout <layout> --cwd <cwd> --name <name>
+-- For cross-container: zellij --session <name> action new-tab ...
 --
 -- Environment variables are passed via shell wrapper since zellij action
 -- doesn't support direct environment variable passing.
@@ -81,15 +94,19 @@ newTabIO config = do
     then pure $ Left ZellijLayoutNotFound { zlnfPath = config.tcLayout }
     else do
       result <- try @SomeException $ do
+        -- Check if we need cross-container session targeting
+        sessionPrefix <- getSessionPrefix
+
         -- Build the command
         -- zellij action new-tab with layout and cwd
         -- The --name argument sets the tab name
-        let args =
+        let actionArgs =
               [ "action", "new-tab"
               , "--layout", config.tcLayout
               , "--cwd", config.tcCwd
               , "--name", T.unpack config.tcName
               ]
+            args = sessionPrefix ++ actionArgs
 
         -- If we have environment variables, we need to set them
         -- We do this by using env -S for the current process
@@ -119,10 +136,14 @@ newTabIO config = do
 -- | Switch focus to a tab by name.
 --
 -- Uses: zellij action go-to-tab-name <name>
+-- For cross-container: zellij --session <name> action go-to-tab-name ...
 goToTabIO :: TabId -> IO (Either ZellijError ())
 goToTabIO (TabId tabName) = do
   result <- try @SomeException $ do
-    let args = ["action", "go-to-tab-name", T.unpack tabName]
+    -- Check if we need cross-container session targeting
+    sessionPrefix <- getSessionPrefix
+    let actionArgs = ["action", "go-to-tab-name", T.unpack tabName]
+        args = sessionPrefix ++ actionArgs
     readProcessWithExitCode "zellij" args ""
 
   case result of
@@ -139,3 +160,19 @@ goToTabIO (TabId tabName) = do
           , zceExitCode = code
           , zceStderr = T.pack stderr
           }
+
+-- | Get session prefix args for cross-container access.
+--
+-- When running inside a Zellij pane (ZELLIJ set), returns empty list.
+-- When cross-container (ZELLIJ_SESSION_NAME set), returns ["--session", "<name>"].
+getSessionPrefix :: IO [String]
+getSessionPrefix = do
+  zellijEnv <- lookupEnv "ZELLIJ"
+  case zellijEnv of
+    Just _ -> pure []  -- Inside Zellij pane, no prefix needed
+    Nothing -> do
+      -- Check for cross-container session name
+      sessionName <- lookupEnv "ZELLIJ_SESSION_NAME"
+      pure $ case sessionName of
+        Just name -> ["--session", name]
+        Nothing -> []  -- No session configured

@@ -12,11 +12,15 @@ services:
       - TIDEPOOL_CONTROL_SOCKET=/sockets/control.sock
       - TIDEPOOL_TUI_SOCKET=/sockets/tui.sock
       - GEMMA_ENDPOINT=${GEMMA_ENDPOINT:-http://host.docker.internal:11434}
+      # Zellij cross-container access (shared socket with orchestrator)
+      - XDG_RUNTIME_DIR=/run/user/1000
+      - ZELLIJ_SESSION_NAME=orchestrator
       # Observability (optional - set OTEL_EXPORTER_OTLP_ENDPOINT in .env to enable)
       # - OTEL_EXPORTER_OTLP_ENDPOINT=http://openobserve:5081
       # - OTEL_EXPORTER_OTLP_HEADERS=Authorization=Basic ${OPENOBSERVE_AUTH_HEADER}
     volumes:
       - tidepool-sockets:/sockets
+      - tidepool-zellij:/run/user/1000
     healthcheck:
       # Use socat to verify actual connectivity, not just file existence
       test: ["CMD-SHELL", "socat -u OPEN:/dev/null UNIX-CONNECT:/sockets/control.sock || exit 1"]
@@ -88,6 +92,7 @@ services:
       - tidepool-sockets:/sockets
       - tidepool-claude-auth:/home/user/.claude
       - tidepool-ssh-keys:/home/user/.ssh
+      - tidepool-zellij:/run/user/1000
       - /var/run/docker.sock:/var/run/docker.sock
     restart: unless-stopped
     networks:
@@ -137,6 +142,8 @@ volumes:
     name: tidepool-repo
   tidepool-ssh-keys:
     name: tidepool-ssh-keys
+  tidepool-zellij:
+    name: tidepool-zellij
   tidepool-openobserve:
     name: tidepool-openobserve
 

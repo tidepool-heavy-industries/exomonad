@@ -20,6 +20,7 @@ This follows the **interpreter design pattern**: abstract syntax (effect types) 
 | Run cabal builds/tests | `cabal-interpreter/CLAUDE.md` |
 | Add session logging | `devlog-interpreter/CLAUDE.md` |
 | Add gamification (Habitica) | `habitica-interpreter/CLAUDE.md` |
+| Create Zellij tabs (parallel agents) | `zellij-interpreter/CLAUDE.md` |
 | Understand the interpreter pattern | This file (you're here) |
 
 ## Documentation Tree

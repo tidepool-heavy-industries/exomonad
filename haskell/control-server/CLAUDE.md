@@ -108,6 +108,22 @@ MCP is accessed via HTTP transport (TCP port 7432). Role-based endpoints filter 
 
 **Subagents** are configured with their appropriate role endpoint (`/role/dev/mcp`).
 
+### Docker Cross-Container Zellij Access
+
+In Docker deployments, the `control-server` container can create Zellij tabs in the `orchestrator` container via shared socket volume:
+
+| Component | Container | Role |
+|-----------|-----------|------|
+| Zellij session | `orchestrator` | Runs the actual Zellij process |
+| control-server | `control-server` | Calls `zellij --session orchestrator action new-tab ...` |
+| Socket | Shared via `tidepool-zellij` volume | `/run/user/1000/zellij/...` |
+
+**Environment variables in control-server:**
+- `XDG_RUNTIME_DIR=/run/user/1000` - Socket directory
+- `ZELLIJ_SESSION_NAME=orchestrator` - Target session for `--session` flag
+
+See [zellij-interpreter/CLAUDE.md](../effects/zellij-interpreter/CLAUDE.md) for implementation details.
+
 ### Tool Annotations
 
 Graphs can document their intended role using the `MCPRoleHint` annotation in the DSL:
