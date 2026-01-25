@@ -280,22 +280,19 @@ In `.claude/settings.local.json`:
 
 **Docker Compose Orchestration (Recommended for Linux)**
 
-The Docker Compose setup provides a containerized environment with browser-based Zellij access:
+The Docker Compose setup provides a containerized environment with Zellij TUI:
 
 ```bash
 # Start the orchestrator container
 docker compose up -d orchestrator
 
-# Generate a login token
-docker exec tidepool-orchestrator gosu user zellij web --create-token
-
-# Open browser to: https://localhost:8080/orchestrator
-# (or https://<hostname>:8080/orchestrator for remote servers)
+# Attach to the Zellij session (detach: ctrl-p, ctrl-q)
+just docker-attach
+# Or: docker attach --detach-keys="ctrl-p,ctrl-q" tidepool-orchestrator
 ```
 
 **Features:**
-- ✅ Browser-based Zellij TUI (no terminal required)
-- ✅ 3-pane layout: control-server logs | Claude Code CLI | tail logs
+- ✅ 3-pane Zellij layout: control-server logs | Claude Code CLI | tail logs
 - ✅ Claude Code with MCP tools + hooks (full integration)
 - ✅ control-server with MCP tools via Unix socket (`/sockets/control.sock`)
 - ✅ Cross-container Zellij tab creation (spawn_agents creates tabs in orchestrator)
@@ -307,17 +304,15 @@ docker exec tidepool-orchestrator gosu user zellij web --create-token
 # Control remote Docker via SSH
 export DOCKER_HOST=ssh://user@hostname
 docker compose up -d
-docker exec tidepool-orchestrator gosu user zellij web --create-token
-
-# Open: https://hostname:8080/orchestrator
+docker attach --detach-keys="ctrl-p,ctrl-q" tidepool-orchestrator
 ```
 
-#### Browser-based Claude Code Session
+#### Docker Claude Code Session
 
 The orchestrator's middle pane runs Claude Code CLI with full MCP and hook integration:
 
 **What you get:**
-- Claude Code session accessible via web browser (no local terminal needed)
+- Claude Code session inside Docker container
 - MCP tools from control-server (`find_callers`, `show_fields`, `show_constructors`, `teach-graph`, `confirm_action`, `select_option`, `request_guidance`)
 - PreToolUse hooks via mantle-agent (tool call interception)
 - Working directory: `/worktrees` (project root, bind-mounted from host)
@@ -331,9 +326,8 @@ The orchestrator's middle pane runs Claude Code CLI with full MCP and hook integ
 **Basic workflow:**
 1. Run pre-build: `./scripts/docker-prebuild.sh`
 2. Start orchestrator: `docker compose up -d orchestrator`
-3. Generate token: `docker exec tidepool-orchestrator zellij web --create-token`
-4. Open browser: `https://nixos:8080/orchestrator` (or `https://localhost:8080/orchestrator`)
-5. Middle pane shows Claude Code prompt
+3. Attach to Zellij: `just docker-attach`
+4. Middle pane shows Claude Code prompt
 
 **Testing MCP connection:**
 ```
@@ -359,7 +353,6 @@ Expected: PreToolUse hook fires (visible in control-server logs, left pane)
 - **"Command not found: claude-code"**: Check build logs for Claude CLI installation errors.
 - **Authentication errors**: Verify `~/.claude/.credentials.json` exists on host and is mounted.
 - **Working directory wrong**: Claude Code should start in `/worktrees`. Check Zellij layout args.
-- **Container restart loop**: Fixed by using `zellij web --daemonize` with `tail -f /dev/null` to keep PID 1 alive. Requires both `tty: true` and `stdin_open: true` in docker-compose.yml.
 
 **Hybrid Tidepool Architecture (process-compose + Zellij - Local Development)**
 

@@ -249,3 +249,46 @@ docker-run: docker-build docker-up docker-attach
 docker-run-dev: docker-build docker-up-dev
     docker attach --detach-keys="ctrl-p,ctrl-q" orchestrator-dev
 
+# Rebuild images (no cache) and restart
+docker-rebuild:
+    docker compose build --no-cache
+    docker compose down
+    docker compose up -d
+
+# Exec into orchestrator container
+docker-exec-orchestrator:
+    docker exec -it tidepool-orchestrator gosu user zsh
+
+# Exec into control-server container
+docker-exec-control:
+    docker exec -it tidepool-control-server zsh
+
+# Test spawn_agents cross-container Zellij (requires running orchestrator + control-server)
+docker-test-zellij:
+    #!/usr/bin/env bash
+    set -e
+    echo "── Testing cross-container Zellij access ──"
+    echo ""
+    echo "1. Checking ZELLIJ_SESSION_NAME in control-server..."
+    docker exec tidepool-control-server bash -c 'echo "ZELLIJ_SESSION_NAME=$ZELLIJ_SESSION_NAME"'
+    echo ""
+    echo "2. Checking XDG_RUNTIME_DIR shared volume..."
+    docker exec tidepool-control-server ls -la /run/user/1000/zellij/ 2>/dev/null || echo "   (Zellij session may not be running yet)"
+    echo ""
+    echo "3. Testing zellij CLI in control-server..."
+    docker exec tidepool-control-server which zellij
+    docker exec tidepool-control-server zellij --version
+    echo ""
+    echo "4. Listing Zellij sessions from control-server..."
+    docker exec tidepool-control-server zellij list-sessions 2>/dev/null || echo "   (No sessions found or Zellij not running)"
+    echo ""
+    echo "✓ Cross-container Zellij setup verified"
+
+# Show logs from control-server container
+docker-logs-control:
+    docker logs -f tidepool-control-server
+
+# Show logs from orchestrator container
+docker-logs-orchestrator:
+    docker logs -f tidepool-orchestrator
+
