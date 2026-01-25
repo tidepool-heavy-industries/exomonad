@@ -7,4 +7,5 @@ members = ["hangar-config",
     "tui-sidebar",
     "tui-popup",
     "ssh-proxy",
+    "effector",
 ]

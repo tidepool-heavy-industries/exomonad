@@ -41,6 +41,14 @@ pre-commit:
     cabal test all
     cd rust && cargo test
 
+# Build effector binary
+build-effector:
+    cd rust && cargo build -p effector
+
+# Test effector binary
+test-effector:
+    cd rust && cargo test -p effector
+
 # ─────────────────────────────────────────────────────────────
 # WASM Roundtrip Testing
 # ─────────────────────────────────────────────────────────────
@@ -99,8 +107,8 @@ rebuild-runtime:
     cabal build tidepool-control-server
 
     echo ""
-    echo "── Building Rust (mantle-agent, tui-sidebar, tui-popup, ssh-proxy) ──"
-    cd "$REPO_ROOT/rust" && cargo build --release -p mantle-agent -p tui-sidebar -p tui-popup -p ssh-proxy
+    echo "── Building Rust (mantle-agent, tui-sidebar, tui-popup, ssh-proxy, effector) ──"
+    cd "$REPO_ROOT/rust" && cargo build --release -p mantle-agent -p tui-sidebar -p tui-popup -p ssh-proxy -p effector
 
     echo ""
     echo "── Installing to $RUNTIME_BIN ──"
@@ -110,6 +118,7 @@ rebuild-runtime:
     cp "$REPO_ROOT/rust/target/release/tui-sidebar" "$RUNTIME_BIN/"
     cp "$REPO_ROOT/rust/target/release/tui-popup" "$RUNTIME_BIN/"
     cp "$REPO_ROOT/rust/target/release/ssh-proxy" "$RUNTIME_BIN/"
+    cp "$REPO_ROOT/rust/target/release/effector" "$RUNTIME_BIN/"
 
     echo ""
     echo "── Code signing binaries (macOS) ──"
@@ -118,6 +127,7 @@ rebuild-runtime:
     codesign -s - --force "$RUNTIME_BIN/tui-sidebar" 2>/dev/null || true
     codesign -s - --force "$RUNTIME_BIN/tui-popup" 2>/dev/null || true
     codesign -s - --force "$RUNTIME_BIN/ssh-proxy" 2>/dev/null || true
+    codesign -s - --force "$RUNTIME_BIN/effector" 2>/dev/null || true
 
     echo ""
     echo "✓ Runtime binaries rebuilt from current repo:"
