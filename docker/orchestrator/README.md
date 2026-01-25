@@ -1,35 +1,53 @@
-# Tidepool Orchestrator Container
+# Tidepool Orchestrator Container (Legacy)
 
-The Orchestrator container provides a centralized environment for managing Tidepool agents and services. It uses Zellij as a terminal multiplexer and runs the `tidepool-control-server` as a background service.
+> **DEPRECATED:** This monolithic orchestrator has been replaced by the Container Separation Architecture.
+>
+> **Use instead:** `docker compose up` which starts dedicated containers:
+> - `tidepool-zellij` - Minimal visual multiplexer
+> - `tidepool-control-server` - Haskell MCP server
+> - `tidepool-tl` / `tidepool-pm` - Named agent containers
+> - `tidepool-docker-spawner` - Container lifecycle management
+>
+> See root `CLAUDE.md` for the new architecture.
 
-## Features
+## Migration
 
-- **Zellij IDE**: Multi-pane terminal interface for managing services and agents.
-- **Control Server**: Pre-configured `tidepool-control-server` running in a dedicated pane.
-- **Docker-out-of-Docker (DooD)**: Ability to spawn and manage sibling agent containers.
-- **Zombie Reaping**: Uses `tini` as PID 1 for proper signal handling and process management.
+The orchestrator combined multiple concerns in one container. The new architecture separates them:
 
-## Prerequisites
+| Old (orchestrator) | New (separated) |
+|--------------------|-----------------|
+| Zellij + control-server + shell | `zellij` container (minimal) |
+| Built-in control-server | `control-server` container |
+| Manual agent spawning | `tl` + `pm` containers (auto-start) |
+| SSH for remote exec | `docker-spawner` `/exec` endpoint |
 
-- Linux x86_64 binaries for Tidepool components:
-    - `tidepool-control-server`
-    - `tui-popup`
-    - `mantle-agent` (recommended)
+## Running Legacy Orchestrator
 
-Place these binaries in the `bin/` directory before building the image.
-
-## Build
+If you need the old behavior:
 
 ```bash
-cd docker/orchestrator
-mkdir -p bin
-# Copy Linux binaries into bin/
-docker build -t tidepool/orchestrator .
+# Start with legacy profile
+docker compose --profile legacy up orchestrator
+docker attach tidepool-orchestrator
 ```
 
-## Run
+## Historical Documentation
 
-Run the orchestrator with the following command:
+The orchestrator provided:
+
+- **Zellij IDE**: Multi-pane terminal interface
+- **Control Server**: `tidepool-control-server` in dedicated pane
+- **Docker-out-of-Docker**: Sibling container management
+- **Zombie Reaping**: tini as PID 1
+
+### Layout
+
+Default Zellij layout:
+- **Control Server** (Left): Real-time logs
+- **Shell** (Top Right): Interactive bash
+- **Logs** (Bottom Right): Log tail
+
+### Mounts
 
 ```bash
 docker run -it --rm \
@@ -43,18 +61,10 @@ docker run -it --rm \
   tidepool/orchestrator
 ```
 
-### Mounts and Flags
+## Files
 
-- `--detach-keys="ctrl-e,e"`: Allows detaching from the container without killing the Zellij session.
-- `-v /var/run/docker.sock:/var/run/docker.sock`: Enables DooD (Docker-out-of-Docker) for sibling container management.
-- `-v $(pwd)/worktrees:/worktrees`: Shared workspace for agents.
-- `-v ~/.claude.json:/root/.claude.json:ro`: Shares Claude Code authentication/config.
-- `-v tidepool-sockets:/sockets`: Named volume for Unix Domain Sockets.
-- `-v tidepool-zellij-cache:/root/.cache/zellij`: Named volume for Zellij session persistence.
-
-## Layout
-
-The orchestrator launches with a default Zellij layout:
-- **Control Server**: (Left) Real-time logs and status of the Haskell control server.
-- **Shell**: (Top Right) Interactive bash shell for manual commands and agent spawning.
-- **Logs**: (Bottom Right) Tail of `/var/log/tidepool/control-server.log`.
+| File | Purpose |
+|------|---------|
+| `Dockerfile` | Multi-stage build (Haskell + Rust + runtime) |
+| `config/layout.kdl` | Zellij layout definition |
+| `config/config.kdl` | Zellij configuration |

@@ -1,6 +1,8 @@
 use bollard::container::{Config, CreateContainerOptions, StartContainerOptions, StopContainerOptions, RemoveContainerOptions, InspectContainerOptions};
+use bollard::exec::{CreateExecOptions, StartExecResults};
 use bollard::Docker;
 use bollard::models::{HostConfig, Mount, MountTypeEnum};
+use futures_util::stream::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -25,6 +27,24 @@ pub struct SpawnResponse {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct StatusResponse {
     pub status: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ExecRequest {
+    pub cmd: Vec<String>,
+    #[serde(default)]
+    pub workdir: Option<String>,
+    #[serde(default)]
+    pub env: Option<Vec<String>>,
+    #[serde(default)]
+    pub user: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ExecResponse {
+    pub exit_code: Option<i64>,
+    pub stdout: String,
+    pub stderr: String,
 }
 
 pub struct Spawner {
@@ -145,6 +165,60 @@ impl Spawner {
         info!("Removing container {}", id);
         self.docker.remove_container(id, None::<RemoveContainerOptions>).await?;
         Ok(())
+    }
+
+    /// Execute a command in a running container
+    pub async fn exec(&self, id: &str, req: ExecRequest) -> anyhow::Result<ExecResponse> {
+        info!("Executing command in container {}: {:?}", id, req.cmd);
+
+        let exec_options = CreateExecOptions {
+            cmd: Some(req.cmd),
+            attach_stdout: Some(true),
+            attach_stderr: Some(true),
+            working_dir: req.workdir,
+            env: req.env,
+            user: req.user,
+            ..Default::default()
+        };
+
+        let exec = self.docker.create_exec(id, exec_options).await?;
+
+        let start_result = self.docker.start_exec(&exec.id, None).await?;
+
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+
+        match start_result {
+            StartExecResults::Attached { mut output, .. } => {
+                while let Some(chunk) = output.next().await {
+                    match chunk {
+                        Ok(bollard::container::LogOutput::StdOut { message }) => {
+                            stdout.extend_from_slice(&message);
+                        }
+                        Ok(bollard::container::LogOutput::StdErr { message }) => {
+                            stderr.extend_from_slice(&message);
+                        }
+                        Ok(_) => {}
+                        Err(e) => {
+                            warn!("Error reading exec output: {}", e);
+                        }
+                    }
+                }
+            }
+            StartExecResults::Detached => {
+                warn!("Exec started in detached mode unexpectedly");
+            }
+        }
+
+        // Get exit code
+        let inspect = self.docker.inspect_exec(&exec.id).await?;
+        let exit_code = inspect.exit_code;
+
+        Ok(ExecResponse {
+            exit_code,
+            stdout: String::from_utf8_lossy(&stdout).to_string(),
+            stderr: String::from_utf8_lossy(&stderr).to_string(),
+        })
     }
 }
 

@@ -1,89 +1,172 @@
 # Claude Code Agent Container
 
-This directory contains the Docker infrastructure for running Claude Code agents in isolated containers.
+Docker container for running Claude Code agents in the Tidepool container separation architecture.
 
-## Build
+## Architecture
 
-Before building the container, ensure the `mantle-agent` binary is built for Linux:
+Agent containers run Claude Code CLI and connect to the control-server via TCP MCP:
 
-```bash
-# Cross-compile mantle-agent for Linux (x86_64)
-docker run --rm -v "$(pwd):/app" -w /app/rust rust:latest cargo build --release -p mantle-agent
-cp rust/target/release/mantle-agent docker/claude-agent/bin/
 ```
-
-Then build the container:
-
-```bash
-docker build -t tidepool/claude-agent:latest docker/claude-agent
-```
-
-## Running with Shared Volumes
-
-To optimize performance and disk usage, the container supports mounting shared caches for Git, Cargo, and Cabal.
-
-### 1. Git Cache (Alternates)
-
-Create a bare clone of the repository on the host to serve as a shared object store. Set `preciousObjects` to true to prevent `git gc` from corrupting the shared objects.
-
-```bash
-mkdir -p ~/.cache/tidepool/git
-git clone --bare https://github.com/tidepool-heavy-industries/tidepool.git ~/.cache/tidepool/git/tidepool.git
-cd ~/.cache/tidepool/git/tidepool.git
-git config extensions.preciousObjects true
-```
-
-When running the container, mount this directory and set `GIT_ALTERNATES_OBJECT_DIR`:
-
-```bash
-docker run -it \
-  -v ~/.cache/tidepool/git/tidepool.git/objects:/cache/git-objects:ro \
-  -e GIT_ALTERNATES_OBJECT_DIR=/cache/git-objects \
-  ...
-```
-
-### 2. Authentication (OAuth Session)
-
-Claude Code stores its OAuth session in `~/.claude.json`. Bind-mount your host's config to avoid re-authenticating inside the container.
-
-```bash
-docker run -it \
-  -v ~/.claude.json:/home/agent/.claude.json:ro \
-  ...
-```
-
-### 3. Full Run Command Example
-
-Use `--detach-keys="ctrl-e,e"` to avoid `Ctrl+P` conflicts with Claude's navigation shortcuts.
-
-```bash
-docker run -it \
-  --name claude-agent \
-  --detach-keys="ctrl-e,e" \
-  -v $(pwd):/workspace \
-  -v ~/.claude.json:/home/agent/.claude.json:ro \
-  -v ~/.cache/tidepool/git/tidepool.git/objects:/cache/git-objects:ro \
-  -v ~/.cache/tidepool/cargo:/home/agent/.cargo/registry \
-  -v ~/.cache/tidepool/cabal:/home/agent/.cabal/store \
-  -v ~/.tidepool/sockets:/home/agent/.tidepool/sockets \
-  -e GIT_ALTERNATES_OBJECT_DIR=/cache/git-objects \
-  -e TIDEPOOL_CONTROL_SOCKET=/home/agent/.tidepool/sockets/control.sock \
-  tidepool/claude-agent:latest
+┌──────────────────────────────────────┐
+│ claude-agent container               │
+│  • Claude Code CLI                   │
+│  • mantle-agent (hook forwarding)    │
+│  • Haskell/Rust toolchains           │
+│  • No SSH (uses docker exec)         │
+└──────────────┬───────────────────────┘
+               │ TCP :7432
+               ▼
+┌──────────────────────────────────────┐
+│ control-server container             │
+│  • MCP server                        │
+│  • LSP (HLS)                         │
+└──────────────────────────────────────┘
 ```
 
 ## Environment Variables
 
-| Variable | Description |
-|----------|-------------|
-| `GIT_ALTERNATES_OBJECT_DIR` | Path inside container to the shared git object store. |
-| `MANTLE_CONTROL_SOCKET` | Path to the control server Unix socket (default: `/home/agent/.tidepool/sockets/control.sock`). |
+| Variable | Purpose |
+|----------|---------|
+| `TIDEPOOL_ROLE` | Agent role: `tl` (Tech Lead) or `pm` (Project Manager) |
+| `CONTROL_SERVER_URL` | TCP URL for MCP (e.g., `http://control-server:7432`) |
+| `ANTHROPIC_API_KEY` | Claude API key |
+| `GIT_ALTERNATES_OBJECT_DIR` | Optional: shared git objects directory |
 
-## Startup Configuration
+## MCP Configuration
 
-The `entrypoint.sh` script automatically:
-1. Configures `.claude/settings.json` with hooks pointing to `mantle-agent`.
-2. Configures `.mcp.json` using the `http+unix` protocol for control socket communication.
-3. Links the mounted git alternates if `GIT_ALTERNATES_OBJECT_DIR` is set.
-4. Pre-seeds `~/.claude.json` to bypass onboarding prompts.
+The entrypoint automatically configures MCP based on environment:
 
+**TCP transport (Docker - recommended):**
+```json
+{
+  "mcpServers": {
+    "tidepool": {
+      "type": "http",
+      "url": "http://control-server:7432/role/tl/mcp"
+    }
+  }
+}
 ```
+
+**Unix socket transport (local dev):**
+```json
+{
+  "mcpServers": {
+    "control": {
+      "type": "http",
+      "url": "http+unix://%2Fhome%2Fagent%2F.tidepool%2Fsockets%2Fcontrol.sock/mcp"
+    }
+  }
+}
+```
+
+## Remote Execution
+
+Remote command execution uses docker-spawner's `/exec` endpoint instead of SSH:
+
+```bash
+# Execute command in this container
+curl -X POST http://docker-spawner:7435/exec/tidepool-tl \
+  -H "Content-Type: application/json" \
+  -d '{"cmd": ["cabal", "build"], "workdir": "/workspace"}'
+```
+
+This approach eliminates the need for:
+- SSH daemon in the container
+- SSH key generation/distribution
+- Port 22 exposure
+
+## Build
+
+The container is built as part of docker-compose:
+
+```bash
+docker compose build tl pm
+```
+
+Or standalone:
+
+```bash
+docker build -t tidepool/claude-agent -f docker/claude-agent/Dockerfile .
+```
+
+## Usage via Docker Compose
+
+```yaml
+services:
+  tl:
+    build:
+      dockerfile: docker/claude-agent/Dockerfile
+    container_name: tidepool-tl
+    tty: true
+    stdin_open: true
+    environment:
+      - TIDEPOOL_ROLE=tl
+      - CONTROL_SERVER_URL=http://control-server:7432
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+```
+
+Attach via Zellij panes or directly:
+
+```bash
+docker attach tidepool-tl
+# Detach: Ctrl+p, Ctrl+q
+```
+
+## Shared Caches
+
+### Git Alternates
+
+Share git objects between containers to save disk space:
+
+```bash
+# Host: create shared object store
+git clone --bare https://github.com/org/repo.git ~/.cache/tidepool/git/repo.git
+```
+
+Mount and set environment:
+```yaml
+volumes:
+  - ~/.cache/tidepool/git:/cache/git:ro
+environment:
+  - GIT_ALTERNATES_OBJECT_DIR=/cache/git/repo.git/objects
+```
+
+### Authentication
+
+Mount Claude credentials (read-only recommended):
+
+```yaml
+volumes:
+  - tidepool-claude-auth:/mnt/secrets:ro
+```
+
+The entrypoint links credentials from `/mnt/secrets/` into the config directory.
+
+## Entrypoint Behavior
+
+The `entrypoint.sh` script:
+
+1. **Git alternates**: Links worktree to shared object store if `GIT_ALTERNATES_OBJECT_DIR` set
+2. **Auth isolation**: Links credentials from `/mnt/secrets/` if mounted
+3. **Claude hooks**: Creates `settings.json` with mantle-agent hooks (if not already linked)
+4. **MCP config**: Generates `.mcp.json` based on `CONTROL_SERVER_URL` or `MANTLE_CONTROL_SOCKET`
+5. **Exec via tini**: Launches CMD with proper signal handling
+
+## Installed Toolchains
+
+| Tool | Version | Purpose |
+|------|---------|---------|
+| GHC | 9.6.4 | Haskell compiler |
+| Cabal | 3.10.2.1 | Haskell build tool |
+| HLS | Latest | Haskell Language Server |
+| Rust | Latest stable | Rust toolchain |
+| Node.js | 20.x | JavaScript runtime |
+| Claude Code | Latest | AI coding assistant |
+
+## Files
+
+| File | Purpose |
+|------|---------|
+| `Dockerfile` | Multi-stage build (rust builder → runtime) |
+| `entrypoint.sh` | Container initialization |

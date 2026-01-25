@@ -42,8 +42,10 @@ CLAUDE.md  ← YOU ARE HERE (project overview)
 │   └── tools/CLAUDE.md         ← Dev tools (ghci-oracle, sleeptime, training-generator)
 ├── rust/CLAUDE.md             ← Claude Code++ (hook handler + MCP forwarding + TUI)
 │   ├── mantle-agent/CLAUDE.md  ← Hook handler (HTTP over Unix socket) (IMPLEMENTED)
+│   ├── docker-spawner/CLAUDE.md ← Container lifecycle + remote exec (IMPLEMENTED)
 │   ├── mantle-hub/CLAUDE.md    ← Metrics hub (LEGACY, needs repurposing)
 │   ├── mantle-shared/CLAUDE.md ← Protocol types, Unix socket client
+│   ├── ssh-proxy/CLAUDE.md     ← DEPRECATED (replaced by docker-spawner)
 │   └── tui-sidebar/CLAUDE.md   ← TUI sidebar: ratatui rendering for graph UIs (IMPLEMENTED)
 ├── types-first-dev/CLAUDE.md   ← V3 TDD protocol project
 ├── deploy/CLAUDE.md            ← Cloudflare deployment
@@ -73,6 +75,7 @@ CLAUDE.md  ← YOU ARE HERE (project overview)
 | Work on the native server | `haskell/native-server/CLAUDE.md` |
 | Work on debug UI frontend | `anemone/CLAUDE.md` or `typescript/native-gui/CLAUDE.md` |
 | Work on TUI sidebar (terminal UI rendering) | `rust/tui-sidebar/CLAUDE.md` |
+| Work on container spawning/exec | `rust/docker-spawner/CLAUDE.md` |
 | Understand control protocol types | `rust/mantle-shared/CLAUDE.md` |
 
 ---
@@ -278,81 +281,95 @@ In `.claude/settings.local.json`:
 
 ### Running
 
-**Docker Compose Orchestration (Recommended for Linux)**
+**Docker Compose - Container Separation Architecture (Recommended)**
 
-The Docker Compose setup provides a containerized environment with Zellij TUI:
+The Docker Compose setup uses a separated container architecture:
 
-```bash
-# Start the orchestrator container
-docker compose up -d orchestrator
-
-# Attach to the Zellij session (detach: Ctrl+o, d)
-just docker-attach
-# Or: docker exec -it tidepool-orchestrator gosu user zellij attach orchestrator
 ```
+┌─────────────────────────────────────────────────────────────────┐
+│ zellij container (human attaches here)                          │
+│  • Minimal: Zellij + Docker CLI + curl                          │
+│  • Panes: docker attach tl, docker attach pm, ...               │
+└─────────────────────────────────────────────────────────────────┘
+              │ docker attach
+              ▼
+┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐
+│ tl (claude-agent)│  │ pm (claude-agent)│  │ subagents...     │
+│ ROLE=tl          │  │ ROLE=pm          │  │ (dynamic)        │
+└────────┬─────────┘  └────────┬─────────┘  └────────┬─────────┘
+         │ TCP :7432           │                     │
+         ▼                     ▼                     ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ control-server container                                        │
+│  • MCP server (TCP 7432)                                        │
+│  • Calls docker-spawner for spawn + exec                        │
+│  • Creates Zellij tabs (shared socket)                          │
+└───────────────────────────────────┬─────────────────────────────┘
+                                    │ HTTP :7435
+                                    ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ docker-spawner container                                        │
+│  • POST /spawn, /stop/{id}, /status/{id}                        │
+│  • POST /exec/{id} (remote command execution)                   │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Quick Start:**
+```bash
+# Build and start all containers
+docker compose up -d
+
+# Attach to Zellij (main interface)
+docker attach tidepool-zellij
+
+# Detach with Ctrl+p, Ctrl+q
+```
+
+**Services:**
+| Container | Purpose |
+|-----------|---------|
+| `tidepool-zellij` | Minimal Zellij multiplexer (human attaches here) |
+| `tidepool-control-server` | Haskell MCP server (TCP 7432) |
+| `tidepool-tl` | Tech Lead agent (coding) |
+| `tidepool-pm` | Project Manager agent (planning) |
+| `tidepool-docker-spawner` | Container lifecycle management |
 
 **Features:**
-- ✅ 3-pane Zellij layout: control-server logs | Claude Code CLI | tail logs
-- ✅ Claude Code with MCP tools + hooks (full integration)
-- ✅ control-server with MCP tools via Unix socket (`/sockets/control.sock`)
-- ✅ Cross-container Zellij tab creation (spawn_agents creates tabs in orchestrator)
-- ✅ Clean shutdown: `docker compose down` (no hangs)
-- ✅ Persistent sessions via session serialization
-
-**Remote access:**
-```bash
-# Control remote Docker via SSH
-export DOCKER_HOST=ssh://user@hostname
-docker compose up -d
-docker exec -it tidepool-orchestrator gosu user zellij attach orchestrator
-```
-
-#### Docker Claude Code Session
-
-The orchestrator's middle pane runs Claude Code CLI with full MCP and hook integration:
-
-**What you get:**
-- Claude Code session inside Docker container
-- MCP tools from control-server (`find_callers`, `show_fields`, `show_constructors`, `teach-graph`, `confirm_action`, `select_option`, `request_guidance`)
-- PreToolUse hooks via mantle-agent (tool call interception)
-- Working directory: `/worktrees` (project root, bind-mounted from host)
-- **SSH Access**: Agent containers accept SSH connections from the orchestrator for remote command execution.
-
-**Agent SSH Setup:**
-- **Pre-build Requirement**: Before building Docker images, run `./scripts/docker-prebuild.sh` (or `just docker-prebuild`) to generate the necessary SSH keypair.
-- **Security**: SSH is restricted to the internal Docker network. Root login is enabled via Ed25519 public key authentication only (no passwords).
-- **Testing**: Use `just test-ssh` to verify connectivity between the orchestrator and an agent container.
-
-**Basic workflow:**
-1. Run pre-build: `./scripts/docker-prebuild.sh`
-2. Start orchestrator: `docker compose up -d`
-3. Attach to Zellij: `just docker-attach` (detach with Ctrl+o, d)
-4. Middle pane shows Claude Code prompt
+- ✅ Named agent containers (TL + PM always running)
+- ✅ TCP MCP transport (no Unix socket complexity)
+- ✅ `/exec` endpoint for remote command execution
+- ✅ Zellij panes connect via `docker attach`
+- ✅ Clean separation of concerns
+- ✅ Dynamic subagent spawning via docker-spawner
 
 **Testing MCP connection:**
 ```
-Type in Claude Code pane: /mcp
-Expected: Shows "tidepool" server status
-If connected: /tools
-Expected: Lists 7 MCP tools
+# In TL or PM pane
+/mcp
+Expected: Shows "tidepool" server connected
+
+/tools
+Expected: Lists MCP tools
 ```
 
-**Testing hooks:**
-```
-Ask Claude: "Read the CLAUDE.md file"
-Expected: PreToolUse hook fires (visible in control-server logs, left pane)
+**Testing docker-spawner exec:**
+```bash
+curl -X POST http://localhost:7435/exec/tidepool-tl \
+  -H "Content-Type: application/json" \
+  -d '{"cmd": ["echo", "hello"]}'
 ```
 
-**Configuration (auto-generated at startup):**
-- `/root/.claude.json` - Skip onboarding
-- `/root/.mcp.json` - MCP server pointing to `/sockets/control.sock`
-- `/root/.claude/settings.json` - Hook configuration for mantle-agent
+**Rollback to Legacy Orchestrator:**
+```bash
+# Use the legacy profile
+docker compose --profile legacy up orchestrator
+docker attach tidepool-orchestrator
+```
 
 **Troubleshooting:**
 - **MCP shows "failed" on startup**: control-server still initializing. Use `/mcp` → `Reconnect` after 10 seconds.
-- **"Command not found: claude-code"**: Check build logs for Claude CLI installation errors.
-- **Authentication errors**: Verify `~/.claude/.credentials.json` exists on host and is mounted.
-- **Working directory wrong**: Claude Code should start in `/worktrees`. Check Zellij layout args.
+- **Agent not responding**: Check `docker logs tidepool-tl` or `docker logs tidepool-pm`.
+- **Authentication errors**: Verify credentials in `tidepool-claude-auth` volume.
 
 **Hybrid Tidepool Architecture (process-compose + Zellij - Local Development)**
 

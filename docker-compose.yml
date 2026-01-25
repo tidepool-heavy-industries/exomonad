@@ -1,13 +1,20 @@
+# Container Separation Architecture
+# ================================
+# - zellij: Minimal visual multiplexer (human attaches here)
+# - control-server: Dedicated Haskell MCP server
+# - tl/pm: Named agent containers (always running)
+# - docker-spawner: Container lifecycle management
+
 services:
+  # ===========================================================================
+  # Control Server: MCP server for all agents
+  # ===========================================================================
   control-server:
-    # Backend: Haskell MCP server + LSP integration
-    platform: linux/amd64
     build:
       context: .
-      dockerfile: docker/orchestrator/Dockerfile
-      target: control-server
+      dockerfile: docker/control-server/Dockerfile
     container_name: tidepool-control-server
-    # Memory limits prevent OOM kills that cause garbled terminals
+    platform: linux/amd64
     deploy:
       resources:
         limits:
@@ -19,40 +26,143 @@ services:
       - TIDEPOOL_CONTROL_SOCKET=/sockets/control.sock
       - TIDEPOOL_TUI_SOCKET=/sockets/tui.sock
       - GEMMA_ENDPOINT=${GEMMA_ENDPOINT:-http://host.docker.internal:11434}
-      # Zellij cross-container access (shared socket with orchestrator)
+      - DOCKER_SPAWNER_URL=http://docker-spawner:7435
       - XDG_RUNTIME_DIR=/run/user/1000
-      - ZELLIJ_SESSION_NAME=orchestrator
-      # Observability (optional - set OTEL_EXPORTER_OTLP_ENDPOINT in .env to enable)
-      # - OTEL_EXPORTER_OTLP_ENDPOINT=http://openobserve:5081
-      # - OTEL_EXPORTER_OTLP_HEADERS=Authorization=Basic ${OPENOBSERVE_AUTH_HEADER}
+      - ZELLIJ_SESSION_NAME=main
     volumes:
       - tidepool-sockets:/sockets
       - tidepool-zellij:/run/user/1000
+      - /var/run/docker.sock:/var/run/docker.sock
     healthcheck:
-      # Use socat to verify actual connectivity, not just file existence
       test: ["CMD-SHELL", "socat -u OPEN:/dev/null UNIX-CONNECT:/sockets/control.sock || exit 1"]
       interval: 5s
       timeout: 2s
       retries: 5
-      start_period: 5s
+      start_period: 10s
     restart: unless-stopped
     networks:
       - tidepool-internal
 
+  # ===========================================================================
+  # Zellij: Visual multiplexer (human attaches here)
+  # ===========================================================================
+  zellij:
+    build:
+      context: .
+      dockerfile: docker/zellij/Dockerfile
+    container_name: tidepool-zellij
+    platform: linux/amd64
+    tty: true
+    stdin_open: true
+    depends_on:
+      tl:
+        condition: service_started
+      pm:
+        condition: service_started
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - tidepool-zellij:/run/user/1000
+    restart: unless-stopped
+    networks:
+      - tidepool-internal
+
+  # ===========================================================================
+  # TL (Tech Lead): Main coding agent
+  # ===========================================================================
+  tl:
+    build:
+      context: .
+      dockerfile: docker/claude-agent/Dockerfile
+    container_name: tidepool-tl
+    platform: linux/amd64
+    tty: true
+    stdin_open: true
+    environment:
+      - TIDEPOOL_ROLE=tl
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - CONTROL_SERVER_URL=http://control-server:7432
+      - MANTLE_CONTROL_SOCKET=/sockets/control.sock
+    volumes:
+      - tidepool-worktrees:/workspace
+      - tidepool-sockets:/sockets
+      - tidepool-claude-auth:/mnt/secrets:ro
+    depends_on:
+      control-server:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - tidepool-internal
+
+  # ===========================================================================
+  # PM (Project Manager): Planning and coordination agent
+  # ===========================================================================
+  pm:
+    build:
+      context: .
+      dockerfile: docker/claude-agent/Dockerfile
+    container_name: tidepool-pm
+    platform: linux/amd64
+    tty: true
+    stdin_open: true
+    environment:
+      - TIDEPOOL_ROLE=pm
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - CONTROL_SERVER_URL=http://control-server:7432
+      - MANTLE_CONTROL_SOCKET=/sockets/control.sock
+    volumes:
+      - tidepool-worktrees:/workspace
+      - tidepool-sockets:/sockets
+      - tidepool-claude-auth:/mnt/secrets:ro
+    depends_on:
+      control-server:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - tidepool-internal
+
+  # ===========================================================================
+  # Docker Spawner: Container lifecycle management
+  # ===========================================================================
+  docker-spawner:
+    build:
+      context: .
+      dockerfile: docker/docker-spawner/Dockerfile
+    container_name: tidepool-docker-spawner
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - tidepool-worktrees:/worktrees:rw
+    environment:
+      - RUST_LOG=info
+      - HOST_UID=${HOST_UID:-1000}
+      - HOST_GID=${HOST_GID:-1000}
+      - TIDEPOOL_AGENT_IMAGE=${TIDEPOOL_AGENT_IMAGE:-tidepool-agent:latest}
+      - TIDEPOOL_NETWORK=tidepool-internal
+    ports:
+      - "7435:7435"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7435/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - tidepool-internal
+
+  # ===========================================================================
+  # OpenObserve: Observability backend (optional)
+  # ===========================================================================
   openobserve:
-    # Observability backend (optional - use with: docker compose --profile monitoring up)
     profiles: ["monitoring"]
     image: public.ecr.aws/zinclabs/openobserve:latest
     container_name: tidepool-openobserve
     restart: unless-stopped
     ports:
-      - "5080:5080"  # Web UI & HTTP API
-      - "5081:5081"  # OTLP gRPC ingestion
+      - "5080:5080"
+      - "5081:5081"
     environment:
       - ZO_DATA_DIR=/data
       - ZO_ROOT_USER_EMAIL=${OPENOBSERVE_EMAIL:-admin@tidepool.local}
       - ZO_ROOT_USER_PASSWORD=${OPENOBSERVE_PASSWORD:-tidepool-dev}
-      # Memory tuning for Docker (prevent OOM)
       - ZO_MAX_FILE_SIZE_IN_MEMORY=128
       - ZO_MEMORY_CACHE_MAX_SIZE=256
       - ZO_FILE_MOVE_THREAD_NUM=1
@@ -66,16 +176,17 @@ services:
       timeout: 5s
       retries: 3
 
+  # ===========================================================================
+  # DEPRECATED: Orchestrator (kept for rollback)
+  # ===========================================================================
   orchestrator:
-    # Frontend: Zellij + Claude Code CLI (attach via: docker exec -it --user user tidepool-orchestrator zellij attach orchestrator)
+    profiles: ["legacy"]
     platform: linux/amd64
     build:
       context: .
       dockerfile: docker/orchestrator/Dockerfile
       target: orchestrator
     container_name: tidepool-orchestrator
-    # Memory limits prevent OOM kills during Zellij resize/scroll operations
-    # Zellij maintains scrollback buffers per pane (reduced to 2000 lines in config)
     deploy:
       resources:
         limits:
@@ -85,8 +196,8 @@ services:
     depends_on:
       control-server:
         condition: service_healthy
-    tty: true         # Allocate pseudo-TTY (-t)
-    stdin_open: true  # Keep stdin open (-i) - prevents Zellij from detecting EOF and exiting
+    tty: true
+    stdin_open: true
     environment:
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}
@@ -95,10 +206,8 @@ services:
       - TIDEPOOL_TUI_SOCKET=/sockets/tui.sock
       - CLAUDE_CONFIG_DIR=/home/user/.claude
       - RUST_BACKTRACE=full
-      # Git repo to clone (for remote Docker where bind mounts don't work)
       - TIDEPOOL_REPO_URL=${TIDEPOOL_REPO_URL:-git@github.com:tidepool-heavy-industries/tidepool.git}
       - TIDEPOOL_REPO_BRANCH=${TIDEPOOL_REPO_BRANCH:-main}
-      # Claude Code environment
       - CLAUDE_CODE_DISABLE_INSTALLATION_CHECKS=1
       - DISABLE_AUTOUPDATER=1
       - DISABLE_TELEMETRY=1
@@ -113,64 +222,6 @@ services:
     networks:
       - tidepool-internal
     command: ["orchestrator"]
-
-  orchestrator-dev:
-    # Development profile with HLS
-    profiles: ["dev"]
-    platform: linux/amd64
-    build:
-      context: .
-      dockerfile: docker/orchestrator/Dockerfile
-      target: dev
-    container_name: tidepool-orchestrator-dev
-    environment:
-      - PUID=${PUID:-1000}
-      - PGID=${PGID:-1000}
-      - HANGAR_ROOT=/worktrees
-      - CLAUDE_CONFIG_DIR=/home/user/.claude
-      - TIDEPOOL_REPO_URL=${TIDEPOOL_REPO_URL:-git@github.com:tidepool-heavy-industries/tidepool.git}
-      - TIDEPOOL_REPO_BRANCH=${TIDEPOOL_REPO_BRANCH:-main}
-    volumes:
-      - tidepool-repo:/worktrees
-      - tidepool-sockets:/sockets
-      - tidepool-claude-auth:/home/user/.claude
-      - tidepool-ssh-keys:/home/user/.ssh
-    command: ["cabal", "repl", "tidepool-control-server"]
-
-  agent-1:
-    build:
-      context: .
-      dockerfile: docker/claude-agent/Dockerfile
-    hostname: agent-1
-    networks:
-      - tidepool-internal
-    depends_on:
-      - orchestrator
-    command: ["sleep", "infinity"]
-
-  docker-spawner:
-    build:
-      context: .
-      dockerfile: docker/docker-spawner/Dockerfile
-    container_name: tidepool-docker-spawner
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock  # DooD pattern
-      - tidepool-worktrees:/worktrees:rw
-    environment:
-      - RUST_LOG=info
-      - HOST_UID=${HOST_UID:-1000}
-      - HOST_GID=${HOST_GID:-1000}
-      - TIDEPOOL_AGENT_IMAGE=${TIDEPOOL_AGENT_IMAGE:-tidepool-agent:latest}
-    ports:
-      - "7435:7435"
-    networks:
-      - tidepool-internal
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:7435/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-    restart: unless-stopped
 
 volumes:
   tidepool-sockets:

@@ -2,10 +2,6 @@
 # Claude Code Agent Entrypoint
 set -e
 
-# Start sshd (daemonized)
-echo "Starting SSH server..."
-/usr/sbin/sshd
-
 # 1. Link worktree to shared git alternates if provided
 # This saves disk space by sharing the object store with a host-side cache
 if [ -n "$GIT_ALTERNATES_OBJECT_DIR" ] && [ -d "/workspace/.git" ]; then
@@ -31,8 +27,11 @@ echo "✓ Auth isolated in $CONFIG_DIR"
 
 # 2. Configure Claude Code hooks
 # We point hooks to mantle-agent which forwards them to the control-server
+# Only create settings.json if it wasn't linked from secrets
 mkdir -p /home/agent/.claude
-cat > /home/agent/.claude/settings.json <<EOF
+if [ ! -L /home/agent/.claude/settings.json ] && [ ! -f /home/agent/.claude/settings.json ]; then
+    echo "Creating default Claude Code settings with hooks..."
+    cat > /home/agent/.claude/settings.json <<EOF
 {
   "hooks": {
     "PreToolUse": [
@@ -50,17 +49,33 @@ cat > /home/agent/.claude/settings.json <<EOF
   }
 }
 EOF
+else
+    echo "Using existing/linked settings.json"
+fi
 
 # 3. Configure MCP
 # Claude Code uses MCP (Model Context Protocol) for tool extension.
-# We use the http+unix protocol to talk to the control socket.
-# The path must be URL-encoded (/ -> %2F).
-if [ -z "${MANTLE_CONTROL_SOCKET:-}" ]; then
-    echo "Error: MANTLE_CONTROL_SOCKET is not set or empty; cannot configure MCP control socket." >&2
-    exit 1
-fi
-SOCKET_PATH_ENCODED=$(echo "$MANTLE_CONTROL_SOCKET" | sed 's/\//%2F/g')
-cat > /home/agent/.mcp.json <<EOF
+# Priority: TCP URL > Unix socket
+ROLE="${TIDEPOOL_ROLE:-agent}"
+
+if [ -n "${CONTROL_SERVER_URL:-}" ]; then
+    # TCP MCP transport (new container separation architecture)
+    echo "Configuring MCP via TCP: ${CONTROL_SERVER_URL}/role/${ROLE}/mcp"
+    cat > /home/agent/.mcp.json <<EOF
+{
+  "mcpServers": {
+    "tidepool": {
+      "type": "http",
+      "url": "${CONTROL_SERVER_URL}/role/${ROLE}/mcp"
+    }
+  }
+}
+EOF
+elif [ -n "${MANTLE_CONTROL_SOCKET:-}" ]; then
+    # Unix socket transport (legacy)
+    echo "Configuring MCP via Unix socket: ${MANTLE_CONTROL_SOCKET}"
+    SOCKET_PATH_ENCODED=$(echo "$MANTLE_CONTROL_SOCKET" | sed 's/\//%2F/g')
+    cat > /home/agent/.mcp.json <<EOF
 {
   "mcpServers": {
     "control": {
@@ -70,6 +85,9 @@ cat > /home/agent/.mcp.json <<EOF
   }
 }
 EOF
+else
+    echo "Warning: No MCP configuration (neither CONTROL_SERVER_URL nor MANTLE_CONTROL_SOCKET set)" >&2
+fi
 
 
 # 4. Handle mounted socket permissions (if any)

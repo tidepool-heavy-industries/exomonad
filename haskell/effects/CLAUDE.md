@@ -21,6 +21,7 @@ This follows the **interpreter design pattern**: abstract syntax (effect types) 
 | Add session logging | `devlog-interpreter/CLAUDE.md` |
 | Add gamification (Habitica) | `habitica-interpreter/CLAUDE.md` |
 | Create Zellij tabs (parallel agents) | `zellij-interpreter/CLAUDE.md` |
+| Spawn/exec in containers | `docker-spawner-interpreter/CLAUDE.md` |
 | Understand the interpreter pattern | This file (you're here) |
 
 ## Documentation Tree
@@ -43,6 +44,7 @@ effects/CLAUDE.md  ← YOU ARE HERE (router)
 ├── filesystem-interpreter/CLAUDE.md    ← File system operations
 ├── gemini-interpreter/CLAUDE.md        ← Gemini API integration
 ├── zellij-interpreter/CLAUDE.md        ← Zellij terminal multiplexer
+├── docker-spawner-interpreter/CLAUDE.md ← Docker container spawn/exec
 └── habitica/CLAUDE.md                  ← Habitica effect types
 ```
 
@@ -76,6 +78,7 @@ Most effect types live in `dsl/core/src/Tidepool/Effect/Types.hs` or `Effects/*.
 | Filesystem | dsl/core | filesystem-interpreter | File system operations |
 | Gemini | dsl/core | gemini-interpreter | Gemini API |
 | Zellij | dsl/core | zellij-interpreter | Zellij multiplexer |
+| DockerSpawner | dsl/core | docker-spawner-interpreter | HTTP to docker-spawner service |
 
 ## Adding a New Effect Interpreter
 
@@ -92,7 +95,7 @@ Most effect types live in `dsl/core/src/Tidepool/Effect/Types.hs` or `Effects/*.
 
 ## Implementation Patterns
 
-- **HTTP clients**: llm, habitica, github, observability
+- **HTTP clients**: llm, habitica, github, observability, docker-spawner
 - **Subprocesses**: bd, worktree, cabal
 - **Socket clients**: ghci, lsp
 - **WebSocket bridge**: ui

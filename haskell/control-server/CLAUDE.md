@@ -1,6 +1,12 @@
 # Tidepool Control Server
 
-Unix socket server for Claude Code++ integration. Receives hook events from mantle-agent and direct HTTP MCP requests from Claude Code via Unix socket. Provides 7 MCP tools organized in tiers: LSP-only (Tier 1), LLM-enhanced (Tier 2), external orchestration (Tier 3), TUI-interactive (Tier 4), and mailbox communication (Tier 5).
+HTTP server for Claude Code++ integration. Receives hook events from mantle-agent and MCP requests from Claude Code.
+
+**Transport:**
+- **Docker:** TCP on port 7432 (recommended)
+- **Local dev:** Unix socket or TCP
+
+Provides 23+ MCP tools organized in tiers: LSP-only (Tier 1), LLM-enhanced (Tier 2), external orchestration (Tier 3), TUI-interactive (Tier 4), and mailbox communication (Tier 5).
 
 ## When to Read This
 
@@ -160,7 +166,7 @@ The system uses `process-compose` to orchestrate multiple services. Subagents (p
 |-----------|---------------|---------|
 | **Control Server** | `--no-tui` | Disables the TUI sidebar listener (for subagents) |
 | **Subagent Config** | `Paths.hs` + `ProcessCompose.hs` | Programmatic type-safe generation of `process-compose.yaml` |
-| **SSH Proxy** | `SSH_PROXY_URL` | URL of the ssh-proxy server for container execution |
+| **Docker Spawner** | `DOCKER_SPAWNER_URL` | URL of docker-spawner service for container operations |
 
 ### Subagent Environment & Config Handling
 
@@ -170,32 +176,35 @@ Subagents spawned by `spawn_agents` receive a **custom-generated environment and
 - Programmatic generation ensures the configuration is always valid and consistent with the current binary versions.
 - Programmatic path construction (Paths.hs) avoids "stringly-typed" errors and handles OS-specific path limits.
 - Merging environments (Haskell source of truth) prevents variable shadowing issues from root `.env` files.
-- **Container Isolation:** Each subagent is assigned a container ID (`TIDEPOOL_CONTAINER`) for remote execution.
+- **Container Isolation:** Each subagent runs in a named container. Remote execution uses docker-spawner's `/exec/{id}` endpoint.
 
 **How it works (SpawnAgents.hs):**
 1. **Paths:** Canonical paths for sockets (`/tmp/tidepool-...`) and binaries are constructed via `Tidepool.Control.Runtime.Paths`.
 2. **Orchestration:** A `ProcessComposeConfig` Haskell value is constructed and serialized to YAML via `Tidepool.Control.Runtime.ProcessCompose`.
 3. **Source of Truth:** The running Haskell process captures its full environment (`getEnvironment`).
 4. **Filtering & Merging:** Conflicting keys (socket paths) are filtered from the captured environment, and subagent-specific overrides are merged in.
-5. **Container ID:** Sets `TIDEPOOL_CONTAINER=agent-<shortId>` for use by SSH-based effects.
+5. **Container Name:** Subagent containers are named `tidepool-agent-<shortId>` for docker-spawner `/exec` calls.
 6. **Deployment:** Self-contained `.env` and `process-compose.yaml` files are written directly to the subagent worktree.
 7. **Execution:** `process-compose` simply loads the generated files, ensuring an isolated and correctly configured environment.
 
-### SSH Execution Effects
+### Remote Execution via Docker Spawner
 
-The control server supports executing commands inside agent containers via an `ssh-proxy` sidecar. This is used by the `Stop` hook and other tools to gather state from the agent's perspective.
+The control server executes commands inside agent containers via the `docker-spawner` service's `/exec/{id}` endpoint. This replaces the previous SSH-based approach.
 
-- **SshExec Effect:** Low-level effect for making HTTP requests to `ssh-proxy`.
-- **Git Via SSH:** Runs `git` commands in the agent container.
-- **Cabal Via SSH:** Runs `cabal` commands in the agent container with structured error parsing.
-- **Justfile Via SSH:** Runs `just` recipes in the agent container.
+- **DockerSpawner Effect:** HTTP calls to docker-spawner for container operations.
+- **Remote Git:** Runs `git` commands in agent containers via `/exec`.
+- **Remote Cabal:** Runs `cabal` commands with structured error parsing.
+- **Remote Just:** Runs `just` recipes in agent containers.
 
-Interpreters are automatically selected in `Handler/Hook.hs` based on the presence of `TIDEPOOL_CONTAINER`.
+**Advantages over SSH:**
+- No SSH key management required
+- No sshd process in agent containers
+- Uses Docker's native exec capability
+- Unified API for spawn + exec operations
 
 ### Limitations (MVP)
 
-- **Cabal Test Output:** Test failures are not yet parsed into structured `TestFailure` objects when running via SSH. Only raw output is returned.
-- **SSH Connectivity:** Requires a running `ssh-proxy` sidecar. Connection failures are caught and returned as errors, but retry logic is minimal.
+- **Cabal Test Output:** Test failures are not yet parsed into structured `TestFailure` objects. Only raw output is returned.
 
 ### Hook Flow (PreToolUse Example)
 

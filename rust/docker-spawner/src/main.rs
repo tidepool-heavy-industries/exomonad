@@ -5,7 +5,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use spawner::{Spawner, SpawnRequest, SpawnResponse, StatusResponse};
+use spawner::{Spawner, SpawnRequest, SpawnResponse, StatusResponse, ExecRequest, ExecResponse};
 use std::sync::Arc;
 use tracing::{error, info};
 use tower_http::trace::TraceLayer;
@@ -24,8 +24,9 @@ async fn main() -> anyhow::Result<()> {
     let app = Router::new()
         .route("/health", get(health_check))
         .route("/spawn", post(spawn_container))
-        .route("/status/:id", get(get_status))
-        .route("/stop/:id", post(stop_container))
+        .route("/status/{id}", get(get_status))
+        .route("/stop/{id}", post(stop_container))
+        .route("/exec/{id}", post(exec_in_container))
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 
@@ -75,6 +76,20 @@ async fn stop_container(
         Ok(_) => Ok(axum::http::StatusCode::OK),
         Err(e) => {
             error!("Failed to stop container: {}", e);
+            Err((axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
+        }
+    }
+}
+
+async fn exec_in_container(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(payload): Json<ExecRequest>,
+) -> Result<Json<ExecResponse>, (axum::http::StatusCode, String)> {
+    match state.spawner.exec(&id, payload).await {
+        Ok(response) => Ok(Json(response)),
+        Err(e) => {
+            error!("Failed to execute command in container {}: {}", id, e);
             Err((axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
         }
     }

@@ -1,103 +1,36 @@
 # ssh-proxy
 
-SSH Proxy for remote command execution in agent containers.
+> **DEPRECATED:** This crate is no longer used. Remote command execution in agent containers is now handled by the `docker-spawner` service via its `/exec/{id}` endpoint.
+>
+> See: `rust/docker-spawner/` and `docker/docker-spawner/Dockerfile`
 
-## Build and Run
+## Migration
+
+The SSH-based approach has been replaced with Docker exec:
+
+| Old (ssh-proxy) | New (docker-spawner) |
+|-----------------|----------------------|
+| SSH connection to container | Docker exec via bollard API |
+| Key management required | No authentication needed |
+| Port 22 + sshd in container | HTTP API on port 7435 |
+| `POST /exec` with SSH | `POST /exec/{id}` with Docker exec |
+
+## New Approach
 
 ```bash
-# Build
-cargo build -p ssh-proxy
-
-# Run
-export SSH_PROXY_KEY_PATH="/path/to/private/key"
-export SSH_PROXY_PORT="7433"
-cargo run -p ssh-proxy
-```
-
-## API
-
-### POST /exec
-
-Executes a command in a target container via SSH.
-
-**Request Body:**
-```json
-{
-  "container": "agent-id",
-  "command": "cabal",
-  "args": ["build"],
-  "working_dir": "/worktrees/my-worktree",
-  "env": {
-    "PATH": "/usr/local/bin:/usr/bin"
-  },
-  "timeout_secs": 300
-}
-```
-
-**Response (Success):**
-```json
-{
-  "exit_code": 0,
-  "stdout": "...",
-  "stderr": "..."
-}
-```
-
-**Response (Error):**
-```json
-{
-  "error": "SSH connection failed: ...",
-  "container": "agent-id"
-}
-```
-
-## Architecture
-
-- **Axum**: HTTP server for the API.
-- **Connection Pool**: Maintains a `HashMap` of `Arc<Client>` connections to Docker containers.
-- **async-ssh2-tokio**: SSH client library (uses `russh` backend).
-- **Parallelism**: Connections are shared via `Arc`, allowing multiple commands to run in parallel across different containers, and potentially multiple channels on the same container connection.
-- **Shell Escaping**: Uses `shell-escape` to prevent command injection.
-
-## Environment Variables
-
-- `SSH_PROXY_KEY_PATH`: Path to the SSH private key used to connect to agents. Default: `/etc/ssh-proxy/orchestrator_key`.
-- `SSH_PROXY_PORT`: Port for the HTTP server. Default: `7433`.
-- `RUST_LOG`: Logging level (e.g., `info`, `debug`).
-
-## Manual Testing
-
-**Check Health:**
-```bash
-curl http://localhost:7433/health
-# Output: ok
-```
-
-**Execute Command:**
-```bash
-curl -X POST http://localhost:7433/exec \
+# Execute command in container
+curl -X POST http://localhost:7435/exec/tidepool-tl \
   -H "Content-Type: application/json" \
-  -d '{
-    "container": "test-agent",
-    "command": "echo",
-    "args": ["hello world"],
-    "working_dir": "/tmp"
-  }'
+  -d '{"cmd": ["echo", "hello"], "workdir": "/workspace"}'
 ```
 
-## Troubleshooting
+The docker-spawner service uses bollard (Rust Docker API client) to execute commands directly via `docker exec`, eliminating the need for SSH infrastructure in agent containers.
 
-### Connection Refused (SSH)
-- **Error**: `SSH connection failed: Connection refused`
-- **Cause**: The agent container is not running `sshd`, or it is not listening on port 22.
-- **Fix**: Verify `sshd` is running in the agent container (`service ssh status`).
+## Historical Context
 
-### Host Unreachable
-- **Error**: `SSH connection failed: No route to host`
-- **Cause**: The container hostname (e.g., `agent-id.docker.internal`) cannot be resolved.
-- **Fix**: Ensure the `ssh-proxy` and agent are on the same Docker network, or that internal DNS is working.
+This crate provided SSH-based remote execution for agent containers. It was replaced because:
 
-### Permission Denied (Public Key)
-- **Error**: `SSH connection failed: Authentication failed`
-- **Cause**: The key at `SSH_PROXY_KEY_PATH` does not match the public key in the agent's `authorized_keys`.
-- **Fix**: Re-deploy the keys or check permissions on the key file (should be 600).
+1. **Simpler**: No SSH key generation, distribution, or management
+2. **Fewer dependencies**: Agent containers don't need sshd
+3. **Native Docker**: Uses Docker's built-in exec capability
+4. **Unified API**: Container lifecycle and exec in one service

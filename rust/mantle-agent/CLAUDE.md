@@ -4,9 +4,13 @@ Hook handler for Claude Code++ sessions.
 
 ## What This Does
 
-Bridges Claude Code hooks to the Tidepool control server via HTTP over Unix Domain Socket.
+Bridges Claude Code hooks to the Tidepool control server via HTTP.
 
-**MCP Tools:** Claude Code connects directly to control-server via HTTP (TCP port 7432). No proxy needed.
+**Transport:**
+- **Local dev:** HTTP over Unix Domain Socket (`.tidepool/sockets/control.sock`)
+- **Docker:** HTTP over TCP (`http://control-server:7432`)
+
+**MCP Tools:** Claude Code connects directly to control-server via HTTP. No proxy needed.
 
 ## Subcommands
 

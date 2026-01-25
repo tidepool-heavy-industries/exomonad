@@ -1,0 +1,31 @@
+// Zellij configuration for container separation architecture
+
+// Tell Zellij where to find layouts
+layout_dir "/etc/zellij/layouts"
+
+// Memory optimization
+scroll_buffer_size 2000
+
+// Serialization settings
+session_serialization true
+serialization_interval 300
+scrollback_lines_to_serialize 100
+
+// Default layout
+default_layout "main"
+
+// IMPORTANT: Quit on force close (don't detach) to properly cleanup
+on_force_close "quit"
+
+// Keybindings
+keybinds {
+    shared_except "locked" {
+        unbind "Ctrl q"
+        bind "Ctrl q" { Quit; }
+    }
+}
+
+// UI settings
+theme "default"
+mouse_mode true
+copy_on_select true
