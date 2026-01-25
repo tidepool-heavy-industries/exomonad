@@ -113,13 +113,14 @@ COPY docker/orchestrator/config/zellij.kdl /etc/tidepool/zellij/config.kdl
 COPY docker/orchestrator/scripts/orchestrator-entrypoint.sh /usr/local/bin/orchestrator-entrypoint.sh
 COPY scripts/docker-entrypoint-orchestrator.sh /usr/local/bin/docker-entrypoint-orchestrator.sh
 COPY docker/orchestrator/scripts/start-claude.sh /usr/local/bin/start-claude.sh
+COPY docker/orchestrator/scripts/zattach /usr/local/bin/zattach
 
 # Copy SSH private key for ssh-proxy (generated during pre-build)
 COPY docker/orchestrator/ssh-keys/orchestrator_key /etc/ssh-proxy/orchestrator_key
 RUN chmod 600 /etc/ssh-proxy/orchestrator_key
 
 # Ensure scripts are executable
-RUN chmod +x /usr/local/bin/orchestrator-entrypoint.sh /usr/local/bin/docker-entrypoint-orchestrator.sh /usr/local/bin/start-claude.sh
+RUN chmod +x /usr/local/bin/orchestrator-entrypoint.sh /usr/local/bin/docker-entrypoint-orchestrator.sh /usr/local/bin/start-claude.sh /usr/local/bin/zattach
 
 # Environment variables
 ENV TIDEPOOL_CONTROL_SOCKET=/sockets/control.sock

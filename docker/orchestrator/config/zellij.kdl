@@ -3,10 +3,8 @@
 // Tell Zellij where to find custom layouts
 layout_dir "/etc/tidepool/zellij/layouts"
 
-// Default layout for new sessions (used by web interface)
+// Default layout for new sessions
 default_layout "exomonad"
-
-// Web server config passed via CLI args to avoid duplication
 
 // Enable session serialization so the session can be resumed if the container restarts
 session_serialization true

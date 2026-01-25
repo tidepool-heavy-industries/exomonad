@@ -16,15 +16,15 @@ layout {
 
             pane split_direction="horizontal" {
                 // Pane 2: Live control-server logs
-                pane name="Control Server Logs" start_suspended=false {
+                pane name="Backend Logs" start_suspended=false {
                     command "bash"
-                    args "-c" "docker logs -f tidepool-control-server 2>&1 || echo 'Waiting for control-server...' && sleep infinity"
+                    args "-c" "export TERM=xterm-256color; docker logs -f tidepool-control-server 2>&1"
                 }
 
                 // Pane 3: Container status
                 pane name="Status" start_suspended=false {
                     command "bash"
-                    args "-c" "watch -n5 'docker ps --format \"table {{.Names}}\t{{.Status}}\" --filter name=tidepool'"
+                    args "-c" "export TERM=xterm-256color; watch -c -n5 'docker ps --format \"table {{.Names}}\\t{{.Status}}\" --filter name=tidepool'"
                 }
             }
         }

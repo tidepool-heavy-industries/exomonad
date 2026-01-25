@@ -1,0 +1,23 @@
+#!/bin/sh
+# Shim script for attaching to Zellij sessions
+# Handles root→user context switch automatically
+#
+# Usage: docker exec -it tidepool-orchestrator zattach [session-name]
+# Default session: orchestrator
+
+TARGET_USER="user"
+TARGET_UID="1000"
+RUNTIME_DIR="/run/user/${TARGET_UID}"
+SESSION="${1:-orchestrator}"
+
+if [ "$(id -u)" = "0" ]; then
+    # Running as root - switch to user with correct env
+    exec gosu "$TARGET_USER" env \
+        TERM="${TERM:-xterm-256color}" \
+        HOME="/home/$TARGET_USER" \
+        XDG_RUNTIME_DIR="$RUNTIME_DIR" \
+        zellij attach "$SESSION"
+else
+    # Already user
+    exec zellij attach "$SESSION"
+fi
