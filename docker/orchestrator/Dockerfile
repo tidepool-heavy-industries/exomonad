@@ -31,10 +31,8 @@ RUN sed -i '/package zlib/,+2d' cabal.project
 # 3. Copy all .cabal files (dependency manifests only, not source)
 # These rarely change compared to source code
 
-# Vendored packages
-COPY haskell/vendor/mcp-server/mcp-server.cabal haskell/vendor/mcp-server/
-COPY haskell/vendor/freer-simple/freer-simple.cabal haskell/vendor/freer-simple/
-COPY haskell/vendor/ginger/ginger.cabal haskell/vendor/ginger/
+# Vendored packages need FULL source (they're local packages, not Hackage deps)
+COPY haskell/vendor/ ./haskell/vendor/
 
 # Core DSL
 COPY haskell/dsl/core/tidepool-core.cabal haskell/dsl/core/
