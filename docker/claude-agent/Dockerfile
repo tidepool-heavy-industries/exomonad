@@ -17,8 +17,9 @@ COPY rust/ ./rust/
 # Use cache mounts for cargo to speed up rebuilds
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/build/rust/target \
-    cd rust && cargo build --release -p mantle-agent && \
-    cp target/release/mantle-agent /mantle-agent
+    cd rust && cargo build --release -p mantle-agent -p effector && \
+    cp target/release/mantle-agent /mantle-agent && \
+    cp target/release/effector /effector
 
 # Stage 2: Main Agent Image
 FROM --platform=linux/amd64 ubuntu:22.04
@@ -96,9 +97,10 @@ ENV PATH="/home/agent/.local/bin:/home/agent/.ghcup/bin:/home/agent/.cargo/bin:$
 # Back to root to copy mantle-agent
 USER root
 
-# Copy pre-built mantle-agent binary from Rust builder stage
+# Copy pre-built binaries from Rust builder stage
 COPY --from=rust-builder /mantle-agent /usr/local/bin/mantle-agent
-RUN chmod +x /usr/local/bin/mantle-agent
+COPY --from=rust-builder /effector /usr/local/bin/effector
+RUN chmod +x /usr/local/bin/mantle-agent /usr/local/bin/effector
 
 # Set up entrypoint script
 COPY docker/claude-agent/entrypoint.sh /usr/local/bin/entrypoint.sh
