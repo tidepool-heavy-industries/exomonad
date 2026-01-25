@@ -15,10 +15,6 @@ scrollback_lines_to_serialize 100       // Don't serialize massive history to di
 // Default layout for new sessions
 default_layout "exomonad"
 
-// Disable session serialization - it can restore panes in suspended state
-// which causes "Waiting to run" prompt instead of auto-starting
-session_serialization false
-
 // When the Zellij window is closed forcefully, detach (don't kill session)
 on_force_close "detach"
 
