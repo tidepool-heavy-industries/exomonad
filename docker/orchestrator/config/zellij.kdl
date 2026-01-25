@@ -6,12 +6,9 @@ layout_dir "/etc/tidepool/zellij/layouts"
 // Default layout for new sessions
 default_layout "exomonad"
 
-// Enable session serialization so the session can be resumed if the container restarts
-session_serialization true
-serialization_interval 60
-
-// Serialize pane viewport to preserve scrollback
-pane_viewport_serialization true
+// Disable session serialization - it can restore panes in suspended state
+// which causes "Waiting to run" prompt instead of auto-starting
+session_serialization false
 
 // When the Zellij window is closed forcefully, detach (don't kill session)
 on_force_close "detach"

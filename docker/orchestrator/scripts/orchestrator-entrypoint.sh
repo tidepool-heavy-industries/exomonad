@@ -100,6 +100,9 @@ echo "✓ Claude Code configured"
 # --- 1.5 Runtime Cleanup ---
 # Remove stale Zellij state that might be root-owned from previous runs
 rm -rf /tmp/zellij-* 2>/dev/null || true
+# Clear Zellij session cache to prevent restoring suspended pane states
+rm -rf /home/user/.cache/zellij 2>/dev/null || true
+rm -rf /home/user/.local/share/zellij/sessions 2>/dev/null || true
 # Don't remove Zellij sockets - they may be in use by cross-container connections
 
 # Ensure XDG_RUNTIME_DIR exists for user
