@@ -1,0 +1,13 @@
+Tests are failing. Here's the summary:
+
+{{ test_failed_count }} tests failed out of {{ test_passed_count + test_failed_count }} total.
+
+{% for failure in test_failures[:5] %}
+## {{ failure.suite }} / {{ failure.test_name }}
+{% if failure.location %}Location: {{ failure.location }}{% endif %}
+
+{{ failure.message }}
+
+{% endfor %}
+
+Please fix the failing tests and re-run.

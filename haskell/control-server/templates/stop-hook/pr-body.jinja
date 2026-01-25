@@ -1,0 +1,26 @@
+Closes {{ bead_id }}
+
+## Description
+{{ description | default("(No description)") }}
+
+## Testing
+{{ testing }}
+{% if compromises %}
+
+## Compromises
+{{ compromises }}
+{% endif %}
+{% if dependencies %}
+
+## Dependencies
+{% for dep in dependencies %}
+- {{ dep.id }}: {{ dep.title }}
+{% endfor %}
+{% endif %}
+{% if dependents %}
+
+## Dependents
+{% for dep in dependents %}
+- {{ dep.id }}: {{ dep.title }}
+{% endfor %}
+{% endif %}

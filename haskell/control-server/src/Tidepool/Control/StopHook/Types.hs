@@ -19,6 +19,8 @@ module Tidepool.Control.StopHook.Types
   , Severity(..)
   , TemplateName
   , StopHookContext(..)
+  , TestResult(..)
+  , TestFailureInfo(..)
   ) where
 
 import Control.Monad.Writer (Writer)
@@ -50,6 +52,7 @@ data WorkflowState = WorkflowState
   , wsCurrentStage :: WorkflowStage
   , wsLastBuildResult :: Maybe BuildResult
   , wsLastPRStatus :: Maybe GhPrStatusResult
+  , wsLastTestResult :: Maybe TestResult
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)
@@ -76,6 +79,23 @@ data BuildFailureInfo = BuildFailureInfo
   , bfiWarnings :: [GHCWarning]    -- Parsed warnings
   , bfiErrorCount :: Int
   , bfiWarningCount :: Int
+  }
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (FromJSON, ToJSON)
+
+data TestResult = TestResult
+  { trPassed :: Int
+  , trFailed :: Int
+  , trFailures :: [TestFailureInfo]
+  }
+  deriving stock (Show, Eq, Generic)
+  deriving anyclass (FromJSON, ToJSON)
+
+data TestFailureInfo = TestFailureInfo
+  { tfiSuite :: Text
+  , tfiTestName :: Text
+  , tfiMessage :: Text
+  , tfiLocation :: Maybe Text
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)
@@ -134,6 +154,11 @@ data StopHookContext = StopHookContext
   , warnings :: [GHCWarning]
   , error_count :: Int
   , raw_output :: Text
+  -- Test context
+  , tests_failed :: Bool
+  , test_passed_count :: Int
+  , test_failed_count :: Int
+  , test_failures :: [TestFailureInfo]
   -- PR info
   , pr_exists :: Bool
   , pr_url :: Maybe Text
@@ -159,11 +184,23 @@ instance ToGVal GingerRun StopHookContext where
     , "warnings" ~> warnings ctx
     , "error_count" ~> error_count ctx
     , "raw_output" ~> raw_output ctx
+    , "tests_failed" ~> tests_failed ctx
+    , "test_passed_count" ~> test_passed_count ctx
+    , "test_failed_count" ~> test_failed_count ctx
+    , "test_failures" ~> test_failures ctx
     , "pr_exists" ~> pr_exists ctx
     , "pr_url" ~> pr_url ctx
     , "pr_number" ~> pr_number ctx
     , "pr_review_status" ~> pr_review_status ctx
     , "pr_comments" ~> pr_comments ctx
+    ]
+
+instance ToGVal GingerRun TestFailureInfo where
+  toGVal fail' = dict
+    [ "suite" ~> tfiSuite fail'
+    , "test_name" ~> tfiTestName fail'
+    , "message" ~> tfiMessage fail'
+    , "location" ~> tfiLocation fail'
     ]
 
 instance ToGVal GingerRun PrComment where
