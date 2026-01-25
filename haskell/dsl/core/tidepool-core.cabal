@@ -81,6 +81,7 @@ library
         Tidepool.Effects.Git
         Tidepool.Effects.Worktree
         Tidepool.Effects.Cabal
+        Tidepool.Effects.Effector
         Tidepool.Effects.Justfile
         Tidepool.Effects.FileSystem
         Tidepool.Effects.Zellij

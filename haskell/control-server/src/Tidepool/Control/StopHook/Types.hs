@@ -27,9 +27,11 @@ import Data.Map.Strict (Map)
 import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
-import Text.Ginger.GVal (ToGVal(..), dict, (~>))
+import Text.Ginger.GVal (ToGVal(..), dict, (~>), fromGVal, asText)
 import Text.Ginger.Run.Type (Run)
 import Text.Parsec.Pos (SourcePos)
+
+import Tidepool.Effects.Effector (GhPrStatusResult(..), PrComment(..))
 
 -- | State passed through the graph
 data AgentState = AgentState
@@ -47,6 +49,7 @@ data WorkflowState = WorkflowState
   , wsStageRetries :: Map WorkflowStage Int
   , wsCurrentStage :: WorkflowStage
   , wsLastBuildResult :: Maybe BuildResult
+  , wsLastPRStatus :: Maybe GhPrStatusResult
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)
@@ -131,6 +134,12 @@ data StopHookContext = StopHookContext
   , warnings :: [GHCWarning]
   , error_count :: Int
   , raw_output :: Text
+  -- PR info
+  , pr_exists :: Bool
+  , pr_url :: Maybe Text
+  , pr_number :: Maybe Int
+  , pr_review_status :: Maybe Text
+  , pr_comments :: [PrComment]
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)
@@ -150,6 +159,19 @@ instance ToGVal GingerRun StopHookContext where
     , "warnings" ~> warnings ctx
     , "error_count" ~> error_count ctx
     , "raw_output" ~> raw_output ctx
+    , "pr_exists" ~> pr_exists ctx
+    , "pr_url" ~> pr_url ctx
+    , "pr_number" ~> pr_number ctx
+    , "pr_review_status" ~> pr_review_status ctx
+    , "pr_comments" ~> pr_comments ctx
+    ]
+
+instance ToGVal GingerRun PrComment where
+  toGVal c = dict
+    [ "author" ~> c.author
+    , "body" ~> c.body
+    , "path" ~> c.path
+    , "line" ~> c.line
     ]
 
 instance ToGVal GingerRun GHCError where

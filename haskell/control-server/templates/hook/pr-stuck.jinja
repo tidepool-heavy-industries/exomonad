@@ -1,0 +1,17 @@
+I've been checking the PR status multiple times, but it seems we are stuck in a loop.
+
+{% if pr_exists %}
+Current PR: {{ pr_url }}
+Review Status: {{ pr_review_status }}
+
+{% if pr_comments %}
+There are still unaddressed comments:
+{% for comment in pr_comments %}
+- {{ comment.author }}: {{ comment.body | truncate(50) }}
+{% endfor %}
+{% endif %}
+{% else %}
+No PR has been created yet.
+{% endif %}
+
+Please manually check the PR status or address any issues that are preventing progress.
