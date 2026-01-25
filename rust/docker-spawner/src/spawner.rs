@@ -13,6 +13,7 @@ pub struct SpawnRequest {
     pub backend: String,  // "claude" | "gemini"
     pub uid: Option<u32>,
     pub gid: Option<u32>,
+    pub expires_at: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -31,6 +32,7 @@ pub struct Spawner {
     agent_image: String,
     host_uid: u32,
     host_gid: u32,
+    network_name: String,
 }
 
 impl Spawner {
@@ -39,12 +41,14 @@ impl Spawner {
         let agent_image = std::env::var("TIDEPOOL_AGENT_IMAGE").unwrap_or_else(|_| "tidepool-agent:latest".to_string());
         let host_uid = std::env::var("HOST_UID").unwrap_or_else(|_| "1000".to_string()).parse()?;
         let host_gid = std::env::var("HOST_GID").unwrap_or_else(|_| "1000".to_string()).parse()?;
+        let network_name = std::env::var("TIDEPOOL_NETWORK").unwrap_or_else(|_| "tidepool".to_string());
 
         Ok(Self {
             docker,
             agent_image,
             host_uid,
             host_gid,
+            network_name,
         })
     }
 
@@ -74,7 +78,10 @@ impl Spawner {
         let mut labels = HashMap::new();
         labels.insert("com.tidepool.bead_id".to_string(), req.bead_id.clone());
         labels.insert("com.tidepool.role".to_string(), "agent".to_string());
-        labels.insert("com.tidepool.expires_at".to_string(), "never".to_string()); 
+        labels.insert(
+            "com.tidepool.expires_at".to_string(), 
+            req.expires_at.clone().unwrap_or_else(|| "never".to_string())
+        ); 
 
         let worktree_mount_target = format!("/worktrees/{}", req.bead_id);
         
@@ -96,7 +103,7 @@ impl Spawner {
             labels: Some(labels),
             host_config: Some(HostConfig {
                 mounts: Some(mounts),
-                network_mode: Some("tidepool".to_string()),
+                network_mode: Some(self.network_name.clone()),
                 ..Default::default()
             }),
             user: Some(user),
@@ -122,8 +129,11 @@ impl Spawner {
     }
 
     pub async fn stop(&self, id: &str) -> anyhow::Result<()> {
-        info!("Stopping container {}", id);
-        match self.docker.stop_container(id, None::<StopContainerOptions>).await {
+        info!("Stopping container {} with 10s timeout", id);
+        let stop_options = StopContainerOptions {
+            t: 10,
+        };
+        match self.docker.stop_container(id, Some(stop_options)).await {
             Ok(_) => (),
             Err(bollard::errors::Error::DockerResponseServerError { status_code: 404, .. }) => {
                 warn!("Container {} not found while stopping", id);
@@ -152,6 +162,7 @@ mod tests {
             agent_image: "tidepool-agent:latest".to_string(),
             host_uid: 1000,
             host_gid: 1000,
+            network_name: "tidepool-test".to_string(),
         };
 
         let req = SpawnRequest {
@@ -160,6 +171,7 @@ mod tests {
             backend: "claude".to_string(),
             uid: Some(2000),
             gid: Some(2000),
+            expires_at: Some("2026-01-26T00:00:00Z".to_string()),
         };
 
         let config = spawner.build_container_config(&req);
@@ -170,9 +182,10 @@ mod tests {
         let labels = config.labels.unwrap();
         assert_eq!(labels.get("com.tidepool.bead_id").unwrap(), "test-bead");
         assert_eq!(labels.get("com.tidepool.role").unwrap(), "agent");
+        assert_eq!(labels.get("com.tidepool.expires_at").unwrap(), "2026-01-26T00:00:00Z");
 
         let host_config = config.host_config.unwrap();
-        assert_eq!(host_config.network_mode, Some("tidepool".to_string()));
+        assert_eq!(host_config.network_mode, Some("tidepool-test".to_string()));
         
         let mounts = host_config.mounts.unwrap();
         assert_eq!(mounts.len(), 1);
