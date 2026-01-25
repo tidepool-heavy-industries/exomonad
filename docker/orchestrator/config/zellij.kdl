@@ -3,9 +3,14 @@
 // Tell Zellij where to find custom layouts
 layout_dir "/etc/tidepool/zellij/layouts"
 
-// Reduce scrollback buffer to prevent OOM (default is 10000 lines per pane)
-// With multiple panes, this can consume significant RAM during resize/scroll
+// Memory optimization settings to prevent OOM in Docker
+// Default scrollback is 10000 lines per pane - reduces RAM during resize/scroll
 scroll_buffer_size 2000
+
+// Serialization tuning - reduces memory spikes and disk I/O
+session_serialization true
+serialization_interval 300              // Write to disk every 5 min (not 60s default)
+scrollback_lines_to_serialize 100       // Don't serialize massive history to disk
 
 // Default layout for new sessions
 default_layout "exomonad"

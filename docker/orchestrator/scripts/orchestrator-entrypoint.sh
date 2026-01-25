@@ -163,14 +163,15 @@ case "${1:-orchestrator}" in
             echo "   docker exec -it tidepool-orchestrator zellij attach $SESSION_NAME"
 
             # Monitor and recreate if needed
+            # Uses "sleep & wait" idiom for responsive signal handling during docker stop
             while true; do
-                sleep 5
                 if ! session_exists; then
                     echo "⚠️  Session died, recreating..."
                     rm -rf /tmp/zellij-*
                     sleep 0.5
                     create_session
                 fi
+                sleep 5 & wait $!
             done
         '
         ;;
