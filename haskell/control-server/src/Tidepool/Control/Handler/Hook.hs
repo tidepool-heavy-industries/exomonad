@@ -260,10 +260,10 @@ runStopHookLogic tracer input = do
         Just container ->
           runM
           $ runSshExec (T.pack sshProxyUrl)
-          $ runGitViaSsh (T.pack container) "."
+          $ runEffectorViaSsh (T.pack container)
           $ runCabalViaSsh (T.pack container)
-          $ runEffectorViaSsh (T.pack container) "."
           $ traceCabal tracer
+          $ runGitViaSsh (T.pack container) "."
           $ traceGit tracer
           $ runGraphMeta (GraphMetadata "stop-hook")
           $ runNodeMeta defaultNodeMeta
@@ -271,14 +271,14 @@ runStopHookLogic tracer input = do
           $ runGraph stopHookHandlers agentState
         Nothing ->
           runM
-          $ runGitIO
+          $ runState initialWorkflow
+          $ runEffectorIO
           $ runCabalIO defaultCabalConfig
-          $ runEffectorIO "."
           $ traceCabal tracer
+          $ runGitIO
           $ traceGit tracer
           $ runGraphMeta (GraphMetadata "stop-hook")
           $ runNodeMeta defaultNodeMeta
-          $ runState initialWorkflow
           $ runGraph stopHookHandlers agentState
 
   pure result

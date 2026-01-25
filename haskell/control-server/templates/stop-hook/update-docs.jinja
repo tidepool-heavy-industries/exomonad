@@ -1,0 +1,13 @@
+Code has changed but documentation may be stale.
+
+## Modified Files
+{% for file in git_dirty_files %}
+- {{ file }}
+{% endfor %}
+
+## CLAUDE.md Files to Review
+{% for doc in stale_docs %}
+- {{ doc }}
+{% endfor %}
+
+Please review and update relevant CLAUDE.md files to reflect your changes.

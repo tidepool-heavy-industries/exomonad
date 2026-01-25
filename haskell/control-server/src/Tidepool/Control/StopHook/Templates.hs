@@ -30,6 +30,9 @@ fixTestFailuresTpl = $(typedTemplateFile ''StopHookContext "templates/stop-hook/
 testStuckTpl :: TypedTemplate StopHookContext SourcePos
 testStuckTpl = $(typedTemplateFile ''StopHookContext "templates/stop-hook/test-stuck.jinja")
 
+updateDocsTpl :: TypedTemplate StopHookContext SourcePos
+updateDocsTpl = $(typedTemplateFile ''StopHookContext "templates/stop-hook/update-docs.jinja")
+
 nextStageStubTpl :: TypedTemplate StopHookContext SourcePos
 nextStageStubTpl = $(typedTemplateFile ''StopHookContext "templates/stop-hook/next-stage-stub.jinja")
 
@@ -43,5 +46,6 @@ renderStopHookTemplate name ctx = case name of
   "build-stuck" -> runTypedTemplate ctx buildStuckTpl
   "fix-test-failures" -> runTypedTemplate ctx fixTestFailuresTpl
   "test-stuck" -> runTypedTemplate ctx testStuckTpl
+  "update-docs" -> runTypedTemplate ctx updateDocsTpl
   "next-stage-stub" -> runTypedTemplate ctx nextStageStubTpl
   _ -> "Error: Unknown template '" <> name <> "'"
