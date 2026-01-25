@@ -8,4 +8,5 @@ members = ["hangar-config",
     "tui-popup",
     "ssh-proxy",
     "effector",
+    "docker-spawner",
 ]
