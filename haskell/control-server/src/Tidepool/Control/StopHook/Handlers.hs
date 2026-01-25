@@ -24,10 +24,15 @@ import Tidepool.Control.StopHook.Types
 import Tidepool.Control.StopHook.Graph
 import Tidepool.Control.StopHook.ErrorParser (parseGHCOutput)
 import Tidepool.Effects.Cabal (Cabal, CabalResult(..), cabalBuild, RawCompileError(..))
+import Tidepool.Effects.Effector (Effector, runEffector, GhPrStatusResult(..))
+import Data.Aeson (eitherDecodeStrict)
+import qualified Data.ByteString.Char8 as BS8
+import qualified Data.Text.Encoding as TE
 
 stopHookHandlers
   :: ( Member (State WorkflowState) es
      , Member Cabal es
+     , Member Effector es
      )
   => StopHookGraph (AsHandler es)
 stopHookHandlers = StopHookGraph
@@ -38,6 +43,10 @@ stopHookHandlers = StopHookGraph
   , routeBuild = handleRouteBuild
   , buildLoopCheck = handleBuildLoopCheck
   , buildMaxReached = handleBuildMaxReached
+  , checkPR = handleCheckPR
+  , routePR = handleRoutePR
+  , prLoopCheck = handlePrLoopCheck
+  , prMaxReached = handlePrMaxReached
   , buildContext = handleBuildContext
   , stubNextStage = handleStubNextStage
   , exit = ()
@@ -122,7 +131,7 @@ handleRouteBuild (state, result) = case result of
 handleBuildLoopCheck
   :: (Member (State WorkflowState) es)
   => AgentState
-  -> Eff es (GotoChoice '[To "buildMaxReached" (), To "stubNextStage" AgentState])
+  -> Eff es (GotoChoice '[To "buildMaxReached" (), To "checkPR" AgentState])
 handleBuildLoopCheck state = do
   ws <- get
   let buildRetries = fromMaybe 0 $ Map.lookup StageBuild (wsStageRetries ws)
@@ -132,7 +141,7 @@ handleBuildLoopCheck state = do
       modify $ \s -> s
         { wsStageRetries = Map.insertWith (+) StageBuild 1 (wsStageRetries s)
         }
-      pure $ gotoChoice @"stubNextStage" state
+      pure $ gotoChoice @"checkPR" state
 
 -- | Build max reached: go to buildContext with build-stuck template
 handleBuildMaxReached
@@ -141,6 +150,61 @@ handleBuildMaxReached
   -> Eff es (GotoChoice '[To "buildContext" TemplateName])
 handleBuildMaxReached () = do
   pure $ gotoChoice @"buildContext" ("build-stuck" :: Text)
+
+-- | Check PR status
+handleCheckPR
+  :: (Member Effector es, Member (State WorkflowState) es)
+  => AgentState
+  -> Eff es (GotoChoice '[To "routePR" (AgentState, GhPrStatusResult)])
+handleCheckPR state = do
+  let branchArgs = maybe [] (\b -> [b]) (asBranch state)
+  raw <- runEffector "gh" ("pr-status" : branchArgs)
+  let mResult = eitherDecodeStrict (BS8.pack $ T.unpack raw)
+  let result = case mResult of
+        Left _err -> GhPrStatusResult False Nothing Nothing Nothing Nothing []
+        Right res -> res
+  modify $ \s -> s
+    { wsLastPRStatus = Just result
+    , wsCurrentStage = if result.exists then StageReview else StagePR
+    }
+  pure $ gotoChoice @"routePR" (state, result)
+
+-- | Route based on PR status
+handleRoutePR
+  :: (Member (State WorkflowState) es)
+  => (AgentState, GhPrStatusResult)
+  -> Eff es (GotoChoice '[To "buildContext" TemplateName, To "prLoopCheck" AgentState])
+handleRoutePR (state, result) = do
+  if not (result.exists)
+    then pure $ gotoChoice @"buildContext" ("file-pr" :: Text)
+    else if not (null (result.comments))
+      then pure $ gotoChoice @"buildContext" ("address-review" :: Text)
+      else pure $ gotoChoice @"prLoopCheck" state
+
+-- | Check PR-specific loop count
+handlePrLoopCheck
+  :: (Member (State WorkflowState) es)
+  => AgentState
+  -> Eff es (GotoChoice '[To "prMaxReached" (), To Exit (TemplateName, StopHookContext)])
+handlePrLoopCheck state = do
+  ws <- get
+  let prRetries = fromMaybe 0 $ Map.lookup (wsCurrentStage ws) (wsStageRetries ws)
+  if prRetries >= 3
+    then pure $ gotoChoice @"prMaxReached" ()
+    else do
+      modify $ \s -> s
+        { wsStageRetries = Map.insertWith (+) (wsCurrentStage ws) 1 (wsStageRetries s)
+        }
+      let context = buildTemplateContext ws "complete"
+      pure $ gotoExit ("complete" :: Text, context)
+
+-- | PR max reached
+handlePrMaxReached
+  :: (Member (State WorkflowState) es)
+  => ()
+  -> Eff es (GotoChoice '[To "buildContext" TemplateName])
+handlePrMaxReached () = do
+  pure $ gotoChoice @"buildContext" ("pr-stuck" :: Text)
 
 -- | Build context for template rendering
 handleBuildContext
@@ -172,6 +236,12 @@ buildTemplateContext ws templateName =
           ([], [], 0, "", False)
         Nothing -> 
           ([], [], 0, "", False)
+      mPR = wsLastPRStatus ws
+      (prExists, prUrl, prNum, prStatus, prComments) = case mPR of
+        Just pr -> 
+          (pr.exists, pr.url, pr.number, pr.review_status, pr.comments)
+        Nothing -> 
+          (False, Nothing, Nothing, Nothing, [])
   in StopHookContext
     { template = templateName
     , stage = T.pack $ show (wsCurrentStage ws)
@@ -182,4 +252,9 @@ buildTemplateContext ws templateName =
     , warnings = warns
     , error_count = count
     , raw_output = raw
+    , pr_exists = prExists
+    , pr_url = prUrl
+    , pr_number = prNum
+    , pr_review_status = prStatus
+    , pr_comments = prComments
     }

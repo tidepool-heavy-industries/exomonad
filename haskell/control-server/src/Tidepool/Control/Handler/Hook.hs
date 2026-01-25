@@ -39,11 +39,13 @@ import Tidepool.Control.Hook.SessionStart (sessionStartLogic)
 import Tidepool.Control.Effects.SshExec (runSshExec)
 import Tidepool.Control.Effects.Git (runGitViaSsh)
 import Tidepool.Control.Effects.Cabal (runCabalViaSsh)
+import Tidepool.Control.Effects.Effector (runEffectorViaSsh, runEffectorIO)
 import Tidepool.Control.Effects.Justfile (runJustfileViaSsh)
 import Tidepool.Control.Interpreters.Traced (traceCabal, traceGit, traceBD)
 import Tidepool.BD.Interpreter (runBDIO, defaultBDConfig)
 import Tidepool.BD.GitInterpreter (runGitIO)
 import Tidepool.Cabal.Interpreter (runCabalIO, defaultCabalConfig)
+import Tidepool.Effects.Effector (Effector)
 import Tidepool.GitHub.Interpreter (runGitHubIO, defaultGitHubConfig)
 import Tidepool.Justfile.Interpreter (runJustfileIO)
 import Tidepool.Effect.Types (runLog, LogLevel(..))
@@ -239,6 +241,7 @@ runStopHookLogic tracer input = do
         , wsStageRetries = Map.empty
         , wsCurrentStage = StageBuild
         , wsLastBuildResult = Nothing
+        , wsLastPRStatus = Nothing
         }
   
   -- We need to fetch git info first to populate AgentState
@@ -249,24 +252,26 @@ runStopHookLogic tracer input = do
   (result, _finalState) <- case mContainer of
         Just container ->
           runM
-          $ runState initialWorkflow
           $ runSshExec (T.pack sshProxyUrl)
-          $ runCabalViaSsh (T.pack container)
-          $ traceCabal tracer
           $ runGitViaSsh (T.pack container) "."
+          $ runCabalViaSsh (T.pack container)
+          $ runEffectorViaSsh (T.pack container) "."
+          $ traceCabal tracer
           $ traceGit tracer
-          $ runGraphMeta (GraphMetadata "StopHookGraph")
+          $ runGraphMeta (GraphMetadata "stop-hook")
           $ runNodeMeta defaultNodeMeta
+          $ runState initialWorkflow
           $ runGraph stopHookHandlers agentState
         Nothing ->
           runM
-          $ runState initialWorkflow
-          $ runCabalIO defaultCabalConfig
-          $ traceCabal tracer
           $ runGitIO
+          $ runCabalIO defaultCabalConfig
+          $ runEffectorIO "."
+          $ traceCabal tracer
           $ traceGit tracer
-          $ runGraphMeta (GraphMetadata "StopHookGraph")
+          $ runGraphMeta (GraphMetadata "stop-hook")
           $ runNodeMeta defaultNodeMeta
+          $ runState initialWorkflow
           $ runGraph stopHookHandlers agentState
 
   pure result

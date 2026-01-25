@@ -70,6 +70,7 @@ library
         Tidepool.Control.StopHook.Templates
         -- Effects
         Tidepool.Control.Effects.SshExec
+        Tidepool.Control.Effects.Effector
         Tidepool.Control.Effects.Cabal
         Tidepool.Control.Effects.Git
         Tidepool.Control.Effects.Justfile

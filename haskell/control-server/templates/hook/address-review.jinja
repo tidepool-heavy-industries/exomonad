@@ -1,0 +1,11 @@
+Your PR has review comments that need attention.
+
+## PR: {{ pr_url }}
+
+{% for comment in pr_comments %}
+### {{ comment.author }}{% if comment.path %} on {{ comment.path }}:{{ comment.line }}{% endif %}
+{{ comment.body }}
+
+{% endfor %}
+
+Please address these comments and push updates.

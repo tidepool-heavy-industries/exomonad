@@ -14,6 +14,7 @@ import Tidepool.Graph.Types (type (:@), Input, UsesEffects, Exit)
 import Tidepool.Graph.Goto (Goto)
 import Tidepool.Control.StopHook.Types
 import Tidepool.Effects.Cabal (Cabal)
+import Tidepool.Effects.Effector (Effector, GhPrStatusResult)
 
 data StopHookGraph mode = StopHookGraph
   { entry :: mode :- EntryNode AgentState
@@ -49,7 +50,7 @@ data StopHookGraph mode = StopHookGraph
       :@ Input AgentState
       :@ UsesEffects '[ State WorkflowState
                       , Goto "buildMaxReached" ()
-                      , Goto "stubNextStage" AgentState
+                      , Goto "checkPR" AgentState
                       ]
 
   , buildMaxReached :: mode :- LogicNode
@@ -63,7 +64,33 @@ data StopHookGraph mode = StopHookGraph
                       , Goto Exit (TemplateName, StopHookContext)
                       ]
 
-  -- Stub for next stage (test stage is separate task)
+  -- PR stage
+  , checkPR :: mode :- LogicNode
+      :@ Input AgentState
+      :@ UsesEffects '[ Effector
+                      , State WorkflowState
+                      , Goto "routePR" (AgentState, GhPrStatusResult)
+                      ]
+
+  , routePR :: mode :- LogicNode
+      :@ Input (AgentState, GhPrStatusResult)
+      :@ UsesEffects '[ State WorkflowState
+                      , Goto "buildContext" TemplateName
+                      , Goto "prLoopCheck" AgentState
+                      ]
+
+  , prLoopCheck :: mode :- LogicNode
+      :@ Input AgentState
+      :@ UsesEffects '[ State WorkflowState
+                      , Goto "prMaxReached" ()
+                      , Goto Exit (TemplateName, StopHookContext) -- Complete for now
+                      ]
+
+  , prMaxReached :: mode :- LogicNode
+      :@ Input ()
+      :@ UsesEffects '[Goto "buildContext" TemplateName]
+
+  -- Stub for next stage (kept for compatibility)
   , stubNextStage :: mode :- LogicNode
       :@ Input AgentState
       :@ UsesEffects '[Goto Exit (TemplateName, StopHookContext)]

@@ -21,6 +21,7 @@ module Tidepool.Effects
   , module Tidepool.Effects.BD
   , module Tidepool.Effects.Cabal
   , module Tidepool.Effects.Env
+  , module Tidepool.Effects.Effector
   , module Tidepool.Effects.Git
   , module Tidepool.Effects.GitHub
   , module Tidepool.Effects.Habitica
@@ -33,6 +34,7 @@ module Tidepool.Effects
 import Tidepool.Effect.Types
 import Tidepool.Effects.BD
 import Tidepool.Effects.Cabal
+import Tidepool.Effects.Effector
 import Tidepool.Effects.Env
 import Tidepool.Effects.Git
 import Tidepool.Effects.GitHub
