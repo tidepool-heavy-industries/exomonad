@@ -76,7 +76,7 @@ data StopHookGraph mode = StopHookGraph
       :@ Input AgentState
       :@ UsesEffects '[ State WorkflowState
                       , Goto "testMaxReached" ()
-                      , Goto "checkPR" AgentState
+                      , Goto "checkDocs" AgentState
                       ]
 
   , testMaxReached :: mode :- LogicNode
@@ -88,6 +88,15 @@ data StopHookGraph mode = StopHookGraph
       :@ Input TemplateName
       :@ UsesEffects '[ State WorkflowState
                       , Goto Exit (TemplateName, StopHookContext)
+                      ]
+
+  -- Docs stage
+  , checkDocs :: mode :- LogicNode
+      :@ Input AgentState
+      :@ UsesEffects '[ Effector
+                      , State WorkflowState
+                      , Goto Exit (TemplateName, StopHookContext)
+                      , Goto "checkPR" AgentState
                       ]
 
   -- PR stage
@@ -115,11 +124,6 @@ data StopHookGraph mode = StopHookGraph
   , prMaxReached :: mode :- LogicNode
       :@ Input ()
       :@ UsesEffects '[Goto "buildContext" TemplateName]
-
-  -- Stub for next stage (kept for compatibility)
-  , stubNextStage :: mode :- LogicNode
-      :@ Input AgentState
-      :@ UsesEffects '[Goto Exit (TemplateName, StopHookContext)]
 
   , exit :: mode :- ExitNode (TemplateName, StopHookContext)
   }

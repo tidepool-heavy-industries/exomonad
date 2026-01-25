@@ -56,6 +56,12 @@ enum GitAction {
         #[arg(long)]
         staged: bool,
     },
+    LsFiles {
+        #[arg(long, default_value = ".")]
+        cwd: String,
+        #[arg(trailing_var_arg = true)]
+        args: Vec<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -85,6 +91,7 @@ fn main() -> Result<()> {
         Commands::Git { action } => match action {
             GitAction::Status { cwd } => git::status(&cwd),
             GitAction::Diff { cwd, staged } => git::diff(&cwd, staged),
+            GitAction::LsFiles { cwd, args } => git::ls_files(&cwd, args),
         },
         Commands::Gh { action } => match action {
             GhAction::PrStatus { branch } => gh::pr_status(branch),

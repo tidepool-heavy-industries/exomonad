@@ -20,8 +20,8 @@ module Tidepool.Effects
     -- * Integration Effects
   , module Tidepool.Effects.BD
   , module Tidepool.Effects.Cabal
-  , module Tidepool.Effects.Env
   , module Tidepool.Effects.Effector
+  , module Tidepool.Effects.Env
   , module Tidepool.Effects.Git
   , module Tidepool.Effects.GitHub
   , module Tidepool.Effects.Habitica

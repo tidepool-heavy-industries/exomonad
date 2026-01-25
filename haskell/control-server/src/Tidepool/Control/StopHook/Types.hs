@@ -165,6 +165,9 @@ data StopHookContext = StopHookContext
   , pr_number :: Maybe Int
   , pr_review_status :: Maybe Text
   , pr_comments :: [PrComment]
+  -- Doc info
+  , stale_docs :: [FilePath]
+  , git_dirty_files :: [FilePath]
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (FromJSON, ToJSON)
@@ -193,6 +196,8 @@ instance ToGVal GingerRun StopHookContext where
     , "pr_number" ~> pr_number ctx
     , "pr_review_status" ~> pr_review_status ctx
     , "pr_comments" ~> pr_comments ctx
+    , "stale_docs" ~> stale_docs ctx
+    , "git_dirty_files" ~> git_dirty_files ctx
     ]
 
 instance ToGVal GingerRun TestFailureInfo where

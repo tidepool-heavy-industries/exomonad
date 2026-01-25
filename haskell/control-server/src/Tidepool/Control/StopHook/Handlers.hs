@@ -27,7 +27,7 @@ import Tidepool.Control.StopHook.Types
 import Tidepool.Control.StopHook.Graph
 import Tidepool.Control.StopHook.ErrorParser (parseGHCOutput)
 import Tidepool.Effects.Cabal (Cabal, CabalResult(..), cabalBuild, RawCompileError(..))
-import Tidepool.Effects.Effector (Effector, runEffector, GhPrStatusResult(..))
+import Tidepool.Effects.Effector (Effector, runEffector, GhPrStatusResult(..), effectorGitStatus, effectorGitLsFiles, GitStatusResult(..))
 import Data.Aeson (eitherDecodeStrict, FromJSON, fromJSON, Result(..))
 import qualified Data.ByteString.Char8 as BS8
 import qualified Data.Text.Encoding as TE
@@ -50,12 +50,12 @@ stopHookHandlers = StopHookGraph
   , routeTest = handleRouteTest
   , testLoopCheck = handleTestLoopCheck
   , testMaxReached = handleTestMaxReached
+  , checkDocs = handleCheckDocs
   , checkPR = handleCheckPR
   , routePR = handleRoutePR
   , prLoopCheck = handlePrLoopCheck
   , prMaxReached = handlePrMaxReached
   , buildContext = handleBuildContext
-  , stubNextStage = handleStubNextStage
   , exit = ()
   }
 
@@ -213,7 +213,7 @@ handleRouteTest (state, result) = case result.trFailed of
 handleTestLoopCheck
   :: (Member (State WorkflowState) es)
   => AgentState
-  -> Eff es (GotoChoice '[To "testMaxReached" (), To "checkPR" AgentState])
+  -> Eff es (GotoChoice '[To "testMaxReached" (), To "checkDocs" AgentState])
 handleTestLoopCheck state = do
   ws <- get
   let testRetries = fromMaybe 0 $ Map.lookup StageTest (wsStageRetries ws)
@@ -223,7 +223,7 @@ handleTestLoopCheck state = do
       modify $ \s -> s
         { wsStageRetries = Map.insertWith (+) StageTest 1 (wsStageRetries s)
         }
-      pure $ gotoChoice @"checkPR" state
+      pure $ gotoChoice @"checkDocs" state
 
 -- | Test max reached
 handleTestMaxReached
@@ -232,6 +232,36 @@ handleTestMaxReached
   -> Eff es (GotoChoice '[To "buildContext" TemplateName])
 handleTestMaxReached () = do
   pure $ gotoChoice @"buildContext" ("test-stuck" :: Text)
+
+-- | Check documentation freshness
+handleCheckDocs
+  :: (Member Effector es, Member (State WorkflowState) es)
+  => AgentState
+  -> Eff es (GotoChoice '[To Exit (TemplateName, StopHookContext), To "checkPR" AgentState])
+handleCheckDocs state = do
+  modify $ \s -> s { wsCurrentStage = StageDocs }
+  
+  -- Get git status
+  status <- effectorGitStatus (asCwd state)
+  
+  -- Get all CLAUDE.md files
+  claudeFiles <- effectorGitLsFiles (asCwd state) ["**/CLAUDE.md"]
+  
+  let dirtyCode = filter (\f -> ".hs" `T.isSuffixOf` T.pack f || ".rs" `T.isSuffixOf` T.pack f) status.gsrDirty
+      dirtyDocs = filter (\f -> "CLAUDE.md" `T.isSuffixOf` T.pack f) (status.gsrDirty ++ status.gsrStaged)
+      
+      docsStale = not (null dirtyCode) && null dirtyDocs
+      
+  if docsStale
+    then do
+      ws <- get
+      let ctx = (buildTemplateContext ws "update-docs")
+                  { git_dirty_files = status.gsrDirty
+                  , stale_docs = claudeFiles
+                  }
+      pure $ gotoExit ("update-docs" :: Text, ctx)
+    else do
+      pure $ gotoChoice @"checkPR" state
 
 -- | Check PR status
 handleCheckPR
@@ -298,16 +328,6 @@ handleBuildContext templateName = do
   let context = buildTemplateContext ws templateName
   pure $ gotoExit (templateName, context)
 
--- | Stub for next stage
-handleStubNextStage
-  :: (Member (State WorkflowState) es)
-  => AgentState
-  -> Eff es (GotoChoice '[To Exit (TemplateName, StopHookContext)])
-handleStubNextStage _state = do
-  ws <- get
-  let context = buildTemplateContext ws "next-stage-stub"
-  pure $ gotoExit ("next-stage-stub" :: Text, context)
-
 buildTemplateContext :: WorkflowState -> TemplateName -> StopHookContext
 buildTemplateContext ws templateName = 
   let mRes = wsLastBuildResult ws
@@ -345,4 +365,6 @@ buildTemplateContext ws templateName =
     , pr_number = prNum
     , pr_review_status = prStatus
     , pr_comments = prComments
+    , stale_docs = []
+    , git_dirty_files = []
     }
