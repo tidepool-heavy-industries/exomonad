@@ -148,6 +148,30 @@ services:
       - orchestrator
     command: ["sleep", "infinity"]
 
+  docker-spawner:
+    build:
+      context: .
+      dockerfile: docker/docker-spawner/Dockerfile
+    container_name: tidepool-docker-spawner
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock  # DooD pattern
+      - tidepool-worktrees:/worktrees:rw
+    environment:
+      - RUST_LOG=info
+      - HOST_UID=${HOST_UID:-1000}
+      - HOST_GID=${HOST_GID:-1000}
+      - TIDEPOOL_AGENT_IMAGE=${TIDEPOOL_AGENT_IMAGE:-tidepool-agent:latest}
+    ports:
+      - "7435:7435"
+    networks:
+      - tidepool-internal
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7435/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
 volumes:
   tidepool-sockets:
     name: tidepool-sockets
@@ -161,6 +185,8 @@ volumes:
     name: tidepool-zellij
   tidepool-openobserve:
     name: tidepool-openobserve
+  tidepool-worktrees:
+    name: tidepool-worktrees
 
 networks:
   tidepool-internal:
