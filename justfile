@@ -218,8 +218,16 @@ docker-up-dev:
     docker compose --profile dev up -d
 
 # Attach to orchestrator Zellij session
+# Auto-detects SSH transport and wraps with ssh -t for TTY passthrough
 docker-attach:
-    docker exec -it tidepool-orchestrator gosu user zellij attach orchestrator
+    #!/usr/bin/env bash
+    if [[ "$DOCKER_HOST" == ssh://* ]]; then
+        # Docker's SSH transport doesn't support TTY passthrough (dial-stdio limitation)
+        # Wrap with ssh -t to allocate PTY on remote host
+        ssh -t "${DOCKER_HOST#ssh://}" "docker exec -it tidepool-orchestrator gosu user zellij attach orchestrator"
+    else
+        docker exec -it tidepool-orchestrator gosu user zellij attach orchestrator
+    fi
 
 # Spawn agent container with shared sockets and auth isolation
 docker-agent BRANCH:
