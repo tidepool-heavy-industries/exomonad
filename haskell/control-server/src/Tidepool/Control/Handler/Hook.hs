@@ -12,7 +12,8 @@
 -- * Stop: Enforces PR filing with templated guidance + auto-focus on subagent error
 module Tidepool.Control.Handler.Hook
   ( handleHook
-  ) where
+  )
+where
 
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -136,7 +137,7 @@ handleSessionStart tracer role input = do
     $ runLog Debug
     $ runBDIO defaultBDConfig
     $ traceBD tracer
-    $ case mContainer of
+    $ case mContainer of 
          Just container -> 
            runSshExec (T.pack sshProxyUrl) 
            $ runGitViaSsh (T.pack container) "." 
@@ -178,7 +179,8 @@ handleStop tracer input runtime cbMap = do
       hFlush stdout
       -- Block with circuit breaker error
       pure $ HookResponse
-        { output = defaultOutput
+        {
+          output = defaultOutput
             { continue_ = False
             , stopReason = Just $ "Circuit breaker: " <> err
             , systemMessage = Just $ "Tidepool circuit breaker triggered: " <> err
@@ -194,7 +196,7 @@ handleStop tracer input runtime cbMap = do
 
       -- Increment circuit breaker stage counter if blocking
       now <- getCurrentTime
-      let shouldBlock = templateName `elem` ["fix-build-errors", "max-loops", "build-stuck"]
+      let shouldBlock = templateName `elem` ["fix-build-errors", "max-loops", "build-stuck", "fix-test-failures", "test-stuck"]
       let stageName = context.stage
       
       -- We always increment stage in the graph/workflow state, but CB map is external
@@ -210,8 +212,10 @@ handleStop tracer input runtime cbMap = do
 
       if shouldBlock
         then pure $ HookResponse
-          { output = defaultOutput
-              { continue_ = False
+          {
+            output = defaultOutput
+              {
+                continue_ = False
               , stopReason = Just $ "Workflow stage: " <> templateName
               , hookSpecificOutput = Just StopOutput
               , systemMessage = Just rendered
@@ -219,7 +223,8 @@ handleStop tracer input runtime cbMap = do
           , exitCode = 1
           }
         else pure $ hookSuccess defaultOutput
-          { systemMessage = Just rendered
+          {
+            systemMessage = Just rendered
           , hookSpecificOutput = Just StopOutput
           }
 
@@ -237,11 +242,13 @@ runStopHookLogic tracer input = do
 
   -- Initialize minimal workflow state
   let initialWorkflow = WorkflowState
-        { wsGlobalStops = 0 -- TODO: Fetch from CB map?
+        {
+          wsGlobalStops = 0 -- TODO: Fetch from CB map?
         , wsStageRetries = Map.empty
         , wsCurrentStage = StageBuild
         , wsLastBuildResult = Nothing
         , wsLastPRStatus = Nothing
+        , wsLastTestResult = Nothing
         }
   
   -- We need to fetch git info first to populate AgentState
@@ -282,7 +289,8 @@ getAgentState input = do
   let branch = (.wiBranch) <$> mWt
       beadId = branch >>= parseBeadId
   pure $ AgentState
-    { asSessionId = input.sessionId
+    {
+      asSessionId = input.sessionId
     , asCwd = T.unpack input.cwd
     , asBranch = branch
     , asBeadId = beadId
@@ -340,36 +348,45 @@ makeResponse :: Text -> HookInput -> HookOutput
 makeResponse eventName input = case eventName of
   "PostToolUse" -> allowPostToolUse Nothing
   "PermissionRequest" -> defaultOutput
-    { hookSpecificOutput = Just $ PermissionRequestOutput $ Allow Nothing
+    {
+      hookSpecificOutput = Just $ PermissionRequestOutput $ Allow Nothing
     }
   "UserPromptSubmit" -> defaultOutput
-    { hookSpecificOutput = Just $ UserPromptSubmitOutput Nothing
+    {
+      hookSpecificOutput = Just $ UserPromptSubmitOutput Nothing
     }
   "SessionStart" -> defaultOutput
-    { hookSpecificOutput = Just $ SessionStartOutput $
+    {
+      hookSpecificOutput = Just $ SessionStartOutput $
         Just $ "Tidepool control server connected. Session: " <> input.sessionId
     }
   "SessionEnd" -> defaultOutput
-    { hookSpecificOutput = Just SessionEndOutput
+    {
+      hookSpecificOutput = Just SessionEndOutput
     }
   "Stop" -> defaultOutput
-    { hookSpecificOutput = Just StopOutput
+    {
+      hookSpecificOutput = Just StopOutput
     }
   "SubagentStop" -> defaultOutput
-    { hookSpecificOutput = Just SubagentStopOutput
+    {
+      hookSpecificOutput = Just SubagentStopOutput
     }
   "Notification" -> defaultOutput
-    { hookSpecificOutput = Just NotificationOutput
+    {
+      hookSpecificOutput = Just NotificationOutput
     }
   "PreCompact" -> defaultOutput
-    { hookSpecificOutput = Just PreCompactOutput
+    {
+      hookSpecificOutput = Just PreCompactOutput
     }
   _ -> defaultOutput
 
 -- | Default output (continue, no specific output)
 defaultOutput :: HookOutput
 defaultOutput = HookOutput
-  { continue_ = True
+  {
+    continue_ = True
   , stopReason = Nothing
   , suppressOutput = Nothing
   , systemMessage = Nothing

@@ -50,10 +50,36 @@ data StopHookGraph mode = StopHookGraph
       :@ Input AgentState
       :@ UsesEffects '[ State WorkflowState
                       , Goto "buildMaxReached" ()
-                      , Goto "checkPR" AgentState
+                      , Goto "checkTest" AgentState
                       ]
 
   , buildMaxReached :: mode :- LogicNode
+      :@ Input ()
+      :@ UsesEffects '[Goto "buildContext" TemplateName]
+
+  -- Test stage
+  , checkTest :: mode :- LogicNode
+      :@ Input AgentState
+      :@ UsesEffects '[ Effector
+                      , State WorkflowState
+                      , Goto "routeTest" (AgentState, TestResult)
+                      ]
+
+  , routeTest :: mode :- LogicNode
+      :@ Input (AgentState, TestResult)
+      :@ UsesEffects '[ State WorkflowState
+                      , Goto "buildContext" TemplateName
+                      , Goto "testLoopCheck" AgentState
+                      ]
+
+  , testLoopCheck :: mode :- LogicNode
+      :@ Input AgentState
+      :@ UsesEffects '[ State WorkflowState
+                      , Goto "testMaxReached" ()
+                      , Goto "checkPR" AgentState
+                      ]
+
+  , testMaxReached :: mode :- LogicNode
       :@ Input ()
       :@ UsesEffects '[Goto "buildContext" TemplateName]
 

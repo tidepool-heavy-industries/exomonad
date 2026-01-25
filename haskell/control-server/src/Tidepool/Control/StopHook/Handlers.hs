@@ -4,6 +4,8 @@
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE OverloadedRecordDot #-}
+{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE DeriveAnyClass #-}
 
 module Tidepool.Control.StopHook.Handlers
   ( stopHookHandlers
@@ -16,6 +18,7 @@ import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
+import GHC.Generics (Generic)
 
 import Tidepool.Graph.Generic (AsHandler, (:-))
 import Tidepool.Graph.Goto (GotoChoice, To, gotoChoice, gotoExit)
@@ -25,7 +28,7 @@ import Tidepool.Control.StopHook.Graph
 import Tidepool.Control.StopHook.ErrorParser (parseGHCOutput)
 import Tidepool.Effects.Cabal (Cabal, CabalResult(..), cabalBuild, RawCompileError(..))
 import Tidepool.Effects.Effector (Effector, runEffector, GhPrStatusResult(..))
-import Data.Aeson (eitherDecodeStrict)
+import Data.Aeson (eitherDecodeStrict, FromJSON, fromJSON, Result(..))
 import qualified Data.ByteString.Char8 as BS8
 import qualified Data.Text.Encoding as TE
 
@@ -43,6 +46,10 @@ stopHookHandlers = StopHookGraph
   , routeBuild = handleRouteBuild
   , buildLoopCheck = handleBuildLoopCheck
   , buildMaxReached = handleBuildMaxReached
+  , checkTest = handleCheckTest
+  , routeTest = handleRouteTest
+  , testLoopCheck = handleTestLoopCheck
+  , testMaxReached = handleTestMaxReached
   , checkPR = handleCheckPR
   , routePR = handleRoutePR
   , prLoopCheck = handlePrLoopCheck
@@ -131,7 +138,7 @@ handleRouteBuild (state, result) = case result of
 handleBuildLoopCheck
   :: (Member (State WorkflowState) es)
   => AgentState
-  -> Eff es (GotoChoice '[To "buildMaxReached" (), To "checkPR" AgentState])
+  -> Eff es (GotoChoice '[To "buildMaxReached" (), To "checkTest" AgentState])
 handleBuildLoopCheck state = do
   ws <- get
   let buildRetries = fromMaybe 0 $ Map.lookup StageBuild (wsStageRetries ws)
@@ -141,7 +148,7 @@ handleBuildLoopCheck state = do
       modify $ \s -> s
         { wsStageRetries = Map.insertWith (+) StageBuild 1 (wsStageRetries s)
         }
-      pure $ gotoChoice @"checkPR" state
+      pure $ gotoChoice @"checkTest" state
 
 -- | Build max reached: go to buildContext with build-stuck template
 handleBuildMaxReached
@@ -150,6 +157,81 @@ handleBuildMaxReached
   -> Eff es (GotoChoice '[To "buildContext" TemplateName])
 handleBuildMaxReached () = do
   pure $ gotoChoice @"buildContext" ("build-stuck" :: Text)
+
+-- | Check test status
+handleCheckTest
+  :: (Member Effector es, Member (State WorkflowState) es)
+  => AgentState
+  -> Eff es (GotoChoice '[To "routeTest" (AgentState, TestResult)])
+handleCheckTest state = do
+  raw <- runEffector "cabal" ["test"]
+  let mResult = eitherDecodeStrict (BS8.pack $ T.unpack raw)
+  let testRes = case mResult of
+        Right (JsonTestResult p f fails) -> 
+          TestResult p f (map translateTestFailure fails)
+        Left _ -> TestResult 0 0 []
+  modify $ \s -> s
+    { wsLastTestResult = Just testRes
+    , wsCurrentStage = StageTest
+    }
+  pure $ gotoChoice @"routeTest" (state, testRes)
+
+-- Types for JSON parsing from effector
+data JsonTestResult = JsonTestResult
+  { passed :: Int
+  , failed :: Int
+  , failures :: [JsonTestFailure]
+  } deriving (Generic, FromJSON)
+
+data JsonTestFailure = JsonTestFailure
+  { suite :: Text
+  , test_name :: Text
+  , message :: Text
+  , location :: Maybe Text
+  } deriving (Generic, FromJSON)
+
+translateTestFailure :: JsonTestFailure -> TestFailureInfo
+translateTestFailure ctf = TestFailureInfo 
+  { tfiSuite = ctf.suite
+  , tfiTestName = ctf.test_name
+  , tfiMessage = ctf.message
+  , tfiLocation = ctf.location
+  }
+
+-- | Route based on test result
+handleRouteTest
+  :: (Member (State WorkflowState) es)
+  => (AgentState, TestResult)
+  -> Eff es (GotoChoice '[To "buildContext" TemplateName, To "testLoopCheck" AgentState])
+handleRouteTest (state, result) = case result.trFailed of
+  0 -> do
+    pure $ gotoChoice @"testLoopCheck" state
+  _ -> do
+    pure $ gotoChoice @"buildContext" ("fix-test-failures" :: Text)
+
+-- | Check test-specific loop count
+handleTestLoopCheck
+  :: (Member (State WorkflowState) es)
+  => AgentState
+  -> Eff es (GotoChoice '[To "testMaxReached" (), To "checkPR" AgentState])
+handleTestLoopCheck state = do
+  ws <- get
+  let testRetries = fromMaybe 0 $ Map.lookup StageTest (wsStageRetries ws)
+  if testRetries >= 3
+    then pure $ gotoChoice @"testMaxReached" ()
+    else do
+      modify $ \s -> s
+        { wsStageRetries = Map.insertWith (+) StageTest 1 (wsStageRetries s)
+        }
+      pure $ gotoChoice @"checkPR" state
+
+-- | Test max reached
+handleTestMaxReached
+  :: (Member (State WorkflowState) es)
+  => ()
+  -> Eff es (GotoChoice '[To "buildContext" TemplateName])
+handleTestMaxReached () = do
+  pure $ gotoChoice @"buildContext" ("test-stuck" :: Text)
 
 -- | Check PR status
 handleCheckPR
@@ -232,10 +314,12 @@ buildTemplateContext ws templateName =
       (errs, warns, count, raw, failed) = case mRes of
         Just (BuildFailure info) -> 
           (bfiErrors info, bfiWarnings info, bfiErrorCount info, bfiRawOutput info, True)
-        Just BuildSuccess -> 
+        _ -> 
           ([], [], 0, "", False)
-        Nothing -> 
-          ([], [], 0, "", False)
+      mTestRes = wsLastTestResult ws
+      (tFailed, tPCount, tFCount, tFailures) = case mTestRes of
+        Just tr -> (tr.trFailed > 0, tr.trPassed, tr.trFailed, tr.trFailures)
+        Nothing -> (False, 0, 0, [])
       mPR = wsLastPRStatus ws
       (prExists, prUrl, prNum, prStatus, prComments) = case mPR of
         Just pr -> 
@@ -252,6 +336,10 @@ buildTemplateContext ws templateName =
     , warnings = warns
     , error_count = count
     , raw_output = raw
+    , tests_failed = tFailed
+    , test_passed_count = tPCount
+    , test_failed_count = tFCount
+    , test_failures = tFailures
     , pr_exists = prExists
     , pr_url = prUrl
     , pr_number = prNum
