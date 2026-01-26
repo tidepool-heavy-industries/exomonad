@@ -48,42 +48,7 @@ else
     echo "Using existing/linked settings.json"
 fi
 
-# 3. Detect Subagent Mode vs Root Agent Mode
-if [ -f "process-compose.yaml" ]; then
-    echo "Starting local control-server (Subagent Mode)..."
-
-    # Ensure socket directory exists
-    if [ -n "$TIDEPOOL_SOCKET_DIR" ]; then
-        mkdir -p "$TIDEPOOL_SOCKET_DIR"
-    fi
-
-    # Clean up stale sockets
-    if [ -n "$TIDEPOOL_CONTROL_SOCKET" ]; then
-        rm -f "$TIDEPOOL_CONTROL_SOCKET"
-    fi
-    if [ -n "$TIDEPOOL_TUI_SOCKET" ]; then
-        rm -f "$TIDEPOOL_TUI_SOCKET"
-    fi
-
-    # Start control-server in background
-    mkdir -p .tidepool/logs
-    echo "Launching tidepool-control-server --no-tui..."
-    # Run as background process. We don't use process-compose anymore, so we supervise manually.
-    tidepool-control-server --no-tui > .tidepool/logs/control-server.log 2>&1 &
-    SERVER_PID=$!
-    
-    # Wait briefly for socket to appear
-    echo "Waiting for control socket..."
-    for i in {1..10}; do
-        if [ -S "$TIDEPOOL_CONTROL_SOCKET" ]; then
-            echo "Control server started (PID $SERVER_PID)"
-            break
-        fi
-        sleep 0.5
-    done
-fi
-
-# 4. Configure MCP
+# 3. Configure MCP
 ROLE="${TIDEPOOL_ROLE:-agent}"
 # Subagents might already have .mcp.json written by SpawnAgents to their worktree root.
 # Root agents might need it in their specific workspace.
@@ -107,18 +72,7 @@ write_mcp_config() {
     echo "✓ MCP config written to $target"
 }
 
-if [ -n "${TIDEPOOL_CONTROL_SOCKET:-}" ]; then
-    echo "Configuring MCP via Unix socket: ${TIDEPOOL_CONTROL_SOCKET}"
-    SOCKET_PATH_ENCODED=$(echo "$TIDEPOOL_CONTROL_SOCKET" | sed 's/\//%2F/g')
-    write_mcp_config '{
-  "mcpServers": {
-    "control": {
-      "type": "http",
-      "url": "http+unix://'"$SOCKET_PATH_ENCODED"'/mcp"
-    }
-  }
-}'
-elif [ -n "${CONTROL_SERVER_URL:-}" ]; then
+if [ -n "${CONTROL_SERVER_URL:-}" ]; then
     echo "Configuring MCP via TCP: ${CONTROL_SERVER_URL}/role/${ROLE}/mcp"
     write_mcp_config '{
   "mcpServers": {
@@ -129,7 +83,7 @@ elif [ -n "${CONTROL_SERVER_URL:-}" ]; then
   }
 }'
 else
-    echo "Warning: No MCP configuration" >&2
+    echo "Warning: No MCP configuration (CONTROL_SERVER_URL not set)" >&2
 fi
 
 # Change to agent-specific workspace
