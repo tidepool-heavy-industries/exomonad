@@ -21,21 +21,26 @@ echo "Rebuilding and refreshing IDE environment..."
 # 1. Detect Docker socket GID for group_add (enables docker socket access without runtime groupadd)
 export DOCKER_GID=$(stat -c '%g' /var/run/docker.sock 2>/dev/null || stat -f '%g' /var/run/docker.sock 2>/dev/null || echo 999)
 
-# 2. Build the reusable agent image (needed by spawn_agents for subagents)
-echo "Building exomonad-agent image..."
-docker build -t exomonad-agent:latest -f docker/claude-agent/Dockerfile .
+# 2. Auto-detect git SHA for OCI labels
+export GIT_SHA="${GIT_SHA:-$(git rev-parse --short HEAD 2>/dev/null || echo unknown)}"
+echo "Git SHA: $GIT_SHA"
 
-# 3. Force recreation of containers
-#    --build: Rebuilds images if Dockerfile changed
+# 3. Build all images via bake (handles multi-stage builder contexts)
+#    --load: Load images into local daemon for compose to use
+echo "Building images via docker bake..."
+./build --load
+
+# 4. Force recreation of containers
+#    Images already built above, no --build needed
 #    --force-recreate: Kills old containers, starts fresh ones
-echo "Rebuilding containers..."
-docker compose up -d --build --force-recreate --remove-orphans
+echo "Recreating containers..."
+docker compose up -d --force-recreate --remove-orphans
 
-# 4. Wait for services to be healthy
+# 5. Wait for services to be healthy
 echo "Waiting for services to initialize..."
 sleep 3
 
-# 5. Reconnect using the standard idempotent command
+# 6. Reconnect using the standard idempotent command
 #    gosu user: Run zellij as UID 1000 so session socket is user-owned
 #               This enables cross-container control via tui-spawner
 echo "Connecting to fresh Zellij session..."

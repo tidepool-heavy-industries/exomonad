@@ -1,10 +1,14 @@
 # BuildKit Bake orchestrator for ExoMonad Docker builds
 #
-# Usage:
-#   docker buildx bake                    # Build all final images
-#   docker buildx bake deps               # Build only dependency cacher layers
-#   docker buildx bake rust-builder       # Build Rust crates only
-#   docker buildx bake haskell-builder    # Build Haskell packages only
+# Usage (preferred - auto-injects GIT_SHA):
+#   ./build                    # Build all final images
+#   ./build --load             # Build and load into local daemon
+#   ./build deps               # Build only dependency cacher layers
+#   ./build control-server     # Build specific target
+#
+# Usage (direct - requires manual GIT_SHA):
+#   export GIT_SHA=$(git rev-parse --short HEAD)
+#   docker buildx bake -f docker/docker-bake.hcl
 #
 # Cache efficiency:
 #   - Deps are built separately from source
@@ -12,7 +16,7 @@
 #   - cargo-chef for Rust, cabal freeze + dummy source for Haskell
 #
 # Version embedding:
-#   docker buildx bake --set *.args.GIT_SHA=$(git rev-parse --short HEAD)
+#   GIT_SHA is read from environment (set by ./build wrapper or manually)
 
 variable "REGISTRY" { default = "" }
 variable "TAG" { default = "latest" }
@@ -33,26 +37,24 @@ group "deps" {
 # =============================================================================
 
 target "rust-planner" {
-  dockerfile = "base/Dockerfile.rust-deps"
+  dockerfile = "docker/base/Dockerfile.rust-deps"
   target = "planner"
-  context = ".."
+  context = "."
 }
 
 target "rust-cacher" {
-  dockerfile = "base/Dockerfile.rust-deps"
+  dockerfile = "docker/base/Dockerfile.rust-deps"
   target = "cacher"
-  context = ".."
+  context = "."
   contexts = {
     rust-planner = "target:rust-planner"
   }
-  cache-from = ["type=registry,ref=${REGISTRY}exomonad-rust-deps:cache"]
-  cache-to = ["type=registry,ref=${REGISTRY}exomonad-rust-deps:cache,mode=max"]
 }
 
 target "rust-builder" {
-  dockerfile = "base/Dockerfile.rust-deps"
+  dockerfile = "docker/base/Dockerfile.rust-deps"
   target = "builder"
-  context = ".."
+  context = "."
   contexts = {
     rust-cacher = "target:rust-cacher"
   }
@@ -66,26 +68,24 @@ target "rust-builder" {
 # =============================================================================
 
 target "haskell-freeze" {
-  dockerfile = "base/Dockerfile.haskell-deps"
+  dockerfile = "docker/base/Dockerfile.haskell-deps"
   target = "freeze"
-  context = ".."
+  context = "."
 }
 
 target "haskell-cacher" {
-  dockerfile = "base/Dockerfile.haskell-deps"
+  dockerfile = "docker/base/Dockerfile.haskell-deps"
   target = "cacher"
-  context = ".."
+  context = "."
   contexts = {
     haskell-freeze = "target:haskell-freeze"
   }
-  cache-from = ["type=registry,ref=${REGISTRY}exomonad-haskell-deps:cache"]
-  cache-to = ["type=registry,ref=${REGISTRY}exomonad-haskell-deps:cache,mode=max"]
 }
 
 target "haskell-builder" {
-  dockerfile = "base/Dockerfile.haskell-deps"
+  dockerfile = "docker/base/Dockerfile.haskell-deps"
   target = "builder"
-  context = ".."
+  context = "."
   contexts = {
     haskell-cacher = "target:haskell-cacher"
   }
@@ -99,8 +99,8 @@ target "haskell-builder" {
 # =============================================================================
 
 target "control-server" {
-  dockerfile = "control-server/Dockerfile"
-  context = ".."
+  dockerfile = "docker/control-server/Dockerfile"
+  context = "."
   contexts = {
     haskell-builder = "target:haskell-builder"
     rust-builder = "target:rust-builder"
@@ -112,8 +112,8 @@ target "control-server" {
 }
 
 target "claude-agent" {
-  dockerfile = "claude-agent/Dockerfile"
-  context = ".."
+  dockerfile = "docker/claude-agent/Dockerfile"
+  context = "."
   contexts = {
     haskell-builder = "target:haskell-builder"
     rust-builder = "target:rust-builder"
@@ -125,8 +125,8 @@ target "claude-agent" {
 }
 
 target "zellij" {
-  dockerfile = "zellij/Dockerfile"
-  context = ".."
+  dockerfile = "docker/zellij/Dockerfile"
+  context = "."
   contexts = {
     rust-builder = "target:rust-builder"
   }

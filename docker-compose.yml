@@ -13,9 +13,12 @@ services:
       file: compose.base.yml
       service: docker-socket-access
     init: true
+    image: exomonad-control-server:${TAG:-latest}
     build:
       context: .
       dockerfile: docker/control-server/Dockerfile
+      args:
+        GIT_SHA: ${GIT_SHA:-unknown}
     container_name: exomonad-control-server
     platform: linux/amd64
     deploy:
@@ -69,9 +72,12 @@ services:
       file: compose.base.yml
       service: docker-socket-access
     init: true
+    image: exomonad-zellij:${TAG:-latest}
     build:
       context: .
       dockerfile: docker/zellij/Dockerfile
+      args:
+        GIT_SHA: ${GIT_SHA:-unknown}
     container_name: exomonad-zellij
     platform: linux/amd64
     tty: true
@@ -97,9 +103,12 @@ services:
       file: compose.base.yml
       service: docker-socket-access
     init: true
+    image: exomonad-agent:${TAG:-latest}
     build:
       context: .
       dockerfile: docker/claude-agent/Dockerfile
+      args:
+        GIT_SHA: ${GIT_SHA:-unknown}
     container_name: exomonad-tl
     platform: linux/amd64
     tty: true
@@ -138,9 +147,12 @@ services:
       file: compose.base.yml
       service: docker-socket-access
     init: true
+    image: exomonad-agent:${TAG:-latest}
     build:
       context: .
       dockerfile: docker/claude-agent/Dockerfile
+      args:
+        GIT_SHA: ${GIT_SHA:-unknown}
     container_name: exomonad-pm
     platform: linux/amd64
     tty: true
@@ -210,6 +222,8 @@ services:
       context: .
       dockerfile: docker/orchestrator/Dockerfile
       target: orchestrator
+      args:
+        GIT_SHA: ${GIT_SHA:-unknown}
     container_name: exomonad-orchestrator
     deploy:
       resources:

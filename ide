@@ -22,13 +22,16 @@ cd "$SCRIPT_DIR"
 # 1. Detect Docker socket GID for group_add (enables docker socket access without runtime groupadd)
 export DOCKER_GID=$(stat -c '%g' /var/run/docker.sock 2>/dev/null || stat -f '%g' /var/run/docker.sock 2>/dev/null || echo 999)
 
-# 2. Ensure containers are running (idempotent)
+# 2. Auto-detect git SHA for OCI labels (used if images need to be built)
+export GIT_SHA="${GIT_SHA:-$(git rev-parse --short HEAD 2>/dev/null || echo unknown)}"
+
+# 3. Ensure containers are running (idempotent)
 #    -d: Detached
 #    --remove-orphans: Clean up old containers
 echo "Ensuring containers are running..."
 docker compose up -d --remove-orphans
 
-# 3. Wait for zellij container to be ready
+# 4. Wait for zellij container to be ready
 echo "Waiting for Zellij container..."
 TIMEOUT=30
 ELAPSED=0
@@ -44,7 +47,7 @@ if [ $ELAPSED -ge $TIMEOUT ]; then
     echo "Warning: Timeout waiting for Zellij container, connecting anyway..."
 fi
 
-# 4. Connect to Zellij (idempotent: creates if missing, attaches if exists)
+# 5. Connect to Zellij (idempotent: creates if missing, attaches if exists)
 #    --layout: Layout to use when creating (ignored if session exists)
 #    attach --create: The magic - connects if exists, creates if not
 #    gosu user: Run zellij as UID 1000 so session socket is user-owned

@@ -12,7 +12,7 @@
 # =============================================================================
 # Stage 1: Planner - generates recipe.json (dependency manifest)
 # =============================================================================
-FROM rust:1.83-bookworm AS planner
+FROM rust:1.93-bookworm AS planner
 
 RUN cargo install cargo-chef --locked
 
@@ -20,7 +20,6 @@ WORKDIR /app
 
 # Copy workspace structure
 COPY rust/Cargo.toml rust/Cargo.lock ./rust/
-COPY rust/hangar-config/Cargo.toml ./rust/hangar-config/
 COPY rust/exomonad/Cargo.toml ./rust/exomonad/
 COPY rust/exomonad-shared/Cargo.toml ./rust/exomonad-shared/
 COPY rust/tui-sidebar/Cargo.toml ./rust/tui-sidebar/
@@ -29,9 +28,12 @@ COPY rust/tui-spawner/Cargo.toml ./rust/tui-spawner/
 COPY rust/effector/Cargo.toml ./rust/effector/
 COPY rust/docker-ctl/Cargo.toml ./rust/docker-ctl/
 
-# Copy source for recipe generation (cargo-chef needs to parse)
-# COPY rust/ ./rust/  <-- REMOVED: Invalidates cache on source change. 
-# Explicit COPYs above are sufficient for recipe generation.
+# Create dummy source files so cargo-chef can determine crate types
+# (Cargo.toml alone isn't enough - needs at least lib.rs or main.rs)
+RUN mkdir -p rust/exomonad/src rust/exomonad-shared/src rust/tui-sidebar/src \
+             rust/tui-popup/src rust/tui-spawner/src rust/effector/src rust/docker-ctl/src && \
+    touch rust/exomonad/src/main.rs rust/exomonad-shared/src/lib.rs rust/tui-sidebar/src/main.rs \
+          rust/tui-popup/src/main.rs rust/tui-spawner/src/main.rs rust/effector/src/main.rs rust/docker-ctl/src/main.rs
 
 # Generate recipe from workspace
 RUN cd rust && cargo chef prepare --recipe-path /recipe.json
@@ -39,7 +41,7 @@ RUN cd rust && cargo chef prepare --recipe-path /recipe.json
 # =============================================================================
 # Stage 2: Cacher - builds deps only (no source code)
 # =============================================================================
-FROM rust:1.83-bookworm AS cacher
+FROM rust:1.93-bookworm AS cacher
 
 RUN apt-get update && apt-get install -y \
     pkg-config \
@@ -62,7 +64,7 @@ RUN cargo chef cook --release --recipe-path /recipe.json
 # =============================================================================
 # Stage 3: Builder - compile full source with cached deps
 # =============================================================================
-FROM rust:1.83-bookworm AS builder
+FROM rust:1.93-bookworm AS builder
 
 RUN apt-get update && apt-get install -y \
     pkg-config \

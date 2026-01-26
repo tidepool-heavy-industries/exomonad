@@ -106,7 +106,10 @@ RUN --mount=type=cache,target=/root/.cargo/registry \
 # Stage 3: Runtime
 # Debian bookworm-slim provides a small, stable base for the runtime
 # Platform controlled by docker-compose.yml (linux/amd64 for deployment)
+ARG GIT_SHA=unknown
 FROM debian:bookworm-slim AS runtime
+ARG GIT_SHA
+LABEL org.opencontainers.image.revision=${GIT_SHA}
 
 # ============================================================================
 # CACHE OPTIMIZATION: Stable layers first, frequently-changing configs last

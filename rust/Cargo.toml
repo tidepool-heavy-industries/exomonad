@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["hangar-config",
+members = [
     "exomonad",
     "exomonad-shared",
     "tui-sidebar",
