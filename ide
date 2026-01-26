@@ -44,9 +44,9 @@ fi
 # 3. Connect to Zellij (idempotent: creates if missing, attaches if exists)
 #    --layout: Layout to use when creating (ignored if session exists)
 #    attach --create: The magic - connects if exists, creates if not
-#    -u user: Run as UID 1000 so Zellij sockets are user-owned (not root)
-#             This enables cross-container control via tui-spawner
+#    gosu user: Run zellij as UID 1000 so session socket is user-owned
+#               This enables cross-container control via tui-spawner
 echo "Connecting to Zellij session..."
-exec docker exec -it -u user tidepool-zellij \
-    zellij --layout /etc/zellij/layouts/main.kdl \
+exec docker exec -it tidepool-zellij \
+    gosu user zellij --layout /etc/zellij/layouts/main.kdl \
     attach --create tidepool
