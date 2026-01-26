@@ -7,7 +7,7 @@ set -euo pipefail
 # Minimal container for visual multiplexing. Panes run docker attach to agents.
 #
 # IDEMPOTENT SESSION MANAGEMENT:
-#   docker exec -it tidepool-zellij zellij --layout /etc/zellij/layouts/main.kdl attach --create tidepool
+#   docker exec -it tidepool-zellij zellij --layout /etc/zellij/layouts/main.kdl attach --create main
 #
 # This single command:
 #   - Creates session with layout if it doesn't exist
@@ -52,7 +52,7 @@ echo "Connect with (idempotent - works for create, attach, or resurrect):"
 echo "  ./ide"
 echo ""
 echo "Or manually:"
-echo "  docker exec -it tidepool-zellij zellij --layout /etc/zellij/layouts/main.kdl attach --create tidepool"
+echo "  docker exec -it tidepool-zellij zellij --layout /etc/zellij/layouts/main.kdl attach --create main"
 echo ""
 
 # Keep container alive - user connects via docker exec

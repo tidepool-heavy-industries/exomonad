@@ -50,5 +50,7 @@ export LANG=C.UTF-8
 export LC_ALL=C.UTF-8
 
 # --- Start server as non-root ---
+# Use username (not UID:GID) so gosu calls initgroups() and picks up
+# supplementary groups like docker-host from /etc/group
 echo "Starting control-server as user..."
-exec gosu 1000:1000 tidepool-control-server
+exec gosu user tidepool-control-server
