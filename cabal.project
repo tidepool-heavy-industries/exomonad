@@ -28,7 +28,6 @@ packages:
     haskell/effects/gemini-interpreter
     haskell/effects/filesystem-interpreter
     haskell/effects/zellij-interpreter
-    haskell/effects/docker-spawner-interpreter
 
     -- Effect types (standalone)
     haskell/effects/habitica

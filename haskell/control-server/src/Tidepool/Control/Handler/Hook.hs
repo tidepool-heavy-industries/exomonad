@@ -34,7 +34,7 @@ import Tidepool.Control.Protocol hiding (role)
 import Tidepool.Control.Types (ServerConfig(..))
 import Tidepool.Control.Hook.Policy (HookDecision(..), evaluatePolicy)
 import Tidepool.Control.Hook.CircuitBreaker (CircuitBreakerMap, SessionId, withCircuitBreaker, incrementStage)
-import Tidepool.Control.ExoTools (parseIssueNumber)
+import Tidepool.Control.ExoTools (parseIssueNumber, findHangarRoot)
 import Tidepool.Control.Hook.SessionStart (sessionStartLogic)
 import Tidepool.Control.Effects.SshExec (runSshExec)
 import Tidepool.Control.Effects.Git (runGitViaSsh)
@@ -43,6 +43,8 @@ import Tidepool.Control.Effects.Effector (runEffectorViaSsh, runEffectorIO)
 import Tidepool.Control.Interpreters.Traced (traceCabal, traceGit)
 import Tidepool.Cabal.Interpreter (runCabalIO, defaultCabalConfig)
 import Tidepool.GitHub.Interpreter (runGitHubIO, defaultGitHubConfig)
+import Tidepool.FileSystem.Interpreter (runFileSystemIO)
+import Tidepool.Env.Interpreter (runEnvIO)
 import Tidepool.Effect.Types (runLog, LogLevel(..))
 import Tidepool.Effect.NodeMeta (runGraphMeta, runNodeMeta, defaultNodeMeta, GraphMetadata(..))
 import Tidepool.Effects.Git (Git, WorktreeInfo(..), getWorktreeInfo)
@@ -50,6 +52,7 @@ import Tidepool.Git.Interpreter (runGitIO)
 import Tidepool.Effects.Zellij (Zellij, checkZellijEnv, goToTab, TabId(..))
 import Tidepool.Zellij.Interpreter (runZellijIO)
 import Tidepool.Graph.Interpret (runGraph)
+import qualified Tidepool.Control.Runtime.Paths as Paths
 
 import Tidepool.Control.StopHook.Types
 import Tidepool.Control.StopHook.Graph
@@ -126,14 +129,19 @@ handleSessionStart tracer role input = do
 
   -- Check if we should use SSH for execution (if TIDEPOOL_CONTAINER is set)
   mContainer <- lookupEnv "TIDEPOOL_CONTAINER"
-  sshProxyUrl <- fromMaybe "http://localhost:7433" <$> lookupEnv "SSH_PROXY_URL"
+  
+  -- Find hangar root to resolve runtime binaries
+  mHangarRoot <- runM $ runEnvIO $ runFileSystemIO $ runGitIO findHangarRoot
+  let hr = fromMaybe "." mHangarRoot
+      binDir = Paths.runtimeBinDir hr
+      dockerCtlPath = Paths.dockerCtlBin binDir
 
   result <- try $ runM
     $ runLog Debug
     $ runGitHubIO defaultGitHubConfig
     $ case mContainer of 
          Just container -> 
-           runSshExec (T.pack sshProxyUrl) 
+           runSshExec dockerCtlPath
            $ runGitViaSsh (T.pack container) "." 
            $ traceGit tracer
            $ sessionStartLogic role input.cwd
@@ -232,7 +240,12 @@ runStopHookLogic :: Tracer -> HookInput -> IO (TemplateName, StopHookContext)
 runStopHookLogic tracer input = do
   -- Check environment for container/SSH
   mContainer <- lookupEnv "TIDEPOOL_CONTAINER"
-  sshProxyUrl <- fromMaybe "http://localhost:7433" <$> lookupEnv "SSH_PROXY_URL"
+  
+  -- Find hangar root to resolve runtime binaries
+  mHangarRoot <- runM $ runEnvIO $ runFileSystemIO $ runGitIO findHangarRoot
+  let hr = fromMaybe "." mHangarRoot
+      binDir = Paths.runtimeBinDir hr
+      dockerCtlPath = Paths.dockerCtlBin binDir
 
   -- Initialize minimal workflow state
   let initialWorkflow = WorkflowState
@@ -247,13 +260,13 @@ runStopHookLogic tracer input = do
   
   -- We need to fetch git info first to populate AgentState
   agentState <- case mContainer of
-     Just container -> runM $ runSshExec (T.pack sshProxyUrl) $ runGitViaSsh (T.pack container) "." $ traceGit tracer $ getAgentState input
+     Just container -> runM $ runSshExec dockerCtlPath $ runGitViaSsh (T.pack container) "." $ traceGit tracer $ getAgentState input
      Nothing -> runM $ runGitIO $ traceGit tracer $ getAgentState input
 
   (result, _finalState) <- case mContainer of
         Just container ->
           runM
-          $ runSshExec (T.pack sshProxyUrl)
+          $ runSshExec dockerCtlPath
           $ runEffectorViaSsh (T.pack container)
           $ runCabalViaSsh (T.pack container)
           $ traceCabal tracer
@@ -300,12 +313,17 @@ autoFocusOnSubagentStop = do
     then pure ()
     else do
       mContainer <- lookupEnv "TIDEPOOL_CONTAINER"
-      sshProxyUrl <- fromMaybe "http://localhost:7433" <$> lookupEnv "SSH_PROXY_URL"
+      
+      -- Find hangar root to resolve runtime binaries
+      mHangarRoot <- runM $ runEnvIO $ runFileSystemIO $ runGitIO findHangarRoot
+      let hr = fromMaybe "." mHangarRoot
+          binDir = Paths.runtimeBinDir hr
+          dockerCtlPath = Paths.dockerCtlBin binDir
 
       result <- try $ runM
         $ runZellijIO
         $ case mContainer of
-             Just container -> runSshExec (T.pack sshProxyUrl) $ runGitViaSsh (T.pack container) "." autoFocusLogic
+             Just container -> runSshExec dockerCtlPath $ runGitViaSsh (T.pack container) "." autoFocusLogic
              Nothing -> runGitIO autoFocusLogic
 
       case result of

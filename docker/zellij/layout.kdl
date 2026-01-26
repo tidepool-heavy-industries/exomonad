@@ -41,12 +41,6 @@ layout {
                     command "bash"
                     args "-c" "watch -c -n5 'docker ps --format \"table {{.Names}}\\t{{.Status}}\\t{{.Ports}}\" --filter name=tidepool'"
                 }
-
-                // Docker spawner logs
-                pane name="Spawner" {
-                    command "docker"
-                    args "logs" "-f" "tidepool-docker-spawner"
-                }
             }
         }
     }

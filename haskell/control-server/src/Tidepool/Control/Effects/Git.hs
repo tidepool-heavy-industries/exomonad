@@ -6,7 +6,7 @@
 {-# LANGUAGE TypeOperators #-}
 
 module Tidepool.Control.Effects.Git
-  ( runGitViaSsh
+  ( runGitRemote
   ) where
 
 import Control.Monad.Freer (Eff, Member, interpret)
@@ -16,12 +16,12 @@ import Data.Text qualified as T
 import Tidepool.Control.Effects.SshExec (SshExec, ExecRequest(..), ExecResult(..), execCommand)
 import Tidepool.Effects.Git (Git(..), WorktreeInfo(..))
 
--- | Interpreter: uses SshExec to run git commands
+-- | Interpreter: uses SshExec to run git commands remotely
 -- Takes a container name and a working directory (relative to container root).
-runGitViaSsh :: Member SshExec effs => Text -> FilePath -> Eff (Git ': effs) a -> Eff effs a
-runGitViaSsh container workDir = interpret $ \case
+runGitRemote :: Member SshExec effs => Text -> FilePath -> Eff (Git ': effs) a -> Eff effs a
+runGitRemote container workDir = interpret $ \case
   GetWorktreeInfo -> do
-    -- This is a bit complex to implement perfectly via SSH without more logic,
+    -- This is a bit complex to implement perfectly for remote containers without more logic,
     -- but we can try to get the basic info.
     mPath <- gitCommand container workDir ["rev-parse", "--show-toplevel"]
     case mPath of
@@ -35,7 +35,7 @@ runGitViaSsh container workDir = interpret $ \case
         let inWorktree = maybe False ("worktrees" `T.isInfixOf`) mGitDir
         
         pure $ Just WorktreeInfo
-          { wiName = if inWorktree then "ssh-worktree" else "main"
+          { wiName = if inWorktree then "remote-worktree" else "main"
           , wiPath = T.unpack (T.strip path)
           , wiBranch = branch
           , wiRepoRoot = T.unpack (T.strip path) -- Simplified
@@ -51,7 +51,7 @@ runGitViaSsh container workDir = interpret $ \case
       , erEnv = []
       , erTimeout = 30
       }
-    pure $ if exExitCode result == 0
+    pure $ if exExitCode result == Just 0
       then map (drop 3 . T.unpack) $ T.lines (exStdout result)
       else []
 
@@ -64,7 +64,7 @@ runGitViaSsh container workDir = interpret $ \case
       , erEnv = []
       , erTimeout = 30
       }
-    pure $ if exExitCode result == 0
+    pure $ if exExitCode result == Just 0
       then T.lines (exStdout result)
       else []
 
@@ -81,7 +81,7 @@ runGitViaSsh container workDir = interpret $ \case
       , erEnv = []
       , erTimeout = 30
       }
-    pure $ if exExitCode result == 0
+    pure $ if exExitCode result == Just 0
       then case reads (T.unpack $ T.strip $ exStdout result) of
         [(n, "")] -> n
         _ -> 0
@@ -98,6 +98,6 @@ gitCommand container wd args = do
     , erEnv = []
     , erTimeout = 30
     }
-  pure $ if exExitCode result == 0
+  pure $ if exExitCode result == Just 0
     then Just (exStdout result)
     else Nothing

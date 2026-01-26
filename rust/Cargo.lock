@@ -1032,17 +1032,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "docker-spawner"
+name = "docker-ctl"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "axum 0.8.8",
  "bollard",
+ "clap",
  "futures-util",
  "serde",
  "serde_json",
  "tokio",
- "tower-http 0.6.8",
  "tracing",
  "tracing-subscriber",
 ]

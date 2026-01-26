@@ -20,11 +20,11 @@ rust/CLAUDE.md  ← YOU ARE HERE (router)
 │   • health subcommand: check control server connectivity
 │   • Fail-closed: errors if control server unavailable
 │
-├── docker-spawner/CLAUDE.md  ← Container lifecycle management (IMPLEMENTED)
-│   • POST /spawn - Create new agent containers
-│   • POST /exec/{id} - Execute commands in containers (replaces SSH)
-│   • GET /status/{id} - Container status
-│   • POST /stop/{id} - Stop containers
+├── docker-ctl/CLAUDE.md  ← Container lifecycle management (IMPLEMENTED)
+│   • spawn - Create new agent containers
+│   • exec {id} - Execute commands in containers (replaces SSH)
+│   • status {id} - Container status
+│   • stop {id} - Stop containers
 │
 ├── mantle-hub/CLAUDE.md  ← Session hub (LEGACY, needs repurposing)
 │   • Currently: session/node tracking for headless mode
@@ -50,7 +50,7 @@ rust/CLAUDE.md  ← YOU ARE HERE (router)
 │   • Blocks reading FIFO until user responds
 │   • Called by Haskell TUIInterpreter via subprocess
 │
-└── ssh-proxy/CLAUDE.md  ← DEPRECATED (replaced by docker-spawner /exec)
+└── ssh-proxy/CLAUDE.md  ← DEPRECATED (replaced by docker-ctl)
 ```
 
 ## Architecture Overview
@@ -75,16 +75,8 @@ rust/CLAUDE.md  ← YOU ARE HERE (router)
 ┌─────────────────────────────────────────────────────────────────┐
 │ control-server container                                        │
 │  • MCP server (TCP 7432)                                        │
-│  • Calls docker-spawner for spawn + exec                        │
+│  • Calls docker-ctl (Rust binary) for spawn + exec              │
 │  • LSP session (HLS)                                            │
-└───────────────────────────────┬─────────────────────────────────┘
-                                │ HTTP :7435
-                                ▼
-┌─────────────────────────────────────────────────────────────────┐
-│ docker-spawner container                                        │
-│  • POST /spawn - create containers                              │
-│  • POST /exec/{id} - run commands (replaces SSH)                │
-│  • GET /status/{id}, POST /stop/{id}                            │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -101,10 +93,10 @@ Human TTY ──▶ Claude Code (in nix shell or direct)
 
 **Current state:**
 - `mantle-agent hook` - Forwards Claude Code hooks to control server ✓
-- `docker-spawner` - Container lifecycle + remote exec via `/exec` endpoint ✓
+- `docker-ctl` - CLI for container lifecycle + remote exec ✓
 - `haskell/control-server` - Haskell MCP server (hooks, tools, LSP) ✓
 - **MCP:** HTTP transport (TCP 7432 in Docker, Unix socket locally) ✓
-- **Remote exec:** docker-spawner `/exec` endpoint (replaces SSH) ✓
+- **Remote exec:** docker-ctl subprocess call (replaces SSH) ✓
 - **Missing:** Daemon mode, metrics hub, real hook logic in Haskell
 
 ## Workspace Members
@@ -112,13 +104,13 @@ Human TTY ──▶ Claude Code (in nix shell or direct)
 | Crate | Type | Purpose |
 |-------|------|---------|
 | [mantle-agent](mantle-agent/CLAUDE.md) | Binary | Hook handler (HTTP over Unix socket) |
-| [docker-spawner](docker-spawner/CLAUDE.md) | Binary | Container lifecycle + remote exec (replaces SSH) |
+| [docker-ctl](docker-ctl/CLAUDE.md) | Binary | CLI for container lifecycle + remote exec (replaces SSH) |
 | [mantle-hub](mantle-hub/CLAUDE.md) | Binary | Metrics/telemetry hub (WIP) |
 | [mantle-shared](mantle-shared/CLAUDE.md) | Library | Shared types, protocols, HTTP socket client (curl-based) |
 | [tui-sidebar](tui-sidebar/CLAUDE.md) | Binary + Lib | TUI sidebar: Unix socket server for interactive UIs |
 | [tui-popup](tui-popup/CLAUDE.md) | Binary | Floating pane UI renderer (uses /dev/tty) |
 | [tui-spawner](tui-spawner/CLAUDE.md) | Binary | FIFO-based popup spawning for cross-container TUI |
-| [ssh-proxy](ssh-proxy/CLAUDE.md) | Binary | DEPRECATED - replaced by docker-spawner |
+| [ssh-proxy](ssh-proxy/CLAUDE.md) | Binary | DEPRECATED - replaced by docker-ctl |
 
 ## Quick Reference
 

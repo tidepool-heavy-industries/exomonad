@@ -42,9 +42,10 @@ import Tidepool.Control.FeedbackTools
   ( registerFeedbackLogic, RegisterFeedbackArgs(..) )
 import Tidepool.Control.ExoTools
   ( exoStatusLogic, ExoStatusArgs(..)
-  , spawnAgentsLogic, SpawnAgentsArgs(..), SpawnAgentsResult(..)
+  , spawnAgentsLogic, SpawnAgentsArgs(..), SpawnAgentsResult(..), findHangarRoot
   , filePRLogic, FilePRArgs(..), FilePRResult(..), PRInfo(..)
   )
+
 import Tidepool.Control.PMTools
   ( pmApproveExpansionLogic, PmApproveExpansionArgs(..), PmApproveExpansionResult(..),
     pmPrioritizeLogic, PmPrioritizeArgs(..), PmPrioritizeResult(..), PrioritizeResultItem(..)
@@ -72,7 +73,7 @@ import Tidepool.Worktree.Interpreter (runWorktreeIO, defaultWorktreeConfig)
 import Tidepool.FileSystem.Interpreter (runFileSystemIO)
 import Tidepool.Env.Interpreter (runEnvIO)
 import Tidepool.Zellij.Interpreter (runZellijIO)
-import Tidepool.DockerSpawner.Interpreter (runDockerSpawner, DockerSpawnerConfig(..))
+import Tidepool.Control.Effects.DockerCtl (runDockerCtl)
 import Tidepool.Gemini.Interpreter (runGeminiIO)
 import Tidepool.Effect.TUI (TUI(..))
 import Tidepool.Effect.Types (runLog, LogLevel(Debug), runReturn, runTime)
@@ -272,10 +273,11 @@ handleSpawnAgentsTool logger reqId args = do
       -- Most interpreters use default configs which assume current dir is repo root.
       let repoRoot = "." 
       
-      -- Create Docker Spawner config
-      manager <- newManager defaultManagerSettings
-      spawnerUrl <- Paths.dockerSpawnerUrl
-      let spawnerConfig = DockerSpawnerConfig spawnerUrl manager
+      -- Find hangar root to resolve runtime binaries
+      mHangarRoot <- runM $ runEnvIO $ runFileSystemIO $ runGitIO findHangarRoot
+      let hr = fromMaybe repoRoot mHangarRoot
+          binDir = Paths.runtimeBinDir hr
+          dockerCtlPath = Paths.dockerCtlBin binDir
 
       resultOrErr <- try $ runM
         $ runLog Debug
@@ -286,7 +288,7 @@ handleSpawnAgentsTool logger reqId args = do
         $ runFileSystemIO
         $ runEnvIO
         $ runZellijIO
-        $ runDockerSpawner spawnerConfig
+        $ runDockerCtl dockerCtlPath
         $ fmap unwrapSingleChoice (spawnAgentsLogic saArgs)
 
       case resultOrErr of

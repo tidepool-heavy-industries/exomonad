@@ -13,6 +13,7 @@ module Tidepool.Control.ExoTools.SpawnAgents
   , spawnAgentsLogic
   , SpawnAgentsArgs(..)
   , SpawnAgentsResult(..)
+  , findHangarRoot
   )
 where
 

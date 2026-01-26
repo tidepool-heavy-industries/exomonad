@@ -1,30 +1,28 @@
 # ssh-proxy
 
-> **DEPRECATED:** This crate is no longer used. Remote command execution in agent containers is now handled by the `docker-spawner` service via its `/exec/{id}` endpoint.
+> **DEPRECATED:** This crate is no longer used. Remote command execution in agent containers is now handled by the `docker-ctl` CLI tool via its `exec` command.
 >
-> See: `rust/docker-spawner/` and `docker/docker-spawner/Dockerfile`
+> See: `rust/docker-ctl/` and `docker/control-server/Dockerfile`
 
 ## Migration
 
 The SSH-based approach has been replaced with Docker exec:
 
-| Old (ssh-proxy) | New (docker-spawner) |
+| Old (ssh-proxy) | New (docker-ctl) |
 |-----------------|----------------------|
 | SSH connection to container | Docker exec via bollard API |
 | Key management required | No authentication needed |
-| Port 22 + sshd in container | HTTP API on port 7435 |
-| `POST /exec` with SSH | `POST /exec/{id}` with Docker exec |
+| Port 22 + sshd in container | CLI tool (no persistent port) |
+| `POST /exec` with SSH | `docker-ctl exec {id}` with Docker exec |
 
 ## New Approach
 
 ```bash
 # Execute command in container
-curl -X POST http://localhost:7435/exec/tidepool-tl \
-  -H "Content-Type: application/json" \
-  -d '{"cmd": ["echo", "hello"], "workdir": "/workspace"}'
+docker-ctl exec tidepool-tl -- echo hello
 ```
 
-The docker-spawner service uses bollard (Rust Docker API client) to execute commands directly via `docker exec`, eliminating the need for SSH infrastructure in agent containers.
+The docker-ctl tool uses bollard (Rust Docker API client) to execute commands directly via `docker exec`, eliminating the need for SSH infrastructure in agent containers.
 
 ## Historical Context
 

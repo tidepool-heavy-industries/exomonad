@@ -28,10 +28,10 @@ Current state of the deployed Docker-based development environment.
 │       │                         - Exo tools (spawn_agents, exo_status)      │
 │       │                         - LSP tools (find_callers, teach-graph)     │
 │       │                                                                     │
-│       │ HTTP (7435)                                                         │
+│       │ subprocess                                                          │
 │       ▼                                                                     │
-│  tidepool-docker-spawner ────── Container lifecycle API                    │
-│                                 POST /spawn, /stop/{id}, /exec/{id}         │
+│  docker-ctl (Rust binary) ───── Container lifecycle CLI                     │
+│                                 spawn, stop, exec, status                   │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -52,12 +52,10 @@ Each container is built from a Dockerfile in `docker/`:
 │     │  Purpose: Agent runtime (TL, PM, and spawned subagents)               │
 │     │                                                                        │
 │  repo-control-server ◄──────── docker/control-server/Dockerfile            │
-│     │  Contains: tidepool-control-server (Haskell), gh CLI, zellij         │
+│     │  Contains: tidepool-control-server (Haskell), gh CLI, zellij,       │
+│     │            docker-ctl (Rust)                                        │
 │     │  Purpose: MCP server, tool execution, cross-container orchestration   │
 │     │                                                                        │
-│  repo-docker-spawner ◄──────── docker/docker-spawner/Dockerfile            │
-│        Contains: docker-spawner (Rust)                                      │
-│        Purpose: Container spawn/stop/exec API                               │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -71,9 +69,9 @@ Binaries that must be built and available:
 │  Built with: cargo build -p <name>                                          │
 │                                                                             │
 │  DEPLOYED:                                                                  │
-│  docker-spawner ◄──────────── rust/docker-spawner/                         │
-│     │  HTTP API for container lifecycle                                     │
-│     │  Depends: bollard (Docker API), axum (HTTP)                           │
+│  docker-ctl ◄────────────────  rust/docker-ctl/                            │
+│     │  CLI for container lifecycle (spawn, stop, exec)                      │
+│     │  Depends: bollard (Docker API)                                        │
 │     │                                                                        │
 │  mantle-agent ◄────────────── rust/mantle-agent/                           │
 │     │  Hook forwarding (spawned per-hook by Claude Code)                    │
@@ -102,7 +100,7 @@ Binaries that must be built and available:
 │     │  Telemetry/metrics hub (WIP, needs repurposing)                       │
 │     │                                                                        │
 │  ssh-proxy ◄─────────────────  rust/ssh-proxy/                             │
-│        HTTP-to-SSH bridge (DEPRECATED, replaced by docker-spawner /exec)    │
+│        HTTP-to-SSH bridge (DEPRECATED, replaced by docker-ctl exec)         │
 └─────────────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -185,8 +183,8 @@ The control-server binary depends on these packages:
 │  github-interpreter ◄─── Shells out to gh CLI                              │
 │     │  runGitHubIO :: GitHubConfig -> Eff (GitHub ': es) a -> Eff es a     │
 │     │                                                                        │
-│  docker-spawner-interpreter ◄── HTTP calls to docker-spawner               │
-│     │  runDockerSpawner :: Config -> Eff (DockerSpawner ': es) a -> ...     │
+│  DockerCtl (in control-server) ◄── Subprocess calls to docker-ctl          │
+│     │  Tidepool.Control.Effects.DockerCtl                                  │
 │     │                                                                        │
 │  zellij-interpreter ◄── Shells out to zellij CLI                           │
 │     │  runZellijIO :: Eff (Zellij ': es) a -> Eff es a                      │
@@ -196,10 +194,10 @@ The control-server binary depends on these packages:
 │  env-interpreter ◄──── Environment variable access                         │
 │  lsp-interpreter ◄──── LSP client (HLS communication)                      │
 │                                                                             │
-│  REMOTE EXECUTION (via docker-spawner /exec/{id}):                          │
-│  SshExec ◄───────────── Low-level HTTP exec to docker-spawner              │
+│  REMOTE EXECUTION (via docker-ctl exec):                                   │
+│  SshExec ◄───────────── Subprocess calls to docker-ctl exec                │
 │     │  control-server/Effects/SshExec.hs                                    │
-│     │  Calls POST /exec/{container} with command JSON                       │
+│     │  Calls docker-ctl exec {container} with arguments                     │
 │     │                                                                        │
 │  Higher-level effects (use SshExec under the hood):                         │
 │  Effector ◄──────────── Structured cabal/git/gh via effector binary        │
@@ -289,7 +287,7 @@ SpawnAgents.hs:
     1. Fetch issue info (GitHub effect → gh CLI)
     2. Create worktree (Worktree effect → git)
     3. Bootstrap .tidepool/ config
-    4. Spawn container (DockerSpawner effect → docker-spawner:7435)
+    4. Spawn container (DockerSpawner effect → docker-ctl spawn)
     5. Create Zellij tab with "docker attach <container>"
     │
     ▼
@@ -302,7 +300,7 @@ New agent container running, attached to Zellij
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                           DOCKER VOLUMES                                     │
 │                                                                             │
-│  tidepool-worktrees ── /worktrees in tl, pm, docker-spawner                │
+│  tidepool-worktrees ── /worktrees in tl, pm, control-server                │
 │     │  Shared worktree storage for subagent spawning                        │
 │     │  Persists across container restarts                                   │
 │     │                                                                        │
@@ -320,7 +318,7 @@ New agent container running, attached to Zellij
 │  tidepool-claude-pm ── /home/agent/.claude in pm                           │
 │     │  Claude Code session state (separate per agent)                       │
 │     │                                                                        │
-│  /var/run/docker.sock ── Docker socket (mounted in zellij, spawner,        │
+│  /var/run/docker.sock ── Docker socket (mounted in zellij,                 │
 │        control-server, tl, pm)                                              │
 │        Enables container management                                         │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -374,7 +372,6 @@ New agent container running, attached to Zellij
 │                        REQUIRED ENVIRONMENT                                  │
 │                                                                             │
 │  ANTHROPIC_API_KEY ──── Claude API key (agent containers)                  │
-│  DOCKER_SPAWNER_URL ── http://docker-spawner:7435 (control-server)         │
 │                                                                             │
 │  GITHUB (one of):                                                           │
 │  GH_TOKEN ───────────── GitHub personal access token (recommended)         │
@@ -487,17 +484,16 @@ LLM agents (Claude Code sessions) need to:
 
 ### What We Built
 
-#### docker-spawner (Rust, ~300 LOC)
+#### docker-ctl (Rust, ~150 LOC)
 
-A thin HTTP wrapper around Docker's API via bollard crate.
+A thin CLI wrapper around Docker's API via bollard crate.
 
-**Endpoints:**
+**Commands:**
 ```
-POST /spawn          Create container with mounts + labels
-POST /exec/{id}      Run command in container, return stdout/stderr/exit_code
-GET  /status/{id}    Container status
-POST /stop/{id}      Stop + remove container
-GET  /health         Liveness check
+docker-ctl spawn          Create container with mounts + labels
+docker-ctl exec {id}      Run command in container, return JSON stdout/stderr/exit_code
+docker-ctl status {id}    Container status
+docker-ctl stop {id}      Stop + remove container
 ```
 
 **Spawn creates containers with:**
@@ -515,28 +511,24 @@ Config {
 }
 ```
 
-**Exec returns:**
+**Exec returns JSON on stdout:**
 ```json
 {"exit_code": 0, "stdout": "...", "stderr": "..."}
 ```
 
-#### Why Not Existing Solutions?
+#### Why CLI Tool?
 
-| Alternative | Why we didn't use it |
-|-------------|---------------------|
-| **docker compose run** | No programmatic API; can't get structured stdout/stderr |
-| **Kubernetes Jobs** | Overkill for local dev; adds etcd, API server complexity |
-| **Nomad** | Good fit but another daemon to run; we already have Docker |
-| **SSH into containers** | Tried this first (ssh-proxy); key distribution, port allocation complex |
-| **docker exec CLI** | No structured output; would need to parse text |
-| **Testcontainers** | Library, not service; tied to test lifecycle |
+1. **No network hop** - Eliminates HTTP overhead and failure modes.
+2. **Simplified architecture** - No need for a persistent spawner service.
+3. **Better error handling** - Exit codes and stderr are more natural for subprocesses.
+4. **Shared docker.sock** - The control-server already has the socket; calling a CLI tool is cleaner.
 
-#### What docker-spawner Actually Does
+#### What docker-ctl Actually Does
 
 1. **Wraps bollard** - Rust Docker client, handles socket communication
 2. **Hardcodes our patterns** - Mounts, labels, network always the same
-3. **Provides HTTP interface** - So Haskell control-server can call it
-4. **Captures exec output** - Streams stdout/stderr, returns exit code
+3. **Provides CLI interface** - So Haskell control-server can call it via subprocess
+4. **Captures exec output** - Buffers stdout/stderr, returns JSON structured exit info
 
 #### Could We Replace It?
 
@@ -563,13 +555,13 @@ Config {
 │           │                                                             │  │
 │           ▼                                                             │  │
 │  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐     │  │
-│  │ docker-spawner  │    │ control-server  │    │ zellij          │     │  │
-│  │ :7435           │◄───│ :7432           │    │ (human here)    │     │  │
-│  │ /spawn,/exec    │    │ MCP tools       │    │                 │     │  │
-│  └────────┬────────┘    └────────┬────────┘    └────────┬────────┘     │  │
-│           │                      │                      │              │  │
-│           │ creates              │ calls                │ attaches     │  │
-│           ▼                      ▼                      ▼              │  │
+│  │ control-server  │    │ zellij          │    │ docker.sock     │     │  │
+│  │ :7432           │    │ (human here)    │◄───┤                 │     │  │
+│  │ (docker-ctl)    │    │                 │    │                 │     │  │
+│  └────────┬────────┘    └────────┬────────┘    └─────────────────┘     │  │
+│           │                      │                                     │  │
+│           │ creates/calls        │ attaches                            │  │
+│           ▼                      ▼                                     │  │
 │  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐     │  │
 │  │ tidepool-tl     │    │ tidepool-pm     │    │ subagent-1      │     │  │
 │  │ Claude Code     │    │ Claude Code     │    │ Claude Code     │◄────┘  │
@@ -587,21 +579,21 @@ Config {
 
 ### Haskell Effect Integration
 
-Control-server calls docker-spawner via an effect interpreter:
+Control-server calls docker-ctl via an effect interpreter:
 
 ```haskell
 -- Effect type (dsl/core)
 data DockerSpawner m a where
   SpawnContainer :: SpawnConfig -> DockerSpawner m ContainerId
-  ExecInContainer :: ContainerId -> [Text] -> DockerSpawner m ExecResult
-  StopContainer :: ContainerId -> DockerSpawner m ()
+  ExecContainer  :: ContainerId -> [Text] -> DockerSpawner m ExecResult
+  StopContainer  :: ContainerId -> DockerSpawner m ()
 
--- Interpreter (effects/docker-spawner-interpreter)
-runDockerSpawner :: Config -> Eff (DockerSpawner ': es) a -> Eff es a
-runDockerSpawner cfg = interpret $ \case
-  SpawnContainer req -> liftIO $ httpPost (cfg.url <> "/spawn") req
-  ExecInContainer id cmd -> liftIO $ httpPost (cfg.url <> "/exec/" <> id) cmd
-  StopContainer id -> liftIO $ httpPost (cfg.url <> "/stop/" <> id) ()
+-- Interpreter (control-server/Effects/DockerCtl.hs)
+runDockerCtl :: FilePath -> Eff (DockerSpawner ': es) a -> Eff es a
+runDockerCtl binPath = interpret $ \case
+  SpawnContainer cfg -> liftIO $ readProcess binPath ["spawn", ...] ""
+  ExecContainer id cmd -> liftIO $ readProcess binPath ["exec", id, "--", cmd] ""
+  StopContainer id -> liftIO $ readProcess binPath ["stop", id] ""
 ```
 
 ### TUI Cross-Container Communication
@@ -627,15 +619,15 @@ This is complex because Zellij doesn't have a native popup API. We spawn a float
 
 ### Questions for Researcher
 
-1. **docker-spawner vs alternatives**: Is there a lighter-weight solution for "spawn container, exec command, get output"?
+1. **CLI vs Service**: We replaced the older HTTP-based spawner with a CLI `docker-ctl`. Does this subprocess approach scale well for higher concurrency?
 
 2. **Zellij limitations**: We work around Zellij's lack of popup API with FIFOs. Is there a better terminal multiplexer for this use case?
 
 3. **Volume sharing patterns**: We share 5+ volumes across containers. Is there a standard pattern for multi-container dev environments?
 
-4. **Bollard deprecation warnings**: The bollard crate has deprecated APIs we're using. Should we switch to another Docker client?
+4. **Bollard deprecation warnings**: The bollard crate has deprecated APIs we're using in `docker-ctl`. Should we switch to another Docker client?
 
-5. **Single-binary alternative**: Could we collapse docker-spawner into control-server? The separation exists because Haskell Docker bindings are immature.
+5. **Single-binary alternative**: Could we collapse `docker-ctl` into `control-server`? The separation exists because Haskell Docker bindings are immature.
 
 ## What's NOT in the Deployed System
 

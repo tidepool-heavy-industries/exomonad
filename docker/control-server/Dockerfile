@@ -1,5 +1,5 @@
 # Dedicated Control Server Container
-# MCP server (TCP 7432) + Zellij tab creation + docker-spawner integration
+# MCP server (TCP 7432) + Zellij tab creation + docker-ctl integration
 
 # =============================================================================
 # Stage 1: Rust Builder (for tui-spawner)
@@ -14,16 +14,18 @@ COPY rust/Cargo.lock ./
 COPY rust/tui-spawner ./tui-spawner
 COPY rust/tui-sidebar ./tui-sidebar
 COPY rust/tui-popup ./tui-popup
+COPY rust/docker-ctl ./docker-ctl
 COPY rust/mantle-shared ./mantle-shared
 COPY rust/hangar-config ./hangar-config
 
-# Create minimal workspace Cargo.toml (only crates needed for tui-spawner)
-RUN echo '[workspace]\nresolver = "2"\nmembers = ["tui-spawner", "tui-sidebar", "tui-popup", "mantle-shared", "hangar-config"]' > Cargo.toml
+# Create minimal workspace Cargo.toml (only crates needed for tui-spawner and docker-ctl)
+RUN echo '[workspace]\nresolver = "2"\nmembers = ["tui-spawner", "tui-sidebar", "tui-popup", "docker-ctl", "mantle-shared", "hangar-config"]' > Cargo.toml
 
 # Cache bust AFTER setup, BEFORE build - invalidates only the build step
 # Usage: docker compose build --build-arg RUST_CACHEBUST=$(date +%s) control-server
 ARG RUST_CACHEBUST=0
-RUN cargo build --release -p tui-spawner
+RUN cargo build --release -p tui-spawner && \
+    cargo build --release -p docker-ctl
 
 # =============================================================================
 # Stage 2: Haskell Builder
@@ -95,6 +97,9 @@ RUN cargo-binstall --no-confirm zellij && \
 # Re-declare CACHEBUST to invalidate COPY --from when rust-builder rebuilds
 ARG RUST_CACHEBUST=0
 COPY --from=rust-builder /build/target/release/tui-spawner /usr/local/bin/tui-spawner
+
+# Copy docker-ctl binary
+COPY --from=rust-builder /build/target/release/docker-ctl /usr/local/bin/docker-ctl
 
 # Copy control-server binary
 COPY --from=builder /usr/local/bin/tidepool-control-server /usr/local/bin/tidepool-control-server

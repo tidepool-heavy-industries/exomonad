@@ -15,11 +15,11 @@ module Tidepool.Control.Runtime.Paths
   , controlServerBin
   , mantleAgentBin
   , tuiSidebarBin
+  , dockerCtlBin
     -- * Docker Spawner Paths
   , dockerBinDir
   , dockerWorktreesPath
   , dockerSocketsPath
-  , dockerSpawnerUrl
   ) where
 
 import Data.Text (Text)
@@ -73,6 +73,10 @@ mantleAgentBin binDir = binDir </> "mantle-agent"
 tuiSidebarBin :: FilePath -> FilePath
 tuiSidebarBin binDir = binDir </> "tui-sidebar"
 
+-- | Path to the docker-ctl binary.
+dockerCtlBin :: FilePath -> FilePath
+dockerCtlBin binDir = binDir </> "docker-ctl"
+
 -- | Directory for binaries used by Docker Spawner.
 dockerBinDir :: IO FilePath
 dockerBinDir = fromMaybe "/usr/local/bin" <$> lookupEnv "TIDEPOOL_BIN_DIR"
@@ -84,7 +88,3 @@ dockerWorktreesPath = fromMaybe "/worktrees" <$> lookupEnv "TIDEPOOL_WORKTREES_P
 -- | Base path for sockets managed by Docker Spawner.
 dockerSocketsPath :: IO FilePath
 dockerSocketsPath = fromMaybe "/sockets" <$> lookupEnv "TIDEPOOL_SOCKETS_PATH"
-
--- | URL for the Docker Spawner service.
-dockerSpawnerUrl :: IO String
-dockerSpawnerUrl = fromMaybe "http://docker-spawner:7435" <$> lookupEnv "DOCKER_SPAWNER_URL"
