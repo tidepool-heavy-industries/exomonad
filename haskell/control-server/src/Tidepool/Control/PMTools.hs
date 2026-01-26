@@ -54,7 +54,10 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Generics (Generic)
 
-import Tidepool.Effects.BD (BD, getLabels, addLabel, removeLabel, getBead, updateBead, BeadInfo(..), UpdateBeadInput(..), emptyUpdateInput)
+import Tidepool.Effects.GitHub
+  ( GitHub, Issue(..), IssueState(..), Repo(..), getIssue, listIssues, defaultIssueFilter
+  , updateIssue, addIssueLabel, removeIssueLabel, UpdateIssueInput(..), emptyUpdateIssueInput
+  )
 import Tidepool.Role (Role(..))
 import Tidepool.Graph.Generic (AsHandler, type (:-))
 import Tidepool.Graph.Generic.Core (EntryNode, ExitNode, LogicNode)
@@ -66,7 +69,7 @@ import Tidepool.Schema (HasJSONSchema(..), objectSchema, arraySchema, describeFi
 -- WORKFLOW STATE
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | PM Workflow state stored in BD labels.
+-- | PM Workflow state stored in GH labels.
 data WorkflowState
   = NeedsTLReview
   | NeedsPMApproval
@@ -112,26 +115,31 @@ workflowStateToLabel Ready = labelReady
 -- HELPERS
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Get the current workflow state of a bead by inspecting its labels.
+-- | Get the current workflow state of an issue by inspecting its labels.
 --
 -- If multiple workflow labels are present, returns the first one found.
-getWorkflowState :: Member BD effs => Text -> Eff effs (Maybe WorkflowState)
-getWorkflowState beadId = do
-  labels <- getLabels beadId
-  pure $ listToMaybe $ mapMaybe labelToWorkflowState labels
+getWorkflowState :: Member GitHub effs => Repo -> Int -> Eff effs (Maybe WorkflowState)
+getWorkflowState repo issueNum = do
+  mIssue <- getIssue repo issueNum False
+  case mIssue of
+    Nothing -> pure Nothing
+    Just issue -> pure $ listToMaybe $ mapMaybe labelToWorkflowState issue.issueLabels
 
--- | Set the workflow state of a bead by updating its labels.
+-- | Set the workflow state of an issue by updating its labels.
 --
 -- This removes any existing workflow labels before adding the new one.
-setWorkflowState :: Member BD effs => Text -> WorkflowState -> Eff effs ()
-setWorkflowState beadId newState = do
-  currentLabels <- getLabels beadId
-  -- Remove existing workflow labels
-  forM_ currentLabels $ \l ->
-    when (l `elem` allWorkflowLabels) $
-      removeLabel beadId l
-  -- Add new workflow label
-  addLabel beadId (workflowStateToLabel newState)
+setWorkflowState :: Member GitHub effs => Repo -> Int -> WorkflowState -> Eff effs ()
+setWorkflowState repo issueNum newState = do
+  mIssue <- getIssue repo issueNum False
+  case mIssue of
+    Nothing -> pure ()
+    Just issue -> do
+      -- Remove existing workflow labels
+      forM_ issue.issueLabels $ \l ->
+        when (l `elem` allWorkflowLabels) $
+          removeIssueLabel repo issueNum l
+      -- Add new workflow label
+      addIssueLabel repo issueNum (workflowStateToLabel newState)
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- PM-APPROVE-EXPANSION GRAPH
@@ -139,7 +147,7 @@ setWorkflowState beadId newState = do
 
 -- | Arguments for pm_approve_expansion tool.
 data PmApproveExpansionArgs = PmApproveExpansionArgs
-  { paeaBeadId :: Text
+  { paeaIssueNum :: Int
   , paeaDecision :: Text  -- "approve" or "reject"
   , paeaFeedback :: Maybe Text
   }
@@ -147,22 +155,22 @@ data PmApproveExpansionArgs = PmApproveExpansionArgs
 
 instance HasJSONSchema PmApproveExpansionArgs where
   jsonSchema = objectSchema
-    [ ("bead_id", describeField "bead_id" "bead ID" (emptySchema TString))
+    [ ("issue_num", describeField "issue_num" "Issue number" (emptySchema TNumber))
     , ("decision", describeField "decision" "Decision: 'approve' or 'reject'" (emptySchema TString))
     , ("feedback", describeField "feedback" "Feedback (required for rejection, optional for approval)" (emptySchema TString))
     ]
-    ["bead_id", "decision"]
+    ["issue_num", "decision"]
 
 instance FromJSON PmApproveExpansionArgs where
   parseJSON = withObject "PmApproveExpansionArgs" $ \v ->
     PmApproveExpansionArgs
-      <$> v .: "bead_id"
+      <$> v .: "issue_num"
       <*> v .: "decision"
       <*> v .:? "feedback"
 
 instance ToJSON PmApproveExpansionArgs where
   toJSON args = object
-    [ "bead_id" .= paeaBeadId args
+    [ "issue_num" .= paeaIssueNum args
     , "decision" .= paeaDecision args
     , "feedback" .= paeaFeedback args
     ]
@@ -184,12 +192,12 @@ instance ToJSON PmApproveExpansionResult where
 data PmApproveExpansionGraph mode = PmApproveExpansionGraph
   { paeEntry :: mode :- EntryNode PmApproveExpansionArgs
       :@ MCPExport
-      :@ MCPToolDef ('("pm_approve_expansion", "Approve or reject a bead's expansion plan. Handles label transitions and feedback."))
+      :@ MCPToolDef ('("pm_approve_expansion", "Approve or reject an issue's expansion plan. Handles label transitions and feedback."))
       :@ MCPRoleHint 'PM
 
   , paeRun :: mode :- LogicNode
       :@ Input PmApproveExpansionArgs
-      :@ UsesEffects '[BD, Goto Exit PmApproveExpansionResult]
+      :@ UsesEffects '[GitHub, Goto Exit PmApproveExpansionResult]
 
   , paeExit :: mode :- ExitNode PmApproveExpansionResult
   }
@@ -197,44 +205,46 @@ data PmApproveExpansionGraph mode = PmApproveExpansionGraph
 
 -- | Core logic for pm_approve_expansion.
 pmApproveExpansionLogic
-  :: Member BD es
+  :: Member GitHub es
   => PmApproveExpansionArgs
   -> Eff es (GotoChoice '[To Exit PmApproveExpansionResult])
 pmApproveExpansionLogic args = do
-  mBead <- getBead args.paeaBeadId
-  case mBead of
+  -- TODO: Configurable repo
+  let repo = Repo "tidepool/tidepool"
+  mIssue <- getIssue repo args.paeaIssueNum False
+  case mIssue of
     Nothing -> pure $ gotoExit PmApproveExpansionResult
       { paerNewStatus = "error"
-      , paerMessage = "Bead not found: " <> args.paeaBeadId
+      , paerMessage = "Issue #" <> T.pack (show args.paeaIssueNum) <> " not found"
       }
-    Just bead -> do
+    Just issue -> do
       case args.paeaDecision of
         "approve" -> do
-          setWorkflowState args.paeaBeadId Ready
+          setWorkflowState repo args.paeaIssueNum Ready
           pure $ gotoExit PmApproveExpansionResult
             { paerNewStatus = workflowStateToLabel Ready
-            , paerMessage = "Bead approved. Moved to 'ready' state."
+            , paerMessage = "Issue approved. Moved to 'ready' state."
             }
         
         "reject" -> do
-          setWorkflowState args.paeaBeadId NeedsTLReview
+          setWorkflowState repo args.paeaIssueNum NeedsTLReview
           
           -- Append feedback to description
           case args.paeaFeedback of
             Just feedback -> do
-              let oldDesc = fromMaybe "" bead.biDescription
+              let oldDesc = issue.issueBody
                   newDesc = if T.null oldDesc 
                             then feedback 
                             else oldDesc <> "\n\n**PM Feedback:**\n" <> feedback
-              updateBead args.paeaBeadId $ emptyUpdateInput { ubiDescription = Just newDesc }
+              updateIssue repo args.paeaIssueNum $ emptyUpdateIssueInput { uiiBody = Just newDesc }
               pure $ gotoExit PmApproveExpansionResult
                 { paerNewStatus = workflowStateToLabel NeedsTLReview
-                , paerMessage = "Bead rejected. Moved to 'needs-tl-review' and feedback appended."
+                , paerMessage = "Issue rejected. Moved to 'needs-tl-review' and feedback appended."
                 }
             Nothing -> 
               pure $ gotoExit PmApproveExpansionResult
                 { paerNewStatus = workflowStateToLabel NeedsTLReview
-                , paerMessage = "Bead rejected. Moved to 'needs-tl-review' (no feedback provided)."
+                , paerMessage = "Issue rejected. Moved to 'needs-tl-review' (no feedback provided)."
                 }
 
         _ -> pure $ gotoExit PmApproveExpansionResult
@@ -246,9 +256,9 @@ pmApproveExpansionLogic args = do
 -- PRIORITIZE TOOL
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Argument for a single bead prioritization.
+-- | Argument for a single issue prioritization.
 data PrioritizeItem = PrioritizeItem
-  { piBeadId      :: Text
+  { piIssueNum    :: Int
   , piNewPriority :: Int
   , piRationale   :: Text
   }
@@ -257,11 +267,11 @@ data PrioritizeItem = PrioritizeItem
 
 instance HasJSONSchema PrioritizeItem where
   jsonSchema = objectSchema
-    [ ("bead_id", describeField "bead_id" "ID of the bead to prioritize (e.g. tidepool-abc)." (emptySchema TString))
+    [ ("issue_num", describeField "issue_num" "Issue number" (emptySchema TNumber))
     , ("new_priority", describeField "new_priority" "New priority value (0-4)." (emptySchema TInteger))
     , ("rationale", describeField "rationale" "Reason for the priority change. Will be added to Priority History." (emptySchema TString))
     ]
-    ["bead_id", "new_priority", "rationale"]
+    ["issue_num", "new_priority", "rationale"]
 
 -- | Arguments for pm_prioritize tool.
 data PmPrioritizeArgs = PmPrioritizeArgs
@@ -272,13 +282,13 @@ data PmPrioritizeArgs = PmPrioritizeArgs
 
 instance HasJSONSchema PmPrioritizeArgs where
   jsonSchema = objectSchema
-    [ ("updates", describeField "updates" "List of beads to prioritize." (arraySchema (jsonSchema @PrioritizeItem)))
+    [ ("updates", describeField "updates" "List of issues to prioritize." (arraySchema (jsonSchema @PrioritizeItem)))
     ]
     ["updates"]
 
--- | Result of a single bead prioritization.
+-- | Result of a single issue prioritization.
 data PrioritizeResultItem = PrioritizeResultItem
-  { priBeadId :: Text
+  { priIssueNum :: Int
   , priSuccess :: Bool
   , priError   :: Maybe Text
   }
@@ -296,19 +306,19 @@ data PmPrioritizeResult = PmPrioritizeResult
 data PmPrioritizeGraph mode = PmPrioritizeGraph
   { ppEntry :: mode :- EntryNode PmPrioritizeArgs
       :@ MCPExport
-      :@ MCPToolDef '("pm_prioritize", "Batch update bead priorities with rationale audit trail.")
+      :@ MCPToolDef '("pm_prioritize", "Batch update issue priorities with rationale audit trail.")
       :@ MCPRoleHint 'PM
 
   , ppRun :: mode :- LogicNode
       :@ Input PmPrioritizeArgs
-      :@ UsesEffects '[BD, Goto Exit PmPrioritizeResult]
+      :@ UsesEffects '[GitHub, Goto Exit PmPrioritizeResult]
 
   , ppExit :: mode :- ExitNode PmPrioritizeResult
   }
   deriving Generic
 
 -- | Handlers for pm_prioritize graph.
-pmPrioritizeHandlers :: Member BD effs => PmPrioritizeGraph (AsHandler effs)
+pmPrioritizeHandlers :: Member GitHub effs => PmPrioritizeGraph (AsHandler effs)
 pmPrioritizeHandlers = PmPrioritizeGraph
   { ppEntry = ()
   , ppRun = pmPrioritizeLogic
@@ -317,61 +327,40 @@ pmPrioritizeHandlers = PmPrioritizeGraph
 
 -- | Logic for pm_prioritize tool.
 --
--- Batch-updates bead priorities and appends a rationale audit trail to each
--- bead's description in a \"Priority History\" markdown section.
---
--- Priority History format:
---
---   * If the bead description already contains the exact header line:
---
---       @## Priority History@
---
---     then a new history entry is appended after the existing text. Each
---     entry is a markdown list item of the form:
---
---       @- Priority \<priority\>: \<rationale\>@
---
---     A newline is inserted before the new entry if the description does not
---     already end with one.
---
---   * If the description is 'Nothing', empty, or whitespace-only, a new
---     Priority History section is created consisting of:
---
---       @## Priority History@
---       @- Priority \<priority\>: \<rationale\>@
---
---     with no extra blank lines before the header.
---
--- Per-item behavior and partial failures:
---
---   * All requested updates are attempted independently. The function does
---     /not/ fail fast if some beads cannot be found.
---   * For each requested bead ID, the result includes a 'PrioritizeResultItem'
---     indicating whether that specific update succeeded.
---   * If a bead does not exist, the corresponding item has 'priSuccess = False'
---     and 'priError = Just \"Bead not found\"'; other beads in the batch are
---     still processed normally.
+-- Batch-updates issue priorities (via P0-P4 labels) and appends a rationale audit trail.
 pmPrioritizeLogic
-  :: Member BD effs
+  :: Member GitHub effs
   => PmPrioritizeArgs
   -> Eff effs (GotoChoice '[To Exit PmPrioritizeResult])
 pmPrioritizeLogic args = do
+  -- TODO: Configurable repo
+  let repo = Repo "tidepool/tidepool"
+  
   results <- forM args.ppaUpdates $ \item -> do
     if item.piNewPriority < 0 || item.piNewPriority > 4
-    then pure $ PrioritizeResultItem item.piBeadId False (Just "Invalid priority: must be between 0 and 4")
+    then pure $ PrioritizeResultItem item.piIssueNum False (Just "Invalid priority: must be between 0 and 4")
     else do
-      mBead <- getBead item.piBeadId
-      case mBead of
-        Nothing -> pure $ PrioritizeResultItem item.piBeadId False (Just "Bead not found")
-        Just bead -> do
-          let oldDesc = bead.biDescription
+      mIssue <- getIssue repo item.piIssueNum False
+      case mIssue of
+        Nothing -> pure $ PrioritizeResultItem item.piIssueNum False (Just "Issue not found")
+        Just issue -> do
+          let oldDesc = Just issue.issueBody
               newDesc = appendRationale oldDesc item.piNewPriority item.piRationale
+              priorityLabel = "P" <> T.pack (show item.piNewPriority)
+              
+          -- Remove old priority labels
+          forM_ ["P0", "P1", "P2", "P3", "P4"] $ \l ->
+            when (l `elem` issue.issueLabels && l /= priorityLabel) $
+              removeIssueLabel repo item.piIssueNum l
+              
+          -- Add new priority label
+          addIssueLabel repo item.piIssueNum priorityLabel
 
-          updateBead item.piBeadId emptyUpdateInput
-            { ubiPriority = Just item.piNewPriority
-            , ubiDescription = Just newDesc
+          -- Update description
+          updateIssue repo item.piIssueNum emptyUpdateIssueInput
+            { uiiBody = Just newDesc
             }
-          pure $ PrioritizeResultItem item.piBeadId True Nothing
+          pure $ PrioritizeResultItem item.piIssueNum True Nothing
 
   pure $ gotoExit $ PmPrioritizeResult results
 

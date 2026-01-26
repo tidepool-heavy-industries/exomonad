@@ -20,7 +20,6 @@ import Data.Aeson (FromJSON(..), ToJSON(..), (.:?), (.=), object, withObject)
 import Data.Text (Text)
 import GHC.Generics (Generic)
 
-import Tidepool.Effects.BD (BD)
 import Tidepool.Effects.Git (Git)
 import Tidepool.Effects.GitHub (GitHub)
 import Tidepool.Graph.Generic (AsHandler, type (:-))
@@ -58,7 +57,7 @@ data ExoStatusGraph mode = ExoStatusGraph
 
   , esRun :: mode :- LogicNode
       :@ Input ExoStatusArgs
-      :@ UsesEffects '[BD, Git, GitHub, Goto Exit ExoStatusResult]
+      :@ UsesEffects '[Git, GitHub, Goto Exit ExoStatusResult]
 
   , esExit :: mode :- ExitNode ExoStatusResult
   }
@@ -66,7 +65,7 @@ data ExoStatusGraph mode = ExoStatusGraph
 
 -- | Handlers for exo_status graph.
 exoStatusHandlers
-  :: (Member BD es, Member Git es, Member GitHub es)
+  :: (Member Git es, Member GitHub es)
   => ExoStatusGraph (AsHandler es)
 exoStatusHandlers = ExoStatusGraph
   { esEntry = ()
@@ -76,7 +75,7 @@ exoStatusHandlers = ExoStatusGraph
 
 -- | Core logic for exo_status.
 exoStatusLogic
-  :: (Member BD es, Member Git es, Member GitHub es)
+  :: (Member Git es, Member GitHub es)
   => ExoStatusArgs
   -> Eff es (GotoChoice '[To Exit ExoStatusResult])
 exoStatusLogic args = do

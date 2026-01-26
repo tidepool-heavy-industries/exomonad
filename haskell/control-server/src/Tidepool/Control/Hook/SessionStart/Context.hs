@@ -51,7 +51,6 @@ data IssuesDashboardContext = IssuesDashboardContext
 data IssueContext = IssueContext
   { number :: Int
   , title :: Text
-  , priority :: Text
   , status :: Text
   , author :: Text
   , labels :: [Text]
@@ -82,7 +81,6 @@ instance ToGVal (Run SourcePos (Writer Text) Text) IssueContext where
   toGVal ic = dict
     [ "number" ~> ic.number
     , "title" ~> ic.title
-    , "priority" ~> ic.priority
     , "status" ~> ic.status
     , "author" ~> ic.author
     , "labels" ~> ic.labels

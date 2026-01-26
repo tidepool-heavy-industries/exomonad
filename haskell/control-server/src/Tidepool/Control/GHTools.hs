@@ -42,6 +42,15 @@ module Tidepool.Control.GHTools
   , ghIssueCloseLogic
   , GHIssueCloseArgs(..)
   , GHIssueCloseResult(..)
+
+    -- * Reopen Tool
+  , GHIssueReopenGraph(..)
+  , ghIssueReopenLogic
+  , GHIssueReopenArgs(..)
+  , GHIssueReopenResult(..)
+
+    -- * Helpers
+  , getRepo
   ) where
 
 import Control.Monad.Freer (Eff, Member)
@@ -57,8 +66,9 @@ import GHC.Generics (Generic)
 import Tidepool.Effects.GitHub
   ( GitHub, Repo(..), Issue(..), IssueState(..), IssueFilter(..)
   , CreateIssueInput(..), UpdateIssueInput(..), defaultIssueFilter, emptyUpdateIssueInput
-  , listIssues, getIssue, createIssue, updateIssue, closeIssue
+  , listIssues, getIssue, createIssue, updateIssue, closeIssue, reopenIssue
   )
+import Tidepool.Effects.Env (Env, getEnv)
 import Tidepool.Graph.Generic (AsHandler, type (:-))
 import Tidepool.Graph.Generic.Core (EntryNode, ExitNode, LogicNode)
 import Tidepool.Graph.Goto (Goto, GotoChoice, To, gotoExit)
@@ -128,7 +138,7 @@ data GHIssueListGraph mode = GHIssueListGraph
 
   , gilRun :: mode :- LogicNode
       :@ Input GHIssueListArgs
-      :@ UsesEffects '[GitHub, Goto Exit GHIssueListResult]
+      :@ UsesEffects '[GitHub, Env, Goto Exit GHIssueListResult]
 
   , gilExit :: mode :- ExitNode GHIssueListResult
   }
@@ -136,11 +146,11 @@ data GHIssueListGraph mode = GHIssueListGraph
 
 -- | Core logic for gh_issue_list.
 ghIssueListLogic
-  :: (Member GitHub es)
+  :: (Member GitHub es, Member Env es)
   => GHIssueListArgs
   -> Eff es (GotoChoice '[To Exit GHIssueListResult])
 ghIssueListLogic args = do
-  let repo = Repo $ fromMaybe "tidepool/tidepool" args.gilaRepo -- TODO: default from env
+  repo <- getRepo args.gilaRepo
   let filt = defaultIssueFilter
         { ifLabels = fromMaybe [] args.gilaLabels
         , ifState  = parseIssueState =<< args.gilaStatus
@@ -204,7 +214,7 @@ data GHIssueShowGraph mode = GHIssueShowGraph
 
   , gisRun :: mode :- LogicNode
       :@ Input GHIssueShowArgs
-      :@ UsesEffects '[GitHub, Goto Exit GHIssueShowResult]
+      :@ UsesEffects '[GitHub, Env, Goto Exit GHIssueShowResult]
 
   , gisExit :: mode :- ExitNode GHIssueShowResult
   }
@@ -212,11 +222,11 @@ data GHIssueShowGraph mode = GHIssueShowGraph
 
 -- | Core logic for gh_issue_show.
 ghIssueShowLogic
-  :: (Member GitHub es)
+  :: (Member GitHub es, Member Env es)
   => GHIssueShowArgs
   -> Eff es (GotoChoice '[To Exit GHIssueShowResult])
 ghIssueShowLogic args = do
-  let repo = Repo $ fromMaybe "tidepool/tidepool" args.gisaRepo
+  repo <- getRepo args.gisaRepo
   maybeIssue <- getIssue repo args.gisaNumber True -- Include comments
   pure $ gotoExit $ GHIssueShowResult
     { gisrIssue = maybeIssue
@@ -289,7 +299,7 @@ data GHIssueCreateGraph mode = GHIssueCreateGraph
 
   , gcRun :: mode :- LogicNode
       :@ Input GHIssueCreateArgs
-      :@ UsesEffects '[GitHub, Goto Exit GHIssueCreateResult]
+      :@ UsesEffects '[GitHub, Env, Goto Exit GHIssueCreateResult]
 
   , gcExit :: mode :- ExitNode GHIssueCreateResult
   }
@@ -297,11 +307,11 @@ data GHIssueCreateGraph mode = GHIssueCreateGraph
 
 -- | Core logic for gh_issue_create.
 ghIssueCreateLogic
-  :: (Member GitHub es)
+  :: (Member GitHub es, Member Env es)
   => GHIssueCreateArgs
   -> Eff es (GotoChoice '[To Exit GHIssueCreateResult])
 ghIssueCreateLogic args = do
-  let repo = Repo $ fromMaybe "tidepool/tidepool" args.gcaRepo
+  repo <- getRepo args.gcaRepo
   let input = CreateIssueInput
         { ciiRepo      = repo
         , ciiTitle     = args.gcaTitle
@@ -387,7 +397,7 @@ data GHIssueUpdateGraph mode = GHIssueUpdateGraph
 
   , guRun :: mode :- LogicNode
       :@ Input GHIssueUpdateArgs
-      :@ UsesEffects '[GitHub, Goto Exit GHIssueUpdateResult]
+      :@ UsesEffects '[GitHub, Env, Goto Exit GHIssueUpdateResult]
 
   , guExit :: mode :- ExitNode GHIssueUpdateResult
   }
@@ -395,11 +405,11 @@ data GHIssueUpdateGraph mode = GHIssueUpdateGraph
 
 -- | Core logic for gh_issue_update.
 ghIssueUpdateLogic
-  :: (Member GitHub es)
+  :: (Member GitHub es, Member Env es)
   => GHIssueUpdateArgs
   -> Eff es (GotoChoice '[To Exit GHIssueUpdateResult])
 ghIssueUpdateLogic args = do
-  let repo = Repo $ fromMaybe "tidepool/tidepool" args.guaRepo
+  repo <- getRepo args.guaRepo
   let input = emptyUpdateIssueInput
         { uiiTitle     = args.guaTitle
         , uiiBody      = args.guaBody
@@ -465,7 +475,7 @@ data GHIssueCloseGraph mode = GHIssueCloseGraph
 
   , gclRun :: mode :- LogicNode
       :@ Input GHIssueCloseArgs
-      :@ UsesEffects '[GitHub, Goto Exit GHIssueCloseResult]
+      :@ UsesEffects '[GitHub, Env, Goto Exit GHIssueCloseResult]
 
   , gclExit :: mode :- ExitNode GHIssueCloseResult
   }
@@ -473,15 +483,86 @@ data GHIssueCloseGraph mode = GHIssueCloseGraph
 
 -- | Core logic for gh_issue_close.
 ghIssueCloseLogic
-  :: (Member GitHub es)
+  :: (Member GitHub es, Member Env es)
   => GHIssueCloseArgs
   -> Eff es (GotoChoice '[To Exit GHIssueCloseResult])
 ghIssueCloseLogic args = do
-  let repo = Repo $ fromMaybe "tidepool/tidepool" args.gclaRepo
+  repo <- getRepo args.gclaRepo
   closeIssue repo args.gclaNumber
   pure $ gotoExit $ GHIssueCloseResult
     { gclrSuccess = True
     , gclrNumber  = args.gclaNumber
+    }
+
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- GH ISSUE REOPEN TOOL
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- | Arguments for gh_issue_reopen tool.
+data GHIssueReopenArgs = GHIssueReopenArgs
+  { graRepo   :: Maybe Text
+  , graNumber :: Int
+  }
+  deriving stock (Show, Eq, Generic)
+
+instance HasJSONSchema GHIssueReopenArgs where
+  jsonSchema = objectSchema
+    [ ("repo", describeField "repo" "Repository in owner/repo format" (emptySchema TString))
+    , ("number", describeField "number" "The issue number to reopen" (emptySchema TNumber))
+    ]
+    ["number"]
+
+instance FromJSON GHIssueReopenArgs where
+  parseJSON = withObject "GHIssueReopenArgs" $ \v ->
+    GHIssueReopenArgs
+      <$> v .:? "repo"
+      <*> v .: "number"
+
+instance ToJSON GHIssueReopenArgs where
+  toJSON args = object
+    [ "repo"   .= graRepo args
+    , "number" .= graNumber args
+    ]
+
+-- | Result of gh_issue_reopen tool.
+data GHIssueReopenResult = GHIssueReopenResult
+  { grrSuccess :: Bool
+  , grrNumber  :: Int
+  }
+  deriving stock (Show, Eq, Generic)
+
+instance ToJSON GHIssueReopenResult where
+  toJSON res = object
+    [ "success" .= grrSuccess res
+    , "number"  .= grrNumber res
+    ]
+
+-- | Graph definition for gh_issue_reopen tool.
+data GHIssueReopenGraph mode = GHIssueReopenGraph
+  { greEntry :: mode :- EntryNode GHIssueReopenArgs
+      :@ MCPExport
+      :@ MCPToolDef '("gh_issue_reopen", "Reopen a closed GitHub issue.")
+
+  , greRun :: mode :- LogicNode
+      :@ Input GHIssueReopenArgs
+      :@ UsesEffects '[GitHub, Env, Goto Exit GHIssueReopenResult]
+
+  , greExit :: mode :- ExitNode GHIssueReopenResult
+  }
+  deriving Generic
+
+-- | Core logic for gh_issue_reopen.
+ghIssueReopenLogic
+  :: (Member GitHub es, Member Env es)
+  => GHIssueReopenArgs
+  -> Eff es (GotoChoice '[To Exit GHIssueReopenResult])
+ghIssueReopenLogic args = do
+  repo <- getRepo args.graRepo
+  reopenIssue repo args.graNumber
+  pure $ gotoExit $ GHIssueReopenResult
+    { grrSuccess = True
+    , grrNumber  = args.graNumber
     }
 
 
@@ -495,3 +576,12 @@ parseIssueState t = case T.toUpper t of
   "OPEN"   -> Just IssueOpen
   "CLOSED" -> Just IssueClosed
   _        -> Nothing
+
+-- | Get repository from args or environment.
+getRepo :: Member Env es => Maybe Text -> Eff es Repo
+getRepo mRepo = do
+  case mRepo of
+    Just r -> pure $ Repo r
+    Nothing -> do
+      mEnvRepo <- getEnv "GITHUB_REPO"
+      pure $ Repo $ fromMaybe "tidepool-heavy-industries/tidepool" mEnvRepo

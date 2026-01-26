@@ -27,7 +27,7 @@ roleTools TL = Just $ Set.fromList
   , "confirm_action", "select_option", "request_guidance"
   -- GitHub tools
   , "gh_issue_list", "gh_issue_show"
-  , "gh_issue_create", "gh_issue_update", "gh_issue_close"
+  , "gh_issue_create", "gh_issue_update", "gh_issue_close", "gh_issue_reopen"
   ]
 
 roleTools Dev = Just $ Set.fromList
@@ -44,14 +44,14 @@ roleTools Dev = Just $ Set.fromList
 
 roleTools PM = Just $ Set.fromList
   -- Planning tools
-  [ "pm_status", "pm_review_dag", "pm_propose"
+  [ "pm_status", "pm_propose"
   , "pm_approve_expansion", "pm_prioritize"
   -- Messaging
   , "send_message", "check_inbox", "read_message", "mark_read"
   , "exo_status"  -- Can view but not spawn
   -- GitHub tools
   , "gh_issue_list", "gh_issue_show"
-  , "gh_issue_create", "gh_issue_update", "gh_issue_close"
+  , "gh_issue_create", "gh_issue_update", "gh_issue_close", "gh_issue_reopen"
   ]
 
 isToolAllowed :: Role -> Text -> Bool

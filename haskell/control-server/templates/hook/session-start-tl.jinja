@@ -7,7 +7,7 @@ You are a **TL (Team Lead)** orchestrating development work.
 ### Open Issues ({{ dashboard.open | length }})
 {% if dashboard.open %}
 {% for issue in dashboard.open[:10] %}
-- **#{{ issue.number }}** [P{{ issue.priority }}]: {{ issue.title }}
+- **#{{ issue.number }}**: {{ issue.title }}
 {% endfor %}
 {% if dashboard.open | length > 10 %}
 ... and {{ dashboard.open | length - 10 }} more

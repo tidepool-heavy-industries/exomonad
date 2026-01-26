@@ -46,7 +46,6 @@ library
         Tidepool.Control.Hook.Stop.Context
         Tidepool.Control.LSPTools
         Tidepool.Control.PMTools
-        Tidepool.Control.PMReviewDAG
         Tidepool.Control.PMStatus
         Tidepool.Control.PMPropose
         Tidepool.Control.MailboxTools
@@ -299,26 +298,6 @@ test-suite pm-propose-test
     default-extensions:
         OverloadedStrings
 
-test-suite pm-review-dag-test
-    import:           warnings
-    type:             exitcode-stdio-1.0
-    main-is:          PMReviewDAGSpec.hs
-    build-depends:
-        base >= 4.17 && < 5,
-        tidepool-control-server,
-        tidepool-core,
-        text >= 2.0 && < 3,
-        aeson,
-        time,
-        containers,
-        freer-simple,
-        tasty,
-        tasty-hunit
-    hs-source-dirs:   test
-    default-language: GHC2024
-    default-extensions:
-        OverloadedStrings
-        TypeApplications
 
 test-suite pm-status-test
     import:           warnings

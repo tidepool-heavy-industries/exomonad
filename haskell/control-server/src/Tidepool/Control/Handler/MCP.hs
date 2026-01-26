@@ -45,9 +45,6 @@ import Tidepool.Control.ExoTools
   , spawnAgentsLogic, SpawnAgentsArgs(..), SpawnAgentsResult(..)
   , filePRLogic, FilePRArgs(..), FilePRResult(..), PRInfo(..)
   )
-import Tidepool.Control.PMReviewDAG
-  ( pmReviewDagLogic, PmReviewDagArgs(..), PmReviewDagResult(..)
-  )
 import Tidepool.Control.PMTools
   ( pmApproveExpansionLogic, PmApproveExpansionArgs(..), PmApproveExpansionResult(..),
     pmPrioritizeLogic, PmPrioritizeArgs(..), PmPrioritizeResult(..), PrioritizeResultItem(..)
@@ -67,8 +64,8 @@ import Tidepool.Control.GHTools
   , ghIssueCreateLogic, GHIssueCreateArgs(..), GHIssueCreateResult(..)
   , ghIssueUpdateLogic, GHIssueUpdateArgs(..), GHIssueUpdateResult(..)
   , ghIssueCloseLogic, GHIssueCloseArgs(..), GHIssueCloseResult(..)
+  , ghIssueReopenLogic, GHIssueReopenArgs(..), GHIssueReopenResult(..)
   )
-import Tidepool.BD.Interpreter (runBDIO, defaultBDConfig)
 import Tidepool.Git.Interpreter (runGitIO)
 import Tidepool.GitHub.Interpreter (runGitHubIO, defaultGitHubConfig)
 import Tidepool.Worktree.Interpreter (runWorktreeIO, defaultWorktreeConfig)
@@ -210,7 +207,6 @@ handleMcpTool logger config traceCtx reqId toolName args =
           "pm_prioritize" -> handlePmPrioritizeTool logger reqId args
           "pm_status" -> handlePmStatusTool logger reqId args
           "pm_propose" -> handlePMProposeTool logger reqId args
-          "pm_review_dag" -> handlePmReviewDagTool logger reqId args
 
           -- Mailbox tools
           "send_message" -> handleSendMessageTool logger currentRole reqId args
@@ -224,6 +220,7 @@ handleMcpTool logger config traceCtx reqId toolName args =
           "gh_issue_create" -> handleGHIssueCreateTool logger reqId args
           "gh_issue_update" -> handleGHIssueUpdateTool logger reqId args
           "gh_issue_close" -> handleGHIssueCloseTool logger reqId args
+          "gh_issue_reopen" -> handleGHIssueReopenTool logger reqId args
 
           _ -> do
             logError logger $ "  (unknown tool)"
@@ -246,7 +243,7 @@ handlePmPrioritizeTool logger reqId args = do
 
       resultOrErr <- try $ runM
         $ runLog Debug
-        $ runBDIO defaultBDConfig
+        $ runGitHubIO defaultGitHubConfig
         $ fmap unwrapSingleChoice (pmPrioritizeLogic ppArgs)
 
       case resultOrErr of
@@ -270,7 +267,7 @@ handleSpawnAgentsTool logger reqId args = do
       pure $ mcpToolError reqId InvalidInput $ "Invalid spawn_agents arguments: " <> T.pack err
 
     Success saArgs -> do
-      logDebug logger $ "  bead_ids=" <> T.intercalate "," saArgs.saaBeadIds
+      logDebug logger $ "  issue_numbers=" <> T.intercalate "," saArgs.saaIssueNumbers
 
       -- Most interpreters use default configs which assume current dir is repo root.
       let repoRoot = "." 
@@ -318,7 +315,7 @@ handleExoStatusTool logger reqId args = do
       resultOrErr <- try $ runM
         $ runLog Debug
         $ runGeminiIO
-        $ runBDIO defaultBDConfig
+        $ runGitHubIO defaultGitHubConfig
         $ runGitIO
         $ runGitHubIO defaultGitHubConfig
         $ fmap unwrapSingleChoice (exoStatusLogic esArgs)
@@ -439,7 +436,7 @@ handleFilePRTool logger reqId args = do
 
       resultOrErr <- try $ runM
         $ runLog Debug
-        $ runBDIO defaultBDConfig
+        $ runGitHubIO defaultGitHubConfig
         $ runGitIO
         $ runGitHubIO defaultGitHubConfig
         $ fmap unwrapSingleChoice (filePRLogic fpArgs)
@@ -469,12 +466,12 @@ handlePmApproveExpansionTool logger reqId args = do
       pure $ mcpToolError reqId InvalidInput $ "Invalid pm_approve_expansion arguments: " <> T.pack err
 
     Success paeArgs -> do
-      logDebug logger $ "  bead_id=" <> paeArgs.paeaBeadId
+      logDebug logger $ "  issue_num=" <> T.pack (show paeArgs.paeaIssueNum)
       logDebug logger $ "  decision=" <> paeArgs.paeaDecision
 
       resultOrErr <- try $ runM
         $ runLog Debug
-        $ runBDIO defaultBDConfig
+        $ runGitHubIO defaultGitHubConfig
         $ fmap unwrapSingleChoice (pmApproveExpansionLogic paeArgs)
 
       case resultOrErr of
@@ -502,7 +499,7 @@ handlePmStatusTool logger reqId args = do
       resultOrErr <- try $ runM
         $ runLog Debug
         $ runTime
-        $ runBDIO defaultBDConfig
+        $ runGitHubIO defaultGitHubConfig
         $ runGitHubIO defaultGitHubConfig
         $ fmap unwrapSingleChoice (pmStatusLogic psArgs)
 
@@ -530,7 +527,8 @@ handlePMProposeTool logger reqId args = do
 
       resultOrErr <- try $ runM
         $ runLog Debug
-        $ runBDIO defaultBDConfig
+        $ runEnvIO
+        $ runGitHubIO defaultGitHubConfig
         $ fmap unwrapSingleChoice (pmProposeLogic ppaArgs)
 
       case resultOrErr of
@@ -539,35 +537,7 @@ handlePMProposeTool logger reqId args = do
           pure $ mcpToolError reqId ExternalFailure $ "pm_propose failed: " <> T.pack (displayException e)
 
         Right result -> do
-          logInfo logger $ "[MCP:" <> reqId <> "] Proposed bead: " <> result.pprBeadId
-          pure $ mcpToolSuccess reqId (toJSON result)
-
--- | Handle the pm_review_dag tool.
---
--- Runs the PmReviewDagGraph logic to analyze the bead DAG.
-handlePmReviewDagTool :: Logger -> Text -> Value -> IO ControlResponse
-handlePmReviewDagTool logger reqId args = do
-  case fromJSON args of
-    Error err -> do
-      logError logger $ "  parse error: " <> T.pack err
-      pure $ mcpToolError reqId InvalidInput $ "Invalid pm_review_dag arguments: " <> T.pack err
-
-    Success prdArgs -> do
-      logDebug logger $ "  focus_track=" <> T.pack (show prdArgs.prdaFocusTrack)
-
-      resultOrErr <- try $ runM
-        $ runLog Debug
-        $ runTime
-        $ runBDIO defaultBDConfig
-        $ fmap unwrapSingleChoice (pmReviewDagLogic prdArgs)
-
-      case resultOrErr of
-        Left (e :: SomeException) -> do
-          logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
-          pure $ mcpToolError reqId ExternalFailure $ "pm_review_dag failed: " <> T.pack (displayException e)
-
-        Right result -> do
-          logInfo logger $ "[MCP:" <> reqId <> "] DAG analyzed: " <> T.pack (show $ length result.prdrReady) <> " ready beads"
+          logInfo logger $ "[MCP:" <> reqId <> "] Proposed issue: #" <> T.pack (show result.pprIssueNum)
           pure $ mcpToolSuccess reqId (toJSON result)
 
 
@@ -801,6 +771,7 @@ handleGHIssueListTool logger reqId args = do
 
       resultOrErr <- try $ runM
         $ runLog Debug
+        $ runEnvIO
         $ runGitHubIO defaultGitHubConfig
         $ fmap unwrapSingleChoice (ghIssueListLogic gilArgs)
 
@@ -827,6 +798,7 @@ handleGHIssueShowTool logger reqId args = do
 
       resultOrErr <- try $ runM
         $ runLog Debug
+        $ runEnvIO
         $ runGitHubIO defaultGitHubConfig
         $ fmap unwrapSingleChoice (ghIssueShowLogic gisArgs)
 
@@ -855,6 +827,7 @@ handleGHIssueCreateTool logger reqId args = do
 
       resultOrErr <- try $ runM
         $ runLog Debug
+        $ runEnvIO
         $ runGitHubIO defaultGitHubConfig
         $ fmap unwrapSingleChoice (ghIssueCreateLogic gicArgs)
 
@@ -881,6 +854,7 @@ handleGHIssueUpdateTool logger reqId args = do
 
       resultOrErr <- try $ runM
         $ runLog Debug
+        $ runEnvIO
         $ runGitHubIO defaultGitHubConfig
         $ fmap unwrapSingleChoice (ghIssueUpdateLogic giuArgs)
 
@@ -907,6 +881,7 @@ handleGHIssueCloseTool logger reqId args = do
 
       resultOrErr <- try $ runM
         $ runLog Debug
+        $ runEnvIO
         $ runGitHubIO defaultGitHubConfig
         $ fmap unwrapSingleChoice (ghIssueCloseLogic gicArgs)
 
@@ -917,4 +892,31 @@ handleGHIssueCloseTool logger reqId args = do
 
         Right result -> do
           logInfo logger $ "[MCP:" <> reqId <> "] Closed issue: #" <> T.pack (show result.gclrNumber)
+          pure $ mcpToolSuccess reqId (toJSON result)
+
+
+-- | Handle the gh_issue_reopen tool.
+handleGHIssueReopenTool :: Logger -> Text -> Value -> IO ControlResponse
+handleGHIssueReopenTool logger reqId args = do
+  case fromJSON args of
+    Error err -> do
+      logError logger $ "  parse error: " <> T.pack err
+      pure $ mcpToolError reqId InvalidInput $ "Invalid gh_issue_reopen arguments: " <> T.pack err
+
+    Success graArgs -> do
+      logDebug logger $ "  number=" <> T.pack (show graArgs.graNumber)
+
+      resultOrErr <- try $ runM
+        $ runLog Debug
+        $ runEnvIO
+        $ runGitHubIO defaultGitHubConfig
+        $ fmap unwrapSingleChoice (ghIssueReopenLogic graArgs)
+
+      case resultOrErr of
+        Left (e :: SomeException) -> do
+          logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId ExternalFailure $ "gh_issue_reopen failed: " <> T.pack (displayException e)
+
+        Right result -> do
+          logInfo logger $ "[MCP:" <> reqId <> "] Reopened issue: #" <> T.pack (show result.grrNumber)
           pure $ mcpToolSuccess reqId (toJSON result)

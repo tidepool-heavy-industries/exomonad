@@ -157,18 +157,9 @@ toIssueContext i =
   in IssueContext
     { number = i.issueNumber
     , title = i.issueTitle
-    , priority = extractPriority i.issueLabels
     , status = T.pack (show i.issueState)
     , author = login
     , labels = i.issueLabels
     , description = i.issueBody
     , url = i.issueUrl
     }
-
--- | Extract priority from labels (e.g. "P1" -> "1").
--- Defaults to "2" if not found.
-extractPriority :: [Text] -> Text
-extractPriority ls =
-  case filter (\l -> "P" `T.isPrefixOf` l && T.length l == 2) ls of
-    (p:_) -> T.drop 1 p
-    []    -> "2"

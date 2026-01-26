@@ -98,7 +98,7 @@ buildIssueContext issue branchName = T.unlines
 
 -- | Arguments for spawn_agents tool.
 data SpawnAgentsArgs = SpawnAgentsArgs
-  { saaBeadIds :: [Text]  -- ^ List of issue numbers (e.g. "123", "456").
+  { saaIssueNumbers :: [Text]  -- ^ List of issue numbers (e.g. "123", "456").
   , saaBackend :: Maybe Text  -- ^ Backend to use: "claude" or "gemini" (defaults to "claude").
   }
   deriving stock (Show, Eq, Generic)
@@ -106,21 +106,21 @@ data SpawnAgentsArgs = SpawnAgentsArgs
 instance HasJSONSchema SpawnAgentsArgs where
   jsonSchema = objectSchema
     [
-      ("bead_ids", describeField "bead_ids" "List of issue numbers to spawn worktrees for." (arraySchema (emptySchema TString)))
+      ("issue_numbers", describeField "issue_numbers" "List of issue numbers to spawn worktrees for." (arraySchema (emptySchema TString)))
     , ("backend", describeField "backend" "Backend to use: 'claude' or 'gemini' (defaults to 'claude')." (emptySchema TString))
     ]
-    ["bead_ids"]
+    ["issue_numbers"]
 
 instance FromJSON SpawnAgentsArgs where
   parseJSON = withObject "SpawnAgentsArgs" $ \v ->
     SpawnAgentsArgs
-      <$> v .: "bead_ids"
+      <$> v .: "issue_numbers"
       <*> v .:? "backend"
 
 instance ToJSON SpawnAgentsArgs where
   toJSON args = object
     [
-      "bead_ids" .= saaBeadIds args
+      "issue_numbers" .= saaIssueNumbers args
     , "backend" .= saaBackend args
     ]
 
@@ -230,7 +230,7 @@ spawnAgentsLogic args = do
           }
         else do
           -- 4. Process each issue
-          results <- forM args.saaBeadIds $ \shortId -> do
+          results <- forM args.saaIssueNumbers $ \shortId -> do
             processIssue spawnMode mHangarRoot repoRoot wtBaseDir backendRaw shortId
 
           -- Partition results
