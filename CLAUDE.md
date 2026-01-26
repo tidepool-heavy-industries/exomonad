@@ -273,17 +273,18 @@ Human-driven Claude Code sessions augmented with Tidepool. **Not headless automa
 8. Claude Code proceeds or blocks
 ```
 
-**MCP Tool Flow (7 available tools):**
+**MCP Tool Flow:**
 ```
-Tools: find_callers, show_fields, show_constructors, teach-graph, confirm_action, select_option, request_guidance
+Tools: find_callers, show_fields, show_constructors, teach-graph, popup, spawn_agents, exo_status, file_pr, ...
 
 1. User asks question requiring code intelligence or human decision
-2. Claude plans to call MCP tool (e.g., teach-graph, confirm_action)
+2. Claude plans to call MCP tool (e.g., teach-graph, popup)
 3. Claude Code sends HTTP request to control-server (TCP port 7432)
 4. control-server routes to appropriate handler
    - Tier 1 (LSP-only): find_callers, show_fields, show_constructors
    - Tier 2 (LLM-enhanced): teach-graph (LSP + Haiku selection)
-   - Tier 4 (TUI-interactive): confirm_action, select_option, request_guidance
+   - Tier 3 (External): spawn_agents, exo_status, file_pr
+   - Tier 4 (TUI-interactive): popup
 5. Returns tool result (JSON) via HTTP response
 6. Claude analyzes and responds to user
 ```
@@ -646,7 +647,7 @@ Ensure `process-compose` is in your `PATH`. The scripts do not use hardcoded pat
 ### Status
 
 - ✅ Hook forwarding (passthrough)
-- ✅ MCP server + 7 tools via auto-discovery (find_callers, show_fields, show_constructors, teach-graph, confirm_action, select_option, request_guidance)
+- ✅ MCP server + 20+ tools via auto-discovery (popup, spawn_agents, exo_status, file_pr, pm_status, mailbox tools, GitHub tools, etc.)
 - ✅ LSP integration (HLS via lsp-test)
 - ✅ FunctionGemma scoring (HTTP interpreter via Ollama)
 - ✅ Automatic tool registration via MCPExport annotation + reifyMCPTools

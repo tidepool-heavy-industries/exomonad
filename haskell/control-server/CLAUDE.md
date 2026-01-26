@@ -474,7 +474,7 @@ Tools that spawn floating Zellij panes with interactive UI and wait for user res
 
 **Architecture (FIFO-based):**
 ```
-Agent calls MCP tool (e.g., confirm_action)
+Agent calls MCP tool (popup)
     │
     ▼
 control-server (Haskell)
@@ -504,47 +504,56 @@ Agent receives structured response
 
 **Key insight:** TUI renders to `/dev/tty` (not stdout), allowing result to go to FIFO. The FIFO provides clean blocking semantics - no polling, kernel handles synchronization.
 
-#### `confirm_action` - Show Confirmation Dialog
+#### `popup` - General-Purpose Popup Dialog
 
-Shows a confirmation dialog to the user for a potentially destructive or important action.
-
-**Request Schema:**
-```json
-{
-  "action": "Delete 15 files",          // required
-  "details": "This will permanently remove the files from disk." // required
-}
-```
-
-**Implementation:** `TUITools.hs:96-123` (ConfirmActionGraph)
-
-#### `select_option` - Select from List
-
-Asks the user to select from a list of predefined options, or provide a custom response.
+A single unified tool for all interactive UI needs. Accepts a flat list of UI elements and returns user responses.
 
 **Request Schema:**
 ```json
 {
-  "prompt": "Select the next step",     // required
-  "options": [["1", "Fix bug"], ["2", "Add test"]] // required: [[id, label], ...] 
+  "title": "Optional Title",
+  "elements": [
+    {"type": "text", "id": "info", "content": "Please configure:"},
+    {"type": "slider", "id": "budget", "label": "Budget", "min": 0, "max": 100, "default": 50},
+    {"type": "checkbox", "id": "tests", "label": "Include tests", "default": false},
+    {"type": "textbox", "id": "desc", "label": "Description", "placeholder": "Enter details..."},
+    {"type": "choice", "id": "method", "label": "Method", "options": ["BFS", "DFS", "Random"], "default": 0},
+    {"type": "multiselect", "id": "features", "label": "Features", "options": ["Logging", "Metrics", "Tracing"]},
+    {"type": "group", "id": "sep", "label": "--- Advanced ---"}
+  ]
 }
 ```
 
-**Implementation:** `TUITools.hs:176-209` (SelectOptionGraph)
+**Element Types:**
 
-#### `request_guidance` - Ask for Human Guidance
+| Type | Fields | Output |
+|------|--------|--------|
+| `text` | id, content | (unchanged) |
+| `slider` | id, label, min, max, default? | `value: number` |
+| `checkbox` | id, label, default? | `value: bool` |
+| `textbox` | id, label, placeholder? | `value: string` |
+| `choice` | id, label, options, default? | `value: string` (selected) |
+| `multiselect` | id, label, options | `value: [string]` |
+| `group` | id, label | (unchanged, visual separator) |
 
-Asks the user for free-form guidance or to select from suggestions when the agent is stuck.
-
-**Request Schema:**
+**Response Schema:**
 ```json
 {
-  "context": "I am unsure how to implement the memory effect.", // required
-  "suggestions": ["Use a Map", "Use a State effect"]           // optional
+  "status": "completed",
+  "button": "submit",
+  "elements": [
+    {"type": "text", "id": "info", "content": "Please configure:"},
+    {"type": "slider", "id": "budget", "label": "Budget", "value": 75},
+    {"type": "checkbox", "id": "tests", "label": "Include tests", "value": true},
+    {"type": "textbox", "id": "desc", "label": "Description", "value": "User typed this"},
+    {"type": "choice", "id": "method", "label": "Method", "value": "DFS"},
+    {"type": "multiselect", "id": "features", "label": "Features", "value": ["Logging", "Tracing"]},
+    {"type": "group", "id": "sep", "label": "--- Advanced ---"}
+  ]
 }
 ```
 
-**Implementation:** `TUITools.hs:258-290` (RequestGuidanceGraph)
+**Implementation:** `TUITools.hs` (PopupGraph)
 
 ### Tier 4 (continued): Project Management Dashboard Tools
 
@@ -708,7 +717,7 @@ All tools (full access):
 **Dev Role Tools:**
 - `file_pr` - File pull requests
 - `exo_status` - Get development context
-- TUI tools (`confirm_action`, `select_option`, `request_guidance`)
+- `popup` - Interactive UI dialogs
 
 **Implementation:** `Server.hs:handleRoleMcpTools` and `RoleConfig.hs:isToolAllowed`
 

@@ -160,7 +160,7 @@ The control-server binary depends on these packages:
 │    FilePR.hs ───────── file_pr (GitHub PR filing)                           │
 │                                                                             │
 │  TIER 4 - TUI-interactive + PM dashboard:                                   │
-│    TUITools.hs ─────── confirm_action, select_option, request_guidance      │
+│    TUITools.hs ─────── popup (general-purpose UI dialog)                    │
 │    PMStatus.hs ─────── pm_status (sprint health dashboard)                  │
 │    PMReviewDAG.hs ──── pm_review_dag (dependency analysis)                  │
 │    PMPrioritize.hs ─── pm_prioritize, pm_propose, pm_approve_expansion      │
