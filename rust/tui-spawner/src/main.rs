@@ -51,6 +51,10 @@ struct Args {
     #[arg(long, default_value = "tidepool-zellij")]
     zellij_container: String,
 
+    /// Zellij session name (required for targeting the correct session)
+    #[arg(long, default_value = "tidepool")]
+    zellij_session: String,
+
     /// Dry run: print commands instead of executing
     #[arg(long)]
     dry_run: bool,
@@ -133,9 +137,11 @@ fn run_popup(
     tracing::info!("Created FIFO");
 
     // 3. Spawn Zellij floating pane
+    // Must use --session flag to target the correct Zellij session
     let zellij_args = [
         "exec", &args.zellij_container,
-        "zellij", "action", "new-pane", "--floating", "--close-on-exit",
+        "zellij", "--session", &args.zellij_session,
+        "action", "new-pane", "--floating", "--close-on-exit",
         "--", "tui-popup",
         "--input", input_path.to_str().unwrap(),
         "--output", fifo_path.to_str().unwrap(),
