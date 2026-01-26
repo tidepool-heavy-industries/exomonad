@@ -6,19 +6,20 @@
 {-# LANGUAGE TypeOperators #-}
 
 module Tidepool.Control.Effects.Justfile
-  ( runJustfileViaSsh
+  ( runJustfileRemote
   ) where
 
 import Control.Monad.Freer (Eff, Member, interpret)
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 
 import Tidepool.Control.Effects.SshExec (SshExec, ExecRequest(..), ExecResult(..), execCommand)
 import Tidepool.Effects.Justfile (Justfile(..), JustResult(..))
 
--- | Interpreter: uses SshExec to run just commands
+-- | Interpreter: uses SshExec to run just commands remotely
 -- Takes a container name and a working directory (relative to container root).
-runJustfileViaSsh :: Member SshExec effs => Text -> FilePath -> Eff (Justfile ': effs) a -> Eff effs a
-runJustfileViaSsh container workDir = interpret $ \case
+runJustfileRemote :: Member SshExec effs => Text -> FilePath -> Eff (Justfile ': effs) a -> Eff effs a
+runJustfileRemote container workDir = interpret $ \case
   RunRecipe recipe args -> do
     result <- execCommand $ ExecRequest
       { erContainer = container
@@ -31,5 +32,5 @@ runJustfileViaSsh container workDir = interpret $ \case
     pure $ JustResult
       { stdout = exStdout result
       , stderr = exStderr result
-      , exitCode = exExitCode result
+      , exitCode = fromMaybe (-1) (exExitCode result)
       }

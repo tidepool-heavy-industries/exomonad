@@ -6,12 +6,12 @@
 {-# LANGUAGE TypeOperators #-}
 
 module Tidepool.Control.Effects.Cabal
-  ( runCabalViaSsh
+  ( runCabalRemote
   ) where
 
 import Control.Monad (void)
 import Control.Monad.Freer (Eff, Member, interpret)
-import Data.Maybe (mapMaybe)
+import Data.Maybe (mapMaybe, fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Text.Regex.TDFA ((=~))
@@ -19,9 +19,9 @@ import Text.Regex.TDFA ((=~))
 import Tidepool.Control.Effects.SshExec (SshExec, ExecRequest(..), ExecResult(..), execCommand)
 import Tidepool.Effects.Cabal (Cabal(..), CabalResult(..), RawCompileError(..))
 
--- | Interpreter: uses SshExec to run cabal commands
-runCabalViaSsh :: Member SshExec effs => Text -> Eff (Cabal ': effs) a -> Eff effs a
-runCabalViaSsh container = interpret $ \case
+-- | Interpreter: uses SshExec to run cabal commands remotely
+runCabalRemote :: Member SshExec effs => Text -> Eff (Cabal ': effs) a -> Eff effs a
+runCabalRemote container = interpret $ \case
   CabalBuild path -> do
     result <- execCommand $ ExecRequest
       { erContainer = container
@@ -31,9 +31,10 @@ runCabalViaSsh container = interpret $ \case
       , erEnv = []
       , erTimeout = 600
       }
-    pure $ case exExitCode result of
+    let code = fromMaybe (-1) (exExitCode result)
+    pure $ case code of
       0 -> CabalSuccess
-      code -> CabalBuildFailure
+      _ -> CabalBuildFailure
         { cbfExitCode = code
         , cbfStderr = exStderr result
         , cbfStdout = exStdout result
@@ -50,13 +51,14 @@ runCabalViaSsh container = interpret $ \case
       , erTimeout = 600
       }
     let output = exStdout result <> exStderr result
-    pure $ case exExitCode result of
+        testCode = fromMaybe (-1) (exExitCode result)
+    pure $ case testCode of
       0 -> CabalTestSuccess { ctsOutput = output }
-      code ->
+      _ ->
         -- Simple check if it's a build failure (could be improved)
         if "error:" `T.isInfixOf` exStderr result
           then CabalBuildFailure
-            { cbfExitCode = code
+            { cbfExitCode = testCode
             , cbfStderr = exStderr result
             , cbfStdout = exStdout result
             , cbfParsedErrors = parseGhcErrors (exStderr result)

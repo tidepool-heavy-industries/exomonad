@@ -11,6 +11,7 @@ module Tidepool.Effects.DockerSpawner
   , SpawnConfig(..)
   , DockerError(..)
   , ExecResult(..)
+  , SpawnResponse(..)
   , spawnContainer
   , stopContainer
   , getContainerStatus
@@ -20,18 +21,50 @@ module Tidepool.Effects.DockerSpawner
 import Data.Text (Text)
 import Control.Monad.Freer (Member, Eff, send)
 import GHC.Generics (Generic)
-import Data.Aeson (ToJSON, FromJSON)
+import Data.Aeson (ToJSON(..), FromJSON(..), genericParseJSON, genericToJSON, withObject, (.:))
+import Data.Aeson.Types (Parser)
+import Data.Aeson.Casing (aesonPrefix, snakeCase)
 
+-- | Container ID extracted from spawn response
 newtype ContainerId = ContainerId { unContainerId :: Text }
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (ToJSON, FromJSON)
+  deriving anyclass (ToJSON)
+
+-- | Response from docker-ctl spawn command
+-- JSON: {"container_id": "...", "hostname": "..."}
+data SpawnResponse = SpawnResponse
+  { srContainerId :: Text
+  , srHostname :: Text
+  } deriving stock (Show, Eq, Generic)
+
+instance ToJSON SpawnResponse where
+  toJSON = genericToJSON $ aesonPrefix snakeCase
+
+instance FromJSON SpawnResponse where
+  parseJSON = genericParseJSON $ aesonPrefix snakeCase
+
+-- | Parse ContainerId from spawn response JSON
+instance FromJSON ContainerId where
+  parseJSON = withObject "SpawnResponse" $ \o -> do
+    cid <- o .: "container_id"
+    pure $ ContainerId cid
 
 data ContainerStatus
   = Running
   | Stopped
   | NotFound
   deriving stock (Show, Eq, Generic)
-  deriving anyclass (ToJSON, FromJSON)
+  deriving anyclass (ToJSON)
+
+-- | Parse ContainerStatus from docker-ctl status response
+-- JSON: {"status": "running"} or {"status": "not_found"}
+instance FromJSON ContainerStatus where
+  parseJSON = withObject "StatusResponse" $ \o -> do
+    status <- o .: "status" :: Parser Text
+    case status of
+      "running" -> pure Running
+      "not_found" -> pure NotFound
+      _ -> pure Stopped  -- Any other Docker status (exited, paused, etc.)
 
 data SpawnConfig = SpawnConfig
   { scIssueId :: Text
@@ -40,14 +73,26 @@ data SpawnConfig = SpawnConfig
   , scUid :: Maybe Int
   , scGid :: Maybe Int
   } deriving stock (Show, Eq, Generic)
-    deriving anyclass (ToJSON, FromJSON)
 
+instance ToJSON SpawnConfig where
+  toJSON = genericToJSON $ aesonPrefix snakeCase
+
+instance FromJSON SpawnConfig where
+  parseJSON = genericParseJSON $ aesonPrefix snakeCase
+
+-- | Result of command execution
+-- Matches docker-ctl exec output: {"exit_code": ..., "stdout": ..., "stderr": ...}
 data ExecResult = ExecResult
   { erExitCode :: Maybe Int
   , erStdout :: Text
   , erStderr :: Text
   } deriving stock (Show, Eq, Generic)
-    deriving anyclass (ToJSON, FromJSON)
+
+instance ToJSON ExecResult where
+  toJSON = genericToJSON $ aesonPrefix snakeCase
+
+instance FromJSON ExecResult where
+  parseJSON = genericParseJSON $ aesonPrefix snakeCase
 
 data DockerError
   = DockerConnectionError Text

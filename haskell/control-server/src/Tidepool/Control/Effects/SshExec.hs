@@ -1,7 +1,6 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeOperators #-}
@@ -14,10 +13,10 @@ module Tidepool.Control.Effects.SshExec
   , runSshExec
   ) where
 
-import Control.Exception (try)
 import Control.Monad.Freer (Eff, interpret, send, Member, LastMember, sendM)
-import Data.Aeson (FromJSON, ToJSON, eitherDecode)
-import Data.Text (Text, unpack, pack)
+import Data.Aeson (FromJSON(..), ToJSON(..), eitherDecode, genericParseJSON, genericToJSON)
+import Data.Aeson.Casing (aesonPrefix, snakeCase)
+import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import qualified Data.ByteString.Lazy as BL
@@ -25,26 +24,39 @@ import GHC.Generics (Generic)
 import System.Process (readProcessWithExitCode)
 import System.Exit (ExitCode(..))
 
--- | Low-level SSH command execution effect
+-- | Low-level remote command execution effect (formerly via SSH, now via docker-ctl)
 data SshExec a where
   ExecCommand :: ExecRequest -> SshExec ExecResult
 
--- | Request to execute a command via ssh-proxy
+-- | Request to execute a command in a remote container
 data ExecRequest = ExecRequest
   { erContainer :: Text           -- ^ Container hostname (e.g., "agent-1")
   , erCommand :: Text             -- ^ Command to execute
   , erArgs :: [Text]              -- ^ Command arguments
   , erWorkingDir :: FilePath      -- ^ Working directory
   , erEnv :: [(Text, Text)]       -- ^ Environment variables
-  , erTimeout :: Int              -- ^ Timeout in seconds
-  } deriving (Show, Generic, ToJSON, FromJSON)
+  , erTimeout :: Int              -- ^ Timeout in seconds (NOTE: not currently enforced)
+  } deriving (Show, Generic)
+
+instance ToJSON ExecRequest where
+  toJSON = genericToJSON $ aesonPrefix snakeCase
+
+instance FromJSON ExecRequest where
+  parseJSON = genericParseJSON $ aesonPrefix snakeCase
 
 -- | Result of command execution
+-- Matches docker-ctl exec output: {"exit_code": ..., "stdout": ..., "stderr": ...}
 data ExecResult = ExecResult
-  { exExitCode :: Int
+  { exExitCode :: Maybe Int  -- Changed to Maybe Int to match docker-ctl output
   , exStdout :: Text
   , exStderr :: Text
-  } deriving (Show, Generic, ToJSON, FromJSON)
+  } deriving (Show, Generic)
+
+instance ToJSON ExecResult where
+  toJSON = genericToJSON $ aesonPrefix snakeCase
+
+instance FromJSON ExecResult where
+  parseJSON = genericParseJSON $ aesonPrefix snakeCase
 
 -- | Send an ExecCommand effect
 execCommand :: Member SshExec effs => ExecRequest -> Eff effs ExecResult
@@ -64,12 +76,12 @@ runSshExec binPath = interpret $ \case
       ExitSuccess -> case eitherDecode (BL.fromStrict $ TE.encodeUtf8 $ T.pack stdout) of
         Right (res :: ExecResult) -> pure res
         Left err -> pure $ ExecResult
-          { exExitCode = -1
+          { exExitCode = Nothing  -- Parse error, no valid exit code
           , exStdout = ""
           , exStderr = "JSON parse error from docker-ctl: " <> T.pack err <> "\nOutput: " <> T.pack stdout
           }
       ExitFailure _ -> pure $ ExecResult
-        { exExitCode = -1
+        { exExitCode = Nothing  -- docker-ctl itself failed
         , exStdout = ""
         , exStderr = "docker-ctl failed: " <> T.pack stderr
         }
