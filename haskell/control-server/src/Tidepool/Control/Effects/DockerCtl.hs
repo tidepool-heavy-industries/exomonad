@@ -35,11 +35,11 @@ runDockerCtl binPath = interpret $ \case
 doSpawn :: FilePath -> SpawnConfig -> IO (Either DockerError ContainerId)
 doSpawn binPath cfg = do
   let args = [ "spawn"
-             , "--bead-id", T.unpack (cfg.scBeadId)
+             , "--issue-id", T.unpack cfg.scIssueId
              , "--worktree-path", cfg.scWorktreePath
-             , "--backend", T.unpack (cfg.scBackend)
-             ] ++ maybe [] (\u -> ["--uid", show u]) (cfg.scUid)
-               ++ maybe [] (\g -> ["--gid", show g]) (cfg.scGid)
+             , "--backend", T.unpack cfg.scBackend
+             ] ++ maybe [] (\u -> ["--uid", show u]) cfg.scUid
+               ++ maybe [] (\g -> ["--gid", show g]) cfg.scGid
   
   (code, stdout, stderr) <- readProcessWithExitCode binPath args ""
   case code of

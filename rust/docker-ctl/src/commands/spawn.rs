@@ -11,7 +11,7 @@ pub struct SpawnResponse {
 }
 
 pub async fn run(
-    bead_id: String,
+    issue_id: String,
     worktree_path: String,
     backend: String,
     uid: Option<u32>,
@@ -19,23 +19,23 @@ pub async fn run(
     expires_at: Option<String>,
 ) -> anyhow::Result<String> {
     let docker = Docker::connect_with_local_defaults()?;
-    
+
     let agent_image = std::env::var("TIDEPOOL_AGENT_IMAGE").unwrap_or_else(|_| "tidepool-agent:latest".to_string());
     let host_uid: u32 = std::env::var("HOST_UID").unwrap_or_else(|_| "1000".to_string()).parse()?;
     let host_gid: u32 = std::env::var("HOST_GID").unwrap_or_else(|_| "1000".to_string()).parse()?;
     let network_name = std::env::var("TIDEPOOL_NETWORK").unwrap_or_else(|_| "tidepool".to_string());
 
-    let container_name = format!("tidepool-agent-{}", bead_id);
-    
+    let container_name = format!("tidepool-agent-{}", issue_id);
+
     let mut labels = HashMap::new();
-    labels.insert("com.tidepool.bead_id".to_string(), bead_id.clone());
+    labels.insert("com.tidepool.issue_id".to_string(), issue_id.clone());
     labels.insert("com.tidepool.role".to_string(), "agent".to_string());
     labels.insert(
-        "com.tidepool.expires_at".to_string(), 
+        "com.tidepool.expires_at".to_string(),
         expires_at.unwrap_or_else(|| "never".to_string())
-    ); 
+    );
 
-    let worktree_mount_target = format!("/worktrees/{}", bead_id);
+    let worktree_mount_target = format!("/worktrees/{}", issue_id);
     
     let mounts = vec![
         Mount {
@@ -66,7 +66,7 @@ pub async fn run(
         }),
         user: Some(user),
         env: Some(vec![
-            format!("TIDEPOOL_BEAD_ID={}", bead_id),
+            format!("TIDEPOOL_ISSUE_ID={}", issue_id),
             format!("TIDEPOOL_BACKEND={}", backend),
         ]),
         ..Default::default()

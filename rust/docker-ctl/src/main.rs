@@ -38,9 +38,9 @@ enum Commands {
     
     /// Spawn a new container
     Spawn {
-        /// Bead ID for the container
+        /// Issue ID for the container
         #[arg(long)]
-        bead_id: String,
+        issue_id: String,
         
         /// Path to the worktree to mount
         #[arg(long)]
@@ -93,8 +93,8 @@ async fn main() {
         Commands::Exec { container, workdir, user, env, cmd } => {
             commands::exec::run(container, workdir, user, env, cmd).await
         }
-        Commands::Spawn { bead_id, worktree_path, backend, uid, gid, expires_at } => {
-            commands::spawn::run(bead_id, worktree_path, backend, uid, gid, expires_at).await
+        Commands::Spawn { issue_id, worktree_path, backend, uid, gid, expires_at } => {
+            commands::spawn::run(issue_id, worktree_path, backend, uid, gid, expires_at).await
         }
         Commands::Stop { container, timeout } => {
             commands::stop::run(container, timeout).await
