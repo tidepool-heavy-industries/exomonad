@@ -288,8 +288,9 @@ processIssue spawnMode mHangarRoot repoRoot wtBaseDir backend shortId = do
           if not binExists
             then pure $ Left (shortId, "Binary missing: " <> T.pack binPath)
             else do
-              -- TODO: Configurable repo
-              let repo = Repo "tidepool/tidepool"
+              -- Get repo from env var or use default
+              mEnvRepo <- getEnv "GITHUB_REPO"
+              let repo = Repo $ fromMaybe "tidepool-heavy-industries/tidepool" mEnvRepo
               mIssue <- getIssue repo n False
               case mIssue of
                 Nothing -> pure $ Left (shortId, "Issue not found: " <> shortId)
