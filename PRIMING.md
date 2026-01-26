@@ -377,11 +377,12 @@ These exist in the repo but are not part of the current Docker deployment:
 - `haskell/tools/ghci-oracle/` - Persistent GHCi session server
 
 **Experimental/Prototypes:**
-- `types-first-dev/` - TDD protocol prototype (own cabal + Docker config)
 - `tools/micro-gastown/` - Code intelligence research sandbox
 
-**Test Scripts:**
-- `test-scout.py`, `test-teach.py` - Manual testing scripts
+**Documentation/Planning (not runtime):**
+- `plans/` - Architectural plans (dockerized-claude-code)
+- `work/` - Active design docs (docgen-graph epic, LSP tools spec)
+- `deps/` - Dependency documentation
 
 **Optional Docker Profiles (not default):**
 - `orchestrator` (profile: legacy) - Fallback container for legacy setup

@@ -1,6 +1,26 @@
 # Minimal Zellij container for visual multiplexing
 # Human attaches here; panes run docker attach to agent containers
 
+# =============================================================================
+# Stage 1: Rust Builder (for tui-popup)
+# =============================================================================
+FROM rust:bookworm AS rust-builder
+
+WORKDIR /build
+
+# Copy Rust workspace
+COPY rust/Cargo.toml rust/Cargo.lock ./
+COPY rust/tui-popup ./tui-popup
+COPY rust/tui-sidebar ./tui-sidebar
+COPY rust/mantle-shared ./mantle-shared
+
+# Build tui-popup
+RUN cargo build --release -p tui-popup && \
+    cp target/release/tui-popup /usr/local/bin/tui-popup
+
+# =============================================================================
+# Stage 2: Runtime
+# =============================================================================
 FROM debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y \
