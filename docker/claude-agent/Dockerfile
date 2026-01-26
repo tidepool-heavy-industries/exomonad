@@ -52,9 +52,9 @@ COPY haskell/ ./haskell/
 # Remove Nix-specific zlib configuration
 RUN sed -i '/package zlib/,+2d' cabal.project
 
-# Build with cache mounts
-RUN --mount=type=cache,target=/root/.cabal/store \
-    --mount=type=cache,target=/build/dist-newstyle \
+# Build with cache mounts (unique IDs prevent parallel build races)
+RUN --mount=type=cache,id=claude-agent-cabal,target=/root/.cabal/store \
+    --mount=type=cache,id=claude-agent-dist,target=/build/dist-newstyle \
     cabal update && \
     cabal build tidepool-control-server -j --ghc-options=-O1 && \
     cp $(cabal list-bin tidepool-control-server) /tidepool-control-server
