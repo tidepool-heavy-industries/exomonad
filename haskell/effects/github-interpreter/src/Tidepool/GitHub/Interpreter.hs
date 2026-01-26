@@ -38,19 +38,18 @@ module Tidepool.GitHub.Interpreter
   , ghPrCreate
   , ghPrReviews
   , ghAuthCheck
+  , GqlResult(..)
   ) where
 
 import Control.Exception (try, SomeException)
 import Control.Monad (unless)
 import Control.Monad.Freer (Eff, LastMember, interpret, sendM)
-import Data.Aeson (eitherDecode, FromJSON(..), withObject, (.:), (.:?), Value)
+import Data.Aeson (eitherDecode, FromJSON(..), withObject, (.:), (.:?), Value(..))
 import Data.Aeson.Types (Parser)
 import Data.ByteString.Lazy qualified as LBS
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
-import Data.Time (UTCTime)
-import GHC.Generics (Generic)
 import System.IO (hPutStrLn, stderr)
 import System.Process (readProcessWithExitCode)
 import System.Exit (ExitCode(..))
@@ -479,8 +478,8 @@ instance FromJSON GqlResult where
       parseComment isResolved = withObject "comment" $ \c -> do
         authorObj <- c .:? "author"
         login <- case authorObj of
-          Just a -> a .: "login"
-          Nothing -> pure "unknown"
+          Just (Object a) -> a .: "login"
+          _               -> pure "unknown"
         
         body <- c .: "body"
         path <- c .: "path"
