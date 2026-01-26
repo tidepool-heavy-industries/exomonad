@@ -104,6 +104,9 @@ pub async fn run(
         image: Some(agent_image),
         labels: Some(labels),
         working_dir: Some(working_dir),
+        // TTY + stdin required for interactive Claude session (docker attach)
+        tty: Some(true),
+        open_stdin: Some(true),
         host_config: Some(HostConfig {
             mounts: Some(mounts),
             network_mode: Some(network_name),
