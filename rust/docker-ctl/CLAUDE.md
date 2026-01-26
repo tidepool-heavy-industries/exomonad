@@ -7,7 +7,7 @@ CLI tool for managing the lifecycle of Tidepool agent containers. Replaces the o
 ```bash
 # Spawn a new agent container
 docker-ctl spawn \
-  --bead-id <id> \
+  --issue-id <id> \
   --worktree-path <path> \
   --backend <claude|gemini> \
   [--uid <uid>] [--gid <gid>] \

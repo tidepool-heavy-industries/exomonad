@@ -37,8 +37,8 @@ import Tidepool.Control.Hook.CircuitBreaker (CircuitBreakerMap, SessionId, withC
 import Tidepool.Control.ExoTools (parseIssueNumber, findHangarRoot)
 import Tidepool.Control.Hook.SessionStart (sessionStartLogic)
 import Tidepool.Control.Effects.SshExec (runSshExec)
-import Tidepool.Control.Effects.Git (runGitViaSsh)
-import Tidepool.Control.Effects.Cabal (runCabalViaSsh)
+import Tidepool.Control.Effects.Git (runGitRemote)
+import Tidepool.Control.Effects.Cabal (runCabalRemote)
 import Tidepool.Control.Effects.Effector (runEffectorViaSsh, runEffectorIO)
 import Tidepool.Control.Interpreters.Traced (traceCabal, traceGit)
 import Tidepool.Cabal.Interpreter (runCabalIO, defaultCabalConfig)
@@ -142,7 +142,7 @@ handleSessionStart tracer role input = do
     $ case mContainer of 
          Just container -> 
            runSshExec dockerCtlPath
-           $ runGitViaSsh (T.pack container) "." 
+           $ runGitRemote (T.pack container) "." 
            $ traceGit tracer
            $ sessionStartLogic role input.cwd
          Nothing -> 
@@ -260,7 +260,7 @@ runStopHookLogic tracer input = do
   
   -- We need to fetch git info first to populate AgentState
   agentState <- case mContainer of
-     Just container -> runM $ runSshExec dockerCtlPath $ runGitViaSsh (T.pack container) "." $ traceGit tracer $ getAgentState input
+     Just container -> runM $ runSshExec dockerCtlPath $ runGitRemote (T.pack container) "." $ traceGit tracer $ getAgentState input
      Nothing -> runM $ runGitIO $ traceGit tracer $ getAgentState input
 
   (result, _finalState) <- case mContainer of
@@ -268,9 +268,9 @@ runStopHookLogic tracer input = do
           runM
           $ runSshExec dockerCtlPath
           $ runEffectorViaSsh (T.pack container)
-          $ runCabalViaSsh (T.pack container)
+          $ runCabalRemote (T.pack container)
           $ traceCabal tracer
-          $ runGitViaSsh (T.pack container) "."
+          $ runGitRemote (T.pack container) "."
           $ traceGit tracer
           $ runGraphMeta (GraphMetadata "stop-hook")
           $ runNodeMeta defaultNodeMeta
@@ -323,7 +323,7 @@ autoFocusOnSubagentStop = do
       result <- try $ runM
         $ runZellijIO
         $ case mContainer of
-             Just container -> runSshExec dockerCtlPath $ runGitViaSsh (T.pack container) "." autoFocusLogic
+             Just container -> runSshExec dockerCtlPath $ runGitRemote (T.pack container) "." autoFocusLogic
              Nothing -> runGitIO autoFocusLogic
 
       case result of
