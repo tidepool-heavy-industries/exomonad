@@ -22,6 +22,7 @@ library
         Tidepool.Effect.Session
         Tidepool.Effect.Subgraph
         Tidepool.Effect.DevLog
+        Tidepool.Effect.Log
         Tidepool.Effect.Metadata
         Tidepool.Effect.NodeMeta
         Tidepool.Effect.Types

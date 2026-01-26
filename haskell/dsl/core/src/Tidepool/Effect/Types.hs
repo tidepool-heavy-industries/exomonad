@@ -185,6 +185,9 @@ import Tidepool.Effect.TUI
   , mkComponent, mkText, mkSlider, mkCheckbox, mkTextbox, mkChoice, mkMultiselect, mkGroup
   )
 
+-- Log effect and types
+import Tidepool.Effect.Log
+
 -- Decision types
 import Tidepool.Effect.Decision.Types
   ( Decision(..), DecisionContext(..), DecisionTrace(..)
@@ -701,84 +704,6 @@ type QuestionHandler = Question -> IO Answer
 runQuestionUI :: LastMember IO effs => QuestionHandler -> Eff (QuestionUI ': effs) a -> Eff effs a
 runQuestionUI handler = interpret $ \case
   AskQuestion q -> sendM $ handler q
-
--- ══════════════════════════════════════════════════════════════
--- LOG EFFECT
--- ══════════════════════════════════════════════════════════════
-
-data LogLevel = Debug | Info | Warn | Error
-  deriving (Show, Eq, Ord, Enum, Bounded)
-
--- | Structured log fields: key-value pairs for queryable log data.
---
--- Example:
--- @
--- logInfoWith "Scoring daily"
---   [ ("taskId", toJSON taskId)
---   , ("direction", toJSON ("up" :: Text))
---   ]
--- @
-type LogFields = [(Text, Value)]
-
-data Log r where
-  LogMsg :: LogLevel -> Text -> Maybe LogFields -> Log ()
-
--- | Log a message at the given level (no structured fields).
-logMsg :: Member Log effs => LogLevel -> Text -> Eff effs ()
-logMsg level msg = send (LogMsg level msg Nothing)
-
--- | Log a message at the given level with structured fields.
-logMsgWith :: Member Log effs => LogLevel -> Text -> LogFields -> Eff effs ()
-logMsgWith level msg fields = send (LogMsg level msg (Just fields))
-
--- | Log a debug message.
-logDebug :: Member Log effs => Text -> Eff effs ()
-logDebug = logMsg Debug
-
--- | Log a debug message with structured fields.
-logDebugWith :: Member Log effs => Text -> LogFields -> Eff effs ()
-logDebugWith = logMsgWith Debug
-
--- | Log an info message.
-logInfo :: Member Log effs => Text -> Eff effs ()
-logInfo = logMsg Info
-
--- | Log an info message with structured fields.
---
--- Example:
--- @
--- logInfoWith "LLM tool calls"
---   [ ("count", toJSON (length toolCalls))
---   , ("tools", toJSON (map tcName toolCalls))
---   ]
--- @
-logInfoWith :: Member Log effs => Text -> LogFields -> Eff effs ()
-logInfoWith = logMsgWith Info
-
--- | Log a warning message.
-logWarn :: Member Log effs => Text -> Eff effs ()
-logWarn = logMsg Warn
-
-logWarnWith :: Member Log effs => Text -> LogFields -> Eff effs ()
-logWarnWith = logMsgWith Warn
-
--- | Log a message at 'Error' level.
-logError :: Member Log effs => Text -> Eff effs ()
-logError = logMsg Error
-
--- | Log a message at 'Error' level with structured fields.
-logErrorWith :: Member Log effs => Text -> LogFields -> Eff effs ()
-logErrorWith = logMsgWith Error
-
-runLog :: LastMember IO effs => LogLevel -> Eff (Log ': effs) a -> Eff effs a
-runLog minLevel = interpret $ \case
-  LogMsg level msg maybeFields
-    | level >= minLevel -> do
-        let fieldStr = case maybeFields of
-              Nothing -> ""
-              Just fs -> " | " <> T.intercalate ", " (map fst fs)
-        sendM $ TIO.hPutStrLn stderr ("[" <> T.pack (show level) <> "] " <> msg <> fieldStr)
-    | otherwise -> pure ()
 
 -- ══════════════════════════════════════════════════════════════
 -- DECISION LOG EFFECT

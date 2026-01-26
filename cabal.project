@@ -25,6 +25,7 @@ packages:
     haskell/effects/cabal-interpreter
     haskell/effects/justfile-interpreter
     haskell/effects/devlog-interpreter
+    haskell/effects/log-interpreter
     haskell/effects/gemini-interpreter
     haskell/effects/filesystem-interpreter
     haskell/effects/zellij-interpreter

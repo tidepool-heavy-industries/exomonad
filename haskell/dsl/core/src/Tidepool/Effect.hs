@@ -8,6 +8,8 @@ module Tidepool.Effect
     module Tidepool.Effect.Types
     -- * DevLog
   , module Tidepool.Effect.DevLog
+    -- * Log
+  , module Tidepool.Effect.Log
     -- * Session (ClaudeCode orchestration)
   , module Tidepool.Effect.Session
     -- * Graph Context (entry + node input)
@@ -18,6 +20,7 @@ module Tidepool.Effect
 
 import Tidepool.Effect.Types
 import Tidepool.Effect.DevLog
+import Tidepool.Effect.Log
 import Tidepool.Effect.Session
 import Tidepool.Effect.GraphContext
 import Tidepool.Effect.Subgraph
