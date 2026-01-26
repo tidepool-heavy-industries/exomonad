@@ -100,13 +100,19 @@ pub async fn run(
     let user_gid = gid.unwrap_or(host_gid);
     let user = format!("{}:{}", user_uid, user_gid);
 
+    // Detached Interactive TTY pattern (-dit):
+    // - tty + open_stdin: allocate TTY and keep stdin open
+    // - attach_* = false: don't expect immediate client attachment
+    // This lets the container run in background, attachable later via `docker attach`
     let config = Config {
         image: Some(agent_image),
         labels: Some(labels),
         working_dir: Some(working_dir),
-        // TTY + stdin required for interactive Claude session (docker attach)
         tty: Some(true),
         open_stdin: Some(true),
+        attach_stdin: Some(false),
+        attach_stdout: Some(false),
+        attach_stderr: Some(false),
         host_config: Some(HostConfig {
             mounts: Some(mounts),
             network_mode: Some(network_name),
