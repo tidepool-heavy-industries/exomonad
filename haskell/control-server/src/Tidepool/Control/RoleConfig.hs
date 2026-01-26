@@ -27,7 +27,7 @@ roleTools TL = Just $ Set.fromList
   -- BD (Beads) tools - read and write
   , "bd_list", "bd_show", "bd_ready"
   , "bd_create", "bd_update", "bd_close"
-  , "bd_add_dep", "bd_add_label", "bd_sync"
+  , "bd_add_dep", "bd_add_label"
   ]
 
 roleTools Dev = Just $ Set.fromList
@@ -52,7 +52,7 @@ roleTools PM = Just $ Set.fromList
   -- BD (Beads) tools - read and write
   , "bd_list", "bd_show", "bd_ready"
   , "bd_create", "bd_update", "bd_close"
-  , "bd_add_dep", "bd_add_label", "bd_sync"
+  , "bd_add_dep", "bd_add_label"
   ]
 
 isToolAllowed :: Role -> Text -> Bool

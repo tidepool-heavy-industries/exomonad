@@ -70,7 +70,6 @@ import Tidepool.Control.BDTools
   , bdCloseLogic, BDCloseArgs(..), BDCloseResult(..)
   , bdAddDepLogic, BDAddDepArgs(..), BDAddDepResult(..)
   , bdAddLabelLogic, BDAddLabelArgs(..), BDAddLabelResult(..)
-  , bdSyncLogic, BDSyncResult(..)
   )
 import Tidepool.BD.Interpreter (runBDIO, defaultBDConfig, BDConfig(..))
 import Tidepool.BD.GitInterpreter (runGitIO)
@@ -232,7 +231,6 @@ handleMcpTool logger config traceCtx tuiState reqId toolName args =
           "bd_close" -> handleBDCloseTool logger reqId args
           "bd_add_dep" -> handleBDAddDepTool logger reqId args
           "bd_add_label" -> handleBDAddLabelTool logger reqId args
-          "bd_sync" -> handleBDSyncTool logger reqId args
 
           _ -> do
             logError logger $ "  (unknown tool)"
@@ -1019,31 +1017,4 @@ handleBDAddLabelTool logger reqId args = do
 
         Right result -> do
           logInfo logger $ "[MCP:" <> reqId <> "] Added label '" <> result.balrLabel <> "' to " <> result.balrBeadId
-          pure $ mcpToolSuccess reqId (toJSON result)
-
-
--- | Handle the bd_sync tool.
-handleBDSyncTool :: Logger -> Text -> Value -> IO ControlResponse
-handleBDSyncTool logger reqId args = do
-  case fromJSON args of
-    Error err -> do
-      logError logger $ "  parse error: " <> T.pack err
-      pure $ mcpToolError reqId InvalidInput $ "Invalid bd_sync arguments: " <> T.pack err
-
-    Success bsyArgs -> do
-      logDebug logger "  syncing beads..."
-
-      bdConfig <- getBDConfig
-      resultOrErr <- try $ runM
-        $ runLog Debug
-        $ runBDIO bdConfig
-        $ fmap unwrapSingleChoice (bdSyncLogic bsyArgs)
-
-      case resultOrErr of
-        Left (e :: SomeException) -> do
-          logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
-          pure $ mcpToolError reqId ExternalFailure $ "bd_sync failed: " <> T.pack (displayException e)
-
-        Right result -> do
-          logInfo logger $ "[MCP:" <> reqId <> "] " <> result.bsyrMessage
           pure $ mcpToolSuccess reqId (toJSON result)

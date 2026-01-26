@@ -26,7 +26,6 @@
 -- - bd_close: Close a bead
 -- - bd_add_dep: Add dependency between beads
 -- - bd_add_label: Add label to a bead
--- - bd_sync: Sync beads with remote
 module Tidepool.Control.BDTools
   ( -- * List Tool
     BDListGraph(..)
@@ -75,12 +74,6 @@ module Tidepool.Control.BDTools
   , bdAddLabelLogic
   , BDAddLabelArgs(..)
   , BDAddLabelResult(..)
-
-    -- * Sync Tool
-  , BDSyncGraph(..)
-  , bdSyncLogic
-  , BDSyncArgs(..)
-  , BDSyncResult(..)
   ) where
 
 import Control.Monad.Freer (Eff, Member)
@@ -746,66 +739,6 @@ bdAddLabelLogic args = do
     { balrSuccess = True
     , balrBeadId = args.balBeadId
     , balrLabel = args.balLabel
-    }
-
-
--- ════════════════════════════════════════════════════════════════════════════
--- BD SYNC TOOL
--- ════════════════════════════════════════════════════════════════════════════
-
--- | Arguments for bd_sync tool.
-data BDSyncArgs = BDSyncArgs
-  { bsyDummy :: Maybe Text  -- Placeholder, sync takes no args
-  }
-  deriving stock (Show, Eq, Generic)
-
-instance HasJSONSchema BDSyncArgs where
-  jsonSchema = objectSchema [] []
-
-instance FromJSON BDSyncArgs where
-  parseJSON = withObject "BDSyncArgs" $ \_ ->
-    pure $ BDSyncArgs Nothing
-
-instance ToJSON BDSyncArgs where
-  toJSON _ = object []
-
--- | Result of bd_sync tool.
-data BDSyncResult = BDSyncResult
-  { bsyrSuccess :: Bool
-  , bsyrMessage :: Text
-  }
-  deriving stock (Show, Eq, Generic)
-
-instance ToJSON BDSyncResult where
-  toJSON res = object
-    [ "success" .= bsyrSuccess res
-    , "message" .= bsyrMessage res
-    ]
-
--- | Graph definition for bd_sync tool.
-data BDSyncGraph mode = BDSyncGraph
-  { bsyEntry :: mode :- EntryNode BDSyncArgs
-      :@ MCPExport
-      :@ MCPToolDef '("bd_sync", "Synchronize beads with the remote/main branch.")
-
-  , bsyRun :: mode :- LogicNode
-      :@ Input BDSyncArgs
-      :@ UsesEffects '[BD, Goto Exit BDSyncResult]
-
-  , bsyExit :: mode :- ExitNode BDSyncResult
-  }
-  deriving Generic
-
--- | Core logic for bd_sync.
-bdSyncLogic
-  :: (Member BD es)
-  => BDSyncArgs
-  -> Eff es (GotoChoice '[To Exit BDSyncResult])
-bdSyncLogic _ = do
-  sync
-  pure $ gotoExit $ BDSyncResult
-    { bsyrSuccess = True
-    , bsyrMessage = "Beads synchronized with remote"
     }
 
 
