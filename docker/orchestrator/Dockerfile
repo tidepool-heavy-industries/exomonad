@@ -119,7 +119,6 @@ RUN apt-get update && apt-get install -y \
     zlib1g \
     ca-certificates \
     openssl \
-    tini \
     gosu \
     git \
     curl \
@@ -204,7 +203,6 @@ RUN apt-get update && apt-get install -y \
     libffi8 \
     zlib1g \
     ca-certificates \
-    tini \
     gosu \
     socat \
     curl \
@@ -264,7 +262,7 @@ EXPOSE 7432
 WORKDIR /home/user
 
 # Run as root initially to fix permissions, entrypoint drops to user
-ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/control-server-entrypoint.sh"]
+ENTRYPOINT ["/usr/local/bin/control-server-entrypoint.sh"]
 
 # Stage 5: Orchestrator (Zellij + Claude Code, mounts control-server socket)
 # Attach via: docker exec -it tidepool-orchestrator zellij attach orchestrator
@@ -273,7 +271,7 @@ FROM runtime AS orchestrator
 WORKDIR /worktrees
 
 # Entrypoint runs as root initially for setup, then drops to user via gosu
-ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/docker-entrypoint-orchestrator.sh"]
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint-orchestrator.sh"]
 CMD ["orchestrator"]
 
 # Stage 6: Dev Target

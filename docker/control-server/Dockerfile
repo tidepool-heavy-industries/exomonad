@@ -61,7 +61,6 @@ RUN apt-get update && apt-get install -y \
     libffi8 \
     zlib1g \
     ca-certificates \
-    tini \
     gosu \
     socat \
     curl \
@@ -114,4 +113,4 @@ EXPOSE 7432
 
 WORKDIR /home/user
 
-ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/entrypoint.sh"]
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

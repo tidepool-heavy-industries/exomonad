@@ -28,7 +28,6 @@ FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y \
     ca-certificates \
     curl \
-    tini \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /docker-spawner /usr/local/bin/docker-spawner
@@ -36,5 +35,4 @@ COPY --from=builder /docker-spawner /usr/local/bin/docker-spawner
 ENV RUST_LOG=info
 EXPOSE 7435
 
-ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["docker-spawner"]

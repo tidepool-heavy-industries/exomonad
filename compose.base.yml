@@ -1,0 +1,12 @@
+# Base service fragments for DRY configuration
+# Services can extend these to inherit common settings
+
+services:
+  # Fragment for services needing Docker socket access
+  # Uses group_add to add the container user to the Docker socket's group
+  # DOCKER_GID is detected by ide/refresh-ide scripts before docker compose runs
+  docker-socket-access:
+    group_add:
+      - "${DOCKER_GID:-999}"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
