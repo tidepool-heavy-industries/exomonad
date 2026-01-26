@@ -24,6 +24,8 @@ roleTools TL = Just $ Set.fromList
   , "exo_complete"    -- Mark agent work complete
   -- Messaging with agents
   , "send_message", "check_inbox", "read_message", "mark_read"
+  -- Interactive (TUI-backed)
+  , "confirm_action", "select_option", "request_guidance"
   -- BD (Beads) tools - read and write
   , "bd_list", "bd_show", "bd_ready"
   , "bd_create", "bd_update", "bd_close"
