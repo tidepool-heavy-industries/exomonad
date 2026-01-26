@@ -2,12 +2,9 @@
 # MCP server (TCP 7432) + Zellij tab creation + docker-spawner integration
 
 # =============================================================================
-# Stage 1: Rust Builder (for bd CLI and tui-spawner)
+# Stage 1: Rust Builder (for tui-spawner)
 # =============================================================================
 FROM rust:bookworm AS rust-builder
-
-# Build bd CLI from source to match container's glibc
-RUN cargo install beads-rs --locked
 
 # Build tui-spawner with minimal workspace
 WORKDIR /build
@@ -82,9 +79,6 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 RUN cargo-binstall --no-confirm zellij && \
     cp /root/.cargo/bin/zellij /usr/local/bin/zellij && \
     chmod 755 /usr/local/bin/zellij
-
-# Copy bd CLI from rust-builder (built from source for glibc compatibility)
-COPY --from=rust-builder /usr/local/cargo/bin/bd /usr/local/bin/bd
 
 # Copy tui-spawner binary (for FIFO-based popup spawning)
 COPY --from=rust-builder /build/target/release/tui-spawner /usr/local/bin/tui-spawner

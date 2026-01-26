@@ -16,11 +16,6 @@ echo "Starting Tidepool Control Server..."
 chown 1000:1000 /sockets 2>/dev/null || true
 chmod 755 /sockets
 
-# --- Beads volume ownership ---
-if [ -d /beads ]; then
-    chown -R 1000:1000 /beads 2>/dev/null || true
-fi
-
 # --- XDG_RUNTIME_DIR for Zellij ---
 mkdir -p /run/user/1000
 chown 1000:1000 /run/user/1000

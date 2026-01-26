@@ -29,11 +29,9 @@ services:
       - DOCKER_SPAWNER_URL=http://docker-spawner:7435
       - XDG_RUNTIME_DIR=/run/user/1000
       - ZELLIJ_SESSION_NAME=main
-      - BEADS_DIR=/beads
     volumes:
       - tidepool-sockets:/sockets
       - tidepool-zellij:/run/user/1000
-      - tidepool-beads:/beads
       - tidepool-gh-auth:/home/user/.config/gh
       - /var/run/docker.sock:/var/run/docker.sock
     healthcheck:
@@ -250,8 +248,6 @@ volumes:
     name: tidepool-openobserve
   tidepool-worktrees:
     name: tidepool-worktrees
-  tidepool-beads:
-    name: tidepool-beads
 
 networks:
   tidepool-internal:

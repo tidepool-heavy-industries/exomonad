@@ -2,13 +2,10 @@
 # No SSH - uses docker exec via docker-spawner for remote commands
 
 # =============================================================================
-# Stage 1: Rust Builder (for mantle-agent, effector, tui-spawner, bd)
+# Stage 1: Rust Builder (for mantle-agent, effector, tui-spawner)
 # =============================================================================
 FROM --platform=linux/amd64 rust:bookworm AS rust-builder
 WORKDIR /build
-
-# Build bd CLI from source to match container's glibc
-RUN cargo install beads-rs --locked
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y \
@@ -144,13 +141,12 @@ USER root
 COPY --from=rust-builder /mantle-agent /usr/local/bin/mantle-agent
 COPY --from=rust-builder /effector /usr/local/bin/effector
 COPY --from=rust-builder /tui-spawner /usr/local/bin/tui-spawner
-COPY --from=rust-builder /usr/local/cargo/bin/bd /usr/local/bin/bd
 
 # Copy Haskell binaries
 COPY --from=haskell-builder /tidepool-control-server /usr/local/bin/tidepool-control-server
 
 # Set permissions
-RUN chmod +x /usr/local/bin/mantle-agent /usr/local/bin/effector /usr/local/bin/tui-spawner /usr/local/bin/tidepool-control-server /usr/local/bin/bd
+RUN chmod +x /usr/local/bin/mantle-agent /usr/local/bin/effector /usr/local/bin/tui-spawner /usr/local/bin/tidepool-control-server
 
 # Set up entrypoint script
 COPY docker/claude-agent/entrypoint.sh /usr/local/bin/entrypoint.sh
