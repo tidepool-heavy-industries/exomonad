@@ -53,7 +53,8 @@ module Tidepool.BD.Interpreter
 import Control.Exception (try, SomeException)
 import Control.Monad (forM_)
 import Control.Monad.Freer (Eff, LastMember, interpret, sendM)
-import Data.Aeson (eitherDecode)
+import Data.Aeson (eitherDecode, Value(..), withObject, (.:))
+import Data.Aeson.Types (parseMaybe)
 import Data.ByteString.Lazy qualified as LBS
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -347,7 +348,7 @@ bdList config input = do
 -- Uses @bd create@ command. Returns the generated bead ID.
 bdCreate :: BDConfig -> CreateBeadInput -> IO Text
 bdCreate config input = do
-  let baseArgs = ["create", T.unpack input.cbiTitle, "--quiet"]
+  let baseArgs = ["create", T.unpack input.cbiTitle, "--json"]
                 ++ maybe [] (\d -> ["--repo", d]) config.bcBeadsDir
                 ++ ["--type", beadTypeToArg input.cbiType]
                 ++ ["--priority", show input.cbiPriority]
@@ -360,7 +361,15 @@ bdCreate config input = do
   result <- runBdCommand config baseArgs
   case result of
     Left err -> error $ "bd create failed: " <> T.unpack err
-    Right output -> pure $ T.strip output
+    Right output ->
+      -- Parse JSON response: {"result":"issue","data":{"id":"beads-xxx",...}}
+      let parseId = withObject "BdCreateResponse" $ \obj -> do
+            dataObj <- obj .: "data"
+            dataObj .: "id"
+          decoded = either (const Nothing) Just $ eitherDecode (LBS.fromStrict $ TE.encodeUtf8 output)
+      in case decoded >>= parseMaybe parseId of
+        Just beadId -> pure beadId
+        Nothing -> error $ "bd create: failed to parse bead ID from response: " <> T.unpack output
 
 
 -- | Update an existing bead.
@@ -506,7 +515,8 @@ runBdCommand config args = do
           if not (null stdout) && ("id" `T.isInfixOf` T.pack stdout || "{" `T.isPrefixOf` T.pack stdout || "[" `T.isPrefixOf` T.pack stdout)
             then pure $ Right $ T.pack stdout
             else pure $ Left $ "bd exited with code " <> T.pack (show code)
-                             <> if config.bcQuiet then "" else ": " <> T.pack stderr
+                             <> (if null stderr then "" else "\nstderr: " <> T.pack stderr)
+                             <> (if null stdout then "" else "\nstdout: " <> T.pack stdout)
 
 
 -- | Convert BeadType to CLI argument.
