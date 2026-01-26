@@ -1,6 +1,6 @@
 -- | External Orchestration tools (Tier 1) as Graph DSL nodes.
 --
--- Includes tools for interacting with beads (BD), git, and GitHub.
+-- Includes tools for interacting with GitHub Issues, git, and PRs.
 --
 -- Note: exo_complete and pre_commit_check have been folded into the Stop hook.
 -- Their logic modules are kept for internal use but are no longer exported as MCP tools.
@@ -37,9 +37,9 @@ module Tidepool.Control.ExoTools
   , FeedbackSummary(..)
 
     -- * Helpers
-  , parseBeadId
+  , parseIssueNumber
   , slugify
-  , extractBeadId
+  , extractIssueNumber
   ) where
 
 import Tidepool.Control.ExoTools.Status

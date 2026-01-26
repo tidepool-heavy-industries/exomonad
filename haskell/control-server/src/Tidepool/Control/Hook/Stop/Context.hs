@@ -21,8 +21,8 @@ import Text.Parsec.Pos (SourcePos)
 
 -- | Context for the Stop hook template.
 data StopContext = StopContext
-  { bead_id :: Maybe Text
-    -- ^ Bead ID if on a bd-* branch
+  { issue_number :: Maybe Int
+    -- ^ Issue number if on a gh-* branch
   , branch :: Text
     -- ^ Current branch name
   , dirty_files :: [Text]
@@ -32,13 +32,13 @@ data StopContext = StopContext
   , pr :: Maybe StopPRContext
     -- ^ PR info if one exists for this branch
   , clean :: Bool
-    -- ^ True if no action needed (no dirty files, has PR or not on bead branch)
+    -- ^ True if no action needed (no dirty files, has PR or not on issue branch)
   , pre_commit :: Maybe StopPreCommitContext
     -- ^ Pre-commit check results (if run)
-  , bead_closed :: Bool
-    -- ^ True if bead was closed as part of this stop
-  , bead_already_closed :: Bool
-    -- ^ True if bead was already closed before stop
+  , issue_closed :: Bool
+    -- ^ True if issue was closed as part of this stop
+  , issue_already_closed :: Bool
+    -- ^ True if issue was already closed before stop
   } deriving stock (Show, Eq, Generic)
 
 -- | Pre-commit check context for Stop hook.
@@ -59,15 +59,15 @@ data StopPRContext = StopPRContext
 
 instance ToGVal (Run SourcePos (Writer Text) Text) StopContext where
   toGVal ctx = dict
-    [ "bead_id" ~> bead_id ctx
+    [ "issue_number" ~> issue_number ctx
     , "branch" ~> branch ctx
     , "dirty_files" ~> dirty_files ctx
     , "commits_ahead" ~> commits_ahead ctx
     , "pr" ~> pr ctx
     , "clean" ~> clean ctx
     , "pre_commit" ~> pre_commit ctx
-    , "bead_closed" ~> bead_closed ctx
-    , "bead_already_closed" ~> bead_already_closed ctx
+    , "issue_closed" ~> issue_closed ctx
+    , "issue_already_closed" ~> issue_already_closed ctx
     ]
 
 instance ToGVal (Run SourcePos (Writer Text) Text) StopPRContext where

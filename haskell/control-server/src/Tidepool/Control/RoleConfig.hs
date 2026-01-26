@@ -21,15 +21,13 @@ roleTools TL = Just $ Set.fromList
   -- Orchestration: spawn and monitor agents
   [ "spawn_agents"
   , "exo_status"      -- Check agent status
-  , "exo_complete"    -- Mark agent work complete
   -- Messaging with agents
   , "send_message", "check_inbox", "read_message", "mark_read"
   -- Interactive (TUI-backed)
   , "confirm_action", "select_option", "request_guidance"
-  -- BD (Beads) tools - read and write
-  , "bd_list", "bd_show", "bd_ready"
-  , "bd_create", "bd_update", "bd_close"
-  , "bd_add_dep", "bd_add_label"
+  -- GitHub tools
+  , "gh_issue_list", "gh_issue_show"
+  , "gh_issue_create", "gh_issue_update", "gh_issue_close", "gh_issue_reopen"
   ]
 
 roleTools Dev = Just $ Set.fromList
@@ -39,22 +37,21 @@ roleTools Dev = Just $ Set.fromList
   , "find_callers", "show_fields", "show_constructors", "teach-graph"
   -- Interactive (TUI-backed)
   , "confirm_action", "select_option", "request_guidance"
-  -- BD (Beads) tools - read and limited write
-  , "bd_list", "bd_show", "bd_ready"
-  , "bd_update"       -- Can update status
+  -- GitHub tools
+  , "gh_issue_list", "gh_issue_show"
+  , "gh_issue_update"
   ]
 
 roleTools PM = Just $ Set.fromList
   -- Planning tools
-  [ "pm_status", "pm_review_dag", "pm_propose"
+  [ "pm_status", "pm_propose"
   , "pm_approve_expansion", "pm_prioritize"
   -- Messaging
   , "send_message", "check_inbox", "read_message", "mark_read"
   , "exo_status"  -- Can view but not spawn
-  -- BD (Beads) tools - read and write
-  , "bd_list", "bd_show", "bd_ready"
-  , "bd_create", "bd_update", "bd_close"
-  , "bd_add_dep", "bd_add_label"
+  -- GitHub tools
+  , "gh_issue_list", "gh_issue_show"
+  , "gh_issue_create", "gh_issue_update", "gh_issue_close", "gh_issue_reopen"
   ]
 
 isToolAllowed :: Role -> Text -> Bool

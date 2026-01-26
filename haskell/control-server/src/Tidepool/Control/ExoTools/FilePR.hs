@@ -22,9 +22,8 @@ import Data.Aeson (FromJSON(..), ToJSON(..), (.:), (.:?), (.=), object, withObje
 import Data.Text (Text)
 import GHC.Generics (Generic)
 
-import Tidepool.Effects.BD (BD, BeadInfo(..), getBead)
 import Tidepool.Effects.Git (Git, WorktreeInfo(..), getWorktreeInfo)
-import Tidepool.Effects.GitHub (GitHub, Repo(..), PRCreateSpec(..), PRUrl(..), PullRequest(..), PRFilter(..), createPR, listPullRequests, defaultPRFilter)
+import Tidepool.Effects.GitHub (GitHub, Repo(..), PRCreateSpec(..), PRUrl(..), PullRequest(..), PRFilter(..), Issue(..), getIssue, createPR, listPullRequests, defaultPRFilter)
 import qualified Data.Text as T
 import Data.Maybe (listToMaybe)
 import Tidepool.Role (Role(..))
@@ -34,10 +33,10 @@ import Tidepool.Graph.Goto (Goto, GotoChoice, To, gotoExit)
 import Tidepool.Graph.Types (type (:@), Input, UsesEffects, Exit, MCPExport, MCPToolDef, MCPRoleHint)
 import Tidepool.Schema (HasJSONSchema(..), objectSchema, emptySchema, SchemaType(..), describeField)
 
-import Tidepool.Control.ExoTools.Internal (parseBeadId, slugify, formatPRBody)
+import Tidepool.Control.ExoTools.Internal (parseIssueNumber, slugify, formatPRBody)
 
 -- | Arguments for file_pr tool.
--- Bead ID and title are inferred from the branch - agent provides context.
+-- Issue number and title are inferred from the branch - agent provides context.
 data FilePRArgs = FilePRArgs
   { fpaTesting     :: Text        -- ^ Required: How was this tested?
   , fpaCompromises :: Maybe Text  -- ^ Optional: Tradeoffs or shortcuts taken
@@ -98,12 +97,12 @@ instance FromJSON FilePRResult where
 data FilePRGraph mode = FilePRGraph
   { fpEntry :: mode :- EntryNode FilePRArgs
       :@ MCPExport
-      :@ MCPToolDef '("file_pr", "File a pull request for current bead. Idempotent: returns existing PR if one exists.")
+      :@ MCPToolDef '("file_pr", "File a pull request for current issue. Idempotent: returns existing PR if one exists.")
       :@ MCPRoleHint 'Dev
 
   , fpRun :: mode :- LogicNode
       :@ Input FilePRArgs
-      :@ UsesEffects '[BD, Git, GitHub, Goto Exit FilePRResult]
+      :@ UsesEffects '[Git, GitHub, Goto Exit FilePRResult]
 
   , fpExit :: mode :- ExitNode FilePRResult
   }
@@ -111,7 +110,7 @@ data FilePRGraph mode = FilePRGraph
 
 -- | Handlers for file_pr graph.
 filePRHandlers
-  :: (Member BD es, Member Git es, Member GitHub es)
+  :: (Member Git es, Member GitHub es)
   => FilePRGraph (AsHandler es)
 filePRHandlers = FilePRGraph
   { fpEntry = ()
@@ -120,34 +119,35 @@ filePRHandlers = FilePRGraph
   }
 
 -- | Core logic for file_pr.
--- Bead ID and title inferred from branch. Agent provides testing/compromises.
+-- Issue number and title inferred from branch. Agent provides testing/compromises.
 -- Idempotent: checks for existing PR first, returns it if found.
 filePRLogic
-  :: (Member BD es, Member Git es, Member GitHub es)
+  :: (Member Git es, Member GitHub es)
   => FilePRArgs
   -> Eff es (GotoChoice '[To Exit FilePRResult])
 filePRLogic args = do
   -- 1. Get Worktree/Git info
   mWt <- getWorktreeInfo
 
-  -- 2. Determine Bead ID from branch
-  let mBeadId = case mWt of
-        Just wt -> parseBeadId wt.wiBranch
+  -- 2. Determine Issue Number from branch
+  let mIssueNum = case mWt of
+        Just wt -> parseIssueNumber wt.wiBranch
         Nothing -> Nothing
 
-  case mBeadId of
+  case mIssueNum of
     Nothing ->
-      pure $ gotoExit $ FilePRResult Nothing False (Just "Not on a bead branch. file_pr requires bd-{id}/* branch naming.")
-    Just bid -> do
-      -- 3. Get Bead Info
-      mBead <- getBead bid
-      case mBead of
+      pure $ gotoExit $ FilePRResult Nothing False (Just "Not on an issue branch. file_pr requires gh-{num}/* branch naming.")
+    Just num -> do
+      -- 3. Get Issue Info
+      -- TODO: Configurable repo
+      let repo = Repo "tidepool/tidepool"
+      mIssue <- getIssue repo num False
+      case mIssue of
         Nothing ->
-          pure $ gotoExit $ FilePRResult Nothing False (Just $ "Bead " <> bid <> " not found.")
-        Just bead -> do
+          pure $ gotoExit $ FilePRResult Nothing False (Just $ "Issue #" <> T.pack (show num) <> " not found.")
+        Just issue -> do
           -- 4. Check if PR already exists (idempotent)
-          let repo = Repo "tidepool-heavy-industries/tidepool"
-              searchStr = "[" <> bid <> "]"
+          let searchStr = "[gh-" <> T.pack (show num) <> "]"
               filt = defaultPRFilter { pfSearch = Just searchStr, pfLimit = Just 1 }
 
           existingPrs <- listPullRequests repo filt
@@ -166,10 +166,10 @@ filePRLogic args = do
               -- 5. Prepare PR Spec
               let headBranch = case mWt of
                     Just wt -> wt.wiBranch
-                    Nothing -> "bd-" <> bid <> "/" <> slugify bead.biTitle
+                    Nothing -> "gh-" <> T.pack (show num) <> "/" <> slugify issue.issueTitle
 
-              let title = "[" <> bid <> "] " <> bead.biTitle
-                  body = formatPRBody bead args.fpaTesting args.fpaCompromises
+              let title = "[" <> "gh-" <> T.pack (show num) <> "] " <> issue.issueTitle
+                  body = formatPRBody issue args.fpaTesting args.fpaCompromises
                   spec = PRCreateSpec
                     { prcsRepo = repo
                     , prcsHead = headBranch

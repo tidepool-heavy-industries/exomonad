@@ -10,7 +10,7 @@ The following files have uncommitted changes:
 Commit these changes before stopping. Use structured commit metadata:
 ```
 git add <files>
-git commit -m "[{{ bead_id | default(branch) }}] <type>: <description>"
+git commit -m "[gh-{{ issue_number | default(branch) }}] <type>: <description>"
 git push
 ```
 {% endif %}
@@ -24,7 +24,7 @@ Use the `file_pr` MCP tool to create a pull request:
 - **testing** (required): How did you verify this works?
 - **compromises** (optional): Any tradeoffs or known limitations?
 
-The tool will infer bead ID and title from your branch.
+The tool will infer issue number and title from your branch.
 {% endif %}
 
 {# TODO: Wire pr_review_status to fetch actual pending_comments count #}
@@ -38,12 +38,12 @@ The tool will infer bead ID and title from your branch.
 {% endif %}
 {% endif %}
 
-{% if clean and not bead_id %}
-✓ Clean state. Not on a bead branch.
+{% if clean and not issue_number %}
+✓ Clean state. Not on an issue branch.
 {% endif %}
 
-{% if clean and bead_id and pr %}
-✓ {{ bead_id }}: All changes committed, PR #{{ pr.number }} filed.
+{% if clean and issue_number and pr %}
+✓ #{{ issue_number }}: All changes committed, PR #{{ pr.number }} filed.
 {% endif %}
 
 {# Pre-commit check results #}
@@ -63,11 +63,11 @@ Fix the issues above before stopping.
 {% endif %}
 {% endif %}
 
-{# Bead closing status #}
-{% if bead_closed %}
-## Bead Completed
+{# Issue closing status #}
+{% if issue_closed %}
+## Issue Completed
 
-✓ {{ bead_id }} has been closed automatically (PR filed, checks passed).
-{% elif bead_already_closed %}
-ℹ {{ bead_id }} was already closed.
+✓ #{{ issue_number }} has been closed automatically (PR filed, checks passed).
+{% elif issue_already_closed %}
+ℹ #{{ issue_number }} was already closed.
 {% endif %}

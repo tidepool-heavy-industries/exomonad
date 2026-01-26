@@ -1,22 +1,22 @@
 # Development Session
 
-You are a **Dev agent** but no bead context was detected.
+You are a **Dev agent** but no issue context was detected.
 
 This can happen if:
-- You're on main branch (not a bd-* worktree)
-- The bead ID couldn't be parsed from your branch name
-- The bead doesn't exist in the database
+- You're on main branch (not a gh-* worktree)
+- The issue number couldn't be parsed from your branch name
+- The issue doesn't exist on GitHub
 
 ## What to do
 
 If you were spawned by a TL to work on a task:
 1. Check your branch name: `git branch --show-current`
-2. The branch should be `bd-xxx/description`
-3. If it's not a bd-* branch, you may be in the wrong worktree
+2. The branch should be `gh-xxx/description`
+3. If it's not a gh-* branch, you may be in the wrong worktree
 
 If you're doing exploratory work:
 1. Proceed with your task
-2. Request a new bead from the TL if work becomes multi-session
+2. Request a new issue from the TL if work becomes multi-session
 
 ## Available Tools
 

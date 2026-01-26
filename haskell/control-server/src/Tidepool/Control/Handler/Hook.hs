@@ -28,30 +28,25 @@ import Control.Monad.Freer (Eff, Member, runM)
 import Control.Monad.Freer.State (runState)
 import Data.Time.Clock (getCurrentTime)
 import OpenTelemetry.Trace
-import qualified OpenTelemetry.Context as Context
 import qualified OpenTelemetry.Context.ThreadLocal as Context
 
 import Tidepool.Control.Protocol hiding (role)
 import Tidepool.Control.Types (ServerConfig(..))
 import Tidepool.Control.Hook.Policy (HookDecision(..), evaluatePolicy)
 import Tidepool.Control.Hook.CircuitBreaker (CircuitBreakerMap, SessionId, withCircuitBreaker, incrementStage)
-import Tidepool.Control.ExoTools (parseBeadId)
+import Tidepool.Control.ExoTools (parseIssueNumber)
 import Tidepool.Control.Hook.SessionStart (sessionStartLogic)
 import Tidepool.Control.Effects.SshExec (runSshExec)
 import Tidepool.Control.Effects.Git (runGitViaSsh)
 import Tidepool.Control.Effects.Cabal (runCabalViaSsh)
 import Tidepool.Control.Effects.Effector (runEffectorViaSsh, runEffectorIO)
-import Tidepool.Control.Effects.Justfile (runJustfileViaSsh)
-import Tidepool.Control.Interpreters.Traced (traceCabal, traceGit, traceBD)
-import Tidepool.BD.Interpreter (runBDIO, defaultBDConfig)
-import Tidepool.BD.GitInterpreter (runGitIO)
+import Tidepool.Control.Interpreters.Traced (traceCabal, traceGit)
 import Tidepool.Cabal.Interpreter (runCabalIO, defaultCabalConfig)
-import Tidepool.Effects.Effector (Effector)
 import Tidepool.GitHub.Interpreter (runGitHubIO, defaultGitHubConfig)
-import Tidepool.Justfile.Interpreter (runJustfileIO)
 import Tidepool.Effect.Types (runLog, LogLevel(..))
 import Tidepool.Effect.NodeMeta (runGraphMeta, runNodeMeta, defaultNodeMeta, GraphMetadata(..))
 import Tidepool.Effects.Git (Git, WorktreeInfo(..), getWorktreeInfo)
+import Tidepool.Git.Interpreter (runGitIO)
 import Tidepool.Effects.Zellij (Zellij, checkZellijEnv, goToTab, TabId(..))
 import Tidepool.Zellij.Interpreter (runZellijIO)
 import Tidepool.Graph.Interpret (runGraph)
@@ -135,8 +130,7 @@ handleSessionStart tracer role input = do
 
   result <- try $ runM
     $ runLog Debug
-    $ runBDIO defaultBDConfig
-    $ traceBD tracer
+    $ runGitHubIO defaultGitHubConfig
     $ case mContainer of 
          Just container -> 
            runSshExec (T.pack sshProxyUrl) 
@@ -287,7 +281,8 @@ getAgentState :: Member Git es => HookInput -> Eff es AgentState
 getAgentState input = do
   mWt <- getWorktreeInfo
   let branch = (.wiBranch) <$> mWt
-      beadId = branch >>= parseBeadId
+      issueNum = branch >>= parseIssueNumber
+      beadId = T.pack . show <$> issueNum
   pure $ AgentState
     {
       asSessionId = input.sessionId
@@ -332,7 +327,14 @@ autoFocusLogic = do
         Nothing -> pure ()
         Just wt -> do
           let branchName = wt.wiBranch
-              maybeBeadId = parseBeadId branchName
+              maybeIssueNum = parseIssueNumber branchName
+              maybeBeadId = T.pack . show <$> maybeIssueNum
+          case maybeBeadId of
+            Nothing -> pure ()
+            Just bid -> do
+              -- Focus on tab with bead ID name
+              _ <- goToTab (TabId bid)
+              pure ()
           case maybeBeadId of
             Nothing -> pure ()
             Just beadId -> do

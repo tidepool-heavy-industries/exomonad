@@ -45,9 +45,6 @@ import Tidepool.Control.ExoTools
   , spawnAgentsLogic, SpawnAgentsArgs(..), SpawnAgentsResult(..)
   , filePRLogic, FilePRArgs(..), FilePRResult(..), PRInfo(..)
   )
-import Tidepool.Control.PMReviewDAG
-  ( pmReviewDagLogic, PmReviewDagArgs(..), PmReviewDagResult(..)
-  )
 import Tidepool.Control.PMTools
   ( pmApproveExpansionLogic, PmApproveExpansionArgs(..), PmApproveExpansionResult(..),
     pmPrioritizeLogic, PmPrioritizeArgs(..), PmPrioritizeResult(..), PrioritizeResultItem(..)
@@ -61,18 +58,15 @@ import Tidepool.Control.MailboxTools
   , readMessageLogic, ReadMessageArgs(..)
   , markReadLogic, MarkReadArgs(..)
   )
-import Tidepool.Control.BDTools
-  ( bdListLogic, BDListArgs(..), BDListResult(..)
-  , bdShowLogic, BDShowArgs(..), BDShowResult(..)
-  , bdReadyLogic, BDReadyArgs(..), BDReadyResult(..)
-  , bdCreateLogic, BDCreateArgs(..), BDCreateResult(..)
-  , bdUpdateLogic, BDUpdateArgs(..), BDUpdateResult(..)
-  , bdCloseLogic, BDCloseArgs(..), BDCloseResult(..)
-  , bdAddDepLogic, BDAddDepArgs(..), BDAddDepResult(..)
-  , bdAddLabelLogic, BDAddLabelArgs(..), BDAddLabelResult(..)
+import Tidepool.Control.GHTools
+  ( ghIssueListLogic, GHIssueListArgs(..), GHIssueListResult(..)
+  , ghIssueShowLogic, GHIssueShowArgs(..), GHIssueShowResult(..)
+  , ghIssueCreateLogic, GHIssueCreateArgs(..), GHIssueCreateResult(..)
+  , ghIssueUpdateLogic, GHIssueUpdateArgs(..), GHIssueUpdateResult(..)
+  , ghIssueCloseLogic, GHIssueCloseArgs(..), GHIssueCloseResult(..)
+  , ghIssueReopenLogic, GHIssueReopenArgs(..), GHIssueReopenResult(..)
   )
-import Tidepool.BD.Interpreter (runBDIO, defaultBDConfig, BDConfig(..))
-import Tidepool.BD.GitInterpreter (runGitIO)
+import Tidepool.Git.Interpreter (runGitIO)
 import Tidepool.GitHub.Interpreter (runGitHubIO, defaultGitHubConfig)
 import Tidepool.Worktree.Interpreter (runWorktreeIO, defaultWorktreeConfig)
 import Tidepool.FileSystem.Interpreter (runFileSystemIO)
@@ -213,7 +207,6 @@ handleMcpTool logger config traceCtx reqId toolName args =
           "pm_prioritize" -> handlePmPrioritizeTool logger reqId args
           "pm_status" -> handlePmStatusTool logger reqId args
           "pm_propose" -> handlePMProposeTool logger reqId args
-          "pm_review_dag" -> handlePmReviewDagTool logger reqId args
 
           -- Mailbox tools
           "send_message" -> handleSendMessageTool logger currentRole reqId args
@@ -221,21 +214,19 @@ handleMcpTool logger config traceCtx reqId toolName args =
           "read_message" -> handleReadMessageTool logger reqId args
           "mark_read" -> handleMarkReadTool logger reqId args
 
-          -- BD (Beads) tools - centralized bead operations
-          "bd_list" -> handleBDListTool logger reqId args
-          "bd_show" -> handleBDShowTool logger reqId args
-          "bd_ready" -> handleBDReadyTool logger reqId args
-          "bd_create" -> handleBDCreateTool logger reqId args
-          "bd_update" -> handleBDUpdateTool logger reqId args
-          "bd_close" -> handleBDCloseTool logger reqId args
-          "bd_add_dep" -> handleBDAddDepTool logger reqId args
-          "bd_add_label" -> handleBDAddLabelTool logger reqId args
+          -- GitHub tools
+          "gh_issue_list" -> handleGHIssueListTool logger reqId args
+          "gh_issue_show" -> handleGHIssueShowTool logger reqId args
+          "gh_issue_create" -> handleGHIssueCreateTool logger reqId args
+          "gh_issue_update" -> handleGHIssueUpdateTool logger reqId args
+          "gh_issue_close" -> handleGHIssueCloseTool logger reqId args
+          "gh_issue_reopen" -> handleGHIssueReopenTool logger reqId args
 
           _ -> do
             logError logger $ "  (unknown tool)"
             pure $ mcpToolError reqId NotFound $
               "Tool not found: " <> toolName <>
-              ". Available tools: exo_status, spawn_agents, file_pr, pm_approve_expansion, pm_prioritize, pm_propose"
+              ". Available tools: exo_status, spawn_agents, file_pr, gh_issue_list, gh_issue_create"
 
 -- | Handle the pm_prioritize tool.
 --
@@ -252,7 +243,7 @@ handlePmPrioritizeTool logger reqId args = do
 
       resultOrErr <- try $ runM
         $ runLog Debug
-        $ runBDIO defaultBDConfig
+        $ runGitHubIO defaultGitHubConfig
         $ fmap unwrapSingleChoice (pmPrioritizeLogic ppArgs)
 
       case resultOrErr of
@@ -276,7 +267,7 @@ handleSpawnAgentsTool logger reqId args = do
       pure $ mcpToolError reqId InvalidInput $ "Invalid spawn_agents arguments: " <> T.pack err
 
     Success saArgs -> do
-      logDebug logger $ "  bead_ids=" <> T.intercalate "," saArgs.saaBeadIds
+      logDebug logger $ "  issue_numbers=" <> T.intercalate "," saArgs.saaIssueNumbers
 
       -- Most interpreters use default configs which assume current dir is repo root.
       let repoRoot = "." 
@@ -289,7 +280,7 @@ handleSpawnAgentsTool logger reqId args = do
       resultOrErr <- try $ runM
         $ runLog Debug
         $ runGeminiIO
-        $ runBDIO defaultBDConfig
+        $ runGitHubIO defaultGitHubConfig
         $ runGitIO
         $ runWorktreeIO (defaultWorktreeConfig repoRoot)
         $ runFileSystemIO
@@ -324,7 +315,7 @@ handleExoStatusTool logger reqId args = do
       resultOrErr <- try $ runM
         $ runLog Debug
         $ runGeminiIO
-        $ runBDIO defaultBDConfig
+        $ runGitHubIO defaultGitHubConfig
         $ runGitIO
         $ runGitHubIO defaultGitHubConfig
         $ fmap unwrapSingleChoice (exoStatusLogic esArgs)
@@ -445,7 +436,7 @@ handleFilePRTool logger reqId args = do
 
       resultOrErr <- try $ runM
         $ runLog Debug
-        $ runBDIO defaultBDConfig
+        $ runGitHubIO defaultGitHubConfig
         $ runGitIO
         $ runGitHubIO defaultGitHubConfig
         $ fmap unwrapSingleChoice (filePRLogic fpArgs)
@@ -475,12 +466,12 @@ handlePmApproveExpansionTool logger reqId args = do
       pure $ mcpToolError reqId InvalidInput $ "Invalid pm_approve_expansion arguments: " <> T.pack err
 
     Success paeArgs -> do
-      logDebug logger $ "  bead_id=" <> paeArgs.paeaBeadId
+      logDebug logger $ "  issue_num=" <> T.pack (show paeArgs.paeaIssueNum)
       logDebug logger $ "  decision=" <> paeArgs.paeaDecision
 
       resultOrErr <- try $ runM
         $ runLog Debug
-        $ runBDIO defaultBDConfig
+        $ runGitHubIO defaultGitHubConfig
         $ fmap unwrapSingleChoice (pmApproveExpansionLogic paeArgs)
 
       case resultOrErr of
@@ -508,7 +499,7 @@ handlePmStatusTool logger reqId args = do
       resultOrErr <- try $ runM
         $ runLog Debug
         $ runTime
-        $ runBDIO defaultBDConfig
+        $ runGitHubIO defaultGitHubConfig
         $ runGitHubIO defaultGitHubConfig
         $ fmap unwrapSingleChoice (pmStatusLogic psArgs)
 
@@ -536,7 +527,8 @@ handlePMProposeTool logger reqId args = do
 
       resultOrErr <- try $ runM
         $ runLog Debug
-        $ runBDIO defaultBDConfig
+        $ runEnvIO
+        $ runGitHubIO defaultGitHubConfig
         $ fmap unwrapSingleChoice (pmProposeLogic ppaArgs)
 
       case resultOrErr of
@@ -545,35 +537,7 @@ handlePMProposeTool logger reqId args = do
           pure $ mcpToolError reqId ExternalFailure $ "pm_propose failed: " <> T.pack (displayException e)
 
         Right result -> do
-          logInfo logger $ "[MCP:" <> reqId <> "] Proposed bead: " <> result.pprBeadId
-          pure $ mcpToolSuccess reqId (toJSON result)
-
--- | Handle the pm_review_dag tool.
---
--- Runs the PmReviewDagGraph logic to analyze the bead DAG.
-handlePmReviewDagTool :: Logger -> Text -> Value -> IO ControlResponse
-handlePmReviewDagTool logger reqId args = do
-  case fromJSON args of
-    Error err -> do
-      logError logger $ "  parse error: " <> T.pack err
-      pure $ mcpToolError reqId InvalidInput $ "Invalid pm_review_dag arguments: " <> T.pack err
-
-    Success prdArgs -> do
-      logDebug logger $ "  focus_track=" <> T.pack (show prdArgs.prdaFocusTrack)
-
-      resultOrErr <- try $ runM
-        $ runLog Debug
-        $ runTime
-        $ runBDIO defaultBDConfig
-        $ fmap unwrapSingleChoice (pmReviewDagLogic prdArgs)
-
-      case resultOrErr of
-        Left (e :: SomeException) -> do
-          logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
-          pure $ mcpToolError reqId ExternalFailure $ "pm_review_dag failed: " <> T.pack (displayException e)
-
-        Right result -> do
-          logInfo logger $ "[MCP:" <> reqId <> "] DAG analyzed: " <> T.pack (show $ length result.prdrReady) <> " ready beads"
+          logInfo logger $ "[MCP:" <> reqId <> "] Proposed issue: #" <> T.pack (show result.pprIssueNum)
           pure $ mcpToolSuccess reqId (toJSON result)
 
 
@@ -697,7 +661,7 @@ handleSendMessageTool logger fromRole reqId args = do
 
       resultOrErr <- try $ runM
         $ runLog Debug
-        $ runBDIO defaultBDConfig
+        $ runGitHubIO defaultGitHubConfig
         $ fmap unwrapSingleChoice (sendMessageLogic fromRole req)
 
       case resultOrErr of
@@ -706,7 +670,7 @@ handleSendMessageTool logger fromRole reqId args = do
           pure $ mcpToolError reqId ExternalFailure $ "send_message failed: " <> T.pack (displayException e)
 
         Right msgId -> do
-          logInfo logger $ "[MCP:" <> reqId <> "] Message sent: " <> msgId
+          logInfo logger $ "[MCP:" <> reqId <> "] Message sent: #" <> T.pack (show msgId)
           pure $ mcpToolSuccess reqId (toJSON msgId)
 
 
@@ -723,7 +687,7 @@ handleCheckInboxTool logger myRole reqId args = do
 
       resultOrErr <- try $ runM
         $ runLog Debug
-        $ runBDIO defaultBDConfig
+        $ runGitHubIO defaultGitHubConfig
         $ fmap unwrapSingleChoice (checkInboxLogic myRole ciArgs)
 
       case resultOrErr of
@@ -745,11 +709,11 @@ handleReadMessageTool logger reqId args = do
       pure $ mcpToolError reqId InvalidInput $ "Invalid read_message arguments: " <> T.pack err
 
     Success rmArgs -> do
-      logDebug logger $ "  message_id=" <> rmArgs.rmaMessageId
+      logDebug logger $ "  message_id=" <> T.pack (show rmArgs.rmaMessageId)
 
       resultOrErr <- try $ runM
         $ runLog Debug
-        $ runBDIO defaultBDConfig
+        $ runGitHubIO defaultGitHubConfig
         $ fmap unwrapSingleChoice (readMessageLogic rmArgs)
 
       case resultOrErr of
@@ -773,11 +737,11 @@ handleMarkReadTool logger reqId args = do
       pure $ mcpToolError reqId InvalidInput $ "Invalid mark_read arguments: " <> T.pack err
 
     Success mrArgs -> do
-      logDebug logger $ "  message_id=" <> mrArgs.mraMessageId
+      logDebug logger $ "  message_id=" <> T.pack (show mrArgs.mraMessageId)
 
       resultOrErr <- try $ runM
         $ runLog Debug
-        $ runBDIO defaultBDConfig
+        $ runGitHubIO defaultGitHubConfig
         $ fmap unwrapSingleChoice (markReadLogic mrArgs)
 
       case resultOrErr of
@@ -791,229 +755,168 @@ handleMarkReadTool logger reqId args = do
 
 
 -- ════════════════════════════════════════════════════════════════════════════
--- BD (BEADS) TOOLS
+-- GITHUB TOOLS
 -- ════════════════════════════════════════════════════════════════════════════
 
--- | Get BD config from environment.
--- Uses BEADS_DIR if set, otherwise uses auto-discovery.
-getBDConfig :: IO BDConfig
-getBDConfig = do
-  dir <- Paths.beadsDir
-  pure $ defaultBDConfig { bcBeadsDir = dir }
-
--- | Handle the bd_list tool.
-handleBDListTool :: Logger -> Text -> Value -> IO ControlResponse
-handleBDListTool logger reqId args = do
+-- | Handle the gh_issue_list tool.
+handleGHIssueListTool :: Logger -> Text -> Value -> IO ControlResponse
+handleGHIssueListTool logger reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
-      pure $ mcpToolError reqId InvalidInput $ "Invalid bd_list arguments: " <> T.pack err
+      pure $ mcpToolError reqId InvalidInput $ "Invalid gh_issue_list arguments: " <> T.pack err
 
-    Success blArgs -> do
-      logDebug logger $ "  status=" <> T.pack (show blArgs.blaStatus)
+    Success gilArgs -> do
+      logDebug logger $ "  status=" <> T.pack (show gilArgs.gilaStatus)
 
-      bdConfig <- getBDConfig
       resultOrErr <- try $ runM
         $ runLog Debug
-        $ runBDIO bdConfig
-        $ fmap unwrapSingleChoice (bdListLogic blArgs)
+        $ runEnvIO
+        $ runGitHubIO defaultGitHubConfig
+        $ fmap unwrapSingleChoice (ghIssueListLogic gilArgs)
 
       case resultOrErr of
         Left (e :: SomeException) -> do
           logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
-          pure $ mcpToolError reqId ExternalFailure $ "bd_list failed: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId ExternalFailure $ "gh_issue_list failed: " <> T.pack (displayException e)
 
         Right result -> do
-          logInfo logger $ "[MCP:" <> reqId <> "] Listed " <> T.pack (show result.blrCount) <> " beads"
+          logInfo logger $ "[MCP:" <> reqId <> "] Listed " <> T.pack (show result.gilrCount) <> " issues"
           pure $ mcpToolSuccess reqId (toJSON result)
 
 
--- | Handle the bd_show tool.
-handleBDShowTool :: Logger -> Text -> Value -> IO ControlResponse
-handleBDShowTool logger reqId args = do
+-- | Handle the gh_issue_show tool.
+handleGHIssueShowTool :: Logger -> Text -> Value -> IO ControlResponse
+handleGHIssueShowTool logger reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
-      pure $ mcpToolError reqId InvalidInput $ "Invalid bd_show arguments: " <> T.pack err
+      pure $ mcpToolError reqId InvalidInput $ "Invalid gh_issue_show arguments: " <> T.pack err
 
-    Success bsArgs -> do
-      logDebug logger $ "  bead_id=" <> bsArgs.bsaBeadId
+    Success gisArgs -> do
+      logDebug logger $ "  number=" <> T.pack (show gisArgs.gisaNumber)
 
-      bdConfig <- getBDConfig
       resultOrErr <- try $ runM
         $ runLog Debug
-        $ runBDIO bdConfig
-        $ fmap unwrapSingleChoice (bdShowLogic bsArgs)
+        $ runEnvIO
+        $ runGitHubIO defaultGitHubConfig
+        $ fmap unwrapSingleChoice (ghIssueShowLogic gisArgs)
 
       case resultOrErr of
         Left (e :: SomeException) -> do
           logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
-          pure $ mcpToolError reqId ExternalFailure $ "bd_show failed: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId ExternalFailure $ "gh_issue_show failed: " <> T.pack (displayException e)
 
         Right result -> do
-          if result.bsrFound
-            then logInfo logger $ "[MCP:" <> reqId <> "] Bead found"
-            else logInfo logger $ "[MCP:" <> reqId <> "] Bead not found"
+          if result.gisrFound
+            then logInfo logger $ "[MCP:" <> reqId <> "] Issue found"
+            else logInfo logger $ "[MCP:" <> reqId <> "] Issue not found"
           pure $ mcpToolSuccess reqId (toJSON result)
 
 
--- | Handle the bd_ready tool.
-handleBDReadyTool :: Logger -> Text -> Value -> IO ControlResponse
-handleBDReadyTool logger reqId args = do
+-- | Handle the gh_issue_create tool.
+handleGHIssueCreateTool :: Logger -> Text -> Value -> IO ControlResponse
+handleGHIssueCreateTool logger reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
-      pure $ mcpToolError reqId InvalidInput $ "Invalid bd_ready arguments: " <> T.pack err
+      pure $ mcpToolError reqId InvalidInput $ "Invalid gh_issue_create arguments: " <> T.pack err
 
-    Success brArgs -> do
-      logDebug logger $ "  assignee=" <> T.pack (show brArgs.braAssignee)
+    Success gicArgs -> do
+      logDebug logger $ "  title=" <> gicArgs.gcaTitle
 
-      bdConfig <- getBDConfig
       resultOrErr <- try $ runM
         $ runLog Debug
-        $ runBDIO bdConfig
-        $ fmap unwrapSingleChoice (bdReadyLogic brArgs)
+        $ runEnvIO
+        $ runGitHubIO defaultGitHubConfig
+        $ fmap unwrapSingleChoice (ghIssueCreateLogic gicArgs)
 
       case resultOrErr of
         Left (e :: SomeException) -> do
           logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
-          pure $ mcpToolError reqId ExternalFailure $ "bd_ready failed: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId ExternalFailure $ "gh_issue_create failed: " <> T.pack (displayException e)
 
         Right result -> do
-          logInfo logger $ "[MCP:" <> reqId <> "] Found " <> T.pack (show result.brrCount) <> " ready beads"
+          logInfo logger $ "[MCP:" <> reqId <> "] Created issue: #" <> T.pack (show result.gcrNumber)
           pure $ mcpToolSuccess reqId (toJSON result)
 
 
--- | Handle the bd_create tool.
-handleBDCreateTool :: Logger -> Text -> Value -> IO ControlResponse
-handleBDCreateTool logger reqId args = do
+-- | Handle the gh_issue_update tool.
+handleGHIssueUpdateTool :: Logger -> Text -> Value -> IO ControlResponse
+handleGHIssueUpdateTool logger reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
-      pure $ mcpToolError reqId InvalidInput $ "Invalid bd_create arguments: " <> T.pack err
+      pure $ mcpToolError reqId InvalidInput $ "Invalid gh_issue_update arguments: " <> T.pack err
 
-    Success bcArgs -> do
-      logDebug logger $ "  title=" <> bcArgs.bcaTitle
+    Success giuArgs -> do
+      logDebug logger $ "  number=" <> T.pack (show giuArgs.guaNumber)
 
-      bdConfig <- getBDConfig
       resultOrErr <- try $ runM
         $ runLog Debug
-        $ runBDIO bdConfig
-        $ fmap unwrapSingleChoice (bdCreateLogic bcArgs)
+        $ runEnvIO
+        $ runGitHubIO defaultGitHubConfig
+        $ fmap unwrapSingleChoice (ghIssueUpdateLogic giuArgs)
 
       case resultOrErr of
         Left (e :: SomeException) -> do
           logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
-          pure $ mcpToolError reqId ExternalFailure $ "bd_create failed: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId ExternalFailure $ "gh_issue_update failed: " <> T.pack (displayException e)
 
         Right result -> do
-          logInfo logger $ "[MCP:" <> reqId <> "] Created bead: " <> result.bcrBeadId
+          logInfo logger $ "[MCP:" <> reqId <> "] Updated issue: #" <> T.pack (show result.gurNumber)
           pure $ mcpToolSuccess reqId (toJSON result)
 
 
--- | Handle the bd_update tool.
-handleBDUpdateTool :: Logger -> Text -> Value -> IO ControlResponse
-handleBDUpdateTool logger reqId args = do
+-- | Handle the gh_issue_close tool.
+handleGHIssueCloseTool :: Logger -> Text -> Value -> IO ControlResponse
+handleGHIssueCloseTool logger reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
-      pure $ mcpToolError reqId InvalidInput $ "Invalid bd_update arguments: " <> T.pack err
+      pure $ mcpToolError reqId InvalidInput $ "Invalid gh_issue_close arguments: " <> T.pack err
 
-    Success buArgs -> do
-      logDebug logger $ "  bead_id=" <> buArgs.buaBeadId
+    Success gicArgs -> do
+      logDebug logger $ "  number=" <> T.pack (show gicArgs.gclaNumber)
 
-      bdConfig <- getBDConfig
       resultOrErr <- try $ runM
         $ runLog Debug
-        $ runBDIO bdConfig
-        $ fmap unwrapSingleChoice (bdUpdateLogic buArgs)
+        $ runEnvIO
+        $ runGitHubIO defaultGitHubConfig
+        $ fmap unwrapSingleChoice (ghIssueCloseLogic gicArgs)
 
       case resultOrErr of
         Left (e :: SomeException) -> do
           logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
-          pure $ mcpToolError reqId ExternalFailure $ "bd_update failed: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId ExternalFailure $ "gh_issue_close failed: " <> T.pack (displayException e)
 
         Right result -> do
-          logInfo logger $ "[MCP:" <> reqId <> "] Updated bead: " <> result.burBeadId
+          logInfo logger $ "[MCP:" <> reqId <> "] Closed issue: #" <> T.pack (show result.gclrNumber)
           pure $ mcpToolSuccess reqId (toJSON result)
 
 
--- | Handle the bd_close tool.
-handleBDCloseTool :: Logger -> Text -> Value -> IO ControlResponse
-handleBDCloseTool logger reqId args = do
+-- | Handle the gh_issue_reopen tool.
+handleGHIssueReopenTool :: Logger -> Text -> Value -> IO ControlResponse
+handleGHIssueReopenTool logger reqId args = do
   case fromJSON args of
     Error err -> do
       logError logger $ "  parse error: " <> T.pack err
-      pure $ mcpToolError reqId InvalidInput $ "Invalid bd_close arguments: " <> T.pack err
+      pure $ mcpToolError reqId InvalidInput $ "Invalid gh_issue_reopen arguments: " <> T.pack err
 
-    Success bclArgs -> do
-      logDebug logger $ "  bead_id=" <> bclArgs.bclBeadId
+    Success graArgs -> do
+      logDebug logger $ "  number=" <> T.pack (show graArgs.graNumber)
 
-      bdConfig <- getBDConfig
       resultOrErr <- try $ runM
         $ runLog Debug
-        $ runBDIO bdConfig
-        $ fmap unwrapSingleChoice (bdCloseLogic bclArgs)
+        $ runEnvIO
+        $ runGitHubIO defaultGitHubConfig
+        $ fmap unwrapSingleChoice (ghIssueReopenLogic graArgs)
 
       case resultOrErr of
         Left (e :: SomeException) -> do
           logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
-          pure $ mcpToolError reqId ExternalFailure $ "bd_close failed: " <> T.pack (displayException e)
+          pure $ mcpToolError reqId ExternalFailure $ "gh_issue_reopen failed: " <> T.pack (displayException e)
 
         Right result -> do
-          logInfo logger $ "[MCP:" <> reqId <> "] Closed bead: " <> result.bclrBeadId
-          pure $ mcpToolSuccess reqId (toJSON result)
-
-
--- | Handle the bd_add_dep tool.
-handleBDAddDepTool :: Logger -> Text -> Value -> IO ControlResponse
-handleBDAddDepTool logger reqId args = do
-  case fromJSON args of
-    Error err -> do
-      logError logger $ "  parse error: " <> T.pack err
-      pure $ mcpToolError reqId InvalidInput $ "Invalid bd_add_dep arguments: " <> T.pack err
-
-    Success badArgs -> do
-      logDebug logger $ "  from_id=" <> badArgs.badFromId <> " to_id=" <> badArgs.badToId
-
-      bdConfig <- getBDConfig
-      resultOrErr <- try $ runM
-        $ runLog Debug
-        $ runBDIO bdConfig
-        $ fmap unwrapSingleChoice (bdAddDepLogic badArgs)
-
-      case resultOrErr of
-        Left (e :: SomeException) -> do
-          logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
-          pure $ mcpToolError reqId ExternalFailure $ "bd_add_dep failed: " <> T.pack (displayException e)
-
-        Right result -> do
-          logInfo logger $ "[MCP:" <> reqId <> "] Added dependency: " <> result.badrFromId <> " -> " <> result.badrToId
-          pure $ mcpToolSuccess reqId (toJSON result)
-
-
--- | Handle the bd_add_label tool.
-handleBDAddLabelTool :: Logger -> Text -> Value -> IO ControlResponse
-handleBDAddLabelTool logger reqId args = do
-  case fromJSON args of
-    Error err -> do
-      logError logger $ "  parse error: " <> T.pack err
-      pure $ mcpToolError reqId InvalidInput $ "Invalid bd_add_label arguments: " <> T.pack err
-
-    Success balArgs -> do
-      logDebug logger $ "  bead_id=" <> balArgs.balBeadId <> " label=" <> balArgs.balLabel
-
-      bdConfig <- getBDConfig
-      resultOrErr <- try $ runM
-        $ runLog Debug
-        $ runBDIO bdConfig
-        $ fmap unwrapSingleChoice (bdAddLabelLogic balArgs)
-
-      case resultOrErr of
-        Left (e :: SomeException) -> do
-          logError logger $ "[MCP:" <> reqId <> "] Error: " <> T.pack (displayException e)
-          pure $ mcpToolError reqId ExternalFailure $ "bd_add_label failed: " <> T.pack (displayException e)
-
-        Right result -> do
-          logInfo logger $ "[MCP:" <> reqId <> "] Added label '" <> result.balrLabel <> "' to " <> result.balrBeadId
+          logInfo logger $ "[MCP:" <> reqId <> "] Reopened issue: #" <> T.pack (show result.grrNumber)
           pure $ mcpToolSuccess reqId (toJSON result)

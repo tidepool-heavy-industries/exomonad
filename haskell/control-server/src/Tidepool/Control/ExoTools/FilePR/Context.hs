@@ -20,7 +20,7 @@ import Text.Parsec.Pos (SourcePos)
 
 -- | Context for PR body template.
 data PRBodyContext = PRBodyContext
-  { bead_id :: Text
+  { issue_number :: Text
   , description :: Maybe Text
   , testing :: Text
   , compromises :: Maybe Text
@@ -36,7 +36,7 @@ data PRDepContext = PRDepContext
 
 instance ToGVal (Run SourcePos (Writer Text) Text) PRBodyContext where
   toGVal ctx = dict
-    [ "bead_id" ~> bead_id ctx
+    [ "issue_number" ~> issue_number ctx
     , "description" ~> description ctx
     , "testing" ~> testing ctx
     , "compromises" ~> compromises ctx
