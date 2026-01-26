@@ -20,12 +20,13 @@ import Data.List (find)
 import Data.Maybe (isJust)
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Time (UTCTime(..), Day(ModifiedJulianDay))
 import Text.Parsec.Pos (SourcePos)
 
 import Tidepool.Control.ExoTools (parseIssueNumber)
 import Tidepool.Control.Hook.Stop.Context (StopContext(..), StopPRContext(..), StopPreCommitContext(..))
 import Tidepool.Effects.Git (Git, WorktreeInfo(..), getWorktreeInfo, getDirtyFiles, getCommitsAhead)
-import Tidepool.Effects.GitHub (GitHub, PullRequest(..), listPullRequests, Repo(..), PRFilter(..), defaultPRFilter, Issue(..), getIssue, closeIssue, IssueState(..))
+import Tidepool.Effects.GitHub (GitHub, PullRequest(..), listPullRequests, Repo(..), PRFilter(..), defaultPRFilter, Issue(..), getIssue, closeIssue, IssueState(..), getPullRequestReviews, Review(..), ReviewComment(..), Author(..), getPullRequest)
 import Tidepool.Effects.Justfile (Justfile, runRecipe, JustResult(..))
 import Tidepool.Graph.Template (TypedTemplate, typedTemplateFile, runTypedTemplate)
 
@@ -42,6 +43,15 @@ data StopHookResult = StopHookResult
   , shrStage :: Maybe Text
     -- ^ Optional stage name for circuit breaker tracking
   } deriving (Show, Eq)
+
+-- | Convert a PR-level Review to a ReviewComment.
+-- PR-level reviews have no file path or line number.
+reviewToComment :: Review -> ReviewComment
+reviewToComment (Review author body state) =
+  let Author login _ = author
+      -- Intentionally normalize review timestamps to the Unix epoch.
+      createdAt = UTCTime (ModifiedJulianDay 0) 0
+  in ReviewComment login body Nothing Nothing state createdAt
 
 -- | Core Stop hook logic.
 --
@@ -97,13 +107,28 @@ stopHookLogic repoName runPreCommit = do
           hasPR = isJust mPR
           isIssueBranch = isJust mIssueNum
 
-          prCtx = case mPR of
-            Nothing -> Nothing
-            Just p -> Just StopPRContext
-              { number = p.prNumber
-              , url = p.prUrl
-              , pending_comments = 0  -- TODO: fetch from pr_review_status
-              }
+      prCtx <- case mPR of
+            Nothing -> pure Nothing
+            Just p -> do
+              -- Fetch inline review comments
+              inlineComments <- getPullRequestReviews repo p.prNumber
+              
+              -- Fetch PR-level reviews (general feedback)
+              maybePrDetails <- getPullRequest repo p.prNumber True
+              let prLevelReviews = case maybePrDetails of
+                    Nothing -> []
+                    Just pr -> map reviewToComment pr.prReviews
+              
+              let allComments = inlineComments ++ prLevelReviews
+                  -- NOTE: We currently treat all comments as unresolved because 
+                  -- GitHub's ReviewState doesn't expose resolution status.
+                  pendingCount = length allComments
+
+              pure $ Just StopPRContext
+                { number = p.prNumber
+                , url = p.prUrl
+                , pending_comments = pendingCount
+                }
 
       -- 5. Check issue status and run completion logic if appropriate
       (preCommitCtx, issueWasClosed, issueWasAlreadyClosed) <- case mIssueNum of
