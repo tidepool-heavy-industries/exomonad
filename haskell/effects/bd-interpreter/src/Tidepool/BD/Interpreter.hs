@@ -193,7 +193,7 @@ runBDIO config = interpret $ \case
 bdShow :: BDConfig -> Text -> IO (Maybe BeadInfo)
 bdShow config beadId = do
   let args = ["show", "--json", T.unpack beadId]
-            ++ maybe [] (\d -> ["--db", d]) config.bcBeadsDir
+            ++ maybe [] (\d -> ["--repo", d]) config.bcBeadsDir
 
   result <- runBdCommand config args
   case result of
@@ -246,7 +246,7 @@ depId (DependencyInfo { diId = i }) = i
 bdLabels :: BDConfig -> Text -> IO [Text]
 bdLabels config beadId = do
   let args = ["label", "list", "--json", T.unpack beadId]
-            ++ maybe [] (\d -> ["--db", d]) config.bcBeadsDir
+            ++ maybe [] (\d -> ["--repo", d]) config.bcBeadsDir
 
   result <- runBdCommand config args
   case result of
@@ -264,7 +264,7 @@ bdLabels config beadId = do
 bdChildren :: BDConfig -> Text -> IO [BeadInfo]
 bdChildren config parentId = do
   let args = ["list", "--parent", T.unpack parentId, "--json"]
-            ++ maybe [] (\d -> ["--db", d]) config.bcBeadsDir
+            ++ maybe [] (\d -> ["--repo", d]) config.bcBeadsDir
 
   result <- runBdCommand config args
   case result of
@@ -287,7 +287,7 @@ bdListByStatus config status = do
         StatusHooked     -> "hooked"
         StatusBlocked    -> "blocked"
   let args = ["list", "--json", "--status=" ++ statusStr]
-            ++ maybe [] (\d -> ["--db", d]) config.bcBeadsDir
+            ++ maybe [] (\d -> ["--repo", d]) config.bcBeadsDir
 
   result <- runBdCommand config args
   case result of
@@ -305,7 +305,7 @@ bdListByType :: BDConfig -> BeadType -> IO [BeadInfo]
 bdListByType config btype = do
   let typeStr = beadTypeToArg btype
   let args = ["list", "--json", "--type=" ++ typeStr]
-            ++ maybe [] (\d -> ["--db", d]) config.bcBeadsDir
+            ++ maybe [] (\d -> ["--repo", d]) config.bcBeadsDir
 
   result <- runBdCommand config args
   case result of
@@ -322,7 +322,7 @@ bdListByType config btype = do
 bdList :: BDConfig -> ListBeadsInput -> IO [BeadInfo]
 bdList config input = do
   let args = ["list", "--json"]
-            ++ maybe [] (\d -> ["--db", d]) config.bcBeadsDir
+            ++ maybe [] (\d -> ["--repo", d]) config.bcBeadsDir
             ++ maybe [] (\s -> ["--status", beadStatusToArg s]) input.lbiStatus
             ++ maybe [] (\t -> ["--type", beadTypeToArg t]) input.lbiType
             ++ concatMap (\l -> ["--label", T.unpack l]) input.lbiLabels
@@ -348,7 +348,7 @@ bdList config input = do
 bdCreate :: BDConfig -> CreateBeadInput -> IO Text
 bdCreate config input = do
   let baseArgs = ["create", T.unpack input.cbiTitle, "--silent"]
-                ++ maybe [] (\d -> ["--db", d]) config.bcBeadsDir
+                ++ maybe [] (\d -> ["--repo", d]) config.bcBeadsDir
                 ++ ["--type", beadTypeToArg input.cbiType]
                 ++ ["--priority", show input.cbiPriority]
                 ++ maybe [] (\desc -> ["--description", T.unpack desc]) input.cbiDescription
@@ -369,7 +369,7 @@ bdCreate config input = do
 bdUpdate :: BDConfig -> Text -> UpdateBeadInput -> IO ()
 bdUpdate config beadId input = do
   let args = ["update", T.unpack beadId]
-            ++ maybe [] (\d -> ["--db", d]) config.bcBeadsDir
+            ++ maybe [] (\d -> ["--repo", d]) config.bcBeadsDir
             ++ maybe [] (\t -> ["--title", T.unpack t]) input.ubiTitle
             ++ maybe [] (\d -> ["--description", T.unpack d]) input.ubiDescription
             ++ maybe [] (\s -> ["--status", beadStatusToArg s]) input.ubiStatus
@@ -392,7 +392,7 @@ bdUpdate config beadId input = do
 bdClose :: BDConfig -> Text -> Maybe Text -> IO ()
 bdClose config beadId maybeReason = do
   let args = ["close", T.unpack beadId]
-            ++ maybe [] (\d -> ["--db", d]) config.bcBeadsDir
+            ++ maybe [] (\d -> ["--repo", d]) config.bcBeadsDir
             ++ maybe [] (\r -> ["--reason", T.unpack r]) maybeReason
 
   result <- runBdCommand config args
@@ -407,7 +407,7 @@ bdClose config beadId maybeReason = do
 bdReopen :: BDConfig -> Text -> IO ()
 bdReopen config beadId = do
   let args = ["reopen", T.unpack beadId]
-            ++ maybe [] (\d -> ["--db", d]) config.bcBeadsDir
+            ++ maybe [] (\d -> ["--repo", d]) config.bcBeadsDir
 
   result <- runBdCommand config args
   case result of
@@ -421,7 +421,7 @@ bdReopen config beadId = do
 bdAddLabel :: BDConfig -> Text -> Text -> IO ()
 bdAddLabel config beadId label = do
   let args = ["label", "add", T.unpack beadId, T.unpack label]
-            ++ maybe [] (\d -> ["--db", d]) config.bcBeadsDir
+            ++ maybe [] (\d -> ["--repo", d]) config.bcBeadsDir
 
   result <- runBdCommand config args
   case result of
@@ -435,7 +435,7 @@ bdAddLabel config beadId label = do
 bdRemoveLabel :: BDConfig -> Text -> Text -> IO ()
 bdRemoveLabel config beadId label = do
   let args = ["label", "remove", T.unpack beadId, T.unpack label]
-            ++ maybe [] (\d -> ["--db", d]) config.bcBeadsDir
+            ++ maybe [] (\d -> ["--repo", d]) config.bcBeadsDir
 
   result <- runBdCommand config args
   case result of
@@ -449,7 +449,7 @@ bdRemoveLabel config beadId label = do
 bdAddDep :: BDConfig -> Text -> Text -> DependencyType -> IO ()
 bdAddDep config fromId toId depType = do
   let args = ["dep", "add", T.unpack fromId, depTypeToArg depType <> ":" <> T.unpack toId]
-            ++ maybe [] (\d -> ["--db", d]) config.bcBeadsDir
+            ++ maybe [] (\d -> ["--repo", d]) config.bcBeadsDir
 
   result <- runBdCommand config args
   case result of
@@ -463,7 +463,7 @@ bdAddDep config fromId toId depType = do
 bdRemoveDep :: BDConfig -> Text -> Text -> IO ()
 bdRemoveDep config fromId toId = do
   let args = ["dep", "remove", T.unpack fromId, T.unpack toId]
-            ++ maybe [] (\d -> ["--db", d]) config.bcBeadsDir
+            ++ maybe [] (\d -> ["--repo", d]) config.bcBeadsDir
 
   result <- runBdCommand config args
   case result of
@@ -477,7 +477,7 @@ bdRemoveDep config fromId toId = do
 bdSync :: BDConfig -> IO ()
 bdSync config = do
   let args = ["sync", "--from-main"]
-            ++ maybe [] (\d -> ["--db", d]) config.bcBeadsDir
+            ++ maybe [] (\d -> ["--repo", d]) config.bcBeadsDir
 
   result <- runBdCommand config args
   case result of
