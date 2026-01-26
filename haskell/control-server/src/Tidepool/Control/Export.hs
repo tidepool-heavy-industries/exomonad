@@ -27,6 +27,10 @@ import Tidepool.Control.PMStatus (PmStatusGraph)
 import Tidepool.Control.PMPropose (PMProposeGraph)
 import Tidepool.Control.MailboxTools
   ( SendMessageGraph, CheckInboxGraph, ReadMessageGraph, MarkReadGraph )
+import Tidepool.Control.BDTools
+  ( BDListGraph, BDShowGraph, BDReadyGraph, BDCreateGraph
+  , BDUpdateGraph, BDCloseGraph, BDAddDepGraph, BDAddLabelGraph
+  )
 
 import Tidepool.Graph.MCPReify (ReifyMCPTools(..), ReifyGraphEntries(..), MCPToolInfo(..))
 
@@ -65,6 +69,16 @@ exportMCPTools logger = do
   let rmTools = reifyMCPTools (Proxy @ReadMessageGraph)
   let mrTools = reifyMCPTools (Proxy @MarkReadGraph)
 
+  -- BD (Beads) tools
+  let bdListTools = reifyMCPTools (Proxy @BDListGraph)
+  let bdShowTools = reifyMCPTools (Proxy @BDShowGraph)
+  let bdReadyTools = reifyMCPTools (Proxy @BDReadyGraph)
+  let bdCreateTools = reifyMCPTools (Proxy @BDCreateGraph)
+  let bdUpdateTools = reifyMCPTools (Proxy @BDUpdateGraph)
+  let bdCloseTools = reifyMCPTools (Proxy @BDCloseGraph)
+  let bdAddDepTools = reifyMCPTools (Proxy @BDAddDepGraph)
+  let bdAddLabelTools = reifyMCPTools (Proxy @BDAddLabelGraph)
+
   -- Log discovered tools per graph for debugging
   logDebug logger $ "[MCP Discovery] ConfirmActionGraph: " <> T.pack (show (length caTools)) <> " tools"
   logDebug logger $ "[MCP Discovery] SelectOptionGraph: " <> T.pack (show (length soTools)) <> " tools"
@@ -83,8 +97,21 @@ exportMCPTools logger = do
   logDebug logger $ "[MCP Discovery] CheckInboxGraph: " <> T.pack (show (length ciTools)) <> " tools"
   logDebug logger $ "[MCP Discovery] ReadMessageGraph: " <> T.pack (show (length rmTools)) <> " tools"
   logDebug logger $ "[MCP Discovery] MarkReadGraph: " <> T.pack (show (length mrTools)) <> " tools"
+  logDebug logger $ "[MCP Discovery] BDListGraph: " <> T.pack (show (length bdListTools)) <> " tools"
+  logDebug logger $ "[MCP Discovery] BDShowGraph: " <> T.pack (show (length bdShowTools)) <> " tools"
+  logDebug logger $ "[MCP Discovery] BDReadyGraph: " <> T.pack (show (length bdReadyTools)) <> " tools"
+  logDebug logger $ "[MCP Discovery] BDCreateGraph: " <> T.pack (show (length bdCreateTools)) <> " tools"
+  logDebug logger $ "[MCP Discovery] BDUpdateGraph: " <> T.pack (show (length bdUpdateTools)) <> " tools"
+  logDebug logger $ "[MCP Discovery] BDCloseGraph: " <> T.pack (show (length bdCloseTools)) <> " tools"
+  logDebug logger $ "[MCP Discovery] BDAddDepGraph: " <> T.pack (show (length bdAddDepTools)) <> " tools"
+  logDebug logger $ "[MCP Discovery] BDAddLabelGraph: " <> T.pack (show (length bdAddLabelTools)) <> " tools"
 
-  let allTools = concat [caTools, soTools, rgTools, rfTools, esTools, saTools, fpTools, paeTools, pmPriTools, pmRevTools, pmStatTools, pmProTools, prTools, smTools, ciTools, rmTools, mrTools]
+  let allTools = concat
+        [ caTools, soTools, rgTools, rfTools
+        , esTools, saTools, fpTools, paeTools, pmPriTools, pmRevTools, pmStatTools, pmProTools, prTools
+        , smTools, ciTools, rmTools, mrTools
+        , bdListTools, bdShowTools, bdReadyTools, bdCreateTools, bdUpdateTools, bdCloseTools, bdAddDepTools, bdAddLabelTools
+        ]
   logInfo logger $ "[MCP Discovery] Total: " <> T.pack (show (length allTools)) <> " tools discovered"
 
   -- Log tool names with entry points for verification
