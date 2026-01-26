@@ -8,11 +8,15 @@ FROM rust:bookworm AS rust-builder
 
 WORKDIR /build
 
-# Copy Rust workspace
-COPY rust/Cargo.toml rust/Cargo.lock ./
+# Copy Rust workspace (only needed crates)
+COPY rust/Cargo.lock ./
 COPY rust/tui-popup ./tui-popup
 COPY rust/tui-sidebar ./tui-sidebar
 COPY rust/mantle-shared ./mantle-shared
+COPY rust/hangar-config ./hangar-config
+
+# Create minimal workspace Cargo.toml (only crates needed for tui-popup)
+RUN echo '[workspace]\nresolver = "2"\nmembers = ["tui-popup", "tui-sidebar", "mantle-shared", "hangar-config"]' > Cargo.toml
 
 # Build tui-popup
 RUN cargo build --release -p tui-popup && \
@@ -43,6 +47,9 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 RUN cargo-binstall --no-confirm zellij && \
     cp /root/.cargo/bin/zellij /usr/local/bin/zellij && \
     chmod 755 /usr/local/bin/zellij
+
+# Copy tui-popup binary from rust-builder
+COPY --from=rust-builder /usr/local/bin/tui-popup /usr/local/bin/tui-popup
 
 # Create non-root user
 RUN useradd -m -u 1000 -s /bin/bash user

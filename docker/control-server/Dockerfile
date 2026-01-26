@@ -9,14 +9,18 @@ FROM rust:bookworm AS rust-builder
 # Build bd CLI from source to match container's glibc
 RUN cargo install beads-rs --locked
 
-# Build tui-spawner
+# Build tui-spawner with minimal workspace
 WORKDIR /build
-COPY rust/Cargo.toml rust/Cargo.lock ./
+COPY rust/Cargo.lock ./
 COPY rust/tui-spawner ./tui-spawner
 COPY rust/tui-sidebar ./tui-sidebar
 COPY rust/tui-popup ./tui-popup
 COPY rust/mantle-shared ./mantle-shared
 COPY rust/hangar-config ./hangar-config
+
+# Create minimal workspace Cargo.toml (only crates needed for tui-spawner)
+RUN echo '[workspace]\nresolver = "2"\nmembers = ["tui-spawner", "tui-sidebar", "tui-popup", "mantle-shared", "hangar-config"]' > Cargo.toml
+
 RUN cargo build --release -p tui-spawner
 
 # =============================================================================
