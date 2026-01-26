@@ -1,6 +1,5 @@
 packages:
     -- Vendored packages (patched for our use)
-    haskell/vendor/mcp-server
 
     -- Core DSL
     haskell/dsl/core
@@ -45,7 +44,6 @@ packages:
     haskell/control-server
 
     -- Tools
-    haskell/tools/sleeptime
     haskell/tools/training-generator
 
     -- Test/example packages

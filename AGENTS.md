@@ -65,7 +65,7 @@ tidepool/
 │   ├── agents/                # Production agents (semantic-scout)
 │   ├── protocol/              # Wire protocols (Haskell ↔ TypeScript)
 │   ├── tools/                 # Dev tools (sleeptime, training-generator)
-│   ├── vendor/                # Vendored forks (freer-simple, ginger, mcp-server)
+│   ├── vendor/                # Vendored forks (freer-simple, ginger)
 │   ├── control-server/        # Claude Code++ TCP server (OSCAR winner)
 │   └── native-server/         # Native HTTP/WebSocket server
 ├── deploy/                    # Cloudflare Worker harness

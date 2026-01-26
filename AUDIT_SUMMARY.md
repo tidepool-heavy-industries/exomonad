@@ -11,8 +11,9 @@ Audited all documentation files and identified stale references to deleted packa
 ## Dead Code Identified
 
 ### 1. Deleted Packages (Confirmed)
-- **haskell/effects/mcp-server/** - Package deleted, no longer in cabal.project
-  - References removed from: CLAUDE.md, haskell/CLAUDE.md, haskell/effects/CLAUDE.md
+| `haskell/vendor/mcp-server/` | DELETED (Unused) | Package removed from repository and cabal.project |
+| `haskell/effects/mcp-server/` | Package deleted, no longer in cabal.project |
+| `haskell/effects/mcp-server/CLAUDE.md` | Reference removed |
 
 ### 2. Deleted Commands (Confirmed)
 - **`just native`** - Command not in justfile

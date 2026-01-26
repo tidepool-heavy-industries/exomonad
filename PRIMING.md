@@ -388,7 +388,6 @@ These exist in the repo but are not part of the current Docker deployment:
 - `haskell/effects/habitica-interpreter/` - Habitica integration
 
 **Tools (cron/offline):**
-- `haskell/tools/sleeptime/` - Log analysis (cron job infrastructure)
 - `haskell/tools/training-generator/` - FunctionGemma training data generation
 - `haskell/tools/ghci-oracle/` - Persistent GHCi session server
 
@@ -396,7 +395,6 @@ These exist in the repo but are not part of the current Docker deployment:
 - `tools/micro-gastown/` - Code intelligence research sandbox
 
 **Documentation/Planning (not runtime):**
-- `plans/` - Architectural plans (dockerized-claude-code)
 - `work/` - Active design docs (docgen-graph epic, LSP tools spec)
 - `deps/` - Dependency documentation
 
