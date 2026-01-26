@@ -437,6 +437,7 @@ test-suite session-start-test
         base >= 4.17 && < 5,
         tidepool-control-server,
         tidepool-core,
+        tidepool-git-interpreter,
         text >= 2.0 && < 3,
         freer-simple,
         tasty,

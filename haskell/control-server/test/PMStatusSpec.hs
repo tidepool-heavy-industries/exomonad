@@ -38,7 +38,6 @@ runMockAll initial eff = run $
     ListPullRequests _ _ -> pure initial.msPrs
     ListIssues _ _ -> pure initial.msIssues
     GetIssue _ _ _ -> pure Nothing
-    GetRepo _ -> pure $ Repo "tidepool/tidepool"
     _ -> error "Not implemented in mock"
   ) eff
 
@@ -59,7 +58,7 @@ test_pmStatus = do
       issue3 = (defaultIssue 3) { issueLabels = ["ready"] }
       issue4 = (defaultIssue 4) { issueState = IssueClosed }
       
-      author = Author "alice" ""
+      author = Author "alice" Nothing
       pr1 = PullRequest 1 "PR1" "" author [] PRMerged "url1" "head" "base" day2 (Just day1) [] []
       
       mockState = MockState now [issue1, issue2, issue3, issue4] [pr1]
@@ -88,6 +87,6 @@ defaultIssue num = Issue
   , issueBody = ""
   , issueState = IssueOpen
   , issueLabels = []
-  , issueAuthor = Author "ghost" ""
+  , issueAuthor = Author "ghost" Nothing
   , issueUrl = ""
   }

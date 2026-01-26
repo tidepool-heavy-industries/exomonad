@@ -49,13 +49,13 @@ runMockGitHub :: Eff (GitHub ': effs) a -> Eff effs a
 runMockGitHub = interpret $ \case
   GetIssue _ _ _ -> pure Nothing
   ListIssues _ _ -> pure []
-  CreateIssue _ _ _ -> pure 1
-  UpdateIssue _ _ _ -> pure 1
-  CloseIssue _ _ -> pure 1
-  ReopenIssue _ _ -> pure 1
+  CreateIssue _ -> pure 1
+  UpdateIssue _ _ _ -> pure ()
+  CloseIssue _ _ -> pure ()
+  ReopenIssue _ _ -> pure ()
   AddIssueLabel _ _ _ -> pure ()
   RemoveIssueLabel _ _ _ -> pure ()
-  GetRepo _ -> pure $ Repo "tidepool/tidepool"
+  -- GetRepo removed
 
 runSessionStart :: Role -> T.Text -> IO (Maybe T.Text)
 runSessionStart role cwd = runM

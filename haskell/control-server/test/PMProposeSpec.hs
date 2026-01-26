@@ -8,7 +8,7 @@
 
 module Main where
 
-import Control.Monad.Freer (Eff, run, reinterpret)
+import Control.Monad.Freer (Eff, run, reinterpret, interpret)
 import Control.Monad.Freer.State (modify, runState)
 import qualified Data.Text as T
 import Test.Tasty
@@ -39,14 +39,14 @@ initialState = MockState []
 
 -- | Mock GitHub and Env interpreter
 runMockStack :: Eff '[GitHub, Env] a -> (a, MockState)
-runMockStack eff = run $ runState initialState $ reinterpret (\case
+runMockStack eff = run $ interpret (\case
   GetEnv _ -> pure Nothing
-  ) $ reinterpret (\case
-  CreateIssue input -> do
-    modify $ \s -> s { createdIssues = input : createdIssues s }
-    pure 123
-  GetRepo _ -> pure $ Repo "tidepool/tidepool"
-  _ -> error "Not implemented in mock"
+  ) $ runState initialState $ reinterpret (\case
+    GetIssue _ _ _ -> pure Nothing
+    CreateIssue input -> do
+      modify (\s -> s { createdIssues = input : createdIssues s })
+      pure 1
+    _ -> error "Not implemented in mock"
   ) eff
 
 test_createsIssue :: Assertion
