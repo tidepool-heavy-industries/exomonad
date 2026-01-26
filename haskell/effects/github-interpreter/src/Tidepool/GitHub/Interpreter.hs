@@ -488,8 +488,9 @@ instance FromJSON GqlResult where
         createdAt <- c .: "createdAt"
         
         let state = case (stateStr :: Text) of
-              "PENDING" -> ReviewPending
-              _         -> ReviewCommented
+              "PENDING"   -> ReviewPending
+              "SUBMITTED" -> ReviewCommented
+              _           -> ReviewCommented
               
         pure ReviewComment
           { rcAuthor = login

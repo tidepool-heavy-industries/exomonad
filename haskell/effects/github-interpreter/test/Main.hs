@@ -19,15 +19,16 @@ main = hspec $ do
   describe "Issue JSON parsing" $ do
     it "parses a minimal issue" $ do
       let json = LBS.pack $ unlines
-            [ "{"
-            , "  \"number\": 123,"
-            , "  \"title\": \"Test issue\","
-            , "  \"body\": \"Issue body\","
-            , "  \"author\": { \"login\": \"testuser\", \"name\": \"Test User\" },"
-            , "  \"labels\": [],"
-            , "  \"state\": \"OPEN\","
-            , "  \"url\": \"https://github.com/owner/repo/issues/123\""
-            , "}"
+            [
+              "{",
+              "  \"number\": 123,",
+              "  \"title\": \"Test issue\",",
+              "  \"body\": \"Issue body\",",
+              "  \"author\": { \"login\": \"testuser\", \"name\": \"Test User\" },",
+              "  \"labels\": [],",
+              "  \"state\": \"OPEN\",",
+              "  \"url\": \"https://github.com/owner/repo/issues/123\"",
+              "}"
             ]
       case eitherDecode json :: Either String Issue of
         Left err -> expectationFailure $ "Failed to parse: " <> err
@@ -248,7 +249,7 @@ main = hspec $ do
             , "                    \"author\": { \"login\": \"reviewer1\" },"
             , "                    \"body\": \"Resolved comment\","
             , "                    \"path\": \"File.hs\","
-            , "                    \"state\": \"COMMENTED\","
+            , "                    \"state\": \"SUBMITTED\","
             , "                    \"createdAt\": \"2024-01-15T10:30:00Z\""
             , "                  }"
             , "                ]"
@@ -262,7 +263,7 @@ main = hspec $ do
             , "                    \"author\": null,"
             , "                    \"body\": \"Unresolved comment from ghost\","
             , "                    \"path\": \"Other.hs\","
-            , "                    \"state\": \"COMMENTED\","
+            , "                    \"state\": \"SUBMITTED\","
             , "                    \"createdAt\": \"2024-01-15T11:00:00Z\""
             , "                  }"
             , "                ]"
