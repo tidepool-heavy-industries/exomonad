@@ -94,7 +94,8 @@ main = hspec $ do
             , "  \"state\": \"OPEN\","
             , "  \"url\": \"https://github.com/owner/repo/pull/100\","
             , "  \"headRefName\": \"feature-branch\","
-            , "  \"baseRefName\": \"main\""
+            , "  \"baseRefName\": \"main\","
+            , "  \"createdAt\": \"2024-01-15T10:00:00Z\""
             , "}"
             ]
       case eitherDecode json :: Either String PullRequest of
@@ -117,6 +118,7 @@ main = hspec $ do
             , "  \"url\": \"https://github.com/owner/repo/pull/200\","
             , "  \"headRefName\": \"fix\","
             , "  \"baseRefName\": \"main\","
+            , "  \"createdAt\": \"2024-01-15T10:00:00Z\","
             , "  \"reviews\": ["
             , "    {"
             , "      \"author\": { \"login\": \"reviewer\" },"
