@@ -18,12 +18,11 @@ cd "$SCRIPT_DIR"
 
 echo "Rebuilding and refreshing IDE environment..."
 
-# 1. Force recreation of containers with clean build
-#    --no-cache: Bypasses all BuildKit caching including cache mounts
+# 1. Force recreation of containers
+#    --build: Rebuilds images if Dockerfile changed
 #    --force-recreate: Kills old containers, starts fresh ones
-echo "Rebuilding containers (no cache)..."
-docker compose build --no-cache
-docker compose up -d --force-recreate --remove-orphans
+echo "Rebuilding containers..."
+docker compose up -d --build --force-recreate --remove-orphans
 
 # 2. Wait for services to be healthy
 echo "Waiting for services to initialize..."
