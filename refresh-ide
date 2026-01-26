@@ -29,7 +29,9 @@ echo "Waiting for services to initialize..."
 sleep 3
 
 # 3. Reconnect using the standard idempotent command
+#    -u user: Run as UID 1000 so Zellij sockets are user-owned (not root)
+#             This enables cross-container control via tui-spawner
 echo "Connecting to fresh Zellij session..."
-exec docker exec -it tidepool-zellij \
+exec docker exec -it -u user tidepool-zellij \
     zellij --layout /etc/zellij/layouts/main.kdl \
     attach --create tidepool
