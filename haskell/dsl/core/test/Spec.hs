@@ -19,6 +19,7 @@ import qualified ConvertTransitionHintSpec
 import qualified ToolTransitionIntegrationSpec
 import qualified DecisionToolsSpec
 import qualified DecisionSpec
+import qualified TUIWireFormatSpec
 
 main :: IO ()
 main = hspec $ do
@@ -69,3 +70,6 @@ main = hspec $ do
 
   describe "Decision" $ do
     DecisionSpec.spec
+
+  describe "TUI Wire Format" $ do
+    TUIWireFormatSpec.spec

@@ -320,4 +320,75 @@ mod tests {
         let rule_eq: VisibilityRule = serde_json::from_str(json_eq).unwrap();
         assert_eq!(rule_eq, VisibilityRule::Equals(HashMap::from([("choice".to_string(), "Value".to_string())])));
     }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // GOLDEN FILE TESTS - Wire format contract with Haskell
+    // ═══════════════════════════════════════════════════════════════════
+    // These tests parse canonical JSON that Haskell must produce.
+    // If these fail, the wire format contract is broken.
+
+    #[test]
+    fn golden_text_component() {
+        let json = include_str!("../../../tests/golden/tui/text_component.json");
+        let parsed: Component = serde_json::from_str(json).expect("Failed to parse golden text_component.json");
+        match parsed {
+            Component::Text { id, content } => {
+                assert_eq!(id, "msg");
+                assert_eq!(content, "Hello World");
+            }
+            _ => panic!("Expected Text component"),
+        }
+    }
+
+    #[test]
+    fn golden_slider_component() {
+        let json = include_str!("../../../tests/golden/tui/slider_component.json");
+        let parsed: Component = serde_json::from_str(json).expect("Failed to parse golden slider_component.json");
+        match parsed {
+            Component::Slider { id, label, min, max, default } => {
+                assert_eq!(id, "volume");
+                assert_eq!(label, "Volume");
+                assert_eq!(min, 0.0);
+                assert_eq!(max, 100.0);
+                assert_eq!(default, 50.0);
+            }
+            _ => panic!("Expected Slider component"),
+        }
+    }
+
+    #[test]
+    fn golden_checkbox_component() {
+        let json = include_str!("../../../tests/golden/tui/checkbox_component.json");
+        let parsed: Component = serde_json::from_str(json).expect("Failed to parse golden checkbox_component.json");
+        match parsed {
+            Component::Checkbox { id, label, default } => {
+                assert_eq!(id, "enabled");
+                assert_eq!(label, "Enable feature");
+                assert_eq!(default, false);
+            }
+            _ => panic!("Expected Checkbox component"),
+        }
+    }
+
+    #[test]
+    fn golden_popup_definition() {
+        let json = include_str!("../../../tests/golden/tui/popup_definition.json");
+        let parsed: PopupDefinition = serde_json::from_str(json).expect("Failed to parse golden popup_definition.json");
+        assert_eq!(parsed.title, "Confirm Action");
+        assert_eq!(parsed.components.len(), 2);
+        match &parsed.components[0] {
+            Component::Text { id, content } => {
+                assert_eq!(id, "action");
+                assert_eq!(content, "Action: Delete files");
+            }
+            _ => panic!("Expected Text component at index 0"),
+        }
+    }
+
+    #[test]
+    fn golden_popup_result() {
+        let json = include_str!("../../../tests/golden/tui/popup_result.json");
+        let parsed: PopupResult = serde_json::from_str(json).expect("Failed to parse golden popup_result.json");
+        assert_eq!(parsed.button, "submit");
+    }
 }

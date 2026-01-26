@@ -49,4 +49,4 @@ fi
 echo "Connecting to Zellij session..."
 exec docker exec -it tidepool-zellij \
     gosu user zellij --layout /etc/zellij/layouts/main.kdl \
-    attach --create tidepool
+    attach --create main

@@ -47,6 +47,9 @@ chown -R 1000:1000 /home/user/.config/gh 2>/dev/null || true
 # --- Environment for user ---
 export HOME=/home/user
 export USER=user
+# UTF-8 locale required for Haskell to decode gh CLI output (contains Unicode like ✓)
+export LANG=C.UTF-8
+export LC_ALL=C.UTF-8
 
 # --- Start server as non-root ---
 echo "Starting control-server as user..."

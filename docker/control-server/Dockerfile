@@ -8,6 +8,8 @@ FROM rust:bookworm AS rust-builder
 
 # Build tui-spawner with minimal workspace
 WORKDIR /build
+
+# These layers are cached (expensive setup)
 COPY rust/Cargo.lock ./
 COPY rust/tui-spawner ./tui-spawner
 COPY rust/tui-sidebar ./tui-sidebar
@@ -18,6 +20,9 @@ COPY rust/hangar-config ./hangar-config
 # Create minimal workspace Cargo.toml (only crates needed for tui-spawner)
 RUN echo '[workspace]\nresolver = "2"\nmembers = ["tui-spawner", "tui-sidebar", "tui-popup", "mantle-shared", "hangar-config"]' > Cargo.toml
 
+# Cache bust AFTER setup, BEFORE build - invalidates only the build step
+# Usage: docker compose build --build-arg RUST_CACHEBUST=$(date +%s) control-server
+ARG RUST_CACHEBUST=0
 RUN cargo build --release -p tui-spawner
 
 # =============================================================================
@@ -88,6 +93,8 @@ RUN cargo-binstall --no-confirm zellij && \
     chmod 755 /usr/local/bin/zellij
 
 # Copy tui-spawner binary (for FIFO-based popup spawning)
+# Re-declare CACHEBUST to invalidate COPY --from when rust-builder rebuilds
+ARG RUST_CACHEBUST=0
 COPY --from=rust-builder /build/target/release/tui-spawner /usr/local/bin/tui-spawner
 
 # Copy control-server binary

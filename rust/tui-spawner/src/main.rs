@@ -138,13 +138,14 @@ fn run_popup(
 
     // 3. Spawn Zellij floating pane
     // Must use --session flag to target the correct Zellij session
-    // CRITICAL: Run as UID 1000 to avoid root-owned files in /sockets
-    // (tui-spawner runs as UID 1000, so files it creates must be writable)
+    // Note: -u flag only affects the zellij client, not the spawned command.
+    // The spawned command runs as the Zellij server's owner (typically UID 1000).
+    // Use absolute path since Zellij server's PATH may differ from shell.
     let zellij_args = [
-        "exec", "-u", "1000", &args.zellij_container,
+        "exec", &args.zellij_container,
         "zellij", "--session", &args.zellij_session,
         "action", "new-pane", "--floating", "--close-on-exit",
-        "--", "tui-popup",
+        "--", "/usr/local/bin/tui-popup",
         "--input", input_path.to_str().unwrap(),
         "--output", fifo_path.to_str().unwrap(),
     ];
@@ -154,15 +155,22 @@ fn run_popup(
         return Ok(r#"{"button":"submit","values":{}}"#.to_string());
     }
 
+    // Log the full command being executed
+    tracing::info!("Executing: docker {}", zellij_args.join(" "));
+
     let status = Command::new("docker")
         .args(&zellij_args)
         .status()
         .context("Failed to execute docker exec")?;
 
+    // Log the result
+    tracing::info!("docker exec returned: {:?}", status);
+
     if !status.success() {
+        tracing::error!("docker exec failed with status: {}", status);
         anyhow::bail!("docker exec failed with status: {}", status);
     }
-    tracing::info!("Spawned Zellij pane");
+    tracing::info!("Spawned Zellij pane successfully");
 
     // 4. Open FIFO with timeout (handles crash-before-open)
     let timeout = Duration::from_secs(args.timeout);

@@ -132,6 +132,8 @@ library
         tidepool-observability-interpreter,
         -- HTTP for FunctionGemma
         http-conduit,
+        -- Logging for TUI interpreter
+        monad-logger,
         http-client,
         regex-tdfa,
         vector,

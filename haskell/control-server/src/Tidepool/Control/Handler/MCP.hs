@@ -90,7 +90,7 @@ import Network.HTTP.Client (newManager, defaultManagerSettings)
 --
 -- This shells out to tui-spawner, which handles cross-container coordination
 -- via named pipes (FIFOs). No WebSocket complexity needed.
-runTUIInterpreter :: LastMember IO effs => Eff (TUI ': effs) a -> Eff effs a
+runTUIInterpreter :: LastMember IO effs => Logger -> Eff (TUI ': effs) a -> Eff effs a
 runTUIInterpreter = runTUIFifo
 
 -- | Wrap MCP tool call with tracing if enabled.
@@ -554,7 +554,7 @@ handleConfirmActionTool logger reqId args = do
 
       resultOrErr <- try $ runM
         $ runLog Debug
-        $ runTUIInterpreter
+        $ runTUIInterpreter logger
         $ runReturn (confirmActionLogic caArgs)
 
       case resultOrErr of
@@ -605,7 +605,7 @@ handleSelectOptionTool logger reqId args = do
 
       resultOrErr <- try $ runM
         $ runLog Debug
-        $ runTUIInterpreter
+        $ runTUIInterpreter logger
         $ runReturn (selectOptionLogic soArgs)
 
       case resultOrErr of
@@ -631,7 +631,7 @@ handleRequestGuidanceTool logger reqId args = do
 
       resultOrErr <- try $ runM
         $ runLog Debug
-        $ runTUIInterpreter
+        $ runTUIInterpreter logger
         $ runReturn (requestGuidanceLogic rgArgs)
 
       case resultOrErr of
