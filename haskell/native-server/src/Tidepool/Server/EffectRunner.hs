@@ -268,8 +268,8 @@ mkInterpreterEnv config = do
 -- @
 -- Eff '[UI, Habitica, LLMComplete, Log, Reader LogContext, Observability, IO] a
 --   → runObservabilityWithContext (interpret Observability)
---   → runReader emptyLogContext (provide LogContext)
---   → runLogFastLogger (interpret Log)
+--   → runReader emptyLogContext (interpret Reader LogContext)
+--   → runLogFastLogger (interpret Log, requires Reader LogContext in tail)
 --   → runLLMComplete (interpret LLMComplete)
 --   → runHabitica (interpret Habitica)
 --   → runUI (interpret UI)
@@ -283,6 +283,9 @@ mkInterpreterEnv config = do
 -- 4. Log - session-scoped logging (fast-logger backend)
 -- 5. Reader LogContext - provides correlation context for Log
 -- 6. Observability (last to peel) - records events and spans
+--
+-- The Log interpreter has constraint @Member (Reader LogContext) es@ where @es@
+-- is the tail after Log is removed. So Log must come BEFORE Reader LogContext.
 --
 -- Traces are automatically flushed to OTLP (Grafana Tempo) after execution
 -- if @OTLP_ENDPOINT@ is configured.
@@ -335,6 +338,10 @@ runEffects env ctx callback action = do
   pure result
 
 -- | Create logger set based on config output setting.
+--
+-- Note: LogBoth creates a file logger (not stderr). For true dual logging
+-- (stderr + file), use 'withLogInterpreter' from "Tidepool.Log.Interpreter"
+-- which handles both destinations with proper resource management.
 mkLoggerSet :: LogConfig -> IO LoggerSet
 mkLoggerSet config = case config.lcOutput of
   LogStderr -> newStderrLoggerSet 4096
@@ -342,6 +349,7 @@ mkLoggerSet config = case config.lcOutput of
     createDirectoryIfMissing True dir
     newFileLoggerSet 4096 (dir </> "session.log")
   LogBoth dir -> do
-    -- For LogBoth, we use stderr as primary; file logging handled separately
+    -- LogBoth falls back to file logging in this simplified API.
+    -- For true dual logging, use withLogInterpreter from log-interpreter.
     createDirectoryIfMissing True dir
-    newStderrLoggerSet 4096
+    newFileLoggerSet 4096 (dir </> "session.log")

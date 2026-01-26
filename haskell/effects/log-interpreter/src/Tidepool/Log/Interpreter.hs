@@ -55,7 +55,7 @@ import qualified Data.Text.Encoding as TE
 import Data.Time (getCurrentTime)
 import Data.UUID (UUID)
 import qualified Data.UUID.V4 as UUID
-import System.Directory (createDirectoryIfMissing, removeFile)
+import System.Directory (createDirectoryIfMissing, removeFile, createFileLink)
 import System.FilePath ((</>))
 import System.IO (Handle, stderr, hFlush)
 import qualified System.IO as IO
@@ -64,7 +64,6 @@ import System.Log.FastLogger
   , pushLogStrLn, flushLogStr, rmLoggerSet
   , toLogStr, LogStr
   )
-import System.Posix.Files (createSymbolicLink)
 import Control.Exception (catch, SomeException)
 
 import Tidepool.Effect.Log (Log(..), LogLevel(..), LogContext)
@@ -243,10 +242,12 @@ formatSessionFilename sessionId =
   "session-" <> take 8 (show sessionId) <> ".log"
 
 -- | Create latest.log symlink.
+-- Uses createFileLink from directory package for cross-platform support.
 createLatestSymlink :: FilePath -> FilePath -> IO ()
 createLatestSymlink logDir filename = do
   let latestLink = logDir </> "latest.log"
+      targetPath = logDir </> filename
   -- Remove existing symlink if present
   removeFile latestLink `catch` \(_ :: SomeException) -> pure ()
-  -- Create relative symlink
-  createSymbolicLink filename latestLink
+  -- Create symlink (cross-platform via directory package)
+  createFileLink targetPath latestLink

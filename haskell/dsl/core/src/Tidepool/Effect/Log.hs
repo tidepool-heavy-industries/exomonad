@@ -233,6 +233,8 @@ instance ToJSON ErrorContextInfo
 
 -- | Log a graph transition.
 --
+-- Produces greppable output like: @GRAPH entry → classify@
+--
 -- @
 -- logGraph GraphTransitionInfo
 --   { gtiFromNode = "entry"
@@ -241,10 +243,8 @@ instance ToJSON ErrorContextInfo
 --   }
 -- @
 logGraph :: Member Log effs => GraphTransitionInfo -> Eff effs ()
-logGraph info = logInfoWith "GRAPH"
-  [ ("from", toJSON info.gtiFromNode)
-  , ("to", toJSON info.gtiToNode)
-  , ("payload", info.gtiPayload)
+logGraph info = logInfoWith ("GRAPH " <> info.gtiFromNode <> " → " <> info.gtiToNode)
+  [ ("payload", info.gtiPayload)
   ]
 
 -- | Log a state field change.

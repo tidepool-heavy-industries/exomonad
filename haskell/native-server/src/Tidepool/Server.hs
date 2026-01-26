@@ -113,6 +113,8 @@ data ServerMode
   deriving (Show, Eq)
 
 -- | Agent type - a computation using UI, LLM, Log, and Observability effects.
+-- Note: Log must come before Reader LogContext because the Log interpreter
+-- has constraint @Member (Reader LogContext) es@ where @es@ is the tail.
 type Agent = Eff '[UI, Habitica, LLMComplete, Log, Reader LogContext, Observability, IO] ()
 
 -- | Server configuration.

@@ -4,14 +4,17 @@
 --
 -- @
 -- [12:00:00.050] GRAPH entry → resumeRouter
---   input: {"action": "attack"}
+--   payload: {"action": "attack"}
 --
--- [12:00:00.051] STATE.mood: {"scene": "encounter"} (unchanged)
+-- [12:00:00.051] STATE.mood
+--   before: {"scene": "encounter"}
+--   after: {"scene": "combat"}
+--   changed: true
 --
 -- [12:00:00.100] LLM.REQUEST dm_scene
 --   model: claude-sonnet-4-20250514
---   tokens: 1847 prompt
---   tools: [engage, end_scene]
+--   prompt_tokens: 1847
+--   tools: ["engage", "end_scene"]
 -- @
 module Tidepool.Log.Formatter
   ( -- * Entry Formatting
