@@ -24,7 +24,7 @@ tui-spawner
     ├─ 1. Generate UUID for this popup
     ├─ 2. Write definition to /sockets/popup-{uuid}-in.json
     ├─ 3. mkfifo /sockets/popup-{uuid}.fifo
-    ├─ 4. docker exec tidepool-zellij zellij action new-pane \
+    ├─ 4. docker exec -u 1000 tidepool-zellij zellij action new-pane \
     │      --floating --close-on-exit -- \
     │      tui-popup --input /sockets/popup-{uuid}-in.json \
     │                --output /sockets/popup-{uuid}.fifo
@@ -43,6 +43,12 @@ control-server parses stdout as PopupResult
 - No polling required - kernel handles synchronization
 - Writer crash → reader gets EOF (empty read)
 - Reader can timeout on open (handles crash-before-open)
+
+**Socket Ownership:** The `docker exec -u 1000` flag ensures tui-popup runs as UID 1000 (user), not root. This prevents permission issues in /sockets volume:
+- tui-spawner runs as UID 1000 in control-server
+- Without `-u 1000`, docker exec defaults to root
+- Root-created files are unwritable by UID 1000
+- This declarative approach avoids ad-hoc `chown` fixes
 
 ## Usage
 

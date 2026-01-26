@@ -138,8 +138,10 @@ fn run_popup(
 
     // 3. Spawn Zellij floating pane
     // Must use --session flag to target the correct Zellij session
+    // CRITICAL: Run as UID 1000 to avoid root-owned files in /sockets
+    // (tui-spawner runs as UID 1000, so files it creates must be writable)
     let zellij_args = [
-        "exec", &args.zellij_container,
+        "exec", "-u", "1000", &args.zellij_container,
         "zellij", "--session", &args.zellij_session,
         "action", "new-pane", "--floating", "--close-on-exit",
         "--", "tui-popup",
