@@ -17,6 +17,19 @@ set -euo pipefail
 
 echo "Starting Zellij multiplexer..."
 
+# --- Docker socket access for gosu ---
+# group_add in docker-compose.yml doesn't persist through gosu (which recalculates
+# supplemental groups from /etc/group). We must add user to the docker group here.
+if [ -S /var/run/docker.sock ] && [ -n "${DOCKER_GID:-}" ]; then
+    if ! getent group "$DOCKER_GID" > /dev/null 2>&1; then
+        groupadd -g "$DOCKER_GID" docker-host
+    fi
+    DOCKER_GROUP=$(getent group "$DOCKER_GID" | cut -d: -f1)
+    if ! id -nG user | grep -qw "$DOCKER_GROUP"; then
+        usermod -aG "$DOCKER_GROUP" user
+    fi
+fi
+
 # --- XDG Runtime ---
 mkdir -p /run/user/1000
 chown user:user /run/user/1000

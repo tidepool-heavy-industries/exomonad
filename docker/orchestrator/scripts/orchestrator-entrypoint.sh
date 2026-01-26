@@ -15,7 +15,20 @@ echo "🚀 Tidepool Orchestrator starting..."
 # PHASE 1: Root Setup
 # =============================================================================
 
-# --- 1.1 Volume Permissions ---
+# --- 1.1 Docker socket access for gosu ---
+# group_add in docker-compose.yml doesn't persist through gosu (which recalculates
+# supplemental groups from /etc/group). We must add user to the docker group here.
+if [ -S /var/run/docker.sock ] && [ -n "${DOCKER_GID:-}" ]; then
+    if ! getent group "$DOCKER_GID" > /dev/null 2>&1; then
+        groupadd -g "$DOCKER_GID" docker-host
+    fi
+    DOCKER_GROUP=$(getent group "$DOCKER_GID" | cut -d: -f1)
+    if ! id -nG user | grep -qw "$DOCKER_GROUP"; then
+        usermod -aG "$DOCKER_GROUP" user
+    fi
+fi
+
+# --- 1.2 Volume Permissions ---
 # Named volumes are created as root; fix ownership
 echo "🔧 Fixing volume permissions..."
 [ -d /home/user/.claude ] && chown -R user:user /home/user/.claude
@@ -23,14 +36,14 @@ echo "🔧 Fixing volume permissions..."
 [ -d /sockets ] && chown -R user:user /sockets
 [ -d /var/log/tidepool ] && chown -R user:user /var/log/tidepool
 
-# --- 1.2 Socket Symlinks ---
+# --- 1.3 Socket Symlinks ---
 # Create symlinks so local dev paths work in Docker
 mkdir -p /worktrees/.tidepool/sockets
 ln -sf /sockets/control.sock /worktrees/.tidepool/sockets/control.sock
 ln -sf /sockets/tui.sock /worktrees/.tidepool/sockets/tui.sock
 chown -R user:user /worktrees/.tidepool
 
-# --- 1.3 Claude Code Configuration ---
+# --- 1.4 Claude Code Configuration ---
 echo "🔧 Configuring Claude Code..."
 
 CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-/home/user/.claude}"
@@ -77,7 +90,7 @@ chown user:user /home/user/.claude.json "$CLAUDE_DIR/settings.json"
 chown -h user:user /worktrees/.mcp.json
 echo "✓ Claude Code configured"
 
-# --- 1.4 Runtime Cleanup ---
+# --- 1.5 Runtime Cleanup ---
 # Remove stale Zellij state that might be root-owned from previous runs
 rm -rf /tmp/zellij-* 2>/dev/null
 # Clear Zellij session cache to prevent restoring suspended pane states
@@ -92,7 +105,7 @@ mkdir -p /run/user/1000
 chown user:user /run/user/1000
 chmod 755 /run/user/1000
 
-# --- 1.5 Control Server Check ---
+# --- 1.6 Control Server Check ---
 SOCKET_PATH="${TIDEPOOL_CONTROL_SOCKET:-/sockets/control.sock}"
 if [ -S "$SOCKET_PATH" ]; then
     echo "✓ Control server socket ready"
