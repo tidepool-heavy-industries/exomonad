@@ -46,7 +46,9 @@ CLAUDE.md  ← YOU ARE HERE (project overview)
 │   ├── mantle-hub/CLAUDE.md    ← Metrics hub (LEGACY, needs repurposing)
 │   ├── mantle-shared/CLAUDE.md ← Protocol types, Unix socket client
 │   ├── ssh-proxy/CLAUDE.md     ← DEPRECATED (replaced by docker-spawner)
-│   └── tui-sidebar/CLAUDE.md   ← TUI sidebar: ratatui rendering for graph UIs (IMPLEMENTED)
+│   ├── tui-sidebar/CLAUDE.md   ← TUI sidebar: ratatui rendering for graph UIs (IMPLEMENTED)
+│   ├── tui-popup/CLAUDE.md     ← TUI popup: floating pane UI for user interaction
+│   └── tui-spawner/CLAUDE.md   ← FIFO-based popup spawning for cross-container TUI
 ├── types-first-dev/CLAUDE.md   ← V3 TDD protocol project
 ├── deploy/CLAUDE.md            ← Cloudflare deployment
 ├── anemone/CLAUDE.md           ← Debug/diagnostic Solid.js UI (in-repo, not ~/tidepool-labs)
@@ -316,13 +318,16 @@ The Docker Compose setup uses a separated container architecture:
 
 **Quick Start:**
 ```bash
-# Build and start all containers
-docker compose up -d
-
-# Attach to Zellij (main interface)
-docker attach tidepool-zellij
+./ide              # Start containers + connect to Zellij (idempotent)
+./refresh-ide      # Rebuild + force-recreate + connect (after Dockerfile changes)
 
 # Detach with Ctrl+p, Ctrl+q
+```
+
+**Manual (if scripts don't work):**
+```bash
+docker compose up -d
+docker attach tidepool-zellij
 ```
 
 **Services:**

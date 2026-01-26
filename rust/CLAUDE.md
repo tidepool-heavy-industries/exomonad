@@ -40,6 +40,16 @@ rust/CLAUDE.md  ← YOU ARE HERE (router)
 │   • Receives UISpec from Haskell tui-interpreter
 │   • Renders with ratatui (Text, Button, Input, Progress)
 │
+├── tui-popup/CLAUDE.md  ← Floating pane popup (IMPLEMENTED)
+│   • Renders popup UI to /dev/tty (not stdout)
+│   • Reads definition from --input file, writes result to --output (FIFO)
+│   • Launched via `zellij action new-pane --floating`
+│
+├── tui-spawner/CLAUDE.md  ← Cross-container popup spawner (IMPLEMENTED)
+│   • Creates FIFO, spawns floating Zellij pane with tui-popup
+│   • Blocks reading FIFO until user responds
+│   • Called by Haskell TUIInterpreter via subprocess
+│
 └── ssh-proxy/CLAUDE.md  ← DEPRECATED (replaced by docker-spawner /exec)
 ```
 
@@ -106,6 +116,8 @@ Human TTY ──▶ Claude Code (in nix shell or direct)
 | [mantle-hub](mantle-hub/CLAUDE.md) | Binary | Metrics/telemetry hub (WIP) |
 | [mantle-shared](mantle-shared/CLAUDE.md) | Library | Shared types, protocols, HTTP socket client (curl-based) |
 | [tui-sidebar](tui-sidebar/CLAUDE.md) | Binary + Lib | TUI sidebar: Unix socket server for interactive UIs |
+| [tui-popup](tui-popup/CLAUDE.md) | Binary | Floating pane UI renderer (uses /dev/tty) |
+| [tui-spawner](tui-spawner/CLAUDE.md) | Binary | FIFO-based popup spawning for cross-container TUI |
 | [ssh-proxy](ssh-proxy/CLAUDE.md) | Binary | DEPRECATED - replaced by docker-spawner |
 
 ## Quick Reference

@@ -71,7 +71,7 @@ The system enforces role-based access control (RBAC) for MCP tools to ensure age
 
 | Role | Purpose | Key Tools |
 |------|---------|-----------|
-| **TL** | Team Lead: Orchestrates agents, spawns worktrees, monitors progress. | `spawn_agents`, `exo_status`, `exo_complete` |
+| **TL** | Team Lead: Orchestrates agents, spawns worktrees, monitors progress. | `spawn_agents`, `exo_status`, `exo_complete`, TUI tools |
 | **Dev** | Developer: Executes implementation tasks, files PRs, uses LSP tools. | `file_pr`, `find_callers`, `show_type`, TUI tools |
 | **PM** | Product Manager: Planning, prioritization, health monitoring. | `pm_*` tools, `exo_status` (read-only) |
 
@@ -471,7 +471,39 @@ Gets current bead details, git status, and PR info.
 
 ### Tier 4: TUI-Interactive Tools
 
-Tools that show interactive UI elements in the TUI sidebar and wait for user response.
+Tools that spawn floating Zellij panes with interactive UI and wait for user response.
+
+**Architecture (FIFO-based):**
+```
+Agent calls MCP tool (e.g., confirm_action)
+    │
+    ▼
+control-server (Haskell)
+    │ calls tui-spawner binary
+    ▼
+tui-spawner (Rust)
+    ├─ 1. Write popup definition to /sockets/popup-{uuid}-in.json
+    ├─ 2. mkfifo /sockets/popup-{uuid}.fifo
+    ├─ 3. docker exec tidepool-zellij zellij action new-pane --floating -- \
+    │      tui-popup --input /sockets/popup-{uuid}-in.json \
+    │                --output /sockets/popup-{uuid}.fifo
+    ├─ 4. Block reading from FIFO (kernel handles sync)
+    │
+    ▼
+tui-popup (in zellij container)
+    ├─ Renders UI to /dev/tty (floating pane)
+    ├─ User interacts (keyboard)
+    ├─ Writes result to FIFO
+    └─ Exits (--close-on-exit closes pane)
+    │
+    ▼
+tui-spawner reads result, returns to Haskell
+    │
+    ▼
+Agent receives structured response
+```
+
+**Key insight:** TUI renders to `/dev/tty` (not stdout), allowing result to go to FIFO. The FIFO provides clean blocking semantics - no polling, kernel handles synchronization.
 
 #### `confirm_action` - Show Confirmation Dialog
 
