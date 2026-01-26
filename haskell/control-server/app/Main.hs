@@ -18,6 +18,7 @@ import ExoMonad.Control.Hook.Policy (loadHookPolicy)
 import ExoMonad.Control.Logging (Logger, withDualLogger, logInfo, logError)
 import ExoMonad.Control.Observability (withTracerProvider, getTracer, TracingConfig(..))
 import ExoMonad.Control.RoleConfig (Role(..))
+import ExoMonad.Control.Version (versionString)
 import ExoMonad.Training.Format (formatTrainingFromSkeleton)
 
 main :: IO ()
@@ -37,6 +38,8 @@ main = do
       ["format-training", skeletonFile] -> runFormatTrainingMode logger skeletonFile
       ["--help"] -> printUsage
       ["-h"] -> printUsage
+      ["--version"] -> TIO.putStrLn versionString
+      ["-V"] -> TIO.putStrLn versionString
       ["--no-tui"] -> runServerMode logger projectDir True
       _ -> runServerMode logger projectDir False
 
@@ -93,7 +96,7 @@ runFormatTrainingMode logger skeletonFile = do
 
 printUsage :: IO ()
 printUsage = do
-  putStrLn "exomonad-control-server - Claude Code++ control server"
+  TIO.putStrLn versionString
   putStrLn ""
   putStrLn "Usage:"
   putStrLn "  exomonad-control-server                    Start control server (HTTP over Unix socket)"
@@ -101,4 +104,5 @@ printUsage = do
   putStrLn "  exomonad-control-server format-training <skeleton-file>"
   putStrLn "                                             Format annotated skeletons to training JSONL"
   putStrLn "  exomonad-control-server --help             Show this help"
+  putStrLn "  exomonad-control-server --version          Show version info"
   putStrLn ""

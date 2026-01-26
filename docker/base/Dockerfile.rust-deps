@@ -1,0 +1,96 @@
+# Rust Dependency Caching via cargo-chef
+#
+# Three-stage build:
+#   1. planner - Generate recipe.json from workspace
+#   2. cacher  - Build deps only (cached layer)
+#   3. builder - Compile full source with cached deps
+#
+# Cache invalidation:
+#   - Cargo.toml/Cargo.lock changes → rebuild deps
+#   - Source changes → rebuild only final binary (deps cached)
+
+# =============================================================================
+# Stage 1: Planner - generates recipe.json (dependency manifest)
+# =============================================================================
+FROM rust:1.83-bookworm AS planner
+
+RUN cargo install cargo-chef --locked
+
+WORKDIR /app
+
+# Copy workspace structure
+COPY rust/Cargo.toml rust/Cargo.lock ./rust/
+COPY rust/hangar-config/Cargo.toml ./rust/hangar-config/
+COPY rust/exomonad/Cargo.toml ./rust/exomonad/
+COPY rust/exomonad-shared/Cargo.toml ./rust/exomonad-shared/
+COPY rust/tui-sidebar/Cargo.toml ./rust/tui-sidebar/
+COPY rust/tui-popup/Cargo.toml ./rust/tui-popup/
+COPY rust/tui-spawner/Cargo.toml ./rust/tui-spawner/
+COPY rust/effector/Cargo.toml ./rust/effector/
+COPY rust/docker-ctl/Cargo.toml ./rust/docker-ctl/
+
+# Copy source for recipe generation (cargo-chef needs to parse)
+COPY rust/ ./rust/
+
+# Generate recipe from workspace
+RUN cd rust && cargo chef prepare --recipe-path /recipe.json
+
+# =============================================================================
+# Stage 2: Cacher - builds deps only (no source code)
+# =============================================================================
+FROM rust:1.83-bookworm AS cacher
+
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    libssl-dev \
+    perl \
+    perl-base \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN cargo install cargo-chef --locked
+
+WORKDIR /app
+
+# Copy recipe from planner
+COPY --from=planner /recipe.json /recipe.json
+
+# Cook deps (this is the expensive cached layer)
+RUN cargo chef cook --release --recipe-path /recipe.json
+
+# =============================================================================
+# Stage 3: Builder - compile full source with cached deps
+# =============================================================================
+FROM rust:1.83-bookworm AS builder
+
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    libssl-dev \
+    perl \
+    perl-base \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy cached deps from cacher
+COPY --from=cacher /app/target target/
+COPY --from=cacher /usr/local/cargo /usr/local/cargo
+
+# Copy full source
+COPY rust/ ./rust/
+
+# Version embedding via vergen (if build.rs configured)
+ARG GIT_SHA
+ENV VERGEN_GIT_SHA=${GIT_SHA}
+
+# Build all binaries
+RUN cd rust && cargo build --release
+
+# Output binaries available at:
+#   /app/rust/target/release/exomonad
+#   /app/rust/target/release/docker-ctl
+#   /app/rust/target/release/tui-sidebar
+#   /app/rust/target/release/tui-popup
+#   /app/rust/target/release/tui-spawner
+#   /app/rust/target/release/effector

@@ -1,74 +1,19 @@
 # Claude Code Agent Container
 # No SSH - uses docker exec via docker-ctl for remote commands
+#
+# Uses pre-built binaries from builder contexts:
+#   - haskell-builder: exomonad-control-server
+#   - rust-builder: exomonad, effector, tui-spawner
+#
+# Build with docker buildx bake (see docker/docker-bake.hcl)
 
-# =============================================================================
-# Stage 1: Rust Builder (for exomonad, effector, tui-spawner)
-# =============================================================================
-FROM --platform=linux/amd64 rust:bookworm AS rust-builder
-WORKDIR /build
-
-# Install build dependencies
-RUN apt-get update && apt-get install -y \
-    pkg-config \
-    libssl-dev \
-    perl \
-    perl-base \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy Rust workspace
-COPY rust/ ./rust/
-
-# Build exomonad, effector, and tui-spawner
-# Use cache mounts for cargo to speed up rebuilds
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/build/rust/target \
-    cd rust && \
-    cargo build --release -p exomonad -p effector -p tui-spawner && \
-    cp target/release/exomonad /exomonad && \
-    cp target/release/effector /effector && \
-    cp target/release/tui-spawner /tui-spawner
-
-# =============================================================================
-# Stage 2: Haskell Builder (for exomonad-control-server)
-# =============================================================================
-FROM haskell:9.12.2-slim-bookworm AS haskell-builder
-
-RUN apt-get update && apt-get install -y \
-    libgmp-dev \
-    libffi-dev \
-    zlib1g-dev \
-    pkg-config \
-    git \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
-
-WORKDIR /build
-
-# Copy all Haskell source
-COPY cabal.project ./
-COPY haskell/ ./haskell/
-
-# Remove Nix-specific zlib configuration
-RUN sed -i '/package zlib/,+2d' cabal.project
-
-# Build with cache mounts (unique IDs prevent parallel build races)
-RUN --mount=type=cache,id=claude-agent-cabal,target=/root/.cabal/store \
-    --mount=type=cache,id=claude-agent-dist,target=/build/dist-newstyle \
-    cabal update && \
-    cabal build exomonad-control-server -j --ghc-options=-O1 && \
-    cp $(cabal list-bin exomonad-control-server) /exomonad-control-server
-
-# =============================================================================
-# Stage 3: Main Agent Image
-# =============================================================================
 FROM --platform=linux/amd64 debian:bookworm-slim
 
 # Avoid prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Install core dependencies (no SSH)
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     curl \
     ca-certificates \
@@ -92,7 +37,8 @@ RUN apt-get update && apt-get install -y \
 
 # Install Node.js 20.x
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
-    && apt-get install -y nodejs
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
 
 # Install Docker CLI for spawner communication (tui-spawner needs this)
 RUN curl -fsSL https://get.docker.com | sh && \
@@ -136,16 +82,19 @@ ENV PATH="/home/agent/.local/bin:/home/agent/.ghcup/bin:/home/agent/.cargo/bin:$
 # Back to root to copy binaries
 USER root
 
-# Copy Rust binaries
-COPY --from=rust-builder /exomonad /usr/local/bin/exomonad
-COPY --from=rust-builder /effector /usr/local/bin/effector
-COPY --from=rust-builder /tui-spawner /usr/local/bin/tui-spawner
+# Copy pre-built Rust binaries from builder context
+COPY --from=rust-builder /app/rust/target/release/exomonad /usr/local/bin/exomonad
+COPY --from=rust-builder /app/rust/target/release/effector /usr/local/bin/effector
+COPY --from=rust-builder /app/rust/target/release/tui-spawner /usr/local/bin/tui-spawner
 
-# Copy Haskell binaries
-COPY --from=haskell-builder /exomonad-control-server /usr/local/bin/exomonad-control-server
+# Copy pre-built Haskell binaries from builder context
+COPY --from=haskell-builder /app/dist-newstyle/build/*/ghc-*/exomonad-control-server-*/x/exomonad-control-server/build/exomonad-control-server/exomonad-control-server /usr/local/bin/exomonad-control-server
 
 # Set permissions
-RUN chmod +x /usr/local/bin/exomonad /usr/local/bin/effector /usr/local/bin/tui-spawner /usr/local/bin/exomonad-control-server
+RUN chmod +x /usr/local/bin/exomonad \
+             /usr/local/bin/effector \
+             /usr/local/bin/tui-spawner \
+             /usr/local/bin/exomonad-control-server
 
 # Set up entrypoint script
 COPY docker/claude-agent/entrypoint.sh /usr/local/bin/entrypoint.sh

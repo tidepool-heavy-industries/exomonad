@@ -1,88 +1,16 @@
 # Dedicated Control Server Container
 # MCP server (TCP 7432) + Zellij tab creation + docker-ctl integration
+#
+# Uses pre-built binaries from builder contexts:
+#   - haskell-builder: exomonad-control-server
+#   - rust-builder: docker-ctl, tui-spawner
+#
+# Build with docker buildx bake (see docker/docker-bake.hcl)
 
-# =============================================================================
-# Stage 1: Rust Builder (for tui-spawner)
-# =============================================================================
-FROM rust:bookworm AS rust-builder
-
-# Build tui-spawner with minimal workspace
-WORKDIR /build
-
-# These layers are cached (expensive setup)
-COPY rust/Cargo.lock ./
-COPY rust/tui-spawner ./tui-spawner
-COPY rust/tui-sidebar ./tui-sidebar
-COPY rust/tui-popup ./tui-popup
-COPY rust/docker-ctl ./docker-ctl
-COPY rust/exomonad-shared ./exomonad-shared
-COPY rust/hangar-config ./hangar-config
-
-# Create minimal workspace Cargo.toml with required dependencies
-RUN cat > Cargo.toml <<'EOF'
-[workspace]
-resolver = "2"
-members = ["tui-spawner", "tui-sidebar", "tui-popup", "docker-ctl", "exomonad-shared", "hangar-config"]
-
-[workspace.dependencies]
-anyhow = "1"
-chrono = { version = "0.4", features = ["serde"] }
-clap = { version = "4", features = ["derive", "env"] }
-nix = { version = "0.29", features = ["poll", "fs", "signal"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-strum = { version = "0.26", features = ["derive"] }
-tempfile = "3"
-thiserror = "2"
-tokio = { version = "1", features = ["full"] }
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-uuid = { version = "1", features = ["v4"] }
-EOF
-
-# Cache bust AFTER setup, BEFORE build - invalidates only the build step
-# Usage: docker compose build --build-arg RUST_CACHEBUST=$(date +%s) control-server
-ARG RUST_CACHEBUST=0
-RUN cargo build --release -p tui-spawner && \
-    cargo build --release -p docker-ctl
-
-# =============================================================================
-# Stage 2: Haskell Builder
-# =============================================================================
-FROM haskell:9.12.2-slim-bookworm AS builder
-
-RUN apt-get update && apt-get install -y \
-    libgmp-dev \
-    libffi-dev \
-    zlib1g-dev \
-    pkg-config \
-    git \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
-
-WORKDIR /build
-
-# Copy all Haskell source
-COPY cabal.project ./
-COPY haskell/ ./haskell/
-
-# Remove Nix-specific zlib configuration
-RUN sed -i '/package zlib/,+2d' cabal.project
-
-# Build with cache mounts
-RUN --mount=type=cache,id=control-server-store,target=/root/.cabal/store \
-    --mount=type=cache,id=control-server-dist,target=/build/dist-newstyle \
-    cabal update && \
-    cabal build exomonad-control-server -j --ghc-options=-O1 && \
-    cp $(cabal list-bin exomonad-control-server) /usr/local/bin/exomonad-control-server
-
-# =============================================================================
-# Stage 2: Runtime
-# =============================================================================
 FROM debian:bookworm-slim
 
 # Install runtime dependencies
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     libgmp10 \
     libffi8 \
     zlib1g \
@@ -96,7 +24,7 @@ RUN apt-get update && apt-get install -y \
 # Install GitHub CLI (required for gh_issue_* MCP tools)
 RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | gpg --dearmor -o /usr/share/keyrings/githubcli-archive-keyring.gpg \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list \
-    && apt-get update && apt-get install -y gh \
+    && apt-get update && apt-get install -y --no-install-recommends gh \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Docker CLI for spawner communication
@@ -112,16 +40,16 @@ RUN cargo-binstall --no-confirm zellij && \
     cp /root/.cargo/bin/zellij /usr/local/bin/zellij && \
     chmod 755 /usr/local/bin/zellij
 
-# Copy tui-spawner binary (for FIFO-based popup spawning)
-# Re-declare CACHEBUST to invalidate COPY --from when rust-builder rebuilds
-ARG RUST_CACHEBUST=0
-COPY --from=rust-builder /build/target/release/tui-spawner /usr/local/bin/tui-spawner
+# Copy pre-built binaries from builder contexts
+# These come from the BuildKit contexts defined in docker-bake.hcl
+COPY --from=haskell-builder /app/dist-newstyle/build/*/ghc-*/exomonad-control-server-*/x/exomonad-control-server/build/exomonad-control-server/exomonad-control-server /usr/local/bin/exomonad-control-server
+COPY --from=rust-builder /app/rust/target/release/docker-ctl /usr/local/bin/docker-ctl
+COPY --from=rust-builder /app/rust/target/release/tui-spawner /usr/local/bin/tui-spawner
 
-# Copy docker-ctl binary
-COPY --from=rust-builder /build/target/release/docker-ctl /usr/local/bin/docker-ctl
-
-# Copy control-server binary
-COPY --from=builder /usr/local/bin/exomonad-control-server /usr/local/bin/exomonad-control-server
+# Verify binaries are executable
+RUN chmod +x /usr/local/bin/exomonad-control-server \
+             /usr/local/bin/docker-ctl \
+             /usr/local/bin/tui-spawner
 
 # Copy entrypoint
 COPY docker/control-server/entrypoint.sh /usr/local/bin/entrypoint.sh

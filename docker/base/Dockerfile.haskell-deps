@@ -1,0 +1,111 @@
+# Haskell Dependency Caching via cabal freeze + dummy source
+#
+# Three-stage build:
+#   1. freeze  - Generate cabal.project.freeze (pinned deps)
+#   2. cacher  - Build deps with dummy source files (cached layer)
+#   3. builder - Compile real source with cached deps
+#
+# Cache invalidation:
+#   - cabal.project or *.cabal changes → rebuild deps
+#   - Source changes → rebuild only packages (deps cached)
+
+# =============================================================================
+# Stage 1: Freeze - generate cabal.project.freeze
+# =============================================================================
+FROM haskell:9.12.2-slim-bookworm AS freeze
+
+RUN apt-get update && apt-get install -y \
+    libgmp-dev \
+    libffi-dev \
+    zlib1g-dev \
+    pkg-config \
+    git \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy cabal project and all package cabal files
+COPY cabal.project ./
+COPY haskell/ ./haskell/
+
+# Remove Nix-specific zlib configuration (paths don't exist in Docker)
+RUN sed -i '/package zlib/,+2d' cabal.project
+
+# Generate freeze file
+RUN cabal update && cabal freeze
+
+# =============================================================================
+# Stage 2: Cacher - build deps with dummy source (no real code)
+# =============================================================================
+FROM haskell:9.12.2-slim-bookworm AS cacher
+
+RUN apt-get update && apt-get install -y \
+    libgmp-dev \
+    libffi-dev \
+    zlib1g-dev \
+    pkg-config \
+    git \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy freeze file from freeze stage
+COPY --from=freeze /app/cabal.project.freeze ./
+
+# Copy cabal project and package metadata (cabal files)
+COPY cabal.project ./
+COPY haskell/ ./haskell/
+
+# Remove Nix-specific zlib configuration
+RUN sed -i '/package zlib/,+2d' cabal.project
+
+# Generate dummy .hs files that satisfy Cabal's module requirements
+# This allows building deps without real source code
+RUN find haskell -name '*.hs' | while read f; do \
+      modname=$(basename "$f" .hs); \
+      if [ "$modname" != "Setup" ]; then \
+        echo "module $modname where" > "$f"; \
+      fi; \
+    done
+
+# Build only dependencies (this is the expensive cached layer)
+RUN cabal update && cabal build all --only-dependencies -j
+
+# =============================================================================
+# Stage 3: Builder - compile real source with cached deps
+# =============================================================================
+FROM haskell:9.12.2-slim-bookworm AS builder
+
+RUN apt-get update && apt-get install -y \
+    libgmp-dev \
+    libffi-dev \
+    zlib1g-dev \
+    pkg-config \
+    git \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy cached cabal store and dist-newstyle from cacher
+COPY --from=cacher /root/.cabal /root/.cabal
+COPY --from=cacher /app/dist-newstyle dist-newstyle/
+
+# Copy real source code
+COPY cabal.project ./
+COPY haskell/ ./haskell/
+
+# Remove Nix-specific zlib configuration
+RUN sed -i '/package zlib/,+2d' cabal.project
+
+# Version embedding via environment variable
+ARG GIT_SHA
+ENV EXOMONAD_GIT_SHA=${GIT_SHA}
+
+# Build all packages
+RUN cabal build all -j --ghc-options=-O1
+
+# Output: binaries in dist-newstyle/build/**/
+# Find with: cabal list-bin exomonad-control-server

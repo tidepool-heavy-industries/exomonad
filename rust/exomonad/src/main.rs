@@ -25,12 +25,25 @@ use exomonad_shared::protocol::{Role, Runtime};
 mod health;
 
 // ============================================================================
+// Version Info (embedded at compile time via build.rs)
+// ============================================================================
+
+/// Build version string from compile-time environment
+const VERSION: &str = concat!(
+    env!("CARGO_PKG_VERSION"),
+    " (",
+    env!("VERGEN_GIT_SHA"),
+    ")"
+);
+
+// ============================================================================
 // CLI Types
 // ============================================================================
 
 #[derive(Parser)]
 #[command(name = "exomonad")]
 #[command(about = "Hook handler for Claude Code++ sessions")]
+#[command(version = VERSION)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,

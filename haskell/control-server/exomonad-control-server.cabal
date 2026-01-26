@@ -62,6 +62,7 @@ library
         ExoMonad.Control.GHTools
         ExoMonad.Control.Export
         ExoMonad.Control.CodeExtraction
+        ExoMonad.Control.Version
         -- StopHook (workflow stages)
         ExoMonad.Control.StopHook.Types
         ExoMonad.Control.StopHook.Graph

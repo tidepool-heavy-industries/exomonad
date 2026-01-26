@@ -1,52 +1,14 @@
 # Minimal Zellij container for visual multiplexing
 # Human attaches here; panes run docker attach to agent containers
+#
+# Uses pre-built binaries from builder context:
+#   - rust-builder: tui-popup
+#
+# Build with docker buildx bake (see docker/docker-bake.hcl)
 
-# =============================================================================
-# Stage 1: Rust Builder (for tui-popup)
-# =============================================================================
-FROM rust:bookworm AS rust-builder
-
-WORKDIR /build
-
-# Copy Rust workspace (only needed crates)
-COPY rust/Cargo.lock ./
-COPY rust/tui-popup ./tui-popup
-COPY rust/tui-sidebar ./tui-sidebar
-COPY rust/exomonad-shared ./exomonad-shared
-COPY rust/hangar-config ./hangar-config
-
-# Create minimal workspace Cargo.toml with required dependencies
-RUN cat > Cargo.toml <<'EOF'
-[workspace]
-resolver = "2"
-members = ["tui-popup", "tui-sidebar", "exomonad-shared", "hangar-config"]
-
-[workspace.dependencies]
-anyhow = "1"
-chrono = { version = "0.4", features = ["serde"] }
-clap = { version = "4", features = ["derive", "env"] }
-nix = { version = "0.29", features = ["poll", "fs", "signal"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-strum = { version = "0.26", features = ["derive"] }
-tempfile = "3"
-thiserror = "2"
-tokio = { version = "1", features = ["full"] }
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-uuid = { version = "1", features = ["v4"] }
-EOF
-
-# Build tui-popup
-RUN cargo build --release -p tui-popup && \
-    cp target/release/tui-popup /usr/local/bin/tui-popup
-
-# =============================================================================
-# Stage 2: Runtime
-# =============================================================================
 FROM debian:bookworm-slim
 
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ca-certificates \
     gosu \
@@ -66,8 +28,9 @@ RUN cargo-binstall --no-confirm zellij && \
     cp /root/.cargo/bin/zellij /usr/local/bin/zellij && \
     chmod 755 /usr/local/bin/zellij
 
-# Copy tui-popup binary from rust-builder
-COPY --from=rust-builder /usr/local/bin/tui-popup /usr/local/bin/tui-popup
+# Copy pre-built tui-popup binary from builder context
+COPY --from=rust-builder /app/rust/target/release/tui-popup /usr/local/bin/tui-popup
+RUN chmod +x /usr/local/bin/tui-popup
 
 # Create non-root user
 RUN useradd -m -u 1000 -s /bin/bash user
