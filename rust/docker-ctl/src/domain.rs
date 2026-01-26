@@ -31,6 +31,9 @@ pub struct AgentVolumes {
 
     /// GitHub CLI auth - shared across all agents.
     pub gh_auth: VolumeMount,
+
+    /// Claude Code auth - API keys/OAuth tokens.
+    pub claude_auth: VolumeMount,
 }
 
 impl Default for AgentVolumes {
@@ -40,6 +43,7 @@ impl Default for AgentVolumes {
             worktrees: VolumeMount::WORKTREES,
             sockets: VolumeMount::SOCKETS,
             gh_auth: VolumeMount::GH_AUTH,
+            claude_auth: VolumeMount::CLAUDE_AUTH,
         }
     }
 }
@@ -51,6 +55,7 @@ impl AgentVolumes {
             self.worktrees.to_bollard(),
             self.sockets.to_bollard(),
             self.gh_auth.to_bollard(),
+            self.claude_auth.to_bollard(),
         ]
     }
 }
@@ -97,6 +102,14 @@ impl VolumeMount {
         path: "/home/agent/.config/gh",
     };
 
+    /// Claude Code auth volume - API keys/OAuth tokens.
+    /// **docker-compose.yml:** `tidepool-claude-auth:/home/user/.claude` (orchestrator)
+    /// Subagents share this volume for consistent auth.
+    pub const CLAUDE_AUTH: Self = Self {
+        volume: "tidepool-claude-auth",
+        path: "/home/agent/.claude",
+    };
+
     // -------------------------------------------------------------------------
     // Conversion
     // -------------------------------------------------------------------------
@@ -116,10 +129,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_volumes_has_all_four() {
+    fn default_volumes_has_all_five() {
         let vols = AgentVolumes::default();
         let mounts = vols.to_mounts();
-        assert_eq!(mounts.len(), 4);
+        assert_eq!(mounts.len(), 5);
     }
 
     #[test]
@@ -129,5 +142,6 @@ mod tests {
         assert_eq!(VolumeMount::WORKTREES.volume, "tidepool-worktrees");
         assert_eq!(VolumeMount::SOCKETS.volume, "tidepool-sockets");
         assert_eq!(VolumeMount::GH_AUTH.volume, "tidepool-gh-auth");
+        assert_eq!(VolumeMount::CLAUDE_AUTH.volume, "tidepool-claude-auth");
     }
 }
