@@ -55,13 +55,15 @@ fi
 
 # 3. Configure MCP
 # Claude Code uses MCP (Model Context Protocol) for tool extension.
-# Priority: TCP URL > Unix socket
+# Each agent gets its own workspace subdirectory to avoid config conflicts
 ROLE="${TIDEPOOL_ROLE:-agent}"
+AGENT_WORKSPACE="/workspace/${ROLE}"
+mkdir -p "$AGENT_WORKSPACE"
 
 if [ -n "${CONTROL_SERVER_URL:-}" ]; then
-    # TCP MCP transport (new container separation architecture)
+    # TCP MCP transport (container separation architecture)
     echo "Configuring MCP via TCP: ${CONTROL_SERVER_URL}/role/${ROLE}/mcp"
-    cat > /home/agent/.mcp.json <<EOF
+    cat > "$AGENT_WORKSPACE/.mcp.json" <<EOF
 {
   "mcpServers": {
     "tidepool": {
@@ -75,7 +77,7 @@ elif [ -n "${MANTLE_CONTROL_SOCKET:-}" ]; then
     # Unix socket transport (legacy)
     echo "Configuring MCP via Unix socket: ${MANTLE_CONTROL_SOCKET}"
     SOCKET_PATH_ENCODED=$(echo "$MANTLE_CONTROL_SOCKET" | sed 's/\//%2F/g')
-    cat > /home/agent/.mcp.json <<EOF
+    cat > "$AGENT_WORKSPACE/.mcp.json" <<EOF
 {
   "mcpServers": {
     "control": {
@@ -88,6 +90,9 @@ EOF
 else
     echo "Warning: No MCP configuration (neither CONTROL_SERVER_URL nor MANTLE_CONTROL_SOCKET set)" >&2
 fi
+
+# Change to agent-specific workspace
+cd "$AGENT_WORKSPACE"
 
 
 # 4. Handle mounted socket permissions (if any)
