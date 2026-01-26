@@ -105,11 +105,17 @@ impl Spawner {
 
         let worktree_mount_target = format!("/worktrees/{}", req.bead_id);
         
-        let mounts = vec![
+        let mut mounts = vec![
             Mount {
                 target: Some(worktree_mount_target.clone()),
                 source: Some(req.worktree_path.to_string_lossy().to_string()),
                 typ: Some(MountTypeEnum::BIND),
+                ..Default::default()
+            },
+            Mount {
+                target: Some("/home/agent/.config/gh".to_string()),
+                source: Some("tidepool-gh-auth".to_string()),
+                typ: Some(MountTypeEnum::VOLUME),
                 ..Default::default()
             }
         ];
@@ -262,9 +268,13 @@ mod tests {
         assert_eq!(host_config.network_mode, Some("tidepool-test".to_string()));
         
         let mounts = host_config.mounts.unwrap();
-        assert_eq!(mounts.len(), 1);
+        assert_eq!(mounts.len(), 2);
         assert_eq!(mounts[0].target, Some("/worktrees/test-bead".to_string()));
         assert_eq!(mounts[0].source, Some("/tmp/worktree".to_string()));
+        
+        assert_eq!(mounts[1].target, Some("/home/agent/.config/gh".to_string()));
+        assert_eq!(mounts[1].source, Some("tidepool-gh-auth".to_string()));
+        assert_eq!(mounts[1].typ, Some(MountTypeEnum::VOLUME));
 
         let env = config.env.unwrap();
         assert!(env.contains(&"TIDEPOOL_BEAD_ID=test-bead".to_string()));

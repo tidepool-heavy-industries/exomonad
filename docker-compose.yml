@@ -34,6 +34,7 @@ services:
       - tidepool-sockets:/sockets
       - tidepool-zellij:/run/user/1000
       - tidepool-beads:/beads
+      - tidepool-gh-auth:/home/user/.config/gh
       - /var/run/docker.sock:/var/run/docker.sock
     healthcheck:
       test: ["CMD-SHELL", "socat -u OPEN:/dev/null UNIX-CONNECT:/sockets/control.sock || exit 1"]
@@ -88,6 +89,7 @@ services:
       - tidepool-worktrees:/workspace
       - tidepool-sockets:/sockets
       - tidepool-claude-tl:/home/agent/.claude
+      - tidepool-gh-auth:/home/agent/.config/gh
     depends_on:
       control-server:
         condition: service_healthy
@@ -114,6 +116,7 @@ services:
       - tidepool-worktrees:/workspace
       - tidepool-sockets:/sockets
       - tidepool-claude-pm:/home/agent/.claude
+      - tidepool-gh-auth:/home/agent/.config/gh
     depends_on:
       control-server:
         condition: service_healthy
@@ -216,6 +219,7 @@ services:
       - tidepool-repo:/worktrees
       - tidepool-sockets:/sockets
       - tidepool-claude-auth:/home/user/.claude
+      - tidepool-gh-auth:/home/user/.config/gh
       - tidepool-ssh-keys:/home/user/.ssh
       - tidepool-zellij:/run/user/1000
       - /var/run/docker.sock:/var/run/docker.sock
@@ -233,6 +237,8 @@ volumes:
     name: tidepool-claude-pm
   tidepool-claude-auth:
     name: tidepool-claude-auth
+  tidepool-gh-auth:
+    name: tidepool-gh-auth
   tidepool-repo:
     name: tidepool-repo
   tidepool-ssh-keys:
