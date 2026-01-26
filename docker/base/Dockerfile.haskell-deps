@@ -1,7 +1,7 @@
 # Haskell Dependency Caching via cabal freeze + dummy source
 #
 # Three-stage build:
-#   1. freeze  - Generate cabal.project.freeze AND skeleton (cabal files only)
+#   1. freeze  - Generate cabal.project.freeze (pinned deps)
 #   2. cacher  - Build deps with dummy source files (cached layer)
 #   3. builder - Compile real source with cached deps
 #
@@ -10,18 +10,23 @@
 #   - Source changes → rebuild only packages (deps cached)
 
 # =============================================================================
-# Stage 1: Freeze - generate cabal.project.freeze and package skeleton
+# Stage 1: Freeze - generate cabal.project.freeze
 # =============================================================================
 FROM haskell:9.12.2-slim-bookworm AS freeze
 
 RUN apt-get update && apt-get install -y \
-    libgmp-dev libffi-dev zlib1g-dev pkg-config git curl \
+    libgmp-dev \
+    libffi-dev \
+    zlib1g-dev \
+    pkg-config \
+    git \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Copy cabal project and all source (needed for freeze)
-COPY cabal.project ./
+# Copy cabal project and all package cabal files
+COPY cabal.project ./ 
 COPY haskell/ ./haskell/
 
 # Remove Nix-specific zlib configuration (paths don't exist in Docker)
@@ -30,34 +35,40 @@ RUN sed -i '/package zlib/,+2d' cabal.project
 # Generate freeze file
 RUN cabal update && cabal freeze
 
-# Create skeleton directory with only .cabal files (preserving structure)
-RUN mkdir -p /skeleton && \
-    find haskell -name '*.cabal' -exec sh -c 'mkdir -p /skeleton/$(dirname {}) && cp {} /skeleton/{}' \; && \
-    cp cabal.project cabal.project.freeze /skeleton/
-
 # =============================================================================
 # Stage 2: Cacher - build deps with dummy source (no real code)
 # =============================================================================
 FROM haskell:9.12.2-slim-bookworm AS cacher
 
 RUN apt-get update && apt-get install -y \
-    libgmp-dev libffi-dev zlib1g-dev pkg-config git curl \
+    libgmp-dev \
+    libffi-dev \
+    zlib1g-dev \
+    pkg-config \
+    git \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Copy ONLY the skeleton from freeze stage (not from build context!)
-# This is the key to caching - skeleton only changes when .cabal files change
-COPY --from=freeze /skeleton/cabal.project ./
-COPY --from=freeze /skeleton/cabal.project.freeze ./
-COPY --from=freeze /skeleton/haskell/ ./haskell/
+# Copy freeze file from freeze stage
+COPY --from=freeze /app/cabal.project.freeze ./
+
+# Copy cabal project and package metadata (cabal files)
+COPY cabal.project ./ 
+COPY haskell/ ./haskell/
 
 # Remove Nix-specific zlib configuration
 RUN sed -i '/package zlib/,+2d' cabal.project
 
-# Generate dummy modules with correct qualified names
-COPY docker/base/generate-dummy-modules.sh /tmp/
-RUN chmod +x /tmp/generate-dummy-modules.sh && /tmp/generate-dummy-modules.sh
+# Generate dummy .hs files that satisfy Cabal's module requirements
+# This allows building deps without real source code
+RUN find haskell -name '*.hs' | while read f; do \
+      modname=$(basename "$f" .hs); \
+      if [ "$modname" != "Setup" ]; then \
+        echo "module $modname where" > "$f"; \
+      fi; \
+    done
 
 # Build only dependencies (this is the expensive cached layer)
 RUN cabal update && cabal build all --only-dependencies -j
@@ -68,7 +79,12 @@ RUN cabal update && cabal build all --only-dependencies -j
 FROM haskell:9.12.2-slim-bookworm AS builder
 
 RUN apt-get update && apt-get install -y \
-    libgmp-dev libffi-dev zlib1g-dev pkg-config git curl \
+    libgmp-dev \
+    libffi-dev \
+    zlib1g-dev \
+    pkg-config \
+    git \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -77,8 +93,8 @@ WORKDIR /app
 COPY --from=cacher /root/.cabal /root/.cabal
 COPY --from=cacher /app/dist-newstyle dist-newstyle/
 
-# Copy real source code (from build context, not from cacher)
-COPY cabal.project ./
+# Copy real source code
+COPY cabal.project ./ 
 COPY haskell/ ./haskell/
 
 # Remove Nix-specific zlib configuration
@@ -91,5 +107,7 @@ ENV EXOMONAD_GIT_SHA=${GIT_SHA}
 # Build all packages
 RUN cabal build all -j --ghc-options=-O1
 
-# Output: binaries in dist-newstyle/build/**/
-# Find with: cabal list-bin exomonad-control-server
+# Install binary to known location for easy COPY --from access
+# This avoids fragile glob paths in downstream Dockerfiles
+RUN mkdir -p /out && \
+    cp $(cabal list-bin exomonad-control-server) /out/exomonad-control-server

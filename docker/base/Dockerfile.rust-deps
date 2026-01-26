@@ -30,7 +30,8 @@ COPY rust/effector/Cargo.toml ./rust/effector/
 COPY rust/docker-ctl/Cargo.toml ./rust/docker-ctl/
 
 # Copy source for recipe generation (cargo-chef needs to parse)
-COPY rust/ ./rust/
+# COPY rust/ ./rust/  <-- REMOVED: Invalidates cache on source change. 
+# Explicit COPYs above are sufficient for recipe generation.
 
 # Generate recipe from workspace
 RUN cd rust && cargo chef prepare --recipe-path /recipe.json

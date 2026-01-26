@@ -88,7 +88,7 @@ COPY --from=rust-builder /app/rust/target/release/effector /usr/local/bin/effect
 COPY --from=rust-builder /app/rust/target/release/tui-spawner /usr/local/bin/tui-spawner
 
 # Copy pre-built Haskell binaries from builder context
-COPY --from=haskell-builder /app/dist-newstyle/build/*/ghc-*/exomonad-control-server-*/x/exomonad-control-server/build/exomonad-control-server/exomonad-control-server /usr/local/bin/exomonad-control-server
+COPY --from=haskell-builder /out/exomonad-control-server /usr/local/bin/exomonad-control-server
 
 # Set permissions
 RUN chmod +x /usr/local/bin/exomonad \

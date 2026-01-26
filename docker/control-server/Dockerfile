@@ -42,7 +42,7 @@ RUN cargo-binstall --no-confirm zellij && \
 
 # Copy pre-built binaries from builder contexts
 # These come from the BuildKit contexts defined in docker-bake.hcl
-COPY --from=haskell-builder /app/dist-newstyle/build/*/ghc-*/exomonad-control-server-*/x/exomonad-control-server/build/exomonad-control-server/exomonad-control-server /usr/local/bin/exomonad-control-server
+COPY --from=haskell-builder /out/exomonad-control-server /usr/local/bin/exomonad-control-server
 COPY --from=rust-builder /app/rust/target/release/docker-ctl /usr/local/bin/docker-ctl
 COPY --from=rust-builder /app/rust/target/release/tui-spawner /usr/local/bin/tui-spawner
 

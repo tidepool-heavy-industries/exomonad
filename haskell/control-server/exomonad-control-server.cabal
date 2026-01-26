@@ -63,6 +63,7 @@ library
         ExoMonad.Control.Export
         ExoMonad.Control.CodeExtraction
         ExoMonad.Control.Version
+        ExoMonad.Control.Version.TH
         -- StopHook (workflow stages)
         ExoMonad.Control.StopHook.Types
         ExoMonad.Control.StopHook.Graph
@@ -150,7 +151,8 @@ library
         mtl,
         ginger,
         parsec,
-        yaml
+        yaml,
+        template-haskell
     hs-source-dirs:   src
     default-language: GHC2024
     default-extensions:
