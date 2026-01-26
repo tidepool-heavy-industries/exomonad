@@ -76,9 +76,8 @@ runMockGitHub initial eff = run $ runState initial $ reinterpret (\case
     in s { msIssues = newIssues }
   ListIssues _ _ -> pure []
   CreateIssue _ -> pure 123
-  CloseIssue _ num -> pure num
-  ReopenIssue _ num -> pure num
-  GetRepo _ -> pure $ Repo "tidepool/tidepool"
+  CloseIssue _ num -> pure ()
+  ReopenIssue _ num -> pure ()
   ) eff
 
 applyUpdate :: UpdateIssueInput -> Issue -> Issue
@@ -233,6 +232,6 @@ defaultIssue num = Issue
   , issueBody = ""
   , issueState = IssueOpen
   , issueLabels = []
-  , issueAuthor = Author "ghost" ""
+  , issueAuthor = Author "ghost" Nothing
   , issueUrl = ""
   }

@@ -208,8 +208,7 @@ prReviewStatusLogic args = do
   maybePr <- getPullRequest repo args.prsaPrNumber True
   let prLevelReviews = case maybePr of
         Nothing -> []
-        -- FIXME: use lenses or something - positional pattern matching is fragile
-        Just (PullRequest _ _ _ _ _ _ _ _ _ _ _ _ reviews) -> map reviewToComment reviews
+        Just pr -> map reviewToComment pr.prReviews
 
   -- Combine all feedback
   let allComments = inlineComments ++ prLevelReviews

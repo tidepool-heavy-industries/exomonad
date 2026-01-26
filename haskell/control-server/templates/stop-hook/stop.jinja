@@ -27,7 +27,13 @@ Use the `file_pr` MCP tool to create a pull request:
 The tool will infer issue number and title from your branch.
 {% endif %}
 
-{# TODO: Wire pr_review_status to fetch actual pending_comments count #}
+{% if pr_exists and pr.pending_comments > 0 %}
+## Pending Feedback
+
+You have **{{ pr.pending_comments }}** pending review comment(s).
+
+Use the `pr_review_status` tool to check for required changes before stopping.
+{% endif %}
 
 {% if pr_exists %}
 ## PR Filed

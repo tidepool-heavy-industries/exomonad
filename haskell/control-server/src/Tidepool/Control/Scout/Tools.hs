@@ -17,6 +17,8 @@ module Tidepool.Control.Scout.Tools
 import Control.Monad.Freer (Eff)
 import Data.Aeson (FromJSON, ToJSON)
 import Data.Text (Text)
+import qualified Data.Text as T
+import qualified Data.Text.Read as TR
 import GHC.Generics (Generic)
 
 import Tidepool.Graph.Tool (ToolDef(..))
@@ -125,15 +127,29 @@ parseSymbolKind _ = SKFunction  -- Default to function for unknown kinds
 -- Example: "file:///path/to/File.hs:42:10"
 -- If parsing fails, returns a default location.
 parseLocation :: Text -> Location
-parseLocation _ =
-  -- FIXME: This is a stub. Proper implementation would:
-  -- 1. Split on ':' to extract URI, line, col
-  -- 2. Parse line/col as Ints
-  -- 3. Construct Location { locUri, locRange }
-  -- For now, we use a placeholder since Location isn't critical for selection.
-  let defaultPos = Position { posLine = 0, posCharacter = 0 }
+parseLocation text =
+  let parts = T.splitOn ":" text
+      n = length parts
+      defaultPos = Position { posLine = 0, posCharacter = 0 }
       defaultRange = Range { rangeStart = defaultPos, rangeEnd = defaultPos }
-  in Location
-       { locUri = "file:///unknown"
-       , locRange = defaultRange
-       }
+      defaultLoc = Location { locUri = "file:///unknown", locRange = defaultRange }
+      
+      -- Helper to parse int from text
+      parseInt t = case TR.decimal t of
+        Right (i, _) -> i
+        Left _ -> 0
+  in
+  if n >= 3 then
+    let colStr = last parts
+        lineStr = last (init parts)
+        uriParts = init (init parts)
+        uri = T.intercalate ":" uriParts
+        
+        line = parseInt lineStr
+        col = parseInt colStr
+        
+        pos = Position { posLine = line, posCharacter = col }
+        range = Range { rangeStart = pos, rangeEnd = pos }
+    in Location { locUri = uri, locRange = range }
+  else
+    defaultLoc

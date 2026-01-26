@@ -24,14 +24,14 @@ spec = do
 
     describe "basic request structure" $ do
       it "includes model and max_tokens" $ do
-        let req = buildAnthropicRequest baseConfig "Hello" Nothing
+        let req = buildAnthropicRequest baseConfig "Hello" Nothing Nothing
             Object fields = toJSON req
 
         KM.lookup "model" fields `shouldBe` Just (String "claude-sonnet-4-20250514")
         KM.lookup "max_tokens" fields `shouldBe` Just (Number 1024)
 
       it "includes user message in messages array" $ do
-        let req = buildAnthropicRequest baseConfig "Hello world" Nothing
+        let req = buildAnthropicRequest baseConfig "Hello world" Nothing Nothing
             Object fields = toJSON req
             Just (Array messages) = KM.lookup "messages" fields
             [Object msg] = V.toList messages
@@ -41,13 +41,13 @@ spec = do
 
       it "includes system prompt when provided" $ do
         let configWithSystem = baseConfig { acSystemPrompt = Just "You are a helpful assistant" }
-            req = buildAnthropicRequest configWithSystem "Hi" Nothing
+            req = buildAnthropicRequest configWithSystem "Hi" Nothing Nothing
             Object fields = toJSON req
 
         KM.lookup "system" fields `shouldBe` Just (String "You are a helpful assistant")
 
       it "omits system prompt when not provided" $ do
-        let req = buildAnthropicRequest baseConfig "Hi" Nothing
+        let req = buildAnthropicRequest baseConfig "Hi" Nothing Nothing
             Object fields = toJSON req
 
         -- Null values are filtered out, so 'system' should not be present
@@ -65,7 +65,7 @@ spec = do
                       ]
                   ]
               ]
-            req = buildAnthropicRequest baseConfig "Search for cats" (Just [anthropicTool])
+            req = buildAnthropicRequest baseConfig "Search for cats" (Just [anthropicTool]) Nothing
             Object fields = toJSON req
             Just (Array tools) = KM.lookup "tools" fields
             [Object tool] = V.toList tools
@@ -93,7 +93,7 @@ spec = do
               , "description" .= tool.atDescription
               , "input_schema" .= tool.atInputSchema
               ]
-            req = buildAnthropicRequest baseConfig "What's the weather?" (Just [toolJson])
+            req = buildAnthropicRequest baseConfig "What's the weather?" (Just [toolJson]) Nothing
             Object fields = toJSON req
             Just (Array tools) = KM.lookup "tools" fields
             [Object parsedTool] = V.toList tools
@@ -103,7 +103,7 @@ spec = do
         KM.member "parameters" parsedTool `shouldBe` False
 
       it "omits tools when None provided" $ do
-        let req = buildAnthropicRequest baseConfig "Hello" Nothing
+        let req = buildAnthropicRequest baseConfig "Hello" Nothing Nothing
             Object fields = toJSON req
 
         KM.member "tools" fields `shouldBe` False
@@ -111,7 +111,7 @@ spec = do
     describe "thinking budget" $ do
       it "includes thinking config when budget provided" $ do
         let configWithThinking = baseConfig { acThinking = ThinkingEnabled 5000 }
-            req = buildAnthropicRequest configWithThinking "Think hard" Nothing
+            req = buildAnthropicRequest configWithThinking "Think hard" Nothing Nothing
             Object fields = toJSON req
             Just (Object thinking) = KM.lookup "thinking" fields
 
@@ -119,7 +119,7 @@ spec = do
         KM.lookup "budget_tokens" thinking `shouldBe` Just (Number 5000)
 
       it "omits thinking when no budget" $ do
-        let req = buildAnthropicRequest baseConfig "Hello" Nothing
+        let req = buildAnthropicRequest baseConfig "Hello" Nothing Nothing
             Object fields = toJSON req
 
         KM.member "thinking" fields `shouldBe` False
@@ -208,7 +208,7 @@ spec = do
                 ]
             ]
 
-          anthropicReq = buildAnthropicRequest anthropicConfig "Test" (Just [anthropicTool])
+          anthropicReq = buildAnthropicRequest anthropicConfig "Test" (Just [anthropicTool]) Nothing
           openaiReq = buildOpenAIRequest openaiConfig "Test" (Just [openaiTool])
 
           Object anthropicFields = toJSON anthropicReq

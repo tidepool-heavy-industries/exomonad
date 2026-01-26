@@ -15,7 +15,7 @@ import qualified Data.Text as T
 import Test.Tasty
 import Test.Tasty.HUnit
 
-import Tidepool.Control.Export (readCodeAtRange)
+import Tidepool.Control.CodeExtraction (readCodeAtRange)
 import Tidepool.Effect.LSP (Range(..), Position(..))
 
 main :: IO ()

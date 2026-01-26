@@ -49,7 +49,7 @@ runMockGitHub stateRef inboxIssues = runM . interpret (\case
     pure $ findByNum num inboxIssues
   CloseIssue _ num -> do
     sendM $ modifyIORef stateRef (\s -> s { closedIssues = num : closedIssues s })
-    pure num
+    pure ()
   _ -> error "Not implemented in mock"
   )
   where
@@ -119,6 +119,6 @@ defaultIssue num = Issue
   , issueBody = ""
   , issueState = IssueOpen
   , issueLabels = []
-  , issueAuthor = Author "ghost" ""
+  , issueAuthor = Author "ghost" Nothing
   , issueUrl = ""
   }

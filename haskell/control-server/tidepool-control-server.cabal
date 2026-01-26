@@ -61,6 +61,7 @@ library
         Tidepool.Control.RoleConfig
         Tidepool.Control.GHTools
         Tidepool.Control.Export
+        Tidepool.Control.CodeExtraction
         -- StopHook (workflow stages)
         Tidepool.Control.StopHook.Types
         Tidepool.Control.StopHook.Graph
@@ -436,6 +437,7 @@ test-suite session-start-test
         base >= 4.17 && < 5,
         tidepool-control-server,
         tidepool-core,
+        tidepool-git-interpreter,
         text >= 2.0 && < 3,
         freer-simple,
         tasty,
