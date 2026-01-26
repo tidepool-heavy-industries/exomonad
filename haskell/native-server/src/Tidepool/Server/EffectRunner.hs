@@ -67,13 +67,15 @@ import Tidepool.LLM.Types
   , ApiKey(..)
   , BaseUrl(..)
   )
-import Tidepool.DevLog.Interpreter
-  ( runDevLog
-  , DevLogConfig(..)
-  , DevLogOutput(..)
-  , defaultDevLogConfig
+import Tidepool.Log.Interpreter
+  ( runLogFastLogger
+  , LogConfig(..)
+  , LogOutput(..)
+  , defaultLogConfig
   )
-import Tidepool.Effect.DevLog (DevLog, Verbosity(..))
+import Tidepool.Effect.Log (Log, LogLevel(..), LogContext, emptyLogContext)
+import Control.Monad.Freer.Reader (Reader, runReader)
+import System.Log.FastLogger (newStderrLoggerSet, flushLogStr, rmLoggerSet)
 
 -- Effect imports
 import Tidepool.Effects.UI (UI)
@@ -98,8 +100,8 @@ data InterpreterConfig = InterpreterConfig
     -- ^ OTLP/Grafana Tempo configuration (traces)
   , ecServiceName :: Text
     -- ^ Service name for trace attribution
-  , ecDevLogConfig :: DevLogConfig
-    -- ^ DevLog (session-scoped file logging) configuration
+  , ecLogConfig :: LogConfig
+    -- ^ Log (session-scoped file logging) configuration
   }
   deriving stock (Show)
 
@@ -116,7 +118,7 @@ defaultInterpreterConfig = InterpreterConfig
   , ecLokiConfig = defaultLokiConfig
   , ecOTLPConfig = Nothing  -- Disabled by default
   , ecServiceName = "tidepool-native"
-  , ecDevLogConfig = defaultDevLogConfig
+  , ecLogConfig = defaultLogConfig
   }
 
 -- | Load configuration from environment variables.
@@ -134,9 +136,9 @@ defaultInterpreterConfig = InterpreterConfig
 -- * @OTLP_USER@ - OTLP basic auth user (optional)
 -- * @OTLP_TOKEN@ - OTLP basic auth token (optional)
 -- * @SERVICE_NAME@ - Service name for traces (default: tidepool-native)
--- * @DEVLOG_DIR@ - DevLog output directory (default: disabled)
--- * @DEVLOG_VERBOSITY@ - Verbosity level: quiet|normal|verbose|trace (default: normal)
--- * @DEVLOG_LATEST@ - Create latest.log symlink: true|false (default: true)
+-- * @LOG_DIR@ - Log output directory (default: disabled, logs to stderr)
+-- * @LOG_LEVEL@ - Minimum log level: trace|debug|info|warn|error (default: info)
+-- * @LOG_LATEST@ - Create latest.log symlink: true|false (default: true)
 loadInterpreterConfig :: IO InterpreterConfig
 loadInterpreterConfig = do
   -- LLM secrets
@@ -158,22 +160,23 @@ loadInterpreterConfig = do
   otlpToken <- lookupEnv "OTLP_TOKEN"
   serviceName <- lookupEnv "SERVICE_NAME"
 
-  -- DevLog config
-  devLogDir <- lookupEnv "DEVLOG_DIR"
-  devLogVerbosity <- lookupEnv "DEVLOG_VERBOSITY"
-  devLogLatest <- lookupEnv "DEVLOG_LATEST"
+  -- Log config
+  logDir <- lookupEnv "LOG_DIR"
+  logLevel <- lookupEnv "LOG_LEVEL"
+  logLatest <- lookupEnv "LOG_LATEST"
 
-  let verbosity = case devLogVerbosity of
-        Just "quiet"   -> VQuiet
-        Just "verbose" -> VVerbose
-        Just "trace"   -> VTrace
-        _              -> VNormal
+  let minLevel = case logLevel of
+        Just "trace" -> Trace
+        Just "debug" -> Debug
+        Just "warn"  -> Warn
+        Just "error" -> Error
+        _            -> Info
 
-      devLogOutput = case devLogDir of
-        Just dir -> OutputFile dir
-        Nothing  -> OutputStderr  -- Default to stderr if no dir specified
+      logOutput = case logDir of
+        Just dir -> LogFile dir
+        Nothing  -> LogStderr  -- Default to stderr if no dir specified
 
-      createLatest = case devLogLatest of
+      createLatest = case logLatest of
         Just "false" -> False
         _            -> True
 
@@ -212,12 +215,13 @@ loadInterpreterConfig = do
           }
         Nothing -> Nothing
     , ecServiceName = maybe "tidepool-native" T.pack serviceName
-    , ecDevLogConfig = DevLogConfig
-        { dcVerbosity = verbosity
-        , dcOutput = devLogOutput
-        , dcSymlinkLatest = createLatest
-        , dcSessionId = Nothing  -- Auto-generated
-        , dcSessionName = Nothing
+    , ecLogConfig = LogConfig
+        { lcMinLevel = minLevel
+        , lcOutput = logOutput
+        , lcHumanReadable = True
+        , lcSessionId = Nothing  -- Auto-generated
+        , lcSessionName = Nothing
+        , lcSymlinkLatest = createLatest
         }
     }
 
@@ -259,9 +263,9 @@ mkInterpreterEnv config = do
 -- This composes the full effect stack:
 --
 -- @
--- Eff '[UI, Habitica, LLMComplete, DevLog, Observability, IO] a
+-- Eff '[UI, Habitica, LLMComplete, Log, Observability, IO] a
 --   → runObservabilityWithContext (interpret Observability)
---   → runDevLog (interpret DevLog)
+--   → runLogFastLogger (interpret Log)
 --   → runLLMComplete (interpret LLMComplete)
 --   → runHabitica (interpret Habitica)
 --   → runUI (interpret UI)
@@ -272,7 +276,7 @@ mkInterpreterEnv config = do
 -- 1. UI (first to peel) - handles user interaction
 -- 2. Habitica - makes Habitica API calls
 -- 3. LLMComplete - makes LLM API calls
--- 4. DevLog - session-scoped dev logging
+-- 4. Log - session-scoped logging (fast-logger backend)
 -- 5. Observability (last to peel) - records events and spans
 --
 -- Traces are automatically flushed to OTLP (Grafana Tempo) after execution
@@ -281,7 +285,7 @@ mkInterpreterEnv config = do
 -- Example:
 --
 -- @
--- myAgent :: Eff '[UI, Habitica, LLMComplete, DevLog, Observability, IO] String
+-- myAgent :: Eff '[UI, Habitica, LLMComplete, Log, Observability, IO] String
 -- myAgent = do
 --   publishEvent $ GraphTransition "entry" "greeting" "start"
 --   showText "Welcome!"
@@ -294,20 +298,28 @@ runEffects
   :: InterpreterEnv
   -> UIContext
   -> UICallback
-  -> Eff '[UI, Habitica, LLMComplete, DevLog, Observability, IO] a
+  -> Eff '[UI, Habitica, LLMComplete, Log, Reader LogContext, Observability, IO] a
   -> IO a
 runEffects env ctx callback action = do
   -- Create a fresh trace context for this request
   traceCtx <- newTraceContext
 
+  -- Create a logger set for this request
+  loggerSet <- newStderrLoggerSet 4096
+
   -- Run the effect stack
   result <- runM
     . runObservabilityWithContext traceCtx (ecLokiConfig $ eeConfig env)
-    . runDevLog (ecDevLogConfig $ eeConfig env)
+    . runReader emptyLogContext
+    . runLogFastLogger (ecLogConfig $ eeConfig env) loggerSet
     . runLLMComplete (eeLLMEnv env)
     . runHabitica (eeHabiticaEnv env)
     . runUI ctx callback
     $ action
+
+  -- Flush and clean up logger
+  flushLogStr loggerSet
+  rmLoggerSet loggerSet
 
   -- Flush traces to OTLP if configured
   case ecOTLPConfig (eeConfig env) of

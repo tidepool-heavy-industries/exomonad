@@ -98,7 +98,8 @@ import Tidepool.Effects.UI (UI)
 import Tidepool.Effects.Habitica (Habitica)
 import Tidepool.Effects.LLMProvider (LLMComplete)
 import Tidepool.Effects.Observability (Observability)
-import Tidepool.Effect.DevLog (DevLog)
+import Tidepool.Effect.Log (Log, LogContext)
+import Control.Monad.Freer.Reader (Reader)
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -111,8 +112,8 @@ data ServerMode
   | DevProxy Int           -- ^ Proxy to Vite dev server on given port (development)
   deriving (Show, Eq)
 
--- | Agent type - a computation using UI, LLM, DevLog, and Observability effects.
-type Agent = Eff '[UI, Habitica, LLMComplete, DevLog, Observability, IO] ()
+-- | Agent type - a computation using UI, LLM, Log, and Observability effects.
+type Agent = Eff '[UI, Habitica, LLMComplete, Log, Reader LogContext, Observability, IO] ()
 
 -- | Server configuration.
 data ServerConfig = ServerConfig
