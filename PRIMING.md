@@ -83,6 +83,11 @@ Binaries that must be built and available:
 │     │  Protocol types (ControlMessage, HookInput, etc.)                     │
 │     │  Must match: haskell/control-server/Protocol.hs                       │
 │     │                                                                        │
+│  effector ◄──────────────────  rust/effector/                              │
+│     │  Stateless IO executor (cabal, git, gh commands)                      │
+│     │  Runs in agent containers, returns structured JSON                    │
+│     │  Used by control-server via SshExec effect (POST /exec/{id})          │
+│     │                                                                        │
 │  tui-sidebar ◄───────────────  rust/tui-sidebar/                           │
 │        Ratatui-based sidebar rendering (connects to control.sock)           │
 │                                                                             │
@@ -187,10 +192,16 @@ The control-server binary depends on these packages:
 │  github-interpreter ◄── GitHub API (PR filing)                             │
 │  lsp-interpreter ◄──── LSP client (HLS communication)                      │
 │                                                                             │
-│  BUILD/DEV TOOLS:                                                           │
-│  cabal-interpreter ◄─── Cabal build operations (runCabalIO)                │
-│  justfile-interpreter ◄─ Just recipe execution (runJustfileIO)             │
-│  git-interpreter ◄───── Git operations via bd-interpreter (runGitIO)       │
+│  REMOTE EXECUTION (via docker-spawner /exec/{id}):                          │
+│  SshExec ◄───────────── Low-level HTTP exec to docker-spawner              │
+│     │  control-server/Effects/SshExec.hs                                    │
+│     │  Calls POST /exec/{container} with command JSON                       │
+│     │                                                                        │
+│  Higher-level effects (use SshExec under the hood):                         │
+│  Effector ◄──────────── Structured cabal/git/gh via effector binary        │
+│  Cabal ◄─────────────── Cabal build/test operations                        │
+│  Git ◄───────────────── Git status/diff operations                         │
+│  Justfile ◄──────────── Just recipe execution                              │
 │                                                                             │
 │  OBSERVABILITY:                                                             │
 │  observability-interpreter ◄── OpenTelemetry traces (Grafana Cloud)        │
@@ -199,22 +210,27 @@ The control-server binary depends on these packages:
                                     │ imports
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                       DSL CORE (haskell/dsl/core/)                           │
+│                       DSL CORE (haskell/dsl/)                                │
 │                                                                             │
-│  Graph DSL ─────────── Type-safe state machine definitions                  │
-│     EntryNode, LogicNode, ExitNode                                          │
-│     MCPExport annotation → auto-discovery                                   │
-│     MCPToolDef annotation → tool name + description                         │
+│  tidepool-core (dsl/core/) ◄── Main DSL package                            │
+│     Graph DSL ─────── Type-safe state machine definitions                   │
+│        EntryNode, LogicNode, ExitNode                                       │
+│        MCPExport annotation → auto-discovery                                │
+│        MCPToolDef annotation → tool name + description                      │
 │                                                                             │
-│  Effects ───────────── Algebraic effect types                               │
-│     BD, LSP, DockerSpawner, Zellij, FileSystem, Env, Log, ...              │
-│     Defined as GADTs, interpreted by effect interpreters                    │
+│     Effects ───────── Algebraic effect types                                │
+│        BD, LSP, DockerSpawner, Zellij, FileSystem, Env, Log, ...           │
+│        Defined as GADTs, interpreted by effect interpreters                 │
 │                                                                             │
-│  Templates ─────────── Typed Jinja (ginger)                                 │
-│     TypedTemplate with compile-time context validation                      │
+│     Templates ─────── Typed Jinja (ginger)                                  │
+│        TypedTemplate with compile-time context validation                   │
 │                                                                             │
-│  Schema ────────────── JSON Schema generation                               │
-│     HasJSONSchema typeclass → tool input schemas                            │
+│     Schema ────────── JSON Schema generation                                │
+│        HasJSONSchema typeclass → tool input schemas                         │
+│                                                                             │
+│  tidepool-teaching (dsl/teaching/) ◄── LLM teaching infrastructure         │
+│     Teaching mode for FunctionGemma training data capture                   │
+│     FineTrainingTeacher typeclass for structured examples                   │
 └───────────────────────────────────┬─────────────────────────────────────────┘
                                     │ depends on
                                     ▼

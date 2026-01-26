@@ -47,11 +47,11 @@ data ExecResult = ExecResult
 execCommand :: Member SshExec effs => ExecRequest -> Eff effs ExecResult
 execCommand = send . ExecCommand
 
--- | Interpreter: calls ssh-proxy HTTP API
+-- | Interpreter: calls docker-spawner HTTP API
 runSshExec :: LastMember IO effs => Text -> Eff (SshExec ': effs) a -> Eff effs a
-runSshExec sshProxyUrl = interpret $ \case
+runSshExec dockerSpawnerUrl = interpret $ \case
   ExecCommand req -> sendM $ do
-    let url = unpack $ sshProxyUrl <> "/exec"
+    let url = unpack $ dockerSpawnerUrl <> "/exec/" <> req.erContainer
     let timeoutMicros = req.erTimeout * 1000000 + 5000000 -- Command timeout + 5s buffer
     let request = setRequestResponseTimeout (responseTimeoutMicro timeoutMicros)
                 $ setRequestMethod "POST"
