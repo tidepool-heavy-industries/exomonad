@@ -18,8 +18,27 @@ COPY rust/docker-ctl ./docker-ctl
 COPY rust/mantle-shared ./mantle-shared
 COPY rust/hangar-config ./hangar-config
 
-# Create minimal workspace Cargo.toml (only crates needed for tui-spawner and docker-ctl)
-RUN echo '[workspace]\nresolver = "2"\nmembers = ["tui-spawner", "tui-sidebar", "tui-popup", "docker-ctl", "mantle-shared", "hangar-config"]' > Cargo.toml
+# Create minimal workspace Cargo.toml with required dependencies
+RUN cat > Cargo.toml <<'EOF'
+[workspace]
+resolver = "2"
+members = ["tui-spawner", "tui-sidebar", "tui-popup", "docker-ctl", "mantle-shared", "hangar-config"]
+
+[workspace.dependencies]
+anyhow = "1"
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4", features = ["derive", "env"] }
+nix = { version = "0.29", features = ["poll", "fs", "signal"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+strum = { version = "0.26", features = ["derive"] }
+tempfile = "3"
+thiserror = "2"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["v4"] }
+EOF
 
 # Cache bust AFTER setup, BEFORE build - invalidates only the build step
 # Usage: docker compose build --build-arg RUST_CACHEBUST=$(date +%s) control-server
