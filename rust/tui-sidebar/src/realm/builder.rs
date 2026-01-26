@@ -1,5 +1,5 @@
 use super::{ComponentType, ComponentWrapper};
-use crate::protocol::{Component, ComponentSpec, PopupDefinition, PopupState, VisibilityRule};
+use crate::protocol::{Component, PopupDefinition, PopupState, VisibilityRule};
 use crate::realm::components::*;
 
 use std::collections::HashMap;
@@ -20,8 +20,9 @@ pub fn build_components(
     let mut visibility_rules = Vec::new();
 
     for (index, component) in definition.components.iter().enumerate() {
-        id_to_index.insert(component.id.clone(), index);
-        visibility_rules.push(component.visible_when.clone());
+        id_to_index.insert(component.id().to_string(), index);
+        // Note: visibility_when not currently in new Component enum, use None
+        visibility_rules.push(None);
 
         let wrapper = build_component(component, state);
         components.push(wrapper);
@@ -32,9 +33,9 @@ pub fn build_components(
 
 /// Build a single component from its definition
 fn build_component(component: &Component, state: &PopupState) -> ComponentWrapper {
-    match &component.spec {
-        ComponentSpec::Text { content } => ComponentWrapper {
-            label: component.id.clone(),
+    match component {
+        Component::Text { id, content } => ComponentWrapper {
+            label: id.clone(),
             component: create_text_component(content),
             component_type: ComponentType::Text,
             focusable: false,
@@ -42,15 +43,16 @@ fn build_component(component: &Component, state: &PopupState) -> ComponentWrappe
             is_multiselect: false,
         },
 
-        ComponentSpec::Slider {
+        Component::Slider {
+            id,
             label,
             min,
             max,
             default,
         } => {
-            let value = state.get_number(&component.id).unwrap_or(*default);
+            let value = state.get_number(id).unwrap_or(*default);
             ComponentWrapper {
-                label: component.id.clone(),
+                label: id.clone(),
                 component: create_slider_component(label, *min, *max, value),
                 component_type: ComponentType::Slider,
                 focusable: true,
@@ -59,10 +61,10 @@ fn build_component(component: &Component, state: &PopupState) -> ComponentWrappe
             }
         }
 
-        ComponentSpec::Checkbox { label, default } => {
-            let checked = state.get_boolean(&component.id).unwrap_or(*default);
+        Component::Checkbox { id, label, default } => {
+            let checked = state.get_boolean(id).unwrap_or(*default);
             ComponentWrapper {
-                label: component.id.clone(),
+                label: id.clone(),
                 component: create_checkbox_component(label, checked),
                 component_type: ComponentType::Checkbox,
                 focusable: true,
@@ -71,18 +73,16 @@ fn build_component(component: &Component, state: &PopupState) -> ComponentWrappe
             }
         }
 
-        ComponentSpec::Textbox {
+        Component::Textbox {
+            id,
             label,
             placeholder,
             rows,
         } => {
-            let text = state
-                .get_text(&component.id)
-                .map(|s| s.to_string())
-                .unwrap_or_default();
+            let text = state.get_text(id).unwrap_or("").to_string();
             let height = rows.unwrap_or(1) as u16 + 1; // +1 for label
             ComponentWrapper {
-                label: component.id.clone(),
+                label: id.clone(),
                 component: create_textbox_component(label, &text, placeholder.as_deref(), *rows),
                 component_type: ComponentType::Textbox,
                 focusable: true,
@@ -91,16 +91,15 @@ fn build_component(component: &Component, state: &PopupState) -> ComponentWrappe
             }
         }
 
-        ComponentSpec::Choice {
+        Component::Choice {
+            id,
             label,
             options,
             default,
         } => {
-            let selected = state
-                .get_choice(&component.id)
-                .unwrap_or(default.unwrap_or(0));
+            let selected = state.get_choice(id).unwrap_or(default.unwrap_or(0));
             ComponentWrapper {
-                label: component.id.clone(),
+                label: id.clone(),
                 component: create_choice_component(label, options, selected),
                 component_type: ComponentType::Choice,
                 focusable: true,
@@ -109,14 +108,14 @@ fn build_component(component: &Component, state: &PopupState) -> ComponentWrappe
             }
         }
 
-        ComponentSpec::Multiselect { label, options } => {
+        Component::Multiselect { id, label, options } => {
             let selections = state
-                .get_multichoice(&component.id)
+                .get_multichoice(id)
                 .map(|s| s.to_vec())
                 .unwrap_or_else(|| vec![false; options.len()]);
             let height = (options.len() as u16 + 1).max(3); // +1 for label, minimum 3
             ComponentWrapper {
-                label: component.id.clone(),
+                label: id.clone(),
                 component: create_multiselect_component(label, options, &selections),
                 component_type: ComponentType::Multiselect,
                 focusable: true,
@@ -125,8 +124,8 @@ fn build_component(component: &Component, state: &PopupState) -> ComponentWrappe
             }
         }
 
-        ComponentSpec::Group { label } => ComponentWrapper {
-            label: component.id.clone(),
+        Component::Group { id, label } => ComponentWrapper {
+            label: id.clone(),
             component: create_group_label(label),
             component_type: ComponentType::Group,
             focusable: false,

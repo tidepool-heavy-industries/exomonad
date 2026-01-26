@@ -8,14 +8,86 @@ pub struct PopupDefinition {
     pub components: Vec<Component>,
 }
 
+/// Component deserialized from Haskell ToJSON format.
+/// Haskell uses flat structure with "type" field, not nested "spec" object.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct Component {
-    pub id: String,
-    pub label: String,
-    pub spec: ComponentSpec,
-    pub visible_when: Option<VisibilityRule>,
+#[serde(tag = "type")]
+pub enum Component {
+    #[serde(rename = "text")]
+    Text {
+        id: String,
+        content: String,
+    },
+    #[serde(rename = "slider")]
+    Slider {
+        id: String,
+        label: String,
+        min: f32,
+        max: f32,
+        default: f32,
+    },
+    #[serde(rename = "checkbox")]
+    Checkbox {
+        id: String,
+        label: String,
+        default: bool,
+    },
+    #[serde(rename = "textbox")]
+    Textbox {
+        id: String,
+        label: String,
+        placeholder: Option<String>,
+        rows: Option<u32>,
+    },
+    #[serde(rename = "choice")]
+    Choice {
+        id: String,
+        label: String,
+        options: Vec<String>,
+        default: Option<usize>,
+    },
+    #[serde(rename = "multiselect")]
+    Multiselect {
+        id: String,
+        label: String,
+        options: Vec<String>,
+    },
+    #[serde(rename = "group")]
+    Group {
+        id: String,
+        label: String,
+    },
 }
 
+impl Component {
+    /// Get the component ID.
+    pub fn id(&self) -> &str {
+        match self {
+            Component::Text { id, .. } => id,
+            Component::Slider { id, .. } => id,
+            Component::Checkbox { id, .. } => id,
+            Component::Textbox { id, .. } => id,
+            Component::Choice { id, .. } => id,
+            Component::Multiselect { id, .. } => id,
+            Component::Group { id, .. } => id,
+        }
+    }
+
+    /// Get the component label (for display). Text components use content as label.
+    pub fn label(&self) -> &str {
+        match self {
+            Component::Text { content, .. } => content,
+            Component::Slider { label, .. } => label,
+            Component::Checkbox { label, .. } => label,
+            Component::Textbox { label, .. } => label,
+            Component::Choice { label, .. } => label,
+            Component::Multiselect { label, .. } => label,
+            Component::Group { label, .. } => label,
+        }
+    }
+}
+
+// Legacy ComponentSpec kept for reference but not used
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "tag", content = "contents")]
 pub enum ComponentSpec {
@@ -51,15 +123,15 @@ pub enum ComponentSpec {
     },
 }
 
+/// Visibility rules from Haskell TUI.hs.
+/// Uses serde untagged since Haskell encodes these as simple objects.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "tag", content = "contents")]
+#[serde(untagged)]
 pub enum VisibilityRule {
-    Checked(String),                   // Visible if checkbox with ID is checked
-    Equals(HashMap<String, String>),   // Visible if choice with ID equals value
-    GreaterThan { id: String, min_value: f32 },
-    LessThan { id: String, max_value: f32 },
-    CountEquals { id: String, exact_count: usize },
-    CountGreaterThan { id: String, min_count: usize },
+    /// Show if checkbox with ID is checked. {"visible_when": "checkbox-id"}
+    Checked(String),
+    /// Show if choice equals value. {"visible_when": {"choice-id": "value"}}
+    Equals(HashMap<String, String>),
 }
 
 /// Internal state of the popup form
@@ -82,22 +154,22 @@ impl PopupState {
     pub fn new(definition: &PopupDefinition) -> Self {
         let mut values = HashMap::new();
         for component in &definition.components {
-            match &component.spec {
-                ComponentSpec::Slider { default, .. } => {
-                    values.insert(component.id.clone(), ElementValue::Number(*default));
+            match component {
+                Component::Slider { id, default, .. } => {
+                    values.insert(id.clone(), ElementValue::Number(*default));
                 }
-                ComponentSpec::Checkbox { default, .. } => {
-                    values.insert(component.id.clone(), ElementValue::Boolean(*default));
+                Component::Checkbox { id, default, .. } => {
+                    values.insert(id.clone(), ElementValue::Boolean(*default));
                 }
-                ComponentSpec::Textbox { .. } => {
-                    values.insert(component.id.clone(), ElementValue::Text(String::new()));
+                Component::Textbox { id, .. } => {
+                    values.insert(id.clone(), ElementValue::Text(String::new()));
                 }
-                ComponentSpec::Choice { default, .. } => {
-                    values.insert(component.id.clone(), ElementValue::Choice(default.unwrap_or(0)));
+                Component::Choice { id, default, .. } => {
+                    values.insert(id.clone(), ElementValue::Choice(default.unwrap_or(0)));
                 }
-                ComponentSpec::Multiselect { options, .. } => {
+                Component::Multiselect { id, options, .. } => {
                     values.insert(
-                        component.id.clone(),
+                        id.clone(),
                         ElementValue::MultiChoice(vec![false; options.len()]),
                     );
                 }
@@ -181,25 +253,35 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_component_serialization() {
-        let component = Component {
-            id: "my-slider".to_string(),
-            label: "Volume".to_string(),
-            spec: ComponentSpec::Slider {
-                label: "Volume".to_string(),
-                min: 0.0,
-                max: 100.0,
-                default: 50.0,
-            },
-            visible_when: None,
-        };
+    fn test_component_deserialization() {
+        // Test the Haskell-format JSON
+        let json = r#"{"id":"my-slider","type":"slider","label":"Volume","min":0.0,"max":100.0,"default":50.0}"#;
+        let parsed: Component = serde_json::from_str(json).unwrap();
 
-        let json = serde_json::to_string(&component).unwrap();
-        let expected = r#"{"id":"my-slider","type":"slider","label":"Volume","min":0.0,"max":100.0,"default":50.0}"#;
-        assert_eq!(json, expected);
+        match parsed {
+            Component::Slider { id, label, min, max, default } => {
+                assert_eq!(id, "my-slider");
+                assert_eq!(label, "Volume");
+                assert_eq!(min, 0.0);
+                assert_eq!(max, 100.0);
+                assert_eq!(default, 50.0);
+            }
+            _ => panic!("Expected Slider component"),
+        }
+    }
 
-        let parsed: Component = serde_json::from_str(expected).unwrap();
-        assert_eq!(parsed, component);
+    #[test]
+    fn test_text_component_deserialization() {
+        let json = r#"{"id":"msg","type":"text","content":"Hello World"}"#;
+        let parsed: Component = serde_json::from_str(json).unwrap();
+
+        match parsed {
+            Component::Text { id, content } => {
+                assert_eq!(id, "msg");
+                assert_eq!(content, "Hello World");
+            }
+            _ => panic!("Expected Text component"),
+        }
     }
 
     #[test]
@@ -207,17 +289,16 @@ mod tests {
         let def = PopupDefinition {
             title: "Test Popup".to_string(),
             components: vec![
-                Component {
+                Component::Checkbox {
                     id: "chk".to_string(),
                     label: "Check".to_string(),
-                    spec: ComponentSpec::Checkbox { label: "Check".to_string(), default: true },
-                    visible_when: None,
+                    default: true,
                 },
-                Component {
+                Component::Textbox {
                     id: "txt".to_string(),
                     label: "Text".to_string(),
-                    spec: ComponentSpec::Textbox { label: "Text".to_string(), placeholder: None, rows: None },
-                    visible_when: None,
+                    placeholder: None,
+                    rows: None,
                 },
             ],
         };
@@ -228,13 +309,15 @@ mod tests {
     }
 
     #[test]
-    fn test_visibility_rule_serialization() {
-        let rule = VisibilityRule::Checked("some-checkbox".to_string());
-        let json = serde_json::to_string(&rule).unwrap();
-        assert_eq!(json, "\"some-checkbox\"");
+    fn test_visibility_rule_deserialization() {
+        // String format for Checked
+        let json = r#""some-checkbox""#;
+        let rule: VisibilityRule = serde_json::from_str(json).unwrap();
+        assert_eq!(rule, VisibilityRule::Checked("some-checkbox".to_string()));
 
-        let rule_eq = VisibilityRule::Equals(HashMap::from([("choice".to_string(), "Value".to_string())]));
-        let json_eq = serde_json::to_string(&rule_eq).unwrap();
-        assert_eq!(json_eq, "{\"choice\":\"Value\"}");
+        // Object format for Equals
+        let json_eq = r#"{"choice":"Value"}"#;
+        let rule_eq: VisibilityRule = serde_json::from_str(json_eq).unwrap();
+        assert_eq!(rule_eq, VisibilityRule::Equals(HashMap::from([("choice".to_string(), "Value".to_string())])));
     }
 }

@@ -5,7 +5,7 @@ use tuirealm::ratatui::widgets::{Block, Clear};
 use tuirealm::{Frame, MockComponent, State, StateValue};
 
 use crate::protocol::{
-    ComponentSpec, ElementValue, PopupDefinition, PopupResult, PopupState, VisibilityRule,
+    Component, ElementValue, PopupDefinition, PopupResult, PopupState, VisibilityRule,
 };
 
 pub mod builder;
@@ -74,8 +74,8 @@ impl PopupComponent {
         for (index, component) in self.definition.components.iter().enumerate() {
             // Skip non-interactive components (Text and Group are display-only)
             if matches!(
-                component.spec,
-                ComponentSpec::Text { .. } | ComponentSpec::Group { .. }
+                component,
+                Component::Text { .. } | Component::Group { .. }
             ) {
                 continue;
             }
@@ -85,13 +85,15 @@ impl PopupComponent {
                 continue;
             }
 
+            let id = component.id();
+
             // Only include visible, interactive components
-            if let Some(value) = self.state.values.get(&component.id) {
-                let json_value = match (value, &component.spec) {
+            if let Some(value) = self.state.values.get(id) {
+                let json_value = match (value, component) {
                     (ElementValue::Number(n), _) => serde_json::json!(n),
                     (ElementValue::Boolean(b), _) => serde_json::json!(b),
                     (ElementValue::Text(s), _) => serde_json::json!(s),
-                    (ElementValue::Choice(idx), ComponentSpec::Choice { options, .. }) => {
+                    (ElementValue::Choice(idx), Component::Choice { options, .. }) => {
                         if let Some(selected) = options.get(*idx) {
                             serde_json::json!(selected)
                         } else {
@@ -100,7 +102,7 @@ impl PopupComponent {
                     }
                     (
                         ElementValue::MultiChoice(selections),
-                        ComponentSpec::Multiselect { options, .. },
+                        Component::Multiselect { options, .. },
                     ) => {
                         let selected: Vec<&String> = options
                             .iter()
@@ -112,7 +114,7 @@ impl PopupComponent {
                     }
                     _ => serde_json::json!(null),
                 };
-                result_values.insert(component.id.clone(), json_value);
+                result_values.insert(id.to_string(), json_value);
             }
         }
 
@@ -149,11 +151,9 @@ impl PopupComponent {
             VisibilityRule::Checked(id) => self.state.get_boolean(id).unwrap_or(false),
             VisibilityRule::Equals(conditions) => conditions.iter().all(|(id, expected_value)| {
                 if let Some(choice_index) = self.state.get_choice(id) {
-                    if let Some(component) = self.definition.components.iter().find(|c| c.id == *id)
+                    if let Some(component) = self.definition.components.iter().find(|c| c.id() == id)
                     {
-                        if let crate::protocol::ComponentSpec::Choice { options, .. } =
-                            &component.spec
-                        {
+                        if let Component::Choice { options, .. } = component {
                             return options
                                 .get(choice_index)
                                 .map(|actual| actual == expected_value)
@@ -163,30 +163,6 @@ impl PopupComponent {
                 }
                 false
             }),
-            VisibilityRule::GreaterThan { id, min_value } => self
-                .state
-                .get_number(id)
-                .map(|n| n > *min_value)
-                .unwrap_or(false),
-            VisibilityRule::LessThan { id, max_value } => self
-                .state
-                .get_number(id)
-                .map(|n| n < *max_value)
-                .unwrap_or(false),
-            VisibilityRule::CountEquals { id, exact_count } => self
-                .state
-                .get_multichoice(id)
-                .map(|selections| {
-                    selections.iter().filter(|&&selected| selected).count() == *exact_count
-                })
-                .unwrap_or(false),
-            VisibilityRule::CountGreaterThan { id, min_count } => self
-                .state
-                .get_multichoice(id)
-                .map(|selections| {
-                    selections.iter().filter(|&&selected| selected).count() > *min_count
-                })
-                .unwrap_or(false),
         }
     }
 
