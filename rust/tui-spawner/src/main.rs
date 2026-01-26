@@ -52,7 +52,7 @@ struct Args {
     zellij_container: String,
 
     /// Zellij session name (required for targeting the correct session)
-    #[arg(long, default_value = "tidepool")]
+    #[arg(long, default_value = "tidepool", env = "ZELLIJ_SESSION_NAME")]
     zellij_session: String,
 
     /// Dry run: print commands instead of executing
