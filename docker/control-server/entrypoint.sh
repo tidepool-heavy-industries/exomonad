@@ -15,13 +15,21 @@ echo "Starting Tidepool Control Server..."
 # --- Docker socket access for gosu ---
 # group_add in docker-compose.yml doesn't persist through gosu (which recalculates
 # supplemental groups from /etc/group). We must add user to the docker group here.
-if [ -S /var/run/docker.sock ] && [ -n "${DOCKER_GID:-}" ]; then
-    if ! getent group "$DOCKER_GID" > /dev/null 2>&1; then
-        groupadd -g "$DOCKER_GID" docker-host
-    fi
-    DOCKER_GROUP=$(getent group "$DOCKER_GID" | cut -d: -f1)
-    if ! id -nG user | grep -qw "$DOCKER_GROUP"; then
-        usermod -aG "$DOCKER_GROUP" user
+#
+# For remote Docker (e.g., Docker via SSH on NixOS), DOCKER_GID from the host may be
+# wrong or unset. Fall back to detecting the GID from the mounted socket.
+if [ -S /var/run/docker.sock ]; then
+    # Prefer DOCKER_GID env var, but fall back to stat if not set
+    SOCKET_GID="${DOCKER_GID:-$(stat -c '%g' /var/run/docker.sock 2>/dev/null || echo '')}"
+
+    if [ -n "$SOCKET_GID" ]; then
+        if ! getent group "$SOCKET_GID" > /dev/null 2>&1; then
+            groupadd -g "$SOCKET_GID" docker-host
+        fi
+        DOCKER_GROUP=$(getent group "$SOCKET_GID" | cut -d: -f1)
+        if ! id -nG user | grep -qw "$DOCKER_GROUP"; then
+            usermod -aG "$DOCKER_GROUP" user
+        fi
     fi
 fi
 
