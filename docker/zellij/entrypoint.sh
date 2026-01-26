@@ -65,13 +65,17 @@ case "${1:-zellij}" in
     zellij)
         export ZELLIJ_CONFIG_DIR=/etc/zellij
 
-        echo "Starting Zellij..."
+        echo "Zellij container ready."
         echo ""
-        echo "For mouse support, connect via:"
-        echo "  docker exec -it tidepool-zellij zellij attach"
+        echo "First connection (creates session with layout):"
+        echo "  docker exec -it tidepool-zellij zellij -s tidepool -n /etc/zellij/layouts/main.kdl"
         echo ""
-        # Layout creates session, exec attaches properly with PTY/mouse
-        exec gosu user zellij --layout /etc/zellij/layouts/main.kdl
+        echo "Subsequent connections:"
+        echo "  docker exec -it tidepool-zellij zellij attach tidepool"
+        echo ""
+
+        # Keep container alive - user creates session on first connect
+        exec tail -f /dev/null
         ;;
     *)
         exec gosu user "$@"
