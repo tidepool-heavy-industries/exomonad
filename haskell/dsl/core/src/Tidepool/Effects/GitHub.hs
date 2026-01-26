@@ -288,6 +288,7 @@ data ReviewComment = ReviewComment
   , rcLine      :: Maybe Int
   , rcState     :: ReviewState
   , rcCreatedAt :: UTCTime
+  , rcIsResolved :: Bool
   }
   deriving (Show, Eq, Generic, ToJSON)
 
@@ -321,6 +322,7 @@ instance FromJSON ReviewComment where
       <*> (v .: "line" <|> v .: "rcLine" <|> pure Nothing)
       <*> (v .: "state" <|> v .: "rcState" <|> pure ReviewCommented)
       <*> pure createdAt
+      <*> (v .: "isResolved" <|> v .: "rcIsResolved" <|> pure False)
 
 -- | GitHub pull request.
 data PullRequest = PullRequest

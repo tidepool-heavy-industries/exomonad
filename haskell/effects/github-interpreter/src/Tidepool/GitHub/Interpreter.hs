@@ -38,12 +38,14 @@ module Tidepool.GitHub.Interpreter
   , ghPrCreate
   , ghPrReviews
   , ghAuthCheck
+  , GqlResult(..)
   ) where
 
 import Control.Exception (try, SomeException)
 import Control.Monad (unless)
 import Control.Monad.Freer (Eff, LastMember, interpret, sendM)
-import Data.Aeson (eitherDecode)
+import Data.Aeson (eitherDecode, FromJSON(..), withObject, (.:), (.:?), Value(..))
+import Data.Aeson.Types (Parser)
 import Data.ByteString.Lazy qualified as LBS
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -64,6 +66,7 @@ import Tidepool.Effects.GitHub
   , PRCreateSpec(..)
   , PRUrl(..)
   , ReviewComment(..)
+  , ReviewState(..)
   , CreateIssueInput(..)
   , UpdateIssueInput(..)
   )
@@ -401,12 +404,43 @@ ghPrCreate config spec = do
     Right output ->
       pure $ PRUrl $ T.strip output
 
--- | Get pull request review comments using gh CLI.
+-- | Get pull request review comments using gh CLI (via GraphQL for resolution status).
 ghPrReviews :: GitHubConfig -> Text -> Int -> IO [ReviewComment]
 ghPrReviews config repo num = do
-  -- Calls: gh api repos/{owner}/{repo}/pulls/{num}/comments
-  let args = ["api", "repos/" <> T.unpack repo <> "/pulls/" <> show num <> "/comments"]
-  
+  let (owner, repoName) = case T.splitOn "/" repo of
+        [o, r] -> (o, r)
+        _      -> (repo, "")
+
+  let query =
+        "query($owner: String!, $repo: String!, $number: Int!) { \
+        \  repository(owner: $owner, name: $repo) { \
+        \    pullRequest(number: $number) { \
+        \      reviewThreads(last: 100) { \
+        \        nodes { \
+        \          isResolved \
+        \          comments(first: 100) { \
+        \            nodes { \
+        \              author { login } \
+        \              body \
+        \              path \
+        \              line \
+        \              state \
+        \              createdAt \
+        \            } \
+        \          } \
+        \        } \
+        \      } \
+        \    } \
+        \  } \
+        \}"
+
+  let args = [ "api", "graphql"
+             , "-f", "owner=" <> T.unpack owner
+             , "-f", "repo=" <> T.unpack repoName
+             , "-F", "number=" <> show num
+             , "-f", "query=" <> query
+             ]
+
   result <- runGhCommand config args
   case result of
     Left err -> do
@@ -414,10 +448,59 @@ ghPrReviews config repo num = do
       pure []
     Right output ->
       case eitherDecode (LBS.fromStrict $ TE.encodeUtf8 output) of
-        Right comments -> pure comments
+        Right (GqlResult comments) -> pure comments
         Left decodeErr -> do
           logDebug config $ "ghPrReviews: JSON decode failed: " <> decodeErr
           pure []
+
+-- | Helper type for parsing GraphQL response
+newtype GqlResult = GqlResult { _unGqlResult :: [ReviewComment] }
+
+instance FromJSON GqlResult where
+  parseJSON = withObject "GqlResult" $ \v -> do
+    -- data.repository.pullRequest.reviewThreads.nodes
+    nodes <- v .: "data" 
+         >>= (.: "repository") 
+         >>= (.: "pullRequest") 
+         >>= (.: "reviewThreads") 
+         >>= (.: "nodes") :: Parser [Value]
+    
+    comments <- mapM parseThread nodes
+    pure $ GqlResult (concat comments)
+    where
+      parseThread :: Value -> Parser [ReviewComment]
+      parseThread = withObject "thread" $ \t -> do
+        isResolved <- t .: "isResolved"
+        commentsNodes <- t .: "comments" >>= (.: "nodes")
+        mapM (parseComment isResolved) commentsNodes
+
+      parseComment :: Bool -> Value -> Parser ReviewComment
+      parseComment isResolved = withObject "comment" $ \c -> do
+        authorObj <- c .:? "author"
+        login <- case authorObj of
+          Just (Object a) -> a .: "login"
+          _               -> pure "unknown"
+        
+        body <- c .: "body"
+        path <- c .: "path"
+        line <- c .:? "line"
+        stateStr <- c .: "state"
+        createdAt <- c .: "createdAt"
+        
+        let state = case (stateStr :: Text) of
+              "PENDING"   -> ReviewPending
+              "SUBMITTED" -> ReviewCommented
+              _           -> ReviewCommented
+              
+        pure ReviewComment
+          { rcAuthor = login
+          , rcBody = body
+          , rcPath = Just path
+          , rcLine = line
+          , rcState = state
+          , rcCreatedAt = createdAt
+          , rcIsResolved = isResolved
+          }
 
 
 -- ════════════════════════════════════════════════════════════════════════════

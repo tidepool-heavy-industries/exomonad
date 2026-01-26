@@ -88,8 +88,8 @@ test_pr_discovery = do
 test_pr_serialization :: Assertion
 test_pr_serialization = do
   now <- getCurrentTime
-  let copilotComment = ReviewComment "Copilot" "Looks good" (Just "Main.hs") (Just 10) ReviewCommented now
-  let humanComment = ReviewComment "reviewer" "LGTM" Nothing Nothing ReviewApproved now
+  let copilotComment = ReviewComment "Copilot" "Looks good" (Just "Main.hs") (Just 10) ReviewCommented now False
+  let humanComment = ReviewComment "reviewer" "LGTM" Nothing Nothing ReviewApproved now True
   let copilotFeedback = AuthorFeedback
         { afPending = [copilotComment]
         , afResolved = []

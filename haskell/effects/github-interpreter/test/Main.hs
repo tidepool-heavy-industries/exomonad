@@ -11,6 +11,7 @@ import Data.ByteString.Lazy.Char8 qualified as LBS
 import Test.Hspec
 
 import Tidepool.Effects.GitHub
+import Tidepool.GitHub.Interpreter (GqlResult(..))
 
 
 main :: IO ()
@@ -18,15 +19,16 @@ main = hspec $ do
   describe "Issue JSON parsing" $ do
     it "parses a minimal issue" $ do
       let json = LBS.pack $ unlines
-            [ "{"
-            , "  \"number\": 123,"
-            , "  \"title\": \"Test issue\","
-            , "  \"body\": \"Issue body\","
-            , "  \"author\": { \"login\": \"testuser\", \"name\": \"Test User\" },"
-            , "  \"labels\": [],"
-            , "  \"state\": \"OPEN\","
-            , "  \"url\": \"https://github.com/owner/repo/issues/123\""
-            , "}"
+            [
+              "{",
+              "  \"number\": 123,",
+              "  \"title\": \"Test issue\",",
+              "  \"body\": \"Issue body\",",
+              "  \"author\": { \"login\": \"testuser\", \"name\": \"Test User\" },",
+              "  \"labels\": [],",
+              "  \"state\": \"OPEN\",",
+              "  \"url\": \"https://github.com/owner/repo/issues/123\"",
+              "}"
             ]
       case eitherDecode json :: Either String Issue of
         Left err -> expectationFailure $ "Failed to parse: " <> err
@@ -94,7 +96,8 @@ main = hspec $ do
             , "  \"state\": \"OPEN\","
             , "  \"url\": \"https://github.com/owner/repo/pull/100\","
             , "  \"headRefName\": \"feature-branch\","
-            , "  \"baseRefName\": \"main\""
+            , "  \"baseRefName\": \"main\","
+            , "  \"createdAt\": \"2024-01-15T10:00:00Z\""
             , "}"
             ]
       case eitherDecode json :: Either String PullRequest of
@@ -117,6 +120,7 @@ main = hspec $ do
             , "  \"url\": \"https://github.com/owner/repo/pull/200\","
             , "  \"headRefName\": \"fix\","
             , "  \"baseRefName\": \"main\","
+            , "  \"createdAt\": \"2024-01-15T10:00:00Z\","
             , "  \"reviews\": ["
             , "    {"
             , "      \"author\": { \"login\": \"reviewer\" },"
@@ -227,3 +231,59 @@ main = hspec $ do
         Left err -> expectationFailure $ "Failed to parse: " <> err
         Right comment -> do
           comment.rcState `shouldBe` ReviewCommented  -- Default when missing
+
+  describe "GraphQL Response parsing" $ do
+    it "parses nested review threads and propagates resolution status" $ do
+      let json = LBS.pack $ unlines
+            [ "{"
+            , "  \"data\": {"
+            , "    \"repository\": {"
+            , "      \"pullRequest\": {"
+            , "        \"reviewThreads\": {"
+            , "          \"nodes\": ["
+            , "            {"
+            , "              \"isResolved\": true,"
+            , "              \"comments\": {"
+            , "                \"nodes\": ["
+            , "                  {"
+            , "                    \"author\": { \"login\": \"reviewer1\" },"
+            , "                    \"body\": \"Resolved comment\","
+            , "                    \"path\": \"File.hs\","
+            , "                    \"state\": \"SUBMITTED\","
+            , "                    \"createdAt\": \"2024-01-15T10:30:00Z\""
+            , "                  }"
+            , "                ]"
+            , "              }"
+            , "            },"
+            , "            {"
+            , "              \"isResolved\": false,"
+            , "              \"comments\": {"
+            , "                \"nodes\": ["
+            , "                  {"
+            , "                    \"author\": null,"
+            , "                    \"body\": \"Unresolved comment from ghost\","
+            , "                    \"path\": \"Other.hs\","
+            , "                    \"state\": \"SUBMITTED\","
+            , "                    \"createdAt\": \"2024-01-15T11:00:00Z\""
+            , "                  }"
+            , "                ]"
+            , "              }"
+            , "            }"
+            , "          ]"
+            , "        }"
+            , "      }"
+            , "    }"
+            , "  }"
+            , "}"
+            ]
+      case eitherDecode json :: Either String GqlResult of
+        Left err -> expectationFailure $ "Failed to parse GraphQL: " <> err
+        Right (GqlResult comments) -> do
+          length comments `shouldBe` 2
+          let c1 = head comments
+          c1.rcAuthor `shouldBe` "reviewer1"
+          c1.rcIsResolved `shouldBe` True
+          
+          let c2 = last comments
+          c2.rcAuthor `shouldBe` "unknown"
+          c2.rcIsResolved `shouldBe` False
