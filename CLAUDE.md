@@ -19,6 +19,47 @@ The repository should be kept clean of dead code, placeholders, and half-done he
 
 Always prefer failure to an undocumented heuristic or fallback.
 
+### AGGRESSIVE LOGGING
+
+Silent failures are unacceptable. When code shells out to subprocesses, calls external services, or crosses process/container boundaries, **log aggressively**:
+
+1. **Before the call**: Log what you're about to do (command, key parameters)
+2. **After the call**: Log exit code, status, response size
+3. **On error**: Log stderr, error messages, enough context to debug without reproducing
+4. **On success**: Log the result summary (e.g., `button=submit`, `items=5`)
+
+**Pattern for subprocess calls (Haskell):**
+```haskell
+logInfo logger $ "[Component] Starting operation: " <> summary
+logDebug logger $ "[Component] Full params: " <> T.pack (show params)
+
+(exitCode, stdout, stderr) <- readProcessWithExitCode cmd args ""
+
+logInfo logger $ "[Component] Exit code: " <> T.pack (show exitCode)
+unless (null stderr) $
+  logDebug logger $ "[Component] stderr: " <> T.pack (take 500 stderr)
+
+case exitCode of
+  ExitFailure code -> do
+    logError logger $ "[Component] FAILED: " <> T.pack stderr
+    -- handle error
+  ExitSuccess -> do
+    logInfo logger $ "[Component] Success: " <> resultSummary
+    -- handle success
+```
+
+**Pattern for subprocess calls (Rust):**
+```rust
+tracing::info!("Executing: {} {}", cmd, args.join(" "));
+let status = Command::new(cmd).args(&args).status()?;
+tracing::info!("{} returned: {:?}", cmd, status);
+if !status.success() {
+    tracing::error!("{} failed with status: {}", cmd, status);
+}
+```
+
+The goal: when something fails, the logs should tell you exactly where and why without needing to add more logging and reproduce.
+
 
 ## Documentation Tree
 
