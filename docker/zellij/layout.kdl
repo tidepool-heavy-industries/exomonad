@@ -12,15 +12,17 @@ layout {
     tab name="Agents" focus=true {
         pane split_direction="vertical" {
             // TL (Tech Lead) agent - main coding agent
+            // Use --detach-keys to avoid conflict with outer docker attach (Ctrl+p,q)
+            // Wrap in loop for auto-reconnect if container restarts
             pane name="TL" focus=true size="50%" {
-                command "docker"
-                args "attach" "tidepool-tl"
+                command "bash"
+                args "-c" "while true; do docker attach --detach-keys 'ctrl-],]' tidepool-tl; echo '[TL disconnected - reconnecting in 2s]'; sleep 2; done"
             }
 
             // PM (Project Manager) agent - planning and coordination
             pane name="PM" size="50%" {
-                command "docker"
-                args "attach" "tidepool-pm"
+                command "bash"
+                args "-c" "while true; do docker attach --detach-keys 'ctrl-],]' tidepool-pm; echo '[PM disconnected - reconnecting in 2s]'; sleep 2; done"
             }
         }
     }

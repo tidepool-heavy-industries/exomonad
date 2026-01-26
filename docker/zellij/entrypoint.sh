@@ -64,10 +64,10 @@ export XDG_RUNTIME_DIR=/run/user/1000
 case "${1:-zellij}" in
     zellij)
         echo "Starting Zellij session 'main'..."
-        # Use --session to create a named session with config and layout
-        exec gosu user zellij --session main \
-            --config /etc/zellij/config.kdl \
-            --layout /etc/zellij/layouts/main.kdl
+        # Use ZELLIJ_CONFIG_DIR for config.kdl location
+        # --layout auto-creates a new session with the layout
+        export ZELLIJ_CONFIG_DIR=/etc/zellij
+        exec gosu user zellij --layout /etc/zellij/layouts/main.kdl
         ;;
     *)
         exec gosu user "$@"
