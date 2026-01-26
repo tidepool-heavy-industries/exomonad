@@ -25,7 +25,7 @@ import qualified Data.Text as T
 import Data.Time (UTCTime(..), Day(ModifiedJulianDay))
 import GHC.Generics (Generic)
 
-import Tidepool.Effects.GitHub (GitHub, getPullRequest, getPullRequestReviews, PullRequest(..), Review(..), ReviewComment(..), Author(..), Repo(..))
+import Tidepool.Effects.GitHub (GitHub, getPullRequest, getPullRequestReviews, PullRequest(..), Review(..), ReviewComment(..), ReviewState(..), Author(..), Repo(..))
 import Tidepool.Graph.Generic (AsHandler, type (:-))
 import Tidepool.Graph.Generic.Core (EntryNode, ExitNode, LogicNode)
 import Tidepool.Graph.Goto (Goto, GotoChoice, To, gotoExit)
@@ -155,7 +155,9 @@ reviewToComment (Review author body state) =
       -- is sufficient. If timestamps become semantically important, pass through
       -- the real created-at time instead of this placeholder.
       createdAt = UTCTime (ModifiedJulianDay 0) 0
-  in ReviewComment login body Nothing Nothing state createdAt
+      -- Treat APPROVED and DISMISSED as resolved.
+      isResolved = state `elem` [ReviewApproved, ReviewDismissed]
+  in ReviewComment login body Nothing Nothing state createdAt isResolved
 
 -- | Check if an author is Copilot or a bot.
 isCopilotAuthor :: Text -> Bool
@@ -163,16 +165,12 @@ isCopilotAuthor author =
   author == "copilot" || author == "github-actions[bot]" || "copilot" `T.isInfixOf` T.toLower author
 
 -- | Check if a comment is resolved.
--- NOTE: GitHub's "resolved conversation" status is not exposed via ReviewState.
--- Without explicit resolution data, we conservatively treat all comments as unresolved.
--- To properly track resolution, we would need to fetch conversation thread data from
--- GitHub's GraphQL API or use the /pulls/{number}/comments endpoint with resolved info.
 isCommentResolved :: ReviewComment -> Bool
-isCommentResolved _ = False
+isCommentResolved c = c.rcIsResolved
 
 -- | Extract author from comment.
 commentAuthor :: ReviewComment -> Text
-commentAuthor (ReviewComment author _ _ _ _ _) = author
+commentAuthor c = c.rcAuthor
 
 -- | Partition comments by author type and resolution status.
 partitionComments :: [ReviewComment] -> (AuthorFeedback, AuthorFeedback)
