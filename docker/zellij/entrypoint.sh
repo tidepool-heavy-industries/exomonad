@@ -63,10 +63,14 @@ export XDG_RUNTIME_DIR=/run/user/1000
 
 case "${1:-zellij}" in
     zellij)
-        echo "Starting Zellij session 'main'..."
-        # Use ZELLIJ_CONFIG_DIR for config.kdl location
-        # --layout auto-creates a new session with the layout
         export ZELLIJ_CONFIG_DIR=/etc/zellij
+
+        echo "Starting Zellij..."
+        echo ""
+        echo "For mouse support, connect via:"
+        echo "  docker exec -it tidepool-zellij zellij attach"
+        echo ""
+        # Layout creates session, exec attaches properly with PTY/mouse
         exec gosu user zellij --layout /etc/zellij/layouts/main.kdl
         ;;
     *)
