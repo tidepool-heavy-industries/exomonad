@@ -79,7 +79,6 @@ services:
     stdin_open: true
     environment:
       - TIDEPOOL_ROLE=tl
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - CONTROL_SERVER_URL=http://control-server:7432
       - MANTLE_CONTROL_SOCKET=/sockets/control.sock
     volumes:
@@ -106,7 +105,6 @@ services:
     stdin_open: true
     environment:
       - TIDEPOOL_ROLE=pm
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - CONTROL_SERVER_URL=http://control-server:7432
       - MANTLE_CONTROL_SOCKET=/sockets/control.sock
     volumes:
