@@ -10,6 +10,10 @@ services:
   # Control Server: MCP server for all agents
   # ===========================================================================
   control-server:
+    extends:
+      file: compose.base.yml
+      service: docker-socket-access
+    init: true
     build:
       context: .
       dockerfile: docker/control-server/Dockerfile
@@ -35,14 +39,13 @@ services:
       - tidepool-sockets:/sockets
       - tidepool-zellij:/run/user/1000
       - tidepool-gh-auth:/home/user/.config/gh
-      - /var/run/docker.sock:/var/run/docker.sock
     healthcheck:
       test: ["CMD-SHELL", "socat -u OPEN:/dev/null UNIX-CONNECT:/sockets/control.sock || exit 1"]
       interval: 5s
       timeout: 2s
       retries: 5
       start_period: 10s
-    restart: unless-stopped
+    restart: on-failure:5
     networks:
       - tidepool-internal
 
@@ -50,6 +53,10 @@ services:
   # Zellij: Visual multiplexer (human attaches here)
   # ===========================================================================
   zellij:
+    extends:
+      file: compose.base.yml
+      service: docker-socket-access
+    init: true
     build:
       context: .
       dockerfile: docker/zellij/Dockerfile
@@ -59,15 +66,14 @@ services:
     stdin_open: true
     depends_on:
       tl:
-        condition: service_started
+        condition: service_healthy
       pm:
-        condition: service_started
+        condition: service_healthy
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
       - tidepool-zellij:/run/user/1000
       - tidepool-sockets:/sockets
       - tidepool-worktrees:/worktrees
-    restart: unless-stopped
+    restart: "no"
     networks:
       - tidepool-internal
 
@@ -75,6 +81,10 @@ services:
   # TL (Tech Lead): Main coding agent
   # ===========================================================================
   tl:
+    extends:
+      file: compose.base.yml
+      service: docker-socket-access
+    init: true
     build:
       context: .
       dockerfile: docker/claude-agent/Dockerfile
@@ -91,11 +101,16 @@ services:
       - tidepool-sockets:/sockets
       - tidepool-claude-tl:/home/agent/.claude
       - tidepool-gh-auth:/home/agent/.config/gh
-      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       control-server:
         condition: service_healthy
-    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f 'node.*claude' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+    restart: on-failure:5
     networks:
       - tidepool-internal
 
@@ -103,6 +118,10 @@ services:
   # PM (Project Manager): Planning and coordination agent
   # ===========================================================================
   pm:
+    extends:
+      file: compose.base.yml
+      service: docker-socket-access
+    init: true
     build:
       context: .
       dockerfile: docker/claude-agent/Dockerfile
@@ -119,11 +138,16 @@ services:
       - tidepool-sockets:/sockets
       - tidepool-claude-pm:/home/agent/.claude
       - tidepool-gh-auth:/home/agent/.config/gh
-      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       control-server:
         condition: service_healthy
-    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f 'node.*claude' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+    restart: on-failure:5
     networks:
       - tidepool-internal
 
@@ -131,12 +155,15 @@ services:
   # Docker Spawner: Container lifecycle management
   # ===========================================================================
   docker-spawner:
+    extends:
+      file: compose.base.yml
+      service: docker-socket-access
+    init: true
     build:
       context: .
       dockerfile: docker/docker-spawner/Dockerfile
     container_name: tidepool-docker-spawner
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
       - tidepool-worktrees:/worktrees:rw
     environment:
       - RUST_LOG=info
@@ -151,7 +178,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
-    restart: unless-stopped
+    restart: on-failure:5
     networks:
       - tidepool-internal
 
@@ -160,9 +187,10 @@ services:
   # ===========================================================================
   openobserve:
     profiles: ["monitoring"]
+    init: true
     image: public.ecr.aws/zinclabs/openobserve:latest
     container_name: tidepool-openobserve
-    restart: unless-stopped
+    restart: on-failure:5
     ports:
       - "5080:5080"
       - "5081:5081"
@@ -187,6 +215,10 @@ services:
   # DEPRECATED: Orchestrator (kept for rollback)
   # ===========================================================================
   orchestrator:
+    extends:
+      file: compose.base.yml
+      service: docker-socket-access
+    init: true
     profiles: ["legacy"]
     platform: linux/amd64
     build:
@@ -225,8 +257,7 @@ services:
       - tidepool-gh-auth:/home/user/.config/gh
       - tidepool-ssh-keys:/home/user/.ssh
       - tidepool-zellij:/run/user/1000
-      - /var/run/docker.sock:/var/run/docker.sock
-    restart: unless-stopped
+    restart: on-failure:5
     networks:
       - tidepool-internal
     command: ["orchestrator"]

@@ -18,17 +18,20 @@ cd "$SCRIPT_DIR"
 
 echo "Rebuilding and refreshing IDE environment..."
 
-# 1. Force recreation of containers
+# 1. Detect Docker socket GID for group_add (enables docker socket access without runtime groupadd)
+export DOCKER_GID=$(stat -c '%g' /var/run/docker.sock 2>/dev/null || stat -f '%g' /var/run/docker.sock 2>/dev/null || echo 999)
+
+# 2. Force recreation of containers
 #    --build: Rebuilds images if Dockerfile changed
 #    --force-recreate: Kills old containers, starts fresh ones
 echo "Rebuilding containers..."
 docker compose up -d --build --force-recreate --remove-orphans
 
-# 2. Wait for services to be healthy
+# 3. Wait for services to be healthy
 echo "Waiting for services to initialize..."
 sleep 3
 
-# 3. Reconnect using the standard idempotent command
+# 4. Reconnect using the standard idempotent command
 #    gosu user: Run zellij as UID 1000 so session socket is user-owned
 #               This enables cross-container control via tui-spawner
 echo "Connecting to fresh Zellij session..."

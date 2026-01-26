@@ -69,7 +69,6 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # Install core dependencies (no SSH)
 RUN apt-get update && apt-get install -y \
-    tini \
     git \
     curl \
     ca-certificates \
@@ -164,8 +163,8 @@ ENV ZELLIJ_SESSION_NAME=main
 USER agent
 WORKDIR /workspace
 
-# Entrypoint uses tini for proper signal handling
-ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/entrypoint.sh"]
+# Entrypoint (init: true in docker-compose.yml provides signal handling)
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 
 # Default command: launch Claude Code with bypassPermissions
 CMD ["claude", "--permission-mode", "bypassPermissions"]

@@ -30,7 +30,6 @@ FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y \
     curl \
     ca-certificates \
-    tini \
     gosu \
     procps \
     && rm -rf /var/lib/apt/lists/*
@@ -67,5 +66,5 @@ ENV ZELLIJ_CONFIG_DIR=/etc/zellij
 ENV TERM=xterm-256color
 ENV XDG_RUNTIME_DIR=/run/user/1000
 
-ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/entrypoint.sh"]
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["zellij"]

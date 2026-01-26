@@ -12,8 +12,21 @@ set -euo pipefail
 
 echo "Starting Tidepool Control Server..."
 
+# --- Docker socket access for gosu ---
+# group_add in docker-compose.yml doesn't persist through gosu (which recalculates
+# supplemental groups from /etc/group). We must add user to the docker group here.
+if [ -S /var/run/docker.sock ] && [ -n "${DOCKER_GID:-}" ]; then
+    if ! getent group "$DOCKER_GID" > /dev/null 2>&1; then
+        groupadd -g "$DOCKER_GID" docker-host
+    fi
+    DOCKER_GROUP=$(getent group "$DOCKER_GID" | cut -d: -f1)
+    if ! id -nG user | grep -qw "$DOCKER_GROUP"; then
+        usermod -aG "$DOCKER_GROUP" user
+    fi
+fi
+
 # --- Fix volume ownership ---
-chown 1000:1000 /sockets 2>/dev/null || true
+[ -d /sockets ] && chown 1000:1000 /sockets
 chmod 755 /sockets
 
 # --- XDG_RUNTIME_DIR for Zellij ---
@@ -22,27 +35,12 @@ chown 1000:1000 /run/user/1000
 chmod 755 /run/user/1000
 
 # --- Cleanup stale sockets ---
-rm -f /sockets/control.sock /sockets/tui.sock 2>/dev/null || true
-
-# --- Docker socket access (for spawner communication) ---
-if [ -S /var/run/docker.sock ]; then
-    SOCKET_GID=$(stat -c '%g' /var/run/docker.sock)
-
-    if ! getent group "$SOCKET_GID" > /dev/null 2>&1; then
-        groupadd -g "$SOCKET_GID" docker-host 2>/dev/null || true
-    fi
-
-    DOCKER_GROUP=$(getent group "$SOCKET_GID" | cut -d: -f1)
-
-    if ! groups user | grep -q "\b$DOCKER_GROUP\b" 2>/dev/null; then
-        usermod -aG "$DOCKER_GROUP" user 2>/dev/null || true
-    fi
-fi
+rm -f /sockets/control.sock /sockets/tui.sock 2>/dev/null
 
 # --- Fix gh CLI auth directory ownership ---
 # Volume may have been created by root; ensure user can write to it
 mkdir -p /home/user/.config/gh
-chown -R 1000:1000 /home/user/.config/gh 2>/dev/null || true
+[ -d /home/user/.config/gh ] && chown -R 1000:1000 /home/user/.config/gh
 
 # --- Environment for user ---
 export HOME=/home/user

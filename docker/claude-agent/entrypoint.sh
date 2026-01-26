@@ -8,21 +8,6 @@ sudo chown 1000:1000 /run/user/1000
 sudo chmod 755 /run/user/1000
 export XDG_RUNTIME_DIR=/run/user/1000
 
-# --- Docker socket access (for tui-spawner) ---
-if [ -S /var/run/docker.sock ]; then
-    SOCKET_GID=$(stat -c '%g' /var/run/docker.sock)
-
-    if ! getent group "$SOCKET_GID" > /dev/null 2>&1; then
-        sudo groupadd -g "$SOCKET_GID" docker-host 2>/dev/null || true
-    fi
-
-    DOCKER_GROUP=$(getent group "$SOCKET_GID" | cut -d: -f1)
-
-    if ! groups agent | grep -q "\b$DOCKER_GROUP\b" 2>/dev/null; then
-        sudo usermod -aG "$DOCKER_GROUP" agent 2>/dev/null || true
-    fi
-fi
-
 # 1. Link worktree to shared git alternates if provided
 if [ -n "$GIT_ALTERNATES_OBJECT_DIR" ] && [ -d "/workspace/.git" ]; then
     echo "Linking worktree to shared git alternates: $GIT_ALTERNATES_OBJECT_DIR"
@@ -138,5 +123,5 @@ fi
 # Change to agent-specific workspace
 cd "$AGENT_WORKSPACE"
 
-# Execute the CMD via tini
-exec tini -- "$@"
+# Execute the CMD (init: true in docker-compose.yml provides signal handling)
+exec "$@"

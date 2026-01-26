@@ -15,22 +15,15 @@ echo "🚀 Tidepool Orchestrator starting..."
 # PHASE 1: Root Setup
 # =============================================================================
 
-# --- 1.1 Docker Socket Access ---
-# Detect host's docker GID and add user to matching group
-if [ -S /var/run/docker.sock ]; then
-    SOCKET_GID=$(stat -c '%g' /var/run/docker.sock)
-
-    # Create group if it doesn't exist
-    if ! getent group "$SOCKET_GID" > /dev/null 2>&1; then
-        echo "📦 Creating docker-host group (GID $SOCKET_GID)"
-        groupadd -g "$SOCKET_GID" docker-host
+# --- 1.1 Docker socket access for gosu ---
+# group_add in docker-compose.yml doesn't persist through gosu (which recalculates
+# supplemental groups from /etc/group). We must add user to the docker group here.
+if [ -S /var/run/docker.sock ] && [ -n "${DOCKER_GID:-}" ]; then
+    if ! getent group "$DOCKER_GID" > /dev/null 2>&1; then
+        groupadd -g "$DOCKER_GID" docker-host
     fi
-
-    DOCKER_GROUP=$(getent group "$SOCKET_GID" | cut -d: -f1)
-
-    # Add user to docker group
-    if ! groups user | grep -q "\b$DOCKER_GROUP\b"; then
-        echo "📦 Adding user to $DOCKER_GROUP group"
+    DOCKER_GROUP=$(getent group "$DOCKER_GID" | cut -d: -f1)
+    if ! id -nG user | grep -qw "$DOCKER_GROUP"; then
         usermod -aG "$DOCKER_GROUP" user
     fi
 fi
@@ -38,16 +31,16 @@ fi
 # --- 1.2 Volume Permissions ---
 # Named volumes are created as root; fix ownership
 echo "🔧 Fixing volume permissions..."
-chown -R user:user /home/user/.claude 2>/dev/null || true
-chown -R user:user /home/user/.ssh 2>/dev/null || true
-chown -R user:user /sockets 2>/dev/null || true
-chown -R user:user /var/log/tidepool 2>/dev/null || true
+[ -d /home/user/.claude ] && chown -R user:user /home/user/.claude
+[ -d /home/user/.ssh ] && chown -R user:user /home/user/.ssh
+[ -d /sockets ] && chown -R user:user /sockets
+[ -d /var/log/tidepool ] && chown -R user:user /var/log/tidepool
 
 # --- 1.3 Socket Symlinks ---
 # Create symlinks so local dev paths work in Docker
 mkdir -p /worktrees/.tidepool/sockets
-ln -sf /sockets/control.sock /worktrees/.tidepool/sockets/control.sock 2>/dev/null || true
-ln -sf /sockets/tui.sock /worktrees/.tidepool/sockets/tui.sock 2>/dev/null || true
+ln -sf /sockets/control.sock /worktrees/.tidepool/sockets/control.sock
+ln -sf /sockets/tui.sock /worktrees/.tidepool/sockets/tui.sock
 chown -R user:user /worktrees/.tidepool
 
 # --- 1.4 Claude Code Configuration ---
@@ -99,10 +92,10 @@ echo "✓ Claude Code configured"
 
 # --- 1.5 Runtime Cleanup ---
 # Remove stale Zellij state that might be root-owned from previous runs
-rm -rf /tmp/zellij-* 2>/dev/null || true
+rm -rf /tmp/zellij-* 2>/dev/null
 # Clear Zellij session cache to prevent restoring suspended pane states
-rm -rf /home/user/.cache/zellij 2>/dev/null || true
-rm -rf /home/user/.local/share/zellij/sessions 2>/dev/null || true
+rm -rf /home/user/.cache/zellij 2>/dev/null
+rm -rf /home/user/.local/share/zellij/sessions 2>/dev/null
 # Don't remove Zellij sockets - they may be in use by cross-container connections
 
 # Ensure XDG_RUNTIME_DIR exists for user
