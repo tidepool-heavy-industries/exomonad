@@ -7,10 +7,10 @@
 module Tidepool.Control.ExoTools.Internal
   ( ExoStatusResult(..)
   , getDevelopmentContext
-  , parseBeadId
+  , parseIssueNumber
   , slugify
   , formatPRBody
-  , extractBeadId
+  , extractIssueNumber
   ) where
 
 import Control.Applicative ((<|>))
@@ -28,55 +28,41 @@ import Text.Parsec.Pos (SourcePos)
 import Tidepool.Control.ExoTools.FilePR.Context (PRBodyContext(..), PRDepContext(..))
 import Tidepool.Graph.Template (TypedTemplate, typedTemplateFile, runTypedTemplate)
 
-import Tidepool.Effects.BD
-  ( BD
-  , BeadInfo(..)
-  , BeadStatus(..)
-  , DependencyInfo(..)
-  , getBead
-  , listBeads
-  , defaultListBeadsInput
-  )
 import Tidepool.Effects.Git (Git, WorktreeInfo(..), getWorktreeInfo, getDirtyFiles)
-import Tidepool.Effects.GitHub (GitHub, PullRequest(..), listPullRequests, Repo(..), PRFilter(..), defaultPRFilter)
+import Tidepool.Effects.GitHub
+  ( GitHub, PullRequest(..), Issue(..), listPullRequests, getIssue
+  , Repo(..), PRFilter(..), defaultPRFilter, IssueState(..), listIssues, defaultIssueFilter, IssueFilter(..)
+  )
 
--- | Brief bead info for summaries.
-data BeadBrief = BeadBrief
-  { bbId :: Text
-  , bbTitle :: Text
-  , bbPriority :: Int
+-- | Brief issue info for summaries.
+data IssueBrief = IssueBrief
+  { ibNumber :: Int
+  , ibTitle :: Text
   }
   deriving stock (Show, Eq, Generic)
 
-instance ToJSON BeadBrief where
+instance ToJSON IssueBrief where
   toJSON b = object
-    [ "id" .= bbId b
-    , "title" .= bbTitle b
-    , "priority" .= bbPriority b
+    [ "number" .= ibNumber b
+    , "title" .= ibTitle b
     ]
 
 -- | Sprint summary info.
 data SprintSummary = SprintSummary
   { ssTotalOpen :: Int
-  , ssReady :: [BeadBrief]
-  , ssBlocked :: Int
-  , ssInProgress :: Int
-  , ssRecentlyClosed :: [BeadBrief]
+  , ssOpenIssues :: [IssueBrief]
   }
   deriving stock (Show, Eq, Generic)
 
 instance ToJSON SprintSummary where
   toJSON s = object
     [ "total_open" .= ssTotalOpen s
-    , "ready" .= ssReady s
-    , "blocked" .= ssBlocked s
-    , "in_progress" .= ssInProgress s
-    , "recently_closed" .= ssRecentlyClosed s
+    , "open_issues" .= ssOpenIssues s
     ]
 
 -- | Result of exo_status tool.
 data ExoStatusResult = ExoStatusResult
-  { esrBead :: Maybe BeadInfo
+  { esrIssue :: Maybe Issue
   , esrWorktree :: Maybe WorktreeInfo
   , esrDirtyFiles :: [FilePath]
   , esrPR :: Maybe PullRequest
@@ -86,7 +72,7 @@ data ExoStatusResult = ExoStatusResult
 
 instance ToJSON ExoStatusResult where
   toJSON res = object
-    [ "bead" .= esrBead res
+    [ "issue" .= esrIssue res
     , "worktree" .= esrWorktree res
     , "dirty_files" .= esrDirtyFiles res
     , "pr" .= esrPR res
@@ -94,79 +80,72 @@ instance ToJSON ExoStatusResult where
     ]
 
 getDevelopmentContext
-  :: (Member BD es, Member Git es, Member GitHub es)
+  :: (Member Git es, Member GitHub es)
   => Maybe Text
   -> Eff es ExoStatusResult
-getDevelopmentContext maybeBeadId = do
+getDevelopmentContext maybeIssueId = do
   -- 1. Get Worktree/Git info
   mWt <- getWorktreeInfo
   dirtyFiles <- getDirtyFiles
 
-  -- 2. Determine Bead ID
-  let branchBeadId = case mWt of
-        Just wt -> parseBeadId wt.wiBranch
-        Nothing -> Nothing
-      targetBeadId = maybeBeadId <|> branchBeadId
+  -- TODO: Configurable repo
+  let repo = Repo "tidepool/tidepool"
 
-  -- 3. Get Bead Info
-  mBead <- case targetBeadId of
-    Just bid -> getBead bid
+  -- 2. Determine Issue Number
+  let branchIssueNum = case mWt of
+        Just wt -> parseIssueNumber wt.wiBranch
+        Nothing -> Nothing
+      targetIssueNum = (maybeIssueId >>= parseNum) <|> branchIssueNum
+      parseNum t = case (reads (T.unpack t) :: [(Int, String)]) of
+        [(n, "")] -> Just n
+        _ -> Nothing
+
+  -- 3. Get Issue Info
+  mIssue <- case targetIssueNum of
+    Just num -> getIssue repo num False
     Nothing -> pure Nothing
 
   -- 4. Get PR Info
   mPR <- case mWt of
     Just wt -> do
-      let repo = Repo "tidepool-heavy-industries/tidepool"
-          filt = defaultPRFilter { pfBase = Just "main", pfLimit = Just 100 }
+      let filt = defaultPRFilter { pfBase = Just "main", pfLimit = Just 100 }
       prs <- listPullRequests repo filt
       pure $ find (\pr -> pr.prHeadRefName == wt.wiBranch) prs
     Nothing -> pure Nothing
 
-  -- 5. Get Sprint Summary if no bead context
-  mSprintSummary <- case mBead of
+  -- 5. Get Sprint Summary if no issue context
+  mSprintSummary <- case mIssue of
     Just _ -> pure Nothing
     Nothing -> do
-      allBeads <- listBeads defaultListBeadsInput
-      let openStatuses = [StatusOpen, StatusInProgress, StatusHooked, StatusBlocked]
-          isOpen b = b.biStatus `elem` openStatuses
-          isReady b = b.biStatus == StatusOpen && all (\d -> d.diStatus == StatusClosed) b.biDependencies
-          isClosed b = b.biStatus == StatusClosed
-          
-          toBeadBrief b = BeadBrief
-            { bbId = b.biId
-            , bbTitle = b.biTitle
-            , bbPriority = b.biPriority
+      allIssues <- listIssues repo (defaultIssueFilter { ifState = Just IssueOpen })
+      let toIssueBrief i = IssueBrief
+            { ibNumber = i.issueNumber
+            , ibTitle = i.issueTitle
             }
 
-          readyBeads = sortOn (.biPriority) $ filter isReady allBeads
-          recentlyClosedBeads = sortOn (Down . (.biClosedAt)) $ filter isClosed allBeads
-
       pure $ Just SprintSummary
-        { ssTotalOpen = length $ filter isOpen allBeads
-        , ssReady = map toBeadBrief $ take 5 readyBeads
-        , ssBlocked = length $ filter (\b -> b.biStatus == StatusBlocked) allBeads
-        , ssInProgress = length $ filter (\b -> b.biStatus == StatusInProgress) allBeads
-        , ssRecentlyClosed = map toBeadBrief $ take 3 recentlyClosedBeads
+        { ssTotalOpen = length allIssues
+        , ssOpenIssues = map toIssueBrief $ take 10 allIssues
         }
 
   pure ExoStatusResult
-    { esrBead = mBead
+    { esrIssue = mIssue
     , esrWorktree = mWt
     , esrDirtyFiles = dirtyFiles
     , esrPR = mPR
     , esrSprintSummary = mSprintSummary
     }
 
--- | Parse bead ID from branch name (bd-{id}/* convention)
-parseBeadId :: Text -> Maybe Text
-parseBeadId branch =
-  if "bd-" `T.isPrefixOf` branch
+-- | Parse issue number from branch name (gh-{num}/* convention)
+parseIssueNumber :: Text -> Maybe Int
+parseIssueNumber branch =
+  if "gh-" `T.isPrefixOf` branch
   then
     let content = T.drop 3 branch
-        (beadId, rest) = T.break (== '/') content
-    in if T.null beadId || T.null (T.drop 1 rest) -- Must have / and something after
-       then Nothing
-       else Just $ "tidepool-" <> beadId
+        (numStr, _) = T.break (== '/') content
+    in case (reads (T.unpack numStr) :: [(Int, String)]) of
+         [(n, "")] -> Just n
+         _ -> Nothing
   else Nothing
 
 -- | Slugify a title for use in branch/directory names.
@@ -183,30 +162,28 @@ slugify title =
 prBodyTemplate :: TypedTemplate PRBodyContext SourcePos
 prBodyTemplate = $(typedTemplateFile ''PRBodyContext "templates/hook/pr-body.jinja")
 
--- | Format PR body from bead info with testing and compromises sections.
-formatPRBody :: BeadInfo -> Text -> Maybe Text -> Text
-formatPRBody bead testing compromises = runTypedTemplate ctx prBodyTemplate
+-- | Format PR body from issue info with testing and compromises sections.
+formatPRBody :: Issue -> Text -> Maybe Text -> Text
+formatPRBody issue testing compromises = runTypedTemplate ctx prBodyTemplate
   where
     ctx = PRBodyContext
-      { bead_id = bead.biId
-      , description = bead.biDescription
+      { issue_number = T.pack (show issue.issueNumber)
+      , description = Just issue.issueBody
       , testing = testing
       , compromises = compromises
-      , dependencies = map toDep bead.biDependencies
-      , dependents = map toDep bead.biDependents
-      }
-    toDep dep = PRDepContext
-      { id = dep.diId
-      , title = dep.diTitle
+      , dependencies = [] -- TODO: Parse from body if needed
+      , dependents = []
       }
 
--- | Extract bead ID from PR title.
--- Pattern: [tidepool-XXX]
-extractBeadId :: Text -> Maybe Text
-extractBeadId title =
-  let (_, rest) = T.breakOn "[tidepool-" title
+-- | Extract issue number from PR title.
+-- Pattern: [gh-XXX]
+extractIssueNumber :: Text -> Maybe Int
+extractIssueNumber title =
+  let (_, rest) = T.breakOn "[gh-" title
   in if T.null rest
      then Nothing
      else
-       let (idPart, _) = T.break (== ']') (T.drop 1 rest)
-       in Just idPart
+       let (numStr, _) = T.break (== ']') (T.drop 4 rest)
+       in case (reads (T.unpack numStr) :: [(Int, String)]) of
+            [(n, "")] -> Just n
+            _ -> Nothing

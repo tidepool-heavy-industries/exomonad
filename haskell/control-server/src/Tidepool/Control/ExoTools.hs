@@ -37,9 +37,9 @@ module Tidepool.Control.ExoTools
   , FeedbackSummary(..)
 
     -- * Helpers
-  , parseBeadId
+  , parseIssueNumber
   , slugify
-  , extractBeadId
+  , extractIssueNumber
   ) where
 
 import Tidepool.Control.ExoTools.Status

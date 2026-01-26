@@ -1,25 +1,19 @@
-# Task: {{ bead.title }}
+# Task: {{ issue.title }}
 
-**ID:** {{ bead.id }}
+**Issue Number:** #{{ issue.number }}
 **Branch:** {{ branch }}
-**Status:** {{ bead.status }}
-**Priority:** P{{ bead.priority }}
+**Status:** {{ issue.status }}
+**Priority:** P{{ issue.priority }}
 
 ## Description
 
-{{ bead.description | default("No description provided.") }}
+{{ issue.description | default("No description provided.") }}
 
-{% if bead.acceptance_criteria %}
-## Acceptance Criteria
+{% if issue.labels %}
+## Labels
 
-{{ bead.acceptance_criteria }}
-{% endif %}
-
-{% if bead.depends_on %}
-## Dependencies
-
-{% for dep in bead.depends_on %}
-- **{{ dep.dep_id }}**: {{ dep.dep_title }} (P{{ dep.dep_priority }})
+{% for label in issue.labels %}
+- {{ label }}
 {% endfor %}
 {% endif %}
 
@@ -29,16 +23,15 @@ You are a **Dev agent** executing this task. Your workflow:
 
 1. **Implement** the changes described above
 2. **Test** your changes compile: `cabal build`
-3. **Commit** with message: `[{{ bead.id }}] <description>`
+3. **Commit** with message: `[gh-{{ issue.number }}] <description>`
 4. **Push** to remote: `git push -u origin {{ branch }}`
 5. **File PR** using the `file_pr` MCP tool (NOT gh CLI)
 
 ## Important Notes
 
-- Do NOT use `bd` commands - the orchestrator manages beads
+- Do NOT use `gh` commands for issue management - the orchestrator manages issues
 - Do NOT spawn other agents - you are a leaf worker
 - Focus on implementation quality and test coverage
-- If blocked, use `signal_blocker` tool to escalate
 
 ## Session Close
 
@@ -46,6 +39,6 @@ Before finishing, ensure:
 ```
 git status          # Check changes
 git add <files>     # Stage changes
-git commit -m "[{{ bead.id }}] ..."
+git commit -m "[gh-{{ issue.number }}] ..."
 git push
 ```

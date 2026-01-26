@@ -64,6 +64,8 @@ import Tidepool.Effects.GitHub
   , PRCreateSpec(..)
   , PRUrl(..)
   , ReviewComment(..)
+  , CreateIssueInput(..)
+  , UpdateIssueInput(..)
   )
 
 
@@ -94,11 +96,31 @@ defaultGitHubConfig = GitHubConfig
 -- This interpreter shells out to the gh command for each operation.
 runGitHubIO :: LastMember IO effs => GitHubConfig -> Eff (GitHub ': effs) a -> Eff effs a
 runGitHubIO config = interpret $ \case
-  -- Legacy (stub - still errors)
-  CreateIssue (Repo repo) title _ _ -> do
-    sendM $ error $ "GitHub.createIssue: not implemented for " <> T.unpack repo <> " - " <> T.unpack title
-
   -- Issue operations
+  CreateIssue input ->
+    sendM $ ghIssueCreate config input
+
+  UpdateIssue (Repo repo) num input ->
+    sendM $ ghIssueEdit config repo num input
+
+  CloseIssue (Repo repo) num ->
+    sendM $ ghIssueClose config repo num
+
+  ReopenIssue (Repo repo) num ->
+    sendM $ ghIssueReopen config repo num
+
+  AddIssueLabel (Repo repo) num label ->
+    sendM $ ghIssueLabelAdd config repo num label
+
+  RemoveIssueLabel (Repo repo) num label ->
+    sendM $ ghIssueLabelRemove config repo num label
+
+  AddIssueAssignee (Repo repo) num assignee ->
+    sendM $ ghIssueAssigneeAdd config repo num assignee
+
+  RemoveIssueAssignee (Repo repo) num assignee ->
+    sendM $ ghIssueAssigneeRemove config repo num assignee
+
   GetIssue (Repo repo) num includeComments ->
     sendM $ ghIssueView config repo num includeComments
 
@@ -126,6 +148,117 @@ runGitHubIO config = interpret $ \case
 -- ════════════════════════════════════════════════════════════════════════════
 -- CLI FUNCTIONS - ISSUES
 -- ════════════════════════════════════════════════════════════════════════════
+
+-- | Create an issue using gh CLI.
+ghIssueCreate :: GitHubConfig -> CreateIssueInput -> IO Int
+ghIssueCreate config input = do
+  let args = [ "issue", "create"
+             , "--repo", T.unpack input.ciiRepo.unRepo
+             , "--title", T.unpack input.ciiTitle
+             , "--body", T.unpack input.ciiBody
+             ]
+             ++ concatMap (\l -> ["--label", T.unpack l]) input.ciiLabels
+             ++ concatMap (\a -> ["--assignee", T.unpack a]) input.ciiAssignees
+
+  result <- runGhCommand config args
+  case result of
+    Left err -> do
+      logDebug config $ "ghIssueCreate: gh command failed: " <> T.unpack err
+      error $ "Failed to create issue: " <> T.unpack err
+    Right output ->
+      -- gh issue create returns the URL of the created issue, e.g.
+      -- https://github.com/owner/repo/issues/123
+      let parts = T.splitOn "/" (T.strip output)
+      in case (reverse parts) of
+        (numStr : _) -> case (reads (T.unpack numStr) :: [(Int, String)]) of
+          [(n, "")] -> pure n
+          _ -> error $ "ghIssueCreate: failed to parse issue number from " <> T.unpack output
+        _ -> error $ "ghIssueCreate: unexpected output format: " <> T.unpack output
+
+
+-- | Edit an issue using gh CLI.
+ghIssueEdit :: GitHubConfig -> Text -> Int -> UpdateIssueInput -> IO ()
+ghIssueEdit config repo num input = do
+  let args = [ "issue", "edit", show num
+             , "--repo", T.unpack repo
+             ]
+             ++ maybe [] (\t -> ["--title", T.unpack t]) input.uiiTitle
+             ++ maybe [] (\b -> ["--body", T.unpack b]) input.uiiBody
+             ++ maybe [] (\case
+                           IssueOpen -> ["--state", "open"]
+                           IssueClosed -> ["--state", "closed"]) input.uiiState
+             ++ maybe [] (\ls -> ["--label", T.unpack $ T.intercalate "," ls]) input.uiiLabels
+             ++ maybe [] (\as -> ["--assignee", T.unpack $ T.intercalate "," as]) input.uiiAssignees
+
+  -- Only run if there are actual changes
+  if length args <= 4 -- ["issue", "edit", numStr, "--repo", repo]
+    then pure ()
+    else do
+      result <- runGhCommand config args
+      case result of
+        Left err -> logDebug config $ "ghIssueEdit: gh command failed: " <> T.unpack err
+        Right _ -> pure ()
+
+
+-- | Close an issue using gh CLI.
+ghIssueClose :: GitHubConfig -> Text -> Int -> IO ()
+ghIssueClose config repo num = do
+  let args = ["issue", "close", show num, "--repo", T.unpack repo]
+  result <- runGhCommand config args
+  case result of
+    Left err -> logDebug config $ "ghIssueClose: gh command failed: " <> T.unpack err
+    Right _ -> pure ()
+
+
+-- | Reopen an issue using gh CLI.
+ghIssueReopen :: GitHubConfig -> Text -> Int -> IO ()
+ghIssueReopen config repo num = do
+  let args = ["issue", "reopen", show num, "--repo", T.unpack repo]
+  result <- runGhCommand config args
+  case result of
+    Left err -> logDebug config $ "ghIssueReopen: gh command failed: " <> T.unpack err
+    Right _ -> pure ()
+
+
+-- | Add a label to an issue.
+ghIssueLabelAdd :: GitHubConfig -> Text -> Int -> Text -> IO ()
+ghIssueLabelAdd config repo num label = do
+  let args = ["issue", "edit", show num, "--repo", T.unpack repo, "--add-label", T.unpack label]
+  result <- runGhCommand config args
+  case result of
+    Left err -> logDebug config $ "ghIssueLabelAdd: gh command failed: " <> T.unpack err
+    Right _ -> pure ()
+
+
+-- | Remove a label from an issue.
+ghIssueLabelRemove :: GitHubConfig -> Text -> Int -> Text -> IO ()
+ghIssueLabelRemove config repo num label = do
+  let args = ["issue", "edit", show num, "--repo", T.unpack repo, "--remove-label", T.unpack label]
+  result <- runGhCommand config args
+  case result of
+    Left err -> logDebug config $ "ghIssueLabelRemove: gh command failed: " <> T.unpack err
+    Right _ -> pure ()
+
+
+-- | Add an assignee to an issue.
+ghIssueAssigneeAdd :: GitHubConfig -> Text -> Int -> Text -> IO ()
+ghIssueAssigneeAdd config repo num assignee = do
+  let args = ["issue", "edit", show num, "--repo", T.unpack repo, "--add-assignee", T.unpack assignee]
+  result <- runGhCommand config args
+  case result of
+    Left err -> logDebug config $ "ghIssueAssigneeAdd: gh command failed: " <> T.unpack err
+    Right _ -> pure ()
+
+
+-- | Remove an assignee from an issue.
+ghIssueAssigneeRemove :: GitHubConfig -> Text -> Int -> Text -> IO ()
+ghIssueAssigneeRemove config repo num assignee = do
+  let args = ["issue", "edit", show num, "--repo", T.unpack repo, "--remove-assignee", T.unpack assignee]
+  result <- runGhCommand config args
+  case result of
+    Left err -> logDebug config $ "ghIssueAssigneeRemove: gh command failed: " <> T.unpack err
+    Right _ -> pure ()
+
 
 -- | List issues using gh CLI.
 ghIssueList :: GitHubConfig -> Text -> IssueFilter -> IO [Issue]

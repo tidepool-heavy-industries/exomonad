@@ -60,7 +60,7 @@ library
         Tidepool.Control.TUITools
         Tidepool.Control.FeedbackTools
         Tidepool.Control.RoleConfig
-        Tidepool.Control.BDTools
+        Tidepool.Control.GHTools
         Tidepool.Control.Export
         -- StopHook (workflow stages)
         Tidepool.Control.StopHook.Types
@@ -120,9 +120,9 @@ library
         tidepool-core,
         tidepool-training-generator,
         tidepool-teaching,
-        tidepool-bd-interpreter,
         tidepool-cabal-interpreter,
         tidepool-github-interpreter,
+        tidepool-git-interpreter,
         tidepool-env-interpreter,
         tidepool-justfile-interpreter,
         tidepool-worktree-interpreter,

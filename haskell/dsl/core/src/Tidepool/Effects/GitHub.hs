@@ -16,12 +16,19 @@
 --
 -- = Implementation
 --
--- Read operations are implemented via the @gh@ CLI tool in
--- @tidepool-github-interpreter@. Write operations (CreateIssue) remain stubbed.
+-- Operations are implemented via the @gh@ CLI tool in
+-- @tidepool-github-interpreter@.
 module Tidepool.Effects.GitHub
   ( -- * Effect
     GitHub(..)
   , createIssue
+  , updateIssue
+  , closeIssue
+  , reopenIssue
+  , addIssueLabel
+  , removeIssueLabel
+  , addIssueAssignee
+  , removeIssueAssignee
   , createPR
   , getIssue
   , listIssues
@@ -40,6 +47,10 @@ module Tidepool.Effects.GitHub
   , IssueState(..)
   , IssueFilter(..)
   , defaultIssueFilter
+  , CreateIssueInput(..)
+  , defaultCreateIssueInput
+  , UpdateIssueInput(..)
+  , emptyUpdateIssueInput
 
     -- * Types - Pull Requests
   , PullRequest(..)
@@ -167,6 +178,46 @@ data IssueFilter = IssueFilter
 -- | Default issue filter (no filtering, no limit).
 defaultIssueFilter :: IssueFilter
 defaultIssueFilter = IssueFilter [] Nothing Nothing
+
+-- | Input for creating a new issue.
+data CreateIssueInput = CreateIssueInput
+  { ciiRepo      :: Repo
+  , ciiTitle     :: Text
+  , ciiBody      :: Text
+  , ciiLabels    :: [Text]
+  , ciiAssignees :: [Text]
+  }
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+
+-- | Default create issue input.
+defaultCreateIssueInput :: Repo -> Text -> CreateIssueInput
+defaultCreateIssueInput repo title = CreateIssueInput
+  { ciiRepo      = repo
+  , ciiTitle     = title
+  , ciiBody      = ""
+  , ciiLabels    = []
+  , ciiAssignees = []
+  }
+
+-- | Input for updating an existing issue.
+data UpdateIssueInput = UpdateIssueInput
+  { uiiTitle     :: Maybe Text
+  , uiiBody      :: Maybe Text
+  , uiiState     :: Maybe IssueState
+  , uiiLabels    :: Maybe [Text] -- ^ If Just, replaces all labels
+  , uiiAssignees :: Maybe [Text] -- ^ If Just, replaces all assignees
+  }
+  deriving (Show, Eq, Generic, ToJSON, FromJSON)
+
+-- | Empty update issue input (no changes).
+emptyUpdateIssueInput :: UpdateIssueInput
+emptyUpdateIssueInput = UpdateIssueInput
+  { uiiTitle     = Nothing
+  , uiiBody      = Nothing
+  , uiiState     = Nothing
+  , uiiLabels    = Nothing
+  , uiiAssignees = Nothing
+  }
 
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -361,10 +412,24 @@ newtype Label = Label { unLabel :: Text }
 -- ════════════════════════════════════════════════════════════════════════════
 
 data GitHub r where
-  -- Legacy (stub - errors at runtime)
-  CreateIssue :: Repo -> Text -> Text -> [Label] -> GitHub IssueUrl
-
   -- Issue operations
+  CreateIssue :: CreateIssueInput -> GitHub Int
+    -- ^ Create an issue, returns the issue number.
+  UpdateIssue :: Repo -> Int -> UpdateIssueInput -> GitHub ()
+    -- ^ Update an existing issue.
+  CloseIssue  :: Repo -> Int -> GitHub ()
+    -- ^ Close an issue.
+  ReopenIssue :: Repo -> Int -> GitHub ()
+    -- ^ Reopen an issue.
+  AddIssueLabel    :: Repo -> Int -> Text -> GitHub ()
+    -- ^ Add a label to an issue.
+  RemoveIssueLabel :: Repo -> Int -> Text -> GitHub ()
+    -- ^ Remove a label from an issue.
+  AddIssueAssignee    :: Repo -> Int -> Text -> GitHub ()
+    -- ^ Add an assignee to an issue.
+  RemoveIssueAssignee :: Repo -> Int -> Text -> GitHub ()
+    -- ^ Remove an assignee from an issue.
+
   GetIssue    :: Repo -> Int -> Bool -> GitHub (Maybe Issue)
     -- ^ Get issue by number. Bool = include comments.
   ListIssues  :: Repo -> IssueFilter -> GitHub [Issue]
@@ -387,8 +452,29 @@ data GitHub r where
 
 -- Smart constructors
 
-createIssue :: Member GitHub effs => Repo -> Text -> Text -> [Label] -> Eff effs IssueUrl
-createIssue repo title body labels = send (CreateIssue repo title body labels)
+createIssue :: Member GitHub effs => CreateIssueInput -> Eff effs Int
+createIssue input = send (CreateIssue input)
+
+updateIssue :: Member GitHub effs => Repo -> Int -> UpdateIssueInput -> Eff effs ()
+updateIssue repo num input = send (UpdateIssue repo num input)
+
+closeIssue :: Member GitHub effs => Repo -> Int -> Eff effs ()
+closeIssue repo num = send (CloseIssue repo num)
+
+reopenIssue :: Member GitHub effs => Repo -> Int -> Eff effs ()
+reopenIssue repo num = send (ReopenIssue repo num)
+
+addIssueLabel :: Member GitHub effs => Repo -> Int -> Text -> Eff effs ()
+addIssueLabel repo num label = send (AddIssueLabel repo num label)
+
+removeIssueLabel :: Member GitHub effs => Repo -> Int -> Text -> Eff effs ()
+removeIssueLabel repo num label = send (RemoveIssueLabel repo num label)
+
+addIssueAssignee :: Member GitHub effs => Repo -> Int -> Text -> Eff effs ()
+addIssueAssignee repo num assignee = send (AddIssueAssignee repo num assignee)
+
+removeIssueAssignee :: Member GitHub effs => Repo -> Int -> Text -> Eff effs ()
+removeIssueAssignee repo num assignee = send (RemoveIssueAssignee repo num assignee)
 
 createPR :: Member GitHub effs => PRCreateSpec -> Eff effs PRUrl
 createPR spec = send (CreatePR spec)
@@ -422,9 +508,37 @@ checkAuth = send CheckAuth
 -- @tidepool-github-interpreter@ for real implementation.
 runGitHubStub :: Member Log effs => Eff (GitHub ': effs) a -> Eff effs a
 runGitHubStub = interpret $ \case
-  CreateIssue (Repo repo) title _ _ -> do
-    logInfo $ "[GitHub:stub] CreateIssue called: " <> repo <> " - " <> title
+  CreateIssue input -> do
+    logInfo $ "[GitHub:stub] CreateIssue called: " <> input.ciiRepo.unRepo <> " - " <> input.ciiTitle
     error "GitHub.createIssue: not implemented"
+
+  UpdateIssue (Repo repo) num _ -> do
+    logInfo $ "[GitHub:stub] UpdateIssue called: " <> repo <> " #" <> showT num
+    pure ()
+
+  CloseIssue (Repo repo) num -> do
+    logInfo $ "[GitHub:stub] CloseIssue called: " <> repo <> " #" <> showT num
+    pure ()
+
+  ReopenIssue (Repo repo) num -> do
+    logInfo $ "[GitHub:stub] ReopenIssue called: " <> repo <> " #" <> showT num
+    pure ()
+
+  AddIssueLabel (Repo repo) num label -> do
+    logInfo $ "[GitHub:stub] AddIssueLabel called: " <> repo <> " #" <> showT num <> " label=" <> label
+    pure ()
+
+  RemoveIssueLabel (Repo repo) num label -> do
+    logInfo $ "[GitHub:stub] RemoveIssueLabel called: " <> repo <> " #" <> showT num <> " label=" <> label
+    pure ()
+
+  AddIssueAssignee (Repo repo) num assignee -> do
+    logInfo $ "[GitHub:stub] AddIssueAssignee called: " <> repo <> " #" <> showT num <> " assignee=" <> assignee
+    pure ()
+
+  RemoveIssueAssignee (Repo repo) num assignee -> do
+    logInfo $ "[GitHub:stub] RemoveIssueAssignee called: " <> repo <> " #" <> showT num <> " assignee=" <> assignee
+    pure ()
 
   CreatePR (PRCreateSpec (Repo repo) headBranch baseBranch title _) -> do
     logInfo $ "[GitHub:stub] CreatePR called: " <> repo <> " (" <> headBranch <> " -> " <> baseBranch <> ") - " <> title

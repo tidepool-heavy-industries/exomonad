@@ -22,6 +22,7 @@ packages:
     haskell/effects/lsp-interpreter
     haskell/effects/ghci-interpreter
     haskell/effects/github-interpreter
+    haskell/effects/git-interpreter
     haskell/effects/worktree-interpreter
     haskell/effects/cabal-interpreter
     haskell/effects/justfile-interpreter

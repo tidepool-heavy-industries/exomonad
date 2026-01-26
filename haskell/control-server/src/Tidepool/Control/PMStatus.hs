@@ -28,11 +28,9 @@ import Data.Text (Text)
 import Data.Time (UTCTime, diffUTCTime, addUTCTime, nominalDay)
 import GHC.Generics (Generic)
 
-import Tidepool.Effects.BD (BD, listBeads, ListBeadsInput(..), defaultListBeadsInput, BeadStatus(..), BeadInfo(..))
-import Tidepool.Effects.GitHub (GitHub, listPullRequests, PRFilter(..), defaultPRFilter, PRState(..), PullRequest(..), Repo(..))
+import Tidepool.Effects.GitHub (GitHub, listIssues, defaultIssueFilter, IssueFilter(..), IssueState(..), Issue(..), listPullRequests, PRFilter(..), defaultPRFilter, PRState(..), PullRequest(..), Repo(..))
 import Tidepool.Effect.Types (Time, getCurrentTime)
 import Tidepool.Role (Role(..))
-import Tidepool.Control.PMTools (labelReady, labelNeedsTLReview, labelNeedsPMApproval)
 import Tidepool.Graph.Generic (AsHandler, type (:-))
 import Tidepool.Graph.Generic.Core (EntryNode, ExitNode, LogicNode)
 import Tidepool.Graph.Goto (Goto, GotoChoice, To, gotoExit)
@@ -153,14 +151,14 @@ data PmStatusGraph mode = PmStatusGraph
 
   , psRun :: mode :- LogicNode
       :@ Input PmStatusArgs
-      :@ UsesEffects '[BD, GitHub, Time, Goto Exit PmStatusResult]
+      :@ UsesEffects '[GitHub, Time, Goto Exit PmStatusResult]
 
   , psExit :: mode :- ExitNode PmStatusResult
   }
   deriving Generic
 
 -- | Handlers for pm_status graph.
-pmStatusHandlers :: (Member BD es, Member GitHub es, Member Time es) => PmStatusGraph (AsHandler es)
+pmStatusHandlers :: (Member GitHub es, Member Time es) => PmStatusGraph (AsHandler es)
 pmStatusHandlers = PmStatusGraph
   { psEntry = ()
   , psRun = pmStatusLogic
@@ -169,7 +167,7 @@ pmStatusHandlers = PmStatusGraph
 
 -- | Core logic for pm_status.
 pmStatusLogic
-  :: (Member BD es, Member GitHub es, Member Time es)
+  :: (Member GitHub es, Member Time es)
   => PmStatusArgs
   -> Eff es (GotoChoice '[To Exit PmStatusResult])
 pmStatusLogic args = do
@@ -178,33 +176,32 @@ pmStatusLogic args = do
       periodStart = addUTCTime (-periodSeconds) now
       prevPeriodStart = addUTCTime (-2 * periodSeconds) now
 
-  -- Fetch all beads (we'll filter in memory for simplicity/flexibility)
-  let listInput = defaultListBeadsInput 
-                    { lbiLabels = maybe [] (:[]) args.psaLabelTrack }
-  allBeads <- listBeads listInput
+  -- TODO: Configurable repo
+  let defaultRepo = Repo "tidepool/tidepool"
+      repo = maybe defaultRepo Repo args.psaRepo
 
-  -- 1. Velocity & Trend
-  let closedInPeriod = filter (isClosedBetween periodStart now) allBeads
-      closedInPrevPeriod = filter (isClosedBetween prevPeriodStart periodStart) allBeads
-      velocity = fromIntegral (length closedInPeriod) / fromIntegral args.psaPeriodDays
-      prevVelocity = fromIntegral (length closedInPrevPeriod) / fromIntegral args.psaPeriodDays
-      trend = if prevVelocity == 0 then 0 else (velocity - prevVelocity) / prevVelocity
+  -- Fetch all issues
+  let listInput = defaultIssueFilter
+                    { ifLabels = maybe [] (:[]) args.psaLabelTrack }
+  allIssues <- listIssues repo listInput
+
+  -- 1. Velocity & Trend (Simulated using state for now as Issue doesn't have closedAt yet)
+  let closedIssues = filter (\i -> i.issueState == IssueClosed) allIssues
+      velocity = fromIntegral (length closedIssues) / fromIntegral args.psaPeriodDays
+      trend = 0 -- Need timestamps for real trend
 
   -- 2. Cycle Time
-  let cycleTimes = mapMaybe calcCycleTime closedInPeriod
-      (ctMedian, ctP90) = calcMetrics cycleTimes (realToFrac nominalDay) -- in days
+  let (ctMedian, ctP90) = (0, 0) -- Need timestamps
 
   -- 3. Current State
-  let inFlight = count (\b -> b.biStatus == StatusInProgress) allBeads
-      ready = count (\b -> labelReady `elem` b.biLabels) allBeads
-      blocked = count (\b -> b.biStatus == StatusBlocked) allBeads
-      needsTLReview = count (\b -> labelNeedsTLReview `elem` b.biLabels) allBeads
-      needsPMApproval = count (\b -> labelNeedsPMApproval `elem` b.biLabels) allBeads
+  let openIssues = filter (\i -> i.issueState == IssueOpen) allIssues
+      inFlight = count (\i -> "in-progress" `elem` i.issueLabels) openIssues
+      ready = count (\i -> "ready" `elem` i.issueLabels) openIssues
+      blocked = count (\i -> "blocked" `elem` i.issueLabels) openIssues
+      needsTLReview = count (\i -> "needs-review" `elem` i.issueLabels) openIssues
+      needsPMApproval = count (\i -> "needs-approval" `elem` i.issueLabels) openIssues
 
   -- 4. PR Lag
-  -- For Tidepool, it's usually tidepool-heavy-industries/tidepool, but allow override via args.
-  let defaultRepo = Repo "tidepool-heavy-industries/tidepool"
-      repo = maybe defaultRepo Repo args.psaRepo
   allPrs <- listPullRequests repo (defaultPRFilter { pfState = Just PRMerged })
   let prsInPeriod = filter (isPrMergedBetween periodStart now) allPrs
       prLags = mapMaybe calcPrLag prsInPeriod
@@ -212,7 +209,7 @@ pmStatusLogic args = do
 
   -- 5. Breakdown (optional)
   let breakdown = if args.psaIncludeBreakdown
-                  then Just $ aggregateLabels allBeads
+                  then Just $ aggregateLabels allIssues
                   else Nothing
 
   pure $ gotoExit PmStatusResult
@@ -228,23 +225,11 @@ pmStatusLogic args = do
 -- HELPERS
 -- ════════════════════════════════════════════════════════════════════════════
 
-isClosedBetween :: UTCTime -> UTCTime -> BeadInfo -> Bool
-isClosedBetween start end b =
-  case b.biClosedAt of
-    Just t -> t >= start && t <= end
-    Nothing -> False
-
 isPrMergedBetween :: UTCTime -> UTCTime -> PullRequest -> Bool
 isPrMergedBetween start end pr =
   case pr.prMergedAt of
     Just t -> t >= start && t <= end
     Nothing -> False
-
-calcCycleTime :: BeadInfo -> Maybe Double
-calcCycleTime b = do
-  start <- b.biCreatedAt
-  end <- b.biClosedAt
-  pure $ realToFrac $ diffUTCTime end start
 
 calcPrLag :: PullRequest -> Maybe Double
 calcPrLag pr = do
@@ -270,13 +255,11 @@ calcMetrics xs unit =
       p = sorted !! p90Idx
   in (m / unit, p / unit)
 
-aggregateLabels :: [BeadInfo] -> [(Text, Int)]
-aggregateLabels beads =
-  let allLabels = concatMap (\b -> b.biLabels) beads
-      uniqueLabels = sort $ filter (not . isWorkflowLabel) allLabels
-      groups = group' uniqueLabels
+aggregateLabels :: [Issue] -> [(Text, Int)]
+aggregateLabels issues =
+  let allLabels = concatMap (\i -> i.issueLabels) issues
+      groups = group' $ sort allLabels
   in mapMaybe (\case { (x:xs) -> Just (x, 1 + length xs); [] -> Nothing }) groups
   where
-    isWorkflowLabel l = l `elem` [labelReady, labelNeedsTLReview, labelNeedsPMApproval]
     group' [] = []
     group' (x:xs) = let (ys, zs) = span (== x) xs in (x:ys) : group' zs
